@@ -383,13 +383,13 @@ jobs:
       # uploaded the ".vwlibrary.zip" bundles; the Windows job the ".vlb.zip"
       # modules. After both downloads dist/ holds all four assets.
       - name: Download macOS artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: vwlibrary-zips
           path: dist
 
       - name: Download Windows artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: vlb-zips
           path: dist
