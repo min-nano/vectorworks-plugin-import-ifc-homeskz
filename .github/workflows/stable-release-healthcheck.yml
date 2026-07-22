@@ -1,0 +1,58 @@
+name: Stable release health check
+
+# Safety net for the "stable" release. build.yml publishes it on every push to
+# main, retrying through transient GitHub API outages. If every retry still
+# fails, the stable release silently falls behind main. This scheduled job
+# compares the published stable release to the tip of main and, when they have
+# drifted apart, re-dispatches build.yml on main to rebuild and republish.
+#
+# NOTE: scheduled workflows only run from the copy of this file on the default
+# branch, so this becomes active once merged to main.
+on:
+  schedule:
+    # Every 6 hours.
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+# Read the repo + release; dispatch build.yml.
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Compare stable release to main and republish if stale
+        run: |
+          set -euo pipefail
+
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          stable_sha="$(gh release view stable --repo "$GITHUB_REPOSITORY" \
+            --json targetCommitish -q .targetCommitish 2>/dev/null || echo "")"
+
+          echo "main:   $main_sha"
+          echo "stable: ${stable_sha:-<none>}"
+
+          if [ "$stable_sha" = "$main_sha" ]; then
+            echo "Stable release is up to date."
+            exit 0
+          fi
+
+          echo "::warning::Stable release is stale (stable=${stable_sha:-none}, main=${main_sha}); re-dispatching build on main to republish."
+
+          # Don't pile on if a build for main is already running (e.g. the normal
+          # post-push build is still in flight) — it will publish on its own.
+          active="$(gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow build.yml --branch main \
+            --json status -q '[.[] | select(.status=="in_progress" or .status=="queued")] | length' \
+            2>/dev/null || echo 0)"
+          if [ "${active:-0}" -gt 0 ]; then
+            echo "A build on main is already in progress/queued; skipping dispatch."
+            exit 0
+          fi
+
+          gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo "Dispatched build.yml on main."

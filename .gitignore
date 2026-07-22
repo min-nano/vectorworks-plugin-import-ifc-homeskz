@@ -1,0 +1,26 @@
+# Build output
+/build/
+/build-tests/
+/buildcov/
+/dist/
+*.vwlibrary
+*.vlb
+
+# Coverage output
+coverage.xml
+*.gcda
+*.gcno
+*.gcov
+
+# Local copy of the Vectorworks SDK
+/vw-sdk/
+/vw-sdk-win/
+*-SDK.zip
+
+# macOS
+.DS_Store
+
+# Xcode / editors
+*.xcuserstate
+xcuserdata/
+.vscode/

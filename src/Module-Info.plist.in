@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleExecutable</key>
+	<string>@VW_BUNDLE_NAME@</string>
+	<key>CFBundleIdentifier</key>
+	<string>@VW_BUNDLE_ID@</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>@VW_BUNDLE_NAME@</string>
+	<key>CFBundlePackageType</key>
+	<string>BNDL</string>
+	<key>CFBundleSignature</key>
+	<string>VW12</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1.0</string>
+	<key>CSResourcesFileMapped</key>
+	<string>yes</string>
+	<!-- Build provenance, stamped by CMake/CI. The updater scripts read these
+	     to tell which build is installed vs. what is available to download. -->
+	<key>VWBuildChannel</key>
+	<string>@VW_BUILD_CHANNEL@</string>
+	<key>VWBuildBranch</key>
+	<string>@VW_BUILD_BRANCH@</string>
+	<key>VWBuildCommit</key>
+	<string>@VW_BUILD_VERSION@</string>
+</dict>
+</plist>

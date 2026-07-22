@@ -1,0 +1,126 @@
+name: Tests
+
+# The project's main CI for correctness: it runs the unit tests and, on top of
+# that, measures and publishes coverage. Two jobs, split so a failure points
+# straight at its cause:
+#   * test     — build the SDK-free unit tests (src/UpdaterParse.h) and run them.
+#                A red X here means a TEST failed.
+#   * coverage — only after `test` passes: rebuild with gcov instrumentation,
+#                produce a Cobertura report, and publish it to GitHub Code
+#                Quality. A red X here means REPORT GENERATION/UPLOAD failed,
+#                not a test.
+#
+# Because the tests do NOT need the Vectorworks SDK, both jobs run on a plain
+# Linux runner — no ~800 MB SDK download — so they are fast and work on pull
+# requests from forks too (the Code Quality upload is then skipped, see below).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One test run per ref; a new push cancels an in-flight run for that ref.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Building/running the tests needs nothing beyond reading the repo.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++
+
+      # Tests only (VW_BUILD_PLUGIN=OFF), no coverage instrumentation, so this
+      # job's result reflects the tests alone. No SDK required.
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DVW_BUILD_PLUGIN=OFF \
+            -DVW_BUILD_TESTS=ON
+
+      - name: Build tests
+        run: cmake --build build -v
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  coverage:
+    # Runs only if `test` succeeded, so a coverage-job failure is unambiguously
+    # about the report (gcovr / upload), never a failing test.
+    needs: test
+    runs-on: ubuntu-latest
+    # actions/upload-code-coverage needs code-quality:write to publish the
+    # report; pull-requests:read lets it associate coverage with the PR.
+    permissions:
+      contents: read
+      code-quality: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build + coverage tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++ gcovr
+
+      # Same tests, this time instrumented for gcov so running them emits
+      # coverage data.
+      - name: Configure (with coverage)
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DVW_BUILD_PLUGIN=OFF \
+            -DVW_BUILD_TESTS=ON \
+            -DVW_ENABLE_COVERAGE=ON
+
+      - name: Build tests
+        run: cmake --build build -v
+
+      # `test` already gated pass/fail; here we just need the run to emit .gcda
+      # coverage data next to the objects.
+      - name: Run tests (produce coverage data)
+        run: ctest --test-dir build --output-on-failure
+
+      # Emit a Cobertura XML report over the plug-in sources under src/. The
+      # build tree holds the gcov data; --root . keeps paths repo-relative so
+      # GitHub can map coverage back to the files.
+      - name: Generate coverage report (Cobertura)
+        run: |
+          gcovr --root . --filter 'src/.*' build \
+            --cobertura coverage.xml \
+            --txt --print-summary
+
+      - name: Upload coverage report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-cobertura
+          path: coverage.xml
+
+      # Publish to GitHub Code Quality. Skipped for pull requests from forks,
+      # whose GITHUB_TOKEN is read-only and cannot upload (mirrors how build.yml
+      # guards its fork PRs).
+      - name: Upload coverage to GitHub Code Quality
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-code-coverage@v1
+        with:
+          file: coverage.xml
+          language: C++
+          label: code-coverage/gcovr

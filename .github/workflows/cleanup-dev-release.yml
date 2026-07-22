@@ -1,0 +1,35 @@
+name: Clean up dev prerelease
+
+# When a branch is deleted, remove the matching "dev-<branch>" prerelease (and
+# its tag) that build.yml published for it, so old dev builds don't pile up.
+#
+# NOTE: `delete`-triggered workflows always run from the copy of this file on
+# the DEFAULT branch, so this only takes effect once it is merged to main; it
+# then fires for branches deleted after that point.
+on:
+  delete:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    # Only branch deletions (not tag deletions) map to a dev prerelease.
+    if: github.event.ref_type == 'branch' && github.event.ref != 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the branch's dev prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="${{ github.event.ref }}"
+          # Same slug rule as the "Publish dev prerelease" step in build.yml.
+          slug="$(printf '%s' "$branch" | tr '/:@ ' '----' | tr -c 'A-Za-z0-9._-' '-')"
+          tag="dev-${slug}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Deleting release + tag: $tag (branch: $branch)"
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          else
+            echo "No dev release for '$branch' (expected tag '$tag'); nothing to clean up."
+          fi

@@ -1,0 +1,499 @@
+name: Build plug-in
+
+on:
+  # Only main builds on push — it is the protected default branch. Feature work
+  # always lives in a pull request, which is what builds those branches (and
+  # publishes their dev prerelease). This keeps a branch-with-an-open-PR from
+  # building twice (once for the push, once for the PR).
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Needed so a build can publish/refresh the GitHub Release that the local
+# updater scripts download from.
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    # Apple Silicon runner (macos-14 and macos-15 are arm64).
+    runs-on: macos-15
+
+    env:
+      # URL of the Vectorworks 2026 mac SDK (~800 MB download).
+      VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-mac-SDK.zip
+      # Where the trimmed SDK lives after the first download. This directory is
+      # what gets cached, so we never download the 800 MB zip more than once.
+      VW_SDK_DIR: ${{ github.workspace }}/vw-sdk
+      # Bump the "v" suffix to force a fresh SDK download (e.g. after Vectorworks
+      # publishes a new "latest" SDK).
+      VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-mac-v3
+
+    steps:
+      # Resolve the commit/ref we are really building. For a pull_request event
+      # GITHUB_SHA is an ephemeral merge commit and GITHUB_REF_NAME is
+      # "<n>/merge", so use the PR head instead — that is the commit the
+      # developer pushed and the one the dev prerelease should point at.
+      - name: Resolve build context
+        id: ctx
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            sha="${{ github.event.pull_request.head.sha }}"
+            ref="${{ github.head_ref }}"
+          else
+            sha="${{ github.sha }}"
+            ref="${{ github.ref_name }}"
+          fi
+          {
+            echo "sha=$sha"
+            echo "short=${sha:0:7}"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Build the resolved commit (PR head, or the pushed/ dispatched sha).
+          ref: ${{ steps.ctx.outputs.sha }}
+
+      - name: Select Xcode 16.2
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "16.2"
+
+      # Restore the previously trimmed SDK if we have it. Only SDKLib/Include and
+      # SDKLib/LibMac are kept, so the cache is a few tens of MB rather than 800.
+      - name: Restore Vectorworks SDK cache
+        id: sdk-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.VW_SDK_DIR }}
+          key: ${{ env.VW_SDK_CACHE_KEY }}
+
+      - name: Download and trim Vectorworks SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          echo "Downloading SDK (this is large, ~800 MB)..."
+          curl -fL --retry 4 --retry-delay 5 -o "$work/sdk.zip" "$VW_SDK_URL"
+
+          echo "Extracting..."
+          unzip -q "$work/sdk.zip" -d "$work/extracted"
+
+          # The zip may wrap everything in a top-level folder, so locate SDKLib.
+          # Skip the "__MACOSX" AppleDouble metadata mirror that macOS zips add.
+          sdklib="$(find "$work/extracted" -type d -name SDKLib -not -path '*/__MACOSX/*' -print -quit)"
+          if [ -z "$sdklib" ]; then
+            echo "::error::Could not find SDKLib inside the downloaded SDK."
+            exit 1
+          fi
+          echo "Found SDKLib at: $sdklib"
+
+          # Keep only the pieces needed to build a mac plug-in:
+          #  - Include: headers
+          #  - LibMac:  libVWSDK.a and the VWMM framework
+          #  - Source:  some Include/ headers #include ../../../Source/VWSDK/...
+          #  - ToolsMac: the BuildVWR tool that packages the .vwr resource
+          mkdir -p "$VW_SDK_DIR/SDKLib"
+          cp -R "$sdklib/Include" "$VW_SDK_DIR/SDKLib/Include"
+          cp -R "$sdklib/LibMac" "$VW_SDK_DIR/SDKLib/LibMac"
+          cp -R "$sdklib/Source" "$VW_SDK_DIR/SDKLib/Source"
+          cp -R "$sdklib/ToolsMac" "$VW_SDK_DIR/SDKLib/ToolsMac"
+
+          # Make sure the BuildVWR tool is runnable (executable, not quarantined).
+          chmod +x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR" || true
+          xattr -dr com.apple.quarantine "$VW_SDK_DIR/SDKLib/ToolsMac" 2>/dev/null || true
+
+          rm -rf "$work"
+          echo "Trimmed SDK size:"
+          du -sh "$VW_SDK_DIR"
+
+      - name: Verify SDK is present
+        run: |
+          set -euo pipefail
+          test -f "$VW_SDK_DIR/SDKLib/Include/VectorworksSDK.h"
+          test -f "$VW_SDK_DIR/SDKLib/LibMac/Release/libVWSDK.a"
+          test -x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR"
+          echo "SDK looks good."
+
+      - name: Configure
+        env:
+          VW_BUILD_VERSION: ${{ steps.ctx.outputs.short }}
+          VW_BUILD_BRANCH: ${{ steps.ctx.outputs.ref }}
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVW_SDK_DIR="$VW_SDK_DIR" \
+            -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
+            -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH"
+
+      - name: Build
+        # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) bundles.
+        run: cmake --build build --config Release -v
+
+      # Apple Silicon requires every Mach-O to carry a code signature. We use a
+      # free, certificate-less "ad-hoc" signature ("-"), which is enough for the
+      # kernel to load the plug-in. This is NOT Apple Developer ID signing or
+      # Vectorworks credentials; the plug-in is still "unsigned" in that sense and
+      # will show the usual unknown-plug-in warning. Done after the build so the
+      # signature seals the packaged .vwr resource too.
+      - name: Ad-hoc code-sign the bundles
+        run: |
+          set -euo pipefail
+          for name in SamplePlugin SamplePluginDev; do
+            bundle="build/$name.vwlibrary"
+            codesign --force --deep --sign - "$bundle"
+            echo "Verifying signature for $name:"
+            codesign --verify --strict --verbose=2 "$bundle"
+          done
+
+      - name: Inspect built plug-ins
+        run: |
+          set -euo pipefail
+          for name in SamplePlugin SamplePluginDev; do
+            bundle="build/$name.vwlibrary"
+            test -d "$bundle" || { echo "::error::$bundle was not produced"; exit 1; }
+            echo "== $name =="
+            find "$bundle" -maxdepth 3
+            lipo -info "$bundle/Contents/MacOS/$name"
+            test -e "$bundle/Contents/Resources/$name.vwr" \
+              || { echo "::error::$name.vwr was not packaged into the bundle"; exit 1; }
+            echo "Build stamp:"
+            /usr/libexec/PlistBuddy -c "Print :VWBuildChannel" "$bundle/Contents/Info.plist"
+            /usr/libexec/PlistBuddy -c "Print :VWBuildBranch"  "$bundle/Contents/Info.plist"
+            /usr/libexec/PlistBuddy -c "Print :VWBuildCommit"  "$bundle/Contents/Info.plist"
+          done
+
+      # Zip each signed bundle keeping the "<name>.vwlibrary/" wrapper folder, so
+      # the zip expands to a usable bundle (not a bare "Contents" folder). These
+      # zips are both the CI artifacts and the release assets the updater fetches.
+      - name: Package bundles
+        run: |
+          set -euo pipefail
+          rm -rf dist stage
+          mkdir -p dist
+          for name in SamplePlugin SamplePluginDev; do
+            rm -rf "stage/$name"
+            mkdir -p "stage/$name"
+            cp -R "build/$name.vwlibrary" "stage/$name/"
+            ( cd "stage/$name" && zip -qry "$GITHUB_WORKSPACE/dist/$name.vwlibrary.zip" "$name.vwlibrary" )
+          done
+          ls -l dist
+
+      - name: Upload plug-in artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: vwlibrary-zips
+          path: dist
+
+  # ---------------------------------------------------------------------------
+  # Windows build. Produces the ".vlb" module (a DLL) plus its sibling ".vwr"
+  # resource, the "<name>.commit" build stamp and the PowerShell updater, zipped
+  # per plug-in. Runs in PARALLEL with the macOS job (build-mac) so the two
+  # platforms build concurrently instead of one after the other. Publishing the
+  # releases is deferred to the separate "release" job, which runs once both
+  # builds have finished — this job just produces and uploads its artifacts.
+  build-windows:
+    runs-on: windows-latest
+
+    env:
+      # URL of the Vectorworks 2026 win SDK (mirrors the mac SDK URL naming).
+      VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-win-SDK.zip
+      # Where the trimmed SDK lives after the first download (this is what gets
+      # cached, so the large zip is never downloaded more than once).
+      VW_SDK_DIR: ${{ github.workspace }}/vw-sdk-win
+      # Bump the "v" suffix to force a fresh SDK download.
+      VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-win-v1
+
+    steps:
+      # Same commit/ref resolution as the macOS job (PR head, or pushed sha).
+      - name: Resolve build context
+        id: ctx
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            sha="${{ github.event.pull_request.head.sha }}"
+            ref="${{ github.head_ref }}"
+          else
+            sha="${{ github.sha }}"
+            ref="${{ github.ref_name }}"
+          fi
+          {
+            echo "sha=$sha"
+            echo "short=${sha:0:7}"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.ctx.outputs.sha }}
+
+      # Restore the previously trimmed SDK if we have it. Only the pieces needed
+      # to build a Windows plug-in are kept, so the cache is small.
+      - name: Restore Vectorworks SDK cache
+        id: sdk-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.VW_SDK_DIR }}
+          key: ${{ env.VW_SDK_CACHE_KEY }}
+
+      - name: Download and trim Vectorworks SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Silencing progress makes Invoke-* and curl far faster in CI.
+          $ProgressPreference = 'SilentlyContinue'
+
+          $work = Join-Path $env:RUNNER_TEMP 'vw-sdk-dl'
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          $zip = Join-Path $work 'sdk.zip'
+
+          Write-Host 'Downloading SDK (this is large)...'
+          curl.exe -fL --retry 4 --retry-delay 5 -o $zip $env:VW_SDK_URL
+          if ($LASTEXITCODE -ne 0) { throw "SDK download failed ($LASTEXITCODE)" }
+
+          Write-Host 'Extracting...'
+          $ex = Join-Path $work 'extracted'
+          Expand-Archive -LiteralPath $zip -DestinationPath $ex -Force
+
+          $sdklib = Get-ChildItem -LiteralPath $ex -Recurse -Directory -Filter 'SDKLib' |
+            Select-Object -First 1
+          if (-not $sdklib) { Write-Error '::error::Could not find SDKLib inside the downloaded SDK.'; exit 1 }
+          Write-Host "Found SDKLib at: $($sdklib.FullName)"
+
+          # Keep only what a Windows plug-in build needs:
+          #  - Include:  headers
+          #  - LibWin:   VWSDK.lib and the VWMM import library
+          #  - Source:   some Include/ headers #include ../../../Source/VWSDK/...
+          #  - ToolsWin: buildvwr.exe + 7-Zip, which package the .vwr resource
+          $dst = Join-Path $env:VW_SDK_DIR 'SDKLib'
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          foreach ($sub in 'Include','LibWin','Source','ToolsWin') {
+            $s = Join-Path $sdklib.FullName $sub
+            if (Test-Path -LiteralPath $s) {
+              Copy-Item -LiteralPath $s -Destination $dst -Recurse -Force
+            } else {
+              Write-Host "(note) SDKLib/$sub not present in this SDK; skipping."
+            }
+          }
+
+          Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host 'Trimmed SDK contents:'
+          Get-ChildItem -LiteralPath $dst | Select-Object Name
+
+      - name: Verify SDK is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$VW_SDK_DIR/SDKLib/Include/VectorworksSDK.h"
+          test -f "$VW_SDK_DIR/SDKLib/LibWin/Release/VWSDK.lib"
+          test -f "$VW_SDK_DIR/SDKLib/ToolsWin/BuildVWR/buildvwr.exe"
+          echo "SDK looks good."
+
+      - name: Configure
+        shell: bash
+        env:
+          VW_BUILD_VERSION: ${{ steps.ctx.outputs.short }}
+          VW_BUILD_BRANCH: ${{ steps.ctx.outputs.ref }}
+        run: |
+          cmake -S . -B build -A x64 \
+            -DVW_SDK_DIR="$VW_SDK_DIR" \
+            -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
+            -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH"
+
+      - name: Build
+        # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) modules.
+        shell: bash
+        run: cmake --build build --config Release -v
+
+      - name: Inspect built plug-ins
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="build/Release"
+          for name in SamplePlugin SamplePluginDev; do
+            echo "== $name =="
+            test -f "$d/$name.vlb" || { echo "::error::$name.vlb was not produced"; exit 1; }
+            test -f "$d/$name.vwr" || { echo "::error::$name.vwr was not packaged"; exit 1; }
+            test -f "$d/$name.commit" || { echo "::error::$name.commit build stamp missing"; exit 1; }
+            echo "Build stamp: $(cat "$d/$name.commit")"
+          done
+
+      # Zip each plug-in's flat files (module + resource + build stamp + updater)
+      # into "<name>.vlb.zip". These are both the CI artifacts and the release
+      # assets the Windows updater (vw-update.ps1) fetches.
+      - name: Package modules
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
+          foreach ($name in 'SamplePlugin','SamplePluginDev') {
+            $files = @(
+              "build/Release/$name.vlb",
+              "build/Release/$name.vwr",
+              "build/Release/$name.commit",
+              "build/Release/vw-update.ps1"
+            ) | Where-Object { Test-Path $_ }
+            Compress-Archive -Path $files -DestinationPath "dist/$name.vlb.zip" -Force
+          }
+          Get-ChildItem dist | Select-Object Name, Length
+
+      - name: Upload plug-in artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: vlb-zips
+          path: dist
+
+  # ---------------------------------------------------------------------------
+  # Publish the downloadable release. Runs only after BOTH platform builds have
+  # finished (needs: [build-mac, build-windows]) so a single release carries the
+  # macOS (.vwlibrary.zip) and Windows (.vlb.zip) assets together. Splitting this
+  # out of the build jobs means neither platform publishes on its own, so there
+  # is no create/attach race between them:
+  #   main  -> refresh the rolling "stable" release with the SamplePlugin bundle.
+  #   other -> refresh a per-branch "dev-<branch>" prerelease with SamplePluginDev.
+  # Rolling tags are deleted and recreated so they always point at this build.
+  release:
+    needs: [build-mac, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      # Same commit/ref resolution as the build jobs (PR head, or pushed sha).
+      - name: Resolve build context
+        id: ctx
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            sha="${{ github.event.pull_request.head.sha }}"
+            ref="${{ github.head_ref }}"
+          else
+            sha="${{ github.sha }}"
+            ref="${{ github.ref_name }}"
+          fi
+          {
+            echo "sha=$sha"
+            echo "short=${sha:0:7}"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+
+      # Pull both build jobs' zips into a single dist/ folder. The macOS job
+      # uploaded the ".vwlibrary.zip" bundles; the Windows job the ".vlb.zip"
+      # modules. After both downloads dist/ holds all four assets.
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: vwlibrary-zips
+          path: dist
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: vlb-zips
+          path: dist
+
+      - name: List downloaded assets
+        run: ls -l dist
+
+      - name: Publish stable release (main)
+        # Runs on a push to main, and on a manual/scheduled re-dispatch of this
+        # workflow on main (the health-check workflow uses that to republish a
+        # stable release that was missed — see stable-release-healthcheck.yml).
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_SHA: ${{ steps.ctx.outputs.sha }}
+          SHORT: ${{ steps.ctx.outputs.short }}
+        run: |
+          set -euo pipefail
+          short="$SHORT"
+          cat > notes.txt <<EOF
+          channel=stable
+          branch=main
+          commit=${BUILD_SHA}
+          built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          # Delete + recreate as one unit, attaching both platform assets at once.
+          # A missed stable release can go unnoticed, so retry with a long backoff
+          # to ride out an extended GitHub API outage. If every attempt still
+          # fails, the scheduled stable-release-healthcheck.yml notices the drift
+          # and re-dispatches this build to republish.
+          publish() {
+            gh release delete stable --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+            gh release create stable \
+              "dist/SamplePlugin.vwlibrary.zip" \
+              "dist/SamplePlugin.vlb.zip" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$BUILD_SHA" \
+              --title "Stable (${short})" \
+              --notes-file notes.txt \
+              --latest
+          }
+          publish && exit 0 || true
+          attempts=1
+          for delay in 30 60 120 300 600; do
+            echo "publish attempt $attempts failed; retrying in ${delay}s..."
+            sleep "$delay"
+            attempts=$((attempts + 1))
+            publish && exit 0 || true
+          done
+          echo "::error::Failed to publish the stable release after $attempts attempts."
+          exit 1
+
+      - name: Publish dev prerelease (pull requests)
+        # Feature branches are built via their pull request. Skip PRs from forks:
+        # their GITHUB_TOKEN is read-only and cannot publish a release.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_SHA: ${{ steps.ctx.outputs.sha }}
+          SHORT: ${{ steps.ctx.outputs.short }}
+          BRANCH: ${{ steps.ctx.outputs.ref }}
+        run: |
+          set -euo pipefail
+          short="$SHORT"
+          branch="$BRANCH"
+          # Sanitize the branch name into a tag-safe slug.
+          slug="$(printf '%s' "$branch" | tr '/:@ ' '----' | tr -c 'A-Za-z0-9._-' '-')"
+          tag="dev-${slug}"
+          cat > notes.txt <<EOF
+          channel=dev
+          branch=${branch}
+          commit=${BUILD_SHA}
+          built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          # Guard against a delete/publish race. The branch may have been
+          # deleted after the PR was opened but before this (slow) build
+          # finished. If so, cleanup-dev-release.yml has already run and found
+          # no prerelease to delete (this job had not published one yet), so
+          # creating one now would orphan it forever. Skip publishing when the
+          # branch no longer exists.
+          branch_exists() {
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1
+          }
+          if ! branch_exists; then
+            echo "Branch '$branch' no longer exists; skipping dev prerelease publish to avoid orphaning it."
+            exit 0
+          fi
+          # Dev builds are only used while actively working on a branch, so no
+          # retry: if a transient GitHub API error fails this, just re-run the
+          # job manually. (The stable release, which could go unnoticed, does
+          # retry and has a scheduled health check.)
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          gh release create "$tag" \
+            "dist/SamplePluginDev.vwlibrary.zip" \
+            "dist/SamplePluginDev.vlb.zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$BUILD_SHA" \
+            --title "Dev: ${branch} (${short})" \
+            --notes-file notes.txt \
+            --prerelease
+          # Close the narrow window where the branch is deleted between the
+          # check above and now: if cleanup ran during publish, it may have
+          # missed the release. Re-check and clean up our own release if so.
+          if ! branch_exists; then
+            echo "Branch '$branch' was deleted during publish; removing the prerelease just created."
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          fi
