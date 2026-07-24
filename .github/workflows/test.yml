@@ -98,14 +98,17 @@ jobs:
       pull-requests: write
 
     steps:
-      # Shallow checkout (the default fetch-depth: 1). Building and running the
-      # tests only need the PR's own tree, so we do NOT pull history here. The
-      # little history diff-cover needs (down to the merge base with the base
-      # branch) is fetched on demand in the diff-coverage step below — for the
-      # base branch alone, not every branch, so CI time does not grow with the
-      # repo's history the way fetch-depth: 0 would.
+      # Full-history checkout (fetch-depth: 0). diff-cover reports coverage of
+      # only the lines this PR changed, which requires the merge base with the
+      # base branch to be present locally. An on-demand shallow-deepen dance is
+      # fragile — on a repo with very little history the deepen can fail to reach
+      # the merge base and diff-cover then aborts with "no merge base" — so we
+      # pull the full history up front. This repo's history is small; the extra
+      # fetch cost is negligible and buys a reliable required check.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Install build + coverage tools
         run: |
@@ -160,24 +163,12 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          # The checkout is shallow. diff-cover only needs enough history to find
-          # the merge base with the base branch, so bring in just THAT branch
-          # (mapped into refs/remotes/origin/ so `origin/<base>` resolves), then
-          # deepen the base ref and the checked-out HEAD together — doubling the
-          # step each time — until they share a common ancestor. A typical PR
-          # stops after the first fetch; only unusually divergent branches deepen
-          # further. This never fetches other branches, so cost tracks the PR's
-          # divergence, not the repo's total history.
-          head_sha="$(git rev-parse HEAD)"
-          base_refspec="+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
-          git fetch --no-tags origin "$base_refspec"
-          depth=200
-          until git merge-base HEAD "origin/$BASE_REF" >/dev/null 2>&1; do
-            git fetch --no-tags --deepen="$depth" origin \
-              "$base_refspec" "$head_sha" || break
-            depth=$((depth * 2))
-            [ "$depth" -gt 200000 ] && break
-          done
+          # The checkout above is full-history (fetch-depth: 0), so the merge
+          # base with the base branch is already present. We only need the base
+          # branch mapped into refs/remotes/origin/ so `origin/<base>` resolves
+          # for diff-cover's --compare-branch.
+          git fetch --no-tags origin \
+            "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
           diff-cover coverage.xml \
             --compare-branch "origin/$BASE_REF" \
             --json-report diff-cover.json \
