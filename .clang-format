@@ -1,0 +1,54 @@
+# clang-format configuration for the Vectorworks plug-in template.
+#
+# It encodes the house style the sources already use so `clang-format` becomes
+# the single source of truth for formatting:
+#   * tabs for indentation (width 4),
+#   * Allman braces (opening brace on its own line),
+#   * indented namespace bodies,
+#   * pointers/references bound to the type (int* p, not int *p).
+#
+# Format a file in place:            clang-format -i src/Updater.cpp
+# Check without writing (CI does):   clang-format --dry-run --Werror src/*.cpp
+Language: Cpp
+BasedOnStyle: LLVM
+
+# --- Indentation ------------------------------------------------------------
+UseTab: Always
+TabWidth: 4
+IndentWidth: 4
+ContinuationIndentWidth: 4
+NamespaceIndentation: All
+AccessModifierOffset: -4
+IndentPPDirectives: AfterHash
+IndentCaseLabels: false
+
+# --- Braces -----------------------------------------------------------------
+BreakBeforeBraces: Allman
+
+# --- Pointers / references bind to the type ---------------------------------
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# --- Line width -------------------------------------------------------------
+# Wrap code at 100 columns. Comments are NOT reflowed (ReflowComments: false):
+# the sources carry heavy, hand-wrapped comment blocks (often with box-drawing
+# rules and Japanese text) that automatic reflow would mangle, so their width
+# stays the author's responsibility while code wrapping is enforced.
+ColumnLimit: 100
+ReflowComments: false
+
+# --- Includes ---------------------------------------------------------------
+# The project relies on a specific include order (PluginPrefix / BuildConfig
+# first), so leave grouping to the author rather than re-sorting across blocks.
+SortIncludes: false
+
+# --- Misc house style -------------------------------------------------------
+FixNamespaceComments: true
+SpaceAfterCStyleCast: false
+AlignAfterOpenBracket: Align
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+EmptyLineBeforeAccessModifier: LogicalBlock
+KeepEmptyLinesAtTheStartOfBlocks: false

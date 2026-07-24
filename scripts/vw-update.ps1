@@ -103,11 +103,13 @@ function Get-InstalledCommit([string] $name) {
     return 'none'
 }
 
-# Replace $dst with $src. A currently-loaded .vlb cannot be deleted on Windows,
-# but it CAN be renamed out of the way — so move any existing file aside (best
-# effort) before copying the new one in. Leftover ".old-*" files are swept on the
-# next install, once Vectorworks has unmapped them.
-function Replace-File([string] $src, [string] $dst) {
+# Install $src at $dst, replacing whatever is there. A currently-loaded .vlb
+# cannot be deleted on Windows, but it CAN be renamed out of the way — so move any
+# existing file aside (best effort) before copying the new one in. Leftover
+# ".old-*" files are swept on the next install, once Vectorworks has unmapped
+# them. (Named with the approved "Install" verb, like Install-Build, so
+# PSScriptAnalyzer's PSUseApprovedVerbs rule stays satisfied.)
+function Install-File([string] $src, [string] $dst) {
     if (Test-Path -LiteralPath $dst) {
         $bak = "$([System.IO.Path]::GetFileName($dst)).old-$([System.IO.Path]::GetRandomFileName())"
         try { Rename-Item -LiteralPath $dst -NewName $bak -ErrorAction Stop }
@@ -148,7 +150,7 @@ function Install-Build([string] $url, [string] $name) {
         foreach ($f in @("$name.vlb", "$name.vwr", "$name.commit", 'vw-update.ps1')) {
             $s = Join-Path $work $f
             if (Test-Path -LiteralPath $s) {
-                try { Replace-File $s (Join-Path $VW_PLUGINS_DIR $f) }
+                try { Install-File $s (Join-Path $VW_PLUGINS_DIR $f) }
                 catch { $script:LastError = 'インストール先へのコピーに失敗しました。'; return $false }
             }
         }
@@ -273,23 +275,33 @@ function Invoke-Dev {
 }
 
 # ---------------------------------------------------------------------------
-$mode = if ($args.Count -ge 1) { [string] $args[0] } else { '' }
+# Dispatch only when this file is EXECUTED (the plug-in runs it with -File; a
+# manual run is the same), NOT when it is dot-sourced. The unit tests
+# (tests/vw-update.Tests.ps1) dot-source the script to call its back-end
+# functions (Get-AssetUrl / Invoke-QStable / Invoke-QDev / Invoke-DoInstall) with
+# Invoke-GH / Invoke-WebRequest stubbed out — there $MyInvocation.InvocationName
+# is '.', so the switch below does not run. This is the PowerShell analogue of the
+# BASH_SOURCE guard in vw-update.sh, and of the IUpdaterHost seam that makes
+# UpdaterFlow.cpp testable.
+if ($MyInvocation.InvocationName -ne '.') {
+    $mode = if ($args.Count -ge 1) { [string] $args[0] } else { '' }
 
-switch ($mode) {
-    'q-stable'   { Invoke-QStable }
-    'q-dev'      { Invoke-QDev }
-    'do-install' { Invoke-DoInstall ([string] $args[1]) ([string] $args[2]) }
-    'stable'     { Invoke-Stable }
-    'dev'        { Invoke-Dev }
-    '' {
-        Write-Host 'どのビルドを確認しますか？'
-        Write-Host '  [1] stable（安定版 / main）'
-        Write-Host '  [2] dev（開発版 / ブランチ選択）'
-        switch (Read-Host '番号') {
-            '1' { Invoke-Stable }
-            '2' { Invoke-Dev }
-            default { Write-Host 'キャンセルしました。' }
+    switch ($mode) {
+        'q-stable'   { Invoke-QStable }
+        'q-dev'      { Invoke-QDev }
+        'do-install' { Invoke-DoInstall ([string] $args[1]) ([string] $args[2]) }
+        'stable'     { Invoke-Stable }
+        'dev'        { Invoke-Dev }
+        '' {
+            Write-Host 'どのビルドを確認しますか？'
+            Write-Host '  [1] stable（安定版 / main）'
+            Write-Host '  [2] dev（開発版 / ブランチ選択）'
+            switch (Read-Host '番号') {
+                '1' { Invoke-Stable }
+                '2' { Invoke-Dev }
+                default { Write-Host 'キャンセルしました。' }
+            }
         }
+        default { Write-Output "error=不明なチャンネル: '$mode'（stable / dev / q-stable / q-dev / do-install）。" }
     }
-    default { Write-Output "error=不明なチャンネル: '$mode'（stable / dev / q-stable / q-dev / do-install）。" }
 }

@@ -1,0 +1,21 @@
+{
+  "$comment": [
+    "editorconfig-checker configuration — https://editorconfig-checker.github.io",
+    "It enforces the whitespace/encoding hygiene the .clang-format / cmake-format",
+    "formatters do NOT cover: a final newline, no trailing whitespace, UTF-8, and",
+    "LF line endings — across every text file in the repo (README, YAML, JSON,",
+    "scripts, ...), not just the C/C++ sources.",
+    "Indentation is intentionally left to the dedicated formatters: both",
+    "clang-format and cmake-format indent with tabs but ALIGN continuation lines",
+    "with spaces, which this checker's indent_style=tab rule cannot express. So",
+    "the indentation check is disabled here and clang-format / cmake-format remain",
+    "the source of truth for it."
+  ],
+  "Exclude": [
+    "\\.vwr/",
+    "\\.vwstrings$"
+  ],
+  "Disable": {
+    "Indentation": true
+  }
+}

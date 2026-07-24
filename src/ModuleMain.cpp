@@ -15,12 +15,18 @@
 // run time. Must match the base name of the packaged .vwr ("SamplePlugin.vwr"
 // for the stable build, "SamplePluginDev.vwr" for the dev build). See
 // BuildConfig.h.
-const char* DefaultPluginVWRIdentifier() { return PLUGIN_VWR_ID; }
+const char* DefaultPluginVWRIdentifier()
+{
+	return PLUGIN_VWR_ID;
+}
 
 //------------------------------------------------------------------
 // Report the SDK version this plug-in was compiled against so Vectorworks can
 // decide whether it is safe to load.
-extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_ver() { return SDK_VERSION; }
+extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_ver()
+{
+	return SDK_VERSION;
+}
 
 //------------------------------------------------------------------
 // Module entry point.
@@ -28,15 +34,12 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_ver() { return SDK_VERSION; }
 // (The old developer.vectorworks.net wiki has been retired; the SDK docs now
 // live in the Vectorworks/developer-sdk repository — see README "SDK ドキュメント".)
 //
-extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(
-	Sint32			action,
-	void*			moduleInfo,
-	const VWIID&	iid,
-	IVWUnknown*&	inOutInterface,
-	CallBackPtr		cbp )
+extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* moduleInfo,
+													   const VWIID& iid,
+													   IVWUnknown*& inOutInterface, CallBackPtr cbp)
 {
 	// Initialize the VCOM (Vectorworks Component Object Model) mechanism.
-	::GS_InitializeVCOM( cbp );
+	::GS_InitializeVCOM(cbp);
 
 	// At Vectorworks start-up, offer to change the build in use. This runs when
 	// Vectorworks loads the module (which it does at start-up to build the
@@ -57,13 +60,13 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(
 	SamplePlugin::RunDevStartupCheck();
 #endif
 
-	Sint32	reply	= 0L;
+	Sint32 reply = 0L;
 
 	using namespace VWFC::PluginSupport;
 
 	// Register our single menu command extension.
-	REGISTER_Extension<SamplePlugin::CExtMenuSample>(
-		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply );
+	REGISTER_Extension<SamplePlugin::CExtMenuSample>(GROUPID_ExtensionMenu, action, moduleInfo, iid,
+													 inOutInterface, cbp, reply);
 
 	return reply;
 }

@@ -1,0 +1,115 @@
+name: CodeQL
+
+# GitHub's semantic code-analysis engine. It complements the existing checks
+# rather than repeating them:
+#   * lint.yml  (clang-format / clang-tidy) -> C++ STYLE and local bug patterns.
+#   * test.yml                              -> correctness + coverage.
+#   * codeql.yml (this file)                -> deeper SECURITY analysis (taint
+#                                              tracking, data-flow) over the C++
+#                                              code AND the GitHub Actions
+#                                              workflows themselves.
+#
+# Two languages are analysed, each as its own matrix leg:
+#
+#   * c-cpp   — the plug-in sources. CodeQL for C/C++ must observe a real
+#               compile, but the security-relevant logic (parsing the untrusted
+#               release JSON / version strings in UpdaterParse.h, and the
+#               UpdaterFlow state machine) is SDK-FREE and builds on a plain
+#               Linux runner via -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON. That
+#               is exactly the code that handles data fetched from the network,
+#               so scanning it is where CodeQL earns its keep — without the
+#               ~800 MB proprietary Vectorworks SDK or the macOS/Windows runners
+#               the full plug-in build needs. The SDK-only platform glue
+#               (#if GS_MAC / GS_WIN in ModuleMain / ExtMenu / Updater) is thin
+#               and already covered by clang-tidy in build.yml.
+#
+#   * actions — the workflows in this very directory. This repo publishes
+#               releases with `contents: write` and threads branch names
+#               (github.head_ref) through shell, so CodeQL's Actions queries
+#               (script injection, over-broad permissions, untrusted checkout)
+#               guard real attack surface. No build is needed for this leg.
+#
+# The bash / PowerShell updater scripts are not a CodeQL-supported language, so
+# they are intentionally out of scope here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Re-scan weekly so newly published CodeQL queries run against code that has
+  # not otherwise changed. Sunday 07:00 UTC, off the top of the hour to avoid
+  # the cron rush.
+  schedule:
+    - cron: "23 7 * * 0"
+  workflow_dispatch:
+
+# One analysis per ref; a new push cancels an in-flight run for that ref. Do
+# NOT cancel scheduled runs — each weekly scan should complete.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Upload the analysis results (SARIF) to the Security tab.
+      security-events: write
+      # Read the repo being analysed.
+      contents: read
+      # Let the Actions leg resolve the workflows it analyses.
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: c-cpp
+            build-mode: manual
+          - language: actions
+            build-mode: none
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Toolchain for the manual C/C++ build below. Skipped for the Actions leg,
+      # which needs no compiler.
+      - name: Install build tools
+        if: matrix.language == 'c-cpp'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-extended adds deeper security queries on top of the default
+          # suite. The quality queries are deliberately left to clang-tidy
+          # (lint.yml / build.yml) so findings do not overlap.
+          queries: security-extended
+
+      # Compile the SDK-free subset so CodeQL can trace it. This mirrors the
+      # lint / test jobs' configure line (VW_BUILD_PLUGIN=OFF, VW_BUILD_TESTS=ON)
+      # so the exact translation units carrying the updater logic are built and
+      # traced. Runs only for the c-cpp leg; the Actions leg uses build-mode:
+      # none and skips straight to Analyze.
+      - name: Build (SDK-free subset)
+        if: matrix.language == 'c-cpp'
+        run: |
+          set -euo pipefail
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DVW_BUILD_PLUGIN=OFF \
+            -DVW_BUILD_TESTS=ON
+          cmake --build build -v
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -31,7 +31,17 @@ scripts/
   vw-update.sh              CI ビルドをダウンロード／インストールする（macOS 用。
                             バンドルに同梱され、プラグインから起動される）
   vw-update.ps1             同上の Windows 版（PowerShell。.vlb の隣に同梱される）
+  lint.sh                   ローカルで全 lint（clang / cmake / yaml / shell …）
+                            を実行する（CI と同じチェック。--fix で自動修正）
+.clang-format               C/C++ フォーマット規則（タブ・Allman ブレース等）
+.clang-tidy                 C/C++ 静的解析チェックの設定（WarningsAsErrors）
+.cmake-format.yaml          CMake の整形（cmake-format）＋ lint（cmake-lint）設定
+.yamllint.yaml              YAML の構造スタイル（yamllint）設定
+PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）のルール設定
+.editorconfig              エディタ側のインデント／改行／文字コード規則
+.editorconfig-checker.json  上記を CI で強制する editorconfig-checker の設定
 .github/workflows/build.yml CI: macOS（Apple Silicon）と Windows でビルドする
+.github/workflows/lint.yml  CI: ソース／非ソースを問わずコーディング規則を強制
 ```
 
 同じソースから、1 つのスイッチ（`VW_DEV_BUILD`、`src/BuildConfig.h` を参照）で
@@ -216,6 +226,12 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 **どのプラットフォームでも**ユニットテストを実行できます。テスト本体は
 `tests/`（`tests/UpdaterParseTests.cpp`）にあり、外部依存のない極小のテストハーネス
 （`tests/TestFramework.h`）を使うため、テストフレームワークのダウンロードも不要です。
+同梱スクリプトのバックエンド（`q-stable` / `q-dev` / `do-install`）も、ネットワーク
+境界だけを差し替えて同じく SDK ／ネットワーク抜きにテストします — macOS 版
+`scripts/vw-update.sh` は `tests/vw-update.test.sh`（bash＋`curl`/`plutil` スタブ）、
+Windows 版 `scripts/vw-update.ps1` は `tests/vw-update.Tests.ps1`（PowerShell 7＋
+`Invoke-GH`/`Invoke-WebRequest` スタブ）で、いずれも Linux ランナー上で動きます
+（詳細は `tests/README.md`）。
 
 ローカルでの実行（SDK 不要）:
 
@@ -225,30 +241,76 @@ cmake --build build-tests
 ctest --test-dir build-tests --output-on-failure
 ```
 
+サニタイザ（AddressSanitizer + UBSan）を有効にして回す（メモリ不正・未定義動作の検出）:
+
+```bash
+cmake -S . -B build-san -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_SANITIZERS=ON
+cmake --build build-san
+ctest --test-dir build-san --output-on-failure
+```
+
+CI の `test` ジョブは常にこの設定でテストを回すため、リファクタが招くメモリ不正
+（境界外アクセス・use-after-free・リーク）や、updater パーサが GitHub 側の仕様変更で
+崩れた入力を誤処理するケースは、その場でビルドを赤にできます。予期しない外部入力に
+対する耐性は `tests/UpdaterRobustnessTests.cpp` の擬似ファズ／敵対的入力テストが担い、
+サニタイザがその番人になります（詳細は `tests/README.md`）。
+
 ビルドオプション:
 
 - `VW_BUILD_PLUGIN`（既定 `ON`）… プラグイン本体をビルドします（SDK が必要で、
   macOS / Windows のみ）。テストだけをビルドしたいときは `OFF` にします。
 - `VW_BUILD_TESTS`（既定 `OFF`）… ユニットテストをビルドします。
 - `VW_ENABLE_COVERAGE`（既定 `OFF`）… テストに gcov 用の計測を付けます（GCC / Clang）。
+- `VW_ENABLE_SANITIZERS`（既定 `OFF`）… テストを ASan + UBSan
+  （`-fsanitize=address,undefined -fno-sanitize-recover=all`）でビルド・実行します
+  （GCC / Clang）。
 
-### カバレッジと GitHub Code Quality
+### カバレッジレポート（GitHub Actions で内製）
 
 `.github/workflows/test.yml` は、テストを Linux ランナー（SDK のダウンロード不要
 なので高速）で実行する **`test` ジョブ**と、それに続く **`coverage` ジョブ**の 2 つに
-分かれています。`test` の失敗はテスト自体の失敗を、`coverage` の失敗はレポート生成／
-アップロードの失敗を意味するので、原因を切り分けやすくしています。`coverage` ジョブは
-`test` の成功後にのみ実行され、`gcovr` で **Cobertura 形式**のカバレッジレポートを生成
-して、`actions/upload-code-coverage` で **GitHub Code Quality** に送信します。カバレッジ
-はプルリクエスト上に集計値として表示されます。アップロードには `code-quality: write`
-権限が必要で、トークンが読み取り専用となるフォーク PR ではスキップされます
-（レポートはアーティファクトとしては常に保存されます）。
+分かれています。`test` の失敗はテスト自体の失敗を、`coverage` の失敗はレポート生成の
+失敗を意味するので、原因を切り分けやすくしています。`coverage` ジョブは `test` の成功後
+にのみ実行され、`gcovr` で **Cobertura 形式**のカバレッジレポートを生成します。
+
+カバレッジの可視化は **GitHub Actions だけで完結**しており、GitHub Code Quality など
+外部サービスには依存しません。レポートは次の 2 つの情報を **1 つの表**にまとめた
+**1 つの PR コメント**として投稿され（2 回目以降は同じコメントを自動更新）、常に
+ビルド成果物としても保存されます。
+
+- **全体カバレッジ（`src/`）**… `gcovr` の集計（行・分岐・関数）。
+- **差分カバレッジ**… `diff-cover` により、この PR が変更した行のみをベースブランチ
+  （マージベース）と比較したカバレッジ。新しく追加・変更したコードがテストされて
+  いるかがひと目で分かります。表の最終行に集計値だけを取り込みます（`diff-cover` の
+  Markdown 出力はそのまま貼らず、JSON 出力から値を抽出）。
+
+各行は絵文字で状態を色分けします（🟢 良好 / 🟡 注意 / 🔴 低 / ⚪ 参考）。しきい値は
+行 🟢≥95% 🟡≥90%、関数 🟢100%、差分 🟢100% 🟡≥95%、分岐は参考扱い（⚪）で、
+ワークフロー内の `THRESHOLDS` に一箇所でまとめており、変更できます。**🔴 が 1 つでも
+あると `coverage` ジョブは失敗します**（表示だけでなく CI でしきい値を強制）。この
+判定はすべてのイベントで走るため、`main` への push やフォーク PR（コメントはスキップ
+されますが判定は有効）でも同様に適用されます。
+
+コメントの投稿には `pull-requests: write` 権限が必要で、トークンが読み取り専用となる
+フォーク PR ではスキップされます（レポートはアーティファクトとしては常に保存されます）。
+`main` への push では比較対象の差分がないため、差分カバレッジとコメント投稿は行わず、
+レポートの生成・アーティファクト保存・しきい値判定を行います。
+
+チェックアウトは**浅い（shallow）まま**で、差分カバレッジに必要な履歴だけを都度取得
+します。全ブランチの全履歴を取る `fetch-depth: 0` は使わず、**ベースブランチのみ**を
+マージベースに届くまで段階的に deepen するので、CI 時間はリポジトリの履歴の長さでは
+なく、その PR の分岐量に応じた分だけで済みます。
+
+ローカルでは同じレポートを次のように再現できます（差分カバレッジはベースブランチを
+指定）:
 
 ```bash
 cmake -S . -B build -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_COVERAGE=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 gcovr --root . --filter 'src/.*' build --cobertura coverage.xml --txt --print-summary
+# 差分カバレッジ（例: origin/main と比較）
+diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cover.md
 ```
 
 ## 継続的インテグレーション（CI）
@@ -301,6 +363,110 @@ gcovr --root . --filter 'src/.*' build --cobertura coverage.xml --txt --print-su
 場合 — つまり stable の公開を取りこぼした場合 — `main` で `build.yml` を再ディスパッチ
 して再ビルド・再公開します。スケジュール／`delete` 系のワークフローと同様に
 デフォルトブランチから実行されるため、`main` にマージされて初めて有効になります。
+
+## コーディング規則の強制（Lint）
+
+`.github/workflows/lint.yml` が、`main` への push とすべての PR で
+コーディング規則を機械的に強制します。対象は C/C++ ソースにとどまらず、
+**CMake ビルドファイル・GitHub ワークフロー・シェルスクリプト、そしてすべての
+テキストファイルの空白／文字コード**まで、それぞれ専用のフォーマッタ／リンタで
+チェックします。原因を切り分けやすいよう、チェックごとに独立したジョブに
+分かれています。
+
+C/C++ を対象とするジョブ:
+
+- **`clang-format`** — `src/` と `tests/` の**すべての** C/C++ ソースを
+  `.clang-format` に照らしてチェックします。`--dry-run --Werror` なので 1 か所
+  でも規則から外れると失敗し、書き換えは行いません。SDK もビルドも不要なので
+  高速で、SDK が要る（`#if GS_MAC` / `GS_WIN`）プラットフォーム固有のグルー
+  コードも含めて**全ファイル**を対象にできます。
+- **`clang-tidy`** — SDK 非依存のアップデータロジック（`src/UpdaterFlow.cpp` と
+  それが取り込む `UpdaterParse.h` / `UpdaterHost.h`）に対して静的解析を行います。
+  clang-tidy は翻訳単位を実際にコンパイルする必要があり、SDK が不要なこの Linux
+  ランナー上では**実ロジックを持つ SDK 非依存コード**を対象にします。`.clang-tidy`
+  は `WarningsAsErrors: "*"` なので、検出があれば CI が失敗します。
+
+ソース以外のファイルを対象とするジョブ:
+
+- **`cmake-format`** — `CMakeLists.txt` 群の整形を `.cmake-format.yaml`
+  （タブ・100 桁・コメントは再整形しない）に照らして `--check` します。あわせて
+  **`cmake-lint`** が CMake のバグを招きやすいパターンを検出します。
+- **`actionlint`** — ワークフロー YAML 自体（構文・式・参照アクション・ランナー
+  ラベル）を検証し、同梱の **shellcheck** で各 `run:` のインラインスクリプトも
+  静的解析します。
+- **`shellcheck`** — `scripts/` 配下のスタンドアロンなシェルスクリプトを解析
+  します（ワークフロー内のインラインスクリプトは actionlint が担当）。
+- **`PSScriptAnalyzer`** — Windows 版アップデータ（`scripts/vw-update.ps1`）の
+  PowerShell 静的解析です。未承認の動詞・未使用パラメータ・危険な null 比較など
+  バグを招きやすいパターンを検出します。clang-tidy（`src/` の実ロジックのみ）や
+  shellcheck（`scripts/*.sh` のみ）と同じく、テストハーネス（`tests/`）ではなく
+  `scripts/` 配下の**本番スクリプト**を対象にします。ルールは
+  `PSScriptAnalyzerSettings.psd1`（デフォルト全ルールから、このスクリプトの意図的な
+  設計と衝突する数個だけを除外）で管理し、残った検出はすべて CI を失敗させます。
+- **`yamllint`** — ワークフローや Dependabot 設定など YAML の構造スタイル
+  （インデント・キー重複・記号まわりの空白）を `.yamllint.yaml` に照らして
+  チェックします。
+- **`editorconfig-checker`** — **すべての**テキストファイルについて、末尾改行・
+  行末空白なし・UTF-8・LF を強制します（フォーマッタがカバーしない衛生面）。
+  対象規則は `.editorconfig`、実行する検査と除外は `.editorconfig-checker.json`
+  で設定します。インデントは各フォーマッタ（clang-format / cmake-format）が
+  タブ＋スペース整列で管理するため、この検査ではあえて無効化しています。
+
+**SDK 依存コードの静的解析（`build.yml`）** — 同じ `.clang-tidy` ルールを、SDK が
+ないとコンパイルできないプラグイン本体（`ModuleMain.cpp` / `Extensions/ExtMenu.cpp`
+/ `Updater.cpp`）にも適用します。ビルドジョブは SDK を用意するので、**ビルド直前**に
+clang-tidy を走らせて全ソースを網羅します。
+
+- **macOS ジョブ** — `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` で生成した compile
+  database に対して clang-tidy を実行し、`#if GS_MAC` 側の分岐を解析します。
+- **Windows ジョブ** — Visual Studio ジェネレータは compile database を出力しない
+  ため、解析専用に **Ninja + clang-cl** でビルドせずに再コンフィグして database を
+  生成し、`#if GS_WIN` 側の分岐（`Updater.cpp` の `Widen` / `Narrow` /
+  `OwnModulePath` / `RunBundledScript`）を解析します。
+
+macOS が `GS_MAC`、Windows が `GS_WIN` の分岐をそれぞれ担当するので、両者を合わせて
+**すべての行**が clang-tidy でチェックされます。
+
+バージョンについて: SDK 非依存の `lint.yml` と macOS ジョブは clang 18 に固定して
+います。Windows ジョブだけは**最新の LLVM**を使います — ランナーの MSVC 標準ライブラリ
+ヘッダが「Clang 20 以降」を要求する（`static_assert` と Clang 20 の組み込み関数を使う）
+ため、clang-cl / clang-tidy がそれを解析できる新しさである必要があるからです。
+
+**採用しているルール:**
+
+- フォーマット（`.clang-format`）— タブインデント（幅 4）、Allman ブレース
+  （`{` を次行に置く）、名前空間本体をインデント、ポインタ／参照は型側に寄せる
+  （`int* p`）、コード幅 100 桁で折り返し。コメントは再整形しません
+  （`ReflowComments: false`）— 手作業で整形された重厚なコメント（日本語・罫線を
+  含む）を壊さないためです。
+- 静的解析（`.clang-tidy`）— `bugprone-*`、`performance-*`、`modernize-*`、
+  `readability-*`、`cppcoreguidelines-*`、`clang-analyzer-*` を有効化し、
+  スタイル系のノイズ（フォーマットは clang-format が担当）や大規模な無関係リ
+  ファクタを要求するチェックは無効化しています。
+
+**ローカルでの実行**（CI と同じチェック）:
+
+```bash
+scripts/lint.sh          # チェックのみ（違反があれば非ゼロ終了）
+scripts/lint.sh --fix    # その場で自動修正（clang-format -i / clang-tidy --fix /
+                         # cmake-format -i）。残りは検査のみ
+```
+
+`scripts/lint.sh` は CI と同じ全ツールを走らせ、未インストールのツールは
+「skip」と表示して飛ばすので、手元に一部しか入っていなくても部分実行できます
+（完全なゲートは CI 側）。各ツールのインストール方法は未インストール時に表示
+されます。CI が使うバージョンは `lint.yml` 冒頭の `env:` に固定してあります。
+
+`.editorconfig` も用意してあり、多くのエディタがインデント・改行・文字コードを
+保存時に合わせるので、CI に到達する前から規則に近い状態を保てます。
+
+> **さらに強化するには（任意）:** コミット前の自動実行に
+> [`pre-commit`](https://pre-commit.com/)、追加の C++ 静的解析に
+> [`cppcheck`](https://cppcheck.sourceforge.io/) を組み合わせられます。SDK 依存の
+> プラグイン本体（`Updater.cpp` など）は CI（`build.yml`）で clang-tidy を掛けて
+> いますが、ローカルで掛けたい場合は SDK を用意したうえで
+> `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` でコンフィグし、生成された
+> `compile_commands.json` に対して `clang-tidy` を実行してください。
 
 ## SDK ドキュメント（API 仕様）
 

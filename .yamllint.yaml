@@ -1,0 +1,42 @@
+# yamllint configuration — https://yamllint.readthedocs.io
+#
+# Enforces the STRUCTURAL style of the repo's YAML (GitHub workflows, Dependabot):
+# consistent 2-space indentation, no duplicate keys, tidy spacing around colons,
+# hyphens, brackets and braces, and no trailing blank lines. Whitespace hygiene
+# (trailing spaces, final newline, LF, UTF-8) is enforced separately by
+# editorconfig-checker, and the workflow SEMANTICS by actionlint.
+#
+# Check locally:  yamllint .
+
+extends: default
+
+# Don't lint generated/vendored YAML — reuse the repo's .gitignore so build
+# trees (e.g. build-lint/CMakeFiles/*.yaml produced by a local cmake configure)
+# are skipped, exactly as editorconfig-checker and git already skip them.
+ignore-from-file: .gitignore
+
+rules:
+  # GitHub Actions workflows conventionally start straight at `name:` with no
+  # leading `---` document marker.
+  document-start: disable
+
+  # The workflow trigger key `on:` is valid YAML; without this yamllint would
+  # read it as the boolean `on` and warn. Only keys are affected, so real truthy
+  # VALUES (yes/no/on/off) are still normalised to true/false.
+  truthy:
+    check-keys: false
+
+  # Long prose lines are wrapped by hand, not by a tool — the workflows carry
+  # long URLs, `::warning::` messages and embedded-shell comments that reflowing
+  # to a hard column would only make less readable (the same reason
+  # .clang-format sets ReflowComments: false). Length is the author's call;
+  # editorconfig-checker still forbids trailing whitespace on those lines.
+  line-length: disable
+
+  # A single space before an inline `#` comment is enough (the default demands
+  # two), matching the one-space style used across the repo's config files.
+  comments:
+    min-spaces-from-content: 1
+  # github-script steps embed JavaScript whose `//` comments yamllint would
+  # otherwise flag; only the leading `#` YAML comments need policing.
+  comments-indentation: disable

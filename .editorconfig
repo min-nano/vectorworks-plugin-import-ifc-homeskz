@@ -1,0 +1,44 @@
+# EditorConfig — https://editorconfig.org
+#
+# Enforces the baseline whitespace/encoding rules directly in the editor, so
+# files are already close to what clang-format expects before CI runs. Most
+# editors honor this natively (VS Code, Visual Studio, Xcode via a plug-in,
+# CLion, Vim, etc.). clang-format remains the source of truth for C/C++ layout;
+# this just covers what clang-format cannot (final newline, trailing spaces,
+# and the non-C++ files).
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# C/C++ sources: tabs, width 4 (matches .clang-format).
+[*.{c,cpp,h,hpp,mm}]
+indent_style = tab
+indent_size = 4
+
+# CMake: tabs, width 4 — same as the C/C++ sources and enforced by cmake-format
+# (.cmake-format.yaml sets use_tabchars).
+[{CMakeLists.txt,*.cmake}]
+indent_style = tab
+indent_size = 4
+
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2
+
+# Markdown: keep trailing whitespace (it is a hard line break in Markdown).
+[*.md]
+trim_trailing_whitespace = false
+
+# Shell / PowerShell updater scripts.
+[*.sh]
+indent_style = space
+indent_size = 2
+
+[*.ps1]
+indent_style = space
+indent_size = 4
