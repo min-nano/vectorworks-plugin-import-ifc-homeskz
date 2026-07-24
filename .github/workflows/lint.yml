@@ -1,0 +1,281 @@
+name: Lint
+
+# Enforces the coding rules on every push to main and every pull request. The
+# checks reach BEYOND the C/C++ sources: the CMake build files, the GitHub
+# workflows, the shell scripts and the universal whitespace/encoding hygiene of
+# every text file are all held to a formatter or linter here. Each check is its
+# own independent job, so a red X points straight at the cause:
+#
+#   * clang-format  — style/formatting for ALL C/C++ sources (src/ + tests/).
+#                     Needs no SDK and no build, so it is fast and complete: it
+#                     checks every file, including the platform-specific plug-in
+#                     glue that only compiles against the Vectorworks SDK.
+#   * clang-tidy    — static analysis (bug-prone patterns, const-correctness,
+#                     modernize, core-guidelines) over the SDK-FREE updater logic
+#                     and its headers. clang-tidy has to actually compile a
+#                     translation unit, and the plug-in glue (#if GS_MAC/GS_WIN)
+#                     needs the SDK, so on this SDK-free Linux runner it lints the
+#                     code that carries the real logic and unit tests. The rest
+#                     is still covered by clang-format above; to tidy the plug-in
+#                     glue too, run clang-tidy locally against an SDK build.
+#   * cmake-format  — layout of the CMakeLists.txt files (.cmake-format.yaml),
+#                     plus cmake-lint for bug-prone CMake patterns.
+#   * actionlint    — validates the GitHub workflows themselves and runs
+#                     shellcheck over every inline `run:` script in them.
+#   * shellcheck    — the stand-alone shell scripts under scripts/.
+#   * PSScriptAnalyzer — static analysis for the PowerShell updater script under
+#                     scripts/ (unapproved verbs, unused params, unsafe patterns),
+#                     per PSScriptAnalyzerSettings.psd1. Scoped to the production
+#                     script like clang-tidy/shellcheck, not the tests.
+#   * yamllint      — structural YAML style (.yamllint.yaml) for the workflows
+#                     and Dependabot config.
+#   * editorconfig  — final newline, no trailing whitespace, UTF-8 and LF across
+#                     EVERY text file — the hygiene the formatters don't cover
+#                     (.editorconfig / .editorconfig-checker.json).
+#
+# Every tool is pinned so results are stable and match what the checked-in config
+# files were tuned against. Reproduce all of it locally with scripts/lint.sh
+# (add --fix to auto-format), or individually:
+#     clang-format-18 --dry-run --Werror src/*.cpp src/**/*.h tests/*
+#     cmake -S . -B build -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON \
+#           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+#     clang-tidy-18 -p build src/UpdaterFlow.cpp
+#     cmake-format --check CMakeLists.txt tests/CMakeLists.txt && cmake-lint ...
+#     actionlint
+#     shellcheck scripts/*.sh
+#     pwsh -c 'Invoke-ScriptAnalyzer -Path scripts -Settings ./PSScriptAnalyzerSettings.psd1'
+#     yamllint .
+#     editorconfig-checker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One lint run per ref; a new push cancels an in-flight run for that ref.
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned tool versions. Keep these in step with scripts/lint.sh so local runs
+  # and CI use the same tools.
+  CLANG_VERSION: "18"
+  CMAKELANG_VERSION: "0.6.13"    # cmake-format + cmake-lint
+  YAMLLINT_VERSION: "1.38.0"
+  ACTIONLINT_VERSION: "v1.7.12"
+  EDITORCONFIG_CHECKER_VERSION: "v3.8.0"
+  PSSCRIPTANALYZER_VERSION: "1.24.0"    # PowerShell static analysis
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install clang-format
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "clang-format-${CLANG_VERSION}"
+
+      # Check every C/C++ source in the repo. --Werror makes any deviation a
+      # failure; --dry-run means nothing is written. The exact offending lines
+      # are printed so the fix is obvious (run clang-format -i locally).
+      - name: Check formatting
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find src tests \
+            \( -name '*.cpp' -o -name '*.h' \) ! -name '*.plist.in' | sort)
+          echo "Checking ${#files[@]} files with clang-format-${CLANG_VERSION}:"
+          printf '  %s\n' "${files[@]}"
+          "clang-format-${CLANG_VERSION}" --dry-run --Werror "${files[@]}"
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build tools + clang-tidy
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ "clang-tidy-${CLANG_VERSION}"
+
+      # Configure the SDK-free build purely to emit compile_commands.json, which
+      # tells clang-tidy exactly how each translation unit is compiled (flags,
+      # include paths, C++ standard). No build step is needed for linting.
+      - name: Configure (compile database, no SDK)
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DVW_BUILD_PLUGIN=OFF \
+            -DVW_BUILD_TESTS=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      # Lint the SDK-free updater logic (src/UpdaterFlow.cpp pulls in
+      # UpdaterParse.h and UpdaterHost.h, all covered via HeaderFilterRegex in
+      # .clang-tidy). WarningsAsErrors in the config makes any finding fail CI.
+      - name: Run clang-tidy
+        run: |
+          set -euo pipefail
+          "clang-tidy-${CLANG_VERSION}" -p build --warnings-as-errors='*' \
+            src/UpdaterFlow.cpp
+
+  # Layout + static checks for the CMake build files. cmake-format enforces the
+  # house style in .cmake-format.yaml (tabs, 100 columns, comments left alone);
+  # cmake-lint catches bug-prone CMake patterns. Both ship in the "cmakelang"
+  # package, pinned so the check matches what the files were formatted against.
+  cmake-format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # cmakelang does not pull in PyYAML, but cmake-format needs it to read the
+      # YAML config file (.cmake-format.yaml), so install it explicitly.
+      - name: Install cmakelang
+        run: pip install "cmakelang==${CMAKELANG_VERSION}" pyyaml
+
+      # --check writes nothing and fails if a file is not already formatted; the
+      # diff to apply is `cmake-format -i` (or scripts/lint.sh --fix).
+      - name: Check CMake formatting
+        run: cmake-format --check CMakeLists.txt tests/CMakeLists.txt
+
+      - name: Lint CMake
+        run: cmake-lint CMakeLists.txt tests/CMakeLists.txt
+
+  # Validate the workflow files themselves (syntax, expressions, referenced
+  # actions, runner labels) and, via the bundled shellcheck, every inline `run:`
+  # script in them. shellcheck is preinstalled on the runner; actionlint picks it
+  # up automatically.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "stable"
+
+      - name: Install actionlint
+        run: |
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+
+      - name: Run actionlint
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          "$(go env GOPATH)/bin/actionlint" -color
+
+  # shellcheck over the stand-alone shell scripts (the updater + this repo's own
+  # lint helper). The workflows' inline scripts are covered by actionlint above.
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run shellcheck
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          shellcheck scripts/*.sh
+
+  # PSScriptAnalyzer over the stand-alone PowerShell script (the Windows updater,
+  # scripts/vw-update.ps1). This is PowerShell's counterpart to clang-tidy and
+  # shellcheck: it flags bug-prone patterns, unapproved cmdlet verbs, unused
+  # parameters, unsafe null comparisons and the like. Like clang-tidy (the SDK-free
+  # src/ logic, not the tests) and shellcheck (scripts/*.sh, not tests/), it lints
+  # the production script under scripts/ — not the test harness under tests/, whose
+  # test doubles legitimately override built-in cmdlets and leave stubs unused. The
+  # rule set (full defaults minus a few that conflict with the script's deliberate
+  # design) lives in PSScriptAnalyzerSettings.psd1; every surviving finding fails
+  # the job. pwsh is preinstalled on the runner. Reproduce locally with
+  # scripts/lint.sh (which runs the exact same command).
+  psscriptanalyzer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer `
+            -RequiredVersion $env:PSSCRIPTANALYZER_VERSION `
+            -Scope CurrentUser -Force
+
+      # Analyse every *.ps1 directly under scripts/ (non-recursive, so it never
+      # reaches tests/). Any finding is printed and turned into a non-zero exit.
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module PSScriptAnalyzer
+          $results = Invoke-ScriptAnalyzer -Path scripts `
+            -Settings ./PSScriptAnalyzerSettings.psd1
+          if ($results) {
+            $results | Format-Table -AutoSize Severity, RuleName, ScriptName, Line, Message
+            throw "PSScriptAnalyzer found $($results.Count) issue(s)."
+          }
+          Write-Host 'PSScriptAnalyzer: no issues.'
+
+  # Structural YAML style (indentation, duplicate keys, spacing) for the
+  # workflows and Dependabot config, per .yamllint.yaml.
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install yamllint
+        run: pip install "yamllint==${YAMLLINT_VERSION}"
+
+      - name: Run yamllint
+        run: yamllint --strict .
+
+  # Universal whitespace/encoding hygiene across EVERY text file: a final
+  # newline, no trailing whitespace, UTF-8, LF line endings. This is what the
+  # per-language formatters do not cover. Config: .editorconfig (the rules) +
+  # .editorconfig-checker.json (which checks to run / what to exclude).
+  editorconfig:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "stable"
+
+      - name: Install editorconfig-checker
+        run: |
+          go install \
+            "github.com/editorconfig-checker/editorconfig-checker/v3/cmd/editorconfig-checker@${EDITORCONFIG_CHECKER_VERSION}"
+
+      - name: Run editorconfig-checker
+        run: |
+          set -euo pipefail
+          "$(go env GOPATH)/bin/editorconfig-checker"

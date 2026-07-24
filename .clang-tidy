@@ -1,0 +1,86 @@
+# clang-tidy configuration for the Vectorworks plug-in template.
+#
+# Runs the static-analysis and lint checks that are meaningful for this code
+# base without drowning it in style noise that clang-format already owns.
+#
+# CI runs clang-tidy over the SDK-free translation units (the updater logic and
+# its tests) using the compile database from a `-DVW_BUILD_PLUGIN=OFF
+# -DVW_BUILD_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` configure. Locally you
+# can do the same and run:
+#     clang-tidy -p build src/UpdaterFlow.cpp
+#
+# Notable disabled checks and why:
+#   * modernize-use-trailing-return-type — pure style, fights the house style.
+#   * readability-identifier-length      — short loop vars (i, n, s) are fine.
+#   * *-magic-numbers                     — noisy for parsing/index code.
+#   * llvmlibc-*, fuchsia-*, altera-*, abseil-* — vendor rules, not relevant.
+#   * cppcoreguidelines checks that duplicate bugprone or demand a large,
+#     unrelated refactor (owning-memory, pointer arithmetic, macro usage).
+#
+# Disabled because they conflict with the Vectorworks SDK rather than our code
+# (they fire only inside SDK macros / on SDK-mandated patterns, so no amount of
+# editing the plug-in sources can satisfy them):
+#   * cppcoreguidelines-special-member-functions — every SDK-derived class
+#     (VWDialog, VWMenu_EventSink, …) has a virtual destructor and is not meant
+#     to be copied; demanding the rule of five on each is pure boilerplate.
+#   * cppcoreguidelines-avoid-non-const-global-variables — the SDK's menu
+#     definition (SMenuDef) and the test registrars are legitimately globals.
+#   * cppcoreguidelines-pro-type-cstyle-cast — the SDK event-map macros and the
+#     Win32 glue use C-style casts; not ours to change.
+#   * clang-diagnostic-inconsistent-missing-override — the SDK's
+#     DEFINE_EVENT_DISPATH_MAP macro declares a virtual without `override`.
+#   * performance-enum-size — the dialog control-id enum interfaces with SDK
+#     APIs that expect the default int width; shrinking it buys nothing.
+#   * modernize-use-designated-initializers — the SDK's SMenuDef / SResString
+#     aggregates are initialized positionally; designated initializers would
+#     hard-couple the plug-in to the SDK's private field names.
+#   * clang-diagnostic-delayed-template-parsing-in-cxx20 — the Windows job passes
+#     -fdelayed-template-parsing so clang-tidy can parse the SDK's MSVC template
+#     headers (see build.yml); Clang 20 deprecates that flag but it still works.
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  portability-*,
+  modernize-*,
+  readability-*,
+  misc-*,
+  cppcoreguidelines-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-braces-around-statements,
+  -readability-implicit-bool-conversion,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  -misc-include-cleaner,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-special-member-functions,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -performance-enum-size,
+  -clang-diagnostic-inconsistent-missing-override,
+  -clang-diagnostic-delayed-template-parsing-in-cxx20,
+  -modernize-use-designated-initializers,
+  -bugprone-easily-swappable-parameters
+
+# Treat every enabled diagnostic as an error so CI fails on any regression.
+WarningsAsErrors: "*"
+
+# Only diagnose the project's own headers (src/ and tests/), never the SDK or
+# system/toolchain headers. The character class accepts both path separators so
+# it works on the Windows compile database too (clang-cl paths).
+HeaderFilterRegex: '(src|tests)[/\\]'
+
+FormatStyle: file

@@ -1,18 +1,30 @@
 name: Tests
 
 # The project's main CI for correctness: it runs the unit tests and, on top of
-# that, measures and publishes coverage. Two jobs, split so a failure points
+# that, measures and reports coverage. Two jobs, split so a failure points
 # straight at its cause:
-#   * test     — build the SDK-free unit tests (src/UpdaterParse.h) and run them.
-#                A red X here means a TEST failed.
+#   * test     — build the SDK-free unit tests (src/UpdaterParse.h) and run them
+#                under AddressSanitizer + UndefinedBehaviorSanitizer, so a memory
+#                error (out-of-bounds read, use-after-free, leak) or undefined
+#                behaviour turns the run red — not just a failed assertion. This
+#                guards against refactors introducing memory bugs and against the
+#                updater parser mishandling unexpected external input (the fuzz /
+#                adversarial cases in tests/UpdaterRobustnessTests.cpp).
+#                A red X here means a TEST failed OR the sanitizers tripped.
 #   * coverage — only after `test` passes: rebuild with gcov instrumentation,
-#                produce a Cobertura report, and publish it to GitHub Code
-#                Quality. A red X here means REPORT GENERATION/UPLOAD failed,
-#                not a test.
+#                produce a Cobertura report, and post it as a comment on the
+#                pull request (overall coverage + coverage of the lines this PR
+#                changed, via diff-cover against the base branch). A red X here
+#                means either REPORT GENERATION failed or a metric fell below
+#                its threshold (a 🔴 in the table) — never a failing test.
+#
+# Coverage is reported entirely inside GitHub Actions — there is no dependency
+# on GitHub Code Quality or any other external service. The report is posted as
+# a single, self-updating PR comment and always kept as a build artifact.
 #
 # Because the tests do NOT need the Vectorworks SDK, both jobs run on a plain
 # Linux runner — no ~800 MB SDK download — so they are fast and work on pull
-# requests from forks too (the Code Quality upload is then skipped, see below).
+# requests from forks too (the comment step is then skipped, see below).
 
 on:
   push:
@@ -34,50 +46,77 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # cmake + g++ for the C++ tests; python3/zip/unzip are the helpers the bash
+      # updater-script harness (tests/vw-update.test.sh) stubs the JSON/zip I/O
+      # with. pwsh (for the PowerShell harness) is preinstalled on the runner —
+      # VW_REQUIRE_SCRIPT_TESTS below turns a missing one into a hard error, so a
+      # dropped dependency fails CI instead of silently skipping the tests.
       - name: Install build tools
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake g++
+          sudo apt-get install -y --no-install-recommends cmake g++ python3 zip unzip
 
-      # Tests only (VW_BUILD_PLUGIN=OFF), no coverage instrumentation, so this
-      # job's result reflects the tests alone. No SDK required.
+      # Tests only (VW_BUILD_PLUGIN=OFF), instrumented with ASan + UBSan (no
+      # coverage — that is the separate `coverage` job). g++ ships libasan /
+      # libubsan, so no extra packages are needed. No SDK required.
+      # VW_REQUIRE_SCRIPT_TESTS=ON makes the updater-script tests mandatory: a
+      # missing interpreter (bash/pwsh) fails configuration and a missing helper
+      # tool fails the harness, so CI can never go green without running them.
       - name: Configure
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DVW_BUILD_PLUGIN=OFF \
-            -DVW_BUILD_TESTS=ON
+            -DVW_BUILD_TESTS=ON \
+            -DVW_ENABLE_SANITIZERS=ON \
+            -DVW_REQUIRE_SCRIPT_TESTS=ON
 
       - name: Build tests
         run: cmake --build build -v
 
-      - name: Run tests
+      # abort_on_error/halt_on_error make the first sanitizer report fatal (the
+      # build already passes -fno-sanitize-recover=all); detect_leaks catches
+      # leaked allocations at exit; print_stacktrace points UBSan at the line.
+      - name: Run tests (ASan + UBSan)
+        env:
+          ASAN_OPTIONS: abort_on_error=1:detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ctest --test-dir build --output-on-failure
 
   coverage:
     # Runs only if `test` succeeded, so a coverage-job failure is unambiguously
-    # about the report (gcovr / upload), never a failing test.
+    # about the report (gcovr / diff-cover), never a failing test.
     needs: test
     runs-on: ubuntu-latest
-    # actions/upload-code-coverage needs code-quality:write to publish the
-    # report; pull-requests:read lets it associate coverage with the PR.
+    # pull-requests:write lets the job post/update the coverage comment on PRs.
+    # contents:read is all the build itself needs.
     permissions:
       contents: read
-      code-quality: write
-      pull-requests: read
+      pull-requests: write
 
     steps:
+      # Shallow checkout (the default fetch-depth: 1). Building and running the
+      # tests only need the PR's own tree, so we do NOT pull history here. The
+      # little history diff-cover needs (down to the merge base with the base
+      # branch) is fetched on demand in the diff-coverage step below — for the
+      # base branch alone, not every branch, so CI time does not grow with the
+      # repo's history the way fetch-depth: 0 would.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install build + coverage tools
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake g++ gcovr
+          # diff-cover: reports coverage of only the lines changed vs. the base
+          # branch (like a coverage "diff"). It is a Python CLI tool, so install
+          # it with pipx (preinstalled on the runner) — this sidesteps PEP 668's
+          # "externally-managed-environment" error and puts `diff-cover` on PATH.
+          pipx install diff-cover
 
       # Same tests, this time instrumented for gcov so running them emits
       # coverage data.
@@ -99,28 +138,197 @@ jobs:
 
       # Emit a Cobertura XML report over the plug-in sources under src/. The
       # build tree holds the gcov data; --root . keeps paths repo-relative so
-      # GitHub can map coverage back to the files.
-      - name: Generate coverage report (Cobertura)
+      # diff-cover (and any reader) can map coverage back to the files. The JSON
+      # summary is a machine-readable copy of the overall totals used to build
+      # the PR comment.
+      - name: Generate coverage report (Cobertura + summary)
         run: |
+          set -euo pipefail
           gcovr --root . --filter 'src/.*' build \
             --cobertura coverage.xml \
+            --json-summary coverage-summary.json \
             --txt --print-summary
 
-      - name: Upload coverage report artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-cobertura
-          path: coverage.xml
+      # Coverage of ONLY the lines this PR adds/changes, compared against the
+      # base branch (diff-cover uses the merge base). Emits a JSON report whose
+      # totals are folded into the single coverage table in the PR comment
+      # below. PR events only — on a push to main there is no diff to compare
+      # against.
+      - name: Compute diff coverage vs. base branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          # The checkout is shallow. diff-cover only needs enough history to find
+          # the merge base with the base branch, so bring in just THAT branch
+          # (mapped into refs/remotes/origin/ so `origin/<base>` resolves), then
+          # deepen the base ref and the checked-out HEAD together — doubling the
+          # step each time — until they share a common ancestor. A typical PR
+          # stops after the first fetch; only unusually divergent branches deepen
+          # further. This never fetches other branches, so cost tracks the PR's
+          # divergence, not the repo's total history.
+          head_sha="$(git rev-parse HEAD)"
+          base_refspec="+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          git fetch --no-tags origin "$base_refspec"
+          depth=200
+          until git merge-base HEAD "origin/$BASE_REF" >/dev/null 2>&1; do
+            git fetch --no-tags --deepen="$depth" origin \
+              "$base_refspec" "$head_sha" || break
+            depth=$((depth * 2))
+            [ "$depth" -gt 200000 ] && break
+          done
+          diff-cover coverage.xml \
+            --compare-branch "origin/$BASE_REF" \
+            --json-report diff-cover.json \
+            --fail-under 0
 
-      # Publish to GitHub Code Quality. Skipped for pull requests from forks,
-      # whose GITHUB_TOKEN is read-only and cannot upload (mirrors how build.yml
-      # guards its fork PRs).
-      - name: Upload coverage to GitHub Code Quality
-        if: >-
-          github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/upload-code-coverage@v1
+      - name: Upload coverage report artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          file: coverage.xml
-          language: C++
-          label: code-coverage/gcovr
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage-summary.json
+            diff-cover.json
+          if-no-files-found: ignore
+
+      # Build the coverage table, post it as a single sticky PR comment, and
+      # FAIL the job if any metric is red (below its threshold). Runs on every
+      # event so the red gate protects pushes to main and fork PRs too; the
+      # comment itself is posted only for same-repo PRs (fork PRs have a
+      # read-only token and cannot comment — the gate still applies).
+      - name: Report coverage & enforce thresholds
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Marker used to find our own previous comment and replace it, so
+            // the PR carries exactly one always-current coverage comment.
+            const marker = '<!-- coverage-report -->';
+
+            const pct = (n) =>
+              (typeof n === 'number') ? `${n.toFixed(1)}%` : '—';
+
+            // Per-metric colour thresholds (percent). A value >= the green cut
+            // is 🟢, >= the yellow cut is 🟡, below that is 🔴. Branches are
+            // reference-only (always ⚪ grey). Tweak these in one place.
+            const THRESHOLDS = {
+              lines: { green: 95, yellow: 90 },
+              functions: { green: 100 }, // 100% or 🔴
+              diff: { green: 100, yellow: 95 },
+            };
+            const badge = (metric, n) => {
+              if (metric === 'branches') return '⚪';
+              if (typeof n !== 'number') return '⚪';
+              const t = THRESHOLDS[metric];
+              if (n >= t.green) return '🟢';
+              if (t.yellow !== undefined && n >= t.yellow) return '🟡';
+              return '🔴';
+            };
+
+            // Build one table: the whole-project totals from gcovr, plus one
+            // final row for the coverage of just the lines this PR changed
+            // (from diff-cover). No separate diff-cover section, so its own
+            // heading/boilerplate never appears.
+            const rows = [];
+
+            try {
+              const s = JSON.parse(
+                fs.readFileSync('coverage-summary.json', 'utf8'));
+              for (const [metric, name, p, cov, tot] of [
+                ['lines', 'Lines', s.line_percent, s.line_covered, s.line_total],
+                ['branches', 'Branches',
+                  s.branch_percent, s.branch_covered, s.branch_total],
+                ['functions', 'Functions',
+                  s.function_percent, s.function_covered, s.function_total],
+              ]) {
+                if (typeof p === 'number') {
+                  rows.push([
+                    `${name} (overall)`,
+                    `${badge(metric, p)} ${pct(p)}`,
+                    `${cov} / ${tot}`,
+                  ]);
+                }
+              }
+            } catch (e) {
+              core.warning(`Could not read coverage summary: ${e}`);
+            }
+
+            try {
+              const d = JSON.parse(fs.readFileSync('diff-cover.json', 'utf8'));
+              const total = d.total_num_lines;
+              const covered = total - d.total_num_violations;
+              if (total > 0) {
+                const p = d.total_percent_covered;
+                rows.push([
+                  '**Diff (changed lines)**',
+                  `${badge('diff', p)} **${pct(p)}**`,
+                  `**${covered} / ${total}**`,
+                ]);
+              } else {
+                rows.push([
+                  '**Diff (changed lines)**', '⚪ **—**',
+                  '_no covered lines changed_',
+                ]);
+              }
+            } catch (e) {
+              core.warning(`Could not read diff-cover report: ${e}`);
+            }
+
+            // Any 🔴 badge means a metric fell below its threshold. Branches
+            // are ⚪ (reference) and never trip this.
+            const hasRed = rows.some((r) => r[1].includes('🔴'));
+
+            const table = rows.length
+              ? [
+                  '| Metric | Coverage | Covered / Total |',
+                  '| --- | ---: | ---: |',
+                  ...rows.map((r) => `| ${r[0]} | ${r[1]} | ${r[2]} |`),
+                ].join('\n')
+              : '_Coverage report unavailable._';
+
+            // Post/update the sticky comment only for same-repo PRs (fork PRs
+            // and pushes to main either can't comment or have no PR to comment
+            // on). The threshold gate below still runs on every event.
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const isSameRepoPr =
+              pr && pr.head.repo.full_name === `${owner}/${repo}`;
+
+            if (isSameRepoPr) {
+              const sha = pr.head.sha.slice(0, 7);
+              const body = [
+                marker,
+                '### 🧪 Test coverage report',
+                '',
+                table,
+                '',
+                'Whole-project coverage of `src/`, plus coverage of only the ' +
+                  'lines this PR changed (vs. the base branch).',
+                '',
+                `<sub>Generated by the \`coverage\` job · commit ${sha}</sub>`,
+              ].join('\n');
+
+              const { data: comments } = await github.rest.issues.listComments(
+                { owner, repo, issue_number: pr.number, per_page: 100 });
+              const existing = comments.find(
+                (c) => c.body && c.body.includes(marker));
+
+              if (existing) {
+                await github.rest.issues.updateComment(
+                  { owner, repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment(
+                  { owner, repo, issue_number: pr.number, body });
+              }
+            }
+
+            // Fail the coverage job when any metric is red, so the threshold is
+            // enforced in CI (not just displayed).
+            if (hasRed) {
+              core.setFailed(
+                'Coverage below threshold: one or more metrics are 🔴. ' +
+                'See the coverage table above.');
+            }

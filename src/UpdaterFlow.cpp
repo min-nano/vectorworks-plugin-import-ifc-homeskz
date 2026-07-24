@@ -29,7 +29,7 @@ namespace SamplePlugin
 					 std::string& errorOut)
 		{
 			std::string out;
-			if (!host.RunScript({ "do-install", url, name }, out))
+			if (!host.RunScript({"do-install", url, name}, out))
 			{
 				errorOut = "アップデータを起動できませんでした。";
 				return false;
@@ -40,21 +40,21 @@ namespace SamplePlugin
 			errorOut = InstallErrorText(out, "インストールに失敗しました。");
 			return false;
 		}
-	}
+	} // namespace
 
 	void RunStableStartupCheckWith(IUpdaterHost& host)
 	{
 		std::string out;
-		if (!host.RunScript({ "q-stable" }, out))
-			return;								// script missing -> stay silent
+		if (!host.RunScript({"q-stable"}, out))
+			return; // script missing -> stay silent
 
 		// Offline / incomplete / already-current all come back as
 		// offerUpdate == false (see EvaluateStable).
-		StableStatus st = EvaluateStable(out);
+		StableStatus const st = EvaluateStable(out);
 		if (!st.offerUpdate)
 			return;
 
-		std::string shownInstalled = st.installed.empty() ? "none" : st.installed;
+		std::string const shownInstalled = st.installed.empty() ? "none" : st.installed;
 		if (!host.Ask("新しい安定版ビルドがあります。今すぐインストールしますか？",
 					  "インストール済み: " + shownInstalled + "\n最新: " + st.latest,
 					  "インストール", "後で"))
@@ -68,12 +68,11 @@ namespace SamplePlugin
 			host.Inform("更新に失敗しました。", err);
 	}
 
-	void RunDevStartupCheckWith(IUpdaterHost& host,
-								const std::string& runningBranch,
+	void RunDevStartupCheckWith(IUpdaterHost& host, const std::string& runningBranch,
 								const std::string& runningCommit)
 	{
 		std::string out;
-		if (!host.RunScript({ "q-dev" }, out) || !ValueOf(out, "error").empty())
+		if (!host.RunScript({"q-dev"}, out) || !ValueOf(out, "error").empty())
 			// Offline / transient: don't block start-up — carry on with the
 			// currently loaded build.
 			return;
@@ -88,13 +87,13 @@ namespace SamplePlugin
 		for (const DevBuild& b : others)
 			items.push_back(b.name + "  (" + b.commit + ")");
 
-		int sel = host.PickBuild(items, /*initialSel*/ 0);
+		int const sel = host.PickBuild(items, /*initialSel*/ 0);
 		if (sel < 0)
-			return;								// cancelled -> keep the loaded build
+			return; // cancelled -> keep the loaded build
 
 		// Map the selection back to a candidate (entry 0 or an out-of-range value
 		// both mean "keep the installed build"). See ResolveDevSelection.
-		int idx = ResolveDevSelection(static_cast<short>(sel), others.size());
+		int const idx = ResolveDevSelection(static_cast<short>(sel), others.size());
 		if (idx < 0)
 			return;
 		const DevBuild& pick = others[static_cast<std::size_t>(idx)];
@@ -104,8 +103,9 @@ namespace SamplePlugin
 		if (Install(host, pick.url, "SamplePluginDev", err))
 			host.Inform("開発版ビルドをインストールしました。",
 						"反映するには Vectorworks を再起動してください。\n"
-						"branch: " + pick.name + "\ncommit: " + pick.commit);
+						"branch: " +
+							pick.name + "\ncommit: " + pick.commit);
 		else
 			host.Inform("インストールに失敗しました。", err);
 	}
-}
+} // namespace SamplePlugin

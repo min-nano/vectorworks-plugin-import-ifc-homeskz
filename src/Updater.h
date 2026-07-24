@@ -29,12 +29,12 @@ namespace SamplePlugin
 	// build with the latest published one; if a newer one exists, ask (native
 	// dialog) whether to install it. Silent when already current or on a network
 	// error. Runs only once per session.
-	void	RunStableStartupCheck();
+	void RunStableStartupCheck();
 
 	// Dev plug-in only. At Vectorworks start-up, ask (native dialogs) which build
 	// to use: the currently installed one, or another branch's prerelease. If a
 	// different build is chosen it is installed (restart to load it); otherwise
 	// nothing happens and start-up continues. Silent on a network error. Runs
 	// only once per session.
-	void	RunDevStartupCheck();
-}
+	void RunDevStartupCheck();
+} // namespace SamplePlugin

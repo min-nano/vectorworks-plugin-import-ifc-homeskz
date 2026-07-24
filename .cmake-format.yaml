@@ -1,0 +1,55 @@
+# cmake-format / cmake-lint configuration for the Vectorworks plug-in template.
+# https://cmake-format.readthedocs.io
+#
+# It makes `cmake-format` the single source of truth for how the CMakeLists.txt
+# files are laid out, mirroring the house style the C/C++ sources already use via
+# .clang-format:
+#   * tabs for indentation (width 4),
+#   * wrap at 100 columns,
+#   * hand-written comments are left ALONE (never reflowed).
+#
+# Format a file in place:            cmake-format -i CMakeLists.txt
+# Check without writing (CI does):   cmake-format --check CMakeLists.txt
+# Lint for bug-prone patterns:       cmake-lint CMakeLists.txt
+
+format:
+  # Wrap at 100 columns, matching ColumnLimit in .clang-format.
+  line_width: 100
+  # Tabs for indentation (width 4), matching UseTab/TabWidth in .clang-format.
+  tab_size: 4
+  use_tabchars: true
+  # Indent with tabs, but use spaces for the fractional alignment cmake-format
+  # adds after an open paren, so aligned arguments line up regardless of how wide
+  # an editor renders a tab (the same split clang-format uses for C/C++).
+  fractional_tab_policy: use-space
+  # Keep a command and its first argument together where they fit; only wrap when
+  # the line would otherwise exceed line_width.
+  dangle_parens: false
+  max_pargs_hwrap: 4
+  # A trailing comment beyond the line width is the author's to wrap, not a
+  # reason to reflow the command.
+  line_ending: unix
+
+markup:
+  # Do NOT reflow or "prettify" comments. The files carry heavy, hand-wrapped
+  # comment blocks (aligned example commands, box-drawing rules, Japanese text)
+  # that automatic markup would mangle — the same reason .clang-format sets
+  # ReflowComments: false. Comment width stays the author's responsibility.
+  enable_markup: false
+
+lint:
+  # cmake-lint bug/style checks. Disabled ones would fight the house style or
+  # flag intentional template patterns:
+  #   C0301 line-too-long   — already enforced by format.line_width above, and it
+  #                           double-counts hand-wrapped comment lines.
+  #   C0111 missing-docstring on functions — add_vw_plugin / vw_add_test are
+  #                           documented with a plain comment block above them,
+  #                           not the cmake-lint "#!" docstring convention.
+  disabled_codes:
+    - C0301
+    - C0111
+  # Local variables set inside functions may use the project's UPPER_SNAKE VW_*
+  # convention (e.g. VW_BUNDLE_NAME, fed to configure_file as @VW_BUNDLE_NAME@)
+  # as well as the CMake-idiomatic lowercase. Anything else (CamelCase, etc.)
+  # still trips C0103.
+  local_var_pattern: '[a-z][a-z0-9_]+|[A-Z][A-Z0-9_]+'

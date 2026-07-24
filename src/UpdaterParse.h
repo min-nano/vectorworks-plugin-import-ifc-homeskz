@@ -23,9 +23,7 @@
 #include <string>
 #include <vector>
 
-namespace SamplePlugin
-{
-namespace UpdaterParse
+namespace SamplePlugin::UpdaterParse
 {
 	// ---------------------------------------------------------------------
 	// Script-output parsing. The two bundled scripts (vw-update.sh /
@@ -36,9 +34,10 @@ namespace UpdaterParse
 	// Strip leading/trailing ASCII whitespace. Returns "" for an all-blank input.
 	inline std::string Trim(const std::string& s)
 	{
-		std::string::size_type b = s.find_first_not_of(" \t\r\n");
-		if (b == std::string::npos) return "";
-		std::string::size_type e = s.find_last_not_of(" \t\r\n");
+		std::string::size_type const b = s.find_first_not_of(" \t\r\n");
+		if (b == std::string::npos)
+			return "";
+		std::string::size_type const e = s.find_last_not_of(" \t\r\n");
 		return s.substr(b, e - b + 1);
 	}
 
@@ -46,15 +45,17 @@ namespace UpdaterParse
 	// or "" if absent.
 	inline std::string ValueOf(const std::string& out, const std::string& key)
 	{
-		std::string needle = key + "=";
+		std::string const needle = key + "=";
 		std::string::size_type pos = 0;
 		while (pos < out.size())
 		{
-			std::string::size_type eol = out.find('\n', pos);
-			std::string line = out.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
-			if (line.compare(0, needle.size(), needle) == 0)
+			std::string::size_type const eol = out.find('\n', pos);
+			std::string const line =
+				out.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
+			if (line.starts_with(needle))
 				return Trim(line.substr(needle.size()));
-			if (eol == std::string::npos) break;
+			if (eol == std::string::npos)
+				break;
 			pos = eol + 1;
 		}
 		return "";
@@ -62,9 +63,9 @@ namespace UpdaterParse
 
 	struct DevBuild
 	{
-		std::string	commit;
-		std::string	name;
-		std::string	url;
+		std::string commit;
+		std::string name;
+		std::string url;
 	};
 
 	// Parse the "build<TAB>commit<TAB>name<TAB>url" lines from q-dev output.
@@ -76,24 +77,27 @@ namespace UpdaterParse
 		std::string::size_type pos = 0;
 		while (pos < out.size())
 		{
-			std::string::size_type eol = out.find('\n', pos);
-			std::string line = out.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
+			std::string::size_type const eol = out.find('\n', pos);
+			std::string const line =
+				out.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
 			pos = (eol == std::string::npos) ? out.size() : eol + 1;
 
-			if (line.compare(0, 6, "build\t") != 0)
+			if (!line.starts_with("build\t"))
 				continue;
 
 			// Split the three tab-separated fields after "build".
-			std::string rest = line.substr(6);
-			std::string::size_type t1 = rest.find('\t');
-			if (t1 == std::string::npos) continue;
-			std::string::size_type t2 = rest.find('\t', t1 + 1);
-			if (t2 == std::string::npos) continue;
+			std::string const rest = line.substr(6);
+			std::string::size_type const t1 = rest.find('\t');
+			if (t1 == std::string::npos)
+				continue;
+			std::string::size_type const t2 = rest.find('\t', t1 + 1);
+			if (t2 == std::string::npos)
+				continue;
 
 			DevBuild b;
 			b.commit = Trim(rest.substr(0, t1));
-			b.name   = Trim(rest.substr(t1 + 1, t2 - (t1 + 1)));
-			b.url    = Trim(rest.substr(t2 + 1));
+			b.name = Trim(rest.substr(t1 + 1, t2 - (t1 + 1)));
+			b.url = Trim(rest.substr(t2 + 1));
 			if (!b.url.empty())
 				builds.push_back(b);
 		}
@@ -111,10 +115,12 @@ namespace UpdaterParse
 	inline std::string ShellQuote(const std::string& s)
 	{
 		std::string out = "'";
-		for (char c : s)
+		for (char const c : s)
 		{
-			if (c == '\'')	out += "'\\''";
-			else			out += c;
+			if (c == '\'')
+				out += "'\\''";
+			else
+				out += c;
 		}
 		out += "'";
 		return out;
@@ -127,8 +133,9 @@ namespace UpdaterParse
 	inline std::string CmdQuote(const std::string& s)
 	{
 		std::string out = "\"";
-		for (char c : s)
-			if (c != '"') out += c;
+		for (char const c : s)
+			if (c != '"')
+				out += c;
 		out += "\"";
 		return out;
 	}
@@ -148,12 +155,12 @@ namespace UpdaterParse
 	inline std::string MacScriptPathFromBinary(const std::string& binaryPath)
 	{
 		const std::string marker = "/Contents/MacOS/";
-		std::string::size_type at = binaryPath.rfind(marker);
+		std::string::size_type const at = binaryPath.rfind(marker);
 		if (at == std::string::npos)
 			return "";
 
 		// substr up to and including "/Contents/" (10 chars), then Resources/…
-		std::string contents = binaryPath.substr(0, at + std::string("/Contents/").size());
+		std::string const contents = binaryPath.substr(0, at + std::string("/Contents/").size());
 		return contents + "Resources/vw-update.sh";
 	}
 
@@ -165,15 +172,15 @@ namespace UpdaterParse
 	// Returns "" if the path does not have the expected shape.
 	inline std::string MacPluginsDirFromBinary(const std::string& binaryPath)
 	{
-		std::string::size_type at = binaryPath.rfind("/Contents/MacOS/");
+		std::string::size_type const at = binaryPath.rfind("/Contents/MacOS/");
 		if (at == std::string::npos)
 			return "";
 
-		std::string bundle = binaryPath.substr(0, at);		// .../<PlugIns>/<name>.vwlibrary
-		std::string::size_type slash = bundle.rfind('/');
+		std::string const bundle = binaryPath.substr(0, at); // .../<PlugIns>/<name>.vwlibrary
+		std::string::size_type const slash = bundle.rfind('/');
 		if (slash == std::string::npos)
 			return "";
-		return bundle.substr(0, slash);						// .../<PlugIns>
+		return bundle.substr(0, slash); // .../<PlugIns>
 	}
 
 	// Windows: directory that contains the given module path. On Windows the
@@ -182,7 +189,7 @@ namespace UpdaterParse
 	// install into. Accepts either separator. Returns "" if there is none.
 	inline std::string WinModuleDirFromPath(const std::string& modulePath)
 	{
-		std::string::size_type slash = modulePath.find_last_of("\\/");
+		std::string::size_type const slash = modulePath.find_last_of("\\/");
 		if (slash == std::string::npos)
 			return "";
 		return modulePath.substr(0, slash);
@@ -211,10 +218,10 @@ namespace UpdaterParse
 	// fields feed the dialog it then shows.
 	struct StableStatus
 	{
-		bool		offerUpdate = false;	// a newer build exists -> prompt to install
-		std::string	installed;				// installed commit ("" if none/unknown)
-		std::string	latest;					// latest published commit
-		std::string	url;					// asset download URL for `latest`
+		bool offerUpdate = false; // a newer build exists -> prompt to install
+		std::string installed;	  // installed commit ("" if none/unknown)
+		std::string latest;		  // latest published commit
+		std::string url;		  // asset download URL for `latest`
 	};
 
 	// Decide whether the stable channel has an update worth prompting for.
@@ -226,14 +233,14 @@ namespace UpdaterParse
 	{
 		StableStatus s;
 		if (!ValueOf(out, "error").empty())
-			return s;							// offline / transient -> stay silent
+			return s; // offline / transient -> stay silent
 		s.installed = ValueOf(out, "installed");
-		s.latest    = ValueOf(out, "latest");
-		s.url       = ValueOf(out, "url");
+		s.latest = ValueOf(out, "latest");
+		s.url = ValueOf(out, "url");
 		if (s.latest.empty() || s.url.empty())
-			return s;							// incomplete -> stay silent
+			return s; // incomplete -> stay silent
 		if (s.installed == s.latest)
-			return s;							// already current -> no dialog
+			return s; // already current -> no dialog
 		s.offerUpdate = true;
 		return s;
 	}
@@ -258,10 +265,10 @@ namespace UpdaterParse
 	inline int ResolveDevSelection(short selection, std::size_t candidateCount)
 	{
 		if (selection <= 0)
-			return -1;							// kept the installed build
-		std::size_t idx = static_cast<std::size_t>(selection) - 1;
+			return -1; // kept the installed build
+		std::size_t const idx = static_cast<std::size_t>(selection) - 1;
 		if (idx >= candidateCount)
-			return -1;							// out of range -> keep current
+			return -1; // out of range -> keep current
 		return static_cast<int>(idx);
 	}
 
@@ -276,8 +283,7 @@ namespace UpdaterParse
 	// (the fallback is passed in so the user-facing wording stays in Updater.cpp).
 	inline std::string InstallErrorText(const std::string& out, const std::string& fallback)
 	{
-		std::string e = ValueOf(out, "error");
+		std::string const e = ValueOf(out, "error");
 		return e.empty() ? fallback : e;
 	}
-}
-}
+} // namespace SamplePlugin::UpdaterParse

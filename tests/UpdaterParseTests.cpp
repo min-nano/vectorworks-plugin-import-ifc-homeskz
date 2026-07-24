@@ -47,10 +47,9 @@ TEST(trim_preserves_interior_whitespace)
 
 TEST(valueof_finds_key_and_trims_value)
 {
-	const std::string out =
-		"installed=abc123\n"
-		"latest=def456\n"
-		"url=https://example.com/x.zip\n";
+	const std::string out = "installed=abc123\n"
+							"latest=def456\n"
+							"url=https://example.com/x.zip\n";
 	CHECK_EQ(ValueOf(out, "installed"), "abc123");
 	CHECK_EQ(ValueOf(out, "latest"), "def456");
 	CHECK_EQ(ValueOf(out, "url"), "https://example.com/x.zip");
@@ -109,10 +108,9 @@ TEST(valueof_empty_input)
 
 TEST(parsedevbuilds_parses_multiple_rows)
 {
-	const std::string out =
-		"channel=dev\n"
-		"build\tc0ffee1\tfeature/one\thttps://ex.com/one.zip\n"
-		"build\tdeadbee\tfeature/two\thttps://ex.com/two.zip\n";
+	const std::string out = "channel=dev\n"
+							"build\tc0ffee1\tfeature/one\thttps://ex.com/one.zip\n"
+							"build\tdeadbee\tfeature/two\thttps://ex.com/two.zip\n";
 
 	std::vector<DevBuild> builds = ParseDevBuilds(out);
 	CHECK_EQ(builds.size(), static_cast<std::size_t>(2));
@@ -129,10 +127,9 @@ TEST(parsedevbuilds_parses_multiple_rows)
 
 TEST(parsedevbuilds_ignores_non_build_lines)
 {
-	const std::string out =
-		"error=\n"
-		"note: this is not a build line\n"
-		"build\tc1\tbranch\thttps://ex.com/a.zip\n";
+	const std::string out = "error=\n"
+							"note: this is not a build line\n"
+							"build\tc1\tbranch\thttps://ex.com/a.zip\n";
 	std::vector<DevBuild> builds = ParseDevBuilds(out);
 	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
 	if (!builds.empty())
@@ -141,10 +138,9 @@ TEST(parsedevbuilds_ignores_non_build_lines)
 
 TEST(parsedevbuilds_skips_rows_missing_fields)
 {
-	const std::string out =
-		"build\tonlyonefield\n"                       // no tabs after -> skip
-		"build\tc1\tbranch-no-url\n"                   // only two fields -> skip
-		"build\tc2\tbranch\thttps://ex.com/ok.zip\n";  // complete -> keep
+	const std::string out = "build\tonlyonefield\n"						  // no tabs after -> skip
+							"build\tc1\tbranch-no-url\n"				  // only two fields -> skip
+							"build\tc2\tbranch\thttps://ex.com/ok.zip\n"; // complete -> keep
 	std::vector<DevBuild> builds = ParseDevBuilds(out);
 	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
 	if (!builds.empty())
@@ -187,8 +183,7 @@ TEST(parsedevbuilds_handles_last_row_without_newline)
 TEST(parsedevbuilds_empty_and_no_matches)
 {
 	CHECK_EQ(ParseDevBuilds("").size(), static_cast<std::size_t>(0));
-	CHECK_EQ(ParseDevBuilds("nothing here\nat all\n").size(),
-			 static_cast<std::size_t>(0));
+	CHECK_EQ(ParseDevBuilds("nothing here\nat all\n").size(), static_cast<std::size_t>(0));
 }
 
 // ---------------------------------------------------------------------------
@@ -246,17 +241,17 @@ TEST(mac_script_path_from_binary_typical)
 {
 	const std::string bin =
 		"/Users/me/Vectorworks/Plug-Ins/SamplePlugin.vwlibrary/Contents/MacOS/SamplePlugin";
-	CHECK_EQ(MacScriptPathFromBinary(bin),
+	CHECK_EQ(
+		MacScriptPathFromBinary(bin),
 		"/Users/me/Vectorworks/Plug-Ins/SamplePlugin.vwlibrary/Contents/Resources/vw-update.sh");
 }
 
 TEST(mac_script_path_from_binary_uses_last_marker)
 {
 	// A stray "/Contents/MacOS/" earlier in the path must not fool rfind.
-	const std::string bin =
-		"/Contents/MacOS/weird/Plug-Ins/X.vwlibrary/Contents/MacOS/X";
+	const std::string bin = "/Contents/MacOS/weird/Plug-Ins/X.vwlibrary/Contents/MacOS/X";
 	CHECK_EQ(MacScriptPathFromBinary(bin),
-		"/Contents/MacOS/weird/Plug-Ins/X.vwlibrary/Contents/Resources/vw-update.sh");
+			 "/Contents/MacOS/weird/Plug-Ins/X.vwlibrary/Contents/Resources/vw-update.sh");
 }
 
 TEST(mac_script_path_from_binary_no_marker_is_empty)
@@ -309,8 +304,7 @@ TEST(win_module_dir_from_path_backslashes)
 
 TEST(win_module_dir_from_path_forward_slashes)
 {
-	CHECK_EQ(WinModuleDirFromPath("C:/Users/me/Plug-Ins/SamplePlugin.vlb"),
-			 "C:/Users/me/Plug-Ins");
+	CHECK_EQ(WinModuleDirFromPath("C:/Users/me/Plug-Ins/SamplePlugin.vlb"), "C:/Users/me/Plug-Ins");
 }
 
 TEST(win_module_dir_from_path_no_separator_is_empty)
@@ -340,10 +334,9 @@ TEST(win_script_path_from_dir_empty_is_empty)
 
 TEST(evaluate_stable_offers_when_newer)
 {
-	const std::string out =
-		"installed=abc1234\n"
-		"latest=def5678\n"
-		"url=https://ex.com/SamplePlugin.vwlibrary.zip\n";
+	const std::string out = "installed=abc1234\n"
+							"latest=def5678\n"
+							"url=https://ex.com/SamplePlugin.vwlibrary.zip\n";
 	StableStatus s = EvaluateStable(out);
 	CHECK(s.offerUpdate);
 	CHECK_EQ(s.installed, "abc1234");
@@ -353,10 +346,9 @@ TEST(evaluate_stable_offers_when_newer)
 
 TEST(evaluate_stable_silent_when_already_current)
 {
-	const std::string out =
-		"installed=def5678\n"
-		"latest=def5678\n"
-		"url=https://ex.com/x.zip\n";
+	const std::string out = "installed=def5678\n"
+							"latest=def5678\n"
+							"url=https://ex.com/x.zip\n";
 	StableStatus s = EvaluateStable(out);
 	CHECK(!s.offerUpdate);
 	// Fields are still populated even though no update is offered.
@@ -367,8 +359,7 @@ TEST(evaluate_stable_silent_on_error_line)
 {
 	// An error= line means offline/transient: never offer, regardless of the
 	// other fields (which the script would not have printed anyway).
-	const std::string out =
-		"error=stable リリースを取得できませんでした。\n";
+	const std::string out = "error=stable リリースを取得できませんでした。\n";
 	StableStatus s = EvaluateStable(out);
 	CHECK(!s.offerUpdate);
 	CHECK_EQ(s.latest, "");
@@ -388,10 +379,9 @@ TEST(evaluate_stable_silent_when_incomplete)
 TEST(evaluate_stable_offers_with_no_installed_build)
 {
 	// First-ever install: nothing installed yet, but a build is published.
-	const std::string out =
-		"installed=none\n"
-		"latest=def5678\n"
-		"url=https://ex.com/x.zip\n";
+	const std::string out = "installed=none\n"
+							"latest=def5678\n"
+							"url=https://ex.com/x.zip\n";
 	StableStatus s = EvaluateStable(out);
 	CHECK(s.offerUpdate);
 	CHECK_EQ(s.installed, "none");
@@ -403,11 +393,10 @@ TEST(evaluate_stable_offers_with_no_installed_build)
 
 TEST(dev_switch_candidates_excludes_running_commit)
 {
-	const std::string out =
-		"installed=c0ffee1\n"
-		"build\tc0ffee1\tmain\thttps://ex.com/a.zip\n"     // running -> dropped
-		"build\tdeadbee\tfeature/x\thttps://ex.com/b.zip\n"
-		"build\tfeed123\tfeature/y\thttps://ex.com/c.zip\n";
+	const std::string out = "installed=c0ffee1\n"
+							"build\tc0ffee1\tmain\thttps://ex.com/a.zip\n" // running -> dropped
+							"build\tdeadbee\tfeature/x\thttps://ex.com/b.zip\n"
+							"build\tfeed123\tfeature/y\thttps://ex.com/c.zip\n";
 	std::vector<DevBuild> others = DevSwitchCandidates(out, "c0ffee1");
 	CHECK_EQ(others.size(), static_cast<std::size_t>(2));
 	if (others.size() == 2)
@@ -420,9 +409,8 @@ TEST(dev_switch_candidates_excludes_running_commit)
 
 TEST(dev_switch_candidates_keeps_all_when_running_absent)
 {
-	const std::string out =
-		"build\tc1\tbranch-a\thttps://ex.com/a.zip\n"
-		"build\tc2\tbranch-b\thttps://ex.com/b.zip\n";
+	const std::string out = "build\tc1\tbranch-a\thttps://ex.com/a.zip\n"
+							"build\tc2\tbranch-b\thttps://ex.com/b.zip\n";
 	// Running commit not among the builds (e.g. a local build) -> keep both.
 	std::vector<DevBuild> others = DevSwitchCandidates(out, "local");
 	CHECK_EQ(others.size(), static_cast<std::size_t>(2));
@@ -430,8 +418,7 @@ TEST(dev_switch_candidates_keeps_all_when_running_absent)
 
 TEST(dev_switch_candidates_empty_when_no_builds)
 {
-	CHECK_EQ(DevSwitchCandidates("installed=none\n", "local").size(),
-			 static_cast<std::size_t>(0));
+	CHECK_EQ(DevSwitchCandidates("installed=none\n", "local").size(), static_cast<std::size_t>(0));
 }
 
 // ---------------------------------------------------------------------------
@@ -472,14 +459,14 @@ TEST(resolve_dev_selection_out_of_range_keeps_current)
 TEST(install_reported_ok_true_for_ok)
 {
 	CHECK(InstallReportedOk("ok"));
-	CHECK(InstallReportedOk("  ok \n"));	// Trim tolerates surrounding whitespace
+	CHECK(InstallReportedOk("  ok \n")); // Trim tolerates surrounding whitespace
 }
 
 TEST(install_reported_ok_false_otherwise)
 {
 	CHECK(!InstallReportedOk(""));
 	CHECK(!InstallReportedOk("error=ダウンロードに失敗しました。\n"));
-	CHECK(!InstallReportedOk("okay"));		// must be exactly "ok"
+	CHECK(!InstallReportedOk("okay")); // must be exactly "ok"
 }
 
 TEST(install_error_text_uses_script_error)

@@ -17,24 +17,24 @@
 #pragma once
 
 #ifdef VW_DEV_BUILD
-	// Dev plug-in identity.
-	#define PLUGIN_VWR_ID			"SamplePluginDev"
-	#define PLUGIN_UNIVERSAL_NAME	"CExtMenuSample_SamplePluginDev"
-	#define PLUGIN_DISPLAY_NAME		"SamplePlugin (Dev)"
+// Dev plug-in identity.
+#	define PLUGIN_VWR_ID "SamplePluginDev"
+#	define PLUGIN_UNIVERSAL_NAME "CExtMenuSample_SamplePluginDev"
+#	define PLUGIN_DISPLAY_NAME "SamplePlugin (Dev)"
 #else
-	// Stable plug-in identity.
-	#define PLUGIN_VWR_ID			"SamplePlugin"
-	#define PLUGIN_UNIVERSAL_NAME	"CExtMenuSample_SamplePlugin"
-	#define PLUGIN_DISPLAY_NAME		"SamplePlugin"
+// Stable plug-in identity.
+#	define PLUGIN_VWR_ID "SamplePlugin"
+#	define PLUGIN_UNIVERSAL_NAME "CExtMenuSample_SamplePlugin"
+#	define PLUGIN_DISPLAY_NAME "SamplePlugin"
 #endif
 
 // Build channel, as a human-readable string ("stable" / "dev").
 #ifndef VW_BUILD_CHANNEL
-	#ifdef VW_DEV_BUILD
-		#define VW_BUILD_CHANNEL	"dev"
-	#else
-		#define VW_BUILD_CHANNEL	"stable"
-	#endif
+#	ifdef VW_DEV_BUILD
+#		define VW_BUILD_CHANNEL "dev"
+#	else
+#		define VW_BUILD_CHANNEL "stable"
+#	endif
 #endif
 
 // Short identifier of the exact build (git commit, or "local" for a local
@@ -42,7 +42,7 @@
 // the bundle's Info.plist and shown in the menu command's alert so you can tell
 // which build is actually loaded.
 #ifndef VW_BUILD_VERSION
-	#define VW_BUILD_VERSION		"local"
+#	define VW_BUILD_VERSION "local"
 #endif
 
 // Git branch the build came from ("main" for stable, the feature/PR branch for
@@ -50,5 +50,5 @@
 // -DVW_BUILD_BRANCH=...; like the commit it is stamped into the Info.plist and
 // shown in the menu command's alert so a dev build can be traced to its branch.
 #ifndef VW_BUILD_BRANCH
-	#define VW_BUILD_BRANCH			"local"
+#	define VW_BUILD_BRANCH "local"
 #endif

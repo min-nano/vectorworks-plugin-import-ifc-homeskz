@@ -57,7 +57,6 @@ namespace SamplePlugin
 	// tests can drive them repeatedly. runningBranch/runningCommit identify the
 	// build currently loaded (compiled-in at run time; injected in tests).
 	void RunStableStartupCheckWith(IUpdaterHost& host);
-	void RunDevStartupCheckWith(IUpdaterHost& host,
-								const std::string& runningBranch,
+	void RunDevStartupCheckWith(IUpdaterHost& host, const std::string& runningBranch,
 								const std::string& runningCommit);
-}
+} // namespace SamplePlugin

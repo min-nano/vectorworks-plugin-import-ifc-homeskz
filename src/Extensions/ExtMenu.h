@@ -18,10 +18,10 @@ namespace SamplePlugin
 	class CSampleMenu_EventSink : public VWMenu_EventSink
 	{
 	public:
-						CSampleMenu_EventSink(IVWUnknown* parent);
-		virtual			~CSampleMenu_EventSink();
+		CSampleMenu_EventSink(IVWUnknown* parent);
+		~CSampleMenu_EventSink() override;
 
-		virtual void	DoInterface() override;
+		void DoInterface() override;
 	};
 
 	// ------------------------------------------------------------------------
@@ -29,8 +29,9 @@ namespace SamplePlugin
 	class CExtMenuSample : public VWExtensionMenu
 	{
 		DEFINE_VWMenuExtension;
+
 	public:
-						CExtMenuSample(CallBackPtr cbp);
-		virtual			~CExtMenuSample();
+		CExtMenuSample(CallBackPtr cbp);
+		~CExtMenuSample() override;
 	};
-}
+} // namespace SamplePlugin
