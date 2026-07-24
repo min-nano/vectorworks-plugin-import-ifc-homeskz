@@ -50,9 +50,10 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 **共存できる 2 つのプラグイン**をビルドします。
 
 - **`HomeskzIfcImport`** — *stable* プラグイン。`main` からビルドされます。
-  メニューカテゴリは **ホームズ君IFC**。
+  メニューカテゴリは **ファイル**、コマンド名は **ホームズ君IFCをインポート…**。
 - **`HomeskzIfcImportDev`** — *dev* プラグイン。フィーチャー／PR ブランチから
-  ビルドされます。メニューカテゴリは **ホームズ君IFC (Dev)**。
+  ビルドされます。メニューカテゴリは **ファイル**、コマンド名は
+  **ホームズ君IFCをインポート… (Dev)**。
 
 プラグインの入れ物はプラットフォームで異なります。
 
@@ -85,7 +86,7 @@ Windows は `.vlb` の隣の `<name>.commit` ファイル）。アップデー�
 | --- | --- | --- |
 | バンドル／出力名 | `HomeskzIfcImport` / `HomeskzIfcImportDev` | `CMakeLists.txt`、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`scripts/vw-update.ps1`、`.github/workflows/build.yml` |
 | バンドル ID（macOS） | `io.github.min-nano.HomeskzIfcImport(Dev)` | `CMakeLists.txt` |
-| メニューカテゴリ | `ホームズ君IFC` / `ホームズ君IFC (Dev)` | `resources/*/Strings/*.vwstrings` |
+| メニューカテゴリ | `ファイル`（コマンド名 `ホームズ君IFCをインポート…`） | `resources/*/Strings/*.vwstrings` |
 | C++ 名前空間・クラス | `HomeskzIfcImport` / `CExtMenuImportIfc` / `CImportIfcMenu_EventSink` | `src/Extensions/ExtMenu.{h,cpp}`、`src/ModuleMain.cpp` |
 | VCOM ユニバーサル名 | `CExtMenuImportIfc_HomeskzIfcImport(Dev)` | `src/BuildConfig.h` |
 | 拡張機能 UUID | stable / dev 各 1 個 | `src/Extensions/ExtMenu.cpp`（一意である必要があるため `uuidgen` で再生成） |
@@ -200,8 +201,9 @@ Vectorworks 開発者クレデンシャルなし）で配布されます。
    プラグインでは想定どおりの挙動で、社内利用では問題ありません。
 
 4. **コマンドをワークスペースに追加します:** ツール ▸ ワークスペース ▸ 現在の
-   ワークスペースを編集 ▸ *メニュー*。**ホームズ君IFC** カテゴリの中に **起動確認** コマンド
-   があるので、メニューにドラッグしてください。実行するとアラートが表示されます。
+   ワークスペースを編集 ▸ *メニュー*。**ファイル** カテゴリの中に
+   **ホームズ君IFCをインポート…** コマンドがあるので、メニューにドラッグしてください。
+   実行するとアラートが表示されます（実際のインポートは今後のマイルストーンで実装）。
 
 ### Windows
 
