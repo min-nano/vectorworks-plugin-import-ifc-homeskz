@@ -173,7 +173,7 @@ jobs:
             src/UpdaterFlow.cpp
 
       - name: Build
-        # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) bundles.
+        # Builds both the stable (HomeskzIfcImport) and dev (HomeskzIfcImportDev) bundles.
         run: cmake --build build --config Release -v
 
       # Apple Silicon requires every Mach-O to carry a code signature. We use a
@@ -185,7 +185,7 @@ jobs:
       - name: Ad-hoc code-sign the bundles
         run: |
           set -euo pipefail
-          for name in SamplePlugin SamplePluginDev; do
+          for name in HomeskzIfcImport HomeskzIfcImportDev; do
             bundle="build/$name.vwlibrary"
             codesign --force --deep --sign - "$bundle"
             echo "Verifying signature for $name:"
@@ -195,7 +195,7 @@ jobs:
       - name: Inspect built plug-ins
         run: |
           set -euo pipefail
-          for name in SamplePlugin SamplePluginDev; do
+          for name in HomeskzIfcImport HomeskzIfcImportDev; do
             bundle="build/$name.vwlibrary"
             test -d "$bundle" || { echo "::error::$bundle was not produced"; exit 1; }
             echo "== $name =="
@@ -217,7 +217,7 @@ jobs:
           set -euo pipefail
           rm -rf dist stage
           mkdir -p dist
-          for name in SamplePlugin SamplePluginDev; do
+          for name in HomeskzIfcImport HomeskzIfcImportDev; do
             rm -rf "stage/$name"
             mkdir -p "stage/$name"
             cp -R "build/$name.vwlibrary" "stage/$name/"
@@ -418,7 +418,7 @@ jobs:
             src/UpdaterFlow.cpp
 
       - name: Build
-        # Builds both the stable (SamplePlugin) and dev (SamplePluginDev) modules.
+        # Builds both the stable (HomeskzIfcImport) and dev (HomeskzIfcImportDev) modules.
         shell: bash
         run: cmake --build build --config Release -v
 
@@ -427,7 +427,7 @@ jobs:
         run: |
           set -euo pipefail
           d="build/Release"
-          for name in SamplePlugin SamplePluginDev; do
+          for name in HomeskzIfcImport HomeskzIfcImportDev; do
             echo "== $name =="
             test -f "$d/$name.vlb" || { echo "::error::$name.vlb was not produced"; exit 1; }
             test -f "$d/$name.vwr" || { echo "::error::$name.vwr was not packaged"; exit 1; }
@@ -443,7 +443,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
-          foreach ($name in 'SamplePlugin','SamplePluginDev') {
+          foreach ($name in 'HomeskzIfcImport','HomeskzIfcImportDev') {
             $files = @(
               "build/Release/$name.vlb",
               "build/Release/$name.vwr",
@@ -466,8 +466,8 @@ jobs:
   # macOS (.vwlibrary.zip) and Windows (.vlb.zip) assets together. Splitting this
   # out of the build jobs means neither platform publishes on its own, so there
   # is no create/attach race between them:
-  #   main  -> refresh the rolling "stable" release with the SamplePlugin bundle.
-  #   other -> refresh a per-branch "dev-<branch>" prerelease with SamplePluginDev.
+  #   main  -> refresh the rolling "stable" release with the HomeskzIfcImport bundle.
+  #   other -> refresh a per-branch "dev-<branch>" prerelease with HomeskzIfcImportDev.
   # Rolling tags are deleted and recreated so they always point at this build.
   release:
     needs: [build-mac, build-windows]
@@ -544,8 +544,8 @@ jobs:
           publish() {
             gh release delete stable --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
             gh release create stable \
-              "dist/SamplePlugin.vwlibrary.zip" \
-              "dist/SamplePlugin.vlb.zip" \
+              "dist/HomeskzIfcImport.vwlibrary.zip" \
+              "dist/HomeskzIfcImport.vlb.zip" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$BUILD_SHA" \
               --title "Stable (${short})" \
@@ -604,8 +604,8 @@ jobs:
           # retry and has a scheduled health check.)
           gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
           gh release create "$tag" \
-            "dist/SamplePluginDev.vwlibrary.zip" \
-            "dist/SamplePluginDev.vlb.zip" \
+            "dist/HomeskzIfcImportDev.vwlibrary.zip" \
+            "dist/HomeskzIfcImportDev.vlb.zip" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$BUILD_SHA" \
             --title "Dev: ${branch} (${short})" \

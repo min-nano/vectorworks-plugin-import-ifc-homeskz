@@ -36,7 +36,7 @@
 #include <string>
 #include <vector>
 
-using namespace SamplePlugin::UpdaterParse;
+using namespace HomeskzIfcImport::UpdaterParse;
 
 namespace
 {

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# vw-update.sh — download the latest CI build of the SamplePlugin Vectorworks plug-in
+# vw-update.sh — download the latest CI build of the HomeskzIfcImport Vectorworks plug-in
 # and install it into your Vectorworks 2026 Plug-Ins folder.
 #
 # Two channels, two separately-named plug-ins that can be installed at once:
 #
-#   stable  -> "SamplePlugin.vwlibrary"     from the rolling "stable" release (main).
-#   dev     -> "SamplePluginDev.vwlibrary"  from a per-branch "dev-<branch>" prerelease;
+#   stable  -> "HomeskzIfcImport.vwlibrary"     from the rolling "stable" release (main).
+#   dev     -> "HomeskzIfcImportDev.vwlibrary"  from a per-branch "dev-<branch>" prerelease;
 #              you pick which branch's build to install.
 #
 # Flow: check the latest build, tell you whether a newer one is available, then
@@ -49,7 +49,7 @@
 #
 set -euo pipefail
 
-VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-native-template}"
+VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-import-ifc-homeskz}"
 VW_PLUGINS_DIR="${VW_PLUGINS_DIR:-$HOME/Library/Application Support/Vectorworks/2026/Plug-Ins}"
 VW_API="https://api.github.com/repos/${VW_REPO}"
 
@@ -75,7 +75,7 @@ APPLESCRIPT
 
 die() { # message
 	echo "error: $1" >&2
-	alert "SamplePlugin アップデート" "エラー: $1"
+	alert "HomeskzIfcImport アップデート" "エラー: $1"
 	exit 1
 }
 
@@ -190,7 +190,7 @@ apply_choice() { # choice, zip, name
 	case "$choice" in
 		"更新だけ")
 			install_zip "$zip" "$name"
-			notify "SamplePlugin アップデート" "更新しました。反映するには Vectorworks を再起動してください。"
+			notify "HomeskzIfcImport アップデート" "更新しました。反映するには Vectorworks を再起動してください。"
 			;;
 		*)
 			echo "skipped."
@@ -205,20 +205,20 @@ update_stable() {
 	local f; f="$(api_get "releases/tags/stable")" \
 		|| die "安定版リリース (stable) が見つかりません。main のビルドが完了しているか確認してください。"
 	local latest_full; latest_full="$(jval "$f" target_commitish)"
-	local url; url="$(asset_url "$f" "assets" "SamplePlugin.vwlibrary.zip" || true)"
+	local url; url="$(asset_url "$f" "assets" "HomeskzIfcImport.vwlibrary.zip" || true)"
 	rm -f "$f"
 	[ -n "$latest_full" ] || die "安定版リリースの情報を取得できませんでした。"
-	[ -n "$url" ] || die "安定版のアセット (SamplePlugin.vwlibrary.zip) が見つかりません。"
+	[ -n "$url" ] || die "安定版のアセット (HomeskzIfcImport.vwlibrary.zip) が見つかりません。"
 
 	local latest="${latest_full:0:7}"
-	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/SamplePlugin.vwlibrary")"
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HomeskzIfcImport.vwlibrary")"
 
 	if [ "$installed" = "$latest" ]; then
-		alert "SamplePlugin (stable)" "既に最新です（build ${installed}）。"
+		alert "HomeskzIfcImport (stable)" "既に最新です（build ${installed}）。"
 		return
 	fi
 
-	local choice; choice="$(ask2 "SamplePlugin (stable)" "新しい安定版ビルドがあります。
+	local choice; choice="$(ask2 "HomeskzIfcImport (stable)" "新しい安定版ビルドがあります。
 インストール済み: ${installed}
 最新: ${latest}
 
@@ -226,8 +226,8 @@ update_stable() {
 	[ "$choice" != "更新しない" ] || { echo "skipped."; return; }
 
 	local tmp; tmp="$(mktemp -d)"
-	download "$url" "$tmp/SamplePlugin.vwlibrary.zip" || die "安定版アセットのダウンロードに失敗しました。"
-	apply_choice "$choice" "$tmp/SamplePlugin.vwlibrary.zip" "SamplePlugin"
+	download "$url" "$tmp/HomeskzIfcImport.vwlibrary.zip" || die "安定版アセットのダウンロードに失敗しました。"
+	apply_choice "$choice" "$tmp/HomeskzIfcImport.vwlibrary.zip" "HomeskzIfcImport"
 	rm -rf "$tmp"
 }
 
@@ -245,7 +245,7 @@ update_dev() {
 			dev-*)
 				name="$(jval "$f" "${i}.name")"
 				commit="$(jval "$f" "${i}.target_commitish")"
-				url="$(asset_url "$f" "${i}.assets" "SamplePluginDev.vwlibrary.zip" || true)"
+				url="$(asset_url "$f" "${i}.assets" "HomeskzIfcImportDev.vwlibrary.zip" || true)"
 				[ -n "$name" ] || name="$tag"
 				names+=("$name"); tags+=("$tag"); commits+=("$commit"); urls+=("$url")
 				;;
@@ -267,14 +267,14 @@ update_dev() {
 	[ "$idx" -ge 0 ] || die "選択したビルドを特定できませんでした。"
 
 	local url2="${urls[$idx]}" latest="${commits[$idx]:0:7}"
-	[ -n "$url2" ] || die "選択したビルドのアセット (SamplePluginDev.vwlibrary.zip) が見つかりません。"
-	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/SamplePluginDev.vwlibrary")"
+	[ -n "$url2" ] || die "選択したビルドのアセット (HomeskzIfcImportDev.vwlibrary.zip) が見つかりません。"
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HomeskzIfcImportDev.vwlibrary")"
 
 	local same_note=""
 	[ "$installed" = "$latest" ] && same_note="（このビルドは既にインストール済みです）
 "
 
-	local choice; choice="$(ask2 "SamplePlugin (dev)" "${chosen_name}
+	local choice; choice="$(ask2 "HomeskzIfcImport (dev)" "${chosen_name}
 ${same_note}インストール済み: ${installed}
 選択したビルド: ${latest}
 
@@ -282,8 +282,8 @@ ${same_note}インストール済み: ${installed}
 	[ "$choice" != "更新しない" ] || { echo "skipped."; return; }
 
 	local tmp; tmp="$(mktemp -d)"
-	download "$url2" "$tmp/SamplePluginDev.vwlibrary.zip" || die "開発版アセットのダウンロードに失敗しました。"
-	apply_choice "$choice" "$tmp/SamplePluginDev.vwlibrary.zip" "SamplePluginDev"
+	download "$url2" "$tmp/HomeskzIfcImportDev.vwlibrary.zip" || die "開発版アセットのダウンロードに失敗しました。"
+	apply_choice "$choice" "$tmp/HomeskzIfcImportDev.vwlibrary.zip" "HomeskzIfcImportDev"
 	rm -rf "$tmp"
 }
 
@@ -303,12 +303,12 @@ q_stable() {
 	local f; f="$(api_get "releases/tags/stable")" \
 		|| { echo "error=stable リリースを取得できませんでした。"; return 0; }
 	local latest_full; latest_full="$(jval "$f" target_commitish)"
-	local url; url="$(asset_url "$f" "assets" "SamplePlugin.vwlibrary.zip" || true)"
+	local url; url="$(asset_url "$f" "assets" "HomeskzIfcImport.vwlibrary.zip" || true)"
 	rm -f "$f"
 	if [ -z "$latest_full" ] || [ -z "$url" ]; then
 		echo "error=stable リリースの情報が不完全です。"; return 0
 	fi
-	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/SamplePlugin.vwlibrary")"
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HomeskzIfcImport.vwlibrary")"
 	echo "installed=${installed}"
 	echo "latest=${latest_full:0:7}"
 	echo "url=${url}"
@@ -320,7 +320,7 @@ q_stable() {
 q_dev() {
 	local f; f="$(api_get "releases?per_page=100")" \
 		|| { echo "error=リリース一覧を取得できませんでした。"; return 0; }
-	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/SamplePluginDev.vwlibrary")"
+	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HomeskzIfcImportDev.vwlibrary")"
 	echo "installed=${installed}"
 
 	local i=0 tag name commit url
@@ -331,7 +331,7 @@ q_dev() {
 			dev-*)
 				name="$(jval "$f" "${i}.name")"
 				commit="$(jval "$f" "${i}.target_commitish")"
-				url="$(asset_url "$f" "${i}.assets" "SamplePluginDev.vwlibrary.zip" || true)"
+				url="$(asset_url "$f" "${i}.assets" "HomeskzIfcImportDev.vwlibrary.zip" || true)"
 				[ -n "$name" ] || name="$tag"
 				# Only list builds that actually have a downloadable asset.
 				[ -n "$url" ] && printf 'build\t%s\t%s\t%s\n' "${commit:0:7}" "$name" "$url"

@@ -151,8 +151,8 @@ $script:FakeStableJson = @'
 {
   "target_commitish": "abc1234def5678",
   "assets": [
-    { "name": "SamplePlugin.vlb.zip",
-      "browser_download_url": "https://example.test/dl/SamplePlugin.vlb.zip" },
+    { "name": "HomeskzIfcImport.vlb.zip",
+      "browser_download_url": "https://example.test/dl/HomeskzIfcImport.vlb.zip" },
     { "name": "notes.txt",
       "browser_download_url": "https://example.test/dl/notes.txt" }
   ]
@@ -162,13 +162,13 @@ $script:FakeStableJson = @'
 $script:FakeReleasesJson = @'
 [
   { "tag_name": "stable", "name": "stable", "target_commitish": "zzz9999",
-    "assets": [ { "name": "SamplePlugin.vlb.zip",
+    "assets": [ { "name": "HomeskzIfcImport.vlb.zip",
                   "browser_download_url": "https://example.test/dl/stable.zip" } ] },
   { "tag_name": "dev-feature-x", "name": "feature/x", "target_commitish": "aaa1111ccc",
-    "assets": [ { "name": "SamplePluginDev.vlb.zip",
+    "assets": [ { "name": "HomeskzIfcImportDev.vlb.zip",
                   "browser_download_url": "https://example.test/dl/x.zip" } ] },
   { "tag_name": "dev-feature-y", "name": "feature/y", "target_commitish": "bbb2222ddd",
-    "assets": [ { "name": "SamplePluginDev.vlb.zip",
+    "assets": [ { "name": "HomeskzIfcImportDev.vlb.zip",
                   "browser_download_url": "https://example.test/dl/y.zip" } ] },
   { "tag_name": "dev-nobuild", "name": "feature/z", "target_commitish": "ccc3333eee",
     "assets": [ { "name": "unrelated.zip",
@@ -188,7 +188,7 @@ function New-BuildZip([string] $zipPath, [string] $vlbName) {
 }
 $GoodZip = Join-Path $Work 'good.zip'
 $BadZip  = Join-Path $Work 'bad.zip'
-New-BuildZip $GoodZip 'SamplePluginDev'
+New-BuildZip $GoodZip 'HomeskzIfcImportDev'
 New-BuildZip $BadZip  'WrongName'
 
 # ===========================================================================
@@ -196,7 +196,7 @@ New-BuildZip $BadZip  'WrongName'
 # ===========================================================================
 T 'Get-AssetUrl finds the matching asset'
 $rel = $script:FakeStableJson | ConvertFrom-Json
-CheckEq (Get-AssetUrl $rel 'SamplePlugin.vlb.zip') 'https://example.test/dl/SamplePlugin.vlb.zip' 'returns the URL'
+CheckEq (Get-AssetUrl $rel 'HomeskzIfcImport.vlb.zip') 'https://example.test/dl/HomeskzIfcImport.vlb.zip' 'returns the URL'
 
 T 'Get-AssetUrl returns null for an unknown asset'
 CheckEq (Get-AssetUrl $rel 'does-not-exist.zip') $null 'null when no asset matches'
@@ -209,11 +209,11 @@ CheckEq (Get-Short '') '' 'empty stays empty'
 # Get-InstalledCommit — reads the real "<name>.commit" sidecar (no OS tool).
 # ===========================================================================
 T 'Get-InstalledCommit reads the sidecar commit'
-Set-Content -LiteralPath (Join-Path $VW_PLUGINS_DIR 'SamplePlugin.commit') -Value "abc1234`n"
-CheckEq (Get-InstalledCommit 'SamplePlugin') 'abc1234' 'trimmed sidecar value'
+Set-Content -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImport.commit') -Value "abc1234`n"
+CheckEq (Get-InstalledCommit 'HomeskzIfcImport') 'abc1234' 'trimmed sidecar value'
 
 T 'Get-InstalledCommit is none when the sidecar is absent'
-CheckEq (Get-InstalledCommit 'SamplePluginDev') 'none' 'absent sidecar -> none'
+CheckEq (Get-InstalledCommit 'HomeskzIfcImportDev') 'none' 'absent sidecar -> none'
 
 # ===========================================================================
 # q-stable — installed / latest / url, and the offline / incomplete paths.
@@ -223,7 +223,7 @@ $script:FakeApiFail = $false
 $out = AsText (Invoke-QStable)
 CheckContains $out 'installed=abc1234' 'installed line (from sidecar)'
 CheckContains $out 'latest=abc1234' 'latest is the 7-char commit prefix'
-CheckContains $out 'url=https://example.test/dl/SamplePlugin.vlb.zip' 'url line'
+CheckContains $out 'url=https://example.test/dl/HomeskzIfcImport.vlb.zip' 'url line'
 
 T 'Invoke-QStable emits an error line when the API is unreachable'
 $script:FakeApiFail = $true
@@ -257,20 +257,20 @@ $script:FakeApiFail = $false
 T 'Invoke-DoInstall installs the .vlb and prints ok'
 $script:FakeDownloadFail = $false
 $script:FakeDownloadZip = $GoodZip
-$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'SamplePluginDev')
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
 CheckEq $out 'ok' 'prints ok'
-CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'SamplePluginDev.vlb')) $true 'the .vlb landed'
-CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'SamplePluginDev.commit')) $true 'the .commit sidecar landed'
+CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.vlb')) $true 'the .vlb landed'
+CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.commit')) $true 'the .commit sidecar landed'
 
 T 'Invoke-DoInstall reports a download failure'
 $script:FakeDownloadFail = $true
-$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'SamplePluginDev')
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
 CheckContains $out 'error=' 'download failure -> error= line'
 $script:FakeDownloadFail = $false
 
 T 'Invoke-DoInstall reports a zip missing the expected .vlb'
 $script:FakeDownloadZip = $BadZip
-$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'SamplePluginDev')
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
 CheckContains $out 'error=' 'wrong .vlb name -> error= line'
 
 T 'Invoke-DoInstall rejects missing arguments'

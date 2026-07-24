@@ -1,16 +1,16 @@
 //
 //	ExtMenu.cpp
 //
-//	Implementation of the sample menu command.
+//	Implementation of the plug-in's menu command.
 //
 
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtMenu.h"
 
-using namespace SamplePlugin;
+using namespace HomeskzIfcImport;
 
-namespace SamplePlugin
+namespace HomeskzIfcImport
 {
 	namespace
 	{
@@ -32,7 +32,7 @@ namespace SamplePlugin
 			/*VersionRetired*/ 0,
 			/*OverrideHelpID*/ ""};
 	} // namespace
-} // namespace SamplePlugin
+} // namespace HomeskzIfcImport
 
 // Every extension needs a globally unique ID and universal name. The stable and
 // dev builds MUST use different ones so both plug-ins can be loaded at once.
@@ -42,35 +42,35 @@ namespace SamplePlugin
 // macro's code, not ours, so silence the check across the two invocations.
 // NOLINTBEGIN(misc-const-correctness)
 #ifdef VW_DEV_BUILD
-// UUID: cc72fd30-f2f6-4c39-8e7b-d81d5421898a  (dev build)
+// UUID: 2368a4b2-0497-4bcc-89f6-fc436736de2b  (dev build)
 IMPLEMENT_VWMenuExtension(
-	/*Extension class*/ CExtMenuSample,
-	/*Event sink*/ CSampleMenu_EventSink,
+	/*Extension class*/ CExtMenuImportIfc,
+	/*Event sink*/ CImportIfcMenu_EventSink,
 	/*Universal name*/ PLUGIN_UNIVERSAL_NAME,
 	/*Version*/ 1,
-	/*UUID*/ 0xcc72fd30, 0xf2f6, 0x4c39, 0x8e, 0x7b, 0xd8, 0x1d, 0x54, 0x21, 0x89, 0x8a);
+	/*UUID*/ 0x2368a4b2, 0x0497, 0x4bcc, 0x89, 0xf6, 0xfc, 0x43, 0x67, 0x36, 0xde, 0x2b);
 #else
-// UUID: 4be7d497-0a1b-4c0e-aef9-aee94befc55e  (stable build)
+// UUID: 137bde33-b2f1-4382-b3dc-1eef297f1b12  (stable build)
 IMPLEMENT_VWMenuExtension(
-	/*Extension class*/ CExtMenuSample,
-	/*Event sink*/ CSampleMenu_EventSink,
+	/*Extension class*/ CExtMenuImportIfc,
+	/*Event sink*/ CImportIfcMenu_EventSink,
 	/*Universal name*/ PLUGIN_UNIVERSAL_NAME,
 	/*Version*/ 1,
-	/*UUID*/ 0x4be7d497, 0x0a1b, 0x4c0e, 0xae, 0xf9, 0xae, 0xe9, 0x4b, 0xef, 0xc5, 0x5e);
+	/*UUID*/ 0x137bde33, 0xb2f1, 0x4382, 0xb3, 0xdc, 0x1e, 0xef, 0x29, 0x7f, 0x1b, 0x12);
 #endif
 // NOLINTEND(misc-const-correctness)
 
 // ---------------------------------------------------------------------------
-CExtMenuSample::CExtMenuSample(CallBackPtr cbp) : VWExtensionMenu(cbp, gMenuDef) {}
+CExtMenuImportIfc::CExtMenuImportIfc(CallBackPtr cbp) : VWExtensionMenu(cbp, gMenuDef) {}
 
-CExtMenuSample::~CExtMenuSample() = default;
+CExtMenuImportIfc::~CExtMenuImportIfc() = default;
 
 // ---------------------------------------------------------------------------
-CSampleMenu_EventSink::CSampleMenu_EventSink(IVWUnknown* parent) : VWMenu_EventSink(parent) {}
+CImportIfcMenu_EventSink::CImportIfcMenu_EventSink(IVWUnknown* parent) : VWMenu_EventSink(parent) {}
 
-CSampleMenu_EventSink::~CSampleMenu_EventSink() = default;
+CImportIfcMenu_EventSink::~CImportIfcMenu_EventSink() = default;
 
-void CSampleMenu_EventSink::DoInterface()
+void CImportIfcMenu_EventSink::DoInterface()
 {
 	// Note: the dev-build picker is NOT run here. It runs once at Vectorworks
 	// start-up (see plugin_module_main -> RunDevStartupCheck) because a compiled

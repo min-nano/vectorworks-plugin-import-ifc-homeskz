@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-namespace SamplePlugin
+namespace HomeskzIfcImport
 {
 	// The side effects the update flows perform. One method per operation that
 	// would otherwise touch the SDK / the OS.
@@ -59,4 +59,4 @@ namespace SamplePlugin
 	void RunStableStartupCheckWith(IUpdaterHost& host);
 	void RunDevStartupCheckWith(IUpdaterHost& host, const std::string& runningBranch,
 								const std::string& runningCommit);
-} // namespace SamplePlugin
+} // namespace HomeskzIfcImport

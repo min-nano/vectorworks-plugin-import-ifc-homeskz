@@ -1,10 +1,12 @@
-# vectorworks-plugin-native-template
+# vectorworks-plugin-import-ifc-homeskz
 
-C++ SDK でネイティブな Vectorworks 2026 プラグインを作るためのテンプレートです。
+ホームズ君構造EX が出力する木造軸組工法建築物の IFC ファイルをパースし、Vectorworks
+2026 のネイティブオブジェクトへ変換して配置する、C++ SDK ネイティブプラグインです。
 
-ビルドシステム・CI・リリース／アップデートの仕組みまで揃った**最小構成の動く
-プラグイン**が入っています。サンプルのプラグインはメニューコマンドを 1 つ追加する
-だけで、実行すると「起動した」ことを知らせるアラートダイアログを表示します。
+ネイティブプラグインテンプレート（`vectorworks-plugin-native-template`）を出発点に、
+ビルドシステム・CI・リリース／アップデートの仕組みまで揃った土台の上へ、IFC 解析と
+描画の機能を段階的に積み上げていきます（`ROADMAP.md`）。現時点のメニューコマンドは
+まだ骨組みで、実行すると「起動した」ことを知らせるアラートダイアログを表示します。
 
 **macOS と Windows の両方**を、同じソースからビルドします（Vectorworks 2026 が対応
 する 2 プラットフォーム）。
@@ -25,8 +27,8 @@ src/
   Module-Info.plist.in      バンドルの Info.plist テンプレート（macOS 専用・ビルド
                             ごとに埋める）
 resources/
-  SamplePlugin.vwr/…             stable プラグインのメニュー文字列
-  SamplePluginDev.vwr/…          dev プラグインのメニュー文字列
+  HomeskzIfcImport.vwr/…             stable プラグインのメニュー文字列
+  HomeskzIfcImportDev.vwr/…          dev プラグインのメニュー文字列
 scripts/
   vw-update.sh              CI ビルドをダウンロード／インストールする（macOS 用。
                             バンドルに同梱され、プラグインから起動される）
@@ -47,10 +49,11 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 同じソースから、1 つのスイッチ（`VW_DEV_BUILD`、`src/BuildConfig.h` を参照）で
 **共存できる 2 つのプラグイン**をビルドします。
 
-- **`SamplePlugin`** — *stable* プラグイン。`main` からビルドされます。
-  メニューカテゴリは **Sample**。
-- **`SamplePluginDev`** — *dev* プラグイン。フィーチャー／PR ブランチから
-  ビルドされます。メニューカテゴリは **Sample (Dev)**。
+- **`HomeskzIfcImport`** — *stable* プラグイン。`main` からビルドされます。
+  メニューカテゴリは **ファイル**、コマンド名は **ホームズ君IFCをインポート…**。
+- **`HomeskzIfcImportDev`** — *dev* プラグイン。フィーチャー／PR ブランチから
+  ビルドされます。メニューカテゴリは **ファイル**、コマンド名は
+  **ホームズ君IFCをインポート… (Dev)**。
 
 プラグインの入れ物はプラットフォームで異なります。
 
@@ -72,25 +75,28 @@ Windows は `.vlb` の隣の `<name>.commit` ファイル）。アップデー�
 バンドル内の `Contents/Resources/<name>.vwr`、Windows は `.vlb` の隣の
 `<name>.vwr`）、各プラグインは自己完結しています。
 
-## プレースホルダー識別子
+## プラグイン識別子
 
-サンプル固有の識別子は次の通りです。実際のプラグインではこれらを置き換えます。
+このプラグインを一意に識別する値は次の通りです（テンプレート
+`vectorworks-plugin-native-template` から移植する際に、サンプル固有の
+プレースホルダーをこれらへ置き換えました）。フォークして別プラグインを
+作るときは、同じ箇所を自分の値へ置き換えます。
 
 | 種別 | 値 | 場所 |
 | --- | --- | --- |
-| バンドル／出力名 | `SamplePlugin` / `SamplePluginDev` | `CMakeLists.txt`、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`scripts/vw-update.ps1`、`.github/workflows/build.yml` |
-| バンドル ID（macOS） | `com.example.vectorworks.SamplePlugin(Dev)` | `CMakeLists.txt` |
-| メニューカテゴリ | `Sample` / `Sample (Dev)` | `resources/*/Strings/*.vwstrings` |
-| C++ 名前空間・クラス | `SamplePlugin` / `CExtMenuSample` / `CSampleMenu_EventSink` | `src/Extensions/ExtMenu.{h,cpp}`、`src/ModuleMain.cpp` |
-| VCOM ユニバーサル名 | `CExtMenuSample_SamplePlugin(Dev)` | `src/BuildConfig.h` |
+| バンドル／出力名 | `HomeskzIfcImport` / `HomeskzIfcImportDev` | `CMakeLists.txt`、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`scripts/vw-update.ps1`、`.github/workflows/build.yml` |
+| バンドル ID（macOS） | `io.github.min-nano.HomeskzIfcImport(Dev)` | `CMakeLists.txt` |
+| メニューカテゴリ | `ファイル`（コマンド名 `ホームズ君IFCをインポート…`） | `resources/*/Strings/*.vwstrings` |
+| C++ 名前空間・クラス | `HomeskzIfcImport` / `CExtMenuImportIfc` / `CImportIfcMenu_EventSink` | `src/Extensions/ExtMenu.{h,cpp}`、`src/ModuleMain.cpp` |
+| VCOM ユニバーサル名 | `CExtMenuImportIfc_HomeskzIfcImport(Dev)` | `src/BuildConfig.h` |
 | 拡張機能 UUID | stable / dev 各 1 個 | `src/Extensions/ExtMenu.cpp`（一意である必要があるため `uuidgen` で再生成） |
-| リポジトリ | `min-nano/vectorworks-plugin-native-template` | `scripts/vw-update.sh` / `scripts/vw-update.ps1` の `VW_REPO` 既定値 |
+| リポジトリ | `min-nano/vectorworks-plugin-import-ifc-homeskz` | `scripts/vw-update.sh` / `scripts/vw-update.ps1` の `VW_REPO` 既定値 |
 
 `.vwstrings` は UTF-16LE（BOM 付き・CRLF 改行）です。編集時はエンコーディングを保持
 してください。現在の識別子は次で一覧できます。
 
 ```sh
-grep -rniE "sampleplugin|com\.example|CExtMenuSample|CSampleMenu" \
+grep -rniE "homeskzifcimport|io\.github\.min-nano|CExtMenuImportIfc|CImportIfcMenu" \
   --exclude-dir=.git .
 ```
 
@@ -115,7 +121,7 @@ Xcode（Vectorworks 2026 は公式に **Xcode 16.2** を対象）と **mac SDK**
    cmake --build build --config Release
    ```
 
-   成果物は `build/SamplePlugin.vwlibrary` です。
+   成果物は `build/HomeskzIfcImport.vwlibrary` です。
 
 既定では Apple Silicon（`arm64`）向けにビルドします。ユニバーサルバイナリにするには:
 
@@ -139,9 +145,9 @@ Visual Studio 2022（v143 ツールセット、x64）と **win SDK** が必要�
    cmake --build build --config Release
    ```
 
-   成果物は `build/Release/SamplePlugin.vlb`（DLL）と、その隣の
-   `build/Release/SamplePlugin.vwr`（リソース）です。ビルドスタンプの
-   `SamplePlugin.commit` と更新スクリプト `vw-update.ps1` も同じ場所に出力されます。
+   成果物は `build/Release/HomeskzIfcImport.vlb`（DLL）と、その隣の
+   `build/Release/HomeskzIfcImport.vwr`（リソース）です。ビルドスタンプの
+   `HomeskzIfcImport.commit` と更新スクリプト `vw-update.ps1` も同じ場所に出力されます。
 
 macOS の `.vwlibrary` バンドルと違い、Windows のプラグインは `<name>.vlb` 本体と
 同名の `<name>.vwr` を**同じフォルダに一緒に**置く必要があります（`.commit` と
@@ -171,13 +177,13 @@ Vectorworks 開発者クレデンシャルなし）で配布されます。
    ダウンロード隔離フラグを付け直すことがあります）。置き場所は Vectorworks 2026
    のユーザフォルダ内の `Plug-Ins` ディレクトリです（Vectorworks ▸ 環境設定 ▸
    *ユーザフォルダ* から探せます）。`.vwr` リソースはバンドル内に含まれているので、
-   `SamplePlugin.vwlibrary` フォルダだけで十分です。
+   `HomeskzIfcImport.vwlibrary` フォルダだけで十分です。
 
 2. Gatekeeper がダウンロードしたバンドルをブロックしないよう、**macOS の隔離フラグを
    解除します**:
 
    ```sh
-   xattr -dr com.apple.quarantine SamplePlugin.vwlibrary
+   xattr -dr com.apple.quarantine HomeskzIfcImport.vwlibrary
    ```
 
    CI ビルドは既に **アドホック署名済み**です（Apple Silicon がバイナリをロードする
@@ -186,7 +192,7 @@ Vectorworks 開発者クレデンシャルなし）で配布されます。
    自分で署名し直してください:
 
    ```sh
-   codesign --force --deep --sign - SamplePlugin.vwlibrary
+   codesign --force --deep --sign - HomeskzIfcImport.vwlibrary
    ```
 
 3. **Vectorworks を起動します。** プラグインが未署名のため、Vectorworks 2026 は起動時
@@ -195,18 +201,19 @@ Vectorworks 開発者クレデンシャルなし）で配布されます。
    プラグインでは想定どおりの挙動で、社内利用では問題ありません。
 
 4. **コマンドをワークスペースに追加します:** ツール ▸ ワークスペース ▸ 現在の
-   ワークスペースを編集 ▸ *メニュー*。**Sample** カテゴリの中に **起動確認** コマンド
-   があるので、メニューにドラッグしてください。実行するとアラートが表示されます。
+   ワークスペースを編集 ▸ *メニュー*。**ファイル** カテゴリの中に
+   **ホームズ君IFCをインポート…** コマンドがあるので、メニューにドラッグしてください。
+   実行するとアラートが表示されます（実際のインポートは今後のマイルストーンで実装）。
 
 ### Windows
 
 Gatekeeper もアドホック署名も無いぶん手順は簡単です:
 
-1. **`SamplePlugin.vlb` と `SamplePlugin.vwr` を一緒に**、Vectorworks 2026 のユーザ
+1. **`HomeskzIfcImport.vlb` と `HomeskzIfcImport.vwr` を一緒に**、Vectorworks 2026 のユーザ
    フォルダ内の `Plug-Ins` ディレクトリに置きます（Vectorworks ▸ 環境設定 ▸ *ユーザ
    フォルダ* から探せます）。2 つは同名・同フォルダである必要があります。自動アップ
-   デートも使うなら `SamplePlugin.commit` と `vw-update.ps1` も一緒に置きます（CI の
-   `SamplePlugin.vlb.zip` にはこれらがすべて入っています）。
+   デートも使うなら `HomeskzIfcImport.commit` と `vw-update.ps1` も一緒に置きます（CI の
+   `HomeskzIfcImport.vlb.zip` にはこれらがすべて入っています）。
 
 2. **Vectorworks を起動します。** プラグインが未署名のため、Vectorworks 2026 は起動時
    に「不明／未署名のプラグイン」警告を表示し、既定で無効化することがあります。警告を
@@ -330,16 +337,16 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 - SDK は一度だけダウンロードし、（トリミングした）SDK を**キャッシュ**するので、大きな
   zip は以降の実行で再ダウンロードされません。強制的に再ダウンロードするにはワーク
   フロー内の `VW_SDK_CACHE_KEY`（各ジョブに 1 つ）を変更します。
-- 各ジョブが `SamplePlugin` と `SamplePluginDev` の**両方**をビルドし、コミットで刻印
+- 各ジョブが `HomeskzIfcImport` と `HomeskzIfcImportDev` の**両方**をビルドし、コミットで刻印
   （`-DVW_BUILD_VERSION`）して成果物を確認・アップロードします（macOS はさらにアドホック
   署名）。PR ではエフェメラルなマージコミットではなく、PR の **head** コミット（あなたが
   push したもの）をビルドします。
 - **ダウンロード可能なリリースを公開**し、アップデータが取得できる安定した URL を用意
   します。1 つのリリースに **macOS と Windows 両方のアセット**が入ります:
   - `main` はローリングな **`stable`** リリースを更新します
-    （`SamplePlugin.vwlibrary.zip` + `SamplePlugin.vlb.zip`）。
+    （`HomeskzIfcImport.vwlibrary.zip` + `HomeskzIfcImport.vlb.zip`）。
   - PR はブランチごとの **`dev-<branch>`** プレリリースを更新します
-    （`SamplePluginDev.vwlibrary.zip` + `SamplePluginDev.vlb.zip`。トークンで公開でき
+    （`HomeskzIfcImportDev.vwlibrary.zip` + `HomeskzIfcImportDev.vlb.zip`。トークンで公開でき
     ないフォーク PR ではスキップされます）。
 
   リリースの公開は独立した **`release` ジョブ**が担当します。このジョブは 2 つのビルド
@@ -522,7 +529,7 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 
 チャンネルごとに挙動が異なります。
 
-- **stable（`SamplePlugin` / main）** — **Vectorworks 起動時**に、より新しい安定版
+- **stable（`HomeskzIfcImport` / main）** — **Vectorworks 起動時**に、より新しい安定版
   ビルドがないかを確認します（`src/ModuleMain.cpp` がモジュールロード時に一度だけ実行）。
   - 既に最新なら**何も表示しません**（毎回の起動を邪魔しません）。
   - 新しいビルドがあれば `AlertQuestion` で「インストールしますか？」と尋ね、選ばれた
@@ -530,7 +537,7 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
   - ネットワーク確認は時間制限付き（`vw-update.sh` の `--max-time`）で、オフラインや
     エラー時は静かに諦めます。
 
-- **dev（`SamplePluginDev` / ブランチ）** — **Vectorworks 起動時**に、使用するビルドを
+- **dev（`HomeskzIfcImportDev` / ブランチ）** — **Vectorworks 起動時**に、使用するビルドを
   **ネイティブのプルダウンダイアログ**（`VWFC::VWUI::VWDialog` + `VWPullDownMenuCtrl`、
   `src/Updater.cpp` の `CBuildPickerDialog`）で問い合わせます（`src/ModuleMain.cpp` が
   モジュールロード時に一度だけ実行）。1 つのドロップダウンに候補を一覧表示します:
@@ -572,9 +579,9 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 
 ```sh
 # --- macOS (bash) -----------------------------------------------------------
-# stable チャンネル（main → SamplePlugin）:
+# stable チャンネル（main → HomeskzIfcImport）:
 ./scripts/vw-update.sh stable
-# dev チャンネル — どのブランチのビルドを入れるか選ぶ（→ SamplePluginDev）:
+# dev チャンネル — どのブランチのビルドを入れるか選ぶ（→ HomeskzIfcImportDev）:
 ./scripts/vw-update.sh dev
 # 引数なし（または Finder でダブルクリック）: 最初にチャンネルを尋ねます。
 ./scripts/vw-update.sh

@@ -1,5 +1,5 @@
 <#
-    vw-update.ps1 — download the latest CI build of the SamplePlugin Vectorworks
+    vw-update.ps1 — download the latest CI build of the HomeskzIfcImport Vectorworks
     plug-in and install it into your Vectorworks 2026 Plug-Ins folder (Windows).
 
     This is the Windows counterpart of scripts/vw-update.sh. On Windows a
@@ -9,8 +9,8 @@
 
     Two channels, two separately-named plug-ins that can be installed at once:
 
-      stable  -> "SamplePlugin.vlb"     from the rolling "stable" release (main).
-      dev     -> "SamplePluginDev.vlb"  from a per-branch "dev-<branch>" prerelease;
+      stable  -> "HomeskzIfcImport.vlb"     from the rolling "stable" release (main).
+      dev     -> "HomeskzIfcImportDev.vlb"  from a per-branch "dev-<branch>" prerelease;
                  you pick which branch's build to install.
 
     The plug-in itself drives its own updates by invoking this same script (it is
@@ -57,7 +57,7 @@ $ErrorActionPreference = 'Stop'
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
 
-$VW_REPO = if ($env:VW_REPO) { $env:VW_REPO } else { 'min-nano/vectorworks-plugin-native-template' }
+$VW_REPO = if ($env:VW_REPO) { $env:VW_REPO } else { 'min-nano/vectorworks-plugin-import-ifc-homeskz' }
 $VW_API  = "https://api.github.com/repos/$VW_REPO"
 $VW_PLUGINS_DIR = if ($env:VW_PLUGINS_DIR) { $env:VW_PLUGINS_DIR } else { Join-Path $env:APPDATA 'Nemetschek\Vectorworks\2026\Plug-Ins' }
 
@@ -173,10 +173,10 @@ function Invoke-QStable {
     catch { Write-Output 'error=stable リリースを取得できませんでした。'; return }
 
     $latestFull = $rel.target_commitish
-    $url = Get-AssetUrl $rel 'SamplePlugin.vlb.zip'
+    $url = Get-AssetUrl $rel 'HomeskzIfcImport.vlb.zip'
     if (-not $latestFull -or -not $url) { Write-Output 'error=stable リリースの情報が不完全です。'; return }
 
-    Write-Output ("installed=" + (Get-InstalledCommit 'SamplePlugin'))
+    Write-Output ("installed=" + (Get-InstalledCommit 'HomeskzIfcImport'))
     Write-Output ("latest=" + (Get-Short $latestFull))
     Write-Output ("url=" + $url)
 }
@@ -185,11 +185,11 @@ function Invoke-QDev {
     try { $rels = Invoke-GH 'releases?per_page=100' }
     catch { Write-Output 'error=リリース一覧を取得できませんでした。'; return }
 
-    Write-Output ("installed=" + (Get-InstalledCommit 'SamplePluginDev'))
+    Write-Output ("installed=" + (Get-InstalledCommit 'HomeskzIfcImportDev'))
 
     foreach ($rel in $rels) {
         if ($rel.tag_name -like 'dev-*') {
-            $url = Get-AssetUrl $rel 'SamplePluginDev.vlb.zip'
+            $url = Get-AssetUrl $rel 'HomeskzIfcImportDev.vlb.zip'
             if ($url) {
                 $name = if ($rel.name) { $rel.name } else { $rel.tag_name }
                 # Only list builds that actually have a downloadable asset.
@@ -217,11 +217,11 @@ function Invoke-Stable {
     try { $rel = Invoke-GH 'releases/tags/stable' }
     catch { Write-Host 'エラー: 安定版リリース (stable) が見つかりません。' -ForegroundColor Red; return }
 
-    $url = Get-AssetUrl $rel 'SamplePlugin.vlb.zip'
+    $url = Get-AssetUrl $rel 'HomeskzIfcImport.vlb.zip'
     $latest = Get-Short $rel.target_commitish
     if (-not $latest -or -not $url) { Write-Host 'エラー: 安定版リリースの情報が不完全です。' -ForegroundColor Red; return }
 
-    $installed = Get-InstalledCommit 'SamplePlugin'
+    $installed = Get-InstalledCommit 'HomeskzIfcImport'
     if ($installed -eq $latest) { Write-Host "既に最新です（build $installed）。"; return }
 
     Write-Host '新しい安定版ビルドがあります。'
@@ -229,7 +229,7 @@ function Invoke-Stable {
     Write-Host "  最新: $latest"
     if ((Read-Host 'インストールしますか？ [y/N]') -notmatch '^[yY]') { Write-Host 'スキップしました。'; return }
 
-    if (Install-Build $url 'SamplePlugin') {
+    if (Install-Build $url 'HomeskzIfcImport') {
         Write-Host '更新しました。反映するには Vectorworks を再起動してください。' -ForegroundColor Green
     }
     else { Write-Host ("更新に失敗しました: " + $script:LastError) -ForegroundColor Red }
@@ -242,7 +242,7 @@ function Invoke-Dev {
     $builds = @()
     foreach ($rel in $rels) {
         if ($rel.tag_name -like 'dev-*') {
-            $url = Get-AssetUrl $rel 'SamplePluginDev.vlb.zip'
+            $url = Get-AssetUrl $rel 'HomeskzIfcImportDev.vlb.zip'
             if ($url) {
                 $builds += [pscustomobject]@{
                     Name   = if ($rel.name) { $rel.name } else { $rel.tag_name }
@@ -254,7 +254,7 @@ function Invoke-Dev {
     }
     if ($builds.Count -eq 0) { Write-Host '開発版ビルド (dev-*) がまだありません。対象ブランチを push してビルドを走らせてください。'; return }
 
-    Write-Host ("インストール済み: " + (Get-InstalledCommit 'SamplePluginDev'))
+    Write-Host ("インストール済み: " + (Get-InstalledCommit 'HomeskzIfcImportDev'))
     Write-Host '利用可能な開発版ビルド:'
     for ($i = 0; $i -lt $builds.Count; $i++) {
         Write-Host ("  [{0}] {1} ({2})" -f ($i + 1), $builds[$i].Name, $builds[$i].Commit)
@@ -268,7 +268,7 @@ function Invoke-Dev {
     }
 
     $b = $builds[$n - 1]
-    if (Install-Build $b.Url 'SamplePluginDev') {
+    if (Install-Build $b.Url 'HomeskzIfcImportDev') {
         Write-Host 'インストールしました。反映するには Vectorworks を再起動してください。' -ForegroundColor Green
     }
     else { Write-Host ("インストールに失敗しました: " + $script:LastError) -ForegroundColor Red }

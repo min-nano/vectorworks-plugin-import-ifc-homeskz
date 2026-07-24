@@ -195,8 +195,8 @@ cat >"$STABLE_JSON" <<'JSON'
 {
   "target_commitish": "abc1234def5678",
   "assets": [
-    { "name": "SamplePlugin.vwlibrary.zip",
-      "browser_download_url": "https://example.test/dl/SamplePlugin.vwlibrary.zip" },
+    { "name": "HomeskzIfcImport.vwlibrary.zip",
+      "browser_download_url": "https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" },
     { "name": "notes.txt",
       "browser_download_url": "https://example.test/dl/notes.txt" }
   ]
@@ -207,13 +207,13 @@ RELEASES_JSON="$WORK/releases.json"
 cat >"$RELEASES_JSON" <<'JSON'
 [
   { "tag_name": "stable", "name": "stable", "target_commitish": "zzz9999",
-    "assets": [ { "name": "SamplePlugin.vwlibrary.zip",
+    "assets": [ { "name": "HomeskzIfcImport.vwlibrary.zip",
                   "browser_download_url": "https://example.test/dl/stable.zip" } ] },
   { "tag_name": "dev-feature-x", "name": "feature/x", "target_commitish": "aaa1111ccc",
-    "assets": [ { "name": "SamplePluginDev.vwlibrary.zip",
+    "assets": [ { "name": "HomeskzIfcImportDev.vwlibrary.zip",
                   "browser_download_url": "https://example.test/dl/x.zip" } ] },
   { "tag_name": "dev-feature-y", "name": "feature/y", "target_commitish": "bbb2222ddd",
-    "assets": [ { "name": "SamplePluginDev.vwlibrary.zip",
+    "assets": [ { "name": "HomeskzIfcImportDev.vwlibrary.zip",
                   "browser_download_url": "https://example.test/dl/y.zip" } ] },
   { "tag_name": "dev-nobuild", "name": "feature/z", "target_commitish": "ccc3333eee",
     "assets": [ { "name": "unrelated.zip",
@@ -224,7 +224,7 @@ JSON
 export VW_TEST_STABLE_JSON="$STABLE_JSON"
 export VW_TEST_RELEASES_JSON="$RELEASES_JSON"
 
-# Build a real "SamplePluginDev.vwlibrary.zip" for the do-install tests, and a
+# Build a real "HomeskzIfcImportDev.vwlibrary.zip" for the do-install tests, and a
 # malformed one whose top-level dir has the wrong name.
 build_zip() { # zip-path, bundle-dir-name
 	local dir="$WORK/stage-$$-$RANDOM"
@@ -235,15 +235,15 @@ build_zip() { # zip-path, bundle-dir-name
 }
 GOOD_ZIP="$WORK/good.zip"
 BAD_ZIP="$WORK/bad.zip"
-build_zip "$GOOD_ZIP" "SamplePluginDev.vwlibrary"
+build_zip "$GOOD_ZIP" "HomeskzIfcImportDev.vwlibrary"
 build_zip "$BAD_ZIP" "WrongName.vwlibrary"
 
 # ===========================================================================
 # asset_url — pick a browser_download_url out of an assets array by file name.
 # ===========================================================================
 t "asset_url finds the matching asset"
-out="$(RUN asset_url "$STABLE_JSON" "assets" "SamplePlugin.vwlibrary.zip")"
-check_eq "$out" "https://example.test/dl/SamplePlugin.vwlibrary.zip" "asset_url returns the URL"
+out="$(RUN asset_url "$STABLE_JSON" "assets" "HomeskzIfcImport.vwlibrary.zip")"
+check_eq "$out" "https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" "asset_url returns the URL"
 
 t "asset_url returns nothing for an unknown asset"
 out="$(RUN asset_url "$STABLE_JSON" "assets" "does-not-exist.zip" || true)"
@@ -270,7 +270,7 @@ t "q_stable reports installed, 7-char latest and the asset url"
 out="$(VW_TEST_INSTALLED=abc1234 RUN q_stable)"
 check_contains "$out" "installed=abc1234" "installed line"
 check_contains "$out" "latest=abc1234" "latest is the 7-char commit prefix"
-check_contains "$out" "url=https://example.test/dl/SamplePlugin.vwlibrary.zip" "url line"
+check_contains "$out" "url=https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" "url line"
 
 t "q_stable reports installed=none when nothing is installed"
 out="$(VW_TEST_INSTALLED=none RUN q_stable)"
@@ -284,7 +284,7 @@ check_not_contains "$out" "latest=" "no latest when offline"
 
 # ===========================================================================
 # q-dev — installed line + one TSV row per dev-* build that has a downloadable
-# SamplePluginDev asset (the stable release and the asset-less dev build are
+# HomeskzIfcImportDev asset (the stable release and the asset-less dev build are
 # both skipped).
 # ===========================================================================
 t "q_dev lists only dev-* builds that have a downloadable asset"
@@ -308,21 +308,21 @@ t "do_install installs the bundle and prints ok"
 dest="$WORK/plugins-ok"
 mkdir -p "$dest"
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$GOOD_ZIP" \
-	RUN do_install "https://example.test/dl/x.zip" "SamplePluginDev")"
+	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
 check_eq "$out" "ok" "do_install prints ok"
-if [ -f "$dest/SamplePluginDev.vwlibrary/Contents/Info.plist" ]; then installed=yes; else installed=no; fi
+if [ -f "$dest/HomeskzIfcImportDev.vwlibrary/Contents/Info.plist" ]; then installed=yes; else installed=no; fi
 check_eq "$installed" "yes" "the .vwlibrary landed in the plug-ins dir"
 
 t "do_install reports a download failure"
 dest="$WORK/plugins-dlfail"
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_FAIL=1 \
-	RUN do_install "https://example.test/dl/x.zip" "SamplePluginDev")"
+	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
 check_contains "$out" "error=" "download failure -> error= line"
 
 t "do_install reports a zip missing the expected bundle"
 dest="$WORK/plugins-badzip"
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$BAD_ZIP" \
-	RUN do_install "https://example.test/dl/x.zip" "SamplePluginDev")"
+	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
 check_contains "$out" "error=" "wrong bundle name -> error= line"
 
 t "do_install rejects missing arguments"

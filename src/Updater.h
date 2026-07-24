@@ -23,7 +23,7 @@
 
 #pragma once
 
-namespace SamplePlugin
+namespace HomeskzIfcImport
 {
 	// Stable plug-in only. At Vectorworks start-up, compare the installed stable
 	// build with the latest published one; if a newer one exists, ask (native
@@ -37,4 +37,4 @@ namespace SamplePlugin
 	// nothing happens and start-up continues. Silent on a network error. Runs
 	// only once per session.
 	void RunDevStartupCheck();
-} // namespace SamplePlugin
+} // namespace HomeskzIfcImport

@@ -27,7 +27,7 @@
 // The pure parsing/quoting/path helpers live in UpdaterParse.h so they can be
 // unit-tested without the SDK. Pull them into this file's scope; everything
 // below is the platform-specific glue that uses them.
-using namespace SamplePlugin::UpdaterParse;
+using namespace HomeskzIfcImport::UpdaterParse;
 
 #if GS_MAC
 #	include <dlfcn.h>
@@ -326,7 +326,7 @@ namespace
 	// Note: the SDK's TXString constructs implicitly from a (UTF-8) const char*,
 	// so we pass std::string::c_str() directly and let that conversion happen.
 	// -----------------------------------------------------------------------
-	class CVectorworksUpdaterHost : public SamplePlugin::IUpdaterHost
+	class CVectorworksUpdaterHost : public HomeskzIfcImport::IUpdaterHost
 	{
 	public:
 		bool RunScript(const std::vector<std::string>& args, std::string& out) override
@@ -371,7 +371,7 @@ namespace
 	};
 } // namespace
 
-namespace SamplePlugin
+namespace HomeskzIfcImport
 {
 	// The public entry points are thin: they enforce "run once per session" and
 	// wire the real host + compiled-in build identity into the SDK-independent
@@ -405,4 +405,4 @@ namespace SamplePlugin
 		CVectorworksUpdaterHost host;
 		RunDevStartupCheckWith(host, VW_BUILD_BRANCH, VW_BUILD_VERSION);
 	}
-} // namespace SamplePlugin
+} // namespace HomeskzIfcImport

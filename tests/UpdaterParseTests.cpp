@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-using namespace SamplePlugin::UpdaterParse;
+using namespace HomeskzIfcImport::UpdaterParse;
 
 // ---------------------------------------------------------------------------
 // Trim
@@ -240,10 +240,10 @@ TEST(cmdquote_keeps_spaces)
 TEST(mac_script_path_from_binary_typical)
 {
 	const std::string bin =
-		"/Users/me/Vectorworks/Plug-Ins/SamplePlugin.vwlibrary/Contents/MacOS/SamplePlugin";
-	CHECK_EQ(
-		MacScriptPathFromBinary(bin),
-		"/Users/me/Vectorworks/Plug-Ins/SamplePlugin.vwlibrary/Contents/Resources/vw-update.sh");
+		"/Users/me/Vectorworks/Plug-Ins/HomeskzIfcImport.vwlibrary/Contents/MacOS/HomeskzIfcImport";
+	CHECK_EQ(MacScriptPathFromBinary(bin),
+			 "/Users/me/Vectorworks/Plug-Ins/HomeskzIfcImport.vwlibrary/Contents/Resources/"
+			 "vw-update.sh");
 }
 
 TEST(mac_script_path_from_binary_uses_last_marker)
@@ -267,7 +267,7 @@ TEST(mac_script_path_from_binary_no_marker_is_empty)
 TEST(mac_plugins_dir_from_binary_typical)
 {
 	const std::string bin =
-		"/Users/me/Vectorworks/Plug-Ins/SamplePlugin.vwlibrary/Contents/MacOS/SamplePlugin";
+		"/Users/me/Vectorworks/Plug-Ins/HomeskzIfcImport.vwlibrary/Contents/MacOS/HomeskzIfcImport";
 	CHECK_EQ(MacPluginsDirFromBinary(bin), "/Users/me/Vectorworks/Plug-Ins");
 }
 
@@ -298,18 +298,19 @@ TEST(mac_plugins_dir_from_binary_no_leading_slash_is_empty)
 
 TEST(win_module_dir_from_path_backslashes)
 {
-	CHECK_EQ(WinModuleDirFromPath("C:\\Users\\me\\Plug-Ins\\SamplePlugin.vlb"),
+	CHECK_EQ(WinModuleDirFromPath("C:\\Users\\me\\Plug-Ins\\HomeskzIfcImport.vlb"),
 			 "C:\\Users\\me\\Plug-Ins");
 }
 
 TEST(win_module_dir_from_path_forward_slashes)
 {
-	CHECK_EQ(WinModuleDirFromPath("C:/Users/me/Plug-Ins/SamplePlugin.vlb"), "C:/Users/me/Plug-Ins");
+	CHECK_EQ(WinModuleDirFromPath("C:/Users/me/Plug-Ins/HomeskzIfcImport.vlb"),
+			 "C:/Users/me/Plug-Ins");
 }
 
 TEST(win_module_dir_from_path_no_separator_is_empty)
 {
-	CHECK_EQ(WinModuleDirFromPath("SamplePlugin.vlb"), "");
+	CHECK_EQ(WinModuleDirFromPath("HomeskzIfcImport.vlb"), "");
 	CHECK_EQ(WinModuleDirFromPath(""), "");
 }
 
@@ -336,12 +337,12 @@ TEST(evaluate_stable_offers_when_newer)
 {
 	const std::string out = "installed=abc1234\n"
 							"latest=def5678\n"
-							"url=https://ex.com/SamplePlugin.vwlibrary.zip\n";
+							"url=https://ex.com/HomeskzIfcImport.vwlibrary.zip\n";
 	StableStatus s = EvaluateStable(out);
 	CHECK(s.offerUpdate);
 	CHECK_EQ(s.installed, "abc1234");
 	CHECK_EQ(s.latest, "def5678");
-	CHECK_EQ(s.url, "https://ex.com/SamplePlugin.vwlibrary.zip");
+	CHECK_EQ(s.url, "https://ex.com/HomeskzIfcImport.vwlibrary.zip");
 }
 
 TEST(evaluate_stable_silent_when_already_current)

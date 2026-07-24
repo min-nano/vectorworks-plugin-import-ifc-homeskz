@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-using namespace SamplePlugin;
+using namespace HomeskzIfcImport;
 
 namespace
 {
@@ -160,7 +160,7 @@ TEST(stable_accepted_and_install_succeeds)
 	FakeHost h;
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=def5678\n"
-				   "url=https://ex.com/SamplePlugin.zip\n";
+				   "url=https://ex.com/HomeskzIfcImport.zip\n";
 	h.askAnswer = true;
 	h.doInstallOut = "ok";
 	RunStableStartupCheckWith(h);
@@ -172,13 +172,13 @@ TEST(stable_accepted_and_install_succeeds)
 	CHECK_EQ(static_cast<std::size_t>(args.size()), static_cast<std::size_t>(3));
 	if (args.size() == 3)
 	{
-		CHECK_EQ(args[1], "https://ex.com/SamplePlugin.zip");
-		CHECK_EQ(args[2], "SamplePlugin");
+		CHECK_EQ(args[1], "https://ex.com/HomeskzIfcImport.zip");
+		CHECK_EQ(args[2], "HomeskzIfcImport");
 	}
 	// Reported success.
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
-		CHECK_EQ(h.informs[0][0], "SamplePlugin を更新しました。");
+		CHECK_EQ(h.informs[0][0], "HomeskzIfcImport を更新しました。");
 }
 
 TEST(stable_accepted_but_install_reports_error)
@@ -290,7 +290,7 @@ TEST(dev_selecting_a_build_installs_it)
 	if (args.size() == 3)
 	{
 		CHECK_EQ(args[1], "https://ex.com/y.zip"); // the SECOND candidate
-		CHECK_EQ(args[2], "SamplePluginDev");
+		CHECK_EQ(args[2], "HomeskzIfcImportDev");
 	}
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())

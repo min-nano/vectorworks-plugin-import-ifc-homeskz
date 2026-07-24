@@ -15,9 +15,9 @@
 #include <string>
 #include <vector>
 
-using namespace SamplePlugin::UpdaterParse;
+using namespace HomeskzIfcImport::UpdaterParse;
 
-namespace SamplePlugin
+namespace HomeskzIfcImport
 {
 	namespace
 	{
@@ -61,8 +61,8 @@ namespace SamplePlugin
 			return;
 
 		std::string err;
-		if (Install(host, st.url, "SamplePlugin", err))
-			host.Inform("SamplePlugin を更新しました。",
+		if (Install(host, st.url, "HomeskzIfcImport", err))
+			host.Inform("HomeskzIfcImport を更新しました。",
 						"反映するには Vectorworks を再起動してください。");
 		else
 			host.Inform("更新に失敗しました。", err);
@@ -100,7 +100,7 @@ namespace SamplePlugin
 
 		// A different build was chosen: install it (restart to load).
 		std::string err;
-		if (Install(host, pick.url, "SamplePluginDev", err))
+		if (Install(host, pick.url, "HomeskzIfcImportDev", err))
 			host.Inform("開発版ビルドをインストールしました。",
 						"反映するには Vectorworks を再起動してください。\n"
 						"branch: " +
@@ -108,4 +108,4 @@ namespace SamplePlugin
 		else
 			host.Inform("インストールに失敗しました。", err);
 	}
-} // namespace SamplePlugin
+} // namespace HomeskzIfcImport

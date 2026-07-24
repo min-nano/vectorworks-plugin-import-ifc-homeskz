@@ -28,9 +28,10 @@ Python プラグイン（`vectorworks-plugin-script-import-ifc-homeskz`）を C+
 **目的:** テンプレートを本プラグインへ改名し、2 フェーズの骨組みと無 SDK テスト土台を敷く。
 描画対象はまだ無し（土台のみ）。
 
-- ⬜ プレースホルダー識別子の置換（`SamplePlugin` → 本プラグイン名。バンドル名・`.vwr`・
-  VCOM ユニバーサル名・**UUID を `uuidgen` で再生成**・namespace・`VW_REPO`）。
-  README「プレースホルダー識別子」節の一覧に従う。`.vwstrings` は UTF-16LE/BOM/CRLF を保持。
+- ✅ プレースホルダー識別子の置換（`SamplePlugin` → `HomeskzIfcImport`。バンドル名・`.vwr`・
+  VCOM ユニバーサル名・**UUID を再生成**・namespace（`CExtMenuImportIfc` /
+  `CImportIfcMenu_EventSink`）・`VW_REPO`・メニュー `ファイル` ▸ `ホームズ君IFCをインポート…`）。
+  現在の識別子は README「プラグイン識別子」節を参照。`.vwstrings` は UTF-16LE/BOM/CRLF を保持。
 - ⬜ ディレクトリ骨組み: `src/core/` `src/parse/` `src/draw/` と CMake ターゲット分割。
   **`parse/`・`core/` は VectorWorks SDK を include しない**ビルド構成にする（無 SDK で
   コンパイルできることを CI で担保）。

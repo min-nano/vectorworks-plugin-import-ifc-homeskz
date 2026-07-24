@@ -177,9 +177,8 @@ tests/
 ### 命名
 
 - **名前空間**: プラグイン固有コードは単一のトップ名前空間にまとめる
-  （Sample の `SamplePlugin` を、移植後のプラグイン名——例
-  `HomeskzIfcImport`——へ改名。M0 で確定）。フェーズは入れ子名前空間
-  （`::parse` / `::draw` / `::core`）で分ける。
+  （M0 でテンプレートの `SamplePlugin` を `HomeskzIfcImport` へ置換済み）。
+  フェーズは入れ子名前空間（`::parse` / `::draw` / `::core`）で分ける。
 - **SDK 拡張クラス**は SDK の作法（`CExt…` / `…_EventSink`）に従う（既存 `ExtMenu` に倣う）。
 - **フェーズ非依存コード**（`core/` `parse/`）は素直な C++ 命名でよい:
   型は `PascalCase`、関数・変数は `camelCase`、定数は `kPascalCase` または
@@ -264,8 +263,8 @@ Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テス�
 テンプレートの `README.md` に、ローカルビルド（`VW_SDK_DIR` 指定）・dual build
 （`VW_DEV_BUILD`）・lint（`scripts/lint.sh`）・自動アップデート・CI の詳細がある。
 移植でこれらの仕組みは基本そのまま使う。**プレースホルダー識別子
-（`SamplePlugin` / `com.example…` / UUID 等）の置換**は M0 で行う（README「プレース
-ホルダー識別子」節の一覧に従う）。
+（`SamplePlugin` / `com.example…` / UUID 等）の置換**は M0 で完了済み（現在の識別子は
+README「プラグイン識別子」節を参照。プラグイン名は `HomeskzIfcImport`）。
 
 ## 開発プロセス: PR 作成と監視
 

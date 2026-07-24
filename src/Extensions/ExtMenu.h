@@ -9,29 +9,29 @@
 
 #include "VectorworksSDK.h"
 
-namespace SamplePlugin
+namespace HomeskzIfcImport
 {
 	using namespace VWFC::PluginSupport;
 
 	// ------------------------------------------------------------------------
 	// The code that actually runs when the menu command is picked.
-	class CSampleMenu_EventSink : public VWMenu_EventSink
+	class CImportIfcMenu_EventSink : public VWMenu_EventSink
 	{
 	public:
-		CSampleMenu_EventSink(IVWUnknown* parent);
-		~CSampleMenu_EventSink() override;
+		CImportIfcMenu_EventSink(IVWUnknown* parent);
+		~CImportIfcMenu_EventSink() override;
 
 		void DoInterface() override;
 	};
 
 	// ------------------------------------------------------------------------
 	// The menu command extension itself.
-	class CExtMenuSample : public VWExtensionMenu
+	class CExtMenuImportIfc : public VWExtensionMenu
 	{
 		DEFINE_VWMenuExtension;
 
 	public:
-		CExtMenuSample(CallBackPtr cbp);
-		~CExtMenuSample() override;
+		CExtMenuImportIfc(CallBackPtr cbp);
+		~CExtMenuImportIfc() override;
 	};
-} // namespace SamplePlugin
+} // namespace HomeskzIfcImport
