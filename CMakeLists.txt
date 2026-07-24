@@ -1,19 +1,21 @@
 cmake_minimum_required(VERSION 3.20)
 
 #
-# SamplePlugin - a minimal Vectorworks 2026 SDK plug-in template.
+# HomeskzIfcImport - the ホームズ君 IFC import plug-in for Vectorworks 2026.
 #
 # The build produces a loadable plug-in that adds a single menu command; running
-# the command shows an alert dialog. It builds on BOTH platforms Vectorworks 2026
-# supports, from the same sources:
+# the command currently shows an alert dialog (the IFC import feature is being
+# built up incrementally — see ROADMAP.md). It builds on BOTH platforms
+# Vectorworks 2026 supports, from the same sources:
 #
-#   * macOS   -> "SamplePlugin.vwlibrary" bundle (the .vwr resource lives inside
+#   * macOS   -> "HomeskzIfcImport.vwlibrary" bundle (the .vwr resource lives inside
 #                the bundle at Contents/Resources).
-#   * Windows -> "SamplePlugin.vlb" (a DLL) with a sibling "SamplePlugin.vwr"
+#   * Windows -> "HomeskzIfcImport.vlb" (a DLL) with a sibling "HomeskzIfcImport.vwr"
 #                resource file next to it, as the SDK expects on Windows.
 #
-# Rename the identifiers below (target, output name, bundle id, menu category)
-# when you use this template for a real plug-in.
+# The plug-in identifiers (target, output name, bundle id, menu category) are
+# documented in README.md ("プラグイン識別子"); this project derives them from the
+# vectorworks-plugin-native-template it was ported from.
 #
 # Requirements:
 #   macOS:
@@ -52,7 +54,7 @@ endif()
 # On macOS the SDK headers are compiled as Objective-C++ (some mac headers
 # #import CoreFoundation), matching how the SDK's own Xcode projects build. On
 # Windows they are plain C++. So enable OBJCXX only where it exists.
-project(SamplePlugin LANGUAGES CXX)
+project(HomeskzIfcImport LANGUAGES CXX)
 if(APPLE)
 	enable_language(OBJCXX)
 endif()
@@ -360,11 +362,11 @@ if(VW_BUILD_PLUGIN)
 
 	# Stable plug-in (from main) and dev plug-in (from feature/PR branches). Both
 	# can be installed and loaded at the same time.
-	add_vw_plugin(SamplePlugin "SamplePlugin" "com.example.vectorworks.SamplePlugin" "stable")
+	add_vw_plugin(HomeskzIfcImport "HomeskzIfcImport" "io.github.min-nano.HomeskzIfcImport" "stable")
 	add_vw_plugin(
-		SamplePluginDev
-		"SamplePluginDev"
-		"com.example.vectorworks.SamplePluginDev"
+		HomeskzIfcImportDev
+		"HomeskzIfcImportDev"
+		"io.github.min-nano.HomeskzIfcImportDev"
 		"dev"
 		DEV)
 

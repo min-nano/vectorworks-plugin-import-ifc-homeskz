@@ -12,8 +12,8 @@
 #include "Updater.h"
 
 // Identifier used by Vectorworks to locate this plug-in's resources (.vwr) at
-// run time. Must match the base name of the packaged .vwr ("SamplePlugin.vwr"
-// for the stable build, "SamplePluginDev.vwr" for the dev build). See
+// run time. Must match the base name of the packaged .vwr ("HomeskzIfcImport.vwr"
+// for the stable build, "HomeskzIfcImportDev.vwr" for the dev build). See
 // BuildConfig.h.
 const char* DefaultPluginVWRIdentifier()
 {
@@ -52,12 +52,12 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// Stable plug-in: check for a newer stable build and, if one exists, ask (with
 	// a native Vectorworks dialog) whether to install it. Silent when already
 	// current or offline.
-	SamplePlugin::RunStableStartupCheck();
+	HomeskzIfcImport::RunStableStartupCheck();
 #else
 	// Dev plug-in: let the user pick which branch's build to use — keep the
 	// installed one, or switch to another branch's prerelease (installed on
 	// choosing, then restart to load). Silent on a network error.
-	SamplePlugin::RunDevStartupCheck();
+	HomeskzIfcImport::RunDevStartupCheck();
 #endif
 
 	Sint32 reply = 0L;
@@ -65,8 +65,8 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	using namespace VWFC::PluginSupport;
 
 	// Register our single menu command extension.
-	REGISTER_Extension<SamplePlugin::CExtMenuSample>(GROUPID_ExtensionMenu, action, moduleInfo, iid,
-													 inOutInterface, cbp, reply);
+	REGISTER_Extension<HomeskzIfcImport::CExtMenuImportIfc>(
+		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
 	return reply;
 }

@@ -4,8 +4,8 @@
 //	Central place for the plug-in's build-time identity. The exact same source
 //	code is compiled into two coexisting plug-ins:
 //
-//	  * the STABLE plug-in ("SamplePlugin"),    built from the `main` branch, and
-//	  * the DEV plug-in    ("SamplePluginDev"), built from feature / PR branches.
+//	  * the STABLE plug-in ("HomeskzIfcImport"),    built from the `main` branch, and
+//	  * the DEV plug-in    ("HomeskzIfcImportDev"), built from feature / PR branches.
 //
 //	They must have DIFFERENT identifiers (bundle name, .vwr identifier, VCOM
 //	universal name and extension UUID) so Vectorworks can load BOTH at the same
@@ -18,14 +18,14 @@
 
 #ifdef VW_DEV_BUILD
 // Dev plug-in identity.
-#	define PLUGIN_VWR_ID "SamplePluginDev"
-#	define PLUGIN_UNIVERSAL_NAME "CExtMenuSample_SamplePluginDev"
-#	define PLUGIN_DISPLAY_NAME "SamplePlugin (Dev)"
+#	define PLUGIN_VWR_ID "HomeskzIfcImportDev"
+#	define PLUGIN_UNIVERSAL_NAME "CExtMenuImportIfc_HomeskzIfcImportDev"
+#	define PLUGIN_DISPLAY_NAME "HomeskzIfcImport (Dev)"
 #else
 // Stable plug-in identity.
-#	define PLUGIN_VWR_ID "SamplePlugin"
-#	define PLUGIN_UNIVERSAL_NAME "CExtMenuSample_SamplePlugin"
-#	define PLUGIN_DISPLAY_NAME "SamplePlugin"
+#	define PLUGIN_VWR_ID "HomeskzIfcImport"
+#	define PLUGIN_UNIVERSAL_NAME "CExtMenuImportIfc_HomeskzIfcImport"
+#	define PLUGIN_DISPLAY_NAME "HomeskzIfcImport"
 #endif
 
 // Build channel, as a human-readable string ("stable" / "dev").

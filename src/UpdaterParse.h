@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-namespace SamplePlugin::UpdaterParse
+namespace HomeskzIfcImport::UpdaterParse
 {
 	// ---------------------------------------------------------------------
 	// Script-output parsing. The two bundled scripts (vw-update.sh /
@@ -286,4 +286,4 @@ namespace SamplePlugin::UpdaterParse
 		std::string const e = ValueOf(out, "error");
 		return e.empty() ? fallback : e;
 	}
-} // namespace SamplePlugin::UpdaterParse
+} // namespace HomeskzIfcImport::UpdaterParse
