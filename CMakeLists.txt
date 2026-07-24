@@ -362,7 +362,8 @@ if(VW_BUILD_PLUGIN)
 
 	# Stable plug-in (from main) and dev plug-in (from feature/PR branches). Both
 	# can be installed and loaded at the same time.
-	add_vw_plugin(HomeskzIfcImport "HomeskzIfcImport" "io.github.min-nano.HomeskzIfcImport" "stable")
+	add_vw_plugin(HomeskzIfcImport "HomeskzIfcImport" "io.github.min-nano.HomeskzIfcImport"
+				  "stable")
 	add_vw_plugin(
 		HomeskzIfcImportDev
 		"HomeskzIfcImportDev"
