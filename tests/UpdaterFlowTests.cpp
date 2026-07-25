@@ -239,6 +239,29 @@ TEST(dev_stays_silent_on_error_line)
 	CHECK_EQ(h.pickCount, 0);
 }
 
+TEST(dev_skips_picker_when_no_prereleases_exist)
+{
+	FakeHost h;
+	// The script returned no build rows at all.
+	h.qDevOut = "installed=run1234\n";
+	RunDevStartupCheckWith(h, "main", "run1234");
+	CHECK_EQ(h.pickCount, 0); // nothing to choose -> no dialog
+	CHECK_EQ(h.CountScript("do-install"), 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+TEST(dev_skips_picker_when_only_prerelease_is_the_running_build)
+{
+	FakeHost h;
+	// The only prerelease is the build already loaded (same commit).
+	h.qDevOut = "installed=run1234\n"
+				"build\trun1234\tmain\thttps://ex.com/main.zip\n";
+	RunDevStartupCheckWith(h, "main", "run1234");
+	CHECK_EQ(h.pickCount, 0); // no alternative build -> no dialog
+	CHECK_EQ(h.CountScript("do-install"), 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
 TEST(dev_picker_lists_current_first_then_other_builds)
 {
 	FakeHost h;
