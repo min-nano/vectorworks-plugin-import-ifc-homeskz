@@ -80,6 +80,13 @@ namespace HomeskzIfcImport
 		// Candidates to switch TO: every prerelease except the running build.
 		std::vector<DevBuild> others = DevSwitchCandidates(out, runningCommit);
 
+		// Nothing to choose between: no prereleases exist, or the only ones are
+		// the running build itself. The picker would show a single "keep current"
+		// row and nothing else, so don't bother the user — carry on with the
+		// loaded build.
+		if (others.empty())
+			return;
+
 		// One drop-down listing everything: entry 0 is the installed build,
 		// entries 1.. are the other branches' prereleases.
 		std::vector<std::string> items;
