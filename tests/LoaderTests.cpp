@@ -102,4 +102,41 @@ TEST(missing_file_reports_not_ok)
 	CHECK_EQ(model.size(), static_cast<std::size_t>(0));
 }
 
+// ---------------------------------------------------------------------------
+// Python 版から流用した実 IFC フィクスチャの読み込み
+// ---------------------------------------------------------------------------
+//
+//	姉妹リポジトリ（Python 版）の tests/fixtures/ から流用したホームズ君 EX 出力の
+//	実 IFC 群（tests/fixtures/README.md）を、自前 STEP リーダで丸ごと読めることを
+//	確かめる。要素ごとの解析（通り芯・横架材…）は今後のマイルストーンで parse
+//	モジュールのテストとして個別に検証するため、ここでは「実データを中断せず読み切り、
+//	期待するエンティティ型が存在する」ことだけを確認する（CLAUDE.md「小さく機能追加」）。
+
+TEST(loads_all_homeskz_fixtures)
+{
+	// Python 版 tests/fixtures/README.md（＝本リポジトリへ流用済み）の実 IFC 全 5 件。
+	// ファイル名はホームズ君のサンプル名（日本語・空白・括弧を含む）をそのまま使う。
+	const char* fixtures[] = {
+		"サンプル1 (住木邸新築工事).ifc",
+		"スキップフロア_サンプル.ifc",
+		"伏図次郎【2階】.ifc",
+		"グレー本モデルプラン1【3階】.ifc",
+		"グレー本モデルプラン2【3階】.ifc",
+	};
+
+	for (const char* name : fixtures)
+	{
+		std::string const path = std::string(HOMESKZ_FIXTURES_DIR) + "/" + name;
+		bool ok = false;
+		Model const model = loadIfc(path, &ok);
+		CHECK(ok);
+		// 実データは数千エンティティ規模。空でないことを確かめる。
+		CHECK(model.size() > 0);
+		// ホームズ君 IFC の骨格をなす型が存在する（通り芯・ストーリ・横架材）。
+		CHECK(!model.byType("IFCBUILDINGSTOREY").empty());
+		CHECK(!model.byType("IFCGRIDAXIS").empty());
+		CHECK(!model.byType("IFCBEAM").empty());
+	}
+}
+
 TEST_MAIN();
