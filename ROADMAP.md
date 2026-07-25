@@ -21,9 +21,34 @@ Python プラグイン（`vectorworks-plugin-script-import-ifc-homeskz`）を C+
 
 進捗記号: ⬜ 未着手 / 🟨 進行中 / ✅ 完了
 
+## 現在の進捗（サマリ）
+
+| マイルストーン | 状態 | 備考 |
+| --- | --- | --- |
+| M0 基盤整備 | 🟨 進行中 | 骨組み・CMake 分割・STEP リーダ・Loader・無 SDK テストは完了。残: メニューの器改修（ファイル選択→parse→件数ダイアログ）。`Mat4` は M2 へ先送り。|
+| M1 通り芯 | ⬜ 未着手 | 最初の縦切り。|
+| M2 幾何の土台 | ⬜ 未着手 | 配置行列・押し出し・断面（`Mat4` を含む）。|
+| M3 ストーリ | ⬜ 未着手 | |
+| M4 構造クラス判定 | ⬜ 未着手 | |
+| M5 横架材 | ⬜ 未着手 | |
+| M6 柱 | ⬜ 未着手 | |
+| M7 基礎（壁・スラブ） | ⬜ 未着手 | |
+| M8 基礎の高度化 | ⬜ 未着手 | |
+| M9 床板 | ⬜ 未着手 | |
+| M10 シンボル置換系 | ⬜ 未着手 | |
+| M11 屋根組 | ⬜ 未着手 | |
+| M12 断面記号・伏図記号 | ⬜ 未着手 | |
+| M13 シート・伏図・タグ・凡例 | ⬜ 未着手 | |
+| M14 断面ビューポート | ⬜ 未着手 | |
+
+直近の到達点（PR #4〜#6）: プレースホルダー識別子の置換、`src/{core,parse,draw}/` の
+2 フェーズ骨組みと CMake ターゲット分割（無 SDK の `HomeskzIfcCore` 静的ライブラリ＋
+SDK 依存 `draw/` の上乗せ）、最小 STEP リーダ（`parse/Step`）とローダ（`parse/Loader`）、
+これらを無 SDK で回す単体テスト（`StepTests` / `LoaderTests` / `CoreDocumentTests`）。
+
 ---
 
-## M0 — 基盤整備（骨組み・STEP リーダ・Document 土台）
+## M0 — 基盤整備（骨組み・STEP リーダ・Document 土台）🟨
 
 **目的:** テンプレートを本プラグインへ改名し、2 フェーズの骨組みと無 SDK テスト土台を敷く。
 描画対象はまだ無し（土台のみ）。
@@ -32,28 +57,43 @@ Python プラグイン（`vectorworks-plugin-script-import-ifc-homeskz`）を C+
   VCOM ユニバーサル名・**UUID を再生成**・namespace（`CExtMenuImportIfc` /
   `CImportIfcMenu_EventSink`）・`VW_REPO`・メニュー `ファイル` ▸ `ホームズ君IFCをインポート…`）。
   現在の識別子は README「プラグイン識別子」節を参照。`.vwstrings` は UTF-16LE/BOM/CRLF を保持。
-- ⬜ ディレクトリ骨組み: `src/core/` `src/parse/` `src/draw/` と CMake ターゲット分割。
+- ✅ ディレクトリ骨組み: `src/core/` `src/parse/` `src/draw/` と CMake ターゲット分割。
   **`parse/`・`core/` は VectorWorks SDK を include しない**ビルド構成にする（無 SDK で
-  コンパイルできることを CI で担保）。
-- ⬜ `core/Geometry.h`: `Vec2` / `Vec3` / `Mat4`（配置行列合成に足りる最小限）。
-- ⬜ `core/Document.h`: 空の Document 構造体（バージョン＋各命令リストの器）と
+  コンパイルできることを CI で担保）。→ 無 SDK 静的ライブラリ `HomeskzIfcCore`
+  （`core/` + `parse/`）に分離し、プラグインは SDK 依存 `draw/` を上乗せ、テストは
+  同ライブラリを無 SDK でリンク（PR #5）。
+- 🟨 `core/Geometry.h`: `Vec2` / `Vec3` / `Mat4`（配置行列合成に足りる最小限）。
+  → `Vec2` / `Vec3` は実装済み。`Mat4`（配置行列合成）とベクトル演算は、実際に使う
+  M2「幾何の土台」へ意図的に先送り（現状はプレースホルダーの TODO）。
+- ✅ `core/Document.h`: 空の Document 構造体（バージョン＋各命令リストの器）と
   `validateDocument` の骨組み。任意で `core/DocumentJson`（デバッグ／ゴールデン用）。
-- ⬜ `parse/Step`: **最小 STEP リーダ**。トークナイザ＋エンティティグラフ
+  → `Document`（`version`）＋ `validateDocument` を実装（PR #5）。命令リストと
+  `DocumentJson`（任意）は各要素マイルストーンで追加。
+- ✅ `parse/Step`: **最小 STEP リーダ**。トークナイザ＋エンティティグラフ
   （`byType(name)` / インデックス属性アクセス / 逆参照 lookup）。ホームズ君サブセット前提。
-- ⬜ `parse/Loader`: ファイル読み込み（テキスト→STEP グラフ）。自前リーダは非正規
+  → `Model`（`entity` / `byType` / `referrers` / `resolve`）と `parseStep` を実装、
+  `StepTests` で網羅（PR #6）。
+- ✅ `parse/Loader`: ファイル読み込み（テキスト→STEP グラフ）。自前リーダは非正規
   エンティティ（IFC4 専用 `IFCFOOTINGTYPE` の混入等）を許容するため、Python 版
   `loader.py` のようなサニタイズ（除去）は不要（詳細は CLAUDE.md「アーキテクチャ」）。
-- ⬜ `tests/`: フィクスチャを Python 版 `tests/fixtures/` から流用。`StepTests` で
-  リーダを実 IFC に対してテスト（`by_type` の件数など）。
+  → `loadIfc` / `loadIfcFromText` を実装、非正規エンティティを除去せず読めることを
+  `LoaderTests` で確認（PR #6）。
+- ✅ `tests/`: フィクスチャを Python 版 `tests/fixtures/` から流用。`StepTests` で
+  リーダを実 IFC に対してテスト（`by_type` の件数など）。→ `StepTests` /
+  `LoaderTests` / `CoreDocumentTests`（無 SDK）を追加（PR #6）。ホームズ君の実 IFC
+  フィクスチャ（グレー本モデル・サンプル邸・スキップフロア・伏図次郎 等）を Python 版から
+  一式流用済み（PR #8）。`LoaderTests` は `minimal_grid.ifc` で実ファイル読み込みを検証。
 - ⬜ メニューコマンドを「IFC をインポート」の器へ改修（ファイル選択ダイアログ →
-  `openIfc` → まだ描画せず件数をダイアログ表示、程度）。
+  `openIfc` → まだ描画せず件数をダイアログ表示、程度）。→ **M0 の残タスク**。現状の
+  `ExtMenu::DoInterface` はビルド情報ダイアログを出すのみ。ファイル選択→`buildDocument`
+  →件数表示への差し替えが必要（これで M0 の「ローカル確認」が回る）。
 
 **ローカル確認:** メニューからコマンド実行 → IFC を選ぶ → 「グリッド軸 N 本を検出」等の
 件数がダイアログに出る（パースが動いている確証）。
 
 ---
 
-## M1 — 通り芯（グリッド）★最初の縦切り
+## M1 — 通り芯（グリッド）★最初の縦切り ⬜
 
 **目的:** 2 フェーズが端から端まで通ることを、最も単純な要素で実証する。
 grids は配置行列・断面・ストーリを必要としない（`IfcGridAxis` → ポリライン → 中心
@@ -74,7 +114,7 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
 
 ---
 
-## M2 — 幾何の土台（配置行列・押し出しソリッド・断面）
+## M2 — 幾何の土台（配置行列・押し出しソリッド・断面） ⬜
 
 **目的:** M3 以降のほぼ全要素が使う共有の幾何計算を、描画なしで先に固めて de-risk する。
 **Python: ifcopenshell 依存部の自前計算（`ifc/footing.py` の `_world_solid` 等）＋
@@ -93,7 +133,7 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
 
 ---
 
-## M3 — ストーリ（階・レベル・レイヤ）
+## M3 — ストーリ（階・レベル・レイヤ） ⬜
 
 **目的:** 以降の要素の配置先となるストーリ・ストーリレベル・デザインレイヤを生成する。
 **Python: `ifc/story.py` / `vw/story.py`。**
@@ -113,7 +153,7 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
 
 ---
 
-## M4 — 構造クラス判定（純ロジック）
+## M4 — 構造クラス判定（純ロジック） ⬜
 
 **目的:** 柱・横架材の `04構造-02木造-…` クラス割り当てを純ロジックとして移植。
 描画は無し（M5/M6 が使う）。**Python: `ifc/structural_class.py`。**
@@ -126,7 +166,7 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
 
 ---
 
-## M5 — 横架材（梁）
+## M5 — 横架材（梁） ⬜
 
 **目的:** 中核要素。土台・梁・桁をストーリレベルにバインドして描く。傾斜梁・食い込み
 調整は基本形のみ先に、登り梁の任意断面と屋根スナップは M11 へ回す。
@@ -147,7 +187,7 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
 
 ---
 
-## M6 — 柱（管柱・通し柱・小屋束）
+## M6 — 柱（管柱・通し柱・小屋束） ⬜
 
 **目的:** 柱を構造材ツールで鉛直材として描き、span レイヤに分けて配置する。
 **Python: `ifc/column.py` / `vw/column.py`。**
@@ -166,7 +206,7 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
 
 ---
 
-## M7 — 基礎（立上り＝壁・底盤＝スラブ）＋基礎ストーリ
+## M7 — 基礎（立上り＝壁・底盤＝スラブ）＋基礎ストーリ ⬜
 
 **目的:** 基礎の主要 2 オブジェクトと基礎ストーリを描く。地中梁・人通口・壁結合・配筋は
 M8 に分割。**Python: `ifc/footing.py`（一部）/ `vw/footing.py`。**
@@ -185,7 +225,7 @@ M8 に分割。**Python: `ifc/footing.py`（一部）/ `vw/footing.py`。**
 
 ---
 
-## M8 — 基礎の高度化（地中梁・人通口・壁結合・配筋）
+## M8 — 基礎の高度化（地中梁・人通口・壁結合・配筋） ⬜
 
 **目的:** 基礎の残り機能。M7 の上に積む。**Python: `ifc/footing.py` / `ifc/reinforcement.py`。**
 
@@ -202,7 +242,7 @@ M8 に分割。**Python: `ifc/footing.py`（一部）/ `vw/footing.py`。**
 
 ---
 
-## M9 — 床板
+## M9 — 床板 ⬜
 
 **目的:** 各階 `n-FL` に床ツールで床を描き、段差（スキップフロア）を表現。
 床レイヤを最背面へ回す並べ替えを効かせる。**Python: `ifc/floor.py` / `vw/floor.py`。**
@@ -217,7 +257,7 @@ M8 に分割。**Python: `ifc/footing.py`（一部）/ `vw/footing.py`。**
 
 ---
 
-## M10 — シンボル置換系（アンカーボルト・床束・火打・仕口）
+## M10 — シンボル置換系（アンカーボルト・床束・火打・仕口） ⬜
 
 **目的:** ハイブリッドシンボルへの置換 4 種。互いに独立で小さく、まとめて 1 マイルストーン。
 **Python: `ifc/{anchor_bolt,floor_post,fire_brace,joint}.py` / 対応 `vw/`。**
@@ -232,7 +272,7 @@ M8 に分割。**Python: `ifc/footing.py`（一部）/ `vw/footing.py`。**
 
 ---
 
-## M11 — 屋根組（垂木・野地板・登り梁）
+## M11 — 屋根組（垂木・野地板・登り梁） ⬜
 
 **目的:** 屋根版から導出する屋根組と、母屋・棟木・登り梁の専用レイヤ分離。
 **Python: `ifc/{rafter,roof,noboribari,member}.py`。**
@@ -248,7 +288,7 @@ M8 に分割。**Python: `ifc/footing.py`（一部）/ `vw/footing.py`。**
 
 ---
 
-## M12 — 断面記号・伏図記号
+## M12 — 断面記号・伏図記号 ⬜
 
 **目的:** span 柱レイヤごとに `柱束伏図記号` PIO を配置（断面記号＝×/／、伏図記号＝シンボル）。
 **Python: `ifc/column_mark.py` / `vw/column_mark.py`。**
@@ -262,7 +302,7 @@ M8 に分割。**Python: `ifc/footing.py`（一部）/ `vw/footing.py`。**
 
 ---
 
-## M13 — シート・伏図・データタグ・凡例
+## M13 — シート・伏図・データタグ・凡例 ⬜
 
 **目的:** シートレイヤとビューポート（基礎伏図／各階柱梁伏図／母屋伏図）、断面寸法データタグ、
 グラフィック凡例。**Python: `ifc/sheet.py` / `ifc/tag.py` / `vw/sheet.py`。**
@@ -278,7 +318,7 @@ M8 に分割。**Python: `ifc/footing.py`（一部）/ `vw/footing.py`。**
 
 ---
 
-## M14 — 断面ビューポート（軸組図）
+## M14 — 断面ビューポート（軸組図） ⬜
 
 **目的:** 既製の 40 枚（`X1`〜`X20`/`Y1`〜`Y20`）の断面指示線・ビューポートを、柱梁の芯を通る
 通りへ移動・改名・削除・整列。**Python: `ifc/section.py` / `vw/section.py`。**
