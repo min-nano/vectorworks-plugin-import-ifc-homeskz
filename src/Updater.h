@@ -34,7 +34,8 @@ namespace HomeskzIfcImport
 	// Dev plug-in only. At Vectorworks start-up, ask (native dialogs) which build
 	// to use: the currently installed one, or another branch's prerelease. If a
 	// different build is chosen it is installed (restart to load it); otherwise
-	// nothing happens and start-up continues. Silent on a network error. Runs
-	// only once per session.
+	// nothing happens and start-up continues. The picker is skipped entirely when
+	// there is nothing to choose between — no prereleases exist, or the only one
+	// is the running build. Silent on a network error. Runs only once per session.
 	void RunDevStartupCheck();
 } // namespace HomeskzIfcImport
