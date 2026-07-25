@@ -90,6 +90,56 @@ if(VW_BUILD_PLUGIN
 			"-DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON.")
 endif()
 
+# --- SDK-free core/parse library ---------------------------------------------
+# The 2-phase architecture (CLAUDE.md / ROADMAP.md M0) keeps IFC parsing
+# (src/parse/) and the phase-independent foundation (src/core/) STRICTLY free of
+# the Vectorworks SDK, so they compile, run and unit-test on any toolchain — the
+# same footing as the updater's SDK-free logic. This library is that code, built
+# once as a single target that both the plug-in and the unit tests link against:
+#
+#   * the plug-in (VW_BUILD_PLUGIN) links it and adds the SDK-dependent draw/
+#     phase (src/draw/) on top;
+#   * the tests (VW_BUILD_TESTS) link it to exercise core/parse WITHOUT the SDK,
+#     which is what lets the SDK-free Linux jobs build it with no SDK present.
+#
+# The dependency direction is enforced by construction: these sources include
+# only core/ and parse/ headers (never PluginPrefix.h / the SDK). The draw/ phase
+# is compiled into the plug-in target instead (it needs the SDK), and the two
+# phases meet only through core/Document.h.
+if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
+	add_library(HomeskzIfcCore STATIC src/core/Document.cpp src/parse/BuildDocument.cpp)
+	target_compile_features(HomeskzIfcCore PUBLIC cxx_std_20)
+	# PUBLIC so every consumer (plug-in + tests) resolves "core/..." / "parse/..."
+	# includes against src/ the same way.
+	target_include_directories(HomeskzIfcCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+	# Our own SDK-free code is kept warning-clean, so warnings are errors here
+	# (unlike the plug-in target, whose SDK headers are not warning-clean).
+	if(MSVC)
+		target_compile_options(HomeskzIfcCore PRIVATE /W4 /WX)
+	else()
+		target_compile_options(HomeskzIfcCore PRIVATE -Wall -Wextra -Werror)
+	endif()
+
+	# Match the tests' instrumentation so, when the coverage or sanitizer job
+	# builds the tests, this library's code is measured / checked too (the test
+	# executables carry the corresponding link flags; see tests/CMakeLists.txt).
+	if(VW_ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+		target_compile_options(
+			HomeskzIfcCore
+			PRIVATE -O0
+					-g
+					--coverage
+					-fprofile-arcs
+					-ftest-coverage)
+	endif()
+	if(VW_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+		target_compile_options(
+			HomeskzIfcCore PRIVATE -g -fno-omit-frame-pointer -fsanitize=address,undefined
+								   -fno-sanitize-recover=all)
+	endif()
+endif()
+
 if(VW_BUILD_PLUGIN)
 
 	# --- Locate the Vectorworks SDK ---------------------------------------------
@@ -168,8 +218,15 @@ if(VW_BUILD_PLUGIN)
 			CACHE STRING "Git branch this build came from")
 	endif()
 
-	set(VW_COMMON_SOURCES src/ModuleMain.cpp src/Extensions/ExtMenu.cpp src/Updater.cpp
-						  src/UpdaterFlow.cpp)
+	# The plug-in sources: the module entry point + menu command + updater, plus
+	# the SDK-dependent draw/ phase (src/draw/). The SDK-free core/ + parse/ code
+	# is NOT listed here — it comes in via the HomeskzIfcCore library linked below.
+	set(VW_COMMON_SOURCES
+		src/ModuleMain.cpp
+		src/Extensions/ExtMenu.cpp
+		src/Updater.cpp
+		src/UpdaterFlow.cpp
+		src/draw/ExecuteDocument.cpp)
 
 	# add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])
 	#
@@ -211,6 +268,10 @@ if(VW_BUILD_PLUGIN)
 					"${VW_SDK_INCLUDE}/Interfaces"
 					"${VW_SDK_INCLUDE}/VWMM"
 					"${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+		# The SDK-free Phase-1 code (core/ + parse/). draw/ (compiled into this
+		# target above) reaches parse output through core/Document.h.
+		target_link_libraries(${target} PRIVATE HomeskzIfcCore)
 
 		# RELEASE_BLD: link against the Release SDK. VW_BUILD_VERSION/VW_BUILD_BRANCH:
 		# build stamp (commit + branch), shown in the menu command's alert.
