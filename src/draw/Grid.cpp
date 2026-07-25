@@ -13,6 +13,8 @@
 //	  * gSDK->CreateCustomObjectPath(name,path,prof,regen) … パスから PIO を生成
 //	  * gSDK->AddClass(name)->InternalIndex / SetObjectClass … クラス分け
 //	  * VWParametricObj(h).SetParamString(name,value)      … PIO パラメータ
+//	  * gSDK->ResetObject(h)                               … パラメータ変更の反映
+//	  * gSDK->Move3DObj(h, dx,dy,dz)                       … PIO をローカル→絶対位置へ移動
 //
 //	実描画（位置・クラス分け・軸名ラベル・基点バブル）はローカルの VectorWorks で
 //	目視確認する（ROADMAP.md M1「ローカル確認」）。特に GridAxis PIO のパラメータ
@@ -67,23 +69,29 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetObjectClass(object, classID);
 		}
 
-		// 1 本の通り芯を描く（Python 版 vw/grid.py draw_grid に対応）。始点→終点の直線を
-		// パスに GridAxis PIO を生成し、クラス・軸名ラベル・基点バブルを設定して再計算する。
-		// PIO 生成に失敗したら通常の直線へフォールバックする。何か 1 つでも配置できたら true。
+		// 1 本の通り芯を描く（Python 版 vw/grid.py draw_grid に対応）。GridAxis PIO を
+		// 生成し、クラス・軸名ラベル・基点バブルを設定して再計算する。PIO 生成に失敗
+		// したら通常の直線へフォールバックする。何か 1 つでも配置できたら true。
+		//
+		// 重要（基点バブルの位置）: GridAxis PIO の基点バブルは**オブジェクトのローカル
+		// 原点**を基準に描かれる。パスに絶対座標を焼き込むと線は正しい位置に出るが、
+		// オブジェクト原点は (0,0) のままなのでバブルが全数ワールド原点へ重なってしまう。
+		// そこで本コードベースの他 PIO（柱・横架材・床。CLAUDE.md「ローカル原点から作成し
+		// Move3D で絶対位置へ」）と同じく、**パスをローカル原点から作り、生成後に
+		// Move3DObj でセンタリング済み始点へ平行移動**する。これで線もバブルも始点基準に
+		// 揃う（オブジェクト全体が平行移動するため）。
 		bool DrawOne(const core::GridCommand& grid)
 		{
-			const WorldPt start = ToWorldPt(grid.start);
-			const WorldPt end = ToWorldPt(grid.end);
-
-			// パスとなる直線をアクティブレイヤに引く。パスに Z 成分は持たせない（平面）。
-			MCObjectHandle path = gSDK->CreateLine(start, end);
+			// パスはローカル原点 (0,0) から (Δx, Δy) で作る（Z 成分は持たせない＝平面）。
+			const WorldPt localStart(0.0, 0.0);
+			const WorldPt localEnd(grid.end.x - grid.start.x, grid.end.y - grid.start.y);
+			MCObjectHandle path = gSDK->CreateLine(localStart, localEnd);
 			if (path == nil)
 				return false;
 
 			// パスから GridAxis のカスタムオブジェクト（PIO）を生成する。第 3 引数の
-			// プロファイルグループは nil。Python 版は空グループを渡すが、GridAxis は
-			// 断面を押し出す種の PIO ではなく（2D の通り芯＋バブル）、空グループと nil は
-			// 等価に働く（ローカル確認対象）。第 4 引数は生成後に再計算するか（true）。
+			// プロファイルグループは nil（GridAxis は断面押し出し系でなく 2D の通り芯＋
+			// バブルのため）。第 4 引数は生成後に再計算するか（true）。
 			const TXString kGridAxis("GridAxis");
 			MCObjectHandle object = gSDK->CreateCustomObjectPath(kGridAxis, path, nil, true);
 
@@ -99,13 +107,18 @@ namespace HomeskzIfcImport::draw
 					pio.SetParamString("Label", TXString(grid.label.c_str()));
 				pio.SetParamString("ShowBubbleAt", "Start Point");
 				gSDK->ResetObject(object);
+				// ローカル原点で作った PIO を、センタリング済み始点の絶対位置へ移動する。
+				// 線・バブルを含むオブジェクト全体が平行移動し、バブルが始点に揃う。
+				gSDK->Move3DObj(object, grid.start.x, grid.start.y, 0.0);
 			}
 			else
 			{
 				// フォールバック: 'GridAxis' PIO が無い等で生成に失敗したら通常の直線を
-				// 引く。Python 版と同じく新規に引く（パスは CreateCustomObjectPath に
-				// 取り込まれ得るため再利用しない）。
-				MCObjectHandle fallback = gSDK->CreateLine(start, end);
+				// 引く。バブルが無く原点問題は起きないため、絶対座標でそのまま引く
+				// （Python 版と同じく新規に引く。パスは CreateCustomObjectPath に取り込まれ
+				// 得るため再利用しない）。
+				MCObjectHandle fallback =
+					gSDK->CreateLine(ToWorldPt(grid.start), ToWorldPt(grid.end));
 				if (fallback != nil)
 					SetClassByName(fallback, grid.drawClass);
 			}
