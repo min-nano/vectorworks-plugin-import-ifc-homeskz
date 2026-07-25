@@ -81,11 +81,15 @@ VectorWorks ネイティブオブジェクト
   アクセス / 逆参照 lookup）を提供する。**幾何エンジン（OpenCASCADE 等）は使わない**
   ——Python 版も ifcopenshell を「エンティティグラフの読み取り」だけに使い、配置行列・
   断面・押し出しの幾何計算は自前で行っている。その幾何計算を C++ へ移植する。
-- **読み込み時サニタイズ**（`ifc/loader.py` 相当）: ホームズ君 IFC2X3 に混入する
-  `IFCFOOTINGTYPE`（IFC4 専用エンティティ）を、STEP テキストから除去してから解析する
-  （本プラグインは基礎の型を参照しないため除去して問題ない）。自前リーダなら
-  「未知エンティティを黙って読み飛ばす」実装にしてもよい（挙動は同値）。方針は
-  Python 版 `loader.py` の docstring を参照。
+- **読み込み時サニタイズは不要**（`ifc/loader.py` との相違点）: Python 版が
+  ホームズ君 IFC2X3 に混入する `IFCFOOTINGTYPE`（IFC4 専用エンティティ）を STEP
+  テキストから除去していたのは、**ifcopenshell が IFC2X3 スキーマに無い非正規
+  エンティティに出会うと処理を中断してしまう**からで、除去はその回避策だった。
+  自前 STEP リーダ（`parse/Step`）は**スキーマ検証をせず非正規エンティティも
+  そのまま読める**ため、除去は不要。本プラグインはそれらの型を参照しないので、
+  グラフ上に残っていても無害（挙動は Python 版の除去と同値）。したがって
+  `parse/Loader` はファイル読み込み（テキスト→STEP グラフ）だけを担い、
+  サニタイズ処理は持たない。
 - 出力は **Document**（下記）。ここに `vs`/SDK ハンドルや STEP エンティティポインタ等の
   「フェーズ間で運べないもの」を入れない。
 
@@ -131,7 +135,7 @@ src/
 
   parse/                    Phase 1: IFC 解析（SDK 非依存）… 旧 ifc/
     Step.{h,cpp}            最小 STEP リーダ（トークナイザ＋エンティティグラフ）
-    Loader.{h,cpp}          サニタイズを含む読み込み（旧 loader.py）
+    Loader.{h,cpp}          ファイル読み込み: テキスト→STEP グラフ（旧 loader.py。サニタイズは不要）
     IfcGeometry.{h,cpp}     配置行列・押し出しソリッド・断面の解決（旧 footing._world_solid 等）
     BuildDocument.{h,cpp}   build_document 相当のオーケストレーション
     Grid.{h,cpp}            通り芯（旧 ifc/grid.py）
@@ -240,7 +244,7 @@ Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テス�
 
 | Python | C++（目標） | 役割 |
 | --- | --- | --- |
-| `ifc/loader.py` | `parse/Loader` + `parse/Step` | 読み込み・サニタイズ・STEP グラフ |
+| `ifc/loader.py` | `parse/Loader` + `parse/Step` | 読み込み・STEP グラフ（サニタイズは不要） |
 | `ifc/__init__.py` `build_document` | `parse/BuildDocument` | 解析オーケストレーション |
 | `ifc/grid.py` … `ifc/section.py` | `parse/Grid` … `parse/Section` | 要素ごとの解析 |
 | `ifc/structural_class.py` | `parse/StructuralClass` | 構造クラス判定（純ロジック） |

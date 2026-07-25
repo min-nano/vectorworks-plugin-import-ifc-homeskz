@@ -40,7 +40,9 @@ Python プラグイン（`vectorworks-plugin-script-import-ifc-homeskz`）を C+
   `validateDocument` の骨組み。任意で `core/DocumentJson`（デバッグ／ゴールデン用）。
 - ⬜ `parse/Step`: **最小 STEP リーダ**。トークナイザ＋エンティティグラフ
   （`byType(name)` / インデックス属性アクセス / 逆参照 lookup）。ホームズ君サブセット前提。
-- ⬜ `parse/Loader`: サニタイズ（`IFCFOOTINGTYPE` 除去、または未知エンティティ読み飛ばし）。
+- ⬜ `parse/Loader`: ファイル読み込み（テキスト→STEP グラフ）。自前リーダは非正規
+  エンティティ（IFC4 専用 `IFCFOOTINGTYPE` の混入等）を許容するため、Python 版
+  `loader.py` のようなサニタイズ（除去）は不要（詳細は CLAUDE.md「アーキテクチャ」）。
 - ⬜ `tests/`: フィクスチャを Python 版 `tests/fixtures/` から流用。`StepTests` で
   リーダを実 IFC に対してテスト（`by_type` の件数など）。
 - ⬜ メニューコマンドを「IFC をインポート」の器へ改修（ファイル選択ダイアログ →
