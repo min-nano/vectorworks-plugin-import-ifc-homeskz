@@ -25,7 +25,7 @@ Python プラグイン（`vectorworks-plugin-script-import-ifc-homeskz`）を C+
 
 | マイルストーン | 状態 | 備考 |
 | --- | --- | --- |
-| M0 基盤整備 | 🟨 進行中 | 骨組み・CMake 分割・STEP リーダ・Loader・無 SDK テストは完了。残: メニューの器改修（ファイル選択→parse→件数ダイアログ）。`Mat4` は M2 へ先送り。|
+| M0 基盤整備 | ✅ 完了 | 骨組み・CMake 分割・STEP リーダ・Loader・無 SDK テスト、メニューの器改修（ファイル選択→parse→件数ダイアログ）まで完了。`Mat4` は M2 へ意図的に先送り。|
 | M1 通り芯 | ⬜ 未着手 | 最初の縦切り。|
 | M2 幾何の土台 | ⬜ 未着手 | 配置行列・押し出し・断面（`Mat4` を含む）。|
 | M3 ストーリ | ⬜ 未着手 | |
@@ -48,7 +48,7 @@ SDK 依存 `draw/` の上乗せ）、最小 STEP リーダ（`parse/Step`）と�
 
 ---
 
-## M0 — 基盤整備（骨組み・STEP リーダ・Document 土台）🟨
+## M0 — 基盤整備（骨組み・STEP リーダ・Document 土台）✅
 
 **目的:** テンプレートを本プラグインへ改名し、2 フェーズの骨組みと無 SDK テスト土台を敷く。
 描画対象はまだ無し（土台のみ）。
@@ -83,10 +83,13 @@ SDK 依存 `draw/` の上乗せ）、最小 STEP リーダ（`parse/Step`）と�
   `LoaderTests` / `CoreDocumentTests`（無 SDK）を追加（PR #6）。ホームズ君の実 IFC
   フィクスチャ（グレー本モデル・サンプル邸・スキップフロア・伏図次郎 等）を Python 版から
   一式流用済み（PR #8）。`LoaderTests` は `minimal_grid.ifc` で実ファイル読み込みを検証。
-- ⬜ メニューコマンドを「IFC をインポート」の器へ改修（ファイル選択ダイアログ →
-  `openIfc` → まだ描画せず件数をダイアログ表示、程度）。→ **M0 の残タスク**。現状の
-  `ExtMenu::DoInterface` はビルド情報ダイアログを出すのみ。ファイル選択→`buildDocument`
-  →件数表示への差し替えが必要（これで M0 の「ローカル確認」が回る）。
+- ✅ メニューコマンドを「IFC をインポート」の器へ改修（ファイル選択ダイアログ →
+  `summarizeIfc`（Phase 1）→ まだ描画せず主要要素の件数をダイアログ表示）。
+  `ExtMenu::DoInterface` はネイティブの「開く」ダイアログ（VCOM `IFileChooserDialog`）で
+  IFC を選ばせ、SDK 非依存の `parse/Summary`（`summarizeModel` / `formatSummary`）で
+  主要型（通り芯・階・横架材・柱・基礎・スラブ・金物）の件数を数えて `AlertInform` で
+  表示する。件数集計と文言整形は無 SDK テスト（`ParseSummaryTests`）で検証済みで、
+  SDK 側にはファイル選択とアラート表示だけを残す（CLAUDE.md「テスト方針」）。
 
 **ローカル確認:** メニューからコマンド実行 → IFC を選ぶ → 「グリッド軸 N 本を検出」等の
 件数がダイアログに出る（パースが動いている確証）。
