@@ -163,7 +163,7 @@ namespace HomeskzIfcImport::parse
 					skipTrivia();
 				}
 				return entities;
-			}
+			} // GCOVR_EXCL_LINE  例外巻き戻しの後始末専用（正常系では通らない）
 
 		private:
 			std::string_view fText;
@@ -354,7 +354,7 @@ namespace HomeskzIfcImport::parse
 				skipTrivia();
 				Value value;
 				if (atEnd())
-					return value;
+					return value; // GCOVR_EXCL_LINE  防御的 EOF ガード。parseArgList は !atEnd のときだけ呼ぶため到達不能
 
 				char const c = peek();
 				switch (c)
@@ -532,7 +532,7 @@ namespace HomeskzIfcImport::parse
 					}
 				}
 				return out;
-			}
+			} // GCOVR_EXCL_LINE  例外巻き戻しの後始末専用（正常系では通らない）
 
 			// 開き '.' に位置している前提で列挙記号（.TRUE. 等）の中身を読む。
 			std::string readEnum()
@@ -557,5 +557,5 @@ namespace HomeskzIfcImport::parse
 			model.addEntity(std::move(entity));
 		model.buildIndices();
 		return model;
-	}
+	} // GCOVR_EXCL_LINE  例外巻き戻しの後始末専用（正常系では通らない）
 } // namespace HomeskzIfcImport::parse
