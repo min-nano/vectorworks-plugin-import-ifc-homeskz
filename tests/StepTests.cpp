@@ -214,4 +214,159 @@ TEST(duplicate_id_keeps_first_declaration)
 	CHECK_EQ(model.entity(1)->type, std::string("IFCCARTESIANPOINT"));
 }
 
+// ---------------------------------------------------------------------------
+// 値の網羅: asReal / 派生値 / 空リスト / 指数 / 裸キーワード / 不明文字
+// ---------------------------------------------------------------------------
+
+TEST(as_real_normalizes_integer_and_non_number)
+{
+	Model const model = parseStep("#1=IFCX(42,'text');");
+	const Entity* e = model.entity(1);
+	CHECK(e != nullptr);
+	// 整数は double へ正規化。
+	CHECK(e->attribute(0).type == ValueType::Integer);
+	CHECK(e->attribute(0).asReal() > 41.9 && e->attribute(0).asReal() < 42.1);
+	// 非数値（文字列）・範囲外（Null）の asReal は 0。
+	CHECK_EQ(e->attribute(1).asReal(), 0.0);
+	CHECK_EQ(e->attribute(99).asReal(), 0.0);
+}
+
+TEST(reads_derived_value)
+{
+	Model const model = parseStep("#1=IFCX(*);");
+	CHECK(model.entity(1)->attribute(0).type == ValueType::Derived);
+}
+
+TEST(reads_empty_argument_list)
+{
+	Model const model = parseStep("#1=IFCX();");
+	const Entity* e = model.entity(1);
+	CHECK(e != nullptr);
+	CHECK_EQ(e->type, std::string("IFCX"));
+	CHECK(e->attributes.empty());
+}
+
+TEST(reads_number_with_exponent)
+{
+	Model const model = parseStep("#1=IFCX(1.5E-3,2E3,-4.0e2);");
+	const Entity* e = model.entity(1);
+	CHECK(e->attribute(0).type == ValueType::Real);
+	CHECK(e->attribute(0).asReal() > 0.0014 && e->attribute(0).asReal() < 0.0016);
+	CHECK(e->attribute(1).asReal() > 1999.0 && e->attribute(1).asReal() < 2001.0);
+	CHECK(e->attribute(2).asReal() < -399.0 && e->attribute(2).asReal() > -401.0);
+}
+
+TEST(reads_bare_keyword_as_enum)
+{
+	// '(' を伴わない裸の識別子は列挙記号として保持する（想定外入力への寛容）。
+	Model const model = parseStep("#1=IFCX(UNKNOWNKW);");
+	const Value& v = model.entity(1)->attribute(0);
+	CHECK(v.type == ValueType::Enum);
+	CHECK_EQ(v.text, std::string("UNKNOWNKW"));
+}
+
+TEST(skips_unparseable_value_character)
+{
+	// 値位置の解釈できない文字は 1 つ捨てて Null にする。
+	Model const model = parseStep("#1=IFCX(@);");
+	const Entity* e = model.entity(1);
+	CHECK(e != nullptr);
+	CHECK_EQ(e->attributes.size(), static_cast<std::size_t>(1));
+	CHECK(e->attribute(0).isNull());
+}
+
+// ---------------------------------------------------------------------------
+// 複合エンティティ #id=(A(...)B(...))
+// ---------------------------------------------------------------------------
+
+TEST(reads_complex_entity_record)
+{
+	Model const model = parseStep("#1=(IFCX(1)IFCY('a',2));");
+	const Entity* e = model.entity(1);
+	CHECK(e != nullptr);
+	// 型名は連結、属性は各レコードの引数を連結（1, 'a', 2）。
+	CHECK_EQ(e->type, std::string("IFCX.IFCY"));
+	CHECK_EQ(e->attributes.size(), static_cast<std::size_t>(3));
+	CHECK_EQ(e->attribute(0).integer, static_cast<long long>(1));
+	CHECK_EQ(e->attribute(1).text, std::string("a"));
+	CHECK_EQ(e->attribute(2).integer, static_cast<long long>(2));
+}
+
+// ---------------------------------------------------------------------------
+// 桁溢れ・数字なし参照は 0 に落とす（寛容な握りつぶし）
+// ---------------------------------------------------------------------------
+
+TEST(overflowing_integer_becomes_zero)
+{
+	Model const model = parseStep("#1=IFCX(999999999999999999999999);");
+	const Value& v = model.entity(1)->attribute(0);
+	CHECK(v.type == ValueType::Integer);
+	CHECK_EQ(v.integer, static_cast<long long>(0));
+}
+
+TEST(overflowing_reference_becomes_zero)
+{
+	Model const model = parseStep("#1=IFCX(#99999999999999);");
+	const Value& v = model.entity(1)->attribute(0);
+	CHECK(v.isReference());
+	CHECK_EQ(v.reference, 0);
+}
+
+TEST(reference_without_digits_is_zero)
+{
+	Model const model = parseStep("#1=IFCX(#);");
+	const Value& v = model.entity(1)->attribute(0);
+	CHECK(v.isReference());
+	CHECK_EQ(v.reference, 0);
+}
+
+// ---------------------------------------------------------------------------
+// 壊れた・途切れた入力への寛容さ（破棄して続行、クラッシュしない）
+// ---------------------------------------------------------------------------
+
+TEST(tolerates_malformed_terminated_instances)
+{
+	// 各種の壊れた宣言（';' で終端）はすべて読み飛ばし、正常な #100 だけが残る。
+	Model const model = parseStep("#0=IFCX($);"		// id<=0 → 破棄
+								  "#=IFCX($);"		// 数字なし id → 破棄
+								  "#3 IFCX($);"		// '=' 欠落 → 破棄
+								  "#5='x';"			// 型名が空 → 破棄
+								  "#6=IFCY;"		// 型名の後に '(' 無し → 破棄
+								  "#100=IFCZ($);"); // 正常
+	CHECK(model.entity(0) == nullptr);
+	CHECK(model.entity(3) == nullptr);
+	CHECK(model.entity(5) == nullptr);
+	CHECK(model.entity(6) == nullptr);
+	CHECK(model.entity(100) != nullptr);
+	CHECK_EQ(model.entity(100)->type, std::string("IFCZ"));
+}
+
+TEST(tolerates_input_truncated_mid_instance)
+{
+	// '=' 直後 EOF / 引数リスト未閉 / ',' 後 EOF / 複合レコード未閉。いずれも
+	// 例外を漏らさず空の Model になる（1 要素の欠損で全体を止めない）。
+	CHECK_EQ(parseStep("#4=").size(), static_cast<std::size_t>(0));
+	CHECK_EQ(parseStep("#7=IFCX(#8").size(), static_cast<std::size_t>(0));
+	CHECK_EQ(parseStep("#9=IFCX(#8,").size(), static_cast<std::size_t>(0));
+	CHECK_EQ(parseStep("#1=(IFCX(1)").size(), static_cast<std::size_t>(0));
+	// 複合レコードの 2 つ目のサブレコードが壊れている場合も破棄する。
+	CHECK_EQ(parseStep("#1=(IFCX(1)@);").size(), static_cast<std::size_t>(0));
+}
+
+TEST(unterminated_string_is_tolerated)
+{
+	// 閉じられない文字列を含む文は捨てられる。クラッシュ・無限ループしないこと。
+	Model const model = parseStep("#1=IFCX('abc");
+	CHECK_EQ(model.size(), static_cast<std::size_t>(0));
+}
+
+TEST(skips_header_statement_with_escaped_quote)
+{
+	// '#' 以外で始まる文（ヘッダ等）は読み飛ばす。文字列内の '' と ';' で誤らず、
+	// 後続の #1 を正しく読める。
+	Model const model = parseStep("FILE_NAME('a''b;c');\n#1=IFCX($);\n");
+	CHECK_EQ(model.size(), static_cast<std::size_t>(1));
+	CHECK(model.entity(1) != nullptr);
+}
+
 TEST_MAIN();

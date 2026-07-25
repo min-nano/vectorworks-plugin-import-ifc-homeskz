@@ -139,4 +139,32 @@ TEST(missing_file_reports_not_ok)
 	CHECK_EQ(model.size(), static_cast<std::size_t>(0));
 }
 
+// ---------------------------------------------------------------------------
+// サニタイズ判定の細部（空白入りの宣言・'=' の無い断片・末尾未終端・'' エスケープ）
+// ---------------------------------------------------------------------------
+
+TEST(sanitize_handles_spaces_and_escapes_around_dropped_type)
+{
+	// '#' 数字 '=' の間に空白があっても型名を判定して除去する。文字列内の '' も
+	// 正しく読み飛ばす。
+	std::string const text = "#1 = IFCFOOTINGTYPE('a''b',$);\n#2=IFCWALL($);\n";
+	std::string const clean = sanitizeIfcText(text);
+	CHECK(clean.find("IFCFOOTINGTYPE") == std::string::npos);
+	CHECK(clean.find("IFCWALL") != std::string::npos);
+}
+
+TEST(sanitize_keeps_hash_statement_without_equals)
+{
+	// '#' で始まるが '=' の無い断片は除去対象ではない（型名を読みに行かない）。
+	std::string const text = "#5;\n#6=IFCWALL($);\n";
+	CHECK_EQ(sanitizeIfcText(text), text);
+}
+
+TEST(sanitize_appends_trailing_unterminated_statement)
+{
+	// 末尾が ';' で終わらない入力でも、残余をそのまま出力へ残す（取りこぼさない）。
+	std::string const text = "#1=IFCWALL($);\n#2=IFCSLAB($)";
+	CHECK_EQ(sanitizeIfcText(text), text);
+}
+
 TEST_MAIN();
