@@ -56,7 +56,10 @@ namespace HomeskzIfcImport
 		bool ChooseIfcFile(std::string& outPath)
 		{
 			// IFileChooserDialogPtr は VCOMPtr<IFileChooserDialog> の SDK 標準 typedef。
-			IFileChooserDialogPtr dialog(IID_FileChooserDialog);
+			// const で受ける: operator-> は const なので、const のまま各インターフェース
+			// メソッド（SetTitle 等）を呼べる。VCOMPtr 自体は再代入しないため
+			// clang-tidy の misc-const-correctness にも従う。
+			const IFileChooserDialogPtr dialog(IID_FileChooserDialog);
 			if (!dialog)
 				return false;
 
