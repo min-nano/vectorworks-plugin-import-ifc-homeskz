@@ -11,11 +11,35 @@
 
 #include "core/Document.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace HomeskzIfcImport::core
 {
+	namespace
+	{
+		// 2 点が実質同一か（縮退した通り芯＝始点と終点が同じ、を弾く判定に使う）。
+		// 座標は mm。Python 版のように厳密一致ではなく微小許容で見る（丸め耐性）。
+		bool isDegenerate(const Vec2& a, const Vec2& b)
+		{
+			constexpr double kEps = 1e-6;
+			return std::abs(a.x - b.x) < kEps && std::abs(a.y - b.y) < kEps;
+		}
+	} // namespace
+
 	bool validateDocument(const Document& document)
 	{
-		// TODO: 命令リストが増えたら要素ごとの検証をここに積む（ROADMAP.md）。
-		return document.version == kDocumentVersion;
+		if (document.version != kDocumentVersion)
+			return false;
+
+		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。
+		// クラス名は空でもよい（無クラス＝既定クラスへ）。1 本でも不正なら描画しない
+		// （Python 版 validateDocument と同じ関門。ROADMAP.md M1）。
+		//
+		// TODO: 命令リストが増えたら、要素ごとの all_of を && で連ねてここに積む
+		// （story / member … の検証。ROADMAP.md）。
+		return std::ranges::all_of(
+			document.grids, [](const GridCommand& grid)
+			{ return !grid.layer.empty() && !isDegenerate(grid.start, grid.end); });
 	}
 } // namespace HomeskzIfcImport::core

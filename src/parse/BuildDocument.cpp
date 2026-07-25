@@ -12,6 +12,7 @@
 //
 
 #include "parse/BuildDocument.h"
+#include "parse/Grid.h"
 #include "parse/Loader.h"
 
 namespace HomeskzIfcImport::parse
@@ -23,9 +24,12 @@ namespace HomeskzIfcImport::parse
 		// 例外を漏らさず、空の Model として先へ進む（1 要素の欠損で全体を止めない）。
 		Model const model = loadIfc(ifcPath);
 
-		// TODO(M1〜): model から要素ごとの parse モジュール（Grid / Story / Member …）
-		// を呼んで Document を組み立てる。骨組みの現状では空の Document を返す。
-		(void)model;
-		return core::Document{};
+		core::Document document;
+
+		// M1 通り芯: IfcGridAxis を解析して GridCommand を積む（parse/Grid）。
+		// 以降のマイルストーンで Story / Member … の解析を同様に足していく（ROADMAP.md）。
+		document.grids = buildGridCommands(model);
+
+		return document;
 	}
 } // namespace HomeskzIfcImport::parse

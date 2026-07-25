@@ -26,7 +26,7 @@ Python プラグイン（`vectorworks-plugin-script-import-ifc-homeskz`）を C+
 | マイルストーン | 状態 | 備考 |
 | --- | --- | --- |
 | M0 基盤整備 | ✅ 完了 | 骨組み・CMake 分割・STEP リーダ・Loader・無 SDK テスト、メニューの器改修（ファイル選択→parse→件数ダイアログ）まで完了。`Mat4` は M2 へ意図的に先送り。|
-| M1 通り芯 | ⬜ 未着手 | 最初の縦切り。|
+| M1 通り芯 | 🟨 進行中 | 最初の縦切り。parse/draw 実装・無 SDK テスト green。ローカル目視確認とクラス名の確定待ち。|
 | M2 幾何の土台 | ⬜ 未着手 | 配置行列・押し出し・断面（`Mat4` を含む）。|
 | M3 ストーリ | ⬜ 未着手 | |
 | M4 構造クラス判定 | ⬜ 未着手 | |
@@ -96,24 +96,32 @@ SDK 依存 `draw/` の上乗せ）、最小 STEP リーダ（`parse/Step`）と�
 
 ---
 
-## M1 — 通り芯（グリッド）★最初の縦切り ⬜
+## M1 — 通り芯（グリッド）★最初の縦切り 🟨
 
 **目的:** 2 フェーズが端から端まで通ることを、最も単純な要素で実証する。
 grids は配置行列・断面・ストーリを必要としない（`IfcGridAxis` → ポリライン → 中心
 オフセット → `GridAxis` オブジェクト）。**Python: `ifc/grid.py` / `vw/grid.py`。**
 
-- ⬜ `parse/Grid`: `IfcGridAxis` の `AxisCurve`(`IfcPolyline`) 端点を取得、重複線除去、
-  bbox 中心でセンタリング、X/Y 通り判定（名前 `X`/`Y` 始まり、無ければ `|Δx|<|Δy|`）、
-  クラス名付与 → `GridCommand`。
-- ⬜ `core/Document`: `GridCommand`（`label` / `layer='共通'` / `drawClass` / `start` / `end`）。
-- ⬜ `draw/Grid`: `共通` レイヤを（無ければ）作成し、`CreateCustomObjectPath('GridAxis', …)`
+- ✅ `parse/Grid`: `IfcGridAxis` の `AxisCurve`(`IfcPolyline`) 端点を取得、重複線除去
+  （反転も同一）、bbox 中心でセンタリング、X/Y 通り判定（名前 `X`/`Y` 始まり優先、
+  無ければ `|Δx|<|Δy|`）、クラス名付与 → `GridCommand`。#id 昇順で決定的。
+- ✅ `core/Document`: `GridCommand`（`label` / `layer='共通'` / `drawClass` / `start` / `end`）
+  と `Document.grids`。`validateDocument` に通り芯の検証（レイヤ名・非縮退）を追加。
+- ✅ `draw/Grid`: `共通` レイヤを（無ければ）作成し、`CreateCustomObjectPath('GridAxis', …)`
   で生成。失敗時は通常線にフォールバック。`Label` / `ShowBubbleAt='Start Point'` を設定。
-- ⬜ `draw/ExecuteDocument`: grid 命令だけをディスパッチする最小版。
-- ⬜ テスト: `ParseGridTests`（フィクスチャで線の本数・センタリング・クラス判定を検証。
-  Python 版 `test_ifc_grid.py` を写す）。
+- ✅ `draw/ExecuteDocument`: grid 命令だけをディスパッチする最小版。メニューコマンドを
+  `buildDocument`→`executeDocument`→本数ダイアログの流れへ改修。
+- ✅ テスト: `ParseGridTests`（合成モデルとフィクスチャで本数・センタリング・X/Y 判定・
+  重複除去・欠損スキップ・決定性を検証。無 SDK で green）。
+- ⬜ **クラス名の確定**: X 通り／Y 通りのクラス文字列は Python 版 `ifc/grid.py` を典拠に
+  確定する。姉妹リポジトリが未添付のため、暫定で `通り芯-X` / `通り芯-Y` を
+  `parse/Grid.cpp` の定数に置いた（判明したら 2 定数を差し替えるだけ）。
+- ⬜ **ローカル目視確認**（下記）。
 
 **ローカル確認:** IFC を選ぶと `共通` レイヤに通り芯が描かれ、X/Y でクラス分けされ、
 軸名ラベルと基点バブルが出る。位置が原点付近にセンタリングされている。
+（`draw/Grid` の GridAxis PIO フィールド名・座標単位・レイヤ生成 API は SDK ビルドと
+VW 実機でのみ確認できる。CI の SDK ビルド green ＋ 目視で M1 完了とする。）
 
 ---
 

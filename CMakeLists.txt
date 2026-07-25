@@ -113,7 +113,8 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/BuildDocument.cpp
 		src/parse/Step.cpp
 		src/parse/Loader.cpp
-		src/parse/Summary.cpp)
+		src/parse/Summary.cpp
+		src/parse/Grid.cpp)
 	target_compile_features(HomeskzIfcCore PUBLIC cxx_std_20)
 	# PUBLIC so every consumer (plug-in + tests) resolves "core/..." / "parse/..."
 	# includes against src/ the same way.
@@ -232,7 +233,8 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtMenu.cpp
 		src/Updater.cpp
 		src/UpdaterFlow.cpp
-		src/draw/ExecuteDocument.cpp)
+		src/draw/ExecuteDocument.cpp
+		src/draw/Grid.cpp)
 
 	# add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])
 	#
