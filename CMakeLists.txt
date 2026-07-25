@@ -107,7 +107,12 @@ endif()
 # is compiled into the plug-in target instead (it needs the SDK), and the two
 # phases meet only through core/Document.h.
 if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
-	add_library(HomeskzIfcCore STATIC src/core/Document.cpp src/parse/BuildDocument.cpp)
+	add_library(
+		HomeskzIfcCore STATIC
+		src/core/Document.cpp
+		src/parse/BuildDocument.cpp
+		src/parse/Step.cpp
+		src/parse/Loader.cpp)
 	target_compile_features(HomeskzIfcCore PUBLIC cxx_std_20)
 	# PUBLIC so every consumer (plug-in + tests) resolves "core/..." / "parse/..."
 	# includes against src/ the same way.

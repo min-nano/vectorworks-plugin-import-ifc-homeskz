@@ -132,7 +132,9 @@ jobs:
           "clang-tidy-${CLANG_VERSION}" -p build --warnings-as-errors='*' \
             src/UpdaterFlow.cpp \
             src/core/Document.cpp \
-            src/parse/BuildDocument.cpp
+            src/parse/BuildDocument.cpp \
+            src/parse/Step.cpp \
+            src/parse/Loader.cpp
 
   # Layout + static checks for the CMake build files. cmake-format enforces the
   # house style in .cmake-format.yaml (tabs, 100 columns, comments left alone);
