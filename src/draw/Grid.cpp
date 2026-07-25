@@ -14,7 +14,7 @@
 //	  * gSDK->AddClass(name)->InternalIndex / SetObjectClass … クラス分け
 //	  * VWParametricObj(h).SetParamString(name,value)      … PIO パラメータ
 //	  * gSDK->ResetObject(h)                               … パラメータ変更の反映
-//	  * gSDK->Move3DObj(h, dx,dy,dz)                       … PIO をローカル→絶対位置へ移動
+//	  * VWParametricObj(h).MoveObject(dx,dy)               … PIO をローカル→絶対位置へ移動
 //
 //	実描画（位置・クラス分け・軸名ラベル・基点バブル）はローカルの VectorWorks で
 //	目視確認する（ROADMAP.md M1「ローカル確認」）。特に GridAxis PIO のパラメータ
@@ -109,7 +109,8 @@ namespace HomeskzIfcImport::draw
 				gSDK->ResetObject(object);
 				// ローカル原点で作った PIO を、センタリング済み始点の絶対位置へ移動する。
 				// 線・バブルを含むオブジェクト全体が平行移動し、バブルが始点に揃う。
-				gSDK->Move3DObj(object, grid.start.x, grid.start.y, 0.0);
+				// VWObject::MoveObject（平面移動。ISDK に Move3DObj は無い）。
+				pio.MoveObject(grid.start.x, grid.start.y);
 			}
 			else
 			{
