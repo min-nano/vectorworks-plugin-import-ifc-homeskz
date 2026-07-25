@@ -120,14 +120,19 @@ jobs:
             -DVW_BUILD_TESTS=ON \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-      # Lint the SDK-free updater logic (src/UpdaterFlow.cpp pulls in
-      # UpdaterParse.h and UpdaterHost.h, all covered via HeaderFilterRegex in
-      # .clang-tidy). WarningsAsErrors in the config makes any finding fail CI.
+      # Lint the SDK-free translation units: the updater logic (src/UpdaterFlow.cpp
+      # pulls in UpdaterParse.h / UpdaterHost.h) and the 2-phase core/parse code
+      # (src/core/ + src/parse/), which must stay SDK-free and clean. Their headers
+      # are covered via HeaderFilterRegex in .clang-tidy; WarningsAsErrors in the
+      # config makes any finding fail CI. draw/ needs the SDK, so it is tidied in
+      # the SDK build (build.yml), not here.
       - name: Run clang-tidy
         run: |
           set -euo pipefail
           "clang-tidy-${CLANG_VERSION}" -p build --warnings-as-errors='*' \
-            src/UpdaterFlow.cpp
+            src/UpdaterFlow.cpp \
+            src/core/Document.cpp \
+            src/parse/BuildDocument.cpp
 
   # Layout + static checks for the CMake build files. cmake-format enforces the
   # house style in .cmake-format.yaml (tabs, 100 columns, comments left alone);

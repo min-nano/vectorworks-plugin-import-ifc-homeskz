@@ -86,6 +86,14 @@ vw_add_test(UpdaterFlowTests UpdaterFlowTests.cpp "${CMAKE_SOURCE_DIR}/src/Updat
 # they also guard against a refactor quietly breaking the parsing contract.
 vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 
+# Smoke test for the SDK-free 2-phase skeleton (src/core/ + src/parse/). It links
+# the HomeskzIfcCore library (defined in the top-level CMakeLists.txt) instead of
+# compiling those sources directly, proving the CMake target split builds and
+# links with no SDK present. As parse modules land, their real tests (ParseGrid,
+# Geometry, …) join this one and link the same library.
+vw_add_test(CoreDocumentTests CoreDocumentTests.cpp)
+target_link_libraries(CoreDocumentTests PRIVATE HomeskzIfcCore)
+
 # Back-end tests for the bundled updater scripts. Both SOURCE (dot-source) their
 # script and drive its q-stable / q-dev / do-install functions with the network
 # boundary stubbed, so they run SDK- and network-free — the same idea as the C++
