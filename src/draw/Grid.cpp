@@ -57,42 +57,57 @@ namespace HomeskzIfcImport::draw
 				gSDK->SetCurrentLayer(layer);
 		}
 
-		// 1 本の通り芯を描く。始点→終点の直線を引き、それをパスに GridAxis PIO を
-		// 生成する。PIO 生成に失敗したら直線のまま残してフォールバックする。生成できた
-		// オブジェクト（PIO か直線）へクラス・軸名・基点バブルを設定する。
-		// 何か 1 つでも配置できたら true。
+		// オブジェクトのクラスを名前で設定する（AddClass は既存なら索引を返し、無ければ作る）。
+		// Python 版 vw/grid.py の vs.SetClass(handle, class) に対応する。
+		void SetClassByName(MCObjectHandle object, const std::string& className)
+		{
+			if (className.empty())
+				return;
+			const InternalIndex classID = gSDK->AddClass(TXString(className.c_str()));
+			gSDK->SetObjectClass(object, classID);
+		}
+
+		// 1 本の通り芯を描く（Python 版 vw/grid.py draw_grid に対応）。始点→終点の直線を
+		// パスに GridAxis PIO を生成し、クラス・軸名ラベル・基点バブルを設定して再計算する。
+		// PIO 生成に失敗したら通常の直線へフォールバックする。何か 1 つでも配置できたら true。
 		bool DrawOne(const core::GridCommand& grid)
 		{
+			const WorldPt start = ToWorldPt(grid.start);
+			const WorldPt end = ToWorldPt(grid.end);
+
 			// パスとなる直線をアクティブレイヤに引く。パスに Z 成分は持たせない（平面）。
-			MCObjectHandle path = gSDK->CreateLine(ToWorldPt(grid.start), ToWorldPt(grid.end));
+			MCObjectHandle path = gSDK->CreateLine(start, end);
 			if (path == nil)
 				return false;
 
-			// パスから GridAxis のカスタムオブジェクト（PIO）を生成する。第 3 引数は
-			// プロファイルグループ（無し=nil）、第 4 引数は生成後に再計算するか（true）。
-			// 'GridAxis' PIO が無い等で失敗（nil）したら、引いた直線をフォールバックにする。
+			// パスから GridAxis のカスタムオブジェクト（PIO）を生成する。第 3 引数の
+			// プロファイルグループは nil。Python 版は空グループを渡すが、GridAxis は
+			// 断面を押し出す種の PIO ではなく（2D の通り芯＋バブル）、空グループと nil は
+			// 等価に働く（ローカル確認対象）。第 4 引数は生成後に再計算するか（true）。
 			const TXString kGridAxis("GridAxis");
 			MCObjectHandle object = gSDK->CreateCustomObjectPath(kGridAxis, path, nil, true);
-			const bool isPio = (object != nil);
-			if (!isPio)
-				object = path; // フォールバック: 直線を残す
 
-			// クラス分け（X 通り／Y 通り）。AddClass は既存なら索引を返し、無ければ作る。
-			if (!grid.drawClass.empty())
+			if (object != nil)
 			{
-				const InternalIndex classID = gSDK->AddClass(TXString(grid.drawClass.c_str()));
-				gSDK->SetObjectClass(object, classID);
-			}
-
-			// GridAxis PIO のときは軸名ラベルと基点バブルをパラメータで設定する。
-			// パラメータ名・値は組み込み GridAxis PIO の仕様（ローカル確認対象。誤りでも
-			// 実行時に無視されるだけでビルドは通る。ROADMAP.md M1）。
-			if (isPio)
-			{
+				// クラス分け（X 通り／Y 通り）。
+				SetClassByName(object, grid.drawClass);
+				// 軸名ラベルと基点バブルをパラメータで設定する（Python 版の
+				// SetRField(handle,'GridAxis','Label'/'ShowBubbleAt',…) に対応。PIO の
+				// ユニバーサルパラメータ名でアクセスする）。設定後に再計算して反映する。
 				VWParametricObj pio(object);
 				if (!grid.label.empty())
 					pio.SetParamString("Label", TXString(grid.label.c_str()));
 				pio.SetParamString("ShowBubbleAt", "Start Point");
+				gSDK->ResetObject(object);
+			}
+			else
+			{
+				// フォールバック: 'GridAxis' PIO が無い等で生成に失敗したら通常の直線を
+				// 引く。Python 版と同じく新規に引く（パスは CreateCustomObjectPath に
+				// 取り込まれ得るため再利用しない）。
+				MCObjectHandle fallback = gSDK->CreateLine(start, end);
+				if (fallback != nil)
+					SetClassByName(fallback, grid.drawClass);
 			}
 			return true;
 		}

@@ -28,6 +28,10 @@ using HomeskzIfcImport::parse::Model;
 
 namespace
 {
+	// Python 版 ifc/grid.py の CLASS_X / CLASS_Y と一致するクラス名。
+	const std::string kClassX = "01作図-01線-01基準線-01通り芯-X通り";
+	const std::string kClassY = "01作図-01線-01基準線-01通り芯-Y通り";
+
 	// 2 つの実数が許容誤差内で等しいか（センタリング後の座標比較に使う）。
 	bool near(double a, double b)
 	{
@@ -111,11 +115,11 @@ TEST(classifies_x_and_y_by_name)
 	const GridCommand* y1 = find(grids, "Y1");
 	CHECK(x1 != nullptr && x2 != nullptr && y1 != nullptr);
 	if (x1 != nullptr)
-		CHECK_EQ(x1->drawClass, std::string("通り芯-X"));
+		CHECK_EQ(x1->drawClass, kClassX);
 	if (x2 != nullptr)
-		CHECK_EQ(x2->drawClass, std::string("通り芯-X"));
+		CHECK_EQ(x2->drawClass, kClassX);
 	if (y1 != nullptr)
-		CHECK_EQ(y1->drawClass, std::string("通り芯-Y"));
+		CHECK_EQ(y1->drawClass, kClassY);
 }
 
 TEST(classifies_by_geometry_when_name_absent)
@@ -137,9 +141,9 @@ TEST(classifies_by_geometry_when_name_absent)
 	for (const GridCommand& g : grids)
 	{
 		CHECK(g.label.empty());
-		if (g.drawClass == "通り芯-X")
+		if (g.drawClass == kClassX)
 			sawX = true;
-		if (g.drawClass == "通り芯-Y")
+		if (g.drawClass == kClassY)
 			sawY = true;
 	}
 	CHECK(sawX);
@@ -208,6 +212,45 @@ TEST(skips_axes_with_bad_points)
 	CHECK(find(grids, "X1") != nullptr);
 }
 
+TEST(skips_non_polyline_curve)
+{
+	// AxisCurve がポリラインでない軸はスキップする（Python の is_a('IfcPolyline') 判定）。
+	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
+										"#11=IFCCARTESIANPOINT((0.,1000.,0.));\n"
+										"#20=IFCPOLYLINE((#10,#11));\n"
+										"#21=IFCCIRCLE(#10,500.);\n" // ポリラインでない曲線
+										"#30=IFCGRIDAXIS('X1',#20,.T.);\n"
+										"#31=IFCGRIDAXIS('C1',#21,.T.);\n");
+	std::vector<GridCommand> const grids = buildGridCommands(model);
+
+	CHECK_EQ(grids.size(), static_cast<std::size_t>(1));
+	CHECK(find(grids, "X1") != nullptr);
+	CHECK(find(grids, "C1") == nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// 多点ポリライン（区間ごとに 1 本）
+// ---------------------------------------------------------------------------
+
+TEST(emits_one_line_per_polyline_segment)
+{
+	// 3 点のポリラインは連続する点対ごとに 2 本の線分になる（Python resolve_lines の
+	// `for i in range(len(pts) - 1)`）。(0,0)-(0,1000)-(0,2000) は同名 X1 の 2 区間。
+	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
+										"#11=IFCCARTESIANPOINT((0.,1000.,0.));\n"
+										"#12=IFCCARTESIANPOINT((0.,2000.,0.));\n"
+										"#20=IFCPOLYLINE((#10,#11,#12));\n"
+										"#30=IFCGRIDAXIS('X1',#20,.T.);\n");
+	std::vector<GridCommand> const grids = buildGridCommands(model);
+
+	CHECK_EQ(grids.size(), static_cast<std::size_t>(2));
+	for (const GridCommand& g : grids)
+	{
+		CHECK_EQ(g.label, std::string("X1"));
+		CHECK_EQ(g.drawClass, kClassX);
+	}
+}
+
 TEST(empty_model_yields_no_grids)
 {
 	Model const model =
@@ -234,9 +277,9 @@ TEST(reads_minimal_grid_fixture)
 	CHECK(x1 != nullptr);
 	CHECK(y1 != nullptr);
 	if (x1 != nullptr)
-		CHECK_EQ(x1->drawClass, std::string("通り芯-X"));
+		CHECK_EQ(x1->drawClass, kClassX);
 	if (y1 != nullptr)
-		CHECK_EQ(y1->drawClass, std::string("通り芯-Y"));
+		CHECK_EQ(y1->drawClass, kClassY);
 
 	// bbox 中心が原点へ来る（全端点の min+max が各軸で 0 になる）。
 	double minX = 1e18;
@@ -273,9 +316,9 @@ TEST(reads_real_homeskz_fixture)
 	bool sawY = false;
 	for (const GridCommand& g : grids)
 	{
-		if (g.drawClass == "通り芯-X")
+		if (g.drawClass == kClassX)
 			sawX = true;
-		if (g.drawClass == "通り芯-Y")
+		if (g.drawClass == kClassY)
 			sawY = true;
 	}
 	CHECK(sawX);

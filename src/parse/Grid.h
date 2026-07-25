@@ -25,9 +25,10 @@ namespace HomeskzIfcImport::parse
 {
 	// STEP Model から通り芯の描画命令を組み立てる（Python 版 build_grid_commands 相当）。
 	//
-	// 手順（ROADMAP.md M1）:
-	//   1. IfcGridAxis の AxisCurve(IfcPolyline) の端点（始点・終点）を取得。
-	//   2. 幾何的に重複する線を除去（反転も同一とみなす）。
+	// 手順（ROADMAP.md M1 / Python 版 ifc/grid.py resolve_lines）:
+	//   1. IfcGridAxis の AxisCurve(IfcPolyline) の全点を取り、連続する点対（線分）
+	//      ごとに 1 本を作る（多点ポリラインは複数本になる）。
+	//   2. 幾何的に重複する線分を除去（反転も同一とみなす）。
 	//   3. 全端点の bbox 中心を原点へ移すセンタリング（VW 上で原点付近に置く）。
 	//   4. X/Y 通り判定（軸名が X/Y で始まればそれ、無ければ |Δx|<|Δy| で縦横判定）。
 	//   5. 判定に応じてクラス名を付与。
