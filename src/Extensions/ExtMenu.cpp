@@ -8,7 +8,20 @@
 #include "BuildConfig.h"
 #include "Extensions/ExtMenu.h"
 
+// Phase 1（IFC 解析）の入口。SDK 非依存の core/parse ライブラリ（HomeskzIfcCore）に
+// 実装があり、このメニューコマンドがオーケストレーションする（Python 版 run() が
+// ifc.build_document を呼ぶのと同じ立ち位置）。ヘッダは SDK を引き込まない。
+#include "parse/Summary.h"
+
+// ファイル選択ダイアログ（VCOM）。ネイティブの「開く」ダイアログを出し、選ばれた
+// ファイルの絶対パスを IFileIdentifier 経由で受け取る。
+#include "Interfaces/VectorWorks/Filing/IFileChooserDialog.h"
+#include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
+
+#include <string>
+
 using namespace HomeskzIfcImport;
+using namespace VectorWorks::Filing;
 
 namespace HomeskzIfcImport
 {
@@ -31,6 +44,48 @@ namespace HomeskzIfcImport
 			/*VersionModified*/ 0,
 			/*VersionRetired*/ 0,
 			/*OverrideHelpID*/ ""};
+
+		// ネイティブの「開く」ダイアログで IFC ファイルを 1 つ選ばせる。選ばれたら
+		// その絶対パス（UTF-8）を outPath に入れて true を返す。キャンセルや取得失敗は
+		// false（呼び出し側は何も描かず静かに終える）。
+		//
+		// VCOM の作法（Info「VCOM」）: VCOMPtr に IID を渡して生成し、ポインタが有効かを
+		// if で確かめ、各呼び出しの VCOMError を kVCOMError_NoError と比較する。選択結果は
+		// IFileIdentifier（0 番目）から GetFileFullPath で受け取り、TXString の
+		// operator const char*()（UTF-8）で std::string へ写す。
+		bool ChooseIfcFile(std::string& outPath)
+		{
+			// IFileChooserDialogPtr は VCOMPtr<IFileChooserDialog> の SDK 標準 typedef。
+			IFileChooserDialogPtr dialog(IID_FileChooserDialog);
+			if (!dialog)
+				return false;
+
+			dialog->SetTitle("ホームズ君IFCファイルを選択");
+			// 拡張子フィルタ（.ifc）と、念のため全ファイル。存在チェックも有効化する。
+			dialog->AddFilter("ifc", "IFC ファイル (*.ifc)");
+			dialog->AddFilterAllFiles();
+			dialog->SetCheckFileExist(true);
+
+			// RunOpenDialog は OK 選択で kVCOMError_NoError を返す（キャンセルはそれ以外）。
+			if (dialog->RunOpenDialog() != kVCOMError_NoError)
+				return false;
+
+			Uint32 count = 0;
+			if (dialog->GetSelectedFileNamesCount(count) != kVCOMError_NoError || count == 0)
+				return false;
+
+			IFileIdentifierPtr fileID;
+			if (dialog->GetSelectedFileName(0, &fileID) != kVCOMError_NoError || !fileID)
+				return false;
+
+			TXString fullPath;
+			if (fileID->GetFileFullPath(fullPath) != kVCOMError_NoError)
+				return false;
+
+			// TXString → UTF-8 std::string（operator const char*() は UTF-8 を返す）。
+			outPath = static_cast<const char*>(fullPath);
+			return !outPath.empty();
+		}
 	} // namespace
 } // namespace HomeskzIfcImport
 
@@ -78,21 +133,25 @@ void CImportIfcMenu_EventSink::DoInterface()
 	// re-invoked programmatically — a picker on the command path would then pop up
 	// repeatedly. So the command just does its work below, every time it runs.
 
-	// This is the whole point of the plug-in for now: tell the user it ran,
-	// and show exactly which build is loaded so a freshly-installed update can
-	// be verified at a glance. VW_BUILD_BRANCH is the git branch the build came
-	// from and VW_BUILD_VERSION is its short commit hash, each shown on its own
-	// line, so a dev/PR build can be traced back to its exact branch and source
-	// revision at a glance. Both are "local" for a local build. The channel
-	// (dev/stable) is intentionally not shown here: the display name already
-	// carries "(Dev)" for dev builds.
-	//
-	// Shown as a modal dialog (the trailing false = NOT a minor alert) so the
-	// start-up confirmation is unmissable. A modal dialog displays both the main
-	// text and the second "advice" argument, so the channel and commit go in the
-	// advice line. (A minor alert would render only in the status bar and drop
-	// the advice text entirely.)
-	gSDK->AlertInform(PLUGIN_DISPLAY_NAME " plug-in started",
-					  "branch: " VW_BUILD_BRANCH "\ncommit: " VW_BUILD_VERSION,
+	// M0 の縦切り: ファイルを選ぶ → parse（Phase 1）で IFC を読む → 主要要素の件数を
+	// ダイアログに出す。まだ描画（Phase 2）はしない。パースが実際に動いている確証を
+	// 件数で示すのが狙い（ROADMAP.md M0「ローカル確認」）。Python 版 run() が
+	// ifc.build_document を呼ぶのと同じ入口で、ここがオーケストレーションを担う。
+
+	// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら静かに終える。
+	std::string ifcPath;
+	if (!ChooseIfcFile(ifcPath))
+		return;
+
+	// 2. Phase 1（SDK 非依存）で読み込み、主要エンティティ型の件数を数える。読み込み
+	//    失敗も例外を漏らさず loaded=false のサマリとして返る（1 要素の欠損で止めない）。
+	const parse::IfcSummary summary = parse::summarizeIfc(ifcPath);
+
+	// 3. 件数を人が読めるテキストへ整形してダイアログ表示（整形は無 SDK でテスト済み）。
+	//    本文に件数一覧、advice 行に選んだファイルのパスを出す。false = 最小アラートで
+	//    なくモーダルダイアログにして、本文と advice を両方見せる（Updater と同じ作法）。
+	//    TXString は UTF-8 の const char* から暗黙変換される（日本語を含めそのまま渡せる）。
+	const std::string body = parse::formatSummary(summary);
+	gSDK->AlertInform(body.c_str(), ifcPath.c_str(),
 					  false /* not a minor alert: show a modal dialog */);
 }

@@ -108,6 +108,16 @@ target_link_libraries(LoaderTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(LoaderTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
+# types and formats them into the dialog text the import command shows. SDK-free —
+# the counting + formatting is tested here; only the file picker and the alert
+# itself live in the SDK menu command. HOMESKZ_FIXTURES_DIR points the file-based
+# cases at the checked-in fixtures (tests/fixtures/).
+vw_add_test(ParseSummaryTests ParseSummaryTests.cpp)
+target_link_libraries(ParseSummaryTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseSummaryTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # Back-end tests for the bundled updater scripts. Both SOURCE (dot-source) their
 # script and drive its q-stable / q-dev / do-install functions with the network
 # boundary stubbed, so they run SDK- and network-free — the same idea as the C++
