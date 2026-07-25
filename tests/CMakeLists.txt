@@ -94,6 +94,20 @@ vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 vw_add_test(CoreDocumentTests CoreDocumentTests.cpp)
 target_link_libraries(CoreDocumentTests PRIVATE HomeskzIfcCore)
 
+# Minimal STEP reader (src/parse/Step): tokeniser + entity graph exercised on
+# small synthetic STEP snippets (references, numbers, strings, enums, nested
+# lists, typed values, referrers/resolve, determinism). SDK-free.
+vw_add_test(StepTests StepTests.cpp)
+target_link_libraries(StepTests PRIVATE HomeskzIfcCore)
+
+# IFC loader + sanitiser (src/parse/Loader): text-level IFCFOOTINGTYPE removal and
+# real-fixture file loading. HOMESKZ_FIXTURES_DIR points the file-based cases at
+# the checked-in fixtures (tests/fixtures/), reused as parse modules land.
+vw_add_test(LoaderTests LoaderTests.cpp)
+target_link_libraries(LoaderTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(LoaderTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # Back-end tests for the bundled updater scripts. Both SOURCE (dot-source) their
 # script and drive its q-stable / q-dev / do-install functions with the network
 # boundary stubbed, so they run SDK- and network-free — the same idea as the C++
