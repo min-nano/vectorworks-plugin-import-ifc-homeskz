@@ -41,6 +41,42 @@ TEST(validate_rejects_unknown_version)
 	CHECK(!core::validateDocument(document));
 }
 
+TEST(validate_accepts_document_with_valid_grid)
+{
+	// 健全な通り芯（レイヤ名あり・始点≠終点）は検証を通る。
+	core::Document document;
+	core::GridCommand grid;
+	grid.label = "X1";
+	grid.drawClass = "通り芯-X";
+	grid.start = core::Vec2{0.0, 0.0};
+	grid.end = core::Vec2{0.0, 1000.0};
+	document.grids.push_back(grid);
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_degenerate_grid)
+{
+	// 始点と終点が同じ（縮退した）通り芯は不正 → 描画しない。
+	core::Document document;
+	core::GridCommand grid;
+	grid.start = core::Vec2{5.0, 5.0};
+	grid.end = core::Vec2{5.0, 5.0};
+	document.grids.push_back(grid);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_grid_with_empty_layer)
+{
+	// 配置先レイヤ名が空の通り芯は不正 → 描画しない。
+	core::Document document;
+	core::GridCommand grid;
+	grid.layer = "";
+	grid.start = core::Vec2{0.0, 0.0};
+	grid.end = core::Vec2{0.0, 1000.0};
+	document.grids.push_back(grid);
+	CHECK(!core::validateDocument(document));
+}
+
 // ---------------------------------------------------------------------------
 // parse::buildDocument（骨組み: いまは空の Document を返すだけ）
 // ---------------------------------------------------------------------------

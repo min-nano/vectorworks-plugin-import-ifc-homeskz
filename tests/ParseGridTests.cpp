@@ -187,6 +187,27 @@ TEST(skips_axes_with_unresolvable_or_short_curve)
 	CHECK(find(grids, "X1") != nullptr);
 }
 
+TEST(skips_axes_with_bad_points)
+{
+	// cartesianPoint の失敗 2 系統をスキップさせる:
+	//   (a) ポリラインの点参照が未解決（#900 が存在しない）→ 始点解決失敗。
+	//   (b) 座標が 1 つしかない点（#12）→ 座標不足で解決失敗。
+	// どちらの軸も落とし、健全な X1 の 1 本だけ返す（1 軸の欠損で全体を止めない）。
+	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
+										"#11=IFCCARTESIANPOINT((0.,1000.,0.));\n"
+										"#12=IFCCARTESIANPOINT((5.));\n" // 座標 1 つ（不足）
+										"#20=IFCPOLYLINE((#10,#11));\n"	 // 健全
+										"#21=IFCPOLYLINE((#900,#901));\n" // 点参照が未解決
+										"#22=IFCPOLYLINE((#12,#10));\n" // 始点の座標が不足
+										"#30=IFCGRIDAXIS('X1',#20,.T.);\n"
+										"#31=IFCGRIDAXIS('X2',#21,.T.);\n"
+										"#32=IFCGRIDAXIS('X3',#22,.T.);\n");
+	std::vector<GridCommand> const grids = buildGridCommands(model);
+
+	CHECK_EQ(grids.size(), static_cast<std::size_t>(1));
+	CHECK(find(grids, "X1") != nullptr);
+}
+
 TEST(empty_model_yields_no_grids)
 {
 	Model const model =
