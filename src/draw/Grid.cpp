@@ -9,26 +9,37 @@
 //	使用する SDK API はすべて ISDK（gSDK）／VWFC の実在シグネチャに合わせている
 //	（Vectorworks 2026 SDK の Interfaces/VectorWorks/ISDK.h・VWFC/VWObjects）:
 //	  * gSDK->GetNamedLayer / CreateLayer / SetCurrentLayer … レイヤの取得・作成・アクティブ化
-//	  * gSDK->CreateLine(WorldPt,WorldPt)                  … パスとなる直線
-//	  * gSDK->CreateCustomObjectPath(name,path,prof,regen) … パスから PIO を生成
+//	  * VWPolygon2DObj({p0,p1}) + SetClosed(false)         … パスとなる開いた 2D ポリライン
+//	  * VWGroupObj()                                       … 空のプロファイルグループ
+//	  * gSDK->CreateCustomObjectPath(name,path,prof,regen) … パス＋プロファイルから PIO を生成
 //	  * gSDK->AddClass(name)->InternalIndex / SetObjectClass … クラス分け
-//	  * VWParametricObj(h).SetParamString(name,value)      … PIO パラメータ
+//	  * VWParametricObj(h).SetParamString(name,value)      … PIO パラメータ（Label / 基点バブル）
 //	  * gSDK->ResetObject(h)                               … パラメータ変更の反映
-//	  * VWParametricObj(h).MoveObject(dx,dy)               … PIO をローカル→絶対位置へ移動
 //
-//	実描画（位置・クラス分け・軸名ラベル・基点バブル）はローカルの VectorWorks で
-//	目視確認する（ROADMAP.md M1「ローカル確認」）。特に GridAxis PIO のパラメータ
-//	ユニバーサル名（Label / ShowBubbleAt）と選択肢値（"Start Point"）、座標単位は
-//	VW 実機でのみ最終確認できる（誤りは実行時に無効化されるだけでビルドは通る）。
+//	Python 版 vw/grid.py（draw_grid）に忠実に写している: BeginPoly/MoveTo/LineTo/EndPoly の
+//	開いたポリラインを**パス**に、空グループ（BeginGroup/EndGroup）を**プロファイル**に
+//	渡して CreateCustomObjectPath('GridAxis', path, profile) で生成し、SetClass・
+//	Label・ShowBubbleAt='Start Point' を設定して ResetObject で反映する。
+//
+//	【設計上の要点】GridAxis PIO の線の向き・端点・基点バブルの位置は、渡した**パスの
+//	頂点**から決まる。したがってパスは頂点を持つ「開いたポリライン」で渡す（頂点を持たない
+//	Line で渡すと PIO が端点を取れず、バブルが挿入点に固定され向きも定まらない）。座標は
+//	センタリング済みの絶対座標をそのまま頂点にする（Python 版と同じく後段の平行移動は不要）。
+//
+//	実描画（クラス分け・軸名ラベル・基点バブルの位置と向き）はローカルの VectorWorks で
+//	目視確認する（ROADMAP.md M1「ローカル確認」）。GridAxis PIO のパラメータ名や座標単位は
+//	VW 実機でのみ最終確認できる。
 //
 
 #include "PluginPrefix.h"
 #include "draw/Grid.h"
 #include "core/Document.h"
 
-// GridAxis PIO のパラメータ設定に使う VWFC ラッパー（PluginPrefix の umbrella が
-// 取り込む VWFC::VWObjects の一部。明示 include で可用性を確実にする）。
+// GridAxis PIO の生成・設定に使う VWFC ラッパー（PluginPrefix の umbrella が取り込む
+// VWFC::VWObjects の一部。明示 include で可用性を確実にする）。
 #include "VWFC/VWObjects/VWParametricObj.h"
+#include "VWFC/VWObjects/VWPolygon2DObj.h"
+#include "VWFC/VWObjects/VWGroupObj.h"
 
 #include <cstddef>
 
@@ -39,14 +50,6 @@ namespace HomeskzIfcImport::draw
 		// デザインレイヤの種別コード（CreateLayer の layerType 引数）。1 = デザインレイヤ、
 		// 2 = シート（プレゼンテーション）レイヤ。通り芯はデザインレイヤに置く。
 		constexpr short kDesignLayerType = 1;
-
-		// core::Vec2（平面座標・mm）→ SDK の WorldPt へ。core と SDK の幾何型を
-		// つなぐ変換はここ 1 か所に集約する（CLAUDE.md「変換規約を分散させない」）。
-		// ホームズ君 IFC の座標は mm。VW ドキュメントも mm 前提で、そのまま渡す。
-		WorldPt ToWorldPt(const core::Vec2& p)
-		{
-			return WorldPt(p.x, p.y);
-		}
 
 		// 「共通」デザインレイヤを取得（無ければ作成）し、アクティブにする。以後に生成する
 		// オブジェクトはこのアクティブレイヤへ入る。取得・生成できなければ何もしない。
@@ -69,31 +72,30 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetObjectClass(object, classID);
 		}
 
-		// 1 本の通り芯を描く（Python 版 vw/grid.py draw_grid に対応）。GridAxis PIO を
-		// 生成し、クラス・軸名ラベル・基点バブルを設定して再計算する。PIO 生成に失敗
-		// したら通常の直線へフォールバックする。何か 1 つでも配置できたら true。
-		//
-		// 重要（基点バブルの位置）: GridAxis PIO の基点バブルは**オブジェクトのローカル
-		// 原点**を基準に描かれる。パスに絶対座標を焼き込むと線は正しい位置に出るが、
-		// オブジェクト原点は (0,0) のままなのでバブルが全数ワールド原点へ重なってしまう。
-		// そこで本コードベースの他 PIO（柱・横架材・床。CLAUDE.md「ローカル原点から作成し
-		// Move3D で絶対位置へ」）と同じく、**パスをローカル原点から作り、生成後に
-		// Move3DObj でセンタリング済み始点へ平行移動**する。これで線もバブルも始点基準に
-		// 揃う（オブジェクト全体が平行移動するため）。
+		// 1 本の通り芯を描く（Python 版 vw/grid.py draw_grid に対応）。開いたポリラインを
+		// パスに、空グループをプロファイルにして GridAxis PIO を生成し、クラス・軸名ラベル・
+		// 基点バブルを設定して再計算する。PIO 生成に失敗したらパスのポリライン（絶対座標の
+		// 直線）をそのままクラス付けしてフォールバックする。何か 1 つでも配置できたら true。
 		bool DrawOne(const core::GridCommand& grid)
 		{
-			// パスはローカル原点 (0,0) から (Δx, Δy) で作る（Z 成分は持たせない＝平面）。
-			const WorldPt localStart(0.0, 0.0);
-			const WorldPt localEnd(grid.end.x - grid.start.x, grid.end.y - grid.start.y);
-			MCObjectHandle path = gSDK->CreateLine(localStart, localEnd);
-			if (path == nil)
+			// パス: センタリング済み絶対座標の始点→終点を頂点に持つ「開いた」2D ポリライン。
+			// PIO はこの頂点から線の向き・端点・基点バブルの位置を決める（要点は冒頭コメント）。
+			VWPolygon2DObj path(
+				{VWPoint2D(grid.start.x, grid.start.y), VWPoint2D(grid.end.x, grid.end.y)});
+			path.SetClosed(false); // ポリゴン（閉）でなくポリライン（開）にする
+			const MCObjectHandle pathHandle = path.GetThisObject();
+			if (pathHandle == nil)
 				return false;
 
-			// パスから GridAxis のカスタムオブジェクト（PIO）を生成する。第 3 引数の
-			// プロファイルグループは nil（GridAxis は断面押し出し系でなく 2D の通り芯＋
-			// バブルのため）。第 4 引数は生成後に再計算するか（true）。
+			// プロファイル: 空グループ（Python 版の BeginGroup/EndGroup に対応）。
+			VWGroupObj profileGroup;
+
+			// パス＋プロファイルから GridAxis のカスタムオブジェクト（PIO）を生成する。
+			// 第 4 引数は生成後に再計算するか（true）。'GridAxis' PIO が無い等で失敗（nil）
+			// したらパスのポリラインをフォールバックにする。
 			const TXString kGridAxis("GridAxis");
-			MCObjectHandle object = gSDK->CreateCustomObjectPath(kGridAxis, path, nil, true);
+			MCObjectHandle object = gSDK->CreateCustomObjectPath(
+				kGridAxis, pathHandle, profileGroup.GetThisObject(), true);
 
 			if (object != nil)
 			{
@@ -107,21 +109,12 @@ namespace HomeskzIfcImport::draw
 					pio.SetParamString("Label", TXString(grid.label.c_str()));
 				pio.SetParamString("ShowBubbleAt", "Start Point");
 				gSDK->ResetObject(object);
-				// ローカル原点で作った PIO を、センタリング済み始点の絶対位置へ移動する。
-				// 線・バブルを含むオブジェクト全体が平行移動し、バブルが始点に揃う。
-				// VWObject::MoveObject（平面移動。ISDK に Move3DObj は無い）。
-				pio.MoveObject(grid.start.x, grid.start.y);
 			}
 			else
 			{
-				// フォールバック: 'GridAxis' PIO が無い等で生成に失敗したら通常の直線を
-				// 引く。バブルが無く原点問題は起きないため、絶対座標でそのまま引く
-				// （Python 版と同じく新規に引く。パスは CreateCustomObjectPath に取り込まれ
-				// 得るため再利用しない）。
-				MCObjectHandle fallback =
-					gSDK->CreateLine(ToWorldPt(grid.start), ToWorldPt(grid.end));
-				if (fallback != nil)
-					SetClassByName(fallback, grid.drawClass);
+				// フォールバック: PIO 生成に失敗したら、パスのポリライン（絶対座標の直線）を
+				// そのままクラス付けして残す（バブルは無いので位置問題は起きない）。
+				SetClassByName(pathHandle, grid.drawClass);
 			}
 			return true;
 		}
