@@ -1,1 +1,0 @@
-/usr/bin/c++ --coverage CMakeFiles/ParseGridTests.dir/ParseGridTests.cpp.o -o ParseGridTests  ../libHomeskzIfcCore.a 

@@ -1,1 +1,0 @@
-/usr/bin/c++ --coverage CMakeFiles/GeometryTests.dir/GeometryTests.cpp.o -o GeometryTests  ../libHomeskzIfcCore.a 

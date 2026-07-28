@@ -1,1 +1,0 @@
-/usr/bin/c++ --coverage CMakeFiles/ParseStructuralClassTests.dir/ParseStructuralClassTests.cpp.o -o ParseStructuralClassTests  ../libHomeskzIfcCore.a 

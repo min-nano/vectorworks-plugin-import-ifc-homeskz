@@ -1,1 +1,0 @@
-/usr/bin/c++ --coverage CMakeFiles/UpdaterFlowTests.dir/UpdaterFlowTests.cpp.o CMakeFiles/UpdaterFlowTests.dir/__/src/UpdaterFlow.cpp.o -o UpdaterFlowTests 

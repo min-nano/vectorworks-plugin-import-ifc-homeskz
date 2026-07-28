@@ -1,1 +1,0 @@
-/usr/bin/c++ --coverage CMakeFiles/CoreDocumentTests.dir/CoreDocumentTests.cpp.o -o CoreDocumentTests  ../libHomeskzIfcCore.a 
