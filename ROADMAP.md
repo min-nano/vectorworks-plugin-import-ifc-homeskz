@@ -27,7 +27,7 @@ Python プラグイン（`vectorworks-plugin-script-import-ifc-homeskz`）を C+
 | --- | --- | --- |
 | M0 基盤整備 | ✅ 完了 | 骨組み・CMake 分割・STEP リーダ・Loader・無 SDK テスト、メニューの器改修（ファイル選択→parse→件数ダイアログ）まで完了。`Mat4` は M2 へ意図的に先送り。|
 | M1 通り芯 | 🟨 進行中 | 最初の縦切り。parse/draw 実装・無 SDK テスト green・Python 版と整合（クラス名・多点区間）。ローカル目視確認待ち。|
-| M2 幾何の土台 | ⬜ 未着手 | 配置行列・押し出し・断面（`Mat4` を含む）。|
+| M2 幾何の土台 | 🟨 進行中 | 配置行列・押し出し・断面（`Mat4` を含む）。`core/Geometry`＋`parse/IfcGeometry` 実装・無 SDK テスト green。PR/CI 待ち。|
 | M3 ストーリ | ⬜ 未着手 | |
 | M4 構造クラス判定 | ⬜ 未着手 | |
 | M5 横架材 | ⬜ 未着手 | |
@@ -127,20 +127,38 @@ VW 実機でのみ確認できる。CI の SDK ビルド green ＋ 目視で M1 
 
 ---
 
-## M2 — 幾何の土台（配置行列・押し出しソリッド・断面） ⬜
+## M2 — 幾何の土台（配置行列・押し出しソリッド・断面） 🟨
 
 **目的:** M3 以降のほぼ全要素が使う共有の幾何計算を、描画なしで先に固めて de-risk する。
 **Python: ifcopenshell 依存部の自前計算（`ifc/footing.py` の `_world_solid` 等）＋
 `ifc/member.py` の `_get_placement_3d` / `_get_profile_dims`。**
 
-- ⬜ `parse/IfcGeometry`: `IfcLocalPlacement` / `IfcAxis2Placement3D` の合成 → ワールド行列。
-- ⬜ 押し出しソリッド（`IfcExtrudedAreaSolid`）のワールド変換。押し出し方向が鉛直／水平で
-  平面外形の求め方を分ける（Python 版 `_world_solid` に準拠）。
-- ⬜ 断面プロファイル: `IfcRectangleProfileDef`（`XDim`/`YDim`）と、任意断面
-  `IfcArbitraryClosedProfileDef`（登り梁・火打の外形）。
-- ⬜ 差演算 `IfcBooleanResult` の第 1 オペランド（素のソリッド）を辿る。
-- ⬜ テスト: `GeometryTests`。**Python 版が同フィクスチャで算出する座標・寸法と許容誤差で
-  突き合わせる**（移植の数値ズレを機械的に検出）。
+- ✅ `core/Geometry`: `Vec2`/`Vec3` の演算（加減・スカラ倍・内積・外積・長さ・正規化）と
+  `Mat4`（単位・平行移動・基底からの生成・行列積・点/方向の適用）。M0 で先送りした `Mat4` を
+  ここで実装。剛体変換（回転＋平行移動）のみで剪断・スケールは持たない。
+- ✅ `parse/IfcGeometry`: `IfcAxis2Placement3D`（Gram-Schmidt で正規直交化）→ 変換行列。
+  要素配置 `resolveObjectPlacement` は **ObjectPlacement の RelativePlacement のみ**を使い、
+  **親 `PlacementRelTo` を合成しない**（Python 版 `member`/`footing`/`story`/`column` と一致。
+  階の高さは親配置ではなく描画フェーズのストーリバウンドで反映するため、親を合成すると
+  階高が二重計上される。実測: ある柱で要素 Z=−174 に親階 Z=+600 が乗り +426 になってしまう）。
+- ✅ 押し出しソリッド（`IfcExtrudedAreaSolid`）のワールド変換 → `WorldSolid`（**Python 版
+  `footing._Solid` に対応**: 配置基底 origin/lX/lY/lZ・押し出し単位方向・押し出し長・
+  プロファイル 2D 頂点・矩形寸法を保持し、`base()`/`top()` で世界底面/天面を得る）。
+  `ExtrudedDirection` は単位化、要素配置 × `Position` の合成行列（Python `_compose` 相当）で
+  世界系へ。鉛直・水平いずれの押し出し方向でも同じ経路で正しく変換される（テストで両方を検証）。
+  ※プラン方向 2D フットプリントの抽出（footing 固有の「平面外形の求め方を鉛直／水平で分ける」
+  `_footprint`）は、2D 頂点＋基底を保持したこの `WorldSolid` から、M7/M8 の footing 導入時に
+  Python 版 `_world_solid`/`_footprint` を直接移植する。
+- ✅ 断面プロファイル: `IfcRectangleProfileDef`（`XDim`/`YDim`、`Position` は Location の
+  **平行移動のみ**適用＝Python `_profile_points` に一致。RefDirection 回転は反映しない）と、
+  任意閉断面 `IfcArbitraryClosedProfileDef`（`OuterCurve`=`IfcPolyline` の外形。始点＝終点の
+  重複を畳む）。
+- ✅ 差演算 `IfcBooleanResult` / `IfcBooleanClippingResult` の第 1 オペランド（素のソリッド）を
+  再帰で辿る。
+- ✅ テスト: `GeometryTests`（無 SDK）。行列・配置・断面・押し出し・boolean 辿りを手計算値と
+  許容誤差で突き合わせ、実フィクスチャ（サンプル邸）で数百の押し出し・矩形断面・boolean が
+  例外なく解決できることを確認。**Python 版とのゴールデン比較**（同フィクスチャの座標・寸法
+  突き合わせ）は、姉妹リポジトリの期待値を取り込める段階で追加する。
 
 **ローカル確認:** （描画なし。テストのみ。）
 
