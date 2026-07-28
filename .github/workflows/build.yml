@@ -203,7 +203,15 @@ jobs:
           brew install llvm@18
           tidy="$(brew --prefix llvm@18)/bin/clang-tidy"
           "$tidy" --version
-          "$tidy" -p build --warnings-as-errors='*' \
+          # clang-tidy analyses the sources without running the build, so the PCH
+          # (used by ./build) is never produced. Generate a separate, PCH-free
+          # compile database purely for clang-tidy; the real build keeps the PCH.
+          cmake -S . -B build-tidy \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVW_SDK_DIR="$VW_SDK_DIR" \
+            -DVW_ENABLE_PCH=OFF \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          "$tidy" -p build-tidy --warnings-as-errors='*' \
             src/ModuleMain.cpp \
             src/Extensions/ExtMenu.cpp \
             src/Updater.cpp \
@@ -478,6 +486,7 @@ jobs:
             -DVW_SDK_DIR="$VW_SDK_DIR" \
             -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
             -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH" \
+            -DVW_ENABLE_PCH=OFF \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
       - name: Static analysis (clang-tidy, SDK-dependent code)
@@ -491,8 +500,13 @@ jobs:
           # calling ::GS_NewPtr) rely on MSVC's delayed parsing to compile. Re-add
           # -fdelayed-template-parsing so those SDK templates parse as they do in
           # the real MSVC build; our own (non-template) code is still analyzed.
+          # Clang 20 deprecates -fdelayed-template-parsing under C++20 and, with
+          # warnings-as-errors, that deprecation notice alone would fail the run.
+          # The flag is still needed (see above) and functional, so silence just
+          # its deprecation warning; everything else stays an error.
           "$tidy" -p build-tidy --warnings-as-errors='*' \
             --extra-arg=-fdelayed-template-parsing \
+            --extra-arg=-Wno-delayed-template-parsing-in-cxx20 \
             src/ModuleMain.cpp \
             src/Extensions/ExtMenu.cpp \
             src/Updater.cpp \

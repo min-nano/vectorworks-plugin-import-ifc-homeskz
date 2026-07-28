@@ -95,6 +95,14 @@ set(VW_BUILD_CHANNEL
 	CACHE STRING "Which plug-in channel(s) to build: stable, dev, or both")
 set_property(CACHE VW_BUILD_CHANNEL PROPERTY STRINGS stable dev both)
 
+# Precompiled header for the SDK umbrella (PluginPrefix.h). ON for real builds —
+# it is the biggest compile-time win. Turned OFF only when generating the
+# compile_commands.json that clang-tidy consumes: clang-tidy analyses the sources
+# WITHOUT running the build, so the .pch is never produced and a compile database
+# carrying "-include-pch <missing>.pch" would make every file error out. A
+# PCH-free database gives clang-tidy the identical flags minus that include.
+option(VW_ENABLE_PCH "Precompile PluginPrefix.h for the plug-in targets" ON)
+
 if(VW_BUILD_PLUGIN
    AND NOT APPLE
    AND NOT WIN32)
@@ -307,8 +315,11 @@ if(VW_BUILD_PLUGIN)
 		# built as Objective-C++ and on Windows as C++ — matching how each TU is
 		# compiled. This also cooperates with a compiler-cache launcher (ccache):
 		# with the SDK header behind a stable PCH, unchanged TUs hit the cache.
-		target_precompile_headers(${target} PRIVATE
-								  "${CMAKE_CURRENT_SOURCE_DIR}/src/PluginPrefix.h")
+		# Skipped for the clang-tidy compile database (see VW_ENABLE_PCH).
+		if(VW_ENABLE_PCH)
+			target_precompile_headers(${target} PRIVATE
+									  "${CMAKE_CURRENT_SOURCE_DIR}/src/PluginPrefix.h")
+		endif()
 
 		# RELEASE_BLD: link against the Release SDK. VW_BUILD_VERSION/VW_BUILD_BRANCH:
 		# build stamp (commit + branch), shown in the menu command's alert.
@@ -383,10 +394,17 @@ if(VW_BUILD_PLUGIN)
 
 			# /bigobj: the template-heavy SDK headers overflow the default section
 			# limit. /wd4996: silence deprecation warnings (parallels the mac flag).
+			target_compile_options(${target} PRIVATE /EHsc /bigobj /wd4996)
+
 			# /MP: compile this target's translation units in parallel (MSVC is
 			# otherwise single-file-at-a-time within a target); the SDK-heavy TUs
 			# dominate the build, so this is a large, free win on multi-core runners.
-			target_compile_options(${target} PRIVATE /EHsc /bigobj /wd4996 /MP)
+			# Only for the real MSVC build: CMake's MSVC variable is also true for
+			# clang-cl (used by the clang-tidy compile database), where /MP is an
+			# unused argument that warnings-as-errors would reject.
+			if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+				target_compile_options(${target} PRIVATE /MP)
+			endif()
 
 			# The host Vectorworks.exe provides the actual SDK functions through the
 			# callback pointer (GS_InitializeVCOM), so we link only the SDK's static
