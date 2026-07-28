@@ -433,44 +433,22 @@ jobs:
         with:
           arch: x64
 
-      # Key the LLVM cache to the runner IMAGE version. Installing LLVM via choco
-      # downloads a ~500 MB installer and runs it (several minutes); caching the
-      # installed tree removes that from the critical path. LLVM must stay new
-      # enough for the runner's MSVC headers (see the install step below), so the
-      # cache is deliberately invalidated whenever the runner image — and thus its
-      # MSVC — changes, rather than pinned to a fixed key that could go stale.
-      - name: Resolve runner image version
-        id: img
-        shell: bash
-        run: echo "version=${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore LLVM cache
-        id: llvm-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: C:\Program Files\LLVM
-          key: llvm-win-${{ steps.img.outputs.version }}
-
       - name: Install LLVM + Ninja (for clang-tidy)
         shell: pwsh
-        env:
-          LLVM_CACHE_HIT: ${{ steps.llvm-cache.outputs.cache-hit }}
         run: |
           $ErrorActionPreference = 'Stop'
-          # Ninja is tiny; always install it (it is the compile-database generator).
           choco install --no-progress -y ninja
           # Install the LATEST LLVM rather than pinning a version: the runner's
           # MSVC standard-library headers static_assert "expected Clang 20 or
           # newer" and use Clang-20 builtins, so clang-cl / clang-tidy must be new
           # enough to parse them. (macOS pins llvm@18 because AppleClang + libc++
           # there impose no such requirement.) Bump the runner's MSVC and this
-          # both track "latest", so they stay compatible. Skip the download when
-          # the image-version-keyed cache already holds a matching LLVM.
-          if ($env:LLVM_CACHE_HIT -eq 'true') {
-            Write-Host 'LLVM restored from cache; skipping choco install.'
-          } else {
-            choco install --no-progress -y llvm
-          }
+          # both track "latest", so they stay compatible. NB: LLVM ships
+          # preinstalled on the runner image, so this is a fast no-op refresh (a
+          # few seconds); we deliberately do NOT actions/cache "C:\Program
+          # Files\LLVM" — caching a ~2-3 GB already-present tree saves nothing and
+          # its restore/save dominates the whole job (~15 min).
+          choco install --no-progress -y llvm
           "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Configure compile database (Ninja + clang-cl, no build)
