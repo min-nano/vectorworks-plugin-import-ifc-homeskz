@@ -136,16 +136,21 @@ VW 実機でのみ確認できる。CI の SDK ビルド green ＋ 目視で M1 
 - ✅ `core/Geometry`: `Vec2`/`Vec3` の演算（加減・スカラ倍・内積・外積・長さ・正規化）と
   `Mat4`（単位・平行移動・基底からの生成・行列積・点/方向の適用）。M0 で先送りした `Mat4` を
   ここで実装。剛体変換（回転＋平行移動）のみで剪断・スケールは持たない。
-- ✅ `parse/IfcGeometry`: `IfcLocalPlacement` / `IfcAxis2Placement3D`（Gram-Schmidt で
-  正規直交化・縮退フォールバック）/ `IfcAxis2Placement2D` の合成 → ワールド行列。親を辿る
-  再帰合成は深さ上限で循環参照を打ち切る。
-- ✅ 押し出しソリッド（`IfcExtrudedAreaSolid`）のワールド変換 → `WorldSolid`（底面ループ＋
-  押し出しベクトル、天面 = 底面＋押し出し）。`ExtrudedDirection` は単位化して `Depth` を掛け、
-  要素 `ObjectPlacement` × `Position` の合成行列で世界系へ。鉛直・水平いずれの押し出し方向でも
-  同じ経路で正しく変換される（テストで両方を検証）。※プラン方向 2D フットプリントの抽出
-  （footing 固有の「平面外形の求め方を鉛直／水平で分ける」処理）は、実際に使う M7/M8 の
-  footing 導入時に Python 版 `_world_solid` と突き合わせて実装する。
-- ✅ 断面プロファイル: `IfcRectangleProfileDef`（`XDim`/`YDim`・`Position`(2D) 適用の 4 隅）と、
+- ✅ `parse/IfcGeometry`: `IfcAxis2Placement3D`（Gram-Schmidt で正規直交化）→ 変換行列。
+  要素配置 `resolveObjectPlacement` は **ObjectPlacement の RelativePlacement のみ**を使い、
+  **親 `PlacementRelTo` を合成しない**（Python 版 `member`/`footing`/`story`/`column` と一致。
+  階の高さは親配置ではなく描画フェーズのストーリバウンドで反映するため、親を合成すると
+  階高が二重計上される。実測: ある柱で要素 Z=−174 に親階 Z=+600 が乗り +426 になってしまう）。
+- ✅ 押し出しソリッド（`IfcExtrudedAreaSolid`）のワールド変換 → `WorldSolid`（**Python 版
+  `footing._Solid` に対応**: 配置基底 origin/lX/lY/lZ・押し出し単位方向・押し出し長・
+  プロファイル 2D 頂点・矩形寸法を保持し、`base()`/`top()` で世界底面/天面を得る）。
+  `ExtrudedDirection` は単位化、要素配置 × `Position` の合成行列（Python `_compose` 相当）で
+  世界系へ。鉛直・水平いずれの押し出し方向でも同じ経路で正しく変換される（テストで両方を検証）。
+  ※プラン方向 2D フットプリントの抽出（footing 固有の「平面外形の求め方を鉛直／水平で分ける」
+  `_footprint`）は、2D 頂点＋基底を保持したこの `WorldSolid` から、M7/M8 の footing 導入時に
+  Python 版 `_world_solid`/`_footprint` を直接移植する。
+- ✅ 断面プロファイル: `IfcRectangleProfileDef`（`XDim`/`YDim`、`Position` は Location の
+  **平行移動のみ**適用＝Python `_profile_points` に一致。RefDirection 回転は反映しない）と、
   任意閉断面 `IfcArbitraryClosedProfileDef`（`OuterCurve`=`IfcPolyline` の外形。始点＝終点の
   重複を畳む）。
 - ✅ 差演算 `IfcBooleanResult` / `IfcBooleanClippingResult` の第 1 オペランド（素のソリッド）を

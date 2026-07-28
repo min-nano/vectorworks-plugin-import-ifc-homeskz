@@ -49,19 +49,27 @@ namespace HomeskzIfcImport::parse
 	// IfcAxis2Placement3D → ローカル変換行列。Axis(=局所 Z)・RefDirection(≈局所 X)から
 	// Gram-Schmidt で正規直交基底を作る（X = 正規化(RefDir − (RefDir·Z)Z)、Y = Z×X）。
 	// Axis 省略時は Z=(0,0,1)、RefDirection 省略時は X=(1,0,0)。placement が nullptr /
-	// 型不一致 / 基底が縮退するときは単位行列（原点のみ反映）を返す。
+	// 型不一致なら単位行列（原点のみ反映）を返す。Python 版 footing._axis_placement と一致。
+	//
+	// ［Python 版との差異・意図的］RefDirection が Axis と平行で基底が縮退する場合、Python は
+	// X=(1,0,0) に固定する（Axis が Z でないと基底が非直交になる）。本実装は Axis に直交する
+	// X へフォールバックして正規直交を保つ。ホームズ君 IFC では RefDirection は常に Axis と
+	// 直交（多くは省略）するため縮退は起きず、実データでの出力は完全に一致する。
 	Mat4 resolveAxis2Placement3D(const Model& model, const Entity* placement);
 
-	// IfcAxis2Placement2D → ローカル変換行列（Z=(0,0,1) 固定の 2D 回転＋平行移動）。
-	// RefDirection(≈局所 X) から X を正規化し、Y=(−X.y, X.x)（左 90°回転）を取る。
-	// 省略時は X=(1,0)。断面プロファイルの Position に使う。
-	Mat4 resolveAxis2Placement2D(const Model& model, const Entity* placement);
-
-	// IfcLocalPlacement → ワールド変換行列。PlacementRelTo を親として再帰合成する
-	// （ワールド = 親ワールド × RelativePlacement）。循環参照・過大な深さは深さ上限で
-	// 打ち切り、それ以降は単位行列とみなす（無限再帰を防ぐ）。placement が nullptr /
-	// 型不一致なら単位行列。
-	Mat4 resolveLocalPlacement(const Model& model, const Entity* placement);
+	// 要素（IfcProduct）の ObjectPlacement から配置行列を返す。
+	//
+	// ★重要（Python 版と一致させるための設計）: ObjectPlacement(IfcLocalPlacement) の
+	//   RelativePlacement（要素自身の IfcAxis2Placement3D）だけを使い、**親 PlacementRelTo は
+	//   合成しない**。ホームズ君 IFC は要素座標を（親＝階/建物の配置ではなく）階基準で直接
+	//   与えており、階の高さ（親配置の Z オフセット）は描画フェーズがストーリバウンドで別途
+	//   反映する。親を合成すると階高が二重計上される（実測: ある柱で要素 Z=−174 に親階の
+	//   Z=+600 が乗り +426 になってしまう）。Python 版は member/footing/story/column の全てで
+	//   要素自身の RelativePlacement のみを読み、PlacementRelTo を一切辿らない。これに揃える。
+	//
+	// ObjectPlacement は IfcProduct の属性 5（GlobalId, OwnerHistory, Name, Description,
+	// ObjectType, ObjectPlacement, Representation, …）。解決できない・型不一致なら単位行列。
+	Mat4 resolveObjectPlacement(const Model& model, const Entity* element);
 
 	// 断面プロファイル（2D、プロファイル定義のローカル座標系）。outer は閉じた外形の
 	// 頂点列で、末尾に始点を重複させない（N 頂点なら N 点）。矩形は rectangle=true と
@@ -76,29 +84,49 @@ namespace HomeskzIfcImport::parse
 	};
 
 	// IfcProfileDef（IfcRectangleProfileDef / IfcArbitraryClosedProfileDef）を解決して
-	// 2D 外形を得る。矩形は Position(2D) を適用した 4 隅を outer に並べ、任意断面は
-	// OuterCurve(IfcPolyline) の点列をそのまま並べる（始点と終点が一致する場合は重複を
-	// 1 つ落として閉ループにする）。未対応の型・欠損・点数不足は false。
+	// 2D 外形を得る。Python 版 footing._profile_points と一致させる:
+	//   * 矩形は中心原点の 4 隅（−hx,−hy）(hx,−hy)(hx,hy)(−hx,hy) に Position の**平行移動
+	//     のみ**（Location 座標）を足す。RefDirection の回転は反映しない（Python 版に合わせる。
+	//     ホームズ君 IFC の矩形断面 Position は RefDirection を持たないので実データでは同一）。
+	//   * 任意断面は OuterCurve(IfcPolyline) の点列をそのまま。始点＝終点の重複は 1 つ落とす。
+	// 未対応の型・欠損・点数不足は false。
 	bool resolveProfile(const Model& model, const Entity* profileDef, Profile& out);
 
-	// 押し出しソリッド（ワールド座標）。base は底面ループ、extrusion は押し出しベクトル
-	// （方向×深さ）。天面は base[i] + extrusion で得られる（top() が返す）。
+	// 押し出しソリッドのワールド情報（Python 版 footing._Solid に対応）。配置基底
+	// （origin/xAxis/yAxis/zAxis = Python の (origin, lX, lY, lZ)）・押し出し単位方向
+	// （extrudeDir = Python の extrude）・押し出し長（depth）・プロファイル 2D 頂点
+	// （profile = Python の pts）・矩形寸法（rectangle/xDim/yDim = Python の dims）を保持する。
+	// ワールド底面点はプロファイル頂点 (u,v) を origin + xAxis·u + yAxis·v で写して得る
+	// （base() が返す。M7 の _footprint / _z_top_and_thickness、M5 の _sloped_member_geometry を
+	// この情報から直接移植できるよう、2D プロファイルと基底を分けて残す）。
 	struct WorldSolid
 	{
-		std::vector<Vec3> base;
-		Vec3 extrusion;
+		Vec3 origin;	 // 配置原点（ワールド）
+		Vec3 xAxis;		 // 局所 X 軸（ワールド。Python lX）
+		Vec3 yAxis;		 // 局所 Y 軸（ワールド。Python lY）
+		Vec3 zAxis;		 // 局所 Z 軸（ワールド。Python lZ）
+		Vec3 extrudeDir; // 押し出し単位方向（ワールド。Python extrude）
+		double depth = 0.0;
+		std::vector<Vec2> profile; // プロファイル 2D 頂点（Python pts）
+		bool rectangle = false;
+		double xDim = 0.0;
+		double yDim = 0.0;
 
+		// プロファイル頂点をワールド底面へ写す（origin + xAxis·u + yAxis·v）。
+		std::vector<Vec3> base() const;
+		// 押し出しベクトル（extrudeDir · depth）。
+		Vec3 extrusion() const;
 		// 天面ループ（base の各点に extrusion を加えたもの）。
 		std::vector<Vec3> top() const;
 	};
 
-	// IfcExtrudedAreaSolid をワールド座標のソリッドへ変換する。
-	//   placement … 対象要素の ObjectPlacement（IfcLocalPlacement）から得たワールド行列。
-	//               solid.Position はこの上に合成される（ワールド = placement × Position）。
-	//               要素配置を持たない単体テストでは単位行列を渡せばオブジェクト座標系で
-	//               得られる。
-	// 押し出し方向（ExtrudedDirection、単位化して Depth を掛ける）も同じ行列で世界系へ
-	// 変換する。SweptArea の解決に失敗した・型が押し出しでないときは false。
+	// IfcExtrudedAreaSolid をワールド座標のソリッド情報へ変換する。
+	//   placement … 対象要素の配置行列（resolveObjectPlacement の戻り。要素自身の
+	//               RelativePlacement のみ＝親非合成）。solid.Position はこの上に合成される
+	//               （Python 版 _compose(element_pl, item_pl) に対応）。要素配置を持たない
+	//               単体テストでは単位行列を渡せばオブジェクト座標系で得られる。
+	// 押し出し方向（ExtrudedDirection、単位化）を同じ基底で世界系へ変換し extrudeDir に、
+	// Depth を depth に入れる。SweptArea の解決に失敗した・型が押し出しでないときは false。
 	bool resolveExtrudedAreaSolid(const Model& model, const Entity* solid, const Mat4& placement,
 								  WorldSolid& out);
 

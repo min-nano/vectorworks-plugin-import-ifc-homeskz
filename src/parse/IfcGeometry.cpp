@@ -36,20 +36,10 @@ namespace HomeskzIfcImport::parse
 			return axis;
 		}
 
-		// IfcLocalPlacement のワールド行列を深さ付きで再帰合成する（公開 API の実体）。
-		Mat4 localPlacementImpl(const Model& model, const Entity* placement, int depth)
-		{
-			if (placement == nullptr || placement->type != "IFCLOCALPLACEMENT" || depth > kMaxDepth)
-				return Mat4::identity();
-
-			// IfcLocalPlacement(PlacementRelTo, RelativePlacement)。
-			const Mat4 relative =
-				resolveAxis2Placement3D(model, model.resolve(placement->attribute(1)));
-			const Entity* parent = model.resolve(placement->attribute(0));
-			if (parent == nullptr)
-				return relative;
-			return localPlacementImpl(model, parent, depth + 1) * relative;
-		}
+		// IfcProduct の ObjectPlacement 属性インデックス（GlobalId, OwnerHistory, Name,
+		// Description, ObjectType, ObjectPlacement=5, Representation=6, …）。IfcProduct の
+		// 全サブタイプで共通。
+		constexpr std::size_t kObjectPlacementAttr = 5;
 
 		// IfcBooleanResult 系の第 1 オペランドを深さ付きで辿る（公開 API の実体）。
 		const Entity* baseSolidImpl(const Model& model, const Entity* item, int depth)
@@ -125,32 +115,18 @@ namespace HomeskzIfcImport::parse
 		return Mat4::fromAxes(xAxis, yAxis, zAxis, origin);
 	}
 
-	Mat4 resolveAxis2Placement2D(const Model& model, const Entity* placement)
+	Mat4 resolveObjectPlacement(const Model& model, const Entity* element)
 	{
-		if (placement == nullptr || placement->type != "IFCAXIS2PLACEMENT2D")
+		if (element == nullptr)
 			return Mat4::identity();
 
-		// IfcAxis2Placement2D(Location, RefDirection)。Z 軸は (0,0,1) 固定。
-		Vec3 origin{0.0, 0.0, 0.0};
-		resolvePoint(model, placement->attribute(0), origin);
-
-		Vec3 refX{1.0, 0.0, 0.0};
-		Vec3 rawRef{0.0, 0.0, 0.0};
-		if (resolveDirection(model, placement->attribute(1), rawRef))
-			refX = rawRef;
-		refX.z = 0.0; // 2D 方向（念のため Z を落とす）
-		Vec3 xAxis = normalized(refX);
-		if (core::length(xAxis) < core::kGeomEps)
-			xAxis = Vec3{1.0, 0.0, 0.0};
-
-		// Y は X を左 90°回した (−X.y, X.x)。
-		const Vec3 yAxis{-xAxis.y, xAxis.x, 0.0};
-		return Mat4::fromAxes(xAxis, yAxis, Vec3{0.0, 0.0, 1.0}, origin);
-	}
-
-	Mat4 resolveLocalPlacement(const Model& model, const Entity* placement)
-	{
-		return localPlacementImpl(model, placement, 0);
+		// element.ObjectPlacement（IfcLocalPlacement）→ その RelativePlacement のみ。
+		// 親 PlacementRelTo は辿らない（ヘッダの★参照。Python 版と一致）。
+		const Entity* placement = model.resolve(element->attribute(kObjectPlacementAttr));
+		if (placement == nullptr || placement->type != "IFCLOCALPLACEMENT")
+			return Mat4::identity();
+		// IfcLocalPlacement(PlacementRelTo, RelativePlacement)。属性 1 が RelativePlacement。
+		return resolveAxis2Placement3D(model, model.resolve(placement->attribute(1)));
 	}
 
 	bool resolveProfile(const Model& model, const Entity* profileDef, Profile& out)
@@ -167,20 +143,25 @@ namespace HomeskzIfcImport::parse
 			if (xDim <= core::kGeomEps || yDim <= core::kGeomEps)
 				return false;
 
-			const Mat4 pos =
-				resolveAxis2Placement2D(model, model.resolve(profileDef->attribute(2)));
 			const double hx = xDim * 0.5;
 			const double hy = yDim * 0.5;
-			// 中心原点の 4 隅を反時計回り（左下→右下→右上→左上）に並べ、Position を適用。
+			// 中心原点の 4 隅を反時計回り（左下→右下→右上→左上）に並べる。
+			// Position は Location の平行移動のみ足す（Python 版 _profile_points に一致。
+			// RefDirection の回転は反映しない）。
+			Vec2 offset{0.0, 0.0};
+			const Entity* pos = model.resolve(profileDef->attribute(2));
+			if (pos != nullptr && pos->type == "IFCAXIS2PLACEMENT2D")
+			{
+				Vec3 loc{0.0, 0.0, 0.0};
+				if (resolvePoint(model, pos->attribute(0), loc))
+					offset = Vec2{loc.x, loc.y};
+			}
 			const std::array<Vec2, 4> corners{Vec2{-hx, -hy}, Vec2{hx, -hy}, Vec2{hx, hy},
 											  Vec2{-hx, hy}};
 			out.outer.clear();
 			out.outer.reserve(corners.size());
 			for (const Vec2& corner : corners)
-			{
-				const Vec3 p = pos.transformPoint(Vec3{corner.x, corner.y, 0.0});
-				out.outer.push_back(Vec2{p.x, p.y});
-			}
+				out.outer.push_back(corner + offset);
 			out.rectangle = true;
 			out.xDim = xDim;
 			out.yDim = yDim;
@@ -229,12 +210,28 @@ namespace HomeskzIfcImport::parse
 		return false; // 未対応のプロファイル型
 	}
 
+	std::vector<Vec3> WorldSolid::base() const
+	{
+		// プロファイル 2D 頂点 (u,v) を origin + xAxis·u + yAxis·v で世界系へ写す
+		// （Python 版 _footprint / to_world の base と一致）。
+		std::vector<Vec3> result;
+		result.reserve(profile.size());
+		for (const Vec2& p : profile)
+			result.push_back(origin + (xAxis * p.x) + (yAxis * p.y));
+		return result;
+	}
+
+	Vec3 WorldSolid::extrusion() const
+	{
+		return extrudeDir * depth;
+	}
+
 	std::vector<Vec3> WorldSolid::top() const
 	{
-		std::vector<Vec3> result;
-		result.reserve(base.size());
-		for (const Vec3& p : base)
-			result.push_back(p + extrusion);
+		const Vec3 disp = extrusion();
+		std::vector<Vec3> result = base();
+		for (Vec3& p : result)
+			p = p + disp;
 		return result;
 	}
 
@@ -251,12 +248,12 @@ namespace HomeskzIfcImport::parse
 		if (profile.outer.empty())
 			return false;
 
-		// Position はプロファイルを 3D（オブジェクト座標）へ据える。ワールド行列と
-		// 合成すると、プロファイル 2D 点 (u,v,0) をそのまま世界系へ写せる。
+		// Position はプロファイルを 3D（オブジェクト座標）へ据える。要素配置と合成すると
+		// プロファイル 2D 点 (u,v,0) をそのまま世界系へ写せる（Python 版 _compose に対応）。
 		const Mat4 position = resolveAxis2Placement3D(model, model.resolve(solid->attribute(1)));
 		const Mat4 full = placement * position;
 
-		// 押し出し方向は Position 座標系。単位化して Depth を掛け、同じ行列で世界系へ。
+		// 押し出し方向は Position 座標系。単位化して同じ基底で世界系へ（長さは depth 別持ち）。
 		Vec3 dir{0.0, 0.0, 1.0};
 		Vec3 rawDir{0.0, 0.0, 0.0};
 		if (resolveDirection(model, solid->attribute(2), rawDir))
@@ -265,13 +262,18 @@ namespace HomeskzIfcImport::parse
 			if (core::length(nd) >= core::kGeomEps)
 				dir = nd;
 		}
-		const double depth = solid->attribute(3).asReal();
 
-		out.base.clear();
-		out.base.reserve(profile.outer.size());
-		for (const Vec2& p : profile.outer)
-			out.base.push_back(full.transformPoint(Vec3{p.x, p.y, 0.0}));
-		out.extrusion = full.transformDirection(dir * depth);
+		// 配置基底（origin/軸）を full から取り出す（Python 版 _Placement=(origin,lX,lY,lZ)）。
+		out.origin = full.transformPoint(Vec3{0.0, 0.0, 0.0});
+		out.xAxis = full.transformDirection(Vec3{1.0, 0.0, 0.0});
+		out.yAxis = full.transformDirection(Vec3{0.0, 1.0, 0.0});
+		out.zAxis = full.transformDirection(Vec3{0.0, 0.0, 1.0});
+		out.extrudeDir = full.transformDirection(dir);
+		out.depth = solid->attribute(3).asReal();
+		out.profile = profile.outer;
+		out.rectangle = profile.rectangle;
+		out.xDim = profile.xDim;
+		out.yDim = profile.yDim;
 		return true;
 	}
 

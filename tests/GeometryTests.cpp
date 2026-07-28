@@ -11,10 +11,11 @@
 //	  * Vec2/Vec3 演算（内積・外積・正規化・ゼロ割り回避）と Mat4（生成・積・点/方向適用）。
 //	  * IfcDirection / IfcCartesianPoint の解決（2D/3D、欠損スキップ）。
 //	  * IfcAxis2Placement3D（既定・回転・Gram-Schmidt・縮退フォールバック）。
-//	  * IfcAxis2Placement2D（回転＋平行移動）。
-//	  * IfcLocalPlacement（親子合成・多段・循環の打ち切り）。
-//	  * IfcRectangleProfileDef / IfcArbitraryClosedProfileDef の外形。
-//	  * IfcExtrudedAreaSolid（鉛直押し出し・水平押し出し・要素ワールド配置との合成）。
+//	  * IfcObjectPlacement（要素自身の RelativePlacement のみ＝★親 PlacementRelTo 非合成。
+//	    Python 版と一致。階高の二重計上を防ぐ最重要のパリティ）。
+//	  * IfcRectangleProfileDef（Position は平行移動のみ・RefDirection 回転は無視）/
+//	    IfcArbitraryClosedProfileDef の外形。
+//	  * IfcExtrudedAreaSolid（鉛直押し出し・水平押し出し・要素配置との合成、WorldSolid の基底）。
 //	  * IfcBooleanResult の第 1 オペランド辿り（入れ子・非 boolean）。
 //	  * 実フィクスチャで例外なく解決できること。
 //
@@ -260,77 +261,55 @@ TEST(axis2placement3d_null_entity_is_identity)
 }
 
 // ---------------------------------------------------------------------------
-// IfcAxis2Placement2D
+// IfcObjectPlacement（要素配置。★親 PlacementRelTo を合成しない ＝ Python 版一致）
 // ---------------------------------------------------------------------------
 
-TEST(axis2placement2d_rotation_and_translation)
+TEST(object_placement_uses_element_own_relative_placement)
 {
-	// 原点 (10,20)、RefDirection=(0,1) → X=世界 +Y、Y=(−1,0)。
-	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((10.,20.));\n"
-										"#11=IFCDIRECTION((0.,1.));\n"
-										"#30=IFCAXIS2PLACEMENT2D(#10,#11);\n");
-	const Mat4 m = parse::resolveAxis2Placement2D(model, model.entity(30));
-	// 局所 (1,0) → X 軸(世界 +Y)＋原点 = (10,21)。
-	CHECK(nearVec(m.transformPoint(Vec3{1.0, 0.0, 0.0}), Vec3{10.0, 21.0, 0.0}));
-	// 局所 (0,1) → Y 軸(世界 −X)＋原点 = (9,20)。
-	CHECK(nearVec(m.transformPoint(Vec3{0.0, 1.0, 0.0}), Vec3{9.0, 20.0, 0.0}));
-}
-
-TEST(axis2placement2d_default_refdirection)
-{
-	// RefDirection 省略 → X=(1,0)、平行移動のみ。
-	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((3.,7.));\n"
-										"#30=IFCAXIS2PLACEMENT2D(#10,$);\n");
-	const Mat4 m = parse::resolveAxis2Placement2D(model, model.entity(30));
-	CHECK(nearVec(m.transformPoint(Vec3{1.0, 2.0, 0.0}), Vec3{4.0, 9.0, 0.0}));
-}
-
-// ---------------------------------------------------------------------------
-// IfcLocalPlacement（親子合成）
-// ---------------------------------------------------------------------------
-
-TEST(local_placement_composes_parent_and_relative)
-{
-	// 親: 原点 (100,0,0)。子: 相対原点 (0,50,0)。ワールド原点は (100,50,0)。
-	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((100.,0.,0.));\n"
+	// IfcColumn の ObjectPlacement（属性 5）の RelativePlacement だけを使う。
+	// 原点 (300,400,-174)、Axis 省略 → 単位回転＋その原点。
+	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((300.,400.,-174.));\n"
 										"#11=IFCAXIS2PLACEMENT3D(#10,$,$);\n"
 										"#12=IFCLOCALPLACEMENT($,#11);\n"
-										"#20=IFCCARTESIANPOINT((0.,50.,0.));\n"
-										"#21=IFCAXIS2PLACEMENT3D(#20,$,$);\n"
-										"#22=IFCLOCALPLACEMENT(#12,#21);\n");
-	const Mat4 m = parse::resolveLocalPlacement(model, model.entity(22));
-	CHECK(nearVec(m.transformPoint(Vec3{0.0, 0.0, 0.0}), Vec3{100.0, 50.0, 0.0}));
-	// 子ローカルの (10,0,0) は親回転が単位なので (110,50,0)。
-	CHECK(nearVec(m.transformPoint(Vec3{10.0, 0.0, 0.0}), Vec3{110.0, 50.0, 0.0}));
+										"#20=IFCCOLUMN('gid',$,'柱',$,$,#12,$,$,$);\n");
+	const Mat4 m = parse::resolveObjectPlacement(model, model.entity(20));
+	CHECK(nearVec(m.transformPoint(Vec3{0.0, 0.0, 0.0}), Vec3{300.0, 400.0, -174.0}));
+	CHECK(nearVec(m.transformDirection(Vec3{1.0, 0.0, 0.0}), Vec3{1.0, 0.0, 0.0}));
 }
 
-TEST(local_placement_applies_parent_rotation_to_child_origin)
+TEST(object_placement_ignores_parent_placement)
 {
-	// 親を Z 周り +90°回転（RefDirection=(0,1,0)）、子相対原点 (10,0,0)。
-	// 親回転で子原点は世界 +Y へ回り、ワールド原点は (0,10,0)。
-	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
-										"#11=IFCDIRECTION((0.,0.,1.));\n"
-										"#12=IFCDIRECTION((0.,1.,0.));\n"
-										"#13=IFCAXIS2PLACEMENT3D(#10,#11,#12);\n"
-										"#14=IFCLOCALPLACEMENT($,#13);\n"
-										"#20=IFCCARTESIANPOINT((10.,0.,0.));\n"
-										"#21=IFCAXIS2PLACEMENT3D(#20,$,$);\n"
-										"#22=IFCLOCALPLACEMENT(#14,#21);\n");
-	const Mat4 m = parse::resolveLocalPlacement(model, model.entity(22));
-	CHECK(nearVec(m.transformPoint(Vec3{0.0, 0.0, 0.0}), Vec3{0.0, 10.0, 0.0}));
+	// ★最重要（Python 版パリティ）: 親（階）配置に Z=+600 があっても、要素配置は
+	// 要素自身の Location（Z=−174）だけを返し、親の +600 を合成しない（階高の二重計上防止）。
+	// 実測（サンプル邸の柱）を再現: 要素 Z=−174 / 親階 Z=+600。合成すると +426 になるが、
+	// Python 版はそうせず −174 を使う。
+	Model const model =
+		loadIfcFromText("#4=IFCCARTESIANPOINT((0.,0.,0.));\n"
+						"#5=IFCAXIS2PLACEMENT3D(#4,$,$);\n"
+						"#6=IFCLOCALPLACEMENT($,#5);\n" // 建物（Z=0）
+						"#37=IFCCARTESIANPOINT((0.,0.,600.));\n"
+						"#38=IFCAXIS2PLACEMENT3D(#37,$,$);\n"
+						"#39=IFCLOCALPLACEMENT(#6,#38);\n" // 階（Z=+600）
+						"#367=IFCCARTESIANPOINT((37765.,-25480.,-174.));\n"
+						"#368=IFCAXIS2PLACEMENT3D(#367,$,$);\n"
+						"#369=IFCLOCALPLACEMENT(#39,#368);\n" // 要素（Z=−174、親=階）
+						"#370=IFCCOLUMN('gid',$,'柱',$,$,#369,$,$,$);\n");
+	const Mat4 m = parse::resolveObjectPlacement(model, model.entity(370));
+	const Vec3 o = m.transformPoint(Vec3{0.0, 0.0, 0.0});
+	// 親の +600 を足さない → Z は要素自身の −174（+426 ではない）。
+	CHECK(near(o.x, 37765.0));
+	CHECK(near(o.y, -25480.0));
+	CHECK(near(o.z, -174.0));
 }
 
-TEST(local_placement_terminates_on_cycle)
+TEST(object_placement_missing_is_identity)
 {
-	// 循環参照（#12 の親が自分自身）でも深さ上限で打ち切り、無限再帰しない。
-	// 結果の正しさより「戻ってくること」を確認する（寛容さ）。
-	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((1.,2.,3.));\n"
-										"#11=IFCAXIS2PLACEMENT3D(#10,$,$);\n"
-										"#12=IFCLOCALPLACEMENT(#12,#11);\n");
-	const Mat4 m = parse::resolveLocalPlacement(model, model.entity(12));
-	// 深さ上限で親側が単位に化けるため、少なくとも有限の点が返る（NaN でない）。
-	const Vec3 p = m.transformPoint(Vec3{0.0, 0.0, 0.0});
-	CHECK(std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z));
+	// ObjectPlacement が $（未設定）/ 要素が nullptr → 単位行列。
+	Model const model = loadIfcFromText("#20=IFCCOLUMN('gid',$,'柱',$,$,$,$,$,$);\n");
+	const Mat4 m = parse::resolveObjectPlacement(model, model.entity(20));
+	CHECK(nearVec(m.transformPoint(Vec3{5.0, 6.0, 7.0}), Vec3{5.0, 6.0, 7.0}));
+	const Mat4 mn = parse::resolveObjectPlacement(model, nullptr);
+	CHECK(nearVec(mn.transformPoint(Vec3{5.0, 6.0, 7.0}), Vec3{5.0, 6.0, 7.0}));
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +344,24 @@ TEST(rectangle_profile_honors_position)
 	CHECK(parse::resolveProfile(model, model.entity(12), prof));
 	CHECK(hasVertex(prof.outer, 1050.0, 2030.0));
 	CHECK(hasVertex(prof.outer, 950.0, 1970.0));
+}
+
+TEST(rectangle_profile_ignores_position_rotation)
+{
+	// ★Python 版パリティ: 矩形 Position は Location の平行移動だけを反映し、RefDirection の
+	// 回転は無視する（_profile_points に一致）。RefDirection=(0,1) を与えても 4 隅は回転せず、
+	// 軸並行の中心 (0,0) 矩形のまま（回転していれば (±30,±50) 等の並びが変わるはず）。
+	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.));\n"
+										"#11=IFCDIRECTION((0.,1.));\n"
+										"#12=IFCAXIS2PLACEMENT2D(#10,#11);\n"
+										"#13=IFCRECTANGLEPROFILEDEF(.AREA.,$,#12,100.,60.);\n");
+	Profile prof;
+	CHECK(parse::resolveProfile(model, model.entity(13), prof));
+	// 回転を無視した軸並行の 4 隅 (±50, ±30)。
+	CHECK(hasVertex(prof.outer, 50.0, 30.0));
+	CHECK(hasVertex(prof.outer, -50.0, 30.0));
+	CHECK(hasVertex(prof.outer, 50.0, -30.0));
+	CHECK(hasVertex(prof.outer, -50.0, -30.0));
 }
 
 TEST(rectangle_profile_rejects_nonpositive_dims)
@@ -428,11 +425,18 @@ TEST(extrude_vertical_with_world_placement)
 	WorldSolid solid;
 	CHECK(parse::resolveExtrudedAreaSolid(model, model.entity(46), placement, solid));
 
-	CHECK_EQ(solid.base.size(), static_cast<std::size_t>(4));
-	CHECK(nearVec(solid.extrusion, Vec3{0.0, 0.0, 2844.0}));
+	// WorldSolid は 2D プロファイル＋基底を保持（Python _Solid 相当）。
+	CHECK_EQ(solid.profile.size(), static_cast<std::size_t>(4));
+	CHECK(solid.rectangle);
+	CHECK(near(solid.depth, 2844.0));
+	CHECK(nearVec(solid.extrudeDir, Vec3{0.0, 0.0, 1.0}));
+	CHECK(nearVec(solid.extrusion(), Vec3{0.0, 0.0, 2844.0}));
+
+	const std::vector<Vec3> base = solid.base();
+	CHECK_EQ(base.size(), static_cast<std::size_t>(4));
 	// 底面の 1 隅: 中心 (300,400) ± 52.5、z=0。
 	bool sawCorner = false;
-	for (const Vec3& p : solid.base)
+	for (const Vec3& p : base)
 	{
 		CHECK(near(p.z, 0.0));
 		if (near(p.x, 352.5) && near(p.y, 452.5))
@@ -461,9 +465,9 @@ TEST(extrude_horizontal_beam_direction)
 										"#48=IFCEXTRUDEDAREASOLID(#42,#46,#47,3000.);\n");
 	WorldSolid solid;
 	CHECK(parse::resolveExtrudedAreaSolid(model, model.entity(48), Mat4::identity(), solid));
-	CHECK(nearVec(solid.extrusion, Vec3{3000.0, 0.0, 0.0}));
+	CHECK(nearVec(solid.extrusion(), Vec3{3000.0, 0.0, 0.0}));
 	// 断面は世界の YZ 平面上（局所 X→世界 +Z、局所 Y→世界 −Y）。全底面点の世界 X は 0。
-	for (const Vec3& p : solid.base)
+	for (const Vec3& p : solid.base())
 		CHECK(near(p.x, 0.0));
 }
 
@@ -480,7 +484,7 @@ TEST(extrude_depth_scales_unit_direction)
 										"#46=IFCEXTRUDEDAREASOLID(#42,#44,#45,500.);\n");
 	WorldSolid solid;
 	CHECK(parse::resolveExtrudedAreaSolid(model, model.entity(46), Mat4::identity(), solid));
-	CHECK(nearVec(solid.extrusion, Vec3{0.0, 0.0, 500.0}));
+	CHECK(nearVec(solid.extrusion(), Vec3{0.0, 0.0, 500.0}));
 }
 
 TEST(extrude_rejects_non_solid)
@@ -560,9 +564,9 @@ TEST(resolves_geometry_on_real_fixture)
 		if (parse::resolveExtrudedAreaSolid(model, model.entity(id), Mat4::identity(), solid))
 		{
 			++resolved;
-			CHECK(solid.base.size() >= 3);
+			CHECK(solid.base().size() >= 3);
 			// 押し出しに有限の長さがあること（NaN/inf でない）。
-			CHECK(std::isfinite(core::length(solid.extrusion)));
+			CHECK(std::isfinite(core::length(solid.extrusion())));
 		}
 	}
 	for (const int id : model.byType("IFCRECTANGLEPROFILEDEF"))
@@ -583,6 +587,35 @@ TEST(resolves_geometry_on_real_fixture)
 		if (base != nullptr)
 			CHECK(base->type != "IFCBOOLEANRESULT" && base->type != "IFCBOOLEANCLIPPINGRESULT");
 	}
+
+	// 実 IfcColumn で要素配置（属性 5）が読め、決定的な有限値を返すこと。★親を合成しない
+	// ので、resolveObjectPlacement の原点 Z は要素自身の RelativePlacement.Location の Z に
+	// 一致する（親階の Z オフセットを含まない）。実データで属性インデックスと非合成を担保する。
+	int columns = 0;
+	for (const int id : model.byType("IFCCOLUMN"))
+	{
+		const parse::Entity* col = model.entity(id);
+		const Mat4 pl = parse::resolveObjectPlacement(model, col);
+		const Vec3 o = pl.transformPoint(Vec3{0.0, 0.0, 0.0});
+		CHECK(std::isfinite(o.x) && std::isfinite(o.y) && std::isfinite(o.z));
+
+		// 要素自身の RelativePlacement.Location を直接読み、原点と一致することを確認
+		// （親非合成の証左。ObjectPlacement=属性 5 → IfcLocalPlacement → RelativePlacement）。
+		const parse::Entity* lp = (col != nullptr) ? model.resolve(col->attribute(5)) : nullptr;
+		if (lp != nullptr && lp->type == "IFCLOCALPLACEMENT")
+		{
+			const parse::Entity* a2p = model.resolve(lp->attribute(1));
+			Vec3 ownLoc{0.0, 0.0, 0.0};
+			if (a2p != nullptr && parse::resolvePoint(model, a2p->attribute(0), ownLoc))
+			{
+				CHECK(near(o.x, ownLoc.x));
+				CHECK(near(o.y, ownLoc.y));
+				CHECK(near(o.z, ownLoc.z));
+				++columns;
+			}
+		}
+	}
+	CHECK(columns > 10);
 }
 
 TEST_MAIN();
