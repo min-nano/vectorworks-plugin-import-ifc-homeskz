@@ -13,6 +13,7 @@
 
 #include "PluginPrefix.h"
 #include "draw/ExecuteDocument.h"
+#include "draw/Grid.h"
 #include "core/Document.h"
 
 namespace HomeskzIfcImport::draw
@@ -23,7 +24,10 @@ namespace HomeskzIfcImport::draw
 		if (!core::validateDocument(document))
 			return false;
 
-		// TODO: grid → story → member … と命令ごとに draw モジュールへディスパッチする。
+		// M1 通り芯を描く。以降のマイルストーンで story → member … と命令ごとに
+		// draw モジュールへのディスパッチを足していく（ROADMAP.md）。
+		drawGrids(document);
+
 		return true;
 	}
 } // namespace HomeskzIfcImport::draw

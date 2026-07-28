@@ -108,6 +108,15 @@ target_link_libraries(LoaderTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(LoaderTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Grid (通り芯) parsing (src/parse/Grid): IfcGridAxis -> polyline endpoints, dedup,
+# bbox centering, X/Y classification (by name, else by orientation) and class
+# assignment. Exercised on synthetic STEP snippets and the checked-in fixtures;
+# SDK-free. HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseGridTests ParseGridTests.cpp)
+target_link_libraries(ParseGridTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseGridTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
 # types and formats them into the dialog text the import command shows. SDK-free —
 # the counting + formatting is tested here; only the file picker and the alert

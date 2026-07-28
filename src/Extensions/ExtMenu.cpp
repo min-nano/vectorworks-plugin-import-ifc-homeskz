@@ -8,16 +8,20 @@
 #include "BuildConfig.h"
 #include "Extensions/ExtMenu.h"
 
-// Phase 1（IFC 解析）の入口。SDK 非依存の core/parse ライブラリ（HomeskzIfcCore）に
-// 実装があり、このメニューコマンドがオーケストレーションする（Python 版 run() が
-// ifc.build_document を呼ぶのと同じ立ち位置）。ヘッダは SDK を引き込まない。
-#include "parse/Summary.h"
+// Phase 1（IFC 解析）と Phase 2（VW 描画）の入口。SDK 非依存の core/parse
+// ライブラリ（HomeskzIfcCore）に解析があり、SDK 依存の draw/ が描画する。この
+// メニューコマンドが両フェーズをオーケストレーションする（Python 版 run() が
+// ifc.build_document → vw.execute_document を呼ぶのと同じ立ち位置）。ヘッダは
+// いずれも core::Document までしか参照せず、SDK / STEP を相互に引き込まない。
+#include "parse/BuildDocument.h"
+#include "draw/ExecuteDocument.h"
 
 // ファイル選択ダイアログ（VCOM）。ネイティブの「開く」ダイアログを出し、選ばれた
 // ファイルの絶対パスを IFileIdentifier 経由で受け取る。
 #include "Interfaces/VectorWorks/Filing/IFileChooserDialog.h"
 #include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
 
+#include <cstddef>
 #include <string>
 
 using namespace HomeskzIfcImport;
@@ -136,25 +140,34 @@ void CImportIfcMenu_EventSink::DoInterface()
 	// re-invoked programmatically — a picker on the command path would then pop up
 	// repeatedly. So the command just does its work below, every time it runs.
 
-	// M0 の縦切り: ファイルを選ぶ → parse（Phase 1）で IFC を読む → 主要要素の件数を
-	// ダイアログに出す。まだ描画（Phase 2）はしない。パースが実際に動いている確証を
-	// 件数で示すのが狙い（ROADMAP.md M0「ローカル確認」）。Python 版 run() が
-	// ifc.build_document を呼ぶのと同じ入口で、ここがオーケストレーションを担う。
+	// M1 の縦切り: ファイルを選ぶ → parse（Phase 1）で IFC を Document へ →
+	// draw（Phase 2）で通り芯を VectorWorks へ描く → 描いた本数をダイアログに出す。
+	// 2 フェーズが端から端まで通ることを最も単純な要素（通り芯）で実証する
+	// （ROADMAP.md M1）。Python 版 run() が ifc.build_document → vw.execute_document
+	// を呼ぶのと同じ入口で、ここが両フェーズのオーケストレーションを担う。
 
 	// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら静かに終える。
 	std::string ifcPath;
 	if (!ChooseIfcFile(ifcPath))
 		return;
 
-	// 2. Phase 1（SDK 非依存）で読み込み、主要エンティティ型の件数を数える。読み込み
-	//    失敗も例外を漏らさず loaded=false のサマリとして返る（1 要素の欠損で止めない）。
-	const parse::IfcSummary summary = parse::summarizeIfc(ifcPath);
+	// 2. Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
+	//    読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
+	const core::Document document = parse::buildDocument(ifcPath);
+	const std::size_t gridCount = document.grids.size();
 
-	// 3. 件数を人が読めるテキストへ整形してダイアログ表示（整形は無 SDK でテスト済み）。
-	//    本文に件数一覧、advice 行に選んだファイルのパスを出す。false = 最小アラートで
-	//    なくモーダルダイアログにして、本文と advice を両方見せる（Updater と同じ作法）。
-	//    TXString は UTF-8 の const char* から暗黙変換される（日本語を含めそのまま渡せる）。
-	const std::string body = parse::formatSummary(summary);
+	// 3. Phase 2（SDK 依存）: 命令セットを検証してから通り芯を描く。検証を通らない・
+	//    描く要素が無い場合は executeDocument が false / 無描画で返る。
+	const bool drawn = draw::executeDocument(document);
+
+	// 4. 結果をダイアログ表示。本文に検出した通り芯の本数、advice 行にファイルパス。
+	//    false = 最小アラートでなくモーダルにして本文と advice を両方見せる（Updater と
+	//    同じ作法）。TXString は UTF-8 の const char* から暗黙変換される（日本語可）。
+	std::string body;
+	if (!drawn || gridCount == 0)
+		body = "通り芯が見つかりませんでした。";
+	else
+		body = "通り芯 " + std::to_string(gridCount) + " 本を「共通」レイヤに描きました。";
 	gSDK->AlertInform(body.c_str(), ifcPath.c_str(),
 					  false /* not a minor alert: show a modal dialog */);
 }
