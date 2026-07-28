@@ -77,6 +77,65 @@ TEST(validate_rejects_grid_with_empty_layer)
 	CHECK(!core::validateDocument(document));
 }
 
+namespace
+{
+	// 検証を通る最小のストーリ命令（名前・接尾辞・1 レベル）。各テストで一部を壊す。
+	core::StoryCommand validStory()
+	{
+		core::StoryCommand story;
+		story.name = "1階";
+		story.suffix = "1";
+		story.elevation = 473.0;
+		story.levels.push_back(core::LevelCommand{"FL", 0.0, "1-FL"});
+		return story;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_story)
+{
+	// 名前・接尾辞・各レベルの種別/レイヤ名が非空なら通る（isValidStory / isValidLevel）。
+	core::Document document;
+	document.stories.push_back(validStory());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_story_with_empty_name)
+{
+	core::Document document;
+	core::StoryCommand story = validStory();
+	story.name = "";
+	document.stories.push_back(story);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_story_with_empty_suffix)
+{
+	// 空 suffix は VW 2026 で 2 回目以降の CreateStory が失敗するため不正。
+	core::Document document;
+	core::StoryCommand story = validStory();
+	story.suffix = "";
+	document.stories.push_back(story);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_story_level_with_empty_type)
+{
+	core::Document document;
+	core::StoryCommand story = validStory();
+	story.levels.push_back(core::LevelCommand{"", 0.0, "1-横架材天端"});
+	document.stories.push_back(story);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_story_level_with_empty_layer)
+{
+	core::Document document;
+	core::StoryCommand story = validStory();
+	story.levels.push_back(core::LevelCommand{"横架材天端", 0.0, ""});
+	document.stories.push_back(story);
+	CHECK(!core::validateDocument(document));
+}
+
 // ---------------------------------------------------------------------------
 // parse::buildDocument（骨組み: いまは空の Document を返すだけ）
 // ---------------------------------------------------------------------------

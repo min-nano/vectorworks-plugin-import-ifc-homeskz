@@ -14,6 +14,7 @@
 #include "PluginPrefix.h"
 #include "draw/ExecuteDocument.h"
 #include "draw/Grid.h"
+#include "draw/Story.h"
 #include "core/Document.h"
 
 namespace HomeskzIfcImport::draw
@@ -24,9 +25,19 @@ namespace HomeskzIfcImport::draw
 		if (!core::validateDocument(document))
 			return false;
 
-		// M1 通り芯を描く。以降のマイルストーンで story → member … と命令ごとに
+		// M3 ストーリを先に描く。以降の要素はここで生成したストーリレベル・デザイン
+		// レイヤに配置されるため、通り芯や他要素より前に用意する（Python 版 execute_document
+		// が execute_stories を先頭で呼ぶのと同じ）。
+		drawStories(document);
+
+		// M1 通り芯を描く。以降のマイルストーンで member … と命令ごとに
 		// draw モジュールへのディスパッチを足していく（ROADMAP.md）。
 		drawGrids(document);
+
+		// レイヤのスタック順の並べ替えはここでは行わない（draw/Story.h 参照: VW 2026 ISDK に
+		// デザインレイヤの重ね順変更呼び出しが無く、目的の伏図ビューポート重ね順制御は
+		// per-viewport の SetViewportLayerStackingOverride を使う M13 へ委ねる。希望順の計算は
+		// core::desiredStoryLayerOrder に用意済み）。
 
 		return true;
 	}

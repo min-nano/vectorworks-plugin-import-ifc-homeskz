@@ -138,6 +138,7 @@ jobs:
             src/parse/Loader.cpp \
             src/parse/Summary.cpp \
             src/parse/Grid.cpp \
+            src/parse/Story.cpp \
             src/parse/IfcGeometry.cpp
 
   # Layout + static checks for the CMake build files. cmake-format enforces the
