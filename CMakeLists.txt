@@ -140,6 +140,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/Summary.cpp
 		src/parse/Grid.cpp
 		src/parse/Story.cpp
+		src/parse/StructuralClass.cpp
 		src/parse/IfcGeometry.cpp)
 	target_compile_features(HomeskzIfcCore PUBLIC cxx_std_20)
 	# PUBLIC so every consumer (plug-in + tests) resolves "core/..." / "parse/..."

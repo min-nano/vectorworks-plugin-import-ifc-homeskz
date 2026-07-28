@@ -29,7 +29,7 @@ Python プラグイン（`vectorworks-plugin-script-import-ifc-homeskz`）を C+
 | M1 通り芯 | 🟨 進行中 | 最初の縦切り。parse/draw 実装・無 SDK テスト green・Python 版と整合（クラス名・多点区間）。ローカル目視確認待ち。|
 | M2 幾何の土台 | 🟨 進行中 | 配置行列・押し出し・断面（`Mat4` を含む）。`core/Geometry`＋`parse/IfcGeometry` 実装・無 SDK テスト green。PR/CI 待ち。|
 | M3 ストーリ | 🟨 進行中 | 階・レベル・レイヤ（基本レベルのみ）。`parse/Story`＋`core`（`StoryCommand`/`desiredStoryLayerOrder`）＋`draw/Story` 実装・無 SDK テスト green。屋根組・登り梁・span 柱レベルは後続 M。ローカル目視確認待ち。|
-| M4 構造クラス判定 | ⬜ 未着手 | |
+| M4 構造クラス判定 | ✅ 完了 | `parse/StructuralClass`（種別トークン→クラスの対応表・名前で判別できないときの状況推定）＋`ParseStructuralClassTests`（Python 版 test 移植）実装・無 SDK テスト green。基礎クラス（立上り／底盤）は Python でも `ifc/footing.py` 側にあるため M7 で定義する。|
 | M5 横架材 | ⬜ 未着手 | |
 | M6 柱 | ⬜ 未着手 | |
 | M7 基礎（壁・スラブ） | ⬜ 未着手 | |
@@ -196,14 +196,22 @@ VW 実機でのみ確認できる。CI の SDK ビルド green ＋ 目視で M1 
 
 ---
 
-## M4 — 構造クラス判定（純ロジック） ⬜
+## M4 — 構造クラス判定（純ロジック） ✅
 
 **目的:** 柱・横架材の `04構造-02木造-…` クラス割り当てを純ロジックとして移植。
 描画は無し（M5/M6 が使う）。**Python: `ifc/structural_class.py`。**
 
-- ⬜ `parse/StructuralClass`: 種別トークン→クラスの対応表、名前で判別できないときの
-  状況推定（階・軒高・貫通判定）。基礎クラス（立上り／底盤）も定義。
-- ⬜ テスト: `test_ifc_structural_class.py` を写す。
+- ✅ `parse/StructuralClass`: 種別トークン→クラスの対応表（`memberTypeOfName` /
+  `memberClassFromName`。床小梁・床大梁・甲乙梁→床梁、登り梁 等）、名前で判別できない
+  ときの状況推定（`resolveMemberClass`＝階・軒高、`resolveColumnClass`＝最上階・貫通判定）。
+  `CLASS_*` 定数を Python 版と一字一句合わせる。**純粋な文字列／整数ロジックのみで STEP
+  グラフにも SDK にも依存しない**（幾何・Model 非依存＝parse 内で最も軽いモジュール）。
+  基礎クラス（立上り＝`04構造-01基礎-03立ち上がり`／底盤＝`…-02基礎スラブ`）は Python でも
+  `ifc/structural_class.py` ではなく `ifc/footing.py` にあるため、M7 基礎の導入時に定義する
+  （M4 は `structural_class.py` の忠実な移植に留め、スコープ外の定数を先取りしない）。
+- ✅ テスト: `tests/ParseStructuralClassTests.cpp`（Python 版 `test_ifc_structural_class.py`
+  の全ケースを 1 対 1 で移植。無 SDK・フィクスチャ不要で green）。CMake の `HomeskzIfcCore`
+  へソースを、`ParseStructuralClassTests` をテストに、`lint.yml` の clang-tidy 対象へ追加。
 
 **ローカル確認:** （描画なし。M5/M6 の描画時にクラス分けで確認。）
 
