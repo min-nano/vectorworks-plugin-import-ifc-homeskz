@@ -132,6 +132,22 @@ CImportIfcMenu_EventSink::CImportIfcMenu_EventSink(IVWUnknown* parent) : VWMenu_
 
 CImportIfcMenu_EventSink::~CImportIfcMenu_EventSink() = default;
 
+// ---------------------------------------------------------------------------
+// ドキュメントが開いているときだけメニューを有効にする（開いていなければ
+// グレーアウト）。VW はメニュー表示のたびにこのフックを呼ぶ。
+//
+// 判定は「アクティブなレイヤがあるか」で行う。ドキュメントが開いていれば必ず
+// カレントレイヤが存在し（少なくとも 1 枚のデザインレイヤを持つ）、文書が閉じて
+// いれば GetCurrentLayer() は nil を返す。したがって nil 判定が「文書が開いて
+// いるか」の判定になる。ハンドルの nil 比較は draw/ 側（PrepareLayer 等）と同じ作法。
+//
+// SMenuDef の Needs / NeedsNot（EMenuEnableFlags）は選択状態など静的条件用で、
+// 「文書が開いているか」を動的に反映するにはこの GetItemEnabled フックが確実。
+bool CImportIfcMenu_EventSink::GetItemEnabled()
+{
+	return gSDK->GetCurrentLayer() != nil;
+}
+
 void CImportIfcMenu_EventSink::DoInterface()
 {
 	// Note: the dev-build picker is NOT run here. It runs once at Vectorworks
