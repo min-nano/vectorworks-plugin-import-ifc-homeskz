@@ -117,6 +117,17 @@ target_link_libraries(ParseGridTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseGridTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Geometry foundation (src/core/Geometry + src/parse/IfcGeometry): placement-matrix
+# composition (IfcLocalPlacement / IfcAxis2Placement3D/2D), profile outlines
+# (IfcRectangleProfileDef / IfcArbitraryClosedProfileDef), extruded-area-solid world
+# transform (vertical & horizontal extrusion) and IfcBooleanResult first-operand walk.
+# Exercised on hand-computed synthetic snippets and a real fixture; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(GeometryTests GeometryTests.cpp)
+target_link_libraries(GeometryTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(GeometryTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
 # types and formats them into the dialog text the import command shows. SDK-free —
 # the counting + formatting is tested here; only the file picker and the alert

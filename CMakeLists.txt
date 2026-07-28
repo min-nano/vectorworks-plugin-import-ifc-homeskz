@@ -110,11 +110,13 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 	add_library(
 		HomeskzIfcCore STATIC
 		src/core/Document.cpp
+		src/core/Geometry.cpp
 		src/parse/BuildDocument.cpp
 		src/parse/Step.cpp
 		src/parse/Loader.cpp
 		src/parse/Summary.cpp
-		src/parse/Grid.cpp)
+		src/parse/Grid.cpp
+		src/parse/IfcGeometry.cpp)
 	target_compile_features(HomeskzIfcCore PUBLIC cxx_std_20)
 	# PUBLIC so every consumer (plug-in + tests) resolves "core/..." / "parse/..."
 	# includes against src/ the same way.
