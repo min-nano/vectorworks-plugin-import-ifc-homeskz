@@ -128,6 +128,17 @@ target_link_libraries(GeometryTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(GeometryTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Story (ストーリ) parsing (src/parse/Story) + the SDK-free desired-layer-order
+# computation (src/core/desiredStoryLayerOrder): IfcBuildingStorey -> stories sorted by
+# Elevation, beam-top offset from contained IfcColumn/IfcSlab local Z, base level/layer
+# assembly (FL + 横架材天端, top = 軒高) and the layer stack order (共通 first, top→bottom,
+# floor to background). Exercised on synthetic STEP snippets and a real fixture; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseStoryTests ParseStoryTests.cpp)
+target_link_libraries(ParseStoryTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseStoryTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
 # types and formats them into the dialog text the import command shows. SDK-free —
 # the counting + formatting is tested here; only the file picker and the alert

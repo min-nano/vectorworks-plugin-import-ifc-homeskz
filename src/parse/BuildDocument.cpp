@@ -14,6 +14,7 @@
 #include "parse/BuildDocument.h"
 #include "parse/Grid.h"
 #include "parse/Loader.h"
+#include "parse/Story.h"
 
 namespace HomeskzIfcImport::parse
 {
@@ -26,8 +27,12 @@ namespace HomeskzIfcImport::parse
 
 		core::Document document;
 
+		// M3 ストーリ: IfcBuildingStorey を解析して StoryCommand を積む（parse/Story）。
+		// 以降の要素はここで作られたレベルへ高さをバインドするため、grids より先に置く。
+		document.stories = buildStoryCommands(model);
+
 		// M1 通り芯: IfcGridAxis を解析して GridCommand を積む（parse/Grid）。
-		// 以降のマイルストーンで Story / Member … の解析を同様に足していく（ROADMAP.md）。
+		// 以降のマイルストーンで Member … の解析を同様に足していく（ROADMAP.md）。
 		document.grids = buildGridCommands(model);
 
 		return document;

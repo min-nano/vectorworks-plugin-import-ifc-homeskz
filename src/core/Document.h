@@ -48,11 +48,45 @@ namespace HomeskzIfcImport::core
 		Vec2 end;
 	};
 
+	// story 命令内の 1 ストーリレベル。Python 版 document.py の LevelCommand（dict）に
+	// 対応する。ストーリレベルとそれに紐づくデザインレイヤ 1 枚を表す。
+	//
+	// Python 版キーとの対応:
+	//   type   ← 'type'   … レベル種別（"FL" / "横架材天端" / "軒高"。CreateLayerLevelType
+	//                        へ登録し、GetLayerForStory でレイヤを取り直す鍵になる）
+	//   offset ← 'offset' … ストーリ原点（FL／軒高）からの相対高さ（mm。負値=下）
+	//   layer  ← 'layer'  … このレベルに紐づくデザインレイヤの意図した名前（"1-FL" 等）
+	struct LevelCommand
+	{
+		std::string type;
+		double offset = 0.0;
+		std::string layer;
+	};
+
+	// ストーリ・ストーリレベル・デザインレイヤを生成する命令。Python 版 document.py の
+	// StoryCommand（dict）に対応する。draw/Story がこれを CreateStory＋レベルテンプレート
+	// によるレイヤ生成へ変換する（ROADMAP.md M3）。
+	//
+	// Python 版キーとの対応:
+	//   name      ← 'name'      … VectorWorks のストーリ名（"1階" / "2階" / "屋根"）
+	//   suffix    ← 'suffix'    … CreateStory の接尾辞（"1" / "2" / "R"。空文字は 2 回目
+	//                             以降の CreateStory が失敗するため非空必須）
+	//   elevation ← 'elevation' … ストーリ高さ（IfcBuildingStorey.Elevation。mm）
+	//   levels    ← 'levels'    … 生成するストーリレベルの列。並び順は**希望する
+	//                             デザインレイヤのスタック順（上→下）**を表し、draw/Story が
+	//                             その順にレイヤを並べ替える（レベルの高さには依存しない）。
+	struct StoryCommand
+	{
+		std::string name;
+		std::string suffix;
+		double elevation = 0.0;
+		std::vector<LevelCommand> levels;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
 	// TODO: 要素ごとに命令リストを追加していく（フィールド名は Python 版のキーに対応）。
-	//   * M3 stories   : std::vector<StoryCommand>
 	//   * M5 members   : std::vector<MemberCommand>
 	//   * M6 columns   : std::vector<ColumnCommand>
 	//   * M7 walls / slabs …
@@ -60,6 +94,11 @@ namespace HomeskzIfcImport::core
 	struct Document
 	{
 		int version = kDocumentVersion;
+
+		// M3 ストーリ。IfcBuildingStorey を解析して得た StoryCommand の列（Elevation
+		// 昇順・最上階が末尾。parse/Story が組み立てる）。以降の要素は配置先レイヤを
+		// このストーリのレベルから得るため、描画は grids より先に stories を処理する。
+		std::vector<StoryCommand> stories;
 
 		// M1 通り芯。IfcGridAxis を解析して得た GridCommand の列（入力順に依存しない
 		// 決定的な並び。parse/Grid が #id 昇順で組み立てる）。
@@ -70,4 +109,18 @@ namespace HomeskzIfcImport::core
 	// 検証を通った Document だけを SDK API へ渡す。骨組みの現状では常に true
 	// （空の Document は妥当）。各命令リストの追加に合わせて検証規則を足していく。
 	bool validateDocument(const Document& document);
+
+	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す
+	// （Python 版 vw/story.py desired_layer_order の SDK 非依存な計算部分）。draw/Story が
+	// この順に HMoveForward でレイヤを並べ替える（レベルの高さには依存しない）。SDK を
+	// 触らない純計算なので core に置いて無 SDK で単体テストする（CLAUDE.md「テスト方針」:
+	// レイヤ順の並べ替え計算のような SDK から切り離せる部分は core へ寄せてテストする）。
+	//
+	// 並び: 最上段に通り芯レイヤ "共通" → topLayers（伏図記号レイヤ等・ストーリ非依存の
+	// 独立レイヤ。M12 以降で渡す）→ **最上階→最下階**の順に各ストーリのレイヤ（stories は
+	// Elevation 昇順＝最下階→最上階なので逆順に辿る）。各ストーリ内は levels の並び順。
+	// ただし床（FL）・野地板レベルのレイヤは全ストーリ分をまとめてスタック最下段（背面）へ
+	// 回す（伏図ビューポートで柱・梁を覆い隠さないため。M9 床板で効いてくる。まずは枠）。
+	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
+													const std::vector<std::string>& topLayers = {});
 } // namespace HomeskzIfcImport::core
