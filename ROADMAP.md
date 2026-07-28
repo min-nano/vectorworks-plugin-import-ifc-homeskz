@@ -28,7 +28,7 @@ Python プラグイン（`vectorworks-plugin-script-import-ifc-homeskz`）を C+
 | M0 基盤整備 | ✅ 完了 | 骨組み・CMake 分割・STEP リーダ・Loader・無 SDK テスト、メニューの器改修（ファイル選択→parse→件数ダイアログ）まで完了。`Mat4` は M2 へ意図的に先送り。|
 | M1 通り芯 | 🟨 進行中 | 最初の縦切り。parse/draw 実装・無 SDK テスト green・Python 版と整合（クラス名・多点区間）。ローカル目視確認待ち。|
 | M2 幾何の土台 | 🟨 進行中 | 配置行列・押し出し・断面（`Mat4` を含む）。`core/Geometry`＋`parse/IfcGeometry` 実装・無 SDK テスト green。PR/CI 待ち。|
-| M3 ストーリ | ⬜ 未着手 | |
+| M3 ストーリ | 🟨 進行中 | 階・レベル・レイヤ（基本レベルのみ）。`parse/Story`＋`core`（`StoryCommand`/`desiredStoryLayerOrder`）＋`draw/Story` 実装・無 SDK テスト green。屋根組・登り梁・span 柱レベルは後続 M。ローカル目視確認待ち。|
 | M4 構造クラス判定 | ⬜ 未着手 | |
 | M5 横架材 | ⬜ 未着手 | |
 | M6 柱 | ⬜ 未着手 | |
@@ -169,15 +169,27 @@ VW 実機でのみ確認できる。CI の SDK ビルド green ＋ 目視で M1 
 **目的:** 以降の要素の配置先となるストーリ・ストーリレベル・デザインレイヤを生成する。
 **Python: `ifc/story.py` / `vw/story.py`。**
 
-- ⬜ `parse/Story`: `…FL` で終わる `IfcBuildingStorey` を対象に、`Elevation`＝ストーリ高さ、
+- ✅ `parse/Story`: `…FL` で終わる `IfcBuildingStorey` を対象に、`Elevation`＝ストーリ高さ、
   `IfcColumn`/`IfcSlab` のローカル Z 最大値（≤0）＝横架材天端オフセットを算出。
   階名・suffix・レイヤ名・レベル（`FL`/`横架材天端`、最上階 `軒高`）を組み立て → `StoryCommand`。
-  （屋根組・登り梁・span 柱レベルは各要素の導入時に追加。まずは基本レベルのみ。）
-- ⬜ `draw/Story`: `CreateStory`→`SetStoryElevationN` を 1 階ずつ。レベルは
-  `CreateLevelTemplateN`＋`AddLevelFromTemplate`＋`GetLayerForStory`＋`SetName`。
-- ⬜ レイヤのスタック順並べ替え（`reorder_story_layers` 相当）。まずは基本レイヤの希望順。
-  床レイヤを最背面へ回す方針は Floor 導入時に効いてくる（枠だけ用意）。
-- ⬜ テスト: `ParseStoryTests`（`test_ifc_story.py` を写す。階数・レベル・オフセット）。
+  Elevation 昇順（同値は #id 昇順で安定）・列挙順に依存しない決定値。**Python 版 `ifc/story.py` の
+  `get_local_placement_z`/`resolve_beam_top_offset`/`collect_stories`/`build_story_commands` と整合**。
+  屋根組・登り梁・span 柱レベルは各要素の導入時に追加（M3 は基本レベルのみ）。
+- ✅ `core/Document`: `LevelCommand`/`StoryCommand`＋`Document.stories`。`validateDocument` に
+  ストーリの検証（名前・接尾辞・各レベルの種別/レイヤ名が非空）を追加。希望レイヤ順の**計算**は
+  SDK 非依存の `desiredStoryLayerOrder`（`共通` 先頭・最上階→最下階・床/野地板は背面）として
+  core に置き無 SDK テストする（Python 版 `vw/story.py` `desired_layer_order` の純計算部）。
+- ✅ `draw/Story`: `CreateStory`→`SetStoryElevationN` を 1 階ずつ。レベルは
+  `CreateLevelTemplateN`＋`AddLevelFromTemplate`＋`GetLayerForStory`＋`SetName`。並べ替えは
+  `desiredStoryLayerOrder` の順に `HMoveForward`（`toFront=false` で 1 段ずつ・端で打ち切り）。
+  `executeDocument` は stories→grids の順で描き、全描画後に `reorderStoryLayers` を呼ぶ。
+- ✅ レイヤのスタック順並べ替え（`reorder_story_layers` 相当）。基本レイヤの希望順。
+  床レイヤ（FL）・野地板を最背面へ回す枠を `desiredStoryLayerOrder` に用意（Floor 導入 M9 で効く）。
+- ✅ テスト: `ParseStoryTests`（合成 STEP とフィクスチャで Z 抽出・オフセット最大値・階数・
+  レベル・センタ判定・非 FL 除外・希望レイヤ順・決定性を検証。無 SDK で green）。
+- ⬜ **ローカル目視確認**（下記）。draw/ の残る未確定は ISDK のストーリ系メソッド
+  （`CreateStory`/`SetStoryElevationN`/`CreateLevelTemplateN`/`AddLevelFromTemplate`/
+  `GetLayerForStory`/`HMoveForward`）のシグネチャで、SDK ビルド（CI）と VW 実機で最終確認する。
 
 **ローカル確認:** ストーリと `n-FL`/`n-横架材天端`/`R-軒高` 等のレイヤが階数分でき、
 ナビゲーションのレベル高さが正しく、レイヤのスタック順が希望どおり。

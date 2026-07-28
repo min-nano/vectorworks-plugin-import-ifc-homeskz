@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ranges>
+#include <string>
 
 namespace HomeskzIfcImport::core
 {
@@ -25,6 +27,22 @@ namespace HomeskzIfcImport::core
 			constexpr double kEps = 1e-6;
 			return std::abs(a.x - b.x) < kEps && std::abs(a.y - b.y) < kEps;
 		}
+
+		// ストーリレベル 1 つが妥当か（Python 版 _validate_level 相当）。種別・レイヤ名が
+		// 非空であること。offset は数値（C++ では double なので常に成立）。
+		bool isValidLevel(const LevelCommand& level)
+		{
+			return !level.type.empty() && !level.layer.empty();
+		}
+
+		// ストーリ 1 つが妥当か（Python 版 _validate_story 相当）。名前・接尾辞が非空で
+		// （空 suffix は VW 2026 で 2 回目以降の CreateStory が失敗するため不可）、各レベルが
+		// 妥当であること。elevation は数値（double なので常に成立）。
+		bool isValidStory(const StoryCommand& story)
+		{
+			return !story.name.empty() && !story.suffix.empty() &&
+				   std::ranges::all_of(story.levels, isValidLevel);
+		}
 	} // namespace
 
 	bool validateDocument(const Document& document)
@@ -32,14 +50,55 @@ namespace HomeskzIfcImport::core
 		if (document.version != kDocumentVersion)
 			return false;
 
+		// ストーリ: 名前・接尾辞が非空で、各ストーリレベルの種別・レイヤ名が非空であること
+		// （Python 版 _validate_story / _validate_level と同じ関門。ROADMAP.md M3）。
+		if (!std::ranges::all_of(document.stories, isValidStory))
+			return false;
+
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。
 		// クラス名は空でもよい（無クラス＝既定クラスへ）。1 本でも不正なら描画しない
 		// （Python 版 validateDocument と同じ関門。ROADMAP.md M1）。
 		//
 		// TODO: 命令リストが増えたら、要素ごとの all_of を && で連ねてここに積む
-		// （story / member … の検証。ROADMAP.md）。
+		// （member … の検証。ROADMAP.md）。
 		return std::ranges::all_of(
 			document.grids, [](const GridCommand& grid)
 			{ return !grid.layer.empty() && !isDegenerate(grid.start, grid.end); });
+	}
+
+	namespace
+	{
+		// スタック最下段（背面）へ回すレベル種別か（Python 版 _BACKGROUND_LEVEL_TYPES）。
+		// 床（FL）・野地板のレイヤは伏図ビューポートで柱・梁を覆い隠さないよう全ストーリ
+		// 分をまとめて背面へ集める（M9 床板で効く。FL は M3 から背面対象に含めておく）。
+		bool isBackgroundLevel(const std::string& type)
+		{
+			return type == "FL" || type == "野地板";
+		}
+	} // namespace
+
+	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
+													const std::vector<std::string>& topLayers)
+	{
+		std::vector<std::string> order;
+		// 通り芯レイヤ "共通"（Python 版 vw/story.py GRID_LAYER。ifc/grid.py の配置先と同じ）を
+		// スタック最上段に置き、続けて topLayers を積む。
+		order.emplace_back("共通");
+		order.insert(order.end(), topLayers.begin(), topLayers.end());
+
+		// stories は Elevation 昇順（最下階→最上階）。スタックは最上階→最下階なので逆順に辿る。
+		std::vector<std::string> background;
+		for (const StoryCommand& command : std::views::reverse(stories))
+		{
+			for (const LevelCommand& level : command.levels)
+			{
+				if (isBackgroundLevel(level.type))
+					background.push_back(level.layer);
+				else
+					order.push_back(level.layer);
+			}
+		}
+		order.insert(order.end(), background.begin(), background.end());
+		return order;
 	}
 } // namespace HomeskzIfcImport::core

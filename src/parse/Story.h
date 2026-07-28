@@ -1,0 +1,69 @@
+//
+//	parse/Story.h
+//
+//	Phase 1（IFC 解析）のストーリモジュール。Python 版 ifc/story.py に対応する。
+//	IfcBuildingStorey を辿ってストーリ（階）・ストーリレベル・デザインレイヤの生成
+//	命令（core::StoryCommand）を組み立てる。以降の要素（横架材・柱・床…）はここで
+//	作られたレベルに高さをバインドして配置されるため、ストーリは幾何の土台（M2）に
+//	続く共有基盤になる（ROADMAP.md M3）。
+//
+//	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ
+//	グラフ（parse/Step の Model）だけで完結し、通常の C++ ツールチェインでコンパイル・
+//	単体テストできる（CLAUDE.md「Phase 1」）。
+//
+//	ホームズ君 IFC の高さ表現ルール（Python 版 ifc/story.py と一致させる）:
+//	  * ストーリは名前が "FL" で終わる IfcBuildingStorey だけを対象にする（"設計GL" 等の
+//	    参照高は VW のストーリにしない。残すと既定高さ 0 のストーリが複数できて衝突する）。
+//	  * Elevation がストーリ高さ。Elevation 昇順に並べ、最上階を「屋根」とみなす。
+//	  * 横架材天端オフセットは、その階に属する IfcColumn / IfcSlab のローカル配置 Z の
+//	    「0 以下の最大値」（＝床に最も近い負のオフセット）。列挙順に依存しない決定値。
+//
+//	【M3 のスコープ】まずは基本レベルだけを組み立てる（一般階=FL＋横架材天端、
+//	最上階=軒高）。屋根組（母屋・垂木・野地板・登り梁）と柱の span レベルは、それぞれ
+//	M5/M6/M11 で対応要素を導入するときに足す（Python 版はこれらを常時組み込むが、
+//	本移植は要素ごとの縦切りで積み上げるため、描画対象の無いレベルは先に作らない。
+//	ROADMAP.md M3「まずは基本レベルのみ」）。
+//
+
+#pragma once
+
+#include "core/Document.h"
+#include "parse/Step.h"
+
+#include <vector>
+
+namespace HomeskzIfcImport::parse
+{
+	// IfcProduct（要素）のローカル配置 Z 座標を取り出す。取得できれば outZ に入れて
+	// true、ObjectPlacement が無い／IfcLocalPlacement でない／座標が足りない等で
+	// 取れなければ false（Python 版 get_local_placement_z 相当）。親 PlacementRelTo は
+	// 辿らず RelativePlacement の Location.Z だけを見る（M2 の resolveObjectPlacement と
+	// 同じく、階高は描画フェーズのストーリで反映するため親配置を合成しない）。
+	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ);
+
+	// 階（#storeyId）に属する IfcColumn / IfcSlab から横架材天端の相対オフセット
+	// （FL からの負値）を求める（Python 版 resolve_beam_top_offset 相当）。ローカル
+	// 配置 Z が負の要素のうち最大値（床に最も近接した負のオフセット）を返す。最初に
+	// 見つかった値ではなく最大値を採るため、エンティティ列挙順に依存しない決定的な
+	// 結果になる。候補が無ければ 0.0。
+	double resolveBeamTopOffset(const Model& model, int storeyId);
+
+	// 収集したストーリ 1 件（Python 版 collect_stories の要素 (elevation, offset) に対応）。
+	struct StoryInfo
+	{
+		int id = 0; // IfcBuildingStorey の #id（要素探索・決定的 tie-break 用）
+		double elevation = 0.0; // Elevation（ストーリ高さ。mm）
+		double beamOffset = 0.0; // 横架材天端オフセット（負値。最上階は未使用で 0）
+		bool isTop = false; // 最上階（Elevation 最大）＝「屋根」か
+	};
+
+	// IFC からストーリ情報を Elevation 昇順で集める（Python 版 collect_stories 相当）。
+	// 名前が "FL" で終わる IfcBuildingStorey だけを対象にし、末尾を最上階（isTop）と
+	// する。Elevation が同値の階は #id 昇順で安定に並べる（列挙順に依存しない決定性）。
+	std::vector<StoryInfo> collectStories(const Model& model);
+
+	// STEP Model から story 命令を組み立てる（Python 版 build_story_commands 相当。
+	// ただし M3 は基本レベルのみ。ヘッダ冒頭「M3 のスコープ」参照）。ストーリを一つも
+	// 検出できなければ空を返す（1 要素の欠損で全体を止めない。CLAUDE.md「エラーハンドリング」）。
+	std::vector<core::StoryCommand> buildStoryCommands(const Model& model);
+} // namespace HomeskzIfcImport::parse
