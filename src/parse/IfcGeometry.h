@@ -69,6 +69,12 @@ namespace HomeskzIfcImport::parse
 	//
 	// ObjectPlacement は IfcProduct の属性 5（GlobalId, OwnerHistory, Name, Description,
 	// ObjectType, ObjectPlacement, Representation, …）。解決できない・型不一致なら単位行列。
+	//
+	// ［M5/M6 への注意］最終的な要素高さ（elevation）は「ストーリ高さ ＋ ローカル配置 Z」で
+	// 決まる（Python 版 column.py 等）。本行列の Z はローカル配置 Z のみを表すので、階の高さは
+	// 各要素の描画側で別途足す。また Python 版 _get_placement_3d は Location が 2 座標のとき Z を
+	// 「未設定（レイヤ基準高さへフォールバック）」として扱い、梁軸方向に Axis を使う。これらの
+	// 要素固有の解釈は M5/M6 の要素解析で行い、本関数は純粋な配置行列だけを返す。
 	Mat4 resolveObjectPlacement(const Model& model, const Entity* element);
 
 	// 断面プロファイル（2D、プロファイル定義のローカル座標系）。outer は閉じた外形の
