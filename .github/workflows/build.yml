@@ -46,6 +46,13 @@ jobs:
       # Bump the "v" suffix to force a fresh SDK download (e.g. after Vectorworks
       # publishes a new "latest" SDK).
       VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-mac-v3
+      # ccache speeds up repeat builds: unchanged translation units are served
+      # from the object cache instead of recompiled (the SDK-heavy TUs behind the
+      # PCH dominate the build). The dir is cached across runs. pch_defines +
+      # time_macros let ccache cache PCH-using compilations correctly.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+      CCACHE_SLOPPINESS: pch_defines,time_macros
 
     steps:
       # Resolve the commit/ref we are really building. For a pull_request event
@@ -62,14 +69,24 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             sha="${{ github.event.pull_request.head.sha }}"
             ref="$HEAD_REF"
+            # A pull request publishes the dev prerelease, so build ONLY the dev
+            # channel — the stable bundle would never be published on this run.
+            channel="dev"
+            name="HomeskzIfcImportDev"
           else
             sha="${{ github.sha }}"
             ref="${{ github.ref_name }}"
+            # main (and any manual/scheduled re-dispatch) publishes the stable
+            # release, so build only the stable channel.
+            channel="stable"
+            name="HomeskzIfcImport"
           fi
           {
             echo "sha=$sha"
             echo "short=${sha:0:7}"
             echo "ref=$ref"
+            echo "channel=$channel"
+            echo "name=$name"
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
@@ -91,6 +108,18 @@ jobs:
         with:
           path: ${{ env.VW_SDK_DIR }}
           key: ${{ env.VW_SDK_CACHE_KEY }}
+
+      # Compiler-object cache, restored across runs. A rolling key (per-commit,
+      # falling back to the newest "ccache-mac-" cache) means each run saves an
+      # updated cache and starts from the most recent one, so only the TUs that
+      # actually changed since then recompile.
+      - name: Restore ccache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-mac-${{ github.sha }}
+          restore-keys: |
+            ccache-mac-
 
       - name: Download and trim Vectorworks SDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
@@ -139,16 +168,24 @@ jobs:
           test -x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR"
           echo "SDK looks good."
 
+      - name: Install ccache
+        run: brew install ccache
+
       - name: Configure
         env:
           VW_BUILD_VERSION: ${{ steps.ctx.outputs.short }}
           VW_BUILD_BRANCH: ${{ steps.ctx.outputs.ref }}
+          VW_BUILD_CHANNEL: ${{ steps.ctx.outputs.channel }}
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DVW_SDK_DIR="$VW_SDK_DIR" \
             -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
             -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH" \
+            -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
       # Static analysis of the SDK-DEPENDENT plug-in sources, right before the
@@ -166,15 +203,29 @@ jobs:
           brew install llvm@18
           tidy="$(brew --prefix llvm@18)/bin/clang-tidy"
           "$tidy" --version
-          "$tidy" -p build --warnings-as-errors='*' \
+          # clang-tidy analyses the sources without running the build, so the PCH
+          # (used by ./build) is never produced. Generate a separate, PCH-free
+          # compile database purely for clang-tidy; the real build keeps the PCH.
+          cmake -S . -B build-tidy \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVW_SDK_DIR="$VW_SDK_DIR" \
+            -DVW_ENABLE_PCH=OFF \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          "$tidy" -p build-tidy --warnings-as-errors='*' \
             src/ModuleMain.cpp \
             src/Extensions/ExtMenu.cpp \
             src/Updater.cpp \
             src/UpdaterFlow.cpp
 
       - name: Build
-        # Builds both the stable (HomeskzIfcImport) and dev (HomeskzIfcImportDev) bundles.
-        run: cmake --build build --config Release -v
+        # Builds only the channel this run publishes (VW_BUILD_CHANNEL), compiling
+        # its TUs in parallel across all cores. ccache stats are reset before and
+        # printed after so the cache hit rate is visible in the log.
+        run: |
+          set -euo pipefail
+          ccache -z >/dev/null
+          cmake --build build --config Release --parallel "$(sysctl -n hw.ncpu)" -v
+          ccache -s
 
       # Apple Silicon requires every Mach-O to carry a code signature. We use a
       # free, certificate-less "ad-hoc" signature ("-"), which is enough for the
@@ -182,47 +233,47 @@ jobs:
       # Vectorworks credentials; the plug-in is still "unsigned" in that sense and
       # will show the usual unknown-plug-in warning. Done after the build so the
       # signature seals the packaged .vwr resource too.
-      - name: Ad-hoc code-sign the bundles
+      - name: Ad-hoc code-sign the bundle
+        env:
+          NAME: ${{ steps.ctx.outputs.name }}
         run: |
           set -euo pipefail
-          for name in HomeskzIfcImport HomeskzIfcImportDev; do
-            bundle="build/$name.vwlibrary"
-            codesign --force --deep --sign - "$bundle"
-            echo "Verifying signature for $name:"
-            codesign --verify --strict --verbose=2 "$bundle"
-          done
+          bundle="build/$NAME.vwlibrary"
+          codesign --force --deep --sign - "$bundle"
+          echo "Verifying signature for $NAME:"
+          codesign --verify --strict --verbose=2 "$bundle"
 
-      - name: Inspect built plug-ins
+      - name: Inspect built plug-in
+        env:
+          NAME: ${{ steps.ctx.outputs.name }}
         run: |
           set -euo pipefail
-          for name in HomeskzIfcImport HomeskzIfcImportDev; do
-            bundle="build/$name.vwlibrary"
-            test -d "$bundle" || { echo "::error::$bundle was not produced"; exit 1; }
-            echo "== $name =="
-            find "$bundle" -maxdepth 3
-            lipo -info "$bundle/Contents/MacOS/$name"
-            test -e "$bundle/Contents/Resources/$name.vwr" \
-              || { echo "::error::$name.vwr was not packaged into the bundle"; exit 1; }
-            echo "Build stamp:"
-            /usr/libexec/PlistBuddy -c "Print :VWBuildChannel" "$bundle/Contents/Info.plist"
-            /usr/libexec/PlistBuddy -c "Print :VWBuildBranch"  "$bundle/Contents/Info.plist"
-            /usr/libexec/PlistBuddy -c "Print :VWBuildCommit"  "$bundle/Contents/Info.plist"
-          done
+          bundle="build/$NAME.vwlibrary"
+          test -d "$bundle" || { echo "::error::$bundle was not produced"; exit 1; }
+          echo "== $NAME =="
+          find "$bundle" -maxdepth 3
+          lipo -info "$bundle/Contents/MacOS/$NAME"
+          test -e "$bundle/Contents/Resources/$NAME.vwr" \
+            || { echo "::error::$NAME.vwr was not packaged into the bundle"; exit 1; }
+          echo "Build stamp:"
+          /usr/libexec/PlistBuddy -c "Print :VWBuildChannel" "$bundle/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :VWBuildBranch"  "$bundle/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :VWBuildCommit"  "$bundle/Contents/Info.plist"
 
       # Zip each signed bundle keeping the "<name>.vwlibrary/" wrapper folder, so
       # the zip expands to a usable bundle (not a bare "Contents" folder). These
       # zips are both the CI artifacts and the release assets the updater fetches.
-      - name: Package bundles
+      - name: Package bundle
+        env:
+          NAME: ${{ steps.ctx.outputs.name }}
         run: |
           set -euo pipefail
           rm -rf dist stage
           mkdir -p dist
-          for name in HomeskzIfcImport HomeskzIfcImportDev; do
-            rm -rf "stage/$name"
-            mkdir -p "stage/$name"
-            cp -R "build/$name.vwlibrary" "stage/$name/"
-            ( cd "stage/$name" && zip -qry "$GITHUB_WORKSPACE/dist/$name.vwlibrary.zip" "$name.vwlibrary" )
-          done
+          rm -rf "stage/$NAME"
+          mkdir -p "stage/$NAME"
+          cp -R "build/$NAME.vwlibrary" "stage/$NAME/"
+          ( cd "stage/$NAME" && zip -qry "$GITHUB_WORKSPACE/dist/$NAME.vwlibrary.zip" "$NAME.vwlibrary" )
           ls -l dist
 
       - name: Upload plug-in artifacts
@@ -263,14 +314,24 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             sha="${{ github.event.pull_request.head.sha }}"
             ref="$HEAD_REF"
+            # A pull request publishes the dev prerelease, so build ONLY the dev
+            # channel — the stable bundle would never be published on this run.
+            channel="dev"
+            name="HomeskzIfcImportDev"
           else
             sha="${{ github.sha }}"
             ref="${{ github.ref_name }}"
+            # main (and any manual/scheduled re-dispatch) publishes the stable
+            # release, so build only the stable channel.
+            channel="stable"
+            name="HomeskzIfcImport"
           fi
           {
             echo "sha=$sha"
             echo "short=${sha:0:7}"
             echo "ref=$ref"
+            echo "channel=$channel"
+            echo "name=$name"
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
@@ -346,11 +407,13 @@ jobs:
         env:
           VW_BUILD_VERSION: ${{ steps.ctx.outputs.short }}
           VW_BUILD_BRANCH: ${{ steps.ctx.outputs.ref }}
+          VW_BUILD_CHANNEL: ${{ steps.ctx.outputs.channel }}
         run: |
           cmake -S . -B build -A x64 \
             -DVW_SDK_DIR="$VW_SDK_DIR" \
             -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
-            -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH"
+            -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH" \
+            -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL"
 
       # Static analysis of the SDK-DEPENDENT plug-in sources, right before the
       # build — the Windows counterpart to the macOS clang-tidy step. It covers
@@ -380,7 +443,11 @@ jobs:
           # newer" and use Clang-20 builtins, so clang-cl / clang-tidy must be new
           # enough to parse them. (macOS pins llvm@18 because AppleClang + libc++
           # there impose no such requirement.) Bump the runner's MSVC and this
-          # both track "latest", so they stay compatible.
+          # both track "latest", so they stay compatible. NB: LLVM ships
+          # preinstalled on the runner image, so this is a fast no-op refresh (a
+          # few seconds); we deliberately do NOT actions/cache "C:\Program
+          # Files\LLVM" — caching a ~2-3 GB already-present tree saves nothing and
+          # its restore/save dominates the whole job (~15 min).
           choco install --no-progress -y llvm
           "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
@@ -397,6 +464,7 @@ jobs:
             -DVW_SDK_DIR="$VW_SDK_DIR" \
             -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
             -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH" \
+            -DVW_ENABLE_PCH=OFF \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
       - name: Static analysis (clang-tidy, SDK-dependent code)
@@ -410,48 +478,56 @@ jobs:
           # calling ::GS_NewPtr) rely on MSVC's delayed parsing to compile. Re-add
           # -fdelayed-template-parsing so those SDK templates parse as they do in
           # the real MSVC build; our own (non-template) code is still analyzed.
+          # Clang 20 deprecates -fdelayed-template-parsing under C++20 and, with
+          # warnings-as-errors, that deprecation notice alone would fail the run.
+          # The flag is still needed (see above) and functional, so silence just
+          # its deprecation warning; everything else stays an error.
           "$tidy" -p build-tidy --warnings-as-errors='*' \
             --extra-arg=-fdelayed-template-parsing \
+            --extra-arg=-Wno-delayed-template-parsing-in-cxx20 \
             src/ModuleMain.cpp \
             src/Extensions/ExtMenu.cpp \
             src/Updater.cpp \
             src/UpdaterFlow.cpp
 
       - name: Build
-        # Builds both the stable (HomeskzIfcImport) and dev (HomeskzIfcImportDev) modules.
+        # Builds only the channel this run publishes (VW_BUILD_CHANNEL). --parallel
+        # runs MSBuild across cores (targets) and /MP (set in CMakeLists.txt)
+        # parallelises the TUs within the target.
         shell: bash
-        run: cmake --build build --config Release -v
+        run: cmake --build build --config Release --parallel "$(nproc)" -v
 
-      - name: Inspect built plug-ins
+      - name: Inspect built plug-in
         shell: bash
+        env:
+          NAME: ${{ steps.ctx.outputs.name }}
         run: |
           set -euo pipefail
           d="build/Release"
-          for name in HomeskzIfcImport HomeskzIfcImportDev; do
-            echo "== $name =="
-            test -f "$d/$name.vlb" || { echo "::error::$name.vlb was not produced"; exit 1; }
-            test -f "$d/$name.vwr" || { echo "::error::$name.vwr was not packaged"; exit 1; }
-            test -f "$d/$name.commit" || { echo "::error::$name.commit build stamp missing"; exit 1; }
-            echo "Build stamp: $(cat "$d/$name.commit")"
-          done
+          echo "== $NAME =="
+          test -f "$d/$NAME.vlb" || { echo "::error::$NAME.vlb was not produced"; exit 1; }
+          test -f "$d/$NAME.vwr" || { echo "::error::$NAME.vwr was not packaged"; exit 1; }
+          test -f "$d/$NAME.commit" || { echo "::error::$NAME.commit build stamp missing"; exit 1; }
+          echo "Build stamp: $(cat "$d/$NAME.commit")"
 
       # Zip each plug-in's flat files (module + resource + build stamp + updater)
       # into "<name>.vlb.zip". These are both the CI artifacts and the release
       # assets the Windows updater (vw-update.ps1) fetches.
-      - name: Package modules
+      - name: Package module
         shell: pwsh
+        env:
+          NAME: ${{ steps.ctx.outputs.name }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $name = $env:NAME
           New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
-          foreach ($name in 'HomeskzIfcImport','HomeskzIfcImportDev') {
-            $files = @(
-              "build/Release/$name.vlb",
-              "build/Release/$name.vwr",
-              "build/Release/$name.commit",
-              "build/Release/vw-update.ps1"
-            ) | Where-Object { Test-Path $_ }
-            Compress-Archive -Path $files -DestinationPath "dist/$name.vlb.zip" -Force
-          }
+          $files = @(
+            "build/Release/$name.vlb",
+            "build/Release/$name.vwr",
+            "build/Release/$name.commit",
+            "build/Release/vw-update.ps1"
+          ) | Where-Object { Test-Path $_ }
+          Compress-Archive -Path $files -DestinationPath "dist/$name.vlb.zip" -Force
           Get-ChildItem dist | Select-Object Name, Length
 
       - name: Upload plug-in artifacts
@@ -490,14 +566,24 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             sha="${{ github.event.pull_request.head.sha }}"
             ref="$HEAD_REF"
+            # A pull request publishes the dev prerelease, so build ONLY the dev
+            # channel — the stable bundle would never be published on this run.
+            channel="dev"
+            name="HomeskzIfcImportDev"
           else
             sha="${{ github.sha }}"
             ref="${{ github.ref_name }}"
+            # main (and any manual/scheduled re-dispatch) publishes the stable
+            # release, so build only the stable channel.
+            channel="stable"
+            name="HomeskzIfcImport"
           fi
           {
             echo "sha=$sha"
             echo "short=${sha:0:7}"
             echo "ref=$ref"
+            echo "channel=$channel"
+            echo "name=$name"
           } >> "$GITHUB_OUTPUT"
 
       # Pull both build jobs' zips into a single dist/ folder. The macOS job

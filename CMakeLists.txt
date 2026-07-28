@@ -80,6 +80,29 @@ option(VW_BUILD_TESTS "Build the unit tests" OFF)
 option(VW_ENABLE_COVERAGE "Instrument the tests for code coverage (gcov/llvm-cov)" OFF)
 option(VW_ENABLE_SANITIZERS "Build/run the tests under AddressSanitizer + UBSan" OFF)
 
+# Which plug-in channel(s) to build: "stable", "dev", or "both".
+#
+# The stable and dev plug-ins share every source file and differ only by the
+# VW_DEV_BUILD define, yet each build compiles the SDK-heavy translation units,
+# links, (on macOS) code-signs and packages a bundle independently. On any one
+# CI run only ONE channel is ever published — main publishes stable, a pull
+# request publishes dev — so building the other is pure waste. CI therefore
+# passes -DVW_BUILD_CHANNEL to build just the channel it will publish, halving
+# that per-target work. Local builds default to "both" so nothing changes for
+# developers, who may want to load both plug-ins side by side.
+set(VW_BUILD_CHANNEL
+	"both"
+	CACHE STRING "Which plug-in channel(s) to build: stable, dev, or both")
+set_property(CACHE VW_BUILD_CHANNEL PROPERTY STRINGS stable dev both)
+
+# Precompiled header for the SDK umbrella (PluginPrefix.h). ON for real builds —
+# it is the biggest compile-time win. Turned OFF only when generating the
+# compile_commands.json that clang-tidy consumes: clang-tidy analyses the sources
+# WITHOUT running the build, so the .pch is never produced and a compile database
+# carrying "-include-pch <missing>.pch" would make every file error out. A
+# PCH-free database gives clang-tidy the identical flags minus that include.
+option(VW_ENABLE_PCH "Precompile PluginPrefix.h for the plug-in targets" ON)
+
 if(VW_BUILD_PLUGIN
    AND NOT APPLE
    AND NOT WIN32)
@@ -285,6 +308,21 @@ if(VW_BUILD_PLUGIN)
 		# target above) reaches parse output through core/Document.h.
 		target_link_libraries(${target} PRIVATE HomeskzIfcCore)
 
+		# Precompiled header. Every SDK-dependent TU begins with PluginPrefix.h,
+		# which pulls in the whole Vectorworks SDK umbrella header — by far the
+		# largest thing each TU parses. Compiling it once as a PCH (per target,
+		# per language) instead of re-parsing it in every TU is the single biggest
+		# reduction in the SDK build's compile time. CMake generates the PCH in the
+		# target's own language, so on macOS (where these sources are OBJCXX) it is
+		# built as Objective-C++ and on Windows as C++ — matching how each TU is
+		# compiled. This also cooperates with a compiler-cache launcher (ccache):
+		# with the SDK header behind a stable PCH, unchanged TUs hit the cache.
+		# Skipped for the clang-tidy compile database (see VW_ENABLE_PCH).
+		if(VW_ENABLE_PCH)
+			target_precompile_headers(${target} PRIVATE
+									  "${CMAKE_CURRENT_SOURCE_DIR}/src/PluginPrefix.h")
+		endif()
+
 		# RELEASE_BLD: link against the Release SDK. VW_BUILD_VERSION/VW_BUILD_BRANCH:
 		# build stamp (commit + branch), shown in the menu command's alert.
 		target_compile_definitions(
@@ -360,6 +398,16 @@ if(VW_BUILD_PLUGIN)
 			# limit. /wd4996: silence deprecation warnings (parallels the mac flag).
 			target_compile_options(${target} PRIVATE /EHsc /bigobj /wd4996)
 
+			# /MP: compile this target's translation units in parallel (MSVC is
+			# otherwise single-file-at-a-time within a target); the SDK-heavy TUs
+			# dominate the build, so this is a large, free win on multi-core runners.
+			# Only for the real MSVC build: CMake's MSVC variable is also true for
+			# clang-cl (used by the clang-tidy compile database), where /MP is an
+			# unused argument that warnings-as-errors would reject.
+			if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+				target_compile_options(${target} PRIVATE /MP)
+			endif()
+
 			# The host Vectorworks.exe provides the actual SDK functions through the
 			# callback pointer (GS_InitializeVCOM), so we link only the SDK's static
 			# library, the VWMM import library, and the two Windows system libs the
@@ -434,15 +482,26 @@ if(VW_BUILD_PLUGIN)
 	endfunction()
 
 	# Stable plug-in (from main) and dev plug-in (from feature/PR branches). Both
-	# can be installed and loaded at the same time.
-	add_vw_plugin(HomeskzIfcImport "HomeskzIfcImport" "io.github.min-nano.HomeskzIfcImport"
-				  "stable")
-	add_vw_plugin(
-		HomeskzIfcImportDev
-		"HomeskzIfcImportDev"
-		"io.github.min-nano.HomeskzIfcImportDev"
-		"dev"
-		DEV)
+	# can be installed and loaded at the same time. VW_BUILD_CHANNEL selects which
+	# to build; CI narrows this to the single channel it will publish (see the
+	# option's definition above), while a local "both" builds the pair.
+	if(NOT VW_BUILD_CHANNEL MATCHES "^(stable|dev|both)$")
+		message(FATAL_ERROR "VW_BUILD_CHANNEL must be 'stable', 'dev' or 'both' "
+							"(got '${VW_BUILD_CHANNEL}').")
+	endif()
+
+	if(VW_BUILD_CHANNEL STREQUAL "stable" OR VW_BUILD_CHANNEL STREQUAL "both")
+		add_vw_plugin(HomeskzIfcImport "HomeskzIfcImport" "io.github.min-nano.HomeskzIfcImport"
+					  "stable")
+	endif()
+	if(VW_BUILD_CHANNEL STREQUAL "dev" OR VW_BUILD_CHANNEL STREQUAL "both")
+		add_vw_plugin(
+			HomeskzIfcImportDev
+			"HomeskzIfcImportDev"
+			"io.github.min-nano.HomeskzIfcImportDev"
+			"dev"
+			DEV)
+	endif()
 
 endif() # VW_BUILD_PLUGIN
 
