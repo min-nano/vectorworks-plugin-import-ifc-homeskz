@@ -55,16 +55,29 @@ namespace HomeskzIfcImport
 		//   None        = EMenuEnableFlags(0)
 		//   DocIsActive = EMenuEnableFlags(1 << 0)
 		// と定義されている（Kernel/API/MiniCadCallBacks）。
-		SMenuDef gMenuDef = {
-			/*Needs*/ EMenuEnableFlags::DocIsActive,
-			/*NeedsNot*/ EMenuEnableFlags::None,
-			/*Title*/ {PLUGIN_VWR_ID, "title"},
-			/*Category*/ {PLUGIN_VWR_ID, "category"},
-			/*HelpText*/ {PLUGIN_VWR_ID, "help"},
-			/*VersionCreated*/ 31,
-			/*VersionModified*/ 0,
-			/*VersionRetired*/ 0,
-			/*OverrideHelpID*/ ""};
+		//
+		// menuDef() は名前空間スコープ変数ではなく関数ローカル static で保持する。
+		// EMenuEnableFlags::DocIsActive / ::None は SDK（別 TU）の非ローカル static
+		// なので、これを名前空間スコープ変数の初期化子で直接参照すると静的初期化
+		// 順序に依存し、clang-tidy の cppcoreguidelines-interfaces-global-init が
+		// エラーにする（"initializing non-local variable with non-const expression
+		// depending on uninitialized non-local variable 'DocIsActive'"）。関数
+		// ローカル static は初回呼び出し時に初期化されるため、その順序問題を避け
+		// つつ名前付き定数のまま書ける（EMenuEnableFlags{} の頃はこの依存が無く
+		// 出なかった）。
+		const SMenuDef& menuDef()
+		{
+			static const SMenuDef def = {/*Needs*/ EMenuEnableFlags::DocIsActive,
+										 /*NeedsNot*/ EMenuEnableFlags::None,
+										 /*Title*/ {PLUGIN_VWR_ID, "title"},
+										 /*Category*/ {PLUGIN_VWR_ID, "category"},
+										 /*HelpText*/ {PLUGIN_VWR_ID, "help"},
+										 /*VersionCreated*/ 31,
+										 /*VersionModified*/ 0,
+										 /*VersionRetired*/ 0,
+										 /*OverrideHelpID*/ ""};
+			return def;
+		}
 
 		// ネイティブの「開く」ダイアログで IFC ファイルを 1 つ選ばせる。選ばれたら
 		// その絶対パス（UTF-8）を outPath に入れて true を返す。キャンセルや取得失敗は
@@ -140,7 +153,7 @@ IMPLEMENT_VWMenuExtension(
 // NOLINTEND(misc-const-correctness)
 
 // ---------------------------------------------------------------------------
-CExtMenuImportIfc::CExtMenuImportIfc(CallBackPtr cbp) : VWExtensionMenu(cbp, gMenuDef) {}
+CExtMenuImportIfc::CExtMenuImportIfc(CallBackPtr cbp) : VWExtensionMenu(cbp, menuDef()) {}
 
 CExtMenuImportIfc::~CExtMenuImportIfc() = default;
 
@@ -150,7 +163,7 @@ CImportIfcMenu_EventSink::CImportIfcMenu_EventSink(IVWUnknown* parent) : VWMenu_
 CImportIfcMenu_EventSink::~CImportIfcMenu_EventSink() = default;
 
 // ---------------------------------------------------------------------------
-// 文書アクティブ時のみ有効化（＝文書が無ければグレーアウト）は gMenuDef の
+// 文書アクティブ時のみ有効化（＝文書が無ければグレーアウト）は menuDef() の
 // Needs = EMenuEnableFlags::DocIsActive で宣言的に行う（上のコメント参照）。
 // このコマンドは追加の動的な有効／無効判定を持たないので GetItemEnabled() は
 // override せず、基底の VWMenu_EventSink::GetItemEnabled()（常に true）に委ねる。
