@@ -34,10 +34,10 @@ namespace HomeskzIfcImport::draw
 		// draw モジュールへのディスパッチを足していく（ROADMAP.md）。
 		drawGrids(document);
 
-		// 全要素の描画後にレイヤのスタック順を希望どおりへ並べ替える。通り芯レイヤ
-		// "共通" 生成後でないと "共通" を最上段へ寄せられないため、ここでまとめて行う
-		// （Python 版 execute_document が全描画後に reorder_story_layers を呼ぶのと同じ）。
-		reorderStoryLayers(document);
+		// レイヤのスタック順の並べ替えはここでは行わない（draw/Story.h 参照: VW 2026 ISDK に
+		// デザインレイヤの重ね順変更呼び出しが無く、目的の伏図ビューポート重ね順制御は
+		// per-viewport の SetViewportLayerStackingOverride を使う M13 へ委ねる。希望順の計算は
+		// core::desiredStoryLayerOrder に用意済み）。
 
 		return true;
 	}

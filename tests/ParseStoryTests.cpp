@@ -109,6 +109,41 @@ TEST(get_local_placement_z_false_when_placement_missing)
 		CHECK(!getLocalPlacementZ(model, *column, z));
 }
 
+TEST(get_local_placement_z_false_when_relative_placement_not_3d)
+{
+	// RelativePlacement が IfcAxis2Placement3D でない（2D 等）なら取れない。
+	Model const model = loadIfcFromText("#11=IFCAXIS2PLACEMENT2D(#10,$);\n"
+										"#12=IFCLOCALPLACEMENT($,#11);\n"
+										"#13=IFCCOLUMN('c',$,$,$,$,#12,$,$);\n");
+	const Entity* column = model.entity(13);
+	double z = 0.0;
+	CHECK(column != nullptr && !getLocalPlacementZ(model, *column, z));
+}
+
+TEST(get_local_placement_z_false_when_location_not_cartesian)
+{
+	// Location が IfcCartesianPoint でない（IfcDirection 等）なら取れない。
+	Model const model = loadIfcFromText("#10=IFCDIRECTION((0.,0.,1.));\n"
+										"#11=IFCAXIS2PLACEMENT3D(#10,$,$);\n"
+										"#12=IFCLOCALPLACEMENT($,#11);\n"
+										"#13=IFCCOLUMN('c',$,$,$,$,#12,$,$);\n");
+	const Entity* column = model.entity(13);
+	double z = 0.0;
+	CHECK(column != nullptr && !getLocalPlacementZ(model, *column, z));
+}
+
+TEST(get_local_placement_z_false_when_coords_2d)
+{
+	// 座標が 2 要素（Z が無い）なら取れない。
+	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.));\n"
+										"#11=IFCAXIS2PLACEMENT3D(#10,$,$);\n"
+										"#12=IFCLOCALPLACEMENT($,#11);\n"
+										"#13=IFCCOLUMN('c',$,$,$,$,#12,$,$);\n");
+	const Entity* column = model.entity(13);
+	double z = 0.0;
+	CHECK(column != nullptr && !getLocalPlacementZ(model, *column, z));
+}
+
 // ---------------------------------------------------------------------------
 // resolveBeamTopOffset: 横架材天端オフセット
 // ---------------------------------------------------------------------------
@@ -154,6 +189,39 @@ TEST(beam_top_offset_zero_when_no_elements)
 {
 	Model const model =
 		loadIfcFromText("#20=IFCBUILDINGSTOREY('s',$,'1FL',$,$,$,$,$,.ELEMENT.,473.);\n");
+	CHECK(near(resolveBeamTopOffset(model, 20), 0.0));
+}
+
+TEST(beam_top_offset_ignores_rel_for_other_structure)
+{
+	// storey を RelatedElements 側に含むが RelatingStructure が別の階である rel は無視する
+	// （その rel はこの階の格納要素を表さない）。候補無しで 0。
+	Model const model =
+		loadIfcFromText("#20=IFCBUILDINGSTOREY('a',$,'1FL',$,$,$,$,$,.ELEMENT.,473.);\n"
+						"#21=IFCBUILDINGSTOREY('b',$,'2FL',$,$,$,$,$,.ELEMENT.,3273.);\n"
+						"#30=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#20),#21);\n");
+	CHECK(near(resolveBeamTopOffset(model, 20), 0.0));
+}
+
+TEST(beam_top_offset_skips_rel_with_null_related)
+{
+	// RelatedElements が $（リストでない）rel は読み飛ばす。候補無しで 0。
+	Model const model =
+		loadIfcFromText("#20=IFCBUILDINGSTOREY('a',$,'1FL',$,$,$,$,$,.ELEMENT.,473.);\n"
+						"#30=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,$,#20);\n");
+	CHECK(near(resolveBeamTopOffset(model, 20), 0.0));
+}
+
+TEST(beam_top_offset_ignores_non_negative_z)
+{
+	// ローカル Z が 0 以上の柱は横架材天端の基準にしない（負値のみ）。候補無しで 0。
+	Model const model =
+		loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,12.));\n"
+						"#11=IFCAXIS2PLACEMENT3D(#10,$,$);\n"
+						"#12=IFCLOCALPLACEMENT($,#11);\n"
+						"#13=IFCCOLUMN('c',$,$,$,$,#12,$,$);\n"
+						"#20=IFCBUILDINGSTOREY('a',$,'1FL',$,$,$,$,$,.ELEMENT.,473.);\n"
+						"#30=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#13),#20);\n");
 	CHECK(near(resolveBeamTopOffset(model, 20), 0.0));
 }
 
@@ -216,6 +284,18 @@ TEST(collect_stories_excludes_non_fl)
 		CHECK(near(stories[1].elevation, 5973.0));
 		CHECK(stories[1].isTop);
 	}
+}
+
+TEST(collect_stories_excludes_unnamed_storey)
+{
+	// Name が $（未設定＝空）の階も "FL" で終わらないため除外する（短名の early-out）。
+	Model const model =
+		loadIfcFromText("#10=IFCBUILDINGSTOREY('x',$,$,$,$,$,$,$,.ELEMENT.,0.);\n"
+						"#20=IFCBUILDINGSTOREY('a',$,'1FL',$,$,$,$,$,.ELEMENT.,473.);\n");
+	std::vector<StoryInfo> const stories = collectStories(model);
+	CHECK_EQ(stories.size(), static_cast<std::size_t>(1));
+	if (stories.size() == 1)
+		CHECK(near(stories[0].elevation, 473.0));
 }
 
 TEST(collect_stories_empty_returns_empty)
