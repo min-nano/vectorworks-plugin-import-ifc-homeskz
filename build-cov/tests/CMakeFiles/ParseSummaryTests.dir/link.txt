@@ -1,0 +1,1 @@
+/usr/bin/c++ --coverage CMakeFiles/ParseSummaryTests.dir/ParseSummaryTests.cpp.o -o ParseSummaryTests  ../libHomeskzIfcCore.a 

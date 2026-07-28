@@ -1,0 +1,1 @@
+/usr/bin/c++ --coverage CMakeFiles/StepTests.dir/StepTests.cpp.o -o StepTests  ../libHomeskzIfcCore.a 

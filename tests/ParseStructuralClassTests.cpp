@@ -19,11 +19,16 @@
 #include <string>
 
 using HomeskzIfcImport::parse::CLASS_DODAI;
+using HomeskzIfcImport::parse::CLASS_DOUSASHI;
 using HomeskzIfcImport::parse::CLASS_KOYABARI;
 using HomeskzIfcImport::parse::CLASS_KOYAZUKA;
 using HomeskzIfcImport::parse::CLASS_KUDABASHIRA;
 using HomeskzIfcImport::parse::CLASS_MOYA;
+using HomeskzIfcImport::parse::CLASS_MUNAGI;
+using HomeskzIfcImport::parse::CLASS_NEDA;
 using HomeskzIfcImport::parse::CLASS_NOBORIBARI;
+using HomeskzIfcImport::parse::CLASS_NOKIGETA;
+using HomeskzIfcImport::parse::CLASS_OOBIKI;
 using HomeskzIfcImport::parse::CLASS_TOSHIBASHIRA;
 using HomeskzIfcImport::parse::CLASS_YUKABARI;
 using HomeskzIfcImport::parse::memberClassFromName;
@@ -56,16 +61,22 @@ TEST(member_type_handles_empty)
 
 // --- memberClassFromName（Python 版 TestMemberClassFromName） ----------------------
 
-// 既知種別は直接クラスへ対応する（床小梁・床大梁・甲乙梁はまとめて床梁）。
+// 既知種別は直接クラスへ対応する（_MEMBER_CLASS_BY_TYPE の全対応を網羅する。床小梁・
+// 床大梁・甲乙梁はまとめて床梁、登り梁は小屋組の登り梁クラス）。
 TEST(member_class_known_types_map_directly)
 {
 	CHECK(memberClassFromName("木梁:土台:1").has_value());
 	CHECK_EQ(memberClassFromName("木梁:土台:1").value(), std::string(CLASS_DODAI));
+	CHECK_EQ(memberClassFromName("木梁:大引:1").value(), std::string(CLASS_OOBIKI));
+	CHECK_EQ(memberClassFromName("木梁:根太:1").value(), std::string(CLASS_NEDA));
+	CHECK_EQ(memberClassFromName("木梁:軒桁:1").value(), std::string(CLASS_NOKIGETA));
+	CHECK_EQ(memberClassFromName("木梁:胴差:1").value(), std::string(CLASS_DOUSASHI));
 	CHECK_EQ(memberClassFromName("木梁:床小梁:1").value(), std::string(CLASS_YUKABARI));
 	CHECK_EQ(memberClassFromName("木梁:床大梁:1").value(), std::string(CLASS_YUKABARI));
 	CHECK_EQ(memberClassFromName("木梁:甲乙梁:1").value(), std::string(CLASS_YUKABARI));
+	CHECK_EQ(memberClassFromName("木梁:小屋梁:1").value(), std::string(CLASS_KOYABARI));
 	CHECK_EQ(memberClassFromName("木梁:母屋:1").value(), std::string(CLASS_MOYA));
-	// 登り梁（傾斜梁）は小屋組の登り梁クラスに直接対応する。
+	CHECK_EQ(memberClassFromName("木梁:棟木:1").value(), std::string(CLASS_MUNAGI));
 	CHECK_EQ(memberClassFromName("木梁:登り梁:1").value(), std::string(CLASS_NOBORIBARI));
 }
 

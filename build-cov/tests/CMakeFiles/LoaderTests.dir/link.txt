@@ -1,0 +1,1 @@
+/usr/bin/c++ --coverage CMakeFiles/LoaderTests.dir/LoaderTests.cpp.o -o LoaderTests  ../libHomeskzIfcCore.a 
