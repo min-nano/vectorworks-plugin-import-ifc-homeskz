@@ -33,14 +33,31 @@ namespace HomeskzIfcImport
 	{
 		// Description of the menu command. The SResString entries ({resource,
 		// identifier}) point at strings in the plug-in's .vwr resource file; a
-		// resource file is optional for a build to succeed. EMenuEnableFlags{}
-		// means "no special selection requirements to enable the command".
-		// PLUGIN_VWR_ID differs between the stable and dev builds (see
-		// BuildConfig.h) so each loads its own strings. File-local (anonymous
-		// namespace) rather than `static`.
+		// resource file is optional for a build to succeed. PLUGIN_VWR_ID differs
+		// between the stable and dev builds (see BuildConfig.h) so each loads its
+		// own strings. File-local (anonymous namespace) rather than `static`.
+		//
+		// Needs = DocIsActive: 文書（デザインレイヤを持つ図面）がアクティブな
+		// ときだけコマンドを有効にし、開いている文書が無ければ VW が自動で
+		// グレーアウトする。これがメニュー有効化の宣言的かつ確実な仕組みで、
+		// SDK 公式サンプル（WebPaletteExample / ProcessResources）も同じ
+		// EMenuEnableFlags::DocIsActive を Needs に指定している。本プラグインは
+		// アクティブなレイヤへ描画するため、文書が無い状態では実行させない。
+		//
+		// 以前は Needs を None（= EMenuEnableFlags{}）にしたうえで GetItemEnabled()
+		// 動的フックで GetCurrentLayer() を判定していたが、VW のメニュー有効化は
+		// まず Needs/NeedsNot フラグで決まり、None のままだと文書の有無に関わらず
+		// 常に有効になってしまう（ローカル確認で「常に実行でき、文書未オープンでも
+		// 描画メッセージが出る」と判明）。そのため宣言的な DocIsActive フラグへ
+		// 移し、動的フックは廃止した。
+		//
+		// EMenuEnableFlags は SDK 内で
+		//   None        = EMenuEnableFlags(0)
+		//   DocIsActive = EMenuEnableFlags(1 << 0)
+		// と定義されている（Kernel/API/MiniCadCallBacks）。
 		SMenuDef gMenuDef = {
-			/*Needs*/ EMenuEnableFlags{},
-			/*NeedsNot*/ EMenuEnableFlags{},
+			/*Needs*/ EMenuEnableFlags::DocIsActive,
+			/*NeedsNot*/ EMenuEnableFlags::None,
 			/*Title*/ {PLUGIN_VWR_ID, "title"},
 			/*Category*/ {PLUGIN_VWR_ID, "category"},
 			/*HelpText*/ {PLUGIN_VWR_ID, "help"},
@@ -133,21 +150,10 @@ CImportIfcMenu_EventSink::CImportIfcMenu_EventSink(IVWUnknown* parent) : VWMenu_
 CImportIfcMenu_EventSink::~CImportIfcMenu_EventSink() = default;
 
 // ---------------------------------------------------------------------------
-// ドキュメントが開いているときだけメニューを有効にする（開いていなければ
-// グレーアウト）。VW はメニュー表示のたびにこのフックを呼ぶ。
-//
-// 判定は「アクティブなレイヤがあるか」で行う。ドキュメントが開いていれば必ず
-// カレントレイヤが存在し（少なくとも 1 枚のデザインレイヤを持つ）、文書が閉じて
-// いれば GetCurrentLayer() は nil を返す。したがって nil 判定が「文書が開いて
-// いるか」の判定になる。ハンドルの nil 比較は draw/ 側（PrepareLayer 等）と同じ作法。
-//
-// SMenuDef の Needs / NeedsNot（EMenuEnableFlags）は選択状態など静的条件用で、
-// 「文書が開いているか」を動的に反映するにはこの GetItemEnabled フックが確実。
-bool CImportIfcMenu_EventSink::GetItemEnabled()
-{
-	return gSDK->GetCurrentLayer() != nil;
-}
-
+// 文書アクティブ時のみ有効化（＝文書が無ければグレーアウト）は gMenuDef の
+// Needs = EMenuEnableFlags::DocIsActive で宣言的に行う（上のコメント参照）。
+// このコマンドは追加の動的な有効／無効判定を持たないので GetItemEnabled() は
+// override せず、基底の VWMenu_EventSink::GetItemEnabled()（常に true）に委ねる。
 void CImportIfcMenu_EventSink::DoInterface()
 {
 	// Note: the dev-build picker is NOT run here. It runs once at Vectorworks

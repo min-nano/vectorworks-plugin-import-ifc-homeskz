@@ -22,14 +22,11 @@ namespace HomeskzIfcImport
 		~CImportIfcMenu_EventSink() override;
 
 		// メニュー項目を実行したときの本体（ファイル選択→解析→描画）。
+		//
+		// 文書が開いていないときのグレーアウトは gMenuDef の Needs =
+		// EMenuEnableFlags::DocIsActive（ExtMenu.cpp）で宣言的に行うため、
+		// GetItemEnabled() の override は持たない（基底の常に true に委ねる）。
 		void DoInterface() override;
-
-		// メニュー項目の有効／無効（グレーアウト）を毎回の表示前に問い合わせる
-		// フック。ドキュメントが開いていないときは false を返してコマンドを
-		// グレーアウトさせる。本プラグインは開いているドキュメントへ描画するため、
-		// 文書が無い状態では実行させない（DoInterface 内の gSDK 描画呼び出しが
-		// アクティブレイヤ前提で、文書が無いと無意味・不安定になるのを防ぐ）。
-		bool GetItemEnabled() override;
 	};
 
 	// ------------------------------------------------------------------------
