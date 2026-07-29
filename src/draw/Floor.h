@@ -2,8 +2,12 @@
 //	draw/Floor.h
 //
 //	Phase 2（VW 描画）の床板モジュール。Python 版 vw/floor.py に対応する。
-//	命令セット（core::FloorCommand の列）を床ツール（Floor オブジェクト）として
-//	VectorWorks に配置する。ExecuteDocument からディスパッチされる（ROADMAP.md M5）。
+//	命令セット（core::FloorCommand の列）を**スラブオブジェクト**として VectorWorks に
+//	配置する。ExecuteDocument からディスパッチされる（ROADMAP.md M5）。
+//
+//	Python 版は床ツール（Floor オブジェクト）で描くが、床ツールは実体が押し出しの派生で
+//	オブジェクト構造が押し出しとほぼ変わらない。スラブは BIM オブジェクトとして機能が
+//	強化されており今後の発展性が高いため、本移植ではスラブを使う（詳細は .cpp 冒頭）。
 //
 //	【SDK 依存】draw/ は VectorWorks SDK のみに依存し、IFC / STEP の知識を持たない。
 //	.cpp は PluginPrefix.h（SDK）を include するため SDK ビルドでのみコンパイルされ、

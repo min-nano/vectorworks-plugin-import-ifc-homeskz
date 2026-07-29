@@ -3,8 +3,8 @@
 //
 //	Phase 1（IFC 解析）の床板モジュール。Python 版 ifc/floor.py に対応する。
 //	ホームズ君 IFC の床板（Name が "床版" の IfcSlab。鉛直押し出しで、押し出し
-//	プロファイルがそのまま床の平面外形になる）を各階の FL レイヤ（"n-FL"）へ
-//	床ツール（Floor オブジェクト）で描くための命令（core::FloorCommand）に変換する。
+//	プロファイルがそのまま床の平面外形になる）を各階の FL レイヤ（"n-FL"）へ描くための
+//	命令（core::FloorCommand）に変換する（描画オブジェクトはスラブ。draw/Floor.h 参照）。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ
 //	グラフ（parse/Step）・幾何（parse/IfcGeometry）・ストーリ（parse/Story）だけで

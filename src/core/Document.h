@@ -98,9 +98,9 @@ namespace HomeskzIfcImport::core
 		double offset = 0.0;
 	};
 
-	// 床板（IfcSlab "床版"）を床ツール（Floor オブジェクト）で描く命令。Python 版
-	// document.py の FloorCommand（dict）に対応する。draw/Floor がこれを床オブジェクトへ
-	// 変換する（ROADMAP.md M5）。
+	// 床板（IfcSlab "床版"）を描く命令。Python 版 document.py の FloorCommand（dict）に
+	// 対応する。draw/Floor がこれをスラブオブジェクトへ変換する（ROADMAP.md M5。Python 版は
+	// 床ツールで描くが、本移植は BIM 機能の充実したスラブを使う。draw/Floor.h 参照）。
 	//
 	// Python 版キーとの対応:
 	//   layer     ← 'layer'     … 配置先デザインレイヤ名（"1-FL" 等。既存のみ・無ければスキップ）

@@ -158,13 +158,6 @@ target_link_libraries(ParseFloorTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseFloorTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
-# Floor VectorScript assembly (src/core/FloorScript): the SDK has no API to create a
-# Floor object, so draw/Floor runs a VectorScript through the SDK's script engine. The
-# script TEXT (command order, coordinate formatting, quoting) is pure string logic, so it
-# is built in core/ and verified here without the SDK — mirroring vw/floor.py's draw_floor.
-vw_add_test(CoreFloorScriptTests CoreFloorScriptTests.cpp)
-target_link_libraries(CoreFloorScriptTests PRIVATE HomeskzIfcCore)
-
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
 # types and formats them into the dialog text the import command shows. SDK-free —
 # the counting + formatting is tested here; only the file picker and the alert
