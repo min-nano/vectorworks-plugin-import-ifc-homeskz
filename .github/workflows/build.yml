@@ -168,22 +168,6 @@ jobs:
           test -x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR"
           echo "SDK looks good."
 
-      # TEMPORARY (M5 床板/スラブ): print the SDK declarations draw/Floor.cpp builds on
-      # (2D polygon wrapper, slab component APIs, story-bound struct). The SDK cannot be
-      # downloaded outside CI, so this is the only way to read its headers.
-      # REMOVE THIS STEP once draw/Floor.cpp compiles.
-      - name: TEMP — probe SDK API surface
-        run: |
-          set -uo pipefail
-          inc="$VW_SDK_DIR/SDKLib/Include"
-          echo "=== VWPolygon2DObj.h（全文） ==="
-          cat "$inc/VWFC/VWObjects/VWPolygon2DObj.h"
-          echo "=== VWPolygon2D（Math）の宣言 ==="
-          grep -rn "class VWPolygon2D\b" -A 60 "$inc/VWFC/Math" | head -80 || true
-          echo "=== ISDK: スラブのコンポーネント・スタイル ==="
-          grep -n "Component\|Slab" "$inc/Interfaces/VectorWorks/ISDK.h" \
-            | grep -i "slab\|componentwidth\|insertnewcomponent\|numcomponent" || true
-
       - name: Install ccache
         run: brew install ccache
 

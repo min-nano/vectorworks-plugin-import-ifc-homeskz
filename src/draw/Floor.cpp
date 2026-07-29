@@ -48,8 +48,10 @@ namespace HomeskzIfcImport::draw
 	namespace
 	{
 		// SetObjectStoryBound に渡すバウンド ID。スラブは高さ基準を 1 つだけ持ち、
-		// Python 版 vw/footing.py の draw_slab も 0 を渡している。
-		constexpr TObjectBoundID kSlabBoundID = 0;
+		// Python 版 vw/footing.py の draw_slab も 0 を渡している。型は SDK の
+		// TObjectBoundID（= Sint32）だが、その別名は SDK の名前空間の中にあるため、
+		// ここでは実体の Sint32 で持つ（暗黙変換で同じ）。
+		constexpr Sint32 kSlabBoundID = 0;
 
 		// スラブのコンポーネント（層）を走査する上限。ホームズ君の床は 1 層で足りるが、
 		// 文書のスラブ設定が多層でも取りこぼさないよう十分大きい値で打ち切る。
