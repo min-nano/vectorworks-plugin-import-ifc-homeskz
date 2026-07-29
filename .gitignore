@@ -1,10 +1,11 @@
 # Build output
 /build/
 /build-tests/
-/buildcov/
+/build-cov/
 /build-lint/
 /build-tidy/
 /dist/
+build*/
 *.vwlibrary
 *.vlb
 

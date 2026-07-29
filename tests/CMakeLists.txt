@@ -139,6 +139,14 @@ target_link_libraries(ParseStoryTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseStoryTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Structural-class assignment (src/parse/StructuralClass): the pure member-type ->
+# VW class logic (04構造-02木造-… leaf classes). Trusts the homeskz IFC Name token when
+# it identifies a type, else infers from story/height (member: dodai/yukabari/koyabari/
+# moya; column: koyazuka/toshibashira/kudabashira). No STEP graph, no fixtures — pure
+# string/index logic, so it links the library but needs no HOMESKZ_FIXTURES_DIR.
+vw_add_test(ParseStructuralClassTests ParseStructuralClassTests.cpp)
+target_link_libraries(ParseStructuralClassTests PRIVATE HomeskzIfcCore)
+
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
 # types and formats them into the dialog text the import command shows. SDK-free —
 # the counting + formatting is tested here; only the file picker and the alert
