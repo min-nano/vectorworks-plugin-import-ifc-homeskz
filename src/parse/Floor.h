@@ -10,14 +10,15 @@
 //	グラフ（parse/Step）・幾何（parse/IfcGeometry）・ストーリ（parse/Story）だけで
 //	完結し、通常の C++ ツールチェインでコンパイル・単体テストできる。
 //
-//	要件（Python 版 CLAUDE.md「床板」節。ROADMAP.md M5）:
+//	要件（Python 版 CLAUDE.md「床板」節＋本移植でのスラブ化。ROADMAP.md M5）:
 //	  * 床のある場所は IFC から抽出する（床版の平面外形をそのまま床の外形にする）。
-//	  * 厚みは 24mm 固定。IFC の押し出し厚（実際には 28mm 等が出力される）は使わない。
-//	  * 高さは **IFC の床位置を尊重する**（段差＝スキップフロアを表現する）。床下端の
-//	    絶対 Z は床版ソリッドの最下端（ストーリ高さ ＋ ローカル最下端 Z）そのまま。
-//	    高さ基準は標準の床高＝「横架材天端」レベル（ストーリ高さ ＋ 横架材天端オフセット）
-//	    にバインドし、床下端との差分（ホームズ君で入力した基準高さからの高低差）を
-//	    bound.offset に入れる。段差の無い床は offset 0、段差床はここがずれる。
+//	  * 高さは **IFC の床位置を尊重する**（段差＝スキップフロアを表現する）。命令が持つ
+//	    高さは**床仕上げ上端**の絶対 Z で、一般部は FL と同じ、部分的に床レベルを指定して
+//	    いる場合は FL ± 差分になる。高さ基準は配置先ストーリの「FL」レベルにバインドし、
+//	    その差分を bound.offset に入れる（一般部は offset 0、段差床はここがずれる）。
+//	  * スラブ構成（上から）は 床仕上げ＝FL 高さ − 横架材天端高さ − 24、床下地＝24mm 固定。
+//	    合計＝FL 高さ − 横架材天端高さなので、スラブ下端は一般部で横架材天端に一致する。
+//	    IFC の押し出し厚（実際には 28mm 等が出力される）は使わない。
 //	  * 最上階（屋根）は FL レイヤを持たない（軒高のみ）ので対象外にする（床版は屋根に無い）。
 //
 //	床は「建物形状の一次情報」で、以降の横架材・柱はこの位置に合わせて載せていく
@@ -36,9 +37,13 @@ namespace HomeskzIfcImport::parse
 	// 床板を識別する IfcSlab の Name（Python 版 FLOOR_SLAB_NAME）。
 	inline constexpr const char* kFloorSlabName = "床版";
 
-	// 床厚（mm）。要件により 24mm 固定（Python 版 FLOOR_THICKNESS）。IFC の押し出し厚は
-	// 使わない（ホームズ君は 28mm 等を出力するが、作図上は 24mm で統一する）。
-	inline constexpr double kFloorThickness = 24.0;
+	// 床下地の厚み（mm）。要件により 24mm 固定（Python 版 FLOOR_THICKNESS と同値）。IFC の
+	// 押し出し厚は使わない（ホームズ君は 28mm 等を出力するが、作図上は 24mm で統一する）。
+	inline constexpr double kSubfloorThickness = 24.0;
+
+	// スラブ構成層の名前。上から 床仕上げ → 床下地。
+	inline constexpr const char* kFloorFinishName = "床仕上げ";
+	inline constexpr const char* kSubfloorName = "床下地";
 
 	// STEP Model から床板の描画命令を組み立てる（Python 版 build_floor_commands 相当）。
 	//

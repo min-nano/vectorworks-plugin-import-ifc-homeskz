@@ -138,7 +138,7 @@ TEST(validate_rejects_story_level_with_empty_layer)
 
 namespace
 {
-	// 検証を通る最小の床命令（レイヤ・クラス・3 点以上の外形・高さ基準）。
+	// 検証を通る最小の床命令（レイヤ・クラス・3 点以上の外形・構成層・高さ基準）。
 	core::FloorCommand validFloor()
 	{
 		core::FloorCommand floor;
@@ -146,9 +146,10 @@ namespace
 		floor.drawClass = "04構造-02木造-06耐力面材-02床";
 		floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, core::Vec2{1000.0, 2000.0},
 						  core::Vec2{0.0, 2000.0}};
-		floor.thickness = 24.0;
-		floor.elevation = -120.0;
-		floor.bound = core::StoryBoundCommand{0, "横架材天端", 0.0};
+		floor.components = {core::SlabComponentCommand{"床仕上げ", 96.0},
+							core::SlabComponentCommand{"床下地", 24.0}};
+		floor.elevation = 0.0;
+		floor.bound = core::StoryBoundCommand{0, "FL", 0.0};
 		return floor;
 	}
 } // namespace
@@ -194,6 +195,56 @@ TEST(validate_rejects_floor_with_empty_bound_level)
 	core::Document document;
 	core::FloorCommand floor = validFloor();
 	floor.bound.level = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_without_components)
+{
+	// 構成層が無いスラブは厚みを持てない。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.components.clear();
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_component_with_empty_name)
+{
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.components[0].name = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_component_with_negative_thickness)
+{
+	// 負の層は作れない（parse 側は 0 に丸める）。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.components[0].thickness = -1.0;
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_accepts_floor_with_zero_thickness_finish)
+{
+	// 床仕上げが 0（FL − 横架材天端 が床下地厚以下）の床も、総厚が正なら妥当。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.components[0].thickness = 0.0;
+	document.floors.push_back(floor);
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_zero_total_thickness)
+{
+	// 総厚 0 のスラブは実体を持たない。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	for (core::SlabComponentCommand& component : floor.components)
+		component.thickness = 0.0;
 	document.floors.push_back(floor);
 	CHECK(!core::validateDocument(document));
 }

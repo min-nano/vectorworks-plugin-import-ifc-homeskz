@@ -98,26 +98,46 @@ namespace HomeskzIfcImport::core
 		double offset = 0.0;
 	};
 
+	// スラブの構成層（コンポーネント）1 枚。床は「床仕上げ」「床下地」の 2 層で構成する。
+	//
+	//   name      … 層の名前（"床仕上げ" / "床下地"）
+	//   thickness … 層厚（mm。0 以上）
+	// 並び順は**上から下**（先頭が最上層＝床仕上げ）。層厚の合計がスラブの総厚になる。
+	struct SlabComponentCommand
+	{
+		std::string name;
+		double thickness = 0.0;
+	};
+
 	// 床板（IfcSlab "床版"）を描く命令。Python 版 document.py の FloorCommand（dict）に
 	// 対応する。draw/Floor がこれをスラブオブジェクトへ変換する（ROADMAP.md M5。Python 版は
 	// 床ツールで描くが、本移植は BIM 機能の充実したスラブを使う。draw/Floor.h 参照）。
 	//
-	// Python 版キーとの対応:
-	//   layer     ← 'layer'     … 配置先デザインレイヤ名（"1-FL" 等。既存のみ・無ければスキップ）
-	//   drawClass ← 'class'     … クラス名（床板。予約語 class を機械置換）
-	//   boundary  ← 'boundary'  … 床の平面外形（mm・グリッド中心オフセット済み。閉じた
-	//                             ポリゴンの頂点列で、末尾に始点を重複させない）
-	//   thickness ← 'thickness' … 床厚（mm。要件により 24 固定。IFC の押し出し厚は使わない）
-	//   elevation ← 'elevation' … 床下端の絶対 Z（mm）。IFC の床位置（床版ソリッドの最下端）
-	//                             をそのまま尊重するので、段差＝スキップフロアがここに表れる
-	//   bound     ← 'bound'     … 高さ基準。標準の床高＝配置先ストーリの「横架材天端」レベルに
-	//                             バインドし、offset に床下端と横架材天端の差分を入れる
+	// 【高さの持ち方】elevation は**床仕上げ上端**の絶対 Z。一般部は FL と同じ高さで、
+	// 部分的に床レベルを指定している場合（スキップフロア等）は FL ± 差分になる。高さ基準は
+	// 配置先ストーリの「FL」レベルにバインドし、その差分を bound.offset に入れる
+	// （一般部は offset 0、段差床は段差ぶんずれる）。
+	//
+	// 【スラブ構成】components は上から順に:
+	//   床仕上げ … FL 高さ − 横架材天端高さ − 床下地厚
+	//   床下地   … 24mm 固定
+	// 合計＝FL 高さ − 横架材天端高さ、すなわちスラブ下端は（一般部では）横架材天端に一致する。
+	//
+	// Python 版キーとの対応（Python 版は床ツール＋厚み 24mm 固定なので構成が異なる）:
+	//   layer      ← 'layer'     … 配置先デザインレイヤ名（"1-FL" 等。既存のみ・無ければスキップ）
+	//   drawClass  ← 'class'     … クラス名（床板。予約語 class を機械置換）
+	//   boundary   ← 'boundary'  … 床の平面外形（mm・グリッド中心オフセット済み。閉じた
+	//                              ポリゴンの頂点列で、末尾に始点を重複させない）
+	//   components （Python 版に対応なし）… スラブの構成層（上から）
+	//   elevation  ← 'elevation' … **床仕上げ上端**の絶対 Z（mm。Python 版は床下端）
+	//   bound      ← 'bound'     … 床仕上げ上端の高さ基準（FL レベル＋段差 offset。
+	//                              Python 版は床下端を横架材天端レベルへバインド）
 	struct FloorCommand
 	{
 		std::string layer;
 		std::string drawClass;
 		std::vector<Vec2> boundary;
-		double thickness = 0.0;
+		std::vector<SlabComponentCommand> components;
 		double elevation = 0.0;
 		StoryBoundCommand bound;
 	};

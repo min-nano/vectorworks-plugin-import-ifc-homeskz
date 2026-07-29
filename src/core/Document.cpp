@@ -44,13 +44,28 @@ namespace HomeskzIfcImport::core
 				   std::ranges::all_of(story.levels, isValidLevel);
 		}
 
+		// スラブの構成層 1 枚が妥当か。名前が非空で、層厚が 0 以上（負の層は作れない）。
+		bool isValidSlabComponent(const SlabComponentCommand& component)
+		{
+			return !component.name.empty() && component.thickness >= 0.0;
+		}
+
 		// 床板 1 枚が妥当か（Python 版 _validate_floor 相当）。配置先レイヤ名・クラス名が
-		// 非空で、平面外形が 3 点以上（面になる）で、高さ基準のレベル種別が非空であること。
-		// thickness / elevation / bound.offset は数値（C++ では double なので常に成立）。
+		// 非空で、平面外形が 3 点以上（面になる）で、高さ基準のレベル種別が非空で、構成層が
+		// 1 枚以上あり総厚が正であること。elevation / bound.offset は数値（double なので
+		// 常に成立）。
 		bool isValidFloor(const FloorCommand& floor)
 		{
-			return !floor.layer.empty() && !floor.drawClass.empty() && floor.boundary.size() >= 3 &&
-				   !floor.bound.level.empty();
+			if (floor.layer.empty() || floor.drawClass.empty() || floor.boundary.size() < 3 ||
+				floor.bound.level.empty() || floor.components.empty())
+				return false;
+			if (!std::ranges::all_of(floor.components, isValidSlabComponent))
+				return false;
+
+			double total = 0.0;
+			for (const SlabComponentCommand& component : floor.components)
+				total += component.thickness;
+			return total > 0.0;
 		}
 	} // namespace
 

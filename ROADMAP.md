@@ -233,9 +233,10 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
 （スキップフロア）を表現。床の位置は IFC の一次情報で、以降の高さ基準の目安になる。
 **Python: `ifc/floor.py` / `vw/floor.py`。**
 
-- ✅ `parse/Floor`: `床版`(`IfcSlab`) → `FloorCommand`（厚み 24mm 固定、床下端絶対 Z、
-  横架材天端バインド＋段差 offset）。平面外形・最下端 Z の抽出は M2 の `WorldSolid` を再利用。
-  最上階（屋根）は FL レイヤを持たないため対象外。座標は通り芯と同じグリッド中心オフセット。
+- ✅ `parse/Floor`: `床版`(`IfcSlab`) → `FloorCommand`（**床仕上げ上端**の絶対 Z ＝ FL ± 段差、
+  FL レベルバインド＋段差 offset、スラブ構成＝床仕上げ〈FL−横架材天端−24〉＋床下地〈24〉）。
+  平面外形・最下端 Z の抽出は M2 の `WorldSolid` を再利用。最上階（屋根）は FL レイヤを
+  持たないため対象外。座標は通り芯と同じグリッド中心オフセット。
 - ✅ `parse/IfcGeometry` 拡張: 要素の形状表現から押し出しを取り出す `firstExtrudedSolid` /
   `resolveElementWorldSolid`、平面外形 `footprint`（鉛直押し出し＝プロファイル、水平押し出し＝
   掃引矩形）、Z 範囲 `zTopAndThickness`（Python 版 `ifc/footing.py` の低レベルヘルパー相当。
@@ -245,10 +246,11 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
   `\S\c` / `\P?\`）を UTF-8 へデコード**。ホームズ君 IFC の日本語 `Name`（`床版` 等）は
   UTF-16 エスケープで出力されるため、これが無いと名前による要素判別が一切通らない
   （ifcopenshell が内部で行っているのと同じ扱い。M7 以降の `木梁:…` 等の判定にも必須）。
-- ✅ `core/Document`: `FloorCommand` ＋ `StoryBoundCommand`。`validateDocument` に床の検証。
-- ✅ `draw/Floor`: 外形の閉じたポリゴン→`CreateSlab`→クラス・by-class 属性→厚み 24mm
-  （コンポーネント）→`SetSlabHeight`（**天端**の絶対 Z ＝床下端＋厚み）→
-  `SetObjectStoryBound`（`横架材天端` レベルへ天端基準の offset でバインド）→`ResetObject`。
+- ✅ `core/Document`: `FloorCommand`（`components` ＝ スラブ構成層）＋ `SlabComponentCommand`
+  ＋ `StoryBoundCommand`。`validateDocument` に床の検証（外形 3 点以上・構成層・総厚 > 0）。
+- ✅ `draw/Floor`: 外形の閉じたポリゴン→`CreateSlab`→クラス・by-class 属性→構成層
+  （床仕上げ／床下地の厚み・名前）→`SetSlabHeight`（**天端**＝床仕上げ上端の絶対 Z）→
+  `SetObjectStoryBound`（`FL` レベルへ段差 offset でバインド）→`ResetObject`。
   配置先 `n-FL` レイヤが無い命令はスキップ（レイヤは story 命令が作る）。スラブを作れない
   場合は外形ポリゴンへフォールバック。
 - ✅ **描画オブジェクトはスラブ**（Python 版の床ツールから意図的に変更）。床ツールは実体が
@@ -268,9 +270,10 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
 `SetViewportLayerStackingOverride` で満たすため **M13 に委ねる**。希望順の計算
 （床＝背面）は `core::desiredStoryLayerOrder` に用意済み。
 
-**ローカル確認:** 各階の `n-FL` レイヤに床（スラブ）が描かれる。床下端が IFC の床位置
-（横架材天端＋高低差）に一致し、厚みが 24mm になっている（スラブのコンポーネント）。
-2D 表現が床ツールと異なる点も併せて確認する。スキップフロアの段差が高さの差として
+**ローカル確認:** 各階の `n-FL` レイヤに床（スラブ）が描かれる。**床仕上げ上端が FL**（床レベル
+指定のある床は FL ± 差分）に一致し、スラブ構成が上から `床仕上げ`（FL−横架材天端−24）＋
+`床下地`（24）になっている（＝スラブ下端が横架材天端に一致）。2D 表現が床ツールと異なる点も
+併せて確認する。スキップフロアの段差が高さの差として
 表れる（`スキップフロア_サンプル` の 2FL は通常床と 832mm 下がった床が混在）。床を選択して
 OIP の高さ基準が `横架材天端` レベル＋offset になっており、編集しても高さがずれない。
 

@@ -11,6 +11,7 @@
 #include "parse/Story.h"
 #include "parse/StructuralClass.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -18,16 +19,15 @@
 namespace HomeskzIfcImport::parse
 {
 	using core::FloorCommand;
+	using core::SlabComponentCommand;
 	using core::StoryBoundCommand;
 	using core::Vec2;
 
 	namespace
 	{
-		// 床の高さ基準にするレベル種別名。parse/Story が一般階に作る "横架材天端" レベルと
-		// 一致させる（Python 版 LEVEL_BEAM_TOP）。ここがズレると SetObjectStoryBound が
-		// 解決できないレベルを指してしまう。
-		constexpr const char* kLevelBeamTop = "横架材天端";
-		// FL レイヤ名の接尾辞（"1-FL" の "FL"。Python 版 LEVEL_FL）。
+		// 床仕上げ上端の高さ基準にするレベル種別名。parse/Story が一般階に作る "FL" レベルと
+		// 一致させる（Python 版 LEVEL_FL）。ここがズレると SetObjectStoryBound が解決できない
+		// レベルを指してしまう。FL レイヤ名の接尾辞（"1-FL" の "FL"）も同じ名前。
 		constexpr const char* kLevelFL = "FL";
 
 		// IfcRoot の Name 属性インデックス（GlobalId, OwnerHistory, Name=2, …）。
@@ -63,8 +63,16 @@ namespace HomeskzIfcImport::parse
 
 			// FL レイヤ名は parse/Story のレイヤ名規約（layer_prefix_for）と同じ "{階}-FL"。
 			const std::string layer = std::to_string(i + 1) + "-" + kLevelFL;
-			// 標準の床高＝横架材天端（基準高さ）の絶対 Z。段差床はここからの高低差でずれる。
+			// 横架材天端（床を受ける基準高さ）の絶対 Z。段差床はここからの高低差でずれる。
 			const double beamTopAbs = story.elevation + story.beamOffset;
+
+			// スラブ構成: 上から 床仕上げ（FL 高さ − 横架材天端高さ − 床下地厚）＋
+			// 床下地（24mm 固定）。合計＝FL 高さ − 横架材天端高さなので、段差の無い床は
+			// 下端が横架材天端・上端が FL にちょうど収まる。横架材天端オフセットを取れない
+			// （＝柱も床版も無い）階では合計が床下地だけになるよう仕上げを 0 に丸める
+			// （負の層は作れない。1 階の欠損で全体を止めない）。
+			const double slabThickness = story.elevation - beamTopAbs;
+			const double finishThickness = std::max(slabThickness - kSubfloorThickness, 0.0);
 
 			for (const int elementId : collectStoryElements(model, story.id))
 			{
@@ -87,21 +95,24 @@ namespace HomeskzIfcImport::parse
 					p.y -= center.y;
 				}
 
-				// IFC の床位置を尊重する: 床下端の絶対 Z は床版ソリッドの最下端
-				// （ストーリ高さ ＋ ローカル最下端 Z）そのまま。標準の床高（横架材天端）
-				// からの高低差は bound.offset に表れる（段差＝スキップフロア）。
+				// IFC の床位置を尊重する: 床版ソリッドの最下端（ストーリ高さ ＋ ローカル
+				// 最下端 Z）が床を受ける位置で、横架材天端からの高低差が段差＝スキップ
+				// フロアになる。命令が持つ高さは**床仕上げ上端**なので、その高低差を FL に
+				// 足した値（一般部は FL そのもの、床レベル指定時は FL ± 差分）にする。
 				double topLocal = 0.0;
 				double thicknessLocal = 0.0;
 				zTopAndThickness(solid, topLocal, thicknessLocal);
 				const double bottomAbs = story.elevation + (topLocal - thicknessLocal);
+				const double levelDelta = bottomAbs - beamTopAbs;
 
 				FloorCommand cmd;
 				cmd.layer = layer;
 				cmd.drawClass = CLASS_FLOOR;
 				cmd.boundary = std::move(boundary);
-				cmd.thickness = kFloorThickness;
-				cmd.elevation = bottomAbs;
-				cmd.bound = StoryBoundCommand{0, kLevelBeamTop, bottomAbs - beamTopAbs};
+				cmd.components = {SlabComponentCommand{kFloorFinishName, finishThickness},
+								  SlabComponentCommand{kSubfloorName, kSubfloorThickness}};
+				cmd.elevation = story.elevation + levelDelta;
+				cmd.bound = StoryBoundCommand{0, kLevelFL, levelDelta};
 				commands.push_back(std::move(cmd));
 			}
 		}

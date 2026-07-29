@@ -7,10 +7,11 @@
 //	1 対 1 で写している。
 //
 //	検証項目（ROADMAP.md M5）: 床版（IfcSlab "床版"）の抽出・FL レイヤ振り分け
-//	（最上階＝屋根には置かない）・厚み 24mm 固定・クラス・**IFC の床位置を尊重した
-//	高さ**（elevation ＝ 横架材天端 ＋ bound.offset の不変条件、スキップフロアの段差、
-//	横架材天端より上の床）・グリッド中心オフセット済みの外形・決定性。実フィクスチャの
-//	パスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
+//	（最上階＝屋根には置かない）・スラブ構成（上から 床仕上げ＝FL−横架材天端−24 と
+//	床下地＝24）・クラス・**IFC の床位置を尊重した高さ**（elevation ＝ 床仕上げ上端 ＝
+//	FL ＋ bound.offset の不変条件、スキップフロアの段差、横架材天端より上の床）・
+//	グリッド中心オフセット済みの外形・決定性。実フィクスチャのパスは CMake が
+//	HOMESKZ_FIXTURES_DIR で渡す。
 //
 
 #include "TestFramework.h"
@@ -32,7 +33,7 @@ using HomeskzIfcImport::core::FloorCommand;
 using HomeskzIfcImport::parse::buildFloorCommands;
 using HomeskzIfcImport::parse::CLASS_FLOOR;
 using HomeskzIfcImport::parse::collectStories;
-using HomeskzIfcImport::parse::kFloorThickness;
+using HomeskzIfcImport::parse::kSubfloorThickness;
 using HomeskzIfcImport::parse::loadIfc;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
@@ -53,8 +54,21 @@ namespace
 		return loadIfc(std::string(HOMESKZ_FIXTURES_DIR) + "/" + filename, &ok);
 	}
 
-	// 各 FL レイヤ名 → その階の横架材天端（絶対 Z）。Python 版テストの
-	// _beam_top_by_layer と同じ（最上階は FL レイヤを持たないので除く）。
+	// 各 FL レイヤ名 → その階の FL 高さ（絶対 Z）。床仕上げ上端の基準になる。
+	std::map<std::string, double> flByLayer(const Model& model)
+	{
+		std::map<std::string, double> result;
+		const std::vector<StoryInfo> stories = collectStories(model);
+		for (std::size_t i = 0; i < stories.size(); ++i)
+		{
+			if (stories[i].isTop)
+				continue;
+			result[std::to_string(i + 1) + "-FL"] = stories[i].elevation;
+		}
+		return result;
+	}
+
+	// 各 FL レイヤ名 → その階の横架材天端（絶対 Z）。スラブ構成（床仕上げ厚）の検証に使う。
 	std::map<std::string, double> beamTopByLayer(const Model& model)
 	{
 		std::map<std::string, double> result;
@@ -66,6 +80,15 @@ namespace
 			result[std::to_string(i + 1) + "-FL"] = stories[i].elevation + stories[i].beamOffset;
 		}
 		return result;
+	}
+
+	// 構成層の合計厚。
+	double totalThickness(const FloorCommand& floor)
+	{
+		double total = 0.0;
+		for (const HomeskzIfcImport::core::SlabComponentCommand& component : floor.components)
+			total += component.thickness;
+		return total;
 	}
 
 	// 指定レイヤの命令だけを取り出す。
@@ -131,13 +154,22 @@ TEST(extracts_floor_slab_from_minimal_model)
 	const FloorCommand& floor = floors.front();
 	CHECK_EQ(floor.layer, std::string("1-FL"));
 	CHECK_EQ(floor.drawClass, std::string(CLASS_FLOOR));
-	// 厚みは IFC の押し出し厚（28）ではなく 24mm 固定。
-	CHECK(near(floor.thickness, 24.0));
-	// 床下端の絶対 Z ＝ ストーリ高さ(0) ＋ ローカル最下端 Z(-120)。
-	CHECK(near(floor.elevation, -120.0));
-	// 横架材天端（= 0 + (-120)）ちょうどなので offset は 0。
+	// スラブ構成は上から 床仕上げ（FL 0 − 横架材天端 -120 − 床下地 24 = 96）＋ 床下地 24。
+	// IFC の押し出し厚（28）は使わない。
+	CHECK_EQ(floor.components.size(), static_cast<std::size_t>(2));
+	if (floor.components.size() == 2)
+	{
+		CHECK_EQ(floor.components[0].name, std::string("床仕上げ"));
+		CHECK(near(floor.components[0].thickness, 96.0));
+		CHECK_EQ(floor.components[1].name, std::string("床下地"));
+		CHECK(near(floor.components[1].thickness, 24.0));
+	}
+	CHECK(near(totalThickness(floor), 120.0));
+	// 床仕上げ上端の絶対 Z ＝ FL（0）。段差が無いので FL ちょうど。
+	CHECK(near(floor.elevation, 0.0));
+	// 高さ基準は FL レベルで、段差が無いので offset は 0。
 	CHECK_EQ(floor.bound.storyOffset, 0);
-	CHECK_EQ(floor.bound.level, std::string("横架材天端"));
+	CHECK_EQ(floor.bound.level, std::string("FL"));
 	CHECK(near(floor.bound.offset, 0.0));
 	// 外形は矩形 4 点（通り芯が無いモデルなのでセンタリングは無し）。
 	CHECK_EQ(floor.boundary.size(), static_cast<std::size_t>(4));
@@ -202,40 +234,58 @@ TEST(sample1_has_floor_on_each_non_top_fl_layer)
 	CHECK_EQ(onLayer(floors, "2-FL").size(), static_cast<std::size_t>(1));
 }
 
-TEST(sample1_thickness_and_class_are_fixed)
+TEST(sample1_components_and_class_are_fixed)
 {
+	// スラブ構成は上から 床仕上げ（FL − 横架材天端 − 24）＋ 床下地（24mm 固定）で、
+	// 合計は FL − 横架材天端。IFC の押し出し厚（28mm 等）は使わない。
 	bool ok = false;
 	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
+	const std::map<std::string, double> fl = flByLayer(model);
+	const std::map<std::string, double> beamTop = beamTopByLayer(model);
+
 	std::vector<FloorCommand> const floors = buildFloorCommands(model);
 	CHECK(!floors.empty());
 	for (const FloorCommand& floor : floors)
 	{
-		// 厚みは IFC の押し出し厚（28mm 等）ではなく要件どおり 24mm 固定。
-		CHECK(near(floor.thickness, kFloorThickness));
-		CHECK(near(kFloorThickness, 24.0));
 		CHECK_EQ(floor.drawClass, std::string(CLASS_FLOOR));
+		CHECK_EQ(floor.components.size(), static_cast<std::size_t>(2));
+		if (floor.components.size() != 2)
+			continue;
+		const auto flIt = fl.find(floor.layer);
+		const auto beamIt = beamTop.find(floor.layer);
+		CHECK(flIt != fl.end() && beamIt != beamTop.end());
+		if (flIt == fl.end() || beamIt == beamTop.end())
+			continue;
+
+		const double slab = flIt->second - beamIt->second;
+		CHECK(slab > kSubfloorThickness); // 実データは仕上げが 0 に潰れない
+		CHECK_EQ(floor.components[0].name, std::string("床仕上げ"));
+		CHECK(near(floor.components[0].thickness, slab - kSubfloorThickness));
+		CHECK_EQ(floor.components[1].name, std::string("床下地"));
+		CHECK(near(floor.components[1].thickness, kSubfloorThickness));
+		CHECK(near(totalThickness(floor), slab));
 	}
 }
 
-TEST(sample1_bottom_elevation_equals_beam_top_when_no_step)
+TEST(sample1_finish_top_equals_fl_when_no_step)
 {
-	// 段差の無い床は床下端（elevation）が横架材天端（絶対 Z）に一致し、
-	// 横架材天端レベルへ offset 0 でバインドされる。
+	// 段差の無い床は床仕上げ上端（elevation）が FL（絶対 Z）に一致し、
+	// FL レベルへ offset 0 でバインドされる。
 	bool ok = false;
 	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
-	const std::map<std::string, double> beamTop = beamTopByLayer(model);
+	const std::map<std::string, double> fl = flByLayer(model);
 
 	for (const FloorCommand& floor : buildFloorCommands(model))
 	{
-		const auto found = beamTop.find(floor.layer);
-		CHECK(found != beamTop.end());
-		if (found == beamTop.end())
+		const auto found = fl.find(floor.layer);
+		CHECK(found != fl.end());
+		if (found == fl.end())
 			continue;
 		CHECK(near(floor.elevation, found->second));
 		CHECK_EQ(floor.bound.storyOffset, 0);
-		CHECK_EQ(floor.bound.level, std::string("横架材天端"));
+		CHECK_EQ(floor.bound.level, std::string("FL"));
 		CHECK(near(floor.bound.offset, 0.0));
 	}
 }
@@ -244,10 +294,10 @@ TEST(sample1_bottom_elevation_equals_beam_top_when_no_step)
 // 実フィクスチャ横断: elevation ＝ 横架材天端 ＋ bound.offset の不変条件
 // ---------------------------------------------------------------------------
 
-TEST(elevation_equals_beam_top_plus_offset_in_all_fixtures)
+TEST(elevation_equals_fl_plus_offset_in_all_fixtures)
 {
-	// 床下端の絶対 Z（elevation）は「標準の床高（横架材天端）」＋「基準高さからの
-	// 高低差（offset）」で表される。この不変条件を全フィクスチャで検証する。
+	// 床仕上げ上端の絶対 Z（elevation）は「FL」＋「床レベル指定による高低差（offset）」
+	// で表される。この不変条件を全フィクスチャで検証する。
 	const std::vector<std::string> files = {"サンプル1 (住木邸新築工事).ifc",
 											"スキップフロア_サンプル.ifc",
 											"グレー本モデルプラン1【3階】.ifc"};
@@ -256,16 +306,18 @@ TEST(elevation_equals_beam_top_plus_offset_in_all_fixtures)
 		bool ok = false;
 		Model const model = fixture(file, ok);
 		CHECK(ok);
-		const std::map<std::string, double> beamTop = beamTopByLayer(model);
+		const std::map<std::string, double> fl = flByLayer(model);
 
 		for (const FloorCommand& floor : buildFloorCommands(model))
 		{
-			CHECK_EQ(floor.bound.level, std::string("横架材天端"));
-			const auto found = beamTop.find(floor.layer);
-			CHECK(found != beamTop.end());
-			if (found == beamTop.end())
+			CHECK_EQ(floor.bound.level, std::string("FL"));
+			const auto found = fl.find(floor.layer);
+			CHECK(found != fl.end());
+			if (found == fl.end())
 				continue;
 			CHECK(near(floor.elevation, found->second + floor.bound.offset));
+			// スラブ構成の合計は FL − 横架材天端（＝床仕上げ上端から床下地下端まで）。
+			CHECK(totalThickness(floor) >= kSubfloorThickness);
 		}
 	}
 }
@@ -281,7 +333,7 @@ TEST(floors_only_on_non_top_fl_layers)
 		bool ok = false;
 		Model const model = fixture(file, ok);
 		CHECK(ok);
-		const std::map<std::string, double> valid = beamTopByLayer(model);
+		const std::map<std::string, double> valid = flByLayer(model);
 		for (const FloorCommand& floor : buildFloorCommands(model))
 			CHECK(valid.find(floor.layer) != valid.end());
 	}

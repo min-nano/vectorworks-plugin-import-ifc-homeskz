@@ -19,13 +19,13 @@
 //	  1. 外形を閉じた 2D ポリゴンにする
 //	  2. CreateSlab(プロファイル) でスラブを生成する
 //	  3. クラス分けと描画属性の by-class 設定
-//	  4. 厚みを 24mm にする（スラブの厚みは**コンポーネント**が決める。文書のスラブ設定に
-//	     依存しないよう、スタイルを外して（ConvertToUnstyledSlab）先頭コンポーネントを
-//	     24mm に、残りは 0 に潰す）
-//	  5. SetSlabHeight にスラブ**天端**の絶対 Z を渡す（＝床下端 + 厚み。SetSlabHeight は
+//	  4. スラブの構成層（コンポーネント）を命令どおりに整える（上から 床仕上げ → 床下地）。
+//	     文書のスラブ設定に依存しないよう、スタイルを外して（ConvertToUnstyledSlab）から
+//	     層数・厚み・名前を設定する
+//	  5. SetSlabHeight にスラブ**天端**＝床仕上げ上端の絶対 Z を渡す（SetSlabHeight は
 //	     厚みではなく天端高さを設定する関数。Python 版 #70 の不具合と同じ落とし穴）
-//	  6. SetObjectStoryBound で天端の高さ基準を「横架材天端」レベルへバインドする
-//	     （offset も天端基準なので命令の offset に厚みを足す）
+//	  6. SetObjectStoryBound で床仕上げ上端の高さ基準を「FL」レベルへバインドする
+//	     （offset は FL からの高低差。一般部は 0）
 //	  7. ResetObject で反映
 //	スラブが作れない場合は外形ポリゴンにフォールバックする（1 枚の失敗で全体を止めない）。
 //
@@ -83,34 +83,48 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetOpacityByClass(object);
 		}
 
-		// スラブの厚みを thickness にする。スラブの実厚はコンポーネント（層）の合計なので、
-		// まずスタイルを外して（文書のスラブ設定＝スタイルに厚みを支配されないように）、
-		// 先頭コンポーネントを thickness に、以降のコンポーネントを 0 に潰す。
-		// コンポーネントが 1 つも無ければ 1 層を挿入する。
-		void SetSlabThickness(MCObjectHandle slab, double thickness)
+		// 既存のコンポーネント（層）数を数える。GetComponentWidth が false を返した索引の
+		// 手前までが実在する層。
+		short CountComponents(MCObjectHandle slab)
 		{
-			// スタイル付きのままではコンポーネント幅を変えられない（スタイルが厚みを持つ）。
-			gSDK->ConvertToUnstyledSlab(slab);
-
-			short components = 0;
+			short count = 0;
 			for (short index = 1; index <= kMaxSlabComponents; ++index)
 			{
 				WorldCoord width = 0;
 				if (!gSDK->GetComponentWidth(slab, index, width))
 					break;
-				components = index;
+				count = index;
 			}
+			return count;
+		}
 
-			if (components == 0)
+		// スラブの構成層を命令どおり（上から 床仕上げ → 床下地）に整える。スラブの実厚は
+		// コンポーネントの合計なので、まずスタイルを外して（文書のスラブ設定＝スタイルに
+		// 構成を支配されないように）、必要な数の層を用意し、各層の厚みと名前を設定する。
+		// 余っている層は厚み 0 に潰す（層の削除 API に頼らずに構成を確定させる）。
+		void SetSlabComponents(MCObjectHandle slab,
+							   const std::vector<core::SlabComponentCommand>& components)
+		{
+			// スタイル付きのままではコンポーネント幅を変えられない（スタイルが構成を持つ）。
+			gSDK->ConvertToUnstyledSlab(slab);
+
+			const auto wanted = static_cast<short>(components.size());
+			short existing = CountComponents(slab);
+
+			// 足りない層を末尾へ挿入する。fill / ペン太さ / 線種は文書の既定に任せ（0）、
+			// 描画属性はクラスに従わせる（SetAllAttributesByClass）。
+			for (short index = static_cast<short>(existing + 1); index <= wanted; ++index)
+				gSDK->InsertNewComponentN(slab, index, 0, 0, 0, 0, 0, 0);
+			existing = CountComponents(slab);
+
+			for (short index = 1; index <= wanted && index <= existing; ++index)
 			{
-				// コンポーネントが無いスラブ（スタイルを外した直後の既定）には 1 層作る。
-				// fill / ペン太さ / 線種は文書の既定に任せ（0 = 既定）、描画属性はクラスに従う。
-				gSDK->InsertNewComponentN(slab, 1, thickness, 0, 0, 0, 0, 0);
-				return;
+				const core::SlabComponentCommand& component =
+					components[static_cast<std::size_t>(index - 1)];
+				gSDK->SetComponentWidth(slab, index, component.thickness);
+				gSDK->SetComponentName(slab, index, TXString(component.name.c_str()));
 			}
-
-			gSDK->SetComponentWidth(slab, 1, thickness);
-			for (short index = 2; index <= components; ++index)
+			for (short index = static_cast<short>(wanted + 1); index <= existing; ++index)
 				gSDK->SetComponentWidth(slab, index, 0);
 		}
 
@@ -146,21 +160,20 @@ namespace HomeskzIfcImport::draw
 
 			SetClassByName(slab, floor.drawClass);
 			SetAllAttributesByClass(slab);
-			SetSlabThickness(slab, floor.thickness);
+			SetSlabComponents(slab, floor.components);
 
-			// SetSlabHeight は厚みではなく**天端高さ**（絶対 Z）を設定する。命令の
-			// elevation は床下端なので厚みを足す（Python 版 #70 と同じ落とし穴）。
-			const double topElevation = floor.elevation + floor.thickness;
-			gSDK->SetSlabHeight(slab, topElevation);
+			// SetSlabHeight は厚みではなく**天端高さ**（絶対 Z）を設定する（Python 版 #70 と
+			// 同じ落とし穴）。命令の elevation は床仕上げ上端＝スラブ天端なのでそのまま渡す。
+			gSDK->SetSlabHeight(slab, floor.elevation);
 
-			// 高さ基準（天端）を標準の床高＝「横架材天端」レベルへバインドする。命令の
-			// bound.offset は床下端と横架材天端の差分なので、天端基準へ厚みぶん寄せる。
-			// これをしないと編集時に高さがレイヤ基準へリセットされて実形状と矛盾する。
+			// 高さ基準（床仕上げ上端）を配置先ストーリの「FL」レベルへバインドする。offset は
+			// FL からの高低差（一般部 0・床レベル指定時は ±差分）。これをしないと編集時に
+			// 高さがレイヤ基準へリセットされて実形状と矛盾する。
 			VectorWorks::SStoryObjectData bound;
 			bound.fBound = VectorWorks::eStoryObjectBound_Story;
 			bound.fBoundStory = static_cast<Sint8>(floor.bound.storyOffset);
 			bound.fLayerLevelType = TXString(floor.bound.level.c_str());
-			bound.fOffset = floor.bound.offset + floor.thickness;
+			bound.fOffset = floor.bound.offset;
 			gSDK->SetObjectStoryBound(slab, kSlabBoundID, bound);
 
 			gSDK->ResetObject(slab);
