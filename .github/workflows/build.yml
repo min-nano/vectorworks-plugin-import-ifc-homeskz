@@ -177,16 +177,19 @@ jobs:
           set -uo pipefail
           inc="$VW_SDK_DIR/SDKLib/Include"
           isdk="$inc/Interfaces/VectorWorks/ISDK.h"
-          echo "=== BasicSlab / slabKind の説明 ==="
-          grep -rn "BasicSlab\|slabKind" "$inc" --include=*.h | head -20 || true
-          echo "=== スラブのコンポーネント厚み ==="
-          grep -n "Component" "$isdk" | grep -i "thick\|width\|slab\|add\|insert\|count" | head -40 || true
-          echo "=== 押し出しオブジェクト（VWExtrudeObj）の API ==="
-          sed -n '1,120p' "$inc/VWFC/VWObjects/VWExtrudeObj.h"
-          echo "=== オブジェクト種別（Objs.TDType.h の床/スラブ周辺） ==="
-          sed -n '275,300p' "$inc/Kernel/API/Objs.TDType.h"
-          echo "=== ISDK: 3D 押し出し生成 ==="
-          grep -n "CreateExtrude\|ExtrudeObject\|SetExtrudeValues\|GetExtrudeValues" "$isdk" | head -20 || true
+          echo "=== ISDK: Script 関連 ==="
+          grep -n "Script" "$isdk" || true
+          echo "=== Interfaces: スクリプト実行インターフェース ==="
+          grep -rln "Script" "$inc/Interfaces" --include=*.h | head -30 || true
+          grep -rn "VCOM_CALLTYPE.*\(Run\|Execute\|Eval\)[A-Za-z]*Script\|RunTempScript\|ExecuteScript" \
+            "$inc" --include=*.h | head -40 || true
+          echo "=== IScriptEngine 等の宣言 ==="
+          for f in "$inc"/Interfaces/VectorWorks/*Script*.h \
+                   "$inc"/Interfaces/VectorWorks/*/*Script*.h; do
+            [ -f "$f" ] || continue
+            echo "--- $f"
+            grep -n "VCOM_CALLTYPE\|class \|IID_" "$f" | head -40
+          done
 
       - name: Install ccache
         run: brew install ccache
