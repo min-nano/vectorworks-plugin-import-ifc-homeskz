@@ -133,6 +133,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 	add_library(
 		HomeskzIfcCore STATIC
 		src/core/Document.cpp
+		src/core/FloorScript.cpp
 		src/core/Geometry.cpp
 		src/parse/BuildDocument.cpp
 		src/parse/Step.cpp

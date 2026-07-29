@@ -177,19 +177,12 @@ jobs:
           set -uo pipefail
           inc="$VW_SDK_DIR/SDKLib/Include"
           isdk="$inc/Interfaces/VectorWorks/ISDK.h"
-          echo "=== ISDK: Script 関連 ==="
-          grep -n "Script" "$isdk" || true
-          echo "=== Interfaces: スクリプト実行インターフェース ==="
-          grep -rln "Script" "$inc/Interfaces" --include=*.h | head -30 || true
-          grep -rn "VCOM_CALLTYPE.*\(Run\|Execute\|Eval\)[A-Za-z]*Script\|RunTempScript\|ExecuteScript" \
-            "$inc" --include=*.h | head -40 || true
-          echo "=== IScriptEngine 等の宣言 ==="
-          for f in "$inc"/Interfaces/VectorWorks/*Script*.h \
-                   "$inc"/Interfaces/VectorWorks/*/*Script*.h; do
-            [ -f "$f" ] || continue
-            echo "--- $f"
-            grep -n "VCOM_CALLTYPE\|class \|IID_" "$f" | head -40
-          done
+          echo "=== IVectorScriptEngine.h（全文） ==="
+          cat "$inc/Interfaces/VectorWorks/Scripting/IVectorScriptEngine.h"
+          echo "=== VCOMPtr でシングルトンを取る書き方の例 ==="
+          grep -rn "VCOMPtr<" "$inc" --include=*.h | head -30 || true
+          echo "=== kVCOMError 定数 ==="
+          grep -rn "kVCOMError_NoError\|typedef.*VCOMError" "$inc" --include=*.h | head -10 || true
 
       - name: Install ccache
         run: brew install ccache

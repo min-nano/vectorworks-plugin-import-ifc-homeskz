@@ -250,6 +250,14 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
   クラス・by-class 属性→`SetObjectStoryBound`（`横架材天端` レベルへ段差 offset でバインド）。
   配置先 `n-FL` レイヤが無い命令はスキップ（レイヤは story 命令が作る）。床を作れない場合は
   外形ポリゴンへフォールバック。
+- ✅ **床だけ VectorScript 経由**（`core/FloorScript` ＋ `IVectorScriptEngine::ExecuteScript`）。
+  **ISDK には床ツール（Floor オブジェクト）を生成する API が無い**（`CreateRoof` /
+  `CreateSlab` はあるが Floor は `Kernel` の種別定数 `kFloorSubT` のみ。`BeginFloor` /
+  `LNewObj` / `Move3D` 等の VS 相当呼び出しも ISDK に無い）。押し出しソリッドやスラブで
+  代替すると Python 版と描かれるオブジェクト種別が変わるため、SDK が公式に提供する
+  スクリプトエンジンで床ツールを呼ぶ。スクリプト**本文の組み立て**は SDK 非依存の
+  `core/FloorScript` に置き無 SDK テストし、`draw/Floor` はレイヤの用意と実行だけを持つ。
+  （他要素は SDK API で直接描く。この迂回は床に限定する。）
 - ✅ テスト: `ParseFloorTests`（`test_ifc_floor.py` の全ケースを移植: 枚数・レイヤ振り分け・
   厚み 24 固定・クラス・`elevation = 横架材天端 + offset` の不変条件・スキップフロアの段差
   −832mm・横架材天端より上の床・センタリング済み外形・決定性。合成モデルでの抽出条件も追加）。
