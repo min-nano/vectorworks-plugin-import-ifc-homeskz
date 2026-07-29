@@ -54,10 +54,6 @@ namespace HomeskzIfcImport::draw
 		// ここでは実体の Sint32 で持つ（暗黙変換で同じ）。
 		constexpr Sint32 kSlabBoundID = 0;
 
-		// スラブのコンポーネント（層）を走査する上限。ホームズ君の床は 1 層で足りるが、
-		// 文書のスラブ設定が多層でも取りこぼさないよう十分大きい値で打ち切る。
-		constexpr short kMaxSlabComponents = 32;
-
 		// オブジェクトのクラスを名前で設定する（AddClass は既存なら索引を返し、無ければ作る。
 		// draw/Grid.cpp の同名ヘルパーと同じ規約）。
 		void SetClassByName(MCObjectHandle object, const std::string& className)
@@ -84,18 +80,12 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetOpacityByClass(object);
 		}
 
-		// 既存のコンポーネント（層）数を数える。GetComponentWidth が false を返した索引の
-		// 手前までが実在する層。
-		short CountComponents(MCObjectHandle slab)
+		// 既存のコンポーネント（層）数。取得できなければ 0（＝層を持たない）とみなす。
+		short CountComponents(MCObjectHandle object)
 		{
 			short count = 0;
-			for (short index = 1; index <= kMaxSlabComponents; ++index)
-			{
-				WorldCoord width = 0;
-				if (!gSDK->GetComponentWidth(slab, index, width))
-					break;
-				count = index;
-			}
+			if (!gSDK->GetNumberOfComponents(object, count))
+				return 0;
 			return count;
 		}
 
@@ -145,7 +135,7 @@ namespace HomeskzIfcImport::draw
 				return 0;
 
 			const TXString name(styleName.c_str());
-			MCObjectHandle style = gSDK->GetObjectByName(name);
+			MCObjectHandle style = gSDK->GetNamedObject(name);
 			if (style == nil)
 				style = gSDK->CreateSlabStyle(name);
 			if (style == nil)
