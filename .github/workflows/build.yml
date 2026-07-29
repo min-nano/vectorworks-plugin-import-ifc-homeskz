@@ -177,17 +177,16 @@ jobs:
           set -uo pipefail
           inc="$VW_SDK_DIR/SDKLib/Include"
           isdk="$inc/Interfaces/VectorWorks/ISDK.h"
-          echo "=== SStoryObjectData + bound IDs (ISDK.h head) ==="
-          sed -n '60,130p' "$isdk"
-          echo "=== CreateBasicSlab / CreateSlab / CreateRoof context ==="
-          sed -n '1060,1090p' "$isdk"
-          sed -n '2098,2135p' "$isdk"
-          echo "=== ISDK: object creation entry points ==="
-          grep -n "VCOM_CALLTYPE Create[A-Za-z]*(" "$isdk" || true
-          echo "=== 'Floor' anywhere in the SDK headers ==="
-          grep -rn "Floor" "$inc" --include=*.h | grep -iv "floorplan\|flooring" | head -60 || true
-          echo "=== VWFC object wrappers ==="
-          ls "$inc/VWFC/VWObjects" || true
+          echo "=== BasicSlab / slabKind の説明 ==="
+          grep -rn "BasicSlab\|slabKind" "$inc" --include=*.h | head -20 || true
+          echo "=== スラブのコンポーネント厚み ==="
+          grep -n "Component" "$isdk" | grep -i "thick\|width\|slab\|add\|insert\|count" | head -40 || true
+          echo "=== 押し出しオブジェクト（VWExtrudeObj）の API ==="
+          sed -n '1,120p' "$inc/VWFC/VWObjects/VWExtrudeObj.h"
+          echo "=== オブジェクト種別（Objs.TDType.h の床/スラブ周辺） ==="
+          sed -n '275,300p' "$inc/Kernel/API/Objs.TDType.h"
+          echo "=== ISDK: 3D 押し出し生成 ==="
+          grep -n "CreateExtrude\|ExtrudeObject\|SetExtrudeValues\|GetExtrudeValues" "$isdk" | head -20 || true
 
       - name: Install ccache
         run: brew install ccache
