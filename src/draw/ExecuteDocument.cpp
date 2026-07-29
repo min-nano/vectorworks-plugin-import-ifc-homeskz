@@ -13,6 +13,7 @@
 
 #include "PluginPrefix.h"
 #include "draw/ExecuteDocument.h"
+#include "draw/Floor.h"
 #include "draw/Grid.h"
 #include "draw/Story.h"
 #include "core/Document.h"
@@ -30,9 +31,14 @@ namespace HomeskzIfcImport::draw
 		// が execute_stories を先頭で呼ぶのと同じ）。
 		drawStories(document);
 
-		// M1 通り芯を描く。以降のマイルストーンで member … と命令ごとに
-		// draw モジュールへのディスパッチを足していく（ROADMAP.md）。
+		// M1 通り芯を描く。
 		drawGrids(document);
+
+		// M5 床板を描く。配置先の FL レイヤは上の drawStories が作るので、必ずその後に
+		// 置く（レイヤが無い命令は drawFloors がスキップする）。以降のマイルストーンで
+		// rafter / member … と命令ごとに draw モジュールへのディスパッチを足していく
+		// （ROADMAP.md）。
+		drawFloors(document);
 
 		// レイヤのスタック順の並べ替えはここでは行わない（draw/Story.h 参照: VW 2026 ISDK に
 		// デザインレイヤの重ね順変更呼び出しが無く、目的の伏図ビューポート重ね順制御は

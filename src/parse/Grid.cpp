@@ -118,63 +118,84 @@ namespace HomeskzIfcImport::parse
 			const double dy = std::abs(line.end.y - line.start.y);
 			return dx < dy;
 		}
+
+		// 各 IfcGridAxis の全点を集め、連続する点対（線分）ごとに 1 本の通り芯を作る
+		// （Python 版 resolve_lines の `for i in range(len(pts) - 1)` に対応。ポリラインが
+		// 多点でも各区間が 1 本になる）。幾何的に重複する線分（向き反転も同一）は全体で
+		// 1 本に畳む（最初に現れた 1 本を残す）。#id 昇順・点順で決定的。
+		std::vector<RawLine> collectLines(const Model& model)
+		{
+			std::vector<RawLine> lines;
+			for (const int id : model.byType("IFCGRIDAXIS"))
+			{
+				const Entity* axis = model.entity(id);
+				if (axis == nullptr)
+					continue;
+				std::string name;
+				std::vector<Vec2> pts;
+				if (!polylinePoints(model, *axis, name, pts))
+					continue; // 非ポリライン・点数不足・点未解決の軸はスキップ
+
+				for (std::size_t i = 0; i + 1 < pts.size(); ++i)
+				{
+					const RawLine segment{name, pts[i], pts[i + 1]};
+
+					bool duplicate = false;
+					for (const RawLine& kept : lines)
+					{
+						if (sameLine(kept, segment))
+						{
+							duplicate = true;
+							break;
+						}
+					}
+					if (!duplicate)
+						lines.push_back(segment);
+				}
+			}
+			return lines;
+		}
+
+		// 全端点の bbox 中心を求める（原点へ寄せるオフセット。VW 上で図面が原点付近に
+		// 来るようにする。ROADMAP.md M1「原点付近にセンタリング」）。lines は非空前提。
+		Vec2 boundingCenter(const std::vector<RawLine>& lines)
+		{
+			double minX = std::numeric_limits<double>::max();
+			double minY = std::numeric_limits<double>::max();
+			double maxX = std::numeric_limits<double>::lowest();
+			double maxY = std::numeric_limits<double>::lowest();
+			for (const RawLine& line : lines)
+			{
+				for (const Vec2& p : {line.start, line.end})
+				{
+					minX = std::min(minX, p.x);
+					minY = std::min(minY, p.y);
+					maxX = std::max(maxX, p.x);
+					maxY = std::max(maxY, p.y);
+				}
+			}
+			return Vec2{(minX + maxX) * 0.5, (minY + maxY) * 0.5};
+		}
 	} // namespace
+
+	bool resolveGridCenter(const Model& model, Vec2& out)
+	{
+		const std::vector<RawLine> lines = collectLines(model);
+		if (lines.empty())
+			return false;
+		out = boundingCenter(lines);
+		return true;
+	}
 
 	std::vector<GridCommand> buildGridCommands(const Model& model)
 	{
-		// 1. 各 IfcGridAxis の全点を集め、連続する点対（線分）ごとに 1 本の通り芯を作る
-		//    （Python 版 resolve_lines の `for i in range(len(pts) - 1)` に対応。ポリラインが
-		//    多点でも各区間が 1 本になる）。幾何的に重複する線分（向き反転も同一）は全体で
-		//    1 本に畳む（最初に現れた 1 本を残す）。#id 昇順・点順で決定的。
-		std::vector<RawLine> lines;
-		for (const int id : model.byType("IFCGRIDAXIS"))
-		{
-			const Entity* axis = model.entity(id);
-			if (axis == nullptr)
-				continue;
-			std::string name;
-			std::vector<Vec2> pts;
-			if (!polylinePoints(model, *axis, name, pts))
-				continue; // 非ポリライン・点数不足・点未解決の軸はスキップ
-
-			for (std::size_t i = 0; i + 1 < pts.size(); ++i)
-			{
-				const RawLine segment{name, pts[i], pts[i + 1]};
-
-				bool duplicate = false;
-				for (const RawLine& kept : lines)
-				{
-					if (sameLine(kept, segment))
-					{
-						duplicate = true;
-						break;
-					}
-				}
-				if (!duplicate)
-					lines.push_back(segment);
-			}
-		}
-
+		// 1. 通り芯の線分を集める（重複除去済み）。
+		const std::vector<RawLine> lines = collectLines(model);
 		if (lines.empty())
 			return {};
 
-		// 2. 全端点の bbox 中心を求め、原点へ寄せるオフセットを作る（VW 上で通り芯が
-		//    原点付近に来るようにする。ROADMAP.md M1「原点付近にセンタリング」）。
-		double minX = std::numeric_limits<double>::max();
-		double minY = std::numeric_limits<double>::max();
-		double maxX = std::numeric_limits<double>::lowest();
-		double maxY = std::numeric_limits<double>::lowest();
-		for (const RawLine& line : lines)
-		{
-			for (const Vec2& p : {line.start, line.end})
-			{
-				minX = std::min(minX, p.x);
-				minY = std::min(minY, p.y);
-				maxX = std::max(maxX, p.x);
-				maxY = std::max(maxY, p.y);
-			}
-		}
-		const Vec2 center{(minX + maxX) * 0.5, (minY + maxY) * 0.5};
+		// 2. 全端点の bbox 中心（センタリングオフセット）。床・基礎・部材も同じ中心を使う。
+		const Vec2 center = boundingCenter(lines);
 
 		// 3. センタリング＋ X/Y 判定＋クラス付与 → GridCommand。判定は平行移動で
 		//    不変なのでセンタリング前後どちらでもよいが、出力座標に揃えて後で行う。

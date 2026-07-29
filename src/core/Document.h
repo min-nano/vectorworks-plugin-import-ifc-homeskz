@@ -83,13 +83,90 @@ namespace HomeskzIfcImport::core
 		std::vector<LevelCommand> levels;
 	};
 
+	// 高さ基準（ストーリレベルへのバインド）1 端分。Python 版 document.py の
+	// StoryBoundCommand（dict）に対応する。床・構造材・柱・壁・スラブが共通で使う。
+	//
+	// Python 版キーとの対応:
+	//   storyOffset ← 'story_offset' … 配置先レイヤのストーリからの相対階数（0=自階・1=上階）
+	//   level       ← 'level'        … そのストーリのレベル種別名（"横架材天端" / "軒高"）
+	//   offset      ← 'offset'       … レベルからの距離（mm。負値=下）
+	// SetObjectStoryBound（VS: SetObjectStoryBound）へそのまま渡す 3 つ組。
+	struct StoryBoundCommand
+	{
+		int storyOffset = 0;
+		std::string level;
+		double offset = 0.0;
+	};
+
+	// スラブの高さ基準（elevation と bound が指すスラブ上の面）。VW のスラブは高さの
+	// 基準面（データム）を持ち、命令の高さはこの面の絶対 Z を表す。
+	//   Top    … スラブ天端（床仕上げ上端）。一般階の床はこちら（＝ FL）。
+	//   Bottom … スラブ底面（床下地下端）。ロフト（屋根階）の床はこちら（＝ 横架材天端＝軒高。
+	//            ロフトの FL は「軒高 + 36mm」という仮定値なので、確かな構造面を基準にする）。
+	enum class SlabDatum
+	{
+		Top,
+		Bottom,
+	};
+
+	// スラブの構成層（コンポーネント）1 枚。床は「床仕上げ」「床下地」の 2 層で構成する。
+	//
+	//   name      … 層の名前（"床仕上げ" / "床下地"）
+	//   thickness … 層厚（mm。0 以上）
+	// 並び順は**上から下**（先頭が最上層＝床仕上げ）。層厚の合計がスラブの総厚になる。
+	struct SlabComponentCommand
+	{
+		std::string name;
+		double thickness = 0.0;
+	};
+
+	// 床板（IfcSlab "床版"）を描く命令。Python 版 document.py の FloorCommand（dict）に
+	// 対応する。draw/Floor がこれをスラブオブジェクトへ変換する（ROADMAP.md M5。Python 版は
+	// 床ツールで描くが、本移植は BIM 機能の充実したスラブを使う。draw/Floor.h 参照）。
+	//
+	// 【高さの持ち方】elevation は**床仕上げ上端**の絶対 Z。一般部は FL と同じ高さで、
+	// 部分的に床レベルを指定している場合（スキップフロア等）は FL ± 差分になる。高さ基準は
+	// 配置先ストーリの「FL」レベルにバインドし、その差分を bound.offset に入れる
+	// （一般部は offset 0、段差床は段差ぶんずれる）。
+	//
+	// 【スラブ構成】components は上から順に:
+	//   床仕上げ … FL 高さ − 横架材天端高さ − 床下地厚
+	//   床下地   … 24mm 固定
+	// 合計＝FL 高さ − 横架材天端高さ、すなわちスラブ下端は（一般部では）横架材天端に一致する。
+	// 構成は**階ごとのスラブスタイル**（styleName）として作り、床はそのスタイルを適用して
+	// 描く（階により構成が異なることが多いため、スタイルは階ごとに 1 つ）。
+	//
+	// Python 版キーとの対応（Python 版は床ツール＋厚み 24mm 固定なので構成が異なる）:
+	//   layer      ← 'layer'     … 配置先デザインレイヤ名（"1-FL" 等。既存のみ・無ければスキップ）
+	//   drawClass  ← 'class'     … クラス名（床板。予約語 class を機械置換）
+	//   boundary   ← 'boundary'  … 床の平面外形（mm・グリッド中心オフセット済み。閉じた
+	//                              ポリゴンの頂点列で、末尾に始点を重複させない）
+	//   styleName  （Python 版に対応なし）… スラブスタイル名（"1F-床スタイル" 等）
+	//   components （Python 版に対応なし）… スタイルの構成層（上から）
+	//   datum      （Python 版に対応なし）… 高さ基準の面（一般階＝Top・ロフト＝Bottom）
+	//   elevation  ← 'elevation' … **基準面**の絶対 Z（mm。Python 版は床下端）
+	//   bound      ← 'bound'     … 基準面の高さ基準（一般階＝FL レベル、ロフト＝軒高レベル、
+	//                              ＋段差 offset。Python 版は床下端を横架材天端レベルへ）
+	struct FloorCommand
+	{
+		std::string layer;
+		std::string drawClass;
+		std::vector<Vec2> boundary;
+		std::string styleName;
+		std::vector<SlabComponentCommand> components;
+		SlabDatum datum = SlabDatum::Top;
+		double elevation = 0.0;
+		StoryBoundCommand bound;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
 	// TODO: 要素ごとに命令リストを追加していく（フィールド名は Python 版のキーに対応）。
-	//   * M5 members   : std::vector<MemberCommand>
-	//   * M6 columns   : std::vector<ColumnCommand>
-	//   * M7 walls / slabs …
+	//   * M6 rafters / roofs : std::vector<RafterCommand> / <RoofCommand>
+	//   * M7 members         : std::vector<MemberCommand>
+	//   * M8 columns         : std::vector<ColumnCommand>
+	//   * M9 walls / slabs …
 	//   スキーマを変えるときは構造体・validateDocument・テスト・JSON ダンプを同時更新する。
 	struct Document
 	{
@@ -103,6 +180,11 @@ namespace HomeskzIfcImport::core
 		// M1 通り芯。IfcGridAxis を解析して得た GridCommand の列（入力順に依存しない
 		// 決定的な並び。parse/Grid が #id 昇順で組み立てる）。
 		std::vector<GridCommand> grids;
+
+		// M5 床板。床版（IfcSlab "床版"）を解析して得た FloorCommand の列（階＝Elevation
+		// 昇順・階内は #id 昇順で決定的。parse/Floor が組み立てる）。配置先の FL レイヤは
+		// stories が作るので、描画は stories の後に処理する。
+		std::vector<FloorCommand> floors;
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は
@@ -120,7 +202,7 @@ namespace HomeskzIfcImport::core
 	// 独立レイヤ。M12 以降で渡す）→ **最上階→最下階**の順に各ストーリのレイヤ（stories は
 	// Elevation 昇順＝最下階→最上階なので逆順に辿る）。各ストーリ内は levels の並び順。
 	// ただし床（FL）・野地板レベルのレイヤは全ストーリ分をまとめてスタック最下段（背面）へ
-	// 回す（伏図ビューポートで柱・梁を覆い隠さないため。M9 床板で効いてくる。まずは枠）。
+	// 回す（伏図ビューポートで柱・梁を覆い隠さないため。M5 床板で効いてくる。まずは枠）。
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
 													const std::vector<std::string>& topLayers = {});
 } // namespace HomeskzIfcImport::core

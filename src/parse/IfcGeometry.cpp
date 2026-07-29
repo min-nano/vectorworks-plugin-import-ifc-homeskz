@@ -8,8 +8,10 @@
 
 #include "parse/IfcGeometry.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <vector>
 
 namespace HomeskzIfcImport::parse
 {
@@ -40,6 +42,17 @@ namespace HomeskzIfcImport::parse
 		// Description, ObjectType, ObjectPlacement=5, Representation=6, …）。IfcProduct の
 		// 全サブタイプで共通。
 		constexpr std::size_t kObjectPlacementAttr = 5;
+		// 同じく Representation 属性インデックス（IfcProductDefinitionShape への参照）。
+		constexpr std::size_t kRepresentationAttr = 6;
+		// IfcProductDefinitionShape(Name, Description, Representations=2)。
+		constexpr std::size_t kRepresentationsAttr = 2;
+		// IfcShapeRepresentation(ContextOfItems, RepresentationIdentifier, RepresentationType,
+		// Items=3)。
+		constexpr std::size_t kRepresentationItemsAttr = 3;
+
+		// 押し出し方向が鉛直とみなす Z 成分の閾値（|z| > これ）。Python 版 footing の
+		// _VERTICAL_EXTRUDE_TOL と同値。床版・底盤は鉛直、立上り・地中梁は水平押し出し。
+		constexpr double kVerticalExtrudeTol = 0.9;
 
 		// IfcBooleanResult 系の第 1 オペランドを深さ付きで辿る（公開 API の実体）。
 		const Entity* baseSolidImpl(const Model& model, const Entity* item, int depth)
@@ -280,5 +293,107 @@ namespace HomeskzIfcImport::parse
 	const Entity* resolveBaseSolid(const Model& model, const Entity* item)
 	{
 		return baseSolidImpl(model, item, 0);
+	}
+
+	const Entity* firstExtrudedSolid(const Model& model, const Entity* element)
+	{
+		if (element == nullptr)
+			return nullptr;
+		// IfcProduct.Representation（属性 6）＝ IfcProductDefinitionShape。その
+		// Representations（属性 2）が IfcShapeRepresentation の列で、各 Items（属性 3）に
+		// 形状アイテムが入る（Python 版 _first_extruded_solid の rep.Representations →
+		// shape_rep.Items と同じ道筋。Body/Axis 等の表現識別子で絞らず、最初に見つかった
+		// 押し出しを採るのも Python 版と同じ）。
+		const Entity* shape = model.resolve(element->attribute(kRepresentationAttr));
+		if (shape == nullptr)
+			return nullptr;
+		const Value& representations = shape->attribute(kRepresentationsAttr);
+		if (!representations.isList())
+			return nullptr;
+
+		for (const Value& repRef : representations.items)
+		{
+			const Entity* rep = model.resolve(repRef);
+			if (rep == nullptr)
+				continue;
+			const Value& items = rep->attribute(kRepresentationItemsAttr);
+			if (!items.isList())
+				continue;
+			for (const Value& itemRef : items.items)
+			{
+				// 差演算（端部が他材で削られた形状）は第 1 オペランド＝素のソリッドを使う。
+				const Entity* solid = resolveBaseSolid(model, model.resolve(itemRef));
+				if (solid != nullptr && solid->type == "IFCEXTRUDEDAREASOLID")
+					return solid;
+			}
+		}
+		return nullptr;
+	}
+
+	bool resolveElementWorldSolid(const Model& model, const Entity* element, WorldSolid& out)
+	{
+		const Entity* solid = firstExtrudedSolid(model, element);
+		if (solid == nullptr)
+			return false;
+		// 要素配置（RelativePlacement のみ＝親非合成）の上にアイテム配置を合成する。
+		return resolveExtrudedAreaSolid(model, solid, resolveObjectPlacement(model, element), out);
+	}
+
+	void zTopAndThickness(const WorldSolid& solid, double& outTop, double& outThickness)
+	{
+		// 底面ループと天面ループの Z を集めて最大／振幅を採る（Python 版と同じ手順。
+		// 押し出し方向が鉛直でも水平でも同じ式で正しい）。
+		const std::vector<Vec3> baseLoop = solid.base();
+		if (baseLoop.empty())
+		{
+			outTop = 0.0;
+			outThickness = 0.0;
+			return;
+		}
+		const double dz = solid.extrudeDir.z * solid.depth;
+		double minZ = baseLoop.front().z;
+		double maxZ = baseLoop.front().z;
+		for (const Vec3& p : baseLoop)
+		{
+			for (const double z : {p.z, p.z + dz})
+			{
+				minZ = std::min(minZ, z);
+				maxZ = std::max(maxZ, z);
+			}
+		}
+		outTop = maxZ;
+		outThickness = maxZ - minZ;
+	}
+
+	std::vector<Vec2> footprint(const WorldSolid& solid)
+	{
+		// 鉛直押し出し（床版・底盤）: 底面ループの XY がそのまま平面外形。
+		if (std::abs(solid.extrudeDir.z) > kVerticalExtrudeTol)
+		{
+			std::vector<Vec2> result;
+			result.reserve(solid.profile.size());
+			for (const Vec3& p : solid.base())
+				result.push_back(Vec2{p.x, p.y});
+			return result;
+		}
+
+		// 水平押し出し（立上り・地中梁）: プロファイルは鉛直面内にあるので、断面の水平方向
+		// の幅（u の範囲）を押し出し方向へ掃引した矩形を平面外形にする。
+		if (solid.profile.empty())
+			return {};
+		double uMin = solid.profile.front().x;
+		double uMax = solid.profile.front().x;
+		for (const Vec2& p : solid.profile)
+		{
+			uMin = std::min(uMin, p.x);
+			uMax = std::max(uMax, p.x);
+		}
+		const auto corner = [&solid](double u, double t)
+		{
+			const Vec3 p =
+				solid.origin + (solid.xAxis * u) + (solid.extrudeDir * (solid.depth * t));
+			return Vec2{p.x, p.y};
+		};
+		return {corner(uMin, 0.0), corner(uMax, 0.0), corner(uMax, 1.0), corner(uMin, 1.0)};
 	}
 } // namespace HomeskzIfcImport::parse

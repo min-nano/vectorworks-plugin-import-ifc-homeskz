@@ -30,6 +30,8 @@
 #include "core/Document.h"
 #include "parse/Step.h"
 
+#include <cstddef>
+#include <string>
 #include <vector>
 
 namespace HomeskzIfcImport::parse
@@ -40,6 +42,17 @@ namespace HomeskzIfcImport::parse
 	// 辿らず RelativePlacement の Location.Z だけを見る（M2 の resolveObjectPlacement と
 	// 同じく、階高は描画フェーズのストーリで反映するため親配置を合成しない）。
 	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ);
+
+	// デザインレイヤ名の接頭辞（＝ CreateStory の接尾辞）を返す（Python 版 layer_prefix_for /
+	// story_suffix_for）。一般階は "{index+1}"、最上階は "R"（屋根）。床・部材の配置先
+	// レイヤ名（"1-FL" / "R-軒高" …）を組み立てるのに使う。
+	std::string storyLayerPrefix(std::size_t index, bool isTop);
+
+	// 階（#storeyId）に属する要素の #id を返す（Python 版 storey.ContainsElements →
+	// RelatedElements に相当）。IfcRelContainedInSpatialStructure を逆参照から辿り、
+	// RelatingStructure が当該階のものだけを採る。並びは rel の #id 昇順・rel 内は
+	// RelatedElements の記述順で、エンティティ列挙順に依存しない決定的な結果になる。
+	std::vector<int> collectStoryElements(const Model& model, int storeyId);
 
 	// 階（#storeyId）に属する IfcColumn / IfcSlab から横架材天端の相対オフセット
 	// （FL からの負値）を求める（Python 版 resolve_beam_top_offset 相当）。ローカル

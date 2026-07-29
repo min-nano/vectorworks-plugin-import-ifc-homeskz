@@ -618,4 +618,204 @@ TEST(resolves_geometry_on_real_fixture)
 	CHECK(columns > 10);
 }
 
+// ---------------------------------------------------------------------------
+// 要素の形状表現 → 押し出しソリッド（firstExtrudedSolid / resolveElementWorldSolid）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 鉛直押し出し（1000×2000・厚み 28）の Body 表現を持つ IfcSlab の最小モデル。
+	// items を差し替えて「押し出しが無い」「差演算越し」などの派生を作れるようにする。
+	Model slabModel(const std::string& items)
+	{
+		return loadIfcFromText("#20=IFCCARTESIANPOINT((0.,0.,0.));\n"
+							   "#21=IFCAXIS2PLACEMENT3D(#20,$,$);\n"
+							   "#22=IFCLOCALPLACEMENT($,#21);\n"
+							   "#30=IFCCARTESIANPOINT((0.,0.));\n"
+							   "#31=IFCAXIS2PLACEMENT2D(#30,$);\n"
+							   "#32=IFCRECTANGLEPROFILEDEF(.AREA.,$,#31,1000.,2000.);\n"
+							   "#33=IFCCARTESIANPOINT((0.,0.,0.));\n"
+							   "#34=IFCAXIS2PLACEMENT3D(#33,$,$);\n"
+							   "#35=IFCDIRECTION((0.,0.,1.));\n"
+							   "#36=IFCEXTRUDEDAREASOLID(#32,#34,#35,28.);\n"
+							   "#37=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(" +
+							   items +
+							   "));\n"
+							   "#38=IFCPRODUCTDEFINITIONSHAPE($,$,(#37));\n"
+							   "#40=IFCSLAB('slab',$,'床版',$,$,#22,#38,$,$);\n");
+	}
+} // namespace
+
+TEST(first_extruded_solid_finds_body_solid)
+{
+	Model const model = slabModel("#36");
+	const parse::Entity* solid = parse::firstExtrudedSolid(model, model.entity(40));
+	CHECK(solid != nullptr);
+	if (solid != nullptr)
+		CHECK_EQ(solid->id, 36);
+}
+
+TEST(first_extruded_solid_walks_boolean_first_operand)
+{
+	// 端部を削られた形状（差演算）は第 1 オペランド＝素の押し出しを採る。
+	Model const model = loadIfcFromText("#30=IFCCARTESIANPOINT((0.,0.));\n"
+										"#31=IFCAXIS2PLACEMENT2D(#30,$);\n"
+										"#32=IFCRECTANGLEPROFILEDEF(.AREA.,$,#31,1000.,2000.);\n"
+										"#33=IFCCARTESIANPOINT((0.,0.,0.));\n"
+										"#34=IFCAXIS2PLACEMENT3D(#33,$,$);\n"
+										"#35=IFCDIRECTION((0.,0.,1.));\n"
+										"#36=IFCEXTRUDEDAREASOLID(#32,#34,#35,28.);\n"
+										"#39=IFCEXTRUDEDAREASOLID(#32,#34,#35,10.);\n"
+										"#41=IFCBOOLEANRESULT(.DIFFERENCE.,#36,#39);\n"
+										"#37=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#41));\n"
+										"#38=IFCPRODUCTDEFINITIONSHAPE($,$,(#37));\n"
+										"#40=IFCSLAB('slab',$,'床版',$,$,$,#38,$,$);\n");
+	const parse::Entity* solid = parse::firstExtrudedSolid(model, model.entity(40));
+	CHECK(solid != nullptr);
+	if (solid != nullptr)
+		CHECK_EQ(solid->id, 36);
+}
+
+TEST(first_extruded_solid_tolerates_missing_pieces)
+{
+	// 要素そのものが無い。
+	Model const empty = loadIfcFromText("#1=IFCDIRECTION((0.,0.,1.));\n");
+	CHECK(parse::firstExtrudedSolid(empty, nullptr) == nullptr);
+
+	// Representation が未設定（$）の要素。
+	Model const noRep = loadIfcFromText("#40=IFCSLAB('slab',$,'床版',$,$,$,$,$,$);\n");
+	CHECK(parse::firstExtrudedSolid(noRep, noRep.entity(40)) == nullptr);
+
+	// Representations がリストでない（壊れた IfcProductDefinitionShape）。
+	Model const badReps = loadIfcFromText("#38=IFCPRODUCTDEFINITIONSHAPE($,$,$);\n"
+										  "#40=IFCSLAB('slab',$,'床版',$,$,$,#38,$,$);\n");
+	CHECK(parse::firstExtrudedSolid(badReps, badReps.entity(40)) == nullptr);
+
+	// Representations の要素が解決できない（未定義の #99 参照）。
+	Model const badRep = loadIfcFromText("#38=IFCPRODUCTDEFINITIONSHAPE($,$,(#99));\n"
+										 "#40=IFCSLAB('slab',$,'床版',$,$,$,#38,$,$);\n");
+	CHECK(parse::firstExtrudedSolid(badRep, badRep.entity(40)) == nullptr);
+
+	// Items がリストでない表現。
+	Model const badItems = loadIfcFromText("#37=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',$);\n"
+										   "#38=IFCPRODUCTDEFINITIONSHAPE($,$,(#37));\n"
+										   "#40=IFCSLAB('slab',$,'床版',$,$,$,#38,$,$);\n");
+	CHECK(parse::firstExtrudedSolid(badItems, badItems.entity(40)) == nullptr);
+
+	// 押し出しでない形状アイテムしか無い（曲面・注記等）。
+	Model const noSolid = loadIfcFromText("#35=IFCDIRECTION((0.,0.,1.));\n"
+										  "#37=IFCSHAPEREPRESENTATION($,'Axis','Curve2D',(#35));\n"
+										  "#38=IFCPRODUCTDEFINITIONSHAPE($,$,(#37));\n"
+										  "#40=IFCSLAB('slab',$,'床版',$,$,$,#38,$,$);\n");
+	CHECK(parse::firstExtrudedSolid(noSolid, noSolid.entity(40)) == nullptr);
+}
+
+TEST(element_world_solid_composes_element_placement)
+{
+	// 要素配置（ここでは原点）とアイテム配置を合成した WorldSolid が得られる。
+	Model const model = slabModel("#36");
+	WorldSolid solid;
+	CHECK(parse::resolveElementWorldSolid(model, model.entity(40), solid));
+	CHECK(nearVec(solid.extrusion(), Vec3{0.0, 0.0, 28.0}));
+	CHECK_EQ(solid.profile.size(), static_cast<std::size_t>(4));
+
+	// 押し出しを持たない要素は false（1 要素の欠損で全体を止めない）。
+	Model const noRep = loadIfcFromText("#40=IFCSLAB('slab',$,'床版',$,$,$,$,$,$);\n");
+	WorldSolid none;
+	CHECK(!parse::resolveElementWorldSolid(noRep, noRep.entity(40), none));
+}
+
+// ---------------------------------------------------------------------------
+// zTopAndThickness / footprint（床板・基礎が共有する平面外形と Z 範囲）
+// ---------------------------------------------------------------------------
+
+TEST(z_top_and_thickness_of_vertical_extrusion)
+{
+	// 原点 Z=-120 に置いた厚み 28 の鉛直押し出し → 天端 -92・厚み 28。
+	Model const model = loadIfcFromText("#30=IFCCARTESIANPOINT((0.,0.));\n"
+										"#31=IFCAXIS2PLACEMENT2D(#30,$);\n"
+										"#32=IFCRECTANGLEPROFILEDEF(.AREA.,$,#31,1000.,2000.);\n"
+										"#33=IFCCARTESIANPOINT((0.,0.,-120.));\n"
+										"#34=IFCAXIS2PLACEMENT3D(#33,$,$);\n"
+										"#35=IFCDIRECTION((0.,0.,1.));\n"
+										"#36=IFCEXTRUDEDAREASOLID(#32,#34,#35,28.);\n");
+	WorldSolid solid;
+	CHECK(parse::resolveExtrudedAreaSolid(model, model.entity(36), Mat4::identity(), solid));
+
+	double top = 0.0;
+	double thickness = 0.0;
+	parse::zTopAndThickness(solid, top, thickness);
+	CHECK(near(top, -92.0));
+	CHECK(near(thickness, 28.0));
+	// 床下端＝天端 − 厚み（床板が elevation に使う値）。
+	CHECK(near(top - thickness, -120.0));
+}
+
+TEST(z_top_and_thickness_of_empty_solid_is_zero)
+{
+	// プロファイルを持たない（手で組んだ縮退した）ソリッドでも落ちず 0 を返す。
+	WorldSolid empty;
+	double top = 1.0;
+	double thickness = 1.0;
+	parse::zTopAndThickness(empty, top, thickness);
+	CHECK(near(top, 0.0));
+	CHECK(near(thickness, 0.0));
+}
+
+TEST(footprint_of_vertical_extrusion_is_the_profile)
+{
+	// 鉛直押し出し（床版・底盤）は断面がそのまま平面外形。
+	Model const model = loadIfcFromText("#30=IFCCARTESIANPOINT((0.,0.));\n"
+										"#31=IFCAXIS2PLACEMENT2D(#30,$);\n"
+										"#32=IFCRECTANGLEPROFILEDEF(.AREA.,$,#31,1000.,2000.);\n"
+										"#33=IFCCARTESIANPOINT((10.,20.,0.));\n"
+										"#34=IFCAXIS2PLACEMENT3D(#33,$,$);\n"
+										"#35=IFCDIRECTION((0.,0.,1.));\n"
+										"#36=IFCEXTRUDEDAREASOLID(#32,#34,#35,28.);\n");
+	WorldSolid solid;
+	CHECK(parse::resolveExtrudedAreaSolid(model, model.entity(36), Mat4::identity(), solid));
+
+	const std::vector<Vec2> outline = parse::footprint(solid);
+	CHECK_EQ(outline.size(), static_cast<std::size_t>(4));
+	CHECK(hasVertex(outline, -490.0, -980.0));
+	CHECK(hasVertex(outline, 510.0, -980.0));
+	CHECK(hasVertex(outline, 510.0, 1020.0));
+	CHECK(hasVertex(outline, -490.0, 1020.0));
+}
+
+TEST(footprint_of_horizontal_extrusion_is_swept_rectangle)
+{
+	// 水平押し出し（立上り・地中梁）は断面が鉛直面内にあるため、断面の水平幅
+	// （プロファイル第 1 座標の範囲 = ±75）を押し出し方向（+X・長さ 1000）へ掃引した
+	// 矩形を平面外形にする。Axis=(1,0,0) なので局所 X はワールド +Y。
+	Model const model = loadIfcFromText("#30=IFCCARTESIANPOINT((0.,0.));\n"
+										"#31=IFCAXIS2PLACEMENT2D(#30,$);\n"
+										"#32=IFCRECTANGLEPROFILEDEF(.AREA.,$,#31,150.,400.);\n"
+										"#33=IFCCARTESIANPOINT((0.,0.,0.));\n"
+										"#34=IFCAXIS2PLACEMENT3D(#33,#39,$);\n"
+										"#35=IFCDIRECTION((0.,0.,1.));\n"
+										"#39=IFCDIRECTION((1.,0.,0.));\n"
+										"#36=IFCEXTRUDEDAREASOLID(#32,#34,#35,1000.);\n");
+	WorldSolid solid;
+	CHECK(parse::resolveExtrudedAreaSolid(model, model.entity(36), Mat4::identity(), solid));
+	// 押し出しはワールド +X（局所 Z=Axis）。
+	CHECK(nearVec(solid.extrudeDir, Vec3{1.0, 0.0, 0.0}));
+
+	const std::vector<Vec2> outline = parse::footprint(solid);
+	CHECK_EQ(outline.size(), static_cast<std::size_t>(4));
+	CHECK(hasVertex(outline, 0.0, -75.0));
+	CHECK(hasVertex(outline, 0.0, 75.0));
+	CHECK(hasVertex(outline, 1000.0, -75.0));
+	CHECK(hasVertex(outline, 1000.0, 75.0));
+}
+
+TEST(footprint_of_empty_profile_is_empty)
+{
+	// プロファイルを持たない（手で組んだ縮退した）水平押し出しは空を返す（落ちない）。
+	WorldSolid empty;
+	empty.extrudeDir = Vec3{1.0, 0.0, 0.0};
+	empty.depth = 1000.0;
+	CHECK(parse::footprint(empty).empty());
+}
+
 TEST_MAIN();

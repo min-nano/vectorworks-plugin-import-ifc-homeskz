@@ -140,6 +140,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/Summary.cpp
 		src/parse/Grid.cpp
 		src/parse/Story.cpp
+		src/parse/Floor.cpp
 		src/parse/StructuralClass.cpp
 		src/parse/IfcGeometry.cpp)
 	target_compile_features(HomeskzIfcCore PUBLIC cxx_std_20)
@@ -262,7 +263,8 @@ if(VW_BUILD_PLUGIN)
 		src/UpdaterFlow.cpp
 		src/draw/ExecuteDocument.cpp
 		src/draw/Grid.cpp
-		src/draw/Story.cpp)
+		src/draw/Story.cpp
+		src/draw/Floor.cpp)
 
 	# add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])
 	#

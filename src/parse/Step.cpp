@@ -12,6 +12,9 @@
 //	  value        := ref | '$' | '*' | string | enum | list | typed | number
 //	  ref          := '#' int
 //	  string       := '\'' ( ... | '\'\'' ) '\''         （'' は ' のエスケープ）
+//	                  ISO 10303-21 の拡張エスケープ（\X2\…\X0\ / \X\HH / \S\c / \P?\）は
+//	                  デコードして UTF-8 にする（ホームズ君 IFC の日本語 Name は
+//	                  \X2\5E8A\X0\ 形式＝UTF-16 で出力される。decodeStepString 参照）
 //	  enum         := '.' ident '.'                      （.TRUE. / .T. など）
 //	  list         := '(' ( value ( ',' value )* )? ')'
 //	  typed        := typeName '(' value ')'             （IFCLABEL('x') など）
@@ -130,6 +133,162 @@ namespace HomeskzIfcImport::parse
 	// -----------------------------------------------------------------------
 	// STEP パーサ本体
 	// -----------------------------------------------------------------------
+
+	namespace
+	{
+		// コードポイント 1 つを UTF-8 で末尾に足す（不正値は置換文字にせず捨てる）。
+		void appendUtf8(std::string& out, unsigned int codePoint)
+		{
+			if (codePoint < 0x80U)
+			{
+				out.push_back(static_cast<char>(codePoint));
+			}
+			else if (codePoint < 0x800U)
+			{
+				out.push_back(static_cast<char>(0xC0U | (codePoint >> 6)));
+				out.push_back(static_cast<char>(0x80U | (codePoint & 0x3FU)));
+			}
+			else if (codePoint < 0x10000U)
+			{
+				out.push_back(static_cast<char>(0xE0U | (codePoint >> 12)));
+				out.push_back(static_cast<char>(0x80U | ((codePoint >> 6) & 0x3FU)));
+				out.push_back(static_cast<char>(0x80U | (codePoint & 0x3FU)));
+			}
+			else if (codePoint <= 0x10FFFFU)
+			{
+				out.push_back(static_cast<char>(0xF0U | (codePoint >> 18)));
+				out.push_back(static_cast<char>(0x80U | ((codePoint >> 12) & 0x3FU)));
+				out.push_back(static_cast<char>(0x80U | ((codePoint >> 6) & 0x3FU)));
+				out.push_back(static_cast<char>(0x80U | (codePoint & 0x3FU)));
+			}
+		}
+
+		// 16 進数字なら値を、そうでなければ -1 を返す。
+		int hexValue(char c)
+		{
+			if (c >= '0' && c <= '9')
+				return c - '0';
+			if (c >= 'A' && c <= 'F')
+				return c - 'A' + 10;
+			if (c >= 'a' && c <= 'f')
+				return c - 'a' + 10;
+			return -1;
+		}
+
+		// text[pos] から 4 桁の 16 進を読み、値を out に入れて true（読めなければ false）。
+		bool readHex4(const std::string& text, std::size_t pos, unsigned int& out)
+		{
+			if (pos + 4 > text.size())
+				return false;
+			unsigned int value = 0;
+			for (std::size_t i = 0; i < 4; ++i)
+			{
+				const int digit = hexValue(text[pos + i]);
+				if (digit < 0)
+					return false;
+				value = (value << 4) | static_cast<unsigned int>(digit);
+			}
+			out = value;
+			return true;
+		}
+	} // namespace
+
+	std::string decodeStepString(const std::string& raw)
+	{
+		// ISO 10303-21 の拡張文字エスケープを UTF-8 へ直す。ホームズ君 IFC の日本語
+		// （部材名・階名・断面名）は \X2\5E8A\X0\ 形式（UTF-16 コード単位の列）で出力
+		// されるため、これをデコードしないと "床版" 等の名前判定が一切通らない
+		// （ifcopenshell は同じデコードを内部で行う。Python 版と挙動を揃える）。
+		//   \X2\<hex…>\X0\ … UTF-16 コード単位の列（サロゲートペアも成立させる）
+		//   \X\HH           … 1 バイト（ISO 8859-1 のコードポイント）
+		//   \S\c            … c のコードポイント + 128（コードページ既定は Latin-1 とみなす）
+		//   \P?\            … コードページ指示。意味を持たせず読み飛ばす
+		// 上記以外のバックスラッシュはそのまま文字として残す（寛容さ: 壊れたエスケープで
+		// 文字列全体を失わない）。
+		if (raw.find('\\') == std::string::npos)
+			return raw; // 一般的なケース（ASCII のみ）は走査せずそのまま返す
+
+		std::string out;
+		out.reserve(raw.size());
+		std::size_t i = 0;
+		while (i < raw.size())
+		{
+			if (raw[i] != '\\' || i + 2 >= raw.size())
+			{
+				out.push_back(raw[i]);
+				++i;
+				continue;
+			}
+
+			// \X2\…\X0\（UTF-16 列）
+			if (raw.compare(i, 4, "\\X2\\") == 0)
+			{
+				std::size_t p = i + 4;
+				unsigned int pending = 0; // 上位サロゲート（0 = 保留なし）
+				while (true)
+				{
+					if (raw.compare(p, 4, "\\X0\\") == 0)
+					{
+						p += 4;
+						break;
+					}
+					unsigned int unit = 0;
+					if (!readHex4(raw, p, unit))
+						break; // 壊れたエスケープ: そこまでを採ってこの区間を終える
+					p += 4;
+					if (unit >= 0xD800U && unit <= 0xDBFFU)
+					{
+						pending = unit;
+						continue;
+					}
+					if (pending != 0 && unit >= 0xDC00U && unit <= 0xDFFFU)
+					{
+						const unsigned int cp =
+							0x10000U + ((pending - 0xD800U) << 10) + (unit - 0xDC00U);
+						appendUtf8(out, cp);
+						pending = 0;
+						continue;
+					}
+					pending = 0;
+					appendUtf8(out, unit);
+				}
+				i = p;
+				continue;
+			}
+
+			// \X\HH（1 バイト）
+			if (raw.compare(i, 3, "\\X\\") == 0)
+			{
+				const int hi = (i + 4 < raw.size()) ? hexValue(raw[i + 3]) : -1;
+				const int lo = (i + 4 < raw.size()) ? hexValue(raw[i + 4]) : -1;
+				if (hi >= 0 && lo >= 0)
+				{
+					appendUtf8(out, static_cast<unsigned int>((hi << 4) | lo));
+					i += 5;
+					continue;
+				}
+			}
+
+			// \S\c（コードポイント = c + 128）
+			if (raw.compare(i, 3, "\\S\\") == 0 && i + 3 < raw.size())
+			{
+				appendUtf8(out, static_cast<unsigned char>(raw[i + 3]) + 128U);
+				i += 4;
+				continue;
+			}
+
+			// \P?\（コードページ指示）は読み飛ばす。
+			if (raw[i + 1] == 'P' && raw.compare(i + 3, 1, "\\") == 0)
+			{
+				i += 4;
+				continue;
+			}
+
+			out.push_back(raw[i]);
+			++i;
+		}
+		return out;
+	}
 
 	namespace
 	{
@@ -507,10 +666,11 @@ namespace HomeskzIfcImport::parse
 				return name;
 			}
 
-			// 開き ' に位置している前提で文字列内容を読む（'' → '）。
+			// 開き ' に位置している前提で文字列内容を読む（'' → '）。ISO 10303-21 の
+			// 拡張エスケープは decodeStepString でまとめて UTF-8 へ直す。
 			std::string readString()
 			{
-				std::string out;
+				std::string raw;
 				++fPos; // 開き '
 				while (!atEnd())
 				{
@@ -519,7 +679,7 @@ namespace HomeskzIfcImport::parse
 					{
 						if (fPos + 1 < fText.size() && fText[fPos + 1] == '\'')
 						{
-							out.push_back('\'');
+							raw.push_back('\'');
 							fPos += 2;
 						}
 						else
@@ -530,11 +690,11 @@ namespace HomeskzIfcImport::parse
 					}
 					else
 					{
-						out.push_back(c);
+						raw.push_back(c);
 						++fPos;
 					}
 				}
-				return out;
+				return decodeStepString(raw);
 			}
 
 			// 開き '.' に位置している前提で列挙記号（.TRUE. 等）の中身を読む。

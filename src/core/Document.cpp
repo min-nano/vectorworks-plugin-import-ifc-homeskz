@@ -43,6 +43,30 @@ namespace HomeskzIfcImport::core
 			return !story.name.empty() && !story.suffix.empty() &&
 				   std::ranges::all_of(story.levels, isValidLevel);
 		}
+
+		// スラブの構成層 1 枚が妥当か。名前が非空で、層厚が 0 以上（負の層は作れない）。
+		bool isValidSlabComponent(const SlabComponentCommand& component)
+		{
+			return !component.name.empty() && component.thickness >= 0.0;
+		}
+
+		// 床板 1 枚が妥当か（Python 版 _validate_floor 相当）。配置先レイヤ名・クラス名・
+		// スラブスタイル名が非空で、平面外形が 3 点以上（面になる）で、高さ基準のレベル種別が
+		// 非空で、構成層が 1 枚以上あり総厚が正であること。elevation / bound.offset は数値
+		// （double なので常に成立）。
+		bool isValidFloor(const FloorCommand& floor)
+		{
+			if (floor.layer.empty() || floor.drawClass.empty() || floor.boundary.size() < 3 ||
+				floor.bound.level.empty() || floor.styleName.empty() || floor.components.empty())
+				return false;
+			if (!std::ranges::all_of(floor.components, isValidSlabComponent))
+				return false;
+
+			double total = 0.0;
+			for (const SlabComponentCommand& component : floor.components)
+				total += component.thickness;
+			return total > 0.0;
+		}
 	} // namespace
 
 	bool validateDocument(const Document& document)
@@ -53,6 +77,11 @@ namespace HomeskzIfcImport::core
 		// ストーリ: 名前・接尾辞が非空で、各ストーリレベルの種別・レイヤ名が非空であること
 		// （Python 版 _validate_story / _validate_level と同じ関門。ROADMAP.md M3）。
 		if (!std::ranges::all_of(document.stories, isValidStory))
+			return false;
+
+		// 床板: 配置先レイヤ名・クラス名が非空で、外形が 3 点以上、高さ基準のレベル種別が
+		// 非空であること（Python 版 _validate_floor と同じ関門。ROADMAP.md M5）。
+		if (!std::ranges::all_of(document.floors, isValidFloor))
 			return false;
 
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。
@@ -70,7 +99,7 @@ namespace HomeskzIfcImport::core
 	{
 		// スタック最下段（背面）へ回すレベル種別か（Python 版 _BACKGROUND_LEVEL_TYPES）。
 		// 床（FL）・野地板のレイヤは伏図ビューポートで柱・梁を覆い隠さないよう全ストーリ
-		// 分をまとめて背面へ集める（M9 床板で効く。FL は M3 から背面対象に含めておく）。
+		// 分をまとめて背面へ集める（M5 床板で効く。FL は M3 から背面対象に含めておく）。
 		bool isBackgroundLevel(const std::string& type)
 		{
 			return type == "FL" || type == "野地板";

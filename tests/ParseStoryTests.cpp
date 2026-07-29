@@ -145,6 +145,39 @@ TEST(get_local_placement_z_false_when_coords_2d)
 }
 
 // ---------------------------------------------------------------------------
+// collectStoryElements: 階に属する要素の列挙
+// ---------------------------------------------------------------------------
+
+TEST(collect_story_elements_lists_contained_elements)
+{
+	// IfcRelContainedInSpatialStructure の RelatedElements を、rel の #id 昇順・
+	// 記述順で返す（列挙順に依存しない決定的な並び）。
+	Model const model =
+		loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,-48.));\n"
+						"#11=IFCAXIS2PLACEMENT3D(#10,$,$);\n"
+						"#12=IFCLOCALPLACEMENT($,#11);\n"
+						"#13=IFCCOLUMN('c',$,$,$,$,#12,$,$);\n"
+						"#14=IFCSLAB('s',$,$,$,$,#12,$,$);\n"
+						"#20=IFCBUILDINGSTOREY('s',$,'1FL',$,$,$,$,$,.ELEMENT.,473.);\n"
+						"#30=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#13,#14),#20);\n");
+	const std::vector<int> elements = HomeskzIfcImport::parse::collectStoryElements(model, 20);
+	CHECK_EQ(elements.size(), static_cast<std::size_t>(2));
+	if (elements.size() == 2)
+	{
+		CHECK_EQ(elements[0], 13);
+		CHECK_EQ(elements[1], 14);
+	}
+}
+
+TEST(collect_story_elements_empty_when_storey_unreferenced)
+{
+	// 誰からも参照されていない階（要素を 1 つも持たない階）は空を返す。
+	Model const model =
+		loadIfcFromText("#20=IFCBUILDINGSTOREY('s',$,'1FL',$,$,$,$,$,.ELEMENT.,473.);\n");
+	CHECK(HomeskzIfcImport::parse::collectStoryElements(model, 20).empty());
+}
+
+// ---------------------------------------------------------------------------
 // resolveBeamTopOffset: 横架材天端オフセット
 // ---------------------------------------------------------------------------
 
@@ -444,6 +477,7 @@ TEST(reads_sample_house_fixture)
 	{
 		CHECK_EQ(roof->suffix, std::string("R"));
 		CHECK(near(roof->elevation, 6300.0));
+		// 床版の無い屋根は軒高だけ（ロフトの床がある屋根には FL が加わる。下のテスト）。
 		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"軒高"}));
 	}
 
@@ -453,6 +487,41 @@ TEST(reads_sample_house_fixture)
 	{
 		const std::vector<std::string> base = {"FL", "横架材天端"};
 		CHECK(sameVec(levelTypes(*first), base));
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 屋根階のロフト床レベル（床版がある屋根にだけ FL を足す）
+// ---------------------------------------------------------------------------
+
+TEST(roof_story_gets_fl_level_only_with_floor_slab)
+{
+	// 屋根階に床版（ロフト＝小屋裏収納の床）があれば、軒高の上に FL（軒高 +36mm）を
+	// 足してレイヤ "R-FL" を作る。床版が無ければ軒高だけ（空の FL レイヤを作らない）。
+	const std::string base = "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
+							 "#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
+							 "#3=IFCLOCALPLACEMENT($,#2);\n"
+							 "#10=IFCBUILDINGSTOREY('s1',$,'1FL',$,$,#3,$,$,.ELEMENT.,0.);\n"
+							 "#11=IFCBUILDINGSTOREY('s2',$,'2FL',$,$,#3,$,$,.ELEMENT.,3000.);\n";
+
+	Model const without = loadIfcFromText(base);
+	std::vector<StoryCommand> const bare = buildStoryCommands(without);
+	const StoryCommand* bareRoof = find(bare, "屋根");
+	CHECK(bareRoof != nullptr);
+	if (bareRoof != nullptr)
+		CHECK(sameVec(levelTypes(*bareRoof), std::vector<std::string>{"軒高"}));
+
+	Model const withLoft =
+		loadIfcFromText(base + "#40=IFCSLAB('slab',$,'床版',$,$,#3,$,$,$);\n"
+							   "#50=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#40),#11);\n");
+	std::vector<StoryCommand> const loft = buildStoryCommands(withLoft);
+	const StoryCommand* loftRoof = find(loft, "屋根");
+	CHECK(loftRoof != nullptr);
+	if (loftRoof != nullptr)
+	{
+		CHECK(sameVec(levelTypes(*loftRoof), std::vector<std::string>{"FL", "軒高"}));
+		CHECK_EQ(loftRoof->levels.front().layer, std::string("R-FL"));
+		CHECK(near(loftRoof->levels.front().offset, 36.0));
 	}
 }
 

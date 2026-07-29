@@ -136,6 +136,137 @@ TEST(validate_rejects_story_level_with_empty_layer)
 	CHECK(!core::validateDocument(document));
 }
 
+namespace
+{
+	// 検証を通る最小の床命令（レイヤ・クラス・3 点以上の外形・構成層・高さ基準）。
+	core::FloorCommand validFloor()
+	{
+		core::FloorCommand floor;
+		floor.layer = "1-FL";
+		floor.drawClass = "04構造-02木造-06耐力面材-02床";
+		floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, core::Vec2{1000.0, 2000.0},
+						  core::Vec2{0.0, 2000.0}};
+		floor.styleName = "1F-床スタイル";
+		floor.components = {core::SlabComponentCommand{"床仕上げ", 96.0},
+							core::SlabComponentCommand{"床下地", 24.0}};
+		floor.elevation = 0.0;
+		floor.bound = core::StoryBoundCommand{0, "FL", 0.0};
+		return floor;
+	}
+} // namespace
+
+TEST(floor_datum_defaults_to_top)
+{
+	// 既定の高さ基準はスラブ天端（床仕上げ上端）。ロフトだけ Bottom（床下地下端）。
+	core::FloorCommand const floor;
+	CHECK(floor.datum == core::SlabDatum::Top);
+}
+
+TEST(validate_accepts_document_with_valid_floor)
+{
+	core::Document document;
+	document.floors.push_back(validFloor());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_empty_layer)
+{
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.layer = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_empty_class)
+{
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.drawClass = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_too_few_boundary_points)
+{
+	// 3 点未満は面にならない（Python 版 _validate_floor と同じ関門）。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}};
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_empty_bound_level)
+{
+	// レベル種別が空だと SetObjectStoryBound がバインド先を決められない。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.bound.level = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_empty_style_name)
+{
+	// スラブスタイル名が空だと構成を持つスタイルを用意できない。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.styleName = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_without_components)
+{
+	// 構成層が無いスラブは厚みを持てない。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.components.clear();
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_component_with_empty_name)
+{
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.components[0].name = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_component_with_negative_thickness)
+{
+	// 負の層は作れない（parse 側は 0 に丸める）。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.components[0].thickness = -1.0;
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_accepts_floor_with_zero_thickness_finish)
+{
+	// 床仕上げが 0（FL − 横架材天端 が床下地厚以下）の床も、総厚が正なら妥当。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.components[0].thickness = 0.0;
+	document.floors.push_back(floor);
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_zero_total_thickness)
+{
+	// 総厚 0 のスラブは実体を持たない。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	for (core::SlabComponentCommand& component : floor.components)
+		component.thickness = 0.0;
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
 // ---------------------------------------------------------------------------
 // parse::buildDocument（骨組み: いまは空の Document を返すだけ）
 // ---------------------------------------------------------------------------
