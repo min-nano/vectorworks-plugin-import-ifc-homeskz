@@ -168,21 +168,6 @@ jobs:
           test -x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR"
           echo "SDK looks good."
 
-      # TEMPORARY (M5 床板/スラブ): find the API behind the slab style's "基準面"
-      # (構成要素の上端／下端) radio — SetDatumSlabComponent only picks the component.
-      # The SDK cannot be downloaded outside CI, so this is the only way to read its
-      # headers. REMOVE once the datum is set correctly.
-      - name: TEMP — probe SDK slab datum APIs
-        run: |
-          set -uo pipefail
-          inc="$VW_SDK_DIR/SDKLib/Include"
-          echo "=== ISDK: Datum ==="
-          grep -n "Datum" "$inc/Interfaces/VectorWorks/ISDK.h" || true
-          echo "=== ヘッダ全体の Datum（スラブ関連） ==="
-          grep -rn "Datum" "$inc" --include=*.h | grep -i "slab\|component\|top\|bottom" | head -40 || true
-          echo "=== オブジェクト変数（スラブ） ==="
-          grep -rn "Slab" "$inc/Kernel" --include=*.h | head -40 || true
-
       - name: Install ccache
         run: brew install ccache
 

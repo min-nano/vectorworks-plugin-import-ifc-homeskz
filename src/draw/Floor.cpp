@@ -132,17 +132,21 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// スラブ（またはスラブスタイル）の高さ基準面を設定する。基準面は「どの構成要素か」
-		// ＋「その上端か下端か」で決まる（スラブスタイル設定ダイアログの「基準面」）。
-		//   Top    … 最上層（床仕上げ）の**上端**＝スラブ天端
-		//   Bottom … 最下層（床下地）の**下端**＝スラブ底面
+		// （SetDatumSlabComponent）＋「その上端か下端か」
+		// （SetComponentDatumIsTopOfComponent）の 2 つで決まる。スラブスタイル設定
+		// ダイアログの「基準面」欄のポップアップとラジオがそれぞれこの 2 つに対応する。
+		//   Top    … 最上層（床仕上げ＝索引 0）の**上端**＝スラブ天端
+		//   Bottom … 最下層（床下地＝索引 個数−1）の**下端**＝スラブ底面
 		// 索引は 0 始まり（SetComponents の★参照）。
 		void SetDatum(MCObjectHandle object, core::SlabDatum datum, short componentCount)
 		{
 			if (componentCount <= 0)
 				return;
-			const bool bottom = (datum == core::SlabDatum::Bottom);
-			const short component = bottom ? static_cast<short>(componentCount - 1) : 0;
+			const bool top = (datum == core::SlabDatum::Top);
+			const short component = top ? 0 : static_cast<short>(componentCount - 1);
 			gSDK->SetDatumSlabComponent(object, component);
+			// 構成要素を指すだけでは既定の面（中心／下端）のままなので、面も明示する。
+			gSDK->SetComponentDatumIsTopOfComponent(object, component, top);
 		}
 
 		// 階ごとのスラブスタイル（"1F-床スタイル" 等）を用意して索引を返す。既にあれば
