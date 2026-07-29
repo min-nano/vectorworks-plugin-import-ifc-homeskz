@@ -25,10 +25,11 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 床仕上げ上端の高さ基準にするレベル種別名。parse/Story が一般階に作る "FL" レベルと
-		// 一致させる（Python 版 LEVEL_FL）。ここがズレると SetObjectStoryBound が解決できない
-		// レベルを指してしまう。FL レイヤ名の接尾辞（"1-FL" の "FL"）も同じ名前。
+		// 高さ基準にするレベル種別名。parse/Story が作るレベル名と一致させる（Python 版
+		// LEVEL_FL / LEVEL_EAVES）。ここがズレると SetObjectStoryBound が解決できないレベルを
+		// 指してしまう。FL レイヤ名の接尾辞（"1-FL" / "R-FL" の "FL"）も同じ名前。
 		constexpr const char* kLevelFL = "FL";
+		constexpr const char* kLevelEaves = "軒高";
 
 		// IfcRoot の Name 属性インデックス（GlobalId, OwnerHistory, Name=2, …）。
 		constexpr std::size_t kNameAttr = 2;
@@ -46,6 +47,17 @@ namespace HomeskzIfcImport::parse
 			return name.type == ValueType::String && name.text == kFloorSlabName;
 		}
 	} // namespace
+
+	bool storyHasFloorSlab(const Model& model, int storeyId)
+	{
+		for (const int elementId : collectStoryElements(model, storeyId))
+		{
+			const Entity* element = model.entity(elementId);
+			if (element != nullptr && isFloorSlab(*element))
+				return true;
+		}
+		return false;
+	}
 
 	std::string floorSlabStyleName(std::size_t index, bool isTop)
 	{
@@ -69,22 +81,36 @@ namespace HomeskzIfcImport::parse
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
 			const StoryInfo& story = stories[i];
-			// 最上階（屋根）は FL レイヤを持たない（軒高のみ）ため床板を配置しない。
-			if (story.isTop)
-				continue;
 
-			// FL レイヤ名は parse/Story のレイヤ名規約（layer_prefix_for）と同じ "{階}-FL"。
-			const std::string layer = std::to_string(i + 1) + "-" + kLevelFL;
-			// 横架材天端（床を受ける基準高さ）の絶対 Z。段差床はここからの高低差でずれる。
-			const double beamTopAbs = story.elevation + story.beamOffset;
+			// 配置先レイヤは parse/Story のレイヤ名規約と同じ "{接頭辞}-FL"（一般階は
+			// "1-FL"…、屋根階は "R-FL"）。屋根階の FL レベルは床版があるときだけ
+			// parse/Story が作る（ロフト＝小屋裏収納の床）。
+			const std::string layer = storyLayerPrefix(i, story.isTop) + "-" + kLevelFL;
 
-			// スラブ構成: 上から 床仕上げ（FL 高さ − 横架材天端高さ − 床下地厚）＋
-			// 床下地（24mm 固定）。合計＝FL 高さ − 横架材天端高さなので、段差の無い床は
-			// 下端が横架材天端・上端が FL にちょうど収まる。横架材天端オフセットを取れない
-			// （＝柱も床版も無い）階では合計が床下地だけになるよう仕上げを 0 に丸める
-			// （負の層は作れない。1 階の欠損で全体を止めない）。
-			const double slabThickness = story.elevation - beamTopAbs;
+			// 床を受ける基準高さ（横架材天端＝床下地の下端）の絶対 Z。段差床はここからの
+			// 高低差でずれる。屋根階は軒高（ストーリ原点）がその高さにあたる。
+			const double beamTopAbs =
+				story.isTop ? story.elevation : story.elevation + story.beamOffset;
+
+			// スラブ構成: 上から 床仕上げ ＋ 床下地（24mm 固定）。総厚は
+			//   一般階 … FL 高さ − 横架材天端高さ（下端が横架材天端・上端が FL に収まる）
+			//   屋根階 … ロフトの標準床レベル（軒高 + 36mm。仮定値）
+			// 横架材天端オフセットを取れない（＝柱も床版も無い）階では合計が床下地だけに
+			// なるよう仕上げを 0 に丸める（負の層は作れない。1 階の欠損で全体を止めない）。
+			const double slabThickness =
+				story.isTop ? kLoftFloorLevelOffset : story.elevation - beamTopAbs;
 			const double finishThickness = std::max(slabThickness - kSubfloorThickness, 0.0);
+
+			// 高さ基準の面とバインド先レベル:
+			//   一般階 … 床仕上げ上端（Top）を FL レベルへ。FL は IFC 由来の確かな高さ。
+			//   屋根階 … 床下地下端（Bottom）を軒高レベルへ。ロフトの FL は仮定値なので、
+			//            確かな構造面（軒高＝横架材天端）を基準にする。
+			const core::SlabDatum datum =
+				story.isTop ? core::SlabDatum::Bottom : core::SlabDatum::Top;
+			const char* const boundLevel = story.isTop ? kLevelEaves : kLevelFL;
+			// 基準面のストーリレベル上の絶対 Z（段差 0 のときの基準面の高さ）。
+			const double datumBaseAbs = story.isTop ? beamTopAbs : story.elevation;
+
 			// スラブスタイルは階ごとに 1 つ（階により構成が異なることが多いため）。
 			const std::string styleName = floorSlabStyleName(i, story.isTop);
 
@@ -110,9 +136,10 @@ namespace HomeskzIfcImport::parse
 				}
 
 				// IFC の床位置を尊重する: 床版ソリッドの最下端（ストーリ高さ ＋ ローカル
-				// 最下端 Z）が床を受ける位置で、横架材天端からの高低差が段差＝スキップ
-				// フロアになる。命令が持つ高さは**床仕上げ上端**なので、その高低差を FL に
-				// 足した値（一般部は FL そのもの、床レベル指定時は FL ± 差分）にする。
+				// 最下端 Z）が床を受ける位置で、横架材天端（屋根階は軒高）からの高低差が
+				// 段差＝スキップフロアになる。命令が持つ高さは基準面（一般階＝床仕上げ
+				// 上端、屋根階＝床下地下端）なので、その高低差を基準レベルへ足す
+				// （段差が無ければ一般階は FL ちょうど、屋根階は軒高ちょうど）。
 				double topLocal = 0.0;
 				double thicknessLocal = 0.0;
 				zTopAndThickness(solid, topLocal, thicknessLocal);
@@ -126,8 +153,9 @@ namespace HomeskzIfcImport::parse
 				cmd.styleName = styleName;
 				cmd.components = {SlabComponentCommand{kFloorFinishName, finishThickness},
 								  SlabComponentCommand{kSubfloorName, kSubfloorThickness}};
-				cmd.elevation = story.elevation + levelDelta;
-				cmd.bound = StoryBoundCommand{0, kLevelFL, levelDelta};
+				cmd.datum = datum;
+				cmd.elevation = datumBaseAbs + levelDelta;
+				cmd.bound = StoryBoundCommand{0, boundLevel, levelDelta};
 				commands.push_back(std::move(cmd));
 			}
 		}

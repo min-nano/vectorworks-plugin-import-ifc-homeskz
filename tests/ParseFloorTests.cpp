@@ -170,7 +170,8 @@ TEST(extracts_floor_slab_from_minimal_model)
 	CHECK(near(totalThickness(floor), 120.0));
 	// 床仕上げ上端の絶対 Z ＝ FL（0）。段差が無いので FL ちょうど。
 	CHECK(near(floor.elevation, 0.0));
-	// 高さ基準は FL レベルで、段差が無いので offset は 0。
+	// 高さ基準は床仕上げ上端（Top）＝FL レベルで、段差が無いので offset は 0。
+	CHECK(floor.datum == HomeskzIfcImport::core::SlabDatum::Top);
 	CHECK_EQ(floor.bound.storyOffset, 0);
 	CHECK_EQ(floor.bound.level, std::string("FL"));
 	CHECK(near(floor.bound.offset, 0.0));
@@ -207,9 +208,10 @@ TEST(returns_empty_without_stories)
 	CHECK(buildFloorCommands(model).empty());
 }
 
-TEST(skips_top_story)
+TEST(top_story_floor_is_a_loft)
 {
-	// 床版が最上階（屋根）に属していれば FL レイヤが無いので配置しない。
+	// 最上階（屋根）に属する床版はロフト（小屋裏収納）の床として "R-FL" に配置する。
+	// 高さ基準は床下地下端（軒高レベル）で、構成は 床仕上げ 12 ＋ 床下地 24（＝軒高+36）。
 	std::string text = minimalFloorText("床版");
 	// 収容先を 1FL(#10) から最上階 2FL(#11) へ差し替える。
 	const std::string from = "(#40),#10)";
@@ -217,7 +219,39 @@ TEST(skips_top_story)
 	text.replace(text.find(from), from.size(), to);
 
 	Model const model = loadIfcFromText(text);
-	CHECK(buildFloorCommands(model).empty());
+	std::vector<FloorCommand> const floors = buildFloorCommands(model);
+	CHECK_EQ(floors.size(), static_cast<std::size_t>(1));
+	if (floors.empty())
+		return;
+	const FloorCommand& loft = floors.front();
+	CHECK_EQ(loft.layer, std::string("R-FL"));
+	CHECK_EQ(loft.styleName, std::string("屋根-床スタイル"));
+	CHECK_EQ(loft.components.size(), static_cast<std::size_t>(2));
+	if (loft.components.size() == 2)
+	{
+		CHECK(near(loft.components[0].thickness, 12.0)); // 36 − 24
+		CHECK(near(loft.components[1].thickness, 24.0));
+	}
+	CHECK(near(totalThickness(loft), 36.0));
+	// 基準面は床下地下端（＝軒高）。床版のローカル最下端 Z(−120) が軒高（3000）からの
+	// 高低差になる: 基準面の絶対 Z = 3000 + (−120) = 2880、offset も −120。
+	CHECK(loft.datum == HomeskzIfcImport::core::SlabDatum::Bottom);
+	CHECK_EQ(loft.bound.level, std::string("軒高"));
+	CHECK(near(loft.bound.offset, -120.0));
+	CHECK(near(loft.elevation, 2880.0));
+}
+
+TEST(story_has_floor_slab_detects_loft)
+{
+	// parse/Story が屋根階へ FL レベルを足すかの判定に使う。
+	std::string text = minimalFloorText("床版");
+	const std::string from = "(#40),#10)";
+	const std::string to = "(#40),#11)";
+	text.replace(text.find(from), from.size(), to);
+
+	Model const model = loadIfcFromText(text);
+	CHECK(HomeskzIfcImport::parse::storyHasFloorSlab(model, 11));
+	CHECK(!HomeskzIfcImport::parse::storyHasFloorSlab(model, 10));
 }
 
 // ---------------------------------------------------------------------------
@@ -353,9 +387,9 @@ TEST(elevation_equals_fl_plus_offset_in_all_fixtures)
 	}
 }
 
-TEST(floors_only_on_non_top_fl_layers)
+TEST(floors_only_on_fl_layers)
 {
-	// 振り分け先は必ず非最上階の FL レイヤ（屋根に床板を置かない）。
+	// 振り分け先は必ずどこかの階の FL レイヤ（実フィクスチャの床版は非最上階のみ）。
 	const std::vector<std::string> files = {"サンプル1 (住木邸新築工事).ifc",
 											"スキップフロア_サンプル.ifc",
 											"グレー本モデルプラン1【3階】.ifc"};

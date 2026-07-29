@@ -98,6 +98,17 @@ namespace HomeskzIfcImport::core
 		double offset = 0.0;
 	};
 
+	// スラブの高さ基準（elevation と bound が指すスラブ上の面）。VW のスラブは高さの
+	// 基準面（データム）を持ち、命令の高さはこの面の絶対 Z を表す。
+	//   Top    … スラブ天端（床仕上げ上端）。一般階の床はこちら（＝ FL）。
+	//   Bottom … スラブ底面（床下地下端）。ロフト（屋根階）の床はこちら（＝ 横架材天端＝軒高。
+	//            ロフトの FL は「軒高 + 36mm」という仮定値なので、確かな構造面を基準にする）。
+	enum class SlabDatum
+	{
+		Top,
+		Bottom,
+	};
+
 	// スラブの構成層（コンポーネント）1 枚。床は「床仕上げ」「床下地」の 2 層で構成する。
 	//
 	//   name      … 層の名前（"床仕上げ" / "床下地"）
@@ -132,9 +143,10 @@ namespace HomeskzIfcImport::core
 	//                              ポリゴンの頂点列で、末尾に始点を重複させない）
 	//   styleName  （Python 版に対応なし）… スラブスタイル名（"1F-床スタイル" 等）
 	//   components （Python 版に対応なし）… スタイルの構成層（上から）
-	//   elevation  ← 'elevation' … **床仕上げ上端**の絶対 Z（mm。Python 版は床下端）
-	//   bound      ← 'bound'     … 床仕上げ上端の高さ基準（FL レベル＋段差 offset。
-	//                              Python 版は床下端を横架材天端レベルへバインド）
+	//   datum      （Python 版に対応なし）… 高さ基準の面（一般階＝Top・ロフト＝Bottom）
+	//   elevation  ← 'elevation' … **基準面**の絶対 Z（mm。Python 版は床下端）
+	//   bound      ← 'bound'     … 基準面の高さ基準（一般階＝FL レベル、ロフト＝軒高レベル、
+	//                              ＋段差 offset。Python 版は床下端を横架材天端レベルへ）
 	struct FloorCommand
 	{
 		std::string layer;
@@ -142,6 +154,7 @@ namespace HomeskzIfcImport::core
 		std::vector<Vec2> boundary;
 		std::string styleName;
 		std::vector<SlabComponentCommand> components;
+		SlabDatum datum = SlabDatum::Top;
 		double elevation = 0.0;
 		StoryBoundCommand bound;
 	};

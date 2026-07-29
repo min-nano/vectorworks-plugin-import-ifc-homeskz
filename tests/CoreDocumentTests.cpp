@@ -155,6 +155,13 @@ namespace
 	}
 } // namespace
 
+TEST(floor_datum_defaults_to_top)
+{
+	// 既定の高さ基準はスラブ天端（床仕上げ上端）。ロフトだけ Bottom（床下地下端）。
+	core::FloorCommand const floor;
+	CHECK(floor.datum == core::SlabDatum::Top);
+}
+
 TEST(validate_accepts_document_with_valid_floor)
 {
 	core::Document document;

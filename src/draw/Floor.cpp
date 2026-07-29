@@ -23,10 +23,11 @@
 //	     適用する。スタイルの構成層は命令どおりに作り直す（上から 床仕上げ → 床下地。
 //	     命令の層を先頭に挿入し、元の層は**削除**する。厚み 0 の層は作れないため）。
 //	     スタイルを用意できないときだけ、スラブ本体のコンポーネントを直接組む
-//	  5. SetSlabHeight にスラブ**天端**＝床仕上げ上端の絶対 Z を渡す（SetSlabHeight は
-//	     厚みではなく天端高さを設定する関数。Python 版 #70 の不具合と同じ落とし穴）
-//	  6. SetObjectStoryBound で床仕上げ上端の高さ基準を「FL」レベルへバインドする
-//	     （offset は FL からの高低差。一般部は 0）
+//	  5. 高さの基準面（データム）を命令に合わせる（一般階＝床仕上げ上端／ロフト＝床下地
+//	     下端）。SetSlabHeight にはその基準面の絶対 Z を渡す（SetSlabHeight は厚みではなく
+//	     高さを設定する関数。Python 版 #70 の不具合と同じ落とし穴）
+//	  6. SetObjectStoryBound で基準面の高さ基準をストーリレベルへバインドする
+//	     （一般階＝FL レベル／ロフト＝軒高レベル。offset はそこからの高低差で一般部は 0）
 //	  7. ResetObject で反映
 //	スラブが作れない場合は外形ポリゴンにフォールバックする（1 枚の失敗で全体を止めない）。
 //
@@ -192,8 +193,21 @@ namespace HomeskzIfcImport::draw
 				SetComponents(slab, floor.components);
 			}
 
-			// SetSlabHeight は厚みではなく**天端高さ**（絶対 Z）を設定する（Python 版 #70 と
-			// 同じ落とし穴）。命令の elevation は床仕上げ上端＝スラブ天端なのでそのまま渡す。
+			// 高さの基準面（データム）を命令に合わせる。スラブの高さはこの面を指す。
+			//   Top    … 床仕上げ＝最上層（コンポーネント 1）を基準にする＝スラブ天端
+			//   Bottom … 床下地＝最下層（コンポーネント N）を基準にする＝スラブ底面
+			// SetDatumSlabComponent はスラブの高さがどのコンポーネントを指すかを決める。
+			// 実際にどの面（層の上端／下端）を指すかは VW 上で目視確認する（ROADMAP.md M5）。
+			const auto componentCount = static_cast<short>(floor.components.size());
+			if (componentCount > 0)
+			{
+				const short datumComponent =
+					(floor.datum == core::SlabDatum::Bottom) ? componentCount : 1;
+				gSDK->SetDatumSlabComponent(slab, datumComponent);
+			}
+
+			// SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する（Python 版 #70 と
+			// 同じ落とし穴）。命令の elevation は基準面の絶対 Z なのでそのまま渡す。
 			gSDK->SetSlabHeight(slab, floor.elevation);
 
 			// 高さ基準（床仕上げ上端）を配置先ストーリの「FL」レベルへバインドする。offset は
