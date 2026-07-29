@@ -19,9 +19,9 @@
 //	  1. 外形を閉じた 2D ポリゴンにする
 //	  2. CreateSlab(プロファイル) でスラブを生成する
 //	  3. クラス分けと描画属性の by-class 設定
-//	  4. スラブの構成層（コンポーネント）を命令どおりに整える（上から 床仕上げ → 床下地）。
+//	  4. スラブの構成層（コンポーネント）を命令どおりに作り直す（上から 床仕上げ → 床下地）。
 //	     文書のスラブ設定に依存しないよう、スタイルを外して（ConvertToUnstyledSlab）から
-//	     層数・厚み・名前を設定する
+//	     命令の層を先頭に挿入し、元の層は**削除**する（厚み 0 の層は作れないため）
 //	  5. SetSlabHeight にスラブ**天端**＝床仕上げ上端の絶対 Z を渡す（SetSlabHeight は
 //	     厚みではなく天端高さを設定する関数。Python 版 #70 の不具合と同じ落とし穴）
 //	  6. SetObjectStoryBound で床仕上げ上端の高さ基準を「FL」レベルへバインドする
@@ -100,32 +100,42 @@ namespace HomeskzIfcImport::draw
 
 		// スラブの構成層を命令どおり（上から 床仕上げ → 床下地）に整える。スラブの実厚は
 		// コンポーネントの合計なので、まずスタイルを外して（文書のスラブ設定＝スタイルに
-		// 構成を支配されないように）、必要な数の層を用意し、各層の厚みと名前を設定する。
-		// 余っている層は厚み 0 に潰す（層の削除 API に頼らずに構成を確定させる）。
+		// 構成を支配されないように）から層を作り直す。
+		//
+		// 手順: **先頭に命令の層を順に挿入し、その後ろに残った元の層を削除する**。
+		//   * 厚み 0 の層は VW が受け付けない（＝「潰す」では構成を確定できない）ので、
+		//     余った層は必ず削除する。
+		//   * 先に挿入してから削除するので、途中でスラブの層が 0 枚になる瞬間が無い
+		//     （層が 1 枚も無いスラブは作れない）。
+		//   * 削除に失敗したら（想定外の API 挙動）そこで打ち切り、元の層が残ったままでも
+		//     床自体は残す（1 枚の失敗で全体を止めない）。
 		void SetSlabComponents(MCObjectHandle slab,
 							   const std::vector<core::SlabComponentCommand>& components)
 		{
-			// スタイル付きのままではコンポーネント幅を変えられない（スタイルが構成を持つ）。
+			// スタイル付きのままではコンポーネント構成を変えられない（スタイルが構成を持つ）。
 			gSDK->ConvertToUnstyledSlab(slab);
 
+			const short original = CountComponents(slab);
 			const auto wanted = static_cast<short>(components.size());
-			short existing = CountComponents(slab);
 
-			// 足りない層を末尾へ挿入する。fill / ペン太さ / 線種は文書の既定に任せ（0）、
-			// 描画属性はクラスに従わせる（SetAllAttributesByClass）。
-			for (short index = static_cast<short>(existing + 1); index <= wanted; ++index)
-				gSDK->InsertNewComponentN(slab, index, 0, 0, 0, 0, 0, 0);
-			existing = CountComponents(slab);
-
-			for (short index = 1; index <= wanted && index <= existing; ++index)
+			// 1. 命令の層を先頭から順に挿入する（index の層の「手前」に入るので、
+			//    1,2,… の順に入れると命令どおりの並びが先頭にできる）。fill / ペン太さ /
+			//    線種は文書の既定に任せ（0）、描画属性はクラスに従わせる。
+			for (short index = 1; index <= wanted; ++index)
 			{
 				const core::SlabComponentCommand& component =
 					components[static_cast<std::size_t>(index - 1)];
+				gSDK->InsertNewComponentN(slab, index, component.thickness, 0, 0, 0, 0, 0);
 				gSDK->SetComponentWidth(slab, index, component.thickness);
 				gSDK->SetComponentName(slab, index, TXString(component.name.c_str()));
 			}
-			for (short index = static_cast<short>(wanted + 1); index <= existing; ++index)
-				gSDK->SetComponentWidth(slab, index, 0);
+
+			// 2. 挿入した層の直後に並んでいる元の層を、前から順に削除する。
+			for (short removed = 0; removed < original; ++removed)
+			{
+				if (!gSDK->DeleteComponent(slab, static_cast<short>(wanted + 1)))
+					break;
+			}
 		}
 
 		// 床の平面外形を閉じた 2D ポリゴンとして作る（スラブのプロファイル）。
