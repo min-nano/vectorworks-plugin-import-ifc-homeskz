@@ -146,6 +146,7 @@ namespace
 		floor.drawClass = "04構造-02木造-06耐力面材-02床";
 		floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, core::Vec2{1000.0, 2000.0},
 						  core::Vec2{0.0, 2000.0}};
+		floor.styleName = "1F-床スタイル";
 		floor.components = {core::SlabComponentCommand{"床仕上げ", 96.0},
 							core::SlabComponentCommand{"床下地", 24.0}};
 		floor.elevation = 0.0;
@@ -195,6 +196,16 @@ TEST(validate_rejects_floor_with_empty_bound_level)
 	core::Document document;
 	core::FloorCommand floor = validFloor();
 	floor.bound.level = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_empty_style_name)
+{
+	// スラブスタイル名が空だと構成を持つスタイルを用意できない。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.styleName = "";
 	document.floors.push_back(floor);
 	CHECK(!core::validateDocument(document));
 }

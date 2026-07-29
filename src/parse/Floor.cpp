@@ -33,6 +33,10 @@ namespace HomeskzIfcImport::parse
 		// IfcRoot の Name 属性インデックス（GlobalId, OwnerHistory, Name=2, …）。
 		constexpr std::size_t kNameAttr = 2;
 
+		// スラブスタイル名の接尾辞と、最上階（屋根）の接頭辞。
+		constexpr const char* kStyleSuffix = "-床スタイル";
+		constexpr const char* kRoofStylePrefix = "屋根";
+
 		// 要素が床板（IfcSlab かつ Name が "床版"）か（Python 版 _is_floor_slab）。
 		bool isFloorSlab(const Entity& element)
 		{
@@ -42,6 +46,14 @@ namespace HomeskzIfcImport::parse
 			return name.type == ValueType::String && name.text == kFloorSlabName;
 		}
 	} // namespace
+
+	std::string floorSlabStyleName(std::size_t index, bool isTop)
+	{
+		// 一般階は "{階}F-床スタイル"、最上階は "屋根-床スタイル"（小屋裏収納・ロフトの床）。
+		if (isTop)
+			return std::string(kRoofStylePrefix) + kStyleSuffix;
+		return std::to_string(index + 1) + "F" + kStyleSuffix;
+	}
 
 	std::vector<FloorCommand> buildFloorCommands(const Model& model)
 	{
@@ -73,6 +85,8 @@ namespace HomeskzIfcImport::parse
 			// （負の層は作れない。1 階の欠損で全体を止めない）。
 			const double slabThickness = story.elevation - beamTopAbs;
 			const double finishThickness = std::max(slabThickness - kSubfloorThickness, 0.0);
+			// スラブスタイルは階ごとに 1 つ（階により構成が異なることが多いため）。
+			const std::string styleName = floorSlabStyleName(i, story.isTop);
 
 			for (const int elementId : collectStoryElements(model, story.id))
 			{
@@ -109,6 +123,7 @@ namespace HomeskzIfcImport::parse
 				cmd.layer = layer;
 				cmd.drawClass = CLASS_FLOOR;
 				cmd.boundary = std::move(boundary);
+				cmd.styleName = styleName;
 				cmd.components = {SlabComponentCommand{kFloorFinishName, finishThickness},
 								  SlabComponentCommand{kSubfloorName, kSubfloorThickness}};
 				cmd.elevation = story.elevation + levelDelta;

@@ -50,14 +50,14 @@ namespace HomeskzIfcImport::core
 			return !component.name.empty() && component.thickness >= 0.0;
 		}
 
-		// 床板 1 枚が妥当か（Python 版 _validate_floor 相当）。配置先レイヤ名・クラス名が
-		// 非空で、平面外形が 3 点以上（面になる）で、高さ基準のレベル種別が非空で、構成層が
-		// 1 枚以上あり総厚が正であること。elevation / bound.offset は数値（double なので
-		// 常に成立）。
+		// 床板 1 枚が妥当か（Python 版 _validate_floor 相当）。配置先レイヤ名・クラス名・
+		// スラブスタイル名が非空で、平面外形が 3 点以上（面になる）で、高さ基準のレベル種別が
+		// 非空で、構成層が 1 枚以上あり総厚が正であること。elevation / bound.offset は数値
+		// （double なので常に成立）。
 		bool isValidFloor(const FloorCommand& floor)
 		{
 			if (floor.layer.empty() || floor.drawClass.empty() || floor.boundary.size() < 3 ||
-				floor.bound.level.empty() || floor.components.empty())
+				floor.bound.level.empty() || floor.styleName.empty() || floor.components.empty())
 				return false;
 			if (!std::ranges::all_of(floor.components, isValidSlabComponent))
 				return false;

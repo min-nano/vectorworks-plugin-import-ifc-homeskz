@@ -19,9 +19,10 @@
 //	  1. 外形を閉じた 2D ポリゴンにする
 //	  2. CreateSlab(プロファイル) でスラブを生成する
 //	  3. クラス分けと描画属性の by-class 設定
-//	  4. スラブの構成層（コンポーネント）を命令どおりに作り直す（上から 床仕上げ → 床下地）。
-//	     文書のスラブ設定に依存しないよう、スタイルを外して（ConvertToUnstyledSlab）から
-//	     命令の層を先頭に挿入し、元の層は**削除**する（厚み 0 の層は作れないため）
+//	  4. **階ごとのスラブスタイル**（"1F-床スタイル" / "屋根-床スタイル" 等）を用意して
+//	     適用する。スタイルの構成層は命令どおりに作り直す（上から 床仕上げ → 床下地。
+//	     命令の層を先頭に挿入し、元の層は**削除**する。厚み 0 の層は作れないため）。
+//	     スタイルを用意できないときだけ、スラブ本体のコンポーネントを直接組む
 //	  5. SetSlabHeight にスラブ**天端**＝床仕上げ上端の絶対 Z を渡す（SetSlabHeight は
 //	     厚みではなく天端高さを設定する関数。Python 版 #70 の不具合と同じ落とし穴）
 //	  6. SetObjectStoryBound で床仕上げ上端の高さ基準を「FL」レベルへバインドする
@@ -98,24 +99,20 @@ namespace HomeskzIfcImport::draw
 			return count;
 		}
 
-		// スラブの構成層を命令どおり（上から 床仕上げ → 床下地）に整える。スラブの実厚は
-		// コンポーネントの合計なので、まずスタイルを外して（文書のスラブ設定＝スタイルに
-		// 構成を支配されないように）から層を作り直す。
+		// オブジェクト（スラブ本体／スラブスタイル）の構成層を命令どおり（上から
+		// 床仕上げ → 床下地）に作り直す。
 		//
 		// 手順: **先頭に命令の層を順に挿入し、その後ろに残った元の層を削除する**。
 		//   * 厚み 0 の層は VW が受け付けない（＝「潰す」では構成を確定できない）ので、
 		//     余った層は必ず削除する。
-		//   * 先に挿入してから削除するので、途中でスラブの層が 0 枚になる瞬間が無い
-		//     （層が 1 枚も無いスラブは作れない）。
+		//   * 先に挿入してから削除するので、途中で層が 0 枚になる瞬間が無い
+		//     （層が 1 枚も無いスラブ／スタイルは作れない）。
 		//   * 削除に失敗したら（想定外の API 挙動）そこで打ち切り、元の層が残ったままでも
 		//     床自体は残す（1 枚の失敗で全体を止めない）。
-		void SetSlabComponents(MCObjectHandle slab,
-							   const std::vector<core::SlabComponentCommand>& components)
+		void SetComponents(MCObjectHandle object,
+						   const std::vector<core::SlabComponentCommand>& components)
 		{
-			// スタイル付きのままではコンポーネント構成を変えられない（スタイルが構成を持つ）。
-			gSDK->ConvertToUnstyledSlab(slab);
-
-			const short original = CountComponents(slab);
+			const short original = CountComponents(object);
 			const auto wanted = static_cast<short>(components.size());
 
 			// 1. 命令の層を先頭から順に挿入する（index の層の「手前」に入るので、
@@ -125,17 +122,37 @@ namespace HomeskzIfcImport::draw
 			{
 				const core::SlabComponentCommand& component =
 					components[static_cast<std::size_t>(index - 1)];
-				gSDK->InsertNewComponentN(slab, index, component.thickness, 0, 0, 0, 0, 0);
-				gSDK->SetComponentWidth(slab, index, component.thickness);
-				gSDK->SetComponentName(slab, index, TXString(component.name.c_str()));
+				gSDK->InsertNewComponentN(object, index, component.thickness, 0, 0, 0, 0, 0);
+				gSDK->SetComponentWidth(object, index, component.thickness);
+				gSDK->SetComponentName(object, index, TXString(component.name.c_str()));
 			}
 
 			// 2. 挿入した層の直後に並んでいる元の層を、前から順に削除する。
 			for (short removed = 0; removed < original; ++removed)
 			{
-				if (!gSDK->DeleteComponent(slab, static_cast<short>(wanted + 1)))
+				if (!gSDK->DeleteComponent(object, static_cast<short>(wanted + 1)))
 					break;
 			}
+		}
+
+		// 階ごとのスラブスタイル（"1F-床スタイル" 等）を用意して索引を返す。既にあれば
+		// それを使い、無ければ作る。構成層は毎回命令どおりに更新する（再インポートで階の
+		// 構成が変わっても追従する）。用意できなければ 0（＝スタイル無し）を返す。
+		InternalIndex ResolveSlabStyle(const std::string& styleName,
+									   const std::vector<core::SlabComponentCommand>& components)
+		{
+			if (styleName.empty())
+				return 0;
+
+			const TXString name(styleName.c_str());
+			MCObjectHandle style = gSDK->GetObjectByName(name);
+			if (style == nil)
+				style = gSDK->CreateSlabStyle(name);
+			if (style == nil)
+				return 0;
+
+			SetComponents(style, components);
+			return gSDK->GetObjectInternalIndex(style);
 		}
 
 		// 床の平面外形を閉じた 2D ポリゴンとして作る（スラブのプロファイル）。
@@ -170,7 +187,20 @@ namespace HomeskzIfcImport::draw
 
 			SetClassByName(slab, floor.drawClass);
 			SetAllAttributesByClass(slab);
-			SetSlabComponents(slab, floor.components);
+
+			// 構成は階ごとのスラブスタイルで与える（階により構成が異なることが多いため、
+			// スタイルは階ごとに 1 つ）。スタイルを用意できない場合だけ、スタイルを外して
+			// スラブ本体のコンポーネントを直接組む（構成の欠落で床を失わないための保険）。
+			const InternalIndex style = ResolveSlabStyle(floor.styleName, floor.components);
+			if (style != 0)
+			{
+				gSDK->SetSlabStyle(slab, style);
+			}
+			else
+			{
+				gSDK->ConvertToUnstyledSlab(slab);
+				SetComponents(slab, floor.components);
+			}
 
 			// SetSlabHeight は厚みではなく**天端高さ**（絶対 Z）を設定する（Python 版 #70 と
 			// 同じ落とし穴）。命令の elevation は床仕上げ上端＝スラブ天端なのでそのまま渡す。

@@ -168,15 +168,21 @@ jobs:
           test -x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR"
           echo "SDK looks good."
 
-      # TEMPORARY (M5 床板/スラブ): print the ISDK component APIs draw/Floor.cpp uses
-      # (insert / delete / name / width on an object). The SDK cannot be downloaded outside
-      # CI, so this is the only way to read its headers. REMOVE once draw/Floor.cpp compiles.
-      - name: TEMP — probe SDK component APIs
+      # TEMPORARY (M5 床板/スラブ): print the ISDK APIs draw/Floor.cpp uses (object
+      # components, slab styles, name/index lookup of a resource). The SDK cannot be
+      # downloaded outside CI, so this is the only way to read its headers.
+      # REMOVE once draw/Floor.cpp compiles.
+      - name: TEMP — probe SDK component/style APIs
         run: |
           set -uo pipefail
           isdk="$VW_SDK_DIR/SDKLib/Include/Interfaces/VectorWorks/ISDK.h"
           echo "=== ISDK: オブジェクトのコンポーネント操作 ==="
           grep -n "VCOM_CALLTYPE.*Component" "$isdk" | grep "MCObjectHandle" || true
+          echo "=== ISDK: スラブスタイル ==="
+          grep -n "SlabStyle" "$isdk" || true
+          echo "=== ISDK: 名前 → オブジェクト / ハンドル → InternalIndex ==="
+          grep -n "VCOM_CALLTYPE GetObjectByName\|VCOM_CALLTYPE GetNamedObject\|InternalIndex.*VCOM_CALLTYPE Get" \
+            "$isdk" || true
 
       - name: Install ccache
         run: brew install ccache

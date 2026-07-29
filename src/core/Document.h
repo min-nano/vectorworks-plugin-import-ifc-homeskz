@@ -122,13 +122,16 @@ namespace HomeskzIfcImport::core
 	//   床仕上げ … FL 高さ − 横架材天端高さ − 床下地厚
 	//   床下地   … 24mm 固定
 	// 合計＝FL 高さ − 横架材天端高さ、すなわちスラブ下端は（一般部では）横架材天端に一致する。
+	// 構成は**階ごとのスラブスタイル**（styleName）として作り、床はそのスタイルを適用して
+	// 描く（階により構成が異なることが多いため、スタイルは階ごとに 1 つ）。
 	//
 	// Python 版キーとの対応（Python 版は床ツール＋厚み 24mm 固定なので構成が異なる）:
 	//   layer      ← 'layer'     … 配置先デザインレイヤ名（"1-FL" 等。既存のみ・無ければスキップ）
 	//   drawClass  ← 'class'     … クラス名（床板。予約語 class を機械置換）
 	//   boundary   ← 'boundary'  … 床の平面外形（mm・グリッド中心オフセット済み。閉じた
 	//                              ポリゴンの頂点列で、末尾に始点を重複させない）
-	//   components （Python 版に対応なし）… スラブの構成層（上から）
+	//   styleName  （Python 版に対応なし）… スラブスタイル名（"1F-床スタイル" 等）
+	//   components （Python 版に対応なし）… スタイルの構成層（上から）
 	//   elevation  ← 'elevation' … **床仕上げ上端**の絶対 Z（mm。Python 版は床下端）
 	//   bound      ← 'bound'     … 床仕上げ上端の高さ基準（FL レベル＋段差 offset。
 	//                              Python 版は床下端を横架材天端レベルへバインド）
@@ -137,6 +140,7 @@ namespace HomeskzIfcImport::core
 		std::string layer;
 		std::string drawClass;
 		std::vector<Vec2> boundary;
+		std::string styleName;
 		std::vector<SlabComponentCommand> components;
 		double elevation = 0.0;
 		StoryBoundCommand bound;

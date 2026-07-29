@@ -30,6 +30,8 @@
 #include "core/Document.h"
 #include "parse/Step.h"
 
+#include <cstddef>
+#include <string>
 #include <vector>
 
 namespace HomeskzIfcImport::parse
@@ -44,6 +46,12 @@ namespace HomeskzIfcImport::parse
 	// スラブ構成層の名前。上から 床仕上げ → 床下地。
 	inline constexpr const char* kFloorFinishName = "床仕上げ";
 	inline constexpr const char* kSubfloorName = "床下地";
+
+	// 床のスラブスタイル名を返す。**階により構成（床仕上げ厚）が異なることが多いため、
+	// スタイルは階ごとに 1 つ**作る。一般階は "{階}F-床スタイル"（"1F-床スタイル" …）、
+	// 最上階は "屋根-床スタイル"（屋根の床＝小屋裏収納・ロフトの床）。index は 0 始まりの
+	// 階インデックス（collectStories の並び）で、isTop は最上階か。
+	std::string floorSlabStyleName(std::size_t index, bool isTop);
 
 	// STEP Model から床板の描画命令を組み立てる（Python 版 build_floor_commands 相当）。
 	//
