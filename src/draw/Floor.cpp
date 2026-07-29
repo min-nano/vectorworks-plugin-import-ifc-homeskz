@@ -100,37 +100,57 @@ namespace HomeskzIfcImport::draw
 		//     （層が 1 枚も無いスラブ／スタイルは作れない）。
 		//   * 削除に失敗したら（想定外の API 挙動）そこで打ち切り、元の層が残ったままでも
 		//     床自体は残す（1 枚の失敗で全体を止めない）。
+		//
+		// ★コンポーネントの索引は **0 始まり**（実機で確認: 索引 1 に挿入すると既定層の
+		// 後ろへ入り、索引 = 層数 で削除すると範囲外で失敗した）。GetNumberOfComponents が
+		// 返すのは「個数」なので、有効な索引は 0 … 個数−1。
 		void SetComponents(MCObjectHandle object,
 						   const std::vector<core::SlabComponentCommand>& components)
 		{
 			const short original = CountComponents(object);
 			const auto wanted = static_cast<short>(components.size());
 
-			// 1. 命令の層を先頭から順に挿入する（index の層の「手前」に入るので、
-			//    1,2,… の順に入れると命令どおりの並びが先頭にできる）。fill / ペン太さ /
+			// 1. 命令の層を先頭から順に挿入する（索引 i の層の「手前」に入るので、
+			//    0,1,… の順に入れると命令どおりの並びが先頭にできる）。fill / ペン太さ /
 			//    線種は文書の既定に任せ（0）、描画属性はクラスに従わせる。
-			for (short index = 1; index <= wanted; ++index)
+			for (short index = 0; index < wanted; ++index)
 			{
 				const core::SlabComponentCommand& component =
-					components[static_cast<std::size_t>(index - 1)];
+					components[static_cast<std::size_t>(index)];
 				gSDK->InsertNewComponentN(object, index, component.thickness, 0, 0, 0, 0, 0);
 				gSDK->SetComponentWidth(object, index, component.thickness);
 				gSDK->SetComponentName(object, index, TXString(component.name.c_str()));
 			}
 
-			// 2. 挿入した層の直後に並んでいる元の層を、前から順に削除する。
+			// 2. 挿入した層の直後に並んでいる元の層を、前から順に削除する（索引 wanted は
+			//    常に「元の層の先頭」を指すので、同じ索引を元の層数だけ削除すればよい）。
 			for (short removed = 0; removed < original; ++removed)
 			{
-				if (!gSDK->DeleteComponent(object, static_cast<short>(wanted + 1)))
+				if (!gSDK->DeleteComponent(object, wanted))
 					break;
 			}
+		}
+
+		// スラブ（またはスラブスタイル）の高さ基準面を設定する。基準面は「どの構成要素か」
+		// ＋「その上端か下端か」で決まる（スラブスタイル設定ダイアログの「基準面」）。
+		//   Top    … 最上層（床仕上げ）の**上端**＝スラブ天端
+		//   Bottom … 最下層（床下地）の**下端**＝スラブ底面
+		// 索引は 0 始まり（SetComponents の★参照）。
+		void SetDatum(MCObjectHandle object, core::SlabDatum datum, short componentCount)
+		{
+			if (componentCount <= 0)
+				return;
+			const bool bottom = (datum == core::SlabDatum::Bottom);
+			const short component = bottom ? static_cast<short>(componentCount - 1) : 0;
+			gSDK->SetDatumSlabComponent(object, component);
 		}
 
 		// 階ごとのスラブスタイル（"1F-床スタイル" 等）を用意して索引を返す。既にあれば
 		// それを使い、無ければ作る。構成層は毎回命令どおりに更新する（再インポートで階の
 		// 構成が変わっても追従する）。用意できなければ 0（＝スタイル無し）を返す。
 		InternalIndex ResolveSlabStyle(const std::string& styleName,
-									   const std::vector<core::SlabComponentCommand>& components)
+									   const std::vector<core::SlabComponentCommand>& components,
+									   core::SlabDatum datum)
 		{
 			if (styleName.empty())
 				return 0;
@@ -143,6 +163,8 @@ namespace HomeskzIfcImport::draw
 				return 0;
 
 			SetComponents(style, components);
+			// 基準面（構成要素とその上端／下端）はスタイルが持つので、スタイル側へ設定する。
+			SetDatum(style, datum, static_cast<short>(components.size()));
 			return gSDK->GetObjectInternalIndex(style);
 		}
 
@@ -182,7 +204,8 @@ namespace HomeskzIfcImport::draw
 			// 構成は階ごとのスラブスタイルで与える（階により構成が異なることが多いため、
 			// スタイルは階ごとに 1 つ）。スタイルを用意できない場合だけ、スタイルを外して
 			// スラブ本体のコンポーネントを直接組む（構成の欠落で床を失わないための保険）。
-			const InternalIndex style = ResolveSlabStyle(floor.styleName, floor.components);
+			const InternalIndex style =
+				ResolveSlabStyle(floor.styleName, floor.components, floor.datum);
 			if (style != 0)
 			{
 				gSDK->SetSlabStyle(slab, style);
@@ -191,19 +214,7 @@ namespace HomeskzIfcImport::draw
 			{
 				gSDK->ConvertToUnstyledSlab(slab);
 				SetComponents(slab, floor.components);
-			}
-
-			// 高さの基準面（データム）を命令に合わせる。スラブの高さはこの面を指す。
-			//   Top    … 床仕上げ＝最上層（コンポーネント 1）を基準にする＝スラブ天端
-			//   Bottom … 床下地＝最下層（コンポーネント N）を基準にする＝スラブ底面
-			// SetDatumSlabComponent はスラブの高さがどのコンポーネントを指すかを決める。
-			// 実際にどの面（層の上端／下端）を指すかは VW 上で目視確認する（ROADMAP.md M5）。
-			const auto componentCount = static_cast<short>(floor.components.size());
-			if (componentCount > 0)
-			{
-				const short datumComponent =
-					(floor.datum == core::SlabDatum::Bottom) ? componentCount : 1;
-				gSDK->SetDatumSlabComponent(slab, datumComponent);
+				SetDatum(slab, floor.datum, static_cast<short>(floor.components.size()));
 			}
 
 			// SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する（Python 版 #70 と
