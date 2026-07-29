@@ -150,6 +150,21 @@ TEST(ignores_slabs_with_other_names)
 	CHECK(buildFloorCommands(model).empty());
 }
 
+TEST(skips_floor_slab_without_solid)
+{
+	// 形状表現を持たない（押し出しを解決できない）床版はスキップする。1 枚の欠損で
+	// 全体を止めない（CLAUDE.md「エラーハンドリング」）。
+	Model const model =
+		loadIfcFromText("#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
+						"#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
+						"#3=IFCLOCALPLACEMENT($,#2);\n"
+						"#10=IFCBUILDINGSTOREY('s1',$,'1FL',$,$,#3,$,$,.ELEMENT.,0.);\n"
+						"#11=IFCBUILDINGSTOREY('s2',$,'2FL',$,$,#3,$,$,.ELEMENT.,3000.);\n"
+						"#40=IFCSLAB('slab',$,'床版',$,$,#3,$,$,$);\n"
+						"#50=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#40),#10);\n");
+	CHECK(buildFloorCommands(model).empty());
+}
+
 TEST(returns_empty_without_stories)
 {
 	// ストーリが無ければ床板も置けない（空を返し、例外を投げない）。

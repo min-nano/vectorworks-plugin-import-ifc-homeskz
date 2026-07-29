@@ -391,6 +391,14 @@ TEST(decodes_utf16_escape_mixed_with_ascii)
 	CHECK_EQ(decodeStepString("\\X2\\5E8A\\X0\\\\X2\\7248\\X0\\"), std::string("床版"));
 }
 
+TEST(decodes_ascii_and_lowercase_hex_in_utf16_escape)
+{
+	// エスケープ区間に ASCII 範囲のコード単位が入ることもある（1 バイトで出力する）。
+	CHECK_EQ(decodeStepString("\\X2\\00410042\\X0\\"), std::string("AB"));
+	// 16 進は小文字でも読む（出力側の実装差を吸収する）。
+	CHECK_EQ(decodeStepString("\\X2\\5e8a7248\\X0\\"), std::string("床版"));
+}
+
 TEST(decodes_surrogate_pair)
 {
 	// U+20BB7（サロゲートペア D842 DFB7）。UTF-8 は 4 バイト。

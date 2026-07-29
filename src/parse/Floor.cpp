@@ -76,9 +76,11 @@ namespace HomeskzIfcImport::parse
 				if (!resolveElementWorldSolid(model, element, solid))
 					continue; // 押し出しを解決できない床版はスキップ
 
+				// 外形は必ず 3 点以上になる（resolveExtrudedAreaSolid が成功した時点で
+				// プロファイルは非空、かつ resolveProfile は矩形＝4 点・任意断面＝3 点以上しか
+				// 返さない。水平押し出しの掃引矩形も 4 点）。validateDocument の 3 点以上の
+				// 関門と整合する。
 				std::vector<Vec2> boundary = footprint(solid);
-				if (boundary.size() < 3)
-					continue; // 面にならない外形はスキップ（validateDocument も弾く）
 				for (Vec2& p : boundary)
 				{
 					p.x -= center.x;

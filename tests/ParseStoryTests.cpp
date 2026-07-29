@@ -145,6 +145,39 @@ TEST(get_local_placement_z_false_when_coords_2d)
 }
 
 // ---------------------------------------------------------------------------
+// collectStoryElements: 階に属する要素の列挙
+// ---------------------------------------------------------------------------
+
+TEST(collect_story_elements_lists_contained_elements)
+{
+	// IfcRelContainedInSpatialStructure の RelatedElements を、rel の #id 昇順・
+	// 記述順で返す（列挙順に依存しない決定的な並び）。
+	Model const model =
+		loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,-48.));\n"
+						"#11=IFCAXIS2PLACEMENT3D(#10,$,$);\n"
+						"#12=IFCLOCALPLACEMENT($,#11);\n"
+						"#13=IFCCOLUMN('c',$,$,$,$,#12,$,$);\n"
+						"#14=IFCSLAB('s',$,$,$,$,#12,$,$);\n"
+						"#20=IFCBUILDINGSTOREY('s',$,'1FL',$,$,$,$,$,.ELEMENT.,473.);\n"
+						"#30=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#13,#14),#20);\n");
+	const std::vector<int> elements = HomeskzIfcImport::parse::collectStoryElements(model, 20);
+	CHECK_EQ(elements.size(), static_cast<std::size_t>(2));
+	if (elements.size() == 2)
+	{
+		CHECK_EQ(elements[0], 13);
+		CHECK_EQ(elements[1], 14);
+	}
+}
+
+TEST(collect_story_elements_empty_when_storey_unreferenced)
+{
+	// 誰からも参照されていない階（要素を 1 つも持たない階）は空を返す。
+	Model const model =
+		loadIfcFromText("#20=IFCBUILDINGSTOREY('s',$,'1FL',$,$,$,$,$,.ELEMENT.,473.);\n");
+	CHECK(HomeskzIfcImport::parse::collectStoryElements(model, 20).empty());
+}
+
+// ---------------------------------------------------------------------------
 // resolveBeamTopOffset: 横架材天端オフセット
 // ---------------------------------------------------------------------------
 

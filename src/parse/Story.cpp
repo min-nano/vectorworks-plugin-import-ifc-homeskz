@@ -120,6 +120,10 @@ namespace HomeskzIfcImport::parse
 	{
 		// storey を RelatingStructure に持つ IfcRelContainedInSpatialStructure を、逆参照
 		// （referrers）から辿る（Python 版は storey.ContainsElements。同じ逆関係）。
+		// 誰からも参照されていない階（要素を 1 つも持たない階）は即座に空を返す。
+		if (model.referrers(storeyId).empty())
+			return {};
+
 		std::vector<int> elements;
 		for (const int relId : model.referrers(storeyId))
 		{

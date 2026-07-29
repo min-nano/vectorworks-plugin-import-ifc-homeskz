@@ -168,6 +168,30 @@ jobs:
           test -x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR"
           echo "SDK looks good."
 
+      # TEMPORARY (M5 床板): print the ISDK declarations needed to create a Floor
+      # object and bind its height, so draw/Floor.cpp can be written against the
+      # real API. The SDK is not downloadable outside CI, so this is the only way
+      # to read its headers. REMOVE THIS STEP once draw/Floor.cpp compiles.
+      - name: TEMP — probe SDK API surface
+        run: |
+          set -uo pipefail
+          inc="$VW_SDK_DIR/SDKLib/Include"
+          isdk="$inc/Interfaces/VectorWorks/ISDK.h"
+          echo "=== ISDK: Floor / Slab / Roof ==="
+          grep -n "Floor\|Slab\|Roof" "$isdk" || true
+          echo "=== ISDK: ByClass ==="
+          grep -n "ByClass" "$isdk" || true
+          echo "=== ISDK: story bound / object variable ==="
+          grep -n "StoryBound\|SStoryObjectData\|TObjectBoundID" "$isdk" || true
+          echo "=== SStoryObjectData / TObjectBoundID definitions ==="
+          grep -rn "SStoryObjectData\|TObjectBoundID" -A 25 \
+            "$inc/Interfaces/VectorWorks/VectorWorksTypes.h" 2>/dev/null | head -80 || true
+          grep -rln "struct SStoryObjectData" "$inc" || true
+          echo "=== ISDK: 3D move / offset ==="
+          grep -n "Move3D\|MoveObject\|Offset3D\|TranslateObject" "$isdk" || true
+          echo "=== VWFC object wrappers ==="
+          ls "$inc/VWFC/VWObjects" || true
+
       - name: Install ccache
         run: brew install ccache
 
