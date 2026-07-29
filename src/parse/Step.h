@@ -134,4 +134,17 @@ namespace HomeskzIfcImport::parse
 	// STEP テキスト全体を解析して Model を返す。DATA セクションのインスタンス
 	// （#id=TYPE(...);）を拾う。ヘッダや解釈できない断片は読み飛ばす（寛容）。
 	Model parseStep(const std::string& text);
+
+	// STEP 文字列（'' のエスケープを解いた生の中身）の ISO 10303-21 拡張文字
+	// エスケープを UTF-8 へデコードする。パーサが文字列値を読むたびに通すので
+	// Value::text は常に UTF-8 になる。ホームズ君 IFC の日本語（"床版" 等の Name）は
+	// \X2\5E8A\X0\ 形式（UTF-16 コード単位列）で出力されるため、これを解かないと
+	// 名前による要素判別が一切通らない（ifcopenshell と同じ扱いに揃える）。
+	//   \X2\<hex…>\X0\ … UTF-16 コード単位列（サロゲートペア対応）
+	//   \X\HH           … 1 バイト（ISO 8859-1 のコードポイント）
+	//   \S\c            … c のコードポイント + 128
+	//   \P?\            … コードページ指示（読み飛ばす）
+	// 壊れたエスケープや上記以外のバックスラッシュはそのまま残す（1 文字列の異常で
+	// 内容全体を失わない。CLAUDE.md「エラーハンドリング」）。
+	std::string decodeStepString(const std::string& raw);
 } // namespace HomeskzIfcImport::parse

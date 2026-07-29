@@ -147,6 +147,17 @@ target_compile_definitions(ParseStoryTests
 vw_add_test(ParseStructuralClassTests ParseStructuralClassTests.cpp)
 target_link_libraries(ParseStructuralClassTests PRIVATE HomeskzIfcCore)
 
+# Floor (床板) parsing (src/parse/Floor): IfcSlab "床版" -> per-storey FL-layer floor
+# commands with a fixed 24mm thickness, the footprint centred on the grid centre, the
+# floor's bottom Z taken straight from the IFC (so skip-floor steps survive) and the
+# height bound to the 横架材天端 level with that difference as its offset. Exercised on
+# synthetic STEP snippets and the checked-in fixtures; SDK-free. HOMESKZ_FIXTURES_DIR
+# points the file-based cases at tests/fixtures/.
+vw_add_test(ParseFloorTests ParseFloorTests.cpp)
+target_link_libraries(ParseFloorTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseFloorTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
 # types and formats them into the dialog text the import command shows. SDK-free —
 # the counting + formatting is tested here; only the file picker and the alert

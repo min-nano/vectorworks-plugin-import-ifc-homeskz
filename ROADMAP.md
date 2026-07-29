@@ -24,8 +24,8 @@ Python プラグイン（`vectorworks-plugin-script-import-ifc-homeskz`）を C+
 
 進捗記号: ⬜ 未着手 / 🟨 進行中（コード実装済み・ローカル目視確認待ち） / ✅ 完了
 
-現状 M0〜M4 は**すべて ✅ 完了**（コードはマージ済み・ローカル目視確認も済み）。次は
-**形状先行**の方針で M5 床板・M6 屋根面へ進む。
+現状 M0〜M4 は**すべて ✅ 完了**（コードはマージ済み・ローカル目視確認も済み）。
+**M5 床板は実装済み（🟨 ローカル目視確認待ち）**。次は M6 屋根面へ進む。
 
 ## 実装順序の方針（形状先行）
 
@@ -68,7 +68,7 @@ Python 版の後処理（`correct_noboribari`）を、C++ では**屋根面を�
 | M2 幾何の土台 | ✅ 完了 | 配置行列・押し出し・断面（`Mat4` 含む）。`core/Geometry`＋`parse/IfcGeometry` 実装・**マージ済み（PR #13）**・無 SDK テスト green。描画なし＝テストのみで完了。|
 | M3 ストーリ | ✅ 完了 | 階・レベル・レイヤ（基本レベルのみ）。`parse/Story`＋`core`＋`draw/Story` 実装・**マージ済み（PR #14）**・無 SDK テスト green・**ローカル目視確認も済み**。屋根組・登り梁・span 柱レベルは後続 M で追加。|
 | M4 構造クラス判定 | ✅ 完了 | `parse/StructuralClass`＋`ParseStructuralClassTests`（Python 版 test 移植）実装・**マージ済み（PR #16）**・無 SDK テスト green。基礎クラス（立上り／底盤）は M9 基礎で定義する。|
-| **M5 床板（形状先行）** | ⬜ 未着手 | 建物形状①。各階 `n-FL` に床ツールで床を描き段差を表現。位置の一次情報。|
+| **M5 床板（形状先行）** | 🟨 進行中 | 建物形状①。各階 `n-FL` に床ツールで床を描き段差を表現。位置の一次情報。parse/draw/テスト実装済み・無 SDK テスト green（Python 版の期待値と一致）。**ローカル目視確認待ち**。|
 | **M6 屋根面・屋根組（形状先行）** | ⬜ 未着手 | 建物形状②。屋根版から垂木・野地板を導出し屋根面を確定。以降の登り梁スナップの基準。|
 | **M7 横架材（支持部材）** | ⬜ 未着手 | 土台・梁・桁＋母屋・棟木・登り梁。M5/M6 の床・屋根面へ合わせて補正（登り梁の屋根スナップ）。|
 | **M8 柱（支持部材）** | ⬜ 未着手 | 管柱・通し柱・小屋束。span レイヤ分割（上階梁下端＝M7 参照）。|
@@ -83,8 +83,9 @@ Python 版の後処理（`correct_noboribari`）を、C++ では**屋根面を�
 ターゲット分割（無 SDK `HomeskzIfcCore`＋SDK 依存 `draw/`）、最小 STEP リーダ・ローダ、
 IFC インポートコマンドの器（ファイル選択→summarize→件数ダイアログ）、**M1 通り芯・
 M2 幾何土台・M3 ストーリ・M4 構造クラス判定を実装しマージ**、CI の SDK ビルド高速化（PR #15）。
-M0〜M4 は**ローカル目視確認も完了**し、全て ✅。次は**形状先行**の方針で
-M5 床板・M6 屋根面へ進む。
+M0〜M4 は**ローカル目視確認も完了**し、全て ✅。続けて**形状先行**の M5 床板を実装した
+（床版の抽出・24mm 固定厚・IFC の床位置尊重＝スキップフロアの段差・横架材天端バインド、
+併せて STEP の日本語文字エスケープのデコード）。ローカル目視確認を経て M6 屋根面へ進む。
 
 ---
 
@@ -226,23 +227,44 @@ grids は配置行列・断面・ストーリを必要としない（`IfcGridAxi
 
 ---
 
-## M5 — 床板（形状先行①） ⬜
+## M5 — 床板（形状先行①） 🟨
 
 **目的:** **建物形状を先に据える第一歩。** 各階 `n-FL` に床ツールで床を描き、段差
 （スキップフロア）を表現。床の位置は IFC の一次情報で、以降の高さ基準の目安になる。
-床レイヤを最背面へ回す並べ替え（M3 で枠を用意済み）を効かせる。
 **Python: `ifc/floor.py` / `vw/floor.py`。**
 
-- ⬜ `parse/Floor`: `床版`(`IfcSlab`) → `FloorCommand`（厚み 24mm 固定、床下端絶対 Z、
+- ✅ `parse/Floor`: `床版`(`IfcSlab`) → `FloorCommand`（厚み 24mm 固定、床下端絶対 Z、
   横架材天端バインド＋段差 offset）。平面外形・最下端 Z の抽出は M2 の `WorldSolid` を再利用。
-- ⬜ `core/Document`: `FloorCommand` ＋ `StoryBoundCommand`。`validateDocument` に床の検証。
-- ⬜ `draw/Floor`: `BeginFloor`→外形ポリゴン→`EndGroup`→`Move3D`（床下端の絶対 Z）→
-  `SetObjectStoryBound`（`横架材天端` レベルへ段差 offset でバインド）。
-- ⬜ `draw/Story` の並べ替えで床レイヤ（`n-FL`）を最背面へ（枠は M3 で用意済み）。
-- ⬜ テスト: `ParseFloorTests`（`test_ifc_floor.py`）。
+  最上階（屋根）は FL レイヤを持たないため対象外。座標は通り芯と同じグリッド中心オフセット。
+- ✅ `parse/IfcGeometry` 拡張: 要素の形状表現から押し出しを取り出す `firstExtrudedSolid` /
+  `resolveElementWorldSolid`、平面外形 `footprint`（鉛直押し出し＝プロファイル、水平押し出し＝
+  掃引矩形）、Z 範囲 `zTopAndThickness`（Python 版 `ifc/footing.py` の低レベルヘルパー相当。
+  M9 基礎でもそのまま使う）。`parse/Grid` にセンタリング中心を返す `resolveGridCenter`、
+  `parse/Story` に階の収容要素を返す `collectStoryElements` を追加。
+- ✅ `parse/Step` 拡張: **ISO 10303-21 の拡張文字エスケープ（`\X2\…\X0\` / `\X\HH` /
+  `\S\c` / `\P?\`）を UTF-8 へデコード**。ホームズ君 IFC の日本語 `Name`（`床版` 等）は
+  UTF-16 エスケープで出力されるため、これが無いと名前による要素判別が一切通らない
+  （ifcopenshell が内部で行っているのと同じ扱い。M7 以降の `木梁:…` 等の判定にも必須）。
+- ✅ `core/Document`: `FloorCommand` ＋ `StoryBoundCommand`。`validateDocument` に床の検証。
+- ✅ `draw/Floor`: `BeginFloor`→外形ポリゴン→`EndGroup`→`Move3D`（床下端の絶対 Z）→
+  クラス・by-class 属性→`SetObjectStoryBound`（`横架材天端` レベルへ段差 offset でバインド）。
+  配置先 `n-FL` レイヤが無い命令はスキップ（レイヤは story 命令が作る）。床を作れない場合は
+  外形ポリゴンへフォールバック。
+- ✅ テスト: `ParseFloorTests`（`test_ifc_floor.py` の全ケースを移植: 枚数・レイヤ振り分け・
+  厚み 24 固定・クラス・`elevation = 横架材天端 + offset` の不変条件・スキップフロアの段差
+  −832mm・横架材天端より上の床・センタリング済み外形・決定性。合成モデルでの抽出条件も追加）。
+  `StepTests` に文字エスケープのデコード、`CoreDocumentTests` に床の検証ケースを追加。
+- ⬜ **ローカル目視確認（ユーザー）**。下記チェックリスト。
 
-**ローカル確認:** 各階に床が描かれ、段差床の高さが IFC どおりずれ、床が（この時点では
-まだ柱梁は無いが）背面に回る。スキップフロアの段差が offset で表れる。
+**床レイヤの最背面化について:** M3 で判明したとおり VW 2026 ISDK にはデザインレイヤの
+重ね順を変える呼び出しが無く、目的（伏図で床が柱・梁を覆わない）は per-viewport の
+`SetViewportLayerStackingOverride` で満たすため **M13 に委ねる**。希望順の計算
+（床＝背面）は `core::desiredStoryLayerOrder` に用意済み。
+
+**ローカル確認:** 各階の `n-FL` レイヤに床が描かれる。床下端が IFC の床位置（横架材天端
+＋高低差）に一致し、厚み 24mm が上方向に伸びる。スキップフロアの段差が高さの差として
+表れる（`スキップフロア_サンプル` の 2FL は通常床と 832mm 下がった床が混在）。床を選択して
+OIP の高さ基準が `横架材天端` レベル＋offset になっており、編集しても高さがずれない。
 
 ---
 

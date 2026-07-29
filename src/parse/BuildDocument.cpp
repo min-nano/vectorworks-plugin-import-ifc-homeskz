@@ -12,6 +12,7 @@
 //
 
 #include "parse/BuildDocument.h"
+#include "parse/Floor.h"
 #include "parse/Grid.h"
 #include "parse/Loader.h"
 #include "parse/Story.h"
@@ -32,8 +33,12 @@ namespace HomeskzIfcImport::parse
 		document.stories = buildStoryCommands(model);
 
 		// M1 通り芯: IfcGridAxis を解析して GridCommand を積む（parse/Grid）。
-		// 以降のマイルストーンで Member … の解析を同様に足していく（ROADMAP.md）。
 		document.grids = buildGridCommands(model);
+
+		// M5 床板: 床版（IfcSlab "床版"）を解析して FloorCommand を積む（parse/Floor）。
+		// 床は建物形状の一次情報で、以降の横架材・柱はこの位置に合わせる（形状先行）。
+		// 以降のマイルストーンで Rafter / Member … の解析を同様に足していく（ROADMAP.md）。
+		document.floors = buildFloorCommands(model);
 
 		return document;
 	}

@@ -136,6 +136,68 @@ TEST(validate_rejects_story_level_with_empty_layer)
 	CHECK(!core::validateDocument(document));
 }
 
+namespace
+{
+	// 検証を通る最小の床命令（レイヤ・クラス・3 点以上の外形・高さ基準）。
+	core::FloorCommand validFloor()
+	{
+		core::FloorCommand floor;
+		floor.layer = "1-FL";
+		floor.drawClass = "04構造-02木造-06耐力面材-02床";
+		floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, core::Vec2{1000.0, 2000.0},
+						  core::Vec2{0.0, 2000.0}};
+		floor.thickness = 24.0;
+		floor.elevation = -120.0;
+		floor.bound = core::StoryBoundCommand{0, "横架材天端", 0.0};
+		return floor;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_floor)
+{
+	core::Document document;
+	document.floors.push_back(validFloor());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_empty_layer)
+{
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.layer = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_empty_class)
+{
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.drawClass = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_too_few_boundary_points)
+{
+	// 3 点未満は面にならない（Python 版 _validate_floor と同じ関門）。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}};
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_with_empty_bound_level)
+{
+	// レベル種別が空だと SetObjectStoryBound がバインド先を決められない。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.bound.level = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
 // ---------------------------------------------------------------------------
 // parse::buildDocument（骨組み: いまは空の Document を返すだけ）
 // ---------------------------------------------------------------------------

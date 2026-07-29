@@ -191,20 +191,22 @@ void CImportIfcMenu_EventSink::DoInterface()
 	const core::Document document = parse::buildDocument(ifcPath);
 	const std::size_t storyCount = document.stories.size();
 	const std::size_t gridCount = document.grids.size();
+	const std::size_t floorCount = document.floors.size();
 
-	// 3. Phase 2（SDK 依存）: 命令セットを検証してからストーリ・通り芯を描く。検証を
+	// 3. Phase 2（SDK 依存）: 命令セットを検証してからストーリ・通り芯・床を描く。検証を
 	//    通らない・描く要素が無い場合は executeDocument が false / 無描画で返る。
 	const bool drawn = draw::executeDocument(document);
 
-	// 4. 結果をダイアログ表示。本文に検出したストーリ数・通り芯の本数、advice 行に
-	//    ファイルパス。false = 最小アラートでなくモーダルにして本文と advice を両方
-	//    見せる（Updater と同じ作法）。TXString は UTF-8 の const char* から暗黙変換される。
+	// 4. 結果をダイアログ表示。本文に検出したストーリ数・通り芯の本数・床の枚数、
+	//    advice 行にファイルパス。false = 最小アラートでなくモーダルにして本文と advice を
+	//    両方見せる（Updater と同じ作法）。TXString は UTF-8 の const char* から暗黙変換される。
 	std::string body;
-	if (!drawn || (storyCount == 0 && gridCount == 0))
-		body = "ストーリ・通り芯が見つかりませんでした。";
+	if (!drawn || (storyCount == 0 && gridCount == 0 && floorCount == 0))
+		body = "ストーリ・通り芯・床が見つかりませんでした。";
 	else
-		body = "ストーリ " + std::to_string(storyCount) + " 層と通り芯 " +
-			   std::to_string(gridCount) + " 本を描きました。";
+		body = "ストーリ " + std::to_string(storyCount) + " 層・通り芯 " +
+			   std::to_string(gridCount) + " 本・床 " + std::to_string(floorCount) +
+			   " 枚を描きました。";
 	gSDK->AlertInform(body.c_str(), ifcPath.c_str(),
 					  false /* not a minor alert: show a modal dialog */);
 }

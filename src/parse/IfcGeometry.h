@@ -141,4 +141,28 @@ namespace HomeskzIfcImport::parse
 	// 「第 1 オペランドを辿る」に対応）。boolean でない要素はそれ自身を返す。参照が
 	// 解決できない・深さ上限に達したときは nullptr。
 	const Entity* resolveBaseSolid(const Model& model, const Entity* item);
+
+	// 要素（IfcProduct）の形状表現から最初の IfcExtrudedAreaSolid を返す（Python 版
+	// footing._first_extruded_solid 相当）。Representation → Representations →
+	// Items を順に辿り、各アイテムは resolveBaseSolid で差演算を剥がしてから押し出し
+	// かどうかを見る。見つからなければ nullptr（1 要素の欠損で全体を止めない）。
+	const Entity* firstExtrudedSolid(const Model& model, const Entity* element);
+
+	// 要素の押し出しソリッドをワールド座標へ変換する（Python 版 footing._world_solid
+	// 相当）。firstExtrudedSolid ＋ resolveObjectPlacement ＋ resolveExtrudedAreaSolid の
+	// 組み合わせで、要素配置とアイテム配置（solid.Position）を合成した結果を返す。
+	// 押し出しが無い・解決できないときは false。
+	bool resolveElementWorldSolid(const Model& model, const Entity* element, WorldSolid& out);
+
+	// ソリッドのワールド最上端 Z と Z 方向の厚みを返す（Python 版 footing の
+	// _z_top_and_thickness 相当）。底面ループと天面ループの Z の最大／最大−最小。
+	// 床板は「最下端 Z = top − thickness」を床下端（絶対 Z）として使う。
+	void zTopAndThickness(const WorldSolid& solid, double& outTop, double& outThickness);
+
+	// ソリッドの平面外形（XY 頂点列）を返す（Python 版 footing._footprint 相当）。
+	//   * 鉛直押し出し（床版・底盤）: プロファイルがそのまま平面外形（底面ループの XY）。
+	//   * 水平押し出し（立上り・地中梁）: プロファイルは鉛直面内にあるため、断面の水平
+	//     方向の幅（プロファイル第 1 座標 u の範囲）を押し出し方向へ掃引した矩形を返す。
+	// 鉛直とみなす押し出し Z 成分の閾値は Python 版 _VERTICAL_EXTRUDE_TOL（0.9）と同値。
+	std::vector<Vec2> footprint(const WorldSolid& solid);
 } // namespace HomeskzIfcImport::parse

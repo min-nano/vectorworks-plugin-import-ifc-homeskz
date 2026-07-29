@@ -369,4 +369,54 @@ TEST(skips_header_statement_with_escaped_quote)
 	CHECK(model.entity(1) != nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// ISO 10303-21 拡張文字エスケープのデコード（\X2\…\X0\ / \X\HH / \S\c / \P?\）
+// ---------------------------------------------------------------------------
+
+TEST(decodes_utf16_escape_in_string)
+{
+	// ホームズ君 IFC の日本語 Name は \X2\<UTF-16>\X0\ で出力される（"床版"）。
+	Model const model = parseStep("#1=IFCSLAB('id',$,'\\X2\\5E8A7248\\X0\\',$);\n");
+	const Entity* slab = model.entity(1);
+	CHECK(slab != nullptr);
+	if (slab != nullptr)
+		CHECK_EQ(slab->attribute(2).text, std::string("床版"));
+}
+
+TEST(decodes_utf16_escape_mixed_with_ascii)
+{
+	// エスケープ区間の前後に ASCII が混じる形（"木梁:1"。ホームズ君の横架材名の形）。
+	CHECK_EQ(decodeStepString("\\X2\\67286881\\X0\\:1"), std::string("木梁:1"));
+	// 連続する 2 区間。
+	CHECK_EQ(decodeStepString("\\X2\\5E8A\\X0\\\\X2\\7248\\X0\\"), std::string("床版"));
+}
+
+TEST(decodes_surrogate_pair)
+{
+	// U+20BB7（サロゲートペア D842 DFB7）。UTF-8 は 4 バイト。
+	const std::string decoded = decodeStepString("\\X2\\D842DFB7\\X0\\");
+	CHECK_EQ(decoded.size(), static_cast<std::size_t>(4));
+	CHECK_EQ(decoded, std::string("\xF0\xA0\xAE\xB7"));
+}
+
+TEST(decodes_single_byte_and_shifted_escapes)
+{
+	// \X\HH は 1 バイト（ここでは U+00C4）、\S\c は c のコードポイント + 128。
+	CHECK_EQ(decodeStepString("\\X\\C4"), std::string("\xC3\x84"));
+	CHECK_EQ(decodeStepString("\\S\\D"), std::string("\xC3\x84"));
+	// \P?\（コードページ指示）は読み飛ばす。
+	CHECK_EQ(decodeStepString("\\PA\\ab"), std::string("ab"));
+}
+
+TEST(leaves_plain_and_broken_escapes_alone)
+{
+	// エスケープを含まない文字列はそのまま。
+	CHECK_EQ(decodeStepString("X1"), std::string("X1"));
+	// 壊れた（16 進でない・閉じられない）エスケープでも文字列全体を失わない。16 進として
+	// 読めなくなった時点で打ち切り、残りはそのまま文字として通す（内容を捨てない）。
+	CHECK_EQ(decodeStepString("a\\X2\\ZZZZ\\X0\\b"), std::string("aZZZZ\\X0\\b"));
+	CHECK_EQ(decodeStepString("a\\X2\\"), std::string("a"));
+	CHECK_EQ(decodeStepString("a\\qb"), std::string("a\\qb"));
+}
+
 TEST_MAIN();

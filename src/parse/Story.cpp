@@ -116,13 +116,11 @@ namespace HomeskzIfcImport::parse
 		return true;
 	}
 
-	double resolveBeamTopOffset(const Model& model, int storeyId)
+	std::vector<int> collectStoryElements(const Model& model, int storeyId)
 	{
 		// storey を RelatingStructure に持つ IfcRelContainedInSpatialStructure を、逆参照
-		// （referrers）から辿る（Python 版は storey.ContainsElements。同じ逆関係）。その
-		// RelatedElements の IfcColumn / IfcSlab のローカル Z 負値の最大を採る。
-		double best = 0.0;
-		bool found = false;
+		// （referrers）から辿る（Python 版は storey.ContainsElements。同じ逆関係）。
+		std::vector<int> elements;
 		for (const int relId : model.referrers(storeyId))
 		{
 			const Entity* rel = model.entity(relId);
@@ -138,18 +136,32 @@ namespace HomeskzIfcImport::parse
 				continue;
 			for (const Value& ref : related.items)
 			{
-				const Entity* element = model.resolve(ref);
-				if (element == nullptr)
-					continue;
-				if (element->type != "IFCCOLUMN" && element->type != "IFCSLAB")
-					continue;
-				double z = 0.0;
-				if (getLocalPlacementZ(model, *element, z) && z < 0.0)
-				{
-					if (!found || z > best)
-						best = z;
-					found = true;
-				}
+				if (model.resolve(ref) != nullptr)
+					elements.push_back(ref.reference);
+			}
+		}
+		return elements;
+	}
+
+	double resolveBeamTopOffset(const Model& model, int storeyId)
+	{
+		// 階に属する IfcColumn / IfcSlab のローカル Z 負値の最大を採る（最初に見つかった
+		// 値ではなく最大値なので、列挙順に依存しない決定的な結果になる）。
+		double best = 0.0;
+		bool found = false;
+		for (const int elementId : collectStoryElements(model, storeyId))
+		{
+			const Entity* element = model.entity(elementId);
+			if (element == nullptr)
+				continue;
+			if (element->type != "IFCCOLUMN" && element->type != "IFCSLAB")
+				continue;
+			double z = 0.0;
+			if (getLocalPlacementZ(model, *element, z) && z < 0.0)
+			{
+				if (!found || z > best)
+					best = z;
+				found = true;
 			}
 		}
 		return best; // 候補が無ければ 0.0

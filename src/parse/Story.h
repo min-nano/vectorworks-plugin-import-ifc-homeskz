@@ -41,6 +41,12 @@ namespace HomeskzIfcImport::parse
 	// 同じく、階高は描画フェーズのストーリで反映するため親配置を合成しない）。
 	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ);
 
+	// 階（#storeyId）に属する要素の #id を返す（Python 版 storey.ContainsElements →
+	// RelatedElements に相当）。IfcRelContainedInSpatialStructure を逆参照から辿り、
+	// RelatingStructure が当該階のものだけを採る。並びは rel の #id 昇順・rel 内は
+	// RelatedElements の記述順で、エンティティ列挙順に依存しない決定的な結果になる。
+	std::vector<int> collectStoryElements(const Model& model, int storeyId);
+
 	// 階（#storeyId）に属する IfcColumn / IfcSlab から横架材天端の相対オフセット
 	// （FL からの負値）を求める（Python 版 resolve_beam_top_offset 相当）。ローカル
 	// 配置 Z が負の要素のうち最大値（床に最も近接した負のオフセット）を返す。最初に

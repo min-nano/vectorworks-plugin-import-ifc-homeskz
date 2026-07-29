@@ -83,13 +83,53 @@ namespace HomeskzIfcImport::core
 		std::vector<LevelCommand> levels;
 	};
 
+	// 高さ基準（ストーリレベルへのバインド）1 端分。Python 版 document.py の
+	// StoryBoundCommand（dict）に対応する。床・構造材・柱・壁・スラブが共通で使う。
+	//
+	// Python 版キーとの対応:
+	//   storyOffset ← 'story_offset' … 配置先レイヤのストーリからの相対階数（0=自階・1=上階）
+	//   level       ← 'level'        … そのストーリのレベル種別名（"横架材天端" / "軒高"）
+	//   offset      ← 'offset'       … レベルからの距離（mm。負値=下）
+	// SetObjectStoryBound（VS: SetObjectStoryBound）へそのまま渡す 3 つ組。
+	struct StoryBoundCommand
+	{
+		int storyOffset = 0;
+		std::string level;
+		double offset = 0.0;
+	};
+
+	// 床板（IfcSlab "床版"）を床ツール（Floor オブジェクト）で描く命令。Python 版
+	// document.py の FloorCommand（dict）に対応する。draw/Floor がこれを床オブジェクトへ
+	// 変換する（ROADMAP.md M5）。
+	//
+	// Python 版キーとの対応:
+	//   layer     ← 'layer'     … 配置先デザインレイヤ名（"1-FL" 等。既存のみ・無ければスキップ）
+	//   drawClass ← 'class'     … クラス名（床板。予約語 class を機械置換）
+	//   boundary  ← 'boundary'  … 床の平面外形（mm・グリッド中心オフセット済み。閉じた
+	//                             ポリゴンの頂点列で、末尾に始点を重複させない）
+	//   thickness ← 'thickness' … 床厚（mm。要件により 24 固定。IFC の押し出し厚は使わない）
+	//   elevation ← 'elevation' … 床下端の絶対 Z（mm）。IFC の床位置（床版ソリッドの最下端）
+	//                             をそのまま尊重するので、段差＝スキップフロアがここに表れる
+	//   bound     ← 'bound'     … 高さ基準。標準の床高＝配置先ストーリの「横架材天端」レベルに
+	//                             バインドし、offset に床下端と横架材天端の差分を入れる
+	struct FloorCommand
+	{
+		std::string layer;
+		std::string drawClass;
+		std::vector<Vec2> boundary;
+		double thickness = 0.0;
+		double elevation = 0.0;
+		StoryBoundCommand bound;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
 	// TODO: 要素ごとに命令リストを追加していく（フィールド名は Python 版のキーに対応）。
-	//   * M5 members   : std::vector<MemberCommand>
-	//   * M6 columns   : std::vector<ColumnCommand>
-	//   * M7 walls / slabs …
+	//   * M6 rafters / roofs : std::vector<RafterCommand> / <RoofCommand>
+	//   * M7 members         : std::vector<MemberCommand>
+	//   * M8 columns         : std::vector<ColumnCommand>
+	//   * M9 walls / slabs …
 	//   スキーマを変えるときは構造体・validateDocument・テスト・JSON ダンプを同時更新する。
 	struct Document
 	{
@@ -103,6 +143,11 @@ namespace HomeskzIfcImport::core
 		// M1 通り芯。IfcGridAxis を解析して得た GridCommand の列（入力順に依存しない
 		// 決定的な並び。parse/Grid が #id 昇順で組み立てる）。
 		std::vector<GridCommand> grids;
+
+		// M5 床板。床版（IfcSlab "床版"）を解析して得た FloorCommand の列（階＝Elevation
+		// 昇順・階内は #id 昇順で決定的。parse/Floor が組み立てる）。配置先の FL レイヤは
+		// stories が作るので、描画は stories の後に処理する。
+		std::vector<FloorCommand> floors;
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は
@@ -120,7 +165,7 @@ namespace HomeskzIfcImport::core
 	// 独立レイヤ。M12 以降で渡す）→ **最上階→最下階**の順に各ストーリのレイヤ（stories は
 	// Elevation 昇順＝最下階→最上階なので逆順に辿る）。各ストーリ内は levels の並び順。
 	// ただし床（FL）・野地板レベルのレイヤは全ストーリ分をまとめてスタック最下段（背面）へ
-	// 回す（伏図ビューポートで柱・梁を覆い隠さないため。M9 床板で効いてくる。まずは枠）。
+	// 回す（伏図ビューポートで柱・梁を覆い隠さないため。M5 床板で効いてくる。まずは枠）。
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
 													const std::vector<std::string>& topLayers = {});
 } // namespace HomeskzIfcImport::core

@@ -37,4 +37,10 @@ namespace HomeskzIfcImport::parse
 	// 重複除去も最初に現れた 1 本を残す）。1 本の欠損（曲線未解決・点数不足）で全体を
 	// 止めず、その軸だけスキップする（Python 版の寛容さ。CLAUDE.md「エラーハンドリング」）。
 	std::vector<core::GridCommand> buildGridCommands(const Model& model);
+
+	// 通り芯の bbox 中心（＝全要素に共通のセンタリングオフセット）を返す。Python 版
+	// resolve_lines が返す (center_x, center_y) に相当し、床・基礎・部材はいずれもこの
+	// オフセットで平面座標を補正する（要素ごとに別の中心を使うと図面がずれる）。通り芯を
+	// 1 本も取れなかったときは false（out は変更しない）＝補正しない。
+	bool resolveGridCenter(const Model& model, core::Vec2& out);
 } // namespace HomeskzIfcImport::parse
