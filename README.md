@@ -342,7 +342,8 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 - SDK は一度だけダウンロードし、（トリミングした）SDK を**キャッシュ**するので、大きな
   zip は以降の実行で再ダウンロードされません。強制的に再ダウンロードするにはワーク
   フロー内の `VW_SDK_CACHE_KEY`（各ジョブに 1 つ）を変更します。
-- 各ジョブが `HomeskzIfcImport` と `HomeskzIfcImportDev` の**両方**をビルドし、コミットで刻印
+- 各ジョブは**その実行が公開するチャンネルだけ**をビルドします（`-DVW_BUILD_CHANNEL`。
+  `main` は `HomeskzIfcImport`、PR は `HomeskzIfcImportDev`）。コミットで刻印
   （`-DVW_BUILD_VERSION`）して成果物を確認・アップロードします（macOS はさらにアドホック
   署名）。PR ではエフェメラルなマージコミットではなく、PR の **head** コミット（あなたが
   push したもの）をビルドします。
@@ -375,6 +376,20 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 場合 — つまり stable の公開を取りこぼした場合 — `main` で `build.yml` を再ディスパッチ
 して再ビルド・再公開します。スケジュール／`delete` 系のワークフローと同様に
 デフォルトブランチから実行されるため、`main` にマージされて初めて有効になります。
+
+#### 手動ディスパッチ（`workflow_dispatch`）を持つワークフロー
+
+「Run workflow」ボタンは**必要なものにだけ**付けています。PR とマージで自動的に走る
+チェック系（`lint.yml` / `test.yml` / `codeql.yml`）は手動起動する用途が無く、失敗した
+実行を回し直したいだけなら Actions 画面の **Re-run** で足りるためディスパッチを持ちません。
+
+| ワークフロー | 手動ディスパッチ | 理由 |
+| --- | :---: | --- |
+| `build.yml` | あり | `stable-release-healthcheck.yml` が stable の取りこぼしを検知して再ディスパッチする（リリース経路） |
+| `stable-release-healthcheck.yml` | あり | 6 時間の次回スケジュールを待たずに stable のずれを直したいとき |
+| `ci-debug.yml` | あり（専用） | 手動ディスパッチ**のみ**で起動する調査用ワークフロー |
+| `lint.yml` / `test.yml` / `codeql.yml` | なし | push / PR（+ CodeQL は週次スケジュール）で自動的に走る |
+| `cleanup-dev-release.yml` | なし | `delete` イベント専用 |
 
 ### CI デバッグ（`ci-debug.yml`）
 

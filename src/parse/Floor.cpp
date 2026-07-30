@@ -50,13 +50,14 @@ namespace HomeskzIfcImport::parse
 
 	bool storyHasFloorSlab(const Model& model, int storeyId)
 	{
-		for (const int elementId : collectStoryElements(model, storeyId))
-		{
-			const Entity* element = model.entity(elementId);
-			if (element != nullptr && isFloorSlab(*element))
-				return true;
-		}
-		return false;
+		// 戻り値を一度束縛してから走査する（一時オブジェクトを直接 ranges へ渡さない）。
+		const std::vector<int> elementIds = collectStoryElements(model, storeyId);
+		return std::ranges::any_of(elementIds,
+								   [&model](int elementId)
+								   {
+									   const Entity* element = model.entity(elementId);
+									   return element != nullptr && isFloorSlab(*element);
+								   });
 	}
 
 	std::string floorSlabStyleName(std::size_t index, bool isTop)

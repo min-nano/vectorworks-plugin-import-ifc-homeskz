@@ -51,7 +51,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:
 
 # One lint run per ref; a new push cancels an in-flight run for that ref.
 concurrency:
@@ -126,21 +125,20 @@ jobs:
       # are covered via HeaderFilterRegex in .clang-tidy; WarningsAsErrors in the
       # config makes any finding fail CI. draw/ needs the SDK, so it is tidied in
       # the SDK build (build.yml), not here.
+      #
+      # The file list is DERIVED, not hand-maintained: core/ and parse/ are
+      # SDK-free by definition (see CLAUDE.md「依存の向きは厳守する」), so every
+      # .cpp under them must be tidied. A hardcoded list silently skipped a newly
+      # added module once (src/parse/Floor.cpp), so glob instead — a new parse
+      # module is linted the moment it lands.
       - name: Run clang-tidy
         run: |
           set -euo pipefail
-          "clang-tidy-${CLANG_VERSION}" -p build --warnings-as-errors='*' \
-            src/UpdaterFlow.cpp \
-            src/core/Document.cpp \
-            src/core/Geometry.cpp \
-            src/parse/BuildDocument.cpp \
-            src/parse/Step.cpp \
-            src/parse/Loader.cpp \
-            src/parse/Summary.cpp \
-            src/parse/Grid.cpp \
-            src/parse/Story.cpp \
-            src/parse/StructuralClass.cpp \
-            src/parse/IfcGeometry.cpp
+          mapfile -t files < <(find src/core src/parse -name '*.cpp' | sort)
+          files+=(src/UpdaterFlow.cpp)
+          echo "Tidying ${#files[@]} SDK-free translation units:"
+          printf '  %s\n' "${files[@]}"
+          "clang-tidy-${CLANG_VERSION}" -p build --warnings-as-errors='*' "${files[@]}"
 
   # Layout + static checks for the CMake build files. cmake-format enforces the
   # house style in .cmake-format.yaml (tabs, 100 columns, comments left alone);
