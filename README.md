@@ -496,9 +496,11 @@ C/C++ を対象とするジョブ:
   タブ＋スペース整列で管理するため、この検査ではあえて無効化しています。
 
 **SDK 依存コードの静的解析（`build.yml`）** — 同じ `.clang-tidy` ルールを、SDK が
-ないとコンパイルできないプラグイン本体（`ModuleMain.cpp` / `Extensions/ExtMenu.cpp`
-/ `Updater.cpp`）にも適用します。ビルドジョブは SDK を用意するので、**ビルド直前**に
-clang-tidy を走らせて全ソースを網羅します。
+ないとコンパイルできない側（`src/draw/*.cpp` と `ModuleMain.cpp` /
+`Extensions/ExtMenu.cpp` / `Updater.cpp`）にも適用します。ビルドジョブは SDK を
+用意するので、**ビルド直前**に clang-tidy を走らせて全ソースを網羅します。
+`src/draw/` はグロブで拾うため、要素を追加しても対象漏れが起きません
+（`core/` `parse/` を `lint.yml` がグロブで拾うのと同じ理屈）。
 
 - **macOS ジョブ** — `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` で生成した compile
   database に対して clang-tidy を実行し、`#if GS_MAC` 側の分岐を解析します。
@@ -509,6 +511,13 @@ clang-tidy を走らせて全ソースを網羅します。
 
 macOS が `GS_MAC`、Windows が `GS_WIN` の分岐をそれぞれ担当するので、両者を合わせて
 **すべての行**が clang-tidy でチェックされます。
+
+解析用の compile database は、**その実行がビルドするチャンネル 1 つ**に絞って生成します
+（`-DVW_BUILD_CHANNEL`。PR は `dev`、`main` は `stable`）。既定の `both` のままだと
+1 ソースにつき database のエントリが 2 つでき、clang-tidy が同じファイルを 2 回解析して
+所要時間が倍になっていました（Windows で約 9 分）。チャンネル間の差は `VW_DEV_BUILD`
+の定義だけ（`ModuleMain.cpp` / `Extensions/ExtMenu.cpp` の 3 分岐）で、PR が dev 側、
+`main` が stable 側を解析するので、パイプライン全体では両方が解析されます。
 
 バージョンについて: SDK 非依存の `lint.yml` と macOS ジョブは clang 18 に固定して
 います。Windows ジョブだけは**最新の LLVM**を使います — ランナーの MSVC 標準ライブラリ
