@@ -41,7 +41,6 @@ on:
   # the cron rush.
   schedule:
     - cron: "23 7 * * 0"
-  workflow_dispatch:
 
 # One analysis per ref; a new push cancels an in-flight run for that ref. Do
 # NOT cancel scheduled runs — each weekly scan should complete.

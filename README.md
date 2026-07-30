@@ -342,7 +342,8 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 - SDK は一度だけダウンロードし、（トリミングした）SDK を**キャッシュ**するので、大きな
   zip は以降の実行で再ダウンロードされません。強制的に再ダウンロードするにはワーク
   フロー内の `VW_SDK_CACHE_KEY`（各ジョブに 1 つ）を変更します。
-- 各ジョブが `HomeskzIfcImport` と `HomeskzIfcImportDev` の**両方**をビルドし、コミットで刻印
+- 各ジョブは**その実行が公開するチャンネルだけ**をビルドします（`-DVW_BUILD_CHANNEL`。
+  `main` は `HomeskzIfcImport`、PR は `HomeskzIfcImportDev`）。コミットで刻印
   （`-DVW_BUILD_VERSION`）して成果物を確認・アップロードします（macOS はさらにアドホック
   署名）。PR ではエフェメラルなマージコミットではなく、PR の **head** コミット（あなたが
   push したもの）をビルドします。
@@ -375,6 +376,20 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 場合 — つまり stable の公開を取りこぼした場合 — `main` で `build.yml` を再ディスパッチ
 して再ビルド・再公開します。スケジュール／`delete` 系のワークフローと同様に
 デフォルトブランチから実行されるため、`main` にマージされて初めて有効になります。
+
+#### 手動ディスパッチ（`workflow_dispatch`）を持つワークフロー
+
+「Run workflow」ボタンは**必要なものにだけ**付けています。PR とマージで自動的に走る
+チェック系（`lint.yml` / `test.yml` / `codeql.yml`）は手動起動する用途が無く、失敗した
+実行を回し直したいだけなら Actions 画面の **Re-run** で足りるためディスパッチを持ちません。
+
+| ワークフロー | 手動ディスパッチ | 理由 |
+| --- | :---: | --- |
+| `build.yml` | あり | `stable-release-healthcheck.yml` が stable の取りこぼしを検知して再ディスパッチする（リリース経路） |
+| `stable-release-healthcheck.yml` | あり | 6 時間の次回スケジュールを待たずに stable のずれを直したいとき |
+| `ci-debug.yml` | あり（専用） | 手動ディスパッチ**のみ**で起動する調査用ワークフロー |
+| `lint.yml` / `test.yml` / `codeql.yml` | なし | push / PR（+ CodeQL は週次スケジュール）で自動的に走る |
+| `cleanup-dev-release.yml` | なし | `delete` イベント専用 |
 
 ### CI デバッグ（`ci-debug.yml`）
 
@@ -481,9 +496,11 @@ C/C++ を対象とするジョブ:
   タブ＋スペース整列で管理するため、この検査ではあえて無効化しています。
 
 **SDK 依存コードの静的解析（`build.yml`）** — 同じ `.clang-tidy` ルールを、SDK が
-ないとコンパイルできないプラグイン本体（`ModuleMain.cpp` / `Extensions/ExtMenu.cpp`
-/ `Updater.cpp`）にも適用します。ビルドジョブは SDK を用意するので、**ビルド直前**に
-clang-tidy を走らせて全ソースを網羅します。
+ないとコンパイルできない側（`src/draw/*.cpp` と `ModuleMain.cpp` /
+`Extensions/ExtMenu.cpp` / `Updater.cpp`）にも適用します。ビルドジョブは SDK を
+用意するので、**ビルド直前**に clang-tidy を走らせて全ソースを網羅します。
+`src/draw/` はグロブで拾うため、要素を追加しても対象漏れが起きません
+（`core/` `parse/` を `lint.yml` がグロブで拾うのと同じ理屈）。
 
 - **macOS ジョブ** — `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` で生成した compile
   database に対して clang-tidy を実行し、`#if GS_MAC` 側の分岐を解析します。
@@ -494,6 +511,13 @@ clang-tidy を走らせて全ソースを網羅します。
 
 macOS が `GS_MAC`、Windows が `GS_WIN` の分岐をそれぞれ担当するので、両者を合わせて
 **すべての行**が clang-tidy でチェックされます。
+
+解析用の compile database は、**その実行がビルドするチャンネル 1 つ**に絞って生成します
+（`-DVW_BUILD_CHANNEL`。PR は `dev`、`main` は `stable`）。既定の `both` のままだと
+1 ソースにつき database のエントリが 2 つでき、clang-tidy が同じファイルを 2 回解析して
+所要時間が倍になっていました（Windows で約 9 分）。チャンネル間の差は `VW_DEV_BUILD`
+の定義だけ（`ModuleMain.cpp` / `Extensions/ExtMenu.cpp` の 3 分岐）で、PR が dev 側、
+`main` が stable 側を解析するので、パイプライン全体では両方が解析されます。
 
 バージョンについて: SDK 非依存の `lint.yml` と macOS ジョブは clang 18 に固定して
 います。Windows ジョブだけは**最新の LLVM**を使います — ランナーの MSVC 標準ライブラリ
