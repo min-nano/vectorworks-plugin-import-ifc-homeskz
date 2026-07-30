@@ -164,24 +164,49 @@ wait_run() {
 	done
 }
 
-# fetch_payload <run-id>: ジョブログを取り、ペイロードマーカー間だけを出す。
-# ログ URL は署名付きストレージへ 302 で飛ぶ。そこへ Authorization ヘッダを付けて
-# 送ると弾かれるので、リダイレクト先は素の curl で取り直す。
+# fetch_payload <run-id>: ペイロードを取り出す。経路は 2 つあり、順に試す。
+#
+#   1. チェックラン注釈（api.github.com のみ）… ci-debug-job.sh が ::notice:: で
+#      ペイロードを注釈としても出しているので、ここから読めればログを触らずに済む。
+#      ログのノイズが混ざらず、下記 2 が使えない環境でも動く。
+#   2. ジョブログ … 従来の経路。ただしログ API は署名付きの Azure Blob Storage へ
+#      302 で飛ぶため、そのホストを egress ポリシーで拒否している環境（Claude Code の
+#      リモートセッション等）では取得できない。その場合は理由と代替手段を示す。
 fetch_payload() {
-	local id="$1" job url tmp
-	job="$(api "$VW_API/actions/runs/$id/jobs" | jq -r '.jobs[0].id // empty')"
+	local id="$1" jobs job check url tmp ann
+	jobs="$(api "$VW_API/actions/runs/$id/jobs")"
+	job="$(printf '%s' "$jobs" | jq -r '.jobs[0].id // empty')"
 	[ -n "$job" ] || {
 		echo "ci-debug: ジョブが見つかりませんでした（run=$id）" >&2
 		return 1
 	}
+	check="$(printf '%s' "$jobs" | jq -r '.jobs[0].check_run_url // empty')"
+
+	if [ -n "$check" ]; then
+		ann="$(api "$check/annotations" |
+			jq -r 'map(select(.title == "ci-debug payload")) | .[0].message // empty')"
+		if [ -n "$ann" ]; then
+			printf '%s\n' "$ann"
+			return 0
+		fi
+	fi
 
 	tmp="$(mktemp)"
 	url="$(api -o /dev/null -w '%{redirect_url}' "$VW_API/actions/jobs/$job/logs")"
 	if [ -n "$url" ]; then
-		curl -sS "$url" >"$tmp"
+		if ! curl -sS "$url" >"$tmp" 2>"$tmp.err"; then
+			echo "(ペイロード注釈が無く、ジョブログも取得できませんでした)"
+			echo "  理由: $(tr -d '\n' <"$tmp.err")"
+			echo "  ログ API は署名付きストレージへリダイレクトします。そのホストが"
+			echo "  egress ポリシーで拒否されている環境では、GitHub MCP の get_job_logs"
+			echo "  （job_id=$job, return_content=true）で取得してください。"
+			rm -f "$tmp" "$tmp.err"
+			return 1
+		fi
 	else
 		api "$VW_API/actions/jobs/$job/logs" >"$tmp"
 	fi
+	rm -f "$tmp.err"
 
 	# GitHub のログは各行に ISO タイムスタンプが前置される。読みづらいので落とす。
 	sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z //' "$tmp" >"$tmp.clean"

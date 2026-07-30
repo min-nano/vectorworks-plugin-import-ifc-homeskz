@@ -267,6 +267,30 @@ emit_payload() {
 	} >"$PAYLOAD"
 
 	cat "$PAYLOAD"
+	emit_annotation
+}
+
+# emit_annotation: ペイロードを **チェックラン注釈** としても出す。
+#
+# なぜ二重に出すか: 呼び出し側がペイロードを取る経路は本来ジョブログだが、ログ API は
+# 署名付きの Azure Blob Storage へ 302 で飛ぶ。組織の egress ポリシーがそのホストを
+# 拒否している環境（Claude Code のリモートセッションなど）では、コンテナからログ本文を
+# 取得できない。一方、注釈は
+#
+#   GET /repos/{owner}/{repo}/check-runs/{check_run_id}/annotations
+#
+# つまり api.github.com だけで読めるうえ、ログのノイズ（セットアップ手順・アーティファクト
+# アップロード・ポストジョブ後始末）が混ざらない。ワークフローコマンドの仕様で改行は
+# %0A へエスケープする必要がある（% と CR も同様）。
+#
+# 注釈のメッセージ長には上限があるため、ここでは先頭 ANNOTATION_MAX_LINES 行に絞る。
+# 全文は従来どおりログとアーティファクトに残るので、情報が失われるわけではない。
+emit_annotation() {
+	local max="${ANNOTATION_MAX_LINES:-120}" body
+	body="$(head -n "$max" "$PAYLOAD" |
+		sed -e 's/%/%25/g' -e 's/\r/%0D/g' |
+		awk '{printf "%s%%0A", $0}')"
+	echo "::notice title=ci-debug payload::${body}"
 }
 
 # ---------------------------------------------------------------------------
