@@ -147,8 +147,9 @@ namespace HomeskzIfcImport::draw
 			// clang-tidy の readability-suspicious-call-argument が
 			// 「引数が入れ替わっているのでは」と誤検知する。
 			const bool datumIsTop = (datum == core::SlabDatum::Top);
-			// 三項演算子の共通型は int になるので、short への縮小は 1 か所でまとめて行う。
-			const short componentIndex = static_cast<short>(datumIsTop ? 0 : componentCount - 1);
+			// 三項演算子の共通型は int になるので、short への縮小は 1 か所でまとめて行う
+			// （型はキャスト側に書いてあるので auto。modernize-use-auto）。
+			const auto componentIndex = static_cast<short>(datumIsTop ? 0 : componentCount - 1);
 			gSDK->SetDatumSlabComponent(object, componentIndex);
 			// 構成要素を指すだけでは既定の面（中心／下端）のままなので、面も明示する。
 			gSDK->SetComponentDatumIsTopOfComponent(object, componentIndex, datumIsTop);
