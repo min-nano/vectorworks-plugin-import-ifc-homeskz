@@ -334,8 +334,9 @@ SDK 非依存コード（`core/` `parse/` とテスト）専用。SDK が要ら�
 ===== END PAYLOAD (exit=N lines_total=N truncated=yes|no) =====
 ```
 
-`... (annotation truncated: showing N of M lines …)` が出ていたら、それは**注釈経路の
-上限**で切られたということ（下記）。全文はジョブログとアーティファクトにある。
+`... (annotation truncated by GitHub's 4096-char limit …)` が出ていたら、それは**注釈経路の
+上限**で切られたということ（下記）。この行は必ず END マーカーの直前に入るので、END の
+`lines_total` を見れば本当の行数が分かる。全文はジョブログとアーティファクトにある。
 
 失敗して調査コマンドに到達しなかった場合はマーカーが無く、代わりに理由が出る。
 全文ログは run のアーティファクト（`ci-debug-<label>`）に残るが、**AI はアーティファクトを
