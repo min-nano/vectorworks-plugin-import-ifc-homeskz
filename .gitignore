@@ -6,6 +6,8 @@
 /build-tidy/
 /dist/
 build*/
+# ci-debug（scripts/ci-debug-job.sh）の生出力
+/debug-out/
 *.vwlibrary
 *.vlb
 

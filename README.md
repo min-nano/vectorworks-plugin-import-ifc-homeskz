@@ -35,6 +35,9 @@ scripts/
   vw-update.ps1             同上の Windows 版（PowerShell。.vlb の隣に同梱される）
   lint.sh                   ローカルで全 lint（clang / cmake / yaml / shell …）
                             を実行する（CI と同じチェック。--fix で自動修正）
+  ci-debug.sh               CI デバッグ実行を起動し、完了まで待って結果を取り出す
+                            （SDK が手元に無い環境から SDK 依存の調査を行うため）
+  ci-debug-job.sh           同・ランナー側の本体。調査モードの実装はこちらにある
 .clang-format               C/C++ フォーマット規則（タブ・Allman ブレース等）
 .clang-tidy                 C/C++ 静的解析チェックの設定（WarningsAsErrors）
 .cmake-format.yaml          CMake の整形（cmake-format）＋ lint（cmake-lint）設定
@@ -44,6 +47,8 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 .editorconfig-checker.json  上記を CI で強制する editorconfig-checker の設定
 .github/workflows/build.yml CI: macOS（Apple Silicon）と Windows でビルドする
 .github/workflows/lint.yml  CI: ソース／非ソースを問わずコーディング規則を強制
+.github/workflows/ci-debug.yml  CI: 手動ディスパッチ専用のデバッグ実行（SDK 調査・
+                            ビルド再現）。push / PR では起動しない
 ```
 
 同じソースから、1 つのスイッチ（`VW_DEV_BUILD`、`src/BuildConfig.h` を参照）で
@@ -370,6 +375,45 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 場合 — つまり stable の公開を取りこぼした場合 — `main` で `build.yml` を再ディスパッチ
 して再ビルド・再公開します。スケジュール／`delete` 系のワークフローと同様に
 デフォルトブランチから実行されるため、`main` にマージされて初めて有効になります。
+
+### CI デバッグ（`ci-debug.yml`）
+
+`.github/workflows/ci-debug.yml` は、**手動ディスパッチ専用**の「CI 上で 1 コマンドだけ
+動かす」ワークフローです。SDK が手元に無い環境（クラウド上の開発セッションや、SDK を
+インストールしていないマシン）から、**SDK 依存のビルドエラーの再現**や
+**「この API は SDK にあるか」という調査**を行うためのものです。
+
+`push` / `pull_request` では**決して起動せず**、リリースも公開しません（`contents: write`
+を持たない）。SDK キャッシュは `build.yml` と同じキーで **読み取り専用**に復元するので、
+デバッグ実行が本番ビルドのキャッシュを汚すこともありません。
+
+起動から結果取得までは `scripts/ci-debug.sh` が一手に引き受けます。
+
+```bash
+# SDK ヘッダを検索する（この API は SDK にあるか？）
+scripts/ci-debug.sh run --mode sdk-grep --args 'GetLayerByName'
+
+# ヘッダの全文を読む
+scripts/ci-debug.sh run --mode sdk-ls --args 'Interfaces/VectorWorks/ISDK.h'
+
+# ビルドエラーを再現する（--args で単一ターゲットに絞れる）
+scripts/ci-debug.sh run --mode build --platform windows
+
+# 1 ファイルだけコンパイルする（数十秒）
+scripts/ci-debug.sh run --mode compile-one --args src/parse/Grid.cpp
+
+# 逃げ道: 任意の bash
+scripts/ci-debug.sh run --mode shell --script 'cmake --version; ls "$VW_SDK_DIR/SDKLib"'
+```
+
+ディスパッチ → 実行中の run の特定 → **完了まで待機** → ジョブログから結果ブロックだけを
+抽出、までを 1 コマンドで行い、完了と同時に終了します（`GITHUB_TOKEN` / `GH_TOKEN` が
+必要）。GitHub の Actions 画面を見に行かなくても、結果が標準出力に出ます。
+
+実際の調査コマンドはワークフロー本体ではなく **`scripts/ci-debug-job.sh`**（ランナー側）に
+まとまっています。モードを増やしたいときはこちらを編集すれば、作業ブランチに push する
+だけで試せます（`workflow_dispatch` はデフォルトブランチにあるワークフロー定義しか
+起動できないため、ワークフロー本体を変えた場合だけ `main` へのマージが必要です）。
 
 ## コーディング規則の強制（Lint）
 
