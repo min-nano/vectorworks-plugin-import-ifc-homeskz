@@ -9,8 +9,9 @@
 //	ツールチェインだけでコンパイル・単体実行・テストできる（CLAUDE.md「Phase 1」）。
 //	この宣言も core/Document.h しか依存しない。
 //
-//	いまはフォルダ骨組みとして関数シグネチャだけを置く。STEP リーダ（parse/Step）・
-//	サニタイズ（parse/Loader）・要素ごとの解析は対応マイルストーンで実装する。
+//	現状は parse/Loader で IFC を読み（テキスト→STEP グラフ）、parse/Story（M3）・
+//	parse/Grid（M1）・parse/Floor（M5）を呼んで Document を組み立てる。残りの要素は
+//	対応マイルストーンで足していく。
 //
 
 #pragma once
@@ -25,7 +26,7 @@ namespace HomeskzIfcImport::parse
 	// フェーズ外へ漏らさない）。1 要素の欠損で全体を止めず、Python 版の寛容さ
 	// （スキップ・フォールバック）を踏襲する。
 	//
-	// TODO(M0/M1〜): parse/Loader でサニタイズ込みの読み込み、parse/Step で STEP
-	// グラフ構築、要素ごとの parse モジュールで Document を肉付けする（ROADMAP.md）。
+	// TODO(M6〜): 屋根面・屋根組（M6）以降の要素ごとの parse モジュールを呼び、Document を
+	// さらに肉付けする（ROADMAP.md）。
 	core::Document buildDocument(const std::string& ifcPath);
 } // namespace HomeskzIfcImport::parse

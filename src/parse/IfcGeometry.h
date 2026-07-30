@@ -70,11 +70,11 @@ namespace HomeskzIfcImport::parse
 	// ObjectPlacement は IfcProduct の属性 5（GlobalId, OwnerHistory, Name, Description,
 	// ObjectType, ObjectPlacement, Representation, …）。解決できない・型不一致なら単位行列。
 	//
-	// ［M5/M6 への注意］最終的な要素高さ（elevation）は「ストーリ高さ ＋ ローカル配置 Z」で
+	// ［M7/M8 への注意］最終的な要素高さ（elevation）は「ストーリ高さ ＋ ローカル配置 Z」で
 	// 決まる（Python 版 column.py 等）。本行列の Z はローカル配置 Z のみを表すので、階の高さは
 	// 各要素の描画側で別途足す。また Python 版 _get_placement_3d は Location が 2 座標のとき Z を
 	// 「未設定（レイヤ基準高さへフォールバック）」として扱い、梁軸方向に Axis を使う。これらの
-	// 要素固有の解釈は M5/M6 の要素解析で行い、本関数は純粋な配置行列だけを返す。
+	// 要素固有の解釈は M7 横架材・M8 柱の要素解析で行い、本関数は純粋な配置行列だけを返す。
 	Mat4 resolveObjectPlacement(const Model& model, const Entity* element);
 
 	// 断面プロファイル（2D、プロファイル定義のローカル座標系）。outer は閉じた外形の
@@ -103,8 +103,9 @@ namespace HomeskzIfcImport::parse
 	// （extrudeDir = Python の extrude）・押し出し長（depth）・プロファイル 2D 頂点
 	// （profile = Python の pts）・矩形寸法（rectangle/xDim/yDim = Python の dims）を保持する。
 	// ワールド底面点はプロファイル頂点 (u,v) を origin + xAxis·u + yAxis·v で写して得る
-	// （base() が返す。M7 の _footprint / _z_top_and_thickness、M5 の _sloped_member_geometry を
-	// この情報から直接移植できるよう、2D プロファイルと基底を分けて残す）。
+	// （base() が返す。M9 基礎の _footprint / _z_top_and_thickness、M6/M7 の傾斜部材
+	// （_sloped_member_geometry）をこの情報から直接移植できるよう、2D プロファイルと基底を
+	// 分けて残す）。
 	struct WorldSolid
 	{
 		Vec3 origin;	 // 配置原点（ワールド）

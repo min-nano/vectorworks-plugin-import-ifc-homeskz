@@ -20,7 +20,7 @@
 //	その per-viewport API を使う方が Python 版のグローバル並べ替えより適切に扱える
 //	（CLAUDE.md「C++ SDK でより良く実装できたもの」）。M3 では希望スタック順の**計算**だけを
 //	SDK 非依存の core::desiredStoryLayerOrder に用意し（無 SDK テスト済み）、実際の適用は
-//	M13 へ委ねる（デザインレイヤ自体はレベル高さ順に生成される）。
+//	M13 へ委ねる（デザインレイヤ自体は命令の levels の並び順に生成される）。
 //
 
 #pragma once
@@ -31,8 +31,9 @@
 
 namespace HomeskzIfcImport::draw
 {
-	// Document 内の全ストーリを描く。各 StoryCommand ごとに CreateStory →
+	// Document 内の全ストーリを描く。まず命令に登場するレベル種別を登場順に登録し、各
+	// StoryCommand ごとに CreateStory（同名のストーリが既にあればそれを再利用）→
 	// SetStoryElevation → 各レベルをレベルテンプレートで生成（レイヤも同時に作成し
-	// 意図した名前へリネーム）する。実際に作成できたストーリ数を返す。
+	// 意図した名前へリネーム）する。実際に用意できたストーリ数を返す。
 	std::size_t drawStories(const core::Document& document);
 } // namespace HomeskzIfcImport::draw

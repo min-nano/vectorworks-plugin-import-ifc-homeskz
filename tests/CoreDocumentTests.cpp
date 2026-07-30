@@ -1,13 +1,14 @@
 //
 //	CoreDocumentTests.cpp
 //
-//	SDK 非依存の骨組み（core/ + parse/）が、無 SDK のテストハーネスから実際に
-//	リンク・実行できることを確かめるスモークテスト。フォルダ骨組みと CMake の
-//	ターゲット分割（SDK 非依存ライブラリ HomeskzIfcCore）が正しく通ることを担保する。
+//	命令セット（core/Document）の検証規則 validateDocument の単体テスト。併せて、
+//	SDK 非依存のライブラリ（core/ + parse/）が無 SDK のテストハーネスから実際に
+//	リンク・実行できること——CMake のターゲット分割（HomeskzIfcCore）が正しく通ること
+//	——もここで担保する（buildDocument / Vec* のスモークテスト）。
 //
 //	この翻訳単位は VectorWorks SDK を一切 include せず、core/Document.h・
-//	core/Geometry.h・parse/BuildDocument.h だけに依存する。要素の移植が進むにつれ、
-//	各 parse モジュールの本格的なテスト（ParseGridTests 等）を隣に足していく。
+//	core/Geometry.h・parse/BuildDocument.h だけに依存する。要素ごとの解析そのものは
+//	隣の parse モジュールのテスト（ParseGridTests 等）で検証する。
 //
 
 #include "TestFramework.h"
@@ -268,18 +269,20 @@ TEST(validate_rejects_floor_with_zero_total_thickness)
 }
 
 // ---------------------------------------------------------------------------
-// parse::buildDocument（骨組み: いまは空の Document を返すだけ）
+// parse::buildDocument（読み込めないパスでは空の Document が返る）
 // ---------------------------------------------------------------------------
 
 TEST(build_document_skeleton_returns_valid_empty_document)
 {
+	// 存在しないファイルでも例外を漏らさず、空だが妥当な Document を返す
+	// （実 IFC を読んだときの中身は各 parse モジュールのテストで検証する）。
 	core::Document const document = parse::buildDocument("dummy.ifc");
 	CHECK_EQ(document.version, core::kDocumentVersion);
 	CHECK(core::validateDocument(document));
 }
 
 // ---------------------------------------------------------------------------
-// core::Geometry（骨組みの最小型が使えることの確認）
+// core::Geometry（型が使えることの確認。数式そのものは GeometryTests で検証する）
 // ---------------------------------------------------------------------------
 
 TEST(geometry_vectors_default_to_origin)

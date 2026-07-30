@@ -69,8 +69,9 @@ namespace HomeskzIfcImport::parse
 
 	// STEP Model から床板の描画命令を組み立てる（Python 版 build_floor_commands 相当）。
 	//
-	// FL ストーリ（parse/Story の collectStories）を Elevation 昇順に走査し、最上階を除く
-	// 各階について、その階に属する床版（Name=="床版" の IfcSlab）を FloorCommand にする。
+	// FL ストーリ（parse/Story の collectStories）を Elevation 昇順に走査し、各階について
+	// その階に属する床版（Name=="床版" の IfcSlab）を FloorCommand にする（最上階も対象で、
+	// その床はロフト＝小屋裏収納の床として "R-FL" へ・基準面は軒高になる。上記要件参照）。
 	// 平面外形は通り芯と同じグリッド中心オフセット（parse/Grid の resolveGridCenter）で
 	// 補正する。押し出しソリッドを解決できない床版はスキップする（1 枚の欠損で全体を
 	// 止めない。CLAUDE.md「エラーハンドリング」）。

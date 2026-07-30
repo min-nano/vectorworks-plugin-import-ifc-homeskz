@@ -236,8 +236,8 @@ if(VW_BUILD_PLUGIN)
 	# --- Build stamp -------------------------------------------------------------
 	# Short identifier of this exact build (git commit in CI, "local" otherwise).
 	# Stamped into each build (mac: Info.plist, win: a "<name>.commit" sidecar) and
-	# shown in the menu command's alert so an installed build can be identified and
-	# compared by the updater scripts.
+	# compiled in, so an installed build can be identified and compared by the
+	# updater scripts and named in the dev build picker.
 	if(NOT DEFINED VW_BUILD_VERSION)
 		set(VW_BUILD_VERSION
 			"local"
@@ -246,7 +246,7 @@ if(VW_BUILD_PLUGIN)
 
 	# Git branch this build came from ("main" for stable, the feature/PR branch for
 	# a dev build, "local" otherwise). CI passes it via -DVW_BUILD_BRANCH; shown in
-	# the menu command's alert next to the channel.
+	# the dev build picker next to the commit.
 	if(NOT DEFINED VW_BUILD_BRANCH)
 		set(VW_BUILD_BRANCH
 			"local"

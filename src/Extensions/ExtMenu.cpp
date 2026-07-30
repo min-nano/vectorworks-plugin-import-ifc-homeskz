@@ -175,10 +175,10 @@ void CImportIfcMenu_EventSink::DoInterface()
 	// re-invoked programmatically — a picker on the command path would then pop up
 	// repeatedly. So the command just does its work below, every time it runs.
 
-	// M1 の縦切り: ファイルを選ぶ → parse（Phase 1）で IFC を Document へ →
-	// draw（Phase 2）で通り芯を VectorWorks へ描く → 描いた本数をダイアログに出す。
-	// 2 フェーズが端から端まで通ることを最も単純な要素（通り芯）で実証する
-	// （ROADMAP.md M1）。Python 版 run() が ifc.build_document → vw.execute_document
+	// 縦切りの通し処理: ファイルを選ぶ → parse（Phase 1）で IFC を Document へ →
+	// draw（Phase 2）でストーリ・通り芯・床を VectorWorks へ描く → 件数をダイアログに
+	// 出す。要素が増えても入口はこの形のまま（各要素の追加は Document と draw 側で行う。
+	// ROADMAP.md）。Python 版 run() が ifc.build_document → vw.execute_document
 	// を呼ぶのと同じ入口で、ここが両フェーズのオーケストレーションを担う。
 
 	// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら静かに終える。
