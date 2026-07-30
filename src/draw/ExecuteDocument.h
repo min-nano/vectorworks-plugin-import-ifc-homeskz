@@ -10,8 +10,8 @@
 //	される（無 SDK の core/parse ライブラリには含めない）。この宣言ヘッダ自体は
 //	core::Document しか参照せず、SDK ヘッダを引き込まない。
 //
-//	いまはフォルダ骨組みとして関数シグネチャだけを置く。実際のディスパッチと
-//	要素ごとの描画は対応マイルストーンで実装する（M1 grid から）。
+//	現状は story（M3）→ grid（M1）→ floor（M5）へディスパッチする。残りの要素は
+//	対応マイルストーンで足していく。
 //
 
 #pragma once
@@ -20,9 +20,10 @@
 
 namespace HomeskzIfcImport::draw
 {
-	// 命令セットを描画する。validateDocument を通してから、命令ごとに要素の
-	// draw モジュールへディスパッチする。戻り値は成功可否（骨組みでは常に成功）。
+	// 命令セットを描画する。validateDocument を通してから、命令ごとに要素の draw モジュール
+	// （story → grid → floor の順）へディスパッチする。戻り値は成功可否で、検証を通らな
+	// かったときだけ false（何も描かない）。命令が空でも検証は通るので true を返す。
 	//
-	// TODO(M1〜): validateDocument → grid/story/member … の順にディスパッチを実装する。
+	// TODO(M6〜): rafter / member … と、要素ごとの draw モジュールへのディスパッチを足す。
 	bool executeDocument(const core::Document& document);
 } // namespace HomeskzIfcImport::draw

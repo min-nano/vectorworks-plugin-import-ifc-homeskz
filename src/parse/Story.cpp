@@ -45,8 +45,9 @@ namespace HomeskzIfcImport::parse
 		constexpr std::size_t kRelRelatedElementsAttr = 4;
 		constexpr std::size_t kRelRelatingStructureAttr = 5;
 
-		// ASCII 範囲だけを大文字化した文字列を返す（"FL" 判定は ASCII なのでこれで十分。
-		// 日本語部分＝マルチバイトは触らない）。
+		// 1 バイトずつ std::toupper を掛けた文字列を返す（"FL" 判定は ASCII なのでこれで
+		// 十分。C ロケールでは 0x80 以上のバイトは変換されないため、UTF-8 の日本語部分＝
+		// マルチバイト列はそのまま残る）。
 		std::string asciiUpper(const std::string& s)
 		{
 			std::string out = s;
@@ -67,7 +68,8 @@ namespace HomeskzIfcImport::parse
 			return upper.compare(upper.size() - 2, 2, "FL") == 0;
 		}
 
-		// エンティティの Name（属性 2）を文字列で返す（未設定・非文字列なら空）。
+		// エンティティの指定属性（Name なら kStoreyNameAttr=2）を文字列で返す
+		// （未設定・非文字列なら空）。
 		std::string entityName(const Entity& entity, std::size_t attrIndex)
 		{
 			const Value& name = entity.attribute(attrIndex);

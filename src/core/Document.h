@@ -10,8 +10,8 @@
 //	Python 版に合わせ、追跡しやすさと仕様のブレ防止を優先する。予約語（class 等）は
 //	drawClass / className のように機械的に置換する。
 //
-//	いまはフォルダ骨組みとして「バージョン＋空の器」だけを持つ。各命令リスト
-//	（stories / grids / members / columns / walls / slabs …）は、対応する
+//	現状は「バージョン＋ stories / grids / floors」を持つ（M1 通り芯・M3 ストーリ・
+//	M5 床板ぶん）。残りの命令リスト（members / columns / walls / slabs …）は、対応する
 //	マイルストーンで要素を移植するたびに 1 つずつ追加する（ROADMAP.md）。
 //
 
@@ -124,15 +124,16 @@ namespace HomeskzIfcImport::core
 	// 対応する。draw/Floor がこれをスラブオブジェクトへ変換する（ROADMAP.md M5。Python 版は
 	// 床ツールで描くが、本移植は BIM 機能の充実したスラブを使う。draw/Floor.h 参照）。
 	//
-	// 【高さの持ち方】elevation は**床仕上げ上端**の絶対 Z。一般部は FL と同じ高さで、
-	// 部分的に床レベルを指定している場合（スキップフロア等）は FL ± 差分になる。高さ基準は
-	// 配置先ストーリの「FL」レベルにバインドし、その差分を bound.offset に入れる
+	// 【高さの持ち方】elevation は datum が指す**基準面**の絶対 Z（一般階＝床仕上げ上端、
+	// ロフト＝床下地下端）。一般階の基準面は一般部で FL と同じ高さで、部分的に床レベルを
+	// 指定している場合（スキップフロア等）は FL ± 差分になる。高さ基準は配置先ストーリの
+	// レベル（一般階＝FL、ロフト＝軒高）にバインドし、その差分を bound.offset に入れる
 	// （一般部は offset 0、段差床は段差ぶんずれる）。
 	//
-	// 【スラブ構成】components は上から順に:
-	//   床仕上げ … FL 高さ − 横架材天端高さ − 床下地厚
-	//   床下地   … 24mm 固定
-	// 合計＝FL 高さ − 横架材天端高さ、すなわちスラブ下端は（一般部では）横架材天端に一致する。
+	// 【スラブ構成】components は上から順に 床仕上げ ＋ 床下地（24mm 固定）:
+	//   一般階 … 床仕上げ＝FL 高さ − 横架材天端高さ − 床下地厚。合計＝FL 高さ − 横架材天端
+	//            高さ、すなわちスラブ下端は（一般部では）横架材天端に一致する。
+	//   ロフト … 合計＝軒高からの標準床レベル（36mm。仮定値）なので 床仕上げ 12 ＋ 床下地 24。
 	// 構成は**階ごとのスラブスタイル**（styleName）として作り、床はそのスタイルを適用して
 	// 描く（階により構成が異なることが多いため、スタイルは階ごとに 1 つ）。
 	//
@@ -188,21 +189,26 @@ namespace HomeskzIfcImport::core
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は
-	// 検証を通った Document だけを SDK API へ渡す。骨組みの現状では常に true
-	// （空の Document は妥当）。各命令リストの追加に合わせて検証規則を足していく。
+	// 検証を通った Document だけを SDK API へ渡す。現状はバージョン・stories・floors・
+	// grids を見る（規則は Document.cpp の各 isValid* 参照。空の Document は妥当）。
+	// 各命令リストの追加に合わせて検証規則を足していく。
 	bool validateDocument(const Document& document);
 
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す
 	// （Python 版 vw/story.py desired_layer_order の SDK 非依存な計算部分）。draw/Story が
-	// この順に HMoveForward でレイヤを並べ替える（レベルの高さには依存しない）。SDK を
-	// 触らない純計算なので core に置いて無 SDK で単体テストする（CLAUDE.md「テスト方針」:
-	// レイヤ順の並べ替え計算のような SDK から切り離せる部分は core へ寄せてテストする）。
+	// この順を適用する（レベルの高さには依存しない）。SDK を触らない純計算なので core に
+	// 置いて無 SDK で単体テストする（CLAUDE.md「テスト方針」: レイヤ順の並べ替え計算のような
+	// SDK から切り離せる部分は core へ寄せてテストする）。
+	//
+	// ただし**適用先は未定のまま**: VW 2026 ISDK にデザインレイヤの重ね順を変更する呼び出しが
+	// 無いため、draw/Story は並べ替えを行わない。目的（伏図で床が柱・梁を覆い隠さない）は
+	// M13 の per-viewport 上書き（SetViewportLayerStackingOverride）で満たす（draw/Story.h 参照）。
 	//
 	// 並び: 最上段に通り芯レイヤ "共通" → topLayers（伏図記号レイヤ等・ストーリ非依存の
 	// 独立レイヤ。M12 以降で渡す）→ **最上階→最下階**の順に各ストーリのレイヤ（stories は
 	// Elevation 昇順＝最下階→最上階なので逆順に辿る）。各ストーリ内は levels の並び順。
 	// ただし床（FL）・野地板レベルのレイヤは全ストーリ分をまとめてスタック最下段（背面）へ
-	// 回す（伏図ビューポートで柱・梁を覆い隠さないため。M5 床板で効いてくる。まずは枠）。
+	// 回す（伏図ビューポートで柱・梁を覆い隠さないため）。
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
 													const std::vector<std::string>& topLayers = {});
 } // namespace HomeskzIfcImport::core

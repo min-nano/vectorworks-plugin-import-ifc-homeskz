@@ -39,8 +39,10 @@
 
 // Short identifier of the exact build (git commit, or "local" for a local
 // build). CMake passes this in via -DVW_BUILD_VERSION=...; it is stamped into
-// the bundle's Info.plist and shown in the menu command's alert so you can tell
-// which build is actually loaded.
+// each build (mac: the bundle's Info.plist, win: a "<name>.commit" sidecar) so
+// the updater scripts can compare the installed build against the published
+// one, and it is compiled in here so the dev build picker can name the build
+// that is actually loaded (see Updater.cpp RunDevStartupCheck).
 #ifndef VW_BUILD_VERSION
 #	define VW_BUILD_VERSION "local"
 #endif
@@ -48,7 +50,8 @@
 // Git branch the build came from ("main" for stable, the feature/PR branch for
 // a dev build, or "local" for a local build). CMake passes this in via
 // -DVW_BUILD_BRANCH=...; like the commit it is stamped into the Info.plist and
-// shown in the menu command's alert so a dev build can be traced to its branch.
+// shown in the dev build picker at start-up, so a dev build can be traced to
+// its branch.
 #ifndef VW_BUILD_BRANCH
 #	define VW_BUILD_BRANCH "local"
 #endif

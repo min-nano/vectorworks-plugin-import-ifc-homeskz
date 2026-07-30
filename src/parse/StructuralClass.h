@@ -12,7 +12,7 @@
 //
 //	【SDK 非依存・幾何非依存】このモジュールは純粋な文字列／整数ロジックだけで完結し、
 //	STEP エンティティグラフ（parse/Step）にも VectorWorks SDK にも依存しない。描画は
-//	持たず（M5 横架材・M6 柱がここで決まったクラスを SetClass する）、無 SDK で単体
+//	持たず（M7 横架材・M8 柱がここで決まったクラスを SetClass する）、無 SDK で単体
 //	テストできる（CLAUDE.md「テスト方針」）。
 //
 //	クラス階層（VW のクラス名は "-" 区切りで全パスを連結する）:
@@ -70,11 +70,12 @@ namespace HomeskzIfcImport::parse
 	// 横架材のクラスを決定する（Python 版 resolve_member_class 相当）。
 	//
 	// IFC Name の種別で判別できればそれを信用する。判別できない部材（火打・隅木谷木・
-	// 無名等）は階と高さの状況から推定する:
-	//   * 最下階（index == 0）の横架材 → 土台
-	//   * 中間階の横架材            → 床梁
-	//   * 最上階（index >= topIndex）の地廻り（軒）高さの横架材 → 小屋梁
-	//   * 最上階のそれより高い横架材（aboveEaves）           → 母屋
+	// 無名等）は階と高さの状況から、次の**優先順**で推定する（Python 版と同じ順序）:
+	//   1. 最上階（index >= topIndex）の地廻り（軒）高さの横架材   → 小屋梁
+	//   2. 最上階のそれより高い横架材（aboveEaves）               → 母屋
+	//   3. 最下階（index <= 0）の横架材                          → 土台
+	//   4. 中間階の横架材                                       → 床梁
+	// 最上階の判定が先なので、単層（topIndex == 0）では 3 ではなく 1/2 が効く。
 	std::string resolveMemberClass(const std::string& name, int index, int topIndex,
 								   bool aboveEaves);
 

@@ -4,8 +4,8 @@
 //	validateDocument の実装。Python 版 document.py の validateDocument に対応する。
 //	SDK 非依存（core/ は VectorWorks SDK を一切 include しない）。
 //
-//	骨組みの現状では Document は「バージョン＋空の器」なので、検証はバージョンの
-//	妥当性だけを見る。各命令リスト（grids / stories / members …）が追加されるたびに、
+//	現状はバージョンの妥当性と、stories（M3）・floors（M5）・grids（M1）の各命令の
+//	必須フィールド・値域を見る。命令リスト（members / columns …）が追加されるたびに、
 //	対応する検証規則（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 
@@ -79,8 +79,9 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.stories, isValidStory))
 			return false;
 
-		// 床板: 配置先レイヤ名・クラス名が非空で、外形が 3 点以上、高さ基準のレベル種別が
-		// 非空であること（Python 版 _validate_floor と同じ関門。ROADMAP.md M5）。
+		// 床板: 配置先レイヤ名・クラス名・スタイル名が非空で、外形が 3 点以上、高さ基準の
+		// レベル種別が非空、構成層が 1 枚以上あり総厚が正であること（isValidFloor 参照。
+		// Python 版 _validate_floor と同じ関門。ROADMAP.md M5）。
 		if (!std::ranges::all_of(document.floors, isValidFloor))
 			return false;
 
@@ -99,7 +100,8 @@ namespace HomeskzIfcImport::core
 	{
 		// スタック最下段（背面）へ回すレベル種別か（Python 版 _BACKGROUND_LEVEL_TYPES）。
 		// 床（FL）・野地板のレイヤは伏図ビューポートで柱・梁を覆い隠さないよう全ストーリ
-		// 分をまとめて背面へ集める（M5 床板で効く。FL は M3 から背面対象に含めておく）。
+		// 分をまとめて背面へ集める（野地板レベルは M6 で追加される。この並びの適用先は
+		// M13 の per-viewport 上書き。desiredStoryLayerOrder の doc コメント参照）。
 		bool isBackgroundLevel(const std::string& type)
 		{
 			return type == "FL" || type == "野地板";

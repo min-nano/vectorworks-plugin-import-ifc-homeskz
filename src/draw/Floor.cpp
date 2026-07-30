@@ -231,9 +231,10 @@ namespace HomeskzIfcImport::draw
 			// 同じ落とし穴）。命令の elevation は基準面の絶対 Z なのでそのまま渡す。
 			gSDK->SetSlabHeight(slab, floor.elevation);
 
-			// 高さ基準（床仕上げ上端）を配置先ストーリの「FL」レベルへバインドする。offset は
-			// FL からの高低差（一般部 0・床レベル指定時は ±差分）。これをしないと編集時に
-			// 高さがレイヤ基準へリセットされて実形状と矛盾する。
+			// 基準面（一般階＝床仕上げ上端／ロフト＝床下地下端）を、命令が指すストーリレベル
+			// （一般階＝"FL"／ロフト＝"軒高"）へバインドする。offset はそのレベルからの高低差
+			// （一般部 0・床レベル指定時は ±差分）。これをしないと編集時に高さがレイヤ基準へ
+			// リセットされて実形状と矛盾する。
 			VectorWorks::SStoryObjectData bound;
 			bound.fBound = VectorWorks::eStoryObjectBound_Story;
 			bound.fBoundStory = static_cast<Sint8>(floor.bound.storyOffset);

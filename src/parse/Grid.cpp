@@ -197,8 +197,8 @@ namespace HomeskzIfcImport::parse
 		// 2. 全端点の bbox 中心（センタリングオフセット）。床・基礎・部材も同じ中心を使う。
 		const Vec2 center = boundingCenter(lines);
 
-		// 3. センタリング＋ X/Y 判定＋クラス付与 → GridCommand。判定は平行移動で
-		//    不変なのでセンタリング前後どちらでもよいが、出力座標に揃えて後で行う。
+		// 3. センタリング＋ X/Y 判定＋クラス付与 → GridCommand。X/Y 判定（軸名・線の向き）は
+		//    平行移動で不変なので、センタリング前の生の線分に対して行ってよい。
 		std::vector<GridCommand> commands;
 		commands.reserve(lines.size());
 		for (const RawLine& line : lines)

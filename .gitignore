@@ -29,3 +29,7 @@ coverage.xml
 *.xcuserstate
 xcuserdata/
 .vscode/
+
+# Claude Code のセッション作業ディレクトリ（バックグラウンドコマンドの出力・
+# スクラッチパッド。リモートセッションが作るもので、成果物ではない）
+*/claude-[0-9]*/

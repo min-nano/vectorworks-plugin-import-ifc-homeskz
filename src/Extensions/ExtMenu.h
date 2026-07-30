@@ -1,8 +1,10 @@
 //
 //	ExtMenu.h
 //
-//	A minimal Vectorworks menu command extension. When the user runs the
-//	command it pops up an alert announcing that the plug-in has started.
+//	The plug-in's "IFC インポート" menu command extension. Running it asks for a
+//	Homes-kun IFC file, parses it into the instruction set (Phase 1, core/parse)
+//	and draws it into the document (Phase 2, draw/), then reports what was drawn
+//	in an alert. See ExtMenu.cpp for the flow.
 //
 
 #pragma once
