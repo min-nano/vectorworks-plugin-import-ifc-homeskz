@@ -160,6 +160,27 @@ namespace HomeskzIfcImport::parse
 	// 床板は「最下端 Z = top − thickness」を床下端（絶対 Z）として使う。
 	void zTopAndThickness(const WorldSolid& solid, double& outTop, double& outThickness);
 
+	// 屋根面（屋根版＝IfcSlab "屋根版" の勾配した平面）。Python 版 rafter._roof_plane の
+	// 戻り値 (verts, normal) に対応する。
+	//   vertices … ワールド座標の平面外形頂点列（末尾に始点を重複させない）。Z は要素配置
+	//              基準＝**ストーリ相対**（階高は要素側で Elevation を足して絶対値にする。
+	//              parse/IfcGeometry の resolveObjectPlacement が親を合成しないため）。
+	//   normal   … 面の単位法線。**必ず上向き**（z 成分 ≥ 0）に揃える（平面式・勾配方向は
+	//              符号反転に対して不変だが、上向きに固定して勾配計算の分母 nz を正にする）。
+	struct RoofPlane
+	{
+		std::vector<Vec3> vertices;
+		Vec3 normal;
+	};
+
+	// 屋根版（IfcSlab）から屋根面を取り出す（Python 版 rafter._roof_plane 相当）。屋根版は
+	// 勾配した平面外形を鉛直に押し出したソリッド（押し出し＝屋根の厚み）なので、
+	// resolveElementWorldSolid の配置基底＋プロファイル頂点（base()）がそのまま平面外形に、
+	// 配置の局所 Z 軸（zAxis）が面法線になる。ソリッドを解決できない・頂点が 3 点未満
+	// （面にならない）ときは false（out は変更しない）。**垂木（parse/Rafter）と野地板
+	// （parse/Roof）が同じ面を共有する**ため、M7 の登り梁スナップも本関数を使う。
+	bool roofPlane(const Model& model, const Entity* element, RoofPlane& out);
+
 	// ソリッドの平面外形（XY 頂点列）を返す（Python 版 footing._footprint 相当）。
 	//   * 鉛直押し出し（床版・底盤）: プロファイルがそのまま平面外形（底面ループの XY）。
 	//   * 水平押し出し（立上り・地中梁）: プロファイルは鉛直面内にあるため、断面の水平

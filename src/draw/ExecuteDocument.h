@@ -10,8 +10,8 @@
 //	される（無 SDK の core/parse ライブラリには含めない）。この宣言ヘッダ自体は
 //	core::Document しか参照せず、SDK ヘッダを引き込まない。
 //
-//	現状は story（M3）→ grid（M1）→ floor（M5）へディスパッチする。残りの要素は
-//	対応マイルストーンで足していく。
+//	現状は story（M3）→ grid（M1）→ floor（M5）→ rafter → roof（M6）へディスパッチする。
+//	残りの要素は対応マイルストーンで足していく。
 //
 
 #pragma once

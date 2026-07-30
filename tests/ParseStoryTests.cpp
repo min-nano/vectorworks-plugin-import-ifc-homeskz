@@ -8,7 +8,8 @@
 //
 //	検証項目（ROADMAP.md M3）: ローカル配置 Z 抽出・横架材天端オフセット（列挙順に
 //	依存しない最大負値）・ストーリ収集（Elevation 昇順・最上階判定・非 FL 除外）・
-//	story 命令の組み立て（一般階=FL＋横架材天端、最上階=軒高。M3 は基本レベルのみ）・
+//	story 命令の組み立て（一般階=FL＋横架材天端、最上階=軒高。屋根版のある階は 垂木・野地板 を
+//	その直上に積む＝M6）・
 //	希望レイヤ順（"共通" 先頭・最上階→最下階・床は背面）・決定性。実フィクスチャのパスは
 //	CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -477,8 +478,9 @@ TEST(reads_sample_house_fixture)
 	{
 		CHECK_EQ(roof->suffix, std::string("R"));
 		CHECK(near(roof->elevation, 6300.0));
-		// 床版の無い屋根は軒高だけ（ロフトの床がある屋根には FL が加わる。下のテスト）。
-		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"軒高"}));
+		// 床版の無い屋根に FL は付かない（ロフトの床がある屋根には FL が加わる。下のテスト）。
+		// 屋根版（屋根面）はあるので 垂木・野地板 レベルが軒高の直上に積まれる（M6）。
+		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"野地板", "垂木", "軒高"}));
 	}
 
 	// 一般階は FL＋横架材天端の 2 レベル（順序は FL が上）。
@@ -523,6 +525,114 @@ TEST(roof_story_gets_fl_level_only_with_floor_slab)
 		CHECK_EQ(loftRoof->levels.front().layer, std::string("R-FL"));
 		CHECK(near(loftRoof->levels.front().offset, 36.0));
 	}
+}
+
+// ---------------------------------------------------------------------------
+// 屋根組（垂木・野地板）レベル: 屋根版のある階にだけ、横架材天端／軒高の直上へ積む（M6）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 1FL / 2FL の 2 階建て。屋根版（Name が "屋根版" 始まりの IfcSlab）を storeyRef
+	// （"#10" or "#11"）の階に 1 枚だけ含める。形状表現は不要（レベル追加の判定は名前と
+	// 収容関係だけを見る）。
+	std::string roofSlabStoryText(const std::string& storeyRef)
+	{
+		return "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
+			   "#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
+			   "#3=IFCLOCALPLACEMENT($,#2);\n"
+			   "#10=IFCBUILDINGSTOREY('s1',$,'1FL',$,$,#3,$,$,.ELEMENT.,0.);\n"
+			   "#11=IFCBUILDINGSTOREY('s2',$,'2FL',$,$,#3,$,$,.ELEMENT.,3000.);\n"
+			   "#40=IFCSLAB('slab',$,'屋根版:1',$,$,#3,$,$,$);\n"
+			   "#50=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#40)," +
+			   storeyRef + ");\n";
+	}
+} // namespace
+
+TEST(roof_frame_levels_only_on_stories_with_roof_slab)
+{
+	// 屋根版が無い階に 垂木・野地板 レベルは作らない（空レイヤを作らない）。
+	Model const without =
+		loadIfcFromText("#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
+						"#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
+						"#3=IFCLOCALPLACEMENT($,#2);\n"
+						"#10=IFCBUILDINGSTOREY('s1',$,'1FL',$,$,#3,$,$,.ELEMENT.,0.);\n"
+						"#11=IFCBUILDINGSTOREY('s2',$,'2FL',$,$,#3,$,$,.ELEMENT.,3000.);\n");
+	std::vector<StoryCommand> const bare = buildStoryCommands(without);
+	const StoryCommand* bareFirst = find(bare, "1階");
+	const StoryCommand* bareRoof = find(bare, "屋根");
+	CHECK(bareFirst != nullptr);
+	CHECK(bareRoof != nullptr);
+	if (bareFirst != nullptr)
+		CHECK(sameVec(levelTypes(*bareFirst), std::vector<std::string>{"FL", "横架材天端"}));
+	if (bareRoof != nullptr)
+		CHECK(sameVec(levelTypes(*bareRoof), std::vector<std::string>{"軒高"}));
+
+	// 最上階（屋根）の主屋根: 軒高の直上に 垂木 → その上に 野地板（スタックは上ほど上段）。
+	Model const mainRoof = loadIfcFromText(roofSlabStoryText("#11"));
+	std::vector<StoryCommand> const withMain = buildStoryCommands(mainRoof);
+	const StoryCommand* roof = find(withMain, "屋根");
+	CHECK(roof != nullptr);
+	if (roof != nullptr)
+	{
+		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"野地板", "垂木", "軒高"}));
+		CHECK_EQ(roof->levels.front().layer, std::string("R-野地板"));
+		CHECK_EQ(roof->levels[1].layer, std::string("R-垂木"));
+		// 最上階の高さ基準は軒高（オフセット 0）。実描画の Z は要素が絶対値で持つ。
+		CHECK(near(roof->levels.front().offset, 0.0));
+		CHECK(near(roof->levels[1].offset, 0.0));
+	}
+}
+
+TEST(roof_frame_levels_on_intermediate_story_shed_roof)
+{
+	// 中間階に架かる下屋根（下屋）も、その階の 垂木・野地板 レベルを持つ（母屋の有無に
+	// 依らず屋根版の有無で判定する）。挿入位置は横架材天端の直上（FL の下）。
+	Model const shed = loadIfcFromText(roofSlabStoryText("#10"));
+	std::vector<StoryCommand> const stories = buildStoryCommands(shed);
+	const StoryCommand* first = find(stories, "1階");
+	const StoryCommand* roof = find(stories, "屋根");
+	CHECK(first != nullptr);
+	if (first != nullptr)
+	{
+		CHECK(sameVec(levelTypes(*first),
+					  std::vector<std::string>{"FL", "野地板", "垂木", "横架材天端"}));
+		CHECK_EQ(first->levels[1].layer, std::string("1-野地板"));
+		CHECK_EQ(first->levels[2].layer, std::string("1-垂木"));
+	}
+	// 屋根版を持たない最上階には作らない。
+	CHECK(roof != nullptr);
+	if (roof != nullptr)
+		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"軒高"}));
+}
+
+TEST(desired_layer_order_sends_roof_sheathing_to_background)
+{
+	// 野地板レイヤは床（FL）と同じく全ストーリ分をまとめてスタック最下段（背面）へ回す
+	// （伏図ビューポートで柱・梁を覆い隠さないため。core::desiredStoryLayerOrder）。
+	Model const model = loadIfcFromText(roofSlabStoryText("#11"));
+	std::vector<std::string> const order = desiredStoryLayerOrder(buildStoryCommands(model));
+
+	CHECK(!order.empty());
+	if (order.empty())
+		return;
+	CHECK_EQ(order.front(), std::string("共通"));
+	// 背面は 野地板 → 床（FL）の順に集まる（最上階→最下階で集めるため R-野地板 が先）。
+	CHECK(order.back() == std::string("1-FL"));
+	bool sheathingBeforeTaruki = false;
+	for (std::size_t i = 0; i < order.size(); ++i)
+	{
+		if (order[i] == "R-野地板")
+		{
+			// 野地板は背面（垂木より後ろ）にある。
+			for (std::size_t j = 0; j < i; ++j)
+			{
+				if (order[j] == "R-垂木")
+					sheathingBeforeTaruki = true;
+			}
+		}
+	}
+	CHECK(sheathingBeforeTaruki);
 }
 
 TEST_MAIN()

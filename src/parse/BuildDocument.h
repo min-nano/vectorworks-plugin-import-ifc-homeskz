@@ -10,8 +10,8 @@
 //	この宣言も core/Document.h しか依存しない。
 //
 //	現状は parse/Loader で IFC を読み（テキスト→STEP グラフ）、parse/Story（M3）・
-//	parse/Grid（M1）・parse/Floor（M5）を呼んで Document を組み立てる。残りの要素は
-//	対応マイルストーンで足していく。
+//	parse/Grid（M1）・parse/Floor（M5）・parse/Rafter / parse/Roof（M6）を呼んで Document を
+//	組み立てる。残りの要素は対応マイルストーンで足していく。
 //
 
 #pragma once

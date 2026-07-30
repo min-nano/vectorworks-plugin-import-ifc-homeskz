@@ -4,8 +4,8 @@
 //	validateDocument の実装。Python 版 document.py の validateDocument に対応する。
 //	SDK 非依存（core/ は VectorWorks SDK を一切 include しない）。
 //
-//	現状はバージョンの妥当性と、stories（M3）・floors（M5）・grids（M1）の各命令の
-//	必須フィールド・値域を見る。命令リスト（members / columns …）が追加されるたびに、
+//	現状はバージョンの妥当性と、stories（M3）・floors（M5）・rafters / roofs（M6）・
+//	grids（M1）の各命令の必須フィールド・値域を見る。命令リスト（members / columns …）が追加されるたびに、
 //	対応する検証規則（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 
@@ -67,6 +67,27 @@ namespace HomeskzIfcImport::core
 				total += component.thickness;
 			return total > 0.0;
 		}
+
+		// 垂木 1 本が妥当か（Python 版 _validate_rafter 相当）。配置先レイヤ名・クラス名が
+		// 非空で、断面（幅・せい）が正で、平面の始点（軒側＝支持点）と終点（棟側）が縮退して
+		// いないこと。elevation / endElevation / overhang / embedment は数値（double なので
+		// 常に成立）。Python 版は型だけを見るが、C++ は型が静的なので「描けない値」を弾く
+		// 幾何の関門に読み替える（床板と同じ方針）。
+		bool isValidRafter(const RafterCommand& rafter)
+		{
+			return !rafter.layer.empty() && !rafter.drawClass.empty() && rafter.width > 0.0 &&
+				   rafter.height > 0.0 && !isDegenerate(rafter.start, rafter.end);
+		}
+
+		// 野地板 1 枚が妥当か（Python 版 _validate_roof 相当）。配置先レイヤ名・クラス名が
+		// 非空で、平面外形が 3 点以上（面になる）で、厚みが正であること。勾配（rise/run）と
+		// 高さは数値（double なので常に成立）で、退化した勾配は描画側がフォールバックで
+		// 扱うためここでは弾かない（1 枚の異常で文書全体を描かないのは過剰）。
+		bool isValidRoof(const RoofCommand& roof)
+		{
+			return !roof.layer.empty() && !roof.drawClass.empty() && roof.boundary.size() >= 3 &&
+				   roof.thickness > 0.0;
+		}
 	} // namespace
 
 	bool validateDocument(const Document& document)
@@ -85,6 +106,14 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.floors, isValidFloor))
 			return false;
 
+		// 垂木・野地板: 配置先レイヤ名・クラス名が非空で、垂木は断面が正・平面が非縮退、
+		// 野地板は外形 3 点以上・厚みが正であること（Python 版 _validate_rafter /
+		// _validate_roof と同じ関門。ROADMAP.md M6）。
+		if (!std::ranges::all_of(document.rafters, isValidRafter))
+			return false;
+		if (!std::ranges::all_of(document.roofs, isValidRoof))
+			return false;
+
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。
 		// クラス名は空でもよい（無クラス＝既定クラスへ）。1 本でも不正なら描画しない
 		// （Python 版 validateDocument と同じ関門。ROADMAP.md M1）。
@@ -100,7 +129,7 @@ namespace HomeskzIfcImport::core
 	{
 		// スタック最下段（背面）へ回すレベル種別か（Python 版 _BACKGROUND_LEVEL_TYPES）。
 		// 床（FL）・野地板のレイヤは伏図ビューポートで柱・梁を覆い隠さないよう全ストーリ
-		// 分をまとめて背面へ集める（野地板レベルは M6 で追加される。この並びの適用先は
+		// 分をまとめて背面へ集める（野地板レベルは M6 で追加済み。この並びの適用先は
 		// M13 の per-viewport 上書き。desiredStoryLayerOrder の doc コメント参照）。
 		bool isBackgroundLevel(const std::string& type)
 		{

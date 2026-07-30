@@ -15,6 +15,8 @@
 #include "parse/Floor.h"
 #include "parse/Grid.h"
 #include "parse/Loader.h"
+#include "parse/Rafter.h"
+#include "parse/Roof.h"
 #include "parse/Story.h"
 
 namespace HomeskzIfcImport::parse
@@ -37,8 +39,14 @@ namespace HomeskzIfcImport::parse
 
 		// M5 床板: 床版（IfcSlab "床版"）を解析して FloorCommand を積む（parse/Floor）。
 		// 床は建物形状の一次情報で、以降の横架材・柱はこの位置に合わせる（形状先行）。
-		// 以降のマイルストーンで Rafter / Member … の解析を同様に足していく（ROADMAP.md）。
 		document.floors = buildFloorCommands(model);
+
+		// M6 屋根面・屋根組: 屋根版（IfcSlab "屋根版"）から垂木・野地板を導出する
+		// （parse/Rafter / parse/Roof）。屋根面は建物形状の要で、M7 の登り梁はここで確定した
+		// 屋根面へスナップ補正される（形状先行）。以降のマイルストーンで Member / Column …
+		// の解析を同様に足していく（ROADMAP.md）。
+		document.rafters = buildRafterCommands(model);
+		document.roofs = buildRoofCommands(model);
 
 		return document;
 	}

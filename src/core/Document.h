@@ -10,9 +10,9 @@
 //	Python 版に合わせ、追跡しやすさと仕様のブレ防止を優先する。予約語（class 等）は
 //	drawClass / className のように機械的に置換する。
 //
-//	現状は「バージョン＋ stories / grids / floors」を持つ（M1 通り芯・M3 ストーリ・
-//	M5 床板ぶん）。残りの命令リスト（members / columns / walls / slabs …）は、対応する
-//	マイルストーンで要素を移植するたびに 1 つずつ追加する（ROADMAP.md）。
+//	現状は「バージョン＋ stories / grids / floors / rafters / roofs」を持つ（M1 通り芯・
+//	M3 ストーリ・M5 床板・M6 屋根組ぶん）。残りの命令リスト（members / columns / walls /
+//	slabs …）は、対応するマイルストーンで要素を移植するたびに 1 つずつ追加する（ROADMAP.md）。
 //
 
 #pragma once
@@ -160,11 +160,84 @@ namespace HomeskzIfcImport::core
 		StoryBoundCommand bound;
 	};
 
+	// 垂木（軸組ツール FramingMember、部材種別 rafter）を描く命令。Python 版 document.py の
+	// RafterCommand（dict）に対応する。draw/Rafter がこれを軸組ツールへ変換する
+	// （ROADMAP.md M6）。垂木はホームズ君 IFC に一切出力されないため、**屋根版（IfcSlab の
+	// 屋根面）の勾配・外形から導出**した結果がこの命令になる（parse/Rafter.h 参照）。
+	//
+	// 【高さと両端の持ち方】start は**軒側＝支持点**（屋根面が横架材天端／軒高の Z レベルと
+	// 交わる点＝受ける軒桁の芯線の真上）、end は**棟側**（高い端）。elevation /
+	// endElevation はそれぞれの天端 Z（絶対値）。描画フェーズはこの 2 点と両端 Z から
+	// 水平投影長・平面方位角・勾配（pitch）を求める。命令の高さは屋根面由来の絶対 Z なので、
+	// 配置先レイヤ（"n-垂木"）のレベルのオフセットには依存しない。
+	//
+	// Python 版キーとの対応:
+	//   layer         ← 'layer'          … 配置先デザインレイヤ名（"n-垂木"）
+	//   drawClass     ← 'class'          … クラス名（小屋組-垂木。予約語 class を機械置換）
+	//   width         ← 'width'          … 断面幅（既定 45mm）
+	//   height        ← 'height'         … 断面せい（既定 45mm）
+	//   start         ← 'start'          … 軒側＝支持点の平面座標（センタリング済み）
+	//   end           ← 'end'            … 棟側の平面座標（同上）
+	//   elevation     ← 'elevation'      … 支持点の天端 Z（絶対値＝横架材天端／軒高）
+	//   endElevation  ← 'end_elevation'  … 棟側の天端 Z（絶対値）
+	//   overhang      ← 'overhang'       … 軒の出（壁外面から軒先までの水平距離）
+	//   embedment     ← 'embedment'      … 支持部分の差し込み（受ける軒桁の桁幅の半分）
+	//   label         ← 'label'          … 仕様ラベル（"45×45@455"）
+	struct RafterCommand
+	{
+		std::string layer;
+		std::string drawClass;
+		double width = 0.0;
+		double height = 0.0;
+		Vec2 start;
+		Vec2 end;
+		double elevation = 0.0;
+		double endElevation = 0.0;
+		double overhang = 0.0;
+		double embedment = 0.0;
+		std::string label;
+	};
+
+	// 野地板（屋根の下地合板）を屋根オブジェクトとして描く命令。Python 版 document.py の
+	// RoofCommand（dict）に対応する。draw/Roof がこれを屋根ツール（BeginRoof 相当）へ
+	// 変換する（ROADMAP.md M6）。屋根版（IfcSlab の屋根面）**1 面につき 1 枚**で、垂木の
+	// ように間隔で割らない。
+	//
+	// 【高さの持ち方】elevation は**軒（屋根軸）の天端 Z の絶対値**。野地板は垂木の上に
+	// 載る（野地板下端＝垂木上端）ため、屋根版の平面（＝垂木下面）から垂木せいを鉛直換算して
+	// 持ち上げた値になる（parse/Roof.h 参照）。屋根オブジェクトはレイヤ基準（レイヤ相対）の
+	// 座標系を持つため、描画フェーズが「絶対 Z − レイヤ Z」へ読み替える。
+	//
+	// Python 版キーとの対応:
+	//   layer     ← 'layer'       … 配置先デザインレイヤ名（"n-野地板"）
+	//   drawClass ← 'class'       … クラス名（耐力面材-屋根。予約語 class を機械置換）
+	//   boundary  ← 'boundary'    … 屋根の水平投影外形（閉じたポリゴンの頂点列。末尾に
+	//                               始点を重複させない。センタリング済み）
+	//   axisStart ← 'axis_start'  … 軒（最も低い辺）に沿う屋根軸の始点
+	//   axisEnd   ← 'axis_end'    … 同 終点（軸の向きが軒の向き）
+	//   upslope   ← 'upslope'     … 棟（高い）側を指す upslope 定義点
+	//   rise      ← 'rise'        … 勾配の rise（屋根面の単位法線の水平成分 dh）
+	//   run       ← 'run'         … 勾配の run（同 鉛直成分 nz。slope = rise/run = tanθ）
+	//   thickness ← 'thickness'   … 野地板厚（12mm 固定）
+	//   elevation ← 'elevation'   … 軒（屋根軸）の天端 Z（絶対値）
+	struct RoofCommand
+	{
+		std::string layer;
+		std::string drawClass;
+		std::vector<Vec2> boundary;
+		Vec2 axisStart;
+		Vec2 axisEnd;
+		Vec2 upslope;
+		double rise = 0.0;
+		double run = 0.0;
+		double thickness = 0.0;
+		double elevation = 0.0;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
 	// TODO: 要素ごとに命令リストを追加していく（フィールド名は Python 版のキーに対応）。
-	//   * M6 rafters / roofs : std::vector<RafterCommand> / <RoofCommand>
 	//   * M7 members         : std::vector<MemberCommand>
 	//   * M8 columns         : std::vector<ColumnCommand>
 	//   * M9 walls / slabs …
@@ -186,6 +259,15 @@ namespace HomeskzIfcImport::core
 		// 昇順・階内は #id 昇順で決定的。parse/Floor が組み立てる）。配置先の FL レイヤは
 		// stories が作るので、描画は stories の後に処理する。
 		std::vector<FloorCommand> floors;
+
+		// M6 垂木。屋根版（IfcSlab "屋根版"）から導出した RafterCommand の列（階＝Elevation
+		// 昇順・階内は屋根版の #id 昇順・面内は掃引位置順で決定的。parse/Rafter が組み立てる）。
+		// 配置先の "n-垂木" レイヤは stories が作るので、描画は stories の後に処理する。
+		std::vector<RafterCommand> rafters;
+
+		// M6 野地板。屋根版 1 面につき 1 枚の RoofCommand の列（並びの決定性は rafters と
+		// 同じ。parse/Roof が組み立てる）。配置先の "n-野地板" レイヤは stories が作る。
+		std::vector<RoofCommand> roofs;
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は

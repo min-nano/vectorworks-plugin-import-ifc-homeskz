@@ -16,6 +16,8 @@
 #include "draw/ExecuteDocument.h"
 #include "draw/Floor.h"
 #include "draw/Grid.h"
+#include "draw/Rafter.h"
+#include "draw/Roof.h"
 #include "draw/Story.h"
 #include "core/Document.h"
 
@@ -36,10 +38,16 @@ namespace HomeskzIfcImport::draw
 		drawGrids(document);
 
 		// M5 床板を描く。配置先の FL レイヤは上の drawStories が作るので、必ずその後に
-		// 置く（レイヤが無い命令は drawFloors がスキップする）。以降のマイルストーンで
-		// rafter / member … と命令ごとに draw モジュールへのディスパッチを足していく
-		// （ROADMAP.md）。
+		// 置く（レイヤが無い命令は drawFloors がスキップする）。
 		drawFloors(document);
+
+		// M6 屋根組を描く。垂木 → 野地板 の順（Python 版 execute_document の実行順と同じで、
+		// 野地板は垂木の上に載る）。配置先の "n-垂木" / "n-野地板" レイヤも drawStories が
+		// 作るので、必ずその後に置く（レイヤが無い命令はそれぞれがスキップする）。以降の
+		// マイルストーンで member / column … と命令ごとに draw モジュールへのディスパッチを
+		// 足していく（ROADMAP.md）。
+		drawRafters(document);
+		drawRoofs(document);
 
 		// レイヤのスタック順の並べ替えはここでは行わない（draw/Story.h 参照: VW 2026 ISDK に
 		// デザインレイヤの重ね順変更呼び出しが無く、目的の伏図ビューポート重ね順制御は
