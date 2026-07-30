@@ -1,0 +1,248 @@
+name: CI debug
+
+# ---------------------------------------------------------------------------
+# 手動ディスパッチ専用の「CI 上で 1 コマンド動かす」ワークフロー。
+#
+# なぜ必要か: リモートセッション（claude.ai/code などクラウド上のコンテナ）には
+# Vectorworks SDK が無く、SDK 依存のビルドエラーや「この API は SDK にあるか」と
+# いった設計調査は CI 上でしか確かめられない。それを build.yml に一時ステップを
+# 挿して調べるのは、(1) 戻し忘れる (2) その commit が dev プレリリースとして公開
+# される (3) ccache / SDK キャッシュを汚す — と副作用が大きい。
+#
+# このワークフローは push / pull_request では**決して**起動せず（トリガは
+# workflow_dispatch のみ）、リリースも公開しない。調査したいことがあるときだけ
+# 叩き、終わったら何も残らない。
+#
+# 使い方（AI・人間とも）は scripts/ci-debug.sh 経由が基本:
+#
+#   scripts/ci-debug.sh run --mode sdk-grep --args 'GetLayerByName'
+#
+# ディスパッチ → 完了待ち → ペイロード抽出までを 1 コマンドで行う。詳細は
+# CLAUDE.md「CI デバッグ」節と scripts/ci-debug.sh のヘッダを参照。
+#
+# NOTE: workflow_dispatch はデフォルトブランチに存在するワークフローしか起動でき
+# ない。このファイルが main にマージされて初めて、作業ブランチを ref に指定して
+# 呼べるようになる（実行されるワークフロー定義はその ref 側のもの）。逆に言えば
+# モードの追加・修正は scripts/ci-debug-job.sh 側で行えば作業ブランチだけで完結する。
+# ---------------------------------------------------------------------------
+
+# run-name は REST API の workflow_runs[].display_title として返る。dispatch API は
+# 起動した run の id を返さないため、一意な label をここへ埋め込むことで
+# 「自分が起動した run」を後から特定できるようにしている（scripts/ci-debug.sh が
+# "[label]" で突き合わせる）。label を必須入力にしているのはこのため。
+run-name: "ci-debug ${{ inputs.mode }}/${{ inputs.platform }} [${{ inputs.label }}]"
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "実行する調査の種類"
+        required: true
+        type: choice
+        options:
+          - sdk-grep
+          - sdk-ls
+          - build
+          - compile-one
+          - shell
+      platform:
+        description: "ランナー（linux は SDK を用意しない = SDK 非依存コード専用）"
+        required: true
+        default: mac
+        type: choice
+        options:
+          - mac
+          - windows
+          - linux
+      label:
+        description: "この実行の一意な識別子（run 名に出る。呼び出し側が run を特定するのに使う）"
+        required: true
+        type: string
+      args:
+        description: "mode ごとの引数（grep パターン / ヘッダのパス / ビルドターゲット / ソースのパス）"
+        required: false
+        type: string
+      script:
+        description: "mode=shell のときに実行する bash"
+        required: false
+        type: string
+      notify_pr:
+        description: "完了時に結果を投稿する PR 番号（空なら投稿しない）"
+        required: false
+        type: string
+
+# 最小権限。contents: write は与えないので、このワークフローがリリースを公開したり
+# ブランチを書き換えたりすることは構造的に起こり得ない。pull-requests: write は
+# notify_pr が指定されたときの結果コメント投稿にだけ使う。
+permissions:
+  contents: read
+  pull-requests: write
+
+# concurrency グループは意図的に設定しない。デバッグ実行は互いに独立で、条件を変えた
+# 2 本を同時に流したいことがあるため（グループ化すると片方が cancel され、完了待ち
+# している呼び出し側が結果を取り逃す）。暴走は timeout-minutes で頭打ちにする。
+
+jobs:
+  debug:
+    runs-on: ${{ (inputs.platform == 'windows' && 'windows-latest') || (inputs.platform == 'linux' && 'ubuntu-latest') || 'macos-15' }}
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        # Windows ランナーでも git-bash を使い、スクリプトを 1 本で済ませる。
+        shell: bash
+
+    env:
+      # SDK の場所・キャッシュキー・URL は build.yml と同一にしてある。build.yml が
+      # 温めたキャッシュにそのままヒットするので、SDK の再ダウンロードは基本発生
+      # しない。build.yml 側でキーを上げたらここも合わせること（将来 composite
+      # action へ切り出して一本化する予定）。
+      VW_SDK_DIR: ${{ github.workspace }}/${{ inputs.platform == 'windows' && 'vw-sdk-win' || 'vw-sdk' }}
+      VW_SDK_CACHE_KEY: ${{ inputs.platform == 'windows' && 'vw-sdk-2026-NNA-win-v1' || 'vw-sdk-2026-NNA-mac-v3' }}
+      VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-${{ inputs.platform == 'windows' && 'win' || 'mac' }}-SDK.zip
+      # 入力は必ず環境変数として渡す（run: のスクリプト本文へ ${{ }} で展開しない）。
+      MODE: ${{ inputs.mode }}
+      PLATFORM: ${{ inputs.platform }}
+      ARGS: ${{ inputs.args }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Show context
+        run: |
+          set -euo pipefail
+          echo "mode=$MODE platform=$PLATFORM runner=$RUNNER_OS"
+          echo "ref=${{ github.ref_name }} sha=${{ github.sha }}"
+          echo "args=$ARGS"
+
+      # SDK が要るかどうかはモードで決まる。platform=linux では SDK を用意できない
+      # ので、SDK を必要とするモードはここで即座に落とす（800 MB を無駄に取りに
+      # いってから失敗するより、理由が明確で速い）。
+      - name: Decide whether the SDK is needed
+        id: sdk
+        run: |
+          set -euo pipefail
+          need=no
+          case "$MODE" in
+            sdk-grep | sdk-ls | build | compile-one | shell) need=yes ;;
+          esac
+          if [ "$PLATFORM" = "linux" ]; then
+            case "$MODE" in
+              sdk-grep | sdk-ls)
+                echo "::error::mode=$MODE は SDK が必要ですが platform=linux では用意できません。platform=mac を使ってください。"
+                exit 1
+                ;;
+            esac
+            need=no
+          fi
+          echo "need=$need" >> "$GITHUB_OUTPUT"
+
+      # 読み取り専用の restore。デバッグ実行がキャッシュを書き戻すと本番ビルドの
+      # ccache / SDK キャッシュを汚しうるので、save は決して行わない。
+      - name: Restore Vectorworks SDK cache (read-only)
+        id: sdk-cache
+        if: steps.sdk.outputs.need == 'yes'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.VW_SDK_DIR }}
+          key: ${{ env.VW_SDK_CACHE_KEY }}
+
+      # キャッシュミス時のみダウンロード。build.yml は mac(bash) / win(pwsh) に分けて
+      # いるが、ここは両ランナーで動く bash 1 本にまとめてある（git-bash に unzip が
+      # ない場合は 7z にフォールバック）。
+      - name: Download and trim Vectorworks SDK
+        if: steps.sdk.outputs.need == 'yes' && steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          echo "SDK cache miss — downloading (~800 MB)..."
+          curl -fL --retry 4 --retry-delay 5 -o "$work/sdk.zip" "$VW_SDK_URL"
+
+          if command -v unzip >/dev/null 2>&1; then
+            unzip -q "$work/sdk.zip" -d "$work/extracted"
+          elif command -v 7z >/dev/null 2>&1; then
+            7z x -bso0 -bsp0 -o"$work/extracted" "$work/sdk.zip"
+          else
+            echo "::error::neither unzip nor 7z is available on this runner."
+            exit 1
+          fi
+
+          # macOS の zip が混ぜる "__MACOSX" メタデータミラーは避ける。
+          sdklib="$(find "$work/extracted" -type d -name SDKLib -not -path '*/__MACOSX/*' -print -quit)"
+          if [ -z "$sdklib" ]; then
+            echo "::error::Could not find SDKLib inside the downloaded SDK."
+            exit 1
+          fi
+
+          if [ "$PLATFORM" = "windows" ]; then
+            subdirs="Include LibWin Source ToolsWin"
+          else
+            subdirs="Include LibMac Source ToolsMac"
+          fi
+          mkdir -p "$VW_SDK_DIR/SDKLib"
+          for sub in $subdirs; do
+            if [ -d "$sdklib/$sub" ]; then
+              cp -R "$sdklib/$sub" "$VW_SDK_DIR/SDKLib/$sub"
+            else
+              echo "(note) SDKLib/$sub not present in this SDK; skipping."
+            fi
+          done
+
+          if [ "$PLATFORM" != "windows" ]; then
+            chmod +x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR" || true
+            xattr -dr com.apple.quarantine "$VW_SDK_DIR/SDKLib/ToolsMac" 2>/dev/null || true
+          fi
+
+          rm -rf "$work"
+          du -sh "$VW_SDK_DIR"
+
+      # ここが本体。ログの末尾がペイロードになるよう、これ以降のステップは
+      # アーティファクトのアップロードと（任意の）PR コメントだけに絞ってある。
+      - name: Run debug command
+        id: payload
+        env:
+          SCRIPT: ${{ inputs.script }}
+        run: scripts/ci-debug-job.sh
+
+      # AI は GitHub MCP でアーティファクトを取得できないため、これはあくまで人間用の
+      # 保険（切り捨てられた全文ログ・compile_commands.json などを後から追える）。
+      - name: Upload raw output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ci-debug-${{ inputs.label }}
+          path: debug-out
+          if-no-files-found: warn
+          retention-days: 7
+
+      # 完了通知の保険。PR 購読中のセッションには「CI 失敗」とコメントは配信される
+      # が、成功は配信されない。scripts/ci-debug.sh のバックグラウンド待機が主たる
+      # 通知経路で、これはその待機プロセスが失われた場合（セッション再開など）に
+      # 結果へ追いつくための冗長化。既定はオフ（notify_pr が空なら投稿しない）。
+      - name: Comment the result on a pull request
+        if: always() && inputs.notify_pr != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.notify_pr }}
+          OUTCOME: ${{ steps.payload.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          {
+            echo "**ci-debug** \`mode=$MODE platform=$PLATFORM\` — **$OUTCOME** ([run]($RUN_URL))"
+            echo
+            echo "<details><summary>payload (label: <code>$LABEL</code>)</summary>"
+            echo
+            echo '```text'
+            if [ -f debug-out/payload.txt ]; then
+              head -n 120 debug-out/payload.txt
+            else
+              echo "(no payload — the job failed before the debug command ran)"
+            fi
+            echo '```'
+            echo
+            echo "</details>"
+          } > comment.md
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md
