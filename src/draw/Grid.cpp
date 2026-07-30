@@ -88,7 +88,7 @@ namespace HomeskzIfcImport::draw
 				return false;
 
 			// プロファイル: 空グループ（Python 版の BeginGroup/EndGroup に対応）。
-			VWGroupObj profileGroup;
+			const VWGroupObj profileGroup;
 
 			// パス＋プロファイルから GridAxis のカスタムオブジェクト（PIO）を生成する。
 			// 第 4 引数は生成後に再計算するか（true）。'GridAxis' PIO が無い等で失敗（nil）

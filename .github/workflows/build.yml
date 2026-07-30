@@ -208,6 +208,12 @@ jobs:
       # Vectorworks header and has no GS_MAC / GS_WIN branch, so lint.yml already
       # tidies it under the same rules on a free Linux runner — re-tidying it
       # inside both (expensive) SDK jobs found nothing the Linux job would miss.
+      #
+      # src/draw/ is globbed rather than listed: every module there is SDK-bound
+      # by definition (CLAUDE.md「依存の向きは厳守する」), so a new draw module is
+      # tidied the moment it lands. The three named files are the rest of the
+      # SDK-only surface, which does not grow per milestone. NB: `mapfile` is
+      # bash 4+, and macOS ships bash 3.2 — hence plain glob expansion.
       - name: Static analysis (clang-tidy, SDK-dependent code)
         run: |
           set -euo pipefail
@@ -222,10 +228,10 @@ jobs:
             -DVW_SDK_DIR="$VW_SDK_DIR" \
             -DVW_ENABLE_PCH=OFF \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-          "$tidy" -p build-tidy --warnings-as-errors='*' \
-            src/ModuleMain.cpp \
-            src/Extensions/ExtMenu.cpp \
-            src/Updater.cpp
+          files=(src/draw/*.cpp src/ModuleMain.cpp src/Extensions/ExtMenu.cpp src/Updater.cpp)
+          echo "Tidying ${#files[@]} SDK-dependent translation units:"
+          printf '  %s\n' "${files[@]}"
+          "$tidy" -p build-tidy --warnings-as-errors='*' "${files[@]}"
 
       - name: Build
         # Builds only the channel this run publishes (VW_BUILD_CHANNEL), compiling
@@ -491,12 +497,15 @@ jobs:
           # warnings-as-errors, that deprecation notice alone would fail the run.
           # The flag is still needed (see above) and functional, so silence just
           # its deprecation warning; everything else stays an error.
+          # Same globbed set as the macOS job (see the comment there); this run
+          # covers the GS_WIN branches.
+          files=(src/draw/*.cpp src/ModuleMain.cpp src/Extensions/ExtMenu.cpp src/Updater.cpp)
+          echo "Tidying ${#files[@]} SDK-dependent translation units:"
+          printf '  %s\n' "${files[@]}"
           "$tidy" -p build-tidy --warnings-as-errors='*' \
             --extra-arg=-fdelayed-template-parsing \
             --extra-arg=-Wno-delayed-template-parsing-in-cxx20 \
-            src/ModuleMain.cpp \
-            src/Extensions/ExtMenu.cpp \
-            src/Updater.cpp
+            "${files[@]}"
 
       - name: Build
         # Builds only the channel this run publishes (VW_BUILD_CHANNEL). --parallel

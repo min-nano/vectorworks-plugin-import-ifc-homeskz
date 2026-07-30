@@ -134,8 +134,7 @@ jobs:
       - name: Run clang-tidy
         run: |
           set -euo pipefail
-          mapfile -t files < <(find src/core src/parse -name '*.cpp' | sort)
-          files+=(src/UpdaterFlow.cpp)
+          files=(src/core/*.cpp src/parse/*.cpp src/UpdaterFlow.cpp)
           echo "Tidying ${#files[@]} SDK-free translation units:"
           printf '  %s\n' "${files[@]}"
           "clang-tidy-${CLANG_VERSION}" -p build --warnings-as-errors='*' "${files[@]}"

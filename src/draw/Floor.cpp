@@ -142,11 +142,16 @@ namespace HomeskzIfcImport::draw
 		{
 			if (componentCount <= 0)
 				return;
-			const bool top = (datum == core::SlabDatum::Top);
-			const short component = top ? 0 : static_cast<short>(componentCount - 1);
-			gSDK->SetDatumSlabComponent(object, component);
+			// ローカル名は SDK 側の引数名（componentIndex / datumIsTopOfComponent）に
+			// 寄せてある。似た並びの short + bool を渡すため、名前が違うと
+			// clang-tidy の readability-suspicious-call-argument が
+			// 「引数が入れ替わっているのでは」と誤検知する。
+			const bool datumIsTop = (datum == core::SlabDatum::Top);
+			// 三項演算子の共通型は int になるので、short への縮小は 1 か所でまとめて行う。
+			const short componentIndex = static_cast<short>(datumIsTop ? 0 : componentCount - 1);
+			gSDK->SetDatumSlabComponent(object, componentIndex);
 			// 構成要素を指すだけでは既定の面（中心／下端）のままなので、面も明示する。
-			gSDK->SetComponentDatumIsTopOfComponent(object, component, top);
+			gSDK->SetComponentDatumIsTopOfComponent(object, componentIndex, datumIsTop);
 		}
 
 		// 階ごとのスラブスタイル（"1F-床スタイル" 等）を用意して索引を返す。既にあれば
