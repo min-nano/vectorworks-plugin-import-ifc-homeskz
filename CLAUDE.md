@@ -281,17 +281,35 @@ SDK 依存のビルドエラーの再現や「この API は SDK にあるか」
 dev プレリリースとして公開される・ccache / SDK キャッシュを汚す、と副作用が大きい。
 調査は必ず下記の経路で行う。
 
-### 使い方
+### 使い方（リモートセッションの AI はこの 2 手順）
+
+リモートセッションのコンテナに入っている `GITHUB_TOKEN` は**読み取り専用**で
+`actions: write` を持たない（REST でのディスパッチは 403 になる）。したがって
+**起動は GitHub MCP、待機はスクリプト**という 2 手順になる。
+
+```
+1. mcp__github__actions_run_trigger
+     method: run_workflow, workflow_id: "ci-debug.yml", ref: <調査したいブランチ>,
+     inputs: {mode, platform, label, args, script, notify_pr}
+     ※ label は一意な文字列にする（これで run を特定する）
+
+2. Bash(run_in_background: true):
+     scripts/ci-debug.sh wait --label <label>
+```
+
+**手順 2 は必ず `run_in_background: true` で投げる。** このスクリプトは「run の特定 →
+完了待ち → ペイロード抽出」を行って**完了した瞬間に exit する**ので、待機時間ゼロ・
+タイマー不要で結果を受け取れる（バックグラウンドコマンドの終了はハーネスが通知する）。
+投げたら別作業を続け、終了通知が来たら出力ファイルを `Read` するだけでよい。
+**`sleep` で待ってはいけない。**
+
+書き込み権限のあるトークン（PAT など）が使える環境では、起動と待機をまとめた
 
 ```bash
 scripts/ci-debug.sh run --mode sdk-grep --args 'GetLayerByName'
 ```
 
-**必ず `Bash` の `run_in_background: true` で投げる。** このスクリプトは
-「ディスパッチ → run の特定 → 完了待ち → ジョブログからペイロード抽出」までを行って
-**完了した瞬間に exit する**ので、待機時間ゼロ・タイマー不要で結果を受け取れる
-（バックグラウンドコマンドの終了はハーネスが通知する）。投げたら別作業を続け、
-終了通知が来たら出力ファイルを `Read` するだけでよい。**`sleep` で待ってはいけない。**
+が使える（`run` は内部で 1 と 2 を続けて行う。403 が返る環境では上の 2 手順に切り替える）。
 
 | mode | 用途 | `--args` |
 | --- | --- | --- |

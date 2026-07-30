@@ -285,9 +285,24 @@ emit_payload() {
 #
 # 注釈のメッセージ長には上限があるため、ここでは先頭 ANNOTATION_MAX_LINES 行に絞る。
 # 全文は従来どおりログとアーティファクトに残るので、情報が失われるわけではない。
+#
+# 絞るときは END マーカー行を必ず残す。単純に head で切ると END 行ごと落ちてしまい、
+# 読み手が「切られた」ことに気づけない（＝これ以上ヒットが無い、と誤読する）ため。
 emit_annotation() {
-	local max="${ANNOTATION_MAX_LINES:-120}" body
-	body="$(head -n "$max" "$PAYLOAD" |
+	local max="${ANNOTATION_MAX_LINES:-120}" total body
+	total="$(wc -l <"$PAYLOAD" | tr -d ' ')"
+
+	if [ "$total" -le "$max" ]; then
+		body="$(cat "$PAYLOAD")"
+	else
+		body="$(
+			head -n "$((max - 2))" "$PAYLOAD"
+			echo "... (annotation truncated: showing $((max - 2)) of $total lines — the full payload is in the job log and the run artifact)"
+			tail -n 1 "$PAYLOAD"
+		)"
+	fi
+
+	body="$(printf '%s\n' "$body" |
 		sed -e 's/%/%25/g' -e 's/\r/%0D/g' |
 		awk '{printf "%s%%0A", $0}')"
 	echo "::notice title=ci-debug payload::${body}"
