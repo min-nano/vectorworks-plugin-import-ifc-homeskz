@@ -267,6 +267,53 @@ emit_payload() {
 	} >"$PAYLOAD"
 
 	cat "$PAYLOAD"
+	emit_annotation
+}
+
+# emit_annotation: ペイロードを **チェックラン注釈** としても出す。
+#
+# なぜ二重に出すか: 呼び出し側がペイロードを取る経路は本来ジョブログだが、ログ API は
+# 署名付きの Azure Blob Storage へ 302 で飛ぶ。組織の egress ポリシーがそのホストを
+# 拒否している環境（Claude Code のリモートセッションなど）では、コンテナからログ本文を
+# 取得できない。一方、注釈は
+#
+#   GET /repos/{owner}/{repo}/check-runs/{check_run_id}/annotations
+#
+# つまり api.github.com だけで読めるうえ、ログのノイズ（セットアップ手順・アーティファクト
+# アップロード・ポストジョブ後始末）が混ざらない。ワークフローコマンドの仕様で改行は
+# %0A へエスケープする必要がある（% と CR も同様）。
+#
+# **GitHub は注釈のメッセージを 4096 文字ちょうどで切る**（実測）。しかも切り方は
+# 単語の途中でも構わない乱暴なもので、そのままだと END マーカーごと消えて「これで
+# 全部だ」と誤読される。そこで自前でバイト予算に収め、切り詰めた旨の 1 行と END
+# マーカー行を**必ず**収まる形で残す。全文はジョブログとアーティファクトに残る。
+#
+# END 行には lines_total が入っているので、注釈側が切られていても「本当は何行あった
+# のか」は読み手に伝わる。
+emit_annotation() {
+	local budget="${ANNOTATION_MAX_BYTES:-3800}" total kept body tail_line notice
+	total="$(wc -l <"$PAYLOAD" | tr -d ' ')"
+	tail_line="$(tail -n 1 "$PAYLOAD")"
+	notice="... (annotation truncated by GitHub's 4096-char limit — the full payload is in the job log and the run artifact)"
+
+	# 予算から「切り詰め通知＋END 行」ぶんを引いた範囲まで、行単位で詰める。
+	# 文字数ではなくバイト数で数えるため LC_ALL=C（日本語のエラーメッセージ対策）。
+	body="$(LC_ALL=C awk -v limit="$((budget - ${#notice} - ${#tail_line} - 4))" '
+		{
+			len += length($0) + 1
+			if (len > limit) { exit }
+			print
+		}' "$PAYLOAD")"
+
+	kept="$(printf '%s\n' "$body" | wc -l | tr -d ' ')"
+	if [ "$kept" -lt "$total" ]; then
+		body="$(printf '%s\n%s\n%s' "$body" "$notice" "$tail_line")"
+	fi
+
+	body="$(printf '%s\n' "$body" |
+		sed -e 's/%/%25/g' -e 's/\r/%0D/g' |
+		awk '{printf "%s%%0A", $0}')"
+	echo "::notice title=ci-debug payload::${body}"
 }
 
 # ---------------------------------------------------------------------------

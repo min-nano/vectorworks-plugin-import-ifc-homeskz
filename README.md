@@ -406,9 +406,26 @@ scripts/ci-debug.sh run --mode compile-one --args src/parse/Grid.cpp
 scripts/ci-debug.sh run --mode shell --script 'cmake --version; ls "$VW_SDK_DIR/SDKLib"'
 ```
 
-ディスパッチ → 実行中の run の特定 → **完了まで待機** → ジョブログから結果ブロックだけを
-抽出、までを 1 コマンドで行い、完了と同時に終了します（`GITHUB_TOKEN` / `GH_TOKEN` が
-必要）。GitHub の Actions 画面を見に行かなくても、結果が標準出力に出ます。
+ディスパッチ → 実行中の run の特定 → **完了まで待機** → 結果ブロックだけを抽出、までを
+1 コマンドで行い、完了と同時に終了します（`GITHUB_TOKEN` / `GH_TOKEN` が必要）。GitHub の
+Actions 画面を見に行かなくても、結果が標準出力に出ます。
+
+結果は `===== BEGIN PAYLOAD … END PAYLOAD (exit=N lines_total=N truncated=…) =====` で
+挟まれた 1 ブロックとして返ります。取得経路は 2 つあり、順に試します。
+
+1. **チェックラン注釈** — ランナー側が結果を `::notice::` としても出しているので、
+   `GET /repos/{owner}/{repo}/check-runs/{id}/annotations` から読めます。`api.github.com`
+   だけで完結し、ログのノイズ（セットアップやポストジョブ後始末）が混ざりません。
+   GitHub が注釈を 4096 文字で切るため、超える場合は**切り詰めた旨と `lines_total`
+   入りの終了行を必ず残して**返します（黙って切れて「これで全部」と誤読されないため）。
+2. **ジョブログ** — 注釈が無いとき（調査コマンドに到達する前に落ちた場合など）の
+   フォールバック。ログ API は署名付きストレージへリダイレクトするので、そのホストを
+   egress ポリシーで塞いでいる環境では取得できず、その旨と代替手段を表示します。
+
+なお、ディスパッチには `actions: write` 権限のあるトークンが必要です。読み取り専用の
+トークンしか無い環境（クラウド上の開発セッションなど）では、起動だけを GitHub の
+API クライアント側で行い、待機と結果取得を `scripts/ci-debug.sh wait --label <label>`
+に任せる 2 手順になります。
 
 実際の調査コマンドはワークフロー本体ではなく **`scripts/ci-debug-job.sh`**（ランナー側）に
 まとまっています。モードを増やしたいときはこちらを編集すれば、作業ブランチに push する

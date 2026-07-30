@@ -281,17 +281,35 @@ SDK 依存のビルドエラーの再現や「この API は SDK にあるか」
 dev プレリリースとして公開される・ccache / SDK キャッシュを汚す、と副作用が大きい。
 調査は必ず下記の経路で行う。
 
-### 使い方
+### 使い方（リモートセッションの AI はこの 2 手順）
+
+リモートセッションのコンテナに入っている `GITHUB_TOKEN` は**読み取り専用**で
+`actions: write` を持たない（REST でのディスパッチは 403 になる）。したがって
+**起動は GitHub MCP、待機はスクリプト**という 2 手順になる。
+
+```
+1. mcp__github__actions_run_trigger
+     method: run_workflow, workflow_id: "ci-debug.yml", ref: <調査したいブランチ>,
+     inputs: {mode, platform, label, args, script, notify_pr}
+     ※ label は一意な文字列にする（これで run を特定する）
+
+2. Bash(run_in_background: true):
+     scripts/ci-debug.sh wait --label <label>
+```
+
+**手順 2 は必ず `run_in_background: true` で投げる。** このスクリプトは「run の特定 →
+完了待ち → ペイロード抽出」を行って**完了した瞬間に exit する**ので、待機時間ゼロ・
+タイマー不要で結果を受け取れる（バックグラウンドコマンドの終了はハーネスが通知する）。
+投げたら別作業を続け、終了通知が来たら出力ファイルを `Read` するだけでよい。
+**`sleep` で待ってはいけない。**
+
+書き込み権限のあるトークン（PAT など）が使える環境では、起動と待機をまとめた
 
 ```bash
 scripts/ci-debug.sh run --mode sdk-grep --args 'GetLayerByName'
 ```
 
-**必ず `Bash` の `run_in_background: true` で投げる。** このスクリプトは
-「ディスパッチ → run の特定 → 完了待ち → ジョブログからペイロード抽出」までを行って
-**完了した瞬間に exit する**ので、待機時間ゼロ・タイマー不要で結果を受け取れる
-（バックグラウンドコマンドの終了はハーネスが通知する）。投げたら別作業を続け、
-終了通知が来たら出力ファイルを `Read` するだけでよい。**`sleep` で待ってはいけない。**
+が使える（`run` は内部で 1 と 2 を続けて行う。403 が返る環境では上の 2 手順に切り替える）。
 
 | mode | 用途 | `--args` |
 | --- | --- | --- |
@@ -316,9 +334,26 @@ SDK 非依存コード（`core/` `parse/` とテスト）専用。SDK が要ら�
 ===== END PAYLOAD (exit=N lines_total=N truncated=yes|no) =====
 ```
 
-失敗して調査コマンドに到達しなかった場合はマーカーが無く、代わりにログ末尾が出る。
+`... (annotation truncated by GitHub's 4096-char limit …)` が出ていたら、それは**注釈経路の
+上限**で切られたということ（下記）。この行は必ず END マーカーの直前に入るので、END の
+`lines_total` を見れば本当の行数が分かる。全文はジョブログとアーティファクトにある。
+
+失敗して調査コマンドに到達しなかった場合はマーカーが無く、代わりに理由が出る。
 全文ログは run のアーティファクト（`ci-debug-<label>`）に残るが、**AI はアーティファクトを
 取得できない**ので、必要な情報は必ずログ側に出すこと（モードを追加するときの原則）。
+
+ペイロードの取得経路は 2 つあり、`ci-debug.sh` はこの順に試す。
+
+1. **チェックラン注釈**（`GET /repos/{owner}/{repo}/check-runs/{id}/annotations`）。
+   `ci-debug-job.sh` がペイロードを `::notice::` としても出しているので、ここから読める。
+   `api.github.com` だけで完結し、ログのノイズ（セットアップ・アーティファクト
+   アップロード・ポストジョブ後始末）も混ざらない。**通常はこちらで取れる。**
+2. **ジョブログ**。ログ API は署名付きの Azure Blob Storage へ 302 で飛ぶが、**その
+   ホストは組織の egress ポリシーで拒否されている**ため、リモートセッションの
+   コンテナからは取得できない（`curl: (56) CONNECT tunnel failed, response 403`）。
+   これは迂回してはならない制約なので、必要なときは GitHub MCP の `get_job_logs`
+   （`job_id` 指定・`return_content: true`）を使う。ただし全ログが文脈に入るので、
+   注釈で足りるならそちらで済ませる。
 
 ### 通知について
 
