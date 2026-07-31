@@ -124,7 +124,14 @@ namespace HomeskzIfcImport::parse
 											   std::optional<double> beamTopZ)
 	{
 		// 勾配の座標系（勾配方向 down・掃引方向 along・平面上の天端 Z）は野地板と共有する
-		// （parse/IfcGeometry の RoofSlope）。ほぼ水平な面・鉛直な面はここで弾かれる。
+		// （parse/IfcGeometry の RoofSlope）。
+		//
+		// ［共有に伴う挙動差・意図的］ほぼ水平な面（法線の水平成分が極小）を弾くのは従来と
+		// 同じだが、**鉛直な面（法線の鉛直成分 nz が極小）も弾くようになった**。従来の垂木は
+		// nz を見ずに平面式の分母へ渡していたため、退化した鉛直の屋根版に当たると天端 Z が
+		// 発散して無意味な垂木を並べていた。野地板（parse/Roof）は元から nz を弾いており、
+		// 屋根面を共有する以上こちらへ揃えるのが正しい（実フィクスチャには該当する屋根版が
+		// 無いため、実データでの出力は従来と一致する）。
 		RoofSlope slope;
 		if (!roofSlope(plane, slope, kFlatTol))
 			return {};
