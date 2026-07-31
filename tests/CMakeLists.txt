@@ -1,13 +1,15 @@
-# Unit tests for the plug-in's SDK-independent code. Two executables:
+# Unit tests for the plug-in's SDK-independent code. Two families of executables:
 #
-#   * UpdaterParseTests — the pure parsing/quoting/path/decision helpers in
-#                         src/UpdaterParse.h (header-only).
-#   * UpdaterFlowTests  — the update FLOWS in src/UpdaterFlow.cpp, driven through
-#                         a fake IUpdaterHost so the whole flow (branches + dialog
-#                         wording) is exercised without the SDK.
+#   * the updater tests (UpdaterParse / UpdaterFlow / UpdaterRobustness + the two
+#     bundled-script suites) — the template's own SDK-free logic;
+#   * the 2-phase tests (Core* / Step / Loader / Parse*) — the IFC import's
+#     SDK-free half (src/core/ + src/parse/), each linking the HomeskzIfcCore
+#     library. A new parse module gets a new vw_add_test entry here.
 #
-# Neither links the Vectorworks SDK, so they build and run on any toolchain —
+# None of them links the Vectorworks SDK, so they build and run on any toolchain —
 # including a plain Linux runner — which is what makes the coverage job cheap.
+# (The SDK-dependent draw/ phase has no unit tests by design: its behaviour is
+# verified on a real Vectorworks install. See tests/README.md.)
 # Enable with -DVW_BUILD_TESTS=ON (see the top-level CMakeLists.txt);
 # VW_ENABLE_COVERAGE adds gcov instrumentation.
 
@@ -86,11 +88,13 @@ vw_add_test(UpdaterFlowTests UpdaterFlowTests.cpp "${CMAKE_SOURCE_DIR}/src/Updat
 # they also guard against a refactor quietly breaking the parsing contract.
 vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 
-# Smoke test for the SDK-free 2-phase skeleton (src/core/ + src/parse/). It links
-# the HomeskzIfcCore library (defined in the top-level CMakeLists.txt) instead of
-# compiling those sources directly, proving the CMake target split builds and
-# links with no SDK present. As parse modules land, their real tests (ParseGrid,
-# Geometry, …) join this one and link the same library.
+# The instruction set (src/core/Document): the command structs' invariants and
+# validateDocument's gate for every command list that has landed so far (stories,
+# grids, floors, rafters, roofs), plus the desired layer-stack order. Links the
+# HomeskzIfcCore library (defined in the top-level CMakeLists.txt) rather than
+# compiling those sources directly, which also proves the CMake target split
+# builds and links with no SDK present. Extend it whenever a command list is
+# added to core/Document.h.
 vw_add_test(CoreDocumentTests CoreDocumentTests.cpp)
 target_link_libraries(CoreDocumentTests PRIVATE HomeskzIfcCore)
 
@@ -100,9 +104,12 @@ target_link_libraries(CoreDocumentTests PRIVATE HomeskzIfcCore)
 vw_add_test(StepTests StepTests.cpp)
 target_link_libraries(StepTests PRIVATE HomeskzIfcCore)
 
-# IFC loader + sanitiser (src/parse/Loader): text-level IFCFOOTINGTYPE removal and
-# real-fixture file loading. HOMESKZ_FIXTURES_DIR points the file-based cases at
-# the checked-in fixtures (tests/fixtures/), reused as parse modules land.
+# IFC loader (src/parse/Loader): proves the loader does NOT sanitise — the in-house
+# STEP reader has no schema, so non-standard entities (the IFC4-only IFCFOOTINGTYPE
+# that homeskz mixes into IFC2X3) are read as-is rather than stripped the way the
+# Python version had to (see src/parse/Loader.h for why) — plus real-fixture file
+# loading. HOMESKZ_FIXTURES_DIR points the file-based cases at the checked-in
+# fixtures (tests/fixtures/), reused as parse modules land.
 vw_add_test(LoaderTests LoaderTests.cpp)
 target_link_libraries(LoaderTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(LoaderTests
@@ -154,12 +161,14 @@ target_compile_definitions(ParseStoryTests
 vw_add_test(ParseStructuralClassTests ParseStructuralClassTests.cpp)
 target_link_libraries(ParseStructuralClassTests PRIVATE HomeskzIfcCore)
 
-# Floor (床板) parsing (src/parse/Floor): IfcSlab "床版" -> per-storey FL-layer floor
-# commands with a fixed 24mm thickness, the footprint centred on the grid centre, the
-# floor's bottom Z taken straight from the IFC (so skip-floor steps survive) and the
-# height bound to the 横架材天端 level with that difference as its offset. Exercised on
-# synthetic STEP snippets and the checked-in fixtures; SDK-free. HOMESKZ_FIXTURES_DIR
-# points the file-based cases at tests/fixtures/.
+# Floor (床板) parsing (src/parse/Floor): IfcSlab "床版" -> per-storey FL-layer slab
+# commands — the per-storey slab style and its 床仕上げ/床下地 components, the datum
+# face (Top on a normal storey, Bottom for the loft), the footprint centred on the
+# grid centre, the floor's Z taken straight from the IFC (so skip-floor steps survive)
+# bound to the FL level (軒高 for the loft) with that difference as its offset, and the
+# loft floor synthesised from the roof storey's floor beams when no floor slab exists.
+# Exercised on synthetic STEP snippets and the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
 vw_add_test(ParseFloorTests ParseFloorTests.cpp)
 target_link_libraries(ParseFloorTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseFloorTests
@@ -184,6 +193,17 @@ target_compile_definitions(ParseRafterTests
 vw_add_test(ParseRoofTests ParseRoofTests.cpp)
 target_link_libraries(ParseRoofTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseRoofTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
+# Shared parse context (src/parse/Context): the per-import cache that lets every
+# element's build*Commands reuse the same stories / grid centre / storey elements /
+# loft-floor regions / roof planes instead of recomputing them. Proves the cached
+# answers are stable across repeated calls AND identical to the uncached functions —
+# the cache must not change behaviour. Exercised on the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseContextTests ParseContextTests.cpp)
+target_link_libraries(ParseContextTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseContextTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity

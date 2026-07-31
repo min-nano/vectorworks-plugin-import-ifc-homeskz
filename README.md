@@ -5,27 +5,60 @@
 
 ネイティブプラグインテンプレート（`vectorworks-plugin-native-template`）を出発点に、
 ビルドシステム・CI・リリース／アップデートの仕組みまで揃った土台の上へ、IFC 解析と
-描画の機能を段階的に積み上げていきます（`ROADMAP.md`）。現時点のメニューコマンドは
-まだ骨組みで、実行すると「起動した」ことを知らせるアラートダイアログを表示します。
+描画の機能を**要素ごとに**積み上げています（進捗は `ROADMAP.md` の「現在の進捗」表が
+単一の真実）。メニューコマンドを実行すると IFC ファイルを選ぶダイアログが出て、選んだ
+ファイルからストーリ（階・レベル・デザインレイヤ）・通り芯・床・屋根組（垂木・野地板）を
+図面へ描き、描けた数を完了ダイアログに表示します。横架材・柱・基礎などの残りの要素は
+以降のマイルストーンで追加していきます。
 
 **macOS と Windows の両方**を、同じソースからビルドします（Vectorworks 2026 が対応
 する 2 プラットフォーム）。
 
 ## 構成
 
+処理は **IFC 解析フェーズ（`src/parse/`）** と **VectorWorks 描画フェーズ（`src/draw/`）**
+に完全分離し、両者は命令セット（`src/core/Document.h`）だけで接続します。`parse/` と
+`core/` は **SDK を一切 include しない**ので、SDK 無しでコンパイル・単体テストできます
+（設計の詳細は `CLAUDE.md`「アーキテクチャ: 2 フェーズ分離」）。
+
 ```
-CMakeLists.txt              macOS / Windows 両対応の CMake ビルド
+CMakeLists.txt              macOS / Windows 両対応の CMake ビルド。SDK 非依存の
+                            静的ライブラリ HomeskzIfcCore（core/ + parse/）と、
+                            SDK 依存のプラグイン本体（draw/ ほか）に分かれる
 src/
   ModuleMain.cpp            モジュールのエントリポイント。拡張機能を登録し、
                             起動時にアップデート確認を仕掛ける（stable は新しい
                             安定版確認、dev はブランチ選択）
-  Extensions/ExtMenu.{h,cpp}  アラートを表示するメニューコマンド
-  Updater.{h,cpp}           同梱した更新スクリプトを起動してアップデートを駆動する
+  Extensions/ExtMenu.{h,cpp}  「ホームズ君IFCをインポート…」メニューコマンド。
+                            ファイル選択 → parse → draw → 完了ダイアログを束ねる
+  core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
+    Document.{h,cpp}          命令セットの構造体定義と validateDocument
+    Geometry.{h,cpp}          自前の Vec2 / Vec3 / Mat4（配置行列）
+    Region.{h,cpp}            部品が囲む平面領域の合成（ロフト床の外形）
+  parse/                    Phase 1: IFC 解析（SDK 非依存）
+    Step.{h,cpp}              最小 STEP リーダ（トークナイザ＋エンティティグラフ）
+    Loader.{h,cpp}            ファイル読み込み（テキスト → STEP グラフ）
+    IfcAttr.h                 IFC 属性インデックスの唯一の定義
+    IfcGeometry.{h,cpp}       配置行列・断面・押し出し・屋根面の解決
+    Context.{h,cpp}           解析中の共有キャッシュ（同じ前処理を繰り返さない）
+    BuildDocument.{h,cpp}     解析のオーケストレーション
+    Grid / Story / Floor / Rafter / Roof / StructuralClass / Summary
+                              要素ごとの解析（Python 版 ifc/*.py に 1 対 1 で対応）
+  draw/                     Phase 2: VW 描画（SDK 依存）
+    ExecuteDocument.{h,cpp}   命令セットを検証して要素ごとにディスパッチ
+    DrawUtil.{h,cpp}          クラス分け・by-class 属性・レイヤ用意の共通ヘルパー
+    Grid / Story / Floor / Rafter / Roof
+                              要素ごとの描画（Python 版 vw/*.py に 1 対 1 で対応）
+  Updater*.{h,cpp}          同梱した更新スクリプトを起動してアップデートを駆動する
                             （macOS: vw-update.sh / Windows: vw-update.ps1）
   BuildConfig.h             stable / dev の識別切り替えスイッチ（VW_DEV_BUILD）
   PluginPrefix.h            共有プレフィックスヘッダ（SDK を取り込む）
   Module-Info.plist.in      バンドルの Info.plist テンプレート（macOS 専用・ビルド
                             ごとに埋める）
+tests/                      無 SDK の単体テスト（詳細は tests/README.md）
+  TestFramework.h           依存ゼロの極小テストハーネス
+  Fixtures.h                フィクスチャの読み込み・近似比較・フィクスチャ一覧
+  fixtures/                 ホームズ君 EX 出力の実 IFC（Python 版から流用）
 resources/
   HomeskzIfcImport.vwr/…             stable プラグインのメニュー文字列
   HomeskzIfcImportDev.vwr/…          dev プラグインのメニュー文字列
@@ -45,8 +78,14 @@ scripts/
 PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）のルール設定
 .editorconfig              エディタ側のインデント／改行／文字コード規則
 .editorconfig-checker.json  上記を CI で強制する editorconfig-checker の設定
-.github/workflows/build.yml CI: macOS（Apple Silicon）と Windows でビルドする
+.github/workflows/build.yml CI: macOS（Apple Silicon）と Windows でビルドし、
+                            リリース（main=stable / PR=dev）を公開する
+.github/workflows/test.yml  CI: 無 SDK の単体テスト（ASan+UBSan）とカバレッジ
 .github/workflows/lint.yml  CI: ソース／非ソースを問わずコーディング規則を強制
+.github/workflows/codeql.yml            CI: CodeQL による静的解析（週次＋PR）
+.github/workflows/cleanup-dev-release.yml  ブランチ削除時に dev プレリリースを片付ける
+.github/workflows/stable-release-healthcheck.yml
+                            stable リリースの取りこぼしを検知して再ビルドする
 .github/workflows/ci-debug.yml  CI: 手動ディスパッチ専用のデバッグ実行（SDK 調査・
                             ビルド再現）。push / PR では起動しない
 ```
@@ -208,7 +247,8 @@ Vectorworks 開発者クレデンシャルなし）で配布されます。
 4. **コマンドをワークスペースに追加します:** ツール ▸ ワークスペース ▸ 現在の
    ワークスペースを編集 ▸ *メニュー*。**ファイル** カテゴリの中に
    **ホームズ君IFCをインポート…** コマンドがあるので、メニューにドラッグしてください。
-   実行するとアラートが表示されます（実際のインポートは今後のマイルストーンで実装）。
+   実行すると IFC ファイルの選択ダイアログが出て、選んだファイルの内容が図面に描かれます
+   （現在の対応要素は `ROADMAP.md` の「現在の進捗」を参照）。
 
 ### Windows
 
@@ -232,18 +272,25 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 
 ## テストとカバレッジ
 
-アップデータ（`src/Updater.cpp`）のうち、SDK に依存しない純粋なロジック
-（スクリプト出力のパース、コマンドラインのクォート、インストール先パスの導出）は
-`src/UpdaterParse.h` に切り出してあります。これにより、Vectorworks SDK なしで
-**どのプラットフォームでも**ユニットテストを実行できます。テスト本体は
-`tests/`（`tests/UpdaterParseTests.cpp`）にあり、外部依存のない極小のテストハーネス
-（`tests/TestFramework.h`）を使うため、テストフレームワークのダウンロードも不要です。
-同梱スクリプトのバックエンド（`q-stable` / `q-dev` / `do-install`）も、ネットワーク
-境界だけを差し替えて同じく SDK ／ネットワーク抜きにテストします — macOS 版
-`scripts/vw-update.sh` は `tests/vw-update.test.sh`（bash＋`curl`/`plutil` スタブ）、
-Windows 版 `scripts/vw-update.ps1` は `tests/vw-update.Tests.ps1`（PowerShell 7＋
-`Invoke-GH`/`Invoke-WebRequest` スタブ）で、いずれも Linux ランナー上で動きます
-（詳細は `tests/README.md`）。
+テストはすべて **Vectorworks SDK 無し**で走ります（SDK は約 800 MB のダウンロードを
+伴うため）。外部依存のない極小のテストハーネス（`tests/TestFramework.h`）を使うので、
+テストフレームワークのダウンロードも不要です。対象は 2 系統あります。
+
+- **インポート機能の解析側**（`src/core/` + `src/parse/`）… 2 フェーズ分離により SDK に
+  触れないので、実際のホームズ君 IFC（`tests/fixtures/`）に対して要素ごとに単体テスト
+  します（STEP リーダ・幾何・通り芯・ストーリ・床・垂木・野地板・構造クラス判定…）。
+  描画側（`src/draw/`）は SDK と実図面を要するため単体テストを持たず、実機での目視確認
+  （`ROADMAP.md` の各マイルストーンの「ローカル確認」）に委ねます。
+- **アップデータ**（`src/Updater.cpp`）… SDK に依存しない純粋なロジック（スクリプト出力の
+  パース、コマンドラインのクォート、インストール先パスの導出）を `src/UpdaterParse.h` に
+  切り出し、更新フロー本体は `IUpdaterHost` のフェイク越しに丸ごと動かします。同梱
+  スクリプトのバックエンド（`q-stable` / `q-dev` / `do-install`）も、ネットワーク境界だけを
+  差し替えて SDK ／ネットワーク抜きにテストします — macOS 版 `scripts/vw-update.sh` は
+  `tests/vw-update.test.sh`（bash＋`curl`/`plutil` スタブ）、Windows 版
+  `scripts/vw-update.ps1` は `tests/vw-update.Tests.ps1`（PowerShell 7＋
+  `Invoke-GH`/`Invoke-WebRequest` スタブ）で、いずれも Linux ランナー上で動きます。
+
+**テストの一覧・方針・何をテストしていないかは `tests/README.md`** に詳しくあります。
 
 ローカルでの実行（SDK 不要）:
 
@@ -402,50 +449,22 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 を持たない）。SDK キャッシュは `build.yml` と同じキーで **読み取り専用**に復元するので、
 デバッグ実行が本番ビルドのキャッシュを汚すこともありません。
 
-起動から結果取得までは `scripts/ci-debug.sh` が一手に引き受けます。
+起動から結果取得までは `scripts/ci-debug.sh` が一手に引き受けます。ディスパッチ →
+実行中の run の特定 → **完了まで待機** → 結果ブロックだけを抽出、までを 1 コマンドで
+行い、完了と同時に終了します（`GITHUB_TOKEN` / `GH_TOKEN` が必要）。
 
 ```bash
 # SDK ヘッダを検索する（この API は SDK にあるか？）
 scripts/ci-debug.sh run --mode sdk-grep --args 'GetLayerByName'
 
-# ヘッダの全文を読む
-scripts/ci-debug.sh run --mode sdk-ls --args 'Interfaces/VectorWorks/ISDK.h'
-
-# ビルドエラーを再現する（--args で単一ターゲットに絞れる）
+# ビルドエラーを再現する（--platform で mac / windows / linux を選ぶ）
 scripts/ci-debug.sh run --mode build --platform windows
-
-# 1 ファイルだけコンパイルする（数十秒）
-scripts/ci-debug.sh run --mode compile-one --args src/parse/Grid.cpp
-
-# 逃げ道: 任意の bash
-scripts/ci-debug.sh run --mode shell --script 'cmake --version; ls "$VW_SDK_DIR/SDKLib"'
 ```
 
-ディスパッチ → 実行中の run の特定 → **完了まで待機** → 結果ブロックだけを抽出、までを
-1 コマンドで行い、完了と同時に終了します（`GITHUB_TOKEN` / `GH_TOKEN` が必要）。GitHub の
-Actions 画面を見に行かなくても、結果が標準出力に出ます。
-
-結果は `===== BEGIN PAYLOAD … END PAYLOAD (exit=N lines_total=N truncated=…) =====` で
-挟まれた 1 ブロックとして返ります。取得経路は 2 つあり、順に試します。
-
-1. **チェックラン注釈** — ランナー側が結果を `::notice::` としても出しているので、
-   `GET /repos/{owner}/{repo}/check-runs/{id}/annotations` から読めます。`api.github.com`
-   だけで完結し、ログのノイズ（セットアップやポストジョブ後始末）が混ざりません。
-   GitHub が注釈を 4096 文字で切るため、超える場合は**切り詰めた旨と `lines_total`
-   入りの終了行を必ず残して**返します（黙って切れて「これで全部」と誤読されないため）。
-2. **ジョブログ** — 注釈が無いとき（調査コマンドに到達する前に落ちた場合など）の
-   フォールバック。ログ API は署名付きストレージへリダイレクトするので、そのホストを
-   egress ポリシーで塞いでいる環境では取得できず、その旨と代替手段を表示します。
-
-なお、ディスパッチには `actions: write` 権限のあるトークンが必要です。読み取り専用の
-トークンしか無い環境（クラウド上の開発セッションなど）では、起動だけを GitHub の
-API クライアント側で行い、待機と結果取得を `scripts/ci-debug.sh wait --label <label>`
-に任せる 2 手順になります。
-
-実際の調査コマンドはワークフロー本体ではなく **`scripts/ci-debug-job.sh`**（ランナー側）に
-まとまっています。モードを増やしたいときはこちらを編集すれば、作業ブランチに push する
-だけで試せます（`workflow_dispatch` はデフォルトブランチにあるワークフロー定義しか
-起動できないため、ワークフロー本体を変えた場合だけ `main` へのマージが必要です）。
+**モードの一覧・結果ブロックの読み方（`BEGIN/END PAYLOAD` マーカーと `truncated`）・
+読み取り専用トークンしか無い環境での 2 手順・モードの増やし方は、`CLAUDE.md` の
+「CI デバッグ」節が単一の真実です。** そちらを参照してください（この README では
+重ねて説明しません）。
 
 ## コーディング規則の強制（Lint）
 

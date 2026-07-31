@@ -846,4 +846,99 @@ TEST(footprint_of_empty_profile_is_empty)
 	CHECK(parse::footprint(empty).empty());
 }
 
+// ---------------------------------------------------------------------------
+// RoofSlope（屋根面の勾配座標系。垂木 parse/Rafter と野地板 parse/Roof が共有する）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 試験用の片流れ屋根面: 4m×3m の矩形が +Y へ立ち上がる。軒（y=0）で z=1000、
+	// 棟（y=3000）で z=2000 なので z = 1000 + y/3 ⇒ 上向き単位法線 (0, −1, 3)/√10。
+	parse::RoofPlane shedPlane()
+	{
+		const double s = std::sqrt(10.0);
+		parse::RoofPlane plane;
+		plane.vertices = {Vec3{0.0, 0.0, 1000.0}, Vec3{4000.0, 0.0, 1000.0},
+						  Vec3{4000.0, 3000.0, 2000.0}, Vec3{0.0, 3000.0, 2000.0}};
+		plane.normal = Vec3{0.0, -1.0 / s, 3.0 / s};
+		return plane;
+	}
+} // namespace
+
+TEST(roof_slope_directions_and_height)
+{
+	parse::RoofSlope slope;
+	CHECK(parse::roofSlope(shedPlane(), slope));
+
+	// 勾配方向は最急降下＝法線の水平成分の向き。この面では −Y（軒側）へ下る。
+	CHECK(near(slope.down.x, 0.0));
+	CHECK(near(slope.down.y, -1.0));
+	// 掃引方向は勾配方向を +90° 回した向き（along = (−down.y, down.x)）＝軒・棟に平行。
+	CHECK(near(slope.along.x, 1.0));
+	CHECK(near(slope.along.y, 0.0));
+	// 直交していること（向きの取り方が変わっても崩れない性質）。
+	CHECK(near((slope.down.x * slope.along.x) + (slope.down.y * slope.along.y), 0.0));
+	// rise/run は単位法線の水平／鉛直成分。slope = rise/run = tanθ = 1/3。
+	const double s = std::sqrt(10.0);
+	CHECK(near(slope.rise, 1.0 / s));
+	CHECK(near(slope.run, 3.0 / s));
+	CHECK(near(slope.rise / slope.run, 1.0 / 3.0));
+
+	// 平面上の天端 Z。ストーリ相対で、elevationOffset を足すと絶対値になる。
+	CHECK(near(slope.zAt(0.0, 0.0), 1000.0));
+	CHECK(near(slope.zAt(4000.0, 3000.0), 2000.0));
+	CHECK(near(slope.zAt(1234.0, 1500.0), 1500.0));
+	CHECK(near(slope.zAt(0.0, 0.0, 6000.0), 7000.0));
+}
+
+TEST(roof_slope_rejects_degenerate_planes)
+{
+	parse::RoofSlope slope;
+
+	// 頂点の無い面。
+	parse::RoofPlane empty;
+	empty.normal = Vec3{0.0, -1.0, 3.0};
+	CHECK(!parse::roofSlope(empty, slope));
+
+	// ほぼ水平な面（法線の水平成分が極小）: 勾配方向が定まらない。
+	parse::RoofPlane flat = shedPlane();
+	flat.normal = Vec3{0.0, 0.0, 1.0};
+	CHECK(!parse::roofSlope(flat, slope));
+
+	// 鉛直な面（法線の鉛直成分が極小）: 平面式の分母が 0 になり天端 Z が定まらない。
+	// 垂木・野地板の双方がこれを弾く（parse/Rafter.cpp の共有メモ参照）。
+	parse::RoofPlane vertical = shedPlane();
+	vertical.normal = Vec3{0.0, 1.0, 0.0};
+	CHECK(!parse::roofSlope(vertical, slope));
+}
+
+TEST(roof_slope_plan_and_projection_range)
+{
+	const parse::RoofPlane plane = shedPlane();
+
+	// plan は頂点の Z を落とした平面投影。
+	const std::vector<Vec2> plan = parse::RoofSlope::plan(plane);
+	CHECK_EQ(plan.size(), plane.vertices.size());
+	CHECK(near(plan[2].x, 4000.0));
+	CHECK(near(plan[2].y, 3000.0));
+
+	parse::RoofSlope slope;
+	CHECK(parse::roofSlope(plane, slope));
+
+	// 掃引方向（−X）への射影の広がりは矩形の幅 4000。
+	double lo = 0.0;
+	double hi = 0.0;
+	parse::RoofSlope::projectionRange(plan, slope.along, lo, hi);
+	CHECK(near(hi - lo, 4000.0));
+
+	// 勾配方向（−Y）への射影の広がりは奥行き 3000。
+	parse::RoofSlope::projectionRange(plan, slope.down, lo, hi);
+	CHECK(near(hi - lo, 3000.0));
+
+	// 空の点列は [0, 0]（呼び出し側が落ちないための防御。退化面はここへ来る前に弾かれる）。
+	parse::RoofSlope::projectionRange({}, slope.along, lo, hi);
+	CHECK(near(lo, 0.0));
+	CHECK(near(hi, 0.0));
+}
+
 TEST_MAIN();

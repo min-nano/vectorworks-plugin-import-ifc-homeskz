@@ -40,6 +40,8 @@
 
 namespace HomeskzIfcImport::parse
 {
+	class Context;
+
 	// 野地板の厚み（mm）。要件により 12mm 固定（Python 版 NOJIITA_THICKNESS と同値。IFC に
 	// 野地板固有の厚み情報が無いための決め打ち）。
 	inline constexpr double kNojiitaThickness = 12.0;
@@ -70,4 +72,7 @@ namespace HomeskzIfcImport::parse
 	// 並びは階（Elevation 昇順）→ 階内は要素の出現順で、エンティティ列挙順に依存しない
 	// 決定的な結果になる。
 	std::vector<core::RoofCommand> buildRoofCommands(const Model& model);
+
+	// 同上。共有コンテキストのストーリ一覧・センタリング中心・屋根面を使う（parse/Context.h）。
+	std::vector<core::RoofCommand> buildRoofCommands(Context& context);
 } // namespace HomeskzIfcImport::parse

@@ -136,6 +136,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/core/Geometry.cpp
 		src/core/Region.cpp
 		src/parse/BuildDocument.cpp
+		src/parse/Context.cpp
 		src/parse/Step.cpp
 		src/parse/Loader.cpp
 		src/parse/Summary.cpp
@@ -264,6 +265,7 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtMenu.cpp
 		src/Updater.cpp
 		src/UpdaterFlow.cpp
+		src/draw/DrawUtil.cpp
 		src/draw/ExecuteDocument.cpp
 		src/draw/Grid.cpp
 		src/draw/Story.cpp

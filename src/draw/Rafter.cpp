@@ -51,6 +51,7 @@
 
 #include "PluginPrefix.h"
 #include "draw/Rafter.h"
+#include "draw/DrawUtil.h"
 #include "core/Document.h"
 
 // 配置行列（VWTransformMatrix）と PIO パラメータ設定（VWParametricObj）。フォールバックの
@@ -130,28 +131,6 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kStructuralUseRafterKey = "rafter";
 		constexpr const char* kMaterialWoodText = "木";
 		constexpr const char* kMaterialWoodKey = "wood";
-
-		// オブジェクトのクラスを名前で設定する（draw/Grid.cpp・draw/Floor.cpp と同じヘルパー）。
-		void SetClassByName(MCObjectHandle object, const std::string& className)
-		{
-			if (className.empty())
-				return;
-			const InternalIndex classID = gSDK->AddClass(TXString(className.c_str()));
-			gSDK->SetObjectClass(object, classID);
-		}
-
-		// 描画属性（線幅・色・パターン・矢印・透明度）をすべてクラス属性に従わせる
-		// （draw/Floor.cpp と同じ規約。SetObjectClass だけでは by-instance の既定値が残る）。
-		void SetAllAttributesByClass(MCObjectHandle object)
-		{
-			gSDK->SetPColorsByClass(object);
-			gSDK->SetFColorsByClass(object);
-			gSDK->SetLWByClass(object);
-			gSDK->SetPPatByClass(object);
-			gSDK->SetFPatByClass(object);
-			gSDK->SetArrowByClass(object);
-			gSDK->SetOpacityByClass(object);
-		}
 
 		// 角度を PIO の角度パラメータへ渡す文字列にする（度記号付き。Python 版 f'{pitch}°'）。
 		// "%g" で余分な 0 を落とす。
@@ -294,11 +273,9 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		for (const core::RafterCommand& rafter : document.rafters)
 		{
-			// 配置先レイヤ（"n-垂木"）が無い命令はスキップする（レイヤは story 命令が作る）。
-			MCObjectHandle layer = gSDK->GetNamedLayer(TXString(rafter.layer.c_str()));
-			if (layer == nil)
+			// 配置先レイヤ（"n-垂木"）が無い命令はスキップする（規約は ActivateExistingLayer）。
+			if (ActivateExistingLayer(rafter.layer) == nil)
 				continue;
-			gSDK->SetCurrentLayer(layer);
 
 			if (DrawOne(rafter))
 				++drawn;

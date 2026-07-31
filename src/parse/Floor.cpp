@@ -6,7 +6,9 @@
 //
 
 #include "parse/Floor.h"
+#include "parse/Context.h"
 #include "parse/Grid.h"
+#include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Story.h"
 #include "parse/StructuralClass.h"
@@ -28,34 +30,22 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 高さ基準にするレベル種別名。parse/Story が作るレベル名と一致させる（Python 版
-		// LEVEL_FL / LEVEL_EAVES）。ここがズレると SetObjectStoryBound が解決できないレベルを
-		// 指してしまう。FL レイヤ名の接尾辞（"1-FL" / "R-FL" の "FL"）も同じ名前。
-		constexpr const char* kLevelFL = "FL";
-		constexpr const char* kLevelEaves = "軒高";
-
-		// IfcRoot の Name 属性インデックス（GlobalId, OwnerHistory, Name=2, …）。
-		constexpr std::size_t kNameAttr = 2;
-
 		// スラブスタイル名の接尾辞と、最上階（屋根）の接頭辞。
 		constexpr const char* kStyleSuffix = "-床スタイル";
 		constexpr const char* kRoofStylePrefix = "屋根";
-
-		// 要素が床板（IfcSlab かつ Name が "床版"）か（Python 版 _is_floor_slab）。
-		bool isFloorSlab(const Entity& element)
-		{
-			if (element.type != "IFCSLAB")
-				return false;
-			const Value& name = element.attribute(kNameAttr);
-			return name.type == ValueType::String && name.text == kFloorSlabName;
-		}
 	} // namespace
 
-	bool storyHasFloorSlab(const Model& model, int storeyId)
+	bool isFloorSlab(const Entity& element)
 	{
-		// 戻り値を一度束縛してから走査する（一時オブジェクトを直接 ranges へ渡さない）。
-		const std::vector<int> elementIds = collectStoryElements(model, storeyId);
-		return std::ranges::any_of(elementIds,
+		if (element.type != "IFCSLAB")
+			return false;
+		return entityName(element) == kFloorSlabName;
+	}
+
+	bool storyHasFloorSlab(Context& context, int storeyId)
+	{
+		const Model& model = context.model();
+		return std::ranges::any_of(context.storyElements(storeyId),
 								   [&model](int elementId)
 								   {
 									   const Entity* element = model.entity(elementId);
@@ -63,15 +53,22 @@ namespace HomeskzIfcImport::parse
 								   });
 	}
 
-	std::vector<LoftFloorRegion> loftFloorRegions(const Model& model, int storeyId)
+	bool storyHasFloorSlab(const Model& model, int storeyId)
+	{
+		Context context(model);
+		return storyHasFloorSlab(context, storeyId);
+	}
+
+	std::vector<LoftFloorRegion> loftFloorRegions(Context& context, int storeyId)
 	{
 		// 屋根階の床梁（床大梁・床小梁・甲乙梁）の平面外形を集める。種別は IFC Name の
 		// 記録だけで判定する（resolveMemberClass の高さ推定は使わない。屋根階の無名部材
 		// ＝火打・隅木谷木まで床梁に化けると、床でない領域まで囲ってしまうため）。
+		const Model& model = context.model();
 		std::vector<std::vector<Vec2>> parts;
 		double beamTop = 0.0;
 		bool hasBeamTop = false;
-		for (const int elementId : collectStoryElements(model, storeyId))
+		for (const int elementId : context.storyElements(storeyId))
 		{
 			const Entity* element = model.entity(elementId);
 			if (element == nullptr)
@@ -79,7 +76,7 @@ namespace HomeskzIfcImport::parse
 			if (element->type != "IFCBEAM" && element->type != "IFCMEMBER")
 				continue;
 			const std::optional<std::string> memberClass =
-				memberClassFromName(element->attribute(kNameAttr).text);
+				memberClassFromName(entityName(*element));
 			if (!memberClass.has_value() || *memberClass != CLASS_YUKABARI)
 				continue;
 
@@ -105,9 +102,23 @@ namespace HomeskzIfcImport::parse
 		return regions;
 	}
 
+	std::vector<LoftFloorRegion> loftFloorRegions(const Model& model, int storeyId)
+	{
+		Context context(model);
+		return loftFloorRegions(context, storeyId);
+	}
+
+	bool storyHasLoftFloor(Context& context, int storeyId)
+	{
+		// ロフト床の合成はセル格子の flood fill を伴うので、コンテキストのキャッシュを通す
+		// （ストーリのレベル追加と床の合成で同じ結果を 2 度計算していた）。
+		return storyHasFloorSlab(context, storeyId) || !context.loftFloorRegions(storeyId).empty();
+	}
+
 	bool storyHasLoftFloor(const Model& model, int storeyId)
 	{
-		return storyHasFloorSlab(model, storeyId) || !loftFloorRegions(model, storeyId).empty();
+		Context context(model);
+		return storyHasLoftFloor(context, storeyId);
 	}
 
 	std::string floorSlabStyleName(std::size_t index, bool isTop)
@@ -118,15 +129,15 @@ namespace HomeskzIfcImport::parse
 		return std::to_string(index + 1) + "F" + kStyleSuffix;
 	}
 
-	std::vector<FloorCommand> buildFloorCommands(const Model& model)
+	std::vector<FloorCommand> buildFloorCommands(Context& context)
 	{
-		const std::vector<StoryInfo> stories = collectStories(model);
+		const Model& model = context.model();
+		const std::vector<StoryInfo> stories = context.stories();
 		if (stories.empty())
 			return {};
 
-		// 通り芯と同じセンタリングオフセット（通り芯が無ければ補正なし＝生の IFC 座標）。
-		Vec2 center{0.0, 0.0};
-		resolveGridCenter(model, center);
+		// 通り芯と同じセンタリングオフセット（通り芯が無ければ (0,0)＝生の IFC 座標）。
+		const Vec2 center = context.gridCenter();
 
 		std::vector<FloorCommand> commands;
 		for (std::size_t i = 0; i < stories.size(); ++i)
@@ -134,9 +145,9 @@ namespace HomeskzIfcImport::parse
 			const StoryInfo& story = stories[i];
 
 			// 配置先レイヤは parse/Story のレイヤ名規約と同じ "{接頭辞}-FL"（一般階は
-			// "1-FL"…、屋根階は "R-FL"）。屋根階の FL レベルは床版があるときだけ
+			// "1-FL"…、屋根階は "R-FL"）。屋根階の FL レベルは床があるときだけ
 			// parse/Story が作る（ロフト＝小屋裏収納の床）。
-			const std::string layer = storyLayerPrefix(i, story.isTop) + "-" + kLevelFL;
+			const std::string layer = storyLayerName(i, story.isTop, kLevelFL);
 
 			// 床を受ける基準高さ（横架材天端＝床下地の下端）の絶対 Z。段差床はここからの
 			// 高低差でずれる。屋根階は軒高（ストーリ原点）がその高さにあたる。
@@ -188,7 +199,7 @@ namespace HomeskzIfcImport::parse
 			};
 
 			const std::size_t before = commands.size();
-			for (const int elementId : collectStoryElements(model, story.id))
+			for (const int elementId : context.storyElements(story.id))
 			{
 				const Entity* element = model.entity(elementId);
 				if (element == nullptr || !isFloorSlab(*element))
@@ -220,11 +231,16 @@ namespace HomeskzIfcImport::parse
 			// 合成する」参照）。床版があるならそちらが正で、合成は行わない。
 			if (story.isTop && commands.size() == before)
 			{
-				for (LoftFloorRegion& region : loftFloorRegions(model, story.id))
-					commands.push_back(
-						makeCommand(std::move(region.boundary), region.beamTopOffset));
+				for (const LoftFloorRegion& region : context.loftFloorRegions(story.id))
+					commands.push_back(makeCommand(region.boundary, region.beamTopOffset));
 			}
 		}
 		return commands;
+	}
+
+	std::vector<FloorCommand> buildFloorCommands(const Model& model)
+	{
+		Context context(model);
+		return buildFloorCommands(context);
 	}
 } // namespace HomeskzIfcImport::parse

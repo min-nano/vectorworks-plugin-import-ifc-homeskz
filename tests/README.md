@@ -6,7 +6,42 @@
 
 ## 何をテストしているか
 
-テストは 5 本立てです。
+テストは 2 系統に分かれます。**インポート機能（2 フェーズ）のテスト**と、テンプレート
+由来の**アップデータのテスト**です。どちらも SDK を要求しないので、同じ Linux ランナーで
+まとめて走ります。
+
+### 1. インポート機能（`core/` + `parse/`）
+
+2 フェーズ分離（`CLAUDE.md`「アーキテクチャ」）の**解析側は SDK に触れない**ので、
+実際のホームズ君 IFC（`tests/fixtures/`）に対して丸ごと単体テストできます。要素を移植する
+たびに 1 本ずつ増える設計で、対応表は次のとおりです。
+
+| テスト | 対象 | 主な検証項目 |
+|--------|------|--------------|
+| `StepTests` | `src/parse/Step` | 最小 STEP リーダ（トークナイザ・参照解決・型別/逆参照インデックス・決定性・文字エスケープのデコード） |
+| `LoaderTests` | `src/parse/Loader` | 非正規エンティティを**除去せず**読めること・実フィクスチャ全件の読み込み |
+| `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配（手計算値との突き合わせ） |
+| `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
+| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`）とレイヤスタック順の計算 |
+| `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
+| `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |
+| `ParseStoryTests` | `src/parse/Story` | 階・レベル・レイヤ名（横架材天端オフセット・屋根組レベルの追加条件） |
+| `ParseStructuralClassTests` | `src/parse/StructuralClass` | 部材種別 → VW クラスの純ロジック |
+| `ParseFloorTests` | `src/parse/Floor` | 床板（スラブ構成・基準面・段差・ロフト床の合成） |
+| `ParseRafterTests` | `src/parse/Rafter` | 垂木（掃引割り付け・非凸面のクリップ・支持点・軒の出） |
+| `ParseRoofTests` | `src/parse/Roof` | 野地板（軒軸・upslope・勾配・厚み・軒の Z） |
+| `ParseSummaryTests` | `src/parse/Summary` | 型別件数の集計とダイアログ文言の整形 |
+
+いずれも無 SDK の静的ライブラリ `HomeskzIfcCore` をリンクします。フィクスチャのパスと
+近似比較・フィクスチャ一覧は `tests/Fixtures.h` に共通化してあります（一覧を各テストが
+持つと、フィクスチャを足したときに一部だけ素通りするため）。
+
+**描画側（`src/draw/`）に単体テストはありません。** SDK と実際の図面が要るためで、
+代わりに (a) SDK から切り離せるロジックは `core/` へ寄せて無 SDK でテストし
+（`desiredStoryLayerOrder` など）、(b) 実描画は各マイルストーンの「ローカル確認
+チェックリスト」（`ROADMAP.md`）に沿って VectorWorks 実機で目視確認します。
+
+### 2. アップデータ（テンプレート由来）
 
 1. **`UpdaterParseTests`** … `src/UpdaterParse.h` の純粋ロジック（`std::string` /
    `std::vector` だけに依存し、`gSDK`・`dladdr`・Win32・VWFC ダイアログに一切触れない
@@ -28,6 +63,9 @@
 5. **`UpdaterScriptTestsPs`** … その Windows 版 `scripts/vw-update.ps1` を、同じ発想で
    `Invoke-GH` / `Invoke-WebRequest` を差し替えて検証します（`tests/vw-update.Tests.ps1`、
    後述）。PowerShell 7（`pwsh`）は Linux でも動くので、**同じ Linux ランナー**で回せます。
+
+以降の節（`IUpdaterHost` によるフロー全体のテスト・スクリプトのテスト・残る部分）は
+すべてこのアップデータ系統の話です。
 
 `Updater.cpp` は残った
 
@@ -79,28 +117,13 @@
 
 ## テストの実行
 
-```sh
-cmake -S . -B build -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
-
-カバレッジ（gcov/gcovr。GCC か Clang が必要）:
+**ビルド／実行のコマンド例（素の実行・カバレッジ・サニタイザ）とビルドオプションの
+一覧は `README.md`「テストとカバレッジ」が単一の真実です。** 最短は次のとおり:
 
 ```sh
-cmake -S . -B buildcov -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_COVERAGE=ON
-cmake --build buildcov
-ctest --test-dir buildcov
-gcovr --root . --filter 'src/.*' buildcov --txt --print-summary
-```
-
-サニタイザ（ASan + UBSan。GCC か Clang が必要）で回す:
-
-```sh
-cmake -S . -B buildsan -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_SANITIZERS=ON
-cmake --build buildsan
-ASAN_OPTIONS=abort_on_error=1:detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
-    ctest --test-dir buildsan --output-on-failure
+cmake -S . -B build-tests -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON
+cmake --build build-tests
+ctest --test-dir build-tests --output-on-failure
 ```
 
 `-DVW_ENABLE_SANITIZERS=ON` を付けると、各テストバイナリが
@@ -184,7 +207,7 @@ C++ 側が `dladdr` / `gSDK` のグルーを対象外にしているのと同様
 なく exit 1** で失敗します。この値は各ハーネスの環境変数 `VW_REQUIRE_SCRIPT_TESTS` として
 渡され、ローカル既定（OFF）では従来どおり穏やかに SKIP します。
 
-## それでも残る部分
+## それでも残る部分（アップデータ）
 
 判断・フロー・スクリプトのバックエンドまで SDK 抜きでカバーできたので、テストが届いて
 いないのは **プラットフォーム固有のグルーと外部 API 呼び出しそのもの** だけになりました。
@@ -213,6 +236,9 @@ ctest／CI に組み込み済みです。残るのは各 OS でしか動かな�
 
 ## まとめ
 
+- **インポートの解析側**（`core/` + `parse/`）は SDK に依存しないので、実フィクスチャに
+  対して要素ごとに単体テストする。**描画側**（`draw/`）は SDK と実図面が要るため、
+  切り出せるロジックを `core/` へ寄せたうえで、残りは実機での目視確認に委ねる。
 - **判断**は `UpdaterParse.h` の純粋関数に寄せ、関数単位で網羅的にテストする。
 - **フロー**は `IUpdaterHost` というシームを挟み、SDK 全体をモックするのではなく
   プラグインが触る 4 つの副作用だけをフェイク化して、分岐と文言まで丸ごとテストする

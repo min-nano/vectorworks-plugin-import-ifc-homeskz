@@ -6,7 +6,9 @@
 //
 
 #include "parse/Story.h"
+#include "parse/Context.h"
 #include "parse/Floor.h"
+#include "parse/IfcAttr.h"
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
 
@@ -22,30 +24,10 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// レベル種別名。Python 版 ifc/story.py の LEVEL_FL / LEVEL_BEAM_TOP / LEVEL_EAVES と
-		// 一致させる。CreateLayerLevelType へ登録し GetLayerForStory でレイヤを取り直す鍵。
-		constexpr const char* kLevelFL = "FL";
-		constexpr const char* kLevelBeamTop = "横架材天端";
-		constexpr const char* kLevelEaves = "軒高";
 		// 最上階のストーリ名。Python 版 STORY_ROOF と一致。
 		constexpr const char* kStoryRoof = "屋根";
 		// 最上階のストーリ接尾辞・レイヤ接頭辞（Roof）。Python 版 story_suffix_for と一致。
 		constexpr const char* kRoofSuffix = "R";
-
-		// IfcProduct（IfcColumn / IfcSlab 等）の ObjectPlacement 属性インデックス
-		// （GlobalId, OwnerHistory, Name, Description, ObjectType, ObjectPlacement=5, …）。
-		// parse/IfcGeometry の kObjectPlacementAttr と同値（フェーズ内で二重定義を避けたいが、
-		// Story は IfcGeometry に依存させないため局所に持つ）。
-		constexpr std::size_t kObjectPlacementAttr = 5;
-
-		// IfcBuildingStorey の属性インデックス（… CompositionType=8, Elevation=9）。
-		constexpr std::size_t kStoreyNameAttr = 2;
-		constexpr std::size_t kStoreyElevationAttr = 9;
-
-		// IfcRelContainedInSpatialStructure の属性インデックス
-		// （… RelatedElements=4, RelatingStructure=5）。
-		constexpr std::size_t kRelRelatedElementsAttr = 4;
-		constexpr std::size_t kRelRelatingStructureAttr = 5;
 
 		// 1 バイトずつ std::toupper を掛けた文字列を返す（"FL" 判定は ASCII なのでこれで
 		// 十分。C ロケールでは 0x80 以上のバイトは変換されないため、UTF-8 の日本語部分＝
@@ -70,14 +52,6 @@ namespace HomeskzIfcImport::parse
 			return upper.compare(upper.size() - 2, 2, "FL") == 0;
 		}
 
-		// エンティティの指定属性（Name なら kStoreyNameAttr=2）を文字列で返す
-		// （未設定・非文字列なら空）。
-		std::string entityName(const Entity& entity, std::size_t attrIndex)
-		{
-			const Value& name = entity.attribute(attrIndex);
-			return (name.type == ValueType::String) ? name.text : std::string();
-		}
-
 		// index（0 始まり）と最上階フラグから VectorWorks のストーリ名を返す
 		// （Python 版 story_name_for）。最上階は "屋根"、それ以外は "{index+1}階"。
 		std::string storyNameFor(std::size_t index, bool isTop)
@@ -98,23 +72,27 @@ namespace HomeskzIfcImport::parse
 		return std::to_string(index + 1);
 	}
 
+	std::string storyLayerName(std::size_t index, bool isTop, const std::string& levelType)
+	{
+		return storyLayerPrefix(index, isTop) + "-" + levelType;
+	}
+
 	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ)
 	{
 		// element.ObjectPlacement（IfcLocalPlacement）→ RelativePlacement（IfcAxis2Placement3D）
 		// → Location（IfcCartesianPoint）の Z。親 PlacementRelTo は辿らない（M2 と同じ規約）。
-		const Entity* placement = model.resolve(element.attribute(kObjectPlacementAttr));
+		const Entity* placement = model.resolve(element.attribute(attr::kProductObjectPlacement));
 		if (placement == nullptr || placement->type != "IFCLOCALPLACEMENT")
 			return false;
-		// IfcLocalPlacement(PlacementRelTo, RelativePlacement)。属性 1 が RelativePlacement。
-		const Entity* axis = model.resolve(placement->attribute(1));
+		const Entity* axis =
+			model.resolve(placement->attribute(attr::kLocalPlacementRelativePlacement));
 		if (axis == nullptr || axis->type != "IFCAXIS2PLACEMENT3D")
 			return false;
-		// IfcAxis2Placement3D(Location, Axis, RefDirection)。属性 0 が Location。
-		const Entity* point = model.resolve(axis->attribute(0));
+		const Entity* point = model.resolve(axis->attribute(attr::kAxis2PlacementLocation));
 		if (point == nullptr || point->type != "IFCCARTESIANPOINT")
 			return false;
-		// IfcCartesianPoint.Coordinates は実数のリスト（属性 0）。Z は 3 番目。
-		const Value& coords = point->attribute(0);
+		// IfcCartesianPoint.Coordinates は実数のリスト。Z は 3 番目。
+		const Value& coords = point->attribute(attr::kCartesianPointCoordinates);
 		if (!coords.isList() || coords.items.size() < 3)
 			return false;
 		outZ = coords.items[2].asReal();
@@ -137,10 +115,10 @@ namespace HomeskzIfcImport::parse
 				continue;
 			// この rel の RelatingStructure が当該 storey であることを確認する（storey が
 			// RelatedElements 側に現れる別の rel を巻き込まないため）。
-			if (rel->attribute(kRelRelatingStructureAttr).reference != storeyId)
+			if (rel->attribute(attr::kRelContainedRelatingStructure).reference != storeyId)
 				continue;
 
-			const Value& related = rel->attribute(kRelRelatedElementsAttr);
+			const Value& related = rel->attribute(attr::kRelContainedRelatedElements);
 			if (!related.isList())
 				continue;
 			for (const Value& ref : related.items)
@@ -152,13 +130,14 @@ namespace HomeskzIfcImport::parse
 		return elements;
 	}
 
-	double resolveBeamTopOffset(const Model& model, int storeyId)
+	double resolveBeamTopOffset(Context& context, int storeyId)
 	{
 		// 階に属する IfcColumn / IfcSlab のローカル Z 負値の最大を採る（最初に見つかった
 		// 値ではなく最大値なので、列挙順に依存しない決定的な結果になる）。
+		const Model& model = context.model();
 		double best = 0.0;
 		bool found = false;
-		for (const int elementId : collectStoryElements(model, storeyId))
+		for (const int elementId : context.storyElements(storeyId))
 		{
 			const Entity* element = model.entity(elementId);
 			if (element == nullptr)
@@ -176,20 +155,27 @@ namespace HomeskzIfcImport::parse
 		return best; // 候補が無ければ 0.0
 	}
 
-	std::vector<StoryInfo> collectStories(const Model& model)
+	double resolveBeamTopOffset(const Model& model, int storeyId)
+	{
+		Context context(model);
+		return resolveBeamTopOffset(context, storeyId);
+	}
+
+	std::vector<StoryInfo> collectStories(Context& context)
 	{
 		// 名前が "FL" で終わる IfcBuildingStorey だけを対象にする。
+		const Model& model = context.model();
 		std::vector<StoryInfo> stories;
 		for (const int id : model.byType("IFCBUILDINGSTOREY"))
 		{
 			const Entity* storey = model.entity(id);
 			if (storey == nullptr)
 				continue;
-			if (!nameEndsWithFL(entityName(*storey, kStoreyNameAttr)))
+			if (!nameEndsWithFL(entityName(*storey)))
 				continue;
 			StoryInfo info;
 			info.id = id;
-			info.elevation = storey->attribute(kStoreyElevationAttr).asReal();
+			info.elevation = storey->attribute(attr::kBuildingStoreyElevation).asReal();
 			stories.push_back(info);
 		}
 
@@ -207,26 +193,35 @@ namespace HomeskzIfcImport::parse
 			const bool isTop = (i + 1 == stories.size());
 			stories[i].isTop = isTop;
 			if (!isTop)
-				stories[i].beamOffset = resolveBeamTopOffset(model, stories[i].id);
+				stories[i].beamOffset = resolveBeamTopOffset(context, stories[i].id);
 		}
 		return stories;
 	}
 
-	std::vector<StoryCommand> buildStoryCommands(const Model& model)
+	std::vector<StoryInfo> collectStories(const Model& model)
 	{
-		const std::vector<StoryInfo> stories = collectStories(model);
+		Context context(model);
+		return collectStories(context);
+	}
+
+	std::vector<StoryCommand> buildStoryCommands(Context& context)
+	{
+		const std::vector<StoryInfo> stories = context.stories();
 
 		std::vector<StoryCommand> commands;
 		commands.reserve(stories.size());
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
 			const StoryInfo& info = stories[i];
-			const std::string prefix = storyLayerPrefix(i, info.isTop);
 
 			StoryCommand cmd;
 			cmd.name = storyNameFor(i, info.isTop);
-			cmd.suffix = prefix;
+			cmd.suffix = storyLayerPrefix(i, info.isTop);
 			cmd.elevation = info.elevation;
+
+			// レイヤ名は要素側の配置先探索と同じ規約で組み立てる（parse/Story storyLayerName）。
+			const auto layerFor = [i, &info](const char* levelType)
+			{ return storyLayerName(i, info.isTop, levelType); };
 
 			// 基本レベル（M3）＋屋根組の垂木・野地板（M6）。登り梁・母屋・span 柱は後続 M で
 			// 追加する（ヘッダ参照）。levels の並び順は希望するデザインレイヤのスタック順（上→下）。
@@ -238,19 +233,19 @@ namespace HomeskzIfcImport::parse
 				// story_has_roof で条件付きにレベルを足すのと同じ枠組み）。この FL が
 				// ロフト床の配置先レイヤ "R-FL" になる。ロフトの床は床版（IfcSlab）でも
 				// 床梁から合成した領域でもよい（parse/Floor の storyHasLoftFloor）。
-				if (storyHasLoftFloor(model, info.id))
+				if (storyHasLoftFloor(context, info.id))
 				{
 					cmd.levels.push_back(
-						LevelCommand{kLevelFL, kLoftFloorLevelOffset, prefix + "-" + kLevelFL});
+						LevelCommand{kLevelFL, kLoftFloorLevelOffset, layerFor(kLevelFL)});
 				}
-				cmd.levels.push_back(LevelCommand{kLevelEaves, 0.0, prefix + "-" + kLevelEaves});
+				cmd.levels.push_back(LevelCommand{kLevelEaves, 0.0, layerFor(kLevelEaves)});
 			}
 			else
 			{
 				// 一般階は FL（0）＋横架材天端（負オフセット）。FL を上段に積む。
-				cmd.levels.push_back(LevelCommand{kLevelFL, 0.0, prefix + "-" + kLevelFL});
+				cmd.levels.push_back(LevelCommand{kLevelFL, 0.0, layerFor(kLevelFL)});
 				cmd.levels.push_back(
-					LevelCommand{kLevelBeamTop, info.beamOffset, prefix + "-" + kLevelBeamTop});
+					LevelCommand{kLevelBeamTop, info.beamOffset, layerFor(kLevelBeamTop)});
 			}
 
 			// M6 屋根組: 屋根版（屋根面）を含む階に 垂木 → 野地板 レベル（"n-垂木" /
@@ -266,20 +261,24 @@ namespace HomeskzIfcImport::parse
 			// レベルを作ると空レイヤが残るだけになる（ロフトの FL レベルを床版の有無で絞るのと
 			// 同じ方針）。ホームズ君の出力では最上階は必ず主屋根の屋根版を含むため、実データでの
 			// 結果は Python 版と一致する。
-			if (storyHasRoofSlab(model, info.id))
+			if (storyHasRoofSlab(context, info.id))
 			{
 				// 横架材天端（最上階は軒高）レベルは常に末尾なので、その直前が挿入位置。
 				const auto tail = static_cast<std::ptrdiff_t>(cmd.levels.size()) - 1;
 				const double roofOffset = info.isTop ? 0.0 : info.beamOffset;
-				cmd.levels.insert(
-					cmd.levels.begin() + tail,
-					LevelCommand{kLevelTaruki, roofOffset, prefix + "-" + kLevelTaruki});
-				cmd.levels.insert(
-					cmd.levels.begin() + tail,
-					LevelCommand{kLevelNojiita, roofOffset, prefix + "-" + kLevelNojiita});
+				cmd.levels.insert(cmd.levels.begin() + tail,
+								  LevelCommand{kLevelTaruki, roofOffset, layerFor(kLevelTaruki)});
+				cmd.levels.insert(cmd.levels.begin() + tail,
+								  LevelCommand{kLevelNojiita, roofOffset, layerFor(kLevelNojiita)});
 			}
 			commands.push_back(std::move(cmd));
 		}
 		return commands;
+	}
+
+	std::vector<StoryCommand> buildStoryCommands(const Model& model)
+	{
+		Context context(model);
+		return buildStoryCommands(context);
 	}
 } // namespace HomeskzIfcImport::parse

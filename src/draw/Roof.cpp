@@ -60,6 +60,7 @@
 
 #include "PluginPrefix.h"
 #include "draw/Roof.h"
+#include "draw/DrawUtil.h"
 #include "core/Document.h"
 
 // 屋根面オブジェクト（VWRoofFaceObj）と、その外形に渡す 2D ポリゴン。フォールバックの
@@ -94,28 +95,6 @@ namespace HomeskzIfcImport::draw
 		void SetRealVariable(MCObjectHandle object, short variable, double value)
 		{
 			gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
-		}
-
-		// オブジェクトのクラスを名前で設定する（draw/Grid.cpp・draw/Floor.cpp と同じヘルパー）。
-		void SetClassByName(MCObjectHandle object, const std::string& className)
-		{
-			if (className.empty())
-				return;
-			const InternalIndex classID = gSDK->AddClass(TXString(className.c_str()));
-			gSDK->SetObjectClass(object, classID);
-		}
-
-		// 描画属性（線幅・色・パターン・矢印・透明度）をすべてクラス属性に従わせる
-		// （draw/Floor.cpp と同じ規約）。
-		void SetAllAttributesByClass(MCObjectHandle object)
-		{
-			gSDK->SetPColorsByClass(object);
-			gSDK->SetFColorsByClass(object);
-			gSDK->SetLWByClass(object);
-			gSDK->SetPPatByClass(object);
-			gSDK->SetFPatByClass(object);
-			gSDK->SetArrowByClass(object);
-			gSDK->SetOpacityByClass(object);
 		}
 
 		// 命令の平面外形を VWPoint2D の列にする（屋根面の外形・フォールバックの外形に共通）。
@@ -214,11 +193,10 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		for (const core::RoofCommand& roof : document.roofs)
 		{
-			// 配置先レイヤ（"n-野地板"）が無い命令はスキップする（レイヤは story 命令が作る）。
-			MCObjectHandle layer = gSDK->GetNamedLayer(TXString(roof.layer.c_str()));
+			// 配置先レイヤ（"n-野地板"）が無い命令はスキップする（規約は ActivateExistingLayer）。
+			const MCObjectHandle layer = ActivateExistingLayer(roof.layer);
 			if (layer == nil)
 				continue;
-			gSDK->SetCurrentLayer(layer);
 
 			if (DrawOne(roof, layer))
 				++drawn;

@@ -51,6 +51,8 @@
 
 namespace HomeskzIfcImport::parse
 {
+	class Context;
+
 	// 屋根面を表す IfcSlab の Name 接頭辞（Python 版 _ROOF_SLAB_PREFIX）。屋根版は
 	// "屋根版:{連番}" のような名前で出力されるため、前方一致で判定する。
 	inline constexpr const char* kRoofSlabPrefix = "屋根版";
@@ -70,11 +72,18 @@ namespace HomeskzIfcImport::parse
 	// ため常にこの既定値を使う**（ヘッダ冒頭「M6 のスコープ」参照）。
 	inline constexpr double kDefaultGirderWidth = 105.0;
 
-	// 階（#storeyId）が屋根版（Name が "屋根版" 始まりの IfcSlab）を含むか（Python 版
-	// story_has_roof 相当）。屋根版を含む階は垂木・野地板レイヤ（"n-垂木" / "n-野地板"）を
-	// 持つため、parse/Story がレベルを足す条件に使う。垂木・野地板を配置する階と一致させる
-	// 必要があるので、判定はここに一本化する。
+	// 要素が屋根版（IfcSlab かつ Name が "屋根版" 始まり）か。**垂木（parse/Rafter）と
+	// 野地板（parse/Roof）は同じ屋根面を共有するので、判定はここに一本化する**（かつては
+	// 両 .cpp に逐語的な複製があり、片方だけ直せば拾う屋根版がズレる形だった）。
+	bool isRoofSlab(const Entity& element);
+
+	// 階（#storeyId）が屋根版を含むか（Python 版 story_has_roof 相当）。屋根版を含む階は
+	// 垂木・野地板レイヤ（"n-垂木" / "n-野地板"）を持つため、parse/Story がレベルを足す
+	// 条件に使う。垂木・野地板を配置する階と一致させる必要があるので、判定はここに一本化する。
 	bool storyHasRoofSlab(const Model& model, int storeyId);
+
+	// 同上。共有コンテキストの要素一覧を使う（parse/Context.h）。
+	bool storyHasRoofSlab(Context& context, int storeyId);
 
 	// 垂木の仕様ラベル（"45×45@455"）を返す。断面・間隔が決め打ちなので全垂木で共通
 	// （Python 版 _rafters_for_plane が組み立てる label と同じ）。
@@ -117,4 +126,8 @@ namespace HomeskzIfcImport::parse
 	// 並びは階（Elevation 昇順）→ 階内は要素の出現順 → 面内は掃引位置順で、エンティティ
 	// 列挙順に依存しない決定的な結果になる。
 	std::vector<core::RafterCommand> buildRafterCommands(const Model& model);
+
+	// 同上。共有コンテキストのストーリ一覧・センタリング中心・屋根面を使う（parse/Context.h）。
+	// 屋根面の解決は野地板（parse/Roof）と共有されるので、屋根版 1 枚あたり 1 回で済む。
+	std::vector<core::RafterCommand> buildRafterCommands(Context& context);
 } // namespace HomeskzIfcImport::parse

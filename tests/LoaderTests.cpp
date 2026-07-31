@@ -9,6 +9,7 @@
 //
 
 #include "TestFramework.h"
+#include "Fixtures.h"
 
 #include "parse/Loader.h"
 
@@ -114,21 +115,12 @@ TEST(missing_file_reports_not_ok)
 
 TEST(loads_all_homeskz_fixtures)
 {
-	// Python 版 tests/fixtures/README.md（＝本リポジトリへ流用済み）の実 IFC 全 5 件。
-	// ファイル名はホームズ君のサンプル名（日本語・空白・括弧を含む）をそのまま使う。
-	const char* fixtures[] = {
-		"サンプル1 (住木邸新築工事).ifc",
-		"スキップフロア_サンプル.ifc",
-		"伏図次郎【2階】.ifc",
-		"グレー本モデルプラン1【3階】.ifc",
-		"グレー本モデルプラン2【3階】.ifc",
-	};
-
-	for (const char* name : fixtures)
+	// フィクスチャの一覧は tests/Fixtures.h が唯一の定義（各テストが独自の一覧を持つと、
+	// フィクスチャを足したときに一部のテストだけ素通りする）。
+	for (const std::string& name : HomeskzIfcTests::allFixtures())
 	{
-		std::string const path = std::string(HOMESKZ_FIXTURES_DIR) + "/" + name;
 		bool ok = false;
-		Model const model = loadIfc(path, &ok);
+		Model const model = HomeskzIfcTests::fixture(name, ok);
 		CHECK(ok);
 		// 実データは数千エンティティ規模。空でないことを確かめる。
 		CHECK(model.size() > 0);

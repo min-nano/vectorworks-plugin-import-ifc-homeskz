@@ -96,7 +96,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Build the resolved commit (PR head, or the pushed/ dispatched sha).
           ref: ${{ steps.ctx.outputs.sha }}
@@ -305,7 +305,7 @@ jobs:
           ls -l dist
 
       - name: Upload plug-in artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vwlibrary-zips
           path: dist
@@ -363,7 +363,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.ctx.outputs.sha }}
 
@@ -566,7 +566,7 @@ jobs:
           Get-ChildItem dist | Select-Object Name, Length
 
       - name: Upload plug-in artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vlb-zips
           path: dist

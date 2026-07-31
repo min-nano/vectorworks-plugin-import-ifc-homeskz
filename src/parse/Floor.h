@@ -46,6 +46,8 @@
 
 namespace HomeskzIfcImport::parse
 {
+	class Context;
+
 	// 床板を識別する IfcSlab の Name（Python 版 FLOOR_SLAB_NAME）。
 	inline constexpr const char* kFloorSlabName = "床版";
 
@@ -62,8 +64,14 @@ namespace HomeskzIfcImport::parse
 	// この高さを床仕上げ上端とみなす。スラブ構成は 床仕上げ（36−24＝12）＋ 床下地（24）。
 	inline constexpr double kLoftFloorLevelOffset = 36.0;
 
+	// 要素が床板（IfcSlab かつ Name が "床版"）か（Python 版 _is_floor_slab）。
+	bool isFloorSlab(const Entity& element);
+
 	// 階（#storeyId）が床板（Name が "床版" の IfcSlab）を含むか。
 	bool storyHasFloorSlab(const Model& model, int storeyId);
+
+	// 同上。共有コンテキストの要素一覧を使う（parse/Context.h）。
+	bool storyHasFloorSlab(Context& context, int storeyId);
 
 	// 床梁から合成したロフト床 1 枚（ヘッダ冒頭「ロフトの外形は床梁から合成する」参照）。
 	struct LoftFloorRegion
@@ -81,10 +89,18 @@ namespace HomeskzIfcImport::parse
 	// 並び・値はエンティティ列挙順に依存しない（外形はセル走査順、天端は床梁天端の最大値）。
 	std::vector<LoftFloorRegion> loftFloorRegions(const Model& model, int storeyId);
 
+	// 同上。共有コンテキストの要素一覧を使う（parse/Context.h）。**結果をキャッシュしたい
+	// ときは Context::loftFloorRegions を呼ぶこと**（この関数は毎回セル格子の flood fill を
+	// やり直す。ストーリのレベル追加と床の合成で 2 回走っていたのがキャッシュ導入の動機）。
+	std::vector<LoftFloorRegion> loftFloorRegions(Context& context, int storeyId);
+
 	// 屋根階（#storeyId）にロフトの床（床版、または床梁から合成できる領域）があるか。
 	// あるときだけ屋根ストーリへ FL レベル（軒高 + kLoftFloorLevelOffset）を足すために
 	// parse/Story が使う（Python 版 story_has_moya / story_has_roof と同じ枠組み）。
 	bool storyHasLoftFloor(const Model& model, int storeyId);
+
+	// 同上。共有コンテキストのキャッシュ済みロフト床を使う（parse/Context.h）。
+	bool storyHasLoftFloor(Context& context, int storeyId);
 
 	// 床のスラブスタイル名を返す。**階により構成（床仕上げ厚）が異なることが多いため、
 	// スタイルは階ごとに 1 つ**作る。一般階は "{階}F-床スタイル"（"1F-床スタイル" …）、
@@ -98,11 +114,14 @@ namespace HomeskzIfcImport::parse
 	// その階に属する床版（Name=="床版" の IfcSlab）を FloorCommand にする（最上階も対象で、
 	// その床はロフト＝小屋裏収納の床として "R-FL" へ・基準面は軒高になる。上記要件参照）。
 	// 屋根階に床版が無いときは、代わりに床梁から合成した外形（loftFloorRegions）を使う。
-	// 平面外形は通り芯と同じグリッド中心オフセット（parse/Grid の resolveGridCenter）で
+	// 平面外形は通り芯と同じグリッド中心オフセット（parse/Context の gridCenter）で
 	// 補正する。押し出しソリッドを解決できない床版はスキップする（1 枚の欠損で全体を
 	// 止めない。CLAUDE.md「エラーハンドリング」）。
 	//
 	// 並びは階（Elevation 昇順）→ 階内は要素の出現順（IfcRelContainedInSpatialStructure の
 	// #id 昇順・記述順）で、エンティティ列挙順に依存しない決定的な結果になる。
 	std::vector<core::FloorCommand> buildFloorCommands(const Model& model);
+
+	// 同上。共有コンテキストのストーリ一覧・センタリング中心・ロフト床を使う（parse/Context.h）。
+	std::vector<core::FloorCommand> buildFloorCommands(Context& context);
 } // namespace HomeskzIfcImport::parse
