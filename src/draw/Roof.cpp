@@ -164,7 +164,7 @@ namespace HomeskzIfcImport::draw
 			// このコンストラクタでは与えられない（冒頭「屋根軸はオブジェクト変数で与える」）ので、
 			// ここでは外形だけを渡す。
 			const VWPolygon2D outline(BoundaryPoints(roof.boundary), true);
-			VWRoofFaceObj face(kRoofFaceType_Roof, outline);
+			const VWRoofFaceObj face(kRoofFaceType_Roof, outline);
 			const MCObjectHandle handle = face.GetThisObject();
 			// 屋根面として成立していなければ外形ポリゴンへフォールバックする（nil だけでなく
 			// 種別も確かめる。屋根面でないものに屋根専用の設定を続けない）。
