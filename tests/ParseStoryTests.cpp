@@ -525,4 +525,55 @@ TEST(roof_story_gets_fl_level_only_with_floor_slab)
 	}
 }
 
+TEST(roof_story_gets_fl_level_from_synthesised_loft_floor)
+{
+	// ホームズ君はロフトの床版を出力しないので、屋根階の床梁が囲む領域から床を合成する
+	// （parse/Floor）。その合成床がある屋根にも FL レベル／レイヤ "R-FL" を作る。
+	// 床梁は矩形リング 4 本（外周 ±550・部材幅 100・厚み 100 の鉛直押し出し）。
+	std::string text = "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
+					   "#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
+					   "#3=IFCLOCALPLACEMENT($,#2);\n"
+					   "#10=IFCBUILDINGSTOREY('s1',$,'1FL',$,$,#3,$,$,.ELEMENT.,0.);\n"
+					   "#11=IFCBUILDINGSTOREY('s2',$,'2FL',$,$,#3,$,$,.ELEMENT.,3000.);\n"
+					   "#33=IFCCARTESIANPOINT((0.,0.,0.));\n"
+					   "#34=IFCAXIS2PLACEMENT3D(#33,$,$);\n"
+					   "#35=IFCDIRECTION((0.,0.,1.));\n";
+	const double bars[4][4] = {{0.0, -500.0, 1100.0, 100.0},
+							   {0.0, 500.0, 1100.0, 100.0},
+							   {-500.0, 0.0, 100.0, 1100.0},
+							   {500.0, 0.0, 100.0, 1100.0}};
+	std::string contained;
+	int id = 100;
+	for (const auto& bar : bars)
+	{
+		const std::string base = std::to_string(id);
+		text += "#" + base + "=IFCCARTESIANPOINT((" + std::to_string(bar[0]) + "," +
+				std::to_string(bar[1]) + "));\n";
+		text += "#" + std::to_string(id + 1) + "=IFCAXIS2PLACEMENT2D(#" + base + ",$);\n";
+		text += "#" + std::to_string(id + 2) + "=IFCRECTANGLEPROFILEDEF(.AREA.,$,#" +
+				std::to_string(id + 1) + "," + std::to_string(bar[2]) + "," +
+				std::to_string(bar[3]) + ");\n";
+		text += "#" + std::to_string(id + 3) + "=IFCEXTRUDEDAREASOLID(#" + std::to_string(id + 2) +
+				",#34,#35,100.);\n";
+		text += "#" + std::to_string(id + 4) + "=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#" +
+				std::to_string(id + 3) + "));\n";
+		text += "#" + std::to_string(id + 5) + "=IFCPRODUCTDEFINITIONSHAPE($,$,(#" +
+				std::to_string(id + 4) + "));\n";
+		text += "#" + std::to_string(id + 6) + "=IFCBEAM('b',$,'木梁:床大梁:1',$,$,#3,#" +
+				std::to_string(id + 5) + ",$);\n";
+		contained += (contained.empty() ? "#" : ",#") + std::to_string(id + 6);
+		id += 10;
+	}
+	text += "#200=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(" + contained + "),#11);\n";
+
+	std::vector<StoryCommand> const stories = buildStoryCommands(loadIfcFromText(text));
+	const StoryCommand* roof = find(stories, "屋根");
+	CHECK(roof != nullptr);
+	if (roof != nullptr)
+	{
+		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"FL", "軒高"}));
+		CHECK_EQ(roof->levels.front().layer, std::string("R-FL"));
+	}
+}
+
 TEST_MAIN()

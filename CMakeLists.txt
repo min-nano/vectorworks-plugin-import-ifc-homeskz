@@ -134,6 +134,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		HomeskzIfcCore STATIC
 		src/core/Document.cpp
 		src/core/Geometry.cpp
+		src/core/Region.cpp
 		src/parse/BuildDocument.cpp
 		src/parse/Step.cpp
 		src/parse/Loader.cpp

@@ -182,7 +182,15 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// --- 任意閉断面 -----------------------------------------------------
-		if (profileDef->type == "IFCARBITRARYCLOSEDPROFILEDEF")
+		// IFCARBITRARYPROFILEDEFWITHVOIDS は IfcArbitraryClosedProfileDef の派生で、
+		// 属性の並びは (ProfileType, ProfileName, OuterCurve, InnerCurves)。外形の
+		// 位置（属性 2）は同じなので、同じ経路で外形だけを読む。
+		// ［既知の制限］InnerCurves（階段の吹抜け等の開口）は無視するので、床は開口を
+		// 塞いだ形で入る。開口ごと落として床を丸ごと失うよりは良い、という判断
+		// （CLAUDE.md「1 要素の欠損で全体を止めない」）。開口の再現は ROADMAP の
+		// 後続課題。
+		if (profileDef->type == "IFCARBITRARYCLOSEDPROFILEDEF" ||
+			profileDef->type == "IFCARBITRARYPROFILEDEFWITHVOIDS")
 		{
 			// IfcArbitraryClosedProfileDef(ProfileType, ProfileName, OuterCurve)。
 			const Entity* curve = model.resolve(profileDef->attribute(2));
