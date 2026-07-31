@@ -18,14 +18,15 @@
 //	  3. クラス（小屋組-垂木）を割り当て、描画属性をすべてクラス属性に従わせる。
 //	  4. 断面・配置・2D 表示・軒の出・差し込み・仕様ラベル・構造用途・材質の各パラメータを
 //	     設定して ResetObject で反映する。
-//	  5. 高さを 3D 移動で与える（MoveObject3D。下記）。
 //	PIO を生成できない場合は平面投影の直線にフォールバックする（1 本の失敗で全体を止めない）。
 //
-//	【高さは配置行列ではなく 3D 移動で与える】配置行列のオフセット Z は PIO に**届かない**
-//	（ローカル確認: 与えた 6109.0 に対し読み戻しは 2.0、OIP の Z も 0）。高さは ResetObject の
-//	後に MoveObject3D で与える（Python 版 Move3D と同じ手）。オブジェクトの Z はレイヤ座標
-//	なので、命令の絶対 Z からレイヤの基準高さ（ovLayerHeightInCurrUnits）を引いてレイヤ相対に
-//	直してから渡す。Z の計算は 1 か所（DrawOne の MoveObject3D）に集約してある。
+//	【高さは配置行列の絶対 Z で与える】配置行列のオフセット Z には命令の elevation（絶対 Z）を
+//	そのまま渡す。一度「行列の Z が届いていない」と読み違えて 3D 移動（MoveObject3D）へ
+//	切り替えたが、これは誤りだった: 読み戻した行列オフセットは**レイヤ相対**で返るため、
+//	絶対 6109 を与えて 2.0 が返るのは「レイヤ高さ 6107 のぶんを引いた正しい値」であって、
+//	Z が落ちていたわけではない（レイヤ相対で 3D 移動し直したところ、垂木が絶対 2mm ＝ 地面に
+//	並んでしまい確定した）。**行列のオフセットは XY がレイヤ座標・Z が絶対**という混在に注意。
+//	Z の計算は 1 か所（DrawOne の SetOffset）に集約してある。
 //
 //	【フィールド名は VW 実機の登録から採る】軸組ツールのパラメータ名は、当初 Python 版の
 //	VectorScript エクスポートから推定していたが、ローカル確認で PIO の全パラメータの universal
@@ -38,7 +39,6 @@
 //
 
 #include "PluginPrefix.h"
-#include "draw/LayerElevation.h"
 #include "draw/Rafter.h"
 #include "core/Document.h"
 
@@ -195,16 +195,16 @@ namespace HomeskzIfcImport::draw
 			pio.SetParamAsString(param, TXString(fallbackKey));
 		}
 
-		// 【一時的な診断・M6 のローカル確認用。値が揃ったらこのブロックごと削除する】
+		// 【一時的な診断・M6 のローカル確認用。向きが確定したらこのブロックごと削除する】
 		//
-		// 1 回目の診断（全パラメータの universal 名とローカライズ名の一覧）で、勾配・構造用途・
-		// ラベルが**名前違いのまま黙って無視されていた**ことと、行列に与えた Z が PIO に
-		// 届いていないことが判明した。名前は上の定数へ反映済み。2 回目のこの診断は、設定した
-		// 値が実際に入ったかを**読み戻して**確かめるためのもので、一覧は「材質」の universal 名
-		// を確定させるために内部パラメータ（ローカライズ名が __NNA_DO_NOT_CHANGE のもの）を
-		// 除いて出す（1 回目は全件出したためダイアログが画面下端で切れた）。
+		// これまでの診断で、パラメータ名（勾配 PitchAngle・構造用途 structuralUse・ラベル
+		// showLabel/labelText・材質 Material）と、行列オフセットの読み戻しが**レイヤ相対**で
+		// 返ることが確定し、いずれも上の実装へ反映した。残る確認は**向き**（勾配の符号と
+		// 方位角の基準）なので、命令の軒側／棟側の 3D 座標と、そこから求めた方位角・勾配を
+		// 出して、実際に描かれた向きと突き合わせられるようにする。
 		void ShowPlacementDiagnostics(const VWParametricObj& pio, MCObjectHandle object,
-									  const core::RafterCommand& rafter, double layerZ, double dz)
+									  const core::RafterCommand& rafter, double azimuth,
+									  double pitch)
 		{
 			VWTransformMatrix readBack;
 			VWParametricObj(object).GetObjectMatrix(readBack);
@@ -212,15 +212,17 @@ namespace HomeskzIfcImport::draw
 
 			std::array<char, 512> buffer{};
 			std::snprintf(buffer.data(), buffer.size(),
-						  "高さ: 命令 %.1f - レイヤ %.1f = 移動量 %.1f / 読み戻しオフセット "
-						  "(%.1f, %.1f, %.1f)",
-						  rafter.elevation, layerZ, dz, offset.x, offset.y, offset.z);
+						  "命令: 軒 (%.1f, %.1f, %.1f) → 棟 (%.1f, %.1f, %.1f) / 方位 %.2f° "
+						  "勾配 %.2f°\n読み戻しオフセット (%.1f, %.1f, %.1f)",
+						  rafter.start.x, rafter.start.y, rafter.elevation, rafter.end.x,
+						  rafter.end.y, rafter.endElevation, azimuth, pitch, offset.x, offset.y,
+						  offset.z);
 			TXString body(buffer.data());
 
 			// 設定した値の読み戻し（入っていないパラメータがひと目で分かる）。
-			const std::array<const char*, 6> checked{kFieldType,		  kFieldPitchAngle,
-													 kFieldStructuralUse, kFieldLabelText,
-													 kFieldLineLength,	  kFieldVerticalReference};
+			const std::array<const char*, 7> checked{
+				kFieldType,		  kFieldPitchAngle,		   kFieldStructuralUse, kFieldLabelText,
+				kFieldLineLength, kFieldVerticalReference, kFieldMaterial};
 			body += "\n\n読み戻し: ";
 			for (const char* name : checked)
 			{
@@ -230,31 +232,13 @@ namespace HomeskzIfcImport::draw
 				body += "] ";
 			}
 
-			// 内部パラメータを除いた一覧（材質の universal 名を確定させるため）。
-			const TXString hidden("__NNA_DO_NOT_CHANGE");
-			TXString names;
-			const size_t count = pio.GetParamsCount();
-			for (size_t i = 0; i < count; ++i)
-			{
-				const TXString localized = pio.GetParamLocalizedName(i);
-				if (localized == hidden)
-					continue;
-				if (!names.IsEmpty())
-					names += ", ";
-				names += pio.GetParamName(i);
-				names += "(";
-				names += localized;
-				names += ")";
-			}
-			body += "\n\nパラメータ（内部を除く）: ";
-			body += names;
 			gSDK->AlertInform(body, TXString("垂木配置の診断（一時）"), false);
 		}
 
 		// 垂木 1 本を軸組ツールで描く。PIO を作れなければ平面投影の直線でフォールバックする。
 		// 何か 1 つでも配置できたら true。diagnose は上記の一時診断を出すかどうか
 		// （最初の 1 本だけ true にして呼ぶ）。
-		bool DrawOne(const core::RafterCommand& rafter, double layerZ, bool diagnose)
+		bool DrawOne(const core::RafterCommand& rafter, bool diagnose)
 		{
 			const double dx = rafter.end.x - rafter.start.x;
 			const double dy = rafter.end.y - rafter.start.y;
@@ -267,13 +251,11 @@ namespace HomeskzIfcImport::draw
 			const double pitch =
 				std::atan2(rafter.endElevation - rafter.elevation, run) * kDegreesPerRadian;
 
-			// 配置行列: Z 軸まわりに平面方位角だけ回し、支持点の XY へ平行移動する。
-			// **Z はここでは与えない**。ローカル確認で、行列に Z を入れても PIO には反映されず
-			// （与えた 6109.0 に対し読み戻しは 2.0、OIP の Z も 0）、高さは別途 3D 移動で
-			// 与える必要があることが分かった（下の MoveObject3D。Python 版 Move3D と同じ手）。
+			// 配置行列: Z 軸まわりに平面方位角だけ回し、支持点（XY ＋ 天端の**絶対** Z）へ
+			// 平行移動する（冒頭「高さは配置行列の絶対 Z で与える」）。
 			VWTransformMatrix matrix;
 			matrix.SetRotation(azimuth, VWPoint3D(0.0, 0.0, 1.0));
-			matrix.SetOffset(rafter.start.x, rafter.start.y, 0.0);
+			matrix.SetOffset(rafter.start.x, rafter.start.y, rafter.elevation);
 
 			MCObjectHandle object = gSDK->CreateCustomObjectByMatrix(kFramingMember, matrix);
 			if (object == nil)
@@ -326,15 +308,8 @@ namespace HomeskzIfcImport::draw
 			pio.SetParamReal(kFieldEmbedment, rafter.embedment);
 			gSDK->ResetObject(object);
 
-			// 高さ。オブジェクトの Z は**レイヤ座標**（レイヤ平面が Z=0）なので、命令の絶対 Z
-			// からレイヤの基準高さを引いてレイヤ相対に直してから 3D 移動する。ResetObject の
-			// **後**に動かす（リセットが形状を作り直すため、先に動かすと戻される）。
-			// Z の計算はこの 1 か所に集約してある（ローカルで高さがずれたらここだけ直せばよい）。
-			const double dz = rafter.elevation - layerZ;
-			gSDK->MoveObject3D(object, 0.0, 0.0, dz);
-
 			if (diagnose)
-				ShowPlacementDiagnostics(pio, object, rafter, layerZ, dz);
+				ShowPlacementDiagnostics(pio, object, rafter, azimuth, pitch);
 			return true;
 		}
 	} // namespace
@@ -358,7 +333,7 @@ namespace HomeskzIfcImport::draw
 
 			// 一時診断は最初に描けた 1 本だけで出す（垂木の本数ぶんダイアログが開かないように）。
 			const bool diagnose = drawn == 0;
-			if (DrawOne(rafter, layerElevation(layer), diagnose))
+			if (DrawOne(rafter, diagnose))
 				++drawn;
 		}
 		return drawn;

@@ -265,7 +265,6 @@ if(VW_BUILD_PLUGIN)
 		src/Updater.cpp
 		src/UpdaterFlow.cpp
 		src/draw/ExecuteDocument.cpp
-		src/draw/LayerElevation.cpp
 		src/draw/Grid.cpp
 		src/draw/Story.cpp
 		src/draw/Floor.cpp

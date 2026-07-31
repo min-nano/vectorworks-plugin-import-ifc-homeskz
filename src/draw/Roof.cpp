@@ -23,7 +23,7 @@
 //	  2. 屋根面オブジェクトを外形から生成する。
 //	  3. **屋根面を決めるオブジェクト変数を実測値で上書きする**（下記「屋根軸は
 //	     オブジェクト変数で与える」）。屋根軸（ovSlabRoofPt1/Pt2）・棟側の点
-//	     （ovSlabRoofUpslopePt）・勾配（ovSlabRoofRise/Run）・軸の Z（ovSlabHeight。レイヤ相対）。
+//	     （ovSlabRoofUpslopePt）・勾配（ovSlabRoofRise/Run）・軸の Z（ovSlabHeight）。
 //	  4. ハンドルから屋根面オブジェクトを作り直して形状を再構築し（VWRoofFaceObj の
 //	     ハンドル版コンストラクタが InitGeometry を呼ぶ）、厚み（野地板 12mm）を設定する。
 //	  5. クラス（耐力面材-屋根）を割り当て、描画属性をすべてクラス属性に従わせて再計算する。
@@ -45,19 +45,19 @@
 //	（ObjectVariables.h のコメント "a point on the upslope side of the roof"）なので、命令の
 //	upslope（軸から棟側へ進んだ点）をそのまま渡す。
 //
-//	【高さはレイヤ相対で与える】屋根軸の Z（ovSlabHeight）はオブジェクトの Z と同じく
-//	**レイヤ座標**なので、命令の elevation（軒の絶対 Z）からレイヤの基準高さを引いて渡す
-//	（draw/LayerElevation.h）。Python 版も BeginRoof 経由で「レイヤ基準で扱わないとレイヤ
-//	高さぶん二重に持ち上がる」ことを確認しており（#113）、垂木の配置でも同じ規約だった
-//	（配置行列の絶対 Z は届かず、MoveObject3D にレイヤ相対で渡す必要があった）。Z の計算は
-//	1 か所（DrawOne の ovSlabHeight 設定）に集約してある。
+//	【高さは絶対 Z で与える（ローカル確認項目）】屋根軸の Z（ovSlabHeight）には命令の
+//	elevation（軒の絶対 Z）をそのまま渡す。垂木の配置で「絶対 Z を渡すのが正しい」ことが
+//	確認できた（draw/Rafter.cpp「高さは配置行列の絶対 Z で与える」）ので、同じ規約に揃える。
+//	なお本プラグインでは野地板レイヤの基準高さと軒の Z の差はごく小さい（レイヤは横架材天端
+//	付近、軒は垂木せいぶん上）ため、仮にレイヤ相対が正しかったとしてもズレは数 mm に留まる。
+//	VW 実機で高さがずれていたら、Z の計算は 1 か所（DrawOne の ovSlabHeight 設定）に集約して
+//	あるのでそこだけ直せばよい。
 //
 //	実描画（高さ・勾配・厚みの最終挙動、厚みが軸のどちら側へ伸びるか）はローカルの
 //	VectorWorks で目視確認する（ROADMAP.md M6「ローカル確認」）。
 //
 
 #include "PluginPrefix.h"
-#include "draw/LayerElevation.h"
 #include "draw/Roof.h"
 #include "core/Document.h"
 
@@ -142,7 +142,7 @@ namespace HomeskzIfcImport::draw
 		// 野地板 1 枚を屋根面オブジェクトとして描く。**屋根面として作れたときだけ true** を返し、
 		// 外形ポリゴンへフォールバックした場合は false（完了ダイアログの「描けた数」が
 		// 「6/6」ではなく「0/6」になるので、ローカル確認で屋根面生成の失敗が一目で分かる）。
-		bool DrawOne(const core::RoofCommand& roof, double layerZ)
+		bool DrawOne(const core::RoofCommand& roof)
 		{
 			if (roof.run <= 0.0 || roof.boundary.size() < 3)
 			{
@@ -179,14 +179,13 @@ namespace HomeskzIfcImport::draw
 			//   * 屋根軸（軒に沿う線）… 命令の軸始点・終点。
 			//   * 棟側の点 … 命令の upslope（**方向ではなく点**）。
 			//   * 勾配 … 比を保ったまま run＝25.4 基準へ正規化する（kSlopeRunUnit 参照）。
-			//   * 軸の Z … 命令の elevation をレイヤ相対に直したもの（冒頭「高さはレイヤ相対で
-			//     与える」）。
+			//   * 軸の Z … 命令の elevation（冒頭「高さは絶対 Z で与える」）。
 			SetPointVariable(handle, ovSlabRoofPt1, roof.axisStart);
 			SetPointVariable(handle, ovSlabRoofPt2, roof.axisEnd);
 			SetPointVariable(handle, ovSlabRoofUpslopePt, roof.upslope);
 			SetRealVariable(handle, ovSlabRoofRise, roof.rise * kSlopeRunUnit / roof.run);
 			SetRealVariable(handle, ovSlabRoofRun, kSlopeRunUnit);
-			SetRealVariable(handle, ovSlabHeight, roof.elevation - layerZ);
+			SetRealVariable(handle, ovSlabHeight, roof.elevation);
 
 			// 上書きした変数から形状を作り直す。ハンドル版コンストラクタが InitGeometry を
 			// 呼ぶので、これが「変数 → 屋根面の 3D 形状」の再構築にあたる。
@@ -212,7 +211,7 @@ namespace HomeskzIfcImport::draw
 				continue;
 			gSDK->SetCurrentLayer(layer);
 
-			if (DrawOne(roof, layerElevation(layer)))
+			if (DrawOne(roof))
 				++drawn;
 		}
 		return drawn;
