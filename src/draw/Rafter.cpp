@@ -130,9 +130,52 @@ namespace HomeskzIfcImport::draw
 			return {buffer.data()};
 		}
 
+		// 【一時的な診断・M6 のローカル確認用。原因が分かり次第このブロックごと削除する】
+		//
+		// ローカル確認で「幅・せい・長さ（SetParamReal）とタイプ（SetParamAsString）は反映
+		// されるのに、勾配・構造用途・材質・名前だけが既定値のまま」という結果になった。
+		// 同じ setter で一部だけ効かない以上、原因は setter ではなく**パラメータ名の誤り**
+		// （VW 実機の FramingMember 登録名が想定と違う）だと考えられる。実機でしか確かめ
+		// られないので、最初の 1 本を描いたところで
+		//   * PIO の全パラメータの「universal 名（ローカライズ名）」
+		//   * 配置行列に与えたオフセットと、生成後に読み戻したオフセット
+		//     （OIP の Z が 0 だった件。行列の Z が落ちているのかを切り分ける）
+		// をダイアログに出す。
+		void ShowPlacementDiagnostics(const VWParametricObj& pio, MCObjectHandle object,
+									  const core::RafterCommand& rafter)
+		{
+			TXString names;
+			const size_t count = pio.GetParamsCount();
+			for (size_t i = 0; i < count; ++i)
+			{
+				if (i > 0)
+					names += ", ";
+				names += pio.GetParamName(i);
+				names += "(";
+				names += pio.GetParamLocalizedName(i);
+				names += ")";
+			}
+
+			VWTransformMatrix readBack;
+			VWParametricObj(object).GetObjectMatrix(readBack);
+			const VWPoint3D offset = readBack.GetOffset();
+
+			std::array<char, 256> buffer{};
+			std::snprintf(buffer.data(), buffer.size(),
+						  "与えたオフセット: (%.1f, %.1f, %.1f) / 読み戻し: (%.1f, %.1f, %.1f)",
+						  rafter.start.x, rafter.start.y, rafter.elevation, offset.x, offset.y,
+						  offset.z);
+
+			TXString body(buffer.data());
+			body += "\n\nFramingMember のパラメータ: ";
+			body += names;
+			gSDK->AlertInform(body, TXString("垂木配置の診断（一時）"), false);
+		}
+
 		// 垂木 1 本を軸組ツールで描く。PIO を作れなければ平面投影の直線でフォールバックする。
-		// 何か 1 つでも配置できたら true。
-		bool DrawOne(const core::RafterCommand& rafter)
+		// 何か 1 つでも配置できたら true。diagnose は上記の一時診断を出すかどうか
+		// （最初の 1 本だけ true にして呼ぶ）。
+		bool DrawOne(const core::RafterCommand& rafter, bool diagnose)
 		{
 			const double dx = rafter.end.x - rafter.start.x;
 			const double dy = rafter.end.y - rafter.start.y;
@@ -194,6 +237,9 @@ namespace HomeskzIfcImport::draw
 			pio.SetParamReal(kFieldOverhang, rafter.overhang);
 			pio.SetParamReal(kFieldEmbedment, rafter.embedment);
 			gSDK->ResetObject(object);
+
+			if (diagnose)
+				ShowPlacementDiagnostics(pio, object, rafter);
 			return true;
 		}
 	} // namespace
@@ -215,7 +261,9 @@ namespace HomeskzIfcImport::draw
 				continue;
 			gSDK->SetCurrentLayer(layer);
 
-			if (DrawOne(rafter))
+			// 一時診断は最初に描けた 1 本だけで出す（垂木の本数ぶんダイアログが開かないように）。
+			const bool diagnose = drawn == 0;
+			if (DrawOne(rafter, diagnose))
 				++drawn;
 		}
 		return drawn;
