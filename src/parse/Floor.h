@@ -114,7 +114,7 @@ namespace HomeskzIfcImport::parse
 	// その階に属する床版（Name=="床版" の IfcSlab）を FloorCommand にする（最上階も対象で、
 	// その床はロフト＝小屋裏収納の床として "R-FL" へ・基準面は軒高になる。上記要件参照）。
 	// 屋根階に床版が無いときは、代わりに床梁から合成した外形（loftFloorRegions）を使う。
-	// 平面外形は通り芯と同じグリッド中心オフセット（parse/Grid の resolveGridCenter）で
+	// 平面外形は通り芯と同じグリッド中心オフセット（parse/Context の gridCenter）で
 	// 補正する。押し出しソリッドを解決できない床版はスキップする（1 枚の欠損で全体を
 	// 止めない。CLAUDE.md「エラーハンドリング」）。
 	//

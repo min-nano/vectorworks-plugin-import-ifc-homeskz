@@ -41,8 +41,12 @@ namespace HomeskzIfcImport::parse
 	// 点順で処理するので、入力の列挙順に依存しない決定的な並びになる。
 	std::vector<GridLine> collectGridLines(const Model& model);
 
-	// 線分群の bbox 中心（＝センタリングオフセット）を返す。線分が空なら false
-	// （out は変更しない＝補正しない）。
+	// 線分群の bbox 中心（＝**全要素に共通のセンタリングオフセット**）を返す。Python 版
+	// resolve_lines が返す (center_x, center_y) に相当し、床・屋根組・基礎・部材はいずれも
+	// このオフセットで平面座標を補正する（要素ごとに別の中心を使うと図面がずれる）。
+	// 線分が空なら false（out は変更しない）＝補正しない。
+	//
+	// 解析中は parse/Context がこの結果を 1 度だけ求めて共有する（Context::gridCenter）。
 	bool gridCenterOf(const std::vector<GridLine>& lines, core::Vec2& out);
 
 	// STEP Model から通り芯の描画命令を組み立てる（Python 版 build_grid_commands 相当）。
@@ -62,10 +66,4 @@ namespace HomeskzIfcImport::parse
 
 	// 同上。共有コンテキストの線分・センタリング中心を使う（parse/Context.h）。
 	std::vector<core::GridCommand> buildGridCommands(Context& context);
-
-	// 通り芯の bbox 中心（＝全要素に共通のセンタリングオフセット）を返す。Python 版
-	// resolve_lines が返す (center_x, center_y) に相当し、床・基礎・部材はいずれもこの
-	// オフセットで平面座標を補正する（要素ごとに別の中心を使うと図面がずれる）。通り芯を
-	// 1 本も取れなかったときは false（out は変更しない）＝補正しない。
-	bool resolveGridCenter(const Model& model, core::Vec2& out);
 } // namespace HomeskzIfcImport::parse

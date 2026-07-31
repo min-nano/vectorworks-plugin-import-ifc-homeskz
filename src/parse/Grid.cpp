@@ -160,11 +160,6 @@ namespace HomeskzIfcImport::parse
 		return true;
 	}
 
-	bool resolveGridCenter(const Model& model, Vec2& out)
-	{
-		return gridCenterOf(collectGridLines(model), out);
-	}
-
 	std::vector<GridCommand> buildGridCommands(Context& context)
 	{
 		// 1. 通り芯の線分（重複除去済み）と 2. 全端点の bbox 中心。いずれもコンテキストが

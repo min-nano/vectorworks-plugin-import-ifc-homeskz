@@ -23,6 +23,7 @@
 | `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配（手計算値との突き合わせ） |
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
 | `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`）とレイヤスタック順の計算 |
+| `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
 | `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |
 | `ParseStoryTests` | `src/parse/Story` | 階・レベル・レイヤ名（横架材天端オフセット・屋根組レベルの追加条件） |
 | `ParseStructuralClassTests` | `src/parse/StructuralClass` | 部材種別 → VW クラスの純ロジック |

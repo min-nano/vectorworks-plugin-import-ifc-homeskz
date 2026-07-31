@@ -279,7 +279,7 @@ Python 版が「並べ替えても既存ビューポートの描画には反映�
 - ✅ `parse/IfcGeometry` 拡張: 要素の形状表現から押し出しを取り出す `firstExtrudedSolid` /
   `resolveElementWorldSolid`、平面外形 `footprint`（鉛直押し出し＝プロファイル、水平押し出し＝
   掃引矩形）、Z 範囲 `zTopAndThickness`（Python 版 `ifc/footing.py` の低レベルヘルパー相当。
-  M9 基礎でもそのまま使う）。`parse/Grid` にセンタリング中心を返す `resolveGridCenter`、
+  M9 基礎でもそのまま使う）。`parse/Grid` にセンタリング中心を返す `gridCenterOf`（解析中は `parse/Context` が共有）、
   `parse/Story` に階の収容要素を返す `collectStoryElements` を追加。
 - ✅ `parse/Step` 拡張: **ISO 10303-21 の拡張文字エスケープ（`\X2\…\X0\` / `\X\HH` /
   `\S\c` / `\P?\`）を UTF-8 へデコード**。ホームズ君 IFC の日本語 `Name`（`床版` 等）は

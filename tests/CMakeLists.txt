@@ -195,6 +195,17 @@ target_link_libraries(ParseRoofTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseRoofTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Shared parse context (src/parse/Context): the per-import cache that lets every
+# element's build*Commands reuse the same stories / grid centre / storey elements /
+# loft-floor regions / roof planes instead of recomputing them. Proves the cached
+# answers are stable across repeated calls AND identical to the uncached functions —
+# the cache must not change behaviour. Exercised on the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseContextTests ParseContextTests.cpp)
+target_link_libraries(ParseContextTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseContextTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
 # types and formats them into the dialog text the import command shows. SDK-free —
 # the counting + formatting is tested here; only the file picker and the alert
