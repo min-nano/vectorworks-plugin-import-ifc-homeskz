@@ -67,6 +67,7 @@
 #include "VWFC/VWObjects/VWRoofFaceObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>

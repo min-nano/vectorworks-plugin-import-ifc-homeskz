@@ -216,13 +216,20 @@ namespace HomeskzIfcImport::draw
 			VWParametricObj(object).GetObjectMatrix(readBack);
 			const VWPoint3D offset = readBack.GetOffset();
 
-			std::array<char, 512> buffer{};
+			// 実際に描かれた 3D 範囲。命令の想定範囲（軒〜棟の XY と天端 Z）と突き合わせれば、
+			// どの軸へどれだけずれているかが数値で分かる（見た目の印象で推測しないため）。
+			WorldCube cube;
+			gSDK->GetObjectCube(object, cube);
+
+			std::array<char, 640> buffer{};
 			std::snprintf(buffer.data(), buffer.size(),
 						  "命令: 軒 (%.1f, %.1f, %.1f) → 棟 (%.1f, %.1f, %.1f) / 方位 %.2f° "
-						  "勾配 %.2f°\n読み戻しオフセット (%.1f, %.1f, %.1f)",
+						  "勾配 %.2f°\n読み戻しオフセット (%.1f, %.1f, %.1f)"
+						  "\n実際の範囲 X[%.1f, %.1f] Y[%.1f, %.1f] Z[%.1f, %.1f]",
 						  rafter.start.x, rafter.start.y, rafter.elevation, rafter.end.x,
 						  rafter.end.y, rafter.endElevation, azimuth, pitch, offset.x, offset.y,
-						  offset.z);
+						  offset.z, cube.MinX(), cube.MaxX(), cube.MinY(), cube.MaxY(), cube.MinZ(),
+						  cube.MaxZ());
 			TXString body(buffer.data());
 
 			// 設定した値の読み戻し（入っていないパラメータがひと目で分かる）。
