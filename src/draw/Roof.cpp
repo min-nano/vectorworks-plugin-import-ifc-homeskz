@@ -67,7 +67,9 @@
 #include "VWFC/VWObjects/VWRoofFaceObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -142,7 +144,34 @@ namespace HomeskzIfcImport::draw
 		// 野地板 1 枚を屋根面オブジェクトとして描く。**屋根面として作れたときだけ true** を返し、
 		// 外形ポリゴンへフォールバックした場合は false（完了ダイアログの「描けた数」が
 		// 「6/6」ではなく「0/6」になるので、ローカル確認で屋根面生成の失敗が一目で分かる）。
-		bool DrawOne(const core::RoofCommand& roof)
+		// 【一時的な診断・M6 のローカル確認用。原因が分かり次第このブロックごと削除する】
+		//
+		// 完了ダイアログは野地板を「描いた」と数えているのに、図面には 1 枚も現れない
+		// （図に見えている面は M5 の床板）。屋根面オブジェクトが
+		//   (a) そもそも作られていない（ハンドルが nil ／屋根面と判定されない）のか
+		//   (b) 作られてはいるが**図面に挿入されていない**（コンテナに入っていない）のか
+		//   (c) 挿入されているが形状が退化していて見えないのか
+		// を切り分ける。VWFC の VWRoofFaceObj は gSDK->CreateBasicSlab でオブジェクトを作る
+		// だけで、レイヤへ入れる呼び出しをしていないため (b) の可能性が高い。
+		void ShowRoofDiagnostics(const core::RoofCommand& roof, MCObjectHandle handle,
+								 MCObjectHandle layer, MCObjectHandle parentBefore)
+		{
+			std::array<char, 512> buffer{};
+			std::snprintf(
+				buffer.data(), buffer.size(),
+				"屋根面: handle=%s 種別=%d 屋根面判定=%s / 生成直後の親=%s → レイヤへ追加=%s\n"
+				"軸 (%.1f, %.1f)→(%.1f, %.1f) 棟側 (%.1f, %.1f) 勾配 %.4f/%.1f 軸Z %.1f 厚み %.1f",
+				handle == nil ? "nil" : "ok", handle == nil ? -1 : gSDK->GetObjectTypeN(handle),
+				(handle != nil && VWRoofFaceObj::IsRoofFaceObjectN(handle)) ? "yes" : "no",
+				parentBefore == nil ? "nil" : (parentBefore == layer ? "レイヤ" : "別のもの"),
+				parentBefore == nil ? "した" : "不要", roof.axisStart.x, roof.axisStart.y,
+				roof.axisEnd.x, roof.axisEnd.y, roof.upslope.x, roof.upslope.y,
+				roof.rise * kSlopeRunUnit / roof.run, kSlopeRunUnit, roof.elevation,
+				roof.thickness);
+			gSDK->AlertInform(TXString(buffer.data()), TXString("野地板の診断（一時）"), false);
+		}
+
+		bool DrawOne(const core::RoofCommand& roof, MCObjectHandle layer, bool diagnose)
 		{
 			if (roof.run <= 0.0 || roof.boundary.size() < 3)
 			{
@@ -171,9 +200,22 @@ namespace HomeskzIfcImport::draw
 			// 種別も確かめる。屋根面でないものに屋根専用の設定を続けない）。
 			if (handle == nil || !VWRoofFaceObj::IsRoofFaceObjectN(handle))
 			{
+				if (diagnose)
+					ShowRoofDiagnostics(roof, handle, layer, nil);
 				DrawFallbackPolygon(roof);
 				return false;
 			}
+
+			// **図面（レイヤ）へ挿入する。** VWFC の VWRoofFaceObj は gSDK->CreateBasicSlab で
+			// オブジェクトを作るだけで、どのコンテナにも入れない（外形ポリゴンを自分の中へ
+			// AddObjectToContainer するのみ）。VWPolygon2DObj のように図面へ入る wrapper と
+			// 違うため、入れないと**オブジェクトはできているのに図面に現れない**。すでに
+			// どこかに入っている場合に二重登録しないよう、親が無いときだけ入れる。
+			const MCObjectHandle parentBefore = gSDK->ParentObject(handle);
+			if (parentBefore == nil)
+				gSDK->AddObjectToContainer(handle, layer);
+			if (diagnose)
+				ShowRoofDiagnostics(roof, handle, layer, parentBefore);
 
 			// 屋根面の形状を決めるオブジェクト変数を命令の値で上書きする。
 			//   * 屋根軸（軒に沿う線）… 命令の軸始点・終点。
@@ -211,7 +253,8 @@ namespace HomeskzIfcImport::draw
 				continue;
 			gSDK->SetCurrentLayer(layer);
 
-			if (DrawOne(roof))
+			// 一時診断は最初の 1 枚だけで出す（野地板の枚数ぶんダイアログが開かないように）。
+			if (DrawOne(roof, layer, drawn == 0))
 				++drawn;
 		}
 		return drawn;

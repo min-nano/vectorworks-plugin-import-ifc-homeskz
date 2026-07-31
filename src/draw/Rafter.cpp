@@ -28,6 +28,12 @@
 //	並んでしまい確定した）。**行列のオフセットは XY がレイヤ座標・Z が絶対**という混在に注意。
 //	Z の計算は 1 か所（DrawOne の SetOffset）に集約してある。
 //
+//	【向きは棟から軒へ下る】ローカル確認で、挿入点から**遠端へ向かって下る**のが軸組ツールの
+//	向きの規約だと分かった（軒側を挿入点にして上り勾配を与えたところ、勾配が逆になるうえ
+//	軒の出も棟側へ出てしまった＝両方が同時に反転した）。したがって挿入点は**棟側（高い端）**、
+//	方位角は**棟→軒**、勾配は下りの角度（正）で与える。命令は start＝軒側（支持点）・
+//	end＝棟側なので、DrawOne で向きを反転して使う。これにより軒の出は遠端（軒先側）へ出る。
+//
 //	【フィールド名は VW 実機の登録から採る】軸組ツールのパラメータ名は、当初 Python 版の
 //	VectorScript エクスポートから推定していたが、ローカル確認で PIO の全パラメータの universal
 //	名とローカライズ名を出したところ、勾配（pitch ではなく **PitchAngle**。pitch という名前の
@@ -240,22 +246,25 @@ namespace HomeskzIfcImport::draw
 		// （最初の 1 本だけ true にして呼ぶ）。
 		bool DrawOne(const core::RafterCommand& rafter, bool diagnose)
 		{
-			const double dx = rafter.end.x - rafter.start.x;
-			const double dy = rafter.end.y - rafter.start.y;
-			const double run = std::hypot(dx, dy); // 平面投影長 = LineLength（支持点→棟）
+			// **挿入点は棟側（高い端）で、方位は棟→軒**（冒頭「向きは棟から軒へ下る」）。
+			// 命令は start＝軒側（支持点）・end＝棟側なので、ここで向きを反転して使う。
+			const double dx = rafter.start.x - rafter.end.x;
+			const double dy = rafter.start.y - rafter.end.y;
+			const double run = std::hypot(dx, dy); // 平面投影長 = LineLength（スパン）
 			if (run <= 0.0)
 				return false;
 
-			// 軒（支持点）→棟の平面方位角と勾配（度）。勾配は両端の天端 Z の差から。
+			// 棟→軒の平面方位角と勾配（度）。勾配は両端の天端 Z の差から求めた**下り**の角度で、
+			// 正の値が「挿入点から遠端へ向かって下る」を意味する。
 			const double azimuth = std::atan2(dy, dx) * kDegreesPerRadian;
 			const double pitch =
 				std::atan2(rafter.endElevation - rafter.elevation, run) * kDegreesPerRadian;
 
-			// 配置行列: Z 軸まわりに平面方位角だけ回し、支持点（XY ＋ 天端の**絶対** Z）へ
+			// 配置行列: Z 軸まわりに平面方位角だけ回し、棟側の端（XY ＋ 天端の**絶対** Z）へ
 			// 平行移動する（冒頭「高さは配置行列の絶対 Z で与える」）。
 			VWTransformMatrix matrix;
 			matrix.SetRotation(azimuth, VWPoint3D(0.0, 0.0, 1.0));
-			matrix.SetOffset(rafter.start.x, rafter.start.y, rafter.elevation);
+			matrix.SetOffset(rafter.end.x, rafter.end.y, rafter.endElevation);
 
 			MCObjectHandle object = gSDK->CreateCustomObjectByMatrix(kFramingMember, matrix);
 			if (object == nil)
