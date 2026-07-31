@@ -9,12 +9,12 @@
 //
 //	描画手順（Python 版 draw_rafter と同じ意図。実現手段は SDK の作法に合わせる）:
 //	  1. 命令の軒側 start（＝支持点）・棟側 end の平面座標と両端の天端 Z から、**水平投影長
-//	     （スパン）・平面方位角・勾配**を求める（向きは下記のとおり棟→軒に取る）。
-//	  2. **配置行列**（Z 軸まわりに平面方位角だけ回し、棟側の端へ平行移動）から軸組ツールの
-//	     PIO を生成する。Python 版は「原点に生成 → Rotate3D → Move3D」の 3 手順だが、ISDK には
-//	     VectorScript の 3D 変換状態（ResetOrientation3D / Rotate3D）が無く、代わりに配置行列
-//	     から直接 PIO を作れる（CreateCustomObjectByMatrix）。勾配は本体の勾配パラメータが担い、
-//	     棟側（下端基準）から軒側へ下る。
+//	     （スパン）・平面方位角・勾配**を求める。
+//	  2. **配置行列**（Z 軸まわりに回し、支持点へ平行移動）から軸組ツールの PIO を生成する。
+//	     Python 版は「原点に生成 → Rotate3D → Move3D」の 3 手順だが、ISDK には VectorScript の
+//	     3D 変換状態（ResetOrientation3D / Rotate3D）が無く、代わりに配置行列から直接 PIO を
+//	     作れる（CreateCustomObjectByMatrix）。勾配は本体の勾配パラメータが担い、支持点
+//	     （下端基準）から棟側へ立ち上がる。
 //	  3. クラス（小屋組-垂木）を割り当て、描画属性をすべてクラス属性に従わせる。
 //	  4. 断面・配置・2D 表示・軒の出・差し込み・仕様ラベル・構造用途・材質の各パラメータを
 //	     設定して ResetObject で反映する。
@@ -28,11 +28,16 @@
 //	並んでしまい確定した）。**行列のオフセットは XY がレイヤ座標・Z が絶対**という混在に注意。
 //	Z の計算は 1 か所（DrawOne の SetOffset）に集約してある。
 //
-//	【向きは棟から軒へ下る】ローカル確認で、挿入点から**遠端へ向かって下る**のが軸組ツールの
-//	向きの規約だと分かった（軒側を挿入点にして上り勾配を与えたところ、勾配が逆になるうえ
-//	軒の出も棟側へ出てしまった＝両方が同時に反転した）。したがって挿入点は**棟側（高い端）**、
-//	方位角は**棟→軒**、勾配は下りの角度（正）で与える。命令は start＝軒側（支持点）・
-//	end＝棟側なので、DrawOne で向きを反転して使う。これにより軒の出は遠端（軒先側）へ出る。
+//	【方位角は符号を反転して渡す】VWTransformMatrix::SetRotation の角度の符号は、部材が実際に
+//	伸びる向きと**逆**である。方位 +90°（＝+Y へ伸ばしたい）を渡したとき OIP の「角度」が
+//	−90° になり、部材は −Y へ伸びた。これが「勾配が逆」「軒の出が棟側へ出る」として同時に
+//	現れていた正体で、勾配の符号や挿入点の取り方は正しかった。したがって挿入点は**軒側の
+//	支持点**（命令の start）、勾配は上りの角度（正）のままで、**方位角だけ −direction を渡す**。
+//	部材は挿入点から遠端（棟側）へ向かって上り、差し込み・軒の出はその手前（軒先側）へ伸びる。
+//
+//	検証: 命令 軒 (-9805, -5940, 6109) → 棟 (-9805, 3440, 7985) に対し、方位 −90° を渡すと
+//	実際の範囲は Y[3387.5, 12820.0] Z[7985.0, 9906.9]（＝挿入点から +Y へ上る）になり、
+//	渡した角度の符号が反転して効いていることが数値で確認できた。
 //
 //	【フィールド名は VW 実機の登録から採る】軸組ツールのパラメータ名は、当初 Python 版の
 //	VectorScript エクスポートから推定していたが、ローカル確認で PIO の全パラメータの universal
@@ -209,7 +214,7 @@ namespace HomeskzIfcImport::draw
 		// 方位角の基準）なので、命令の軒側／棟側の 3D 座標と、そこから求めた方位角・勾配を
 		// 出して、実際に描かれた向きと突き合わせられるようにする。
 		void ShowPlacementDiagnostics(const VWParametricObj& pio, MCObjectHandle object,
-									  const core::RafterCommand& rafter, double azimuth,
+									  const core::RafterCommand& rafter, double direction,
 									  double pitch)
 		{
 			VWTransformMatrix readBack;
@@ -227,7 +232,7 @@ namespace HomeskzIfcImport::draw
 						  "勾配 %.2f°\n読み戻しオフセット (%.1f, %.1f, %.1f)"
 						  "\n実際の範囲 X[%.1f, %.1f] Y[%.1f, %.1f] Z[%.1f, %.1f]",
 						  rafter.start.x, rafter.start.y, rafter.elevation, rafter.end.x,
-						  rafter.end.y, rafter.endElevation, azimuth, pitch, offset.x, offset.y,
+						  rafter.end.y, rafter.endElevation, direction, pitch, offset.x, offset.y,
 						  offset.z, cube.MinX(), cube.MaxX(), cube.MinY(), cube.MaxY(), cube.MinZ(),
 						  cube.MaxZ());
 			TXString body(buffer.data());
@@ -253,25 +258,24 @@ namespace HomeskzIfcImport::draw
 		// （最初の 1 本だけ true にして呼ぶ）。
 		bool DrawOne(const core::RafterCommand& rafter, bool diagnose)
 		{
-			// **挿入点は棟側（高い端）で、方位は棟→軒**（冒頭「向きは棟から軒へ下る」）。
-			// 命令は start＝軒側（支持点）・end＝棟側なので、ここで向きを反転して使う。
-			const double dx = rafter.start.x - rafter.end.x;
-			const double dy = rafter.start.y - rafter.end.y;
+			const double dx = rafter.end.x - rafter.start.x;
+			const double dy = rafter.end.y - rafter.start.y;
 			const double run = std::hypot(dx, dy); // 平面投影長 = LineLength（スパン）
 			if (run <= 0.0)
 				return false;
 
-			// 棟→軒の平面方位角と勾配（度）。勾配は両端の天端 Z の差から求めた**下り**の角度で、
-			// 正の値が「挿入点から遠端へ向かって下る」を意味する。
-			const double azimuth = std::atan2(dy, dx) * kDegreesPerRadian;
+			// 軒（支持点）→棟の平面方位角と勾配（度）。勾配は両端の天端 Z の差から求めた
+			// **上り**の角度で、正の値が「挿入点から遠端へ向かって上る」を意味する。
+			const double direction = std::atan2(dy, dx) * kDegreesPerRadian;
 			const double pitch =
 				std::atan2(rafter.endElevation - rafter.elevation, run) * kDegreesPerRadian;
 
-			// 配置行列: Z 軸まわりに平面方位角だけ回し、棟側の端（XY ＋ 天端の**絶対** Z）へ
-			// 平行移動する（冒頭「高さは配置行列の絶対 Z で与える」）。
+			// 配置行列: Z 軸まわりに回し、支持点（XY ＋ 天端の**絶対** Z）へ平行移動する
+			// （冒頭「高さは配置行列の絶対 Z で与える」）。**角度は符号を反転して渡す**
+			// （冒頭「方位角は符号を反転して渡す」）。
 			VWTransformMatrix matrix;
-			matrix.SetRotation(azimuth, VWPoint3D(0.0, 0.0, 1.0));
-			matrix.SetOffset(rafter.end.x, rafter.end.y, rafter.endElevation);
+			matrix.SetRotation(-direction, VWPoint3D(0.0, 0.0, 1.0));
+			matrix.SetOffset(rafter.start.x, rafter.start.y, rafter.elevation);
 
 			MCObjectHandle object = gSDK->CreateCustomObjectByMatrix(kFramingMember, matrix);
 			if (object == nil)
@@ -325,7 +329,7 @@ namespace HomeskzIfcImport::draw
 			gSDK->ResetObject(object);
 
 			if (diagnose)
-				ShowPlacementDiagnostics(pio, object, rafter, azimuth, pitch);
+				ShowPlacementDiagnostics(pio, object, rafter, direction, pitch);
 			return true;
 		}
 	} // namespace
