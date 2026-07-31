@@ -9,12 +9,12 @@
 //
 //	描画手順（Python 版 draw_rafter と同じ意図。実現手段は SDK の作法に合わせる）:
 //	  1. 命令の軒側 start（＝支持点）・棟側 end の平面座標と両端の天端 Z から、**水平投影長
-//	     （スパン）・平面方位角・勾配**を求める。
-//	  2. **配置行列**（Z 軸まわりに平面方位角だけ回し、支持点の XY へ平行移動）から軸組ツールの
+//	     （スパン）・平面方位角・勾配**を求める（向きは下記のとおり棟→軒に取る）。
+//	  2. **配置行列**（Z 軸まわりに平面方位角だけ回し、棟側の端へ平行移動）から軸組ツールの
 //	     PIO を生成する。Python 版は「原点に生成 → Rotate3D → Move3D」の 3 手順だが、ISDK には
 //	     VectorScript の 3D 変換状態（ResetOrientation3D / Rotate3D）が無く、代わりに配置行列
 //	     から直接 PIO を作れる（CreateCustomObjectByMatrix）。勾配は本体の勾配パラメータが担い、
-//	     支持点（下端基準）から棟側へ立ち上がる。
+//	     棟側（下端基準）から軒側へ下る。
 //	  3. クラス（小屋組-垂木）を割り当て、描画属性をすべてクラス属性に従わせる。
 //	  4. 断面・配置・2D 表示・軒の出・差し込み・仕様ラベル・構造用途・材質の各パラメータを
 //	     設定して ResetObject で反映する。
@@ -88,7 +88,7 @@ namespace HomeskzIfcImport::draw
 		}
 		constexpr const char* kMemberTypeRafter = "rafter";
 
-		// 垂直基準（verticalReference）。軒側（下端基準）から棟へ立ち上がる。
+		// 垂直基準（verticalReference）。挿入点の Z を部材の**下端**として扱う。
 		constexpr const char* kVerticalReferenceBottom = "bottom";
 		// 2D 表示（2DDisplay）。要件により「幅」表示にする。
 		constexpr const char* k2DDisplayWidth = "width";
@@ -112,8 +112,8 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kFieldShowLabel = "showLabel"; // ラベルを表示
 		constexpr const char* kFieldLabelText = "labelText"; // ラベル文字
 		constexpr const char* kFieldStructuralUse = "structuralUse"; // 構造用途（**先頭は小文字**）
-		// 材質の universal 名は診断ダイアログが下端で切れて読み取れていない。universal 名で
-		// 見つからなければローカライズ名「材質」で引き直す（ResolveParam）。
+		// 材質。universal 名が実機で "Material" と確認できたが、念のため見つからなければ
+		// ローカライズ名「材質」で引き直す（ResolveParam）。
 		constexpr const char* kFieldMaterial = "Material";
 		constexpr const char* kLocalizedMaterial = "材質";
 		// ポップアップの選択肢は**キー（英語）で保持され、表示だけがローカライズ**される
@@ -293,7 +293,7 @@ namespace HomeskzIfcImport::draw
 			//     文字列で入れ直す（下記の読み戻し確認）。
 			VWParametricObj pio(object);
 			pio.SetParamAsString(kFieldType, kMemberTypeRafter);
-			// 支持点（下端基準）から棟側へ立ち上がる。
+			// 挿入点の Z を部材の下端として扱う。
 			pio.SetParamAsString(kFieldVerticalReference, kVerticalReferenceBottom);
 			pio.SetParamAsString(kField2DDisplay, k2DDisplayWidth);
 			// ラベルは「表示するか」と「文字」の 2 つ。文字だけ入れても表示は既定のままなので
