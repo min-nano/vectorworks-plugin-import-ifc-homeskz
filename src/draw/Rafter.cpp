@@ -206,57 +206,9 @@ namespace HomeskzIfcImport::draw
 			pio.SetParamAsString(param, TXString(fallbackKey));
 		}
 
-		// 【一時的な診断・M6 のローカル確認用。向きが確定したらこのブロックごと削除する】
-		//
-		// これまでの診断で、パラメータ名（勾配 PitchAngle・構造用途 structuralUse・ラベル
-		// showLabel/labelText・材質 Material）と、行列オフセットの読み戻しが**レイヤ相対**で
-		// 返ることが確定し、いずれも上の実装へ反映した。残る確認は**向き**（勾配の符号と
-		// 方位角の基準）なので、命令の軒側／棟側の 3D 座標と、そこから求めた方位角・勾配を
-		// 出して、実際に描かれた向きと突き合わせられるようにする。
-		void ShowPlacementDiagnostics(const VWParametricObj& pio, MCObjectHandle object,
-									  const core::RafterCommand& rafter, double direction,
-									  double pitch)
-		{
-			VWTransformMatrix readBack;
-			VWParametricObj(object).GetObjectMatrix(readBack);
-			const VWPoint3D offset = readBack.GetOffset();
-
-			// 実際に描かれた 3D 範囲。命令の想定範囲（軒〜棟の XY と天端 Z）と突き合わせれば、
-			// どの軸へどれだけずれているかが数値で分かる（見た目の印象で推測しないため）。
-			WorldCube cube;
-			gSDK->GetObjectCube(object, cube);
-
-			std::array<char, 640> buffer{};
-			std::snprintf(buffer.data(), buffer.size(),
-						  "命令: 軒 (%.1f, %.1f, %.1f) → 棟 (%.1f, %.1f, %.1f) / 方位 %.2f° "
-						  "勾配 %.2f°\n読み戻しオフセット (%.1f, %.1f, %.1f)"
-						  "\n実際の範囲 X[%.1f, %.1f] Y[%.1f, %.1f] Z[%.1f, %.1f]",
-						  rafter.start.x, rafter.start.y, rafter.elevation, rafter.end.x,
-						  rafter.end.y, rafter.endElevation, direction, pitch, offset.x, offset.y,
-						  offset.z, cube.MinX(), cube.MaxX(), cube.MinY(), cube.MaxY(), cube.MinZ(),
-						  cube.MaxZ());
-			TXString body(buffer.data());
-
-			// 設定した値の読み戻し（入っていないパラメータがひと目で分かる）。
-			const std::array<const char*, 7> checked{
-				kFieldType,		  kFieldPitchAngle,		   kFieldStructuralUse, kFieldLabelText,
-				kFieldLineLength, kFieldVerticalReference, kFieldMaterial};
-			body += "\n\n読み戻し: ";
-			for (const char* name : checked)
-			{
-				body += name;
-				body += "=[";
-				body += pio.GetParamAsString(TXString(name));
-				body += "] ";
-			}
-
-			gSDK->AlertInform(body, TXString("垂木配置の診断（一時）"), false);
-		}
-
 		// 垂木 1 本を軸組ツールで描く。PIO を作れなければ平面投影の直線でフォールバックする。
-		// 何か 1 つでも配置できたら true。diagnose は上記の一時診断を出すかどうか
-		// （最初の 1 本だけ true にして呼ぶ）。
-		bool DrawOne(const core::RafterCommand& rafter, bool diagnose)
+		// 何か 1 つでも配置できたら true。
+		bool DrawOne(const core::RafterCommand& rafter)
 		{
 			const double dx = rafter.end.x - rafter.start.x;
 			const double dy = rafter.end.y - rafter.start.y;
@@ -327,9 +279,6 @@ namespace HomeskzIfcImport::draw
 			pio.SetParamReal(kFieldOverhang, rafter.overhang);
 			pio.SetParamReal(kFieldEmbedment, rafter.embedment);
 			gSDK->ResetObject(object);
-
-			if (diagnose)
-				ShowPlacementDiagnostics(pio, object, rafter, direction, pitch);
 			return true;
 		}
 	} // namespace
@@ -351,9 +300,7 @@ namespace HomeskzIfcImport::draw
 				continue;
 			gSDK->SetCurrentLayer(layer);
 
-			// 一時診断は最初に描けた 1 本だけで出す（垂木の本数ぶんダイアログが開かないように）。
-			const bool diagnose = drawn == 0;
-			if (DrawOne(rafter, diagnose))
+			if (DrawOne(rafter))
 				++drawn;
 		}
 		return drawn;

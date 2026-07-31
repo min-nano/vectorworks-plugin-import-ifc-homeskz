@@ -24,10 +24,17 @@
 //	  3. **屋根面を決めるオブジェクト変数を実測値で上書きする**（下記「屋根軸は
 //	     オブジェクト変数で与える」）。屋根軸（ovSlabRoofPt1/Pt2）・棟側の点
 //	     （ovSlabRoofUpslopePt）・勾配（ovSlabRoofRise/Run）・軸の Z（ovSlabHeight）。
-//	  4. ハンドルから屋根面オブジェクトを作り直して形状を再構築し（VWRoofFaceObj の
+//	  4. **図面（レイヤ）へ挿入する**（下記「生成しただけでは図面に入らない」）。
+//	  5. ハンドルから屋根面オブジェクトを作り直して形状を再構築し（VWRoofFaceObj の
 //	     ハンドル版コンストラクタが InitGeometry を呼ぶ）、厚み（野地板 12mm）を設定する。
-//	  5. クラス（耐力面材-屋根）を割り当て、描画属性をすべてクラス属性に従わせて再計算する。
+//	  6. クラス（耐力面材-屋根）を割り当て、描画属性をすべてクラス属性に従わせて再計算する。
 //	屋根面を作れない場合は外形ポリゴンにフォールバックする（1 枚の失敗で全体を止めない）。
+//
+//	【生成しただけでは図面に入らない】VWRoofFaceObj は gSDK->CreateBasicSlab でオブジェクトを
+//	作るだけで、どのコンテナにも入れない（外形ポリゴンを自分の中へ入れるのみ）。VWPolygon2DObj
+//	のように図面へ入る wrapper とは違うので、**明示的にレイヤへ AddObjectToContainer しないと
+//	オブジェクトはできているのに図面に現れない**（ローカル確認で、完了ダイアログは枚数を数えて
+//	いるのに 1 枚も見えないという形で判明した）。二重登録を避けるため親が無いときだけ入れる。
 //
 //	【屋根軸はオブジェクト変数で与える（重要）】VWFC の
 //	`VWRoofFaceObj(type, poly, z, upSlopeDir, rise, run)` は一見これだけで屋根面を組めそうだが、
@@ -37,24 +44,18 @@
 //	  * 屋根軸を `±upSlopeDir.Perp() * dim`（dim＝外形バウンズの短辺の半分）＝**原点を通る線**
 //	    として設定する。外形の位置を見ておらず、外形が原点から離れているほど軸は外形の外に出る
 //
-//	という実装で、任意の位置・高さの片流れ面を作る用途には使えない（ローカル確認で野地板が
-//	1 枚も現れなかった原因）。屋根面の形状を実際に決めているのは InitGeometry が読む
+//	という実装で、任意の位置・高さの片流れ面を作る用途には使えない。屋根面の形状を実際に
+//	決めているのは InitGeometry が読む
 //	オブジェクト変数（ovSlabRoofPt1/Pt2/UpslopePt/Rise/Run・ovSlabHeight・ovSlabThickness）
 //	なので、生成後にそれらを命令の値で上書きし、ハンドル版コンストラクタで InitGeometry を
 //	もう一度走らせて形状を作り直す。**ovSlabRoofUpslopePt は「方向」ではなく「棟側にある点」**
 //	（ObjectVariables.h のコメント "a point on the upslope side of the roof"）なので、命令の
 //	upslope（軸から棟側へ進んだ点）をそのまま渡す。
 //
-//	【高さは絶対 Z で与える（ローカル確認項目）】屋根軸の Z（ovSlabHeight）には命令の
-//	elevation（軒の絶対 Z）をそのまま渡す。垂木の配置で「絶対 Z を渡すのが正しい」ことが
-//	確認できた（draw/Rafter.cpp「高さは配置行列の絶対 Z で与える」）ので、同じ規約に揃える。
-//	なお本プラグインでは野地板レイヤの基準高さと軒の Z の差はごく小さい（レイヤは横架材天端
-//	付近、軒は垂木せいぶん上）ため、仮にレイヤ相対が正しかったとしてもズレは数 mm に留まる。
-//	VW 実機で高さがずれていたら、Z の計算は 1 か所（DrawOne の ovSlabHeight 設定）に集約して
-//	あるのでそこだけ直せばよい。
-//
-//	実描画（高さ・勾配・厚みの最終挙動、厚みが軸のどちら側へ伸びるか）はローカルの
-//	VectorWorks で目視確認する（ROADMAP.md M6「ローカル確認」）。
+//	【高さは絶対 Z で与える】屋根軸の Z（ovSlabHeight）には命令の elevation（軒の絶対 Z）を
+//	そのまま渡す。垂木の配置で「絶対 Z を渡すのが正しい」ことが確認できた
+//	（draw/Rafter.cpp「高さは配置行列の絶対 Z で与える」）ので、同じ規約に揃えてある。
+//	Z の計算は 1 か所（DrawOne の ovSlabHeight 設定）に集約してある。
 //
 
 #include "PluginPrefix.h"
@@ -67,10 +68,7 @@
 #include "VWFC/VWObjects/VWRoofFaceObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
-#include <algorithm>
-#include <array>
 #include <cmath>
-#include <cstdio>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -145,43 +143,7 @@ namespace HomeskzIfcImport::draw
 		// 野地板 1 枚を屋根面オブジェクトとして描く。**屋根面として作れたときだけ true** を返し、
 		// 外形ポリゴンへフォールバックした場合は false（完了ダイアログの「描けた数」が
 		// 「6/6」ではなく「0/6」になるので、ローカル確認で屋根面生成の失敗が一目で分かる）。
-		// 【一時的な診断・M6 のローカル確認用。原因が分かり次第このブロックごと削除する】
-		//
-		// 完了ダイアログは野地板を「描いた」と数えているのに、図面には 1 枚も現れない
-		// （図に見えている面は M5 の床板）。屋根面オブジェクトが
-		//   (a) そもそも作られていない（ハンドルが nil ／屋根面と判定されない）のか
-		//   (b) 作られてはいるが**図面に挿入されていない**（コンテナに入っていない）のか
-		//   (c) 挿入されているが形状が退化していて見えないのか
-		// を切り分ける。VWFC の VWRoofFaceObj は gSDK->CreateBasicSlab でオブジェクトを作る
-		// だけで、レイヤへ入れる呼び出しをしていないため (b) の可能性が高い。
-		// 生成直後の親コンテナを説明する文字列（三項演算子を入れ子にしない）。
-		const char* ParentText(MCObjectHandle parentBefore, MCObjectHandle layer)
-		{
-			if (parentBefore == nil)
-				return "nil";
-			if (parentBefore == layer)
-				return "レイヤ";
-			return "別のもの";
-		}
-
-		void ShowRoofDiagnostics(const core::RoofCommand& roof, MCObjectHandle handle,
-								 MCObjectHandle layer, MCObjectHandle parentBefore)
-		{
-			std::array<char, 512> buffer{};
-			std::snprintf(
-				buffer.data(), buffer.size(),
-				"屋根面: handle=%s 種別=%d 屋根面判定=%s / 生成直後の親=%s → レイヤへ追加=%s\n"
-				"軸 (%.1f, %.1f)→(%.1f, %.1f) 棟側 (%.1f, %.1f) 勾配 %.4f/%.1f 軸Z %.1f 厚み %.1f",
-				handle == nil ? "nil" : "ok", handle == nil ? -1 : gSDK->GetObjectTypeN(handle),
-				(handle != nil && VWRoofFaceObj::IsRoofFaceObjectN(handle)) ? "yes" : "no",
-				ParentText(parentBefore, layer), parentBefore == nil ? "した" : "不要",
-				roof.axisStart.x, roof.axisStart.y, roof.axisEnd.x, roof.axisEnd.y, roof.upslope.x,
-				roof.upslope.y, roof.rise * kSlopeRunUnit / roof.run, kSlopeRunUnit, roof.elevation,
-				roof.thickness);
-			gSDK->AlertInform(TXString(buffer.data()), TXString("野地板の診断（一時）"), false);
-		}
-
-		bool DrawOne(const core::RoofCommand& roof, MCObjectHandle layer, bool diagnose)
+		bool DrawOne(const core::RoofCommand& roof, MCObjectHandle layer)
 		{
 			if (roof.run <= 0.0 || roof.boundary.size() < 3)
 			{
@@ -210,8 +172,6 @@ namespace HomeskzIfcImport::draw
 			// 種別も確かめる。屋根面でないものに屋根専用の設定を続けない）。
 			if (handle == nil || !VWRoofFaceObj::IsRoofFaceObjectN(handle))
 			{
-				if (diagnose)
-					ShowRoofDiagnostics(roof, handle, layer, nil);
 				DrawFallbackPolygon(roof);
 				return false;
 			}
@@ -221,11 +181,8 @@ namespace HomeskzIfcImport::draw
 			// AddObjectToContainer するのみ）。VWPolygon2DObj のように図面へ入る wrapper と
 			// 違うため、入れないと**オブジェクトはできているのに図面に現れない**。すでに
 			// どこかに入っている場合に二重登録しないよう、親が無いときだけ入れる。
-			const MCObjectHandle parentBefore = gSDK->ParentObject(handle);
-			if (parentBefore == nil)
+			if (gSDK->ParentObject(handle) == nil)
 				gSDK->AddObjectToContainer(handle, layer);
-			if (diagnose)
-				ShowRoofDiagnostics(roof, handle, layer, parentBefore);
 
 			// 屋根面の形状を決めるオブジェクト変数を命令の値で上書きする。
 			//   * 屋根軸（軒に沿う線）… 命令の軸始点・終点。
@@ -263,8 +220,7 @@ namespace HomeskzIfcImport::draw
 				continue;
 			gSDK->SetCurrentLayer(layer);
 
-			// 一時診断は最初の 1 枚だけで出す（野地板の枚数ぶんダイアログが開かないように）。
-			if (DrawOne(roof, layer, drawn == 0))
+			if (DrawOne(roof, layer))
 				++drawn;
 		}
 		return drawn;
