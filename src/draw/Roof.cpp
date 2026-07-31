@@ -153,6 +153,16 @@ namespace HomeskzIfcImport::draw
 		//   (c) 挿入されているが形状が退化していて見えないのか
 		// を切り分ける。VWFC の VWRoofFaceObj は gSDK->CreateBasicSlab でオブジェクトを作る
 		// だけで、レイヤへ入れる呼び出しをしていないため (b) の可能性が高い。
+		// 生成直後の親コンテナを説明する文字列（三項演算子を入れ子にしない）。
+		const char* ParentText(MCObjectHandle parentBefore, MCObjectHandle layer)
+		{
+			if (parentBefore == nil)
+				return "nil";
+			if (parentBefore == layer)
+				return "レイヤ";
+			return "別のもの";
+		}
+
 		void ShowRoofDiagnostics(const core::RoofCommand& roof, MCObjectHandle handle,
 								 MCObjectHandle layer, MCObjectHandle parentBefore)
 		{
@@ -163,10 +173,9 @@ namespace HomeskzIfcImport::draw
 				"軸 (%.1f, %.1f)→(%.1f, %.1f) 棟側 (%.1f, %.1f) 勾配 %.4f/%.1f 軸Z %.1f 厚み %.1f",
 				handle == nil ? "nil" : "ok", handle == nil ? -1 : gSDK->GetObjectTypeN(handle),
 				(handle != nil && VWRoofFaceObj::IsRoofFaceObjectN(handle)) ? "yes" : "no",
-				parentBefore == nil ? "nil" : (parentBefore == layer ? "レイヤ" : "別のもの"),
-				parentBefore == nil ? "した" : "不要", roof.axisStart.x, roof.axisStart.y,
-				roof.axisEnd.x, roof.axisEnd.y, roof.upslope.x, roof.upslope.y,
-				roof.rise * kSlopeRunUnit / roof.run, kSlopeRunUnit, roof.elevation,
+				ParentText(parentBefore, layer), parentBefore == nil ? "した" : "不要",
+				roof.axisStart.x, roof.axisStart.y, roof.axisEnd.x, roof.axisEnd.y, roof.upslope.x,
+				roof.upslope.y, roof.rise * kSlopeRunUnit / roof.run, kSlopeRunUnit, roof.elevation,
 				roof.thickness);
 			gSDK->AlertInform(TXString(buffer.data()), TXString("野地板の診断（一時）"), false);
 		}
