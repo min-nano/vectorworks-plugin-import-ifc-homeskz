@@ -7,7 +7,6 @@
 
 #include "parse/Floor.h"
 #include "parse/Context.h"
-#include "parse/Grid.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Story.h"

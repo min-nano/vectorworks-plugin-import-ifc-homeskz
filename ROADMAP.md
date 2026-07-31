@@ -357,12 +357,21 @@ M7 で扱う。**Python: `ifc/rafter.py` / `ifc/roof.py`（＋屋根面ヘルパ
   （レイヤ・クラス・外形 3 点以上・厚みが正）の検証を追加。
 - ✅ `draw/Rafter`: **配置行列**（`VWTransformMatrix` で Z 軸まわりに平面方位角＋支持点への
   平行移動）から `CreateCustomObjectByMatrix` で軸組ツール（`FramingMember` type=`rafter`）を
-  生成 → クラス・by-class 属性 → 断面／`LineLength`／`pitch`／`verticalReference`／
-  `2DDisplay`／軒の出／差し込み（登録名 `bearinginset`）／ラベル／構造用途／材質を設定 →
-  `ResetObject`。生成できなければ平面投影の直線にフォールバック。
-- ✅ `draw/Roof`: **屋根面オブジェクト**（VWFC の `VWRoofFaceObj`: 外形ポリゴン＋軒の天端 Z＋
-  upslope 方向＋勾配 rise/run）を直接組み立て、厚み（12mm）を `SetThickness` で与える →
-  クラス・by-class 属性 → `ResetObject`。作れなければ外形ポリゴンにフォールバック。
+  生成 → クラス・by-class 属性 → 断面／`LineLength`／`PitchAngle`／`verticalReference`／
+  `2DDisplay`／軒の出／差し込み（登録名 `bearinginset`）／ラベル（`showLabel` ＋ `labelText`）／
+  構造用途（`structuralUse`）／材質を設定 → `ResetObject`。生成できなければ平面投影の直線に
+  フォールバック。**パラメータ名は VW 実機の PIO 登録から採る**（当初 VectorScript
+  エクスポートから推定した名前——`pitch`・`label`・先頭大文字の `StructuralUse`——では
+  setter が**黙って無視されていた**。`draw/Rafter.cpp` 冒頭）。生成時に設定ダイアログが
+  開かないよう `DefineCustomObject(…, kCustomObjectPrefNever)` を 1 度だけ呼ぶ。
+- ✅ `draw/Roof`: **屋根面オブジェクト**（VWFC の `VWRoofFaceObj`）を外形ポリゴンから生成し、
+  **屋根軸・棟側の点・勾配・軸の Z はオブジェクト変数**（`ovSlabRoofPt1/Pt2/UpslopePt/Rise/Run`・
+  `ovSlabHeight`）で与えてハンドル版コンストラクタで形状を作り直す → 厚み（12mm）を
+  `SetThickness` → クラス・by-class 属性 → `ResetObject`。作れなければ外形ポリゴンに
+  フォールバック。**`VWRoofFaceObj(type, poly, z, upSlopeDir, rise, run)` は使えない**
+  （SDK のソース上 `z` を読まず、屋根軸を原点を通る線として置く）ことと、生成しただけでは
+  図面に入らない（明示的に `AddObjectToContainer` が要る）ことはローカル確認で判明した
+  （`draw/Roof.cpp` 冒頭）。`ovSlabRoofUpslopePt` は**方向ではなく棟側の点**。
 - ✅ **［Python 版と実現手段が異なる点］ISDK には VectorScript の 3D 変換状態
   （`ResetOrientation3D`／`Rotate3D`／`Move3D`）と屋根作成の一連の呼び出し
   （`BeginRoof`／`EndGroup`／`GetZVals`／`SetZVals`／`LNewObj`／`GetRoofFaceCoords`）が無い**
@@ -370,7 +379,7 @@ M7 で扱う。**Python: `ifc/rafter.py` / `ifc/roof.py`（＋屋根面ヘルパ
   副産物として、Python 版 #113 の落とし穴（テンプレートのポリゴンを屋根と誤認する／確定後の
   後付け操作で VW がクラッシュする）が構造的に起きない。`GetLayerElevation` 相当も無いため
   **高さは命令の絶対 Z をそのまま渡す**（Python 版の垂木と同じ挙動）。レイヤ相対にすべきかは
-  ローカル確認項目で、`draw/Rafter` の `SetOffset`／`draw/Roof` の `VWRoofFaceObj` 生成の
+  ローカル確認項目で、`draw/Rafter` の `SetOffset`／`draw/Roof` の `ovSlabHeight` 設定の
   1 か所ずつで切り替えられるようにしてある。**この「VS 名 → ISDK の実在 API」への読み替えは
   M7 以降でも必要**（冒頭「進め方の原則」参照）。
 - ✅ テスト: `ParseRafterTests` / `ParseRoofTests`（`test_ifc_rafter.py` / `test_ifc_roof.py` を

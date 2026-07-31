@@ -7,14 +7,11 @@
 
 #include "parse/Roof.h"
 #include "parse/Context.h"
-#include "parse/Grid.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Rafter.h"
 #include "parse/Story.h"
 #include "parse/StructuralClass.h"
 
-#include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -28,10 +25,6 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 屋根面の法線の水平成分／鉛直成分がこれ以下なら勾配・軒・天端 Z が定まらないため
-		// 屋根オブジェクトを作らない（Python 版 _FLAT_TOL。垂木と同じ扱い）。
-		constexpr double kFlatTol = 1e-6;
-
 		// footprint の広がり（軒方向・勾配方向）がこれ未満なら退化とみなしスキップ（mm。
 		// Python 版 _MIN_SPAN）。
 		constexpr double kMinSpan = 1.0;
@@ -42,9 +35,9 @@ namespace HomeskzIfcImport::parse
 	{
 		// 勾配の座標系は垂木（parse/Rafter）と共有する（parse/IfcGeometry の RoofSlope）。
 		// ほぼ水平な面（勾配方向・軒が定まらない）と鉛直な面（平面式が nz で除算する）は
-		// ここで弾かれる。
+		// ここで弾かれる（閾値 kRoofFlatTol も垂木と共有＝roofSlope の既定値）。
 		RoofSlope slope;
-		if (!roofSlope(plane, slope, kFlatTol))
+		if (!roofSlope(plane, slope))
 			return std::nullopt;
 
 		const std::vector<Vec2> plan = RoofSlope::plan(plane);

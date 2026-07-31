@@ -10,13 +10,13 @@
 //	実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
 
+#include "Fixtures.h"
 #include "TestFramework.h"
 
 #include "core/Document.h"
 #include "parse/Grid.h"
 #include "parse/Loader.h"
 
-#include <cmath>
 #include <string>
 #include <vector>
 
@@ -25,18 +25,14 @@ using HomeskzIfcImport::core::GridCommand;
 using HomeskzIfcImport::parse::buildGridCommands;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
+using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::near;
 
 namespace
 {
 	// Python 版 ifc/grid.py の CLASS_X / CLASS_Y と一致するクラス名。
 	const std::string kClassX = "01作図-01線-01基準線-01通り芯-X通り";
 	const std::string kClassY = "01作図-01線-01基準線-01通り芯-Y通り";
-
-	// 2 つの実数が許容誤差内で等しいか（センタリング後の座標比較に使う）。
-	bool near(double a, double b)
-	{
-		return std::abs(a - b) < 1e-6;
-	}
 
 	// label の通り芯を探す（見つからなければ nullptr）。
 	const GridCommand* find(const std::vector<GridCommand>& grids, const std::string& label)
@@ -266,8 +262,7 @@ TEST(reads_minimal_grid_fixture)
 {
 	// minimal_grid.ifc は X1/X2（鉛直）と Y1（水平）の 3 本（ParseSummaryTests と同じ内訳）。
 	bool ok = false;
-	Model const model = HomeskzIfcImport::parse::loadIfc(
-		std::string(HOMESKZ_FIXTURES_DIR) + "/minimal_grid.ifc", &ok);
+	Model const model = fixture("minimal_grid.ifc", ok);
 	CHECK(ok);
 	std::vector<GridCommand> const grids = buildGridCommands(model);
 
@@ -304,8 +299,7 @@ TEST(reads_real_homeskz_fixture)
 {
 	// ホームズ君の実モデル。多数の x*/y* 軸を含み、解析が例外なく通り、命令が出る。
 	bool ok = false;
-	Model const model = HomeskzIfcImport::parse::loadIfc(
-		std::string(HOMESKZ_FIXTURES_DIR) + "/グレー本モデルプラン1【3階】.ifc", &ok);
+	Model const model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
 	CHECK(ok);
 	std::vector<GridCommand> const grids = buildGridCommands(model);
 

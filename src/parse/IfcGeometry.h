@@ -210,10 +210,15 @@ namespace HomeskzIfcImport::parse
 									double& outMin, double& outMax);
 	};
 
+	// 屋根面の退化（ほぼ水平／鉛直）を判定する法線成分の許容（Python 版 _FLAT_TOL）。
+	// 垂木（parse/Rafter）と野地板（parse/Roof）は同じ屋根面を共有するので、**同じ面を
+	// 一方だけが退化と見なすことが無いよう**閾値はここに 1 つだけ置く。
+	inline constexpr double kRoofFlatTol = 1e-6;
+
 	// 屋根面から勾配の座標系を作る。ほぼ水平な面（法線の水平成分が flatTol 以下＝勾配方向が
 	// 定まらない）と、鉛直な面（法線の鉛直成分が flatTol 以下＝平面式が 0 除算になる）は
 	// false（out は変更しない）。頂点が空の面も false。
-	bool roofSlope(const RoofPlane& plane, RoofSlope& out, double flatTol = 1e-6);
+	bool roofSlope(const RoofPlane& plane, RoofSlope& out, double flatTol = kRoofFlatTol);
 
 	// 屋根版（IfcSlab）から屋根面を取り出す（Python 版 rafter._roof_plane 相当）。屋根版は
 	// 勾配した平面外形を鉛直に押し出したソリッド（押し出し＝屋根の厚み）なので、

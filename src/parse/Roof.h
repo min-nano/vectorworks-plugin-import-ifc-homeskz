@@ -47,7 +47,9 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kNojiitaThickness = 12.0;
 
 	// 野地板レベル・レイヤの名前（Python 版 LEVEL_NOJIITA）。配置先レイヤは "{接頭辞}-野地板"。
-	inline constexpr const char* kLevelNojiita = "野地板";
+	// 文字列の定義は core/Document.h（命令セットの語彙）にあり、ここはその再公開
+	// （レベル種別名の置き場所は parse/Story.h の kLevelFL ほかと同じ流儀）。
+	inline constexpr const char* kLevelNojiita = core::kLevelNojiita;
 
 	// 1 つの屋根面（parse/IfcGeometry の RoofPlane）から野地板（roof）命令を組み立てる
 	// （Python 版 _roof_command_for_plane 相当）。

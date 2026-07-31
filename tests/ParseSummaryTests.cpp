@@ -6,6 +6,7 @@
 //	整形だけを検証する。フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
 
+#include "Fixtures.h"
 #include "TestFramework.h"
 
 #include "parse/Loader.h"
@@ -99,7 +100,7 @@ TEST(format_summary_reports_load_failure)
 
 TEST(summarize_ifc_reads_fixture)
 {
-	std::string const path = std::string(HOMESKZ_FIXTURES_DIR) + "/minimal_grid.ifc";
+	std::string const path = HomeskzIfcTests::fixturePath("minimal_grid.ifc");
 	IfcSummary const summary = summarizeIfc(path);
 
 	CHECK(summary.loaded);
@@ -111,8 +112,7 @@ TEST(summarize_ifc_reads_fixture)
 
 TEST(summarize_ifc_missing_file_reports_not_loaded)
 {
-	IfcSummary const summary =
-		summarizeIfc(std::string(HOMESKZ_FIXTURES_DIR) + "/does_not_exist.ifc");
+	IfcSummary const summary = summarizeIfc(HomeskzIfcTests::fixturePath("does_not_exist.ifc"));
 	CHECK(!summary.loaded);
 	CHECK(summary.counts.empty());
 	CHECK(formatSummary(summary).find("読み込めませんでした") != std::string::npos);
