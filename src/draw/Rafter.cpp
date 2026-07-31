@@ -61,6 +61,17 @@ namespace HomeskzIfcImport::draw
 
 		// 軸組ツールの PIO 名と部材種別（垂木は 'rafter'）。VW の登録名に一致させる。
 		const TXString kFramingMember("FramingMember");
+
+		// PIO 生成時に「オブジェクトの設定」ダイアログを出さない設定（Python 版
+		// CreateCustomObjectN(showPref=False) 相当）。ISDK の CreateCustomObject 系には
+		// VectorScript のような showPref 引数が無く、代わりに PIO ごとの「設定ダイアログを
+		// いつ出すか」を DefineCustomObject で切り替える（kCustomObjectPrefNever＝
+		// 「生成時に決して出さない」。Kernel/API/MiniCadCallBacks.h）。これを呼ばないと
+		// インポート中に垂木 1 本ごとにダイアログが開いて手入力を求められる（ローカル確認で判明）。
+		void SuppressSettingsDialog()
+		{
+			gSDK->DefineCustomObject(kFramingMember, kCustomObjectPrefNever);
+		}
 		constexpr const char* kMemberTypeRafter = "rafter";
 
 		// 垂直基準（verticalReference）。軒側（下端基準）から棟へ立ち上がる。
@@ -174,6 +185,12 @@ namespace HomeskzIfcImport::draw
 
 	std::size_t drawRafters(const core::Document& document)
 	{
+		if (document.rafters.empty())
+			return 0;
+
+		// 生成のたびに設定ダイアログが開かないよう、最初に 1 度だけ抑止しておく。
+		SuppressSettingsDialog();
+
 		std::size_t drawn = 0;
 		for (const core::RafterCommand& rafter : document.rafters)
 		{

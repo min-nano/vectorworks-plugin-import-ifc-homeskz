@@ -55,6 +55,14 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
+		// 勾配（rise/run）を渡すときの run の基準値（mm）。命令の rise/run は屋根面の**単位
+		// 法線成分**（rise=水平成分 dh・run=鉛直成分 nz）で、比はそのまま勾配だが、値そのものは
+		// 1 mm 未満の極小値になる。屋根面は rise/run を**長さ**として保持するため、極小値のまま
+		// 渡すと面が成立しないおそれがある（ローカル確認で野地板が 1 枚も描かれなかった）。
+		// Python 版が VW 実機で通していた VectorScript エクスポートの規約に合わせ、比を保った
+		// まま run＝25.4（1 インチ）へ正規化して渡す（例: 10 度 → rise≈4.479 / run=25.4）。
+		constexpr double kSlopeRunUnit = 25.4;
+
 		// オブジェクトのクラスを名前で設定する（draw/Grid.cpp・draw/Floor.cpp と同じヘルパー）。
 		void SetClassByName(MCObjectHandle object, const std::string& className)
 		{
@@ -121,13 +129,16 @@ namespace HomeskzIfcImport::draw
 			}
 			const VWPoint2D upSlopeDir(upX / upLength, upY / upLength);
 
-			// 屋根面: 水平投影外形（閉じたポリゴン）＋軒の天端 Z＋upslope 方向＋勾配
-			// （rise/run。比がそのまま勾配になるので命令の値をそのまま渡す）。
+			// 屋根面: 水平投影外形（閉じたポリゴン）＋軒の天端 Z＋upslope 方向＋勾配。
+			// 勾配は比を保ったまま run＝25.4 基準へ正規化する（kSlopeRunUnit 参照）。
+			const double rise = roof.rise * kSlopeRunUnit / roof.run;
 			const VWPolygon2D outline(BoundaryPoints(roof.boundary), true);
-			VWRoofFaceObj face(kRoofFaceType_Roof, outline, roof.elevation, upSlopeDir, roof.rise,
-							   roof.run);
+			VWRoofFaceObj face(kRoofFaceType_Roof, outline, roof.elevation, upSlopeDir, rise,
+							   kSlopeRunUnit);
 			const MCObjectHandle handle = face.GetThisObject();
-			if (handle == nil)
+			// 屋根面として成立していなければ外形ポリゴンへフォールバックする（nil だけでなく
+			// 種別も確かめる。屋根面でないものに屋根専用の設定を続けない）。
+			if (handle == nil || !VWRoofFaceObj::IsRoofFaceObjectN(handle))
 			{
 				DrawFallbackPolygon(roof);
 				return true;

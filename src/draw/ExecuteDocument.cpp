@@ -23,37 +23,40 @@
 
 namespace HomeskzIfcImport::draw
 {
-	bool executeDocument(const core::Document& document)
+	DrawCounts executeDocument(const core::Document& document)
 	{
+		DrawCounts counts;
+
 		// 検証を通らない Document は描画しない（Python 版 validateDocument と同じ関門）。
 		if (!core::validateDocument(document))
-			return false;
+			return counts;
+		counts.valid = true;
 
 		// M3 ストーリを先に描く。以降の要素はここで生成したストーリレベル・デザイン
 		// レイヤに配置されるため、通り芯や他要素より前に用意する（Python 版 execute_document
 		// が execute_stories を先頭で呼ぶのと同じ）。
-		drawStories(document);
+		counts.stories = drawStories(document);
 
 		// M1 通り芯を描く。
-		drawGrids(document);
+		counts.grids = drawGrids(document);
 
 		// M5 床板を描く。配置先の FL レイヤは上の drawStories が作るので、必ずその後に
 		// 置く（レイヤが無い命令は drawFloors がスキップする）。
-		drawFloors(document);
+		counts.floors = drawFloors(document);
 
 		// M6 屋根組を描く。垂木 → 野地板 の順（Python 版 execute_document の実行順と同じで、
 		// 野地板は垂木の上に載る）。配置先の "n-垂木" / "n-野地板" レイヤも drawStories が
 		// 作るので、必ずその後に置く（レイヤが無い命令はそれぞれがスキップする）。以降の
 		// マイルストーンで member / column … と命令ごとに draw モジュールへのディスパッチを
 		// 足していく（ROADMAP.md）。
-		drawRafters(document);
-		drawRoofs(document);
+		counts.rafters = drawRafters(document);
+		counts.roofs = drawRoofs(document);
 
 		// レイヤのスタック順の並べ替えはここでは行わない（draw/Story.h 参照: VW 2026 ISDK に
 		// デザインレイヤの重ね順変更呼び出しが無く、目的の伏図ビューポート重ね順制御は
 		// per-viewport の SetViewportLayerStackingOverride を使う M13 へ委ねる。希望順の計算は
 		// core::desiredStoryLayerOrder に用意済み）。
 
-		return true;
+		return counts;
 	}
 } // namespace HomeskzIfcImport::draw
