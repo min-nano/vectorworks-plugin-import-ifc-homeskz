@@ -117,6 +117,13 @@ target_link_libraries(ParseGridTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseGridTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Planar region synthesis (src/core/Region): the outline of the area a set of parts
+# encloses (enclosed voids plus the parts bounding them), used to synthesise the loft
+# floor from the roof storey's floor beams when homeskz emits no floor slab for it.
+# Pure geometry — no STEP, no SDK, no fixtures.
+vw_add_test(CoreRegionTests CoreRegionTests.cpp)
+target_link_libraries(CoreRegionTests PRIVATE HomeskzIfcCore)
+
 # Geometry foundation (src/core/Geometry + src/parse/IfcGeometry): placement-matrix
 # composition (IfcLocalPlacement / IfcAxis2Placement3D/2D), profile outlines
 # (IfcRectangleProfileDef / IfcArbitraryClosedProfileDef), extruded-area-solid world

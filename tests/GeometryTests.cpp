@@ -390,6 +390,34 @@ TEST(arbitrary_profile_reads_outline)
 	CHECK(hasVertex(prof.outer, 0.0, 50.0));
 }
 
+TEST(arbitrary_profile_with_voids_reads_outer_curve)
+{
+	// IfcArbitraryProfileDefWithVoids（階段の吹抜け等の開口を持つ床版の断面）は
+	// IfcArbitraryClosedProfileDef の派生で属性の並びが同じなので、外形（属性 2）を
+	// 同じ経路で読む。開口（InnerCurves）は無視する——開口ごと落として床を丸ごと
+	// 失うより、開口を塞いだ床を入れる方がましだという判断。
+	Model const model =
+		loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.));\n"
+						"#11=IFCCARTESIANPOINT((100.,0.));\n"
+						"#12=IFCCARTESIANPOINT((100.,100.));\n"
+						"#13=IFCCARTESIANPOINT((0.,100.));\n"
+						"#14=IFCPOLYLINE((#10,#11,#12,#13,#10));\n"
+						"#20=IFCCARTESIANPOINT((40.,40.));\n"
+						"#21=IFCCARTESIANPOINT((60.,40.));\n"
+						"#22=IFCCARTESIANPOINT((60.,60.));\n"
+						"#23=IFCCARTESIANPOINT((40.,60.));\n"
+						"#24=IFCPOLYLINE((#20,#21,#22,#23,#20));\n"
+						"#30=IFCARBITRARYPROFILEDEFWITHVOIDS(.AREA.,$,#14,(#24));\n");
+	Profile prof;
+	CHECK(parse::resolveProfile(model, model.entity(30), prof));
+	CHECK(!prof.rectangle);
+	CHECK_EQ(prof.outer.size(), static_cast<std::size_t>(4));
+	CHECK(hasVertex(prof.outer, 0.0, 0.0));
+	CHECK(hasVertex(prof.outer, 100.0, 100.0));
+	// 開口の頂点は外形に混ざらない。
+	CHECK(!hasVertex(prof.outer, 40.0, 40.0));
+}
+
 TEST(arbitrary_profile_rejects_non_polyline_or_short)
 {
 	// OuterCurve が非ポリライン → false。点が 2 つ（面にならない）→ false。

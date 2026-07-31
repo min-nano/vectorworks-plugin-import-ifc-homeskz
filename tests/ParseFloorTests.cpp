@@ -476,6 +476,174 @@ TEST(boundary_is_centered_polygon)
 	CHECK(maxAbs < 30000.0);
 }
 
+// ---------------------------------------------------------------------------
+// 合成モデル: 床梁から合成するロフト床（ホームズ君はロフトの床版を出力しない）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// STEP の REAL リテラル（必ず小数点を含む形）。
+	std::string real(double value)
+	{
+		std::string text = std::to_string(value);
+		return text;
+	}
+
+	// 1FL（Elevation 0）と 2FL（Elevation 3000）を持ち、最上階 2FL に床梁で矩形リング
+	// （外周 ±550・部材幅 100）を組んだ最小モデル。梁はローカル Z=-100 に置いた厚み
+	// 100 の鉛直押し出しなので、天端はストーリ原点（軒高）ちょうどになる。
+	// beamName を床梁でない名前にすると、ロフト床が合成されないことの確認にも使う。
+	std::string loftFrameText(const std::string& beamName)
+	{
+		std::string text = "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
+						   "#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
+						   "#3=IFCLOCALPLACEMENT($,#2);\n"
+						   "#10=IFCBUILDINGSTOREY('s1',$,'1FL',$,$,#3,$,$,.ELEMENT.,0.);\n"
+						   "#11=IFCBUILDINGSTOREY('s2',$,'2FL',$,$,#3,$,$,.ELEMENT.,3000.);\n"
+						   // 梁の配置（ローカル Z=-100。厚み 100 なので天端は 0＝軒高）
+						   "#20=IFCCARTESIANPOINT((0.,0.,-100.));\n"
+						   "#21=IFCAXIS2PLACEMENT3D(#20,$,$);\n"
+						   "#22=IFCLOCALPLACEMENT(#3,#21);\n"
+						   "#33=IFCCARTESIANPOINT((0.,0.,0.));\n"
+						   "#34=IFCAXIS2PLACEMENT3D(#33,$,$);\n"
+						   "#35=IFCDIRECTION((0.,0.,1.));\n";
+
+		// 4 本で閉じた矩形リング（中心・幅・高さ）。角で重なるので隙間ができない。
+		const double bars[4][4] = {{0.0, -500.0, 1100.0, 100.0},
+								   {0.0, 500.0, 1100.0, 100.0},
+								   {-500.0, 0.0, 100.0, 1100.0},
+								   {500.0, 0.0, 100.0, 1100.0}};
+		std::string contained;
+		int id = 100;
+		for (const auto& bar : bars)
+		{
+			const std::string base = std::to_string(id);
+			text +=
+				"#" + base + "=IFCCARTESIANPOINT((" + real(bar[0]) + "," + real(bar[1]) + "));\n";
+			text += "#" + std::to_string(id + 1) + "=IFCAXIS2PLACEMENT2D(#" + base + ",$);\n";
+			text += "#" + std::to_string(id + 2) + "=IFCRECTANGLEPROFILEDEF(.AREA.,$,#" +
+					std::to_string(id + 1) + "," + real(bar[2]) + "," + real(bar[3]) + ");\n";
+			text += "#" + std::to_string(id + 3) + "=IFCEXTRUDEDAREASOLID(#" +
+					std::to_string(id + 2) + ",#34,#35,100.);\n";
+			text += "#" + std::to_string(id + 4) +
+					"=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#" + std::to_string(id + 3) +
+					"));\n";
+			text += "#" + std::to_string(id + 5) + "=IFCPRODUCTDEFINITIONSHAPE($,$,(#" +
+					std::to_string(id + 4) + "));\n";
+			text += "#" + std::to_string(id + 6) + "=IFCBEAM('b',$,'" + beamName + "',$,$,#22,#" +
+					std::to_string(id + 5) + ",$);\n";
+			contained += (contained.empty() ? "#" : ",#") + std::to_string(id + 6);
+			id += 10;
+		}
+		text += "#200=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(" + contained + "),#11);\n";
+		return text;
+	}
+} // namespace
+
+TEST(loft_floor_is_synthesised_from_floor_beams)
+{
+	// 屋根階に床版が無くても、床梁が囲む領域をロフトの床として取り込む。
+	Model const model = loadIfcFromText(loftFrameText("木梁:床大梁:1"));
+	std::vector<FloorCommand> const floors = buildFloorCommands(model);
+	CHECK_EQ(floors.size(), static_cast<std::size_t>(1));
+	if (floors.empty())
+		return;
+
+	const FloorCommand& loft = floors.front();
+	CHECK_EQ(loft.layer, std::string("R-FL"));
+	CHECK_EQ(loft.styleName, std::string("屋根-床スタイル"));
+	CHECK_EQ(loft.drawClass, std::string(CLASS_FLOOR));
+	// 構成・基準面・バインド先は床版から作るロフト床と同じ（床仕上げ 12 ＋ 床下地 24）。
+	CHECK(near(totalThickness(loft), 36.0));
+	CHECK(loft.datum == HomeskzIfcImport::core::SlabDatum::Bottom);
+	CHECK_EQ(loft.bound.level, std::string("軒高"));
+	// 床梁の天端が軒高ちょうど（ローカル Z=-100 ＋ 厚み 100）なので段差は 0。
+	CHECK(near(loft.bound.offset, 0.0));
+	CHECK(near(loft.elevation, 3000.0));
+	// 外形は骨組みの外周（±550 の矩形。共線点は落ちて 4 点）。
+	CHECK_EQ(loft.boundary.size(), static_cast<std::size_t>(4));
+	double maxAbs = 0.0;
+	for (const core::Vec2& point : loft.boundary)
+	{
+		maxAbs = std::max(maxAbs, std::abs(point.x));
+		maxAbs = std::max(maxAbs, std::abs(point.y));
+	}
+	CHECK(near(maxAbs, 550.0));
+}
+
+TEST(loft_synthesis_ignores_non_floor_beams)
+{
+	// 小屋梁・軒桁など床梁でない横架材は床を作らない（種別は IFC Name の記録で判定）。
+	Model const model = loadIfcFromText(loftFrameText("木梁:小屋梁:1"));
+	CHECK(buildFloorCommands(model).empty());
+	CHECK(HomeskzIfcImport::parse::loftFloorRegions(model, 11).empty());
+}
+
+TEST(loft_floor_slab_wins_over_synthesis)
+{
+	// 屋根階に床版があるときは、そちらが正でロフト床の合成は行わない。
+	std::string text = minimalFloorText("床版");
+	const std::string from = "(#40),#10)";
+	const std::string to = "(#40),#11)";
+	text.replace(text.find(from), from.size(), to);
+	// 床梁のリングも同じ屋根階（#11）に足す（床版が優先されることの確認）。
+	std::string frame = loftFrameText("木梁:床大梁:1");
+	frame = frame.substr(frame.find("#20=IFCCARTESIANPOINT((0.,0.,-100.));"));
+
+	Model const model = loadIfcFromText(text + frame);
+	std::vector<FloorCommand> const floors = buildFloorCommands(model);
+	// 床版 1 枚だけ（合成分は増えない）。外形は床版の 1000×2000 矩形。
+	CHECK_EQ(floors.size(), static_cast<std::size_t>(1));
+	if (floors.empty())
+		return;
+	CHECK_EQ(floors.front().layer, std::string("R-FL"));
+	CHECK(near(floors.front().bound.offset, -120.0));
+}
+
+TEST(story_has_loft_floor_covers_both_sources)
+{
+	// parse/Story が屋根階へ FL レベルを足すかの判定。床版でも合成床でも真になる。
+	Model const beams = loadIfcFromText(loftFrameText("木梁:床小梁:1"));
+	CHECK(HomeskzIfcImport::parse::storyHasLoftFloor(beams, 11));
+	CHECK(!HomeskzIfcImport::parse::storyHasFloorSlab(beams, 11));
+	CHECK(!HomeskzIfcImport::parse::storyHasLoftFloor(beams, 10));
+
+	std::string text = minimalFloorText("床版");
+	const std::string from = "(#40),#10)";
+	const std::string to = "(#40),#11)";
+	text.replace(text.find(from), from.size(), to);
+	Model const slab = loadIfcFromText(text);
+	CHECK(HomeskzIfcImport::parse::storyHasLoftFloor(slab, 11));
+}
+
+TEST(loft_synthesis_skips_beams_without_solid)
+{
+	// 形状表現を持たない床梁は飛ばす（1 本の欠損で全体を止めない）。リングの 1 本が
+	// 欠けると閉じないので、床は合成されない。
+	std::string text = loftFrameText("木梁:床大梁:1");
+	const std::string from = "#106=IFCBEAM('b',$,'木梁:床大梁:1',$,$,#22,#105,$);";
+	const std::string to = "#106=IFCBEAM('b',$,'木梁:床大梁:1',$,$,#22,$,$);";
+	text.replace(text.find(from), from.size(), to);
+
+	Model const model = loadIfcFromText(text);
+	CHECK(HomeskzIfcImport::parse::loftFloorRegions(model, 11).empty());
+}
+
+TEST(loft_floor_is_synthesised_from_a_real_fixture)
+{
+	// 実データ: 屋根階に床梁（床大梁・床小梁）を持つモデルは無く、既存フィクスチャでは
+	// ロフト床が合成されない＝屋根階の床は増えないことを確かめる（合成が暴発しない）。
+	bool ok = false;
+	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	CHECK(ok);
+	const std::vector<StoryInfo> stories = collectStories(model);
+	CHECK(!stories.empty());
+	if (stories.empty())
+		return;
+	CHECK(HomeskzIfcImport::parse::loftFloorRegions(model, stories.back().id).empty());
+	CHECK(onLayer(buildFloorCommands(model), "R-FL").empty());
+}
+
 TEST(is_deterministic)
 {
 	// 同じ入力からは同じ命令列（順序・値）が得られる（エンティティ列挙順に依存しない）。

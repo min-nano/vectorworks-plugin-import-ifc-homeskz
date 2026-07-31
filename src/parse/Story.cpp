@@ -234,10 +234,11 @@ namespace HomeskzIfcImport::parse
 			{
 				// 最上階（屋根）は軒高（オフセット 0）。ロフト（小屋裏収納）の床がある
 				// ときだけ、その標準床レベル FL（軒高 + kLoftFloorLevelOffset）を足す
-				// （床版の無い屋根に空の FL レイヤを作らない。Python 版が story_has_moya /
+				// （床の無い屋根に空の FL レイヤを作らない。Python 版が story_has_moya /
 				// story_has_roof で条件付きにレベルを足すのと同じ枠組み）。この FL が
-				// ロフト床の配置先レイヤ "R-FL" になる。
-				if (storyHasFloorSlab(model, info.id))
+				// ロフト床の配置先レイヤ "R-FL" になる。ロフトの床は床版（IfcSlab）でも
+				// 床梁から合成した領域でもよい（parse/Floor の storyHasLoftFloor）。
+				if (storyHasLoftFloor(model, info.id))
 				{
 					cmd.levels.push_back(
 						LevelCommand{kLevelFL, kLoftFloorLevelOffset, prefix + "-" + kLevelFL});
