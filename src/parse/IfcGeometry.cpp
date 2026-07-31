@@ -7,8 +7,10 @@
 //
 
 #include "parse/IfcGeometry.h"
+#include "parse/IfcAttr.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <vector>
@@ -38,18 +40,6 @@ namespace HomeskzIfcImport::parse
 			return axis;
 		}
 
-		// IfcProduct の ObjectPlacement 属性インデックス（GlobalId, OwnerHistory, Name,
-		// Description, ObjectType, ObjectPlacement=5, Representation=6, …）。IfcProduct の
-		// 全サブタイプで共通。
-		constexpr std::size_t kObjectPlacementAttr = 5;
-		// 同じく Representation 属性インデックス（IfcProductDefinitionShape への参照）。
-		constexpr std::size_t kRepresentationAttr = 6;
-		// IfcProductDefinitionShape(Name, Description, Representations=2)。
-		constexpr std::size_t kRepresentationsAttr = 2;
-		// IfcShapeRepresentation(ContextOfItems, RepresentationIdentifier, RepresentationType,
-		// Items=3)。
-		constexpr std::size_t kRepresentationItemsAttr = 3;
-
 		// 押し出し方向が鉛直とみなす Z 成分の閾値（|z| > これ）。Python 版 footing の
 		// _VERTICAL_EXTRUDE_TOL と同値。床版・底盤は鉛直、立上り・地中梁は水平押し出し。
 		constexpr double kVerticalExtrudeTol = 0.9;
@@ -62,7 +52,8 @@ namespace HomeskzIfcImport::parse
 			if (item->type != "IFCBOOLEANRESULT" && item->type != "IFCBOOLEANCLIPPINGRESULT")
 				return item;
 			// IfcBooleanResult(Operator, FirstOperand, SecondOperand)。第 1 を辿る。
-			return baseSolidImpl(model, model.resolve(item->attribute(1)), depth + 1);
+			return baseSolidImpl(
+				model, model.resolve(item->attribute(attr::kBooleanResultFirstOperand)), depth + 1);
 		}
 	} // namespace
 
@@ -71,8 +62,8 @@ namespace HomeskzIfcImport::parse
 		const Entity* dir = model.resolve(ref);
 		if (dir == nullptr)
 			return false;
-		// IfcDirection.DirectionRatios は実数のリスト（属性 0）。2D なら Z=0。
-		const Value& ratios = dir->attribute(0);
+		// IfcDirection.DirectionRatios は実数のリスト。2D なら Z=0。
+		const Value& ratios = dir->attribute(attr::kDirectionRatios);
 		if (!ratios.isList() || ratios.items.size() < 2)
 			return false;
 		out.x = ratios.items[0].asReal();
@@ -86,13 +77,24 @@ namespace HomeskzIfcImport::parse
 		const Entity* point = model.resolve(ref);
 		if (point == nullptr)
 			return false;
-		// IfcCartesianPoint.Coordinates は実数のリスト（属性 0）。2D なら Z=0。
-		const Value& coords = point->attribute(0);
+		// IfcCartesianPoint.Coordinates は実数のリスト。2D なら Z=0。
+		const Value& coords = point->attribute(attr::kCartesianPointCoordinates);
 		if (!coords.isList() || coords.items.size() < 2)
 			return false;
 		out.x = coords.items[0].asReal();
 		out.y = coords.items[1].asReal();
 		out.z = (coords.items.size() >= 3) ? coords.items[2].asReal() : 0.0;
+		return true;
+	}
+
+	bool resolvePoint2D(const Model& model, const Value& ref, Vec2& out)
+	{
+		// 3D 点でも Z は捨てる（通り芯のように平面だけで決まる要素向け）。判定規則は
+		// resolvePoint と完全に同じにしたいので、そちらへ委譲して XY だけを写す。
+		Vec3 point{0.0, 0.0, 0.0};
+		if (!resolvePoint(model, ref, point))
+			return false;
+		out = Vec2{point.x, point.y};
 		return true;
 	}
 
@@ -103,12 +105,12 @@ namespace HomeskzIfcImport::parse
 
 		// IfcAxis2Placement3D(Location, Axis, RefDirection)。
 		Vec3 origin{0.0, 0.0, 0.0};
-		resolvePoint(model, placement->attribute(0), origin);
+		resolvePoint(model, placement->attribute(attr::kAxis2PlacementLocation), origin);
 
 		// Axis(=局所 Z)。省略／縮退なら (0,0,1)。
 		Vec3 zAxis{0.0, 0.0, 1.0};
 		Vec3 rawZ{0.0, 0.0, 0.0};
-		if (resolveDirection(model, placement->attribute(1), rawZ))
+		if (resolveDirection(model, placement->attribute(attr::kAxis2PlacementAxis), rawZ))
 		{
 			const Vec3 nz = normalized(rawZ);
 			if (core::length(nz) >= core::kGeomEps)
@@ -118,7 +120,8 @@ namespace HomeskzIfcImport::parse
 		// RefDirection(≈局所 X)。省略なら (1,0,0)。z 成分を除いて正規化（Gram-Schmidt）。
 		Vec3 refX{1.0, 0.0, 0.0};
 		Vec3 rawRef{0.0, 0.0, 0.0};
-		if (resolveDirection(model, placement->attribute(2), rawRef))
+		if (resolveDirection(model, placement->attribute(attr::kAxis2PlacementRefDirection),
+							 rawRef))
 			refX = rawRef;
 		Vec3 xAxis = normalized(refX - (zAxis * dot(refX, zAxis)));
 		if (core::length(xAxis) < core::kGeomEps) // RefDirection が z と平行（縮退）
@@ -135,11 +138,11 @@ namespace HomeskzIfcImport::parse
 
 		// element.ObjectPlacement（IfcLocalPlacement）→ その RelativePlacement のみ。
 		// 親 PlacementRelTo は辿らない（ヘッダの★参照。Python 版と一致）。
-		const Entity* placement = model.resolve(element->attribute(kObjectPlacementAttr));
+		const Entity* placement = model.resolve(element->attribute(attr::kProductObjectPlacement));
 		if (placement == nullptr || placement->type != "IFCLOCALPLACEMENT")
 			return Mat4::identity();
-		// IfcLocalPlacement(PlacementRelTo, RelativePlacement)。属性 1 が RelativePlacement。
-		return resolveAxis2Placement3D(model, model.resolve(placement->attribute(1)));
+		return resolveAxis2Placement3D(
+			model, model.resolve(placement->attribute(attr::kLocalPlacementRelativePlacement)));
 	}
 
 	bool resolveProfile(const Model& model, const Entity* profileDef, Profile& out)
@@ -151,8 +154,8 @@ namespace HomeskzIfcImport::parse
 		if (profileDef->type == "IFCRECTANGLEPROFILEDEF")
 		{
 			// IfcRectangleProfileDef(ProfileType, ProfileName, Position, XDim, YDim)。
-			const double xDim = profileDef->attribute(3).asReal();
-			const double yDim = profileDef->attribute(4).asReal();
+			const double xDim = profileDef->attribute(attr::kRectangleProfileXDim).asReal();
+			const double yDim = profileDef->attribute(attr::kRectangleProfileYDim).asReal();
 			if (xDim <= core::kGeomEps || yDim <= core::kGeomEps)
 				return false;
 
@@ -162,11 +165,11 @@ namespace HomeskzIfcImport::parse
 			// Position は Location の平行移動のみ足す（Python 版 _profile_points に一致。
 			// RefDirection の回転は反映しない）。
 			Vec2 offset{0.0, 0.0};
-			const Entity* pos = model.resolve(profileDef->attribute(2));
+			const Entity* pos = model.resolve(profileDef->attribute(attr::kProfilePosition));
 			if (pos != nullptr && pos->type == "IFCAXIS2PLACEMENT2D")
 			{
 				Vec3 loc{0.0, 0.0, 0.0};
-				if (resolvePoint(model, pos->attribute(0), loc))
+				if (resolvePoint(model, pos->attribute(attr::kAxis2PlacementLocation), loc))
 					offset = Vec2{loc.x, loc.y};
 			}
 			const std::array<Vec2, 4> corners{Vec2{-hx, -hy}, Vec2{hx, -hy}, Vec2{hx, hy},
@@ -192,11 +195,12 @@ namespace HomeskzIfcImport::parse
 		if (profileDef->type == "IFCARBITRARYCLOSEDPROFILEDEF" ||
 			profileDef->type == "IFCARBITRARYPROFILEDEFWITHVOIDS")
 		{
-			// IfcArbitraryClosedProfileDef(ProfileType, ProfileName, OuterCurve)。
-			const Entity* curve = model.resolve(profileDef->attribute(2));
+			// IfcArbitraryClosedProfileDef(ProfileType, ProfileName, OuterCurve)。位置は
+			// IfcRectangleProfileDef の Position と同じ（kProfilePosition）。
+			const Entity* curve = model.resolve(profileDef->attribute(attr::kProfilePosition));
 			if (curve == nullptr || curve->type != "IFCPOLYLINE")
 				return false;
-			const Value& points = curve->attribute(0);
+			const Value& points = curve->attribute(attr::kPolylinePoints);
 			if (!points.isList() || points.items.size() < 3)
 				return false;
 
@@ -264,20 +268,22 @@ namespace HomeskzIfcImport::parse
 
 		// IfcExtrudedAreaSolid(SweptArea, Position, ExtrudedDirection, Depth)。
 		Profile profile;
-		if (!resolveProfile(model, model.resolve(solid->attribute(0)), profile))
+		if (!resolveProfile(
+				model, model.resolve(solid->attribute(attr::kExtrudedAreaSolidSweptArea)), profile))
 			return false;
 		if (profile.outer.empty())
 			return false;
 
 		// Position はプロファイルを 3D（オブジェクト座標）へ据える。要素配置と合成すると
 		// プロファイル 2D 点 (u,v,0) をそのまま世界系へ写せる（Python 版 _compose に対応）。
-		const Mat4 position = resolveAxis2Placement3D(model, model.resolve(solid->attribute(1)));
+		const Mat4 position = resolveAxis2Placement3D(
+			model, model.resolve(solid->attribute(attr::kExtrudedAreaSolidPosition)));
 		const Mat4 full = placement * position;
 
 		// 押し出し方向は Position 座標系。単位化して同じ基底で世界系へ（長さは depth 別持ち）。
 		Vec3 dir{0.0, 0.0, 1.0};
 		Vec3 rawDir{0.0, 0.0, 0.0};
-		if (resolveDirection(model, solid->attribute(2), rawDir))
+		if (resolveDirection(model, solid->attribute(attr::kExtrudedAreaSolidDirection), rawDir))
 		{
 			const Vec3 nd = normalized(rawDir);
 			if (core::length(nd) >= core::kGeomEps)
@@ -290,7 +296,7 @@ namespace HomeskzIfcImport::parse
 		out.yAxis = full.transformDirection(Vec3{0.0, 1.0, 0.0});
 		out.zAxis = full.transformDirection(Vec3{0.0, 0.0, 1.0});
 		out.extrudeDir = full.transformDirection(dir);
-		out.depth = solid->attribute(3).asReal();
+		out.depth = solid->attribute(attr::kExtrudedAreaSolidDepth).asReal();
 		out.profile = profile.outer;
 		out.rectangle = profile.rectangle;
 		out.xDim = profile.xDim;
@@ -312,10 +318,11 @@ namespace HomeskzIfcImport::parse
 		// 形状アイテムが入る（Python 版 _first_extruded_solid の rep.Representations →
 		// shape_rep.Items と同じ道筋。Body/Axis 等の表現識別子で絞らず、最初に見つかった
 		// 押し出しを採るのも Python 版と同じ）。
-		const Entity* shape = model.resolve(element->attribute(kRepresentationAttr));
+		const Entity* shape = model.resolve(element->attribute(attr::kProductRepresentation));
 		if (shape == nullptr)
 			return nullptr;
-		const Value& representations = shape->attribute(kRepresentationsAttr);
+		const Value& representations =
+			shape->attribute(attr::kProductDefinitionShapeRepresentations);
 		if (!representations.isList())
 			return nullptr;
 
@@ -324,7 +331,7 @@ namespace HomeskzIfcImport::parse
 			const Entity* rep = model.resolve(repRef);
 			if (rep == nullptr)
 				continue;
-			const Value& items = rep->attribute(kRepresentationItemsAttr);
+			const Value& items = rep->attribute(attr::kShapeRepresentationItems);
 			if (!items.isList())
 				continue;
 			for (const Value& itemRef : items.items)
@@ -367,6 +374,68 @@ namespace HomeskzIfcImport::parse
 
 		out.vertices = std::move(vertices);
 		out.normal = normal;
+		return true;
+	}
+
+	double RoofSlope::zAt(double x, double y, double elevationOffset) const
+	{
+		// 平面式: 法線 n との内積が一定。n の水平成分（rise·down）と鉛直成分（run）から
+		// z = origin.z − (n_h·(p − origin_h)) / n_z。法線の符号反転に対して不変
+		// （rise/run/down が揃って反転し比が変わらない）。
+		const double nx = down.x * rise;
+		const double ny = down.y * rise;
+		return origin.z - (((nx * (x - origin.x)) + (ny * (y - origin.y))) / run) + elevationOffset;
+	}
+
+	std::vector<Vec2> RoofSlope::plan(const RoofPlane& plane)
+	{
+		std::vector<Vec2> points;
+		points.reserve(plane.vertices.size());
+		for (const Vec3& v : plane.vertices)
+			points.push_back(Vec2{v.x, v.y});
+		return points;
+	}
+
+	void RoofSlope::projectionRange(const std::vector<Vec2>& points, const Vec2& dir,
+									double& outMin, double& outMax)
+	{
+		if (points.empty())
+		{
+			outMin = 0.0;
+			outMax = 0.0;
+			return;
+		}
+		outMin = (points.front().x * dir.x) + (points.front().y * dir.y);
+		outMax = outMin;
+		for (const Vec2& p : points)
+		{
+			const double t = (p.x * dir.x) + (p.y * dir.y);
+			outMin = std::min(outMin, t);
+			outMax = std::max(outMax, t);
+		}
+	}
+
+	bool roofSlope(const RoofPlane& plane, RoofSlope& out, double flatTol)
+	{
+		if (plane.vertices.empty())
+			return false;
+
+		const double nx = plane.normal.x;
+		const double ny = plane.normal.y;
+		const double nz = plane.normal.z;
+		const double dh = std::hypot(nx, ny);
+		// ほぼ水平な面は勾配方向が定まらない。鉛直な面（法線が水平）は平面式の分母 nz が
+		// 0 になり天端 Z が定まらない（RoofPlane の normal は上向きなので nz >= 0）。
+		if (dh <= flatTol || nz <= flatTol)
+			return false;
+
+		// 勾配方向 d（最急降下＝水平法線方向）。+d へ進むと天端 Z は下がる（軒側）。
+		out.down = Vec2{nx / dh, ny / dh};
+		// 掃引方向 e（軒・棟に平行。勾配方向に直交）。
+		out.along = Vec2{-out.down.y, out.down.x};
+		out.rise = dh;
+		out.run = nz;
+		out.origin = plane.vertices.front();
 		return true;
 	}
 

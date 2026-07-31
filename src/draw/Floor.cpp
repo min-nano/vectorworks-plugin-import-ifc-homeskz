@@ -37,6 +37,7 @@
 
 #include "PluginPrefix.h"
 #include "draw/Floor.h"
+#include "draw/DrawUtil.h"
 #include "core/Document.h"
 
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
@@ -54,32 +55,6 @@ namespace HomeskzIfcImport::draw
 		// TObjectBoundID（= Sint32）だが、その別名は SDK の名前空間の中にあるため、
 		// ここでは実体の Sint32 で持つ（暗黙変換で同じ）。
 		constexpr Sint32 kSlabBoundID = 0;
-
-		// オブジェクトのクラスを名前で設定する（AddClass は既存なら索引を返し、無ければ作る。
-		// draw/Grid.cpp の同名ヘルパーと同じ規約）。
-		void SetClassByName(MCObjectHandle object, const std::string& className)
-		{
-			if (className.empty())
-				return;
-			const InternalIndex classID = gSDK->AddClass(TXString(className.c_str()));
-			gSDK->SetObjectClass(object, classID);
-		}
-
-		// 描画属性（線幅・色・パターン・矢印・透明度）をすべてクラス属性に従わせる。
-		// SetObjectClass はクラスを割り当てるだけで各属性は by-instance の既定値のまま
-		// 残るため、属性ごとに by-class を指定する（Python 版 _set_all_attributes_by_class
-		// と同じ意図。ISDK の関数名は VS と異なる: PColors=ペン色 / FColors=面色 /
-		// PPat=線種 / FPat=面パターン / Arrow=マーカー）。
-		void SetAllAttributesByClass(MCObjectHandle object)
-		{
-			gSDK->SetPColorsByClass(object);
-			gSDK->SetFColorsByClass(object);
-			gSDK->SetLWByClass(object);
-			gSDK->SetPPatByClass(object);
-			gSDK->SetFPatByClass(object);
-			gSDK->SetArrowByClass(object);
-			gSDK->SetOpacityByClass(object);
-		}
 
 		// 既存のコンポーネント（層）数。取得できなければ 0（＝層を持たない）とみなす。
 		short CountComponents(MCObjectHandle object)
@@ -252,13 +227,9 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		for (const core::FloorCommand& floor : document.floors)
 		{
-			// 配置先レイヤ（"n-FL"）が無い命令はスキップする。レイヤは story 命令が作る
-			// ので、無い＝そのストーリの生成がスキップされたということ。床のために勝手に
-			// レイヤを作らない（Python 版 execute_floors と同じ規約）。
-			MCObjectHandle layer = gSDK->GetNamedLayer(TXString(floor.layer.c_str()));
-			if (layer == nil)
+			// 配置先レイヤ（"n-FL"）が無い命令はスキップする（規約は ActivateExistingLayer）。
+			if (ActivateExistingLayer(floor.layer) == nil)
 				continue;
-			gSDK->SetCurrentLayer(layer);
 
 			if (DrawOne(floor))
 				++drawn;

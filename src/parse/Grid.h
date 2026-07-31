@@ -19,10 +19,32 @@
 #include "core/Document.h"
 #include "parse/Step.h"
 
+#include <string>
 #include <vector>
 
 namespace HomeskzIfcImport::parse
 {
+	class Context;
+
+	// 解析途中の 1 本の通り芯（センタリング**前**の生端点＋軸名）。センタリング中心は
+	// 全端点の bbox から決まるので、線分の収集と中心の算出を分けられるようにこの中間型を
+	// 公開する（床・垂木・野地板も同じ中心を使うため、線分収集は 1 回で済ませたい）。
+	struct GridLine
+	{
+		std::string label;
+		core::Vec2 start;
+		core::Vec2 end;
+	};
+
+	// IfcGridAxis から通り芯の線分を集める。連続する点対（区間）ごとに 1 本を作り、
+	// 幾何的に重複する線分（向きの反転も同一）は最初に現れた 1 本へ畳む。#id 昇順・
+	// 点順で処理するので、入力の列挙順に依存しない決定的な並びになる。
+	std::vector<GridLine> collectGridLines(const Model& model);
+
+	// 線分群の bbox 中心（＝センタリングオフセット）を返す。線分が空なら false
+	// （out は変更しない＝補正しない）。
+	bool gridCenterOf(const std::vector<GridLine>& lines, core::Vec2& out);
+
 	// STEP Model から通り芯の描画命令を組み立てる（Python 版 build_grid_commands 相当）。
 	//
 	// 手順（ROADMAP.md M1 / Python 版 ifc/grid.py resolve_lines）:
@@ -37,6 +59,9 @@ namespace HomeskzIfcImport::parse
 	// 重複除去も最初に現れた 1 本を残す）。1 本の欠損（曲線未解決・点数不足）で全体を
 	// 止めず、その軸だけスキップする（Python 版の寛容さ。CLAUDE.md「エラーハンドリング」）。
 	std::vector<core::GridCommand> buildGridCommands(const Model& model);
+
+	// 同上。共有コンテキストの線分・センタリング中心を使う（parse/Context.h）。
+	std::vector<core::GridCommand> buildGridCommands(Context& context);
 
 	// 通り芯の bbox 中心（＝全要素に共通のセンタリングオフセット）を返す。Python 版
 	// resolve_lines が返す (center_x, center_y) に相当し、床・基礎・部材はいずれもこの

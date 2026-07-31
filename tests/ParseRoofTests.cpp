@@ -14,6 +14,7 @@
 //
 
 #include "TestFramework.h"
+#include "Fixtures.h"
 
 #include "core/Document.h"
 #include "parse/IfcGeometry.h"
@@ -42,21 +43,11 @@ using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::roofCommandForPlane;
 using HomeskzIfcImport::parse::RoofPlane;
+using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::near;
 
 namespace
 {
-	// 2 つの実数が許容誤差内で等しいか。
-	bool near(double a, double b, double tol = 1e-6)
-	{
-		return std::abs(a - b) < tol;
-	}
-
-	// フィクスチャを読む（読み込めなければテスト側で CHECK 失敗させる）。
-	Model fixture(const std::string& filename, bool& ok)
-	{
-		return loadIfc(std::string(HOMESKZ_FIXTURES_DIR) + "/" + filename, &ok);
-	}
-
 	// 試験用の屋根面（ParseRafterTests と同じ片流れ）: 4m×3m 矩形が +Y に立ち上がり、
 	// 軒（y=0）で z=1000、棟（y=3000）で z=2000。z = 1000 + y/3 ⇒ 法線 (0, −1, 3)/√10。
 	RoofPlane shedPlane()

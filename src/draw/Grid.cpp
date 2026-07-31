@@ -8,7 +8,7 @@
 //
 //	使用する SDK API はすべて ISDK（gSDK）／VWFC の実在シグネチャに合わせている
 //	（Vectorworks 2026 SDK の Interfaces/VectorWorks/ISDK.h・VWFC/VWObjects）:
-//	  * gSDK->GetNamedLayer / CreateLayer / SetCurrentLayer … レイヤの取得・作成・アクティブ化
+//	  * draw/DrawUtil の PrepareLayer                      … レイヤの取得・作成・アクティブ化
 //	  * VWPolygon2DObj({p0,p1}) + SetClosed(false)         … パスとなる開いた 2D ポリライン
 //	  * VWGroupObj()                                       … 空のプロファイルグループ
 //	  * gSDK->CreateCustomObjectPath(name,path,prof,regen) … パス＋プロファイルから PIO を生成
@@ -33,6 +33,7 @@
 
 #include "PluginPrefix.h"
 #include "draw/Grid.h"
+#include "draw/DrawUtil.h"
 #include "core/Document.h"
 
 // GridAxis PIO の生成・設定に使う VWFC ラッパー（PluginPrefix の umbrella が取り込む
@@ -47,31 +48,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// デザインレイヤの種別コード（CreateLayer の layerType 引数）。1 = デザインレイヤ、
-		// 2 = シート（プレゼンテーション）レイヤ。通り芯はデザインレイヤに置く。
-		constexpr short kDesignLayerType = 1;
-
-		// 「共通」デザインレイヤを取得（無ければ作成）し、アクティブにする。以後に生成する
-		// オブジェクトはこのアクティブレイヤへ入る。取得・生成できなければ何もしない。
-		void PrepareLayer(const TXString& layerName)
-		{
-			MCObjectHandle layer = gSDK->GetNamedLayer(layerName);
-			if (layer == nil)
-				layer = gSDK->CreateLayer(layerName, kDesignLayerType);
-			if (layer != nil)
-				gSDK->SetCurrentLayer(layer);
-		}
-
-		// オブジェクトのクラスを名前で設定する（AddClass は既存なら索引を返し、無ければ作る）。
-		// Python 版 vw/grid.py の vs.SetClass(handle, class) に対応する。
-		void SetClassByName(MCObjectHandle object, const std::string& className)
-		{
-			if (className.empty())
-				return;
-			const InternalIndex classID = gSDK->AddClass(TXString(className.c_str()));
-			gSDK->SetObjectClass(object, classID);
-		}
-
 		// 1 本の通り芯を描く（Python 版 vw/grid.py draw_grid に対応）。開いたポリラインを
 		// パスに、空グループをプロファイルにして GridAxis PIO を生成し、クラス・軸名ラベル・
 		// 基点バブルを設定して再計算する。PIO 生成に失敗したらパスのポリライン（絶対座標の
@@ -126,7 +102,8 @@ namespace HomeskzIfcImport::draw
 			return 0;
 
 		// 通り芯はすべて「共通」レイヤ（全命令で同一）。最初の命令のレイヤ名で用意する。
-		PrepareLayer(TXString(document.grids.front().layer.c_str()));
+		// 通り芯は**自分でレイヤを作ってよい**唯一の要素（他はストーリ由来のレイヤに乗る）。
+		PrepareLayer(document.grids.front().layer);
 
 		std::size_t drawn = 0;
 		for (const core::GridCommand& grid : document.grids)

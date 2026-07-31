@@ -128,15 +128,17 @@ src/
   Updater*.{h,cpp}          自動アップデータ（既存・テンプレート由来。基本触らない）
 
   core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
-    Geometry.h              Vec2 / Vec3 / Mat4 等の自前数学型（parse が SDK 非依存のため必須）
-    Document.h              命令セットの構造体定義
-    DocumentValidate.{h,cpp} validateDocument
-    DocumentJson.{h,cpp}    Document ⇔ JSON（デバッグ / ゴールデンテスト用・任意）
+    Geometry.{h,cpp}        Vec2 / Vec3 / Mat4 等の自前数学型（parse が SDK 非依存のため必須）
+    Document.{h,cpp}        命令セットの構造体定義と validateDocument（1 対で持つ。分割は不要）
+    Region.{h,cpp}          部品が囲む平面領域の合成（ロフト床の外形。M5 で追加）
+    DocumentJson.{h,cpp}    Document ⇔ JSON（デバッグ / ゴールデンテスト用。**未実装・M6.5**）
 
   parse/                    Phase 1: IFC 解析（SDK 非依存）… 旧 ifc/
     Step.{h,cpp}            最小 STEP リーダ（トークナイザ＋エンティティグラフ）
     Loader.{h,cpp}          ファイル読み込み: テキスト→STEP グラフ（旧 loader.py。サニタイズは不要）
-    IfcGeometry.{h,cpp}     配置行列・押し出しソリッド・断面の解決（旧 footing._world_solid 等）
+    IfcAttr.h               IFC 属性インデックスの唯一の定義（番号を散らさない）
+    IfcGeometry.{h,cpp}     配置行列・押し出しソリッド・断面・屋根面の解決（旧 footing._world_solid 等）
+    Context.{h,cpp}         解析中の共有キャッシュ（下記「共有コンテキスト」）
     BuildDocument.{h,cpp}   build_document 相当のオーケストレーション
     Grid.{h,cpp}            通り芯（旧 ifc/grid.py）
     Story.{h,cpp}           ストーリ（旧 ifc/story.py）
@@ -145,17 +147,31 @@ src/
 
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
     ExecuteDocument.{h,cpp} execute_document 相当のディスパッチ
+    DrawUtil.{h,cpp}        クラス分け・by-class 属性・レイヤ用意の共通ヘルパー
     Grid.{h,cpp}            grid 命令 → GridAxis（旧 vw/grid.py）
     Story.{h,cpp}           story 命令 → ストーリ・レベル・レイヤ（旧 vw/story.py）
     …                       以降、要素ごとに 1 対 1 で追加
 
 tests/
   TestFramework.h           既存の極小ハーネス（無 SDK）
+  Fixtures.h                フィクスチャの読み込み・近似比較・フィクスチャ一覧（共通）
   fixtures/                 ホームズ君 IFC（Python 版 tests/fixtures から流用）
   StepTests.cpp             STEP リーダ
   GeometryTests.cpp         幾何計算（Python 版の値と突き合わせ）
   ParseGridTests.cpp        parse/Grid …（要素ごと）
 ```
+
+**共有コンテキスト（`parse/Context`）**: 各要素の解析は「ストーリ一覧」「通り芯の
+センタリング中心」「階に属する要素」「屋根面」を共通して必要とする。`buildDocument` は
+`Context` を **1 つだけ**作って全要素へ渡し、これらの前処理を 1 回で済ませる（要素ごとに
+求め直すと同じ走査が要素の数だけ走る）。単体テストの都合で `const Model&` を直接取る
+オーバーロードも各 `build*Commands` に残してあり、そちらは内部でコンテキストを作って捨てる。
+
+**重複を作らない置き場所**: 同じ定数・述語・ヘルパーを 2 か所に書かない。IFC の属性
+インデックスは `parse/IfcAttr.h`、レベル種別名は `parse/Story.h`（屋根組は
+`parse/Rafter.h` / `parse/Roof.h`）、レイヤ名の組み立ては `storyLayerName`、要素の判別
+述語（`isFloorSlab` / `isRoofSlab`）はその要素のヘッダ、`draw/` の SDK 呼び出しの定型は
+`draw/DrawUtil` に**それぞれ 1 つだけ**置く。
 
 **依存の向きは厳守する:** `parse/` と `core/` は VectorWorks SDK を include しない。
 `draw/` は STEP / IFC を include しない。両者をつなぐのは `core/Document.h` だけ。
@@ -249,7 +265,7 @@ Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テス�
 | `ifc/grid.py` … `ifc/section.py` | `parse/Grid` … `parse/Section` | 要素ごとの解析 |
 | `ifc/structural_class.py` | `parse/StructuralClass` | 構造クラス判定（純ロジック） |
 | （ifcopenshell の行列・幾何） | `parse/IfcGeometry` + `core/Geometry` | 配置行列・押し出し・断面 |
-| `document.py` | `core/Document` (+ `DocumentValidate` / `DocumentJson`) | 命令セット・検証 |
+| `document.py` | `core/Document`（検証も同ファイル）(+ `DocumentJson`) | 命令セット・検証 |
 | `tracing.py` | `core/Trace`（任意） | クラッシュ診断ログ |
 | `vw/__init__.py` `execute_document` | `draw/ExecuteDocument` | 描画ディスパッチ |
 | `vw/grid.py` … `vw/section.py` | `draw/Grid` … `draw/Section` | 要素ごとの描画 |

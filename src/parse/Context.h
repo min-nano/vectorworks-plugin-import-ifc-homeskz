@@ -1,0 +1,84 @@
+//
+//	parse/Context.h
+//
+//	Phase 1（IFC 解析）の共有コンテキスト。1 回のインポートで**同じ Model に対して
+//	何度も同じ答えを出す前処理**を 1 か所へ集め、最初に求めた結果を使い回す。
+//
+//	【なぜ要るか】parse/BuildDocument は要素ごとの build*Commands を順に呼ぶが、各要素は
+//	いずれも「ストーリ一覧」「通り芯のセンタリング中心」「階に属する要素」「屋根面」を
+//	必要とする。素直に書くと要素の数だけ同じ走査が走る（実測: ストーリ収集 4 回・通り芯の
+//	線分収集 4 回・ロフト床の領域合成 2 回・屋根版 1 枚あたり屋根面の解決 2 回）。いずれも
+//	同じ Model に対する純粋な計算なので、結果は毎回同じ——要素が増えるほど倍率だけが乗る。
+//	コンテキストはこの重複をなくすためのもので、**振る舞いは一切変えない**。
+//
+//	【使い方】buildDocument が 1 つだけ作り、各 build*Commands へ参照で渡す。単体テストの
+//	都合で `const Model&` を直接取る従来のオーバーロードも残してあり、そちらは内部で
+//	コンテキストを 1 つ作って捨てる（＝従来どおりの挙動）。
+//
+//	【キャッシュの一貫性】保持するのは Model への参照だけで、Model は解析中に変化しない
+//	（parse/Step の Model は構築後は読み取り専用）。したがってキャッシュが古くなることは
+//	無い。コンテキストは 1 回のインポートより長生きさせない。
+//
+//	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。
+//
+
+#pragma once
+
+#include "core/Geometry.h"
+#include "parse/Floor.h"
+#include "parse/Grid.h"
+#include "parse/IfcGeometry.h"
+#include "parse/Step.h"
+#include "parse/Story.h"
+
+#include <map>
+#include <optional>
+#include <vector>
+
+namespace HomeskzIfcImport::parse
+{
+	// 解析中に共有する遅延キャッシュ。アクセサはいずれも**初回に計算して以後は同じ値を
+	// 返す**（そのため非 const。const 参照で配りたくなるが、mutable を持ち込むより
+	// 「変更しうる」ことを型で示す方が読み違えにくい）。
+	class Context
+	{
+	public:
+		explicit Context(const Model& model) : fModel(&model) {}
+
+		const Model& model() const
+		{
+			return *fModel;
+		}
+
+		// FL ストーリの一覧（Elevation 昇順・末尾が最上階）。parse/Story の collectStories。
+		const std::vector<StoryInfo>& stories();
+
+		// 通り芯の線分（重複除去済み・#id 昇順で決定的）。parse/Grid の collectGridLines。
+		const std::vector<GridLine>& gridLines();
+
+		// 全要素に共通のセンタリングオフセット（通り芯の bbox 中心）。通り芯が 1 本も
+		// 取れなければ (0,0)＝補正しない。
+		const core::Vec2& gridCenter();
+
+		// 階（#storeyId）に属する要素の #id。parse/Story の collectStoryElements。
+		const std::vector<int>& storyElements(int storeyId);
+
+		// 屋根階（#storeyId）の床梁が囲む領域から合成したロフト床。parse/Floor の
+		// loftFloorRegions（セル格子の flood fill を伴うため、特に重複計算を避けたい）。
+		const std::vector<LoftFloorRegion>& loftFloorRegions(int storeyId);
+
+		// 屋根版（#elementId）の屋根面。解決できない屋根版は nullptr。垂木（parse/Rafter）と
+		// 野地板（parse/Roof）が同じ面を共有するので、押し出しソリッドの解決は 1 回で済む。
+		const RoofPlane* roofPlane(int elementId);
+
+	private:
+		const Model* fModel = nullptr;
+
+		std::optional<std::vector<StoryInfo>> fStories;
+		std::optional<std::vector<GridLine>> fGridLines;
+		std::optional<core::Vec2> fGridCenter;
+		std::map<int, std::vector<int>> fStoryElements;
+		std::map<int, std::vector<LoftFloorRegion>> fLoftFloorRegions;
+		std::map<int, std::optional<RoofPlane>> fRoofPlanes;
+	};
+} // namespace HomeskzIfcImport::parse

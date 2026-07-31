@@ -15,6 +15,7 @@
 //
 
 #include "TestFramework.h"
+#include "Fixtures.h"
 
 #include "core/Document.h"
 #include "parse/Floor.h"
@@ -39,22 +40,11 @@ using HomeskzIfcImport::parse::loadIfc;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::StoryInfo;
+using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::near;
 
 namespace
 {
-	// 2 つの実数が許容誤差内で等しいか。高さ・オフセット比較に使う（mm 単位なので
-	// Python 版の round(…, 3) と同等の粒度で十分）。
-	bool near(double a, double b)
-	{
-		return std::abs(a - b) < 1e-6;
-	}
-
-	// フィクスチャを読む（読み込めなければテスト側で CHECK 失敗させる）。
-	Model fixture(const std::string& filename, bool& ok)
-	{
-		return loadIfc(std::string(HOMESKZ_FIXTURES_DIR) + "/" + filename, &ok);
-	}
-
 	// 各 FL レイヤ名 → その階の FL 高さ（絶対 Z）。床仕上げ上端の基準になる。
 	std::map<std::string, double> flByLayer(const Model& model)
 	{

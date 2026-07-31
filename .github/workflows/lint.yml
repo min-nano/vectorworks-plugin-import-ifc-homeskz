@@ -131,6 +131,11 @@ jobs:
       # .cpp under them must be tidied. A hardcoded list silently skipped a newly
       # added module once (src/parse/Floor.cpp), so glob instead — a new parse
       # module is linted the moment it lands.
+      #
+      # KEEP IN SYNC with scripts/lint.sh, which must tidy the identical list:
+      # that script is what developers run before pushing, and it once lagged
+      # behind this job (tidying only src/UpdaterFlow.cpp), so core/ and parse/
+      # findings first appeared here instead of locally.
       - name: Run clang-tidy
         run: |
           set -euo pipefail

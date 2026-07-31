@@ -6,7 +6,9 @@
 //
 
 #include "parse/Rafter.h"
+#include "parse/Context.h"
 #include "parse/Grid.h"
+#include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Story.h"
 #include "parse/StructuralClass.h"
@@ -23,15 +25,11 @@ namespace HomeskzIfcImport::parse
 {
 	using core::RafterCommand;
 	using core::Vec2;
-	using core::Vec3;
 
 	namespace
 	{
-		// IfcRoot の Name 属性インデックス（GlobalId, OwnerHistory, Name=2, …）。
-		constexpr std::size_t kNameAttr = 2;
-
 		// 屋根面の法線の水平成分がこれ以下（ほぼ水平な面）なら勾配方向が定まらないため垂木を
-		// 流さない（Python 版 _FLAT_TOL）。
+		// 流さない（Python 版 _FLAT_TOL）。野地板（parse/Roof）も同じ閾値を使う。
 		constexpr double kFlatTol = 1e-6;
 
 		// クリップした垂木の平面投影長がこれ未満（隅木際の極小片等）なら配置しない（mm。
@@ -41,19 +39,6 @@ namespace HomeskzIfcImport::parse
 		// 掃引線と外形辺の交点判定の許容（mm。Python 版 _EDGE_TOL）。両端の掃引線を半幅
 		// 内側へ寄せた実効幅がこの 2 倍以下なら、区間が取れない極小面として中央 1 本にする。
 		constexpr double kEdgeTol = 1.0;
-
-		// 要素が屋根版（IfcSlab かつ Name が "屋根版" 始まり）か（Python 版の
-		// element.is_a('IfcSlab') and Name.startswith('屋根版') と同じ判定）。
-		bool isRoofSlab(const Entity& element)
-		{
-			if (element.type != "IFCSLAB")
-				return false;
-			const Value& name = element.attribute(kNameAttr);
-			if (name.type != ValueType::String)
-				return false;
-			const std::string prefix(kRoofSlabPrefix);
-			return name.text.compare(0, prefix.size(), prefix) == 0;
-		}
 
 		// 走査線と外形辺の交点 1 つ（勾配方向 d の座標＋平面座標）。d 昇順に並べると
 		// [偶, 奇] の対が面内の区間になる（非凸面も走査線法で正しく分割される）。
@@ -65,15 +50,31 @@ namespace HomeskzIfcImport::parse
 		};
 	} // namespace
 
-	bool storyHasRoofSlab(const Model& model, int storeyId)
+	bool isRoofSlab(const Entity& element)
 	{
-		const std::vector<int> elements = collectStoryElements(model, storeyId);
-		return std::ranges::any_of(elements,
+		if (element.type != "IFCSLAB")
+			return false;
+		// Python 版の element.is_a('IfcSlab') and Name.startswith('屋根版') と同じ判定。
+		const std::string name = entityName(element);
+		const std::string prefix(kRoofSlabPrefix);
+		return name.size() >= prefix.size() && name.compare(0, prefix.size(), prefix) == 0;
+	}
+
+	bool storyHasRoofSlab(Context& context, int storeyId)
+	{
+		const Model& model = context.model();
+		return std::ranges::any_of(context.storyElements(storeyId),
 								   [&model](int elementId)
 								   {
 									   const Entity* element = model.entity(elementId);
 									   return element != nullptr && isRoofSlab(*element);
 								   });
+	}
+
+	bool storyHasRoofSlab(const Model& model, int storeyId)
+	{
+		Context context(model);
+		return storyHasRoofSlab(context, storeyId);
 	}
 
 	std::string rafterLabel()
@@ -122,44 +123,24 @@ namespace HomeskzIfcImport::parse
 											   double storeyElevation, const Vec2& center,
 											   std::optional<double> beamTopZ)
 	{
-		const double nx = plane.normal.x;
-		const double ny = plane.normal.y;
-		const double nz = plane.normal.z;
-		const double dh = std::hypot(nx, ny);
-		if (dh <= kFlatTol)
-			return {}; // ほぼ水平な面は勾配方向が定まらない
+		// 勾配の座標系（勾配方向 down・掃引方向 along・平面上の天端 Z）は野地板と共有する
+		// （parse/IfcGeometry の RoofSlope）。ほぼ水平な面・鉛直な面はここで弾かれる。
+		RoofSlope slope;
+		if (!roofSlope(plane, slope, kFlatTol))
+			return {};
 
-		// 勾配方向 d（最急降下＝水平法線方向）。+d へ進むと天端 Z は下がる（軒側）。
-		const double dx = nx / dh;
-		const double dy = ny / dh;
-		// 掃引方向 e（軒・棟に平行。勾配方向に直交）。
-		const double ex = -dy;
-		const double ey = dx;
-
-		// 平面外形の XY と、平面式の基準点（頂点 0）。
-		std::vector<Vec2> plan;
-		plan.reserve(plane.vertices.size());
-		for (const Vec3& v : plane.vertices)
-			plan.push_back(Vec2{v.x, v.y});
-		const Vec3 origin = plane.vertices.front();
-
-		// 屋根面（平面）上の点の天端 Z。ストーリ相対 → Elevation を足して絶対値にする
-		// （法線の符号反転に対して不変: nx/ny/nz が揃って反転し比が変わらない）。
-		const auto zAt = [&](double x, double y) {
-			return origin.z - (((nx * (x - origin.x)) + (ny * (y - origin.y))) / nz) +
-				   storeyElevation;
-		};
-
-		double eMin = (plan.front().x * ex) + (plan.front().y * ey);
-		double eMax = eMin;
-		for (const Vec2& p : plan)
-		{
-			const double e = (p.x * ex) + (p.y * ey);
-			eMin = std::min(eMin, e);
-			eMax = std::max(eMax, e);
-		}
+		// 平面外形の XY と、掃引方向への広がり。
+		const std::vector<Vec2> plan = RoofSlope::plan(plane);
+		double eMin = 0.0;
+		double eMax = 0.0;
+		RoofSlope::projectionRange(plan, slope.along, eMin, eMax);
 		if (eMax - eMin < kMinRafterLength)
 			return {}; // 掃引方向の広がりが極小な面（退化した屋根版）
+
+		const double ex = slope.along.x;
+		const double ey = slope.along.y;
+		const double dx = slope.down.x;
+		const double dy = slope.down.y;
 
 		const std::string label = rafterLabel();
 		// 差し込み（支持点→壁外面）。M6 は横架材が未導入なので既定桁幅の半分
@@ -211,8 +192,9 @@ namespace HomeskzIfcImport::parse
 				if (std::hypot(low.x - high.x, low.y - high.y) < kMinRafterLength)
 					continue; // 隅木際の極小片・端で退化した区間は配置しない
 
-				const double zTip = zAt(low.x, low.y);	   // 軒先の天端 Z
-				const double zRidge = zAt(high.x, high.y); // 棟側の天端 Z
+				// 天端 Z（絶対値）。ストーリ相対の平面式に Elevation を足す。
+				const double zTip = slope.zAt(low.x, low.y, storeyElevation);	  // 軒先
+				const double zRidge = slope.zAt(high.x, high.y, storeyElevation); // 棟側
 
 				// 支持点 = 屋根面が横架材天端（軒高）Z と交わる点。軒先→棟の線上で
 				// z=beamTopZ となる位置 s を採る。軒先が既に beamTopZ 以上（s<=0）や面全体が
@@ -256,41 +238,48 @@ namespace HomeskzIfcImport::parse
 		return commands;
 	}
 
-	std::vector<RafterCommand> buildRafterCommands(const Model& model)
+	std::vector<RafterCommand> buildRafterCommands(Context& context)
 	{
-		const std::vector<StoryInfo> stories = collectStories(model);
+		const Model& model = context.model();
+		const std::vector<StoryInfo> stories = context.stories();
 		if (stories.empty())
 			return {};
 
-		// 通り芯と同じセンタリングオフセット（通り芯が無ければ補正なし＝生の IFC 座標）。
-		Vec2 center{0.0, 0.0};
-		resolveGridCenter(model, center);
+		// 通り芯と同じセンタリングオフセット（通り芯が無ければ (0,0)＝生の IFC 座標）。
+		const Vec2 center = context.gridCenter();
 
 		std::vector<RafterCommand> commands;
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
 			const StoryInfo& story = stories[i];
-			const std::string layer = storyLayerPrefix(i, story.isTop) + "-" + kLevelTaruki;
+			const std::string layer = storyLayerName(i, story.isTop, kLevelTaruki);
 			// 支持点が乗る横架材天端の絶対 Z（最上階は軒高＝オフセット 0）。
 			const double beamTopZ =
 				story.isTop ? story.elevation : story.elevation + story.beamOffset;
 
-			for (const int elementId : collectStoryElements(model, story.id))
+			for (const int elementId : context.storyElements(story.id))
 			{
 				const Entity* element = model.entity(elementId);
 				if (element == nullptr || !isRoofSlab(*element))
 					continue;
 
-				RoofPlane plane;
-				if (!roofPlane(model, element, plane))
+				// 屋根面は野地板（parse/Roof）と共有する（コンテキストが 1 度だけ解決する）。
+				const RoofPlane* plane = context.roofPlane(elementId);
+				if (plane == nullptr)
 					continue; // 屋根面を解決できない屋根版はスキップ
 
 				std::vector<RafterCommand> rafters =
-					raftersForPlane(plane, layer, story.elevation, center, beamTopZ);
+					raftersForPlane(*plane, layer, story.elevation, center, beamTopZ);
 				for (RafterCommand& rafter : rafters)
 					commands.push_back(std::move(rafter));
 			}
 		}
 		return commands;
+	}
+
+	std::vector<RafterCommand> buildRafterCommands(const Model& model)
+	{
+		Context context(model);
+		return buildRafterCommands(context);
 	}
 } // namespace HomeskzIfcImport::parse

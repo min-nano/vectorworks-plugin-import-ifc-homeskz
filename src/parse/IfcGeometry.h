@@ -46,6 +46,10 @@ namespace HomeskzIfcImport::parse
 	// 参照が解決できない・座標が 2 つ未満のときは false。
 	bool resolvePoint(const Model& model, const Value& ref, Vec3& out);
 
+	// 同上を平面座標で返す（3D 点でも Z は捨てる）。通り芯のように平面だけで決まる要素が
+	// 使う（resolvePoint の薄いラッパーで、判定規則は完全に同じ）。
+	bool resolvePoint2D(const Model& model, const Value& ref, Vec2& out);
+
 	// IfcAxis2Placement3D → ローカル変換行列。Axis(=局所 Z)・RefDirection(≈局所 X)から
 	// Gram-Schmidt で正規直交基底を作る（X = 正規化(RefDir − (RefDir·Z)Z)、Y = Z×X）。
 	// Axis 省略時は Z=(0,0,1)、RefDirection 省略時は X=(1,0,0)。placement が nullptr /
@@ -172,6 +176,44 @@ namespace HomeskzIfcImport::parse
 		std::vector<Vec3> vertices;
 		Vec3 normal;
 	};
+
+	// 屋根面の法線から導かれる勾配の座標系。垂木（parse/Rafter）と野地板（parse/Roof）は
+	// どちらも「勾配方向へ流す／軒方向へ掃引する／面上の点の天端 Z を引く」を行うため、
+	// その計算をここに一本化する（両者に逐語的な複製があり、片方だけ直すとズレていた）。
+	//
+	//   down   … 勾配方向（最急降下＝法線の水平成分の向き）。+down へ進むと天端 Z が下がる
+	//            ＝軒側へ向かう。単位ベクトル。
+	//   along  … 軒・棟に平行な方向（勾配方向に直交）。垂木の掃引方向。単位ベクトル。
+	//   rise   … 法線の水平成分の大きさ dh（勾配の rise）
+	//   run    … 法線の鉛直成分 nz（勾配の run。slope = rise/run = tanθ）
+	// 平面上の点の天端 Z は zAt() が返す（法線の符号反転に対して不変。RoofPlane の
+	// normal は上向きに揃えてあるので run は正）。
+	struct RoofSlope
+	{
+		Vec2 down;
+		Vec2 along;
+		double rise = 0.0;
+		double run = 0.0;
+
+		Vec3 origin; // 平面式の基準点（RoofPlane の頂点 0。Z はストーリ相対）
+
+		// 平面上の点 (x, y) の天端 Z。elevationOffset にストーリ高さ（Elevation）を渡すと
+		// 絶対 Z になる（RoofPlane の Z はストーリ相対のため。IfcGeometry.h の RoofPlane 参照）。
+		double zAt(double x, double y, double elevationOffset = 0.0) const;
+
+		// 平面外形の XY 射影（RoofPlane::vertices の Z を落としたもの）。
+		// 掃引・クリップ・軒軸の算出はいずれもこの平面図形の上で行う。
+		static std::vector<Vec2> plan(const RoofPlane& plane);
+
+		// 点列を方向 dir へ射影した値の [最小, 最大] を返す（掃引方向・勾配方向の広がり）。
+		static void projectionRange(const std::vector<Vec2>& points, const Vec2& dir,
+									double& outMin, double& outMax);
+	};
+
+	// 屋根面から勾配の座標系を作る。ほぼ水平な面（法線の水平成分が flatTol 以下＝勾配方向が
+	// 定まらない）と、鉛直な面（法線の鉛直成分が flatTol 以下＝平面式が 0 除算になる）は
+	// false（out は変更しない）。頂点が空の面も false。
+	bool roofSlope(const RoofPlane& plane, RoofSlope& out, double flatTol = 1e-6);
 
 	// 屋根版（IfcSlab）から屋根面を取り出す（Python 版 rafter._roof_plane 相当）。屋根版は
 	// 勾配した平面外形を鉛直に押し出したソリッド（押し出し＝屋根の厚み）なので、

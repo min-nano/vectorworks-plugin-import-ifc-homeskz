@@ -38,6 +38,20 @@
 
 namespace HomeskzIfcImport::parse
 {
+	class Context;
+
+	// レベル種別名。Python 版 ifc/story.py の LEVEL_FL / LEVEL_BEAM_TOP / LEVEL_EAVES と
+	// 一致させる。CreateLayerLevelType へ登録し GetLayerForStory でレイヤを取り直す鍵で、
+	// デザインレイヤ名の接尾辞（"1-FL" の "FL"）も同じ名前になる。
+	//
+	// **ここが唯一の定義。** 床（parse/Floor）は高さ基準のレベル名としてこれを参照する
+	// （かつては Story.cpp と Floor.cpp が各々ローカルに持っており、片方だけ直すと
+	// SetObjectStoryBound が解決できないレベルを指す形になっていた）。屋根組のレベル名は
+	// 同じ流儀で parse/Rafter の kLevelTaruki・parse/Roof の kLevelNojiita が公開する。
+	inline constexpr const char* kLevelFL = "FL";
+	inline constexpr const char* kLevelBeamTop = "横架材天端";
+	inline constexpr const char* kLevelEaves = "軒高";
+
 	// IfcProduct（要素）のローカル配置 Z 座標を取り出す。取得できれば outZ に入れて
 	// true、ObjectPlacement が無い／IfcLocalPlacement でない／座標が足りない等で
 	// 取れなければ false（Python 版 get_local_placement_z 相当）。親 PlacementRelTo は
@@ -49,6 +63,12 @@ namespace HomeskzIfcImport::parse
 	// story_suffix_for）。一般階は "{index+1}"、最上階は "R"（屋根）。床・部材の配置先
 	// レイヤ名（"1-FL" / "R-軒高" …）を組み立てるのに使う。
 	std::string storyLayerPrefix(std::size_t index, bool isTop);
+
+	// 配置先デザインレイヤ名 "{接頭辞}-{レベル種別}" を組み立てる（"1-FL" / "R-軒高" /
+	// "2-垂木" …）。レイヤ名の規約を 1 か所に固定するためのヘルパーで、ストーリがレベルを
+	// 作るときと、各要素が配置先を引くときの**両方**がこれを通る（規約がズレると要素の
+	// レイヤ探索が黙って失敗し、命令はあるのに 1 つも描かれない形になる）。
+	std::string storyLayerName(std::size_t index, bool isTop, const std::string& levelType);
 
 	// 階（#storeyId）に属する要素の #id を返す（Python 版 storey.ContainsElements →
 	// RelatedElements に相当）。IfcRelContainedInSpatialStructure を逆参照から辿り、
@@ -62,6 +82,9 @@ namespace HomeskzIfcImport::parse
 	// 見つかった値ではなく最大値を採るため、エンティティ列挙順に依存しない決定的な
 	// 結果になる。候補が無ければ 0.0。
 	double resolveBeamTopOffset(const Model& model, int storeyId);
+
+	// 同上。共有コンテキストの要素一覧を使う（parse/Context.h）。
+	double resolveBeamTopOffset(Context& context, int storeyId);
 
 	// 収集したストーリ 1 件（Python 版 collect_stories の要素 (elevation, offset) に対応）。
 	struct StoryInfo
@@ -77,8 +100,14 @@ namespace HomeskzIfcImport::parse
 	// する。Elevation が同値の階は #id 昇順で安定に並べる（列挙順に依存しない決定性）。
 	std::vector<StoryInfo> collectStories(const Model& model);
 
+	// 同上。共有コンテキストの要素一覧を使う（parse/Context.h）。
+	std::vector<StoryInfo> collectStories(Context& context);
+
 	// STEP Model から story 命令を組み立てる（Python 版 build_story_commands 相当。
 	// ただし M3 は基本レベルのみ。ヘッダ冒頭「M3 のスコープ」参照）。ストーリを一つも
 	// 検出できなければ空を返す（1 要素の欠損で全体を止めない。CLAUDE.md「エラーハンドリング」）。
 	std::vector<core::StoryCommand> buildStoryCommands(const Model& model);
+
+	// 同上。共有コンテキストのストーリ一覧・要素一覧・ロフト床を使う（parse/Context.h）。
+	std::vector<core::StoryCommand> buildStoryCommands(Context& context);
 } // namespace HomeskzIfcImport::parse

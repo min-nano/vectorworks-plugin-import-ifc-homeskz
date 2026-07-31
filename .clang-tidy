@@ -3,11 +3,13 @@
 # Runs the static-analysis and lint checks that are meaningful for this code
 # base without drowning it in style noise that clang-format already owns.
 #
-# CI runs clang-tidy over the SDK-free translation units (the updater logic and
-# its tests) using the compile database from a `-DVW_BUILD_PLUGIN=OFF
-# -DVW_BUILD_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` configure. Locally you
-# can do the same and run:
-#     clang-tidy -p build src/UpdaterFlow.cpp
+# CI runs clang-tidy over every SDK-free translation unit — the 2-phase import
+# code (src/core/ + src/parse/) and the updater logic — using the compile database
+# from a `-DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON
+# -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` configure. The SDK-dependent draw/ phase is
+# tidied in the SDK build (build.yml) instead. Locally, `scripts/lint.sh` runs the
+# identical file list; to check by hand:
+#     clang-tidy -p build src/core/*.cpp src/parse/*.cpp src/UpdaterFlow.cpp
 #
 # Notable disabled checks and why:
 #   * modernize-use-trailing-return-type — pure style, fights the house style.

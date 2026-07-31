@@ -6,6 +6,9 @@
 //
 
 #include "parse/Grid.h"
+#include "parse/Context.h"
+#include "parse/IfcAttr.h"
+#include "parse/IfcGeometry.h"
 
 #include <cctype>
 #include <cmath>
@@ -29,40 +32,16 @@ namespace HomeskzIfcImport::parse
 		// 重複軸は通常ぴったり一致するので、丸め耐性の微小値で十分。
 		constexpr double kEps = 1e-6;
 
-		// 解析途中の 1 本の通り芯（センタリング前の生端点＋軸名）。
-		struct RawLine
-		{
-			std::string label;
-			Vec2 start;
-			Vec2 end;
-		};
-
 		bool samePoint(const Vec2& a, const Vec2& b)
 		{
 			return std::abs(a.x - b.x) < kEps && std::abs(a.y - b.y) < kEps;
 		}
 
 		// 2 本が幾何的に同一の線分か（向きの反転も同一とみなす）。重複線除去に使う。
-		bool sameLine(const RawLine& a, const RawLine& b)
+		bool sameLine(const GridLine& a, const GridLine& b)
 		{
 			return (samePoint(a.start, b.start) && samePoint(a.end, b.end)) ||
 				   (samePoint(a.start, b.end) && samePoint(a.end, b.start));
-		}
-
-		// 参照値が指す IfcCartesianPoint の平面座標（X,Y）を取り出す。3D 点でも Z は
-		// 捨てる（通り芯は平面で決まる）。解決できない・座標が足りないときは false。
-		bool cartesianPoint(const Model& model, const Value& ref, Vec2& out)
-		{
-			const Entity* point = model.resolve(ref);
-			if (point == nullptr)
-				return false;
-			// IfcCartesianPoint.Coordinates は実数のリスト（属性 0）。
-			const Value& coords = point->attribute(0);
-			if (!coords.isList() || coords.items.size() < 2)
-				return false;
-			out.x = coords.items[0].asReal();
-			out.y = coords.items[1].asReal();
-			return true;
 		}
 
 		// 1 本の IfcGridAxis から AxisCurve(IfcPolyline) の全点を平面座標で集める。
@@ -75,15 +54,13 @@ namespace HomeskzIfcImport::parse
 							std::vector<Vec2>& pts)
 		{
 			// IfcGridAxis(AxisTag, AxisCurve, SameSense)。AxisTag は省略され得る。
-			const Value& tag = axis.attribute(0);
-			label = (tag.type == ValueType::String) ? tag.text : std::string();
+			label = entityString(axis, attr::kGridAxisTag);
 
-			const Entity* curve = model.resolve(axis.attribute(1));
+			const Entity* curve = model.resolve(axis.attribute(attr::kGridAxisCurve));
 			// Python は curve.is_a('IfcPolyline') を確認する。型名で判定（常に大文字保持）。
 			if (curve == nullptr || curve->type != "IFCPOLYLINE")
 				return false;
-			// IfcPolyline.Points は点参照のリスト（属性 0）。
-			const Value& points = curve->attribute(0);
+			const Value& points = curve->attribute(attr::kPolylinePoints);
 			if (!points.isList() || points.items.size() < 2)
 				return false;
 
@@ -91,8 +68,9 @@ namespace HomeskzIfcImport::parse
 			pts.reserve(points.items.size());
 			for (const Value& ref : points.items)
 			{
+				// 点の解決規則は parse/IfcGeometry と共有する（通り芯は Z を捨てた平面）。
 				Vec2 point;
-				if (!cartesianPoint(model, ref, point))
+				if (!resolvePoint2D(model, ref, point))
 					return false; // 点が解決できない軸はスキップ
 				pts.push_back(point);
 			}
@@ -103,7 +81,7 @@ namespace HomeskzIfcImport::parse
 		// X/Y ならそれに従い（大文字小文字を無視）、判別できなければ線の向きで決める
 		// （|Δx|<|Δy| すなわち縦長の線を X 通り＝X 軸上に並ぶ縦線とみなす。ホームズ君の
 		// x1/x2… は実際に鉛直線として出力される）。
-		bool isXAxis(const RawLine& line)
+		bool isXAxis(const GridLine& line)
 		{
 			if (!line.label.empty())
 			{
@@ -118,90 +96,89 @@ namespace HomeskzIfcImport::parse
 			const double dy = std::abs(line.end.y - line.start.y);
 			return dx < dy;
 		}
+	} // namespace
 
+	std::vector<GridLine> collectGridLines(const Model& model)
+	{
 		// 各 IfcGridAxis の全点を集め、連続する点対（線分）ごとに 1 本の通り芯を作る
 		// （Python 版 resolve_lines の `for i in range(len(pts) - 1)` に対応。ポリラインが
 		// 多点でも各区間が 1 本になる）。幾何的に重複する線分（向き反転も同一）は全体で
 		// 1 本に畳む（最初に現れた 1 本を残す）。#id 昇順・点順で決定的。
-		std::vector<RawLine> collectLines(const Model& model)
+		std::vector<GridLine> lines;
+		for (const int id : model.byType("IFCGRIDAXIS"))
 		{
-			std::vector<RawLine> lines;
-			for (const int id : model.byType("IFCGRIDAXIS"))
+			const Entity* axis = model.entity(id);
+			if (axis == nullptr)
+				continue;
+			std::string name;
+			std::vector<Vec2> pts;
+			if (!polylinePoints(model, *axis, name, pts))
+				continue; // 非ポリライン・点数不足・点未解決の軸はスキップ
+
+			for (std::size_t i = 0; i + 1 < pts.size(); ++i)
 			{
-				const Entity* axis = model.entity(id);
-				if (axis == nullptr)
-					continue;
-				std::string name;
-				std::vector<Vec2> pts;
-				if (!polylinePoints(model, *axis, name, pts))
-					continue; // 非ポリライン・点数不足・点未解決の軸はスキップ
+				const GridLine segment{name, pts[i], pts[i + 1]};
 
-				for (std::size_t i = 0; i + 1 < pts.size(); ++i)
+				bool duplicate = false;
+				for (const GridLine& kept : lines)
 				{
-					const RawLine segment{name, pts[i], pts[i + 1]};
-
-					bool duplicate = false;
-					for (const RawLine& kept : lines)
+					if (sameLine(kept, segment))
 					{
-						if (sameLine(kept, segment))
-						{
-							duplicate = true;
-							break;
-						}
+						duplicate = true;
+						break;
 					}
-					if (!duplicate)
-						lines.push_back(segment);
 				}
+				if (!duplicate)
+					lines.push_back(segment);
 			}
-			return lines;
 		}
+		return lines;
+	}
 
-		// 全端点の bbox 中心を求める（原点へ寄せるオフセット。VW 上で図面が原点付近に
-		// 来るようにする。ROADMAP.md M1「原点付近にセンタリング」）。lines は非空前提。
-		Vec2 boundingCenter(const std::vector<RawLine>& lines)
-		{
-			double minX = std::numeric_limits<double>::max();
-			double minY = std::numeric_limits<double>::max();
-			double maxX = std::numeric_limits<double>::lowest();
-			double maxY = std::numeric_limits<double>::lowest();
-			for (const RawLine& line : lines)
-			{
-				for (const Vec2& p : {line.start, line.end})
-				{
-					minX = std::min(minX, p.x);
-					minY = std::min(minY, p.y);
-					maxX = std::max(maxX, p.x);
-					maxY = std::max(maxY, p.y);
-				}
-			}
-			return Vec2{(minX + maxX) * 0.5, (minY + maxY) * 0.5};
-		}
-	} // namespace
-
-	bool resolveGridCenter(const Model& model, Vec2& out)
+	bool gridCenterOf(const std::vector<GridLine>& lines, Vec2& out)
 	{
-		const std::vector<RawLine> lines = collectLines(model);
+		// 全端点の bbox 中心を求める（原点へ寄せるオフセット。VW 上で図面が原点付近に
+		// 来るようにする。ROADMAP.md M1「原点付近にセンタリング」）。
 		if (lines.empty())
 			return false;
-		out = boundingCenter(lines);
+
+		double minX = std::numeric_limits<double>::max();
+		double minY = std::numeric_limits<double>::max();
+		double maxX = std::numeric_limits<double>::lowest();
+		double maxY = std::numeric_limits<double>::lowest();
+		for (const GridLine& line : lines)
+		{
+			for (const Vec2& p : {line.start, line.end})
+			{
+				minX = std::min(minX, p.x);
+				minY = std::min(minY, p.y);
+				maxX = std::max(maxX, p.x);
+				maxY = std::max(maxY, p.y);
+			}
+		}
+		out = Vec2{(minX + maxX) * 0.5, (minY + maxY) * 0.5};
 		return true;
 	}
 
-	std::vector<GridCommand> buildGridCommands(const Model& model)
+	bool resolveGridCenter(const Model& model, Vec2& out)
 	{
-		// 1. 通り芯の線分を集める（重複除去済み）。
-		const std::vector<RawLine> lines = collectLines(model);
+		return gridCenterOf(collectGridLines(model), out);
+	}
+
+	std::vector<GridCommand> buildGridCommands(Context& context)
+	{
+		// 1. 通り芯の線分（重複除去済み）と 2. 全端点の bbox 中心。いずれもコンテキストが
+		//    1 度だけ計算したものを共有する（床・垂木・野地板も同じ中心を使う）。
+		const std::vector<GridLine>& lines = context.gridLines();
 		if (lines.empty())
 			return {};
-
-		// 2. 全端点の bbox 中心（センタリングオフセット）。床・基礎・部材も同じ中心を使う。
-		const Vec2 center = boundingCenter(lines);
+		const Vec2 center = context.gridCenter();
 
 		// 3. センタリング＋ X/Y 判定＋クラス付与 → GridCommand。X/Y 判定（軸名・線の向き）は
 		//    平行移動で不変なので、センタリング前の生の線分に対して行ってよい。
 		std::vector<GridCommand> commands;
 		commands.reserve(lines.size());
-		for (const RawLine& line : lines)
+		for (const GridLine& line : lines)
 		{
 			GridCommand cmd;
 			cmd.label = line.label;
@@ -212,5 +189,11 @@ namespace HomeskzIfcImport::parse
 			commands.push_back(cmd);
 		}
 		return commands;
+	}
+
+	std::vector<GridCommand> buildGridCommands(const Model& model)
+	{
+		Context context(model);
+		return buildGridCommands(context);
 	}
 } // namespace HomeskzIfcImport::parse

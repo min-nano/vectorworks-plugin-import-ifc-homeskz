@@ -26,7 +26,7 @@ namespace HomeskzIfcImport::parse
 	// フェーズ外へ漏らさない）。1 要素の欠損で全体を止めず、Python 版の寛容さ
 	// （スキップ・フォールバック）を踏襲する。
 	//
-	// TODO(M6〜): 屋根面・屋根組（M6）以降の要素ごとの parse モジュールを呼び、Document を
+	// TODO(M7〜): 横架材（M7）以降の要素ごとの parse モジュールを呼び、Document を
 	// さらに肉付けする（ROADMAP.md）。
 	core::Document buildDocument(const std::string& ifcPath);
 } // namespace HomeskzIfcImport::parse

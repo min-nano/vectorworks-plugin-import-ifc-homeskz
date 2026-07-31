@@ -6,9 +6,9 @@
 //	この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の
 //	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Floor へ
-//	ディスパッチする。以降のマイルストーンで draw/Rafter … draw/Section を足していく
-//	（ROADMAP.md）。
+//	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Floor →
+//	draw/Rafter → draw/Roof へディスパッチする。以降のマイルストーンで draw/Member …
+//	draw/Section を足していく（ROADMAP.md）。
 //	実描画（高さ・傾き・スタイル・PIO の挙動）はローカルの VectorWorks で目視確認する。
 //
 

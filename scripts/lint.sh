@@ -5,7 +5,8 @@
 # pushing. The checks cover far more than the C/C++ sources:
 #
 #   * clang-format          — C/C++ formatting (src/ + tests/)
-#   * clang-tidy            — C/C++ static analysis (SDK-free updater logic)
+#   * clang-tidy            — C/C++ static analysis over the SDK-free code
+#                             (src/core/ + src/parse/ + the updater logic)
 #   * cmake-format          — CMakeLists.txt layout (.cmake-format.yaml)
 #   * cmake-lint            — bug-prone CMake patterns
 #   * actionlint            — GitHub workflow validity (+ shellcheck on inline
@@ -78,10 +79,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# clang-tidy — C/C++ static analysis over the SDK-free updater logic. Needs a
-# compile database describing how each translation unit is built.
+# clang-tidy — C/C++ static analysis over every SDK-free translation unit: the
+# updater logic (src/UpdaterFlow.cpp, which pulls in UpdaterParse.h /
+# UpdaterHost.h) and the 2-phase core/parse code (src/core/ + src/parse/). Needs
+# a compile database describing how each translation unit is built. draw/ needs
+# the SDK, so it is tidied in the SDK build (build.yml), not here.
+#
+# The file list is DERIVED, not hand-maintained, and MUST stay identical to the
+# one in .github/workflows/lint.yml: core/ and parse/ are SDK-free by definition
+# (CLAUDE.md「依存の向きは厳守する」), so every .cpp under them must be tidied.
+# A hardcoded list silently skipped a newly added module once, so glob instead.
 if have "$CLANG_TIDY" && have cmake; then
-	echo "==> clang-tidy (SDK-free updater logic)"
+	TIDY_FILES=(src/core/*.cpp src/parse/*.cpp src/UpdaterFlow.cpp)
+	echo "==> clang-tidy (${#TIDY_FILES[@]} SDK-free translation units)"
 	if cmake -S . -B build-lint \
 		-DCMAKE_BUILD_TYPE=Debug \
 		-DVW_BUILD_PLUGIN=OFF \
@@ -89,7 +99,7 @@ if have "$CLANG_TIDY" && have cmake; then
 		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null; then
 		TIDY_ARGS=(-p build-lint --warnings-as-errors='*')
 		[ "$FIX" -eq 1 ] && TIDY_ARGS+=(--fix --fix-errors)
-		"$CLANG_TIDY" "${TIDY_ARGS[@]}" src/UpdaterFlow.cpp
+		"$CLANG_TIDY" "${TIDY_ARGS[@]}" "${TIDY_FILES[@]}"
 		report "clang-tidy"
 	else
 		false
