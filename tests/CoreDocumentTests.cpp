@@ -269,6 +269,130 @@ TEST(validate_rejects_floor_with_zero_total_thickness)
 }
 
 // ---------------------------------------------------------------------------
+// 垂木・野地板の検証（ROADMAP.md M6）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 検証を通る垂木命令（1 本）。個々のテストはここから 1 か所だけ崩す。
+	core::RafterCommand validRafter()
+	{
+		core::RafterCommand rafter;
+		rafter.layer = "R-垂木";
+		rafter.drawClass = "04構造-02木造-05小屋組-05垂木";
+		rafter.width = 45.0;
+		rafter.height = 45.0;
+		rafter.start = core::Vec2{0.0, 0.0};
+		rafter.end = core::Vec2{0.0, 3000.0};
+		rafter.elevation = 6300.0;
+		rafter.endElevation = 7300.0;
+		rafter.overhang = 500.0;
+		rafter.embedment = 52.5;
+		rafter.label = "45×45@455";
+		return rafter;
+	}
+
+	// 検証を通る野地板命令（1 枚）。
+	core::RoofCommand validRoof()
+	{
+		core::RoofCommand roof;
+		roof.layer = "R-野地板";
+		roof.drawClass = "04構造-02木造-06耐力面材-03屋根";
+		roof.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{4000.0, 0.0}, core::Vec2{4000.0, 3000.0},
+						 core::Vec2{0.0, 3000.0}};
+		roof.axisStart = core::Vec2{0.0, 0.0};
+		roof.axisEnd = core::Vec2{4000.0, 0.0};
+		roof.upslope = core::Vec2{0.0, 3000.0};
+		roof.rise = 0.316;
+		roof.run = 0.949;
+		roof.thickness = 12.0;
+		roof.elevation = 6350.0;
+		return roof;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_rafter_and_roof)
+{
+	core::Document document;
+	document.rafters.push_back(validRafter());
+	document.roofs.push_back(validRoof());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_rafter_with_empty_layer)
+{
+	core::Document document;
+	core::RafterCommand rafter = validRafter();
+	rafter.layer = "";
+	document.rafters.push_back(rafter);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_rafter_with_empty_class)
+{
+	core::Document document;
+	core::RafterCommand rafter = validRafter();
+	rafter.drawClass = "";
+	document.rafters.push_back(rafter);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_rafter_with_nonpositive_section)
+{
+	// 断面（幅・せい）が 0 以下の垂木は描けない。
+	core::Document width;
+	core::RafterCommand thin = validRafter();
+	thin.width = 0.0;
+	width.rafters.push_back(thin);
+	CHECK(!core::validateDocument(width));
+
+	core::Document height;
+	core::RafterCommand flat = validRafter();
+	flat.height = -45.0;
+	height.rafters.push_back(flat);
+	CHECK(!core::validateDocument(height));
+}
+
+TEST(validate_rejects_degenerate_rafter)
+{
+	// 平面上で始点（支持点）と終点（棟側）が同じ垂木は向き・長さが決まらない。
+	core::Document document;
+	core::RafterCommand rafter = validRafter();
+	rafter.end = rafter.start;
+	document.rafters.push_back(rafter);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_roof_with_empty_layer)
+{
+	core::Document document;
+	core::RoofCommand roof = validRoof();
+	roof.layer = "";
+	document.roofs.push_back(roof);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_roof_with_too_few_boundary_points)
+{
+	// 3 点未満は面にならない（Python 版 _validate_roof と同じ関門）。
+	core::Document document;
+	core::RoofCommand roof = validRoof();
+	roof.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{4000.0, 0.0}};
+	document.roofs.push_back(roof);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_roof_with_nonpositive_thickness)
+{
+	// 厚み 0 の野地板は実体を持たない（厚みは描画側で ΔZ として与える）。
+	core::Document document;
+	core::RoofCommand roof = validRoof();
+	roof.thickness = 0.0;
+	document.roofs.push_back(roof);
+	CHECK(!core::validateDocument(document));
+}
+
+// ---------------------------------------------------------------------------
 // parse::buildDocument（読み込めないパスでは空の Document が返る）
 // ---------------------------------------------------------------------------
 

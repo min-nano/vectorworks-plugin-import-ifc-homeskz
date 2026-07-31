@@ -347,6 +347,29 @@ namespace HomeskzIfcImport::parse
 		return resolveExtrudedAreaSolid(model, solid, resolveObjectPlacement(model, element), out);
 	}
 
+	bool roofPlane(const Model& model, const Entity* element, RoofPlane& out)
+	{
+		WorldSolid solid;
+		if (!resolveElementWorldSolid(model, element, solid))
+			return false;
+
+		// 平面外形はプロファイル頂点をワールドへ写した底面ループ（origin + xAxis·u + yAxis·v）。
+		// 3 点未満（面にならない）屋根版は扱わない（Python 版と同じ関門）。
+		std::vector<Vec3> vertices = solid.base();
+		if (vertices.size() < 3)
+			return false;
+
+		// 法線は配置の局所 Z 軸。上向き（z 成分 ≥ 0）に揃える（平面式・勾配方向は符号反転に
+		// 対して不変。上向きに固定することで勾配計算の分母 nz を正にできる）。
+		Vec3 normal = solid.zAxis;
+		if (normal.z < 0.0)
+			normal = normal * -1.0;
+
+		out.vertices = std::move(vertices);
+		out.normal = normal;
+		return true;
+	}
+
 	void zTopAndThickness(const WorldSolid& solid, double& outTop, double& outThickness)
 	{
 		// 底面ループと天面ループの Z を集めて最大／振幅を採る（Python 版と同じ手順。

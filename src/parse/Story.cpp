@@ -7,6 +7,8 @@
 
 #include "parse/Story.h"
 #include "parse/Floor.h"
+#include "parse/Rafter.h"
+#include "parse/Roof.h"
 
 #include <algorithm>
 #include <cctype>
@@ -226,8 +228,8 @@ namespace HomeskzIfcImport::parse
 			cmd.suffix = prefix;
 			cmd.elevation = info.elevation;
 
-			// M3 の基本レベルのみ（屋根組・登り梁・span 柱は後続 M で追加。ヘッダ参照）。
-			// levels の並び順は希望するデザインレイヤのスタック順（上→下）。
+			// 基本レベル（M3）＋屋根組の垂木・野地板（M6）。登り梁・母屋・span 柱は後続 M で
+			// 追加する（ヘッダ参照）。levels の並び順は希望するデザインレイヤのスタック順（上→下）。
 			if (info.isTop)
 			{
 				// 最上階（屋根）は軒高（オフセット 0）。ロフト（小屋裏収納）の床がある
@@ -249,6 +251,32 @@ namespace HomeskzIfcImport::parse
 				cmd.levels.push_back(LevelCommand{kLevelFL, 0.0, prefix + "-" + kLevelFL});
 				cmd.levels.push_back(
 					LevelCommand{kLevelBeamTop, info.beamOffset, prefix + "-" + kLevelBeamTop});
+			}
+
+			// M6 屋根組: 屋根版（屋根面）を含む階に 垂木 → 野地板 レベル（"n-垂木" /
+			// "n-野地板" レイヤ）を足す。スタックは 横架材天端/軒高 ← （母屋）← 垂木 ←
+			// 野地板（上ほど上段）なので、横架材天端（最上階は軒高）レベルの**直前**へ
+			// 垂木・野地板の順に挿入する（後から挿入したものが 1 段上に来る）。高さはいずれも
+			// 横架材天端（最上階は軒高）に揃える（実描画の Z は屋根版由来の絶対値を垂木・
+			// 野地板の要素が持つため、このオフセットには依存しない）。
+			//
+			// ［Python 版との差異・意図的］Python 版は最上階（屋根）には屋根版の有無に関わらず
+			// 垂木・野地板レベルを持たせる（is_top or roof_flags[i]）。本移植は**屋根版がある階
+			// だけ**に絞る: 垂木・野地板の命令は屋根版からのみ生まれるので、屋根版の無い階に
+			// レベルを作ると空レイヤが残るだけになる（ロフトの FL レベルを床版の有無で絞るのと
+			// 同じ方針）。ホームズ君の出力では最上階は必ず主屋根の屋根版を含むため、実データでの
+			// 結果は Python 版と一致する。
+			if (storyHasRoofSlab(model, info.id))
+			{
+				// 横架材天端（最上階は軒高）レベルは常に末尾なので、その直前が挿入位置。
+				const auto tail = static_cast<std::ptrdiff_t>(cmd.levels.size()) - 1;
+				const double roofOffset = info.isTop ? 0.0 : info.beamOffset;
+				cmd.levels.insert(
+					cmd.levels.begin() + tail,
+					LevelCommand{kLevelTaruki, roofOffset, prefix + "-" + kLevelTaruki});
+				cmd.levels.insert(
+					cmd.levels.begin() + tail,
+					LevelCommand{kLevelNojiita, roofOffset, prefix + "-" + kLevelNojiita});
 			}
 			commands.push_back(std::move(cmd));
 		}

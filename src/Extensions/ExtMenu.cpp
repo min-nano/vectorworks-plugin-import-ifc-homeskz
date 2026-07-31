@@ -189,24 +189,39 @@ void CImportIfcMenu_EventSink::DoInterface()
 	// 2. Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
 	//    読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
 	const core::Document document = parse::buildDocument(ifcPath);
-	const std::size_t storyCount = document.stories.size();
-	const std::size_t gridCount = document.grids.size();
-	const std::size_t floorCount = document.floors.size();
 
-	// 3. Phase 2（SDK 依存）: 命令セットを検証してからストーリ・通り芯・床を描く。検証を
-	//    通らない・描く要素が無い場合は executeDocument が false / 無描画で返る。
-	const bool drawn = draw::executeDocument(document);
+	// 3. Phase 2（SDK 依存）: 命令セットを検証してからストーリ・通り芯・床・屋根組（垂木・
+	//    野地板）を描く。検証を通らなければ valid=false で何も描かない。
+	const draw::DrawCounts drawn = draw::executeDocument(document);
 
-	// 4. 結果をダイアログ表示。本文に検出したストーリ数・通り芯の本数・床の枚数、
+	// 4. 結果をダイアログ表示。本文には**実際に描けた数**を出し、命令はあるのに描けなかった
+	//    要素は「N 件中 0 件」の形で分かるようにする（配置先レイヤが無い・オブジェクトを
+	//    作れない等の描画側の問題を、ローカル確認で解析側と切り分けられるようにするため）。
 	//    advice 行にファイルパス。false = 最小アラートでなくモーダルにして本文と advice を
 	//    両方見せる（Updater と同じ作法）。TXString は UTF-8 の const char* から暗黙変換される。
+	//
+	// 「描けた数 / 命令数」を "3"（一致）または "0/12"（不一致）の形に整える小ヘルパー。
+	const auto formatCount = [](std::size_t placed, std::size_t commands)
+	{
+		if (placed == commands)
+			return std::to_string(placed);
+		return std::to_string(placed) + "/" + std::to_string(commands);
+	};
+
+	const std::size_t commandCount = document.stories.size() + document.grids.size() +
+									 document.floors.size() + document.rafters.size() +
+									 document.roofs.size();
 	std::string body;
-	if (!drawn || (storyCount == 0 && gridCount == 0 && floorCount == 0))
-		body = "ストーリ・通り芯・床が見つかりませんでした。";
+	if (!drawn.valid)
+		body = "命令セットの検証に通らなかったため、何も描きませんでした。";
+	else if (commandCount == 0)
+		body = "ストーリ・通り芯・床・屋根組が見つかりませんでした。";
 	else
-		body = "ストーリ " + std::to_string(storyCount) + " 層・通り芯 " +
-			   std::to_string(gridCount) + " 本・床 " + std::to_string(floorCount) +
-			   " 枚を描きました。";
+		body = "ストーリ " + formatCount(drawn.stories, document.stories.size()) + " 層・通り芯 " +
+			   formatCount(drawn.grids, document.grids.size()) + " 本・床 " +
+			   formatCount(drawn.floors, document.floors.size()) + " 枚・垂木 " +
+			   formatCount(drawn.rafters, document.rafters.size()) + " 本・野地板 " +
+			   formatCount(drawn.roofs, document.roofs.size()) + " 枚を描きました。";
 	gSDK->AlertInform(body.c_str(), ifcPath.c_str(),
 					  false /* not a minor alert: show a modal dialog */);
 }

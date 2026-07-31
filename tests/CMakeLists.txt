@@ -165,6 +165,27 @@ target_link_libraries(ParseFloorTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseFloorTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Rafter (垂木) parsing (src/parse/Rafter): roof slabs (IfcSlab "屋根版") -> per-storey
+# 垂木-layer rafter commands derived from the roof face — sweep spacing (ends inset by half
+# the rafter width, interior <= 455mm), scan-line clipping of non-convex faces, the support
+# point where the roof face crosses the 横架材天端 level, overhang/embedment and the spec
+# label. Exercised on synthetic planes/STEP snippets and the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseRafterTests ParseRafterTests.cpp)
+target_link_libraries(ParseRafterTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseRafterTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
+# Roof sheathing (野地板) parsing (src/parse/Roof): one roof command per roof-slab face —
+# eaves axis on the lowest edge, upslope toward the ridge, slope as rise/run from the face
+# normal, the 12mm fixed thickness and the eaves Z lifted by the rafter depth. Exercised on
+# synthetic planes/STEP snippets and the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseRoofTests ParseRoofTests.cpp)
+target_link_libraries(ParseRoofTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseRoofTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
 # types and formats them into the dialog text the import command shows. SDK-free —
 # the counting + formatting is tested here; only the file picker and the alert
