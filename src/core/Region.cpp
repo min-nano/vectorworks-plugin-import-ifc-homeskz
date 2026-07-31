@@ -8,6 +8,7 @@
 #include "core/Region.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <map>
@@ -87,6 +88,16 @@ namespace HomeskzIfcImport::core
 			}
 		};
 
+		// セル at の 4 近傍。格子の外へ出る向きは at 自身を返す（＝「隣が無い」印。
+		// 呼び出し側は next == at を隣なしとして読み飛ばす）。
+		std::array<std::size_t, 4> neighboursOf(const Grid& grid, std::size_t at)
+		{
+			const std::size_t ix = at % grid.nx;
+			const std::size_t iy = at / grid.nx;
+			return {ix > 0 ? at - 1 : at, ix + 1 < grid.nx ? at + 1 : at,
+					iy > 0 ? at - grid.nx : at, iy + 1 < grid.ny ? at + grid.nx : at};
+		}
+
 		// 部品群からセル格子を作り、中心が部品内にあるセルを実体にする。
 		Grid buildGrid(const std::vector<std::vector<Vec2>>& parts)
 		{
@@ -162,12 +173,7 @@ namespace HomeskzIfcImport::core
 			{
 				const std::size_t at = stack.back();
 				stack.pop_back();
-				const std::size_t ix = at % grid.nx;
-				const std::size_t iy = at / grid.nx;
-				const std::size_t neighbours[4] = {
-					ix > 0 ? at - 1 : at, ix + 1 < grid.nx ? at + 1 : at,
-					iy > 0 ? at - grid.nx : at, iy + 1 < grid.ny ? at + grid.nx : at};
-				for (const std::size_t next : neighbours)
+				for (const std::size_t next : neighboursOf(grid, at))
 				{
 					if (next == at || grid.solid[next] != 0 || outside[next] != 0)
 						continue;
@@ -236,12 +242,7 @@ namespace HomeskzIfcImport::core
 				{
 					const std::size_t at = stack.back();
 					stack.pop_back();
-					const std::size_t ix = at % grid.nx;
-					const std::size_t iy = at / grid.nx;
-					const std::size_t neighbours[4] = {
-						ix > 0 ? at - 1 : at, ix + 1 < grid.nx ? at + 1 : at,
-						iy > 0 ? at - grid.nx : at, iy + 1 < grid.ny ? at + grid.nx : at};
-					for (const std::size_t next : neighbours)
+					for (const std::size_t next : neighboursOf(grid, at))
 					{
 						if (next == at || grid.solid[next] == 0 || labels[next] != 0)
 							continue;
