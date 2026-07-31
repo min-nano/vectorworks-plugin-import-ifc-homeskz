@@ -158,7 +158,9 @@ namespace HomeskzIfcImport::draw
 		TXString ResolveParam(const VWParametricObj& pio, const char* universalName,
 							  const char* localizedName)
 		{
-			const TXString universal(universalName);
+			// const にしない: 戻り値として返すので、const だと move されず余計なコピーになる
+			// （clang-tidy performance-no-automatic-move）。
+			TXString universal(universalName);
 			if (pio.GetParamIndex(universal) != static_cast<size_t>(-1))
 				return universal;
 
