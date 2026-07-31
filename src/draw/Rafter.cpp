@@ -38,6 +38,7 @@
 //
 
 #include "PluginPrefix.h"
+#include "draw/LayerElevation.h"
 #include "draw/Rafter.h"
 #include "core/Document.h"
 
@@ -192,21 +193,6 @@ namespace HomeskzIfcImport::draw
 			pio.SetParamAsString(param, TXString(fallbackKey));
 		}
 
-		// デザインレイヤの基準高さ（レイヤ平面の Z）。オブジェクトの Z はレイヤ座標なので、
-		// 絶対 Z へ置きたい命令はここを引いてレイヤ相対に直す必要がある。
-		// ovLayerHeightInCurrUnits は「現在の単位でのレイヤの基準高さ」（Kernel/API/
-		// ObjectVariables.h）。本プラグインが扱う図面は mm 単位なので WorldCoord と一致する。
-		double LayerElevation(MCObjectHandle layer)
-		{
-			TVariableBlock value;
-			if (!gSDK->GetObjectVariable(layer, ovLayerHeightInCurrUnits, value))
-				return 0.0;
-			double elevation = 0.0;
-			if (!value.GetReal64(elevation))
-				return 0.0;
-			return elevation;
-		}
-
 		// 【一時的な診断・M6 のローカル確認用。値が揃ったらこのブロックごと削除する】
 		//
 		// 1 回目の診断（全パラメータの universal 名とローカライズ名の一覧）で、勾配・構造用途・
@@ -216,8 +202,7 @@ namespace HomeskzIfcImport::draw
 		// を確定させるために内部パラメータ（ローカライズ名が __NNA_DO_NOT_CHANGE のもの）を
 		// 除いて出す（1 回目は全件出したためダイアログが画面下端で切れた）。
 		void ShowPlacementDiagnostics(const VWParametricObj& pio, MCObjectHandle object,
-									  const core::RafterCommand& rafter, double layerElevation,
-									  double dz)
+									  const core::RafterCommand& rafter, double layerZ, double dz)
 		{
 			VWTransformMatrix readBack;
 			VWParametricObj(object).GetObjectMatrix(readBack);
@@ -227,7 +212,7 @@ namespace HomeskzIfcImport::draw
 			std::snprintf(buffer.data(), buffer.size(),
 						  "高さ: 命令 %.1f - レイヤ %.1f = 移動量 %.1f / 読み戻しオフセット "
 						  "(%.1f, %.1f, %.1f)",
-						  rafter.elevation, layerElevation, dz, offset.x, offset.y, offset.z);
+						  rafter.elevation, layerZ, dz, offset.x, offset.y, offset.z);
 			TXString body(buffer.data());
 
 			// 設定した値の読み戻し（入っていないパラメータがひと目で分かる）。
@@ -267,7 +252,7 @@ namespace HomeskzIfcImport::draw
 		// 垂木 1 本を軸組ツールで描く。PIO を作れなければ平面投影の直線でフォールバックする。
 		// 何か 1 つでも配置できたら true。diagnose は上記の一時診断を出すかどうか
 		// （最初の 1 本だけ true にして呼ぶ）。
-		bool DrawOne(const core::RafterCommand& rafter, double layerElevation, bool diagnose)
+		bool DrawOne(const core::RafterCommand& rafter, double layerZ, bool diagnose)
 		{
 			const double dx = rafter.end.x - rafter.start.x;
 			const double dy = rafter.end.y - rafter.start.y;
@@ -343,11 +328,11 @@ namespace HomeskzIfcImport::draw
 			// からレイヤの基準高さを引いてレイヤ相対に直してから 3D 移動する。ResetObject の
 			// **後**に動かす（リセットが形状を作り直すため、先に動かすと戻される）。
 			// Z の計算はこの 1 か所に集約してある（ローカルで高さがずれたらここだけ直せばよい）。
-			const double dz = rafter.elevation - layerElevation;
+			const double dz = rafter.elevation - layerZ;
 			gSDK->MoveObject3D(object, 0.0, 0.0, dz);
 
 			if (diagnose)
-				ShowPlacementDiagnostics(pio, object, rafter, layerElevation, dz);
+				ShowPlacementDiagnostics(pio, object, rafter, layerZ, dz);
 			return true;
 		}
 	} // namespace
@@ -371,7 +356,7 @@ namespace HomeskzIfcImport::draw
 
 			// 一時診断は最初に描けた 1 本だけで出す（垂木の本数ぶんダイアログが開かないように）。
 			const bool diagnose = drawn == 0;
-			if (DrawOne(rafter, LayerElevation(layer), diagnose))
+			if (DrawOne(rafter, layerElevation(layer), diagnose))
 				++drawn;
 		}
 		return drawn;
