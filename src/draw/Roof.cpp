@@ -11,7 +11,8 @@
 //	退避・復元、外形ポリゴンをテンプレートに使う、確定後の後付け操作でクラッシュしないよう
 //	細心の順序を守る…といった作法が必要だった。#113）。ISDK にその一連の呼び出しは無く、
 //	代わりに**屋根面オブジェクトを外形・高さ・勾配から直接組み立てられる**（VWFC の
-//	VWRoofFaceObj。外形ポリゴン＋軸の Z＋upslope 方向＋rise/run を渡し、厚みは SetThickness）。
+//	VWRoofFaceObj。外形ポリゴンから生成し、屋根軸・棟側・勾配・軸の Z はオブジェクト変数で
+//	与え、厚みは SetThickness）。
 //	作図状態に依存せず、確定後の後付け操作も要らないので、Python 版が #113 で踏んだ落とし穴
 //	（テンプレートのポリゴンを屋根と誤認する／未定義動作でのクラッシュ）が構造的に起きない。
 //	**仕様の意図（屋根版 1 面＝単勾配の野地板 1 枚）は同じで、実現手段を SDK の作法へ寄せた**
@@ -19,18 +20,37 @@
 //
 //	描画手順:
 //	  1. 命令の平面外形を閉じた 2D ポリゴンにする（屋根面の水平投影）。
-//	  2. 屋根面オブジェクトを「外形・軸の Z（レイヤ相対）・upslope 方向・勾配（rise/run）」で
-//	     生成し、厚み（野地板 12mm）を設定する。upslope 方向は軒（屋根軸）から棟へ向かう
-//	     単位方向で、命令の axisStart → upslope から求める。
-//	  3. クラス（耐力面材-屋根）を割り当て、描画属性をすべてクラス属性に従わせて再計算する。
+//	  2. 屋根面オブジェクトを外形から生成する。
+//	  3. **屋根面を決めるオブジェクト変数を実測値で上書きする**（下記「屋根軸は
+//	     オブジェクト変数で与える」）。屋根軸（ovSlabRoofPt1/Pt2）・棟側の点
+//	     （ovSlabRoofUpslopePt）・勾配（ovSlabRoofRise/Run）・軸の Z（ovSlabHeight）。
+//	  4. ハンドルから屋根面オブジェクトを作り直して形状を再構築し（VWRoofFaceObj の
+//	     ハンドル版コンストラクタが InitGeometry を呼ぶ）、厚み（野地板 12mm）を設定する。
+//	  5. クラス（耐力面材-屋根）を割り当て、描画属性をすべてクラス属性に従わせて再計算する。
 //	屋根面を作れない場合は外形ポリゴンにフォールバックする（1 枚の失敗で全体を止めない）。
 //
-//	【高さの与え方（ローカル確認項目）】屋根面には命令の elevation（軒の絶対 Z）をそのまま渡す。
-//	Python 版は BeginRoof 経由では「レイヤ基準で扱わないとレイヤ高さぶん二重に持ち上がる」ことを
-//	確認している（#113）が、それは SetZVals ＋ Move3D の手続きに固有の挙動で、屋根面オブジェクトを
-//	直接組み立てる本実装では当てはまらない可能性がある。VW 実機で高さがずれていたら、ここで
-//	レイヤの高さを引く（＝レイヤ相対へ直す）ことで直せるよう、Z の計算は 1 か所（DrawOne の
-//	VWRoofFaceObj 生成）に集約してある。
+//	【屋根軸はオブジェクト変数で与える（重要）】VWFC の
+//	`VWRoofFaceObj(type, poly, z, upSlopeDir, rise, run)` は一見これだけで屋根面を組めそうだが、
+//	SDK のソース（SDKLib/Source/VWSDK/VWFC/VWObjects/VWRoofFaceObj.cpp）を読むと
+//
+//	  * 引数 z を**一度も使っていない**（軸の Z は 0 のまま）
+//	  * 屋根軸を `±upSlopeDir.Perp() * dim`（dim＝外形バウンズの短辺の半分）＝**原点を通る線**
+//	    として設定する。外形の位置を見ておらず、外形が原点から離れているほど軸は外形の外に出る
+//
+//	という実装で、任意の位置・高さの片流れ面を作る用途には使えない（ローカル確認で野地板が
+//	1 枚も現れなかった原因）。屋根面の形状を実際に決めているのは InitGeometry が読む
+//	オブジェクト変数（ovSlabRoofPt1/Pt2/UpslopePt/Rise/Run・ovSlabHeight・ovSlabThickness）
+//	なので、生成後にそれらを命令の値で上書きし、ハンドル版コンストラクタで InitGeometry を
+//	もう一度走らせて形状を作り直す。**ovSlabRoofUpslopePt は「方向」ではなく「棟側にある点」**
+//	（ObjectVariables.h のコメント "a point on the upslope side of the roof"）なので、命令の
+//	upslope（軸から棟側へ進んだ点）をそのまま渡す。
+//
+//	【高さの与え方（ローカル確認項目）】屋根軸の Z（ovSlabHeight）には命令の elevation
+//	（軒の絶対 Z）をそのまま渡す。Python 版は BeginRoof 経由では「レイヤ基準で扱わないと
+//	レイヤ高さぶん二重に持ち上がる」ことを確認している（#113）が、それは SetZVals ＋ Move3D の
+//	手続きに固有の挙動で、屋根面オブジェクトを直接組み立てる本実装では当てはまらない可能性が
+//	ある。VW 実機で高さがずれていたら、ここでレイヤの高さを引く（＝レイヤ相対へ直す）ことで
+//	直せるよう、Z の計算は 1 か所（DrawOne の ovSlabHeight 設定）に集約してある。
 //
 //	実描画（高さ・勾配・厚みの最終挙動、厚みが軸のどちら側へ伸びるか）はローカルの
 //	VectorWorks で目視確認する（ROADMAP.md M6「ローカル確認」）。
@@ -57,11 +77,22 @@ namespace HomeskzIfcImport::draw
 	{
 		// 勾配（rise/run）を渡すときの run の基準値（mm）。命令の rise/run は屋根面の**単位
 		// 法線成分**（rise=水平成分 dh・run=鉛直成分 nz）で、比はそのまま勾配だが、値そのものは
-		// 1 mm 未満の極小値になる。屋根面は rise/run を**長さ**として保持するため、極小値のまま
-		// 渡すと面が成立しないおそれがある（ローカル確認で野地板が 1 枚も描かれなかった）。
-		// Python 版が VW 実機で通していた VectorScript エクスポートの規約に合わせ、比を保った
-		// まま run＝25.4（1 インチ）へ正規化して渡す（例: 10 度 → rise≈4.479 / run=25.4）。
+		// 1 mm 未満の極小値になる。屋根面は rise/run を**長さ（WorldCoord）**として保持するため、
+		// 極小値のまま渡すと勾配計算が丸めに埋もれるおそれがある。Python 版が VW 実機で通して
+		// いた VectorScript エクスポートの規約に合わせ、比を保ったまま run＝25.4（1 インチ）へ
+		// 正規化して渡す（例: 10 度 → rise≈4.479 / run=25.4）。
 		constexpr double kSlopeRunUnit = 25.4;
+
+		// オブジェクト変数へ 2D 点／実数を書き込む小さなヘルパー（呼び出しの定型を 1 か所に）。
+		void SetPointVariable(MCObjectHandle object, short variable, const core::Vec2& point)
+		{
+			gSDK->SetObjectVariable(object, variable, TVariableBlock(WorldPt(point.x, point.y)));
+		}
+
+		void SetRealVariable(MCObjectHandle object, short variable, double value)
+		{
+			gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
+		}
 
 		// オブジェクトのクラスを名前で設定する（draw/Grid.cpp・draw/Floor.cpp と同じヘルパー）。
 		void SetClassByName(MCObjectHandle object, const std::string& className)
@@ -107,45 +138,59 @@ namespace HomeskzIfcImport::draw
 			SetAllAttributesByClass(handle);
 		}
 
-		// 野地板 1 枚を屋根面オブジェクトとして描く。作れなければ外形ポリゴンへフォールバック
-		// する。何か 1 つでも配置できたら true。
+		// 野地板 1 枚を屋根面オブジェクトとして描く。**屋根面として作れたときだけ true** を返し、
+		// 外形ポリゴンへフォールバックした場合は false（完了ダイアログの「描けた数」が
+		// 「6/6」ではなく「0/6」になるので、ローカル確認で屋根面生成の失敗が一目で分かる）。
 		bool DrawOne(const core::RoofCommand& roof)
 		{
 			if (roof.run <= 0.0 || roof.boundary.size() < 3)
 			{
 				// 勾配が定まらない（鉛直面等の退化した）命令は屋根面を作らずフォールバック。
 				DrawFallbackPolygon(roof);
-				return true;
+				return false;
 			}
 
-			// 軒（屋根軸）から棟へ向かう単位方向。命令は軸始点と upslope 定義点で向きを表す。
-			const double upX = roof.upslope.x - roof.axisStart.x;
-			const double upY = roof.upslope.y - roof.axisStart.y;
-			const double upLength = std::hypot(upX, upY);
-			if (upLength <= 0.0)
+			// 軒（屋根軸）が退化していないこと。軸の向きが無いと屋根面が定まらない。
+			if (std::hypot(roof.axisEnd.x - roof.axisStart.x, roof.axisEnd.y - roof.axisStart.y) <=
+					0.0 ||
+				std::hypot(roof.upslope.x - roof.axisStart.x, roof.upslope.y - roof.axisStart.y) <=
+					0.0)
 			{
 				DrawFallbackPolygon(roof);
-				return true;
+				return false;
 			}
-			const VWPoint2D upSlopeDir(upX / upLength, upY / upLength);
 
-			// 屋根面: 水平投影外形（閉じたポリゴン）＋軒の天端 Z＋upslope 方向＋勾配。
-			// 勾配は比を保ったまま run＝25.4 基準へ正規化する（kSlopeRunUnit 参照）。
-			const double rise = roof.rise * kSlopeRunUnit / roof.run;
+			// 水平投影外形（閉じたポリゴン）から屋根面オブジェクトを作る。位置・高さ・勾配は
+			// このコンストラクタでは与えられない（冒頭「屋根軸はオブジェクト変数で与える」）ので、
+			// ここでは外形だけを渡す。
 			const VWPolygon2D outline(BoundaryPoints(roof.boundary), true);
-			VWRoofFaceObj face(kRoofFaceType_Roof, outline, roof.elevation, upSlopeDir, rise,
-							   kSlopeRunUnit);
+			VWRoofFaceObj face(kRoofFaceType_Roof, outline);
 			const MCObjectHandle handle = face.GetThisObject();
 			// 屋根面として成立していなければ外形ポリゴンへフォールバックする（nil だけでなく
 			// 種別も確かめる。屋根面でないものに屋根専用の設定を続けない）。
 			if (handle == nil || !VWRoofFaceObj::IsRoofFaceObjectN(handle))
 			{
 				DrawFallbackPolygon(roof);
-				return true;
+				return false;
 			}
 
+			// 屋根面の形状を決めるオブジェクト変数を命令の値で上書きする。
+			//   * 屋根軸（軒に沿う線）… 命令の軸始点・終点。
+			//   * 棟側の点 … 命令の upslope（**方向ではなく点**）。
+			//   * 勾配 … 比を保ったまま run＝25.4 基準へ正規化する（kSlopeRunUnit 参照）。
+			//   * 軸の Z … 命令の elevation（冒頭「高さの与え方」）。
+			SetPointVariable(handle, ovSlabRoofPt1, roof.axisStart);
+			SetPointVariable(handle, ovSlabRoofPt2, roof.axisEnd);
+			SetPointVariable(handle, ovSlabRoofUpslopePt, roof.upslope);
+			SetRealVariable(handle, ovSlabRoofRise, roof.rise * kSlopeRunUnit / roof.run);
+			SetRealVariable(handle, ovSlabRoofRun, kSlopeRunUnit);
+			SetRealVariable(handle, ovSlabHeight, roof.elevation);
+
+			// 上書きした変数から形状を作り直す。ハンドル版コンストラクタが InitGeometry を
+			// 呼ぶので、これが「変数 → 屋根面の 3D 形状」の再構築にあたる。
+			VWRoofFaceObj placed(handle);
 			// 厚み（野地板 12mm 固定）。屋根面は厚みを自分で持つ（スラブのような構成層ではない）。
-			face.SetThickness(roof.thickness);
+			placed.SetThickness(roof.thickness);
 
 			SetClassByName(handle, roof.drawClass);
 			SetAllAttributesByClass(handle);

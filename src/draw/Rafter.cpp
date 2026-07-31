@@ -47,8 +47,10 @@
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <numbers>
 #include <string>
 
@@ -119,6 +121,15 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetOpacityByClass(object);
 		}
 
+		// 角度を PIO の角度パラメータへ渡す文字列にする（度記号付き。Python 版 f'{pitch}°'）。
+		// "%g" で余分な 0 を落とす。
+		TXString AngleText(double degrees)
+		{
+			std::array<char, 32> buffer{};
+			std::snprintf(buffer.data(), buffer.size(), "%g°", degrees);
+			return {buffer.data()};
+		}
+
 		// 垂木 1 本を軸組ツールで描く。PIO を作れなければ平面投影の直線でフォールバックする。
 		// 何か 1 つでも配置できたら true。
 		bool DrawOne(const core::RafterCommand& rafter)
@@ -158,24 +169,28 @@ namespace HomeskzIfcImport::draw
 			SetClassByName(object, rafter.drawClass);
 			SetAllAttributesByClass(object);
 
-			// パラメータは**型ごとのセッタで渡す**。文字列セッタ（SetParamString）は文字列
-			// パラメータ専用で、寸法・角度のような数値パラメータには効かない（ローカル確認で
-			// 幅 100・せい 300・長さ 254＝すべて PIO の既定値のまま描かれ、文字列で渡した
-			// type だけが反映されていた）。寸法・角度は SetParamReal で渡す。
+			// パラメータの渡し方はローカル確認で 2 段階に絞り込んだ:
+			//   * 寸法・長さ（幅／せい／LineLength／軒の出／差し込み）は **SetParamReal**。
+			//     文字列で渡していたときは既定値（幅 100・せい 300・長さ 254）のままだった。
+			//   * ポップアップ・角度（勾配／構造用途／2D 表示／垂直基準／材質／種別）は
+			//     **SetParamAsString**。SetParamString は「文字列型のパラメータ」専用で、
+			//     ポップアップや角度には効かない（構造用途が既定の "梁" のまま・勾配が 0° の
+			//     ままだった）。SetParamAsString はパラメータの型に応じて文字列を解釈するので、
+			//     Python 版が SetRField に文字列を渡していたのと同じ意味になる。
 			VWParametricObj pio(object);
-			// 文字列（ポップアップ・テキスト）のパラメータ。
-			pio.SetParamString(kFieldType, kMemberTypeRafter);
+			pio.SetParamAsString(kFieldType, kMemberTypeRafter);
 			// 支持点（下端基準）から棟側へ立ち上がる。
-			pio.SetParamString(kFieldVerticalReference, kVerticalReferenceBottom);
-			pio.SetParamString(kField2DDisplay, k2DDisplayWidth);
-			pio.SetParamString(kFieldLabel, TXString(rafter.label.c_str()));
-			pio.SetParamString(kFieldStructuralUse, kStructuralUseRafter);
-			pio.SetParamString(kFieldMaterial, kMaterialWood);
-			// 数値（寸法・長さ・角度）のパラメータ。長さは文書単位（mm）、角度は度。
+			pio.SetParamAsString(kFieldVerticalReference, kVerticalReferenceBottom);
+			pio.SetParamAsString(kField2DDisplay, k2DDisplayWidth);
+			pio.SetParamAsString(kFieldLabel, TXString(rafter.label.c_str()));
+			pio.SetParamAsString(kFieldStructuralUse, kStructuralUseRafter);
+			pio.SetParamAsString(kFieldMaterial, kMaterialWood);
+			// 勾配は角度なので度記号付きの文字列で渡す（Python 版 f'{pitch}°' と同じ）。
+			pio.SetParamAsString(kFieldPitch, AngleText(pitch));
+			// 寸法・長さ（文書単位＝mm）。
 			pio.SetParamReal(kFieldWidth, rafter.width);
 			pio.SetParamReal(kFieldHeight, rafter.height);
 			pio.SetParamReal(kFieldLineLength, run);
-			pio.SetParamReal(kFieldPitch, pitch);
 			pio.SetParamReal(kFieldOverhang, rafter.overhang);
 			pio.SetParamReal(kFieldEmbedment, rafter.embedment);
 			gSDK->ResetObject(object);
