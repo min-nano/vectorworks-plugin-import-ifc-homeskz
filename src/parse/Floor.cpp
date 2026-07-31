@@ -10,10 +10,13 @@
 #include "parse/IfcGeometry.h"
 #include "parse/Story.h"
 #include "parse/StructuralClass.h"
+#include "core/Region.h"
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::parse
@@ -58,6 +61,53 @@ namespace HomeskzIfcImport::parse
 									   const Entity* element = model.entity(elementId);
 									   return element != nullptr && isFloorSlab(*element);
 								   });
+	}
+
+	std::vector<LoftFloorRegion> loftFloorRegions(const Model& model, int storeyId)
+	{
+		// 屋根階の床梁（床大梁・床小梁・甲乙梁）の平面外形を集める。種別は IFC Name の
+		// 記録だけで判定する（resolveMemberClass の高さ推定は使わない。屋根階の無名部材
+		// ＝火打・隅木谷木まで床梁に化けると、床でない領域まで囲ってしまうため）。
+		std::vector<std::vector<Vec2>> parts;
+		double beamTop = 0.0;
+		bool hasBeamTop = false;
+		for (const int elementId : collectStoryElements(model, storeyId))
+		{
+			const Entity* element = model.entity(elementId);
+			if (element == nullptr)
+				continue;
+			if (element->type != "IFCBEAM" && element->type != "IFCMEMBER")
+				continue;
+			const std::optional<std::string> memberClass =
+				memberClassFromName(element->attribute(kNameAttr).text);
+			if (!memberClass.has_value() || *memberClass != CLASS_YUKABARI)
+				continue;
+
+			WorldSolid solid;
+			if (!resolveElementWorldSolid(model, element, solid))
+				continue; // 押し出しを解決できない床梁はスキップ
+
+			// 床下地はこれらの梁の天端に載る。天端は最大値を採るので、部材の列挙順に
+			// 依存しない（梁せいが違っても最も高い天端が床を受ける）。
+			double topLocal = 0.0;
+			double thicknessLocal = 0.0;
+			zTopAndThickness(solid, topLocal, thicknessLocal);
+			if (!hasBeamTop || topLocal > beamTop)
+				beamTop = topLocal;
+			hasBeamTop = true;
+
+			parts.push_back(footprint(solid));
+		}
+
+		std::vector<LoftFloorRegion> regions;
+		for (std::vector<Vec2>& outline : core::filledUnionOutlines(parts))
+			regions.push_back(LoftFloorRegion{std::move(outline), beamTop});
+		return regions;
+	}
+
+	bool storyHasLoftFloor(const Model& model, int storeyId)
+	{
+		return storyHasFloorSlab(model, storeyId) || !loftFloorRegions(model, storeyId).empty();
 	}
 
 	std::string floorSlabStyleName(std::size_t index, bool isTop)
@@ -115,38 +165,15 @@ namespace HomeskzIfcImport::parse
 			// スラブスタイルは階ごとに 1 つ（階により構成が異なることが多いため）。
 			const std::string styleName = floorSlabStyleName(i, story.isTop);
 
-			for (const int elementId : collectStoryElements(model, story.id))
+			// 床 1 枚の命令を組み立てる。boundary は IFC の生座標（ここで通り芯センタリング
+			// を掛ける）、levelDelta は基準レベル（一般階＝FL／屋根階＝軒高）からの高低差。
+			const auto makeCommand = [&](std::vector<Vec2> boundary, double levelDelta)
 			{
-				const Entity* element = model.entity(elementId);
-				if (element == nullptr || !isFloorSlab(*element))
-					continue;
-
-				WorldSolid solid;
-				if (!resolveElementWorldSolid(model, element, solid))
-					continue; // 押し出しを解決できない床版はスキップ
-
-				// 外形は必ず 3 点以上になる（resolveExtrudedAreaSolid が成功した時点で
-				// プロファイルは非空、かつ resolveProfile は矩形＝4 点・任意断面＝3 点以上しか
-				// 返さない。水平押し出しの掃引矩形も 4 点）。validateDocument の 3 点以上の
-				// 関門と整合する。
-				std::vector<Vec2> boundary = footprint(solid);
 				for (Vec2& p : boundary)
 				{
 					p.x -= center.x;
 					p.y -= center.y;
 				}
-
-				// IFC の床位置を尊重する: 床版ソリッドの最下端（ストーリ高さ ＋ ローカル
-				// 最下端 Z）が床を受ける位置で、横架材天端（屋根階は軒高）からの高低差が
-				// 段差＝スキップフロアになる。命令が持つ高さは基準面（一般階＝床仕上げ
-				// 上端、屋根階＝床下地下端）なので、その高低差を基準レベルへ足す
-				// （段差が無ければ一般階は FL ちょうど、屋根階は軒高ちょうど）。
-				double topLocal = 0.0;
-				double thicknessLocal = 0.0;
-				zTopAndThickness(solid, topLocal, thicknessLocal);
-				const double bottomAbs = story.elevation + (topLocal - thicknessLocal);
-				const double levelDelta = bottomAbs - beamTopAbs;
-
 				FloorCommand cmd;
 				cmd.layer = layer;
 				cmd.drawClass = CLASS_FLOOR;
@@ -157,7 +184,45 @@ namespace HomeskzIfcImport::parse
 				cmd.datum = datum;
 				cmd.elevation = datumBaseAbs + levelDelta;
 				cmd.bound = StoryBoundCommand{0, boundLevel, levelDelta};
-				commands.push_back(std::move(cmd));
+				return cmd;
+			};
+
+			const std::size_t before = commands.size();
+			for (const int elementId : collectStoryElements(model, story.id))
+			{
+				const Entity* element = model.entity(elementId);
+				if (element == nullptr || !isFloorSlab(*element))
+					continue;
+
+				WorldSolid solid;
+				if (!resolveElementWorldSolid(model, element, solid))
+					continue; // 押し出しを解決できない床版はスキップ
+
+				// IFC の床位置を尊重する: 床版ソリッドの最下端（ストーリ高さ ＋ ローカル
+				// 最下端 Z）が床を受ける位置で、横架材天端（屋根階は軒高）からの高低差が
+				// 段差＝スキップフロアになる。命令が持つ高さは基準面（一般階＝床仕上げ
+				// 上端、屋根階＝床下地下端）なので、その高低差を基準レベルへ足す
+				// （段差が無ければ一般階は FL ちょうど、屋根階は軒高ちょうど）。
+				double topLocal = 0.0;
+				double thicknessLocal = 0.0;
+				zTopAndThickness(solid, topLocal, thicknessLocal);
+				const double bottomAbs = story.elevation + (topLocal - thicknessLocal);
+
+				// 外形は必ず 3 点以上になる（resolveExtrudedAreaSolid が成功した時点で
+				// プロファイルは非空、かつ resolveProfile は矩形＝4 点・任意断面＝3 点以上しか
+				// 返さない。水平押し出しの掃引矩形も 4 点）。validateDocument の 3 点以上の
+				// 関門と整合する。
+				commands.push_back(makeCommand(footprint(solid), bottomAbs - beamTopAbs));
+			}
+
+			// 屋根階に床版が 1 枚も無いときだけ、床梁が囲む領域をロフト床として補う
+			// （ホームズ君はロフトの床版を出力しない。ヘッダ「ロフトの外形は床梁から
+			// 合成する」参照）。床版があるならそちらが正で、合成は行わない。
+			if (story.isTop && commands.size() == before)
+			{
+				for (LoftFloorRegion& region : loftFloorRegions(model, story.id))
+					commands.push_back(
+						makeCommand(std::move(region.boundary), region.beamTopOffset));
 			}
 		}
 		return commands;

@@ -23,7 +23,13 @@
 //	    「軒高 + 36mm」と仮定し（IFC に無いため）、スラブ構成は 床仕上げ 12 ＋ 床下地 24。
 //	    高さ基準は一般階が床仕上げ上端（FL レベル）、ロフトは床下地下端（軒高レベル＝
 //	    横架材天端。ロフトの FL は仮定値なので確かな構造面を基準にする）。屋根階の FL
-//	    レベル／レイヤ（"R-FL"）は、床版がある場合に限り parse/Story が作る。
+//	    レベル／レイヤ（"R-FL"）は、ロフトの床があるときに限り parse/Story が作る。
+//	  * **ロフトの外形は床梁から合成する**。ホームズ君は小屋伏図に床梁（床大梁・床小梁）を
+//	    出力する一方、ロフトの**床版は出力しない**（実データ 6 件すべてで屋根階に "床版" が
+//	    無いことを確認済み）。そこで屋根階に床版が無いときに限り、屋根階の床梁が囲む領域
+//	    （core::filledUnionOutlines）を床の外形とみなす。根太が渡っていない——どの空隙も
+//	    囲っていない——単独の床梁は床にならない。あくまで床版の代替なので、屋根階に床版が
+//	    あればそちらを優先する。
 //
 //	床は「建物形状の一次情報」で、以降の横架材・柱はこの位置に合わせて載せていく
 //	（ROADMAP.md「実装順序の方針（形状先行）」）。
@@ -56,10 +62,29 @@ namespace HomeskzIfcImport::parse
 	// この高さを床仕上げ上端とみなす。スラブ構成は 床仕上げ（36−24＝12）＋ 床下地（24）。
 	inline constexpr double kLoftFloorLevelOffset = 36.0;
 
-	// 階（#storeyId）が床板（Name が "床版" の IfcSlab）を含むか。屋根階にロフトの床が
+	// 階（#storeyId）が床板（Name が "床版" の IfcSlab）を含むか。
+	bool storyHasFloorSlab(const Model& model, int storeyId);
+
+	// 床梁から合成したロフト床 1 枚（ヘッダ冒頭「ロフトの外形は床梁から合成する」参照）。
+	struct LoftFloorRegion
+	{
+		// 平面外形（IFC の生座標。通り芯センタリングは呼び出し側で行う）。
+		std::vector<core::Vec2> boundary;
+		// 床下地下端＝床梁天端の、ストーリ原点（軒高）からの相対 Z。段差が無ければ 0。
+		double beamTopOffset = 0.0;
+	};
+
+	// 屋根階（#storeyId）の床梁が囲む領域からロフト床を合成する。床梁は横架材クラスが
+	// 床梁（床大梁・床小梁・甲乙梁）の IfcBeam / IfcMember。押し出しを解決できない部材は
+	// 飛ばす。囲まれた領域が無ければ空を返す。
+	//
+	// 並び・値はエンティティ列挙順に依存しない（外形はセル走査順、天端は床梁天端の最大値）。
+	std::vector<LoftFloorRegion> loftFloorRegions(const Model& model, int storeyId);
+
+	// 屋根階（#storeyId）にロフトの床（床版、または床梁から合成できる領域）があるか。
 	// あるときだけ屋根ストーリへ FL レベル（軒高 + kLoftFloorLevelOffset）を足すために
 	// parse/Story が使う（Python 版 story_has_moya / story_has_roof と同じ枠組み）。
-	bool storyHasFloorSlab(const Model& model, int storeyId);
+	bool storyHasLoftFloor(const Model& model, int storeyId);
 
 	// 床のスラブスタイル名を返す。**階により構成（床仕上げ厚）が異なることが多いため、
 	// スタイルは階ごとに 1 つ**作る。一般階は "{階}F-床スタイル"（"1F-床スタイル" …）、
@@ -72,6 +97,7 @@ namespace HomeskzIfcImport::parse
 	// FL ストーリ（parse/Story の collectStories）を Elevation 昇順に走査し、各階について
 	// その階に属する床版（Name=="床版" の IfcSlab）を FloorCommand にする（最上階も対象で、
 	// その床はロフト＝小屋裏収納の床として "R-FL" へ・基準面は軒高になる。上記要件参照）。
+	// 屋根階に床版が無いときは、代わりに床梁から合成した外形（loftFloorRegions）を使う。
 	// 平面外形は通り芯と同じグリッド中心オフセット（parse/Grid の resolveGridCenter）で
 	// 補正する。押し出しソリッドを解決できない床版はスキップする（1 枚の欠損で全体を
 	// 止めない。CLAUDE.md「エラーハンドリング」）。
