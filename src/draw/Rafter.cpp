@@ -9,32 +9,32 @@
 //
 //	描画手順（Python 版 draw_rafter と同じ意図。実現手段は SDK の作法に合わせる）:
 //	  1. 命令の軒側 start（＝支持点）・棟側 end の平面座標と両端の天端 Z から、**水平投影長
-//	     （LineLength）・平面方位角・勾配（pitch）**を求める。
-//	  2. **配置行列**（Z 軸まわりに平面方位角だけ回し、支持点へ平行移動）から軸組ツールの PIO を
-//	     生成する。Python 版は「原点に生成 → Rotate3D → Move3D」の 3 手順だが、ISDK には
-//	     VectorScript の 3D 変換状態（ResetOrientation3D / Rotate3D / Move3D）が無く、代わりに
-//	     配置行列から直接 PIO を作れる（CreateCustomObjectByMatrix）。結果は同じで、作図状態に
-//	     依存しないぶん堅い。勾配は本体の pitch パラメータが担い、支持点（下端基準）から棟側へ
-//	     立ち上がる。
+//	     （スパン）・平面方位角・勾配**を求める。
+//	  2. **配置行列**（Z 軸まわりに平面方位角だけ回し、支持点の XY へ平行移動）から軸組ツールの
+//	     PIO を生成する。Python 版は「原点に生成 → Rotate3D → Move3D」の 3 手順だが、ISDK には
+//	     VectorScript の 3D 変換状態（ResetOrientation3D / Rotate3D）が無く、代わりに配置行列
+//	     から直接 PIO を作れる（CreateCustomObjectByMatrix）。勾配は本体の勾配パラメータが担い、
+//	     支持点（下端基準）から棟側へ立ち上がる。
 //	  3. クラス（小屋組-垂木）を割り当て、描画属性をすべてクラス属性に従わせる。
 //	  4. 断面・配置・2D 表示・軒の出・差し込み・仕様ラベル・構造用途・材質の各パラメータを
 //	     設定して ResetObject で反映する。
+//	  5. 高さを 3D 移動で与える（MoveObject3D。下記）。
 //	PIO を生成できない場合は平面投影の直線にフォールバックする（1 本の失敗で全体を止めない）。
 //
-//	【高さの与え方（ローカル確認項目）】配置行列のオフセット Z には命令の elevation（絶対 Z）を
-//	そのまま渡す。Python 版 vw/rafter.py も Move3D に絶対 Z を渡して実機で確認済みで、まずは
-//	その挙動に合わせる。ただし屋根では Python 版が「レイヤ基準で扱わないとレイヤ高さぶん二重に
-//	持ち上がる」ことを確認している（#113）ため、垂木でも二重に持ち上がる可能性は残る。VW 実機で
-//	高さがずれていたら、ここでレイヤの高さを引く（＝レイヤ相対へ直す）ことで直せるよう、
-//	オフセットの計算は 1 か所（DrawOne の SetOffset）に集約してある。
+//	【高さは配置行列ではなく 3D 移動で与える】配置行列のオフセット Z は PIO に**届かない**
+//	（ローカル確認: 与えた 6109.0 に対し読み戻しは 2.0、OIP の Z も 0）。高さは ResetObject の
+//	後に MoveObject3D で与える（Python 版 Move3D と同じ手）。オブジェクトの Z はレイヤ座標
+//	なので、命令の絶対 Z からレイヤの基準高さ（ovLayerHeightInCurrUnits）を引いてレイヤ相対に
+//	直してから渡す。Z の計算は 1 か所（DrawOne の MoveObject3D）に集約してある。
 //
-//	【フィールド名・値は VW の登録に一致させる必要がある】軸組ツールのパラメータ名（type /
-//	width / height / LineLength / pitch / verticalReference / 2DDisplay / overhang /
-//	bearinginset / label / StructuralUse / Material）と値は VectorWorks の FramingMember 登録に
-//	合わせる（Python 版が実オブジェクトの VectorScript エクスポートで確認した名前。差し込みの
-//	登録名は overhang と違って **bearinginset** で、既定 88.9mm＝3.5inch を上書きしないと軒先が
-//	外へずれる）。最終挙動（高さ・向き・pitch・各パラメータ）は VW 実機で確認する
-//	（ROADMAP.md M6「ローカル確認」）。名前付き定数に集約する。
+//	【フィールド名は VW 実機の登録から採る】軸組ツールのパラメータ名は、当初 Python 版の
+//	VectorScript エクスポートから推定していたが、ローカル確認で PIO の全パラメータの universal
+//	名とローカライズ名を出したところ、勾配（pitch ではなく **PitchAngle**。pitch という名前の
+//	内部パラメータが別にあり、そちらは __NNA_DO_NOT_CHANGE）・構造用途（**先頭が小文字**の
+//	structuralUse）・ラベル（label ではなく **showLabel** ＋ **labelText** の 2 つ）が名前違いで
+//	**黙って無視されていた**ことが判明した。スパン（LineLength）は水平投影長で、部材に沿った
+//	実長は別パラメータ（LineLengthReal）。ポップアップの値は表示文字ではなく**キー**を渡す。
+//	最終挙動は VW 実機で確認する（ROADMAP.md M6「ローカル確認」）。名前付き定数に集約する。
 //
 
 #include "PluginPrefix.h"
@@ -52,6 +52,8 @@
 #include <cstddef>
 #include <cstdio>
 #include <numbers>
+#include <utility>
+#include <vector>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -60,6 +62,9 @@ namespace HomeskzIfcImport::draw
 	{
 		// ラジアン → 度（M_PI は MSVC で既定では未定義なので C++20 の std::numbers を使う）。
 		constexpr double kDegreesPerRadian = 180.0 / std::numbers::pi;
+
+		// 勾配の読み戻し確認の許容差（度）。これを超えて食い違えば実数で入らなかったとみなす。
+		constexpr double kPitchTolerance = 1e-3;
 
 		// 軸組ツールの PIO 名と部材種別（垂木は 'rafter'）。VW の登録名に一致させる。
 		const TXString kFramingMember("FramingMember");
@@ -81,23 +86,38 @@ namespace HomeskzIfcImport::draw
 		// 2D 表示（2DDisplay）。要件により「幅」表示にする。
 		constexpr const char* k2DDisplayWidth = "width";
 
-		// 以下のフィールド名・値は VW の FramingMember 登録に一致させる（冒頭コメント参照）。
-		constexpr const char* kFieldType = "type";
-		constexpr const char* kFieldWidth = "width";
-		constexpr const char* kFieldHeight = "height";
-		constexpr const char* kFieldLineLength = "LineLength";
-		constexpr const char* kFieldPitch = "pitch";
-		constexpr const char* kFieldVerticalReference = "verticalReference";
-		constexpr const char* kField2DDisplay = "2DDisplay";
+		// 以下のフィールド名は VW 実機の FramingMember 登録から採った（ローカル確認で PIO の
+		// 全パラメータの universal 名とローカライズ名をダイアログに出して確定させた。それまでは
+		// Python 版の VectorScript エクスポートから推定した名前を使っており、勾配・構造用途・
+		// ラベルが**名前違いで黙って無視されていた**）。括弧内は実機のローカライズ名。
+		constexpr const char* kFieldType = "type";			   // タイプ
+		constexpr const char* kFieldWidth = "width";		   // 幅
+		constexpr const char* kFieldHeight = "height";		   // 高さ
+		constexpr const char* kFieldLineLength = "LineLength"; // スパン（＝水平投影長）
+		constexpr const char* kFieldPitchAngle = "PitchAngle"; // 勾配
+		constexpr const char* kFieldVerticalReference = "verticalReference"; // 垂直配置基準
+		constexpr const char* kField2DDisplay = "2DDisplay";				 // 2D 表示
 		// 軒の出（支持点より軒側＝低い部分）。壁外面から軒先までの距離。
 		constexpr const char* kFieldOverhang = "overhang";
-		// 支持部分の差し込み。VW の登録名は 'bearinginset'（既定 88.9mm を上書きする）。
+		// 支持部分の差し込み（既定 88.9mm＝3.5inch を上書きしないと軒先が外へずれる）。
 		constexpr const char* kFieldEmbedment = "bearinginset";
-		constexpr const char* kFieldLabel = "label";
-		constexpr const char* kFieldStructuralUse = "StructuralUse";
-		constexpr const char* kStructuralUseRafter = "垂木";
+		// ラベルは「表示するか（bool）」と「文字（string）」の 2 つに分かれている。
+		constexpr const char* kFieldShowLabel = "showLabel"; // ラベルを表示
+		constexpr const char* kFieldLabelText = "labelText"; // ラベル文字
+		constexpr const char* kFieldStructuralUse = "structuralUse"; // 構造用途（**先頭は小文字**）
+		// 材質の universal 名は診断ダイアログが下端で切れて読み取れていない。universal 名で
+		// 見つからなければローカライズ名「材質」で引き直す（ResolveParam）。
 		constexpr const char* kFieldMaterial = "Material";
-		constexpr const char* kMaterialWood = "木";
+		constexpr const char* kLocalizedMaterial = "材質";
+		// ポップアップの選択肢は**キー（英語）で保持され、表示だけがローカライズ**される
+		// （タイプに "rafter" を渡すと OIP に「垂木」と出たことで確認済み）。したがって
+		// 構造用途・材質も表示文字ではなくキーを渡す必要がある。キーは実機の登録次第なので、
+		// 選択肢を列挙して「表示が目的の文字と一致するもの」のキーを使い、列挙できないときだけ
+		// 下のフォールバックのキーを使う（SetPopupByLocalized）。
+		constexpr const char* kStructuralUseRafterText = "垂木";
+		constexpr const char* kStructuralUseRafterKey = "rafter";
+		constexpr const char* kMaterialWoodText = "木";
+		constexpr const char* kMaterialWoodKey = "wood";
 
 		// オブジェクトのクラスを名前で設定する（draw/Grid.cpp・draw/Floor.cpp と同じヘルパー）。
 		void SetClassByName(MCObjectHandle object, const std::string& className)
@@ -130,44 +150,116 @@ namespace HomeskzIfcImport::draw
 			return {buffer.data()};
 		}
 
-		// 【一時的な診断・M6 のローカル確認用。原因が分かり次第このブロックごと削除する】
-		//
-		// ローカル確認で「幅・せい・長さ（SetParamReal）とタイプ（SetParamAsString）は反映
-		// されるのに、勾配・構造用途・材質・名前だけが既定値のまま」という結果になった。
-		// 同じ setter で一部だけ効かない以上、原因は setter ではなく**パラメータ名の誤り**
-		// （VW 実機の FramingMember 登録名が想定と違う）だと考えられる。実機でしか確かめ
-		// られないので、最初の 1 本を描いたところで
-		//   * PIO の全パラメータの「universal 名（ローカライズ名）」
-		//   * 配置行列に与えたオフセットと、生成後に読み戻したオフセット
-		//     （OIP の Z が 0 だった件。行列の Z が落ちているのかを切り分ける）
-		// をダイアログに出す。
-		void ShowPlacementDiagnostics(const VWParametricObj& pio, MCObjectHandle object,
-									  const core::RafterCommand& rafter)
+		// パラメータ名を解決する。universal 名で見つかればそれを使い、見つからなければ
+		// ローカライズ名（OIP に出る日本語）で引き直す。名前が 1 つ違うだけで setter が
+		// **黙って無視される**ため、確実に見つかる方を選ぶ。どちらでも見つからなければ
+		// universal 名をそのまま返す（設定は無視されるが害は無い）。
+		TXString ResolveParam(const VWParametricObj& pio, const char* universalName,
+							  const char* localizedName)
 		{
-			TXString names;
+			const TXString universal(universalName);
+			if (pio.GetParamIndex(universal) != static_cast<size_t>(-1))
+				return universal;
+
+			const TXString localized(localizedName);
 			const size_t count = pio.GetParamsCount();
 			for (size_t i = 0; i < count; ++i)
 			{
-				if (i > 0)
-					names += ", ";
-				names += pio.GetParamName(i);
-				names += "(";
-				names += pio.GetParamLocalizedName(i);
-				names += ")";
+				if (pio.GetParamLocalizedName(i) == localized)
+					return pio.GetParamName(i);
 			}
+			return universal;
+		}
 
+		// ポップアップのパラメータを「表示文字」で設定する。選択肢はキー（英語）で保持され
+		// 表示だけがローカライズされるので、選択肢を列挙して表示が一致するもののキーを渡す。
+		// 列挙できない（静的登録で動的選択肢が空）ときは fallbackKey を渡す。
+		void SetPopupByLocalized(VWParametricObj& pio, const TXString& param,
+								 const char* localizedChoice, const char* fallbackKey)
+		{
+			std::vector<std::pair<TXString, TXString>> choices;
+			pio.PopupGetChoices(param, choices);
+
+			const TXString wanted(localizedChoice);
+			for (const std::pair<TXString, TXString>& choice : choices)
+			{
+				if (choice.second == wanted)
+				{
+					pio.SetParamAsString(param, choice.first);
+					return;
+				}
+			}
+			pio.SetParamAsString(param, TXString(fallbackKey));
+		}
+
+		// デザインレイヤの基準高さ（レイヤ平面の Z）。オブジェクトの Z はレイヤ座標なので、
+		// 絶対 Z へ置きたい命令はここを引いてレイヤ相対に直す必要がある。
+		// ovLayerHeightInCurrUnits は「現在の単位でのレイヤの基準高さ」（Kernel/API/
+		// ObjectVariables.h）。本プラグインが扱う図面は mm 単位なので WorldCoord と一致する。
+		double LayerElevation(MCObjectHandle layer)
+		{
+			TVariableBlock value;
+			if (!gSDK->GetObjectVariable(layer, ovLayerHeightInCurrUnits, value))
+				return 0.0;
+			double elevation = 0.0;
+			if (!value.GetReal64(elevation))
+				return 0.0;
+			return elevation;
+		}
+
+		// 【一時的な診断・M6 のローカル確認用。値が揃ったらこのブロックごと削除する】
+		//
+		// 1 回目の診断（全パラメータの universal 名とローカライズ名の一覧）で、勾配・構造用途・
+		// ラベルが**名前違いのまま黙って無視されていた**ことと、行列に与えた Z が PIO に
+		// 届いていないことが判明した。名前は上の定数へ反映済み。2 回目のこの診断は、設定した
+		// 値が実際に入ったかを**読み戻して**確かめるためのもので、一覧は「材質」の universal 名
+		// を確定させるために内部パラメータ（ローカライズ名が __NNA_DO_NOT_CHANGE のもの）を
+		// 除いて出す（1 回目は全件出したためダイアログが画面下端で切れた）。
+		void ShowPlacementDiagnostics(const VWParametricObj& pio, MCObjectHandle object,
+									  const core::RafterCommand& rafter, double layerElevation,
+									  double dz)
+		{
 			VWTransformMatrix readBack;
 			VWParametricObj(object).GetObjectMatrix(readBack);
 			const VWPoint3D offset = readBack.GetOffset();
 
-			std::array<char, 256> buffer{};
+			std::array<char, 512> buffer{};
 			std::snprintf(buffer.data(), buffer.size(),
-						  "与えたオフセット: (%.1f, %.1f, %.1f) / 読み戻し: (%.1f, %.1f, %.1f)",
-						  rafter.start.x, rafter.start.y, rafter.elevation, offset.x, offset.y,
-						  offset.z);
-
+						  "高さ: 命令 %.1f - レイヤ %.1f = 移動量 %.1f / 読み戻しオフセット "
+						  "(%.1f, %.1f, %.1f)",
+						  rafter.elevation, layerElevation, dz, offset.x, offset.y, offset.z);
 			TXString body(buffer.data());
-			body += "\n\nFramingMember のパラメータ: ";
+
+			// 設定した値の読み戻し（入っていないパラメータがひと目で分かる）。
+			const std::array<const char*, 6> checked{kFieldType,		  kFieldPitchAngle,
+													 kFieldStructuralUse, kFieldLabelText,
+													 kFieldLineLength,	  kFieldVerticalReference};
+			body += "\n\n読み戻し: ";
+			for (const char* name : checked)
+			{
+				body += name;
+				body += "=[";
+				body += pio.GetParamAsString(TXString(name));
+				body += "] ";
+			}
+
+			// 内部パラメータを除いた一覧（材質の universal 名を確定させるため）。
+			const TXString hidden("__NNA_DO_NOT_CHANGE");
+			TXString names;
+			const size_t count = pio.GetParamsCount();
+			for (size_t i = 0; i < count; ++i)
+			{
+				const TXString localized = pio.GetParamLocalizedName(i);
+				if (localized == hidden)
+					continue;
+				if (!names.IsEmpty())
+					names += ", ";
+				names += pio.GetParamName(i);
+				names += "(";
+				names += localized;
+				names += ")";
+			}
+			body += "\n\nパラメータ（内部を除く）: ";
 			body += names;
 			gSDK->AlertInform(body, TXString("垂木配置の診断（一時）"), false);
 		}
@@ -175,7 +267,7 @@ namespace HomeskzIfcImport::draw
 		// 垂木 1 本を軸組ツールで描く。PIO を作れなければ平面投影の直線でフォールバックする。
 		// 何か 1 つでも配置できたら true。diagnose は上記の一時診断を出すかどうか
 		// （最初の 1 本だけ true にして呼ぶ）。
-		bool DrawOne(const core::RafterCommand& rafter, bool diagnose)
+		bool DrawOne(const core::RafterCommand& rafter, double layerElevation, bool diagnose)
 		{
 			const double dx = rafter.end.x - rafter.start.x;
 			const double dy = rafter.end.y - rafter.start.y;
@@ -188,12 +280,13 @@ namespace HomeskzIfcImport::draw
 			const double pitch =
 				std::atan2(rafter.endElevation - rafter.elevation, run) * kDegreesPerRadian;
 
-			// 配置行列: Z 軸まわりに平面方位角だけ回し、支持点（XY ＋ 天端 Z）へ平行移動する
-			// （Python 版 Rotate3D → Move3D と同じ結果を 1 手で与える。高さの基準は冒頭
-			// 「高さの与え方（ローカル確認項目）」参照）。
+			// 配置行列: Z 軸まわりに平面方位角だけ回し、支持点の XY へ平行移動する。
+			// **Z はここでは与えない**。ローカル確認で、行列に Z を入れても PIO には反映されず
+			// （与えた 6109.0 に対し読み戻しは 2.0、OIP の Z も 0）、高さは別途 3D 移動で
+			// 与える必要があることが分かった（下の MoveObject3D。Python 版 Move3D と同じ手）。
 			VWTransformMatrix matrix;
 			matrix.SetRotation(azimuth, VWPoint3D(0.0, 0.0, 1.0));
-			matrix.SetOffset(rafter.start.x, rafter.start.y, rafter.elevation);
+			matrix.SetOffset(rafter.start.x, rafter.start.y, 0.0);
 
 			MCObjectHandle object = gSDK->CreateCustomObjectByMatrix(kFramingMember, matrix);
 			if (object == nil)
@@ -212,24 +305,32 @@ namespace HomeskzIfcImport::draw
 			SetClassByName(object, rafter.drawClass);
 			SetAllAttributesByClass(object);
 
-			// パラメータの渡し方はローカル確認で 2 段階に絞り込んだ:
-			//   * 寸法・長さ（幅／せい／LineLength／軒の出／差し込み）は **SetParamReal**。
+			// パラメータの渡し方はローカル確認で次のように絞り込んだ:
+			//   * 寸法・長さ（幅／せい／スパン／軒の出／差し込み）は **SetParamReal**。
 			//     文字列で渡していたときは既定値（幅 100・せい 300・長さ 254）のままだった。
-			//   * ポップアップ・角度（勾配／構造用途／2D 表示／垂直基準／材質／種別）は
-			//     **SetParamAsString**。SetParamString は「文字列型のパラメータ」専用で、
-			//     ポップアップや角度には効かない（構造用途が既定の "梁" のまま・勾配が 0° の
-			//     ままだった）。SetParamAsString はパラメータの型に応じて文字列を解釈するので、
-			//     Python 版が SetRField に文字列を渡していたのと同じ意味になる。
+			//   * ポップアップ・文字列は **SetParamAsString**（SetParamString は「文字列型の
+			//     パラメータ」専用で、ポップアップには効かない）。ポップアップの値は表示文字
+			//     ではなく**キー**なので SetPopupByLocalized で選択肢から引く。
+			//   * 勾配は角度なので degrees を **SetParamReal**。効かなければ度記号付きの
+			//     文字列で入れ直す（下記の読み戻し確認）。
 			VWParametricObj pio(object);
 			pio.SetParamAsString(kFieldType, kMemberTypeRafter);
 			// 支持点（下端基準）から棟側へ立ち上がる。
 			pio.SetParamAsString(kFieldVerticalReference, kVerticalReferenceBottom);
 			pio.SetParamAsString(kField2DDisplay, k2DDisplayWidth);
-			pio.SetParamAsString(kFieldLabel, TXString(rafter.label.c_str()));
-			pio.SetParamAsString(kFieldStructuralUse, kStructuralUseRafter);
-			pio.SetParamAsString(kFieldMaterial, kMaterialWood);
-			// 勾配は角度なので度記号付きの文字列で渡す（Python 版 f'{pitch}°' と同じ）。
-			pio.SetParamAsString(kFieldPitch, AngleText(pitch));
+			// ラベルは「表示するか」と「文字」の 2 つ。文字だけ入れても表示は既定のままなので
+			// 両方設定する。
+			pio.SetParamBool(kFieldShowLabel, true);
+			pio.SetParamAsString(kFieldLabelText, TXString(rafter.label.c_str()));
+			SetPopupByLocalized(pio, TXString(kFieldStructuralUse), kStructuralUseRafterText,
+								kStructuralUseRafterKey);
+			SetPopupByLocalized(pio, ResolveParam(pio, kFieldMaterial, kLocalizedMaterial),
+								kMaterialWoodText, kMaterialWoodKey);
+			// 勾配（度）。角度パラメータは実数で保持されるので degrees をそのまま入れ、
+			// 反映されていなければ度記号付きの文字列で入れ直す（登録の型に依らず入るように）。
+			pio.SetParamReal(kFieldPitchAngle, pitch);
+			if (std::abs(pio.GetParamReal(kFieldPitchAngle) - pitch) > kPitchTolerance)
+				pio.SetParamAsString(kFieldPitchAngle, AngleText(pitch));
 			// 寸法・長さ（文書単位＝mm）。
 			pio.SetParamReal(kFieldWidth, rafter.width);
 			pio.SetParamReal(kFieldHeight, rafter.height);
@@ -238,8 +339,15 @@ namespace HomeskzIfcImport::draw
 			pio.SetParamReal(kFieldEmbedment, rafter.embedment);
 			gSDK->ResetObject(object);
 
+			// 高さ。オブジェクトの Z は**レイヤ座標**（レイヤ平面が Z=0）なので、命令の絶対 Z
+			// からレイヤの基準高さを引いてレイヤ相対に直してから 3D 移動する。ResetObject の
+			// **後**に動かす（リセットが形状を作り直すため、先に動かすと戻される）。
+			// Z の計算はこの 1 か所に集約してある（ローカルで高さがずれたらここだけ直せばよい）。
+			const double dz = rafter.elevation - layerElevation;
+			gSDK->MoveObject3D(object, 0.0, 0.0, dz);
+
 			if (diagnose)
-				ShowPlacementDiagnostics(pio, object, rafter);
+				ShowPlacementDiagnostics(pio, object, rafter, layerElevation, dz);
 			return true;
 		}
 	} // namespace
@@ -263,7 +371,7 @@ namespace HomeskzIfcImport::draw
 
 			// 一時診断は最初に描けた 1 本だけで出す（垂木の本数ぶんダイアログが開かないように）。
 			const bool diagnose = drawn == 0;
-			if (DrawOne(rafter, diagnose))
+			if (DrawOne(rafter, LayerElevation(layer), diagnose))
 				++drawn;
 		}
 		return drawn;
