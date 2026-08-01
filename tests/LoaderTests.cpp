@@ -68,7 +68,7 @@ TEST(unresolved_reference_is_tolerated)
 
 TEST(loads_fixture_file_and_reads_grid)
 {
-	std::string const path = std::string(HOMESKZ_FIXTURES_DIR) + "/minimal_grid.ifc";
+	std::string const path = HomeskzIfcTests::fixturePath("minimal_grid.ifc");
 	bool ok = false;
 	Model const model = loadIfc(path, &ok);
 	CHECK(ok);
@@ -98,7 +98,7 @@ TEST(loads_fixture_file_and_reads_grid)
 TEST(missing_file_reports_not_ok)
 {
 	bool ok = true;
-	Model const model = loadIfc(std::string(HOMESKZ_FIXTURES_DIR) + "/does_not_exist.ifc", &ok);
+	Model const model = loadIfc(HomeskzIfcTests::fixturePath("does_not_exist.ifc"), &ok);
 	CHECK(!ok);
 	CHECK_EQ(model.size(), static_cast<std::size_t>(0));
 }

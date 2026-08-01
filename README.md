@@ -42,8 +42,10 @@ src/
     IfcGeometry.{h,cpp}       配置行列・断面・押し出し・屋根面の解決
     Context.{h,cpp}           解析中の共有キャッシュ（同じ前処理を繰り返さない）
     BuildDocument.{h,cpp}     解析のオーケストレーション
-    Grid / Story / Floor / Rafter / Roof / StructuralClass / Summary
+    Grid / Story / Floor / Rafter / Roof / StructuralClass
                               要素ごとの解析（Python 版 ifc/*.py に 1 対 1 で対応）
+    Summary.{h,cpp}           読み取り結果サマリ（型別件数とその文言整形。Python 版に
+                              対応モジュールは無く、M15 の完了文言へ転用する）
   draw/                     Phase 2: VW 描画（SDK 依存）
     ExecuteDocument.{h,cpp}   命令セットを検証して要素ごとにディスパッチ
     DrawUtil.{h,cpp}          クラス分け・by-class 属性・レイヤ用意の共通ヘルパー

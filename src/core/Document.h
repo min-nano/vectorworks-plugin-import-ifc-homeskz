@@ -28,6 +28,25 @@ namespace HomeskzIfcImport::core
 	// 期待値とのゴールデン比較で、スキーマ変更を検出できるように持たせておく。
 	inline constexpr int kDocumentVersion = 1;
 
+	// 通り芯を置くデザインレイヤ名（Python 版 vw/story.py GRID_LAYER）。GridCommand の
+	// 既定値と desiredStoryLayerOrder の最上段が同じ名前を指す必要があるので、ここに 1 つだけ置く。
+	inline constexpr const char* kGridLayer = "共通";
+
+	// ストーリレベルの種別名。**命令セットの語彙なのでここが唯一の定義**で、
+	// LevelCommand::type / StoryBoundCommand::level に入る値と、デザインレイヤ名の接尾辞
+	// （"1-FL" の "FL"）がこれになる。parse/ 側（parse/Story.h・parse/Rafter.h・parse/Roof.h）は
+	// 要素ごとの読みやすい名前でこれを再公開するだけで、文字列を自前で持たない。
+	//
+	// core が持つ理由: desiredStoryLayerOrder は「床（FL）・野地板のレイヤを背面へ回す」
+	// 判定でこの名前を要するが、core/ は parse/ を include できない（依存の向き。
+	// CLAUDE.md「依存の向きは厳守する」）。かつては core/Document.cpp が "FL" / "野地板" を
+	// 独自に書いており、parse 側で名前を変えると背面送りが黙って効かなくなる形だった。
+	inline constexpr const char* kLevelFL = "FL";
+	inline constexpr const char* kLevelBeamTop = "横架材天端";
+	inline constexpr const char* kLevelEaves = "軒高";
+	inline constexpr const char* kLevelTaruki = "垂木";
+	inline constexpr const char* kLevelNojiita = "野地板";
+
 	// 通り芯（グリッド）1 本の描画命令。Python 版 document.py の GridCommand（dict）に
 	// 対応する。draw/Grid がこれを GridAxis オブジェクトへ変換する（ROADMAP.md M1）。
 	//
@@ -42,7 +61,7 @@ namespace HomeskzIfcImport::core
 	struct GridCommand
 	{
 		std::string label;
-		std::string layer = "共通";
+		std::string layer = kGridLayer;
 		std::string drawClass;
 		Vec2 start;
 		Vec2 end;
@@ -198,10 +217,11 @@ namespace HomeskzIfcImport::core
 		std::string label;
 	};
 
-	// 野地板（屋根の下地合板）を屋根オブジェクトとして描く命令。Python 版 document.py の
-	// RoofCommand（dict）に対応する。draw/Roof がこれを屋根ツール（BeginRoof 相当）へ
-	// 変換する（ROADMAP.md M6）。屋根版（IfcSlab の屋根面）**1 面につき 1 枚**で、垂木の
-	// ように間隔で割らない。
+	// 野地板（屋根の下地合板）を屋根面オブジェクト（Roof Face）として描く命令。Python 版
+	// document.py の RoofCommand（dict）に対応する。draw/Roof がこれを屋根面オブジェクトへ
+	// 変換する（ROADMAP.md M6。Python 版の BeginRoof に相当する呼び出しは ISDK に無いため、
+	// VWFC の VWRoofFaceObj を組み立てる。draw/Roof.cpp 冒頭参照）。屋根版（IfcSlab の
+	// 屋根面）**1 面につき 1 枚**で、垂木のように間隔で割らない。
 	//
 	// 【高さの持ち方】elevation は**軒（屋根軸）の天端 Z の絶対値**。野地板は垂木の上に
 	// 載る（野地板下端＝垂木上端）ため、屋根版の平面（＝垂木下面）から垂木せいを鉛直換算して
@@ -271,8 +291,8 @@ namespace HomeskzIfcImport::core
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は
-	// 検証を通った Document だけを SDK API へ渡す。現状はバージョン・stories・floors・
-	// grids を見る（規則は Document.cpp の各 isValid* 参照。空の Document は妥当）。
+	// 検証を通った Document だけを SDK API へ渡す。現状はバージョンと stories / floors /
+	// rafters / roofs / grids を見る（規則は Document.cpp の各 isValid* 参照。空の Document は妥当）。
 	// 各命令リストの追加に合わせて検証規則を足していく。
 	bool validateDocument(const Document& document);
 

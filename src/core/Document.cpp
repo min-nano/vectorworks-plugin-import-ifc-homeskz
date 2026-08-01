@@ -133,7 +133,7 @@ namespace HomeskzIfcImport::core
 		// M13 の per-viewport 上書き。desiredStoryLayerOrder の doc コメント参照）。
 		bool isBackgroundLevel(const std::string& type)
 		{
-			return type == "FL" || type == "野地板";
+			return type == kLevelFL || type == kLevelNojiita;
 		}
 	} // namespace
 
@@ -141,9 +141,9 @@ namespace HomeskzIfcImport::core
 													const std::vector<std::string>& topLayers)
 	{
 		std::vector<std::string> order;
-		// 通り芯レイヤ "共通"（Python 版 vw/story.py GRID_LAYER。ifc/grid.py の配置先と同じ）を
+		// 通り芯レイヤ "共通"（core::kGridLayer。GridCommand::layer の既定値と同じ）を
 		// スタック最上段に置き、続けて topLayers を積む。
-		order.emplace_back("共通");
+		order.emplace_back(kGridLayer);
 		order.insert(order.end(), topLayers.begin(), topLayers.end());
 
 		// stories は Elevation 昇順（最下階→最上階）。スタックは最上階→最下階なので逆順に辿る。

@@ -58,7 +58,9 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kRoofSlabPrefix = "屋根版";
 
 	// 垂木レベル・レイヤの名前（Python 版 LEVEL_TARUKI）。配置先レイヤは "{接頭辞}-垂木"。
-	inline constexpr const char* kLevelTaruki = "垂木";
+	// 文字列の定義は core/Document.h（命令セットの語彙）にあり、ここはその再公開
+	// （レベル種別名の置き場所は parse/Story.h の kLevelFL ほかと同じ流儀）。
+	inline constexpr const char* kLevelTaruki = core::kLevelTaruki;
 
 	// 垂木の既定断面（mm）。IFC に垂木の寸法情報が無いため決め打ち（要件どおり 45×45）。
 	inline constexpr double kDefaultRafterWidth = 45.0;

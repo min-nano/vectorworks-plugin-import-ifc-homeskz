@@ -20,6 +20,7 @@
 //	  * 実フィクスチャで例外なく解決できること。
 //
 
+#include "Fixtures.h"
 #include "TestFramework.h"
 
 #include "core/Geometry.h"
@@ -34,6 +35,8 @@ using namespace HomeskzIfcImport;
 using core::Mat4;
 using core::Vec2;
 using core::Vec3;
+using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::near;
 using parse::loadIfcFromText;
 using parse::Model;
 using parse::Profile;
@@ -41,12 +44,6 @@ using parse::WorldSolid;
 
 namespace
 {
-	// 2 つの実数が許容誤差内で等しいか。座標・寸法比較に使う（mm 単位系）。
-	bool near(double a, double b)
-	{
-		return std::abs(a - b) < 1e-6;
-	}
-
 	// 2 つの Vec3 が許容誤差内で等しいか。
 	bool nearVec(const Vec3& a, const Vec3& b)
 	{
@@ -580,8 +577,7 @@ TEST(resolves_geometry_on_real_fixture)
 	// 解決できること・矩形断面が拾えることを確認する。数値の厳密一致ではなく、
 	// パイプライン（プロファイル→押し出し）が実データで通ることの担保。
 	bool ok = false;
-	Model const model =
-		parse::loadIfc(std::string(HOMESKZ_FIXTURES_DIR) + "/サンプル1 (住木邸新築工事).ifc", &ok);
+	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 
 	int resolved = 0;

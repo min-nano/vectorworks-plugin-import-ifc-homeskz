@@ -14,13 +14,13 @@
 //	CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
 
+#include "Fixtures.h"
 #include "TestFramework.h"
 
 #include "core/Document.h"
 #include "parse/Loader.h"
 #include "parse/Story.h"
 
-#include <cmath>
 #include <string>
 #include <vector>
 
@@ -36,15 +36,11 @@ using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::resolveBeamTopOffset;
 using HomeskzIfcImport::parse::StoryInfo;
+using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::near;
 
 namespace
 {
-	// 2 つの実数が許容誤差内で等しいか。オフセット・高さ比較に使う。
-	bool near(double a, double b)
-	{
-		return std::abs(a - b) < 1e-9;
-	}
-
 	// #id の IfcColumn（ObjectPlacement 付き）を 1 つだけ持つ最小モデルを作る。
 	// z を Location の Z に持つローカル配置。
 	Model columnModel(double z)
@@ -463,8 +459,7 @@ TEST(reads_sample_house_fixture)
 {
 	// サンプル1 のストーリは 設計GL(除外)/1FL/2FL/RFL。→ 1階・2階・屋根 の 3 命令。
 	bool ok = false;
-	Model const model = HomeskzIfcImport::parse::loadIfc(
-		std::string(HOMESKZ_FIXTURES_DIR) + "/サンプル1 (住木邸新築工事).ifc", &ok);
+	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	std::vector<StoryCommand> const stories = buildStoryCommands(model);
 

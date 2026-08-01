@@ -7,7 +7,6 @@
 
 #include "parse/Rafter.h"
 #include "parse/Context.h"
-#include "parse/Grid.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Story.h"
@@ -28,10 +27,6 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 屋根面の法線の水平成分がこれ以下（ほぼ水平な面）なら勾配方向が定まらないため垂木を
-		// 流さない（Python 版 _FLAT_TOL）。野地板（parse/Roof）も同じ閾値を使う。
-		constexpr double kFlatTol = 1e-6;
-
 		// クリップした垂木の平面投影長がこれ未満（隅木際の極小片等）なら配置しない（mm。
 		// Python 版 _MIN_RAFTER_LENGTH）。
 		constexpr double kMinRafterLength = 100.0;
@@ -131,9 +126,10 @@ namespace HomeskzIfcImport::parse
 		// nz を見ずに平面式の分母へ渡していたため、退化した鉛直の屋根版に当たると天端 Z が
 		// 発散して無意味な垂木を並べていた。野地板（parse/Roof）は元から nz を弾いており、
 		// 屋根面を共有する以上こちらへ揃えるのが正しい（実フィクスチャには該当する屋根版が
-		// 無いため、実データでの出力は従来と一致する）。
+		// 無いため、実データでの出力は従来と一致する）。退化とみなす閾値（kRoofFlatTol）も
+		// 野地板と共有する——roofSlope の既定値なので明示的に渡さない。
 		RoofSlope slope;
-		if (!roofSlope(plane, slope, kFlatTol))
+		if (!roofSlope(plane, slope))
 			return {};
 
 		// 平面外形の XY と、掃引方向への広がり。
@@ -213,7 +209,7 @@ namespace HomeskzIfcImport::parse
 				if (beamTopZ.has_value())
 				{
 					const double dz = zRidge - zTip;
-					const double s = (dz > kFlatTol) ? ((*beamTopZ - zTip) / dz) : 0.0;
+					const double s = (dz > kRoofFlatTol) ? ((*beamTopZ - zTip) / dz) : 0.0;
 					if (s > 0.0 && s < 1.0)
 					{
 						supportX = low.x + (s * (high.x - low.x));

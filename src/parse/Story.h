@@ -44,13 +44,14 @@ namespace HomeskzIfcImport::parse
 	// 一致させる。CreateLayerLevelType へ登録し GetLayerForStory でレイヤを取り直す鍵で、
 	// デザインレイヤ名の接尾辞（"1-FL" の "FL"）も同じ名前になる。
 	//
-	// **ここが唯一の定義。** 床（parse/Floor）は高さ基準のレベル名としてこれを参照する
-	// （かつては Story.cpp と Floor.cpp が各々ローカルに持っており、片方だけ直すと
-	// SetObjectStoryBound が解決できないレベルを指す形になっていた）。屋根組のレベル名は
-	// 同じ流儀で parse/Rafter の kLevelTaruki・parse/Roof の kLevelNojiita が公開する。
-	inline constexpr const char* kLevelFL = "FL";
-	inline constexpr const char* kLevelBeamTop = "横架材天端";
-	inline constexpr const char* kLevelEaves = "軒高";
+	// **文字列の定義は core/Document.h（命令セットの語彙）にあり、ここはその再公開**。
+	// 床（parse/Floor）は高さ基準のレベル名としてこれを参照する（かつては Story.cpp と
+	// Floor.cpp が各々ローカルに持っており、片方だけ直すと SetObjectStoryBound が解決
+	// できないレベルを指す形になっていた）。屋根組のレベル名は同じ流儀で parse/Rafter の
+	// kLevelTaruki・parse/Roof の kLevelNojiita が再公開する。
+	inline constexpr const char* kLevelFL = core::kLevelFL;
+	inline constexpr const char* kLevelBeamTop = core::kLevelBeamTop;
+	inline constexpr const char* kLevelEaves = core::kLevelEaves;
 
 	// IfcProduct（要素）のローカル配置 Z 座標を取り出す。取得できれば outZ に入れて
 	// true、ObjectPlacement が無い／IfcLocalPlacement でない／座標が足りない等で

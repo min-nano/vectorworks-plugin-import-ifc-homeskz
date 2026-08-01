@@ -46,7 +46,7 @@ ISDK には VS の一部（3D 変換状態・屋根作成の一連・レイヤ�
 | M3 ストーリ | ✅ 完了 | 階・レベル・レイヤ（基本レベルのみ）。`parse/Story`＋`draw/Story`（PR #14）。**ローカル目視確認済み**。デザインレイヤの重ね順変更は ISDK に無く**見送り**（M13 へ委譲。M3 の節参照）。屋根組・登り梁・span 柱レベルは後続 M で追加。|
 | M4 構造クラス判定 | ✅ 完了 | `parse/StructuralClass`＋Python 版テスト移植（PR #16）。基礎クラス（立上り／底盤）は M9 で定義。|
 | **M5 床板（形状先行①）** | ✅ 完了 | 建物形状①。各階 `n-FL` にスラブで床を描き段差を表現（PR #18）。併せて STEP の日本語文字エスケープをデコード。**ローカル目視確認済み**。|
-| **M6 屋根面・屋根組（形状先行②）** | 🟨 進行中 | 建物形状②。屋根版から垂木・野地板を導出し屋根面を確定。**PR #19 マージ済み**・無 SDK テスト green。**ローカル目視確認待ち**。|
+| **M6 屋根面・屋根組（形状先行②）** | ✅ 完了 | 建物形状②。屋根版から垂木・野地板を導出し屋根面を確定（PR #19）。**ローカル目視確認済み**。|
 | M6.5 ゴールデン比較の土台 | ⬜ 未着手 | `core/DocumentJson`＋Python 版 `build_document` 出力との突き合わせ。最大要素の M7 の前に入れる。|
 | **M7 横架材（支持部材）** | ⬜ 未着手 | 土台・梁・桁＋母屋・棟木・登り梁。M5/M6 の床・屋根面へ合わせて補正（登り梁の屋根スナップ）。|
 | **M8 柱（支持部材）** | ⬜ 未着手 | 管柱・通し柱・小屋束。span レイヤ分割（上階梁下端＝M7 参照）。|
@@ -58,9 +58,8 @@ ISDK には VS の一部（3D 変換状態・屋根作成の一連・レイヤ�
 | M14 断面ビューポート | ⬜ 未着手 | 軸組図（既製 40 枚の指示線・ビューポートの移動／改名／整列）。|
 | M15 仕上げ（実行 UX・診断） | ⬜ 未着手 | 進捗メッセージ・例外処理・完了文言の集約（`parse/Summary` を転用）・`core/Trace`。Python 版 `run()` / `tracing.py` 相当。|
 
-**次の一手:** M6 のローカル目視確認（コードは main にマージ済み）。続けて M6.5 ゴールデン
-比較の土台を入れてから M7 横架材へ進む（基礎 M9 は上部形状と独立なので、M7 と並行に着手
-してよい）。
+**次の一手:** M6.5 ゴールデン比較の土台を入れてから M7 横架材へ進む（基礎 M9 は上部形状と
+独立なので、M7 と並行に着手してよい）。
 
 **マイルストーン番号は動かさない。** M6.5 が非整数なのは、既存のコードコメント・PR 本文が
 参照している M7〜M14 の番号を保つため（`src/core/Document.h` の TODO 等）。
@@ -325,15 +324,12 @@ Python 版が「並べ替えても既存ビューポートの描画には反映�
 
 ---
 
-## M6 — 屋根面・屋根組（垂木・野地板）（形状先行②） 🟨
+## M6 — 屋根面・屋根組（垂木・野地板）（形状先行②） ✅
 
 **目的:** **建物形状の要＝屋根面を確定する。** 屋根版（`IfcSlab` の屋根面）から垂木・
 野地板を導出し、屋根面の勾配・外形を据える。これが M7 の**登り梁を屋根面へスナップ補正**
 する際の基準になる（形状 → 支持部材の依存を作る）。母屋・棟木・登り梁（＝横架材）は
 M7 で扱う。**Python: `ifc/rafter.py` / `ifc/roof.py`（＋屋根面ヘルパー `_roof_plane`）。**
-
-**状態: PR #19 マージ済み（コード実装完了）。無 SDK テスト green・SDK ビルド（mac）通過。
-ローカル目視確認待ち——これが済めば ✅。**
 
 - ✅ `parse/IfcGeometry` 拡張: 屋根版から**屋根面**（平面外形頂点列＋上向き単位法線）を
   取り出す `roofPlane`（Python `rafter._roof_plane`）。M2 の `resolveElementWorldSolid` の
@@ -357,12 +353,21 @@ M7 で扱う。**Python: `ifc/rafter.py` / `ifc/roof.py`（＋屋根面ヘルパ
   （レイヤ・クラス・外形 3 点以上・厚みが正）の検証を追加。
 - ✅ `draw/Rafter`: **配置行列**（`VWTransformMatrix` で Z 軸まわりに平面方位角＋支持点への
   平行移動）から `CreateCustomObjectByMatrix` で軸組ツール（`FramingMember` type=`rafter`）を
-  生成 → クラス・by-class 属性 → 断面／`LineLength`／`pitch`／`verticalReference`／
-  `2DDisplay`／軒の出／差し込み（登録名 `bearinginset`）／ラベル／構造用途／材質を設定 →
-  `ResetObject`。生成できなければ平面投影の直線にフォールバック。
-- ✅ `draw/Roof`: **屋根面オブジェクト**（VWFC の `VWRoofFaceObj`: 外形ポリゴン＋軒の天端 Z＋
-  upslope 方向＋勾配 rise/run）を直接組み立て、厚み（12mm）を `SetThickness` で与える →
-  クラス・by-class 属性 → `ResetObject`。作れなければ外形ポリゴンにフォールバック。
+  生成 → クラス・by-class 属性 → 断面／`LineLength`／`PitchAngle`／`verticalReference`／
+  `2DDisplay`／軒の出／差し込み（登録名 `bearinginset`）／ラベル（`showLabel` ＋ `labelText`）／
+  構造用途（`structuralUse`）／材質を設定 → `ResetObject`。生成できなければ平面投影の直線に
+  フォールバック。**パラメータ名は VW 実機の PIO 登録から採る**（当初 VectorScript
+  エクスポートから推定した名前——`pitch`・`label`・先頭大文字の `StructuralUse`——では
+  setter が**黙って無視されていた**。`draw/Rafter.cpp` 冒頭）。生成時に設定ダイアログが
+  開かないよう `DefineCustomObject(…, kCustomObjectPrefNever)` を 1 度だけ呼ぶ。
+- ✅ `draw/Roof`: **屋根面オブジェクト**（VWFC の `VWRoofFaceObj`）を外形ポリゴンから生成し、
+  **屋根軸・棟側の点・勾配・軸の Z はオブジェクト変数**（`ovSlabRoofPt1/Pt2/UpslopePt/Rise/Run`・
+  `ovSlabHeight`）で与えてハンドル版コンストラクタで形状を作り直す → 厚み（12mm）を
+  `SetThickness` → クラス・by-class 属性 → `ResetObject`。作れなければ外形ポリゴンに
+  フォールバック。**`VWRoofFaceObj(type, poly, z, upSlopeDir, rise, run)` は使えない**
+  （SDK のソース上 `z` を読まず、屋根軸を原点を通る線として置く）ことと、生成しただけでは
+  図面に入らない（明示的に `AddObjectToContainer` が要る）ことはローカル確認で判明した
+  （`draw/Roof.cpp` 冒頭）。`ovSlabRoofUpslopePt` は**方向ではなく棟側の点**。
 - ✅ **［Python 版と実現手段が異なる点］ISDK には VectorScript の 3D 変換状態
   （`ResetOrientation3D`／`Rotate3D`／`Move3D`）と屋根作成の一連の呼び出し
   （`BeginRoof`／`EndGroup`／`GetZVals`／`SetZVals`／`LNewObj`／`GetRoofFaceCoords`）が無い**
@@ -370,7 +375,7 @@ M7 で扱う。**Python: `ifc/rafter.py` / `ifc/roof.py`（＋屋根面ヘルパ
   副産物として、Python 版 #113 の落とし穴（テンプレートのポリゴンを屋根と誤認する／確定後の
   後付け操作で VW がクラッシュする）が構造的に起きない。`GetLayerElevation` 相当も無いため
   **高さは命令の絶対 Z をそのまま渡す**（Python 版の垂木と同じ挙動）。レイヤ相対にすべきかは
-  ローカル確認項目で、`draw/Rafter` の `SetOffset`／`draw/Roof` の `VWRoofFaceObj` 生成の
+  ローカル確認項目で、`draw/Rafter` の `SetOffset`／`draw/Roof` の `ovSlabHeight` 設定の
   1 か所ずつで切り替えられるようにしてある。**この「VS 名 → ISDK の実在 API」への読み替えは
   M7 以降でも必要**（冒頭「進め方の原則」参照）。
 - ✅ テスト: `ParseRafterTests` / `ParseRoofTests`（`test_ifc_rafter.py` / `test_ifc_roof.py` を
@@ -378,9 +383,9 @@ M7 で扱う。**Python: `ifc/rafter.py` / `ifc/roof.py`（＋屋根面ヘルパ
   退化面のスキップ・レイヤ振り分け（伏図次郎＝`2-垂木`/`R-垂木`・`2-野地板`/`R-野地板`）・
   決定性）。`ParseStoryTests` に 垂木/野地板 レベルの追加条件とスタック位置、
   `CoreDocumentTests` に検証ケースを追加。
-- ⬜ **ローカル目視確認（ユーザー）**。下記チェックリスト。
+- ✅ **ローカル目視確認済み**（下記チェックリストを VW 実機で確認）。
 
-**ローカル確認:** 屋根版を含む階に `n-垂木`/`n-野地板` レイヤができ、屋根面に沿って垂木が
+**ローカル確認（済）:** 屋根版を含む階に `n-垂木`/`n-野地板` レイヤができ、屋根面に沿って垂木が
 455mm 以下の間隔で並ぶ（両端は屋根面の端から半幅内側で、垂木がケラバからはみ出さない）。
 垂木の下端が屋根版の平面に載り、軒先が「支持点＋差し込み＋軒の出」の位置に来る（差し込みが
 既定 88.9mm のまま残って軒先が外へずれていないか）。**高さの基準**（垂木・野地板がレイヤ高さぶん

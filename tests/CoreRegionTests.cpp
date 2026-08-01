@@ -10,17 +10,18 @@
 //	用途はロフト（屋根階の床）の外形合成（parse/Floor。ROADMAP.md M5）。
 //
 
+#include "Fixtures.h"
 #include "TestFramework.h"
 
 #include "core/Region.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <vector>
 
 using HomeskzIfcImport::core::filledUnionOutlines;
 using HomeskzIfcImport::core::Vec2;
+using HomeskzIfcTests::near;
 
 namespace
 {
@@ -60,11 +61,6 @@ namespace
 			b.maxY = std::max(b.maxY, p.y);
 		}
 		return b;
-	}
-
-	bool near(double a, double b)
-	{
-		return std::abs(a - b) < 1e-6;
 	}
 
 	// 多角形の符号付き面積（反時計回りで正）。
