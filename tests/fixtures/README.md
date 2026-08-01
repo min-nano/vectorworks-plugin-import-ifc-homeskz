@@ -9,8 +9,9 @@
 以下は姉妹リポジトリ **`vectorworks-plugin-script-import-ifc-homeskz`**
 （Python 版）の `tests/fixtures/` からそのまま流用した、ホームズ君構造EX 出力の
 木造軸組工法建築物の実 IFC ファイル群です（ROADMAP.md「フィクスチャを Python 版
-`tests/fixtures/` から流用」）。移植した解析ロジックを Python 版と同じ入力で
-突き合わせ、ズレを機械的に検出するために使います（ゴールデンテスト）。
+`tests/fixtures/` から流用」）。移植した解析ロジックを Python 版と**同じ入力**で
+検証するために使います（出力どうしの機械的な突き合わせは行いません。ROADMAP.md
+「Python 版出力との比較はしない」）。
 
 いずれも ホームズ君 EX 出力（スキーマ `IFC2X3`、プロジェクト名 `HomesKZEX`）の
 サンプルデータで、ファイル名はホームズ君のサンプルファイル名をそのまま使用して
