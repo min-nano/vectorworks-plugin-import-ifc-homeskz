@@ -64,14 +64,13 @@ namespace HomeskzIfcImport::parse
 				const RoofPlane* plane = context.roofPlane(elementId);
 				if (plane == nullptr)
 					continue;
-				NoboribariRoofPlane entry;
 				// 勾配方向が定まらない面（ほぼ水平）と平面式が発散する面（鉛直）は roofSlope が
 				// 弾く。垂木・野地板とまったく同じ関門なので、拾う面が三者でズレない。
-				if (!roofSlope(*plane, entry.slope))
+				RoofSlope slope;
+				if (!roofSlope(*plane, slope))
 					continue;
-				entry.plan = RoofSlope::plan(*plane);
-				entry.storeyElevation = story.elevation;
-				planes.push_back(std::move(entry));
+				planes.push_back(
+					NoboribariRoofPlane{slope, RoofSlope::plan(*plane), story.elevation});
 			}
 		}
 		return planes;

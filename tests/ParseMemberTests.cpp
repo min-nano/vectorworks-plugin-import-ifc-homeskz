@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -188,6 +189,9 @@ namespace
 		bool verticalElementAxis = false; // 要素 Axis を鉛直（火打）にする
 		bool transpose = false;			  // プロファイルの (u, v) を入れ替える
 		int rotate = 0; // プロファイル頂点列を先頭から rotate 個ずらす
+		// 非空ならこの頂点列をそのままプロファイルに使う（平行四辺形でない 4 頂点＝
+		// 自己交差した断面などを作るため。length / height / shear / pointCount は無視される）。
+		std::vector<Vec2> customRing;
 	};
 
 	int makeSlopedBeam(StepText& step, int storey, const SlopedBeamSpec& spec)
@@ -204,7 +208,11 @@ namespace
 
 		const double halfHeight = spec.height / 2.0;
 		std::vector<Vec2> ring;
-		if (spec.pointCount == 4)
+		if (!spec.customRing.empty())
+		{
+			ring = spec.customRing;
+		}
+		else if (spec.pointCount == 4)
 		{
 			ring = {Vec2{0.0, -halfHeight}, Vec2{spec.length, -halfHeight},
 					Vec2{spec.length + spec.shear, halfHeight}, Vec2{spec.shear, halfHeight}};
@@ -709,6 +717,23 @@ TEST(sloped_geometry_false_without_solid)
 	// 形状表現の無い材からは中心軸を導出できない。
 	Model const model = loadIfcFromText("#1=IFCBEAM('b',$,$,$,$,$,$,$);\n");
 	const Entity* element = model.entity(1);
+	SlopedMemberGeometry geometry;
+	CHECK(element != nullptr && !slopedMemberGeometry(model, *element, geometry));
+}
+
+TEST(sloped_geometry_false_when_end_edge_midpoints_coincide)
+{
+	// 4 頂点でも**平行四辺形でない**（自己交差した「たすき掛け」の）断面は、両端辺の中点が
+	// 一致して中心軸の長さが 0 になる。長さ 0 の軸からは方向が定まらないのでスキップする。
+	// 頂点 (0,0)(L,0)(0,H)(L,H) は u/v の広がりが正なのに端辺の中点がどちらも (L/2, H/2)。
+	StepText step;
+	const int storey = makeStorey(step, "2FL", 0.0);
+	SlopedBeamSpec spec;
+	spec.customRing = {Vec2{0.0, 0.0}, Vec2{1000.0, 0.0}, Vec2{0.0, 120.0}, Vec2{1000.0, 120.0}};
+	const int beam = makeSlopedBeam(step, storey, spec);
+
+	Model const model = step.build();
+	const Entity* element = model.entity(beam);
 	SlopedMemberGeometry geometry;
 	CHECK(element != nullptr && !slopedMemberGeometry(model, *element, geometry));
 }
@@ -1609,6 +1634,25 @@ TEST(vertical_axis_sloped_beam_skipped)
 	makeSlopedBeam(step, storey, spec);
 
 	CHECK(buildMemberCommands(step.build()).empty());
+}
+
+TEST(sloped_beam_with_vertical_centre_axis_skipped)
+{
+	// 要素 Axis は水平でも、**任意断面から導いた中心軸**が鉛直な材（束・方杖のように
+	// 立った材が登り梁と同じ断面表現で出力された場合）は横架材でないのでスキップする。
+	// 鉛直軸の関門は要素 Axis（断面種別より先）と導出軸（登り梁経路の後）の 2 か所にある。
+	StepText step;
+	const int storey = makeStorey(step, "1FL", 473.0);
+	makeStorey(step, "RFL", 5973.0);
+	SlopedBeamSpec spec;
+	spec.theta = std::numbers::pi / 2.0; // 断面の長さ軸をワールド Z へ向ける
+	spec.name = "木梁:登り梁:1_1";
+	makeSlopedBeam(step, storey, spec);
+
+	Model const model = step.build();
+	// 中心軸そのものは導出できる（長さは正）——弾かれるのは水平成分が無いから。
+	const std::vector<core::MemberCommand> members = buildMemberCommands(model);
+	CHECK(members.empty());
 }
 
 TEST(six_point_profile_beam_skipped)
