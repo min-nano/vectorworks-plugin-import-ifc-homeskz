@@ -32,11 +32,10 @@
 //	    （embedment）はその軒桁の桁幅の半分で、軒の出（overhang）は支持点→軒先の水平距離
 //	    から差し込みを引いた残り（VW の垂木は軒先を 支持点＋差し込み＋軒の出 に置く）。
 //
-//	【M6 のスコープ】桁幅は横架材（M7）が未導入なので既定桁幅 kDefaultGirderWidth へ
-//	フォールバックする（Python 版 _girder_width_at は支持点の真下の軒桁＝横架材命令から
-//	桁幅を引くが、members が空のときは同じ既定値を返すため、M6 の出力は Python 版に
-//	「横架材を渡さなかった場合」と一致する）。M7 で横架材が入ったら、支持点の真下の軒桁を
-//	参照して精緻化する（ROADMAP.md M6「依存メモ」）。
+//	【M7 で精緻化済み】差し込みに使う桁幅は、支持点の真下にある軒桁（parse/Member の
+//	横架材命令）の実寸から採る（girderWidthAt）。受ける軒桁が見つからないときだけ既定桁幅
+//	kDefaultGirderWidth へフォールバックする（M6 では横架材が未導入で常にこの既定値だった。
+//	ROADMAP.md M6「依存メモ」/ M7）。
 //
 
 #pragma once
@@ -70,9 +69,16 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kRafterInterval = 455.0;
 
 	// 支持部分の差し込み（embedment）に使う桁幅（mm）。受ける軒桁（横架材命令）から桁幅を
-	// 参照できないときのフォールバックで、差し込みはこの半分になる。**M6 では横架材が未導入の
-	// ため常にこの既定値を使う**（ヘッダ冒頭「M6 のスコープ」参照）。
+	// 参照できないときのフォールバックで、差し込みはこの半分になる。
 	inline constexpr double kDefaultGirderWidth = 105.0;
+
+	// 桁幅の探索許容（Python 版 _GIRDER_SEARCH_TOL / _GIRDER_ALONG_TOL / _GIRDER_PERP_SIN）。
+	//   Search … 支持点から軒桁の芯線までの直交距離の上限（mm）
+	//   Along  … 芯線に沿う射影位置が区間内かの余裕（mm。角部も拾う）
+	//   PerpSin… 垂木となす角の sin の下限。これ未満（＝垂木と平行に走る材）は軒桁でない
+	inline constexpr double kGirderSearchTol = 100.0;
+	inline constexpr double kGirderAlongTol = 1.0;
+	inline constexpr double kGirderPerpSin = 0.1;
 
 	// 要素が屋根版（IfcSlab かつ Name が "屋根版" 始まり）か。**垂木（parse/Rafter）と
 	// 野地板（parse/Roof）は同じ屋根面を共有するので、判定はここに一本化する**（かつては
@@ -103,6 +109,16 @@ namespace HomeskzIfcImport::parse
 	// 上端で交点を落とす問題も回避）、確実に区間を得られる。
 	std::vector<double> sweepPositions(double eMin, double eMax, double interval, double inset);
 
+	// 支持点 (px, py) の真下にある軒桁（横架材命令）の幅を返す（Python 版 _girder_width_at）。
+	// 支持点は屋根面（垂木下面）が横架材天端 Z と交わる点で、受ける軒桁の芯線のほぼ真上に
+	// 来る。members のうち芯線が支持点に最も近い（直交距離が kGirderSearchTol 以内・射影が
+	// 芯線区間内）ものの幅を採り、見つからなければ kDefaultGirderWidth を返す。座標系は
+	// member 命令と同じセンタリング済み。(rdx, rdy) は垂木の方向（支持点→棟）で、垂木と
+	// 平行に走る材（継ぎ手・側並び）を除いて軒桁（垂木に直交）を選ぶために使う。判定は
+	// members の並び順に依存しない決定的な結果になる。
+	double girderWidthAt(double px, double py, double rdx, double rdy,
+						 const std::vector<core::MemberCommand>& members);
+
 	// 1 つの屋根面（parse/IfcGeometry の RoofPlane）から垂木命令を組み立てる（Python 版
 	// _rafters_for_plane 相当）。
 	//   plane           … 屋根面（平面外形頂点列＋上向き単位法線。Z はストーリ相対）
@@ -111,11 +127,13 @@ namespace HomeskzIfcImport::parse
 	//   center          … グリッド中心オフセット（通り芯・床と同じセンタリング）
 	//   beamTopZ        … 支持点が乗る横架材天端（最上階は軒高）の絶対 Z。std::nullopt なら
 	//                     支持点を取らず start＝軒先・overhang=0 にする
+	//   storyMembers    … 同じ階の横架材命令（差し込みに使う桁幅の参照先。空なら既定桁幅）
 	// **start＝軒側（支持点）・end＝棟側（高い端）**。ほぼ水平な面・広がりが極小の面は空
 	// （勾配方向が定まらない）。区間の平面投影長が極小（隅木際の極小片等）のものは配置しない。
 	std::vector<core::RafterCommand>
 	raftersForPlane(const RoofPlane& plane, const std::string& layer, double storeyElevation,
-					const core::Vec2& center, std::optional<double> beamTopZ = std::nullopt);
+					const core::Vec2& center, std::optional<double> beamTopZ = std::nullopt,
+					const std::vector<core::MemberCommand>& storyMembers = {});
 
 	// STEP Model から垂木の描画命令を組み立てる（Python 版 build_rafter_commands 相当）。
 	//
@@ -131,5 +149,12 @@ namespace HomeskzIfcImport::parse
 
 	// 同上。共有コンテキストのストーリ一覧・センタリング中心・屋根面を使う（parse/Context.h）。
 	// 屋根面の解決は野地板（parse/Roof）と共有されるので、屋根版 1 枚あたり 1 回で済む。
+	// 桁幅の参照先は Context::members（＝登り梁の補正前）。
 	std::vector<core::RafterCommand> buildRafterCommands(Context& context);
+
+	// 同上だが、桁幅の参照先の横架材命令を明示的に渡す。parse/BuildDocument は**登り梁の
+	// 補正後**の命令を渡す（Python 版 build_document が補正後の members を
+	// build_rafter_commands へ渡すのと同じ）。
+	std::vector<core::RafterCommand>
+	buildRafterCommands(Context& context, const std::vector<core::MemberCommand>& members);
 } // namespace HomeskzIfcImport::parse

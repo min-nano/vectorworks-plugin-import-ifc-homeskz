@@ -195,6 +195,27 @@ target_link_libraries(ParseRoofTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseRoofTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Member (横架材) parsing (src/parse/Member): IfcBeam / IfcMember -> structural-member
+# commands — the section-centre-to-top-centre reference correction, per-beam elevation from
+# the element's own local Z, story-level binding (横架材天端 / 軒高 / 母屋 / 登り梁), the
+# sloped-beam (登り梁) arbitrary-profile extraction with its square-cut geometry, and the
+# T/L interference trimming. Exercised on synthetic STEP snippets and the checked-in
+# fixtures; SDK-free. HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseMemberTests ParseMemberTests.cpp)
+target_link_libraries(ParseMemberTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseMemberTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
+# Sloped-beam (登り梁) correction (src/parse/Noboribari): trims the ends that homeskz sinks
+# into the receiving members and snaps the top centre line onto the roof face fixed in M6,
+# so the pitch and height match the rafter underside. Exercised on synthetic planes/commands
+# and the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseNoboribariTests ParseNoboribariTests.cpp)
+target_link_libraries(ParseNoboribariTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseNoboribariTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # Shared parse context (src/parse/Context): the per-import cache that lets every
 # element's build*Commands reuse the same stories / grid centre / storey elements /
 # loft-floor regions / roof planes instead of recomputing them. Proves the cached

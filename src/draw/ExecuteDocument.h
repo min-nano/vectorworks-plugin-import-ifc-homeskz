@@ -10,8 +10,8 @@
 //	される（無 SDK の core/parse ライブラリには含めない）。この宣言ヘッダ自体は
 //	core::Document しか参照せず、SDK ヘッダを引き込まない。
 //
-//	現状は story（M3）→ grid（M1）→ floor（M5）→ rafter → roof（M6）へディスパッチする。
-//	残りの要素は対応マイルストーンで足していく。
+//	現状は story（M3）→ grid（M1）→ floor（M5）→ member（M7）→ rafter → roof（M6）へ
+//	ディスパッチする。残りの要素は対応マイルストーンで足していく。
 //
 
 #pragma once
@@ -32,14 +32,15 @@ namespace HomeskzIfcImport::draw
 		std::size_t stories = 0;
 		std::size_t grids = 0;
 		std::size_t floors = 0;
+		std::size_t members = 0;
 		std::size_t rafters = 0;
 		std::size_t roofs = 0;
 	};
 
 	// 命令セットを描画する。validateDocument を通してから、命令ごとに要素の draw モジュール
-	// （story → grid → floor → rafter → roof の順）へディスパッチし、描けた数を返す。検証を
-	// 通らなかったときは valid=false で何も描かない。命令が空でも検証は通る（valid=true）。
+	// （story → grid → floor → member → rafter → roof の順）へディスパッチし、描けた数を返す。
+	// 検証を通らなかったときは valid=false で何も描かない。命令が空でも検証は通る（valid=true）。
 	//
-	// TODO(M7〜): member / column … と、要素ごとの draw モジュールへのディスパッチを足す。
+	// TODO(M8〜): column … と、要素ごとの draw モジュールへのディスパッチを足す。
 	DrawCounts executeDocument(const core::Document& document);
 } // namespace HomeskzIfcImport::draw

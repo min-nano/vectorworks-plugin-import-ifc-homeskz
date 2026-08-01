@@ -4,9 +4,10 @@
 //	validateDocument の実装。Python 版 document.py の validateDocument に対応する。
 //	SDK 非依存（core/ は VectorWorks SDK を一切 include しない）。
 //
-//	現状はバージョンの妥当性と、stories（M3）・floors（M5）・rafters / roofs（M6）・
-//	grids（M1）の各命令の必須フィールド・値域を見る。命令リスト（members / columns …）が追加されるたびに、
-//	対応する検証規則（必須フィールドの有無・参照整合性・値域）をここへ足していく。
+//	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・
+//	rafters / roofs（M6）・grids（M1）の各命令の必須フィールド・値域を見る。命令リスト
+//	（columns / walls …）が追加されるたびに、対応する検証規則（必須フィールドの有無・
+//	参照整合性・値域）をここへ足していく。
 //
 
 #include "core/Document.h"
@@ -71,6 +72,19 @@ namespace HomeskzIfcImport::core
 				   rafter.height > 0.0 && !samePoint(rafter.start, rafter.end);
 		}
 
+		// 横架材 1 本が妥当か（Python 版 _validate_member 相当）。配置先レイヤ名・クラス名・
+		// 構造材 ID が非空で、断面（幅・せい）が正で、天端中央線の始端・終端が縮退していない
+		// こと（判定は core/Geometry の samePoint）。始端・終端の高さ基準のレベル種別も非空
+		// （空だと SetObjectStoryBound が解決できず、高さがレイヤ基準へリセットされる）。
+		// elevation / endElevation は数値（double なので常に成立）。
+		bool isValidMember(const MemberCommand& member)
+		{
+			return !member.layer.empty() && !member.drawClass.empty() && !member.memberId.empty() &&
+				   member.width > 0.0 && member.height > 0.0 &&
+				   !samePoint(member.start, member.end) && !member.startBound.level.empty() &&
+				   !member.endBound.level.empty();
+		}
+
 		// 野地板 1 枚が妥当か（Python 版 _validate_roof 相当）。配置先レイヤ名・クラス名が
 		// 非空で、平面外形が 3 点以上（面になる）で、厚みが正であること。勾配（rise/run）と
 		// 高さは数値（double なので常に成立）で、退化した勾配は描画側がフォールバックで
@@ -98,6 +112,12 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.floors, isValidFloor))
 			return false;
 
+		// 横架材: 配置先レイヤ名・クラス名・構造材 ID が非空で、断面が正・天端中央線が非縮退、
+		// 両端の高さ基準のレベル種別が非空であること（isValidMember 参照。Python 版
+		// _validate_member と同じ関門。ROADMAP.md M7）。
+		if (!std::ranges::all_of(document.members, isValidMember))
+			return false;
+
 		// 垂木・野地板: 配置先レイヤ名・クラス名が非空で、垂木は断面が正・平面が非縮退、
 		// 野地板は外形 3 点以上・厚みが正であること（Python 版 _validate_rafter /
 		// _validate_roof と同じ関門。ROADMAP.md M6）。
@@ -113,7 +133,7 @@ namespace HomeskzIfcImport::core
 		// （Python 版 validateDocument と同じ関門。ROADMAP.md M1）。
 		//
 		// TODO: 命令リストが増えたら、要素ごとの all_of を && で連ねてここに積む
-		// （member … の検証。ROADMAP.md）。
+		// （column … の検証。ROADMAP.md）。
 		return std::ranges::all_of(
 			document.grids, [](const GridCommand& grid)
 			{ return !grid.layer.empty() && !samePoint(grid.start, grid.end); });

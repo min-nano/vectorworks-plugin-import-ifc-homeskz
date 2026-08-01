@@ -474,8 +474,11 @@ TEST(reads_sample_house_fixture)
 		CHECK_EQ(roof->suffix, std::string("R"));
 		CHECK(near(roof->elevation, 6300.0));
 		// 床版の無い屋根に FL は付かない（ロフトの床がある屋根には FL が加わる。下のテスト）。
-		// 屋根版（屋根面）はあるので 垂木・野地板 レベルが軒高の直上に積まれる（M6）。
-		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"野地板", "垂木", "軒高"}));
+		// 屋根版（屋根面）はあるので 垂木・野地板 レベルが軒高の直上に積まれ（M6）、母屋・棟木の
+		// 命令があるので 母屋 レベルがその下（軒高の直上）に積まれる（M7）。このモデルに登り梁は
+		// 無いので 登り梁 レベルは作らない（空レイヤを作らない）。
+		CHECK(
+			sameVec(levelTypes(*roof), std::vector<std::string>{"野地板", "垂木", "母屋", "軒高"}));
 	}
 
 	// 一般階は FL＋横架材天端の 2 レベル（順序は FL が上）。
@@ -485,6 +488,49 @@ TEST(reads_sample_house_fixture)
 		const std::vector<std::string> base = {"FL", "横架材天端"};
 		CHECK(sameVec(levelTypes(*first), base));
 	}
+}
+
+// ---------------------------------------------------------------------------
+// 母屋レベル（母屋・棟木の命令がある階にだけ足す。M7）
+// ---------------------------------------------------------------------------
+
+TEST(moya_level_only_on_stories_with_moya_member)
+{
+	// 母屋（"木梁:母屋:…"）を 1 本だけ持つ最上階。母屋レベルが軒高の直上に積まれ、
+	// レイヤ "R-母屋" ができる。判定は**組み立てた横架材命令の配置先レイヤ**で、名前判定
+	// ではない（parse/Story.cpp の「Python 版との差異」）。
+	const std::string moya = "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
+							 "#2=IFCDIRECTION((1.,0.,0.));\n"
+							 "#3=IFCAXIS2PLACEMENT3D(#1,#2,$);\n"
+							 "#4=IFCLOCALPLACEMENT($,#3);\n"
+							 "#5=IFCRECTANGLEPROFILEDEF(.AREA.,$,$,105.,105.);\n"
+							 "#6=IFCDIRECTION((1.,0.,0.));\n"
+							 "#7=IFCEXTRUDEDAREASOLID(#5,$,#6,1000.);\n"
+							 "#8=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#7));\n"
+							 "#9=IFCPRODUCTDEFINITIONSHAPE($,$,(#8));\n"
+							 "#10=IFCBEAM('b',$,'木梁:母屋:1_1',$,$,#4,#9,$);\n"
+							 "#11=IFCBUILDINGSTOREY('s',$,'RFL',$,$,$,$,$,.ELEMENT.,3000.);\n"
+							 "#12=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#10),#11);\n";
+	const std::vector<StoryCommand> withMoya = buildStoryCommands(loadIfcFromText(moya));
+	CHECK_EQ(withMoya.size(), static_cast<std::size_t>(1));
+	if (withMoya.size() == 1)
+	{
+		CHECK(sameVec(levelTypes(withMoya[0]), std::vector<std::string>{"母屋", "軒高"}));
+		CHECK_EQ(withMoya[0].levels.front().layer, std::string("R-母屋"));
+		// 高さは軒高に揃える（最上階のオフセットは 0）。
+		CHECK(near(withMoya[0].levels.front().offset, 0.0));
+	}
+
+	// 同じモデルから母屋を外す（軒桁にする）と、母屋レベルは作らない＝空レイヤを作らない。
+	std::string girder = moya;
+	const std::string::size_type at = girder.find("木梁:母屋:1_1");
+	CHECK(at != std::string::npos);
+	if (at != std::string::npos)
+		girder.replace(at, std::string("木梁:母屋:1_1").size(), "木梁:軒桁:1_1");
+	const std::vector<StoryCommand> withoutMoya = buildStoryCommands(loadIfcFromText(girder));
+	CHECK_EQ(withoutMoya.size(), static_cast<std::size_t>(1));
+	if (withoutMoya.size() == 1)
+		CHECK(sameVec(levelTypes(withoutMoya[0]), std::vector<std::string>{"軒高"}));
 }
 
 // ---------------------------------------------------------------------------

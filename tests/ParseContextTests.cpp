@@ -21,6 +21,7 @@
 #include "parse/Grid.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Loader.h"
+#include "parse/Member.h"
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
 #include "parse/Story.h"
@@ -233,6 +234,34 @@ TEST(unresolvable_roof_plane_is_remembered_as_absent)
 // 共有コンテキストを通した Document が、通さない場合と一致する（本命の回帰）
 // ---------------------------------------------------------------------------
 
+TEST(members_are_cached_and_match_the_plain_call)
+{
+	// 横架材の解析はストーリ・垂木・登り梁の補正が共有するので、コンテキストは 1 回だけ
+	// 走らせて覚える。2 度目が同じ結果（同じ実体）を返し、キャッシュを通さない呼び出しとも
+	// 一致すること。
+	bool ok = false;
+	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	CHECK(ok);
+	if (!ok)
+		return;
+
+	Context context(model);
+	const std::vector<core::MemberCommand>& first = context.members();
+	const std::vector<core::MemberCommand>& second = context.members();
+	CHECK(&first == &second);
+
+	const std::vector<core::MemberCommand> plain = parse::buildMemberCommands(model);
+	CHECK_EQ(first.size(), plain.size());
+	CHECK(!plain.empty());
+	for (std::size_t i = 0; i < first.size() && i < plain.size(); ++i)
+	{
+		CHECK_EQ(first[i].layer, plain[i].layer);
+		CHECK_EQ(first[i].memberId, plain[i].memberId);
+		CHECK(near(first[i].elevation, plain[i].elevation));
+		CHECK(near(first[i].start.x, plain[i].start.x));
+	}
+}
+
 TEST(context_backed_commands_match_the_plain_commands)
 {
 	for (const std::string& name : HomeskzIfcTests::allFixtures())
@@ -247,11 +276,13 @@ TEST(context_backed_commands_match_the_plain_commands)
 		const std::vector<core::StoryCommand> stories = parse::buildStoryCommands(shared);
 		const std::vector<core::GridCommand> grids = parse::buildGridCommands(shared);
 		const std::vector<core::FloorCommand> floors = parse::buildFloorCommands(shared);
+		const std::vector<core::MemberCommand> members = parse::buildMemberCommands(shared);
 		const std::vector<core::RafterCommand> rafters = parse::buildRafterCommands(shared);
 		const std::vector<core::RoofCommand> roofs = parse::buildRoofCommands(shared);
 
 		CHECK_EQ(stories.size(), parse::buildStoryCommands(model).size());
 		CHECK_EQ(grids.size(), parse::buildGridCommands(model).size());
+		CHECK_EQ(members.size(), parse::buildMemberCommands(model).size());
 		CHECK_EQ(rafters.size(), parse::buildRafterCommands(model).size());
 		CHECK_EQ(roofs.size(), parse::buildRoofCommands(model).size());
 

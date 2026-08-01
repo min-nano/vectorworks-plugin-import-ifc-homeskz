@@ -20,6 +20,8 @@
 #include "parse/Floor.h"
 #include "parse/Grid.h"
 #include "parse/Loader.h"
+#include "parse/Member.h"
+#include "parse/Noboribari.h"
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
 #include "parse/Story.h"
@@ -39,8 +41,17 @@ namespace HomeskzIfcImport::parse
 
 		core::Document document;
 
+		// M7 横架材: 先に組み立てる。ストーリ（母屋・登り梁レイヤを作るか）・垂木（差し込みの
+		// 桁幅）・登り梁の位置補正が同じ結果を必要とするため、Context が 1 回だけ解析して
+		// 全員へ配る（parse/Context.h の members）。**登り梁は屋根面へスナップ補正**して
+		// から Document に載せる（形状先行。parse/Noboribari）。受ける材は横架材のみで、
+		// 柱を参照する最終化は M8 で足す（ROADMAP.md M7）。
+		document.members = correctNoboribari(context, context.members());
+
 		// M3 ストーリ: IfcBuildingStorey を解析して StoryCommand を積む（parse/Story）。
 		// 以降の要素はここで作られたレベルへ高さをバインドするため、grids より先に置く。
+		// 母屋・登り梁レベルは横架材命令の配置先レイヤから決まる（補正はレイヤを変えない
+		// ので、Context の補正前の命令で判定して同じ結果になる）。
 		document.stories = buildStoryCommands(context);
 
 		// M1 通り芯: IfcGridAxis を解析して GridCommand を積む（parse/Grid）。
@@ -51,10 +62,11 @@ namespace HomeskzIfcImport::parse
 		document.floors = buildFloorCommands(context);
 
 		// M6 屋根面・屋根組: 屋根版（IfcSlab "屋根版"）から垂木・野地板を導出する
-		// （parse/Rafter / parse/Roof）。屋根面は建物形状の要で、M7 の登り梁はここで確定した
-		// 屋根面へスナップ補正される（形状先行）。以降のマイルストーンで Member / Column …
-		// の解析を同様に足していく（ROADMAP.md）。
-		document.rafters = buildRafterCommands(context);
+		// （parse/Rafter / parse/Roof）。屋根面は建物形状の要で、上の登り梁はここで確定した
+		// 屋根面へスナップ補正されている（形状先行）。垂木の差し込みに使う桁幅は**補正後の**
+		// 横架材命令から引く（Python 版 build_document と同じ順序）。以降のマイルストーンで
+		// Column … の解析を同様に足していく（ROADMAP.md）。
+		document.rafters = buildRafterCommands(context, document.members);
 		document.roofs = buildRoofCommands(context);
 
 		return document;

@@ -78,4 +78,11 @@ namespace HomeskzIfcImport::parse
 			return nullptr;
 		return &cached.value();
 	}
+
+	const std::vector<core::MemberCommand>& Context::members()
+	{
+		if (!fMembers.has_value())
+			fMembers = buildMemberCommands(*this);
+		return *fMembers;
+	}
 } // namespace HomeskzIfcImport::parse

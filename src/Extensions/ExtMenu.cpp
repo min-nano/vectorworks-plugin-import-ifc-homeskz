@@ -190,8 +190,8 @@ void CImportIfcMenu_EventSink::DoInterface()
 	//    読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
 	const core::Document document = parse::buildDocument(ifcPath);
 
-	// 3. Phase 2（SDK 依存）: 命令セットを検証してからストーリ・通り芯・床・屋根組（垂木・
-	//    野地板）を描く。検証を通らなければ valid=false で何も描かない。
+	// 3. Phase 2（SDK 依存）: 命令セットを検証してからストーリ・通り芯・床・横架材・屋根組
+	//    （垂木・野地板）を描く。検証を通らなければ valid=false で何も描かない。
 	const draw::DrawCounts drawn = draw::executeDocument(document);
 
 	// 4. 結果をダイアログ表示。本文には**実際に描けた数**を出し、命令はあるのに描けなかった
@@ -209,17 +209,18 @@ void CImportIfcMenu_EventSink::DoInterface()
 	};
 
 	const std::size_t commandCount = document.stories.size() + document.grids.size() +
-									 document.floors.size() + document.rafters.size() +
-									 document.roofs.size();
+									 document.floors.size() + document.members.size() +
+									 document.rafters.size() + document.roofs.size();
 	std::string body;
 	if (!drawn.valid)
 		body = "命令セットの検証に通らなかったため、何も描きませんでした。";
 	else if (commandCount == 0)
-		body = "ストーリ・通り芯・床・屋根組が見つかりませんでした。";
+		body = "ストーリ・通り芯・床・横架材・屋根組が見つかりませんでした。";
 	else
 		body = "ストーリ " + formatCount(drawn.stories, document.stories.size()) + " 層・通り芯 " +
 			   formatCount(drawn.grids, document.grids.size()) + " 本・床 " +
-			   formatCount(drawn.floors, document.floors.size()) + " 枚・垂木 " +
+			   formatCount(drawn.floors, document.floors.size()) + " 枚・横架材 " +
+			   formatCount(drawn.members, document.members.size()) + " 本・垂木 " +
 			   formatCount(drawn.rafters, document.rafters.size()) + " 本・野地板 " +
 			   formatCount(drawn.roofs, document.roofs.size()) + " 枚を描きました。";
 	gSDK->AlertInform(body.c_str(), ifcPath.c_str(),

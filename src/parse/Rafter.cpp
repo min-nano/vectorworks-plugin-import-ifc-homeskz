@@ -114,9 +114,47 @@ namespace HomeskzIfcImport::parse
 		return positions;
 	}
 
+	double girderWidthAt(double px, double py, double rdx, double rdy,
+						 const std::vector<core::MemberCommand>& members)
+	{
+		const double rafterLength = std::hypot(rdx, rdy);
+		double bestDistance = kGirderSearchTol;
+		double bestWidth = kDefaultGirderWidth;
+		bool found = false;
+		for (const core::MemberCommand& member : members)
+		{
+			const double mdx = member.end.x - member.start.x;
+			const double mdy = member.end.y - member.start.y;
+			const double memberLength = std::hypot(mdx, mdy);
+			if (memberLength <= 0.0)
+				continue;
+			const double ux = mdx / memberLength;
+			const double uy = mdy / memberLength;
+
+			// 芯線に沿う射影位置 t が区間内か、芯線からの直交距離が許容内かを判定する。
+			const double t = ((px - member.start.x) * ux) + ((py - member.start.y) * uy);
+			if (t < -kGirderAlongTol || t > memberLength + kGirderAlongTol)
+				continue;
+			const double perpendicular =
+				std::abs((-(px - member.start.x) * uy) + ((py - member.start.y) * ux));
+			if (perpendicular > bestDistance)
+				continue;
+			// 垂木と平行に走る材は軒桁でないため除外する（なす角の sin が小さい）。
+			if (rafterLength > 0.0 &&
+				std::abs((rdx * uy) - (rdy * ux)) / rafterLength < kGirderPerpSin)
+				continue;
+
+			bestDistance = perpendicular;
+			bestWidth = member.width;
+			found = true;
+		}
+		return found ? bestWidth : kDefaultGirderWidth;
+	}
+
 	std::vector<RafterCommand> raftersForPlane(const RoofPlane& plane, const std::string& layer,
 											   double storeyElevation, const Vec2& center,
-											   std::optional<double> beamTopZ)
+											   std::optional<double> beamTopZ,
+											   const std::vector<core::MemberCommand>& storyMembers)
 	{
 		// 勾配の座標系（勾配方向 down・掃引方向 along・平面上の天端 Z）は野地板と共有する
 		// （parse/IfcGeometry の RoofSlope）。
@@ -146,10 +184,6 @@ namespace HomeskzIfcImport::parse
 		const double dy = slope.down.y;
 
 		const std::string label = rafterLabel();
-		// 差し込み（支持点→壁外面）。M6 は横架材が未導入なので既定桁幅の半分
-		// （ヘッダ「M6 のスコープ」。Python 版も members が空なら同じ値になる）。
-		const double embedment = kDefaultGirderWidth / 2.0;
-
 		const std::size_t vertexCount = plan.size();
 		std::vector<RafterCommand> commands;
 		for (const double t :
@@ -229,6 +263,12 @@ namespace HomeskzIfcImport::parse
 				cmd.end = Vec2{high.x - center.x, high.y - center.y};
 				cmd.elevation = supportZ;
 				cmd.endElevation = zRidge;
+				// 差し込み（支持点→壁外面）＝支持点の真下にある軒桁の桁幅の半分。受ける
+				// 軒桁が見つからなければ既定桁幅（M6 の挙動と同じ値）。
+				const double embedment =
+					girderWidthAt(cmd.start.x, cmd.start.y, cmd.end.x - cmd.start.x,
+								  cmd.end.y - cmd.start.y, storyMembers) /
+					2.0;
 				// 壁外面から軒先の距離（overhang）＝ 支持点→軒先（supportToTip）から支持部分の
 				// 差し込み（embedment ＝ 支持点→壁外面）を引いた残り。VW の垂木は軒先を
 				// 支持点＋差し込み＋軒の出 に置くため、両者の和が supportToTip になるようにする。
@@ -241,7 +281,8 @@ namespace HomeskzIfcImport::parse
 		return commands;
 	}
 
-	std::vector<RafterCommand> buildRafterCommands(Context& context)
+	std::vector<RafterCommand> buildRafterCommands(Context& context,
+												   const std::vector<core::MemberCommand>& members)
 	{
 		const Model& model = context.model();
 		const std::vector<StoryInfo> stories = context.stories();
@@ -259,6 +300,14 @@ namespace HomeskzIfcImport::parse
 			// 支持点が乗る横架材天端の絶対 Z（最上階は軒高＝オフセット 0）。
 			const double beamTopZ =
 				story.isTop ? story.elevation : story.elevation + story.beamOffset;
+			// 桁幅の参照先は同じ階の横架材だけ（レイヤ接頭辞 "{n}-" で絞る。Python 版と同じ）。
+			const std::string layerPrefix = storyLayerPrefix(i, story.isTop) + "-";
+			std::vector<core::MemberCommand> storyMembers;
+			for (const core::MemberCommand& member : members)
+			{
+				if (member.layer.compare(0, layerPrefix.size(), layerPrefix) == 0)
+					storyMembers.push_back(member);
+			}
 
 			for (const int elementId : context.storyElements(story.id))
 			{
@@ -272,12 +321,17 @@ namespace HomeskzIfcImport::parse
 					continue; // 屋根面を解決できない屋根版はスキップ
 
 				std::vector<RafterCommand> rafters =
-					raftersForPlane(*plane, layer, story.elevation, center, beamTopZ);
+					raftersForPlane(*plane, layer, story.elevation, center, beamTopZ, storyMembers);
 				for (RafterCommand& rafter : rafters)
 					commands.push_back(std::move(rafter));
 			}
 		}
 		return commands;
+	}
+
+	std::vector<RafterCommand> buildRafterCommands(Context& context)
+	{
+		return buildRafterCommands(context, context.members());
 	}
 
 	std::vector<RafterCommand> buildRafterCommands(const Model& model)
