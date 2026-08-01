@@ -1,10 +1,16 @@
 name: Stable release health check
 
-# Safety net for the "stable" release. build.yml publishes it on every push to
-# main, retrying through transient GitHub API outages. If every retry still
-# fails, the stable release silently falls behind main. This scheduled job
-# compares the published stable release to the tip of main and, when they have
+# Safety net for the "stable" distribution. build.yml publishes it on every push
+# to main: the assets + manifest go to the Cloudflare R2 bucket (what the updater
+# reads), and the GitHub Release is refreshed as the human-facing record. If both
+# retries still fail, stable silently falls behind main. This scheduled job
+# compares what is actually published to the tip of main and, when they have
 # drifted apart, re-dispatches build.yml on main to rebuild and republish.
+#
+# The R2 side is checked over the PUBLIC base URL rather than the S3 API on
+# purpose: that is the exact path a user's plug-in takes, so this also catches a
+# broken/stale custom domain or an object that never became publicly readable —
+# not just a missing upload.
 #
 # NOTE: scheduled workflows only run from the copy of this file on the default
 # branch, so this becomes active once merged to main.
@@ -24,24 +30,41 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      VW_R2_PUBLIC_BASE: ${{ vars.VW_R2_PUBLIC_BASE }}
     steps:
-      - name: Compare stable release to main and republish if stale
+      - name: Compare the published stable build to main and republish if stale
         run: |
           set -euo pipefail
 
+          if [ -z "$VW_R2_PUBLIC_BASE" ]; then
+            echo "::error::Repository variable VW_R2_PUBLIC_BASE is not set; cannot check the published build."
+            exit 1
+          fi
+          base="${VW_R2_PUBLIC_BASE%/}"
+
           main_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-          stable_sha="$(gh release view stable --repo "$GITHUB_REPOSITORY" \
+
+          # The manifest is served with no-cache, but append a cache-buster too
+          # so an intermediate proxy cannot hand us a stale copy and hide drift.
+          manifest_sha="$(curl -fsSL --max-time 30 --retry 2 \
+            -H 'Cache-Control: no-cache' \
+            "${base}/stable/manifest.json?ts=${GITHUB_RUN_ID}" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("commit",""))' \
+            2>/dev/null || echo "")"
+
+          release_sha="$(gh release view stable --repo "$GITHUB_REPOSITORY" \
             --json targetCommitish -q .targetCommitish 2>/dev/null || echo "")"
 
-          echo "main:   $main_sha"
-          echo "stable: ${stable_sha:-<none>}"
+          echo "main:     $main_sha"
+          echo "manifest: ${manifest_sha:-<none>}"
+          echo "release:  ${release_sha:-<none>}"
 
-          if [ "$stable_sha" = "$main_sha" ]; then
-            echo "Stable release is up to date."
+          if [ "$manifest_sha" = "$main_sha" ] && [ "$release_sha" = "$main_sha" ]; then
+            echo "The published stable build is up to date."
             exit 0
           fi
 
-          echo "::warning::Stable release is stale (stable=${stable_sha:-none}, main=${main_sha}); re-dispatching build on main to republish."
+          echo "::warning::Stable is stale (manifest=${manifest_sha:-none}, release=${release_sha:-none}, main=${main_sha}); re-dispatching build on main to republish."
 
           # Don't pile on if a build for main is already running (e.g. the normal
           # post-push build is still in flight) — it will publish on its own.

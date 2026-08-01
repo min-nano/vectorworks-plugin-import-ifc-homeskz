@@ -6,11 +6,11 @@
 //
 //	The parsers here consume text that ultimately comes from OUTSIDE the plug-in:
 //	the machine-readable output of the bundled updater scripts, which in turn is
-//	built from the GitHub REST API's responses (release names, asset URLs, commit
-//	SHAs, branch names). None of that is under our control — GitHub can change a
-//	field, a branch name can contain odd bytes, a network hiccup can truncate the
-//	output mid-line. These tests therefore feed the parsers deliberately hostile
-//	and malformed input and assert two things:
+//	built from the JSON manifests published alongside each build (branch names,
+//	asset URLs, commit SHAs). None of that is under our control — the publishing
+//	side can change a field, a branch name can contain odd bytes, a network
+//	hiccup can truncate the output mid-line. These tests therefore feed the
+//	parsers deliberately hostile and malformed input and assert two things:
 //
 //	  1. No crash / no undefined behaviour. This matters most when the suite is
 //	     built with -DVW_ENABLE_SANITIZERS=ON (ASan + UBSan): an out-of-bounds
@@ -221,7 +221,7 @@ TEST(embedded_nul_in_quoters_and_paths)
 }
 
 // ---------------------------------------------------------------------------
-// Degenerate line structure — the kinds of thing a truncated or reshaped GitHub
+// Degenerate line structure — the kinds of thing a truncated or reshaped
 // response could produce.
 // ---------------------------------------------------------------------------
 
@@ -275,7 +275,7 @@ TEST(huge_single_line_no_newline)
 
 TEST(crlf_line_endings)
 {
-	// GitHub-derived text could arrive with CRLF. ValueOf splits on '\n'; Trim
+	// Manifest-derived text could arrive with CRLF. ValueOf splits on '\n'; Trim
 	// then strips the stray '\r', so the value is clean.
 	const std::string out = "installed=abc\r\nlatest=def\r\nurl=https://ex.com/x.zip\r\n";
 	CHECK_EQ(ValueOf(out, "installed"), "abc");
@@ -287,7 +287,7 @@ TEST(crlf_line_endings)
 
 TEST(high_bytes_utf8_branch_names)
 {
-	// Non-ASCII branch/release names (fully valid on GitHub) must pass through
+	// Non-ASCII branch names (fully valid in git) must pass through
 	// unharmed and not confuse the tab splitting.
 	const std::string out = "build\tc0ffee1\t機能/日本語ブランチ\thttps://ex.com/a.zip\n"
 							"build\tdeadbee\tfeature/émoji-🚀\thttps://ex.com/b.zip\n";

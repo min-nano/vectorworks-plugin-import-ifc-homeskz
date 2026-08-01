@@ -12,10 +12,10 @@
 #
 #	  * jval        the JSON boundary. Real jval shells out to `plutil`, which is
 #	                macOS-only; here it is emulated with python3 so the REAL
-#	                asset_url / q_stable / q_dev logic runs against JSON fixtures
+#	                short_of / q_stable / q_dev logic runs against JSON fixtures
 #	                on a plain Linux runner. (This mirrors the C++ tests, which
 #	                also run SDK-free on Linux — see tests/README.md.)
-#	  * api_get     returns a fixture instead of hitting the GitHub REST API.
+#	  * fetch_json  returns a fixture instead of fetching the R2 manifest.
 #	  * download    copies a local fixture zip instead of downloading one.
 #	  * installed_commit  returns a canned commit (real one needs macOS
 #	                      PlistBuddy); its "no bundle -> none" branch is still
@@ -118,6 +118,13 @@ check_not_contains() { # haystack needle [label]
 # cannot abort the harness. Each function under test is still invoked inside a
 # `set -euo pipefail` subshell (RUN, below) so its real behaviour is preserved.
 # ---------------------------------------------------------------------------
+# The distribution base URL is injected at BUILD time (CMake substitutes
+# @VW_UPDATE_BASE_URL@), so the repository copy of the script has none and every
+# mode would short-circuit with "配布先 URL が設定されていません". Provide one
+# through the environment BEFORE sourcing, exactly as a manual run would; the
+# "not configured" branch is covered by its own test below.
+export VW_BASE_URL="https://dist.example.test"
+
 # shellcheck source=/dev/null
 source "$SCRIPT"
 set +e +u +o pipefail
@@ -150,15 +157,16 @@ except Exception:
 PY
 }
 
-# api_get: copy the fixture selected for this endpoint into a fresh temp file and
-# echo its path — the real api_get returns a temp file the caller then `rm`s, so
-# we must NOT hand back the fixture itself. VW_TEST_API_FAIL simulates offline.
-api_get() { # api-subpath
+# fetch_json: copy the fixture selected for this bucket key into a fresh temp file
+# and echo its path — the real fetch_json returns a temp file the caller then
+# `rm`s, so we must NOT hand back the fixture itself. VW_TEST_API_FAIL simulates
+# an unreachable bucket.
+fetch_json() { # bucket key
 	[ -n "${VW_TEST_API_FAIL:-}" ] && return 1
 	local fixture=""
 	case "$1" in
-		releases/tags/stable) fixture="${VW_TEST_STABLE_JSON:-}" ;;
-		releases*) fixture="${VW_TEST_RELEASES_JSON:-}" ;;
+		stable/manifest.json) fixture="${VW_TEST_STABLE_JSON:-}" ;;
+		dev/index.json) fixture="${VW_TEST_INDEX_JSON:-}" ;;
 	esac
 	[ -n "$fixture" ] && [ -f "$fixture" ] || return 1
 	local f
@@ -190,39 +198,51 @@ xattr() { return 0; }
 RUN() { ( set -euo pipefail; "$@" ); }
 
 # --- Fixtures -------------------------------------------------------------
+# The two JSON objects the bucket serves (see scripts/r2-publish.sh for the
+# schema): the stable manifest, and the dev index listing one entry per branch.
 STABLE_JSON="$WORK/stable.json"
 cat >"$STABLE_JSON" <<'JSON'
 {
-  "target_commitish": "abc1234def5678",
-  "assets": [
-    { "name": "HomeskzIfcImport.vwlibrary.zip",
-      "browser_download_url": "https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" },
-    { "name": "notes.txt",
-      "browser_download_url": "https://example.test/dl/notes.txt" }
+  "schema": 1,
+  "channel": "stable",
+  "branch": "main",
+  "commit": "abc1234def5678",
+  "short": "abc1234",
+  "built": "2026-08-01T00:00:00Z",
+  "mac": "https://dist.example.test/stable/abc1234/HomeskzIfcImport.vwlibrary.zip",
+  "win": "https://dist.example.test/stable/abc1234/HomeskzIfcImport.vlb.zip"
+}
+JSON
+
+# feature/y deliberately has NO "short" (the commit-prefix fallback must kick
+# in), feature/z has no download URLs (must be skipped), and the last entry has
+# no "branch" (the slug must stand in as the display name).
+INDEX_JSON="$WORK/index.json"
+cat >"$INDEX_JSON" <<'JSON'
+{
+  "schema": 1,
+  "generated": "2026-08-01T00:00:00Z",
+  "builds": [
+    { "branch": "feature/x", "slug": "feature-x",
+      "commit": "aaa1111ccc", "short": "aaa1111",
+      "mac": "https://dist.example.test/dev/feature-x/aaa1111/HomeskzIfcImportDev.vwlibrary.zip",
+      "win": "https://dist.example.test/dev/feature-x/aaa1111/HomeskzIfcImportDev.vlb.zip" },
+    { "branch": "feature/y", "slug": "feature-y",
+      "commit": "bbb2222ddd",
+      "mac": "https://dist.example.test/dev/feature-y/bbb2222/HomeskzIfcImportDev.vwlibrary.zip",
+      "win": "https://dist.example.test/dev/feature-y/bbb2222/HomeskzIfcImportDev.vlb.zip" },
+    { "branch": "feature/z", "slug": "feature-z",
+      "commit": "ccc3333eee", "short": "ccc3333" },
+    { "slug": "no-branch-field",
+      "commit": "ddd4444fff", "short": "ddd4444",
+      "mac": "https://dist.example.test/dev/no-branch-field/ddd4444/HomeskzIfcImportDev.vwlibrary.zip",
+      "win": "https://dist.example.test/dev/no-branch-field/ddd4444/HomeskzIfcImportDev.vlb.zip" }
   ]
 }
 JSON
 
-RELEASES_JSON="$WORK/releases.json"
-cat >"$RELEASES_JSON" <<'JSON'
-[
-  { "tag_name": "stable", "name": "stable", "target_commitish": "zzz9999",
-    "assets": [ { "name": "HomeskzIfcImport.vwlibrary.zip",
-                  "browser_download_url": "https://example.test/dl/stable.zip" } ] },
-  { "tag_name": "dev-feature-x", "name": "feature/x", "target_commitish": "aaa1111ccc",
-    "assets": [ { "name": "HomeskzIfcImportDev.vwlibrary.zip",
-                  "browser_download_url": "https://example.test/dl/x.zip" } ] },
-  { "tag_name": "dev-feature-y", "name": "feature/y", "target_commitish": "bbb2222ddd",
-    "assets": [ { "name": "HomeskzIfcImportDev.vwlibrary.zip",
-                  "browser_download_url": "https://example.test/dl/y.zip" } ] },
-  { "tag_name": "dev-nobuild", "name": "feature/z", "target_commitish": "ccc3333eee",
-    "assets": [ { "name": "unrelated.zip",
-                  "browser_download_url": "https://example.test/dl/z.zip" } ] }
-]
-JSON
-
 export VW_TEST_STABLE_JSON="$STABLE_JSON"
-export VW_TEST_RELEASES_JSON="$RELEASES_JSON"
+export VW_TEST_INDEX_JSON="$INDEX_JSON"
 
 # Build a real "HomeskzIfcImportDev.vwlibrary.zip" for the do-install tests, and a
 # malformed one whose top-level dir has the wrong name.
@@ -239,15 +259,23 @@ build_zip "$GOOD_ZIP" "HomeskzIfcImportDev.vwlibrary"
 build_zip "$BAD_ZIP" "WrongName.vwlibrary"
 
 # ===========================================================================
-# asset_url — pick a browser_download_url out of an assets array by file name.
+# short_of — the 7-char build id of a manifest entry, with the commit fallback.
 # ===========================================================================
-t "asset_url finds the matching asset"
-out="$(RUN asset_url "$STABLE_JSON" "assets" "HomeskzIfcImport.vwlibrary.zip")"
-check_eq "$out" "https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" "asset_url returns the URL"
+t "short_of prefers the manifest's own short field"
+out="$(RUN short_of "$STABLE_JSON" "")"
+check_eq "$out" "abc1234" "top-level short"
 
-t "asset_url returns nothing for an unknown asset"
-out="$(RUN asset_url "$STABLE_JSON" "assets" "does-not-exist.zip" || true)"
-check_eq "$out" "" "asset_url is empty when no asset matches"
+t "short_of reads an indexed entry"
+out="$(RUN short_of "$INDEX_JSON" "builds.0.")"
+check_eq "$out" "aaa1111" "builds.0.short"
+
+t "short_of falls back to the commit prefix when short is absent"
+out="$(RUN short_of "$INDEX_JSON" "builds.1.")"
+check_eq "$out" "bbb2222" "first 7 chars of commit"
+
+t "short_of is empty when neither field is present"
+out="$(RUN short_of "$INDEX_JSON" "builds.99.")"
+check_eq "$out" "" "missing entry -> empty"
 
 # ===========================================================================
 # installed_commit — the "no bundle installed -> none" branch (the PlistBuddy
@@ -269,35 +297,50 @@ check_eq "$out" "none" "absent bundle -> none"
 t "q_stable reports installed, 7-char latest and the asset url"
 out="$(VW_TEST_INSTALLED=abc1234 RUN q_stable)"
 check_contains "$out" "installed=abc1234" "installed line"
-check_contains "$out" "latest=abc1234" "latest is the 7-char commit prefix"
-check_contains "$out" "url=https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" "url line"
+check_contains "$out" "latest=abc1234" "latest is the 7-char build id"
+check_contains "$out" "url=https://dist.example.test/stable/abc1234/HomeskzIfcImport.vwlibrary.zip" "url line (mac asset)"
+check_not_contains "$out" "HomeskzIfcImport.vlb.zip" "the Windows asset is not offered to macOS"
 
 t "q_stable reports installed=none when nothing is installed"
 out="$(VW_TEST_INSTALLED=none RUN q_stable)"
 check_contains "$out" "installed=none" "installed=none"
 check_contains "$out" "latest=abc1234" "latest still present"
 
-t "q_stable emits an error line when the API is unreachable"
+t "q_stable emits an error line when the manifest is unreachable"
 out="$(VW_TEST_API_FAIL=1 RUN q_stable)"
 check_contains "$out" "error=" "offline -> error= line"
 check_not_contains "$out" "latest=" "no latest when offline"
 
 # ===========================================================================
-# q-dev — installed line + one TSV row per dev-* build that has a downloadable
-# HomeskzIfcImportDev asset (the stable release and the asset-less dev build are
-# both skipped).
+# q-dev — installed line + one TSV row per indexed build that has a downloadable
+# HomeskzIfcImportDev asset.
 # ===========================================================================
-t "q_dev lists only dev-* builds that have a downloadable asset"
+t "q_dev lists only indexed builds that have a downloadable asset"
 out="$(VW_TEST_INSTALLED=run1234 RUN q_dev)"
 check_contains "$out" "installed=run1234" "installed line first"
-check_contains "$out" $'build\taaa1111\tfeature/x\thttps://example.test/dl/x.zip' "feature/x row"
-check_contains "$out" $'build\tbbb2222\tfeature/y\thttps://example.test/dl/y.zip' "feature/y row"
-check_not_contains "$out" "feature/z" "asset-less dev build is skipped"
-check_not_contains "$out" $'build\tzzz9999' "the stable (non dev-*) release is skipped"
+check_contains "$out" $'build\taaa1111\tfeature/x\thttps://dist.example.test/dev/feature-x/aaa1111/HomeskzIfcImportDev.vwlibrary.zip' "feature/x row"
+check_contains "$out" $'build\tbbb2222\tfeature/y\thttps://dist.example.test/dev/feature-y/bbb2222/HomeskzIfcImportDev.vwlibrary.zip' "feature/y row (short derived from commit)"
+check_not_contains "$out" "feature/z" "asset-less build is skipped"
+check_contains "$out" $'build\tddd4444\tno-branch-field\t' "slug stands in when branch is absent"
 
-t "q_dev emits an error line when the API is unreachable"
+t "q_dev emits an error line when the index is unreachable"
 out="$(VW_TEST_API_FAIL=1 RUN q_dev)"
 check_contains "$out" "error=" "offline -> error= line"
+
+# ===========================================================================
+# No distribution base URL configured — the state of the repository copy, whose
+# @VW_UPDATE_BASE_URL@ placeholder is only substituted when CMake bundles the
+# script. Both query modes must say so instead of reaching the network.
+# ===========================================================================
+t "q_stable / q_dev report a missing base URL"
+out="$( set -uo pipefail
+	unset VW_BASE_URL
+	# shellcheck source=/dev/null
+	source "$SCRIPT"
+	q_stable
+	q_dev )"
+check_contains "$out" "error=配布先 URL" "unset VW_BASE_URL -> error= line"
+check_not_contains "$out" "installed=" "nothing else is printed"
 
 # ===========================================================================
 # do-install — download + unzip + atomic swap into VW_PLUGINS_DIR, and its

@@ -55,7 +55,7 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	HomeskzIfcImport::RunStableStartupCheck();
 #else
 	// Dev plug-in: let the user pick which branch's build to use — keep the
-	// installed one, or switch to another branch's prerelease (installed on
+	// installed one, or switch to another branch's dev build (installed on
 	// choosing, then restart to load). Silent on a network error.
 	HomeskzIfcImport::RunDevStartupCheck();
 #endif

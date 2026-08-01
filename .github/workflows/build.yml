@@ -3,12 +3,12 @@ name: Build plug-in
 on:
   # Only main builds on push — it is the protected default branch. Feature work
   # always lives in a pull request, which is what builds those branches (and
-  # publishes their dev prerelease). This keeps a branch-with-an-open-PR from
+  # publishes their dev build). This keeps a branch-with-an-open-PR from
   # building twice (once for the push, once for the PR).
   push:
     branches: [main]
   pull_request:
-  # このワークフローだけは workflow_dispatch を残す。stable リリースの取りこぼしを
+  # このワークフローだけは workflow_dispatch を残す。stable の公開の取りこぼしを
   # 検知した stable-release-healthcheck.yml が `gh workflow run build.yml --ref main`
   # で再ディスパッチして stable を再公開するため、リリース経路に必要な入口である
   # （lint / test / codeql の手動ディスパッチは誰も使っておらず、単なる「再実行」なら
@@ -18,19 +18,22 @@ on:
 
 # Least privilege by default: the build jobs only check out the code and upload
 # artifacts, so they get read-only access. The one job that needs to write
-# (publishing the GitHub Release) requests contents: write on itself instead.
+# (refreshing the GitHub Release) requests contents: write on itself instead. The
+# R2 upload does not use the GitHub token at all — it authenticates with its own
+# credentials, so no job needs write access to publish the actual build.
 permissions:
   contents: read
 
 # One build per ref. On a pull request a new push cancels the in-flight build
-# for that PR: only the latest commit's dev prerelease matters, so racing an
-# outdated build to completion just wastes runner time. The delete+recreate of
-# the "dev-<branch>" prerelease is per-branch and idempotent, so a cancel mid-
-# publish is harmless — the newer run that triggered the cancellation republishes
-# the prerelease for its (newer) commit, and state converges to the latest push.
+# for that PR: only the latest commit's dev build matters, so racing an
+# outdated build to completion just wastes runner time. Publishing is per-branch
+# and idempotent on both sides (the "dev/<slug>/" prefix in R2 and the
+# "dev-<branch>" release are each rewritten wholesale), so a cancel mid-publish is
+# harmless — the newer run that triggered the cancellation republishes for its
+# (newer) commit, and state converges to the latest push.
 #
 # On main we deliberately do NOT cancel (cancel-in-progress is false for push /
-# workflow_dispatch): every commit to main publishes its own stable release, so
+# workflow_dispatch): every commit to main publishes its own stable build, so
 # each build must run to completion and none may be superseded. The group is
 # per-ref (refs/pull/<n>/merge is unique per PR, refs/heads/main for main), so
 # one branch's build never cancels another's.
@@ -71,6 +74,10 @@ jobs:
           # head_ref is attacker-controllable (a branch name), so pass it through
           # the environment instead of interpolating it into the script directly.
           HEAD_REF: ${{ github.head_ref }}
+          # Whether this run will publish. A pull request from a FORK cannot
+          # (its token is read-only and the R2 secrets are withheld), so such a
+          # run is a build-only check.
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             sha="${{ github.event.pull_request.head.sha }}"
@@ -87,12 +94,15 @@ jobs:
             channel="stable"
             name="HomeskzIfcImport"
           fi
+          publish=true
+          [ "$IS_FORK_PR" = "true" ] && publish=false
           {
             echo "sha=$sha"
             echo "short=${sha:0:7}"
             echo "ref=$ref"
             echo "channel=$channel"
             echo "name=$name"
+            echo "publish=$publish"
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
@@ -100,6 +110,24 @@ jobs:
         with:
           # Build the resolved commit (PR head, or the pushed/ dispatched sha).
           ref: ${{ steps.ctx.outputs.sha }}
+
+      # The bundled updater scripts have no distribution URL hardcoded in the
+      # repository — CMake bakes vars.VW_R2_PUBLIC_BASE into the copy it ships
+      # inside the plug-in (see VW_UPDATE_BASE_URL in CMakeLists.txt). A build
+      # that WILL be published with an empty base URL would ship a plug-in that
+      # can never update itself, so fail here rather than publish that. Fork PRs
+      # publish nothing, so they are allowed to build without it.
+      - name: Verify the distribution base URL is configured
+        if: steps.ctx.outputs.publish == 'true'
+        env:
+          VW_R2_PUBLIC_BASE: ${{ vars.VW_R2_PUBLIC_BASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VW_R2_PUBLIC_BASE" ]; then
+            echo "::error::Repository variable VW_R2_PUBLIC_BASE is not set. Set it to the public base URL of the Cloudflare R2 bucket (e.g. https://dist.example.com) under Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+          echo "Distribution base URL: $VW_R2_PUBLIC_BASE"
 
       - name: Select Xcode 16.2
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
@@ -182,6 +210,7 @@ jobs:
           VW_BUILD_VERSION: ${{ steps.ctx.outputs.short }}
           VW_BUILD_BRANCH: ${{ steps.ctx.outputs.ref }}
           VW_BUILD_CHANNEL: ${{ steps.ctx.outputs.channel }}
+          VW_R2_PUBLIC_BASE: ${{ vars.VW_R2_PUBLIC_BASE }}
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
@@ -189,6 +218,7 @@ jobs:
             -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
             -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH" \
             -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL" \
+            -DVW_UPDATE_BASE_URL="$VW_R2_PUBLIC_BASE" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache \
@@ -290,7 +320,8 @@ jobs:
 
       # Zip each signed bundle keeping the "<name>.vwlibrary/" wrapper folder, so
       # the zip expands to a usable bundle (not a bare "Contents" folder). These
-      # zips are both the CI artifacts and the release assets the updater fetches.
+      # zips are both the CI artifacts and the objects uploaded to R2, which is
+      # where the updater downloads them from.
       - name: Package bundle
         env:
           NAME: ${{ steps.ctx.outputs.name }}
@@ -338,6 +369,7 @@ jobs:
           # head_ref is attacker-controllable (a branch name), so pass it through
           # the environment instead of interpolating it into the script directly.
           HEAD_REF: ${{ github.head_ref }}
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             sha="${{ github.event.pull_request.head.sha }}"
@@ -354,18 +386,36 @@ jobs:
             channel="stable"
             name="HomeskzIfcImport"
           fi
+          publish=true
+          [ "$IS_FORK_PR" = "true" ] && publish=false
           {
             echo "sha=$sha"
             echo "short=${sha:0:7}"
             echo "ref=$ref"
             echo "channel=$channel"
             echo "name=$name"
+            echo "publish=$publish"
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.ctx.outputs.sha }}
+
+      # Same guard as the macOS job: the updater URL is injected at build time
+      # from vars.VW_R2_PUBLIC_BASE, never hardcoded in the repository.
+      - name: Verify the distribution base URL is configured
+        if: steps.ctx.outputs.publish == 'true'
+        shell: bash
+        env:
+          VW_R2_PUBLIC_BASE: ${{ vars.VW_R2_PUBLIC_BASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VW_R2_PUBLIC_BASE" ]; then
+            echo "::error::Repository variable VW_R2_PUBLIC_BASE is not set. Set it to the public base URL of the Cloudflare R2 bucket (e.g. https://dist.example.com) under Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+          echo "Distribution base URL: $VW_R2_PUBLIC_BASE"
 
       # Restore the previously trimmed SDK if we have it. Only the pieces needed
       # to build a Windows plug-in are kept, so the cache is small.
@@ -436,12 +486,14 @@ jobs:
           VW_BUILD_VERSION: ${{ steps.ctx.outputs.short }}
           VW_BUILD_BRANCH: ${{ steps.ctx.outputs.ref }}
           VW_BUILD_CHANNEL: ${{ steps.ctx.outputs.channel }}
+          VW_R2_PUBLIC_BASE: ${{ vars.VW_R2_PUBLIC_BASE }}
         run: |
           cmake -S . -B build -A x64 \
             -DVW_SDK_DIR="$VW_SDK_DIR" \
             -DVW_BUILD_VERSION="$VW_BUILD_VERSION" \
             -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH" \
-            -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL"
+            -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL" \
+            -DVW_UPDATE_BASE_URL="$VW_R2_PUBLIC_BASE"
 
       # Static analysis of the SDK-DEPENDENT plug-in sources, right before the
       # build — the Windows counterpart to the macOS clang-tidy step. It covers
@@ -546,8 +598,9 @@ jobs:
           echo "Build stamp: $(cat "$d/$NAME.commit")"
 
       # Zip each plug-in's flat files (module + resource + build stamp + updater)
-      # into "<name>.vlb.zip". These are both the CI artifacts and the release
-      # assets the Windows updater (vw-update.ps1) fetches.
+      # into "<name>.vlb.zip". These are both the CI artifacts and the objects
+      # uploaded to R2, which is where the Windows updater (vw-update.ps1)
+      # downloads them from.
       - name: Package module
         shell: pwsh
         env:
@@ -572,22 +625,41 @@ jobs:
           path: dist
 
   # ---------------------------------------------------------------------------
-  # Publish the downloadable release. Runs only after BOTH platform builds have
-  # finished (needs: [build-mac, build-windows]) so a single release carries the
-  # macOS (.vwlibrary.zip) and Windows (.vlb.zip) assets together. Splitting this
-  # out of the build jobs means neither platform publishes on its own, so there
-  # is no create/attach race between them:
-  #   main  -> refresh the rolling "stable" release with the HomeskzIfcImport bundle.
-  #   other -> refresh a per-branch "dev-<branch>" prerelease with HomeskzIfcImportDev.
-  # Rolling tags are deleted and recreated so they always point at this build.
+  # Publish the downloadable build. Runs only after BOTH platform builds have
+  # finished (needs: [build-mac, build-windows]) so one publish carries the macOS
+  # (.vwlibrary.zip) and Windows (.vlb.zip) assets together. Splitting this out of
+  # the build jobs means neither platform publishes on its own, so there is no
+  # create/attach race between them:
+  #   main  -> refresh the "stable" build (HomeskzIfcImport).
+  #   other -> refresh the per-branch "dev-<branch>" build (HomeskzIfcImportDev).
+  #
+  # WHERE the assets go changed: they are uploaded to a Cloudflare R2 bucket, not
+  # attached to the GitHub Release. Fetching release / prerelease assets from the
+  # GitHub API turned out to be unreliable from the client side, so R2 + small
+  # JSON manifests are now the distribution channel the updater reads
+  # (scripts/r2-publish.sh documents the bucket layout and manifest schema). The
+  # GitHub Release is still refreshed, but purely as the human-facing record: it
+  # carries the R2 download links in its notes instead of the binaries.
   release:
     needs: [build-mac, build-windows]
     runs-on: ubuntu-latest
 
-    # Only this job publishes/refreshes the GitHub Release that the local updater
-    # scripts download from, so it is the only one that needs write access.
+    # Only this job refreshes the GitHub Release, so it is the only one that
+    # needs write access. The R2 upload authenticates with its own credentials.
     permissions:
       contents: write
+
+    env:
+      # Non-secret configuration (repository variables): which bucket, and the
+      # public base URL the manifests' download links are built from — the same
+      # value the build jobs bake into the shipped updater scripts.
+      VW_R2_BUCKET: ${{ vars.VW_R2_BUCKET }}
+      VW_R2_PUBLIC_BASE: ${{ vars.VW_R2_PUBLIC_BASE }}
+      # Secrets: the account whose S3 endpoint we talk to, and an R2 API token
+      # scoped to this bucket. Passed under the AWS_* names aws-cli expects.
+      VW_R2_ACCOUNT_ID: ${{ secrets.VW_R2_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.VW_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.VW_R2_SECRET_ACCESS_KEY }}
 
     steps:
       # Same commit/ref resolution as the build jobs (PR head, or pushed sha).
@@ -615,9 +687,19 @@ jobs:
             echo "ref=$ref"
           } >> "$GITHUB_OUTPUT"
 
+      # The publisher (scripts/r2-publish.sh) lives in the repository, so this
+      # job needs a checkout too. Only the scripts are used, so a shallow
+      # checkout of the built commit is enough.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.ctx.outputs.sha }}
+
       # Pull both build jobs' zips into a single dist/ folder. The macOS job
-      # uploaded the ".vwlibrary.zip" bundles; the Windows job the ".vlb.zip"
-      # modules. After both downloads dist/ holds all four assets.
+      # uploaded the ".vwlibrary.zip" bundle; the Windows job the ".vlb.zip"
+      # module. Each job builds only the channel this run publishes, so after
+      # both downloads dist/ holds that channel's two assets — exactly the pair
+      # scripts/r2-publish.sh expects.
       - name: Download macOS artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -633,103 +715,161 @@ jobs:
       - name: List downloaded assets
         run: ls -l dist
 
-      - name: Publish stable release (main)
+      # --- stable (main) -------------------------------------------------------
+      # Upload the assets to R2 FIRST. This is the only step the updater depends
+      # on, so it is the one that must succeed; scripts/r2-publish.sh retries each
+      # upload, swaps the manifest in only after both zips are in place, and
+      # prunes the previous build's zips. The step's outputs carry the public URLs
+      # so the GitHub Release below can link to them.
+      - name: Publish stable build to R2 (main)
+        id: r2-stable
         # Runs on a push to main, and on a manual/scheduled re-dispatch of this
         # workflow on main (the health-check workflow uses that to republish a
-        # stable release that was missed — see stable-release-healthcheck.yml).
+        # stable build that was missed — see stable-release-healthcheck.yml).
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        env:
+          BUILD_SHA: ${{ steps.ctx.outputs.sha }}
+        run: scripts/r2-publish.sh publish-stable --commit "$BUILD_SHA" --branch main --dist dist
+
+      - name: Refresh the stable GitHub Release (links to R2)
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_SHA: ${{ steps.ctx.outputs.sha }}
           SHORT: ${{ steps.ctx.outputs.short }}
+          MAC_URL: ${{ steps.r2-stable.outputs.mac_url }}
+          WIN_URL: ${{ steps.r2-stable.outputs.win_url }}
+          MANIFEST_URL: ${{ steps.r2-stable.outputs.manifest_url }}
         run: |
           set -euo pipefail
-          short="$SHORT"
+          # No assets are attached any more: the release is the human-facing
+          # record and points at the R2 objects the updater actually downloads.
+          # The machine-readable "key=value" header is kept so anything that used
+          # to scrape the notes still finds commit/branch/channel.
           cat > notes.txt <<EOF
           channel=stable
           branch=main
           commit=${BUILD_SHA}
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          ## ダウンロード
+
+          - macOS: <${MAC_URL}>
+          - Windows: <${WIN_URL}>
+
+          マニフェスト: <${MANIFEST_URL}>
+
+          配布実体は Cloudflare R2 にあります（このリリースにアセットは添付されません）。
+          プラグインの自動アップデートは上記マニフェストを参照します。
           EOF
-          # Delete + recreate as one unit, attaching both platform assets at once.
-          # A missed stable release can go unnoticed, so retry with a long backoff
-          # to ride out an extended GitHub API outage. If every attempt still
-          # fails, the scheduled stable-release-healthcheck.yml notices the drift
-          # and re-dispatches this build to republish.
+          # Delete + recreate as one unit. A missed stable release is only a
+          # missing record now (R2 already has the build), but it is still worth
+          # riding out a GitHub API blip, so keep a short retry.
           publish() {
             gh release delete stable --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
             gh release create stable \
-              "dist/HomeskzIfcImport.vwlibrary.zip" \
-              "dist/HomeskzIfcImport.vlb.zip" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$BUILD_SHA" \
-              --title "Stable (${short})" \
+              --title "Stable (${SHORT})" \
               --notes-file notes.txt \
               --latest
           }
           if publish; then exit 0; fi
           attempts=1
-          for delay in 30 60 120 300 600; do
+          for delay in 30 60 120; do
             echo "publish attempt $attempts failed; retrying in ${delay}s..."
             sleep "$delay"
             attempts=$((attempts + 1))
             if publish; then exit 0; fi
           done
-          echo "::error::Failed to publish the stable release after $attempts attempts."
+          echo "::error::Failed to refresh the stable GitHub Release after $attempts attempts."
           exit 1
 
-      - name: Publish dev prerelease (pull requests)
-        # Feature branches are built via their pull request. Skip PRs from forks:
-        # their GITHUB_TOKEN is read-only and cannot publish a release.
+      # --- dev (pull requests) -------------------------------------------------
+      # Guard against a delete/publish race. The branch may have been deleted
+      # after the PR was opened but before this (slow) build finished. If so,
+      # cleanup-dev-release.yml has already run and found nothing to delete (this
+      # job had not published yet), so publishing now would orphan the build in
+      # the bucket forever. Skip when the branch is gone, and re-check afterwards
+      # to close the narrow window where it disappears mid-publish.
+      - name: Check the branch still exists
+        id: branch
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.ctx.outputs.ref }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Branch '$BRANCH' no longer exists; skipping the dev publish to avoid orphaning it."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish dev build to R2 (pull requests)
+        id: r2-dev
+        # Feature branches are built via their pull request. Skip PRs from forks:
+        # they get neither the write token nor the R2 secrets.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.branch.outputs.exists == 'true'
+        env:
+          BUILD_SHA: ${{ steps.ctx.outputs.sha }}
+          BRANCH: ${{ steps.ctx.outputs.ref }}
+        run: scripts/r2-publish.sh publish-dev --commit "$BUILD_SHA" --branch "$BRANCH" --dist dist
+
+      - name: Refresh the dev prerelease (links to R2)
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.branch.outputs.exists == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_SHA: ${{ steps.ctx.outputs.sha }}
           SHORT: ${{ steps.ctx.outputs.short }}
           BRANCH: ${{ steps.ctx.outputs.ref }}
+          SLUG: ${{ steps.r2-dev.outputs.slug }}
+          MAC_URL: ${{ steps.r2-dev.outputs.mac_url }}
+          WIN_URL: ${{ steps.r2-dev.outputs.win_url }}
+          MANIFEST_URL: ${{ steps.r2-dev.outputs.manifest_url }}
         run: |
           set -euo pipefail
-          short="$SHORT"
-          branch="$BRANCH"
-          # Sanitize the branch name into a tag-safe slug.
-          slug="$(printf '%s' "$branch" | tr '/:@ ' '----' | tr -c 'A-Za-z0-9._-' '-')"
-          tag="dev-${slug}"
+          # The publisher derives the slug (bucket folder); reuse it as the tag
+          # so the two never drift apart.
+          tag="dev-${SLUG}"
           cat > notes.txt <<EOF
           channel=dev
-          branch=${branch}
+          branch=${BRANCH}
           commit=${BUILD_SHA}
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          ## ダウンロード
+
+          - macOS: <${MAC_URL}>
+          - Windows: <${WIN_URL}>
+
+          マニフェスト: <${MANIFEST_URL}>
+
+          配布実体は Cloudflare R2 にあります（このリリースにアセットは添付されません）。
           EOF
-          # Guard against a delete/publish race. The branch may have been
-          # deleted after the PR was opened but before this (slow) build
-          # finished. If so, cleanup-dev-release.yml has already run and found
-          # no prerelease to delete (this job had not published one yet), so
-          # creating one now would orphan it forever. Skip publishing when the
-          # branch no longer exists.
-          branch_exists() {
-            gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1
-          }
-          if ! branch_exists; then
-            echo "Branch '$branch' no longer exists; skipping dev prerelease publish to avoid orphaning it."
-            exit 0
-          fi
           # Dev builds are only used while actively working on a branch, so no
           # retry: if a transient GitHub API error fails this, just re-run the
-          # job manually. (The stable release, which could go unnoticed, does
-          # retry and has a scheduled health check.)
+          # job. (R2 — the part the updater reads — was already written above.)
           gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
           gh release create "$tag" \
-            "dist/HomeskzIfcImportDev.vwlibrary.zip" \
-            "dist/HomeskzIfcImportDev.vlb.zip" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$BUILD_SHA" \
-            --title "Dev: ${branch} (${short})" \
+            --title "Dev: ${BRANCH} (${SHORT})" \
             --notes-file notes.txt \
             --prerelease
-          # Close the narrow window where the branch is deleted between the
-          # check above and now: if cleanup ran during publish, it may have
-          # missed the release. Re-check and clean up our own release if so.
-          if ! branch_exists; then
-            echo "Branch '$branch' was deleted during publish; removing the prerelease just created."
-            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+
+      - name: Clean up if the branch was deleted mid-publish
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.branch.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.ctx.outputs.ref }}
+          SLUG: ${{ steps.r2-dev.outputs.slug }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" >/dev/null 2>&1; then
+            exit 0
           fi
+          echo "Branch '$BRANCH' was deleted during publish; removing what this run just created."
+          gh release delete "dev-${SLUG}" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          scripts/r2-publish.sh remove-dev --branch "$BRANCH"

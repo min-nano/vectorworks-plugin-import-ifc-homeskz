@@ -7,7 +7,7 @@
 //	branch and the exact dialog wording — is exercised WITHOUT the Vectorworks
 //	SDK. This is still a unit test: the flow is the unit, the fake host is a test
 //	double. (An end-to-end test would run the real plug-in inside Vectorworks
-//	against the live GitHub API.)
+//	against the live distribution bucket.)
 //
 
 #include "TestFramework.h"

@@ -127,7 +127,7 @@ namespace HomeskzIfcImport::UpdaterParse
 	}
 
 	// Wrap a string in double quotes for a cmd.exe/PowerShell command line. Our
-	// arguments are release-asset URLs and fixed plug-in names, which never
+	// arguments are asset download URLs and fixed plug-in names, which never
 	// contain quotes; drop any that somehow appear rather than risk breaking the
 	// quoting.
 	inline std::string CmdQuote(const std::string& s)

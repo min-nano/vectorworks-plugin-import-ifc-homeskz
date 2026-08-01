@@ -3,7 +3,7 @@
 //
 //	Native-dialog front end for the plug-in's self-update. All user interaction
 //	uses the Vectorworks SDK (gSDK->AlertInform / gSDK->AlertQuestion). The
-//	actual work (GitHub API, download, install) is delegated to a bundled
+//	actual work (manifest lookup, download, install) is delegated to a bundled
 //	updater script, invoked non-interactively; see Updater.h for the contract.
 //
 //	The script and the way we locate ourselves are platform-specific:
@@ -244,7 +244,7 @@ namespace
 	//
 	// A single modal dialog with one drop-down listing every choice at once:
 	// entry 0 is the currently installed build, the rest are other branches'
-	// prereleases. The selected 0-based index is delivered via DDX into
+	// dev builds. The selected 0-based index is delivered via DDX into
 	// fSelection. All signatures follow the Vectorworks 2026 SDK headers
 	// (VWFC/VWUI/{Dialog,PullDownMenuCtrl,StaticTextCtrl}.h); the control classes
 	// and the event-map macros come in via PluginPrefix.h -> VectorworksSDK.h.

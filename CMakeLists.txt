@@ -258,6 +258,36 @@ if(VW_BUILD_PLUGIN)
 			CACHE STRING "Git branch this build came from")
 	endif()
 
+	# --- Distribution base URL for the bundled updater scripts -------------------
+	# The updater downloads builds from a Cloudflare R2 bucket served over a
+	# public base URL (see scripts/r2-publish.sh for the bucket layout). That URL
+	# is deliberately NOT hardcoded in the repository: it is configuration, so CI
+	# passes it in (-DVW_UPDATE_BASE_URL, fed from the VW_R2_PUBLIC_BASE
+	# repository variable) and the value is substituted into the COPY of each
+	# updater script that gets bundled with the plug-in. The scripts in scripts/
+	# keep the bare "@VW_UPDATE_BASE_URL@" placeholder, which they treat as "not
+	# configured" — a manual run can then still supply it via the VW_BASE_URL
+	# environment variable.
+	#
+	# NB: the substitution is configure_file(@ONLY), so ANY "@NAME@" token in
+	# those scripts would be replaced. Keep "@" out of them except for this one
+	# placeholder.
+	if(NOT DEFINED VW_UPDATE_BASE_URL)
+		set(VW_UPDATE_BASE_URL
+			""
+			CACHE STRING "Public base URL the updater downloads builds from")
+	endif()
+	if(VW_UPDATE_BASE_URL STREQUAL "")
+		message(
+			STATUS
+				"VW_UPDATE_BASE_URL is empty: the bundled updater will need VW_BASE_URL set in the environment."
+		)
+	endif()
+	set(VW_UPDATE_SH "${CMAKE_CURRENT_BINARY_DIR}/vw-update.sh")
+	set(VW_UPDATE_PS1 "${CMAKE_CURRENT_BINARY_DIR}/vw-update.ps1")
+	configure_file("${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.sh" "${VW_UPDATE_SH}" @ONLY)
+	configure_file("${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.ps1" "${VW_UPDATE_PS1}" @ONLY)
+
 	# The plug-in sources: the module entry point + menu command + updater, plus
 	# the SDK-dependent draw/ phase (src/draw/). The SDK-free core/ + parse/ code
 	# is NOT listed here — it comes in via the HomeskzIfcCore library linked below.
@@ -464,15 +494,16 @@ if(VW_BUILD_PLUGIN)
 		# --- Bundle the updater so the installed plug-in can update itself --------
 		# See src/Updater.cpp. macOS reads Contents/Resources/vw-update.sh from
 		# inside the bundle; Windows reads vw-update.ps1 from next to the .vlb.
+		# What gets bundled is the CONFIGURED copy (VW_UPDATE_BASE_URL substituted
+		# in), not the placeholder-carrying script in scripts/.
 		if(APPLE)
 			add_custom_command(
 				TARGET ${target}
 				POST_BUILD
 				COMMAND "${CMAKE_COMMAND}" -E make_directory
 						"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources"
-				COMMAND
-					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.sh"
-					"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-update.sh"
+				COMMAND "${CMAKE_COMMAND}" -E copy "${VW_UPDATE_SH}"
+						"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-update.sh"
 				VERBATIM
 				COMMENT "Bundling vw-update.sh into ${output_name}")
 		else()
@@ -485,9 +516,8 @@ if(VW_BUILD_PLUGIN)
 			add_custom_command(
 				TARGET ${target}
 				POST_BUILD
-				COMMAND
-					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.ps1"
-					"$<TARGET_FILE_DIR:${target}>/vw-update.ps1"
+				COMMAND "${CMAKE_COMMAND}" -E copy "${VW_UPDATE_PS1}"
+						"$<TARGET_FILE_DIR:${target}>/vw-update.ps1"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${commit_file}"
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.commit"
 				VERBATIM

@@ -68,6 +68,8 @@ scripts/
   vw-update.sh              CI ビルドをダウンロード／インストールする（macOS 用。
                             バンドルに同梱され、プラグインから起動される）
   vw-update.ps1             同上の Windows 版（PowerShell。.vlb の隣に同梱される）
+  r2-publish.sh             CI: ビルド成果物を Cloudflare R2 へ公開する（配布の
+                            書き込み側。バケット構成とマニフェスト仕様の一次資料）
   lint.sh                   ローカルで全 lint（clang / cmake / yaml / shell …）
                             を実行する（CI と同じチェック。--fix で自動修正）
   ci-debug.sh               CI デバッグ実行を起動し、完了まで待って結果を取り出す
@@ -81,13 +83,15 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 .editorconfig              エディタ側のインデント／改行／文字コード規則
 .editorconfig-checker.json  上記を CI で強制する editorconfig-checker の設定
 .github/workflows/build.yml CI: macOS（Apple Silicon）と Windows でビルドし、
-                            リリース（main=stable / PR=dev）を公開する
+                            成果物を Cloudflare R2 へ公開（main=stable / PR=dev）
+                            したうえで GitHub リリースに R2 へのリンクを貼る
 .github/workflows/test.yml  CI: 無 SDK の単体テスト（ASan+UBSan）とカバレッジ
 .github/workflows/lint.yml  CI: ソース／非ソースを問わずコーディング規則を強制
 .github/workflows/codeql.yml            CI: CodeQL による静的解析（週次＋PR）
-.github/workflows/cleanup-dev-release.yml  ブランチ削除時に dev プレリリースを片付ける
+.github/workflows/cleanup-dev-release.yml  ブランチ削除時に dev ビルド（R2 の
+                            オブジェクトとプレリリース）を片付ける
 .github/workflows/stable-release-healthcheck.yml
-                            stable リリースの取りこぼしを検知して再ビルドする
+                            stable の公開取りこぼしを検知して再ビルドする
 .github/workflows/ci-debug.yml  CI: 手動ディスパッチ専用のデバッグ実行（SDK 調査・
                             ビルド再現）。push / PR では起動しない
 ```
@@ -137,7 +141,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | C++ 名前空間・クラス | `HomeskzIfcImport` / `CExtMenuImportIfc` / `CImportIfcMenu_EventSink` | `src/Extensions/ExtMenu.{h,cpp}`、`src/ModuleMain.cpp` |
 | VCOM ユニバーサル名 | `CExtMenuImportIfc_HomeskzIfcImport(Dev)` | `src/BuildConfig.h` |
 | 拡張機能 UUID | stable / dev 各 1 個 | `src/Extensions/ExtMenu.cpp`（一意である必要があるため `uuidgen` で再生成） |
-| リポジトリ | `min-nano/vectorworks-plugin-import-ifc-homeskz` | `scripts/vw-update.sh` / `scripts/vw-update.ps1` の `VW_REPO` 既定値 |
+| 配布先（R2）ベース URL | リポジトリ変数 `VW_R2_PUBLIC_BASE`（**ソースにハードコードしない**） | ビルド時に `-DVW_UPDATE_BASE_URL` で `scripts/vw-update.sh` / `scripts/vw-update.ps1` の `@VW_UPDATE_BASE_URL@` へ埋め込む |
 
 `.vwstrings` は UTF-16LE（BOM 付き・CRLF 改行）です。編集時はエンコーディングを保持
 してください。現在の識別子は次で一覧できます。
@@ -312,7 +316,7 @@ ctest --test-dir build-san --output-on-failure
 ```
 
 CI の `test` ジョブは常にこの設定でテストを回すため、リファクタが招くメモリ不正
-（境界外アクセス・use-after-free・リーク）や、updater パーサが GitHub 側の仕様変更で
+（境界外アクセス・use-after-free・リーク）や、updater パーサが配布側の仕様変更で
 崩れた入力を誤処理するケースは、その場でビルドを赤にできます。予期しない外部入力に
 対する耐性は `tests/UpdaterRobustnessTests.cpp` の擬似ファズ／敵対的入力テストが担い、
 サニタイザがその番人になります（詳細は `tests/README.md`）。
@@ -326,6 +330,10 @@ CI の `test` ジョブは常にこの設定でテストを回すため、リフ
 - `VW_ENABLE_SANITIZERS`（既定 `OFF`）… テストを ASan + UBSan
   （`-fsanitize=address,undefined -fno-sanitize-recover=all`）でビルド・実行します
   （GCC / Clang）。
+- `VW_UPDATE_BASE_URL`（既定 空）… 同梱する更新スクリプトへ埋め込む配布先
+  （Cloudflare R2）のベース URL。空のままでもビルドは通り、そのビルドの自動アップデート
+  だけが無効になります（スクリプトは `VW_BASE_URL` 環境変数でも受け付けます）。CI は
+  リポジトリ変数 `VW_R2_PUBLIC_BASE` をここへ渡します。
 
 ### カバレッジレポート（GitHub Actions で内製）
 
@@ -381,8 +389,8 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 デフォルトブランチで、機能開発は必ず PR 上で行うため、ブランチを二重にビルドしない
 ようトリガを分けています。
 
-- **`main` への push**（マージ）は **stable** リリースをビルドして公開します。
-- **PR** はそのブランチをビルドして **dev** プレリリースを公開します。
+- **`main` への push**（マージ）は **stable** ビルドを作って公開します。
+- **PR** はそのブランチをビルドして **dev** ビルドを公開します。
 
 ワークフローの内容:
 
@@ -397,35 +405,64 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
   （`-DVW_BUILD_VERSION`）して成果物を確認・アップロードします（macOS はさらにアドホック
   署名）。PR ではエフェメラルなマージコミットではなく、PR の **head** コミット（あなたが
   push したもの）をビルドします。
-- **ダウンロード可能なリリースを公開**し、アップデータが取得できる安定した URL を用意
-  します。1 つのリリースに **macOS と Windows 両方のアセット**が入ります:
-  - `main` はローリングな **`stable`** リリースを更新します
-    （`HomeskzIfcImport.vwlibrary.zip` + `HomeskzIfcImport.vlb.zip`）。
-  - PR はブランチごとの **`dev-<branch>`** プレリリースを更新します
-    （`HomeskzIfcImportDev.vwlibrary.zip` + `HomeskzIfcImportDev.vlb.zip`。トークンで公開でき
-    ないフォーク PR ではスキップされます）。
+- 各ジョブは、ビルド時に**配布先のベース URL**（リポジトリ変数 `VW_R2_PUBLIC_BASE`）を
+  `-DVW_UPDATE_BASE_URL` で渡します。CMake がその値を、プラグインに同梱する更新
+  スクリプトの `@VW_UPDATE_BASE_URL@` へ埋め込みます。公開を伴う実行で変数が未設定
+  なら、**更新できないプラグインを配ってしまわないよう**ビルドを失敗させます
+  （何も公開しないフォーク PR は対象外）。
+- **成果物を Cloudflare R2 へ公開**し、アップデータが取得できる安定した URL を用意
+  します。1 回の公開に **macOS と Windows 両方のアセット**が入ります:
+  - `main` は `stable/manifest.json` と
+    `stable/<short>/HomeskzIfcImport.{vwlibrary,vlb}.zip` を更新します。
+  - PR はブランチごとの `dev/<slug>/manifest.json` と
+    `dev/<slug>/<short>/HomeskzIfcImportDev.{vwlibrary,vlb}.zip` を更新し、
+    一覧 `dev/index.json` を作り直します（資格情報を渡せないフォーク PR ではスキップ
+    されます）。
 
-  リリースの公開は独立した **`release` ジョブ**が担当します。このジョブは 2 つのビルド
-  ジョブ（`build-mac` と `build-windows`）が**両方**完了してから走り（`needs:
-  [build-mac, build-windows]`）、両ジョブがアップロードした成果物をまとめてダウンロード
-  し、**macOS と Windows 両方のアセットを 1 つのリリースに**添付して公開します。公開を
-  ビルドから切り出したことで、どちらのプラットフォームも単独でリリースを作らなくなり、
-  作成とアタッチが競合することがありません。どちらもローリング方式で、毎回タグを最新
-  ビルドに貼り直します。**stable** の公開は GitHub API の長時間障害があってもリトライ
-  します（stable リリースの取りこぼしは気づかれにくいため）。**dev** の公開はリトライ
-  しません — dev ビルドはブランチ作業中にしか使わないので、一時的なエラーが出たら
-  ジョブを再実行すれば十分です。
+  公開は独立した **`release` ジョブ**が担当します。このジョブは 2 つのビルドジョブ
+  （`build-mac` と `build-windows`）が**両方**完了してから走り（`needs: [build-mac,
+  build-windows]`）、両ジョブがアップロードした成果物をまとめてダウンロードして
+  `scripts/r2-publish.sh` に渡します。公開をビルドから切り出したことで、どちらの
+  プラットフォームも単独で公開せず、書き込みが競合することがありません。
+
+  **GitHub のリリース／プレリリースも従来どおり更新しますが、アセットは添付しません。**
+  クライアントからの取得が不安定だったのが R2 へ移した理由なので、リリースは「人が
+  辿る記録」として R2 へのリンクを本文に載せるだけにしてあります（ローリング方式で
+  毎回タグを最新ビルドに貼り直す点は同じ）。**stable** のリリース更新は GitHub API の
+  一時障害に備えてリトライしますが、**アップデータが読むのは R2 だけ**なので、こちらが
+  失敗しても配布自体は成立しています。**dev** のリリース更新はリトライしません — dev
+  ビルドはブランチ作業中にしか使わないので、ジョブを再実行すれば十分です。
+
+  公開に必要な設定（Actions の Variables / Secrets）:
+
+  | 種別 | 名前 | 内容 |
+  | --- | --- | --- |
+  | Variable | `VW_R2_PUBLIC_BASE` | 公開ベース URL（例 `https://dist.example.com`）。ビルドにも埋め込まれる |
+  | Variable | `VW_R2_BUCKET` | R2 のバケット名 |
+  | Secret | `VW_R2_ACCOUNT_ID` | Cloudflare アカウント ID（S3 API エンドポイントの組み立てに使う） |
+  | Secret | `VW_R2_ACCESS_KEY_ID` | R2 API トークン（当該バケットへの読み書き） |
+  | Secret | `VW_R2_SECRET_ACCESS_KEY` | 同上 |
+
+  バケットは**匿名 GET を許可**しておく必要があります（プラグインは資格情報を持ち
+  ません）。バケット構成・マニフェスト仕様・キャッシュ方針は `scripts/r2-publish.sh`
+  の冒頭コメントが一次資料です。要点だけ挙げると、zip は `<short>/` 配下に置いて
+  **不変・長期キャッシュ**、可変なのは `manifest.json` / `index.json` だけで
+  **`no-cache`**、というキャッシュ事故を避けるための分担になっています。
 
 `.github/workflows/cleanup-dev-release.yml` は、ブランチが削除されたときにその
-`dev-<branch>` プレリリース（とタグ）を削除し、dev ビルドが溜まらないようにします。
-`delete` イベントで起動されるため、デフォルトブランチ上のコピーから実行され、この
-ワークフローが `main` に入った後に削除されたブランチだけを対象とします。
+`dev/<slug>/` 配下のオブジェクトを R2 から削除して `dev/index.json` を作り直し、
+併せて `dev-<branch>` プレリリース（とタグ）も削除します。`delete` イベントで
+起動されるため、デフォルトブランチ上のコピーから実行され、このワークフローが
+`main` に入った後に削除されたブランチだけを対象とします。
 
 `.github/workflows/stable-release-healthcheck.yml` はスケジュール（6 時間ごと）で
-安全網として実行されます。公開済みの `stable` リリースが `main` の先頭からずれている
-場合 — つまり stable の公開を取りこぼした場合 — `main` で `build.yml` を再ディスパッチ
-して再ビルド・再公開します。スケジュール／`delete` 系のワークフローと同様に
-デフォルトブランチから実行されるため、`main` にマージされて初めて有効になります。
+安全網として実行されます。公開済みの stable が `main` の先頭からずれている場合 —
+つまり公開を取りこぼした場合 — `main` で `build.yml` を再ディスパッチして再ビルド・
+再公開します。判定には R2 の `stable/manifest.json` を**公開 URL 経由で**取りに行き
+ます（利用者のプラグインとまったく同じ経路なので、アップロード漏れだけでなく独自
+ドメインの不調や公開設定の抜けも検知できます）。GitHub リリース側のずれも同時に見ます。
+スケジュール／`delete` 系のワークフローと同様にデフォルトブランチから実行されるため、
+`main` にマージされて初めて有効になります。
 
 #### 手動ディスパッチ（`workflow_dispatch`）を持つワークフロー
 
@@ -623,13 +660,36 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 
 アップデートはコマンドラインではなく、**プラグイン自身がネイティブの Vectorworks
 ダイアログ**（`gSDK->AlertInform` / `gSDK->AlertQuestion`、およびドロップダウン選択は
-`VWFC::VWUI::VWDialog` + `VWPullDownMenuCtrl`）を表示して行います（`src/Updater.cpp`）。ネットワーク・インストールなどの実処理（GitHub API の参照・
+`VWFC::VWUI::VWDialog` + `VWPullDownMenuCtrl`）を表示して行います（`src/Updater.cpp`）。ネットワーク・インストールなどの実処理（マニフェストの参照・
 ダウンロード・`Plug-Ins` へのインストール）は**プラットフォームごとの更新スクリプト**
 に集約され、ビルド時にインストール物と一緒に**同梱**されます:
 
 - **macOS** — `scripts/vw-update.sh`（bash）。バンドル内の
   `Contents/Resources/vw-update.sh` に入り、隔離解除とアドホック再署名も行います。
 - **Windows** — `scripts/vw-update.ps1`（PowerShell）。`.vlb` の隣に入ります。
+
+### 取得元は Cloudflare R2（GitHub Releases ではありません）
+
+以前は GitHub Releases のアセットを GitHub API 経由で取得していましたが、**クライアント
+からの取得が不安定**（プレリリースの列挙・アセット URL のリダイレクト・未認証時の
+レート制限）だったため、配布実体を **Cloudflare R2** へ移しました。スクリプトが読むのは
+バケット上の 2 つの小さな JSON だけです。
+
+- `stable/manifest.json` — stable の現在のビルド。
+- `dev/index.json` — dev ビルドの一覧（ブランチごとに 1 件）。
+
+いずれも `commit` / `short` / `branch` と、`mac`（`.vwlibrary.zip`）・`win`（`.vlb.zip`）の
+ダウンロード URL を持ちます。スキーマとバケット構成の一次資料は `scripts/r2-publish.sh`
+の冒頭コメントです。マニフェストは `no-cache` で配信したうえ、スクリプト側も
+`Cache-Control: no-cache` とクエリ文字列でキャッシュを避けます（zip はコミットごとに
+別パスなので、そのまま長期キャッシュできます）。
+
+**配布先のベース URL はソースにハードコードしていません。** ビルド時に
+`-DVW_UPDATE_BASE_URL`（CI ではリポジトリ変数 `VW_R2_PUBLIC_BASE`）が、同梱される
+スクリプトの `@VW_UPDATE_BASE_URL@` へ埋め込まれます。リポジトリ内のスクリプトは
+プレースホルダーのままなので、**手元で直接実行するときは環境変数 `VW_BASE_URL`**
+を指定してください（未設定なら各モードは `error=配布先 URL が設定されていません…`
+を返し、ネットワークへは出ません）。
 
 プラグインはこのスクリプトを**非対話モード**（`q-stable` / `q-dev` / `do-install`）で
 呼び出して結果を受け取り、ユーザーへの表示はすべて自前のネイティブダイアログで行う
@@ -653,7 +713,8 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
   `src/Updater.cpp` の `CBuildPickerDialog`）で問い合わせます（`src/ModuleMain.cpp` が
   モジュールロード時に一度だけ実行）。1 つのドロップダウンに候補を一覧表示します:
   - 先頭は**現在ロードされているビルド**（branch / commit、「インストール済み」と明示）。
-  - 続いて**他のブランチのプレリリース**（現在のビルドと同じコミットは除外）。
+  - 続いて**他のブランチの dev ビルド**（`dev/index.json` の各エントリ。現在のビルドと
+    同じコミットは除外）。表示名にはブランチ名を使います。
   - **インストール済み（先頭）を選ぶ／キャンセル** → 何もせず起動を続けます。
   - **別のブランチを選ぶ** → それをインストールします（反映は次回起動）。インストール
     完了メッセージを表示します。
@@ -679,7 +740,7 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 パスを使うため、ユーザフォルダが独自の場合は `VW_PLUGINS_DIR` を実際の場所に合わせて
 実行してください。
 
-リポジトリは公開なので、認証や追加ツールは不要です。各スクリプトは OS 標準のものだけ
+バケットは公開配信なので、認証や追加ツールは不要です。各スクリプトは OS 標準のものだけ
 を使います — macOS は `curl`・`plutil`・`unzip`・`codesign`・`xattr`・`osascript`
 （`osascript` は下記の手動 CLI パスのみ）、Windows は PowerShell 組み込みの
 `Invoke-RestMethod` / `Invoke-WebRequest` / `Expand-Archive`。
@@ -713,6 +774,13 @@ powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 q-dev
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 do-install <url> <name>
 ```
 
-環境変数で上書き可能: `VW_REPO`（owner/repo）、`VW_PLUGINS_DIR`（インストール先）。
+環境変数で上書き可能: `VW_BASE_URL`（配布先のベース URL）、`VW_PLUGINS_DIR`
+（インストール先）。リポジトリ内のスクリプトにはベース URL が埋まっていないので、
+**手元から直接実行するときは `VW_BASE_URL` の指定が必須**です:
+
+```sh
+VW_BASE_URL=https://dist.example.com ./scripts/vw-update.sh q-stable
+```
+
 2 つのチャンネルは別名のプラグインをインストールするので、stable と dev が互いを
 上書きすることはありません。

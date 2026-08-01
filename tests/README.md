@@ -63,14 +63,14 @@
    食わせ、境界外アクセスや未定義動作を起こさないこと、そして「戻り値の `url` は必ず
    非空」「`EvaluateStable` が更新を提示するのは整形式のときだけ」「`ResolveDevSelection`
    は範囲外を返さない」といった**契約**が保たれることを検証します。とりわけ
-   **ASan / UBSan 有効時**（後述）に真価を発揮し、リファクタが招くメモリ不正や、GitHub 側
+   **ASan / UBSan 有効時**（後述）に真価を発揮し、リファクタが招くメモリ不正や、配布側
    仕様変更で崩れた入力への耐性を守ります（`tests/UpdaterRobustnessTests.cpp`）。
 4. **`UpdaterScriptTests`** … 同梱スクリプト `scripts/vw-update.sh`（macOS）の
    **機械可読バックエンド**（`q-stable` / `q-dev` / `do-install` と、その土台の
-   `asset_url` / `installed_commit`）を、`curl` / `plutil` を差し替えて検証します
+   `short_of` / `installed_commit`）を、`curl` / `plutil` を差し替えて検証します
    （`tests/vw-update.test.sh`、後述）。
 5. **`UpdaterScriptTestsPs`** … その Windows 版 `scripts/vw-update.ps1` を、同じ発想で
-   `Invoke-GH` / `Invoke-WebRequest` を差し替えて検証します（`tests/vw-update.Tests.ps1`、
+   `Get-Manifest` / `Invoke-WebRequest` を差し替えて検証します（`tests/vw-update.Tests.ps1`、
    後述）。PowerShell 7（`pwsh`）は Linux でも動くので、**同じ Linux ランナー**で回せます。
 
 以降の節（`IUpdaterHost` によるフロー全体のテスト・スクリプトのテスト・残る部分）は
@@ -121,7 +121,7 @@
 
 > これは **ユニットテスト（コンポーネントテスト）** です。テスト対象の「ユニット」は
 > フロー関数で、host はそれを差し替えるテストダブル（フェイク）です。**e2e ではありません**
-> — e2e なら実際に Vectorworks 上でプラグインを起動し、本物の GitHub API を叩き、本物の
+> — e2e なら実際に Vectorworks 上でプラグインを起動し、本物の配布バケットを叩き、本物の
 > ダイアログを出して確認することになります。ここではプロセス内で SDK ゼロで完結します。
 
 ## テストの実行
@@ -142,7 +142,7 @@ ctest --test-dir build-tests --output-on-failure
 この設定で回るので（`.github/workflows/test.yml`）、
 
 - **リファクタ**でメモリ不正を持ち込めばそのコミットで赤くなり、
-- **予期しない外部入力**（例: GitHub 側の仕様変更で崩れた updater パーサ入力）は
+- **予期しない外部入力**（例: 配布側の仕様変更で崩れた updater パーサ入力）は
   `UpdaterRobustnessTests` の擬似ファズが大量に流し込み、サニタイザが番人になります。
 
 カバレッジ計測とは別ジョブ・別ビルドに分けてあるので、赤の原因が「テスト失敗＋
@@ -154,7 +154,7 @@ ctest --test-dir build-tests --output-on-failure
 ## スクリプトのテスト（ソース＋スタブ方式）
 
 「更新の実体」を担う `scripts/vw-update.sh`（macOS）と `scripts/vw-update.ps1`
-（Windows。GitHub API 取得・zip 展開・インストール）も、C++ 側と同じ発想で
+（Windows。マニフェスト取得・zip 展開・インストール）も、C++ 側と同じ発想で
 SDK ／ネットワーク抜きに単体テストします（`tests/vw-update.test.sh` /
 `tests/vw-update.Tests.ps1`）。Pester や bats などの外部フレームワークは使わず、
 `TestFramework.h` と同じ**依存ゼロの極小ハーネス**を各ファイルに同梱しています。
@@ -184,8 +184,8 @@ if ($MyInvocation.InvocationName -ne '.') {
 
 | 差し替える関数 | 本番 | テスト |
 |----------------|------|--------|
-| `jval` | `plutil`（macOS 専用）で JSON 抽出 | `python3` で同等のキーパス抽出。実際の `asset_url` / `q_stable` / `q_dev` がフィクスチャ JSON に対して動く |
-| `api_get` | `curl` で GitHub REST API | フィクスチャファイルを返す（オフラインも再現） |
+| `jval` | `plutil`（macOS 専用）で JSON 抽出 | `python3` で同等のキーパス抽出。実際の `short_of` / `q_stable` / `q_dev` がフィクスチャ JSON に対して動く |
+| `fetch_json` | `curl` で R2 のマニフェストを取得 | フィクスチャファイルを返す（オフラインも再現） |
 | `download` | `curl` でアセット取得 | ローカルの zip を配置（失敗も再現） |
 | `installed_commit` | `PlistBuddy`（macOS 専用） | 既定コミットを返す（「バンドル無し → none」の枝は本物を直接検証） |
 
@@ -195,11 +195,12 @@ if ($MyInvocation.InvocationName -ne '.') {
 
 | 差し替える関数 | 本番 | テスト |
 |----------------|------|--------|
-| `Invoke-GH` | `Invoke-RestMethod` で GitHub REST API | フィクスチャ JSON を `ConvertFrom-Json` して返す（オフラインは throw） |
+| `Get-Manifest` | `Invoke-RestMethod` で R2 のマニフェストを取得 | フィクスチャ JSON を `ConvertFrom-Json` して返す（オフラインは throw） |
 | `Invoke-WebRequest` | アセットをダウンロード | ローカルの zip を `-OutFile` にコピー（失敗は throw） |
 
 これで両スクリプトとも、`q-stable` の `installed` / `latest`（7 桁化）/ `url`、`q-dev` の
-`dev-*` フィルタとアセットのあるビルドだけの列挙、`do-install` の成功・各失敗経路
+アセットのあるビルドだけの列挙（`short` 欠落時のコミット短縮・`branch` 欠落時の `slug`
+代用を含む）、配布先 URL 未設定時の `error=` 応答、`do-install` の成功・各失敗経路
 （ダウンロード失敗／想定外の zip／引数不足）まで、**素の Linux ランナーで**検証できます。
 
 各スクリプトに残る OS 固有の面（`.sh` の osascript ダイアログ・`codesign` / `xattr` の
@@ -253,7 +254,7 @@ ctest／CI に組み込み済みです。残るのは各 OS でしか動かな�
   プラグインが触る 4 つの副作用だけをフェイク化して、分岐と文言まで丸ごとテストする
   （ユニット／コンポーネントテスト。e2e ではない）。
 - **スクリプト**は末尾のディスパッチをガードして `source`（dot-source）可能にし、
-  ネットワーク境界（`.sh`: `curl` / `plutil`、`.ps1`: `Invoke-GH` / `Invoke-WebRequest`）
+  ネットワーク境界（`.sh`: `curl` / `plutil`、`.ps1`: `Get-Manifest` / `Invoke-WebRequest`）
   だけを差し替えて `q-stable` / `q-dev` / `do-install` を **Linux 上で**単体テストする
   （C++ の `IUpdaterHost` に対応するスクリプト版のシーム）。
 - 残るのは SDK 関数を呼ぶだけの薄い配線と、Mac／Windows 実機でしか動かない OS 固有

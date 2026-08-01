@@ -1,7 +1,9 @@
-name: Clean up dev prerelease
+name: Clean up dev build
 
-# When a branch is deleted, remove the matching "dev-<branch>" prerelease (and
-# its tag) that build.yml published for it, so old dev builds don't pile up.
+# When a branch is deleted, remove the dev build build.yml published for it:
+# the objects under "dev/<slug>/" in the Cloudflare R2 bucket (the distribution
+# the updater actually reads) and the matching "dev-<branch>" GitHub Release
+# (the human-facing record), so old dev builds don't pile up in either place.
 #
 # NOTE: `delete`-triggered workflows always run from the copy of this file on
 # the DEFAULT branch, so this only takes effect once it is merged to main; it
@@ -14,22 +16,41 @@ permissions:
 
 jobs:
   cleanup:
-    # Only branch deletions (not tag deletions) map to a dev prerelease.
+    # Only branch deletions (not tag deletions) map to a dev build.
     if: github.event.ref_type == 'branch' && github.event.ref != 'main'
     runs-on: ubuntu-latest
+
+    env:
+      VW_R2_BUCKET: ${{ vars.VW_R2_BUCKET }}
+      VW_R2_PUBLIC_BASE: ${{ vars.VW_R2_PUBLIC_BASE }}
+      VW_R2_ACCOUNT_ID: ${{ secrets.VW_R2_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.VW_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.VW_R2_SECRET_ACCESS_KEY }}
+
     steps:
+      # scripts/r2-publish.sh does the bucket-side work (delete the branch's
+      # prefix, then rebuild dev/index.json so the build disappears from the
+      # picker). A delete event checks out the default branch, which is where
+      # that script lives.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Delete the branch's dev build from R2
+        env:
+          BRANCH: ${{ github.event.ref }}
+        run: scripts/r2-publish.sh remove-dev --branch "$BRANCH"
+
       - name: Delete the branch's dev prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.ref }}
         run: |
           set -euo pipefail
-          branch="${{ github.event.ref }}"
-          # Same slug rule as the "Publish dev prerelease" step in build.yml.
-          slug="$(printf '%s' "$branch" | tr '/:@ ' '----' | tr -c 'A-Za-z0-9._-' '-')"
-          tag="dev-${slug}"
+          # Same slug rule as the publisher (and therefore as build.yml).
+          tag="dev-$(scripts/r2-publish.sh slug --branch "$BRANCH")"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Deleting release + tag: $tag (branch: $branch)"
+            echo "Deleting release + tag: $tag (branch: $BRANCH)"
             gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
           else
-            echo "No dev release for '$branch' (expected tag '$tag'); nothing to clean up."
+            echo "No dev release for '$BRANCH' (expected tag '$tag'); nothing to clean up."
           fi

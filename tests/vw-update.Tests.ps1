@@ -9,10 +9,10 @@
 #
 #   Only two seams need faking — everything else runs for real on Linux pwsh:
 #
-#     * Invoke-GH          the GitHub REST boundary. Replaced with a stub that
-#                          returns objects parsed from fixture JSON (exactly what
-#                          the real Invoke-RestMethod would hand back), or throws
-#                          to simulate an unreachable API.
+#     * Get-Manifest       the R2 boundary. Replaced with a stub that returns
+#                          objects parsed from fixture JSON (exactly what the real
+#                          Invoke-RestMethod would hand back), or throws to
+#                          simulate an unreachable bucket.
 #     * Invoke-WebRequest  the asset download. Replaced with a stub that copies a
 #                          local fixture .zip to -OutFile (or throws to simulate a
 #                          failed download).
@@ -63,6 +63,12 @@ New-Item -ItemType Directory -Force -Path $Work | Out-Null
 $PluginsDir = Join-Path $Work 'plugins'
 New-Item -ItemType Directory -Force -Path $PluginsDir | Out-Null
 $env:VW_PLUGINS_DIR = $PluginsDir
+
+# Likewise the distribution base URL: it is injected at BUILD time (CMake
+# substitutes @VW_UPDATE_BASE_URL@), so the repository copy has none. Supply one
+# through the environment, exactly as a manual run would. The "not configured"
+# branch is covered by its own test at the end.
+$env:VW_BASE_URL = 'https://dist.example.test'
 
 # ---------------------------------------------------------------------------
 # Load the script under test. Dot-sourcing brings its functions and top-level
@@ -120,15 +126,15 @@ function AsText($lines) { return (@($lines) -join "`n") }
 # ---------------------------------------------------------------------------
 $script:FakeApiFail = $false
 $script:FakeStableJson = $null
-$script:FakeReleasesJson = $null
+$script:FakeIndexJson = $null
 $script:FakeDownloadZip = $null
 $script:FakeDownloadFail = $false
 
-function Invoke-GH([string] $subpath) {
+function Get-Manifest([string] $key) {
     if ($script:FakeApiFail) { throw 'offline' }
-    if ($subpath -eq 'releases/tags/stable') { return ($script:FakeStableJson | ConvertFrom-Json) }
-    if ($subpath -like 'releases*') { return ($script:FakeReleasesJson | ConvertFrom-Json) }
-    throw "unexpected subpath: $subpath"
+    if ($key -eq 'stable/manifest.json') { return ($script:FakeStableJson | ConvertFrom-Json) }
+    if ($key -eq 'dev/index.json') { return ($script:FakeIndexJson | ConvertFrom-Json) }
+    throw "unexpected key: $key"
 }
 
 function Invoke-WebRequest {
@@ -147,33 +153,45 @@ function Invoke-WebRequest {
 # Fixtures. The JSON the stubbed API returns, and real .zip archives for the
 # do-install path. ($Work / $PluginsDir were created above, before dot-source.)
 # ---------------------------------------------------------------------------
+# The two JSON objects the bucket serves (see scripts/r2-publish.sh for the
+# schema): the stable manifest, and the dev index listing one entry per branch.
 $script:FakeStableJson = @'
 {
-  "target_commitish": "abc1234def5678",
-  "assets": [
-    { "name": "HomeskzIfcImport.vlb.zip",
-      "browser_download_url": "https://example.test/dl/HomeskzIfcImport.vlb.zip" },
-    { "name": "notes.txt",
-      "browser_download_url": "https://example.test/dl/notes.txt" }
-  ]
+  "schema": 1,
+  "channel": "stable",
+  "branch": "main",
+  "commit": "abc1234def5678",
+  "short": "abc1234",
+  "built": "2026-08-01T00:00:00Z",
+  "mac": "https://dist.example.test/stable/abc1234/HomeskzIfcImport.vwlibrary.zip",
+  "win": "https://dist.example.test/stable/abc1234/HomeskzIfcImport.vlb.zip"
 }
 '@
 
-$script:FakeReleasesJson = @'
-[
-  { "tag_name": "stable", "name": "stable", "target_commitish": "zzz9999",
-    "assets": [ { "name": "HomeskzIfcImport.vlb.zip",
-                  "browser_download_url": "https://example.test/dl/stable.zip" } ] },
-  { "tag_name": "dev-feature-x", "name": "feature/x", "target_commitish": "aaa1111ccc",
-    "assets": [ { "name": "HomeskzIfcImportDev.vlb.zip",
-                  "browser_download_url": "https://example.test/dl/x.zip" } ] },
-  { "tag_name": "dev-feature-y", "name": "feature/y", "target_commitish": "bbb2222ddd",
-    "assets": [ { "name": "HomeskzIfcImportDev.vlb.zip",
-                  "browser_download_url": "https://example.test/dl/y.zip" } ] },
-  { "tag_name": "dev-nobuild", "name": "feature/z", "target_commitish": "ccc3333eee",
-    "assets": [ { "name": "unrelated.zip",
-                  "browser_download_url": "https://example.test/dl/z.zip" } ] }
-]
+# feature/y deliberately has NO "short" (the commit-prefix fallback must kick
+# in), feature/z has no download URLs (must be skipped), and the last entry has
+# no "branch" (the slug must stand in as the display name).
+$script:FakeIndexJson = @'
+{
+  "schema": 1,
+  "generated": "2026-08-01T00:00:00Z",
+  "builds": [
+    { "branch": "feature/x", "slug": "feature-x",
+      "commit": "aaa1111ccc", "short": "aaa1111",
+      "mac": "https://dist.example.test/dev/feature-x/aaa1111/HomeskzIfcImportDev.vwlibrary.zip",
+      "win": "https://dist.example.test/dev/feature-x/aaa1111/HomeskzIfcImportDev.vlb.zip" },
+    { "branch": "feature/y", "slug": "feature-y",
+      "commit": "bbb2222ddd",
+      "mac": "https://dist.example.test/dev/feature-y/bbb2222/HomeskzIfcImportDev.vwlibrary.zip",
+      "win": "https://dist.example.test/dev/feature-y/bbb2222/HomeskzIfcImportDev.vlb.zip" },
+    { "branch": "feature/z", "slug": "feature-z",
+      "commit": "ccc3333eee", "short": "ccc3333" },
+    { "slug": "no-branch-field",
+      "commit": "ddd4444fff", "short": "ddd4444",
+      "mac": "https://dist.example.test/dev/no-branch-field/ddd4444/HomeskzIfcImportDev.vwlibrary.zip",
+      "win": "https://dist.example.test/dev/no-branch-field/ddd4444/HomeskzIfcImportDev.vlb.zip" }
+  ]
+}
 '@
 
 # Build a real "<bundle>.vlb" zip for the do-install tests: a staging dir holding
@@ -192,18 +210,30 @@ New-BuildZip $GoodZip 'HomeskzIfcImportDev'
 New-BuildZip $BadZip  'WrongName'
 
 # ===========================================================================
-# Get-AssetUrl / Get-Short — the pure helpers.
+# Get-Field / Get-Short / Get-BuildId / Get-BuildName — the pure helpers.
 # ===========================================================================
-T 'Get-AssetUrl finds the matching asset'
-$rel = $script:FakeStableJson | ConvertFrom-Json
-CheckEq (Get-AssetUrl $rel 'HomeskzIfcImport.vlb.zip') 'https://example.test/dl/HomeskzIfcImport.vlb.zip' 'returns the URL'
+$manifest = $script:FakeStableJson | ConvertFrom-Json
+$entries = ($script:FakeIndexJson | ConvertFrom-Json).builds
 
-T 'Get-AssetUrl returns null for an unknown asset'
-CheckEq (Get-AssetUrl $rel 'does-not-exist.zip') $null 'null when no asset matches'
+T 'Get-Field reads a present property'
+CheckEq (Get-Field $manifest 'win') 'https://dist.example.test/stable/abc1234/HomeskzIfcImport.vlb.zip' 'returns the URL'
+
+T 'Get-Field returns null for an absent property'
+CheckEq (Get-Field $manifest 'does-not-exist') $null 'null when the field is missing'
+CheckEq (Get-Field $null 'win') $null 'null object -> null'
 
 T 'Get-Short takes the first 7 chars'
 CheckEq (Get-Short 'abc1234def5678') 'abc1234' '7-char prefix'
 CheckEq (Get-Short '') '' 'empty stays empty'
+
+T 'Get-BuildId prefers short and falls back to the commit prefix'
+CheckEq (Get-BuildId $manifest) 'abc1234' 'manifest short'
+CheckEq (Get-BuildId $entries[0]) 'aaa1111' 'entry short'
+CheckEq (Get-BuildId $entries[1]) 'bbb2222' 'first 7 chars of commit'
+
+T 'Get-BuildName prefers branch and falls back to slug'
+CheckEq (Get-BuildName $entries[0]) 'feature/x' 'branch'
+CheckEq (Get-BuildName $entries[3]) 'no-branch-field' 'slug when branch is absent'
 
 # ===========================================================================
 # Get-InstalledCommit — reads the real "<name>.commit" sidecar (no OS tool).
@@ -222,10 +252,11 @@ T 'Invoke-QStable reports installed, 7-char latest and the asset url'
 $script:FakeApiFail = $false
 $out = AsText (Invoke-QStable)
 CheckContains $out 'installed=abc1234' 'installed line (from sidecar)'
-CheckContains $out 'latest=abc1234' 'latest is the 7-char commit prefix'
-CheckContains $out 'url=https://example.test/dl/HomeskzIfcImport.vlb.zip' 'url line'
+CheckContains $out 'latest=abc1234' 'latest is the 7-char build id'
+CheckContains $out 'url=https://dist.example.test/stable/abc1234/HomeskzIfcImport.vlb.zip' 'url line (Windows asset)'
+CheckNotContains $out 'HomeskzIfcImport.vwlibrary.zip' 'the macOS asset is not offered to Windows'
 
-T 'Invoke-QStable emits an error line when the API is unreachable'
+T 'Invoke-QStable emits an error line when the manifest is unreachable'
 $script:FakeApiFail = $true
 $out = AsText (Invoke-QStable)
 CheckContains $out 'error=' 'offline -> error= line'
@@ -233,17 +264,17 @@ CheckNotContains $out 'latest=' 'no latest when offline'
 $script:FakeApiFail = $false
 
 # ===========================================================================
-# q-dev — installed line + one TSV row per dev-* build that has a downloadable
-# asset (the stable release and the asset-less dev build are both skipped).
+# q-dev — installed line + one TSV row per indexed build that has a downloadable
+# asset.
 # ===========================================================================
-T 'Invoke-QDev lists only dev-* builds that have a downloadable asset'
+T 'Invoke-QDev lists only indexed builds that have a downloadable asset'
 $out = AsText (Invoke-QDev)
-CheckContains $out ("build`taaa1111`tfeature/x`thttps://example.test/dl/x.zip") 'feature/x row'
-CheckContains $out ("build`tbbb2222`tfeature/y`thttps://example.test/dl/y.zip") 'feature/y row'
-CheckNotContains $out 'feature/z' 'asset-less dev build is skipped'
-CheckNotContains $out ("build`tzzz9999") 'the stable (non dev-*) release is skipped'
+CheckContains $out ("build`taaa1111`tfeature/x`thttps://dist.example.test/dev/feature-x/aaa1111/HomeskzIfcImportDev.vlb.zip") 'feature/x row'
+CheckContains $out ("build`tbbb2222`tfeature/y`thttps://dist.example.test/dev/feature-y/bbb2222/HomeskzIfcImportDev.vlb.zip") 'feature/y row (short derived from commit)'
+CheckNotContains $out 'feature/z' 'asset-less build is skipped'
+CheckContains $out ("build`tddd4444`tno-branch-field`t") 'slug stands in when branch is absent'
 
-T 'Invoke-QDev emits an error line when the API is unreachable'
+T 'Invoke-QDev emits an error line when the index is unreachable'
 $script:FakeApiFail = $true
 $out = AsText (Invoke-QDev)
 CheckContains $out 'error=' 'offline -> error= line'
@@ -276,6 +307,20 @@ CheckContains $out 'error=' 'wrong .vlb name -> error= line'
 T 'Invoke-DoInstall rejects missing arguments'
 $out = AsText (Invoke-DoInstall '' '')
 CheckContains $out 'error=' 'empty args -> error= line'
+
+# ===========================================================================
+# No distribution base URL configured — the state of the repository copy, whose
+# @VW_UPDATE_BASE_URL@ placeholder is only substituted when CMake bundles the
+# script. Both query modes must say so instead of reaching the network. Loaded
+# into a CHILD scope so the real Get-Manifest runs rather than the stub above.
+# ===========================================================================
+T 'the query modes report a missing base URL'
+$SavedBase = $env:VW_BASE_URL
+$env:VW_BASE_URL = ''
+$out = AsText (& { . $Script; Invoke-QStable; Invoke-QDev })
+$env:VW_BASE_URL = $SavedBase
+CheckContains $out 'error=配布先 URL' 'unset VW_BASE_URL -> error= line'
+CheckNotContains $out 'installed=' 'nothing else is printed'
 
 # ===========================================================================
 Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
