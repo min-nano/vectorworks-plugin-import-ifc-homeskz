@@ -25,7 +25,7 @@
 	<!-- Build provenance, stamped by CMake/CI. The updater scripts read these
 	     to tell which build is installed vs. what is available to download. -->
 	<key>VWBuildChannel</key>
-	<string>@VW_BUILD_CHANNEL@</string>
+	<string>@VW_PLUGIN_CHANNEL@</string>
 	<key>VWBuildBranch</key>
 	<string>@VW_BUILD_BRANCH@</string>
 	<key>VWBuildCommit</key>

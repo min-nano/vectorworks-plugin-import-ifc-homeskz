@@ -19,6 +19,7 @@
 namespace HomeskzIfcImport::parse
 {
 	using core::GridCommand;
+	using core::samePoint;
 	using core::Vec2;
 
 	namespace
@@ -28,16 +29,9 @@ namespace HomeskzIfcImport::parse
 		constexpr const char* kGridClassX = "01作図-01線-01基準線-01通り芯-X通り";
 		constexpr const char* kGridClassY = "01作図-01線-01基準線-01通り芯-Y通り";
 
-		// 座標比較の許容誤差（mm）。重複線除去と縮退判定に使う。ホームズ君 IFC の
-		// 重複軸は通常ぴったり一致するので、丸め耐性の微小値で十分。
-		constexpr double kEps = 1e-6;
-
-		bool samePoint(const Vec2& a, const Vec2& b)
-		{
-			return std::abs(a.x - b.x) < kEps && std::abs(a.y - b.y) < kEps;
-		}
-
 		// 2 本が幾何的に同一の線分か（向きの反転も同一とみなす）。重複線除去に使う。
+		// 点の同一判定（許容 core::kPointEps）は core/Geometry の samePoint を使う
+		// ——core/Document の縮退判定と同じ述語・同じ閾値である必要があるため。
 		bool sameLine(const GridLine& a, const GridLine& b)
 		{
 			return (samePoint(a.start, b.start) && samePoint(a.end, b.end)) ||

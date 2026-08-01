@@ -26,12 +26,25 @@ namespace HomeskzIfcImport::core
 	// 座標比較・正規化のゼロ割り回避に使う微小値（mm 単位系での実用的な下限）。
 	inline constexpr double kGeomEps = 1e-9;
 
+	// 平面座標が「同じ点」とみなせる許容（mm）。IFC 由来の座標は丸め誤差を含むので
+	// 厳密一致では比べない。kGeomEps（ゼロ割り回避の下限）より粗い、座標としての同値判定。
+	inline constexpr double kPointEps = 1e-6;
+
 	// 2 次元ベクトル（平面上の点・方向）。通り芯やプロファイル外形の座標に使う。
 	struct Vec2
 	{
 		double x = 0.0;
 		double y = 0.0;
 	};
+
+	// 2 つの平面座標が実質同一か（通り芯の重複線除去と縮退判定に使う）。**この述語と
+	// 閾値はここに 1 つだけ置く**: かつて core/Document.cpp の isDegenerate と
+	// parse/Grid.cpp の samePoint が同じ式・同じ 1e-6 を各々持っており、片方の閾値を
+	// 直すと「重複として畳んだ線が検証では非縮退」のような食い違いが起こり得た。
+	inline bool samePoint(const Vec2& a, const Vec2& b, double tol = kPointEps)
+	{
+		return std::abs(a.x - b.x) < tol && std::abs(a.y - b.y) < tol;
+	}
 
 	// 3 次元ベクトル（ワールド座標の点・方向）。配置・押し出しに使う。
 	struct Vec3

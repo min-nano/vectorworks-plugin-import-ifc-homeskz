@@ -195,9 +195,10 @@ namespace HomeskzIfcImport::parse
 		if (profileDef->type == "IFCARBITRARYCLOSEDPROFILEDEF" ||
 			profileDef->type == "IFCARBITRARYPROFILEDEFWITHVOIDS")
 		{
-			// IfcArbitraryClosedProfileDef(ProfileType, ProfileName, OuterCurve)。位置は
-			// IfcRectangleProfileDef の Position と同じ（kProfilePosition）。
-			const Entity* curve = model.resolve(profileDef->attribute(attr::kProfilePosition));
+			// IfcArbitraryClosedProfileDef(ProfileType, ProfileName, OuterCurve)。属性番号は
+			// IfcRectangleProfileDef の Position と同じ 2 だが、指すのは外形曲線。
+			const Entity* curve =
+				model.resolve(profileDef->attribute(attr::kArbitraryProfileOuterCurve));
 			if (curve == nullptr || curve->type != "IFCPOLYLINE")
 				return false;
 			const Value& points = curve->attribute(attr::kPolylinePoints);

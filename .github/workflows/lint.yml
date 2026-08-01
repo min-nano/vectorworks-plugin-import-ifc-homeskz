@@ -11,13 +11,14 @@ name: Lint
 #                     checks every file, including the platform-specific plug-in
 #                     glue that only compiles against the Vectorworks SDK.
 #   * clang-tidy    — static analysis (bug-prone patterns, const-correctness,
-#                     modernize, core-guidelines) over the SDK-FREE updater logic
-#                     and its headers. clang-tidy has to actually compile a
-#                     translation unit, and the plug-in glue (#if GS_MAC/GS_WIN)
-#                     needs the SDK, so on this SDK-free Linux runner it lints the
-#                     code that carries the real logic and unit tests. The rest
-#                     is still covered by clang-format above; to tidy the plug-in
-#                     glue too, run clang-tidy locally against an SDK build.
+#                     modernize, core-guidelines) over EVERY SDK-free translation
+#                     unit: the 2-phase import code (src/core/ + src/parse/) and
+#                     the updater logic, plus their headers. clang-tidy has to
+#                     actually compile a translation unit, and the plug-in glue
+#                     (#if GS_MAC/GS_WIN) needs the SDK, so on this SDK-free Linux
+#                     runner it lints the code that carries the real logic; the
+#                     SDK-dependent src/draw/ + glue is tidied under the same rules
+#                     in build.yml, where the SDK is available.
 #   * cmake-format  — layout of the CMakeLists.txt files (.cmake-format.yaml),
 #                     plus cmake-lint for bug-prone CMake patterns.
 #   * actionlint    — validates the GitHub workflows themselves and runs
@@ -39,7 +40,7 @@ name: Lint
 #     clang-format-18 --dry-run --Werror src/*.cpp src/**/*.h tests/*
 #     cmake -S . -B build -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON \
 #           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-#     clang-tidy-18 -p build src/UpdaterFlow.cpp
+#     clang-tidy-18 -p build src/core/*.cpp src/parse/*.cpp src/UpdaterFlow.cpp
 #     cmake-format --check CMakeLists.txt tests/CMakeLists.txt && cmake-lint ...
 #     actionlint
 #     shellcheck scripts/*.sh

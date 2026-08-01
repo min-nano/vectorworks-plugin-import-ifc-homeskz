@@ -110,11 +110,12 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 
 出力名・`.vwr` 識別子・VCOM ユニバーサル名・拡張機能 UUID がそれぞれ別々なので、
 両方を同時にインストールしてロードできます — stable は通常利用に、dev は作業中の
-ブランチを試すために使えます。各プラグインのメニューコマンドは、アラート内に自分の
-チャンネルとビルドコミットを表示します。そのコミットは、判別できるよう各ビルドに
-刻まれます（macOS はバンドルの `Info.plist` の `VWBuildChannel` / `VWBuildCommit`、
-Windows は `.vlb` の隣の `<name>.commit` ファイル）。アップデータはこれを読んで何が
-インストールされているかを判別します。
+ブランチを試すために使えます。どのビルドがインストールされているかを判別できるよう、
+チャンネルとコミットは各ビルドに刻まれます（macOS はバンドルの `Info.plist` の
+`VWBuildChannel` / `VWBuildBranch` / `VWBuildCommit`、Windows は `.vlb` の隣の
+`<name>.commit` ファイル）。アップデータはこれを読んで何がインストールされているかを
+判別し、dev のビルド選択ダイアログは現在ロード中のビルドをブランチ／コミットで示します
+（メニューコマンド自体はインポート結果の件数だけを表示します）。
 
 各メニューコマンドの表示テキストは、それぞれの `resources/<name>.vwr` フォルダから
 来ます。ビルド時に SDK の `BuildVWR` ツールがこれをパッケージするので（macOS は
@@ -484,11 +485,15 @@ C/C++ を対象とするジョブ:
   でも規則から外れると失敗し、書き換えは行いません。SDK もビルドも不要なので
   高速で、SDK が要る（`#if GS_MAC` / `GS_WIN`）プラットフォーム固有のグルー
   コードも含めて**全ファイル**を対象にできます。
-- **`clang-tidy`** — SDK 非依存のアップデータロジック（`src/UpdaterFlow.cpp` と
-  それが取り込む `UpdaterParse.h` / `UpdaterHost.h`）に対して静的解析を行います。
-  clang-tidy は翻訳単位を実際にコンパイルする必要があり、SDK が不要なこの Linux
-  ランナー上では**実ロジックを持つ SDK 非依存コード**を対象にします。`.clang-tidy`
-  は `WarningsAsErrors: "*"` なので、検出があれば CI が失敗します。
+- **`clang-tidy`** — **SDK 非依存の全翻訳単位**、すなわち 2 フェーズのインポート
+  コード（`src/core/*.cpp` / `src/parse/*.cpp`）と アップデータロジック
+  （`src/UpdaterFlow.cpp`。取り込む `UpdaterParse.h` / `UpdaterHost.h` も
+  `HeaderFilterRegex` で対象）に対して静的解析を行います。clang-tidy は翻訳単位を
+  実際にコンパイルする必要があり、SDK が不要なこの Linux ランナー上では**実ロジックを
+  持つ SDK 非依存コード**を対象にします。`core/` `parse/` はハードコードした一覧では
+  なく**グロブ**で拾うので、新しい parse モジュールを足した瞬間から対象になります
+  （`scripts/lint.sh` も同一の一覧を使います）。`.clang-tidy` は
+  `WarningsAsErrors: "*"` なので、検出があれば CI が失敗します。
 
 ソース以外のファイルを対象とするジョブ:
 
