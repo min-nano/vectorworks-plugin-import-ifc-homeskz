@@ -376,6 +376,14 @@ TEST(girder_width_ignores_members_parallel_to_rafter)
 	CHECK(near(girderWidthAt(0.0, 0.0, 0.0, 1000.0, members), kDefaultGirderWidth));
 }
 
+TEST(girder_width_ignores_degenerate_members)
+{
+	// 平面投影長が 0 の材（点に潰れた命令）は候補にしない → 既定桁幅。
+	const std::vector<MemberCommand> members = {
+		girderMember(Vec2{0.0, 0.0}, Vec2{0.0, 0.0}, 150.0)};
+	CHECK(near(girderWidthAt(0.0, 0.0, 0.0, 1000.0, members), kDefaultGirderWidth));
+}
+
 TEST(girder_width_ignores_distant_members)
 {
 	// 芯線が探索許容（100mm）より遠い材は選ばない → 既定桁幅。

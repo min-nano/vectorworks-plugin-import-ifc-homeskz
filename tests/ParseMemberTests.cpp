@@ -258,6 +258,13 @@ namespace
 		return beam;
 	}
 
+	// 要素へ材種を関連付ける（RelatingMaterial は IfcMaterial 以外の形も渡せる）。
+	void associateMaterial(StepText& step, int element, int material)
+	{
+		step.add("IFCRELASSOCIATESMATERIAL('m',$,$,$,(" + ref(element) + ")," + ref(material) +
+				 ")");
+	}
+
 	// 通り芯（センタリング中心の算出に使う）。
 	void makeGridAxis(StepText& step, const std::string& tag, double x1, double y1, double x2,
 					  double y2)
@@ -467,6 +474,259 @@ TEST(member_material_name_empty_without_association)
 	CHECK(element != nullptr);
 	if (element != nullptr)
 		CHECK_EQ(memberMaterialName(model, *element), "");
+}
+
+TEST(member_material_name_reads_material_list)
+{
+	// IfcMaterialList は先頭の材種名を採る（Python 版 _get_material_name の分岐）。
+	StepText step;
+	const int storey = makeStorey(step, "1FL", 0.0);
+	const int beam = makeBeam(step, storey, BeamSpec{});
+	const int first = step.add("IFCMATERIAL('杉')");
+	const int second = step.add("IFCMATERIAL('檜')");
+	const int list = step.add("IFCMATERIALLIST((" + ref(first) + "," + ref(second) + "))");
+	associateMaterial(step, beam, list);
+
+	Model const model = step.build();
+	const Entity* element = model.entity(beam);
+	CHECK(element != nullptr);
+	if (element != nullptr)
+		CHECK_EQ(memberMaterialName(model, *element), "杉");
+}
+
+TEST(member_material_name_empty_for_empty_material_list)
+{
+	StepText step;
+	const int storey = makeStorey(step, "1FL", 0.0);
+	const int beam = makeBeam(step, storey, BeamSpec{});
+	associateMaterial(step, beam, step.add("IFCMATERIALLIST(())"));
+
+	Model const model = step.build();
+	const Entity* element = model.entity(beam);
+	CHECK(element != nullptr);
+	if (element != nullptr)
+		CHECK_EQ(memberMaterialName(model, *element), "");
+}
+
+TEST(member_material_name_reads_material_layer_set_usage)
+{
+	// IfcMaterialLayerSetUsage → ForLayerSet → 先頭 MaterialLayer → Material の名前。
+	StepText step;
+	const int storey = makeStorey(step, "1FL", 0.0);
+	const int beam = makeBeam(step, storey, BeamSpec{});
+	const int material = step.add("IFCMATERIAL('杉集成材')");
+	const int layer = step.add("IFCMATERIALLAYER(" + ref(material) + ",120.,$)");
+	const int layerSet = step.add("IFCMATERIALLAYERSET((" + ref(layer) + "),'set')");
+	const int usage =
+		step.add("IFCMATERIALLAYERSETUSAGE(" + ref(layerSet) + ",.AXIS2.,.POSITIVE.,0.)");
+	associateMaterial(step, beam, usage);
+
+	Model const model = step.build();
+	const Entity* element = model.entity(beam);
+	CHECK(element != nullptr);
+	if (element != nullptr)
+		CHECK_EQ(memberMaterialName(model, *element), "杉集成材");
+}
+
+TEST(member_material_name_empty_for_incomplete_layer_set_usage)
+{
+	// ForLayerSet が解決できない／構成層が空 のいずれも空文字（1 材の欠損で止めない）。
+	StepText missingSet;
+	const int storeyA = makeStorey(missingSet, "1FL", 0.0);
+	const int beamA = makeBeam(missingSet, storeyA, BeamSpec{});
+	associateMaterial(missingSet, beamA,
+					  missingSet.add("IFCMATERIALLAYERSETUSAGE($,.AXIS2.,.POSITIVE.,0.)"));
+	Model const withoutSet = missingSet.build();
+	const Entity* elementA = withoutSet.entity(beamA);
+	CHECK(elementA != nullptr);
+	if (elementA != nullptr)
+		CHECK_EQ(memberMaterialName(withoutSet, *elementA), "");
+
+	StepText emptyLayers;
+	const int storeyB = makeStorey(emptyLayers, "1FL", 0.0);
+	const int beamB = makeBeam(emptyLayers, storeyB, BeamSpec{});
+	const int layerSet = emptyLayers.add("IFCMATERIALLAYERSET((),'set')");
+	associateMaterial(
+		emptyLayers, beamB,
+		emptyLayers.add("IFCMATERIALLAYERSETUSAGE(" + ref(layerSet) + ",.AXIS2.,.POSITIVE.,0.)"));
+	Model const withoutLayers = emptyLayers.build();
+	const Entity* elementB = withoutLayers.entity(beamB);
+	CHECK(elementB != nullptr);
+	if (elementB != nullptr)
+		CHECK_EQ(memberMaterialName(withoutLayers, *elementB), "");
+}
+
+TEST(member_material_name_empty_for_unresolvable_layer_chain)
+{
+	// MaterialLayer / その Material が解決できない鎖も空文字（1 材の欠損で止めない）。
+	StepText danglingLayer;
+	const int storeyA = makeStorey(danglingLayer, "1FL", 0.0);
+	const int beamA = makeBeam(danglingLayer, storeyA, BeamSpec{});
+	const int setA = danglingLayer.add("IFCMATERIALLAYERSET((#999),'set')");
+	associateMaterial(
+		danglingLayer, beamA,
+		danglingLayer.add("IFCMATERIALLAYERSETUSAGE(" + ref(setA) + ",.AXIS2.,.POSITIVE.,0.)"));
+	Model const withDanglingLayer = danglingLayer.build();
+	const Entity* elementA = withDanglingLayer.entity(beamA);
+	CHECK(elementA != nullptr);
+	if (elementA != nullptr)
+		CHECK_EQ(memberMaterialName(withDanglingLayer, *elementA), "");
+
+	StepText noLayerMaterial;
+	const int storeyB = makeStorey(noLayerMaterial, "1FL", 0.0);
+	const int beamB = makeBeam(noLayerMaterial, storeyB, BeamSpec{});
+	const int layer = noLayerMaterial.add("IFCMATERIALLAYER($,120.,$)");
+	const int setB = noLayerMaterial.add("IFCMATERIALLAYERSET((" + ref(layer) + "),'set')");
+	associateMaterial(
+		noLayerMaterial, beamB,
+		noLayerMaterial.add("IFCMATERIALLAYERSETUSAGE(" + ref(setB) + ",.AXIS2.,.POSITIVE.,0.)"));
+	Model const withoutLayerMaterial = noLayerMaterial.build();
+	const Entity* elementB = withoutLayerMaterial.entity(beamB);
+	CHECK(elementB != nullptr);
+	if (elementB != nullptr)
+		CHECK_EQ(memberMaterialName(withoutLayerMaterial, *elementB), "");
+}
+
+TEST(member_material_name_empty_for_unsupported_material_type)
+{
+	// 対応しない型（IfcMaterialLayer を直接関連付ける等）と、RelatingMaterial 未設定は空文字。
+	StepText unsupported;
+	const int storeyA = makeStorey(unsupported, "1FL", 0.0);
+	const int beamA = makeBeam(unsupported, storeyA, BeamSpec{});
+	associateMaterial(unsupported, beamA, unsupported.add("IFCMATERIALLAYER($,120.,$)"));
+	Model const withUnsupported = unsupported.build();
+	const Entity* elementA = withUnsupported.entity(beamA);
+	CHECK(elementA != nullptr);
+	if (elementA != nullptr)
+		CHECK_EQ(memberMaterialName(withUnsupported, *elementA), "");
+
+	StepText missing;
+	const int storeyB = makeStorey(missing, "1FL", 0.0);
+	const int beamB = makeBeam(missing, storeyB, BeamSpec{});
+	missing.add("IFCRELASSOCIATESMATERIAL('m',$,$,$,(" + ref(beamB) + "),$)");
+	Model const withoutMaterial = missing.build();
+	const Entity* elementB = withoutMaterial.entity(beamB);
+	CHECK(elementB != nullptr);
+	if (elementB != nullptr)
+		CHECK_EQ(memberMaterialName(withoutMaterial, *elementB), "");
+}
+
+TEST(member_material_name_ignores_association_for_other_elements)
+{
+	// 自分を RelatedObjects に含まない関連付け（別の梁のもの）は無視する。
+	StepText step;
+	const int storey = makeStorey(step, "1FL", 0.0);
+	const int mine = makeBeam(step, storey, BeamSpec{});
+	BeamSpec otherSpec;
+	otherSpec.oy = 2000.0;
+	const int other = makeBeam(step, storey, otherSpec);
+	associateMaterial(step, other, step.add("IFCMATERIAL('檜')"));
+
+	Model const model = step.build();
+	const Entity* element = model.entity(mine);
+	CHECK(element != nullptr);
+	if (element != nullptr)
+		CHECK_EQ(memberMaterialName(model, *element), "");
+}
+
+TEST(member_material_name_ignores_association_not_listing_this_element)
+{
+	// 自分を**参照はする**が RelatedObjects には含めない関連付けも無視する
+	// （逆参照は「どこかで参照している」だけなので、RelatedObjects 側を必ず確認する。
+	// parse/Story の collectStoryElements が RelatingStructure を確かめるのと同じ理由）。
+	// 併せて RelatedObjects がリストでない（$）関連付けも素通しすることを確かめる。
+	StepText step;
+	const int storey = makeStorey(step, "1FL", 0.0);
+	const int mine = makeBeam(step, storey, BeamSpec{});
+	BeamSpec otherSpec;
+	otherSpec.oy = 2000.0;
+	const int other = makeBeam(step, storey, otherSpec);
+	// 自分を RelatingMaterial 側に置いた（＝RelatedObjects には居ない）関連付け。
+	step.add("IFCRELASSOCIATESMATERIAL('m',$,$,$,(" + ref(other) + ")," + ref(mine) + ")");
+	// RelatedObjects がリストでない関連付け。
+	step.add("IFCRELASSOCIATESMATERIAL('n',$,$,$,$," + ref(mine) + ")");
+
+	Model const model = step.build();
+	const Entity* element = model.entity(mine);
+	CHECK(element != nullptr);
+	if (element != nullptr)
+		CHECK_EQ(memberMaterialName(model, *element), "");
+}
+
+TEST(member_placement_false_for_malformed_placements)
+{
+	// RelativePlacement が 3D でない／Location が無い／座標が 1 つしかない、のいずれも false。
+	const std::string notAxis3D = "#1=IFCAXIS2PLACEMENT2D($,$);\n"
+								  "#2=IFCLOCALPLACEMENT($,#1);\n"
+								  "#3=IFCBEAM('b',$,$,$,$,#2,$,$);\n";
+	const std::string noLocation = "#1=IFCAXIS2PLACEMENT3D($,$,$);\n"
+								   "#2=IFCLOCALPLACEMENT($,#1);\n"
+								   "#3=IFCBEAM('b',$,$,$,$,#2,$,$);\n";
+	const std::string oneCoordinate = "#1=IFCCARTESIANPOINT((0.));\n"
+									  "#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
+									  "#3=IFCLOCALPLACEMENT($,#2);\n"
+									  "#4=IFCBEAM('b',$,$,$,$,#3,$,$);\n";
+	for (const auto& [text, beamId] :
+		 {std::pair{notAxis3D, 3}, std::pair{noLocation, 3}, std::pair{oneCoordinate, 4}})
+	{
+		Model const model = loadIfcFromText(text);
+		const Entity* element = model.entity(beamId);
+		MemberPlacement placement;
+		CHECK(element != nullptr && !memberPlacement3D(model, *element, placement));
+	}
+}
+
+TEST(member_profile_dims_false_for_malformed_representations)
+{
+	// 表現が無い／Representations がリストでない／参照先が解決できない／Items がリストでない／
+	// Body の中身が押し出しでない、のいずれも false。
+	const std::string noShape = "#1=IFCBEAM('b',$,$,$,$,$,$,$);\n";
+	const std::string noRepresentations = "#1=IFCPRODUCTDEFINITIONSHAPE($,$,$);\n"
+										  "#2=IFCBEAM('b',$,$,$,$,$,#1,$);\n";
+	const std::string danglingRepresentation = "#1=IFCPRODUCTDEFINITIONSHAPE($,$,(#99));\n"
+											   "#2=IFCBEAM('b',$,$,$,$,$,#1,$);\n";
+	const std::string itemsNotList = "#1=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',$);\n"
+									 "#2=IFCPRODUCTDEFINITIONSHAPE($,$,(#1));\n"
+									 "#3=IFCBEAM('b',$,$,$,$,$,#2,$);\n";
+	const std::string nonExtrudedItem = "#1=IFCCARTESIANPOINT((0.,0.));\n"
+										"#2=IFCPOLYLINE((#1));\n"
+										"#3=IFCSHAPEREPRESENTATION($,'Body','Curve2D',(#2));\n"
+										"#4=IFCPRODUCTDEFINITIONSHAPE($,$,(#3));\n"
+										"#5=IFCBEAM('b',$,$,$,$,$,#4,$);\n";
+	for (const auto& [text, beamId] : {std::pair{noShape, 1}, std::pair{noRepresentations, 2},
+									   std::pair{danglingRepresentation, 2},
+									   std::pair{itemsNotList, 3}, std::pair{nonExtrudedItem, 5}})
+	{
+		Model const model = loadIfcFromText(text);
+		const Entity* element = model.entity(beamId);
+		MemberProfile profile;
+		CHECK(element != nullptr && !memberProfileDims(model, *element, profile));
+	}
+}
+
+TEST(sloped_geometry_false_without_solid)
+{
+	// 形状表現の無い材からは中心軸を導出できない。
+	Model const model = loadIfcFromText("#1=IFCBEAM('b',$,$,$,$,$,$,$);\n");
+	const Entity* element = model.entity(1);
+	SlopedMemberGeometry geometry;
+	CHECK(element != nullptr && !slopedMemberGeometry(model, *element, geometry));
+}
+
+TEST(sloped_geometry_false_for_degenerate_profile)
+{
+	// 4 頂点でも広がりが 0（一直線に潰れた断面）なら中心軸を導出できない。
+	StepText step;
+	const int storey = makeStorey(step, "2FL", 0.0);
+	SlopedBeamSpec spec;
+	spec.height = 0.0; // せいが 0 → プロファイルの v 方向の span が 0
+	spec.shear = 0.0;
+	const int beam = makeSlopedBeam(step, storey, spec);
+
+	Model const model = step.build();
+	const Entity* element = model.entity(beam);
+	SlopedMemberGeometry geometry;
+	CHECK(element != nullptr && !slopedMemberGeometry(model, *element, geometry));
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,6 +1375,24 @@ TEST(different_layers_not_trimmed)
 	const std::vector<MemberCommand> result =
 		resolveMemberInterferences({member(primarySpec), member(buttingSpec)});
 	CHECK(near(result[1].end.x, 0.0));
+}
+
+TEST(degenerate_member_is_not_trimmed_and_passes_through)
+{
+	// 平面投影長が 0 の命令（点に潰れた材）は調整対象にせず、そのまま返す。
+	const MemberCommand primary = member(MemberSpec{Vec2{0.0, -1000.0}, Vec2{0.0, 1000.0}});
+	MemberSpec pointSpec{Vec2{0.0, 500.0}, Vec2{0.0, 500.0}};
+	pointSpec.memberId = "point";
+	const std::vector<MemberCommand> result =
+		resolveMemberInterferences({primary, member(pointSpec)});
+	const MemberCommand* point = findById(result, "point");
+	CHECK(point != nullptr);
+	if (point != nullptr)
+	{
+		CHECK(near(point->start.x, 0.0));
+		CHECK(near(point->start.y, 500.0));
+		CHECK(near(point->end.y, 500.0));
+	}
 }
 
 TEST(non_interfering_beam_unchanged)

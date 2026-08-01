@@ -42,6 +42,7 @@ using HomeskzIfcImport::parse::collectRoofPlanes;
 using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::correctNoboribari;
 using HomeskzIfcImport::parse::correctOneNoboribari;
+using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::noboribariEndTrim;
 using HomeskzIfcImport::parse::NoboribariRoofPlane;
@@ -159,6 +160,14 @@ TEST(roof_plane_contains_only_inside_footprint)
 	const NoboribariRoofPlane plane = flatRoofPlane(0.25, 900.0);
 	CHECK(plane.contains(0.0, 0.0));
 	CHECK(!plane.contains(20000.0, 0.0));
+}
+
+TEST(roof_plane_without_footprint_contains_nothing)
+{
+	// 外形が面にならない（3 点未満）平面は何も内包しない。
+	NoboribariRoofPlane degenerate = flatRoofPlane(0.25, 900.0);
+	degenerate.plan.resize(2);
+	CHECK(!degenerate.contains(0.0, 0.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -337,6 +346,29 @@ TEST(passes_non_noboribari_through_unchanged)
 	CHECK_EQ(out.size(), members.size());
 	for (std::size_t i = 0; i < out.size() && i < members.size(); ++i)
 		CHECK(sameCommand(out[i], members[i]));
+}
+
+TEST(collect_roof_planes_skips_unresolvable_roof_slabs)
+{
+	// 形状表現を持たない屋根版（屋根面を解決できない）と、ほぼ水平な屋根版（勾配方向が
+	// 定まらない）はどちらも集めない＝垂木・野地板と同じ関門を通る。
+	Model const model =
+		loadIfcFromText("#1=IFCBUILDINGSTOREY('s',$,'RFL',$,$,$,$,$,.ELEMENT.,3000.);\n"
+						"#2=IFCSLAB('a',$,'屋根版:1',$,$,$,$,$,$);\n"
+						"#3=IFCCARTESIANPOINT((0.,0.));\n"
+						"#4=IFCCARTESIANPOINT((1000.,0.));\n"
+						"#5=IFCCARTESIANPOINT((1000.,1000.));\n"
+						"#6=IFCPOLYLINE((#3,#4,#5,#3));\n"
+						"#7=IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,$,#6);\n"
+						"#8=IFCDIRECTION((0.,0.,1.));\n"
+						"#9=IFCEXTRUDEDAREASOLID(#7,$,#8,12.);\n"
+						"#10=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#9));\n"
+						"#11=IFCPRODUCTDEFINITIONSHAPE($,$,(#10));\n"
+						"#12=IFCSLAB('b',$,'屋根版:2',$,$,$,#11,$,$);\n"
+						"#13=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#2,#12),#1);\n");
+
+	Context context(model);
+	CHECK(collectRoofPlanes(context).empty());
 }
 
 TEST(collects_roof_planes_from_fixture)
