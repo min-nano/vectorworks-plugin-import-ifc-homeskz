@@ -24,8 +24,8 @@
 
 namespace HomeskzIfcImport::core
 {
-	// 命令セットのスキーマバージョン。JSON ダンプ（DocumentJson・任意）や Python 版
-	// 期待値とのゴールデン比較で、スキーマ変更を検出できるように持たせておく。
+	// 命令セットのスキーマバージョン。解析側と描画側でスキーマの世代が食い違ったこと
+	// （dev/stable 混在や部分的な再ビルド）を検出できるように持たせておく。
 	inline constexpr int kDocumentVersion = 1;
 
 	// 通り芯を置くデザインレイヤ名（Python 版 vw/story.py GRID_LAYER）。GridCommand の
@@ -261,7 +261,7 @@ namespace HomeskzIfcImport::core
 	//   * M7 members         : std::vector<MemberCommand>
 	//   * M8 columns         : std::vector<ColumnCommand>
 	//   * M9 walls / slabs …
-	//   スキーマを変えるときは構造体・validateDocument・テスト・JSON ダンプを同時更新する。
+	//   スキーマを変えるときは構造体・validateDocument・テストを同時更新する。
 	struct Document
 	{
 		int version = kDocumentVersion;

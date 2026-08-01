@@ -108,11 +108,11 @@ VectorWorks ネイティブオブジェクト
   `columnMarks` / `sheets` / `sections` / `tags` / `legends` …）は Python 版
   `document.py` の `TypedDict` 群に対応させる。**フィールド名・意味は Python 版に
   合わせる**（対応が追いやすく、仕様のブレを防ぐ）。
-- Document は**任意で JSON へダンプできる**ようにしておく（デバッグと、Python 版の
-  期待値と突き合わせる**ゴールデンテスト**のため）。ただしフェーズ間の受け渡しは
-  構造体のまま行い、JSON 往復は必須にしない。
-- スキーマを変えるときは、構造体定義・`validateDocument`・テスト・（あれば）JSON
-  ダンプを同時に更新する。
+- フェーズ間の受け渡しは**構造体のまま**行う。JSON 直列化は**予定に無い**——Python 版
+  出力との突き合わせ（ゴールデンテスト）は行わない方針のため、唯一の用途が消えた
+  （理由は `ROADMAP.md`「Python 版出力との比較はしない」）。デバッグでダンプが要る場面が
+  実際に出てきたら、そのときに最小限を足す。
+- スキーマを変えるときは、構造体定義・`validateDocument`・テストを同時に更新する。
 
 ## ディレクトリ構造（目標）
 
@@ -131,7 +131,6 @@ src/
     Geometry.{h,cpp}        Vec2 / Vec3 / Mat4 等の自前数学型（parse が SDK 非依存のため必須）
     Document.{h,cpp}        命令セットの構造体定義と validateDocument（1 対で持つ。分割は不要）
     Region.{h,cpp}          部品が囲む平面領域の合成（ロフト床の外形。M5 で追加）
-    DocumentJson.{h,cpp}    Document ⇔ JSON（デバッグ / ゴールデンテスト用。**未実装・M6.5**）
 
   parse/                    Phase 1: IFC 解析（SDK 非依存）… 旧 ifc/
     Step.{h,cpp}            最小 STEP リーダ（トークナイザ＋エンティティグラフ）
@@ -249,9 +248,11 @@ Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テス�
 - **`core/` `parse/`**: **無 SDK で単体テスト**（既存 `TestFramework.h` を使う）。
   - STEP リーダ・幾何計算・各 parse モジュールを、Python 版と同じ**実 IFC フィクスチャ**
     （`tests/fixtures/` へ流用）に対してテストする。
-  - 可能なら**ゴールデンテスト**: Document を JSON ダンプし、Python 版の
-    `build_document` 出力（同じフィクスチャ）と主要フィールドを突き合わせて、
-    移植のズレを機械的に検出する。数値は許容誤差付きで比較する。
+  - **期待値は手書きする。** Python 版 `build_document` の出力と機械的に突き合わせる
+    （ゴールデンテスト）ことはしない——Python 版は仕様の一次資料であって出力の契約では
+    なく、意図的な差が積み上がるほど除外リストが育つだけになる（`ROADMAP.md`
+    「Python 版出力との比較はしない」）。移植ズレは Python 版の該当節・実装・テストを
+    読んで期待値へ写すことで防ぐ。数値は許容誤差付きで比較する。
   - CI（`lint.yml` / ランナー）で無 SDK ビルドとして常時回す。
 - **`draw/`**: SDK 依存のため CI での完全な実行は難しい。
   - ロジック（レイヤ順の並べ替え計算、命令→SDK 呼び出し列の組み立て等）で
@@ -269,7 +270,7 @@ Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テス�
 | `ifc/grid.py` … `ifc/section.py` | `parse/Grid` … `parse/Section` | 要素ごとの解析 |
 | `ifc/structural_class.py` | `parse/StructuralClass` | 構造クラス判定（純ロジック） |
 | （ifcopenshell の行列・幾何） | `parse/IfcGeometry` + `core/Geometry` | 配置行列・押し出し・断面 |
-| `document.py` | `core/Document`（検証も同ファイル）(+ `DocumentJson`) | 命令セット・検証 |
+| `document.py` | `core/Document`（検証も同ファイル） | 命令セット・検証 |
 | `tracing.py` | `core/Trace`（任意） | クラッシュ診断ログ |
 | `vw/__init__.py` `execute_document` | `draw/ExecuteDocument` | 描画ディスパッチ |
 | `vw/grid.py` … `vw/section.py` | `draw/Grid` … `draw/Section` | 要素ごとの描画 |
