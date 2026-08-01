@@ -4,8 +4,8 @@ cmake_minimum_required(VERSION 3.20)
 # HomeskzIfcImport - the ホームズ君 IFC import plug-in for Vectorworks 2026.
 #
 # The build produces a loadable plug-in that adds a single menu command; running
-# the command currently shows an alert dialog (the IFC import feature is being
-# built up incrementally — see ROADMAP.md). It builds on BOTH platforms
+# it picks an IFC file and draws what has been ported so far (the import is
+# built up element by element — see ROADMAP.md). It builds on BOTH platforms
 # Vectorworks 2026 supports, from the same sources:
 #
 #   * macOS   -> "HomeskzIfcImport.vwlibrary" bundle (the .vwr resource lives inside
@@ -63,7 +63,8 @@ endif()
 # The loadable plug-in (needs the Vectorworks SDK; macOS/Windows only) and the
 # unit tests are independent build products:
 #   * VW_BUILD_PLUGIN (default ON)  -> the .vwlibrary / .vlb plug-in.
-#   * VW_BUILD_TESTS  (default OFF) -> the SDK-free unit tests (src/UpdaterParse.h).
+#   * VW_BUILD_TESTS  (default OFF) -> the SDK-free unit tests (src/core/ +
+#                                      src/parse/ and the updater logic).
 #                                      These build on ANY platform, so the coverage
 #                                      job can run them on a plain Linux runner
 #                                      with -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON.
@@ -350,10 +351,13 @@ if(VW_BUILD_PLUGIN)
 
 			target_include_directories(${target} PRIVATE "${VW_SDK_INCLUDE}/OnlyMac")
 
-			# Fill in a per-target Info.plist from the shared template.
+			# Fill in a per-target Info.plist from the shared template. The channel
+			# placeholder is deliberately NOT called VW_BUILD_CHANNEL: that name is
+			# the cache option above, whose domain includes "both", while the plist
+			# records the single channel THIS target belongs to ("stable"/"dev").
 			set(VW_BUNDLE_NAME "${output_name}")
 			set(VW_BUNDLE_ID "${bundle_id}")
-			set(VW_BUILD_CHANNEL "${channel}")
+			set(VW_PLUGIN_CHANNEL "${channel}")
 			# VW_BUILD_BRANCH and VW_BUILD_VERSION come from the parent scope (CI/-D).
 			set(plist "${CMAKE_CURRENT_BINARY_DIR}/${target}-Info.plist")
 			configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/Module-Info.plist.in" "${plist}" @ONLY)
@@ -516,8 +520,9 @@ if(VW_BUILD_PLUGIN)
 endif() # VW_BUILD_PLUGIN
 
 # --- Unit tests --------------------------------------------------------------
-# SDK-free tests for the updater's parsing/quoting/path helpers. They build on
-# any platform, so a fast Linux job can run them and measure coverage.
+# SDK-free tests: the import's parse side (src/core/ + src/parse/, via the
+# HomeskzIfcCore library) and the updater's parsing/quoting/path helpers. They
+# build on any platform, so a fast Linux job can run them and measure coverage.
 if(VW_BUILD_TESTS)
 	enable_testing()
 	add_subdirectory(tests)

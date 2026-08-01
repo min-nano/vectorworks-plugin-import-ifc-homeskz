@@ -1,4 +1,4 @@
-# clang-tidy configuration for the Vectorworks plug-in template.
+# clang-tidy configuration for the ホームズ君 IFC import plug-in.
 #
 # Runs the static-analysis and lint checks that are meaningful for this code
 # base without drowning it in style noise that clang-format already owns.

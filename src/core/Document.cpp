@@ -12,7 +12,6 @@
 #include "core/Document.h"
 
 #include <algorithm>
-#include <cmath>
 #include <ranges>
 #include <string>
 
@@ -20,14 +19,6 @@ namespace HomeskzIfcImport::core
 {
 	namespace
 	{
-		// 2 点が実質同一か（縮退した通り芯＝始点と終点が同じ、を弾く判定に使う）。
-		// 座標は mm。Python 版のように厳密一致ではなく微小許容で見る（丸め耐性）。
-		bool isDegenerate(const Vec2& a, const Vec2& b)
-		{
-			constexpr double kEps = 1e-6;
-			return std::abs(a.x - b.x) < kEps && std::abs(a.y - b.y) < kEps;
-		}
-
 		// ストーリレベル 1 つが妥当か（Python 版 _validate_level 相当）。種別・レイヤ名が
 		// 非空であること。offset は数値（C++ では double なので常に成立）。
 		bool isValidLevel(const LevelCommand& level)
@@ -70,13 +61,14 @@ namespace HomeskzIfcImport::core
 
 		// 垂木 1 本が妥当か（Python 版 _validate_rafter 相当）。配置先レイヤ名・クラス名が
 		// 非空で、断面（幅・せい）が正で、平面の始点（軒側＝支持点）と終点（棟側）が縮退して
-		// いないこと。elevation / endElevation / overhang / embedment は数値（double なので
-		// 常に成立）。Python 版は型だけを見るが、C++ は型が静的なので「描けない値」を弾く
-		// 幾何の関門に読み替える（床板と同じ方針）。
+		// いないこと（縮退＝始点と終点が同じ点。判定は core/Geometry の samePoint）。
+		// elevation / endElevation / overhang / embedment は数値（double なので常に成立）。
+		// Python 版は型だけを見るが、C++ は型が静的なので「描けない値」を弾く幾何の関門に
+		// 読み替える（床板と同じ方針）。
 		bool isValidRafter(const RafterCommand& rafter)
 		{
 			return !rafter.layer.empty() && !rafter.drawClass.empty() && rafter.width > 0.0 &&
-				   rafter.height > 0.0 && !isDegenerate(rafter.start, rafter.end);
+				   rafter.height > 0.0 && !samePoint(rafter.start, rafter.end);
 		}
 
 		// 野地板 1 枚が妥当か（Python 版 _validate_roof 相当）。配置先レイヤ名・クラス名が
@@ -115,6 +107,8 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。
+		// 同一判定は parse/Grid の重複線除去と同じ core/Geometry の samePoint を通す
+		// （閾値がズレると「畳まれた線が検証では非縮退」のような食い違いが起こる）。
 		// クラス名は空でもよい（無クラス＝既定クラスへ）。1 本でも不正なら描画しない
 		// （Python 版 validateDocument と同じ関門。ROADMAP.md M1）。
 		//
@@ -122,7 +116,7 @@ namespace HomeskzIfcImport::core
 		// （member … の検証。ROADMAP.md）。
 		return std::ranges::all_of(
 			document.grids, [](const GridCommand& grid)
-			{ return !grid.layer.empty() && !isDegenerate(grid.start, grid.end); });
+			{ return !grid.layer.empty() && !samePoint(grid.start, grid.end); });
 	}
 
 	namespace

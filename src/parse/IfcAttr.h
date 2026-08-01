@@ -69,12 +69,17 @@ namespace HomeskzIfcImport::parse
 		inline constexpr std::size_t kGridAxisTag = 0;
 		inline constexpr std::size_t kGridAxisCurve = 1;
 
-		// IfcProfileDef(ProfileType, ProfileName, Position=2) と、その派生の寸法。
+		// IfcParameterizedProfileDef(ProfileType, ProfileName, Position=2) と、その派生の寸法。
 		// IfcRectangleProfileDef(…, Position=2, XDim=3, YDim=4)。
-		// IfcArbitraryClosedProfileDef(…, OuterCurve=2)。位置が同じなので番号を共有する。
 		inline constexpr std::size_t kProfilePosition = 2;
 		inline constexpr std::size_t kRectangleProfileXDim = 3;
 		inline constexpr std::size_t kRectangleProfileYDim = 4;
+
+		// IfcArbitraryClosedProfileDef(ProfileType, ProfileName, OuterCurve=2)。番号は
+		// 上の Position と同じだが**指す属性が違う**ので、別名を与えて呼び出し側の意図を
+		// 取り違えないようにする（kProfilePosition で外形を引くと "Position" を読んでいる
+		// ように見えてしまう）。派生の IfcArbitraryProfileDefWithVoids も同じ位置。
+		inline constexpr std::size_t kArbitraryProfileOuterCurve = 2;
 
 		// IfcExtrudedAreaSolid(SweptArea=0, Position=1, ExtrudedDirection=2, Depth=3)。
 		inline constexpr std::size_t kExtrudedAreaSolidSweptArea = 0;

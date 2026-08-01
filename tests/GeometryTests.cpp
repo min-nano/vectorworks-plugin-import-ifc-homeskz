@@ -21,6 +21,7 @@
 //
 
 #include "Fixtures.h"
+#include "RoofSample.h"
 #include "TestFramework.h"
 
 #include "core/Geometry.h"
@@ -37,6 +38,7 @@ using core::Vec2;
 using core::Vec3;
 using HomeskzIfcTests::fixture;
 using HomeskzIfcTests::near;
+using HomeskzIfcTests::shedPlane;
 using parse::loadIfcFromText;
 using parse::Model;
 using parse::Profile;
@@ -846,20 +848,9 @@ TEST(footprint_of_empty_profile_is_empty)
 // RoofSlope（屋根面の勾配座標系。垂木 parse/Rafter と野地板 parse/Roof が共有する）
 // ---------------------------------------------------------------------------
 
-namespace
-{
-	// 試験用の片流れ屋根面: 4m×3m の矩形が +Y へ立ち上がる。軒（y=0）で z=1000、
-	// 棟（y=3000）で z=2000 なので z = 1000 + y/3 ⇒ 上向き単位法線 (0, −1, 3)/√10。
-	parse::RoofPlane shedPlane()
-	{
-		const double s = std::sqrt(10.0);
-		parse::RoofPlane plane;
-		plane.vertices = {Vec3{0.0, 0.0, 1000.0}, Vec3{4000.0, 0.0, 1000.0},
-						  Vec3{4000.0, 3000.0, 2000.0}, Vec3{0.0, 3000.0, 2000.0}};
-		plane.normal = Vec3{0.0, -1.0 / s, 3.0 / s};
-		return plane;
-	}
-} // namespace
+// 試験用の片流れ屋根面（4m×3m が +Y へ立ち上がる）は tests/RoofSample.h が唯一の定義で、
+// 垂木（ParseRafterTests）・野地板（ParseRoofTests）と共有する。勾配座標系の期待値は
+// それらのテストの前提でもあるので、同じ平面で検証する必要がある。
 
 TEST(roof_slope_directions_and_height)
 {

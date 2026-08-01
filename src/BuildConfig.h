@@ -11,7 +11,8 @@
 //	universal name and extension UUID) so Vectorworks can load BOTH at the same
 //	time without them colliding. The DEV build is selected by defining
 //	VW_DEV_BUILD (done per-target in CMakeLists.txt); everything else here is
-//	derived from that single switch.
+//	derived from that single switch. Only identifiers that the C++ code actually
+//	uses live here — see the note on the build channel below.
 //
 
 #pragma once
@@ -20,22 +21,19 @@
 // Dev plug-in identity.
 #	define PLUGIN_VWR_ID "HomeskzIfcImportDev"
 #	define PLUGIN_UNIVERSAL_NAME "CExtMenuImportIfc_HomeskzIfcImportDev"
-#	define PLUGIN_DISPLAY_NAME "HomeskzIfcImport (Dev)"
 #else
 // Stable plug-in identity.
 #	define PLUGIN_VWR_ID "HomeskzIfcImport"
 #	define PLUGIN_UNIVERSAL_NAME "CExtMenuImportIfc_HomeskzIfcImport"
-#	define PLUGIN_DISPLAY_NAME "HomeskzIfcImport"
 #endif
 
-// Build channel, as a human-readable string ("stable" / "dev").
-#ifndef VW_BUILD_CHANNEL
-#	ifdef VW_DEV_BUILD
-#		define VW_BUILD_CHANNEL "dev"
-#	else
-#		define VW_BUILD_CHANNEL "stable"
-#	endif
-#endif
+// NB: there is deliberately no build-channel macro here. The channel a build
+// belongs to ("stable" / "dev") is stamped into the packaged build by CMake —
+// the mac Info.plist's VWBuildChannel key, filled from the add_vw_plugin
+// argument — and that is the only place anything reads it (the updater scripts).
+// The C++ side identifies itself by branch + commit (below), so a macro would be
+// a third spelling of the same fact, and it would collide in name with CMake's
+// VW_BUILD_CHANNEL option, which has a DIFFERENT domain ("stable"/"dev"/"both").
 
 // Short identifier of the exact build (git commit, or "local" for a local
 // build). CMake passes this in via -DVW_BUILD_VERSION=...; it is stamped into

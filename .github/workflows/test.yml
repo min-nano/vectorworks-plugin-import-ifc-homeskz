@@ -3,7 +3,8 @@ name: Tests
 # The project's main CI for correctness: it runs the unit tests and, on top of
 # that, measures and reports coverage. Two jobs, split so a failure points
 # straight at its cause:
-#   * test     — build the SDK-free unit tests (src/UpdaterParse.h) and run them
+#   * test     — build the SDK-free unit tests (the import's src/core/ + src/parse/
+#                half, plus the updater logic) and run them
 #                under AddressSanitizer + UndefinedBehaviorSanitizer, so a memory
 #                error (out-of-bounds read, use-after-free, leak) or undefined
 #                behaviour turns the run red — not just a failed assertion. This

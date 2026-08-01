@@ -33,9 +33,10 @@
 
 namespace HomeskzIfcImport::parse
 {
-	// 構造材（柱・横架材）へ割り当てる VW クラス名。Python 版 ifc/structural_class.py の
-	// CLASS_* 定数と一字一句合わせる（04構造-02木造 を共通接頭辞に持つ葉クラス。番号と
-	// 名称の間にスペースを入れず、全パスを "-" で連結する）。constexpr const char* なので
+	// 構造材（柱・横架材）と面材（床板・野地板）へ割り当てる VW クラス名。Python 版
+	// ifc/structural_class.py の CLASS_* 定数と一字一句合わせる（04構造-02木造 を共通
+	// 接頭辞に持つ葉クラス。番号と名称の間にスペースを入れず、全パスを "-" で連結する）。
+	// constexpr const char* なので
 	// 動的初期化を持たず、std::string / std::optional<std::string> と直接比較できる。
 	inline constexpr const char* CLASS_DODAI = "04構造-02木造-01土台-01土台";
 	inline constexpr const char* CLASS_OOBIKI = "04構造-02木造-02床組-01大引";

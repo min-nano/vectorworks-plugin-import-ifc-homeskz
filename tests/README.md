@@ -32,11 +32,18 @@
 | `ParseRoofTests` | `src/parse/Roof` | 野地板（軒軸・upslope・勾配・厚み・軒の Z） |
 | `ParseSummaryTests` | `src/parse/Summary` | 型別件数の集計とダイアログ文言の整形 |
 
-いずれも無 SDK の静的ライブラリ `HomeskzIfcCore` をリンクします。フィクスチャのパスと
-近似比較・フィクスチャ一覧は `tests/Fixtures.h` に共通化してあります（一覧を各テストが
-持つと、フィクスチャを足したときに一部だけ素通りするため）。フィクスチャを読むヘルパー
-（`fixture` / `allFixtures`）は `HOMESKZ_FIXTURES_DIR` を受け取るターゲットでのみ現れ、
-近似比較（`near`）はフィクスチャを使わないテストからも使えます。
+いずれも無 SDK の静的ライブラリ `HomeskzIfcCore` をリンクします。テスト間で共有する
+小道具は 2 つのヘッダに一本化してあります（同じものを各テストが持つと、片方だけ直したときに
+テスト同士の前提が食い違うため）。
+
+- `tests/Fixtures.h` … フィクスチャのパス・読み込み・近似比較・**フィクスチャ一覧**。
+  フィクスチャを読むヘルパー（`fixture` / `allFixtures`）は `HOMESKZ_FIXTURES_DIR` を
+  受け取るターゲットでのみ現れ、近似比較（`near`）はフィクスチャを使わないテストからも
+  使えます。
+- `tests/RoofSample.h` … 試験用の片流れ屋根面（`shedPlane`）と、それに対応する最小の
+  屋根版 IFC（`minimalRoofText`）。垂木・野地板・勾配座標系は**同じ屋根面**に対する
+  期待値でなければ意味がないので、`ParseRafterTests` / `ParseRoofTests` / `GeometryTests`
+  はこの定義を共有します。
 
 **描画側（`src/draw/`）に単体テストはありません。** SDK と実際の図面が要るためで、
 代わりに (a) SDK から切り離せるロジックは `core/` へ寄せて無 SDK でテストし

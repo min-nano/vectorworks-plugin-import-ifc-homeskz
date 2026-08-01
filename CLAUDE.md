@@ -155,6 +155,7 @@ src/
 tests/
   TestFramework.h           既存の極小ハーネス（無 SDK）
   Fixtures.h                フィクスチャの読み込み・近似比較・フィクスチャ一覧（共通）
+  RoofSample.h              試験用の屋根面と最小の屋根版 IFC（垂木/野地板/幾何で共有）
   fixtures/                 ホームズ君 IFC（Python 版 tests/fixtures から流用）
   StepTests.cpp             STEP リーダ
   GeometryTests.cpp         幾何計算（Python 版の値と突き合わせ）
@@ -170,8 +171,11 @@ tests/
 **重複を作らない置き場所**: 同じ定数・述語・ヘルパーを 2 か所に書かない。IFC の属性
 インデックスは `parse/IfcAttr.h`、レベル種別名は `parse/Story.h`（屋根組は
 `parse/Rafter.h` / `parse/Roof.h`）、レイヤ名の組み立ては `storyLayerName`、要素の判別
-述語（`isFloorSlab` / `isRoofSlab`）はその要素のヘッダ、`draw/` の SDK 呼び出しの定型は
-`draw/DrawUtil` に**それぞれ 1 つだけ**置く。
+述語（`isFloorSlab` / `isRoofSlab`）はその要素のヘッダ、平面座標の同一判定と許容
+（`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値は
+`parse/IfcGeometry.h`、`draw/` の SDK 呼び出しの定型は `draw/DrawUtil` に**それぞれ
+1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、
+共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
 
 **依存の向きは厳守する:** `parse/` と `core/` は VectorWorks SDK を include しない。
 `draw/` は STEP / IFC を include しない。両者をつなぐのは `core/Document.h` だけ。
