@@ -8,8 +8,8 @@
 //	入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	描画手順（Python 版 draw_member と同じ意図。実現手段は SDK の作法に合わせる）:
-//	  1. **パス**＝天端中央線の始端→終端を頂点に持つ「開いた 3D ポリライン」。頂点の XY は
-//	     命令のセンタリング済み絶対座標、**Z は両端とも命令の始端天端 elevation**。
+//	  1. **パス**＝天端中央線の始端→終端を頂点に持つ「開いた 2D ポリライン」。頂点は命令の
+//	     センタリング済み絶対座標で、**Z は持たせない**（高さは下記のストーリバウンドが与える）。
 //	  2. **プロファイル**＝断面の矩形（幅 × せい）をグループに入れたもの。**空のグループを
 //	     渡してはならない**（断面が無いのと同じで、PIO は生成できても実体が描かれず
 //	     「オブジェクトはあるのに画面に何も出ない」状態になる。CreateProfileGroup 参照）。
@@ -25,12 +25,21 @@
 //	終端が実際の 2 倍の高さに描かれる（Python 版が柱の二重加算 #54 と同種の問題として実機で
 //	確認済み。水平梁は差が 0 なので顕在化しない）。
 //
-//	【高さの与え方】Python 版は「ローカル原点にパスを作る → Move3D(x1, y1, z1)」の 2 手順だが、
-//	ISDK には VectorScript の 3D 変換状態（Move3D）が無い。代わりに**パスの頂点そのものを
-//	最終位置（XY は絶対座標・Z は始端天端）で作る**——これは Move3D 後の状態と同じで、
-//	draw/Grid が GridAxis のパスを絶対座標で渡しているのと同じ作法。**Z が絶対か
-//	レイヤ相対かはローカル確認項目**で、切り替えは下の kPathZ の 1 か所で済む
-//	（M6 の垂木・野地板と同じ扱い。ROADMAP.md M6/M7「ローカル確認」）。
+//	【パスは 2D ポリラインで渡す】最初は 2 頂点の **3D** ポリライン（VWPolygon3DObj）に絶対 Z を
+//	持たせていたが、実機で**構造材が長さ 0 になり画面に何も描かれなかった**。OIP は
+//	「スパン 0 / 長さ 0」（どちらもパスが支配するためグレーアウト）で、X/Y/Z はパスの始点と
+//	一致していた——つまり PIO はパスを**挿入点としてしか読まず、長さを取れていなかった**。
+//	断面（構造材 ID 105×240）とスタイルは正しく入っていたので、原因はパスの種別に絞られる。
+//
+//	Python 版は NURBS 曲線（CreateNurbsCurve ＋ AddVertex3D）を渡すが、**ISDK ではこれを
+//	再現できない**: VWFC の VWNURBSCurve は評価専用で制御点から構築できず、ISDK の
+//	CreateNurbsCurve は 1 点の曲線しか作れず頂点を足す呼び出しが無い（AppendNurbsCurves は
+//	曲線同士の連結）。そこで**本リポジトリで実績のある 2D ポリライン**にする——draw/Grid が
+//	GridAxis のパスにまさに VWPolygon2DObj を渡しており、M1 で実機確認済み。
+//
+//	高さは 3D パスではなく**始端／終端のストーリバウンドだけ**で与える（元々の設計どおり。
+//	ISDK には VectorScript の Move3D が無く、Python 版の「原点に作って Move3D」も再現
+//	できない）。実機の OIP でバウンド（横架材天端・オフセット）が正しく入ることは確認済み。
 //
 //	【パラメータは名前解決してから書き、読み戻して確かめる】断面寸法が入らないと材のせいが
 //	0 になり、オブジェクトはあるのに画面に出ない。PIO のパラメータは universal 名が 1 つ違う
@@ -62,7 +71,6 @@
 #include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
-#include "VWFC/VWObjects/VWPolygon3DObj.h"
 
 #include <cmath>
 #include <cstddef>
@@ -79,6 +87,9 @@ namespace HomeskzIfcImport::draw
 		// SetObjectStoryBound に渡すバウンド ID。構造材は始端＝0・終端＝1 の 2 つを持つ
 		// （Python 版 vw/member.py と同じ規約）。型は SDK の TObjectBoundID（= Sint32）だが、
 		// その別名は SDK の名前空間の中にあるため実体の Sint32 で持つ（暗黙変換で同じ）。
+		// 部材長を「取れていない」とみなす閾値（mm）。読み戻した スパン がこれ以下なら 0 扱い。
+		constexpr double kZeroLengthTol = 1e-6;
+
 		constexpr Sint32 kStartBoundID = 0;
 		constexpr Sint32 kEndBoundID = 1;
 
@@ -102,6 +113,10 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kLocalizedBreadth = "幅";
 		constexpr const char* kLocalizedDepth = "せい";
 		constexpr const char* kLocalizedProfileShape = "断面形状";
+		// パスから取れた部材長（OIP「スパン」）。**書くためではなく読み戻して確かめるため**の
+		// 名前で、0 のままなら PIO がパスの長さを取れていない＝画面に何も描かれない。
+		constexpr const char* kFieldSpan = "Span";
+		constexpr const char* kLocalizedSpan = "スパン";
 
 		// フィールドに渡す値（Python 版と同じ。ポップアップはキーで保持されるため数値文字列）。
 		constexpr const char* kProfileShapeRectangle = "Rectangle";
@@ -167,14 +182,13 @@ namespace HomeskzIfcImport::draw
 		// 横架材 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。
 		bool DrawOne(const core::MemberCommand& member, RefNumber style,
-					 std::size_t& outSectionFailures)
+					 std::size_t& outSectionFailures, std::size_t& outLengthFailures)
 		{
-			// パスの Z（両端で同じ）。傾斜は高さバインドの offset 差だけで表す
-			// （冒頭「パスに傾斜を持たせない」）。絶対 Z かレイヤ相対かの切り替えはここ 1 か所。
-			const double kPathZ = member.elevation;
-
-			VWPolygon3DObj path({VWPoint3D(member.start.x, member.start.y, kPathZ),
-								 VWPoint3D(member.end.x, member.end.y, kPathZ)});
+			// パス＝天端中央線の始端→終端を頂点に持つ「開いた **2D** ポリライン」。
+			// 高さは一切持たせず、始端／終端のストーリバウンドだけで与える（冒頭
+			// 「パスは 2D ポリラインで渡す」「パスに傾斜を持たせない」）。
+			VWPolygon2DObj path(
+				{VWPoint2D(member.start.x, member.start.y), VWPoint2D(member.end.x, member.end.y)});
 			path.SetClosed(false); // ポリゴン（閉）でなくポリライン（開）
 			const MCObjectHandle pathHandle = path.GetThisObject();
 			if (pathHandle == nil)
@@ -242,6 +256,11 @@ namespace HomeskzIfcImport::draw
 			// 断面が入らなかった本数を数える（診断。drawMembers が完了ダイアログへ載せる）。
 			if (!breadthOk || !depthOk)
 				++outSectionFailures;
+			// パスから部材長を取れたかを読み戻す。0 のままなら実体が無く画面に描かれない
+			// （冒頭「パスは 2D ポリラインで渡す」で直した症状そのもの）。
+			if (std::abs(pio.GetParamReal(ResolveParamName(pio, kFieldSpan, kLocalizedSpan))) <=
+				kZeroLengthTol)
+				++outLengthFailures;
 			return true;
 		}
 	} // namespace
@@ -255,6 +274,7 @@ namespace HomeskzIfcImport::draw
 
 		std::size_t drawn = 0;
 		std::size_t sectionFailures = 0;
+		std::size_t lengthFailures = 0;
 		for (const core::MemberCommand& member : document.members)
 		{
 			// 配置先レイヤ（"n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁"）が無い命令は
@@ -262,7 +282,7 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(member.layer) == nil)
 				continue;
 
-			if (DrawOne(member, style, sectionFailures))
+			if (DrawOne(member, style, sectionFailures, lengthFailures))
 				++drawn;
 		}
 
@@ -274,11 +294,13 @@ namespace HomeskzIfcImport::draw
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「作れたが断面が
 		// 入らなかった」「スタイルが見つからなかった」を件数で持ち帰る。横架材が 1 本も
 		// 見えないときに、原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
-		if (outDiagnostics != nullptr && (sectionFailures > 0 || style == 0))
+		if (outDiagnostics != nullptr && (sectionFailures > 0 || lengthFailures > 0 || style == 0))
 		{
 			std::string note = "横架材の診断: ";
 			if (sectionFailures > 0)
 				note += "断面を設定できなかった材 " + std::to_string(sectionFailures) + " 本。";
+			if (lengthFailures > 0)
+				note += "パスから長さを取れなかった材 " + std::to_string(lengthFailures) + " 本。";
 			if (style == 0)
 				note += "プラグインスタイル『木質構造材_横架材』が見つかりません。";
 			*outDiagnostics = std::move(note);
