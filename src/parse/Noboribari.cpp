@@ -111,8 +111,43 @@ namespace HomeskzIfcImport::parse
 		return nullptr;
 	}
 
+	double noboribariColumnPenetration(const Vec2& point, const Vec2& outward,
+									   const core::ColumnCommand& column)
+	{
+		const double halfX = column.width / 2.0;
+		const double halfY = column.depth / 2.0;
+		if (std::abs(point.x - column.position.x) > halfX ||
+			std::abs(point.y - column.position.y) > halfY)
+			return 0.0; // 端点が柱の断面の外（食い込んでいない）
+
+		// 内側方向（−outward）へ引き戻して、先に出会う面（X 面／Y 面）までの距離を採る。
+		const Vec2 inward{-outward.x, -outward.y};
+		double best = 0.0;
+		bool found = false;
+		const auto consider = [&best, &found](double distance)
+		{
+			if (distance <= 0.0)
+				return;
+			if (!found || distance < best)
+				best = distance;
+			found = true;
+		};
+		if (std::abs(inward.x) > kNoboribariColumnDirEps)
+		{
+			const double face = column.position.x + (inward.x > 0.0 ? halfX : -halfX);
+			consider((face - point.x) / inward.x);
+		}
+		if (std::abs(inward.y) > kNoboribariColumnDirEps)
+		{
+			const double face = column.position.y + (inward.y > 0.0 ? halfY : -halfY);
+			consider((face - point.y) / inward.y);
+		}
+		return found ? best : 0.0;
+	}
+
 	double noboribariEndTrim(const Vec2& point, const Vec2& outward, double zBottom, double zTop,
-							 const std::vector<MemberCommand>& receivers)
+							 const std::vector<MemberCommand>& receivers,
+							 const std::vector<core::ColumnCommand>& columns)
 	{
 		double best = 0.0;
 		for (const MemberCommand& receiver : receivers)
@@ -133,12 +168,24 @@ namespace HomeskzIfcImport::parse
 														 Vec2{dx / length, dy / length}, length,
 														 receiver.width / 2.0));
 		}
+
+		// 柱（M8）。柱は方向を持たないので断面の軸平行矩形として扱う。Z 範囲は下端
+		// （elevation）〜上端（elevation + height）。
+		for (const core::ColumnCommand& column : columns)
+		{
+			const double columnTop = column.elevation + column.height;
+			if (std::min(zTop, columnTop) - std::max(zBottom, column.elevation) <=
+				kNoboribariZOverlapTol)
+				continue; // Z 範囲が離れた柱は取り合いでない
+			best = std::max(best, noboribariColumnPenetration(point, outward, column));
+		}
 		return best;
 	}
 
 	MemberCommand correctOneNoboribari(const MemberCommand& command,
 									   const std::vector<NoboribariRoofPlane>& planes,
 									   const std::vector<MemberCommand>& receivers,
+									   const std::vector<core::ColumnCommand>& columns,
 									   const Vec2& center)
 	{
 		const double dx = command.end.x - command.start.x;
@@ -154,8 +201,9 @@ namespace HomeskzIfcImport::parse
 
 		// 1. 端部の食い込み解消: 始端は外向き −u、終端は外向き +u。詰めた後に極小長に
 		//    ならない範囲で端点を軸に沿って内側へ引き戻す。
-		double sStart = noboribariEndTrim(command.start, backward, zBottom, zTop, receivers);
-		double sEnd = noboribariEndTrim(command.end, axis, zBottom, zTop, receivers);
+		double sStart =
+			noboribariEndTrim(command.start, backward, zBottom, zTop, receivers, columns);
+		double sEnd = noboribariEndTrim(command.end, axis, zBottom, zTop, receivers, columns);
 		if (sStart < kNoboribariMinTrim)
 			sStart = 0.0;
 		if (sEnd < kNoboribariMinTrim)
@@ -187,7 +235,8 @@ namespace HomeskzIfcImport::parse
 	}
 
 	std::vector<MemberCommand> correctNoboribari(Context& context,
-												 const std::vector<MemberCommand>& members)
+												 const std::vector<MemberCommand>& members,
+												 const std::vector<core::ColumnCommand>& columns)
 	{
 		// 登り梁が 1 本も無ければ屋根面の収集ごと省く（素通しと同じ結果）。
 		const bool hasNoboribari = std::ranges::any_of(members, [](const MemberCommand& m)
@@ -213,15 +262,16 @@ namespace HomeskzIfcImport::parse
 			if (member.drawClass != CLASS_NOBORIBARI)
 				result.push_back(member);
 			else
-				result.push_back(correctOneNoboribari(member, planes, receivers, center));
+				result.push_back(correctOneNoboribari(member, planes, receivers, columns, center));
 		}
 		return result;
 	}
 
 	std::vector<MemberCommand> correctNoboribari(const Model& model,
-												 const std::vector<MemberCommand>& members)
+												 const std::vector<MemberCommand>& members,
+												 const std::vector<core::ColumnCommand>& columns)
 	{
 		Context context(model);
-		return correctNoboribari(context, members);
+		return correctNoboribari(context, members, columns);
 	}
 } // namespace HomeskzIfcImport::parse

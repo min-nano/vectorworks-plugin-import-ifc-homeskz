@@ -80,6 +80,12 @@ namespace HomeskzIfcImport::parse
 	std::string resolveMemberClass(const std::string& name, int index, int topIndex,
 								   bool aboveEaves);
 
+	// 小屋束を識別する IfcColumn.ObjectType（Python 版 COLUMN_STANDCOLUMN_OBJECT_TYPE）。
+	// **この定義が唯一**で、クラス判定（resolveColumnClass）と柱種別名の変換
+	// （parse/Column の resolveColumnType）が同じ文字列を見る（片方だけ直すと、
+	// クラスは小屋束なのに構造材 ID の種別が管柱のまま、といったズレが起こる）。
+	inline constexpr const char* kStandColumnObjectType = "STANDCOLUMN";
+
 	// 柱のクラスを決定する（Python 版 resolve_column_class 相当）。
 	//
 	// 小屋束は IFC 記録（objectType == "STANDCOLUMN" または name が "小屋束" で始まる）で

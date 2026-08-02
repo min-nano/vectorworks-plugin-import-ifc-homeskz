@@ -4,9 +4,9 @@
 //	validateDocument の実装。Python 版 document.py の validateDocument に対応する。
 //	SDK 非依存（core/ は VectorWorks SDK を一切 include しない）。
 //
-//	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・
+//	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
 //	rafters / roofs（M6）・grids（M1）の各命令の必須フィールド・値域を見る。命令リスト
-//	（columns / walls …）が追加されるたびに、対応する検証規則（必須フィールドの有無・
+//	（walls / slabs …）が追加されるたびに、対応する検証規則（必須フィールドの有無・
 //	参照整合性・値域）をここへ足していく。
 //
 
@@ -85,6 +85,18 @@ namespace HomeskzIfcImport::core
 				   !member.endBound.level.empty();
 		}
 
+		// 柱 1 本が妥当か（Python 版 _validate_column 相当）。配置先レイヤ名（span レイヤ）・
+		// クラス名・構造材 ID・構造用途が非空で、断面（幅・せい）と柱高さが正で、上下端の
+		// 高さ基準のレベル種別が非空であること（空だと SetObjectStoryBound が解決できず、
+		// 高さがレイヤ基準へリセットされる）。elevation は数値（double なので常に成立）。
+		bool isValidColumn(const ColumnCommand& column)
+		{
+			return !column.layer.empty() && !column.drawClass.empty() && !column.memberId.empty() &&
+				   !column.structuralUse.empty() && column.width > 0.0 && column.depth > 0.0 &&
+				   column.height > 0.0 && !column.bottomBound.level.empty() &&
+				   !column.topBound.level.empty();
+		}
+
 		// 野地板 1 枚が妥当か（Python 版 _validate_roof 相当）。配置先レイヤ名・クラス名が
 		// 非空で、平面外形が 3 点以上（面になる）で、厚みが正であること。勾配（rise/run）と
 		// 高さは数値（double なので常に成立）で、退化した勾配は描画側がフォールバックで
@@ -118,6 +130,12 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.members, isValidMember))
 			return false;
 
+		// 柱: 配置先レイヤ名（span レイヤ）・クラス名・構造材 ID・構造用途が非空で、断面と
+		// 柱高さが正、上下端の高さ基準のレベル種別が非空であること（isValidColumn 参照。
+		// Python 版 _validate_column と同じ関門。ROADMAP.md M8）。
+		if (!std::ranges::all_of(document.columns, isValidColumn))
+			return false;
+
 		// 垂木・野地板: 配置先レイヤ名・クラス名が非空で、垂木は断面が正・平面が非縮退、
 		// 野地板は外形 3 点以上・厚みが正であること（Python 版 _validate_rafter /
 		// _validate_roof と同じ関門。ROADMAP.md M6）。
@@ -133,7 +151,7 @@ namespace HomeskzIfcImport::core
 		// （Python 版 validateDocument と同じ関門。ROADMAP.md M1）。
 		//
 		// TODO: 命令リストが増えたら、要素ごとの all_of を && で連ねてここに積む
-		// （column … の検証。ROADMAP.md）。
+		// （wall / slab … の検証。ROADMAP.md）。
 		return std::ranges::all_of(
 			document.grids, [](const GridCommand& grid)
 			{ return !grid.layer.empty() && !samePoint(grid.start, grid.end); });

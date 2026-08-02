@@ -10,8 +10,8 @@
 //	される（無 SDK の core/parse ライブラリには含めない）。この宣言ヘッダ自体は
 //	core::Document しか参照せず、SDK ヘッダを引き込まない。
 //
-//	現状は story（M3）→ grid（M1）→ floor（M5）→ member（M7）→ rafter → roof（M6）へ
-//	ディスパッチする。残りの要素は対応マイルストーンで足していく。
+//	現状は story（M3）→ grid（M1）→ floor（M5）→ member（M7）→ column（M8）→
+//	rafter → roof（M6）へディスパッチする。残りの要素は対応マイルストーンで足していく。
 //
 
 #pragma once
@@ -35,6 +35,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t grids = 0;
 		std::size_t floors = 0;
 		std::size_t members = 0;
+		std::size_t columns = 0;
 		std::size_t rafters = 0;
 		std::size_t roofs = 0;
 
@@ -43,17 +44,18 @@ namespace HomeskzIfcImport::draw
 		// M15。ROADMAP.md）。完了ダイアログはこれを見て中止を明示する。
 		bool cancelled = false;
 
-		// 描画側で起きた異常の 1 行説明（無ければ空）。実描画はローカルの VectorWorks で
-		// しか確認できないので、「命令はあるのに見えない」ときに原因を解析側と描画側で
-		// 切り分ける手掛かりをメニューコマンドの完了ダイアログへ持ち帰る。
+		// 描画側で起きた異常の説明（無ければ空）。要素ごとに 1 行を改行で連ねる。実描画は
+		// ローカルの VectorWorks でしか確認できないので、「命令はあるのに見えない」ときに
+		// 原因を解析側と描画側で切り分ける手掛かりをメニューコマンドの完了ダイアログへ持ち帰る。
 		std::string diagnostics;
 	};
 
 	// 命令セットを描画する。validateDocument を通してから、命令ごとに要素の draw モジュール
-	// （story → grid → floor → member → rafter → roof の順）へディスパッチし、描けた数を返す。
+	// （story → grid → floor → member → column → rafter → roof の順）へディスパッチし、
+	// 描けた数を返す。
 	// 検証を通らなかったときは valid=false で何も描かない。命令が空でも検証は通る（valid=true）。
 	//
-	// TODO(M8〜): column … と、要素ごとの draw モジュールへのディスパッチを足す。
+	// TODO(M9〜): footing … と、要素ごとの draw モジュールへのディスパッチを足す。
 	DrawCounts executeDocument(const core::Document& document);
 
 	// 進捗を報告しながら描画する。要素ごとに 1 フェーズを開き（進捗バーの配分は命令数の比。

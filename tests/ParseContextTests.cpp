@@ -16,6 +16,7 @@
 #include "TestFramework.h"
 #include "Fixtures.h"
 
+#include "parse/Column.h"
 #include "parse/Context.h"
 #include "parse/Floor.h"
 #include "parse/Grid.h"
@@ -259,6 +260,34 @@ TEST(members_are_cached_and_match_the_plain_call)
 		CHECK_EQ(first[i].memberId, plain[i].memberId);
 		CHECK(near(first[i].elevation, plain[i].elevation));
 		CHECK(near(first[i].start.x, plain[i].start.x));
+	}
+}
+
+TEST(columns_are_cached_and_match_the_plain_call)
+{
+	// 柱の解析はストーリ（span 柱レベル）・Document の columns・登り梁の端部詰めが共有する
+	// ので、コンテキストは 1 回だけ走らせて覚える。2 度目が同じ結果（同じ実体）を返し、
+	// キャッシュを通さない呼び出しとも一致すること。
+	bool ok = false;
+	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	CHECK(ok);
+	if (!ok)
+		return;
+
+	Context context(model);
+	const std::vector<core::ColumnCommand>& first = context.columns();
+	const std::vector<core::ColumnCommand>& second = context.columns();
+	CHECK(&first == &second);
+
+	const std::vector<core::ColumnCommand> plain = parse::buildColumnCommands(model);
+	CHECK_EQ(first.size(), plain.size());
+	CHECK(!plain.empty());
+	for (std::size_t i = 0; i < first.size() && i < plain.size(); ++i)
+	{
+		CHECK_EQ(first[i].layer, plain[i].layer);
+		CHECK_EQ(first[i].memberId, plain[i].memberId);
+		CHECK(near(first[i].elevation, plain[i].elevation));
+		CHECK(near(first[i].position.x, plain[i].position.x));
 	}
 }
 

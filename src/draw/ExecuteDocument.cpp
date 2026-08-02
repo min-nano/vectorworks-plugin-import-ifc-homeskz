@@ -7,13 +7,14 @@
 //	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Floor → draw/Member →
-//	draw/Rafter → draw/Roof へディスパッチする。以降のマイルストーンで draw/Column …
-//	draw/Section を足していく（ROADMAP.md）。
+//	draw/Column → draw/Rafter → draw/Roof へディスパッチする。以降のマイルストーンで
+//	draw/Footing … draw/Section を足していく（ROADMAP.md）。
 //	実描画（高さ・傾き・スタイル・PIO の挙動）はローカルの VectorWorks で目視確認する。
 //
 
 #include "PluginPrefix.h"
 #include "draw/ExecuteDocument.h"
+#include "draw/Column.h"
 #include "draw/Floor.h"
 #include "draw/Grid.h"
 #include "draw/Member.h"
@@ -24,6 +25,7 @@
 #include "core/Progress.h"
 
 #include <cstddef>
+#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -47,7 +49,19 @@ namespace HomeskzIfcImport::draw
 		// 実測が無い以上、件数比が一番嘘の少ない近似。core::phaseShare）。
 		const std::size_t total = document.stories.size() + document.grids.size() +
 								  document.floors.size() + document.members.size() +
-								  document.rafters.size() + document.roofs.size();
+								  document.columns.size() + document.rafters.size() +
+								  document.roofs.size();
+
+		// 要素ごとの診断（無ければ空）を改行で連ねる。1 つの文字列を各 draw* へ渡すと
+		// 後の要素が前の要素の診断を上書きしてしまうため、ここで積む。
+		const auto addDiagnostics = [&counts](const std::string& note)
+		{
+			if (note.empty())
+				return;
+			if (!counts.diagnostics.empty())
+				counts.diagnostics += "\n";
+			counts.diagnostics += note;
+		};
 
 		// フェーズを開く。中止済みなら false を返し、呼び出し側はそのフェーズごと飛ばす
 		// （各 draw* も自分のループの先頭で中止を見て抜けるので、途中で押されても止まる）。
@@ -77,12 +91,26 @@ namespace HomeskzIfcImport::draw
 		// M7 横架材を描く。配置先の "n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁" レイヤは
 		// drawStories が作るので、必ずその後に置く（レイヤが無い命令はスキップされる）。
 		if (beginPhase("横架材を描画しています…", document.members.size()))
-			counts.members = drawMembers(document, progress, &counts.diagnostics);
+		{
+			std::string note;
+			counts.members = drawMembers(document, progress, &note);
+			addDiagnostics(note);
+		}
+
+		// M8 柱を描く。配置先の span レイヤ（"1to2-柱" 等）も drawStories が作るので、必ず
+		// その後に置く（レイヤが無い命令はスキップされる）。横架材の後なのは、柱が横架材と
+		// 同じ構造材ツール／同じスタイル更新の作法を採るため揃えているだけで依存は無い。
+		if (beginPhase("柱を描画しています…", document.columns.size()))
+		{
+			std::string note;
+			counts.columns = drawColumns(document, progress, &note);
+			addDiagnostics(note);
+		}
 
 		// M6 屋根組を描く。垂木 → 野地板 の順（Python 版 execute_document の実行順と同じで、
 		// 野地板は垂木の上に載る）。配置先の "n-垂木" / "n-野地板" レイヤも drawStories が
 		// 作るので、必ずその後に置く（レイヤが無い命令はそれぞれがスキップする）。以降の
-		// マイルストーンで column … と命令ごとに draw モジュールへのディスパッチを
+		// マイルストーンで footing … と命令ごとに draw モジュールへのディスパッチを
 		// 足していく（ROADMAP.md）。
 		if (beginPhase("垂木を描画しています…", document.rafters.size()))
 			counts.rafters = drawRafters(document, progress);

@@ -11,6 +11,9 @@
 #include "PluginPrefix.h"
 #include "draw/DrawUtil.h"
 
+#include "VWFC/VWObjects/VWGroupObj.h"
+#include "VWFC/VWObjects/VWPolygon2DObj.h"
+
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -76,6 +79,29 @@ namespace HomeskzIfcImport::draw
 		std::snprintf(buffer.data(), buffer.size(), "%g", value);
 		pio.SetParamAsString(param, TXString(buffer.data()));
 		return std::abs(pio.GetParamReal(param) - value) <= tolerance;
+	}
+
+	MCObjectHandle CreateRectangleProfileGroup(double minX, double minY, double maxX, double maxY)
+	{
+		if (maxX - minX <= 0.0 || maxY - minY <= 0.0)
+			return nil;
+
+		VWPolygon2DObj profile({VWPoint2D(minX, minY), VWPoint2D(minX, maxY), VWPoint2D(maxX, maxY),
+								VWPoint2D(maxX, minY)});
+		profile.SetClosed(true);
+		const MCObjectHandle profileHandle = profile.GetThisObject();
+		if (profileHandle == nil)
+			return nil;
+
+		VWGroupObj group;
+		group.AddObject(profileHandle);
+		const MCObjectHandle groupHandle = group.GetThisObject();
+		if (groupHandle == nil)
+			return nil;
+		// 断面が本当に入ったか（空のグループを渡さない。ヘッダ参照）。
+		if (VWGroupObj(groupHandle).GetFirstMemberObject() == nil)
+			return nil;
+		return groupHandle;
 	}
 
 	MCObjectHandle PrepareLayer(const std::string& layerName)

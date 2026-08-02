@@ -369,6 +369,109 @@ TEST(validate_rejects_member_with_empty_bound_level)
 }
 
 // ---------------------------------------------------------------------------
+// 柱の検証（ROADMAP.md M8）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 検証を通る柱命令（1 本）。個々のテストはここから 1 か所だけ崩す。
+	core::ColumnCommand validColumn()
+	{
+		core::ColumnCommand column;
+		column.layer = "1to2-柱";
+		column.memberId = "105×105 - 管柱";
+		column.drawClass = "04構造-02木造-03柱-02管柱";
+		column.structuralUse = "4";
+		column.position = core::Vec2{0.0, 0.0};
+		column.width = 105.0;
+		column.depth = 105.0;
+		column.height = 2844.0;
+		column.elevation = 426.0;
+		column.bottomBound = core::StoryBoundCommand{0, core::kLevelBeamTop, 0.0};
+		column.topBound = core::StoryBoundCommand{1, core::kLevelBeamTop, -150.0};
+		return column;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_column)
+{
+	core::Document document;
+	document.columns.push_back(validColumn());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_column_with_empty_layer)
+{
+	core::Document document;
+	core::ColumnCommand column = validColumn();
+	column.layer = "";
+	document.columns.push_back(column);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_column_with_empty_class_or_member_id)
+{
+	core::Document emptyClass;
+	core::ColumnCommand column = validColumn();
+	column.drawClass = "";
+	emptyClass.columns.push_back(column);
+	CHECK(!core::validateDocument(emptyClass));
+
+	core::Document emptyId;
+	column = validColumn();
+	column.memberId = "";
+	emptyId.columns.push_back(column);
+	CHECK(!core::validateDocument(emptyId));
+}
+
+TEST(validate_rejects_column_with_empty_structural_use)
+{
+	// 構造用途が空だと VW の既定（自動）になり、小屋束が柱の高さモデルで描かれてしまう。
+	core::Document document;
+	core::ColumnCommand column = validColumn();
+	column.structuralUse = "";
+	document.columns.push_back(column);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_column_with_nonpositive_dimensions)
+{
+	core::Document zeroWidth;
+	core::ColumnCommand column = validColumn();
+	column.width = 0.0;
+	zeroWidth.columns.push_back(column);
+	CHECK(!core::validateDocument(zeroWidth));
+
+	core::Document zeroDepth;
+	column = validColumn();
+	column.depth = 0.0;
+	zeroDepth.columns.push_back(column);
+	CHECK(!core::validateDocument(zeroDepth));
+
+	core::Document negativeHeight;
+	column = validColumn();
+	column.height = -1.0;
+	negativeHeight.columns.push_back(column);
+	CHECK(!core::validateDocument(negativeHeight));
+}
+
+TEST(validate_rejects_column_with_empty_bound_level)
+{
+	// レベル種別が空だと SetObjectStoryBound が解決できず、高さがレイヤ基準へリセットされる。
+	core::Document bottomEmpty;
+	core::ColumnCommand column = validColumn();
+	column.bottomBound.level = "";
+	bottomEmpty.columns.push_back(column);
+	CHECK(!core::validateDocument(bottomEmpty));
+
+	core::Document topEmpty;
+	column = validColumn();
+	column.topBound.level = "";
+	topEmpty.columns.push_back(column);
+	CHECK(!core::validateDocument(topEmpty));
+}
+
+// ---------------------------------------------------------------------------
 // 垂木・野地板の検証（ROADMAP.md M6）
 // ---------------------------------------------------------------------------
 

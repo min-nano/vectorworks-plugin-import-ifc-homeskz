@@ -6,6 +6,7 @@
 //
 
 #include "parse/Story.h"
+#include "parse/Column.h"
 #include "parse/Context.h"
 #include "parse/Floor.h"
 #include "parse/IfcAttr.h"
@@ -15,6 +16,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -70,7 +74,74 @@ namespace HomeskzIfcImport::parse
 			return std::ranges::any_of(members, [&layer](const core::MemberCommand& member)
 									   { return member.layer == layer; });
 		}
+
+		// span レベル 1 つの表記（Python 版 _fmt_span_level）。整数は小数点なし、半整数は
+		// ".5" 付き。span レベルは resolveColumnToLevel が返す整数／半整数だけなので、
+		// 一般の実数書式（std::to_string の 6 桁固定小数）は使わない。
+		std::string formatSpanLevel(double value)
+		{
+			const double rounded = std::floor(value);
+			const auto whole = static_cast<long long>(rounded);
+			if (value == rounded)
+				return std::to_string(whole);
+			return std::to_string(whole) + ".5";
+		}
+
+		// 文字列全体が実数として読めれば outValue に入れて true（"1" / "2.5"）。末尾に
+		// 余りがある・空文字・数値でないなら false（parseSpanLayer の関門）。
+		bool parseNumber(const std::string& text, double& outValue)
+		{
+			if (text.empty())
+				return false;
+			try
+			{
+				std::size_t consumed = 0;
+				const double value = std::stod(text, &consumed);
+				if (consumed != text.size())
+					return false;
+				outValue = value;
+				return true;
+			}
+			catch (...)
+			{
+				// std::stod は数値でない／範囲外で例外を投げる。span レイヤでないだけなので
+				// 呼び出し側へは false で返す（例外はここに閉じ込める。CLAUDE.md「例外は
+				// parse 内部の局所処理に留める」）。
+				return false;
+			}
+		}
 	} // namespace
+
+	std::string spanLayerName(double fromLevel, double toLevel)
+	{
+		return formatSpanLevel(fromLevel) + "to" + formatSpanLevel(toLevel) + "-" +
+			   kColumnLayerSuffix;
+	}
+
+	bool parseSpanLayer(const std::string& name, double& outFrom, double& outTo)
+	{
+		const std::string suffix = std::string("-") + kColumnLayerSuffix;
+		if (name.size() <= suffix.size() ||
+			name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+			return false;
+		const std::string core = name.substr(0, name.size() - suffix.size());
+		const std::size_t separator = core.find("to");
+		if (separator == std::string::npos)
+			return false;
+		// "to" が 2 つ以上あるレイヤ名（"1to2to3-柱"）は分解できないので span でないとする
+		// （Python 版の core.split('to') が 2 要素でなければ None を返すのと同じ関門）。
+		if (core.find("to", separator + 2) != std::string::npos)
+			return false;
+
+		double from = 0.0;
+		double to = 0.0;
+		if (!parseNumber(core.substr(0, separator), from) ||
+			!parseNumber(core.substr(separator + 2), to))
+			return false;
+		outFrom = from;
+		outTo = to;
+		return true;
+	}
 
 	std::string storyLayerPrefix(std::size_t index, bool isTop)
 	{
@@ -220,6 +291,11 @@ namespace HomeskzIfcImport::parse
 		// （下記「Python 版との差異」）。コンテキストが 1 度だけ解析するので、垂木・登り梁の
 		// 補正と同じ結果を共有する。
 		const std::vector<core::MemberCommand>& members = context.members();
+		// span 柱レイヤ（"{from}to{to}-柱"）は実在する柱から決まる。コンテキストが柱命令を
+		// 1 度だけ組み立てるので、ここと Document の columns は同じ結果を共有する
+		// （parse/Context.h の columns）。
+		const std::map<int, std::vector<std::string>> columnLayers =
+			collectColumnLayersByStory(context.columns());
 
 		std::vector<StoryCommand> commands;
 		commands.reserve(stories.size());
@@ -309,6 +385,26 @@ namespace HomeskzIfcImport::parse
 			{
 				insertAboveBeamTop(kLevelTaruki);
 				insertAboveBeamTop(kLevelNojiita);
+			}
+
+			// M8 柱: この階を base（from = i+1）とする span レイヤ（"{from}to{to}-柱"）の
+			// レベルを、levels の**先頭＝スタック最上段**（FL／軒高レイヤの直上）へ (from, to)
+			// 昇順で積む。レベル種別はレイヤ名そのもの（span ごとに一意な文字列が要るため。
+			// Python 版と同じ）。高さは横架材天端（最上階は軒高）に揃えるが、柱の上下端は
+			// bottomBound / topBound が指すレベルで決まるのでこのオフセットには依存しない。
+			//
+			// レイヤは**実在する柱から決まる**ので、母屋・登り梁と同じく「命令があるときだけ・
+			// 命令があれば必ず」できる（空レイヤを作らない。Python 版も span レイヤは
+			// collect_column_layers_by_story 由来で同じ）。
+			const auto spanLayers = columnLayers.find(static_cast<int>(i));
+			if (spanLayers != columnLayers.end())
+			{
+				cmd.levels.insert(cmd.levels.begin(), spanLayers->second.size(), LevelCommand{});
+				for (std::size_t s = 0; s < spanLayers->second.size(); ++s)
+				{
+					const std::string& layer = spanLayers->second[s];
+					cmd.levels[s] = LevelCommand{layer, upperOffset, layer};
+				}
 			}
 			commands.push_back(std::move(cmd));
 		}

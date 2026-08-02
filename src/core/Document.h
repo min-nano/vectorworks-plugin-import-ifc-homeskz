@@ -300,11 +300,59 @@ namespace HomeskzIfcImport::core
 		StoryBoundCommand endBound;
 	};
 
+	// 柱（構造材ツール StructuralMember）を鉛直材として描く命令。Python 版 document.py の
+	// ColumnCommand（dict）に対応する。draw/Column がこれを構造材オブジェクトへ変換する
+	// （ROADMAP.md M8）。管柱・通し柱・小屋束をこの命令で表し、種別の違いは drawClass と
+	// structuralUse（構造用途）に出る。
+	//
+	// 【配置先レイヤは span（またぐレベル区間）】柱は階のレイヤではなく "{from}to{to}-柱"
+	// という**span 専用レイヤ**に置く（"1to2-柱" / "2to2.5-柱"）。from は柱が立つ床レベル
+	// （1 始まり）、to は上端が届く床／屋根面レベル（管柱＝次階の整数・屋根束＝屋根面で
+	// 止まる半整数・通し柱＝複数階ぶん上）。伏図が切断レベルで表示レイヤを絞れるようにする
+	// ための分け方で、下屋の小屋束が上階の小屋伏図へ写り込まない（parse/Column.h 参照）。
+	//
+	// 【高さの持ち方】elevation は**柱下端**の絶対 Z、height は柱高さ（押し出し Depth）で、
+	// 上端は elevation + height。加えて上下端をストーリレベルへバインドする（bottomBound /
+	// topBound）。柱（管柱・通し柱）は下端を当階・上端を上階（storyOffset=1）の横架材天端
+	// （最上階は軒高）へ、小屋束は上下端とも当階の横架材天端へバインドする。**小屋束の
+	// 上端 offset は下端と同値**にする（VW の構造材ツールは上下端 offset 差を部材長へ
+	// 加算するため、天端相当の値を入れると柱高さが二重加算される。parse/Column.h 参照）。
+	//
+	// Python 版キーとの対応:
+	//   layer          ← 'layer'           … 配置先デザインレイヤ名（"1to2-柱" 等）
+	//   memberId       ← 'member_id'       … 構造材 ID（"105×105 - 管柱 / 柱頭金物:(ろ)"）
+	//   drawClass      ← 'class'           … クラス名（通し柱／管柱／小屋束。予約語 class を機械置換）
+	//   structuralUse  ← 'structural_use'  … 構造用途（柱="4" / 小屋束="5"）
+	//   position       ← 'position'        … 断面中心の平面座標（センタリング済み）
+	//   width          ← 'width'           … 断面幅（mm）
+	//   depth          ← 'depth'           … 断面せい（mm）
+	//   height         ← 'height'          … 柱高さ（mm）
+	//   elevation      ← 'elevation'       … 柱下端の絶対 Z（mm）
+	//   topHardware    ← 'top_hardware'    … 柱頭金物の仕様（無ければ空文字）
+	//   bottomHardware ← 'bottom_hardware' … 柱脚金物の仕様（同上）
+	//   bottomBound    ← 'bottom_bound'    … 下端の高さ基準
+	//   topBound       ← 'top_bound'       … 上端の高さ基準
+	struct ColumnCommand
+	{
+		std::string layer;
+		std::string memberId;
+		std::string drawClass;
+		std::string structuralUse;
+		Vec2 position;
+		double width = 0.0;
+		double depth = 0.0;
+		double height = 0.0;
+		double elevation = 0.0;
+		std::string topHardware;
+		std::string bottomHardware;
+		StoryBoundCommand bottomBound;
+		StoryBoundCommand topBound;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
 	// TODO: 要素ごとに命令リストを追加していく（フィールド名は Python 版のキーに対応）。
-	//   * M8 columns         : std::vector<ColumnCommand>
 	//   * M9 walls / slabs …
 	//   スキーマを変えるときは構造体・validateDocument・テストを同時更新する。
 	struct Document
@@ -339,6 +387,11 @@ namespace HomeskzIfcImport::core
 		// M6 野地板。屋根版 1 面につき 1 枚の RoofCommand の列（並びの決定性は rafters と
 		// 同じ。parse/Roof が組み立てる）。配置先の "n-野地板" レイヤは stories が作る。
 		std::vector<RoofCommand> roofs;
+
+		// M8 柱。IfcColumn を解析して得た ColumnCommand の列（階＝Elevation 昇順・階内は
+		// 要素の出現順で決定的。parse/Column が組み立てる）。配置先の span レイヤ
+		// （"1to2-柱" 等）は stories が作るので、描画は stories の後に処理する。
+		std::vector<ColumnCommand> columns;
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は

@@ -180,8 +180,8 @@ TEST(end_trim_trims_to_member_face)
 	// 登り梁の終端 (1000, 0)・外向き +x は面より 2.5mm 内側 → 2.5mm 詰める。
 	const std::vector<MemberCommand> receivers = {
 		receiver(Vec2{1050.0, -1000.0}, Vec2{1050.0, 1000.0}, 1000.0)};
-	CHECK(
-		near(noboribariEndTrim(Vec2{1000.0, 0.0}, Vec2{1.0, 0.0}, 900.0, 1050.0, receivers), 2.5));
+	CHECK(near(noboribariEndTrim(Vec2{1000.0, 0.0}, Vec2{1.0, 0.0}, 900.0, 1050.0, receivers, {}),
+			   2.5));
 }
 
 TEST(end_trim_is_gated_by_z_range)
@@ -189,16 +189,16 @@ TEST(end_trim_is_gated_by_z_range)
 	// Z 範囲が離れた受け材は対象外（食い込み 0）。
 	const std::vector<MemberCommand> receivers = {
 		receiver(Vec2{1050.0, -1000.0}, Vec2{1050.0, 1000.0}, 5000.0)};
-	CHECK(
-		near(noboribariEndTrim(Vec2{1000.0, 0.0}, Vec2{1.0, 0.0}, 900.0, 1050.0, receivers), 0.0));
+	CHECK(near(noboribariEndTrim(Vec2{1000.0, 0.0}, Vec2{1.0, 0.0}, 900.0, 1050.0, receivers, {}),
+			   0.0));
 }
 
 TEST(end_trim_ignores_degenerate_receiver)
 {
 	const std::vector<MemberCommand> receivers = {
 		receiver(Vec2{1000.0, 0.0}, Vec2{1000.0, 0.0}, 1120.0)};
-	CHECK(
-		near(noboribariEndTrim(Vec2{1000.0, 0.0}, Vec2{1.0, 0.0}, 900.0, 1150.0, receivers), 0.0));
+	CHECK(near(noboribariEndTrim(Vec2{1000.0, 0.0}, Vec2{1.0, 0.0}, 900.0, 1150.0, receivers, {}),
+			   0.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +240,7 @@ TEST(snaps_pitch_and_height_to_roof)
 		noboribari(Vec2{0.0, 0.0}, Vec2{1000.0, 0.0}, 1000.0, 1300.0, 800.0);
 	const std::vector<NoboribariRoofPlane> planes = {flatRoofPlane(0.25, 900.0)};
 
-	const MemberCommand out = correctOneNoboribari(command, planes, {}, Vec2{0.0, 0.0});
+	const MemberCommand out = correctOneNoboribari(command, planes, {}, {}, Vec2{0.0, 0.0});
 	CHECK(near(out.elevation, 900.0));
 	CHECK(near(out.endElevation, 1150.0));
 	const double span = std::hypot(out.end.x - out.start.x, out.end.y - out.start.y);
@@ -259,7 +259,7 @@ TEST(trims_penetrating_ends)
 	const std::vector<MemberCommand> receivers = {
 		receiver(Vec2{1000.0, -1000.0}, Vec2{1000.0, 1000.0}, 1120.0)};
 
-	const MemberCommand out = correctOneNoboribari(command, {}, receivers, Vec2{0.0, 0.0});
+	const MemberCommand out = correctOneNoboribari(command, {}, receivers, {}, Vec2{0.0, 0.0});
 	CHECK(near(out.end.x, 947.5));
 	CHECK(near(out.start.x, 0.0)); // 始端は受け材が無く不変
 }
@@ -271,7 +271,7 @@ TEST(no_roof_keeps_height_but_trims)
 	const std::vector<MemberCommand> receivers = {
 		receiver(Vec2{1000.0, -1000.0}, Vec2{1000.0, 1000.0}, 1250.0)};
 
-	const MemberCommand out = correctOneNoboribari(command, {}, receivers, Vec2{0.0, 0.0});
+	const MemberCommand out = correctOneNoboribari(command, {}, receivers, {}, Vec2{0.0, 0.0});
 	CHECK(near(out.elevation, 1000.0)); // 天端はそのまま
 	CHECK(near(out.endElevation, 1300.0));
 	CHECK(near(out.end.x, 947.5)); // 食い込みは詰める
@@ -280,7 +280,7 @@ TEST(no_roof_keeps_height_but_trims)
 TEST(degenerate_length_returned_unchanged)
 {
 	const MemberCommand command = noboribari(Vec2{5.0, 5.0}, Vec2{5.0, 5.0}, 1000.0, 1000.0);
-	const MemberCommand out = correctOneNoboribari(command, {}, {}, Vec2{0.0, 0.0});
+	const MemberCommand out = correctOneNoboribari(command, {}, {}, {}, Vec2{0.0, 0.0});
 	CHECK(sameCommand(out, command));
 }
 
@@ -292,7 +292,7 @@ TEST(over_trim_is_skipped)
 		receiver(Vec2{-50.0, -1000.0}, Vec2{-50.0, 1000.0}, 1000.0),
 		receiver(Vec2{54.0, -1000.0}, Vec2{54.0, 1000.0}, 1000.0)};
 
-	const MemberCommand out = correctOneNoboribari(command, {}, receivers, Vec2{0.0, 0.0});
+	const MemberCommand out = correctOneNoboribari(command, {}, receivers, {}, Vec2{0.0, 0.0});
 	CHECK(near(out.start.x, 0.0));
 	CHECK(near(out.end.x, 4.0));
 }
@@ -306,7 +306,7 @@ TEST(tiny_penetration_not_trimmed)
 	const std::vector<MemberCommand> receivers = {
 		receiver(Vec2{1052.4, -1000.0}, Vec2{1052.4, 1000.0}, 1120.0)};
 
-	const MemberCommand out = correctOneNoboribari(command, {}, receivers, Vec2{0.0, 0.0});
+	const MemberCommand out = correctOneNoboribari(command, {}, receivers, {}, Vec2{0.0, 0.0});
 	CHECK(near(out.end.x, 1000.0));
 }
 
@@ -319,7 +319,7 @@ TEST(snap_uses_trimmed_end_position)
 	const std::vector<MemberCommand> receivers = {
 		receiver(Vec2{1000.0, -1000.0}, Vec2{1000.0, 1000.0}, 1120.0)};
 
-	const MemberCommand out = correctOneNoboribari(command, planes, receivers, Vec2{0.0, 0.0});
+	const MemberCommand out = correctOneNoboribari(command, planes, receivers, {}, Vec2{0.0, 0.0});
 	CHECK(near(out.end.x, 947.5));
 	CHECK(near(out.endElevation, 900.0 + (0.25 * 947.5)));
 }
@@ -342,7 +342,7 @@ TEST(passes_non_noboribari_through_unchanged)
 												   { return m.drawClass == CLASS_NOBORIBARI; });
 	CHECK(!anyNoboribari);
 
-	const std::vector<MemberCommand> out = correctNoboribari(model, members);
+	const std::vector<MemberCommand> out = correctNoboribari(model, members, {});
 	CHECK_EQ(out.size(), members.size());
 	for (std::size_t i = 0; i < out.size() && i < members.size(); ++i)
 		CHECK(sameCommand(out[i], members[i]));
@@ -405,7 +405,7 @@ TEST(processes_injected_noboribari)
 	MemberCommand recv = receiver(Vec2{51050.0, -1000.0}, Vec2{51050.0, 1000.0}, 1120.0);
 	recv.layer = "2-登り梁"; // Z 重なりのみで判定するためレイヤは不問
 
-	const std::vector<MemberCommand> out = correctNoboribari(model, {nobori, recv});
+	const std::vector<MemberCommand> out = correctNoboribari(model, {nobori, recv}, {});
 	CHECK_EQ(out.size(), std::size_t(2));
 	if (out.size() == 2)
 	{
