@@ -258,8 +258,14 @@ namespace HomeskzIfcImport::draw
 				++outSectionFailures;
 			// パスから部材長を取れたかを読み戻す。0 のままなら実体が無く画面に描かれない
 			// （冒頭「パスは 2D ポリラインで渡す」で直した症状そのもの）。
-			if (std::abs(pio.GetParamReal(ResolveParamName(pio, kFieldSpan, kLocalizedSpan))) <=
-				kZeroLengthTol)
+			//
+			// **パラメータが実在するときだけ数える。** ResolveParamName は見つからなくても
+			// universal 名をそのまま返し、GetParamReal は存在しない名前に対して 0 を返すので、
+			// 存在確認をしないと「スパン」という名前が違うだけで**パスは正常なのに全数を
+			// 長さ 0 と誤報**してしまう（診断が嘘をつくと切り分けが逆に遠のく）。
+			const TXString span = ResolveParamName(pio, kFieldSpan, kLocalizedSpan);
+			if (pio.GetParamIndex(span) != static_cast<size_t>(-1) &&
+				std::abs(pio.GetParamReal(span)) <= kZeroLengthTol)
 				++outLengthFailures;
 			return true;
 		}
