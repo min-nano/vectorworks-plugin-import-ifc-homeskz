@@ -10,7 +10,7 @@
 //	検証項目（ROADMAP.md M8）: 配置座標と断面の抽出・柱種別／構造材 ID・柱頭/柱脚金物の
 //	対応付け・**span（またぐレベル区間）の to レベル判定**（管柱／通し柱／屋根束）・
 //	span レイヤへの振り分けと base ごとのまとめ・上下端のストーリバウンド（柱＝当階と上階、
-//	小屋束＝当階のみ・offset 差 0）・構造用途・クラス割り当て・**小屋束の断面を直上の
+//	小屋束＝当階のみ。**差は常に柱高さ**）・構造用途・クラス割り当て・**小屋束の断面を直上の
 //	母屋幅へ合わせる補正**・センタリング・決定性・全フィクスチャの通し。実フィクスチャの
 //	パスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -652,9 +652,9 @@ TEST(build_column_binds_bottom_current_top_upper_floor)
 
 TEST(build_koyazuka_binds_both_ends_to_current_eaves)
 {
-	// 小屋束は上下端とも当階の横架材天端（最上階は軒高）へバインドし、**上端 offset は
-	// 下端と同値**にする（offset 差 0 で、パスが既に持つ柱高さの二重加算を避ける。
-	// 上端の実高さはパス＝下端 + 柱高さ が担う。parse/Column.h）。
+	// 小屋束は上下端とも当階の横架材天端（最上階は軒高）へバインドし、offset にはそれぞれ
+	// 実際の下端／上端 Z までの距離を入れる（＝**バウンドの差が柱高さ**になる。同値にすると
+	// 高さ 0 の柱になる。parse/Column.h の「Python 版との差異」）。
 	StepText step;
 	makeStorey(step, "1FL", 600.0);
 	const int storey = makeStorey(step, "RFL", 6300.0);
@@ -676,7 +676,9 @@ TEST(build_koyazuka_binds_both_ends_to_current_eaves)
 	CHECK(near(command.bottomBound.offset, -100.0));
 	CHECK_EQ(command.topBound.storyOffset, 0);
 	CHECK_EQ(command.topBound.level, std::string("軒高"));
-	CHECK(near(command.topBound.offset, -100.0));
+	// 下端 6300 − 100 = 6200、上端 6200 + 800 = 7000 → 軒高 6300 からの距離は 700。
+	CHECK(near(command.topBound.offset, 700.0));
+	CHECK(near(command.topBound.offset - command.bottomBound.offset, command.height));
 }
 
 TEST(build_assigns_span_layer_per_story)
@@ -1035,16 +1037,14 @@ TEST(reads_sample_house_fixture)
 	}
 }
 
-TEST(all_fixtures_bounds_agree_with_path_geometry)
+TEST(all_fixtures_bounds_span_the_column_height)
 {
-	// バウンドは高さの**基準**を与える（実体はパス＝下端 → 下端 + 柱高さ が作る）。
-	// したがって全フィクスチャの全柱で次が成り立たなければならない:
-	//   * 下端バウンドの絶対 Z ＝ elevation（柱下端）——ずれるとパスとバインドが矛盾し、
-	//     編集時に高さがレイヤ基準へリセットされる。
-	//   * 柱（管柱・通し柱）の上端バウンドの絶対 Z ＝ elevation + height（柱上端）。
-	//     上階へバインドするので offset 差は ≈0 になり、パス長への二重加算が起きない。
-	//   * 小屋束は上端 offset ＝ 下端 offset（差 0）。天端相当の値を入れるとパスの柱高さが
-	//     二重加算され、上端が約 2 倍になる（Python 版 #116）。
+	// **バウンドの差が描かれる高さを支配する**（鉛直パスはその高さで実体を作るために要る。
+	// parse/Column.h）。したがって全フィクスチャの全柱で次が成り立たなければならない:
+	//   * 下端バウンドの絶対 Z ＝ elevation（柱下端）
+	//   * 上端バウンドの絶対 Z ＝ elevation + height（柱上端）
+	// 小屋束の上端 offset を下端と同値にしていた頃はここが崩れ、実機で高さ 0 の小屋束に
+	// なっていた（M8 のローカル確認 3 周目）。
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
@@ -1072,13 +1072,8 @@ TEST(all_fixtures_bounds_agree_with_path_geometry)
 			if (base >= levelZ.size() || top >= levelZ.size())
 				continue;
 
-			const double bottomZ = levelZ[base] + command.bottomBound.offset;
-			CHECK(near(bottomZ, command.elevation));
-			if (command.drawClass == CLASS_KOYAZUKA)
-				CHECK(near(command.topBound.offset, command.bottomBound.offset));
-			else
-				CHECK(near(levelZ[top] + command.topBound.offset,
-						   command.elevation + command.height));
+			CHECK(near(levelZ[base] + command.bottomBound.offset, command.elevation));
+			CHECK(near(levelZ[top] + command.topBound.offset, command.elevation + command.height));
 		}
 	}
 }

@@ -427,10 +427,10 @@ namespace HomeskzIfcImport::parse
 				if (isKoyazuka || story.isTop)
 				{
 					// 小屋束（および上階の無い最上階の柱）は上下端とも当階の横架材天端
-					// （最上階は軒高）へバインドする。**上端 offset は下端と同値**にして
-					// offset 差を 0 にし、パスが既に持つ柱高さの二重加算を避ける
-					// （ヘッダ冒頭「高さはパスのジオメトリ…」。Python 版 #116）。
-					cmd.topBound = StoryBoundCommand{0, currentLevel, bottomOffset};
+					// （最上階は軒高）へバインドし、**上端 offset には実際の上端 Z までの
+					// 距離**（＝下端 offset ＋ 柱高さ）を入れる。バウンドの差が柱高さに
+					// なるので、管柱・通し柱と同じ形になる（ヘッダ冒頭「高さは…」）。
+					cmd.topBound = StoryBoundCommand{0, currentLevel, topAbs - beamTopAbs[i]};
 				}
 				else
 				{
