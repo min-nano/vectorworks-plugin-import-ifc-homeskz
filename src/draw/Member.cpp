@@ -183,12 +183,11 @@ namespace HomeskzIfcImport::draw
 			// 断面（プロファイルグループ）を先に用意する。作れなければ PIO を作らない
 			// ——断面の無い構造材は生成できても実体が描かれず、「オブジェクトはあるのに
 			// 画面に出ない」状態になるだけなので、直線のフォールバックの方が有用。
-			const MCObjectHandle profileGroup =
-				CreateProfileGroup(member.width, member.height);
+			const MCObjectHandle profileGroup = CreateProfileGroup(member.width, member.height);
 			MCObjectHandle object =
-				profileGroup == nil
-					? nil
-					: gSDK->CreateCustomObjectPath(kStructuralMember, pathHandle, profileGroup, true);
+				profileGroup == nil ? nil
+									: gSDK->CreateCustomObjectPath(kStructuralMember, pathHandle,
+																   profileGroup, true);
 			if (object == nil)
 			{
 				// フォールバック: 平面投影の直線（クラス付き）を残す。

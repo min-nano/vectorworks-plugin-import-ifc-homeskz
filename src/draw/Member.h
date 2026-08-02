@@ -30,6 +30,5 @@ namespace HomeskzIfcImport::draw
 	// 「プラグインスタイルが見つからない」といった**描画側の異常**を人が読める 1 行として
 	// 返す（異常が無ければ触らない）。実描画はローカルの VectorWorks でしか確認できないため、
 	// 横架材が見えないときに原因を解析側と描画側で切り分けるための唯一の手掛かりになる。
-	std::size_t drawMembers(const core::Document& document,
-							std::string* outDiagnostics = nullptr);
+	std::size_t drawMembers(const core::Document& document, std::string* outDiagnostics = nullptr);
 } // namespace HomeskzIfcImport::draw
