@@ -167,7 +167,11 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle profileGroup = CreateRectangleProfileGroup(
 				-column.width / 2.0, -column.depth / 2.0, column.width / 2.0, column.depth / 2.0);
 
-			const MCObjectHandle pathHandle = profileGroup == nil ? nil : CreateColumnPath(column);
+			bool pathAppended = false;
+			const MCObjectHandle pathHandle =
+				profileGroup == nil ? nil : CreateVerticalPath(column, pathAppended);
+			if (pathHandle != nil && !pathAppended)
+				++outPathFailures;
 
 			MCObjectHandle object =
 				pathHandle == nil ? nil
