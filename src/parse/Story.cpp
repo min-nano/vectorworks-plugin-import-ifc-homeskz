@@ -399,12 +399,11 @@ namespace HomeskzIfcImport::parse
 			const auto spanLayers = columnLayers.find(static_cast<int>(i));
 			if (spanLayers != columnLayers.end())
 			{
-				cmd.levels.insert(cmd.levels.begin(), spanLayers->second.size(), LevelCommand{});
-				for (std::size_t s = 0; s < spanLayers->second.size(); ++s)
-				{
-					const std::string& layer = spanLayers->second[s];
-					cmd.levels[s] = LevelCommand{layer, upperOffset, layer};
-				}
+				std::vector<LevelCommand> spanLevels;
+				spanLevels.reserve(spanLayers->second.size());
+				for (const std::string& layer : spanLayers->second)
+					spanLevels.push_back(LevelCommand{layer, upperOffset, layer});
+				cmd.levels.insert(cmd.levels.begin(), spanLevels.begin(), spanLevels.end());
 			}
 			commands.push_back(std::move(cmd));
 		}
