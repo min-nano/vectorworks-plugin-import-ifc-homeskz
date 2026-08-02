@@ -10,7 +10,9 @@
 //	描画手順（Python 版 draw_member と同じ意図。実現手段は SDK の作法に合わせる）:
 //	  1. **パス**＝天端中央線の始端→終端を頂点に持つ「開いた 3D ポリライン」。頂点の XY は
 //	     命令のセンタリング済み絶対座標、**Z は両端とも命令の始端天端 elevation**。
-//	  2. **プロファイル**＝断面の矩形（幅 × せい）をグループに入れたもの。
+//	  2. **プロファイル**＝断面の矩形（幅 × せい）をグループに入れたもの。**空のグループを
+//	     渡してはならない**（断面が無いのと同じで、PIO は生成できても実体が描かれず
+//	     「オブジェクトはあるのに画面に何も出ない」状態になる。CreateProfileGroup 参照）。
 //	  3. CreateCustomObjectPath('StructuralMember', path, profile) で PIO を生成する。
 //	  4. クラス分け → プラグインスタイル（木質構造材_横架材）の関連付け → 個別フィールド
 //	     （構造材 ID・断面寸法・種別）の設定 → ResetObject。
@@ -29,6 +31,13 @@
 //	draw/Grid が GridAxis のパスを絶対座標で渡しているのと同じ作法。**Z が絶対か
 //	レイヤ相対かはローカル確認項目**で、切り替えは下の kPathZ の 1 か所で済む
 //	（M6 の垂木・野地板と同じ扱い。ROADMAP.md M6/M7「ローカル確認」）。
+//
+//	【パラメータは名前解決してから書き、読み戻して確かめる】断面寸法が入らないと材のせいが
+//	0 になり、オブジェクトはあるのに画面に出ない。PIO のパラメータは universal 名が 1 つ違う
+//	だけで setter が黙って無視され、しかも数値パラメータが実数ではなく文字列で保持されている
+//	ことがある（M6 の垂木で両方に遭遇）。そこで draw/DrawUtil の ResolveParamName で名前を
+//	解決し、SetParamRealChecked で書いた値を読み戻して確認し、実数で入らなければ文字列で
+//	入れ直す。それでも入らなかった本数は診断として完了ダイアログへ返す（drawMembers）。
 //
 //	【スタイルは関連付けだけでは効かない】ISDK の SetPluginObjectStyle はスタイルの関連付け
 //	（パラメータ）までで、スタイルが決める描画属性（コンポーネントのクラス／マテリアル＝
@@ -89,6 +98,11 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kFieldEndCondition = "EndCondition";	   // 終端の端部条件
 		constexpr const char* kFieldProfileSeries = "ProfileSeries";   // 断面シリーズ
 
+		// universal 名で引けなかったときに使う OIP のローカライズ名（ResolveParamName）。
+		constexpr const char* kLocalizedBreadth = "幅";
+		constexpr const char* kLocalizedDepth = "せい";
+		constexpr const char* kLocalizedProfileShape = "断面形状";
+
 		// フィールドに渡す値（Python 版と同じ。ポップアップはキーで保持されるため数値文字列）。
 		constexpr const char* kProfileShapeRectangle = "Rectangle";
 		constexpr const char* kMemberTypeBeam = "2";	// 梁
@@ -120,23 +134,40 @@ namespace HomeskzIfcImport::draw
 
 		// 断面の矩形（幅 × せい）をプロファイルグループとして作る（Python 版の
 		// BeginGroup / ClosePoly / Poly(0,0, 0,h, w,h, w,0) / EndGroup に対応）。
+		//
+		// **グループへは VWFC の VWGroupObj::AddObject で入れる**。当初は
+		// gSDK->AddObjectToContainer を直に呼んでいたが、その場合ポリゴンは「レイヤに
+		// 作ってから移す」形になり、移動に失敗すると**空のグループ**が残る。空のプロファイルは
+		// 断面が無いのと同じで、PIO は生成できても実体が描かれない（＝オブジェクトはあるのに
+		// 画面に何も出ない）。入ったかどうかは GetFirstMemberObject で確かめ、空なら nil を
+		// 返して呼び出し側にフォールバックさせる。
 		MCObjectHandle CreateProfileGroup(double width, double height)
 		{
+			if (width <= 0.0 || height <= 0.0)
+				return nil;
+
 			VWPolygon2DObj profile({VWPoint2D(0.0, 0.0), VWPoint2D(0.0, height),
 									VWPoint2D(width, height), VWPoint2D(width, 0.0)});
 			profile.SetClosed(true);
 			const MCObjectHandle profileHandle = profile.GetThisObject();
+			if (profileHandle == nil)
+				return nil;
 
-			const VWGroupObj group;
+			VWGroupObj group;
+			group.AddObject(profileHandle);
 			const MCObjectHandle groupHandle = group.GetThisObject();
-			if (groupHandle != nil && profileHandle != nil)
-				gSDK->AddObjectToContainer(profileHandle, groupHandle);
+			if (groupHandle == nil)
+				return nil;
+			// 断面が本当に入ったか（空のグループを渡さない）。
+			if (VWGroupObj(groupHandle).GetFirstMemberObject() == nil)
+				return nil;
 			return groupHandle;
 		}
 
 		// 横架材 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。
-		bool DrawOne(const core::MemberCommand& member, RefNumber style)
+		bool DrawOne(const core::MemberCommand& member, RefNumber style,
+					 std::size_t& outSectionFailures)
 		{
 			// パスの Z（両端で同じ）。傾斜は高さバインドの offset 差だけで表す
 			// （冒頭「パスに傾斜を持たせない」）。絶対 Z かレイヤ相対かの切り替えはここ 1 か所。
@@ -149,9 +180,15 @@ namespace HomeskzIfcImport::draw
 			if (pathHandle == nil)
 				return false;
 
+			// 断面（プロファイルグループ）を先に用意する。作れなければ PIO を作らない
+			// ——断面の無い構造材は生成できても実体が描かれず、「オブジェクトはあるのに
+			// 画面に出ない」状態になるだけなので、直線のフォールバックの方が有用。
+			const MCObjectHandle profileGroup =
+				CreateProfileGroup(member.width, member.height);
 			MCObjectHandle object =
-				gSDK->CreateCustomObjectPath(kStructuralMember, pathHandle,
-											 CreateProfileGroup(member.width, member.height), true);
+				profileGroup == nil
+					? nil
+					: gSDK->CreateCustomObjectPath(kStructuralMember, pathHandle, profileGroup, true);
 			if (object == nil)
 			{
 				// フォールバック: 平面投影の直線（クラス付き）を残す。
@@ -178,27 +215,39 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetObjectStoryBound(object, kStartBoundID, StoryBoundOf(member.startBound));
 			gSDK->SetObjectStoryBound(object, kEndBoundID, StoryBoundOf(member.endBound));
 
-			// 寸法は実数で、種別・断面形状はポップアップ／文字列で渡す（M6 の垂木で
-			// 「寸法を文字列で渡すと既定値のままだった」ことが判明している）。
+			// パラメータは**名前を解決してから**書き、寸法は**読み戻して確かめる**
+			// （名前が 1 つ違うだけで setter は黙って無視される。M6 の垂木で実証済み。
+			// draw/DrawUtil の ResolveParamName / SetParamRealChecked）。
 			VWParametricObj pio(object);
+			const TXString breadth = ResolveParamName(pio, kFieldMajorBreadth, kLocalizedBreadth);
+			const TXString depth = ResolveParamName(pio, kFieldMajorDepth, kLocalizedDepth);
+
+			pio.SetParamAsString(ResolveParamName(pio, kFieldProfileShape, kLocalizedProfileShape),
+								 kProfileShapeRectangle);
+			pio.SetParamAsString(kFieldProfileSeries, kProfileSeriesDefault);
+			const bool breadthOk = SetParamRealChecked(pio, breadth, member.width);
+			const bool depthOk = SetParamRealChecked(pio, depth, member.height);
+			// B / D は矩形断面のときの別名。上と同じ値を入れる（存在しなければ無視される）。
+			SetParamRealChecked(pio, ResolveParamName(pio, kFieldB, kLocalizedBreadth),
+								member.width);
+			SetParamRealChecked(pio, ResolveParamName(pio, kFieldD, kLocalizedDepth),
+								member.height);
 			pio.SetParamAsString(kFieldMemberID, TXString(member.memberId.c_str()));
-			pio.SetParamAsString(kFieldProfileShape, kProfileShapeRectangle);
-			pio.SetParamReal(kFieldMajorBreadth, member.width);
-			pio.SetParamReal(kFieldMajorDepth, member.height);
-			pio.SetParamReal(kFieldB, member.width);
-			pio.SetParamReal(kFieldD, member.height);
 			pio.SetParamAsString(kFieldMemberType, kMemberTypeBeam);
 			pio.SetParamAsString(kFieldStructuralUse, kStructuralUseBeam);
 			pio.SetParamAsString(kFieldAxisAlign, kAxisAlignTopCentre);
 			pio.SetParamAsString(kFieldStartCondition, kEndConditionSquare);
 			pio.SetParamAsString(kFieldEndCondition, kEndConditionSquare);
-			pio.SetParamAsString(kFieldProfileSeries, kProfileSeriesDefault);
 			gSDK->ResetObject(object);
+
+			// 断面が入らなかった本数を数える（診断。drawMembers が完了ダイアログへ載せる）。
+			if (!breadthOk || !depthOk)
+				++outSectionFailures;
 			return true;
 		}
 	} // namespace
 
-	std::size_t drawMembers(const core::Document& document)
+	std::size_t drawMembers(const core::Document& document, std::string* outDiagnostics)
 	{
 		if (document.members.empty())
 			return 0;
@@ -206,6 +255,7 @@ namespace HomeskzIfcImport::draw
 		const RefNumber style = ResolveMemberStyle();
 
 		std::size_t drawn = 0;
+		std::size_t sectionFailures = 0;
 		for (const core::MemberCommand& member : document.members)
 		{
 			// 配置先レイヤ（"n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁"）が無い命令は
@@ -213,7 +263,7 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(member.layer) == nil)
 				continue;
 
-			if (DrawOne(member, style))
+			if (DrawOne(member, style, sectionFailures))
 				++drawn;
 		}
 
@@ -221,6 +271,19 @@ namespace HomeskzIfcImport::draw
 		// （冒頭「スタイルは関連付けだけでは効かない」）。
 		if (drawn > 0 && style != 0)
 			gSDK->UpdateStyledObjects(style);
+
+		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「作れたが断面が
+		// 入らなかった」「スタイルが見つからなかった」を件数で持ち帰る。横架材が 1 本も
+		// 見えないときに、原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
+		if (outDiagnostics != nullptr && (sectionFailures > 0 || style == 0))
+		{
+			std::string note = "横架材の診断: ";
+			if (sectionFailures > 0)
+				note += "断面を設定できなかった材 " + std::to_string(sectionFailures) + " 本。";
+			if (style == 0)
+				note += "プラグインスタイル『木質構造材_横架材』が見つかりません。";
+			*outDiagnostics = std::move(note);
+		}
 
 		return drawn;
 	}

@@ -223,6 +223,9 @@ void CImportIfcMenu_EventSink::DoInterface()
 			   formatCount(drawn.members, document.members.size()) + " 本・垂木 " +
 			   formatCount(drawn.rafters, document.rafters.size()) + " 本・野地板 " +
 			   formatCount(drawn.roofs, document.roofs.size()) + " 枚を描きました。";
+	// 描画側で異常があれば本文へ足す（横架材の断面が入らない等。draw/Member 参照）。
+	if (!drawn.diagnostics.empty())
+		body += "\n" + drawn.diagnostics;
 	gSDK->AlertInform(body.c_str(), ifcPath.c_str(),
 					  false /* not a minor alert: show a modal dialog */);
 }

@@ -47,7 +47,7 @@ namespace HomeskzIfcImport::draw
 
 		// M7 横架材を描く。配置先の "n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁" レイヤは
 		// drawStories が作るので、必ずその後に置く（レイヤが無い命令はスキップされる）。
-		counts.members = drawMembers(document);
+		counts.members = drawMembers(document, &counts.diagnostics);
 
 		// M6 屋根組を描く。垂木 → 野地板 の順（Python 版 execute_document の実行順と同じで、
 		// 野地板は垂木の上に載る）。配置先の "n-垂木" / "n-野地板" レイヤも drawStories が

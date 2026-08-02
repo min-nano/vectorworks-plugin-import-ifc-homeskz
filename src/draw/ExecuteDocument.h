@@ -19,6 +19,7 @@
 #include "core/Document.h"
 
 #include <cstddef>
+#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -35,6 +36,11 @@ namespace HomeskzIfcImport::draw
 		std::size_t members = 0;
 		std::size_t rafters = 0;
 		std::size_t roofs = 0;
+
+		// 描画側で起きた異常の 1 行説明（無ければ空）。実描画はローカルの VectorWorks で
+		// しか確認できないので、「命令はあるのに見えない」ときに原因を解析側と描画側で
+		// 切り分ける手掛かりをメニューコマンドの完了ダイアログへ持ち帰る。
+		std::string diagnostics;
 	};
 
 	// 命令セットを描画する。validateDocument を通してから、命令ごとに要素の draw モジュール
