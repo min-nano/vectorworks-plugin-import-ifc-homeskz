@@ -29,7 +29,7 @@ ISDK には VS の一部（3D 変換状態・屋根作成の一連・レイヤ�
    （Python 版出力との自動突き合わせは行わない。下記「Python 版出力との比較はしない」）。
 2. `draw/` が SDK ビルドでコンパイルできる（SDK API の実在は上記 ci-debug で事前確認）。
 3. **ローカル確認チェックリスト**をユーザーが VectorWorks 上で確認済み。
-4. lint（`scripts/lint.sh`）通過・PR 作成・CI green。
+4. lint（`scripts/lint.sh`）通過・CI green。
 
 **Python 版出力との比較はしない。** Python 版は**仕様の一次資料**であって出力の契約ではない
 （CLAUDE.md 方針1「完全一致は非目標」）。実際 M5/M6 の時点で意図的な差——床＝スラブ化に伴う
