@@ -6,8 +6,8 @@
 //	この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の
 //	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Floor →
-//	draw/Rafter → draw/Roof へディスパッチする。以降のマイルストーンで draw/Member …
+//	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Floor → draw/Member →
+//	draw/Rafter → draw/Roof へディスパッチする。以降のマイルストーンで draw/Column …
 //	draw/Section を足していく（ROADMAP.md）。
 //	実描画（高さ・傾き・スタイル・PIO の挙動）はローカルの VectorWorks で目視確認する。
 //
@@ -16,6 +16,7 @@
 #include "draw/ExecuteDocument.h"
 #include "draw/Floor.h"
 #include "draw/Grid.h"
+#include "draw/Member.h"
 #include "draw/Rafter.h"
 #include "draw/Roof.h"
 #include "draw/Story.h"
@@ -44,10 +45,14 @@ namespace HomeskzIfcImport::draw
 		// 置く（レイヤが無い命令は drawFloors がスキップする）。
 		counts.floors = drawFloors(document);
 
+		// M7 横架材を描く。配置先の "n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁" レイヤは
+		// drawStories が作るので、必ずその後に置く（レイヤが無い命令はスキップされる）。
+		counts.members = drawMembers(document, &counts.diagnostics);
+
 		// M6 屋根組を描く。垂木 → 野地板 の順（Python 版 execute_document の実行順と同じで、
 		// 野地板は垂木の上に載る）。配置先の "n-垂木" / "n-野地板" レイヤも drawStories が
 		// 作るので、必ずその後に置く（レイヤが無い命令はそれぞれがスキップする）。以降の
-		// マイルストーンで member / column … と命令ごとに draw モジュールへのディスパッチを
+		// マイルストーンで column … と命令ごとに draw モジュールへのディスパッチを
 		// 足していく（ROADMAP.md）。
 		counts.rafters = drawRafters(document);
 		counts.roofs = drawRoofs(document);

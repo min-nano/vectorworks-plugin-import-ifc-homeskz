@@ -40,8 +40,9 @@ namespace HomeskzIfcImport::parse
 		// IfcProductDefinitionShape(Name, Description, Representations=2)。
 		inline constexpr std::size_t kProductDefinitionShapeRepresentations = 2;
 
-		// IfcShapeRepresentation(ContextOfItems, RepresentationIdentifier,
+		// IfcShapeRepresentation(ContextOfItems, RepresentationIdentifier=1,
 		// RepresentationType, Items=3)。
+		inline constexpr std::size_t kShapeRepresentationIdentifier = 1;
 		inline constexpr std::size_t kShapeRepresentationItems = 3;
 
 		// IfcLocalPlacement(PlacementRelTo, RelativePlacement=1)。
@@ -89,6 +90,20 @@ namespace HomeskzIfcImport::parse
 
 		// IfcBooleanResult(Operator, FirstOperand=1, SecondOperand)。
 		inline constexpr std::size_t kBooleanResultFirstOperand = 1;
+
+		// IfcRelAssociatesMaterial(… RelatedObjects=4, RelatingMaterial=5)。横架材の材種名は
+		// この逆参照から辿る（parse/Member の memberMaterialName）。
+		inline constexpr std::size_t kRelAssociatesRelatedObjects = 4;
+		inline constexpr std::size_t kRelAssociatesMaterialRelatingMaterial = 5;
+
+		// IfcMaterial(Name=0) / IfcMaterialList(Materials=0) /
+		// IfcMaterialLayerSetUsage(ForLayerSet=0) / IfcMaterialLayerSet(MaterialLayers=0) /
+		// IfcMaterialLayer(Material=0)。いずれも要る属性が先頭に来る。
+		inline constexpr std::size_t kMaterialName = 0;
+		inline constexpr std::size_t kMaterialListMaterials = 0;
+		inline constexpr std::size_t kMaterialLayerSetUsageForLayerSet = 0;
+		inline constexpr std::size_t kMaterialLayerSetLayers = 0;
+		inline constexpr std::size_t kMaterialLayerMaterial = 0;
 	} // namespace attr
 
 	// エンティティの指定属性を文字列で返す（未設定・非文字列なら空文字）。Value::text は

@@ -25,10 +25,12 @@
 | `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`）とレイヤスタック順の計算 |
 | `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
 | `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |
-| `ParseStoryTests` | `src/parse/Story` | 階・レベル・レイヤ名（横架材天端オフセット・屋根組レベルの追加条件） |
+| `ParseStoryTests` | `src/parse/Story` | 階・レベル・レイヤ名（横架材天端オフセット・屋根組／母屋レベルの追加条件） |
 | `ParseStructuralClassTests` | `src/parse/StructuralClass` | 部材種別 → VW クラスの純ロジック |
 | `ParseFloorTests` | `src/parse/Floor` | 床板（スラブ構成・基準面・段差・ロフト床の合成） |
-| `ParseRafterTests` | `src/parse/Rafter` | 垂木（掃引割り付け・非凸面のクリップ・支持点・軒の出） |
+| `ParseMemberTests` | `src/parse/Member` | 横架材（天端中央線への補正・高さバインド・母屋／登り梁の分離・登り梁の任意断面・食い込み調整） |
+| `ParseNoboribariTests` | `src/parse/Noboribari` | 登り梁の位置補正（端部の食い込み解消・天端の屋根面スナップ） |
+| `ParseRafterTests` | `src/parse/Rafter` | 垂木（掃引割り付け・非凸面のクリップ・支持点・軒の出・桁幅参照） |
 | `ParseRoofTests` | `src/parse/Roof` | 野地板（軒軸・upslope・勾配・厚み・軒の Z） |
 | `ParseSummaryTests` | `src/parse/Summary` | 型別件数の集計とダイアログ文言の整形 |
 

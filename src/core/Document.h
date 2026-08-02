@@ -46,6 +46,10 @@ namespace HomeskzIfcImport::core
 	inline constexpr const char* kLevelEaves = "軒高";
 	inline constexpr const char* kLevelTaruki = "垂木";
 	inline constexpr const char* kLevelNojiita = "野地板";
+	// M7 横架材のうち、梁（小屋梁・軒桁）と重なって見にくい小屋組の材を分離する
+	// 専用レベル。母屋・棟木は "母屋"、登り梁は "登り梁"（parse/Member.h 参照）。
+	inline constexpr const char* kLevelMoya = "母屋";
+	inline constexpr const char* kLevelNoboribari = "登り梁";
 
 	// 通り芯（グリッド）1 本の描画命令。Python 版 document.py の GridCommand（dict）に
 	// 対応する。draw/Grid がこれを GridAxis オブジェクトへ変換する（ROADMAP.md M1）。
@@ -254,11 +258,52 @@ namespace HomeskzIfcImport::core
 		double elevation = 0.0;
 	};
 
+	// 横架材（構造材ツール StructuralMember）を描く命令。Python 版 document.py の
+	// MemberCommand（dict）に対応する。draw/Member がこれを構造材オブジェクトへ変換する
+	// （ROADMAP.md M7）。土台・梁・桁のほか、母屋・棟木・登り梁もこの命令で表し、
+	// 配置先レイヤと高さ基準レベルだけが専用のもの（"n-母屋" / "n-登り梁"）になる。
+	//
+	// 【高さと両端の持ち方】start / end は**天端中央線**（断面基準点＝左右中央・上端が
+	// 通る線）の平面座標で、elevation / endElevation がそれぞれの天端 Z（絶対値）。
+	// ホームズ君 IFC の配置点は断面中心なので、解析側が背/2 だけ持ち上げてここへ入れる
+	// （parse/Member.h「基準点補正」）。両者が異なれば傾斜梁（登り梁・隅木等）。
+	//
+	// 【傾斜はバインドの offset 差だけで表す】描画側は**パスに Z 成分を持たせない**。
+	// 構造材ツールの高さバインドはパス由来の部材長へ加算されるため、パスにも傾斜を
+	// 持たせると二重に適用される（Python 版 #54 と同種。draw/Member.cpp 冒頭）。
+	//
+	// Python 版キーとの対応:
+	//   layer        ← 'layer'          … 配置先デザインレイヤ名（"1-横架材天端" / "R-軒高" /
+	//                                     "n-母屋" / "n-登り梁"）
+	//   memberId     ← 'member_id'      … 構造材 ID（"120×180 - 杉…"。材種が無ければ "120×180"）
+	//   drawClass    ← 'class'          … クラス名（土台／床梁／軒桁／母屋…。予約語 class を機械置換）
+	//   start        ← 'start'          … 天端中央線の始端（センタリング済みの平面座標）
+	//   end          ← 'end'            … 同 終端
+	//   width        ← 'width'          … 断面幅（mm）
+	//   height       ← 'height'         … 断面せい（背。mm）
+	//   elevation    ← 'elevation'      … 始端の天端 Z（絶対値）
+	//   endElevation ← 'end_elevation'  … 終端の天端 Z（絶対値）
+	//   startBound   ← 'start_bound'    … 始端の高さ基準（配置先レベル＋天端との差）
+	//   endBound     ← 'end_bound'      … 終端の高さ基準（同上）
+	struct MemberCommand
+	{
+		std::string layer;
+		std::string memberId;
+		std::string drawClass;
+		Vec2 start;
+		Vec2 end;
+		double width = 0.0;
+		double height = 0.0;
+		double elevation = 0.0;
+		double endElevation = 0.0;
+		StoryBoundCommand startBound;
+		StoryBoundCommand endBound;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
 	// TODO: 要素ごとに命令リストを追加していく（フィールド名は Python 版のキーに対応）。
-	//   * M7 members         : std::vector<MemberCommand>
 	//   * M8 columns         : std::vector<ColumnCommand>
 	//   * M9 walls / slabs …
 	//   スキーマを変えるときは構造体・validateDocument・テストを同時更新する。
@@ -279,6 +324,12 @@ namespace HomeskzIfcImport::core
 		// 昇順・階内は #id 昇順で決定的。parse/Floor が組み立てる）。配置先の FL レイヤは
 		// stories が作るので、描画は stories の後に処理する。
 		std::vector<FloorCommand> floors;
+
+		// M7 横架材。IfcBeam / IfcMember を解析して得た MemberCommand の列（階＝Elevation
+		// 昇順・階内は要素の出現順で決定的。parse/Member が組み立て、登り梁は parse/Noboribari が
+		// 屋根面へスナップ補正した後の値）。配置先レイヤ（"n-横架材天端" / "R-軒高" /
+		// "n-母屋" / "n-登り梁"）は stories が作るので、描画は stories の後に処理する。
+		std::vector<MemberCommand> members;
 
 		// M6 垂木。屋根版（IfcSlab "屋根版"）から導出した RafterCommand の列（階＝Elevation
 		// 昇順・階内は屋根版の #id 昇順・面内は掃引位置順で決定的。parse/Rafter が組み立てる）。

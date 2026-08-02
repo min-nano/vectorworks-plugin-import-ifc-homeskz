@@ -21,6 +21,8 @@
 
 #include "PluginPrefix.h"
 
+#include "VWFC/VWObjects/VWParametricObj.h"
+
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -36,6 +38,21 @@ namespace HomeskzIfcImport::draw
 	// ISDK の関数名は VS と異なる: PColors=ペン色 / FColors=面色 / PPat=線種 /
 	// FPat=面パターン / Arrow=マーカー）。
 	void SetAllAttributesByClass(MCObjectHandle object);
+
+	// PIO のパラメータ名を解決する。universal 名で見つかればそれを使い、見つからなければ
+	// ローカライズ名（OIP に出る日本語）で引き直す。**名前が 1 つ違うだけで setter は黙って
+	// 無視される**（M6 の垂木で実証済み: 勾配・構造用途・ラベルが名前違いで効いていなかった）
+	// ため、確実に見つかる方を選ぶ。どちらでも見つからなければ universal 名をそのまま返す。
+	TXString ResolveParamName(const VWParametricObj& pio, const char* universalName,
+							  const char* localizedName);
+
+	// PIO に実数パラメータを書き、**読み戻して書けたか確かめる**。書けていれば true。
+	// 角度・寸法のような数値パラメータでも、PIO の登録次第で実数ではなく文字列として
+	// 保持されていることがあり、その場合 SetParamReal は黙って無視される。そこで実数で
+	// 書けなかったときは文字列で入れ直す（M6 の垂木で「寸法を文字列で渡すと既定値のまま
+	// だった」逆のケースが起きており、どちらに転んでも入るようにする）。
+	bool SetParamRealChecked(VWParametricObj& pio, const TXString& param, double value,
+							 double tolerance = 1e-6);
 
 	// 名前付きデザインレイヤを取得（無ければ作成）してアクティブにする。以後に生成する
 	// オブジェクトはこのレイヤへ入る。取得・生成できなければ nil を返し、カレントレイヤも

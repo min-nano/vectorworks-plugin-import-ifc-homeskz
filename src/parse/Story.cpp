@@ -9,6 +9,7 @@
 #include "parse/Context.h"
 #include "parse/Floor.h"
 #include "parse/IfcAttr.h"
+#include "parse/Member.h"
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
 
@@ -61,6 +62,14 @@ namespace HomeskzIfcImport::parse
 			return std::to_string(index + 1) + "階";
 		}
 
+		// 横架材命令のどれかが layer を配置先に指しているか。母屋・登り梁レベルを足すかの
+		// 判定に使う（buildStoryCommands の「Python 版との差異」参照）。
+		bool anyMemberOnLayer(const std::vector<core::MemberCommand>& members,
+							  const std::string& layer)
+		{
+			return std::ranges::any_of(members, [&layer](const core::MemberCommand& member)
+									   { return member.layer == layer; });
+		}
 	} // namespace
 
 	std::string storyLayerPrefix(std::size_t index, bool isTop)
@@ -207,6 +216,10 @@ namespace HomeskzIfcImport::parse
 	std::vector<StoryCommand> buildStoryCommands(Context& context)
 	{
 		const std::vector<StoryInfo> stories = context.stories();
+		// 母屋・登り梁レベルの有無は、実際に組み立てた横架材命令の配置先レイヤから決める
+		// （下記「Python 版との差異」）。コンテキストが 1 度だけ解析するので、垂木・登り梁の
+		// 補正と同じ結果を共有する。
+		const std::vector<core::MemberCommand>& members = context.members();
 
 		std::vector<StoryCommand> commands;
 		commands.reserve(stories.size());
@@ -248,12 +261,43 @@ namespace HomeskzIfcImport::parse
 					LevelCommand{kLevelBeamTop, info.beamOffset, layerFor(kLevelBeamTop)});
 			}
 
+			// 小屋組のレベル（登り梁・母屋・垂木・野地板）は、横架材天端（最上階は軒高）
+			// レベルの**直前**へ順に挿入して積み上げる。挿入位置は「最初の挿入前の横架材天端
+			// レベルの索引」で固定し、そこへ挿し続けることで**後から挿入したものが 1 段上**に
+			// 来る（＝スタックは 横架材天端/軒高 ← 登り梁 ← 母屋 ← 垂木 ← 野地板）。高さは
+			// いずれも横架材天端（最上階は軒高）に揃える（実描画の Z は各材／屋根版由来の
+			// 絶対値を要素自身が持つため、このオフセットには依存しない）。
+			const double upperOffset = info.isTop ? 0.0 : info.beamOffset;
+			const auto beamTopIndex = static_cast<std::ptrdiff_t>(cmd.levels.size()) - 1;
+			const auto insertAboveBeamTop =
+				[&cmd, &layerFor, upperOffset, beamTopIndex](const char* levelType)
+			{
+				cmd.levels.insert(cmd.levels.begin() + beamTopIndex,
+								  LevelCommand{levelType, upperOffset, layerFor(levelType)});
+			};
+
+			// M7 横架材: 母屋・棟木（"n-母屋"）と登り梁（"n-登り梁"）は、梁（小屋梁・軒桁）と
+			// 重なって見にくいため専用レイヤへ分離する（parse/Member）。そのレイヤはここで作る。
+			// スタックは 横架材天端/軒高 ← 登り梁 ← 母屋 なので、登り梁 → 母屋 の順に挿入する。
+			//
+			// ［Python 版との差異・意図的］Python 版は名前判定（story_has_moya /
+			// story_has_noboribari）でレベルを足し、さらに最上階には母屋レベルを無条件で足す。
+			// 本移植は**実際に組み立てた横架材命令の配置先レイヤ**で判定する。理由は 2 つ:
+			//   * 名前判定は「名前では判別できないが高さで母屋と推定された最上階の材」
+			//     （隅木谷木等）を取りこぼす。Python 版はそれを最上階の無条件追加で救っている。
+			//   * その無条件追加は、母屋を持たない最上階に空レイヤを残す（本移植は空レイヤを
+			//     作らない方針。M5 ロフト FL・M6 垂木/野地板と同じ）。
+			// 命令の配置先で判定すれば、**レイヤは命令があるときだけ・命令があれば必ず**でき、
+			// 両方の齟齬が構造的に起きない。
+			for (const char* levelType : {kLevelNoboribari, kLevelMoya})
+			{
+				if (anyMemberOnLayer(members, layerFor(levelType)))
+					insertAboveBeamTop(levelType);
+			}
+
 			// M6 屋根組: 屋根版（屋根面）を含む階に 垂木 → 野地板 レベル（"n-垂木" /
-			// "n-野地板" レイヤ）を足す。スタックは 横架材天端/軒高 ← （母屋）← 垂木 ←
-			// 野地板（上ほど上段）なので、横架材天端（最上階は軒高）レベルの**直前**へ
-			// 垂木・野地板の順に挿入する（後から挿入したものが 1 段上に来る）。高さはいずれも
-			// 横架材天端（最上階は軒高）に揃える（実描画の Z は屋根版由来の絶対値を垂木・
-			// 野地板の要素が持つため、このオフセットには依存しない）。
+			// "n-野地板" レイヤ）を足す。スタックは 横架材天端/軒高 ← 登り梁 ← 母屋 ← 垂木 ←
+			// 野地板（上ほど上段）なので、垂木・野地板の順に挿入する。
 			//
 			// ［Python 版との差異・意図的］Python 版は最上階（屋根）には屋根版の有無に関わらず
 			// 垂木・野地板レベルを持たせる（is_top or roof_flags[i]）。本移植は**屋根版がある階
@@ -263,13 +307,8 @@ namespace HomeskzIfcImport::parse
 			// 結果は Python 版と一致する。
 			if (storyHasRoofSlab(context, info.id))
 			{
-				// 横架材天端（最上階は軒高）レベルは常に末尾なので、その直前が挿入位置。
-				const auto tail = static_cast<std::ptrdiff_t>(cmd.levels.size()) - 1;
-				const double roofOffset = info.isTop ? 0.0 : info.beamOffset;
-				cmd.levels.insert(cmd.levels.begin() + tail,
-								  LevelCommand{kLevelTaruki, roofOffset, layerFor(kLevelTaruki)});
-				cmd.levels.insert(cmd.levels.begin() + tail,
-								  LevelCommand{kLevelNojiita, roofOffset, layerFor(kLevelNojiita)});
+				insertAboveBeamTop(kLevelTaruki);
+				insertAboveBeamTop(kLevelNojiita);
 			}
 			commands.push_back(std::move(cmd));
 		}

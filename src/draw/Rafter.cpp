@@ -119,7 +119,7 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kFieldLabelText = "labelText"; // ラベル文字
 		constexpr const char* kFieldStructuralUse = "structuralUse"; // 構造用途（**先頭は小文字**）
 		// 材質。universal 名が実機で "Material" と確認できたが、念のため見つからなければ
-		// ローカライズ名「材質」で引き直す（ResolveParam）。
+		// ローカライズ名「材質」で引き直す（draw/DrawUtil の ResolveParamName）。
 		constexpr const char* kFieldMaterial = "Material";
 		constexpr const char* kLocalizedMaterial = "材質";
 		// ポップアップの選択肢は**キー（英語）で保持され、表示だけがローカライズ**される
@@ -139,29 +139,6 @@ namespace HomeskzIfcImport::draw
 			std::array<char, 32> buffer{};
 			std::snprintf(buffer.data(), buffer.size(), "%g°", degrees);
 			return {buffer.data()};
-		}
-
-		// パラメータ名を解決する。universal 名で見つかればそれを使い、見つからなければ
-		// ローカライズ名（OIP に出る日本語）で引き直す。名前が 1 つ違うだけで setter が
-		// **黙って無視される**ため、確実に見つかる方を選ぶ。どちらでも見つからなければ
-		// universal 名をそのまま返す（設定は無視されるが害は無い）。
-		TXString ResolveParam(const VWParametricObj& pio, const char* universalName,
-							  const char* localizedName)
-		{
-			// const にしない: 戻り値として返すので、const だと move されず余計なコピーになる
-			// （clang-tidy performance-no-automatic-move）。
-			TXString universal(universalName);
-			if (pio.GetParamIndex(universal) != static_cast<size_t>(-1))
-				return universal;
-
-			const TXString localized(localizedName);
-			const size_t count = pio.GetParamsCount();
-			for (size_t i = 0; i < count; ++i)
-			{
-				if (pio.GetParamLocalizedName(i) == localized)
-					return pio.GetParamName(i);
-			}
-			return universal;
 		}
 
 		// ポップアップのパラメータを「表示文字」で設定する。選択肢はキー（英語）で保持され
@@ -244,7 +221,7 @@ namespace HomeskzIfcImport::draw
 			pio.SetParamAsString(kFieldLabelText, TXString(rafter.label.c_str()));
 			SetPopupByLocalized(pio, TXString(kFieldStructuralUse), kStructuralUseRafterText,
 								kStructuralUseRafterKey);
-			SetPopupByLocalized(pio, ResolveParam(pio, kFieldMaterial, kLocalizedMaterial),
+			SetPopupByLocalized(pio, ResolveParamName(pio, kFieldMaterial, kLocalizedMaterial),
 								kMaterialWoodText, kMaterialWoodKey);
 			// 勾配（度）。角度パラメータは実数で保持されるので degrees をそのまま入れ、
 			// 反映されていなければ度記号付きの文字列で入れ直す（登録の型に依らず入るように）。

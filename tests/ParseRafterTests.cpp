@@ -4,9 +4,9 @@
 //	垂木解析（src/parse/Rafter）の単体テスト。VectorWorks SDK を一切 include せず、
 //	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
 //	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_rafter.py のケースを
-//	1 対 1 で写している（桁幅参照＝_girder_width_at のケースだけは、横架材が未導入の
-//	M6 では既定桁幅へのフォールバックのみが該当するため、そのフォールバックを検証する
-//	形に読み替えている。ROADMAP.md M6「依存メモ」）。
+//	1 対 1 で写している。桁幅参照（girderWidthAt）は M7 で横架材が入って実寸を引けるように
+//	なったので、実寸の選択・垂木と平行な材の除外・見つからないときの既定値フォールバックを
+//	それぞれ検証する（ROADMAP.md M6「依存メモ」/ M7）。
 //
 //	検証項目（ROADMAP.md M6）: 屋根面の掃引（両端は半幅内側・内部 455 以下・中間 455 ちょうど・
 //	端数は両端へ等分）・走査線クリップ（非凸面の分割）・勾配（start=軒側の支持点／end=棟側）・
@@ -33,11 +33,13 @@
 #include <vector>
 
 using namespace HomeskzIfcImport;
+using HomeskzIfcImport::core::MemberCommand;
 using HomeskzIfcImport::core::RafterCommand;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::core::Vec3;
 using HomeskzIfcImport::parse::buildRafterCommands;
 using HomeskzIfcImport::parse::CLASS_TARUKI;
+using HomeskzIfcImport::parse::girderWidthAt;
 using HomeskzIfcImport::parse::kDefaultGirderWidth;
 using HomeskzIfcImport::parse::kDefaultRafterHeight;
 using HomeskzIfcImport::parse::kDefaultRafterWidth;
@@ -58,6 +60,21 @@ namespace
 {
 	// 試験用の屋根面（4m×3m の片流れ）と、それに対応する最小の屋根版 IFC は
 	// tests/RoofSample.h が唯一の定義。野地板（ParseRoofTests）と共有する。
+
+	// 桁幅参照（girderWidthAt）に渡す軒桁の member 命令。芯線と幅だけを見るので、
+	// 高さ・クラス・レイヤは既定のままでよい。
+	MemberCommand girderMember(const Vec2& start, const Vec2& end, double width)
+	{
+		MemberCommand member;
+		member.layer = "R-軒高";
+		member.memberId = "girder";
+		member.drawClass = CLASS_TARUKI; // 桁幅の判定はクラスを見ない
+		member.start = start;
+		member.end = end;
+		member.width = width;
+		member.height = 105.0;
+		return member;
+	}
 
 	// 上の屋根面から垂木命令を作る（支持点なし＝start は軒先のまま）。
 	std::vector<RafterCommand> shedRafters(double storeyElevation = 0.0,
@@ -332,11 +349,75 @@ TEST(no_overhang_when_beam_top_at_or_below_eave_tip)
 
 TEST(embedment_defaults_to_half_default_girder)
 {
-	// M6 は横架材が未導入なので差し込みは常に既定桁幅の半分（Python 版も members が
-	// 空のときはこの値になる。ROADMAP.md M6「依存メモ」）。
+	// 受ける軒桁（横架材命令）を渡さなければ差し込みは既定桁幅の半分（M6 の挙動と同じ値。
+	// Python 版も members が空のときはこの値になる）。
 	CHECK(near(kDefaultGirderWidth, 105.0));
 	for (const RafterCommand& rafter : shedRaftersWithBeamTop(1500.0))
 		CHECK(near(rafter.embedment, kDefaultGirderWidth / 2.0));
+}
+
+// ---------------------------------------------------------------------------
+// girderWidthAt: 支持点の真下の軒桁から桁幅を引く（M7 で横架材が入って有効になった）
+// ---------------------------------------------------------------------------
+
+TEST(girder_width_uses_nearest_perpendicular_member)
+{
+	// 支持点 (0, 0) の真下を x 方向に走る幅 150 の軒桁。垂木は +y へ流れるので直交する。
+	const std::vector<MemberCommand> members = {
+		girderMember(Vec2{-1000.0, 0.0}, Vec2{1000.0, 0.0}, 150.0)};
+	CHECK(near(girderWidthAt(0.0, 0.0, 0.0, 1000.0, members), 150.0));
+}
+
+TEST(girder_width_ignores_members_parallel_to_rafter)
+{
+	// 垂木と平行に走る材（継ぎ手・側並び）は軒桁でないため選ばない → 既定桁幅。
+	const std::vector<MemberCommand> members = {
+		girderMember(Vec2{0.0, -1000.0}, Vec2{0.0, 1000.0}, 150.0)};
+	CHECK(near(girderWidthAt(0.0, 0.0, 0.0, 1000.0, members), kDefaultGirderWidth));
+}
+
+TEST(girder_width_ignores_degenerate_members)
+{
+	// 平面投影長が 0 の材（点に潰れた命令）は候補にしない → 既定桁幅。
+	const std::vector<MemberCommand> members = {
+		girderMember(Vec2{0.0, 0.0}, Vec2{0.0, 0.0}, 150.0)};
+	CHECK(near(girderWidthAt(0.0, 0.0, 0.0, 1000.0, members), kDefaultGirderWidth));
+}
+
+TEST(girder_width_ignores_distant_members)
+{
+	// 芯線が探索許容（100mm）より遠い材は選ばない → 既定桁幅。
+	const std::vector<MemberCommand> members = {
+		girderMember(Vec2{-1000.0, 500.0}, Vec2{1000.0, 500.0}, 150.0)};
+	CHECK(near(girderWidthAt(0.0, 0.0, 0.0, 1000.0, members), kDefaultGirderWidth));
+}
+
+TEST(girder_width_picks_the_closest_of_several)
+{
+	// 複数の候補があれば芯線が支持点に最も近いものを採る（並び順に依存しない）。
+	const std::vector<MemberCommand> near_ = {
+		girderMember(Vec2{-1000.0, 10.0}, Vec2{1000.0, 10.0}, 120.0)};
+	const std::vector<MemberCommand> far_ = {
+		girderMember(Vec2{-1000.0, 60.0}, Vec2{1000.0, 60.0}, 240.0)};
+	std::vector<MemberCommand> both = near_;
+	both.push_back(far_.front());
+	std::vector<MemberCommand> reversed = far_;
+	reversed.push_back(near_.front());
+	CHECK(near(girderWidthAt(0.0, 0.0, 0.0, 1000.0, both), 120.0));
+	CHECK(near(girderWidthAt(0.0, 0.0, 0.0, 1000.0, reversed), 120.0));
+}
+
+TEST(embedment_uses_real_girder_width_from_members)
+{
+	// 支持点の真下に幅 150 の軒桁があれば、差し込みはその半分（75）になる。
+	// 片流れ屋根の支持点は y=1500 の線上（勾配方向は +y）。
+	const std::vector<MemberCommand> members = {
+		girderMember(Vec2{-1000.0, 1500.0}, Vec2{5000.0, 1500.0}, 150.0)};
+	const std::vector<RafterCommand> rafters = raftersForPlane(
+		shedPlane(), "R-垂木", 0.0, Vec2{0.0, 0.0}, std::optional<double>(1500.0), members);
+	CHECK(!rafters.empty());
+	for (const RafterCommand& rafter : rafters)
+		CHECK(near(rafter.embedment, 75.0));
 }
 
 TEST(label_shows_spec)

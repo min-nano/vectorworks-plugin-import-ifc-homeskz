@@ -269,6 +269,106 @@ TEST(validate_rejects_floor_with_zero_total_thickness)
 }
 
 // ---------------------------------------------------------------------------
+// 横架材の検証（ROADMAP.md M7）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 検証を通る横架材命令（1 本）。個々のテストはここから 1 か所だけ崩す。
+	core::MemberCommand validMember()
+	{
+		core::MemberCommand member;
+		member.layer = "1-横架材天端";
+		member.memberId = "120×180 - 杉";
+		member.drawClass = "04構造-02木造-04梁桁-03床梁";
+		member.start = core::Vec2{0.0, 0.0};
+		member.end = core::Vec2{3000.0, 0.0};
+		member.width = 120.0;
+		member.height = 180.0;
+		member.elevation = 383.0;
+		member.endElevation = 383.0;
+		member.startBound = core::StoryBoundCommand{0, core::kLevelBeamTop, 0.0};
+		member.endBound = core::StoryBoundCommand{0, core::kLevelBeamTop, 0.0};
+		return member;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_member)
+{
+	core::Document document;
+	document.members.push_back(validMember());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_member_with_empty_layer)
+{
+	core::Document document;
+	core::MemberCommand member = validMember();
+	member.layer = "";
+	document.members.push_back(member);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_member_with_empty_class)
+{
+	core::Document document;
+	core::MemberCommand member = validMember();
+	member.drawClass = "";
+	document.members.push_back(member);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_member_with_empty_member_id)
+{
+	core::Document document;
+	core::MemberCommand member = validMember();
+	member.memberId = "";
+	document.members.push_back(member);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_member_with_nonpositive_section)
+{
+	core::Document zeroWidth;
+	core::MemberCommand member = validMember();
+	member.width = 0.0;
+	zeroWidth.members.push_back(member);
+	CHECK(!core::validateDocument(zeroWidth));
+
+	core::Document negativeHeight;
+	member = validMember();
+	member.height = -1.0;
+	negativeHeight.members.push_back(member);
+	CHECK(!core::validateDocument(negativeHeight));
+}
+
+TEST(validate_rejects_degenerate_member)
+{
+	// 天端中央線が縮退している（始端＝終端）命令は描けない。
+	core::Document document;
+	core::MemberCommand member = validMember();
+	member.end = member.start;
+	document.members.push_back(member);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_member_with_empty_bound_level)
+{
+	// レベル種別が空だと SetObjectStoryBound が解決できず高さがレイヤ基準へ戻る。
+	core::Document startEmpty;
+	core::MemberCommand member = validMember();
+	member.startBound.level = "";
+	startEmpty.members.push_back(member);
+	CHECK(!core::validateDocument(startEmpty));
+
+	core::Document endEmpty;
+	member = validMember();
+	member.endBound.level = "";
+	endEmpty.members.push_back(member);
+	CHECK(!core::validateDocument(endEmpty));
+}
+
+// ---------------------------------------------------------------------------
 // 垂木・野地板の検証（ROADMAP.md M6）
 // ---------------------------------------------------------------------------
 

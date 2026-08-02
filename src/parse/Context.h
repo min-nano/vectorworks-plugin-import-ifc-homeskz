@@ -25,9 +25,11 @@
 #pragma once
 
 #include "core/Geometry.h"
+#include "core/Document.h"
 #include "parse/Floor.h"
 #include "parse/Grid.h"
 #include "parse/IfcGeometry.h"
+#include "parse/Member.h"
 #include "parse/Step.h"
 #include "parse/Story.h"
 
@@ -71,6 +73,17 @@ namespace HomeskzIfcImport::parse
 		// 野地板（parse/Roof）が同じ面を共有するので、押し出しソリッドの解決は 1 回で済む。
 		const RoofPlane* roofPlane(int elementId);
 
+		// 横架材の命令（parse/Member の buildMemberCommands。**登り梁の補正前**）。3 者が
+		// この 1 回の解析結果を共有する: ストーリ（母屋・登り梁レイヤを作るか）・垂木（差し込みに
+		// 使う軒桁の桁幅）・登り梁の位置補正（受ける材）。全 IfcBeam の配置・断面・材種を辿る
+		// 重い解析なので、要素ごとに組み立て直すと同じ走査が 3 回走る。
+		//
+		// **補正前**なのは、この値を使う 2 者（ストーリ・登り梁の補正）が補正前を要するから:
+		// ストーリは配置先レイヤ名しか見ず、補正はレイヤを変えない。登り梁の補正自体はこれを
+		// 入力に取る。垂木だけは補正後を渡したいので、parse/BuildDocument が補正結果を明示的に
+		// 渡す（buildRafterCommands のオーバーロード）。
+		const std::vector<core::MemberCommand>& members();
+
 	private:
 		const Model* fModel = nullptr;
 
@@ -80,5 +93,6 @@ namespace HomeskzIfcImport::parse
 		std::map<int, std::vector<int>> fStoryElements;
 		std::map<int, std::vector<LoftFloorRegion>> fLoftFloorRegions;
 		std::map<int, std::optional<RoofPlane>> fRoofPlanes;
+		std::optional<std::vector<core::MemberCommand>> fMembers;
 	};
 } // namespace HomeskzIfcImport::parse
