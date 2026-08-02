@@ -14,6 +14,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/Progress.h"
 
 #include <cstddef>
 
@@ -23,5 +24,9 @@ namespace HomeskzIfcImport::draw
 	// 各 GridCommand を GridAxis のカスタムオブジェクト（PIO）として生成する。PIO の
 	// 生成に失敗した場合は通常の直線へフォールバックする（1 本の失敗で全体を止めない。
 	// Python 版 vw/grid.py の寛容さ）。実際に配置できた本数を返す。
-	std::size_t drawGrids(const core::Document& document);
+	//
+	// progress には 1 件描くごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
+	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
+	// 決める）。描けたところまでは図面に残る。
+	std::size_t drawGrids(const core::Document& document, core::ProgressReporter& progress);
 } // namespace HomeskzIfcImport::draw

@@ -14,6 +14,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/Progress.h"
 
 #include <cstddef>
 #include <string>
@@ -30,5 +31,10 @@ namespace HomeskzIfcImport::draw
 	// 「プラグインスタイルが見つからない」といった**描画側の異常**を人が読める 1 行として
 	// 返す（異常が無ければ触らない）。実描画はローカルの VectorWorks でしか確認できないため、
 	// 横架材が見えないときに原因を解析側と描画側で切り分けるための唯一の手掛かりになる。
-	std::size_t drawMembers(const core::Document& document, std::string* outDiagnostics = nullptr);
+	//
+	// progress には 1 件描くごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
+	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
+	// 決める）。描けたところまでは図面に残る。
+	std::size_t drawMembers(const core::Document& document, core::ProgressReporter& progress,
+							std::string* outDiagnostics = nullptr);
 } // namespace HomeskzIfcImport::draw

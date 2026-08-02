@@ -18,6 +18,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/Progress.h"
 
 #include <cstddef>
 
@@ -27,5 +28,9 @@ namespace HomeskzIfcImport::draw
 	// 命令だけを処理する（レイヤは story 命令が作る。存在しない＝ストーリ生成が
 	// スキップされた階なので、床のために勝手にレイヤを作らない。Python 版
 	// execute_floors と同じ規約）。実際に配置できた枚数を返す。
-	std::size_t drawFloors(const core::Document& document);
+	//
+	// progress には 1 件描くごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
+	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
+	// 決める）。描けたところまでは図面に残る。
+	std::size_t drawFloors(const core::Document& document, core::ProgressReporter& progress);
 } // namespace HomeskzIfcImport::draw

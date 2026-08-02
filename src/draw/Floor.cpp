@@ -39,6 +39,7 @@
 #include "draw/Floor.h"
 #include "draw/DrawUtil.h"
 #include "core/Document.h"
+#include "core/Progress.h"
 
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
@@ -222,11 +223,17 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	std::size_t drawFloors(const core::Document& document)
+	std::size_t drawFloors(const core::Document& document, core::ProgressReporter& progress)
 	{
 		std::size_t drawn = 0;
 		for (const core::FloorCommand& floor : document.floors)
 		{
+			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は枚数で報告し、
+			// 描画の前に 1 件進める（＝「いま何枚目を描いているか」が見える）。
+			if (progress.cancelled())
+				break;
+			progress.step();
+
 			// 配置先レイヤ（"n-FL"）が無い命令はスキップする（規約は ActivateExistingLayer）。
 			if (ActivateExistingLayer(floor.layer) == nil)
 				continue;

@@ -15,6 +15,7 @@
 // いずれも core::Document までしか参照せず、SDK / STEP を相互に引き込まない。
 #include "parse/BuildDocument.h"
 #include "draw/ExecuteDocument.h"
+#include "draw/ProgressDialog.h"
 
 // ファイル選択ダイアログ（VCOM）。ネイティブの「開く」ダイアログを出し、選ばれた
 // ファイルの絶対パスを IFileIdentifier 経由で受け取る。
@@ -123,6 +124,17 @@ namespace HomeskzIfcImport
 			outPath = static_cast<const char*>(fullPath);
 			return !outPath.empty();
 		}
+
+		// パスから末尾のファイル名だけを取り出す（進捗ダイアログの上段に出す 1 行）。
+		// 区切りは POSIX とネイティブ Windows の両方を見る（SDK が返すパスは実行環境の
+		// 流儀に従う）。区切りが無ければパスそのものがファイル名。
+		std::string FileNameOf(const std::string& path)
+		{
+			const std::size_t pos = path.find_last_of("/\\");
+			if (pos == std::string::npos)
+				return path;
+			return path.substr(pos + 1);
+		}
 	} // namespace
 } // namespace HomeskzIfcImport
 
@@ -186,15 +198,25 @@ void CImportIfcMenu_EventSink::DoInterface()
 	if (!ChooseIfcFile(ifcPath))
 		return;
 
-	// 2. Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
+	// 2. 進捗ダイアログを開く。両フェーズへ**同じ 1 つ**を渡し、解析→描画を通して
+	//    見出しとバーを進める。描画は横架材・垂木を 1 本ずつ SDK で作るため数百回の
+	//    呼び出しになり、これが無いと VectorWorks が固まったように見える
+	//    （draw/ProgressDialog.h「なぜ要るか」）。
+	draw::ProgressDialog progress("ホームズ君 IFC インポート", FileNameOf(ifcPath));
+
+	// 3. Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
 	//    読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
-	const core::Document document = parse::buildDocument(ifcPath);
+	const core::Document document = parse::buildDocument(ifcPath, progress);
 
-	// 3. Phase 2（SDK 依存）: 命令セットを検証してからストーリ・通り芯・床・横架材・屋根組
+	// 4. Phase 2（SDK 依存）: 命令セットを検証してからストーリ・通り芯・床・横架材・屋根組
 	//    （垂木・野地板）を描く。検証を通らなければ valid=false で何も描かない。
-	const draw::DrawCounts drawn = draw::executeDocument(document);
+	//    途中でキャンセルされたら、その時点までを描いて cancelled=true で戻る。
+	const draw::DrawCounts drawn = draw::executeDocument(document, progress);
 
-	// 4. 結果をダイアログ表示。本文には**実際に描けた数**を出し、命令はあるのに描けなかった
+	// 5. 完了ダイアログの前に進捗ダイアログを閉じる（2 枚重ねない）。
+	progress.close();
+
+	// 6. 結果をダイアログ表示。本文には**実際に描けた数**を出し、命令はあるのに描けなかった
 	//    要素は「N 件中 0 件」の形で分かるようにする（配置先レイヤが無い・オブジェクトを
 	//    作れない等の描画側の問題を、ローカル確認で解析側と切り分けられるようにするため）。
 	//    advice 行にファイルパス。false = 最小アラートでなくモーダルにして本文と advice を
@@ -223,6 +245,10 @@ void CImportIfcMenu_EventSink::DoInterface()
 			   formatCount(drawn.members, document.members.size()) + " 本・垂木 " +
 			   formatCount(drawn.rafters, document.rafters.size()) + " 本・野地板 " +
 			   formatCount(drawn.roofs, document.roofs.size()) + " 枚を描きました。";
+	// 中止されたときは件数が命令数に届かないのが正常なので、そう明示する（「描けなかった」
+	// と読み違えないように）。描けたところまでは図面に残っている。
+	if (drawn.cancelled)
+		body += "\n（キャンセルされたため、途中で中断しました。）";
 	// 描画側で異常があれば本文へ足す（横架材の断面が入らない等。draw/Member 参照）。
 	if (!drawn.diagnostics.empty())
 		body += "\n" + drawn.diagnostics;

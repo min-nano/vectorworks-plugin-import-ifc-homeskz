@@ -72,6 +72,7 @@
 #include "draw/Member.h"
 #include "draw/DrawUtil.h"
 #include "core/Document.h"
+#include "core/Progress.h"
 
 #include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWParametricObj.h"
@@ -276,7 +277,8 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	std::size_t drawMembers(const core::Document& document, std::string* outDiagnostics)
+	std::size_t drawMembers(const core::Document& document, core::ProgressReporter& progress,
+							std::string* outDiagnostics)
 	{
 		if (document.members.empty())
 			return 0;
@@ -288,6 +290,12 @@ namespace HomeskzIfcImport::draw
 		std::size_t lengthFailures = 0;
 		for (const core::MemberCommand& member : document.members)
 		{
+			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
+			// 描画の前に 1 件進める（＝「いま何本目を描いているか」が見える）。
+			if (progress.cancelled())
+				break;
+			progress.step();
+
 			// 配置先レイヤ（"n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁"）が無い命令は
 			// スキップする（規約は ActivateExistingLayer）。
 			if (ActivateExistingLayer(member.layer) == nil)

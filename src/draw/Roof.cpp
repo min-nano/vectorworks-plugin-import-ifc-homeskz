@@ -62,6 +62,7 @@
 #include "draw/Roof.h"
 #include "draw/DrawUtil.h"
 #include "core/Document.h"
+#include "core/Progress.h"
 
 // 屋根面オブジェクト（VWRoofFaceObj）と、その外形に渡す 2D ポリゴン。フォールバックの
 // 外形ポリゴンは draw/Floor.cpp と同じ VWPolygon2DObj で描く。
@@ -188,11 +189,17 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	std::size_t drawRoofs(const core::Document& document)
+	std::size_t drawRoofs(const core::Document& document, core::ProgressReporter& progress)
 	{
 		std::size_t drawn = 0;
 		for (const core::RoofCommand& roof : document.roofs)
 		{
+			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は枚数で報告し、
+			// 描画の前に 1 件進める（＝「いま何枚目を描いているか」が見える）。
+			if (progress.cancelled())
+				break;
+			progress.step();
+
 			// 配置先レイヤ（"n-野地板"）が無い命令はスキップする（規約は ActivateExistingLayer）。
 			const MCObjectHandle layer = ActivateExistingLayer(roof.layer);
 			if (layer == nil)
