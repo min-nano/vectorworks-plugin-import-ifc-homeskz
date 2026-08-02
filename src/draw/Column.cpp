@@ -17,29 +17,29 @@
 //	  5. 全配置後に UpdateStyledObjects を 1 回（横架材と同じ。draw/Member.cpp 冒頭）。
 //	PIO を生成できない場合は断面の矩形にフォールバックする（1 本の失敗で全体を止めない）。
 //
-//	【なぜ横架材と違って NURBS 曲線のパスなのか】draw/Member は 2D ポリラインをパスにする
-//	（M7 のローカル確認で確定した作法）。しかし**柱は鉛直材**なので、平面へ落とすとパスが
-//	1 点に潰れて長さを持てない——2D ポリラインでは表現できない。Python 版が使う
-//	`CreateNurbsCurve` ＋ `AddVertex3D`（＝鉛直な 2 点の曲線）が、構造材ツールで鉛直材を
-//	作れることの唯一の実証なので、ISDK でそれに最も近い組み合わせを使う:
-//	    gSDK->CreateNurbsCurve(始点, byCtrlPts=false, degree=1)
-//	  ＋ gSDK->Insert3DVertex(曲線, 終点, beforeVertex=2)   ← VS の AddVertex3D 相当
-//	（どちらも ISDK に実在することを ci-debug の sdk-grep で確認済み。M7 のコメントは
-//	「頂点を足す呼び出しが無い」としていたが、Insert3DVertex がそれにあたる。）
-//	**M7 で長さ 0 になった VWPolygon3DObj のパスは使わない。**
+//	【パスは配置点（XY）だけを与える。高さはストーリバウンドが決める】
+//	**ISDK の構造材 PIO はパスを平面（2D）としてしか読まない。** 柱は鉛直材なので平面へ
+//	落とすとパスが 1 点に潰れ、長さも Z も渡らない——ローカル確認（M8）で実際にそうなった:
+//	OIP は「スパン 0 / 長さ 0」で、オブジェクトはレイヤ原点（Z=0）に置かれ、ストーリバウンドの
+//	offset は VW が「レベル Z − オブジェクト Z」で再計算した値に上書きされていた。XY だけは
+//	パスどおりだったので、**パスは配置点としてしか効いていない**。
 //
-//	【高さの与え方】パスの頂点は**最終位置の絶対 Z** で作る（ISDK に VectorScript の Move3D が
-//	無いため。M6 / M7 と同じ作法）。上下端のストーリバウンドは命令が持つ offset をそのまま
-//	渡す——構造材ツールは上下端バウンドの offset 差をパス由来の部材長へ**加算**するが、
-//	解析側がその性質を織り込んで offset を決めている（柱は上端を上階へバインドして差 ≈0、
-//	小屋束は上端 offset を下端と同値にして差 0。parse/Column.h）。したがってパスの長さが
-//	そのまま柱の高さになり、二重加算は起きない。
+//	これは M7 の横架材で「2 頂点の 3D ポリラインを渡したら長さ 0 になった」のと同じ現象で、
+//	横架材はパスが平面内に長さを持つ（2D ポリライン）ので解決したが、柱では解決できない。
+//	Python 版が使う VS の `CreateNurbsCurve` ＋ `AddVertex3D`（鉛直な 2 点の曲線）に相当する
+//	組み立ては ISDK では作れない（`VWNURBSCurve` は評価専用で制御点から構築できず、
+//	`CreateNurbsCurve` は 1 点の曲線しか作れない。ci-debug の sdk-grep で確認済み）。
+//
+//	したがって**柱の高さは上下端のストーリバウンドだけで決まる**。解析側はその前提で
+//	offset に実際の下端／上端の絶対 Z までの距離を入れており（小屋束の上端 offset ＝
+//	下端 offset ＋ 柱高さ）、パスは長さを持たないので二重加算は起こらない（Python 版 #116 の
+//	「上端 offset を下端と同値にする」対策は、パスが柱高さを持つ VS 側の事情。parse/Column.h）。
+//	パスは配置点として 1 点の NURBS 曲線を渡す（XY が正しく効くことは上記のローカル確認済み）。
 //
 //	【診断を必ず持ち帰る】実描画はローカルの VectorWorks でしか確認できない。そこで
-//	draw/Member と同じく、断面が入ったか・パスから長さ（スパン）を取れたかを**読み戻して
-//	確かめ**、駄目だった本数を完了ダイアログへ返す。柱は上記のとおりパスの作り方が横架材と
-//	異なるので、「鉛直パスの頂点が 2 つになったか」も数えて返す（ローカル確認で最初に見る
-//	べき数字になる）。
+//	draw/Member と同じく、断面が入ったかを**読み戻して確かめ**、駄目だった本数を完了
+//	ダイアログへ返す。**スパン（部材長）は数えない**——柱ではパスが長さを持たないので 0 が
+//	正常であり、横架材と同じ数え方をすると全数を誤報する。
 //
 
 #include "PluginPrefix.h"
@@ -51,7 +51,6 @@
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
-#include <cmath>
 #include <cstddef>
 #include <string>
 
@@ -70,17 +69,9 @@ namespace HomeskzIfcImport::draw
 		constexpr Sint32 kBottomBoundID = 0;
 		constexpr Sint32 kTopBoundID = 1;
 
-		// 部材長を「取れていない」とみなす閾値（mm）。読み戻した スパン がこれ以下なら 0 扱い。
-		constexpr double kZeroLengthTol = 1e-6;
-
-		// 鉛直パス（NURBS 曲線）の次数。直線 1 本なので 1（Python 版 CreateNurbsCurve の
-		// degree=1 と同じ）。byCtrlPts=false ＝ 通過点で定義する。
+		// 配置点として渡すパス（1 点の NURBS 曲線）の次数。直線 1 本なので 1。
+		// byCtrlPts=false ＝ 通過点で定義する（Python 版 CreateNurbsCurve と同じ引数）。
 		constexpr short kPathDegree = 1;
-		// Insert3DVertex の挿入位置。1 点だけの曲線に対して「2 番目の頂点の前」＝末尾へ足す
-		// （VectorScript の AddVertex3D と同じ結果になる）。
-		constexpr short kAppendBeforeVertex = 2;
-		// 鉛直パスに必要な頂点数（始点＝下端・終点＝上端）。
-		constexpr Sint32 kPathPointCount = 2;
 
 		// 構造材ツールのフィールド名（Python 版 vw/column.py の SetRField と同じ universal 名）。
 		// **名前が 1 つ違うだけで setter は黙って無視される**ので、寸法は読み戻して確かめる
@@ -102,9 +93,6 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kLocalizedBreadth = "幅";
 		constexpr const char* kLocalizedDepth = "せい";
 		constexpr const char* kLocalizedProfileShape = "断面形状";
-		// パスから取れた部材長（OIP「スパン」）。**書くためではなく読み戻して確かめるため**。
-		constexpr const char* kFieldSpan = "Span";
-		constexpr const char* kLocalizedSpan = "スパン";
 
 		// フィールドに渡す値（Python 版と同じ。ポップアップはキーで保持されるため数値文字列）。
 		constexpr const char* kProfileShapeRectangle = "Rectangle";
@@ -135,33 +123,21 @@ namespace HomeskzIfcImport::draw
 			return data;
 		}
 
-		// 柱下端 → 上端の鉛直パス（2 点の NURBS 曲線）を作る。頂点が 2 つになったかを
-		// outAppended に返す（診断用。冒頭「診断を必ず持ち帰る」）。作れなければ nil。
-		MCObjectHandle CreateVerticalPath(const core::ColumnCommand& column, bool& outAppended)
+		// 柱の**配置点**を与えるパス（1 点の NURBS 曲線）を作る。作れなければ nil。
+		// 冒頭「パスは配置点（XY）だけを与える」のとおり、構造材 PIO はパスを平面としてしか
+		// 読まないので、ここで鉛直な線分を作っても長さ・Z は渡らない（高さはストーリ
+		// バウンドが決める）。Z は配置点として素直に柱下端の絶対値を渡す。
+		MCObjectHandle CreateColumnPath(const core::ColumnCommand& column)
 		{
-			outAppended = false;
-			const double topZ = column.elevation + column.height;
-			MCObjectHandle path = gSDK->CreateNurbsCurve(
+			return gSDK->CreateNurbsCurve(
 				WorldPt3(column.position.x, column.position.y, column.elevation), false,
 				kPathDegree);
-			if (path == nil)
-				return nil;
-
-			gSDK->Insert3DVertex(path, WorldPt3(column.position.x, column.position.y, topZ),
-								 kAppendBeforeVertex);
-			// 頂点が本当に 2 つになったかを読み戻す。ピース索引の起点は 0 / 1 のどちらの
-			// 規約もあり得るので両方を見る（**判定に失敗しても曲線はそのまま使う**——ここで
-			// 諦めると、索引の規約違いというだけで柱が 1 本も描かれなくなる）。
-			outAppended = gSDK->NurbsGetNumPts(path, 0) >= kPathPointCount ||
-						  gSDK->NurbsGetNumPts(path, 1) >= kPathPointCount;
-			return path;
 		}
 
 		// 柱 1 本を構造材ツールで描く。PIO を作れなければ断面の矩形でフォールバックする
 		// （Python 版 draw_column と同じフォールバック）。何か 1 つでも配置できたら true。
 		bool DrawOne(const core::ColumnCommand& column, RefNumber style,
-					 std::size_t& outPathFailures, std::size_t& outSectionFailures,
-					 std::size_t& outLengthFailures)
+					 std::size_t& outSectionFailures)
 		{
 			// 断面の矩形（幅 × せい）は**原点中心**に置く（AxisAlign＝中央と一致させる。
 			// パスが断面中心を通る）。作れなければ PIO を作らない——断面の無い構造材は
@@ -169,11 +145,7 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle profileGroup = CreateRectangleProfileGroup(
 				-column.width / 2.0, -column.depth / 2.0, column.width / 2.0, column.depth / 2.0);
 
-			bool pathAppended = false;
-			const MCObjectHandle pathHandle =
-				profileGroup == nil ? nil : CreateVerticalPath(column, pathAppended);
-			if (pathHandle != nil && !pathAppended)
-				++outPathFailures;
+			const MCObjectHandle pathHandle = profileGroup == nil ? nil : CreateColumnPath(column);
 
 			MCObjectHandle object =
 				pathHandle == nil ? nil
@@ -205,9 +177,8 @@ namespace HomeskzIfcImport::draw
 			if (style != 0)
 				gSDK->SetPluginObjectStyle(object, style);
 
-			// 高さ基準を下端（0）・上端（1）それぞれのストーリレベルへバインドする。これで
-			// 構造材ツールの高さ基準が「レイヤの高さ」・offset 0 のまま実ジオメトリと矛盾する
-			// ことがなくなり、編集時に高さがリセットされない。
+			// 高さ基準を下端（0）・上端（1）それぞれのストーリレベルへバインドする。
+			// **柱の高さはこの 2 つが決める**（冒頭「パスは配置点（XY）だけを与える」）。
 			gSDK->SetObjectStoryBound(object, kBottomBoundID, StoryBoundOf(column.bottomBound));
 			gSDK->SetObjectStoryBound(object, kTopBoundID, StoryBoundOf(column.topBound));
 
@@ -235,16 +206,10 @@ namespace HomeskzIfcImport::draw
 			gSDK->ResetObject(object);
 
 			// 断面が入らなかった本数を数える（診断。drawColumns が完了ダイアログへ載せる）。
+			// **スパン（部材長）は数えない**——柱ではパスが長さを持たず 0 が正常なので、
+			// 横架材と同じ数え方をすると全数を誤報する（冒頭「診断を必ず持ち帰る」）。
 			if (!breadthOk || !depthOk)
 				++outSectionFailures;
-			// パスから部材長を取れたかを読み戻す。0 のままなら実体が無く画面に描かれない
-			// （M7 の横架材で 3D ポリラインのパスが起こした症状そのもの）。**パラメータが
-			// 実在するときだけ数える**（存在しない名前に対して GetParamReal は 0 を返すので、
-			// 存在確認をしないと全数を長さ 0 と誤報してしまう）。
-			const TXString span = ResolveParamName(pio, kFieldSpan, kLocalizedSpan);
-			if (pio.GetParamIndex(span) != static_cast<size_t>(-1) &&
-				std::abs(pio.GetParamReal(span)) <= kZeroLengthTol)
-				++outLengthFailures;
 			return true;
 		}
 	} // namespace
@@ -258,9 +223,7 @@ namespace HomeskzIfcImport::draw
 		const RefNumber style = ResolveColumnStyle();
 
 		std::size_t drawn = 0;
-		std::size_t pathFailures = 0;
 		std::size_t sectionFailures = 0;
-		std::size_t lengthFailures = 0;
 		for (const core::ColumnCommand& column : document.columns)
 		{
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
@@ -274,7 +237,7 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(column.layer) == nil)
 				continue;
 
-			if (DrawOne(column, style, pathFailures, sectionFailures, lengthFailures))
+			if (DrawOne(column, style, sectionFailures))
 				++drawn;
 		}
 
@@ -283,19 +246,13 @@ namespace HomeskzIfcImport::draw
 		if (drawn > 0 && style != 0)
 			gSDK->UpdateStyledObjects(style);
 
-		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「鉛直パスが 2 点に
-		// ならなかった」「断面が入らなかった」「パスから長さを取れなかった」「スタイルが
-		// 見つからなかった」を件数で持ち帰る（柱が 1 本も見えないときの切り分け材料）。
-		if (outDiagnostics != nullptr &&
-			(pathFailures > 0 || sectionFailures > 0 || lengthFailures > 0 || style == 0))
+		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「断面が入らなかった」
+		// 「スタイルが見つからなかった」を件数で持ち帰る（柱が見えないときの切り分け材料）。
+		if (outDiagnostics != nullptr && (sectionFailures > 0 || style == 0))
 		{
 			std::string note = "柱の診断: ";
-			if (pathFailures > 0)
-				note += "鉛直パスが 2 点にならなかった柱 " + std::to_string(pathFailures) + " 本。";
 			if (sectionFailures > 0)
 				note += "断面を設定できなかった柱 " + std::to_string(sectionFailures) + " 本。";
-			if (lengthFailures > 0)
-				note += "パスから長さを取れなかった柱 " + std::to_string(lengthFailures) + " 本。";
 			if (style == 0)
 				note += "プラグインスタイル『木質構造材_柱・束』が見つかりません。";
 			*outDiagnostics = std::move(note);

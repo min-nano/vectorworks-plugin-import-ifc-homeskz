@@ -10,7 +10,7 @@
 //	検証項目（ROADMAP.md M8）: 配置座標と断面の抽出・柱種別／構造材 ID・柱頭/柱脚金物の
 //	対応付け・**span（またぐレベル区間）の to レベル判定**（管柱／通し柱／屋根束）・
 //	span レイヤへの振り分けと base ごとのまとめ・上下端のストーリバウンド（柱＝当階と上階、
-//	小屋束＝当階のみ・offset 差 0）・構造用途・クラス割り当て・**小屋束の断面を直上の
+//	小屋束＝当階のみ。**バウンドの差が柱高さになる**）・構造用途・クラス割り当て・**小屋束の断面を直上の
 //	母屋幅へ合わせる補正**・センタリング・決定性・全フィクスチャの通し。実フィクスチャの
 //	パスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -652,8 +652,9 @@ TEST(build_column_binds_bottom_current_top_upper_floor)
 
 TEST(build_koyazuka_binds_both_ends_to_current_eaves)
 {
-	// 小屋束は上下端とも当階の横架材天端（最上階は軒高）へバインドし、**上端 offset は
-	// 下端と同値**（offset 差 0 で柱高さの二重加算を避ける）。上端の実高さはパスが担う。
+	// 小屋束は上下端とも当階の横架材天端（最上階は軒高）へバインドし、offset にはそれぞれ
+	// 実際の下端／上端 Z までの距離を入れる（上端 offset ＝ 下端 offset ＋ 柱高さ）。
+	// **柱の高さはこの 2 つのバウンドだけで決まる**（パスは長さを持てない。parse/Column.h）。
 	StepText step;
 	makeStorey(step, "1FL", 600.0);
 	const int storey = makeStorey(step, "RFL", 6300.0);
@@ -675,7 +676,10 @@ TEST(build_koyazuka_binds_both_ends_to_current_eaves)
 	CHECK(near(command.bottomBound.offset, -100.0));
 	CHECK_EQ(command.topBound.storyOffset, 0);
 	CHECK_EQ(command.topBound.level, std::string("軒高"));
-	CHECK(near(command.topBound.offset, -100.0));
+	// 下端 6300 − 100 = 6200、上端 6200 + 800 = 7000 → 軒高 6300 からの距離は 700。
+	CHECK(near(command.topBound.offset, 700.0));
+	// バウンドの差が柱高さと一致する（これが実際に描かれる高さになる）。
+	CHECK(near(command.topBound.offset - command.bottomBound.offset, command.height));
 }
 
 TEST(build_assigns_span_layer_per_story)
@@ -1031,6 +1035,49 @@ TEST(reads_sample_house_fixture)
 	{
 		if (command.drawClass == CLASS_TOSHIBASHIRA)
 			CHECK_EQ(command.layer, std::string("1to3-柱"));
+	}
+}
+
+TEST(all_fixtures_bound_difference_equals_column_height)
+{
+	// **描かれる高さは上下端バウンドの差だけで決まる**（構造材 PIO はパスを平面としてしか
+	// 読まず、鉛直パスは長さを持てない。parse/Column.h）。したがって全フィクスチャの全柱で
+	//   下端バウンドの絶対 Z ＝ elevation（柱下端）
+	//   上端バウンドの絶対 Z − 下端バウンドの絶対 Z ＝ height（柱高さ）
+	// が成り立たなければならない。小屋束の上端 offset を下端と同値にしていた頃はここが
+	// 崩れ、実機で高さ 0 の小屋束になっていた（M8 のローカル確認）。
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		Model const model = fixture(name, ok);
+		CHECK(ok);
+		if (!ok)
+			continue;
+
+		// 各階の横架材天端（最上階は軒高）の絶対 Z ＝ バウンド先レベルの高さ。
+		const std::vector<HomeskzIfcImport::parse::StoryInfo> stories =
+			HomeskzIfcImport::parse::collectStories(model);
+		std::vector<double> levelZ;
+		levelZ.reserve(stories.size());
+		for (const HomeskzIfcImport::parse::StoryInfo& story : stories)
+			levelZ.push_back(story.isTop ? story.elevation : story.elevation + story.beamOffset);
+
+		for (const ColumnCommand& command : buildColumnCommands(model))
+		{
+			double from = 0.0;
+			double to = 0.0;
+			CHECK(HomeskzIfcImport::parse::parseSpanLayer(command.layer, from, to));
+			const auto base = static_cast<std::size_t>(from) - 1;
+			const std::size_t top = base + static_cast<std::size_t>(command.topBound.storyOffset);
+			CHECK(base < levelZ.size() && top < levelZ.size());
+			if (base >= levelZ.size() || top >= levelZ.size())
+				continue;
+
+			const double bottomZ = levelZ[base] + command.bottomBound.offset;
+			const double topZ = levelZ[top] + command.topBound.offset;
+			CHECK(near(bottomZ, command.elevation));
+			CHECK(near(topZ - bottomZ, command.height));
+		}
 	}
 }
 

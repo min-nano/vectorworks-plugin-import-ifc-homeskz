@@ -312,11 +312,11 @@ namespace HomeskzIfcImport::core
 	// ための分け方で、下屋の小屋束が上階の小屋伏図へ写り込まない（parse/Column.h 参照）。
 	//
 	// 【高さの持ち方】elevation は**柱下端**の絶対 Z、height は柱高さ（押し出し Depth）で、
-	// 上端は elevation + height。加えて上下端をストーリレベルへバインドする（bottomBound /
-	// topBound）。柱（管柱・通し柱）は下端を当階・上端を上階（storyOffset=1）の横架材天端
-	// （最上階は軒高）へ、小屋束は上下端とも当階の横架材天端へバインドする。**小屋束の
-	// 上端 offset は下端と同値**にする（VW の構造材ツールは上下端 offset 差を部材長へ
-	// 加算するため、天端相当の値を入れると柱高さが二重加算される。parse/Column.h 参照）。
+	// 上端は elevation + height。**実際の高さは上下端のバウンド（bottomBound / topBound）
+	// だけで決まる**（構造材 PIO はパスを平面としてしか読まず、鉛直パスは長さを持てない。
+	// parse/Column.h 参照）。柱（管柱・通し柱）は下端を当階・上端を上階（storyOffset=1）の
+	// 横架材天端（最上階は軒高）へ、小屋束は上下端とも当階の横架材天端へバインドし、
+	// offset にはそれぞれ実際の下端／上端の絶対 Z までの距離を入れる。
 	//
 	// Python 版キーとの対応:
 	//   layer          ← 'layer'           … 配置先デザインレイヤ名（"1to2-柱" 等）

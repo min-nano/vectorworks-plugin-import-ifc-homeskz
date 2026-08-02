@@ -404,7 +404,9 @@ namespace HomeskzIfcImport::parse
 				}
 
 				// 上下端高さを横架材天端（最上階は軒高）のストーリレベルへバインドする。
-				// offset はバインド先レベルの絶対 Z から実際の下端／上端 Z までの距離。
+				// offset はバインド先レベルの絶対 Z から実際の下端／上端 Z までの距離で、
+				// **柱の高さはこの 2 つのバウンドだけで決まる**（ヘッダ冒頭「高さは上下端の
+				// バウンドだけで決まる」）。
 				const char* currentLevel = story.isTop ? kLevelEaves : kLevelBeamTop;
 				const double bottomOffset = bottomAbs - beamTopAbs[i];
 
@@ -424,10 +426,17 @@ namespace HomeskzIfcImport::parse
 				cmd.bottomBound = StoryBoundCommand{0, currentLevel, bottomOffset};
 				if (isKoyazuka || story.isTop)
 				{
-					// 小屋束（および上階の無い最上階の柱）は上下端とも当階の横架材天端へ。
-					// **上端 offset は下端と同値**にして offset 差を 0 にし、パスが既に持つ
-					// 柱高さの二重加算を避ける（ヘッダ冒頭「高さはパスのジオメトリ…」参照）。
-					cmd.topBound = StoryBoundCommand{0, currentLevel, bottomOffset};
+					// 小屋束（および上階の無い最上階の柱）は上下端とも当階の横架材天端
+					// （最上階は軒高）へバインドし、**上端 offset に実際の上端 Z までの距離**
+					// （＝下端 offset ＋ 柱高さ）を入れる。
+					//
+					// ［Python 版との差異・意図的］Python 版は上端 offset を下端と同値にして
+					// offset 差を 0 にする（#116）。VS のパス（NURBS 曲線）が柱高さを持つため、
+					// offset 差を足すと二重になるからである。**ISDK ではパスが柱高さを持てない**
+					// （構造材 PIO はパスを平面としてしか読まず、鉛直パスは平面で 1 点に潰れる。
+					// draw/Column.cpp 冒頭）ので、同値にすると高さ 0 の柱になる。ローカル確認で
+					// 実際にそうなった（OIP: スパン 0／長さ 0／高さ 0）。
+					cmd.topBound = StoryBoundCommand{0, currentLevel, topAbs - beamTopAbs[i]};
 				}
 				else
 				{
