@@ -131,6 +131,7 @@ src/
     Geometry.{h,cpp}        Vec2 / Vec3 / Mat4 等の自前数学型（parse が SDK 非依存のため必須）
     Document.{h,cpp}        命令セットの構造体定義と validateDocument（1 対で持つ。分割は不要）
     Region.{h,cpp}          部品が囲む平面領域の合成（ロフト床の外形。M5 で追加）
+    Progress.{h,cpp}        進捗の報告先（ProgressReporter）と文言整形・バー配分（M15 の先行実装）
 
   parse/                    Phase 1: IFC 解析（SDK 非依存）… 旧 ifc/
     Step.{h,cpp}            最小 STEP リーダ（トークナイザ＋エンティティグラフ）
@@ -147,6 +148,7 @@ src/
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
     ExecuteDocument.{h,cpp} execute_document 相当のディスパッチ
     DrawUtil.{h,cpp}        クラス分け・by-class 属性・レイヤ用意の共通ヘルパー
+    ProgressDialog.{h,cpp}  core::ProgressReporter を VW の進捗ダイアログへ橋渡し（唯一の実装）
     Grid.{h,cpp}            grid 命令 → GridAxis（旧 vw/grid.py）
     Story.{h,cpp}           story 命令 → ストーリ・レベル・レイヤ（旧 vw/story.py）
     …                       以降、要素ごとに 1 対 1 で追加
@@ -172,8 +174,9 @@ tests/
 `parse/Rafter.h` / `parse/Roof.h`）、レイヤ名の組み立ては `storyLayerName`、要素の判別
 述語（`isFloorSlab` / `isRoofSlab`）はその要素のヘッダ、平面座標の同一判定と許容
 （`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値は
-`parse/IfcGeometry.h`、`draw/` の SDK 呼び出しの定型は `draw/DrawUtil` に**それぞれ
-1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、
+`parse/IfcGeometry.h`、`draw/` の SDK 呼び出しの定型は `draw/DrawUtil`、進捗の見出し・
+バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`（整形と配分の
+計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
 
 **依存の向きは厳守する:** `parse/` と `core/` は VectorWorks SDK を include しない。

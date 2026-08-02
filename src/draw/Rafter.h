@@ -13,6 +13,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/Progress.h"
 
 #include <cstddef>
 
@@ -23,5 +24,9 @@ namespace HomeskzIfcImport::draw
 	// 配置先レイヤ（"n-垂木"）が無い命令はスキップする（レイヤは story 命令が作るので、
 	// 無い＝そのストーリの生成がスキップされたということ。垂木のために勝手にレイヤを
 	// 作らない。Python 版 execute_rafters と同じ規約）。
-	std::size_t drawRafters(const core::Document& document);
+	//
+	// progress には 1 件描くごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
+	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
+	// 決める）。描けたところまでは図面に残る。
+	std::size_t drawRafters(const core::Document& document, core::ProgressReporter& progress);
 } // namespace HomeskzIfcImport::draw

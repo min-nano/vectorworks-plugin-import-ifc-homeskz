@@ -21,10 +21,20 @@
 #include "draw/Roof.h"
 #include "draw/Story.h"
 #include "core/Document.h"
+#include "core/Progress.h"
+
+#include <cstddef>
 
 namespace HomeskzIfcImport::draw
 {
 	DrawCounts executeDocument(const core::Document& document)
+	{
+		// 進捗を表示しない呼び出し（従来の呼び出し口）。振る舞いは同じ。
+		core::NullProgressReporter noProgress;
+		return executeDocument(document, noProgress);
+	}
+
+	DrawCounts executeDocument(const core::Document& document, core::ProgressReporter& progress)
 	{
 		DrawCounts counts;
 
@@ -33,29 +43,54 @@ namespace HomeskzIfcImport::draw
 			return counts;
 		counts.valid = true;
 
+		// 進捗バーの配分は**命令数の比**にする（1 件あたりの重さは要素で違うが、要素ごとの
+		// 実測が無い以上、件数比が一番嘘の少ない近似。core::phaseShare）。
+		const std::size_t total = document.stories.size() + document.grids.size() +
+								  document.floors.size() + document.members.size() +
+								  document.rafters.size() + document.roofs.size();
+
+		// フェーズを開く。中止済みなら false を返し、呼び出し側はそのフェーズごと飛ばす
+		// （各 draw* も自分のループの先頭で中止を見て抜けるので、途中で押されても止まる）。
+		const auto beginPhase = [&](const char* label, std::size_t count)
+		{
+			if (progress.cancelled())
+				return false;
+			progress.beginPhase(label, core::phaseShare(count, total, core::kDrawShare), count);
+			return true;
+		};
+
 		// M3 ストーリを先に描く。以降の要素はここで生成したストーリレベル・デザイン
 		// レイヤに配置されるため、通り芯や他要素より前に用意する（Python 版 execute_document
 		// が execute_stories を先頭で呼ぶのと同じ）。
-		counts.stories = drawStories(document);
+		if (beginPhase("ストーリとレイヤを作成しています…", document.stories.size()))
+			counts.stories = drawStories(document, progress);
 
 		// M1 通り芯を描く。
-		counts.grids = drawGrids(document);
+		if (beginPhase("通り芯を描画しています…", document.grids.size()))
+			counts.grids = drawGrids(document, progress);
 
 		// M5 床板を描く。配置先の FL レイヤは上の drawStories が作るので、必ずその後に
 		// 置く（レイヤが無い命令は drawFloors がスキップする）。
-		counts.floors = drawFloors(document);
+		if (beginPhase("床を描画しています…", document.floors.size()))
+			counts.floors = drawFloors(document, progress);
 
 		// M7 横架材を描く。配置先の "n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁" レイヤは
 		// drawStories が作るので、必ずその後に置く（レイヤが無い命令はスキップされる）。
-		counts.members = drawMembers(document, &counts.diagnostics);
+		if (beginPhase("横架材を描画しています…", document.members.size()))
+			counts.members = drawMembers(document, progress, &counts.diagnostics);
 
 		// M6 屋根組を描く。垂木 → 野地板 の順（Python 版 execute_document の実行順と同じで、
 		// 野地板は垂木の上に載る）。配置先の "n-垂木" / "n-野地板" レイヤも drawStories が
 		// 作るので、必ずその後に置く（レイヤが無い命令はそれぞれがスキップする）。以降の
 		// マイルストーンで column … と命令ごとに draw モジュールへのディスパッチを
 		// 足していく（ROADMAP.md）。
-		counts.rafters = drawRafters(document);
-		counts.roofs = drawRoofs(document);
+		if (beginPhase("垂木を描画しています…", document.rafters.size()))
+			counts.rafters = drawRafters(document, progress);
+		if (beginPhase("野地板を描画しています…", document.roofs.size()))
+			counts.roofs = drawRoofs(document, progress);
+
+		// 途中で中止されたか（件数が命令数に届かないのが正常になる）。
+		counts.cancelled = progress.cancelled();
 
 		// レイヤのスタック順の並べ替えはここでは行わない（draw/Story.h 参照: VW 2026 ISDK に
 		// デザインレイヤの重ね順変更呼び出しが無く、目的の伏図ビューポート重ね順制御は

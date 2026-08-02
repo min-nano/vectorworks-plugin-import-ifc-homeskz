@@ -98,6 +98,14 @@ vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 vw_add_test(CoreDocumentTests CoreDocumentTests.cpp)
 target_link_libraries(CoreDocumentTests PRIVATE HomeskzIfcCore)
 
+# Progress reporting (src/core/Progress): the display-text formatting, the
+# proportional progress-bar share per phase, the step counting (reset per phase,
+# clamped to the total) and the latched cancellation flag. Pure logic shared by
+# both phases — the actual dialog (draw/ProgressDialog) is SDK-side and verified
+# on a real Vectorworks install. SDK-free, no fixtures.
+vw_add_test(CoreProgressTests CoreProgressTests.cpp)
+target_link_libraries(CoreProgressTests PRIVATE HomeskzIfcCore)
+
 # Minimal STEP reader (src/parse/Step): tokeniser + entity graph exercised on
 # small synthetic STEP snippets (references, numbers, strings, enums, nested
 # lists, typed values, referrers/resolve, determinism). SDK-free.

@@ -26,6 +26,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/Progress.h"
 
 #include <cstddef>
 
@@ -35,5 +36,9 @@ namespace HomeskzIfcImport::draw
 	// StoryCommand ごとに CreateStory（同名のストーリが既にあればそれを再利用）→
 	// SetStoryElevation → 各レベルをレベルテンプレートで生成（レイヤも同時に作成し
 	// 意図した名前へリネーム）する。実際に用意できたストーリ数を返す。
-	std::size_t drawStories(const core::Document& document);
+	//
+	// progress には 1 件描くごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
+	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
+	// 決める）。描けたところまでは図面に残る。
+	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress);
 } // namespace HomeskzIfcImport::draw

@@ -35,6 +35,7 @@
 #include "draw/Grid.h"
 #include "draw/DrawUtil.h"
 #include "core/Document.h"
+#include "core/Progress.h"
 
 // GridAxis PIO の生成・設定に使う VWFC ラッパー（PluginPrefix の umbrella が取り込む
 // VWFC::VWObjects の一部。明示 include で可用性を確実にする）。
@@ -96,7 +97,7 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	std::size_t drawGrids(const core::Document& document)
+	std::size_t drawGrids(const core::Document& document, core::ProgressReporter& progress)
 	{
 		if (document.grids.empty())
 			return 0;
@@ -108,6 +109,12 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		for (const core::GridCommand& grid : document.grids)
 		{
+			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
+			// 描画の前に 1 件進める（＝「いま何本目を描いているか」が見える）。
+			if (progress.cancelled())
+				break;
+			progress.step();
+
 			if (DrawOne(grid))
 				++drawn;
 		}

@@ -17,6 +17,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/Progress.h"
 
 #include <cstddef>
 #include <string>
@@ -37,6 +38,11 @@ namespace HomeskzIfcImport::draw
 		std::size_t rafters = 0;
 		std::size_t roofs = 0;
 
+		// 進捗ダイアログの「キャンセル」で途中打ち切りになったか。true のときは各要素の
+		// 件数が命令数に届かないのが正常で、描けたところまでは図面に残る（Undo の一括化は
+		// M15。ROADMAP.md）。完了ダイアログはこれを見て中止を明示する。
+		bool cancelled = false;
+
 		// 描画側で起きた異常の 1 行説明（無ければ空）。実描画はローカルの VectorWorks で
 		// しか確認できないので、「命令はあるのに見えない」ときに原因を解析側と描画側で
 		// 切り分ける手掛かりをメニューコマンドの完了ダイアログへ持ち帰る。
@@ -49,4 +55,13 @@ namespace HomeskzIfcImport::draw
 	//
 	// TODO(M8〜): column … と、要素ごとの draw モジュールへのディスパッチを足す。
 	DrawCounts executeDocument(const core::Document& document);
+
+	// 進捗を報告しながら描画する。要素ごとに 1 フェーズを開き（進捗バーの配分は命令数の比。
+	// core::phaseShare）、1 件描くたびに 1 ステップ進める。**インポートの体感時間はほぼ
+	// すべてここ**なので、進捗ダイアログを出すのはこのオーバーロードの役目
+	// （core/Progress.h「なぜ要るか」）。
+	//
+	// 進捗の報告先が中止を返したら、その時点で残りを描かずに戻る（DrawCounts::cancelled）。
+	// 上のオーバーロードは NullProgressReporter で呼ぶだけ（＝振る舞いは同じ）。
+	DrawCounts executeDocument(const core::Document& document, core::ProgressReporter& progress);
 } // namespace HomeskzIfcImport::draw

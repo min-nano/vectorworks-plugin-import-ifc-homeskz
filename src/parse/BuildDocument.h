@@ -17,6 +17,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/Progress.h"
 
 #include <string>
 
@@ -29,4 +30,13 @@ namespace HomeskzIfcImport::parse
 	// TODO(M7〜): 横架材（M7）以降の要素ごとの parse モジュールを呼び、Document を
 	// さらに肉付けする（ROADMAP.md）。
 	core::Document buildDocument(const std::string& ifcPath);
+
+	// 進捗を報告しながら解析する。読み込みと要素ごとの解析を core/Progress の
+	// 2 フェーズ（kLoadShare / kParseShare）として報告する。上のオーバーロードは
+	// これを NullProgressReporter で呼ぶだけ（＝振る舞いは同じ）。
+	//
+	// **中止（cancelled）は見ない。** 解析は大きなホームズ君 IFC でも 0.1 秒程度で
+	// 終わり、途中で切り上げる意味が無い（体感時間はすべて描画側にある。
+	// core/Progress.h の配分の但し書き参照）。中止は描画側で効かせる。
+	core::Document buildDocument(const std::string& ifcPath, core::ProgressReporter& progress);
 } // namespace HomeskzIfcImport::parse

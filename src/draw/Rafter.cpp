@@ -53,6 +53,7 @@
 #include "draw/Rafter.h"
 #include "draw/DrawUtil.h"
 #include "core/Document.h"
+#include "core/Progress.h"
 
 // 配置行列（VWTransformMatrix）と PIO パラメータ設定（VWParametricObj）。フォールバックの
 // 直線は draw/Grid.cpp と同じ VWPolygon2DObj で描く。
@@ -239,7 +240,7 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	std::size_t drawRafters(const core::Document& document)
+	std::size_t drawRafters(const core::Document& document, core::ProgressReporter& progress)
 	{
 		if (document.rafters.empty())
 			return 0;
@@ -250,6 +251,12 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		for (const core::RafterCommand& rafter : document.rafters)
 		{
+			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
+			// 描画の前に 1 件進める（＝「いま何本目を描いているか」が見える）。
+			if (progress.cancelled())
+				break;
+			progress.step();
+
 			// 配置先レイヤ（"n-垂木"）が無い命令はスキップする（規約は ActivateExistingLayer）。
 			if (ActivateExistingLayer(rafter.layer) == nil)
 				continue;
