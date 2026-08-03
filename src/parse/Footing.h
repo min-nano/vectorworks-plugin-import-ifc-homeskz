@@ -18,12 +18,12 @@
 //	グラフ（parse/Step）・幾何（parse/IfcGeometry）・ストーリ（parse/Story）だけで完結し、
 //	通常の C++ ツールチェインでコンパイル・単体テストできる（CLAUDE.md「Phase 1」）。
 //
-//	【基礎ストーリのレベルは 2 つだけ】Python 版は 基礎天端（アンカーボルト）→ GL（立上り）→
-//	床束 → 底盤天端 の 4 レベルを常に持たせるが、本移植は**本 M で描く 2 つ**（GL＝立上り・
-//	底盤天端＝底盤）だけを作る。アンカーボルト・床束は M11 の要素なので、いま作ると空レイヤが
-//	残るだけになる（M5 ロフト FL・M6 垂木/野地板・M7 母屋・M8 span 柱と同じ「描画対象の無い
-//	レベルは先に作らない」方針）。M11 で 基礎天端 を GL の上段へ、床束 を 底盤天端 の上段へ
-//	挿し込めば Python 版と同じ 4 レベルのスタックになる。
+//	【基礎ストーリのレベルは 4 つ】スタック順（上→下）に 基礎天端（アンカーボルト）→
+//	GL（立上り）→ 床束 → 底盤天端 で、Python 版と同じ構成。M9 の時点では描画対象のある
+//	2 つ（GL・底盤天端）だけを作っていたが、**M11 でアンカーボルト・床束を導入したので
+//	残る 2 つを挿し込んだ**（「描画対象の無いレベルは先に作らない＝空レイヤを作らない」
+//	方針の下で、対象が入った時点で足す）。基礎天端・床束は M11 のシンボルの高さ基準で、
+//	シンボル自身は高さを持たない。
 //
 //	【立上りの後処理は 3 段】ホームズ君 IFC の立上りは通り芯の交点等で細かく分断され、かつ
 //	自由端が柱芯までの長さで入力されている。そこで
@@ -66,15 +66,24 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kFoundationSuffix = "F";
 
 	// 基礎ストーリのレベル種別。**文字列の定義は core/Document.h（命令セットの語彙）**に
-	// あり、ここはその再公開（parse/Story の kLevelFL 等と同じ流儀）。
+	// あり、ここはその再公開（parse/Story の kLevelFL 等と同じ流儀）。GL・底盤天端は M9
+	// （立上り・底盤）、基礎天端・床束は M11（アンカーボルト・床束のシンボル）が使う。
 	inline constexpr const char* kLevelGL = core::kLevelGL;
 	inline constexpr const char* kLevelSlabTop = core::kLevelSlabTop;
+	inline constexpr const char* kLevelFoundationTop = core::kLevelFoundationTop;
+	inline constexpr const char* kLevelFloorPost = core::kLevelFloorPost;
 
 	// 基礎のデザインレイヤ名（Python 版 LAYER_FOUNDATION_WALL / …_SLAB）。**一般階のように
 	// "{接頭辞}-{レベル種別}" では組み立てられない**（レベル "GL" に対してレイヤは "F-立上り"）
 	// ので、規約ではなく名前そのものをここに 1 つずつ置く。
 	inline constexpr const char* kLayerFoundationWall = "F-立上り";
 	inline constexpr const char* kLayerFoundationSlab = "F-底盤";
+	// 同じく M11 のシンボルの配置先（アンカーボルト＝基礎天端レベル、床束＝床束レベル）。
+	// **シンボル（parse/AnchorBolt・parse/FloorPost）が配置先を名乗るときと、基礎ストーリが
+	// そのレベルを作るときの両方がこの定数を通る**（規約がズレると、命令はあるのに配置先が
+	// 見つからず 1 つも描かれない形になる）。
+	inline constexpr const char* kLayerFoundationAnchor = "F-アンカーボルト";
+	inline constexpr const char* kLayerFoundationFloorPost = "F-床束";
 
 	// 立上りのマージ・自由端判定の許容値（mm / sin 角。Python 版 _WALL_MERGE_DIST_TOL /
 	// _WALL_MERGE_ANGLE_TOL / _JOIN_ENDPOINT_TOL）。同一直線判定の直交距離・区間の
@@ -159,14 +168,23 @@ namespace HomeskzIfcImport::parse
 	// 1 枚も無ければ false（out は変更しない）。
 	bool resolveSlabTopElevation(const Model& model, double& out);
 
+	// 基礎天端＝**立上り（基礎梁）の天端**の絶対 Z（Python 版
+	// resolve_foundation_top_elevation）。アンカーボルト（M11）の高さ基準になる。立上りの
+	// 天端 Z のうち**最大値**を採る（最初に見つかった値ではないので、エンティティ列挙順に
+	// 依存しない決定的な高さ）。立上りが 1 つも無い基礎（底盤のみ）は false で、呼び出し側が
+	// 底盤天端へフォールバックする。
+	bool resolveFoundationTopElevation(const Model& model, double& out);
+
 	// 基礎（立上り・底盤・地中梁）が 1 つでもあるか（Python 版 has_foundation）。
 	bool hasFoundation(const Model& model);
 
 	// 基礎ストーリの story 命令を組み立てる（Python 版 build_foundation_story_command）。
 	// 基礎要素が 1 つも無ければ false（out は変更しない）。ストーリ高さは GL=0（常に）で、
-	// レベルは GL（0・"F-立上り"）→ 底盤天端（底盤天端の絶対 Z・"F-底盤"）の 2 つ
-	// （4 レベルにしない理由はヘッダ冒頭「基礎ストーリのレベルは 2 つだけ」）。levels の
-	// 並びは希望するデザインレイヤのスタック順（上→下）。
+	// levels の並びは**希望するデザインレイヤのスタック順（上→下）**に
+	//   基礎天端（立上り天端の絶対 Z・"F-アンカーボルト"）→ GL（0・"F-立上り"）→
+	//   床束（底盤天端の絶対 Z・"F-床束"）→ 底盤天端（同・"F-底盤"）
+	// の 4 つ（ヘッダ冒頭「基礎ストーリのレベルは 4 つ」）。立上りが無い基礎は基礎天端を
+	// 底盤天端へフォールバックする。
 	bool buildFoundationStoryCommand(const Model& model, core::StoryCommand& out);
 
 	// 立上り（基礎梁）から wall 命令を組み立てる（Python 版 build_wall_commands）。

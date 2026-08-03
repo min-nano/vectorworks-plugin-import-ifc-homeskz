@@ -16,9 +16,12 @@
 #include "TestFramework.h"
 #include "Fixtures.h"
 
+#include "parse/AnchorBolt.h"
 #include "parse/Column.h"
 #include "parse/Context.h"
+#include "parse/FireBrace.h"
 #include "parse/Floor.h"
+#include "parse/FloorPost.h"
 #include "parse/Footing.h"
 #include "parse/Grid.h"
 #include "parse/IfcGeometry.h"
@@ -339,9 +342,16 @@ TEST(context_backed_commands_match_the_plain_commands)
 		const std::vector<core::RoofCommand> roofs = parse::buildRoofCommands(shared);
 		const std::vector<core::SlabCommand> slabs =
 			parse::buildSlabCommands(shared, shared.walls());
+		// M11 シンボル置換系（仕口は命令から導出するのでコンテキストを取らない）。
+		const std::vector<core::SymbolCommand> bolts = parse::buildAnchorBoltCommands(shared);
+		const std::vector<core::SymbolCommand> posts = parse::buildFloorPostCommands(shared);
+		const std::vector<core::SymbolCommand> braces = parse::buildFireBraceCommands(shared);
 
 		CHECK_EQ(stories.size(), parse::buildStoryCommands(model).size());
 		CHECK_EQ(slabs.size(), parse::buildSlabCommands(model).size());
+		CHECK_EQ(bolts.size(), parse::buildAnchorBoltCommands(model).size());
+		CHECK_EQ(posts.size(), parse::buildFloorPostCommands(model).size());
+		CHECK_EQ(braces.size(), parse::buildFireBraceCommands(model).size());
 		CHECK_EQ(grids.size(), parse::buildGridCommands(model).size());
 		CHECK_EQ(members.size(), parse::buildMemberCommands(model).size());
 		CHECK_EQ(rafters.size(), parse::buildRafterCommands(model).size());

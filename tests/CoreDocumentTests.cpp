@@ -919,6 +919,86 @@ TEST(raise_modifier_top_is_a_no_op_without_bite)
 }
 
 // ---------------------------------------------------------------------------
+// シンボル置換系（アンカーボルト・床束・火打・仕口。ROADMAP.md M11）
+//
+// 4 種は同じ命令型（core::SymbolCommand）なので検証規則も 1 つ。関門は「配置先レイヤ名と
+// シンボル名が非空」だけで、位置・角度に値域の制限は無い（角度は正規化しない）。
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	core::SymbolCommand validSymbol()
+	{
+		core::SymbolCommand symbol;
+		symbol.layer = "1-横架材天端";
+		symbol.symbol = "仕口";
+		symbol.position = core::Vec2{100.0, 200.0};
+		symbol.angle = 90.0;
+		return symbol;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_symbols)
+{
+	core::Document document;
+	document.anchorBolts.push_back(validSymbol());
+	document.floorPosts.push_back(validSymbol());
+	document.fireBraces.push_back(validSymbol());
+	document.joints.push_back(validSymbol());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_symbol_with_empty_layer)
+{
+	// 配置先レイヤ名が空だと描画側がどのレイヤへ置くか決められない。4 種すべてで同じ関門。
+	for (int which = 0; which < 4; ++which)
+	{
+		core::Document document;
+		core::SymbolCommand symbol = validSymbol();
+		symbol.layer.clear();
+		switch (which)
+		{
+		case 0:
+			document.anchorBolts.push_back(symbol);
+			break;
+		case 1:
+			document.floorPosts.push_back(symbol);
+			break;
+		case 2:
+			document.fireBraces.push_back(symbol);
+			break;
+		default:
+			document.joints.push_back(symbol);
+			break;
+		}
+		CHECK(!core::validateDocument(document));
+	}
+}
+
+TEST(validate_rejects_symbol_with_empty_name)
+{
+	// シンボル名が空だと置換対象を引けない（名前でシンボル定義を探すため）。
+	core::Document document;
+	core::SymbolCommand symbol = validSymbol();
+	symbol.symbol.clear();
+	document.fireBraces.push_back(symbol);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_accepts_symbol_with_any_angle)
+{
+	// 角度は 0〜360 に正規化しない（負値・360 超も VW 側がそのまま受け取る）。
+	core::Document document;
+	core::SymbolCommand negative = validSymbol();
+	negative.angle = -135.0;
+	core::SymbolCommand large = validSymbol();
+	large.angle = 720.0;
+	document.joints.push_back(negative);
+	document.joints.push_back(large);
+	CHECK(core::validateDocument(document));
+}
+
+// ---------------------------------------------------------------------------
 // parse::buildDocument（読み込めないパスでは空の Document が返る）
 // ---------------------------------------------------------------------------
 
