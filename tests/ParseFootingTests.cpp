@@ -8,6 +8,7 @@
 //	（地中梁・人通口・壁結合・配筋のケースは M10）。
 //
 //	検証項目（ROADMAP.md M9）:
+//	  * Name による基礎要素の判別（立上り／地中梁／底盤）
 //	  * 基礎ストーリ（"基礎" / suffix "F" / GL=0・レベルとレイヤ）
 //	  * 底盤天端＝面積最大の天端 Z、立上り下端の底盤への呑み込み（kSlabBite）
 //	  * 立上りの統合（同一直線・同一断面のみ）と自由端の半壁厚延長（柱芯スナップ）
@@ -49,6 +50,9 @@ using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::extendFreeWallEnds;
 using HomeskzIfcImport::parse::foundationSlabStyleName;
 using HomeskzIfcImport::parse::hasFoundation;
+using HomeskzIfcImport::parse::isBaseSlab;
+using HomeskzIfcImport::parse::isFoundationWall;
+using HomeskzIfcImport::parse::isGroundBeam;
 using HomeskzIfcImport::parse::kFoundationSuffix;
 using HomeskzIfcImport::parse::kLayerFoundationSlab;
 using HomeskzIfcImport::parse::kLayerFoundationWall;
@@ -143,6 +147,35 @@ namespace
 										 [](const SlabCommand& s) { return s.boundary.size(); });
 	}
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Name による基礎要素の判別（Python 版 _is_wall / _is_ground_beam / _is_base_slab）
+// ---------------------------------------------------------------------------
+
+TEST(name_predicates_classify_footing_elements)
+{
+	// ホームズ君 IFC が実際に出す Name（伏図次郎の IfcFooting / IfcSlab から採取）。
+	// 立上りは "基礎梁" 始まり、地中梁・底盤は部分一致で判別する。
+	CHECK(isFoundationWall("基礎梁:1"));
+	CHECK(!isFoundationWall("地中梁:1"));
+	CHECK(!isFoundationWall("基礎底盤:1"));
+
+	CHECK(isGroundBeam("地中梁:1"));
+	CHECK(isGroundBeam("部分地中梁:3")); // 部分一致なので接頭辞が付いても地中梁
+	CHECK(!isGroundBeam("基礎梁:1"));
+	CHECK(!isGroundBeam("基礎底盤:1"));
+
+	CHECK(isBaseSlab("基礎底盤:1"));
+	CHECK(isBaseSlab("独立基礎底盤:2"));
+	CHECK(!isBaseSlab("独立基礎:1")); // "底盤" を含まない独立基礎そのものは底盤でない
+	CHECK(!isBaseSlab("基礎梁:1"));
+	CHECK(!isBaseSlab("床版"));
+
+	// 空の Name（Name 未設定の要素）はいずれにも当たらない。
+	CHECK(!isFoundationWall(""));
+	CHECK(!isGroundBeam(""));
+	CHECK(!isBaseSlab(""));
+}
 
 // ---------------------------------------------------------------------------
 // 立上りの統合（mergeWallCommands）— Python 版 TestMergeWallCommands

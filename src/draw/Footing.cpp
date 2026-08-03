@@ -59,7 +59,13 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kWallStyle = "基礎 - 木造ベタ基礎150mm";
 
 		// SetWallStyle に渡す壁芯からのオフセット（選択側／置換側とも 0＝壁芯に揃える）。
-		constexpr double kWallStyleOffset = 0.0;
+		// **名前は SDK 側の引数名（selectedOffset / replacingOffset）に寄せてある**: 似た並びの
+		// InternalIndex + WorldCoord を渡すため、名前が違うと clang-tidy の
+		// readability-suspicious-call-argument が「引数が入れ替わっているのでは」と誤検知する
+		// （"…StyleOffset" という名前がスタイル引数と紛らわしいと判定された。draw/DrawUtil の
+		// SetSlabDatum と同じ理由・同じ対処）。
+		constexpr double kSelectedOffset = 0.0;
+		constexpr double kReplacingOffset = 0.0;
 
 		// 壁スタイル適用後に命令の壁厚を入れ直すか（ヘッダ冒頭「壁厚の再設定」）。
 		constexpr bool kReassertWallWidth = true;
@@ -93,7 +99,7 @@ namespace HomeskzIfcImport::draw
 
 		// 立上り 1 本を壁として描く。壁を作れなければ壁芯の直線にフォールバックする。
 		// 配置できたら true。
-		bool DrawOneWall(const core::WallCommand& wall, InternalIndex style)
+		bool DrawOneWall(const core::WallCommand& wall, InternalIndex wallStyle)
 		{
 			const WorldPt start(wall.start.x, wall.start.y);
 			const WorldPt end(wall.end.x, wall.end.y);
@@ -120,9 +126,9 @@ namespace HomeskzIfcImport::draw
 
 			// スタイルは高さバインドより**先に**当てる（Python 版 draw_wall と同じ順序）。
 			// スタイル適用が壁の属性を作り直す場合でも、後から入れる高さが残るようにする。
-			if (style != 0)
+			if (wallStyle != 0)
 			{
-				gSDK->SetWallStyle(object, style, kWallStyleOffset, kWallStyleOffset);
+				gSDK->SetWallStyle(object, wallStyle, kSelectedOffset, kReplacingOffset);
 				if (kReassertWallWidth)
 					gSDK->SetWallWidth(object, wall.thickness);
 			}
@@ -187,7 +193,7 @@ namespace HomeskzIfcImport::draw
 	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress)
 	{
 		// 壁スタイルの解決は 1 回で足りる（全ての立上りが同じスタイルを使う）。
-		const InternalIndex style = ResolveWallStyle();
+		const InternalIndex wallStyle = ResolveWallStyle();
 
 		std::size_t drawn = 0;
 		for (const core::WallCommand& wall : document.walls)
@@ -202,7 +208,7 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(wall.layer) == nil)
 				continue;
 
-			if (DrawOneWall(wall, style))
+			if (DrawOneWall(wall, wallStyle))
 				++drawn;
 		}
 		return drawn;
