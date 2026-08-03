@@ -31,17 +31,20 @@
 //	VS では offset 差がパス長へ加算されて二重になる）は**この SDK では当てはまらず**、
 //	同値にすると高さ 0 になる（parse/Column.h の「Python 版との差異」）。
 //
-//	【柱のパスは鉛直な 2 点の NURBS 曲線】柱は鉛直材なので、M7 の横架材で確定した 2D
-//	ポリラインでは表せない（平面へ落とすと 1 点に潰れる）。Python 版と同じく
+//	【柱のパスは鉛直な 2 点の NURBS 曲線】M7 の横架材が使っていた 2D ポリラインでは鉛直材を
+//	表せない（平面へ落とすと 1 点に潰れる）。Python 版と同じく
 //	    gSDK->CreateNurbsCurve(下端, byCtrlPts=false, degree=1)   ← VS CreateNurbsCurve
 //	  ＋ gSDK->Add3DVertex(曲線, 上端)                            ← VS AddVertex3D
-//	で作る（実体は draw/StructuralMember の CreateVerticalPath）。**`Add3DVertex` が VS の
-//	`AddVertex3D` にあたる**（当初 `Insert3DVertex` を使っていたが別物で、頂点が増えず
-//	1 点のままだった＝上記 1 周目・2 周目の原因）。M7 のコメントにある「頂点を足す呼び出しが
-//	無い」も同じ取りこぼしで、`VWNURBSCurve` が評価専用（制御点から構築できない）なのは
-//	事実だが、ISDK 側に追加の呼び出しがある。**M7 で長さ 0 になった VWPolygon3DObj のパスは
-//	使わない。** なお `Add3DVertex` が見つかった今も**横架材のパスは 2D のまま**でよい
-//	（傾斜を offset 差だけで表す設計。使い分けの根拠は draw/StructuralMember.h 冒頭）。
+//	で作る。**`Add3DVertex` が VS の `AddVertex3D` にあたる**（当初 `Insert3DVertex` を
+//	使っていたが別物で、頂点が増えず 1 点のままだった＝上記 1 周目・2 周目の原因）。M7 の
+//	コメントにあった「頂点を足す呼び出しが無い」も同じ取りこぼしで、`VWNURBSCurve` が
+//	評価専用（制御点から構築できない）なのは事実だが、ISDK 側に追加の呼び出しがある。
+//	**M7 で長さ 0 になった VWPolygon3DObj のパスは使わない。**
+//
+//	この経路は**横架材と共通**（draw/StructuralMember の CreatePath）。水平材も鉛直材も
+//	3 次元空間の直線 1 本なので、パスの作り方は分けず、**2 点の Z の置き方**だけが要素の
+//	仕様になる（柱＝下端 Z → 上端 Z、横架材＝両端とも天端 Z）。根拠は
+//	draw/StructuralMember.h 冒頭。
 //
 //	【高さの与え方】パスの頂点は**最終位置の絶対 Z**（下端 → 下端＋柱高さ）で作る（ISDK に
 //	VectorScript の Move3D が無いため。M6 / M7 と同じ作法）。上下端のストーリバウンドは命令の
@@ -49,9 +52,10 @@
 //	決めている（parse/Column.h）。
 //
 //	【診断を必ず持ち帰る】実描画はローカルの VectorWorks でしか確認できない。そこで
-//	draw/Member と同じく、断面が入ったかを**読み戻して確かめ**、駄目だった本数を完了
-//	ダイアログへ返す。柱はパスの作り方が横架材と異なるので、**鉛直パスの頂点が 2 つに
-//	なったか**も数える（上記のとおり、ここが崩れると何も描かれない）。
+//	draw/Member と同じく、断面が入ったか・パスの頂点が 2 つになったかを**読み戻して確かめ**、
+//	駄目だった本数を完了ダイアログへ返す（上記のとおり、パスが 1 点のままだと何も描かれない）。
+//	**スパン（平面投影長）だけは横架材と違って数えない**——鉛直材では 0 が正常なので、
+//	同じ数え方をすると全数を誤報する。
 //
 
 #include "PluginPrefix.h"
@@ -86,11 +90,16 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle profile = CreateRectangleProfileGroup(
 				-column.width / 2.0, -column.depth / 2.0, column.width / 2.0, column.depth / 2.0);
 
+			// パス＝断面中心を通る鉛直線（下端 → 上端）。横架材と同じ CreatePath で作り、
+			// **柱では 2 点の Z が異なる**（＝この差が柱の高さになる）。
 			bool pathAppended = false;
 			const MCObjectHandle path =
-				profile == nil ? nil
-							   : CreateVerticalPath(column.position, column.elevation,
-													column.elevation + column.height, pathAppended);
+				profile == nil
+					? nil
+					: CreatePath(core::Vec3{column.position.x, column.position.y, column.elevation},
+								 core::Vec3{column.position.x, column.position.y,
+											column.elevation + column.height},
+								 pathAppended);
 			if (path != nil && !pathAppended)
 				++outPathFailures;
 

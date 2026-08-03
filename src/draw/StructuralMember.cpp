@@ -29,7 +29,6 @@
 #include "core/Document.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
-#include "VWFC/VWObjects/VWPolygon2DObj.h"
 
 namespace HomeskzIfcImport::draw
 {
@@ -102,28 +101,20 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	MCObjectHandle CreateFlatPath(const core::Vec2& start, const core::Vec2& end)
-	{
-		VWPolygon2DObj path({VWPoint2D(start.x, start.y), VWPoint2D(end.x, end.y)});
-		path.SetClosed(false); // ポリゴン（閉）でなくポリライン（開）
-		return path.GetThisObject();
-	}
-
-	MCObjectHandle CreateVerticalPath(const core::Vec2& position, double bottomZ, double topZ,
-									  bool& outAppended)
+	MCObjectHandle CreatePath(const core::Vec3& start, const core::Vec3& end, bool& outAppended)
 	{
 		outAppended = false;
 		MCObjectHandle path =
-			gSDK->CreateNurbsCurve(WorldPt3(position.x, position.y, bottomZ), false, kPathDegree);
+			gSDK->CreateNurbsCurve(WorldPt3(start.x, start.y, start.z), false, kPathDegree);
 		if (path == nil)
 			return nil;
 
 		// **Add3DVertex が VS の AddVertex3D にあたる**（ヘッダ参照）。末尾へ 1 点足して
-		// 下端 → 上端の鉛直な 2 点にする。
-		gSDK->Add3DVertex(path, WorldPt3(position.x, position.y, topZ));
+		// 始端 → 終端の 2 点にする。
+		gSDK->Add3DVertex(path, WorldPt3(end.x, end.y, end.z));
 		// 頂点が本当に 2 つになったかを読み戻す。ピース索引の起点は 0 / 1 のどちらの
 		// 規約もあり得るので両方を見る（**判定に失敗しても曲線はそのまま使う**——ここで
-		// 諦めると、索引の規約違いというだけで柱が 1 本も描かれなくなる）。
+		// 諦めると、索引の規約違いというだけで部材が 1 本も描かれなくなる）。
 		outAppended = gSDK->NurbsGetNumPts(path, 0) >= kPathPointCount ||
 					  gSDK->NurbsGetNumPts(path, 1) >= kPathPointCount;
 		return path;

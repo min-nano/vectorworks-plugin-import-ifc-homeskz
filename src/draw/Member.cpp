@@ -8,12 +8,13 @@
 //	入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	描画手順（Python 版 draw_member と同じ意図。実現手段は SDK の作法に合わせる）:
-//	  1. **パス**＝天端中央線の始端→終端を頂点に持つ「開いた 2D ポリライン」。頂点は命令の
-//	     センタリング済み絶対座標で、**Z は持たせない**（高さは下記のストーリバウンドが与える）。
+//	  1. **パス**＝天端中央線の始端→終端を通る 2 点の NURBS 曲線（柱と共通。
+//	     draw/StructuralMember の CreatePath）。頂点は命令のセンタリング済み絶対座標で、
+//	     **両端とも同じ Z（始端の天端 Z）**を持つ（傾斜は下記のストーリバウンドが与える）。
 //	  2. **プロファイル**＝断面の矩形（幅 × せい）をグループに入れたもの。
 //	  3. **PIO の生成から各フィールドの設定までは柱と共通**（draw/StructuralMember）。
-//	     ここが受け持つのは横架材固有の値——平面パス・天端中央基準の断面矩形・構造用途
-//	     （横架材）・スタイル（木質構造材_横架材）・配置先レイヤ——だけ。
+//	     ここが受け持つのは横架材固有の値——パスの Z（両端とも天端 Z）・天端中央基準の
+//	     断面矩形・構造用途（横架材）・スタイル（木質構造材_横架材）・配置先レイヤ——だけ。
 //	  4. 全配置後に UpdateStyledObjects を 1 回（下記「スタイルは関連付けだけでは効かない」）。
 //	PIO を生成できない場合は平面投影の直線にフォールバックする（1 本の失敗で全体を止めない）。
 //
@@ -23,28 +24,29 @@
 //	終端が実際の 2 倍の高さに描かれる（Python 版が柱の二重加算 #54 と同種の問題として実機で
 //	確認済み。水平梁は差が 0 なので顕在化しない）。
 //
-//	【パスは 2D ポリラインで渡す】最初は 2 頂点の **3D** ポリライン（VWPolygon3DObj）に絶対 Z を
-//	持たせていたが、実機で**構造材が長さ 0 になり画面に何も描かれなかった**。OIP は
-//	「スパン 0 / 長さ 0」（どちらもパスが支配するためグレーアウト）で、X/Y/Z はパスの始点と
-//	一致していた——つまり PIO はパスを**挿入点としてしか読まず、長さを取れていなかった**。
-//	断面（構造材 ID 105×240）とスタイルは正しく入っていたので、原因はパスの種別に絞られる。
-//	そこで**本リポジトリで実績のある 2D ポリライン**にした——draw/Grid が GridAxis のパスに
-//	まさに VWPolygon2DObj を渡しており、M1 で実機確認済みだった。
+//	【パスの遍歴（2 頂点の 3D ポリライン → 2D ポリライン → 2 点の NURBS 曲線）】最初は 2 頂点の
+//	**3D ポリライン**（VWPolygon3DObj）に絶対 Z を持たせていたが、実機で**構造材が長さ 0 に
+//	なり画面に何も描かれなかった**。OIP は「スパン 0 / 長さ 0」（どちらもパスが支配するため
+//	グレーアウト）で、X/Y/Z はパスの始点と一致していた——つまり PIO はパスを**挿入点として
+//	しか読まず、長さを取れていなかった**。断面（構造材 ID 105×240）とスタイルは正しく入って
+//	いたので、原因は**パスの種別**（VWPolygon3DObj）にある。
 //
-//	高さは 3D パスではなく**始端／終端のストーリバウンドだけ**で与える（元々の設計どおり。
-//	ISDK には VectorScript の Move3D が無く、Python 版の「原点に作って Move3D」も再現できない）。
+//	Python 版は NURBS 曲線（CreateNurbsCurve ＋ AddVertex3D）を渡しているが、M7 の時点では
+//	「ISDK には NURBS 曲線へ頂点を足す呼び出しが無い」と誤認しており（`VWNURBSCurve` が
+//	評価専用なのは事実だが、ISDK 側に `Add3DVertex` がある）、代わりに**本リポジトリで実績の
+//	ある 2D ポリライン**を選んだ——draw/Grid が GridAxis のパスにまさに VWPolygon2DObj を
+//	渡しており、M1 で実機確認済みだったため。これで M7 のローカル確認は通っている（OIP の
+//	スパン・長さが実寸（例 2170）、勾配 0°・主幅 105・主高さ 120・構造材 ID も命令どおり、
+//	高さもバウンド（横架材天端・オフセット 0）だけで正しく決まり、段差梁・傾斜梁の二重加算も
+//	起きず、登り梁の屋根面スナップも乗った）。
 //
-//	**実機で確認済み（M7 のローカル確認）**: 2D ポリラインのパスで OIP のスパン・長さが実寸
-//	（例 2170）になり、勾配 0°・主幅 105・主高さ 120・構造材 ID も命令どおりに入る。高さも
-//	バウンド（横架材天端・オフセット 0）だけで正しく決まり、段差梁・傾斜梁の二重加算も起きず、
-//	登り梁の屋根面スナップも狙いどおりに乗った。
-//
-//	【M8 で `Add3DVertex` が見つかった後も水平材は 2D パスのまま】M7 の時点では NURBS 曲線へ
-//	頂点を足す呼び出しを見つけられておらず、そのことも 2D ポリラインを選ぶ理由の 1 つだった。
-//	M8 の柱で `Add3DVertex`（VS の AddVertex3D）が見つかり 3D パスも作れるようになったが、
-//	**水平材のパスを 3D へ変えてはならない**——上記のとおり傾斜は offset 差だけで表す設計で、
-//	パスに Z を持たせると二重加算になる。鉛直材（柱）だけが 3D パスを要する（平面へ落とすと
-//	1 点に潰れるため）。この使い分けの根拠は draw/StructuralMember.h 冒頭にまとめてある。
+//	M8 の柱で `Add3DVertex`（VS の AddVertex3D）が見つかり、2D ポリラインを選んだ前提が消えた。
+//	水平材も鉛直材も本質は 3 次元空間の直線 1 本なので、**パスは柱と同じ 2 点の NURBS 曲線に
+//	統一した**（Python 版と同じ作法へ戻ったことにもなる）。要素ごとに違うのは 2 点の Z だけで、
+//	水平材は**両端とも同じ Z**を渡すため、傾斜が二重に適用される心配は無い。**Z を 0 には
+//	しない**（3D 座標は絶対 Z として渡るので上階の梁が地面に落ちる。理由は
+//	draw/StructuralMember.h 冒頭）。**この統一は M7 の確認項目——スパン・長さが実寸か、
+//	段差梁・傾斜梁が二重加算にならないか、登り梁が屋根面に乗るか——の再確認が要る。**
 //
 //	【スタイルは関連付けだけでは効かない】ISDK の SetPluginObjectStyle はスタイルの関連付け
 //	（パラメータ）までで、スタイルが決める描画属性（コンポーネントのクラス／マテリアル＝
@@ -88,7 +90,8 @@ namespace HomeskzIfcImport::draw
 		// 横架材 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。
 		bool DrawOne(const core::MemberCommand& member, RefNumber style,
-					 std::size_t& outSectionFailures, std::size_t& outLengthFailures)
+					 std::size_t& outPathFailures, std::size_t& outSectionFailures,
+					 std::size_t& outLengthFailures)
 		{
 			// 断面（プロファイルグループ）を**先に**用意する。作れなければ PIO を作らない
 			// ——断面の無い構造材は生成できても実体が描かれず、「オブジェクトはあるのに
@@ -98,11 +101,20 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle profile =
 				CreateRectangleProfileGroup(0.0, 0.0, member.width, member.height);
 
-			// パス＝天端中央線の始端→終端を頂点に持つ「開いた **2D** ポリライン」。
-			// 高さは一切持たせず、始端／終端のストーリバウンドだけで与える（冒頭
-			// 「パスは 2D ポリラインで渡す」「パスに傾斜を持たせない」）。
+			// パス＝天端中央線の始端→終端を通る 2 点の NURBS 曲線（柱と共通。
+			// draw/StructuralMember の CreatePath）。**両端とも同じ Z（始端の天端 Z）**を
+			// 渡し、傾斜梁の勾配はストーリバウンドの offset 差だけで表す（冒頭「パスに
+			// 傾斜を持たせない」）。Z を 0 にはしない——3D 座標は絶対 Z として渡るので、
+			// 0 を渡すと上階の梁が地面に置かれる（draw/StructuralMember.h 冒頭）。
+			bool pathAppended = false;
 			const MCObjectHandle path =
-				profile == nil ? nil : CreateFlatPath(member.start, member.end);
+				profile == nil
+					? nil
+					: CreatePath(core::Vec3{member.start.x, member.start.y, member.elevation},
+								 core::Vec3{member.end.x, member.end.y, member.elevation},
+								 pathAppended);
+			if (path != nil && !pathAppended)
+				++outPathFailures;
 
 			StructuralMemberSpec spec;
 			spec.path = path;
@@ -135,7 +147,7 @@ namespace HomeskzIfcImport::draw
 				++outSectionFailures;
 
 			// パスから部材長を取れたかを読み戻す。0 のままなら実体が無く画面に描かれない
-			// （冒頭「パスは 2D ポリラインで渡す」で直した症状そのもの）。**鉛直材（柱）では
+			// （冒頭「パスの遍歴」の 3D ポリラインで起きた症状そのもの）。**鉛直材（柱）では
 			// スパン 0 が正常**なので、この数え方は水平材だけのもの（draw/Column.cpp 参照）。
 			//
 			// **パラメータが実在するときだけ数える。** ResolveParamName は見つからなくても
@@ -160,6 +172,7 @@ namespace HomeskzIfcImport::draw
 		const RefNumber style = ResolvePluginStyle(kMemberStyle);
 
 		std::size_t drawn = 0;
+		std::size_t pathFailures = 0;
 		std::size_t sectionFailures = 0;
 		std::size_t lengthFailures = 0;
 		for (const core::MemberCommand& member : document.members)
@@ -175,7 +188,7 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(member.layer) == nil)
 				continue;
 
-			if (DrawOne(member, style, sectionFailures, lengthFailures))
+			if (DrawOne(member, style, pathFailures, sectionFailures, lengthFailures))
 				++drawn;
 		}
 
@@ -187,9 +200,12 @@ namespace HomeskzIfcImport::draw
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「作れたが断面が
 		// 入らなかった」「スタイルが見つからなかった」を件数で持ち帰る。横架材が 1 本も
 		// 見えないときに、原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
-		if (outDiagnostics != nullptr && (sectionFailures > 0 || lengthFailures > 0 || style == 0))
+		if (outDiagnostics != nullptr &&
+			(pathFailures > 0 || sectionFailures > 0 || lengthFailures > 0 || style == 0))
 		{
 			std::string note = "横架材の診断: ";
+			if (pathFailures > 0)
+				note += "パスが 2 点にならなかった材 " + std::to_string(pathFailures) + " 本。";
 			if (sectionFailures > 0)
 				note += "断面を設定できなかった材 " + std::to_string(sectionFailures) + " 本。";
 			if (lengthFailures > 0)
