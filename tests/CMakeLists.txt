@@ -254,6 +254,48 @@ target_link_libraries(ParseNoboribariTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseNoboribariTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Anchor-bolt (アンカーボルト) parsing (src/parse/AnchorBolt): IfcMechanicalFastener bolt
+# BODIES (never the washers, which share the axis and would double-count) -> symbol commands
+# on the foundation's F-アンカーボルト layer, with the M12 / M16 split driven by whether the
+# fastener type name says 座金なし. Exercised on synthetic STEP snippets and the checked-in
+# fixtures; SDK-free. HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseAnchorBoltTests ParseAnchorBoltTests.cpp)
+target_link_libraries(ParseAnchorBoltTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseAnchorBoltTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
+# Floor-post (床束) parsing (src/parse/FloorPost): homeskz emits no floor posts, so they are
+# placed at a fixed 910mm pitch under the 大引 — after merging the runs split by 継手 (a gap of
+# at most half a module) and after moving each end from the real member end onto the CENTRE of
+# the 土台 / 大引 that supports it. Exercised on synthetic geometry/STEP snippets and the
+# checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseFloorPostTests ParseFloorPostTests.cpp)
+target_link_libraries(ParseFloorPostTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseFloorPostTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
+# Fire-brace (火打) parsing (src/parse/FireBrace): vertically extruded IfcBeam / IfcMember named
+# 火打… -> 鋼製火打 symbols on the beam layer — the two end faces picked out of the footprint by
+# the sign flip of the profile's local v, their extended intersection as the inside-corner base
+# point, and the angle bisector plus the symbol's 45-degree orientation offset. Exercised on
+# synthetic footprints/STEP snippets and the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseFireBraceTests ParseFireBraceTests.cpp)
+target_link_libraries(ParseFireBraceTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseFireBraceTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
+# Joint (仕口) parsing (src/parse/Joint): the only parse module that never touches IFC — it reads
+# the finished member/column commands and marks the beam ends that actually land on a receiving
+# member or column (parallel splices, other layers and separated Z ranges excluded; 登り梁 alone
+# may reach across layers). Exercised on synthetic commands and the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseJointTests ParseJointTests.cpp)
+target_link_libraries(ParseJointTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseJointTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # Shared parse context (src/parse/Context): the per-import cache that lets every
 # element's build*Commands reuse the same stories / grid centre / storey elements /
 # loft-floor regions / roof planes instead of recomputing them. Proves the cached

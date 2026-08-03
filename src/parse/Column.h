@@ -100,6 +100,16 @@ namespace HomeskzIfcImport::parse
 	// 未設定（空文字）・未知の値は既定種別（管柱）として扱う。
 	std::string resolveColumnType(const std::string& objectType);
 
+	// 金物（IfcMechanicalFastener）の型（IfcMechanicalFastenerType）の名前を返す（Python 版
+	// _get_fastener_type_name）。型は IfcRelDefinesByType の逆参照から辿る。型が付いていない
+	// ／名前が無ければ空文字。referrers は #id 昇順なので、複数あっても常に同じものを選ぶ
+	// （決定的）。
+	//
+	// **ここに 1 つだけ置く**: 柱頭・柱脚金物（本モジュール）とアンカーボルト
+	// （parse/AnchorBolt）はどちらも IfcMechanicalFastener で、型名から仕様／シンボルを
+	// 決める。Python 版も ifc/anchor_bolt.py が ifc/column.py の同関数を import している。
+	std::string fastenerTypeName(const Model& model, const Entity& fastener);
+
 	// 金物の型名を仕様文字列として返す（Python 版 _hardware_spec）。**加工しない**:
 	// ホームズ君側で金物定義をカスタマイズしていると型名が想定の "柱頭金物:(ろ)" 形式とは
 	// 限らず、コロン分割等の加工で文字列が失われる（空欄になる）ため、型名全体を登録する。

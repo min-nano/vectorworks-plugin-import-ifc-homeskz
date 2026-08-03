@@ -11,8 +11,8 @@
 //	core::Document しか参照せず、SDK ヘッダを引き込まない。
 //
 //	現状は story（M3）→ grid（M1）→ wall / slab（M9）→ floor（M5）→ member（M7）→
-//	column（M8）→ rafter → roof（M6）へディスパッチする。残りの要素は対応マイルストーンで
-//	足していく。
+//	column（M8）→ rafter → roof（M6）→ シンボル置換系（M11: アンカーボルト・床束・
+//	火打・仕口）へディスパッチする。残りの要素は対応マイルストーンで足していく。
 //
 
 #pragma once
@@ -41,6 +41,12 @@ namespace HomeskzIfcImport::draw
 		std::size_t roofs = 0;
 		std::size_t walls = 0;
 		std::size_t slabs = 0;
+		// M11 シンボル置換系。アンカーボルト・床束の配置先（"F-アンカーボルト" / "F-床束"）は
+		// 基礎ストーリのレイヤなので、基礎の無いモデルでは命令自体が出ない（parse 側で空になる）。
+		std::size_t anchorBolts = 0;
+		std::size_t floorPosts = 0;
+		std::size_t fireBraces = 0;
+		std::size_t joints = 0;
 
 		// 進捗ダイアログの「キャンセル」で途中打ち切りになったか。true のときは各要素の
 		// 件数が命令数に届かないのが正常で、描けたところまでは図面に残る（Undo の一括化は
@@ -54,7 +60,8 @@ namespace HomeskzIfcImport::draw
 	};
 
 	// 命令セットを描画する。validateDocument を通してから、命令ごとに要素の draw モジュール
-	// （story → grid → wall → slab → floor → member → column → rafter → roof の順）へ
+	// （story → grid → wall → slab → floor → member → column → rafter → roof →
+	// シンボル置換系の順）へ
 	// ディスパッチし、描けた数を返す。
 	// 検証を通らなかったときは valid=false で何も描かない。命令が空でも検証は通る（valid=true）。
 	//
