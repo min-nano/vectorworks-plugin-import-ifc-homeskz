@@ -12,12 +12,14 @@
 //	     DoubLines(壁厚) → Wall(壁芯) という 2 手順は要らない**——ISDK の CreateWall は
 //	     壁厚を引数に取る（ci-debug の sdk-grep で確認）。
 //	  2. クラス分けと描画属性の by-class 設定。
-//	  3. SetWallOverallHeights で下端・上端をストーリレベルへバインドする。
+//	  3. 壁スタイル（kWallStyle）を適用する。
+//	  4. SetWallOverallHeights で下端・上端をストーリレベルへバインドする。
 //	     **壁だけは汎用の SetObjectStoryBound では高さ基準が確定せず**、デザインレイヤの
 //	     「壁の高さ（レイヤ設定）」に従ってしまう（構造材・スラブでは SetObjectStoryBound が
 //	     効くが、壁は専用関数が要る。Python 版 CLAUDE.md「基礎」節）。命令の
 //	     bottomBound / topBound の storyOffset（0=自階・1=上階）がそのまま story 引数になる。
-//	  4. 壁スタイル（kWallStyle）を適用する。
+//	     **スタイルより後に置く**のは Python 版 draw_wall と同じ順序で、スタイル適用が壁の
+//	     属性を作り直しても高さが残るようにするため。
 //	  5. ResetObject で反映。
 //	壁を作れない場合は壁芯の直線にフォールバックする（1 本の失敗で全体を止めない）。
 //
@@ -116,17 +118,19 @@ namespace HomeskzIfcImport::draw
 			SetClassByName(object, wall.drawClass);
 			SetAllAttributesByClass(object);
 
-			// 高さは壁専用の SetWallOverallHeights でストーリレベルへバインドする
-			// （ヘッダ冒頭「立上りの描画手順」3）。
-			gSDK->SetWallOverallHeights(object, StoryBound(wall.bottomBound),
-										StoryBound(wall.topBound));
-
+			// スタイルは高さバインドより**先に**当てる（Python 版 draw_wall と同じ順序）。
+			// スタイル適用が壁の属性を作り直す場合でも、後から入れる高さが残るようにする。
 			if (style != 0)
 			{
 				gSDK->SetWallStyle(object, style, kWallStyleOffset, kWallStyleOffset);
 				if (kReassertWallWidth)
 					gSDK->SetWallWidth(object, wall.thickness);
 			}
+
+			// 高さは壁専用の SetWallOverallHeights でストーリレベルへバインドする
+			// （ヘッダ冒頭「立上りの描画手順」3）。
+			gSDK->SetWallOverallHeights(object, StoryBound(wall.bottomBound),
+										StoryBound(wall.topBound));
 
 			gSDK->ResetObject(object);
 			return true;
