@@ -146,6 +146,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/Story.cpp
 		src/parse/Floor.cpp
 		src/parse/Member.cpp
+		src/parse/Column.cpp
 		src/parse/Noboribari.cpp
 		src/parse/Rafter.cpp
 		src/parse/Roof.cpp
@@ -276,6 +277,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Story.cpp
 		src/draw/Floor.cpp
 		src/draw/Member.cpp
+		src/draw/Column.cpp
 		src/draw/Rafter.cpp
 		src/draw/Roof.cpp)
 

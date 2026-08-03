@@ -17,6 +17,7 @@
 
 #include "parse/BuildDocument.h"
 #include "core/Progress.h"
+#include "parse/Column.h"
 #include "parse/Context.h"
 #include "parse/Floor.h"
 #include "parse/Grid.h"
@@ -56,18 +57,25 @@ namespace HomeskzIfcImport::parse
 
 		core::Document document;
 
-		// M7 横架材: 先に組み立てる。ストーリ（母屋・登り梁レイヤを作るか）・垂木（差し込みの
-		// 桁幅）・登り梁の位置補正が同じ結果を必要とするため、Context が 1 回だけ解析して
-		// 全員へ配る（parse/Context.h の members）。**登り梁は屋根面へスナップ補正**して
-		// から Document に載せる（形状先行。parse/Noboribari）。受ける材は横架材のみで、
-		// 柱を参照する最終化は M8 で足す（ROADMAP.md M7）。
-		document.members = correctNoboribari(context, context.members());
+		// M8 柱: 横架材（Context が 1 回だけ解析する）を入力に柱命令を組み立てる。span の
+		// to レベル判定に上階の横架材下端が要るためで、Python 版 build_document の順序
+		// （members → columns → correct_noboribari）と同じ。柱もストーリ（span レベル）・
+		// 登り梁の端部詰めが共有するので、Context がキャッシュする（parse/Context.h の columns）。
+		document.columns = context.columns();
+		progress.step();
+
+		// M7 横架材: ストーリ（母屋・登り梁レイヤを作るか）・垂木（差し込みの桁幅）・登り梁の
+		// 位置補正が同じ結果を必要とするため、Context が 1 回だけ解析して全員へ配る
+		// （parse/Context.h の members）。**登り梁は屋根面へスナップ補正**してから Document に
+		// 載せる（形状先行。parse/Noboribari）。受ける材は横架材と柱の両方（M8 で最終化）。
+		document.members = correctNoboribari(context, context.members(), document.columns);
 		progress.step();
 
 		// M3 ストーリ: IfcBuildingStorey を解析して StoryCommand を積む（parse/Story）。
 		// 以降の要素はここで作られたレベルへ高さをバインドするため、grids より先に置く。
-		// 母屋・登り梁レベルは横架材命令の配置先レイヤから決まる（補正はレイヤを変えない
-		// ので、Context の補正前の命令で判定して同じ結果になる）。
+		// 母屋・登り梁レベルは横架材命令の配置先レイヤから、span 柱レベルは柱命令の配置先
+		// レイヤから決まる（登り梁の補正はレイヤを変えないので、Context の補正前の命令で
+		// 判定して同じ結果になる）。
 		document.stories = buildStoryCommands(context);
 		progress.step();
 

@@ -85,4 +85,11 @@ namespace HomeskzIfcImport::parse
 			fMembers = buildMemberCommands(*this);
 		return *fMembers;
 	}
+
+	const std::vector<core::ColumnCommand>& Context::columns()
+	{
+		if (!fColumns.has_value())
+			fColumns = buildColumnCommands(*this);
+		return *fColumns;
+	}
 } // namespace HomeskzIfcImport::parse

@@ -15,10 +15,9 @@ namespace HomeskzIfcImport::parse
 {
 	namespace
 	{
-		// 小屋束を識別する IFC 記録（Python 版 COLUMN_STANDCOLUMN_OBJECT_TYPE /
-		// COLUMN_KOYAZUKA_NAME_PREFIX）。ObjectType が STANDCOLUMN、または Name が
-		// "小屋束" で始まる柱を小屋束とみなす。
-		constexpr const char* kStandColumnObjectType = "STANDCOLUMN";
+		// 小屋束を識別する Name の接頭辞（Python 版 COLUMN_KOYAZUKA_NAME_PREFIX）。
+		// ObjectType による判定（kStandColumnObjectType）はヘッダ側にあり、parse/Column の
+		// 柱種別名の変換と共有する。
 		constexpr const char* kKoyazukaNamePrefix = "小屋束";
 
 		// 文字列を区切り文字 delim で分割する（Python の str.split(delim) と同じ挙動）。

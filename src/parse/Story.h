@@ -55,6 +55,22 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kLevelBeamTop = core::kLevelBeamTop;
 	inline constexpr const char* kLevelEaves = core::kLevelEaves;
 
+	// 柱・小屋束を配置する span（またぐレベル区間）レイヤの接尾辞（Python 版
+	// LAYER_COLUMN_SUFFIX）。レイヤ名は "{from}to{to}-柱" で、from は柱が立つ床レベル
+	// （1 始まり・GL=0）、to は上端が届く床／屋根面レベル（parse/Column の
+	// resolveColumnToLevel）。伏図が切断レベルで表示レイヤを絞れるようにするための分け方。
+	inline constexpr const char* kColumnLayerSuffix = "柱";
+
+	// span レベルから柱のデザインレイヤ名 "{from}to{to}-柱" を組み立てる（Python 版
+	// span_layer_name）。整数レベルは小数点なし・半整数は ".5" 付き（"1to2-柱" /
+	// "2to2.5-柱"）。**レイヤ名の規約はここが唯一**で、柱がレイヤを名乗るときと、
+	// ストーリがそのレベル（＝レイヤ）を作るときの両方がこれを通る。
+	std::string spanLayerName(double fromLevel, double toLevel);
+
+	// "{from}to{to}-柱" レイヤ名を (from, to) へ分解する（Python 版 parse_span_layer）。
+	// span 柱レイヤでなければ false（接尾辞が違う・"to" が無い・数値でない）。
+	bool parseSpanLayer(const std::string& name, double& outFrom, double& outTo);
+
 	// IfcProduct（要素）のローカル配置 Z 座標を取り出す。取得できれば outZ に入れて
 	// true、ObjectPlacement が無い／IfcLocalPlacement でない／座標が足りない等で
 	// 取れなければ false（Python 版 get_local_placement_z 相当）。親 PlacementRelTo は

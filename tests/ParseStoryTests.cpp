@@ -9,7 +9,8 @@
 //	検証項目（ROADMAP.md M3）: ローカル配置 Z 抽出・横架材天端オフセット（列挙順に
 //	依存しない最大負値）・ストーリ収集（Elevation 昇順・最上階判定・非 FL 除外）・
 //	story 命令の組み立て（一般階=FL＋横架材天端、最上階=軒高。屋根版のある階は 垂木・野地板 を
-//	その直上に積む＝M6）・
+//	その直上に積む＝M6。柱のある階は span 柱レベルを最上段に積む＝M8）・
+//	span 柱レイヤ名の生成と分解（spanLayerName / parseSpanLayer）・
 //	希望レイヤ順（"共通" 先頭・最上階→最下階・床は背面）・決定性。実フィクスチャのパスは
 //	CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -34,7 +35,9 @@ using HomeskzIfcImport::parse::Entity;
 using HomeskzIfcImport::parse::getLocalPlacementZ;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
+using HomeskzIfcImport::parse::parseSpanLayer;
 using HomeskzIfcImport::parse::resolveBeamTopOffset;
+using HomeskzIfcImport::parse::spanLayerName;
 using HomeskzIfcImport::parse::StoryInfo;
 using HomeskzIfcTests::fixture;
 using HomeskzIfcTests::near;
@@ -476,16 +479,19 @@ TEST(reads_sample_house_fixture)
 		// 床版の無い屋根に FL は付かない（ロフトの床がある屋根には FL が加わる。下のテスト）。
 		// 屋根版（屋根面）はあるので 垂木・野地板 レベルが軒高の直上に積まれ（M6）、母屋・棟木の
 		// 命令があるので 母屋 レベルがその下（軒高の直上）に積まれる（M7）。このモデルに登り梁は
-		// 無いので 登り梁 レベルは作らない（空レイヤを作らない）。
-		CHECK(
-			sameVec(levelTypes(*roof), std::vector<std::string>{"野地板", "垂木", "母屋", "軒高"}));
+		// 無いので 登り梁 レベルは作らない（空レイヤを作らない）。最上段は span 柱レベル
+		// （M8）で、屋根階に立つ主屋根の小屋束が "3to3.5-柱"（屋根面で止まる半整数）に入る。
+		CHECK(sameVec(levelTypes(*roof),
+					  std::vector<std::string>{"3to3.5-柱", "野地板", "垂木", "母屋", "軒高"}));
 	}
 
-	// 一般階は FL＋横架材天端の 2 レベル（順序は FL が上）。
+	// 一般階は FL＋横架材天端の 2 レベル（順序は FL が上）。その上に span 柱レベル（M8）が
+	// (from, to) 昇順で積まれる: 1 階には 2 階で止まる管柱（"1to2-柱"）と、3 階床まで届く
+	// 通し柱（"1to3-柱"）がある。
 	const StoryCommand* first = find(stories, "1階");
 	if (first != nullptr)
 	{
-		const std::vector<std::string> base = {"FL", "横架材天端"};
+		const std::vector<std::string> base = {"1to2-柱", "1to3-柱", "FL", "横架材天端"};
 		CHECK(sameVec(levelTypes(*first), base));
 	}
 }
@@ -725,6 +731,97 @@ TEST(desired_layer_order_sends_roof_sheathing_to_background)
 		}
 	}
 	CHECK(sheathingBeforeTaruki);
+}
+
+// ---------------------------------------------------------------------------
+// span 柱レイヤ名（"{from}to{to}-柱"。Python 版 test_ifc_column_span.py の
+// TestSpanLayerName / TestParseSpanLayer を移植。M8）
+// ---------------------------------------------------------------------------
+
+TEST(span_layer_name_integer_levels_have_no_decimal)
+{
+	CHECK_EQ(spanLayerName(1.0, 2.0), std::string("1to2-柱"));
+	CHECK_EQ(spanLayerName(1.0, 3.0), std::string("1to3-柱"));
+}
+
+TEST(span_layer_name_half_level_keeps_point_five)
+{
+	CHECK_EQ(spanLayerName(2.0, 2.5), std::string("2to2.5-柱"));
+	CHECK_EQ(spanLayerName(3.0, 3.5), std::string("3to3.5-柱"));
+}
+
+TEST(parse_span_layer_round_trips_integer_and_half)
+{
+	double from = 0.0;
+	double to = 0.0;
+	CHECK(parseSpanLayer("1to2-柱", from, to));
+	CHECK(near(from, 1.0) && near(to, 2.0));
+	CHECK(parseSpanLayer("2to2.5-柱", from, to));
+	CHECK(near(from, 2.0) && near(to, 2.5));
+}
+
+TEST(parse_span_layer_rejects_non_span_layers)
+{
+	// 柱以外のレイヤ・通り芯・横架材は span レイヤでない。
+	double from = 0.0;
+	double to = 0.0;
+	CHECK(!parseSpanLayer("R-軒高", from, to));
+	CHECK(!parseSpanLayer("共通", from, to));
+	CHECK(!parseSpanLayer("1to2-梁", from, to));
+}
+
+TEST(parse_span_layer_rejects_malformed_core)
+{
+	// "to" が無い／数値でない core は分解できない。
+	double from = 0.0;
+	double to = 0.0;
+	CHECK(!parseSpanLayer("foo-柱", from, to));
+	CHECK(!parseSpanLayer("atob-柱", from, to));
+	CHECK(!parseSpanLayer("-柱", from, to));
+	// 片側が空（"to" が先頭・末尾）。
+	CHECK(!parseSpanLayer("to2-柱", from, to));
+	CHECK(!parseSpanLayer("1to-柱", from, to));
+	// 数値の後ろに余りがある（数値として全部は読めない）。
+	CHECK(!parseSpanLayer("1ato2-柱", from, to));
+	CHECK(!parseSpanLayer("1to2x-柱", from, to));
+	// "to" が 2 つ以上あると (from, to) に分解できない。
+	CHECK(!parseSpanLayer("1to2to3-柱", from, to));
+}
+
+// ---------------------------------------------------------------------------
+// span 柱レベル（柱の命令がある階にだけ足す。M8）
+// ---------------------------------------------------------------------------
+
+TEST(span_column_levels_are_stacked_on_top)
+{
+	// 1FL に柱（高さ 2844 → 上端 3444。2FL の梁が無いので梁下端は天端＝2FL 高さで代用され、
+	// 3444 < 3500 なので直上階へ届かず屋根束扱いの 1to1.5）と、RFL に小屋束を置く。
+	// span レベルは levels の**先頭**（FL／軒高の直上＝スタック最上段）に積まれ、レベル種別は
+	// レイヤ名そのもの。柱の無い階には span レベルを作らない（空レイヤを作らない）。
+	Model const model =
+		loadIfcFromText("#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
+						"#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
+						"#3=IFCLOCALPLACEMENT($,#2);\n"
+						"#4=IFCRECTANGLEPROFILEDEF(.AREA.,$,$,105.,105.);\n"
+						"#5=IFCDIRECTION((0.,0.,1.));\n"
+						"#6=IFCEXTRUDEDAREASOLID(#4,$,#5,2844.);\n"
+						"#7=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#6));\n"
+						"#8=IFCPRODUCTDEFINITIONSHAPE($,$,(#7));\n"
+						"#9=IFCCOLUMN('c',$,$,$,$,#3,#8,$);\n"
+						"#10=IFCBUILDINGSTOREY('s',$,'1FL',$,$,$,$,$,.ELEMENT.,600.);\n"
+						"#11=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#9),#10);\n"
+						"#12=IFCBUILDINGSTOREY('s',$,'2FL',$,$,$,$,$,.ELEMENT.,3500.);\n");
+
+	std::vector<StoryCommand> const stories = buildStoryCommands(model);
+	CHECK_EQ(stories.size(), static_cast<std::size_t>(2));
+	if (stories.size() != 2)
+		return;
+	// 1 階（柱あり）: span レベルが先頭に積まれる。
+	CHECK(
+		sameVec(levelTypes(stories[0]), std::vector<std::string>{"1to1.5-柱", "FL", "横架材天端"}));
+	CHECK_EQ(stories[0].levels.front().layer, std::string("1to1.5-柱"));
+	// 2 階（最上階・柱なし）: span レベルは作らない。
+	CHECK(sameVec(levelTypes(stories[1]), std::vector<std::string>{"軒高"}));
 }
 
 TEST_MAIN()

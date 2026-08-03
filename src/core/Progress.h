@@ -34,8 +34,8 @@ namespace HomeskzIfcImport::core
 	constexpr double kDrawShare = 90.0; // VectorWorks への描画
 
 	// 解析フェーズの step() 呼び出し回数（parse/BuildDocument が要素ごとに 1 回進める:
-	// 横架材・ストーリ・通り芯・床・垂木・野地板）。要素を足したらここも増やす。
-	constexpr std::size_t kParseSteps = 6;
+	// 柱・横架材・ストーリ・通り芯・床・垂木・野地板）。要素を足したらここも増やす。
+	constexpr std::size_t kParseSteps = 7;
 
 	// いま報告されている進捗。label は「横架材を描画しています…」のような見出し、
 	// done / total は件数（total = 0 は「総数が分からない／件数を出さない」の意味）。
