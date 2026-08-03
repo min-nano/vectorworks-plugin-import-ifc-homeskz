@@ -97,8 +97,12 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// 壁スタイルの索引を返す（無ければ 0）。ISDK には名前から引く呼び出しが無いので、
-		// 名前付きオブジェクトを GetNamedObject で引いて内部索引に直す（draw/Member の
-		// プラグインスタイル解決と同じ作法）。
+		// 名前付きオブジェクトを GetNamedObject で引いて内部索引に直す。
+		//
+		// ★**draw/DrawUtil の ResolvePluginStyle とは統合できない**（見た目は似ているが
+		// 別物）。あちらは構造材ツールのプラグインスタイル用で `IsPluginStyle` で絞り込む。
+		// ウォールスタイルはプラグインスタイルではない名前付きリソースなので、その関門を
+		// 通すと常に 0（＝スタイル無し）になってしまう。
 		InternalIndex ResolveWallStyle()
 		{
 			MCObjectHandle style = gSDK->GetNamedObject(TXString(kWallStyle));

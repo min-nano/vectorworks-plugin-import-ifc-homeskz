@@ -148,7 +148,8 @@ src/
 
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
     ExecuteDocument.{h,cpp} execute_document 相当のディスパッチ
-    DrawUtil.{h,cpp}        クラス分け・by-class 属性・レイヤ用意・スラブの共通ヘルパー
+    DrawUtil.{h,cpp}        クラス分け・by-class 属性・スタイル解決・レイヤ用意・スラブの共通ヘルパー
+    StructuralMember.{h,cpp} 構造材ツール（StructuralMember PIO）1 本の生成・設定（横架材／柱で共有）
     ProgressDialog.{h,cpp}  core::ProgressReporter を VW の進捗ダイアログへ橋渡し（唯一の実装）
     Grid.{h,cpp}            grid 命令 → GridAxis（旧 vw/grid.py）
     Story.{h,cpp}           story 命令 → ストーリ・レベル・レイヤ（旧 vw/story.py）
@@ -177,9 +178,10 @@ tests/
 `parse/Rafter.h` / `parse/Roof.h`）、レイヤ名の組み立ては `storyLayerName`、要素の判別
 述語（`isFloorSlab` / `isRoofSlab`）はその要素のヘッダ、平面座標の同一判定と許容
 （`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値は
-`parse/IfcGeometry.h`、基礎のレイヤ名・許容値・呑み込み量は `parse/Footing.h`、
-`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・**スラブの構成層／基準面／
-スタイル**——床板と底盤が共有する）は `draw/DrawUtil`、進捗の見出し・
+`parse/IfcGeometry.h`、基礎のレイヤ名・許容値は `parse/Footing.h`、`draw/` の SDK 呼び出しの
+定型（クラス分け・レイヤ用意・スタイル解決・**スラブの構成層／基準面／スタイル**——床板と
+底盤が共有する）は `draw/DrawUtil`、構造材ツール（StructuralMember PIO）のフィールド名・
+値・生成手順は `draw/StructuralMember`、進捗の見出し・
 バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`（整形と配分の
 計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。

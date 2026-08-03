@@ -9,12 +9,12 @@
 //	（SetClassByName は 4 か所、SetAllAttributesByClass は 3 か所）。属性を 1 つ足す・
 //	by-class の指定を直すといった変更が、直した .cpp でしか効かない形になっていた。
 //
-//	【SDK 依存・include の順序】このヘッダは**唯一 draw/ の中で SDK 型を公開する**
-//	（MCObjectHandle を引数に取るため）。自分で PluginPrefix.h を include するので、
-//	draw/*.cpp のどこから include しても成立する。逆に、要素ごとの draw/*.h は従来どおり
-//	core::Document.h までしか参照しない（SDK を持たない翻訳単位＝Extensions/ExtMenu から
-//	安全に include できるようにするため。CLAUDE.md「依存の向きは厳守する」）。したがって
-//	**このヘッダを draw/*.h から include してはならない**。
+//	【SDK 依存・include の順序】このヘッダは draw/StructuralMember.h とともに**SDK 型を
+//	公開する共通ヘッダ**（MCObjectHandle を引数に取るため）。自分で PluginPrefix.h を
+//	include するので、draw/*.cpp のどこから include しても成立する。逆に、要素ごとの
+//	draw/*.h は従来どおり core::Document.h までしか参照しない（SDK を持たない翻訳単位＝
+//	Extensions/ExtMenu から安全に include できるようにするため。CLAUDE.md「依存の向きは
+//	厳守する」）。したがって**このヘッダを draw/*.h から include してはならない**。
 //
 
 #pragma once
@@ -70,6 +70,15 @@ namespace HomeskzIfcImport::draw
 	// 確かめ、空なら nil を返すので、呼び出し側はフォールバックへ回せる。
 	// 幅・せいが 0 以下なら nil。
 	MCObjectHandle CreateRectangleProfileGroup(double minX, double minY, double maxX, double maxY);
+
+	// 名前付きプラグインスタイル（"木質構造材_横架材" 等）の RefNumber を引く。文書に無ければ
+	// 0 を返す（＝スタイル無しで描く。スタイルの欠落で部材を失わない）。
+	//
+	// ISDK はスタイル名から RefNumber を引く呼び出しを持たないので、名前付きオブジェクト
+	// （プラグインスタイルはシンボル定義）を GetNamedObject で引き、その InternalIndex を
+	// RefNumber として渡す（どちらも SysName を表す Sint32。SDK ヘッダでも InternalIndex と
+	// RefNumber は相互に渡し合う形で使われている）。
+	RefNumber ResolvePluginStyle(const TXString& styleName);
 
 	// 平面外形を閉じた 2D ポリゴンとして作る（スラブのプロファイル・フォールバック描画）。
 	// 頂点が空なら nil。
