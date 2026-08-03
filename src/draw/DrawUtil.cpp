@@ -104,6 +104,14 @@ namespace HomeskzIfcImport::draw
 		return groupHandle;
 	}
 
+	RefNumber ResolvePluginStyle(const TXString& styleName)
+	{
+		MCObjectHandle style = gSDK->GetNamedObject(styleName);
+		if (style == nil || !gSDK->IsPluginStyle(style))
+			return 0;
+		return static_cast<RefNumber>(gSDK->GetObjectInternalIndex(style));
+	}
+
 	MCObjectHandle PrepareLayer(const std::string& layerName)
 	{
 		const TXString name(layerName.c_str());

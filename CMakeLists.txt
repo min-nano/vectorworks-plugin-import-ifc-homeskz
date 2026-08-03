@@ -271,6 +271,7 @@ if(VW_BUILD_PLUGIN)
 		src/Updater.cpp
 		src/UpdaterFlow.cpp
 		src/draw/DrawUtil.cpp
+		src/draw/StructuralMember.cpp
 		src/draw/ProgressDialog.cpp
 		src/draw/ExecuteDocument.cpp
 		src/draw/Grid.cpp
