@@ -17,6 +17,8 @@
 //
 //	クラス階層（VW のクラス名は "-" 区切りで全パスを連結する）:
 //	  04構造
+//	    01基礎
+//	      02基礎スラブ（底盤）・03立ち上がり（基礎梁）
 //	    02木造
 //	      01土台   / 01土台
 //	      02床組   / 01大引・02根太
@@ -58,6 +60,14 @@ namespace HomeskzIfcImport::parse
 	// 登り梁（傾斜梁）。屋根の勾配に沿って軒から棟へ架かる小屋組の梁。母屋・棟木と
 	// 同じく梁（小屋梁・軒桁）と重なって見にくいため専用レイヤ（n-登り梁）に分離する。
 	inline constexpr const char* CLASS_NOBORIBARI = "04構造-02木造-05小屋組-06登り梁";
+
+	// 基礎（04構造-01基礎 階層）。木造（02木造）ではなく基礎（01基礎）の下に置く。Python 版は
+	// ifc/footing.py が持つが、本移植はクラス名の定義をここへ集約する（M4 の枠。ROADMAP.md M9）。
+	//   立上り（基礎梁）… 壁オブジェクト（parse/Footing の buildWallCommands）
+	//   底盤            … スラブオブジェクト（同 buildSlabCommands）。地中梁（M10）も
+	//                     底盤に噛み合う一体の形状なので同じクラスで描く。
+	inline constexpr const char* CLASS_FOUNDATION_WALL = "04構造-01基礎-03立ち上がり";
+	inline constexpr const char* CLASS_FOUNDATION_SLAB = "04構造-01基礎-02基礎スラブ";
 
 	// IFC Name から部材種別トークンを取り出す（Python 版 member_type_of_name 相当）。
 	// "木梁:{種別}:{連番}" は中央の種別（例 "土台"・"軒桁"）を、"火打:0_1" /

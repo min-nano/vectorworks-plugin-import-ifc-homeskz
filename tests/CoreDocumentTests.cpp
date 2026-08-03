@@ -596,6 +596,162 @@ TEST(validate_rejects_roof_with_nonpositive_thickness)
 }
 
 // ---------------------------------------------------------------------------
+// 基礎（立上り＝壁・底盤＝スラブ）の検証（ROADMAP.md M9）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 検証を通る立上り命令（1 本）。個々のテストはここから 1 か所だけ崩す。
+	core::WallCommand validWall()
+	{
+		core::WallCommand wall;
+		wall.layer = "F-立上り";
+		wall.drawClass = "04構造-01基礎-03立ち上がり";
+		wall.start = core::Vec2{0.0, 0.0};
+		wall.end = core::Vec2{3640.0, 0.0};
+		wall.thickness = 120.0;
+		wall.bottomBound = core::StoryBoundCommand{0, core::kLevelGL, -110.0};
+		wall.topBound = core::StoryBoundCommand{1, core::kLevelBeamTop, -190.0};
+		return wall;
+	}
+
+	// 検証を通る底盤命令（1 枚）。
+	core::SlabCommand validSlab()
+	{
+		core::SlabCommand slab;
+		slab.layer = "F-底盤";
+		slab.drawClass = "04構造-01基礎-02基礎スラブ";
+		slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}, core::Vec2{3640.0, 2730.0},
+						 core::Vec2{0.0, 2730.0}};
+		slab.styleName = "基礎スラブ - コンクリート 150mm / 捨てコン 30mm / 砕石 100mm";
+		slab.components = {core::SlabComponentCommand{"コンクリート", 150.0},
+						   core::SlabComponentCommand{"捨てコン", 30.0},
+						   core::SlabComponentCommand{"砕石", 100.0}};
+		slab.datum = core::SlabDatum::Top;
+		slab.thickness = 150.0;
+		slab.elevation = 50.0;
+		slab.bound = core::StoryBoundCommand{0, core::kLevelSlabTop, 0.0};
+		return slab;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_wall_and_slab)
+{
+	core::Document document;
+	document.walls.push_back(validWall());
+	document.slabs.push_back(validSlab());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_wall_with_empty_layer_or_class)
+{
+	core::Document layer;
+	core::WallCommand wall = validWall();
+	wall.layer = "";
+	layer.walls.push_back(wall);
+	CHECK(!core::validateDocument(layer));
+
+	core::Document drawClass;
+	wall = validWall();
+	wall.drawClass = "";
+	drawClass.walls.push_back(wall);
+	CHECK(!core::validateDocument(drawClass));
+}
+
+TEST(validate_rejects_wall_with_nonpositive_thickness)
+{
+	// 壁厚 0 の立上りは実体を持たない（CreateWall に渡す厚みがそのまま 0 になる）。
+	core::Document document;
+	core::WallCommand wall = validWall();
+	wall.thickness = 0.0;
+	document.walls.push_back(wall);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_degenerate_wall)
+{
+	// 壁芯の始点と終点が同じ立上りは向き・長さが決まらない。
+	core::Document document;
+	core::WallCommand wall = validWall();
+	wall.end = wall.start;
+	document.walls.push_back(wall);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_wall_with_empty_bound_level)
+{
+	// レベル種別が空だと SetWallOverallHeights が解決できず、高さがレイヤの
+	// 「壁の高さ」設定に落ちる（構造材・スラブと同じ関門）。
+	core::Document bottomEmpty;
+	core::WallCommand wall = validWall();
+	wall.bottomBound.level = "";
+	bottomEmpty.walls.push_back(wall);
+	CHECK(!core::validateDocument(bottomEmpty));
+
+	core::Document topEmpty;
+	wall = validWall();
+	wall.topBound.level = "";
+	topEmpty.walls.push_back(wall);
+	CHECK(!core::validateDocument(topEmpty));
+}
+
+TEST(validate_rejects_slab_with_empty_layer_class_or_style)
+{
+	core::Document layer;
+	core::SlabCommand slab = validSlab();
+	slab.layer = "";
+	layer.slabs.push_back(slab);
+	CHECK(!core::validateDocument(layer));
+
+	core::Document drawClass;
+	slab = validSlab();
+	slab.drawClass = "";
+	drawClass.slabs.push_back(slab);
+	CHECK(!core::validateDocument(drawClass));
+
+	core::Document style;
+	slab = validSlab();
+	slab.styleName = "";
+	style.slabs.push_back(slab);
+	CHECK(!core::validateDocument(style));
+}
+
+TEST(validate_rejects_slab_with_too_few_boundary_points)
+{
+	// 3 点未満は面にならない（床板と同じ関門）。
+	core::Document document;
+	core::SlabCommand slab = validSlab();
+	slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}};
+	document.slabs.push_back(slab);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_slab_with_nonpositive_thickness)
+{
+	// コンクリート厚 0 の底盤はスラブスタイルを作れない。
+	core::Document document;
+	core::SlabCommand slab = validSlab();
+	slab.thickness = 0.0;
+	document.slabs.push_back(slab);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_slab_with_no_components_or_empty_bound_level)
+{
+	core::Document components;
+	core::SlabCommand slab = validSlab();
+	slab.components.clear();
+	components.slabs.push_back(slab);
+	CHECK(!core::validateDocument(components));
+
+	core::Document bound;
+	slab = validSlab();
+	slab.bound.level = "";
+	bound.slabs.push_back(slab);
+	CHECK(!core::validateDocument(bound));
+}
+
+// ---------------------------------------------------------------------------
 // parse::buildDocument（読み込めないパスでは空の Document が返る）
 // ---------------------------------------------------------------------------
 

@@ -1,0 +1,1300 @@
+//
+//	parse/Footing.cpp
+//
+//	基礎解析の実装。Python 版 ifc/footing.py の build_foundation_story_command /
+//	build_wall_commands / build_slab_commands（および統合・外面合わせ）に対応。
+//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//
+//	地中梁・人通口・壁結合・配筋は M10（ROADMAP.md）。本ファイルは立上り（壁）と
+//	底盤（スラブ）、および基礎ストーリだけを扱う。
+//
+
+#include "parse/Footing.h"
+#include "parse/Context.h"
+#include "parse/IfcAttr.h"
+#include "parse/IfcGeometry.h"
+#include "parse/Story.h"
+#include "parse/StructuralClass.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <map>
+#include <numbers>
+#include <set>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+namespace HomeskzIfcImport::parse
+{
+	using core::ColumnCommand;
+	using core::LevelCommand;
+	using core::SlabCommand;
+	using core::SlabComponentCommand;
+	using core::StoryBoundCommand;
+	using core::StoryCommand;
+	using core::Vec2;
+	using core::WallCommand;
+
+	namespace
+	{
+		// --- 小さな共通ヘルパー ---------------------------------------------------
+
+		// 名前が prefix で始まるか。
+		bool startsWith(const std::string& name, const std::string& prefix)
+		{
+			return name.size() >= prefix.size() && name.compare(0, prefix.size(), prefix) == 0;
+		}
+
+		// 多角形の面積（絶対値。Python 版 _shoelace_area）。
+		double shoelaceArea(const std::vector<Vec2>& pts)
+		{
+			double total = 0.0;
+			const std::size_t n = pts.size();
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				const Vec2& a = pts[i];
+				const Vec2& b = pts[(i + 1) % n];
+				total += (a.x * b.y) - (b.x * a.y);
+			}
+			return std::abs(total) / 2.0;
+		}
+
+		// 符号付き面積（CCW で正・CW で負。Python 版 _shoelace_signed）。
+		double shoelaceSigned(const std::vector<Vec2>& pts)
+		{
+			double total = 0.0;
+			const std::size_t n = pts.size();
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				const Vec2& a = pts[i];
+				const Vec2& b = pts[(i + 1) % n];
+				total += (a.x * b.y) - (b.x * a.y);
+			}
+			return total / 2.0;
+		}
+
+		// 許容値で丸めた整数キー（グループ化の鍵。Python 版 round(v / tol) / round(v, 3)）。
+		// std::llround は 0.5 を 0 から離れる向きへ丸める（Python の銀行家丸めとは境界だけ
+		// 挙動が違うが、実座標がちょうど半端に乗ることは無いので実害は無い）。
+		long long roundKey(double value, double tolerance)
+		{
+			return std::llround(value / tolerance);
+		}
+
+		// --- 立上り（壁）------------------------------------------------------------
+
+		// 立上りの断面形状（統合可否）を表すキー（Python 版 _wall_section_key）。レイヤ・
+		// クラス・壁厚・上下端の高さ基準がすべて一致する立上り同士だけを統合対象にする。
+		// **配筋（M10）を足すときはこのキーにも足す**（配筋の違う立上りを 1 本へ統合すると
+		// 片方の配筋が失われるため。Python 版はキーに含めている）。
+		using WallKey = std::tuple<std::string, std::string, long long, int, std::string, long long,
+								   int, std::string, long long>;
+
+		WallKey wallSectionKey(const WallCommand& wall)
+		{
+			return WallKey{wall.layer,
+						   wall.drawClass,
+						   roundKey(wall.thickness, 1e-3),
+						   wall.bottomBound.storyOffset,
+						   wall.bottomBound.level,
+						   roundKey(wall.bottomBound.offset, kWallMergeDistTol),
+						   wall.topBound.storyOffset,
+						   wall.topBound.level,
+						   roundKey(wall.topBound.offset, kWallMergeDistTol)};
+		}
+
+		// 立上り a・b が同一直線上にあり、区間が重なる／接触するか（Python 版
+		// _walls_connected_collinear）。(1) 方向が平行、(2) b の端点が a の直線上、
+		// (3) a の区間と b の射影区間が重なる／接触する、の 3 条件。
+		bool wallsConnectedCollinear(const WallCommand& a, const WallCommand& b)
+		{
+			const Vec2 da = a.end - a.start;
+			const Vec2 db = b.end - b.start;
+			const double la = std::hypot(da.x, da.y);
+			const double lb = std::hypot(db.x, db.y);
+			if (la <= 0.0 || lb <= 0.0)
+				return false;
+			const double ux = da.x / la;
+			const double uy = da.y / la;
+			// (1) 単位方向ベクトルの外積（= sin 角）で平行判定
+			if (std::abs((ux * (db.y / lb)) - (uy * (db.x / lb))) > kWallMergeAngleTol)
+				return false;
+			// (2) b の始点の a 直線からの直交距離（平行なら b の全点が同距離）
+			if (std::abs((ux * (b.start.y - a.start.y)) - (uy * (b.start.x - a.start.x))) >
+				kWallMergeDistTol)
+				return false;
+			// (3) b を a 方向に射影した区間が [0, la] と重なる／接触するか
+			const double t1 = (ux * (b.start.x - a.start.x)) + (uy * (b.start.y - a.start.y));
+			const double t2 = (ux * (b.end.x - a.start.x)) + (uy * (b.end.y - a.start.y));
+			const double lo = std::min(t1, t2);
+			const double hi = std::max(t1, t2);
+			return hi >= -kWallMergeDistTol && lo <= la + kWallMergeDistTol;
+		}
+
+		// Union-Find の根を返す（経路圧縮つき）。
+		std::size_t findRoot(std::vector<std::size_t>& parent, std::size_t a)
+		{
+			while (parent[a] != a)
+			{
+				parent[a] = parent[parent[a]];
+				a = parent[a];
+			}
+			return a;
+		}
+
+		// 同一断面の立上り群のうち、同一直線上で連続するものを 1 本に統合する
+		// （Python 版 _merge_wall_group）。成分の代表は最小インデックスで、出力は代表
+		// インデックス昇順＝入力順に準ずる（列挙順に依存しない決定的な並び）。
+		std::vector<WallCommand> mergeWallGroup(const std::vector<WallCommand>& walls)
+		{
+			const std::size_t n = walls.size();
+			std::vector<std::size_t> parent(n);
+			for (std::size_t i = 0; i < n; ++i)
+				parent[i] = i;
+
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				for (std::size_t j = i + 1; j < n; ++j)
+				{
+					if (!wallsConnectedCollinear(walls[i], walls[j]))
+						continue;
+					const std::size_t ri = findRoot(parent, i);
+					const std::size_t rj = findRoot(parent, j);
+					if (ri != rj)
+						parent[std::max(ri, rj)] = std::min(ri, rj);
+				}
+			}
+
+			std::map<std::size_t, std::vector<std::size_t>> components;
+			for (std::size_t i = 0; i < n; ++i)
+				components[findRoot(parent, i)].push_back(i);
+
+			std::vector<WallCommand> merged;
+			merged.reserve(components.size());
+			for (const auto& component : components)
+			{
+				const std::vector<std::size_t>& indices = component.second;
+				const WallCommand& base = walls[indices.front()];
+				if (indices.size() == 1)
+				{
+					merged.push_back(base);
+					continue;
+				}
+				// 先頭の壁芯方向へ全端点を射影し、最小〜最大区間の 1 本にする
+				// （高さ基準・壁厚・クラスは先頭のものを引き継ぐ）。
+				const Vec2 axis = base.end - base.start;
+				const double la = std::hypot(axis.x, axis.y);
+				const double ux = axis.x / la;
+				const double uy = axis.y / la;
+				double lo = 0.0;
+				double hi = 0.0;
+				bool first = true;
+				for (const std::size_t index : indices)
+				{
+					for (const Vec2& p : {walls[index].start, walls[index].end})
+					{
+						const double t = (ux * (p.x - base.start.x)) + (uy * (p.y - base.start.y));
+						if (first || t < lo)
+							lo = t;
+						if (first || t > hi)
+							hi = t;
+						first = false;
+					}
+				}
+				WallCommand cmd = base;
+				cmd.start = Vec2{base.start.x + (ux * lo), base.start.y + (uy * lo)};
+				cmd.end = Vec2{base.start.x + (ux * hi), base.start.y + (uy * hi)};
+				merged.push_back(cmd);
+			}
+			return merged;
+		}
+
+		// 立上り a・b の壁芯の交点と、その交点が各壁芯の端点か内部かを求める（Python 版
+		// _wall_intersection）。平行（交点が定まらない）・区間外で交わる立上りは false。
+		//
+		// **端点許容は相手壁の半壁厚を含める**: ホームズ君 IFC の立上りは直交する相手壁の
+		// 外面までモデル化されるため、コーナーでは壁芯どうしの交点が壁の端から半壁厚ほど
+		// 離れた位置に来る。固定 1mm の許容だと外周コーナーが「両方とも内部で交わる」と
+		// 誤判定され、自由端の判定（延長する／しない）を取り違える。
+		bool wallIntersection(const WallCommand& a, const WallCommand& b, Vec2& outPoint,
+							  bool& outAAtEnd, bool& outBAtEnd)
+		{
+			const Vec2 r = a.end - a.start;
+			const Vec2 s = b.end - b.start;
+			const double la = std::hypot(r.x, r.y);
+			const double lb = std::hypot(s.x, s.y);
+			if (la <= 0.0 || lb <= 0.0)
+				return false;
+			const double rxs = (r.x * s.y) - (r.y * s.x);
+			// 平行／同一直線: 交点が定まらない（同一直線は mergeWallCommands が扱う）。
+			if (std::abs(rxs) <= kWallMergeAngleTol * la * lb)
+				return false;
+			const Vec2 q = b.start - a.start;
+			const double t = ((q.x * s.y) - (q.y * s.x)) / rxs;
+			const double u = ((q.x * r.y) - (q.y * r.x)) / rxs;
+			// a の端点許容は相手 b の半壁厚（a は b の外面で終端しうる）、b は a の半壁厚。
+			const double fracA = ((b.thickness / 2.0) + kWallEndpointTol) / la;
+			const double fracB = ((a.thickness / 2.0) + kWallEndpointTol) / lb;
+			if (t < -fracA || t > 1.0 + fracA)
+				return false;
+			if (u < -fracB || u > 1.0 + fracB)
+				return false;
+			outPoint = Vec2{a.start.x + (t * r.x), a.start.y + (t * r.y)};
+			outAAtEnd = (t <= fracA) || (t >= 1.0 - fracA);
+			outBAtEnd = (u <= fracB) || (u >= 1.0 - fracB);
+			return true;
+		}
+
+		// 自由端の終端柱（柱芯）を壁芯上に射影した基準点を返す（Python 版
+		// _terminal_column_base）。(ux, uy) は自由端で壁の外側を向く単位ベクトル。終端柱が
+		// 見つからなければ自由端そのものを返す（柱芯 = 自由端とみなす）。
+		Vec2 terminalColumnBase(const Vec2& point, double ux, double uy, double half,
+								const std::vector<ColumnCommand>& columns)
+		{
+			double bestT = 0.0;
+			bool found = false;
+			for (const ColumnCommand& column : columns)
+			{
+				const double dx = column.position.x - point.x;
+				const double dy = column.position.y - point.y;
+				const double along = (dx * ux) + (dy * uy); // 外向きの沿軸成分（内側は負）
+				const double perp = std::abs((dx * -uy) + (dy * ux)); // 壁芯線からの直交距離
+				if (perp > half + kFreeEndColumnPerpTol)
+					continue;
+				// 自由端の内側（along<0）または端点付近（along≈0）にある柱だけを対象にする。
+				if (along > kWallEndpointTol || along < -kFreeEndColumnAlongTol)
+					continue;
+				if (!found || std::abs(along) < std::abs(bestT))
+					bestT = along;
+				found = true;
+			}
+			if (!found)
+				return point;
+			return Vec2{point.x + (ux * bestT), point.y + (uy * bestT)};
+		}
+
+		// --- 底盤（スラブ）----------------------------------------------------------
+		//
+		// 多角形の和（union）は「頂点を丸めて厳密比較できるようにし、全辺を交点で細分し、
+		// すぐ右（外側）がどの多角形にも入らない有向辺だけを境界として残してつなぐ」という
+		// 手順で求める（Python 版 _polygon_union）。丸めた点をキーにするので、集合・辞書は
+		// 素直な std::set / std::map（辞書順比較）で足りる。
+
+		// 交点計算で頂点を丸める小数桁（1e-4 mm = 0.1 ミクロン。Python 版 _SLAB_ROUND）。
+		constexpr double kSlabRoundScale = 1e4;
+
+		// 丸めた平面点。std::set / std::map の鍵にするので、Vec2 ではなく比較可能な pair。
+		using Pt2 = std::pair<double, double>;
+		using Edge = std::pair<Pt2, Pt2>;
+
+		Pt2 roundPt(double x, double y)
+		{
+			return Pt2{std::round(x * kSlabRoundScale) / kSlabRoundScale,
+					   std::round(y * kSlabRoundScale) / kSlabRoundScale};
+		}
+
+		Pt2 roundPt(const Vec2& p)
+		{
+			return roundPt(p.x, p.y);
+		}
+
+		// 境界を丸めた頂点列にし、末尾の閉じ重複・連続する同一点を除く（Python 版 _clean_ring）。
+		std::vector<Pt2> cleanRing(const std::vector<Vec2>& boundary)
+		{
+			std::vector<Pt2> out;
+			out.reserve(boundary.size());
+			for (const Vec2& p : boundary)
+			{
+				const Pt2 rp = roundPt(p);
+				if (out.empty() || out.back() != rp)
+					out.push_back(rp);
+			}
+			if (out.size() > 1 && out.front() == out.back())
+				out.pop_back();
+			return out;
+		}
+
+		double shoelaceSigned(const std::vector<Pt2>& pts)
+		{
+			double total = 0.0;
+			const std::size_t n = pts.size();
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				const Pt2& a = pts[i];
+				const Pt2& b = pts[(i + 1) % n];
+				total += (a.first * b.second) - (b.first * a.second);
+			}
+			return total / 2.0;
+		}
+
+		// 点 (x, y) が単純多角形の内部（境界は含めない近似）にあるか（Python 版
+		// _point_in_poly）。水平レイキャスト（半開ルール）。呼び出し側は辺から法線方向へ
+		// kSlabSideEps ずらした点を渡すので、辺ちょうどの縮退は問題にならない。
+		bool pointInPoly(double x, double y, const std::vector<Pt2>& poly)
+		{
+			bool inside = false;
+			const std::size_t n = poly.size();
+			std::size_t j = n - 1;
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				const auto [xi, yi] = poly[i];
+				const auto [xj, yj] = poly[j];
+				if ((yi > y) != (yj > y))
+				{
+					const double xint = xi + ((y - yi) * (xj - xi) / (yj - yi));
+					if (x < xint)
+						inside = !inside;
+				}
+				j = i;
+			}
+			return inside;
+		}
+
+		// 線分 ab を分割すべき点（線分 cd との交点）を ab 上の点として返す（Python 版
+		// _seg_split_points）。非平行なら区間内の交点、共線なら cd の端点を ab 上へ射影した
+		// 点（区間内）。これで交差・T 字接合・共線オーバーラップの分割点をすべて拾う。
+		std::vector<Pt2> segSplitPoints(const Pt2& a, const Pt2& b, const Pt2& c, const Pt2& d)
+		{
+			const double rx = b.first - a.first;
+			const double ry = b.second - a.second;
+			const double sx = d.first - c.first;
+			const double sy = d.second - c.second;
+			const double rLen = std::hypot(rx, ry);
+			const double sLen = std::hypot(sx, sy);
+			if (rLen <= 0.0 || sLen <= 0.0)
+				return {};
+
+			std::vector<Pt2> out;
+			const double denom = (rx * sy) - (ry * sx);
+			if (std::abs(denom) > kSlabAngleTol * rLen * sLen)
+			{
+				const double t =
+					(((c.first - a.first) * sy) - ((c.second - a.second) * sx)) / denom;
+				const double u =
+					(((c.first - a.first) * ry) - ((c.second - a.second) * rx)) / denom;
+				if (t >= -1e-9 && t <= 1.0 + 1e-9 && u >= -1e-9 && u <= 1.0 + 1e-9)
+					out.emplace_back(a.first + (t * rx), a.second + (t * ry));
+				return out;
+			}
+			// 平行: 共線ならオーバーラップ端点を分割点にする。
+			if (std::abs(((c.first - a.first) * ry) - ((c.second - a.second) * rx)) >
+				kSlabMergeTol * rLen)
+				return out;
+			for (const Pt2& p : {c, d})
+			{
+				const double t =
+					(((p.first - a.first) * rx) + ((p.second - a.second) * ry)) / (rLen * rLen);
+				if (t >= -1e-9 && t <= 1.0 + 1e-9)
+					out.emplace_back(a.first + (t * rx), a.second + (t * ry));
+			}
+			return out;
+		}
+
+		// 有向辺 a→b を分割点 cuts で細分した有向部分辺のリスト（Python 版 _split_edge）。
+		std::vector<Edge> splitEdge(const Pt2& a, const Pt2& b, const std::set<Pt2>& cuts)
+		{
+			const double rx = b.first - a.first;
+			const double ry = b.second - a.second;
+			const double length2 = (rx * rx) + (ry * ry);
+
+			std::map<Pt2, double> params;
+			const auto add = [&](const Pt2& raw)
+			{
+				const Pt2 rp = roundPt(raw.first, raw.second);
+				const double t =
+					(length2 > 0.0)
+						? ((((rp.first - a.first) * rx) + ((rp.second - a.second) * ry)) / length2)
+						: 0.0;
+				if (t >= -1e-9 && t <= 1.0 + 1e-9)
+					params[rp] = t;
+			};
+			add(a);
+			add(b);
+			for (const Pt2& cut : cuts)
+				add(cut);
+
+			std::vector<Pt2> ordered;
+			ordered.reserve(params.size());
+			for (const auto& entry : params)
+				ordered.push_back(entry.first);
+			std::stable_sort(ordered.begin(), ordered.end(),
+							 [&params](const Pt2& lhs, const Pt2& rhs)
+							 { return params.at(lhs) < params.at(rhs); });
+
+			std::vector<Edge> out;
+			for (std::size_t i = 0; i + 1 < ordered.size(); ++i)
+			{
+				if (ordered[i] != ordered[i + 1])
+					out.emplace_back(ordered[i], ordered[i + 1]);
+			}
+			return out;
+		}
+
+		// 境界追跡で分岐点に来たとき、内側を左に保つ次の辺（最も時計回り）を選ぶ
+		// （Python 版 _next_boundary_edge）。
+		Edge nextBoundaryEdge(const Edge& current, const std::vector<Edge>& options)
+		{
+			const double reverse = std::atan2(current.first.second - current.second.second,
+											  current.first.first - current.second.first);
+			const auto clockwise = [reverse](const Edge& edge)
+			{
+				const double d = std::atan2(edge.second.second - edge.first.second,
+											edge.second.first - edge.first.first);
+				double angle = std::fmod(reverse - d, 2.0 * std::numbers::pi);
+				if (angle < 0.0)
+					angle += 2.0 * std::numbers::pi;
+				return (angle > 1e-9) ? angle : 2.0 * std::numbers::pi;
+			};
+			return *std::min_element(options.begin(), options.end(),
+									 [&clockwise](const Edge& lhs, const Edge& rhs)
+									 { return clockwise(lhs) < clockwise(rhs); });
+		}
+
+		// 閉リングから共線の中間点を除いた頂点列（Python 版 _simplify_ring）。
+		std::vector<Pt2> simplifyRing(const std::vector<Pt2>& ring)
+		{
+			std::vector<Pt2> pts = ring;
+			if (pts.size() > 1 && pts.front() == pts.back())
+				pts.pop_back();
+			const std::size_t n = pts.size();
+			std::vector<Pt2> out;
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				const Pt2& a = pts[(i + n - 1) % n];
+				const Pt2& b = pts[i];
+				const Pt2& c = pts[(i + 1) % n];
+				const double cross = ((b.first - a.first) * (c.second - b.second)) -
+									 ((b.second - a.second) * (c.first - b.first));
+				if (std::abs(cross) > kSlabMergeTol)
+					out.push_back(b);
+			}
+			return out;
+		}
+
+		// 有向境界辺をつないで閉ループのリストにする（Python 版 _chain_boundary）。
+		// 開ループが生じたら false（統合できない成分として呼び出し側が元のまま残す）。
+		bool chainBoundary(const std::vector<Edge>& edges, std::vector<std::vector<Pt2>>& out)
+		{
+			std::map<Pt2, std::vector<Edge>> fromMap;
+			for (const Edge& edge : edges)
+				fromMap[edge.first].push_back(edge);
+			std::set<Edge> remaining(edges.begin(), edges.end());
+
+			std::vector<std::vector<Pt2>> loops;
+			while (!remaining.empty())
+			{
+				const Edge start = *remaining.begin(); // std::set は辞書順＝Python の min
+				Edge cur = start;
+				std::vector<Pt2> ring{cur.first};
+				while (true)
+				{
+					remaining.erase(cur);
+					ring.push_back(cur.second);
+					if (cur.second == start.first)
+						break;
+					std::vector<Edge> options;
+					const auto found = fromMap.find(cur.second);
+					if (found != fromMap.end())
+					{
+						for (const Edge& edge : found->second)
+						{
+							if (remaining.contains(edge))
+								options.push_back(edge);
+						}
+					}
+					if (options.empty())
+						return false;
+					cur = nextBoundaryEdge(cur, options);
+				}
+				std::vector<Pt2> simplified = simplifyRing(ring);
+				if (simplified.size() >= 3)
+					loops.push_back(std::move(simplified));
+			}
+			out = std::move(loops);
+			return true;
+		}
+
+		// 任意向きの単純多角形群の和（union）の境界ループ（Python 版 _polygon_union）。
+		// 各多角形を CCW（内部が左）に揃え、全辺を他辺との交点で細分し、細分した有向辺のうち
+		// **すぐ右（外側）がどの多角形にも含まれない**ものだけを境界として残してつなぐ
+		// （共有辺は両隣の多角形が右側に来て打ち消され、外周辺だけ残る）。開ループなら false。
+		bool polygonUnion(const std::vector<std::vector<Pt2>>& polys,
+						  std::vector<std::vector<Pt2>>& out)
+		{
+			std::vector<std::vector<Pt2>> oriented;
+			oriented.reserve(polys.size());
+			for (const std::vector<Pt2>& poly : polys)
+			{
+				if (shoelaceSigned(poly) >= 0.0)
+				{
+					oriented.push_back(poly);
+				}
+				else
+				{
+					oriented.emplace_back(poly.rbegin(), poly.rend());
+				}
+			}
+
+			std::vector<Edge> directed;
+			for (const std::vector<Pt2>& poly : oriented)
+			{
+				const std::size_t n = poly.size();
+				for (std::size_t i = 0; i < n; ++i)
+					directed.emplace_back(poly[i], poly[(i + 1) % n]);
+			}
+
+			const std::size_t m = directed.size();
+			std::vector<std::set<Pt2>> cuts(m);
+			for (std::size_t i = 0; i < m; ++i)
+			{
+				for (std::size_t j = 0; j < m; ++j)
+				{
+					if (i == j)
+						continue;
+					for (const Pt2& pt : segSplitPoints(directed[i].first, directed[i].second,
+														directed[j].first, directed[j].second))
+						cuts[i].insert(roundPt(pt.first, pt.second));
+				}
+			}
+
+			std::vector<Edge> boundary;
+			std::set<Edge> seen;
+			for (std::size_t i = 0; i < m; ++i)
+			{
+				for (const Edge& part : splitEdge(directed[i].first, directed[i].second, cuts[i]))
+				{
+					if (!seen.insert(part).second)
+						continue;
+					const double mx = (part.first.first + part.second.first) / 2.0;
+					const double my = (part.first.second + part.second.second) / 2.0;
+					const double ex = part.second.first - part.first.first;
+					const double ey = part.second.second - part.first.second;
+					const double length = std::hypot(ex, ey);
+					if (length <= 0.0)
+						continue;
+					// 進行方向 p→q の右向き法線 (ey, −ex)/length。外側へはみ出した点。
+					const double rx = mx + (kSlabSideEps * ey / length);
+					const double ry = my - (kSlabSideEps * ex / length);
+					const bool insideAny =
+						std::ranges::any_of(oriented, [rx, ry](const std::vector<Pt2>& poly)
+											{ return pointInPoly(rx, ry, poly); });
+					if (!insideAny)
+						boundary.push_back(part);
+				}
+			}
+			return chainBoundary(boundary, out);
+		}
+
+		// 共線の線分 ab・cd の重なり長さ（共線でなければ 0。Python 版 _collinear_overlap）。
+		double collinearOverlap(const Pt2& a, const Pt2& b, const Pt2& c, const Pt2& d)
+		{
+			const double rx = b.first - a.first;
+			const double ry = b.second - a.second;
+			const double rLen = std::hypot(rx, ry);
+			if (rLen <= 0.0)
+				return 0.0;
+			const double sx = d.first - c.first;
+			const double sy = d.second - c.second;
+			const double sLen = std::hypot(sx, sy);
+			if (sLen <= 0.0)
+				return 0.0;
+			if (std::abs((rx * sy) - (ry * sx)) > kSlabAngleTol * rLen * sLen)
+				return 0.0;
+			if (std::abs(((c.first - a.first) * ry) - ((c.second - a.second) * rx)) >
+				kSlabMergeTol * rLen)
+				return 0.0;
+			const double tc =
+				(((c.first - a.first) * rx) + ((c.second - a.second) * ry)) / (rLen * rLen);
+			const double td =
+				(((d.first - a.first) * rx) + ((d.second - a.second) * ry)) / (rLen * rLen);
+			const double lo = std::max(0.0, std::min(tc, td));
+			const double hi = std::min(1.0, std::max(tc, td));
+			return (hi > lo) ? (hi - lo) * rLen : 0.0;
+		}
+
+		// 線分 a→b 上の点 p の正規化パラメータ（0=a, 1=b。Python 版 _param_on）。
+		double paramOn(const Pt2& a, const Pt2& b, const Pt2& p)
+		{
+			const double rx = b.first - a.first;
+			const double ry = b.second - a.second;
+			const double length2 = (rx * rx) + (ry * ry);
+			if (length2 <= 0.0)
+				return 0.0;
+			return (((p.first - a.first) * rx) + ((p.second - a.second) * ry)) / length2;
+		}
+
+		// 底盤ポリゴン a・b が連続する（境界を共有 or 面で重なる）か（Python 版
+		// _polys_connected）。角（点）だけで接する場合は連続としない。
+		bool polysConnected(const std::vector<Pt2>& a, const std::vector<Pt2>& b)
+		{
+			const std::size_t na = a.size();
+			const std::size_t nb = b.size();
+			for (std::size_t i = 0; i < na; ++i)
+			{
+				const Pt2& a1 = a[i];
+				const Pt2& a2 = a[(i + 1) % na];
+				for (std::size_t j = 0; j < nb; ++j)
+				{
+					const Pt2& b1 = b[j];
+					const Pt2& b2 = b[(j + 1) % nb];
+					if (collinearOverlap(a1, a2, b1, b2) > kSlabMergeTol)
+						return true;
+					// 内部で交差（端点を含まない真の交差）
+					for (const Pt2& pt : segSplitPoints(a1, a2, b1, b2))
+					{
+						const double t = paramOn(a1, a2, pt);
+						const double u = paramOn(b1, b2, pt);
+						if (t > kSlabAngleTol && t < 1.0 - kSlabAngleTol && u > kSlabAngleTol &&
+							u < 1.0 - kSlabAngleTol)
+							return true;
+					}
+				}
+			}
+			if (std::ranges::any_of(a, [&b](const Pt2& p)
+									{ return pointInPoly(p.first, p.second, b); }))
+				return true;
+			return std::ranges::any_of(b, [&a](const Pt2& p)
+									   { return pointInPoly(p.first, p.second, a); });
+		}
+
+		// 底盤の統合可否を表すキー（Python 版 _slab_merge_key）。レイヤ・クラス・コンクリート
+		// 厚・高さ基準がすべて一致する底盤同士だけを統合対象にする。**配筋（M10）を足すときは
+		// このキーにも足す**（配筋の違う底盤を 1 枚へ統合すると片方が失われるため）。
+		using SlabKey =
+			std::tuple<std::string, std::string, long long, int, std::string, long long>;
+
+		SlabKey slabMergeKey(const SlabCommand& slab)
+		{
+			return SlabKey{slab.layer,
+						   slab.drawClass,
+						   roundKey(slab.thickness, 1e-3),
+						   slab.bound.storyOffset,
+						   slab.bound.level,
+						   roundKey(slab.bound.offset, kSlabMergeTol)};
+		}
+
+		// 連続する底盤（polysConnected）の連結成分をインデックス集合で返す（Python 版
+		// _slab_components）。成分は昇順・成分内も昇順で決定的。
+		std::vector<std::vector<std::size_t>>
+		slabComponents(const std::map<std::size_t, std::vector<Pt2>>& polys)
+		{
+			std::vector<std::size_t> ids;
+			ids.reserve(polys.size());
+			for (const auto& entry : polys)
+				ids.push_back(entry.first);
+
+			std::map<std::size_t, std::size_t> parent;
+			for (const std::size_t id : ids)
+				parent[id] = id;
+			const auto find = [&parent](std::size_t a)
+			{
+				while (parent[a] != a)
+				{
+					parent[a] = parent[parent[a]];
+					a = parent[a];
+				}
+				return a;
+			};
+
+			for (std::size_t p = 0; p < ids.size(); ++p)
+			{
+				for (std::size_t q = p + 1; q < ids.size(); ++q)
+				{
+					if (!polysConnected(polys.at(ids[p]), polys.at(ids[q])))
+						continue;
+					const std::size_t ra = find(ids[p]);
+					const std::size_t rb = find(ids[q]);
+					if (ra != rb)
+						parent[std::max(ra, rb)] = std::min(ra, rb);
+				}
+			}
+
+			std::map<std::size_t, std::vector<std::size_t>> comps;
+			for (const std::size_t id : ids)
+				comps[find(id)].push_back(id);
+
+			std::vector<std::vector<std::size_t>> result;
+			result.reserve(comps.size());
+			for (auto& comp : comps)
+			{
+				std::ranges::sort(comp.second);
+				result.push_back(comp.second);
+			}
+			return result;
+		}
+
+		// 底盤の辺 a→b に沿う立上りの半壁厚（該当が無ければ 0。Python 版
+		// _wall_half_thickness_for_edge）。最も重なりの大きい立上りの半壁厚を採る。
+		double wallHalfThicknessForEdge(const Vec2& a, const Vec2& b,
+										const std::vector<WallCommand>& walls)
+		{
+			const double ex = b.x - a.x;
+			const double ey = b.y - a.y;
+			const double length = std::hypot(ex, ey);
+			if (length <= kSlabMergeTol)
+				return 0.0;
+			const double ux = ex / length;
+			const double uy = ey / length;
+
+			double best = 0.0;
+			double bestOverlap = kSlabMergeTol;
+			for (const WallCommand& wall : walls)
+			{
+				const double dx = wall.end.x - wall.start.x;
+				const double dy = wall.end.y - wall.start.y;
+				const double wlen = std::hypot(dx, dy);
+				if (wlen <= kSlabMergeTol)
+					continue;
+				// 壁芯が辺と平行かつ同一直線上（端点の直交距離 ≈ 0）か。
+				if (std::abs((ux * dy) - (uy * dx)) / wlen > kSlabAngleTol)
+					continue;
+				if (std::abs((ux * (wall.start.y - a.y)) - (uy * (wall.start.x - a.x))) >
+					kSlabMergeTol)
+					continue;
+				const double t1 = (ux * (wall.start.x - a.x)) + (uy * (wall.start.y - a.y));
+				const double t2 = (ux * (wall.end.x - a.x)) + (uy * (wall.end.y - a.y));
+				const double overlap =
+					std::min(std::max(t1, t2), length) - std::max(std::min(t1, t2), 0.0);
+				if (overlap > bestOverlap)
+				{
+					bestOverlap = overlap;
+					best = wall.thickness / 2.0;
+				}
+			}
+			return best;
+		}
+
+		// 点 p・方向 d の 2 直線の交点（平行なら false。Python 版 _line_intersection）。
+		bool lineIntersection(const Vec2& p1, const Vec2& d1, const Vec2& p2, const Vec2& d2,
+							  Vec2& out)
+		{
+			const double denom = (d1.x * d2.y) - (d1.y * d2.x);
+			if (std::abs(denom) < 1e-12)
+				return false;
+			const double dx = p2.x - p1.x;
+			const double dy = p2.y - p1.y;
+			const double t = ((dx * d2.y) - (dy * d2.x)) / denom;
+			out = Vec2{p1.x + (t * d1.x), p1.y + (t * d1.y)};
+			return true;
+		}
+
+		// CCW ポリゴンの各辺 i を外向きへ dists[i] だけ移動した頂点列（Python 版
+		// _offset_polygon）。隣接する移動後の辺（直線）の交点を新しい頂点にするので、凸角は
+		// 外側へ伸び、凹角（入隅）は詰まる。
+		std::vector<Vec2> offsetPolygon(const std::vector<Vec2>& pts,
+										const std::vector<double>& dists)
+		{
+			const std::size_t n = pts.size();
+			std::vector<std::pair<Vec2, Vec2>> lines; // (点, 方向)
+			lines.reserve(n);
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				const Vec2& a = pts[i];
+				const Vec2& b = pts[(i + 1) % n];
+				const double ex = b.x - a.x;
+				const double ey = b.y - a.y;
+				const double length = std::hypot(ex, ey);
+				if (length <= 0.0)
+				{
+					lines.emplace_back(a, Vec2{1.0, 0.0});
+					continue;
+				}
+				const double ux = ex / length;
+				const double uy = ey / length;
+				// CCW ポリゴンの外向き法線（進行方向の右）。
+				lines.emplace_back(Vec2{a.x + (dists[i] * uy), a.y - (dists[i] * ux)},
+								   Vec2{ux, uy});
+			}
+
+			std::vector<Vec2> out;
+			out.reserve(n);
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				const auto& [q1, d1] = lines[(i + n - 1) % n];
+				const auto& [q2, d2] = lines[i];
+				Vec2 vertex;
+				if (!lineIntersection(q1, d1, q2, d2, vertex))
+				{
+					// 平行（同一直線の連続辺）: 法線方向へずらした点で代用する。
+					vertex = Vec2{pts[i].x + (dists[i] * d2.y), pts[i].y - (dists[i] * d2.x)};
+				}
+				out.push_back(vertex);
+			}
+			return out;
+		}
+
+		// 底盤外形の各辺を、沿っている立上りの外面まで外側へ広げた外形（Python 版
+		// _offset_boundary_to_walls）。立上りに沿う辺が 1 つも無ければ false（呼び出し側は
+		// 元の外形をそのまま使う）。
+		bool offsetBoundaryToWalls(const std::vector<Vec2>& boundary,
+								   const std::vector<WallCommand>& walls, std::vector<Vec2>& out)
+		{
+			std::vector<Vec2> pts = boundary;
+			if (pts.size() > 1 && core::samePoint(pts.front(), pts.back()))
+				pts.pop_back();
+			if (pts.size() < 3)
+				return false;
+			if (shoelaceSigned(pts) < 0.0)
+				std::ranges::reverse(pts);
+
+			const std::size_t n = pts.size();
+			std::vector<double> dists;
+			dists.reserve(n);
+			for (std::size_t i = 0; i < n; ++i)
+				dists.push_back(wallHalfThicknessForEdge(pts[i], pts[(i + 1) % n], walls));
+			if (std::ranges::none_of(dists, [](double d) { return d > 0.0; }))
+				return false;
+
+			out = offsetPolygon(pts, dists);
+			return true;
+		}
+	} // namespace
+
+	// --- 公開 API ------------------------------------------------------------------
+
+	bool isFoundationWall(const std::string& name)
+	{
+		return startsWith(name, kFoundationWallPrefix);
+	}
+
+	bool isGroundBeam(const std::string& name)
+	{
+		return name.find(kGroundBeamToken) != std::string::npos;
+	}
+
+	bool isBaseSlab(const std::string& name)
+	{
+		return name.find(kBaseSlabToken) != std::string::npos;
+	}
+
+	std::string foundationSlabStyleName(double concreteThickness)
+	{
+		// "基礎スラブ - コンクリート 150mm / 捨てコン 30mm / 砕石 100mm"。厚みは整数 mm
+		// （命令の thickness は解析側で丸め済みだが、名前を作るここでも整数化して揺れを断つ）。
+		const auto mm = [](double value) { return std::to_string(std::llround(value)) + "mm"; };
+		return std::string("基礎スラブ - ") + kSlabConcreteName + " " + mm(concreteThickness) +
+			   " / " + kSlabLeanConcreteName + " " + mm(kSlabLeanConcreteThickness) + " / " +
+			   kSlabGravelName + " " + mm(kSlabGravelThickness);
+	}
+
+	std::vector<SlabComponentCommand> foundationSlabComponents(double concreteThickness)
+	{
+		return {SlabComponentCommand{kSlabConcreteName, concreteThickness},
+				SlabComponentCommand{kSlabLeanConcreteName, kSlabLeanConcreteThickness},
+				SlabComponentCommand{kSlabGravelName, kSlabGravelThickness}};
+	}
+
+	std::vector<int> collectFootingElements(const Model& model)
+	{
+		std::vector<int> elements = model.byType("IFCFOOTING");
+		for (const int id : model.byType("IFCSLAB"))
+		{
+			const Entity* element = model.entity(id);
+			if (element != nullptr && isBaseSlab(entityName(*element)))
+				elements.push_back(id);
+		}
+		return elements;
+	}
+
+	bool resolveSlabTopElevation(const Model& model, double& out)
+	{
+		// 天端 Z（1e-3 で丸めたキー）ごとに平面面積を合計し、合計面積が最大の天端 Z を採る。
+		std::map<long long, std::pair<double, double>> areas; // キー → (面積合計, 天端 Z)
+		for (const int id : collectFootingElements(model))
+		{
+			const Entity* element = model.entity(id);
+			if (element == nullptr || !isBaseSlab(entityName(*element)))
+				continue;
+			WorldSolid solid;
+			if (!resolveElementWorldSolid(model, element, solid))
+				continue;
+			double top = 0.0;
+			double thickness = 0.0;
+			zTopAndThickness(solid, top, thickness);
+			auto& entry = areas[roundKey(top, 1e-3)];
+			entry.first += shoelaceArea(footprint(solid));
+			entry.second = top;
+		}
+		if (areas.empty())
+			return false;
+
+		// 面積が最大の天端。同一面積なら高い方（キーは昇順なので > で更新すれば高い方が残る）。
+		double bestArea = 0.0;
+		double bestTop = 0.0;
+		bool found = false;
+		for (const auto& entry : areas)
+		{
+			const double area = entry.second.first;
+			const double top = entry.second.second;
+			if (!found || area > bestArea || (area >= bestArea && top > bestTop))
+			{
+				bestArea = area;
+				bestTop = top;
+				found = true;
+			}
+		}
+		out = bestTop;
+		return true;
+	}
+
+	bool hasFoundation(const Model& model)
+	{
+		const std::vector<int> elements = collectFootingElements(model);
+		return std::ranges::any_of(elements,
+								   [&model](int id)
+								   {
+									   const Entity* element = model.entity(id);
+									   if (element == nullptr)
+										   return false;
+									   const std::string name = entityName(*element);
+									   return isFoundationWall(name) || isGroundBeam(name) ||
+											  isBaseSlab(name);
+								   });
+	}
+
+	bool buildFoundationStoryCommand(const Model& model, StoryCommand& out)
+	{
+		if (!hasFoundation(model))
+			return false;
+
+		double slabTop = 0.0;
+		if (!resolveSlabTopElevation(model, slabTop))
+			slabTop = 0.0; // 底盤の無い基礎（立上りのみ）は GL に揃える
+
+		StoryCommand cmd;
+		cmd.name = kStoryFoundation;
+		cmd.suffix = kFoundationSuffix;
+		cmd.elevation = 0.0; // GL は常に 0
+		// levels の並びは希望するデザインレイヤのスタック順（上→下）。立上り（GL）を
+		// 底盤（底盤天端）の上段に積む。基礎天端・床束は M11（ヘッダ冒頭参照）。
+		cmd.levels.push_back(LevelCommand{kLevelGL, 0.0, kLayerFoundationWall});
+		cmd.levels.push_back(LevelCommand{kLevelSlabTop, slabTop, kLayerFoundationSlab});
+		out = std::move(cmd);
+		return true;
+	}
+
+	std::vector<WallCommand> mergeWallCommands(const std::vector<WallCommand>& walls)
+	{
+		// 断面キーごとにグループ化する（グループの並びは最初に現れた順＝入力順に決定的）。
+		std::map<WallKey, std::size_t> index;
+		std::vector<std::vector<WallCommand>> groups;
+		for (const WallCommand& wall : walls)
+		{
+			const WallKey key = wallSectionKey(wall);
+			const auto found = index.find(key);
+			if (found == index.end())
+			{
+				index.emplace(key, groups.size());
+				groups.emplace_back();
+				groups.back().push_back(wall);
+			}
+			else
+			{
+				groups[found->second].push_back(wall);
+			}
+		}
+
+		std::vector<WallCommand> result;
+		for (const std::vector<WallCommand>& group : groups)
+		{
+			for (WallCommand& merged : mergeWallGroup(group))
+				result.push_back(std::move(merged));
+		}
+		return result;
+	}
+
+	std::vector<WallCommand> extendFreeWallEnds(const std::vector<WallCommand>& walls,
+												const std::vector<ColumnCommand>& columns)
+	{
+		const std::size_t n = walls.size();
+		// 各壁の始点・終点が他の立上りとの交点に関与するか。
+		std::vector<bool> startJoined(n, false);
+		std::vector<bool> endJoined(n, false);
+		const auto mark = [&](std::size_t index, const Vec2& point)
+		{
+			const WallCommand& wall = walls[index];
+			const double toStart = std::hypot(wall.start.x - point.x, wall.start.y - point.y);
+			const double toEnd = std::hypot(wall.end.x - point.x, wall.end.y - point.y);
+			if (toStart <= toEnd)
+				startJoined[index] = true;
+			else
+				endJoined[index] = true;
+		};
+
+		for (std::size_t i = 0; i < n; ++i)
+		{
+			for (std::size_t j = i + 1; j < n; ++j)
+			{
+				if (walls[i].layer != walls[j].layer)
+					continue;
+				Vec2 point;
+				bool aAtEnd = false;
+				bool bAtEnd = false;
+				if (!wallIntersection(walls[i], walls[j], point, aAtEnd, bAtEnd))
+					continue;
+				if (aAtEnd)
+					mark(i, point);
+				if (bAtEnd)
+					mark(j, point);
+			}
+		}
+
+		std::vector<WallCommand> extended;
+		extended.reserve(n);
+		for (std::size_t i = 0; i < n; ++i)
+		{
+			WallCommand wall = walls[i];
+			const double length = std::hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+			if (length <= 0.0)
+			{
+				extended.push_back(wall);
+				continue;
+			}
+			const double half = wall.thickness / 2.0;
+			const double ux = (wall.end.x - wall.start.x) / length;
+			const double uy = (wall.end.y - wall.start.y) / length;
+			if (!startJoined[i])
+			{
+				// 始端の自由端: 外向きは −軸方向。柱芯へ寄せてから半壁厚延長する。
+				const Vec2 base = terminalColumnBase(wall.start, -ux, -uy, half, columns);
+				wall.start = Vec2{base.x - (ux * half), base.y - (uy * half)};
+			}
+			if (!endJoined[i])
+			{
+				// 終端の自由端: 外向きは +軸方向。
+				const Vec2 base = terminalColumnBase(wall.end, ux, uy, half, columns);
+				wall.end = Vec2{base.x + (ux * half), base.y + (uy * half)};
+			}
+			extended.push_back(wall);
+		}
+		return extended;
+	}
+
+	std::vector<WallCommand> buildWallCommands(Context& context,
+											   const std::vector<ColumnCommand>& columns)
+	{
+		const Model& model = context.model();
+		const std::vector<StoryInfo>& stories = context.stories();
+		if (stories.empty())
+			return {}; // 上端のバインド先（1 階の横架材天端）が決まらない
+
+		// 立上りの上端は 1 階（＝最下階の FL ストーリ）の横架材天端へバインドする。
+		const StoryInfo& first = stories.front();
+		const double beamOffset =
+			first.isTop ? resolveBeamTopOffset(context, first.id) : first.beamOffset;
+		const double beamTopAbs = first.elevation + beamOffset;
+
+		const Vec2 center = context.gridCenter();
+
+		std::vector<WallCommand> commands;
+		for (const int id : model.byType("IFCFOOTING"))
+		{
+			const Entity* element = model.entity(id);
+			if (element == nullptr || !isFoundationWall(entityName(*element)))
+				continue;
+			WorldSolid solid;
+			if (!resolveElementWorldSolid(model, element, solid))
+				continue; // 押し出しを解決できない立上りはスキップ
+			// 立上りは矩形断面（幅=壁厚・背=壁高）を前提とする。非矩形断面は壁厚が定まらない。
+			if (!solid.rectangle)
+				continue;
+			const double thickness = solid.xDim;
+			const double height = solid.yDim;
+
+			// 壁芯は配置原点から押し出し方向へ depth 伸ばした線（グリッド中心オフセット済み）。
+			const Vec2 start{solid.origin.x - center.x, solid.origin.y - center.y};
+			const Vec2 end{start.x + (solid.extrudeDir.x * solid.depth),
+						   start.y + (solid.extrudeDir.y * solid.depth)};
+
+			double topAbs = 0.0;
+			double zThickness = 0.0;
+			zTopAndThickness(solid, topAbs, zThickness);
+			const double bottomAbs = topAbs - height;
+
+			WallCommand cmd;
+			cmd.layer = kLayerFoundationWall;
+			cmd.drawClass = CLASS_FOUNDATION_WALL;
+			cmd.start = start;
+			cmd.end = end;
+			cmd.thickness = thickness;
+			// 下端を kSlabBite だけ下げて底盤に呑み込ませる（core/Document.h の WallCommand
+			// 「下端は底盤へ呑み込ませる」参照）。
+			cmd.bottomBound = StoryBoundCommand{0, kLevelGL, bottomAbs - kSlabBite};
+			cmd.topBound = StoryBoundCommand{1, kLevelBeamTop, topAbs - beamTopAbs};
+			commands.push_back(std::move(cmd));
+		}
+		// 人通口（立上りの切り下げ）と壁結合は M10。ここは統合 → 自由端の延長まで。
+		return extendFreeWallEnds(mergeWallCommands(commands), columns);
+	}
+
+	std::vector<WallCommand> buildWallCommands(const Model& model)
+	{
+		Context context(model);
+		return buildWallCommands(context, context.columns());
+	}
+
+	std::vector<SlabCommand> mergeSlabCommands(const std::vector<SlabCommand>& slabs)
+	{
+		// 断面キーごとにグループ化する（グループの並びは最初に現れた順＝入力順に決定的）。
+		std::map<SlabKey, std::size_t> index;
+		std::vector<std::vector<std::size_t>> groups;
+		for (std::size_t i = 0; i < slabs.size(); ++i)
+		{
+			const SlabKey key = slabMergeKey(slabs[i]);
+			const auto found = index.find(key);
+			if (found == index.end())
+			{
+				index.emplace(key, groups.size());
+				groups.emplace_back();
+				groups.back().push_back(i);
+			}
+			else
+			{
+				groups[found->second].push_back(i);
+			}
+		}
+
+		std::set<std::size_t> dropped;
+		std::map<std::size_t, std::vector<SlabCommand>> mergedAt;
+		for (const std::vector<std::size_t>& group : groups)
+		{
+			std::map<std::size_t, std::vector<Pt2>> polys;
+			for (const std::size_t i : group)
+			{
+				std::vector<Pt2> ring = cleanRing(slabs[i].boundary);
+				if (ring.size() >= 3)
+					polys.emplace(i, std::move(ring));
+			}
+			for (const std::vector<std::size_t>& comp : slabComponents(polys))
+			{
+				if (comp.size() < 2)
+					continue;
+				std::vector<std::vector<Pt2>> parts;
+				parts.reserve(comp.size());
+				for (const std::size_t i : comp)
+					parts.push_back(polys.at(i));
+
+				std::vector<std::vector<Pt2>> loops;
+				if (!polygonUnion(parts, loops))
+					continue; // 開ループ（和を作れない成分）はそのまま残す
+
+				std::vector<std::vector<Pt2>> outer;
+				bool hasHole = false;
+				for (const std::vector<Pt2>& loop : loops)
+				{
+					const double area = shoelaceSigned(loop);
+					if (area > 0.0)
+						outer.push_back(loop);
+					else if (area < 0.0)
+						hasHole = true;
+				}
+				// 単一の外形・穴無しの成分だけ 1 枚に統合する（穴があると単一境界で表せず、
+				// 部屋の下までコンクリートで埋めると誤りになるため見送る）。
+				if (outer.size() != 1 || hasHole)
+					continue;
+
+				SlabCommand merged = slabs[comp.front()];
+				merged.boundary.clear();
+				merged.boundary.reserve(outer.front().size());
+				for (const Pt2& p : outer.front())
+					merged.boundary.push_back(Vec2{p.first, p.second});
+				mergedAt[comp.front()].push_back(std::move(merged));
+				dropped.insert(comp.begin(), comp.end());
+			}
+		}
+
+		std::vector<SlabCommand> result;
+		for (std::size_t i = 0; i < slabs.size(); ++i)
+		{
+			const auto found = mergedAt.find(i);
+			if (found != mergedAt.end())
+				result.insert(result.end(), found->second.begin(), found->second.end());
+			if (dropped.contains(i))
+				continue;
+			result.push_back(slabs[i]);
+		}
+		return result;
+	}
+
+	std::vector<SlabCommand> alignSlabsToWallFaces(const std::vector<SlabCommand>& slabs,
+												   const std::vector<WallCommand>& walls)
+	{
+		if (walls.empty())
+			return slabs;
+
+		std::vector<SlabCommand> result;
+		result.reserve(slabs.size());
+		for (const SlabCommand& slab : slabs)
+		{
+			std::vector<Vec2> boundary;
+			if (!offsetBoundaryToWalls(slab.boundary, walls, boundary))
+			{
+				result.push_back(slab);
+				continue;
+			}
+			SlabCommand adjusted = slab;
+			adjusted.boundary = std::move(boundary);
+			result.push_back(std::move(adjusted));
+		}
+		return result;
+	}
+
+	std::vector<SlabCommand> buildSlabCommands(Context& context,
+											   const std::vector<WallCommand>& walls)
+	{
+		const Model& model = context.model();
+		double slabTopAbs = 0.0;
+		if (!resolveSlabTopElevation(model, slabTopAbs))
+			slabTopAbs = 0.0;
+
+		const Vec2 center = context.gridCenter();
+
+		std::vector<SlabCommand> commands;
+		for (const int id : collectFootingElements(model))
+		{
+			const Entity* element = model.entity(id);
+			if (element == nullptr || !isBaseSlab(entityName(*element)))
+				continue;
+			WorldSolid solid;
+			if (!resolveElementWorldSolid(model, element, solid))
+				continue; // 押し出しを解決できない底盤はスキップ
+
+			double topAbs = 0.0;
+			double thickness = 0.0;
+			zTopAndThickness(solid, topAbs, thickness);
+			// スラブスタイルのコンクリート厚は整数 mm に丸める（同厚の底盤が別スタイルへ
+			// 散らないようにする。Python 版 float(round(thickness)) と同値）。
+			const double concrete = std::round(thickness);
+
+			std::vector<Vec2> boundary = footprint(solid);
+			for (Vec2& p : boundary)
+			{
+				p.x -= center.x;
+				p.y -= center.y;
+			}
+
+			SlabCommand cmd;
+			cmd.layer = kLayerFoundationSlab;
+			cmd.drawClass = CLASS_FOUNDATION_SLAB;
+			cmd.boundary = std::move(boundary);
+			cmd.styleName = foundationSlabStyleName(concrete);
+			cmd.components = foundationSlabComponents(concrete);
+			cmd.datum = core::SlabDatum::Top; // 基準面はコンクリート天端
+			cmd.thickness = concrete;
+			cmd.elevation = topAbs;
+			cmd.bound = StoryBoundCommand{0, kLevelSlabTop, topAbs - slabTopAbs};
+			commands.push_back(std::move(cmd));
+		}
+		// 地中梁（台形断面のモディファイア）は M10。ここは統合 → 外面合わせまで。
+		return alignSlabsToWallFaces(mergeSlabCommands(commands), walls);
+	}
+
+	std::vector<SlabCommand> buildSlabCommands(const Model& model)
+	{
+		Context context(model);
+		return buildSlabCommands(context, context.walls());
+	}
+} // namespace HomeskzIfcImport::parse

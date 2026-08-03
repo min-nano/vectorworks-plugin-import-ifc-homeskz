@@ -10,9 +10,10 @@
 //	Python 版に合わせ、追跡しやすさと仕様のブレ防止を優先する。予約語（class 等）は
 //	drawClass / className のように機械的に置換する。
 //
-//	現状は「バージョン＋ stories / grids / floors / rafters / roofs」を持つ（M1 通り芯・
-//	M3 ストーリ・M5 床板・M6 屋根組ぶん）。残りの命令リスト（members / columns / walls /
-//	slabs …）は、対応するマイルストーンで要素を移植するたびに 1 つずつ追加する（ROADMAP.md）。
+//	現状は「バージョン＋ stories / grids / floors / members / columns / rafters / roofs /
+//	walls / slabs」を持つ（M1 通り芯・M3 ストーリ・M5 床板・M6 屋根組・M7 横架材・M8 柱・
+//	M9 基礎ぶん）。残りの命令リスト（wallJoins / anchorBolts …）は、対応するマイルストーンで
+//	要素を移植するたびに 1 つずつ追加する（ROADMAP.md）。
 //
 
 #pragma once
@@ -50,6 +51,12 @@ namespace HomeskzIfcImport::core
 	// 専用レベル。母屋・棟木は "母屋"、登り梁は "登り梁"（parse/Member.h 参照）。
 	inline constexpr const char* kLevelMoya = "母屋";
 	inline constexpr const char* kLevelNoboribari = "登り梁";
+	// M9 基礎ストーリのレベル。GL は基礎ストーリの原点（常に 0）で立上り（"F-立上り"）を、
+	// 底盤天端は底盤コンクリートの天端で底盤（"F-底盤"）を載せる。アンカーボルト
+	// （"基礎天端"）・床束（"床束"）のレベルは、その要素を導入する M11 で足す
+	// （描画対象の無いレベルは先に作らない＝空レイヤを作らない。parse/Footing.h 参照）。
+	inline constexpr const char* kLevelGL = "GL";
+	inline constexpr const char* kLevelSlabTop = "底盤天端";
 
 	// 通り芯（グリッド）1 本の描画命令。Python 版 document.py の GridCommand（dict）に
 	// 対応する。draw/Grid がこれを GridAxis オブジェクトへ変換する（ROADMAP.md M1）。
@@ -350,11 +357,81 @@ namespace HomeskzIfcImport::core
 		StoryBoundCommand topBound;
 	};
 
+	// 基礎の立上り（基礎梁）を壁オブジェクトとして描く命令。Python 版 document.py の
+	// WallCommand（dict）に対応する。draw/Footing がこれを壁へ変換する（ROADMAP.md M9）。
+	//
+	// 【高さの持ち方】立上りは基礎ストーリの GL（下端）と 1 階（上階）の横架材天端（上端）に
+	// バインドし、実形状の絶対 Z との差を各 offset に入れる。**壁だけは高さ基準に汎用の
+	// SetObjectStoryBound ではなく壁専用の SetWallOverallHeights を使う**（前者ではレイヤの
+	// 「壁の高さ」設定に引きずられる。Python 版 CLAUDE.md「基礎」節）。したがって
+	// bottomBound / topBound の storyOffset は SetWallOverallHeights の story 引数
+	// （0=自階・1=上階）とそのまま一致する。
+	//
+	// 【下端は底盤へ呑み込ませる】立上りの下端は底盤の底面とちょうど一致する（coplanar）ため、
+	// そのままだと断面ビューポートで境界線が不安定に出る。解析側が下端を kSlabBite だけ
+	// 下げてあり、bottomBound.offset にはその呑み込み後の値が入っている（parse/Footing.h）。
+	//
+	// Python 版キーとの対応（reinforcement＝配筋は M10）:
+	//   layer       ← 'layer'        … 配置先デザインレイヤ名（"F-立上り"）
+	//   drawClass   ← 'class'        … クラス名（立ち上がり。予約語 class を機械置換）
+	//   start       ← 'start'        … 壁芯の始点（センタリング済みの平面座標）
+	//   end         ← 'end'          … 壁芯の終点（同上）
+	//   thickness   ← 'thickness'    … 壁厚（矩形断面の幅。mm）
+	//   bottomBound ← 'bottom_bound' … 下端の高さ基準（基礎の GL レベル）
+	//   topBound    ← 'top_bound'    … 上端の高さ基準（1 階の横架材天端レベル）
+	struct WallCommand
+	{
+		std::string layer;
+		std::string drawClass;
+		Vec2 start;
+		Vec2 end;
+		double thickness = 0.0;
+		StoryBoundCommand bottomBound;
+		StoryBoundCommand topBound;
+	};
+
+	// 基礎の底盤をスラブオブジェクトとして描く命令。Python 版 document.py の SlabCommand
+	// （dict）に対応する。draw/Footing がこれをスラブへ変換する（ROADMAP.md M9）。床板
+	// （FloorCommand）と描画の作法は同じで、構成層とスタイル名の中身だけが基礎向けになる。
+	//
+	// 【高さの持ち方】elevation は**コンクリート天端**（＝底盤天端）の絶対 Z で、datum は
+	// 常に Top（最上層＝コンクリートの上端）。基礎ストーリは GL=0 なので、この絶対 Z は
+	// ストーリ基準高さとも一致する。bound は底盤天端レベルへのバインドで、offset は実天端 Z と
+	// 底盤天端レベル（面積最大の天端 Z）の差（主たる底盤は ≈0、独立基礎底盤等はずれる）。
+	//
+	// 【スラブ構成】components は上から コンクリート（thickness）＋ 捨てコン ＋ 砕石。
+	// styleName はコンクリート厚ごとに 1 つ（"基礎スラブ - コンクリート 150mm / 捨てコン
+	// 30mm / 砕石 100mm"）で、厚みの違う底盤は別スタイルになる（parse/Footing.h）。
+	//
+	// Python 版キーとの対応（reinforcement＝配筋・modifiers＝地中梁は M10）:
+	//   layer      ← 'layer'      … 配置先デザインレイヤ名（"F-底盤"）
+	//   drawClass  ← 'class'      … クラス名（基礎スラブ。予約語 class を機械置換）
+	//   boundary   ← 'boundary'   … 平面外形（mm・グリッド中心オフセット済み。閉じた
+	//                               ポリゴンの頂点列で、末尾に始点を重複させない）
+	//   styleName  （Python 版は描画側が厚みから引く）… スラブスタイル名
+	//   components （同上）… スタイルの構成層（上から）
+	//   datum      （同上）… 高さ基準の面（底盤は常に Top＝コンクリート天端）
+	//   thickness  ← 'thickness'  … コンクリート厚（mm。整数に丸めた値）
+	//   elevation  ← 'elevation'  … コンクリート天端の絶対 Z
+	//   bound      ← 'bound'      … 天端の高さ基準（底盤天端レベル＋差分）
+	struct SlabCommand
+	{
+		std::string layer;
+		std::string drawClass;
+		std::vector<Vec2> boundary;
+		std::string styleName;
+		std::vector<SlabComponentCommand> components;
+		SlabDatum datum = SlabDatum::Top;
+		double thickness = 0.0;
+		double elevation = 0.0;
+		StoryBoundCommand bound;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
 	// TODO: 要素ごとに命令リストを追加していく（フィールド名は Python 版のキーに対応）。
-	//   * M9 walls / slabs …
+	//   * M10 wallJoins / modifiers（地中梁）…
 	//   スキーマを変えるときは構造体・validateDocument・テストを同時更新する。
 	struct Document
 	{
@@ -393,6 +470,17 @@ namespace HomeskzIfcImport::core
 		// 要素の出現順で決定的。parse/Column が組み立てる）。配置先の span レイヤ
 		// （"1to2-柱" 等）は stories が作るので、描画は stories の後に処理する。
 		std::vector<ColumnCommand> columns;
+
+		// M9 基礎の立上り。IfcFooting "基礎梁…" を解析して得た WallCommand の列
+		// （同一直線・同一断面のものを統合し、自由端を半壁厚延長した後の値。#id 昇順に
+		// 準ずる決定的な並び。parse/Footing が組み立てる）。配置先の "F-立上り" レイヤは
+		// 基礎ストーリ（stories の先頭）が作るので、描画は stories の後に処理する。
+		std::vector<WallCommand> walls;
+
+		// M9 基礎の底盤。IfcSlab / IfcFooting の "…底盤…" を解析して得た SlabCommand の列
+		// （連続する同厚・同高のものを統合し、外周を立上りの外面へ合わせた後の値。
+		// parse/Footing が組み立てる）。外面合わせに立上りを参照するので walls の後に作る。
+		std::vector<SlabCommand> slabs;
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は

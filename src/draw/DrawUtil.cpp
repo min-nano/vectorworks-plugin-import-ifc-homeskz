@@ -16,8 +16,10 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
@@ -26,6 +28,15 @@ namespace HomeskzIfcImport::draw
 		// デザインレイヤの種別コード（CreateLayer の layerType 引数）。1 = デザインレイヤ、
 		// 2 = シート（プレゼンテーション）レイヤ。本プラグインが描くのはデザインレイヤ。
 		constexpr short kDesignLayerType = 1;
+
+		// 既存のコンポーネント（層）数。取得できなければ 0（＝層を持たない）とみなす。
+		short CountComponents(MCObjectHandle object)
+		{
+			short count = 0;
+			if (!gSDK->GetNumberOfComponents(object, count))
+				return 0;
+			return count;
+		}
 	} // namespace
 
 	void SetClassByName(MCObjectHandle object, const std::string& className)
@@ -45,6 +56,84 @@ namespace HomeskzIfcImport::draw
 		gSDK->SetFPatByClass(object);
 		gSDK->SetArrowByClass(object);
 		gSDK->SetOpacityByClass(object);
+	}
+
+	MCObjectHandle CreateClosedPolygon(const std::vector<core::Vec2>& boundary)
+	{
+		if (boundary.empty())
+			return nil;
+
+		std::vector<VWPoint2D> vertices;
+		vertices.reserve(boundary.size());
+		for (const core::Vec2& point : boundary)
+			vertices.emplace_back(point.x, point.y);
+
+		VWPolygon2DObj polygon(vertices);
+		polygon.SetClosed(true); // スラブのプロファイルは閉じた外形
+		return polygon.GetThisObject();
+	}
+
+	void SetSlabComponents(MCObjectHandle object,
+						   const std::vector<core::SlabComponentCommand>& components)
+	{
+		const short original = CountComponents(object);
+		const auto wanted = static_cast<short>(components.size());
+
+		// 1. 命令の層を先頭から順に挿入する（索引 i の層の「手前」に入るので、0,1,… の順に
+		//    入れると命令どおりの並びが先頭にできる）。fill / ペン太さ / 線種は文書の既定に
+		//    任せ（0）、描画属性はクラスに従わせる。
+		for (short index = 0; index < wanted; ++index)
+		{
+			const core::SlabComponentCommand& component =
+				components[static_cast<std::size_t>(index)];
+			gSDK->InsertNewComponentN(object, index, component.thickness, 0, 0, 0, 0, 0);
+			gSDK->SetComponentWidth(object, index, component.thickness);
+			gSDK->SetComponentName(object, index, TXString(component.name.c_str()));
+		}
+
+		// 2. 挿入した層の直後に並んでいる元の層を、前から順に削除する（索引 wanted は常に
+		//    「元の層の先頭」を指すので、同じ索引を元の層数だけ削除すればよい）。
+		for (short removed = 0; removed < original; ++removed)
+		{
+			if (!gSDK->DeleteComponent(object, wanted))
+				break;
+		}
+	}
+
+	void SetSlabDatum(MCObjectHandle object, core::SlabDatum datum, short componentCount)
+	{
+		if (componentCount <= 0)
+			return;
+		// ローカル名は SDK 側の引数名（componentIndex / datumIsTopOfComponent）に寄せてある。
+		// 似た並びの short + bool を渡すため、名前が違うと clang-tidy の
+		// readability-suspicious-call-argument が「引数が入れ替わっているのでは」と誤検知する。
+		const bool datumIsTop = (datum == core::SlabDatum::Top);
+		// 三項演算子の共通型は int になるので、short への縮小は 1 か所でまとめて行う
+		// （型はキャスト側に書いてあるので auto。modernize-use-auto）。
+		const auto componentIndex = static_cast<short>(datumIsTop ? 0 : componentCount - 1);
+		gSDK->SetDatumSlabComponent(object, componentIndex);
+		// 構成要素を指すだけでは既定の面（中心／下端）のままなので、面も明示する。
+		gSDK->SetComponentDatumIsTopOfComponent(object, componentIndex, datumIsTop);
+	}
+
+	InternalIndex ResolveSlabStyle(const std::string& styleName,
+								   const std::vector<core::SlabComponentCommand>& components,
+								   core::SlabDatum datum)
+	{
+		if (styleName.empty())
+			return 0;
+
+		const TXString name(styleName.c_str());
+		MCObjectHandle style = gSDK->GetNamedObject(name);
+		if (style == nil)
+			style = gSDK->CreateSlabStyle(name);
+		if (style == nil)
+			return 0;
+
+		SetSlabComponents(style, components);
+		// 基準面（構成要素とその上端／下端）はスタイルが持つので、スタイル側へ設定する。
+		SetSlabDatum(style, datum, static_cast<short>(components.size()));
+		return gSDK->GetObjectInternalIndex(style);
 	}
 
 	TXString ResolveParamName(const VWParametricObj& pio, const char* universalName,

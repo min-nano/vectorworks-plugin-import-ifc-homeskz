@@ -28,6 +28,7 @@
 #include "core/Document.h"
 #include "parse/Column.h"
 #include "parse/Floor.h"
+#include "parse/Footing.h"
 #include "parse/Grid.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Member.h"
@@ -92,6 +93,11 @@ namespace HomeskzIfcImport::parse
 		// 何度も走る。
 		const std::vector<core::ColumnCommand>& columns();
 
+		// 基礎の立上りの命令（parse/Footing の buildWallCommands）。2 者がこの 1 回の解析結果を
+		// 共有する: Document の walls と、底盤の外面合わせ（辺に沿う立上りの半壁厚）。立上りの
+		// 自由端は柱芯へ寄せるので、この計算は columns（上記）を入力に取る。
+		const std::vector<core::WallCommand>& walls();
+
 	private:
 		const Model* fModel = nullptr;
 
@@ -103,5 +109,6 @@ namespace HomeskzIfcImport::parse
 		std::map<int, std::optional<RoofPlane>> fRoofPlanes;
 		std::optional<std::vector<core::MemberCommand>> fMembers;
 		std::optional<std::vector<core::ColumnCommand>> fColumns;
+		std::optional<std::vector<core::WallCommand>> fWalls;
 	};
 } // namespace HomeskzIfcImport::parse

@@ -92,4 +92,11 @@ namespace HomeskzIfcImport::parse
 			fColumns = buildColumnCommands(*this);
 		return *fColumns;
 	}
+
+	const std::vector<core::WallCommand>& Context::walls()
+	{
+		if (!fWalls.has_value())
+			fWalls = buildWallCommands(*this, columns());
+		return *fWalls;
+	}
 } // namespace HomeskzIfcImport::parse
