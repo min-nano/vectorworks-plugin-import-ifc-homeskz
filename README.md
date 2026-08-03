@@ -70,6 +70,10 @@ scripts/
   vw-update.ps1             同上の Windows 版（PowerShell。.vlb の隣に同梱される）
   lint.sh                   ローカルで全 lint（clang / cmake / yaml / shell …）
                             を実行する（CI と同じチェック。--fix で自動修正）
+  ci-common.sh              CI の完了待ちの共通土台（必ず有限時間で exit するための
+                            歯止めとポーリング。下記 2 つが source する）
+  ci-wait.sh                PR ／ブランチ ／コミットの CI が終わるまで待ち、終わった
+                            瞬間に exit する（結果は最終行の conclusion=… で分かる）
   ci-debug.sh               CI デバッグ実行を起動し、完了まで待って結果を取り出す
                             （SDK が手元に無い環境から SDK 依存の調査を行うため）
   ci-debug-job.sh           同・ランナー側の本体。調査モードの実装はこちらにある
@@ -470,6 +474,25 @@ scripts/ci-debug.sh run --mode build --platform windows
 読み取り専用トークンしか無い環境での 2 手順・モードの増やし方は、`CLAUDE.md` の
 「CI デバッグ」節が単一の真実です。** そちらを参照してください（この README では
 重ねて説明しません）。
+
+### CI の完了待ち（`scripts/ci-wait.sh`）
+
+PR やブランチの CI（`build.yml` / `lint.yml` / `test.yml` …）が終わるのを待つ側にも
+同じ道具立てを用意しています。`scripts/ci-wait.sh` は対象のチェックが全部終わった
+**瞬間に exit** し、最終行に結果を出します。
+
+```bash
+scripts/ci-wait.sh --pr 34        # PR の head（待機中に push が入ったら追随する）
+scripts/ci-wait.sh --ref main     # ブランチ / タグ
+scripts/ci-wait.sh                # いま checkout しているブランチ
+```
+
+待機の土台（`scripts/ci-common.sh`）は `ci-debug.sh` と共有で、**どんな異常でも必ず
+有限時間で exit する**ことを最優先に作ってあります（HTTP の時間上限・締切判定・
+ウォッチドッグの三重）。加えて「チェックがまだ 1 件も登録されていない」「新しい push で
+古い run がキャンセルされた」を green と取り違えません。この性質は
+`tests/ci-wait.test.sh`（ctest の `CiWaitScriptTests`）で回帰テストしています。
+結果の読み方（`conclusion=` の一覧）は `CLAUDE.md`「CI の完了を待つ」節が単一の真実です。
 
 ## コーディング規則の強制（Lint）
 

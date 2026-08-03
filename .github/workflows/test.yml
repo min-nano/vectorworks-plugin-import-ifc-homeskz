@@ -50,14 +50,16 @@ jobs:
 
       # cmake + g++ for the C++ tests; python3/zip/unzip are the helpers the bash
       # updater-script harness (tests/vw-update.test.sh) stubs the JSON/zip I/O
-      # with. pwsh (for the PowerShell harness) is preinstalled on the runner —
+      # with; jq is what the CI-wait clients (scripts/ci-*.sh) parse GitHub
+      # responses with, so tests/ci-wait.test.sh needs it too. pwsh (for the
+      # PowerShell harness) is preinstalled on the runner —
       # VW_REQUIRE_SCRIPT_TESTS below turns a missing one into a hard error, so a
       # dropped dependency fails CI instead of silently skipping the tests.
       - name: Install build tools
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake g++ python3 zip unzip
+          sudo apt-get install -y --no-install-recommends cmake g++ python3 zip unzip jq
 
       # Tests only (VW_BUILD_PLUGIN=OFF), instrumented with ASan + UBSan (no
       # coverage — that is the separate `coverage` job). g++ ships libasan /
