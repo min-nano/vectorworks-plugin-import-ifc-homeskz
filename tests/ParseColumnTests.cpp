@@ -269,6 +269,38 @@ TEST(position_extracts_origin)
 	CHECK(near(position.y, 2000.0));
 }
 
+TEST(position_false_for_malformed_placements)
+{
+	// ObjectPlacement が IfcLocalPlacement でない／RelativePlacement が
+	// IfcAxis2Placement3D でない／Location が無い／座標が 2 要素に満たない、
+	// のいずれでも取れない。
+	const std::vector<std::string> texts = {
+		"#1=IFCAXIS2PLACEMENT3D($,$,$);\n"
+		"#2=IFCCOLUMN('c',$,$,$,$,#1,$,$);\n",
+		"#1=IFCAXIS2PLACEMENT2D($,$);\n"
+		"#2=IFCLOCALPLACEMENT($,#1);\n"
+		"#3=IFCCOLUMN('c',$,$,$,$,#2,$,$);\n",
+		"#1=IFCAXIS2PLACEMENT3D($,$,$);\n"
+		"#2=IFCLOCALPLACEMENT($,#1);\n"
+		"#3=IFCCOLUMN('c',$,$,$,$,#2,$,$);\n",
+		// 座標が 1 要素しかない（平面座標にならない）。
+		"#1=IFCCARTESIANPOINT((0.));\n"
+		"#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
+		"#3=IFCLOCALPLACEMENT($,#2);\n"
+		"#4=IFCCOLUMN('c',$,$,$,$,#3,$,$);\n",
+	};
+	for (const std::string& text : texts)
+	{
+		const Model model = loadIfcFromText(text);
+		const std::vector<int> columns = model.byType("IFCCOLUMN");
+		CHECK_EQ(columns.size(), std::size_t(1));
+		if (columns.empty())
+			continue;
+		Vec2 position;
+		CHECK(!columnPosition2D(model, *model.entity(columns.front()), position));
+	}
+}
+
 TEST(position_false_when_no_placement)
 {
 	StepText step;
@@ -388,6 +420,17 @@ TEST(width_on_top_matches_member_pierced_by_post)
 	const std::optional<double> width = memberWidthOnTop(0.0, 0.0, 6861.0, {moya});
 	CHECK(width.has_value());
 	CHECK(near(width.value_or(0.0), 105.0));
+}
+
+TEST(width_on_top_ignores_degenerate_member)
+{
+	// 平面投影長が 0 の材（始端＝終端）は軸が定まらないので対象にしない。
+	TopMemberSpec spec;
+	spec.start = Vec2{0.0, 0.0};
+	spec.end = Vec2{0.0, 0.0};
+	spec.topZ = 7090.0;
+	const MemberCommand degenerate = topMember(spec);
+	CHECK(!memberWidthOnTop(0.0, 0.0, 7000.0, {degenerate}).has_value());
 }
 
 TEST(width_on_top_ignores_member_far_below)
@@ -994,6 +1037,88 @@ TEST(build_general_column_not_resized_by_member)
 		return;
 	CHECK(near(commands[0].width, 105.0));
 	CHECK(near(commands[0].depth, 120.0));
+}
+
+// ---------------------------------------------------------------------------
+// 柱頭・柱脚金物の異常系（型を辿れない金物は仕様が空 ＝ 対応付けない）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 金物を「型の辿り方」だけ変えて置く。typeRelBody は IfcRelDefinesByType の本体で、
+	// 空文字なら型そのものを作らない。placement=false なら配置を持たない金物にする。
+	std::vector<ColumnCommand> buildWithHardware(const std::string& typeRelKind, bool placement)
+	{
+		StepText step;
+		const int storey = makeStorey(step, "1FL", 600.0);
+		makeStorey(step, "RFL", 6300.0);
+		{
+			ColumnSpec spec;
+			makeColumn(step, storey, spec);
+		}
+
+		std::string placementRef = "$";
+		if (placement)
+		{
+			const int location = point3(step, 0.0, 0.0, 0.0);
+			const int axis = step.add("IFCAXIS2PLACEMENT3D(" + ref(location) + ",$,$)");
+			placementRef = ref(step.add("IFCLOCALPLACEMENT($," + ref(axis) + ")"));
+		}
+		const int fastener = step.add("IFCMECHANICALFASTENER('f',$,'柱No.1:柱頭金物',$,$," +
+									  placementRef + ",$,$,$,$)");
+		if (typeRelKind == "empty-related")
+		{
+			// 金物を（RelatedObjects ではなく）RelatingType 側から参照する壊れた rel。
+			// 逆参照には現れるが RelatedObjects がリストでないので型として採らない。
+			step.add("IFCRELDEFINESBYTYPE('d',$,$,$,$," + ref(fastener) + ")");
+		}
+		else if (typeRelKind == "other-object")
+		{
+			// 同じく RelatingType 側から参照する壊れた rel で、RelatedObjects は別の要素。
+			// 逆参照には現れるが、この金物を定義していないので型として採らない。
+			step.add("IFCRELDEFINESBYTYPE('d',$,$,$,(" + ref(storey) + ")," + ref(fastener) + ")");
+		}
+		else if (typeRelKind == "missing-type")
+		{
+			// RelatingType が $（型が無い）。
+			step.add("IFCRELDEFINESBYTYPE('d',$,$,$,(" + ref(fastener) + "),$)");
+		}
+		else if (typeRelKind == "unnamed-type")
+		{
+			// 型はあるが Name が $ → 仕様が空文字になる。
+			const int type = step.add("IFCMECHANICALFASTENERTYPE('t',$,$,$,$,$,$,$,$)");
+			step.add("IFCRELDEFINESBYTYPE('d',$,$,$,(" + ref(fastener) + ")," + ref(type) + ")");
+		}
+		contain(step, storey, fastener);
+		return buildColumnCommands(step.build());
+	}
+} // namespace
+
+TEST(build_ignores_hardware_whose_type_cannot_be_resolved)
+{
+	// 型を辿れない金物（rel が無い／RelatedObjects がリストでない／別要素を定義している／
+	// RelatingType が無い／型名が空）はいずれも仕様が空になり、柱へ対応付けない。
+	for (const std::string& kind :
+		 {std::string("none"), std::string("empty-related"), std::string("other-object"),
+		  std::string("missing-type"), std::string("unnamed-type")})
+	{
+		const std::vector<ColumnCommand> commands = buildWithHardware(kind, true);
+		CHECK_EQ(commands.size(), std::size_t(1));
+		if (commands.empty())
+			continue;
+		CHECK(commands[0].topHardware.empty());
+		CHECK_EQ(commands[0].memberId, std::string("105×105 - 管柱"));
+	}
+}
+
+TEST(build_ignores_hardware_without_placement)
+{
+	// 配置を持たない金物は平面座標で対応付けられないのでスキップする。
+	const std::vector<ColumnCommand> commands = buildWithHardware("named", false);
+	CHECK_EQ(commands.size(), std::size_t(1));
+	if (commands.empty())
+		return;
+	CHECK(commands[0].topHardware.empty());
 }
 
 // ---------------------------------------------------------------------------

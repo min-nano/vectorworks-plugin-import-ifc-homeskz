@@ -44,6 +44,7 @@ using HomeskzIfcImport::parse::correctNoboribari;
 using HomeskzIfcImport::parse::correctOneNoboribari;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
+using HomeskzIfcImport::parse::noboribariColumnPenetration;
 using HomeskzIfcImport::parse::noboribariEndTrim;
 using HomeskzIfcImport::parse::NoboribariRoofPlane;
 using HomeskzIfcImport::parse::RoofPlane;
@@ -131,6 +132,25 @@ namespace
 		return command;
 	}
 
+	// 受ける柱の column 命令（M8。登り梁の端部詰めは柱面まで見る）。
+	core::ColumnCommand column(const Vec2& position, double elevation, double height = 500.0,
+							   double width = 105.0, double depth = 105.0)
+	{
+		core::ColumnCommand command;
+		command.layer = "2to2.5-柱";
+		command.memberId = "col";
+		command.drawClass = HomeskzIfcImport::parse::CLASS_KOYAZUKA;
+		command.structuralUse = "5";
+		command.position = position;
+		command.width = width;
+		command.depth = depth;
+		command.height = height;
+		command.elevation = elevation;
+		command.bottomBound = StoryBoundCommand{0, "軒高", 0.0};
+		command.topBound = StoryBoundCommand{0, "軒高", height};
+		return command;
+	}
+
 	// 2 つの命令が（補正対象のフィールドについて）同じか。素通しの確認に使う。
 	bool sameCommand(const MemberCommand& a, const MemberCommand& b)
 	{
@@ -199,6 +219,82 @@ TEST(end_trim_ignores_degenerate_receiver)
 		receiver(Vec2{1000.0, 0.0}, Vec2{1000.0, 0.0}, 1120.0)};
 	CHECK(near(noboribariEndTrim(Vec2{1000.0, 0.0}, Vec2{1.0, 0.0}, 900.0, 1150.0, receivers, {}),
 			   0.0));
+}
+
+// ---------------------------------------------------------------------------
+// noboribariColumnPenetration / 柱を受け材にした端部詰め（M8）
+// ---------------------------------------------------------------------------
+
+TEST(column_penetration_trims_to_near_face)
+{
+	// 柱: 中心 (1000, 0)・105 角 → 面は x=947.5 / 1052.5、y=±52.5。端点が中心にあり
+	// 外向き +x なら、内側（−x）へ 52.5mm 引き戻すと手前の面 947.5 に出る。
+	const core::ColumnCommand receiver = column(Vec2{1000.0, 0.0}, 900.0);
+	CHECK(near(noboribariColumnPenetration(Vec2{1000.0, 0.0}, Vec2{1.0, 0.0}, receiver), 52.5));
+}
+
+TEST(column_penetration_is_zero_outside_the_section)
+{
+	// 端点が柱の断面の外（x が半幅を超える）なら食い込んでいない。
+	const core::ColumnCommand receiver = column(Vec2{1000.0, 0.0}, 900.0);
+	CHECK(near(noboribariColumnPenetration(Vec2{1100.0, 0.0}, Vec2{1.0, 0.0}, receiver), 0.0));
+	// y 方向に外れている場合も同じ。
+	CHECK(near(noboribariColumnPenetration(Vec2{1000.0, 100.0}, Vec2{1.0, 0.0}, receiver), 0.0));
+}
+
+TEST(column_penetration_takes_the_nearest_face_for_a_diagonal)
+{
+	// 外向きが斜め（+x, +y の単位ベクトル）なら、X 面・Y 面のうち先に出る方までの距離。
+	// 端点 (1030, 1010) は中心 (1000, 1000) から X へ 30・Y へ 10 入った位置で、内側方向は
+	// (−1/√2, −1/√2)。X 面（947.5）までは (947.5−1030)/(−1/√2) ≈ 116.7、Y 面（947.5）までは
+	// (947.5−1010)/(−1/√2) ≈ 88.4 → 小さい方を採る。
+	const core::ColumnCommand receiver = column(Vec2{1000.0, 1000.0}, 900.0);
+	const double diagonal = 1.0 / std::sqrt(2.0);
+	CHECK(
+		near(noboribariColumnPenetration(Vec2{1030.0, 1010.0}, Vec2{diagonal, diagonal}, receiver),
+			 62.5 / diagonal));
+}
+
+TEST(column_penetration_is_zero_on_the_face)
+{
+	// 端点がちょうど手前の面（x=947.5）にあると引き戻す距離が 0 になり、詰めない。
+	const core::ColumnCommand receiver = column(Vec2{1000.0, 0.0}, 900.0);
+	CHECK(near(noboribariColumnPenetration(Vec2{947.5, 0.0}, Vec2{1.0, 0.0}, receiver), 0.0));
+}
+
+TEST(column_penetration_is_zero_when_direction_degenerates)
+{
+	// 外向きが 0 ベクトル（方向が定まらない）なら詰めない。
+	const core::ColumnCommand receiver = column(Vec2{1000.0, 0.0}, 900.0);
+	CHECK(near(noboribariColumnPenetration(Vec2{1000.0, 0.0}, Vec2{0.0, 0.0}, receiver), 0.0));
+}
+
+TEST(end_trim_trims_to_column_face)
+{
+	// 受け材が無くても、Z 範囲の重なる柱があれば端部を柱の手前の面まで詰める。
+	const std::vector<core::ColumnCommand> columns = {column(Vec2{1000.0, 0.0}, 900.0)};
+	CHECK(near(noboribariEndTrim(Vec2{1000.0, 0.0}, Vec2{1.0, 0.0}, 900.0, 1050.0, {}, columns),
+			   52.5));
+}
+
+TEST(end_trim_column_is_gated_by_z_range)
+{
+	// Z 範囲が離れた柱（下端 5000・上端 5500）は取り合いでない。
+	const std::vector<core::ColumnCommand> columns = {column(Vec2{1000.0, 0.0}, 5000.0)};
+	CHECK(near(noboribariEndTrim(Vec2{1000.0, 0.0}, Vec2{1.0, 0.0}, 900.0, 1050.0, {}, columns),
+			   0.0));
+}
+
+TEST(correct_one_trims_the_end_against_a_column)
+{
+	// 梁 (0,0)→(1000,0)。終端側に中心 (1000, 0)・105 角の柱があり、手前の面 947.5 まで詰める。
+	const MemberCommand command =
+		noboribari(Vec2{0.0, 0.0}, Vec2{1000.0, 0.0}, 1000.0, 1150.0, 800.0);
+	const std::vector<core::ColumnCommand> columns = {column(Vec2{1000.0, 0.0}, 900.0, 300.0)};
+
+	const MemberCommand out = correctOneNoboribari(command, {}, {}, columns, Vec2{0.0, 0.0});
+	CHECK(near(out.end.x, 947.5));
+	CHECK(near(out.start.x, 0.0)); // 始端は受けるものが無く不変
 }
 
 // ---------------------------------------------------------------------------

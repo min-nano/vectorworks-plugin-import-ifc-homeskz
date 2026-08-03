@@ -778,6 +778,14 @@ TEST(parse_span_layer_rejects_malformed_core)
 	CHECK(!parseSpanLayer("foo-柱", from, to));
 	CHECK(!parseSpanLayer("atob-柱", from, to));
 	CHECK(!parseSpanLayer("-柱", from, to));
+	// 片側が空（"to" が先頭・末尾）。
+	CHECK(!parseSpanLayer("to2-柱", from, to));
+	CHECK(!parseSpanLayer("1to-柱", from, to));
+	// 数値の後ろに余りがある（数値として全部は読めない）。
+	CHECK(!parseSpanLayer("1ato2-柱", from, to));
+	CHECK(!parseSpanLayer("1to2x-柱", from, to));
+	// "to" が 2 つ以上あると (from, to) に分解できない。
+	CHECK(!parseSpanLayer("1to2to3-柱", from, to));
 }
 
 // ---------------------------------------------------------------------------
