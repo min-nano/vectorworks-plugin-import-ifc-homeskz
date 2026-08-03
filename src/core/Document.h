@@ -367,9 +367,9 @@ namespace HomeskzIfcImport::core
 	// bottomBound / topBound の storyOffset は SetWallOverallHeights の story 引数
 	// （0=自階・1=上階）とそのまま一致する。
 	//
-	// 【下端は底盤へ呑み込ませる】立上りの下端は底盤の底面とちょうど一致する（coplanar）ため、
-	// そのままだと断面ビューポートで境界線が不安定に出る。解析側が下端を kSlabBite だけ
-	// 下げてあり、bottomBound.offset にはその呑み込み後の値が入っている（parse/Footing.h）。
+	// 【下端は IFC 実形状のまま】ホームズ君は基礎梁を底盤の底面までの全高でモデリングするので、
+	// bottomBound.offset にはソリッドの下端がそのまま入る（呑み込み等の補正はしない。
+	// parse/Footing.h「下端は IFC 実形状のまま」）。
 	//
 	// Python 版キーとの対応（reinforcement＝配筋は M10）:
 	//   layer       ← 'layer'        … 配置先デザインレイヤ名（"F-立上り"）

@@ -10,7 +10,7 @@
 //	検証項目（ROADMAP.md M9）:
 //	  * Name による基礎要素の判別（立上り／地中梁／底盤）
 //	  * 基礎ストーリ（"基礎" / suffix "F" / GL=0・レベルとレイヤ）
-//	  * 底盤天端＝面積最大の天端 Z、立上り下端の底盤への呑み込み（kSlabBite）
+//	  * 底盤天端＝面積最大の天端 Z、立上り下端＝IFC 実形状（呑み込み補正なし）
 //	  * 立上りの統合（同一直線・同一断面のみ）と自由端の半壁厚延長（柱芯スナップ）
 //	  * 底盤の統合（辺共有・面重なりの連結成分の多角形和。穴・隙間・角接触は統合しない）
 //	  * 底盤外周の外面合わせ（辺ごとに沿う立上りの半壁厚だけ外へ）
@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -59,7 +60,6 @@ using HomeskzIfcImport::parse::kLayerFoundationWall;
 using HomeskzIfcImport::parse::kLevelBeamTop;
 using HomeskzIfcImport::parse::kLevelGL;
 using HomeskzIfcImport::parse::kLevelSlabTop;
-using HomeskzIfcImport::parse::kSlabBite;
 using HomeskzIfcImport::parse::kStoryFoundation;
 using HomeskzIfcImport::parse::mergeSlabCommands;
 using HomeskzIfcImport::parse::mergeWallCommands;
@@ -625,11 +625,12 @@ TEST(wall_commands_shape)
 	}
 }
 
-TEST(wall_bottom_bites_into_slab)
+TEST(wall_bottom_is_the_ifc_solid_bottom)
 {
-	// 立上りの下端は底盤の底面（底盤天端 − 底盤厚）より kSlabBite だけ下げて底盤に
-	// 呑み込ませる（面ちょうど接する coplanar による断面ビューポートの境界線を防ぐ）。
-	// 伏図次郎は 底盤天端=50・底盤厚=150 → 底面=−100 なので立上り下端は −110。
+	// 立上りの下端は IFC のソリッド下端をそのまま使う（呑み込み等の補正はしない。
+	// parse/Footing.h「下端は IFC 実形状のまま」）。ホームズ君は基礎梁を**底盤の底面まで**の
+	// 全高でモデリングするので、伏図次郎（底盤天端 50・底盤厚 150）では下端が底盤の底面
+	// −100 に一致する。
 	bool ok = false;
 	Model const model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
@@ -643,7 +644,22 @@ TEST(wall_bottom_bites_into_slab)
 	const std::vector<WallCommand> walls = buildWallCommands(model);
 	CHECK(!walls.empty());
 	for (const WallCommand& cmd : walls)
-		CHECK(near(cmd.bottomBound.offset, slabBottom - kSlabBite, 1e-3));
+		CHECK(near(cmd.bottomBound.offset, slabBottom, 1e-3));
+}
+
+TEST(wall_bottom_keeps_per_wall_depth_from_the_ifc)
+{
+	// 深さの違う基礎梁を持つモデルでは、その差が命令にそのまま残ること（底盤天端から
+	// 一律に決めると深い基礎が潰れてしまう）。スキップフロアは −100 と −150 が混在する。
+	bool ok = false;
+	Model const model = fixture("スキップフロア_サンプル.ifc", ok);
+	CHECK(ok);
+	std::set<long long> depths;
+	for (const WallCommand& cmd : buildWallCommands(model))
+		depths.insert(std::llround(cmd.bottomBound.offset));
+	CHECK(depths.size() >= 2);
+	CHECK(depths.contains(-100));
+	CHECK(depths.contains(-150));
 }
 
 TEST(walls_are_fully_merged)

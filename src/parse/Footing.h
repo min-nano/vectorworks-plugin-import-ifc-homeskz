@@ -70,11 +70,6 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kLayerFoundationWall = "F-立上り";
 	inline constexpr const char* kLayerFoundationSlab = "F-底盤";
 
-	// 立上り下端を底盤へ呑み込ませる量（mm。Python 版 _SLAB_BITE）。立上りの下端は底盤の
-	// 底面とちょうど一致する（coplanar）ため、そのままだと断面ビューポートで境界線が不安定に
-	// 表示される。下端をこの量だけ下げて面を重ね、境界線が出ないようにする。
-	inline constexpr double kSlabBite = 10.0;
-
 	// 立上りのマージ・自由端判定の許容値（mm / sin 角。Python 版 _WALL_MERGE_DIST_TOL /
 	// _WALL_MERGE_ANGLE_TOL / _JOIN_ENDPOINT_TOL）。同一直線判定の直交距離・区間の
 	// 重なり／接触の隙間・断面キーの丸め桁に使う。
@@ -142,7 +137,16 @@ namespace HomeskzIfcImport::parse
 	// 壁芯は配置原点から押し出し方向へ伸ばした線、壁厚は矩形断面の幅（XDim）。**非矩形断面の
 	// 立上りは壁厚が定まらないのでスキップする**。下端は基礎（自階）の GL、上端は 1 階
 	// （上階＝storyOffset 1）の横架材天端へバインドし、offset は実 Z とバインド先レベルの
-	// 絶対 Z の差（下端は kSlabBite だけ下げた値）。座標は通り芯と同じグリッド中心オフセット。
+	// 絶対 Z の差。座標は通り芯と同じグリッド中心オフセット。
+	//
+	// 【下端は IFC 実形状のまま】ホームズ君は基礎梁を**底盤の底面まで**の全高でモデリングする
+	// （実測: 伏図次郎・サンプル1 は全本が Z=−100＝底盤天端 50 − 底盤厚 150、スキップフロアは
+	// −100 と −150 が混在）。したがって下端はソリッドの下端をそのまま使い、**Python 版の
+	// 呑み込み（_SLAB_BITE = 10mm 下げ）は行わない**。Python 版のねらいは「底盤に少し
+	// 呑み込ませて coplanar による断面の境界線を防ぐ」ことだったが、下端は既に底盤の底面と
+	// 一致しているので下へ 10mm 伸ばしても**底盤の下に突き出すだけ**で、意図と逆の結果に
+	// なっていた（ローカル確認で判明。ROADMAP.md M9）。深さの差（外周が深い等）は
+	// 地中梁（M10）が持つので、基礎梁側で作り込まない。
 	//
 	// 組み立てたあと mergeWallCommands → extendFreeWallEnds を通す。自由端を柱芯へ寄せるのに
 	// 柱命令（columns）を使う（未指定なら端点から半壁厚延長する＝後方互換）。

@@ -30,10 +30,18 @@
 //	行える（ローカル確認で「スタイルを当てても壁厚が命令どおり」なら false にしてよい）。
 //
 //	【底盤の描画手順】床板（draw/Floor）と同じ作法で、共通部分は draw/DrawUtil にある
-//	（SetSlabComponents / SetSlabDatum / ResolveSlabStyle）。違うのはスタイル名
-//	（"基礎スラブ - コンクリート …"）と構成層（コンクリート／捨てコン／砕石）だけ。
-//	SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する関数である点に注意
-//	（Python 版 #70 と同じ落とし穴）。基礎ストーリは GL=0 なので絶対 Z がそのまま渡せる。
+//	（SetSlabComponents / SetSlabDatum）。違うのはスタイル名（"基礎スラブ - コンクリート …"）と
+//	構成層（コンクリート／捨てコン／砕石）だけ。SetSlabHeight は厚みではなく**基準面の高さ**
+//	（絶対 Z）を設定する関数である点に注意（Python 版 #70 と同じ落とし穴）。基礎ストーリは
+//	GL=0 なので絶対 Z がそのまま渡せる。
+//
+//	【スラブスタイルは常に新規作成する】**既存の同名スタイルには一切触れない**
+//	（CreateUniqueSlabStyle）。名前が空いていなければ " (2)" … と連番を付けて作る。
+//	当初は「名前で引いて、あれば構成層を組み直す」形にしていたが、ドキュメントの
+//	テンプレートに同名のスタイルがあると、そこで設定済みのクラス・マテリアル・用途が
+//	既定値へ戻ってしまった（ローカル確認で判明。ROADMAP.md M9）。構成をテンプレートに
+//	頼らずコード側から与える方が将来の変更が容易、という方針に基づく。
+//	同じ命令スタイル名の底盤どうしは 1 つのスタイルを共有する（drawSlabs の対応表）。
 //
 //	実描画（壁の高さ基準・壁スタイル・底盤の天端とスラブスタイル）はローカルの
 //	VectorWorks で目視確認する方針（ROADMAP.md M9「ローカル確認」）。
@@ -48,6 +56,8 @@
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
 #include <cstddef>
+#include <map>
+#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -144,7 +154,7 @@ namespace HomeskzIfcImport::draw
 
 		// 底盤 1 枚をスラブとして描く。スラブを作れなければ外形ポリゴンにフォールバックする。
 		// 配置できたら true。手順は draw/Floor の DrawOne と同じ（共通部分は draw/DrawUtil）。
-		bool DrawOneSlab(const core::SlabCommand& slab)
+		bool DrawOneSlab(const core::SlabCommand& slab, InternalIndex style)
 		{
 			const MCObjectHandle profile = CreateClosedPolygon(slab.boundary);
 			if (profile == nil)
@@ -162,11 +172,9 @@ namespace HomeskzIfcImport::draw
 			SetClassByName(object, slab.drawClass);
 			SetAllAttributesByClass(object);
 
-			// 構成はコンクリート厚ごとのスラブスタイルで与える。用意できない場合だけ、
-			// スタイルを外してスラブ本体のコンポーネントを直接組む（構成の欠落で底盤を
-			// 失わないための保険。draw/Floor と同じ）。
-			const InternalIndex style =
-				ResolveSlabStyle(slab.styleName, slab.components, slab.datum);
+			// 構成はコンクリート厚ごとのスラブスタイルで与える（呼び出し側が用意して渡す）。
+			// 用意できない場合だけ、スタイルを外してスラブ本体のコンポーネントを直接組む
+			// （構成の欠落で底盤を失わないための保険。draw/Floor と同じ）。
 			if (style != 0)
 			{
 				gSDK->SetSlabStyle(object, style);
@@ -216,6 +224,11 @@ namespace HomeskzIfcImport::draw
 
 	std::size_t drawSlabs(const core::Document& document, core::ProgressReporter& progress)
 	{
+		// 命令のスタイル名 → このインポートで作ったスタイルの索引。同じコンクリート厚の
+		// 底盤は 1 つのスタイルを共有する（毎回作ると厚みの数だけでなく枚数ぶんスタイルが
+		// 増えてしまう）。既存リソースには触れないので、実際の名前は連番付きになりうる。
+		std::map<std::string, InternalIndex> styles;
+
 		std::size_t drawn = 0;
 		for (const core::SlabCommand& slab : document.slabs)
 		{
@@ -227,7 +240,16 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(slab.layer) == nil)
 				continue;
 
-			if (DrawOneSlab(slab))
+			const auto found = styles.find(slab.styleName);
+			const InternalIndex style =
+				(found != styles.end())
+					? found->second
+					: styles
+						  .emplace(slab.styleName, CreateUniqueSlabStyle(
+													   slab.styleName, slab.components, slab.datum))
+						  .first->second;
+
+			if (DrawOneSlab(slab, style))
 				++drawn;
 		}
 		return drawn;

@@ -1120,9 +1120,9 @@ namespace HomeskzIfcImport::parse
 			cmd.start = start;
 			cmd.end = end;
 			cmd.thickness = thickness;
-			// 下端を kSlabBite だけ下げて底盤に呑み込ませる（core/Document.h の WallCommand
-			// 「下端は底盤へ呑み込ませる」参照）。
-			cmd.bottomBound = StoryBoundCommand{0, kLevelGL, bottomAbs - kSlabBite};
+			// 下端は IFC 実形状のまま（呑み込みはしない。parse/Footing.h「下端は IFC 実形状の
+			// まま」参照）。
+			cmd.bottomBound = StoryBoundCommand{0, kLevelGL, bottomAbs};
 			cmd.topBound = StoryBoundCommand{1, kLevelBeamTop, topAbs - beamTopAbs};
 			commands.push_back(std::move(cmd));
 		}

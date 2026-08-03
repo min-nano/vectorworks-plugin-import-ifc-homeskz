@@ -136,6 +136,38 @@ namespace HomeskzIfcImport::draw
 		return gSDK->GetObjectInternalIndex(style);
 	}
 
+	InternalIndex CreateUniqueSlabStyle(const std::string& baseName,
+										const std::vector<core::SlabComponentCommand>& components,
+										core::SlabDatum datum, std::string* outName)
+	{
+		if (baseName.empty())
+			return 0;
+
+		// 空いている名前を探す。既存のリソース（テンプレートのスタイル・前回インポートで
+		// 作ったスタイル）には触れないので、そこで設定済みのクラス・マテリアル・用途が
+		// 失われることが構造的に起きない。連番の上限は「同名が延々と埋まっている」異常時に
+		// 無限ループしないための歯止めで、実運用で届く数ではない。
+		constexpr int kMaxAttempts = 1000;
+		std::string name = baseName;
+		for (int attempt = 2; gSDK->GetNamedObject(TXString(name.c_str())) != nil; ++attempt)
+		{
+			if (attempt > kMaxAttempts)
+				return 0;
+			name = baseName + " (" + std::to_string(attempt) + ")";
+		}
+
+		MCObjectHandle style = gSDK->CreateSlabStyle(TXString(name.c_str()));
+		if (style == nil)
+			return 0;
+
+		SetSlabComponents(style, components);
+		// 基準面（構成要素とその上端／下端）はスタイルが持つので、スタイル側へ設定する。
+		SetSlabDatum(style, datum, static_cast<short>(components.size()));
+		if (outName != nullptr)
+			*outName = name;
+		return gSDK->GetObjectInternalIndex(style);
+	}
+
 	TXString ResolveParamName(const VWParametricObj& pio, const char* universalName,
 							  const char* localizedName)
 	{

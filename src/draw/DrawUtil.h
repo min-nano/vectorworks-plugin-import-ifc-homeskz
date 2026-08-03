@@ -110,9 +110,24 @@ namespace HomeskzIfcImport::draw
 	// 名前付きのスラブスタイルを用意して索引を返す。既にあればそれを使い、無ければ作る。
 	// 構成層と基準面は毎回命令どおりに更新する（再インポートで構成が変わっても追従する）。
 	// 用意できなければ 0（＝スタイル無し。呼び出し側はスラブ本体へ直接構成を組む）。
+	//
+	// ★**既存のスタイルを見つけたときはその構成層を作り直す**（＝上書きする）。ドキュメントの
+	// テンプレートに同名のスタイルがあると、そこで設定済みのクラス・マテリアル・用途が既定値へ
+	// 戻る。上書きされては困る用途では CreateUniqueSlabStyle を使うこと（基礎の底盤はそちら。
+	// 床＝draw/Floor は階ごとに構成（床仕上げ厚）を計算して当てる必要があるため現状こちら）。
 	InternalIndex ResolveSlabStyle(const std::string& styleName,
 								   const std::vector<core::SlabComponentCommand>& components,
 								   core::SlabDatum datum);
+
+	// **既存のリソースには一切触れずに**新しいスラブスタイルを作って索引を返す。baseName が
+	// 既に使われていれば " (2)" … と連番を付けて空いている名前を探す（上書き事故が構造的に
+	// 起きない）。構成層と基準面は命令どおりに設定する。作れなければ 0。
+	//
+	// 実際に使った名前は outName に入る（同じ命令スタイル名の底盤どうしで 1 つのスタイルを
+	// 共有できるよう、呼び出し側が対応表に覚えるため）。
+	InternalIndex CreateUniqueSlabStyle(const std::string& baseName,
+										const std::vector<core::SlabComponentCommand>& components,
+										core::SlabDatum datum, std::string* outName = nullptr);
 
 	// 名前付きデザインレイヤを取得（無ければ作成）してアクティブにする。以後に生成する
 	// オブジェクトはこのレイヤへ入る。取得・生成できなければ nil を返し、カレントレイヤも

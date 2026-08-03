@@ -232,7 +232,7 @@ target_compile_definitions(ParseColumnTests
 # Foundation (基礎) parsing (src/parse/Footing): IfcFooting "基礎梁…" -> wall commands and
 # IfcSlab/IfcFooting "…底盤…" -> slab commands, plus the 基礎 storey (suffix F, GL=0, the
 # GL/底盤天端 levels and their F-立上り/F-底盤 layers). Covers the slab-top elevation (largest
-# summed footprint area wins), the wall bottom biting kSlabBite into the slab, the wall merge
+# summed footprint area wins), the wall bottom taken straight from the IFC solid, the wall merge
 # (collinear + same section only) and free-end half-thickness extension snapped to the terminal
 # column centre, the slab merge (polygon union over edge-sharing components; gaps, corner
 # touches and rings with holes are left alone) and the outer-face alignment (each edge pushed
