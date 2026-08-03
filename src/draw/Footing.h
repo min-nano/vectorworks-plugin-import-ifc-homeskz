@@ -30,6 +30,6 @@ namespace HomeskzIfcImport::draw
 
 	// 底盤（slab 命令）をスラブオブジェクトとして描く。配置先レイヤ（"F-底盤"）が無い命令は
 	// スキップする。実際に配置できた枚数を返す。手順は床板（draw/Floor）と同じで、共通部分は
-	// draw/DrawUtil（SetSlabComponents / SetSlabDatum / ResolveSlabStyle）にある。
+	// draw/DrawUtil（SetComponents / SetSlabDatum / ResolveSlabStyle）にある。
 	std::size_t drawSlabs(const core::Document& document, core::ProgressReporter& progress);
 } // namespace HomeskzIfcImport::draw

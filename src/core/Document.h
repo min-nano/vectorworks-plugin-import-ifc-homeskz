@@ -139,12 +139,15 @@ namespace HomeskzIfcImport::core
 		Bottom,
 	};
 
-	// スラブの構成層（コンポーネント）1 枚。床は「床仕上げ」「床下地」の 2 層で構成する。
+	// 複合オブジェクト（スラブ・壁）の構成層（VW の「構成要素」）1 枚。
+	//   スラブ … 床は「床仕上げ」「床下地」、基礎の底盤は「コンクリート」「捨てコン」「砕石」
+	//   壁     … 基礎の立上りは「コンクリート」1 層
 	//
-	//   name      … 層の名前（"床仕上げ" / "床下地"）
+	//   name      … 層の名前（"床仕上げ" / "コンクリート" …）
 	//   thickness … 層厚（mm。0 以上）
-	// 並び順は**上から下**（先頭が最上層＝床仕上げ）。層厚の合計がスラブの総厚になる。
-	struct SlabComponentCommand
+	// 並び順は**上から下**（スラブ）／**外から内**（壁）で、先頭が最初の層。層厚の合計が
+	// そのオブジェクトの総厚（スラブ厚・壁厚）になる。
+	struct ComponentCommand
 	{
 		std::string name;
 		double thickness = 0.0;
@@ -184,7 +187,7 @@ namespace HomeskzIfcImport::core
 		std::string drawClass;
 		std::vector<Vec2> boundary;
 		std::string styleName;
-		std::vector<SlabComponentCommand> components;
+		std::vector<ComponentCommand> components;
 		SlabDatum datum = SlabDatum::Top;
 		double elevation = 0.0;
 		StoryBoundCommand bound;
@@ -377,8 +380,15 @@ namespace HomeskzIfcImport::core
 	//   start       ← 'start'        … 壁芯の始点（センタリング済みの平面座標）
 	//   end         ← 'end'          … 壁芯の終点（同上）
 	//   thickness   ← 'thickness'    … 壁厚（矩形断面の幅。mm）
+	//   styleName   （Python 版は描画側の定数）… 壁スタイル名（"基礎立上り - コンクリート 150mm"）
+	//   components  （Python 版に対応なし）… スタイルの構成層（コンクリート 1 層）
 	//   bottomBound ← 'bottom_bound' … 下端の高さ基準（基礎の GL レベル）
 	//   topBound    ← 'top_bound'    … 上端の高さ基準（1 階の横架材天端レベル）
+	//
+	// 【壁スタイルは厚みごとに 1 つ】Python 版は既製の `基礎 - 木造ベタ基礎150mm` を全ての
+	// 立上りへ当てるが、本移植は**壁厚ごとのスタイルを解析側が名乗り、描画側がコード上の
+	// 構成から新規作成する**（実データの壁厚は 120 / 150 / 300mm と混在するので、150mm 固定の
+	// 既製スタイルでは厚みが合わない）。既存リソースは上書きしない（draw/Footing.cpp 参照）。
 	struct WallCommand
 	{
 		std::string layer;
@@ -386,6 +396,8 @@ namespace HomeskzIfcImport::core
 		Vec2 start;
 		Vec2 end;
 		double thickness = 0.0;
+		std::string styleName;
+		std::vector<ComponentCommand> components;
 		StoryBoundCommand bottomBound;
 		StoryBoundCommand topBound;
 	};
@@ -420,7 +432,7 @@ namespace HomeskzIfcImport::core
 		std::string drawClass;
 		std::vector<Vec2> boundary;
 		std::string styleName;
-		std::vector<SlabComponentCommand> components;
+		std::vector<ComponentCommand> components;
 		SlabDatum datum = SlabDatum::Top;
 		double thickness = 0.0;
 		double elevation = 0.0;

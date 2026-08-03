@@ -90,21 +90,28 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kSlabAngleTol = 1e-3;
 	inline constexpr double kSlabSideEps = 1e-2;
 
-	// 底盤スラブの構成層（上から コンクリート → 捨てコン → 砕石）。コンクリート厚は底盤
-	// ソリッドの Z 厚（整数 mm に丸めたもの）で、捨てコン・砕石は既定値。
-	inline constexpr const char* kSlabConcreteName = "コンクリート";
+	// 基礎の構成層の名前。立上りは コンクリート 1 層、底盤は 上から コンクリート → 捨てコン →
+	// 砕石。コンクリート厚は要素ソリッドの実寸（整数 mm に丸めたもの）で、捨てコン・砕石は既定値。
+	inline constexpr const char* kConcreteComponentName = "コンクリート";
 	inline constexpr const char* kSlabLeanConcreteName = "捨てコン";
 	inline constexpr const char* kSlabGravelName = "砕石";
 	inline constexpr double kSlabLeanConcreteThickness = 30.0;
 	inline constexpr double kSlabGravelThickness = 100.0;
 
 	// 底盤のスラブスタイル名（"基礎スラブ - コンクリート 150mm / 捨てコン 30mm / 砕石
-	// 100mm"）。**コンクリート厚ごとに 1 つ**で、厚みの違う底盤は別スタイルになる
-	// （Python 版が既定スタイルを複製してコンクリート層の厚みだけ差し替えるのと同じ命名）。
+	// 100mm"）。**コンクリート厚ごとに 1 つ**で、厚みの違う底盤は別スタイルになる。
 	std::string foundationSlabStyleName(double concreteThickness);
 
 	// 底盤スラブの構成層を組み立てる（上から コンクリート → 捨てコン → 砕石）。
-	std::vector<core::SlabComponentCommand> foundationSlabComponents(double concreteThickness);
+	std::vector<core::ComponentCommand> foundationSlabComponents(double concreteThickness);
+
+	// 立上りの壁スタイル名（"基礎立上り - コンクリート 150mm"）。**壁厚ごとに 1 つ**で、
+	// 厚みの違う立上りは別スタイルになる（実データの壁厚は 120 / 150 / 300mm と混在するため、
+	// Python 版のように 150mm 固定の既製スタイルを全てへ当てると厚みが合わない）。
+	std::string foundationWallStyleName(double thickness);
+
+	// 立上りの壁の構成層を組み立てる（コンクリート 1 層。総厚＝壁厚）。
+	std::vector<core::ComponentCommand> foundationWallComponents(double thickness);
 
 	// Name による基礎要素の判別（Python 版 _is_wall / _is_ground_beam / _is_base_slab）。
 	// **述語はここが唯一の定義**で、解析も判定（hasFoundation）も同じ関数を通る。

@@ -30,9 +30,9 @@
 namespace HomeskzIfcImport::parse
 {
 	using core::ColumnCommand;
+	using core::ComponentCommand;
 	using core::LevelCommand;
 	using core::SlabCommand;
-	using core::SlabComponentCommand;
 	using core::StoryBoundCommand;
 	using core::StoryCommand;
 	using core::Vec2;
@@ -875,16 +875,29 @@ namespace HomeskzIfcImport::parse
 		// "基礎スラブ - コンクリート 150mm / 捨てコン 30mm / 砕石 100mm"。厚みは整数 mm
 		// （命令の thickness は解析側で丸め済みだが、名前を作るここでも整数化して揺れを断つ）。
 		const auto mm = [](double value) { return std::to_string(std::llround(value)) + "mm"; };
-		return std::string("基礎スラブ - ") + kSlabConcreteName + " " + mm(concreteThickness) +
+		return std::string("基礎スラブ - ") + kConcreteComponentName + " " + mm(concreteThickness) +
 			   " / " + kSlabLeanConcreteName + " " + mm(kSlabLeanConcreteThickness) + " / " +
 			   kSlabGravelName + " " + mm(kSlabGravelThickness);
 	}
 
-	std::vector<SlabComponentCommand> foundationSlabComponents(double concreteThickness)
+	std::string foundationWallStyleName(double thickness)
 	{
-		return {SlabComponentCommand{kSlabConcreteName, concreteThickness},
-				SlabComponentCommand{kSlabLeanConcreteName, kSlabLeanConcreteThickness},
-				SlabComponentCommand{kSlabGravelName, kSlabGravelThickness}};
+		// "基礎立上り - コンクリート 150mm"。底盤のスタイル名と同じ流儀（厚みは整数 mm）。
+		return std::string("基礎立上り - ") + kConcreteComponentName + " " +
+			   std::to_string(std::llround(thickness)) + "mm";
+	}
+
+	std::vector<ComponentCommand> foundationWallComponents(double thickness)
+	{
+		// 立上りはコンクリート 1 層（総厚＝壁厚）。
+		return {ComponentCommand{kConcreteComponentName, thickness}};
+	}
+
+	std::vector<ComponentCommand> foundationSlabComponents(double concreteThickness)
+	{
+		return {ComponentCommand{kConcreteComponentName, concreteThickness},
+				ComponentCommand{kSlabLeanConcreteName, kSlabLeanConcreteThickness},
+				ComponentCommand{kSlabGravelName, kSlabGravelThickness}};
 	}
 
 	std::vector<int> collectFootingElements(const Model& model)
@@ -1120,6 +1133,10 @@ namespace HomeskzIfcImport::parse
 			cmd.start = start;
 			cmd.end = end;
 			cmd.thickness = thickness;
+			// 壁スタイルは壁厚ごとに 1 つ（構成はコンクリート 1 層＝壁厚）。描画側はこの名前で
+			// **新しいスタイルを作る**（既存リソースには触れない。draw/Footing.cpp 参照）。
+			cmd.styleName = foundationWallStyleName(thickness);
+			cmd.components = foundationWallComponents(thickness);
 			// 下端は IFC 実形状のまま（呑み込みはしない。parse/Footing.h「下端は IFC 実形状の
 			// まま」参照）。
 			cmd.bottomBound = StoryBoundCommand{0, kLevelGL, bottomAbs};

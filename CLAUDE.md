@@ -179,8 +179,8 @@ tests/
 述語（`isFloorSlab` / `isRoofSlab`）はその要素のヘッダ、平面座標の同一判定と許容
 （`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値は
 `parse/IfcGeometry.h`、基礎のレイヤ名・許容値は `parse/Footing.h`、`draw/` の SDK 呼び出しの
-定型（クラス分け・レイヤ用意・スタイル解決・**スラブの構成層／基準面／スタイル**——床板と
-底盤が共有する）は `draw/DrawUtil`、構造材ツール（StructuralMember PIO）のフィールド名・
+定型（クラス分け・レイヤ用意・スタイル解決・**構成層／基準面／スタイルの新規作成**——床板・
+底盤・立上りが共有する）は `draw/DrawUtil`、構造材ツール（StructuralMember PIO）のフィールド名・
 値・生成手順は `draw/StructuralMember`、進捗の見出し・
 バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`（整形と配分の
 計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、

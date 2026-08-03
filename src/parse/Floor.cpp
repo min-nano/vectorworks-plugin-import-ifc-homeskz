@@ -22,8 +22,8 @@
 
 namespace HomeskzIfcImport::parse
 {
+	using core::ComponentCommand;
 	using core::FloorCommand;
-	using core::SlabComponentCommand;
 	using core::StoryBoundCommand;
 	using core::Vec2;
 
@@ -189,8 +189,8 @@ namespace HomeskzIfcImport::parse
 				cmd.drawClass = CLASS_FLOOR;
 				cmd.boundary = std::move(boundary);
 				cmd.styleName = styleName;
-				cmd.components = {SlabComponentCommand{kFloorFinishName, finishThickness},
-								  SlabComponentCommand{kSubfloorName, kSubfloorThickness}};
+				cmd.components = {ComponentCommand{kFloorFinishName, finishThickness},
+								  ComponentCommand{kSubfloorName, kSubfloorThickness}};
 				cmd.datum = datum;
 				cmd.elevation = datumBaseAbs + levelDelta;
 				cmd.bound = StoryBoundCommand{0, boundLevel, levelDelta};

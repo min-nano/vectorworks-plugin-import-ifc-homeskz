@@ -105,8 +105,8 @@ namespace HomeskzIfcImport::draw
 	// ★コンポーネントの索引は **0 始まり**（実機で確認: 索引 1 に挿入すると既定層の後ろへ
 	// 入り、索引 = 層数 で削除すると範囲外で失敗した）。GetNumberOfComponents が返すのは
 	// 「個数」なので、有効な索引は 0 … 個数−1。
-	void SetSlabComponents(MCObjectHandle object,
-						   const std::vector<core::SlabComponentCommand>& components);
+	void SetComponents(MCObjectHandle object,
+					   const std::vector<core::ComponentCommand>& components);
 
 	// スラブ（またはスラブスタイル）の高さ基準面を設定する。基準面は「どの構成要素か」
 	// （SetDatumSlabComponent）＋「その上端か下端か」（SetComponentDatumIsTopOfComponent）の
@@ -125,7 +125,7 @@ namespace HomeskzIfcImport::draw
 	// 戻る。上書きされては困る用途では CreateUniqueSlabStyle を使うこと（基礎の底盤はそちら。
 	// 床＝draw/Floor は階ごとに構成（床仕上げ厚）を計算して当てる必要があるため現状こちら）。
 	InternalIndex ResolveSlabStyle(const std::string& styleName,
-								   const std::vector<core::SlabComponentCommand>& components,
+								   const std::vector<core::ComponentCommand>& components,
 								   core::SlabDatum datum);
 
 	// **既存のリソースには一切触れずに**新しいスラブスタイルを作って索引を返す。baseName が
@@ -135,8 +135,15 @@ namespace HomeskzIfcImport::draw
 	// 実際に使った名前は outName に入る（同じ命令スタイル名の底盤どうしで 1 つのスタイルを
 	// 共有できるよう、呼び出し側が対応表に覚えるため）。
 	InternalIndex CreateUniqueSlabStyle(const std::string& baseName,
-										const std::vector<core::SlabComponentCommand>& components,
+										const std::vector<core::ComponentCommand>& components,
 										core::SlabDatum datum, std::string* outName = nullptr);
+
+	// 同じく**既存のリソースには一切触れずに**新しいウォールスタイルを作って索引を返す。
+	// 名前の空き探しと構成層の設定はスラブ版と同じで、基準面（datum）を持たない点だけが違う
+	// （壁は構成層の合計がそのまま壁厚になる）。作れなければ 0。
+	InternalIndex CreateUniqueWallStyle(const std::string& baseName,
+										const std::vector<core::ComponentCommand>& components,
+										std::string* outName = nullptr);
 
 	// 名前付きデザインレイヤを取得（無ければ作成）してアクティブにする。以後に生成する
 	// オブジェクトはこのレイヤへ入る。取得・生成できなければ nil を返し、カレントレイヤも

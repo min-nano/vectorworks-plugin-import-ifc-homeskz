@@ -148,8 +148,8 @@ namespace
 		floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, core::Vec2{1000.0, 2000.0},
 						  core::Vec2{0.0, 2000.0}};
 		floor.styleName = "1F-床スタイル";
-		floor.components = {core::SlabComponentCommand{"床仕上げ", 96.0},
-							core::SlabComponentCommand{"床下地", 24.0}};
+		floor.components = {core::ComponentCommand{"床仕上げ", 96.0},
+							core::ComponentCommand{"床下地", 24.0}};
 		floor.elevation = 0.0;
 		floor.bound = core::StoryBoundCommand{0, "FL", 0.0};
 		return floor;
@@ -262,7 +262,7 @@ TEST(validate_rejects_floor_with_zero_total_thickness)
 	// 総厚 0 のスラブは実体を持たない。
 	core::Document document;
 	core::FloorCommand floor = validFloor();
-	for (core::SlabComponentCommand& component : floor.components)
+	for (core::ComponentCommand& component : floor.components)
 		component.thickness = 0.0;
 	document.floors.push_back(floor);
 	CHECK(!core::validateDocument(document));
@@ -610,7 +610,9 @@ namespace
 		wall.start = core::Vec2{0.0, 0.0};
 		wall.end = core::Vec2{3640.0, 0.0};
 		wall.thickness = 120.0;
-		wall.bottomBound = core::StoryBoundCommand{0, core::kLevelGL, -110.0};
+		wall.styleName = "基礎立上り - コンクリート 120mm";
+		wall.components = {core::ComponentCommand{"コンクリート", 120.0}};
+		wall.bottomBound = core::StoryBoundCommand{0, core::kLevelGL, -100.0};
 		wall.topBound = core::StoryBoundCommand{1, core::kLevelBeamTop, -190.0};
 		return wall;
 	}
@@ -624,9 +626,9 @@ namespace
 		slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}, core::Vec2{3640.0, 2730.0},
 						 core::Vec2{0.0, 2730.0}};
 		slab.styleName = "基礎スラブ - コンクリート 150mm / 捨てコン 30mm / 砕石 100mm";
-		slab.components = {core::SlabComponentCommand{"コンクリート", 150.0},
-						   core::SlabComponentCommand{"捨てコン", 30.0},
-						   core::SlabComponentCommand{"砕石", 100.0}};
+		slab.components = {core::ComponentCommand{"コンクリート", 150.0},
+						   core::ComponentCommand{"捨てコン", 30.0},
+						   core::ComponentCommand{"砕石", 100.0}};
 		slab.datum = core::SlabDatum::Top;
 		slab.thickness = 150.0;
 		slab.elevation = 50.0;
@@ -656,6 +658,22 @@ TEST(validate_rejects_wall_with_empty_layer_or_class)
 	wall.drawClass = "";
 	drawClass.walls.push_back(wall);
 	CHECK(!core::validateDocument(drawClass));
+}
+
+TEST(validate_rejects_wall_with_empty_style_or_no_components)
+{
+	// 壁スタイル名と構成層は描画側が壁厚ごとのスタイルを作るのに要る（底盤と同じ関門）。
+	core::Document style;
+	core::WallCommand wall = validWall();
+	wall.styleName = "";
+	style.walls.push_back(wall);
+	CHECK(!core::validateDocument(style));
+
+	core::Document components;
+	wall = validWall();
+	wall.components.clear();
+	components.walls.push_back(wall);
+	CHECK(!core::validateDocument(components));
 }
 
 TEST(validate_rejects_wall_with_nonpositive_thickness)

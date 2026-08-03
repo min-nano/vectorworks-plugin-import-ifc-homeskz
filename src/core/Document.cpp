@@ -36,8 +36,8 @@ namespace HomeskzIfcImport::core
 				   std::ranges::all_of(story.levels, isValidLevel);
 		}
 
-		// スラブの構成層 1 枚が妥当か。名前が非空で、層厚が 0 以上（負の層は作れない）。
-		bool isValidSlabComponent(const SlabComponentCommand& component)
+		// 構成層（スラブ・壁）1 枚が妥当か。名前が非空で、層厚が 0 以上（負の層は作れない）。
+		bool isValidComponent(const ComponentCommand& component)
 		{
 			return !component.name.empty() && component.thickness >= 0.0;
 		}
@@ -51,11 +51,11 @@ namespace HomeskzIfcImport::core
 			if (floor.layer.empty() || floor.drawClass.empty() || floor.boundary.size() < 3 ||
 				floor.bound.level.empty() || floor.styleName.empty() || floor.components.empty())
 				return false;
-			if (!std::ranges::all_of(floor.components, isValidSlabComponent))
+			if (!std::ranges::all_of(floor.components, isValidComponent))
 				return false;
 
 			double total = 0.0;
-			for (const SlabComponentCommand& component : floor.components)
+			for (const ComponentCommand& component : floor.components)
 				total += component.thickness;
 			return total > 0.0;
 		}
@@ -98,14 +98,24 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 基礎の立上り 1 本が妥当か（Python 版 _validate_wall 相当）。配置先レイヤ名・
-		// クラス名が非空で、壁厚が正で、壁芯の始点と終点が縮退していないこと（判定は
-		// core/Geometry の samePoint）。上下端の高さ基準のレベル種別も非空（空だと
-		// SetWallOverallHeights が解決できず、レイヤの「壁の高さ」設定に落ちる）。
+		// クラス名・壁スタイル名が非空で、壁厚が正で、壁芯の始点と終点が縮退していないこと
+		// （判定は core/Geometry の samePoint）。上下端の高さ基準のレベル種別も非空（空だと
+		// SetWallOverallHeights が解決できず、レイヤの「壁の高さ」設定に落ちる）。構成層は
+		// 1 枚以上あり総厚が正であること（スラブと同じ関門）。
 		bool isValidWall(const WallCommand& wall)
 		{
-			return !wall.layer.empty() && !wall.drawClass.empty() && wall.thickness > 0.0 &&
-				   !samePoint(wall.start, wall.end) && !wall.bottomBound.level.empty() &&
-				   !wall.topBound.level.empty();
+			if (wall.layer.empty() || wall.drawClass.empty() || wall.styleName.empty() ||
+				wall.thickness <= 0.0 || samePoint(wall.start, wall.end) ||
+				wall.bottomBound.level.empty() || wall.topBound.level.empty() ||
+				wall.components.empty())
+				return false;
+			if (!std::ranges::all_of(wall.components, isValidComponent))
+				return false;
+
+			double total = 0.0;
+			for (const ComponentCommand& component : wall.components)
+				total += component.thickness;
+			return total > 0.0;
 		}
 
 		// 基礎の底盤 1 枚が妥当か（Python 版 _validate_slab 相当）。床板と同じ関門
@@ -118,11 +128,11 @@ namespace HomeskzIfcImport::core
 				slab.bound.level.empty() || slab.styleName.empty() || slab.components.empty() ||
 				slab.thickness <= 0.0)
 				return false;
-			if (!std::ranges::all_of(slab.components, isValidSlabComponent))
+			if (!std::ranges::all_of(slab.components, isValidComponent))
 				return false;
 
 			double total = 0.0;
-			for (const SlabComponentCommand& component : slab.components)
+			for (const ComponentCommand& component : slab.components)
 				total += component.thickness;
 			return total > 0.0;
 		}

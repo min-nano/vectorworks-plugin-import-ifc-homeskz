@@ -86,7 +86,7 @@ namespace HomeskzIfcImport::draw
 			else
 			{
 				gSDK->ConvertToUnstyledSlab(slab);
-				SetSlabComponents(slab, floor.components);
+				SetComponents(slab, floor.components);
 				SetSlabDatum(slab, floor.datum, static_cast<short>(floor.components.size()));
 			}
 

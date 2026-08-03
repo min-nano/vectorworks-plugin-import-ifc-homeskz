@@ -50,6 +50,7 @@ using HomeskzIfcImport::parse::CLASS_FOUNDATION_WALL;
 using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::extendFreeWallEnds;
 using HomeskzIfcImport::parse::foundationSlabStyleName;
+using HomeskzIfcImport::parse::foundationWallStyleName;
 using HomeskzIfcImport::parse::hasFoundation;
 using HomeskzIfcImport::parse::isBaseSlab;
 using HomeskzIfcImport::parse::isFoundationWall;
@@ -81,6 +82,8 @@ namespace
 		cmd.start = start;
 		cmd.end = end;
 		cmd.thickness = thickness;
+		cmd.styleName = foundationWallStyleName(thickness);
+		cmd.components = HomeskzIfcImport::parse::foundationWallComponents(thickness);
 		cmd.bottomBound = StoryBoundCommand{0, kLevelGL, bottomOffset};
 		cmd.topBound = StoryBoundCommand{1, kLevelBeamTop, topOffset};
 		return cmd;
@@ -617,6 +620,11 @@ TEST(wall_commands_shape)
 		CHECK_EQ(cmd.drawClass, std::string(CLASS_FOUNDATION_WALL));
 		CHECK(cmd.thickness > 0.0);
 		CHECK(!core::samePoint(cmd.start, cmd.end));
+		// 壁スタイルは壁厚ごとに 1 つで、構成層（コンクリート 1 層）の総厚が壁厚に一致する。
+		CHECK_EQ(cmd.styleName, foundationWallStyleName(cmd.thickness));
+		CHECK_EQ(cmd.components.size(), std::size_t{1});
+		if (cmd.components.size() == 1)
+			CHECK(near(cmd.components[0].thickness, cmd.thickness));
 		// 下端は基礎（自階）の GL、上端は 1 階（上階）の横架材天端。
 		CHECK_EQ(cmd.bottomBound.storyOffset, 0);
 		CHECK_EQ(cmd.bottomBound.level, std::string(kLevelGL));

@@ -12,7 +12,7 @@
 //	     DoubLines(壁厚) → Wall(壁芯) という 2 手順は要らない**——ISDK の CreateWall は
 //	     壁厚を引数に取る（ci-debug の sdk-grep で確認）。
 //	  2. クラス分けと描画属性の by-class 設定。
-//	  3. 壁スタイル（kWallStyle）を適用する。
+//	  3. **壁厚ごとの壁スタイル**を当てる（下記「スタイルは常に新規作成する」）。
 //	  4. SetWallOverallHeights で下端・上端をストーリレベルへバインドする。
 //	     **壁だけは汎用の SetObjectStoryBound では高さ基準が確定せず**、デザインレイヤの
 //	     「壁の高さ（レイヤ設定）」に従ってしまう（構造材・スラブでは SetObjectStoryBound が
@@ -23,25 +23,24 @@
 //	  5. ResetObject で反映。
 //	壁を作れない場合は壁芯の直線にフォールバックする（1 本の失敗で全体を止めない）。
 //
-//	【壁厚の再設定】壁スタイルは 150mm 厚の複合壁なので、**当てると壁厚がスタイル側の値に
-//	上書きされうる**（Python 版はスタイルを当てっぱなしで、この点は VW 上で確認していない）。
-//	命令の壁厚（120 / 150 / 300mm と実データでも混在する）を保つため、スタイル適用の直後に
-//	SetWallWidth で命令の壁厚を入れ直す。挙動の切り替えは kReassertWallWidth の 1 か所で
-//	行える（ローカル確認で「スタイルを当てても壁厚が命令どおり」なら false にしてよい）。
-//
 //	【底盤の描画手順】床板（draw/Floor）と同じ作法で、共通部分は draw/DrawUtil にある
-//	（SetSlabComponents / SetSlabDatum）。違うのはスタイル名（"基礎スラブ - コンクリート …"）と
+//	（SetComponents / SetSlabDatum）。違うのはスタイル名（"基礎スラブ - コンクリート …"）と
 //	構成層（コンクリート／捨てコン／砕石）だけ。SetSlabHeight は厚みではなく**基準面の高さ**
 //	（絶対 Z）を設定する関数である点に注意（Python 版 #70 と同じ落とし穴）。基礎ストーリは
 //	GL=0 なので絶対 Z がそのまま渡せる。
 //
-//	【スラブスタイルは常に新規作成する】**既存の同名スタイルには一切触れない**
-//	（CreateUniqueSlabStyle）。名前が空いていなければ " (2)" … と連番を付けて作る。
-//	当初は「名前で引いて、あれば構成層を組み直す」形にしていたが、ドキュメントの
-//	テンプレートに同名のスタイルがあると、そこで設定済みのクラス・マテリアル・用途が
-//	既定値へ戻ってしまった（ローカル確認で判明。ROADMAP.md M9）。構成をテンプレートに
-//	頼らずコード側から与える方が将来の変更が容易、という方針に基づく。
-//	同じ命令スタイル名の底盤どうしは 1 つのスタイルを共有する（drawSlabs の対応表）。
+//	【スタイルは常に新規作成する（立上り・底盤とも）】**既存の同名スタイルには一切触れない**
+//	（CreateUniqueWallStyle / CreateUniqueSlabStyle）。名前が空いていなければ " (2)" … と
+//	連番を付けて作る。当初は「名前で引いて、あれば構成層を組み直す」形にしていたが、
+//	ドキュメントのテンプレートに同名のスタイルがあると、そこで設定済みのクラス・マテリアル・
+//	用途が既定値へ戻ってしまった（ローカル確認で判明。ROADMAP.md M9）。構成をテンプレートに
+//	頼らずコード側から与える方が将来の変更が容易、という方針に基づく。同じ命令スタイル名の
+//	立上り／底盤どうしは 1 つのスタイルを共有する（drawWalls / drawSlabs の対応表）。
+//
+//	立上りのスタイルは**壁厚ごと**（"基礎立上り - コンクリート 150mm"）。Python 版は既製の
+//	`基礎 - 木造ベタ基礎150mm` を全ての立上りへ当てるが、実データの壁厚は 120 / 150 / 300mm と
+//	混在するので 150mm 固定のスタイルでは厚みが合わない（構成層＝コンクリート 1 層の合計が
+//	そのまま壁厚になるので、スタイルを当てても命令の壁厚が保たれる）。
 //
 //	実描画（壁の高さ基準・壁スタイル・底盤の天端とスラブスタイル）はローカルの
 //	VectorWorks で目視確認する方針（ROADMAP.md M9「ローカル確認」）。
@@ -63,11 +62,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 立上りへ適用する壁スタイル名（Python 版 vw/footing.py の
-		// '基礎 - 木造ベタ基礎150mm'。「壁 基礎立ち上がり」フォルダ内のウォールスタイル）。
-		// 見つからなければスタイル無しで描く（クラス属性だけが効く）。
-		constexpr const char* kWallStyle = "基礎 - 木造ベタ基礎150mm";
-
 		// SetWallStyle に渡す壁芯からのオフセット（選択側／置換側とも 0＝壁芯に揃える）。
 		// **名前は SDK 側の引数名（selectedOffset / replacingOffset）に寄せてある**: 似た並びの
 		// InternalIndex + WorldCoord を渡すため、名前が違うと clang-tidy の
@@ -76,9 +70,6 @@ namespace HomeskzIfcImport::draw
 		// SetSlabDatum と同じ理由・同じ対処）。
 		constexpr double kSelectedOffset = 0.0;
 		constexpr double kReplacingOffset = 0.0;
-
-		// 壁スタイル適用後に命令の壁厚を入れ直すか（ヘッダ冒頭「壁厚の再設定」）。
-		constexpr bool kReassertWallWidth = true;
 
 		// SetObjectStoryBound に渡すバウンド ID。スラブは高さ基準を 1 つだけ持つ
 		// （draw/Floor と同じ）。型は SDK の TObjectBoundID（= Sint32）だが、その別名は
@@ -94,21 +85,6 @@ namespace HomeskzIfcImport::draw
 			data.fLayerLevelType = TXString(bound.level.c_str());
 			data.fOffset = bound.offset;
 			return data;
-		}
-
-		// 壁スタイルの索引を返す（無ければ 0）。ISDK には名前から引く呼び出しが無いので、
-		// 名前付きオブジェクトを GetNamedObject で引いて内部索引に直す。
-		//
-		// ★**draw/DrawUtil の ResolvePluginStyle とは統合できない**（見た目は似ているが
-		// 別物）。あちらは構造材ツールのプラグインスタイル用で `IsPluginStyle` で絞り込む。
-		// ウォールスタイルはプラグインスタイルではない名前付きリソースなので、その関門を
-		// 通すと常に 0（＝スタイル無し）になってしまう。
-		InternalIndex ResolveWallStyle()
-		{
-			MCObjectHandle style = gSDK->GetNamedObject(TXString(kWallStyle));
-			if (style == nil)
-				return 0;
-			return gSDK->GetObjectInternalIndex(style);
 		}
 
 		// 立上り 1 本を壁として描く。壁を作れなければ壁芯の直線にフォールバックする。
@@ -140,12 +116,9 @@ namespace HomeskzIfcImport::draw
 
 			// スタイルは高さバインドより**先に**当てる（Python 版 draw_wall と同じ順序）。
 			// スタイル適用が壁の属性を作り直す場合でも、後から入れる高さが残るようにする。
+			// スタイルは壁厚ごとに作ってあるので、当てても壁厚は命令どおりのままになる。
 			if (wallStyle != 0)
-			{
 				gSDK->SetWallStyle(object, wallStyle, kSelectedOffset, kReplacingOffset);
-				if (kReassertWallWidth)
-					gSDK->SetWallWidth(object, wall.thickness);
-			}
 
 			// 高さは壁専用の SetWallOverallHeights でストーリレベルへバインドする
 			// （ヘッダ冒頭「立上りの描画手順」3）。
@@ -186,7 +159,7 @@ namespace HomeskzIfcImport::draw
 			else
 			{
 				gSDK->ConvertToUnstyledSlab(object);
-				SetSlabComponents(object, slab.components);
+				SetComponents(object, slab.components);
 				SetSlabDatum(object, slab.datum, static_cast<short>(slab.components.size()));
 			}
 
@@ -204,8 +177,10 @@ namespace HomeskzIfcImport::draw
 
 	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress)
 	{
-		// 壁スタイルの解決は 1 回で足りる（全ての立上りが同じスタイルを使う）。
-		const InternalIndex wallStyle = ResolveWallStyle();
+		// 命令のスタイル名 → このインポートで作ったスタイルの索引（底盤と同じ作法）。
+		// 同じ壁厚の立上りは 1 つのスタイルを共有する。既存リソースには触れないので、
+		// 実際の名前は連番付きになりうる。
+		std::map<std::string, InternalIndex> styles;
 
 		std::size_t drawn = 0;
 		for (const core::WallCommand& wall : document.walls)
@@ -219,6 +194,15 @@ namespace HomeskzIfcImport::draw
 			// 配置先レイヤ（"F-立上り"）が無い命令はスキップする（規約は ActivateExistingLayer）。
 			if (ActivateExistingLayer(wall.layer) == nil)
 				continue;
+
+			const auto found = styles.find(wall.styleName);
+			const InternalIndex wallStyle =
+				(found != styles.end())
+					? found->second
+					: styles
+						  .emplace(wall.styleName,
+								   CreateUniqueWallStyle(wall.styleName, wall.components))
+						  .first->second;
 
 			if (DrawOneWall(wall, wallStyle))
 				++drawn;
