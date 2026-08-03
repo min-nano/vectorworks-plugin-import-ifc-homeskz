@@ -953,6 +953,35 @@ namespace HomeskzIfcImport::parse
 		return true;
 	}
 
+	bool resolveFoundationTopElevation(const Model& model, double& out)
+	{
+		// 立上り（基礎梁）の天端 Z のうち最大値。collectFootingElements は #id 昇順なので、
+		// 最大値を採ることと合わせてエンティティ列挙順に依存しない決定的な高さになる。
+		bool found = false;
+		double best = 0.0;
+		for (const int id : collectFootingElements(model))
+		{
+			const Entity* element = model.entity(id);
+			if (element == nullptr || !isFoundationWall(entityName(*element)))
+				continue;
+			WorldSolid solid;
+			if (!resolveElementWorldSolid(model, element, solid))
+				continue;
+			double top = 0.0;
+			double thickness = 0.0;
+			zTopAndThickness(solid, top, thickness);
+			if (!found || top > best)
+			{
+				best = top;
+				found = true;
+			}
+		}
+		if (!found)
+			return false;
+		out = best;
+		return true;
+	}
+
 	bool hasFoundation(const Model& model)
 	{
 		const std::vector<int> elements = collectFootingElements(model);
@@ -977,13 +1006,24 @@ namespace HomeskzIfcImport::parse
 		if (!resolveSlabTopElevation(model, slabTop))
 			slabTop = 0.0; // 底盤の無い基礎（立上りのみ）は GL に揃える
 
+		// 基礎天端はアンカーボルト（M11）の高さ基準＝立上りの天端。立上りが無い基礎
+		// （底盤のみ）は底盤天端へフォールバックする（Python 版と同じ）。
+		double foundationTop = slabTop;
+		if (!resolveFoundationTopElevation(model, foundationTop))
+			foundationTop = slabTop;
+
 		StoryCommand cmd;
 		cmd.name = kStoryFoundation;
 		cmd.suffix = kFoundationSuffix;
 		cmd.elevation = 0.0; // GL は常に 0
-		// levels の並びは希望するデザインレイヤのスタック順（上→下）。立上り（GL）を
-		// 底盤（底盤天端）の上段に積む。基礎天端・床束は M11（ヘッダ冒頭参照）。
+		// levels の並びは希望するデザインレイヤのスタック順（上→下）。上から
+		// 基礎天端（アンカーボルト）→ GL（立上り）→ 床束 → 底盤天端（底盤）。
+		// 床束は基礎底盤の上端に立つので、高さは底盤天端に揃える（レベルは分ける——
+		// 底盤レイヤに床束を混ぜないため）。
+		cmd.levels.push_back(
+			LevelCommand{kLevelFoundationTop, foundationTop, kLayerFoundationAnchor});
 		cmd.levels.push_back(LevelCommand{kLevelGL, 0.0, kLayerFoundationWall});
+		cmd.levels.push_back(LevelCommand{kLevelFloorPost, slabTop, kLayerFoundationFloorPost});
 		cmd.levels.push_back(LevelCommand{kLevelSlabTop, slabTop, kLayerFoundationSlab});
 		out = std::move(cmd);
 		return true;

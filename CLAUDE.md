@@ -107,7 +107,10 @@ VectorWorks ネイティブオブジェクト
   `rafters` / `roofs` / `anchorBolts` / `floorPosts` / `fireBraces` / `joints` /
   `columnMarks` / `sheets` / `sections` / `tags` / `legends` …）は Python 版
   `document.py` の `TypedDict` 群に対応させる。**フィールド名・意味は Python 版に
-  合わせる**（対応が追いやすく、仕様のブレを防ぐ）。
+  合わせる**（対応が追いやすく、仕様のブレを防ぐ）。ただし**同型の TypedDict が並ぶところは
+  構造体 1 つへまとめる**——`anchorBolts` / `floorPosts` / `fireBraces` / `joints` は
+  Python 版では 4 つの TypedDict だが中身が同じなので、C++ は `core::SymbolCommand` 1 つで
+  受け、要素の区別は「Document のどのリストか」が担う（`core/Document.h` の doc コメント参照）。
 - フェーズ間の受け渡しは**構造体のまま**行う。JSON 直列化は**予定に無い**——Python 版
   出力との突き合わせ（ゴールデンテスト）は行わない方針のため、唯一の用途が消えた
   （理由は `ROADMAP.md`「Python 版出力との比較はしない」）。デバッグでダンプが要る場面が
@@ -144,6 +147,7 @@ src/
     Story.{h,cpp}           ストーリ（旧 ifc/story.py）
     Member.{h,cpp}          横架材（旧 ifc/member.py）
     Footing.{h,cpp}         基礎（立上り＝壁・底盤＝スラブ・基礎ストーリ。旧 ifc/footing.py）
+    Joint.{h,cpp}           仕口（旧 ifc/joint.py。IFC ではなく member/column 命令から導出）
     …                       以降、要素ごとに 1 対 1 で追加
 
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
@@ -154,6 +158,8 @@ src/
     Grid.{h,cpp}            grid 命令 → GridAxis（旧 vw/grid.py）
     Story.{h,cpp}           story 命令 → ストーリ・レベル・レイヤ（旧 vw/story.py）
     Footing.{h,cpp}         wall/slab 命令 → 壁・スラブ（旧 vw/footing.py）
+    Symbol.{h,cpp}          シンボル配置（旧 vw/{anchor_bolt,floor_post,fire_brace,joint}.py
+                            の 4 本を 1 本に。要素の区別は呼び出し側が持つ）
     …                       以降、要素ごとに 1 対 1 で追加
 
 tests/
@@ -175,13 +181,17 @@ tests/
 
 **重複を作らない置き場所**: 同じ定数・述語・ヘルパーを 2 か所に書かない。IFC の属性
 インデックスは `parse/IfcAttr.h`、レベル種別名は `parse/Story.h`（屋根組は
-`parse/Rafter.h` / `parse/Roof.h`）、レイヤ名の組み立ては `storyLayerName`、要素の判別
-述語（`isFloorSlab` / `isRoofSlab`）はその要素のヘッダ、平面座標の同一判定と許容
+`parse/Rafter.h` / `parse/Roof.h`。基礎ストーリの名前・接尾辞・レベル・レイヤ名は
+`parse/Footing.h`）、レイヤ名の組み立ては `storyLayerName`、要素の判別
+述語（`isFloorSlab` / `isRoofSlab` / `isFireBrace`、基礎の `isBaseSlab` 等）はその要素の
+ヘッダ、金物（`IfcMechanicalFastener`）の型名取得は `parse/Column` の `fastenerTypeName`
+（柱頭・柱脚金物とアンカーボルトが共有）、平面座標の同一判定と許容
 （`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値は
 `parse/IfcGeometry.h`、基礎のレイヤ名・許容値は `parse/Footing.h`、`draw/` の SDK 呼び出しの
 定型（クラス分け・レイヤ用意・スタイル解決・**構成層／基準面／スタイルの新規作成**——床板・
 底盤・立上りが共有する）は `draw/DrawUtil`、構造材ツール（StructuralMember PIO）のフィールド名・
-値・生成手順は `draw/StructuralMember`、進捗の見出し・
+値・生成手順は `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`
+（4 要素で共有する唯一の実装）、進捗の見出し・
 バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`（整形と配分の
 計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。

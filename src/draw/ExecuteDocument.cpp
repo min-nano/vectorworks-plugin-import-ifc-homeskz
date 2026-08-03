@@ -7,8 +7,9 @@
 //	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（立上り・底盤）→
-//	draw/Floor → draw/Member → draw/Column → draw/Rafter → draw/Roof へディスパッチする。
-//	以降のマイルストーンで draw/AnchorBolt … draw/Section を足していく（ROADMAP.md）。
+//	draw/Floor → draw/Member → draw/Column → draw/Rafter → draw/Roof → draw/Symbol
+//	（アンカーボルト・床束・火打・仕口）へディスパッチする。以降のマイルストーンで
+//	draw/ColumnMark … draw/Section を足していく（ROADMAP.md）。
 //	実描画（高さ・傾き・スタイル・PIO の挙動）はローカルの VectorWorks で目視確認する。
 //
 
@@ -22,11 +23,13 @@
 #include "draw/Rafter.h"
 #include "draw/Roof.h"
 #include "draw/Story.h"
+#include "draw/Symbol.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
@@ -51,7 +54,9 @@ namespace HomeskzIfcImport::draw
 		const std::size_t total =
 			document.stories.size() + document.grids.size() + document.floors.size() +
 			document.members.size() + document.columns.size() + document.rafters.size() +
-			document.roofs.size() + document.walls.size() + document.slabs.size();
+			document.roofs.size() + document.walls.size() + document.slabs.size() +
+			document.anchorBolts.size() + document.floorPosts.size() + document.fireBraces.size() +
+			document.joints.size();
 
 		// 要素ごとの診断（無ければ空）を改行で連ねる。1 つの文字列を各 draw* へ渡すと
 		// 後の要素が前の要素の診断を上書きしてしまうため、ここで積む。
@@ -126,6 +131,26 @@ namespace HomeskzIfcImport::draw
 			counts.rafters = drawRafters(document, progress);
 		if (beginPhase("野地板を描画しています…", document.roofs.size()))
 			counts.roofs = drawRoofs(document, progress);
+
+		// M11 シンボル置換系。4 種とも同じ描画（draw/Symbol）で、違いは配置先レイヤと
+		// シンボル名だけ。配置先（アンカーボルト・床束＝基礎ストーリの "F-…"、火打・仕口＝
+		// 横架材と同じレイヤ）はいずれも drawStories が作るので、必ずその後に置く
+		// （レイヤが無い命令はスキップされ、その件数が診断行に出る）。
+		const auto drawSymbolPhase = [&](const char* label, const char* elementLabel,
+										 const std::vector<core::SymbolCommand>& commands,
+										 std::size_t& out)
+		{
+			if (!beginPhase(label, commands.size()))
+				return;
+			std::string note;
+			out = drawSymbols(commands, progress, elementLabel, &note);
+			addDiagnostics(note);
+		};
+		drawSymbolPhase("アンカーボルトを配置しています…", "アンカーボルト", document.anchorBolts,
+						counts.anchorBolts);
+		drawSymbolPhase("床束を配置しています…", "床束", document.floorPosts, counts.floorPosts);
+		drawSymbolPhase("火打を配置しています…", "火打", document.fireBraces, counts.fireBraces);
+		drawSymbolPhase("仕口を配置しています…", "仕口", document.joints, counts.joints);
 
 		// 途中で中止されたか（件数が命令数に届かないのが正常になる）。
 		counts.cancelled = progress.cancelled();

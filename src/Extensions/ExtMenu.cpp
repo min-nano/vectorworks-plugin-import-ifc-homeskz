@@ -234,12 +234,14 @@ void CImportIfcMenu_EventSink::DoInterface()
 	const std::size_t commandCount =
 		document.stories.size() + document.grids.size() + document.floors.size() +
 		document.members.size() + document.columns.size() + document.rafters.size() +
-		document.roofs.size() + document.walls.size() + document.slabs.size();
+		document.roofs.size() + document.walls.size() + document.slabs.size() +
+		document.anchorBolts.size() + document.floorPosts.size() + document.fireBraces.size() +
+		document.joints.size();
 	std::string body;
 	if (!drawn.valid)
 		body = "命令セットの検証に通らなかったため、何も描きませんでした。";
 	else if (commandCount == 0)
-		body = "ストーリ・通り芯・床・横架材・柱・屋根組・基礎が見つかりませんでした。";
+		body = "ストーリ・通り芯・床・横架材・柱・屋根組・基礎・シンボルが見つかりませんでした。";
 	else
 		body = "ストーリ " + formatCount(drawn.stories, document.stories.size()) + " 層・通り芯 " +
 			   formatCount(drawn.grids, document.grids.size()) + " 本・床 " +
@@ -249,7 +251,11 @@ void CImportIfcMenu_EventSink::DoInterface()
 			   formatCount(drawn.rafters, document.rafters.size()) + " 本・野地板 " +
 			   formatCount(drawn.roofs, document.roofs.size()) + " 枚・立上り " +
 			   formatCount(drawn.walls, document.walls.size()) + " 本・底盤 " +
-			   formatCount(drawn.slabs, document.slabs.size()) + " 枚を描きました。";
+			   formatCount(drawn.slabs, document.slabs.size()) + " 枚・アンカーボルト " +
+			   formatCount(drawn.anchorBolts, document.anchorBolts.size()) + " 本・床束 " +
+			   formatCount(drawn.floorPosts, document.floorPosts.size()) + " 本・火打 " +
+			   formatCount(drawn.fireBraces, document.fireBraces.size()) + " 本・仕口 " +
+			   formatCount(drawn.joints, document.joints.size()) + " か所を描きました。";
 	// 中止されたときは件数が命令数に届かないのが正常なので、そう明示する（「描けなかった」
 	// と読み違えないように）。描けたところまでは図面に残っている。
 	if (drawn.cancelled)

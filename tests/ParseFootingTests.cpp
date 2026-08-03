@@ -56,15 +56,20 @@ using HomeskzIfcImport::parse::isBaseSlab;
 using HomeskzIfcImport::parse::isFoundationWall;
 using HomeskzIfcImport::parse::isGroundBeam;
 using HomeskzIfcImport::parse::kFoundationSuffix;
+using HomeskzIfcImport::parse::kLayerFoundationAnchor;
+using HomeskzIfcImport::parse::kLayerFoundationFloorPost;
 using HomeskzIfcImport::parse::kLayerFoundationSlab;
 using HomeskzIfcImport::parse::kLayerFoundationWall;
 using HomeskzIfcImport::parse::kLevelBeamTop;
+using HomeskzIfcImport::parse::kLevelFloorPost;
+using HomeskzIfcImport::parse::kLevelFoundationTop;
 using HomeskzIfcImport::parse::kLevelGL;
 using HomeskzIfcImport::parse::kLevelSlabTop;
 using HomeskzIfcImport::parse::kStoryFoundation;
 using HomeskzIfcImport::parse::mergeSlabCommands;
 using HomeskzIfcImport::parse::mergeWallCommands;
 using HomeskzIfcImport::parse::Model;
+using HomeskzIfcImport::parse::resolveFoundationTopElevation;
 using HomeskzIfcImport::parse::resolveSlabTopElevation;
 using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
@@ -583,17 +588,69 @@ TEST(foundation_story_command_shape)
 	CHECK_EQ(story.name, std::string(kStoryFoundation));
 	CHECK_EQ(story.suffix, std::string(kFoundationSuffix));
 	CHECK(near(story.elevation, 0.0)); // GL は常に 0
-	// レベルは希望スタック順（上→下）で GL（立上り）→ 底盤天端（底盤）の 2 つ。
-	// 基礎天端（アンカーボルト）・床束は M11 で足す（空レイヤを作らない方針）。
-	CHECK_EQ(story.levels.size(), std::size_t{2});
-	if (story.levels.size() < 2)
+	// レベルは希望スタック順（上→下）で 基礎天端（アンカーボルト）→ GL（立上り）→
+	// 床束 → 底盤天端（底盤）の 4 つ（M9 の 2 つに M11 のシンボル 2 つを足した）。
+	CHECK_EQ(story.levels.size(), std::size_t{4});
+	if (story.levels.size() < 4)
 		return;
-	CHECK_EQ(story.levels[0].type, std::string(kLevelGL));
-	CHECK_EQ(story.levels[0].layer, std::string(kLayerFoundationWall));
-	CHECK(near(story.levels[0].offset, 0.0));
-	CHECK_EQ(story.levels[1].type, std::string(kLevelSlabTop));
-	CHECK_EQ(story.levels[1].layer, std::string(kLayerFoundationSlab));
-	CHECK(near(story.levels[1].offset, 50.0));
+	// 基礎天端＝立上りの天端（伏図次郎は GL+400）。アンカーボルトの高さ基準。
+	CHECK_EQ(story.levels[0].type, std::string(kLevelFoundationTop));
+	CHECK_EQ(story.levels[0].layer, std::string(kLayerFoundationAnchor));
+	CHECK(near(story.levels[0].offset, 400.0));
+	CHECK_EQ(story.levels[1].type, std::string(kLevelGL));
+	CHECK_EQ(story.levels[1].layer, std::string(kLayerFoundationWall));
+	CHECK(near(story.levels[1].offset, 0.0));
+	// 床束は底盤天端に揃える（レベルは分けるが高さは同じ）。
+	CHECK_EQ(story.levels[2].type, std::string(kLevelFloorPost));
+	CHECK_EQ(story.levels[2].layer, std::string(kLayerFoundationFloorPost));
+	CHECK(near(story.levels[2].offset, 50.0));
+	CHECK_EQ(story.levels[3].type, std::string(kLevelSlabTop));
+	CHECK_EQ(story.levels[3].layer, std::string(kLayerFoundationSlab));
+	CHECK(near(story.levels[3].offset, 50.0));
+}
+
+TEST(foundation_top_is_the_highest_wall_top)
+{
+	// 基礎天端は立上り（基礎梁）の天端の最大値。伏図次郎は GL+400（立上りは −100〜400）。
+	bool ok = false;
+	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	CHECK(ok);
+	double top = 0.0;
+	CHECK(resolveFoundationTopElevation(model, top));
+	CHECK(near(top, 400.0));
+}
+
+TEST(foundation_top_falls_back_to_slab_top_without_walls)
+{
+	// 立上りが 1 つも無い基礎（底盤のみ）は基礎天端が定まらないので、ストーリは
+	// 基礎天端レベルを底盤天端へフォールバックする（Python 版と同じ）。
+	bool ok = false;
+	Model const model = fixture("minimal_grid.ifc", ok);
+	CHECK(ok);
+	double top = 0.0;
+	CHECK(!resolveFoundationTopElevation(model, top));
+}
+
+TEST(foundation_story_levels_are_consistent_across_fixtures)
+{
+	// 全フィクスチャで 4 レベルが揃い、床束と底盤天端が同じ高さ（床束は底盤上端に立つ）で、
+	// 基礎天端が底盤天端以上（立上りは底盤より上へ出る）であること。
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		Model const model = fixture(name, ok);
+		CHECK(ok);
+		StoryCommand story;
+		CHECK(buildFoundationStoryCommand(model, story));
+		CHECK_EQ(story.levels.size(), std::size_t{4});
+		if (story.levels.size() < 4)
+			continue;
+		CHECK_EQ(story.levels[0].type, std::string(kLevelFoundationTop));
+		CHECK_EQ(story.levels[2].type, std::string(kLevelFloorPost));
+		CHECK_EQ(story.levels[3].type, std::string(kLevelSlabTop));
+		CHECK(near(story.levels[2].offset, story.levels[3].offset));
+		CHECK(story.levels[0].offset >= story.levels[3].offset);
+	}
 }
 
 TEST(no_foundation_story_without_foundation_elements)
