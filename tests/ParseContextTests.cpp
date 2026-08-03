@@ -19,6 +19,7 @@
 #include "parse/Column.h"
 #include "parse/Context.h"
 #include "parse/Floor.h"
+#include "parse/Footing.h"
 #include "parse/Grid.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Loader.h"
@@ -291,6 +292,34 @@ TEST(columns_are_cached_and_match_the_plain_call)
 	}
 }
 
+TEST(walls_are_cached_and_match_the_plain_call)
+{
+	// 立上りの解析は Document の walls と底盤の外面合わせが共有するので、コンテキストは
+	// 1 回だけ走らせて覚える。2 度目が同じ結果（同じ実体）を返し、キャッシュを通さない
+	// 呼び出しとも一致すること。
+	bool ok = false;
+	Model const model = fixture(kRoofFixture, ok);
+	CHECK(ok);
+	if (!ok)
+		return;
+
+	Context context(model);
+	const std::vector<core::WallCommand>& first = context.walls();
+	const std::vector<core::WallCommand>& second = context.walls();
+	CHECK(&first == &second);
+
+	const std::vector<core::WallCommand> plain = parse::buildWallCommands(model);
+	CHECK_EQ(first.size(), plain.size());
+	CHECK(!plain.empty());
+	for (std::size_t i = 0; i < first.size() && i < plain.size(); ++i)
+	{
+		CHECK_EQ(first[i].layer, plain[i].layer);
+		CHECK(near(first[i].thickness, plain[i].thickness));
+		CHECK(near(first[i].start.x, plain[i].start.x));
+		CHECK(near(first[i].topBound.offset, plain[i].topBound.offset));
+	}
+}
+
 TEST(context_backed_commands_match_the_plain_commands)
 {
 	for (const std::string& name : HomeskzIfcTests::allFixtures())
@@ -308,8 +337,11 @@ TEST(context_backed_commands_match_the_plain_commands)
 		const std::vector<core::MemberCommand> members = parse::buildMemberCommands(shared);
 		const std::vector<core::RafterCommand> rafters = parse::buildRafterCommands(shared);
 		const std::vector<core::RoofCommand> roofs = parse::buildRoofCommands(shared);
+		const std::vector<core::SlabCommand> slabs =
+			parse::buildSlabCommands(shared, shared.walls());
 
 		CHECK_EQ(stories.size(), parse::buildStoryCommands(model).size());
+		CHECK_EQ(slabs.size(), parse::buildSlabCommands(model).size());
 		CHECK_EQ(grids.size(), parse::buildGridCommands(model).size());
 		CHECK_EQ(members.size(), parse::buildMemberCommands(model).size());
 		CHECK_EQ(rafters.size(), parse::buildRafterCommands(model).size());

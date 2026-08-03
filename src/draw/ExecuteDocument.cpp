@@ -6,9 +6,9 @@
 //	この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の
 //	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Floor → draw/Member →
-//	draw/Column → draw/Rafter → draw/Roof へディスパッチする。以降のマイルストーンで
-//	draw/Footing … draw/Section を足していく（ROADMAP.md）。
+//	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（立上り・底盤）→
+//	draw/Floor → draw/Member → draw/Column → draw/Rafter → draw/Roof へディスパッチする。
+//	以降のマイルストーンで draw/AnchorBolt … draw/Section を足していく（ROADMAP.md）。
 //	実描画（高さ・傾き・スタイル・PIO の挙動）はローカルの VectorWorks で目視確認する。
 //
 
@@ -16,6 +16,7 @@
 #include "draw/ExecuteDocument.h"
 #include "draw/Column.h"
 #include "draw/Floor.h"
+#include "draw/Footing.h"
 #include "draw/Grid.h"
 #include "draw/Member.h"
 #include "draw/Rafter.h"
@@ -47,10 +48,10 @@ namespace HomeskzIfcImport::draw
 
 		// 進捗バーの配分は**命令数の比**にする（1 件あたりの重さは要素で違うが、要素ごとの
 		// 実測が無い以上、件数比が一番嘘の少ない近似。core::phaseShare）。
-		const std::size_t total = document.stories.size() + document.grids.size() +
-								  document.floors.size() + document.members.size() +
-								  document.columns.size() + document.rafters.size() +
-								  document.roofs.size();
+		const std::size_t total =
+			document.stories.size() + document.grids.size() + document.floors.size() +
+			document.members.size() + document.columns.size() + document.rafters.size() +
+			document.roofs.size() + document.walls.size() + document.slabs.size();
 
 		// 要素ごとの診断（無ければ空）を改行で連ねる。1 つの文字列を各 draw* へ渡すと
 		// 後の要素が前の要素の診断を上書きしてしまうため、ここで積む。
@@ -82,6 +83,15 @@ namespace HomeskzIfcImport::draw
 		// M1 通り芯を描く。
 		if (beginPhase("通り芯を描画しています…", document.grids.size()))
 			counts.grids = drawGrids(document, progress);
+
+		// M9 基礎を描く。立上り（壁）→ 底盤（スラブ）の順（Python 版 execute_document と
+		// 同じで、M10 の壁結合が立上りのハンドルを参照するため立上りを先に置く）。配置先の
+		// "F-立上り" / "F-底盤" レイヤは基礎ストーリの story 命令が作るので、必ず
+		// drawStories の後に置く（レイヤが無い命令はそれぞれがスキップする）。
+		if (beginPhase("基礎の立上りを描画しています…", document.walls.size()))
+			counts.walls = drawWalls(document, progress);
+		if (beginPhase("基礎の底盤を描画しています…", document.slabs.size()))
+			counts.slabs = drawSlabs(document, progress);
 
 		// M5 床板を描く。配置先の FL レイヤは上の drawStories が作るので、必ずその後に
 		// 置く（レイヤが無い命令は drawFloors がスキップする）。

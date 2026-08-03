@@ -77,7 +77,7 @@ namespace
 	double totalThickness(const FloorCommand& floor)
 	{
 		double total = 0.0;
-		for (const HomeskzIfcImport::core::SlabComponentCommand& component : floor.components)
+		for (const HomeskzIfcImport::core::ComponentCommand& component : floor.components)
 			total += component.thickness;
 		return total;
 	}

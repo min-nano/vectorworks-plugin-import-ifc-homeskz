@@ -143,15 +143,17 @@ src/
     Grid.{h,cpp}            通り芯（旧 ifc/grid.py）
     Story.{h,cpp}           ストーリ（旧 ifc/story.py）
     Member.{h,cpp}          横架材（旧 ifc/member.py）
+    Footing.{h,cpp}         基礎（立上り＝壁・底盤＝スラブ・基礎ストーリ。旧 ifc/footing.py）
     …                       以降、要素ごとに 1 対 1 で追加
 
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
     ExecuteDocument.{h,cpp} execute_document 相当のディスパッチ
-    DrawUtil.{h,cpp}        クラス分け・by-class 属性・スタイル解決・レイヤ用意の共通ヘルパー
+    DrawUtil.{h,cpp}        クラス分け・by-class 属性・スタイル解決・レイヤ用意・スラブの共通ヘルパー
     StructuralMember.{h,cpp} 構造材ツール（StructuralMember PIO）1 本の生成・設定（横架材／柱で共有）
     ProgressDialog.{h,cpp}  core::ProgressReporter を VW の進捗ダイアログへ橋渡し（唯一の実装）
     Grid.{h,cpp}            grid 命令 → GridAxis（旧 vw/grid.py）
     Story.{h,cpp}           story 命令 → ストーリ・レベル・レイヤ（旧 vw/story.py）
+    Footing.{h,cpp}         wall/slab 命令 → 壁・スラブ（旧 vw/footing.py）
     …                       以降、要素ごとに 1 対 1 で追加
 
 tests/
@@ -165,7 +167,8 @@ tests/
 ```
 
 **共有コンテキスト（`parse/Context`）**: 各要素の解析は「ストーリ一覧」「通り芯の
-センタリング中心」「階に属する要素」「屋根面」を共通して必要とする。`buildDocument` は
+センタリング中心」「階に属する要素」「屋根面」を共通して必要とする（加えて横架材・柱・
+立上りの命令そのものも複数の要素が参照するのでキャッシュする）。`buildDocument` は
 `Context` を **1 つだけ**作って全要素へ渡し、これらの前処理を 1 回で済ませる（要素ごとに
 求め直すと同じ走査が要素の数だけ走る）。単体テストの都合で `const Model&` を直接取る
 オーバーロードも各 `build*Commands` に残してあり、そちらは内部でコンテキストを作って捨てる。
@@ -175,8 +178,10 @@ tests/
 `parse/Rafter.h` / `parse/Roof.h`）、レイヤ名の組み立ては `storyLayerName`、要素の判別
 述語（`isFloorSlab` / `isRoofSlab`）はその要素のヘッダ、平面座標の同一判定と許容
 （`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値は
-`parse/IfcGeometry.h`、`draw/` の SDK 呼び出しの定型は `draw/DrawUtil`、構造材ツール
-（StructuralMember PIO）のフィールド名・値・生成手順は `draw/StructuralMember`、進捗の見出し・
+`parse/IfcGeometry.h`、基礎のレイヤ名・許容値は `parse/Footing.h`、`draw/` の SDK 呼び出しの
+定型（クラス分け・レイヤ用意・スタイル解決・**構成層／基準面／スタイルの新規作成**——床板・
+底盤・立上りが共有する）は `draw/DrawUtil`、構造材ツール（StructuralMember PIO）のフィールド名・
+値・生成手順は `draw/StructuralMember`、進捗の見出し・
 バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`（整形と配分の
 計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
@@ -273,12 +278,14 @@ Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テス�
 | `ifc/loader.py` | `parse/Loader` + `parse/Step` | 読み込み・STEP グラフ（サニタイズは不要） |
 | `ifc/__init__.py` `build_document` | `parse/BuildDocument` | 解析オーケストレーション |
 | `ifc/grid.py` … `ifc/section.py` | `parse/Grid` … `parse/Section` | 要素ごとの解析 |
+| `ifc/footing.py` | `parse/Footing` | 基礎（立上り・底盤・基礎ストーリ） |
 | `ifc/structural_class.py` | `parse/StructuralClass` | 構造クラス判定（純ロジック） |
 | （ifcopenshell の行列・幾何） | `parse/IfcGeometry` + `core/Geometry` | 配置行列・押し出し・断面 |
 | `document.py` | `core/Document`（検証も同ファイル） | 命令セット・検証 |
 | `tracing.py` | `core/Trace`（任意） | クラッシュ診断ログ |
 | `vw/__init__.py` `execute_document` | `draw/ExecuteDocument` | 描画ディスパッチ |
 | `vw/grid.py` … `vw/section.py` | `draw/Grid` … `draw/Section` | 要素ごとの描画 |
+| `vw/footing.py` | `draw/Footing` | 基礎の描画（壁・スラブ） |
 | `main.py` / `__init__.py` `run()` | `Extensions/ExtMenu`（コマンド本体） | ファイル選択→解析→描画→完了ダイアログ |
 
 ## 移植上の既知の制限・非目標

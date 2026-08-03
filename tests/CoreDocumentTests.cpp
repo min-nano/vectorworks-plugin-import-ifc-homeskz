@@ -148,8 +148,8 @@ namespace
 		floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, core::Vec2{1000.0, 2000.0},
 						  core::Vec2{0.0, 2000.0}};
 		floor.styleName = "1F-床スタイル";
-		floor.components = {core::SlabComponentCommand{"床仕上げ", 96.0},
-							core::SlabComponentCommand{"床下地", 24.0}};
+		floor.components = {core::ComponentCommand{"床仕上げ", 96.0},
+							core::ComponentCommand{"床下地", 24.0}};
 		floor.elevation = 0.0;
 		floor.bound = core::StoryBoundCommand{0, "FL", 0.0};
 		return floor;
@@ -262,7 +262,7 @@ TEST(validate_rejects_floor_with_zero_total_thickness)
 	// 総厚 0 のスラブは実体を持たない。
 	core::Document document;
 	core::FloorCommand floor = validFloor();
-	for (core::SlabComponentCommand& component : floor.components)
+	for (core::ComponentCommand& component : floor.components)
 		component.thickness = 0.0;
 	document.floors.push_back(floor);
 	CHECK(!core::validateDocument(document));
@@ -593,6 +593,180 @@ TEST(validate_rejects_roof_with_nonpositive_thickness)
 	roof.thickness = 0.0;
 	document.roofs.push_back(roof);
 	CHECK(!core::validateDocument(document));
+}
+
+// ---------------------------------------------------------------------------
+// 基礎（立上り＝壁・底盤＝スラブ）の検証（ROADMAP.md M9）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 検証を通る立上り命令（1 本）。個々のテストはここから 1 か所だけ崩す。
+	core::WallCommand validWall()
+	{
+		core::WallCommand wall;
+		wall.layer = "F-立上り";
+		wall.drawClass = "04構造-01基礎-03立ち上がり";
+		wall.start = core::Vec2{0.0, 0.0};
+		wall.end = core::Vec2{3640.0, 0.0};
+		wall.thickness = 120.0;
+		wall.styleName = "基礎立上り - コンクリート 120mm";
+		wall.components = {core::ComponentCommand{"コンクリート", 120.0}};
+		wall.bottomBound = core::StoryBoundCommand{0, core::kLevelGL, -100.0};
+		wall.topBound = core::StoryBoundCommand{1, core::kLevelBeamTop, -190.0};
+		return wall;
+	}
+
+	// 検証を通る底盤命令（1 枚）。
+	core::SlabCommand validSlab()
+	{
+		core::SlabCommand slab;
+		slab.layer = "F-底盤";
+		slab.drawClass = "04構造-01基礎-02基礎スラブ";
+		slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}, core::Vec2{3640.0, 2730.0},
+						 core::Vec2{0.0, 2730.0}};
+		slab.styleName = "基礎スラブ - コンクリート 150mm / 捨てコン 30mm / 砕石 100mm";
+		slab.components = {core::ComponentCommand{"コンクリート", 150.0},
+						   core::ComponentCommand{"捨てコン", 30.0},
+						   core::ComponentCommand{"砕石", 100.0}};
+		slab.datum = core::SlabDatum::Top;
+		slab.thickness = 150.0;
+		slab.elevation = 50.0;
+		slab.bound = core::StoryBoundCommand{0, core::kLevelSlabTop, 0.0};
+		return slab;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_wall_and_slab)
+{
+	core::Document document;
+	document.walls.push_back(validWall());
+	document.slabs.push_back(validSlab());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_wall_with_empty_layer_or_class)
+{
+	core::Document layer;
+	core::WallCommand wall = validWall();
+	wall.layer = "";
+	layer.walls.push_back(wall);
+	CHECK(!core::validateDocument(layer));
+
+	core::Document drawClass;
+	wall = validWall();
+	wall.drawClass = "";
+	drawClass.walls.push_back(wall);
+	CHECK(!core::validateDocument(drawClass));
+}
+
+TEST(validate_rejects_wall_with_empty_style_or_no_components)
+{
+	// 壁スタイル名と構成層は描画側が壁厚ごとのスタイルを作るのに要る（底盤と同じ関門）。
+	core::Document style;
+	core::WallCommand wall = validWall();
+	wall.styleName = "";
+	style.walls.push_back(wall);
+	CHECK(!core::validateDocument(style));
+
+	core::Document components;
+	wall = validWall();
+	wall.components.clear();
+	components.walls.push_back(wall);
+	CHECK(!core::validateDocument(components));
+}
+
+TEST(validate_rejects_wall_with_nonpositive_thickness)
+{
+	// 壁厚 0 の立上りは実体を持たない（CreateWall に渡す厚みがそのまま 0 になる）。
+	core::Document document;
+	core::WallCommand wall = validWall();
+	wall.thickness = 0.0;
+	document.walls.push_back(wall);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_degenerate_wall)
+{
+	// 壁芯の始点と終点が同じ立上りは向き・長さが決まらない。
+	core::Document document;
+	core::WallCommand wall = validWall();
+	wall.end = wall.start;
+	document.walls.push_back(wall);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_wall_with_empty_bound_level)
+{
+	// レベル種別が空だと SetWallOverallHeights が解決できず、高さがレイヤの
+	// 「壁の高さ」設定に落ちる（構造材・スラブと同じ関門）。
+	core::Document bottomEmpty;
+	core::WallCommand wall = validWall();
+	wall.bottomBound.level = "";
+	bottomEmpty.walls.push_back(wall);
+	CHECK(!core::validateDocument(bottomEmpty));
+
+	core::Document topEmpty;
+	wall = validWall();
+	wall.topBound.level = "";
+	topEmpty.walls.push_back(wall);
+	CHECK(!core::validateDocument(topEmpty));
+}
+
+TEST(validate_rejects_slab_with_empty_layer_class_or_style)
+{
+	core::Document layer;
+	core::SlabCommand slab = validSlab();
+	slab.layer = "";
+	layer.slabs.push_back(slab);
+	CHECK(!core::validateDocument(layer));
+
+	core::Document drawClass;
+	slab = validSlab();
+	slab.drawClass = "";
+	drawClass.slabs.push_back(slab);
+	CHECK(!core::validateDocument(drawClass));
+
+	core::Document style;
+	slab = validSlab();
+	slab.styleName = "";
+	style.slabs.push_back(slab);
+	CHECK(!core::validateDocument(style));
+}
+
+TEST(validate_rejects_slab_with_too_few_boundary_points)
+{
+	// 3 点未満は面にならない（床板と同じ関門）。
+	core::Document document;
+	core::SlabCommand slab = validSlab();
+	slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}};
+	document.slabs.push_back(slab);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_slab_with_nonpositive_thickness)
+{
+	// コンクリート厚 0 の底盤はスラブスタイルを作れない。
+	core::Document document;
+	core::SlabCommand slab = validSlab();
+	slab.thickness = 0.0;
+	document.slabs.push_back(slab);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_slab_with_no_components_or_empty_bound_level)
+{
+	core::Document components;
+	core::SlabCommand slab = validSlab();
+	slab.components.clear();
+	components.slabs.push_back(slab);
+	CHECK(!core::validateDocument(components));
+
+	core::Document bound;
+	slab = validSlab();
+	slab.bound.level = "";
+	bound.slabs.push_back(slab);
+	CHECK(!core::validateDocument(bound));
 }
 
 // ---------------------------------------------------------------------------

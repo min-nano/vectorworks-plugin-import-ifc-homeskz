@@ -21,9 +21,12 @@
 
 #include "PluginPrefix.h"
 
+#include "core/Document.h"
+
 #include "VWFC/VWObjects/VWParametricObj.h"
 
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
@@ -76,6 +79,71 @@ namespace HomeskzIfcImport::draw
 	// RefNumber として渡す（どちらも SysName を表す Sint32。SDK ヘッダでも InternalIndex と
 	// RefNumber は相互に渡し合う形で使われている）。
 	RefNumber ResolvePluginStyle(const TXString& styleName);
+
+	// 平面外形を閉じた 2D ポリゴンとして作る（スラブのプロファイル・フォールバック描画）。
+	// 頂点が空なら nil。
+	MCObjectHandle CreateClosedPolygon(const std::vector<core::Vec2>& boundary);
+
+	// --- スラブ（床板＝M5・基礎の底盤＝M9 が共有する作法）--------------------------
+	//
+	// 床（draw/Floor）と底盤（draw/Footing）は**同じ手順**でスラブを描く（外形ポリゴン →
+	// CreateSlab → クラス → スタイル（構成層・基準面）→ SetSlabHeight → バインド →
+	// ResetObject）。違うのはスタイル名と構成層の中身だけなので、SDK を叩く部分はここに
+	// 1 つだけ置く（かつては draw/Floor.cpp の無名名前空間にあり、底盤が同じものを 2 つ目に
+	// 書く形になっていた）。
+
+	// オブジェクト（スラブ本体／スラブスタイル）の構成層を命令どおりに作り直す。
+	//
+	// 手順: **先頭に命令の層を順に挿入し、その後ろに残った元の層を削除する**。
+	//   * 厚み 0 の層は VW が受け付けない（＝「潰す」では構成を確定できない）ので、
+	//     余った層は必ず削除する。
+	//   * 先に挿入してから削除するので、途中で層が 0 枚になる瞬間が無い
+	//     （層が 1 枚も無いスラブ／スタイルは作れない）。
+	//   * 削除に失敗したら（想定外の API 挙動）そこで打ち切り、元の層が残ったままでも
+	//     スラブ自体は残す（1 枚の失敗で全体を止めない）。
+	//
+	// ★コンポーネントの索引は **0 始まり**（実機で確認: 索引 1 に挿入すると既定層の後ろへ
+	// 入り、索引 = 層数 で削除すると範囲外で失敗した）。GetNumberOfComponents が返すのは
+	// 「個数」なので、有効な索引は 0 … 個数−1。
+	void SetComponents(MCObjectHandle object,
+					   const std::vector<core::ComponentCommand>& components);
+
+	// スラブ（またはスラブスタイル）の高さ基準面を設定する。基準面は「どの構成要素か」
+	// （SetDatumSlabComponent）＋「その上端か下端か」（SetComponentDatumIsTopOfComponent）の
+	// 2 つで決まる。スラブスタイル設定ダイアログの「基準面」欄のポップアップとラジオが
+	// それぞれこの 2 つに対応する。
+	//   Top    … 最上層（索引 0）の**上端**＝スラブ天端
+	//   Bottom … 最下層（索引 個数−1）の**下端**＝スラブ底面
+	void SetSlabDatum(MCObjectHandle object, core::SlabDatum datum, short componentCount);
+
+	// 名前付きのスラブスタイルを用意して索引を返す。既にあればそれを使い、無ければ作る。
+	// 構成層と基準面は毎回命令どおりに更新する（再インポートで構成が変わっても追従する）。
+	// 用意できなければ 0（＝スタイル無し。呼び出し側はスラブ本体へ直接構成を組む）。
+	//
+	// ★**既存のスタイルを見つけたときはその構成層を作り直す**（＝上書きする）。ドキュメントの
+	// テンプレートに同名のスタイルがあると、そこで設定済みのクラス・マテリアル・用途が既定値へ
+	// 戻る。上書きされては困る用途では CreateUniqueSlabStyle を使うこと（基礎の底盤はそちら。
+	// 床＝draw/Floor は階ごとに構成（床仕上げ厚）を計算して当てる必要があるため現状こちら）。
+	InternalIndex ResolveSlabStyle(const std::string& styleName,
+								   const std::vector<core::ComponentCommand>& components,
+								   core::SlabDatum datum);
+
+	// **既存のリソースには一切触れずに**新しいスラブスタイルを作って索引を返す。baseName が
+	// 既に使われていれば " (2)" … と連番を付けて空いている名前を探す（上書き事故が構造的に
+	// 起きない）。構成層と基準面は命令どおりに設定する。作れなければ 0。
+	//
+	// 実際に使った名前は outName に入る（同じ命令スタイル名の底盤どうしで 1 つのスタイルを
+	// 共有できるよう、呼び出し側が対応表に覚えるため）。
+	InternalIndex CreateUniqueSlabStyle(const std::string& baseName,
+										const std::vector<core::ComponentCommand>& components,
+										core::SlabDatum datum, std::string* outName = nullptr);
+
+	// 同じく**既存のリソースには一切触れずに**新しいウォールスタイルを作って索引を返す。
+	// 名前の空き探しと構成層の設定はスラブ版と同じで、基準面（datum）を持たない点だけが違う
+	// （壁は構成層の合計がそのまま壁厚になる）。作れなければ 0。
+	InternalIndex CreateUniqueWallStyle(const std::string& baseName,
+										const std::vector<core::ComponentCommand>& components,
+										std::string* outName = nullptr);
 
 	// 名前付きデザインレイヤを取得（無ければ作成）してアクティブにする。以後に生成する
 	// オブジェクトはこのレイヤへ入る。取得・生成できなければ nil を返し、カレントレイヤも

@@ -229,6 +229,21 @@ target_link_libraries(ParseColumnTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseColumnTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Foundation (基礎) parsing (src/parse/Footing): IfcFooting "基礎梁…" -> wall commands and
+# IfcSlab/IfcFooting "…底盤…" -> slab commands, plus the 基礎 storey (suffix F, GL=0, the
+# GL/底盤天端 levels and their F-立上り/F-底盤 layers). Covers the slab-top elevation (largest
+# summed footprint area wins), the wall bottom taken straight from the IFC solid, the wall merge
+# (collinear + same section only) and free-end half-thickness extension snapped to the terminal
+# column centre, the slab merge (polygon union over edge-sharing components; gaps, corner
+# touches and rings with holes are left alone) and the outer-face alignment (each edge pushed
+# out by the half thickness of the wall it runs along). Exercised on synthetic commands and the
+# checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseFootingTests ParseFootingTests.cpp)
+target_link_libraries(ParseFootingTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseFootingTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # Sloped-beam (登り梁) correction (src/parse/Noboribari): trims the ends that homeskz sinks
 # into the receiving members and snaps the top centre line onto the roof face fixed in M6,
 # so the pitch and height match the rafter underside. Exercised on synthetic planes/commands

@@ -20,6 +20,7 @@
 #include "parse/Column.h"
 #include "parse/Context.h"
 #include "parse/Floor.h"
+#include "parse/Footing.h"
 #include "parse/Grid.h"
 #include "parse/Loader.h"
 #include "parse/Member.h"
@@ -27,6 +28,8 @@
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
 #include "parse/Story.h"
+
+#include <utility>
 
 namespace HomeskzIfcImport::parse
 {
@@ -97,6 +100,21 @@ namespace HomeskzIfcImport::parse
 		progress.step();
 		document.roofs = buildRoofCommands(context);
 		progress.step();
+
+		// M9 基礎: 立上り（壁）→ 底盤（スラブ）。立上りは自由端を柱芯へ寄せるので柱命令を、
+		// 底盤は外周を立上りの外面へ合わせるので立上りの命令を入力に取る（Python 版
+		// build_document と同じ依存の向き）。Context が立上りを 1 回だけ組み立てて両者へ配る。
+		document.walls = context.walls();
+		progress.step();
+		document.slabs = buildSlabCommands(context, document.walls);
+		progress.step();
+
+		// 基礎要素があれば**基礎ストーリを stories の先頭（最下層）へ**置く（Python 版
+		// build_document と同じ）。Elevation=0 で最下層になり、レイヤの希望スタック順
+		// （最上階→最下階）でも最下段に積まれる。基礎ストーリは FL 階の命令を変えない。
+		core::StoryCommand foundationStory;
+		if (buildFoundationStoryCommand(model, foundationStory))
+			document.stories.insert(document.stories.begin(), std::move(foundationStory));
 
 		return document;
 	}

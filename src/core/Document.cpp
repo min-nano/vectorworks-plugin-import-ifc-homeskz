@@ -5,9 +5,9 @@
 //	SDK 非依存（core/ は VectorWorks SDK を一切 include しない）。
 //
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
-//	rafters / roofs（M6）・grids（M1）の各命令の必須フィールド・値域を見る。命令リスト
-//	（walls / slabs …）が追加されるたびに、対応する検証規則（必須フィールドの有無・
-//	参照整合性・値域）をここへ足していく。
+//	walls / slabs（M9）・rafters / roofs（M6）・grids（M1）の各命令の必須フィールド・値域を
+//	見る。命令リスト（wallJoins …）が追加されるたびに、対応する検証規則（必須フィールドの
+//	有無・参照整合性・値域）をここへ足していく。
 //
 
 #include "core/Document.h"
@@ -36,8 +36,8 @@ namespace HomeskzIfcImport::core
 				   std::ranges::all_of(story.levels, isValidLevel);
 		}
 
-		// スラブの構成層 1 枚が妥当か。名前が非空で、層厚が 0 以上（負の層は作れない）。
-		bool isValidSlabComponent(const SlabComponentCommand& component)
+		// 構成層（スラブ・壁）1 枚が妥当か。名前が非空で、層厚が 0 以上（負の層は作れない）。
+		bool isValidComponent(const ComponentCommand& component)
 		{
 			return !component.name.empty() && component.thickness >= 0.0;
 		}
@@ -51,11 +51,11 @@ namespace HomeskzIfcImport::core
 			if (floor.layer.empty() || floor.drawClass.empty() || floor.boundary.size() < 3 ||
 				floor.bound.level.empty() || floor.styleName.empty() || floor.components.empty())
 				return false;
-			if (!std::ranges::all_of(floor.components, isValidSlabComponent))
+			if (!std::ranges::all_of(floor.components, isValidComponent))
 				return false;
 
 			double total = 0.0;
-			for (const SlabComponentCommand& component : floor.components)
+			for (const ComponentCommand& component : floor.components)
 				total += component.thickness;
 			return total > 0.0;
 		}
@@ -97,6 +97,46 @@ namespace HomeskzIfcImport::core
 				   !column.topBound.level.empty();
 		}
 
+		// 基礎の立上り 1 本が妥当か（Python 版 _validate_wall 相当）。配置先レイヤ名・
+		// クラス名・壁スタイル名が非空で、壁厚が正で、壁芯の始点と終点が縮退していないこと
+		// （判定は core/Geometry の samePoint）。上下端の高さ基準のレベル種別も非空（空だと
+		// SetWallOverallHeights が解決できず、レイヤの「壁の高さ」設定に落ちる）。構成層は
+		// 1 枚以上あり総厚が正であること（スラブと同じ関門）。
+		bool isValidWall(const WallCommand& wall)
+		{
+			if (wall.layer.empty() || wall.drawClass.empty() || wall.styleName.empty() ||
+				wall.thickness <= 0.0 || samePoint(wall.start, wall.end) ||
+				wall.bottomBound.level.empty() || wall.topBound.level.empty() ||
+				wall.components.empty())
+				return false;
+			if (!std::ranges::all_of(wall.components, isValidComponent))
+				return false;
+
+			double total = 0.0;
+			for (const ComponentCommand& component : wall.components)
+				total += component.thickness;
+			return total > 0.0;
+		}
+
+		// 基礎の底盤 1 枚が妥当か（Python 版 _validate_slab 相当）。床板と同じ関門
+		// （レイヤ名・クラス名・スタイル名が非空／外形 3 点以上／高さ基準のレベル種別が
+		// 非空／構成層が 1 枚以上あり総厚が正）に、コンクリート厚が正であることを足す
+		// （厚み 0 のスラブスタイルは作れない）。
+		bool isValidSlab(const SlabCommand& slab)
+		{
+			if (slab.layer.empty() || slab.drawClass.empty() || slab.boundary.size() < 3 ||
+				slab.bound.level.empty() || slab.styleName.empty() || slab.components.empty() ||
+				slab.thickness <= 0.0)
+				return false;
+			if (!std::ranges::all_of(slab.components, isValidComponent))
+				return false;
+
+			double total = 0.0;
+			for (const ComponentCommand& component : slab.components)
+				total += component.thickness;
+			return total > 0.0;
+		}
+
 		// 野地板 1 枚が妥当か（Python 版 _validate_roof 相当）。配置先レイヤ名・クラス名が
 		// 非空で、平面外形が 3 点以上（面になる）で、厚みが正であること。勾配（rise/run）と
 		// 高さは数値（double なので常に成立）で、退化した勾配は描画側がフォールバックで
@@ -136,6 +176,14 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.columns, isValidColumn))
 			return false;
 
+		// 基礎: 立上りは壁厚が正・壁芯が非縮退・上下端のレベル種別が非空、底盤は床板と同じ
+		// 関門＋コンクリート厚が正であること（isValidWall / isValidSlab 参照。Python 版
+		// _validate_wall / _validate_slab と同じ関門。ROADMAP.md M9）。
+		if (!std::ranges::all_of(document.walls, isValidWall))
+			return false;
+		if (!std::ranges::all_of(document.slabs, isValidSlab))
+			return false;
+
 		// 垂木・野地板: 配置先レイヤ名・クラス名が非空で、垂木は断面が正・平面が非縮退、
 		// 野地板は外形 3 点以上・厚みが正であること（Python 版 _validate_rafter /
 		// _validate_roof と同じ関門。ROADMAP.md M6）。
@@ -151,7 +199,7 @@ namespace HomeskzIfcImport::core
 		// （Python 版 validateDocument と同じ関門。ROADMAP.md M1）。
 		//
 		// TODO: 命令リストが増えたら、要素ごとの all_of を && で連ねてここに積む
-		// （wall / slab … の検証。ROADMAP.md）。
+		// （wallJoin / anchorBolt … の検証。ROADMAP.md）。
 		return std::ranges::all_of(
 			document.grids, [](const GridCommand& grid)
 			{ return !grid.layer.empty() && !samePoint(grid.start, grid.end); });
