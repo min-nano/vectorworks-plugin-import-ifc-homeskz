@@ -24,8 +24,9 @@
 //	件数・並び順は保つ（後続 M のタグが命令インデックスで横架材を参照するため）。判定は
 //	命令の並び順に依存しない決定的な結果になる。
 //
-//	【M7 のスコープ】受ける材は**横架材だけ**を見る。柱（M8）を参照する端部詰めの最終化は、
-//	柱の導入時に行う（ROADMAP.md M7「端部詰めは…柱導入後（M8）に最終化する」）。
+//	【M8 で最終化】受ける材は横架材と**柱**の両方を見る（M7 の時点では横架材だけだった。
+//	ROADMAP.md M7「端部詰めは…柱導入後（M8）に最終化する」）。柱は方向を持たないので、
+//	断面の軸平行矩形へ食い込む量を別式で求める（noboribariColumnPenetration）。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。
 //
@@ -47,6 +48,9 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kNoboribariZOverlapTol = 1.0; // これ以下の Z 重なりは取り合いでない
 	inline constexpr double kNoboribariMinTrim = 0.5; // これ未満の食い込みは詰めない
 	inline constexpr double kNoboribariMinLength = 1.0; // 詰めた後にこの長さ未満なら詰めない
+	// 柱の食い込み量を求めるとき、この値以下の方向成分は「その軸方向へ進んでいない」と
+	// みなす（0 除算を避ける。Python 版 _column_penetration の 1e-9）。
+	inline constexpr double kNoboribariColumnDirEps = 1e-9;
 
 	// 屋根面の法線水平成分と登り梁の勾配方向の内積（単位）の下限。屋根面の勾配方向が登り梁の
 	// 勾配方向と平行（この値以上）な屋根版だけを、その登り梁の屋根面とみなす
@@ -83,11 +87,19 @@ namespace HomeskzIfcImport::parse
 											const std::vector<NoboribariRoofPlane>& planes,
 											const core::Vec2& center);
 
-	// 登り梁の端点 point・外向き outward を、受ける材（横架材）の面まで詰める量を返す
-	// （Python 版 _end_trim。柱は M8 で足す）。Z 範囲 [zBottom, zTop] が重なる材だけを見て、
-	// 食い込み量の最大値を返す。平行な材（継ぎ手・側並び）は 0 になる。
+	// 登り梁の端点 point・外向き outward が、柱の断面矩形（軸平行）へ食い込む量を返す
+	// （Python 版 _column_penetration）。端点が矩形の内部にあるとき、内側方向（−outward）へ
+	// 引き戻して柱の手前の面まで出すのに必要な距離（>= 0）。柱は方向を持たないため軸平行の
+	// 矩形として扱う。食い込んでいなければ 0。
+	double noboribariColumnPenetration(const core::Vec2& point, const core::Vec2& outward,
+									   const core::ColumnCommand& column);
+
+	// 登り梁の端点 point・外向き outward を、受ける材（横架材）・柱の面まで詰める量を返す
+	// （Python 版 _end_trim）。Z 範囲 [zBottom, zTop] が重なる材・柱だけを見て、食い込み量の
+	// 最大値を返す。平行な材（継ぎ手・側並び）は 0 になる。
 	double noboribariEndTrim(const core::Vec2& point, const core::Vec2& outward, double zBottom,
-							 double zTop, const std::vector<core::MemberCommand>& receivers);
+							 double zTop, const std::vector<core::MemberCommand>& receivers,
+							 const std::vector<core::ColumnCommand>& columns);
 
 	// 登り梁命令 1 件を補正する（Python 版 _correct_one）。端部の食い込みを詰めてから、
 	// 屋根面が見つかれば天端をその面へスナップする（バインド offset も更新）。平面投影長が
@@ -95,14 +107,17 @@ namespace HomeskzIfcImport::parse
 	core::MemberCommand correctOneNoboribari(const core::MemberCommand& command,
 											 const std::vector<NoboribariRoofPlane>& planes,
 											 const std::vector<core::MemberCommand>& receivers,
+											 const std::vector<core::ColumnCommand>& columns,
 											 const core::Vec2& center);
 
 	// 横架材命令のうち登り梁だけを補正した新しいリストを返す（Python 版 correct_noboribari）。
-	// 登り梁でない材は素通しし、件数・並び順は保つ。受ける材は「登り梁でない横架材」。
+	// 登り梁でない材は素通しし、件数・並び順は保つ。受ける材は「登り梁でない横架材」と柱。
 	std::vector<core::MemberCommand>
-	correctNoboribari(Context& context, const std::vector<core::MemberCommand>& members);
+	correctNoboribari(Context& context, const std::vector<core::MemberCommand>& members,
+					  const std::vector<core::ColumnCommand>& columns);
 
 	// 同上（コンテキストを内部で 1 つ作って捨てる。単体テスト用）。
 	std::vector<core::MemberCommand>
-	correctNoboribari(const Model& model, const std::vector<core::MemberCommand>& members);
+	correctNoboribari(const Model& model, const std::vector<core::MemberCommand>& members,
+					  const std::vector<core::ColumnCommand>& columns);
 } // namespace HomeskzIfcImport::parse

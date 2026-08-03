@@ -74,7 +74,6 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 
-#include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
@@ -153,38 +152,6 @@ namespace HomeskzIfcImport::draw
 			return data;
 		}
 
-		// 断面の矩形（幅 × せい）をプロファイルグループとして作る（Python 版の
-		// BeginGroup / ClosePoly / Poly(0,0, 0,h, w,h, w,0) / EndGroup に対応）。
-		//
-		// **グループへは VWFC の VWGroupObj::AddObject で入れる**。当初は
-		// gSDK->AddObjectToContainer を直に呼んでいたが、その場合ポリゴンは「レイヤに
-		// 作ってから移す」形になり、移動に失敗すると**空のグループ**が残る。空のプロファイルは
-		// 断面が無いのと同じで、PIO は生成できても実体が描かれない（＝オブジェクトはあるのに
-		// 画面に何も出ない）。入ったかどうかは GetFirstMemberObject で確かめ、空なら nil を
-		// 返して呼び出し側にフォールバックさせる。
-		MCObjectHandle CreateProfileGroup(double width, double height)
-		{
-			if (width <= 0.0 || height <= 0.0)
-				return nil;
-
-			VWPolygon2DObj profile({VWPoint2D(0.0, 0.0), VWPoint2D(0.0, height),
-									VWPoint2D(width, height), VWPoint2D(width, 0.0)});
-			profile.SetClosed(true);
-			const MCObjectHandle profileHandle = profile.GetThisObject();
-			if (profileHandle == nil)
-				return nil;
-
-			VWGroupObj group;
-			group.AddObject(profileHandle);
-			const MCObjectHandle groupHandle = group.GetThisObject();
-			if (groupHandle == nil)
-				return nil;
-			// 断面が本当に入ったか（空のグループを渡さない）。
-			if (VWGroupObj(groupHandle).GetFirstMemberObject() == nil)
-				return nil;
-			return groupHandle;
-		}
-
 		// 横架材 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。
 		bool DrawOne(const core::MemberCommand& member, RefNumber style,
@@ -203,7 +170,10 @@ namespace HomeskzIfcImport::draw
 			// 断面（プロファイルグループ）を先に用意する。作れなければ PIO を作らない
 			// ——断面の無い構造材は生成できても実体が描かれず、「オブジェクトはあるのに
 			// 画面に出ない」状態になるだけなので、直線のフォールバックの方が有用。
-			const MCObjectHandle profileGroup = CreateProfileGroup(member.width, member.height);
+			// 矩形の置き方は M7 のローカル確認で通った [0, 0]〜[幅, せい] のまま
+			// （断面基準点は AxisAlign＝天端中央が決める。矩形の座標そのものは変えない）。
+			const MCObjectHandle profileGroup =
+				CreateRectangleProfileGroup(0.0, 0.0, member.width, member.height);
 			MCObjectHandle object =
 				profileGroup == nil ? nil
 									: gSDK->CreateCustomObjectPath(kStructuralMember, pathHandle,

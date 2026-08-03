@@ -26,6 +26,7 @@
 
 #include "core/Geometry.h"
 #include "core/Document.h"
+#include "parse/Column.h"
 #include "parse/Floor.h"
 #include "parse/Grid.h"
 #include "parse/IfcGeometry.h"
@@ -84,6 +85,13 @@ namespace HomeskzIfcImport::parse
 		// 渡す（buildRafterCommands のオーバーロード）。
 		const std::vector<core::MemberCommand>& members();
 
+		// 柱の命令（parse/Column の buildColumnCommands）。3 者がこの 1 回の解析結果を
+		// 共有する: ストーリ（span 柱レイヤのレベルを作る）・Document の columns・登り梁の
+		// 端部詰め（受ける柱）。柱の span 判定は上階の横架材下端を要するので、この計算は
+		// members（上記）を入力に取る——要素ごとに組み立て直すと横架材の解析まで巻き添えで
+		// 何度も走る。
+		const std::vector<core::ColumnCommand>& columns();
+
 	private:
 		const Model* fModel = nullptr;
 
@@ -94,5 +102,6 @@ namespace HomeskzIfcImport::parse
 		std::map<int, std::vector<LoftFloorRegion>> fLoftFloorRegions;
 		std::map<int, std::optional<RoofPlane>> fRoofPlanes;
 		std::optional<std::vector<core::MemberCommand>> fMembers;
+		std::optional<std::vector<core::ColumnCommand>> fColumns;
 	};
 } // namespace HomeskzIfcImport::parse

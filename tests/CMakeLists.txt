@@ -90,8 +90,8 @@ vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 
 # The instruction set (src/core/Document): the command structs' invariants and
 # validateDocument's gate for every command list that has landed so far (stories,
-# grids, floors, rafters, roofs), plus the desired layer-stack order. Links the
-# HomeskzIfcCore library (defined in the top-level CMakeLists.txt) rather than
+# grids, floors, members, columns, rafters, roofs), plus the desired layer-stack order.
+# Links the HomeskzIfcCore library (defined in the top-level CMakeLists.txt) rather than
 # compiling those sources directly, which also proves the CMake target split
 # builds and links with no SDK present. Extend it whenever a command list is
 # added to core/Document.h.
@@ -153,8 +153,9 @@ target_compile_definitions(GeometryTests
 # Story (ストーリ) parsing (src/parse/Story) + the SDK-free desired-layer-order
 # computation (src/core/desiredStoryLayerOrder): IfcBuildingStorey -> stories sorted by
 # Elevation, beam-top offset from contained IfcColumn/IfcSlab local Z, base level/layer
-# assembly (FL + 横架材天端, top = 軒高) and the layer stack order (共通 first, top→bottom,
-# floor to background). Exercised on synthetic STEP snippets and a real fixture; SDK-free.
+# assembly (FL + 横架材天端, top = 軒高), the span column layer name round-trip
+# ({from}to{to}-柱) with its per-storey levels, and the layer stack order (共通 first,
+# top→bottom, floor to background). Exercised on synthetic STEP snippets and a real fixture; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
 vw_add_test(ParseStoryTests ParseStoryTests.cpp)
 target_link_libraries(ParseStoryTests PRIVATE HomeskzIfcCore)
@@ -212,6 +213,20 @@ target_compile_definitions(ParseRoofTests
 vw_add_test(ParseMemberTests ParseMemberTests.cpp)
 target_link_libraries(ParseMemberTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseMemberTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
+# Column (柱) parsing (src/parse/Column): IfcColumn -> vertical structural-member commands —
+# the span layer ({from}to{to}-柱) with its to-level rule (next floor for a 管柱, +0.5 for a roof
+# post, several floors up for a 通し柱, all measured against the upper storeys' beam BOTTOMS),
+# the story-level binding of both ends (柱 = current + upper storey, 小屋束 = current twice with
+# equal offsets so the path length is not double-counted), the structural use, the column-head /
+# base hardware matched by plan position and folded into the member ID, and the 小屋束 section
+# resized to the width of the 母屋/棟木/登り梁 resting on it. Exercised on synthetic STEP snippets
+# and the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseColumnTests ParseColumnTests.cpp)
+target_link_libraries(ParseColumnTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseColumnTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
 # Sloped-beam (登り梁) correction (src/parse/Noboribari): trims the ends that homeskz sinks

@@ -54,6 +54,20 @@ namespace HomeskzIfcImport::draw
 	bool SetParamRealChecked(VWParametricObj& pio, const TXString& param, double value,
 							 double tolerance = 1e-6);
 
+	// 構造材ツール（StructuralMember）へ渡す**断面プロファイルのグループ**を作る。
+	// 矩形（[minX, minY]〜[maxX, maxY]）1 枚を閉じたポリゴンとしてグループへ入れて返す
+	// （Python 版の BeginGroup / ClosePoly / Poly(…) / EndGroup に対応）。矩形の位置は
+	// 呼び出し側の**断面基準点の規約**で決まる: 横架材は天端中央基準なので原点が上辺中央、
+	// 柱は断面中心基準なので原点が中心（AxisAlign の設定と一致させる）。
+	//
+	// **グループへは VWFC の VWGroupObj::AddObject で入れる**。gSDK->AddObjectToContainer を
+	// 直に呼ぶと「レイヤに作ってから移す」形になり、移動に失敗すると**空のグループ**が残る。
+	// 空のプロファイルは断面が無いのと同じで、PIO は生成できても実体が描かれない（＝
+	// オブジェクトはあるのに画面に何も出ない）。入ったかどうかを GetFirstMemberObject で
+	// 確かめ、空なら nil を返すので、呼び出し側はフォールバックへ回せる。
+	// 幅・せいが 0 以下なら nil。
+	MCObjectHandle CreateRectangleProfileGroup(double minX, double minY, double maxX, double maxY);
+
 	// 名前付きデザインレイヤを取得（無ければ作成）してアクティブにする。以後に生成する
 	// オブジェクトはこのレイヤへ入る。取得・生成できなければ nil を返し、カレントレイヤも
 	// 変えない。**通り芯の "共通" レイヤのように、その要素が自分で用意してよいレイヤ専用。**

@@ -34,6 +34,8 @@ namespace HomeskzIfcImport::parse
 
 		// IfcProduct(… ObjectType=4, ObjectPlacement=5, Representation=6)。
 		// IfcProduct の全サブタイプ（IfcSlab / IfcBeam / IfcColumn / IfcBuildingStorey …）で共通。
+		// ObjectType は柱の種別記録（"STANDCOLUMN"＝小屋束）に使う（parse/Column）。
+		inline constexpr std::size_t kProductObjectType = 4;
 		inline constexpr std::size_t kProductObjectPlacement = 5;
 		inline constexpr std::size_t kProductRepresentation = 6;
 
@@ -90,6 +92,12 @@ namespace HomeskzIfcImport::parse
 
 		// IfcBooleanResult(Operator, FirstOperand=1, SecondOperand)。
 		inline constexpr std::size_t kBooleanResultFirstOperand = 1;
+
+		// IfcRelDefines(… RelatedObjects=4) と IfcRelDefinesByType(… RelatingType=5)。
+		// 柱頭・柱脚金物の型（IfcMechanicalFastenerType）名はこの逆参照から辿る
+		// （parse/Column の fastenerTypeName）。
+		inline constexpr std::size_t kRelDefinesRelatedObjects = 4;
+		inline constexpr std::size_t kRelDefinesByTypeRelatingType = 5;
 
 		// IfcRelAssociatesMaterial(… RelatedObjects=4, RelatingMaterial=5)。横架材の材種名は
 		// この逆参照から辿る（parse/Member の memberMaterialName）。
