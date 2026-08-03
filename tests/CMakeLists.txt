@@ -285,3 +285,27 @@ elseif(VW_REQUIRE_SCRIPT_TESTS)
 	message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'pwsh' (PowerShell 7) was not found: "
 						"the Windows updater-script tests (vw-update.Tests.ps1) cannot run.")
 endif()
+
+# CI-wait clients (scripts/ci-common.sh + scripts/ci-wait.sh) via bash + a fake
+# `curl` on PATH. These are developer tooling rather than plug-in code, but the
+# property they encode — a wait that ALWAYS terminates and never mistakes "CI has
+# not started" or "run cancelled by a newer push" for a green build — has broken
+# twice, and each break cost a session that never noticed CI had finished. Same
+# skip/require policy as the updater harnesses above.
+if(NOT WIN32)
+	find_program(BASH_PROGRAM bash)
+	if(BASH_PROGRAM)
+		add_test(NAME CiWaitScriptTests COMMAND "${BASH_PROGRAM}"
+												"${CMAKE_CURRENT_SOURCE_DIR}/ci-wait.test.sh")
+		set_tests_properties(
+			CiWaitScriptTests PROPERTIES ENVIRONMENT
+										 "VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
+		# The suite deliberately waits on real deadlines (a few seconds each), and
+		# has its own ceiling; keep ctest's above it so a hang is reported by the
+		# suite itself rather than as an opaque ctest timeout.
+		set_tests_properties(CiWaitScriptTests PROPERTIES TIMEOUT 900)
+	elseif(VW_REQUIRE_SCRIPT_TESTS)
+		message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'bash' was not found: the CI-wait "
+							"script tests (ci-wait.test.sh) cannot run.")
+	endif()
+endif()
