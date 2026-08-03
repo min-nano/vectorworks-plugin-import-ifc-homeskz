@@ -326,6 +326,15 @@ TEST(joint_degenerate_member_is_skipped)
 	CHECK(buildJointCommands({degenerate, other}).empty());
 }
 
+TEST(joint_end_has_receiver_rejects_out_of_range_index)
+{
+	// 範囲外のインデックスは受ける材なしとして扱う（呼び出し側は範囲内しか渡さないが、
+	// 添字で落ちないことを守る）。
+	const std::vector<MemberCommand> members = {
+		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})};
+	CHECK(!endHasReceiver(5, Vec2{0.0, 0.0}, geomsOf(members), members, {}));
+}
+
 // --- 命令の組み立て（Python 版 TestBuildJointCommands）-----------------------
 
 TEST(joint_t_junction_places_single_joint_at_stem_end)

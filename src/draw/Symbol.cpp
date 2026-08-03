@@ -103,8 +103,7 @@ namespace HomeskzIfcImport::draw
 			// シンボル定義が無ければ置けない。名前を 1 度だけ診断へ残す。
 			if (!HasSymbolDefinition(symbolExists, command.symbol))
 			{
-				if (std::find(missingSymbols.begin(), missingSymbols.end(), command.symbol) ==
-					missingSymbols.end())
+				if (std::ranges::find(missingSymbols, command.symbol) == missingSymbols.end())
 					missingSymbols.push_back(command.symbol);
 				continue;
 			}
