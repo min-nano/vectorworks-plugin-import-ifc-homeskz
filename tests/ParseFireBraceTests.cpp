@@ -21,6 +21,7 @@
 #include "parse/FireBrace.h"
 #include "parse/Loader.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -141,6 +142,33 @@ TEST(fire_brace_is_matched_by_name_and_type)
 	CHECK(!isFireBrace(*model.entity(2))); // 種別が違う横架材
 	CHECK(!isFireBrace(*model.entity(3))); // 名前は火打でも IfcColumn は対象外
 	CHECK(isFireBrace(*model.entity(4)));  // IfcBeam + "火打…"
+}
+
+TEST(fire_brace_angle_of_empty_footprint_is_zero)
+{
+	// 外形が空なら重心が定まらない。呼び出し側はここへ空の外形を渡さないが、
+	// 0 を返して落ちないことを守る（1 本の欠損で全体を止めない）。
+	CHECK(near(fireBraceAngle(Vec2{1.0, 2.0}, {}), 0.0));
+}
+
+// --- 解決できない火打はスキップする -------------------------------------------
+
+TEST(fire_brace_without_solid_is_skipped)
+{
+	// 押し出しソリッドを解決できない火打（形状表現なし）は命令を出さない。ストーリと
+	// 所属関係だけがあり、火打の名前は付いている状態。
+	const Model model =
+		loadIfcFromText("#1=IFCBUILDINGSTOREY('s',$,'1FL',$,$,$,$,$,.ELEMENT.,0.);\n"
+						"#2=IFCMEMBER('m',$,'火打:1_1',$,$,$,$,$);\n"
+						"#3=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#2),#1);\n");
+	CHECK(buildFireBraceCommands(model).empty());
+}
+
+TEST(fire_brace_without_storeys_is_empty)
+{
+	// FL ストーリが 1 つも無いモデルは配置先レイヤが決まらないので空。
+	CHECK(buildFireBraceCommands(loadIfcFromText("#1=IFCMEMBER('m',$,'火打:1_1',$,$,$,$,$);\n"))
+			  .empty());
 }
 
 // --- 実フィクスチャ（Python 版 TestBuildFromFixture）-------------------------

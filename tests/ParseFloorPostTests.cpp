@@ -21,6 +21,7 @@
 #include "parse/Footing.h"
 #include "parse/Loader.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <optional>
@@ -178,6 +179,33 @@ TEST(floor_post_gap_zero_when_touching)
 	const std::optional<double> gap = collinearGap(a, b);
 	CHECK(gap.has_value());
 	CHECK(near(*gap, 0.0));
+}
+
+TEST(floor_post_gap_none_for_degenerate_run)
+{
+	// 長さ 0 の区間は方向が定まらないので同一直線判定が成り立たない。
+	const OhbikiRun degenerate{Vec2{0.0, 0.0}, Vec2{0.0, 0.0}};
+	const OhbikiRun normal{Vec2{0.0, 0.0}, Vec2{1000.0, 0.0}};
+	CHECK(!collinearGap(degenerate, normal).has_value());
+	CHECK(!collinearGap(normal, degenerate).has_value());
+}
+
+TEST(floor_post_merge_of_empty_input_is_empty)
+{
+	CHECK(mergeCollinearOhbiki({}).empty());
+}
+
+TEST(floor_post_members_without_geometry_are_skipped)
+{
+	// 配置・断面を解決できない大引／土台は支持材にも大引にも数えない（基礎はあるが
+	// 幾何が無いので床束は 0 本）。
+	const Model model = loadIfcFromText("#1=IFCSLAB('s',$,'基礎底盤',$,$,$,$,$,$);\n"
+										"#2=IFCBEAM('b',$,'木梁:大引:1',$,$,$,$,$);\n"
+										"#3=IFCBEAM('b',$,'木梁:土台:1',$,$,$,$,$);\n");
+	CHECK(hasFoundation(model));
+	CHECK(collectOhbikiLines(model).empty());
+	CHECK(collectSupportLines(model).empty());
+	CHECK(buildFloorPostCommands(model).empty());
 }
 
 TEST(floor_post_joint_merged_into_one_run)
