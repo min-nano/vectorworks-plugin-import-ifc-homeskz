@@ -154,7 +154,8 @@ namespace HomeskzIfcImport::draw
 			// universal 名をそのまま返し、GetParamReal は存在しない名前に対して 0 を返すので、
 			// 存在確認をしないと「スパン」という名前が違うだけで**パスは正常なのに全数を
 			// 長さ 0 と誤報**してしまう（診断が嘘をつくと切り分けが逆に遠のく）。
-			VWParametricObj pio(result.object);
+			// 読み戻すだけ（設定は draw/StructuralMember が済ませている）なので const。
+			const VWParametricObj pio(result.object);
 			const TXString span = ResolveParamName(pio, kFieldSpan, kLocalizedSpan);
 			if (pio.GetParamIndex(span) != static_cast<size_t>(-1) &&
 				std::abs(pio.GetParamReal(span)) <= kZeroLengthTol)
