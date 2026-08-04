@@ -188,7 +188,7 @@ namespace HomeskzIfcImport::draw
 				normal.z += (a.x - b.x) * (a.y + b.y);
 			}
 			if ((normal.x * axis.x) + (normal.y * axis.y) < 0.0)
-				std::reverse(vertices.begin(), vertices.end());
+				std::ranges::reverse(vertices);
 
 			VWPolygon3D base;
 			for (const core::Vec3& v : vertices)
