@@ -900,6 +900,98 @@ TEST(multiple_openings_on_one_wall_all_apply)
 	CHECK(near(carved[2].start.x, 4600.0));
 }
 
+namespace
+{
+	// 人通口の判定を突くための最小 STEP モデル。**立上り 1 本＋削り取り 4 つ**で、
+	// 4 つのうち 1 つだけが人通口として採られる。
+	//
+	// 立上りの配置は「局所 Z＝押し出し方向＝ワールド +X」「局所 X＝ワールド +Y（＝壁厚）」
+	// 「局所 Y＝ワールド +Z（＝壁高）」で、原点 (0,0,250)・断面 120×500 なので、壁芯は
+	// (0,0)→(3000,0)・壁厚 120・天端 Z=500・底面 Z=0 になる（ホームズ君の基礎梁と同じ
+	// 「鉛直断面を水平に押し出す」表現）。削り取りは Body の差演算を入れ子にして与える
+	// （((((素 − v1) − v2) − v3) − v4)）。
+	//
+	//   v1（採用）  … 天端まで届き底面には届かない Z 帯 [300, 500]＝人通口
+	//   v2（不採用）… 底面まで届く全高の削り Z 帯 [0, 500]＝端部が他材で削られたもの
+	//   v3（不採用）… 天端に届かない中間帯 Z 帯 [100, 300]
+	//   v4（不採用）… 鉛直押し出し（壁芯が水平にならない）
+	std::string wallWithOpeningsText()
+	{
+		return "#1=IFCCARTESIANPOINT((0.,0.,250.));\n"
+			   "#2=IFCDIRECTION((1.,0.,0.));\n" // 局所 Z＝押し出し方向（ワールド +X）
+			   "#3=IFCDIRECTION((0.,1.,0.));\n" // 局所 X＝壁厚方向（ワールド +Y）
+			   "#4=IFCAXIS2PLACEMENT3D(#1,#2,#3);\n"
+			   "#5=IFCLOCALPLACEMENT($,#4);\n"
+			   // 素の立上り: 断面 120（壁厚）×500（壁高）を 3000 押し出す。
+			   "#10=IFCCARTESIANPOINT((0.,0.));\n"
+			   "#11=IFCAXIS2PLACEMENT2D(#10,$);\n"
+			   "#12=IFCRECTANGLEPROFILEDEF(.AREA.,$,#11,120.,500.);\n"
+			   "#13=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
+			   "#14=IFCDIRECTION((0.,0.,1.));\n"
+			   "#15=IFCEXTRUDEDAREASOLID(#12,$,#14,3000.);\n"
+			   // v1: Z 帯 [300, 500]（断面中心を v=+150 へずらす）・区間 x∈[1000, 1600]。
+			   "#20=IFCCARTESIANPOINT((0.,150.));\n"
+			   "#21=IFCAXIS2PLACEMENT2D(#20,$);\n"
+			   "#22=IFCRECTANGLEPROFILEDEF(.AREA.,$,#21,120.,200.);\n"
+			   "#23=IFCCARTESIANPOINT((0.,0.,1000.));\n"
+			   "#24=IFCAXIS2PLACEMENT3D(#23,$,$);\n"
+			   "#25=IFCEXTRUDEDAREASOLID(#22,#24,#14,600.);\n"
+			   // v2: 全高 Z 帯 [0, 500]・区間 x∈[2800, 3000]（端部の削り）。
+			   "#30=IFCAXIS2PLACEMENT2D(#10,$);\n"
+			   "#31=IFCRECTANGLEPROFILEDEF(.AREA.,$,#30,120.,500.);\n"
+			   "#32=IFCCARTESIANPOINT((0.,0.,2800.));\n"
+			   "#33=IFCAXIS2PLACEMENT3D(#32,$,$);\n"
+			   "#34=IFCEXTRUDEDAREASOLID(#31,#33,#14,200.);\n"
+			   // v3: 中間帯 Z 帯 [100, 300]（断面中心を v=−50 へ）・区間 x∈[200, 800]。
+			   "#40=IFCCARTESIANPOINT((0.,-50.));\n"
+			   "#41=IFCAXIS2PLACEMENT2D(#40,$);\n"
+			   "#42=IFCRECTANGLEPROFILEDEF(.AREA.,$,#41,120.,200.);\n"
+			   "#43=IFCCARTESIANPOINT((0.,0.,200.));\n"
+			   "#44=IFCAXIS2PLACEMENT3D(#43,$,$);\n"
+			   "#45=IFCEXTRUDEDAREASOLID(#42,#44,#14,600.);\n"
+			   // v4: 鉛直押し出し（局所 Z をワールド +Z＝要素の局所 Y へ向ける）。
+			   "#50=IFCCARTESIANPOINT((0.,0.,1800.));\n"
+			   "#51=IFCDIRECTION((0.,1.,0.));\n"
+			   "#52=IFCAXIS2PLACEMENT3D(#50,#51,$);\n"
+			   "#53=IFCEXTRUDEDAREASOLID(#22,#52,#14,600.);\n"
+			   // Body: ((((素 − v1) − v2) − v3) − v4)
+			   "#60=IFCBOOLEANRESULT(.DIFFERENCE.,#15,#25);\n"
+			   "#61=IFCBOOLEANRESULT(.DIFFERENCE.,#60,#34);\n"
+			   "#62=IFCBOOLEANRESULT(.DIFFERENCE.,#61,#45);\n"
+			   "#63=IFCBOOLEANRESULT(.DIFFERENCE.,#62,#53);\n"
+			   "#64=IFCSHAPEREPRESENTATION($,'Body','CSG',(#63));\n"
+			   "#65=IFCPRODUCTDEFINITIONSHAPE($,$,(#64));\n"
+			   "#70=IFCFOOTING('f1',$,'基礎梁:1',$,$,#5,#65,$,$);\n";
+	}
+} // namespace
+
+TEST(only_top_down_horizontal_cuts_count_as_openings)
+{
+	// 差演算の第 2 オペランドのうち、**天端まで届き底面には届かない水平押し出し**だけが
+	// 人通口。端部が他材で削られた全高の削り・天端に届かない中間帯・鉛直押し出しは
+	// 人通口ではない（これらを拾うと立上りを誤って分割・切り下げしてしまう）。
+	const Model model = HomeskzIfcImport::parse::loadIfcFromText(wallWithOpeningsText());
+	const std::vector<WallOpening> openings =
+		HomeskzIfcImport::parse::collectWallOpenings(model, Vec2{0.0, 0.0});
+
+	CHECK_EQ(openings.size(), std::size_t{1});
+	if (openings.empty())
+		return;
+	CHECK(near(openings[0].start.x, 1000.0) && near(openings[0].start.y, 0.0));
+	CHECK(near(openings[0].end.x, 1600.0) && near(openings[0].end.y, 0.0));
+	CHECK(near(openings[0].zBottom, 300.0));
+	CHECK(near(openings[0].zTop, 500.0));
+
+	// この 1 か所を当てはめると、開口下端（300）が底盤天端（50）より高いので
+	// **天端を切り下げた中間区間**を挟んだ 3 本になる。
+	const std::vector<WallCommand> carved =
+		applyWallOpenings({wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})}, openings, 50.0, 590.0);
+	CHECK_EQ(carved.size(), std::size_t{3});
+	if (carved.size() != 3)
+		return;
+	CHECK(near(carved[1].topBound.offset, 300.0 - 590.0));
+}
+
 TEST(openings_come_from_the_real_fixtures)
 {
 	// 実フィクスチャの立上りには人通口（差演算の第 2 オペランド）がある。天端まで届き
