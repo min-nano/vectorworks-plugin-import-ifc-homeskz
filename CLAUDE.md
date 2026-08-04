@@ -143,7 +143,8 @@ src/
     Grid.{h,cpp}            通り芯（旧 ifc/grid.py）
     Story.{h,cpp}           ストーリ（旧 ifc/story.py）
     Member.{h,cpp}          横架材（旧 ifc/member.py）
-    Footing.{h,cpp}         基礎（立上り＝壁・底盤＝スラブ・基礎ストーリ。旧 ifc/footing.py）
+    Footing.{h,cpp}         基礎（立上り＝壁・底盤＝スラブ・基礎ストーリ・人通口・壁結合・
+                            地中梁。旧 ifc/footing.py）
     …                       以降、要素ごとに 1 対 1 で追加
 
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
@@ -153,7 +154,8 @@ src/
     ProgressDialog.{h,cpp}  core::ProgressReporter を VW の進捗ダイアログへ橋渡し（唯一の実装）
     Grid.{h,cpp}            grid 命令 → GridAxis（旧 vw/grid.py）
     Story.{h,cpp}           story 命令 → ストーリ・レベル・レイヤ（旧 vw/story.py）
-    Footing.{h,cpp}         wall/slab 命令 → 壁・スラブ（旧 vw/footing.py）
+    Footing.{h,cpp}         wall/wallJoin/slab 命令 → 壁・壁結合・スラブ（地中梁の
+                            台形プリズムを含む。旧 vw/footing.py）
     …                       以降、要素ごとに 1 対 1 で追加
 
 tests/
@@ -177,13 +179,16 @@ tests/
 インデックスは `parse/IfcAttr.h`、レベル種別名は `parse/Story.h`（屋根組は
 `parse/Rafter.h` / `parse/Roof.h`）、レイヤ名の組み立ては `storyLayerName`、要素の判別
 述語（`isFloorSlab` / `isRoofSlab`）はその要素のヘッダ、平面座標の同一判定と許容
-（`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値は
-`parse/IfcGeometry.h`、基礎のレイヤ名・許容値は `parse/Footing.h`、`draw/` の SDK 呼び出しの
-定型（クラス分け・レイヤ用意・スタイル解決・**構成層／基準面／スタイルの新規作成**——床板・
-底盤・立上りが共有する）は `draw/DrawUtil`、構造材ツール（StructuralMember PIO）のフィールド名・
-値・生成手順は `draw/StructuralMember`、進捗の見出し・
-バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`（整形と配分の
-計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、
+（`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値・**押し出しを
+鉛直とみなす閾値**（`kVerticalExtrudeTol`。平面外形の求め方と、人通口・地中梁の「水平押し出しか」
+判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・許容値（統合・自由端・**人通口・
+壁結合・地中梁**）は `parse/Footing.h`、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・
+スタイル解決・**構成層／基準面／スタイルの新規作成**——床板・底盤・立上りが共有する）は
+`draw/DrawUtil`、構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
+`draw/StructuralMember`、**描画側から切り離せる純計算**（レイヤの希望スタック順
+`desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`）は `core/Document`、
+進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
+（整形と配分の計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
 
 **依存の向きは厳守する:** `parse/` と `core/` は VectorWorks SDK を include しない。

@@ -48,10 +48,11 @@ namespace HomeskzIfcImport::draw
 
 		// 進捗バーの配分は**命令数の比**にする（1 件あたりの重さは要素で違うが、要素ごとの
 		// 実測が無い以上、件数比が一番嘘の少ない近似。core::phaseShare）。
-		const std::size_t total =
-			document.stories.size() + document.grids.size() + document.floors.size() +
-			document.members.size() + document.columns.size() + document.rafters.size() +
-			document.roofs.size() + document.walls.size() + document.slabs.size();
+		const std::size_t total = document.stories.size() + document.grids.size() +
+								  document.floors.size() + document.members.size() +
+								  document.columns.size() + document.rafters.size() +
+								  document.roofs.size() + document.walls.size() +
+								  document.wallJoins.size() + document.slabs.size();
 
 		// 要素ごとの診断（無ければ空）を改行で連ねる。1 つの文字列を各 draw* へ渡すと
 		// 後の要素が前の要素の診断を上書きしてしまうため、ここで積む。
@@ -84,12 +85,16 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("通り芯を描画しています…", document.grids.size()))
 			counts.grids = drawGrids(document, progress);
 
-		// M9 基礎を描く。立上り（壁）→ 底盤（スラブ）の順（Python 版 execute_document と
-		// 同じで、M10 の壁結合が立上りのハンドルを参照するため立上りを先に置く）。配置先の
-		// "F-立上り" / "F-底盤" レイヤは基礎ストーリの story 命令が作るので、必ず
+		// M9/M10 基礎を描く。立上り（壁）→ 壁結合 → 底盤（スラブ）の順（Python 版
+		// execute_document と同じ）。**壁結合は立上りのハンドルを引く**ので、立上りを
+		// すべて配置した直後に置く（対応表は WallHandles で受け渡す。draw/Footing.h）。
+		// 配置先の "F-立上り" / "F-底盤" レイヤは基礎ストーリの story 命令が作るので、必ず
 		// drawStories の後に置く（レイヤが無い命令はそれぞれがスキップする）。
+		WallHandles wallHandles;
 		if (beginPhase("基礎の立上りを描画しています…", document.walls.size()))
-			counts.walls = drawWalls(document, progress);
+			counts.walls = drawWalls(document, progress, &wallHandles);
+		if (beginPhase("基礎の立上りを結合しています…", document.wallJoins.size()))
+			counts.wallJoins = drawWallJoins(document, progress, wallHandles);
 		if (beginPhase("基礎の底盤を描画しています…", document.slabs.size()))
 			counts.slabs = drawSlabs(document, progress);
 

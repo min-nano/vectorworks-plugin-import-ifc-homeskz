@@ -10,9 +10,9 @@
 //	される（無 SDK の core/parse ライブラリには含めない）。この宣言ヘッダ自体は
 //	core::Document しか参照せず、SDK ヘッダを引き込まない。
 //
-//	現状は story（M3）→ grid（M1）→ wall / slab（M9）→ floor（M5）→ member（M7）→
-//	column（M8）→ rafter → roof（M6）へディスパッチする。残りの要素は対応マイルストーンで
-//	足していく。
+//	現状は story（M3）→ grid（M1）→ wall（M9）→ wallJoin（M10）→ slab（M9。地中梁＝M10 を
+//	含む）→ floor（M5）→ member（M7）→ column（M8）→ rafter → roof（M6）へディスパッチする。
+//	残りの要素は対応マイルストーンで足していく。
 //
 
 #pragma once
@@ -40,6 +40,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t rafters = 0;
 		std::size_t roofs = 0;
 		std::size_t walls = 0;
+		std::size_t wallJoins = 0;
 		std::size_t slabs = 0;
 
 		// 進捗ダイアログの「キャンセル」で途中打ち切りになったか。true のときは各要素の
@@ -54,11 +55,11 @@ namespace HomeskzIfcImport::draw
 	};
 
 	// 命令セットを描画する。validateDocument を通してから、命令ごとに要素の draw モジュール
-	// （story → grid → wall → slab → floor → member → column → rafter → roof の順）へ
-	// ディスパッチし、描けた数を返す。
+	// （story → grid → wall → wallJoin → slab → floor → member → column → rafter → roof の
+	// 順）へディスパッチし、描けた数を返す。
 	// 検証を通らなかったときは valid=false で何も描かない。命令が空でも検証は通る（valid=true）。
 	//
-	// TODO(M10〜): wallJoin … と、要素ごとの draw モジュールへのディスパッチを足す。
+	// TODO(M11〜): anchorBolt … と、要素ごとの draw モジュールへのディスパッチを足す。
 	DrawCounts executeDocument(const core::Document& document);
 
 	// 進捗を報告しながら描画する。要素ごとに 1 フェーズを開き（進捗バーの配分は命令数の比。

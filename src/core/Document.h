@@ -11,9 +11,9 @@
 //	drawClass / className のように機械的に置換する。
 //
 //	現状は「バージョン＋ stories / grids / floors / members / columns / rafters / roofs /
-//	walls / slabs」を持つ（M1 通り芯・M3 ストーリ・M5 床板・M6 屋根組・M7 横架材・M8 柱・
-//	M9 基礎ぶん）。残りの命令リスト（wallJoins / anchorBolts …）は、対応するマイルストーンで
-//	要素を移植するたびに 1 つずつ追加する（ROADMAP.md）。
+//	walls / wallJoins / slabs」を持つ（M1 通り芯・M3 ストーリ・M5 床板・M6 屋根組・M7 横架材・
+//	M8 柱・M9 基礎・M10 基礎の高度化ぶん）。残りの命令リスト（anchorBolts …）は、対応する
+//	マイルストーンで要素を移植するたびに 1 つずつ追加する（ROADMAP.md）。
 //
 
 #pragma once
@@ -402,6 +402,99 @@ namespace HomeskzIfcImport::core
 		StoryBoundCommand topBound;
 	};
 
+	// 交差する立上り（壁）同士を VW の壁結合（JoinWalls）で結合する種別。値は SDK の
+	// JoinModifierType（kTWallJoin=1 / kLWallJoin=2 / kXWallJoin=3）と一致させてあり、
+	// draw/Footing はそのまま JoinWalls へ渡す（Python 版 _JOIN_T / _JOIN_L / _JOIN_X）。
+	enum class WallJoinType
+	{
+		T = 1, // 端点で突き当たる壁（stem）を通し壁（through）へ延長して繋ぐ
+		L = 2, // 端点どうしのコーナー
+		X = 3, // 内部どうしの十字
+	};
+
+	// 交差する立上り（壁）2 本を結合する命令。Python 版 document.py の WallJoinCommand
+	// （dict）に対応する。draw/Footing がこれを JoinWalls へ変換する（ROADMAP.md M10）。
+	//
+	// 【壁ハンドルは命令インデックスで受け渡す】a / b は Document::walls の**添字**で、
+	// 描画側は立上りを描くときに「命令インデックス → 壁ハンドル」の対応表を作り、ここから
+	// 引く。**SDK ハンドルは Document に載せない**（フェーズ間で運べない。CLAUDE.md
+	// 「所有権」）。どちらかの壁が未配置（レイヤ未生成・フォールバック描画）の命令は
+	// 描画側がスキップする。
+	//
+	// Python 版キーとの対応:
+	//   a        ← 'a'         … 結合する壁の walls 内インデックス（T 結合では stem＝延長される側）
+	//   b        ← 'b'         … 同上（T 結合では through＝通し壁）
+	//   point    ← 'point'     … 2 壁の壁芯の交点（参照用。センタリング済み）
+	//   pickA    ← 'pick_a'    … a に渡すピック点（**交点ではなく「残す側」へ寄せた点**）
+	//   pickB    ← 'pick_b'    … b に渡すピック点（同上）
+	//   joinType ← 'join_type' … 結合種別（JoinWalls の joinModifier）
+	//   capped   ← 'capped'    … 結合部を閉じるか（天端高さの違う立上りどうしは閉じる）
+	//
+	// 【ピック点を交点からずらす理由】壁芯の交点は相手壁の壁芯上にも乗るため「どちら側を
+	// 残すか」が曖昧になり、VW が L 結合でコーナーを詰めず立上りが相手壁の外面まで伸びた
+	// まま残る（Python 版 #84）。交点から**遠い端点の方向**へ控えめに寄せた点を渡して
+	// 残す区間を明示する（算出は parse/Footing の keptSidePick）。
+	struct WallJoinCommand
+	{
+		std::size_t a = 0;
+		std::size_t b = 0;
+		Vec2 point;
+		Vec2 pickA;
+		Vec2 pickB;
+		WallJoinType joinType = WallJoinType::L;
+		bool capped = false;
+	};
+
+	// 地中梁（台形断面プリズム）1 本。Python 版 document.py の ModifierCommand（dict）に
+	// 対応し、底盤（SlabCommand::modifiers）にぶら下がる（ROADMAP.md M10）。
+	//
+	// 【なぜスラブ命令にしないか】地中梁は**台形断面**（下端が狭く上端が広い下り梁）なので、
+	// 一様な厚みしか持てない単一のスラブでは描けない。底盤のコンクリートに噛み合う
+	// 台形プリズムとして表し、描画側はこれを **2 回**作る（draw/Footing.h 参照）:
+	//   1. 削り取りモディファイア … スラブのプロファイル群へ渡して底盤を clip する
+	//   2. 可視の 3D ソリッド     … 削り取った位置を地中梁のコンクリートで埋める
+	//
+	// 【断面の座標系】profile は断面の 2D 頂点列 (u, v) で、u＝幅軸（押し出し方向を +90 度
+	// 回した水平軸）・v＝鉛直軸（v=0 が断面原点＝梁下端）。origin は断面原点のワールド
+	// 絶対座標（XY はセンタリング済み・z は絶対値）で、azimuth は押し出し方向（梁の走る
+	// 向き）の方位角（度・+X から反時計回り）。**u 軸の取り方は描画側の復元規約と対で
+	// 決まっている**ので、片方だけ変えてはいけない（parse/Footing の groundBeamModifier と
+	// draw/Footing の ModifierPrism）。
+	//
+	// Python 版キーとの対応:
+	//   profile ← 'profile' … 断面の 2D 頂点列（u, v）
+	//   depth   ← 'depth'   … 押し出し長（軸方向。mm）
+	//   origin  ← 'origin'  … 断面原点のワールド絶対座標（[x, y, z]）
+	//   azimuth ← 'azimuth' … 押し出し方向の方位角（度）
+	struct ModifierCommand
+	{
+		std::vector<Vec2> profile;
+		double depth = 0.0;
+		Vec3 origin;
+		double azimuth = 0.0;
+	};
+
+	// 地中梁の**可視ソリッド**用に、天端（profile の最大 v）を底盤側へ bite だけ持ち上げた
+	// コピーを返す（Python 版 vw/footing.py の _bite_modifier）。地中梁の天端は底盤の底面と
+	// ちょうど接する（coplanar）ため、そのままだと断面ビューポートで境界線が不安定に出る。
+	// 可視ソリッドだけを少し大きくして底盤本体に重ねることで境界線を消す（**削り取り
+	// モディファイアは実形状のまま**にする——削り取りも一緒に上げると底盤にできるノッチと
+	// 可視ソリッドが再び面ちょうど接して境界線が残る）。
+	//
+	// 地中梁は台形断面で側辺が斜めなので、天端頂点を**真上へ**上げると側面の勾配が変わって
+	// 削り取りの斜面とずれる。そこで各天端頂点を隣接する側辺（下端側の頂点へ向かう斜辺）の
+	// 延長線上へ動かす（v を bite 上げるのに合わせて u も勾配ぶんずらす）。側辺が見つからない
+	// ／ほぼ水平な頂点は真上へ上げる。bite が 0 以下なら入力をそのまま返す。
+	//
+	// **core に置く理由**: SDK を触らない純計算で、無 SDK テストで検証できるため
+	// （desiredStoryLayerOrder と同じ立ち位置。CLAUDE.md「テスト方針」: draw から切り離せる
+	// ロジックは core へ寄せる）。
+	ModifierCommand raiseModifierTop(const ModifierCommand& modifier, double bite);
+
+	// 地中梁の天端とみなす頂点の許容差（mm）。最大 v からこの差以内の頂点を天端の辺とみなす
+	// （Python 版 _BITE_VERTEX_TOL）。raiseModifierTop と、その期待値を書くテストが共有する。
+	inline constexpr double kModifierTopVertexTol = 0.5;
+
 	// 基礎の底盤をスラブオブジェクトとして描く命令。Python 版 document.py の SlabCommand
 	// （dict）に対応する。draw/Footing がこれをスラブへ変換する（ROADMAP.md M9）。床板
 	// （FloorCommand）と描画の作法は同じで、構成層とスタイル名の中身だけが基礎向けになる。
@@ -415,7 +508,7 @@ namespace HomeskzIfcImport::core
 	// styleName はコンクリート厚ごとに 1 つ（"基礎スラブ - コンクリート 150mm / 捨てコン
 	// 30mm / 砕石 100mm"）で、厚みの違う底盤は別スタイルになる（parse/Footing.h）。
 	//
-	// Python 版キーとの対応（reinforcement＝配筋・modifiers＝地中梁は M10）:
+	// Python 版キーとの対応（reinforcement＝配筋は M10 の残り）:
 	//   layer      ← 'layer'      … 配置先デザインレイヤ名（"F-底盤"）
 	//   drawClass  ← 'class'      … クラス名（基礎スラブ。予約語 class を機械置換）
 	//   boundary   ← 'boundary'   … 平面外形（mm・グリッド中心オフセット済み。閉じた
@@ -426,6 +519,7 @@ namespace HomeskzIfcImport::core
 	//   thickness  ← 'thickness'  … コンクリート厚（mm。整数に丸めた値）
 	//   elevation  ← 'elevation'  … コンクリート天端の絶対 Z
 	//   bound      ← 'bound'      … 天端の高さ基準（底盤天端レベル＋差分）
+	//   modifiers  ← 'modifiers'  … この底盤に噛み合う地中梁（台形プリズム）。無ければ空
 	struct SlabCommand
 	{
 		std::string layer;
@@ -437,13 +531,14 @@ namespace HomeskzIfcImport::core
 		double thickness = 0.0;
 		double elevation = 0.0;
 		StoryBoundCommand bound;
+		std::vector<ModifierCommand> modifiers;
 	};
 
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
 	// TODO: 要素ごとに命令リストを追加していく（フィールド名は Python 版のキーに対応）。
-	//   * M10 wallJoins / modifiers（地中梁）…
+	//   * M11 anchorBolts / floorPosts / fireBraces / joints …
 	//   スキーマを変えるときは構造体・validateDocument・テストを同時更新する。
 	struct Document
 	{
@@ -489,9 +584,16 @@ namespace HomeskzIfcImport::core
 		// 基礎ストーリ（stories の先頭）が作るので、描画は stories の後に処理する。
 		std::vector<WallCommand> walls;
 
+		// M10 基礎の立上りどうしの壁結合。交差する立上りのジャンクション（同一交点に集まる
+		// 立上りの集合）ごとに L / T / X の結合を組み立てた列（parse/Footing が walls から
+		// 導く決定的な並び）。a / b は **walls の添字**なので、walls を並べ替えたり足したり
+		// したらこの列も作り直す。描画は立上りの直後・底盤の前に行う（draw/ExecuteDocument）。
+		std::vector<WallJoinCommand> wallJoins;
+
 		// M9 基礎の底盤。IfcSlab / IfcFooting の "…底盤…" を解析して得た SlabCommand の列
 		// （連続する同厚・同高のものを統合し、外周を立上りの外面へ合わせた後の値。
 		// parse/Footing が組み立てる）。外面合わせに立上りを参照するので walls の後に作る。
+		// **地中梁（M10）は独立した命令にせず**、平面で最も重なる底盤の modifiers に付く。
 		std::vector<SlabCommand> slabs;
 	};
 

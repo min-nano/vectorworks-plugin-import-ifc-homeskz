@@ -4,8 +4,8 @@
 //	基礎解析（src/parse/Footing）の単体テスト。VectorWorks SDK を一切 include せず、
 //	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
 //	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_footing.py の
-//	**M9 に相当するケース**（立上り・底盤・基礎ストーリ）を 1 対 1 で写している
-//	（地中梁・人通口・壁結合・配筋のケースは M10）。
+//	**M9 / M10 に相当するケース**（立上り・底盤・基礎ストーリ・人通口・壁結合・地中梁）を
+//	1 対 1 で写している（配筋のケースは保留）。
 //
 //	検証項目（ROADMAP.md M9）:
 //	  * Name による基礎要素の判別（立上り／地中梁／底盤）
@@ -14,6 +14,9 @@
 //	  * 立上りの統合（同一直線・同一断面のみ）と自由端の半壁厚延長（柱芯スナップ）
 //	  * 底盤の統合（辺共有・面重なりの連結成分の多角形和。穴・隙間・角接触は統合しない）
 //	  * 底盤外周の外面合わせ（辺ごとに沿う立上りの半壁厚だけ外へ）
+//	  * 人通口（開口の区間で立上りを分割／天端を切り下げる。M10）
+//	  * 壁結合（L / T / X の判定・天端差の capped・ピック点の寄せ・平行は対象外。M10）
+//	  * 地中梁（同一軸線上の統合・掃引外形・底盤への振り分け。M10）
 //	  * 実フィクスチャでの形（レイヤ・クラス・バインド・不変条件）と決定性
 //	実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -42,9 +45,12 @@ using HomeskzIfcImport::core::StoryCommand;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::core::WallCommand;
 using HomeskzIfcImport::parse::alignSlabsToWallFaces;
+using HomeskzIfcImport::parse::applyWallOpenings;
+using HomeskzIfcImport::parse::attachGroundBeamModifiers;
 using HomeskzIfcImport::parse::buildFoundationStoryCommand;
 using HomeskzIfcImport::parse::buildSlabCommands;
 using HomeskzIfcImport::parse::buildWallCommands;
+using HomeskzIfcImport::parse::buildWallJoinCommands;
 using HomeskzIfcImport::parse::CLASS_FOUNDATION_SLAB;
 using HomeskzIfcImport::parse::CLASS_FOUNDATION_WALL;
 using HomeskzIfcImport::parse::Context;
@@ -62,10 +68,13 @@ using HomeskzIfcImport::parse::kLevelBeamTop;
 using HomeskzIfcImport::parse::kLevelGL;
 using HomeskzIfcImport::parse::kLevelSlabTop;
 using HomeskzIfcImport::parse::kStoryFoundation;
+using HomeskzIfcImport::parse::mergeGroundBeamModifiers;
 using HomeskzIfcImport::parse::mergeSlabCommands;
 using HomeskzIfcImport::parse::mergeWallCommands;
 using HomeskzIfcImport::parse::Model;
+using HomeskzIfcImport::parse::modifierFootprint;
 using HomeskzIfcImport::parse::resolveSlabTopElevation;
+using HomeskzIfcImport::parse::WallOpening;
 using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
 using HomeskzIfcTests::near;
@@ -107,6 +116,19 @@ namespace
 	std::vector<Vec2> rect(double x1, double y1, double x2, double y2)
 	{
 		return {Vec2{x1, y1}, Vec2{x2, y1}, Vec2{x2, y2}, Vec2{x1, y2}};
+	}
+
+	// 合成の地中梁（台形プリズム）。断面は実データに倣った下り梁の台形——下端が幅 300mm・
+	// 天端が幅 700mm・せい 140mm で、v=0 が梁下端（origin の Z）。
+	core::ModifierCommand groundBeam(core::Vec3 origin, double azimuth, double depth)
+	{
+		core::ModifierCommand cmd;
+		cmd.profile = {Vec2{-150.0, 0.0}, Vec2{150.0, 0.0}, Vec2{350.0, 140.0},
+					   Vec2{-350.0, 140.0}};
+		cmd.depth = depth;
+		cmd.origin = origin;
+		cmd.azimuth = azimuth;
+		return cmd;
 	}
 
 	// 自由端の終端柱判定用の最小の柱命令（位置しか使わない）。
@@ -789,6 +811,397 @@ TEST(is_deterministic)
 		CHECK(near(firstSlabs[i].elevation, secondSlabs[i].elevation));
 		CHECK(near(firstSlabs[i].thickness, secondSlabs[i].thickness));
 	}
+}
+
+// ---------------------------------------------------------------------------
+// 人通口（applyWallOpenings）— ROADMAP.md M10
+// ---------------------------------------------------------------------------
+
+TEST(opening_below_slab_top_splits_wall_without_middle)
+{
+	// 開口の下端が底盤天端以下 → その区間に立上りは生じない（両側だけを描く）。
+	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})};
+	const WallOpening opening{Vec2{1000.0, 0.0}, Vec2{1600.0, 0.0}, 50.0, 400.0};
+	const std::vector<WallCommand> carved = applyWallOpenings(walls, {opening}, 50.0, 400.0);
+
+	CHECK_EQ(carved.size(), std::size_t{2});
+	if (carved.size() != 2)
+		return;
+	CHECK(near(carved[0].start.x, 0.0) && near(carved[0].end.x, 1000.0));
+	CHECK(near(carved[1].start.x, 1600.0) && near(carved[1].end.x, 3000.0));
+	// 天端は元のまま（切り下げていない）。端は実寸法どおりで延長しない。
+	CHECK(near(carved[0].topBound.offset, -190.0));
+	CHECK(near(carved[1].topBound.offset, -190.0));
+	// 壁厚・下端・レイヤ・クラスは元の立上りを引き継ぐ。
+	CHECK(near(carved[0].thickness, 120.0));
+	CHECK(near(carved[0].bottomBound.offset, -100.0));
+	CHECK(carved[1].layer == kLayerFoundationWall);
+	CHECK(carved[1].drawClass == CLASS_FOUNDATION_WALL);
+}
+
+TEST(opening_above_slab_top_lowers_middle_segment)
+{
+	// 開口の下端が底盤天端より高い → その区間だけ天端を開口下端へ切り下げる（3 分割）。
+	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})};
+	const WallOpening opening{Vec2{1000.0, 0.0}, Vec2{1600.0, 0.0}, 300.0, 400.0};
+	// 横架材天端の絶対 Z を 590 とすると、切り下げた天端の offset は 300 − 590 = −290。
+	const std::vector<WallCommand> carved = applyWallOpenings(walls, {opening}, 50.0, 590.0);
+
+	CHECK_EQ(carved.size(), std::size_t{3});
+	if (carved.size() != 3)
+		return;
+	CHECK(near(carved[1].start.x, 1000.0) && near(carved[1].end.x, 1600.0));
+	CHECK(near(carved[1].topBound.offset, -290.0));
+	// 中間区間もレベル種別・階の相対は元のまま（offset だけが変わる）。
+	CHECK(carved[1].topBound.level == kLevelBeamTop);
+	CHECK_EQ(carved[1].topBound.storyOffset, 1);
+	// 両側は元の天端のまま。
+	CHECK(near(carved[0].topBound.offset, -190.0));
+	CHECK(near(carved[2].topBound.offset, -190.0));
+}
+
+TEST(opening_at_wall_end_drops_the_empty_side)
+{
+	// 開口が立上りの端から始まる → 残らない側（長さ 0）の区間は作らない。
+	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})};
+	const WallOpening opening{Vec2{0.0, 0.0}, Vec2{600.0, 0.0}, 50.0, 400.0};
+	const std::vector<WallCommand> carved = applyWallOpenings(walls, {opening}, 50.0, 400.0);
+
+	CHECK_EQ(carved.size(), std::size_t{1});
+	if (carved.empty())
+		return;
+	CHECK(near(carved[0].start.x, 600.0) && near(carved[0].end.x, 3000.0));
+}
+
+TEST(opening_off_the_wall_is_ignored)
+{
+	// 壁芯から離れた（側並びの平行壁に乗る）開口・向きの違う開口は当てはめない。
+	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})};
+	const WallOpening offset{Vec2{1000.0, 60.0}, Vec2{1600.0, 60.0}, 50.0, 400.0};
+	const WallOpening crossing{Vec2{1200.0, -300.0}, Vec2{1200.0, 300.0}, 50.0, 400.0};
+	CHECK_EQ(applyWallOpenings(walls, {offset}, 50.0, 400.0).size(), std::size_t{1});
+	CHECK_EQ(applyWallOpenings(walls, {crossing}, 50.0, 400.0).size(), std::size_t{1});
+}
+
+TEST(multiple_openings_on_one_wall_all_apply)
+{
+	// 1 本に複数の人通口があっても、更新後の列に順に当てはめるので全部効く。
+	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{6000.0, 0.0})};
+	const std::vector<WallOpening> openings = {
+		WallOpening{Vec2{1000.0, 0.0}, Vec2{1600.0, 0.0}, 50.0, 400.0},
+		WallOpening{Vec2{4000.0, 0.0}, Vec2{4600.0, 0.0}, 50.0, 400.0}};
+	const std::vector<WallCommand> carved = applyWallOpenings(walls, openings, 50.0, 400.0);
+
+	CHECK_EQ(carved.size(), std::size_t{3});
+	if (carved.size() != 3)
+		return;
+	CHECK(near(carved[0].end.x, 1000.0));
+	CHECK(near(carved[1].start.x, 1600.0) && near(carved[1].end.x, 4000.0));
+	CHECK(near(carved[2].start.x, 4600.0));
+}
+
+TEST(openings_come_from_the_real_fixtures)
+{
+	// 実フィクスチャの立上りには人通口（差演算の第 2 オペランド）がある。天端まで届き
+	// 底面には届かない削りだけを拾うので、Z 帯は必ず「下端 < 上端」で厚みを持つ。
+	bool ok = false;
+	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	CHECK(ok);
+	Context context(model);
+	const std::vector<WallOpening> openings =
+		HomeskzIfcImport::parse::collectWallOpenings(model, context.gridCenter());
+	CHECK(!openings.empty());
+	for (const WallOpening& opening : openings)
+	{
+		CHECK(opening.zTop > opening.zBottom);
+		// 壁芯上の線分として非縮退（水平押し出しだけを拾っている）。
+		CHECK(!HomeskzIfcImport::core::samePoint(opening.start, opening.end));
+	}
+
+	// このフィクスチャは底盤天端より高い位置に下端のある人通口（z=300、底盤天端 50）を
+	// 持つので、**天端を切り下げた区間**が立上りに現れる（＝天端の offset が一様でない）。
+	const std::vector<WallCommand> walls = buildWallCommands(model);
+	CHECK(!walls.empty());
+	std::set<long long> topOffsets;
+	for (const WallCommand& command : walls)
+		topOffsets.insert(std::llround(command.topBound.offset));
+	CHECK(topOffsets.size() >= 2);
+}
+
+// ---------------------------------------------------------------------------
+// 壁結合（buildWallJoinCommands）— ROADMAP.md M10
+// ---------------------------------------------------------------------------
+
+TEST(join_corner_of_two_walls_is_an_L_join)
+{
+	// 端点どうしで交わるコーナー（同じ天端）→ L 結合・閉じない。
+	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}),
+											wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0})};
+	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+
+	CHECK_EQ(joins.size(), std::size_t{1});
+	if (joins.empty())
+		return;
+	CHECK(joins[0].joinType == core::WallJoinType::L);
+	CHECK(!joins[0].capped);
+	CHECK(near(joins[0].point.x, 3000.0) && near(joins[0].point.y, 0.0));
+	// ピック点は交点そのものではなく「残す側」（交点から遠い端点の方向）へ寄せた点。
+	CHECK(joins[0].pickA.x < 3000.0 || joins[0].pickB.y > 0.0);
+	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickA, joins[0].point));
+	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickB, joins[0].point));
+}
+
+TEST(join_tee_uses_the_stem_as_first_wall)
+{
+	// 一方の端点が他方の内部で交わる → T 結合。延長される stem（端点側）が a。
+	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{6000.0, 0.0}),
+											wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0})};
+	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+
+	CHECK_EQ(joins.size(), std::size_t{1});
+	if (joins.empty())
+		return;
+	CHECK(joins[0].joinType == core::WallJoinType::T);
+	CHECK_EQ(joins[0].a, std::size_t{1}); // stem = 端点で突き当たる縦の立上り
+	CHECK_EQ(joins[0].b, std::size_t{0}); // through = 通し壁
+}
+
+TEST(join_crossing_interiors_is_an_X_join)
+{
+	// 互いの内部で交わる十字 → X 結合。
+	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{6000.0, 0.0}),
+											wall(Vec2{3000.0, -3000.0}, Vec2{3000.0, 3000.0})};
+	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+
+	CHECK_EQ(joins.size(), std::size_t{1});
+	if (joins.empty())
+		return;
+	CHECK(joins[0].joinType == core::WallJoinType::X);
+}
+
+TEST(join_of_different_top_heights_caps_and_puts_the_lower_first)
+{
+	// 天端の違う立上りどうしは、低いほうを a にして高いほうへ結合し端部を閉じる。
+	const std::vector<WallCommand> walls = {
+		wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 120.0, -100.0, -190.0),
+		wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0}, 120.0, -100.0, -500.0)};
+	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+
+	CHECK_EQ(joins.size(), std::size_t{1});
+	if (joins.empty())
+		return;
+	CHECK(joins[0].capped);
+	CHECK_EQ(joins[0].a, std::size_t{1}); // offset −500 のほうが低い
+	CHECK_EQ(joins[0].b, std::size_t{0});
+}
+
+TEST(join_ignores_parallel_and_collinear_walls)
+{
+	// 同一直線上（統合済みのはず）・側並びの平行壁は結合対象にしない。
+	const std::vector<WallCommand> collinear = {wall(Vec2{0.0, 0.0}, Vec2{1000.0, 0.0}),
+												wall(Vec2{1000.0, 0.0}, Vec2{3000.0, 0.0})};
+	CHECK(buildWallJoinCommands(collinear).empty());
+
+	const std::vector<WallCommand> sideBySide = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}),
+												 wall(Vec2{0.0, 120.0}, Vec2{3000.0, 120.0})};
+	CHECK(buildWallJoinCommands(sideBySide).empty());
+}
+
+TEST(join_three_walls_at_a_corner_emits_L_then_T)
+{
+	// 3 本が 1 つの端点コーナーに集まる → はじめの 2 本を L、残りを T（バックボーンへ）。
+	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}),
+											wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0}),
+											wall(Vec2{3000.0, 0.0}, Vec2{3000.0, -3000.0})};
+	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+
+	CHECK_EQ(joins.size(), std::size_t{2});
+	if (joins.size() != 2)
+		return;
+	CHECK(joins[0].joinType == core::WallJoinType::L);
+	CHECK(joins[1].joinType == core::WallJoinType::T);
+	// 3 本とも同じ交点に集まるので、命令はすべて同じ点を指す。
+	CHECK(near(joins[1].point.x, 3000.0) && near(joins[1].point.y, 0.0));
+}
+
+TEST(joins_reference_valid_walls_in_the_real_fixtures)
+{
+	// 実フィクスチャの壁結合は必ず walls の範囲内を指し、2 本は別の立上り
+	// （＝命令セットの検証を通る）。並びは決定的。
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		Model const model = fixture(name, ok);
+		CHECK(ok);
+		const std::vector<WallCommand> walls = buildWallCommands(model);
+		const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+		CHECK(!joins.empty()); // どのフィクスチャも交差する立上りを持つ
+		for (const core::WallJoinCommand& join : joins)
+		{
+			CHECK(join.a < walls.size());
+			CHECK(join.b < walls.size());
+			CHECK(join.a != join.b);
+		}
+
+		core::Document document;
+		document.walls = walls;
+		document.wallJoins = joins;
+		CHECK(core::validateDocument(document));
+
+		const std::vector<core::WallJoinCommand> again = buildWallJoinCommands(walls);
+		CHECK_EQ(again.size(), joins.size());
+		for (std::size_t i = 0; i < joins.size() && i < again.size(); ++i)
+		{
+			CHECK_EQ(again[i].a, joins[i].a);
+			CHECK_EQ(again[i].b, joins[i].b);
+			CHECK(again[i].joinType == joins[i].joinType);
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 地中梁（mergeGroundBeamModifiers / modifierFootprint / attachGroundBeamModifiers）
+// — ROADMAP.md M10
+// ---------------------------------------------------------------------------
+
+TEST(merge_ground_beams_collinear_touching_into_one)
+{
+	// 同一軸線・同一断面・同一高さで区間が接する地中梁は 1 本に統合する。
+	const std::vector<core::ModifierCommand> merged =
+		mergeGroundBeamModifiers({groundBeam(core::Vec3{0.0, 0.0, -240.0}, 0.0, 1000.0),
+								  groundBeam(core::Vec3{1000.0, 0.0, -240.0}, 0.0, 2000.0)});
+
+	CHECK_EQ(merged.size(), std::size_t{1});
+	if (merged.empty())
+		return;
+	CHECK(near(merged[0].depth, 3000.0));
+	CHECK(near(merged[0].origin.x, 0.0) && near(merged[0].origin.y, 0.0));
+	CHECK(near(merged[0].origin.z, -240.0));
+	CHECK(near(merged[0].azimuth, 0.0));
+	CHECK_EQ(merged[0].profile.size(), std::size_t{4});
+}
+
+TEST(merge_ground_beams_keeps_gaps_and_differences)
+{
+	// 隙間がある／別の軸線上／高さが違う／断面が違う／向きが違う地中梁は統合しない。
+	const auto pair = [](core::ModifierCommand a, core::ModifierCommand b)
+	{ return mergeGroundBeamModifiers({std::move(a), std::move(b)}).size(); };
+
+	const core::ModifierCommand base = groundBeam(core::Vec3{0.0, 0.0, -240.0}, 0.0, 1000.0);
+	// 隙間（10mm 空く）
+	CHECK_EQ(pair(base, groundBeam(core::Vec3{1010.0, 0.0, -240.0}, 0.0, 1000.0)), std::size_t{2});
+	// 別の軸線（直交距離 500mm の平行線）
+	CHECK_EQ(pair(base, groundBeam(core::Vec3{0.0, 500.0, -240.0}, 0.0, 1000.0)), std::size_t{2});
+	// 高さが違う
+	CHECK_EQ(pair(base, groundBeam(core::Vec3{1000.0, 0.0, -300.0}, 0.0, 1000.0)), std::size_t{2});
+	// 向き（方位角）が違う
+	CHECK_EQ(pair(base, groundBeam(core::Vec3{1000.0, 0.0, -240.0}, 90.0, 1000.0)), std::size_t{2});
+	// 断面が違う（幅の広い台形）
+	core::ModifierCommand wide = groundBeam(core::Vec3{1000.0, 0.0, -240.0}, 0.0, 1000.0);
+	wide.profile = {Vec2{-200.0, 0.0}, Vec2{200.0, 0.0}, Vec2{300.0, 140.0}, Vec2{-300.0, 140.0}};
+	CHECK_EQ(pair(base, wide), std::size_t{2});
+}
+
+TEST(modifier_footprint_sweeps_the_section_width)
+{
+	// 平面外形は「断面の u 範囲」を軸方向へ depth 掃引した矩形。方位角 0 なら軸＝+X・
+	// 幅軸＝+Y なので、Y 方向の広がりが断面の**最大幅**（天端の −350〜350）になる。
+	const std::vector<Vec2> footprint =
+		modifierFootprint(groundBeam(core::Vec3{0.0, 0.0, -240.0}, 0.0, 2000.0));
+	CHECK_EQ(footprint.size(), std::size_t{4});
+	if (footprint.size() != 4)
+		return;
+	CHECK(near(minX(footprint), 0.0) && near(maxX(footprint), 2000.0));
+	CHECK(near(minY(footprint), -350.0) && near(maxY(footprint), 350.0));
+}
+
+TEST(attach_ground_beams_to_the_overlapping_slab)
+{
+	// 平面外形が重なる底盤へ振り分ける（重なりが無ければ重心が最も近い底盤へ）。
+	std::vector<SlabCommand> slabs = {slab(rect(0.0, 0.0, 2000.0, 2000.0)),
+									  slab(rect(5000.0, 0.0, 7000.0, 2000.0))};
+	const std::vector<core::ModifierCommand> modifiers = {
+		groundBeam(core::Vec3{200.0, 1000.0, -240.0}, 0.0, 1600.0),	 // 1 枚目の中
+		groundBeam(core::Vec3{5200.0, 1000.0, -240.0}, 0.0, 1600.0), // 2 枚目の中
+		groundBeam(core::Vec3{9000.0, 1000.0, -240.0}, 0.0,
+				   500.0)}; // どちらの外でも近いのは 2 枚目
+	attachGroundBeamModifiers(slabs, modifiers);
+
+	CHECK_EQ(slabs[0].modifiers.size(), std::size_t{1});
+	CHECK_EQ(slabs[1].modifiers.size(), std::size_t{2});
+	// 底盤が 1 枚も無ければ付けようがない（落として先へ進む）。
+	std::vector<SlabCommand> none;
+	attachGroundBeamModifiers(none, modifiers);
+	CHECK(none.empty());
+}
+
+TEST(ground_beams_of_the_real_fixtures_land_on_slabs)
+{
+	// 実フィクスチャ: 地中梁は 1 本も取りこぼさず底盤へ付く。断面は下端が v=0 で天端が
+	// 正（下り梁）、押し出し長は正。命令セットの検証も通る。
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		Model const model = fixture(name, ok);
+		CHECK(ok);
+		Context context(model);
+		const std::vector<WallCommand> walls = buildWallCommands(model);
+		const std::vector<core::ModifierCommand> modifiers =
+			HomeskzIfcImport::parse::buildGroundBeamModifiers(model, context.gridCenter());
+		const std::vector<SlabCommand> slabs = buildSlabCommands(context, walls);
+
+		std::size_t attached = 0;
+		for (const SlabCommand& command : slabs)
+			attached += command.modifiers.size();
+		CHECK_EQ(attached, modifiers.size());
+
+		for (const core::ModifierCommand& modifier : modifiers)
+		{
+			CHECK(modifier.depth > 0.0);
+			CHECK(modifier.profile.size() >= 3);
+			double vMin = modifier.profile.front().y;
+			double vMax = modifier.profile.front().y;
+			for (const Vec2& point : modifier.profile)
+			{
+				vMin = std::min(vMin, point.y);
+				vMax = std::max(vMax, point.y);
+			}
+			CHECK(near(vMin, 0.0)); // 断面原点＝梁下端
+			CHECK(vMax > 0.0);
+		}
+
+		core::Document document;
+		document.walls = walls;
+		document.slabs = slabs;
+		CHECK(core::validateDocument(document));
+	}
+}
+
+TEST(ground_beam_tops_meet_the_slab_bottom)
+{
+	// 地中梁は底盤からぶら下がる下り梁なので、天端（origin.z + 最大 v）が底盤の底面
+	// （底盤天端 − 厚み）に一致する。可視ソリッドの呑み込み（core::raiseModifierTop）が
+	// 要るのはこの coplanar のため（draw/Footing.cpp）。
+	bool ok = false;
+	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	CHECK(ok);
+	Context context(model);
+	const std::vector<SlabCommand> slabs = buildSlabCommands(context, context.walls());
+
+	std::size_t checked = 0;
+	for (const SlabCommand& command : slabs)
+	{
+		const double slabBottom = command.elevation - command.thickness;
+		for (const core::ModifierCommand& modifier : command.modifiers)
+		{
+			double vMax = modifier.profile.front().y;
+			for (const Vec2& point : modifier.profile)
+				vMax = std::max(vMax, point.y);
+			CHECK(near(modifier.origin.z + vMax, slabBottom, 1.0));
+			++checked;
+		}
+	}
+	CHECK(checked > 0);
 }
 
 TEST_MAIN()
