@@ -195,7 +195,7 @@ namespace HomeskzIfcImport::draw
 				base.AddVertex(v.x, v.y, v.z);
 			base.SetClosed(true);
 
-			VWExtrudeObj prism(base, modifier.depth);
+			const VWExtrudeObj prism(base, modifier.depth);
 			const MCObjectHandle handle = prism.GetThisObject();
 			if (handle == nil)
 				return nil;
