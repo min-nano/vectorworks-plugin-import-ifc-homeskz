@@ -15,7 +15,8 @@
 //	  * IfcRectangleProfileDef                … 矩形断面（XDim / YDim）
 //	  * IfcArbitraryClosedProfileDef          … 任意閉断面（外形ポリライン）
 //	  * IfcExtrudedAreaSolid                  … 押し出しソリッド
-//	  * IfcBooleanResult / …ClippingResult    … 差演算の第 1 オペランド（素ソリッド）
+//	  * IfcBooleanResult / …ClippingResult    … 差演算の第 1 オペランド（素ソリッド）と
+//	                                            第 2 オペランド（削り取り＝人通口。M10）
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md
 //	「Phase 1」）。STEP グラフ（parse/Step）と自前幾何型（core/Geometry）だけに依存。
@@ -147,6 +148,17 @@ namespace HomeskzIfcImport::parse
 	// 解決できない・深さ上限に達したときは nullptr。
 	const Entity* resolveBaseSolid(const Model& model, const Entity* item);
 
+	// 要素（IfcProduct）の形状表現から**削り取られる側**（差演算の第 2 オペランド）の
+	// 押し出しソリッドを列挙する（Python 版 footing._void_solids / _element_void_solids
+	// 相当）。基礎の立上りに開けた人通口は、立上りソリッドから天端下方へ削り取った別の
+	// IfcExtrudedAreaSolid として表される（ROADMAP.md M10）。
+	//
+	// 複数の削りは ((base − void1) − void2) のように第 1 オペランドが入れ子の差演算に
+	// なるので、第 1 オペランドを辿りながら各差演算の第 2 オペランドを集める（＝
+	// resolveBaseSolid が捨てていく側を拾う関係）。第 2 オペランドが押し出しでないもの
+	// （回転体・ブレップ等）は解析外なので落とす。並びは表現の出現順で決定的。
+	std::vector<const Entity*> elementVoidSolids(const Model& model, const Entity* element);
+
 	// 要素（IfcProduct）の形状表現から最初の IfcExtrudedAreaSolid を返す（Python 版
 	// footing._first_extruded_solid 相当）。Representation → Representations →
 	// Items を順に辿り、各アイテムは resolveBaseSolid で差演算を剥がしてから押し出し
@@ -228,10 +240,16 @@ namespace HomeskzIfcImport::parse
 	// （parse/Roof）が同じ面を共有する**ため、M7 の登り梁スナップも本関数を使う。
 	bool roofPlane(const Model& model, const Entity* element, RoofPlane& out);
 
+	// 押し出し方向が**鉛直**とみなす Z 成分の閾値（|extrudeDir.z| > これ。Python 版 footing の
+	// _VERTICAL_EXTRUDE_TOL と同値）。床版・底盤は鉛直押し出し、立上り・地中梁・人通口は
+	// 水平押し出し。**平面外形の求め方（footprint）と、人通口・地中梁の「水平押し出しか」
+	// 判定（parse/Footing）が同じ閾値を見る**必要があるので、ここに 1 つだけ置く。
+	inline constexpr double kVerticalExtrudeTol = 0.9;
+
 	// ソリッドの平面外形（XY 頂点列）を返す（Python 版 footing._footprint 相当）。
 	//   * 鉛直押し出し（床版・底盤）: プロファイルがそのまま平面外形（底面ループの XY）。
 	//   * 水平押し出し（立上り・地中梁）: プロファイルは鉛直面内にあるため、断面の水平
 	//     方向の幅（プロファイル第 1 座標 u の範囲）を押し出し方向へ掃引した矩形を返す。
-	// 鉛直とみなす押し出し Z 成分の閾値は Python 版 _VERTICAL_EXTRUDE_TOL（0.9）と同値。
+	// 鉛直とみなす閾値は上の kVerticalExtrudeTol。
 	std::vector<Vec2> footprint(const WorldSolid& solid);
 } // namespace HomeskzIfcImport::parse

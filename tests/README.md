@@ -22,7 +22,7 @@
 | `LoaderTests` | `src/parse/Loader` | 非正規エンティティを**除去せず**読めること・実フィクスチャ全件の読み込み |
 | `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配（手計算値との突き合わせ） |
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
-| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`）とレイヤスタック順の計算 |
+| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`） |
 | `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
 | `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |
 | `ParseStoryTests` | `src/parse/Story` | 階・レベル・レイヤ名（横架材天端オフセット・屋根組／母屋／span 柱レベルの追加条件・span レイヤ名の生成と分解） |
@@ -33,6 +33,7 @@
 | `ParseNoboribariTests` | `src/parse/Noboribari` | 登り梁の位置補正（端部の食い込み解消・天端の屋根面スナップ） |
 | `ParseRafterTests` | `src/parse/Rafter` | 垂木（掃引割り付け・非凸面のクリップ・支持点・軒の出・桁幅参照） |
 | `ParseRoofTests` | `src/parse/Roof` | 野地板（軒軸・upslope・勾配・厚み・軒の Z） |
+| `ParseFootingTests` | `src/parse/Footing` | 基礎（立上り・底盤・基礎ストーリ／人通口の分割・切り下げ／壁結合の L・T・X 判定／地中梁の統合と底盤への振り分け） |
 | `ParseSummaryTests` | `src/parse/Summary` | 型別件数の集計とダイアログ文言の整形 |
 
 いずれも無 SDK の静的ライブラリ `HomeskzIfcCore` をリンクします。テスト間で共有する

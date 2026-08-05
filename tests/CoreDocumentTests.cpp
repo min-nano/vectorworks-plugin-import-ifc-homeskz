@@ -17,6 +17,9 @@
 #include "core/Geometry.h"
 #include "parse/BuildDocument.h"
 
+#include <cmath>
+#include <cstddef>
+
 using namespace HomeskzIfcImport;
 
 // ---------------------------------------------------------------------------
@@ -767,6 +770,152 @@ TEST(validate_rejects_slab_with_no_components_or_empty_bound_level)
 	slab.bound.level = "";
 	bound.slabs.push_back(slab);
 	CHECK(!core::validateDocument(bound));
+}
+
+// ---------------------------------------------------------------------------
+// 基礎の高度化（壁結合・地中梁＝底盤のモディファイア）の検証（ROADMAP.md M10）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 検証を通る壁結合命令（walls に 2 本ある前提）。
+	core::WallJoinCommand validJoin()
+	{
+		core::WallJoinCommand join;
+		join.a = 0;
+		join.b = 1;
+		join.point = core::Vec2{3640.0, 0.0};
+		join.pickA = core::Vec2{3400.0, 0.0};
+		join.pickB = core::Vec2{3640.0, 240.0};
+		join.joinType = core::WallJoinType::L;
+		join.capped = false;
+		return join;
+	}
+
+	// 検証を通る地中梁（台形プリズム）。
+	core::ModifierCommand validModifier()
+	{
+		core::ModifierCommand modifier;
+		modifier.profile = {core::Vec2{-150.0, 0.0}, core::Vec2{150.0, 0.0},
+							core::Vec2{350.0, 140.0}, core::Vec2{-350.0, 140.0}};
+		modifier.depth = 2730.0;
+		modifier.origin = core::Vec3{0.0, 0.0, -240.0};
+		modifier.azimuth = 0.0;
+		return modifier;
+	}
+
+	// 立上り 2 本＋壁結合 1 件の Document（結合の検証は walls の本数を見るため対で作る）。
+	core::Document documentWithJoin(const core::WallJoinCommand& join)
+	{
+		core::Document document;
+		document.walls.push_back(validWall());
+		core::WallCommand second = validWall();
+		second.start = core::Vec2{3640.0, 0.0};
+		second.end = core::Vec2{3640.0, 2730.0};
+		document.walls.push_back(second);
+		document.wallJoins.push_back(join);
+		return document;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_wall_join)
+{
+	CHECK(core::validateDocument(documentWithJoin(validJoin())));
+}
+
+TEST(validate_rejects_wall_join_of_a_wall_with_itself)
+{
+	core::WallJoinCommand join = validJoin();
+	join.b = join.a;
+	CHECK(!core::validateDocument(documentWithJoin(join)));
+}
+
+TEST(validate_rejects_wall_join_pointing_outside_walls)
+{
+	// 範囲外の添字は描画側で壁ハンドルを引けず、黙って結合されないだけになるので弾く。
+	core::WallJoinCommand join = validJoin();
+	join.b = 2; // walls は 2 本（添字 0/1）
+	CHECK(!core::validateDocument(documentWithJoin(join)));
+
+	core::Document empty;
+	empty.wallJoins.push_back(validJoin()); // 立上りが 1 本も無い
+	CHECK(!core::validateDocument(empty));
+}
+
+TEST(validate_accepts_slab_with_ground_beam_modifiers)
+{
+	core::Document document;
+	core::SlabCommand slab = validSlab();
+	slab.modifiers.push_back(validModifier());
+	document.slabs.push_back(slab);
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_degenerate_ground_beam_modifier)
+{
+	// 断面が面にならない（2 点）・押し出し長が 0 のプリズムは描けない。
+	core::Document profile;
+	core::SlabCommand slab = validSlab();
+	core::ModifierCommand modifier = validModifier();
+	modifier.profile.resize(2);
+	slab.modifiers.push_back(modifier);
+	profile.slabs.push_back(slab);
+	CHECK(!core::validateDocument(profile));
+
+	core::Document depth;
+	slab = validSlab();
+	modifier = validModifier();
+	modifier.depth = 0.0;
+	slab.modifiers.push_back(modifier);
+	depth.slabs.push_back(slab);
+	CHECK(!core::validateDocument(depth));
+}
+
+// ---------------------------------------------------------------------------
+// core::raiseModifierTop（地中梁の可視ソリッドを底盤へ呑み込ませる）
+// ---------------------------------------------------------------------------
+
+TEST(raise_modifier_top_extends_along_the_slanted_side)
+{
+	// 台形の天端（最大 v）だけを bite ぶん上げる。側辺は斜めなので、u も勾配ぶんずらして
+	// **側面が実形状の斜面の直線延長**になるようにする（真上へ上げると勾配が変わる）。
+	// 下端 (±150, 0) → 天端 (±350, 140) の側辺は「v が 140 増える間に u が 200 増える」
+	// ので、bite=10 なら u は 200/140 × 10 ≈ 14.2857 ずれる。
+	const core::ModifierCommand raised = core::raiseModifierTop(validModifier(), 10.0);
+	CHECK_EQ(raised.profile.size(), std::size_t{4});
+	if (raised.profile.size() != 4)
+		return;
+	// 下端の 2 点は動かない。
+	CHECK(raised.profile[0].x == -150.0 && raised.profile[0].y == 0.0);
+	CHECK(raised.profile[1].x == 150.0 && raised.profile[1].y == 0.0);
+	// 天端の 2 点は v が +10、u は斜辺に沿って外側へ（左右対称）。
+	const double expected = 350.0 + (200.0 / 140.0 * 10.0);
+	CHECK(std::abs(raised.profile[2].x - expected) < 1e-9);
+	CHECK(std::abs(raised.profile[2].y - 150.0) < 1e-9);
+	CHECK(std::abs(raised.profile[3].x + expected) < 1e-9);
+	CHECK(std::abs(raised.profile[3].y - 150.0) < 1e-9);
+	// 断面以外（押し出し長・原点・方位角）はそのまま。
+	CHECK(raised.depth == validModifier().depth);
+	CHECK(raised.origin.z == validModifier().origin.z);
+}
+
+TEST(raise_modifier_top_moves_vertical_sides_straight_up)
+{
+	// 側辺が鉛直な断面（矩形）は u が変わらず、天端だけが真上へ上がる。
+	core::ModifierCommand rectangular = validModifier();
+	rectangular.profile = {core::Vec2{-150.0, 0.0}, core::Vec2{150.0, 0.0},
+						   core::Vec2{150.0, 140.0}, core::Vec2{-150.0, 140.0}};
+	const core::ModifierCommand raised = core::raiseModifierTop(rectangular, 10.0);
+	CHECK(raised.profile[2].x == 150.0 && raised.profile[2].y == 150.0);
+	CHECK(raised.profile[3].x == -150.0 && raised.profile[3].y == 150.0);
+}
+
+TEST(raise_modifier_top_is_a_no_op_without_bite)
+{
+	// 呑み込み量が 0 以下なら実形状のまま（削り取りモディファイアはこちらを使う）。
+	const core::ModifierCommand same = core::raiseModifierTop(validModifier(), 0.0);
+	CHECK_EQ(same.profile.size(), validModifier().profile.size());
+	CHECK(same.profile[2].y == 140.0);
 }
 
 // ---------------------------------------------------------------------------
