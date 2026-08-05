@@ -336,6 +336,60 @@ TEST(extend_t_junction_stem_end_not_extended)
 	CHECK(near(ext[1].end.y, 2060.0)); // 反対の自由端は延長
 }
 
+TEST(extend_does_not_push_into_a_collinear_neighbour)
+{
+	// **同一直線上で突き合わせになっている端は自由端ではない**（交点判定は平行な立上りを
+	// 除外するので、これを見ないと双方が半壁厚ずつ延びて重なる）。統合できない＝上端／下端の
+	// 違う隣どうしで顕在化する（実データで 150mm＝半壁厚 2 つぶんの重なりになっていた）。
+	const std::vector<WallCommand> ext =
+		extendFreeWallEnds({wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 150.0, -100.0, -125.0),
+							wall(Vec2{3000.0, 0.0}, Vec2{5000.0, 0.0}, 150.0, -100.0, -225.0)},
+						   {});
+	CHECK(near(ext[0].end.x, 3000.0));	 // 突き合わせ側は据え置き
+	CHECK(near(ext[1].start.x, 3000.0)); // 相手も据え置き（重ならない）
+	// 反対側の自由端は従来どおり半壁厚だけ延びる。
+	CHECK(near(ext[0].start.x, -75.0));
+	CHECK(near(ext[1].end.x, 5075.0));
+}
+
+TEST(extend_still_reaches_out_past_a_distant_collinear_wall)
+{
+	// 同一直線上でも**離れて**いれば突き合わせではない（自由端のまま延長する）。
+	const std::vector<WallCommand> ext = extendFreeWallEnds(
+		{wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}), wall(Vec2{5000.0, 0.0}, Vec2{7000.0, 0.0})}, {});
+	CHECK(near(ext[0].end.x, 3060.0));
+	CHECK(near(ext[1].start.x, 4940.0));
+}
+
+TEST(extend_keeps_free_ends_of_a_wall_that_swallows_a_short_neighbour)
+{
+	// 隣が自分の内側に完全に収まっている（端に届かない）場合、外側の壁の端は自由端のまま。
+	const std::vector<WallCommand> ext = extendFreeWallEnds(
+		{wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}), wall(Vec2{1000.0, 0.0}, Vec2{2000.0, 0.0})}, {});
+	CHECK(near(ext[0].start.x, -60.0) && near(ext[0].end.x, 3060.0));
+}
+
+TEST(caps_open_a_collinear_butt_joint_of_the_same_top)
+{
+	// 統合できない（下端が違う）けれど**天端が同じ**で突き合わせ／重なる立上りは、平面で
+	// 1 本に見えるべきなので端部を閉じない。天端が違えば段差が実在するので閉じる。
+	std::vector<WallCommand> same = {
+		wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 150.0, -100.0, -125.0),
+		wall(Vec2{3000.0, 0.0}, Vec2{5000.0, 0.0}, 150.0, -70.0, -125.0)};
+	applyWallCaps(same, buildWallJoinCommands(same));
+	CHECK(!same[0].capEnd);
+	CHECK(!same[1].capStart);
+	CHECK(same[0].capStart); // 反対側は自由端
+	CHECK(same[1].capEnd);
+
+	std::vector<WallCommand> stepped = {
+		wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 150.0, -100.0, -125.0),
+		wall(Vec2{3000.0, 0.0}, Vec2{5000.0, 0.0}, 150.0, -100.0, -225.0)};
+	applyWallCaps(stepped, buildWallJoinCommands(stepped));
+	CHECK(stepped[0].capEnd);
+	CHECK(stepped[1].capStart);
+}
+
 TEST(extend_leaves_zero_length_wall_unchanged)
 {
 	const std::vector<WallCommand> ext =

@@ -110,10 +110,14 @@ namespace HomeskzIfcImport::parse
 						   roundKey(wall.topBound.offset, kWallMergeDistTol)};
 		}
 
-		// 立上り a・b が同一直線上にあり、区間が重なる／接触するか（Python 版
-		// _walls_connected_collinear）。(1) 方向が平行、(2) b の端点が a の直線上、
-		// (3) a の区間と b の射影区間が重なる／接触する、の 3 条件。
-		bool wallsConnectedCollinear(const WallCommand& a, const WallCommand& b)
+		// 立上り b が a と**同一直線上**（平行かつ壁芯が同じ線）にあるか。区間の重なりは
+		// 問わない（離れた延長線上の立上りも true）。true のとき、b を a の壁芯方向へ射影した
+		// 区間 [outLo, outHi] を返す（a の始点が 0・終点が壁芯長）。
+		//
+		// **統合（重なり／接触が要る）と、自由端の延長制限（離れた隣も要る）が同じ「同一直線
+		// 判定」を共有する**ので、条件はここに 1 つだけ置く。
+		bool wallsOnSameLine(const WallCommand& a, const WallCommand& b, double& outLo,
+							 double& outHi)
 		{
 			const Vec2 da = a.end - a.start;
 			const Vec2 db = b.end - b.start;
@@ -130,11 +134,23 @@ namespace HomeskzIfcImport::parse
 			if (std::abs((ux * (b.start.y - a.start.y)) - (uy * (b.start.x - a.start.x))) >
 				kWallMergeDistTol)
 				return false;
-			// (3) b を a 方向に射影した区間が [0, la] と重なる／接触するか
+			// (3) b を a 方向へ射影した区間
 			const double t1 = (ux * (b.start.x - a.start.x)) + (uy * (b.start.y - a.start.y));
 			const double t2 = (ux * (b.end.x - a.start.x)) + (uy * (b.end.y - a.start.y));
-			const double lo = std::min(t1, t2);
-			const double hi = std::max(t1, t2);
+			outLo = std::min(t1, t2);
+			outHi = std::max(t1, t2);
+			return true;
+		}
+
+		// 立上り a・b が同一直線上にあり、区間が重なる／接触するか（Python 版
+		// _walls_connected_collinear）。同一直線判定は wallsOnSameLine と共有する。
+		bool wallsConnectedCollinear(const WallCommand& a, const WallCommand& b)
+		{
+			double lo = 0.0;
+			double hi = 0.0;
+			if (!wallsOnSameLine(a, b, lo, hi))
+				return false;
+			const double la = std::hypot(a.end.x - a.start.x, a.end.y - a.start.y);
 			return hi >= -kWallMergeDistTol && lo <= la + kWallMergeDistTol;
 		}
 
@@ -250,6 +266,32 @@ namespace HomeskzIfcImport::parse
 			outAAtEnd = (t <= fracA) || (t >= 1.0 - fracA);
 			outBAtEnd = (u <= fracB) || (u >= 1.0 - fracB);
 			return true;
+		}
+
+		// 立上り a の端点が、同一直線上に並ぶ別の立上り b と**突き合わせ**になっているか
+		// （outAtStart＝始点側・outAtEnd＝終点側）。b を a の壁芯方向へ射影した区間が a の端に
+		// 届いていれば、その端は「何も無い自由端」ではなく collinear な隣と接している。
+		//
+		// 【なぜ要るか】交点判定（wallIntersection）は平行な立上りを除外するので、**同一直線上で
+		// 端どうしが接する立上り**はどちらの端も自由端に見える。そのまま半壁厚ずつ延長すると
+		// 互いに食い込み、実データで 75mm（片側）・150mm（両側）の重なりになっていた（統合
+		// できない＝上端／下端の違う隣どうしで顕在化する。ROADMAP.md M10）。
+		void collinearAbutment(const WallCommand& a, const WallCommand& b, bool& outAtStart,
+							   bool& outAtEnd)
+		{
+			outAtStart = false;
+			outAtEnd = false;
+			double lo = 0.0;
+			double hi = 0.0;
+			if (!wallsOnSameLine(a, b, lo, hi))
+				return; // 平行でない／別の線上
+			const double la = std::hypot(a.end.x - a.start.x, a.end.y - a.start.y);
+			if (hi < -kWallMergeDistTol || lo > la + kWallMergeDistTol)
+				return; // 同一直線上だが離れている（隙間がある）＝突き合わせではない
+			// b が a の端へ届いている（接する／越える）側だけを「突き合わせ」とみなす。
+			// b が a の内側に完全に収まっている場合はどちらの端も自由端のまま。
+			outAtStart = lo <= kWallMergeDistTol;
+			outAtEnd = hi >= la - kWallMergeDistTol;
 		}
 
 		// 自由端の終端柱（柱芯）を壁芯上に射影した基準点を返す（Python 版
@@ -1475,6 +1517,19 @@ namespace HomeskzIfcImport::parse
 			{
 				if (walls[i].layer != walls[j].layer)
 					continue;
+
+				// 同一直線上で突き合わせになっている端は自由端ではない（延長すると隣へ
+				// 食い込む。collinearAbutment 参照）。**統合できなかった隣**——上端／下端の
+				// 違う立上り——との突き合わせがこれに当たる。
+				bool atStart = false;
+				bool atEnd = false;
+				collinearAbutment(walls[i], walls[j], atStart, atEnd);
+				startJoined[i] = startJoined[i] || atStart;
+				endJoined[i] = endJoined[i] || atEnd;
+				collinearAbutment(walls[j], walls[i], atStart, atEnd);
+				startJoined[j] = startJoined[j] || atStart;
+				endJoined[j] = endJoined[j] || atEnd;
+
 				Vec2 point;
 				bool aAtEnd = false;
 				bool bAtEnd = false;
@@ -1501,6 +1556,7 @@ namespace HomeskzIfcImport::parse
 			const double half = wall.thickness / 2.0;
 			const double ux = (wall.end.x - wall.start.x) / length;
 			const double uy = (wall.end.y - wall.start.y) / length;
+
 			if (!startJoined[i])
 			{
 				// 始端の自由端: 外向きは −軸方向。柱芯へ寄せてから半壁厚延長する。
@@ -1958,6 +2014,29 @@ namespace HomeskzIfcImport::parse
 				continue; // 天端の違う相手との結合は端部を閉じたままにする
 			openEnd(join.a, join.point);
 			openEnd(join.b, join.point);
+		}
+
+		// **同一直線上の突き合わせ**（交点判定に掛からない平行な隣）も、天端が同じなら
+		// コンクリートは連続しているので端部を閉じない。統合できなかった隣——上端／下端の
+		// 違う立上り——のうち、**下端だけが違うもの**は平面では 1 本に見えるべきで、天端の
+		// 違うものは段差が実在するので閉じたままにする（結合の capped と同じ判断）。
+		const std::size_t count = walls.size();
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			for (std::size_t j = 0; j < count; ++j)
+			{
+				if (i == j || walls[i].layer != walls[j].layer)
+					continue;
+				if (std::abs(wallTop(walls[i]) - wallTop(walls[j])) > kWallMergeDistTol)
+					continue; // 天端が違う＝段差があるので閉じる
+				bool atStart = false;
+				bool atEnd = false;
+				collinearAbutment(walls[i], walls[j], atStart, atEnd);
+				if (atStart)
+					walls[i].capStart = false;
+				if (atEnd)
+					walls[i].capEnd = false;
+			}
 		}
 	}
 
