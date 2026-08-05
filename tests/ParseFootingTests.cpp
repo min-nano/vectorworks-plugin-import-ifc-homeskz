@@ -16,6 +16,7 @@
 //	  * 底盤外周の外面合わせ（辺ごとに沿う立上りの半壁厚だけ外へ）
 //	  * 人通口（開口の区間で立上りを分割／天端を切り下げる。M10）
 //	  * 壁結合（L / T / X の判定・天端差の capped・ピック点の寄せ・平行は対象外。M10）
+//	  * 端部のキャップ（自由端は閉じ、同じ天端と取り合う端は開く。M10）
 //	  * 地中梁（同一軸線上の統合・掃引外形・底盤への振り分け。M10）
 //	  * 実フィクスチャでの形（レイヤ・クラス・バインド・不変条件）と決定性
 //	実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
@@ -45,6 +46,7 @@ using HomeskzIfcImport::core::StoryCommand;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::core::WallCommand;
 using HomeskzIfcImport::parse::alignSlabsToWallFaces;
+using HomeskzIfcImport::parse::applyWallCaps;
 using HomeskzIfcImport::parse::applyWallOpenings;
 using HomeskzIfcImport::parse::attachGroundBeamModifiers;
 using HomeskzIfcImport::parse::buildFoundationStoryCommand;
@@ -1149,6 +1151,77 @@ TEST(joins_reference_valid_walls_in_the_real_fixtures)
 			CHECK(again[i].joinType == joins[i].joinType);
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// 端部のキャップ（applyWallCaps）— ROADMAP.md M10（ローカル確認で判明した項目）
+// ---------------------------------------------------------------------------
+
+TEST(caps_close_free_ends_and_open_joined_ends)
+{
+	// L コーナー（同じ天端）: 取り合う端は閉じない（コンクリートで一体）。反対側の
+	// 自由端は閉じる。
+	std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}),
+									  wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0})};
+	applyWallCaps(walls, buildWallJoinCommands(walls));
+
+	CHECK(walls[0].capStart);  // 自由端
+	CHECK(!walls[0].capEnd);   // コーナー
+	CHECK(!walls[1].capStart); // コーナー
+	CHECK(walls[1].capEnd);	   // 自由端
+}
+
+TEST(caps_open_the_stem_end_of_a_tee)
+{
+	// T 字（同じ天端）: ぶつかる側（stem）の端は閉じない。通し壁は端部で交わらないので
+	// 両端とも自由端のまま閉じる。
+	std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{6000.0, 0.0}),
+									  wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0})};
+	applyWallCaps(walls, buildWallJoinCommands(walls));
+
+	CHECK(walls[0].capStart);
+	CHECK(walls[0].capEnd);
+	CHECK(!walls[1].capStart); // 通し壁へぶつかる端
+	CHECK(walls[1].capEnd);
+}
+
+TEST(caps_stay_closed_against_a_wall_of_a_different_top)
+{
+	// 天端の違う立上りとだけ取り合う端は閉じたまま（低いほうの端部が見える＝Python 版の
+	// capped=true と同じ判断）。
+	std::vector<WallCommand> walls = {
+		wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 120.0, -100.0, -190.0),
+		wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0}, 120.0, -100.0, -500.0)};
+	applyWallCaps(walls, buildWallJoinCommands(walls));
+
+	CHECK(walls[0].capStart);
+	CHECK(walls[0].capEnd);
+	CHECK(walls[1].capStart);
+	CHECK(walls[1].capEnd);
+}
+
+TEST(caps_open_where_the_same_height_walls_meet_at_a_crowded_corner)
+{
+	// 3 本コーナー（同じ天端の 2 本 ＋ 天端の低い 1 本）: 高い 2 本は互いに閉じない結合を
+	// 持つので開き、低い 1 本は閉じる結合しか持たないので閉じたまま。
+	std::vector<WallCommand> walls = {
+		wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 120.0, -100.0, -190.0),
+		wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0}, 120.0, -100.0, -190.0),
+		wall(Vec2{3000.0, 0.0}, Vec2{3000.0, -3000.0}, 120.0, -100.0, -500.0)};
+	applyWallCaps(walls, buildWallJoinCommands(walls));
+
+	CHECK(!walls[0].capEnd);
+	CHECK(!walls[1].capStart);
+	CHECK(walls[2].capStart); // 天端が低い立上りの端部は閉じる
+}
+
+TEST(caps_default_to_closed_without_joins)
+{
+	// 結合が 1 つも無ければ全端が閉じる（孤立した立上り）。
+	std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})};
+	applyWallCaps(walls, {});
+	CHECK(walls[0].capStart);
+	CHECK(walls[0].capEnd);
 }
 
 // ---------------------------------------------------------------------------

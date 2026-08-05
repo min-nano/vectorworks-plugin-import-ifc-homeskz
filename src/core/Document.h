@@ -384,6 +384,19 @@ namespace HomeskzIfcImport::core
 	//   components  （Python 版に対応なし）… スタイルの構成層（コンクリート 1 層）
 	//   bottomBound ← 'bottom_bound' … 下端の高さ基準（基礎の GL レベル）
 	//   topBound    ← 'top_bound'    … 上端の高さ基準（1 階の横架材天端レベル）
+	//   capStart    （Python 版に対応なし）… 壁芯**始点側**の端部を閉じるか
+	//   capEnd      （同上）          … 壁芯**終点側**の端部を閉じるか
+	//
+	// 【端部を閉じるかは解析側が決める】VW の壁は端部の「キャップ」（端を閉じる線）を
+	// 壁ごとに持ち、既定値はドキュメントの壁ツール設定に従う。**結合（JoinWalls）任せに
+	// すると、どの端が閉じるかがその設定と VW の結合実装に左右される**ので、解析側で
+	// 「その端が何と取り合うか」から決めて命令に載せ、描画側は SetWallCaps でそのまま
+	// 設定する（Python 版は JoinWalls の capped 引数だけに任せていた部分）。規則は
+	//   * 自由端（何とも結合しない端）              … 閉じる
+	//   * 同じ天端の立上りと結合する端              … 閉じない（コンクリートで一体）
+	//   * 天端の違う立上りとだけ結合する端          … 閉じる（低いほうの端部が見える）
+	// で、これは壁結合命令の capped（WallJoinCommand）と同じ判断を**端ごと**に写したもの。
+	// 算出は parse/Footing の applyWallCaps。
 	//
 	// 【壁スタイルは厚みごとに 1 つ】Python 版は既製の `基礎 - 木造ベタ基礎150mm` を全ての
 	// 立上りへ当てるが、本移植は**壁厚ごとのスタイルを解析側が名乗り、描画側がコード上の
@@ -400,6 +413,8 @@ namespace HomeskzIfcImport::core
 		std::vector<ComponentCommand> components;
 		StoryBoundCommand bottomBound;
 		StoryBoundCommand topBound;
+		bool capStart = true;
+		bool capEnd = true;
 	};
 
 	// 交差する立上り（壁）同士を VW の壁結合（JoinWalls）で結合する種別。値は SDK の

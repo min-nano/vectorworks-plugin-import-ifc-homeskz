@@ -1925,6 +1925,42 @@ namespace HomeskzIfcImport::parse
 		return result;
 	}
 
+	void applyWallCaps(std::vector<WallCommand>& walls,
+					   const std::vector<core::WallJoinCommand>& joins)
+	{
+		// 既定は「閉じる」。閉じない結合（capped=false）が当たった端だけを開ける。
+		for (WallCommand& wall : walls)
+		{
+			wall.capStart = true;
+			wall.capEnd = true;
+		}
+
+		// 交点が壁芯のどちら側の端に当たるかは、端点までの距離が近いほうで決める
+		// （交点が壁の内部にある通し壁は端部を持たないので触らない）。
+		const auto openEnd = [&walls](std::size_t index, const Vec2& point)
+		{
+			if (index >= walls.size())
+				return;
+			WallCommand& wall = walls[index];
+			if (!wallPointAtEnd(wall, point))
+				return; // 内部で交わる通し壁の端部は、この交点では閉じ方が決まらない
+			const double toStart = std::hypot(wall.start.x - point.x, wall.start.y - point.y);
+			const double toEnd = std::hypot(wall.end.x - point.x, wall.end.y - point.y);
+			if (toStart <= toEnd)
+				wall.capStart = false;
+			else
+				wall.capEnd = false;
+		};
+
+		for (const core::WallJoinCommand& join : joins)
+		{
+			if (join.capped)
+				continue; // 天端の違う相手との結合は端部を閉じたままにする
+			openEnd(join.a, join.point);
+			openEnd(join.b, join.point);
+		}
+	}
+
 	std::vector<core::ModifierCommand> buildGroundBeamModifiers(const Model& model,
 																const Vec2& center)
 	{

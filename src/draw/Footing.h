@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -66,8 +67,12 @@ namespace HomeskzIfcImport::draw
 	// 壁結合（wallJoin 命令）を実行して交差する立上りを結合する。結合できた件数を返す。
 	// handles は drawWalls が記録した対応表で、a / b の**どちらかが未配置の命令はスキップ**
 	// する。実行は立上りの直後・底盤の前（Python 版 execute_wall_joins と同じ位置）。
+	//
+	// 結合の**後に各立上りの端部キャップを命令どおりへ揃え直す**（JoinWalls が結合した端の
+	// キャップを書き換えるため。draw/Footing.cpp「端部のキャップ」）。VW に拒否された結合が
+	// あれば outNote に件数を残す（完了ダイアログの診断。draw/Member と同じ流儀）。
 	std::size_t drawWallJoins(const core::Document& document, core::ProgressReporter& progress,
-							  const WallHandles& handles);
+							  const WallHandles& handles, std::string* outNote = nullptr);
 
 	// 底盤（slab 命令）をスラブオブジェクトとして描く。配置先レイヤ（"F-底盤"）が無い命令は
 	// スキップする。実際に配置できた枚数を返す。手順は床板（draw/Floor）と同じで、共通部分は

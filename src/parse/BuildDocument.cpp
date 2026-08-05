@@ -108,8 +108,11 @@ namespace HomeskzIfcImport::parse
 		document.walls = context.walls();
 		progress.step();
 		// M10 壁結合: 交差する立上りどうしの結合命令。命令の a / b は **walls の添字**なので、
-		// walls を確定させた**直後**に組み立てる（並びが変わると添字がずれる）。
+		// walls を確定させた**直後**に組み立てる（並びが変わると添字がずれる）。続けて、その
+		// 結合から各立上りの**端部を閉じるか**（capStart / capEnd）を決めて書き戻す
+		// （VW の壁のキャップは結合任せにせず解析側で決める。core/Document.h 参照）。
 		document.wallJoins = buildWallJoinCommands(document.walls);
+		applyWallCaps(document.walls, document.wallJoins);
 		document.slabs = buildSlabCommands(context, document.walls);
 		progress.step();
 

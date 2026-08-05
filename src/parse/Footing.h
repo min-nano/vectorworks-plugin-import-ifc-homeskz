@@ -272,6 +272,21 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::WallJoinCommand>
 	buildWallJoinCommands(const std::vector<core::WallCommand>& walls);
 
+	// 立上りの端部を閉じるか（capStart / capEnd）を壁結合命令から決めて walls へ書き戻す。
+	//
+	// **VW の壁は端部のキャップを壁ごとに持つ**ので、結合（JoinWalls）の副作用に任せず
+	// 明示的に決める（core/Document.h「端部を閉じるかは解析側が決める」）。規則は
+	// 「その端に**閉じない結合**（capped=false＝同じ天端の立上りと一体になる結合）が
+	// 1 つでもあれば閉じない、無ければ閉じる」。したがって
+	//   * 自由端                        … 結合が無い → 閉じる
+	//   * 同じ天端どうしの L / T / X    … capped=false の結合がある → 閉じない
+	//   * 天端の違う相手とだけ結合する端 … capped=true しか無い → 閉じる
+	// になる（3 本以上が集まる交点で、高い者どうしが閉じずに繋がり、低い者の端部だけが
+	// 閉じる形も自然に出る）。joins は buildWallJoinCommands の戻り＝walls の添字を指す
+	// 前提で、範囲外の添字は無視する。
+	void applyWallCaps(std::vector<core::WallCommand>& walls,
+					   const std::vector<core::WallJoinCommand>& joins);
+
 	// 地中梁を台形プリズムのモディファイアへ変換する（Python 版 _build_ground_beam_modifiers
 	// ＋ _ground_beam_modifier）。各地中梁は水平押し出しの台形断面ソリッドなので、押し出し
 	// 方向の方位角と、幅軸 u（走る向きを +90 度回した水平単位ベクトル）・鉛直軸 v で

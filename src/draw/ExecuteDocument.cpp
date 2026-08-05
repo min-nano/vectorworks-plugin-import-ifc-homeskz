@@ -94,7 +94,11 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("基礎の立上りを描画しています…", document.walls.size()))
 			counts.walls = drawWalls(document, progress, &wallHandles);
 		if (beginPhase("基礎の立上りを結合しています…", document.wallJoins.size()))
-			counts.wallJoins = drawWallJoins(document, progress, wallHandles);
+		{
+			std::string note;
+			counts.wallJoins = drawWallJoins(document, progress, wallHandles, &note);
+			addDiagnostics(note);
+		}
 		if (beginPhase("基礎の底盤を描画しています…", document.slabs.size()))
 			counts.slabs = drawSlabs(document, progress);
 

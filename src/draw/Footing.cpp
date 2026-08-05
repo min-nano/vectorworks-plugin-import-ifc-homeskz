@@ -42,6 +42,13 @@
 //	混在するので 150mm 固定のスタイルでは厚みが合わない（構成層＝コンクリート 1 層の合計が
 //	そのまま壁厚になるので、スタイルを当てても命令の壁厚が保たれる）。
 //
+//	【端部のキャップ（M10・ローカル確認で判明）】VW の壁は端部を閉じる線（キャップ）を
+//	**壁ごとに**持ち、明示しなければドキュメントの壁ツール設定に従う。実機では
+//	「T 字でぶつかる側の端線が見える」「自由端に閉じ線が無い」の両方が起きたので、
+//	**解析側が端ごとに決めた値**（WallCommand の capStart / capEnd）を SetWallCaps で
+//	そのまま設定する。設定は 2 回行う: 壁を作った直後（結合が無くても正しく見えるように）と、
+//	**壁結合をすべて実行した後**（JoinWalls が結合した端のキャップを書き換えるため）。
+//
 //	【壁結合の手順（M10）】立上りを描くときに**命令インデックス → 壁ハンドル**の対応表
 //	（WallHandles）を作り、壁結合命令の a / b でその 2 本を引いて JoinWalls へ渡す。SDK
 //	ハンドルは Document に載せられないので、この対応表が唯一の受け渡し手段になる
@@ -135,6 +142,23 @@ namespace HomeskzIfcImport::draw
 		void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value)
 		{
 			gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
+		}
+
+		// 壁の端部キャップ（端を閉じる線）を命令どおりに設定する。
+		//
+		// **既定値はドキュメントの壁ツール設定に従う**ため、明示的に設定しないと「自由端が
+		// 開いたまま」「結合した端が閉じたまま」になる（実機で確認）。命令の capStart /
+		// capEnd は解析側が交点から決めた値（core/Document.h「端部を閉じるかは解析側が
+		// 決める」）。第 4 引数の round は端部を丸めるかで、基礎の立上りは常に角のまま。
+		//
+		// ★左右（leftCap / rightCap）が壁芯の始点側／終点側のどちらに当たるかは SDK の
+		// ヘッダに明記が無いので、**始点＝left・終点＝right** と解釈している。両端の値が
+		// 違う立上り（片方だけ自由端）でだけ差が出るので、ローカル確認の項目にしてある
+		// （ROADMAP.md M10。取り違えていれば入れ替えるだけ）。
+		void SetWallCaps(MCObjectHandle object, const core::WallCommand& wall)
+		{
+			gSDK->SetWallCaps(object, static_cast<Boolean>(wall.capStart),
+							  static_cast<Boolean>(wall.capEnd), false);
 		}
 
 		// 命令の高さ基準（StoryBoundCommand）を SDK の SStoryObjectData へ写す。
@@ -285,6 +309,9 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetWallOverallHeights(object, StoryBound(wall.bottomBound),
 										StoryBound(wall.topBound));
 
+			// 端部を閉じるかは命令どおりに設定する（ヘッダ冒頭「端部のキャップ」）。
+			SetWallCaps(object, wall);
+
 			gSDK->ResetObject(object);
 			outPlaced = true;
 			return object;
@@ -425,11 +452,12 @@ namespace HomeskzIfcImport::draw
 	}
 
 	std::size_t drawWallJoins(const core::Document& document, core::ProgressReporter& progress,
-							  const WallHandles& handles)
+							  const WallHandles& handles, std::string* outNote)
 	{
 		const std::map<std::size_t, MCObjectHandle>& table = handles.table().handles;
 
 		std::size_t joined = 0;
+		std::size_t refused = 0; // JoinWalls が false を返した件数（診断用）
 		for (const core::WallJoinCommand& join : document.wallJoins)
 		{
 			if (progress.cancelled())
@@ -448,7 +476,27 @@ namespace HomeskzIfcImport::draw
 								WorldPt(join.pickB.x, join.pickB.y), JoinModifier(join.joinType),
 								static_cast<Boolean>(join.capped), kJoinShowAlerts))
 				++joined;
+			else
+				++refused;
 		}
+
+		// **結合の後に端部のキャップを入れ直す**。JoinWalls は結合した端のキャップを自分で
+		// 書き換えるので、最後に命令どおりへ揃え直さないと「取り合う端が閉じたまま」
+		// （T 字でぶつかる側の端線が見える）や「自由端が開いたまま」（閉じ線が無い）が残る
+		// ——実機で両方が起きた（ROADMAP.md M10）。結合を拒否された命令があっても、
+		// 配置できた立上りは必ず命令どおりの端部になる。
+		for (const auto& entry : table)
+		{
+			if (entry.first < document.walls.size())
+				SetWallCaps(entry.second, document.walls[entry.first]);
+		}
+
+		// 結合を拒否された件数は診断へ出す（「命令はあるのに繋がらない」が起きたとき、
+		// 解析側の判定（種別・ピック点）と描画側（JoinWalls の引数）のどちらを疑うべきかを
+		// 完了ダイアログから切り分けられるようにする。draw/Member の診断と同じ流儀）。
+		if (outNote != nullptr && refused > 0)
+			*outNote = "壁結合: " + std::to_string(refused) +
+					   " 件を VW が拒否しました（結合種別・ピック点を確認してください）。";
 		return joined;
 	}
 
