@@ -261,6 +261,26 @@ namespace HomeskzIfcImport::parse
 													 const std::vector<WallOpening>& openings,
 													 double slabTopAbs, double beamTopAbs);
 
+	// 十字に交差する立上りの**片方を交点で切る**。切って増えた本数を返す（切らなければ 0）。
+	//
+	// 【なぜ自分で切るのか】VW の X 結合（`JoinWalls` の kXWallJoin）は、**交点で壁を切って
+	// 図面に立上りを 1 本増やす**。実データで確認済み: X 結合 2 件を実行したら壁が 50 → 52 本に
+	// 増え、増えた 1 本は交点から端までの区間（元の立上りの片半分）と重なっていた
+	// （ROADMAP.md M10「交差部で命令に無い立上りがある」）。**命令セットに無い図形が
+	// 図面に出る**のは、命令セットが図面の唯一の出どころという本移植の前提に反するので、
+	// VW に切らせるのをやめて解析側で切る。
+	//
+	// 切り方は VW の X 結合と同じ考え方で、ジャンクションに**内部で交わる通し壁が 2 本以上**
+	// あるとき（＝そのままなら X 結合になる交差）、天端が最も高い（同点なら添字の小さい）
+	// 1 本をバックボーンとして残し、**それ以外の通し壁を交点で 2 本へ分ける**。分けた両側は
+	// 交点が端点になるので、後続の buildWallJoinCommands が自動的に T 結合（両側 → バックボーン）
+	// として扱う——したがって**この関数を通した立上りに X 結合命令は出ない**（X の分岐は
+	// buildWallJoinCommands を直接呼ぶ単体テスト用に残してある）。
+	//
+	// 1 本が複数の交点で切られる場合も壁芯の始点から順に分ける。端点と重なる切り点
+	// （kPointEps 以内）は無視する。入力順に対して決定的。
+	std::size_t splitWallsAtCrossings(std::vector<core::WallCommand>& walls);
+
 	// 交差する立上りどうしの壁結合命令を組み立てる（Python 版 build_wall_join_commands）。
 	// walls は buildWallCommands が返した（＝Document::walls と同じ並びの）立上りで、命令の
 	// a / b はその添字をそのまま指す。

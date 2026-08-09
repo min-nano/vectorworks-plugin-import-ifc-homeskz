@@ -1645,6 +1645,83 @@ namespace HomeskzIfcImport::parse
 		return result;
 	}
 
+	std::size_t splitWallsAtCrossings(std::vector<WallCommand>& walls)
+	{
+		// 切る点（壁の添字 → 交点の列）。同じ壁が複数の交点で切られることもある。
+		std::map<std::size_t, std::vector<Vec2>> cuts;
+		for (const Junction& junction : wallJunctions(walls))
+		{
+			std::vector<std::size_t> interiors;
+			for (const std::size_t index : junction.walls)
+			{
+				if (!wallPointAtEnd(walls[index], junction.point))
+					interiors.push_back(index);
+			}
+			// 通し壁が 1 本以下なら十字ではない（L / T のまま扱える）。
+			if (interiors.size() < 2)
+				continue;
+
+			// バックボーン＝天端が最も高い（同点なら添字の小さい）通し壁。残りを交点で切る
+			// （buildWallJoinCommands が X 結合のバックボーンを選ぶ規則と同じ）。
+			std::ranges::sort(interiors,
+							  [&walls](std::size_t lhs, std::size_t rhs)
+							  {
+								  const double lt = wallTop(walls[lhs]);
+								  const double rt = wallTop(walls[rhs]);
+								  if (lt != rt)
+									  return lt > rt;
+								  return lhs < rhs;
+							  });
+			for (const std::size_t index : interiors | std::views::drop(1))
+				cuts[index].push_back(junction.point);
+		}
+		if (cuts.empty())
+			return 0;
+
+		std::vector<WallCommand> result;
+		result.reserve(walls.size() + cuts.size());
+		std::size_t added = 0;
+		for (std::size_t index = 0; index < walls.size(); ++index)
+		{
+			const WallCommand& wall = walls[index];
+			const auto found = cuts.find(index);
+			const Vec2 axis = wall.end - wall.start;
+			const double length = std::hypot(axis.x, axis.y);
+			if (found == cuts.end() || length <= 0.0)
+			{
+				result.push_back(wall);
+				continue;
+			}
+
+			// 切る点を壁芯の始点からの距離で並べる（順に区間を切り出すため）。
+			std::vector<Vec2> points = found->second;
+			const auto alongAxis = [&wall, &axis](const Vec2& point)
+			{ return ((point.x - wall.start.x) * axis.x) + ((point.y - wall.start.y) * axis.y); };
+			std::ranges::sort(points, [&alongAxis](const Vec2& lhs, const Vec2& rhs)
+							  { return alongAxis(lhs) < alongAxis(rhs); });
+
+			// 端点や直前の切り点と重なる点は飛ばす（長さ 0 の立上りを作らない）。
+			Vec2 from = wall.start;
+			for (const Vec2& cut : points)
+			{
+				if (samePoint(cut, from) || samePoint(cut, wall.end))
+					continue;
+				WallCommand segment = wall;
+				segment.start = from;
+				segment.end = cut;
+				result.push_back(segment);
+				++added;
+				from = cut;
+			}
+			WallCommand last = wall;
+			last.start = from;
+			last.end = wall.end;
+			result.push_back(last);
+		}
+		walls = std::move(result);
+		return added;
+	}
+
 	std::vector<core::WallJoinCommand> buildWallJoinCommands(const std::vector<WallCommand>& walls)
 	{
 		std::vector<core::WallJoinCommand> commands;

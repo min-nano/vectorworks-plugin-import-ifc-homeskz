@@ -107,6 +107,12 @@ namespace HomeskzIfcImport::parse
 		// 立上りには人通口の分割・切り下げまで反映されている（M10。parse/Footing.h）。
 		document.walls = context.walls();
 		progress.step();
+		// M10 十字の交差は**解析側で切る**（splitWallsAtCrossings）。VW の X 結合は交点で壁を
+		// 切って図面に立上りを 1 本増やすので、命令セットに無い図形が図面に出てしまう
+		// （実データで確認。parse/Footing.h 参照）。切った両側は端点で突き当たる形になるため、
+		// 続く buildWallJoinCommands が T 結合として扱う。**結合命令より先**に呼ぶ
+		// （walls の並びが変わると命令の添字がずれる）。
+		splitWallsAtCrossings(document.walls);
 		// M10 壁結合: 交差する立上りどうしの結合命令。命令の a / b は **walls の添字**なので、
 		// walls を確定させた**直後**に組み立てる（並びが変わると添字がずれる）。続けて、その
 		// 結合から各立上りの**端部を閉じるか**（capStart / capEnd）を決めて書き戻す
