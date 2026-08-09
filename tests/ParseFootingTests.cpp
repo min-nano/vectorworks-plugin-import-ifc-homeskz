@@ -1125,6 +1125,10 @@ TEST(join_crossing_interiors_is_an_X_join)
 	if (joins.empty())
 		return;
 	CHECK(joins[0].joinType == core::WallJoinType::X);
+	// 十字は四方すべてが残るので「残す側」の指示に意味が無い。交点そのものを渡す
+	// （片側を指すと VW が交点で壁を切って別の立上りを作った。ROADMAP.md M10）。
+	CHECK(HomeskzIfcImport::core::samePoint(joins[0].pickA, joins[0].point));
+	CHECK(HomeskzIfcImport::core::samePoint(joins[0].pickB, joins[0].point));
 }
 
 TEST(join_of_different_top_heights_caps_and_puts_the_lower_first)

@@ -380,6 +380,25 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
+		// レイヤ上の壁オブジェクトの本数を数える（診断用）。デザインレイヤは group-like なので
+		// VWGroupObj として辿れる（VWLayerObj は VWGroupObj の派生）。
+		//
+		// 【なぜ数えるか】ローカル確認で「解析側が出していない立上り（既存の壁の一部と同じ
+		// 区間）が図面に増えている」ことが分かった。壁結合の前後で本数を突き合わせれば、
+		// **どの結合種別が壁を増やしているか**が実機の 1 周で切り分けられる（ROADMAP.md M10）。
+		std::size_t CountWallsOnLayer(MCObjectHandle layer)
+		{
+			if (layer == nil)
+				return 0;
+			std::size_t count = 0;
+			for (MCObjectHandle object : VWGroupObj(layer))
+			{
+				if (object != nil && gSDK->GetObjectType(object) == kWallNode)
+					++count;
+			}
+			return count;
+		}
+
 		// 壁結合の joinModifier（SDK の JoinModifierType）へ写す。命令の enum は SDK の値
 		// （T=1 / L=2 / X=3）に合わせてあるので、そのまま数値で渡せる（core/Document.h）。
 		JoinModifierType JoinModifier(core::WallJoinType type)
@@ -394,6 +413,21 @@ namespace HomeskzIfcImport::draw
 				return kXWallJoin;
 			}
 			return kLWallJoin;
+		}
+
+		// 結合種別の表示名（診断の内訳に出す）。
+		std::string JoinTypeLabel(core::WallJoinType type)
+		{
+			switch (type)
+			{
+			case core::WallJoinType::T:
+				return "T";
+			case core::WallJoinType::L:
+				return "L";
+			case core::WallJoinType::X:
+				return "X";
+			}
+			return "?";
 		}
 	} // namespace
 
@@ -456,6 +490,15 @@ namespace HomeskzIfcImport::draw
 	{
 		const std::map<std::size_t, MCObjectHandle>& table = handles.table().handles;
 
+		// 診断: 結合の前後で壁の本数がどう変わるかを結合種別ごとに数える（CountWallsOnLayer の
+		// doc コメント参照）。立上りは 1 枚のレイヤに載るので、その 1 枚を数えれば足りる。
+		const MCObjectHandle layer =
+			document.walls.empty()
+				? nil
+				: gSDK->GetNamedLayer(TXString(document.walls.front().layer.c_str()));
+		std::size_t wallCount = CountWallsOnLayer(layer);
+		std::map<core::WallJoinType, std::size_t> added;
+
 		std::size_t joined = 0;
 		std::size_t refused = 0; // JoinWalls が false を返した件数（診断用）
 		for (const core::WallJoinCommand& join : document.wallJoins)
@@ -478,6 +521,11 @@ namespace HomeskzIfcImport::draw
 				++joined;
 			else
 				++refused;
+
+			const std::size_t after = CountWallsOnLayer(layer);
+			if (after > wallCount)
+				added[join.joinType] += after - wallCount;
+			wallCount = after;
 		}
 
 		// **結合の後に端部のキャップを入れ直す**。JoinWalls は結合した端のキャップを自分で
@@ -491,12 +539,32 @@ namespace HomeskzIfcImport::draw
 				SetWallCaps(entry.second, document.walls[entry.first]);
 		}
 
-		// 結合を拒否された件数は診断へ出す（「命令はあるのに繋がらない」が起きたとき、
-		// 解析側の判定（種別・ピック点）と描画側（JoinWalls の引数）のどちらを疑うべきかを
-		// 完了ダイアログから切り分けられるようにする。draw/Member の診断と同じ流儀）。
-		if (outNote != nullptr && refused > 0)
-			*outNote = "壁結合: " + std::to_string(refused) +
-					   " 件を VW が拒否しました（結合種別・ピック点を確認してください）。";
+		// 診断（draw/Member と同じ流儀）。「命令はあるのに繋がらない」「壁が増えた」が起きた
+		// とき、解析側の判定（種別・ピック点）と描画側（JoinWalls の挙動）のどちらを疑うべきかを
+		// 完了ダイアログから切り分けられるようにする。
+		if (outNote != nullptr)
+		{
+			std::string note;
+			if (refused > 0)
+				note = "壁結合: " + std::to_string(refused) + " 件を VW が拒否しました。";
+			if (!added.empty())
+			{
+				std::size_t total = 0;
+				std::string breakdown;
+				for (const auto& entry : added)
+				{
+					total += entry.second;
+					if (!breakdown.empty())
+						breakdown += " ";
+					breakdown += JoinTypeLabel(entry.first) + ":" + std::to_string(entry.second);
+				}
+				if (!note.empty())
+					note += "\n";
+				note += "壁結合: 結合後に立上りが " + std::to_string(total) + " 本増えました（" +
+						breakdown + "）。";
+			}
+			*outNote = note;
+		}
 		return joined;
 	}
 

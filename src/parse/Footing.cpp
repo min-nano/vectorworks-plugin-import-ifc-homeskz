@@ -1692,8 +1692,20 @@ namespace HomeskzIfcImport::parse
 				cmd.a = a;
 				cmd.b = b;
 				cmd.point = point;
-				cmd.pickA = keptSidePick(walls[a], point, pickOffset);
-				cmd.pickB = keptSidePick(walls[b], point, pickOffset);
+				// **X 結合は交点そのものをピック点にする。** 十字では四方すべてが残るので
+				// 「残す側」という指示に意味が無く、片側を指すと VW が交点で壁を切って
+				// **別の立上りを作ってしまった**（ローカル確認: 交差する立上りの片側と同じ
+				// 区間の壁が増えていた。ROADMAP.md M10）。詰める側がある L / T は寄せた点を渡す。
+				if (type == core::WallJoinType::X)
+				{
+					cmd.pickA = point;
+					cmd.pickB = point;
+				}
+				else
+				{
+					cmd.pickA = keptSidePick(walls[a], point, pickOffset);
+					cmd.pickB = keptSidePick(walls[b], point, pickOffset);
+				}
 				cmd.joinType = type;
 				cmd.capped = capped;
 				return cmd;
