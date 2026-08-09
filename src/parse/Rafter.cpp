@@ -226,7 +226,8 @@ namespace HomeskzIfcImport::parse
 			{
 				const Hit& high = hits[j];	  // d 最小 = 高い側 = 棟側
 				const Hit& low = hits[j + 1]; // d 最大 = 低い側 = 軒先
-				if (std::hypot(low.x - high.x, low.y - high.y) < kMinRafterLength)
+				const double segmentRun = std::hypot(low.x - high.x, low.y - high.y);
+				if (segmentRun < kMinRafterLength)
 					continue; // 隅木際の極小片・端で退化した区間は配置しない
 
 				// 天端 Z（絶対値）。ストーリ相対の平面式に Elevation を足す。
@@ -234,8 +235,25 @@ namespace HomeskzIfcImport::parse
 				const double zRidge = slope.zAt(high.x, high.y, storeyElevation); // 棟側
 
 				// 支持点 = 屋根面が横架材天端（軒高）Z と交わる点。軒先→棟の線上で
-				// z=beamTopZ となる位置 s を採る。軒先が既に beamTopZ 以上（s<=0）や面全体が
-				// 下（s>=1）なら支持点は取れないので軒先のままにする。
+				// z=beamTopZ となる位置 s を採る。
+				//
+				// **軒桁に乗らない垂木は軒先を高さの基準（軒高）にする。** 軒先が既に
+				// beamTopZ 以上（s <= 0）・面全体が軒高より下（s >= 1）・支持点が棟側の端へ
+				// 寄り切って部材が残らない（隅棟際の三角形の先端。下記）——これらは受ける
+				// 軒桁が無いので、支持点を採らず**軒先そのものを挿入点＝高さの基準**にし、
+				// 差し込み・軒の出を 0 にして**長さと高さを実形状に合わせる**
+				// （ROADMAP.md M6「ローカル確認」の指示）。描画側は start の XY と elevation を
+				// 挿入点に、start→end の水平投影長をスパンにするので、これで OIP の
+				// 長さ・高さが実形状どおりになる（draw/Rafter.cpp）。
+				//
+				// **s の丸めに頼らない。** 屋根面の棟側の端が軒高ちょうどに来る面では
+				// zRidge == beamTopZ となり s は本来ちょうど 1.0 だが、割り算の丸めで 1−ε に
+				// なることがある。`s < 1.0` だけで判定すると支持点が棟側の端に重なり、長さが
+				// ほぼ 0 の垂木が出てしまう（実測: 区間 850mm に対し支持点→棟側が 3.4e-8mm。
+				// core::samePoint から見れば縮退で、validateDocument が Document 全体を弾く＝
+				// その IFC が 1 つも描かれない）。そこで s ではなく**支持点→棟側に部材が
+				// 残るか**で判定する。
+				bool restsOnGirder = false;
 				double supportX = low.x;
 				double supportY = low.y;
 				double supportZ = zTip;
@@ -244,8 +262,9 @@ namespace HomeskzIfcImport::parse
 				{
 					const double dz = zRidge - zTip;
 					const double s = (dz > kRoofFlatTol) ? ((*beamTopZ - zTip) / dz) : 0.0;
-					if (s > 0.0 && s < 1.0)
+					if (s > 0.0 && (1.0 - s) * segmentRun >= kMinRafterLength)
 					{
+						restsOnGirder = true;
 						supportX = low.x + (s * (high.x - low.x));
 						supportY = low.y + (s * (high.y - low.y));
 						supportZ = *beamTopZ;
@@ -258,20 +277,25 @@ namespace HomeskzIfcImport::parse
 				cmd.drawClass = CLASS_TARUKI;
 				cmd.width = kDefaultRafterWidth;
 				cmd.height = kDefaultRafterHeight;
-				// start=軒側（支持点）、end=棟側（高い端）。座標はセンタリング済み。
+				// start=軒側（支持点。軒桁に乗らない垂木は軒先そのもの）、end=棟側（高い端）。
+				// 座標はセンタリング済み。
 				cmd.start = Vec2{supportX - center.x, supportY - center.y};
 				cmd.end = Vec2{high.x - center.x, high.y - center.y};
 				cmd.elevation = supportZ;
 				cmd.endElevation = zRidge;
 				// 差し込み（支持点→壁外面）＝支持点の真下にある軒桁の桁幅の半分。受ける
-				// 軒桁が見つからなければ既定桁幅（M6 の挙動と同じ値）。
+				// 軒桁が見つからなければ既定桁幅（M6 の挙動と同じ値）。**軒桁に乗らない
+				// 垂木は 0**——差し込む相手が無く、VW は軒先を「挿入点＋差し込み＋軒の出」に
+				// 置くので、0 でなければ実形状より長く描かれてしまう。
 				const double embedment =
-					girderWidthAt(cmd.start.x, cmd.start.y, cmd.end.x - cmd.start.x,
-								  cmd.end.y - cmd.start.y, storyMembers) /
-					2.0;
+					restsOnGirder ? girderWidthAt(cmd.start.x, cmd.start.y, cmd.end.x - cmd.start.x,
+												  cmd.end.y - cmd.start.y, storyMembers) /
+										2.0
+								  : 0.0;
 				// 壁外面から軒先の距離（overhang）＝ 支持点→軒先（supportToTip）から支持部分の
 				// 差し込み（embedment ＝ 支持点→壁外面）を引いた残り。VW の垂木は軒先を
-				// 支持点＋差し込み＋軒の出 に置くため、両者の和が supportToTip になるようにする。
+				// 支持点＋差し込み＋軒の出 に置くため、両者の和が supportToTip になるようにする
+				// （軒桁に乗らない垂木は supportToTip も embedment も 0 なので軒の出も 0）。
 				cmd.overhang = std::max(0.0, supportToTip - embedment);
 				cmd.embedment = embedment;
 				cmd.label = label;
