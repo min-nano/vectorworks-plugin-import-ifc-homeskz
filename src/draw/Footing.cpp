@@ -591,6 +591,12 @@ namespace HomeskzIfcImport::draw
 		std::size_t joined = 0;
 		std::size_t refused = 0; // JoinWalls が false を返した件数（診断用）
 		std::map<core::WallJoinType, std::size_t> refusedByType;
+		std::vector<core::Vec2> refusedAt; // 拒否された結合の交点（診断用）
+		// **成功を返したのに幾何が動かなかった**結合の交点（診断用）。結合が効けば a の壁は
+		// 相手の面まで詰められる／伸ばされるので、壁芯の端点が動く。動かないなら「VW は
+		// true を返したが何もしていない」——実機で下側の立上りだけ結合されないように見えた
+		// 症状がこれかを確かめる（ROADMAP.md M10）。
+		std::vector<core::Vec2> inertAt;
 		for (const core::WallJoinCommand& join : document.wallJoins)
 		{
 			if (progress.cancelled())
@@ -603,16 +609,32 @@ namespace HomeskzIfcImport::draw
 			if (first == table.end() || second == table.end())
 				continue;
 
+			VWPoint2D beforeStart;
+			VWPoint2D beforeEnd;
+			VWWallObj(first->second).GetPoints(beforeStart, beforeEnd);
+
 			// ピック点は解析側が算出済みの「残す側」の点をそのまま渡す（ヘッダ冒頭
 			// 「壁結合の手順」）。結合できたかは戻り値で見る（失敗しても他は続ける）。
 			if (gSDK->JoinWalls(first->second, second->second, WorldPt(join.pickA.x, join.pickA.y),
 								WorldPt(join.pickB.x, join.pickB.y), JoinModifier(join.joinType),
 								static_cast<Boolean>(join.capped), kJoinShowAlerts))
+			{
 				++joined;
+				VWPoint2D afterStart;
+				VWPoint2D afterEnd;
+				VWWallObj(first->second).GetPoints(afterStart, afterEnd);
+				const bool moved = std::abs(afterStart.x - beforeStart.x) > kSurveyPointTol ||
+								   std::abs(afterStart.y - beforeStart.y) > kSurveyPointTol ||
+								   std::abs(afterEnd.x - beforeEnd.x) > kSurveyPointTol ||
+								   std::abs(afterEnd.y - beforeEnd.y) > kSurveyPointTol;
+				if (!moved)
+					inertAt.push_back(join.point);
+			}
 			else
 			{
 				++refused;
 				refusedByType[join.joinType] += 1;
+				refusedAt.push_back(join.point);
 			}
 
 			const std::size_t after = SurveyWallsOnLayer(layer).count;
@@ -657,11 +679,26 @@ namespace HomeskzIfcImport::draw
 				return text;
 			};
 
+			// 交点の座標を並べる小ヘルパー（先頭 3 件まで。ダイアログを長くしすぎない）。
+			const auto pointsOf = [](const std::vector<core::Vec2>& points)
+			{
+				std::string text;
+				for (std::size_t i = 0; i < points.size() && i < 3; ++i)
+					text += (i == 0 ? "" : ", ") + PointText(points[i]);
+				if (points.size() > 3)
+					text += " …計 " + std::to_string(points.size()) + " 件";
+				return text;
+			};
+
 			std::string note = "壁結合: 結合前 " + std::to_string(before) + " 本 → 結合後 " +
 							   std::to_string(wallCount) + " 本。";
 			if (refused > 0)
 				note += "\n壁結合: " + std::to_string(refused) + " 件を VW が拒否しました（" +
-						breakdownOf(refusedByType) + "）。";
+						breakdownOf(refusedByType) + "）: " + pointsOf(refusedAt) + "。";
+			if (!inertAt.empty())
+				note += "\n壁結合: " + std::to_string(inertAt.size()) +
+						" 件は成功を返しましたが立上りが動きませんでした: " + pointsOf(inertAt) +
+						"。";
 			if (!added.empty())
 			{
 				std::size_t total = 0;

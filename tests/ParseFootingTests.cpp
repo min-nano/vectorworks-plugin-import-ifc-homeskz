@@ -1168,6 +1168,33 @@ TEST(crossing_walls_are_split_so_no_X_join_remains)
 		CHECK(join.joinType == core::WallJoinType::T);
 		CHECK_EQ(join.b, std::size_t{2}); // through＝バックボーン
 	}
+	if (joins.size() != 2)
+		return;
+	// 同じ通し壁の同じ交点へ 2 本が取り付くので、**通し壁のピック点は別の点**にする
+	// （同じ点だと VW が同じ結合と見なして後の 1 件を落とす。parse/Footing.cpp の makeT）。
+	// 交点は縦の壁の中ほどなので、反対の端点方向へ寄れば符号が逆になる。
+	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickB, joins[1].pickB));
+	CHECK(near(joins[0].pickB.x, 3000.0));
+	CHECK(near(joins[1].pickB.x, 3000.0));
+	CHECK(joins[0].pickB.y * joins[1].pickB.y < 0.0);
+}
+
+TEST(a_lone_stem_keeps_the_kept_side_pick_on_the_through_wall)
+{
+	// 交点に stem が 1 本だけの T 結合は従来どおり「残す側」（交点から遠い端点の方向）。
+	// 上のテストの「2 本目は逆側」が既存の T 結合の引数を変えていないことを押さえる。
+	const std::vector<WallCommand> walls = {
+		wall(Vec2{0.0, 0.0}, Vec2{6000.0, 0.0}, 120.0, -100.0, 0.0), // 通し壁（バックボーン）
+		wall(Vec2{4000.0, 0.0}, Vec2{4000.0, 3000.0})};				 // stem
+	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+
+	CHECK_EQ(joins.size(), std::size_t{1});
+	if (joins.empty())
+		return;
+	CHECK(joins[0].joinType == core::WallJoinType::T);
+	// 交点 (4000,0) から遠い端点は始点 (0,0) 側なので、寄せ先は交点より小さい x。
+	CHECK(joins[0].pickB.x < 4000.0);
+	CHECK(near(joins[0].pickB.y, 0.0));
 }
 
 TEST(split_leaves_walls_alone_when_nothing_crosses_in_the_interior)

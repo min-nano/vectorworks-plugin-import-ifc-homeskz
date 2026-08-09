@@ -434,20 +434,27 @@ namespace HomeskzIfcImport::parse
 			return (t <= frac) || (t >= 1.0 - frac);
 		}
 
-		// 交点から「残す側」（＝交点から遠い端点の方向）へ寄せたピック点を返す（Python 版
-		// _kept_side_pick）。寄せ量は offset を「交点〜遠い端点の距離 × kPickOffsetFrac」で
-		// クランプした値。壁芯長 0 の壁は交点をそのまま返す。
-		Vec2 keptSidePick(const WallCommand& wall, const Vec2& junction, double offset)
+		// 交点から wall の指定した端点の方向へ寄せた壁芯上の点を返す。寄せ量は offset を
+		// 「交点〜その端点の距離 × kPickOffsetFrac」でクランプした値。端点が交点と同じ位置なら
+		// 交点をそのまま返す。keptSidePick と、通し壁のピック点をずらす側の指定で共有する。
+		Vec2 sidePick(const WallCommand& wall, const Vec2& junction, double offset, bool towardEnd)
 		{
-			const double d1 = std::hypot(wall.start.x - junction.x, wall.start.y - junction.y);
-			const double d2 = std::hypot(wall.end.x - junction.x, wall.end.y - junction.y);
-			const Vec2 far = (d2 >= d1) ? wall.end : wall.start;
-			const Vec2 delta = far - junction;
+			const Vec2 target = towardEnd ? wall.end : wall.start;
+			const Vec2 delta = target - junction;
 			const double length = std::hypot(delta.x, delta.y);
 			if (length <= 0.0)
 				return junction;
 			const double step = std::min(offset, length * kPickOffsetFrac) / length;
 			return Vec2{junction.x + (delta.x * step), junction.y + (delta.y * step)};
+		}
+
+		// 交点から「残す側」（＝交点から遠い端点の方向）へ寄せたピック点を返す（Python 版
+		// _kept_side_pick）。壁芯長 0 の壁は交点をそのまま返す。
+		Vec2 keptSidePick(const WallCommand& wall, const Vec2& junction, double offset)
+		{
+			const double d1 = std::hypot(wall.start.x - junction.x, wall.start.y - junction.y);
+			const double d2 = std::hypot(wall.end.x - junction.x, wall.end.y - junction.y);
+			return sidePick(wall, junction, offset, d2 >= d1);
 		}
 
 		// 立上りの壁芯方向ベクトルと長さ（Python 版 _line_dir）。
@@ -1799,11 +1806,36 @@ namespace HomeskzIfcImport::parse
 				return makeCommand(a, b, type, capped);
 			};
 
+			// 同じ通し壁に同じ交点で何本の stem がすでに取り付いたか（下の makeT が使う）。
+			std::map<std::size_t, std::size_t> stemsPerThrough;
+
 			// T 結合。stem（端点側＝延長される壁）を a、through（通し壁）を b にする。
+			//
+			// 【2 本目以降の stem は通し壁のピック点を逆側へ寄せる】十字を切った両側のように、
+			// **同じ通し壁の同じ交点へ 2 本の stem が取り付く**とき、通し壁のピック点が
+			// どちらの結合でも同じ点になる（交点が通し壁の中ほどなら「残す側」が同じ側になる）。
+			// 実機ではこのとき **JoinWalls が両方 true を返すのに、図面では先の 1 本だけが
+			// 結合されて見えた**（ROADMAP.md M10）。ピック点は「どの端を結合するか」を指す
+			// 引数なので、同じ点を渡した 2 件が同じ結合と見なされて後の 1 件が落ちている疑いが
+			// 濃い。そこで 2 本目以降は通し壁の反対の端点方向へ寄せて、**別の結合として
+			// 区別できる**ようにする。1 本目は従来どおり「残す側」なので、既存の T 結合
+			// （交点に stem が 1 本だけ）の引数は 1 ビットも変わらない。
 			const auto makeT = [&](std::size_t stem, std::size_t through)
 			{
 				const bool capped = std::abs(tops.at(stem) - tops.at(through)) > kWallMergeDistTol;
-				return makeCommand(stem, through, core::WallJoinType::T, capped);
+				core::WallJoinCommand cmd =
+					makeCommand(stem, through, core::WallJoinType::T, capped);
+				const std::size_t order = stemsPerThrough[through]++;
+				if (order % 2 == 1)
+				{
+					// 「残す側」と逆の端点方向へ寄せる（a / b の入れ替えは T では起きない）。
+					const double d1 = std::hypot(walls[through].start.x - point.x,
+												 walls[through].start.y - point.y);
+					const double d2 =
+						std::hypot(walls[through].end.x - point.x, walls[through].end.y - point.y);
+					cmd.pickB = sidePick(walls[through], point, pickOffset, d2 < d1);
+				}
+				return cmd;
 			};
 
 			// stem が T 結合する通し壁を選ぶ（最も直交する壁。同点なら天端が高いほう、
