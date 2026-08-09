@@ -61,8 +61,10 @@ namespace HomeskzIfcImport::draw
 	// が引く。フォールバック描画＝壁を作れなかった命令とレイヤ未生成でスキップした命令は
 	// 記録しない）。描画は必ず**底盤より先**に行う（Python 版の実行順 walls → wall_joins →
 	// slabs に揃えてある）。
+	// outNote には、命令数・配置数とレイヤ上の壁の本数が合わないときだけ診断を残す
+	// （「命令に無い立上りが図面にある」を実機の 1 周で捕まえるため。draw/Footing.cpp 参照）。
 	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress,
-						  WallHandles* handles = nullptr);
+						  WallHandles* handles = nullptr, std::string* outNote = nullptr);
 
 	// 壁結合（wallJoin 命令）を実行して交差する立上りを結合する。結合できた件数を返す。
 	// handles は drawWalls が記録した対応表で、a / b の**どちらかが未配置の命令はスキップ**

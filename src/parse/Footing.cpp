@@ -1692,20 +1692,16 @@ namespace HomeskzIfcImport::parse
 				cmd.a = a;
 				cmd.b = b;
 				cmd.point = point;
-				// **X 結合は交点そのものをピック点にする。** 十字では四方すべてが残るので
-				// 「残す側」という指示に意味が無く、片側を指すと VW が交点で壁を切って
-				// **別の立上りを作ってしまった**（ローカル確認: 交差する立上りの片側と同じ
-				// 区間の壁が増えていた。ROADMAP.md M10）。詰める側がある L / T は寄せた点を渡す。
-				if (type == core::WallJoinType::X)
-				{
-					cmd.pickA = point;
-					cmd.pickB = point;
-				}
-				else
-				{
-					cmd.pickA = keptSidePick(walls[a], point, pickOffset);
-					cmd.pickB = keptSidePick(walls[b], point, pickOffset);
-				}
+				// ピック点は**種別に関係なく**「残す側」へ寄せた壁芯上の点にする（Python 版
+				// `_kept_side_pick` と同じ。X 結合では VW が壁を詰めないので寄せは無害、という
+				// のが Python 版の実証済みの結論）。
+				//
+				// 一度「X 結合だけ交点そのものを渡す」ことを試した（交差では四方すべてが残るので
+				// 「残す側」に意味が無く、片側を指すせいで VW が交点で壁を切って別の立上りを
+				// 作っているのではないかと疑った）が、**実機で症状は変わらなかった**ので、
+				// 根拠の無い Python 版との差異を残さないためにこちらへ戻した（ROADMAP.md M10）。
+				cmd.pickA = keptSidePick(walls[a], point, pickOffset);
+				cmd.pickB = keptSidePick(walls[b], point, pickOffset);
 				cmd.joinType = type;
 				cmd.capped = capped;
 				return cmd;

@@ -1125,10 +1125,13 @@ TEST(join_crossing_interiors_is_an_X_join)
 	if (joins.empty())
 		return;
 	CHECK(joins[0].joinType == core::WallJoinType::X);
-	// 十字は四方すべてが残るので「残す側」の指示に意味が無い。交点そのものを渡す
-	// （片側を指すと VW が交点で壁を切って別の立上りを作った。ROADMAP.md M10）。
-	CHECK(HomeskzIfcImport::core::samePoint(joins[0].pickA, joins[0].point));
-	CHECK(HomeskzIfcImport::core::samePoint(joins[0].pickB, joins[0].point));
+	// ピック点は種別に関係なく「残す側」へ寄せた点（Python 版 `_kept_side_pick` と同じ。
+	// X 結合では VW が壁を詰めないので寄せは無害）。交点そのものは渡さない。
+	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickA, joins[0].point));
+	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickB, joins[0].point));
+	// 寄せる先は交点から遠い端点の方向で、壁芯上に乗る（横の壁は y=0・縦の壁は x=3000）。
+	CHECK(std::abs(joins[0].pickA.y - 0.0) < 1e-6);
+	CHECK(std::abs(joins[0].pickB.x - 3000.0) < 1e-6);
 }
 
 TEST(join_of_different_top_heights_caps_and_puts_the_lower_first)

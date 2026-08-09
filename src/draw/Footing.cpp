@@ -90,6 +90,7 @@
 #include "VWFC/VWObjects/VWExtrudeObj.h"
 #include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
+#include "VWFC/VWObjects/VWWallObj.h"
 
 #include <algorithm>
 #include <cmath>
@@ -98,6 +99,7 @@
 #include <memory>
 #include <numbers>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -380,23 +382,79 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
-		// レイヤ上の壁オブジェクトの本数を数える（診断用）。デザインレイヤは group-like なので
+		// 診断で座標を突き合わせるときの端点許容（mm）。壁結合が端点を詰める／伸ばす前に
+		// 見る前提なので、素の一致（丸め誤差だけ）を見れば足りる。
+		constexpr double kSurveyPointTol = 2.0;
+
+		// レイヤ上の立上り（壁）を見て回った結果。
+		struct WallSurvey
+		{
+			std::size_t count = 0; // レイヤ上の壁オブジェクトの本数
+			// 命令セットのどの立上りとも端点が一致しなかった壁の始点・終点。
+			std::vector<std::pair<core::Vec2, core::Vec2>> unmatched;
+		};
+
+		// レイヤ上の壁オブジェクトを数え、walls を渡した場合は**命令セットのどの立上りとも
+		// 端点が一致しないもの**を拾う（診断用）。デザインレイヤは group-like なので
 		// VWGroupObj として辿れる（VWLayerObj は VWGroupObj の派生）。
 		//
-		// 【なぜ数えるか】ローカル確認で「解析側が出していない立上り（既存の壁の一部と同じ
-		// 区間）が図面に増えている」ことが分かった。壁結合の前後で本数を突き合わせれば、
-		// **どの結合種別が壁を増やしているか**が実機の 1 周で切り分けられる（ROADMAP.md M10）。
-		std::size_t CountWallsOnLayer(MCObjectHandle layer)
+		// 【なぜ見て回るか】ローカル確認で「解析側が出していない立上り（交差部で分かれた
+		// 片側と同じ区間の壁）が図面に増えている」ことが分かった。命令セットには該当区間の
+		// 立上りが 1 本しか無い（tests/ParseFootingTests の重なり検査でも重複は出ない）ので、
+		// 増えるのは描画のどこか。**立上りの直後に位置ごと名指しし、壁結合の前後で本数を
+		// 突き合わせれば、どの工程が増やしているかが実機の 1 周で切り分けられる**
+		// （ROADMAP.md M10）。
+		WallSurvey SurveyWallsOnLayer(MCObjectHandle layer,
+									  const std::vector<core::WallCommand>* walls = nullptr)
 		{
+			WallSurvey survey;
 			if (layer == nil)
-				return 0;
-			std::size_t count = 0;
+				return survey;
 			for (MCObjectHandle object : VWGroupObj(layer))
 			{
-				if (object != nil && gSDK->GetObjectType(object) == kWallNode)
-					++count;
+				if (object == nil || gSDK->GetObjectType(object) != kWallNode)
+					continue;
+				++survey.count;
+				if (walls == nullptr)
+					continue;
+
+				VWPoint2D startPt;
+				VWPoint2D endPt;
+				VWWallObj(object).GetPoints(startPt, endPt);
+				const core::Vec2 begin{startPt.x, startPt.y};
+				const core::Vec2 finish{endPt.x, endPt.y};
+
+				const auto same = [](const core::Vec2& lhs, const core::Vec2& rhs) {
+					return std::abs(lhs.x - rhs.x) < kSurveyPointTol &&
+						   std::abs(lhs.y - rhs.y) < kSurveyPointTol;
+				};
+				// 向きは問わない（CreateWall へ渡す始終点の向きは命令どおりだが、
+				// 診断で向きの違いを「命令に無い壁」と読み違えないため）。
+				const auto matches = [&](const core::WallCommand& command)
+				{
+					return (same(begin, command.start) && same(finish, command.end)) ||
+						   (same(begin, command.end) && same(finish, command.start));
+				};
+				if (std::ranges::none_of(*walls, matches))
+					survey.unmatched.emplace_back(begin, finish);
 			}
-			return count;
+			return survey;
+		}
+
+		// 診断に座標を出すための整形（mm・小数 1 桁。位置が特定できれば十分）。
+		std::string CoordText(double value)
+		{
+			const long long scaled = std::llround(value * 10.0);
+			const long long whole = scaled / 10;
+			const long long frac = std::abs(scaled % 10);
+			// -1 < value < 0 は whole が 0 になって符号が消えるので補う。
+			const std::string head = (scaled < 0 && whole == 0) ? "-0" : std::to_string(whole);
+			return head + "." + std::to_string(frac);
+		}
+
+		std::string PointText(const core::Vec2& point)
+		{
+			return "(" + CoordText(point.x) + "," + CoordText(point.y) + ")";
 		}
 
 		// 壁結合の joinModifier（SDK の JoinModifierType）へ写す。命令の enum は SDK の値
@@ -442,12 +500,21 @@ namespace HomeskzIfcImport::draw
 	WallHandles::~WallHandles() = default;
 
 	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress,
-						  WallHandles* handles)
+						  WallHandles* handles, std::string* outNote)
 	{
 		// 命令のスタイル名 → このインポートで作ったスタイルの索引（底盤と同じ作法）。
 		// 同じ壁厚の立上りは 1 つのスタイルを共有する。既存リソースには触れないので、
 		// 実際の名前は連番付きになりうる。
 		std::map<std::string, InternalIndex> styles;
+
+		// 診断（SurveyWallsOnLayer 参照）: 配置の前後でレイヤ上の壁を見て回り、命令に無い壁が
+		// あればその位置を名指しする。ここで出れば**立上りの配置**が、出ずに壁結合の診断で
+		// 増えていれば**結合**が増やしている（ROADMAP.md M10）。
+		const MCObjectHandle layer =
+			document.walls.empty()
+				? nil
+				: gSDK->GetNamedLayer(TXString(document.walls.front().layer.c_str()));
+		const std::size_t existing = SurveyWallsOnLayer(layer).count;
 
 		std::size_t drawn = 0;
 		for (std::size_t index = 0; index < document.walls.size(); ++index)
@@ -482,6 +549,27 @@ namespace HomeskzIfcImport::draw
 			if (handles != nullptr && object != nil)
 				handles->table().handles.emplace(index, object);
 		}
+
+		// 診断（draw/Member と同じ流儀）。命令数・配置数とレイヤ上の本数が合わないときだけ出す
+		// （**数え方が効いていない場合も分かる**ように、絶対本数をそのまま並べる）。
+		const WallSurvey survey = SurveyWallsOnLayer(layer, &document.walls);
+		if (outNote != nullptr && (survey.count != existing + drawn || !survey.unmatched.empty() ||
+								   (survey.count == 0 && drawn > 0)))
+		{
+			std::string note = "立上り: 命令 " + std::to_string(document.walls.size()) +
+							   " 本・配置 " + std::to_string(drawn) + " 本に対し、レイヤの壁は " +
+							   std::to_string(existing) + " → " + std::to_string(survey.count) +
+							   " 本。";
+			if (!survey.unmatched.empty())
+			{
+				note += "命令に無い壁 " + std::to_string(survey.unmatched.size()) + " 本: ";
+				for (std::size_t i = 0; i < survey.unmatched.size() && i < 3; ++i)
+					note += (i == 0 ? "" : ", ") + PointText(survey.unmatched[i].first) + "-" +
+							PointText(survey.unmatched[i].second);
+				note += "。";
+			}
+			*outNote = note;
+		}
 		return drawn;
 	}
 
@@ -490,17 +578,19 @@ namespace HomeskzIfcImport::draw
 	{
 		const std::map<std::size_t, MCObjectHandle>& table = handles.table().handles;
 
-		// 診断: 結合の前後で壁の本数がどう変わるかを結合種別ごとに数える（CountWallsOnLayer の
+		// 診断: 結合の前後で壁の本数がどう変わるかを結合種別ごとに数える（SurveyWallsOnLayer の
 		// doc コメント参照）。立上りは 1 枚のレイヤに載るので、その 1 枚を数えれば足りる。
 		const MCObjectHandle layer =
 			document.walls.empty()
 				? nil
 				: gSDK->GetNamedLayer(TXString(document.walls.front().layer.c_str()));
-		std::size_t wallCount = CountWallsOnLayer(layer);
+		const std::size_t before = SurveyWallsOnLayer(layer).count;
+		std::size_t wallCount = before;
 		std::map<core::WallJoinType, std::size_t> added;
 
 		std::size_t joined = 0;
 		std::size_t refused = 0; // JoinWalls が false を返した件数（診断用）
+		std::map<core::WallJoinType, std::size_t> refusedByType;
 		for (const core::WallJoinCommand& join : document.wallJoins)
 		{
 			if (progress.cancelled())
@@ -520,9 +610,12 @@ namespace HomeskzIfcImport::draw
 								static_cast<Boolean>(join.capped), kJoinShowAlerts))
 				++joined;
 			else
+			{
 				++refused;
+				refusedByType[join.joinType] += 1;
+			}
 
-			const std::size_t after = CountWallsOnLayer(layer);
+			const std::size_t after = SurveyWallsOnLayer(layer).count;
 			if (after > wallCount)
 				added[join.joinType] += after - wallCount;
 			wallCount = after;
@@ -533,10 +626,17 @@ namespace HomeskzIfcImport::draw
 		// （T 字でぶつかる側の端線が見える）や「自由端が開いたまま」（閉じ線が無い）が残る
 		// ——実機で両方が起きた（ROADMAP.md M10）。結合を拒否された命令があっても、
 		// 配置できた立上りは必ず命令どおりの端部になる。
+		//
+		// **キャップを入れ直したら壁をリセットする**（順序: キャップ → リセット）。実機で
+		// 「54 件のうち 53 件は VW が結合を受け付けているのに T 字の面線が残る」——結合は
+		// 成立しているのに平面の 2D 表現が古いまま——という状態になった。手で壁スタイルを
+		// 編集すると表現が変わる（＝壁を作り直せば直る）ことも分かっているので、
+		// ResetObject で明示的に作り直す（ROADMAP.md M10）。
 		for (const auto& entry : table)
 		{
 			if (entry.first < document.walls.size())
 				SetWallCaps(entry.second, document.walls[entry.first]);
+			gSDK->ResetObject(entry.second);
 		}
 
 		// 診断（draw/Member と同じ流儀）。「命令はあるのに繋がらない」「壁が増えた」が起きた
@@ -544,24 +644,33 @@ namespace HomeskzIfcImport::draw
 		// 完了ダイアログから切り分けられるようにする。
 		if (outNote != nullptr)
 		{
-			std::string note;
+			// 内訳（種別ごとの件数）を "T:2 X:1" の形に整える小ヘルパー。
+			const auto breakdownOf = [](const std::map<core::WallJoinType, std::size_t>& counts)
+			{
+				std::string text;
+				for (const auto& entry : counts)
+				{
+					if (!text.empty())
+						text += " ";
+					text += JoinTypeLabel(entry.first) + ":" + std::to_string(entry.second);
+				}
+				return text;
+			};
+
+			std::string note = "壁結合: 結合前 " + std::to_string(before) + " 本 → 結合後 " +
+							   std::to_string(wallCount) + " 本。";
 			if (refused > 0)
-				note = "壁結合: " + std::to_string(refused) + " 件を VW が拒否しました。";
+				note += "\n壁結合: " + std::to_string(refused) + " 件を VW が拒否しました（" +
+						breakdownOf(refusedByType) + "）。";
 			if (!added.empty())
 			{
 				std::size_t total = 0;
-				std::string breakdown;
 				for (const auto& entry : added)
-				{
 					total += entry.second;
-					if (!breakdown.empty())
-						breakdown += " ";
-					breakdown += JoinTypeLabel(entry.first) + ":" + std::to_string(entry.second);
-				}
 				if (!note.empty())
 					note += "\n";
 				note += "壁結合: 結合後に立上りが " + std::to_string(total) + " 本増えました（" +
-						breakdown + "）。";
+						breakdownOf(added) + "）。";
 			}
 			*outNote = note;
 		}
