@@ -1829,14 +1829,36 @@ namespace HomeskzIfcImport::parse
 			{
 				// 通し壁の無い端点コーナー: 天端高さ降順ではじめの 2 本を L、それ以降を T
 				// （はじめの 2 本＝バックボーンへ突き当てる）。
+				//
+				// **L の相手は「root と同一直線でない最初の 1 本」にする。** 素直に 2 番目を
+				// 採ると、root と同一直線に並ぶ立上り（一直線の突き合わせ）が相手に選ばれて
+				// L 結合が落ち（pushJoin が同一直線を捨てる）、残った直交する立上りが
+				// 「その点で終わっている壁」への T 結合になってしまう。T 結合は相手が通し壁で
+				// ないと成立しないので VW が拒否する——実データの拒否 1 件 (6370,1820) が
+				// これで、そこは本来 root と直交する立上りとの**隅（L）結合**（ROADMAP.md M10）。
 				std::vector<std::size_t> ordered = ends;
 				std::ranges::sort(ordered, byHeight);
 				const std::size_t root = ordered.front();
-				if (ordered.size() >= 2)
-					pushJoin(junctionCommands, makeLX(ordered[1], root, core::WallJoinType::L));
-				const std::vector<std::size_t> backbone(ordered.begin(), ordered.begin() + 2);
-				for (const std::size_t stem : ordered | std::views::drop(2))
+				const auto notCollinearWithRoot = [&](std::size_t index)
+				{
+					double lo = 0.0;
+					double hi = 0.0;
+					return !wallsOnSameLine(walls[root], walls[index], lo, hi);
+				};
+				const auto partner =
+					std::ranges::find_if(ordered | std::views::drop(1), notCollinearWithRoot);
+				std::vector<std::size_t> backbone{root};
+				if (partner != std::ranges::end(ordered | std::views::drop(1)))
+				{
+					pushJoin(junctionCommands, makeLX(*partner, root, core::WallJoinType::L));
+					backbone.push_back(*partner);
+				}
+				for (const std::size_t stem : ordered | std::views::drop(1))
+				{
+					if (std::ranges::find(backbone, stem) != backbone.end())
+						continue;
 					pushJoin(junctionCommands, makeT(stem, pickThrough(stem, backbone)));
+				}
 			}
 
 			// capped=false（天端の高い立上りどうし）を先に、capped=true を後に並べる

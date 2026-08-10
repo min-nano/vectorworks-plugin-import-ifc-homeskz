@@ -1159,6 +1159,49 @@ TEST(a_lone_stem_keeps_the_kept_side_pick_on_the_through_wall)
 	CHECK(near(joins[0].pickB.y, 0.0));
 }
 
+TEST(corner_L_partner_skips_a_collinear_wall)
+{
+	// 端点コーナーで **L の相手は root と同一直線でない最初の 1 本**にする。素直に 2 番目を
+	// 採ると同一直線の隣が選ばれて L が落ち（pushJoin が同一直線を捨てる）、残った直交する
+	// 立上りが「その点で終わっている壁」への T 結合になって VW に拒否される
+	// （実データの (6370,1820)。parse/Footing.cpp の端点コーナー）。
+	const std::vector<WallCommand> walls = {
+		wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}),	// [0] root
+		wall(Vec2{3000.0, 0.0}, Vec2{6000.0, 0.0}), // [1] [0] と同一直線
+		wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0}, 120.0, -100.0, -400.0)}; // [2] 直交・低い
+	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+
+	// 同一直線の [0]-[1] には結合を出さない。
+	for (const core::WallJoinCommand& join : joins)
+	{
+		const bool zeroOne = (join.a == 0 && join.b == 1) || (join.a == 1 && join.b == 0);
+		CHECK(!zeroOne);
+	}
+	// L は [0] と [2]（低い [2] が a・高い [0] が b で capped）。
+	std::size_t lCount = 0;
+	for (const core::WallJoinCommand& join : joins)
+	{
+		if (join.joinType != core::WallJoinType::L)
+			continue;
+		++lCount;
+		CHECK_EQ(join.a, std::size_t{2});
+		CHECK_EQ(join.b, std::size_t{0});
+		CHECK(join.capped);
+	}
+	CHECK_EQ(lCount, std::size_t{1});
+	// 同一直線だった [1] は、直交する [2] へ T 結合する（バックボーンは {[0], [2]}）。
+	std::size_t tCount = 0;
+	for (const core::WallJoinCommand& join : joins)
+	{
+		if (join.joinType != core::WallJoinType::T)
+			continue;
+		++tCount;
+		CHECK_EQ(join.a, std::size_t{1});
+		CHECK_EQ(join.b, std::size_t{2});
+	}
+	CHECK_EQ(tCount, std::size_t{1});
+}
+
 TEST(x_joins_are_emitted_last)
 {
 	// **X 結合はすべて最後**（VW の X 結合は a を分割するので、分割された壁のハンドルを
