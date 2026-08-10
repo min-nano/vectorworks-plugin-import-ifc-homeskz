@@ -2320,8 +2320,10 @@ namespace HomeskzIfcImport::parse
 				Vec2{end.x + (width.x * uLo), end.y + (width.y * uLo)}};
 	}
 
-	core::ModifierCommand extendModifierEndsToBoundary(const core::ModifierCommand& modifier,
-													   const std::vector<Vec2>& boundary)
+	core::ModifierCommand
+	extendModifierEndsToBoundary(const core::ModifierCommand& modifier,
+								 const std::vector<Vec2>& boundary,
+								 const std::vector<core::ModifierCommand>& others)
 	{
 		core::ModifierCommand result = modifier;
 		if (modifier.profile.empty() || modifier.depth <= 0.0 || boundary.size() < 3)
@@ -2330,6 +2332,42 @@ namespace HomeskzIfcImport::parse
 		const Vec2 axis = groundBeamAxisDir(modifier);
 		const Vec2 start{modifier.origin.x, modifier.origin.y};
 		const Vec2 end{start.x + (axis.x * modifier.depth), start.y + (axis.y * modifier.depth)};
+
+		// 端 tip から外向き (dx, dy) へ**別の地中梁が続いているか**。続いているならその端は
+		// 伸ばさない（伸ばすと隣の梁へ食い込む。立上りの collinearAbutment と同じ考え方で、
+		// 実機では 75mm ぶん隣の梁と重なった。ROADMAP.md M10）。
+		const auto abuttingBeam = [&](const Vec2& tip, double dx, double dy)
+		{
+			const auto continuesPast = [&](const core::ModifierCommand& other)
+			{
+				if (other.depth <= 0.0)
+					return false;
+				const Vec2 otherAxis = groundBeamAxisDir(other);
+				const Vec2 otherStart{other.origin.x, other.origin.y};
+				const Vec2 otherEnd{otherStart.x + (otherAxis.x * other.depth),
+									otherStart.y + (otherAxis.y * other.depth)};
+				// 自分自身は飛ばす（統合済みなので同じ軸線・同じ区間の重複は無い）。
+				if (samePoint(otherStart, start) && samePoint(otherEnd, end))
+					return false;
+				// tip を相手の軸線へ射影する。軸線上に無い相手は関係ない。
+				const Vec2 delta = tip - otherStart;
+				const double along = (delta.x * otherAxis.x) + (delta.y * otherAxis.y);
+				const double across = std::abs((delta.x * -otherAxis.y) + (delta.y * otherAxis.x));
+				if (across > kGroundBeamMergeTol)
+					return false;
+				// 直交する相手は「続いている」のではなく取り合う相手。
+				const double heading = (dx * otherAxis.x) + (dy * otherAxis.y);
+				if (std::abs(heading) <= kGroundBeamMergeAngleTol)
+					return false;
+				// tip から外向きへ進んだ先が相手の区間 [0, depth] に入っているか
+				// （相手が tip を越えて続いている＝この端は伸ばさない）。
+				return (heading > 0.0) ? (along > -kGroundBeamMergeTol &&
+										  along < other.depth - kGroundBeamMergeTol)
+									   : (along > kGroundBeamMergeTol &&
+										  along < other.depth + kGroundBeamMergeTol);
+			};
+			return std::ranges::any_of(others, continuesPast);
+		};
 
 		// 端 tip から外向き (dx, dy) へ進んで、最初に外形の辺を横切るまでの距離。
 		// kGroundBeamEndReach を越えるものは「外形の縁で止まっていない端」とみなして 0 を返す
@@ -2364,8 +2402,10 @@ namespace HomeskzIfcImport::parse
 			return best;
 		};
 
-		const double back = reachToBoundary(start, -axis.x, -axis.y);
-		const double forward = reachToBoundary(end, axis.x, axis.y);
+		const double back =
+			abuttingBeam(start, -axis.x, -axis.y) ? 0.0 : reachToBoundary(start, -axis.x, -axis.y);
+		const double forward =
+			abuttingBeam(end, axis.x, axis.y) ? 0.0 : reachToBoundary(end, axis.x, axis.y);
 		if (back <= 0.0 && forward <= 0.0)
 			return result;
 
@@ -2433,7 +2473,7 @@ namespace HomeskzIfcImport::parse
 				}
 			}
 			slabs[best].modifiers.push_back(
-				extendModifierEndsToBoundary(modifier, slabs[best].boundary));
+				extendModifierEndsToBoundary(modifier, slabs[best].boundary, modifiers));
 		}
 	}
 

@@ -1460,27 +1460,37 @@ TEST(ground_beam_ends_snap_to_the_slab_edge)
 
 	// (1) 両端が 75mm 手前で止まっている → どちらも縁まで伸びる。
 	const core::ModifierCommand shortBoth = extendModifierEndsToBoundary(
-		groundBeam(core::Vec3{75.0, 1000.0, -240.0}, 0.0, 5850.0), boundary);
+		groundBeam(core::Vec3{75.0, 1000.0, -240.0}, 0.0, 5850.0), boundary, {});
 	CHECK(near(shortBoth.origin.x, 0.0));
 	CHECK(near(shortBoth.depth, 6000.0));
 
 	// (2) すでに縁に届いている端は動かさない（伸ばすと底盤の外へはみ出す）。
 	const core::ModifierCommand exact = extendModifierEndsToBoundary(
-		groundBeam(core::Vec3{0.0, 1000.0, -240.0}, 0.0, 6000.0), boundary);
+		groundBeam(core::Vec3{0.0, 1000.0, -240.0}, 0.0, 6000.0), boundary, {});
 	CHECK(near(exact.origin.x, 0.0));
 	CHECK(near(exact.depth, 6000.0));
 
 	// (3) 底盤の中ほどで終わっている端は動かさない（縁が kGroundBeamEndReach より遠い）。
 	const core::ModifierCommand inside = extendModifierEndsToBoundary(
-		groundBeam(core::Vec3{2000.0, 1000.0, -240.0}, 0.0, 2000.0), boundary);
+		groundBeam(core::Vec3{2000.0, 1000.0, -240.0}, 0.0, 2000.0), boundary, {});
 	CHECK(near(inside.origin.x, 2000.0));
 	CHECK(near(inside.depth, 2000.0));
 
 	// (4) 片方だけ手前で止まっている場合はその端だけ伸びる（-90 度＝-Y 方向）。
 	const core::ModifierCommand oneEnd = extendModifierEndsToBoundary(
-		groundBeam(core::Vec3{3000.0, 2000.0, -240.0}, -90.0, 1925.0), boundary);
+		groundBeam(core::Vec3{3000.0, 2000.0, -240.0}, -90.0, 1925.0), boundary, {});
 	CHECK(near(oneEnd.origin.y, 2000.0));
 	CHECK(near(oneEnd.depth, 2000.0));
+
+	// (5) **別の地中梁が続いている端は伸ばさない**（伸ばすと隣へ食い込むだけで縁へは
+	// 近づかない。実機で 75mm ぶん隣の梁と重なった）。同じ軸線上で、始端 75 から反対向きへ
+	// 続く隣を置く。
+	const std::vector<core::ModifierCommand> neighbour = {
+		groundBeam(core::Vec3{75.0, 1000.0, -240.0}, 180.0, 1000.0)};
+	const core::ModifierCommand abutted = extendModifierEndsToBoundary(
+		groundBeam(core::Vec3{75.0, 1000.0, -240.0}, 0.0, 5850.0), boundary, neighbour);
+	CHECK(near(abutted.origin.x, 75.0)); // 隣が続く始端は動かない
+	CHECK(near(abutted.depth, 5925.0));	 // 反対の終端だけ縁（6000）まで伸びる
 }
 
 TEST(ground_beams_of_the_real_fixtures_land_on_slabs)

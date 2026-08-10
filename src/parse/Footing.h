@@ -360,8 +360,14 @@ namespace HomeskzIfcImport::parse
 	// 届いている地中梁もあり（同じ物件で壁芯止まりと外面止まりが混在する）、一律に足すと
 	// そちらが底盤の外へはみ出す。縁が kGroundBeamEndReach より遠い端は伸ばさない
 	// （底盤の中ほどで終わっている地中梁が対象外になる）。
-	core::ModifierCommand extendModifierEndsToBoundary(const core::ModifierCommand& modifier,
-													   const std::vector<core::Vec2>& boundary);
+	//
+	// **別の地中梁が続いている端も伸ばさない**（others に全地中梁を渡す）。伸ばすと隣の梁へ
+	// 食い込むだけで、外形の縁へは近づかない——実機で 75mm ぶん隣と重なった。立上りの
+	// collinearAbutment（同一直線の隣がある端は延長しない）と同じ考え方。
+	core::ModifierCommand
+	extendModifierEndsToBoundary(const core::ModifierCommand& modifier,
+								 const std::vector<core::Vec2>& boundary,
+								 const std::vector<core::ModifierCommand>& others);
 
 	// 地中梁を、平面外形が最も重なる底盤の modifiers へ振り分ける（Python 版
 	// _attach_ground_beam_modifiers）。代表点（重心・各頂点・各辺の中点）が外形内に入る数が
