@@ -1581,6 +1581,91 @@ namespace HomeskzIfcImport::parse
 		return extended;
 	}
 
+	std::vector<WallCommand> extendDeeperCollinearEnds(const std::vector<WallCommand>& walls)
+	{
+		const std::size_t n = walls.size();
+		std::vector<WallCommand> result = walls;
+		for (std::size_t i = 0; i < n; ++i)
+		{
+			const WallCommand& wall = walls[i];
+			const double length = std::hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+			if (length <= 0.0)
+				continue;
+			const double ux = (wall.end.x - wall.start.x) / length;
+			const double uy = (wall.end.y - wall.start.y) / length;
+
+			// 端ごとに「そこで一直線の線が続いていて、自分が深いほう」かを見る。
+			for (int side = 0; side < 2; ++side)
+			{
+				const bool atStart = (side == 0);
+				const Vec2 tip = atStart ? wall.start : wall.end;
+				// 端から外側を向く単位ベクトル。
+				const double ox = atStart ? -ux : ux;
+				const double oy = atStart ? -uy : uy;
+
+				// (1) この端が同一直線上の隣に「越えられている」か（線が続いているか）を見て、
+				//     続いているなら自分が深いほう（下端が低い。同値なら添字が小さいほう）か。
+				bool lineContinues = false;
+				bool deepest = true;
+				for (std::size_t j = 0; j < n && deepest; ++j)
+				{
+					if (j == i || walls[j].layer != wall.layer)
+						continue;
+					double lo = 0.0;
+					double hi = 0.0;
+					if (!wallsOnSameLine(wall, walls[j], lo, hi))
+						continue;
+					// 隣が端を越えて続いているか（始端側は 0 より手前・終端側は壁芯長より先）。
+					const bool beyond =
+						atStart ? (lo < -kWallMergeDistTol) : (hi > length + kWallMergeDistTol);
+					if (!beyond)
+						continue;
+					// 天端が違う隣は「1 本に見せたい線」ではない（低い側の端部は閉じる）。
+					if (std::abs(wall.topBound.offset - walls[j].topBound.offset) >
+						kWallMergeDistTol)
+						continue;
+					lineContinues = true;
+					const double mine = wall.bottomBound.offset;
+					const double theirs = walls[j].bottomBound.offset;
+					if (theirs < mine - kWallMergeDistTol ||
+						(std::abs(theirs - mine) <= kWallMergeDistTol && j < i))
+						deepest = false;
+				}
+				if (!lineContinues || !deepest)
+					continue;
+
+				// (2) その端が直交する立上りの**壁芯上**にあるか（＝そこで止まっている）。
+				//     あれば相手の半壁厚のうち最大ぶん伸ばして、壁芯を越えさせる。
+				double reach = 0.0;
+				for (std::size_t j = 0; j < n; ++j)
+				{
+					if (j == i || walls[j].layer != wall.layer)
+						continue;
+					Vec2 point;
+					bool aAtEnd = false;
+					bool bAtEnd = false;
+					if (!wallIntersection(wall, walls[j], point, aAtEnd, bAtEnd))
+						continue; // 平行（同一直線の隣）はここで落ちる
+					// 端そのもの（丸め誤差ぶん）で交わっている場合だけが対象。半壁厚の許容
+					// （wallPointAtEnd）ではなく厳密に見る——相手の外面まで伸びている立上りを
+					// さらに伸ばさないため。
+					if (std::hypot(point.x - tip.x, point.y - tip.y) > kWallEndpointTol)
+						continue;
+					reach = std::max(reach, walls[j].thickness / 2.0);
+				}
+				if (reach <= 0.0)
+					continue;
+
+				const Vec2 moved{tip.x + (ox * reach), tip.y + (oy * reach)};
+				if (atStart)
+					result[i].start = moved;
+				else
+					result[i].end = moved;
+			}
+		}
+		return result;
+	}
+
 	std::vector<WallOpening> collectWallOpenings(const Model& model, const Vec2& center)
 	{
 		std::vector<WallOpening> openings;
@@ -1737,28 +1822,13 @@ namespace HomeskzIfcImport::parse
 				return makeCommand(a, b, type, capped);
 			};
 
-			// 同じ通し壁に同じ交点で何本の stem がすでに取り付いたか（下の makeT が使う）。
-			std::map<std::size_t, std::size_t> stemsPerThrough;
-
 			// T 結合。stem（端点側＝延長される壁）を a、through（通し壁）を b にする。
-			//
-			// 【同じ通し壁の同じ交点に 2 本目が取り付くときは Auto にする】十字を切った両側の
-			// ように **同じ通し壁の同じ交点へ 2 本の stem が取り付く**と、実機では
-			// **JoinWalls が両方 true を返すのに、図面では先に実行した 1 本だけが結合されて
-			// 見えた**（拒否件数は増えない。ROADMAP.md M10）。
-			//
-			// まず「通し壁側のピック点が 2 件とも同じ点だから同じ結合と見なされている」と疑って
-			// 2 本目を通し壁の反対の端点方向へ寄せてみたが、**実機で描画は変わらなかった**。
-			// ピック点では区別されないので、2 本目は `kAutoWallJoin`（ピック点を無視して VW に
-			// 種別を判断させる）で通す。1 本目は従来どおり T なので、**交点に stem が 1 本だけの
-			// 既存の T 結合の引数は変わらない**（それらは実機で正しく結合されている）。
+			// **2 本目以降の stem を Auto にする判定は pushJoin 側**（実際に出す命令だけを
+			// 数えるため。同一直線で落とす stem を数えてしまうと 1 本目が Auto になる）。
 			const auto makeT = [&](std::size_t stem, std::size_t through)
 			{
 				const bool capped = std::abs(tops.at(stem) - tops.at(through)) > kWallMergeDistTol;
-				const std::size_t order = stemsPerThrough[through]++;
-				const core::WallJoinType type =
-					(order == 0) ? core::WallJoinType::T : core::WallJoinType::Auto;
-				return makeCommand(stem, through, type, capped);
+				return makeCommand(stem, through, core::WallJoinType::T, capped);
 			};
 
 			// stem が T 結合する通し壁を選ぶ（最も直交する壁。同点なら天端が高いほう、
@@ -1800,13 +1870,25 @@ namespace HomeskzIfcImport::parse
 			// 拒否する——実データで「壁結合: 1 件を VW が拒否しました (T:1): (6370,1820)」の
 			// 正体がこれだった（ROADMAP.md M10）。同一直線上の突き合わせは結合ではなく
 			// 端部のキャップ（applyWallCaps の collinearAbutment）で 1 本に見せる。
+			//
+			// あわせて、**同じ通し壁の同じ交点へ 2 本目以降の stem が取り付く T 結合は Auto へ
+			// 落とす**。明示的な T では実機で **JoinWalls が両方 true を返すのに、図面では先に
+			// 実行した 1 本だけが結合されて見えた**（拒否件数は増えない）。通し壁側のピック点を
+			// 反対側へ寄せて区別させる案は実機で描画が変わらず外れたので、`kAutoWallJoin`
+			// （ピック点を無視して VW に種別を判断させる）で通す。1 本目は従来どおり T なので、
+			// **交点に stem が 1 本だけの既存の T 結合の引数は変わらない**（ROADMAP.md M10）。
+			// 数えるのは**実際に出した命令だけ**（同一直線で落とす stem を数えると 1 本目が
+			// Auto になってしまう）。
+			std::map<std::size_t, std::size_t> stemsPerThrough;
 			const auto pushJoin =
-				[&](std::vector<core::WallJoinCommand>& into, const core::WallJoinCommand& cmd)
+				[&](std::vector<core::WallJoinCommand>& into, core::WallJoinCommand cmd)
 			{
 				double lo = 0.0;
 				double hi = 0.0;
 				if (wallsOnSameLine(walls[cmd.a], walls[cmd.b], lo, hi))
 					return;
+				if (cmd.joinType == core::WallJoinType::T && stemsPerThrough[cmd.b]++ > 0)
+					cmd.joinType = core::WallJoinType::Auto;
 				into.push_back(cmd);
 			};
 
@@ -1829,35 +1911,60 @@ namespace HomeskzIfcImport::parse
 			{
 				// 通し壁の無い端点コーナー: 天端高さ降順ではじめの 2 本を L、それ以降を T
 				// （はじめの 2 本＝バックボーンへ突き当てる）。
-				//
-				// **L の相手は「root と同一直線でない最初の 1 本」にする。** 素直に 2 番目を
-				// 採ると、root と同一直線に並ぶ立上り（一直線の突き合わせ）が相手に選ばれて
-				// L 結合が落ち（pushJoin が同一直線を捨てる）、残った直交する立上りが
-				// 「その点で終わっている壁」への T 結合になってしまう。T 結合は相手が通し壁で
-				// ないと成立しないので VW が拒否する——実データの拒否 1 件 (6370,1820) が
-				// これで、そこは本来 root と直交する立上りとの**隅（L）結合**（ROADMAP.md M10）。
 				std::vector<std::size_t> ordered = ends;
 				std::ranges::sort(ordered, byHeight);
-				const std::size_t root = ordered.front();
-				const auto notCollinearWithRoot = [&](std::size_t index)
+
+				// **ただし同一直線の 2 本がこの交点に集まっているなら、そこにコーナーは無い。**
+				// 上端が同じで下端だけ違って統合できなかった立上りが、直交する立上りの位置で
+				// 突き合わさるとこうなる（底盤厚が違う箇所。extendDeeperCollinearEnds 参照）。
+				// このとき「天端降順の先頭 2 本を L」にすると同一直線の 2 本が選ばれてしまい、
+				// コーナーにならないので VW が拒否する——実データの拒否 1 件 (6370,1820)。
+				//
+				// **深いほう（下端が低い。同値なら添字が小さいほう）を通し壁にして、直交する
+				// 立上りをそこへ T 結合する。** その通し壁は extendDeeperCollinearEnds が相手の
+				// 半壁厚だけ伸ばして交点を越えているので、T 結合が成立する。同一直線の隣とは
+				// 結合せず、端部のキャップ（applyWallCaps）で 1 本に見せる。
+				std::vector<std::size_t> collinearGroup;
+				for (const std::size_t index : ordered)
 				{
-					double lo = 0.0;
-					double hi = 0.0;
-					return !wallsOnSameLine(walls[root], walls[index], lo, hi);
-				};
-				const auto partner =
-					std::ranges::find_if(ordered | std::views::drop(1), notCollinearWithRoot);
-				std::vector<std::size_t> backbone{root};
-				if (partner != std::ranges::end(ordered | std::views::drop(1)))
-				{
-					pushJoin(junctionCommands, makeLX(*partner, root, core::WallJoinType::L));
-					backbone.push_back(*partner);
+					const auto sameLineAsIndex = [&](std::size_t other)
+					{
+						double lo = 0.0;
+						double hi = 0.0;
+						return other != index &&
+							   wallsOnSameLine(walls[index], walls[other], lo, hi);
+					};
+					if (std::ranges::any_of(ordered, sameLineAsIndex))
+						collinearGroup.push_back(index);
 				}
-				for (const std::size_t stem : ordered | std::views::drop(1))
+
+				if (!collinearGroup.empty())
 				{
-					if (std::ranges::find(backbone, stem) != backbone.end())
-						continue;
-					pushJoin(junctionCommands, makeT(stem, pickThrough(stem, backbone)));
+					std::size_t through = collinearGroup.front();
+					for (const std::size_t index : collinearGroup)
+					{
+						const double mine = walls[index].bottomBound.offset;
+						const double best = walls[through].bottomBound.offset;
+						if (mine < best - kWallMergeDistTol ||
+							(std::abs(mine - best) <= kWallMergeDistTol && index < through))
+							through = index;
+					}
+					for (const std::size_t stem : ordered)
+					{
+						if (stem == through)
+							continue;
+						// 同一直線の隣は pushJoin が落とす（結合ではなくキャップで見せる）。
+						pushJoin(junctionCommands, makeT(stem, through));
+					}
+				}
+				else
+				{
+					const std::size_t root = ordered.front();
+					if (ordered.size() >= 2)
+						pushJoin(junctionCommands, makeLX(ordered[1], root, core::WallJoinType::L));
+					const std::vector<std::size_t> backbone(ordered.begin(), ordered.begin() + 2);
+					for (const std::size_t stem : ordered | std::views::drop(2))
+						pushJoin(junctionCommands, makeT(stem, pickThrough(stem, backbone)));
 				}
 			}
 
@@ -1949,10 +2056,13 @@ namespace HomeskzIfcImport::parse
 			cmd.topBound = StoryBoundCommand{1, kLevelBeamTop, topAbs - beamTopAbs};
 			commands.push_back(std::move(cmd));
 		}
-		// 統合 → 自由端の延長 → 人通口の当てはめ（ROADMAP.md M10）。**人通口は統合・延長の
-		// 後**に当てはめるので、開口を跨いで統合された立上りも開口位置で正しく分割され、
-		// 開口境界の端は実寸法のまま（延長しない）になる。
-		std::vector<WallCommand> walls = extendFreeWallEnds(mergeWallCommands(commands), columns);
+		// 統合 → 自由端の延長 → 深いほうの延長 → 人通口の当てはめ（ROADMAP.md M10）。
+		// **人通口は統合・延長の後**に当てはめるので、開口を跨いで統合された立上りも開口位置で
+		// 正しく分割され、開口境界の端は実寸法のまま（延長しない）になる。深いほうの延長は
+		// 自由端の延長の**後**（自由端ではない端＝直交する立上りの壁芯で止まっている端が対象で、
+		// 自由端の延長とは対象が重ならない。parse/Footing.h 参照）。
+		std::vector<WallCommand> walls =
+			extendDeeperCollinearEnds(extendFreeWallEnds(mergeWallCommands(commands), columns));
 		const std::vector<WallOpening> openings = collectWallOpenings(model, center);
 		if (openings.empty())
 			return walls;

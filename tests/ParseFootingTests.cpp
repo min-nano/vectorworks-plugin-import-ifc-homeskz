@@ -56,6 +56,7 @@ using HomeskzIfcImport::parse::buildWallJoinCommands;
 using HomeskzIfcImport::parse::CLASS_FOUNDATION_SLAB;
 using HomeskzIfcImport::parse::CLASS_FOUNDATION_WALL;
 using HomeskzIfcImport::parse::Context;
+using HomeskzIfcImport::parse::extendDeeperCollinearEnds;
 using HomeskzIfcImport::parse::extendFreeWallEnds;
 using HomeskzIfcImport::parse::foundationSlabStyleName;
 using HomeskzIfcImport::parse::foundationWallStyleName;
@@ -1159,47 +1160,41 @@ TEST(a_lone_stem_keeps_the_kept_side_pick_on_the_through_wall)
 	CHECK(near(joins[0].pickB.y, 0.0));
 }
 
-TEST(corner_L_partner_skips_a_collinear_wall)
+TEST(collinear_pair_at_a_corner_makes_the_deeper_wall_the_through_wall)
 {
-	// 端点コーナーで **L の相手は root と同一直線でない最初の 1 本**にする。素直に 2 番目を
-	// 採ると同一直線の隣が選ばれて L が落ち（pushJoin が同一直線を捨てる）、残った直交する
-	// 立上りが「その点で終わっている壁」への T 結合になって VW に拒否される
-	// （実データの (6370,1820)。parse/Footing.cpp の端点コーナー）。
-	const std::vector<WallCommand> walls = {
-		wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}),	// [0] root
-		wall(Vec2{3000.0, 0.0}, Vec2{6000.0, 0.0}), // [1] [0] と同一直線
-		wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0}, 120.0, -100.0, -400.0)}; // [2] 直交・低い
-	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+	// 上端が同じで**下端だけ違う**（＝統合できない）立上りが、直交する立上りの位置で
+	// 突き合わさる形。そこにコーナーは無いので、**深いほうを通し壁**にして直交する立上りを
+	// T 結合する。通し壁は相手の半壁厚だけ伸びて交点を越える（実データの (6370,1820)。
+	// parse/Footing.h の extendDeeperCollinearEnds）。
+	const std::vector<WallCommand> input = {
+		wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 150.0, -100.0),	  // [0] 深い（下端 -100）
+		wall(Vec2{3000.0, 0.0}, Vec2{6000.0, 0.0}, 150.0, -70.0), // [1] 浅い・[0] と同一直線
+		wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0}, 150.0, -70.0)}; // [2] 直交
 
-	// 同一直線の [0]-[1] には結合を出さない。
-	for (const core::WallJoinCommand& join : joins)
-	{
-		const bool zeroOne = (join.a == 0 && join.b == 1) || (join.a == 1 && join.b == 0);
-		CHECK(!zeroOne);
-	}
-	// L は [0] と [2]（低い [2] が a・高い [0] が b で capped）。
-	std::size_t lCount = 0;
-	for (const core::WallJoinCommand& join : joins)
-	{
-		if (join.joinType != core::WallJoinType::L)
-			continue;
-		++lCount;
-		CHECK_EQ(join.a, std::size_t{2});
-		CHECK_EQ(join.b, std::size_t{0});
-		CHECK(join.capped);
-	}
-	CHECK_EQ(lCount, std::size_t{1});
-	// 同一直線だった [1] は、直交する [2] へ T 結合する（バックボーンは {[0], [2]}）。
-	std::size_t tCount = 0;
-	for (const core::WallJoinCommand& join : joins)
-	{
-		if (join.joinType != core::WallJoinType::T)
-			continue;
-		++tCount;
-		CHECK_EQ(join.a, std::size_t{1});
-		CHECK_EQ(join.b, std::size_t{2});
-	}
-	CHECK_EQ(tCount, std::size_t{1});
+	// (1) 深いほう [0] が直交壁 [2] の半壁厚（75mm）だけ伸びる。浅い [1] と [2] は動かない。
+	const std::vector<WallCommand> walls = extendDeeperCollinearEnds(input);
+	CHECK(near(walls[0].end.x, 3075.0));
+	CHECK(near(walls[1].start.x, 3000.0));
+	CHECK(near(walls[2].end.y, 3000.0));
+
+	// (2) 結合は「[2] → [0]」の T 1 件だけ（同一直線の [0]-[1] は結合しない）。
+	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+	CHECK_EQ(joins.size(), std::size_t{1});
+	if (joins.empty())
+		return;
+	CHECK(joins[0].joinType == core::WallJoinType::T);
+	CHECK_EQ(joins[0].a, std::size_t{2}); // stem＝直交する立上り
+	CHECK_EQ(joins[0].b, std::size_t{0}); // through＝深いほう
+}
+
+TEST(deeper_extension_leaves_a_plain_corner_alone)
+{
+	// 同一直線の隣が無い普通のコーナーは伸ばさない（伸ばすとコーナーが T になってしまう）。
+	const std::vector<WallCommand> input = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}),
+											wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0})};
+	const std::vector<WallCommand> walls = extendDeeperCollinearEnds(input);
+	CHECK(near(walls[0].end.x, 3000.0));
+	CHECK(near(walls[1].start.y, 0.0));
 }
 
 TEST(x_joins_are_emitted_last)
@@ -1257,9 +1252,11 @@ TEST(join_ignores_parallel_and_collinear_walls)
 TEST(join_three_walls_at_a_corner_emits_L_then_T)
 {
 	// 3 本が 1 つの端点コーナーに集まる → はじめの 2 本を L、残りを T（バックボーンへ）。
+	// **互いに同一直線でない** 3 本にする（同一直線の組があるとそこに線が続いている＝
+	// コーナーではないので、深いほうを通し壁にする別の規則が働く。上のテスト参照）。
 	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}),
 											wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0}),
-											wall(Vec2{3000.0, 0.0}, Vec2{3000.0, -3000.0})};
+											wall(Vec2{3000.0, 0.0}, Vec2{5121.0, 2121.0})};
 	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
 
 	CHECK_EQ(joins.size(), std::size_t{2});
