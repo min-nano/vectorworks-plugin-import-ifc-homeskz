@@ -1811,31 +1811,23 @@ namespace HomeskzIfcImport::parse
 
 			// T 結合。stem（端点側＝延長される壁）を a、through（通し壁）を b にする。
 			//
-			// 【2 本目以降の stem は通し壁のピック点を逆側へ寄せる】十字を切った両側のように、
-			// **同じ通し壁の同じ交点へ 2 本の stem が取り付く**とき、通し壁のピック点が
-			// どちらの結合でも同じ点になる（交点が通し壁の中ほどなら「残す側」が同じ側になる）。
-			// 実機ではこのとき **JoinWalls が両方 true を返すのに、図面では先の 1 本だけが
-			// 結合されて見えた**（ROADMAP.md M10）。ピック点は「どの端を結合するか」を指す
-			// 引数なので、同じ点を渡した 2 件が同じ結合と見なされて後の 1 件が落ちている疑いが
-			// 濃い。そこで 2 本目以降は通し壁の反対の端点方向へ寄せて、**別の結合として
-			// 区別できる**ようにする。1 本目は従来どおり「残す側」なので、既存の T 結合
-			// （交点に stem が 1 本だけ）の引数は 1 ビットも変わらない。
+			// 【同じ通し壁の同じ交点に 2 本目が取り付くときは Auto にする】十字を切った両側の
+			// ように **同じ通し壁の同じ交点へ 2 本の stem が取り付く**と、実機では
+			// **JoinWalls が両方 true を返すのに、図面では先に実行した 1 本だけが結合されて
+			// 見えた**（拒否件数は増えない。ROADMAP.md M10）。
+			//
+			// まず「通し壁側のピック点が 2 件とも同じ点だから同じ結合と見なされている」と疑って
+			// 2 本目を通し壁の反対の端点方向へ寄せてみたが、**実機で描画は変わらなかった**。
+			// ピック点では区別されないので、2 本目は `kAutoWallJoin`（ピック点を無視して VW に
+			// 種別を判断させる）で通す。1 本目は従来どおり T なので、**交点に stem が 1 本だけの
+			// 既存の T 結合の引数は変わらない**（それらは実機で正しく結合されている）。
 			const auto makeT = [&](std::size_t stem, std::size_t through)
 			{
 				const bool capped = std::abs(tops.at(stem) - tops.at(through)) > kWallMergeDistTol;
-				core::WallJoinCommand cmd =
-					makeCommand(stem, through, core::WallJoinType::T, capped);
 				const std::size_t order = stemsPerThrough[through]++;
-				if (order % 2 == 1)
-				{
-					// 「残す側」と逆の端点方向へ寄せる（a / b の入れ替えは T では起きない）。
-					const double d1 = std::hypot(walls[through].start.x - point.x,
-												 walls[through].start.y - point.y);
-					const double d2 =
-						std::hypot(walls[through].end.x - point.x, walls[through].end.y - point.y);
-					cmd.pickB = sidePick(walls[through], point, pickOffset, d2 < d1);
-				}
-				return cmd;
+				const core::WallJoinType type =
+					(order == 0) ? core::WallJoinType::T : core::WallJoinType::Auto;
+				return makeCommand(stem, through, type, capped);
 			};
 
 			// stem が T 結合する通し壁を選ぶ（最も直交する壁。同点なら天端が高いほう、
@@ -1870,6 +1862,23 @@ namespace HomeskzIfcImport::parse
 				return best;
 			};
 
+			// **同一直線上の 2 本には結合を出さない。** 平行な立上りは wallIntersection が
+			// 交点を作らないので普段は候補にならないが、**第 3 の壁が作った交点**には同じ
+			// ジャンクションとして入ってくる（例: 一直線に並ぶ 2 本の突き合わせ位置を別の
+			// 立上りが横切る）。そこへ L / T 結合を出すと、コーナーにならないので VW が
+			// 拒否する——実データで「壁結合: 1 件を VW が拒否しました (T:1): (6370,1820)」の
+			// 正体がこれだった（ROADMAP.md M10）。同一直線上の突き合わせは結合ではなく
+			// 端部のキャップ（applyWallCaps の collinearAbutment）で 1 本に見せる。
+			const auto pushJoin =
+				[&](std::vector<core::WallJoinCommand>& into, const core::WallJoinCommand& cmd)
+			{
+				double lo = 0.0;
+				double hi = 0.0;
+				if (wallsOnSameLine(walls[cmd.a], walls[cmd.b], lo, hi))
+					return;
+				into.push_back(cmd);
+			};
+
 			std::vector<core::WallJoinCommand> junctionCommands;
 			if (!interiors.empty())
 			{
@@ -1879,11 +1888,11 @@ namespace HomeskzIfcImport::parse
 				std::ranges::sort(ordered, byHeight);
 				const std::size_t root = ordered.front();
 				for (const std::size_t other : ordered | std::views::drop(1))
-					junctionCommands.push_back(makeLX(other, root, core::WallJoinType::X));
+					pushJoin(junctionCommands, makeLX(other, root, core::WallJoinType::X));
 				std::vector<std::size_t> stems = ends;
 				std::ranges::sort(stems, byHeight);
 				for (const std::size_t stem : stems)
-					junctionCommands.push_back(makeT(stem, pickThrough(stem, interiors)));
+					pushJoin(junctionCommands, makeT(stem, pickThrough(stem, interiors)));
 			}
 			else
 			{
@@ -1893,10 +1902,10 @@ namespace HomeskzIfcImport::parse
 				std::ranges::sort(ordered, byHeight);
 				const std::size_t root = ordered.front();
 				if (ordered.size() >= 2)
-					junctionCommands.push_back(makeLX(ordered[1], root, core::WallJoinType::L));
+					pushJoin(junctionCommands, makeLX(ordered[1], root, core::WallJoinType::L));
 				const std::vector<std::size_t> backbone(ordered.begin(), ordered.begin() + 2);
 				for (const std::size_t stem : ordered | std::views::drop(2))
-					junctionCommands.push_back(makeT(stem, pickThrough(stem, backbone)));
+					pushJoin(junctionCommands, makeT(stem, pickThrough(stem, backbone)));
 			}
 
 			// capped=false（天端の高い立上りどうし）を先に、capped=true を後に並べる

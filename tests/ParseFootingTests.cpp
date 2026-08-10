@@ -1160,23 +1160,17 @@ TEST(crossing_walls_are_split_so_no_X_join_remains)
 	CHECK(near(walls[1].thickness, 120.0));
 	CHECK(near(walls[1].topBound.offset, -190.0));
 
-	// 切ったあとは X が出ず、両側 → バックボーンの T 結合 2 件になる。
+	// 切ったあとは X が出ず、両側 → バックボーンの結合 2 件になる。
 	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
 	CHECK_EQ(joins.size(), std::size_t{2});
-	for (const core::WallJoinCommand& join : joins)
-	{
-		CHECK(join.joinType == core::WallJoinType::T);
-		CHECK_EQ(join.b, std::size_t{2}); // through＝バックボーン
-	}
 	if (joins.size() != 2)
 		return;
-	// 同じ通し壁の同じ交点へ 2 本が取り付くので、**通し壁のピック点は別の点**にする
-	// （同じ点だと VW が同じ結合と見なして後の 1 件を落とす。parse/Footing.cpp の makeT）。
-	// 交点は縦の壁の中ほどなので、反対の端点方向へ寄れば符号が逆になる。
-	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickB, joins[1].pickB));
-	CHECK(near(joins[0].pickB.x, 3000.0));
-	CHECK(near(joins[1].pickB.x, 3000.0));
-	CHECK(joins[0].pickB.y * joins[1].pickB.y < 0.0);
+	for (const core::WallJoinCommand& join : joins)
+		CHECK_EQ(join.b, std::size_t{2}); // through＝バックボーン
+	// **1 本目は T・2 本目は Auto**（同じ通し壁の同じ交点へ 2 本が取り付くと、明示的な T では
+	// 先に実行した 1 件だけが図面に効いた。parse/Footing.cpp の makeT）。
+	CHECK(joins[0].joinType == core::WallJoinType::T);
+	CHECK(joins[1].joinType == core::WallJoinType::Auto);
 }
 
 TEST(a_lone_stem_keeps_the_kept_side_pick_on_the_through_wall)

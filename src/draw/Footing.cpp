@@ -469,6 +469,8 @@ namespace HomeskzIfcImport::draw
 				return kLWallJoin;
 			case core::WallJoinType::X:
 				return kXWallJoin;
+			case core::WallJoinType::Auto:
+				return kAutoWallJoin;
 			}
 			return kLWallJoin;
 		}
@@ -484,6 +486,8 @@ namespace HomeskzIfcImport::draw
 				return "L";
 			case core::WallJoinType::X:
 				return "X";
+			case core::WallJoinType::Auto:
+				return "Auto";
 			}
 			return "?";
 		}
@@ -592,11 +596,10 @@ namespace HomeskzIfcImport::draw
 		std::size_t refused = 0; // JoinWalls が false を返した件数（診断用）
 		std::map<core::WallJoinType, std::size_t> refusedByType;
 		std::vector<core::Vec2> refusedAt; // 拒否された結合の交点（診断用）
-		// **成功を返したのに幾何が動かなかった**結合の交点（診断用）。結合が効けば a の壁は
-		// 相手の面まで詰められる／伸ばされるので、壁芯の端点が動く。動かないなら「VW は
-		// true を返したが何もしていない」——実機で下側の立上りだけ結合されないように見えた
-		// 症状がこれかを確かめる（ROADMAP.md M10）。
-		std::vector<core::Vec2> inertAt;
+		// 【測ってみて外した診断】「結合の前後で a の壁の壁芯端点が動いたか」も測ってみたが、
+		// **これは結合が効いたかどうかを測れない**。実機では 55 件中 48 件が「動かなかった」のに
+		// T 字の取り合いは正しく描かれていた——**VW は結合を記録しても壁芯の端点は変えず、
+		// 表示のときに取り合いを解決する**（ROADMAP.md M10）。同じ測り方を足し直さない。
 		for (const core::WallJoinCommand& join : document.wallJoins)
 		{
 			if (progress.cancelled())
@@ -609,27 +612,12 @@ namespace HomeskzIfcImport::draw
 			if (first == table.end() || second == table.end())
 				continue;
 
-			VWPoint2D beforeStart;
-			VWPoint2D beforeEnd;
-			VWWallObj(first->second).GetPoints(beforeStart, beforeEnd);
-
 			// ピック点は解析側が算出済みの「残す側」の点をそのまま渡す（ヘッダ冒頭
 			// 「壁結合の手順」）。結合できたかは戻り値で見る（失敗しても他は続ける）。
 			if (gSDK->JoinWalls(first->second, second->second, WorldPt(join.pickA.x, join.pickA.y),
 								WorldPt(join.pickB.x, join.pickB.y), JoinModifier(join.joinType),
 								static_cast<Boolean>(join.capped), kJoinShowAlerts))
-			{
 				++joined;
-				VWPoint2D afterStart;
-				VWPoint2D afterEnd;
-				VWWallObj(first->second).GetPoints(afterStart, afterEnd);
-				const bool moved = std::abs(afterStart.x - beforeStart.x) > kSurveyPointTol ||
-								   std::abs(afterStart.y - beforeStart.y) > kSurveyPointTol ||
-								   std::abs(afterEnd.x - beforeEnd.x) > kSurveyPointTol ||
-								   std::abs(afterEnd.y - beforeEnd.y) > kSurveyPointTol;
-				if (!moved)
-					inertAt.push_back(join.point);
-			}
 			else
 			{
 				++refused;
@@ -695,10 +683,6 @@ namespace HomeskzIfcImport::draw
 			if (refused > 0)
 				note += "\n壁結合: " + std::to_string(refused) + " 件を VW が拒否しました（" +
 						breakdownOf(refusedByType) + "）: " + pointsOf(refusedAt) + "。";
-			if (!inertAt.empty())
-				note += "\n壁結合: " + std::to_string(inertAt.size()) +
-						" 件は成功を返しましたが立上りが動きませんでした: " + pointsOf(inertAt) +
-						"。";
 			if (!added.empty())
 			{
 				std::size_t total = 0;
