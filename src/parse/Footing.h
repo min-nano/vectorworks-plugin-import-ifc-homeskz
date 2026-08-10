@@ -99,6 +99,15 @@ namespace HomeskzIfcImport::parse
 	// 側を取り違えるので、控えめに寄せる。
 	inline constexpr double kPickOffsetFrac = 0.4;
 
+	// 地中梁の端部を底盤の外形へ伸ばす上限（mm）。**底盤の外形は立上りの壁芯から外面
+	// （壁心 + 半壁厚）まで広げてある**（alignSlabsToWallFaces）のに、地中梁の端は壁芯で
+	// 止まっているものがあり、底盤の角と地中梁の角がずれる（ローカル確認で判明。
+	// ROADMAP.md M10）。そこで端を外形の縁まで伸ばすが、**縁がこの距離より遠い端は伸ばさない**
+	// ——底盤の中ほどで終わっている地中梁を伸ばしてしまわないため。実データの立上り厚は
+	// 120 / 150 / 300mm（半壁厚は最大 150mm）なので、それを覆いつつ 1 モジュール（455mm）には
+	// 遠く届かない値にする。
+	inline constexpr double kGroundBeamEndReach = 200.0;
+
 	// 地中梁のマージ許容値（Python 版 _GROUND_BEAM_MERGE_TOL / …_ANGLE_TOL /
 	// …_PROFILE_TOL / …_AZIMUTH_TOL）。順に 距離（mm）・平行判定（sin 角）・断面キーの
 	// 丸め（mm）・方位角キーの丸め（度）。
@@ -340,6 +349,19 @@ namespace HomeskzIfcImport::parse
 	// 地中梁（台形プリズム）の平面外形＝断面の u 範囲を軸方向へ depth だけ掃引した矩形
 	// （Python 版 _modifier_footprint）。底盤への振り分け判定に使う。
 	std::vector<core::Vec2> modifierFootprint(const core::ModifierCommand& modifier);
+
+	// 地中梁の端部を底盤の外形の縁まで伸ばす（伸ばした命令を返す）。
+	//
+	// 【なぜ要るか】底盤の外形は立上りの**外面**（壁心 + 半壁厚）まで広げてあるのに
+	// （alignSlabsToWallFaces）、ホームズ君 IFC の地中梁は端が立上りの**壁芯**で止まっている
+	// ものがあり、底盤の角と地中梁の角がずれる（ローカル確認で判明。ROADMAP.md M10）。
+	//
+	// **一律に半壁厚を足すのではなく、外形の縁まで伸ばす。** 実データには端が最初から外面まで
+	// 届いている地中梁もあり（同じ物件で壁芯止まりと外面止まりが混在する）、一律に足すと
+	// そちらが底盤の外へはみ出す。縁が kGroundBeamEndReach より遠い端は伸ばさない
+	// （底盤の中ほどで終わっている地中梁が対象外になる）。
+	core::ModifierCommand extendModifierEndsToBoundary(const core::ModifierCommand& modifier,
+													   const std::vector<core::Vec2>& boundary);
 
 	// 地中梁を、平面外形が最も重なる底盤の modifiers へ振り分ける（Python 版
 	// _attach_ground_beam_modifiers）。代表点（重心・各頂点・各辺の中点）が外形内に入る数が

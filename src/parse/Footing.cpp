@@ -2320,6 +2320,61 @@ namespace HomeskzIfcImport::parse
 				Vec2{end.x + (width.x * uLo), end.y + (width.y * uLo)}};
 	}
 
+	core::ModifierCommand extendModifierEndsToBoundary(const core::ModifierCommand& modifier,
+													   const std::vector<Vec2>& boundary)
+	{
+		core::ModifierCommand result = modifier;
+		if (modifier.profile.empty() || modifier.depth <= 0.0 || boundary.size() < 3)
+			return result;
+
+		const Vec2 axis = groundBeamAxisDir(modifier);
+		const Vec2 start{modifier.origin.x, modifier.origin.y};
+		const Vec2 end{start.x + (axis.x * modifier.depth), start.y + (axis.y * modifier.depth)};
+
+		// 端 tip から外向き (dx, dy) へ進んで、最初に外形の辺を横切るまでの距離。
+		// kGroundBeamEndReach を越えるものは「外形の縁で止まっていない端」とみなして 0 を返す
+		// （梁が底盤の中ほどで終わっている場合に伸ばしてしまわないため）。
+		const auto reachToBoundary = [&boundary](const Vec2& tip, double dx, double dy)
+		{
+			double best = 0.0;
+			bool found = false;
+			for (std::size_t i = 0; i < boundary.size(); ++i)
+			{
+				const Vec2& p = boundary[i];
+				const Vec2& q = boundary[(i + 1) % boundary.size()];
+				const Vec2 edge = q - p;
+				// 光線 tip + t*(dx,dy) と辺 p + u*edge の交点（t ≥ 0・0 ≤ u ≤ 1）。
+				const double denominator = (dx * edge.y) - (dy * edge.x);
+				if (std::abs(denominator) <= kSlabAngleTol)
+					continue; // 平行
+				const double t =
+					(((p.x - tip.x) * edge.y) - ((p.y - tip.y) * edge.x)) / denominator;
+				const double u = (((p.x - tip.x) * dy) - ((p.y - tip.y) * dx)) / denominator;
+				if (t < -kSlabMergeTol || u < -kSlabMergeTol || u > 1.0 + kSlabMergeTol)
+					continue;
+				const double clamped = std::max(t, 0.0);
+				if (!found || clamped < best)
+				{
+					best = clamped;
+					found = true;
+				}
+			}
+			if (!found || best > kGroundBeamEndReach)
+				return 0.0;
+			return best;
+		};
+
+		const double back = reachToBoundary(start, -axis.x, -axis.y);
+		const double forward = reachToBoundary(end, axis.x, axis.y);
+		if (back <= 0.0 && forward <= 0.0)
+			return result;
+
+		result.origin =
+			core::Vec3{start.x - (axis.x * back), start.y - (axis.y * back), modifier.origin.z};
+		result.depth = modifier.depth + back + forward;
+		return result;
+	}
+
 	void attachGroundBeamModifiers(std::vector<SlabCommand>& slabs,
 								   const std::vector<core::ModifierCommand>& modifiers)
 	{
@@ -2377,7 +2432,8 @@ namespace HomeskzIfcImport::parse
 					}
 				}
 			}
-			slabs[best].modifiers.push_back(modifier);
+			slabs[best].modifiers.push_back(
+				extendModifierEndsToBoundary(modifier, slabs[best].boundary));
 		}
 	}
 
