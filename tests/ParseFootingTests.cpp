@@ -1127,15 +1127,18 @@ TEST(join_crossing_interiors_is_an_X_join)
 	CHECK(joins[0].joinType == core::WallJoinType::X);
 	// **十字は縦横 2 本の壁のまま**にして交差結合（X）で繋ぐ。分割して T 結合 2 つに
 	// 置き換えるのは別処理で、モデルとしても誤り（ROADMAP.md M10）。
-	CHECK_EQ(joins[0].a, std::size_t{0});
-	CHECK_EQ(joins[0].b, std::size_t{1});
+	// VW の X 結合は **a を交点で 2 本に分割し、b（load bearing wall）を丸ごと残す**ので、
+	// **バックボーン（天端が最も高い＝同点なら添字の小さい通し壁）を b にする**。
+	CHECK_EQ(joins[0].a, std::size_t{1});
+	CHECK_EQ(joins[0].b, std::size_t{0});
 	// ピック点は種別に関係なく「残す側」へ寄せた点（Python 版 `_kept_side_pick` と同じ。
 	// X 結合では VW が壁を詰めないので寄せは無害）。交点そのものは渡さない。
 	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickA, joins[0].point));
 	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickB, joins[0].point));
-	// 寄せる先は交点から遠い端点の方向で、壁芯上に乗る（横の壁は y=0・縦の壁は x=3000）。
-	CHECK(std::abs(joins[0].pickA.y - 0.0) < 1e-6);
-	CHECK(std::abs(joins[0].pickB.x - 3000.0) < 1e-6);
+	// 寄せる先は交点から遠い端点の方向で、それぞれの壁芯上に乗る
+	// （a＝縦の壁は x=3000・b＝横の壁は y=0）。
+	CHECK(std::abs(joins[0].pickA.x - 3000.0) < 1e-6);
+	CHECK(std::abs(joins[0].pickB.y - 0.0) < 1e-6);
 }
 
 TEST(a_lone_stem_keeps_the_kept_side_pick_on_the_through_wall)
@@ -1154,6 +1157,30 @@ TEST(a_lone_stem_keeps_the_kept_side_pick_on_the_through_wall)
 	// 交点 (4000,0) から遠い端点は始点 (0,0) 側なので、寄せ先は交点より小さい x。
 	CHECK(joins[0].pickB.x < 4000.0);
 	CHECK(near(joins[0].pickB.y, 0.0));
+}
+
+TEST(x_joins_are_emitted_last)
+{
+	// **X 結合はすべて最後**（VW の X 結合は a を分割するので、分割された壁のハンドルを
+	// 後の結合が使うと片方だけを相手にしてしまう。parse/Footing.cpp の末尾）。
+	// 横の通し壁が交差（内部）と両端の T 結合を持つ形で確かめる。
+	const std::vector<WallCommand> walls = {
+		wall(Vec2{0.0, 0.0}, Vec2{9000.0, 0.0}), // [0] 横の通し壁（交差＋両端 T）
+		wall(Vec2{4500.0, -3000.0}, Vec2{4500.0, 3000.0}), // [1] 交差する縦の壁
+		wall(Vec2{0.0, 0.0}, Vec2{0.0, 3000.0}),		   // [2] 左端に突き当たる
+		wall(Vec2{9000.0, 0.0}, Vec2{9000.0, 3000.0})};	   // [3] 右端に突き当たる
+	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
+
+	CHECK(joins.size() >= 2);
+	if (joins.size() < 2)
+		return;
+	// 最後の 1 件だけが X で、それより前に X は無い。
+	CHECK(joins.back().joinType == core::WallJoinType::X);
+	for (std::size_t i = 0; i + 1 < joins.size(); ++i)
+		CHECK(joins[i].joinType != core::WallJoinType::X);
+	// 分割されるのは a＝交差する縦の壁で、丸ごと残るのは b＝バックボーンの通し壁。
+	CHECK_EQ(joins.back().a, std::size_t{1});
+	CHECK_EQ(joins.back().b, std::size_t{0});
 }
 
 TEST(join_of_different_top_heights_caps_and_puts_the_lower_first)

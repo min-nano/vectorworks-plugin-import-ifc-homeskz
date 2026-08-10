@@ -1716,12 +1716,20 @@ namespace HomeskzIfcImport::parse
 
 			// L / X 結合。天端高さが違えば**低いほうを a**（高いほうへ結合）にして端部を
 			// 閉じる。同じ高さならルート（root）を a にして閉じない。
+			//
+			// **ただし X 結合（交差結合）だけは常に `other` を a にする。** VW の X 結合は
+			// 「**1 本目の壁を交点で 2 本に分割し、2 本目（load bearing wall）へ結合する**」
+			// という仕様（VW ヘルプ「X wall joins」: 両壁の長さは変わらない＝すでに交差して
+			// いる必要があり、1 本目が 2 本の壁に分かれる）。したがって a に渡した壁が分割され、
+			// b に渡した壁が丸ごと残る。**丸ごと残すべきはバックボーン**（天端が最も高い通し壁）
+			// なので、a＝other・b＝root にする。root は最も高いので、天端が違うときの
+			// 「低いほうを a」も同時に満たす（ROADMAP.md M10）。
 			const auto makeLX = [&](std::size_t other, std::size_t root, core::WallJoinType type)
 			{
 				const bool capped = std::abs(tops.at(other) - tops.at(root)) > kWallMergeDistTol;
 				std::size_t a = root;
 				std::size_t b = other;
-				if (capped && tops.at(other) < tops.at(root))
+				if (type == core::WallJoinType::X || (capped && tops.at(other) < tops.at(root)))
 				{
 					a = other;
 					b = root;
@@ -1840,6 +1848,25 @@ namespace HomeskzIfcImport::parse
 				{ return static_cast<int>(lhs.capped) < static_cast<int>(rhs.capped); });
 			commands.insert(commands.end(), junctionCommands.begin(), junctionCommands.end());
 		}
+
+		// **X 結合（交差結合）はすべて最後に回す。** VW の X 結合は 1 本目の壁を交点で 2 本に
+		// 分割する仕様なので（makeLX の doc コメント）、分割された壁の**ハンドルが古くなる**。
+		// 描画側は「命令インデックス → 壁ハンドル」の対応表で壁を引くため、X 結合より後に
+		// その壁を使う結合が残っていると、**分割された片方だけを相手にしてしまう**。実機で
+		// まさにこれが起きた: 交差する横の立上りは両端に T 結合を持ち、X 結合（交点）→
+		// T 結合（端）の順に実行されたため、**分割後の半分の壁が T 結合されて全長の壁は
+		// 結合されないまま**になった（ROADMAP.md M10）。X を最後に回せば、分割の時点で
+		// 他の結合はすべて全長の壁に対して済んでいる。
+		//
+		// 安定ソートなので X 以外の並び（ジャンクション順・capped 順）は変わらない。
+		std::ranges::stable_sort(
+			commands,
+			[](const core::WallJoinCommand& lhs, const core::WallJoinCommand& rhs)
+			{
+				const int lx = (lhs.joinType == core::WallJoinType::X) ? 1 : 0;
+				const int rx = (rhs.joinType == core::WallJoinType::X) ? 1 : 0;
+				return lx < rx;
+			});
 		return commands;
 	}
 

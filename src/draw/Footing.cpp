@@ -703,11 +703,13 @@ namespace HomeskzIfcImport::draw
 			}
 			if (!survey.unmatched.empty())
 			{
-				note +=
-					"\n壁結合: 命令に無い壁 " + std::to_string(survey.unmatched.size()) + " 本: ";
+				note += "\n壁結合: 命令と端点が一致しない壁 " +
+						std::to_string(survey.unmatched.size()) + " 本: ";
 				for (std::size_t i = 0; i < survey.unmatched.size() && i < 3; ++i)
 					note += (i == 0 ? "" : ", ") + PointText(survey.unmatched[i].first) + "-" +
 							PointText(survey.unmatched[i].second);
+				if (survey.unmatched.size() > 3)
+					note += " …ほか";
 				note += "。";
 			}
 			*outNote = note;
