@@ -421,14 +421,16 @@ namespace HomeskzIfcImport::core
 	// JoinModifierType（kTWallJoin=1 / kLWallJoin=2 / kXWallJoin=3 / kAutoWallJoin=4）と
 	// 一致させてあり、draw/Footing はそのまま JoinWalls へ渡す
 	// （Python 版 _JOIN_T / _JOIN_L / _JOIN_X。Auto は Python 版に無い）。
+	// T 字結合・隅（L）結合・交差（X）結合は VW の壁結合の 3 モードで、**交差結合は T 字結合
+	// 2 つとは別処理**。十字は縦横 2 本の壁のままにして X で繋ぐ（切って T 2 件に置き換えるのは
+	// モデルとして誤り。ROADMAP.md M10）。
 	enum class WallJoinType
 	{
 		T = 1, // 端点で突き当たる壁（stem）を通し壁（through）へ延長して繋ぐ
-		L = 2, // 端点どうしのコーナー
-		X = 3, // 内部どうしの十字（**実運用では出さない**。parse/Footing.h の
-		// splitWallsAtCrossings 参照——VW の X 結合は図面に壁を 1 本増やす）
+		L = 2, // 端点どうしのコーナー（隅結合）
+		X = 3, // 内部どうしの十字（交差結合）
 		Auto = 4, // ピック点を無視して VW に種別を判断させる（parse/Footing.cpp の makeT。
-		// 同じ通し壁の同じ交点に 2 本目が取り付くときだけ使う）
+		// 同じ通し壁の同じ交点に 2 本目の stem が取り付くときだけ使う）
 	};
 
 	// 交差する立上り（壁）2 本を結合する命令。Python 版 document.py の WallJoinCommand

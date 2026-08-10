@@ -76,7 +76,6 @@ using HomeskzIfcImport::parse::mergeWallCommands;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::modifierFootprint;
 using HomeskzIfcImport::parse::resolveSlabTopElevation;
-using HomeskzIfcImport::parse::splitWallsAtCrossings;
 using HomeskzIfcImport::parse::WallOpening;
 using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
@@ -1126,6 +1125,10 @@ TEST(join_crossing_interiors_is_an_X_join)
 	if (joins.empty())
 		return;
 	CHECK(joins[0].joinType == core::WallJoinType::X);
+	// **十字は縦横 2 本の壁のまま**にして交差結合（X）で繋ぐ。分割して T 結合 2 つに
+	// 置き換えるのは別処理で、モデルとしても誤り（ROADMAP.md M10）。
+	CHECK_EQ(joins[0].a, std::size_t{0});
+	CHECK_EQ(joins[0].b, std::size_t{1});
 	// ピック点は種別に関係なく「残す側」へ寄せた点（Python 版 `_kept_side_pick` と同じ。
 	// X 結合では VW が壁を詰めないので寄せは無害）。交点そのものは渡さない。
 	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickA, joins[0].point));
@@ -1133,44 +1136,6 @@ TEST(join_crossing_interiors_is_an_X_join)
 	// 寄せる先は交点から遠い端点の方向で、壁芯上に乗る（横の壁は y=0・縦の壁は x=3000）。
 	CHECK(std::abs(joins[0].pickA.y - 0.0) < 1e-6);
 	CHECK(std::abs(joins[0].pickB.x - 3000.0) < 1e-6);
-}
-
-TEST(crossing_walls_are_split_so_no_X_join_remains)
-{
-	// 十字は解析側で切る（VW の X 結合は交点で壁を切って図面に立上りを 1 本増やすため。
-	// parse/Footing.h「なぜ自分で切るのか」）。バックボーン＝天端の高いほうを残し、
-	// 低いほうを交点で 2 本へ分ける。分けた両側は端点で突き当たるので T 結合になる。
-	std::vector<WallCommand> walls = {
-		wall(Vec2{0.0, 0.0}, Vec2{6000.0, 0.0}, 120.0, -100.0, -190.0), // 低い（切られる）
-		wall(Vec2{3000.0, -3000.0}, Vec2{3000.0, 3000.0}, 120.0, -100.0,
-			 0.0)}; // 高い（バックボーン）
-
-	CHECK_EQ(splitWallsAtCrossings(walls), std::size_t{1});
-	CHECK_EQ(walls.size(), std::size_t{3});
-	if (walls.size() != 3)
-		return;
-	// 切られた 2 本（元の並びの位置に順で入る）と、そのまま残るバックボーン。
-	CHECK(HomeskzIfcImport::core::samePoint(walls[0].start, Vec2{0.0, 0.0}));
-	CHECK(HomeskzIfcImport::core::samePoint(walls[0].end, Vec2{3000.0, 0.0}));
-	CHECK(HomeskzIfcImport::core::samePoint(walls[1].start, Vec2{3000.0, 0.0}));
-	CHECK(HomeskzIfcImport::core::samePoint(walls[1].end, Vec2{6000.0, 0.0}));
-	CHECK(HomeskzIfcImport::core::samePoint(walls[2].start, Vec2{3000.0, -3000.0}));
-	CHECK(HomeskzIfcImport::core::samePoint(walls[2].end, Vec2{3000.0, 3000.0}));
-	// 断面・高さは元の立上りのまま（切っただけ）。
-	CHECK(near(walls[1].thickness, 120.0));
-	CHECK(near(walls[1].topBound.offset, -190.0));
-
-	// 切ったあとは X が出ず、両側 → バックボーンの結合 2 件になる。
-	const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
-	CHECK_EQ(joins.size(), std::size_t{2});
-	if (joins.size() != 2)
-		return;
-	for (const core::WallJoinCommand& join : joins)
-		CHECK_EQ(join.b, std::size_t{2}); // through＝バックボーン
-	// **1 本目は T・2 本目は Auto**（同じ通し壁の同じ交点へ 2 本が取り付くと、明示的な T では
-	// 先に実行した 1 件だけが図面に効いた。parse/Footing.cpp の makeT）。
-	CHECK(joins[0].joinType == core::WallJoinType::T);
-	CHECK(joins[1].joinType == core::WallJoinType::Auto);
 }
 
 TEST(a_lone_stem_keeps_the_kept_side_pick_on_the_through_wall)
@@ -1189,34 +1154,6 @@ TEST(a_lone_stem_keeps_the_kept_side_pick_on_the_through_wall)
 	// 交点 (4000,0) から遠い端点は始点 (0,0) 側なので、寄せ先は交点より小さい x。
 	CHECK(joins[0].pickB.x < 4000.0);
 	CHECK(near(joins[0].pickB.y, 0.0));
-}
-
-TEST(split_leaves_walls_alone_when_nothing_crosses_in_the_interior)
-{
-	// 端点で突き当たる T / コーナー L は切らない（通し壁が 1 本しか無い）。
-	std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{6000.0, 0.0}),
-									  wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0})};
-	CHECK_EQ(splitWallsAtCrossings(walls), std::size_t{0});
-	CHECK_EQ(walls.size(), std::size_t{2});
-}
-
-TEST(split_handles_a_wall_crossed_at_two_points)
-{
-	// 1 本が 2 か所で交差されたら 3 本へ分かれる（壁芯の始点から順に）。
-	std::vector<WallCommand> walls = {
-		wall(Vec2{0.0, 0.0}, Vec2{9000.0, 0.0}, 120.0, -100.0, -190.0),
-		wall(Vec2{6000.0, -3000.0}, Vec2{6000.0, 3000.0}, 120.0, -100.0, 0.0),
-		wall(Vec2{3000.0, -3000.0}, Vec2{3000.0, 3000.0}, 120.0, -100.0, 0.0)};
-
-	CHECK_EQ(splitWallsAtCrossings(walls), std::size_t{2});
-	CHECK_EQ(walls.size(), std::size_t{5});
-	if (walls.size() != 5)
-		return;
-	CHECK(HomeskzIfcImport::core::samePoint(walls[0].end, Vec2{3000.0, 0.0}));
-	CHECK(HomeskzIfcImport::core::samePoint(walls[1].start, Vec2{3000.0, 0.0}));
-	CHECK(HomeskzIfcImport::core::samePoint(walls[1].end, Vec2{6000.0, 0.0}));
-	CHECK(HomeskzIfcImport::core::samePoint(walls[2].start, Vec2{6000.0, 0.0}));
-	CHECK(HomeskzIfcImport::core::samePoint(walls[2].end, Vec2{9000.0, 0.0}));
 }
 
 TEST(join_of_different_top_heights_caps_and_puts_the_lower_first)
@@ -1295,36 +1232,6 @@ TEST(joins_reference_valid_walls_in_the_real_fixtures)
 			CHECK_EQ(again[i].a, joins[i].a);
 			CHECK_EQ(again[i].b, joins[i].b);
 			CHECK(again[i].joinType == joins[i].joinType);
-		}
-	}
-}
-
-TEST(splitting_crossings_removes_every_X_join_in_the_real_fixtures)
-{
-	// buildDocument の順序（splitWallsAtCrossings → buildWallJoinCommands）を通したら
-	// **X 結合は 1 件も残らない**。VW の X 結合が図面に立上りを増やしてしまうため、
-	// 十字は解析側で切って T 結合 2 件に置き換えるのが本移植の形（parse/Footing.h）。
-	// 切った本数ぶんだけ立上りが増え、切り方は決定的。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		Model const model = fixture(name, ok);
-		CHECK(ok);
-		const std::vector<WallCommand> original = buildWallCommands(model);
-
-		std::vector<WallCommand> walls = original;
-		const std::size_t added = splitWallsAtCrossings(walls);
-		CHECK_EQ(walls.size(), original.size() + added);
-
-		for (const core::WallJoinCommand& join : buildWallJoinCommands(walls))
-			CHECK(join.joinType != core::WallJoinType::X);
-
-		std::vector<WallCommand> again = original;
-		CHECK_EQ(splitWallsAtCrossings(again), added);
-		for (std::size_t i = 0; i < walls.size() && i < again.size(); ++i)
-		{
-			CHECK(HomeskzIfcImport::core::samePoint(again[i].start, walls[i].start));
-			CHECK(HomeskzIfcImport::core::samePoint(again[i].end, walls[i].end));
 		}
 	}
 }

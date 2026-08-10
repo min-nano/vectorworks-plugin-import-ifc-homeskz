@@ -631,6 +631,14 @@ namespace HomeskzIfcImport::draw
 			wallCount = after;
 		}
 
+		// 診断: 結合の後に**命令セットのどの立上りとも端点が一致しない壁**を拾う
+		// （SurveyWallsOnLayer）。**結合は壁芯の端点を動かさない**（実機で 55 件中 48 件が
+		// 動かないのに取り合いは正しく描かれた）ので、ここで一致しない壁は結合が新しく
+		// 作った壁だと言い切れる。X 結合（交差結合）が壁を 1 本増やすことは分かっているが、
+		// **それがどんな壁なのか**——元の壁の片半分か・全長の複製か——が分からないと打ち手が
+		// 決まらないので、位置を名指しする（ROADMAP.md M10）。
+		const WallSurvey survey = SurveyWallsOnLayer(layer, &document.walls);
+
 		// **結合の後に端部のキャップを入れ直す**。JoinWalls は結合した端のキャップを自分で
 		// 書き換えるので、最後に命令どおりへ揃え直さないと「取り合う端が閉じたまま」
 		// （T 字でぶつかる側の端線が見える）や「自由端が開いたまま」（閉じ線が無い）が残る
@@ -692,6 +700,15 @@ namespace HomeskzIfcImport::draw
 					note += "\n";
 				note += "壁結合: 結合後に立上りが " + std::to_string(total) + " 本増えました（" +
 						breakdownOf(added) + "）。";
+			}
+			if (!survey.unmatched.empty())
+			{
+				note +=
+					"\n壁結合: 命令に無い壁 " + std::to_string(survey.unmatched.size()) + " 本: ";
+				for (std::size_t i = 0; i < survey.unmatched.size() && i < 3; ++i)
+					note += (i == 0 ? "" : ", ") + PointText(survey.unmatched[i].first) + "-" +
+							PointText(survey.unmatched[i].second);
+				note += "。";
 			}
 			*outNote = note;
 		}
