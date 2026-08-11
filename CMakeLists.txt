@@ -266,14 +266,9 @@ if(VW_BUILD_PLUGIN)
 	# The plug-in sources: the module entry point + menu command + updater, plus
 	# the SDK-dependent draw/ phase (src/draw/). The SDK-free core/ + parse/ code
 	# is NOT listed here — it comes in via the HomeskzIfcCore library linked below.
-	# ExtMenuDumpAux.cpp は **dev ビルド専用の一時的な調査コマンド**（地中梁の噛み合わせを
-	# 探るため。ExtMenuDumpAux.h 冒頭）。両ターゲットでコンパイルはするが、メニューへの
-	# 登録が ModuleMain.cpp の #ifdef VW_DEV_BUILD に囲まれているので stable には出ない。
-	# 方針が決まったらこの行ごと消す。
 	set(VW_COMMON_SOURCES
 		src/ModuleMain.cpp
 		src/Extensions/ExtMenu.cpp
-		src/Extensions/ExtMenuDumpAux.cpp
 		src/Updater.cpp
 		src/UpdaterFlow.cpp
 		src/draw/DrawUtil.cpp
