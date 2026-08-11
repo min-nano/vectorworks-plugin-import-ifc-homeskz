@@ -43,14 +43,23 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// シンボル定義が図面に在るか。**同じ名前を何百回も問い合わせない**よう 1 回の
-		// 描画の中で覚えておく（1 要素のシンボル名は多くて 2 種類なので、地図は極小）。
+		// シンボル定義が図面に在るか。**配置を止める門にはしない**（下記 drawSymbols）——
+		// 配置に失敗した理由を診断に書き分けるためだけに使う。同じ名前を何百回も問い合わせ
+		// ないよう 1 回の描画の中で覚えておく（1 要素のシンボル名は多くて 2 種類）。
 		bool HasSymbolDefinition(std::map<std::string, bool>& cache, const std::string& name)
 		{
 			const auto found = cache.find(name);
 			if (found != cache.end())
 				return found->second;
-			const bool exists = VWSymbolDefObj::IsSymbolDefObject(TXString(name.c_str()));
+			bool exists = false;
+			try
+			{
+				exists = VWSymbolDefObj::IsSymbolDefObject(TXString(name.c_str()));
+			}
+			catch (...)
+			{
+				exists = false;
+			}
 			cache.emplace(name, exists);
 			return exists;
 		}
@@ -74,6 +83,17 @@ namespace HomeskzIfcImport::draw
 				return false;
 			}
 		}
+
+		// 診断行へ名前の一覧を「・」区切りで足す。
+		void AppendNames(std::string& text, const std::vector<std::string>& names)
+		{
+			for (std::size_t i = 0; i < names.size(); ++i)
+			{
+				if (i > 0)
+					text += "・";
+				text += names[i];
+			}
+		}
 	} // namespace
 
 	std::size_t drawSymbols(const std::vector<core::SymbolCommand>& commands,
@@ -83,7 +103,9 @@ namespace HomeskzIfcImport::draw
 		std::map<std::string, bool> symbolExists;
 		std::size_t drawn = 0;
 		std::size_t missingLayers = 0;
-		std::vector<std::string> missingSymbols;
+		std::size_t failed = 0;
+		std::vector<std::string> undefinedSymbols; // 図面にシンボル定義が無かった名前
+		std::vector<std::string> failedSymbols; // 定義はあるのに配置できなかった名前
 
 		for (const core::SymbolCommand& command : commands)
 		{
@@ -100,35 +122,47 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			// シンボル定義が無ければ置けない。名前を 1 度だけ診断へ残す。
-			if (!HasSymbolDefinition(symbolExists, command.symbol))
+			// **必ず配置を試みる。** かつてはここで IsSymbolDefObject による事前ガードを
+			// 掛けていたが、その判定が期待どおりでないと**1 つも置けないのに「シンボルが
+			// 見つかりません」と報告する**（原因を誤って指す）形になる。配置そのものを
+			// 唯一の判定にし、失敗したときだけ理由を調べて書き分ける。
+			if (PlaceOne(command))
 			{
-				if (std::ranges::find(missingSymbols, command.symbol) == missingSymbols.end())
-					missingSymbols.push_back(command.symbol);
+				++drawn;
 				continue;
 			}
 
-			if (PlaceOne(command))
-				++drawn;
+			++failed;
+			std::vector<std::string>& bucket = HasSymbolDefinition(symbolExists, command.symbol)
+												   ? failedSymbols
+												   : undefinedSymbols;
+			if (std::ranges::find(bucket, command.symbol) == bucket.end())
+				bucket.push_back(command.symbol);
 		}
 
-		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 件」のときに、原因が
-		// 配置先レイヤ（＝ストーリ側）かシンボル定義（＝リソース側）かを切り分けられる。
-		if (note != nullptr && (missingLayers > 0 || !missingSymbols.empty()))
+		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 件」のときに、原因が配置先レイヤ
+		// （＝ストーリ側）か、図面にシンボル定義が無いのか（＝リソース側）か、定義はあるのに
+		// 配置に失敗したのか（＝描画側）を切り分けられる。
+		if (note != nullptr && (missingLayers > 0 || failed > 0))
 		{
 			std::string text = std::string(elementLabel) + "の診断: ";
 			if (missingLayers > 0)
 				text += "配置先レイヤが無い命令 " + std::to_string(missingLayers) + " 件。";
-			if (!missingSymbols.empty())
+			if (failed > 0)
 			{
-				text += "シンボルが見つかりません: ";
-				for (std::size_t i = 0; i < missingSymbols.size(); ++i)
+				text += "配置できなかった命令 " + std::to_string(failed) + " 件。";
+				if (!undefinedSymbols.empty())
 				{
-					if (i > 0)
-						text += "・";
-					text += missingSymbols[i];
+					text += "図面にシンボル定義がありません: ";
+					AppendNames(text, undefinedSymbols);
+					text += "。";
 				}
-				text += "。";
+				if (!failedSymbols.empty())
+				{
+					text += "シンボル定義はあるのに配置できません: ";
+					AppendNames(text, failedSymbols);
+					text += "。";
+				}
 			}
 			*note = std::move(text);
 		}
