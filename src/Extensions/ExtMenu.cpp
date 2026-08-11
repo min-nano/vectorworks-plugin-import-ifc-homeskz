@@ -231,10 +231,11 @@ void CImportIfcMenu_EventSink::DoInterface()
 		return std::to_string(placed) + "/" + std::to_string(commands);
 	};
 
-	const std::size_t commandCount =
-		document.stories.size() + document.grids.size() + document.floors.size() +
-		document.members.size() + document.columns.size() + document.rafters.size() +
-		document.roofs.size() + document.walls.size() + document.slabs.size();
+	const std::size_t commandCount = document.stories.size() + document.grids.size() +
+									 document.floors.size() + document.members.size() +
+									 document.columns.size() + document.rafters.size() +
+									 document.roofs.size() + document.walls.size() +
+									 document.wallJoins.size() + document.slabs.size();
 	std::string body;
 	if (!drawn.valid)
 		body = "命令セットの検証に通らなかったため、何も描きませんでした。";
@@ -248,7 +249,8 @@ void CImportIfcMenu_EventSink::DoInterface()
 			   formatCount(drawn.columns, document.columns.size()) + " 本・垂木 " +
 			   formatCount(drawn.rafters, document.rafters.size()) + " 本・野地板 " +
 			   formatCount(drawn.roofs, document.roofs.size()) + " 枚・立上り " +
-			   formatCount(drawn.walls, document.walls.size()) + " 本・底盤 " +
+			   formatCount(drawn.walls, document.walls.size()) + " 本（結合 " +
+			   formatCount(drawn.wallJoins, document.wallJoins.size()) + " 箇所）・底盤 " +
 			   formatCount(drawn.slabs, document.slabs.size()) + " 枚を描きました。";
 	// 中止されたときは件数が命令数に届かないのが正常なので、そう明示する（「描けなかった」
 	// と読み違えないように）。描けたところまでは図面に残っている。
