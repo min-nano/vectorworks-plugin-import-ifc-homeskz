@@ -139,6 +139,10 @@ namespace HomeskzIfcImport::draw
 		// 手動操作を求めない。Python 版 _JOIN_SHOW_ALERTS と同じ）。
 		constexpr Boolean kJoinShowAlerts = false;
 
+		// 地中梁のプリズムを置き直すかを決める許容（mm。CreateModifierPrism の末尾）。
+		// 丸め誤差で毎回動かさない程度に大きく、図面で見える差より十分小さい値。
+		constexpr double kPlacementTol = 0.5;
+
 		// オブジェクト変数へ真偽値を書き込む（呼び出しの定型を 1 か所に。draw/Roof の
 		// SetPointVariable / SetRealVariable と同じ流儀）。
 		void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value)
@@ -226,6 +230,39 @@ namespace HomeskzIfcImport::draw
 			if (handle == nil)
 				return nil;
 			SetBooleanVariable(handle, ovPlanarObjIsSrceen, false);
+
+			// **VW が置いた位置を実測して命令どおりへ寄せ直す。** VWExtrudeObj は押し出しを内部で
+			// 「2D 基面 ＋ 基準高さ（baseElevation）＋ 厚み」に持ち替えるため、3D ポリゴンから
+			// 作ると基面の平面を導出したうえで**配置先レイヤの高さ（ストーリレベル）を法線方向へ
+			// 足す**。普通の押し出しは鉛直なのでこれは「レイヤぶん持ち上げる」正しい動作だが、
+			// 地中梁の押し出しは**水平**なので、そのまま**軸方向の横ずれ**として出る——実機で
+			// 全ての地中梁が軸方向へ 50mm（＝ F-底盤 レイヤの高さ＝底盤天端 Z）ずれていた
+			// （長さ・断面・向きは命令どおりで、位置だけが平行移動していた。ROADMAP.md M10）。
+			//
+			// 原因の値（レイヤ高さ）を当てにいくのではなく、**平面外形の中心が命令どおりの位置に
+			// 来るよう実測して動かす**。プリズムの平面外形は矩形なので、軸に平行でも斜めでも
+			// 「バウンディング矩形の中心＝外形の中心」が成り立つ（対称性）。ずれが無ければ
+			// 何もしないので、VW 側の挙動が変わってもこのままで正しい。
+			double uLo = modifier.profile.front().x;
+			double uHi = uLo;
+			for (const core::Vec2& p : modifier.profile)
+			{
+				uLo = std::min(uLo, p.x);
+				uHi = std::max(uHi, p.x);
+			}
+			const double uMid = (uLo + uHi) / 2.0;
+			const double half = modifier.depth / 2.0;
+			const core::Vec2 wanted{modifier.origin.x + (axis.x * half) + (width.x * uMid),
+									modifier.origin.y + (axis.y * half) + (width.y * uMid)};
+
+			WorldRect bounds;
+			if (gSDK->GetObjectBounds(handle, bounds))
+			{
+				const double dx = wanted.x - ((bounds.left + bounds.right) / 2.0);
+				const double dy = wanted.y - ((bounds.top + bounds.bottom) / 2.0);
+				if (std::abs(dx) > kPlacementTol || std::abs(dy) > kPlacementTol)
+					gSDK->MoveObject3D(handle, dx, dy, 0.0);
+			}
 			return handle;
 		}
 
