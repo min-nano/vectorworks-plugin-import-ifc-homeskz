@@ -6,12 +6,13 @@
 //	RunStableStartupCheck / RunDevStartupCheck are two small state machines:
 //	"ask the script, decide, maybe show a dialog, maybe install, report". The
 //	decisions are already pure (UpdaterParse.h); what remained SDK-bound was the
-//	four side-effecting operations those flows perform:
+//	side-effecting operations those flows perform:
 //	  * run the bundled updater script and capture its stdout,
 //	  * show an informational dialog,
 //	  * ask a yes/no question,
-//	  * show the build picker and return the chosen index.
-//	Those four are gathered behind IUpdaterHost. The flows (UpdaterFlow.cpp)
+//	  * show the build picker and return the chosen index,
+//	  * restart Vectorworks (so a freshly installed build is loaded).
+//	Those are gathered behind IUpdaterHost. The flows (UpdaterFlow.cpp)
 //	depend ONLY on this interface, so they compile and run on any toolchain.
 //
 //	At run time Updater.cpp supplies the real implementation (gSDK dialogs +
@@ -50,6 +51,14 @@ namespace HomeskzIfcImport
 		// preselecting `initialSel`. Returns the chosen 0-based index, or a
 		// negative value if the user cancelled.
 		virtual int PickBuild(const std::vector<std::string>& items, int initialSel) = 0;
+
+		// Quit Vectorworks and start it again, so the build just installed is
+		// actually loaded (a compiled plug-in is only ever picked up at start-up).
+		// Open documents are closed with the usual save prompt, so the user can
+		// still back out at that point — hence there is nothing to report back
+		// and no return value: this call either takes the application down or
+		// leaves it running exactly as it was.
+		virtual void Restart() = 0;
 	};
 
 	// The SDK-independent update flows, parameterized by the host above. These

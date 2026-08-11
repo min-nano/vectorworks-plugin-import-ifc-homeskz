@@ -40,6 +40,26 @@ namespace HomeskzIfcImport
 			errorOut = InstallErrorText(out, "インストールに失敗しました。");
 			return false;
 		}
+
+		// How every successful install ends. A compiled plug-in is only loaded at
+		// start-up, so the new build does nothing until Vectorworks restarts —
+		// hence this is a QUESTION with a 再起動 button rather than a notice that
+		// merely tells the user to restart on their own. Choosing 後で does
+		// nothing further: the dialog the user just dismissed already said a
+		// restart is needed, so a follow-up notice would only be nagging. The
+		// per-channel details (build / branch+commit) come in as `detail` and are
+		// shown above the shared restart wording.
+		void OfferRestart(IUpdaterHost& host, const std::string& text, const std::string& detail)
+		{
+			std::string advice = detail;
+			if (!advice.empty())
+				advice += "\n\n";
+			advice += "反映するには Vectorworks の再起動が必要です。\n"
+					  "今すぐ再起動しますか？（開いているファイルは保存を確認します）";
+
+			if (host.Ask(text, advice, "再起動", "後で"))
+				host.Restart();
+		}
 	} // namespace
 
 	void RunStableStartupCheckWith(IUpdaterHost& host)
@@ -62,8 +82,7 @@ namespace HomeskzIfcImport
 
 		std::string err;
 		if (Install(host, st.url, "HomeskzIfcImport", err))
-			host.Inform("HomeskzIfcImport を更新しました。",
-						"反映するには Vectorworks を再起動してください。");
+			OfferRestart(host, "HomeskzIfcImport を更新しました。", "build: " + st.latest);
 		else
 			host.Inform("更新に失敗しました。", err);
 	}
@@ -105,13 +124,12 @@ namespace HomeskzIfcImport
 			return;
 		const DevBuild& pick = others[static_cast<std::size_t>(idx)];
 
-		// A different build was chosen: install it (restart to load).
+		// A different build was chosen: install it, then offer the restart that
+		// actually loads it.
 		std::string err;
 		if (Install(host, pick.url, "HomeskzIfcImportDev", err))
-			host.Inform("開発版ビルドをインストールしました。",
-						"反映するには Vectorworks を再起動してください。\n"
-						"branch: " +
-							pick.name + "\ncommit: " + pick.commit);
+			OfferRestart(host, "開発版ビルドをインストールしました。",
+						 "branch: " + pick.name + "\ncommit: " + pick.commit);
 		else
 			host.Inform("インストールに失敗しました。", err);
 	}

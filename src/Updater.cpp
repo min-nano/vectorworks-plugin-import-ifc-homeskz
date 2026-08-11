@@ -368,6 +368,18 @@ namespace
 				return -1; // cancelled -> keep the loaded build
 			return dlg.GetSelection();
 		}
+
+		// Quit Vectorworks and launch it again, so the freshly installed build is
+		// loaded. The SDK does the whole thing for us (an ISDK method added in
+		// VW2025), so there is no watchdog process to spawn. bAskForSave = true
+		// keeps the normal save prompt for open documents: if the user backs out
+		// there, Vectorworks stays up and simply keeps running the old build —
+		// the installed files are already on disk, so the next start-up picks
+		// them up anyway.
+		void Restart() override
+		{
+			gSDK->CloseAllFilesAndQuitVectorworks(/*bAskForSave*/ true, /*bRestart*/ true);
+		}
 	};
 } // namespace
 
