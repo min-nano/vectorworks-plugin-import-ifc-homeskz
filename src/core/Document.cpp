@@ -6,8 +6,9 @@
 //
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
 //	walls / slabs（M9）・wallJoins / 底盤の modifiers＝地中梁（M10）・rafters / roofs（M6）・
-//	grids（M1）の各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する
-//	検証規則（必須フィールドの有無・参照整合性・値域）をここへ足していく。
+//	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints）の
+//	各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
+//	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 //	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
 //	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み）。SDK を触らないので
@@ -171,6 +172,15 @@ namespace HomeskzIfcImport::core
 			return !roof.layer.empty() && !roof.drawClass.empty() && roof.boundary.size() >= 3 &&
 				   roof.thickness > 0.0;
 		}
+
+		// シンボル配置 1 件が妥当か（Python 版 _validate_anchor_bolt / _validate_floor_post /
+		// _validate_fire_brace / _validate_joint と同じ関門を 1 つにまとめたもの）。配置先
+		// レイヤ名とシンボル名が非空であること。position / angle は数値（double なので常に
+		// 成立）で、値域の制限は無い（角度は 0〜360 に正規化しない。VW 側が受け取る）。
+		bool isValidSymbol(const SymbolCommand& symbol)
+		{
+			return !symbol.layer.empty() && !symbol.symbol.empty();
+		}
 	} // namespace
 
 	bool validateDocument(const Document& document)
@@ -222,6 +232,15 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.rafters, isValidRafter))
 			return false;
 		if (!std::ranges::all_of(document.roofs, isValidRoof))
+			return false;
+
+		// シンボル置換系（アンカーボルト・床束・火打・仕口）: 配置先レイヤ名とシンボル名が
+		// 非空であること（isValidSymbol 参照。Python 版 _validate_anchor_bolt ほかと同じ関門。
+		// ROADMAP.md M11）。4 種は同じ命令型なので同じ規則で見る。
+		if (!std::ranges::all_of(document.anchorBolts, isValidSymbol) ||
+			!std::ranges::all_of(document.floorPosts, isValidSymbol) ||
+			!std::ranges::all_of(document.fireBraces, isValidSymbol) ||
+			!std::ranges::all_of(document.joints, isValidSymbol))
 			return false;
 
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。

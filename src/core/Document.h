@@ -51,12 +51,16 @@ namespace HomeskzIfcImport::core
 	// 専用レベル。母屋・棟木は "母屋"、登り梁は "登り梁"（parse/Member.h 参照）。
 	inline constexpr const char* kLevelMoya = "母屋";
 	inline constexpr const char* kLevelNoboribari = "登り梁";
-	// M9 基礎ストーリのレベル。GL は基礎ストーリの原点（常に 0）で立上り（"F-立上り"）を、
-	// 底盤天端は底盤コンクリートの天端で底盤（"F-底盤"）を載せる。アンカーボルト
-	// （"基礎天端"）・床束（"床束"）のレベルは、その要素を導入する M11 で足す
-	// （描画対象の無いレベルは先に作らない＝空レイヤを作らない。parse/Footing.h 参照）。
+	// M9/M11 基礎ストーリのレベル。GL は基礎ストーリの原点（常に 0）で立上り（"F-立上り"）を、
+	// 底盤天端は底盤コンクリートの天端で底盤（"F-底盤"）を載せる（M9）。基礎天端は立上りの
+	// 天端でアンカーボルト（"F-アンカーボルト"）を、床束は底盤天端に揃えて床束（"F-床束"）を
+	// 載せる（M11。シンボルは高さを持たず、この 2 つのレベルが Z を決める）。
+	// スタック順は 基礎天端 → GL → 床束 → 底盤天端（parse/Footing の
+	// buildFoundationStoryCommand）。
 	inline constexpr const char* kLevelGL = "GL";
 	inline constexpr const char* kLevelSlabTop = "底盤天端";
+	inline constexpr const char* kLevelFoundationTop = "基礎天端";
+	inline constexpr const char* kLevelFloorPost = "床束";
 
 	// 通り芯（グリッド）1 本の描画命令。Python 版 document.py の GridCommand（dict）に
 	// 対応する。draw/Grid がこれを GridAxis オブジェクトへ変換する（ROADMAP.md M1）。
@@ -555,6 +559,35 @@ namespace HomeskzIfcImport::core
 		std::vector<ModifierCommand> modifiers;
 	};
 
+	// ハイブリッドシンボルを平面座標＋回転角で置く命令。アンカーボルト・床束・火打・仕口の
+	// 4 種（ROADMAP.md M11「シンボル置換系」）が共通で使う。draw/Symbol がこれをシンボル
+	// オブジェクトへ変換する。
+	//
+	// ［Python 版との差異・意図的］Python 版は AnchorBoltCommand / FloorPostCommand /
+	// FireBraceCommand / JointCommand の 4 つの TypedDict を持つが、中身は
+	// (layer, symbol, position ＋ 火打・仕口だけ angle) で同型であり、描画側
+	// （vw/{anchor_bolt,floor_post,fire_brace,joint}.py）に至っては「配置先レイヤが
+	// 在るか確かめて vs.Symbol を呼ぶ」だけの**逐語的に同じ実装が 4 本**ある。C++ では
+	// 構造体 1 つ・描画 1 つ（draw/Symbol）へまとめる（CLAUDE.md「重複を作らない置き場所」）。
+	// 要素の区別は **Document のどのリストに入っているか**が担い、進捗の見出しと完了
+	// ダイアログの件数は従来どおり要素ごとに出る。角度を持たない命令（アンカーボルト・
+	// 床束）は angle = 0 ＝シンボルの基準姿勢。
+	//
+	// Python 版キーとの対応:
+	//   layer    ← 'layer'    … 配置先デザインレイヤ名（既存のみ・無ければスキップ）
+	//   symbol   ← 'symbol'   … 置換するハイブリッドシンボル名（"アンカーボルト_M12" 等）
+	//   position ← 'position' … シンボルの基準点（センタリング済みの平面座標）
+	//   angle    ← 'angle'    … 回転角（度・反時計回り。持たない命令は 0）
+	// **高さは持たない**: 配置先レイヤのストーリレベル（基礎天端／底盤天端／横架材天端…）が
+	// シンボルの Z を決める（Python 版と同じ設計）。
+	struct SymbolCommand
+	{
+		std::string layer;
+		std::string symbol;
+		Vec2 position;
+		double angle = 0.0;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
@@ -616,11 +649,32 @@ namespace HomeskzIfcImport::core
 		// parse/Footing が組み立てる）。外面合わせに立上りを参照するので walls の後に作る。
 		// **地中梁（M10）は独立した命令にせず**、平面で最も重なる底盤の modifiers に付く。
 		std::vector<SlabCommand> slabs;
+
+		// M11 アンカーボルト。IfcMechanicalFastener のボルト本体（座金は除く）を
+		// "アンカーボルト_M12" / "…_M16" へ置換する（parse/AnchorBolt）。配置先は基礎
+		// ストーリの "F-アンカーボルト"（基礎天端レベル）で、レイヤは M9 の基礎 story 命令が
+		// 作る（parse/Footing の buildFoundationStoryCommand）。
+		std::vector<SymbolCommand> anchorBolts;
+
+		// M11 床束。ホームズ君 IFC に床束は出力されないので、大引の下へ 910mm 間隔で
+		// 決め打ち配置する（parse/FloorPost）。配置先は基礎ストーリの "F-床束"（床束レベル＝
+		// 底盤天端に揃える）。
+		std::vector<SymbolCommand> floorPosts;
+
+		// M11 火打。Name が "火打…" の IfcBeam / IfcMember を "鋼製火打" へ置換する
+		// （parse/FireBrace）。配置先は横架材と同じレイヤ（"n-横架材天端" / "R-軒高"）。
+		std::vector<SymbolCommand> fireBraces;
+
+		// M11 仕口。受ける材（別の横架材・柱）のある横架材端部へ "仕口" を置く
+		// （parse/Joint）。members / columns から導出するので、その 2 つより後に組み立てる。
+		// 配置先は受ける側ではなく**その横架材自身のレイヤ**。
+		std::vector<SymbolCommand> joints;
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は
 	// 検証を通った Document だけを SDK API へ渡す。現状はバージョンと stories / floors /
-	// rafters / roofs / grids を見る（規則は Document.cpp の各 isValid* 参照。空の Document は妥当）。
+	// rafters / roofs / grids / シンボル 4 種を見る（規則は Document.cpp の各 isValid* 参照。
+	// 空の Document は妥当）。
 	// 各命令リストの追加に合わせて検証規則を足していく。
 	bool validateDocument(const Document& document);
 

@@ -17,11 +17,15 @@
 
 #include "parse/BuildDocument.h"
 #include "core/Progress.h"
+#include "parse/AnchorBolt.h"
 #include "parse/Column.h"
 #include "parse/Context.h"
+#include "parse/FireBrace.h"
 #include "parse/Floor.h"
+#include "parse/FloorPost.h"
 #include "parse/Footing.h"
 #include "parse/Grid.h"
+#include "parse/Joint.h"
 #include "parse/Loader.h"
 #include "parse/Member.h"
 #include "parse/Noboribari.h"
@@ -122,6 +126,19 @@ namespace HomeskzIfcImport::parse
 		core::StoryCommand foundationStory;
 		if (buildFoundationStoryCommand(model, foundationStory))
 			document.stories.insert(document.stories.begin(), std::move(foundationStory));
+
+		// M11 シンボル置換系（アンカーボルト・床束・火打・仕口）。互いに独立だが、
+		// **仕口だけは横架材・柱の命令から導出する**ので、上の members / columns が確定した
+		// 後に置く（Python 版 build_document と同じ順序）。仕口が見る横架材は登り梁の屋根
+		// スナップ**後**——受ける材との取り合いは補正後の位置で決まる。
+		document.anchorBolts = buildAnchorBoltCommands(context);
+		progress.step();
+		document.floorPosts = buildFloorPostCommands(context);
+		progress.step();
+		document.fireBraces = buildFireBraceCommands(context);
+		progress.step();
+		document.joints = buildJointCommands(document.members, document.columns);
+		progress.step();
 
 		return document;
 	}
