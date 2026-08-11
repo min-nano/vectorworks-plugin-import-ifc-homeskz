@@ -66,14 +66,23 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
+		// 1 件の配置の結末。**非 nil のハンドルは成功の証拠にならない**ので（ファイル冒頭
+		// 「成功判定に handle の非 nil を使わない」）、どこまで進んだかを 3 つに分けて返す。
+		enum class PlaceResult
+		{
+			NotPlaced,	// そもそもインスタンスができていない
+			WrongLayer, // できたが意図したレイヤに載っていない
+			Placed,		// できて、意図したレイヤに載った
+		};
+
 		// シンボル 1 つを配置する（Python 版 draw_anchor_bolt ほかに対応）。センタリング
 		// 済みの絶対座標と回転角（度）をそのまま渡す。高さはアクティブレイヤ（＝配置先の
 		// ストーリレベル）の平面で決まるので、命令は高さを持たない。
 		//
-		// **置けたと数えるのは、その名前のシンボルインスタンスが実際にできたときだけ。**
-		// 非 nil のハンドルは成功の証拠にならない（ファイル冒頭「成功判定に handle の
-		// 非 nil を使わない」）。
-		bool PlaceOne(const core::SymbolCommand& command)
+		// layer は ActivateExistingLayer が返したアクティブレイヤ。新しいオブジェクトは
+		// そこへ入るはずなので、**入ったことまで確かめる**（入っていなければ「命令数どおり
+		// 置いたのに図面に見えない」が起きる。原因を診断行で指せるようにする）。
+		PlaceResult PlaceOne(const core::SymbolCommand& command, MCObjectHandle layer)
 		{
 			// VWFC の構築子は失敗を例外で伝えるので、1 件の異常で残りの配置を止めない
 			// （CLAUDE.md「エラーハンドリング」: SDK コールバックへ例外を漏らさない）。
@@ -82,15 +91,26 @@ namespace HomeskzIfcImport::draw
 				const TXString name(command.symbol.c_str());
 				const VWSymbolObj symbol(name, VWPoint2D(command.position.x, command.position.y),
 										 command.angle);
-				MCObjectHandle handle = symbol.GetThisObject();
-				if (handle == nil)
-					return false;
-				return VWSymbolObj::IsSymbolObject(handle, name);
+				const MCObjectHandle handle = symbol.GetThisObject();
+				if (handle == nil || !VWSymbolObj::IsSymbolObject(handle, name))
+					return PlaceResult::NotPlaced;
+				if (symbol.GetParentLayer() != layer)
+					return PlaceResult::WrongLayer;
+				return PlaceResult::Placed;
 			}
 			catch (...)
 			{
-				return false;
+				return PlaceResult::NotPlaced;
 			}
+		}
+
+		// 診断へ残す名前は 1 度だけ（同じ名前が何百件も並ばないように）。**参照を三項演算子で
+		// 束ねてから push_back しない**——clang-tidy の misc-const-correctness がその形の変更を
+		// 見落とし、束ねた先の vector に const を要求してくる（CI の tidy-mac / tidy-windows）。
+		void RememberOnce(std::vector<std::string>& names, const std::string& name)
+		{
+			if (std::ranges::find(names, name) == names.end())
+				names.push_back(name);
 		}
 
 		// 診断行へ名前の一覧を「・」区切りで足す。
@@ -120,6 +140,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		std::size_t missingLayers = 0;
 		std::size_t failed = 0;
+		std::size_t wrongLayer = 0; // できたが意図したレイヤに載らなかった
 		std::vector<std::string> undefinedSymbols; // 図面にシンボル定義が無かった名前
 		std::vector<std::string> failedSymbols; // 定義はあるのに配置できなかった名前
 
@@ -132,37 +153,45 @@ namespace HomeskzIfcImport::draw
 			progress.step();
 
 			// 配置先レイヤが無い命令はスキップする（規約は ActivateExistingLayer）。
-			if (ActivateExistingLayer(command.layer) == nil)
+			const MCObjectHandle layer = ActivateExistingLayer(command.layer);
+			if (layer == nil)
 			{
 				++missingLayers;
 				continue;
 			}
 
 			// **必ず配置を試みる。** 事前ガードで弾かず、置けたかどうかだけで数える
-			// （PlaceOne が「その名前のシンボルインスタンスができたか」まで確かめる）。
-			if (PlaceOne(command))
+			// （PlaceOne が「その名前のシンボルインスタンスができ、そのレイヤに載ったか」
+			// まで確かめる）。レイヤ違いは「置けてはいる」ので drawn に数え、件数だけ
+			// 診断へ出す（図面に見えない原因になり得るため）。
+			const PlaceResult result = PlaceOne(command, layer);
+			if (result != PlaceResult::NotPlaced)
 			{
 				++drawn;
+				if (result == PlaceResult::WrongLayer)
+					++wrongLayer;
 				continue;
 			}
 
 			++failed;
 			const auto defined = definedBefore.find(command.symbol);
-			std::vector<std::string>& bucket = (defined != definedBefore.end() && defined->second)
-												   ? failedSymbols
-												   : undefinedSymbols;
-			if (std::ranges::find(bucket, command.symbol) == bucket.end())
-				bucket.push_back(command.symbol);
+			if (defined != definedBefore.end() && defined->second)
+				RememberOnce(failedSymbols, command.symbol);
+			else
+				RememberOnce(undefinedSymbols, command.symbol);
 		}
 
 		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 件」のときに、原因が配置先レイヤ
 		// （＝ストーリ側）か、図面にシンボル定義が無いのか（＝リソース側）か、定義はあるのに
 		// 配置に失敗したのか（＝描画側）を切り分けられる。
-		if (note != nullptr && (missingLayers > 0 || failed > 0))
+		if (note != nullptr && (missingLayers > 0 || failed > 0 || wrongLayer > 0))
 		{
 			std::string text = std::string(elementLabel) + "の診断: ";
 			if (missingLayers > 0)
 				text += "配置先レイヤが無い命令 " + std::to_string(missingLayers) + " 件。";
+			if (wrongLayer > 0)
+				text +=
+					"意図したレイヤに載らなかったシンボル " + std::to_string(wrongLayer) + " 件。";
 			if (failed > 0)
 			{
 				text += "配置できなかった命令 " + std::to_string(failed) + " 件。";
