@@ -958,8 +958,12 @@ M7 のコメントにある「頂点を足す呼び出しが無い」は取り�
 - ✅ `draw/Symbol`: 4 種を**1 本の描画**にまとめた（`VWSymbolObj(name, VWPoint2D, angleDeg)`＝
   VS の `vs.Symbol` にあたる。ci-debug の `sdk-grep` / `sdk-ls` で実在確認済み）。命令型も
   `core::SymbolCommand` 1 つに統合してある（理由は `core/Document.h` の doc コメント）。
-  シンボル定義が図面に無いときは `VWSymbolDefObj::IsSymbolDefObject` で先に弾き、件数と
-  名前を完了ダイアログの診断行へ出す（プラグインはシンボル定義を作らない）。
+  **配置そのものが唯一の門**で、`VWSymbolObj` の構築を必ず試みる。当初は
+  `VWSymbolDefObj::IsSymbolDefObject` で先に弾いていたが、その判定が期待どおりでないと
+  **1 つも置けないうえに原因を誤って指す**ため事前ガードを外した（実際に「ひとつも配置
+  できない」報告を受けている）。失敗したときだけ `IsSymbolDefObject` を引いて、
+  「配置先レイヤが無い」「図面にシンボル定義が無い」「定義はあるのに配置できない」の
+  3 通りを完了ダイアログの診断行へ書き分ける（プラグインはシンボル定義を作らない）。
 - ✅ テスト: `ParseAnchorBoltTests` / `ParseFloorPostTests` / `ParseFireBraceTests` /
   `ParseJointTests`（Python 版 `test_ifc_{anchor_bolt,floor_post,fire_brace,joint}.py` の
   全ケースを移植）。`CoreDocumentTests` にシンボル命令の検証、`ParseContextTests` に
