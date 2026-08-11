@@ -601,9 +601,21 @@ PCH が使えず（`VW_ENABLE_PCH`）、1 翻訳単位ごとに SDK のアンブ
 `main` が stable 側を解析するので、パイプライン全体では両方が解析されます。
 
 バージョンについて: SDK 非依存の `lint.yml` と `tidy-mac` は clang 18 に固定して
-います。`tidy-windows` だけは**最新の LLVM**を使います — ランナーの MSVC 標準ライブラリ
-ヘッダが「Clang 20 以降」を要求する（`static_assert` と Clang 20 の組み込み関数を使う）
-ため、clang-cl / clang-tidy がそれを解析できる新しさである必要があるからです。
+います。`tidy-windows` だけは**ランナーイメージに入っている LLVM**（現在 20 系）を
+そのまま使います — ランナーの MSVC 標準ライブラリヘッダが「Clang 20 以降」を要求する
+（`static_assert` と Clang 20 の組み込み関数を使う）ため、clang-cl / clang-tidy が
+それを解析できる新しさである必要があるからです。以前は `choco install llvm` で最新版を
+入れ直していましたが、実測すると**既に入っているものの入れ直しに 31 秒**かかるだけだった
+ので、インストールはやめてバージョンが 20 以上であることを確認するだけにしました
+（将来ランナーの LLVM が MSVC ヘッダの要求より古くなったら、パースエラーの山ではなく
+その旨のメッセージで落ちます）。Ninja も同様にイメージに入っているものを使います。
+
+`tidy-windows` に vcvars（`msvc-dev-cmd`）のステップはありません。clang-cl は MSVC
+ツールチェインと Windows SDK をレジストリ／vswhere から自力で見つけるので、`INCLUDE` /
+`LIB` を環境へ流し込む必要がなく、その 17 秒も不要でした。代わりに clang-cl は**絶対
+パス**で指定しています — ランナーの PATH には Visual Studio 同梱の LLVM
+（`VC\Tools\Llvm\x64\bin`）も入っており、`clang-cl` という名前がどちらに解決されるかを
+運任せにしないためです。
 
 **採用しているルール:**
 
