@@ -960,10 +960,22 @@ M7 のコメントにある「頂点を足す呼び出しが無い」は取り�
   `core::SymbolCommand` 1 つに統合してある（理由は `core/Document.h` の doc コメント）。
   **配置そのものが唯一の門**で、`VWSymbolObj` の構築を必ず試みる。当初は
   `VWSymbolDefObj::IsSymbolDefObject` で先に弾いていたが、その判定が期待どおりでないと
-  **1 つも置けないうえに原因を誤って指す**ため事前ガードを外した（実際に「ひとつも配置
-  できない」報告を受けている）。失敗したときだけ `IsSymbolDefObject` を引いて、
-  「配置先レイヤが無い」「図面にシンボル定義が無い」「定義はあるのに配置できない」の
-  3 通りを完了ダイアログの診断行へ書き分ける（プラグインはシンボル定義を作らない）。
+  **1 つも置けないうえに原因を誤って指す**ため事前ガードを外した。失敗したときだけ
+  `IsSymbolDefObject` を引いて、「配置先レイヤが無い」「図面にシンボル定義が無い」
+  「定義はあるのに配置できない」を完了ダイアログの診断行へ書き分ける（プラグインは
+  シンボル定義を作らない）。
+- ✅ **［VW 2026 SDK の落とし穴］`VWSymbolObj` は生成しただけでは図面に現れない。**
+  ローカル実機で「シンボルがひとつも配置できない」ところから切り分けた結果:
+  シンボル定義（テンプレート由来）も配置先レイヤも名前も座標も揃っているのに、
+  **4 種 472 件すべてで `GetParentLayer()` が配置先レイヤと一致しなかった**。ISDK には
+  シンボルを配置する呼び出しが無く（在るのは `CreateSymbolDefinition` だけ）、この構築子は
+  レガシーの `PlaceSymbol` を包んでいて、VWFC の他のラッパー（ポリライン等）と違い
+  **アクティブレイヤへ入らない**。生成後に `gSDK->AddObjectToContainer(handle, layer)`
+  （「h を container の末尾へ**移動**する」）で配置先レイヤへ入れ直す。
+  併せて成功判定も直した——構築子は**何も置けていなくても非 nil のハンドルを返し得る**ので、
+  `VWSymbolObj::IsSymbolObject(handle, name)` で「その名前のシンボルインスタンスができた」
+  ことまで確かめてから 1 件と数える（この判定が無いあいだ、完了ダイアログは「アンカーボルト
+  97 本…を描きました」と**全数成功で嘘をついていた**）。
 - ✅ テスト: `ParseAnchorBoltTests` / `ParseFloorPostTests` / `ParseFireBraceTests` /
   `ParseJointTests`（Python 版 `test_ifc_{anchor_bolt,floor_post,fire_brace,joint}.py` の
   全ケースを移植）。`CoreDocumentTests` にシンボル命令の検証、`ParseContextTests` に
