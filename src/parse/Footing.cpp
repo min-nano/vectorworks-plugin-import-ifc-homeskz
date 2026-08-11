@@ -5,8 +5,8 @@
 //	build_wall_commands / build_slab_commands（および統合・外面合わせ）に対応。
 //	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
 //
-//	地中梁・人通口・壁結合・配筋は M10（ROADMAP.md）。本ファイルは立上り（壁）と
-//	底盤（スラブ）、および基礎ストーリだけを扱う。
+//	人通口・壁結合・配筋は M10 の残り（ROADMAP.md）。本ファイルは立上り（壁）と
+//	底盤（スラブ）＋地中梁（底盤へ噛み合わせるモディファイア）、および基礎ストーリを扱う。
 //
 
 #include "parse/Footing.h"
@@ -19,8 +19,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iterator>
 #include <map>
 #include <numbers>
+#include <ranges>
 #include <set>
 #include <string>
 #include <tuple>
@@ -32,10 +34,12 @@ namespace HomeskzIfcImport::parse
 	using core::ColumnCommand;
 	using core::ComponentCommand;
 	using core::LevelCommand;
+	using core::ModifierCommand;
 	using core::SlabCommand;
 	using core::StoryBoundCommand;
 	using core::StoryCommand;
 	using core::Vec2;
+	using core::Vec3;
 	using core::WallCommand;
 
 	namespace
@@ -851,6 +855,275 @@ namespace HomeskzIfcImport::parse
 			out = offsetPolygon(pts, dists);
 			return true;
 		}
+
+		// --- 地中梁（底盤へ噛み合わせるモディファイア）-------------------------------
+
+		// 方位角（度）から走る向きの水平単位ベクトルを返す（Python 版 _ground_beam_axis_dir）。
+		Vec2 groundBeamAxisDir(const ModifierCommand& modifier)
+		{
+			const double phi = modifier.azimuth * std::numbers::pi / 180.0;
+			return Vec2{std::cos(phi), std::sin(phi)};
+		}
+
+		// 断面形状（統合可否）を表す正規化キー（Python 版 _ground_beam_profile_key）。頂点を
+		// 許容値で丸め、巻きを CCW に揃えたうえで辞書順最小の頂点から始まる回転に正規化する。
+		// **頂点の絶対 (u, v) 位置を保つ**ので、断面形状が同じでも軸に対する横位置（u
+		// オフセット）が違う地中梁は別キーになり統合されない（向き＝方位角は別途キーに含める）。
+		using ProfileKey = std::vector<std::pair<long long, long long>>;
+
+		ProfileKey groundBeamProfileKey(const ModifierCommand& modifier)
+		{
+			ProfileKey pts;
+			pts.reserve(modifier.profile.size());
+			for (const Vec2& p : modifier.profile)
+				pts.emplace_back(roundKey(p.x, kGroundBeamProfileTol),
+								 roundKey(p.y, kGroundBeamProfileTol));
+			if (pts.empty())
+				return pts;
+
+			double area = 0.0;
+			const std::size_t n = pts.size();
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				const auto& [x1, y1] = pts[i];
+				const auto& [x2, y2] = pts[(i + 1) % n];
+				area += static_cast<double>(x1) * static_cast<double>(y2);
+				area -= static_cast<double>(x2) * static_cast<double>(y1);
+			}
+			if (area < 0.0)
+				std::ranges::reverse(pts);
+			std::ranges::rotate(pts, std::ranges::min_element(pts));
+			return pts;
+		}
+
+		// 統合対象を粗くまとめるグループキー（高さ＝下端 z・方位角・断面形状。Python 版
+		// _ground_beam_group_key）。実際に同一軸線上かは modifiersCollinear が見る（粗いキー
+		// だけでは平行な別線上の地中梁も同じグループに入りうる）。
+		using GroundBeamKey = std::tuple<long long, long long, ProfileKey>;
+
+		GroundBeamKey groundBeamGroupKey(const ModifierCommand& modifier)
+		{
+			return GroundBeamKey{roundKey(modifier.origin.z, kGroundBeamMergeTol),
+								 roundKey(modifier.azimuth, kGroundBeamAzimuthTol),
+								 groundBeamProfileKey(modifier)};
+		}
+
+		// 地中梁 a・b が同一軸線・同一高さにあり区間が連続するか（Python 版
+		// _modifiers_collinear）。(1) 高さが一致、(2) 方向が平行、(3) b の原点が a の軸線上
+		// （直交距離 ≈ 0）、(4) a の区間 [0, depth] と b の射影区間が重なる／接触する。
+		bool modifiersCollinear(const ModifierCommand& a, const ModifierCommand& b)
+		{
+			if (std::abs(a.origin.z - b.origin.z) > kGroundBeamMergeTol)
+				return false;
+
+			const Vec2 da = groundBeamAxisDir(a);
+			const Vec2 db = groundBeamAxisDir(b);
+			// 単位方向ベクトルの外積（＝ sin 角）で平行判定
+			if (std::abs((da.x * db.y) - (da.y * db.x)) > kGroundBeamMergeAngleTol)
+				return false;
+
+			const double dx = b.origin.x - a.origin.x;
+			const double dy = b.origin.y - a.origin.y;
+			// b の原点の a 軸線からの直交距離（平行なので b の全点が同じ距離になる）
+			if (std::abs((da.x * dy) - (da.y * dx)) > kGroundBeamMergeTol)
+				return false;
+
+			// b を a 方向へ射影した区間が [0, a.depth] と重なる／接触するか
+			const double t0 = (da.x * dx) + (da.y * dy);
+			const double t1 = t0 + (b.depth * ((da.x * db.x) + (da.y * db.y)));
+			const double lo = std::min(t0, t1);
+			const double hi = std::max(t0, t1);
+			return hi >= -kGroundBeamMergeTol && lo <= a.depth + kGroundBeamMergeTol;
+		}
+
+		// 同一軸線上の地中梁群を 1 本の台形プリズムへ統合する（Python 版
+		// _merge_ground_beam_component）。先頭を基準に全端点（各梁の原点・原点 + depth·方向）を
+		// 軸方向へ射影し、最小〜最大区間を新しい 1 本にする。断面・向き・高さは先頭を引き継ぐ
+		// （全メンバーは同一グループキー＝同一断面・同一向きかつ同一軸線上なので、先頭の断面で
+		// 全長を厳密に表せる）。
+		ModifierCommand mergeGroundBeamComponent(const std::vector<ModifierCommand>& members)
+		{
+			const ModifierCommand& base = members.front();
+			const Vec2 dir = groundBeamAxisDir(base);
+
+			double lo = 0.0;
+			double hi = 0.0;
+			bool first = true;
+			for (const ModifierCommand& member : members)
+			{
+				const double t0 = (dir.x * (member.origin.x - base.origin.x)) +
+								  (dir.y * (member.origin.y - base.origin.y));
+				const Vec2 memberDir = groundBeamAxisDir(member);
+				const double t1 =
+					t0 + (member.depth * ((dir.x * memberDir.x) + (dir.y * memberDir.y)));
+				for (const double t : {t0, t1})
+				{
+					if (first)
+					{
+						lo = t;
+						hi = t;
+						first = false;
+						continue;
+					}
+					lo = std::min(lo, t);
+					hi = std::max(hi, t);
+				}
+			}
+
+			ModifierCommand merged = base;
+			merged.depth = hi - lo;
+			merged.origin =
+				Vec3{base.origin.x + (dir.x * lo), base.origin.y + (dir.y * lo), base.origin.z};
+			return merged;
+		}
+
+		// 同一断面・同一向きの地中梁群のうち、同一軸線上で連続するものを 1 本へ統合する
+		// （Python 版 _merge_ground_beam_group）。Union-Find で連結成分にまとめ、成分ごとに
+		// mergeGroundBeamComponent で 1 本にする。成分の代表は最小インデックスで、出力は
+		// 代表インデックス昇順＝入力順に準ずる。
+		std::vector<GroundBeam> mergeGroundBeamGroup(const std::vector<GroundBeam>& beams)
+		{
+			const std::size_t n = beams.size();
+			std::vector<std::size_t> parent(n);
+			for (std::size_t i = 0; i < n; ++i)
+				parent[i] = i;
+			const auto find = [&parent](std::size_t a)
+			{
+				while (parent[a] != a)
+				{
+					parent[a] = parent[parent[a]];
+					a = parent[a];
+				}
+				return a;
+			};
+			for (std::size_t a = 0; a < n; ++a)
+			{
+				for (std::size_t b = a + 1; b < n; ++b)
+				{
+					if (!modifiersCollinear(beams[a].modifier, beams[b].modifier))
+						continue;
+					const std::size_t ra = find(a);
+					const std::size_t rb = find(b);
+					if (ra != rb)
+						parent[std::max(ra, rb)] = std::min(ra, rb);
+				}
+			}
+
+			std::map<std::size_t, std::vector<std::size_t>> components;
+			for (std::size_t a = 0; a < n; ++a)
+				components[find(a)].push_back(a);
+
+			std::vector<GroundBeam> merged;
+			merged.reserve(components.size());
+			for (const auto& [root, component] : components)
+			{
+				if (component.size() == 1)
+				{
+					merged.push_back(beams[component.front()]);
+					continue;
+				}
+				std::vector<ModifierCommand> members;
+				members.reserve(component.size());
+				for (const std::size_t i : component)
+					members.push_back(beams[i].modifier);
+
+				GroundBeam beam;
+				beam.modifier = mergeGroundBeamComponent(members);
+				beam.footprint = modifierFootprint(beam.modifier);
+				merged.push_back(std::move(beam));
+			}
+			return merged;
+		}
+
+		// 平面外形の重心（頂点の相加平均。Python 版 _polygon_centroid）。
+		Vec2 polygonCentroid(const std::vector<Vec2>& pts)
+		{
+			Vec2 sum;
+			for (const Vec2& p : pts)
+				sum = sum + p;
+			return sum * (1.0 / static_cast<double>(pts.size()));
+		}
+
+		// 平面外形の代表点＝重心・各頂点・各辺の中点（Python 版 _footprint_samples）。
+		// 底盤への振り分けはこの点が外形に入る数で決める。
+		std::vector<Vec2> footprintSamples(const std::vector<Vec2>& pts)
+		{
+			std::vector<Vec2> samples;
+			samples.reserve((2 * pts.size()) + 1);
+			samples.push_back(polygonCentroid(pts));
+			samples.insert(samples.end(), pts.begin(), pts.end());
+			const std::size_t n = pts.size();
+			for (std::size_t i = 0; i < n; ++i)
+				samples.push_back((pts[i] + pts[(i + 1) % n]) * 0.5);
+			return samples;
+		}
+
+		// 外形を pointInPoly が食べる形（丸めない点列）にする。統合（cleanRing）と違い、
+		// ここは包含判定に使うだけなので座標をそのまま持つ。
+		std::vector<Pt2> asRing(const std::vector<Vec2>& boundary)
+		{
+			std::vector<Pt2> ring;
+			ring.reserve(boundary.size());
+			for (const Vec2& p : boundary)
+				ring.emplace_back(p.x, p.y);
+			return ring;
+		}
+
+		// 地中梁の平面外形が最も重なる底盤の索引を返す（Python 版 _best_slab_for_footprint）。
+		// 代表点が外形内に入る数が最大の底盤を選び（同数なら先に現れたもの）、どの底盤にも
+		// 入らないときは重心が最も近い底盤へフォールバックする（継目・下屋等の地中梁を
+		// 取りこぼさない）。底盤が 1 枚も無ければ false。
+		bool bestSlabForFootprint(const std::vector<Vec2>& footprintPts,
+								  const std::vector<SlabCommand>& slabs, std::size_t& out)
+		{
+			if (slabs.empty() || footprintPts.empty())
+				return false;
+
+			std::vector<std::vector<Pt2>> rings;
+			rings.reserve(slabs.size());
+			for (const SlabCommand& slab : slabs)
+				rings.push_back(asRing(slab.boundary));
+
+			const std::vector<Vec2> samples = footprintSamples(footprintPts);
+			std::size_t best = 0;
+			std::size_t bestCount = 0;
+			for (std::size_t i = 0; i < rings.size(); ++i)
+			{
+				std::size_t count = 0;
+				for (const Vec2& sample : samples)
+				{
+					if (pointInPoly(sample.x, sample.y, rings[i]))
+						++count;
+				}
+				if (count > bestCount)
+				{
+					best = i;
+					bestCount = count;
+				}
+			}
+			if (bestCount > 0)
+			{
+				out = best;
+				return true;
+			}
+
+			// フォールバック: 重心が最も近い底盤（同距離なら先に現れたもの）。
+			const Vec2 center = polygonCentroid(footprintPts);
+			std::size_t nearest = 0;
+			double bestDist = 0.0;
+			for (std::size_t i = 0; i < slabs.size(); ++i)
+			{
+				const Vec2 slabCenter = polygonCentroid(slabs[i].boundary);
+				const double dist = std::hypot(center.x - slabCenter.x, center.y - slabCenter.y);
+				if (i == 0 || dist < bestDist)
+				{
+					nearest = i;
+					bestDist = dist;
+				}
+			}
+			out = nearest;
+			return true;
+		}
 	} // namespace
 
 	// --- 公開 API ------------------------------------------------------------------
@@ -1305,13 +1578,139 @@ namespace HomeskzIfcImport::parse
 			cmd.bound = StoryBoundCommand{0, kLevelSlabTop, topAbs - slabTopAbs};
 			commands.push_back(std::move(cmd));
 		}
-		// 地中梁（台形断面のモディファイア）は M10。ここは統合 → 外面合わせまで。
-		return alignSlabsToWallFaces(mergeSlabCommands(commands), walls);
+		// 統合 → 外面合わせ → 地中梁の振り分け。地中梁は**スラブにせず**、平面で最も重なる
+		// 底盤へ噛み合わせるモディファイアとして載せる（振り分けは外形が確定した後に行う）。
+		std::vector<SlabCommand> slabs = alignSlabsToWallFaces(mergeSlabCommands(commands), walls);
+		attachGroundBeamModifiers(slabs, buildGroundBeamModifiers(model, center));
+		return slabs;
 	}
 
 	std::vector<SlabCommand> buildSlabCommands(const Model& model)
 	{
 		Context context(model);
 		return buildSlabCommands(context, context.walls());
+	}
+
+	// --- 地中梁（底盤へ噛み合わせるモディファイア）------------------------------------
+
+	bool groundBeamModifier(const WorldSolid& solid, const Vec2& center, ModifierCommand& out)
+	{
+		// 走る向き（押し出し方向）の水平成分。鉛直押し出し（＝地中梁でない）は方位角が
+		// 定まらないので扱わない。
+		const double runLength = std::hypot(solid.extrudeDir.x, solid.extrudeDir.y);
+		if (runLength <= 0.0)
+			return false;
+		const double ux = solid.extrudeDir.x / runLength;
+		const double uy = solid.extrudeDir.y / runLength;
+
+		// 幅軸 w ＝ 走る向きを +90 度回した水平単位ベクトル（描画の配置行列の u 軸と一致）。
+		const double wx = -uy;
+		const double wy = ux;
+
+		ModifierCommand modifier;
+		modifier.azimuth = std::atan2(uy, ux) * (180.0 / std::numbers::pi);
+		modifier.depth = solid.depth;
+		modifier.origin =
+			Vec3{solid.origin.x - center.x, solid.origin.y - center.y, solid.origin.z};
+
+		// 断面頂点をワールドへ写し、幅軸 u（水平）・鉛直軸 v（ワールド Z の差分）へ取り直す。
+		modifier.profile.reserve(solid.profile.size());
+		for (const Vec2& p : solid.profile)
+		{
+			const Vec3 world = solid.origin + (solid.xAxis * p.x) + (solid.yAxis * p.y);
+			const double u = ((world.x - solid.origin.x) * wx) + ((world.y - solid.origin.y) * wy);
+			modifier.profile.push_back(Vec2{u, world.z - solid.origin.z});
+		}
+
+		out = std::move(modifier);
+		return true;
+	}
+
+	std::vector<Vec2> modifierFootprint(const ModifierCommand& modifier)
+	{
+		const Vec2 dir = groundBeamAxisDir(modifier);
+		const Vec2 width{-dir.y, dir.x}; // 幅軸（groundBeamModifier の w に一致）
+		if (modifier.profile.empty())
+			return {};
+
+		const auto [minU, maxU] = std::ranges::minmax(
+			modifier.profile | std::views::transform([](const Vec2& p) { return p.x; }));
+
+		const Vec2 start{modifier.origin.x, modifier.origin.y};
+		const Vec2 end = start + (dir * modifier.depth);
+		return {start + (width * minU), start + (width * maxU), end + (width * maxU),
+				end + (width * minU)};
+	}
+
+	std::vector<GroundBeam> buildGroundBeamModifiers(const Model& model, const Vec2& center)
+	{
+		std::vector<GroundBeam> beams;
+		for (const int id : model.byType("IFCFOOTING"))
+		{
+			const Entity* element = model.entity(id);
+			if (element == nullptr || !isGroundBeam(entityName(*element)))
+				continue;
+			WorldSolid solid;
+			if (!resolveElementWorldSolid(model, element, solid))
+				continue; // 押し出しを解決できない地中梁はスキップ
+
+			GroundBeam beam;
+			if (!groundBeamModifier(solid, center, beam.modifier))
+				continue; // 水平押し出しでない＝地中梁として扱えない形
+
+			beam.footprint = footprint(solid);
+			for (Vec2& p : beam.footprint)
+			{
+				p.x -= center.x;
+				p.y -= center.y;
+			}
+			beams.push_back(std::move(beam));
+		}
+		return mergeGroundBeamModifiers(beams);
+	}
+
+	std::vector<GroundBeam> mergeGroundBeamModifiers(const std::vector<GroundBeam>& beams)
+	{
+		// グループキーごとにまとめる（グループの並びは最初に現れた順＝入力順に決定的。
+		// 立上り・底盤の統合と同じ作法）。
+		std::map<GroundBeamKey, std::size_t> index;
+		std::vector<std::vector<GroundBeam>> groups;
+		for (const GroundBeam& beam : beams)
+		{
+			const GroundBeamKey key = groundBeamGroupKey(beam.modifier);
+			const auto found = index.find(key);
+			if (found == index.end())
+			{
+				index.emplace(key, groups.size());
+				groups.emplace_back();
+				groups.back().push_back(beam);
+			}
+			else
+			{
+				groups[found->second].push_back(beam);
+			}
+		}
+
+		std::vector<GroundBeam> result;
+		result.reserve(beams.size());
+		for (const std::vector<GroundBeam>& group : groups)
+		{
+			std::vector<GroundBeam> merged = mergeGroundBeamGroup(group);
+			result.insert(result.end(), std::make_move_iterator(merged.begin()),
+						  std::make_move_iterator(merged.end()));
+		}
+		return result;
+	}
+
+	void attachGroundBeamModifiers(std::vector<SlabCommand>& slabs,
+								   const std::vector<GroundBeam>& beams)
+	{
+		for (const GroundBeam& beam : beams)
+		{
+			std::size_t index = 0;
+			if (!bestSlabForFootprint(beam.footprint, slabs, index))
+				continue; // 底盤が 1 枚も無ければ噛み合わせる相手がいない（地中梁を捨てる）
+			slabs[index].modifiers.push_back(beam.modifier);
+		}
 	}
 } // namespace HomeskzIfcImport::parse

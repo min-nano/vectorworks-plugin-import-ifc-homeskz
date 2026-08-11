@@ -4,12 +4,14 @@
 //	Phase 2（VW 描画）の基礎モジュール。Python 版 vw/footing.py に対応する。
 //	命令セットの立上り（core::WallCommand）を**壁オブジェクト**へ、底盤
 //	（core::SlabCommand）を**スラブオブジェクト**へ変換して配置する（ROADMAP.md M9）。
+//	底盤が持つ地中梁（core::ModifierCommand）は押し出しソリッドにして ISDK::ModifySlab で
+//	その底盤へ**噛み合わせる**（ROADMAP.md M10。実装の詳細は .cpp 冒頭）。
 //
 //	【SDK 依存】.cpp は PluginPrefix.h（VectorWorks SDK）を include するため、
 //	SDK ビルドでのみコンパイルされる。この宣言ヘッダ自体は core::Document / core::Progress
 //	しか参照せず SDK ヘッダを引き込まない（draw/*.h 共通の約束。draw/DrawUtil.h 参照）。
 //
-//	地中梁・人通口・壁結合・配筋は M10。本モジュールは立上りと底盤だけを描く。
+//	人通口・壁結合・配筋は M10 の残り。本モジュールは立上りと底盤（＋地中梁）を描く。
 //
 
 #pragma once

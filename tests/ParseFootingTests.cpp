@@ -4,16 +4,18 @@
 //	基礎解析（src/parse/Footing）の単体テスト。VectorWorks SDK を一切 include せず、
 //	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
 //	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_footing.py の
-//	**M9 に相当するケース**（立上り・底盤・基礎ストーリ）を 1 対 1 で写している
-//	（地中梁・人通口・壁結合・配筋のケースは M10）。
+//	**M9（立上り・底盤・基礎ストーリ）と M10 の地中梁**に相当するケースを 1 対 1 で
+//	写している（人通口・壁結合・配筋のケースは M10 の残り）。
 //
-//	検証項目（ROADMAP.md M9）:
+//	検証項目（ROADMAP.md M9・M10）:
 //	  * Name による基礎要素の判別（立上り／地中梁／底盤）
 //	  * 基礎ストーリ（"基礎" / suffix "F" / GL=0・レベルとレイヤ）
 //	  * 底盤天端＝面積最大の天端 Z、立上り下端＝IFC 実形状（呑み込み補正なし）
 //	  * 立上りの統合（同一直線・同一断面のみ）と自由端の半壁厚延長（柱芯スナップ）
 //	  * 底盤の統合（辺共有・面重なりの連結成分の多角形和。穴・隙間・角接触は統合しない）
 //	  * 底盤外周の外面合わせ（辺ごとに沿う立上りの半壁厚だけ外へ）
+//	  * 地中梁 → モディファイア（断面の取り直し・方位角・**描画の配置行列規約との往復**）、
+//	    同一軸線上の統合、平面で最も重なる底盤への振り分け
 //	  * 実フィクスチャでの形（レイヤ・クラス・バインド・不変条件）と決定性
 //	実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -24,6 +26,7 @@
 #include "core/Document.h"
 #include "parse/Context.h"
 #include "parse/Footing.h"
+#include "parse/IfcAttr.h"
 #include "parse/Loader.h"
 #include "parse/Story.h"
 #include "parse/StructuralClass.h"
@@ -31,18 +34,23 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <numbers>
 #include <set>
 #include <string>
 #include <vector>
 
 using namespace HomeskzIfcImport;
+using HomeskzIfcImport::core::ModifierCommand;
 using HomeskzIfcImport::core::SlabCommand;
 using HomeskzIfcImport::core::StoryBoundCommand;
 using HomeskzIfcImport::core::StoryCommand;
 using HomeskzIfcImport::core::Vec2;
+using HomeskzIfcImport::core::Vec3;
 using HomeskzIfcImport::core::WallCommand;
 using HomeskzIfcImport::parse::alignSlabsToWallFaces;
+using HomeskzIfcImport::parse::attachGroundBeamModifiers;
 using HomeskzIfcImport::parse::buildFoundationStoryCommand;
+using HomeskzIfcImport::parse::buildGroundBeamModifiers;
 using HomeskzIfcImport::parse::buildSlabCommands;
 using HomeskzIfcImport::parse::buildWallCommands;
 using HomeskzIfcImport::parse::CLASS_FOUNDATION_SLAB;
@@ -51,6 +59,8 @@ using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::extendFreeWallEnds;
 using HomeskzIfcImport::parse::foundationSlabStyleName;
 using HomeskzIfcImport::parse::foundationWallStyleName;
+using HomeskzIfcImport::parse::GroundBeam;
+using HomeskzIfcImport::parse::groundBeamModifier;
 using HomeskzIfcImport::parse::hasFoundation;
 using HomeskzIfcImport::parse::isBaseSlab;
 using HomeskzIfcImport::parse::isFoundationWall;
@@ -62,10 +72,14 @@ using HomeskzIfcImport::parse::kLevelBeamTop;
 using HomeskzIfcImport::parse::kLevelGL;
 using HomeskzIfcImport::parse::kLevelSlabTop;
 using HomeskzIfcImport::parse::kStoryFoundation;
+using HomeskzIfcImport::parse::mergeGroundBeamModifiers;
 using HomeskzIfcImport::parse::mergeSlabCommands;
 using HomeskzIfcImport::parse::mergeWallCommands;
 using HomeskzIfcImport::parse::Model;
+using HomeskzIfcImport::parse::modifierFootprint;
+using HomeskzIfcImport::parse::resolveElementWorldSolid;
 using HomeskzIfcImport::parse::resolveSlabTopElevation;
+using HomeskzIfcImport::parse::WorldSolid;
 using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
 using HomeskzIfcTests::near;
@@ -107,6 +121,28 @@ namespace
 	std::vector<Vec2> rect(double x1, double y1, double x2, double y2)
 	{
 		return {Vec2{x1, y1}, Vec2{x2, y1}, Vec2{x2, y2}, Vec2{x1, y2}};
+	}
+
+	// 合成の地中梁モディファイア（Python 版 _modifier と同じ既定値。台形断面の下り梁で、
+	// v=0 が下端・u が幅方向）。
+	ModifierCommand modifier(Vec3 origin, double azimuth = 0.0, double depth = 1000.0)
+	{
+		ModifierCommand cmd;
+		cmd.profile = {Vec2{0.0, 0.0}, Vec2{-150.0, 0.0}, Vec2{-290.0, 140.0}, Vec2{0.0, 140.0}};
+		cmd.depth = depth;
+		cmd.origin = origin;
+		cmd.azimuth = azimuth;
+		return cmd;
+	}
+
+	// 合成の地中梁（モディファイア＋平面外形）。統合のテストは外形を見ないので、Python 版
+	// と同じくダミーの 3 頂点を入れておく（統合されたものは掃引矩形へ作り直される）。
+	GroundBeam beam(Vec3 origin, double azimuth = 0.0, double depth = 1000.0)
+	{
+		GroundBeam value;
+		value.modifier = modifier(origin, azimuth, depth);
+		value.footprint = {Vec2{0.0, 0.0}, Vec2{1.0, 0.0}, Vec2{1.0, 1.0}};
+		return value;
 	}
 
 	// 自由端の終端柱判定用の最小の柱命令（位置しか使わない）。
@@ -735,6 +771,291 @@ TEST(base_slab_outer_boundary_matches_wall_outer_face)
 	const double faceMaxX = maxX(biggest(withFace).boundary);
 	const double centerMaxX = maxX(biggest(centerline).boundary);
 	CHECK(near(faceMaxX - centerMaxX, 60.0, 0.5));
+}
+
+// ---------------------------------------------------------------------------
+// 地中梁 → 底盤へ噛み合わせるモディファイア（groundBeamModifier）
+//   Python 版 TestGroundBeamModifier
+// ---------------------------------------------------------------------------
+
+TEST(ground_beam_modifier_from_horizontal_solid)
+{
+	// 水平押し出し（+X）・鉛直断面（yAxis=+Z）の台形地中梁。
+	WorldSolid solid;
+	solid.origin = Vec3{1000.0, 2000.0, -240.0};
+	solid.xAxis = Vec3{0.0, 1.0, 0.0};
+	solid.yAxis = Vec3{0.0, 0.0, 1.0};
+	solid.zAxis = Vec3{1.0, 0.0, 0.0};
+	solid.extrudeDir = Vec3{1.0, 0.0, 0.0};
+	solid.depth = 1060.0;
+	solid.profile = {Vec2{0.0, 0.0}, Vec2{-150.0, 0.0}, Vec2{-290.0, 140.0}, Vec2{0.0, 140.0}};
+
+	ModifierCommand modifier;
+	CHECK(groundBeamModifier(solid, Vec2{100.0, 200.0}, modifier));
+	CHECK(near(modifier.depth, 1060.0));
+	CHECK(near(modifier.azimuth, 0.0));
+	// XY はセンタリング済み、z は絶対値（梁下端）。
+	CHECK(near(modifier.origin.x, 900.0) && near(modifier.origin.y, 1800.0) &&
+		  near(modifier.origin.z, -240.0));
+	// 幅軸 u・鉛直軸 v の断面。この配置では元の (u, v) と一致する。
+	CHECK_EQ(modifier.profile.size(), solid.profile.size());
+	for (std::size_t i = 0; i < modifier.profile.size() && i < solid.profile.size(); ++i)
+	{
+		CHECK(near(modifier.profile[i].x, solid.profile[i].x));
+		CHECK(near(modifier.profile[i].y, solid.profile[i].y));
+	}
+}
+
+TEST(ground_beam_modifier_rejects_vertical_extrude)
+{
+	// 鉛直押し出しは地中梁でない（通常起きない）ので方位角が定まらず false。
+	WorldSolid solid;
+	solid.xAxis = Vec3{1.0, 0.0, 0.0};
+	solid.yAxis = Vec3{0.0, 1.0, 0.0};
+	solid.zAxis = Vec3{0.0, 0.0, 1.0};
+	solid.extrudeDir = Vec3{0.0, 0.0, 1.0};
+	solid.depth = 100.0;
+	solid.profile = {Vec2{0.0, 0.0}, Vec2{1.0, 0.0}, Vec2{1.0, 1.0}};
+
+	ModifierCommand modifier;
+	CHECK(!groundBeamModifier(solid, Vec2{0.0, 0.0}, modifier));
+}
+
+TEST(ground_beam_modifier_azimuth_from_run_direction)
+{
+	// 押し出し +Y → 方位角 90 度。
+	WorldSolid solid;
+	solid.xAxis = Vec3{-1.0, 0.0, 0.0};
+	solid.yAxis = Vec3{0.0, 0.0, 1.0};
+	solid.zAxis = Vec3{0.0, 1.0, 0.0};
+	solid.extrudeDir = Vec3{0.0, 1.0, 0.0};
+	solid.depth = 500.0;
+	solid.profile = {Vec2{0.0, 0.0}, Vec2{-150.0, 0.0}, Vec2{-290.0, 140.0}, Vec2{0.0, 140.0}};
+
+	ModifierCommand modifier;
+	CHECK(groundBeamModifier(solid, Vec2{0.0, 0.0}, modifier));
+	CHECK(near(modifier.azimuth, 90.0));
+}
+
+TEST(ground_beam_modifier_roundtrips_to_solid_world)
+{
+	// モディファイアの (profile, origin, azimuth, depth) が、**描画フェーズの配置行列の規約**
+	// （u 軸＝幅軸 w・v 軸＝ワールド +Z・押し出し軸＝走る向き。core/Document.h の
+	// ModifierCommand）で元ソリッドのワールド座標（センタリング済み）を復元すること。
+	// 解析側と描画側の座標規約がズレていないことを、SDK 抜きで確かめる関門
+	// （Python 版 test_modifiers_roundtrip_to_solid_world に対応）。
+	bool ok = false;
+	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	CHECK(ok);
+	Context context(model);
+	const Vec2 center = context.gridCenter();
+
+	std::size_t checked = 0;
+	double maxError = 0.0;
+	for (const int id : model.byType("IFCFOOTING"))
+	{
+		const HomeskzIfcImport::parse::Entity* element = model.entity(id);
+		if (element == nullptr || !HomeskzIfcImport::parse::isGroundBeam(entityName(*element)))
+			continue;
+		WorldSolid solid;
+		if (!resolveElementWorldSolid(model, element, solid))
+			continue;
+		ModifierCommand modifier;
+		CHECK(groundBeamModifier(solid, center, modifier));
+
+		const double phi = modifier.azimuth * (std::numbers::pi / 180.0);
+		const double dirX = std::cos(phi);
+		const double dirY = std::sin(phi);
+		for (std::size_t i = 0; i < solid.profile.size(); ++i)
+		{
+			const Vec2& raw = solid.profile[i];
+			const Vec2& section = modifier.profile[i];
+			for (const double t : {0.0, solid.depth})
+			{
+				// 元ソリッドのワールド点（センタリング済み）
+				const Vec3 base = solid.origin + (solid.xAxis * raw.x) + (solid.yAxis * raw.y) +
+								  (solid.extrudeDir * t);
+				// 描画側の規約で復元した点: origin + w·u + ẑ·v + d·t
+				const Vec3 drawn{modifier.origin.x - (section.x * dirY) + (t * dirX),
+								 modifier.origin.y + (section.x * dirX) + (t * dirY),
+								 modifier.origin.z + section.y};
+				maxError = std::max(maxError, std::abs(base.x - center.x - drawn.x));
+				maxError = std::max(maxError, std::abs(base.y - center.y - drawn.y));
+				maxError = std::max(maxError, std::abs(base.z - drawn.z));
+				++checked;
+			}
+		}
+	}
+	CHECK(checked > 0);
+	CHECK(maxError < 1e-6);
+}
+
+TEST(modifier_footprint_is_swept_rectangle)
+{
+	// 統合後のモディファイアの平面外形は、断面の u 範囲を軸に直交する幅として掃引した矩形。
+	const std::vector<Vec2> footprintPts = modifierFootprint(modifier(Vec3{0.0, 0.0, -240.0}));
+	CHECK_EQ(footprintPts.size(), std::size_t{4});
+	if (footprintPts.size() != 4)
+		return;
+	// 方位角 0（+X へ 1000 走る）・断面 u ∈ [−290, 0] なので、幅軸 +Y 側の矩形になる。
+	CHECK(near(minX(footprintPts), 0.0) && near(maxX(footprintPts), 1000.0));
+	CHECK(near(minY(footprintPts), -290.0) && near(maxY(footprintPts), 0.0));
+}
+
+// ---------------------------------------------------------------------------
+// 地中梁の統合（mergeGroundBeamModifiers）— Python 版 TestMergeGroundBeamModifiers
+// ---------------------------------------------------------------------------
+
+TEST(merge_ground_beams_collinear_contiguous_into_one)
+{
+	const std::vector<GroundBeam> merged =
+		mergeGroundBeamModifiers({beam(Vec3{0.0, 0.0, -240.0}), beam(Vec3{1000.0, 0.0, -240.0})});
+	CHECK_EQ(merged.size(), std::size_t{1});
+	if (merged.empty())
+		return;
+	CHECK(near(merged[0].modifier.depth, 2000.0));
+	CHECK(near(merged[0].modifier.origin.x, 0.0) && near(merged[0].modifier.origin.y, 0.0) &&
+		  near(merged[0].modifier.origin.z, -240.0));
+	// 統合後の平面外形は掃引矩形（4 頂点）に作り直す。
+	CHECK_EQ(merged[0].footprint.size(), std::size_t{4});
+}
+
+TEST(merge_ground_beams_collinear_overlapping)
+{
+	// 区間が重なる（継目の削り分で長め）地中梁も 1 本になる。
+	const std::vector<GroundBeam> merged = mergeGroundBeamModifiers(
+		{beam(Vec3{0.0, 0.0, -240.0}, 0.0, 1200.0), beam(Vec3{1000.0, 0.0, -240.0}, 0.0, 1000.0)});
+	CHECK_EQ(merged.size(), std::size_t{1});
+	if (merged.empty())
+		return;
+	CHECK(near(merged[0].modifier.depth, 2000.0));
+}
+
+TEST(merge_ground_beams_gap_not_merged)
+{
+	// 同一直線上でも隙間（> 許容値）がある地中梁は統合しない（実在しない梁を作らない）。
+	CHECK_EQ(
+		mergeGroundBeamModifiers({beam(Vec3{0.0, 0.0, -240.0}), beam(Vec3{1100.0, 0.0, -240.0})})
+			.size(),
+		std::size_t{2});
+}
+
+TEST(merge_ground_beams_parallel_different_line_not_merged)
+{
+	// 平行だが別の線上（直交距離あり）の地中梁は統合しない。
+	CHECK_EQ(
+		mergeGroundBeamModifiers({beam(Vec3{0.0, 0.0, -240.0}), beam(Vec3{1000.0, 500.0, -240.0})})
+			.size(),
+		std::size_t{2});
+}
+
+TEST(merge_ground_beams_different_height_not_merged)
+{
+	CHECK_EQ(
+		mergeGroundBeamModifiers({beam(Vec3{0.0, 0.0, -240.0}), beam(Vec3{1000.0, 0.0, -300.0})})
+			.size(),
+		std::size_t{2});
+}
+
+TEST(merge_ground_beams_different_section_not_merged)
+{
+	// 断面形状の異なる地中梁は統合しない（統合すると片方の断面が失われる）。
+	GroundBeam other = beam(Vec3{1000.0, 0.0, -240.0});
+	other.modifier.profile = {Vec2{0.0, 0.0}, Vec2{-100.0, 0.0}, Vec2{-100.0, 200.0},
+							  Vec2{0.0, 200.0}};
+	CHECK_EQ(mergeGroundBeamModifiers({beam(Vec3{0.0, 0.0, -240.0}), other}).size(),
+			 std::size_t{2});
+}
+
+TEST(merge_ground_beams_different_direction_not_merged)
+{
+	// 直交する向き（方位角の違う）地中梁は統合しない。
+	CHECK_EQ(mergeGroundBeamModifiers(
+				 {beam(Vec3{0.0, 0.0, -240.0}, 0.0), beam(Vec3{1000.0, 0.0, -240.0}, 90.0)})
+				 .size(),
+			 std::size_t{2});
+}
+
+TEST(merge_ground_beams_chain_of_three_into_one)
+{
+	const std::vector<GroundBeam> merged =
+		mergeGroundBeamModifiers({beam(Vec3{0.0, 0.0, -240.0}), beam(Vec3{1000.0, 0.0, -240.0}),
+								  beam(Vec3{2000.0, 0.0, -240.0})});
+	CHECK_EQ(merged.size(), std::size_t{1});
+	if (merged.empty())
+		return;
+	CHECK(near(merged[0].modifier.depth, 3000.0));
+}
+
+TEST(merge_ground_beams_single_passthrough)
+{
+	// 1 本だけの成分は形も外形もそのまま（掃引矩形へ作り直さない）。
+	const GroundBeam only = beam(Vec3{0.0, 0.0, -240.0});
+	const std::vector<GroundBeam> merged = mergeGroundBeamModifiers({only});
+	CHECK_EQ(merged.size(), std::size_t{1});
+	if (merged.empty())
+		return;
+	CHECK(near(merged[0].modifier.depth, only.modifier.depth));
+	CHECK_EQ(merged[0].footprint.size(), only.footprint.size());
+}
+
+// ---------------------------------------------------------------------------
+// 地中梁の底盤への振り分け（attachGroundBeamModifiers）
+//   Python 版 TestAttachGroundBeamModifiers
+// ---------------------------------------------------------------------------
+
+TEST(attach_ground_beam_to_overlapping_slab)
+{
+	std::vector<SlabCommand> slabs{slab(rect(0.0, 0.0, 1000.0, 1000.0)),
+								   slab(rect(5000.0, 0.0, 6000.0, 1000.0))};
+	GroundBeam target = beam(Vec3{400.0, 400.0, -240.0});
+	target.footprint = rect(300.0, 300.0, 700.0, 700.0);
+	attachGroundBeamModifiers(slabs, {target});
+	CHECK_EQ(slabs[0].modifiers.size(), std::size_t{1});
+	CHECK(slabs[1].modifiers.empty());
+}
+
+TEST(attach_ground_beam_falls_back_to_nearest_slab)
+{
+	// どちらの底盤の外にもある（継目・下屋等）地中梁は、重心が最も近い底盤へ付けて
+	// 取りこぼさない。
+	std::vector<SlabCommand> slabs{slab(rect(0.0, 0.0, 1000.0, 1000.0)),
+								   slab(rect(5000.0, 0.0, 6000.0, 1000.0))};
+	GroundBeam far = beam(Vec3{5500.0, 3000.0, -240.0});
+	far.footprint = rect(5400.0, 3000.0, 5600.0, 3100.0);
+	attachGroundBeamModifiers(slabs, {far});
+	CHECK(slabs[0].modifiers.empty());
+	CHECK_EQ(slabs[1].modifiers.size(), std::size_t{1});
+}
+
+TEST(attach_ground_beam_without_slabs_drops_silently)
+{
+	// 底盤が 1 枚も無ければ噛み合わせる相手がいない（例外を出さずに捨てる）。
+	std::vector<SlabCommand> slabs;
+	attachGroundBeamModifiers(slabs, {beam(Vec3{0.0, 0.0, 0.0})});
+	CHECK(slabs.empty());
+}
+
+TEST(build_slab_commands_attaches_all_ground_beams)
+{
+	// 実フィクスチャ: 統合後の全地中梁がいずれかの底盤に収まる（取りこぼさない）。
+	// 地中梁は**単独のスラブにならない**（スラブはすべて底盤＝コンクリート厚を持つ）。
+	bool ok = false;
+	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	CHECK(ok);
+	Context context(model);
+	const std::vector<GroundBeam> beams = buildGroundBeamModifiers(model, context.gridCenter());
+	const std::vector<SlabCommand> slabs = buildSlabCommands(model);
+
+	std::size_t attached = 0;
+	for (const SlabCommand& command : slabs)
+	{
+		attached += command.modifiers.size();
+		CHECK(command.thickness > 0.0);
+	}
+	CHECK_EQ(attached, beams.size());
+	// 23 本の地中梁が 13 本へ統合される（Python 版と同じ本数。細切れの梁がつながる）。
+	CHECK_EQ(beams.size(), std::size_t{13});
 }
 
 TEST(all_fixtures_parse_without_error)

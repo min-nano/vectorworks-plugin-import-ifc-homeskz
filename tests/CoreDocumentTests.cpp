@@ -754,6 +754,48 @@ TEST(validate_rejects_slab_with_nonpositive_thickness)
 	CHECK(!core::validateDocument(document));
 }
 
+TEST(validate_accepts_slab_with_ground_beam_modifier)
+{
+	// 地中梁（底盤へ噛み合わせる台形プリズム）を持つ底盤は妥当。
+	core::Document document;
+	core::SlabCommand slab = validSlab();
+	core::ModifierCommand modifier;
+	modifier.profile = {core::Vec2{0.0, 0.0}, core::Vec2{-150.0, 0.0}, core::Vec2{-290.0, 140.0},
+						core::Vec2{0.0, 140.0}};
+	modifier.depth = 2940.0;
+	modifier.origin = core::Vec3{760.0, 5520.0, -240.0};
+	modifier.azimuth = 0.0;
+	slab.modifiers.push_back(modifier);
+	document.slabs.push_back(slab);
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_ground_beam_modifier_with_bad_profile_or_depth)
+{
+	// 断面が 3 点未満（面にならない）／押し出し長が 0 以下（角柱にならない）の
+	// モディファイアは描けない。
+	core::ModifierCommand valid;
+	valid.profile = {core::Vec2{0.0, 0.0}, core::Vec2{-150.0, 0.0}, core::Vec2{-290.0, 140.0},
+					 core::Vec2{0.0, 140.0}};
+	valid.depth = 2940.0;
+
+	core::Document profile;
+	core::SlabCommand slab = validSlab();
+	core::ModifierCommand modifier = valid;
+	modifier.profile = {core::Vec2{0.0, 0.0}, core::Vec2{-150.0, 0.0}};
+	slab.modifiers.push_back(modifier);
+	profile.slabs.push_back(slab);
+	CHECK(!core::validateDocument(profile));
+
+	core::Document depth;
+	slab = validSlab();
+	modifier = valid;
+	modifier.depth = 0.0;
+	slab.modifiers.push_back(modifier);
+	depth.slabs.push_back(slab);
+	CHECK(!core::validateDocument(depth));
+}
+
 TEST(validate_rejects_slab_with_no_components_or_empty_bound_level)
 {
 	core::Document components;

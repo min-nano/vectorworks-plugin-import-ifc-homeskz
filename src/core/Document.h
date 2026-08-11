@@ -402,6 +402,36 @@ namespace HomeskzIfcImport::core
 		StoryBoundCommand topBound;
 	};
 
+	// 底盤スラブへ**噛み合わせる**地中梁（台形断面プリズム）のモディファイア。Python 版
+	// document.py の ModifierCommand（dict）に対応する。draw/Footing がこれを押し出し
+	// ソリッドにして ModifySlab で底盤へ足す（ROADMAP.md M10）。
+	//
+	// 地中梁は下り梁で断面が台形（下端が狭く上端が広い）のため、単一のスラブオブジェクトでは
+	// 描けない。底盤コンクリートに 3D ソリッドとして噛み合わせて実形状を表す。
+	//
+	// 【形の持ち方】断面（profile）を押し出し方向へ depth だけ**水平に**掃引した角柱。
+	//   * profile … 断面の 2D 頂点列。u＝幅方向（押し出し方向に直交する水平軸）・
+	//                v＝鉛直方向（v=0 が梁の下端）。末尾に始点を重複させない。
+	//   * origin  … 断面原点（profile の (0,0)）のワールド座標。XY はグリッド中心
+	//                オフセット済み、z は**絶対値**（＝梁下端の Z）。
+	//   * azimuth … 押し出し方向（梁の走る向き）の方位角（度・+X から反時計回り）。
+	//
+	// 【描画側の座標規約】draw/Footing は配置行列（VWTransformMatrix）の 3 軸へ
+	// 「u 軸＝走る向きを +90 度回した水平単位ベクトル w」「v 軸＝ワールド +Z」
+	// 「押し出し軸＝走る向き」を入れて、断面をそのままワールドへ写す。解析側の u 軸の
+	// 取り方はこの規約と一致させてある（parse/Footing の groundBeamModifier。
+	// Python 版は Rotate3D を 2 回かける手順だが、C++ は行列を直接組める）。
+	//
+	// Python 版キーとの対応:
+	//   profile ← 'profile' / depth ← 'depth' / origin ← 'origin' / azimuth ← 'azimuth'
+	struct ModifierCommand
+	{
+		std::vector<Vec2> profile;
+		double depth = 0.0;
+		Vec3 origin;
+		double azimuth = 0.0;
+	};
+
 	// 基礎の底盤をスラブオブジェクトとして描く命令。Python 版 document.py の SlabCommand
 	// （dict）に対応する。draw/Footing がこれをスラブへ変換する（ROADMAP.md M9）。床板
 	// （FloorCommand）と描画の作法は同じで、構成層とスタイル名の中身だけが基礎向けになる。
@@ -415,7 +445,11 @@ namespace HomeskzIfcImport::core
 	// styleName はコンクリート厚ごとに 1 つ（"基礎スラブ - コンクリート 150mm / 捨てコン
 	// 30mm / 砕石 100mm"）で、厚みの違う底盤は別スタイルになる（parse/Footing.h）。
 	//
-	// Python 版キーとの対応（reinforcement＝配筋・modifiers＝地中梁は M10）:
+	// 【地中梁（modifiers）】台形断面のため単独のスラブにできない地中梁を、平面で重なる
+	// 底盤へ**噛み合わせるモディファイア**として持たせる（parse/Footing が振り分ける）。
+	// 空のことが多い（地中梁の無い基礎・そもそも底盤が 1 枚も無い場合）。配筋は M10 の残り。
+	//
+	// Python 版キーとの対応（reinforcement＝配筋は M10）:
 	//   layer      ← 'layer'      … 配置先デザインレイヤ名（"F-底盤"）
 	//   drawClass  ← 'class'      … クラス名（基礎スラブ。予約語 class を機械置換）
 	//   boundary   ← 'boundary'   … 平面外形（mm・グリッド中心オフセット済み。閉じた
@@ -426,6 +460,7 @@ namespace HomeskzIfcImport::core
 	//   thickness  ← 'thickness'  … コンクリート厚（mm。整数に丸めた値）
 	//   elevation  ← 'elevation'  … コンクリート天端の絶対 Z
 	//   bound      ← 'bound'      … 天端の高さ基準（底盤天端レベル＋差分）
+	//   modifiers  ← 'modifiers'  … この底盤へ噛み合わせる地中梁（ModifierCommand の列）
 	struct SlabCommand
 	{
 		std::string layer;
@@ -437,13 +472,14 @@ namespace HomeskzIfcImport::core
 		double thickness = 0.0;
 		double elevation = 0.0;
 		StoryBoundCommand bound;
+		std::vector<ModifierCommand> modifiers;
 	};
 
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
 	// TODO: 要素ごとに命令リストを追加していく（フィールド名は Python 版のキーに対応）。
-	//   * M10 wallJoins / modifiers（地中梁）…
+	//   * M10 wallJoins（壁結合）… 地中梁は SlabCommand::modifiers として実装済み
 	//   スキーマを変えるときは構造体・validateDocument・テストを同時更新する。
 	struct Document
 	{

@@ -7,8 +7,8 @@
 //
 //	  * 立上り（基礎梁。Name が "基礎梁" 始まりの IfcFooting）→ **壁**（core::WallCommand）
 //	  * 底盤（Name に "底盤" を含む IfcSlab / IfcFooting）→ **スラブ**（core::SlabCommand）
-//	  * 地中梁（Name に "地中梁" を含む IfcFooting）→ **M10**。本 M では読み飛ばす
-//	    （台形断面のため単一のスラブでは描けず、底盤のモディファイア＋可視ソリッドになる）。
+//	  * 地中梁（Name に "地中梁" を含む IfcFooting）→ 底盤へ**噛み合わせるモディファイア**
+//	    （core::ModifierCommand。台形断面のため単一のスラブでは描けない。ROADMAP.md M10）
 //
 //	加えて、基礎要素があるときだけ**基礎ストーリ**（"基礎" / suffix "F" / GL=0）を組み立てる。
 //	buildDocument はこれを stories の**先頭**（最下層）へ置く（parse/BuildDocument）。
@@ -30,16 +30,18 @@
 //	  2. extendFreeWallEnds … 他の立上りと交差しない端点を「柱芯 + 半壁厚」へ延長する
 //	の順に通してから命令にする。人通口（立上りの切り下げ）と壁結合は M10。
 //
-//	【底盤の後処理も 2 段】
-//	  1. mergeSlabCommands      … 同厚・同高で連続する底盤を多角形の和で 1 枚へ統合する
-//	  2. alignSlabsToWallFaces  … 外形が立上りの**壁心**に一致しているので、辺ごとに沿う
-//	                              立上りの**外面**（壁心 + 半壁厚）まで外側へ広げる
+//	【底盤の後処理は 3 段】
+//	  1. mergeSlabCommands          … 同厚・同高で連続する底盤を多角形の和で 1 枚へ統合する
+//	  2. alignSlabsToWallFaces      … 外形が立上りの**壁心**に一致しているので、辺ごとに沿う
+//	                                  立上りの**外面**（壁心 + 半壁厚）まで外側へ広げる
+//	  3. attachGroundBeamModifiers  … 地中梁（統合済み）を平面で最も重なる底盤へ振り分ける
 //
 
 #pragma once
 
 #include "core/Document.h"
 #include "core/Geometry.h"
+#include "parse/IfcGeometry.h"
 #include "parse/Step.h"
 
 #include <string>
@@ -89,6 +91,14 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kSlabMergeTol = 1.0;
 	inline constexpr double kSlabAngleTol = 1e-3;
 	inline constexpr double kSlabSideEps = 1e-2;
+
+	// 地中梁の統合の許容値（Python 版 _GROUND_BEAM_MERGE_TOL / _GROUND_BEAM_MERGE_ANGLE_TOL /
+	// _GROUND_BEAM_PROFILE_TOL / _GROUND_BEAM_AZIMUTH_TOL）。順に 距離（mm。高さ・軸線からの
+	// 直交距離・区間の隙間）・平行判定（sin 角）・断面キーの丸め（mm）・方位角キーの丸め（度）。
+	inline constexpr double kGroundBeamMergeTol = 1.0;
+	inline constexpr double kGroundBeamMergeAngleTol = 1e-3;
+	inline constexpr double kGroundBeamProfileTol = 1.0;
+	inline constexpr double kGroundBeamAzimuthTol = 0.1;
 
 	// 基礎の構成層の名前。立上りは コンクリート 1 層、底盤は 上から コンクリート → 捨てコン →
 	// 砕石。コンクリート厚は要素ソリッドの実寸（整数 mm に丸めたもの）で、捨てコン・砕石は既定値。
@@ -192,8 +202,9 @@ namespace HomeskzIfcImport::parse
 	// 値を thickness（＝スラブスタイルのコンクリート厚）に入れる。天端は底盤天端レベルへ
 	// バインドし、offset は実天端 Z と底盤天端の絶対 Z の差（主たる底盤は ≈0）。
 	//
-	// 組み立てたあと mergeSlabCommands → alignSlabsToWallFaces を通す（外面合わせに使う
-	// 立上りは walls）。地中梁はスラブにしない（M10 でモディファイアにする）。
+	// 組み立てたあと mergeSlabCommands → alignSlabsToWallFaces → attachGroundBeamModifiers を
+	// 通す（外面合わせに使う立上りは walls）。**地中梁はスラブにせず**、噛み合わせる底盤の
+	// modifiers に載る。
 	std::vector<core::SlabCommand> buildSlabCommands(const Model& model);
 	std::vector<core::SlabCommand> buildSlabCommands(Context& context,
 													 const std::vector<core::WallCommand>& walls);
@@ -217,4 +228,68 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::SlabCommand>
 	alignSlabsToWallFaces(const std::vector<core::SlabCommand>& slabs,
 						  const std::vector<core::WallCommand>& walls);
+
+	// --- 地中梁（底盤へ噛み合わせるモディファイア）--------------------------------
+	//
+	// 地中梁は台形断面（下端が狭く上端が広い下り梁）の水平押し出しソリッドで、単一の
+	// スラブオブジェクトでは描けない。底盤コンクリートへ**噛み合わせる**角柱
+	// （core::ModifierCommand）にして、平面で重なる底盤の modifiers に載せる。
+	//
+	// ［Python 版と実現手段が異なる点］Python 版は同じ角柱を **2 回**作る——(1) 底盤を
+	// 削り取る clip モディファイア（SetCustomObjectProfileGroup）と (2) 削った位置を
+	// 埋める可視の 3D ソリッド——が、これは **VectorScript に「足す」形で噛み合わせる
+	// 手段が無かった**ための回避策（ModifySlab は「選択が間違っています」で失敗、
+	// CreateCustomObjectPath は作成時ダイアログ＋再実行クラッシュ、後付けの
+	// SetCustomObjectProfileGroup は未確定で底盤が不可視）。C++ SDK には
+	// **ISDK::ModifySlab(slab, modifier, isClipObject, componentFlags)**（"Adds to or
+	// clips from a slab"）があり、isClipObject=false で**足す**モディファイアとして
+	// そのまま噛み合わせられる（ci-debug の sdk-grep で実在を確認）。したがって解析側は
+	// **地中梁 1 本につきモディファイア 1 つ**だけを出し、可視ソリッド用の複製は持たない。
+
+	// 地中梁 1 本＝（モディファイア命令, 平面外形）。平面外形は底盤への振り分け
+	// （attachGroundBeamModifiers）だけに使う中間データなので命令には載せない
+	// （Python 版が tuple[ModifierCommand, list[_Pt2]] で持ち回すのと同じ）。
+	struct GroundBeam
+	{
+		core::ModifierCommand modifier;
+		std::vector<Vec2> footprint;
+	};
+
+	// 地中梁の押し出しソリッドを台形プリズムのモディファイア命令にする（Python 版
+	// _ground_beam_modifier）。押し出し方向（梁の走る向き）の水平成分から方位角を求め、
+	// 断面頂点を**幅軸 u**（走る向きを +90 度回した水平単位ベクトル w）・**鉛直軸 v**
+	// （ワールド Z の差分）へ取り直す。origin の XY は center でセンタリングし、z は絶対値
+	// （＝梁下端の Z）。押し出しが水平でない（鉛直＝地中梁でない）ソリッドは false。
+	//
+	// u 軸の取り方（w）は描画フェーズの配置行列の規約（u 軸＝w・v 軸＝ワールド +Z・
+	// 押し出し軸＝走る向き。core/Document.h の ModifierCommand）と一致させてある。
+	bool groundBeamModifier(const WorldSolid& solid, const Vec2& center,
+							core::ModifierCommand& out);
+
+	// モディファイア（台形プリズム）の平面外形＝掃引した矩形を返す（Python 版
+	// _modifier_footprint）。断面の u 範囲を軸に直交する幅、depth を軸方向の長さとする。
+	std::vector<Vec2> modifierFootprint(const core::ModifierCommand& modifier);
+
+	// 地中梁（Name に "地中梁" を含む IfcFooting）をモディファイアへ変換して返す（Python 版
+	// _build_ground_beam_modifiers）。組み立てたあと mergeGroundBeamModifiers を通す。
+	std::vector<GroundBeam> buildGroundBeamModifiers(const Model& model, const Vec2& center);
+
+	// 同一直線上に並ぶ同一断面形状の地中梁を 1 本の台形プリズムへ統合する（Python 版
+	// _merge_ground_beam_modifiers）。ホームズ君 IFC では 1 本の地中梁が通り芯の交点等で
+	// 細かく分断されているため、立上り・底盤と同じ方針で統合する。グループキー（高さ＝
+	// 下端 z・方位角・断面形状）ごとにまとめ、各グループ内で Union-Find により「同一軸線上で
+	// 区間が重なる／接触する」連結成分を求め、成分ごとに先頭の軸方向へ全端点を射影した
+	// 最小〜最大区間の 1 本にする（断面・向き・高さは先頭を引き継ぐ）。
+	//
+	// **統合しないもの**: 断面が違う（軸に対する横位置＝u オフセットの違いも含む）／向きが
+	// 違う／別の線上（直交距離がある）／高さが違う／同一直線上でも隙間がある地中梁。隙間を
+	// 橋渡しして実在しない地中梁を作らないため。入力順に対して決定的。
+	std::vector<GroundBeam> mergeGroundBeamModifiers(const std::vector<GroundBeam>& beams);
+
+	// 地中梁を、平面外形が最も重なる底盤の modifiers へ振り分ける（Python 版
+	// _attach_ground_beam_modifiers）。代表点（重心・各頂点・各辺の中点）が外形内に入る数が
+	// 最大の底盤を選び、どの底盤にも入らない（継目・下屋等）ときは重心が最も近い底盤へ
+	// フォールバックして取りこぼさない。底盤が 1 枚も無ければ付けられず捨てる。決定的。
+	void attachGroundBeamModifiers(std::vector<core::SlabCommand>& slabs,
+								   const std::vector<GroundBeam>& beams);
 } // namespace HomeskzIfcImport::parse

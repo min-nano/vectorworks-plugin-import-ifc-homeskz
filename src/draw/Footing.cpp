@@ -29,6 +29,27 @@
 //	（絶対 Z）を設定する関数である点に注意（Python 版 #70 と同じ落とし穴）。基礎ストーリは
 //	GL=0 なので絶対 Z がそのまま渡せる。
 //
+//	【地中梁は底盤へ「噛み合わせる」（Python 版と実現手段が異なる最大の点）】
+//	地中梁（下り梁・台形断面）は命令セットでは底盤の modifiers に載っている。描画は
+//	  1. 断面（u=幅・v=鉛直）を閉じた 2D ポリゴンにし、VWExtrudeObj で 0→depth へ押し出す
+//	  2. 配置行列（VWTransformMatrix）の u/v/w 軸へ「幅軸 w・ワールド +Z・走る向き」を入れて
+//	     SetObjectMatrix でワールドへ置く（断面原点＝origin。z は絶対値＝梁下端）
+//	  3. **ISDK::ModifySlab(slab, solid, isClipObject=false, componentFlags)** で底盤へ足す
+//	の 3 手順だけで済む。
+//
+//	Python 版（VectorScript）は同じ台形プリズムを **2 回**作っていた——(1) 底盤を削り取る
+//	clip モディファイア（SetCustomObjectProfileGroup）と (2) 削った位置を埋める可視の 3D
+//	ソリッド——が、これは **VS に「足す」形で噛み合わせる手段が無かった**ための回避策である
+//	（VW 2026 で確認: vs.ModifySlab は「選択が間違っています」で失敗、CreateCustomObjectPath は
+//	作成時ダイアログ＋再実行クラッシュ、後付けの SetCustomObjectProfileGroup は未確定で底盤が
+//	不可視）。C++ SDK の ISDK には **ModifySlab（"Adds to or clips from a slab"）** があり、
+//	isClipObject=false で**足す**モディファイアとして噛み合わせられる（ci-debug の sdk-grep で
+//	実在を確認）。したがって本移植は**地中梁 1 本＝ソリッド 1 つ**で、複製も削り取りも持たない。
+//
+//	噛み合わせに失敗した場合（ModifySlab が false）だけ、作ったソリッドを**独立した可視
+//	ソリッド**として底盤と同じクラスで残す（Python 版の (2) に相当。1 本の失敗で地中梁を
+//	失わないためのフォールバックで、正常系では通らない）。
+//
 //	【スタイルは常に新規作成する（立上り・底盤とも）】**既存の同名スタイルには一切触れない**
 //	（CreateUniqueWallStyle / CreateUniqueSlabStyle）。名前が空いていなければ " (2)" … と
 //	連番を付けて作る。当初は「名前で引いて、あれば構成層を組み直す」形にしていたが、
@@ -52,10 +73,14 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 
+#include "VWFC/Math/VWTransformMatrix.h"
+#include "VWFC/VWObjects/VWExtrudeObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
+#include <cmath>
 #include <cstddef>
 #include <map>
+#include <numbers>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -75,6 +100,23 @@ namespace HomeskzIfcImport::draw
 		// （draw/Floor と同じ）。型は SDK の TObjectBoundID（= Sint32）だが、その別名は
 		// SDK の名前空間の中にあるため、ここでは実体の Sint32 で持つ（暗黙変換で同じ）。
 		constexpr Sint32 kSlabBoundID = 0;
+
+		// ModifySlab の isClipObject。**false＝足す（add）モディファイア**で、地中梁は
+		// 底盤へ足して噛み合わせる（削り取り＝true は使わない。ヘッダ冒頭「地中梁は底盤へ
+		// 噛み合わせる」）。名前を付けて渡すのは、bool の裸の false が「clip しない」なのか
+		// 「add しない」なのか読めないため。
+		constexpr bool kAddModifier = false;
+
+		// ModifySlab の componentFlags（どの構成層をモディファイアが変えるか、のビット）。
+		// 地中梁は**コンクリートの下り梁**なので、最上層＝コンクリート（索引 0）のビットだけを
+		// 立てる。スラブのコンポーネント索引が 0 始まりであることは実機で確認済み
+		// （draw/DrawUtil の SetComponents の注記）。
+		//
+		// ★ローカル確認の観察点: 断面ビューポートで**コンクリート層**が地中梁の形に下がって
+		// いるか。もし下がるのが捨てコン層（＝ビットが 1 始まり）だったら 1u << 1 へ、
+		// 層の区別がそもそも無ければ全層（0xFFFFFFFFu）へ変える。**この 1 か所だけ**を直せば
+		// よいようにここに置く。
+		constexpr Uint32 kGroundBeamComponentFlags = 1u << 0;
 
 		// 命令の高さ基準（StoryBoundCommand）を SDK の SStoryObjectData へ写す。
 		VectorWorks::SStoryObjectData StoryBound(const core::StoryBoundCommand& bound)
@@ -129,6 +171,73 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
+		// 地中梁 1 本を台形プリズム（押し出しソリッド）として作り、そのハンドルを返す。
+		// 作れなければ nil。
+		//
+		// 断面（profile。u=幅・v=鉛直で v=0 が梁下端）を閉じた 2D ポリゴンにして局所 Z へ
+		// 0→depth だけ押し出し、配置行列でワールドへ置く。行列の 3 軸は命令の座標規約
+		// （core/Document.h の ModifierCommand）と 1 対 1 で対応する:
+		//   u 軸（局所 X）… 幅軸 w ＝ 走る向きを +90 度回した水平単位ベクトル
+		//   v 軸（局所 Y）… ワールド +Z（鉛直）
+		//   w 軸（局所 Z）… 走る向き（押し出し方向。方位角 azimuth の水平単位ベクトル）
+		//   offset       … 断面原点のワールド座標（z は**絶対値**＝梁下端の Z）
+		// この 3 軸は右手系（u × v = w）で、Python 版が Rotate3D を 2 回かけて作っていた姿勢と
+		// 同じものを 1 つの行列で与える（C++ では回転状態を持たず行列を直接組める）。
+		MCObjectHandle CreateGroundBeamSolid(const core::ModifierCommand& modifier)
+		{
+			const MCObjectHandle profile = CreateClosedPolygon(modifier.profile);
+			if (profile == nil)
+				return nil;
+
+			// 押し出し（局所 Z へ 0→depth）。プロファイルは押し出しの中へ入る。
+			VWExtrudeObj extrude(profile, 0.0, modifier.depth);
+			const MCObjectHandle object = extrude.GetThisObject();
+			if (object == nil)
+				return nil;
+
+			const double phi = modifier.azimuth * (std::numbers::pi / 180.0);
+			const double dirX = std::cos(phi);
+			const double dirY = std::sin(phi);
+
+			VWTransformMatrix matrix;
+			matrix.SetMatrix(VWPoint3D(-dirY, dirX, 0.0), VWPoint3D(0.0, 0.0, 1.0),
+							 VWPoint3D(dirX, dirY, 0.0),
+							 VWPoint3D(modifier.origin.x, modifier.origin.y, modifier.origin.z));
+			extrude.SetObjectMatrix(matrix);
+			return object;
+		}
+
+		// 底盤へ地中梁を噛み合わせる。噛み合わせられた本数を返す。
+		//
+		// ModifySlab に **isClipObject=false（足す）** で渡すだけで、地中梁は底盤の一部になる
+		// （ヘッダ冒頭「地中梁は底盤へ噛み合わせる」）。失敗した 1 本は独立した可視ソリッドと
+		// して底盤と同じクラスで残し、**断面ビューポートで構造用図形として扱う**
+		// （ovIsStructural）を立てて底盤と一体に見えるようにする（Python 版の可視ソリッドと
+		// 同じ扱い。1 本の失敗で地中梁を失わないための保険）。
+		std::size_t AttachGroundBeams(MCObjectHandle slabObject, const core::SlabCommand& slab)
+		{
+			std::size_t attached = 0;
+			for (const core::ModifierCommand& modifier : slab.modifiers)
+			{
+				const MCObjectHandle solid = CreateGroundBeamSolid(modifier);
+				if (solid == nil)
+					continue;
+
+				if (slabObject != nil &&
+					gSDK->ModifySlab(slabObject, solid, kAddModifier, kGroundBeamComponentFlags))
+				{
+					++attached;
+					continue;
+				}
+
+				// フォールバック: 噛み合わせられなかった地中梁は、そのまま可視ソリッドとして残す。
+				SetClassByName(solid, slab.drawClass);
+				SetAllAttributesByClass(solid);
+				gSDK->SetObjectVariable(solid, ovIsStructural, TVariableBlock(true));
+			}
+			return attached;
+		}
+
 		// 底盤 1 枚をスラブとして描く。スラブを作れなければ外形ポリゴンにフォールバックする。
 		// 配置できたら true。手順は draw/Floor の DrawOne と同じ（共通部分は draw/DrawUtil）。
 		bool DrawOneSlab(const core::SlabCommand& slab, InternalIndex style)
@@ -140,9 +249,11 @@ namespace HomeskzIfcImport::draw
 			MCObjectHandle object = gSDK->CreateSlab(profile);
 			if (object == nil)
 			{
-				// フォールバック: 外形ポリゴンをクラス付きで残す。
+				// フォールバック: 外形ポリゴンをクラス付きで残す。スラブが作れなくても
+				// **地中梁自体は描く**（AttachGroundBeams が可視ソリッドとして残す）。
 				SetClassByName(profile, slab.drawClass);
 				SetAllAttributesByClass(profile);
+				AttachGroundBeams(nil, slab);
 				return true;
 			}
 
@@ -169,6 +280,11 @@ namespace HomeskzIfcImport::draw
 
 			// 天端を底盤天端レベルへバインドする（offset はそのレベルからの差。主たる底盤は 0）。
 			gSDK->SetObjectStoryBound(object, kSlabBoundID, StoryBound(slab.bound));
+
+			// 地中梁を噛み合わせる（**高さ・スタイルを与えた後**に行う。スラブの構成層と
+			// 基準面が確定してからでないと、モディファイアがどの層をどこまで変えるかが
+			// 決まらない）。ResetObject はこの後に 1 回だけ回して形状を作り直させる。
+			AttachGroundBeams(object, slab);
 
 			gSDK->ResetObject(object);
 			return true;

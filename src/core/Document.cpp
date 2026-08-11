@@ -118,10 +118,18 @@ namespace HomeskzIfcImport::core
 			return total > 0.0;
 		}
 
+		// 地中梁のモディファイア 1 本が妥当か。断面が 3 点以上（面になる）で、押し出し長が
+		// 正であること（長さ 0 の角柱は作れない）。origin / azimuth は数値（double なので
+		// 常に成立）で、断面の巻き方向は問わない（描画側は閉じたポリゴンとして扱う）。
+		bool isValidModifier(const ModifierCommand& modifier)
+		{
+			return modifier.profile.size() >= 3 && modifier.depth > 0.0;
+		}
+
 		// 基礎の底盤 1 枚が妥当か（Python 版 _validate_slab 相当）。床板と同じ関門
 		// （レイヤ名・クラス名・スタイル名が非空／外形 3 点以上／高さ基準のレベル種別が
-		// 非空／構成層が 1 枚以上あり総厚が正）に、コンクリート厚が正であることを足す
-		// （厚み 0 のスラブスタイルは作れない）。
+		// 非空／構成層が 1 枚以上あり総厚が正）に、コンクリート厚が正であることと、
+		// 噛み合わせる地中梁（modifiers。0 本でもよい）が描ける形であることを足す。
 		bool isValidSlab(const SlabCommand& slab)
 		{
 			if (slab.layer.empty() || slab.drawClass.empty() || slab.boundary.size() < 3 ||
@@ -129,6 +137,8 @@ namespace HomeskzIfcImport::core
 				slab.thickness <= 0.0)
 				return false;
 			if (!std::ranges::all_of(slab.components, isValidComponent))
+				return false;
+			if (!std::ranges::all_of(slab.modifiers, isValidModifier))
 				return false;
 
 			double total = 0.0;
@@ -177,8 +187,9 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// 基礎: 立上りは壁厚が正・壁芯が非縮退・上下端のレベル種別が非空、底盤は床板と同じ
-		// 関門＋コンクリート厚が正であること（isValidWall / isValidSlab 参照。Python 版
-		// _validate_wall / _validate_slab と同じ関門。ROADMAP.md M9）。
+		// 関門＋コンクリート厚が正＋噛み合わせる地中梁が描ける形であること（isValidWall /
+		// isValidSlab / isValidModifier 参照。Python 版 _validate_wall / _validate_slab と
+		// 同じ関門。ROADMAP.md M9・M10）。
 		if (!std::ranges::all_of(document.walls, isValidWall))
 			return false;
 		if (!std::ranges::all_of(document.slabs, isValidSlab))
