@@ -22,10 +22,15 @@
 //
 //	Both channels end the same way: a build that installed successfully is only
 //	LOADED at the next start-up, so the "installed" dialog is not a plain notice
-//	but a question with a 再起動 button. Choosing it quits and relaunches
-//	Vectorworks right away (gSDK->CloseAllFilesAndQuitVectorworks with bRestart —
-//	open documents are closed with the usual save prompt); choosing 後で keeps the
-//	running build until the user restarts on their own.
+//	but a question with a 再起動 button. Choosing it quits Vectorworks (with the
+//	usual save prompt) and starts it again; choosing 後で keeps the running build
+//	until the user restarts on their own.
+//
+//	The restart is deliberately NOT left to the SDK's own bRestart flag: that
+//	brings the new instance up while the old one is still quitting, and it dies
+//	with 「サポートファイルの読み込みに失敗しました」. Instead the bundled script
+//	is started detached in "relaunch" mode first; it waits for this process to
+//	disappear and only then opens the application again. See Updater.cpp.
 //
 
 #pragma once

@@ -27,6 +27,10 @@
 #                       (or error=<message>).
 #   do-install <url> <name>   Download+install <name>.vwlibrary; print "ok" or
 #                             error=<message>. No dialogs.
+#   relaunch <pid> <app>      Wait for the Vectorworks process <pid> to exit,
+#                             then launch <app> again. Started DETACHED by the
+#                             plug-in just before it quits, so that the restart
+#                             happens once the old instance is really gone.
 #
 # The interactive stable/dev modes below are the manual, run-from-a-terminal
 # fallback and keep using macOS (osascript) dialogs.
@@ -38,6 +42,7 @@
 #   ./scripts/vw-update.sh q-stable                 # (used by the plug-in)
 #   ./scripts/vw-update.sh q-dev                    # (used by the plug-in)
 #   ./scripts/vw-update.sh do-install <url> <name>  # (used by the plug-in)
+#   ./scripts/vw-update.sh relaunch <pid> <app>     # (used by the plug-in)
 #
 # Requirements: macOS only. Uses tools that ship with macOS (curl, plutil,
 # unzip, codesign, xattr, osascript) — no Homebrew, no `gh`, and because the
@@ -381,6 +386,46 @@ do_install() {
 	echo "ok"
 }
 
+# relaunch <pid> <app>: wait for the running Vectorworks (process <pid>) to exit,
+# then start <app> again. Prints "ok" or "error=<message>".
+#
+# The plug-in starts this DETACHED (nohup … &) right before it asks Vectorworks
+# to quit, so it outlives the process it is waiting for. Doing the restart from
+# the outside — after the old instance is really gone, and via `open` so the
+# bundle is launched through LaunchServices exactly as a double-click would — is
+# what makes it work: Vectorworks' own restart flag (CloseAllFilesAndQuitVectorworks
+# の bRestart) brings the new instance up while the old one is still quitting, and
+# it dies with 「サポートファイルの読み込みに失敗しました」.
+#
+# If Vectorworks does NOT quit (the user cancelled the save prompt), we give up
+# after the timeout rather than relaunching an application the user is still
+# using. The two knobs exist for the unit tests; the defaults are what ships.
+relaunch() { # pid, app
+	local pid="$1" app="$2"
+	if [ -z "$pid" ] || [ -z "$app" ]; then
+		echo "error=引数が不足しています。"
+		return 0
+	fi
+
+	local timeout="${VW_RELAUNCH_TIMEOUT:-300}" waited=0
+	while kill -0 "$pid" 2>/dev/null; do
+		sleep 1
+		waited=$((waited + 1))
+		if [ "$waited" -ge "$timeout" ]; then
+			echo "error=Vectorworks が終了しなかったため、起動し直しませんでした。"
+			return 0
+		fi
+	done
+
+	# Let macOS finish tearing the old instance down before asking for a new one.
+	sleep "${VW_RELAUNCH_DELAY:-2}"
+	if open -a "$app"; then
+		echo "ok"
+	else
+		echo "error=Vectorworks を起動し直せませんでした: $app"
+	fi
+}
+
 # ---------------------------------------------------------------------------
 main() {
 	command -v curl >/dev/null 2>&1 || die "curl が見つかりません（macOS で実行してください）。"
@@ -401,7 +446,8 @@ main() {
 		q-stable)   q_stable ;;
 		q-dev)      q_dev ;;
 		do-install) do_install "${2:-}" "${3:-}" ;;
-		*)      die "不明なチャンネル: '$channel'（stable / dev / q-stable / q-dev / do-install）。" ;;
+		relaunch)   relaunch "${2:-}" "${3:-}" ;;
+		*)      die "不明なチャンネル: '$channel'（stable / dev / q-stable / q-dev / do-install / relaunch）。" ;;
 	esac
 }
 

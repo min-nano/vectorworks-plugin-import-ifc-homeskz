@@ -57,8 +57,18 @@ namespace HomeskzIfcImport
 			advice += "反映するには Vectorworks の再起動が必要です。\n"
 					  "今すぐ再起動しますか？（開いているファイルは保存を確認します）";
 
-			if (host.Ask(text, advice, "再起動", "後で"))
-				host.Restart();
+			if (!host.Ask(text, advice, "再起動", "後で"))
+				return;
+
+			// The restart could not even be set up (the application to relaunch
+			// could not be found, or the helper that does it would not start).
+			// Nothing was lost — the new build is installed and will load at the
+			// next start-up — but say so, otherwise pressing 再起動 looks like it
+			// did nothing at all.
+			if (!host.Restart())
+				host.Inform("再起動できませんでした。",
+							"お手数ですが、手動で Vectorworks を再起動してください。\n"
+							"（更新自体は完了しているので、次回の起動で反映されます）");
 		}
 	} // namespace
 

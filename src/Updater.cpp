@@ -12,6 +12,11 @@
 //	               GetModuleFileName.
 //	Everything else (parsing, native dialogs, the update flows) is shared.
 //
+//	The same script also performs the RESTART offered after an install: it is
+//	started detached in "relaunch" mode and opens the application again once this
+//	process is gone. See CVectorworksUpdaterHost::Restart for why the SDK's own
+//	bRestart flag is not used.
+//
 
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
@@ -20,7 +25,10 @@
 #include "UpdaterParse.h"
 
 #include <array>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -31,16 +39,22 @@ using namespace HomeskzIfcImport::UpdaterParse;
 
 #if GS_MAC
 #	include <dlfcn.h>
+#	include <mach-o/dyld.h>
+#	include <unistd.h>
 #endif
 
 namespace
 {
 	// -----------------------------------------------------------------------
 	// Bundled-script discovery + invocation. Two platform implementations of
-	// the same three primitives:
+	// the same five primitives:
 	//   BundledScriptPath()  absolute path of the updater script we ship, or "".
 	//   BundlePluginsDir()   the Plug-Ins folder this build was loaded from, or "".
 	//   RunBundledScript(args, out) run the script with args, capture stdout.
+	//   HostAppPath()        what to launch to start Vectorworks again, or "".
+	//   SpawnBundledScript(args)    start the script DETACHED (no output, no
+	//                        waiting) so it outlives this process — the restart
+	//                        helper must still be around after Vectorworks quits.
 	// -----------------------------------------------------------------------
 
 #if GS_MAC
@@ -117,6 +131,54 @@ namespace
 			out.append(buf.data(), n);
 		::pclose(pipe);
 		return true;
+	}
+
+	// The Vectorworks application bundle to launch when restarting, or "" if it
+	// cannot be resolved. _NSGetExecutablePath gives the HOST executable (the one
+	// that loaded us — Vectorworks itself), i.e.
+	//   /Applications/Vectorworks 2026/Vectorworks.app/Contents/MacOS/Vectorworks
+	// and we hand `open` the enclosing .app (see MacAppBundleFromExecutable).
+	std::string HostAppPath()
+	{
+		// _NSGetExecutablePath fills the buffer when it fits, and otherwise
+		// returns non-zero after writing the required length back into `size` —
+		// so a too-small first guess costs one extra call, never a truncation.
+		std::uint32_t size = 1024;
+		std::string buf(size, '\0');
+		if (::_NSGetExecutablePath(buf.data(), &size) != 0)
+		{
+			buf.assign(size, '\0');
+			if (::_NSGetExecutablePath(buf.data(), &size) != 0)
+				return "";
+		}
+		buf.resize(std::strlen(buf.c_str())); // drop the unused tail
+
+		return MacAppBundleFromExecutable(buf);
+	}
+
+	// Start "vw-update.sh <args>" DETACHED and return immediately: nohup + & so
+	// the helper keeps running after Vectorworks exits (that is the whole point —
+	// it waits for this process to die and then launches the app again), and all
+	// output is discarded because nobody is left to read it. Returns false if the
+	// script could not be located or the shell could not be started.
+	bool SpawnBundledScript(const std::vector<std::string>& args)
+	{
+		const std::string script = BundledScriptPath();
+		if (script.empty())
+			return false;
+
+		std::string cmd = "nohup /bin/bash " + ShellQuote(script);
+		for (const std::string& a : args)
+			cmd += " " + ShellQuote(a);
+		cmd += " >/dev/null 2>&1 &";
+
+		return std::system(cmd.c_str()) == 0;
+	}
+
+	// This process' id, for the helper to wait on.
+	std::string OwnProcessId()
+	{
+		return std::to_string(static_cast<long long>(::getpid()));
 	}
 
 #elif GS_WIN
@@ -230,6 +292,63 @@ namespace
 		if (!pluginsDir.empty())
 			::SetEnvironmentVariableW(L"VW_PLUGINS_DIR", nullptr);
 		return true;
+	}
+
+	// The Vectorworks executable to start when restarting, or "" if it cannot be
+	// resolved. GetModuleFileNameW(nullptr) returns the HOST executable (the one
+	// that loaded this .vlb — Vectorworks itself), which is exactly what
+	// Start-Process needs.
+	std::string HostAppPath()
+	{
+		std::wstring buf(MAX_PATH, L'\0');
+		DWORD len = ::GetModuleFileNameW(nullptr, buf.data(), (DWORD)buf.size());
+		while (len == buf.size()) // path longer than the buffer -> grow and retry
+		{
+			buf.resize(buf.size() * 2, L'\0');
+			len = ::GetModuleFileNameW(nullptr, buf.data(), (DWORD)buf.size());
+		}
+		if (len == 0)
+			return "";
+		buf.resize(len);
+		return Narrow(buf);
+	}
+
+	// Start "vw-update.ps1 <args>" DETACHED and return immediately: the helper
+	// must outlive Vectorworks (it waits for this process to die and then starts
+	// the application again), so it is created as its own process with no window
+	// and no pipes — unlike RunBundledScript, nothing is read back. Returns false
+	// if the script could not be located or the process could not be created.
+	bool SpawnBundledScript(const std::vector<std::string>& args)
+	{
+		const std::string script = BundledScriptPath();
+		if (script.empty())
+			return false;
+
+		std::string cmd =
+			"powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " +
+			CmdQuote(script);
+		for (const std::string& a : args)
+			cmd += " " + CmdQuote(a);
+
+		// CreateProcessW may modify the command line buffer, hence a writable copy.
+		std::wstring wcmd = Widen(cmd);
+		STARTUPINFOW si{};
+		si.cb = sizeof(si);
+		PROCESS_INFORMATION pi{};
+		if (::CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+							 nullptr, nullptr, &si, &pi) == 0)
+			return false;
+
+		// We never wait on it; drop both handles so nothing is leaked.
+		::CloseHandle(pi.hThread);
+		::CloseHandle(pi.hProcess);
+		return true;
+	}
+
+	// This process' id, for the helper to wait on.
+	std::string OwnProcessId()
+	{
+		return std::to_string(static_cast<long long>(::GetCurrentProcessId()));
 	}
 
 #endif // GS_WIN
@@ -370,15 +489,36 @@ namespace
 		}
 
 		// Quit Vectorworks and launch it again, so the freshly installed build is
-		// loaded. The SDK does the whole thing for us (an ISDK method added in
-		// VW2025), so there is no watchdog process to spawn. bAskForSave = true
-		// keeps the normal save prompt for open documents: if the user backs out
-		// there, Vectorworks stays up and simply keeps running the old build —
-		// the installed files are already on disk, so the next start-up picks
-		// them up anyway.
-		void Restart() override
+		// loaded. Returns false if the restart could not even be arranged, in
+		// which case Vectorworks is left running untouched and the caller tells
+		// the user to restart by hand.
+		//
+		// The SDK can do both halves on its own — CloseAllFilesAndQuitVectorworks
+		// takes a bRestart flag — but that flag does NOT work here: the new
+		// instance comes up while the old one is still quitting and dies with
+		// 「サポートファイルの読み込みに失敗しました」, leaving the user with no
+		// Vectorworks at all. So we only use the SDK for the QUIT (bRestart =
+		// false) and drive the relaunch from outside, with the bundled updater
+		// script: it waits for THIS process to disappear and only then opens the
+		// application again (macOS: `open -a <app>` — through LaunchServices,
+		// exactly like a double-click; Windows: Start-Process <exe>).
+		//
+		// Order matters: the helper has to be running before we ask to quit, or
+		// there would be nobody left to start us again. It is detached, so it
+		// survives us. bAskForSave = true keeps the normal save prompt; if the
+		// user backs out there Vectorworks stays up, the helper gives up after
+		// its timeout, and the installed build is simply picked up at the next
+		// start-up.
+		bool Restart() override
 		{
-			gSDK->CloseAllFilesAndQuitVectorworks(/*bAskForSave*/ true, /*bRestart*/ true);
+			const std::string app = HostAppPath();
+			if (app.empty())
+				return false;
+			if (!SpawnBundledScript({"relaunch", OwnProcessId(), app}))
+				return false;
+
+			gSDK->CloseAllFilesAndQuitVectorworks(/*bAskForSave*/ true, /*bRestart*/ false);
+			return true;
 		}
 	};
 } // namespace

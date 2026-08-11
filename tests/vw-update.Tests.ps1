@@ -278,6 +278,49 @@ $out = AsText (Invoke-DoInstall '' '')
 CheckContains $out 'error=' 'empty args -> error= line'
 
 # ===========================================================================
+# relaunch — wait for the Vectorworks process to exit, then start it again.
+# This is what actually restarts Vectorworks after an update (the SDK's own
+# bRestart flag brings the new instance up too early and it dies on its support
+# files), so the two properties that matter are covered: it starts the app once
+# the process is gone, and it does NOT start one the user is still using.
+# Start-Process is stubbed with a recorder, like the download above.
+# ===========================================================================
+$script:StartedApps = @()
+function Start-Process { param([string] $FilePath) $script:StartedApps += $FilePath }
+
+# A process id that is certainly NOT running (counted down from a high value),
+# so the "already gone" path is deterministic on any host.
+$GoneId = 60000
+while (Get-Process -Id $GoneId -ErrorAction SilentlyContinue) { $GoneId-- }
+
+T 'Invoke-Relaunch rejects missing arguments'
+$script:StartedApps = @()
+$out = AsText (Invoke-Relaunch '' '')
+CheckContains $out 'error=' 'empty args -> error= line'
+CheckEq $script:StartedApps.Count 0 'nothing was started'
+
+T 'Invoke-Relaunch rejects a non-numeric process id'
+$out = AsText (Invoke-Relaunch 'not-a-pid' 'C:\VW\Vectorworks.exe')
+CheckContains $out 'error=' 'bad pid -> error= line'
+
+T 'Invoke-Relaunch starts the app once the process is gone'
+$script:StartedApps = @()
+$env:VW_RELAUNCH_DELAY = '0'
+$out = AsText (Invoke-Relaunch ([string] $GoneId) 'C:\VW\Vectorworks.exe')
+CheckEq $out 'ok' 'prints ok'
+CheckEq ($script:StartedApps -join ',') 'C:\VW\Vectorworks.exe' 'started the Vectorworks executable'
+
+T 'Invoke-Relaunch gives up (and starts nothing) if Vectorworks keeps running'
+$script:StartedApps = @()
+$env:VW_RELAUNCH_TIMEOUT = '1'
+# This very process is, by definition, still alive when the timeout expires.
+$out = AsText (Invoke-Relaunch ([string] $PID) 'C:\VW\Vectorworks.exe')
+CheckContains $out 'error=' 'still running -> error= line'
+CheckEq $script:StartedApps.Count 0 'did not start an app still in use'
+Remove-Item Env:VW_RELAUNCH_TIMEOUT
+Remove-Item Env:VW_RELAUNCH_DELAY
+
+# ===========================================================================
 Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
 Write-Output '---------------------------------------------------------------'
 if ($script:TestsFailed -eq 0) {

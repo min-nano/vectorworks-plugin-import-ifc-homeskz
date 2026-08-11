@@ -70,12 +70,13 @@
    **ASan / UBSan 有効時**（後述）に真価を発揮し、リファクタが招くメモリ不正や、GitHub 側
    仕様変更で崩れた入力への耐性を守ります（`tests/UpdaterRobustnessTests.cpp`）。
 4. **`UpdaterScriptTests`** … 同梱スクリプト `scripts/vw-update.sh`（macOS）の
-   **機械可読バックエンド**（`q-stable` / `q-dev` / `do-install` と、その土台の
-   `asset_url` / `installed_commit`）を、`curl` / `plutil` を差し替えて検証します
-   （`tests/vw-update.test.sh`、後述）。
+   **機械可読バックエンド**（`q-stable` / `q-dev` / `do-install` / `relaunch` と、その
+   土台の `asset_url` / `installed_commit`）を、`curl` / `plutil` / `open` を差し替えて
+   検証します（`tests/vw-update.test.sh`、後述）。
 5. **`UpdaterScriptTestsPs`** … その Windows 版 `scripts/vw-update.ps1` を、同じ発想で
-   `Invoke-GH` / `Invoke-WebRequest` を差し替えて検証します（`tests/vw-update.Tests.ps1`、
-   後述）。PowerShell 7（`pwsh`）は Linux でも動くので、**同じ Linux ランナー**で回せます。
+   `Invoke-GH` / `Invoke-WebRequest` / `Start-Process` を差し替えて検証します
+   （`tests/vw-update.Tests.ps1`、後述）。PowerShell 7（`pwsh`）は Linux でも動くので、
+   **同じ Linux ランナー**で回せます。
 
 以降の節（`IUpdaterHost` によるフロー全体のテスト・スクリプトのテスト・残る部分）は
 すべてこのアップデータ系統の話です。
@@ -115,7 +116,7 @@
 ## フロー全体のテスト（インターフェイス／フェイク方式）
 
 判断だけでなく **フロー全体**（スクリプトに問い合わせ→判断→ダイアログ→インストール→
-結果表示）も SDK 抜きでテストしています。フローが実行する副作用を 4 つに絞って
+結果表示）も SDK 抜きでテストしています。フローが実行する副作用を 5 つに絞って
 `IUpdaterHost`（`src/UpdaterHost.h`）というインターフェイスにまとめました。
 
 | メソッド | 本番（`Updater.cpp`） | テスト（`UpdaterFlowTests.cpp`） |
@@ -123,6 +124,7 @@
 | `RunScript` | 同梱スクリプトを `popen` で実行 | 固定の stdout を返す |
 | `Inform` / `Ask` | `gSDK->AlertInform` / `AlertQuestion` | 呼び出しを記録／既定の回答を返す |
 | `PickBuild` | VWFC のプルダウンダイアログ | 選択インデックスを返す |
+| `Restart` | 再起動ヘルパーを切り離して起動し、`gSDK` で終了する | 呼び出し回数を数える／成否を返す |
 
 フロー本体（`RunStableStartupCheckWith` / `RunDevStartupCheckWith`、`src/UpdaterFlow.cpp`）
 は `IUpdaterHost&` だけに依存し、SDK ヘッダを一切 include しません。よって
@@ -212,10 +214,14 @@ if ($MyInvocation.InvocationName -ne '.') {
 |----------------|------|--------|
 | `Invoke-GH` | `Invoke-RestMethod` で GitHub REST API | フィクスチャ JSON を `ConvertFrom-Json` して返す（オフラインは throw） |
 | `Invoke-WebRequest` | アセットをダウンロード | ローカルの zip を `-OutFile` にコピー（失敗は throw） |
+| `Start-Process`（`.ps1`）／ `open`（`.sh`） | 終了後に Vectorworks を起動し直す | 起動要求を記録するだけ（何も起動しない） |
 
 これで両スクリプトとも、`q-stable` の `installed` / `latest`（7 桁化）/ `url`、`q-dev` の
 `dev-*` フィルタとアセットのあるビルドだけの列挙、`do-install` の成功・各失敗経路
 （ダウンロード失敗／想定外の zip／引数不足）まで、**素の Linux ランナーで**検証できます。
+更新後の再起動を担う `relaunch` も同じ土台に乗り、**待っているプロセスが消えてから
+起動し直すこと**と、**終了しなかったら（保存ダイアログで取り消されたら）起動し直さない
+こと**——この 2 つの性質を、本物のプロセスを終了させ／生かしたまま確認します。
 
 各スクリプトに残る OS 固有の面（`.sh` の osascript ダイアログ・`codesign` / `xattr` の
 再署名・`PlistBuddy`、`.ps1` の `%APPDATA%` 既定パス）は、その OS でしか動かないため、
@@ -265,11 +271,13 @@ ctest／CI に組み込み済みです。残るのは各 OS でしか動かな�
   切り出せるロジックを `core/` へ寄せたうえで、残りは実機での目視確認に委ねる。
 - **判断**は `UpdaterParse.h` の純粋関数に寄せ、関数単位で網羅的にテストする。
 - **フロー**は `IUpdaterHost` というシームを挟み、SDK 全体をモックするのではなく
-  プラグインが触る 4 つの副作用だけをフェイク化して、分岐と文言まで丸ごとテストする
+  プラグインが触る 5 つの副作用（スクリプト実行・通知・質問・ビルド選択・再起動）
+  だけをフェイク化して、分岐と文言まで丸ごとテストする
   （ユニット／コンポーネントテスト。e2e ではない）。
 - **スクリプト**は末尾のディスパッチをガードして `source`（dot-source）可能にし、
-  ネットワーク境界（`.sh`: `curl` / `plutil`、`.ps1`: `Invoke-GH` / `Invoke-WebRequest`）
-  だけを差し替えて `q-stable` / `q-dev` / `do-install` を **Linux 上で**単体テストする
+  ネットワークとアプリ起動の境界（`.sh`: `curl` / `plutil` / `open`、`.ps1`:
+  `Invoke-GH` / `Invoke-WebRequest` / `Start-Process`）だけを差し替えて
+  `q-stable` / `q-dev` / `do-install` / `relaunch` を **Linux 上で**単体テストする
   （C++ の `IUpdaterHost` に対応するスクリプト版のシーム）。
 - 残るのは SDK 関数を呼ぶだけの薄い配線と、Mac／Windows 実機でしか動かない OS 固有
   ツールの実行だけで、ここは費用対効果から e2e ／手動に委ねる。

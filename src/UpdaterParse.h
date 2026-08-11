@@ -183,6 +183,24 @@ namespace HomeskzIfcImport::UpdaterParse
 		return bundle.substr(0, slash); // .../<PlugIns>
 	}
 
+	// macOS: from the HOST APPLICATION's executable path
+	//   /Applications/Vectorworks 2026/Vectorworks.app/Contents/MacOS/Vectorworks
+	// derive the bundle to relaunch:
+	//   /Applications/Vectorworks 2026/Vectorworks.app
+	// Returns "" if the executable is not inside a .app bundle.
+	//
+	// This is what the restart hands to `open -a`: launching the BUNDLE (through
+	// LaunchServices, exactly as a double-click would) rather than exec'ing the
+	// inner binary is what keeps Vectorworks able to find its support files.
+	inline std::string MacAppBundleFromExecutable(const std::string& exePath)
+	{
+		const std::string marker = ".app/Contents/MacOS/";
+		std::string::size_type const at = exePath.rfind(marker);
+		if (at == std::string::npos)
+			return "";
+		return exePath.substr(0, at + std::string(".app").size());
+	}
+
 	// Windows: directory that contains the given module path. On Windows the
 	// plug-in is a bare "<name>.vlb" living directly in the Plug-Ins folder, so
 	// this is both where the updater script sits and the Plug-Ins folder to

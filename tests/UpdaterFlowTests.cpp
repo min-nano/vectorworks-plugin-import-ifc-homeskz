@@ -37,7 +37,8 @@ namespace
 		// "install?" and then "restart?"). Anything beyond falls back to
 		// askAnswer.
 		std::vector<bool> askAnswers;
-		int pickAnswer = 0; // what PickBuild returns
+		int pickAnswer = 0;		   // what PickBuild returns
+		bool restartAnswer = true; // what Restart returns (false -> could not be arranged)
 
 		// --- Recorded interactions ------------------------------------------
 		std::vector<std::vector<std::string>> scriptCalls;
@@ -99,9 +100,10 @@ namespace
 			return pickAnswer;
 		}
 
-		void Restart() override
+		bool Restart() override
 		{
 			++restartCount;
+			return restartAnswer;
 		}
 
 		// Convenience: how many times a given mode was invoked.
@@ -217,6 +219,26 @@ TEST(stable_restart_button_restarts_vectorworks)
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	CHECK_EQ(h.restartCount, 1);
+	// It worked, so the user is not told anything further.
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+TEST(stable_restart_that_cannot_be_arranged_is_reported)
+{
+	FakeHost h;
+	h.qStableOut = "installed=abc1234\n"
+				   "latest=def5678\n"
+				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+	h.askAnswer = true;
+	h.doInstallOut = "ok";
+	h.restartAnswer = false; // e.g. the relaunch helper would not start
+	RunStableStartupCheckWith(h);
+
+	CHECK_EQ(h.restartCount, 1);
+	// Pressing 再起動 must not look like it did nothing.
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+		CHECK_EQ(h.informs[0][0], "再起動できませんでした。");
 }
 
 TEST(stable_accepted_but_install_reports_error)

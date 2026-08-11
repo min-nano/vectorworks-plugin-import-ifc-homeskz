@@ -301,11 +301,12 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 - **アップデータ**（`src/Updater.cpp`）… SDK に依存しない純粋なロジック（スクリプト出力の
   パース、コマンドラインのクォート、インストール先パスの導出）を `src/UpdaterParse.h` に
   切り出し、更新フロー本体は `IUpdaterHost` のフェイク越しに丸ごと動かします。同梱
-  スクリプトのバックエンド（`q-stable` / `q-dev` / `do-install`）も、ネットワーク境界だけを
-  差し替えて SDK ／ネットワーク抜きにテストします — macOS 版 `scripts/vw-update.sh` は
-  `tests/vw-update.test.sh`（bash＋`curl`/`plutil` スタブ）、Windows 版
-  `scripts/vw-update.ps1` は `tests/vw-update.Tests.ps1`（PowerShell 7＋
-  `Invoke-GH`/`Invoke-WebRequest` スタブ）で、いずれも Linux ランナー上で動きます。
+  スクリプトのバックエンド（`q-stable` / `q-dev` / `do-install` / `relaunch`）も、
+  ネットワークとアプリ起動の境界だけを差し替えて SDK ／ネットワーク抜きにテストします —
+  macOS 版 `scripts/vw-update.sh` は `tests/vw-update.test.sh`（bash＋`curl`/`plutil`/
+  `open` スタブ）、Windows 版 `scripts/vw-update.ps1` は `tests/vw-update.Tests.ps1`
+  （PowerShell 7＋`Invoke-GH`/`Invoke-WebRequest`/`Start-Process` スタブ）で、いずれも
+  Linux ランナー上で動きます。
 
 **テストの一覧・方針・何をテストしていないかは `tests/README.md`** に詳しくあります。
 
@@ -715,7 +716,8 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
   `Contents/Resources/vw-update.sh` に入り、隔離解除とアドホック再署名も行います。
 - **Windows** — `scripts/vw-update.ps1`（PowerShell）。`.vlb` の隣に入ります。
 
-プラグインはこのスクリプトを**非対話モード**（`q-stable` / `q-dev` / `do-install`）で
+プラグインはこのスクリプトを**非対話モード**（`q-stable` / `q-dev` / `do-install` /
+`relaunch`）で
 呼び出して結果を受け取り、ユーザーへの表示はすべて自前のネイティブダイアログで行う
 ため、利用者がターミナルを開く必要はありません。どちらの OS でも
 `src/Updater.cpp` の同じフロー・ダイアログが動き、変わるのは「自分の場所を特定する
@@ -755,14 +757,36 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 にしてあり、**「再起動」ボタン**をその場に出します（`src/UpdaterFlow.cpp` の
 `OfferRestart`）。
 
-- **「再起動」** → `gSDK->CloseAllFilesAndQuitVectorworks(bAskForSave: true,
-  bRestart: true)` で Vectorworks を終了し、そのまま起動し直します（`src/Updater.cpp`
-  の `CVectorworksUpdaterHost::Restart`）。開いているファイルは**通常どおり保存を確認**
-  してから閉じられるので、保存ダイアログで取り消せば Vectorworks は落ちません（その
-  場合もインストール済みのファイルはディスクに残るため、次回の起動で反映されます）。
+- **「再起動」** → Vectorworks を終了し、終了しきってから起動し直します
+  （`src/Updater.cpp` の `CVectorworksUpdaterHost::Restart`）。開いているファイルは
+  **通常どおり保存を確認**してから閉じられるので、保存ダイアログで取り消せば Vectorworks
+  は落ちません（その場合もインストール済みのファイルはディスクに残るため、次回の起動で
+  反映されます）。
 - **「後で」** → 何もせず起動を続けます。反映は次に Vectorworks を起動したときです。
 
 インストールに失敗したときは（当然）再起動を尋ねず、失敗の理由だけを表示します。
+
+#### 再起動を SDK に任せない理由
+
+SDK の `CloseAllFilesAndQuitVectorworks` には `bRestart` という「終了後に起動し直す」
+フラグがありますが、**これは使いません**。macOS で実際に試すと、古いインスタンスがまだ
+終了しきらないうちに新しいインスタンスが立ち上がり、
+**「サポートファイルの読み込みに失敗しました。」**というダイアログを出して落ちてしまい、
+結果として Vectorworks が 1 つも残らない状態になります。
+
+そこで**終了だけを SDK に任せ**（`bRestart: false`）、**起動し直しは外から**行います。
+同梱の更新スクリプトに `relaunch <pid> <app>` モードを足し、プラグインは終了を頼む
+**直前にこれを切り離して（detached で）起動**します。ヘルパーは
+
+1. 渡された pid（＝実行中の Vectorworks）が**消えるまで待ち**、
+2. 消えてから 2 秒おいて、
+3. **macOS は `open -a <app>`**（LaunchServices 経由＝ダブルクリックと同じ扱い）、
+   **Windows は `Start-Process <exe>`** でアプリを起動し直します。
+
+保存ダイアログで取り消して Vectorworks が終了しなかった場合は、**既定 300 秒**待って
+あきらめます（使用中のアプリを勝手に起動し直さないため）。ヘルパーの起動そのものに
+失敗した場合（アプリのパスを解決できない等）は再起動を諦め、「手動で再起動してください」
+と表示します——更新自体は完了しているので、次回起動で反映されます。
 
 新しいビルドが実際にロードされるのは、この再起動（または手動での再起動）以降です。
 
@@ -800,6 +824,7 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 ./scripts/vw-update.sh q-stable                # stable の状態を表示
 ./scripts/vw-update.sh q-dev                   # dev ビルド一覧を表示
 ./scripts/vw-update.sh do-install <url> <name> # ダウンロードしてインストール
+./scripts/vw-update.sh relaunch <pid> <app>    # 終了を待ってアプリを起動し直す
 ```
 
 ```pwsh
@@ -807,10 +832,11 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 stable
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 dev
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1          # チャンネルを尋ねる
-# 非対話モード（プラグインが使うもの。stable/dev/do-install は sh 版と同じ契約）:
+# 非対話モード（プラグインが使うもの。do-install / relaunch は sh 版と同じ契約）:
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 q-stable
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 q-dev
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 do-install <url> <name>
+powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 relaunch <pid> <exe>
 ```
 
 環境変数で上書き可能: `VW_REPO`（owner/repo）、`VW_PLUGINS_DIR`（インストール先）。

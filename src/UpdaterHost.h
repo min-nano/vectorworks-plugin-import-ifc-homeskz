@@ -54,11 +54,13 @@ namespace HomeskzIfcImport
 
 		// Quit Vectorworks and start it again, so the build just installed is
 		// actually loaded (a compiled plug-in is only ever picked up at start-up).
-		// Open documents are closed with the usual save prompt, so the user can
-		// still back out at that point — hence there is nothing to report back
-		// and no return value: this call either takes the application down or
-		// leaves it running exactly as it was.
-		virtual void Restart() = 0;
+		// Returns false if the restart could not even be ARRANGED (the host could
+		// not work out what to relaunch, or could not start the helper that does
+		// it) — Vectorworks is then left running untouched and the flow tells the
+		// user to restart by hand. A true return only means "the quit was
+		// requested": open documents still get the usual save prompt, and backing
+		// out there simply leaves the old build running until the next start-up.
+		virtual bool Restart() = 0;
 	};
 
 	// The SDK-independent update flows, parameterized by the host above. These

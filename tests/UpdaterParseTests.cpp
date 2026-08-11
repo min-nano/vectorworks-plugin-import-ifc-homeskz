@@ -293,6 +293,32 @@ TEST(mac_plugins_dir_from_binary_no_leading_slash_is_empty)
 }
 
 // ---------------------------------------------------------------------------
+// MacAppBundleFromExecutable — what the restart hands to `open -a`.
+// ---------------------------------------------------------------------------
+
+TEST(mac_app_bundle_from_executable_typical)
+{
+	const std::string exe =
+		"/Applications/Vectorworks 2026/Vectorworks.app/Contents/MacOS/Vectorworks";
+	CHECK_EQ(MacAppBundleFromExecutable(exe), "/Applications/Vectorworks 2026/Vectorworks.app");
+}
+
+TEST(mac_app_bundle_from_executable_not_in_a_bundle_is_empty)
+{
+	// A bare executable (no .app around it) gives nothing to relaunch.
+	CHECK_EQ(MacAppBundleFromExecutable("/usr/local/bin/vectorworks"), "");
+	CHECK_EQ(MacAppBundleFromExecutable(""), "");
+}
+
+TEST(mac_app_bundle_from_executable_uses_the_outermost_match)
+{
+	// A helper nested inside another .app: rfind takes the LAST marker, i.e. the
+	// bundle the executable actually belongs to.
+	const std::string exe = "/Applications/A.app/Contents/Helpers/B.app/Contents/MacOS/B";
+	CHECK_EQ(MacAppBundleFromExecutable(exe), "/Applications/A.app/Contents/Helpers/B.app");
+}
+
+// ---------------------------------------------------------------------------
 // WinModuleDirFromPath
 // ---------------------------------------------------------------------------
 
