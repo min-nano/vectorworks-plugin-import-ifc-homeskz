@@ -341,34 +341,13 @@ namespace HomeskzIfcImport::parse
 	// （Python 版 _modifier_footprint）。底盤への振り分け判定に使う。
 	std::vector<core::Vec2> modifierFootprint(const core::ModifierCommand& modifier);
 
-	// 地中梁の端部を、そこで交わる立上りの**半壁厚**だけ伸ばす（伸ばした命令を返す）。
-	//
-	// 【なぜ要るか】底盤の外形は立上りの**外面**（壁心 + 半壁厚）まで広げてあるのに
-	// （alignSlabsToWallFaces）、ホームズ君 IFC の地中梁は端が直交する立上りの**壁芯**で
-	// 止まっているものがあり、底盤の角と地中梁の角がずれる（ローカル確認で判明。
-	// ROADMAP.md M10）。端がその立上りの外面まで届けば角が揃う。
-	//
-	// 伸ばすのは **端が直交する立上りの壁芯上にある**ときだけ（その立上りの半壁厚ぶん。
-	// 複数あれば最も厚いものに合わせる）。したがって
-	//   * 端が最初から外面まで届いている地中梁は動かない（壁芯上に無い）
-	//   * 底盤の中ほどで終わっている地中梁も動かない（越える立上りが無い）
-	// が自然に出る。梁と平行な立上り（沿って走っている相手）は対象にしない。
-	//
-	// **別の地中梁が続いている端も伸ばさない**（others に全地中梁を渡す）。伸ばすと隣の梁へ
-	// 食い込むだけで外面へは近づかない——実機で 75mm ぶん隣と重なった。立上りの
-	// collinearAbutment（同一直線の隣がある端は延長しない）と同じ考え方。
-	core::ModifierCommand extendGroundBeamEnds(const core::ModifierCommand& modifier,
-											   const std::vector<core::WallCommand>& walls,
-											   const std::vector<core::ModifierCommand>& others);
-
 	// 地中梁を、平面外形が最も重なる底盤の modifiers へ振り分ける（Python 版
 	// _attach_ground_beam_modifiers）。代表点（重心・各頂点・各辺の中点）が外形内に入る数が
 	// 最大の底盤を選び、どの底盤にも入らない（継目・下屋等の）地中梁は重心が最も近い底盤へ
 	// フォールバックして取りこぼさない。底盤が 1 枚も無ければ付けられないので捨てる。
 	// 入力順に対して決定的。
 	void attachGroundBeamModifiers(std::vector<core::SlabCommand>& slabs,
-								   const std::vector<core::ModifierCommand>& modifiers,
-								   const std::vector<core::WallCommand>& walls);
+								   const std::vector<core::ModifierCommand>& modifiers);
 
 	// 底盤から slab 命令を組み立てる（Python 版 build_slab_commands）。平面外形をグリッド
 	// 中心オフセットで補正して格納し、天端の絶対 Z を elevation に、Z 厚を整数 mm に丸めた

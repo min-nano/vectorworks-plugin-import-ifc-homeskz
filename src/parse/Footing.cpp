@@ -2320,95 +2320,8 @@ namespace HomeskzIfcImport::parse
 				Vec2{end.x + (width.x * uLo), end.y + (width.y * uLo)}};
 	}
 
-	core::ModifierCommand extendGroundBeamEnds(const core::ModifierCommand& modifier,
-											   const std::vector<WallCommand>& walls,
-											   const std::vector<core::ModifierCommand>& others)
-	{
-		core::ModifierCommand result = modifier;
-		if (modifier.profile.empty() || modifier.depth <= 0.0)
-			return result;
-
-		const Vec2 axis = groundBeamAxisDir(modifier);
-		const Vec2 start{modifier.origin.x, modifier.origin.y};
-		const Vec2 end{start.x + (axis.x * modifier.depth), start.y + (axis.y * modifier.depth)};
-
-		// 端 tip から外向き (dx, dy) へ**別の地中梁が続いているか**。続いているならその端は
-		// 伸ばさない（伸ばすと隣の梁へ食い込む。立上りの collinearAbutment と同じ考え方で、
-		// 実機では 75mm ぶん隣の梁と重なった。ROADMAP.md M10）。
-		const auto abuttingBeam = [&](const Vec2& tip, double dx, double dy)
-		{
-			const auto continuesPast = [&](const core::ModifierCommand& other)
-			{
-				if (other.depth <= 0.0)
-					return false;
-				const Vec2 otherAxis = groundBeamAxisDir(other);
-				const Vec2 otherStart{other.origin.x, other.origin.y};
-				const Vec2 otherEnd{otherStart.x + (otherAxis.x * other.depth),
-									otherStart.y + (otherAxis.y * other.depth)};
-				// 自分自身は飛ばす（統合済みなので同じ軸線・同じ区間の重複は無い）。
-				if (samePoint(otherStart, start) && samePoint(otherEnd, end))
-					return false;
-				// tip を相手の軸線へ射影する。軸線上に無い相手は関係ない。
-				const Vec2 delta = tip - otherStart;
-				const double along = (delta.x * otherAxis.x) + (delta.y * otherAxis.y);
-				const double across = std::abs((delta.x * -otherAxis.y) + (delta.y * otherAxis.x));
-				if (across > kGroundBeamMergeTol)
-					return false;
-				// 直交する相手は「続いている」のではなく取り合う相手。
-				const double heading = (dx * otherAxis.x) + (dy * otherAxis.y);
-				if (std::abs(heading) <= kGroundBeamMergeAngleTol)
-					return false;
-				// tip から外向きへ進んだ先が相手の区間 [0, depth] に入っているか
-				// （相手が tip を越えて続いている＝この端は伸ばさない）。
-				return (heading > 0.0) ? (along > -kGroundBeamMergeTol &&
-										  along < other.depth - kGroundBeamMergeTol)
-									   : (along > kGroundBeamMergeTol &&
-										  along < other.depth + kGroundBeamMergeTol);
-			};
-			return std::ranges::any_of(others, continuesPast);
-		};
-
-		// 端 tip が**直交する立上りの壁芯上**にあるなら、その立上りの半壁厚を返す（無ければ 0）。
-		// 複数見つかったら最も厚い立上りに合わせる。
-		const auto reachAtWall = [&walls, &axis](const Vec2& tip)
-		{
-			double reach = 0.0;
-			for (const WallCommand& wall : walls)
-			{
-				const Vec2 delta = wall.end - wall.start;
-				const double length = std::hypot(delta.x, delta.y);
-				if (length <= 0.0)
-					continue;
-				const Vec2 dir{delta.x / length, delta.y / length};
-				// 梁と平行な立上りは「越える相手」ではない（沿って走っている）。
-				if (std::abs((dir.x * axis.y) - (dir.y * axis.x)) <= kGroundBeamMergeAngleTol)
-					continue;
-				// tip が壁芯の線上（直交距離）かつ区間内にあるか。
-				const Vec2 offset = tip - wall.start;
-				const double across = std::abs((offset.x * -dir.y) + (offset.y * dir.x));
-				const double along = (offset.x * dir.x) + (offset.y * dir.y);
-				if (across > kGroundBeamMergeTol || along < -kGroundBeamMergeTol ||
-					along > length + kGroundBeamMergeTol)
-					continue;
-				reach = std::max(reach, wall.thickness / 2.0);
-			}
-			return reach;
-		};
-
-		const double back = abuttingBeam(start, -axis.x, -axis.y) ? 0.0 : reachAtWall(start);
-		const double forward = abuttingBeam(end, axis.x, axis.y) ? 0.0 : reachAtWall(end);
-		if (back <= 0.0 && forward <= 0.0)
-			return result;
-
-		result.origin =
-			core::Vec3{start.x - (axis.x * back), start.y - (axis.y * back), modifier.origin.z};
-		result.depth = modifier.depth + back + forward;
-		return result;
-	}
-
 	void attachGroundBeamModifiers(std::vector<SlabCommand>& slabs,
-								   const std::vector<core::ModifierCommand>& modifiers,
-								   const std::vector<WallCommand>& walls)
+								   const std::vector<core::ModifierCommand>& modifiers)
 	{
 		if (slabs.empty())
 			return; // 底盤が 1 枚も無ければ付けられない（地中梁だけの基礎は稀）
@@ -2464,7 +2377,7 @@ namespace HomeskzIfcImport::parse
 					}
 				}
 			}
-			slabs[best].modifiers.push_back(extendGroundBeamEnds(modifier, walls, modifiers));
+			slabs[best].modifiers.push_back(modifier);
 		}
 	}
 
@@ -2517,7 +2430,7 @@ namespace HomeskzIfcImport::parse
 		// 統合 → 外面合わせ → 地中梁の振り分け（ROADMAP.md M10）。地中梁は**単独のスラブ命令に
 		// せず**、外形の確定した底盤の modifiers へ付ける（台形断面は単一のスラブで描けない）。
 		std::vector<SlabCommand> slabs = alignSlabsToWallFaces(mergeSlabCommands(commands), walls);
-		attachGroundBeamModifiers(slabs, buildGroundBeamModifiers(model, center), walls);
+		attachGroundBeamModifiers(slabs, buildGroundBeamModifiers(model, center));
 		return slabs;
 	}
 

@@ -58,7 +58,6 @@ using HomeskzIfcImport::parse::CLASS_FOUNDATION_WALL;
 using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::extendDeeperCollinearEnds;
 using HomeskzIfcImport::parse::extendFreeWallEnds;
-using HomeskzIfcImport::parse::extendGroundBeamEnds;
 using HomeskzIfcImport::parse::foundationSlabStyleName;
 using HomeskzIfcImport::parse::foundationWallStyleName;
 using HomeskzIfcImport::parse::hasFoundation;
@@ -1441,49 +1440,14 @@ TEST(attach_ground_beams_to_the_overlapping_slab)
 		groundBeam(core::Vec3{5200.0, 1000.0, -240.0}, 0.0, 1600.0), // 2 枚目の中
 		groundBeam(core::Vec3{9000.0, 1000.0, -240.0}, 0.0,
 				   500.0)}; // どちらの外でも近いのは 2 枚目
-	attachGroundBeamModifiers(slabs, modifiers, {});
+	attachGroundBeamModifiers(slabs, modifiers);
 
 	CHECK_EQ(slabs[0].modifiers.size(), std::size_t{1});
 	CHECK_EQ(slabs[1].modifiers.size(), std::size_t{2});
 	// 底盤が 1 枚も無ければ付けようがない（落として先へ進む）。
 	std::vector<SlabCommand> none;
-	attachGroundBeamModifiers(none, modifiers, {});
+	attachGroundBeamModifiers(none, modifiers);
 	CHECK(none.empty());
-}
-
-TEST(ground_beam_ends_extend_by_the_crossing_wall_half_thickness)
-{
-	// 底盤の外形は立上りの**外面**まで広げてあるのに、地中梁の端は直交する立上りの**壁芯**で
-	// 止まっているものがあり、角がずれる。その端を立上りの半壁厚だけ伸ばす
-	// （parse/Footing.h の extendGroundBeamEnds。ROADMAP.md M10）。
-	const core::ModifierCommand beam = groundBeam(core::Vec3{0.0, 1000.0, -240.0}, 0.0, 3000.0);
-	const WallCommand crossing = wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 2000.0}, 150.0);
-
-	// (1) 終端が直交する立上りの壁芯上 → 半壁厚（75mm）伸びる。始端は何も無いので動かない。
-	const core::ModifierCommand extended = extendGroundBeamEnds(beam, {crossing}, {});
-	CHECK(near(extended.origin.x, 0.0));
-	CHECK(near(extended.depth, 3075.0));
-
-	// (2) 立上りが 1 本も無ければ動かない。
-	const core::ModifierCommand none = extendGroundBeamEnds(beam, {}, {});
-	CHECK(near(none.depth, 3000.0));
-
-	// (3) 梁に**平行**な立上り（沿って走っている相手）は対象にしない。
-	const WallCommand alongside = wall(Vec2{0.0, 1000.0}, Vec2{3000.0, 1000.0}, 150.0);
-	const core::ModifierCommand parallelOnly = extendGroundBeamEnds(beam, {alongside}, {});
-	CHECK(near(parallelOnly.depth, 3000.0));
-
-	// (4) 壁芯上でも**別の地中梁が続いている端**は伸ばさない（隣へ食い込むだけ）。
-	const std::vector<core::ModifierCommand> neighbour = {
-		groundBeam(core::Vec3{3000.0, 1000.0, -240.0}, 0.0, 1000.0)}; // 終端から先へ続く隣
-	const core::ModifierCommand abutted = extendGroundBeamEnds(beam, {crossing}, neighbour);
-	CHECK(near(abutted.depth, 3000.0));
-
-	// (5) 両端が壁芯上なら両端が伸びる（始点は外向きへ動く）。
-	const WallCommand atStart = wall(Vec2{0.0, 0.0}, Vec2{0.0, 2000.0}, 150.0);
-	const core::ModifierCommand bothEnds = extendGroundBeamEnds(beam, {atStart, crossing}, {});
-	CHECK(near(bothEnds.origin.x, -75.0));
-	CHECK(near(bothEnds.depth, 3150.0));
 }
 
 TEST(ground_beams_of_the_real_fixtures_land_on_slabs)
