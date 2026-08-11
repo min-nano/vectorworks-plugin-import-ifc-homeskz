@@ -12,7 +12,16 @@
 //	  * draw/DrawUtil の ActivateExistingLayer            … 配置先レイヤ（既存のみ）
 //	  * VWSymbolDefObj::IsSymbolDefObject(name)           … シンボル定義が図面に在るか
 //	  * VWSymbolObj(name, VWPoint2D(x, y), angleDeg)      … シンボルインスタンスの配置
+//	  * VWSymbolObj::IsSymbolObject(handle, name)         … 置けたものが本当にそれか
 //	VWSymbolObj のこの構築子が VS の vs.Symbol(name, point, angle) にあたる。
+//
+//	【成功判定に handle の非 nil を使わない】ISDK にシンボルを配置する呼び出しは無く
+//	（在るのは CreateSymbolDefinition だけ）、この構築子はレガシーの PlaceSymbol を包む。
+//	PlaceSymbol は「定義が nil なら何もしない」仕様なので、**定義が無いときでも構築子は
+//	非 nil のハンドル（直前のオブジェクト等）を返し得る**。実際に「アンカーボルト 97 本…
+//	を描きました」と全数成功で報告しながら図面には 1 つも出ていない、という報告を受けた。
+//	そこで生成したハンドルが**その名前のシンボルインスタンスであること**まで確かめて
+//	初めて 1 件と数える。
 //
 //	【設計上の要点】**シンボル定義はプラグインが作らない。** ハイブリッドシンボル
 //	（"アンカーボルト_M12" / "アンカーボルト_M16" / "床束" / "鋼製火打" / "仕口"）は
@@ -44,39 +53,39 @@ namespace HomeskzIfcImport::draw
 	namespace
 	{
 		// シンボル定義が図面に在るか。**配置を止める門にはしない**（下記 drawSymbols）——
-		// 配置に失敗した理由を診断に書き分けるためだけに使う。同じ名前を何百回も問い合わせ
-		// ないよう 1 回の描画の中で覚えておく（1 要素のシンボル名は多くて 2 種類）。
-		bool HasSymbolDefinition(std::map<std::string, bool>& cache, const std::string& name)
+		// 配置に失敗した理由を診断に書き分けるためだけに使う。
+		bool HasSymbolDefinition(const std::string& name)
 		{
-			const auto found = cache.find(name);
-			if (found != cache.end())
-				return found->second;
-			bool exists = false;
 			try
 			{
-				exists = VWSymbolDefObj::IsSymbolDefObject(TXString(name.c_str()));
+				return VWSymbolDefObj::IsSymbolDefObject(TXString(name.c_str()));
 			}
 			catch (...)
 			{
-				exists = false;
+				return false;
 			}
-			cache.emplace(name, exists);
-			return exists;
 		}
 
 		// シンボル 1 つを配置する（Python 版 draw_anchor_bolt ほかに対応）。センタリング
 		// 済みの絶対座標と回転角（度）をそのまま渡す。高さはアクティブレイヤ（＝配置先の
 		// ストーリレベル）の平面で決まるので、命令は高さを持たない。
+		//
+		// **置けたと数えるのは、その名前のシンボルインスタンスが実際にできたときだけ。**
+		// 非 nil のハンドルは成功の証拠にならない（ファイル冒頭「成功判定に handle の
+		// 非 nil を使わない」）。
 		bool PlaceOne(const core::SymbolCommand& command)
 		{
 			// VWFC の構築子は失敗を例外で伝えるので、1 件の異常で残りの配置を止めない
 			// （CLAUDE.md「エラーハンドリング」: SDK コールバックへ例外を漏らさない）。
 			try
 			{
-				const VWSymbolObj symbol(TXString(command.symbol.c_str()),
-										 VWPoint2D(command.position.x, command.position.y),
+				const TXString name(command.symbol.c_str());
+				const VWSymbolObj symbol(name, VWPoint2D(command.position.x, command.position.y),
 										 command.angle);
-				return symbol.GetThisObject() != nil;
+				MCObjectHandle handle = symbol.GetThisObject();
+				if (handle == nil)
+					return false;
+				return VWSymbolObj::IsSymbolObject(handle, name);
 			}
 			catch (...)
 			{
@@ -100,7 +109,14 @@ namespace HomeskzIfcImport::draw
 							core::ProgressReporter& progress, const char* elementLabel,
 							std::string* note)
 	{
-		std::map<std::string, bool> symbolExists;
+		// **配置を始める前に**、命令に出てくる名前の定義の有無を控えておく。配置の途中で
+		// 調べると、VWFC が見つからない名前の（空の）定義を作ってしまった場合に「定義は
+		// あった」と誤って報告しかねない。名前は 1 要素あたり多くて 2 種類なので安い。
+		std::map<std::string, bool> definedBefore;
+		for (const core::SymbolCommand& command : commands)
+			if (!definedBefore.contains(command.symbol))
+				definedBefore.emplace(command.symbol, HasSymbolDefinition(command.symbol));
+
 		std::size_t drawn = 0;
 		std::size_t missingLayers = 0;
 		std::size_t failed = 0;
@@ -122,10 +138,8 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			// **必ず配置を試みる。** かつてはここで IsSymbolDefObject による事前ガードを
-			// 掛けていたが、その判定が期待どおりでないと**1 つも置けないのに「シンボルが
-			// 見つかりません」と報告する**（原因を誤って指す）形になる。配置そのものを
-			// 唯一の判定にし、失敗したときだけ理由を調べて書き分ける。
+			// **必ず配置を試みる。** 事前ガードで弾かず、置けたかどうかだけで数える
+			// （PlaceOne が「その名前のシンボルインスタンスができたか」まで確かめる）。
 			if (PlaceOne(command))
 			{
 				++drawn;
@@ -133,7 +147,8 @@ namespace HomeskzIfcImport::draw
 			}
 
 			++failed;
-			std::vector<std::string>& bucket = HasSymbolDefinition(symbolExists, command.symbol)
+			const auto defined = definedBefore.find(command.symbol);
+			std::vector<std::string>& bucket = (defined != definedBefore.end() && defined->second)
 												   ? failedSymbols
 												   : undefinedSymbols;
 			if (std::ranges::find(bucket, command.symbol) == bucket.end())
