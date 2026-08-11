@@ -308,7 +308,8 @@ jobs:
         #
         # No vcvars / msvc-dev-cmd step is needed: `cmake --build` drives MSBuild
         # through the Visual Studio generator, which brings its own toolset
-        # environment. (Neither does tidy-windows — clang-cl finds MSVC by itself.)
+        # environment. (tidy-windows does keep one, but for speed, not
+        # correctness — see the comment on that step.)
         shell: bash
         run: cmake --build build --config Release --parallel "$(nproc)" -v
 
@@ -464,10 +465,29 @@ jobs:
         shell: bash
         run: scripts/fetch-vw-sdk.sh
 
+      # clang-cl CAN find the MSVC toolchain and the Windows SDK on its own, so
+      # this step is not needed to make the analysis WORK — but it is needed to
+      # make it fast. Removing it and letting each clang-tidy process discover
+      # MSVC for itself measured 1.5x slower overall:
+      #
+      #   clang-tidy step, 15 TUs, 4-wide     with this step   without
+      #                                        164 s / 171 s    245 s / 256 s
+      #
+      # The compile databases are byte-identical either way (same flags, same
+      # clang-cl), so the difference is not in what is analysed — INCLUDE is read
+      # from the ENVIRONMENT by every one of the 15 clang-tidy processes, and
+      # having it handed to them beats each of them rediscovering it. 12-17 s here
+      # buys ~80 s there.
+      - name: Set up MSVC environment (for clang-cl)
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: x64
+
       # LLVM and Ninja both ship PREINSTALLED on the windows-latest image, so this
       # job installs neither — it only checks that what is there is usable. We used
       # to `choco install llvm ninja` here on the assumption that it was "a fast
-      # no-op refresh"; measured, it cost 31 s per run for nothing.
+      # no-op refresh"; measured, it cost 11-31 s per run for nothing. (Unlike the
+      # MSVC environment above, dropping it changed no timing anywhere else.)
       #
       # The one thing the install was really buying is a NEW ENOUGH clang: the
       # runner's MSVC standard-library headers static_assert "expected Clang 20 or
@@ -501,14 +521,13 @@ jobs:
       # the database matches the real MSVC build's GS_WIN configuration. Nothing is
       # built here, so the link-only SDK libraries are never needed.
       #
-      # No vcvars / msvc-dev-cmd step precedes this: clang-cl locates the MSVC
-      # toolchain and the Windows SDK on its own (registry / vswhere), so it does
-      # not need INCLUDE and LIB injected into the environment. That step cost 17 s
-      # per run. The compiler is given as an ABSOLUTE PATH rather than "clang-cl":
-      # the runner's PATH also carries Visual Studio's own bundled LLVM
+      # The compiler is given as an ABSOLUTE PATH rather than "clang-cl": the
+      # runner's PATH also carries Visual Studio's own bundled LLVM
       # (VC\Tools\Llvm\x64\bin), and which one a bare name resolves to is not
       # something this job should leave to chance — $LLVM_BIN is the one whose
       # version the step above checked, and the one clang-tidy runs from below.
+      # (Today a bare name happens to resolve to the same binary; this just stops
+      # that from being luck.)
       #
       # Only CMAKE_CXX_COMPILER is set. The project is declared LANGUAGES CXX, so
       # no C compiler is ever looked for; CMake reported the CMAKE_C_COMPILER that
