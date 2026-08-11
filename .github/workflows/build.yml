@@ -19,6 +19,14 @@ on:
 # Least privilege by default: the build jobs only check out the code and upload
 # artifacts, so they get read-only access. The one job that needs to write
 # (publishing the GitHub Release) requests contents: write on itself instead.
+#
+# この分離が、ビルドジョブが PR の head を checkout してその中のスクリプトを走らせても
+# 安全である根拠になっている（fork の PR では release ジョブの publish ステップが
+# 条件で外れるので、fork のコードで作った成果物は決して公開されない）。CodeQL の
+# actions/untrusted-checkout/medium はこの経路を指すが、上記の理由で除外して
+# ある——判断の全文と「見直しが要る条件」は .github/codeql/codeql-config.yml に
+# 書いてあるので、ここの permissions や release ジョブの条件を緩めるときは
+# 必ずそちらも読むこと。
 permissions:
   contents: read
 

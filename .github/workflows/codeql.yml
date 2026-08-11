@@ -88,10 +88,12 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          # security-extended adds deeper security queries on top of the default
-          # suite. The quality queries are deliberately left to clang-tidy
-          # (lint.yml / build.yml) so findings do not overlap.
-          queries: security-extended
+          # Which queries run — and which findings are deliberately excluded —
+          # lives in the config file, not here. Splitting the two across the
+          # workflow and the config would make the effective query set the union
+          # of two places; keeping it in one file means the reasoning (and the
+          # conditions that would invalidate it) sits next to the setting.
+          config-file: .github/codeql/codeql-config.yml
 
       # Compile the SDK-free subset so CodeQL can trace it. This mirrors the
       # lint / test jobs' configure line (VW_BUILD_PLUGIN=OFF, VW_BUILD_TESTS=ON)

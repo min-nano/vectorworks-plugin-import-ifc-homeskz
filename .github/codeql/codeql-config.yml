@@ -1,0 +1,62 @@
+# CodeQL の設定。codeql.yml の init ステップが config-file で読み込む。
+#
+# クエリの選択はここに一本化してある（codeql.yml 側の `queries:` は置かない。
+# 両方に書くと和集合になり、どちらが効いているのか追えなくなる）。
+#
+# security-extended は既定のスイートへさらに深いセキュリティクエリを足したもの。
+# 品質系クエリは clang-tidy（lint.yml / build.yml）に任せてあるので、ここでは
+# 意図的に足さない（指摘が二重になるだけのため）。
+queries:
+  - uses: security-extended
+
+# ---------------------------------------------------------------------------
+# 除外するクエリ。
+#
+# actions/untrusted-checkout/medium
+#   「非特権のワークフローが信頼できないコードを checkout している」という指摘。
+#   build.yml の build-mac / build-windows が
+#
+#       ref: ${{ steps.ctx.outputs.sha }}   # = pull_request のときは PR の head
+#
+#   で PR の head を checkout し、その中の CMakeLists.txt / scripts/*.sh を実行し、
+#   成果物を artifact として上げている——という経路を捉えている。クエリの説明が
+#   挙げる危険は「キャッシュや artifact を汚染し、それを特権ワークフローに食わせる」
+#   ことだが、このリポジトリではその先が塞がっている。
+#
+#     * 非特権である。build.yml のトップレベルは `permissions: contents: read` で、
+#       ビルドジョブに secrets は一切渡していない（`secrets.*` の参照が無い）。
+#       トリガも pull_request だけで、pull_request_target / workflow_run /
+#       issue_comment といった自動的に特権が付くトリガは使っていない。
+#     * fork の PR からは何も publish されない。特権を持つのは release ジョブ
+#       （`permissions: contents: write`）だけだが、その publish ステップは
+#         - stable: `github.event_name == 'push' || 'workflow_dispatch'` かつ main
+#         - dev:    `github.event.pull_request.head.repo.full_name == github.repository`
+#       で条件付けてある。fork の PR ではどちらも走らない（そもそも fork PR の
+#       GITHUB_TOKEN は read-only に落とされるので publish できない）。したがって
+#       「fork のコードで作った artifact がリリースとして公開される」経路は無い。
+#     * 同一リポジトリのブランチからの PR は、そもそも push 権限のある人しか作れない
+#       ので「信頼できないコード」ではない。
+#     * キャッシュ（ccache / SDK）は GitHub 側がブランチ単位でスコープを切るため、
+#       PR ブランチが書いたキャッシュを main のビルドが読むことはない。
+#
+#   PR の head をあえて checkout しているのは仕様である。PR のビルドは dev
+#   プレリリースとして配布され、それをローカルの Vectorworks に入れて目視確認する
+#   （ROADMAP.md の「ローカル確認チェックリスト」）。既定の checkout が指す
+#   refs/pull/<n>/merge は main を取り込んだ合成コミットなので、それをビルドすると
+#   「手元のブランチには無い main の変更」が混ざったものを確認することになり、
+#   マイルストーンの確認としては成立しない。
+#
+#   以上より、この指摘は「形としては真、この構成では悪用経路が無い」と判断して
+#   除外する。除外は **medium（非特権）だけ** で、privileged 版の
+#   actions/untrusted-checkout/critical は有効なまま残す。将来うっかり
+#   pull_request_target や workflow_run を足して特権ワークフローで PR のコードを
+#   checkout してしまった場合は、そちらが引き続き検知する。
+#
+#   この判断が崩れる条件（どれかを満たしたら除外を外して見直すこと）:
+#     * ビルドジョブに secrets を渡す
+#     * release ジョブの fork ガードを緩める
+#     * self-hosted runner を使う（fork PR のコードが自前のホストで動くようになる）
+# ---------------------------------------------------------------------------
+query-filters:
+  - exclude:
+      id: actions/untrusted-checkout/medium
