@@ -51,6 +51,7 @@ using HomeskzIfcImport::parse::raftersForPlane;
 using HomeskzIfcImport::parse::RoofPlane;
 using HomeskzIfcImport::parse::storyHasRoofSlab;
 using HomeskzIfcImport::parse::sweepPositions;
+using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
 using HomeskzIfcTests::minimalRoofText;
 using HomeskzIfcTests::near;
@@ -271,6 +272,95 @@ TEST(tiny_face_below_min_length_has_no_rafters)
 	tiny.vertices = {Vec3{0.0, 0.0, 1000.0}, Vec3{50.0, 0.0, 1000.0}, Vec3{50.0, 3000.0, 2000.0},
 					 Vec3{0.0, 3000.0, 2000.0}};
 	CHECK(raftersForPlane(tiny, "R-垂木", 0.0, Vec2{0.0, 0.0}).empty());
+}
+
+TEST(rafter_without_girder_support_uses_the_eaves_tip)
+{
+	// **軒桁に乗らない垂木は軒先を高さの基準（軒高）にする。** 試験用の片流れは
+	// 軒 y=0/z=1000・棟 y=3000/z=2000（平面投影長 3000mm）。支持点は
+	// s=(beamTopZ−1000)/1000 の位置に来るので、支持点→棟側は (1−s)·3000mm。
+	// beamTopZ=1990 → s=0.99 → 30mm しか残らない＝部材にならないので支持点を採らず、
+	// 軒先そのものを挿入点にする（長さ 3000mm・高さ差 1000mm の実形状）。
+	const std::vector<RafterCommand> noSupport = shedRaftersWithBeamTop(1990.0);
+	CHECK(!noSupport.empty());
+	for (const RafterCommand& rafter : noSupport)
+	{
+		// 挿入点＝軒先（y=0・z=1000）。棟側は y=3000・z=2000。
+		CHECK(near(rafter.start.y, 0.0));
+		CHECK(near(rafter.elevation, 1000.0));
+		CHECK(near(rafter.end.y, 3000.0));
+		CHECK(near(rafter.endElevation, 2000.0));
+		// **長さと高さを実形状に合わせる**: 差し込み・軒の出が乗ると VW は軒先を
+		// 「挿入点＋差し込み＋軒の出」に置くので、受ける軒桁が無い垂木では 0 にする。
+		CHECK(near(rafter.embedment, 0.0));
+		CHECK(near(rafter.overhang, 0.0));
+	}
+}
+
+TEST(rafter_resting_on_a_girder_keeps_the_support_point)
+{
+	// 支持点→棟側に部材が残る（beamTopZ=1500 → s=0.5 → 1500mm）ときは従来どおり
+	// 支持点を採る。挿入点は軒高（z=1500）で、軒先までの距離は差し込み＋軒の出になる。
+	const std::vector<RafterCommand> supported = shedRaftersWithBeamTop(1500.0);
+	CHECK(!supported.empty());
+	for (const RafterCommand& rafter : supported)
+	{
+		CHECK(near(rafter.start.y, 1500.0));
+		CHECK(near(rafter.elevation, 1500.0));
+		// 支持点→軒先は 1500mm。差し込み（既定桁幅 105 の半分）＋軒の出がその全部を占める。
+		CHECK(near(rafter.embedment, kDefaultGirderWidth / 2.0));
+		CHECK(near(rafter.embedment + rafter.overhang, 1500.0));
+	}
+}
+
+TEST(rafter_with_beam_top_at_the_ridge_uses_the_eaves_tip)
+{
+	// 棟側の端がちょうど横架材天端に来る面（隅棟・谷際の三角形の先端）。s は本来 1.0 だが
+	// 割り算の丸めで 1−ε になり `s < 1.0` をすり抜けることがある。s ではなく「支持点→棟側に
+	// 部材が残るか」で判定するので、どちらに転んでも軒先が基準になり縮退しない。
+	const std::vector<RafterCommand> rafters = shedRaftersWithBeamTop(2000.0);
+	CHECK(!rafters.empty());
+	for (const RafterCommand& rafter : rafters)
+	{
+		CHECK(!core::samePoint(rafter.start, rafter.end));
+		CHECK(near(rafter.start.y, 0.0));
+		CHECK(near(rafter.elevation, 1000.0));
+		CHECK(near(rafter.embedment, 0.0));
+	}
+}
+
+TEST(no_degenerate_rafters_in_any_fixture)
+{
+	// **回帰（実データ）**: 全フィクスチャで縮退した垂木が 1 本も出ないこと。かつては
+	// サンプル1 で 8 本・グレー本モデルプラン1 で 7 本の縮退垂木が出ており、
+	// validateDocument がその 2 モデルの Document 全体を弾いていた（＝インポートしても
+	// 何も描かれなかった）。core::samePoint は validateDocument の isValidRafter と同じ述語。
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		Model const model = fixture(name, ok);
+		CHECK(ok);
+		for (const RafterCommand& rafter : buildRafterCommands(model))
+			CHECK(!core::samePoint(rafter.start, rafter.end));
+	}
+}
+
+TEST(rafters_without_girder_support_have_no_extra_length_in_any_fixture)
+{
+	// 軒桁に乗らない垂木（embedment 0）は軒の出も 0 で、OIP のスパン（start→end の水平
+	// 投影長）がそのまま部材長になる＝**長さと高さが実形状と一致**する。
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		Model const model = fixture(name, ok);
+		CHECK(ok);
+		for (const RafterCommand& rafter : buildRafterCommands(model))
+		{
+			if (rafter.embedment != 0.0)
+				continue;
+			CHECK(near(rafter.overhang, 0.0));
+		}
+	}
 }
 
 TEST(non_convex_face_splits_into_multiple_segments)
@@ -510,9 +600,13 @@ TEST(fixture_rafters_are_valid)
 		CHECK(rafter.endElevation >= rafter.elevation);
 		CHECK(rafter.layer.size() > 3);
 		CHECK(rafter.layer.rfind("-垂木") == rafter.layer.size() - std::string("-垂木").size());
-		// 軒の出は 0 以上、差し込みは桁幅/2（正）、仕様ラベルは 45×45@455。
+		// 軒の出は 0 以上、仕様ラベルは 45×45@455。差し込みは**軒桁に乗る垂木なら
+		// 桁幅/2（正）、乗らない垂木なら 0**（軒先が挿入点＝軒高になり、差し込み・軒の出が
+		// 乗ると実形状より長く描かれるため。src/parse/Rafter.cpp）。
 		CHECK(rafter.overhang >= 0.0);
-		CHECK(rafter.embedment > 0.0);
+		CHECK(rafter.embedment >= 0.0);
+		if (rafter.embedment == 0.0)
+			CHECK(near(rafter.overhang, 0.0));
 		CHECK_EQ(rafter.label, std::string("45×45@455"));
 	}
 }
