@@ -142,10 +142,10 @@ namespace HomeskzIfcImport::draw
 		// （draw/DrawUtil の SetComponents の注記）。
 		//
 		// ★ローカル確認の観察点: 断面ビューポートで**コンクリート層**が地中梁の形に下がって
-		// いるか。もし下がるのが捨てコン層（＝ビットが 1 始まり）なら 1u << 1 へ、層の区別が
-		// そもそも無ければ全層（0xFFFFFFFFu）へ変える。**この 1 か所だけ**を直せばよいように
+		// いるか。もし下がるのが捨てコン層（＝ビットが 1 始まり）なら 1U << 1 へ、層の区別が
+		// そもそも無ければ全層（0xFFFFFFFFU）へ変える。**この 1 か所だけ**を直せばよいように
 		// ここに置く（ROADMAP.md M10「ローカル確認」）。
-		constexpr Uint32 kGroundBeamComponentFlags = 1u << 0;
+		constexpr Uint32 kGroundBeamComponentFlags = 1U << 0;
 
 		// 地中梁のソリッドに立てるオブジェクト変数（Python 版 _MODIFIER_PLANE_VAR＝1160 /
 		// _MARK_STRUCTURAL_VAR＝702。SDK 側の名前付き selector を使う）。
