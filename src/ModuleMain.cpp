@@ -9,6 +9,11 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtMenu.h"
+#ifdef VW_DEV_BUILD
+// dev ビルド専用の調査コマンド（地中梁の噛み合わせを探るための一時的な道具。
+// ExtMenuDumpAux.h 冒頭）。方針が決まったらこの include と下の登録を消す。
+#	include "Extensions/ExtMenuDumpAux.h"
+#endif
 #include "Updater.h"
 
 // Identifier used by Vectorworks to locate this plug-in's resources (.vwr) at
@@ -67,6 +72,12 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// Register our single menu command extension.
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuImportIfc>(
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
+
+#ifdef VW_DEV_BUILD
+	// 調査コマンドは dev ビルドにだけ出す（stable の利用者には見せない）。
+	REGISTER_Extension<HomeskzIfcImport::CExtMenuDumpAux>(GROUPID_ExtensionMenu, action, moduleInfo,
+														  iid, inOutInterface, cbp, reply);
+#endif
 
 	return reply;
 }
