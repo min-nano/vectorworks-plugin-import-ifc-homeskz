@@ -1,8 +1,9 @@
 name: Tests
 
 # The project's main CI for correctness: it runs the unit tests and, on top of
-# that, measures and reports coverage. Two jobs, split so a failure points
-# straight at its cause:
+# that, measures and reports coverage. Two jobs, split by RESPONSIBILITY — the
+# tests are built and run exactly ONCE, in `test`; `coverage` never builds or
+# runs anything, it only turns that one run's measurement into a report:
 #   * test     — build the SDK-free unit tests (the import's src/core/ + src/parse/
 #                half, plus the updater logic) and run them
 #                under AddressSanitizer + UndefinedBehaviorSanitizer, so a memory
@@ -11,13 +12,24 @@ name: Tests
 #                guards against refactors introducing memory bugs and against the
 #                updater parser mishandling unexpected external input (the fuzz /
 #                adversarial cases in tests/UpdaterRobustnessTests.cpp).
-#                A red X here means a TEST failed OR the sanitizers tripped.
-#   * coverage — only after `test` passes: rebuild with gcov instrumentation,
-#                produce a Cobertura report, and post it as a comment on the
-#                pull request (overall coverage + coverage of the lines this PR
-#                changed, via diff-cover against the base branch). A red X here
-#                means either REPORT GENERATION failed or a metric fell below
-#                its threshold (a 🔴 in the table) — never a failing test.
+#                The same build is ALSO gcov-instrumented, so that single test run
+#                emits the coverage data, which gcovr turns into a Cobertura report
+#                handed to `coverage` as an artifact.
+#                A red X here means a TEST failed, the sanitizers tripped, or the
+#                coverage data could not be measured.
+#   * coverage — only after `test` passes: download that measurement, compute the
+#                coverage of the lines this PR changed (diff-cover against the base
+#                branch) and post the table as a comment on the pull request. No
+#                compiler, no ctest — a red X here means either REPORT GENERATION
+#                failed or a metric fell below its threshold (a 🔴 in the table),
+#                never a failing test.
+#
+# Sanitizers and gcov instrumentation coexist in one build (both are plain GCC
+# flags), which is what lets the two jobs share a single test run instead of
+# compiling and running the whole suite twice. The one caveat is benign: a
+# sanitizer abort (ASAN_OPTIONS=abort_on_error) kills the process before gcov
+# flushes its .gcda files, so the measurement is complete exactly when the tests
+# pass — the only case in which `coverage` runs at all.
 #
 # Coverage is reported entirely inside GitHub Actions — there is no dependency
 # on GitHub Code Quality or any other external service. The report is posted as
@@ -48,7 +60,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # cmake + g++ for the C++ tests; python3/zip/unzip are the helpers the bash
+      # cmake + g++ for the C++ tests; gcovr turns the gcov data the run emits
+      # into the Cobertura report; python3/zip/unzip are the helpers the bash
       # updater-script harness (tests/vw-update.test.sh) stubs the JSON/zip I/O
       # with; jq is what the CI-wait clients (scripts/ci-*.sh) parse GitHub
       # responses with, so tests/ci-wait.test.sh needs it too. pwsh (for the
@@ -59,11 +72,13 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake g++ python3 zip unzip jq
+          sudo apt-get install -y --no-install-recommends cmake g++ gcovr python3 zip unzip jq
 
-      # Tests only (VW_BUILD_PLUGIN=OFF), instrumented with ASan + UBSan (no
-      # coverage — that is the separate `coverage` job). g++ ships libasan /
-      # libubsan, so no extra packages are needed. No SDK required.
+      # Tests only (VW_BUILD_PLUGIN=OFF), instrumented with ASan + UBSan AND with
+      # gcov, so this one build serves both purposes: the sanitizers police the
+      # run, and running it emits the .gcda coverage data the `coverage` job
+      # reports on. g++ ships libasan / libubsan and gcov, so no extra packages
+      # are needed. No SDK required.
       # VW_REQUIRE_SCRIPT_TESTS=ON makes the updater-script tests mandatory: a
       # missing interpreter (bash/pwsh) fails configuration and a missing helper
       # tool fails the harness, so CI can never go green without running them.
@@ -74,6 +89,7 @@ jobs:
             -DVW_BUILD_PLUGIN=OFF \
             -DVW_BUILD_TESTS=ON \
             -DVW_ENABLE_SANITIZERS=ON \
+            -DVW_ENABLE_COVERAGE=ON \
             -DVW_REQUIRE_SCRIPT_TESTS=ON
 
       - name: Build tests
@@ -82,19 +98,46 @@ jobs:
       # abort_on_error/halt_on_error make the first sanitizer report fatal (the
       # build already passes -fno-sanitize-recover=all); detect_leaks catches
       # leaked allocations at exit; print_stacktrace points UBSan at the line.
-      - name: Run tests (ASan + UBSan)
+      # This is the ONLY test run in this workflow — it both gates correctness
+      # and leaves the .gcda coverage data next to the objects.
+      - name: Run tests (ASan + UBSan, with coverage instrumentation)
         env:
           ASAN_OPTIONS: abort_on_error=1:detect_leaks=1:strict_string_checks=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ctest --test-dir build --output-on-failure
 
+      # Emit a Cobertura XML report over the plug-in sources under src/. The
+      # build tree holds the gcov data; --root . keeps paths repo-relative so
+      # diff-cover (and any reader) can map coverage back to the files. The JSON
+      # summary is a machine-readable copy of the overall totals used to build
+      # the PR comment. Both are the handoff to the `coverage` job.
+      - name: Generate coverage report (Cobertura + summary)
+        run: |
+          set -euo pipefail
+          gcovr --root . --filter 'src/.*' build \
+            --cobertura coverage.xml \
+            --json-summary coverage-summary.json \
+            --txt --print-summary
+
+      # The measurement, kept as a build artifact and picked up by `coverage`.
+      - name: Upload coverage report artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage-summary.json
+          if-no-files-found: error
+
   coverage:
-    # Runs only if `test` succeeded, so a coverage-job failure is unambiguously
-    # about the report (gcovr / diff-cover), never a failing test.
+    # Runs only if `test` succeeded — that job is where the tests are built, run
+    # and measured, and its artifact is this job's input. So a coverage-job
+    # failure is unambiguously about the report (diff-cover / the thresholds),
+    # never a failing test. Nothing is compiled or executed here.
     needs: test
     runs-on: ubuntu-latest
     # pull-requests:write lets the job post/update the coverage comment on PRs.
-    # contents:read is all the build itself needs.
+    # contents:read is all the checkout (for diff-cover's merge base) needs.
     permissions:
       contents: read
       pull-requests: write
@@ -112,47 +155,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install build + coverage tools
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake g++ gcovr
-          # diff-cover: reports coverage of only the lines changed vs. the base
-          # branch (like a coverage "diff"). It is a Python CLI tool, so install
-          # it with pipx (preinstalled on the runner) — this sidesteps PEP 668's
-          # "externally-managed-environment" error and puts `diff-cover` on PATH.
-          pipx install diff-cover
+      # diff-cover: reports coverage of only the lines changed vs. the base
+      # branch (like a coverage "diff"). It is a Python CLI tool, so install it
+      # with pipx (preinstalled on the runner) — this sidesteps PEP 668's
+      # "externally-managed-environment" error and puts `diff-cover` on PATH.
+      # No compiler and no gcovr: this job reports, it does not measure.
+      - name: Install reporting tools
+        run: pipx install diff-cover
 
-      # Same tests, this time instrumented for gcov so running them emits
-      # coverage data.
-      - name: Configure (with coverage)
-        run: |
-          cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DVW_BUILD_PLUGIN=OFF \
-            -DVW_BUILD_TESTS=ON \
-            -DVW_ENABLE_COVERAGE=ON
-
-      - name: Build tests
-        run: cmake --build build -v
-
-      # `test` already gated pass/fail; here we just need the run to emit .gcda
-      # coverage data next to the objects.
-      - name: Run tests (produce coverage data)
-        run: ctest --test-dir build --output-on-failure
-
-      # Emit a Cobertura XML report over the plug-in sources under src/. The
-      # build tree holds the gcov data; --root . keeps paths repo-relative so
-      # diff-cover (and any reader) can map coverage back to the files. The JSON
-      # summary is a machine-readable copy of the overall totals used to build
-      # the PR comment.
-      - name: Generate coverage report (Cobertura + summary)
-        run: |
-          set -euo pipefail
-          gcovr --root . --filter 'src/.*' build \
-            --cobertura coverage.xml \
-            --json-summary coverage-summary.json \
-            --txt --print-summary
+      # The measurement produced by `test`: coverage.xml (Cobertura, with
+      # repo-relative paths) and coverage-summary.json (the overall totals).
+      # Unpacked at the workspace root so both sit next to the checkout, exactly
+      # where the steps below expect them.
+      - name: Download coverage measurement from the test job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-report
+          path: .
 
       # Coverage of ONLY the lines this PR adds/changes, compared against the
       # base branch (diff-cover uses the merge base). Emits a JSON report whose
@@ -176,14 +195,14 @@ jobs:
             --json-report diff-cover.json \
             --fail-under 0
 
-      - name: Upload coverage report artifact
+      # Only the diff report: the whole-project measurement is already kept as
+      # the `coverage-report` artifact by the test job, and an artifact name can
+      # be claimed only once per run.
+      - name: Upload diff coverage artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: coverage-report
-          path: |
-            coverage.xml
-            coverage-summary.json
-            diff-cover.json
+          name: diff-coverage-report
+          path: diff-cover.json
           if-no-files-found: ignore
 
       # Build the coverage table, post it as a single sticky PR comment, and
