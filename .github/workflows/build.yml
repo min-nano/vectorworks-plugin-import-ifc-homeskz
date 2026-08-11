@@ -44,10 +44,10 @@ jobs:
     runs-on: macos-15
 
     env:
-      # URL of the Vectorworks 2026 mac SDK (~800 MB download).
+      # URL of the Vectorworks 2026 mac SDK (a ~140 MB zip, ~790 MB unpacked).
       VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-mac-SDK.zip
       # Where the trimmed SDK lives after the first download. This directory is
-      # what gets cached, so we never download the 800 MB zip more than once.
+      # what gets cached, so we never download the zip more than once.
       VW_SDK_DIR: ${{ github.workspace }}/vw-sdk
       # Bump the "v" suffix to force a fresh SDK download (e.g. after Vectorworks
       # publishes a new "latest" SDK).
@@ -106,8 +106,8 @@ jobs:
         with:
           xcode-version: "16.2"
 
-      # Restore the previously trimmed SDK if we have it. Only SDKLib/Include and
-      # SDKLib/LibMac are kept, so the cache is a few tens of MB rather than 800.
+      # Restore the previously trimmed SDK if we have it. Only the pieces a mac
+      # plug-in build needs are kept (see scripts/fetch-vw-sdk.sh).
       - name: Restore Vectorworks SDK cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:

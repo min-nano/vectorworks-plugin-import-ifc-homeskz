@@ -5,7 +5,7 @@
 # なぜこれがあるか
 # ----------------
 # SDK を要するジョブは build.yml だけで 4 つある（mac / Windows のビルドと、
-# mac / Windows の clang-tidy）。さらに ci-debug.yml も同じことをする。「800 MB の
+# mac / Windows の clang-tidy）。さらに ci-debug.yml も同じことをする。「大きな
 # zip を取ってきて、必要な部分だけ残して、ちゃんと揃っているか確かめる」という
 # 手順を各ジョブのインライン run: に書くと 5 か所に増え、SDK の構成が変わったときに
 # 直し漏れる（CLAUDE.md「重複を作らない置き場所」）。手順はここに 1 つだけ置く。
@@ -76,7 +76,7 @@ fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-echo "Downloading the Vectorworks SDK (this is large, ~800 MB)..."
+echo "Downloading the Vectorworks SDK (a large zip: ~140 MB mac / ~90 MB win)..."
 curl -fL --retry 4 --retry-delay 5 -o "$work/sdk.zip" "$SDK_URL"
 
 # 展開。ランナーによって入っている道具が違うので順に試す（git-bash には unzip が

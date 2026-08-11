@@ -95,8 +95,8 @@ jobs:
     env:
       # SDK の場所・キャッシュキー・URL は build.yml と同一にしてある。build.yml が
       # 温めたキャッシュにそのままヒットするので、SDK の再ダウンロードは基本発生
-      # しない。build.yml 側でキーを上げたらここも合わせること（将来 composite
-      # action へ切り出して一本化する予定）。
+      # しない。build.yml 側でキーを上げたらここも合わせること（用意する手順そのものは
+      # scripts/fetch-vw-sdk.sh に一本化済みで、残る重複はこの 3 つの値だけ）。
       VW_SDK_DIR: ${{ github.workspace }}/${{ inputs.platform == 'windows' && 'vw-sdk-win' || 'vw-sdk' }}
       VW_SDK_CACHE_KEY: ${{ inputs.platform == 'windows' && 'vw-sdk-2026-NNA-win-v1' || 'vw-sdk-2026-NNA-mac-v3' }}
       VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-${{ inputs.platform == 'windows' && 'win' || 'mac' }}-SDK.zip
@@ -117,7 +117,7 @@ jobs:
           echo "args=$ARGS"
 
       # SDK が要るかどうかはモードで決まる。platform=linux では SDK を用意できない
-      # ので、SDK を必要とするモードはここで即座に落とす（800 MB を無駄に取りに
+      # ので、SDK を必要とするモードはここで即座に落とす（大きな zip を無駄に取りに
       # いってから失敗するより、理由が明確で速い）。
       - name: Decide whether the SDK is needed
         id: sdk
