@@ -71,6 +71,9 @@ scripts/
   vw-update.ps1             同上の Windows 版（PowerShell。.vlb の隣に同梱される）
   lint.sh                   ローカルで全 lint（clang / cmake / yaml / shell …）
                             を実行する（CI と同じチェック。--fix で自動修正）
+  clang-tidy-sdk.sh         SDK 依存の翻訳単位（src/draw/ ほか）に clang-tidy を
+                            コア数ぶん並列でかける（build.yml の mac / Windows
+                            両ジョブが使う。対象一覧の唯一の定義）
   ci-common.sh              CI の完了待ちの共通土台（必ず有限時間で exit するための
                             歯止めとポーリング。下記 2 つが source する）
   ci-wait.sh                PR ／ブランチ ／コミットの CI が終わるまで待ち、終わった
@@ -550,9 +553,19 @@ C/C++ を対象とするジョブ:
 **SDK 依存コードの静的解析（`build.yml`）** — 同じ `.clang-tidy` ルールを、SDK が
 ないとコンパイルできない側（`src/draw/*.cpp` と `ModuleMain.cpp` /
 `Extensions/ExtMenu.cpp` / `Updater.cpp`）にも適用します。ビルドジョブは SDK を
-用意するので、**ビルド直前**に clang-tidy を走らせて全ソースを網羅します。
+用意するので、**ビルド直後**に clang-tidy を走らせて全ソースを網羅します
+（ビルドのほうが桁違いに速いので、単なるコンパイルエラーは解析を待たずに分かります）。
 `src/draw/` はグロブで拾うため、要素を追加しても対象漏れが起きません
 （`core/` `parse/` を `lint.yml` がグロブで拾うのと同じ理屈）。
+
+対象一覧と実行そのものは **`scripts/clang-tidy-sdk.sh`** が持ちます。mac / Windows の
+両ジョブが同じスクリプトを呼ぶので一覧は 1 か所にしかなく、かつ**翻訳単位をランナーの
+コア数ぶん並列**に解析します。clang-tidy はビルドを走らせずに解析するので PCH が使えず
+（`VW_ENABLE_PCH`）、1 翻訳単位ごとに SDK のアンブレラヘッダを丸ごと読み直すため
+1 本あたり 30〜40 秒かかります。直列に 15 本回すとこれがそのまま積み上がり、
+**Windows ジョブの 12 分 41 秒のうち 10 分 10 秒**（mac は 7 分 44 秒のうち 6 分 40 秒）が
+この 1 ステップでした。並列化でそれぞれ **約 3 分 40 秒 / 約 2 分**になります
+（実測。ランナーは Windows 4 コア・mac 3 コア）。
 
 - **macOS ジョブ** — `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` で生成した compile
   database に対して clang-tidy を実行し、`#if GS_MAC` 側の分岐を解析します。

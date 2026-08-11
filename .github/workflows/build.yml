@@ -194,43 +194,49 @@ jobs:
             -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-      # Static analysis of the SDK-DEPENDENT plug-in sources, right before the
-      # build. The SDK-free lint workflow (lint.yml) already tidies the updater
-      # logic on a plain Linux runner; this step extends the SAME .clang-tidy
-      # rules to the code that only compiles against the Vectorworks SDK
-      # (ModuleMain / ExtMenu / Updater). Configuring with
-      # CMAKE_EXPORT_COMPILE_COMMANDS above gives clang-tidy the exact compile
-      # flags for each file. This job compiles the GS_MAC branches; the Windows
-      # job runs the same check for the GS_WIN branches, so together they cover
-      # every line. clang-tidy is pinned to 18 (Homebrew) to match .clang-tidy.
+      - name: Build
+        # Builds only the channel this run publishes (VW_BUILD_CHANNEL), compiling
+        # its TUs in parallel across all cores. ccache stats are reset before and
+        # printed after so the cache hit rate is visible in the log.
+        #
+        # Deliberately BEFORE the static-analysis step: the build is the cheap one
+        # (~20 s behind ccache + the PCH) while clang-tidy is minutes, so putting
+        # it first surfaces a plain compile error almost immediately instead of
+        # after the whole analysis has run.
+        run: |
+          set -euo pipefail
+          ccache -z >/dev/null
+          cmake --build build --config Release --parallel "$(sysctl -n hw.ncpu)" -v
+          ccache -s
+
+      # Static analysis of the SDK-DEPENDENT plug-in sources. The SDK-free lint
+      # workflow (lint.yml) already tidies the updater logic on a plain Linux
+      # runner; this step extends the SAME .clang-tidy rules to the code that only
+      # compiles against the Vectorworks SDK (src/draw/ + ModuleMain / ExtMenu /
+      # Updater). This job analyses the GS_MAC branches; the Windows job runs the
+      # same check for the GS_WIN branches, so together they cover every line.
+      # clang-tidy is pinned to 18 (Homebrew, preinstalled on the runner image) to
+      # match .clang-tidy.
       #
-      # Only SDK-DEPENDENT files belong here. src/UpdaterFlow.cpp includes no
-      # Vectorworks header and has no GS_MAC / GS_WIN branch, so lint.yml already
-      # tidies it under the same rules on a free Linux runner — re-tidying it
-      # inside both (expensive) SDK jobs found nothing the Linux job would miss.
-      #
-      # src/draw/ is globbed rather than listed: every module there is SDK-bound
-      # by definition (CLAUDE.md「依存の向きは厳守する」), so a new draw module is
-      # tidied the moment it lands. The three named files are the rest of the
-      # SDK-only surface, which does not grow per milestone. NB: `mapfile` is
-      # bash 4+, and macOS ships bash 3.2 — hence plain glob expansion.
+      # The translation units to analyse — and the parallel execution — live in
+      # scripts/clang-tidy-sdk.sh, shared with the Windows job so the list exists
+      # in exactly one place (CLAUDE.md「重複を作らない置き場所」). Running the TUs
+      # concurrently instead of in one serial clang-tidy process is what keeps this
+      # step to a couple of minutes; see that script's header for the measurements.
       #
       # The compile database is built for ONE channel (VW_BUILD_CHANNEL — dev on a
       # pull request, stable on main), matching what this run actually builds and
       # publishes. Leaving it at the "both" default put two entries per source in
-      # the database and clang-tidy analysed every file TWICE, doubling a step that
-      # already takes ~9 minutes. The only per-channel difference is the
-      # VW_DEV_BUILD define (3 branches in ModuleMain / ExtMenu), and the two
-      # channels are covered across the pipeline: PRs analyse the dev branches,
-      # main analyses the stable ones.
+      # the database and clang-tidy analysed every file TWICE. The only per-channel
+      # difference is the VW_DEV_BUILD define (3 branches in ModuleMain / ExtMenu),
+      # and the two channels are covered across the pipeline: PRs analyse the dev
+      # branches, main analyses the stable ones.
       - name: Static analysis (clang-tidy, SDK-dependent code)
         env:
           VW_BUILD_CHANNEL: ${{ steps.ctx.outputs.channel }}
         run: |
           set -euo pipefail
           brew install llvm@18
-          tidy="$(brew --prefix llvm@18)/bin/clang-tidy"
-          "$tidy" --version
           # clang-tidy analyses the sources without running the build, so the PCH
           # (used by ./build) is never produced. Generate a separate, PCH-free
           # compile database purely for clang-tidy; the real build keeps the PCH.
@@ -240,20 +246,7 @@ jobs:
             -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL" \
             -DVW_ENABLE_PCH=OFF \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-          files=(src/draw/*.cpp src/ModuleMain.cpp src/Extensions/ExtMenu.cpp src/Updater.cpp)
-          echo "Tidying ${#files[@]} SDK-dependent translation units:"
-          printf '  %s\n' "${files[@]}"
-          "$tidy" -p build-tidy --warnings-as-errors='*' "${files[@]}"
-
-      - name: Build
-        # Builds only the channel this run publishes (VW_BUILD_CHANNEL), compiling
-        # its TUs in parallel across all cores. ccache stats are reset before and
-        # printed after so the cache hit rate is visible in the log.
-        run: |
-          set -euo pipefail
-          ccache -z >/dev/null
-          cmake --build build --config Release --parallel "$(sysctl -n hw.ncpu)" -v
-          ccache -s
+          scripts/clang-tidy-sdk.sh -p build-tidy -t "$(brew --prefix llvm@18)/bin/clang-tidy"
 
       # Apple Silicon requires every Mach-O to carry a code signature. We use a
       # free, certificate-less "ad-hoc" signature ("-"), which is enough for the
@@ -443,24 +436,28 @@ jobs:
             -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH" \
             -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL"
 
-      # Static analysis of the SDK-DEPENDENT plug-in sources, right before the
-      # build — the Windows counterpart to the macOS clang-tidy step. It covers
-      # the GS_WIN branches (Widen / Narrow / OwnModulePath / RunBundledScript in
-      # Updater.cpp) that the macOS job preprocesses out, so the two jobs
-      # together tidy every line.
-      #
-      # The Visual Studio generator used for the real build does NOT emit a
-      # compile_commands.json, so a SEPARATE, build-free configure with Ninja +
-      # clang-cl produces the compile database for clang-tidy. clang-cl inherits
-      # the same Windows (non-APPLE) settings from CMakeLists.txt (_WINDOWS, /MD,
-      # the OnlyWin include dir), so the database matches the real MSVC build's
-      # GS_WIN configuration. Nothing is built here — only configured — so the
-      # link-only SDK libraries are never needed.
       - name: Set up MSVC environment (for clang-cl)
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
           arch: x64
 
+      - name: Build
+        # Builds only the channel this run publishes (VW_BUILD_CHANNEL). --parallel
+        # runs MSBuild across cores (targets) and /MP (set in CMakeLists.txt)
+        # parallelises the TUs within the target.
+        #
+        # Deliberately BEFORE the static-analysis steps (see the macOS job): the
+        # build takes about a minute behind the PCH while clang-tidy takes several,
+        # so building first surfaces a plain compile error almost immediately. It
+        # stays after the MSVC environment step so its environment is unchanged.
+        shell: bash
+        run: cmake --build build --config Release --parallel "$(nproc)" -v
+
+      # The three steps below are the Windows counterpart to the macOS clang-tidy
+      # step: they analyse the same translation units under the same .clang-tidy
+      # rules, covering the GS_WIN branches (Widen / Narrow / OwnModulePath /
+      # RunBundledScript in Updater.cpp) that the macOS job preprocesses out — so
+      # the two jobs together tidy every line.
       - name: Install LLVM + Ninja (for clang-tidy)
         shell: pwsh
         run: |
@@ -479,6 +476,14 @@ jobs:
           choco install --no-progress -y llvm
           "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
+      # The Visual Studio generator used for the real build does NOT emit a
+      # compile_commands.json, so a SEPARATE, build-free configure with Ninja +
+      # clang-cl produces the compile database for clang-tidy. clang-cl inherits
+      # the same Windows (non-APPLE) settings from CMakeLists.txt (_WINDOWS, /MD,
+      # the OnlyWin include dir), so the database matches the real MSVC build's
+      # GS_WIN configuration. Nothing is built here — only configured — so the
+      # link-only SDK libraries are never needed.
+      #
       # No build stamp is passed here (unlike the real Configure above, and like
       # the macOS clang-tidy configure): VW_BUILD_VERSION / VW_BUILD_BRANCH only
       # end up as string literals in the binary, and nothing is built from this
@@ -500,37 +505,26 @@ jobs:
             -DVW_ENABLE_PCH=OFF \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
+      # Same translation units and the same parallel runner as the macOS job
+      # (scripts/clang-tidy-sdk.sh owns both); this run covers the GS_WIN branches.
+      #
+      # clang-tidy forces -fno-delayed-template-parsing to get a full AST, but the
+      # Vectorworks SDK's MSVC-oriented template headers (e.g. VWVariant.h calling
+      # ::GS_NewPtr) rely on MSVC's delayed parsing to compile. Re-add
+      # -fdelayed-template-parsing so those SDK templates parse as they do in the
+      # real MSVC build; our own (non-template) code is still analyzed. Clang 20
+      # deprecates -fdelayed-template-parsing under C++20 and, with
+      # warnings-as-errors, that deprecation notice alone would fail the run. The
+      # flag is still needed (see above) and functional, so silence just its
+      # deprecation warning; everything else stays an error.
       - name: Static analysis (clang-tidy, SDK-dependent code)
         shell: bash
         run: |
-          set -euo pipefail
-          tidy="/c/Program Files/LLVM/bin/clang-tidy"
-          "$tidy" --version
-          # clang-tidy forces -fno-delayed-template-parsing to get a full AST, but
-          # the Vectorworks SDK's MSVC-oriented template headers (e.g. VWVariant.h
-          # calling ::GS_NewPtr) rely on MSVC's delayed parsing to compile. Re-add
-          # -fdelayed-template-parsing so those SDK templates parse as they do in
-          # the real MSVC build; our own (non-template) code is still analyzed.
-          # Clang 20 deprecates -fdelayed-template-parsing under C++20 and, with
-          # warnings-as-errors, that deprecation notice alone would fail the run.
-          # The flag is still needed (see above) and functional, so silence just
-          # its deprecation warning; everything else stays an error.
-          # Same globbed set as the macOS job (see the comment there); this run
-          # covers the GS_WIN branches.
-          files=(src/draw/*.cpp src/ModuleMain.cpp src/Extensions/ExtMenu.cpp src/Updater.cpp)
-          echo "Tidying ${#files[@]} SDK-dependent translation units:"
-          printf '  %s\n' "${files[@]}"
-          "$tidy" -p build-tidy --warnings-as-errors='*' \
-            --extra-arg=-fdelayed-template-parsing \
-            --extra-arg=-Wno-delayed-template-parsing-in-cxx20 \
-            "${files[@]}"
-
-      - name: Build
-        # Builds only the channel this run publishes (VW_BUILD_CHANNEL). --parallel
-        # runs MSBuild across cores (targets) and /MP (set in CMakeLists.txt)
-        # parallelises the TUs within the target.
-        shell: bash
-        run: cmake --build build --config Release --parallel "$(nproc)" -v
+          scripts/clang-tidy-sdk.sh \
+            -p build-tidy \
+            -t "/c/Program Files/LLVM/bin/clang-tidy" \
+            -x --extra-arg=-fdelayed-template-parsing \
+            -x --extra-arg=-Wno-delayed-template-parsing-in-cxx20
 
       - name: Inspect built plug-in
         shell: bash
