@@ -79,8 +79,9 @@ namespace HomeskzIfcImport::draw
 	// スキップする。実際に配置できた枚数を返す。手順は床板（draw/Floor）と同じで、共通部分は
 	// draw/DrawUtil（SetComponents / SetSlabDatum / ResolveSlabStyle）にある。
 	//
-	// **地中梁（modifiers）を持つ底盤は台形プリズムを 2 回作る**: 削り取りモディファイア
-	// （プロファイル群としてスラブへ渡し、底盤を clip する）と、可視の 3D ソリッド（削り取った
-	// 位置を地中梁のコンクリートで埋める）。詳細は draw/Footing.cpp 冒頭。
+	// **地中梁（modifiers）を持つ底盤は、台形プリズムを ISDK::ModifySlab で底盤へ足して
+	// 噛み合わせる**（isClipObject=false）。プリズムは 1 本につき 1 つだけ作り、削り取りも
+	// 可視ソリッドの複製も持たない（Python 版が 2 回作っていた理由と経緯は
+	// draw/Footing.cpp 冒頭「地中梁の描画」）。
 	std::size_t drawSlabs(const core::Document& document, core::ProgressReporter& progress);
 } // namespace HomeskzIfcImport::draw
