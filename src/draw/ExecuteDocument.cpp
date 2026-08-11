@@ -100,11 +100,7 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 		}
 		if (beginPhase("基礎の底盤を描画しています…", document.slabs.size()))
-		{
-			std::string note;
-			counts.slabs = drawSlabs(document, progress, &note);
-			addDiagnostics(note);
-		}
+			counts.slabs = drawSlabs(document, progress);
 
 		// M5 床板を描く。配置先の FL レイヤは上の drawStories が作るので、必ずその後に
 		// 置く（レイヤが無い命令は drawFloors がスキップする）。

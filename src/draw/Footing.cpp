@@ -57,39 +57,37 @@
 //	結合失敗のダイアログは抑止する（インポート中に手動操作を求めない）。
 //
 //	【地中梁の描画（M10）】地中梁は**台形断面**なので単一のスラブでは描けない。底盤に
-//	噛み合う台形プリズム（core::ModifierCommand）で表し、次の 2 段構えで描く。
+//	噛み合う台形プリズム（core::ModifierCommand）を **2 回**作って表す:
+//	  1. **削り取りモディファイア** … プリズム群を 1 つのグループにまとめ、
+//	     SetCustomObjectProfileGroup で通常スラブ（CreateSlab）へ渡すと底盤を**削り取る**。
+//	     地中梁の位置で底盤のスラブスタイルの層（コンクリート・捨てコン・砕石）が消え、
+//	     断面に写り込まなくなる。
+//	  2. **可視の 3D ソリッド** … 同じプリズムを独立したソリッドとして同じレイヤ・同じ
+//	     基礎スラブクラスで置き、削り取った位置を地中梁のコンクリートで埋める。
+//	     こちらだけ天端を底盤へ 10mm 呑み込ませ（core::raiseModifierTop）、天端と底盤底面が
+//	     面ちょうど接する（coplanar）ことによる断面の境界線を防ぐ。
+//	Python 版が「足す」形で Slab PIO に噛み合わせられず 2 回作る形に落ち着いた経緯
+//	（CreateCustomObjectPath はダイアログ＋クラッシュ、後付けの ProfileGroup は底盤が不可視、
+//	ModifySlab は失敗）も同じで、こちらは最初からこの形で作る。
 //
-//	  1. **噛み合わせ（本来やりたい形）** … ISDK の
-//	     `ModifySlab(slab, prism, isClipObject=false, componentFlags)`（"Adds to or clips
-//	     from a slab"。Interfaces/VectorWorks/ISDK.h）へプリズムを渡す。成功すれば地中梁は
-//	     底盤スラブ**そのものの一部**になり、プリズムは 1 本につき 1 つで済む。
-//	  2. **削り取り＋可視ソリッド（フォールバック。Python 版と同じ）** … 同じプリズムを
-//	     2 回作る: (a) 群を SetCustomObjectProfileGroup で通常スラブへ渡して底盤を**削り取り**、
-//	     (b) 削った位置を独立した**可視の 3D ソリッド**で埋める（(b) だけ天端を底盤へ 10mm
-//	     呑み込ませる＝core::raiseModifierTop。coplanar による断面の境界線を防ぐ）。
+//	★**C++ SDK でも「足す」噛み合わせはできない（試して確認済み。もう試さないこと）。**
+//	ISDK には `ModifySlab(slab, modifier, isClipObject, componentFlags)`（"Adds to or clips
+//	from a slab"）があり、`isClipObject = false` が「足す」にあたる——が、実機（VW 2026）では
+//	VectorScript 版と同じく**「選択が間違っています」のダイアログを出して false を返す**
+//	（底盤は直方体のまま・地中梁は独立したプリズムのまま残り、ダイアログは呼んだ回数ぶん出る）。
+//	この文言は VW のコマンドが**ドキュメントの選択**を検証したときの定型なので「全解除 →
+//	底盤とプリズムだけを選択 → 呼ぶ」も試したが結果は同じで、**VW 側の不具合の可能性が高い**。
+//	SDK に他の手段も無い（スラブのモディファイアを扱う API は ModifySlab だけ）。ただし
+//	**UI では噛み合わせられる**ので、残る手は「UI で噛み合わせたスラブを解析して同じ構造を
+//	組み立てる」——経緯と次の一手は ROADMAP.md M10 の「調査済み・不可」を参照。
 //
-//	★**1 は実機で失敗する**（VW 2026 で確認）。`ModifySlab` は VectorScript 版（vs.ModifySlab）
-//	と同じく**「選択が間違っています」のダイアログを出して false を返す**——しかも地中梁の
-//	本数ぶん出る。この文言は VW のコマンドが**ドキュメントの選択**を検証したときの定型なので、
-//	引数のハンドルではなく選択を見ている疑いがあり、**底盤とプリズムだけを選択した状態**で
-//	呼ぶ形にしてある（TryInterlockGroundBeam）。それでも駄目なら 2 へ落ちる。
-//
-//	そのため**噛み合わせは文書全体で 1 度しか試さない**（Interlock の状態遷移）。失敗したら
-//	以降の地中梁は一切試さずに 2 で描くので、**警告ダイアログは多くても 1 回**になる。
-//	2 で描いたことは完了ダイアログの診断行に残す（drawSlabs の outNote）。
-//
-//	なお Python 版が 2 を選んだのも同じ経緯で、VS には「足す」形で噛み合わせる手段が無かった
-//	（CreateCustomObjectPath は作成時ダイアログ＋再実行クラッシュ、後付けの
-//	SetCustomObjectProfileGroup は未確定で底盤が不可視、ModifySlab は上記のとおり失敗）。
-//
-//	【Python 版と異なる点・意図的】地中梁に**マテリアルを設定しない**。Python 版は文書に
-//	登録済みの "基礎コンクリート MT" を名前で引いて可視ソリッドへ割り当てるが、本移植は
+//	【Python 版と異なる点・意図的】地中梁の可視ソリッドに**マテリアルを設定しない**。
+//	Python 版は文書に登録済みの "基礎コンクリート MT" を名前で引いて割り当てるが、本移植は
 //	既存リソースに依存しない（スタイルを名前で作るのと同じ方針。draw/Footing.cpp の
-//	「スタイルは常に新規作成する」）。見え方はクラス（基礎スラブ）の by-class 属性で決まる
-//	（噛み合わせに成功した場合は底盤スラブの一部なので、底盤の見え方に従う）。
+//	「スタイルは常に新規作成する」）。見え方はクラス（基礎スラブ）の by-class 属性で決まる。
 //
 //	実描画（壁の高さ基準・壁スタイル・底盤の天端とスラブスタイル・壁結合の詰まり方・
-//	地中梁の向きと噛み合わせ）はローカルの VectorWorks で目視確認する方針
+//	地中梁の向きと削り取り）はローカルの VectorWorks で目視確認する方針
 //	（ROADMAP.md M9 / M10「ローカル確認」）。
 //
 
@@ -133,36 +131,18 @@ namespace HomeskzIfcImport::draw
 
 		// 地中梁の可視ソリッドを底盤へ呑み込ませる量（mm。Python 版 _GROUND_BEAM_SLAB_BITE）。
 		// 地中梁の天端は底盤の底面とちょうど接する（実データで確認: 天端 = 底盤天端 − 底盤厚）
-		// ため、独立したソリッドとして置くときだけ少し大きくして底盤本体に重ね、断面
-		// ビューポートで境界線が不安定に出るのを防ぐ。**噛み合わせるモディファイアは実形状の
-		// まま**渡す（底盤と一体になるので境界面そのものが消える）。
+		// ため、可視ソリッドだけを少し大きくして底盤本体に重ね、断面ビューポートで境界線が
+		// 不安定に出るのを防ぐ。**削り取りモディファイアは実形状のまま**（ヘッダ冒頭）。
 		constexpr double kGroundBeamSlabBite = 10.0;
-
-		// ModifySlab の isClipObject。**false＝足す（add）モディファイア**で、地中梁は底盤へ
-		// 足して噛み合わせる（削り取り＝true は使わない。ヘッダ冒頭「地中梁の描画」）。名前を
-		// 付けて渡すのは、裸の false が「clip しない」なのか「add しない」なのか読めないため。
-		constexpr bool kAddModifier = false;
-
-		// ModifySlab の componentFlags（どの構成層をモディファイアが変えるか、のビット）。
-		// 地中梁は**コンクリートの下り梁**なので、最上層＝コンクリート（索引 0）のビットだけを
-		// 立てる。スラブのコンポーネント索引が 0 始まりであることは実機で確認済み
-		// （draw/DrawUtil の SetComponents の注記）。
-		//
-		// ★ローカル確認の観察点: 断面ビューポートで**コンクリート層**が地中梁の形に下がって
-		// いるか。もし下がるのが捨てコン層（＝ビットが 1 始まり）なら 1U << 1 へ、層の区別が
-		// そもそも無ければ全層（0xFFFFFFFFU）へ変える。**この 1 か所だけ**を直せばよいように
-		// ここに置く（ROADMAP.md M10「ローカル確認」）。
-		constexpr Uint32 kGroundBeamComponentFlags = 1U << 0;
 
 		// 地中梁のソリッドに立てるオブジェクト変数（Python 版 _MODIFIER_PLANE_VAR＝1160 /
 		// _MARK_STRUCTURAL_VAR＝702。SDK 側の名前付き selector を使う）。
 		//   ovPlanarObjIsSrceen（1160）… 「2D スクリーンオブジェクトか」。false を立てて
 		//          レイヤ平面のワールド 3D として扱わせる（VW 自身のエクスポートで底盤の
-		//          モディファイアに false が立つのに合わせる）。**すべてのプリズムへ**。
+		//          モディファイアに false が立つのに合わせる）。削り取り・可視の両方へ。
 		//   ovIsStructural（702）… 「断面ビューポートで構造用図形として扱う」（Mark Object as
 		//          Structural）。断面で底盤など他の構造用図形と一体にマージ表示させる。
-		//          **フォールバックの可視ソリッドだけ**（噛み合わせた地中梁は底盤スラブの
-		//          一部になるので、底盤自身の扱いに従う）。
+		//          **可視ソリッドだけ**（底盤を clip するだけのモディファイアには不要）。
 
 		// JoinWalls の showAlerts。結合に失敗してもダイアログを出さない（インポート中に
 		// 手動操作を求めない。Python 版 _JOIN_SHOW_ALERTS と同じ）。
@@ -171,15 +151,6 @@ namespace HomeskzIfcImport::draw
 		// 地中梁のプリズムを置き直すかを決める許容（mm。CreateModifierPrism の末尾）。
 		// 丸め誤差で毎回動かさない程度に大きく、図面で見える差より十分小さい値。
 		constexpr double kPlacementTol = 0.5;
-
-		// 地中梁の**噛み合わせ**（ISDK::ModifySlab）が使えるか。文書単位の状態で、
-		// drawSlabs が 1 つ持って各底盤へ渡す（ヘッダ冒頭「地中梁の描画」）。
-		enum class Interlock
-		{
-			Untried,   // まだ試していない（最初の地中梁で 1 度だけ試す）
-			Available, // 使える（以降も噛み合わせで描く）
-			Unavailable, // 使えない（以降は削り取り＋可視ソリッドで描く。二度と試さない）
-		};
 
 		// オブジェクト変数へ真偽値を書き込む（呼び出しの定型を 1 か所に。draw/Roof の
 		// SetPointVariable / SetRealVariable と同じ流儀）。
@@ -326,7 +297,7 @@ namespace HomeskzIfcImport::draw
 			return groupHandle;
 		}
 
-		// 地中梁を**可視の 3D ソリッド**として置く（削り取り方式の 2 つ目の実体）。底盤と
+		// 地中梁を**可視の 3D ソリッド**として置く（削り取りとは別の 2 つ目の実体）。底盤と
 		// 同じクラスを付けて一体に見せ、天端を底盤へ呑み込ませる。断面ビューポートで
 		// 構造用図形として扱わせる（オブジェクト変数 702）。
 		void DrawBeamSolids(const std::vector<core::ModifierCommand>& modifiers,
@@ -342,64 +313,6 @@ namespace HomeskzIfcImport::draw
 				SetAllAttributesByClass(solid);
 				SetBooleanVariable(solid, ovIsStructural, true);
 			}
-		}
-
-		// 地中梁 1 本を底盤へ噛み合わせられるか試す。成功したら true（プリズムは底盤の一部に
-		// なる）。失敗したらプリズムを消して false（呼び出し側は削り取り方式へ回す）。
-		//
-		// **選択状態をセットしてから呼ぶ。** `ModifySlab` は VS 版・SDK 版とも
-		// **「選択が間違っています」で失敗する**（どちらも実機で確認済み）。この文言は VW の
-		// コマンドが**ドキュメントの選択**を検証したときに出す定型なので、引数のハンドルでは
-		// なく選択を見ている疑いがある。そこで「全解除 → 底盤とプリズムだけを選択 → 呼ぶ →
-		// 全解除」の形にしてある。**この仮説が外れれば噛み合わせは諦めて削り取り方式へ回る**
-		// （呼び出し側が 1 度きりしか試さないので、失敗しても警告は 1 回で済む）。
-		bool TryInterlockGroundBeam(MCObjectHandle slabObject,
-									const core::ModifierCommand& modifier)
-		{
-			const MCObjectHandle prism = CreateModifierPrism(modifier);
-			if (prism == nil)
-				return false;
-
-			gSDK->DeselectAll();
-			VWObject(slabObject).SetSelected(true);
-			VWObject(prism).SetSelected(true);
-			const bool interlocked =
-				gSDK->ModifySlab(slabObject, prism, kAddModifier, kGroundBeamComponentFlags);
-			gSDK->DeselectAll();
-
-			if (!interlocked)
-			{
-				// ModifySlab は false のとき底盤へ何も足していないので、プリズムが宙に浮いた
-				// 図形として残る。削り取り方式で描き直すぶんと二重にならないよう消す。
-				VWObject(prism).DeleteObject();
-			}
-			return interlocked;
-		}
-
-		// 底盤 1 枚ぶんの地中梁を噛み合わせ、**噛み合わせられた本数**を返す（先頭から数えた
-		// 連続本数。残りは呼び出し側が削り取り方式で描く）。
-		//
-		// **文書全体で 1 度失敗したら、以降は二度と試さない**（`state` が Unavailable になる）。
-		// 実機で ModifySlab が全件失敗したとき、「選択が間違っています」のダイアログが地中梁の
-		// **本数ぶん**出てインポートが止まりかけたため、警告は多くても 1 回に抑える。
-		std::size_t InterlockGroundBeams(MCObjectHandle slabObject, const core::SlabCommand& slab,
-										 Interlock& state)
-		{
-			if (slabObject == nil || state == Interlock::Unavailable)
-				return 0;
-
-			std::size_t interlocked = 0;
-			for (const core::ModifierCommand& modifier : slab.modifiers)
-			{
-				if (!TryInterlockGroundBeam(slabObject, modifier))
-				{
-					state = Interlock::Unavailable;
-					break;
-				}
-				state = Interlock::Available;
-				++interlocked;
-			}
-			return interlocked;
 		}
 
 		// 立上り 1 本を壁として描く。壁を作れなければ壁芯の直線にフォールバックする。
@@ -454,11 +367,8 @@ namespace HomeskzIfcImport::draw
 
 		// 底盤 1 枚をスラブとして描く。スラブを作れなければ外形ポリゴンにフォールバックする。
 		// 配置できたら true。手順は draw/Floor の DrawOne と同じ（共通部分は draw/DrawUtil）。
-		//
-		// 地中梁はまず**噛み合わせ**を試し（ISDK::ModifySlab）、使えない場合だけ従来どおり
-		// **削り取り＋可視ソリッド**で描く（ヘッダ冒頭「地中梁の描画」）。`interlock` は文書
-		// 単位の状態で、1 度失敗したら以降の底盤では試さない。
-		bool DrawOneSlab(const core::SlabCommand& slab, InternalIndex style, Interlock& interlock)
+		// 地中梁を持つ底盤は、削り取りモディファイア＋可視ソリッドの 2 つを併せて置く。
+		bool DrawOneSlab(const core::SlabCommand& slab, InternalIndex style)
 		{
 			const MCObjectHandle profile = CreateClosedPolygon(slab.boundary);
 			if (profile == nil)
@@ -468,7 +378,7 @@ namespace HomeskzIfcImport::draw
 			if (object == nil)
 			{
 				// フォールバック: 外形ポリゴンをクラス付きで残す。**スラブを作れなくても
-				// 地中梁自体は描く**（噛み合わせる相手も削り取る相手も無いので可視ソリッド）。
+				// 地中梁自体は描く**（削り取る相手が無いだけで、可視ソリッドは意味を持つ）。
 				SetClassByName(profile, slab.drawClass);
 				SetAllAttributesByClass(profile);
 				DrawBeamSolids(slab.modifiers, slab.drawClass);
@@ -478,18 +388,12 @@ namespace HomeskzIfcImport::draw
 			SetClassByName(object, slab.drawClass);
 			SetAllAttributesByClass(object);
 
-			// 地中梁を噛み合わせる。噛み合わせられなかったぶん（`rest`）は削り取り方式へ回す。
-			const std::size_t interlocked = InterlockGroundBeams(object, slab, interlock);
-			const std::vector<core::ModifierCommand> rest(
-				slab.modifiers.begin() + static_cast<std::ptrdiff_t>(interlocked),
-				slab.modifiers.end());
-
-			// 削り取り方式: プリズム群を**削り取りモディファイア**として渡して底盤を clip する
-			// （スラブスタイルの層が地中梁の位置から消える）。可視のソリッドは下で別に置く。
-			// **スタイルより前**に渡す（この順序はローカル確認済み。ヘッダ冒頭）。
-			if (!rest.empty())
+			// 地中梁（台形プリズム）を持つ底盤は、プリズム群を**削り取りモディファイア**として
+			// 渡して底盤を clip する（スラブスタイルの層が地中梁の位置から消える）。可視の
+			// ソリッドは下で別に置く（ヘッダ冒頭「地中梁の描画」）。
+			if (!slab.modifiers.empty())
 			{
-				const MCObjectHandle group = CreateModifierGroup(rest);
+				const MCObjectHandle group = CreateModifierGroup(slab.modifiers);
 				if (group != nil)
 					gSDK->SetCustomObjectProfileGroup(object, group);
 			}
@@ -517,10 +421,10 @@ namespace HomeskzIfcImport::draw
 
 			gSDK->ResetObject(object);
 
-			// 削り取った位置を埋める可視の 3D ソリッド（削り取り方式の 2 つ目の実体）。
-			// **スラブの確定後**に置く（ResetObject がスラブを作り直す前に置くと、同じレイヤの
-			// 図形として巻き込まれかねない）。噛み合わせられたぶんは底盤の一部なので置かない。
-			DrawBeamSolids(rest, slab.drawClass);
+			// 削り取った位置を埋める可視の 3D ソリッド（2 つ目の実体）。**スラブの確定後**に
+			// 置く（ResetObject がスラブを作り直す前に置くと、同じレイヤの図形として巻き込まれ
+			// かねない）。
+			DrawBeamSolids(slab.modifiers, slab.drawClass);
 			return true;
 		}
 
@@ -689,16 +593,12 @@ namespace HomeskzIfcImport::draw
 		return joined;
 	}
 
-	std::size_t drawSlabs(const core::Document& document, core::ProgressReporter& progress,
-						  std::string* outNote)
+	std::size_t drawSlabs(const core::Document& document, core::ProgressReporter& progress)
 	{
 		// 命令のスタイル名 → このインポートで作ったスタイルの索引。同じコンクリート厚の
 		// 底盤は 1 つのスタイルを共有する（毎回作ると厚みの数だけでなく枚数ぶんスタイルが
 		// 増えてしまう）。既存リソースには触れないので、実際の名前は連番付きになりうる。
 		std::map<std::string, InternalIndex> styles;
-
-		// 地中梁の噛み合わせが使えるか（文書単位。最初の 1 本で決まる）。
-		Interlock interlock = Interlock::Untried;
 
 		std::size_t drawn = 0;
 		for (const core::SlabCommand& slab : document.slabs)
@@ -720,17 +620,8 @@ namespace HomeskzIfcImport::draw
 													   slab.styleName, slab.components, slab.datum))
 						  .first->second;
 
-			if (DrawOneSlab(slab, style, interlock))
+			if (DrawOneSlab(slab, style))
 				++drawn;
-		}
-
-		// 噛み合わせを試して使えなかったことは**完了ダイアログに残す**（VW が出す警告は 1 回
-		// だけ・以降は削り取り方式で描いているので、黙っていると「なぜ 2 通りの結果があるのか」
-		// が分からなくなる）。試すまでもなく地中梁が無かった場合は何も言わない。
-		if (outNote != nullptr && interlock == Interlock::Unavailable)
-		{
-			*outNote =
-				"地中梁: 噛み合わせ（ModifySlab）が使えないため、削り取り＋ソリッドで描きました";
 		}
 		return drawn;
 	}

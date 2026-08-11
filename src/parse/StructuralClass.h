@@ -64,9 +64,8 @@ namespace HomeskzIfcImport::parse
 	// 基礎（04構造-01基礎 階層）。木造（02木造）ではなく基礎（01基礎）の下に置く。Python 版は
 	// ifc/footing.py が持つが、本移植はクラス名の定義をここへ集約する（M4 の枠。ROADMAP.md M9）。
 	//   立上り（基礎梁）… 壁オブジェクト（parse/Footing の buildWallCommands）
-	//   底盤            … スラブオブジェクト（同 buildSlabCommands）。地中梁は底盤へ
-	//                     噛み合わせるモディファイアなので、底盤と一体＝同じクラスで描かれる
-	//                     （噛み合わせに失敗したときのフォールバックの可視ソリッドも同じ）。
+	//   底盤            … スラブオブジェクト（同 buildSlabCommands）。地中梁（M10）も
+	//                     底盤に噛み合う一体の形状なので同じクラスで描く。
 	inline constexpr const char* CLASS_FOUNDATION_WALL = "04構造-01基礎-03立ち上がり";
 	inline constexpr const char* CLASS_FOUNDATION_SLAB = "04構造-01基礎-02基礎スラブ";
 

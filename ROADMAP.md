@@ -703,32 +703,33 @@ M7 のコメントにある「頂点を足す呼び出しが無い」は取り�
   1 本へ統合し（`mergeGroundBeamModifiers`）、平面外形が最も重なる底盤の `modifiers` へ
   振り分ける（`attachGroundBeamModifiers`。どの底盤にも入らないものは重心が最も近い底盤へ
   フォールバックし取りこぼさない）。**単独のスラブ命令にはしない**。描画は台形プリズムを
-  **1 本につき 1 つ**だけ作り、`ISDK::ModifySlab(slab, prism, isClipObject=false, componentFlags)`
-  で底盤へ**足して噛み合わせる**（下記「地中梁は 1 回だけ作る」）。実データ:
+  **2 回**作る: (1) 削り取りモディファイア群を `SetCustomObjectProfileGroup` で通常スラブへ
+  渡して底盤を clip、(2) 同じプリズムを可視の 3D ソリッドとして同じレイヤ・クラスで置く
+  （こちらだけ天端を 10mm 底盤へ呑み込ませる＝`core::raiseModifierTop`）。実データ:
   サンプル1 で 17 本、伏図次郎で 13 本（統合後）。
-- ✅ **［Python 版と実現手段が異なる点］地中梁は 1 回だけ作る（噛み合わせる）。** Python 版は
-  同じ台形プリズムを **2 回**作っていた——(1) `SetCustomObjectProfileGroup` へ渡して底盤を
-  削り取る clip モディファイアと、(2) 削った位置を埋める可視の 3D ソリッド。これは
-  **VectorScript に「足す」形で噛み合わせる手段が無かった**ための回避策で（VW 2026 で確認:
-  `vs.ModifySlab` は「選択が間違っています」で失敗、`CreateCustomObjectPath` は作成時
-  ダイアログ＋再実行クラッシュ、後付けの `SetCustomObjectProfileGroup` は未確定で底盤が
-  不可視）、C++ SDK には**専用の API がある**:
+- ❌ **［調査済み・不可］`ModifySlab` で「足す」噛み合わせはできない**（PR #44。**この API を
+  もう一度試さないこと**）。2 回作るのは Python 版（VectorScript）の回避策なので、C++ SDK なら
+  1 回で噛み合わせられるのではないか、を実際に試した結果:
 
-  ```cpp
-  // Interfaces/VectorWorks/ISDK.h（ci-debug の sdk-grep で確認）
-  virtual bool ModifySlab(MCObjectHandle slab, MCObjectHandle modifier,
-                          bool isClipObject, Uint32 componentFlags) = 0;
-  // vs.py の説明: "Adds to or clips from a slab."
-  //   modifier … The adding or clipping object
-  //   isClipObject … Whether the modifier is an add object or a clip object
-  ```
-
-  `isClipObject = false` が**足す（噛み合わせる）**モディファイアなので、削り取りも複製も
-  要らない。`componentFlags`（どの構成層が modifier の形に追従するか）はビットの意味が
-  SDK に書かれていないため、**最上層＝コンクリート（索引 0）のビット**を立てている
-  （`draw/Footing.cpp` の `kGroundBeamComponentFlags`。実機の見え方で 1 か所だけ直せる）。
-  噛み合わせに失敗した 1 本だけ、従来どおり**可視の 3D ソリッド**として置き直す
-  （天端を 10mm 呑み込ませる＝`core::raiseModifierTop`。正常系では通らないフォールバック）。
+  * SDK には**専用の API がある**——`ISDK::ModifySlab(slab, modifier, isClipObject,
+    componentFlags)`（`Interfaces/VectorWorks/ISDK.h`。`vs.py` の説明は "Adds to or clips
+    from a slab."、`isClipObject` は "Whether the modifier is an add object or a clip
+    object"）。**API の形の上では `isClipObject = false` が「足す＝噛み合わせる」にあたる。**
+  * しかし**実機（VW 2026）では VectorScript 版と同じく失敗する**。`ModifySlab` は
+    **「選択が間違っています」のダイアログを出して false を返し**、底盤は直方体のまま・
+    地中梁は独立したプリズムのまま残る。ダイアログは**呼んだ回数ぶん**出る。
+  * この文言は VW のコマンドが**ドキュメントの選択**を検証したときの定型なので、
+    「全解除 → 底盤とプリズムだけを選択 → 呼ぶ」も試したが**結果は同じ**だった。
+    引数のハンドルの問題でも選択状態の問題でもなく、**VW 側の不具合の可能性が高い**。
+  * SDK に他の手段は無い（`sdk-grep` で確認: スラブのモディファイアを扱う API は
+    `ModifySlab` だけで、`Interfaces/` にスラブ用のインターフェースも、モディファイアの
+    add/clip を表すオブジェクト変数・レコードも無い）。
+  * したがって**削り取り＋可視ソリッドの 2 回作りが現時点の最善**で、上の実装を維持する。
+  * **ただし UI では噛み合わせられる**（ユーザー確認）。残る手は「UI で噛み合わせた
+    スラブを解析して同じ構造を組み立てる」で、見るべきは**プロファイル群に入っている
+    オブジェクトのクラス名とレコード**（VS に `MakeModifierClass`＝"Creates special class
+    for modifiers" があるので、**モディファイア専用クラス**で add / clip を区別している
+    可能性がある）。次に着手するならここから。
 - ✅ **［ローカル確認で判明・Python 版に無い］端部のキャップは解析側が端ごとに決める。**
   VW の壁は端部を閉じる線（キャップ）を**壁ごと**に持ち、明示しなければドキュメントの壁ツール
   設定に従う。結合（`JoinWalls` の `capped`）任せにしたところ、実機で **T 字でぶつかる側の
@@ -848,10 +849,9 @@ M7 のコメントにある「頂点を足す呼び出しが無い」は取り�
   渡す（回転・移動の手順が消え、位置・向き・形状の自由度が「押し出しの向き」1 つだけになる）。
   押し出しは基面の法線方向へ伸びるため、**頂点の並びを法線が梁の走る向きを指すよう揃える**
   （Newell 法。ローカル確認の要点はこの向き）。
-- ✅ **［Python 版と異なる点・意図的］地中梁にマテリアルを設定しない。** Python 版は文書に
-  登録済みの `基礎コンクリート MT` を名前で引いて可視ソリッドへ割り当てるが、本移植は既存
-  リソースに依存しない（スタイルを名前で新規作成するのと同じ方針。M9）。噛み合わせた地中梁は
-  底盤スラブの一部なので、見え方は底盤のスタイル・クラスがそのまま決める。
+- ✅ **［Python 版と異なる点・意図的］可視ソリッドにマテリアルを設定しない。** Python 版は
+  文書に登録済みの `基礎コンクリート MT` を名前で引いて割り当てるが、本移植は既存リソースに
+  依存しない（スタイルを名前で新規作成するのと同じ方針。M9）。見え方はクラスの by-class 属性。
 - ✅ `core/Document`: `WallJoinCommand`＋`WallJoinType`（値は SDK の `JoinModifierType` と一致）・
   `Document.wallJoins`、`ModifierCommand`＋`SlabCommand.modifiers`、描画側から切り離した純計算
   `raiseModifierTop`。`validateDocument` に壁結合（2 本が異なり `walls` の範囲内）と地中梁
@@ -893,14 +893,10 @@ M7 のコメントにある「頂点を足す呼び出しが無い」は取り�
   （実データでは 0 件）。出る場合は結合種別・ピック点（解析側）を疑う。
 - **地中梁が正しい向き・位置に伸びている**こと（`VWExtrudeObj` の押し出しが基面の法線方向か。
   逆向きなら梁が軸の反対側へ出るので、`CreateModifierPrism` の巻き直しを反転する）。
-- **地中梁が底盤に噛み合って 1 つのスラブオブジェクトになっている**こと（3D で底盤の下に
-  下り梁が付き、モディファイア用の**余分なソリッドが図面に残っていない**）。残っていたら
-  `ModifySlab` が false を返して可視ソリッドのフォールバックが動いた合図。
-- 断面ビューポートで、地中梁の位置の**コンクリート層**が梁の形に下がっていること。下がるのが
-  捨てコン層（＝ビットが 1 始まり）なら `draw/Footing.cpp` の `kGroundBeamComponentFlags` を
-  `1U << 1` へ、層の区別がそもそも無ければ全層（`0xFFFFFFFFU`）へ変える（**1 か所だけ**）。
-- 捨てコン・砕石の層が地中梁を貫いて見えないか（Python 版は clip で除去していた部分）。
-  見える場合は `componentFlags` の選び方を実機の見え方に合わせて決める。
+- 地中梁の位置で**底盤が削り取られ**（断面ビューポートで躯体・捨てコン・砕石の層が地中梁の
+  位置に写り込まない）、そこを可視ソリッドが埋めて一体に見えること。断面で底盤と地中梁が
+  **構造用図形としてマージ**表示されること（オブジェクト変数 702）。
+- 地中梁の天端と底盤の底面の境界線が断面で不安定に出ないこと（呑み込み 10mm が効いているか）。
 - **地中梁が命令どおりの位置に置かれている**こと（平行移動の補正が効いているか）。ずれが
   疑われるときは、その梁の**両端の座標と長さ**を測って命令セットと突き合わせる——長さが
   一致して位置だけ違えば描画側の配置、長さも違えば解析側の問題と切り分けられる。
