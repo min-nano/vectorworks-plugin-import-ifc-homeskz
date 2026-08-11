@@ -61,18 +61,17 @@ namespace HomeskzIfcImport::draw
 	// が引く。フォールバック描画＝壁を作れなかった命令とレイヤ未生成でスキップした命令は
 	// 記録しない）。描画は必ず**底盤より先**に行う（Python 版の実行順 walls → wall_joins →
 	// slabs に揃えてある）。
-	// outNote には、命令数・配置数とレイヤ上の壁の本数が合わないときだけ診断を残す
-	// （「命令に無い立上りが図面にある」を実機の 1 周で捕まえるため。draw/Footing.cpp 参照）。
 	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress,
-						  WallHandles* handles = nullptr, std::string* outNote = nullptr);
+						  WallHandles* handles = nullptr);
 
 	// 壁結合（wallJoin 命令）を実行して交差する立上りを結合する。結合できた件数を返す。
 	// handles は drawWalls が記録した対応表で、a / b の**どちらかが未配置の命令はスキップ**
 	// する。実行は立上りの直後・底盤の前（Python 版 execute_wall_joins と同じ位置）。
 	//
-	// 結合の**後に各立上りの端部キャップを命令どおりへ揃え直す**（JoinWalls が結合した端の
-	// キャップを書き換えるため。draw/Footing.cpp「端部のキャップ」）。VW に拒否された結合が
-	// あれば outNote に件数を残す（完了ダイアログの診断。draw/Member と同じ流儀）。
+	// 結合の**後に各立上りの端部キャップを命令どおりへ揃え直し、壁をリセットする**
+	// （JoinWalls が結合した端のキャップを書き換え、平面の 2D 表現も作り直すまで古いまま
+	// になるため。draw/Footing.cpp「端部のキャップ」）。VW に拒否された結合があれば outNote に
+	// 件数を残す（完了ダイアログの診断。draw/Member と同じ流儀）。
 	std::size_t drawWallJoins(const core::Document& document, core::ProgressReporter& progress,
 							  const WallHandles& handles, std::string* outNote = nullptr);
 

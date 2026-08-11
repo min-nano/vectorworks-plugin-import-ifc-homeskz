@@ -92,11 +92,7 @@ namespace HomeskzIfcImport::draw
 		// drawStories の後に置く（レイヤが無い命令はそれぞれがスキップする）。
 		WallHandles wallHandles;
 		if (beginPhase("基礎の立上りを描画しています…", document.walls.size()))
-		{
-			std::string note;
-			counts.walls = drawWalls(document, progress, &wallHandles, &note);
-			addDiagnostics(note);
-		}
+			counts.walls = drawWalls(document, progress, &wallHandles);
 		if (beginPhase("基礎の立上りを結合しています…", document.wallJoins.size()))
 		{
 			std::string note;
