@@ -109,7 +109,6 @@ jobs:
       # Restore the previously trimmed SDK if we have it. Only SDKLib/Include and
       # SDKLib/LibMac are kept, so the cache is a few tens of MB rather than 800.
       - name: Restore Vectorworks SDK cache
-        id: sdk-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.VW_SDK_DIR }}
@@ -127,52 +126,11 @@ jobs:
           restore-keys: |
             ccache-mac-
 
-      - name: Download and trim Vectorworks SDK
-        if: steps.sdk-cache.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          work="$(mktemp -d)"
-          echo "Downloading SDK (this is large, ~800 MB)..."
-          curl -fL --retry 4 --retry-delay 5 -o "$work/sdk.zip" "$VW_SDK_URL"
-
-          echo "Extracting..."
-          unzip -q "$work/sdk.zip" -d "$work/extracted"
-
-          # The zip may wrap everything in a top-level folder, so locate SDKLib.
-          # Skip the "__MACOSX" AppleDouble metadata mirror that macOS zips add.
-          sdklib="$(find "$work/extracted" -type d -name SDKLib -not -path '*/__MACOSX/*' -print -quit)"
-          if [ -z "$sdklib" ]; then
-            echo "::error::Could not find SDKLib inside the downloaded SDK."
-            exit 1
-          fi
-          echo "Found SDKLib at: $sdklib"
-
-          # Keep only the pieces needed to build a mac plug-in:
-          #  - Include: headers
-          #  - LibMac:  libVWSDK.a and the VWMM framework
-          #  - Source:  some Include/ headers #include ../../../Source/VWSDK/...
-          #  - ToolsMac: the BuildVWR tool that packages the .vwr resource
-          mkdir -p "$VW_SDK_DIR/SDKLib"
-          cp -R "$sdklib/Include" "$VW_SDK_DIR/SDKLib/Include"
-          cp -R "$sdklib/LibMac" "$VW_SDK_DIR/SDKLib/LibMac"
-          cp -R "$sdklib/Source" "$VW_SDK_DIR/SDKLib/Source"
-          cp -R "$sdklib/ToolsMac" "$VW_SDK_DIR/SDKLib/ToolsMac"
-
-          # Make sure the BuildVWR tool is runnable (executable, not quarantined).
-          chmod +x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR" || true
-          xattr -dr com.apple.quarantine "$VW_SDK_DIR/SDKLib/ToolsMac" 2>/dev/null || true
-
-          rm -rf "$work"
-          echo "Trimmed SDK size:"
-          du -sh "$VW_SDK_DIR"
-
-      - name: Verify SDK is present
-        run: |
-          set -euo pipefail
-          test -f "$VW_SDK_DIR/SDKLib/Include/VectorworksSDK.h"
-          test -f "$VW_SDK_DIR/SDKLib/LibMac/Release/libVWSDK.a"
-          test -x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR"
-          echo "SDK looks good."
+      # Download + trim on a cache miss, verify either way. The script decides
+      # which it is by looking at $VW_SDK_DIR, so there is no cache-hit condition
+      # here; it is shared with the other three SDK jobs (see its header).
+      - name: Set up Vectorworks SDK
+        run: scripts/fetch-vw-sdk.sh
 
       - name: Install ccache
         run: brew install ccache
@@ -198,55 +156,11 @@ jobs:
         # Builds only the channel this run publishes (VW_BUILD_CHANNEL), compiling
         # its TUs in parallel across all cores. ccache stats are reset before and
         # printed after so the cache hit rate is visible in the log.
-        #
-        # Deliberately BEFORE the static-analysis step: the build is the cheap one
-        # (~20 s behind ccache + the PCH) while clang-tidy is minutes, so putting
-        # it first surfaces a plain compile error almost immediately instead of
-        # after the whole analysis has run.
         run: |
           set -euo pipefail
           ccache -z >/dev/null
           cmake --build build --config Release --parallel "$(sysctl -n hw.ncpu)" -v
           ccache -s
-
-      # Static analysis of the SDK-DEPENDENT plug-in sources. The SDK-free lint
-      # workflow (lint.yml) already tidies the updater logic on a plain Linux
-      # runner; this step extends the SAME .clang-tidy rules to the code that only
-      # compiles against the Vectorworks SDK (src/draw/ + ModuleMain / ExtMenu /
-      # Updater). This job analyses the GS_MAC branches; the Windows job runs the
-      # same check for the GS_WIN branches, so together they cover every line.
-      # clang-tidy is pinned to 18 (Homebrew, preinstalled on the runner image) to
-      # match .clang-tidy.
-      #
-      # The translation units to analyse — and the parallel execution — live in
-      # scripts/clang-tidy-sdk.sh, shared with the Windows job so the list exists
-      # in exactly one place (CLAUDE.md「重複を作らない置き場所」). Running the TUs
-      # concurrently instead of in one serial clang-tidy process is what keeps this
-      # step to a couple of minutes; see that script's header for the measurements.
-      #
-      # The compile database is built for ONE channel (VW_BUILD_CHANNEL — dev on a
-      # pull request, stable on main), matching what this run actually builds and
-      # publishes. Leaving it at the "both" default put two entries per source in
-      # the database and clang-tidy analysed every file TWICE. The only per-channel
-      # difference is the VW_DEV_BUILD define (3 branches in ModuleMain / ExtMenu),
-      # and the two channels are covered across the pipeline: PRs analyse the dev
-      # branches, main analyses the stable ones.
-      - name: Static analysis (clang-tidy, SDK-dependent code)
-        env:
-          VW_BUILD_CHANNEL: ${{ steps.ctx.outputs.channel }}
-        run: |
-          set -euo pipefail
-          brew install llvm@18
-          # clang-tidy analyses the sources without running the build, so the PCH
-          # (used by ./build) is never produced. Generate a separate, PCH-free
-          # compile database purely for clang-tidy; the real build keeps the PCH.
-          cmake -S . -B build-tidy \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DVW_SDK_DIR="$VW_SDK_DIR" \
-            -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL" \
-            -DVW_ENABLE_PCH=OFF \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-          scripts/clang-tidy-sdk.sh -p build-tidy -t "$(brew --prefix llvm@18)/bin/clang-tidy"
 
       # Apple Silicon requires every Mach-O to carry a code signature. We use a
       # free, certificate-less "ad-hoc" signature ("-"), which is enough for the
@@ -306,10 +220,10 @@ jobs:
   # ---------------------------------------------------------------------------
   # Windows build. Produces the ".vlb" module (a DLL) plus its sibling ".vwr"
   # resource, the "<name>.commit" build stamp and the PowerShell updater, zipped
-  # per plug-in. Runs in PARALLEL with the macOS job (build-mac) so the two
-  # platforms build concurrently instead of one after the other. Publishing the
-  # releases is deferred to the separate "release" job, which runs once both
-  # builds have finished — this job just produces and uploads its artifacts.
+  # per plug-in. Runs in PARALLEL with the macOS build and with both
+  # static-analysis jobs, so nothing here waits on anything else. Publishing the
+  # releases is deferred to the separate "release" job, which runs once all four
+  # have finished — this job just produces and uploads its artifacts.
   build-windows:
     runs-on: windows-latest
 
@@ -363,65 +277,16 @@ jobs:
       # Restore the previously trimmed SDK if we have it. Only the pieces needed
       # to build a Windows plug-in are kept, so the cache is small.
       - name: Restore Vectorworks SDK cache
-        id: sdk-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.VW_SDK_DIR }}
           key: ${{ env.VW_SDK_CACHE_KEY }}
 
-      - name: Download and trim Vectorworks SDK
-        if: steps.sdk-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          # Silencing progress makes Invoke-* and curl far faster in CI.
-          $ProgressPreference = 'SilentlyContinue'
-
-          $work = Join-Path $env:RUNNER_TEMP 'vw-sdk-dl'
-          New-Item -ItemType Directory -Force -Path $work | Out-Null
-          $zip = Join-Path $work 'sdk.zip'
-
-          Write-Host 'Downloading SDK (this is large)...'
-          curl.exe -fL --retry 4 --retry-delay 5 -o $zip $env:VW_SDK_URL
-          if ($LASTEXITCODE -ne 0) { throw "SDK download failed ($LASTEXITCODE)" }
-
-          Write-Host 'Extracting...'
-          $ex = Join-Path $work 'extracted'
-          Expand-Archive -LiteralPath $zip -DestinationPath $ex -Force
-
-          $sdklib = Get-ChildItem -LiteralPath $ex -Recurse -Directory -Filter 'SDKLib' |
-            Select-Object -First 1
-          if (-not $sdklib) { Write-Error '::error::Could not find SDKLib inside the downloaded SDK.'; exit 1 }
-          Write-Host "Found SDKLib at: $($sdklib.FullName)"
-
-          # Keep only what a Windows plug-in build needs:
-          #  - Include:  headers
-          #  - LibWin:   VWSDK.lib and the VWMM import library
-          #  - Source:   some Include/ headers #include ../../../Source/VWSDK/...
-          #  - ToolsWin: buildvwr.exe + 7-Zip, which package the .vwr resource
-          $dst = Join-Path $env:VW_SDK_DIR 'SDKLib'
-          New-Item -ItemType Directory -Force -Path $dst | Out-Null
-          foreach ($sub in 'Include','LibWin','Source','ToolsWin') {
-            $s = Join-Path $sdklib.FullName $sub
-            if (Test-Path -LiteralPath $s) {
-              Copy-Item -LiteralPath $s -Destination $dst -Recurse -Force
-            } else {
-              Write-Host "(note) SDKLib/$sub not present in this SDK; skipping."
-            }
-          }
-
-          Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
-          Write-Host 'Trimmed SDK contents:'
-          Get-ChildItem -LiteralPath $dst | Select-Object Name
-
-      - name: Verify SDK is present
+      # Download + trim on a cache miss, verify either way — the same script the
+      # macOS job uses (it picks LibWin / ToolsWin from RUNNER_OS).
+      - name: Set up Vectorworks SDK
         shell: bash
-        run: |
-          set -euo pipefail
-          test -f "$VW_SDK_DIR/SDKLib/Include/VectorworksSDK.h"
-          test -f "$VW_SDK_DIR/SDKLib/LibWin/Release/VWSDK.lib"
-          test -f "$VW_SDK_DIR/SDKLib/ToolsWin/BuildVWR/buildvwr.exe"
-          echo "SDK looks good."
+        run: scripts/fetch-vw-sdk.sh
 
       - name: Configure
         shell: bash
@@ -436,95 +301,17 @@ jobs:
             -DVW_BUILD_BRANCH="$VW_BUILD_BRANCH" \
             -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL"
 
-      - name: Set up MSVC environment (for clang-cl)
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-        with:
-          arch: x64
-
       - name: Build
         # Builds only the channel this run publishes (VW_BUILD_CHANNEL). --parallel
         # runs MSBuild across cores (targets) and /MP (set in CMakeLists.txt)
         # parallelises the TUs within the target.
         #
-        # Deliberately BEFORE the static-analysis steps (see the macOS job): the
-        # build takes about a minute behind the PCH while clang-tidy takes several,
-        # so building first surfaces a plain compile error almost immediately. It
-        # stays after the MSVC environment step so its environment is unchanged.
+        # No vcvars / msvc-dev-cmd step is needed: `cmake --build` drives MSBuild
+        # through the Visual Studio generator, which brings its own toolset
+        # environment. (The MSVC environment step this job used to carry existed
+        # only for clang-cl, and moved to tidy-windows along with clang-tidy.)
         shell: bash
         run: cmake --build build --config Release --parallel "$(nproc)" -v
-
-      # The three steps below are the Windows counterpart to the macOS clang-tidy
-      # step: they analyse the same translation units under the same .clang-tidy
-      # rules, covering the GS_WIN branches (Widen / Narrow / OwnModulePath /
-      # RunBundledScript in Updater.cpp) that the macOS job preprocesses out — so
-      # the two jobs together tidy every line.
-      - name: Install LLVM + Ninja (for clang-tidy)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          choco install --no-progress -y ninja
-          # Install the LATEST LLVM rather than pinning a version: the runner's
-          # MSVC standard-library headers static_assert "expected Clang 20 or
-          # newer" and use Clang-20 builtins, so clang-cl / clang-tidy must be new
-          # enough to parse them. (macOS pins llvm@18 because AppleClang + libc++
-          # there impose no such requirement.) Bump the runner's MSVC and this
-          # both track "latest", so they stay compatible. NB: LLVM ships
-          # preinstalled on the runner image, so this is a fast no-op refresh (a
-          # few seconds); we deliberately do NOT actions/cache "C:\Program
-          # Files\LLVM" — caching a ~2-3 GB already-present tree saves nothing and
-          # its restore/save dominates the whole job (~15 min).
-          choco install --no-progress -y llvm
-          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-
-      # The Visual Studio generator used for the real build does NOT emit a
-      # compile_commands.json, so a SEPARATE, build-free configure with Ninja +
-      # clang-cl produces the compile database for clang-tidy. clang-cl inherits
-      # the same Windows (non-APPLE) settings from CMakeLists.txt (_WINDOWS, /MD,
-      # the OnlyWin include dir), so the database matches the real MSVC build's
-      # GS_WIN configuration. Nothing is built here — only configured — so the
-      # link-only SDK libraries are never needed.
-      #
-      # No build stamp is passed here (unlike the real Configure above, and like
-      # the macOS clang-tidy configure): VW_BUILD_VERSION / VW_BUILD_BRANCH only
-      # end up as string literals in the binary, and nothing is built from this
-      # tree — it exists solely to emit compile_commands.json for clang-tidy.
-      # VW_BUILD_CHANNEL, on the other hand, IS passed: it keeps the database to
-      # the single channel this run builds, so clang-tidy analyses each source
-      # once instead of twice (see the macOS job for the full rationale).
-      - name: Configure compile database (Ninja + clang-cl, no build)
-        shell: bash
-        env:
-          VW_BUILD_CHANNEL: ${{ steps.ctx.outputs.channel }}
-        run: |
-          cmake -S . -B build-tidy -G Ninja \
-            -DCMAKE_C_COMPILER=clang-cl \
-            -DCMAKE_CXX_COMPILER=clang-cl \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DVW_SDK_DIR="$VW_SDK_DIR" \
-            -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL" \
-            -DVW_ENABLE_PCH=OFF \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-
-      # Same translation units and the same parallel runner as the macOS job
-      # (scripts/clang-tidy-sdk.sh owns both); this run covers the GS_WIN branches.
-      #
-      # clang-tidy forces -fno-delayed-template-parsing to get a full AST, but the
-      # Vectorworks SDK's MSVC-oriented template headers (e.g. VWVariant.h calling
-      # ::GS_NewPtr) rely on MSVC's delayed parsing to compile. Re-add
-      # -fdelayed-template-parsing so those SDK templates parse as they do in the
-      # real MSVC build; our own (non-template) code is still analyzed. Clang 20
-      # deprecates -fdelayed-template-parsing under C++20 and, with
-      # warnings-as-errors, that deprecation notice alone would fail the run. The
-      # flag is still needed (see above) and functional, so silence just its
-      # deprecation warning; everything else stays an error.
-      - name: Static analysis (clang-tidy, SDK-dependent code)
-        shell: bash
-        run: |
-          scripts/clang-tidy-sdk.sh \
-            -p build-tidy \
-            -t "/c/Program Files/LLVM/bin/clang-tidy" \
-            -x --extra-arg=-fdelayed-template-parsing \
-            -x --extra-arg=-Wno-delayed-template-parsing-in-cxx20
 
       - name: Inspect built plug-in
         shell: bash
@@ -566,16 +353,188 @@ jobs:
           path: dist
 
   # ---------------------------------------------------------------------------
-  # Publish the downloadable release. Runs only after BOTH platform builds have
-  # finished (needs: [build-mac, build-windows]) so a single release carries the
-  # macOS (.vwlibrary.zip) and Windows (.vlb.zip) assets together. Splitting this
+  # Static analysis of the SDK-DEPENDENT plug-in sources, one job per platform.
+  #
+  # WHY THESE ARE THEIR OWN JOBS. The SDK-free lint workflow (lint.yml) tidies the
+  # 2-phase import code on a free Linux runner; these jobs extend the SAME
+  # .clang-tidy rules to the code that only compiles against the Vectorworks SDK
+  # (src/draw/ + ModuleMain / ExtMenu / Updater). clang-tidy cannot use a PCH (it
+  # analyses without running the build), so every translation unit re-parses the
+  # whole SDK umbrella header and the analysis costs minutes — far more than the
+  # build it used to sit inside. Run as separate jobs it happens CONCURRENTLY with
+  # the builds instead of after them, which takes it off the critical path.
+  #
+  # The gate is unchanged: `release` needs these jobs too, so a clang-tidy finding
+  # still stops the release from being published even though the build succeeded.
+  #
+  # macOS covers the GS_MAC branches and Windows the GS_WIN ones (Widen / Narrow /
+  # OwnModulePath / RunBundledScript in Updater.cpp), so together they tidy every
+  # line. The translation units and the parallel execution live in
+  # scripts/clang-tidy-sdk.sh — one definition for both jobs.
+  #
+  # Neither job builds anything, so it needs no build stamp and no ccache; the
+  # SDK cache is restore-ONLY so these jobs never race the build jobs to save it.
+  #
+  # The compile database is generated for the ONE channel this run publishes (dev
+  # on a pull request, stable on main). At the "both" default the database holds
+  # two entries per source and clang-tidy analyses every file twice; the only
+  # per-channel difference is the VW_DEV_BUILD define (3 branches in ModuleMain /
+  # ExtMenu), and the pipeline covers both — PRs analyse dev, main analyses stable.
+  # That is the whole context these jobs need, so they derive it inline instead of
+  # repeating the build jobs' full "Resolve build context" step.
+  tidy-mac:
+    runs-on: macos-15
+
+    env:
+      VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-mac-SDK.zip
+      VW_SDK_DIR: ${{ github.workspace }}/vw-sdk
+      VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-mac-v3
+      # PR は dev、それ以外（main への push / 再ディスパッチ）は stable。
+      VW_BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Analyse the same commit the build jobs build (the PR head, not the
+          # ephemeral merge commit).
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # The compile database records this toolchain's flags, so pin the same Xcode
+      # the build job uses.
+      - name: Select Xcode 16.2
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: "16.2"
+
+      - name: Restore Vectorworks SDK cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.VW_SDK_DIR }}
+          key: ${{ env.VW_SDK_CACHE_KEY }}
+
+      - name: Set up Vectorworks SDK
+        run: scripts/fetch-vw-sdk.sh
+
+      # clang-tidy is pinned to 18 (Homebrew, preinstalled on the runner image) to
+      # match what .clang-tidy was tuned against.
+      - name: Install clang-tidy
+        run: brew install llvm@18
+
+      # PCH off: clang-tidy never runs the build, so a database carrying
+      # "-include-pch <missing>.pch" would make every file error out.
+      - name: Configure compile database (no build)
+        run: |
+          cmake -S . -B build-tidy \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVW_SDK_DIR="$VW_SDK_DIR" \
+            -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL" \
+            -DVW_ENABLE_PCH=OFF \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Static analysis (clang-tidy, SDK-dependent code)
+        run: scripts/clang-tidy-sdk.sh -p build-tidy -t "$(brew --prefix llvm@18)/bin/clang-tidy"
+
+  tidy-windows:
+    runs-on: windows-latest
+
+    env:
+      VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-win-SDK.zip
+      VW_SDK_DIR: ${{ github.workspace }}/vw-sdk-win
+      VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-win-v1
+      VW_BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Restore Vectorworks SDK cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.VW_SDK_DIR }}
+          key: ${{ env.VW_SDK_CACHE_KEY }}
+
+      - name: Set up Vectorworks SDK
+        shell: bash
+        run: scripts/fetch-vw-sdk.sh
+
+      # clang-cl needs the MSVC headers/libs on INCLUDE/LIB.
+      - name: Set up MSVC environment (for clang-cl)
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: x64
+
+      - name: Install LLVM + Ninja (for clang-tidy)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install --no-progress -y ninja
+          # Install the LATEST LLVM rather than pinning a version: the runner's
+          # MSVC standard-library headers static_assert "expected Clang 20 or
+          # newer" and use Clang-20 builtins, so clang-cl / clang-tidy must be new
+          # enough to parse them. (macOS pins llvm@18 because AppleClang + libc++
+          # there impose no such requirement.) Bump the runner's MSVC and this
+          # both track "latest", so they stay compatible. NB: LLVM ships
+          # preinstalled on the runner image, so this is a fast no-op refresh (a
+          # few seconds); we deliberately do NOT actions/cache "C:\Program
+          # Files\LLVM" — caching a ~2-3 GB already-present tree saves nothing and
+          # its restore/save dominates the whole job (~15 min).
+          choco install --no-progress -y llvm
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      # The Visual Studio generator the real build uses does NOT emit a
+      # compile_commands.json, so the database comes from a build-free configure
+      # with Ninja + clang-cl. clang-cl inherits the same Windows (non-APPLE)
+      # settings from CMakeLists.txt (_WINDOWS, /MD, the OnlyWin include dir), so
+      # the database matches the real MSVC build's GS_WIN configuration. Nothing is
+      # built here, so the link-only SDK libraries are never needed.
+      - name: Configure compile database (Ninja + clang-cl, no build)
+        shell: bash
+        run: |
+          cmake -S . -B build-tidy -G Ninja \
+            -DCMAKE_C_COMPILER=clang-cl \
+            -DCMAKE_CXX_COMPILER=clang-cl \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVW_SDK_DIR="$VW_SDK_DIR" \
+            -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL" \
+            -DVW_ENABLE_PCH=OFF \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      # clang-tidy forces -fno-delayed-template-parsing to get a full AST, but the
+      # Vectorworks SDK's MSVC-oriented template headers (e.g. VWVariant.h calling
+      # ::GS_NewPtr) rely on MSVC's delayed parsing to compile. Re-add
+      # -fdelayed-template-parsing so those SDK templates parse as they do in the
+      # real MSVC build; our own (non-template) code is still analyzed. Clang 20
+      # deprecates -fdelayed-template-parsing under C++20 and, with
+      # warnings-as-errors, that deprecation notice alone would fail the run. The
+      # flag is still needed (see above) and functional, so silence just its
+      # deprecation warning; everything else stays an error.
+      - name: Static analysis (clang-tidy, SDK-dependent code)
+        shell: bash
+        run: |
+          scripts/clang-tidy-sdk.sh \
+            -p build-tidy \
+            -t "/c/Program Files/LLVM/bin/clang-tidy" \
+            -x --extra-arg=-fdelayed-template-parsing \
+            -x --extra-arg=-Wno-delayed-template-parsing-in-cxx20
+
+  # ---------------------------------------------------------------------------
+  # Publish the downloadable release. Runs only after BOTH platform builds AND
+  # both static-analysis jobs have finished
+  # (needs: [build-mac, build-windows, tidy-mac, tidy-windows]) so a single
+  # release carries the macOS (.vwlibrary.zip) and Windows (.vlb.zip) assets
+  # together — and so a clang-tidy finding still blocks publishing even though
+  # the builds themselves succeeded. The analysis runs CONCURRENTLY with the
+  # builds rather than inside them, so keeping it as a gate costs no extra time. Splitting this
   # out of the build jobs means neither platform publishes on its own, so there
   # is no create/attach race between them:
   #   main  -> refresh the rolling "stable" release with the HomeskzIfcImport bundle.
   #   other -> refresh a per-branch "dev-<branch>" prerelease with HomeskzIfcImportDev.
   # Rolling tags are deleted and recreated so they always point at this build.
   release:
-    needs: [build-mac, build-windows]
+    needs: [build-mac, build-windows, tidy-mac, tidy-windows]
     runs-on: ubuntu-latest
 
     # Only this job publishes/refreshes the GitHub Release that the local updater

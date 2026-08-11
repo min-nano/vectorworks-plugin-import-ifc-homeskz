@@ -72,8 +72,11 @@ scripts/
   lint.sh                   ローカルで全 lint（clang / cmake / yaml / shell …）
                             を実行する（CI と同じチェック。--fix で自動修正）
   clang-tidy-sdk.sh         SDK 依存の翻訳単位（src/draw/ ほか）に clang-tidy を
-                            コア数ぶん並列でかける（build.yml の mac / Windows
-                            両ジョブが使う。対象一覧の唯一の定義）
+                            コア数ぶん並列でかける（build.yml の tidy-mac /
+                            tidy-windows が使う。対象一覧の唯一の定義）
+  fetch-vw-sdk.sh           Vectorworks SDK をランナーへ用意する（ダウンロード →
+                            トリミング → 検証。build.yml の 4 ジョブと
+                            ci-debug.yml が共有する唯一の定義）
   ci-common.sh              CI の完了待ちの共通土台（必ず有限時間で exit するための
                             歯止めとポーリング。下記 2 つが source する）
   ci-wait.sh                PR ／ブランチ ／コミットの CI が終わるまで待ち、終わった
@@ -396,12 +399,16 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 
 ワークフローの内容:
 
-- **2 つのビルドジョブ**を持ちます。`build-mac`（`macos-15`・Apple Silicon、Xcode 16.2）と
-  `build-windows`（`windows-latest`・Visual Studio 2022）で、両者は**並行**して走ります。
-  それぞれが対応するプラットフォームの SDK をダウンロードします。
+- **4 つの並行ジョブ**を持ちます。ビルドの `build-mac`（`macos-15`・Apple Silicon、
+  Xcode 16.2）と `build-windows`（`windows-latest`・Visual Studio 2022）、および
+  静的解析の `tidy-mac` / `tidy-windows` です。4 つとも**同時**に走り、互いを待ちません
+  （clang-tidy はビルドより時間がかかるので、ビルドの中に置かず並走させています。
+  詳細は下記「SDK 依存コードの静的解析」）。
 - SDK は一度だけダウンロードし、（トリミングした）SDK を**キャッシュ**するので、大きな
   zip は以降の実行で再ダウンロードされません。強制的に再ダウンロードするにはワーク
-  フロー内の `VW_SDK_CACHE_KEY`（各ジョブに 1 つ）を変更します。
+  フロー内の `VW_SDK_CACHE_KEY`（プラットフォームごとに 1 つ）を変更します。SDK を
+  用意する手順そのものは `scripts/fetch-vw-sdk.sh` に 1 つだけあり、4 ジョブと
+  `ci-debug.yml` が共有します（キャッシュがヒットしていれば検証だけして抜けます）。
 - 各ジョブは**その実行が公開するチャンネルだけ**をビルドします（`-DVW_BUILD_CHANNEL`。
   `main` は `HomeskzIfcImport`、PR は `HomeskzIfcImportDev`）。コミットで刻印
   （`-DVW_BUILD_VERSION`）して成果物を確認・アップロードします（macOS はさらにアドホック
@@ -415,12 +422,15 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
     （`HomeskzIfcImportDev.vwlibrary.zip` + `HomeskzIfcImportDev.vlb.zip`。トークンで公開でき
     ないフォーク PR ではスキップされます）。
 
-  リリースの公開は独立した **`release` ジョブ**が担当します。このジョブは 2 つのビルド
-  ジョブ（`build-mac` と `build-windows`）が**両方**完了してから走り（`needs:
-  [build-mac, build-windows]`）、両ジョブがアップロードした成果物をまとめてダウンロード
+  リリースの公開は独立した **`release` ジョブ**が担当します。このジョブは 4 つのジョブ
+  （`build-mac` / `build-windows` / `tidy-mac` / `tidy-windows`）が**すべて**完了してから
+  走り（`needs: [build-mac, build-windows, tidy-mac, tidy-windows]`）、両ビルドジョブが
+  アップロードした成果物をまとめてダウンロード
   し、**macOS と Windows 両方のアセットを 1 つのリリースに**添付して公開します。公開を
   ビルドから切り出したことで、どちらのプラットフォームも単独でリリースを作らなくなり、
-  作成とアタッチが競合することがありません。どちらもローリング方式で、毎回タグを最新
+  作成とアタッチが競合することがありません。静的解析ジョブも `needs` に入っているので、
+  **ビルドが通っていても clang-tidy が通らなければリリースは公開されません**（解析は
+  ビルドと並走しているため、このゲートを保っても所要時間は増えません）。どちらもローリング方式で、毎回タグを最新
   ビルドに貼り直します。**stable** の公開は GitHub API の長時間障害があってもリトライ
   します（stable リリースの取りこぼしは気づかれにくいため）。**dev** の公開はリトライ
   しません — dev ビルドはブランチ作業中にしか使わないので、一時的なエラーが出たら
@@ -550,32 +560,38 @@ C/C++ を対象とするジョブ:
   で設定します。インデントは各フォーマッタ（clang-format / cmake-format）が
   タブ＋スペース整列で管理するため、この検査ではあえて無効化しています。
 
-**SDK 依存コードの静的解析（`build.yml`）** — 同じ `.clang-tidy` ルールを、SDK が
-ないとコンパイルできない側（`src/draw/*.cpp` と `ModuleMain.cpp` /
-`Extensions/ExtMenu.cpp` / `Updater.cpp`）にも適用します。ビルドジョブは SDK を
-用意するので、**ビルド直後**に clang-tidy を走らせて全ソースを網羅します
-（ビルドのほうが桁違いに速いので、単なるコンパイルエラーは解析を待たずに分かります）。
+**SDK 依存コードの静的解析（`build.yml` の `tidy-mac` / `tidy-windows`）** — 同じ
+`.clang-tidy` ルールを、SDK がないとコンパイルできない側（`src/draw/*.cpp` と
+`ModuleMain.cpp` / `Extensions/ExtMenu.cpp` / `Updater.cpp`）にも適用します。
 `src/draw/` はグロブで拾うため、要素を追加しても対象漏れが起きません
 （`core/` `parse/` を `lint.yml` がグロブで拾うのと同じ理屈）。
 
-対象一覧と実行そのものは **`scripts/clang-tidy-sdk.sh`** が持ちます。mac / Windows の
-両ジョブが同じスクリプトを呼ぶので一覧は 1 か所にしかなく、かつ**翻訳単位をランナーの
-コア数ぶん並列**に解析します。clang-tidy はビルドを走らせずに解析するので PCH が使えず
-（`VW_ENABLE_PCH`）、1 翻訳単位ごとに SDK のアンブレラヘッダを丸ごと読み直すため
-1 本あたり 30〜40 秒かかります。直列に 15 本回すとこれがそのまま積み上がり、
-**Windows ジョブの 12 分 41 秒のうち 10 分 10 秒**（mac は 7 分 44 秒のうち 6 分 40 秒）が
-この 1 ステップでした。並列化でそれぞれ **約 3 分 40 秒 / 約 2 分**になります
-（実測。ランナーは Windows 4 コア・mac 3 コア）。
-
-- **macOS ジョブ** — `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` で生成した compile
+- **`tidy-mac`** — `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` で生成した compile
   database に対して clang-tidy を実行し、`#if GS_MAC` 側の分岐を解析します。
-- **Windows ジョブ** — Visual Studio ジェネレータは compile database を出力しない
+- **`tidy-windows`** — Visual Studio ジェネレータは compile database を出力しない
   ため、解析専用に **Ninja + clang-cl** でビルドせずに再コンフィグして database を
   生成し、`#if GS_WIN` 側の分岐（`Updater.cpp` の `Widen` / `Narrow` /
   `OwnModulePath` / `RunBundledScript`）を解析します。
 
 macOS が `GS_MAC`、Windows が `GS_WIN` の分岐をそれぞれ担当するので、両者を合わせて
 **すべての行**が clang-tidy でチェックされます。
+
+**なぜ独立したジョブなのか（速度）** — clang-tidy はビルドを走らせずに解析するので
+PCH が使えず（`VW_ENABLE_PCH`）、1 翻訳単位ごとに SDK のアンブレラヘッダを丸ごと
+読み直すため 1 本あたり 30〜40 秒かかります。当初はこれをビルドジョブの中で 15 本
+直列に回していて、**Windows ジョブの 12 分 41 秒のうち 10 分 10 秒**（mac は 7 分 44 秒の
+うち 6 分 40 秒）がこの 1 ステップでした。そこで 2 段階で速くしています。
+
+1. **翻訳単位をランナーのコア数ぶん並列に解析する**（Windows 4 コア・mac 3 コア）。
+   対象一覧と並列実行は **`scripts/clang-tidy-sdk.sh`** が持ち、両ジョブが同じ
+   スクリプトを呼ぶので一覧は 1 か所にしかありません。約 3 分 40 秒 / 約 2 分になります。
+2. **ビルドと並走させる**。解析をビルドジョブから独立したジョブへ出したことで、
+   ビルドの後ろに積まれなくなりました。
+
+**ゲートは緩めていません。** `release` ジョブの `needs` には 2 つのビルドジョブに加えて
+`tidy-mac` / `tidy-windows` も入っているので、**ビルドが成功していても clang-tidy が
+通らなければリリースは公開されません**。解析はビルドと同時に走っているため、この
+ゲートを保っても所要時間は増えません。
 
 解析用の compile database は、**その実行がビルドするチャンネル 1 つ**に絞って生成します
 （`-DVW_BUILD_CHANNEL`。PR は `dev`、`main` は `stable`）。既定の `both` のままだと
@@ -584,8 +600,8 @@ macOS が `GS_MAC`、Windows が `GS_WIN` の分岐をそれぞれ担当する�
 の定義だけ（`ModuleMain.cpp` / `Extensions/ExtMenu.cpp` の 3 分岐）で、PR が dev 側、
 `main` が stable 側を解析するので、パイプライン全体では両方が解析されます。
 
-バージョンについて: SDK 非依存の `lint.yml` と macOS ジョブは clang 18 に固定して
-います。Windows ジョブだけは**最新の LLVM**を使います — ランナーの MSVC 標準ライブラリ
+バージョンについて: SDK 非依存の `lint.yml` と `tidy-mac` は clang 18 に固定して
+います。`tidy-windows` だけは**最新の LLVM**を使います — ランナーの MSVC 標準ライブラリ
 ヘッダが「Clang 20 以降」を要求する（`static_assert` と Clang 20 の組み込み関数を使う）
 ため、clang-cl / clang-tidy がそれを解析できる新しさである必要があるからです。
 
