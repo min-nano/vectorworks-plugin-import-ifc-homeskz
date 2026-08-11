@@ -207,16 +207,16 @@ namespace HomeskzIfcImport::draw
 			return object;
 		}
 
-		// 底盤へ地中梁を噛み合わせる。噛み合わせられた本数を返す。
+		// 底盤へ地中梁を噛み合わせる（slabObject が nil＝スラブを作れなかったときは、
+		// 地中梁を可視ソリッドとして置くだけにする）。
 		//
 		// ModifySlab に **isClipObject=false（足す）** で渡すだけで、地中梁は底盤の一部になる
 		// （ヘッダ冒頭「地中梁は底盤へ噛み合わせる」）。失敗した 1 本は独立した可視ソリッドと
 		// して底盤と同じクラスで残し、**断面ビューポートで構造用図形として扱う**
 		// （ovIsStructural）を立てて底盤と一体に見えるようにする（Python 版の可視ソリッドと
 		// 同じ扱い。1 本の失敗で地中梁を失わないための保険）。
-		std::size_t AttachGroundBeams(MCObjectHandle slabObject, const core::SlabCommand& slab)
+		void AttachGroundBeams(MCObjectHandle slabObject, const core::SlabCommand& slab)
 		{
-			std::size_t attached = 0;
 			for (const core::ModifierCommand& modifier : slab.modifiers)
 			{
 				const MCObjectHandle solid = CreateGroundBeamSolid(modifier);
@@ -225,17 +225,13 @@ namespace HomeskzIfcImport::draw
 
 				if (slabObject != nil &&
 					gSDK->ModifySlab(slabObject, solid, kAddModifier, kGroundBeamComponentFlags))
-				{
-					++attached;
 					continue;
-				}
 
 				// フォールバック: 噛み合わせられなかった地中梁は、そのまま可視ソリッドとして残す。
 				SetClassByName(solid, slab.drawClass);
 				SetAllAttributesByClass(solid);
 				gSDK->SetObjectVariable(solid, ovIsStructural, TVariableBlock(true));
 			}
-			return attached;
 		}
 
 		// 底盤 1 枚をスラブとして描く。スラブを作れなければ外形ポリゴンにフォールバックする。
