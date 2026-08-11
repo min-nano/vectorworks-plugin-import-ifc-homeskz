@@ -236,8 +236,12 @@ target_compile_definitions(ParseColumnTests
 # (collinear + same section only) and free-end half-thickness extension snapped to the terminal
 # column centre, the slab merge (polygon union over edge-sharing components; gaps, corner
 # touches and rings with holes are left alone) and the outer-face alignment (each edge pushed
-# out by the half thickness of the wall it runs along). Exercised on synthetic commands and the
-# checked-in fixtures; SDK-free.
+# out by the half thickness of the wall it runs along). Also covers the M10 additions: person
+# passages (人通口) carved out of the merged walls (split when the opening bottom sits at or below
+# the slab top, top lowered to the opening bottom otherwise), the wall joins (L/T/X per junction,
+# capped when the tops differ, pick points nudged to the kept side) and the ground beams (地中梁)
+# turned into trapezoid-prism modifiers, merged along a shared axis and handed to the slab they
+# overlap. Exercised on synthetic commands and the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
 vw_add_test(ParseFootingTests ParseFootingTests.cpp)
 target_link_libraries(ParseFootingTests PRIVATE HomeskzIfcCore)

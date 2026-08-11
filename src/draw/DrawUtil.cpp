@@ -190,6 +190,14 @@ namespace HomeskzIfcImport::draw
 
 		// 壁は構成層の合計がそのまま壁厚になるので、スラブと違って基準面の設定は要らない。
 		SetComponents(style, components);
+
+		// **コア構成要素**を指定する（VW が結合部で構成要素を融合する基準になる。指定が無いと
+		// 壁結合しても平面で層が繋がらず、取り合いに面線が残る＝ローカル確認で判明した T 字の
+		// 線。ROADMAP.md M10）。基礎の立上りは構成が 1 層（コンクリート）なので、その 1 枚が
+		// コアになる。索引は SetComponents と同じ **0 始まり**（draw/DrawUtil.h 参照）。
+		if (!components.empty())
+			gSDK->SetCoreWallComponent(style, 0);
+
 		if (outName != nullptr)
 			*outName = name;
 		return gSDK->GetObjectInternalIndex(style);

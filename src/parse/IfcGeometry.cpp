@@ -40,10 +40,6 @@ namespace HomeskzIfcImport::parse
 			return axis;
 		}
 
-		// 押し出し方向が鉛直とみなす Z 成分の閾値（|z| > これ）。Python 版 footing の
-		// _VERTICAL_EXTRUDE_TOL と同値。床版・底盤は鉛直、立上り・地中梁は水平押し出し。
-		constexpr double kVerticalExtrudeTol = 0.9;
-
 		// IfcBooleanResult 系の第 1 オペランドを深さ付きで辿る（公開 API の実体）。
 		const Entity* baseSolidImpl(const Model& model, const Entity* item, int depth)
 		{
@@ -54,6 +50,52 @@ namespace HomeskzIfcImport::parse
 			// IfcBooleanResult(Operator, FirstOperand, SecondOperand)。第 1 を辿る。
 			return baseSolidImpl(
 				model, model.resolve(item->attribute(attr::kBooleanResultFirstOperand)), depth + 1);
+		}
+
+		// 要素の形状表現アイテムを出現順に訪ねる（Representation → Representations → Items）。
+		// visit が true を返したら打ち切る。**素のソリッド探索（firstExtrudedSolid）と
+		// 削り取り収集（elementVoidSolids）が同じ道筋を辿る**ので、走査はここに 1 つだけ置く。
+		template <typename Visit>
+		void forEachShapeItem(const Model& model, const Entity* element, Visit visit)
+		{
+			if (element == nullptr)
+				return;
+			// IfcProduct.Representation（属性 6）＝ IfcProductDefinitionShape。その
+			// Representations（属性 2）が IfcShapeRepresentation の列で、各 Items（属性 3）に
+			// 形状アイテムが入る（Python 版 rep.Representations → shape_rep.Items と同じ道筋。
+			// Body/Axis 等の表現識別子で絞らないのも Python 版と同じ）。
+			const Entity* shape = model.resolve(element->attribute(attr::kProductRepresentation));
+			if (shape == nullptr)
+				return;
+			const Value& representations =
+				shape->attribute(attr::kProductDefinitionShapeRepresentations);
+			if (!representations.isList())
+				return;
+
+			for (const Value& repRef : representations.items)
+			{
+				const Entity* rep = model.resolve(repRef);
+				if (rep == nullptr)
+					continue;
+				const Value& items = rep->attribute(attr::kShapeRepresentationItems);
+				if (!items.isList())
+					continue;
+				for (const Value& itemRef : items.items)
+				{
+					if (visit(model.resolve(itemRef)))
+						return;
+				}
+			}
+		}
+
+		// 差演算アイテムか（IfcBooleanClippingResult は常に差演算、IfcBooleanResult は
+		// Operator が DIFFERENCE のとき）。列挙値は ".DIFFERENCE." のように前後をピリオドで
+		// 囲んで書かれるが、parse/Step は記号部分（DIFFERENCE）だけを text に入れる。
+		bool isDifferenceItem(const Entity& item)
+		{
+			if (item.type == "IFCBOOLEANCLIPPINGRESULT")
+				return true;
+			return item.attribute(attr::kBooleanResultOperator).text == "DIFFERENCE";
 		}
 	} // namespace
 
@@ -310,40 +352,47 @@ namespace HomeskzIfcImport::parse
 		return baseSolidImpl(model, item, 0);
 	}
 
+	std::vector<const Entity*> elementVoidSolids(const Model& model, const Entity* element)
+	{
+		std::vector<const Entity*> voids;
+		forEachShapeItem(
+			model, element,
+			[&model, &voids](const Entity* item)
+			{
+				// ((base − void1) − void2) のように第 1 オペランドを辿りながら、
+				// 各差演算の第 2 オペランド（削り取る側）を集める。
+				for (int depth = 0; item != nullptr && depth <= kMaxDepth; ++depth)
+				{
+					if (item->type != "IFCBOOLEANRESULT" &&
+						item->type != "IFCBOOLEANCLIPPINGRESULT")
+						break;
+					const Entity* second =
+						model.resolve(item->attribute(attr::kBooleanResultSecondOperand));
+					if (isDifferenceItem(*item) && second != nullptr &&
+						second->type == "IFCEXTRUDEDAREASOLID")
+						voids.push_back(second);
+					item = model.resolve(item->attribute(attr::kBooleanResultFirstOperand));
+				}
+				return false; // すべてのアイテムを見る
+			});
+		return voids;
+	}
+
 	const Entity* firstExtrudedSolid(const Model& model, const Entity* element)
 	{
-		if (element == nullptr)
-			return nullptr;
-		// IfcProduct.Representation（属性 6）＝ IfcProductDefinitionShape。その
-		// Representations（属性 2）が IfcShapeRepresentation の列で、各 Items（属性 3）に
-		// 形状アイテムが入る（Python 版 _first_extruded_solid の rep.Representations →
-		// shape_rep.Items と同じ道筋。Body/Axis 等の表現識別子で絞らず、最初に見つかった
-		// 押し出しを採るのも Python 版と同じ）。
-		const Entity* shape = model.resolve(element->attribute(attr::kProductRepresentation));
-		if (shape == nullptr)
-			return nullptr;
-		const Value& representations =
-			shape->attribute(attr::kProductDefinitionShapeRepresentations);
-		if (!representations.isList())
-			return nullptr;
-
-		for (const Value& repRef : representations.items)
-		{
-			const Entity* rep = model.resolve(repRef);
-			if (rep == nullptr)
-				continue;
-			const Value& items = rep->attribute(attr::kShapeRepresentationItems);
-			if (!items.isList())
-				continue;
-			for (const Value& itemRef : items.items)
-			{
-				// 差演算（端部が他材で削られた形状）は第 1 オペランド＝素のソリッドを使う。
-				const Entity* solid = resolveBaseSolid(model, model.resolve(itemRef));
-				if (solid != nullptr && solid->type == "IFCEXTRUDEDAREASOLID")
-					return solid;
-			}
-		}
-		return nullptr;
+		// 最初に見つかった押し出しを採る（Python 版 _first_extruded_solid と同じ）。差演算
+		// （端部が他材で削られた形状）は第 1 オペランド＝素のソリッドを使う。
+		const Entity* found = nullptr;
+		forEachShapeItem(model, element,
+						 [&model, &found](const Entity* item)
+						 {
+							 const Entity* solid = resolveBaseSolid(model, item);
+							 if (solid == nullptr || solid->type != "IFCEXTRUDEDAREASOLID")
+								 return false;
+							 found = solid;
+							 return true; // 打ち切り
+						 });
+		return found;
 	}
 
 	bool resolveElementWorldSolid(const Model& model, const Entity* element, WorldSolid& out)

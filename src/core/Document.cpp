@@ -5,14 +5,20 @@
 //	SDK 非依存（core/ は VectorWorks SDK を一切 include しない）。
 //
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
-//	walls / slabs（M9）・rafters / roofs（M6）・grids（M1）の各命令の必須フィールド・値域を
-//	見る。命令リスト（wallJoins …）が追加されるたびに、対応する検証規則（必須フィールドの
-//	有無・参照整合性・値域）をここへ足していく。
+//	walls / slabs（M9）・wallJoins / 底盤の modifiers＝地中梁（M10）・rafters / roofs（M6）・
+//	grids（M1）の各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する
+//	検証規則（必須フィールドの有無・参照整合性・値域）をここへ足していく。
+//
+//	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
+//	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み）。SDK を触らないので
+//	無 SDK テストで検証できる（CLAUDE.md「テスト方針」）。
 //
 
 #include "core/Document.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <ranges>
 #include <string>
 
@@ -118,9 +124,9 @@ namespace HomeskzIfcImport::core
 			return total > 0.0;
 		}
 
-		// 地中梁のモディファイア 1 本が妥当か。断面が 3 点以上（面になる）で、押し出し長が
-		// 正であること（長さ 0 の角柱は作れない）。origin / azimuth は数値（double なので
-		// 常に成立）で、断面の巻き方向は問わない（描画側は閉じたポリゴンとして扱う）。
+		// 地中梁（台形プリズム）1 本が妥当か（Python 版 _validate_modifier 相当）。断面が
+		// 3 点以上（面になる）で、押し出し長が正であること（長さ 0 のプリズムは描けない）。
+		// origin / azimuth は数値（double なので常に成立）。
 		bool isValidModifier(const ModifierCommand& modifier)
 		{
 			return modifier.profile.size() >= 3 && modifier.depth > 0.0;
@@ -129,7 +135,7 @@ namespace HomeskzIfcImport::core
 		// 基礎の底盤 1 枚が妥当か（Python 版 _validate_slab 相当）。床板と同じ関門
 		// （レイヤ名・クラス名・スタイル名が非空／外形 3 点以上／高さ基準のレベル種別が
 		// 非空／構成層が 1 枚以上あり総厚が正）に、コンクリート厚が正であることと、
-		// 噛み合わせる地中梁（modifiers。0 本でもよい）が描ける形であることを足す。
+		// 噛み合う地中梁がすべて妥当であることを足す（厚み 0 のスラブスタイルは作れない）。
 		bool isValidSlab(const SlabCommand& slab)
 		{
 			if (slab.layer.empty() || slab.drawClass.empty() || slab.boundary.size() < 3 ||
@@ -145,6 +151,15 @@ namespace HomeskzIfcImport::core
 			for (const ComponentCommand& component : slab.components)
 				total += component.thickness;
 			return total > 0.0;
+		}
+
+		// 壁結合 1 件が妥当か（Python 版 _validate_wall_join 相当）。結合する 2 本が**異なる**
+		// 立上りで、どちらも walls の範囲内を指すこと（範囲外の添字は描画側でハンドルを
+		// 引けず、黙って結合されないだけになるので検証で弾く）。結合種別は enum なので
+		// 値域は型が保証する。ピック点・交点は数値（double なので常に成立）。
+		bool isValidWallJoin(const WallJoinCommand& join, std::size_t wallCount)
+		{
+			return join.a != join.b && join.a < wallCount && join.b < wallCount;
 		}
 
 		// 野地板 1 枚が妥当か（Python 版 _validate_roof 相当）。配置先レイヤ名・クラス名が
@@ -187,12 +202,18 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// 基礎: 立上りは壁厚が正・壁芯が非縮退・上下端のレベル種別が非空、底盤は床板と同じ
-		// 関門＋コンクリート厚が正＋噛み合わせる地中梁が描ける形であること（isValidWall /
-		// isValidSlab / isValidModifier 参照。Python 版 _validate_wall / _validate_slab と
-		// 同じ関門。ROADMAP.md M9・M10）。
+		// 関門＋コンクリート厚が正であること（isValidWall / isValidSlab 参照。Python 版
+		// _validate_wall / _validate_slab と同じ関門。ROADMAP.md M9）。
 		if (!std::ranges::all_of(document.walls, isValidWall))
 			return false;
 		if (!std::ranges::all_of(document.slabs, isValidSlab))
+			return false;
+
+		// 壁結合（M10）: 結合する 2 本が異なり、どちらも walls の範囲内であること
+		// （isValidWallJoin 参照。Python 版 _validate_wall_join と同じ関門。ROADMAP.md M10）。
+		// 地中梁は底盤の modifiers として isValidSlab が併せて見る。
+		if (!std::ranges::all_of(document.wallJoins, [&document](const WallJoinCommand& join)
+								 { return isValidWallJoin(join, document.walls.size()); }))
 			return false;
 
 		// 垂木・野地板: 配置先レイヤ名・クラス名が非空で、垂木は断面が正・平面が非縮退、
@@ -210,10 +231,47 @@ namespace HomeskzIfcImport::core
 		// （Python 版 validateDocument と同じ関門。ROADMAP.md M1）。
 		//
 		// TODO: 命令リストが増えたら、要素ごとの all_of を && で連ねてここに積む
-		// （wallJoin / anchorBolt … の検証。ROADMAP.md）。
+		// （anchorBolt … の検証。ROADMAP.md）。
 		return std::ranges::all_of(
 			document.grids, [](const GridCommand& grid)
 			{ return !grid.layer.empty() && !samePoint(grid.start, grid.end); });
+	}
+
+	ModifierCommand raiseModifierTop(const ModifierCommand& modifier, double bite)
+	{
+		if (bite <= 0.0 || modifier.profile.empty())
+			return modifier;
+
+		// 天端＝最大 v。そこから kModifierTopVertexTol 以内の頂点を天端の辺とみなす。
+		double vMax = modifier.profile.front().y;
+		for (const Vec2& p : modifier.profile)
+			vMax = std::max(vMax, p.y);
+		const auto isTop = [&](std::size_t i)
+		{ return modifier.profile[i].y >= vMax - kModifierTopVertexTol; };
+
+		const std::size_t n = modifier.profile.size();
+		ModifierCommand raised = modifier;
+		for (std::size_t i = 0; i < n; ++i)
+		{
+			if (!isTop(i))
+				continue;
+			const Vec2& top = modifier.profile[i];
+			// 隣接する 2 頂点のうち**下端側**（側辺の相手）を探し、その斜辺の延長線上へ
+			// 動かす。見つからない（天端が水平に分割された中間頂点）／側辺がほぼ水平なら
+			// 真上へ上げる。
+			double du = 0.0;
+			for (const std::size_t j : {(i + n - 1) % n, (i + 1) % n})
+			{
+				if (isTop(j))
+					continue;
+				const double dv = top.y - modifier.profile[j].y;
+				if (std::abs(dv) > kModifierTopVertexTol)
+					du = ((top.x - modifier.profile[j].x) / dv) * bite;
+				break;
+			}
+			raised.profile[i] = Vec2{top.x + du, top.y + bite};
+		}
+		return raised;
 	}
 
 	namespace

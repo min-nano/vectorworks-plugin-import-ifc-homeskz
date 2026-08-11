@@ -90,8 +90,11 @@ namespace HomeskzIfcImport::parse
 		inline constexpr std::size_t kExtrudedAreaSolidDirection = 2;
 		inline constexpr std::size_t kExtrudedAreaSolidDepth = 3;
 
-		// IfcBooleanResult(Operator, FirstOperand=1, SecondOperand)。
+		// IfcBooleanResult(Operator=0, FirstOperand=1, SecondOperand=2)。第 1 オペランドは
+		// 削られる前の素のソリッド、第 2 オペランドは**削り取る側**（人通口＝M10 はこちら）。
+		inline constexpr std::size_t kBooleanResultOperator = 0;
 		inline constexpr std::size_t kBooleanResultFirstOperand = 1;
+		inline constexpr std::size_t kBooleanResultSecondOperand = 2;
 
 		// IfcRelDefines(… RelatedObjects=4) と IfcRelDefinesByType(… RelatingType=5)。
 		// 柱頭・柱脚金物の型（IfcMechanicalFastenerType）名はこの逆参照から辿る
