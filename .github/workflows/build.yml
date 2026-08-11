@@ -308,8 +308,7 @@ jobs:
         #
         # No vcvars / msvc-dev-cmd step is needed: `cmake --build` drives MSBuild
         # through the Visual Studio generator, which brings its own toolset
-        # environment. (The MSVC environment step this job used to carry existed
-        # only for clang-cl, and moved to tidy-windows along with clang-tidy.)
+        # environment. (Neither does tidy-windows — clang-cl finds MSVC by itself.)
         shell: bash
         run: cmake --build build --config Release --parallel "$(nproc)" -v
 
@@ -385,6 +384,24 @@ jobs:
   tidy-mac:
     runs-on: macos-15
 
+    # Split the translation units across runners. Within one runner clang-tidy is
+    # already run core-count-wide, but that tops out with the core count (a 4-core
+    # Windows runner only gets ~2.5x out of 4-way parallelism), and the analysis
+    # is what this workflow's critical path is made of. Splitting is the only way
+    # past that ceiling, and unlike most CI tuning it needs no careful measurement
+    # to believe: half the translation units take about half as long on the same
+    # host. scripts/clang-tidy-sdk.sh does the splitting (-s I/N), round-robin, so
+    # the shards together are exactly the whole set — no gaps, no overlap.
+    #
+    # fail-fast is off so a finding in one shard does not cancel the other: both
+    # should report, or you fix one diagnostic only to be shown the next one on
+    # the following run. Adding shards is a one-token edit to the list below —
+    # strategy.job-total feeds the count straight through to the script.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
     env:
       VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-mac-SDK.zip
       VW_SDK_DIR: ${{ github.workspace }}/vw-sdk
@@ -433,16 +450,32 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
       - name: Static analysis (clang-tidy, SDK-dependent code)
-        run: scripts/clang-tidy-sdk.sh -p build-tidy -t "$(brew --prefix llvm@18)/bin/clang-tidy"
+        run: |
+          scripts/clang-tidy-sdk.sh \
+            -p build-tidy \
+            -t "$(brew --prefix llvm@18)/bin/clang-tidy" \
+            -s "${{ matrix.shard }}/${{ strategy.job-total }}"
 
   tidy-windows:
     runs-on: windows-latest
+
+    # Sharded across runners for the same reason as tidy-mac (see there). This is
+    # the workflow's critical path, so it is the shard that actually matters.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     env:
       VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-win-SDK.zip
       VW_SDK_DIR: ${{ github.workspace }}/vw-sdk-win
       VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-win-v1
       VW_BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
+      # The LLVM preinstalled on the runner image, named once. Every clang tool
+      # this job runs (clang-cl for the compile database, clang-tidy for the
+      # analysis) comes from here, so the version checked below is the version
+      # actually used — see the check step for why that matters.
+      LLVM_BIN: /c/Program Files/LLVM/bin
 
     steps:
       - name: Checkout
@@ -460,29 +493,55 @@ jobs:
         shell: bash
         run: scripts/fetch-vw-sdk.sh
 
-      # clang-cl needs the MSVC headers/libs on INCLUDE/LIB.
-      - name: Set up MSVC environment (for clang-cl)
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-        with:
-          arch: x64
+      # ---------------------------------------------------------------------
+      # NB for anyone tuning this job: the clang-tidy step's wall time swings by
+      # ~1.4x between runners for identical work (the same single translation
+      # unit measured 25 s on one host and 37 s on another). Do NOT conclude
+      # anything from comparing that step across two runs — this job's setup was
+      # once "fixed" and then "un-fixed" on exactly that mistake. Measure A and B
+      # in the SAME job, interleaved, with a repeat of A at the end as a drift
+      # control.
+      # ---------------------------------------------------------------------
 
-      - name: Install LLVM + Ninja (for clang-tidy)
-        shell: pwsh
+      # LLVM and Ninja both ship PREINSTALLED on the windows-latest image, so this
+      # job installs neither — it only checks that what is there is usable. We used
+      # to `choco install llvm ninja` here on the assumption that it was "a fast
+      # no-op refresh"; measured, it cost 11-31 s per run for nothing.
+      #
+      # There is no vcvars / msvc-dev-cmd step either (it used to cost 12-17 s):
+      # clang-cl locates the MSVC toolchain and the Windows SDK on its own
+      # (registry / vswhere), so INCLUDE and LIB do not have to be injected into
+      # the environment. Measured at this job's real concurrency — 15 TUs, 4-wide,
+      # one host, run without / with / without — that made no difference:
+      # 3:58 / 3:37 / 3:39, i.e. the drift control lands on the "with" figure and
+      # the first run is just the tail of cache warm-up. The compile database is
+      # byte-identical either way (same flags, same clang-cl), which is the reason
+      # to expect exactly that.
+      #
+      # The one thing the install was really buying is a NEW ENOUGH clang: the
+      # runner's MSVC standard-library headers static_assert "expected Clang 20 or
+      # newer" and use Clang-20 builtins, so clang-cl / clang-tidy must be able to
+      # parse them. (macOS pins llvm@18 because AppleClang + libc++ there impose no
+      # such requirement.) Assert that here instead — free, and it fails with a
+      # sentence you can act on rather than a wall of parse errors if a future
+      # runner image ever ships an older LLVM than its own MSVC needs.
+      - name: Check the preinstalled LLVM + Ninja
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-          choco install --no-progress -y ninja
-          # Install the LATEST LLVM rather than pinning a version: the runner's
-          # MSVC standard-library headers static_assert "expected Clang 20 or
-          # newer" and use Clang-20 builtins, so clang-cl / clang-tidy must be new
-          # enough to parse them. (macOS pins llvm@18 because AppleClang + libc++
-          # there impose no such requirement.) Bump the runner's MSVC and this
-          # both track "latest", so they stay compatible. NB: LLVM ships
-          # preinstalled on the runner image, so this is a fast no-op refresh (a
-          # few seconds); we deliberately do NOT actions/cache "C:\Program
-          # Files\LLVM" — caching a ~2-3 GB already-present tree saves nothing and
-          # its restore/save dominates the whole job (~15 min).
-          choco install --no-progress -y llvm
-          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          set -euo pipefail
+          "$LLVM_BIN/clang-tidy" --version
+          ninja --version
+          major="$("$LLVM_BIN/clang-tidy" --version |
+            sed -n 's/.*LLVM version \([0-9][0-9]*\).*/\1/p' | head -n 1)"
+          if [ -z "$major" ]; then
+            echo "::error::Could not parse the LLVM version out of clang-tidy --version."
+            exit 1
+          fi
+          if [ "$major" -lt 20 ]; then
+            echo "::error::The runner ships LLVM $major, but its MSVC headers need Clang 20 or newer. Install a newer LLVM in this step (e.g. choco install llvm)."
+            exit 1
+          fi
+          echo "LLVM $major is new enough."
 
       # The Visual Studio generator the real build uses does NOT emit a
       # compile_commands.json, so the database comes from a build-free configure
@@ -490,12 +549,23 @@ jobs:
       # settings from CMakeLists.txt (_WINDOWS, /MD, the OnlyWin include dir), so
       # the database matches the real MSVC build's GS_WIN configuration. Nothing is
       # built here, so the link-only SDK libraries are never needed.
+      #
+      # The compiler is given as an ABSOLUTE PATH rather than "clang-cl": the
+      # runner's PATH also carries Visual Studio's own bundled LLVM
+      # (VC\Tools\Llvm\x64\bin), and which one a bare name resolves to is not
+      # something this job should leave to chance — $LLVM_BIN is the one whose
+      # version the step above checked, and the one clang-tidy runs from below.
+      # (Today a bare name happens to resolve to the same binary; this just stops
+      # that from being luck.)
+      #
+      # Only CMAKE_CXX_COMPILER is set. The project is declared LANGUAGES CXX, so
+      # no C compiler is ever looked for; CMake reported the CMAKE_C_COMPILER that
+      # used to be passed here as an unused variable.
       - name: Configure compile database (Ninja + clang-cl, no build)
         shell: bash
         run: |
           cmake -S . -B build-tidy -G Ninja \
-            -DCMAKE_C_COMPILER=clang-cl \
-            -DCMAKE_CXX_COMPILER=clang-cl \
+            -DCMAKE_CXX_COMPILER="$LLVM_BIN/clang-cl.exe" \
             -DCMAKE_BUILD_TYPE=Release \
             -DVW_SDK_DIR="$VW_SDK_DIR" \
             -DVW_BUILD_CHANNEL="$VW_BUILD_CHANNEL" \
@@ -516,7 +586,8 @@ jobs:
         run: |
           scripts/clang-tidy-sdk.sh \
             -p build-tidy \
-            -t "/c/Program Files/LLVM/bin/clang-tidy" \
+            -t "$LLVM_BIN/clang-tidy" \
+            -s "${{ matrix.shard }}/${{ strategy.job-total }}" \
             -x --extra-arg=-fdelayed-template-parsing \
             -x --extra-arg=-Wno-delayed-template-parsing-in-cxx20
 
