@@ -308,8 +308,7 @@ jobs:
         #
         # No vcvars / msvc-dev-cmd step is needed: `cmake --build` drives MSBuild
         # through the Visual Studio generator, which brings its own toolset
-        # environment. (tidy-windows does keep one, but for speed, not
-        # correctness — see the comment on that step.)
+        # environment. (Neither does tidy-windows — clang-cl finds MSVC by itself.)
         shell: bash
         run: cmake --build build --config Release --parallel "$(nproc)" -v
 
@@ -465,29 +464,30 @@ jobs:
         shell: bash
         run: scripts/fetch-vw-sdk.sh
 
-      # clang-cl CAN find the MSVC toolchain and the Windows SDK on its own, so
-      # this step is not needed to make the analysis WORK — but it is needed to
-      # make it fast. Removing it and letting each clang-tidy process discover
-      # MSVC for itself measured 1.5x slower overall:
-      #
-      #   clang-tidy step, 15 TUs, 4-wide     with this step   without
-      #                                        164 s / 171 s    245 s / 256 s
-      #
-      # The compile databases are byte-identical either way (same flags, same
-      # clang-cl), so the difference is not in what is analysed — INCLUDE is read
-      # from the ENVIRONMENT by every one of the 15 clang-tidy processes, and
-      # having it handed to them beats each of them rediscovering it. 12-17 s here
-      # buys ~80 s there.
-      - name: Set up MSVC environment (for clang-cl)
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-        with:
-          arch: x64
+      # ---------------------------------------------------------------------
+      # NB for anyone tuning this job: the clang-tidy step's wall time swings by
+      # ~1.4x between runners for identical work (the same single translation
+      # unit measured 25 s on one host and 37 s on another). Do NOT conclude
+      # anything from comparing that step across two runs — this job's setup was
+      # once "fixed" and then "un-fixed" on exactly that mistake. Measure A and B
+      # in the SAME job, interleaved, with a repeat of A at the end as a drift
+      # control.
+      # ---------------------------------------------------------------------
 
       # LLVM and Ninja both ship PREINSTALLED on the windows-latest image, so this
       # job installs neither — it only checks that what is there is usable. We used
       # to `choco install llvm ninja` here on the assumption that it was "a fast
-      # no-op refresh"; measured, it cost 11-31 s per run for nothing. (Unlike the
-      # MSVC environment above, dropping it changed no timing anywhere else.)
+      # no-op refresh"; measured, it cost 11-31 s per run for nothing.
+      #
+      # There is no vcvars / msvc-dev-cmd step either (it used to cost 12-17 s):
+      # clang-cl locates the MSVC toolchain and the Windows SDK on its own
+      # (registry / vswhere), so INCLUDE and LIB do not have to be injected into
+      # the environment. Measured at this job's real concurrency — 15 TUs, 4-wide,
+      # one host, run without / with / without — that made no difference:
+      # 3:58 / 3:37 / 3:39, i.e. the drift control lands on the "with" figure and
+      # the first run is just the tail of cache warm-up. The compile database is
+      # byte-identical either way (same flags, same clang-cl), which is the reason
+      # to expect exactly that.
       #
       # The one thing the install was really buying is a NEW ENOUGH clang: the
       # runner's MSVC standard-library headers static_assert "expected Clang 20 or
