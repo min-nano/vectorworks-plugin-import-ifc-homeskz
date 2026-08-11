@@ -354,6 +354,31 @@ ci-wait: done (conclusion=<結果> exit=<終了コード>)
 間も、状態が変わらなければ 5 分ごとに生存行が stderr に出るので、固まっているのか
 単に長いのかは出力を見れば分かる。
 
+### CI が始まらないときに疑うこと（原因を何度も見誤っている）
+
+`no-checks` が返る・PR の Checks が 0 のままというのは、**CI が失敗したのではなく
+「チェックが登録されていない」**という意味。原因の切り分けを毎回やり直さないよう、
+実際に起きたものを可能性の高い順に置く。**どれも「必ずそうなる」規則ではない**ので、
+断定して報告せず、疑う順序として使うこと。
+
+1. **PR にコンフリクトがある。** `build.yml` / `lint.yml` / `test.yml` は `pull_request`
+   トリガなので PR が対象だが、**コンフリクトを抱えた PR ではチェックが 1 件も登録されない
+   ことがある**（実測: main を取り込んで解消したら、こちらが何も操作しなくても CI が
+   起動した）。ただし**コンフリクトがあれば毎回走らない、という挙動でもない**らしい
+   （GitHub 側で無駄な実行を削っている可能性がある）。**「走らないならまずここを見る」**
+   という位置づけで、「走らせるために必ず解消しろ」という意味ではない。
+2. **PR がまだ無い／その head に PR が向いていない。** 作業ブランチへの push は
+   `push: branches: [main]` に当たらないので何も走らない。PR を作る前に push しただけの
+   コミットにチェックが付かないのは正常。
+3. どれでもなければ、GitHub MCP で run（`actions_list` の `list_workflow_runs`）と
+   check-run（`pull_request_read` の `get_check_runs`）を直接数えて、登録の有無を確かめる。
+
+**`ci-wait` の `success` を鵜呑みにしない。** `ci-wait --pr` は「その sha に登録されている
+チェック」を見るので、`ci-debug`（`workflow_dispatch`）の `debug` チェックしか無い状態でも
+`conclusion=success` を返す。出力に並ぶチェック名を必ず読み、`build-mac` /
+`build-windows` / `clang-tidy` / `test` … が並んでいることを確認する（**`debug` だけなら
+本来の CI は走っていない**）。
+
 ### 仕組みと不変条件
 
 待機の土台は `scripts/ci-common.sh` にあり、`ci-wait.sh` と `ci-debug.sh` が共有する。
@@ -433,6 +458,13 @@ scripts/ci-debug.sh run --mode sdk-grep --args 'GetLayerByName'
 `--platform` は `mac`（既定）/ `windows` / `linux`。**`linux` は SDK を用意しない**ので
 SDK 非依存コード（`core/` `parse/` とテスト）専用。SDK が要らない調査は `linux` を選ぶと
 速い。`--ref` は既定で現在のブランチ。
+
+**`ci-debug` の `build` / `compile-one` は本番 CI の代わりにならない。** どちらも
+clang-tidy を通さない構成でコンパイルするだけなので、`build.yml` の `build-mac` /
+`build-windows` が落とす lint（例: `readability-uppercase-literal-suffix`）はここでは
+素通りする。**「ci-debug の build が通ったから CI も通る」と報告しない**——SDK 依存
+コードの最終確認は PR の CI が緑になったことで行う（`ci-debug` は「SDK でコンパイルが
+成立するか」を早く知るための道具）。
 
 ### 結果の読み方
 
