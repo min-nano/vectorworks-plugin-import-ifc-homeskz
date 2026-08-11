@@ -384,6 +384,24 @@ jobs:
   tidy-mac:
     runs-on: macos-15
 
+    # Split the translation units across runners. Within one runner clang-tidy is
+    # already run core-count-wide, but that tops out with the core count (a 4-core
+    # Windows runner only gets ~2.5x out of 4-way parallelism), and the analysis
+    # is what this workflow's critical path is made of. Splitting is the only way
+    # past that ceiling, and unlike most CI tuning it needs no careful measurement
+    # to believe: half the translation units take about half as long on the same
+    # host. scripts/clang-tidy-sdk.sh does the splitting (-s I/N), round-robin, so
+    # the shards together are exactly the whole set — no gaps, no overlap.
+    #
+    # fail-fast is off so a finding in one shard does not cancel the other: both
+    # should report, or you fix one diagnostic only to be shown the next one on
+    # the following run. Adding shards is a one-token edit to the list below —
+    # strategy.job-total feeds the count straight through to the script.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
     env:
       VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-mac-SDK.zip
       VW_SDK_DIR: ${{ github.workspace }}/vw-sdk
@@ -432,10 +450,21 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
       - name: Static analysis (clang-tidy, SDK-dependent code)
-        run: scripts/clang-tidy-sdk.sh -p build-tidy -t "$(brew --prefix llvm@18)/bin/clang-tidy"
+        run: |
+          scripts/clang-tidy-sdk.sh \
+            -p build-tidy \
+            -t "$(brew --prefix llvm@18)/bin/clang-tidy" \
+            -s "${{ matrix.shard }}/${{ strategy.job-total }}"
 
   tidy-windows:
     runs-on: windows-latest
+
+    # Sharded across runners for the same reason as tidy-mac (see there). This is
+    # the workflow's critical path, so it is the shard that actually matters.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     env:
       VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-win-SDK.zip
@@ -558,6 +587,7 @@ jobs:
           scripts/clang-tidy-sdk.sh \
             -p build-tidy \
             -t "$LLVM_BIN/clang-tidy" \
+            -s "${{ matrix.shard }}/${{ strategy.job-total }}" \
             -x --extra-arg=-fdelayed-template-parsing \
             -x --extra-arg=-Wno-delayed-template-parsing-in-cxx20
 

@@ -24,14 +24,22 @@
 # 並びが変わって差分が読めなくなるため、いったんファイルごとのログへ落としてから
 # 順に流す（CLAUDE.md「決定性を守る」）。
 #
+# 並列には**2 段**ある。ランナー 1 台の中でコア数ぶん同時に回す（-j）のに加えて、
+# 対象そのものを複数のジョブへ分けられる（-s）。前者はコア数で頭打ちになる
+# （実測で 4 コアのランナーは 4 並列でも 2.5 倍程度しか出ない）ので、そこから先を
+# 縮めたければランナーを増やすしかない。-s はそのためにある。
+#
 # 使い方:
 #   scripts/clang-tidy-sdk.sh -p <compile-db-dir> [-t <clang-tidy>] [-j <jobs>]
-#                             [-x <extra clang-tidy arg>]...
+#                             [-s <index>/<total>] [-x <extra clang-tidy arg>]...
 #
 #     -p DIR   compile_commands.json のあるディレクトリ（必須）。PCH 無しで
 #              configure したものを渡すこと（VW_ENABLE_PCH=OFF）。
 #     -t PATH  clang-tidy の実体（既定: PATH 上の clang-tidy）
-#     -j N     並列数（既定: ランナーのコア数）
+#     -j N     1 ランナー内の並列数（既定: ランナーのコア数）
+#     -s I/N   翻訳単位を N 分割したうちの I 番目だけを解析する（1 始まり）。
+#              build.yml が matrix から渡す。分け方はラウンドロビンなので、
+#              全シャードを合わせるとちょうど全体になり、重複も漏れも無い。
 #     -x ARG   clang-tidy へそのまま渡す追加引数。複数回指定できる。
 #              Windows は SDK のテンプレートヘッダを通すために
 #              -x --extra-arg=-fdelayed-template-parsing が要る（build.yml 参照）。
@@ -45,6 +53,7 @@ cd "$(dirname "$0")/.." || exit 1
 TIDY="clang-tidy"
 DB=""
 JOBS=""
+SHARD=""
 EXTRA=()
 
 usage() {
@@ -63,6 +72,10 @@ while [ "$#" -gt 0 ]; do
 			;;
 		-j)
 			JOBS="${2:-}"
+			shift 2
+			;;
+		-s)
+			SHARD="${2:-}"
 			shift 2
 			;;
 		-x)
@@ -124,6 +137,51 @@ esac
 # （高価な SDK ジョブ 2 つで解析し直しても、Linux ジョブが見逃すものは何も出なかった。）
 FILES=(src/draw/*.cpp src/ModuleMain.cpp src/Extensions/ExtMenu.cpp src/Updater.cpp)
 
+TOTAL="${#FILES[@]}"
+SHARD_LABEL=""
+
+# --- -s I/N: 対象を N 台のランナーへ分ける ----------------------------------
+#
+# 割り当ては**ラウンドロビン**（下の -j と同じ理屈）。1 翻訳単位あたりの時間は SDK
+# ヘッダの解析に支配されていてどれもほぼ同じなので、静的に配るだけで実質最適に詰まる。
+# 全シャードの和はちょうど元の一覧になるので、重複も漏れも起きない。
+if [ -n "$SHARD" ]; then
+	case "$SHARD" in
+		*/*) ;;
+		*)
+			echo "clang-tidy-sdk.sh: -s は I/N の形で指定してください（'$SHARD'）" >&2
+			exit 2
+			;;
+	esac
+	SHARD_INDEX="${SHARD%%/*}"
+	SHARD_TOTAL="${SHARD##*/}"
+	case "$SHARD_INDEX$SHARD_TOTAL" in
+		'' | *[!0-9]*)
+			echo "clang-tidy-sdk.sh: -s の I と N は正の整数で（'$SHARD'）" >&2
+			exit 2
+			;;
+	esac
+	if [ "$SHARD_INDEX" -lt 1 ] || [ "$SHARD_TOTAL" -lt 1 ] ||
+		[ "$SHARD_INDEX" -gt "$SHARD_TOTAL" ]; then
+		echo "clang-tidy-sdk.sh: -s は 1 <= I <= N を満たすこと（'$SHARD'）" >&2
+		exit 2
+	fi
+	# 分割数が翻訳単位より多いと空のシャードができる。黙って「成功」にすると
+	# 「何も解析していないのに緑」になるので、設定の誤りとして落とす。
+	if [ "$SHARD_TOTAL" -gt "$TOTAL" ]; then
+		echo "clang-tidy-sdk.sh: 分割数 $SHARD_TOTAL が翻訳単位の数 $TOTAL を超えています" >&2
+		exit 2
+	fi
+	SHARDED=()
+	k=$((SHARD_INDEX - 1))
+	while [ "$k" -lt "$TOTAL" ]; do
+		SHARDED+=("${FILES[$k]}")
+		k=$((k + SHARD_TOTAL))
+	done
+	FILES=("${SHARDED[@]}")
+	SHARD_LABEL=" (shard $SHARD_INDEX of $SHARD_TOTAL, out of $TOTAL total)"
+fi
+
 # 実際に叩くコマンド。--warnings-as-errors は呼び出し側に任せず必ず付ける（両ジョブで
 # 同一にするため）。空配列の展開は bash 3.2 の `set -u` で落ちるので、要素があるときだけ
 # 足して、以降は常に非空の配列として展開する。
@@ -132,7 +190,7 @@ if [ "${#EXTRA[@]}" -gt 0 ]; then
 	CMD+=("${EXTRA[@]}")
 fi
 
-echo "Tidying ${#FILES[@]} SDK-dependent translation units with $JOBS parallel jobs:"
+echo "Tidying ${#FILES[@]} SDK-dependent translation units with $JOBS parallel jobs$SHARD_LABEL:"
 printf '  %s\n' "${FILES[@]}"
 "$TIDY" --version | sed 's/^/  /'
 
