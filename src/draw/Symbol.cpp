@@ -16,19 +16,19 @@
 //	  * gSDK->AddObjectToContainer(handle, layer)         … 配置先レイヤへ入れ直す
 //	VWSymbolObj のこの構築子が VS の vs.Symbol(name, point, angle) にあたる。
 //
-//	【生成しただけでは図面に現れない】ISDK にシンボルを配置する呼び出しは無く（在るのは
-//	CreateSymbolDefinition だけ）、この構築子はレガシーの PlaceSymbol を包む。VWFC の他の
-//	ラッパー（ポリライン等）と違って**できたインスタンスはアクティブレイヤに入らない**——
-//	ローカル実測で、シンボル定義もレイヤも名前も揃っているのに 4 種 472 件すべてで
-//	GetParentLayer が配置先と一致せず、図面には 1 つも現れなかった。そこで生成後に
-//	AddObjectToContainer（「h を container の末尾へ**移動**する」）で配置先レイヤへ
-//	入れ直す。
+//	【VW 2026 SDK の落とし穴】ISDK にシンボルを配置する呼び出しは無く（在るのは
+//	CreateSymbolDefinition だけ）、`VWSymbolObj` の構築子はレガシーの PlaceSymbol を包む。
+//	ここから 2 つの作法が要る。どちらも実機で「シンボルがひとつも配置できない」ところから
+//	切り分けて分かったもので、**外すと静かに壊れる**（ROADMAP.md M11）。
 //
-//	【成功判定に handle の非 nil を使わない】同じ理由で、構築子は**何も置けていなくても
-//	非 nil のハンドルを返し得る**（PlaceSymbol は「定義が nil なら何もしない」仕様）。
-//	実際に「アンカーボルト 97 本…を描きました」と全数成功で報告しながら図面には 1 つも
-//	出ていない、という報告を受けた。生成したハンドルが**その名前のシンボルインスタンスで
-//	あること**まで確かめて初めて 1 件と数える。
+//	  1. **生成しただけでは図面に現れない。** VWFC の他のラッパー（ポリライン等）と違い、
+//	     できたインスタンスはアクティブレイヤに入らない（定義・レイヤ・名前・座標が
+//	     すべて揃っていても `GetParentLayer()` が配置先と一致しない）。生成後に
+//	     `AddObjectToContainer`（「h を container の末尾へ**移動**する」）で入れ直す。
+//	  2. **非 nil のハンドルを成功判定に使わない。** PlaceSymbol は「定義が nil なら何も
+//	     しない」仕様で、構築子は何も置けていなくても非 nil のハンドルを返し得る。
+//	     `IsSymbolObject(handle, name)` で「その名前のシンボルインスタンスができた」ことを
+//	     確かめて初めて 1 件と数える（これが無いと完了ダイアログが全数成功で嘘をつく）。
 //
 //	【設計上の要点】**シンボル定義はプラグインが作らない。** ハイブリッドシンボル
 //	（"アンカーボルト_M12" / "アンカーボルト_M16" / "床束" / "鋼製火打" / "仕口"）は
@@ -73,22 +73,14 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// 1 件の配置の結末。**非 nil のハンドルは成功の証拠にならない**ので（ファイル冒頭
-		// 「成功判定に handle の非 nil を使わない」）、どこまで進んだかを 3 つに分けて返す。
-		enum class PlaceResult
-		{
-			NotPlaced,	// そもそもインスタンスができていない
-			StrayLayer, // できたが、入れ直しても意図したレイヤに載らない
-			Placed,		// できて、意図したレイヤに載った
-		};
-
 		// シンボル 1 つを配置する（Python 版 draw_anchor_bolt ほかに対応）。センタリング
 		// 済みの絶対座標と回転角（度）をそのまま渡す。高さはアクティブレイヤ（＝配置先の
-		// ストーリレベル）の平面で決まるので、命令は高さを持たない。
+		// ストーリレベル）の平面で決まるので、命令は高さを持たない。layer は
+		// ActivateExistingLayer が返したアクティブレイヤ。
 		//
-		// layer は ActivateExistingLayer が返したアクティブレイヤ。**生成しただけでは
-		// ここへ入らない**ので、入っていなければ入れ直す（下記）。
-		PlaceResult PlaceOne(const core::SymbolCommand& command, MCObjectHandle layer)
+		// **「その名前のシンボルインスタンスができ、配置先レイヤに載った」ときだけ true。**
+		// 2 つの作法（生成後に入れ直す／非 nil を成功と見なさない）はファイル冒頭を参照。
+		bool PlaceOne(const core::SymbolCommand& command, MCObjectHandle layer)
 		{
 			// VWFC の構築子は失敗を例外で伝えるので、1 件の異常で残りの配置を止めない
 			// （CLAUDE.md「エラーハンドリング」: SDK コールバックへ例外を漏らさない）。
@@ -99,21 +91,14 @@ namespace HomeskzIfcImport::draw
 										 command.angle);
 				const MCObjectHandle handle = symbol.GetThisObject();
 				if (handle == nil || !VWSymbolObj::IsSymbolObject(handle, name))
-					return PlaceResult::NotPlaced;
-
-				// **配置先レイヤへ入れ直す。** VWFC の他のラッパー（ポリライン等）と違い、
-				// VWSymbolObj はレガシーの PlaceSymbol を包んでいて、できたインスタンスは
-				// アクティブレイヤに入らない（実測: 4 種 472 件すべてで GetParentLayer が
-				// 配置先と不一致。図面には 1 つも現れなかった）。AddObjectToContainer は
-				// 「h を container の末尾へ**移動**する」呼び出しなので、これで載せ替える。
+					return false;
 				if (symbol.GetParentLayer() != layer)
 					gSDK->AddObjectToContainer(handle, layer);
-				return (symbol.GetParentLayer() == layer) ? PlaceResult::Placed
-														  : PlaceResult::StrayLayer;
+				return symbol.GetParentLayer() == layer;
 			}
 			catch (...)
 			{
-				return PlaceResult::NotPlaced;
+				return false;
 			}
 		}
 
@@ -153,7 +138,6 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		std::size_t missingLayers = 0;
 		std::size_t failed = 0;
-		std::size_t wrongLayer = 0; // できたが意図したレイヤに載らなかった
 		std::vector<std::string> undefinedSymbols; // 図面にシンボル定義が無かった名前
 		std::vector<std::string> failedSymbols; // 定義はあるのに配置できなかった名前
 
@@ -173,17 +157,10 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			// **必ず配置を試みる。** 事前ガードで弾かず、置けたかどうかだけで数える
-			// （PlaceOne が「その名前のシンボルインスタンスができ、そのレイヤに載ったか」
-			// まで確かめ、載っていなければ載せ直す）。載せ直しても駄目だったものは
-			// 「置けてはいる」ので drawn に数え、件数だけ診断へ出す（図面に見えない
-			// 原因になり得るため）。
-			const PlaceResult result = PlaceOne(command, layer);
-			if (result != PlaceResult::NotPlaced)
+			// **必ず配置を試みる。** 事前ガードで弾かず、置けたかどうかだけで数える。
+			if (PlaceOne(command, layer))
 			{
 				++drawn;
-				if (result == PlaceResult::StrayLayer)
-					++wrongLayer;
 				continue;
 			}
 
@@ -198,14 +175,11 @@ namespace HomeskzIfcImport::draw
 		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 件」のときに、原因が配置先レイヤ
 		// （＝ストーリ側）か、図面にシンボル定義が無いのか（＝リソース側）か、定義はあるのに
 		// 配置に失敗したのか（＝描画側）を切り分けられる。
-		if (note != nullptr && (missingLayers > 0 || failed > 0 || wrongLayer > 0))
+		if (note != nullptr && (missingLayers > 0 || failed > 0))
 		{
 			std::string text = std::string(elementLabel) + "の診断: ";
 			if (missingLayers > 0)
 				text += "配置先レイヤが無い命令 " + std::to_string(missingLayers) + " 件。";
-			if (wrongLayer > 0)
-				text +=
-					"意図したレイヤに載らなかったシンボル " + std::to_string(wrongLayer) + " 件。";
 			if (failed > 0)
 			{
 				text += "配置できなかった命令 " + std::to_string(failed) + " 件。";
