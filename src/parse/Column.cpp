@@ -47,35 +47,6 @@ namespace HomeskzIfcImport::parse
 			return PositionKey{std::llround(x * 1000.0), std::llround(y * 1000.0)};
 		}
 
-		// 金物（IfcMechanicalFastener）の型（IfcMechanicalFastenerType）名を返す。型は
-		// IfcRelDefinesByType 経由で辿る（Python 版は逆方向属性名がスキーマで異なるため
-		// IsTypedBy / IsDefinedBy の両方を走査するが、こちらは逆参照を辿るので 1 度で済む）。
-		// referrers は #id 昇順なので、複数あっても常に同じものを選ぶ（決定的）。
-		std::string fastenerTypeName(const Model& model, const Entity& fastener)
-		{
-			for (const int relId : model.referrers(fastener.id))
-			{
-				const Entity* rel = model.entity(relId);
-				if (rel == nullptr || rel->type != "IFCRELDEFINESBYTYPE")
-					continue;
-				const Value& related = rel->attribute(attr::kRelDefinesRelatedObjects);
-				if (!related.isList())
-					continue;
-				const bool definesThis =
-					std::ranges::any_of(related.items, [&fastener](const Value& ref)
-										{ return ref.reference == fastener.id; });
-				if (!definesThis)
-					continue;
-
-				const Entity* type =
-					model.resolve(rel->attribute(attr::kRelDefinesByTypeRelatingType));
-				if (type == nullptr)
-					continue;
-				return entityName(*type);
-			}
-			return {};
-		}
-
 		// 階に属する柱頭・柱脚金物を XY 位置で索引する（Python 版 _collect_column_hardware）。
 		// 柱頭・柱脚金物は柱と同じストーリに含まれ、柱と同じ平面座標へ立方体として置かれる。
 		struct ColumnHardware
@@ -124,6 +95,32 @@ namespace HomeskzIfcImport::parse
 			return found == index.end() ? std::string() : found->second;
 		}
 	} // namespace
+
+	// 型は IfcRelDefinesByType 経由で辿る（Python 版は逆方向属性名がスキーマで異なるため
+	// IsTypedBy / IsDefinedBy の両方を走査するが、こちらは逆参照を辿るので 1 度で済む）。
+	std::string fastenerTypeName(const Model& model, const Entity& fastener)
+	{
+		for (const int relId : model.referrers(fastener.id))
+		{
+			const Entity* rel = model.entity(relId);
+			if (rel == nullptr || rel->type != "IFCRELDEFINESBYTYPE")
+				continue;
+			const Value& related = rel->attribute(attr::kRelDefinesRelatedObjects);
+			if (!related.isList())
+				continue;
+			const bool definesThis =
+				std::ranges::any_of(related.items, [&fastener](const Value& ref)
+									{ return ref.reference == fastener.id; });
+			if (!definesThis)
+				continue;
+
+			const Entity* type = model.resolve(rel->attribute(attr::kRelDefinesByTypeRelatingType));
+			if (type == nullptr)
+				continue;
+			return entityName(*type);
+		}
+		return {};
+	}
 
 	bool isColumnElement(const Entity& element)
 	{

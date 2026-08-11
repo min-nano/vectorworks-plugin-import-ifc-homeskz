@@ -149,6 +149,11 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/Member.cpp
 		src/parse/Column.cpp
 		src/parse/Noboribari.cpp
+		src/parse/Footing.cpp
+		src/parse/AnchorBolt.cpp
+		src/parse/FloorPost.cpp
+		src/parse/FireBrace.cpp
+		src/parse/Joint.cpp
 		src/parse/Rafter.cpp
 		src/parse/Roof.cpp
 		src/parse/StructuralClass.cpp
@@ -282,7 +287,8 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Member.cpp
 		src/draw/Column.cpp
 		src/draw/Rafter.cpp
-		src/draw/Roof.cpp)
+		src/draw/Roof.cpp
+		src/draw/Symbol.cpp)
 
 	# add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])
 	#
