@@ -95,8 +95,8 @@ jobs:
     env:
       # SDK の場所・キャッシュキー・URL は build.yml と同一にしてある。build.yml が
       # 温めたキャッシュにそのままヒットするので、SDK の再ダウンロードは基本発生
-      # しない。build.yml 側でキーを上げたらここも合わせること（将来 composite
-      # action へ切り出して一本化する予定）。
+      # しない。build.yml 側でキーを上げたらここも合わせること（用意する手順そのものは
+      # scripts/fetch-vw-sdk.sh に一本化済みで、残る重複はこの 3 つの値だけ）。
       VW_SDK_DIR: ${{ github.workspace }}/${{ inputs.platform == 'windows' && 'vw-sdk-win' || 'vw-sdk' }}
       VW_SDK_CACHE_KEY: ${{ inputs.platform == 'windows' && 'vw-sdk-2026-NNA-win-v1' || 'vw-sdk-2026-NNA-mac-v3' }}
       VW_SDK_URL: https://release.vectorworks.net/latest/Vectorworks/2026-NNA-eng-${{ inputs.platform == 'windows' && 'win' || 'mac' }}-SDK.zip
@@ -117,7 +117,7 @@ jobs:
           echo "args=$ARGS"
 
       # SDK が要るかどうかはモードで決まる。platform=linux では SDK を用意できない
-      # ので、SDK を必要とするモードはここで即座に落とす（800 MB を無駄に取りに
+      # ので、SDK を必要とするモードはここで即座に落とす（大きな zip を無駄に取りに
       # いってから失敗するより、理由が明確で速い）。
       - name: Decide whether the SDK is needed
         id: sdk
@@ -141,61 +141,19 @@ jobs:
       # 読み取り専用の restore。デバッグ実行がキャッシュを書き戻すと本番ビルドの
       # ccache / SDK キャッシュを汚しうるので、save は決して行わない。
       - name: Restore Vectorworks SDK cache (read-only)
-        id: sdk-cache
         if: steps.sdk.outputs.need == 'yes'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.VW_SDK_DIR }}
           key: ${{ env.VW_SDK_CACHE_KEY }}
 
-      # キャッシュミス時のみダウンロード。build.yml は mac(bash) / win(pwsh) に分けて
-      # いるが、ここは両ランナーで動く bash 1 本にまとめてある（git-bash に unzip が
-      # ない場合は 7z にフォールバック）。
-      - name: Download and trim Vectorworks SDK
-        if: steps.sdk.outputs.need == 'yes' && steps.sdk-cache.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          work="$(mktemp -d)"
-          echo "SDK cache miss — downloading (~800 MB)..."
-          curl -fL --retry 4 --retry-delay 5 -o "$work/sdk.zip" "$VW_SDK_URL"
-
-          if command -v unzip >/dev/null 2>&1; then
-            unzip -q "$work/sdk.zip" -d "$work/extracted"
-          elif command -v 7z >/dev/null 2>&1; then
-            7z x -bso0 -bsp0 -o"$work/extracted" "$work/sdk.zip"
-          else
-            echo "::error::neither unzip nor 7z is available on this runner."
-            exit 1
-          fi
-
-          # macOS の zip が混ぜる "__MACOSX" メタデータミラーは避ける。
-          sdklib="$(find "$work/extracted" -type d -name SDKLib -not -path '*/__MACOSX/*' -print -quit)"
-          if [ -z "$sdklib" ]; then
-            echo "::error::Could not find SDKLib inside the downloaded SDK."
-            exit 1
-          fi
-
-          if [ "$PLATFORM" = "windows" ]; then
-            subdirs="Include LibWin Source ToolsWin"
-          else
-            subdirs="Include LibMac Source ToolsMac"
-          fi
-          mkdir -p "$VW_SDK_DIR/SDKLib"
-          for sub in $subdirs; do
-            if [ -d "$sdklib/$sub" ]; then
-              cp -R "$sdklib/$sub" "$VW_SDK_DIR/SDKLib/$sub"
-            else
-              echo "(note) SDKLib/$sub not present in this SDK; skipping."
-            fi
-          done
-
-          if [ "$PLATFORM" != "windows" ]; then
-            chmod +x "$VW_SDK_DIR/SDKLib/ToolsMac/BuildVWR/BuildVWR" || true
-            xattr -dr com.apple.quarantine "$VW_SDK_DIR/SDKLib/ToolsMac" 2>/dev/null || true
-          fi
-
-          rm -rf "$work"
-          du -sh "$VW_SDK_DIR"
+      # キャッシュミス時のみダウンロードし、ヒット時は検証だけして抜ける（その判断は
+      # スクリプト側が $VW_SDK_DIR の中身を見て行うので、ここに cache-hit の分岐は
+      # 要らない）。build.yml の 4 ジョブと同じスクリプトで、SDK の用意手順はここに
+      # 1 つしかない（CLAUDE.md「重複を作らない置き場所」）。
+      - name: Set up Vectorworks SDK
+        if: steps.sdk.outputs.need == 'yes'
+        run: scripts/fetch-vw-sdk.sh
 
       # ここが本体。ログの末尾がペイロードになるよう、これ以降のステップは
       # アーティファクトのアップロードと（任意の）PR コメントだけに絞ってある。

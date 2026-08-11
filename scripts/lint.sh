@@ -83,7 +83,8 @@ fi
 # updater logic (src/UpdaterFlow.cpp, which pulls in UpdaterParse.h /
 # UpdaterHost.h) and the 2-phase core/parse code (src/core/ + src/parse/). Needs
 # a compile database describing how each translation unit is built. draw/ needs
-# the SDK, so it is tidied in the SDK build (build.yml), not here.
+# the SDK, so it is tidied in the SDK build (build.yml) via
+# scripts/clang-tidy-sdk.sh, not here.
 #
 # The file list is DERIVED, not hand-maintained, and MUST stay identical to the
 # one in .github/workflows/lint.yml: core/ and parse/ are SDK-free by definition

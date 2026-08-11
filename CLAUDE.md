@@ -208,7 +208,10 @@ tests/
   **include は自動並べ替えしない**（`PluginPrefix` / `BuildConfig` を先頭に保つ）。
 - `.clang-tidy`: **警告をエラー扱い**（`WarningsAsErrors`）。SDK 非依存コード
   （`core/` `parse/`）は CI のランナー上でも clang-tidy にかける。SDK 依存コード
-  （`draw/`）は `build.yml` の SDK ビルド中に同じルールでチェックする。
+  （`draw/`）は `build.yml` の `tidy-mac` / `tidy-windows` ジョブが同じルールで
+  チェックする（ビルドと並走。対象一覧と並列実行は `scripts/clang-tidy-sdk.sh`）。
+  この 2 ジョブは `release` の `needs` に入っているので、**ビルドが通っていても
+  clang-tidy が通らなければリリースは公開されない**。
 - コミット前に `scripts/lint.sh`（必要なら `--fix`）で C++ / CMake / YAML / shell の
   全 lint を通す（CI と同一チェック）。
 
