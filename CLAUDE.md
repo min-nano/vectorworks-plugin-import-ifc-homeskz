@@ -159,13 +159,14 @@ src/
     StructuralMember.{h,cpp} 構造材ツール（StructuralMember PIO）1 本の生成・設定（横架材／柱で共有）
     ProgressDialog.{h,cpp}  core::ProgressReporter を VW の進捗ダイアログへ橋渡し（唯一の実装）
     Grid.{h,cpp}            grid 命令 → GridAxis（旧 vw/grid.py）
-    Story.{h,cpp}           story 命令 → ストーリ・レベル・レイヤ（旧 vw/story.py）
+    Story.{h,cpp}           story 命令 → ストーリ・レベル・レイヤ（旧 vw/story.py）。
+                            デザインレイヤの重ね順の並べ替えもここが唯一の適用箇所
     Footing.{h,cpp}         wall/wallJoin/slab 命令 → 壁・壁結合・スラブ（地中梁の
                             台形プリズムを含む。旧 vw/footing.py）
     Symbol.{h,cpp}          シンボル配置（旧 vw/{anchor_bolt,floor_post,fire_brace,joint}.py
                             の 4 本を 1 本に。要素の区別は呼び出し側が持つ）
     Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）。
-                            レイヤの重ね順の per-viewport 上書きはここが唯一の適用箇所
+                            表示レイヤの絞り込みとクラス表示はここが唯一の適用箇所
     …                       以降、要素ごとに 1 対 1 で追加
 
 tests/

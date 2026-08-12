@@ -725,6 +725,18 @@ namespace HomeskzIfcImport::core
 	// 各命令リストの追加に合わせて検証規則を足していく。
 	bool validateDocument(const Document& document);
 
+	// 命令セットが使うクラス名（drawClass）を重複なく昇順で返す。空文字（無クラス）は含めない。
+	//
+	// **伏図ビューポートのクラス表示に使う**（draw/Sheet）。VW のビューポートはクラスの表示を
+	// 明示しないと**全クラスが非表示**になり、レイヤを正しく絞っても図形が 1 つも出ない
+	// （M13 のローカル確認で判明）。ところが ISDK には「ドキュメントの全クラスを列挙する」
+	// 呼び出しが無い（VWClass にあるのは名前↔索引の変換だけ）。そこで、**プラグインが自分で
+	// 割り当てたクラスは命令セットから分かる**ことを使い、その名前を数え上げて表示へ戻す。
+	//
+	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder と
+	// 同じ立ち位置。CLAUDE.md「テスト方針」）。並びは昇順で、命令の並び順に依存しない。
+	std::vector<std::string> documentClassNames(const Document& document);
+
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す
 	// （Python 版 vw/story.py desired_layer_order の SDK 非依存な計算部分）。draw/Story が
 	// この順を適用する（レベルの高さには依存しない）。SDK を触らない純計算なので core に

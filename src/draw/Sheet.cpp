@@ -20,10 +20,10 @@
 //	  * gSDK->NextObject(handle)                      … 次のレイヤへ
 //	  * gSDK->CreateViewport(sheetLayer)              … ビューポート生成
 //	  * gSDK->SetViewportLayerVisibility(vp, layer, v)… 表示レイヤの絞り込み（0=表示/1=非表示）
-//	  * gSDK->GetObjectInternalIndex(layer)           … 重ね順上書きが要る InternalIndex
-//	  * gSDK->CreateViewportLayerOverride(vp, idx) /
-//	    gSDK->SetViewportLayerStackingOverride(vp, idx, pos)
-//	                                                  … per-viewport のレイヤ重ね順上書き
+//	  * gSDK->FirstMemberObj(h) / gSDK->GetObjectClass(h)
+//	                                                  … 図形が使うクラスの数え上げ（下記）
+//	  * gSDK->ClassNameToID(name)                     … クラス名 → InternalIndex
+//	  * gSDK->SetViewportClassVisibility(vp, idx, 0)  … クラス表示（既定は非表示。下記）
 //	  * VWViewportObj(vp).SetScale(scale)             … ビューポート縮尺（オブジェクト変数 1003）
 //	  * VWViewportObj(vp).SetDescription(title)       … 図面タイトル（同 1032・Dwg Title）
 //	  * VWViewportObj(vp).SetLocator(number)          … 図番（同 1033・Item）
@@ -34,9 +34,18 @@
 //	同じく、まず全レイヤを**非表示**にしてから命令の layers を名前で引いて表示へ戻す
 //	（グレー表示 2 を使うと薄く残ってしまうので、必ず 1＝非表示）。
 //
-//	【重ね順は per-viewport 上書き】希望順（core::desiredStoryLayerOrder）を前面→背面の
-//	並びとして各ビューポートへ与える（draw/Sheet.h の設計メモ参照）。デザインレイヤ自体の
-//	並びには触らない。
+//	【クラスは 1 つずつ表示に戻す】レイヤと違い、**ビューポートのクラスは明示しないと非表示の
+//	まま**（ローカル確認で判明）。しかも ISDK にドキュメントの全クラスを列挙する呼び出しが
+//	無いので、**図形が身に付けているクラスを全レイヤ走査で数え上げて**（CollectUsedClasses。
+//	PIO / シンボルの中まで辿る）表示に戻す。クラスで絞る伏図はまだ無い（命令に
+//	hidden_classes を持たせていない。core/Document.h の ViewportCommand 参照）。
+//
+//	【重ね順はここでは扱わない】床・野地板が柱・梁を覆わないようにする件は、**ドキュメントの
+//	デザインレイヤの並べ替え**（draw/Story の reorderStoryLayers）が担う。per-viewport の
+//	上書き（SetViewportLayerStackingOverride）は実機で効かなかった——呼び出しは true を
+//	返すのに GetNumViewportLayerStackingOverrides は 0 のままで、OIP も「順序を上書き:
+//	いいえ」だった——ので捨てた。**並べ替えはビューポート生成より前**に済ませる必要がある
+//	（生成時の重ね順で描かれるため。draw/ExecuteDocument の実行順）。
 //
 
 #include "PluginPrefix.h"
@@ -49,8 +58,11 @@
 #include "VWFC/VWObjects/VWLayerObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -67,6 +79,11 @@ namespace HomeskzIfcImport::draw
 		// グレーにすると伏図に薄く残る（Python 版 vw/sheet.py の注記と同じ）。
 		constexpr short kLayerVisible = 0;
 		constexpr short kLayerHidden = 1;
+
+		// SetViewportClassVisibility の表示種別。SDK の EClassVisibility（VWFC/VWObjects/
+		// VWClass.h）が Normal=0 / Invisible=-1 / Grayed=2 と定めており、**VS の 0/1/2 とは
+		// 値が違う**（1 は「非表示」ではない）。表示に戻すのが目的なので Normal だけを使う。
+		constexpr short kClassVisible = 0;
 
 		// 図面のレイヤを先頭から順に辿る。VWDocument::GetDrawingHeaderFristMember（SDK の
 		// 綴りママ）が図面のオブジェクト列の先頭＝最初のレイヤで、以降は NextObject でたどれる。
@@ -140,28 +157,72 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// レイヤの重ね順をこのビューポートだけで上書きする（M3 の【決定】の実装箇所。
-		// draw/Sheet.h 参照）。order は前面→背面の希望順で、**そのビューポートに実在する
-		// レイヤだけ**へ 0 から詰めた位置を与える（希望順に載っていないレイヤ＝ユーザーが
-		// 別途作ったレイヤには触れない＝既定の重ね順のまま残す）。
+		// クラス表示に渡す「図面で実際に使われているクラス」の索引を集める。
 		//
-		// SetViewportLayerStackingOverride は上書きレコードが要るので、先に
-		// CreateViewportLayerOverride を呼ぶ（既にあれば失敗するだけで害は無い）。
-		void ApplyLayerStacking(MCObjectHandle viewport, const std::vector<std::string>& order)
+		// 【なぜ数え上げるのか】ISDK には**ドキュメントの全クラスを列挙する呼び出しが無い**
+		// （VWClass にあるのは名前↔索引の変換と妥当性判定だけ。BuildResourceList にクラス用の
+		// 型も無い。ci-debug で確認）。そこで**図形が身に付けているクラス**を全レイヤ走査で
+		// 数え上げる。**コンテナは中まで辿る**のが要点で、通り芯（GridAxis PIO）のラベルの
+		// ように「PIO / シンボルの中の図形が、スタイルの決めたクラスを持つ」ものは、外側の
+		// オブジェクトのクラスだけ見ても拾えない（ラベルだけ消える。ローカル確認で判明）。
+		//
+		// 走査は 1 回だけ行い、全ビューポートで同じ集合を使う（伏図ごとに全図形を辿り直すと
+		// 図面の規模なりに重くなる）。
+		std::set<InternalIndex> CollectUsedClasses(const std::vector<MCObjectHandle>& layers)
 		{
-			Sint32 position = 0;
-			for (const std::string& name : order)
+			std::set<InternalIndex> classes;
+			// 入れ子（グループ・シンボル・PIO）は深さ上限つきで辿る。上限は「PIO の中の
+			// グループの中の図形」に十分で、壊れたデータで無限に潜らない値。
+			constexpr int kMaxDepth = 6;
+			std::vector<std::pair<MCObjectHandle, int>> pending;
+			pending.reserve(layers.size());
+			for (const MCObjectHandle layer : layers)
 			{
-				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
-				if (layer == nil)
-					continue;
-				const InternalIndex index = gSDK->GetObjectInternalIndex(layer);
-				if (index == 0)
-					continue;
-				gSDK->CreateViewportLayerOverride(viewport, index);
-				gSDK->SetViewportLayerStackingOverride(viewport, index, position);
-				++position;
+				const MCObjectHandle first = gSDK->FirstMemberObj(layer);
+				if (first != nil)
+					pending.emplace_back(first, 0);
 			}
+			while (!pending.empty())
+			{
+				const auto [head, depth] = pending.back();
+				pending.pop_back();
+				for (MCObjectHandle h = head; h != nil; h = gSDK->NextObject(h))
+				{
+					const InternalIndex index = gSDK->GetObjectClass(h);
+					if (index != 0)
+						classes.insert(index);
+					if (depth >= kMaxDepth)
+						continue;
+					const MCObjectHandle child = gSDK->FirstMemberObj(h);
+					if (child != nil)
+						pending.emplace_back(child, depth + 1);
+				}
+			}
+			return classes;
+		}
+
+		// ビューポートのクラス表示を「全部表示」にする。**設定した数**を返す。
+		//
+		// 【なぜ要るか】**ビューポートはクラスの表示を明示しないと非表示のまま**（ローカル
+		// 確認で判明: レイヤは命令どおりなのにクラスが全て非表示で、明示したクラスだけが
+		// 表示になった）。Python 版 vw/sheet.py の configure_viewport_classes が全クラスを
+		// 表示へ戻していたのと同じ手当てが要る。
+		//
+		// ［やってはいけないこと］`SetUseDocumentClassVis(true)`（オブジェクト変数 1031）で
+		// ドキュメントのクラス表示に従わせる手は**シートレイヤのビューポートには効かない**
+		// ——ObjectVariables.h の但し書きが "for dlvps"（＝デザインレイヤビューポート専用）で、
+		// 実際 1 回目の修正はこれを呼んでも全クラス非表示のままだった。クラスは 1 つずつ
+		// 表示にするしかない。
+		std::size_t ConfigureViewportClasses(MCObjectHandle viewport,
+											 const std::set<InternalIndex>& classes)
+		{
+			std::size_t applied = 0;
+			for (const InternalIndex index : classes)
+			{
+				if (gSDK->SetViewportClassVisibility(viewport, index, kClassVisible))
+					++applied;
+			}
+			return applied;
 		}
 
 		// 表示するデザインレイヤの縮尺を返す（Python 版 configure_viewport_scale）。伏図が映す
@@ -220,11 +281,19 @@ namespace HomeskzIfcImport::draw
 		if (commands.empty())
 			return 0;
 
-		// レイヤの走査と希望スタック順は全シートで共通なので 1 回だけ求める。希望順の計算は
-		// SDK 非依存（core::desiredStoryLayerOrder。無 SDK テスト済み）で、**伏図記号レイヤ
-		// 等のストーリ非依存レイヤ（topLayers）は M12 が着地したら渡す**。
+		// レイヤの走査は全シートで共通なので 1 回だけ行う。
 		const std::vector<MCObjectHandle> allLayers = AllLayers();
-		const std::vector<std::string> stacking = core::desiredStoryLayerOrder(document.stories);
+		// 表示に戻すクラス（全ビューポートで同じ）。**図形が使っているクラス**（走査で数え
+		// 上げ。通り芯ラベルのように PIO の中でスタイルが決めるクラスもここで拾う）に、
+		// **命令セットが名乗るクラス**（core::documentClassNames。まだ図形が無いクラスや、
+		// 走査で辿れなかったものの取りこぼしを防ぐ保険）を足す。
+		std::set<InternalIndex> classes = CollectUsedClasses(allLayers);
+		for (const std::string& name : core::documentClassNames(document))
+		{
+			const InternalIndex index = gSDK->ClassNameToID(TXString(name.c_str()));
+			if (index != 0)
+				classes.insert(index);
+		}
 
 		// 描画の前後でカレントレイヤが変わると以降のフェーズ（M14 以降）に響くので、
 		// 元のレイヤへ戻せるよう控えておく。
@@ -233,6 +302,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		std::size_t missingSheetLayers = 0;
 		std::size_t missingViewports = 0;
+		// クラス表示は「設定できた数」を数える（0 なら図形が 1 つも映らない）。
+		std::size_t classesApplied = 0;
 
 		for (const core::SheetCommand& command : commands)
 		{
@@ -259,7 +330,7 @@ namespace HomeskzIfcImport::draw
 			}
 
 			ConfigureViewportLayers(viewport, sheetLayer, allLayers, command.viewport);
-			ApplyLayerStacking(viewport, stacking);
+			classesApplied += ConfigureViewportClasses(viewport, classes);
 			// **縮尺は表示レイヤを絞った後に読む**（映すレイヤの縮尺に合わせるため）。
 			FinishViewport(viewport, command.viewport, LayerScaleFor(command.viewport));
 			++drawn;
@@ -270,7 +341,8 @@ namespace HomeskzIfcImport::draw
 
 		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 枚」のときに、シートレイヤを
 		// 作れないのか、ビューポートを作れないのかを切り分けられる。
-		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0))
+		const bool classesBroken = drawn > 0 && classesApplied == 0;
+		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken))
 		{
 			std::string text = "伏図の診断: ";
 			if (missingSheetLayers > 0)
@@ -279,6 +351,9 @@ namespace HomeskzIfcImport::draw
 			if (missingViewports > 0)
 				text +=
 					"ビューポートを作れなかった命令 " + std::to_string(missingViewports) + " 件。";
+			if (classesBroken)
+				text += "クラスを表示に戻せませんでした（対象 " + std::to_string(classes.size()) +
+						" クラス）。図形が映りません。";
 			*note = std::move(text);
 		}
 		return drawn;
