@@ -301,12 +301,13 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 - **アップデータ**（`src/Updater.cpp`）… SDK に依存しない純粋なロジック（スクリプト出力の
   パース、コマンドラインのクォート、インストール先パスの導出）を `src/UpdaterParse.h` に
   切り出し、更新フロー本体は `IUpdaterHost` のフェイク越しに丸ごと動かします。同梱
-  スクリプトのバックエンド（`q-stable` / `q-dev` / `do-install` / `relaunch`）も、
-  ネットワークとアプリ起動の境界だけを差し替えて SDK ／ネットワーク抜きにテストします —
-  macOS 版 `scripts/vw-update.sh` は `tests/vw-update.test.sh`（bash＋`curl`/`plutil`/
-  `open` スタブ）、Windows 版 `scripts/vw-update.ps1` は `tests/vw-update.Tests.ps1`
-  （PowerShell 7＋`Invoke-GH`/`Invoke-WebRequest`/`Start-Process` スタブ）で、いずれも
-  Linux ランナー上で動きます。
+  スクリプトのバックエンド（`q-stable` / `q-dev` / `do-install`）も、ネットワーク境界だけを
+  差し替えて SDK ／ネットワーク抜きにテストします — macOS 版 `scripts/vw-update.sh` は
+  `tests/vw-update.test.sh`（bash＋`curl`/`plutil` スタブ）、Windows 版
+  `scripts/vw-update.ps1` は `tests/vw-update.Tests.ps1`（PowerShell 7＋
+  `Invoke-GH`/`Invoke-WebRequest` スタブ）で、いずれも Linux ランナー上で動きます。
+  再起動のコマンド（終了要求 → 終了待ち → 起動し直し）は純粋関数が組み立てるので、生成
+  される shell / PowerShell そのものを `tests/UpdaterParseTests.cpp` で検証します。
 
 **テストの一覧・方針・何をテストしていないかは `tests/README.md`** に詳しくあります。
 
@@ -741,8 +742,7 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
   `Contents/Resources/vw-update.sh` に入り、隔離解除とアドホック再署名も行います。
 - **Windows** — `scripts/vw-update.ps1`（PowerShell）。`.vlb` の隣に入ります。
 
-プラグインはこのスクリプトを**非対話モード**（`q-stable` / `q-dev` / `do-install` /
-`relaunch`）で
+プラグインはこのスクリプトを**非対話モード**（`q-stable` / `q-dev` / `do-install`）で
 呼び出して結果を受け取り、ユーザーへの表示はすべて自前のネイティブダイアログで行う
 ため、利用者がターミナルを開く必要はありません。どちらの OS でも
 `src/Updater.cpp` の同じフロー・ダイアログが動き、変わるのは「自分の場所を特定する
@@ -782,36 +782,49 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 にしてあり、**「再起動」ボタン**をその場に出します（`src/UpdaterFlow.cpp` の
 `OfferRestart`）。
 
-- **「再起動」** → Vectorworks を終了し、終了しきってから起動し直します
-  （`src/Updater.cpp` の `CVectorworksUpdaterHost::Restart`）。開いているファイルは
-  **通常どおり保存を確認**してから閉じられるので、保存ダイアログで取り消せば Vectorworks
-  は落ちません（その場合もインストール済みのファイルはディスクに残るため、次回の起動で
-  反映されます）。
+- **「再起動」** → 起動の完了後に Vectorworks を終了し、終了しきってから起動し直します
+  （`src/Updater.cpp` の `CVectorworksUpdaterHost::Restart`）。終了要求は OS 経由なので
+  **押した直後ではなく、起動が終わってから**効きます。開いているファイルは**通常どおり
+  保存を確認**してから閉じられ、保存ダイアログで取り消せば Vectorworks は落ちません
+  （その場合もインストール済みのファイルはディスクに残るため、次回の起動で反映されます）。
 - **「後で」** → 何もせず起動を続けます。反映は次に Vectorworks を起動したときです。
 
-インストールに失敗したときは（当然）再起動を尋ねず、失敗の理由だけを表示します。
+インストールに失敗したときは（当然）再起動を尋ねず、失敗の理由だけを表示します。再起動を
+**用意できなかった**とき（アプリを特定できない／ヘルパーを起動できない）は「手動で再起動して
+ください」と案内します——押しても何も起きないように見えるのを避けるためです。
 
-#### 再起動を SDK に任せない理由
+#### 再起動を SDK に任せない理由（実機で確かめた失敗）
 
-SDK の `CloseAllFilesAndQuitVectorworks` には `bRestart` という「終了後に起動し直す」
-フラグがありますが、**これは使いません**。macOS で実際に試すと、古いインスタンスがまだ
-終了しきらないうちに新しいインスタンスが立ち上がり、
-**「サポートファイルの読み込みに失敗しました。」**というダイアログを出して落ちてしまい、
-結果として Vectorworks が 1 つも残らない状態になります。
+SDK の `CloseAllFilesAndQuitVectorworks` には「終了」と「終了後に起動し直す」
+（`bRestart`）がありますが、**どちらも使いません**。macOS 実機では次のように失敗しました。
 
-そこで**終了だけを SDK に任せ**（`bRestart: false`）、**起動し直しは外から**行います。
-同梱の更新スクリプトに `relaunch <pid> <app>` モードを足し、プラグインは終了を頼む
-**直前にこれを切り離して（detached で）起動**します。ヘルパーは
+1. `bRestart: true`（終了＋再起動を SDK に任せる）→ 古いインスタンスが終了しきる前に新しい
+   インスタンスが立ち上がり、**「サポートファイルの読み込みに失敗しました。」**で落ちる。
+2. `bRestart: false`（終了だけ SDK に任せ、起動し直しは自前）→ **同じダイアログが出る**。
+   アップデート確認は**プラグインのロード中**（スプラッシュ表示中）に走るため、Vectorworks
+   本体がまだ自分を終了させられる状態になっていないため、と考えられます。SDK には
+   「起動完了後に実行する」フックが無く（`RegisterNotificationProcedure` の通知一覧にも
+   起動完了に相当するものは無い）、いつ呼べば安全かを当てにいくのは筋が悪い。
 
-1. 渡された pid（＝実行中の Vectorworks）が**消えるまで待ち**、
-2. 消えてから 2 秒おいて、
-3. **macOS は `open -a <app>`**（LaunchServices 経由＝ダブルクリックと同じ扱い）、
-   **Windows は `Start-Process <exe>`** でアプリを起動し直します。
+そこで**終了も起動し直しも、切り離した（detached）ヘルパープロセスに任せます**。プラグイン
+がすることは、そのヘルパーを起動することだけです。ヘルパーは
 
-保存ダイアログで取り消して Vectorworks が終了しなかった場合は、**既定 300 秒**待って
-あきらめます（使用中のアプリを勝手に起動し直さないため）。ヘルパーの起動そのものに
-失敗した場合（アプリのパスを解決できない等）は再起動を諦め、「手動で再起動してください」
-と表示します——更新自体は完了しているので、次回起動で反映されます。
+1. **OS の通常の終了要求**を送る（macOS: 自分のバンドル ID 宛の `quit` Apple event ＝ ⌘Q と
+   同じもの。Windows: メインウィンドウへ `CloseMainWindow()` ＝ 閉じるボタンと同じもの）。
+   OS はこれを**イベントループが回り始めてから**、つまり Vectorworks が処理できる状態に
+   なってから配送します——「いつ安全か」を推測する必要がありません。保存の確認も通常どおり。
+2. プロセスが**消えるまで待ち**（既定 300 秒。保存ダイアログで取り消して終了しなかった場合は
+   あきらめる——使用中のアプリを勝手に起動し直さないため）、
+3. 2 秒おいてから **macOS は `open -a <app>`**（LaunchServices 経由＝ダブルクリックと同じ）、
+   **Windows は `Start-Process <exe>`** で起動し直します。
+
+ヘルパーに渡すコマンドは**同梱スクリプトのモードではなく、その場で組み立てた 1 行**です
+（`src/UpdaterParse.h` の `MacRelaunchCommand` / `WinRelaunchCommand`。純粋関数なので生成
+される shell / PowerShell はそのまま単体テストしてあります）。理由は、**インストール直後の
+ディスク上のスクリプトは「いま入れたビルドに同梱されていた版」**であり、実行中のコードより
+古いことがあるからです。実際に古い版を呼んでしまい
+**「エラー: 不明なチャンネル: 'relaunch'」**というダイアログが出ました。インラインのコマンド
+なら呼び出し側と食い違いようがありません。
 
 新しいビルドが実際にロードされるのは、この再起動（または手動での再起動）以降です。
 
@@ -849,7 +862,6 @@ SDK の `CloseAllFilesAndQuitVectorworks` には `bRestart` という「終了�
 ./scripts/vw-update.sh q-stable                # stable の状態を表示
 ./scripts/vw-update.sh q-dev                   # dev ビルド一覧を表示
 ./scripts/vw-update.sh do-install <url> <name> # ダウンロードしてインストール
-./scripts/vw-update.sh relaunch <pid> <app>    # 終了を待ってアプリを起動し直す
 ```
 
 ```pwsh
@@ -857,11 +869,10 @@ SDK の `CloseAllFilesAndQuitVectorworks` には `bRestart` という「終了�
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 stable
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 dev
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1          # チャンネルを尋ねる
-# 非対話モード（プラグインが使うもの。do-install / relaunch は sh 版と同じ契約）:
+# 非対話モード（プラグインが使うもの。stable/dev/do-install は sh 版と同じ契約）:
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 q-stable
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 q-dev
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 do-install <url> <name>
-powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 relaunch <pid> <exe>
 ```
 
 環境変数で上書き可能: `VW_REPO`（owner/repo）、`VW_PLUGINS_DIR`（インストール先）。

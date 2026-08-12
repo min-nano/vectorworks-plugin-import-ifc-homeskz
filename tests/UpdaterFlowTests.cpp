@@ -197,9 +197,11 @@ TEST(stable_accepted_and_install_succeeds)
 	if (h.asks.size() == 2)
 	{
 		CHECK_EQ(h.asks[1][0], "HomeskzIfcImport を更新しました。");
-		CHECK_EQ(h.asks[1][1], "build: def5678\n\n"
-							   "反映するには Vectorworks の再起動が必要です。\n"
-							   "今すぐ再起動しますか？（開いているファイルは保存を確認します）");
+		CHECK_EQ(h.asks[1][1],
+				 "build: def5678\n\n"
+				 "反映するには Vectorworks の再起動が必要です。\n"
+				 "今すぐ再起動しますか？（起動の完了後に終了し、自動で起動し直します。\n"
+				 "開いているファイルは保存を確認します）");
 		CHECK_EQ(h.asks[1][2], "再起動");
 		CHECK_EQ(h.asks[1][3], "後で");
 	}
@@ -386,9 +388,11 @@ TEST(dev_selecting_a_build_installs_it)
 	if (h.asks.size() == 1)
 	{
 		CHECK_EQ(h.asks[0][0], "開発版ビルドをインストールしました。");
-		CHECK_EQ(h.asks[0][1], "branch: feature/y\ncommit: bbb2222\n\n"
-							   "反映するには Vectorworks の再起動が必要です。\n"
-							   "今すぐ再起動しますか？（開いているファイルは保存を確認します）");
+		CHECK_EQ(h.asks[0][1],
+				 "branch: feature/y\ncommit: bbb2222\n\n"
+				 "反映するには Vectorworks の再起動が必要です。\n"
+				 "今すぐ再起動しますか？（起動の完了後に終了し、自動で起動し直します。\n"
+				 "開いているファイルは保存を確認します）");
 		CHECK_EQ(h.asks[0][2], "再起動");
 		CHECK_EQ(h.asks[0][3], "後で");
 	}

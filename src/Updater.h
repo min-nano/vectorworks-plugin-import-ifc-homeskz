@@ -26,11 +26,14 @@
 //	usual save prompt) and starts it again; choosing 後で keeps the running build
 //	until the user restarts on their own.
 //
-//	The restart is deliberately NOT left to the SDK's own bRestart flag: that
-//	brings the new instance up while the old one is still quitting, and it dies
-//	with 「サポートファイルの読み込みに失敗しました」. Instead the bundled script
-//	is started detached in "relaunch" mode first; it waits for this process to
-//	disappear and only then opens the application again. See Updater.cpp.
+//	Neither half of that restart is performed by this process. These checks run
+//	while the plug-in is being LOADED at start-up (splash still up), and
+//	Vectorworks is not ready to shut itself down then: the SDK's quit — with or
+//	without its bRestart flag — ends in 「サポートファイルの読み込みに失敗しました」.
+//	So a detached helper is started instead, which sends the ORDINARY OS quit
+//	request (the ⌘Q one, delivered by the event loop only once Vectorworks is
+//	really running), waits for this process to disappear, and then opens the
+//	application again. See Updater.cpp and UpdaterParse.h's MacRelaunchCommand.
 //
 
 #pragma once

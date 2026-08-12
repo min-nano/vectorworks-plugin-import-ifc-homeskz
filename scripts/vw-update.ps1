@@ -26,10 +26,6 @@
                           (or error=<message>).
       do-install <url> <name>   Download+install "<name>.vlb"; print "ok" or
                                 error=<message>. No dialogs.
-      relaunch <pid> <exe>      Wait for the Vectorworks process <pid> to exit,
-                                then start <exe> again. Started DETACHED by the
-                                plug-in just before it quits, so the restart
-                                happens once the old instance is really gone.
 
     The interactive stable/dev modes are the manual, run-from-a-terminal fallback
     and prompt on the console.
@@ -41,7 +37,6 @@
       powershell -ExecutionPolicy Bypass -File vw-update.ps1 q-stable                 # (used by the plug-in)
       powershell -ExecutionPolicy Bypass -File vw-update.ps1 q-dev                    # (used by the plug-in)
       powershell -ExecutionPolicy Bypass -File vw-update.ps1 do-install <url> <name>  # (used by the plug-in)
-      powershell -ExecutionPolicy Bypass -File vw-update.ps1 relaunch <pid> <exe>     # (used by the plug-in)
 
     Requirements: Windows PowerShell 5.1+ (ships with Windows) or PowerShell 7.
     Uses only built-in cmdlets (Invoke-RestMethod / Invoke-WebRequest /
@@ -204,41 +199,6 @@ function Invoke-QDev {
     }
 }
 
-# relaunch <pid> <exe>: wait for the running Vectorworks (process <pid>) to exit,
-# then start <exe> again. Prints "ok" or "error=<message>".
-#
-# The plug-in starts this DETACHED right before it asks Vectorworks to quit, so
-# it outlives the process it waits for. Restarting from the outside — after the
-# old instance is really gone — is what makes it work; Vectorworks' own restart
-# flag (the bRestart parameter of CloseAllFilesAndQuitVectorworks) brings the new
-# instance up while the old one is still quitting and it fails to load its
-# support files. The two env knobs exist for the unit tests; the defaults ship.
-function Invoke-Relaunch([string] $ProcessIdText, [string] $ExePath) {
-    if (-not $ProcessIdText -or -not $ExePath) { Write-Output 'error=引数が不足しています。'; return }
-
-    $targetId = 0
-    if (-not [int]::TryParse($ProcessIdText, [ref] $targetId)) {
-        Write-Output 'error=プロセス ID が不正です。'; return
-    }
-
-    $timeout = if ($env:VW_RELAUNCH_TIMEOUT) { [int] $env:VW_RELAUNCH_TIMEOUT } else { 300 }
-    $delay = if ($env:VW_RELAUNCH_DELAY) { [int] $env:VW_RELAUNCH_DELAY } else { 2 }
-
-    if (Get-Process -Id $targetId -ErrorAction SilentlyContinue) {
-        try { Wait-Process -Id $targetId -Timeout $timeout -ErrorAction Stop } catch { }
-        # Still alive: the user cancelled the save prompt (or the quit hung), so
-        # do NOT relaunch an application they are still using.
-        if (Get-Process -Id $targetId -ErrorAction SilentlyContinue) {
-            Write-Output 'error=Vectorworks が終了しなかったため、起動し直しませんでした。'; return
-        }
-    }
-
-    if ($delay -gt 0) { Start-Sleep -Seconds $delay }
-    try { Start-Process -FilePath $ExePath }
-    catch { Write-Output "error=Vectorworks を起動し直せませんでした: $ExePath"; return }
-    Write-Output 'ok'
-}
-
 function Invoke-DoInstall([string] $url, [string] $name) {
     if (Install-Build $url $name) {
         Write-Output 'ok'
@@ -330,7 +290,6 @@ if ($MyInvocation.InvocationName -ne '.') {
         'q-stable'   { Invoke-QStable }
         'q-dev'      { Invoke-QDev }
         'do-install' { Invoke-DoInstall ([string] $args[1]) ([string] $args[2]) }
-        'relaunch'   { Invoke-Relaunch ([string] $args[1]) ([string] $args[2]) }
         'stable'     { Invoke-Stable }
         'dev'        { Invoke-Dev }
         '' {
@@ -343,6 +302,6 @@ if ($MyInvocation.InvocationName -ne '.') {
                 default { Write-Host 'キャンセルしました。' }
             }
         }
-        default { Write-Output "error=不明なチャンネル: '$mode'（stable / dev / q-stable / q-dev / do-install / relaunch）。" }
+        default { Write-Output "error=不明なチャンネル: '$mode'（stable / dev / q-stable / q-dev / do-install）。" }
     }
 }

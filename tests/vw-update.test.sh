@@ -330,45 +330,6 @@ out="$(RUN do_install "" "")"
 check_contains "$out" "error=" "empty args -> error= line"
 
 # ===========================================================================
-# relaunch — wait for the Vectorworks process to exit, then open the app again.
-# This is what actually restarts Vectorworks after an update (the SDK's own
-# bRestart flag brings the new instance up too early and it dies on its support
-# files), so the two properties that matter are tested here: it waits for the
-# process to really be gone, and it does NOT relaunch an application the user is
-# still using. `open` is macOS-only, so it is stubbed with a recorder — the same
-# treatment curl/plutil get above.
-# ===========================================================================
-OPEN_LOG="$WORK/open.log"
-: >"$OPEN_LOG"
-open() { echo "$*" >>"$OPEN_LOG"; } # stands in for macOS `open`
-
-t "relaunch rejects missing arguments"
-out="$(RUN relaunch "" "")"
-check_contains "$out" "error=" "empty args -> error= line"
-check_eq "$(wc -l <"$OPEN_LOG" | tr -d ' ')" "0" "nothing was launched"
-
-t "relaunch waits for the process to exit, then opens the app"
-: >"$OPEN_LOG"
-sleep 1 &
-victim=$!
-out="$(VW_RELAUNCH_DELAY=0 VW_RELAUNCH_TIMEOUT=30 RUN relaunch "$victim" "/Applications/VW.app")"
-check_eq "$out" "ok" "relaunch prints ok"
-check_contains "$(cat "$OPEN_LOG")" "-a /Applications/VW.app" "opened the app bundle"
-# The wait really waited: the process is gone by the time we get here.
-if kill -0 "$victim" 2>/dev/null; then gone=no; else gone=yes; fi
-check_eq "$gone" "yes" "returned only after the process exited"
-
-t "relaunch gives up (and launches nothing) if Vectorworks keeps running"
-: >"$OPEN_LOG"
-sleep 30 &
-survivor=$!
-out="$(VW_RELAUNCH_DELAY=0 VW_RELAUNCH_TIMEOUT=1 RUN relaunch "$survivor" "/Applications/VW.app")"
-check_contains "$out" "error=" "still running -> error= line"
-check_eq "$(wc -l <"$OPEN_LOG" | tr -d ' ')" "0" "did not relaunch an app still in use"
-kill "$survivor" 2>/dev/null || true
-wait "$survivor" 2>/dev/null || true
-
-# ===========================================================================
 echo "---------------------------------------------------------------"
 if [ "$TESTS_FAILED" -eq 0 ]; then
 	echo "PASS: all ${TESTS_RUN} checks passed."

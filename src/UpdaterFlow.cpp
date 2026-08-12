@@ -54,8 +54,12 @@ namespace HomeskzIfcImport
 			std::string advice = detail;
 			if (!advice.empty())
 				advice += "\n\n";
+			// The restart is requested from outside and arrives once Vectorworks
+			// has finished starting up (see IUpdaterHost::Restart), so say that —
+			// otherwise pressing 再起動 looks like it did nothing for a moment.
 			advice += "反映するには Vectorworks の再起動が必要です。\n"
-					  "今すぐ再起動しますか？（開いているファイルは保存を確認します）";
+					  "今すぐ再起動しますか？（起動の完了後に終了し、自動で起動し直します。\n"
+					  "開いているファイルは保存を確認します）";
 
 			if (!host.Ask(text, advice, "再起動", "後で"))
 				return;
