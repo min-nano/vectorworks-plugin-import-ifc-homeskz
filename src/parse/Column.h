@@ -64,8 +64,12 @@ namespace HomeskzIfcImport::parse
 	// 構造材ツールの構造用途（StructuralUse）値。VW の構造用途プルダウンの並び順に
 	// 対応する（<自動>, 梁="1", 桁, 根太, 柱="4", 小屋束="5", …）。Python 版
 	// STRUCTURAL_USE_COLUMN / STRUCTURAL_USE_KOYAZUKA と同値。
-	inline constexpr const char* kStructuralUseColumn = "4";   // 柱（管柱・通し柱）
-	inline constexpr const char* kStructuralUseKoyazuka = "5"; // 小屋束
+	//
+	// **実体は core/Document.h**（記号 PIO も同じ値で柱／小屋束を見分けるため、両フェーズが
+	// 見てよい唯一の置き場に定義がある）。ここは解析側の読みやすい別名で、レベル種別名
+	// （kLevelFL 等）を parse/Story.h が再公開しているのと同じ形。
+	inline constexpr const char* kStructuralUseColumn = core::kStructuralUseColumn;
+	inline constexpr const char* kStructuralUseKoyazuka = core::kStructuralUseKoyazuka;
 
 	// IfcColumn.ObjectType から得る柱種別名（構造材 ID の表記に使う）。ホームズ君 IFC の
 	// ObjectType は未設定（管柱）または "STANDCOLUMN"（小屋束）で、未知の値は既定＝管柱。

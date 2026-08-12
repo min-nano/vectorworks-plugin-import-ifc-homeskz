@@ -48,6 +48,23 @@
 
 namespace HomeskzIfcImport::draw
 {
+	// 構造材ツールのフィールド名のうち、**描いた構造材を後から読む側とも共有する**もの。
+	// 記号 PIO（Extensions/ExtColumnMark）は対象レイヤの構造材を走査し、構造用途で柱／
+	// 小屋束を見分け、断面寸法から記号の大きさを決める——つまり**ここで書いた名前で
+	// 読み直す**ので、書き手と読み手が同じ定義を見る必要がある（CLAUDE.md「構造材ツールの
+	// フィールド名・値・生成手順は draw/StructuralMember」）。残りのフィールド名は書き手
+	// しか使わないので .cpp のまま。
+	inline constexpr const char* kFieldStructuralUse = "StructuralUse"; // 構造用途
+	inline constexpr const char* kFieldMajorBreadth = "MajorBreadth";	// 断面幅
+	inline constexpr const char* kFieldMajorDepth = "MajorDepth";		// 断面せい
+
+	// universal 名で引けなかったときに使う OIP のローカライズ名（DrawUtil の
+	// ResolveParamName へ渡す第 2 候補）。**書きも読みも同じ解決を通す**必要がある——
+	// 日本語環境では universal 名で引けないことがあり、書き手だけがローカライズ名へ
+	// 落ちると、読み手は同じ値を見つけられない。
+	inline constexpr const char* kLocalizedBreadth = "幅";
+	inline constexpr const char* kLocalizedDepth = "せい";
+
 	// 断面基準点（PIO の AxisAlign）。パスが断面のどこを通るかを決めるので、**呼び出し側が
 	// 渡す断面矩形の置き方と必ず一致させる**（天端中央なら原点が上辺中央、中央なら原点が
 	// 断面中心）。値は構造材ツールのポップアップのキー（DrawStructuralMember 内で変換）。

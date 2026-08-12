@@ -55,22 +55,19 @@ namespace HomeskzIfcImport::draw
 		// 構造材ツールのフィールド名（Python 版 vw/member.py・vw/column.py の SetRField と
 		// 同じ universal 名）。**名前が 1 つ違うだけで setter は黙って無視される**（M6 の
 		// 垂木で実証済み。draw/Rafter.cpp 冒頭）ので、寸法は読み戻して確かめる。
+		// 記号 PIO も読む 3 つ（kFieldStructuralUse / kFieldMajorBreadth / kFieldMajorDepth）と
+		// そのローカライズ名は draw/StructuralMember.h にある。ここは書き手だけが使う残り。
 		constexpr const char* kFieldMemberID = "MemberID";			   // 構造材 ID
 		constexpr const char* kFieldProfileShape = "ProfileShape";	   // 断面形状
-		constexpr const char* kFieldMajorBreadth = "MajorBreadth";	   // 断面幅
-		constexpr const char* kFieldMajorDepth = "MajorDepth";		   // 断面せい
 		constexpr const char* kFieldB = "B";						   // 幅（矩形断面）
 		constexpr const char* kFieldD = "D";						   // せい（矩形断面）
 		constexpr const char* kFieldMemberType = "MemberType";		   // 部材種別
-		constexpr const char* kFieldStructuralUse = "StructuralUse";   // 構造用途
 		constexpr const char* kFieldAxisAlign = "AxisAlign";		   // 軸の配置基準
 		constexpr const char* kFieldStartCondition = "StartCondition"; // 始端の端部条件
 		constexpr const char* kFieldEndCondition = "EndCondition";	   // 終端の端部条件
 		constexpr const char* kFieldProfileSeries = "ProfileSeries";   // 断面シリーズ
 
 		// universal 名で引けなかったときに使う OIP のローカライズ名（ResolveParamName）。
-		constexpr const char* kLocalizedBreadth = "幅";
-		constexpr const char* kLocalizedDepth = "せい";
 		constexpr const char* kLocalizedProfileShape = "断面形状";
 
 		// フィールドに渡す値（Python 版と同じ。ポップアップはキーで保持されるため数値文字列）。

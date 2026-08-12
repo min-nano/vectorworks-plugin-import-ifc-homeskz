@@ -63,6 +63,18 @@ namespace HomeskzIfcImport::core
 	inline constexpr const char* kLevelFoundationTop = "基礎天端";
 	inline constexpr const char* kLevelFloorPost = "床束";
 
+	// 構造用途（構造材ツールのポップアップのキー）。**命令セットの語彙なのでここが唯一の
+	// 定義**で、ColumnCommand::structuralUse に入る値がこれになる。parse/Column.h は
+	// 読みやすい名前で再公開するだけ（レベル種別名と同じ扱い）。
+	//
+	// core が持つ理由: 記号 PIO（Extensions/ExtColumnMark）は、対象レイヤの構造材を
+	// **この値で**柱／小屋束に見分ける。PIO は SDK 側のコードなので parse/ を include
+	// できず（依存の向き）、かつては "4" / "5" を自前で書き写していた——parse 側で値を
+	// 変えると記号が黙って何も描かなくなる形だった。両フェーズが見てよい唯一の置き場が
+	// ここ（CLAUDE.md「両者をつなぐのは core/Document.h だけ」）。
+	inline constexpr const char* kStructuralUseColumn = "4";   // 柱（管柱・通し柱）
+	inline constexpr const char* kStructuralUseKoyazuka = "5"; // 小屋束
+
 	// 通り芯（グリッド）1 本の描画命令。Python 版 document.py の GridCommand（dict）に
 	// 対応する。draw/Grid がこれを GridAxis オブジェクトへ変換する（ROADMAP.md M1）。
 	//
