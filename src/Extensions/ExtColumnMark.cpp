@@ -255,6 +255,14 @@ namespace HomeskzIfcImport
 			if (layer == nil)
 				return kObjectEventNoErr; // レイヤが無い＝その階が生成されていない
 
+			// **PIO のジオメトリは PIO 自身のローカル座標で持たれる。** 柱はワールド座標で
+			// 見つかるので、描く前に必ずローカルへ落とす。これをしないと PIO を動かした量
+			// だけ記号がまるごとずれ、しかもリセットしても同じ相対位置に描き直すので直らない
+			// （実機で確認。ResetOnMove を立てただけでは解決しない）。InversePointTransform
+			// は回転も含めて戻すので、PIO を回しても記号は柱の上に残る。
+			VWTransformMatrix toWorld;
+			self.GetObjectToWorldTransform(toWorld);
+
 			for (MCObjectHandle h = gSDK->FirstMemberObj(layer); h != nil; h = gSDK->NextObject(h))
 			{
 				// クラスで絞る指定があれば、それ以外は飛ばす（空＝全クラス）。
@@ -272,12 +280,14 @@ namespace HomeskzIfcImport
 					continue;
 
 				// 位置は柱のバウンディングボックスの中心（鉛直材なので平面の中心＝柱心）。
+				// 求まるのはワールド座標なので、PIO のローカルへ落としてから描く（上記）。
 				WorldRect bounds;
 				gSDK->GetObjectBounds(h, bounds);
-				const WorldPt centre((bounds.left + bounds.right) / 2.0,
-									 (bounds.top + bounds.bottom) / 2.0);
+				const VWPoint2D centre = toWorld.InversePointTransform(VWPoint2D(
+					(bounds.left + bounds.right) / 2.0, (bounds.top + bounds.bottom) / 2.0));
 
-				DrawMark(this->fhObject, plan, symbol, koyazuka, centre, width, depth);
+				DrawMark(this->fhObject, plan, symbol, koyazuka, WorldPt(centre.x, centre.y), width,
+						 depth);
 			}
 		}
 		catch (...)

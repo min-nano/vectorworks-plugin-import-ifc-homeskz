@@ -37,7 +37,7 @@ namespace HomeskzIfcImport::draw
 		// 記号 1 つを置く。PIO を作ってパラメータを書き、リセットまでできたら true。
 		bool PlaceOne(const core::ColumnMarkCommand& mark)
 		{
-			// 挿入点は原点でよい（記号は検索した柱のワールド位置に描かれる）。第 4 引数
+			// 挿入点は原点でよい（記号は検索した柱の位置に描かれる）。第 4 引数
 			// bInsert=true でアクティブレイヤへ入れる。
 			const MCObjectHandle object =
 				gSDK->CreateCustomObject(TXString(kColumnMarkUniversalName),
@@ -77,6 +77,17 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		std::size_t missingLayers = 0;
 		std::size_t failed = 0;
+
+		// **記号を 1 つも作る前に、PIO の定義を「設定ダイアログを出さない」で作っておく。**
+		//
+		// CreateCustomObject は、その名前の PIO が文書にまだ定義されていなければ
+		// DefineCustomObject で定義を作る。その既定が `kCustomObjectPrefAlways` なので、
+		// **最初の 1 個を作るときだけ「オブジェクトの設定」ダイアログが出て、インポートが
+		// そこで止まる**（実機で確認。2 個目以降は定義済みなので出ない）。PIO 側の
+		// OnInitXProperties は定義が作られる過程で走るため、この 1 回目には間に合わない。
+		// ここで先に定義してしまえば、CreateCustomObject は既存の定義を使うので出ない。
+		if (!document.columnMarks.empty())
+			gSDK->DefineCustomObject(TXString(kColumnMarkUniversalName), kCustomObjectPrefNever);
 
 		for (const core::ColumnMarkCommand& mark : document.columnMarks)
 		{
