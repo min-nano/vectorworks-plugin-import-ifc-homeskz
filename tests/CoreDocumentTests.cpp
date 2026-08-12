@@ -1122,15 +1122,31 @@ TEST(document_class_names_collects_every_command_list)
 	slab.drawClass = "04構造-01基礎-02基礎スラブ";
 	document.slabs.push_back(slab);
 
+	// 断面記号・伏図記号（M12）。**この 2 つを漏らすと記号だけが伏図で消える**——記号は
+	// 構造材とは別のクラス（極細実線・記号クラス）に載るので、他の要素が表示に戻っても
+	// 巻き添えで救われない。
+	core::ColumnSectionMarkCommand sectionMark;
+	sectionMark.layer = "1to2-柱";
+	sectionMark.drawClass = "01作図-01線-02実線-01極細線";
+	sectionMark.segments = {core::MarkSegment{core::Vec2{-52.5, -52.5}, core::Vec2{52.5, 52.5}}};
+	document.columnSectionMarks.push_back(sectionMark);
+
+	core::ColumnPlanMarkCommand planMark;
+	planMark.layer = "2-柱伏図記号";
+	planMark.styleName = "柱伏図記号";
+	planMark.drawClass = "01作図-04記号-04構造-一般";
+	document.columnPlanMarks.push_back(planMark);
+
 	const std::vector<std::string> names = core::documentClassNames(document);
-	// 8 つの命令リストすべてから 1 つずつ拾い、昇順で並ぶ。
-	CHECK_EQ(names.size(), static_cast<std::size_t>(8));
+	// 10 の命令リストすべてから 1 つずつ拾い、昇順で並ぶ。
+	CHECK_EQ(names.size(), static_cast<std::size_t>(10));
 	CHECK(std::ranges::is_sorted(names));
 	for (const char* const expected :
-		 {"01作図-01線-01基準線-01通り芯-X通り", "04構造-01基礎-02基礎スラブ",
-		  "04構造-01基礎-03立ち上がり", "04構造-02木造-01土台-01土台",
-		  "04構造-02木造-03軸組-01管柱", "04構造-02木造-05小屋組-05垂木",
-		  "04構造-02木造-06耐力面材-02床", "04構造-02木造-06耐力面材-03屋根"})
+		 {"01作図-01線-01基準線-01通り芯-X通り", "01作図-01線-02実線-01極細線",
+		  "01作図-04記号-04構造-一般", "04構造-01基礎-02基礎スラブ", "04構造-01基礎-03立ち上がり",
+		  "04構造-02木造-01土台-01土台", "04構造-02木造-03軸組-01管柱",
+		  "04構造-02木造-05小屋組-05垂木", "04構造-02木造-06耐力面材-02床",
+		  "04構造-02木造-06耐力面材-03屋根"})
 		CHECK(std::ranges::find(names, expected) != names.end());
 }
 
