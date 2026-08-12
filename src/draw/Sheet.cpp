@@ -24,10 +24,6 @@
 //	                                                  … 図形が使うクラスの数え上げ（下記）
 //	  * gSDK->ClassNameToID(name)                     … クラス名 → InternalIndex
 //	  * gSDK->SetViewportClassVisibility(vp, idx, 0)  … クラス表示（既定は非表示。下記）
-//	  * gSDK->GetObjectInternalIndex(layer)           … 重ね順上書きが要る InternalIndex
-//	  * gSDK->SetViewportLayerStackingOverride(vp, idx, pos) /
-//	    gSDK->GetNumViewportLayerStackingOverrides(vp)
-//	                                                  … per-viewport のレイヤ重ね順上書きと確認
 //	  * VWViewportObj(vp).SetScale(scale)             … ビューポート縮尺（オブジェクト変数 1003）
 //	  * VWViewportObj(vp).SetDescription(title)       … 図面タイトル（同 1032・Dwg Title）
 //	  * VWViewportObj(vp).SetLocator(number)          … 図番（同 1033・Item）
@@ -44,9 +40,12 @@
 //	PIO / シンボルの中まで辿る）表示に戻す。クラスで絞る伏図はまだ無い（命令に
 //	hidden_classes を持たせていない。core/Document.h の ViewportCommand 参照）。
 //
-//	【重ね順は per-viewport 上書き】希望順（core::desiredStoryLayerOrder）を前面→背面の
-//	並びとして各ビューポートへ与える（draw/Sheet.h の設計メモ参照）。デザインレイヤ自体の
-//	並びには触らない。
+//	【重ね順はここでは扱わない】床・野地板が柱・梁を覆わないようにする件は、**ドキュメントの
+//	デザインレイヤの並べ替え**（draw/Story の reorderStoryLayers）が担う。per-viewport の
+//	上書き（SetViewportLayerStackingOverride）は実機で効かなかった——呼び出しは true を
+//	返すのに GetNumViewportLayerStackingOverrides は 0 のままで、OIP も「順序を上書き:
+//	いいえ」だった——ので捨てた。**並べ替えはビューポート生成より前**に済ませる必要がある
+//	（生成時の重ね順で描かれるため。draw/ExecuteDocument の実行順）。
 //
 
 #include "PluginPrefix.h"
@@ -226,39 +225,6 @@ namespace HomeskzIfcImport::draw
 			return applied;
 		}
 
-		// レイヤの重ね順をこのビューポートだけで上書きする（M3 の【決定】の実装箇所。
-		// draw/Sheet.h 参照）。**設定できた数**を返す（0 なら上書きが効いていない＝診断へ）。
-		//
-		// order は前面→背面の希望順で、**そのビューポートが表示するレイヤだけ**へ 0 から
-		// 詰めた位置を与える。非表示のレイヤまで並べても意味が無いうえ、VW 側が受け付けない
-		// 可能性がある（重ね順はビューポートに映るレイヤの間の話）。希望順に無いレイヤ
-		// （ユーザーが別途作ったもの）は触らず既定の重ね順のまま残す。
-		//
-		// ［1 回目の修正で外したこと］以前は先に `CreateViewportLayerOverride` を呼んでいたが、
-		// これは**別系統**（SViewportLayerOverride＝レイヤの描画属性の上書き）で、重ね順とは
-		// 関係が無い（重ね順は Get/Set/RemoveViewportLayerStackingOverride の 3 つだけで、
-		// Create に当たるものは無い）。
-		std::size_t ApplyLayerStacking(MCObjectHandle viewport,
-									   const std::vector<std::string>& order,
-									   const std::vector<std::string>& shown)
-		{
-			std::size_t applied = 0;
-			Sint32 position = 0;
-			for (const std::string& name : order)
-			{
-				if (std::ranges::find(shown, name) == shown.end())
-					continue;
-				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
-				if (layer == nil)
-					continue;
-				const InternalIndex index = gSDK->GetObjectInternalIndex(layer);
-				if (gSDK->SetViewportLayerStackingOverride(viewport, index, position))
-					++applied;
-				++position;
-			}
-			return applied;
-		}
-
 		// 表示するデザインレイヤの縮尺を返す（Python 版 configure_viewport_scale）。伏図が映す
 		// レイヤの縮尺は揃っているので、最初に取れたものを採る。取れなければ 0（＝ビューポートの
 		// 既定縮尺のままにする）。
@@ -315,11 +281,8 @@ namespace HomeskzIfcImport::draw
 		if (commands.empty())
 			return 0;
 
-		// レイヤの走査と希望スタック順は全シートで共通なので 1 回だけ求める。希望順の計算は
-		// SDK 非依存（core::desiredStoryLayerOrder。無 SDK テスト済み）で、**伏図記号レイヤ
-		// 等のストーリ非依存レイヤ（topLayers）は M12 が着地したら渡す**。
+		// レイヤの走査は全シートで共通なので 1 回だけ行う。
 		const std::vector<MCObjectHandle> allLayers = AllLayers();
-		const std::vector<std::string> stacking = core::desiredStoryLayerOrder(document.stories);
 		// 表示に戻すクラス（全ビューポートで同じ）。**図形が使っているクラス**（走査で数え
 		// 上げ。通り芯ラベルのように PIO の中でスタイルが決めるクラスもここで拾う）に、
 		// **命令セットが名乗るクラス**（core::documentClassNames。まだ図形が無いクラスや、
@@ -339,12 +302,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		std::size_t missingSheetLayers = 0;
 		std::size_t missingViewports = 0;
-		// 重ね順の上書きは**効いたかどうかを図面から読み戻せる**ので、設定できた数と VW が
-		// 実際に持っている数の両方を数えて診断に出す（ローカル確認で「順序を上書き: いいえ」
-		// のままだったため、次の確認で切り分けられるようにする）。
-		std::size_t stackingApplied = 0;
-		std::size_t stackingRecorded = 0;
-		// クラス表示も同じく「設定できた数」を数える（0 なら図形が 1 つも映らない）。
+		// クラス表示は「設定できた数」を数える（0 なら図形が 1 つも映らない）。
 		std::size_t classesApplied = 0;
 
 		for (const core::SheetCommand& command : commands)
@@ -373,8 +331,6 @@ namespace HomeskzIfcImport::draw
 
 			ConfigureViewportLayers(viewport, sheetLayer, allLayers, command.viewport);
 			classesApplied += ConfigureViewportClasses(viewport, classes);
-			stackingApplied += ApplyLayerStacking(viewport, stacking, command.viewport.layers);
-			stackingRecorded += gSDK->GetNumViewportLayerStackingOverrides(viewport);
 			// **縮尺は表示レイヤを絞った後に読む**（映すレイヤの縮尺に合わせるため）。
 			FinishViewport(viewport, command.viewport, LayerScaleFor(command.viewport));
 			++drawn;
@@ -384,13 +340,9 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetCurrentLayer(previousLayer);
 
 		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 枚」のときに、シートレイヤを
-		// 作れないのか、ビューポートを作れないのかを切り分けられる。**重ね順は図面から
-		// 読み戻せる**ので、1 件も記録されていなければそれも出す（床・野地板が柱・梁を覆う
-		// 見え方になる原因が、命令ではなく VW 側の受け付けだと分かる）。
-		const bool stackingBroken = drawn > 0 && stackingRecorded == 0;
+		// 作れないのか、ビューポートを作れないのかを切り分けられる。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
-		if (note != nullptr &&
-			(missingSheetLayers > 0 || missingViewports > 0 || stackingBroken || classesBroken))
+		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken))
 		{
 			std::string text = "伏図の診断: ";
 			if (missingSheetLayers > 0)
@@ -402,9 +354,6 @@ namespace HomeskzIfcImport::draw
 			if (classesBroken)
 				text += "クラスを表示に戻せませんでした（対象 " + std::to_string(classes.size()) +
 						" クラス）。図形が映りません。";
-			if (stackingBroken)
-				text += "レイヤの重ね順を上書きできませんでした（設定 " +
-						std::to_string(stackingApplied) + " 件・図面に記録 0 件）。";
 			*note = std::move(text);
 		}
 		return drawn;

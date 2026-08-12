@@ -41,4 +41,25 @@ namespace HomeskzIfcImport::draw
 	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
 	// 決める）。描けたところまでは図面に残る。
 	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress);
+
+	// デザインレイヤのスタック順を希望順（core::desiredStoryLayerOrder）へ並べ替える
+	// （Python 版 vw/story.py の reorder_story_layers に対応）。動かせたレイヤ数を返す。
+	//
+	// 【なぜ要るか】伏図ビューポートは**ドキュメントのレイヤ重ね順で描かれる**ので、
+	// 床（"n-FL"）・野地板が柱・梁より前面にあると覆い隠してしまう。希望順は
+	// 「共通（通り芯）を最前面 → 最上階→最下階 → 床・野地板は最背面」で、計算そのものは
+	// SDK 非依存の core::desiredStoryLayerOrder が持つ（無 SDK テスト済み）。
+	//
+	// 【ヘッダ冒頭の「M3 の【決定】」を差し替える】M3 では「ISDK にデザインレイヤの重ね順を
+	// 変える呼び出しが無い」と判断して per-viewport の上書き
+	// （SetViewportLayerStackingOverride）に委ねたが、**実機で per-viewport 上書きは効かず**
+	// （呼び出しは true を返すのに GetNumViewportLayerStackingOverrides は 0 のまま・OIP も
+	// 「順序を上書き: いいえ」）、一方で **ISDK には InsertObjectAfter / InsertObjectBefore が
+	// あり、レイヤは図面のオブジェクト列に並んでいる**（VW の HMoveForward 相当がこの名前で
+	// 存在する）。したがって Python 版と同じ「ドキュメントの重ね順を並べ替える」方式に戻す。
+	//
+	// **伏図より前に呼ぶこと。** ビューポートは生成時の重ね順で描かれるので、並べ替えを
+	// 後にすると既存のビューポートへ反映されない（Python 版が「手動更新が要る」と諦めていた
+	// 現象そのもの）。draw/ExecuteDocument は全要素の描画後・drawSheets の直前に呼ぶ。
+	std::size_t reorderStoryLayers(const core::Document& document);
 } // namespace HomeskzIfcImport::draw

@@ -26,10 +26,11 @@
 //	CreateStory の suffix を末尾に付けた名前でレイヤを作る（例 "1-FL-1"）ため、GetLayerForStory
 //	で取り直して SetObjectName で意図した名前（"1-FL"）へ直す。
 //
-//	レイヤのスタック順の並べ替えは行わない（ヘッダ参照: VW 2026 ISDK にデザインレイヤの
-//	重ね順変更呼び出しが無く、目的である伏図ビューポートの重ね順制御は per-viewport の
-//	SetViewportLayerStackingOverride を使う M13 へ委ねる。希望順の計算は
-//	core::desiredStoryLayerOrder に用意済み）。
+//	レイヤのスタック順の並べ替え（reorderStoryLayers）もここに置く。**ISDK の
+//	InsertObjectAfter / InsertObjectBefore** で図面のオブジェクト列（＝レイヤの並び）を
+//	組み替える——M3 では「重ね順を変える呼び出しが無い」と見て per-viewport 上書きへ
+//	委ねたが、実機でそちらは効かず、この 2 つが VS の HMoveForward 相当だと分かった
+//	（ヘッダの reorderStoryLayers 参照）。
 //
 //	実描画（ストーリ高さ・レベルのバインド・単位）はローカルの VectorWorks で目視確認する
 //	（ROADMAP.md M3「ローカル確認」）。
@@ -78,6 +79,33 @@ namespace HomeskzIfcImport::draw
 				gSDK->SetObjectName(layer, TXString(desiredLayerName.c_str()));
 		}
 	} // namespace
+
+	std::size_t reorderStoryLayers(const core::Document& document)
+	{
+		// 希望順は**前面→背面**（"共通" が先頭＝最前面。core::desiredStoryLayerOrder）。
+		const std::vector<std::string> desired = core::desiredStoryLayerOrder(document.stories);
+
+		// 図面のオブジェクト列は**背面→前面**（先頭が最背面で、NextObject が前面へ向かう。
+		// Python 版が FLayer→NextLayer を「下→上」と呼んでいるのと同じ並び）。したがって
+		// 希望順を**逆から**辿り、直前に置いたレイヤの「後ろ」へ次を挿していくと、列全体が
+		// 希望どおりの重ね順になる。
+		//
+		// 希望順に出てこないレイヤ（ユーザーが別途作ったもの・まだ生成されていないもの）は
+		// 触らない。GetNamedLayer が nil を返すレイヤは黙って飛ばす（要素の描画がスキップ
+		// されてレイヤが無い場合など）。
+		std::size_t moved = 0;
+		MCObjectHandle previous = nil;
+		for (auto name = desired.rbegin(); name != desired.rend(); ++name)
+		{
+			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name->c_str()));
+			if (layer == nil)
+				continue;
+			if (previous != nil && gSDK->InsertObjectAfter(layer, previous))
+				++moved;
+			previous = layer;
+		}
+		return moved;
+	}
 
 	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress)
 	{

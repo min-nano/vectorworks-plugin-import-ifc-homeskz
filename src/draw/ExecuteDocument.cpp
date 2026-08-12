@@ -161,9 +161,23 @@ namespace HomeskzIfcImport::draw
 		drawSymbolPhase("火打を配置しています…", "火打", document.fireBraces, counts.fireBraces);
 		drawSymbolPhase("仕口を配置しています…", "仕口", document.joints, counts.joints);
 
+		// M3 の【決定】の実装箇所（M13 で確定）: **デザインレイヤのスタック順を希望順へ
+		// 並べ替える**。伏図ビューポートはドキュメントの重ね順で描かれるので、床・野地板が
+		// 柱・梁を覆わないようにするにはここで並べ替えるしかない（per-viewport の重ね順
+		// 上書きは実機で効かなかった。draw/Story.h の reorderStoryLayers）。**必ず伏図より
+		// 前**に行う——ビューポートは生成時の重ね順で描かれるため。
+		if (!progress.cancelled())
+		{
+			// 並べ替えは図面から効いたか分かる（動かせたレイヤ数）。0 件なら伏図で床・野地板が
+			// 柱・梁を覆うので、原因の切り分け材料として診断行に出す。
+			const std::size_t reordered = reorderStoryLayers(document);
+			if (reordered == 0 && !document.stories.empty())
+				addDiagnostics("レイヤの重ね順を並べ替えられませんでした（0 件）。");
+		}
+
 		// M13 シート（伏図）。**必ず最後**に置く: ビューポートはデザインレイヤ（＝ここまでに
 		// 描いたモデル）を映すので、全要素の描画が済んでいないと空の図になる。表示レイヤの
-		// 絞り込みと重ね順の上書きも、対象のレイヤが揃っていて初めて効く（draw/Sheet.h）。
+		// 絞り込みも、対象のレイヤが揃っていて初めて効く（draw/Sheet.h）。
 		if (beginPhase("伏図を作成しています…", document.sheets.size()))
 		{
 			std::string note;
@@ -173,11 +187,6 @@ namespace HomeskzIfcImport::draw
 
 		// 途中で中止されたか（件数が命令数に届かないのが正常になる）。
 		counts.cancelled = progress.cancelled();
-
-		// デザインレイヤ自体のスタック順は最後まで触らない（draw/Story.h 参照: VW 2026 ISDK に
-		// 重ね順変更の呼び出しが無い）。目的だった「伏図で床・野地板が柱・梁を覆い隠さない」は
-		// **上の drawSheets が per-viewport の重ね順上書きで満たす**（core::desiredStoryLayerOrder
-		// の希望順をビューポートごとに与える。draw/Sheet.h）。
 
 		return counts;
 	}
