@@ -10,11 +10,13 @@
 
 #include "PluginPrefix.h"
 #include "draw/DrawUtil.h"
+#include "draw/ObjectHandles.h"
 
 #include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
 #include <array>
+#include <memory>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -287,4 +289,11 @@ namespace HomeskzIfcImport::draw
 		gSDK->SetCurrentLayer(layer);
 		return layer;
 	}
+
+	// 「命令インデックス → ハンドル」の対応表の所有者。**表の中身（MCObjectHandle）は
+	// SDK 型なので、宣言（draw/ObjectHandles.h）と定義（draw/DrawUtil.h）が分かれている**。
+	// 不完全型の unique_ptr を持つので、構築と破棄は定義の見えるこの翻訳単位に置く。
+	ObjectHandles::ObjectHandles() : fTable(std::make_unique<ObjectHandleTable>()) {}
+
+	ObjectHandles::~ObjectHandles() = default;
 } // namespace HomeskzIfcImport::draw

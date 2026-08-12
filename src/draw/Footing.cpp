@@ -50,7 +50,7 @@
 //	**壁結合をすべて実行した後**（JoinWalls が結合した端のキャップを書き換えるため）。
 //
 //	【壁結合の手順（M10）】立上りを描くときに**命令インデックス → 壁ハンドル**の対応表
-//	（WallHandles）を作り、壁結合命令の a / b でその 2 本を引いて JoinWalls へ渡す。SDK
+//	（ObjectHandles）を作り、壁結合命令の a / b でその 2 本を引いて JoinWalls へ渡す。SDK
 //	ハンドルは Document に載せられないので、この対応表が唯一の受け渡し手段になる
 //	（CLAUDE.md「所有権」）。ピック点は解析側が算出済みの「残す側」の点をそのまま渡す
 //	（交点そのものを渡すと VW が残す／詰める側を決められない。core/Document.h 参照）。
@@ -466,18 +466,8 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	// 壁ハンドル表の実体。命令インデックス → 壁ハンドル（draw/Footing.h の WallHandles）。
-	struct WallHandleTable
-	{
-		std::map<std::size_t, MCObjectHandle> handles;
-	};
-
-	WallHandles::WallHandles() : fTable(std::make_unique<WallHandleTable>()) {}
-
-	WallHandles::~WallHandles() = default;
-
 	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress,
-						  WallHandles* handles)
+						  ObjectHandles* handles)
 	{
 		// 命令のスタイル名 → このインポートで作ったスタイルの索引（底盤と同じ作法）。
 		// 同じ壁厚の立上りは 1 つのスタイルを共有する。既存リソースには触れないので、
@@ -522,7 +512,7 @@ namespace HomeskzIfcImport::draw
 	}
 
 	std::size_t drawWallJoins(const core::Document& document, core::ProgressReporter& progress,
-							  const WallHandles& handles, std::string* outNote)
+							  const ObjectHandles& handles, std::string* outNote)
 	{
 		const std::map<std::size_t, MCObjectHandle>& table = handles.table().handles;
 

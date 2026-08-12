@@ -14,6 +14,7 @@
 
 #include "parse/Sheet.h"
 #include "core/Document.h"
+#include "parse/ColumnMark.h"
 #include "parse/Context.h"
 #include "parse/Footing.h"
 #include "parse/Member.h"
@@ -106,6 +107,7 @@ namespace HomeskzIfcImport::parse
 	{
 		const std::vector<StoryInfo> stories = context.stories();
 		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns());
+		const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
 		const bool foundation = hasFoundation(context.model());
 
 		std::vector<core::SheetCommand> commands;
@@ -118,13 +120,16 @@ namespace HomeskzIfcImport::parse
 				storyLayerName(i, isTop, isTop ? kLevelEaves : kLevelBeamTop)};
 
 			// 切断レベル（その階の床レベル + 0.25）を span が含む柱レイヤ。
-			const std::vector<std::string> spanLayers =
-				spanLayersAtCut(spans, static_cast<double>(i) + kFloorPlanCutOffset);
+			const double cut = static_cast<double>(i) + kFloorPlanCutOffset;
+			const std::vector<std::string> spanLayers = spanLayersAtCut(spans, cut);
 			layers.insert(layers.end(), spanLayers.begin(), spanLayers.end());
 
-			// TODO(M13/M12): 切断位置の直下（to < 切断で最大の to）の伏図記号レイヤ
-			// "{to}-柱伏図記号" もここへ足す。レイヤを作るのは M12（parse/ColumnMark）で、
-			// レイヤ名の規約もそちらが持つ（ヘッダ「Python 版との差異」参照）。
+			// 切断位置の**直下**の伏図記号レイヤ（M12）。その伏図が対象とする横架材の下に
+			// ある柱・小屋束を平面記号で示す（例 2 階床伏図＝切断 2.25 → "2-柱伏図記号"＝
+			// 1 階管柱 "1to2-柱" の平面記号）。断面記号（span レイヤ）とは排他になる。
+			if (const std::string markLayer = planMarkLayerBelowCut(markLayers, cut);
+				!markLayer.empty())
+				layers.push_back(markLayer);
 
 			if (!isTop)
 			{
@@ -149,6 +154,7 @@ namespace HomeskzIfcImport::parse
 			return {};
 
 		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns());
+		const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
 		const std::vector<core::MemberCommand>& members = context.members();
 
 		// 番号は 基礎伏図（1）＋各階の柱梁伏図（ストーリ数）の次から。**柱梁伏図は基礎の
@@ -179,12 +185,16 @@ namespace HomeskzIfcImport::parse
 
 			// 切断レベル（その階の床レベル + 0.75）を span が含む柱レイヤ＝屋根を貫いて
 			// 立ち上がる主屋の柱（母屋を支える小屋束はこの切断より低いので載らない）。
-			const std::vector<std::string> spanLayers =
-				spanLayersAtCut(spans, static_cast<double>(i) + kMoyaPlanCutOffset);
+			const double cut = static_cast<double>(i) + kMoyaPlanCutOffset;
+			const std::vector<std::string> spanLayers = spanLayersAtCut(spans, cut);
 			layers.insert(layers.end(), spanLayers.begin(), spanLayers.end());
 
-			// TODO(M13/M12): 柱梁伏図と同じく、切断位置の直下の伏図記号レイヤを足す。
-			// 母屋伏図ではこれが「母屋を支える小屋束の位置」を示す平面記号になる。
+			// 切断位置の直下の伏図記号レイヤ（M12）。母屋伏図ではこれが「母屋を支える
+			// 小屋束の位置」を示す平面記号になる（例 1 階母屋伏図＝切断 2.75 →
+			// "2.5-柱伏図記号"＝下屋小屋束 "2to2.5-柱" の平面記号）。
+			if (const std::string markLayer = planMarkLayerBelowCut(markLayers, cut);
+				!markLayer.empty())
+				layers.push_back(markLayer);
 
 			layers.emplace_back(core::kGridLayer);
 

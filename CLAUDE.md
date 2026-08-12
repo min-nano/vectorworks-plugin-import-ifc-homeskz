@@ -164,6 +164,10 @@ src/
                             台形プリズムを含む。旧 vw/footing.py）
     Symbol.{h,cpp}          シンボル配置（旧 vw/{anchor_bolt,floor_post,fire_brace,joint}.py
                             の 4 本を 1 本に。要素の区別は呼び出し側が持つ）
+    ColumnMark.{h,cpp}      断面記号（直線）・伏図記号（データタグ）（旧 vw/column_mark.py。
+                            カスタム PIO は使わない。ROADMAP.md M12 の【決定】）
+    ObjectHandles.{h,cpp}   「命令インデックス → 描いたオブジェクトのハンドル」の対応表
+                            （壁→壁結合・柱→伏図記号タグが共有。実体は draw/DrawUtil）
     Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）。
                             レイヤの重ね順の per-viewport 上書きはここが唯一の適用箇所
     …                       以降、要素ごとに 1 対 1 で追加
@@ -199,7 +203,10 @@ tests/
 スタイル解決・**構成層／基準面／スタイルの新規作成**——床板・底盤・立上りが共有する）は
 `draw/DrawUtil`、構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
-実装）、**描画側から切り離せる純計算**（レイヤの希望スタック順
+実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・タグスタイル名は
+`parse/ColumnMark`、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`
+（span 柱レイヤと伏図記号レイヤが共有）、「命令インデックス → ハンドル」の対応表は
+`draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`）は `core/Document`、
 進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
 （整形と配分の計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、

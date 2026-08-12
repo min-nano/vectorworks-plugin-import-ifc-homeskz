@@ -19,6 +19,7 @@
 #include "core/Progress.h"
 #include "parse/AnchorBolt.h"
 #include "parse/Column.h"
+#include "parse/ColumnMark.h"
 #include "parse/Context.h"
 #include "parse/FireBrace.h"
 #include "parse/Floor.h"
@@ -139,6 +140,13 @@ namespace HomeskzIfcImport::parse
 		document.fireBraces = buildFireBraceCommands(context);
 		progress.step();
 		document.joints = buildJointCommands(document.members, document.columns);
+		progress.step();
+
+		// M12 断面記号・伏図記号。柱の命令だけから決まる（IFC は見ない）ので columns の
+		// 後ならどこでもよいが、**伏図より前**に置く必要がある——伏図は伏図記号レイヤを
+		// 表示レイヤに載せるため、そのレイヤ名を決める側が先に確定していないといけない。
+		document.columnSectionMarks = buildColumnSectionMarkCommands(document.columns);
+		document.columnPlanMarks = buildColumnPlanMarkCommands(document.columns);
 		progress.step();
 
 		// M13 シート（伏図）: 基礎伏図・各階の柱梁伏図・母屋伏図。**どの伏図に何を映すかは

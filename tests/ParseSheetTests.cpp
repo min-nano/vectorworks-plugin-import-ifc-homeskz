@@ -18,6 +18,7 @@
 
 #include "core/Document.h"
 #include "parse/Column.h"
+#include "parse/ColumnMark.h"
 #include "parse/Context.h"
 #include "parse/Footing.h"
 #include "parse/Loader.h"
@@ -33,6 +34,7 @@
 
 using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::SheetCommand;
+using HomeskzIfcImport::parse::buildColumnCommands;
 using HomeskzIfcImport::parse::buildFloorFramingSheetCommands;
 using HomeskzIfcImport::parse::buildFoundationSheetCommands;
 using HomeskzIfcImport::parse::buildFoundationStoryCommand;
@@ -40,6 +42,7 @@ using HomeskzIfcImport::parse::buildMoyaSheetCommands;
 using HomeskzIfcImport::parse::buildSheetCommands;
 using HomeskzIfcImport::parse::buildStoryCommands;
 using HomeskzIfcImport::parse::collectColumnSpans;
+using HomeskzIfcImport::parse::collectPlanMarkLayers;
 using HomeskzIfcImport::parse::collectStories;
 using HomeskzIfcImport::parse::ColumnSpan;
 using HomeskzIfcImport::parse::Context;
@@ -53,6 +56,7 @@ using HomeskzIfcImport::parse::kLayerFoundationAnchor;
 using HomeskzIfcImport::parse::kMoyaPlanCutOffset;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::moyaPlanTitle;
+using HomeskzIfcImport::parse::PlanMarkLayer;
 using HomeskzIfcImport::parse::spanLayersAtCut;
 using HomeskzIfcImport::parse::storyHasRoofSlab;
 using HomeskzIfcImport::parse::storyLayerName;
@@ -288,8 +292,11 @@ TEST(SheetNumbersAreUniqueAndConsecutive)
 TEST(ViewportLayersExistAmongStoryLayers)
 {
 	// **伏図が映そうとするレイヤは必ず実在する**。ストーリが作るレイヤ名（＋通り芯・
-	// 基礎ストーリの 4 枚）に含まれない名前があれば、レイヤ名の規約がどこかでズレている
-	// （命令はあるのにビューポートが空になる、という形の不具合を防ぐ関門）。
+	// 基礎ストーリの 4 枚・伏図記号レイヤ）に含まれない名前があれば、レイヤ名の規約が
+	// どこかでズレている（命令はあるのにビューポートが空になる、という形の不具合を防ぐ
+	// 関門）。**伏図記号レイヤ（"{to}-柱伏図記号"）はストーリが作らない独立レイヤ**で、
+	// 通り芯 "共通" と同じく描画側（draw/ColumnMark）が用意するので、ここも通り芯と
+	// 同じ扱いで既知の名前に足す（規約を持つ parse/ColumnMark から引く）。
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
@@ -304,6 +311,9 @@ TEST(ViewportLayersExistAmongStoryLayers)
 			for (const core::LevelCommand& level : foundation.levels)
 				known.insert(level.layer);
 		}
+		for (const PlanMarkLayer& layer :
+			 collectPlanMarkLayers(collectColumnSpans(buildColumnCommands(model))))
+			known.insert(layer.layer);
 
 		for (const SheetCommand& sheet : buildSheetCommands(model))
 		{

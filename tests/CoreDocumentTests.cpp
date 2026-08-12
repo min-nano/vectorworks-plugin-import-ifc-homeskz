@@ -1088,6 +1088,113 @@ TEST(build_document_skeleton_returns_valid_empty_document)
 }
 
 // ---------------------------------------------------------------------------
+// 断面記号・伏図記号（M12）の検証
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	core::ColumnSectionMarkCommand validSectionMark()
+	{
+		core::ColumnSectionMarkCommand mark;
+		mark.layer = "1to2-柱";
+		mark.drawClass = "01作図-01線-02実線-01極細線";
+		mark.segments = {core::MarkSegment{core::Vec2{-52.5, -52.5}, core::Vec2{52.5, 52.5}},
+						 core::MarkSegment{core::Vec2{52.5, -52.5}, core::Vec2{-52.5, 52.5}}};
+		return mark;
+	}
+
+	core::ColumnPlanMarkCommand validPlanMark()
+	{
+		core::ColumnPlanMarkCommand mark;
+		mark.layer = "2-柱伏図記号";
+		mark.styleName = "柱伏図記号";
+		mark.drawClass = "01作図-04記号-04構造-一般";
+		mark.columnIndex = 0;
+		mark.position = core::Vec2{0.0, 0.0};
+		return mark;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_column_marks)
+{
+	core::Document document;
+	document.columns.push_back(validColumn());
+	document.columnSectionMarks.push_back(validSectionMark());
+	document.columnPlanMarks.push_back(validPlanMark());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_section_mark_without_layer_or_class)
+{
+	core::Document byLayer;
+	core::ColumnSectionMarkCommand noLayer = validSectionMark();
+	noLayer.layer.clear();
+	byLayer.columnSectionMarks.push_back(noLayer);
+	CHECK(!core::validateDocument(byLayer));
+
+	core::Document byClass;
+	core::ColumnSectionMarkCommand noClass = validSectionMark();
+	noClass.drawClass.clear();
+	byClass.columnSectionMarks.push_back(noClass);
+	CHECK(!core::validateDocument(byClass));
+}
+
+TEST(validate_rejects_section_mark_without_segments)
+{
+	// 線分の無い記号は図面に何も描かない。
+	core::Document document;
+	core::ColumnSectionMarkCommand mark = validSectionMark();
+	mark.segments.clear();
+	document.columnSectionMarks.push_back(mark);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_section_mark_with_degenerate_segment)
+{
+	// 両端が同じ点の線は描かれず選択もできないゴミになるので弾く（退化した断面の柱は
+	// そもそも parse/ColumnMark が記号を作らない）。
+	core::Document document;
+	core::ColumnSectionMarkCommand mark = validSectionMark();
+	mark.segments.push_back(core::MarkSegment{core::Vec2{10.0, 20.0}, core::Vec2{10.0, 20.0}});
+	document.columnSectionMarks.push_back(mark);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_plan_mark_without_layer_style_or_class)
+{
+	for (int which = 0; which < 3; ++which)
+	{
+		core::Document document;
+		document.columns.push_back(validColumn());
+		core::ColumnPlanMarkCommand mark = validPlanMark();
+		if (which == 0)
+			mark.layer.clear();
+		else if (which == 1)
+			mark.styleName.clear();
+		else
+			mark.drawClass.clear();
+		document.columnPlanMarks.push_back(mark);
+		CHECK(!core::validateDocument(document));
+	}
+}
+
+TEST(validate_rejects_plan_mark_pointing_outside_columns)
+{
+	// 関連付け先が columns の範囲外だと、どの柱にも関連付かないタグが図面に残る
+	// （壁結合の a / b と同じ考え方）。柱を 1 本も持たない Document も同じ扱い。
+	core::Document outOfRange;
+	outOfRange.columns.push_back(validColumn());
+	core::ColumnPlanMarkCommand mark = validPlanMark();
+	mark.columnIndex = 1;
+	outOfRange.columnPlanMarks.push_back(mark);
+	CHECK(!core::validateDocument(outOfRange));
+
+	core::Document noColumns;
+	noColumns.columnPlanMarks.push_back(validPlanMark());
+	CHECK(!core::validateDocument(noColumns));
+}
+
+// ---------------------------------------------------------------------------
 // core::Geometry（型が使えることの確認。数式そのものは GeometryTests で検証する）
 // ---------------------------------------------------------------------------
 

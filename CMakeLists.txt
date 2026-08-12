@@ -148,6 +148,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/Footing.cpp
 		src/parse/Member.cpp
 		src/parse/Column.cpp
+		src/parse/ColumnMark.cpp
 		src/parse/Noboribari.cpp
 		src/parse/Footing.cpp
 		src/parse/AnchorBolt.cpp
@@ -287,6 +288,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Footing.cpp
 		src/draw/Member.cpp
 		src/draw/Column.cpp
+		src/draw/ColumnMark.cpp
 		src/draw/Rafter.cpp
 		src/draw/Roof.cpp
 		src/draw/Symbol.cpp

@@ -67,6 +67,13 @@ namespace HomeskzIfcImport::parse
 	// ストーリがそのレベル（＝レイヤ）を作るときの両方がこれを通る。
 	std::string spanLayerName(double fromLevel, double toLevel);
 
+	// span レベル 1 つの表記（Python 版 _fmt_span_level）。整数は小数点なし・半整数は
+	// ".5" 付き（1 → "1"、2.5 → "2.5"）。**この表記の定義はここが唯一**で、span 柱レイヤ
+	// （spanLayerName）と伏図記号レイヤ（parse/ColumnMark の planMarkLayerName）の両方が
+	// これを通る（別々に書くと "2.5-柱伏図記号" と "2.5to…-柱" の桁がズレたときに、
+	// 伏図の表示レイヤ探索が黙って失敗する形になる）。
+	std::string formatSpanLevel(double value);
+
 	// "{from}to{to}-柱" レイヤ名を (from, to) へ分解する（Python 版 parse_span_layer）。
 	// span 柱レイヤでなければ false（接尾辞が違う・"to" が無い・数値でない）。
 	bool parseSpanLayer(const std::string& name, double& outFrom, double& outTo);

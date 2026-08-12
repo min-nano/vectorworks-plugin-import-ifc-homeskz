@@ -32,6 +32,7 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
@@ -44,6 +45,10 @@ namespace HomeskzIfcImport::draw
 	// progress には 1 枚ごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
 	// （フェーズの見出しと配分は draw/ExecuteDocument が決める）。描けたところまでは
 	// 図面に残る。note には異常（ビューポートを作れなかった等）の説明を入れる（無ければ空）。
+	// topLayers は**ストーリに属さない独立レイヤ**の希望スタック順（いまは伏図記号レイヤ
+	// "{to}-柱伏図記号"。draw/ColumnMark の planMarkLayerNames が渡す）。通り芯 "共通" の
+	// 直下へ差し込まれる（core::desiredStoryLayerOrder）。
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
+						   const std::vector<std::string>& topLayers = {},
 						   std::string* note = nullptr);
 } // namespace HomeskzIfcImport::draw

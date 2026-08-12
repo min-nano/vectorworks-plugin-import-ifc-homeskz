@@ -16,6 +16,7 @@
 
 #include "core/Document.h"
 #include "core/Progress.h"
+#include "draw/ObjectHandles.h"
 
 #include <cstddef>
 #include <string>
@@ -38,6 +39,10 @@ namespace HomeskzIfcImport::draw
 	// progress には 1 件描くごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
 	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
 	// 決める）。描けたところまでは図面に残る。
+	// handles を渡すと、**命令のインデックスをキーに**配置した柱ハンドルを記録する
+	// （伏図記号のデータタグが関連付け先として引く。フォールバック描画＝構造材ツールを
+	// 作れなかった命令と、レイヤ未生成でスキップした命令は記録しない）。
 	std::size_t drawColumns(const core::Document& document, core::ProgressReporter& progress,
-							std::string* outDiagnostics = nullptr);
+							std::string* outDiagnostics = nullptr,
+							ObjectHandles* handles = nullptr);
 } // namespace HomeskzIfcImport::draw

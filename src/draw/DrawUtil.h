@@ -25,6 +25,8 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
+#include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -156,4 +158,12 @@ namespace HomeskzIfcImport::draw
 	// ために勝手にレイヤを作らない（Python 版 execute_floors / execute_rafters /
 	// execute_roofs と同じ規約）。
 	MCObjectHandle ActivateExistingLayer(const std::string& layerName);
+
+	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
+	// （draw/ObjectHandles.h の ObjectHandles）は SDK 非依存のヘッダに置いてあり、
+	// SDK 型を持つこの定義だけがここに来る（そちらのヘッダ冒頭を参照）。
+	struct ObjectHandleTable
+	{
+		std::map<std::size_t, MCObjectHandle> handles;
+	};
 } // namespace HomeskzIfcImport::draw

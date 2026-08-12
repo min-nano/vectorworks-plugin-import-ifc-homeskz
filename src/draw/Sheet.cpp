@@ -214,17 +214,18 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
-						   std::string* note)
+						   const std::vector<std::string>& topLayers, std::string* note)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
 			return 0;
 
 		// レイヤの走査と希望スタック順は全シートで共通なので 1 回だけ求める。希望順の計算は
-		// SDK 非依存（core::desiredStoryLayerOrder。無 SDK テスト済み）で、**伏図記号レイヤ
-		// 等のストーリ非依存レイヤ（topLayers）は M12 が着地したら渡す**。
+		// SDK 非依存（core::desiredStoryLayerOrder。無 SDK テスト済み）で、ストーリに属さない
+		// 独立レイヤ（topLayers＝伏図記号レイヤ。M12）は通り芯の直下へ差し込まれる。
 		const std::vector<MCObjectHandle> allLayers = AllLayers();
-		const std::vector<std::string> stacking = core::desiredStoryLayerOrder(document.stories);
+		const std::vector<std::string> stacking =
+			core::desiredStoryLayerOrder(document.stories, topLayers);
 
 		// 描画の前後でカレントレイヤが変わると以降のフェーズ（M14 以降）に響くので、
 		// 元のレイヤへ戻せるよう控えておく。
