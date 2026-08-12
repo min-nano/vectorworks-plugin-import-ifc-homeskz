@@ -7,32 +7,29 @@
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。
 //
-//	作るものは 2 つで、**柱 1 本につき 1 つずつ**（Python 版は span レイヤにつき 1 つの
-//	PIO を置き、PIO がリセット時に対象レイヤの構造材を検索して記号群を描いていた）:
+//	作るものは 2 つで、**実在する span 柱レイヤにつき 1 つずつ**（Python 版と同じ形）:
 //
-//	  * **断面記号**（buildColumnSectionMarkCommands）… その柱を切った位置に重ねる
-//	    ×（柱）／／（小屋束）。柱と同じ span レイヤ（"1to2-柱"）へ、極細実線クラスで
-//	    **素の直線**として描く。両端は柱の実断面（幅×せいの矩形）の角そのもの。
-//	  * **伏図記号**（buildColumnPlanMarkCommands）… 専用レイヤ "{to}-柱伏図記号" へ
-//	    置く平面記号。**VW 同梱のデータタグ**で描き、その柱へ関連付ける。
+//	  * **断面記号**（style=Section）… その span レイヤ自身を検索対象にし、レイヤ自身へ
+//	    重ねて置く。PIO が見つけた柱・小屋束の**実断面**に合わせて ×（柱）／／（小屋束）を
+//	    極細実線で描く。
+//	  * **伏図記号**（style=Plan）… 検索対象は同じ span レイヤ、配置先は専用レイヤ
+//	    "{to}-柱伏図記号"。各柱の位置にシンボル（柱＝"柱伏図記号" / 小屋束＝"束伏図記号"）を
+//	    置く。
+//
+//	【なぜ柱 1 本ごとではないか】記号を柱ごとの静的ジオメトリで持つと、**柱の断面が
+//	変わったときに古い記号が残り、しかもそれが「間違った断面の記号」になる**——記号が
+//	無いより悪い。PIO なら、リセットのたびに対象レイヤの実物から位置・大きさ・本数を
+//	導き直すので、嘘をつき続けることがない。したがって命令は「どのレイヤの何を、どこへ、
+//	どう描くか」だけを持ち、記号の絵は PIO（Extensions/ExtColumnMark）が描く。
 //
 //	［Python 版との差異・意図的］
-//	  * **カスタム PIO（"柱束伏図記号"）を使わない。** 姉妹プロジェクトの PIO は、それを
-//	    導入していないマシンで図面の表示が崩れる。本移植は記号を素のジオメトリ（直線）と
-//	    VW 本体同梱の PIO（データタグ）だけで描き、**プラグインが無い環境でも図面が
-//	    そのまま読める**ことを優先する。
-//	  * **記号の絵は柱ごとに解析側で計算する。** PIO のリセットが担っていた「対象レイヤの
-//	    構造材を検索して実断面に合わせた記号を描く」計算を、解析側が柱命令から済ませる
-//	    （幅・せい・中心はすべて命令にある）。結果として描画側は線を引くだけになり、
-//	    無 SDK テストで期待値を確かめられる（CLAUDE.md「テスト方針」）。
-//	  * **柱の編集への追随は伏図記号（データタグ）だけが担う。** VW には素の図形を他の
-//	    図形へ追随させる仕組みが無い（ISDK の association は読み取りと削除のみ／レコードは
-//	    値の入れ物で再計算の引き金にならない）。追随するのは「リセットされるもの」＝ PIO
-//	    だけなので、データタグに関連付けを持たせて追随させ、断面記号は静的な線とする。
-//	    断面記号は柱と同じレイヤ・同じ位置にあるので、ズレれば図面上ですぐ分かる。
+//	  * **PIO は姉妹プロジェクトのものではなく、本プラグインが提供する**
+//	    （Extensions/ExtColumnMark）。1 つのモジュールにメニューコマンドと一緒に登録する
+//	    ので、インストールも自動更新も 1 つで済み、記号の規約（構造用途・レイヤ名・
+//	    クラス名）を解析側と共有できる。登録名は Python 版の "柱束伏図記号" と**分ける**
+//	    （両方を入れた環境で衝突させないため）。
 //	  * **記号サイズ（Python 版 DEFAULT_MARK_SIZE=300mm）は持たない。** 断面記号は実断面の
-//	    対角線そのもので、伏図記号はタグスタイルが絵を持つため、どちらもサイズ指定を
-//	    使わない（Python 版でも断面記号のフォールバック用途だけだった）。
+//	    対角線そのもので、伏図記号はシンボルをそのまま置くので、サイズ指定を使う経路が無い。
 //
 //	【span レイヤは単一種別】柱は span（またぐレベル区間）ごとのレイヤに分かれており
 //	（parse/Column）、1 つの span レイヤには柱（構造用途 4）だけ、または小屋束（構造用途 5）
@@ -69,34 +66,23 @@ namespace HomeskzIfcImport::parse
 	// 伏図記号の作図クラス（Python 版 PLAN_MARK_CLASS）。記号クラス。
 	inline constexpr const char* kPlanMarkClass = "01作図-04記号-04構造-一般";
 
-	// 伏図記号のデータタグスタイル名（Python 版 SYMBOL_COLUMN / SYMBOL_KOYAZUKA と同じ
-	// 名前）。**スタイルはプラグインが作らない**——テンプレートやリソースライブラリから
-	// 供給される前提で、その中に Python 版と同じシンボル（柱伏図記号／束伏図記号）を
-	// 焼き込んでおく（draw/ColumnMark.h「スタイルは作らない」）。
-	inline constexpr const char* kPlanMarkStyleColumn = "柱伏図記号"; // 柱（管柱・通し柱）
-	inline constexpr const char* kPlanMarkStyleKoyazuka = "束伏図記号"; // 小屋束
+	// 伏図記号で使うシンボル名（Python 版 SYMBOL_COLUMN / SYMBOL_KOYAZUKA）。span レイヤは
+	// 単一種別なので、そのレイヤの柱の構造用途（柱=4 / 小屋束=5）でどちらかに決まる。
+	// **シンボル定義はプラグインが作らない**——テンプレートやリソースライブラリから
+	// 供給される前提（シンボル置換系と同じ作法。draw/Symbol.cpp）。
+	inline constexpr const char* kPlanMarkSymbolColumn = "柱伏図記号"; // 柱（管柱・通し柱）
+	inline constexpr const char* kPlanMarkSymbolKoyazuka = "束伏図記号"; // 小屋束
 
-	// 柱命令から断面記号の命令を組み立てる（柱 1 本につき 1 つ、columns と同じ並び）。
+	// 柱命令から記号の命令を組み立てる（Python 版 build_column_mark_commands）。
 	//
-	// 記号は柱の断面矩形（position を中心とする width×depth・軸平行）の対角線で、
-	//   * 柱（構造用途 4）  … ×（2 本の対角線）
-	//   * 小屋束（構造用途 5）… ／（左下→右上の 1 本）
-	// になる。配置先は柱と同じ span レイヤ、クラスは極細実線（kSectionMarkClass）。
-	// **断面が退化している柱（幅・せいのどちらかが 0 以下）は記号を作らない**（縮退した
-	// 線は図面に何も描かず選択もできないゴミになる。core の isValidSectionMark と同じ考え）。
-	std::vector<core::ColumnSectionMarkCommand>
-	buildColumnSectionMarkCommands(const std::vector<core::ColumnCommand>& columns);
-
-	// 柱命令から伏図記号（データタグ）の命令を組み立てる（柱 1 本につき 1 つ、columns と
-	// 同じ並び）。配置先は "{to}-柱伏図記号"、スタイルは構造用途で選ぶ（柱＝柱伏図記号／
-	// 小屋束＝束伏図記号）、挿入点は柱の断面中心、columnIndex は **columns の添字**。
+	// 実在する span 柱レイヤ（collectColumnSpans。(from, to) 昇順）ごとに、断面記号 1 つと
+	// 伏図記号 1 つを作る。**断面記号をすべて先に、続けて伏図記号をすべて**並べる
+	// （順序は描画に影響しないが、Python 版の並びに合わせてある）。柱が無ければ空。
 	//
-	// **配置先レイヤ名は柱の span レイヤ名から to を読み取って作る**（parse/Story の
-	// parseSpanLayer）。span レイヤでない配置先（将来レイヤの分け方を変えたとき）の柱は
-	// 記号を作らない——存在しないレイヤ名の命令を出すより、記号が出ないほうが原因を
-	// 追いやすい。
-	std::vector<core::ColumnPlanMarkCommand>
-	buildColumnPlanMarkCommands(const std::vector<core::ColumnCommand>& columns);
+	// 伏図記号のシンボルはその span レイヤの柱の構造用途で決める（span レイヤは単一種別＝
+	// 柱のみ、または小屋束のみ。parse/Column.h）。
+	std::vector<core::ColumnMarkCommand>
+	buildColumnMarkCommands(const std::vector<core::ColumnCommand>& columns);
 
 	// 実在する伏図記号レイヤを **to の昇順**で（重複を除いて）列挙する。伏図が「切断位置の
 	// 直下のレイヤ」を 1 枚選ぶのに使う（parse/Sheet）。

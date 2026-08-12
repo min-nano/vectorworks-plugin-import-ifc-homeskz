@@ -257,10 +257,8 @@ void CImportIfcMenu_EventSink::DoInterface()
 			   formatCount(drawn.anchorBolts, document.anchorBolts.size()) + " 本・床束 " +
 			   formatCount(drawn.floorPosts, document.floorPosts.size()) + " 本・火打 " +
 			   formatCount(drawn.fireBraces, document.fireBraces.size()) + " 本・仕口 " +
-			   formatCount(drawn.joints, document.joints.size()) + " か所・断面記号 " +
-			   formatCount(drawn.columnSectionMarks, document.columnSectionMarks.size()) +
-			   " 個・伏図記号 " +
-			   formatCount(drawn.columnPlanMarks, document.columnPlanMarks.size()) + " 個・伏図 " +
+			   formatCount(drawn.joints, document.joints.size()) + " か所・柱記号 " +
+			   formatCount(drawn.columnMarks, document.columnMarks.size()) + " 個・伏図 " +
 			   formatCount(drawn.sheets, document.sheets.size()) + " 枚を描きました。";
 	// 中止されたときは件数が命令数に届かないのが正常なので、そう明示する（「描けなかった」
 	// と読み違えないように）。描けたところまでは図面に残っている。

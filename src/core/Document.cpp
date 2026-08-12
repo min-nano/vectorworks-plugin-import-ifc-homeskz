@@ -197,25 +197,14 @@ namespace HomeskzIfcImport::core
 			return !symbol.layer.empty() && !symbol.symbol.empty();
 		}
 
-		// 断面記号 1 つが妥当か。配置先レイヤ名・クラス名が非空で、線分を 1 本以上持ち、
-		// どの線分も**縮退していない**こと（両端が同じ点の線は図面に何も描かず、選択も
-		// できないゴミになるので作らせない）。同一判定は通り芯の重複線除去と同じ
-		// core/Geometry の samePoint を通す（閾値を分けない）。
-		bool isValidSectionMark(const ColumnSectionMarkCommand& mark)
+		// 記号（断面記号・伏図記号）1 つが妥当か。PIO を置くレイヤ名・作図クラス名・
+		// **検索対象レイヤ名**が非空であること（対象レイヤが空だと PIO は何も見つけられず、
+		// 記号 0 個の空オブジェクトが図面に残る）。伏図記号はシンボル名も非空であること
+		// （シンボルが無ければ平面記号は描けない）。targetClass は**空が正常**＝全クラス。
+		bool isValidColumnMark(const ColumnMarkCommand& mark)
 		{
-			return !mark.layer.empty() && !mark.drawClass.empty() && !mark.segments.empty() &&
-				   std::ranges::none_of(mark.segments, [](const MarkSegment& segment)
-										{ return samePoint(segment.start, segment.end); });
-		}
-
-		// 伏図記号 1 つが妥当か。配置先レイヤ名・タグスタイル名・クラス名が非空で、
-		// 関連付け先が columns の範囲内を指すこと（範囲外の添字は描画側でハンドルを引けず、
-		// **どの柱にも関連付かないタグ**が図面に残るので検証で弾く。壁結合の a / b と同じ
-		// 考え方）。position は数値（double なので常に成立）。
-		bool isValidPlanMark(const ColumnPlanMarkCommand& mark, std::size_t columnCount)
-		{
-			return !mark.layer.empty() && !mark.styleName.empty() && !mark.drawClass.empty() &&
-				   mark.columnIndex < columnCount;
+			return !mark.layer.empty() && !mark.drawClass.empty() && !mark.targetLayer.empty() &&
+				   (mark.style != ColumnMarkStyle::Plan || !mark.symbol.empty());
 		}
 	} // namespace
 
@@ -279,16 +268,9 @@ namespace HomeskzIfcImport::core
 			!std::ranges::all_of(document.joints, isValidSymbol))
 			return false;
 
-		// 断面記号・伏図記号（M12）: 断面記号は配置先レイヤ名・クラス名が非空で線分が
-		// 非縮退、伏図記号はレイヤ名・タグスタイル名・クラス名が非空で関連付け先が columns の
-		// 範囲内であること（isValidSectionMark / isValidPlanMark 参照。ROADMAP.md M12）。
-		// Python 版は 2 つを 1 つの column_mark 命令にまとめているが、本移植は描き方が
-		// まったく違う（直線とデータタグ）ので命令も分けてある（core/Document.h 参照）。
-		if (!std::ranges::all_of(document.columnSectionMarks, isValidSectionMark))
-			return false;
-		if (!std::ranges::all_of(document.columnPlanMarks,
-								 [&document](const ColumnPlanMarkCommand& mark)
-								 { return isValidPlanMark(mark, document.columns.size()); }))
+		// 断面記号・伏図記号（M12）: PIO のレイヤ名・作図クラス名・検索対象レイヤ名が非空で、
+		// 伏図記号はシンボル名も非空であること（isValidColumnMark 参照。ROADMAP.md M12）。
+		if (!std::ranges::all_of(document.columnMarks, isValidColumnMark))
 			return false;
 
 		// シート（伏図）: シートレイヤ番号・タイトルが非空で、ビューポートが非空のレイヤ名を
@@ -368,8 +350,7 @@ namespace HomeskzIfcImport::core
 		collect(document.roofs);
 		collect(document.walls);
 		collect(document.slabs);
-		collect(document.columnSectionMarks);
-		collect(document.columnPlanMarks);
+		collect(document.columnMarks);
 		return {names.begin(), names.end()};
 	}
 

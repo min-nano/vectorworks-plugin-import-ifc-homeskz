@@ -4,14 +4,12 @@
 //	断面記号・伏図記号の解析（src/parse/ColumnMark）の単体テスト。VectorWorks SDK を
 //	一切 include せず、無 SDK のテストハーネス（TestFramework.h）で走る
 //	（CLAUDE.md「テスト方針」）。Python 版 test_ifc_column_mark.py が見ていた性質を
-//	写しつつ、**記号の絵を解析側で持つ**という本移植の差（PIO を使わない。
-//	parse/ColumnMark.h）に合わせて期待値を書き直してある（手書き。
-//	ROADMAP.md「Python 版出力との比較はしない」）。
+//	写しつつ、期待値は手書きする（ROADMAP.md「Python 版出力との比較はしない」）。
 //
-//	検証項目（ROADMAP.md M12）: 断面記号の線分が実断面の対角線であること・柱は ×
-//	（2 本）／小屋束は ／（1 本）・配置先が柱と同じ span レイヤであること・伏図記号の
-//	レイヤ名 "{to}-柱伏図記号"・タグスタイルの選択・関連付け先の添字・退化した断面と
-//	span でない配置先の除外・伏図記号レイヤの列挙と「切断の直下」の選び方・実フィクスチャ
+//	検証項目（ROADMAP.md M12）: span レイヤごとに断面記号・伏図記号が 1 つずつ出ること・
+//	配置先と検索対象レイヤ（断面記号＝span レイヤ自身／伏図記号＝"{to}-柱伏図記号"）・
+//	作図クラス・シンボルの選択（柱／小屋束）・対象クラスが空＝全クラスであること・
+//	並び（断面記号が先）・伏図記号レイヤの列挙と「切断の直下」の選び方・実フィクスチャ
 //	での通し・並び順に依存しない決定性。実フィクスチャのパスは CMake が
 //	HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -32,19 +30,17 @@
 
 using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::ColumnCommand;
-using HomeskzIfcImport::core::ColumnPlanMarkCommand;
-using HomeskzIfcImport::core::ColumnSectionMarkCommand;
-using HomeskzIfcImport::core::MarkSegment;
+using HomeskzIfcImport::core::ColumnMarkCommand;
+using HomeskzIfcImport::core::ColumnMarkStyle;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::parse::buildColumnCommands;
-using HomeskzIfcImport::parse::buildColumnPlanMarkCommands;
-using HomeskzIfcImport::parse::buildColumnSectionMarkCommands;
+using HomeskzIfcImport::parse::buildColumnMarkCommands;
 using HomeskzIfcImport::parse::collectColumnSpans;
 using HomeskzIfcImport::parse::collectPlanMarkLayers;
 using HomeskzIfcImport::parse::ColumnSpan;
 using HomeskzIfcImport::parse::kPlanMarkClass;
-using HomeskzIfcImport::parse::kPlanMarkStyleColumn;
-using HomeskzIfcImport::parse::kPlanMarkStyleKoyazuka;
+using HomeskzIfcImport::parse::kPlanMarkSymbolColumn;
+using HomeskzIfcImport::parse::kPlanMarkSymbolKoyazuka;
 using HomeskzIfcImport::parse::kSectionMarkClass;
 using HomeskzIfcImport::parse::kStructuralUseColumn;
 using HomeskzIfcImport::parse::kStructuralUseKoyazuka;
@@ -72,52 +68,91 @@ namespace
 		column.height = 2800.0;
 		return column;
 	}
-
-	// 線分が (ax, ay)-(bx, by) か（向きも含めて）。
-	bool isSegment(const MarkSegment& segment, double ax, double ay, double bx, double by)
-	{
-		return near(segment.start.x, ax) && near(segment.start.y, ay) && near(segment.end.x, bx) &&
-			   near(segment.end.y, by);
-	}
 } // namespace
 
-TEST(SectionMarkIsTheDiagonalsOfTheActualSection)
+TEST(EachSpanLayerGetsASectionMarkAndAPlanMark)
 {
-	// 柱（構造用途 4）は × ＝実断面の外接矩形の 2 本の対角線。105×120 の柱を
-	// (1000, 2000) に置くと、隅は x=947.5/1052.5・y=1940/2060 になる。
+	// span レイヤ 1 つにつき断面記号 1 つ・伏図記号 1 つ。**断面記号が先**に全部並ぶ。
 	const std::vector<ColumnCommand> columns{
-		makeColumn(1000.0, 2000.0, 105.0, 120.0, "1to2-柱", kStructuralUseColumn)};
+		makeColumn(0.0, 0.0, 105.0, 105.0, "1to2-柱", kStructuralUseColumn),
+		makeColumn(500.0, 0.0, 105.0, 105.0, "1to2-柱", kStructuralUseColumn), // 同じ span
+		makeColumn(1000.0, 0.0, 90.0, 90.0, "2to2.5-柱", kStructuralUseKoyazuka)};
 
-	const std::vector<ColumnSectionMarkCommand> marks = buildColumnSectionMarkCommands(columns);
-	CHECK(marks.size() == 1);
-	CHECK(marks[0].layer == "1to2-柱"); // 柱と同じ span レイヤに重ねる
-	CHECK(marks[0].drawClass == kSectionMarkClass);
-	CHECK(marks[0].segments.size() == 2);
-	CHECK(isSegment(marks[0].segments[0], 947.5, 1940.0, 1052.5, 2060.0)); // 左下→右上
-	CHECK(isSegment(marks[0].segments[1], 1052.5, 1940.0, 947.5, 2060.0)); // 右下→左上
+	const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns);
+	// span は 2 つ（"1to2-柱" / "2to2.5-柱"）なので記号は 4 つ。**柱の本数には依存しない**
+	// ——記号は PIO が対象レイヤを検索して描くので、柱が何本あっても命令は 1 つ。
+	CHECK(marks.size() == 4);
+	CHECK(marks[0].style == ColumnMarkStyle::Section);
+	CHECK(marks[1].style == ColumnMarkStyle::Section);
+	CHECK(marks[2].style == ColumnMarkStyle::Plan);
+	CHECK(marks[3].style == ColumnMarkStyle::Plan);
 }
 
-TEST(SectionMarkForKoyazukaIsASingleSlash)
+TEST(SectionMarkSitsOnAndSearchesItsOwnSpanLayer)
 {
-	// 小屋束（構造用途 5）は ／ ＝左下→右上の 1 本だけ。
 	const std::vector<ColumnCommand> columns{
-		makeColumn(0.0, 0.0, 90.0, 90.0, "2to2.5-柱", kStructuralUseKoyazuka)};
-
-	const std::vector<ColumnSectionMarkCommand> marks = buildColumnSectionMarkCommands(columns);
-	CHECK(marks.size() == 1);
-	CHECK(marks[0].segments.size() == 1);
-	CHECK(isSegment(marks[0].segments[0], -45.0, -45.0, 45.0, 45.0));
-}
-
-TEST(SectionMarkSkipsDegenerateSections)
-{
-	// 幅・せいのどちらかが 0 以下の柱は縮退した線しか引けないので記号を作らない。
-	const std::vector<ColumnCommand> columns{
-		makeColumn(0.0, 0.0, 0.0, 105.0, "1to2-柱", kStructuralUseColumn),
-		makeColumn(0.0, 0.0, 105.0, -1.0, "1to2-柱", kStructuralUseColumn),
 		makeColumn(0.0, 0.0, 105.0, 105.0, "1to2-柱", kStructuralUseColumn)};
 
-	CHECK(buildColumnSectionMarkCommands(columns).size() == 1);
+	const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns);
+	CHECK(marks.size() == 2);
+
+	const ColumnMarkCommand& section = marks[0];
+	CHECK(section.layer == "1to2-柱");		 // 配置先＝span レイヤ自身
+	CHECK(section.targetLayer == "1to2-柱"); // 検索対象も同じレイヤ
+	CHECK(section.drawClass == kSectionMarkClass);
+	CHECK(section.targetClass.empty()); // 空＝全クラス
+	CHECK(section.symbol.empty());		// 断面記号はシンボルを使わない
+}
+
+TEST(PlanMarkGoesToItsOwnLayerButSearchesTheSpanLayer)
+{
+	const std::vector<ColumnCommand> columns{
+		makeColumn(0.0, 0.0, 105.0, 105.0, "1to2-柱", kStructuralUseColumn)};
+
+	const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns);
+	CHECK(marks.size() == 2);
+
+	const ColumnMarkCommand& plan = marks[1];
+	CHECK(plan.layer == "2-柱伏図記号");  // 配置先＝span の to の専用レイヤ
+	CHECK(plan.targetLayer == "1to2-柱"); // 検索対象は span レイヤ
+	CHECK(plan.drawClass == kPlanMarkClass);
+	CHECK(plan.targetClass.empty());
+	CHECK(plan.symbol == kPlanMarkSymbolColumn);
+}
+
+TEST(PlanMarkSymbolFollowsTheSpanStructuralUse)
+{
+	// シンボルはその span レイヤの種別で決まる（柱＝柱伏図記号／小屋束＝束伏図記号）。
+	const std::vector<ColumnCommand> columns{
+		makeColumn(0.0, 0.0, 105.0, 105.0, "1to2-柱", kStructuralUseColumn),
+		makeColumn(0.0, 0.0, 90.0, 90.0, "2to2.5-柱", kStructuralUseKoyazuka)};
+
+	const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns);
+	CHECK(marks.size() == 4);
+	CHECK(marks[2].symbol == kPlanMarkSymbolColumn);   // "1to2-柱" の伏図記号
+	CHECK(marks[3].symbol == kPlanMarkSymbolKoyazuka); // "2to2.5-柱" の伏図記号
+}
+
+TEST(SameSpanTopSharesOnePlanMarkLayer)
+{
+	// 同じ to の span（"1to2.5-柱" と "2to2.5-柱"）は同じ伏図記号レイヤに載る。
+	// **記号は span ごとに 1 つずつ**なので、命令は 2 つ出て配置先だけが同じになる
+	// （検索対象がそれぞれの span レイヤなので、まとめてしまうと片方が描かれない）。
+	const std::vector<ColumnCommand> columns{
+		makeColumn(0.0, 0.0, 90.0, 90.0, "1to2.5-柱", kStructuralUseKoyazuka),
+		makeColumn(500.0, 0.0, 90.0, 90.0, "2to2.5-柱", kStructuralUseKoyazuka)};
+
+	const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns);
+	CHECK(marks.size() == 4);
+	CHECK(marks[2].layer == "2.5-柱伏図記号");
+	CHECK(marks[3].layer == "2.5-柱伏図記号");
+	CHECK(marks[2].targetLayer == "1to2.5-柱");
+	CHECK(marks[3].targetLayer == "2to2.5-柱");
+}
+
+TEST(NoColumnsMeansNoMarks)
+{
+	CHECK(buildColumnMarkCommands({}).empty());
 }
 
 TEST(PlanMarkLayerNameUsesTheSpanTopLevel)
@@ -127,57 +162,6 @@ TEST(PlanMarkLayerNameUsesTheSpanTopLevel)
 	CHECK(planMarkLayerName(2.0) == "2-柱伏図記号");
 	CHECK(planMarkLayerName(2.5) == "2.5-柱伏図記号");
 	CHECK(planMarkLayerName(3.0) == "3-柱伏図記号");
-}
-
-TEST(PlanMarkGoesToTheLayerOfItsSpanTop)
-{
-	// 伏図記号は "{to}-柱伏図記号" へ。**同じ to の span は同じレイヤに載る**
-	// （"1to2.5-柱" と "2to2.5-柱" → どちらも "2.5-柱伏図記号"）。
-	const std::vector<ColumnCommand> columns{
-		makeColumn(0.0, 0.0, 105.0, 105.0, "1to2-柱", kStructuralUseColumn),
-		makeColumn(500.0, 0.0, 90.0, 90.0, "1to2.5-柱", kStructuralUseKoyazuka),
-		makeColumn(1000.0, 0.0, 90.0, 90.0, "2to2.5-柱", kStructuralUseKoyazuka)};
-
-	const std::vector<ColumnPlanMarkCommand> marks = buildColumnPlanMarkCommands(columns);
-	CHECK(marks.size() == 3);
-	CHECK(marks[0].layer == "2-柱伏図記号");
-	CHECK(marks[1].layer == "2.5-柱伏図記号");
-	CHECK(marks[2].layer == "2.5-柱伏図記号");
-}
-
-TEST(PlanMarkStyleFollowsTheStructuralUse)
-{
-	// 記号の絵はタグスタイルが持ち、スタイルは構造用途で選ぶ（柱＝柱伏図記号／
-	// 小屋束＝束伏図記号）。挿入点は柱の断面中心、関連付け先は columns の添字。
-	const std::vector<ColumnCommand> columns{
-		makeColumn(100.0, 200.0, 105.0, 105.0, "1to2-柱", kStructuralUseColumn),
-		makeColumn(300.0, 400.0, 90.0, 90.0, "2to2.5-柱", kStructuralUseKoyazuka)};
-
-	const std::vector<ColumnPlanMarkCommand> marks = buildColumnPlanMarkCommands(columns);
-	CHECK(marks.size() == 2);
-
-	CHECK(marks[0].styleName == kPlanMarkStyleColumn);
-	CHECK(marks[0].drawClass == kPlanMarkClass);
-	CHECK(marks[0].columnIndex == 0);
-	CHECK(near(marks[0].position.x, 100.0) && near(marks[0].position.y, 200.0));
-
-	CHECK(marks[1].styleName == kPlanMarkStyleKoyazuka);
-	CHECK(marks[1].columnIndex == 1);
-	CHECK(near(marks[1].position.x, 300.0) && near(marks[1].position.y, 400.0));
-}
-
-TEST(PlanMarkSkipsColumnsThatAreNotOnASpanLayer)
-{
-	// 配置先が span レイヤでない柱は to が決まらないので記号を作らない（存在しない
-	// レイヤ名の命令を出すより、記号が出ないほうが原因を追いやすい）。**添字は
-	// columns のものを保つ**ので、飛ばした後の柱も正しい柱を指す。
-	const std::vector<ColumnCommand> columns{
-		makeColumn(0.0, 0.0, 105.0, 105.0, "1-柱", kStructuralUseColumn),
-		makeColumn(0.0, 0.0, 105.0, 105.0, "1to2-柱", kStructuralUseColumn)};
-
-	const std::vector<ColumnPlanMarkCommand> marks = buildColumnPlanMarkCommands(columns);
-	CHECK(marks.size() == 1);
-	CHECK(marks[0].columnIndex == 1);
 }
 
 TEST(PlanMarkLayersAreUniqueAndSortedByLevel)
@@ -218,10 +202,11 @@ TEST(PlanMarkLayerBelowCutPicksTheHighestLevelUnderTheCut)
 	CHECK(planMarkLayerBelowCut(layers, 2.0).empty());
 }
 
-TEST(MarksMatchTheColumnsOnEveryFixture)
+TEST(MarksMatchTheSpansOnEveryFixture)
 {
-	// 実フィクスチャ通し: 断面記号は「断面が正の柱」と同数、伏図記号は「span レイヤに
-	// 載る柱」と同数で、どの命令も実在する柱を指し、配置先レイヤの規約が守られていること。
+	// 実フィクスチャ通し: 記号は span レイヤ 1 つにつき 2 つ（断面記号・伏図記号）で、
+	// 検索対象レイヤは必ず実在する span レイヤ、伏図記号のシンボルはその span の種別と
+	// 一致すること。
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
@@ -229,35 +214,32 @@ TEST(MarksMatchTheColumnsOnEveryFixture)
 		CHECK(ok);
 
 		const std::vector<ColumnCommand> columns = buildColumnCommands(model);
-		const std::vector<ColumnSectionMarkCommand> sections =
-			buildColumnSectionMarkCommands(columns);
-		const std::vector<ColumnPlanMarkCommand> plans = buildColumnPlanMarkCommands(columns);
+		const std::vector<ColumnSpan> spans = collectColumnSpans(columns);
+		const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns);
+		CHECK(marks.size() == spans.size() * 2);
 
-		std::size_t drawable = 0;
-		for (const ColumnCommand& column : columns)
-			if (column.width > 0.0 && column.depth > 0.0)
-				++drawable;
-		CHECK(sections.size() == drawable);
+		std::set<std::string> spanLayers;
+		for (const ColumnSpan& span : spans)
+			spanLayers.insert(span.layer);
 
-		// 伏図記号のレイヤは、そのフィクスチャの span から作られる名前のどれかに一致する。
-		std::set<std::string> known;
-		for (const PlanMarkLayer& layer : collectPlanMarkLayers(collectColumnSpans(columns)))
-			known.insert(layer.layer);
-		for (const ColumnPlanMarkCommand& mark : plans)
+		std::set<std::string> markLayers;
+		for (const PlanMarkLayer& layer : collectPlanMarkLayers(spans))
+			markLayers.insert(layer.layer);
+
+		for (const ColumnMarkCommand& mark : marks)
 		{
-			CHECK(known.count(mark.layer) == 1);
-			CHECK(mark.columnIndex < columns.size());
-			// スタイルは関連付け先の柱の構造用途と一致する。
-			const bool koyazuka = columns[mark.columnIndex].structuralUse == kStructuralUseKoyazuka;
-			CHECK(mark.styleName == (koyazuka ? kPlanMarkStyleKoyazuka : kPlanMarkStyleColumn));
+			CHECK(spanLayers.count(mark.targetLayer) == 1);
+			if (mark.style == ColumnMarkStyle::Section)
+			{
+				CHECK(mark.layer == mark.targetLayer);
+				CHECK(mark.symbol.empty());
+			}
+			else
+			{
+				CHECK(markLayers.count(mark.layer) == 1);
+				CHECK(!mark.symbol.empty());
+			}
 		}
-
-		// 断面記号は柱と同じレイヤに載る（伏図が span レイヤを映せば記号も併せて出る）。
-		std::set<std::string> columnLayers;
-		for (const ColumnCommand& column : columns)
-			columnLayers.insert(column.layer);
-		for (const ColumnSectionMarkCommand& mark : sections)
-			CHECK(columnLayers.count(mark.layer) == 1);
 	}
 }
 
@@ -271,25 +253,15 @@ TEST(MarkCommandsAreDeterministic)
 		CHECK(ok);
 
 		const std::vector<ColumnCommand> columns = buildColumnCommands(model);
-		const std::vector<ColumnSectionMarkCommand> sectionsA =
-			buildColumnSectionMarkCommands(columns);
-		const std::vector<ColumnSectionMarkCommand> sectionsB =
-			buildColumnSectionMarkCommands(columns);
-		CHECK(sectionsA.size() == sectionsB.size());
-		for (std::size_t i = 0; i < sectionsA.size() && i < sectionsB.size(); ++i)
+		const std::vector<ColumnMarkCommand> a = buildColumnMarkCommands(columns);
+		const std::vector<ColumnMarkCommand> b = buildColumnMarkCommands(columns);
+		CHECK(a.size() == b.size());
+		for (std::size_t i = 0; i < a.size() && i < b.size(); ++i)
 		{
-			CHECK(sectionsA[i].layer == sectionsB[i].layer);
-			CHECK(sectionsA[i].segments.size() == sectionsB[i].segments.size());
-		}
-
-		const std::vector<ColumnPlanMarkCommand> plansA = buildColumnPlanMarkCommands(columns);
-		const std::vector<ColumnPlanMarkCommand> plansB = buildColumnPlanMarkCommands(columns);
-		CHECK(plansA.size() == plansB.size());
-		for (std::size_t i = 0; i < plansA.size() && i < plansB.size(); ++i)
-		{
-			CHECK(plansA[i].layer == plansB[i].layer);
-			CHECK(plansA[i].styleName == plansB[i].styleName);
-			CHECK(plansA[i].columnIndex == plansB[i].columnIndex);
+			CHECK(a[i].layer == b[i].layer);
+			CHECK(a[i].targetLayer == b[i].targetLayer);
+			CHECK(a[i].symbol == b[i].symbol);
+			CHECK(a[i].style == b[i].style);
 		}
 	}
 }

@@ -589,64 +589,54 @@ namespace HomeskzIfcImport::core
 		double angle = 0.0;
 	};
 
-	// 断面記号（柱＝×・小屋束＝／）の線分 1 本。両端は柱の**実断面**（幅×せいの矩形）の
-	// 角そのもので、記号の大きさは柱ごとに違う（Python 版の柱束伏図記号 PIO が
-	// リセット時に実断面から描いていたのと同じ絵を、解析側で計算して持たせる）。
-	struct MarkSegment
+	// 記号の描き方（Python 版 MARK_STYLE_SECTION / MARK_STYLE_PLAN。PIO の MarkStyle
+	// パラメータに対応する）。
+	enum class ColumnMarkStyle
 	{
-		Vec2 start;
-		Vec2 end;
+		Section, // 断面記号: 柱の実断面に合わせた対角線（柱＝×・小屋束＝／）
+		Plan, // 伏図記号: 各柱の位置にシンボルを 1 つ
 	};
 
-	// 断面記号（柱・小屋束を切った位置に重ねる ×／／）を**直線**で描く命令。柱 1 本につき
-	// 1 つで、segments は 柱＝2 本（× の対角線）・小屋束＝1 本（／）（ROADMAP.md M12）。
+	// 柱・小屋束の記号（断面記号・伏図記号）を **PIO 1 つ**で描く命令。Python 版
+	// document.py の ColumnMarkCommand（dict）に対応する（ROADMAP.md M12）。
 	//
-	// ［Python 版との差異・意図的］Python 版は姉妹プロジェクトのカスタム PIO
-	// 「柱束伏図記号」を span レイヤごとに 1 つ置き、PIO がリセット時に対象レイヤの
-	// 構造材を検索して記号を描く。本移植は **PIO を使わず素の直線で描く**——カスタム PIO は
-	// それを導入していないマシンで図面の表示が崩れるため（M12 の方針。ROADMAP.md）。
-	// 代わりに「柱を編集したら記号が追随する」性質は失われるので、伏図記号のほうは
-	// VW 同梱のデータタグ（ColumnPlanMarkCommand）で追随を担わせている。
+	// 【柱 1 本ごとではなく span レイヤごとに 1 つ】記号は PIO がリセット時に
+	// **対象レイヤ（targetLayer）の構造材を検索して描く**ので、命令は「どのレイヤの
+	// 何を、どこへ、どう描くか」だけを持つ。柱が動いた・断面が変わった・増減したときは、
+	// PIO のリセットで記号がまとめて描き直される——記号の位置・大きさ・本数はモデル側の
+	// 実物から毎回導かれるので、**古い記号が間違った内容のまま残ることがない**。
+	// （素のジオメトリやデータタグでは、位置は追えても実断面の変化に追随できず、
+	// 「間違った記号が残る」＝図面としては記号が無いより悪い状態になる。）
 	//
-	//   layer     … 配置先デザインレイヤ名（柱と同じ span レイヤ "1to2-柱"）
-	//   drawClass … 作図クラス（極細実線。予約語 class を機械置換）
-	//   segments  … 記号を構成する線分（柱＝2 本・小屋束＝1 本）
-	struct ColumnSectionMarkCommand
+	// 【PIO はこのプラグインが提供する】Extensions/ExtColumnMark が本体で、モジュールの
+	// 拡張としてメニューコマンドと一緒に登録される（別プラグインにしない）。VW は PIO が
+	// **描いたジオメトリを図面に保存する**ので、プラグインを入れていない環境でも
+	// 図面はそのまま表示できる（更新だけができない。実機で確認済み）。
+	//
+	// Python 版キーとの対応:
+	//   layer       ← 'layer'        … PIO を置くデザインレイヤ名（断面記号＝span レイヤ
+	//                                  自身／伏図記号＝"{to}-柱伏図記号"）
+	//   drawClass   ← 'class'        … PIO 本体の作図クラス（予約語 class を機械置換）
+	//   targetLayer ← 'target_layer' … 検索対象のデザインレイヤ名（＝span 柱レイヤ）
+	//   targetClass ← 'target_class' … 検索対象クラス（**空＝全クラス**）
+	//   style       ← 'style'        … 記号の描き方（断面／平面）
+	//   symbol      ← 'symbol'       … 伏図記号のシンボル名（"柱伏図記号" / "束伏図記号"。
+	//                                  断面記号では空）
+	//   position    ← 'position'     … PIO の挿入点。**原点でよい**——記号は検索した柱の
+	//                                  ワールド位置に描かれ、挿入点には依存しない
+	//
+	// ［Python 版との差異・意図的］記号サイズ（Python 版 'size'＝既定 300mm）は持たない。
+	// あちらは PIO がシンボル未指定のときのフォールバックに使っていたが、本移植の PIO は
+	// 断面記号を**柱の実断面から**描き、伏図記号はシンボルをそのまま置くので、
+	// サイズ指定を使う経路が無い（使われない枠を先に作らない）。
+	struct ColumnMarkCommand
 	{
 		std::string layer;
 		std::string drawClass;
-		std::vector<MarkSegment> segments;
-	};
-
-	// 伏図記号（柱・小屋束の平面記号）を **VW 標準のデータタグ**として置く命令。柱 1 本に
-	// つき 1 つで、専用レイヤ "{to}-柱伏図記号" に載る（ROADMAP.md M12）。
-	//
-	// 【なぜデータタグか】記号の目的は「その伏図が対象とする横架材の下にある柱・小屋束の
-	// 位置を示す」ことで、**柱が動いたら記号も動いてほしい**。ところが VW には素の図形
-	// （線・シンボル）を他の図形へ追随させる仕組みが無い（ISDK の association は読み取りと
-	// 削除だけで、追加する公開 API が無い。レコードは値の入れ物であって再計算の引き金には
-	// ならない）。追随するのは「リセットされるもの」＝ PIO だけなので、**VW 本体に同梱の
-	// PIO であるデータタグ**を使う——カスタム PIO と違い、どのマシンでも欠落しない。
-	// 関連付けは draw 側が IDataTagSupport::AssociateWithObject で行う。
-	//
-	// 記号の絵（柱＝"柱伏図記号" / 小屋束＝"束伏図記号" のシンボル）は**タグスタイルに
-	// 焼き込む**（Python 版がシンボル名で指定していたものを、そのままスタイル名にする）。
-	// スタイルはプラグインが作らずテンプレート側の用意に従う（構造材の
-	// "木質構造材_横架材" と同じ作法。draw/ColumnMark.h）。
-	//
-	//   layer       … 配置先デザインレイヤ名（"{to}-柱伏図記号"。ストーリに属さない独立レイヤ）
-	//   styleName   … データタグスタイル名（"柱伏図記号" / "束伏図記号"）
-	//   drawClass   … 作図クラス（記号クラス。予約語 class を機械置換）
-	//   columnIndex … 関連付け先の **Document::columns の添字**（SDK ハンドルは Document に
-	//                 載せられないので、描画側が「命令インデックス → ハンドル」の対応表で
-	//                 引く。壁結合の a / b と同じ受け渡し方式）
-	//   position    … タグの挿入点（柱の断面中心。センタリング済みの平面座標）
-	struct ColumnPlanMarkCommand
-	{
-		std::string layer;
-		std::string styleName;
-		std::string drawClass;
-		std::size_t columnIndex = 0;
+		std::string targetLayer;
+		std::string targetClass;
+		ColumnMarkStyle style = ColumnMarkStyle::Section;
+		std::string symbol;
 		Vec2 position;
 	};
 
@@ -773,14 +763,10 @@ namespace HomeskzIfcImport::core
 		// 配置先は受ける側ではなく**その横架材自身のレイヤ**。
 		std::vector<SymbolCommand> joints;
 
-		// M12 断面記号。柱 1 本につき 1 つで、その柱と同じ span レイヤへ ×（柱）／／
-		// （小屋束）を直線で重ねる（parse/ColumnMark）。並びは columns と同じ順。
-		std::vector<ColumnSectionMarkCommand> columnSectionMarks;
-
-		// M12 伏図記号。柱 1 本につき 1 つで、"{to}-柱伏図記号" レイヤへデータタグを置き、
-		// その柱へ関連付ける（parse/ColumnMark）。columnIndex は **columns の添字**なので、
-		// columns を並べ替えたり足したりしたらこの列も作り直す。並びは columns と同じ順。
-		std::vector<ColumnPlanMarkCommand> columnPlanMarks;
+		// M12 断面記号・伏図記号。**実在する span 柱レイヤごとに 2 つ**（断面記号と
+		// 伏図記号）で、断面記号をすべて先に、続けて伏図記号を並べる（parse/ColumnMark）。
+		// 柱の span から決まるので columns より後に組み立てる。
+		std::vector<ColumnMarkCommand> columnMarks;
 
 		// M13 シート（伏図）。基礎伏図 → 各階の柱梁伏図 → 屋根版を持つ階ごとの母屋伏図の
 		// 順で、シートレイヤ番号もその順に "1" から振る（parse/Sheet が組み立てる）。

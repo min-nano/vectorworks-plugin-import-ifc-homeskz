@@ -58,8 +58,7 @@ namespace HomeskzIfcImport::draw
 			document.members.size() + document.columns.size() + document.rafters.size() +
 			document.roofs.size() + document.walls.size() + document.wallJoins.size() +
 			document.slabs.size() + document.anchorBolts.size() + document.floorPosts.size() +
-			document.fireBraces.size() + document.joints.size() +
-			document.columnSectionMarks.size() + document.columnPlanMarks.size() +
+			document.fireBraces.size() + document.joints.size() + document.columnMarks.size() +
 			document.sheets.size();
 
 		// 要素ごとの診断（無ければ空）を改行で連ねる。1 つの文字列を各 draw* へ渡すと
@@ -167,20 +166,14 @@ namespace HomeskzIfcImport::draw
 		drawSymbolPhase("火打を配置しています…", "火打", document.fireBraces, counts.fireBraces);
 		drawSymbolPhase("仕口を配置しています…", "仕口", document.joints, counts.joints);
 
-		// M12 断面記号・伏図記号。**柱の後**に置く: 伏図記号のデータタグは柱ハンドルへ
-		// 関連付けるので、柱が描き終わっていないと関連付け先が無い。かつ**レイヤの並べ替えより
-		// 前**に置く: 伏図記号レイヤ（"{to}-柱伏図記号"）はここで作られるので、希望順へ
-		// 並べるときに実在していないといけない。
-		if (beginPhase("断面記号を描画しています…", document.columnSectionMarks.size()))
+		// M12 断面記号・伏図記号。**柱の後**に置く: 記号 PIO はリセット時に対象レイヤの
+		// 構造材を検索するので、柱が置かれていないと記号 0 個で確定してしまう。かつ
+		// **レイヤの並べ替えより前**に置く: 伏図記号レイヤ（"{to}-柱伏図記号"）はここで
+		// 作られるので、希望順へ並べるときに実在していないといけない。
+		if (beginPhase("柱記号を配置しています…", document.columnMarks.size()))
 		{
 			std::string note;
-			counts.columnSectionMarks = drawColumnSectionMarks(document, progress, &note);
-			addDiagnostics(note);
-		}
-		if (beginPhase("伏図記号を配置しています…", document.columnPlanMarks.size()))
-		{
-			std::string note;
-			counts.columnPlanMarks = drawColumnPlanMarks(document, progress, columnHandles, &note);
+			counts.columnMarks = drawColumnMarks(document, progress, &note);
 			addDiagnostics(note);
 		}
 

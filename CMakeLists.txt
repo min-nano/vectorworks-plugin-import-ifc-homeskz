@@ -289,6 +289,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Member.cpp
 		src/draw/Column.cpp
 		src/draw/ColumnMark.cpp
+		src/Extensions/ExtColumnMark.cpp
 		src/draw/Rafter.cpp
 		src/draw/Roof.cpp
 		src/draw/Symbol.cpp
