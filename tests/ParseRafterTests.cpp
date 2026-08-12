@@ -338,7 +338,7 @@ TEST(no_degenerate_rafters_in_any_fixture)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		Model const model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 		for (const RafterCommand& rafter : buildRafterCommands(model))
 			CHECK(!core::samePoint(rafter.start, rafter.end));
@@ -352,7 +352,7 @@ TEST(rafters_without_girder_support_have_no_extra_length_in_any_fixture)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		Model const model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 		for (const RafterCommand& rafter : buildRafterCommands(model))
 		{
@@ -587,7 +587,7 @@ TEST(story_has_roof_slab_detects_roof_face)
 TEST(fixture_rafters_are_valid)
 {
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	std::vector<RafterCommand> const rafters = buildRafterCommands(model);
 	CHECK(!rafters.empty());
@@ -615,7 +615,7 @@ TEST(fixture_layers_map_to_roof_storeys)
 {
 	// 伏図次郎: 下屋根（2FL）→ "2-垂木"、主屋根（RFL）→ "R-垂木"。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	std::set<std::string> const layers = layersOf(buildRafterCommands(model));
 	CHECK_EQ(layers.size(), static_cast<std::size_t>(2));
@@ -627,7 +627,7 @@ TEST(shed_dormer_without_moya_still_gets_rafters)
 {
 	// スキップフロア: 2FL の下屋根は母屋を持たないが屋根版＝垂木を持つ。
 	bool ok = false;
-	Model const model = fixture("スキップフロア_サンプル.ifc", ok);
+	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
 	std::set<std::string> const layers = layersOf(buildRafterCommands(model));
 	CHECK(layers.count("2-垂木") == 1);
@@ -639,7 +639,7 @@ TEST(fixture_rafters_are_spaced_within_interval)
 	// 面ごとの厳密な検証は合成入力側で行うので、ここでは実データで「命令が正の長さを持ち、
 	// 平面投影長が 100mm 以上（極小片が混じらない）」ことを確かめる。
 	bool ok = false;
-	Model const model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
+	const Model& model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
 	CHECK(ok);
 	std::vector<RafterCommand> const rafters = buildRafterCommands(model);
 	CHECK(!rafters.empty());
@@ -656,7 +656,7 @@ TEST(rafters_are_deterministic)
 {
 	// 同じ入力からは同じ命令列（順序・値）が得られる（エンティティ列挙順に依存しない）。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	std::vector<RafterCommand> const first = buildRafterCommands(model);
 	std::vector<RafterCommand> const second = buildRafterCommands(model);

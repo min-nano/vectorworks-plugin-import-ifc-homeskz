@@ -1679,7 +1679,7 @@ TEST(fixtures_produce_members_with_valid_fields)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		Model const model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 		if (!ok)
 			continue;
@@ -1704,7 +1704,7 @@ TEST(fixtures_produce_members_with_valid_fields)
 TEST(fixture_members_are_deterministic)
 {
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	if (!ok)
 		return;

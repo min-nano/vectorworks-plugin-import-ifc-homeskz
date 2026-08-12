@@ -413,7 +413,7 @@ TEST(joint_result_is_order_independent)
 TEST(joint_fixture_shape_and_layers)
 {
 	bool ok = false;
-	const Model model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	const std::vector<MemberCommand> members = buildMemberCommands(model);
@@ -450,7 +450,7 @@ TEST(joint_columns_only_add_joints)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		const Model model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 
 		const std::vector<MemberCommand> members = buildMemberCommands(model);
@@ -476,7 +476,7 @@ TEST(joint_added_joints_land_on_columns)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		const Model model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 
 		const std::vector<MemberCommand> members = buildMemberCommands(model);
@@ -502,7 +502,7 @@ TEST(joint_all_fixtures_build)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		const Model model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 
 		const std::vector<SymbolCommand> joints = buildJointCommands(buildMemberCommands(model));
@@ -515,7 +515,7 @@ TEST(joint_all_fixtures_build)
 TEST(joint_fixture_result_is_order_independent_with_columns)
 {
 	bool ok = false;
-	const Model model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	std::vector<MemberCommand> members = buildMemberCommands(model);

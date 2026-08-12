@@ -650,7 +650,7 @@ TEST(slab_top_elevation_is_largest_area_height)
 	// 底盤の大半（基礎底盤 IfcSlab）の天端は 50.0。面積最大の天端 Z を採るので、
 	// 独立基礎底盤のような少数の異なる高さは採用されない。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	double slabTop = 0.0;
 	CHECK(resolveSlabTopElevation(model, slabTop));
@@ -660,7 +660,7 @@ TEST(slab_top_elevation_is_largest_area_height)
 TEST(foundation_story_command_shape)
 {
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	StoryCommand story;
 	CHECK(buildFoundationStoryCommand(model, story));
@@ -692,7 +692,7 @@ TEST(foundation_top_is_the_highest_wall_top)
 {
 	// 基礎天端は立上り（基礎梁）の天端の最大値。伏図次郎は GL+400（立上りは −100〜400）。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	double top = 0.0;
 	CHECK(resolveFoundationTopElevation(model, top));
@@ -704,7 +704,7 @@ TEST(foundation_top_falls_back_to_slab_top_without_walls)
 	// 立上りが 1 つも無い基礎（底盤のみ）は基礎天端が定まらないので、ストーリは
 	// 基礎天端レベルを底盤天端へフォールバックする（Python 版と同じ）。
 	bool ok = false;
-	Model const model = fixture("minimal_grid.ifc", ok);
+	const Model& model = fixture("minimal_grid.ifc", ok);
 	CHECK(ok);
 	double top = 0.0;
 	CHECK(!resolveFoundationTopElevation(model, top));
@@ -717,7 +717,7 @@ TEST(foundation_story_levels_are_consistent_across_fixtures)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		Model const model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 		StoryCommand story;
 		CHECK(buildFoundationStoryCommand(model, story));
@@ -736,7 +736,7 @@ TEST(no_foundation_story_without_foundation_elements)
 {
 	// 基礎要素を持たない IFC では基礎ストーリを作らない（空のレイヤを残さない）。
 	bool ok = false;
-	Model const model = fixture("minimal_grid.ifc", ok);
+	const Model& model = fixture("minimal_grid.ifc", ok);
 	CHECK(ok);
 	CHECK(!hasFoundation(model));
 	StoryCommand story;
@@ -746,7 +746,7 @@ TEST(no_foundation_story_without_foundation_elements)
 TEST(wall_commands_shape)
 {
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	const std::vector<WallCommand> walls = buildWallCommands(model);
 	CHECK(!walls.empty());
@@ -776,7 +776,7 @@ TEST(wall_bottom_is_the_ifc_solid_bottom)
 	// 全高でモデリングするので、伏図次郎（底盤天端 50・底盤厚 150）では下端が底盤の底面
 	// −100 に一致する。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	double slabTop = 0.0;
 	CHECK(resolveSlabTopElevation(model, slabTop));
@@ -796,7 +796,7 @@ TEST(wall_bottom_keeps_per_wall_depth_from_the_ifc)
 	// 深さの違う基礎梁を持つモデルでは、その差が命令にそのまま残ること（底盤天端から
 	// 一律に決めると深い基礎が潰れてしまう）。スキップフロアは −100 と −150 が混在する。
 	bool ok = false;
-	Model const model = fixture("スキップフロア_サンプル.ifc", ok);
+	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
 	std::set<long long> depths;
 	for (const WallCommand& cmd : buildWallCommands(model))
@@ -811,7 +811,7 @@ TEST(walls_are_fully_merged)
 	// 統合の後、残った立上り同士に「同一断面かつ同一直線で連続する」ペアが無い
 	// （＝これ以上まとめられない形になっている）。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	const std::vector<WallCommand> walls = buildWallCommands(model);
 	CHECK(!walls.empty());
@@ -822,7 +822,7 @@ TEST(walls_are_fully_merged)
 TEST(slab_commands_shape)
 {
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	double slabTop = 0.0;
 	CHECK(resolveSlabTopElevation(model, slabTop));
@@ -858,7 +858,7 @@ TEST(base_slab_outer_boundary_matches_wall_outer_face)
 	// 底盤外形は立上りの壁心にあるため、外面（壁心 + 半壁厚）まで広がる。伏図次郎の
 	// 外周立上りは全て 120mm 厚なので、統合底盤の外周が半壁厚（60mm）外へ動く。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	Context context(model);
 	const std::vector<WallCommand> walls = buildWallCommands(model);
@@ -880,7 +880,7 @@ TEST(all_fixtures_parse_without_error)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		Model const model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 		Context context(model);
 		const std::vector<WallCommand> walls = buildWallCommands(model);
@@ -904,7 +904,7 @@ TEST(is_deterministic)
 {
 	// 同じ入力からは同じ命令列（順序・値）が得られる（エンティティ列挙順に依存しない）。
 	bool ok = false;
-	Model const model = fixture("スキップフロア_サンプル.ifc", ok);
+	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
 	const std::vector<WallCommand> firstWalls = buildWallCommands(model);
 	const std::vector<WallCommand> secondWalls = buildWallCommands(model);
@@ -1111,7 +1111,7 @@ TEST(openings_come_from_the_real_fixtures)
 	// 実フィクスチャの立上りには人通口（差演算の第 2 オペランド）がある。天端まで届き
 	// 底面には届かない削りだけを拾うので、Z 帯は必ず「下端 < 上端」で厚みを持つ。
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	Context context(model);
 	const std::vector<WallOpening> openings =
@@ -1332,7 +1332,7 @@ TEST(joins_reference_valid_walls_in_the_real_fixtures)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		Model const model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 		const std::vector<WallCommand> walls = buildWallCommands(model);
 		const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
@@ -1514,7 +1514,7 @@ TEST(ground_beams_of_the_real_fixtures_land_on_slabs)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		Model const model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 		Context context(model);
 		const std::vector<WallCommand> walls = buildWallCommands(model);
@@ -1555,7 +1555,7 @@ TEST(ground_beam_tops_meet_the_slab_bottom)
 	// （底盤天端 − 厚み）に一致する。可視ソリッドの呑み込み（core::raiseModifierTop）が
 	// 要るのはこの coplanar のため（draw/Footing.cpp）。
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	Context context(model);
 	const std::vector<SlabCommand> slabs = buildSlabCommands(context, context.walls());

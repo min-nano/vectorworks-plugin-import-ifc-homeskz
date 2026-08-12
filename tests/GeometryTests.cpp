@@ -579,7 +579,7 @@ TEST(resolves_geometry_on_real_fixture)
 	// 解決できること・矩形断面が拾えることを確認する。数値の厳密一致ではなく、
 	// パイプライン（プロファイル→押し出し）が実データで通ることの担保。
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 
 	int resolved = 0;

@@ -178,7 +178,7 @@ TEST(fire_brace_fixture_count_and_shape)
 	// 伏図次郎: 28 本。Python 版 test_ifc_fire_brace.py の test_count_matches と同じ値
 	// （移植ズレの検出点）。レイヤは横架材と同じ（一般階＝横架材天端、最上階＝軒高）。
 	bool ok = false;
-	const Model model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	const std::vector<SymbolCommand> braces = buildFireBraceCommands(model);
@@ -198,7 +198,7 @@ TEST(fire_brace_fixture_count_and_shape)
 TEST(fire_brace_fixture_positions_are_centered)
 {
 	bool ok = false;
-	const Model model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	const std::vector<SymbolCommand> braces = buildFireBraceCommands(model);
@@ -223,7 +223,7 @@ TEST(fire_brace_all_fixtures_build)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		const Model model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 
 		const std::vector<SymbolCommand> braces = buildFireBraceCommands(model);
@@ -239,7 +239,7 @@ TEST(fire_brace_all_fixtures_build)
 TEST(fire_brace_is_deterministic)
 {
 	bool ok = false;
-	const Model model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 
 	const std::vector<SymbolCommand> first = buildFireBraceCommands(model);

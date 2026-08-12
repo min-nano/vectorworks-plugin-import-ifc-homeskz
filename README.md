@@ -315,16 +315,20 @@ Vectorworks 開発者クレデンシャル（2026 の「サテライト」ファ
 
 ```bash
 cmake -S . -B build-tests -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON
-cmake --build build-tests
-ctest --test-dir build-tests --output-on-failure
+cmake --build build-tests --parallel "$(nproc)"
+ctest --test-dir build-tests --output-on-failure -j "$(nproc)"
 ```
+
+`--parallel` / `-j` を付けないと、cmake も ctest も**既定で 1 コアしか使いません**。
+テストは 20 本以上の独立した実行ファイルなので、コア数を渡すだけで素直に短くなります
+（CI の `test` ジョブも同じ指定で回します。下記「カバレッジレポート」）。
 
 サニタイザ（AddressSanitizer + UBSan）を有効にして回す（メモリ不正・未定義動作の検出）:
 
 ```bash
 cmake -S . -B build-san -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON -DVW_ENABLE_SANITIZERS=ON
-cmake --build build-san
-ctest --test-dir build-san --output-on-failure
+cmake --build build-san --parallel "$(nproc)"
+ctest --test-dir build-san --output-on-failure -j "$(nproc)"
 ```
 
 CI の `test` ジョブは常にこの設定（に `VW_ENABLE_COVERAGE=ON` を足したもの）で
@@ -353,9 +357,10 @@ CI の `test` ジョブは常にこの設定（に `VW_ENABLE_COVERAGE=ON` を�
 
 - **`test`** … ASan + UBSan **と gcov 計測を同時に有効にして**ビルドし、テストを
   1 回実行します。この 1 回の実行が、正しさの判定（テスト失敗・サニタイザ検出）と
-  カバレッジデータ（`.gcda`）の生成を兼ねます。続けて `gcovr` で **Cobertura 形式**の
-  レポート（`coverage.xml`）と集計 JSON を生成し、アーティファクト `coverage-report`
-  として `coverage` ジョブへ渡します。
+  カバレッジデータ（`.gcda`）の生成を兼ねます。ビルドもテスト実行も**ランナーの
+  全コア**を使います（`--parallel "$(nproc)"` / `ctest -j "$(nproc)"`）。続けて
+  `gcovr` で **Cobertura 形式**のレポート（`coverage.xml`）と集計 JSON を生成し、
+  アーティファクト `coverage-report` として `coverage` ジョブへ渡します。
 - **`coverage`** … `test` の成功後にのみ実行され、**コンパイルもテスト実行もしません**。
   受け取った計測結果に `diff-cover` で差分カバレッジを加え、表を PR コメントとして
   投稿し、しきい値を判定します。
@@ -363,6 +368,13 @@ CI の `test` ジョブは常にこの設定（に `VW_ENABLE_COVERAGE=ON` を�
 `test` の失敗はテスト自体の失敗（サニタイザ検出・計測の失敗を含む）を、`coverage` の
 失敗はレポート生成またはしきい値割れを意味するので、原因を切り分けやすいという性質は
 そのままです。
+
+**並列実行とカバレッジ**: テストを `-j` で同時に走らせても、計測結果は逐次実行と
+**完全に一致**します。共有されている状態は、どのテスト実行ファイルもリンクしている
+`HomeskzIfcCore` の `.gcda` カウンタだけで、libgcov はそこへ書き戻すときファイルを
+ロックするためです（この PR で逐次実行と付き合わせて確認済み: 行 4883/4994・
+分岐 4346/6300・関数 418/418 が両者で完全一致）。テスト実行ファイル同士は独立した
+プロセスなので、それ以外に共有するものはありません。
 
 サニタイザと gcov は同じ GCC のフラグとして共存できるため、以前のように
 「サニタイザ付きのビルド＋実行」と「カバレッジ付きのビルド＋実行」を 2 回行う必要は

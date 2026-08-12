@@ -43,7 +43,12 @@
 - `tests/Fixtures.h` … フィクスチャのパス・読み込み・近似比較・**フィクスチャ一覧**。
   フィクスチャを読むヘルパー（`fixture` / `allFixtures`）は `HOMESKZ_FIXTURES_DIR` を
   受け取るターゲットでのみ現れ、近似比較（`near`）はフィクスチャを使わないテストからも
-  使えます。
+  使えます。`fixture` は**同じファイルをプロセス内で 1 回しかパースせず**、2 回目以降は
+  同じ `Model` への `const` 参照を返します（実 IFC は 1 ファイル 2MB 前後あり、テストは
+  ASan＋gcov 付きの `-O0` ビルドで走るので、読み直しの分だけ待ち時間が伸びるため）。
+  受け取る側は `const Model& model = fixture(…)` と**参照で**受けます（値で受けると
+  コピーの分だけ元に戻ってしまいます）。共有して問題ないのは、`parse/` の解析関数が
+  どれも `const Model&` しか取らない——誰も `Model` を書き換えない——からです。
 - `tests/RoofSample.h` … 試験用の片流れ屋根面（`shedPlane`）と、それに対応する最小の
   屋根版 IFC（`minimalRoofText`）。垂木・野地板・勾配座標系は**同じ屋根面**に対する
   期待値でなければ意味がないので、`ParseRafterTests` / `ParseRoofTests` / `GeometryTests`

@@ -462,7 +462,7 @@ TEST(reads_sample_house_fixture)
 {
 	// サンプル1 のストーリは 設計GL(除外)/1FL/2FL/RFL。→ 1階・2階・屋根 の 3 命令。
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	std::vector<StoryCommand> const stories = buildStoryCommands(model);
 
