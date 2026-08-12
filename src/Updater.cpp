@@ -165,10 +165,13 @@ namespace
 	// application name.
 	std::string HostBundleId()
 	{
-		CFBundleRef const mainBundle = ::CFBundleGetMainBundle();
+		// No `const` on these: CFBundleRef / CFStringRef are pointer typedefs, so
+		// a trailing const would qualify the POINTER, not what it points at
+		// (clang-tidy's misc-misplaced-const rejects it).
+		CFBundleRef mainBundle = ::CFBundleGetMainBundle();
 		if (mainBundle == nullptr)
 			return "";
-		CFStringRef const identifier = ::CFBundleGetIdentifier(mainBundle);
+		CFStringRef identifier = ::CFBundleGetIdentifier(mainBundle);
 		if (identifier == nullptr)
 			return "";
 
