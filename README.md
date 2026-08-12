@@ -460,7 +460,7 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
     （`HomeskzIfcImport.vwlibrary.zip` + `HomeskzIfcImport.vlb.zip`）。
   - PR はブランチごとの **`dev-<branch>`** プレリリースを更新します
     （`HomeskzIfcImportDev.vwlibrary.zip` + `HomeskzIfcImportDev.vlb.zip`。トークンで公開でき
-    ないフォーク PR ではスキップされます）。
+    ないフォーク PR では `release` ジョブごとスキップされます）。
 
   リリースの公開は独立した **`release` ジョブ**が担当します。このジョブは 4 つのジョブ
   （`build-mac` / `build-windows` / `tidy-mac` / `tidy-windows`）が**すべて**完了してから
@@ -475,6 +475,12 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
   します（stable リリースの取りこぼしは気づかれにくいため）。**dev** の公開はリトライ
   しません — dev ビルドはブランチ作業中にしか使わないので、一時的なエラーが出たら
   ジョブを再実行すれば十分です。
+
+  公開に至らない実行 — トークンでリリースを作れない**フォーク PR** や、`main` 以外の
+  ref での `workflow_dispatch` — では、**`release` ジョブ自体が起動しません**（ジョブの
+  `if` で振り分けているので、成果物のダウンロードも走りません）。スキップされたジョブの
+  チェック結論は `skipped` で失敗ではないため、ブランチ保護や `ci-wait` の判定には
+  影響しません。
 
 `.github/workflows/cleanup-dev-release.yml` は、ブランチが削除されたときにその
 `dev-<branch>` プレリリース（とタグ）を削除し、dev ビルドが溜まらないようにします。
