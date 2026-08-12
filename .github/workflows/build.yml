@@ -601,11 +601,32 @@ jobs:
   # builds rather than inside them, so keeping it as a gate costs no extra time. Splitting this
   # out of the build jobs means neither platform publishes on its own, so there
   # is no create/attach race between them:
-  #   main  -> refresh the rolling "stable" release with the HomeskzIfcImport bundle.
-  #   other -> refresh a per-branch "dev-<branch>" prerelease with HomeskzIfcImportDev.
+  #   main -> refresh the rolling "stable" release with the HomeskzIfcImport bundle.
+  #   PR   -> refresh a per-branch "dev-<branch>" prerelease with HomeskzIfcImportDev.
   # Rolling tags are deleted and recreated so they always point at this build.
+  # 公開する対象が無い実行（フォーク PR / main 以外での workflow_dispatch）では、
+  # 下の job-level if でジョブごとスキップする。
   release:
     needs: [build-mac, build-windows, tidy-mac, tidy-windows]
+
+    # 公開できる実行でだけジョブを起動する。以前は 2 つの公開ステップの if だけで
+    # 制御していたため、フォーク PR や main 以外での workflow_dispatch でもジョブは
+    # 走り、成果物をダウンロードしたうえで両ステップが skip される（何も公開しない
+    # ジョブが緑で終わる）という無駄があった。公開に至る組み合わせは次の 2 つだけ
+    # なので、ここで先に振り分ける:
+    #   - main への push / main での workflow_dispatch → stable リリース
+    #   - 同一リポジトリのブランチから出た PR         → dev-<branch> プレリリース
+    # フォーク PR の GITHUB_TOKEN は読み取り専用でリリースを作れないため除外する。
+    # ジョブがスキップされてもチェックの結論は skipped（＝失敗ではない）なので、
+    # ブランチ保護や ci-wait の判定には影響しない。
+    # 折り畳みスカラ（>-）の継続行は、YAML の「より深くインデントした行は折り畳まない」
+    # 規則に当たらないよう、すべて同じ桁に揃える（揃えないと式に改行が残る）。
+    if: >-
+      (github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository)
+      || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main')
+
     runs-on: ubuntu-latest
 
     # Only this job publishes/refreshes the GitHub Release that the local updater
@@ -661,7 +682,10 @@ jobs:
         # Runs on a push to main, and on a manual/scheduled re-dispatch of this
         # workflow on main (the health-check workflow uses that to republish a
         # stable release that was missed — see stable-release-healthcheck.yml).
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        # ジョブ側の if が「main への push / dispatch」か「同一リポジトリの PR」の
+        # どちらかにすでに絞っているので、ここは PR かどうかで振り分けるだけでよい
+        # （同じ条件を 2 か所に書かない）。
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_SHA: ${{ steps.ctx.outputs.sha }}
@@ -703,9 +727,10 @@ jobs:
           exit 1
 
       - name: Publish dev prerelease (pull requests)
-        # Feature branches are built via their pull request. Skip PRs from forks:
-        # their GITHUB_TOKEN is read-only and cannot publish a release.
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        # Feature branches are built via their pull request. フォーク PR
+        # （GITHUB_TOKEN が読み取り専用でリリースを作れない）はジョブ側の if で
+        # すでに除外済みなので、ここは PR かどうかだけを見る。
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_SHA: ${{ steps.ctx.outputs.sha }}
