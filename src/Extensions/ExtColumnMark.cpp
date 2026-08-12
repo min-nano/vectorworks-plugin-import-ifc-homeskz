@@ -50,14 +50,21 @@ namespace HomeskzIfcImport
 
 		// PIO の定義。**関数ローカル static** で持つ理由は ExtMenu の menuDef と同じ
 		// （SDK の非ローカル static を名前空間スコープの初期化子から参照しない）。
-		// 点 PIO（シンボルのように 1 点で挿入する）で、移動・回転でリセットはしない
-		// ——記号の中身は対象レイヤの柱から決まり、PIO 自身の位置には依存しないため。
+		// 点 PIO（シンボルのように 1 点で挿入する）。
+		//
+		// 【移動・回転でリセットする】記号の絵は対象レイヤの柱の**ワールド位置**に描くが、
+		// PIO のジオメトリは挿入点からの相対で保持される。したがって PIO 自体を動かすと
+		// 記号がまるごとずれ、柱と食い違ったまま戻らない（実機で確認）。リセットすれば
+		// 実物から描き直されて正しい位置へ戻るので、移動・回転を契機にしておく。
+		// Python 版（姉妹プロジェクトの「柱束伏図記号」）もスクリプト PIO のリセット条件を
+		// プラグインエディタで同じように設定してあり、「動かしても柱位置に描かれる」のは
+		// この設定によるもの。
 		const SParametricDef& parametricDef()
 		{
 			static const SParametricDef def = {/*LocalizedName*/ {PLUGIN_VWR_ID, "columnMarkName"},
 											   /*SubType*/ kParametricSubType_Point,
-											   /*ResetOnMove*/ false,
-											   /*ResetOnRotate*/ false,
+											   /*ResetOnMove*/ true,
+											   /*ResetOnRotate*/ true,
 											   /*WallInsertOnEdge*/ false,
 											   /*WallInsertNoBreak*/ false,
 											   /*WallInsertHalfBreak*/ false,
@@ -217,6 +224,11 @@ namespace HomeskzIfcImport
 		// SetObjectProperty ではない。ISDK.h:1545-1546）。
 		gSDK->SetObjectPropertyChar(objectID, kObjXPropShowPrefDialogWhen,
 									static_cast<unsigned char>(kCustomObjectPrefNever));
+
+		// 印刷・書き出しの直前にリセットする。**図面として外へ出る瞬間に必ず実物と
+		// 一致させる**ための最後の砦で、柱を編集してから記号をリセットし忘れても、
+		// 印刷／書き出したものは正しい（ROADMAP.md M12「追随の契機」）。
+		gSDK->SetObjectProperty(objectID, kObjXPropResetBeforeExport, true);
 		return result;
 	}
 
