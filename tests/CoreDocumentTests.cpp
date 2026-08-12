@@ -17,8 +17,11 @@
 #include "core/Geometry.h"
 #include "parse/BuildDocument.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <string>
+#include <vector>
 
 using namespace HomeskzIfcImport;
 
@@ -1072,6 +1075,89 @@ TEST(validate_accepts_sheet_without_drawing_label)
 	sheet.viewport.drawingNumber.clear();
 	document.sheets.push_back(sheet);
 	CHECK(core::validateDocument(document));
+}
+
+// ---------------------------------------------------------------------------
+// documentClassNames（命令が使うクラス名の数え上げ。ROADMAP.md M13）
+//
+// 伏図ビューポートは**クラスの表示を明示しないと全クラスが非表示**になるので、描画側は
+// この一覧を「表示」へ戻す（draw/Sheet）。ISDK にドキュメントの全クラスを列挙する
+// 呼び出しが無いための代替なので、**クラスを持つ命令を 1 つも漏らさない**ことが要点。
+// ---------------------------------------------------------------------------
+
+TEST(document_class_names_collects_every_command_list)
+{
+	core::Document document;
+	core::GridCommand grid;
+	grid.drawClass = "01作図-01線-01基準線-01通り芯-X通り";
+	grid.start = core::Vec2{0.0, 0.0};
+	grid.end = core::Vec2{1000.0, 0.0};
+	document.grids.push_back(grid);
+
+	core::FloorCommand floor = validFloor();
+	floor.drawClass = "04構造-02木造-06耐力面材-02床";
+	document.floors.push_back(floor);
+
+	core::MemberCommand member = validMember();
+	member.drawClass = "04構造-02木造-01土台-01土台";
+	document.members.push_back(member);
+
+	core::ColumnCommand column = validColumn();
+	column.drawClass = "04構造-02木造-03軸組-01管柱";
+	document.columns.push_back(column);
+
+	core::RafterCommand rafter = validRafter();
+	rafter.drawClass = "04構造-02木造-05小屋組-05垂木";
+	document.rafters.push_back(rafter);
+
+	core::RoofCommand roof = validRoof();
+	roof.drawClass = "04構造-02木造-06耐力面材-03屋根";
+	document.roofs.push_back(roof);
+
+	core::WallCommand wall = validWall();
+	wall.drawClass = "04構造-01基礎-03立ち上がり";
+	document.walls.push_back(wall);
+
+	core::SlabCommand slab = validSlab();
+	slab.drawClass = "04構造-01基礎-02基礎スラブ";
+	document.slabs.push_back(slab);
+
+	const std::vector<std::string> names = core::documentClassNames(document);
+	// 8 つの命令リストすべてから 1 つずつ拾い、昇順で並ぶ。
+	CHECK_EQ(names.size(), static_cast<std::size_t>(8));
+	CHECK(std::ranges::is_sorted(names));
+	for (const char* const expected :
+		 {"01作図-01線-01基準線-01通り芯-X通り", "04構造-01基礎-02基礎スラブ",
+		  "04構造-01基礎-03立ち上がり", "04構造-02木造-01土台-01土台",
+		  "04構造-02木造-03軸組-01管柱", "04構造-02木造-05小屋組-05垂木",
+		  "04構造-02木造-06耐力面材-02床", "04構造-02木造-06耐力面材-03屋根"})
+		CHECK(std::ranges::find(names, expected) != names.end());
+}
+
+TEST(document_class_names_dedupes_and_skips_empty)
+{
+	// 同じクラスが何百件並んでも 1 つ。無クラス（空文字）は数えない（既定クラスのまま）。
+	core::Document document;
+	for (int i = 0; i < 3; ++i)
+	{
+		core::MemberCommand member = validMember();
+		member.drawClass = "04構造-02木造-01土台-01土台";
+		document.members.push_back(member);
+	}
+	core::GridCommand grid;
+	grid.drawClass.clear();
+	grid.start = core::Vec2{0.0, 0.0};
+	grid.end = core::Vec2{1000.0, 0.0};
+	document.grids.push_back(grid);
+
+	const std::vector<std::string> names = core::documentClassNames(document);
+	CHECK_EQ(names.size(), static_cast<std::size_t>(1));
+	CHECK(names[0] == "04構造-02木造-01土台-01土台");
+}
+
+TEST(document_class_names_of_empty_document_is_empty)
+{
+	CHECK(core::documentClassNames(core::Document{}).empty());
 }
 
 // ---------------------------------------------------------------------------

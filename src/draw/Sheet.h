@@ -10,18 +10,16 @@
 //	無 SDK の core/parse ライブラリには含めない。この宣言ヘッダ自体は core::Document /
 //	core::Progress しか参照せず、SDK ヘッダを引き込まない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	【レイヤの重ね順は per-viewport 上書きで決める（M3 の【決定】の実装箇所）】
-//	床・野地板が柱・梁を覆い隠さないようにする、という Python 版の目的は、Python 版では
-//	**デザインレイヤ自体の並べ替え**（HMoveForward）で満たしていた。VW 2026 の ISDK には
-//	その呼び出しが無く、代わりに**ビューポート単位のレイヤ重ね順オーバーライド**
-//	（SetViewportLayerStackingOverride）がある。本移植はそちらを使う:
-//	  * デザインレイヤの並びは触らない（ユーザーが並べ替えた順を壊さない）。
-//	  * 希望順は core::desiredStoryLayerOrder（SDK 非依存・無 SDK テスト済み）が唯一の定義で、
-//	    全ビューポートが同じ 1 本を使う。
-//	  * Python 版が抱えていた「並べ替えの結果が既存ビューポートに反映されず、手動更新が
-//	    必要」という制約は、ビューポートごとに上書きを持たせるこの方式では起きない。
+//	【レイヤの重ね順はここでは決めない】床・野地板が柱・梁を覆い隠さないようにする件は、
+//	**デザインレイヤ自体の並べ替え**（draw/Story の reorderStoryLayers）が担う。当初は
+//	ビューポート単位の重ね順オーバーライド（SetViewportLayerStackingOverride）へ委ねたが、
+//	**実機で効かなかった**（呼び出しは true を返すのに上書き件数は 0 のまま）ので、Python 版と
+//	同じドキュメント重ね順の並べ替えに戻してある（経緯は draw/Story.h の reorderStoryLayers）。
+//	ビューポートは**生成時の重ね順で描かれる**ので、並べ替えは drawSheets より前に済ませる
+//	（順序は draw/ExecuteDocument が持つ）。ここが持つのは**表示レイヤの絞り込みとクラス表示**
+//	だけになる。
 //
-//	実描画（ビューポートの見え方・縮尺・重ね順の向き）はローカルの VectorWorks で目視確認する
+//	実描画（ビューポートの見え方・縮尺・表示レイヤ）はローカルの VectorWorks で目視確認する
 //	（ROADMAP.md M13「ローカル確認」）。
 //
 
@@ -32,7 +30,6 @@
 
 #include <cstddef>
 #include <string>
-#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
@@ -45,10 +42,6 @@ namespace HomeskzIfcImport::draw
 	// progress には 1 枚ごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
 	// （フェーズの見出しと配分は draw/ExecuteDocument が決める）。描けたところまでは
 	// 図面に残る。note には異常（ビューポートを作れなかった等）の説明を入れる（無ければ空）。
-	// topLayers は**ストーリに属さない独立レイヤ**の希望スタック順（いまは伏図記号レイヤ
-	// "{to}-柱伏図記号"。draw/ColumnMark の planMarkLayerNames が渡す）。通り芯 "共通" の
-	// 直下へ差し込まれる（core::desiredStoryLayerOrder）。
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
-						   const std::vector<std::string>& topLayers = {},
 						   std::string* note = nullptr);
 } // namespace HomeskzIfcImport::draw

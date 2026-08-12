@@ -660,10 +660,10 @@ namespace HomeskzIfcImport::core
 	//   layers        ← 'layers'         … 表示するデザインレイヤ名（**それ以外は非表示**）
 	//
 	// 【並びは重ね順ではない】layers の並び順は描画側の走査順にすぎず、伏図での重なりは
-	// ビューポートのレイヤ重ね順が決める。床・野地板が柱・梁を覆い隠さないようにする件は
-	// **描画側が core::desiredStoryLayerOrder を per-viewport の重ね順上書きへ適用**して
-	// 満たす（draw/Sheet.h。命令にレイヤ順を持たせないのは、全ビューポートで同じ 1 本の
-	// 希望順を使うため——命令ごとに複製すると希望順の定義が命令の数だけ増える）。
+	// **ドキュメントのデザインレイヤ重ね順**が決める。床・野地板が柱・梁を覆い隠さないように
+	// する件は、描画側が core::desiredStoryLayerOrder の希望順へレイヤを並べ替えて満たす
+	// （draw/Story の reorderStoryLayers。命令にレイヤ順を持たせないのは、全ビューポートで
+	// 同じ 1 本の希望順を使うため——命令ごとに複製すると希望順の定義が命令の数だけ増える）。
 	//
 	// ［Python 版との差異・意図的］Python 版は hidden_classes（クラス単位の非表示）を持つが、
 	// **どの伏図も指定していない**（汎用機構として残されているだけ）。使われない枠を先に
@@ -796,18 +796,31 @@ namespace HomeskzIfcImport::core
 	// 各命令リストの追加に合わせて検証規則を足していく。
 	bool validateDocument(const Document& document);
 
+	// 命令セットが使うクラス名（drawClass）を重複なく昇順で返す。空文字（無クラス）は含めない。
+	//
+	// **伏図ビューポートのクラス表示に使う**（draw/Sheet）。VW のビューポートはクラスの表示を
+	// 明示しないと**全クラスが非表示**になり、レイヤを正しく絞っても図形が 1 つも出ない
+	// （M13 のローカル確認で判明）。ところが ISDK には「ドキュメントの全クラスを列挙する」
+	// 呼び出しが無い（VWClass にあるのは名前↔索引の変換だけ）。そこで、**プラグインが自分で
+	// 割り当てたクラスは命令セットから分かる**ことを使い、その名前を数え上げて表示へ戻す。
+	//
+	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder と
+	// 同じ立ち位置。CLAUDE.md「テスト方針」）。並びは昇順で、命令の並び順に依存しない。
+	std::vector<std::string> documentClassNames(const Document& document);
+
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す
 	// （Python 版 vw/story.py desired_layer_order の SDK 非依存な計算部分）。draw/Story が
 	// この順を適用する（レベルの高さには依存しない）。SDK を触らない純計算なので core に
 	// 置いて無 SDK で単体テストする（CLAUDE.md「テスト方針」: レイヤ順の並べ替え計算のような
 	// SDK から切り離せる部分は core へ寄せてテストする）。
 	//
-	// ただし**適用先は未定のまま**: VW 2026 ISDK にデザインレイヤの重ね順を変更する呼び出しが
-	// 無いため、draw/Story は並べ替えを行わない。目的（伏図で床が柱・梁を覆い隠さない）は
-	// M13 の per-viewport 上書き（SetViewportLayerStackingOverride）で満たす（draw/Story.h 参照）。
+	// 適用先は **draw/Story の reorderStoryLayers**（InsertObjectAfter でレイヤの並びを
+	// 希望順へ揃える）ただ 1 か所。当初は per-viewport の重ね順上書きへ委ねたが実機で
+	// 効かなかった（経緯は draw/Story.h の reorderStoryLayers）。
 	//
-	// 並び: 最上段に通り芯レイヤ "共通" → topLayers（伏図記号レイヤ等・ストーリ非依存の
-	// 独立レイヤ。M12 以降で渡す）→ **最上階→最下階**の順に各ストーリのレイヤ（stories は
+	// 並び: 最上段に通り芯レイヤ "共通" → topLayers（伏図記号レイヤ "{to}-柱伏図記号" 等・
+	// ストーリ非依存の独立レイヤ。M12 で reorderStoryLayers が渡すようになった）→
+	// **最上階→最下階**の順に各ストーリのレイヤ（stories は
 	// Elevation 昇順＝最下階→最上階なので逆順に辿る）。各ストーリ内は levels の並び順。
 	// ただし床（FL）・野地板レベルのレイヤは全ストーリ分をまとめてスタック最下段（背面）へ
 	// 回す（伏図ビューポートで柱・梁を覆い隠さないため）。
