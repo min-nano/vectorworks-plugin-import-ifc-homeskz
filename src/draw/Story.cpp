@@ -42,6 +42,7 @@
 #include "core/Progress.h"
 
 #include <cstddef>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -95,9 +96,9 @@ namespace HomeskzIfcImport::draw
 		// されてレイヤが無い場合など）。
 		std::size_t moved = 0;
 		MCObjectHandle previous = nil;
-		for (auto name = desired.rbegin(); name != desired.rend(); ++name)
+		for (const std::string& name : std::ranges::reverse_view(desired))
 		{
-			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name->c_str()));
+			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
 			if (layer == nil)
 				continue;
 			if (previous != nil && gSDK->InsertObjectAfter(layer, previous))
