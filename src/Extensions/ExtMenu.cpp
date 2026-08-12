@@ -236,8 +236,8 @@ void CImportIfcMenu_EventSink::DoInterface()
 		document.members.size() + document.columns.size() + document.rafters.size() +
 		document.roofs.size() + document.walls.size() + document.wallJoins.size() +
 		document.slabs.size() + document.anchorBolts.size() + document.floorPosts.size() +
-		document.fireBraces.size() + document.joints.size() + document.columnSectionMarks.size() +
-		document.columnPlanMarks.size() + document.sheets.size();
+		document.fireBraces.size() + document.joints.size() + document.columnMarks.size() +
+		document.sheets.size();
 	std::string body;
 	if (!drawn.valid)
 		body = "命令セットの検証に通らなかったため、何も描きませんでした。";
