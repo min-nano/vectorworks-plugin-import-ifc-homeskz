@@ -57,6 +57,17 @@ namespace HomeskzIfcImport
 
 		// 対象レイヤを検索して記号を描き直す（PIO のリセット）。
 		EObjectEvent Recalculate() override;
+
+		// オブジェクトプロパティの初期化。**「生成時に設定ダイアログを出さない」を
+		// ここで宣言する。**
+		//
+		// PIO の既定は `DefineCustomObject(name, prefWhen = kCustomObjectPrefAlways)`
+		// ——つまり**オブジェクトを作るたびに「オブジェクトの設定」ダイアログが出る**。
+		// 手で 1 つ置くツールならそれでよいが、記号はインポートが span レイヤの数だけ
+		// 自動生成するので、そのたびに応答を求められてインポートが止まる（実機で確認）。
+		// パラメータは描画側（draw/ColumnMark）が命令から書くため、ユーザーに尋ねる
+		// ことは何も無い。
+		EObjectEvent OnInitXProperties(CodeRefID objectID) override;
 	};
 
 	// ------------------------------------------------------------------------

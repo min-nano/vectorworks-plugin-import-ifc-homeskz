@@ -21,6 +21,11 @@
 //	実際の見え方（線の太さ・シンボルの向き・リセットの契機）はローカルの VectorWorks で
 //	目視確認する（ROADMAP.md M12「ローカル確認」）。
 //
+//	【生成時にダイアログを出さない】PIO の既定は「作るたびに設定ダイアログを出す」
+//	（`DefineCustomObject` の `prefWhen` 既定＝`kCustomObjectPrefAlways`）。記号は
+//	インポートが自動生成するので、`OnInitXProperties` で `kCustomObjectPrefNever` を
+//	宣言しておかないとインポートが記号の数だけ止まる（実機で確認）。
+//
 
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
@@ -201,6 +206,19 @@ namespace HomeskzIfcImport
 	}
 
 	CColumnMark_EventSink::~CColumnMark_EventSink() = default;
+
+	// ---------------------------------------------------------------------------
+	EObjectEvent CColumnMark_EventSink::OnInitXProperties(CodeRefID objectID)
+	{
+		const EObjectEvent result = VWParametric_EventSink::OnInitXProperties(objectID);
+
+		// 生成のたびに「オブジェクトの設定」ダイアログを出さない（意図はヘッダ参照）。
+		// 値は Sint8 なので **SetObjectPropertyChar** を使う（Boolean 版の
+		// SetObjectProperty ではない。ISDK.h:1545-1546）。
+		gSDK->SetObjectPropertyChar(objectID, kObjXPropShowPrefDialogWhen,
+									static_cast<unsigned char>(kCustomObjectPrefNever));
+		return result;
+	}
 
 	EObjectEvent CColumnMark_EventSink::Recalculate()
 	{
