@@ -20,6 +20,10 @@
 //	  * gSDK->NextObject(handle)                      … 次のレイヤへ
 //	  * gSDK->CreateViewport(sheetLayer)              … ビューポート生成
 //	  * gSDK->SetViewportLayerVisibility(vp, layer, v)… 表示レイヤの絞り込み（0=表示/1=非表示）
+//	  * gSDK->ClassNameToID(name)                     … クラス名 → InternalIndex
+//	  * VWViewportObj(vp).SetUseDocumentClassVis(true) /
+//	    VWViewportObj(vp).SetClassVisibility(idx, kClassVisibilityNormal)
+//	                                                  … クラス表示（既定は全非表示。下記）
 //	  * gSDK->GetObjectInternalIndex(layer)           … 重ね順上書きが要る InternalIndex
 //	  * gSDK->CreateViewportLayerOverride(vp, idx) /
 //	    gSDK->SetViewportLayerStackingOverride(vp, idx, pos)
@@ -33,6 +37,11 @@
 //	ドキュメントの表示状態を引き継ぐので、命令に挙げていないレイヤが映り込む。Python 版と
 //	同じく、まず全レイヤを**非表示**にしてから命令の layers を名前で引いて表示へ戻す
 //	（グレー表示 2 を使うと薄く残ってしまうので、必ず 1＝非表示）。
+//
+//	【クラスは明示しないと全部消える】レイヤと違い、**ビューポートのクラス表示は既定で全
+//	非表示**（M13 のローカル確認で判明）。伏図に必要な図形が欠けないよう、生成直後に全クラスを
+//	表示へ戻す（ConfigureViewportClasses）。クラスで絞る伏図はまだ無い（命令に hidden_classes を
+//	持たせていない。core/Document.h の ViewportCommand 参照）。
 //
 //	【重ね順は per-viewport 上書き】希望順（core::desiredStoryLayerOrder）を前面→背面の
 //	並びとして各ビューポートへ与える（draw/Sheet.h の設計メモ参照）。デザインレイヤ自体の
@@ -140,6 +149,42 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
+		// ビューポートのクラス表示を「全部表示」にする。
+		//
+		// 【なぜ要るか】**ビューポートはクラスの表示を明示しないと全クラスが非表示になる**
+		// （M13 のローカル確認で判明: レイヤは命令どおりなのに、クラスがすべて非表示で図形が
+		// 1 つも出ない）。Python 版 vw/sheet.py の configure_viewport_classes が全クラスを
+		// 表示へ戻していたのと同じ手当てが要る。
+		//
+		// 【なぜ 2 段構えか】ISDK には**ドキュメントの全クラスを列挙する呼び出しが無い**
+		// （VWClass にあるのは名前↔索引の変換と妥当性判定だけ。ci-debug で確認）。そこで
+		//   1. ドキュメントのクラス表示に従わせる（SetUseDocumentClassVis）。プラグインは
+		//      クラスを隠さないので、これが効けば VW 組み込みのクラス（寸法等・こちらが名前を
+		//      知らないもの）まで含めて表示になる。
+		//   2. **命令セットが使うクラス**（core::documentClassNames）を 1 つずつ「表示」にする。
+		//      名前が分かっているものだけは、1 の効き方によらず確実に表示させるための保険。
+		// の順に両方行う。1 が優先される実装なら 2 は無害な上書き記録として残るだけ。
+		void ConfigureViewportClasses(MCObjectHandle viewport,
+									  const std::vector<std::string>& classNames)
+		{
+			try
+			{
+				VWViewportObj vp(viewport);
+				vp.SetUseDocumentClassVis(true);
+				for (const std::string& name : classNames)
+				{
+					const InternalIndex index = gSDK->ClassNameToID(TXString(name.c_str()));
+					if (index != 0)
+						vp.SetClassVisibility(index, kClassVisibilityNormal);
+				}
+			}
+			catch (...)
+			{
+				// クラス表示を設定できなくてもビューポートは残す（1 つの失敗で全体を止めない）。
+				return;
+			}
+		}
+
 		// レイヤの重ね順をこのビューポートだけで上書きする（M3 の【決定】の実装箇所。
 		// draw/Sheet.h 参照）。order は前面→背面の希望順で、**そのビューポートに実在する
 		// レイヤだけ**へ 0 から詰めた位置を与える（希望順に載っていないレイヤ＝ユーザーが
@@ -225,6 +270,9 @@ namespace HomeskzIfcImport::draw
 		// 等のストーリ非依存レイヤ（topLayers）は M12 が着地したら渡す**。
 		const std::vector<MCObjectHandle> allLayers = AllLayers();
 		const std::vector<std::string> stacking = core::desiredStoryLayerOrder(document.stories);
+		// 命令セットが使うクラス名（全ビューポートで同じ）。ビューポートは既定で全クラスが
+		// 非表示なので、これを表示へ戻す（ConfigureViewportClasses）。
+		const std::vector<std::string> classNames = core::documentClassNames(document);
 
 		// 描画の前後でカレントレイヤが変わると以降のフェーズ（M14 以降）に響くので、
 		// 元のレイヤへ戻せるよう控えておく。
@@ -259,6 +307,7 @@ namespace HomeskzIfcImport::draw
 			}
 
 			ConfigureViewportLayers(viewport, sheetLayer, allLayers, command.viewport);
+			ConfigureViewportClasses(viewport, classNames);
 			ApplyLayerStacking(viewport, stacking);
 			// **縮尺は表示レイヤを絞った後に読む**（映すレイヤの縮尺に合わせるため）。
 			FinishViewport(viewport, command.viewport, LayerScaleFor(command.viewport));

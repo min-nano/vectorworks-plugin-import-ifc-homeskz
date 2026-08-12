@@ -11,8 +11,9 @@
 //	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 //	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
-//	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み）。SDK を触らないので
-//	無 SDK テストで検証できる（CLAUDE.md「テスト方針」）。
+//	スタック順、documentClassNames＝命令が使うクラス名の数え上げ、raiseModifierTop＝地中梁の
+//	可視ソリッドの呑み込み）。SDK を触らないので無 SDK テストで検証できる
+//	（CLAUDE.md「テスト方針」）。
 //
 
 #include "core/Document.h"
@@ -21,6 +22,7 @@
 #include <cmath>
 #include <cstddef>
 #include <ranges>
+#include <set>
 #include <string>
 
 namespace HomeskzIfcImport::core
@@ -310,6 +312,30 @@ namespace HomeskzIfcImport::core
 			raised.profile[i] = Vec2{top.x + du, top.y + bite};
 		}
 		return raised;
+	}
+
+	std::vector<std::string> documentClassNames(const Document& document)
+	{
+		// 命令ごとに drawClass を集める（同じクラスが何百件も並ぶので集合で受ける）。
+		// **クラスを持つ命令をすべて通す**——1 つ漏らすと、その要素だけ伏図で消える。
+		std::set<std::string> names;
+		const auto collect = [&names](const auto& commands)
+		{
+			for (const auto& command : commands)
+			{
+				if (!command.drawClass.empty())
+					names.insert(command.drawClass);
+			}
+		};
+		collect(document.grids);
+		collect(document.floors);
+		collect(document.members);
+		collect(document.columns);
+		collect(document.rafters);
+		collect(document.roofs);
+		collect(document.walls);
+		collect(document.slabs);
+		return {names.begin(), names.end()};
 	}
 
 	namespace
