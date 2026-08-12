@@ -236,7 +236,7 @@ void CImportIfcMenu_EventSink::DoInterface()
 		document.members.size() + document.columns.size() + document.rafters.size() +
 		document.roofs.size() + document.walls.size() + document.wallJoins.size() +
 		document.slabs.size() + document.anchorBolts.size() + document.floorPosts.size() +
-		document.fireBraces.size() + document.joints.size();
+		document.fireBraces.size() + document.joints.size() + document.sheets.size();
 	std::string body;
 	if (!drawn.valid)
 		body = "命令セットの検証に通らなかったため、何も描きませんでした。";
@@ -256,7 +256,8 @@ void CImportIfcMenu_EventSink::DoInterface()
 			   formatCount(drawn.anchorBolts, document.anchorBolts.size()) + " 本・床束 " +
 			   formatCount(drawn.floorPosts, document.floorPosts.size()) + " 本・火打 " +
 			   formatCount(drawn.fireBraces, document.fireBraces.size()) + " 本・仕口 " +
-			   formatCount(drawn.joints, document.joints.size()) + " か所を描きました。";
+			   formatCount(drawn.joints, document.joints.size()) + " か所・伏図 " +
+			   formatCount(drawn.sheets, document.sheets.size()) + " 枚を描きました。";
 	// 中止されたときは件数が命令数に届かないのが正常なので、そう明示する（「描けなかった」
 	// と読み違えないように）。描けたところまでは図面に残っている。
 	if (drawn.cancelled)

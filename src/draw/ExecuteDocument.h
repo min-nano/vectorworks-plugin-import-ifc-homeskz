@@ -12,8 +12,8 @@
 //
 //	現状は story（M3）→ grid（M1）→ wall（M9）→ wallJoin（M10）→ slab（M9。地中梁＝M10 を
 //	含む）→ floor（M5）→ member（M7）→ column（M8）→ rafter → roof（M6）→ シンボル置換系
-//	（M11: アンカーボルト・床束・火打・仕口）へディスパッチする。残りの要素は対応
-//	マイルストーンで足していく。
+//	（M11: アンカーボルト・床束・火打・仕口）→ sheet（M13。伏図。**モデルを映すので必ず
+//	最後**）へディスパッチする。残りの要素は対応マイルストーンで足していく。
 //
 
 #pragma once
@@ -50,6 +50,10 @@ namespace HomeskzIfcImport::draw
 		std::size_t fireBraces = 0;
 		std::size_t joints = 0;
 
+		// M13 シート（伏図）。**ビューポートまで作れた枚数**（シートレイヤだけできた場合は
+		// 数えない）。命令はあるのに 0 なら、原因は診断行に出る（draw/Sheet）。
+		std::size_t sheets = 0;
+
 		// 進捗ダイアログの「キャンセル」で途中打ち切りになったか。true のときは各要素の
 		// 件数が命令数に届かないのが正常で、描けたところまでは図面に残る（Undo の一括化は
 		// M15。ROADMAP.md）。完了ダイアログはこれを見て中止を明示する。
@@ -63,7 +67,7 @@ namespace HomeskzIfcImport::draw
 
 	// 命令セットを描画する。validateDocument を通してから、命令ごとに要素の draw モジュール
 	// （story → grid → wall → wallJoin → slab → floor → member → column → rafter → roof →
-	// シンボル置換系の順）へディスパッチし、描けた数を返す。
+	// シンボル置換系 → シート（伏図）の順）へディスパッチし、描けた数を返す。
 	// 検証を通らなかったときは valid=false で何も描かない。命令が空でも検証は通る（valid=true）。
 	//
 	// TODO(M11〜): anchorBolt … と、要素ごとの draw モジュールへのディスパッチを足す。

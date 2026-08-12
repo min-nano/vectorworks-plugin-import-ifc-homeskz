@@ -31,6 +31,7 @@
 #include "parse/Noboribari.h"
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
+#include "parse/Sheet.h"
 #include "parse/Story.h"
 
 #include <utility>
@@ -138,6 +139,12 @@ namespace HomeskzIfcImport::parse
 		document.fireBraces = buildFireBraceCommands(context);
 		progress.step();
 		document.joints = buildJointCommands(document.members, document.columns);
+		progress.step();
+
+		// M13 シート（伏図）: 基礎伏図・各階の柱梁伏図・母屋伏図。**どの伏図に何を映すかは
+		// 他の要素が出した答え（基礎の有無・柱の span・横架材の配置先レイヤ・屋根版の有無）
+		// から決まる**ので、それらが確定した後＝最後に組み立てる（parse/Sheet）。
+		document.sheets = buildSheetCommands(context);
 		progress.step();
 
 		return document;

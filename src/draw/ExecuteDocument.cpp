@@ -8,8 +8,8 @@
 //
 //	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（立上り・底盤）→
 //	draw/Floor → draw/Member → draw/Column → draw/Rafter → draw/Roof → draw/Symbol
-//	（アンカーボルト・床束・火打・仕口）へディスパッチする。以降のマイルストーンで
-//	draw/ColumnMark … draw/Section を足していく（ROADMAP.md）。
+//	（アンカーボルト・床束・火打・仕口）→ draw/Sheet（伏図）へディスパッチする。以降の
+//	マイルストーンで draw/ColumnMark … draw/Section を足していく（ROADMAP.md）。
 //	実描画（高さ・傾き・スタイル・PIO の挙動）はローカルの VectorWorks で目視確認する。
 //
 
@@ -22,6 +22,7 @@
 #include "draw/Member.h"
 #include "draw/Rafter.h"
 #include "draw/Roof.h"
+#include "draw/Sheet.h"
 #include "draw/Story.h"
 #include "draw/Symbol.h"
 #include "core/Document.h"
@@ -56,7 +57,7 @@ namespace HomeskzIfcImport::draw
 			document.members.size() + document.columns.size() + document.rafters.size() +
 			document.roofs.size() + document.walls.size() + document.wallJoins.size() +
 			document.slabs.size() + document.anchorBolts.size() + document.floorPosts.size() +
-			document.fireBraces.size() + document.joints.size();
+			document.fireBraces.size() + document.joints.size() + document.sheets.size();
 
 		// 要素ごとの診断（無ければ空）を改行で連ねる。1 つの文字列を各 draw* へ渡すと
 		// 後の要素が前の要素の診断を上書きしてしまうため、ここで積む。
@@ -160,13 +161,23 @@ namespace HomeskzIfcImport::draw
 		drawSymbolPhase("火打を配置しています…", "火打", document.fireBraces, counts.fireBraces);
 		drawSymbolPhase("仕口を配置しています…", "仕口", document.joints, counts.joints);
 
+		// M13 シート（伏図）。**必ず最後**に置く: ビューポートはデザインレイヤ（＝ここまでに
+		// 描いたモデル）を映すので、全要素の描画が済んでいないと空の図になる。表示レイヤの
+		// 絞り込みと重ね順の上書きも、対象のレイヤが揃っていて初めて効く（draw/Sheet.h）。
+		if (beginPhase("伏図を作成しています…", document.sheets.size()))
+		{
+			std::string note;
+			counts.sheets = drawSheets(document, progress, &note);
+			addDiagnostics(note);
+		}
+
 		// 途中で中止されたか（件数が命令数に届かないのが正常になる）。
 		counts.cancelled = progress.cancelled();
 
-		// レイヤのスタック順の並べ替えはここでは行わない（draw/Story.h 参照: VW 2026 ISDK に
-		// デザインレイヤの重ね順変更呼び出しが無く、目的の伏図ビューポート重ね順制御は
-		// per-viewport の SetViewportLayerStackingOverride を使う M13 へ委ねる。希望順の計算は
-		// core::desiredStoryLayerOrder に用意済み）。
+		// デザインレイヤ自体のスタック順は最後まで触らない（draw/Story.h 参照: VW 2026 ISDK に
+		// 重ね順変更の呼び出しが無い）。目的だった「伏図で床・野地板が柱・梁を覆い隠さない」は
+		// **上の drawSheets が per-viewport の重ね順上書きで満たす**（core::desiredStoryLayerOrder
+		// の希望順をビューポートごとに与える。draw/Sheet.h）。
 
 		return counts;
 	}

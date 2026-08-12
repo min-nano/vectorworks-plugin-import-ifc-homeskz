@@ -999,6 +999,82 @@ TEST(validate_accepts_symbol_with_any_angle)
 }
 
 // ---------------------------------------------------------------------------
+// シート（伏図。ROADMAP.md M13）
+//
+// 関門は「シートレイヤ番号（＝レイヤ名）とタイトルが非空」「ビューポートが非空のレイヤ名を
+// 1 つ以上持つ」の 2 つ。図面タイトル・図番は空でも描ける（ラベルが空になるだけ）ので
+// 弾かない。
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	core::SheetCommand validSheet()
+	{
+		core::SheetCommand sheet;
+		sheet.number = "2";
+		sheet.title = "1階床伏図";
+		sheet.viewport.drawingNumber = "2";
+		sheet.viewport.drawingTitle = "1階床伏図";
+		sheet.viewport.layers = {"1-横架材天端", "1to2-柱", "1-FL", "共通"};
+		return sheet;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_sheet)
+{
+	core::Document document;
+	document.sheets.push_back(validSheet());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_sheet_without_number_or_title)
+{
+	// 番号はシートレイヤ名そのもの・タイトルはシートの説明。どちらも空では作れない。
+	core::Document byNumber;
+	core::SheetCommand noNumber = validSheet();
+	noNumber.number.clear();
+	byNumber.sheets.push_back(noNumber);
+	CHECK(!core::validateDocument(byNumber));
+
+	core::Document byTitle;
+	core::SheetCommand noTitle = validSheet();
+	noTitle.title.clear();
+	byTitle.sheets.push_back(noTitle);
+	CHECK(!core::validateDocument(byTitle));
+}
+
+TEST(validate_rejects_sheet_with_no_layers)
+{
+	// 表示レイヤが 0 枚の伏図＝何も映らないビューポートなので作らせない。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	sheet.viewport.layers.clear();
+	document.sheets.push_back(sheet);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_sheet_with_empty_layer_name)
+{
+	// 名前の無いレイヤは引けない（描画側が黙って読み飛ばすだけになる）ので検証で弾く。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	sheet.viewport.layers.emplace_back();
+	document.sheets.push_back(sheet);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_accepts_sheet_without_drawing_label)
+{
+	// 図面タイトル・図番は空でも描ける（ラベルが空になるだけ）。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	sheet.viewport.drawingTitle.clear();
+	sheet.viewport.drawingNumber.clear();
+	document.sheets.push_back(sheet);
+	CHECK(core::validateDocument(document));
+}
+
+// ---------------------------------------------------------------------------
 // parse::buildDocument（読み込めないパスでは空の Document が返る）
 // ---------------------------------------------------------------------------
 
