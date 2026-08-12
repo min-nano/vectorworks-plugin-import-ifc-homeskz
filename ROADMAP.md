@@ -135,7 +135,7 @@ C++ では**屋根面を先に確定した上で**素直に適用できる。
 
 - ✅ プレースホルダー識別子の置換（`SamplePlugin` → `HomeskzIfcImport`。バンドル名・`.vwr`・
   VCOM ユニバーサル名・**UUID を再生成**・namespace（`CExtMenuImportIfc` /
-  `CImportIfcMenu_EventSink`）・`VW_REPO`・メニュー `ファイル` ▸ `ホームズ君IFCをインポート…`）。
+  `CImportIfcMenu_EventSink`）・`VW_REPO`・メニュー `ファイル` ▸ `IFC (ホームズ君) 取り込み…`）。
   現在の識別子は README「プラグイン識別子」節を参照。`.vwstrings` は UTF-16LE/BOM/CRLF を保持。
 - ✅ ディレクトリ骨組み: `src/core/` `src/parse/` `src/draw/` と CMake ターゲット分割。
   **`parse/`・`core/` は VectorWorks SDK を include しない**ビルド構成（無 SDK 静的ライブラリ

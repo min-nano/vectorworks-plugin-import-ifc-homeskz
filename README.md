@@ -30,7 +30,7 @@ src/
   ModuleMain.cpp            モジュールのエントリポイント。拡張機能を登録し、
                             起動時にアップデート確認を仕掛ける（stable は新しい
                             安定版確認、dev はブランチ選択）
-  Extensions/ExtMenu.{h,cpp}  「ホームズ君IFCをインポート…」メニューコマンド。
+  Extensions/ExtMenu.{h,cpp}  「IFC (ホームズ君) 取り込み…」メニューコマンド。
                             ファイル選択 → parse → draw → 完了ダイアログを束ねる
   core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
     Document.{h,cpp}          命令セットの構造体定義と validateDocument
@@ -108,10 +108,10 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 **共存できる 2 つのプラグイン**をビルドします。
 
 - **`HomeskzIfcImport`** — *stable* プラグイン。`main` からビルドされます。
-  メニューカテゴリは **ファイル**、コマンド名は **ホームズ君IFCをインポート…**。
+  メニューカテゴリは **ファイル**、コマンド名は **IFC (ホームズ君) 取り込み…**。
 - **`HomeskzIfcImportDev`** — *dev* プラグイン。フィーチャー／PR ブランチから
   ビルドされます。メニューカテゴリは **ファイル**、コマンド名は
-  **ホームズ君IFCをインポート… (Dev)**。
+  **IFC (ホームズ君) 取り込み… (Dev)**。
 
 プラグインの入れ物はプラットフォームで異なります。
 
@@ -145,7 +145,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | --- | --- | --- |
 | バンドル／出力名 | `HomeskzIfcImport` / `HomeskzIfcImportDev` | `CMakeLists.txt`、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`scripts/vw-update.ps1`、`.github/workflows/build.yml` |
 | バンドル ID（macOS） | `io.github.min-nano.HomeskzIfcImport(Dev)` | `CMakeLists.txt` |
-| メニューカテゴリ | `ファイル`（コマンド名 `ホームズ君IFCをインポート…`） | `resources/*/Strings/*.vwstrings` |
+| メニューカテゴリ | `ファイル`（コマンド名 `IFC (ホームズ君) 取り込み…`） | `resources/*/Strings/*.vwstrings` |
 | C++ 名前空間・クラス | `HomeskzIfcImport` / `CExtMenuImportIfc` / `CImportIfcMenu_EventSink` | `src/Extensions/ExtMenu.{h,cpp}`、`src/ModuleMain.cpp` |
 | VCOM ユニバーサル名 | `CExtMenuImportIfc_HomeskzIfcImport(Dev)` | `src/BuildConfig.h` |
 | 拡張機能 UUID | stable / dev 各 1 個 | `src/Extensions/ExtMenu.cpp`（一意である必要があるため `uuidgen` で再生成） |
@@ -261,7 +261,7 @@ Vectorworks 開発者クレデンシャルなし）で配布されます。
 
 4. **コマンドをワークスペースに追加します:** ツール ▸ ワークスペース ▸ 現在の
    ワークスペースを編集 ▸ *メニュー*。**ファイル** カテゴリの中に
-   **ホームズ君IFCをインポート…** コマンドがあるので、メニューにドラッグしてください。
+   **IFC (ホームズ君) 取り込み…** コマンドがあるので、メニューにドラッグしてください。
    実行すると IFC ファイルの選択ダイアログが出て、選んだファイルの内容が図面に描かれます
    （現在の対応要素は `ROADMAP.md` の「現在の進捗」を参照）。描画中は進捗ダイアログが
    「いま何を・何件中の何件まで描いたか」を表示し、キャンセルで途中中断できます
