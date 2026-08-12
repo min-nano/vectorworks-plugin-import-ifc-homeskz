@@ -173,6 +173,19 @@ namespace HomeskzIfcImport::core
 				   roof.thickness > 0.0;
 		}
 
+		// シート（伏図）1 枚が妥当か（Python 版 _validate_sheet / _validate_viewport 相当）。
+		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを
+		// **1 つ以上**持ち、そのレイヤ名がどれも非空であること。図面タイトル・図番は空でも
+		// 描ける（ラベルが空になるだけ）ので弾かない——Python 版が型だけを見るのと同じ扱い。
+		// 表示レイヤが 0 枚の伏図は「何も映らないビューポート」なので作らせない。
+		bool isValidSheet(const SheetCommand& sheet)
+		{
+			return !sheet.number.empty() && !sheet.title.empty() &&
+				   !sheet.viewport.layers.empty() &&
+				   std::ranges::none_of(sheet.viewport.layers,
+										[](const std::string& layer) { return layer.empty(); });
+		}
+
 		// シンボル配置 1 件が妥当か（Python 版 _validate_anchor_bolt / _validate_floor_post /
 		// _validate_fire_brace / _validate_joint と同じ関門を 1 つにまとめたもの）。配置先
 		// レイヤ名とシンボル名が非空であること。position / angle は数値（double なので常に
@@ -241,6 +254,12 @@ namespace HomeskzIfcImport::core
 			!std::ranges::all_of(document.floorPosts, isValidSymbol) ||
 			!std::ranges::all_of(document.fireBraces, isValidSymbol) ||
 			!std::ranges::all_of(document.joints, isValidSymbol))
+			return false;
+
+		// シート（伏図）: シートレイヤ番号・タイトルが非空で、ビューポートが非空のレイヤ名を
+		// 1 つ以上持つこと（isValidSheet 参照。Python 版 _validate_sheet / _validate_viewport と
+		// 同じ関門。ROADMAP.md M13）。
+		if (!std::ranges::all_of(document.sheets, isValidSheet))
 			return false;
 
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。

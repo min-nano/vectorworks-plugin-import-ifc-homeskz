@@ -149,6 +149,8 @@ src/
     Footing.{h,cpp}         基礎（立上り＝壁・底盤＝スラブ・基礎ストーリ・人通口・壁結合・
                             地中梁。旧 ifc/footing.py）
     Joint.{h,cpp}           仕口（旧 ifc/joint.py。IFC ではなく member/column 命令から導出）
+    Sheet.{h,cpp}           シート＝伏図（旧 ifc/sheet.py の sheet 命令。IFC ではなく
+                            取り込んだ要素の有無・柱の span から決まる）
     …                       以降、要素ごとに 1 対 1 で追加
 
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
@@ -162,6 +164,8 @@ src/
                             台形プリズムを含む。旧 vw/footing.py）
     Symbol.{h,cpp}          シンボル配置（旧 vw/{anchor_bolt,floor_post,fire_brace,joint}.py
                             の 4 本を 1 本に。要素の区別は呼び出し側が持つ）
+    Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）。
+                            レイヤの重ね順の per-viewport 上書きはここが唯一の適用箇所
     …                       以降、要素ごとに 1 対 1 で追加
 
 tests/

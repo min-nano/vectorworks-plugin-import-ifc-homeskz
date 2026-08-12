@@ -34,6 +34,7 @@
 | `ParseRafterTests` | `src/parse/Rafter` | 垂木（掃引割り付け・非凸面のクリップ・支持点・軒の出・桁幅参照） |
 | `ParseRoofTests` | `src/parse/Roof` | 野地板（軒軸・upslope・勾配・厚み・軒の Z） |
 | `ParseFootingTests` | `src/parse/Footing` | 基礎（立上り・底盤・基礎ストーリ／人通口の分割・切り下げ／壁結合の L・T・X 判定／地中梁の統合と底盤への振り分け） |
+| `ParseSheetTests` | `src/parse/Sheet` | シート（伏図。タイトル・切断レベルによる span 柱レイヤの絞り込み・番号の連番・基礎の有無による出し分け・表示レイヤがストーリの作るレイヤに実在すること） |
 | `ParseSummaryTests` | `src/parse/Summary` | 型別件数の集計とダイアログ文言の整形 |
 
 いずれも無 SDK の静的ライブラリ `HomeskzIfcCore` をリンクします。テスト間で共有する

@@ -588,6 +588,47 @@ namespace HomeskzIfcImport::core
 		double angle = 0.0;
 	};
 
+	// シートレイヤに載せるビューポート 1 枚。Python 版 document.py の ViewportCommand
+	// （dict）に対応する。伏図は「特定のデザインレイヤ群だけを見下げた図」なので、命令が
+	// 持つのは**どのレイヤを見せるか**と図面タイトル・図番だけになる（ROADMAP.md M13）。
+	//
+	// Python 版キーとの対応:
+	//   drawingTitle  ← 'drawing_title'  … 図面タイトル（"1階床伏図" 等）
+	//   drawingNumber ← 'drawing_number' … 図番（シートレイヤ番号と同じ文字列）
+	//   layers        ← 'layers'         … 表示するデザインレイヤ名（**それ以外は非表示**）
+	//
+	// 【並びは重ね順ではない】layers の並び順は描画側の走査順にすぎず、伏図での重なりは
+	// ビューポートのレイヤ重ね順が決める。床・野地板が柱・梁を覆い隠さないようにする件は
+	// **描画側が core::desiredStoryLayerOrder を per-viewport の重ね順上書きへ適用**して
+	// 満たす（draw/Sheet.h。命令にレイヤ順を持たせないのは、全ビューポートで同じ 1 本の
+	// 希望順を使うため——命令ごとに複製すると希望順の定義が命令の数だけ増える）。
+	//
+	// ［Python 版との差異・意図的］Python 版は hidden_classes（クラス単位の非表示）を持つが、
+	// **どの伏図も指定していない**（汎用機構として残されているだけ）。使われない枠を先に
+	// 作らない方針（空レイヤを作らないのと同じ）でここには持たせず、描画側は全クラスを
+	// 表示にする。クラスで絞る伏図が実際に要るときにフィールドごと足す。
+	struct ViewportCommand
+	{
+		std::string drawingTitle;
+		std::string drawingNumber;
+		std::vector<std::string> layers;
+	};
+
+	// シートレイヤ 1 枚（＋その上のビューポート 1 枚）を生成する命令。Python 版
+	// document.py の SheetCommand（dict）に対応する。draw/Sheet がこれをシートレイヤと
+	// ビューポートへ変換する（ROADMAP.md M13）。
+	//
+	// Python 版キーとの対応:
+	//   number   ← 'number'   … シートレイヤ番号（**レイヤ名がこれを担う**。"1" / "2" …）
+	//   title    ← 'title'    … シートレイヤのタイトル（"基礎伏図" 等）
+	//   viewport ← 'viewport' … そのシートに載せるビューポート 1 枚
+	struct SheetCommand
+	{
+		std::string number;
+		std::string title;
+		ViewportCommand viewport;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
@@ -669,6 +710,12 @@ namespace HomeskzIfcImport::core
 		// （parse/Joint）。members / columns から導出するので、その 2 つより後に組み立てる。
 		// 配置先は受ける側ではなく**その横架材自身のレイヤ**。
 		std::vector<SymbolCommand> joints;
+
+		// M13 シート（伏図）。基礎伏図 → 各階の柱梁伏図 → 屋根版を持つ階ごとの母屋伏図の
+		// 順で、シートレイヤ番号もその順に "1" から振る（parse/Sheet が組み立てる）。
+		// ビューポートが見せるデザインレイヤはすべて stories が作るので、描画は
+		// **全要素の描画が済んだ後**に処理する（draw/ExecuteDocument）。
+		std::vector<SheetCommand> sheets;
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は

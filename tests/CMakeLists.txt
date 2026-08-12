@@ -162,6 +162,18 @@ target_link_libraries(ParseStoryTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseStoryTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Sheet (伏図) parsing (src/parse/Sheet): which plan sheets to make and what each viewport
+# shows — the foundation plan (only when foundation elements exist), one framing plan per
+# storey and one moya plan per storey with a roof slab, the sheet numbering (1 → 2… → moya),
+# the titles (床/小屋/母屋) and the cut-level filter that picks the span column layers
+# ({from}to{to}-柱) a plan crosses. Also cross-checks that every layer a viewport lists is
+# one the story commands actually create. Exercised on the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseSheetTests ParseSheetTests.cpp)
+target_link_libraries(ParseSheetTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseSheetTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # Structural-class assignment (src/parse/StructuralClass): the pure member-type ->
 # VW class logic (04構造-02木造-… leaf classes). Trusts the homeskz IFC Name token when
 # it identifies a type, else infers from story/height (member: dodai/yukabari/koyabari/
