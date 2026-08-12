@@ -321,6 +321,34 @@ target_link_libraries(ParseSummaryTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseSummaryTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# --- 並列実行（ctest -j）の詰め方 ---------------------------------------------
+# ctest は COST の降順にテストを開始する。COST が無いと前回の実行の実測
+# （build/Testing/Temporary/CTestCostData.txt）を使うが、CI は毎回まっさらな
+# チェックアウトなのでそれが存在せず、登録順に開始することになる。**長いテストが
+# 最後に始まると、その分だけ全体の終わりが後ろへずれる**（同じマシン・同じ -j4 での
+# 実測: コストデータ有り 36 秒に対し、無しでは 60 秒）。
+#
+# そこで「重いものから始める」という情報だけを明示する。ctest が必要とするのは
+# **相対的な重さ**であって秒数の正確さではないので、テストが少し伸び縮みしても
+# 直し続ける必要はない（順位が入れ替わったときだけ見直せばよい）。ここに挙げるのは
+# 長い方から数本だけで、残りは既定の 0 のまま——空いたスロットを埋める側に回る。
+#
+# 数字はローカルの逐次実行の実測秒（このディレクトリの各テストの Passed 表示）を
+# 丸めたもの。CiWaitScriptTests だけは性質が違い、本物の締切を待つ**ほぼ純粋な
+# 待ち時間**なので、CPU を占有しない代わりに何を足しても短くならない。いちばん先に
+# 始めておくのが効く。
+set_tests_properties(ParseRafterTests PROPERTIES COST 13)
+set_tests_properties(LoaderTests PROPERTIES COST 12)
+set_tests_properties(ParseFootingTests PROPERTIES COST 11)
+set_tests_properties(ParseContextTests PROPERTIES COST 11)
+set_tests_properties(ParseMemberTests PROPERTIES COST 10)
+set_tests_properties(ParseJointTests PROPERTIES COST 9)
+set_tests_properties(ParseColumnTests PROPERTIES COST 9)
+set_tests_properties(ParseFireBraceTests PROPERTIES COST 8)
+set_tests_properties(ParseAnchorBoltTests PROPERTIES COST 8)
+set_tests_properties(UpdaterRobustnessTests PROPERTIES COST 6)
+set_tests_properties(ParseFloorTests PROPERTIES COST 6)
+
 # Back-end tests for the bundled updater scripts. Both SOURCE (dot-source) their
 # script and drive its q-stable / q-dev / do-install functions with the network
 # boundary stubbed, so they run SDK- and network-free — the same idea as the C++
@@ -379,7 +407,10 @@ if(NOT WIN32)
 		# The suite deliberately waits on real deadlines (a few seconds each), and
 		# has its own ceiling; keep ctest's above it so a hang is reported by the
 		# suite itself rather than as an opaque ctest timeout.
-		set_tests_properties(CiWaitScriptTests PROPERTIES TIMEOUT 900)
+		# COST は「いちばん先に始めさせる」ため（上記「並列実行の詰め方」）。実測 26 秒
+		# のうちほとんどが待ち時間で、他のテストと並べても互いに邪魔をしない代わりに、
+		# 後から始めるとその 26 秒がまるごと最後尾に足される。
+		set_tests_properties(CiWaitScriptTests PROPERTIES TIMEOUT 900 COST 30)
 	elseif(VW_REQUIRE_SCRIPT_TESTS)
 		message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'bash' was not found: the CI-wait "
 							"script tests (ci-wait.test.sh) cannot run.")
