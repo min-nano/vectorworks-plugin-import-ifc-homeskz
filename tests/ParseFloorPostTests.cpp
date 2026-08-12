@@ -290,7 +290,7 @@ TEST(floor_post_foundation_detected_from_base_slab)
 TEST(floor_post_fixture_shape)
 {
 	bool ok = false;
-	const Model model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	const std::vector<SymbolCommand> posts = buildFloorPostCommands(model);
@@ -308,7 +308,7 @@ TEST(floor_post_support_lines_include_ohbiki)
 {
 	// 支持材芯には土台だけでなく大引も含める（二次大引の端を大引芯基準にするため）。
 	bool ok = false;
-	const Model model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	const std::vector<SupportLine> supports = collectSupportLines(model);
@@ -322,7 +322,7 @@ TEST(floor_post_collinear_ohbiki_are_merged_in_fixture)
 {
 	// 継手で分断された大引が統合され、連の数は元の大引本数より少なくなる。
 	bool ok = false;
-	const Model model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	const std::vector<OhbikiRun> lines = collectOhbikiLines(model);
@@ -335,7 +335,7 @@ TEST(floor_post_count_matches_merged_run_shin_spans)
 	// 床束の総数は「継手統合後の大引 1 連の支持材芯どうしの区間」に floorPostOffsets を
 	// 適用した合計と一致する（継手は端部として扱わず、支持材芯を端部にする）。
 	bool ok = false;
-	const Model model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	const std::vector<SupportLine> supports = collectSupportLines(model);
@@ -417,7 +417,7 @@ TEST(floor_post_synthetic_run_places_posts_at_shin_pitch)
 TEST(floor_post_is_deterministic)
 {
 	bool ok = false;
-	const Model model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 
 	const std::vector<SymbolCommand> first = buildFloorPostCommands(model);

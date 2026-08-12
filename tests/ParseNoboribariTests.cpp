@@ -427,7 +427,7 @@ TEST(snap_uses_trimmed_end_position)
 TEST(passes_non_noboribari_through_unchanged)
 {
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	if (!ok)
 		return;
@@ -470,7 +470,7 @@ TEST(collect_roof_planes_skips_unresolvable_roof_slabs)
 TEST(collects_roof_planes_from_fixture)
 {
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	if (!ok)
 		return;
@@ -492,7 +492,7 @@ TEST(processes_injected_noboribari)
 	// フィクスチャの屋根版と重ならない位置に合成登り梁＋受け材を置く（屋根スナップは
 	// 効かないが、端部の食い込み詰めが働くことを検証する）。
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	if (!ok)
 		return;

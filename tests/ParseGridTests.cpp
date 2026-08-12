@@ -262,7 +262,7 @@ TEST(reads_minimal_grid_fixture)
 {
 	// minimal_grid.ifc は X1/X2（鉛直）と Y1（水平）の 3 本（ParseSummaryTests と同じ内訳）。
 	bool ok = false;
-	Model const model = fixture("minimal_grid.ifc", ok);
+	const Model& model = fixture("minimal_grid.ifc", ok);
 	CHECK(ok);
 	std::vector<GridCommand> const grids = buildGridCommands(model);
 
@@ -299,7 +299,7 @@ TEST(reads_real_homeskz_fixture)
 {
 	// ホームズ君の実モデル。多数の x*/y* 軸を含み、解析が例外なく通り、命令が出る。
 	bool ok = false;
-	Model const model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
+	const Model& model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
 	CHECK(ok);
 	std::vector<GridCommand> const grids = buildGridCommands(model);
 

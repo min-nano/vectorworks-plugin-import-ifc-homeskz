@@ -242,7 +242,7 @@ TEST(returns_empty_without_stories)
 TEST(fixture_roofs_are_valid)
 {
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	std::vector<RoofCommand> const roofs = buildRoofCommands(model);
 	CHECK(!roofs.empty());
@@ -263,7 +263,7 @@ TEST(fixture_layers_map_to_roof_storeys)
 {
 	// 伏図次郎: 下屋根（2FL）→ "2-野地板"、主屋根（RFL）→ "R-野地板"。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	std::set<std::string> layers;
 	for (const RoofCommand& roof : buildRoofCommands(model))
@@ -278,7 +278,7 @@ TEST(one_roof_per_roof_slab_plane)
 	// 野地板は屋根版 1 面につき 1 枚（垂木のように 455 間隔で割らない）。勾配のある面の
 	// 数だけできるので、屋根版の枚数以下（水平面はスキップ）。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	std::size_t roofSlabs = 0;
@@ -300,7 +300,7 @@ TEST(one_roof_per_roof_slab_plane)
 TEST(roofs_are_deterministic)
 {
 	bool ok = false;
-	Model const model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
+	const Model& model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
 	CHECK(ok);
 	std::vector<RoofCommand> const first = buildRoofCommands(model);
 	std::vector<RoofCommand> const second = buildRoofCommands(model);

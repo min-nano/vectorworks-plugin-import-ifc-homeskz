@@ -1128,7 +1128,7 @@ TEST(build_ignores_hardware_without_placement)
 TEST(reads_sample_house_fixture)
 {
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	const std::vector<ColumnCommand> commands = buildColumnCommands(model);
 	CHECK(!commands.empty());
@@ -1173,7 +1173,7 @@ TEST(all_fixtures_bounds_span_the_column_height)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		Model const model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 		if (!ok)
 			continue;
@@ -1208,7 +1208,7 @@ TEST(all_fixtures_build_columns_deterministically)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		Model const model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 		if (!ok)
 			continue;

@@ -262,7 +262,7 @@ TEST(sample1_style_name_matches_layer)
 {
 	// 実フィクスチャでも命令のスタイル名が階（レイヤ接頭辞）と対応する。
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	for (const FloorCommand& floor : buildFloorCommands(model))
 	{
@@ -279,7 +279,7 @@ TEST(sample1_style_name_matches_layer)
 TEST(sample1_has_floor_on_each_non_top_fl_layer)
 {
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	std::vector<FloorCommand> const floors = buildFloorCommands(model);
 
@@ -294,7 +294,7 @@ TEST(sample1_components_and_class_are_fixed)
 	// スラブ構成は上から 床仕上げ（FL − 横架材天端 − 24）＋ 床下地（24mm 固定）で、
 	// 合計は FL − 横架材天端。IFC の押し出し厚（28mm 等）は使わない。
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	const std::map<std::string, double> fl = flByLayer(model);
 	const std::map<std::string, double> beamTop = beamTopByLayer(model);
@@ -328,7 +328,7 @@ TEST(sample1_finish_top_equals_fl_when_no_step)
 	// 段差の無い床は床仕上げ上端（elevation）が FL（絶対 Z）に一致し、
 	// FL レベルへ offset 0 でバインドされる。
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	const std::map<std::string, double> fl = flByLayer(model);
 
@@ -359,7 +359,7 @@ TEST(elevation_equals_fl_plus_offset_in_all_fixtures)
 	for (const std::string& file : files)
 	{
 		bool ok = false;
-		Model const model = fixture(file, ok);
+		const Model& model = fixture(file, ok);
 		CHECK(ok);
 		const std::map<std::string, double> fl = flByLayer(model);
 
@@ -386,7 +386,7 @@ TEST(floors_only_on_fl_layers)
 	for (const std::string& file : files)
 	{
 		bool ok = false;
-		Model const model = fixture(file, ok);
+		const Model& model = fixture(file, ok);
 		CHECK(ok);
 		const std::map<std::string, double> valid = flByLayer(model);
 		for (const FloorCommand& floor : buildFloorCommands(model))
@@ -404,7 +404,7 @@ TEST(skip_floor_steps_are_represented)
 	// ある通常の床が混在する。床ごとに実際の高さ（elevation）を持ち、offset に高低差が
 	// 現れる（全床を横架材天端へ潰すと段差が失われる）。
 	bool ok = false;
-	Model const model = fixture("スキップフロア_サンプル.ifc", ok);
+	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
 	const std::vector<FloorCommand> twoFL = onLayer(buildFloorCommands(model), "2-FL");
 	CHECK(!twoFL.empty());
@@ -431,7 +431,7 @@ TEST(floor_above_beam_top_respects_ifc_position)
 	// グレー本モデルプラン1の床は横架材天端より 100〜150mm 高い位置にある。
 	// 横架材天端へ潰さず、IFC の床位置（正の offset）を保つ。
 	bool ok = false;
-	Model const model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
+	const Model& model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
 	CHECK(ok);
 	std::vector<FloorCommand> const floors = buildFloorCommands(model);
 	CHECK(!floors.empty());
@@ -448,7 +448,7 @@ TEST(boundary_is_centered_polygon)
 	// 外形はグリッド中心オフセット済みの 3 点以上のポリゴン。生の IFC 座標は数万 mm
 	// なので、センタリングにより原点近傍（|v| < 30000）に頂点が分布する。
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	std::vector<FloorCommand> const floors = buildFloorCommands(model);
 	CHECK(!floors.empty());
@@ -624,7 +624,7 @@ TEST(loft_floor_is_synthesised_from_a_real_fixture)
 	// 実データ: 屋根階に床梁（床大梁・床小梁）を持つモデルは無く、既存フィクスチャでは
 	// ロフト床が合成されない＝屋根階の床は増えないことを確かめる（合成が暴発しない）。
 	bool ok = false;
-	Model const model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
+	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
 	const std::vector<StoryInfo> stories = collectStories(model);
 	CHECK(!stories.empty());
@@ -638,7 +638,7 @@ TEST(is_deterministic)
 {
 	// 同じ入力からは同じ命令列（順序・値）が得られる（エンティティ列挙順に依存しない）。
 	bool ok = false;
-	Model const model = fixture("スキップフロア_サンプル.ifc", ok);
+	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
 	std::vector<FloorCommand> const first = buildFloorCommands(model);
 	std::vector<FloorCommand> const second = buildFloorCommands(model);

@@ -184,7 +184,7 @@ TEST(anchor_bolt_fixture_counts)
 	// 伏図次郎: 84 本が座金付き（M12）、1 本が座金なし（M16）。Python 版 test_ifc_anchor_bolt.py
 	// の test_counts_match_washered_and_washerless と同じ値（移植ズレの検出点）。
 	bool ok = false;
-	const Model model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	const std::vector<SymbolCommand> bolts = buildAnchorBoltCommands(model);
@@ -202,7 +202,7 @@ TEST(anchor_bolt_fixture_positions_are_centered)
 {
 	// センタリング補正済みなら X は 0 をまたいで分布する。
 	bool ok = false;
-	const Model model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
 	const std::vector<SymbolCommand> bolts = buildAnchorBoltCommands(model);
@@ -224,7 +224,7 @@ TEST(anchor_bolt_all_fixtures_build)
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
-		const Model model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 
 		const std::vector<SymbolCommand> bolts = buildAnchorBoltCommands(model);
@@ -242,7 +242,7 @@ TEST(anchor_bolt_is_deterministic)
 {
 	// 同じ入力からは常に同じ並び・同じ値（byType が #id 昇順なので列挙順に依存しない）。
 	bool ok = false;
-	const Model model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
+	const Model& model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
 	CHECK(ok);
 
 	const std::vector<SymbolCommand> first = buildAnchorBoltCommands(model);

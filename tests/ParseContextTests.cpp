@@ -58,7 +58,7 @@ namespace
 TEST(stories_are_cached_and_match_the_plain_call)
 {
 	bool ok = false;
-	Model const model = fixture(kLoftFixture, ok);
+	const Model& model = fixture(kLoftFixture, ok);
 	CHECK(ok);
 
 	Context context(model);
@@ -82,7 +82,7 @@ TEST(stories_are_cached_and_match_the_plain_call)
 TEST(grid_centre_is_cached_and_matches_the_plain_call)
 {
 	bool ok = false;
-	Model const model = fixture(kLoftFixture, ok);
+	const Model& model = fixture(kLoftFixture, ok);
 	CHECK(ok);
 
 	Context context(model);
@@ -111,7 +111,7 @@ TEST(grid_centre_is_origin_when_there_are_no_grid_axes)
 TEST(story_elements_are_cached_and_match_the_plain_call)
 {
 	bool ok = false;
-	Model const model = fixture(kLoftFixture, ok);
+	const Model& model = fixture(kLoftFixture, ok);
 	CHECK(ok);
 
 	Context context(model);
@@ -130,7 +130,7 @@ TEST(story_elements_are_cached_and_match_the_plain_call)
 TEST(unknown_storey_id_yields_no_elements)
 {
 	bool ok = false;
-	Model const model = fixture(kLoftFixture, ok);
+	const Model& model = fixture(kLoftFixture, ok);
 	CHECK(ok);
 
 	// 存在しない #id でも落ちず、空を返して覚える（1 要素の欠損で全体を止めない）。
@@ -146,7 +146,7 @@ TEST(unknown_storey_id_yields_no_elements)
 TEST(loft_floor_regions_are_cached_and_match_the_plain_call)
 {
 	bool ok = false;
-	Model const model = fixture(kLoftFixture, ok);
+	const Model& model = fixture(kLoftFixture, ok);
 	CHECK(ok);
 
 	Context context(model);
@@ -185,7 +185,7 @@ TEST(loft_floor_regions_are_cached_and_match_the_plain_call)
 TEST(roof_planes_are_cached_and_match_the_plain_call)
 {
 	bool ok = false;
-	Model const model = fixture(kRoofFixture, ok);
+	const Model& model = fixture(kRoofFixture, ok);
 	CHECK(ok);
 
 	Context context(model);
@@ -225,7 +225,7 @@ TEST(roof_planes_are_cached_and_match_the_plain_call)
 TEST(unresolvable_roof_plane_is_remembered_as_absent)
 {
 	bool ok = false;
-	Model const model = fixture(kRoofFixture, ok);
+	const Model& model = fixture(kRoofFixture, ok);
 	CHECK(ok);
 
 	// 存在しない #id は解決できない。**その事実もキャッシュする**ので、2 度目も
@@ -245,7 +245,7 @@ TEST(members_are_cached_and_match_the_plain_call)
 	// 走らせて覚える。2 度目が同じ結果（同じ実体）を返し、キャッシュを通さない呼び出しとも
 	// 一致すること。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	if (!ok)
 		return;
@@ -273,7 +273,7 @@ TEST(columns_are_cached_and_match_the_plain_call)
 	// ので、コンテキストは 1 回だけ走らせて覚える。2 度目が同じ結果（同じ実体）を返し、
 	// キャッシュを通さない呼び出しとも一致すること。
 	bool ok = false;
-	Model const model = fixture("伏図次郎【2階】.ifc", ok);
+	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 	if (!ok)
 		return;
@@ -301,7 +301,7 @@ TEST(walls_are_cached_and_match_the_plain_call)
 	// 1 回だけ走らせて覚える。2 度目が同じ結果（同じ実体）を返し、キャッシュを通さない
 	// 呼び出しとも一致すること。
 	bool ok = false;
-	Model const model = fixture(kRoofFixture, ok);
+	const Model& model = fixture(kRoofFixture, ok);
 	CHECK(ok);
 	if (!ok)
 		return;
@@ -328,7 +328,7 @@ TEST(context_backed_commands_match_the_plain_commands)
 	for (const std::string& name : HomeskzIfcTests::allFixtures())
 	{
 		bool ok = false;
-		Model const model = fixture(name, ok);
+		const Model& model = fixture(name, ok);
 		CHECK(ok);
 
 		// 1 つのコンテキストを全要素で共有した結果（＝buildDocument と同じ経路）と、

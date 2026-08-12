@@ -120,7 +120,7 @@ TEST(loads_all_homeskz_fixtures)
 	for (const std::string& name : HomeskzIfcTests::allFixtures())
 	{
 		bool ok = false;
-		Model const model = HomeskzIfcTests::fixture(name, ok);
+		const Model& model = HomeskzIfcTests::fixture(name, ok);
 		CHECK(ok);
 		// 実データは数千エンティティ規模。空でないことを確かめる。
 		CHECK(model.size() > 0);
