@@ -140,6 +140,24 @@ namespace HomeskzIfcImport::UpdaterParse
 		return out;
 	}
 
+	// Wrap a string as a PowerShell single-quoted literal (no expansion inside),
+	// doubling any embedded single quote — PowerShell's own escaping rule. Used
+	// for paths inside a -Command script; single quotes keep the whole script
+	// free of double quotes, which is what lets it be passed as one argument.
+	inline std::string PowerShellQuote(const std::string& s)
+	{
+		std::string out = "'";
+		for (char const c : s)
+		{
+			if (c == '\'')
+				out += "''";
+			else
+				out += c;
+		}
+		out += "'";
+		return out;
+	}
+
 	// ---------------------------------------------------------------------
 	// Deriving install paths from the plug-in's own binary path. The platform
 	// code in Updater.cpp resolves its own binary (dladdr / GetModuleFileName);
@@ -183,6 +201,24 @@ namespace HomeskzIfcImport::UpdaterParse
 		return bundle.substr(0, slash); // .../<PlugIns>
 	}
 
+	// macOS: from the HOST APPLICATION's executable path
+	//   /Applications/Vectorworks 2026/Vectorworks.app/Contents/MacOS/Vectorworks
+	// derive the bundle to relaunch:
+	//   /Applications/Vectorworks 2026/Vectorworks.app
+	// Returns "" if the executable is not inside a .app bundle.
+	//
+	// This is what the restart hands to `open -a`: launching the BUNDLE (through
+	// LaunchServices, exactly as a double-click would) rather than exec'ing the
+	// inner binary is what keeps Vectorworks able to find its support files.
+	inline std::string MacAppBundleFromExecutable(const std::string& exePath)
+	{
+		const std::string marker = ".app/Contents/MacOS/";
+		std::string::size_type const at = exePath.rfind(marker);
+		if (at == std::string::npos)
+			return "";
+		return exePath.substr(0, at + std::string(".app").size());
+	}
+
 	// Windows: directory that contains the given module path. On Windows the
 	// plug-in is a bare "<name>.vlb" living directly in the Plug-Ins folder, so
 	// this is both where the updater script sits and the Plug-Ins folder to
@@ -201,6 +237,100 @@ namespace HomeskzIfcImport::UpdaterParse
 		if (moduleDir.empty())
 			return "";
 		return moduleDir + "\\vw-update.ps1";
+	}
+
+	// ---------------------------------------------------------------------
+	// Restarting Vectorworks after an install.
+	//
+	// The whole restart — quit AND relaunch — is handed to a small helper process
+	// that outlives us, for two reasons learned the hard way:
+	//
+	//  * The RELAUNCH cannot come from inside Vectorworks. The old process has to
+	//    be gone before the new one starts, or the new instance fails to load its
+	//    support files and dies (which is what the SDK's own
+	//    CloseAllFilesAndQuitVectorworks(bRestart: true) does).
+	//  * The QUIT must not be an SDK call made while the plug-in is being loaded.
+	//    The update check runs during start-up, with the splash still up, and
+	//    Vectorworks is not ready to shut itself down at that point — asking it to
+	//    produced the same 「サポートファイルの読み込みに失敗しました」 failure. The
+	//    SDK offers no "run this once start-up finished" hook, so instead of
+	//    guessing when it is safe, the helper asks the OS for an ORDINARY quit —
+	//    the exact thing ⌘Q / closing the window does (macOS: a 'quit' Apple event
+	//    to our own bundle id; Windows: WM_CLOSE to the main window). The OS
+	//    delivers it through the normal event loop, i.e. only once Vectorworks is
+	//    actually processing events, and the usual save prompts appear.
+	//
+	// The helper is a one-liner passed straight to /bin/sh (macOS) or
+	// powershell -Command (Windows) — deliberately NOT a mode of the bundled
+	// updater script. The script on disk belongs to whatever build was JUST
+	// installed, which may be older than the running code and know nothing about
+	// the mode we would call (that mismatch really happened: 「不明なチャンネル:
+	// 'relaunch'」). An inline command cannot fall out of sync with its caller.
+	// The text is built here, as a pure function, so the exact shell / PowerShell
+	// that runs is unit-tested.
+	// ---------------------------------------------------------------------
+
+	// Seconds the helper waits for Vectorworks to exit before giving up. Backing
+	// out of the save prompt keeps the application running, and relaunching one
+	// the user is still working in would be worse than not restarting at all.
+	inline constexpr int kRelaunchWaitSeconds = 300;
+	// Seconds after which the quit request is sent a SECOND time if Vectorworks
+	// is still there. The first one goes out while start-up is still finishing;
+	// should it be dropped rather than queued, this is the second chance. Kept to
+	// exactly one retry — if the user cancelled the save prompt, they get at most
+	// one more prompt, not a stream of them.
+	inline constexpr int kRelaunchRetrySeconds = 15;
+	// Seconds to let the old process' teardown settle before opening the app.
+	inline constexpr int kRelaunchSettleSeconds = 2;
+
+	// macOS: /bin/sh command that asks the running Vectorworks (identified by its
+	// bundle id, so no dependence on the localized application name) to quit,
+	// waits for `pid` to exit (bounded), and then re-opens `appPath`. `open` goes
+	// through LaunchServices, exactly like a double-click — launching the inner
+	// executable directly is what makes Vectorworks fail to find its support
+	// files.
+	inline std::string MacRelaunchCommand(const std::string& pid, const std::string& appPath,
+										  const std::string& bundleId,
+										  int waitSeconds = kRelaunchWaitSeconds,
+										  int retrySeconds = kRelaunchRetrySeconds,
+										  int settleSeconds = kRelaunchSettleSeconds)
+	{
+		// The AppleScript is a single-quoted /bin/sh word, and it contains double
+		// quotes around the bundle id — so the id must not carry either quote
+		// character. Bundle ids never do; drop them rather than risk the quoting.
+		std::string safeId;
+		for (char const c : bundleId)
+			if (c != '"' && c != '\'')
+				safeId += c;
+
+		return "q() { osascript -e 'tell application id \"" + safeId +
+			   "\" to quit' >/dev/null 2>&1; }; q; i=0; while kill -0 " + pid +
+			   " 2>/dev/null; do [ \"$i\" -eq " + std::to_string(retrySeconds) +
+			   " ] && q; [ \"$i\" -ge " + std::to_string(waitSeconds) +
+			   " ] && exit 0; sleep 1; i=$((i+1)); done; sleep " + std::to_string(settleSeconds) +
+			   "; exec open -a " + ShellQuote(appPath);
+	}
+
+	// Windows: powershell -Command script with the same shape — CloseMainWindow
+	// posts WM_CLOSE, the same request as clicking the window's close box, so
+	// Vectorworks shuts down its own way (save prompts included). Single quotes
+	// throughout, so the whole script can be passed as one double-quoted argument.
+	inline std::string WinRelaunchCommand(const std::string& pid, const std::string& exePath,
+										  int waitSeconds = kRelaunchWaitSeconds,
+										  int retrySeconds = kRelaunchRetrySeconds,
+										  int settleSeconds = kRelaunchSettleSeconds)
+	{
+		// Same shape as the macOS one: close, wait a little, close once more if it
+		// is still there, wait out the rest of the budget, then relaunch.
+		const int restSeconds = waitSeconds > retrySeconds ? waitSeconds - retrySeconds : 0;
+		const std::string close =
+			"$p = Get-Process -Id " + pid + "; if ($p) { $null = $p.CloseMainWindow() }; ";
+
+		return "$ErrorActionPreference='SilentlyContinue'; " + close + "Wait-Process -Id " + pid +
+			   " -Timeout " + std::to_string(retrySeconds) + "; " + close + "Wait-Process -Id " +
+			   pid + " -Timeout " + std::to_string(restSeconds) + "; if (Get-Process -Id " + pid +
+			   ") { exit }; Start-Sleep -Seconds " + std::to_string(settleSeconds) +
+			   "; Start-Process -FilePath " + PowerShellQuote(exePath);
 	}
 
 	// ---------------------------------------------------------------------

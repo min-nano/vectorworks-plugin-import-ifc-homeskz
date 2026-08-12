@@ -32,14 +32,22 @@ namespace
 		bool qStableStarts = true;
 		bool qDevStarts = true;
 		bool doInstallStarts = true;
-		bool askAnswer = true; // what Ask returns
-		int pickAnswer = 0;	   // what PickBuild returns
+		bool askAnswer = true; // what Ask returns once askAnswers runs out
+		// Answers for the first N Ask calls, in order (a flow can ask twice:
+		// "install?" and then "restart?"). Anything beyond falls back to
+		// askAnswer.
+		std::vector<bool> askAnswers;
+		int pickAnswer = 0;		   // what PickBuild returns
+		bool restartAnswer = true; // what Restart returns (false -> could not be arranged)
 
 		// --- Recorded interactions ------------------------------------------
 		std::vector<std::vector<std::string>> scriptCalls;
 		std::vector<std::vector<std::string>> informs; // {text, advice}
+		// {text, advice, okText, cancelText} of every Ask, in order.
+		std::vector<std::vector<std::string>> asks;
 		int askCount = 0;
 		int pickCount = 0;
+		int restartCount = 0;
 		std::vector<std::string> lastPickItems;
 
 		bool RunScript(const std::vector<std::string>& args, std::string& out) override
@@ -76,11 +84,13 @@ namespace
 			informs.push_back({text, advice});
 		}
 
-		bool Ask(const std::string&, const std::string&, const std::string&,
-				 const std::string&) override
+		bool Ask(const std::string& text, const std::string& advice, const std::string& okText,
+				 const std::string& cancelText) override
 		{
+			const std::size_t i = asks.size();
+			asks.push_back({text, advice, okText, cancelText});
 			++askCount;
-			return askAnswer;
+			return i < askAnswers.size() ? askAnswers[i] : askAnswer;
 		}
 
 		int PickBuild(const std::vector<std::string>& items, int) override
@@ -88,6 +98,12 @@ namespace
 			++pickCount;
 			lastPickItems = items;
 			return pickAnswer;
+		}
+
+		bool Restart() override
+		{
+			++restartCount;
+			return restartAnswer;
 		}
 
 		// Convenience: how many times a given mode was invoked.
@@ -161,11 +177,10 @@ TEST(stable_accepted_and_install_succeeds)
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=def5678\n"
 				   "url=https://ex.com/HomeskzIfcImport.zip\n";
-	h.askAnswer = true;
+	h.askAnswers = {true, false}; // install: yes, restart: later
 	h.doInstallOut = "ok";
 	RunStableStartupCheckWith(h);
 
-	CHECK_EQ(h.askCount, 1);
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	// Installed the right asset under the stable name.
 	std::vector<std::string> args = h.DoInstallArgs();
@@ -175,10 +190,57 @@ TEST(stable_accepted_and_install_succeeds)
 		CHECK_EQ(args[1], "https://ex.com/HomeskzIfcImport.zip");
 		CHECK_EQ(args[2], "HomeskzIfcImport");
 	}
-	// Reported success.
+	// Success is reported by the restart QUESTION (a plain notice would leave the
+	// user to work out that a restart is needed), not by an Inform.
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+	CHECK_EQ(static_cast<std::size_t>(h.asks.size()), static_cast<std::size_t>(2));
+	if (h.asks.size() == 2)
+	{
+		CHECK_EQ(h.asks[1][0], "HomeskzIfcImport を更新しました。");
+		CHECK_EQ(h.asks[1][1],
+				 "build: def5678\n\n"
+				 "反映するには Vectorworks の再起動が必要です。\n"
+				 "今すぐ再起動しますか？（起動の完了後に終了し、自動で起動し直します。\n"
+				 "開いているファイルは保存を確認します）");
+		CHECK_EQ(h.asks[1][2], "再起動");
+		CHECK_EQ(h.asks[1][3], "後で");
+	}
+	// The user picked 後で, so nothing was restarted.
+	CHECK_EQ(h.restartCount, 0);
+}
+
+TEST(stable_restart_button_restarts_vectorworks)
+{
+	FakeHost h;
+	h.qStableOut = "installed=abc1234\n"
+				   "latest=def5678\n"
+				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+	h.askAnswer = true; // says yes to both questions: install, then restart
+	h.doInstallOut = "ok";
+	RunStableStartupCheckWith(h);
+
+	CHECK_EQ(h.CountScript("do-install"), 1);
+	CHECK_EQ(h.restartCount, 1);
+	// It worked, so the user is not told anything further.
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+TEST(stable_restart_that_cannot_be_arranged_is_reported)
+{
+	FakeHost h;
+	h.qStableOut = "installed=abc1234\n"
+				   "latest=def5678\n"
+				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+	h.askAnswer = true;
+	h.doInstallOut = "ok";
+	h.restartAnswer = false; // e.g. the relaunch helper would not start
+	RunStableStartupCheckWith(h);
+
+	CHECK_EQ(h.restartCount, 1);
+	// Pressing 再起動 must not look like it did nothing.
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
-		CHECK_EQ(h.informs[0][0], "HomeskzIfcImport を更新しました。");
+		CHECK_EQ(h.informs[0][0], "再起動できませんでした。");
 }
 
 TEST(stable_accepted_but_install_reports_error)
@@ -198,6 +260,10 @@ TEST(stable_accepted_but_install_reports_error)
 		// The script's own error message is surfaced as the advice line.
 		CHECK_EQ(h.informs[0][1], "ダウンロードに失敗しました。");
 	}
+	// Nothing was installed, so no restart is offered (the single Ask was the
+	// install question).
+	CHECK_EQ(h.askCount, 1);
+	CHECK_EQ(h.restartCount, 0);
 }
 
 TEST(stable_accepted_but_installer_cannot_start)
@@ -303,7 +369,8 @@ TEST(dev_selecting_a_build_installs_it)
 	h.qDevOut = "installed=run1234\n"
 				"build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n"
 				"build\tbbb2222\tfeature/y\thttps://ex.com/y.zip\n";
-	h.pickAnswer = 2; // entry 2 -> candidate index 1 (feature/y)
+	h.pickAnswer = 2;		// entry 2 -> candidate index 1 (feature/y)
+	h.askAnswers = {false}; // restart: later
 	h.doInstallOut = "ok";
 	RunDevStartupCheckWith(h, "main", "run1234");
 
@@ -315,9 +382,35 @@ TEST(dev_selecting_a_build_installs_it)
 		CHECK_EQ(args[1], "https://ex.com/y.zip"); // the SECOND candidate
 		CHECK_EQ(args[2], "HomeskzIfcImportDev");
 	}
-	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
-	if (!h.informs.empty())
-		CHECK_EQ(h.informs[0][0], "開発版ビルドをインストールしました。");
+	// Like the stable channel, success is reported by the restart question.
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+	CHECK_EQ(static_cast<std::size_t>(h.asks.size()), static_cast<std::size_t>(1));
+	if (h.asks.size() == 1)
+	{
+		CHECK_EQ(h.asks[0][0], "開発版ビルドをインストールしました。");
+		CHECK_EQ(h.asks[0][1],
+				 "branch: feature/y\ncommit: bbb2222\n\n"
+				 "反映するには Vectorworks の再起動が必要です。\n"
+				 "今すぐ再起動しますか？（起動の完了後に終了し、自動で起動し直します。\n"
+				 "開いているファイルは保存を確認します）");
+		CHECK_EQ(h.asks[0][2], "再起動");
+		CHECK_EQ(h.asks[0][3], "後で");
+	}
+	CHECK_EQ(h.restartCount, 0);
+}
+
+TEST(dev_restart_button_restarts_vectorworks)
+{
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n";
+	h.pickAnswer = 1;	// the only candidate
+	h.askAnswer = true; // presses 再起動
+	h.doInstallOut = "ok";
+	RunDevStartupCheckWith(h, "main", "run1234");
+
+	CHECK_EQ(h.CountScript("do-install"), 1);
+	CHECK_EQ(h.restartCount, 1);
 }
 
 TEST(dev_out_of_range_selection_keeps_current)
@@ -333,7 +426,8 @@ TEST(dev_install_failure_is_reported)
 {
 	FakeHost h;
 	h.qDevOut = "build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n";
-	h.pickAnswer = 1; // the only candidate
+	h.pickAnswer = 1;	// the only candidate
+	h.askAnswer = true; // would press 再起動 if it were ever offered...
 	h.doInstallOut = "error=アーカイブの展開に失敗しました。\n";
 	RunDevStartupCheckWith(h, "main", "run1234");
 
@@ -343,6 +437,9 @@ TEST(dev_install_failure_is_reported)
 		CHECK_EQ(h.informs[0][0], "インストールに失敗しました。");
 		CHECK_EQ(h.informs[0][1], "アーカイブの展開に失敗しました。");
 	}
+	// ...but the install failed, so it never is.
+	CHECK_EQ(h.askCount, 0);
+	CHECK_EQ(h.restartCount, 0);
 }
 
 // ---------------------------------------------------------------------------

@@ -20,6 +20,21 @@
 //	    change at start-up anyway — so the picker belongs where the build is
 //	    actually loaded, not on every command run.
 //
+//	Both channels end the same way: a build that installed successfully is only
+//	LOADED at the next start-up, so the "installed" dialog is not a plain notice
+//	but a question with a 再起動 button. Choosing it quits Vectorworks (with the
+//	usual save prompt) and starts it again; choosing 後で keeps the running build
+//	until the user restarts on their own.
+//
+//	Neither half of that restart is performed by this process. These checks run
+//	while the plug-in is being LOADED at start-up (splash still up), and
+//	Vectorworks is not ready to shut itself down then: the SDK's quit — with or
+//	without its bRestart flag — ends in 「サポートファイルの読み込みに失敗しました」.
+//	So a detached helper is started instead, which sends the ORDINARY OS quit
+//	request (the ⌘Q one, delivered by the event loop only once Vectorworks is
+//	really running), waits for this process to disappear, and then opens the
+//	application again. See Updater.cpp and UpdaterParse.h's MacRelaunchCommand.
+//
 
 #pragma once
 
@@ -33,7 +48,8 @@ namespace HomeskzIfcImport
 
 	// Dev plug-in only. At Vectorworks start-up, ask (native dialogs) which build
 	// to use: the currently installed one, or another branch's prerelease. If a
-	// different build is chosen it is installed (restart to load it); otherwise
+	// different build is chosen it is installed (and the user is offered an
+	// immediate restart, since that is what loads it); otherwise
 	// nothing happens and start-up continues. The picker is skipped entirely when
 	// there is nothing to choose between — no prereleases exist, or the only one
 	// is the running build. Silent on a network error. Runs only once per session.
