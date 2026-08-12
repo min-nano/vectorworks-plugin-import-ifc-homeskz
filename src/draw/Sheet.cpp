@@ -87,6 +87,9 @@ namespace HomeskzIfcImport::draw
 			catch (...)
 			{
 				// 走査中の異常で伏図全体を落とさない（CLAUDE.md「エラーハンドリング」）。
+				// そこまでに拾えたレイヤだけを返す（絞り込みの取りこぼしは、そのレイヤが
+				// 伏図に映り込むだけで済む）。
+				return layers;
 			}
 			return layers;
 		}
@@ -109,7 +112,9 @@ namespace HomeskzIfcImport::draw
 			}
 			catch (...)
 			{
-				// タイトルが付かなくても図は描ける（1 つの失敗で全体を止めない）。
+				// タイトルが付かなくても図は描ける（1 つの失敗で全体を止めない）ので、
+				// レイヤはそのまま返す。
+				return layer;
 			}
 			return layer;
 		}
@@ -171,7 +176,7 @@ namespace HomeskzIfcImport::draw
 					continue;
 				try
 				{
-					VWLayerObj design(layer);
+					const VWLayerObj design(layer);
 					const double scale = design.GetScale();
 					if (scale > 0.0)
 						return scale;
@@ -179,6 +184,7 @@ namespace HomeskzIfcImport::draw
 				catch (...)
 				{
 					// このレイヤからは縮尺を取れなかった。次の候補を見る。
+					continue;
 				}
 			}
 			return 0.0;
@@ -201,7 +207,8 @@ namespace HomeskzIfcImport::draw
 			}
 			catch (...)
 			{
-				// ラベル・縮尺が付かなくてもビューポートは図面に残る。
+				// ラベル・縮尺が付かなくてもビューポートは図面に残るので、ここで戻る。
+				return;
 			}
 		}
 	} // namespace
