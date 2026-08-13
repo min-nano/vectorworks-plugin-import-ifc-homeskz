@@ -6,8 +6,8 @@
 //
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
 //	walls / slabs（M9）・wallJoins / 底盤の modifiers＝地中梁（M10）・rafters / roofs（M6）・
-//	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints）の
-//	各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
+//	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints）・
+//	sheets（M13）・sections（M14）の各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
 //	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 //	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
@@ -188,6 +188,22 @@ namespace HomeskzIfcImport::core
 										[](const std::string& layer) { return layer.empty(); });
 		}
 
+		// 断面ビューポート（軸組図）1 枚が妥当か（Python 版 _validate_section 相当）。
+		// 配置先シートレイヤ番号（＝レイヤ名）とタイトルが非空で、表示レイヤを 1 つ以上持ち
+		// （伏図と同じ理由＝何も映らないビューポートを作らせない）、**断面指示線が縮退して
+		// いない**（始点≠終点。縮退した線からは切断面が決まらない）こと。加えて
+		// **高さ範囲が正**（startHeight < endHeight）で**奥行きが正**であること——どちらも
+		// 0 以下だと切断面の手前も奥も含まれない空の断面になる。
+		bool isValidSection(const SectionCommand& section)
+		{
+			return !section.number.empty() && !section.title.empty() &&
+				   !section.viewport.layers.empty() &&
+				   std::ranges::none_of(section.viewport.layers,
+										[](const std::string& layer) { return layer.empty(); }) &&
+				   !samePoint(section.lineStart, section.lineEnd) && section.depth > 0.0 &&
+				   section.startHeight < section.endHeight;
+		}
+
 		// シンボル配置 1 件が妥当か（Python 版 _validate_anchor_bolt / _validate_floor_post /
 		// _validate_fire_brace / _validate_joint と同じ関門を 1 つにまとめたもの）。配置先
 		// レイヤ名とシンボル名が非空であること。position / angle は数値（double なので常に
@@ -277,6 +293,11 @@ namespace HomeskzIfcImport::core
 		// 1 つ以上持つこと（isValidSheet 参照。Python 版 _validate_sheet / _validate_viewport と
 		// 同じ関門。ROADMAP.md M13）。
 		if (!std::ranges::all_of(document.sheets, isValidSheet))
+			return false;
+
+		// 断面ビューポート（軸組図）: シートレイヤ番号・タイトル・表示レイヤに加え、指示線が
+		// 縮退しておらず、奥行き・高さ範囲が正であること（isValidSection 参照。ROADMAP.md M14）。
+		if (!std::ranges::all_of(document.sections, isValidSection))
 			return false;
 
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。

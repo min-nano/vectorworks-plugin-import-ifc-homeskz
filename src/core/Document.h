@@ -693,6 +693,57 @@ namespace HomeskzIfcImport::core
 		ViewportCommand viewport;
 	};
 
+	// 断面ビューポート（軸組図）の向き。X通り＝定 X の切断面（指示線は Y 方向へ延びる）、
+	// Y通り＝定 Y の切断面（指示線は X 方向へ延びる）。Python 版の 'direction'（'X'/'Y'）に
+	// 対応し、文字列ではなく enum で持つ（ColumnMarkStyle と同じ流儀）。
+	enum class SectionDirection
+	{
+		X,
+		Y,
+	};
+
+	// 断面ビューポート（軸組図）1 枚を**新規作成**する命令。Python 版 document.py の
+	// SectionCommand（dict）に対応する（ROADMAP.md M14）。
+	//
+	// 【Python 版との最大の差異＝新規作成する】Python 版（VectorScript）は断面ビューポートを
+	// 作れないため、シートレイヤ "A" にあらかじめ用意した 40 枚（X1..X20 / Y1..Y20）の指示線・
+	// ビューポートを**移動・改名・削除**して流用していた（`source_number` は流用元の図番）。
+	// C++ SDK には ISDK::CreateSectionViewport があるので、本移植は**通りの数だけ新規に作る**
+	// ——したがって既製枚数の上限も `source_number` も要らない（parse/Section.h 参照）。
+	//
+	// Python 版キーとの対応:
+	//   number      （Python 版 vw/section.py SECTION_SHEET_LAYER）… 配置先シートレイヤ番号
+	//                                （＝レイヤ名。全 section 命令で同じ "A"）
+	//   title       （同上）          … シートレイヤのタイトル（"軸組図"）
+	//   direction   ← 'direction'     … X通り / Y通り
+	//   lineStart   ← 'line_start'    … 断面指示線の始点（切断位置。センタリング済みの平面座標）
+	//   lineEnd     ← 'line_end'      … 同 終点
+	//   viewPoint   （Python 版に対応なし）… **視線の向き**を示す点（指示線の中点から見る側へ
+	//                                 離した点）。Python 版は既製の指示線の向きをそのまま
+	//                                 使ったので不要だった。
+	//   depth       （同上）          … 切断面から視線方向への奥行き（mm）
+	//   startHeight （同上）          … 断面の下端 Z（絶対値・mm）
+	//   endHeight   （同上）          … 断面の上端 Z（絶対値・mm）
+	//   viewport    ← 'drawing_number' / 'drawing_title' … 図番（通り名 "X1" / "又い"）・
+	//                                 図面タイトル（"X1通り"）と、映すデザインレイヤ
+	//
+	// **並べる位置は持たない**: シートレイヤ上での配置は、実際にできたビューポートの大きさに
+	// 合わせて詰める必要があり、大きさは描いてみるまで分からない（draw/Section が
+	// GetObjectBounds で測って並べる。Python 版 _arrange_viewports と同じ）。
+	struct SectionCommand
+	{
+		std::string number;
+		std::string title;
+		SectionDirection direction = SectionDirection::X;
+		Vec2 lineStart;
+		Vec2 lineEnd;
+		Vec2 viewPoint;
+		double depth = 0.0;
+		double startHeight = 0.0;
+		double endHeight = 0.0;
+		ViewportCommand viewport;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
@@ -785,6 +836,12 @@ namespace HomeskzIfcImport::core
 		// ビューポートが見せるデザインレイヤはすべて stories が作るので、描画は
 		// **全要素の描画が済んだ後**に処理する（draw/ExecuteDocument）。
 		std::vector<SheetCommand> sheets;
+
+		// M14 断面ビューポート（軸組図）。柱と梁の両方が通る通り（柱梁の芯）を X・Y 方向
+		// それぞれ検出し、切断位置の昇順に X通り → Y通り の順で並べる（parse/Section）。
+		// 伏図と同じくモデルを映すので、描画は **全要素の描画が済んだ後**（伏図の後）に
+		// 処理する（draw/ExecuteDocument）。
+		std::vector<SectionCommand> sections;
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は

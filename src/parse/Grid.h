@@ -41,6 +41,14 @@ namespace HomeskzIfcImport::parse
 	// 点順で処理するので、入力の列挙順に依存しない決定的な並びになる。
 	std::vector<GridLine> collectGridLines(const Model& model);
 
+	// 通り芯 1 本が X 通り（＝定 X の縦線）か。軸名の先頭が X/Y ならそれに従い（大文字小文字を
+	// 無視）、判別できなければ線の向き（|Δx| < |Δy| なら縦線＝X 通り）で決める。
+	//
+	// **X/Y の判定はここが唯一の定義**で、通り芯のクラス分け（buildGridCommands）と軸組図の
+	// 通り名の照合（parse/Section の namedAxes）が同じ述語を通す。別々に書くと「通り芯は
+	// X 通りなのに軸組図では Y 通り」という食い違いが起きうる（CLAUDE.md「重複を作らない置き場所」）。
+	bool isXAxis(const GridLine& line);
+
 	// 線分群の bbox 中心（＝**全要素に共通のセンタリングオフセット**）を返す。Python 版
 	// resolve_lines が返す (center_x, center_y) に相当し、床・屋根組・基礎・部材はいずれも
 	// このオフセットで平面座標を補正する（要素ごとに別の中心を使うと図面がずれる）。

@@ -157,6 +157,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/Joint.cpp
 		src/parse/Rafter.cpp
 		src/parse/Roof.cpp
+		src/parse/Section.cpp
 		src/parse/Sheet.cpp
 		src/parse/StructuralClass.cpp
 		src/parse/IfcGeometry.cpp)
@@ -293,6 +294,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Rafter.cpp
 		src/draw/Roof.cpp
 		src/draw/Symbol.cpp
+		src/draw/Section.cpp
 		src/draw/Sheet.cpp)
 
 	# add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])

@@ -153,6 +153,8 @@ src/
     Joint.{h,cpp}           仕口（旧 ifc/joint.py。IFC ではなく member/column 命令から導出）
     Sheet.{h,cpp}           シート＝伏図（旧 ifc/sheet.py の sheet 命令。IFC ではなく
                             取り込んだ要素の有無・柱の span から決まる）
+    Section.{h,cpp}         軸組図＝断面ビューポート（旧 ifc/section.py。柱梁の芯を通る通りを
+                            検出し、切断線・視線の向き・奥行き・高さ範囲・表示レイヤを決める）
     …                       以降、要素ごとに 1 対 1 で追加
 
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
@@ -171,8 +173,10 @@ src/
                             Extensions/ExtColumnMark（ROADMAP.md M12 の【決定】）
     ObjectHandles.{h,cpp}   「命令インデックス → 描いたオブジェクトのハンドル」の対応表
                             （壁→壁結合が使う。実体は draw/DrawUtil）
-    Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）。
-                            表示レイヤの絞り込みとクラス表示はここが唯一の適用箇所
+    Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）
+    Section.{h,cpp}         section 命令 → 断面ビューポート（旧 vw/section.py）。**Python 版と
+                            違い ISDK::CreateSectionViewport で新規作成する**（既製 40 枚の
+                            流用はしない。ROADMAP.md M14 の【決定】）
     …                       以降、要素ごとに 1 対 1 で追加
 
 tests/
@@ -204,7 +208,9 @@ tests/
 判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・許容値（統合・自由端・**人通口・
 壁結合・地中梁**）は `parse/Footing.h`、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・
 スタイル解決・**構成層／基準面／スタイルの新規作成**——床板・底盤・立上りが共有する）は
-`draw/DrawUtil`、構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
+`draw/DrawUtil`、**シートレイヤの用意とビューポートの仕上げ**（表示レイヤの絞り込み・クラス表示・
+縮尺・図番／図面タイトル・更新——伏図と軸組図が共有する唯一の実装）も `draw/DrawUtil`、
+構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
 実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名は
 `parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`

@@ -32,6 +32,7 @@
 #include "parse/Noboribari.h"
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
+#include "parse/Section.h"
 #include "parse/Sheet.h"
 #include "parse/Story.h"
 
@@ -152,6 +153,13 @@ namespace HomeskzIfcImport::parse
 		// 他の要素が出した答え（基礎の有無・柱の span・横架材の配置先レイヤ・屋根版の有無）
 		// から決まる**ので、それらが確定した後＝最後に組み立てる（parse/Sheet）。
 		document.sheets = buildSheetCommands(context);
+		progress.step();
+
+		// M14 軸組図（断面ビューポート）: 柱梁の芯を通る通りを切断位置にし、そこへ断面
+		// ビューポートを 1 枚ずつ作る。**組み立て済みの Document を入力に取る**——切断位置は
+		// 柱・横架材の命令から、映すレイヤはストーリの命令から、断面の高さ範囲は各要素の Z から
+		// 決まるので、ここが最後になる（parse/Section）。
+		document.sections = buildSectionCommands(context, document);
 		progress.step();
 
 		return document;

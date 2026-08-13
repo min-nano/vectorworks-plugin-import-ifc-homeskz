@@ -174,6 +174,18 @@ target_link_libraries(ParseSheetTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseSheetTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Section (軸組図) parsing (src/parse/Section): which grid lines get a section viewport and
+# what each one cuts — the cut positions where both a column and a parallel beam run (大引 and
+# 母屋 do not count as beams), the naming against the IFC grid axes (an exact axis name, else
+# an intermediate line as X1' / 又い), the section line geometry (constant X / constant Y plus
+# a margin), the view direction (so grid names read left to right), the height range that wraps
+# the model and the design layers a section shows. Synthetic STEP grid axes plus one real
+# fixture end to end; SDK-free. HOMESKZ_FIXTURES_DIR points the file-based case at fixtures/.
+vw_add_test(ParseSectionTests ParseSectionTests.cpp)
+target_link_libraries(ParseSectionTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseSectionTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # Structural-class assignment (src/parse/StructuralClass): the pure member-type ->
 # VW class logic (04構造-02木造-… leaf classes). Trusts the homeskz IFC Name token when
 # it identifies a type, else infers from story/height (member: dodai/yukabari/koyabari/

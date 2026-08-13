@@ -8,8 +8,8 @@
 //
 //	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（立上り・底盤）→
 //	draw/Floor → draw/Member → draw/Column → draw/Rafter → draw/Roof → draw/Symbol
-//	（アンカーボルト・床束・火打・仕口）→ draw/Sheet（伏図）へディスパッチする。以降の
-//	マイルストーンで draw/ColumnMark … draw/Section を足していく（ROADMAP.md）。
+//	（アンカーボルト・床束・火打・仕口）→ draw/ColumnMark（記号）→ draw/Sheet（伏図）→
+//	draw/Section（軸組図）へディスパッチする。
 //	実描画（高さ・傾き・スタイル・PIO の挙動）はローカルの VectorWorks で目視確認する。
 //
 
@@ -23,6 +23,7 @@
 #include "draw/Member.h"
 #include "draw/Rafter.h"
 #include "draw/Roof.h"
+#include "draw/Section.h"
 #include "draw/Sheet.h"
 #include "draw/Story.h"
 #include "draw/Symbol.h"
@@ -59,7 +60,7 @@ namespace HomeskzIfcImport::draw
 			document.roofs.size() + document.walls.size() + document.wallJoins.size() +
 			document.slabs.size() + document.anchorBolts.size() + document.floorPosts.size() +
 			document.fireBraces.size() + document.joints.size() + document.columnMarks.size() +
-			document.sheets.size();
+			document.sheets.size() + document.sections.size();
 
 		// 要素ごとの診断（無ければ空）を改行で連ねる。1 つの文字列を各 draw* へ渡すと
 		// 後の要素が前の要素の診断を上書きしてしまうため、ここで積む。
@@ -198,6 +199,16 @@ namespace HomeskzIfcImport::draw
 		{
 			std::string note;
 			counts.sheets = drawSheets(document, progress, &note);
+			addDiagnostics(note);
+		}
+
+		// M14 軸組図（断面ビューポート）。**伏図の後**に置く: どちらもモデルを映すので全要素の
+		// 描画が済んでいる必要があり、シートレイヤの番号も伏図（"1" / "2" …）の後に "A" が
+		// 続く並びになる（Python 版 execute_document も伏図 → 軸組図の順）。
+		if (beginPhase("軸組図を作成しています…", document.sections.size()))
+		{
+			std::string note;
+			counts.sections = drawSections(document, progress, &note);
 			addDiagnostics(note);
 		}
 

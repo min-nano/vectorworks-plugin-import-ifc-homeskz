@@ -12,15 +12,20 @@
 #include "draw/DrawUtil.h"
 #include "draw/ObjectHandles.h"
 
+#include "VWFC/VWObjects/VWDocument.h"
 #include "VWFC/VWObjects/VWGroupObj.h"
+#include "VWFC/VWObjects/VWLayerObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
+#include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <array>
 #include <memory>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -28,8 +33,109 @@ namespace HomeskzIfcImport::draw
 	namespace
 	{
 		// デザインレイヤの種別コード（CreateLayer の layerType 引数）。1 = デザインレイヤ、
-		// 2 = シート（プレゼンテーション）レイヤ。本プラグインが描くのはデザインレイヤ。
+		// 2 = シート（プレゼンテーション）レイヤ。SDK の ELayerType（Kernel/API/
+		// MiniCadCallBacks.h）がこの値を定める。
 		constexpr short kDesignLayerType = 1;
+		constexpr short kSheetLayerType = 2;
+
+		// SetViewportLayerVisibility の表示種別。**2（グレー）は使わない**——対象外のレイヤを
+		// グレーにすると図に薄く残る（Python 版 vw/sheet.py の注記と同じ）。
+		constexpr short kLayerVisible = 0;
+		constexpr short kLayerHidden = 1;
+
+		// SetViewportClassVisibility の表示種別。SDK の EClassVisibility（VWFC/VWObjects/
+		// VWClass.h）が Normal=0 / Invisible=-1 / Grayed=2 と定めており、**VS の 0/1/2 とは
+		// 値が違う**（1 は「非表示」ではない）。表示に戻すのが目的なので Normal だけを使う。
+		constexpr short kClassVisible = 0;
+
+		// 図面のレイヤを先頭から順に辿る。VWDocument::GetDrawingHeaderFristMember（SDK の
+		// 綴りママ）が図面のオブジェクト列の先頭＝最初のレイヤで、以降は NextObject でたどれる。
+		// レイヤ以外が混ざっても IsLayerObject で弾く（ISDK に「レイヤだけを列挙する」呼び出しは
+		// 無いため、この走査が唯一の手立て）。
+		std::vector<MCObjectHandle> AllLayers()
+		{
+			std::vector<MCObjectHandle> layers;
+			try
+			{
+				for (MCObjectHandle h = VWDocument::GetDrawingHeaderFristMember(); h != nil;
+					 h = gSDK->NextObject(h))
+				{
+					if (VWLayerObj::IsLayerObject(h))
+						layers.push_back(h);
+				}
+			}
+			catch (...)
+			{
+				// 走査中の異常で図全体を落とさない（CLAUDE.md「エラーハンドリング」）。
+				// そこまでに拾えたレイヤだけを返す（絞り込みの取りこぼしは、そのレイヤが
+				// 図に映り込むだけで済む）。
+				return layers;
+			}
+			return layers;
+		}
+
+		// 図面で実際に使われているクラスの索引を集める（DrawUtil.h の ViewportSetup 参照）。
+		// **コンテナは中まで辿る**のが要点で、通り芯（GridAxis PIO）のラベルのように
+		// 「PIO / シンボルの中の図形が、スタイルの決めたクラスを持つ」ものは、外側の
+		// オブジェクトのクラスだけ見ても拾えない（ラベルだけ消える。ローカル確認で判明）。
+		std::set<InternalIndex> CollectUsedClasses(const std::vector<MCObjectHandle>& layers)
+		{
+			std::set<InternalIndex> classes;
+			// 入れ子（グループ・シンボル・PIO）は深さ上限つきで辿る。上限は「PIO の中の
+			// グループの中の図形」に十分で、壊れたデータで無限に潜らない値。
+			constexpr int kMaxDepth = 6;
+			std::vector<std::pair<MCObjectHandle, int>> pending;
+			pending.reserve(layers.size());
+			for (const MCObjectHandle layer : layers)
+			{
+				const MCObjectHandle first = gSDK->FirstMemberObj(layer);
+				if (first != nil)
+					pending.emplace_back(first, 0);
+			}
+			while (!pending.empty())
+			{
+				const auto [head, depth] = pending.back();
+				pending.pop_back();
+				for (MCObjectHandle h = head; h != nil; h = gSDK->NextObject(h))
+				{
+					const InternalIndex index = gSDK->GetObjectClass(h);
+					if (index != 0)
+						classes.insert(index);
+					if (depth >= kMaxDepth)
+						continue;
+					const MCObjectHandle child = gSDK->FirstMemberObj(h);
+					if (child != nil)
+						pending.emplace_back(child, depth + 1);
+				}
+			}
+			return classes;
+		}
+
+		// 表示するデザインレイヤの縮尺を返す（Python 版 configure_viewport_scale）。図が映す
+		// レイヤの縮尺は揃っているので、最初に取れたものを採る。取れなければ 0（＝ビューポートの
+		// 既定縮尺のままにする）。
+		double LayerScaleFor(const core::ViewportCommand& command)
+		{
+			for (const std::string& name : command.layers)
+			{
+				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
+				if (layer == nil)
+					continue;
+				try
+				{
+					const VWLayerObj design(layer);
+					const double scale = design.GetScale();
+					if (scale > 0.0)
+						return scale;
+				}
+				catch (...)
+				{
+					// このレイヤからは縮尺を取れなかった。次の候補を見る。
+					continue;
+				}
+			}
+			return 0.0;
+		}
 
 		// 既存のコンポーネント（層）数。取得できなければ 0（＝層を持たない）とみなす。
 		short CountComponents(MCObjectHandle object)
@@ -288,6 +394,106 @@ namespace HomeskzIfcImport::draw
 			return nil;
 		gSDK->SetCurrentLayer(layer);
 		return layer;
+	}
+
+	// --- シートレイヤとビューポート（伏図＝M13・軸組図＝M14 が共有する）------------------
+	//
+	// 使う SDK API は ISDK（gSDK）／VWFC の実在シグネチャに合わせている
+	// （Vectorworks 2026 SDK。ci-debug の sdk-grep / shell で確認済み）:
+	//   * VWDocument::GetDrawingHeaderFristMember()      … 図面のオブジェクト列の先頭（＝最初の
+	//                                                      レイヤ。SDK の綴りママ）
+	//   * gSDK->NextObject(h) / VWLayerObj::IsLayerObject … レイヤの走査
+	//   * gSDK->GetNamedLayer / CreateLayer               … シートレイヤの取得・生成
+	//   * VWLayerObj(h).SetDescription / GetScale         … シートレイヤのタイトル・縮尺
+	//   * gSDK->SetViewportLayerVisibility(vp, layer, v)  … 表示レイヤの絞り込み（0=表示/1=非表示）
+	//   * gSDK->FirstMemberObj / GetObjectClass           … 図形が使うクラスの数え上げ
+	//   * gSDK->ClassNameToID(name)                       … クラス名 → InternalIndex
+	//   * gSDK->SetViewportClassVisibility(vp, idx, 0)    … クラス表示（既定は非表示）
+	//   * VWViewportObj(vp).SetScale / SetDescription / SetLocator / Update
+	//                                                     … 縮尺（1003）・図面タイトル（1032）・
+	//                                                       図番（1033）・描画更新
+	ViewportSetup PrepareViewportSetup(const core::Document& document)
+	{
+		ViewportSetup setup;
+		setup.layers = AllLayers();
+		setup.classes = CollectUsedClasses(setup.layers);
+		// 命令セットが名乗るクラスも足す（まだ図形が無いクラスや、走査で辿れなかったものの
+		// 取りこぼしを防ぐ保険）。
+		for (const std::string& name : core::documentClassNames(document))
+		{
+			const InternalIndex index = gSDK->ClassNameToID(TXString(name.c_str()));
+			if (index != 0)
+				setup.classes.insert(index);
+		}
+		return setup;
+	}
+
+	MCObjectHandle PrepareSheetLayer(const std::string& number, const std::string& title)
+	{
+		const TXString name(number.c_str());
+		MCObjectHandle layer = gSDK->GetNamedLayer(name);
+		if (layer == nil)
+			layer = gSDK->CreateLayer(name, kSheetLayerType);
+		if (layer == nil)
+			return nil;
+		try
+		{
+			VWLayerObj sheet(layer);
+			sheet.SetDescription(TXString(title.c_str()));
+		}
+		catch (...)
+		{
+			// タイトルが付かなくても図は描ける（1 つの失敗で全体を止めない）ので、
+			// レイヤはそのまま返す。
+			return layer;
+		}
+		return layer;
+	}
+
+	std::size_t ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
+								  const ViewportSetup& setup, const core::ViewportCommand& command)
+	{
+		// 表示レイヤ: まず全部隠し、命令に挙げたものだけ表示へ戻す。**存在しないレイヤ名は
+		// 黙って読み飛ばす**（要素の描画がスキップされてレイヤが無い場合など。図自体は残す）。
+		for (const MCObjectHandle layer : setup.layers)
+		{
+			if (layer == sheetLayer)
+				continue;
+			gSDK->SetViewportLayerVisibility(viewport, layer, kLayerHidden);
+		}
+		for (const std::string& name : command.layers)
+		{
+			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
+			if (layer != nil)
+				gSDK->SetViewportLayerVisibility(viewport, layer, kLayerVisible);
+		}
+
+		// クラス: 1 つずつ表示へ戻す（ヘッダ「クラスをわざわざ数え上げる理由」）。
+		std::size_t applied = 0;
+		for (const InternalIndex index : setup.classes)
+		{
+			if (gSDK->SetViewportClassVisibility(viewport, index, kClassVisible))
+				++applied;
+		}
+
+		// 縮尺・ラベル・更新。**縮尺は表示レイヤを絞った後に読む**（映すレイヤの縮尺に
+		// 合わせるため）。設定に失敗しても図そのものは残す。
+		const double scale = LayerScaleFor(command);
+		try
+		{
+			VWViewportObj vp(viewport);
+			if (scale > 0.0)
+				vp.SetScale(scale);
+			vp.SetDescription(TXString(command.drawingTitle.c_str()));
+			vp.SetLocator(TXString(command.drawingNumber.c_str()));
+			vp.Update();
+		}
+		catch (...)
+		{
+			// ラベル・縮尺が付かなくてもビューポートは図面に残るので、ここで戻る。
+			return applied;
+		}
+		return applied;
 	}
 
 	// 「命令インデックス → ハンドル」の対応表の所有者。**表の中身（MCObjectHandle）は
