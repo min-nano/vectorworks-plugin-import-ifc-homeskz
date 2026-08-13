@@ -318,13 +318,13 @@ TEST(NameCutsHandleMultiByteAndBrokenAxisNames)
 	const std::vector<NamedAxis> ascii{NamedAxis{"A1", 0.0}};
 	CHECK(nameSectionCuts({1000.0}, ascii) == (std::vector<std::string>{"A1'"}));
 
-	const std::vector<NamedAxis> twoByte{NamedAxis{"é", 0.0}};      // U+00E9（2 バイト）
+	const std::vector<NamedAxis> twoByte{NamedAxis{"é", 0.0}}; // U+00E9（2 バイト）
 	CHECK(nameSectionCuts({1000.0}, twoByte) == (std::vector<std::string>{"é'"}));
 
-	const std::vector<NamedAxis> fourByte{NamedAxis{"𠮷", 0.0}};    // U+20BB7（4 バイト）
+	const std::vector<NamedAxis> fourByte{NamedAxis{"𠮷", 0.0}}; // U+20BB7（4 バイト）
 	CHECK(nameSectionCuts({1000.0}, fourByte) == (std::vector<std::string>{"𠮷'"}));
 
-	const std::vector<NamedAxis> broken{NamedAxis{std::string("\x80X"), 0.0}};  // 継続バイトが先頭
+	const std::vector<NamedAxis> broken{NamedAxis{std::string("\x80X"), 0.0}}; // 継続バイトが先頭
 	CHECK(nameSectionCuts({1000.0}, broken).size() == static_cast<std::size_t>(1));
 
 	const std::vector<NamedAxis> truncated{NamedAxis{std::string("\xE3\x81"), 0.0}}; // 途中で切れ
