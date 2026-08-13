@@ -123,10 +123,11 @@ namespace HomeskzIfcImport::parse
 			std::size_t count = 0;
 			double last = tagged.front().coord;
 			Cluster current;
+			// 溜まっている座標を 1 クラスタとして確定する。**呼ぶ時点で必ず 1 件以上ある**
+			// （空の入力は上で弾き、ループ内では隙間を見つけたときだけ呼ぶ）ので、
+			// 0 件の番人は置かない。
 			const auto flush = [&]()
 			{
-				if (count == 0)
-					return;
 				current.coord = sum / static_cast<double>(count);
 				clusters.push_back(current);
 				current = Cluster{};
@@ -461,14 +462,16 @@ namespace HomeskzIfcImport::parse
 		if (!gridPlanBounds(context.gridLines(), context.gridCenter(), bounds))
 			return {};
 
+		// 建物の高さ範囲。求まらない（高さの分かる要素が 1 つも無い＝空の命令セット）なら
+		// 作らない。**レイヤの確認より先に見る**——ストーリがあれば必ず高さが求まる
+		// （ストーリ高さも範囲に入れるため）ので、逆順にするとこの関門を通れなくなる。
+		HeightRange heights;
+		if (!sectionHeightRange(document, heights.start, heights.end))
+			return {};
+
 		// 映すレイヤが無い（ストーリを作れていない）なら、断面には何も出ないので作らない。
 		const std::vector<std::string> layers = sectionLayers(document.stories);
 		if (layers.empty())
-			return {};
-
-		// 建物の高さ範囲。求まらない（高さの分かる要素が 1 つも無い）なら作らない。
-		HeightRange heights;
-		if (!sectionHeightRange(document, heights.start, heights.end))
 			return {};
 
 		const std::vector<double> xCuts =

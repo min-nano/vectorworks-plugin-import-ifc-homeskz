@@ -59,6 +59,11 @@ namespace
 	// 試験用の通り芯（Python 版テストの _LINES と同じ配置）。X通り（縦線）= X1/X2/X3、
 	// Y通り（横線）= い/ろ。bbox は x∈[0,8000]・y∈[0,6000] で中心は (4000,3000) なので、
 	// センタリング後は Python 版テストと同じ ±4000 / ±3000 になる。
+	//
+	// 実データに寄せて、次の 3 つも混ぜてある（いずれも bbox は広げない）:
+	//   * **宣言順は座標順ではない**（X3 → X1 → X2）。並べ替えが効いていることを見る。
+	//   * **同名で 2 区間に分かれた通り芯**（X1 の短い区間）。1 本にまとめられる。
+	//   * **無名の通り芯**（命名に使えないので通り名の候補から外れる）。
 	Model sampleGridModel()
 	{
 		return loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
@@ -67,16 +72,24 @@ namespace
 							   "#13=IFCCARTESIANPOINT((4000.,6000.,0.));\n"
 							   "#14=IFCCARTESIANPOINT((8000.,0.,0.));\n"
 							   "#15=IFCCARTESIANPOINT((8000.,6000.,0.));\n"
+							   "#16=IFCCARTESIANPOINT((0.,1000.,0.));\n"
+							   "#17=IFCCARTESIANPOINT((0.,5000.,0.));\n"
+							   "#18=IFCCARTESIANPOINT((2000.,0.,0.));\n"
+							   "#19=IFCCARTESIANPOINT((2000.,6000.,0.));\n"
 							   "#20=IFCPOLYLINE((#10,#11));\n"
 							   "#21=IFCPOLYLINE((#12,#13));\n"
 							   "#22=IFCPOLYLINE((#14,#15));\n"
 							   "#23=IFCPOLYLINE((#10,#14));\n"
 							   "#24=IFCPOLYLINE((#11,#15));\n"
-							   "#30=IFCGRIDAXIS('X1',#20,.T.);\n"
-							   "#31=IFCGRIDAXIS('X2',#21,.T.);\n"
-							   "#32=IFCGRIDAXIS('X3',#22,.T.);\n"
+							   "#25=IFCPOLYLINE((#16,#17));\n"
+							   "#26=IFCPOLYLINE((#18,#19));\n"
+							   "#30=IFCGRIDAXIS('X3',#22,.T.);\n"
+							   "#31=IFCGRIDAXIS('X1',#20,.T.);\n"
+							   "#32=IFCGRIDAXIS('X2',#21,.T.);\n"
 							   "#33=IFCGRIDAXIS('い',#23,.T.);\n"
-							   "#34=IFCGRIDAXIS('ろ',#24,.T.);\n");
+							   "#34=IFCGRIDAXIS('ろ',#24,.T.);\n"
+							   "#35=IFCGRIDAXIS('X1',#25,.T.);\n"
+							   "#36=IFCGRIDAXIS($,#26,.T.);\n");
 	}
 
 	core::ColumnCommand column(double x, double y)
@@ -174,6 +187,34 @@ TEST(NamedAxesSplitsByDirectionAndSorts)
 	CHECK(near(y[1].coord, 3000.0));
 }
 
+TEST(NamedAxesMergesRepeatsAndSkipsUnnamed)
+{
+	// 試験用モデルには X1 が 2 区間・無名の通り芯が 1 本ある（sampleGridModel）。
+	// 同名は 1 本にまとまり、無名は通り名の候補にならない（座標 2000 の軸は出てこない）。
+	Model const model = sampleGridModel();
+	const std::vector<parse::GridLine> lines = parse::collectGridLines(model);
+	core::Vec2 center;
+	CHECK(parse::gridCenterOf(lines, center));
+
+	const std::vector<NamedAxis> x = namedAxes(lines, center, SectionDirection::X);
+	CHECK(x.size() == static_cast<std::size_t>(3));
+	CHECK(std::ranges::none_of(x, [](const NamedAxis& axis) { return axis.name.empty(); }));
+	CHECK(std::ranges::none_of(x, [](const NamedAxis& axis) { return near(axis.coord, -2000.0); }));
+}
+
+TEST(NamedAxesSortsTiesByName)
+{
+	// 同じ座標に名前の違う通り芯が 2 本あるとき（区間が分かれた別名の通り）は名前順にする
+	// ——入力の並び順に依存しない決定的な結果にするため。
+	const std::vector<parse::GridLine> lines{
+		parse::GridLine{"X2", core::Vec2{0.0, 0.0}, core::Vec2{0.0, 1000.0}},
+		parse::GridLine{"X1", core::Vec2{0.0, 2000.0}, core::Vec2{0.0, 3000.0}}};
+	const std::vector<NamedAxis> axes = namedAxes(lines, core::Vec2{0.0, 0.0}, SectionDirection::X);
+	CHECK(axes.size() == static_cast<std::size_t>(2));
+	CHECK(axes[0].name == "X1");
+	CHECK(axes[1].name == "X2");
+}
+
 // --- 切断位置（柱梁の芯）-----------------------------------------------------
 
 TEST(CutPositionsNeedBothColumnAndBeam)
@@ -261,6 +302,39 @@ TEST(NameCutsWithoutAxesFallsBackToNumbers)
 	CHECK(nameSectionCuts({0.0, 1000.0}, {}) == (std::vector<std::string>{"1", "2"}));
 }
 
+TEST(NameCutsBeforeFirstAxisUsesTheFirstAsBase)
+{
+	// 最初の通り芯より手前で切る（まれ）。基準にできる「直前の通り」が無いので、
+	// 先頭の通り芯を基準にして連番する。
+	const std::vector<NamedAxis> axes{NamedAxis{"X1", 0.0}, NamedAxis{"X2", 4000.0}};
+	CHECK(nameSectionCuts({-2000.0, 4000.0}, axes) == (std::vector<std::string>{"X1'", "X2"}));
+}
+
+TEST(NameCutsHandleMultiByteAndBrokenAxisNames)
+{
+	// 通り名は UTF-8 で、いろは文字だけなら「又」書式・それ以外は「'」書式になる。
+	// 1〜4 バイトの文字と、壊れた並び（継続バイトが先頭・途中で切れている）を混ぜても
+	// 落ちず、いろは以外として扱われる。
+	const std::vector<NamedAxis> ascii{NamedAxis{"A1", 0.0}};
+	CHECK(nameSectionCuts({1000.0}, ascii) == (std::vector<std::string>{"A1'"}));
+
+	const std::vector<NamedAxis> twoByte{NamedAxis{"é", 0.0}};      // U+00E9（2 バイト）
+	CHECK(nameSectionCuts({1000.0}, twoByte) == (std::vector<std::string>{"é'"}));
+
+	const std::vector<NamedAxis> fourByte{NamedAxis{"𠮷", 0.0}};    // U+20BB7（4 バイト）
+	CHECK(nameSectionCuts({1000.0}, fourByte) == (std::vector<std::string>{"𠮷'"}));
+
+	const std::vector<NamedAxis> broken{NamedAxis{std::string("\x80X"), 0.0}};  // 継続バイトが先頭
+	CHECK(nameSectionCuts({1000.0}, broken).size() == static_cast<std::size_t>(1));
+
+	const std::vector<NamedAxis> truncated{NamedAxis{std::string("\xE3\x81"), 0.0}}; // 途中で切れ
+	CHECK(nameSectionCuts({1000.0}, truncated).size() == static_cast<std::size_t>(1));
+
+	// 名前が空の通り芯（IFC の AxisTag が空）。いろは判定は false 側へ倒れ、`'` が付く。
+	const std::vector<NamedAxis> empty{NamedAxis{"", 0.0}};
+	CHECK(nameSectionCuts({1000.0}, empty) == (std::vector<std::string>{"'"}));
+}
+
 // --- 表示レイヤ・高さ範囲 ----------------------------------------------------
 
 TEST(SectionLayersListsStoryLayersAndGrid)
@@ -345,7 +419,10 @@ TEST(BuildSectionCommandsNeedsGridStoriesAndHeights)
 	CHECK(buildSectionCommands(empty, sampleDocument()).empty());
 
 	Model const model = sampleGridModel();
-	// ストーリが無ければ映すレイヤが無い。
+	// 空の命令セット＝高さの分かる要素が 1 つも無ければ断面の範囲が決まらない。
+	CHECK(buildSectionCommands(model, core::Document{}).empty());
+
+	// ストーリが無ければ映すレイヤが無い（高さは横架材・柱から求まる）。
 	core::Document noStories = sampleDocument();
 	noStories.stories.clear();
 	CHECK(buildSectionCommands(model, noStories).empty());

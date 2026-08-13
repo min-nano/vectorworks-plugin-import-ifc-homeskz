@@ -18,6 +18,7 @@
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <cmath>
@@ -78,7 +79,10 @@ namespace HomeskzIfcImport::draw
 		// **コンテナは中まで辿る**のが要点で、通り芯（GridAxis PIO）のラベルのように
 		// 「PIO / シンボルの中の図形が、スタイルの決めたクラスを持つ」ものは、外側の
 		// オブジェクトのクラスだけ見ても拾えない（ラベルだけ消える。ローカル確認で判明）。
-		std::set<InternalIndex> CollectUsedClasses(const std::vector<MCObjectHandle>& layers)
+		//
+		// 走査中は重複除去のために std::set を使い、**返すのは昇順・重複なしの vector**
+		// （ViewportSetup が std::set を持てない理由は DrawUtil.h 参照）。
+		std::vector<InternalIndex> CollectUsedClasses(const std::vector<MCObjectHandle>& layers)
 		{
 			std::set<InternalIndex> classes;
 			// 入れ子（グループ・シンボル・PIO）は深さ上限つきで辿る。上限は「PIO の中の
@@ -108,7 +112,7 @@ namespace HomeskzIfcImport::draw
 						pending.emplace_back(child, depth + 1);
 				}
 			}
-			return classes;
+			return {classes.begin(), classes.end()};
 		}
 
 		// 表示するデザインレイヤの縮尺を返す（Python 版 configure_viewport_scale）。図が映す
@@ -418,13 +422,16 @@ namespace HomeskzIfcImport::draw
 		setup.layers = AllLayers();
 		setup.classes = CollectUsedClasses(setup.layers);
 		// 命令セットが名乗るクラスも足す（まだ図形が無いクラスや、走査で辿れなかったものの
-		// 取りこぼしを防ぐ保険）。
+		// 取りこぼしを防ぐ保険）。足した後に昇順・重複なしへ整える。
 		for (const std::string& name : core::documentClassNames(document))
 		{
 			const InternalIndex index = gSDK->ClassNameToID(TXString(name.c_str()));
 			if (index != 0)
-				setup.classes.insert(index);
+				setup.classes.push_back(index);
 		}
+		std::sort(setup.classes.begin(), setup.classes.end());
+		setup.classes.erase(std::unique(setup.classes.begin(), setup.classes.end()),
+							setup.classes.end());
 		return setup;
 	}
 

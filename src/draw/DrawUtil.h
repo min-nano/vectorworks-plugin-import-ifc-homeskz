@@ -176,10 +176,15 @@ namespace HomeskzIfcImport::draw
 	// ところが ISDK には「ドキュメントの全クラスを列挙する」呼び出しが無い（VWClass にあるのは
 	// 名前↔索引の変換だけ）。そこで**図形が身に付けているクラス**を全レイヤ走査で数え上げ、
 	// 命令セットが名乗るクラス（core::documentClassNames）も取りこぼし防止に足す。
+	//
+	// classes は**昇順・重複なしの vector**（集合として使うが std::set では持たない）。
+	// Windows の clang-tidy が std::set を持つ構造体の暗黙の特殊メンバに
+	// bugprone-exception-escape を出すため、走査中だけ set を使い、結果は vector へ移す
+	// （用途は「1 つずつ表示へ戻す」走査だけなので、連続領域の方が素直でもある）。
 	struct ViewportSetup
 	{
 		std::vector<MCObjectHandle> layers;
-		std::set<InternalIndex> classes;
+		std::vector<InternalIndex> classes;
 	};
 
 	// 上の下ごしらえを行う。図面の規模なりに走査するので、**ビューポートを作るフェーズごとに
