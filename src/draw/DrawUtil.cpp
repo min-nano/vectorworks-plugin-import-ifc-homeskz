@@ -429,9 +429,9 @@ namespace HomeskzIfcImport::draw
 			if (index != 0)
 				setup.classes.push_back(index);
 		}
-		std::sort(setup.classes.begin(), setup.classes.end());
-		setup.classes.erase(std::unique(setup.classes.begin(), setup.classes.end()),
-							setup.classes.end());
+		std::ranges::sort(setup.classes);
+		const auto duplicates = std::ranges::unique(setup.classes);
+		setup.classes.erase(duplicates.begin(), duplicates.end());
 		return setup;
 	}
 
