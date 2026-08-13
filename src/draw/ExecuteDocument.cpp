@@ -16,6 +16,7 @@
 #include "PluginPrefix.h"
 #include "draw/ExecuteDocument.h"
 #include "draw/Column.h"
+#include "draw/ColumnMark.h"
 #include "draw/Floor.h"
 #include "draw/Footing.h"
 #include "draw/Grid.h"
@@ -57,7 +58,8 @@ namespace HomeskzIfcImport::draw
 			document.members.size() + document.columns.size() + document.rafters.size() +
 			document.roofs.size() + document.walls.size() + document.wallJoins.size() +
 			document.slabs.size() + document.anchorBolts.size() + document.floorPosts.size() +
-			document.fireBraces.size() + document.joints.size() + document.sheets.size();
+			document.fireBraces.size() + document.joints.size() + document.columnMarks.size() +
+			document.sheets.size();
 
 		// 要素ごとの診断（無ければ空）を改行で連ねる。1 つの文字列を各 draw* へ渡すと
 		// 後の要素が前の要素の診断を上書きしてしまうため、ここで積む。
@@ -95,7 +97,7 @@ namespace HomeskzIfcImport::draw
 		// すべて配置した直後に置く（対応表は WallHandles で受け渡す。draw/Footing.h）。
 		// 配置先の "F-立上り" / "F-底盤" レイヤは基礎ストーリの story 命令が作るので、必ず
 		// drawStories の後に置く（レイヤが無い命令はそれぞれがスキップする）。
-		WallHandles wallHandles;
+		ObjectHandles wallHandles;
 		if (beginPhase("基礎の立上りを描画しています…", document.walls.size()))
 			counts.walls = drawWalls(document, progress, &wallHandles);
 		if (beginPhase("基礎の立上りを結合しています…", document.wallJoins.size()))
@@ -124,10 +126,13 @@ namespace HomeskzIfcImport::draw
 		// M8 柱を描く。配置先の span レイヤ（"1to2-柱" 等）も drawStories が作るので、必ず
 		// その後に置く（レイヤが無い命令はスキップされる）。横架材の後なのは、柱が横架材と
 		// 同じ構造材ツール／同じスタイル更新の作法を採るため揃えているだけで依存は無い。
+		// **柱ハンドルを記録する**——伏図記号のデータタグがこれを関連付け先として引く
+		// （立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
+		ObjectHandles columnHandles;
 		if (beginPhase("柱を描画しています…", document.columns.size()))
 		{
 			std::string note;
-			counts.columns = drawColumns(document, progress, &note);
+			counts.columns = drawColumns(document, progress, &note, &columnHandles);
 			addDiagnostics(note);
 		}
 
@@ -160,6 +165,17 @@ namespace HomeskzIfcImport::draw
 		drawSymbolPhase("床束を配置しています…", "床束", document.floorPosts, counts.floorPosts);
 		drawSymbolPhase("火打を配置しています…", "火打", document.fireBraces, counts.fireBraces);
 		drawSymbolPhase("仕口を配置しています…", "仕口", document.joints, counts.joints);
+
+		// M12 断面記号・伏図記号。**柱の後**に置く: 記号 PIO はリセット時に対象レイヤの
+		// 構造材を検索するので、柱が置かれていないと記号 0 個で確定してしまう。かつ
+		// **レイヤの並べ替えより前**に置く: 伏図記号レイヤ（"{to}-柱伏図記号"）はここで
+		// 作られるので、希望順へ並べるときに実在していないといけない。
+		if (beginPhase("柱記号を配置しています…", document.columnMarks.size()))
+		{
+			std::string note;
+			counts.columnMarks = drawColumnMarks(document, progress, &note);
+			addDiagnostics(note);
+		}
 
 		// M3 の【決定】の実装箇所（M13 で確定）: **デザインレイヤのスタック順を希望順へ
 		// 並べ替える**。伏図ビューポートはドキュメントの重ね順で描かれるので、床・野地板が

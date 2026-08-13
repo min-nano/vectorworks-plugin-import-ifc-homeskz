@@ -17,43 +17,13 @@
 
 #include "core/Document.h"
 #include "core/Progress.h"
+#include "draw/ObjectHandles.h"
 
 #include <cstddef>
-#include <memory>
 #include <string>
 
 namespace HomeskzIfcImport::draw
 {
-	// 立上りの壁ハンドル表の実体（draw/Footing.cpp の無名でない定義）。**SDK 型を持つので
-	// このヘッダには中身を書かない**（draw/*.h は core までしか参照しない約束。
-	// draw/DrawUtil.h 参照）。
-	struct WallHandleTable;
-
-	// 立上りの壁ハンドル表（命令インデックス → 壁ハンドル）を持ち回るための小さな所有者。
-	// **SDK ハンドルは Document に載せられない**ので、壁結合はこの対応表で 2 本の壁を引く
-	// （CLAUDE.md「所有権」: 命令インデックス → ハンドルの対応で受け渡す）。
-	// executeDocument が 1 つ作り、drawWalls（書く）→ drawWallJoins（読む）へ渡す。
-	class WallHandles
-	{
-	public:
-		WallHandles();
-		~WallHandles();
-		WallHandles(const WallHandles&) = delete;
-		WallHandles& operator=(const WallHandles&) = delete;
-
-		WallHandleTable& table()
-		{
-			return *fTable;
-		}
-		const WallHandleTable& table() const
-		{
-			return *fTable;
-		}
-
-	private:
-		std::unique_ptr<WallHandleTable> fTable;
-	};
-
 	// 立上り（wall 命令）を壁オブジェクトとして描く。配置先レイヤ（"F-立上り"）が無い命令は
 	// スキップする（レイヤは基礎ストーリの story 命令が作る）。実際に配置できた本数を返す。
 	//
@@ -62,7 +32,7 @@ namespace HomeskzIfcImport::draw
 	// 記録しない）。描画は必ず**底盤より先**に行う（Python 版の実行順 walls → wall_joins →
 	// slabs に揃えてある）。
 	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress,
-						  WallHandles* handles = nullptr);
+						  ObjectHandles* handles = nullptr);
 
 	// 壁結合（wallJoin 命令）を実行して交差する立上りを結合する。結合できた件数を返す。
 	// handles は drawWalls が記録した対応表で、a / b の**どちらかが未配置の命令はスキップ**
@@ -73,7 +43,7 @@ namespace HomeskzIfcImport::draw
 	// になるため。draw/Footing.cpp「端部のキャップ」）。VW に拒否された結合があれば outNote に
 	// 件数を残す（完了ダイアログの診断。draw/Member と同じ流儀）。
 	std::size_t drawWallJoins(const core::Document& document, core::ProgressReporter& progress,
-							  const WallHandles& handles, std::string* outNote = nullptr);
+							  const ObjectHandles& handles, std::string* outNote = nullptr);
 
 	// 底盤（slab 命令）をスラブオブジェクトとして描く。配置先レイヤ（"F-底盤"）が無い命令は
 	// スキップする。実際に配置できた枚数を返す。手順は床板（draw/Floor）と同じで、共通部分は

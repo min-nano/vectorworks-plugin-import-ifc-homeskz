@@ -50,6 +50,10 @@ namespace HomeskzIfcImport::draw
 		std::size_t fireBraces = 0;
 		std::size_t joints = 0;
 
+		// M12 断面記号・伏図記号。**span 柱レイヤごとに置いた記号 PIO の数**（記号そのものの
+		// 個数ではない——1 つの PIO がそのレイヤの柱すべてに記号を描く）。
+		std::size_t columnMarks = 0;
+
 		// M13 シート（伏図）。**ビューポートまで作れた枚数**（シートレイヤだけできた場合は
 		// 数えない）。命令はあるのに 0 なら、原因は診断行に出る（draw/Sheet）。
 		std::size_t sheets = 0;

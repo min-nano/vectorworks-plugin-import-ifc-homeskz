@@ -126,6 +126,8 @@ src/
   ModuleMain.cpp            モジュールのエントリポイント（既存）
   Extensions/
     ExtMenu.{h,cpp}         「IFC インポート」メニューコマンド（既存 Sample から改名・改修）
+    ExtColumnMark.{h,cpp}   柱・小屋束の記号 PIO（対象レイヤの構造材を検索して ×／／・
+                            平面記号を描く。M12。登録名は Python 版と分ける）
   BuildConfig.h             stable/dev 識別（既存）
   PluginPrefix.h            SDK を取り込む共有プレフィックス（既存。parse/ からは include しない）
   Updater*.{h,cpp}          自動アップデータ（既存・テンプレート由来。基本触らない）
@@ -165,6 +167,10 @@ src/
                             台形プリズムを含む。旧 vw/footing.py）
     Symbol.{h,cpp}          シンボル配置（旧 vw/{anchor_bolt,floor_post,fire_brace,joint}.py
                             の 4 本を 1 本に。要素の区別は呼び出し側が持つ）
+    ColumnMark.{h,cpp}      記号 PIO の設置（旧 vw/column_mark.py）。PIO 本体は
+                            Extensions/ExtColumnMark（ROADMAP.md M12 の【決定】）
+    ObjectHandles.{h,cpp}   「命令インデックス → 描いたオブジェクトのハンドル」の対応表
+                            （壁→壁結合が使う。実体は draw/DrawUtil）
     Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）。
                             表示レイヤの絞り込みとクラス表示はここが唯一の適用箇所
     …                       以降、要素ごとに 1 対 1 で追加
@@ -200,7 +206,10 @@ tests/
 スタイル解決・**構成層／基準面／スタイルの新規作成**——床板・底盤・立上りが共有する）は
 `draw/DrawUtil`、構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
-実装）、**描画側から切り離せる純計算**（レイヤの希望スタック順
+実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名は
+`parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`
+（span 柱レイヤと伏図記号レイヤが共有）、「命令インデックス → ハンドル」の対応表は
+`draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`）は `core/Document`、
 進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
 （整形と配分の計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、

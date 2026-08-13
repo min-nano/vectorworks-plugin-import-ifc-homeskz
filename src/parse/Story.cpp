@@ -75,18 +75,6 @@ namespace HomeskzIfcImport::parse
 									   { return member.layer == layer; });
 		}
 
-		// span レベル 1 つの表記（Python 版 _fmt_span_level）。整数は小数点なし、半整数は
-		// ".5" 付き。span レベルは resolveColumnToLevel が返す整数／半整数だけなので、
-		// 一般の実数書式（std::to_string の 6 桁固定小数）は使わない。
-		std::string formatSpanLevel(double value)
-		{
-			const double rounded = std::floor(value);
-			const auto whole = static_cast<long long>(rounded);
-			if (value == rounded)
-				return std::to_string(whole);
-			return std::to_string(whole) + ".5";
-		}
-
 		// 文字列全体が実数として読めれば outValue に入れて true（"1" / "2.5"）。末尾に
 		// 余りがある・空文字・数値でないなら false（parseSpanLayer の関門）。
 		bool parseNumber(const std::string& text, double& outValue)
@@ -111,6 +99,17 @@ namespace HomeskzIfcImport::parse
 			}
 		}
 	} // namespace
+
+	// span レベルは resolveColumnToLevel が返す整数／半整数だけなので、一般の実数書式
+	// （std::to_string の 6 桁固定小数）は使わない。
+	std::string formatSpanLevel(double value)
+	{
+		const double rounded = std::floor(value);
+		const auto whole = static_cast<long long>(rounded);
+		if (value == rounded)
+			return std::to_string(whole);
+		return std::to_string(whole) + ".5";
+	}
 
 	std::string spanLayerName(double fromLevel, double toLevel)
 	{

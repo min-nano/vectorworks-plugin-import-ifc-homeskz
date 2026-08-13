@@ -81,8 +81,11 @@ namespace HomeskzIfcImport::draw
 
 		// 柱 1 本を構造材ツールで描く。PIO を作れなければ断面の矩形でフォールバックする
 		// （Python 版 draw_column と同じフォールバック）。何か 1 つでも配置できたら true。
+		// outObject には**構造材ツールで作れたときだけ**そのハンドルを入れる（伏図記号の
+		// データタグはこれに関連付ける。フォールバックの矩形はタグを付ける相手にしない）。
 		bool DrawOne(const core::ColumnCommand& column, RefNumber style,
-					 std::size_t& outPathFailures, std::size_t& outSectionFailures)
+					 std::size_t& outPathFailures, std::size_t& outSectionFailures,
+					 MCObjectHandle& outObject)
 		{
 			// 断面の矩形（幅 × せい）は**原点中心**に置く（AxisAlign＝中央と一致させる。
 			// パスが断面中心を通る）。作れなければ PIO を作らない——断面の無い構造材は
@@ -142,12 +145,13 @@ namespace HomeskzIfcImport::draw
 			// 数え方をすると全数を誤報する（冒頭「診断を必ず持ち帰る」）。
 			if (!result.sectionOk)
 				++outSectionFailures;
+			outObject = result.object;
 			return true;
 		}
 	} // namespace
 
 	std::size_t drawColumns(const core::Document& document, core::ProgressReporter& progress,
-							std::string* outDiagnostics)
+							std::string* outDiagnostics, ObjectHandles* handles)
 	{
 		if (document.columns.empty())
 			return 0;
@@ -157,8 +161,10 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		std::size_t pathFailures = 0;
 		std::size_t sectionFailures = 0;
-		for (const core::ColumnCommand& column : document.columns)
+		for (std::size_t index = 0; index < document.columns.size(); ++index)
 		{
+			const core::ColumnCommand& column = document.columns[index];
+
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
 			// 描画の前に 1 件進める（＝「いま何本目を描いているか」が見える）。
 			if (progress.cancelled())
@@ -170,8 +176,13 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(column.layer) == nil)
 				continue;
 
-			if (DrawOne(column, style, pathFailures, sectionFailures))
+			MCObjectHandle object = nil;
+			if (DrawOne(column, style, pathFailures, sectionFailures, object))
 				++drawn;
+			// 伏図記号のデータタグが引けるよう、**構造材ツールで描けた柱だけ**を記録する
+			// （立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
+			if (handles != nullptr && object != nil)
+				handles->table().handles.emplace(index, object);
 		}
 
 		// 全配置後に 1 回だけスタイル更新を掛けて、by-style の描画属性を反映する

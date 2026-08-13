@@ -312,6 +312,16 @@ target_link_libraries(ParseJointTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseJointTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Column marks (src/parse/ColumnMark): the section marks (× / ／ drawn as plain lines on the
+# column's own span layer) and the plan marks (VW data tags on the independent "{to}-柱伏図記号"
+# layer). Like the joints, this module never touches IFC — the marks are derived from the finished
+# column commands, so the whole thing is exercised on synthetic commands plus the fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseColumnMarkTests ParseColumnMarkTests.cpp)
+target_link_libraries(ParseColumnMarkTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseColumnMarkTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # Shared parse context (src/parse/Context): the per-import cache that lets every
 # element's build*Commands reuse the same stories / grid centre / storey elements /
 # loft-floor regions / roof planes instead of recomputing them. Proves the cached

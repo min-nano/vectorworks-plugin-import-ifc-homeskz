@@ -1122,15 +1122,33 @@ TEST(document_class_names_collects_every_command_list)
 	slab.drawClass = "04構造-01基礎-02基礎スラブ";
 	document.slabs.push_back(slab);
 
+	// 断面記号・伏図記号（M12）。**これを漏らすと記号だけが伏図で消える**——記号は
+	// 構造材とは別のクラス（極細実線・記号クラス）に載るので、他の要素が表示に戻っても
+	// 巻き添えで救われない。
+	core::ColumnMarkCommand sectionMark;
+	sectionMark.layer = "1to2-柱";
+	sectionMark.drawClass = "01作図-01線-02実線-01極細線";
+	sectionMark.targetLayer = "1to2-柱";
+	document.columnMarks.push_back(sectionMark);
+
+	core::ColumnMarkCommand planMark;
+	planMark.layer = "2-柱伏図記号";
+	planMark.drawClass = "01作図-04記号-04構造-一般";
+	planMark.targetLayer = "1to2-柱";
+	planMark.style = core::ColumnMarkStyle::Plan;
+	planMark.symbol = "柱伏図記号";
+	document.columnMarks.push_back(planMark);
+
 	const std::vector<std::string> names = core::documentClassNames(document);
-	// 8 つの命令リストすべてから 1 つずつ拾い、昇順で並ぶ。
-	CHECK_EQ(names.size(), static_cast<std::size_t>(8));
+	// 10 の命令リストすべてから 1 つずつ拾い、昇順で並ぶ。
+	CHECK_EQ(names.size(), static_cast<std::size_t>(10));
 	CHECK(std::ranges::is_sorted(names));
 	for (const char* const expected :
-		 {"01作図-01線-01基準線-01通り芯-X通り", "04構造-01基礎-02基礎スラブ",
-		  "04構造-01基礎-03立ち上がり", "04構造-02木造-01土台-01土台",
-		  "04構造-02木造-03軸組-01管柱", "04構造-02木造-05小屋組-05垂木",
-		  "04構造-02木造-06耐力面材-02床", "04構造-02木造-06耐力面材-03屋根"})
+		 {"01作図-01線-01基準線-01通り芯-X通り", "01作図-01線-02実線-01極細線",
+		  "01作図-04記号-04構造-一般", "04構造-01基礎-02基礎スラブ", "04構造-01基礎-03立ち上がり",
+		  "04構造-02木造-01土台-01土台", "04構造-02木造-03軸組-01管柱",
+		  "04構造-02木造-05小屋組-05垂木", "04構造-02木造-06耐力面材-02床",
+		  "04構造-02木造-06耐力面材-03屋根"})
 		CHECK(std::ranges::find(names, expected) != names.end());
 }
 
@@ -1170,6 +1188,82 @@ TEST(build_document_skeleton_returns_valid_empty_document)
 	// （実 IFC を読んだときの中身は各 parse モジュールのテストで検証する）。
 	core::Document const document = parse::buildDocument("dummy.ifc");
 	CHECK_EQ(document.version, core::kDocumentVersion);
+	CHECK(core::validateDocument(document));
+}
+
+// ---------------------------------------------------------------------------
+// 断面記号・伏図記号（M12）の検証
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	core::ColumnMarkCommand validSectionMark()
+	{
+		core::ColumnMarkCommand mark;
+		mark.layer = "1to2-柱";
+		mark.drawClass = "01作図-01線-02実線-01極細線";
+		mark.targetLayer = "1to2-柱";
+		mark.style = core::ColumnMarkStyle::Section;
+		return mark;
+	}
+
+	core::ColumnMarkCommand validPlanMark()
+	{
+		core::ColumnMarkCommand mark;
+		mark.layer = "2-柱伏図記号";
+		mark.drawClass = "01作図-04記号-04構造-一般";
+		mark.targetLayer = "1to2-柱";
+		mark.style = core::ColumnMarkStyle::Plan;
+		mark.symbol = "柱伏図記号";
+		return mark;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_column_marks)
+{
+	core::Document document;
+	document.columnMarks.push_back(validSectionMark());
+	document.columnMarks.push_back(validPlanMark());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_column_mark_without_layer_class_or_target)
+{
+	// PIO を置くレイヤ・作図クラス・**検索対象レイヤ**はどれも欠かせない。とくに
+	// 検索対象が空だと PIO は何も見つけられず、記号 0 個の空オブジェクトが残る。
+	for (int which = 0; which < 3; ++which)
+	{
+		core::Document document;
+		core::ColumnMarkCommand mark = validSectionMark();
+		if (which == 0)
+			mark.layer.clear();
+		else if (which == 1)
+			mark.drawClass.clear();
+		else
+			mark.targetLayer.clear();
+		document.columnMarks.push_back(mark);
+		CHECK(!core::validateDocument(document));
+	}
+}
+
+TEST(validate_rejects_plan_mark_without_symbol)
+{
+	// 伏図記号はシンボルを置くだけの記号なので、名前が無ければ何も描けない。
+	core::Document document;
+	core::ColumnMarkCommand mark = validPlanMark();
+	mark.symbol.clear();
+	document.columnMarks.push_back(mark);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_accepts_section_mark_without_symbol)
+{
+	// 断面記号は実断面から描くのでシンボルを使わない（空が正常）。対象クラスも
+	// **空が正常**＝全クラス。
+	core::Document document;
+	core::ColumnMarkCommand mark = validSectionMark();
+	CHECK(mark.symbol.empty() && mark.targetClass.empty());
+	document.columnMarks.push_back(mark);
 	CHECK(core::validateDocument(document));
 }
 

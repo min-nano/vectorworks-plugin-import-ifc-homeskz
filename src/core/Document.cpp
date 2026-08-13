@@ -196,6 +196,16 @@ namespace HomeskzIfcImport::core
 		{
 			return !symbol.layer.empty() && !symbol.symbol.empty();
 		}
+
+		// 記号（断面記号・伏図記号）1 つが妥当か。PIO を置くレイヤ名・作図クラス名・
+		// **検索対象レイヤ名**が非空であること（対象レイヤが空だと PIO は何も見つけられず、
+		// 記号 0 個の空オブジェクトが図面に残る）。伏図記号はシンボル名も非空であること
+		// （シンボルが無ければ平面記号は描けない）。targetClass は**空が正常**＝全クラス。
+		bool isValidColumnMark(const ColumnMarkCommand& mark)
+		{
+			return !mark.layer.empty() && !mark.drawClass.empty() && !mark.targetLayer.empty() &&
+				   (mark.style != ColumnMarkStyle::Plan || !mark.symbol.empty());
+		}
 	} // namespace
 
 	bool validateDocument(const Document& document)
@@ -256,6 +266,11 @@ namespace HomeskzIfcImport::core
 			!std::ranges::all_of(document.floorPosts, isValidSymbol) ||
 			!std::ranges::all_of(document.fireBraces, isValidSymbol) ||
 			!std::ranges::all_of(document.joints, isValidSymbol))
+			return false;
+
+		// 断面記号・伏図記号（M12）: PIO のレイヤ名・作図クラス名・検索対象レイヤ名が非空で、
+		// 伏図記号はシンボル名も非空であること（isValidColumnMark 参照。ROADMAP.md M12）。
+		if (!std::ranges::all_of(document.columnMarks, isValidColumnMark))
 			return false;
 
 		// シート（伏図）: シートレイヤ番号・タイトルが非空で、ビューポートが非空のレイヤ名を
@@ -335,6 +350,7 @@ namespace HomeskzIfcImport::core
 		collect(document.roofs);
 		collect(document.walls);
 		collect(document.slabs);
+		collect(document.columnMarks);
 		return {names.begin(), names.end()};
 	}
 

@@ -20,6 +20,7 @@
 
 #include "core/Geometry.h"
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -61,6 +62,18 @@ namespace HomeskzIfcImport::core
 	inline constexpr const char* kLevelSlabTop = "底盤天端";
 	inline constexpr const char* kLevelFoundationTop = "基礎天端";
 	inline constexpr const char* kLevelFloorPost = "床束";
+
+	// 構造用途（構造材ツールのポップアップのキー）。**命令セットの語彙なのでここが唯一の
+	// 定義**で、ColumnCommand::structuralUse に入る値がこれになる。parse/Column.h は
+	// 読みやすい名前で再公開するだけ（レベル種別名と同じ扱い）。
+	//
+	// core が持つ理由: 記号 PIO（Extensions/ExtColumnMark）は、対象レイヤの構造材を
+	// **この値で**柱／小屋束に見分ける。PIO は SDK 側のコードなので parse/ を include
+	// できず（依存の向き）、かつては "4" / "5" を自前で書き写していた——parse 側で値を
+	// 変えると記号が黙って何も描かなくなる形だった。両フェーズが見てよい唯一の置き場が
+	// ここ（CLAUDE.md「両者をつなぐのは core/Document.h だけ」）。
+	inline constexpr const char* kStructuralUseColumn = "4";   // 柱（管柱・通し柱）
+	inline constexpr const char* kStructuralUseKoyazuka = "5"; // 小屋束
 
 	// 通り芯（グリッド）1 本の描画命令。Python 版 document.py の GridCommand（dict）に
 	// 対応する。draw/Grid がこれを GridAxis オブジェクトへ変換する（ROADMAP.md M1）。
@@ -588,6 +601,57 @@ namespace HomeskzIfcImport::core
 		double angle = 0.0;
 	};
 
+	// 記号の描き方（Python 版 MARK_STYLE_SECTION / MARK_STYLE_PLAN。PIO の MarkStyle
+	// パラメータに対応する）。
+	enum class ColumnMarkStyle
+	{
+		Section, // 断面記号: 柱の実断面に合わせた対角線（柱＝×・小屋束＝／）
+		Plan, // 伏図記号: 各柱の位置にシンボルを 1 つ
+	};
+
+	// 柱・小屋束の記号（断面記号・伏図記号）を **PIO 1 つ**で描く命令。Python 版
+	// document.py の ColumnMarkCommand（dict）に対応する（ROADMAP.md M12）。
+	//
+	// 【柱 1 本ごとではなく span レイヤごとに 1 つ】記号は PIO がリセット時に
+	// **対象レイヤ（targetLayer）の構造材を検索して描く**ので、命令は「どのレイヤの
+	// 何を、どこへ、どう描くか」だけを持つ。柱が動いた・断面が変わった・増減したときは、
+	// PIO のリセットで記号がまとめて描き直される——記号の位置・大きさ・本数はモデル側の
+	// 実物から毎回導かれるので、**古い記号が間違った内容のまま残ることがない**。
+	// （素のジオメトリやデータタグでは、位置は追えても実断面の変化に追随できず、
+	// 「間違った記号が残る」＝図面としては記号が無いより悪い状態になる。）
+	//
+	// 【PIO はこのプラグインが提供する】Extensions/ExtColumnMark が本体で、モジュールの
+	// 拡張としてメニューコマンドと一緒に登録される（別プラグインにしない）。VW は PIO が
+	// **描いたジオメトリを図面に保存する**ので、プラグインを入れていない環境でも
+	// 図面はそのまま表示できる（更新だけができない。実機で確認済み）。
+	//
+	// Python 版キーとの対応:
+	//   layer       ← 'layer'        … PIO を置くデザインレイヤ名（断面記号＝span レイヤ
+	//                                  自身／伏図記号＝"{to}-柱伏図記号"）
+	//   drawClass   ← 'class'        … PIO 本体の作図クラス（予約語 class を機械置換）
+	//   targetLayer ← 'target_layer' … 検索対象のデザインレイヤ名（＝span 柱レイヤ）
+	//   targetClass ← 'target_class' … 検索対象クラス（**空＝全クラス**）
+	//   style       ← 'style'        … 記号の描き方（断面／平面）
+	//   symbol      ← 'symbol'       … 伏図記号のシンボル名（"柱伏図記号" / "束伏図記号"。
+	//                                  断面記号では空）
+	//   position    ← 'position'     … PIO の挿入点。**原点でよい**——記号は検索した柱の
+	//                                  ワールド位置に描かれ、挿入点には依存しない
+	//
+	// ［Python 版との差異・意図的］記号サイズ（Python 版 'size'＝既定 300mm）は持たない。
+	// あちらは PIO がシンボル未指定のときのフォールバックに使っていたが、本移植の PIO は
+	// 断面記号を**柱の実断面から**描き、伏図記号はシンボルをそのまま置くので、
+	// サイズ指定を使う経路が無い（使われない枠を先に作らない）。
+	struct ColumnMarkCommand
+	{
+		std::string layer;
+		std::string drawClass;
+		std::string targetLayer;
+		std::string targetClass;
+		ColumnMarkStyle style = ColumnMarkStyle::Section;
+		std::string symbol;
+		Vec2 position;
+	};
+
 	// シートレイヤに載せるビューポート 1 枚。Python 版 document.py の ViewportCommand
 	// （dict）に対応する。伏図は「特定のデザインレイヤ群だけを見下げた図」なので、命令が
 	// 持つのは**どのレイヤを見せるか**と図面タイトル・図番だけになる（ROADMAP.md M13）。
@@ -598,10 +662,10 @@ namespace HomeskzIfcImport::core
 	//   layers        ← 'layers'         … 表示するデザインレイヤ名（**それ以外は非表示**）
 	//
 	// 【並びは重ね順ではない】layers の並び順は描画側の走査順にすぎず、伏図での重なりは
-	// ビューポートのレイヤ重ね順が決める。床・野地板が柱・梁を覆い隠さないようにする件は
-	// **描画側が core::desiredStoryLayerOrder を per-viewport の重ね順上書きへ適用**して
-	// 満たす（draw/Sheet.h。命令にレイヤ順を持たせないのは、全ビューポートで同じ 1 本の
-	// 希望順を使うため——命令ごとに複製すると希望順の定義が命令の数だけ増える）。
+	// **ドキュメントのデザインレイヤ重ね順**が決める。床・野地板が柱・梁を覆い隠さないように
+	// する件は、描画側が core::desiredStoryLayerOrder の希望順へレイヤを並べ替えて満たす
+	// （draw/Story の reorderStoryLayers。命令にレイヤ順を持たせないのは、全ビューポートで
+	// 同じ 1 本の希望順を使うため——命令ごとに複製すると希望順の定義が命令の数だけ増える）。
 	//
 	// ［Python 版との差異・意図的］Python 版は hidden_classes（クラス単位の非表示）を持つが、
 	// **どの伏図も指定していない**（汎用機構として残されているだけ）。使われない枠を先に
@@ -711,6 +775,11 @@ namespace HomeskzIfcImport::core
 		// 配置先は受ける側ではなく**その横架材自身のレイヤ**。
 		std::vector<SymbolCommand> joints;
 
+		// M12 断面記号・伏図記号。**実在する span 柱レイヤごとに 2 つ**（断面記号と
+		// 伏図記号）で、断面記号をすべて先に、続けて伏図記号を並べる（parse/ColumnMark）。
+		// 柱の span から決まるので columns より後に組み立てる。
+		std::vector<ColumnMarkCommand> columnMarks;
+
 		// M13 シート（伏図）。基礎伏図 → 各階の柱梁伏図 → 屋根版を持つ階ごとの母屋伏図の
 		// 順で、シートレイヤ番号もその順に "1" から振る（parse/Sheet が組み立てる）。
 		// ビューポートが見せるデザインレイヤはすべて stories が作るので、描画は
@@ -743,12 +812,13 @@ namespace HomeskzIfcImport::core
 	// 置いて無 SDK で単体テストする（CLAUDE.md「テスト方針」: レイヤ順の並べ替え計算のような
 	// SDK から切り離せる部分は core へ寄せてテストする）。
 	//
-	// ただし**適用先は未定のまま**: VW 2026 ISDK にデザインレイヤの重ね順を変更する呼び出しが
-	// 無いため、draw/Story は並べ替えを行わない。目的（伏図で床が柱・梁を覆い隠さない）は
-	// M13 の per-viewport 上書き（SetViewportLayerStackingOverride）で満たす（draw/Story.h 参照）。
+	// 適用先は **draw/Story の reorderStoryLayers**（InsertObjectAfter でレイヤの並びを
+	// 希望順へ揃える）ただ 1 か所。当初は per-viewport の重ね順上書きへ委ねたが実機で
+	// 効かなかった（経緯は draw/Story.h の reorderStoryLayers）。
 	//
-	// 並び: 最上段に通り芯レイヤ "共通" → topLayers（伏図記号レイヤ等・ストーリ非依存の
-	// 独立レイヤ。M12 以降で渡す）→ **最上階→最下階**の順に各ストーリのレイヤ（stories は
+	// 並び: 最上段に通り芯レイヤ "共通" → topLayers（伏図記号レイヤ "{to}-柱伏図記号" 等・
+	// ストーリ非依存の独立レイヤ。M12 で reorderStoryLayers が渡すようになった）→
+	// **最上階→最下階**の順に各ストーリのレイヤ（stories は
 	// Elevation 昇順＝最下階→最上階なので逆順に辿る）。各ストーリ内は levels の並び順。
 	// ただし床（FL）・野地板レベルのレイヤは全ストーリ分をまとめてスタック最下段（背面）へ
 	// 回す（伏図ビューポートで柱・梁を覆い隠さないため）。

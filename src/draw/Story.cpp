@@ -38,6 +38,7 @@
 
 #include "PluginPrefix.h"
 #include "draw/Story.h"
+#include "draw/ColumnMark.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -84,7 +85,12 @@ namespace HomeskzIfcImport::draw
 	std::size_t reorderStoryLayers(const core::Document& document)
 	{
 		// 希望順は**前面→背面**（"共通" が先頭＝最前面。core::desiredStoryLayerOrder）。
-		const std::vector<std::string> desired = core::desiredStoryLayerOrder(document.stories);
+		// 伏図記号レイヤ（"{to}-柱伏図記号"。M12）はストーリに属さない独立レイヤで story 命令の
+		// levels に現れないので、**topLayers として通り芯 "共通" の直下へ差し込む**（Python 版
+		// reorder_story_layers の top_layers と同じ扱い）。柱・梁の記号なので、床・野地板より
+		// 前面に無いと覆い隠される。
+		const std::vector<std::string> desired =
+			core::desiredStoryLayerOrder(document.stories, planMarkLayerNames(document));
 
 		// 図面のオブジェクト列は**背面→前面**（先頭が最背面で、NextObject が前面へ向かう。
 		// Python 版が FLayer→NextLayer を「下→上」と呼んでいるのと同じ並び）。したがって
