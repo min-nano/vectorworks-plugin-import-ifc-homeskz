@@ -182,18 +182,11 @@ namespace HomeskzIfcImport::parse
 			return true;
 		}
 
-		// 断面の高さ範囲（全命令で共通）。
-		struct HeightRange
-		{
-			double start = 0.0;
-			double end = 0.0;
-		};
-
 		// 1 方向ぶんの section 命令を組み立てる。
 		std::vector<core::SectionCommand>
 		commandsForDirection(SectionDirection direction, const std::vector<double>& cuts,
 							 const std::vector<NamedAxis>& axes, const PlanBounds& bounds,
-							 const std::vector<std::string>& layers, const HeightRange& heights)
+							 const std::vector<std::string>& layers)
 		{
 			const std::vector<std::string> names = nameSectionCuts(cuts, axes);
 			std::vector<core::SectionCommand> commands;
@@ -225,9 +218,6 @@ namespace HomeskzIfcImport::parse
 					command.viewPoint =
 						core::Vec2{(bounds.minX + bounds.maxX) / 2.0, cut + kViewPointOffset};
 				}
-				command.depth = kSectionDepth;
-				command.startHeight = heights.start;
-				command.endHeight = heights.end;
 				command.viewport.drawingNumber = names[i];
 				command.viewport.drawingTitle = names[i] + kSectionTitleSuffix;
 				command.viewport.layers = layers;
@@ -393,66 +383,6 @@ namespace HomeskzIfcImport::parse
 		return layers;
 	}
 
-	bool sectionHeightRange(const core::Document& document, double& start, double& end)
-	{
-		double low = std::numeric_limits<double>::max();
-		double high = std::numeric_limits<double>::lowest();
-		bool any = false;
-		const auto take = [&](double z)
-		{
-			low = std::min(low, z);
-			high = std::max(high, z);
-			any = true;
-		};
-
-		// 床（基準面と、構成層の合計だけ下がった下端）。
-		for (const core::FloorCommand& floor : document.floors)
-		{
-			double thickness = 0.0;
-			for (const core::ComponentCommand& component : floor.components)
-				thickness += component.thickness;
-			take(floor.elevation);
-			take(floor.elevation - thickness);
-		}
-		// 横架材（天端と、せいのぶん下がった下端。傾斜梁は両端とも見る）。
-		for (const core::MemberCommand& member : document.members)
-		{
-			take(member.elevation);
-			take(member.endElevation);
-			take(std::min(member.elevation, member.endElevation) - member.height);
-		}
-		// 柱（下端と上端）。
-		for (const core::ColumnCommand& column : document.columns)
-		{
-			take(column.elevation);
-			take(column.elevation + column.height);
-		}
-		// 屋根組（垂木の両端・野地板の軒）。
-		for (const core::RafterCommand& rafter : document.rafters)
-		{
-			take(rafter.elevation);
-			take(rafter.endElevation);
-		}
-		for (const core::RoofCommand& roof : document.roofs)
-			take(roof.elevation);
-		// 基礎の底盤（天端と、コンクリート厚のぶん下がった下端）。立上りは高さを絶対値で
-		// 持たない（レベルへのバインドで表す）ので、底盤とストーリで下端を代表させる。
-		for (const core::SlabCommand& slab : document.slabs)
-		{
-			take(slab.elevation);
-			take(slab.elevation - slab.thickness);
-		}
-		// ストーリ高さ（要素が 1 つも無い階でも範囲に含める）。
-		for (const core::StoryCommand& story : document.stories)
-			take(story.elevation);
-
-		if (!any)
-			return false;
-		start = low - kSectionHeightMargin;
-		end = high + kSectionHeightMargin;
-		return true;
-	}
-
 	std::vector<core::SectionCommand> buildSectionCommands(Context& context,
 														   const core::Document& document)
 	{
@@ -460,13 +390,6 @@ namespace HomeskzIfcImport::parse
 		// （Python 版 build_section_commands と同じ）。
 		PlanBounds bounds;
 		if (!gridPlanBounds(context.gridLines(), context.gridCenter(), bounds))
-			return {};
-
-		// 建物の高さ範囲。求まらない（高さの分かる要素が 1 つも無い＝空の命令セット）なら
-		// 作らない。**レイヤの確認より先に見る**——ストーリがあれば必ず高さが求まる
-		// （ストーリ高さも範囲に入れるため）ので、逆順にするとこの関門を通れなくなる。
-		HeightRange heights;
-		if (!sectionHeightRange(document, heights.start, heights.end))
 			return {};
 
 		// 映すレイヤが無い（ストーリを作れていない）なら、断面には何も出ないので作らない。
@@ -484,9 +407,9 @@ namespace HomeskzIfcImport::parse
 			namedAxes(context.gridLines(), context.gridCenter(), SectionDirection::Y);
 
 		std::vector<core::SectionCommand> commands =
-			commandsForDirection(SectionDirection::X, xCuts, xAxes, bounds, layers, heights);
+			commandsForDirection(SectionDirection::X, xCuts, xAxes, bounds, layers);
 		for (core::SectionCommand& command :
-			 commandsForDirection(SectionDirection::Y, yCuts, yAxes, bounds, layers, heights))
+			 commandsForDirection(SectionDirection::Y, yCuts, yAxes, bounds, layers))
 			commands.push_back(std::move(command));
 		return commands;
 	}

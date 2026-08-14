@@ -9,8 +9,8 @@
 //	検証項目（ROADMAP.md M14）: 柱と梁の**両方**が通る通りだけを切断位置にすること
 //	（大引・母屋は梁とみなさない）・名前付き通り芯への照合と中間通りの命名（`'` / `又`）・
 //	指示線の向きと長さ（X通り＝定 X の縦線・Y通り＝定 Y の横線＋余白）・視線の向きが
-//	通り名の並ぶ側を向くこと・断面の高さ範囲が要素を包むこと・映すレイヤがストーリの作る
-//	レイヤに実在すること・命令の並び順に依存しない決定性。
+//	通り名の並ぶ側を向くこと・映すレイヤがストーリの作るレイヤに実在すること・
+//	命令の並び順に依存しない決定性。
 //
 //	Python 版が `resolve_lines` を monkeypatch していたところは、**最小の STEP テキストから
 //	Model を作る**（loadIfcFromText）ことで置き換える——通り芯の読み方は parse/Grid の
@@ -38,8 +38,6 @@ using HomeskzIfcImport::core::SectionCommand;
 using HomeskzIfcImport::core::SectionDirection;
 using HomeskzIfcImport::parse::buildSectionCommands;
 using HomeskzIfcImport::parse::kAxisMatchTol;
-using HomeskzIfcImport::parse::kSectionDepth;
-using HomeskzIfcImport::parse::kSectionHeightMargin;
 using HomeskzIfcImport::parse::kSectionLineMargin;
 using HomeskzIfcImport::parse::kSectionSheetNumber;
 using HomeskzIfcImport::parse::kSectionSheetTitle;
@@ -50,7 +48,6 @@ using HomeskzIfcImport::parse::namedAxes;
 using HomeskzIfcImport::parse::NamedAxis;
 using HomeskzIfcImport::parse::nameSectionCuts;
 using HomeskzIfcImport::parse::sectionCutPositions;
-using HomeskzIfcImport::parse::sectionHeightRange;
 using HomeskzIfcImport::parse::sectionLayers;
 using HomeskzIfcTests::near;
 
@@ -345,20 +342,6 @@ TEST(SectionLayersListsStoryLayersAndGrid)
 	CHECK(sectionLayers({}).empty());
 }
 
-TEST(SectionHeightRangeCoversElementsWithMargin)
-{
-	core::Document document = sampleDocument();
-	double start = 0.0;
-	double end = 0.0;
-	CHECK(sectionHeightRange(document, start, end));
-	// 柱は 0〜3000、横架材は天端 3000・下端 2820。範囲は上下に余白ぶん広い。
-	CHECK(near(start, 0.0 - kSectionHeightMargin));
-	CHECK(near(end, 3000.0 + kSectionHeightMargin));
-
-	// 高さの分かる要素が 1 つも無ければ範囲は求まらない。
-	CHECK(!sectionHeightRange(core::Document{}, start, end));
-}
-
 // --- 命令の組み立て ----------------------------------------------------------
 
 TEST(BuildSectionCommandsPlacesCutsAndNames)
@@ -372,13 +355,12 @@ TEST(BuildSectionCommandsPlacesCutsAndNames)
 	CHECK(commands[0].viewport.drawingTitle == std::string("X1") + kSectionTitleSuffix);
 	CHECK(commands[4].viewport.drawingTitle == std::string("又い") + kSectionTitleSuffix);
 
-	// シートレイヤは全命令で同じ（軸組図 1 枚に並べる）。
+	// シートレイヤは全命令で同じ（軸組図 1 枚に並べる）。断面の範囲（長さ・高さ・奥行き）は
+	// 命令が持たない——軸組図は範囲を限らないので、描画側の定数が受け持つ。
 	for (const SectionCommand& command : commands)
 	{
 		CHECK(command.number == kSectionSheetNumber);
 		CHECK(command.title == kSectionSheetTitle);
-		CHECK(near(command.depth, kSectionDepth));
-		CHECK(command.startHeight < command.endHeight);
 		CHECK(command.viewport.layers ==
 			  (std::vector<std::string>{"1-FL", "1-横架材天端", core::kGridLayer}));
 	}
@@ -419,10 +401,10 @@ TEST(BuildSectionCommandsNeedsGridStoriesAndHeights)
 	CHECK(buildSectionCommands(empty, sampleDocument()).empty());
 
 	Model const model = sampleGridModel();
-	// 空の命令セット＝高さの分かる要素が 1 つも無ければ断面の範囲が決まらない。
+	// 空の命令セット＝ストーリも柱梁も無ければ、映すレイヤも切断位置も無い。
 	CHECK(buildSectionCommands(model, core::Document{}).empty());
 
-	// ストーリが無ければ映すレイヤが無い（高さは横架材・柱から求まる）。
+	// ストーリが無ければ映すレイヤが無い。
 	core::Document noStories = sampleDocument();
 	noStories.stories.clear();
 	CHECK(buildSectionCommands(model, noStories).empty());
@@ -449,8 +431,8 @@ TEST(BuildSectionCommandsIsDeterministic)
 	{
 		CHECK(near(a[i].lineStart.x, b[i].lineStart.x));
 		CHECK(near(a[i].lineStart.y, b[i].lineStart.y));
-		CHECK(near(a[i].startHeight, b[i].startHeight));
-		CHECK(near(a[i].endHeight, b[i].endHeight));
+		CHECK(near(a[i].viewPoint.x, b[i].viewPoint.x));
+		CHECK(near(a[i].viewPoint.y, b[i].viewPoint.y));
 	}
 }
 
@@ -506,10 +488,6 @@ TEST(FixtureSectionsCutRealGridLinesAndShowExistingLayers)
 			CHECK(near(section.lineStart.y, section.lineEnd.y));
 			CHECK(!near(section.lineStart.x, section.lineEnd.x));
 		}
-		// 高さ範囲は建物を包む（下端は GL 以下・上端は最上階のストーリ高さ以上）。
-		CHECK(section.startHeight < section.endHeight);
-		CHECK(section.startHeight <= 0.0);
-		CHECK(section.endHeight >= document.stories.back().elevation);
 		// 映すレイヤはすべて実在する。
 		CHECK(!section.viewport.layers.empty());
 		for (const std::string& layer : section.viewport.layers)

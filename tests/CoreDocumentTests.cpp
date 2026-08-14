@@ -1081,8 +1081,8 @@ TEST(validate_accepts_sheet_without_drawing_label)
 // 断面ビューポート（軸組図。ROADMAP.md M14）
 //
 // 伏図の関門（シートレイヤ番号・タイトル・非空の表示レイヤ）に加えて、**指示線が縮退して
-// いない**・**奥行きが正**・**高さ範囲が正**（start < end）を見る。どれが欠けても「切断面が
-// 決まらない／何も含まない断面」になり、図面に空のビューポートだけが残る。
+// いない**ことを見る（縮退した線からは切断面の向きが決まらない）。断面の範囲（長さ・高さ・
+// 奥行き）は命令が持たない——軸組図は範囲を限らないので、描画側の定数が受け持つ。
 // ---------------------------------------------------------------------------
 
 namespace
@@ -1096,9 +1096,6 @@ namespace
 		section.lineStart = core::Vec2{1000.0, -4000.0};
 		section.lineEnd = core::Vec2{1000.0, 4000.0};
 		section.viewPoint = core::Vec2{0.0, 0.0};
-		section.depth = 455.0;
-		section.startHeight = -1000.0;
-		section.endHeight = 7000.0;
 		section.viewport.drawingNumber = "X1";
 		section.viewport.drawingTitle = "X1通り";
 		section.viewport.layers = {"1-横架材天端", "1-FL", "共通"};
@@ -1143,23 +1140,6 @@ TEST(validate_rejects_section_with_degenerate_line)
 	section.lineEnd = section.lineStart;
 	document.sections.push_back(section);
 	CHECK(!core::validateDocument(document));
-}
-
-TEST(validate_rejects_section_without_depth_or_height)
-{
-	// 奥行き 0 では切断面の奥に何も含まれない。
-	core::Document byDepth;
-	core::SectionCommand noDepth = validSection();
-	noDepth.depth = 0.0;
-	byDepth.sections.push_back(noDepth);
-	CHECK(!core::validateDocument(byDepth));
-
-	// 高さ範囲が上下逆（または潰れている）と断面が空になる。
-	core::Document byHeight;
-	core::SectionCommand flat = validSection();
-	flat.endHeight = flat.startHeight;
-	byHeight.sections.push_back(flat);
-	CHECK(!core::validateDocument(byHeight));
 }
 
 // ---------------------------------------------------------------------------

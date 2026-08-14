@@ -721,13 +721,15 @@ namespace HomeskzIfcImport::core
 	//   viewPoint   （Python 版に対応なし）… **視線の向き**を示す点（指示線の中点から見る側へ
 	//                                 離した点）。Python 版は既製の指示線の向きをそのまま
 	//                                 使ったので不要だった。
-	//   depth       （同上）          … 切断面から視線方向への奥行き（mm）
-	//   startHeight （同上）          … 断面の下端 Z（絶対値・mm）
-	//   endHeight   （同上）          … 断面の上端 Z（絶対値・mm）
 	//   viewport    ← 'drawing_number' / 'drawing_title' … 図番（通り名 "X1" / "又い"）・
 	//                                 図面タイトル（"X1通り"）と、映すデザインレイヤ
 	//
-	// **並べる位置は持たない**: シートレイヤ上での配置は、実際にできたビューポートの大きさに
+	// **断面の範囲（長さ・高さ・奥行き）は持たない**: 軸組図は範囲を限らない（全方向 infinite。
+	// VW の「範囲」タブの既定）ので、命令ごとに変わる値が無い。切断面より奥を出すか・
+	// プレイナー図形を出すか・2D コンポーネントを出すかという表示の作法も同じ理由で
+	// **draw/Section の名前付き定数**が持つ（描き方であって、どこを切るかではない）。
+	//
+	// **並べる位置も持たない**: シートレイヤ上での配置は、実際にできたビューポートの大きさに
 	// 合わせて詰める必要があり、大きさは描いてみるまで分からない（draw/Section が
 	// GetObjectBounds で測って並べる。Python 版 _arrange_viewports と同じ）。
 	struct SectionCommand
@@ -738,9 +740,6 @@ namespace HomeskzIfcImport::core
 		Vec2 lineStart;
 		Vec2 lineEnd;
 		Vec2 viewPoint;
-		double depth = 0.0;
-		double startHeight = 0.0;
-		double endHeight = 0.0;
 		ViewportCommand viewport;
 	};
 

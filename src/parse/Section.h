@@ -16,8 +16,10 @@
 //	    切り捨てない。
 //	  * 流用元の図番（Python 版 'source_number'）が消える——命令は「どこを切るか」だけを持つ。
 //	  * 図面の下準備（40 枚の手置き）が不要になる——テンプレートに依存しない。
-//	代わりに、Python 版では既製ビューポートが持っていた情報——**視線の向き・奥行き・断面の
-//	高さ範囲・映すレイヤ**——を解析側が決めて命令に載せる必要がある（下記）。
+//	代わりに、Python 版では既製ビューポートが持っていた情報のうち**視線の向きと映すレイヤ**を
+//	解析側が決めて命令に載せる（下記）。**断面の範囲（長さ・高さ・奥行き）は限らない**——
+//	VW の「範囲」タブの既定どおり全方向 infinite にするので、命令ごとに変わる値が無い
+//	（切断面より奥を出さない等の表示の作法とあわせて draw/Section が持つ）。
 //
 //	【何を切るか＝柱梁の芯】柱（ColumnCommand）と梁（MemberCommand）の**両方**が通る通りだけを
 //	切断位置にする（柱だけ・梁だけの通りは軸組図にしない）。X通り（定 X）は、ある X 座標に柱が
@@ -70,15 +72,6 @@ namespace HomeskzIfcImport::parse
 	// （向きだけを表す）、切断面と同じ点にならない大きさであればよい。
 	inline constexpr double kViewPointOffset = 1000.0;
 
-	// 切断面から視線方向への奥行き（mm）。軸組図は**その通りの軸組だけ**を見せる図なので、
-	// 隣の通り（1 モジュール≈910mm 先）を含まない半モジュールにしてある。深くすると背後の
-	// 軸組まで写り込んで読めなくなり、浅すぎると通り上の材が欠ける。
-	inline constexpr double kSectionDepth = 455.0;
-
-	// 断面の高さ範囲に足す余白（mm）。範囲は取り込んだ要素の Z から求める（sectionHeightRange）
-	// が、基礎の底や屋根の頂部を切り落とさないよう上下に余白を取る。
-	inline constexpr double kSectionHeightMargin = 1000.0;
-
 	// 名前付き通り芯 1 本（方向別に見たときの名前と座標）。X通りは座標＝X、Y通りは座標＝Y
 	// （いずれもセンタリング済み）。Python 版 _named_axes が返すタプルに対応する。
 	struct NamedAxis
@@ -110,19 +103,13 @@ namespace HomeskzIfcImport::parse
 	// 作るレイヤではないため、この実装では自然に外れる）。並びは stories の順＋通り芯。
 	std::vector<std::string> sectionLayers(const std::vector<core::StoryCommand>& stories);
 
-	// 断面の高さ範囲（絶対 Z。上下に kSectionHeightMargin の余白つき）を求める。取り込んだ
-	// 要素（床・横架材・柱・垂木・野地板・基礎）の Z から建物の下端・上端を数え上げる。
-	// 高さの分かる要素が 1 つも無ければ false（＝断面を作らない）。
-	bool sectionHeightRange(const core::Document& document, double& start, double& end);
-
 	// 軸組図の section 命令を組み立てる（Python 版 build_section_commands）。X通りの切断位置を
 	// 昇順に並べ、続けて Y通りを並べる。通り芯が 1 本も無い（平面の広がりが決まらない）・
-	// 柱梁の芯が 1 つも無い・高さ範囲が求まらないときは空を返す。
+	// 映すレイヤが無い・柱梁の芯が 1 つも無いときは空を返す。
 	//
 	// document は**組み立て済みの命令セット**（stories / members / columns …）を渡す
-	// ——切断位置は柱・梁の命令から、映すレイヤはストーリの命令から、高さ範囲は各要素の Z から
-	// 決まるので、IFC を見直さずに済む（Python 版が members / columns を受け取るのと同じ考え方を、
-	// レイヤ・高さまで広げたもの）。
+	// ——切断位置は柱・梁の命令から、映すレイヤはストーリの命令から決まるので、IFC を見直さずに
+	// 済む（Python 版が members / columns を受け取るのと同じ考え方を、レイヤまで広げたもの）。
 	std::vector<core::SectionCommand> buildSectionCommands(Context& context,
 														   const core::Document& document);
 	std::vector<core::SectionCommand> buildSectionCommands(const Model& model,

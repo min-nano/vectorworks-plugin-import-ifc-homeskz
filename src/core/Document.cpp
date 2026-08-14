@@ -191,17 +191,15 @@ namespace HomeskzIfcImport::core
 		// 断面ビューポート（軸組図）1 枚が妥当か（Python 版 _validate_section 相当）。
 		// 配置先シートレイヤ番号（＝レイヤ名）とタイトルが非空で、表示レイヤを 1 つ以上持ち
 		// （伏図と同じ理由＝何も映らないビューポートを作らせない）、**断面指示線が縮退して
-		// いない**（始点≠終点。縮退した線からは切断面が決まらない）こと。加えて
-		// **高さ範囲が正**（startHeight < endHeight）で**奥行きが正**であること——どちらも
-		// 0 以下だと切断面の手前も奥も含まれない空の断面になる。
+		// いない**（始点≠終点。縮退した線からは切断面が決まらない）こと。断面の範囲は
+		// 命令が持たない（常に無制限。core/Document.h の SectionCommand 参照）ので見ない。
 		bool isValidSection(const SectionCommand& section)
 		{
 			return !section.number.empty() && !section.title.empty() &&
 				   !section.viewport.layers.empty() &&
 				   std::ranges::none_of(section.viewport.layers,
 										[](const std::string& layer) { return layer.empty(); }) &&
-				   !samePoint(section.lineStart, section.lineEnd) && section.depth > 0.0 &&
-				   section.startHeight < section.endHeight;
+				   !samePoint(section.lineStart, section.lineEnd);
 		}
 
 		// シンボル配置 1 件が妥当か（Python 版 _validate_anchor_bolt / _validate_floor_post /
@@ -296,7 +294,7 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// 断面ビューポート（軸組図）: シートレイヤ番号・タイトル・表示レイヤに加え、指示線が
-		// 縮退しておらず、奥行き・高さ範囲が正であること（isValidSection 参照。ROADMAP.md M14）。
+		// 縮退していないこと（isValidSection 参照。ROADMAP.md M14）。
 		if (!std::ranges::all_of(document.sections, isValidSection))
 			return false;
 

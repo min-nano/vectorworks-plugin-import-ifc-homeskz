@@ -154,7 +154,8 @@ src/
     Sheet.{h,cpp}           シート＝伏図（旧 ifc/sheet.py の sheet 命令。IFC ではなく
                             取り込んだ要素の有無・柱の span から決まる）
     Section.{h,cpp}         軸組図＝断面ビューポート（旧 ifc/section.py。柱梁の芯を通る通りを
-                            検出し、切断線・視線の向き・奥行き・高さ範囲・表示レイヤを決める）
+                            検出し、切断線・視線の向き・表示レイヤを決める。断面の範囲と
+                            表示の作法は draw/Section が持つ）
     …                       以降、要素ごとに 1 対 1 で追加
 
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
@@ -176,7 +177,9 @@ src/
     Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）
     Section.{h,cpp}         section 命令 → 断面ビューポート（旧 vw/section.py）。**Python 版と
                             違い ISDK::CreateSectionViewport で新規作成する**（既製 40 枚の
-                            流用はしない。ROADMAP.md M14 の【決定】）
+                            流用はしない。ROADMAP.md M14 の【決定】）。断面の範囲（無制限）と
+                            表示の作法（奥を出さない・プレイナー図形を出さない・2D
+                            コンポーネントは出す）の唯一の置き場所
     …                       以降、要素ごとに 1 対 1 で追加
 
 tests/
