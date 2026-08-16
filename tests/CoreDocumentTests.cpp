@@ -1196,6 +1196,30 @@ TEST(section_height_range_covers_floors_roofs_slabs_and_stories)
 	CHECK(std::abs(end - (6000.0 + core::kSectionHeightMargin)) < 1e-6);
 }
 
+TEST(section_height_range_covers_floors_and_rafters)
+{
+	core::Document document;
+	// 床は**基準面と構成層の合計だけ下がった下端**の両方を見る（合計 12+150=162 なので
+	// 基準面 3000 の床の下端は 2838）。ここが範囲の下端になる。
+	core::FloorCommand floor;
+	floor.elevation = 3000.0;
+	floor.components.push_back(core::ComponentCommand{"仕上げ", 12.0});
+	floor.components.push_back(core::ComponentCommand{"床下地", 150.0});
+	document.floors.push_back(floor);
+
+	// 垂木は勾配があるので**両端**を見る（軒 5000・棟 7000）。棟が範囲の上端になる。
+	core::RafterCommand rafter;
+	rafter.elevation = 5000.0;
+	rafter.endElevation = 7000.0;
+	document.rafters.push_back(rafter);
+
+	double start = 0.0;
+	double end = 0.0;
+	CHECK(core::sectionHeightRange(document, start, end));
+	CHECK(std::abs(start - (2838.0 - core::kSectionHeightMargin)) < 1e-6);
+	CHECK(std::abs(end - (7000.0 + core::kSectionHeightMargin)) < 1e-6);
+}
+
 TEST(section_height_range_fails_without_elements)
 {
 	// 高さの分かる要素が 1 つも無ければ範囲は求まらない（out は触らない）。
