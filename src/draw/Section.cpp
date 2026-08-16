@@ -31,10 +31,19 @@
 //	レイヤ平面）図形は表示せず**、**2D コンポーネントは表示する**（下記のオブジェクト変数）。
 //	断面の範囲は、**奥行きは無制限**（0 を渡す）・**高さは建物を包む実寸＋余白**・**長さは
 //	断面線の長さ**（指示線を十分外まで延ばして実質無制限にする）。
-//	**SDK には高さ・長さを「無限」に切り替える呼び出しもオブジェクト変数も無い**ことを
-//	ci-debug で SDK 全体を検索して確認済み（断面まわりの API は CreateSectionViewport /
-//	CreateSectionLineInstance / IsSectionLineLinkedToViewport / UpdateSectionLineInstances の
-//	4 つだけ、ovSectionViewport* にも範囲の項目は無い）。
+//
+//	【範囲を「無限」にはできない（調べ尽くした結論）】UI で断面ビューポートを手で作ると
+//	〈長さ・高さの範囲〉は既定で〈無限〉になるが、**SDK からその状態にする手段は無い**。
+//	  * 断面まわりの API は CreateSectionViewport / CreateSectionLineInstance /
+//	    IsSectionLineLinkedToViewport / UpdateSectionLineInstances の 4 つだけで、範囲を
+//	    切り替える呼び出しは無い（ci-debug で SDK 全体を検索）。
+//	  * ovSectionViewport* のオブジェクト変数にも範囲の項目は無い。
+//	  * 公開ヘッダの**欠番**（1060〜1090）に隠れている可能性を dev ビルドの一時診断で
+//	    調べたが、**手で〈無限〉にした 1 枚とプラグインが作った 65 枚とで値の違う変数は
+//	    1 つも無かった**（断面ビューポート 66 枚・値の組み合わせ 1 通り）。範囲はオブジェクト
+//	    変数の外に保持されている。
+//	そこで**建物の大きさから有限の範囲を決める**（高さ＝core::sectionHeightRange、長さ＝
+//	指示線を通り芯 bbox より十分外へ延ばす）。実用上は無限と同じ見え方になる。
 //	いずれも「どこを切るか」ではなく「どう描くか」なので、命令セット（core::SectionCommand）
 //	には載せずここが持つ。
 //
@@ -46,13 +55,9 @@
 #include "core/Progress.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
-#include <cstdio>
-#include <map>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -75,10 +80,8 @@ namespace HomeskzIfcImport::draw
 
 		// **高さの範囲だけは実寸を渡す**（core::sectionHeightRange。建物の上下＋余白）。
 		// 同じ 0 を高さへ渡すと〈高さの範囲: 有限・始点 0・終点 0〉になり、断面から建物が
-		// 消えかねないことがローカル確認で分かった。**SDK には高さ・長さを「無限」にする
-		// 呼び出しもオブジェクト変数も無い**（断面まわりは CreateSectionViewport /
-		// CreateSectionLineInstance / IsSectionLineLinkedToViewport /
-		// UpdateSectionLineInstances だけ。ci-debug で SDK 全体を確認）ので、実寸＋余白の
+		// 消えてしまうことがローカル確認で分かった。**高さ・長さを「無限」にする手段は
+		// SDK に無い**（ファイル冒頭「範囲を『無限』にはできない」）ので、実寸＋余白の
 		// 有限範囲で建物全体を収める（ROADMAP.md M14）。
 		//
 		// 長さの範囲も同じ理由で〈断面線の長さ〉のままになる。こちらは**指示線を通り芯の
@@ -126,156 +129,6 @@ namespace HomeskzIfcImport::draw
 			SetBooleanVariable(viewport, kOVDisplayPlanarObjects, kShowPlanarObjects);
 			SetBooleanVariable(viewport, kOVDisplay2DComponents, kShow2DComponents);
 		}
-
-#ifdef VW_DEV_BUILD
-		// --- 【一時的な診断】断面の「範囲」を保持するオブジェクト変数を突き止める ---------
-		//
-		// 【なぜ要るか】VW の「断面の詳細設定」にある〈長さの範囲〉〈高さの範囲〉を**無限へ
-		// 切り替える手段が SDK に無い**（範囲を決めるのは CreateSectionViewport の引数だけで、
-		// 高さに 0 を渡すと〈有限 0〜0〉になってしまう。ROADMAP.md M14）。一方でオブジェクト
-		// 変数には**公開ヘッダに載っていない欠番**（1067〜1076）があり、そこに範囲の設定が
-		// 載っている可能性がある。読み取りだけなので図面は変えない。
-		//
-		// 【使い方（ローカル）】
-		//   1. dev ビルドでインポートする（完了ダイアログの末尾にこの診断が出る）。
-		//   2. VW で断面ビューポートを**1 枚だけ**選び、「断面の詳細設定」で
-		//      〈長さの範囲: 無限〉〈高さの範囲: 無限〉へ手で変更する。
-		//   3. 同じ図面でもう一度インポートする。**手で変えた 1 枚だけ値が違う**ので、
-		//      「差のある変数」としてその番号と値が出る。
-		//
-		// 突き止めたらこのブロックごと削除し、ApplySectionDisplayOptions で該当変数を設定する。
-		constexpr short kOVIsSectionViewport = 1054; // 断面ビューポートか（読み取り専用）
-		constexpr short kProbeFirstSelector = 1060;
-		constexpr short kProbeLastSelector = 1090;
-		constexpr std::size_t kProbeMaxGroups = 4;	   // 報告する組み合わせの上限
-		constexpr std::size_t kProbeMaxDiffLines = 12; // 報告する差の上限
-
-		// 変数の値を人が読める文字列にする。型が分からないものは型番号だけを出す
-		// （欠番の変数が何型かも手掛かりになる）。
-		std::string DescribeVariable(const TVariableBlock& value)
-		{
-			bool flag = false;
-			if (value.GetBoolean(flag))
-				return flag ? "true" : "false";
-			Sint32 int32 = 0;
-			if (value.GetSint32(int32))
-				return std::to_string(int32);
-			Sint16 int16 = 0;
-			if (value.GetSint16(int16))
-				return std::to_string(int16);
-			Uint8 uint8 = 0;
-			if (value.GetUint8(uint8))
-				return std::to_string(static_cast<int>(uint8));
-			Real64 real = 0.0;
-			if (value.GetReal64(real))
-			{
-				std::array<char, 32> buffer{};
-				std::snprintf(buffer.data(), buffer.size(), "%g", real);
-				return {buffer.data()};
-			}
-			return "型" + std::to_string(static_cast<int>(value.GetType()));
-		}
-
-		// 1 枚のビューポートについて、読めた変数を "セレクタ=値" の並びで返す。
-		std::vector<std::pair<short, std::string>> ReadProbeValues(MCObjectHandle viewport)
-		{
-			std::vector<std::pair<short, std::string>> values;
-			for (short selector = kProbeFirstSelector; selector <= kProbeLastSelector; ++selector)
-			{
-				TVariableBlock value;
-				if (!gSDK->GetObjectVariable(viewport, selector, value))
-					continue;
-				values.emplace_back(selector, DescribeVariable(value));
-			}
-			return values;
-		}
-
-		// そのオブジェクトが断面ビューポートか。
-		bool IsSectionViewport(MCObjectHandle object)
-		{
-			TVariableBlock value;
-			if (!gSDK->GetObjectVariable(object, kOVIsSectionViewport, value))
-				return false;
-			bool flag = false;
-			return value.GetBoolean(flag) && flag;
-		}
-
-		// 図面内の全断面ビューポートを走査し、**値の組み合わせが違うもの**を報告する。
-		// 組み合わせが 1 通りしか無ければ「まだ差が無い」ことだけを出す（手順 2 が済んで
-		// いない、あるいはその変数が範囲を持っていない、のどちらか）。
-		std::string ProbeSectionExtentVariables(const std::vector<MCObjectHandle>& layers)
-		{
-			// 値の組み合わせ（文字列化したもの）→ その枚数と代表の値。
-			std::map<std::string,
-					 std::pair<std::size_t, std::vector<std::pair<short, std::string>>>>
-				groups;
-			std::size_t viewports = 0;
-			for (const MCObjectHandle layer : layers)
-			{
-				for (MCObjectHandle h = gSDK->FirstMemberObj(layer); h != nil;
-					 h = gSDK->NextObject(h))
-				{
-					if (!IsSectionViewport(h))
-						continue;
-					++viewports;
-					std::vector<std::pair<short, std::string>> values = ReadProbeValues(h);
-					std::string signature;
-					for (const auto& [selector, text] : values)
-						signature += std::to_string(selector) + "=" + text + ";";
-					auto& group = groups[signature];
-					++group.first;
-					if (group.second.empty())
-						group.second = std::move(values);
-				}
-			}
-
-			if (viewports == 0)
-				return {};
-			std::string text = "範囲の探索: 断面ビューポート " + std::to_string(viewports) +
-							   " 枚・値の組み合わせ " + std::to_string(groups.size()) + " 通り。";
-			if (groups.size() < 2)
-			{
-				text += "（まだ差がありません。1 枚だけ手動で〈長さ・高さの範囲: 無限〉に"
-						"してから、もう一度インポートしてください。）";
-				return text;
-			}
-
-			// 組み合わせ間で値の違う変数だけを並べる（同じ値の変数は手掛かりにならない）。
-			const auto& first = groups.begin()->second.second;
-			std::size_t lines = 0;
-			for (const auto& [selector, value] : first)
-			{
-				bool differs = false;
-				std::string others;
-				for (const auto& entry : groups)
-				{
-					const auto& group = entry.second;
-					const auto& values = group.second;
-					const auto match = std::ranges::find_if(values, [selector](const auto& entry)
-															{ return entry.first == selector; });
-					const std::string text2 = match != values.end() ? match->second : "-";
-					if (text2 != value)
-						differs = true;
-					others += " " + text2 + "(" + std::to_string(group.first) + "枚)";
-				}
-				if (!differs)
-					continue;
-				if (++lines > kProbeMaxDiffLines)
-				{
-					text += "\n  …（差のある変数が多すぎます）";
-					break;
-				}
-				text += "\n  " + std::to_string(selector) + ":" + others;
-			}
-			if (lines == 0)
-				text += "（読み取れた変数には差がありませんでした。範囲は別の場所に"
-						"保持されています。）";
-			if (groups.size() > kProbeMaxGroups)
-				text += "\n  （組み合わせが多いので先頭 " + std::to_string(kProbeMaxGroups) +
-						" 通りだけを見ています）";
-			return text;
-		}
-#endif // VW_DEV_BUILD
 
 		// できたビューポートをシートレイヤ上で重ならないように格子状へ並べる（Python 版
 		// _arrange_viewports）。**実寸は描いてみるまで分からない**ので、GetObjectBounds で
@@ -374,19 +227,6 @@ namespace HomeskzIfcImport::draw
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
-		const bool classesBroken = drawn > 0 && classesApplied == 0;
-#ifdef VW_DEV_BUILD
-		// 【一時的】範囲の設定がどのオブジェクト変数に載っているかの探索（上記の手順）。
-		if (note != nullptr)
-		{
-			const std::string probe = ProbeSectionExtentVariables(setup.layers);
-			if (!probe.empty())
-			{
-				if (!note->empty())
-					*note += "\n";
-				*note += probe;
-			}
-		}
 #endif
 		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken))
 		{
