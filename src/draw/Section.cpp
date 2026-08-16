@@ -227,7 +227,7 @@ namespace HomeskzIfcImport::draw
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
-#endif
+		const bool classesBroken = drawn > 0 && classesApplied == 0;
 		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken))
 		{
 			std::string text = "軸組図の診断: ";
