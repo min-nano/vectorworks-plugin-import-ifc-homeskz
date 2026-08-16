@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <ranges>
 #include <set>
 #include <string>
@@ -309,6 +310,66 @@ namespace HomeskzIfcImport::core
 		return std::ranges::all_of(
 			document.grids, [](const GridCommand& grid)
 			{ return !grid.layer.empty() && !samePoint(grid.start, grid.end); });
+	}
+
+	bool sectionHeightRange(const Document& document, double& start, double& end)
+	{
+		double low = std::numeric_limits<double>::max();
+		double high = std::numeric_limits<double>::lowest();
+		bool any = false;
+		const auto take = [&](double z)
+		{
+			low = std::min(low, z);
+			high = std::max(high, z);
+			any = true;
+		};
+
+		// 床（基準面と、構成層の合計だけ下がった下端）。
+		for (const FloorCommand& floor : document.floors)
+		{
+			double thickness = 0.0;
+			for (const ComponentCommand& component : floor.components)
+				thickness += component.thickness;
+			take(floor.elevation);
+			take(floor.elevation - thickness);
+		}
+		// 横架材（天端と、せいのぶん下がった下端。傾斜梁は両端とも見る）。
+		for (const MemberCommand& member : document.members)
+		{
+			take(member.elevation);
+			take(member.endElevation);
+			take(std::min(member.elevation, member.endElevation) - member.height);
+		}
+		// 柱（下端と上端）。
+		for (const ColumnCommand& column : document.columns)
+		{
+			take(column.elevation);
+			take(column.elevation + column.height);
+		}
+		// 屋根組（垂木の両端・野地板の軒）。
+		for (const RafterCommand& rafter : document.rafters)
+		{
+			take(rafter.elevation);
+			take(rafter.endElevation);
+		}
+		for (const RoofCommand& roof : document.roofs)
+			take(roof.elevation);
+		// 基礎の底盤（天端と、コンクリート厚のぶん下がった下端）。立上りは高さを絶対値で
+		// 持たない（レベルへのバインドで表す）ので、底盤とストーリで下端を代表させる。
+		for (const SlabCommand& slab : document.slabs)
+		{
+			take(slab.elevation);
+			take(slab.elevation - slab.thickness);
+		}
+		// ストーリ高さ（要素が 1 つも無い階でも範囲に含める）。
+		for (const StoryCommand& story : document.stories)
+			take(story.elevation);
+
+		if (!any)
+			return false;
+		start = low - kSectionHeightMargin;
+		end = high + kSectionHeightMargin;
+		return true;
 	}
 
 	ModifierCommand raiseModifierTop(const ModifierCommand& modifier, double bite)

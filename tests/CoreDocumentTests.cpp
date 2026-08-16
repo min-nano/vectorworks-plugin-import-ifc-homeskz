@@ -1143,6 +1143,70 @@ TEST(validate_rejects_section_with_degenerate_line)
 }
 
 // ---------------------------------------------------------------------------
+// sectionHeightRange（軸組図の高さ範囲。ROADMAP.md M14）
+//
+// 断面ビューポートの高さ範囲は CreateSectionViewport の引数でしか与えられず、SDK に
+// 「無限」を指定する手段が無い。そこで取り込んだ要素の Z から建物を包む範囲を求める。
+// ---------------------------------------------------------------------------
+
+TEST(section_height_range_wraps_elements_with_margin)
+{
+	core::Document document;
+	// 柱 0〜3000、横架材の天端 3000（せい 180 なので下端 2820）。範囲は上下に余白ぶん広い。
+	core::ColumnCommand column;
+	column.elevation = 0.0;
+	column.height = 3000.0;
+	document.columns.push_back(column);
+
+	core::MemberCommand member;
+	member.elevation = 3000.0;
+	member.endElevation = 3000.0;
+	member.height = 180.0;
+	document.members.push_back(member);
+
+	double start = 0.0;
+	double end = 0.0;
+	CHECK(core::sectionHeightRange(document, start, end));
+	CHECK(std::abs(start - (0.0 - core::kSectionHeightMargin)) < 1e-6);
+	CHECK(std::abs(end - (3000.0 + core::kSectionHeightMargin)) < 1e-6);
+}
+
+TEST(section_height_range_covers_floors_roofs_slabs_and_stories)
+{
+	core::Document document;
+	// 基礎の底盤（天端 50・厚 150 → 下端 −100）と屋根（軒 6000）で上下が決まる。
+	core::SlabCommand slab;
+	slab.elevation = 50.0;
+	slab.thickness = 150.0;
+	document.slabs.push_back(slab);
+
+	core::RoofCommand roof;
+	roof.elevation = 6000.0;
+	document.roofs.push_back(roof);
+
+	// ストーリ高さも範囲に入る（要素の無い階を切り落とさない）。
+	core::StoryCommand story;
+	story.elevation = 3000.0;
+	document.stories.push_back(story);
+
+	double start = 0.0;
+	double end = 0.0;
+	CHECK(core::sectionHeightRange(document, start, end));
+	CHECK(std::abs(start - (-100.0 - core::kSectionHeightMargin)) < 1e-6);
+	CHECK(std::abs(end - (6000.0 + core::kSectionHeightMargin)) < 1e-6);
+}
+
+TEST(section_height_range_fails_without_elements)
+{
+	// 高さの分かる要素が 1 つも無ければ範囲は求まらない（out は触らない）。
+	double start = -1.0;
+	double end = -2.0;
+	CHECK(!core::sectionHeightRange(core::Document{}, start, end));
+	CHECK(std::abs(start - (-1.0)) < 1e-6);
+	CHECK(std::abs(end - (-2.0)) < 1e-6);
+}
+
+// ---------------------------------------------------------------------------
 // documentClassNames（命令が使うクラス名の数え上げ。ROADMAP.md M13）
 //
 // 伏図ビューポートは**クラスの表示を明示しないと全クラスが非表示**になるので、描画側は

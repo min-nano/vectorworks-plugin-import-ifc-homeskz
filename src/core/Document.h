@@ -862,6 +862,25 @@ namespace HomeskzIfcImport::core
 	// 同じ立ち位置。CLAUDE.md「テスト方針」）。並びは昇順で、命令の並び順に依存しない。
 	std::vector<std::string> documentClassNames(const Document& document);
 
+	// 断面（軸組図）の高さ範囲に足す上下の余白（mm）。基礎の底や屋根の頂部を切り落とさない
+	// ための遊びで、sectionHeightRange とその期待値を書くテストが共有する。
+	inline constexpr double kSectionHeightMargin = 1000.0;
+
+	// 取り込んだ要素（床・横架材・柱・屋根組・基礎・ストーリ）の Z から、建物を包む高さ範囲
+	// （絶対 Z。上下に kSectionHeightMargin の余白つき）を返す。高さの分かる要素が 1 つも
+	// 無ければ false（out は変更しない）。
+	//
+	// **なぜ要るか**: 断面ビューポートの高さ範囲は ISDK::CreateSectionViewport の引数でしか
+	// 与えられず、**「無限」を指定する手段が SDK に無い**（ObjectVariables にも該当の
+	// 変数が無く、断面まわりの呼び出しは CreateSectionViewport / CreateSectionLineInstance /
+	// IsSectionLineLinkedToViewport / UpdateSectionLineInstances だけ。ci-debug で確認）。
+	// 0 を渡すと**奥行きは無限**になるが**高さは「有限 0〜0」**になってしまい、断面から
+	// 建物が消えかねない。そこで高さだけは実寸＋余白の有限値を渡す（ROADMAP.md M14）。
+	//
+	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder・
+	// documentClassNames と同じ立ち位置。CLAUDE.md「テスト方針」）。
+	bool sectionHeightRange(const Document& document, double& start, double& end);
+
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す
 	// （Python 版 vw/story.py desired_layer_order の SDK 非依存な計算部分）。draw/Story が
 	// この順を適用する（レベルの高さには依存しない）。SDK を触らない純計算なので core に

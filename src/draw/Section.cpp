@@ -27,11 +27,16 @@
 //	決め方（X通り＝−X 方向・Y通り＝+Y 方向。図面の右へ座標が増える＝通り名が左から右へ並ぶ）は
 //	parse/Section が持つ。
 //
-//	【軸組図としての見え方（要件）】断面の範囲は**限らず**（長さ・高さ・奥行きとも無制限＝
-//	VW の「範囲」タブの既定）、**切断面より奥は表示せず**、**プレイナー（アクティブレイヤ
-//	平面）図形は表示せず**、**2D コンポーネントは表示する**。範囲以外はオブジェクト変数で
-//	設定する（下記の定数）。これらは「どこを切るか」ではなく「どう描くか」なので、命令セット
-//	（core::SectionCommand）には載せずここが持つ。
+//	【軸組図としての見え方（要件）】**切断面より奥は表示せず**、**プレイナー（アクティブ
+//	レイヤ平面）図形は表示せず**、**2D コンポーネントは表示する**（下記のオブジェクト変数）。
+//	断面の範囲は、**奥行きは無制限**（0 を渡す）・**高さは建物を包む実寸＋余白**・**長さは
+//	断面線の長さ**（指示線を十分外まで延ばして実質無制限にする）。
+//	**SDK には高さ・長さを「無限」に切り替える呼び出しもオブジェクト変数も無い**ことを
+//	ci-debug で SDK 全体を検索して確認済み（断面まわりの API は CreateSectionViewport /
+//	CreateSectionLineInstance / IsSectionLineLinkedToViewport / UpdateSectionLineInstances の
+//	4 つだけ、ovSectionViewport* にも範囲の項目は無い）。
+//	いずれも「どこを切るか」ではなく「どう描くか」なので、命令セット（core::SectionCommand）
+//	には載せずここが持つ。
 //
 
 #include "PluginPrefix.h"
@@ -59,13 +64,23 @@ namespace HomeskzIfcImport::draw
 		constexpr int kArrangeColumns = 5;
 		constexpr double kArrangeGap = 300.0;
 
-		// 断面の範囲（長さ・高さ・奥行き）に渡す値。**軸組図は範囲を限らない**（要件）。
-		// VW の「範囲」タブは既定が全方向 infinite で、CreateSectionViewport の
-		// depth / startHeight / endHeight は**その範囲を限りたいときに与える値**なので、
-		// 0＝制限なし＝既定の infinite のままにする、と読んで 0 を渡す。
-		// **ローカル確認の要点**: 断面が空になる・帯状に切れて見えるなら、この値が
-		// 「範囲 0」と解釈されているということなので、その時は実寸の範囲を渡す形へ戻す。
-		constexpr double kInfiniteExtent = 0.0;
+		// 切断面より奥の範囲に渡す値。**0 が「無限」**（ローカル確認で実測: 0 を渡した
+		// ビューポートの「断面の詳細設定」で〈切断面より奥の範囲: 無限〉になっていた）。
+		// 奥は表示しない設定（下記 1064）なので実際には効かないが、範囲の指定としては
+		// 無制限にしておく。
+		constexpr double kInfiniteDepth = 0.0;
+
+		// **高さの範囲だけは実寸を渡す**（core::sectionHeightRange。建物の上下＋余白）。
+		// 同じ 0 を高さへ渡すと〈高さの範囲: 有限・始点 0・終点 0〉になり、断面から建物が
+		// 消えかねないことがローカル確認で分かった。**SDK には高さ・長さを「無限」にする
+		// 呼び出しもオブジェクト変数も無い**（断面まわりは CreateSectionViewport /
+		// CreateSectionLineInstance / IsSectionLineLinkedToViewport /
+		// UpdateSectionLineInstances だけ。ci-debug で SDK 全体を確認）ので、実寸＋余白の
+		// 有限範囲で建物全体を収める（ROADMAP.md M14）。
+		//
+		// 長さの範囲も同じ理由で〈断面線の長さ〉のままになる。こちらは**指示線を通り芯の
+		// bbox より十分外まで延ばす**ことで実質無制限にしている（parse/Section の
+		// kSectionLineMargin）。
 
 		// 断面ビューポートのオブジェクト変数（Kernel/API/ObjectVariables.h。ci-debug で確認）。
 		//   1064 … 切断面より**奥**の図形を表示するか（要件: 表示しない）
@@ -87,16 +102,17 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
 		}
 
-		// 断面ビューポートを 1 枚作る。作れなければ nil。範囲（長さ・高さ・奥行き）は
-		// 限らない（上記 kInfiniteExtent）。
+		// 断面ビューポートを 1 枚作る。作れなければ nil。奥行きは無制限、高さは建物を包む
+		// 実寸（上記）。
 		MCObjectHandle CreateSectionViewport(const core::SectionCommand& command,
-											 MCObjectHandle sheetLayer)
+											 MCObjectHandle sheetLayer, double startHeight,
+											 double endHeight)
 		{
 			const WorldPt start(command.lineStart.x, command.lineStart.y);
 			const WorldPt end(command.lineEnd.x, command.lineEnd.y);
 			const WorldPt view(command.viewPoint.x, command.viewPoint.y);
-			return gSDK->CreateSectionViewport(start, end, view, kInfiniteExtent, kInfiniteExtent,
-											   kInfiniteExtent, sheetLayer);
+			return gSDK->CreateSectionViewport(start, end, view, kInfiniteDepth, startHeight,
+											   endHeight, sheetLayer);
 		}
 
 		// 軸組図としての見え方を整える（要件。ConfigureViewport＝更新より**前**に呼ぶ）。
@@ -150,6 +166,13 @@ namespace HomeskzIfcImport::draw
 		// レイヤの走査とクラスの数え上げは全命令で共通なので 1 回だけ行う（draw/DrawUtil）。
 		const ViewportSetup setup = PrepareViewportSetup(document);
 
+		// 断面の高さ範囲も全命令で共通（建物を包む実寸＋余白。core::sectionHeightRange）。
+		// 求まらない＝高さの分かる要素が 1 つも無い文書では 0〜0 になるが、そのときは
+		// そもそも切断位置が出ない（parse/Section）のでここへは来ない。
+		double startHeight = 0.0;
+		double endHeight = 0.0;
+		core::sectionHeightRange(document, startHeight, endHeight);
+
 		// 描画の前後でカレントレイヤが変わらないようにする（伏図と同じ作法）。
 		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();
 
@@ -174,7 +197,8 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			const MCObjectHandle viewport = CreateSectionViewport(command, sheetLayer);
+			const MCObjectHandle viewport =
+				CreateSectionViewport(command, sheetLayer, startHeight, endHeight);
 			if (viewport == nil)
 			{
 				// 断面ビューポートを作れなかった。件数を診断へ残して「命令はあるのに軸組図が
