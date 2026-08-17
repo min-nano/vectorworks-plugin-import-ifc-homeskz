@@ -1196,6 +1196,31 @@ TEST(section_height_range_covers_floors_roofs_slabs_and_stories)
 	CHECK(std::abs(end - (6000.0 + core::kSectionHeightMargin)) < 1e-6);
 }
 
+TEST(section_height_range_reaches_ground_beam_bottom)
+{
+	core::Document document;
+	// 底盤（天端 50・厚 150 → 下端 −100）に、そこから更に深く垂れ下がる地中梁を 1 本。
+	// **モデルの最深部は底盤の下端ではなく地中梁の下端**なので、範囲はそこまで届く。
+	core::SlabCommand slab;
+	slab.elevation = 50.0;
+	slab.thickness = 150.0;
+
+	// 台形断面（v=0 が梁下端）。origin.z＝梁下端の絶対 Z なので、下端 −700・上端 −100。
+	core::ModifierCommand modifier;
+	modifier.origin = core::Vec3{0.0, 0.0, -700.0};
+	modifier.depth = 2000.0;
+	modifier.profile = {core::Vec2{-75.0, 0.0}, core::Vec2{75.0, 0.0}, core::Vec2{150.0, 600.0},
+						core::Vec2{-150.0, 600.0}};
+	slab.modifiers.push_back(modifier);
+	document.slabs.push_back(slab);
+
+	double start = 0.0;
+	double end = 0.0;
+	CHECK(core::sectionHeightRange(document, start, end));
+	CHECK(std::abs(start - (-700.0 - core::kSectionHeightMargin)) < 1e-6);
+	CHECK(std::abs(end - (50.0 + core::kSectionHeightMargin)) < 1e-6);
+}
+
 TEST(section_height_range_covers_floors_and_rafters)
 {
 	core::Document document;

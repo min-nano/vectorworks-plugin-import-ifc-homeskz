@@ -49,10 +49,16 @@ namespace HomeskzIfcImport::draw
 		// 値が違う**（1 は「非表示」ではない）。表示に戻すのが目的なので Normal だけを使う。
 		constexpr short kClassVisible = 0;
 
-		// 図面のレイヤを先頭から順に辿る。VWDocument::GetDrawingHeaderFristMember（SDK の
-		// 綴りママ）が図面のオブジェクト列の先頭＝最初のレイヤで、以降は NextObject でたどれる。
-		// レイヤ以外が混ざっても IsLayerObject で弾く（ISDK に「レイヤだけを列挙する」呼び出しは
-		// 無いため、この走査が唯一の手立て）。
+		// 図面の**デザインレイヤ**を先頭から順に辿る。VWDocument::GetDrawingHeaderFristMember
+		// （SDK の綴りママ）が図面のオブジェクト列の先頭＝最初のレイヤで、以降は NextObject で
+		// たどれる。レイヤ以外が混ざっても IsLayerObject で弾く（ISDK に「レイヤだけを列挙する」
+		// 呼び出しは無いため、この走査が唯一の手立て）。
+		//
+		// **シートレイヤは除く**（VWLayerObj::GetLayerType が kLayerSheet=2 を返すもの）。
+		// ビューポートに映るのはデザインレイヤだけなので、シートレイヤを混ぜても
+		// SetViewportLayerVisibility は意味を持たず、CollectUsedClasses が既にできている
+		// ビューポートの中身まで辿る無駄が増える。**軸組図は伏図の後に走る**ので、除かないと
+		// 伏図の作ったシートレイヤ（"1" / "2" …）がそのまま入ってくる。
 		std::vector<MCObjectHandle> AllLayers()
 		{
 			std::vector<MCObjectHandle> layers;
@@ -61,8 +67,11 @@ namespace HomeskzIfcImport::draw
 				for (MCObjectHandle h = VWDocument::GetDrawingHeaderFristMember(); h != nil;
 					 h = gSDK->NextObject(h))
 				{
-					if (VWLayerObj::IsLayerObject(h))
-						layers.push_back(h);
+					if (!VWLayerObj::IsLayerObject(h))
+						continue;
+					if (VWLayerObj(h).GetLayerType() == kLayerSheet)
+						continue;
+					layers.push_back(h);
 				}
 			}
 			catch (...)

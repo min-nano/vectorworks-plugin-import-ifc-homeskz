@@ -86,7 +86,8 @@ namespace HomeskzIfcImport::parse
 
 	// 名前付き通り芯を方向別に (名前, 座標) の昇順で返す（Python 版 _named_axes）。無名の
 	// 通り芯は命名に使えないので除く。同名の通り芯が複数区間に分かれていても 1 本にまとめる
-	// （最初に現れた区間の中点を採るので、入力順に依存しない）。
+	// （最初に現れた区間の中点を採る。「最初」は入力順で決まるが、collectGridLines が
+	// #id 昇順の決定的な並びを返すので結果も決定的になる）。
 	std::vector<NamedAxis> namedAxes(const std::vector<GridLine>& lines, const core::Vec2& center,
 									 core::SectionDirection direction);
 

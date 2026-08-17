@@ -193,7 +193,7 @@ namespace HomeskzIfcImport::core
 		// 配置先シートレイヤ番号（＝レイヤ名）とタイトルが非空で、表示レイヤを 1 つ以上持ち
 		// （伏図と同じ理由＝何も映らないビューポートを作らせない）、**断面指示線が縮退して
 		// いない**（始点≠終点。縮退した線からは切断面が決まらない）こと。断面の範囲は
-		// 命令が持たない（常に無制限。core/Document.h の SectionCommand 参照）ので見ない。
+		// 命令が持たない（core/Document.h の SectionCommand 参照）ので見ない。
 		bool isValidSection(const SectionCommand& section)
 		{
 			return !section.number.empty() && !section.title.empty() &&
@@ -360,6 +360,15 @@ namespace HomeskzIfcImport::core
 		{
 			take(slab.elevation);
 			take(slab.elevation - slab.thickness);
+			// 地中梁（底盤にぶら下がる台形プリズム）。**モデルの最深部はふつう底盤の下端では
+			// なく地中梁の下端**なので、これを見ないと余白（kSectionHeightMargin）より深い
+			// 地中梁が軸組図の足元で切れる。断面原点が梁下端（v=0）で origin.z が絶対 Z
+			// なので、プロファイルの v をそのまま足せば上下端になる（ModifierCommand 参照）。
+			for (const ModifierCommand& modifier : slab.modifiers)
+			{
+				for (const Vec2& vertex : modifier.profile)
+					take(modifier.origin.z + vertex.y);
+			}
 		}
 		// ストーリ高さ（要素が 1 つも無い階でも範囲に含める）。
 		for (const StoryCommand& story : document.stories)

@@ -230,7 +230,9 @@ namespace HomeskzIfcImport::parse
 	std::vector<NamedAxis> namedAxes(const std::vector<GridLine>& lines, const core::Vec2& center,
 									 SectionDirection direction)
 	{
-		// 同名の通り芯が複数区間に分かれていても 1 本にまとめる（最初に現れた区間の中点）。
+		// 同名の通り芯が複数区間に分かれていても 1 本にまとめる（最初に現れた区間の中点を
+		// 採る）。**「最初」は入力順で決まる**が、入力の collectGridLines が #id 昇順の
+		// 決定的な並びを返す（parse/Grid）ので、結果も決定的になる。
 		std::vector<NamedAxis> axes;
 		std::set<std::string> seen;
 		for (const GridLine& line : lines)

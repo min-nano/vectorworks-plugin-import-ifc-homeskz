@@ -173,11 +173,23 @@ namespace HomeskzIfcImport::draw
 		const ViewportSetup setup = PrepareViewportSetup(document);
 
 		// 断面の高さ範囲も全命令で共通（建物を包む実寸＋余白。core::sectionHeightRange）。
-		// 求まらない＝高さの分かる要素が 1 つも無い文書では 0〜0 になるが、そのときは
-		// そもそも切断位置が出ない（parse/Section）のでここへは来ない。
+		// **求まらないときは描かない**——高さの分かる要素が 1 つも無い文書では out が
+		// 触られず 0〜0 のままで、その範囲で作ると「軸組図はあるのに空」になる（高さに 0 を
+		// 渡すと〈高さの範囲: 有限・0〜0〉になる。ファイル冒頭）。parse/Section を通った
+		// 文書ならここへは来ないが、drawSections は**任意の Document を取れる公開関数**
+		// なので、暗黙の不変条件に寄りかからず理由を残して抜ける。
 		double startHeight = 0.0;
 		double endHeight = 0.0;
-		core::sectionHeightRange(document, startHeight, endHeight);
+		if (!core::sectionHeightRange(document, startHeight, endHeight))
+		{
+			if (note != nullptr)
+			{
+				if (!note->empty())
+					*note += "\n";
+				*note += "軸組図の診断: 建物の高さが求まらないため作成しませんでした。";
+			}
+			return 0;
+		}
 
 		// 描画の前後でカレントレイヤが変わらないようにする（伏図と同じ作法）。
 		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();

@@ -177,7 +177,8 @@ src/
     Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）
     Section.{h,cpp}         section 命令 → 断面ビューポート（旧 vw/section.py）。**Python 版と
                             違い ISDK::CreateSectionViewport で新規作成する**（既製 40 枚の
-                            流用はしない。ROADMAP.md M14 の【決定】）。断面の範囲（無制限）と
+                            流用はしない。ROADMAP.md M14 の【決定】）。断面の範囲（奥行きだけ
+                            0＝無限・高さは建物の実寸＋余白・長さは断面線の長さ）と
                             表示の作法（奥を出さない・プレイナー図形を出さない・2D
                             コンポーネントは出す）の唯一の置き場所
     …                       以降、要素ごとに 1 対 1 で追加
