@@ -71,26 +71,30 @@ namespace HomeskzIfcImport::parse
 			return true;
 		}
 
-		// 軸が X 通りか Y 通りかを判定する（ROADMAP.md M1）。まず軸名の先頭文字が
-		// X/Y ならそれに従い（大文字小文字を無視）、判別できなければ線の向きで決める
-		// （|Δx|<|Δy| すなわち縦長の線を X 通り＝X 軸上に並ぶ縦線とみなす。ホームズ君の
-		// x1/x2… は実際に鉛直線として出力される）。
-		bool isXAxis(const GridLine& line)
-		{
-			if (!line.label.empty())
-			{
-				const auto first = static_cast<unsigned char>(line.label.front());
-				const int upper = std::toupper(first);
-				if (upper == 'X')
-					return true;
-				if (upper == 'Y')
-					return false;
-			}
-			const double dx = std::abs(line.end.x - line.start.x);
-			const double dy = std::abs(line.end.y - line.start.y);
-			return dx < dy;
-		}
 	} // namespace
+
+	// 軸が X 通りか Y 通りかを判定する（ROADMAP.md M1）。まず軸名の先頭文字が
+	// X/Y ならそれに従い（大文字小文字を無視）、判別できなければ線の向きで決める
+	// （|Δx|<|Δy| すなわち縦長の線を X 通り＝X 軸上に並ぶ縦線とみなす。ホームズ君の
+	// x1/x2… は実際に鉛直線として出力される）。
+	//
+	// 軸組図（parse/Section）も通り名の照合でこの判定を使うため、無名名前空間ではなく
+	// parse に公開している（parse/Grid.h）。
+	bool isXAxis(const GridLine& line)
+	{
+		if (!line.label.empty())
+		{
+			const auto first = static_cast<unsigned char>(line.label.front());
+			const int upper = std::toupper(first);
+			if (upper == 'X')
+				return true;
+			if (upper == 'Y')
+				return false;
+		}
+		const double dx = std::abs(line.end.x - line.start.x);
+		const double dy = std::abs(line.end.y - line.start.y);
+		return dx < dy;
+	}
 
 	std::vector<GridLine> collectGridLines(const Model& model)
 	{

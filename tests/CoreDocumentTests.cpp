@@ -1078,6 +1078,184 @@ TEST(validate_accepts_sheet_without_drawing_label)
 }
 
 // ---------------------------------------------------------------------------
+// 断面ビューポート（軸組図。ROADMAP.md M14）
+//
+// 伏図の関門（シートレイヤ番号・タイトル・非空の表示レイヤ）に加えて、**指示線が縮退して
+// いない**ことを見る（縮退した線からは切断面の向きが決まらない）。断面の範囲（長さ・高さ・
+// 奥行き）は命令が持たない——軸組図は範囲を限らないので、描画側の定数が受け持つ。
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	core::SectionCommand validSection()
+	{
+		core::SectionCommand section;
+		section.number = "A";
+		section.title = "軸組図";
+		section.direction = core::SectionDirection::X;
+		section.lineStart = core::Vec2{1000.0, -4000.0};
+		section.lineEnd = core::Vec2{1000.0, 4000.0};
+		section.viewPoint = core::Vec2{0.0, 0.0};
+		section.viewport.drawingNumber = "X1";
+		section.viewport.drawingTitle = "X1通り";
+		section.viewport.layers = {"1-横架材天端", "1-FL", "共通"};
+		return section;
+	}
+} // namespace
+
+TEST(validate_accepts_document_with_valid_section)
+{
+	core::Document document;
+	document.sections.push_back(validSection());
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_section_without_sheet_or_layers)
+{
+	// シートレイヤ番号・タイトル・表示レイヤは伏図と同じ関門。
+	core::Document byNumber;
+	core::SectionCommand noNumber = validSection();
+	noNumber.number.clear();
+	byNumber.sections.push_back(noNumber);
+	CHECK(!core::validateDocument(byNumber));
+
+	core::Document byTitle;
+	core::SectionCommand noTitle = validSection();
+	noTitle.title.clear();
+	byTitle.sections.push_back(noTitle);
+	CHECK(!core::validateDocument(byTitle));
+
+	core::Document byLayers;
+	core::SectionCommand noLayers = validSection();
+	noLayers.viewport.layers.clear();
+	byLayers.sections.push_back(noLayers);
+	CHECK(!core::validateDocument(byLayers));
+}
+
+TEST(validate_rejects_section_with_degenerate_line)
+{
+	// 始点＝終点では切断面の向きが決まらない。
+	core::Document document;
+	core::SectionCommand section = validSection();
+	section.lineEnd = section.lineStart;
+	document.sections.push_back(section);
+	CHECK(!core::validateDocument(document));
+}
+
+// ---------------------------------------------------------------------------
+// sectionHeightRange（軸組図の高さ範囲。ROADMAP.md M14）
+//
+// 断面ビューポートの高さ範囲は CreateSectionViewport の引数でしか与えられず、SDK に
+// 「無限」を指定する手段が無い。そこで取り込んだ要素の Z から建物を包む範囲を求める。
+// ---------------------------------------------------------------------------
+
+TEST(section_height_range_wraps_elements_with_margin)
+{
+	core::Document document;
+	// 柱 0〜3000、横架材の天端 3000（せい 180 なので下端 2820）。範囲は上下に余白ぶん広い。
+	core::ColumnCommand column;
+	column.elevation = 0.0;
+	column.height = 3000.0;
+	document.columns.push_back(column);
+
+	core::MemberCommand member;
+	member.elevation = 3000.0;
+	member.endElevation = 3000.0;
+	member.height = 180.0;
+	document.members.push_back(member);
+
+	double start = 0.0;
+	double end = 0.0;
+	CHECK(core::sectionHeightRange(document, start, end));
+	CHECK(std::abs(start - (0.0 - core::kSectionHeightMargin)) < 1e-6);
+	CHECK(std::abs(end - (3000.0 + core::kSectionHeightMargin)) < 1e-6);
+}
+
+TEST(section_height_range_covers_floors_roofs_slabs_and_stories)
+{
+	core::Document document;
+	// 基礎の底盤（天端 50・厚 150 → 下端 −100）と屋根（軒 6000）で上下が決まる。
+	core::SlabCommand slab;
+	slab.elevation = 50.0;
+	slab.thickness = 150.0;
+	document.slabs.push_back(slab);
+
+	core::RoofCommand roof;
+	roof.elevation = 6000.0;
+	document.roofs.push_back(roof);
+
+	// ストーリ高さも範囲に入る（要素の無い階を切り落とさない）。
+	core::StoryCommand story;
+	story.elevation = 3000.0;
+	document.stories.push_back(story);
+
+	double start = 0.0;
+	double end = 0.0;
+	CHECK(core::sectionHeightRange(document, start, end));
+	CHECK(std::abs(start - (-100.0 - core::kSectionHeightMargin)) < 1e-6);
+	CHECK(std::abs(end - (6000.0 + core::kSectionHeightMargin)) < 1e-6);
+}
+
+TEST(section_height_range_reaches_ground_beam_bottom)
+{
+	core::Document document;
+	// 底盤（天端 50・厚 150 → 下端 −100）に、そこから更に深く垂れ下がる地中梁を 1 本。
+	// **モデルの最深部は底盤の下端ではなく地中梁の下端**なので、範囲はそこまで届く。
+	core::SlabCommand slab;
+	slab.elevation = 50.0;
+	slab.thickness = 150.0;
+
+	// 台形断面（v=0 が梁下端）。origin.z＝梁下端の絶対 Z なので、下端 −700・上端 −100。
+	core::ModifierCommand modifier;
+	modifier.origin = core::Vec3{0.0, 0.0, -700.0};
+	modifier.depth = 2000.0;
+	modifier.profile = {core::Vec2{-75.0, 0.0}, core::Vec2{75.0, 0.0}, core::Vec2{150.0, 600.0},
+						core::Vec2{-150.0, 600.0}};
+	slab.modifiers.push_back(modifier);
+	document.slabs.push_back(slab);
+
+	double start = 0.0;
+	double end = 0.0;
+	CHECK(core::sectionHeightRange(document, start, end));
+	CHECK(std::abs(start - (-700.0 - core::kSectionHeightMargin)) < 1e-6);
+	CHECK(std::abs(end - (50.0 + core::kSectionHeightMargin)) < 1e-6);
+}
+
+TEST(section_height_range_covers_floors_and_rafters)
+{
+	core::Document document;
+	// 床は**基準面と構成層の合計だけ下がった下端**の両方を見る（合計 12+150=162 なので
+	// 基準面 3000 の床の下端は 2838）。ここが範囲の下端になる。
+	core::FloorCommand floor;
+	floor.elevation = 3000.0;
+	floor.components.push_back(core::ComponentCommand{"仕上げ", 12.0});
+	floor.components.push_back(core::ComponentCommand{"床下地", 150.0});
+	document.floors.push_back(floor);
+
+	// 垂木は勾配があるので**両端**を見る（軒 5000・棟 7000）。棟が範囲の上端になる。
+	core::RafterCommand rafter;
+	rafter.elevation = 5000.0;
+	rafter.endElevation = 7000.0;
+	document.rafters.push_back(rafter);
+
+	double start = 0.0;
+	double end = 0.0;
+	CHECK(core::sectionHeightRange(document, start, end));
+	CHECK(std::abs(start - (2838.0 - core::kSectionHeightMargin)) < 1e-6);
+	CHECK(std::abs(end - (7000.0 + core::kSectionHeightMargin)) < 1e-6);
+}
+
+TEST(section_height_range_fails_without_elements)
+{
+	// 高さの分かる要素が 1 つも無ければ範囲は求まらない（out は触らない）。
+	double start = -1.0;
+	double end = -2.0;
+	CHECK(!core::sectionHeightRange(core::Document{}, start, end));
+	CHECK(std::abs(start - (-1.0)) < 1e-6);
+	CHECK(std::abs(end - (-2.0)) < 1e-6);
+}
+
+// ---------------------------------------------------------------------------
 // documentClassNames（命令が使うクラス名の数え上げ。ROADMAP.md M13）
 //
 // 伏図ビューポートは**クラスの表示を明示しないと全クラスが非表示**になるので、描画側は

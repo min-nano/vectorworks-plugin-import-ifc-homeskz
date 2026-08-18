@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -158,6 +159,53 @@ namespace HomeskzIfcImport::draw
 	// ために勝手にレイヤを作らない（Python 版 execute_floors / execute_rafters /
 	// execute_roofs と同じ規約）。
 	MCObjectHandle ActivateExistingLayer(const std::string& layerName);
+
+	// --- シートレイヤとビューポート（伏図＝M13・軸組図＝M14 が共有する作法）------------
+	//
+	// 伏図（draw/Sheet）と軸組図（draw/Section）は、ビューポートの**種類が違うだけ**で
+	// 前後の手当ては同じ（シートレイヤを用意 → 生成 → 表示レイヤを絞る → クラスを表示に
+	// 戻す → 縮尺 → 図面タイトル・図番 → 更新）。SDK を叩く部分はここに 1 つだけ置く。
+	// 断面ビューポートも例外ではなく、ISDK::CreateSectionViewport のコメントが
+	// 「クラス・レイヤの表示はこの呼び出しでは扱わない。呼び出し後に設定し、そのあとで
+	// ビューポートを更新すること」と明記している。
+
+	// ビューポート共通の下ごしらえ。図面の全レイヤと、**表示に戻すクラス**の索引を持つ。
+	//
+	// 【クラスをわざわざ数え上げる理由】ビューポートはクラスの表示を明示しないと**非表示の
+	// まま**（M13 のローカル確認で判明。レイヤは命令どおりなのに図形が 1 つも出なかった）。
+	// ところが ISDK には「ドキュメントの全クラスを列挙する」呼び出しが無い（VWClass にあるのは
+	// 名前↔索引の変換だけ）。そこで**図形が身に付けているクラス**を全レイヤ走査で数え上げ、
+	// 命令セットが名乗るクラス（core::documentClassNames）も取りこぼし防止に足す。
+	//
+	// classes は**昇順・重複なしの vector**（集合として使うが std::set では持たない）。
+	// Windows の clang-tidy が std::set を持つ構造体の暗黙の特殊メンバに
+	// bugprone-exception-escape を出すため、走査中だけ set を使い、結果は vector へ移す
+	// （用途は「1 つずつ表示へ戻す」走査だけなので、連続領域の方が素直でもある）。
+	struct ViewportSetup
+	{
+		std::vector<MCObjectHandle> layers;
+		std::vector<InternalIndex> classes;
+	};
+
+	// 上の下ごしらえを行う。図面の規模なりに走査するので、**ビューポートを作るフェーズごとに
+	// 1 回だけ**呼ぶこと（伏図・軸組図がそれぞれ 1 回。フェーズをまたいで持ち回さないのは、
+	// 要素ごとの draw/*.h に SDK 型を出さない約束を守るため。DrawUtil.h 冒頭参照）。
+	ViewportSetup PrepareViewportSetup(const core::Document& document);
+
+	// シートレイヤを用意する（同じ番号のものがあれば再利用）。**シートレイヤ番号はレイヤ名が
+	// 担う**（Python 版と同じ）。タイトルはレイヤの説明＝オブジェクト変数 159
+	// （ovLayerDescription。"only used for sheet layers"）へ入れる。用意できなければ nil。
+	MCObjectHandle PrepareSheetLayer(const std::string& number, const std::string& title);
+
+	// 生成済みのビューポートを命令どおりに仕上げる（表示レイヤの絞り込み → クラス表示 →
+	// 縮尺 → 図面タイトル・図番 → 更新）。**表示に戻せたクラスの数**を返す（0 なら図形が
+	// 1 つも映らないので、呼び出し側は診断行に出す）。
+	//
+	// 表示レイヤは「まず全部隠してから、命令に挙げたものだけ表示へ戻す」——ビューポートは
+	// 既定でドキュメントの表示状態を引き継ぐため、挙げていないレイヤが映り込む。グレー表示
+	// （2）は薄く残るので使わず、必ず非表示（1）にする。
+	std::size_t ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
+								  const ViewportSetup& setup, const core::ViewportCommand& command);
 
 	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
 	// （draw/ObjectHandles.h の ObjectHandles）は SDK 非依存のヘッダに置いてあり、

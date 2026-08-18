@@ -693,6 +693,59 @@ namespace HomeskzIfcImport::core
 		ViewportCommand viewport;
 	};
 
+	// 断面ビューポート（軸組図）の向き。X通り＝定 X の切断面（指示線は Y 方向へ延びる）、
+	// Y通り＝定 Y の切断面（指示線は X 方向へ延びる）。Python 版の 'direction'（'X'/'Y'）に
+	// 対応し、文字列ではなく enum で持つ（ColumnMarkStyle と同じ流儀）。
+	enum class SectionDirection
+	{
+		X,
+		Y,
+	};
+
+	// 断面ビューポート（軸組図）1 枚を**新規作成**する命令。Python 版 document.py の
+	// SectionCommand（dict）に対応する（ROADMAP.md M14）。
+	//
+	// 【Python 版との最大の差異＝新規作成する】Python 版（VectorScript）は断面ビューポートを
+	// 作れないため、シートレイヤ "A" にあらかじめ用意した 40 枚（X1..X20 / Y1..Y20）の指示線・
+	// ビューポートを**移動・改名・削除**して流用していた（`source_number` は流用元の図番）。
+	// C++ SDK には ISDK::CreateSectionViewport があるので、本移植は**通りの数だけ新規に作る**
+	// ——したがって既製枚数の上限も `source_number` も要らない（parse/Section.h 参照）。
+	//
+	// Python 版キーとの対応:
+	//   number      （Python 版 vw/section.py SECTION_SHEET_LAYER）… 配置先シートレイヤ番号
+	//                                （＝レイヤ名。全 section 命令で同じ "A"）
+	//   title       （同上）          … シートレイヤのタイトル（"軸組図"）
+	//   direction   ← 'direction'     … X通り / Y通り
+	//   lineStart   ← 'line_start'    … 断面指示線の始点（切断位置。センタリング済みの平面座標）
+	//   lineEnd     ← 'line_end'      … 同 終点
+	//   viewPoint   （Python 版に対応なし）… **視線の向き**を示す点（指示線の中点から見る側へ
+	//                                 離した点）。Python 版は既製の指示線の向きをそのまま
+	//                                 使ったので不要だった。
+	//   viewport    ← 'drawing_number' / 'drawing_title' … 図番（通り名 "X1" / "又い"）・
+	//                                 図面タイトル（"X1通り"）と、映すデザインレイヤ
+	//
+	// **断面の範囲（長さ・高さ・奥行き）は持たない**: **命令ごとに変わる値が無い**ため。
+	// 内訳は 奥行き＝0（＝無限）／高さ＝建物を包む実寸＋余白（core::sectionHeightRange。
+	// 文書に 1 つで足りる）／長さ＝断面線の長さ（指示線を通り芯 bbox より十分外へ延ばして
+	// 実質無制限にする）で、**「無限」なのは奥行きだけ**（長さ・高さを無限にする手段は
+	// SDK に無い。経緯は draw/Section.cpp 冒頭）。切断面より奥を出すか・
+	// プレイナー図形を出すか・2D コンポーネントを出すかという表示の作法も同じ理由で
+	// **draw/Section の名前付き定数**が持つ（描き方であって、どこを切るかではない）。
+	//
+	// **並べる位置も持たない**: シートレイヤ上での配置は、実際にできたビューポートの大きさに
+	// 合わせて詰める必要があり、大きさは描いてみるまで分からない（draw/Section が
+	// GetObjectBounds で測って並べる。Python 版 _arrange_viewports と同じ）。
+	struct SectionCommand
+	{
+		std::string number;
+		std::string title;
+		SectionDirection direction = SectionDirection::X;
+		Vec2 lineStart;
+		Vec2 lineEnd;
+		Vec2 viewPoint;
+		ViewportCommand viewport;
+	};
+
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
@@ -785,6 +838,12 @@ namespace HomeskzIfcImport::core
 		// ビューポートが見せるデザインレイヤはすべて stories が作るので、描画は
 		// **全要素の描画が済んだ後**に処理する（draw/ExecuteDocument）。
 		std::vector<SheetCommand> sheets;
+
+		// M14 断面ビューポート（軸組図）。柱と梁の両方が通る通り（柱梁の芯）を X・Y 方向
+		// それぞれ検出し、切断位置の昇順に X通り → Y通り の順で並べる（parse/Section）。
+		// 伏図と同じくモデルを映すので、描画は **全要素の描画が済んだ後**（伏図の後）に
+		// 処理する（draw/ExecuteDocument）。
+		std::vector<SectionCommand> sections;
 	};
 
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は
@@ -805,6 +864,25 @@ namespace HomeskzIfcImport::core
 	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder と
 	// 同じ立ち位置。CLAUDE.md「テスト方針」）。並びは昇順で、命令の並び順に依存しない。
 	std::vector<std::string> documentClassNames(const Document& document);
+
+	// 断面（軸組図）の高さ範囲に足す上下の余白（mm）。基礎の底や屋根の頂部を切り落とさない
+	// ための遊びで、sectionHeightRange とその期待値を書くテストが共有する。
+	inline constexpr double kSectionHeightMargin = 1000.0;
+
+	// 取り込んだ要素（床・横架材・柱・屋根組・基礎・ストーリ）の Z から、建物を包む高さ範囲
+	// （絶対 Z。上下に kSectionHeightMargin の余白つき）を返す。高さの分かる要素が 1 つも
+	// 無ければ false（out は変更しない）。
+	//
+	// **なぜ要るか**: 断面ビューポートの高さ範囲は ISDK::CreateSectionViewport の引数でしか
+	// 与えられず、**「無限」を指定する手段が SDK に無い**（ObjectVariables にも該当の
+	// 変数が無く、断面まわりの呼び出しは CreateSectionViewport / CreateSectionLineInstance /
+	// IsSectionLineLinkedToViewport / UpdateSectionLineInstances だけ。ci-debug で確認）。
+	// 0 を渡すと**奥行きは無限**になるが**高さは「有限 0〜0」**になってしまい、断面から
+	// 建物が消えかねない。そこで高さだけは実寸＋余白の有限値を渡す（ROADMAP.md M14）。
+	//
+	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder・
+	// documentClassNames と同じ立ち位置。CLAUDE.md「テスト方針」）。
+	bool sectionHeightRange(const Document& document, double& start, double& end);
 
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す
 	// （Python 版 vw/story.py desired_layer_order の SDK 非依存な計算部分）。draw/Story が

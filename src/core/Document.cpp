@@ -6,8 +6,8 @@
 //
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
 //	walls / slabs（M9）・wallJoins / 底盤の modifiers＝地中梁（M10）・rafters / roofs（M6）・
-//	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints）の
-//	各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
+//	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints）・
+//	sheets（M13）・sections（M14）の各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
 //	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 //	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <ranges>
 #include <set>
 #include <string>
@@ -188,6 +189,20 @@ namespace HomeskzIfcImport::core
 										[](const std::string& layer) { return layer.empty(); });
 		}
 
+		// 断面ビューポート（軸組図）1 枚が妥当か（Python 版 _validate_section 相当）。
+		// 配置先シートレイヤ番号（＝レイヤ名）とタイトルが非空で、表示レイヤを 1 つ以上持ち
+		// （伏図と同じ理由＝何も映らないビューポートを作らせない）、**断面指示線が縮退して
+		// いない**（始点≠終点。縮退した線からは切断面が決まらない）こと。断面の範囲は
+		// 命令が持たない（core/Document.h の SectionCommand 参照）ので見ない。
+		bool isValidSection(const SectionCommand& section)
+		{
+			return !section.number.empty() && !section.title.empty() &&
+				   !section.viewport.layers.empty() &&
+				   std::ranges::none_of(section.viewport.layers,
+										[](const std::string& layer) { return layer.empty(); }) &&
+				   !samePoint(section.lineStart, section.lineEnd);
+		}
+
 		// シンボル配置 1 件が妥当か（Python 版 _validate_anchor_bolt / _validate_floor_post /
 		// _validate_fire_brace / _validate_joint と同じ関門を 1 つにまとめたもの）。配置先
 		// レイヤ名とシンボル名が非空であること。position / angle は数値（double なので常に
@@ -279,6 +294,11 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.sheets, isValidSheet))
 			return false;
 
+		// 断面ビューポート（軸組図）: シートレイヤ番号・タイトル・表示レイヤに加え、指示線が
+		// 縮退していないこと（isValidSection 参照。ROADMAP.md M14）。
+		if (!std::ranges::all_of(document.sections, isValidSection))
+			return false;
+
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。
 		// 同一判定は parse/Grid の重複線除去と同じ core/Geometry の samePoint を通す
 		// （閾値がズレると「畳まれた線が検証では非縮退」のような食い違いが起こる）。
@@ -290,6 +310,75 @@ namespace HomeskzIfcImport::core
 		return std::ranges::all_of(
 			document.grids, [](const GridCommand& grid)
 			{ return !grid.layer.empty() && !samePoint(grid.start, grid.end); });
+	}
+
+	bool sectionHeightRange(const Document& document, double& start, double& end)
+	{
+		double low = std::numeric_limits<double>::max();
+		double high = std::numeric_limits<double>::lowest();
+		bool any = false;
+		const auto take = [&](double z)
+		{
+			low = std::min(low, z);
+			high = std::max(high, z);
+			any = true;
+		};
+
+		// 床（基準面と、構成層の合計だけ下がった下端）。
+		for (const FloorCommand& floor : document.floors)
+		{
+			double thickness = 0.0;
+			for (const ComponentCommand& component : floor.components)
+				thickness += component.thickness;
+			take(floor.elevation);
+			take(floor.elevation - thickness);
+		}
+		// 横架材（天端と、せいのぶん下がった下端。傾斜梁は両端とも見る）。
+		for (const MemberCommand& member : document.members)
+		{
+			take(member.elevation);
+			take(member.endElevation);
+			take(std::min(member.elevation, member.endElevation) - member.height);
+		}
+		// 柱（下端と上端）。
+		for (const ColumnCommand& column : document.columns)
+		{
+			take(column.elevation);
+			take(column.elevation + column.height);
+		}
+		// 屋根組（垂木の両端・野地板の軒）。
+		for (const RafterCommand& rafter : document.rafters)
+		{
+			take(rafter.elevation);
+			take(rafter.endElevation);
+		}
+		for (const RoofCommand& roof : document.roofs)
+			take(roof.elevation);
+		// 基礎の底盤（天端と、コンクリート厚のぶん下がった下端）。立上りは高さを絶対値で
+		// 持たない（レベルへのバインドで表す）ので、底盤とストーリで下端を代表させる。
+		for (const SlabCommand& slab : document.slabs)
+		{
+			take(slab.elevation);
+			take(slab.elevation - slab.thickness);
+			// 地中梁（底盤にぶら下がる台形プリズム）。**モデルの最深部はふつう底盤の下端では
+			// なく地中梁の下端**なので、これを見ないと余白（kSectionHeightMargin）より深い
+			// 地中梁が軸組図の足元で切れる。断面原点が梁下端（v=0）で origin.z が絶対 Z
+			// なので、プロファイルの v をそのまま足せば上下端になる（ModifierCommand 参照）。
+			for (const ModifierCommand& modifier : slab.modifiers)
+			{
+				for (const Vec2& vertex : modifier.profile)
+					take(modifier.origin.z + vertex.y);
+			}
+		}
+		// ストーリ高さ（要素が 1 つも無い階でも範囲に含める）。
+		for (const StoryCommand& story : document.stories)
+			take(story.elevation);
+
+		if (!any)
+			return false;
+		start = low - kSectionHeightMargin;
+		end = high + kSectionHeightMargin;
+		return true;
 	}
 
 	ModifierCommand raiseModifierTop(const ModifierCommand& modifier, double bite)
