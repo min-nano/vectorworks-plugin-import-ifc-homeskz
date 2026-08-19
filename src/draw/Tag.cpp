@@ -27,10 +27,14 @@
 #include "Interfaces/VectorWorks/Extension/IDataTagSupport.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
+#include "VWFC/VWObjects/VWViewportObj.h"
 
+#include <cmath>
 #include <cstddef>
 #include <map>
+#include <set>
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
@@ -47,11 +51,39 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kFieldUseLeader = "Use Leader";
 		constexpr const char* kLocalizedUseLeader = "引出線を表示";
 
+		// 置いたタグを目標位置へ動かす（冒頭「置いた後に測って直す」）。命令の position は
+		// **部材の辺の中央**で、そこへタグの下端中央が接するようにしたい。タグの実寸は
+		// スタイルが決めるので、置いてから GetObjectBounds で測り、その半分だけ offset の
+		// 向きへ逃がした点へ**バウンディングボックスの中心**を合わせる。
+		//
+		// 逃がす量は「offset の向きに沿ったタグの差し渡しの半分」。offset は軸に平行
+		// （伏図＝上または左、軸組図＝上）なので、|x| 成分には幅・|y| 成分には高さを当てれば
+		// よい（斜材で斜めになる場合も、外接矩形の差し渡しとして妥当な近似になる）。
+		void MoveToTarget(MCObjectHandle object, const core::TagCommand& tag)
+		{
+			WorldRect bounds;
+			if (!gSDK->GetObjectBounds(object, bounds))
+				return;
+			const double width = std::abs(bounds.right - bounds.left);
+			// WorldRect は top > bottom（Y 上向き）。
+			const double height = std::abs(bounds.top - bounds.bottom);
+			const double centreX = (bounds.left + bounds.right) / 2.0;
+			const double centreY = (bounds.top + bounds.bottom) / 2.0;
+
+			const double clearance =
+				(std::abs(tag.offset.x) * width + std::abs(tag.offset.y) * height) / 2.0;
+			const double targetX = tag.position.x + tag.offset.x * clearance;
+			const double targetY = tag.position.y + tag.offset.y * clearance;
+			gSDK->MoveObject(object, targetX - centreX, targetY - centreY);
+		}
+
 		// タグ 1 つを注釈として置く。置けたら true。support は呼び出し側が 1 回だけ作った
 		// VCOM のデータタグ支援インターフェース（タグごとに QueryInterface しない）。
+		// 置けたタグのハンドルは outPlaced へ積む（クラスを表示へ戻すのに使う）。
 		bool PlaceOne(MCObjectHandle viewport, const core::TagCommand& tag, RefNumber style,
 					  MCObjectHandle member,
-					  const VectorWorks::Extension::IDataTagSupportPtr& support, TagCounts& counts)
+					  const VectorWorks::Extension::IDataTagSupportPtr& support, TagCounts& counts,
+					  std::vector<MCObjectHandle>& outPlaced)
 		{
 			// 第 4 引数 bInsert=true でカレントレイヤへ入る。この後 AddViewportAnnotationObject で
 			// 注釈へ移すので、レイヤ上に残るのは失敗したときだけ（下記で消す）。
@@ -63,11 +95,27 @@ namespace HomeskzIfcImport::draw
 				return false;
 			}
 
+			// **関連付けを先に行う**（スタイルより前）。関連付け先の無いタグにスタイルを
+			// 当てると、VW が「互換性のないデータタグスタイルを選択しています」の警告
+			// ダイアログを出してインポートが止まる（ローカル確認で判明。タグの数だけ出る）。
+			// フォールバックの直線になった横架材はハンドルが無いので関連付けを省く
+			// （Python 版と同じ。タグは置く）。
+			if (member != nil && support)
+				support->AssociateWithObject(object, member);
+			else
+				++counts.unassociated;
+
 			// スタイル（"断面寸法"）。文書に無ければ**スタイル無しで置く**——タグを失うより、
 			// 位置だけでも正しいタグを残した方が原因を追いやすい（構造材のプラグイン
 			// スタイルと同じ方針。draw/DrawUtil の ResolvePluginStyle）。
+			//
+			// **skipValidation=true** を渡して検証を止める。関連付けを先に済ませてあれば
+			// 本来は通るはずだが、この検証は**ダイアログでユーザーに聞く**造りなので、
+			// 1 件でも引っかかるとインポートが止まってしまう（無人で走らせられない）。
+			// 互換性が無ければタグの本文が空になるだけで図面は壊れないので、ここは黙って
+			// 進めて結果を目で見てもらう方がよい。
 			if (style != 0 && support)
-				support->SetDataTagStyle(object, style);
+				support->SetDataTagStyle(object, style, /*skipValidation=*/true);
 
 			// 引出線を OFF にする。
 			try
@@ -85,13 +133,6 @@ namespace HomeskzIfcImport::draw
 
 			gSDK->ResetObject(object);
 
-			// 関連付け先（構造材ツールで描けた横架材）。フォールバックの直線になった横架材は
-			// ハンドルが無いので関連付けを省く（Python 版と同じ。タグは置く）。
-			if (member != nil && support)
-				support->AssociateWithObject(object, member);
-			else
-				++counts.unassociated;
-
 			// ビューポートの注釈へ移す。入らなければタグを消す（冒頭「注釈に入らなかった
 			// タグは消す」）。
 			if (!gSDK->AddViewportAnnotationObject(viewport, object))
@@ -106,6 +147,11 @@ namespace HomeskzIfcImport::draw
 			if (support)
 				support->UpdateDataTag(object);
 
+			// **最後に位置を直す**。ここまでで VW はタグを関連付け先へ吸着させ、スタイルが
+			// 本文を流し込んでタグの実寸が確定している。その状態を測って目標へ動かす。
+			MoveToTarget(object, tag);
+
+			outPlaced.push_back(object);
 			++counts.drawn;
 			return true;
 		}
@@ -133,6 +179,12 @@ namespace HomeskzIfcImport::draw
 		const VectorWorks::Extension::IDataTagSupportPtr support(
 			VectorWorks::Extension::IID_DataTagSupport);
 
+		// 置けたタグ。**注釈へ足した図形のクラスはビューポートで非表示のまま**なので
+		// （PrepareViewportSetup はデザインレイヤしか走査しない。ローカル確認で判明）、
+		// 全部置いてから、そのクラスをまとめて表示へ戻す。
+		std::vector<MCObjectHandle> placed;
+		placed.reserve(command.tags.size());
+
 		std::size_t drawn = 0;
 		for (const core::TagCommand& tag : command.tags)
 		{
@@ -150,16 +202,46 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle member =
 				found == memberHandles.handles.end() ? nil : found->second;
 
-			if (PlaceOne(viewport, tag, style->second, member, support, counts))
+			if (PlaceOne(viewport, tag, style->second, member, support, counts, placed))
 				++drawn;
+		}
+
+		// タグ（とスタイルが決めるその中身）のクラスを表示へ戻し、ビューポートを更新して
+		// 反映する。ConfigureViewport は**タグを置く前**に走っているので、ここで足さないと
+		// 注釈だけが空白のまま残る。
+		if (!placed.empty())
+		{
+			std::set<InternalIndex> classes;
+			for (const MCObjectHandle object : placed)
+			{
+				const std::vector<InternalIndex> used = CollectObjectClasses(object);
+				classes.insert(used.begin(), used.end());
+			}
+			if (!classes.empty())
+			{
+				counts.classesShown +=
+					ShowViewportClasses(viewport, {classes.begin(), classes.end()});
+				try
+				{
+					VWViewportObj(viewport).Update();
+				}
+				catch (...)
+				{
+					// 更新できなくてもタグ自体は図面に残る（表示は次の更新で追いつく）。
+					++counts.updateFailed;
+				}
+			}
 		}
 		return drawn;
 	}
 
 	std::string tagDiagnostics(const std::string& label, const TagCounts& counts)
 	{
+		// **タグを 1 つでも置いたのにクラスを 1 つも表示へ戻せていない**のも異常として扱う
+		// （注釈にタグはあるのに図には出ない、という一番分かりにくい壊れ方になる）。
+		const bool classesBroken = counts.drawn > 0 && counts.classesShown == 0;
 		if (counts.failed == 0 && counts.unassociated == 0 && counts.leaderLeft == 0 &&
-			!counts.styleMissing)
+			counts.updateFailed == 0 && !classesBroken && !counts.styleMissing)
 			return {};
 
 		std::string text = label + "の断面寸法タグの診断: ";
@@ -173,6 +255,11 @@ namespace HomeskzIfcImport::draw
 		if (counts.unassociated > 0)
 			text += "関連付け先の横架材が無いタグ " + std::to_string(counts.unassociated) +
 					" 件（断面寸法が空になります）。";
+		if (classesBroken)
+			text += "タグのクラスを表示に戻せませんでした（タグが図に出ません）。";
+		if (counts.updateFailed > 0)
+			text += "クラスを戻した後に更新できなかったビューポート " +
+					std::to_string(counts.updateFailed) + " 枚。";
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw

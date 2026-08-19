@@ -69,6 +69,10 @@ namespace HomeskzIfcImport::parse
 	// 長さが 0 の軸には既定（上＝(0, 1)）を返す。
 	core::Vec2 tagOffsetSide(double dx, double dy);
 
+	// 線 (du, dv) の法線のうち**上を向く側**の単位ベクトル。断面（軸組図）でタグを部材の
+	// 上辺から逃がす向きに使う。長さが 0 の線には既定（真上＝(0, 1)）を返す。
+	core::Vec2 upwardNormal(double du, double dv);
+
 	// 横架材の平面座標＋天端 Z を、断面ビューポートの注釈空間へ投影する
 	// （ヘッダ冒頭「断面の注釈空間」）。**投影の定義はここ 1 か所**で、実機確認でずれが
 	// 判明したときもここだけを直せばよい。

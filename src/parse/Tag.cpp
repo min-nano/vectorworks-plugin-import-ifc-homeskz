@@ -71,6 +71,18 @@ namespace HomeskzIfcImport::parse
 		return angle;
 	}
 
+	core::Vec2 upwardNormal(double du, double dv)
+	{
+		const double length = std::hypot(du, dv);
+		if (length <= kDirTol)
+			return core::Vec2{0.0, 1.0};
+		// 線の法線 2 候補のうち上を向く側。真横（法線が水平）になることは天端線では
+		// 起きない（鉛直な天端線＝長さ 0 の投影）ので、上下の判定だけで足りる。
+		const double nx = -dv / length;
+		const double ny = du / length;
+		return ny < 0.0 ? core::Vec2{-nx, -ny} : core::Vec2{nx, ny};
+	}
+
 	core::Vec2 tagOffsetSide(double dx, double dy)
 	{
 		const double length = std::hypot(dx, dy);
@@ -113,15 +125,18 @@ namespace HomeskzIfcImport::parse
 			const double dx = member.end.x - member.start.x;
 			const double dy = member.end.y - member.start.y;
 			const core::Vec2 side = tagOffsetSide(dx, dy);
-			// 軸中央から部材の面（断面幅/2）まで寄せた点＝部材の辺の中央。余白を足さず面
-			// ちょうどに置くことで引出線が出ないようにする（parse/Tag.h）。
-			const double offset = member.width / 2.0;
+			// 軸中央から部材の面（断面幅/2）まで寄せた点＝**部材の辺の中央**。ここにタグの
+			// 下端中央が接する（余白を足さず面ちょうどに置くことで引出線が出ない。parse/Tag.h）。
+			// タグ自身の大きさぶんの逃がしは描画側が実寸を測って足す（core/Document.h の
+			// TagCommand）。
+			const double half = member.width / 2.0;
 
 			core::TagCommand tag;
 			tag.style = kTagStyle;
 			tag.memberIndex = i;
-			tag.position = core::Vec2{(member.start.x + member.end.x) / 2.0 + side.x * offset,
-									  (member.start.y + member.end.y) / 2.0 + side.y * offset};
+			tag.position = core::Vec2{(member.start.x + member.end.x) / 2.0 + side.x * half,
+									  (member.start.y + member.end.y) / 2.0 + side.y * half};
+			tag.offset = side;
 			tag.angle = tagAngle(dx, dy);
 			commands.push_back(std::move(tag));
 		}
@@ -150,6 +165,9 @@ namespace HomeskzIfcImport::parse
 			tag.style = kTagStyle;
 			tag.memberIndex = i;
 			tag.position = core::Vec2{(start.x + end.x) / 2.0, (start.y + end.y) / 2.0};
+			// 断面では天端線がそのまま部材の上辺なので、逃がす向きは**その線の法線のうち
+			// 上を向く側**（水平材なら真上）。伏図で「上または左」へ寄せるのと同じ意図。
+			tag.offset = upwardNormal(end.x - start.x, end.y - start.y);
 			// 傾斜材（登り梁・隅木）は立面でも傾くので、文字も天端線に沿わせる。
 			tag.angle = tagAngle(end.x - start.x, end.y - start.y);
 			commands.push_back(std::move(tag));

@@ -91,19 +91,20 @@ namespace HomeskzIfcImport::draw
 		//
 		// 走査中は重複除去のために std::set を使い、**返すのは昇順・重複なしの vector**
 		// （ViewportSetup が std::set を持てない理由は DrawUtil.h 参照）。
-		std::vector<InternalIndex> CollectUsedClasses(const std::vector<MCObjectHandle>& layers)
+		// 図形の連なり（と、その入れ子）が身に付けているクラスを集める。heads は走査を
+		// 始める先頭オブジェクトの列。
+		std::set<InternalIndex> CollectClassesFrom(const std::vector<MCObjectHandle>& heads)
 		{
 			std::set<InternalIndex> classes;
 			// 入れ子（グループ・シンボル・PIO）は深さ上限つきで辿る。上限は「PIO の中の
 			// グループの中の図形」に十分で、壊れたデータで無限に潜らない値。
 			constexpr int kMaxDepth = 6;
 			std::vector<std::pair<MCObjectHandle, int>> pending;
-			pending.reserve(layers.size());
-			for (const MCObjectHandle layer : layers)
+			pending.reserve(heads.size());
+			for (const MCObjectHandle head : heads)
 			{
-				const MCObjectHandle first = gSDK->FirstMemberObj(layer);
-				if (first != nil)
-					pending.emplace_back(first, 0);
+				if (head != nil)
+					pending.emplace_back(head, 0);
 			}
 			while (!pending.empty())
 			{
@@ -121,6 +122,16 @@ namespace HomeskzIfcImport::draw
 						pending.emplace_back(child, depth + 1);
 				}
 			}
+			return classes;
+		}
+
+		std::vector<InternalIndex> CollectUsedClasses(const std::vector<MCObjectHandle>& layers)
+		{
+			std::vector<MCObjectHandle> heads;
+			heads.reserve(layers.size());
+			for (const MCObjectHandle layer : layers)
+				heads.push_back(gSDK->FirstMemberObj(layer));
+			const std::set<InternalIndex> classes = CollectClassesFrom(heads);
 			return {classes.begin(), classes.end()};
 		}
 
@@ -466,6 +477,24 @@ namespace HomeskzIfcImport::draw
 		return layer;
 	}
 
+	std::vector<InternalIndex> CollectObjectClasses(MCObjectHandle object)
+	{
+		const std::set<InternalIndex> classes = CollectClassesFrom({object});
+		return {classes.begin(), classes.end()};
+	}
+
+	std::size_t ShowViewportClasses(MCObjectHandle viewport,
+									const std::vector<InternalIndex>& classes)
+	{
+		std::size_t applied = 0;
+		for (const InternalIndex index : classes)
+		{
+			if (gSDK->SetViewportClassVisibility(viewport, index, kClassVisible))
+				++applied;
+		}
+		return applied;
+	}
+
 	std::size_t ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
 								  const ViewportSetup& setup, const core::ViewportCommand& command)
 	{
@@ -485,12 +514,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// クラス: 1 つずつ表示へ戻す（ヘッダ「クラスをわざわざ数え上げる理由」）。
-		std::size_t applied = 0;
-		for (const InternalIndex index : setup.classes)
-		{
-			if (gSDK->SetViewportClassVisibility(viewport, index, kClassVisible))
-				++applied;
-		}
+		const std::size_t applied = ShowViewportClasses(viewport, setup.classes);
 
 		// 縮尺・ラベル・更新。**縮尺は表示レイヤを絞った後に読む**（映すレイヤの縮尺に
 		// 合わせるため）。設定に失敗しても図そのものは残す。

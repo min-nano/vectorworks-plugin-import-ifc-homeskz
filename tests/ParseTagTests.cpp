@@ -41,6 +41,7 @@ using HomeskzIfcImport::parse::kTagStyle;
 using HomeskzIfcImport::parse::sectionAnnotationPoint;
 using HomeskzIfcImport::parse::tagAngle;
 using HomeskzIfcImport::parse::tagOffsetSide;
+using HomeskzIfcImport::parse::upwardNormal;
 using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::near;
 
@@ -141,17 +142,21 @@ TEST(PlanTagsSitOnTheMemberEdge)
 	if (tags.size() < 2)
 		return;
 
-	// 1 本目: 東西材。軸中央 (1000, 0) から上へ 幅/2 = 60。
+	// 1 本目: 東西材。軸中央 (1000, 0) から上へ 幅/2 = 60（＝上辺の中央）。逃がす向きは上。
 	CHECK(tags[0].memberIndex == 0);
 	CHECK(tags[0].style == std::string(kTagStyle));
 	CHECK(near(tags[0].position.x, 1000.0, 1e-9));
 	CHECK(near(tags[0].position.y, 60.0, 1e-9));
+	CHECK(near(tags[0].offset.x, 0.0, 1e-9));
+	CHECK(near(tags[0].offset.y, 1.0, 1e-9));
 	CHECK(near(tags[0].angle, 0.0, 1e-9));
 
-	// 2 本目: 南北材。軸中央 (500, 910) から左へ 幅/2 = 52.5。
+	// 2 本目: 南北材。軸中央 (500, 910) から左へ 幅/2 = 52.5（＝左辺の中央）。逃がす向きは左。
 	CHECK(tags[1].memberIndex == 1);
 	CHECK(near(tags[1].position.x, 500.0 - 52.5, 1e-9));
 	CHECK(near(tags[1].position.y, 910.0, 1e-9));
+	CHECK(near(tags[1].offset.x, -1.0, 1e-9));
+	CHECK(near(tags[1].offset.y, 0.0, 1e-9));
 	CHECK(near(tags[1].angle, 90.0, 1e-9));
 }
 
@@ -187,18 +192,40 @@ TEST(SectionTagsOnlyCoverMembersOnTheCutPlane)
 	if (tags.size() < 2)
 		return;
 
-	// 1 本目: 水平材。注釈座標は (Y の中点, 天端 Z)。
+	// 1 本目: 水平材。注釈座標は (Y の中点, 天端 Z)。逃がす向きは真上。
 	CHECK(tags[0].memberIndex == 0);
 	CHECK(tags[0].style == std::string(kTagStyle));
 	CHECK(near(tags[0].position.x, 1820.0, 1e-9));
 	CHECK(near(tags[0].position.y, 3000.0, 1e-9));
+	CHECK(near(tags[0].offset.x, 0.0, 1e-9));
+	CHECK(near(tags[0].offset.y, 1.0, 1e-9));
 	CHECK(near(tags[0].angle, 0.0, 1e-9));
 
-	// 2 本目: 傾斜材。1000 進んで 1000 上がるので立面では 45 度。
+	// 2 本目: 傾斜材。1000 進んで 1000 上がるので立面では 45 度。逃がす向きは天端線の
+	// 法線のうち上を向く側＝(-1, 1)/√2。
 	CHECK(tags[1].memberIndex == 3);
 	CHECK(near(tags[1].position.x, 500.0, 1e-9));
 	CHECK(near(tags[1].position.y, 6500.0, 1e-9));
+	CHECK(near(tags[1].offset.x, -std::sqrt(0.5), 1e-9));
+	CHECK(near(tags[1].offset.y, std::sqrt(0.5), 1e-9));
 	CHECK(near(tags[1].angle, 45.0, 1e-9));
+}
+
+TEST(UpwardNormalAlwaysPointsUp)
+{
+	// 水平な天端線は真上。向きを反転しても同じ側を返す（部材の始終端の取り方に依らない）。
+	const Vec2 east = upwardNormal(1000.0, 0.0);
+	CHECK(near(east.x, 0.0, 1e-9) && near(east.y, 1.0, 1e-9));
+	const Vec2 west = upwardNormal(-1000.0, 0.0);
+	CHECK(near(west.x, 0.0, 1e-9) && near(west.y, 1.0, 1e-9));
+
+	// 登り勾配は法線が棟側へ倒れる（上向きは保つ）。
+	const Vec2 up = upwardNormal(1000.0, 1000.0);
+	CHECK(near(up.x, -std::sqrt(0.5), 1e-9) && near(up.y, std::sqrt(0.5), 1e-9));
+
+	// 長さ 0 は既定（真上）。
+	const Vec2 degenerate = upwardNormal(0.0, 0.0);
+	CHECK(near(degenerate.x, 0.0, 1e-9) && near(degenerate.y, 1.0, 1e-9));
 }
 
 TEST(SectionTagsFollowTheViewDirection)
