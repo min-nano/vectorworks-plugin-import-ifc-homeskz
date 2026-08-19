@@ -48,7 +48,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;	// 注釈に置けたタグ
 		std::size_t failed = 0; // PIO を作れなかった／注釈に入れられなかった
 		std::size_t unassociated = 0; // 関連付け先の横架材ハンドルが無かった
-		bool styleMissing = false;	  // "断面寸法" スタイルが文書に無い
+		std::size_t leaderLeft = 0; // 引出線を OFF にできなかった（引出線が残る）
+		bool styleMissing = false;	// "断面寸法" スタイルが文書に無い
 	};
 
 	// データタグ PIO の定義を**設定ダイアログを出さない**で用意する。タグを 1 つでも置く

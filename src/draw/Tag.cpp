@@ -78,7 +78,9 @@ namespace HomeskzIfcImport::draw
 			}
 			catch (...)
 			{
-				// 引出線が残るだけでタグ自体は使えるので、失敗しても続ける。
+				// 引出線が残るだけでタグ自体は使えるので、失敗しても続ける（件数だけ
+				// 数えて診断へ回す）。
+				++counts.leaderLeft;
 			}
 
 			gSDK->ResetObject(object);
@@ -156,7 +158,8 @@ namespace HomeskzIfcImport::draw
 
 	std::string tagDiagnostics(const std::string& label, const TagCounts& counts)
 	{
-		if (counts.failed == 0 && counts.unassociated == 0 && !counts.styleMissing)
+		if (counts.failed == 0 && counts.unassociated == 0 && counts.leaderLeft == 0 &&
+			!counts.styleMissing)
 			return {};
 
 		std::string text = label + "の断面寸法タグの診断: ";
@@ -165,6 +168,8 @@ namespace HomeskzIfcImport::draw
 				"データタグスタイル「断面寸法」が文書にありません（スタイル無しで置きました）。";
 		if (counts.failed > 0)
 			text += "タグを置けなかった命令 " + std::to_string(counts.failed) + " 件。";
+		if (counts.leaderLeft > 0)
+			text += "引出線を消せなかったタグ " + std::to_string(counts.leaderLeft) + " 件。";
 		if (counts.unassociated > 0)
 			text += "関連付け先の横架材が無いタグ " + std::to_string(counts.unassociated) +
 					" 件（断面寸法が空になります）。";
