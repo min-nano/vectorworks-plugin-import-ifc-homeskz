@@ -51,50 +51,157 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kFieldUseLeader = "Use Leader";
 		constexpr const char* kLocalizedUseLeader = "引出線を表示";
 
-		// 置いたタグを目標位置へ動かす（冒頭「置いた後に測って直す」）。命令の position は
+		// タグの逃がし量（offset の向きに沿ったタグの差し渡しの半分）。命令の position は
 		// **部材の辺の中央**で、そこへタグの下端中央が接するようにしたい。タグの実寸は
-		// スタイルが決めるので、置いてから GetObjectBounds で測り、その半分だけ offset の
-		// 向きへ逃がす。
-		//
-		// 逃がす量は「offset の向きに沿ったタグの差し渡しの半分」。offset は軸に平行
+		// スタイルが決めるので、置いてから GetObjectBounds で測る。offset は軸に平行
 		// （伏図＝上または左、軸組図＝上）なので、|x| 成分には幅・|y| 成分には高さを当てれば
 		// よい（斜材で斜めになる場合も、外接矩形の差し渡しとして妥当な近似になる）。
-		//
-		// **どこを基準に動かすかは命令が決める**（core::TagPlacement）:
-		//   * Absolute        … 目標の絶対位置へバウンディングボックスの中心を合わせる。
-		//                       注釈空間がモデルの平面座標そのものである伏図で使う。
-		//   * RelativeToAnchor … **いま在る場所からの相対**で動かす。関連付け済みのタグは
-		//                       VW が関連付け先へ吸着させているので、その位置は「関連付け先の
-		//                       注釈空間での位置」そのもの。そこから anchor → position の
-		//                       モデル上の変位ぶんだけ動かせば、**注釈空間の原点を知らなくても**
-		//                       正しい場所へ来る（軸組図。ヘッダ「断面の注釈空間」）。
-		// 関連付けできなかったタグは VW が吸着させていない＝基準が無いので、相対を指定
-		// されていても絶対で置く（位置は当てにならないが、タグ自体は残す）。
-		void MoveToTarget(MCObjectHandle object, const core::TagCommand& tag, bool associated)
+		double Clearance(const core::TagCommand& tag, double width, double height)
 		{
-			WorldRect bounds;
-			if (!gSDK->GetObjectBounds(object, bounds))
-				return;
-			const double width = std::abs(bounds.right - bounds.left);
-			// WorldRect は top > bottom（Y 上向き）。
-			const double height = std::abs(bounds.top - bounds.bottom);
+			return (std::abs(tag.offset.x) * width + std::abs(tag.offset.y) * height) / 2.0;
+		}
 
-			const double clearance =
-				(std::abs(tag.offset.x) * width + std::abs(tag.offset.y) * height) / 2.0;
-			const double clearX = tag.offset.x * clearance;
-			const double clearY = tag.offset.y * clearance;
+		// 較正の基準点候補（下記 CalibrateAnnotationOrigin）。VW がタグを吸着させる点が
+		// 部材のどこなのかは分からないので、**実測から選ぶ**。命令は天端線の始端（anchor）と
+		// その中央（position）を持つので、終端は 2·position − anchor で出る。
+		enum class AnchorGuess
+		{
+			Mid,
+			Start,
+			End,
+		};
 
-			if (tag.placement == core::TagPlacement::RelativeToAnchor && associated)
+		core::Vec2 GuessedAnchor(const core::TagCommand& tag, AnchorGuess guess)
+		{
+			switch (guess)
 			{
-				gSDK->MoveObject(object, (tag.position.x - tag.anchor.x) + clearX,
-								 (tag.position.y - tag.anchor.y) + clearY);
-				return;
+			case AnchorGuess::Start:
+				return tag.anchor;
+			case AnchorGuess::End:
+				return core::Vec2{(2.0 * tag.position.x) - tag.anchor.x,
+								  (2.0 * tag.position.y) - tag.anchor.y};
+			case AnchorGuess::Mid:
+			default:
+				return tag.position;
+			}
+		}
+
+		const char* AnchorGuessLabel(AnchorGuess guess)
+		{
+			switch (guess)
+			{
+			case AnchorGuess::Start:
+				return "始端";
+			case AnchorGuess::End:
+				return "終端";
+			case AnchorGuess::Mid:
+			default:
+				return "中央";
+			}
+		}
+
+		// 注釈へ置いたタグ 1 つの実測。移動は全部置いてから（較正の後で）行う。
+		struct PendingTag
+		{
+			MCObjectHandle object = nil;
+			const core::TagCommand* command = nullptr;
+			double centreX = 0.0; // 置いた直後の実位置（＝VW が吸着させた場所）
+			double centreY = 0.0;
+			double clearX = 0.0; // 部材から逃がすベクトル（実寸から求めた）
+			double clearY = 0.0;
+			bool associated = false; // 関連付けできたか（較正に使えるのはこれだけ）
+		};
+
+		// **注釈空間の原点を実測から較正する。**
+		//
+		// 断面（軸組図）の注釈空間は、モデルの投影と**平行移動ぶんだけ**ずれている
+		// （実機で、高さは合うのに横だけ一定量ずれた＝回転も反転もしていない）。その
+		// ずれ量は断面ごとに違いうるし、規約も分からない。そこで**当てずっぽうで決めず、
+		// VW 自身が置いた位置から測る**——データタグは関連付けると関連付け先へ吸着するので、
+		// 「タグの実位置 − その部材の基準点」がそのままずれ量になる。
+		//
+		// ただし**吸着する基準点が部材のどこか**（始端／中央／終端）が分からない。そこで
+		// 3 通りとも試し、**ずれ量のばらつき（残差）が最も小さいもの**を採る——基準点の
+		// 読みが正しければずれ量は全タグで一定になり、外れていれば部材の長さぶんばらつく
+		// ので、部材の長さが揃っていない限り一意に決まる。選んだ結果と残差は診断行へ出す
+		// （次のローカル確認で規約そのものが分かる）。
+		Calibration CalibrateAnnotationOrigin(const std::vector<PendingTag>& pending)
+		{
+			Calibration best;
+			bool first = true;
+			for (const AnchorGuess guess : {AnchorGuess::Mid, AnchorGuess::Start, AnchorGuess::End})
+			{
+				double sumX = 0.0;
+				double sumY = 0.0;
+				for (const PendingTag& tag : pending)
+				{
+					const core::Vec2 anchor = GuessedAnchor(*tag.command, guess);
+					sumX += tag.centreX - anchor.x;
+					sumY += tag.centreY - anchor.y;
+				}
+				const auto count = static_cast<double>(pending.size());
+				const double meanX = sumX / count;
+				const double meanY = sumY / count;
+
+				double residual = 0.0;
+				for (const PendingTag& tag : pending)
+				{
+					const core::Vec2 anchor = GuessedAnchor(*tag.command, guess);
+					residual = std::max(residual, std::hypot((tag.centreX - anchor.x) - meanX,
+															 (tag.centreY - anchor.y) - meanY));
+				}
+
+				if (first || residual < best.residual)
+				{
+					best.anchor = AnchorGuessLabel(guess);
+					best.offsetX = meanX;
+					best.offsetY = meanY;
+					best.residual = residual;
+					best.samples = pending.size();
+					first = false;
+				}
+			}
+			return best;
+		}
+
+		// 置いたタグをまとめて目標へ動かす。
+		//
+		// **絶対で置くもの（伏図）と較正して置くもの（軸組図）を分ける。** 伏図は注釈空間が
+		// モデルの平面座標そのものだと実機で確認できているので、測った実位置から目標の
+		// 絶対位置へ動かせば正確に決まる。軸組図は原点が分からないので、関連付けできた
+		// タグ全体から**ずれ量を較正**し、それを目標へ足す（CalibrateAnnotationOrigin）。
+		// 較正に使えるタグが 1 つも無ければ（＝どれも関連付けできなかった）絶対で置く。
+		void MovePendingTags(const std::vector<PendingTag>& pending, TagCounts& counts)
+		{
+			std::vector<PendingTag> calibrated;
+			for (const PendingTag& tag : pending)
+			{
+				if (tag.command->placement == core::TagPlacement::RelativeToAnchor &&
+					tag.associated)
+					calibrated.push_back(tag);
 			}
 
-			const double centreX = (bounds.left + bounds.right) / 2.0;
-			const double centreY = (bounds.top + bounds.bottom) / 2.0;
-			gSDK->MoveObject(object, (tag.position.x + clearX) - centreX,
-							 (tag.position.y + clearY) - centreY);
+			Calibration calibration;
+			if (!calibrated.empty())
+			{
+				calibration = CalibrateAnnotationOrigin(calibrated);
+				// 診断行には最初のビューポートの較正だけを出す（規約を読み取るには 1 枚で
+				// 足りる。全枚数ぶん並べると診断行が読めなくなる）。
+				if (counts.calibration.samples == 0)
+					counts.calibration = calibration;
+			}
+
+			for (const PendingTag& tag : pending)
+			{
+				const bool useCalibration =
+					tag.command->placement == core::TagPlacement::RelativeToAnchor &&
+					tag.associated && !calibrated.empty();
+				const double originX = useCalibration ? calibration.offsetX : 0.0;
+				const double originY = useCalibration ? calibration.offsetY : 0.0;
+				const double targetX = tag.command->position.x + tag.clearX + originX;
+				const double targetY = tag.command->position.y + tag.clearY + originY;
+				gSDK->MoveObject(tag.object, targetX - tag.centreX, targetY - tag.centreY);
+			}
 		}
 
 		// タグ 1 つを注釈として置く。置けたら true。support は呼び出し側が 1 回だけ作った
@@ -103,7 +210,7 @@ namespace HomeskzIfcImport::draw
 		bool PlaceOne(MCObjectHandle viewport, const core::TagCommand& tag, RefNumber style,
 					  MCObjectHandle member,
 					  const VectorWorks::Extension::IDataTagSupportPtr& support, TagCounts& counts,
-					  std::vector<MCObjectHandle>& outPlaced)
+					  std::vector<MCObjectHandle>& outPlaced, std::vector<PendingTag>& outPending)
 		{
 			// 第 4 引数 bInsert=true でカレントレイヤへ入る。この後 AddViewportAnnotationObject で
 			// 注釈へ移すので、レイヤ上に残るのは失敗したときだけ（下記で消す）。
@@ -168,9 +275,31 @@ namespace HomeskzIfcImport::draw
 			if (support)
 				support->UpdateDataTag(object);
 
-			// **最後に位置を直す**。ここまでで VW はタグを関連付け先へ吸着させ、スタイルが
-			// 本文を流し込んでタグの実寸が確定している。その状態を測って目標へ動かす。
-			MoveToTarget(object, tag, associated);
+			// **ここで実位置と実寸を測る**。ここまでで VW はタグを関連付け先へ吸着させ、
+			// スタイルが本文を流し込んでタグの実寸が確定している。動かすのは全部置いてから
+			// （較正に全タグの実測が要る。CalibrateAnnotationOrigin）。
+			WorldRect bounds;
+			if (!gSDK->GetObjectBounds(object, bounds))
+			{
+				// 測れないものは動かしようがないので、そのまま残す（生成した位置のまま）。
+				++counts.unmeasured;
+				outPlaced.push_back(object);
+				++counts.drawn;
+				return true;
+			}
+
+			PendingTag pending;
+			pending.object = object;
+			pending.command = &tag;
+			pending.centreX = (bounds.left + bounds.right) / 2.0;
+			// WorldRect は top > bottom（Y 上向き）。
+			pending.centreY = (bounds.top + bounds.bottom) / 2.0;
+			const double clearance = Clearance(tag, std::abs(bounds.right - bounds.left),
+											   std::abs(bounds.top - bounds.bottom));
+			pending.clearX = tag.offset.x * clearance;
+			pending.clearY = tag.offset.y * clearance;
+			pending.associated = associated;
+			outPending.push_back(pending);
 
 			outPlaced.push_back(object);
 			++counts.drawn;
@@ -206,6 +335,10 @@ namespace HomeskzIfcImport::draw
 		std::vector<MCObjectHandle> placed;
 		placed.reserve(command.tags.size());
 
+		// 実測を積む（動かすのは全部置いてから。較正に全タグぶんの実測が要る）。
+		std::vector<PendingTag> pending;
+		pending.reserve(command.tags.size());
+
 		std::size_t drawn = 0;
 		for (const core::TagCommand& tag : command.tags)
 		{
@@ -223,9 +356,11 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle member =
 				found == memberHandles.handles.end() ? nil : found->second;
 
-			if (PlaceOne(viewport, tag, style->second, member, support, counts, placed))
+			if (PlaceOne(viewport, tag, style->second, member, support, counts, placed, pending))
 				++drawn;
 		}
+
+		MovePendingTags(pending, counts);
 
 		// タグ（とスタイルが決めるその中身）のクラスを表示へ戻し、ビューポートを更新して
 		// 反映する。ConfigureViewport は**タグを置く前**に走っているので、ここで足さないと
@@ -256,13 +391,27 @@ namespace HomeskzIfcImport::draw
 		return drawn;
 	}
 
+	namespace
+	{
+		// 診断行に出す数値（mm）。小数は要らないので整数へ丸めて短くする。
+		std::string Round(double value)
+		{
+			return std::to_string(static_cast<long long>(std::llround(value)));
+		}
+	} // namespace
+
 	std::string tagDiagnostics(const std::string& label, const TagCounts& counts)
 	{
 		// **タグを 1 つでも置いたのにクラスを 1 つも表示へ戻せていない**のも異常として扱う
 		// （注釈にタグはあるのに図には出ない、という一番分かりにくい壊れ方になる）。
 		const bool classesBroken = counts.drawn > 0 && counts.classesShown == 0;
+		// 較正の結果は**異常でなくても出す**。断面の注釈空間の規約はまだ分かっておらず、
+		// この 1 行がローカル確認で規約を読み取る唯一の手掛かりになる（draw/Tag.h の
+		// Calibration）。残差が大きければ基準点の読みが外れているということ。
+		const bool hasCalibration = counts.calibration.samples > 0;
 		if (counts.failed == 0 && counts.unassociated == 0 && counts.leaderLeft == 0 &&
-			counts.updateFailed == 0 && !classesBroken && !counts.styleMissing)
+			counts.updateFailed == 0 && counts.unmeasured == 0 && !classesBroken &&
+			!counts.styleMissing && !hasCalibration)
 			return {};
 
 		std::string text = label + "の断面寸法タグの診断: ";
@@ -281,6 +430,16 @@ namespace HomeskzIfcImport::draw
 		if (counts.updateFailed > 0)
 			text += "クラスを戻した後に更新できなかったビューポート " +
 					std::to_string(counts.updateFailed) + " 枚。";
+		if (counts.unmeasured > 0)
+			text +=
+				"実位置を測れず動かせなかったタグ " + std::to_string(counts.unmeasured) + " 件。";
+		if (hasCalibration)
+		{
+			const Calibration& c = counts.calibration;
+			text += "注釈空間の較正: 基準=" + c.anchor + " / ずれ (" + Round(c.offsetX) + ", " +
+					Round(c.offsetY) + ") / 残差 " + Round(c.residual) + " / 標本 " +
+					std::to_string(c.samples) + " 件。";
+		}
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw
