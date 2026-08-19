@@ -396,7 +396,8 @@ namespace HomeskzIfcImport::draw
 		// 診断行に出す数値（mm）。小数は要らないので整数へ丸めて短くする。
 		std::string Round(double value)
 		{
-			return std::to_string(static_cast<long long>(std::llround(value)));
+			// std::llround は long long を返すので、そのまま文字列にする。
+			return std::to_string(std::llround(value));
 		}
 	} // namespace
 
