@@ -32,13 +32,13 @@ using HomeskzIfcImport::core::MemberCommand;
 using HomeskzIfcImport::core::SectionCommand;
 using HomeskzIfcImport::core::SectionDirection;
 using HomeskzIfcImport::core::TagCommand;
-using HomeskzIfcImport::core::TagPlacement;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::core::ViewportCommand;
 using HomeskzIfcImport::parse::attachTagCommands;
 using HomeskzIfcImport::parse::buildPlanTagCommands;
 using HomeskzIfcImport::parse::buildSectionTagCommands;
 using HomeskzIfcImport::parse::kTagStyle;
+using HomeskzIfcImport::parse::sectionAlongOrigin;
 using HomeskzIfcImport::parse::sectionAnnotationPoint;
 using HomeskzIfcImport::parse::tagAngle;
 using HomeskzIfcImport::parse::tagOffsetSide;
@@ -150,7 +150,6 @@ TEST(PlanTagsSitOnTheMemberEdge)
 	CHECK(near(tags[0].position.y, 60.0, 1e-9));
 	CHECK(near(tags[0].offset.x, 0.0, 1e-9));
 	CHECK(near(tags[0].offset.y, 1.0, 1e-9));
-	CHECK(tags[0].placement == TagPlacement::Absolute);
 	CHECK(near(tags[0].angle, 0.0, 1e-9));
 
 	// 2 本目: 南北材。軸中央 (500, 910) から左へ 幅/2 = 52.5（＝左辺の中央）。逃がす向きは左。
@@ -164,15 +163,26 @@ TEST(PlanTagsSitOnTheMemberEdge)
 
 TEST(SectionAnnotationPointProjectsToTheView)
 {
-	// X通り（−X 方向を見る）は画面右が +Y なので、注釈座標の x は材の Y。
-	const Vec2 onX = sectionAnnotationPoint(Vec2{1500.0, -2000.0}, 3273.0, SectionDirection::X);
-	CHECK(near(onX.x, -2000.0, 1e-9));
+	// 横方向の原点は断面線の**終点**（画面右向きに測った 0 点）。X通りは終点の Y、
+	// Y通りは終点の X。
+	CHECK(near(sectionAlongOrigin(makeSection(SectionDirection::X, 1000.0)), 10000.0, 1e-9));
+	CHECK(near(sectionAlongOrigin(makeSection(SectionDirection::Y, 1000.0)), 10000.0, 1e-9));
+
+	// X通り（−X 方向を見る）は画面右が +Y なので、注釈座標の x は材の Y −原点。
+	const Vec2 onX =
+		sectionAnnotationPoint(Vec2{1500.0, -2000.0}, 3273.0, SectionDirection::X, 500.0);
+	CHECK(near(onX.x, -2500.0, 1e-9));
 	CHECK(near(onX.y, 3273.0, 1e-9));
 
-	// Y通り（+Y 方向を見る）は画面右が +X なので、注釈座標の x は材の X。
-	const Vec2 onY = sectionAnnotationPoint(Vec2{1500.0, -2000.0}, 3273.0, SectionDirection::Y);
-	CHECK(near(onY.x, 1500.0, 1e-9));
+	// Y通り（+Y 方向を見る）は画面右が +X なので、注釈座標の x は材の X −原点。
+	const Vec2 onY =
+		sectionAnnotationPoint(Vec2{1500.0, -2000.0}, 3273.0, SectionDirection::Y, 500.0);
+	CHECK(near(onY.x, 1000.0, 1e-9));
 	CHECK(near(onY.y, 3273.0, 1e-9));
+
+	// 縦は天端 Z そのまま（原点の補正は横だけ）。
+	CHECK(near(sectionAnnotationPoint(Vec2{0.0, 0.0}, 3273.0, SectionDirection::X, 9999.0).y,
+			   3273.0, 1e-9));
 }
 
 TEST(SectionTagsOnlyCoverMembersOnTheCutPlane)
@@ -194,31 +204,23 @@ TEST(SectionTagsOnlyCoverMembersOnTheCutPlane)
 	if (tags.size() < 2)
 		return;
 
-	// 1 本目: 水平材。注釈座標は (Y の中点, 天端 Z)。逃がす向きは真上。
+	// 1 本目: 水平材。注釈座標は (Y の中点 − 横原点, 天端 Z)。逃がす向きは真上。
+	// 横原点は断面線の終点（この試験用の断面では Y=10000）。
 	CHECK(tags[0].memberIndex == 0);
 	CHECK(tags[0].style == std::string(kTagStyle));
-	CHECK(near(tags[0].position.x, 1820.0, 1e-9));
+	CHECK(near(tags[0].position.x, 1820.0 - 10000.0, 1e-9));
 	CHECK(near(tags[0].position.y, 3000.0, 1e-9));
 	CHECK(near(tags[0].offset.x, 0.0, 1e-9));
 	CHECK(near(tags[0].offset.y, 1.0, 1e-9));
-	// 断面は原点が分からないので、VW が置いた位置からの相対で決める。基準点は横架材の
-	// 挿入点（天端中央線の始端）を同じように投影したもの。
-	CHECK(tags[0].placement == TagPlacement::RelativeToAnchor);
-	CHECK(near(tags[0].anchor.x, 0.0, 1e-9));
-	CHECK(near(tags[0].anchor.y, 3000.0, 1e-9));
 	CHECK(near(tags[0].angle, 0.0, 1e-9));
 
 	// 2 本目: 傾斜材。1000 進んで 1000 上がるので立面では 45 度。逃がす向きは天端線の
 	// 法線のうち上を向く側＝(-1, 1)/√2。
 	CHECK(tags[1].memberIndex == 3);
-	CHECK(near(tags[1].position.x, 500.0, 1e-9));
+	CHECK(near(tags[1].position.x, 500.0 - 10000.0, 1e-9));
 	CHECK(near(tags[1].position.y, 6500.0, 1e-9));
 	CHECK(near(tags[1].offset.x, -std::sqrt(0.5), 1e-9));
 	CHECK(near(tags[1].offset.y, std::sqrt(0.5), 1e-9));
-	// 基準点は始端の投影 (Y=0, 天端 Z=6000)。position との差が「材の始端から辺の中央まで」
-	// のモデル上の変位になり、描画側はこの差だけタグを動かす。
-	CHECK(near(tags[1].anchor.x, 0.0, 1e-9));
-	CHECK(near(tags[1].anchor.y, 6000.0, 1e-9));
 	CHECK(near(tags[1].angle, 45.0, 1e-9));
 }
 
@@ -241,7 +243,8 @@ TEST(UpwardNormalAlwaysPointsUp)
 
 TEST(SectionTagsFollowTheViewDirection)
 {
-	// Y通り（定 Y）は東西に走る材が切断面に乗る。注釈座標の x は材の X。
+	// Y通り（定 Y）は東西に走る材が切断面に乗る。注釈座標の x は材の X −横原点
+	// （この試験用の断面は終点が X=10000）。
 	const std::vector<MemberCommand> members = {
 		makeMember("1-横架材天端", Vec2{0.0, 500.0}, Vec2{3640.0, 500.0}, 120.0, 3000.0, 3000.0),
 		makeMember("1-横架材天端", Vec2{910.0, 0.0}, Vec2{910.0, 2000.0}, 120.0, 3000.0, 3000.0),
@@ -253,7 +256,7 @@ TEST(SectionTagsFollowTheViewDirection)
 	if (tags.empty())
 		return;
 	CHECK(tags[0].memberIndex == 0);
-	CHECK(near(tags[0].position.x, 1820.0, 1e-9));
+	CHECK(near(tags[0].position.x, 1820.0 - 10000.0, 1e-9));
 	CHECK(near(tags[0].position.y, 3000.0, 1e-9));
 }
 
