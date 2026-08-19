@@ -112,53 +112,74 @@ namespace HomeskzIfcImport::draw
 			bool associated = false; // 関連付けできたか（較正に使えるのはこれだけ）
 		};
 
-		// **注釈空間の原点を実測から較正する。**
+		// 較正で試す写像（下記 CalibrateAnnotationOrigin）。**横方向が反転している可能性**も
+		// 候補に入れる。ローカル確認 4 回の観測を並べると、反転が全部を説明できるため:
+		//   * 2 回目（絶対位置）… 高さは合い、横は「一定量ずれた」ように見えた。**反転でも
+		//     間隔は保たれるので、画像からは平行移動と区別が付かない**（順序が逆になるだけ）。
+		//   * 3 回目（相対移動）… 平行移動なら差分は不変なので合うはずが、ばらけた。反転なら
+		//     正しい移動は −Δ で、+Δ を当てたので誤差は 2Δ＝部材長ぶん——観測と合う。
+		//   * 4 回目（平行移動だけの較正）… 反転があると「実位置 − 基準点」が一定にならず
+		//     （−u − u = −2u で位置に依存する）、残差が大きいまま誤った補正が入る。両軸が
+		//     ずれた観測と合う。
+		// 縦方向の反転は候補に入れない——2 回目で高さが合っていたので反転していない。標本が
+		// 少ないときに候補を増やすと当てはめ過ぎになるので、根拠のあるものだけを試す。
+		double MapU(double u, bool mirrorU)
+		{
+			return mirrorU ? -u : u;
+		}
+
+		// **注釈空間の写像を実測から較正する。**
 		//
-		// 断面（軸組図）の注釈空間は、モデルの投影と**平行移動ぶんだけ**ずれている
-		// （実機で、高さは合うのに横だけ一定量ずれた＝回転も反転もしていない）。その
-		// ずれ量は断面ごとに違いうるし、規約も分からない。そこで**当てずっぽうで決めず、
-		// VW 自身が置いた位置から測る**——データタグは関連付けると関連付け先へ吸着するので、
-		// 「タグの実位置 − その部材の基準点」がそのままずれ量になる。
+		// 断面（軸組図）の注釈空間は、モデルの投影と原点（と、もしかすると横方向の向き）が
+		// 違う。規約は分からないので**当てずっぽうで決めず、VW 自身が置いた位置から測る**
+		// ——データタグは関連付けると関連付け先へ吸着するので、「タグの実位置 − 写像した
+		// 基準点」がそのままずれ量になる。
 		//
-		// ただし**吸着する基準点が部材のどこか**（始端／中央／終端）が分からない。そこで
-		// 3 通りとも試し、**ずれ量のばらつき（残差）が最も小さいもの**を採る——基準点の
-		// 読みが正しければずれ量は全タグで一定になり、外れていれば部材の長さぶんばらつく
-		// ので、部材の長さが揃っていない限り一意に決まる。選んだ結果と残差は診断行へ出す
-		// （次のローカル確認で規約そのものが分かる）。
+		// ただし**吸着する基準点が部材のどこか**（始端／中央／終端）も分からない。そこで
+		// **基準点 3 通り × 横反転の有無 2 通り**を試し、**ずれ量のばらつき（残差）が最も
+		// 小さい組**を採る——読みが正しければずれ量は全タグで一定になり、外れていれば部材の
+		// 長さぶんばらつくので、部材の長さが揃っていない限り一意に決まる。選んだ組と残差は
+		// 診断行へ出す（次のローカル確認で規約そのものが分かる）。
 		Calibration CalibrateAnnotationOrigin(const std::vector<PendingTag>& pending)
 		{
 			Calibration best;
 			bool first = true;
-			for (const AnchorGuess guess : {AnchorGuess::Mid, AnchorGuess::Start, AnchorGuess::End})
+			for (const bool mirrorU : {false, true})
 			{
-				double sumX = 0.0;
-				double sumY = 0.0;
-				for (const PendingTag& tag : pending)
+				for (const AnchorGuess guess :
+					 {AnchorGuess::Mid, AnchorGuess::Start, AnchorGuess::End})
 				{
-					const core::Vec2 anchor = GuessedAnchor(*tag.command, guess);
-					sumX += tag.centreX - anchor.x;
-					sumY += tag.centreY - anchor.y;
-				}
-				const auto count = static_cast<double>(pending.size());
-				const double meanX = sumX / count;
-				const double meanY = sumY / count;
+					double sumX = 0.0;
+					double sumY = 0.0;
+					for (const PendingTag& tag : pending)
+					{
+						const core::Vec2 anchor = GuessedAnchor(*tag.command, guess);
+						sumX += tag.centreX - MapU(anchor.x, mirrorU);
+						sumY += tag.centreY - anchor.y;
+					}
+					const auto count = static_cast<double>(pending.size());
+					const double meanX = sumX / count;
+					const double meanY = sumY / count;
 
-				double residual = 0.0;
-				for (const PendingTag& tag : pending)
-				{
-					const core::Vec2 anchor = GuessedAnchor(*tag.command, guess);
-					residual = std::max(residual, std::hypot((tag.centreX - anchor.x) - meanX,
-															 (tag.centreY - anchor.y) - meanY));
-				}
+					double residual = 0.0;
+					for (const PendingTag& tag : pending)
+					{
+						const core::Vec2 anchor = GuessedAnchor(*tag.command, guess);
+						residual = std::max(
+							residual, std::hypot((tag.centreX - MapU(anchor.x, mirrorU)) - meanX,
+												 (tag.centreY - anchor.y) - meanY));
+					}
 
-				if (first || residual < best.residual)
-				{
-					best.anchor = AnchorGuessLabel(guess);
-					best.offsetX = meanX;
-					best.offsetY = meanY;
-					best.residual = residual;
-					best.samples = pending.size();
-					first = false;
+					if (first || residual < best.residual)
+					{
+						best.anchor = AnchorGuessLabel(guess);
+						best.mirrorU = mirrorU;
+						best.offsetX = meanX;
+						best.offsetY = meanY;
+						best.residual = residual;
+						best.samples = pending.size();
+						first = false;
+					}
 				}
 			}
 			return best;
@@ -185,6 +206,8 @@ namespace HomeskzIfcImport::draw
 			if (!calibrated.empty())
 			{
 				calibration = CalibrateAnnotationOrigin(calibrated);
+				// **残差が大きい較正は使わない**（draw/Tag.h の kCalibrationTolerance）。
+				calibration.trusted = calibration.residual <= kCalibrationTolerance;
 				// 診断行には最初のビューポートの較正だけを出す（規約を読み取るには 1 枚で
 				// 足りる。全枚数ぶん並べると診断行が読めなくなる）。
 				if (counts.calibration.samples == 0)
@@ -193,12 +216,25 @@ namespace HomeskzIfcImport::draw
 
 			for (const PendingTag& tag : pending)
 			{
-				const bool useCalibration =
+				const bool relative =
 					tag.command->placement == core::TagPlacement::RelativeToAnchor &&
-					tag.associated && !calibrated.empty();
-				const double originX = useCalibration ? calibration.offsetX : 0.0;
-				const double originY = useCalibration ? calibration.offsetY : 0.0;
-				const double targetX = tag.command->position.x + tag.clearX + originX;
+					tag.associated;
+				if (relative && !calibration.trusted)
+				{
+					// 較正できていない＝写像が読めていない。**動かさずに VW が置いた位置へ
+					// 残す**（少なくとも部材の上にある）。当てずっぽうの補正で図の外へ
+					// 飛ばすより、そのままの方が図として読める。
+					++counts.uncalibrated;
+					continue;
+				}
+
+				// 較正した写像を目標へ当てる。横が反転しているなら、部材から逃がす向きも
+				// 一緒に反転する（大きさは注釈空間で測った実寸なのでそのまま）。
+				const bool mirrorU = relative && calibration.mirrorU;
+				const double originX = relative ? calibration.offsetX : 0.0;
+				const double originY = relative ? calibration.offsetY : 0.0;
+				const double targetX =
+					MapU(tag.command->position.x, mirrorU) + MapU(tag.clearX, mirrorU) + originX;
 				const double targetY = tag.command->position.y + tag.clearY + originY;
 				gSDK->MoveObject(tag.object, targetX - tag.centreX, targetY - tag.centreY);
 			}
@@ -411,8 +447,8 @@ namespace HomeskzIfcImport::draw
 		// Calibration）。残差が大きければ基準点の読みが外れているということ。
 		const bool hasCalibration = counts.calibration.samples > 0;
 		if (counts.failed == 0 && counts.unassociated == 0 && counts.leaderLeft == 0 &&
-			counts.updateFailed == 0 && counts.unmeasured == 0 && !classesBroken &&
-			!counts.styleMissing && !hasCalibration)
+			counts.updateFailed == 0 && counts.unmeasured == 0 && counts.uncalibrated == 0 &&
+			!classesBroken && !counts.styleMissing && !hasCalibration)
 			return {};
 
 		std::string text = label + "の断面寸法タグの診断: ";
@@ -434,12 +470,17 @@ namespace HomeskzIfcImport::draw
 		if (counts.unmeasured > 0)
 			text +=
 				"実位置を測れず動かせなかったタグ " + std::to_string(counts.unmeasured) + " 件。";
+		if (counts.uncalibrated > 0)
+			text += "較正できず動かさなかったタグ " + std::to_string(counts.uncalibrated) +
+					" 件（VW が置いた位置のまま）。";
 		if (hasCalibration)
 		{
 			const Calibration& c = counts.calibration;
-			text += "注釈空間の較正: 基準=" + c.anchor + " / ずれ (" + Round(c.offsetX) + ", " +
-					Round(c.offsetY) + ") / 残差 " + Round(c.residual) + " / 標本 " +
-					std::to_string(c.samples) + " 件。";
+			text += "注釈空間の較正: 基準=" + c.anchor +
+					" / 横反転=" + std::string(c.mirrorU ? "あり" : "なし") + " / ずれ (" +
+					Round(c.offsetX) + ", " + Round(c.offsetY) + ") / 残差 " + Round(c.residual) +
+					" / 標本 " + std::to_string(c.samples) + " 件" +
+					(c.trusted ? "" : "（不採用）") + "。";
 		}
 		return text;
 	}

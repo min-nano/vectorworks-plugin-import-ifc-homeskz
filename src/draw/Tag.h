@@ -69,11 +69,20 @@ namespace HomeskzIfcImport::draw
 	struct Calibration
 	{
 		std::string anchor;	  // 選んだ基準点の名前（"中央" / "始端" / "終端"）
+		bool mirrorU = false; // 横方向が反転しているか
 		double offsetX = 0.0; // 測ったずれ量
 		double offsetY = 0.0; //
-		double residual = 0.0; // ずれ量のばらつき（小さいほど基準点の読みが確か）
+		double residual = 0.0; // ずれ量のばらつき（小さいほど写像の読みが確か）
 		std::size_t samples = 0; // 較正に使ったタグの数
+		bool trusted = false;	 // 残差が小さく、この較正で動かしてよいか
 	};
+
+	// 較正を信用してよい残差の上限（mm）。**これを超えたら動かさない**——写像の読みが
+	// 外れている状態で補正を当てると、VW が関連付け先へ吸着させた（＝少なくとも部材の上に
+	// ある）位置よりかえって悪くなる。動かさなければタグは部材の上に残るので、図として
+	// 読める状態は保てる。値は「部材 1 本ぶんの長さより十分小さく、タグ 1 個ぶんより大きい」
+	// 程度（半モジュール 455mm を下回る）。
+	inline constexpr double kCalibrationTolerance = 300.0;
 
 	struct TagCounts
 	{
@@ -83,8 +92,9 @@ namespace HomeskzIfcImport::draw
 		std::size_t leaderLeft = 0; // 引出線を OFF にできなかった（引出線が残る）
 		std::size_t classesShown = 0; // タグのクラスを表示へ戻せた数（0 ならタグが映らない）
 		std::size_t updateFailed = 0; // クラスを戻した後の再更新に失敗したビューポート
-		std::size_t unmeasured = 0; // 実位置を測れず動かせなかったタグ
-		bool styleMissing = false;	// "断面寸法" スタイルが文書に無い
+		std::size_t unmeasured = 0;	  // 実位置を測れず動かせなかったタグ
+		std::size_t uncalibrated = 0; // 較正が信用できず動かさなかったタグ
+		bool styleMissing = false;	  // "断面寸法" スタイルが文書に無い
 
 		// 最初に較正できたビューポートの結果（診断行に出す。空なら較正していない＝
 		// 絶対位置で置いた伏図だけだったということ）。
