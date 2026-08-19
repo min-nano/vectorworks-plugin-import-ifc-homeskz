@@ -54,12 +54,23 @@ namespace HomeskzIfcImport::draw
 		// 置いたタグを目標位置へ動かす（冒頭「置いた後に測って直す」）。命令の position は
 		// **部材の辺の中央**で、そこへタグの下端中央が接するようにしたい。タグの実寸は
 		// スタイルが決めるので、置いてから GetObjectBounds で測り、その半分だけ offset の
-		// 向きへ逃がした点へ**バウンディングボックスの中心**を合わせる。
+		// 向きへ逃がす。
 		//
 		// 逃がす量は「offset の向きに沿ったタグの差し渡しの半分」。offset は軸に平行
 		// （伏図＝上または左、軸組図＝上）なので、|x| 成分には幅・|y| 成分には高さを当てれば
 		// よい（斜材で斜めになる場合も、外接矩形の差し渡しとして妥当な近似になる）。
-		void MoveToTarget(MCObjectHandle object, const core::TagCommand& tag)
+		//
+		// **どこを基準に動かすかは命令が決める**（core::TagPlacement）:
+		//   * Absolute        … 目標の絶対位置へバウンディングボックスの中心を合わせる。
+		//                       注釈空間がモデルの平面座標そのものである伏図で使う。
+		//   * RelativeToAnchor … **いま在る場所からの相対**で動かす。関連付け済みのタグは
+		//                       VW が関連付け先へ吸着させているので、その位置は「関連付け先の
+		//                       注釈空間での位置」そのもの。そこから anchor → position の
+		//                       モデル上の変位ぶんだけ動かせば、**注釈空間の原点を知らなくても**
+		//                       正しい場所へ来る（軸組図。ヘッダ「断面の注釈空間」）。
+		// 関連付けできなかったタグは VW が吸着させていない＝基準が無いので、相対を指定
+		// されていても絶対で置く（位置は当てにならないが、タグ自体は残す）。
+		void MoveToTarget(MCObjectHandle object, const core::TagCommand& tag, bool associated)
 		{
 			WorldRect bounds;
 			if (!gSDK->GetObjectBounds(object, bounds))
@@ -67,14 +78,23 @@ namespace HomeskzIfcImport::draw
 			const double width = std::abs(bounds.right - bounds.left);
 			// WorldRect は top > bottom（Y 上向き）。
 			const double height = std::abs(bounds.top - bounds.bottom);
-			const double centreX = (bounds.left + bounds.right) / 2.0;
-			const double centreY = (bounds.top + bounds.bottom) / 2.0;
 
 			const double clearance =
 				(std::abs(tag.offset.x) * width + std::abs(tag.offset.y) * height) / 2.0;
-			const double targetX = tag.position.x + (tag.offset.x * clearance);
-			const double targetY = tag.position.y + (tag.offset.y * clearance);
-			gSDK->MoveObject(object, targetX - centreX, targetY - centreY);
+			const double clearX = tag.offset.x * clearance;
+			const double clearY = tag.offset.y * clearance;
+
+			if (tag.placement == core::TagPlacement::RelativeToAnchor && associated)
+			{
+				gSDK->MoveObject(object, (tag.position.x - tag.anchor.x) + clearX,
+								 (tag.position.y - tag.anchor.y) + clearY);
+				return;
+			}
+
+			const double centreX = (bounds.left + bounds.right) / 2.0;
+			const double centreY = (bounds.top + bounds.bottom) / 2.0;
+			gSDK->MoveObject(object, (tag.position.x + clearX) - centreX,
+							 (tag.position.y + clearY) - centreY);
 		}
 
 		// タグ 1 つを注釈として置く。置けたら true。support は呼び出し側が 1 回だけ作った
@@ -100,7 +120,8 @@ namespace HomeskzIfcImport::draw
 			// ダイアログを出してインポートが止まる（ローカル確認で判明。タグの数だけ出る）。
 			// フォールバックの直線になった横架材はハンドルが無いので関連付けを省く
 			// （Python 版と同じ。タグは置く）。
-			if (member != nil && support)
+			const bool associated = member != nil && support;
+			if (associated)
 				support->AssociateWithObject(object, member);
 			else
 				++counts.unassociated;
@@ -149,7 +170,7 @@ namespace HomeskzIfcImport::draw
 
 			// **最後に位置を直す**。ここまでで VW はタグを関連付け先へ吸着させ、スタイルが
 			// 本文を流し込んでタグの実寸が確定している。その状態を測って目標へ動かす。
-			MoveToTarget(object, tag);
+			MoveToTarget(object, tag, associated);
 
 			outPlaced.push_back(object);
 			++counts.drawn;

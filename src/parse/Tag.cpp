@@ -137,6 +137,9 @@ namespace HomeskzIfcImport::parse
 			tag.position = core::Vec2{(member.start.x + member.end.x) / 2.0 + side.x * half,
 									  (member.start.y + member.end.y) / 2.0 + side.y * half};
 			tag.offset = side;
+			// 伏図の注釈空間はモデルの平面座標そのもの（実機で確認済み）なので、position を
+			// そのまま使えばよい（core/Document.h の TagPlacement）。
+			tag.placement = core::TagPlacement::Absolute;
 			tag.angle = tagAngle(dx, dy);
 			commands.push_back(std::move(tag));
 		}
@@ -168,6 +171,11 @@ namespace HomeskzIfcImport::parse
 			// 断面では天端線がそのまま部材の上辺なので、逃がす向きは**その線の法線のうち
 			// 上を向く側**（水平材なら真上）。伏図で「上または左」へ寄せるのと同じ意図。
 			tag.offset = upwardNormal(end.x - start.x, end.y - start.y);
+			// **断面の注釈空間は原点が分からない**ので、VW が関連付け先へ吸着させた位置を
+			// 基準に置く（core/Document.h の TagPlacement）。基準点は横架材の挿入点＝
+			// 天端中央線の始端を同じように投影したもの。
+			tag.anchor = start;
+			tag.placement = core::TagPlacement::RelativeToAnchor;
 			// 傾斜材（登り梁・隅木）は立面でも傾くので、文字も天端線に沿わせる。
 			tag.angle = tagAngle(end.x - start.x, end.y - start.y);
 			commands.push_back(std::move(tag));

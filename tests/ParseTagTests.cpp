@@ -32,6 +32,7 @@ using HomeskzIfcImport::core::MemberCommand;
 using HomeskzIfcImport::core::SectionCommand;
 using HomeskzIfcImport::core::SectionDirection;
 using HomeskzIfcImport::core::TagCommand;
+using HomeskzIfcImport::core::TagPlacement;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::core::ViewportCommand;
 using HomeskzIfcImport::parse::attachTagCommands;
@@ -149,6 +150,7 @@ TEST(PlanTagsSitOnTheMemberEdge)
 	CHECK(near(tags[0].position.y, 60.0, 1e-9));
 	CHECK(near(tags[0].offset.x, 0.0, 1e-9));
 	CHECK(near(tags[0].offset.y, 1.0, 1e-9));
+	CHECK(tags[0].placement == TagPlacement::Absolute);
 	CHECK(near(tags[0].angle, 0.0, 1e-9));
 
 	// 2 本目: 南北材。軸中央 (500, 910) から左へ 幅/2 = 52.5（＝左辺の中央）。逃がす向きは左。
@@ -199,6 +201,11 @@ TEST(SectionTagsOnlyCoverMembersOnTheCutPlane)
 	CHECK(near(tags[0].position.y, 3000.0, 1e-9));
 	CHECK(near(tags[0].offset.x, 0.0, 1e-9));
 	CHECK(near(tags[0].offset.y, 1.0, 1e-9));
+	// 断面は原点が分からないので、VW が置いた位置からの相対で決める。基準点は横架材の
+	// 挿入点（天端中央線の始端）を同じように投影したもの。
+	CHECK(tags[0].placement == TagPlacement::RelativeToAnchor);
+	CHECK(near(tags[0].anchor.x, 0.0, 1e-9));
+	CHECK(near(tags[0].anchor.y, 3000.0, 1e-9));
 	CHECK(near(tags[0].angle, 0.0, 1e-9));
 
 	// 2 本目: 傾斜材。1000 進んで 1000 上がるので立面では 45 度。逃がす向きは天端線の
@@ -208,6 +215,10 @@ TEST(SectionTagsOnlyCoverMembersOnTheCutPlane)
 	CHECK(near(tags[1].position.y, 6500.0, 1e-9));
 	CHECK(near(tags[1].offset.x, -std::sqrt(0.5), 1e-9));
 	CHECK(near(tags[1].offset.y, std::sqrt(0.5), 1e-9));
+	// 基準点は始端の投影 (Y=0, 天端 Z=6000)。position との差が「材の始端から辺の中央まで」
+	// のモデル上の変位になり、描画側はこの差だけタグを動かす。
+	CHECK(near(tags[1].anchor.x, 0.0, 1e-9));
+	CHECK(near(tags[1].anchor.y, 6000.0, 1e-9));
 	CHECK(near(tags[1].angle, 45.0, 1e-9));
 }
 

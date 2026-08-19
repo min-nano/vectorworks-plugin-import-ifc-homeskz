@@ -671,6 +671,25 @@ namespace HomeskzIfcImport::core
 	// 軸組図（断面ビューポート）は横から見た図なので**(切断線に沿った距離, 高さ Z)** になる
 	// （どちらを x に取るかは視線の向きが決める。parse/Tag.h「断面の注釈空間」）。
 	//
+	// タグの置き方。**注釈空間の原点がどこかを知っているか**で分かれる（parse/Tag.h
+	// 「断面の注釈空間」）。
+	enum class TagPlacement
+	{
+		// 命令の position をそのまま注釈空間の座標として使う。**伏図（平面ビューポート）
+		// はこれ**——注釈空間がモデルの平面座標そのものであることは実機で確認済み。
+		Absolute,
+
+		// **VW が置いた位置からの相対**で決める。データタグは関連付けると関連付け先へ
+		// 吸着するので、その位置は「VW が計算した、関連付け先の注釈空間での位置」に
+		// ほかならない。そこから anchor → position のモデル上の変位ぶんだけ動かせば、
+		// **注釈空間の原点がどこであっても正しい場所に来る**。
+		//
+		// **軸組図（断面ビューポート）はこれ**——断面の注釈空間は横方向の原点が世界座標と
+		// 違う（実機で、高さは合うのに横だけ一定量ずれた）。原点の規約を当てずっぽうで
+		// 決めるより、VW 自身が出した位置を基準にする方が確実（draw/Tag.cpp）。
+		RelativeToAnchor,
+	};
+
 	// 【position は「部材の辺」で、タグの大きさは描画側が測る】position はタグの中心では
 	// なく**部材の辺の中央**（＝タグの下端中央を接させたい点）で、そこから offset の向きへ
 	// **タグの実寸の半分**だけ押し出した位置がタグの中心になる。タグの実寸は VW のスタイル
@@ -687,6 +706,10 @@ namespace HomeskzIfcImport::core
 	//   style       ← 'style'        … データタグスタイル名（"断面寸法"）
 	//   memberIndex ← 'member_index' … 関連付け先の横架材（Document::members の添字）
 	//   position    ← 'position'     … 注釈空間での**部材の辺の中央**（タグの下端中央が接する点）
+	//   anchor      （Python 版に対応なし）… 関連付け先の横架材の**挿入点**（＝VW がタグを
+	//                                 吸着させる点）を同じ空間へ投影したもの。placement が
+	//                                 RelativeToAnchor のときだけ意味を持つ
+	//   placement   （Python 版に対応なし）… 上の TagPlacement
 	//   offset      （Python 版に対応なし）… 部材から逃がす向き（単位ベクトル）。Python 版は
 	//                                 断面幅/2 を解析側で足し込んで position に畳んでいたが、
 	//                                 本移植は**タグ自身の大きさ**も要るので向きのまま持つ
@@ -698,6 +721,8 @@ namespace HomeskzIfcImport::core
 		std::size_t memberIndex = 0;
 		Vec2 position;
 		Vec2 offset;
+		Vec2 anchor;
+		TagPlacement placement = TagPlacement::Absolute;
 		double angle = 0.0;
 	};
 
