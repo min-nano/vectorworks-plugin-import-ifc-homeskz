@@ -72,8 +72,8 @@ namespace HomeskzIfcImport::draw
 
 			const double clearance =
 				(std::abs(tag.offset.x) * width + std::abs(tag.offset.y) * height) / 2.0;
-			const double targetX = tag.position.x + tag.offset.x * clearance;
-			const double targetY = tag.position.y + tag.offset.y * clearance;
+			const double targetX = tag.position.x + (tag.offset.x * clearance);
+			const double targetY = tag.position.y + (tag.offset.y * clearance);
 			gSDK->MoveObject(object, targetX - centreX, targetY - centreY);
 		}
 
