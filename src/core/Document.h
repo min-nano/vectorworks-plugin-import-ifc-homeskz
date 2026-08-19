@@ -652,6 +652,39 @@ namespace HomeskzIfcImport::core
 		Vec2 position;
 	};
 
+	// 断面寸法データタグ 1 つ（ビューポート注釈のデータタグ）。Python 版 document.py の
+	// TagCommand（dict）に対応する（ROADMAP.md M13）。横架材 1 本の断面寸法（"120×180"）を
+	// その図の上に表示するための命令で、**IFC ではなく横架材命令（MemberCommand）から
+	// 導出する**（parse/Tag）。
+	//
+	// 【どのビューポートに載るかは構造で決まる】タグは ViewportCommand の中に住む——
+	// 「この図に載せる注釈」という関係をフィールド（レイヤ名・図番）の突き合わせではなく
+	// **入れ子**で表す。Python 版は tag 命令を文書の直下に平らに持ち、描画側が
+	// 「tag['layer'] がそのビューポートの表示レイヤに含まれるか」で振り分けていたが、
+	// 本移植は**軸組図（断面ビューポート）にもタグを載せる**ので、その突き合わせが成り立たない
+	// （断面に映る横架材はレイヤでは選べず、切断面に乗るかどうかで決まる）。振り分けを
+	// 解析側（parse/Tag）で済ませてしまえば、描画側は「そのビューポートの tags を置く」
+	// だけになり、伏図と軸組図で 1 つの実装を共有できる。
+	//
+	// 【position は注釈空間の座標】ビューポート注釈はその図の**投影された 2 次元空間**に
+	// 置かれる。伏図（平面ビューポート）は真上から見た図なので投影＝平面座標そのままだが、
+	// 軸組図（断面ビューポート）は横から見た図なので**(切断線に沿った距離, 高さ Z)** になる
+	// （どちらを x に取るかは視線の向きが決める。parse/Tag.h「断面の注釈空間」）。
+	//
+	// Python 版キーとの対応:
+	//   style       ← 'style'        … データタグスタイル名（"断面寸法"）
+	//   memberIndex ← 'member_index' … 関連付け先の横架材（Document::members の添字）
+	//   position    ← 'position'     … 注釈空間での挿入位置（タグの下端中央が来る点）
+	//   angle       ← 'angle'        … 文字角度（度。(-90, 90] に正規化済み）
+	//   （'layer' は持たない。上記のとおり振り分けは解析側で済ませるため）
+	struct TagCommand
+	{
+		std::string style;
+		std::size_t memberIndex = 0;
+		Vec2 position;
+		double angle = 0.0;
+	};
+
 	// シートレイヤに載せるビューポート 1 枚。Python 版 document.py の ViewportCommand
 	// （dict）に対応する。伏図は「特定のデザインレイヤ群だけを見下げた図」なので、命令が
 	// 持つのは**どのレイヤを見せるか**と図面タイトル・図番だけになる（ROADMAP.md M13）。
@@ -676,6 +709,10 @@ namespace HomeskzIfcImport::core
 		std::string drawingTitle;
 		std::string drawingNumber;
 		std::vector<std::string> layers;
+
+		// M13 断面寸法データタグ。この図に載せる注釈（TagCommand の doc コメント参照）。
+		// 伏図・軸組図とも同じ形で持ち、描画側は種類を区別せずに置く。
+		std::vector<TagCommand> tags;
 	};
 
 	// シートレイヤ 1 枚（＋その上のビューポート 1 枚）を生成する命令。Python 版

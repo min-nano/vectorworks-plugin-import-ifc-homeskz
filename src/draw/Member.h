@@ -15,6 +15,7 @@
 
 #include "core/Document.h"
 #include "core/Progress.h"
+#include "draw/ObjectHandles.h"
 
 #include <cstddef>
 #include <string>
@@ -35,6 +36,11 @@ namespace HomeskzIfcImport::draw
 	// progress には 1 件描くごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
 	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
 	// 決める）。描けたところまでは図面に残る。
+	//
+	// handles に非 nullptr を渡すと、**構造材ツールで描けた横架材だけ**を「命令インデックス →
+	// ハンドル」の対応表へ記録する（断面寸法データタグの関連付け先。draw/ObjectHandles.h）。
+	// フォールバックの直線は断面寸法を持たないので記録しない＝タグを付ける相手にしない。
 	std::size_t drawMembers(const core::Document& document, core::ProgressReporter& progress,
-							std::string* outDiagnostics = nullptr);
+							std::string* outDiagnostics = nullptr,
+							ObjectHandles* handles = nullptr);
 } // namespace HomeskzIfcImport::draw
