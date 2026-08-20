@@ -61,13 +61,6 @@ namespace HomeskzIfcImport::draw
 			return (std::abs(tag.offset.x) * width + std::abs(tag.offset.y) * height) / 2.0;
 		}
 
-		// 診断行に出す数値（mm）。小数は要らないので整数へ丸めて短くする。
-		std::string Round(double value)
-		{
-			// std::llround は long long を返すので、そのまま文字列にする。
-			return std::to_string(std::llround(value));
-		}
-
 		// 注釈へ置いたタグ 1 つの実測。移動は全部置いてから行う（診断へ出す実測を先頭から
 		// 数件そろえるため）。
 		struct PendingTag
@@ -76,8 +69,6 @@ namespace HomeskzIfcImport::draw
 			const core::TagCommand* command = nullptr;
 			double centreX = 0.0; // 置いた直後の実位置
 			double centreY = 0.0;
-			double width = 0.0; // 置いた直後の実寸（診断に出す）
-			double height = 0.0;
 			double clearX = 0.0; // 部材から逃がすベクトル（実寸から求めた）
 			double clearY = 0.0;
 		};
@@ -88,23 +79,14 @@ namespace HomeskzIfcImport::draw
 		// すでにそのビューポートの注釈空間で表されている（伏図＝モデルの平面座標そのもの、
 		// 軸組図＝切断線の終点からの距離と天端 Z。parse/Tag.h）。
 		//
-		// 併せて**先頭の数件を実測として診断行へ出す**。断面の注釈空間の規約はローカル確認で
-		// 詰めている最中で、「こちらが指示した位置」と「置いた直後の実位置」を並べて見られると
-		// 一度の実行で写像が読める（両者が一致していれば VW はタグを動かしていない、という
-		// ことも同時に分かる）。**規約が確定したらこの計装は外す。**
-		void MovePendingTags(const std::vector<PendingTag>& pending, TagCounts& counts)
+		// **この後処理が最終位置を決める。** VW は指定した挿入点にタグを留めない（伏図は
+		// タグ幅の半分だけ −X へ寄り、軸組図はビューポートごとにばらばらの場所へ落ちる。
+		// ローカル確認で実測。draw/Tag.h の落とし穴 2）ので、どこへ置かれたかに依らず
+		// 実位置との差だけ動かす。
+		void MovePendingTags(const std::vector<PendingTag>& pending)
 		{
 			for (const PendingTag& tag : pending)
 			{
-				if (counts.samples.size() < kDiagnosticSamples)
-				{
-					counts.samples.push_back("指示(" + Round(tag.command->position.x) + "," +
-											 Round(tag.command->position.y) + ")実測(" +
-											 Round(tag.centreX) + "," + Round(tag.centreY) +
-											 ")大きさ(" + Round(tag.width) + "x" +
-											 Round(tag.height) + ")");
-				}
-
 				const double targetX = tag.command->position.x + tag.clearX;
 				const double targetY = tag.command->position.y + tag.clearY;
 				gSDK->MoveObject(tag.object, targetX - tag.centreX, targetY - tag.centreY);
@@ -200,9 +182,8 @@ namespace HomeskzIfcImport::draw
 			pending.centreX = (bounds.left + bounds.right) / 2.0;
 			// WorldRect は top > bottom（Y 上向き）。
 			pending.centreY = (bounds.top + bounds.bottom) / 2.0;
-			pending.width = std::abs(bounds.right - bounds.left);
-			pending.height = std::abs(bounds.top - bounds.bottom);
-			const double clearance = Clearance(tag, pending.width, pending.height);
+			const double clearance = Clearance(tag, std::abs(bounds.right - bounds.left),
+											   std::abs(bounds.top - bounds.bottom));
 			pending.clearX = tag.offset.x * clearance;
 			pending.clearY = tag.offset.y * clearance;
 			outPending.push_back(pending);
@@ -266,7 +247,7 @@ namespace HomeskzIfcImport::draw
 				++drawn;
 		}
 
-		MovePendingTags(pending, counts);
+		MovePendingTags(pending);
 
 		// タグ（とスタイルが決めるその中身）のクラスを表示へ戻し、ビューポートを更新して
 		// 反映する。ConfigureViewport は**タグを置く前**に走っているので、ここで足さないと
@@ -302,11 +283,9 @@ namespace HomeskzIfcImport::draw
 		// **タグを 1 つでも置いたのにクラスを 1 つも表示へ戻せていない**のも異常として扱う
 		// （注釈にタグはあるのに図には出ない、という一番分かりにくい壊れ方になる）。
 		const bool classesBroken = counts.drawn > 0 && counts.classesShown == 0;
-		// 実測は**異常でなくても出す**。断面の注釈空間の規約をローカル確認で詰めている間、
-		// この行が唯一の手掛かりになる（MovePendingTags の計装。規約が確定したら外す）。
 		if (counts.failed == 0 && counts.unassociated == 0 && counts.leaderLeft == 0 &&
 			counts.updateFailed == 0 && counts.unmeasured == 0 && !classesBroken &&
-			!counts.styleMissing && counts.samples.empty())
+			!counts.styleMissing)
 			return {};
 
 		std::string text = label + "の断面寸法タグの診断: ";
@@ -328,12 +307,6 @@ namespace HomeskzIfcImport::draw
 		if (counts.unmeasured > 0)
 			text +=
 				"実位置を測れず動かせなかったタグ " + std::to_string(counts.unmeasured) + " 件。";
-		if (!counts.samples.empty())
-		{
-			text += "実測 ";
-			for (const std::string& sample : counts.samples)
-				text += sample + " ";
-		}
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw
