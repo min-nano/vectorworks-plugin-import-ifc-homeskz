@@ -86,54 +86,58 @@ namespace HomeskzIfcImport::parse
 		// 触るのはこの表の 1 行だけ（以前は Extensions/ExtMenu.cpp の文字列連結と命令数の
 		// 足し算の 2 か所を手で伸ばしていた。ROADMAP.md M15「完了文言の集約」）。
 		//
-		// commands は「解析が出した命令の数」を Document から取る関数（キャプチャの無い
-		// ラムダは関数ポインタへ変換できるので constexpr の表に置ける）、placed は
-		// 「描画が実際に描けた数」を指す core::DrawCounts のメンバポインタ。並びは
-		// draw/ExecuteDocument のディスパッチ順（ストーリ → 通り芯 → … → 伏図 → 軸組図）に
-		// 揃えてあり、読む側が描かれた順にたどれる。
+		// commands は「解析が出した命令の数」を Document から、placed は「描画が実際に
+		// 描けた数」を DrawCounts から取り出す関数。キャプチャの無いラムダは関数ポインタへ
+		// 変換できるので constexpr の表に置ける。並びは draw/ExecuteDocument のディスパッチ順
+		// （ストーリ → 通り芯 → … → 伏図 → 軸組図）に揃えてあり、読む側が描かれた順にたどれる。
+		//
+		// placed をメンバポインタ（`std::size_t core::DrawCounts::*`）にしないのは、
+		// `counts.*element.placed` という書き方を CodeQL が追えず、初期化済みのローカルを
+		// 「未初期化かもしれない」と誤検出したため（cpp/uninitialized-local）。2 列とも
+		// 同じ「取り出す関数」に揃えるほうが読みやすくもある。
 		struct ElementDef
 		{
 			const char* label;								// 表示名（例: "横架材"）
 			const char* unit;								// 助数詞（例: "本"）
 			std::size_t (*commands)(const core::Document&); // 命令数
-			std::size_t core::DrawCounts::*placed;			// 描けた数
+			std::size_t (*placed)(const core::DrawCounts&); // 描けた数
 		};
 
 		constexpr std::array<ElementDef, 17> kElements = {{
 			{"ストーリ", "層", [](const core::Document& d) { return d.stories.size(); },
-			 &core::DrawCounts::stories},
+			 [](const core::DrawCounts& c) { return c.stories; }},
 			{"通り芯", "本", [](const core::Document& d) { return d.grids.size(); },
-			 &core::DrawCounts::grids},
+			 [](const core::DrawCounts& c) { return c.grids; }},
 			{"立上り", "本", [](const core::Document& d) { return d.walls.size(); },
-			 &core::DrawCounts::walls},
+			 [](const core::DrawCounts& c) { return c.walls; }},
 			{"壁結合", "箇所", [](const core::Document& d) { return d.wallJoins.size(); },
-			 &core::DrawCounts::wallJoins},
+			 [](const core::DrawCounts& c) { return c.wallJoins; }},
 			{"底盤", "枚", [](const core::Document& d) { return d.slabs.size(); },
-			 &core::DrawCounts::slabs},
+			 [](const core::DrawCounts& c) { return c.slabs; }},
 			{"床", "枚", [](const core::Document& d) { return d.floors.size(); },
-			 &core::DrawCounts::floors},
+			 [](const core::DrawCounts& c) { return c.floors; }},
 			{"横架材", "本", [](const core::Document& d) { return d.members.size(); },
-			 &core::DrawCounts::members},
+			 [](const core::DrawCounts& c) { return c.members; }},
 			{"柱", "本", [](const core::Document& d) { return d.columns.size(); },
-			 &core::DrawCounts::columns},
+			 [](const core::DrawCounts& c) { return c.columns; }},
 			{"垂木", "本", [](const core::Document& d) { return d.rafters.size(); },
-			 &core::DrawCounts::rafters},
+			 [](const core::DrawCounts& c) { return c.rafters; }},
 			{"野地板", "枚", [](const core::Document& d) { return d.roofs.size(); },
-			 &core::DrawCounts::roofs},
+			 [](const core::DrawCounts& c) { return c.roofs; }},
 			{"アンカーボルト", "本", [](const core::Document& d) { return d.anchorBolts.size(); },
-			 &core::DrawCounts::anchorBolts},
+			 [](const core::DrawCounts& c) { return c.anchorBolts; }},
 			{"床束", "本", [](const core::Document& d) { return d.floorPosts.size(); },
-			 &core::DrawCounts::floorPosts},
+			 [](const core::DrawCounts& c) { return c.floorPosts; }},
 			{"火打", "本", [](const core::Document& d) { return d.fireBraces.size(); },
-			 &core::DrawCounts::fireBraces},
+			 [](const core::DrawCounts& c) { return c.fireBraces; }},
 			{"仕口", "箇所", [](const core::Document& d) { return d.joints.size(); },
-			 &core::DrawCounts::joints},
+			 [](const core::DrawCounts& c) { return c.joints; }},
 			{"柱記号", "個", [](const core::Document& d) { return d.columnMarks.size(); },
-			 &core::DrawCounts::columnMarks},
+			 [](const core::DrawCounts& c) { return c.columnMarks; }},
 			{"伏図", "枚", [](const core::Document& d) { return d.sheets.size(); },
-			 &core::DrawCounts::sheets},
+			 [](const core::DrawCounts& c) { return c.sheets; }},
 			{"軸組図", "枚", [](const core::Document& d) { return d.sections.size(); },
-			 &core::DrawCounts::sections},
+			 [](const core::DrawCounts& c) { return c.sections; }},
 		}};
 	} // namespace
 
@@ -169,7 +173,7 @@ namespace HomeskzIfcImport::parse
 				const std::size_t commands = element.commands(document);
 				if (commands == 0)
 					continue; // 命令の無い要素は行ごと出さない（行が無い＝解析で 0 件）
-				const std::size_t placed = counts.*element.placed;
+				const std::size_t placed = element.placed(counts);
 				out << "\n  " << element.label << ": ";
 				if (placed != commands)
 					out << placed << "/" << commands; // 描けなかったぶんが分かる形

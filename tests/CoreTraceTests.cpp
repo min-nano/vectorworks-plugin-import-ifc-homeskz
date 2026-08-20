@@ -2,7 +2,7 @@
 //	CoreTraceTests.cpp
 //
 //	クラッシュ診断ログ（src/core/Trace）の単体テスト。無 SDK のテストハーネスで走る。
-//	出力先は一時ディレクトリ（core::trace::defaultLogPath が返す場所）で、各ケースは
+//	出力先は CMake が渡すビルドディレクトリ（HOMESKZ_TRACE_TEST_DIR）で、各ケースは
 //	書いたファイルを必ず消してから終わる。
 //
 
@@ -30,9 +30,16 @@ namespace
 	}
 
 	// テスト用のログパス（ケースごとに名前を分け、並列実行でぶつからないようにする）。
+	//
+	// **環境変数から組み立てない。** `defaultLogPath` は TMPDIR / TEMP を読むので、その値を
+	// そのままファイルを開く先に使うと CodeQL が「制御されていないデータをパスに使った」
+	// （cpp/path-injection）と報告する。テストが書く先は CMake から受け取るビルド
+	// ディレクトリで十分——共有の一時ディレクトリを汚さずに済むという実利もある。
+	// `defaultLogPath` 自体は下の default_log_path_… が**文字列として**検証する
+	// （ファイルは開かないので流れが繋がらない）。
 	std::string logPath(const std::string& name)
 	{
-		return trace::defaultLogPath("homeskz-trace-test-" + name + ".log");
+		return std::string(HOMESKZ_TRACE_TEST_DIR) + "/homeskz-trace-test-" + name + ".log";
 	}
 } // namespace
 
