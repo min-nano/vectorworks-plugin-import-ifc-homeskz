@@ -32,10 +32,23 @@ namespace HomeskzIfcImport::core::trace
 		}
 
 		// 環境変数を 1 つ読む（未設定・空文字は「無い」扱い）。
+		//
+		// **getenv を使うのはここだけ。** MSVC は C4996（"_dupenv_s を使え"）を出し、
+		// 無 SDK ライブラリは /W4 /WX で警告をエラーにするので、抑止をこの 1 か所へ
+		// 閉じ込める。危険とされるのは「返った文字列を持ち回る／環境を書き換える」
+		// 使い方で、ここは**その場で読んで即コピーする**だけなので問題にならない
+		// （インポートはメインスレッド 1 本で走り、環境変数を書き換えもしない）。
 		const char* envOrNull(const char* name)
 		{
+#if defined(_MSC_VER)
+#	pragma warning(push)
+#	pragma warning(disable : 4996)
+#endif
 			// NOLINTNEXTLINE(concurrency-mt-unsafe): インポートはメインスレッド 1 本で走る
 			const char* value = std::getenv(name);
+#if defined(_MSC_VER)
+#	pragma warning(pop)
+#endif
 			if (value == nullptr || *value == '\0')
 				return nullptr;
 			return value;
@@ -85,6 +98,11 @@ namespace HomeskzIfcImport::core::trace
 		if (s.out.is_open())
 			s.out.close();
 		s.path.clear();
+	}
+
+	bool envFlag(const char* name)
+	{
+		return envOrNull(name) != nullptr;
 	}
 
 	std::string defaultLogPath(const std::string& fileName)

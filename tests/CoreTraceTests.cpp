@@ -96,6 +96,15 @@ TEST(trace_open_failure_is_not_fatal)
 	trace::log("落ちない");
 }
 
+TEST(env_flag_reads_the_environment)
+{
+	// 立っていない変数は false。**getenv を使うのは core/Trace だけ**なので、その
+	// 読み取り（未設定・空文字の扱い）はここで固定しておく。
+	CHECK(!trace::envFlag("HOMESKZ_IFC_TRACE_DEFINITELY_NOT_SET"));
+	// PATH は mac / Windows / Linux のいずれでも必ず入っている。
+	CHECK(trace::envFlag("PATH"));
+}
+
 TEST(default_log_path_uses_temp_dir_and_single_separator)
 {
 	std::string const path = trace::defaultLogPath("HomeskzIfcImport.log");

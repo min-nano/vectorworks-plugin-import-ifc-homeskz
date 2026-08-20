@@ -25,7 +25,6 @@
 #include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
 
 #include <cstddef>
-#include <cstdlib>
 #include <exception>
 #include <string>
 
@@ -217,8 +216,8 @@ namespace HomeskzIfcImport
 		void OpenImportTrace(const std::string& ifcPath)
 		{
 #ifndef VW_DEV_BUILD
-			// NOLINTNEXTLINE(concurrency-mt-unsafe): メニューコマンドはメインスレッド 1 本
-			if (std::getenv("HOMESKZ_IFC_TRACE") == nullptr)
+			// 環境変数の読み取りは core/Trace が持つ（getenv の作法をあちこちに書かない）。
+			if (!core::trace::envFlag("HOMESKZ_IFC_TRACE"))
 				return;
 #endif
 			if (!core::trace::open(core::trace::defaultLogPath("HomeskzIfcImport.log")))

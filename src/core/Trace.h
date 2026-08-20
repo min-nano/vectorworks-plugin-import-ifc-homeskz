@@ -50,6 +50,14 @@ namespace HomeskzIfcImport::core::trace
 	// 閉じる（2 回呼んでも安全）。
 	void close();
 
+	// 環境変数が立っているか（未設定・空文字は false）。
+	//
+	// トレースの有効化条件を SDK 側（Extensions/ExtMenu）が判断するのに使う。**ここに
+	// 置くのは、`std::getenv` の作法をこのファイル 1 つへ閉じ込めるため**——MSVC は
+	// getenv に C4996（"_dupenv_s を使え"）を出し、無 SDK ライブラリは /W4 /WX で
+	// 警告をエラー扱いにしているので、抑止をあちこちに書きたくない。
+	bool envFlag(const char* name);
+
 	// 既定の出力先を組み立てる。ディレクトリは環境変数 TMPDIR / TEMP / TMP の順に見て、
 	// どれも無ければ "/tmp"（macOS は TMPDIR、Windows は TEMP が必ず入っている）。
 	// 図面や IFC の隣には置かない——ユーザーのデータのある場所へ勝手に書かないため。
