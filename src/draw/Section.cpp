@@ -51,6 +51,7 @@
 #include "PluginPrefix.h"
 #include "draw/Section.h"
 #include "draw/DrawUtil.h"
+#include "draw/Tag.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -163,7 +164,7 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
-							 std::string* note)
+							 std::string* note, const ObjectHandles* memberHandles)
 	{
 		const std::vector<core::SectionCommand>& commands = document.sections;
 		if (commands.empty())
@@ -198,6 +199,16 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingSheetLayers = 0;
 		std::size_t missingViewports = 0;
 		std::size_t classesApplied = 0;
+		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
+		const ObjectHandles emptyHandles;
+		const ObjectHandleTable& members =
+			memberHandles != nullptr ? memberHandles->table() : emptyHandles.table();
+		TagCounts tags;
+		// タグ PIO の定義を先に用意する（伏図と同じ。draw/Tag.h）。タグが 1 つも無い文書では
+		// 定義そのものを作らない。
+		if (std::ranges::any_of(commands, [](const core::SectionCommand& section)
+								{ return !section.viewport.tags.empty(); }))
+			prepareDataTagPlugin();
 		std::vector<MCObjectHandle> viewports;
 		viewports.reserve(commands.size());
 
@@ -229,6 +240,10 @@ namespace HomeskzIfcImport::draw
 			// **更新より前**に設定する（ConfigureViewport の最後が更新）。
 			ApplySectionDisplayOptions(viewport);
 			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport);
+
+			// 断面寸法データタグ。**並べ替え（ArrangeViewports）より前**に置く——注釈は
+			// ビューポートと一緒に動くので、先に置いておけば移動しても図の上に留まる。
+			drawViewportTags(viewport, command.viewport, members, tags);
 			viewports.push_back(viewport);
 			++drawn;
 		}
@@ -255,6 +270,15 @@ namespace HomeskzIfcImport::draw
 			if (!note->empty())
 				*note += "\n";
 			*note += text;
+		}
+
+		// タグの診断は軸組図の診断とは別行にする（原因が別物なので混ぜない）。
+		const std::string tagNote = tagDiagnostics("軸組図", tags);
+		if (note != nullptr && !tagNote.empty())
+		{
+			if (!note->empty())
+				*note += "\n";
+			*note += tagNote;
 		}
 		return drawn;
 	}

@@ -197,6 +197,18 @@ namespace HomeskzIfcImport::draw
 	// （ovLayerDescription。"only used for sheet layers"）へ入れる。用意できなければ nil。
 	MCObjectHandle PrepareSheetLayer(const std::string& number, const std::string& title);
 
+	// オブジェクト（PIO・グループ・シンボル）が**中身も含めて**身に付けているクラスを
+	// 昇順・重複なしで返す。**後から注釈へ足した図形のクラスを表示へ戻す**のに使う
+	// ——PrepareViewportSetup はデザインレイヤしか走査しないので、ビューポート注釈に
+	// 置いたデータタグ（とスタイルが決めるその中身）のクラスは数え上げに入らない
+	// （ローカル確認で「タグに含まれるクラスが非表示」と判明。draw/Tag）。
+	std::vector<InternalIndex> CollectObjectClasses(MCObjectHandle object);
+
+	// ビューポートで指定のクラスを表示へ戻す（戻せた数を返す）。ConfigureViewport が
+	// 使うのと同じ規約で、**表示種別の値をここ 1 か所に閉じ込める**ためのもの。
+	std::size_t ShowViewportClasses(MCObjectHandle viewport,
+									const std::vector<InternalIndex>& classes);
+
 	// 生成済みのビューポートを命令どおりに仕上げる（表示レイヤの絞り込み → クラス表示 →
 	// 縮尺 → 図面タイトル・図番 → 更新）。**表示に戻せたクラスの数**を返す（0 なら図形が
 	// 1 つも映らないので、呼び出し側は診断行に出す）。

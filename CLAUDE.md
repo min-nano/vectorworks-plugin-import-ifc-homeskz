@@ -156,6 +156,9 @@ src/
     Section.{h,cpp}         軸組図＝断面ビューポート（旧 ifc/section.py。柱梁の芯を通る通りを
                             検出し、切断線・視線の向き・表示レイヤを決める。断面の範囲と
                             表示の作法は draw/Section が持つ）
+    Tag.{h,cpp}             断面寸法データタグ（旧 ifc/tag.py。IFC ではなく member 命令から
+                            導出する。**Python 版と違い伏図だけでなく軸組図にも載せる**ので、
+                            どのビューポートに載るかの振り分けもここが持つ）
     …                       以降、要素ごとに 1 対 1 で追加
 
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
@@ -175,6 +178,8 @@ src/
     ObjectHandles.{h,cpp}   「命令インデックス → 描いたオブジェクトのハンドル」の対応表
                             （壁→壁結合が使う。実体は draw/DrawUtil）
     Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）
+    Tag.{h,cpp}             ビューポート注釈の断面寸法データタグ（旧 vw/sheet.py の draw_tag）。
+                            伏図・軸組図が共有する唯一の実装（振り分けは parse/Tag 済み）
     Section.{h,cpp}         section 命令 → 断面ビューポート（旧 vw/section.py）。**Python 版と
                             違い ISDK::CreateSectionViewport で新規作成する**（既製 40 枚の
                             流用はしない。ROADMAP.md M14 の【決定】）。断面の範囲（奥行きだけ
@@ -214,6 +219,9 @@ tests/
 スタイル解決・**構成層／基準面／スタイルの新規作成**——床板・底盤・立上りが共有する）は
 `draw/DrawUtil`、**シートレイヤの用意とビューポートの仕上げ**（表示レイヤの絞り込み・クラス表示・
 縮尺・図番／図面タイトル・更新——伏図と軸組図が共有する唯一の実装）も `draw/DrawUtil`、
+**断面寸法データタグ**（スタイル名は `parse/Tag` の `kTagStyle`、断面の注釈空間への投影は
+同じく `parse/Tag` の `sectionAnnotationPoint`、`Data Tag` PIO の登録名・引出線パラメータと
+配置手順は `draw/Tag`——伏図と軸組図が共有する唯一の実装）、
 構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
 実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名は
@@ -320,6 +328,7 @@ Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テス�
 | `ifc/loader.py` | `parse/Loader` + `parse/Step` | 読み込み・STEP グラフ（サニタイズは不要） |
 | `ifc/__init__.py` `build_document` | `parse/BuildDocument` | 解析オーケストレーション |
 | `ifc/grid.py` … `ifc/section.py` | `parse/Grid` … `parse/Section` | 要素ごとの解析 |
+| `ifc/tag.py` | `parse/Tag` | 断面寸法データタグ（伏図＋**軸組図**） |
 | `ifc/footing.py` | `parse/Footing` | 基礎（立上り・底盤・基礎ストーリ） |
 | `ifc/structural_class.py` | `parse/StructuralClass` | 構造クラス判定（純ロジック） |
 | （ifcopenshell の行列・幾何） | `parse/IfcGeometry` + `core/Geometry` | 配置行列・押し出し・断面 |
@@ -327,6 +336,7 @@ Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テス�
 | `tracing.py` | `core/Trace`（任意） | クラッシュ診断ログ |
 | `vw/__init__.py` `execute_document` | `draw/ExecuteDocument` | 描画ディスパッチ |
 | `vw/grid.py` … `vw/section.py` | `draw/Grid` … `draw/Section` | 要素ごとの描画 |
+| `vw/sheet.py` `draw_tag` | `draw/Tag` | データタグの配置・関連付け・注釈への追加 |
 | `vw/footing.py` | `draw/Footing` | 基礎の描画（壁・スラブ） |
 | `main.py` / `__init__.py` `run()` | `Extensions/ExtMenu`（コマンド本体） | ファイル選択→解析→描画→完了ダイアログ |
 

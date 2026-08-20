@@ -7,7 +7,8 @@
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
 //	walls / slabs（M9）・wallJoins / 底盤の modifiers＝地中梁（M10）・rafters / roofs（M6）・
 //	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints）・
-//	sheets（M13）・sections（M14）の各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
+//	sheets（M13）・sections（M14）・ビューポート注釈の断面寸法データタグ（M13）の
+//	各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
 //	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 //	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
@@ -177,6 +178,22 @@ namespace HomeskzIfcImport::core
 		}
 
 		// シート（伏図）1 枚が妥当か（Python 版 _validate_sheet / _validate_viewport 相当）。
+		// ビューポート注釈の断面寸法データタグ 1 つが妥当か（Python 版 _validate_tag 相当）。
+		// スタイル名が非空で、関連付け先の横架材が members の範囲内であること（範囲外の
+		// 添字は「どの部材にも付かないタグ」＝図面に寸法の出ない空のタグが残る）。position /
+		// angle は数値（double なので常に成立）で値域の制限は無い。
+		bool isValidTag(const TagCommand& tag, std::size_t memberCount)
+		{
+			return !tag.style.empty() && tag.memberIndex < memberCount;
+		}
+
+		// ビューポート 1 枚のタグがすべて妥当か。伏図・軸組図が同じ規則で見る。
+		bool areValidTags(const ViewportCommand& viewport, std::size_t memberCount)
+		{
+			return std::ranges::all_of(viewport.tags, [memberCount](const TagCommand& tag)
+									   { return isValidTag(tag, memberCount); });
+		}
+
 		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを
 		// **1 つ以上**持ち、そのレイヤ名がどれも非空であること。図面タイトル・図番は空でも
 		// 描ける（ラベルが空になるだけ）ので弾かない——Python 版が型だけを見るのと同じ扱い。
@@ -297,6 +314,17 @@ namespace HomeskzIfcImport::core
 		// 断面ビューポート（軸組図）: シートレイヤ番号・タイトル・表示レイヤに加え、指示線が
 		// 縮退していないこと（isValidSection 参照。ROADMAP.md M14）。
 		if (!std::ranges::all_of(document.sections, isValidSection))
+			return false;
+
+		// 断面寸法データタグ（M13）: 伏図・軸組図どちらのビューポート注釈も、スタイル名が
+		// 非空で関連付け先の横架材が members の範囲内であること（areValidTags 参照）。
+		// タグはビューポート命令の中に住むので、シート・軸組図の関門を通った後に見る。
+		const std::size_t memberCount = document.members.size();
+		if (!std::ranges::all_of(document.sheets, [memberCount](const SheetCommand& sheet)
+								 { return areValidTags(sheet.viewport, memberCount); }))
+			return false;
+		if (!std::ranges::all_of(document.sections, [memberCount](const SectionCommand& section)
+								 { return areValidTags(section.viewport, memberCount); }))
 			return false;
 
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。

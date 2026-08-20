@@ -88,10 +88,12 @@ namespace HomeskzIfcImport::draw
 		constexpr double kZeroLengthTol = 1e-6;
 
 		// 横架材 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
-		// する。何か 1 つでも配置できたら true。
+		// する。何か 1 つでも配置できたら true。**構造材ツールで描けたときだけ** outObject に
+		// そのハンドルを入れる（断面寸法データタグの関連付け先。フォールバックの直線は
+		// 断面寸法を持たないのでタグを付ける相手にしない。draw/Column の柱ハンドルと同じ扱い）。
 		bool DrawOne(const core::MemberCommand& member, RefNumber style,
 					 std::size_t& outPathFailures, std::size_t& outSectionFailures,
-					 std::size_t& outLengthFailures)
+					 std::size_t& outLengthFailures, MCObjectHandle& outObject)
 		{
 			// 断面（プロファイルグループ）を**先に**用意する。作れなければ PIO を作らない
 			// ——断面の無い構造材は生成できても実体が描かれず、「オブジェクトはあるのに
@@ -142,6 +144,9 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
+			// 断面寸法データタグの関連付け先として記録する（draw/Tag が引く）。
+			outObject = result.object;
+
 			// 断面が入らなかった本数を数える（診断。drawMembers が完了ダイアログへ載せる）。
 			if (!result.sectionOk)
 				++outSectionFailures;
@@ -165,7 +170,7 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawMembers(const core::Document& document, core::ProgressReporter& progress,
-							std::string* outDiagnostics)
+							std::string* outDiagnostics, ObjectHandles* handles)
 	{
 		if (document.members.empty())
 			return 0;
@@ -176,8 +181,10 @@ namespace HomeskzIfcImport::draw
 		std::size_t pathFailures = 0;
 		std::size_t sectionFailures = 0;
 		std::size_t lengthFailures = 0;
-		for (const core::MemberCommand& member : document.members)
+		for (std::size_t index = 0; index < document.members.size(); ++index)
 		{
+			const core::MemberCommand& member = document.members[index];
+
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
 			// 描画の前に 1 件進める（＝「いま何本目を描いているか」が見える）。
 			if (progress.cancelled())
@@ -189,8 +196,15 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(member.layer) == nil)
 				continue;
 
-			if (DrawOne(member, style, pathFailures, sectionFailures, lengthFailures))
+			MCObjectHandle object = nil;
+			if (DrawOne(member, style, pathFailures, sectionFailures, lengthFailures, object))
 				++drawn;
+
+			// **命令インデックス → ハンドル**の対応表へ記録する（断面寸法データタグが
+			// 関連付け先として引く。立上り → 壁結合・柱 → 伏図記号と同じ受け渡し方式。
+			// draw/ObjectHandles.h）。
+			if (handles != nullptr && object != nil)
+				handles->table().handles.emplace(index, object);
 		}
 
 		// 全配置後に 1 回だけスタイル更新を掛けて、by-style の描画属性を反映する

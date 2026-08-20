@@ -186,6 +186,19 @@ target_link_libraries(ParseSectionTests PRIVATE HomeskzIfcCore)
 target_compile_definitions(ParseSectionTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
+# Data tags (src/parse/Tag): the 断面寸法 data tags that annotate each 横架材 on a
+# viewport — the readable text angle ((-90, 90] so it never reads upside down), the side the
+# tag is nudged to (up for east-west members, left for north-south ones), which members a plan
+# viewport tags (those whose layer it shows) and where the tag sits (mid of the member's edge,
+# flush so VW draws no leader), and — new against the Python version — which members a section
+# viewport tags (only those lying on the cut plane) and how they project into the section's
+# annotation space (distance along the cut line, elevation). Runs end to end on the checked-in
+# fixtures; SDK-free. HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseTagTests ParseTagTests.cpp)
+target_link_libraries(ParseTagTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseTagTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # Structural-class assignment (src/parse/StructuralClass): the pure member-type ->
 # VW class logic (04構造-02木造-… leaf classes). Trusts the homeskz IFC Name token when
 # it identifies a type, else infers from story/height (member: dodai/yukabari/koyabari/

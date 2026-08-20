@@ -1143,6 +1143,91 @@ TEST(validate_rejects_section_with_degenerate_line)
 }
 
 // ---------------------------------------------------------------------------
+// 断面寸法データタグ（ビューポート注釈。ROADMAP.md M13）
+//
+// タグはビューポート命令の中に住む（伏図・軸組図で同じ形）。関門は「スタイル名が非空」と
+// 「関連付け先の横架材が members の範囲内」の 2 つ——範囲外の添字はどの部材にも付かない
+// タグ＝寸法の出ない空のタグが図面に残るので描かせない。
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 横架材 1 本だけを持つ文書（タグの関連付け先。添字 0 だけが有効になる）。
+	core::Document documentWithOneMember()
+	{
+		core::Document document;
+		core::MemberCommand member;
+		member.layer = "1-横架材天端";
+		member.memberId = "120×180";
+		member.drawClass = "04構造-02木造-04床組-03床梁";
+		member.start = core::Vec2{0.0, 0.0};
+		member.end = core::Vec2{2000.0, 0.0};
+		member.width = 120.0;
+		member.height = 180.0;
+		member.elevation = 3000.0;
+		member.endElevation = 3000.0;
+		member.startBound.level = "横架材天端";
+		member.endBound.level = "横架材天端";
+		document.members.push_back(member);
+		return document;
+	}
+
+	core::TagCommand validTag()
+	{
+		core::TagCommand tag;
+		tag.style = "断面寸法";
+		tag.memberIndex = 0;
+		tag.position = core::Vec2{1000.0, 60.0};
+		tag.angle = 0.0;
+		return tag;
+	}
+} // namespace
+
+TEST(validate_accepts_viewport_tags_on_sheets_and_sections)
+{
+	core::Document document = documentWithOneMember();
+	core::SheetCommand sheet = validSheet();
+	sheet.viewport.tags.push_back(validTag());
+	document.sheets.push_back(sheet);
+
+	core::SectionCommand section = validSection();
+	section.viewport.tags.push_back(validTag());
+	document.sections.push_back(section);
+
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_tag_pointing_past_the_members)
+{
+	// 伏図でも軸組図でも、範囲外の添字は同じ規則で弾く。
+	core::Document bySheet = documentWithOneMember();
+	core::SheetCommand sheet = validSheet();
+	core::TagCommand outOfRange = validTag();
+	outOfRange.memberIndex = 1; // 横架材は 1 本（有効な添字は 0 だけ）
+	sheet.viewport.tags.push_back(outOfRange);
+	bySheet.sheets.push_back(sheet);
+	CHECK(!core::validateDocument(bySheet));
+
+	core::Document bySection = documentWithOneMember();
+	core::SectionCommand section = validSection();
+	section.viewport.tags.push_back(outOfRange);
+	bySection.sections.push_back(section);
+	CHECK(!core::validateDocument(bySection));
+}
+
+TEST(validate_rejects_tag_without_style)
+{
+	// スタイルが無いと寸法の書式が決まらない（VW 側の「断面寸法」スタイルが担う）。
+	core::Document document = documentWithOneMember();
+	core::SheetCommand sheet = validSheet();
+	core::TagCommand noStyle = validTag();
+	noStyle.style.clear();
+	sheet.viewport.tags.push_back(noStyle);
+	document.sheets.push_back(sheet);
+	CHECK(!core::validateDocument(document));
+}
+
+// ---------------------------------------------------------------------------
 // sectionHeightRange（軸組図の高さ範囲。ROADMAP.md M14）
 //
 // 断面ビューポートの高さ範囲は CreateSectionViewport の引数でしか与えられず、SDK に

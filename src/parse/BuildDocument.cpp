@@ -35,6 +35,7 @@
 #include "parse/Section.h"
 #include "parse/Sheet.h"
 #include "parse/Story.h"
+#include "parse/Tag.h"
 
 #include <utility>
 
@@ -160,6 +161,13 @@ namespace HomeskzIfcImport::parse
 		// 柱・横架材の命令から、映すレイヤはストーリの命令から、断面の高さ範囲は各要素の Z から
 		// 決まるので、ここが最後になる（parse/Section）。
 		document.sections = buildSectionCommands(context, document);
+		progress.step();
+
+		// M13 断面寸法データタグ: 伏図・軸組図の**両方**のビューポート注釈に、横架材の断面
+		// 寸法を示すデータタグを載せる（Python 版は伏図だけ）。タグはビューポート命令の中に
+		// 入るので、**sheets / sections が確定した後**でなければ置き場所が決まらない
+		// ——したがってここが最後になる（parse/Tag）。
+		attachTagCommands(document);
 		progress.step();
 
 		return document;

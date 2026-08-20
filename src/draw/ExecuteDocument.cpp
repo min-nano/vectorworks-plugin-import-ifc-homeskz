@@ -9,7 +9,8 @@
 //	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（立上り・底盤）→
 //	draw/Floor → draw/Member → draw/Column → draw/Rafter → draw/Roof → draw/Symbol
 //	（アンカーボルト・床束・火打・仕口）→ draw/ColumnMark（記号）→ draw/Sheet（伏図）→
-//	draw/Section（軸組図）へディスパッチする。
+//	draw/Section（軸組図）へディスパッチする。伏図・軸組図のビューポート注釈に載る断面寸法
+//	データタグ（draw/Tag）は、それぞれのフェーズの中で置かれる。
 //	実描画（高さ・傾き・スタイル・PIO の挙動）はローカルの VectorWorks で目視確認する。
 //
 
@@ -117,10 +118,13 @@ namespace HomeskzIfcImport::draw
 
 		// M7 横架材を描く。配置先の "n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁" レイヤは
 		// drawStories が作るので、必ずその後に置く（レイヤが無い命令はスキップされる）。
+		// **横架材ハンドルを記録する**——伏図・軸組図の断面寸法データタグがこれを関連付け先
+		// として引く（立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
+		ObjectHandles memberHandles;
 		if (beginPhase("横架材を描画しています…", document.members.size()))
 		{
 			std::string note;
-			counts.members = drawMembers(document, progress, &note);
+			counts.members = drawMembers(document, progress, &note, &memberHandles);
 			addDiagnostics(note);
 		}
 
@@ -198,7 +202,7 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("伏図を作成しています…", document.sheets.size()))
 		{
 			std::string note;
-			counts.sheets = drawSheets(document, progress, &note);
+			counts.sheets = drawSheets(document, progress, &note, &memberHandles);
 			addDiagnostics(note);
 		}
 
@@ -208,7 +212,7 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("軸組図を作成しています…", document.sections.size()))
 		{
 			std::string note;
-			counts.sections = drawSections(document, progress, &note);
+			counts.sections = drawSections(document, progress, &note, &memberHandles);
 			addDiagnostics(note);
 		}
 

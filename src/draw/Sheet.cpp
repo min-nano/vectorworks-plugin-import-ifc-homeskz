@@ -28,9 +28,11 @@
 #include "PluginPrefix.h"
 #include "draw/Sheet.h"
 #include "draw/DrawUtil.h"
+#include "draw/Tag.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <utility>
@@ -39,7 +41,7 @@
 namespace HomeskzIfcImport::draw
 {
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
-						   std::string* note)
+						   std::string* note, const ObjectHandles* memberHandles)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
@@ -57,6 +59,17 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingViewports = 0;
 		// クラス表示は「設定できた数」を数える（0 なら図形が 1 つも映らない）。
 		std::size_t classesApplied = 0;
+		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
+		// （渡されなければ空の表＝関連付け無しで置く。draw/Tag.h）。
+		const ObjectHandles emptyHandles;
+		const ObjectHandleTable& members =
+			memberHandles != nullptr ? memberHandles->table() : emptyHandles.table();
+		TagCounts tags;
+		// タグ PIO の定義を先に用意する（最初の 1 個で設定ダイアログが出るのを防ぐ。draw/Tag.h）。
+		// タグが 1 つも無い文書では定義そのものを作らない（使わない PIO を文書へ足さない）。
+		if (std::ranges::any_of(commands, [](const core::SheetCommand& sheet)
+								{ return !sheet.viewport.tags.empty(); }))
+			prepareDataTagPlugin();
 
 		for (const core::SheetCommand& command : commands)
 		{
@@ -83,6 +96,11 @@ namespace HomeskzIfcImport::draw
 			}
 
 			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport);
+
+			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport の
+			// 最後が更新で、注釈はその後に足しても図に出る。Python 版 execute_sheets も
+			// ビューポートを作り終えてからタグを置く）。
+			drawViewportTags(viewport, command.viewport, members, tags);
 			++drawn;
 		}
 
@@ -105,6 +123,15 @@ namespace HomeskzIfcImport::draw
 				text += "クラスを表示に戻せませんでした（対象 " +
 						std::to_string(setup.classes.size()) + " クラス）。図形が映りません。";
 			*note = std::move(text);
+		}
+
+		// タグの診断は伏図の診断とは別行にする（原因が別物なので混ぜない）。
+		const std::string tagNote = tagDiagnostics("伏図", tags);
+		if (note != nullptr && !tagNote.empty())
+		{
+			if (!note->empty())
+				*note += "\n";
+			*note += tagNote;
 		}
 		return drawn;
 	}
