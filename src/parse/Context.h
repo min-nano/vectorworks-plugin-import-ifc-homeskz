@@ -98,6 +98,13 @@ namespace HomeskzIfcImport::parse
 		// 自由端は柱芯へ寄せるので、この計算は columns（上記）を入力に取る。
 		const std::vector<core::WallCommand>& walls();
 
+		// アンカーボルトの命令（parse/AnchorBolt の buildAnchorBoltCommands）。2 者がこの
+		// 1 回の解析結果を共有する: Document の anchorBolts と、基礎伏図のグラフィック凡例
+		// （**アンカーボルトを 1 本も置かないなら凡例も出さない**という判断だけに使う。
+		// parse/Sheet）。全 IfcMechanicalFastener を辿るので、要素ごとに組み立て直すと
+		// 同じ走査が 2 回走る。
+		const std::vector<core::SymbolCommand>& anchorBolts();
+
 	private:
 		const Model* fModel = nullptr;
 
@@ -110,5 +117,6 @@ namespace HomeskzIfcImport::parse
 		std::optional<std::vector<core::MemberCommand>> fMembers;
 		std::optional<std::vector<core::ColumnCommand>> fColumns;
 		std::optional<std::vector<core::WallCommand>> fWalls;
+		std::optional<std::vector<core::SymbolCommand>> fAnchorBolts;
 	};
 } // namespace HomeskzIfcImport::parse

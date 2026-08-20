@@ -9,6 +9,8 @@
 //	検証項目（ROADMAP.md M13）: 伏図のタイトル（床／小屋／母屋）・切断レベルによる span 柱
 //	レイヤの絞り込み・シートレイヤ番号の連番（基礎伏図 1 →柱梁伏図 2… →母屋伏図）・
 //	基礎の有無による基礎伏図とアンカーボルトの出し分け・母屋伏図を作る階（屋根版のある階）・
+//	**グラフィック凡例**（柱梁伏図・母屋伏図は常に "床伏図凡例"、基礎伏図はアンカーボルトを
+//	置いたときだけ "基礎伏図凡例"）・
 //	**表示レイヤが必ずストーリの作るレイヤに実在すること**（レイヤ名の規約がズレていない）・
 //	並び順に依存しない決定性。実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -17,6 +19,7 @@
 #include "TestFramework.h"
 
 #include "core/Document.h"
+#include "parse/AnchorBolt.h"
 #include "parse/Column.h"
 #include "parse/ColumnMark.h"
 #include "parse/Context.h"
@@ -34,6 +37,7 @@
 
 using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::SheetCommand;
+using HomeskzIfcImport::parse::buildAnchorBoltCommands;
 using HomeskzIfcImport::parse::buildColumnCommands;
 using HomeskzIfcImport::parse::buildFloorFramingSheetCommands;
 using HomeskzIfcImport::parse::buildFoundationSheetCommands;
@@ -48,11 +52,14 @@ using HomeskzIfcImport::parse::ColumnSpan;
 using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::floorPlanTitle;
 using HomeskzIfcImport::parse::hasFoundation;
+using HomeskzIfcImport::parse::kFloorLegendStyle;
 using HomeskzIfcImport::parse::kFloorPlanCutOffset;
 using HomeskzIfcImport::parse::kFloorPlanStartNumber;
+using HomeskzIfcImport::parse::kFoundationLegendStyle;
 using HomeskzIfcImport::parse::kFoundationSheetNumber;
 using HomeskzIfcImport::parse::kFoundationSheetTitle;
 using HomeskzIfcImport::parse::kLayerFoundationAnchor;
+using HomeskzIfcImport::parse::kLegendPosition;
 using HomeskzIfcImport::parse::kMoyaPlanCutOffset;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::moyaPlanTitle;
@@ -323,6 +330,55 @@ TEST(ViewportLayersExistAmongStoryLayers)
 	}
 }
 
+// --- グラフィック凡例（M13） ------------------------------------------------
+
+TEST(FoundationSheetLegendFollowsAnchorBolts)
+{
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		const Model& model = fixture(name, ok);
+		CHECK(ok);
+
+		const std::vector<SheetCommand> sheets = buildFoundationSheetCommands(model);
+		if (sheets.empty())
+			continue;
+
+		// 凡例に並ぶのは基礎伏図に映るシンボル（＝アンカーボルト）なので、**1 本も
+		// 置かない文書では凡例そのものを作らない**（空の箱を図面に残さない）。
+		const bool expected = !buildAnchorBoltCommands(model).empty();
+		CHECK(sheets[0].legend.has_value() == expected);
+		if (expected)
+		{
+			CHECK(sheets[0].legend->style == kFoundationLegendStyle);
+			CHECK(sheets[0].legend->position.x == kLegendPosition.x);
+			CHECK(sheets[0].legend->position.y == kLegendPosition.y);
+		}
+	}
+}
+
+TEST(FloorAndMoyaSheetsAlwaysCarryFloorLegend)
+{
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		const Model& model = fixture(name, ok);
+		CHECK(ok);
+
+		// 柱梁伏図・母屋伏図は**必ず**凡例を載せる（何が並ぶかはスタイルが決めるので、
+		// 解析側では中身の有無を判断できない）。スタイルは基礎伏図とは別のもの。
+		for (const std::vector<SheetCommand>& sheets :
+			 {buildFloorFramingSheetCommands(model), buildMoyaSheetCommands(model)})
+		{
+			for (const SheetCommand& sheet : sheets)
+			{
+				CHECK(sheet.legend.has_value());
+				CHECK(sheet.legend->style == kFloorLegendStyle);
+			}
+		}
+	}
+}
+
 TEST(SheetCommandsAreDeterministic)
 {
 	for (const std::string& name : allFixtures())
@@ -339,6 +395,9 @@ TEST(SheetCommandsAreDeterministic)
 			CHECK(first[i].number == second[i].number);
 			CHECK(first[i].title == second[i].title);
 			CHECK(first[i].viewport.layers == second[i].viewport.layers);
+			CHECK(first[i].legend.has_value() == second[i].legend.has_value());
+			if (first[i].legend.has_value() && second[i].legend.has_value())
+				CHECK(first[i].legend->style == second[i].legend->style);
 		}
 	}
 }

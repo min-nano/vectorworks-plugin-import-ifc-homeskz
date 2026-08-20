@@ -21,6 +21,7 @@
 #include "core/Geometry.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -741,6 +742,41 @@ namespace HomeskzIfcImport::core
 		std::vector<TagCommand> tags;
 	};
 
+	// 伏図のグラフィック凡例 1 つ（VW 標準の "GraphicLegend" PIO）。Python 版 document.py の
+	// LegendCommand（dict）に対応する（ROADMAP.md M13）。**シートレイヤの上**に置く
+	// ——ビューポート注釈ではない（データタグとはそこが違う）。
+	//
+	// 【中身はスタイルが決める】凡例に何を並べるか——ソース定義（どのビューポートの
+	// シンボルを集めるか）・集計基準・行レイアウト・行ラベル——は**PIO のパラメータでは
+	// 設定できない**（ソース定義はボタンのフィールドで、選んだソースを保持する文字列
+	// フィールドがパラメトリックレコードに無いことを Python 版が実オブジェクトの
+	// フィールドダンプで確認済み）。したがってユーザーが VW 側で用意した
+	// **グラフィック凡例スタイル**へ焼き込み、命令はそのスタイル名と置き場所だけを持つ
+	// （構造材の "木質構造材_横架材"・データタグの "断面寸法" と同じプラグインスタイル方式）。
+	//
+	// 【どのシートに載るかは構造で決まる】凡例は SheetCommand の中に住む——タグを
+	// ViewportCommand の中に持たせたのと同じ理由で、「このシートに載せる」という関係を
+	// 番号の突き合わせではなく**入れ子**で表す（Python 版は legend 命令を文書の直下に
+	// 平らに持ち、描画側が legend['number'] == sheet['number'] で突き合わせていた）。
+	//
+	// Python 版キーとの対応:
+	//   style    ← 'style'    … グラフィック凡例スタイル名（基礎伏図＝"基礎伏図凡例"、
+	//                           床伏図・母屋伏図＝"床伏図凡例"）
+	//   position ← 'position' … シートレイヤ上の配置点（用紙座標 mm）
+	//   （'number' は持たない。上記のとおり入れ子で表すため）
+	//
+	// ［Python 版との差異・意図的］載せるシンボルとラベルの一覧（Python 版 'items'）は
+	// 持たない。**描画側が一切使わない**からで（内容はスタイルが決める）、あちらでも
+	// 基礎伏図の意図を記録するためだけに残っていた（床伏図・母屋伏図は空）。使われない枠を
+	// 先に作らない方針（ColumnMarkCommand の 'size' を落としたのと同じ）。**実際に
+	// アンカーボルトを配置したときだけ基礎伏図に凡例を出す**という Python 版の判断は
+	// 解析側（parse/Sheet）に残っているので、空の凡例が図面に出ることはない。
+	struct LegendCommand
+	{
+		std::string style;
+		Vec2 position;
+	};
+
 	// シートレイヤ 1 枚（＋その上のビューポート 1 枚）を生成する命令。Python 版
 	// document.py の SheetCommand（dict）に対応する。draw/Sheet がこれをシートレイヤと
 	// ビューポートへ変換する（ROADMAP.md M13）。
@@ -749,11 +785,17 @@ namespace HomeskzIfcImport::core
 	//   number   ← 'number'   … シートレイヤ番号（**レイヤ名がこれを担う**。"1" / "2" …）
 	//   title    ← 'title'    … シートレイヤのタイトル（"基礎伏図" 等）
 	//   viewport ← 'viewport' … そのシートに載せるビューポート 1 枚
+	//   legend   （Python 版の legend 命令。number で突き合わせていたものを入れ子にした）
+	//            … そのシートレイヤに載せるグラフィック凡例（無い伏図もある）
 	struct SheetCommand
 	{
 		std::string number;
 		std::string title;
 		ViewportCommand viewport;
+
+		// M13 グラフィック凡例。**シートレイヤの上**に 1 つ（LegendCommand の doc コメント
+		// 参照）。凡例を載せない伏図（アンカーボルトを 1 本も置かなかった基礎伏図）では空。
+		std::optional<LegendCommand> legend;
 	};
 
 	// 断面ビューポート（軸組図）の向き。X通り＝定 X の切断面（指示線は Y 方向へ延びる）、

@@ -7,7 +7,8 @@
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
 //	walls / slabs（M9）・wallJoins / 底盤の modifiers＝地中梁（M10）・rafters / roofs（M6）・
 //	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints）・
-//	sheets（M13）・sections（M14）・ビューポート注釈の断面寸法データタグ（M13）の
+//	sheets（M13。シートレイヤ上のグラフィック凡例を含む）・sections（M14）・
+//	ビューポート注釈の断面寸法データタグ（M13）の
 //	各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
 //	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
@@ -200,6 +201,11 @@ namespace HomeskzIfcImport::core
 		// 表示レイヤが 0 枚の伏図は「何も映らないビューポート」なので作らせない。
 		bool isValidSheet(const SheetCommand& sheet)
 		{
+			// グラフィック凡例（M13）を載せるなら、スタイル名が非空であること。凡例の中身は
+			// スタイルが決めるので（core/Document.h の LegendCommand）、スタイル名が空の凡例は
+			// 「何も並ばない空の箱」にしかならない。凡例を載せない伏図（＝空の optional）は妥当。
+			if (sheet.legend.has_value() && sheet.legend->style.empty())
+				return false;
 			return !sheet.number.empty() && !sheet.title.empty() &&
 				   !sheet.viewport.layers.empty() &&
 				   std::ranges::none_of(sheet.viewport.layers,
@@ -306,7 +312,8 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// シート（伏図）: シートレイヤ番号・タイトルが非空で、ビューポートが非空のレイヤ名を
-		// 1 つ以上持つこと（isValidSheet 参照。Python 版 _validate_sheet / _validate_viewport と
+		// 1 つ以上持ち、グラフィック凡例を載せるならそのスタイル名も非空であること
+		// （isValidSheet 参照。Python 版 _validate_sheet / _validate_viewport / _validate_legend と
 		// 同じ関門。ROADMAP.md M13）。
 		if (!std::ranges::all_of(document.sheets, isValidSheet))
 			return false;
