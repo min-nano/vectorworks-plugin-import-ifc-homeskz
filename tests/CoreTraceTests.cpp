@@ -40,7 +40,6 @@ TEST(trace_is_disabled_until_opened)
 {
 	trace::close(); // 直前のケースの状態を持ち越さない
 	CHECK(!trace::isOpen());
-	CHECK(trace::path().empty());
 	// 開いていないときの log は「何もしない」——例外も出さず、どこにも書かない。
 	trace::log("この行はどこへも出ない");
 	CHECK(!trace::isOpen());
@@ -64,7 +63,9 @@ TEST(trace_writes_each_line_immediately)
 	trace::log("描画: 開始");
 	trace::close();
 	CHECK(!trace::isOpen());
-	CHECK(trace::path().empty());
+	// **閉じてもパスは残る**——エラーダイアログが閉じた後に「診断ログはここ」と案内できる
+	// ようにするため（残さないと、案内のためだけに閉じる前のコピーが要る）。
+	CHECK_EQ(trace::path(), path);
 
 	std::string const text = readAll(path);
 	CHECK(text.find("解析: 開始") != std::string::npos);

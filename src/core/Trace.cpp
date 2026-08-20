@@ -97,7 +97,7 @@ namespace HomeskzIfcImport::core::trace
 		State& s = state();
 		if (s.out.is_open())
 			s.out.close();
-		s.path.clear();
+		// **パスは残す**（閉じた後に「診断ログはここ」と案内できるように。Trace.h の path()）。
 	}
 
 	bool envFlag(const char* name)

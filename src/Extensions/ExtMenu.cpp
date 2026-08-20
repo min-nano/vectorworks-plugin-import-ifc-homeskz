@@ -266,10 +266,9 @@ namespace HomeskzIfcImport
 		std::string ReportImportError(const std::string& detail)
 		{
 			core::trace::log("error: " + (detail.empty() ? std::string("(unknown)") : detail));
-			// close() でパスが消えるので、案内に使うぶんを先に控える。
-			const std::string logPath = core::trace::path();
 			core::trace::close();
-			return parse::formatImportError(detail, logPath);
+			// パスは close() の後も残る（core/Trace の path()）ので、そのまま案内に使える。
+			return parse::formatImportError(detail, core::trace::path());
 		}
 	} // namespace
 } // namespace HomeskzIfcImport
