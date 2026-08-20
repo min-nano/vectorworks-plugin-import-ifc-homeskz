@@ -137,6 +137,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/core/Geometry.cpp
 		src/core/Progress.cpp
 		src/core/Region.cpp
+		src/core/Trace.cpp
 		src/parse/BuildDocument.cpp
 		src/parse/Context.cpp
 		src/parse/Step.cpp

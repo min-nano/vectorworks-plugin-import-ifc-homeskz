@@ -7,6 +7,7 @@
 //
 
 #include "core/Progress.h"
+#include "core/Trace.h"
 
 #include <algorithm>
 #include <string>
@@ -41,6 +42,13 @@ namespace HomeskzIfcImport::core
 		fStatus.label = label;
 		fStatus.done = 0;
 		fStatus.total = totalSteps;
+
+		// クラッシュ診断ログへフェーズの区切りを流す（有効でなければ何もしない）。
+		// **トレースの呼び出しを各要素へ撒かないための 1 か所**——解析も描画も
+		// フェーズの見出しはここを通るので、ログの最終行がそのまま「どこで落ちたか」に
+		// なる（core/Trace.h「誰が書くか」）。
+		trace::log(formatProgressText(fStatus));
+
 		onBeginPhase(fStatus, share);
 	}
 

@@ -14,6 +14,8 @@
 // ifc.build_document → vw.execute_document を呼ぶのと同じ立ち位置）。ヘッダは
 // いずれも core::Document までしか参照せず、SDK / STEP を相互に引き込まない。
 #include "parse/BuildDocument.h"
+#include "parse/Summary.h"
+#include "core/Trace.h"
 #include "draw/ExecuteDocument.h"
 #include "draw/ProgressDialog.h"
 
@@ -23,6 +25,8 @@
 #include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
 
 #include <cstddef>
+#include <cstdlib>
+#include <exception>
 #include <string>
 
 using namespace HomeskzIfcImport;
@@ -174,6 +178,103 @@ CImportIfcMenu_EventSink::CImportIfcMenu_EventSink(IVWUnknown* parent) : VWMenu_
 
 CImportIfcMenu_EventSink::~CImportIfcMenu_EventSink() = default;
 
+namespace HomeskzIfcImport
+{
+	namespace
+	{
+		// インポート全体を 1 回の Undo で戻せるようにする（ROADMAP.md M15）。
+		//
+		// 【調査結果】VectorWorks は**外部（プラグイン）の実行 1 回につき undo イベントを
+		// 1 つ自動で作り、外部が終わった時点で自動的に閉じる**（SDK の
+		// Kernel/API/APIBase.Legacy.Defs.h、GS_EndUndoEvent の説明: "The use of this
+		// procedure is not required; VectorWorks will automatically end the event when an
+		// external is completed."）。つまり **メニューコマンド 1 回 ＝ undo イベント 1 つ**で、
+		// こちらから開始・終了を呼ぶ必要は無い——そもそも ISDK に「開始」に当たる呼び出しは
+		// 無く、あるのは EndUndoEvent / NameUndoEvent / SetUndoMethod /
+		// IsCurrentlyBuildingAnUndoEvent 等だけである（ci-debug の sdk-grep で確認）。
+		//
+		// したがって残る仕事は**そのイベントに名前を付けること**で、これで「編集」メニューが
+		// 「取り消し: ホームズ君 IFC 取り込み」と読める（無名だと何が戻るのか分からない）。
+		// イベントが実際に組み立て中のときだけ呼ぶ（そうでなければ名前の宛先が無い）。
+		//
+		// **ローカル確認が要る**: 自動イベントに図形の追加が記録されているか（＝Undo 1 回で
+		// 取り込んだオブジェクトがすべて消えるか）は実機でしか確かめられない。もし戻らなければ、
+		// 次の手は SetUndoMethod(kUndoSwapObjects) を先に呼び、作った各ハンドルを
+		// AddAfterSwapObject へ登録する方式（draw/ObjectHandles を全要素へ広げる必要がある）。
+		void NameImportUndoEvent()
+		{
+			if (gSDK->IsCurrentlyBuildingAnUndoEvent())
+				gSDK->NameUndoEvent(TXString("ホームズ君 IFC 取り込み"));
+		}
+
+		// クラッシュ診断ログを開く（ROADMAP.md M15「core/Trace」）。**dev ビルドでは常に、
+		// stable では環境変数 HOMESKZ_IFC_TRACE があるときだけ**開く——常時ログを吐くのは
+		// 実運用では余計で、しかし不具合を追うときには「落ちた直前のフェーズ」が唯一の
+		// 手掛かりになるので、dev には既定で残す。開けなくても黙って続ける（付随機能）。
+		//
+		// 有効／無効の判断がここにあるのは、**BuildConfig.h（VW_DEV_BUILD）を見られるのが
+		// SDK 側だけ**だから。core/Trace 自身はビルド種別を知らない。
+		void OpenImportTrace(const std::string& ifcPath)
+		{
+#ifndef VW_DEV_BUILD
+			// NOLINTNEXTLINE(concurrency-mt-unsafe): メニューコマンドはメインスレッド 1 本
+			if (std::getenv("HOMESKZ_IFC_TRACE") == nullptr)
+				return;
+#endif
+			if (!core::trace::open(core::trace::defaultLogPath("HomeskzIfcImport.log")))
+				return;
+			core::trace::log("import: " + ifcPath);
+		}
+
+		// インポート本体（ファイル選択の後）。解析 → 描画を通し、完了ダイアログの本文を返す。
+		// 例外はここでは受けず、呼び出し元（DoInterface）が SDK コールバックの境界で 1 か所だけ
+		// 受け止める。進捗ダイアログは RAII なので、途中で例外が出てもデストラクタが閉じる。
+		std::string RunImport(const std::string& ifcPath)
+		{
+			OpenImportTrace(ifcPath);
+
+			// 進捗ダイアログを開く。両フェーズへ**同じ 1 つ**を渡し、解析→描画を通して
+			// 見出しとバーを進める。描画は横架材・垂木を 1 本ずつ SDK で作るため数百回の
+			// 呼び出しになり、これが無いと VectorWorks が固まったように見える
+			// （draw/ProgressDialog.h「なぜ要るか」）。
+			draw::ProgressDialog progress("ホームズ君 IFC インポート", FileNameOf(ifcPath));
+
+			// Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
+			// 読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
+			const core::Document document = parse::buildDocument(ifcPath, progress);
+
+			// Phase 2（SDK 依存）: 命令セットを検証してから各要素を描く。検証を通らなければ
+			// valid=false で何も描かない。途中でキャンセルされたら、その時点までを描いて
+			// cancelled=true で戻る。
+			const draw::DrawCounts drawn = draw::executeDocument(document, progress);
+
+			// 図面が変わった後（＝undo イベントが確実に組み立て中）に名前を付ける。
+			NameImportUndoEvent();
+
+			// 完了ダイアログの前に進捗ダイアログを閉じる（2 枚重ねない）。
+			progress.close();
+
+			// 本文の組み立ては**無 SDK 側**（parse/Summary）が持つ。要素が増えても
+			// ここは変わらない（ROADMAP.md M15「完了文言の集約」）。
+			const std::string body = parse::formatImportResult(document, drawn);
+			core::trace::log("done");
+			core::trace::close();
+			return body;
+		}
+
+		// 例外で中断したときの後始末と本文づくり。診断ログに例外を書き残してから閉じ、
+		// ダイアログ本文（無 SDK 側が組み立てる）にログの場所を添えて返す。
+		std::string ReportImportError(const std::string& detail)
+		{
+			core::trace::log("error: " + (detail.empty() ? std::string("(unknown)") : detail));
+			// close() でパスが消えるので、案内に使うぶんを先に控える。
+			const std::string logPath = core::trace::path();
+			core::trace::close();
+			return parse::formatImportError(detail, logPath);
+		}
+	} // namespace
+} // namespace HomeskzIfcImport
+
 // ---------------------------------------------------------------------------
 // 文書アクティブ時のみ有効化（＝文書が無ければグレーアウト）は menuDef() の
 // Needs = EMenuEnableFlags::DocIsActive で宣言的に行う（上のコメント参照）。
@@ -188,86 +289,41 @@ void CImportIfcMenu_EventSink::DoInterface()
 	// repeatedly. So the command just does its work below, every time it runs.
 
 	// 縦切りの通し処理: ファイルを選ぶ → parse（Phase 1）で IFC を Document へ →
-	// draw（Phase 2）でストーリ・通り芯・床・屋根組を VectorWorks へ描く → 件数を
-	// ダイアログに出す。要素が増えても入口はこの形のまま（各要素の追加は Document と draw 側で行う。
-	// ROADMAP.md）。Python 版 run() が ifc.build_document → vw.execute_document
-	// を呼ぶのと同じ入口で、ここが両フェーズのオーケストレーションを担う。
+	// draw（Phase 2）で VectorWorks へ描く → 件数をダイアログに出す。要素が増えても
+	// 入口はこの形のまま（各要素の追加は Document と draw 側で行う。ROADMAP.md）。
+	// Python 版 run() が ifc.build_document → vw.execute_document を呼ぶのと同じ入口で、
+	// ここが両フェーズのオーケストレーションを担う。
 
 	// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら静かに終える。
 	std::string ifcPath;
 	if (!ChooseIfcFile(ifcPath))
 		return;
 
-	// 2. 進捗ダイアログを開く。両フェーズへ**同じ 1 つ**を渡し、解析→描画を通して
-	//    見出しとバーを進める。描画は横架材・垂木を 1 本ずつ SDK で作るため数百回の
-	//    呼び出しになり、これが無いと VectorWorks が固まったように見える
-	//    （draw/ProgressDialog.h「なぜ要るか」）。
-	draw::ProgressDialog progress("ホームズ君 IFC インポート", FileNameOf(ifcPath));
-
-	// 3. Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
-	//    読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
-	const core::Document document = parse::buildDocument(ifcPath, progress);
-
-	// 4. Phase 2（SDK 依存）: 命令セットを検証してからストーリ・通り芯・床・横架材・柱・
-	//    屋根組（垂木・野地板）・基礎（立上り・底盤）を描く。検証を通らなければ
-	//    valid=false で何も描かない。
-	//    途中でキャンセルされたら、その時点までを描いて cancelled=true で戻る。
-	const draw::DrawCounts drawn = draw::executeDocument(document, progress);
-
-	// 5. 完了ダイアログの前に進捗ダイアログを閉じる（2 枚重ねない）。
-	progress.close();
-
-	// 6. 結果をダイアログ表示。本文には**実際に描けた数**を出し、命令はあるのに描けなかった
-	//    要素は「N 件中 0 件」の形で分かるようにする（配置先レイヤが無い・オブジェクトを
-	//    作れない等の描画側の問題を、ローカル確認で解析側と切り分けられるようにするため）。
-	//    advice 行にファイルパス。false = 最小アラートでなくモーダルにして本文と advice を
-	//    両方見せる（Updater と同じ作法）。TXString は UTF-8 の const char* から暗黙変換される。
-	//
-	// 「描けた数 / 命令数」を "3"（一致）または "0/12"（不一致）の形に整える小ヘルパー。
-	const auto formatCount = [](std::size_t placed, std::size_t commands)
-	{
-		if (placed == commands)
-			return std::to_string(placed);
-		return std::to_string(placed) + "/" + std::to_string(commands);
-	};
-
-	const std::size_t commandCount =
-		document.stories.size() + document.grids.size() + document.floors.size() +
-		document.members.size() + document.columns.size() + document.rafters.size() +
-		document.roofs.size() + document.walls.size() + document.wallJoins.size() +
-		document.slabs.size() + document.anchorBolts.size() + document.floorPosts.size() +
-		document.fireBraces.size() + document.joints.size() + document.columnMarks.size() +
-		document.sheets.size() + document.sections.size();
+	// 2. インポート本体。**例外を SDK コールバックの外へ漏らさない**（CLAUDE.md
+	//    「エラーハンドリング・所有権」）。ネイティブプラグインの未捕捉例外は Python 版と
+	//    違って **VectorWorks 本体を巻き込んで落とす**ので、フェーズ境界であるここで必ず
+	//    受け止め、ユーザーへは 1 通のダイアログとして見せる。1 要素の欠損で全体を止めない
+	//    寛容さ（parse / draw の中で continue する）は従来どおりで、ここへ来るのは
+	//    「そこでも吸収できなかった異常」だけ。
 	std::string body;
-	if (!drawn.valid)
-		body = "命令セットの検証に通らなかったため、何も描きませんでした。";
-	else if (commandCount == 0)
-		body = "ストーリ・通り芯・床・横架材・柱・屋根組・基礎・シンボルが見つかりませんでした。";
-	else
-		body = "ストーリ " + formatCount(drawn.stories, document.stories.size()) + " 層・通り芯 " +
-			   formatCount(drawn.grids, document.grids.size()) + " 本・床 " +
-			   formatCount(drawn.floors, document.floors.size()) + " 枚・横架材 " +
-			   formatCount(drawn.members, document.members.size()) + " 本・柱 " +
-			   formatCount(drawn.columns, document.columns.size()) + " 本・垂木 " +
-			   formatCount(drawn.rafters, document.rafters.size()) + " 本・野地板 " +
-			   formatCount(drawn.roofs, document.roofs.size()) + " 枚・立上り " +
-			   formatCount(drawn.walls, document.walls.size()) + " 本（結合 " +
-			   formatCount(drawn.wallJoins, document.wallJoins.size()) + " 箇所）・底盤 " +
-			   formatCount(drawn.slabs, document.slabs.size()) + " 枚・アンカーボルト " +
-			   formatCount(drawn.anchorBolts, document.anchorBolts.size()) + " 本・床束 " +
-			   formatCount(drawn.floorPosts, document.floorPosts.size()) + " 本・火打 " +
-			   formatCount(drawn.fireBraces, document.fireBraces.size()) + " 本・仕口 " +
-			   formatCount(drawn.joints, document.joints.size()) + " か所・柱記号 " +
-			   formatCount(drawn.columnMarks, document.columnMarks.size()) + " 個・伏図 " +
-			   formatCount(drawn.sheets, document.sheets.size()) + " 枚・軸組図 " +
-			   formatCount(drawn.sections, document.sections.size()) + " 枚を描きました。";
-	// 中止されたときは件数が命令数に届かないのが正常なので、そう明示する（「描けなかった」
-	// と読み違えないように）。描けたところまでは図面に残っている。
-	if (drawn.cancelled)
-		body += "\n（キャンセルされたため、途中で中断しました。）";
-	// 描画側で異常があれば本文へ足す（横架材の断面が入らない等。draw/Member 参照）。
-	if (!drawn.diagnostics.empty())
-		body += "\n" + drawn.diagnostics;
+	try
+	{
+		body = RunImport(ifcPath);
+	}
+	catch (const std::exception& error)
+	{
+		body = ReportImportError(error.what());
+	}
+	catch (...)
+	{
+		// std::exception ですらないもの（サードパーティや処理系が投げるもの）。
+		// 何が起きたかは分からないが、**それでも VW を落とさない**ことが最優先。
+		body = ReportImportError("");
+	}
+
+	// 3. 結果をダイアログ表示。advice 行にファイルパス。false = 最小アラートでなくモーダルに
+	//    して本文と advice を両方見せる（Updater と同じ作法）。TXString は UTF-8 の
+	//    const char* から暗黙変換される。
 	gSDK->AlertInform(body.c_str(), ifcPath.c_str(),
 					  false /* not a minor alert: show a modal dialog */);
 }

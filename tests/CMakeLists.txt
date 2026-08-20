@@ -106,6 +106,13 @@ target_link_libraries(CoreDocumentTests PRIVATE HomeskzIfcCore)
 vw_add_test(CoreProgressTests CoreProgressTests.cpp)
 target_link_libraries(CoreProgressTests PRIVATE HomeskzIfcCore)
 
+# Crash-diagnosis log (src/core/Trace): enable/disable, per-line flushing (a crash
+# must not eat the last line), truncate-on-reopen, a non-fatal open failure, the
+# default temp-dir path, and the one place phases reach the log (core/Progress's
+# beginPhase). SDK-free, writes into the temp dir and removes what it wrote.
+vw_add_test(CoreTraceTests CoreTraceTests.cpp)
+target_link_libraries(CoreTraceTests PRIVATE HomeskzIfcCore)
+
 # Minimal STEP reader (src/parse/Step): tokeniser + entity graph exercised on
 # small synthetic STEP snippets (references, numbers, strings, enums, nested
 # lists, typed values, referrers/resolve, determinism). SDK-free.
