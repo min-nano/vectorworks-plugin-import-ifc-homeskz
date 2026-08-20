@@ -180,6 +180,9 @@ src/
     Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）
     Tag.{h,cpp}             ビューポート注釈の断面寸法データタグ（旧 vw/sheet.py の draw_tag）。
                             伏図・軸組図が共有する唯一の実装（振り分けは parse/Tag 済み）
+    Legend.{h,cpp}          伏図のグラフィック凡例（旧 vw/sheet.py の draw_legend）。
+                            ビューポート注釈ではなく**シートレイヤ（用紙）**に置く。
+                            凡例に並ぶ中身は VW 側のグラフィック凡例スタイルが決める
     Section.{h,cpp}         section 命令 → 断面ビューポート（旧 vw/section.py）。**Python 版と
                             違い ISDK::CreateSectionViewport で新規作成する**（既製 40 枚の
                             流用はしない。ROADMAP.md M14 の【決定】）。断面の範囲（奥行きだけ
@@ -221,7 +224,10 @@ tests/
 縮尺・図番／図面タイトル・更新——伏図と軸組図が共有する唯一の実装）も `draw/DrawUtil`、
 **断面寸法データタグ**（スタイル名は `parse/Tag` の `kTagStyle`、断面の注釈空間への投影は
 同じく `parse/Tag` の `sectionAnnotationPoint`、`Data Tag` PIO の登録名・引出線パラメータと
-配置手順は `draw/Tag`——伏図と軸組図が共有する唯一の実装）、
+配置手順は `draw/Tag`——伏図と軸組図が共有する唯一の実装）、**グラフィック凡例**
+（スタイル名と配置点は `parse/Sheet` の `kFoundationLegendStyle` / `kFloorLegendStyle` /
+`kLegendPosition`、`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗りと配置手順は
+`draw/Legend`）、
 構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
 実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名は

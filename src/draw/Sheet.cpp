@@ -7,6 +7,13 @@
 //	ビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse ライブラリには入れない
 //	（CLAUDE.md「依存の向きは厳守する」）。
 //
+//	【シートレイヤに載るのはビューポートだけではない】伏図には**グラフィック凡例**
+//	（VW 標準の "GraphicLegend" PIO）も 1 つ載る（M13）。凡例はビューポート注釈では
+//	なくシートレイヤ（＝用紙）へ直接置くので、置き方は draw/Legend が持つ。ここは
+//	ビューポートを仕上げた後にそれを呼び、**全シートを置き終えてからスタイルごとの
+//	反映**（updateLegendStyles）をまとめて 1 回行う（draw/Legend.h「スタイルは当てる
+//	だけでは効かない」）。
+//
 //	【シートレイヤとビューポートの手当ては draw/DrawUtil が持つ】シートレイヤの用意
 //	（PrepareSheetLayer）・表示レイヤの絞り込み・クラス表示・縮尺・図面タイトル/図番・更新
 //	（ConfigureViewport）は、軸組図（draw/Section。M14）と**逐語的に同じ**手順なので
@@ -28,6 +35,7 @@
 #include "PluginPrefix.h"
 #include "draw/Sheet.h"
 #include "draw/DrawUtil.h"
+#include "draw/Legend.h"
 #include "draw/Tag.h"
 #include "core/Document.h"
 #include "core/Progress.h"
@@ -71,6 +79,13 @@ namespace HomeskzIfcImport::draw
 								{ return !sheet.viewport.tags.empty(); }))
 			prepareDataTagPlugin();
 
+		// M13 グラフィック凡例。タグと同じ理由で PIO の定義を先に用意する（凡例を載せる
+		// 伏図が 1 枚も無ければ定義そのものを作らない。draw/Legend.h）。
+		LegendCounts legends;
+		if (std::ranges::any_of(commands, [](const core::SheetCommand& sheet)
+								{ return sheet.legend.has_value(); }))
+			prepareGraphicLegendPlugin();
+
 		for (const core::SheetCommand& command : commands)
 		{
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は枚数で報告し、
@@ -101,8 +116,19 @@ namespace HomeskzIfcImport::draw
 			// 最後が更新で、注釈はその後に足しても図に出る。Python 版 execute_sheets も
 			// ビューポートを作り終えてからタグを置く）。
 			drawViewportTags(viewport, command.viewport, members, tags);
+
+			// グラフィック凡例は**ビューポートではなくシートレイヤ**に載せる（用紙の上）。
+			// タグの後に置くのは、凡例がカレントレイヤをこのシートレイヤへ移すため——
+			// タグは生成したカレントレイヤに一旦入ってから注釈へ移るので、順序を逆にすると
+			// タグがシートレイヤを経由することになる（結果は同じだが、経路は素直な方がよい）。
+			if (command.legend.has_value())
+				drawSheetLegend(sheetLayer, *command.legend, legends);
 			++drawn;
 		}
+
+		// 凡例の中身（スタイルのソースから集めたセル）を流し込む。**全部置いてから
+		// スタイルごとに 1 回**（draw/Legend.h「スタイルは当てるだけでは効かない」）。
+		updateLegendStyles(legends);
 
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
@@ -125,14 +151,17 @@ namespace HomeskzIfcImport::draw
 			*note = std::move(text);
 		}
 
-		// タグの診断は伏図の診断とは別行にする（原因が別物なので混ぜない）。
-		const std::string tagNote = tagDiagnostics("伏図", tags);
-		if (note != nullptr && !tagNote.empty())
+		// タグ・凡例の診断は伏図の診断とは別行にする（原因が別物なので混ぜない）。
+		const auto addNote = [note](const std::string& text)
 		{
+			if (note == nullptr || text.empty())
+				return;
 			if (!note->empty())
 				*note += "\n";
-			*note += tagNote;
-		}
+			*note += text;
+		};
+		addNote(tagDiagnostics("伏図", tags));
+		addNote(legendDiagnostics(legends));
 		return drawn;
 	}
 } // namespace HomeskzIfcImport::draw

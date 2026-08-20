@@ -135,7 +135,9 @@ namespace HomeskzIfcImport::parse
 		// **仕口だけは横架材・柱の命令から導出する**ので、上の members / columns が確定した
 		// 後に置く（Python 版 build_document と同じ順序）。仕口が見る横架材は登り梁の屋根
 		// スナップ**後**——受ける材との取り合いは補正後の位置で決まる。
-		document.anchorBolts = buildAnchorBoltCommands(context);
+		// アンカーボルトはコンテキストが 1 回だけ組み立てる（伏図のグラフィック凡例が
+		// 「1 本でも置いたか」を見るため。parse/Sheet）。
+		document.anchorBolts = context.anchorBolts();
 		progress.step();
 		document.floorPosts = buildFloorPostCommands(context);
 		progress.step();

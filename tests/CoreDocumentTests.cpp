@@ -1005,8 +1005,8 @@ TEST(validate_accepts_symbol_with_any_angle)
 // シート（伏図。ROADMAP.md M13）
 //
 // 関門は「シートレイヤ番号（＝レイヤ名）とタイトルが非空」「ビューポートが非空のレイヤ名を
-// 1 つ以上持つ」の 2 つ。図面タイトル・図番は空でも描ける（ラベルが空になるだけ）ので
-// 弾かない。
+// 1 つ以上持つ」「グラフィック凡例を載せるならそのスタイル名が非空」の 3 つ。図面タイトル・
+// 図番は空でも描ける（ラベルが空になるだけ）ので弾かない。
 // ---------------------------------------------------------------------------
 
 namespace
@@ -1075,6 +1075,39 @@ TEST(validate_accepts_sheet_without_drawing_label)
 	sheet.viewport.drawingNumber.clear();
 	document.sheets.push_back(sheet);
 	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_accepts_sheet_with_legend)
+{
+	// グラフィック凡例（M13）はスタイル名さえ非空なら妥当。中身（並ぶシンボル）は VW 側の
+	// スタイルが決めるので、命令には現れない（core/Document.h の LegendCommand）。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	core::LegendCommand legend;
+	legend.style = "床伏図凡例";
+	sheet.legend = legend;
+	document.sheets.push_back(sheet);
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_accepts_sheet_without_legend)
+{
+	// 凡例を載せない伏図（アンカーボルトを 1 本も置かなかった基礎伏図）も妥当。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	CHECK(!sheet.legend.has_value());
+	document.sheets.push_back(sheet);
+	CHECK(core::validateDocument(document));
+}
+
+TEST(validate_rejects_sheet_with_legend_without_style)
+{
+	// スタイル名が空の凡例は「何も並ばない空の箱」にしかならないので弾く。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	sheet.legend = core::LegendCommand{};
+	document.sheets.push_back(sheet);
+	CHECK(!core::validateDocument(document));
 }
 
 // ---------------------------------------------------------------------------

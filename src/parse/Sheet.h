@@ -32,6 +32,16 @@
 //	出ることはない。レイヤ名の規約も「直下」の選び方も持つのは parse/ColumnMark 側で、
 //	ここはそれを呼ぶだけにしてある（名前の組み立てを 2 か所へ散らさない）。
 //
+//	【グラフィック凡例も同じ理由でここが決める】伏図のシートレイヤには、その図に出る
+//	シンボルの凡例（VW 標準の "GraphicLegend" PIO）を 1 つ載せる（M13）。**何が並ぶかは
+//	VW 側のグラフィック凡例スタイルが決める**ので（core/Document.h の LegendCommand）、
+//	ここが決めるのは「どの伏図にどのスタイルの凡例を載せるか」だけになる:
+//	  * 基礎伏図 … "基礎伏図凡例"。**アンカーボルトを 1 本でも置いたときだけ**
+//	    （置かなければ凡例に並ぶものが無く、空の箱が図面に残る）。
+//	  * 柱梁伏図・母屋伏図 … "床伏図凡例"（常に載せる）。
+//	凡例は SheetCommand の中に入れ子で持つので、Python 版のように番号で突き合わせる
+//	必要が無い（タグを ViewportCommand の中に持たせたのと同じ考え方）。
+//
 //	［Python 版との差異・意図的］
 //	  * **母屋伏図を作る条件は「屋根版を持つ階」だけ**（Python 版は `is_top or roof_flags[i]`）。
 //	    本移植は屋根版のある階にしか垂木・野地板レベルを作らないので（parse/Story）、屋根版の
@@ -96,19 +106,40 @@ namespace HomeskzIfcImport::parse
 	// 返す（Python 版 _span_layers_at_cut）。spans は parse/Column の collectColumnSpans。
 	std::vector<std::string> spanLayersAtCut(const std::vector<ColumnSpan>& spans, double cut);
 
+	// グラフィック凡例スタイル名（Python 版 FOUNDATION_LEGEND_STYLE / FLOOR_LEGEND_STYLE）。
+	// **ユーザーが VW 側で用意したスタイル**の名前で、凡例に並べるシンボル・ラベル・
+	// ソース定義（どのビューポートのシンボルを集めるか）はそのスタイルが持つ
+	// （core/Document.h の LegendCommand）。名前が一致しないとスタイルが当たらず、
+	// 空の凡例になる。
+	inline constexpr const char* kFoundationLegendStyle = "基礎伏図凡例";
+	inline constexpr const char* kFloorLegendStyle = "床伏図凡例";
+
+	// 凡例のシートレイヤ上の配置点（用紙座標 mm。Python 版 FOUNDATION_LEGEND_POSITION /
+	// FLOOR_LEGEND_POSITION と同じく原点）。**ビューポートと重ならない位置はローカルの
+	// VectorWorks で最終調整する**——ビューポートの実寸は描いてみるまで分からないので、
+	// 解析側では決められない（ROADMAP.md M13）。
+	inline constexpr core::Vec2 kLegendPosition{0.0, 0.0};
+
 	// 基礎伏図の sheet 命令（無ければ空）。基礎要素が 1 つも無ければ空を返す——表示すべき
 	// "F-底盤" ほかのレイヤが生成されず、ビューポートが空になるため（Python 版
 	// build_foundation_sheet_commands）。
+	//
+	// グラフィック凡例（"基礎伏図凡例"）は**アンカーボルトを 1 本でも置いたときだけ**
+	// 載せる（Python 版 build_legend_commands の判断。凡例に並ぶものが無ければ空の箱が
+	// 残るため）。
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(const Model& model);
 
-	// 各階の柱梁伏図の sheet 命令（ストーリが無ければ空）。Python 版
-	// build_floor_framing_sheet_commands。
+	// 各階の柱梁伏図の sheet 命令（ストーリが無ければ空）。グラフィック凡例
+	// （"床伏図凡例"）を各シートに 1 つ載せる。Python 版
+	// build_floor_framing_sheet_commands ＋ build_floor_legend_commands。
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(const Model& model);
 
 	// 屋根版を持つ階ごとの母屋伏図の sheet 命令（無ければ空）。番号は柱梁伏図の最後に
-	// 続けて Elevation 昇順（最下階→最上階）に振る（Python 版 build_moya_sheet_commands）。
+	// 続けて Elevation 昇順（最下階→最上階）に振る。柱梁伏図と同じくグラフィック凡例
+	// （"床伏図凡例"）を 1 つ載せる（Python 版 build_moya_sheet_commands ＋
+	// build_floor_legend_commands）。
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(const Model& model);
 

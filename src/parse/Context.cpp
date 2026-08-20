@@ -7,6 +7,7 @@
 //
 
 #include "parse/Context.h"
+#include "parse/AnchorBolt.h"
 
 #include <utility>
 #include <vector>
@@ -98,5 +99,12 @@ namespace HomeskzIfcImport::parse
 		if (!fWalls.has_value())
 			fWalls = buildWallCommands(*this, columns());
 		return *fWalls;
+	}
+
+	const std::vector<core::SymbolCommand>& Context::anchorBolts()
+	{
+		if (!fAnchorBolts.has_value())
+			fAnchorBolts = buildAnchorBoltCommands(*this);
+		return *fAnchorBolts;
 	}
 } // namespace HomeskzIfcImport::parse
