@@ -137,6 +137,56 @@ namespace
 		document.columns.resize(2);
 		return document;
 	}
+
+	// 全要素に 1 件ずつ入れた命令セット。**要素表（Summary.cpp の kElements）を端から端まで
+	// 通す**ために使う——要素を足したときに表へ書き忘れると、下の 2 つのケースが落ちる。
+	Document fullDocument()
+	{
+		Document document;
+		document.stories.resize(1);
+		document.grids.resize(1);
+		document.walls.resize(1);
+		document.wallJoins.resize(1);
+		document.slabs.resize(1);
+		document.floors.resize(1);
+		document.members.resize(1);
+		document.columns.resize(1);
+		document.rafters.resize(1);
+		document.roofs.resize(1);
+		document.anchorBolts.resize(1);
+		document.floorPosts.resize(1);
+		document.fireBraces.resize(1);
+		document.joints.resize(1);
+		document.columnMarks.resize(1);
+		document.sheets.resize(1);
+		document.sections.resize(1);
+		return document;
+	}
+
+	// fullDocument をすべて描けた場合の件数。
+	DrawCounts fullCounts()
+	{
+		DrawCounts counts;
+		counts.valid = true;
+		counts.stories = 1;
+		counts.grids = 1;
+		counts.walls = 1;
+		counts.wallJoins = 1;
+		counts.slabs = 1;
+		counts.floors = 1;
+		counts.members = 1;
+		counts.columns = 1;
+		counts.rafters = 1;
+		counts.roofs = 1;
+		counts.anchorBolts = 1;
+		counts.floorPosts = 1;
+		counts.fireBraces = 1;
+		counts.joints = 1;
+		counts.columnMarks = 1;
+		counts.sheets = 1;
+		counts.sections = 1;
+		return counts;
+	}
 } // namespace
 
 TEST(format_import_result_lists_only_elements_with_commands)
@@ -213,27 +263,48 @@ TEST(document_command_count_sums_every_element_list)
 {
 	// **要素を足したときに数え漏らさない**ための番人。Document の各リストに 1 件ずつ
 	// 入れたら、総数はリストの数と一致しなければならない（kElements の網羅性を固定する）。
-	Document document;
-	document.stories.resize(1);
-	document.grids.resize(1);
-	document.walls.resize(1);
-	document.wallJoins.resize(1);
-	document.slabs.resize(1);
-	document.floors.resize(1);
-	document.members.resize(1);
-	document.columns.resize(1);
-	document.rafters.resize(1);
-	document.roofs.resize(1);
-	document.anchorBolts.resize(1);
-	document.floorPosts.resize(1);
-	document.fireBraces.resize(1);
-	document.joints.resize(1);
-	document.columnMarks.resize(1);
-	document.sheets.resize(1);
-	document.sections.resize(1);
-
-	CHECK_EQ(documentCommandCount(document), static_cast<std::size_t>(17));
+	CHECK_EQ(documentCommandCount(fullDocument()), static_cast<std::size_t>(17));
 	CHECK_EQ(documentCommandCount(Document{}), static_cast<std::size_t>(0));
+}
+
+TEST(format_import_result_covers_every_element)
+{
+	// 表（kElements）の**全行**を通し、表示名と助数詞をここで固定する。要素を足したときに
+	// 表へ書き忘れれば上の総数のケースが、ラベルや助数詞を取り違えればこのケースが落ちる。
+	std::string const text = formatImportResult(fullDocument(), fullCounts());
+
+	CHECK(text.find("ストーリ: 1 層") != std::string::npos);
+	CHECK(text.find("通り芯: 1 本") != std::string::npos);
+	CHECK(text.find("立上り: 1 本") != std::string::npos);
+	CHECK(text.find("壁結合: 1 箇所") != std::string::npos);
+	CHECK(text.find("底盤: 1 枚") != std::string::npos);
+	CHECK(text.find("床: 1 枚") != std::string::npos);
+	CHECK(text.find("横架材: 1 本") != std::string::npos);
+	CHECK(text.find("柱: 1 本") != std::string::npos);
+	CHECK(text.find("垂木: 1 本") != std::string::npos);
+	CHECK(text.find("野地板: 1 枚") != std::string::npos);
+	CHECK(text.find("アンカーボルト: 1 本") != std::string::npos);
+	CHECK(text.find("床束: 1 本") != std::string::npos);
+	CHECK(text.find("火打: 1 本") != std::string::npos);
+	CHECK(text.find("仕口: 1 箇所") != std::string::npos);
+	CHECK(text.find("柱記号: 1 個") != std::string::npos);
+	CHECK(text.find("伏図: 1 枚") != std::string::npos);
+	CHECK(text.find("軸組図: 1 枚") != std::string::npos);
+	// 並びは draw/ExecuteDocument のディスパッチ順（ストーリが先頭・軸組図が末尾）。
+	CHECK(text.find("ストーリ: 1 層") < text.find("軸組図: 1 枚"));
+}
+
+TEST(format_import_result_shortfall_for_every_element)
+{
+	// どの要素でも「描けた数/命令数」で出せること（描画側の取りこぼしを要素によらず
+	// 同じ形で見せる）。全要素の命令はあるが 1 つも描けなかった、という極端な形で通す。
+	DrawCounts counts; // 件数はすべて 0 のまま
+	counts.valid = true;
+	std::string const text = formatImportResult(fullDocument(), counts);
+
+	CHECK(text.find("ストーリ: 0/1 層") != std::string::npos);
+	CHECK(text.find("軸組図: 0/1 枚") != std::string::npos);
+	CHECK(text.find("アンカーボルト: 0/1 本") != std::string::npos);
 }
 
 TEST(format_import_error_includes_detail)
