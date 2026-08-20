@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include "core/Document.h"
+#include "parse/BuildDocument.h"
 #include "parse/Loader.h"
 
 #include <cmath>
@@ -84,6 +86,40 @@ namespace HomeskzIfcTests
 		}
 		ok = it->second.second;
 		return it->second.first;
+	}
+
+	// フィクスチャ 1 件を **解析し切った** 命令セット（parse::buildDocument の結果）。
+	//
+	// 【1 プロセス 1 回だけ組み立てる】上の fixture() と同じ理由。buildDocument は
+	// 読み込み（loadIfc）と全要素の解析を通しで行うので、実 IFC 1 件で最も重い呼び出しに
+	// なる。「全フィクスチャに対して回す」ケースが 1 つの実行ファイルに 2 つあれば、それだけで
+	// 素の 2 倍の時間がかかる（実際 ParseTagTests がそうなっていた）。同じファイルからは
+	// 毎回まったく同じ Document ができる以上、組み直しは純粋な待ち時間でしかない。
+	//
+	// **fixture() のキャッシュとは別に持つ**——buildDocument はパスを取って自分で読むので、
+	// Model のキャッシュは通らない（読み込みぶんもここで 1 回に畳まれる）。
+	//
+	// 戻り値が **const 参照**なのも fixture() と同じ理由（コピーを返すと畳んだ意味が薄れる）。
+	// 命令セットを書き換えるテスト（べき等性の確認など）は、この参照から自分のコピーを
+	// 作って使う——共有しているのは読み取り専用の原本、という約束にする。
+	// 引数の値渡し string_view も fixture() と同じ（GCC の -Wdangling-reference 対策）。
+	inline const HomeskzIfcImport::core::Document& fixtureDocument(std::string_view filename)
+	{
+		// map はイテレータ・参照が無効化されないので、後から別のフィクスチャを組み立てても、
+		// 先に返した参照はそのまま生きている。std::less<> は string_view のまま引ける。
+		static std::map<std::string, HomeskzIfcImport::core::Document, std::less<>> cache;
+
+		auto it = cache.find(filename);
+		if (it == cache.end())
+		{
+			// 読み込みに失敗しても buildDocument は空の Document を返す（例外を漏らさない）
+			// ので、成否は呼び出し側が中身で確かめる。失敗もそのままキャッシュしてよい。
+			it = cache
+					 .emplace(std::string(filename),
+							  HomeskzIfcImport::parse::buildDocument(fixturePath(filename)))
+					 .first;
+		}
+		return it->second;
 	}
 
 	// 検証済みのホームズ君 EX 実 IFC 一式（tests/fixtures/README.md）。**この一覧が唯一の
