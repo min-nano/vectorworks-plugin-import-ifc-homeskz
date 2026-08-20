@@ -236,7 +236,8 @@ tests/
 `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`）は `core/Document`、
 進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
-（整形と配分の計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較は `tests/Fixtures.h`、
+（整形と配分の計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較・**実 IFC の読み込みと命令セットの組み立てを
+1 プロセス 1 回に畳むキャッシュ**（`fixture` / `fixtureDocument`）は `tests/Fixtures.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
 
 **依存の向きは厳守する:** `parse/` と `core/` は VectorWorks SDK を include しない。

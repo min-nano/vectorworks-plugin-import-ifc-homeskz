@@ -18,7 +18,6 @@
 #include "TestFramework.h"
 
 #include "core/Document.h"
-#include "parse/BuildDocument.h"
 #include "parse/Tag.h"
 
 #include <cmath>
@@ -44,6 +43,7 @@ using HomeskzIfcImport::parse::tagAngle;
 using HomeskzIfcImport::parse::tagOffsetSide;
 using HomeskzIfcImport::parse::upwardNormal;
 using HomeskzIfcTests::allFixtures;
+using HomeskzIfcTests::fixtureDocument;
 using HomeskzIfcTests::near;
 
 namespace
@@ -268,7 +268,9 @@ TEST(AttachedTagsAreValidOnRealFixtures)
 	std::size_t withSectionTags = 0;
 	for (const std::string& name : allFixtures())
 	{
-		const Document document = parse::buildDocument(HomeskzIfcTests::fixturePath(name));
+		// 命令セットは 1 プロセス 1 回だけ組み立てて共有する（tests/Fixtures.h の
+		// fixtureDocument）。ここは読むだけなので参照のまま使える。
+		const Document& document = fixtureDocument(name);
 		CHECK(core::validateDocument(document));
 
 		for (const auto& sheet : document.sheets)
@@ -307,7 +309,9 @@ TEST(TagCommandsAreDeterministic)
 	// 同じ入力から 2 度割り当てても同じ並び・同じ値（CLAUDE.md「決定性を守る」）。
 	for (const std::string& name : allFixtures())
 	{
-		Document a = parse::buildDocument(HomeskzIfcTests::fixturePath(name));
+		// 原本は共有のキャッシュ（fixtureDocument）から借り、**書き換えるほうだけ**自分の
+		// コピーにする。原本を書き換えると同じフィクスチャを見る他のケースに漏れる。
+		const Document& a = fixtureDocument(name);
 		Document b = a;
 		// もう一度割り当てても結果が変わらない（べき等かつ決定的）。
 		attachTagCommands(b);

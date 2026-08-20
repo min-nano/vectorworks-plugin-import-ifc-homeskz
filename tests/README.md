@@ -50,6 +50,12 @@
   受け取る側は `const Model& model = fixture(…)` と**参照で**受けます（値で受けると
   コピーの分だけ元に戻ってしまいます）。共有して問題ないのは、`parse/` の解析関数が
   どれも `const Model&` しか取らない——誰も `Model` を書き換えない——からです。
+  同じ理由で、**解析し切った命令セット**も `fixtureDocument` が 1 回だけ組み立てて
+  `const core::Document&` で配ります。`parse::buildDocument` は読み込みから全要素の解析まで
+  通しで行う最も重い呼び出しなので、「全フィクスチャに対して回す」ケースが 1 つの実行
+  ファイルに 2 つあるだけで素の 2 倍の時間になります（実際 `ParseTagTests` がそうでした）。
+  命令セットを**書き換える**テスト（べき等性の確認など）は、この参照から自分のコピーを
+  作って使います——共有しているのは読み取り専用の原本、という約束です。
 - `tests/RoofSample.h` … 試験用の片流れ屋根面（`shedPlane`）と、それに対応する最小の
   屋根版 IFC（`minimalRoofText`）。垂木・野地板・勾配座標系は**同じ屋根面**に対する
   期待値でなければ意味がないので、`ParseRafterTests` / `ParseRoofTests` / `GeometryTests`
