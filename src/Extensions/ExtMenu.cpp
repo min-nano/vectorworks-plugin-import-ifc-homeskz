@@ -181,25 +181,33 @@ namespace HomeskzIfcImport
 {
 	namespace
 	{
-		// インポート全体を 1 回の Undo で戻せるようにする（ROADMAP.md M15）。
+		// undo イベントの状態を診断ログへ 1 行残す（ROADMAP.md M15「Undo の一括化」）。
 		//
-		// 【調査結果】VectorWorks は**外部（プラグイン）の実行 1 回につき undo イベントを
-		// 1 つ自動で作り、外部が終わった時点で自動的に閉じる**（SDK の
-		// Kernel/API/APIBase.Legacy.Defs.h、GS_EndUndoEvent の説明: "The use of this
-		// procedure is not required; VectorWorks will automatically end the event when an
-		// external is completed."）。つまり **メニューコマンド 1 回 ＝ undo イベント 1 つ**で、
-		// こちらから開始・終了を呼ぶ必要は無い——そもそも ISDK に「開始」に当たる呼び出しは
-		// 無く、あるのは EndUndoEvent / NameUndoEvent / SetUndoMethod /
-		// IsCurrentlyBuildingAnUndoEvent 等だけである（ci-debug の sdk-grep で確認）。
+		// 【いま分かっていること】SDK の説明では VectorWorks は**外部（プラグイン）の実行
+		// 1 回につき undo イベントを 1 つ自動で作り、外部の終了時に閉じる**
+		// （Kernel/API/APIBase.Legacy.Defs.h、GS_EndUndoEvent: "The use of this procedure is
+		// not required; VectorWorks will automatically end the event when an external is
+		// completed."）。ISDK に「開始」に当たる呼び出しは無い（ci-debug の sdk-grep）。
+		// ところが**実機では取り込みの後に「取り消しできる処理がありません」**と出る——
+		// つまり undo テーブルが空で、名前を付ける相手すら居ない。
 		//
-		// したがって残る仕事は**そのイベントに名前を付けること**で、これで「編集」メニューが
-		// 「取り消し: ホームズ君 IFC 取り込み」と読める（無名だと何が戻るのか分からない）。
-		// イベントが実際に組み立て中のときだけ呼ぶ（そうでなければ名前の宛先が無い）。
+		// 疑っているのは「本プラグインが undo の効かない操作をしている」こと。ISDK には
+		// ClearUndoTableDueToUnsupportedAction() があり、**undo で戻せない操作をしたら
+		// テーブルごと捨てる**のが VW の作法である。取り込みはデザインレイヤ・ストーリ・
+		// クラス・シートレイヤ・ビューポートを作る（＝図形ではなく文書の構造をいじる）ので、
+		// どこかでテーブルが捨てられていておかしくない。
 		//
-		// **ローカル確認が要る**: 自動イベントに図形の追加が記録されているか（＝Undo 1 回で
-		// 取り込んだオブジェクトがすべて消えるか）は実機でしか確かめられない。もし戻らなければ、
-		// 次の手は SetUndoMethod(kUndoSwapObjects) を先に呼び、作った各ハンドルを
-		// AddAfterSwapObject へ登録する方式（draw/ObjectHandles を全要素へ広げる必要がある）。
+		// **どこで消えるかは実機でしか分からない**ので、解析の前後・描画の後の 3 点で
+		// 状態を診断ログへ落とす。start=yes → afterDraw=no なら描画のどこかで捨てられており、
+		// start=no なら最初からイベントが無い（自動生成されていない）と分かる。
+		void LogUndoState(const char* when)
+		{
+			core::trace::log(std::string("undo: ") + when + " building=" +
+							 (gSDK->IsCurrentlyBuildingAnUndoEvent() ? "yes" : "no"));
+		}
+
+		// 組み立て中の undo イベントがあれば名前を付ける（「編集」メニューが
+		// 「取り消し: ホームズ君 IFC 取り込み」と読めるように）。イベントが無ければ何もしない。
 		void NameImportUndoEvent()
 		{
 			if (gSDK->IsCurrentlyBuildingAnUndoEvent())
@@ -231,6 +239,7 @@ namespace HomeskzIfcImport
 		std::string RunImport(const std::string& ifcPath)
 		{
 			OpenImportTrace(ifcPath);
+			LogUndoState("start");
 
 			// 進捗ダイアログを開く。両フェーズへ**同じ 1 つ**を渡し、解析→描画を通して
 			// 見出しとバーを進める。描画は横架材・垂木を 1 本ずつ SDK で作るため数百回の
@@ -241,13 +250,15 @@ namespace HomeskzIfcImport
 			// Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
 			// 読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
 			const core::Document document = parse::buildDocument(ifcPath, progress);
+			LogUndoState("afterParse");
 
 			// Phase 2（SDK 依存）: 命令セットを検証してから各要素を描く。検証を通らなければ
 			// valid=false で何も描かない。途中でキャンセルされたら、その時点までを描いて
 			// cancelled=true で戻る。
 			const draw::DrawCounts drawn = draw::executeDocument(document, progress);
+			LogUndoState("afterDraw");
 
-			// 図面が変わった後（＝undo イベントが確実に組み立て中）に名前を付ける。
+			// 図面が変わった後に名前を付ける（イベントが残っていれば）。
 			NameImportUndoEvent();
 
 			// 完了ダイアログの前に進捗ダイアログを閉じる（2 枚重ねない）。
@@ -255,7 +266,10 @@ namespace HomeskzIfcImport
 
 			// 本文の組み立ては**無 SDK 側**（parse/Summary）が持つ。要素が増えても
 			// ここは変わらない（ROADMAP.md M15「完了文言の集約」）。
-			const std::string body = parse::formatImportResult(document, drawn);
+			// 診断ログが有効ならその場所も本文へ載せる（一時ディレクトリは macOS では
+			// /var/folders/… という当てられない場所なので、毎回ここで案内する）。
+			const std::string body =
+				parse::formatImportResult(document, drawn, core::trace::path());
 			core::trace::log("done");
 			core::trace::close();
 			return body;

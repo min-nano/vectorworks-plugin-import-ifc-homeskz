@@ -39,7 +39,7 @@ ISDK には VS の一部（3D 変換状態・屋根作成の一連・レイヤ�
 意図的な差かの判断は人間に戻る**ため、費用対効果が合わない。移植ズレは Python 版の該当節・
 実装・テストを読んで**手書き期待値へ写す**ことで防ぐ。
 
-進捗記号: ⬜ 未着手 / 🟨 進行中（コード実装済み・ローカル目視確認待ち） / ✅ 完了
+進捗記号: ⬜ 未着手 / 🟨 進行中（コード実装済み・ローカル目視確認待ち） / 🟥 ローカル確認で不合格（実機で期待どおりにならず、原因の切り分け中） / ✅ 完了
 
 ## 現在の進捗（サマリ）
 
@@ -62,7 +62,7 @@ ISDK には VS の一部（3D 変換状態・屋根作成の一連・レイヤ�
 | M12 断面記号・伏図記号 | ✅ 完了 | **記号 PIO を本プラグインへ同梱して実装**（`parse/ColumnMark`＋`draw/ColumnMark`＋`Extensions/ExtColumnMark`）。PIO がリセットのたびに対象レイヤの構造材を走査し、断面記号＝実断面の対角線（柱＝×・小屋束＝／）、伏図記号＝シンボルを描く。M13 の伏図へ伏図記号レイヤの表示も足した。**ローカル確認済み**。|
 | M13 シート・伏図・タグ・凡例 | 🟨 進行中 | **シートレイヤ・ビューポート（基礎伏図／柱梁伏図／母屋伏図）を実装**（`parse/Sheet`＋`draw/Sheet`）。**レイヤ重ね順の目的もここで per-viewport 上書きにより満たした**。伏図記号レイヤ（切断の直下 1 枚）の表示は M12 で着地。**断面寸法データタグも実装**（`parse/Tag`＋`draw/Tag`）——**Python 版と違い伏図だけでなく軸組図にも載せる**。伏図・軸組図とも**ローカル目視確認済み**。**グラフィック凡例も実装**（`core::LegendCommand`＋`draw/Legend`）——凡例は伏図のシートレイヤ（用紙）に載り、並ぶ中身は VW 側のグラフィック凡例スタイルが決める。**凡例もローカル目視確認済み**。|
 | **M14 断面ビューポート** | ✅ 完了 | 軸組図（`parse/Section`＋`draw/Section`）。**Python 版と違い断面ビューポートを新規作成する**（`ISDK::CreateSectionViewport`）ので、既製 40 枚の手置き・流用・削除は要らなくなった。断面の範囲は**奥行きだけが 0＝無限**で、高さ（建物の実寸＋余白）・長さ（断面線の長さ）は**「無限」にする手段が SDK に無い**ため実寸で決める。**ローカル目視確認済み**。|
-| M15 仕上げ（実行 UX・診断） | 🟨 進行中 | **進捗表示（進捗ダイアログ＋キャンセル）を先行実装**（`core/Progress`＋`draw/ProgressDialog`）。表示とオーバーヘッドは**ローカル確認済み**。**残りも実装済み**: 完了文言の集約（`parse/Summary` の要素表 1 つへ。`DrawCounts` は `core/Document.h` へ移動）・例外処理（`DoInterface` と `plugin_module_main` で受け止めエラーダイアログ 1 通）・`core/Trace`（フェーズ単位ログ。`beginPhase` 1 か所から流す）・Undo の一括化（**VW が外部 1 回につき undo イベントを 1 つ自動で作る**ので `NameUndoEvent` で名前を付けるだけ）。**ローカル目視確認待ち**。Python 版 `run()` / `tracing.py` 相当。|
+| M15 仕上げ（実行 UX・診断） | 🟨 進行中 | **進捗表示（進捗ダイアログ＋キャンセル）を先行実装**（`core/Progress`＋`draw/ProgressDialog`）。表示とオーバーヘッドは**ローカル確認済み**。**残りも実装済み**: 完了文言の集約（`parse/Summary` の要素表 1 つへ。`DrawCounts` は `core/Document.h` へ移動）・例外処理（`DoInterface` と `plugin_module_main` で受け止めエラーダイアログ 1 通）・`core/Trace`（フェーズ単位ログ。`beginPhase` 1 か所から流す）・Undo の一括化は**実機で効かないことが判明**（「取り消しできる処理がありません」＝テーブルが空。文書構造の生成で捨てられている疑い）、切り分け用のログを仕込んで再確認待ち。**ローカル目視確認中**。Python 版 `run()` / `tracing.py` 相当。|
 
 **次の一手:** M9 と M15 のローカル目視確認（M15 は完了ダイアログの新しい書式・Undo 1 回・
 壊れた IFC でのエラーダイアログ・dev ビルドの診断ログ）。**これで Python 版からの移植は
@@ -1345,6 +1345,8 @@ Python 版より高い。
   入れて総数と突き合わせる）。
   - **文言も 1 行 1 要素の一覧へ変えた**（従来は「・」で 17 要素を連ねた 1 文）。命令が 0 件の
     要素は行ごと出さず（行が無い＝解析で 0 件）、描けなかった要素だけ「0/12 本」の形にする。
+  - **診断ログが有効なときは完了ダイアログにその場所を出す**。一時ディレクトリは macOS では
+    `/var/folders/…/T/` という当てられない場所で、「ログはどこ？」に毎回答えることになるため。
   - `DrawCounts` は `core::DrawCounts`（`core/Document.h`）へ移した。`parse/` から draw/ は
     include できないため、**命令セットと対になる「その実行結果」**として境界のヘッダに置き、
     `draw/ExecuteDocument.h` は別名で受ける。
@@ -1385,19 +1387,30 @@ Python 版より高い。
     出力先は一時ディレクトリ（`TMPDIR` / `TEMP` / `TMP`、無ければ `/tmp`）の
     `HomeskzIfcImport.log`。**図面や IFC の隣には置かない**（ユーザーのデータのある場所へ
     勝手に書かないため）。開けなくてもインポートは続ける。
-- 🟨 **Undo の一括化**: 調査の結論は「**追加の仕組みは要らない。名前だけ付ける**」。
-  - **VectorWorks は外部（プラグイン）の実行 1 回につき undo イベントを 1 つ自動で作り、
-    外部が終わった時点で自動的に閉じる**（SDK `Kernel/API/APIBase.Legacy.Defs.h` の
-    `GS_EndUndoEvent` の説明: "The use of this procedure is not required; VectorWorks will
-    automatically end the event when an external is completed."）。ISDK に「開始」に当たる
-    呼び出しは無く、あるのは `EndUndoEvent` / `NameUndoEvent` / `SetUndoMethod` /
-    `IsCurrentlyBuildingAnUndoEvent` 等だけ（ci-debug の `sdk-grep` で確認）。
-  - したがって実装は `NameUndoEvent("ホームズ君 IFC 取り込み")` を描画の後に 1 回呼ぶだけ。
-    「編集」メニューが**何が戻るのか読める**ようになる。
-  - **ローカル確認待ち**: 自動イベントに図形の追加が記録されているか（＝Undo 1 回で取り込んだ
-    オブジェクトがすべて消えるか）は実機でしか確かめられない。戻らなければ次の手は
-    `SetUndoMethod(kUndoSwapObjects)` を先に呼び、作った各ハンドルを `AddAfterSwapObject` へ
-    登録する方式（`draw/ObjectHandles` を全要素へ広げる必要がある）。
+- 🟥 **Undo の一括化**: **実機では効かなかった。** 取り込みの後に「編集」メニューは
+  「取り消しできる処理がありません」と出る（＝undo テーブルが空で、名前を付ける相手すら居ない）。
+  - SDK の説明では VW は**外部（プラグイン）の実行 1 回につき undo イベントを 1 つ自動で作り、
+    外部の終了時に閉じる**（`Kernel/API/APIBase.Legacy.Defs.h` の `GS_EndUndoEvent`: "The use of
+    this procedure is not required; VectorWorks will automatically end the event when an external
+    is completed."）。ISDK に「開始」に当たる呼び出しは無い（ci-debug の `sdk-grep`）。
+  - **疑っているのは「本プラグインが undo の効かない操作をしていること」**。ISDK には
+    `ClearUndoTableDueToUnsupportedAction()` があり、**undo で戻せない操作をしたらテーブルごと
+    捨てる**のが VW の作法。取り込みはデザインレイヤ・ストーリ・クラス・シートレイヤ・
+    ビューポートを作る（＝図形ではなく**文書の構造**をいじる）ので、どこかで捨てられていて
+    おかしくない。
+  - **切り分けは診断ログに仕込んだ**（`ExtMenu` の `LogUndoState`）。解析の前後・描画の後の
+    3 点で `IsCurrentlyBuildingAnUndoEvent()` を記録する。`start=yes` → `afterDraw=no` なら
+    描画のどこかで捨てられており、`start=no` なら最初からイベントが無い。
+  - **次の手（実機の結果を見てから決める）**:
+    1. VW 標準の作法に倒す。`NonUndoableActionOK()` で「この操作は取り消せません」と先に断り
+       （「取り消し警告を表示」環境設定が off のユーザーには無音で通る）、OK なら
+       `SetUndoMethod(kUndoNone)` を呼ぶ（SDK の要求。同関数の説明）。**取り消せないことを
+       黙っている**現状よりは誠実。
+    2. 図形だけでも戻せるようにする。`SetUndoMethod(kUndoSwapObjects)` を先に呼び、作った各
+       ハンドルを `AddAfterSwapObject` へ登録する（`draw/ObjectHandles` を全要素へ広げる）。
+       ただしテーブルがレイヤ生成で捨てられるなら**これも効かない**ので、切り分けが先。
+    3. 自前の「取り込みを取り消す」コマンド（作ったレイヤ・ストーリ・クラス・シートレイヤを
+       まとめて消す）。C++ 版独自の改良として M16 以降。
 - ✅ テスト: 完了文言・エラー文言・要素表の網羅性は `ParseSummaryTests`、診断ログ
   （1 行ごとのフラッシュ・開き直しでの切り詰め・開けなかったときに落ちないこと・既定の
   出力先・進捗フェーズが行になること）は `CoreTraceTests`。どちらも無 SDK で走る。
@@ -1407,8 +1420,9 @@ Python 版より高い。
 
 - **完了ダイアログ**が 1 行 1 要素の一覧になっている。取り込めた要素だけが並び、件数が読める。
   基礎の無いモデルではアンカーボルト・床束の行が出ない（行が無い＝解析で 0 件）。
-- **Undo 1 回**でインポートしたオブジェクトがすべて消える。「編集」メニューの表示が
-  「取り消し: ホームズ君 IFC 取り込み」になっている。
+- ~~**Undo 1 回**でインポートしたオブジェクトがすべて消える~~ → **効かないことを確認済み**
+  （「取り消しできる処理がありません」）。次回は診断ログの `undo:` 行（start / afterParse /
+  afterDraw）を見て、テーブルがどこで消えるかを切り分ける。
 - **壊れた IFC / 途中で切れた IFC** を読ませても VectorWorks が落ちず、エラーダイアログが
   1 通だけ出る（本文に「詳細:」と、dev ビルドなら「診断ログ:」の行がある）。
 - **dev ビルド**でインポートすると一時ディレクトリに `HomeskzIfcImport.log` ができ、

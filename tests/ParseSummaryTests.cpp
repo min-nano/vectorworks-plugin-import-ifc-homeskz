@@ -239,6 +239,24 @@ TEST(format_import_result_reports_cancel_and_diagnostics)
 	CHECK(text.find("断面が入りませんでした") != std::string::npos);
 }
 
+TEST(format_import_result_points_at_the_trace_log)
+{
+	// 診断ログが有効なとき（dev ビルド / HOMESKZ_IFC_TRACE 指定時）は場所を必ず案内する。
+	// 一時ディレクトリは macOS では /var/folders/… という当てられない場所なので、
+	// 「ログはどこ？」を毎回聞かれないようにするため。
+	DrawCounts counts;
+	counts.valid = true;
+	counts.members = 3;
+	counts.columns = 2;
+
+	std::string const text =
+		formatImportResult(sampleDocument(), counts, "/tmp/HomeskzIfcImport.log");
+	CHECK(text.find("診断ログ: /tmp/HomeskzIfcImport.log") != std::string::npos);
+
+	// 無効なら案内も出ない（存在しない場所を指さない）。
+	CHECK(formatImportResult(sampleDocument(), counts).find("診断ログ") == std::string::npos);
+}
+
 TEST(format_import_result_reports_invalid_document)
 {
 	// 検証に落ちたときは何も描いていないので、件数は並べず理由だけを返す。

@@ -149,7 +149,8 @@ namespace HomeskzIfcImport::parse
 		return total;
 	}
 
-	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts)
+	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts,
+								   const std::string& logPath)
 	{
 		std::ostringstream out;
 		if (!counts.valid)
@@ -190,6 +191,10 @@ namespace HomeskzIfcImport::parse
 		// 描画側で起きた異常があれば足す（横架材の断面が入らない等。draw/Member 参照）。
 		if (!counts.diagnostics.empty())
 			out << "\n" << counts.diagnostics;
+		// 診断ログが有効なら場所を案内する（有効なのは dev ビルドか HOMESKZ_IFC_TRACE 指定時
+		// だけなので、ふだんの完了ダイアログには出ない）。
+		if (!logPath.empty())
+			out << "\n\n診断ログ: " << logPath;
 		return out.str();
 	}
 

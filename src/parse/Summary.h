@@ -82,7 +82,12 @@ namespace HomeskzIfcImport::parse
 	// 検証に落ちたとき（counts.valid=false）・命令が 1 件も無いときはその旨だけを返す。
 	// 中止（counts.cancelled）と描画側の診断（counts.diagnostics）も末尾へ足すので、
 	// **呼び出し側（Extensions/ExtMenu）はこの戻り値をそのまま出すだけでよい**。
-	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts);
+	//
+	// logPath はクラッシュ診断ログ（core/Trace）の場所（無効なら空）。**空でなければ必ず
+	// 出す**——一時ディレクトリは macOS では `/var/folders/…/T/` のような当てられない場所で、
+	// 「ログはどこ？」に毎回答えることになるため（エラーダイアログと同じ扱い）。
+	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts,
+								   const std::string& logPath = {});
 
 	// インポートが例外で中断したときのダイアログ本文。detail は例外の説明
 	// （std::exception::what()。分からなければ空）で、空なら「原因不明」として出す。
