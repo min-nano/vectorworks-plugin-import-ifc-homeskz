@@ -450,6 +450,15 @@ namespace HomeskzIfcImport::draw
 		scope->fCreatedLayers.push_back(layer);
 	}
 
+	void RecordCreatedObject(MCObjectHandle object)
+	{
+		if (gActiveUndoScope == nullptr || object == nil)
+			return;
+		// レイヤと違い一覧には控えない（数えるのは「取り消しで戻せるか」の判断材料であって、
+		// 下ごしらえのオブジェクトはその判断に関係しないため）。
+		gSDK->AddAfterSwapObject(object);
+	}
+
 	void NoteExistingLayerUsed(MCObjectHandle layer)
 	{
 		ImportUndoScope* scope = gActiveUndoScope;

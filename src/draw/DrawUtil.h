@@ -212,6 +212,24 @@ namespace HomeskzIfcImport::draw
 	// レイヤを用意するヘルパー（下記 3 つ）が自分で呼ぶので、要素側は意識しなくてよい。
 	void NoteExistingLayerUsed(MCObjectHandle layer);
 
+	// **SDK に渡して消費させる下ごしらえのオブジェクト**（PIO のパス・プロファイル等）を
+	// 「このインポートが追加したもの」として undo イベントへ申告する。
+	//
+	// 【なぜ要るか】通り芯は `CreateCustomObjectPath` にポリライン（パス）を渡して PIO を
+	// 作る。SDK はそのポリラインを **undo 記録つきで削除**して PIO へ取り込むため、こちらが
+	// イベントを開いていると「削除」がその記録に入り、**取り消しでポリラインが復活する**
+	// （実機で確認: 取り込み直後は PIO だけなのに、取り消すとレイヤ「共通」に曲線だけが残った）。
+	//
+	// 対処は SDK の作法どおり「**自分が追加したものは申告する**」——`AddAfterSwapObject` の
+	// 説明は "Use this callback after you add an object in your routine. A reference to h is
+	// stored in the undo table, and that object is deleted when Undo is selected."
+	// つまり申告しておけば、取り消しのときに**復活したそれが改めて消える**。
+	//
+	// レイヤ（RecordCreatedLayer）と違い、**レイヤの上に普通に置いた図形へは使わない**
+	// ——レイヤごと消えるものを二重に登録しない（DrawUtil.h「なぜレイヤを記録するのか」）。
+	// 使うのは「SDK へ渡して消えるもの」だけ。
+	void RecordCreatedObject(MCObjectHandle object);
+
 	// 名前付きデザインレイヤを取得（無ければ作成）してアクティブにする。以後に生成する
 	// オブジェクトはこのレイヤへ入る。取得・生成できなければ nil を返し、カレントレイヤも
 	// 変えない。**通り芯の "共通" レイヤのように、その要素が自分で用意してよいレイヤ専用。**
