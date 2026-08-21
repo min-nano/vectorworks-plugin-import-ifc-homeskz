@@ -19,6 +19,11 @@
 #include <string>
 #include <vector>
 
+using HomeskzIfcImport::core::Document;
+using HomeskzIfcImport::core::DrawPhase;
+using HomeskzIfcImport::core::drawPhaseShare;
+using HomeskzIfcImport::core::drawWeight;
+using HomeskzIfcImport::core::drawWeightedTotal;
 using HomeskzIfcImport::core::formatProgressText;
 using HomeskzIfcImport::core::NullProgressReporter;
 using HomeskzIfcImport::core::phaseShare;
@@ -202,6 +207,63 @@ TEST(null_reporter_is_inert)
 	reporter.step();
 	CHECK(!reporter.cancelled());
 	CHECK_EQ(reporter.status().done, std::size_t{1});
+}
+
+// ---------------------------------------------------------------------------
+// 描画フェーズの重み付き配分（実測に基づく按分）
+// ---------------------------------------------------------------------------
+
+TEST(draw_weights_are_defined_for_every_phase)
+{
+	// **表の網羅性の番人**。DrawPhase を足したのに重みの表へ書き忘れると、その要素の重さが
+	// 0 になってバーが進まなくなる（気付きにくい）。全フェーズが正の重さを持つことを固定する。
+	for (std::size_t i = 0; i < static_cast<std::size_t>(DrawPhase::Count); ++i)
+		CHECK(drawWeight(static_cast<DrawPhase>(i)) > 0.0);
+	// 番兵そのものは重さを持たない（範囲外は 0）。
+	CHECK_EQ(drawWeight(DrawPhase::Count), 0.0);
+}
+
+TEST(draw_weighted_total_sums_count_times_weight)
+{
+	Document document;
+	document.members.resize(2);
+	document.sections.resize(3);
+
+	const double expected =
+		2.0 * drawWeight(DrawPhase::Members) + 3.0 * drawWeight(DrawPhase::Sections);
+	CHECK(std::fabs(drawWeightedTotal(document) - expected) < 1e-9);
+	// 空の命令セットは 0（配分の分母が 0 ＝ バーを進めないフェーズだけになる）。
+	CHECK_EQ(drawWeightedTotal(Document{}), 0.0);
+}
+
+TEST(draw_phase_share_follows_time_not_command_count)
+{
+	// **これが直したかったこと。** 実測モデルに近い内訳（仕口 284 件は 0.03 秒、
+	// 軸組図 33 枚は 17 秒）で、件数比なら仕口が軸組図の 8 倍以上バーを進めてしまう。
+	// 重み付きなら逆転し、時間を食う軸組図のほうが大きく進む。
+	Document document;
+	document.joints.resize(284);
+	document.sections.resize(33);
+	const double total = drawWeightedTotal(document);
+
+	const double joints = drawPhaseShare(284, DrawPhase::Joints, total, 100.0);
+	const double sections = drawPhaseShare(33, DrawPhase::Sections, total, 100.0);
+
+	CHECK(sections > joints * 100.0); // 桁で違う（実測では 0.03 秒 対 17 秒）
+	CHECK(std::fabs(joints + sections - 100.0) < 1e-9); // 取りこぼしなく 100% を配る
+}
+
+TEST(draw_phase_share_handles_empty_and_single_phase)
+{
+	// 描く物が無ければ 0（0 除算しない）。
+	CHECK_EQ(drawPhaseShare(0, DrawPhase::Members, 0.0, 97.0), 0.0);
+	CHECK_EQ(drawPhaseShare(5, DrawPhase::Members, 0.0, 97.0), 0.0);
+
+	// 1 フェーズしか無ければ端数で超えず、ぴったり全部を受け取る。
+	Document document;
+	document.members.resize(7);
+	const double total = drawWeightedTotal(document);
+	CHECK_EQ(drawPhaseShare(7, DrawPhase::Members, total, 97.0), 97.0);
 }
 
 TEST_MAIN();

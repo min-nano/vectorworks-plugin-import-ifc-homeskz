@@ -181,37 +181,43 @@ namespace HomeskzIfcImport
 {
 	namespace
 	{
-		// undo イベントの状態を診断ログへ 1 行残す（ROADMAP.md M15「Undo の一括化」）。
-		//
-		// 【いま分かっていること】SDK の説明では VectorWorks は**外部（プラグイン）の実行
-		// 1 回につき undo イベントを 1 つ自動で作り、外部の終了時に閉じる**
-		// （Kernel/API/APIBase.Legacy.Defs.h、GS_EndUndoEvent: "The use of this procedure is
-		// not required; VectorWorks will automatically end the event when an external is
-		// completed."）。ISDK に「開始」に当たる呼び出しは無い（ci-debug の sdk-grep）。
-		// ところが**実機では取り込みの後に「取り消しできる処理がありません」**と出る——
-		// つまり undo テーブルが空で、名前を付ける相手すら居ない。
-		//
-		// 疑っているのは「本プラグインが undo の効かない操作をしている」こと。ISDK には
-		// ClearUndoTableDueToUnsupportedAction() があり、**undo で戻せない操作をしたら
-		// テーブルごと捨てる**のが VW の作法である。取り込みはデザインレイヤ・ストーリ・
-		// クラス・シートレイヤ・ビューポートを作る（＝図形ではなく文書の構造をいじる）ので、
-		// どこかでテーブルが捨てられていておかしくない。
-		//
-		// **どこで消えるかは実機でしか分からない**ので、解析の前後・描画の後の 3 点で
-		// 状態を診断ログへ落とす。start=yes → afterDraw=no なら描画のどこかで捨てられており、
-		// start=no なら最初からイベントが無い（自動生成されていない）と分かる。
+		// undo イベントの状態を診断ログへ 1 行残す（ROADMAP.md M15「Undo」）。
+		// 実機でしか分からない挙動なので、変えたときに確かめられるよう残してある。
 		void LogUndoState(const char* when)
 		{
 			core::trace::log(std::string("undo: ") + when + " building=" +
 							 (gSDK->IsCurrentlyBuildingAnUndoEvent() ? "yes" : "no"));
 		}
 
-		// 組み立て中の undo イベントがあれば名前を付ける（「編集」メニューが
-		// 「取り消し: ホームズ君 IFC 取り込み」と読めるように）。イベントが無ければ何もしない。
-		void NameImportUndoEvent()
+		// 取り込みが残した**中途半端な undo イベントを捨てる**（ROADMAP.md M15「Undo」）。
+		//
+		// 【実機で分かったこと】診断ログの undo: 行は start=no / afterParse=no / afterDraw=yes
+		// だった。つまり **VectorWorks は取り込みの開始時に undo イベントを開かない**
+		// （SDK の GS_EndUndoEvent の説明は「外部の終了時に自動で閉じる」であって「自動で
+		// 開く」とは言っていない。当初これを取り違えていた）。にもかかわらず描画の終わりには
+		// 「組み立て中」になっている——断面ビューポートの生成のように **SDK 内部が自前で
+		// イベントを開く呼び出しがある**ためで、そこから先の操作だけが記録される。
+		//
+		// この状態で「取り消し」を実行すると**図面が壊れる**（実機で確認: 軸組図の
+		// ビューポートだけが消え、レイヤは戻らず、構造材や立上りは断面を失って単線・2D 面に
+		// なった）。記録が取り込みの一部しか含まないので当然で、**戻せないものを戻したふり**を
+		// している状態だった。
+		//
+		// そこで ISDK::EndAndRemoveUndoEvent()——「現在のイベントを終わらせてテーブルから
+		// 取り除く」——で捨てる。**取り込み前のユーザー自身の操作履歴はそのまま残る**のが、
+		// ClearUndoTableDueToUnsupportedAction()（テーブル全体を消す）より優れている点。
+		// kUndoNone による無効化は使えない（MiniCadCallBacks.h で obsolete としてコメント
+		// アウトされている。ci-debug の sdk-grep で確認）。
+		//
+		// **取り込み全体を 1 回で戻せるようにする案**（SetUndoMethod(kUndoSwapObjects) で
+		// 自分からイベントを開き、作った各ハンドルを AddAfterSwapObject へ登録する）は
+		// ROADMAP.md M15「次の手」に残した。レイヤ・ストーリ・クラス・シートレイヤは図形では
+		// ないので、それでも完全には戻らない。
+		void DiscardPartialUndoEvent()
 		{
-			if (gSDK->IsCurrentlyBuildingAnUndoEvent())
-				gSDK->NameUndoEvent(TXString("ホームズ君 IFC 取り込み"));
+			if (!gSDK->IsCurrentlyBuildingAnUndoEvent())
+				return;
+			gSDK->EndAndRemoveUndoEvent();
 		}
 
 		// クラッシュ診断ログを開く（ROADMAP.md M15「core/Trace」）。**dev ビルドでは常に、
@@ -258,8 +264,11 @@ namespace HomeskzIfcImport
 			const draw::DrawCounts drawn = draw::executeDocument(document, progress);
 			LogUndoState("afterDraw");
 
-			// 図面が変わった後に名前を付ける（イベントが残っていれば）。
-			NameImportUndoEvent();
+			// SDK 内部が開いた中途半端なイベントを捨てる（これを残すと「取り消し」で図面が
+			// 壊れる。上の DiscardPartialUndoEvent の説明）。捨てた後は building=no になる
+			// はずで、それをログで確かめられるようにしておく。
+			DiscardPartialUndoEvent();
+			LogUndoState("afterDiscard");
 
 			// 完了ダイアログの前に進捗ダイアログを閉じる（2 枚重ねない）。
 			progress.close();

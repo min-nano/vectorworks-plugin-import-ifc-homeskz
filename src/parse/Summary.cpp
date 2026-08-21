@@ -188,6 +188,14 @@ namespace HomeskzIfcImport::parse
 		// と読み違えないように）。描けたところまでは図面に残っている。
 		if (counts.cancelled)
 			out << "\n\n（キャンセルされたため、途中で中断しました。）";
+		// **取り消せないことを黙っていない。** 図形を 1 つでも描いたなら、ユーザーは
+		// 「間違えたら取り消せばいい」と考えるのが自然だが、取り込みはデザインレイヤ・
+		// ストーリ・クラス・シートレイヤという文書の構造ごと作るので「取り消し」では戻せない
+		// （中途半端な取り消しで図面が壊れないよう、描画側で undo イベントを捨てている。
+		// Extensions/ExtMenu の DiscardPartialUndoEvent）。戻したいなら保存せずに閉じる。
+		if (counts.valid && documentCommandCount(document) != 0)
+			out << "\n\n※ 取り込んだ内容は「取り消し」では戻せません。取り込み前に戻したいときは、"
+				   "保存せずに文書を閉じてください。";
 		// 描画側で起きた異常があれば足す（横架材の断面が入らない等。draw/Member 参照）。
 		if (!counts.diagnostics.empty())
 			out << "\n" << counts.diagnostics;

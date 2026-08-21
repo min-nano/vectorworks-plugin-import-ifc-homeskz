@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "core/Document.h"
+
 #include <cstddef>
 #include <string>
 
@@ -29,9 +31,12 @@ namespace HomeskzIfcImport::core
 	// （エンティティ 4 万・横架材 270 本）でも 100ms 弱で終わり、体感時間はすべて描画側にある。
 	// 解析に大きな配分を与えるとバーが一瞬で 3 割まで飛んで以後動かない、という嘘の進捗に
 	// なるため、実時間の比に近い配分にしてある。
-	constexpr double kLoadShare = 3.0; // IFC ファイルの読み込み（テキスト→STEP グラフ）
-	constexpr double kParseShare = 7.0; // 要素ごとの解析（Document の組み立て）
-	constexpr double kDrawShare = 90.0; // VectorWorks への描画
+	// 実測（安藤邸 IFC・命令 1,000 超・macOS）: 読み込み 36ms・解析 25ms に対し、描画は
+	// 71 秒。解析は全体の 0.1% ほどしか使っていないので、以前の 3%/7% でもまだ大きすぎた
+	// （バーが一瞬で 10% まで飛んで以後の 71 秒を 90% で刻む）。実時間の比に寄せてある。
+	constexpr double kLoadShare = 1.0; // IFC ファイルの読み込み（テキスト→STEP グラフ）
+	constexpr double kParseShare = 2.0; // 要素ごとの解析（Document の組み立て）
+	constexpr double kDrawShare = 97.0; // VectorWorks への描画
 
 	// 解析フェーズの step() 呼び出し回数（parse/BuildDocument が要素ごとに 1 回進める:
 	// 柱・横架材・ストーリ・通り芯・床・垂木・野地板・立上り・底盤・アンカーボルト・床束・
@@ -52,7 +57,49 @@ namespace HomeskzIfcImport::core
 
 	// 進捗バー全体に占めるフェーズの配分（%）を、命令数の比で求める。total が 0 なら 0
 	// （＝バーを進めないフェーズ）。count が total を超えていても totalShare は超えない。
+	//
+	// **解析フェーズ用**（要素ごとの重さが揃っている）。描画は 1 件あたりの重さが要素で
+	// 3 桁違うので、下の drawPhaseShare（重み付き）を使う。
 	double phaseShare(std::size_t count, std::size_t total, double totalShare);
+
+	// 描画フェーズの種類（＝Document の命令リスト 1 つ）。並びは draw/ExecuteDocument の
+	// ディスパッチ順で、Count は表の網羅性を固定するための番兵。
+	enum class DrawPhase : std::size_t
+	{
+		Stories = 0,
+		Grids,
+		Walls,
+		WallJoins,
+		Slabs,
+		Floors,
+		Members,
+		Columns,
+		Rafters,
+		Roofs,
+		AnchorBolts,
+		FloorPosts,
+		FireBraces,
+		Joints,
+		ColumnMarks,
+		Sheets,
+		Sections,
+		Count
+	};
+
+	// そのフェーズの **1 件あたりの重さ**（実測値。単位は ms/件）。
+	//
+	// **なぜ件数比では駄目か**: 実測では 1 件あたりの重さが要素で 3 桁違う——仕口は
+	// 0.1ms/件なのに底盤は 670ms/件。件数比で配分すると、シンボル 472 件（全命令の 4 割超）が
+	// 0.05 秒で終わってバーを 4 割進め、その後 33 枚の軸組図（命令の 3%）が 17 秒かけて
+	// 3% しか進まない。**バーが嘘をつく**ので、実測の重さで按分する。
+	double drawWeight(DrawPhase phase);
+
+	// 命令セット全体の重み付き総量（Σ 件数 × 重さ）。drawPhaseShare の分母。
+	double drawWeightedTotal(const Document& document);
+
+	// 進捗バー全体に占める描画フェーズの配分（%）。weightedTotal が 0（描く物が無い）なら 0。
+	double drawPhaseShare(std::size_t count, DrawPhase phase, double weightedTotal,
+						  double totalShare);
 
 	// 進捗の報告先。**呼び出し側（parse / draw）はこの基底だけを知る。** 件数の勘定と
 	// 表示文言の整形はここで済ませ、派生（draw/ProgressDialog）は「見出しが変わった」
