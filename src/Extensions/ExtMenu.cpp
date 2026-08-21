@@ -182,42 +182,15 @@ namespace HomeskzIfcImport
 	namespace
 	{
 		// undo イベントの状態を診断ログへ 1 行残す（ROADMAP.md M15「Undo」）。
-		// 実機でしか分からない挙動なので、変えたときに確かめられるよう残してある。
+		//
+		// **実機でしか分からない挙動なので残してある。** 実測では start=no / afterParse=no /
+		// afterDraw=yes で、「VW は取り込みの開始時にイベントを開かない」「SDK 内部が描画の
+		// 途中で勝手に開く」ことが分かった。いまは描画を draw::ImportUndoScope で包むので、
+		// **afterDraw は no（自分で開いたイベントを閉じ切った状態）が正しい**。
 		void LogUndoState(const char* when)
 		{
 			core::trace::log(std::string("undo: ") + when + " building=" +
 							 (gSDK->IsCurrentlyBuildingAnUndoEvent() ? "yes" : "no"));
-		}
-
-		// 取り込みが残した**中途半端な undo イベントを捨てる**（ROADMAP.md M15「Undo」）。
-		//
-		// 【実機で分かったこと】診断ログの undo: 行は start=no / afterParse=no / afterDraw=yes
-		// だった。つまり **VectorWorks は取り込みの開始時に undo イベントを開かない**
-		// （SDK の GS_EndUndoEvent の説明は「外部の終了時に自動で閉じる」であって「自動で
-		// 開く」とは言っていない。当初これを取り違えていた）。にもかかわらず描画の終わりには
-		// 「組み立て中」になっている——断面ビューポートの生成のように **SDK 内部が自前で
-		// イベントを開く呼び出しがある**ためで、そこから先の操作だけが記録される。
-		//
-		// この状態で「取り消し」を実行すると**図面が壊れる**（実機で確認: 軸組図の
-		// ビューポートだけが消え、レイヤは戻らず、構造材や立上りは断面を失って単線・2D 面に
-		// なった）。記録が取り込みの一部しか含まないので当然で、**戻せないものを戻したふり**を
-		// している状態だった。
-		//
-		// そこで ISDK::EndAndRemoveUndoEvent()——「現在のイベントを終わらせてテーブルから
-		// 取り除く」——で捨てる。**取り込み前のユーザー自身の操作履歴はそのまま残る**のが、
-		// ClearUndoTableDueToUnsupportedAction()（テーブル全体を消す）より優れている点。
-		// kUndoNone による無効化は使えない（MiniCadCallBacks.h で obsolete としてコメント
-		// アウトされている。ci-debug の sdk-grep で確認）。
-		//
-		// **取り込み全体を 1 回で戻せるようにする案**（SetUndoMethod(kUndoSwapObjects) で
-		// 自分からイベントを開き、作った各ハンドルを AddAfterSwapObject へ登録する）は
-		// ROADMAP.md M15「次の手」に残した。レイヤ・ストーリ・クラス・シートレイヤは図形では
-		// ないので、それでも完全には戻らない。
-		void DiscardPartialUndoEvent()
-		{
-			if (!gSDK->IsCurrentlyBuildingAnUndoEvent())
-				return;
-			gSDK->EndAndRemoveUndoEvent();
 		}
 
 		// クラッシュ診断ログを開く（ROADMAP.md M15「core/Trace」）。**dev ビルドでは常に、
@@ -261,14 +234,11 @@ namespace HomeskzIfcImport
 			// Phase 2（SDK 依存）: 命令セットを検証してから各要素を描く。検証を通らなければ
 			// valid=false で何も描かない。途中でキャンセルされたら、その時点までを描いて
 			// cancelled=true で戻る。
+			// 図面変更は draw 側が自前の undo イベント（draw::ImportUndoScope）で包む。
+			// executeDocument から戻った時点でイベントは閉じているので、building=no に
+			// なっているはず——そこが崩れると「取り消し」で図面が壊れるので、ログで見る。
 			const draw::DrawCounts drawn = draw::executeDocument(document, progress);
 			LogUndoState("afterDraw");
-
-			// SDK 内部が開いた中途半端なイベントを捨てる（これを残すと「取り消し」で図面が
-			// 壊れる。上の DiscardPartialUndoEvent の説明）。捨てた後は building=no になる
-			// はずで、それをログで確かめられるようにしておく。
-			DiscardPartialUndoEvent();
-			LogUndoState("afterDiscard");
 
 			// 完了ダイアログの前に進捗ダイアログを閉じる（2 枚重ねない）。
 			progress.close();

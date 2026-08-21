@@ -16,6 +16,7 @@
 
 #include "PluginPrefix.h"
 #include "draw/ExecuteDocument.h"
+#include "draw/DrawUtil.h"
 #include "draw/Column.h"
 #include "draw/ColumnMark.h"
 #include "draw/Floor.h"
@@ -52,6 +53,12 @@ namespace HomeskzIfcImport::draw
 		if (!core::validateDocument(document))
 			return counts;
 		counts.valid = true;
+
+		// **取り込みの図面変更をまるごと 1 つの undo イベントで包む**（ROADMAP.md M15）。
+		// VW は取り込みの開始時にイベントを開かないので、ここで自分から開く。構築で開き、
+		// 破棄で閉じる RAII なので、途中で例外が出ても・中止されても閉じる。
+		// 何が登録され何が戻らないかは draw/DrawUtil.h「取り込み全体の Undo」を参照。
+		const ImportUndoScope undoScope;
 
 		// 進捗バーの配分は**実測した 1 件あたりの重さ×件数**で按分する（重さの表と計算は
 		// core/Progress。件数比では 1 件 0.1ms のシンボル 472 件がバーを 4 割進め、1 枚 0.5 秒の
@@ -224,6 +231,12 @@ namespace HomeskzIfcImport::draw
 
 		// 途中で中止されたか（件数が命令数に届かないのが正常になる）。
 		counts.cancelled = progress.cancelled();
+
+		// 「取り消し」で取り込みを戻せる状態にできたか（完了ダイアログがこれを伝える）。
+		// armed=false は「登録できるレイヤが 1 つも無かった」＝取り込み前から在るレイヤへ
+		// だけ描いた場合で、そのときイベントはスコープの破棄で捨てられる。
+		counts.undoArmed = undoScope.armed();
+		counts.undoPartial = undoScope.partial();
 
 		return counts;
 	}

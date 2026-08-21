@@ -148,6 +148,52 @@ namespace HomeskzIfcImport::draw
 										const std::vector<core::ComponentCommand>& components,
 										std::string* outName = nullptr);
 
+	// --- 取り込み全体の Undo（ROADMAP.md M15）--------------------------------------
+	//
+	// 【なぜレイヤを記録するのか】VectorWorks は取り込みの開始時に undo イベントを開かない
+	// （実機の診断ログで確認。ROADMAP.md M15）。そこで**自分でイベントを開き**、
+	// `AddAfterSwapObject` で「あとで消してよいもの」を登録する。登録するのは
+	// **このインポートが新しく作ったレイヤだけ**——レイヤを消せばその上の図形も消えるので、
+	// 図形を 1 つずつ登録する必要は無く、**二重登録（レイヤと中身の両方）で undo が既に
+	// 消えたものを消しにいく事故**も避けられる。
+	//
+	// 取り込みが作らないもの（クラス・スラブ／ウォールスタイル・ストーリ・レベル
+	// テンプレート）はリソースであり、undo では戻らない。空のクラスやスタイルが残るが、
+	// 図面の見た目は取り込み前に戻る。
+	//
+	// 【既にあったレイヤ】2 回目の取り込みのように、**取り込み前から在ったレイヤ**へ描いた
+	// 分は登録できない（そのレイヤごと消すわけにいかない）。その場合は取り消しが部分的に
+	// なるので、完了ダイアログでその旨を伝える（ImportUndoScope::partial）。
+
+	// 取り込みの図面変更をまるごと包む undo イベント。**構築で開き、破棄で閉じる**
+	// （途中で例外が出ても閉じる）。記録が 1 件も無ければ、閉じるときにイベントごと
+	// 捨てる——空のイベントを残すと「取り消し」が中途半端に効いて図面が壊れるため
+	// （実機で確認。ROADMAP.md M15）。
+	class ImportUndoScope final
+	{
+	public:
+		ImportUndoScope();
+		~ImportUndoScope();
+		ImportUndoScope(const ImportUndoScope&) = delete;
+		ImportUndoScope& operator=(const ImportUndoScope&) = delete;
+		ImportUndoScope(ImportUndoScope&&) = delete;
+		ImportUndoScope& operator=(ImportUndoScope&&) = delete;
+
+		// 取り消しで戻せる状態か（レイヤを 1 つでも登録できたか）。
+		bool armed() const;
+
+		// **取り込み前から在ったレイヤ**へも描いたか（＝取り消しはその分だけ戻らない）。
+		bool partial() const;
+	};
+
+	// このインポートが新しく作ったレイヤを undo イベントへ登録する（デザイン／シートの
+	// どちらも）。イベントが開いていなければ何もしない。nil は無視。
+	void RecordCreatedLayer(MCObjectHandle layer);
+
+	// 取り込み前から在ったレイヤへ描いたことを控える（取り消しが部分的になる）。
+	// レイヤを用意するヘルパー（下記 3 つ）が自分で呼ぶので、要素側は意識しなくてよい。
+	void NoteExistingLayerUsed(MCObjectHandle layer);
+
 	// 名前付きデザインレイヤを取得（無ければ作成）してアクティブにする。以後に生成する
 	// オブジェクトはこのレイヤへ入る。取得・生成できなければ nil を返し、カレントレイヤも
 	// 変えない。**通り芯の "共通" レイヤのように、その要素が自分で用意してよいレイヤ専用。**

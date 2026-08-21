@@ -257,22 +257,36 @@ TEST(format_import_result_points_at_the_trace_log)
 	CHECK(formatImportResult(sampleDocument(), counts).find("診断ログ") == std::string::npos);
 }
 
-TEST(format_import_result_warns_that_undo_will_not_work)
+TEST(format_import_result_tells_how_far_undo_reaches)
 {
-	// 図形を描いたなら「取り消しでは戻せない」ことを必ず添える（取り込みはレイヤ・ストーリ・
-	// クラスという文書の構造ごと作るので VW の取り消しでは戻らない。ROADMAP.md M15）。
+	// 図形を描いたなら**取り消しがどこまで効くか**を必ず 1 行で伝える（ユーザーは
+	// 「間違えたら取り消せばいい」と考えるのが自然なので、戻せる／一部だけ／戻せないの
+	// 区別を黙らない。判断材料は描画側が置く。core::DrawCounts）。
 	DrawCounts counts;
 	counts.valid = true;
 	counts.members = 3;
 	counts.columns = 2;
+
+	// (1) undo イベントを張れた＝1 回で戻せる。
+	counts.undoArmed = true;
+	CHECK(formatImportResult(sampleDocument(), counts).find("「取り消し」1 回で元に戻せます") !=
+		  std::string::npos);
+
+	// (2) 取り込み前から在ったレイヤへも描いた＝その分は戻らない。
+	counts.undoPartial = true;
+	CHECK(formatImportResult(sampleDocument(), counts).find("新しく作ったレイヤの分だけ") !=
+		  std::string::npos);
+
+	// (3) そもそも張れなかった＝戻せない。保存せずに閉じるしかない。
+	counts.undoArmed = false;
+	counts.undoPartial = false;
 	CHECK(formatImportResult(sampleDocument(), counts).find("「取り消し」では戻せません") !=
 		  std::string::npos);
 
-	// 何も描いていないとき（命令が 0 件）は言う必要が無い。
+	// 何も描いていないとき（命令が 0 件）は取り消しの話をしない。
 	DrawCounts empty;
 	empty.valid = true;
-	CHECK(formatImportResult(Document{}, empty).find("「取り消し」では戻せません") ==
-		  std::string::npos);
+	CHECK(formatImportResult(Document{}, empty).find("取り消し") == std::string::npos);
 }
 
 TEST(format_import_result_reports_invalid_document)

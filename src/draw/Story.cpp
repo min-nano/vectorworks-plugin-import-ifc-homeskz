@@ -39,6 +39,7 @@
 #include "PluginPrefix.h"
 #include "draw/Story.h"
 #include "draw/ColumnMark.h"
+#include "draw/DrawUtil.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -78,7 +79,13 @@ namespace HomeskzIfcImport::draw
 			// AddStoryLevelFromTemplate はレイヤ名に suffix を付ける（"1-FL-1"）。取り直して直す。
 			MCObjectHandle layer = gSDK->GetLayerForStory(story, levelTypeName);
 			if (layer != nil)
+			{
 				gSDK->SetObjectName(layer, TXString(desiredLayerName.c_str()));
+				// **このインポートが作ったレイヤ**として undo イベントへ登録する。取り消すと
+				// このレイヤごと——上に描いた構造材・壁・スラブ・シンボルもまとめて——消える
+				// （draw/DrawUtil.h「なぜレイヤを記録するのか」）。
+				RecordCreatedLayer(layer);
+			}
 		}
 	} // namespace
 
