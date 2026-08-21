@@ -180,10 +180,28 @@ namespace HomeskzIfcImport::draw
 		ImportUndoScope& operator=(ImportUndoScope&&) = delete;
 
 		// 取り消しで戻せる状態か（レイヤを 1 つでも登録できたか）。
-		bool armed() const;
+		bool armed() const
+		{
+			return !fCreatedLayers.empty();
+		}
 
 		// **取り込み前から在ったレイヤ**へも描いたか（＝取り消しはその分だけ戻らない）。
-		bool partial() const;
+		bool partial() const
+		{
+			return fUsedExistingLayer;
+		}
+
+	private:
+		// 記録の実体はスコープが持ち、下の 2 つの自由関数が「いま開いているスコープ」を
+		// 通して書き込む（要素側の draw モジュールはスコープを持ち回らずに済む。
+		// インポートはメインスレッドから 1 本しか走らないので、開いているスコープは高々 1 つ）。
+		friend void RecordCreatedLayer(MCObjectHandle layer);
+		friend void NoteExistingLayerUsed(MCObjectHandle layer);
+
+		bool contains(MCObjectHandle layer) const;
+
+		std::vector<MCObjectHandle> fCreatedLayers; // このインポートが作ったレイヤ
+		bool fUsedExistingLayer = false; // 取り込み前から在ったレイヤへも描いた
 	};
 
 	// このインポートが新しく作ったレイヤを undo イベントへ登録する（デザイン／シートの
