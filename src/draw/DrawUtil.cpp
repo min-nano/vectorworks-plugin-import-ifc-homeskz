@@ -436,8 +436,7 @@ namespace HomeskzIfcImport::draw
 
 	bool ImportUndoScope::contains(MCObjectHandle layer) const
 	{
-		return std::find(fCreatedLayers.begin(), fCreatedLayers.end(), layer) !=
-			   fCreatedLayers.end();
+		return std::ranges::find(fCreatedLayers, layer) != fCreatedLayers.end();
 	}
 
 	void RecordCreatedLayer(MCObjectHandle layer)
