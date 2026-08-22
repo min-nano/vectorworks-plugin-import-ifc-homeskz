@@ -199,11 +199,14 @@ namespace HomeskzIfcImport::draw
 			for (const DisplayOption& option : kDisplayOptions)
 			{
 				bool actual = false;
-				const bool read = ReadBooleanVariable(viewport, option.selector, actual);
+				// 三項演算子を入れ子にしない（clang-tidy
+				// readability-avoid-nested-conditional-operator）。
+				const char* state = "?"; // 読めなかった
+				if (ReadBooleanVariable(viewport, option.selector, actual))
+					state = actual ? "表示" : "非表示";
 				if (!text.empty())
 					text += " / ";
-				text +=
-					std::string(option.label) + "=" + (!read ? "?" : (actual ? "表示" : "非表示"));
+				text += std::string(option.label) + "=" + state;
 			}
 			return text;
 		}
