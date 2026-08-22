@@ -955,6 +955,76 @@ namespace HomeskzIfcImport::core
 		std::vector<SectionCommand> sections;
 	};
 
+	// ------------------------------------------------------------------------
+	// 描画結果の件数
+	// ------------------------------------------------------------------------
+
+	// 命令セットを描画した結果、実際に**描けた**数（命令数ではない）。draw/executeDocument が
+	// 返し、メニューコマンドの完了ダイアログ（parse/Summary の formatImportResult）が読む。
+	// 命令はあるのに 0 なら「配置先レイヤが無い」「PIO / オブジェクトを作れなかった」等の
+	// 描画側の問題だと分かり、ローカル確認で原因を解析側と切り分けられる（命令数は
+	// Document から取れる）。valid は validateDocument を通ったか。
+	//
+	// **なぜ core にあるか**: 完了文言の整形は無 SDK 側で行いたい（要素が増えるたびに
+	// SDK 側の文字列を手で伸ばす作業を無くす。ROADMAP.md M15「完了文言の集約」）。
+	// そのためには parse/Summary から件数を読めなければならないが、parse/ は draw/ を
+	// include できない（依存の向き。CLAUDE.md）。命令セットと対になる「その実行結果」
+	// なので、フェーズをつなぐ唯一の境界であるこのヘッダに置き、draw/ExecuteDocument.h は
+	// 別名（using DrawCounts = core::DrawCounts）で受ける。**SDK 型は載せない**という
+	// Document と同じ規律がここにも効く。
+	struct DrawCounts
+	{
+		bool valid = false;
+		std::size_t stories = 0;
+		std::size_t grids = 0;
+		std::size_t floors = 0;
+		std::size_t members = 0;
+		std::size_t columns = 0;
+		std::size_t rafters = 0;
+		std::size_t roofs = 0;
+		std::size_t walls = 0;
+		std::size_t wallJoins = 0;
+		std::size_t slabs = 0;
+		// M11 シンボル置換系。アンカーボルト・床束の配置先（"F-アンカーボルト" / "F-床束"）は
+		// 基礎ストーリのレイヤなので、基礎の無いモデルでは命令自体が出ない（parse 側で空になる）。
+		std::size_t anchorBolts = 0;
+		std::size_t floorPosts = 0;
+		std::size_t fireBraces = 0;
+		std::size_t joints = 0;
+
+		// M12 断面記号・伏図記号。**span 柱レイヤごとに置いた記号 PIO の数**（記号そのものの
+		// 個数ではない——1 つの PIO がそのレイヤの柱すべてに記号を描く）。
+		std::size_t columnMarks = 0;
+
+		// M13 シート（伏図）。**ビューポートまで作れた枚数**（シートレイヤだけできた場合は
+		// 数えない）。命令はあるのに 0 なら、原因は診断行に出る（draw/Sheet）。
+		std::size_t sheets = 0;
+
+		// M14 軸組図。**作れた断面ビューポートの枚数**（＝柱梁の芯を通る通りの数）。
+		// 命令はあるのに 0 なら、原因は診断行に出る（draw/Section）。
+		std::size_t sections = 0;
+
+		// 進捗ダイアログの「キャンセル」で途中打ち切りになったか。true のときは各要素の
+		// 件数が命令数に届かないのが正常で、描けたところまでは図面に残る（要らなければ
+		// 「取り消し」で消せる。undoArmed 参照）。完了ダイアログはこれを見て中止を明示する。
+		bool cancelled = false;
+
+		// **「取り消し」1 回で取り込みを戻せる状態にできたか。** 描画は自前の undo イベントで
+		// 包み、このインポートが新しく作ったレイヤを登録する（レイヤを消せば上の図形も消える。
+		// draw/DrawUtil.h「取り込み全体の Undo」）。登録できるレイヤが 1 つも無ければ false で、
+		// そのときイベントごと捨てる（中途半端な取り消しは図面を壊す）。
+		bool undoArmed = false;
+
+		// 取り消しが**部分的**か。取り込み前から在ったレイヤへも描いた場合（同じ文書への
+		// 2 回目の取り込み等）、その分はレイヤごと消すわけにいかないので戻らない。
+		bool undoPartial = false;
+
+		// 描画側で起きた異常の説明（無ければ空）。要素ごとに 1 行を改行で連ねる。実描画は
+		// ローカルの VectorWorks でしか確認できないので、「命令はあるのに見えない」ときに
+		// 原因を解析側と描画側で切り分ける手掛かりをメニューコマンドの完了ダイアログへ持ち帰る。
+		std::string diagnostics;
+	};
+
 	// Document を描画前に検証する（Python 版 validateDocument 相当）。draw/ は
 	// 検証を通った Document だけを SDK API へ渡す。現状はバージョンと stories / floors /
 	// rafters / roofs / grids / シンボル 4 種を見る（規則は Document.cpp の各 isValid* 参照。

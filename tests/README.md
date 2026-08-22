@@ -35,7 +35,9 @@
 | `ParseRoofTests` | `src/parse/Roof` | 野地板（軒軸・upslope・勾配・厚み・軒の Z） |
 | `ParseFootingTests` | `src/parse/Footing` | 基礎（立上り・底盤・基礎ストーリ／人通口の分割・切り下げ／壁結合の L・T・X 判定／地中梁の統合と底盤への振り分け） |
 | `ParseSheetTests` | `src/parse/Sheet` | シート（伏図。タイトル・切断レベルによる span 柱レイヤの絞り込み・番号の連番・基礎の有無による出し分け・表示レイヤがストーリの作るレイヤに実在すること） |
-| `ParseSummaryTests` | `src/parse/Summary` | 型別件数の集計とダイアログ文言の整形 |
+| `ParseSummaryTests` | `src/parse/Summary` | 型別件数の集計と、**完了／エラーダイアログ文言**の整形（描けなかった要素の「0/12」表記・中止と診断行・要素表の網羅性） |
+| `CoreProgressTests` | `src/core/Progress` | 進捗の文言整形・フェーズ配分・件数の勘定・中止フラグのラッチ |
+| `CoreTraceTests` | `src/core/Trace` | クラッシュ診断ログ（1 行ごとのフラッシュ・開き直しでの切り詰め・開けなくても落ちないこと・既定の出力先・進捗フェーズが行になること） |
 
 いずれも無 SDK の静的ライブラリ `HomeskzIfcCore` をリンクします。テスト間で共有する
 小道具は 2 つのヘッダに一本化してあります（同じものを各テストが持つと、片方だけ直したときに

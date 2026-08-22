@@ -137,6 +137,7 @@ src/
     Document.{h,cpp}        命令セットの構造体定義と validateDocument（1 対で持つ。分割は不要）
     Region.{h,cpp}          部品が囲む平面領域の合成（ロフト床の外形。M5 で追加）
     Progress.{h,cpp}        進捗の報告先（ProgressReporter）と文言整形・バー配分（M15 の先行実装）
+    Trace.{h,cpp}           クラッシュ診断ログ（フェーズの区切りを 1 行ずつ・毎行フラッシュ。M15）
 
   parse/                    Phase 1: IFC 解析（SDK 非依存）… 旧 ifc/
     Step.{h,cpp}            最小 STEP リーダ（トークナイザ＋エンティティグラフ）
@@ -145,6 +146,7 @@ src/
     IfcGeometry.{h,cpp}     配置行列・押し出しソリッド・断面・屋根面の解決（旧 footing._world_solid 等）
     Context.{h,cpp}         解析中の共有キャッシュ（下記「共有コンテキスト」）
     BuildDocument.{h,cpp}   build_document 相当のオーケストレーション
+    Summary.{h,cpp}         完了・エラーダイアログの本文（要素の一覧＝件数の表を 1 つ持つ。M15）
     Grid.{h,cpp}            通り芯（旧 ifc/grid.py）
     Story.{h,cpp}           ストーリ（旧 ifc/story.py）
     Member.{h,cpp}          横架材（旧 ifc/member.py）
@@ -239,7 +241,11 @@ tests/
 `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`）は `core/Document`、
 進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
-（整形と配分の計算）に**それぞれ 1 つだけ**置く。テスト側も同じで、フィクスチャ一覧・近似比較・**実 IFC の読み込みと命令セットの組み立てを
+（整形と配分の計算）に**それぞれ 1 つだけ**置く。**完了ダイアログに並ぶ要素の一覧**
+（表示名・助数詞・命令数の取り出し・描けた数）は `parse/Summary` の `kElements` ただ 1 つの表で、
+要素を足すときに触るのはその 1 行だけ（SDK 側は組み上がった本文を出すだけ）。**診断ログへの
+書き出し口**は `core/Progress` の `beginPhase` 1 か所（各要素へ `trace::log` を撒かない。
+開始・終了・例外だけを `Extensions/ExtMenu` が書く）。テスト側も同じで、フィクスチャ一覧・近似比較・**実 IFC の読み込みと命令セットの組み立てを
 1 プロセス 1 回に畳むキャッシュ**（`fixture` / `fixtureDocument`）は `tests/Fixtures.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
 
@@ -342,8 +348,9 @@ Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テス�
 | `ifc/footing.py` | `parse/Footing` | 基礎（立上り・底盤・基礎ストーリ） |
 | `ifc/structural_class.py` | `parse/StructuralClass` | 構造クラス判定（純ロジック） |
 | （ifcopenshell の行列・幾何） | `parse/IfcGeometry` + `core/Geometry` | 配置行列・押し出し・断面 |
-| `document.py` | `core/Document`（検証も同ファイル） | 命令セット・検証 |
-| `tracing.py` | `core/Trace`（任意） | クラッシュ診断ログ |
+| `document.py` | `core/Document`（検証も同ファイル） | 命令セット・検証・描画結果の件数（`DrawCounts`） |
+| （`main.py` の完了メッセージ） | `parse/Summary` | 完了・エラーダイアログの本文 |
+| `tracing.py` | `core/Trace` | クラッシュ診断ログ（フェーズ単位・毎行フラッシュ） |
 | `vw/__init__.py` `execute_document` | `draw/ExecuteDocument` | 描画ディスパッチ |
 | `vw/grid.py` … `vw/section.py` | `draw/Grid` … `draw/Section` | 要素ごとの描画 |
 | `vw/sheet.py` `draw_tag` | `draw/Tag` | データタグの配置・関連付け・注釈への追加 |

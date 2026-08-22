@@ -403,12 +403,86 @@ namespace HomeskzIfcImport::draw
 		return static_cast<RefNumber>(gSDK->GetObjectInternalIndex(style));
 	}
 
+	// --- 取り込み全体の Undo（DrawUtil.h「なぜレイヤを記録するのか」）--------------------
+	namespace
+	{
+		// いま開いている undo スコープ（無ければ nullptr）。インポートはメニューコマンドから
+		// 1 本しか走らないので、高々 1 つで足りる。要素側が引数で持ち回らずに済むように、
+		// 記録の入口（RecordCreatedLayer / NoteExistingLayerUsed）はここを見る。
+		ImportUndoScope* gActiveUndoScope = nullptr;
+	} // namespace
+
+	ImportUndoScope::ImportUndoScope()
+	{
+		// kUndoSwapObjects は「入れ替えるオブジェクトを AddBeforeSwapObject /
+		// AddAfterSwapObject で指定する」方式（Kernel/API/APIBase.Legacy.Defs.h）。
+		// **これがイベントの開始も兼ねる**（ISDK に開始専用の呼び出しは無い）。
+		gSDK->SetUndoMethod(kUndoSwapObjects);
+		gSDK->NameUndoEvent(TXString("ホームズ君 IFC 取り込み"));
+		gActiveUndoScope = this;
+	}
+
+	ImportUndoScope::~ImportUndoScope()
+	{
+		gActiveUndoScope = nullptr;
+		if (fCreatedLayers.empty())
+		{
+			// 何も登録できていない＝「取り消し」しても取り込みは戻らない。それでも
+			// イベントを残すと、SDK 内部が途中で開いた記録（断面ビューポート等）が
+			// 取り消しの対象になり、**図面が壊れる**（実機で確認。ROADMAP.md M15）。
+			// テーブルから取り除いておく——取り込み前のユーザー自身の履歴は残る。
+			gSDK->EndAndRemoveUndoEvent();
+			return;
+		}
+		gSDK->EndUndoEvent();
+	}
+
+	bool ImportUndoScope::contains(MCObjectHandle layer) const
+	{
+		return std::ranges::find(fCreatedLayers, layer) != fCreatedLayers.end();
+	}
+
+	void RecordCreatedLayer(MCObjectHandle layer)
+	{
+		ImportUndoScope* scope = gActiveUndoScope;
+		if (scope == nullptr || layer == nil || scope->contains(layer))
+			return;
+		// 「あとで消してよいもの」として undo テーブルへ登録する。レイヤを消せば、その上の
+		// 図形（構造材・壁・スラブ・シンボル・ビューポート）もまとめて消える。
+		gSDK->AddAfterSwapObject(layer);
+		scope->fCreatedLayers.push_back(layer);
+	}
+
+	void RecordCreatedObject(MCObjectHandle object)
+	{
+		if (gActiveUndoScope == nullptr || object == nil)
+			return;
+		// レイヤと違い一覧には控えない（数えるのは「取り消しで戻せるか」の判断材料であって、
+		// 下ごしらえのオブジェクトはその判断に関係しないため）。
+		gSDK->AddAfterSwapObject(object);
+	}
+
+	void NoteExistingLayerUsed(MCObjectHandle layer)
+	{
+		ImportUndoScope* scope = gActiveUndoScope;
+		if (scope == nullptr || layer == nil || scope->contains(layer))
+			return;
+		scope->fUsedExistingLayer = true;
+	}
+
 	MCObjectHandle PrepareLayer(const std::string& layerName)
 	{
 		const TXString name(layerName.c_str());
 		MCObjectHandle layer = gSDK->GetNamedLayer(name);
 		if (layer == nil)
+		{
 			layer = gSDK->CreateLayer(name, kDesignLayerType);
+			RecordCreatedLayer(layer); // 取り消しで消してよい（このインポートが作った）
+		}
+		else
+		{
+			NoteExistingLayerUsed(layer); // 取り込み前から在った＝取り消しでは戻らない
+		}
 		if (layer != nil)
 			gSDK->SetCurrentLayer(layer);
 		return layer;
@@ -419,6 +493,9 @@ namespace HomeskzIfcImport::draw
 		MCObjectHandle layer = gSDK->GetNamedLayer(TXString(layerName.c_str()));
 		if (layer == nil)
 			return nil;
+		// ストーリ由来のレイヤは drawStories が作った（＝登録済み）なので何も起きない。
+		// 取り込み前から在ったものだけが「戻らない」印になる。
+		NoteExistingLayerUsed(layer);
 		gSDK->SetCurrentLayer(layer);
 		return layer;
 	}
@@ -463,7 +540,14 @@ namespace HomeskzIfcImport::draw
 		const TXString name(number.c_str());
 		MCObjectHandle layer = gSDK->GetNamedLayer(name);
 		if (layer == nil)
+		{
 			layer = gSDK->CreateLayer(name, kSheetLayerType);
+			RecordCreatedLayer(layer); // 取り消しで消してよい（ビューポートごと消える）
+		}
+		else
+		{
+			NoteExistingLayerUsed(layer);
+		}
 		if (layer == nil)
 			return nil;
 		try
