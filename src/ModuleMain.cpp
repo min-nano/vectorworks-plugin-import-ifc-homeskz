@@ -49,17 +49,34 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// Start-up is the right place because a compiled plug-in can only be swapped in
 	// at load time, and because a plug-in may re-invoke its own command
 	// programmatically — so the check must not live on the command path.
+	//
+	// 例外はここから外へ出さない（CLAUDE.md「エラーハンドリング・所有権」）。
+	// **起動時に呼ばれる SDK コールバックなので、ここで例外が漏れると
+	// VectorWorks の起動そのものを巻き込んで落とす。** 自動アップデートは
+	// あくまで付随機能であり、失敗してもプラグインの登録（この関数の本題）は
+	// 続けなければならないため、黙って諦める（オフライン時に無言なのと同じ扱い）。
+	//
+	// NOLINTBEGIN(bugprone-empty-catch): 起動時は報告先が無い（ここでダイアログを出すと
+	// 起動を妨げるだけ）。黙って諦めるのが**この場所では正しい**振る舞いなので、
+	// 握り潰しを禁じる規則をここだけ外す。
+	try
+	{
 #ifndef VW_DEV_BUILD
-	// Stable plug-in: check for a newer stable build and, if one exists, ask (with
-	// a native Vectorworks dialog) whether to install it. Silent when already
-	// current or offline.
-	HomeskzIfcImport::RunStableStartupCheck();
+		// Stable plug-in: check for a newer stable build and, if one exists, ask (with
+		// a native Vectorworks dialog) whether to install it. Silent when already
+		// current or offline.
+		HomeskzIfcImport::RunStableStartupCheck();
 #else
-	// Dev plug-in: let the user pick which branch's build to use — keep the
-	// installed one, or switch to another branch's prerelease (installed on
-	// choosing, then restart to load). Silent on a network error.
-	HomeskzIfcImport::RunDevStartupCheck();
+		// Dev plug-in: let the user pick which branch's build to use — keep the
+		// installed one, or switch to another branch's prerelease (installed on
+		// choosing, then restart to load). Silent on a network error.
+		HomeskzIfcImport::RunDevStartupCheck();
 #endif
+	}
+	catch (...)
+	{
+	}
+	// NOLINTEND(bugprone-empty-catch)
 
 	Sint32 reply = 0L;
 

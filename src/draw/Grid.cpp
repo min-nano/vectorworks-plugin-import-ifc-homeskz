@@ -67,6 +67,13 @@ namespace HomeskzIfcImport::draw
 			// プロファイル: 空グループ（Python 版の BeginGroup/EndGroup に対応）。
 			const VWGroupObj profileGroup;
 
+			// **この 2 つは「自分が追加したもの」として undo イベントへ申告する。**
+			// CreateCustomObjectPath は両者を undo 記録つきで削除して PIO へ取り込むので、
+			// 申告しておかないと**取り消したときにポリラインだけが図面へ復活する**
+			// （実機で確認。draw/DrawUtil.h の RecordCreatedObject に経緯）。
+			RecordCreatedObject(pathHandle);
+			RecordCreatedObject(profileGroup.GetThisObject());
+
 			// パス＋プロファイルから GridAxis のカスタムオブジェクト（PIO）を生成する。
 			// 第 4 引数は生成後に再計算するか（true）。'GridAxis' PIO が無い等で失敗（nil）
 			// したらパスのポリラインをフォールバックにする。
