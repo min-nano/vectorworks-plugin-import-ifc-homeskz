@@ -221,19 +221,11 @@ namespace HomeskzIfcImport::parse
 				command.viewport.drawingNumber = names[i];
 				command.viewport.drawingTitle = names[i] + kSectionTitleSuffix;
 				command.viewport.layers = layers;
-				// 切断面に平行な通り芯（紙面に平行＝水平の一点鎖線として写り込む）は
-				// この図だけで消す（parse/Section.h の gridClassFor）。
-				command.viewport.hiddenClasses.emplace_back(gridClassFor(direction));
 				commands.push_back(std::move(command));
 			}
 			return commands;
 		}
 	} // namespace
-
-	const char* gridClassFor(SectionDirection direction)
-	{
-		return direction == SectionDirection::X ? kGridClassX : kGridClassY;
-	}
 
 	std::vector<NamedAxis> namedAxes(const std::vector<GridLine>& lines, const core::Vec2& center,
 									 SectionDirection direction)

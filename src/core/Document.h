@@ -720,7 +720,6 @@ namespace HomeskzIfcImport::core
 	//   drawingTitle  ← 'drawing_title'  … 図面タイトル（"1階床伏図" 等）
 	//   drawingNumber ← 'drawing_number' … 図番（シートレイヤ番号と同じ文字列）
 	//   layers        ← 'layers'         … 表示するデザインレイヤ名（**それ以外は非表示**）
-	//   hiddenClasses ← 'hidden_classes' … このビューポートだけで非表示にするクラス名
 	//
 	// 【並びは重ね順ではない】layers の並び順は描画側の走査順にすぎず、伏図での重なりは
 	// **ドキュメントのデザインレイヤ重ね順**が決める。床・野地板が柱・梁を覆い隠さないように
@@ -728,18 +727,19 @@ namespace HomeskzIfcImport::core
 	// （draw/Story の reorderStoryLayers。命令にレイヤ順を持たせないのは、全ビューポートで
 	// 同じ 1 本の希望順を使うため——命令ごとに複製すると希望順の定義が命令の数だけ増える）。
 	//
-	// 【クラス単位の非表示（hiddenClasses）】描画側はまず**全クラスを表示へ戻し**（そうしないと
-	// 図形が 1 つも映らない。draw/DrawUtil「クラスをわざわざ数え上げる理由」）、そのあとで
-	// ここに挙がったクラスだけを非表示へ落とす。Python 版 ViewportCommand の 'hidden_classes'
-	// に対応する枠で、あちらは**どの伏図も指定しない**まま残っていたが、本移植では軸組図が
-	// 実際に使う——**切断面に平行な通り芯**（例: い通りの軸組図に写り込む い通り自身）を
-	// その図だけで消すため（parse/Section の gridClassFor。ROADMAP.md M14）。伏図は空のまま。
+	// ［Python 版との差異・意図的］Python 版は hidden_classes（クラス単位の非表示）を持つが、
+	// **どの伏図も指定していない**（汎用機構として残されているだけ）。使われない枠を先に
+	// 作らない方針（空レイヤを作らないのと同じ）でここには持たせず、描画側は全クラスを
+	// 表示にする。クラスで絞る図が実際に要るときにフィールドごと足す。
+	//
+	// **軸組図に写り込む「切断面に平行な通り芯」も、クラスの非表示では消さない**——VW が
+	// ビューポート注釈へ作ってしまったインスタンスを描画側が消す（draw/Section の
+	// RemoveGridAxisInstances。ROADMAP.md M14）。
 	struct ViewportCommand
 	{
 		std::string drawingTitle;
 		std::string drawingNumber;
 		std::vector<std::string> layers;
-		std::vector<std::string> hiddenClasses;
 
 		// M13 断面寸法データタグ。この図に載せる注釈（TagCommand の doc コメント参照）。
 		// 伏図・軸組図とも同じ形で持ち、描画側は種類を区別せずに置く。

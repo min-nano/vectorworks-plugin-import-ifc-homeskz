@@ -13,7 +13,9 @@
 //	                                        呼び出し後に設定し、そのあとで更新すること」と
 //	                                        あるので、後段は伏図と同じ手順（draw/DrawUtil の
 //	                                        ConfigureViewport）で仕上げる。
-//	  * gSDK->SetObjectVariable(h, 1064/1035/1059, …) … 断面の見え方（下記）
+//	  * gSDK->SetObjectVariable(h, 1064/1035/1065, …) … 断面の見え方（下記）
+//	  * gSDK->AddViewportAnnotationObject / ParentObject / FirstMemberObj / NextObject /
+//	    DeleteObject … ビューポート注釈の走査と後始末（下記「通り芯の写り込み」）
 //	  * gSDK->GetObjectVariable(h, …)        … 上を**読み戻して効いたか確かめる**（下記）
 //	  * gSDK->GetObjectBounds(h, WorldRect&) … できたビューポートの実寸（並べるのに使う）
 //	  * gSDK->MoveObject(h, dx, dy)          … シートレイヤ上での移動
@@ -28,33 +30,28 @@
 //	決め方（X通り＝−X 方向・Y通り＝+Y 方向。図面の右へ座標が増える＝通り名が左から右へ並ぶ）は
 //	parse/Section が持つ。
 //
-//	【軸組図としての見え方（要件）】**切断面より奥は表示せず**、**プレイナー（レイヤ平面）
-//	図形は表示せず**、**2D コンポーネントは表示する**（下記のオブジェクト変数）。
+//	【軸組図としての見え方（要件）】**切断面より奥も手前も表示せず**、**プレイナー（レイヤ
+//	平面）図形は表示しない**（下記のオブジェクト変数）。**2D コンポーネントは表示したいが
+//	SDK からは設定できない**（下記「通り芯の写り込み」）。
 //	断面の範囲は、**奥行きは無制限**（0 を渡す）・**高さは建物を包む実寸＋余白**・**長さは
 //	断面線の長さ**（指示線を十分外まで延ばして実質無制限にする）。
 //
-//	【通り芯（グリッド線）の写り込み】VW のグリッド線は**デザインレイヤのレイヤ平面に置かれた
-//	平面図形**で、ビューポートには**インスタンス**として出る。VW ヘルプによれば、断面・立面
-//	ビューポートに出せるのは**視線に直交するグリッド線だけ**（平行なものはインスタンスを
-//	作れない＝ダイアログ上でもグレーになる）。ところが**このプラグインが作った断面ビューポート
-//	には、切断面に平行な通り芯が紙面に平行な水平線として写り込む**。ローカル確認で分かった
-//	ことは次のとおり（ROADMAP.md M14 に切り分けの経過）:
-//	  * **同じ書類で手で作った断面ビューポートには写らない**（＝通り芯オブジェクトやレイヤの
+//	【通り芯（グリッド線）の写り込みと、その対処】VW のグリッド線は**デザインレイヤの
+//	レイヤ平面に置かれた平面図形**で、ビューポートには**インスタンス**として注釈へ作られる。
+//	断面・立面ビューポートに出せるのは**視線に直交するグリッド線だけ**のはずだが、この
+//	プラグインが作った断面ビューポートには**切断面に平行な通り芯まで、平面の姿がそのまま
+//	寝た水平の一点鎖線として作られてしまう**。実機での切り分け（ROADMAP.md M14 に経過）:
+//	  * **同じ書類で手で作った断面ビューポートには出ない**（＝通り芯オブジェクトやレイヤの
 //	    表示ではなく、CreateSectionViewport が作るビューポート側の設定差）。
-//	  * 設定の前後で読み戻した実測で、**1059（2D コンポーネント）だけ true を書いても入らない**
-//	    と判明した（作成直後＝非表示、更新後も非表示。1064・1035 は同じ書き方で入っている）。
-//	    手作りビューポートは**表示**なので、これが差だった。
-//	そこで本実装は
-//	  * 表示設定を当てた後に**読み戻して確かめ、入っていなければ更新の後にもう一度当てて更新
-//	    し直す**（SetObjectVariable は書けなかったことを教えてくれないので推測しない）、
-//	  * 1065（切断面より手前）も false にする（軸組図は切断面の軸組を見る図なので素直な指定。
-//	    実測では作成直後から非表示だった）、
-//	  * 4 つの表示設定を各段階で読み出して完了ダイアログへ出す（SnapshotDisplayOptions。
-//	    **原因調査中の一時的な診断**）、
-//	  * 切断面に平行な通り芯のクラスを、その軸組図でだけ非表示にする（命令の hiddenClasses。
-//	    値は parse/Section の gridClassFor が決める。VW 自身の規則をクラス指定で実現するもので、
-//	    表示設定の効き方に依らず効く）
-//	を重ねる。当て直しで入ることが確認できたら、診断と重複した対処は整理する。
+//	  * 表示設定を読み戻した実測で、**手作りは 2D コンポーネント＝表示／プラグイン製は
+//	    非表示**と判明した。そして**1059 は true を書いても・更新後に当て直しても入らない**
+//	    （1064・1035・1065 は同じ書き方で入る）。VW の UI でもオブジェクト情報パレットや
+//	    オーガナイザからは変更できず、**作成時のダイアログかビューポートスタイルでしか
+//	    決まらない**設定で、後から書き換える手立てが無い。
+//	そこで**設定を直すのは諦め、作られてしまったインスタンスを注釈から消す**
+//	（RemoveGridAxisInstances）。消すのは**寝ているもの**（外接矩形が横長＝平面の姿のまま
+//	写ったもの）だけで、直交する通り芯のインスタンス（鉛直線＋通り名バブル。軸組図に通り名を
+//	出す目的そのもの）はそのまま残す。
 //
 //	【範囲を「無限」にはできない（調べ尽くした結論）】UI で断面ビューポートを手で作ると
 //	〈長さ・高さの範囲〉は既定で〈無限〉になるが、**SDK からその状態にする手段は無い**。
@@ -79,8 +76,10 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 
-// ビューポートの更新（表示設定を当て直したときに描き直す）に使う VWFC ラッパー。
-#include "VWFC/VWObjects/VWViewportObj.h"
+// 注釈の走査に使う VWFC ラッパー（通り芯インスタンスの判別＝VWParametricObj、注釈グループを
+// 特定する使い捨て図形＝VWPolygon2DObj）。
+#include "VWFC/VWObjects/VWParametricObj.h"
+#include "VWFC/VWObjects/VWPolygon2DObj.h"
 
 #include <algorithm>
 #include <array>
@@ -127,30 +126,27 @@ namespace HomeskzIfcImport::draw
 		// CreateSectionViewport のヘッダコメントも「表示設定は呼び出し後、更新はその後」）。
 		constexpr short kOVDisplayObjectsBeyondCutPlane = 1064;
 		constexpr short kOVDisplayPlanarObjects = 1035;
-		constexpr short kOVDisplay2DComponents = 1059;
 		constexpr short kOVDisplayObjectsBeforeCutPlane = 1065;
 
 		// 軸組図としてこうあってほしい値と、診断に出す表示名。
 		//
-		// **1059（2D コンポーネント）は書いても効かないことがある**——実機の読み戻しで、
-		// CreateSectionViewport の直後は**非表示**で、true を書いてビューポートを更新しても
-		// **非表示のまま**だった（1064・1035 は同じ書き方で入っている＝読み出しは正しい）。
-		// 手で作った断面ビューポートは**表示**なので、これが「切断面に平行な通り芯が水平線と
-		// して写る／写らない」の差になっている（ROADMAP.md M14）。そこで**更新のあとに当て
-		// 直す**（drawSections の retryApply）。
-		//
-		// 1065（切断面より手前）は手作りビューポートとの差を潰すために足したもの。軸組図は
-		// 切断面の軸組を見る図なので素直な指定でもある（実測では作成直後から非表示だった）。
+		// **1059（2D コンポーネント）はここに入れない**——実機の読み戻しで、
+		// CreateSectionViewport 直後は非表示・true を書いても・更新後に当て直しても**非表示の
+		// まま**だと分かった（1064・1035・1065 は同じ書き方で入っている＝読み出しは正しい）。
+		// VW 側でも**オブジェクト情報パレットやオーガナイザからは変更できず、作成時のダイアログ
+		// かビューポートスタイルでしか決まらない**設定で、後から書き換える手立てが無い。
+		// この設定が非表示のままだと**切断面に平行な通り芯のインスタンスが水平線として
+		// 注釈に作られてしまう**ので、そちらは作られたインスタンスを消して対処する
+		// （RemoveGridAxisInstances。ファイル冒頭「通り芯（グリッド線）の写り込み」）。
 		struct DisplayOption
 		{
 			short selector = 0;
 			bool wanted = false;
 			const char* label = "";
 		};
-		constexpr std::array<DisplayOption, 4> kDisplayOptions = {{
+		constexpr std::array<DisplayOption, 3> kDisplayOptions = {{
 			{kOVDisplayObjectsBeyondCutPlane, false, "1064 奥"},
 			{kOVDisplayPlanarObjects, false, "1035 プレイナー"},
-			{kOVDisplay2DComponents, true, "1059 2D"},
 			{kOVDisplayObjectsBeforeCutPlane, false, "1065 手前"},
 		}};
 
@@ -191,66 +187,153 @@ namespace HomeskzIfcImport::draw
 				SetBooleanVariable(viewport, option.selector, static_cast<Boolean>(option.wanted));
 		}
 
-		// 表示設定がすべて要件どおりに**読み戻せる**か。読めない項目があれば false
-		// （＝「効いていない」側に倒す。当て直しを試す価値があるため）。
-		bool MatchesDisplayOptions(MCObjectHandle viewport)
-		{
-			for (const DisplayOption& option : kDisplayOptions)
-			{
-				bool actual = false;
-				if (!ReadBooleanVariable(viewport, option.selector, actual))
-					return false;
-				if (actual != option.wanted)
-					return false;
-			}
-			return true;
-		}
-
-		// ビューポートを描き直す（表示設定を当て直したあとに要る）。描き直せたら true。
-		bool UpdateViewport(MCObjectHandle viewport)
-		{
-			try
-			{
-				VWViewportObj vp(viewport);
-				vp.Update();
-			}
-			catch (...)
-			{
-				// 描き直せなくてもビューポートは図面に残る（1 つの失敗で全体を止めない）。
-				// 当て直した設定が絵に反映されないだけなので、そのまま戻る。
-				return false;
-			}
-			return true;
-		}
-
-		// **ビューポートの表示設定をそのまま読み出す**（"1064 奥=表示 / 1035 プレイナー=非表示"
-		// …の形）。読めない項目は「?」にする（＝「読めない」と「false だった」を混同しない）。
+		// **設定が効いたかを読み戻して確かめる**（要件どおりでない項目だけを "1035 プレイナー=
+		// 表示（期待: 非表示）" の形で返す。すべて要件どおりなら空文字）。
 		//
 		// 【なぜ読むか】SetObjectVariable は**変数が読み取り専用・型違い・そのオブジェクトに
-		// 無い**とき黙って何もしない（返り値も見ていなかった）。「設定したつもりで効いていない」
-		// を目視で見抜くのは難しいので、図面から読み戻して確かめる。
-		//
-		// 【調査中は作成直後と更新後の両方を出す】切断面に平行な通り芯が水平線として写る件
-		// （ROADMAP.md M14）は、**同じ書類でも手で作ったビューポートには出ない**と分かって
-		// おり、差は CreateSectionViewport が作るビューポートの設定にある。既定値が何かを
-		// 実機から読むために、当面は完了ダイアログへ実測をそのまま出す（原因が確定したら、
-		// 要件どおりでないときだけ出す形へ戻す）。
-		std::string SnapshotDisplayOptions(MCObjectHandle viewport)
+		// 無い**とき黙って何もしない（返り値も無い）。「設定したつもりで効いていない」は目視で
+		// 見抜けないので、図面から読み戻して確かめる——1059（2D コンポーネント）が書けない
+		// ことも、この読み戻しで初めて分かった（kDisplayOptions のコメント）。
+		std::string CheckDisplayOptions(MCObjectHandle viewport)
 		{
 			std::string text;
 			for (const DisplayOption& option : kDisplayOptions)
 			{
 				bool actual = false;
-				// 三項演算子を入れ子にしない（clang-tidy
-				// readability-avoid-nested-conditional-operator）。
-				const char* state = "?"; // 読めなかった
-				if (ReadBooleanVariable(viewport, option.selector, actual))
-					state = actual ? "表示" : "非表示";
+				if (!ReadBooleanVariable(viewport, option.selector, actual))
+					continue; // 読めない項目は判定材料にしない
+				if (actual == option.wanted)
+					continue;
 				if (!text.empty())
 					text += " / ";
-				text += std::string(option.label) + "=" + state;
+				text += std::string(option.label) + "=" + (actual ? "表示" : "非表示") +
+						"（期待: " + (option.wanted ? "表示" : "非表示") + "）";
 			}
 			return text;
+		}
+
+		// --- 切断面に平行な通り芯インスタンスの削除 -----------------------------------
+		//
+		// VW はビューポートごとに通り芯（グリッド線）の**インスタンス**を注釈へ作る。本来
+		// 断面ビューポートに作られるのは**視線に直交する**通り芯だけだが、2D コンポーネント
+		// 表示が非表示のまま（＝SDK から直せない。上記）だと、**切断面に平行な通り芯まで
+		// 水平の一点鎖線として作られてしまう**。そこで作られてしまったものを消す。
+		//
+		// 見分け方は**向き**: 直交する通り芯のインスタンスは鉛直線＋足元のバブル（＝縦長）、
+		// 平行なものは平面の姿がそのまま寝た水平線＋左端のバブル（＝横長）になる。外接矩形の
+		// 幅が高さを上回るものを「寝ている」と判定する。
+
+		// グリッド線の PIO 名（VW 標準。draw/Grid が CreateCustomObjectPath へ渡すのと同じ
+		// universal 名）。インスタンスも同じ PIO なので、この名前で拾える。
+		constexpr const char* kGridAxisPlugin = "GridAxis";
+
+		// 注釈の走査結果（診断用）。
+		struct AnnotationCounts
+		{
+			std::size_t viewports = 0;	 // 注釈をたどれたビューポート
+			std::size_t unreachable = 0; // 注釈グループを取れなかったビューポート
+			std::size_t gridInstances = 0; // 見つけた通り芯インスタンス
+			std::size_t removed = 0;	   // うち寝ていて消したもの
+		};
+
+		// オブジェクトが「寝ている」（外接矩形が横長）か。測れなければ false（消さない側へ倒す）。
+		bool IsLyingFlat(MCObjectHandle object)
+		{
+			WorldRect bounds;
+			if (!gSDK->GetObjectBounds(object, bounds))
+				return false;
+			const double width = std::abs(bounds.right - bounds.left);
+			const double height = std::abs(bounds.top - bounds.bottom);
+			return width > height;
+		}
+
+		// オブジェクトが通り芯（GridAxis）の PIO か。PIO でなければ VWParametricObj の構築が
+		// 例外を投げるので、それを掴んで false にする。
+		bool IsGridAxisObject(MCObjectHandle object)
+		{
+			try
+			{
+				const VWParametricObj pio(object);
+				return pio.GetParametricName() == TXString(kGridAxisPlugin);
+			}
+			catch (...)
+			{
+				// PIO ではない（＝通り芯インスタンスではない）。注釈には自前のデータタグや
+				// VW の作る図形も入るので、ここは素通りが正常。
+				return false;
+			}
+		}
+
+		// ビューポートの**注釈グループ**を返す。取れなければ nil。
+		//
+		// 【なぜ回りくどいのか】ビューポートのグループ（Crop=1 / Annotation=2 / Cache=3）を
+		// 直に取る API は **VectorScript の GetVPGroup にはあるが SDK には無い**（ci-debug で
+		// SDK 全体を検索）。そこで**注釈へ入れた図形の親**をたどる——AddViewportAnnotationObject
+		// は渡した図形を注釈グループへ移すので（draw/Tag が頼っているのと同じ挙動）、使い捨ての
+		// 図形を 1 つ入れて親を控え、すぐ消せば注釈グループのハンドルだけが手に入る。
+		MCObjectHandle AnnotationGroupOf(MCObjectHandle viewport)
+		{
+			// 使い捨ての 2 点ポリライン（draw/Grid のパスと同じ作り方。カレントレイヤに出る）。
+			VWPolygon2DObj probe({VWPoint2D(0.0, 0.0), VWPoint2D(1.0, 0.0)});
+			const MCObjectHandle probeHandle = probe.GetThisObject();
+			if (probeHandle == nil)
+				return nil;
+			if (!gSDK->AddViewportAnnotationObject(viewport, probeHandle))
+			{
+				// 注釈へ入らなかった。カレントレイヤに残る（draw/Tag の「注釈に入らなかった
+				// タグは消す」と同じ理由）ので必ず消す。
+				gSDK->DeleteObject(probeHandle, true);
+				return nil;
+			}
+			const MCObjectHandle group = gSDK->ParentObject(probeHandle);
+			gSDK->DeleteObject(probeHandle, true);
+			return group;
+		}
+
+		// ビューポートの注釈から、寝ている通り芯インスタンスを消す。
+		void RemoveGridAxisInstances(MCObjectHandle viewport, AnnotationCounts& counts)
+		{
+			const MCObjectHandle group = AnnotationGroupOf(viewport);
+			if (group == nil)
+			{
+				++counts.unreachable;
+				return;
+			}
+			++counts.viewports;
+
+			// **消す前に一覧を作る**——走査しながら消すと、消した図形から NextObject を
+			// たどることになる。
+			std::vector<MCObjectHandle> doomed;
+			for (MCObjectHandle member = gSDK->FirstMemberObj(group); member != nil;
+				 member = gSDK->NextObject(member))
+			{
+				if (!IsGridAxisObject(member))
+					continue;
+				++counts.gridInstances;
+				if (IsLyingFlat(member))
+					doomed.push_back(member);
+			}
+			for (const MCObjectHandle member : doomed)
+			{
+				gSDK->DeleteObject(member, true);
+				++counts.removed;
+			}
+		}
+
+		// 注釈の走査を人が読める 1 行にする（異常が無ければ空文字）。**通り芯インスタンスを
+		// 1 つも見つけられなかった**ときも出す——「消したつもりで消せていない」を黙らせない。
+		std::string AnnotationDiagnostics(const AnnotationCounts& counts)
+		{
+			std::string text;
+			if (counts.unreachable > 0)
+				text += "注釈をたどれなかったビューポート " + std::to_string(counts.unreachable) +
+						" 枚。";
+			if (counts.viewports > 0 && counts.gridInstances == 0)
+				text += "通り芯インスタンスが 1 つも見つかりませんでした（寝た通り芯が残ります）。";
+			if (text.empty())
+				return text;
+			return "軸組図の通り芯インスタンス: " + text + "（消した数 " +
+				   std::to_string(counts.removed) + "）";
 		}
 
 		// できたビューポートをシートレイヤ上で重ならないように格子状へ並べる（Python 版
@@ -321,11 +404,11 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingSheetLayers = 0;
 		std::size_t missingViewports = 0;
 		std::size_t classesApplied = 0;
-		// 表示設定（1064/1035/1059/1065）の実測（SnapshotDisplayOptions）。設定の前後で読み、
-		// 完了ダイアログへ出す。**原因調査中の一時的な診断**（ROADMAP.md M14）。
+		// 表示設定の実測（要件どおりにならなかった項目だけ。CheckDisplayOptions）。全命令で
+		// 同じ設定なので 1 枚目だけ見る。
 		std::string displayNote;
-		// 更新後の当て直しを試すか。1 枚目で効かなければ false にして以降は省く。
-		bool retryApply = true;
+		// 注釈から消した通り芯インスタンスの集計（RemoveGridAxisInstances）。
+		AnnotationCounts annotations;
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
 		const ObjectHandles emptyHandles;
 		const ObjectHandleTable& members =
@@ -363,36 +446,18 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			// 表示の作法（奥・手前を出さない／プレイナー図形を出さない／2D コンポーネントは
-			// 出す）は**更新より前**に設定する（ConfigureViewport の最後が更新）。設定の前後で
-			// 読み出しておき（1 枚目だけ。全命令で同じ設定なので診断行を命令の数だけ並べない）、
-			// **CreateSectionViewport の既定値と、設定が効いたか**を診断へ出す。
-			const bool inspect = drawn == 0;
-			if (inspect)
-				displayNote = "作成直後 " + SnapshotDisplayOptions(viewport);
+			// 表示の作法（奥・手前を出さない／プレイナー図形を出さない）は**更新より前**に
+			// 設定する（ConfigureViewport の最後が更新）。効いたかは 1 枚目だけ読み戻す
+			// （全命令で同じ設定なので、診断行を命令の数だけ並べない）。
 			ApplySectionDisplayOptions(viewport);
-			if (inspect)
-				displayNote += " ｜ 設定直後 " + SnapshotDisplayOptions(viewport);
 			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport);
-			if (inspect)
-				displayNote += " ｜ 更新後 " + SnapshotDisplayOptions(viewport);
+			if (drawn == 0)
+				displayNote = CheckDisplayOptions(viewport);
 
-			// **更新の後にもう一度当てる**。1059（2D コンポーネント）は作成直後に書いても
-			// 入らないので、更新後に当て直して描き直す（kDisplayOptions のコメント）。
-			// **1 枚目で効果が無ければ以降はやらない**（retryApply）——効かない当て直しの
-			// ために全枚数を 2 回更新すると、取り込みが遅くなるだけになる。
-			if (retryApply && !MatchesDisplayOptions(viewport))
-			{
-				ApplySectionDisplayOptions(viewport);
-				// 描き直せなくても当てた値は残る（次に手で更新すれば絵に出る）ので、
-				// 戻り値は見ない＝当て直しそのものは失敗扱いにしない。
-				static_cast<void>(UpdateViewport(viewport));
-				if (inspect)
-				{
-					displayNote += " ｜ 再設定後 " + SnapshotDisplayOptions(viewport);
-					retryApply = MatchesDisplayOptions(viewport);
-				}
-			}
+			// **更新のあと**に、切断面へ平行なまま作られてしまった通り芯インスタンスを注釈から
+			// 消す（上記 RemoveGridAxisInstances）。インスタンスは更新で作られるので、
+			// ConfigureViewport（最後が更新）より前にやっても消すものが無い。
+			RemoveGridAxisInstances(viewport, annotations);
 
 			// 断面寸法データタグ。**並べ替え（ArrangeViewports）より前**に置く——注釈は
 			// ビューポートと一緒に動くので、先に置いておけば移動しても図の上に留まる。
@@ -407,15 +472,22 @@ namespace HomeskzIfcImport::draw
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
-		// 表示設定の実測（原因が別物なので他の診断とは別行にする）。**図は出ているのに
-		// 見え方だけが違う**という不具合は目視で見落としやすいので、実測値をそのまま出す。
+		// 表示設定が効かなかったときの診断（原因が別物なので他とは別行にする）。**図は出て
+		// いるのに見え方だけが違う**という不具合は目視で見落としやすいので、実測値を出す。
 		if (note != nullptr && !displayNote.empty())
 		{
 			if (!note->empty())
 				*note += "\n";
-			*note += "軸組図の表示設定（実測。期待は 奥=非表示 / プレイナー=非表示 / 2D=表示 / "
-					 "手前=非表示）: " +
-					 displayNote;
+			*note += "軸組図の表示設定: " + displayNote;
+		}
+
+		// 通り芯インスタンスの診断（同上、別行）。
+		const std::string annotationNote = AnnotationDiagnostics(annotations);
+		if (note != nullptr && !annotationNote.empty())
+		{
+			if (!note->empty())
+				*note += "\n";
+			*note += annotationNote;
 		}
 
 		const bool classesBroken = drawn > 0 && classesApplied == 0;

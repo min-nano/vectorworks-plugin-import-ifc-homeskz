@@ -26,15 +26,6 @@ namespace HomeskzIfcImport::parse
 {
 	class Context;
 
-	// X 通り／Y 通りのクラス名。Python 版 ifc/grid.py の CLASS_X / CLASS_Y と一致させる。
-	//
-	// **通り芯のクラス名はここが唯一の定義**で、通り芯のクラス分け（buildGridCommands）と
-	// 軸組図が切断面に**平行**な通り芯を隠す指定（parse/Section の gridClassFor）が同じ
-	// 文字列を使う。別々に書くと「クラス分けは X通り なのに隠すのは別名」という取りこぼしが
-	// 起きうる（CLAUDE.md「重複を作らない置き場所」）。
-	inline constexpr const char* kGridClassX = "01作図-01線-01基準線-01通り芯-X通り";
-	inline constexpr const char* kGridClassY = "01作図-01線-01基準線-01通り芯-Y通り";
-
 	// 解析途中の 1 本の通り芯（センタリング**前**の生端点＋軸名）。センタリング中心は
 	// 全端点の bbox から決まるので、線分の収集と中心の算出を分けられるようにこの中間型を
 	// 公開する（床・垂木・野地板も同じ中心を使うため、線分収集は 1 回で済ませたい）。

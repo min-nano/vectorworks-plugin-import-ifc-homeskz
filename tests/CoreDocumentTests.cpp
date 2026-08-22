@@ -1132,7 +1132,6 @@ namespace
 		section.viewport.drawingNumber = "X1";
 		section.viewport.drawingTitle = "X1通り";
 		section.viewport.layers = {"1-横架材天端", "1-FL", "共通"};
-		section.viewport.hiddenClasses = {"01作図-01線-01基準線-01通り芯-X通り"};
 		return section;
 	}
 } // namespace
@@ -1164,30 +1163,6 @@ TEST(validate_rejects_section_without_sheet_or_layers)
 	noLayers.viewport.layers.clear();
 	byLayers.sections.push_back(noLayers);
 	CHECK(!core::validateDocument(byLayers));
-}
-
-TEST(validate_rejects_viewport_with_empty_hidden_class_name)
-{
-	// 非表示クラスは 0 個でよい（伏図は指定しない）が、空の名前はどのクラスも指さないので
-	// 命令として意味を持たない＝描画側に黙って読み飛ばされる。
-	core::Document none;
-	core::SectionCommand noHidden = validSection();
-	noHidden.viewport.hiddenClasses.clear();
-	none.sections.push_back(noHidden);
-	CHECK(core::validateDocument(none));
-
-	core::Document empty;
-	core::SectionCommand emptyName = validSection();
-	emptyName.viewport.hiddenClasses.emplace_back();
-	empty.sections.push_back(emptyName);
-	CHECK(!core::validateDocument(empty));
-
-	// 伏図（同じ ViewportCommand を使う）も同じ関門を通る。
-	core::Document sheet;
-	core::SheetCommand emptySheetClass = validSheet();
-	emptySheetClass.viewport.hiddenClasses.emplace_back();
-	sheet.sheets.push_back(emptySheetClass);
-	CHECK(!core::validateDocument(sheet));
 }
 
 TEST(validate_rejects_section_with_degenerate_line)

@@ -37,10 +37,7 @@ using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::SectionCommand;
 using HomeskzIfcImport::core::SectionDirection;
 using HomeskzIfcImport::parse::buildSectionCommands;
-using HomeskzIfcImport::parse::gridClassFor;
 using HomeskzIfcImport::parse::kAxisMatchTol;
-using HomeskzIfcImport::parse::kGridClassX;
-using HomeskzIfcImport::parse::kGridClassY;
 using HomeskzIfcImport::parse::kSectionLineMargin;
 using HomeskzIfcImport::parse::kSectionSheetNumber;
 using HomeskzIfcImport::parse::kSectionSheetTitle;
@@ -369,29 +366,6 @@ TEST(BuildSectionCommandsPlacesCutsAndNames)
 	}
 }
 
-TEST(BuildSectionCommandsHidesTheParallelGridClass)
-{
-	Model const model = sampleGridModel();
-	const std::vector<SectionCommand> commands = buildSectionCommands(model, sampleDocument());
-
-	// 軸組図には**切断面と直交する**通り芯だけを出す。切断面に平行な通り芯——とりわけ
-	// 切断位置に乗っている 1 本——は紙面に平行な水平線として写り込むので、その図だけ
-	// クラスごと隠す（X通りの図では X通り、Y通りの図では Y通り）。
-	for (const SectionCommand& command : commands)
-	{
-		const char* parallel = command.direction == SectionDirection::X ? kGridClassX : kGridClassY;
-		const char* perpendicular =
-			command.direction == SectionDirection::X ? kGridClassY : kGridClassX;
-		CHECK(command.viewport.hiddenClasses == (std::vector<std::string>{parallel}));
-		// 直交する側は隠さない（隠すと通り名のバブルまで消える）。
-		CHECK(std::ranges::find(command.viewport.hiddenClasses, std::string(perpendicular)) ==
-			  command.viewport.hiddenClasses.end());
-	}
-	// 期待値は手書き（parse/Grid.h の定数と一致すること自体を確かめる）。
-	CHECK(std::string(gridClassFor(SectionDirection::X)) == "01作図-01線-01基準線-01通り芯-X通り");
-	CHECK(std::string(gridClassFor(SectionDirection::Y)) == "01作図-01線-01基準線-01通り芯-Y通り");
-}
-
 TEST(BuildSectionCommandsOrientsLinesAndViewDirection)
 {
 	Model const model = sampleGridModel();
@@ -518,12 +492,6 @@ TEST(FixtureSectionsCutRealGridLinesAndShowExistingLayers)
 		CHECK(!section.viewport.layers.empty());
 		for (const std::string& layer : section.viewport.layers)
 			CHECK(storyLayers.contains(layer));
-		// 隠すのは切断面に平行な通り芯のクラス 1 つだけで、**実際に通り芯が身に付けて
-		// いるクラス**であること（名前がずれていると何も隠せない）。
-		CHECK(section.viewport.hiddenClasses ==
-			  (std::vector<std::string>{gridClassFor(section.direction)}));
-		CHECK(std::ranges::any_of(document.grids, [&section](const core::GridCommand& grid)
-								  { return grid.drawClass == gridClassFor(section.direction); }));
 	}
 
 	// 命令セット全体が検証を通る（描画フェーズへ渡せる）。

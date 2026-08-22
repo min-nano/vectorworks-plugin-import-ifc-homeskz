@@ -156,8 +156,7 @@ src/
     Sheet.{h,cpp}           シート＝伏図（旧 ifc/sheet.py の sheet 命令。IFC ではなく
                             取り込んだ要素の有無・柱の span から決まる）
     Section.{h,cpp}         軸組図＝断面ビューポート（旧 ifc/section.py。柱梁の芯を通る通りを
-                            検出し、切断線・視線の向き・表示レイヤと**非表示クラス**
-                            ——切断面に平行な通り芯（gridClassFor）——を決める。断面の範囲と
+                            検出し、切断線・視線の向き・表示レイヤを決める。断面の範囲と
                             表示の作法は draw/Section が持つ）
     Tag.{h,cpp}             断面寸法データタグ（旧 ifc/tag.py。IFC ではなく member 命令から
                             導出する。**Python 版と違い伏図だけでなく軸組図にも載せる**ので、
@@ -190,8 +189,10 @@ src/
                             違い ISDK::CreateSectionViewport で新規作成する**（既製 40 枚の
                             流用はしない。ROADMAP.md M14 の【決定】）。断面の範囲（奥行きだけ
                             0＝無限・高さは建物の実寸＋余白・長さは断面線の長さ）と
-                            表示の作法（奥を出さない・プレイナー図形を出さない・2D
-                            コンポーネントは出す）の唯一の置き場所
+                            表示の作法（奥・手前を出さない／プレイナー図形を出さない）、
+                            **VW が注釈へ作ってしまう「寝た」通り芯インスタンスの削除**
+                            （RemoveGridAxisInstances。2D コンポーネント表示を SDK から
+                            設定できないため）の唯一の置き場所
     …                       以降、要素ごとに 1 対 1 で追加
 
 tests/
@@ -218,9 +219,7 @@ tests/
 述語（`isFloorSlab` / `isRoofSlab` / `isFireBrace`、基礎の `isBaseSlab` 等）はその要素の
 ヘッダ、金物（`IfcMechanicalFastener`）の型名取得は `parse/Column` の `fastenerTypeName`
 （柱頭・柱脚金物とアンカーボルトが共有）、平面座標の同一判定と許容
-（`samePoint` / `kPointEps`）は `core/Geometry.h`、**通り芯のクラス名**（`kGridClassX` /
-`kGridClassY`。クラス分けと、軸組図で切断面に**平行**な通り芯を隠す指定
-＝`parse/Section` の `gridClassFor` が共有する）は `parse/Grid.h`、屋根面の勾配座標系と退化の閾値・**押し出しを
+（`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値・**押し出しを
 鉛直とみなす閾値**（`kVerticalExtrudeTol`。平面外形の求め方と、人通口・地中梁の「水平押し出しか」
 判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・許容値（統合・自由端・**人通口・
 壁結合・地中梁**）は `parse/Footing.h`、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・
