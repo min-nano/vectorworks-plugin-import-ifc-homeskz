@@ -206,9 +206,8 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
-		// ビューポートを描き直す（表示設定を当て直したあとに要る）。失敗しても図は残るので
-		// 黙って戻る（ConfigureViewport の Update と同じ扱い）。
-		void UpdateViewport(MCObjectHandle viewport)
+		// ビューポートを描き直す（表示設定を当て直したあとに要る）。描き直せたら true。
+		bool UpdateViewport(MCObjectHandle viewport)
 		{
 			try
 			{
@@ -217,7 +216,11 @@ namespace HomeskzIfcImport::draw
 			}
 			catch (...)
 			{
+				// 描き直せなくてもビューポートは図面に残る（1 つの失敗で全体を止めない）。
+				// 当て直した設定が絵に反映されないだけなので、そのまま戻る。
+				return false;
 			}
+			return true;
 		}
 
 		// **ビューポートの表示設定をそのまま読み出す**（"1064 奥=表示 / 1035 プレイナー=非表示"
@@ -381,7 +384,9 @@ namespace HomeskzIfcImport::draw
 			if (retryApply && !MatchesDisplayOptions(viewport))
 			{
 				ApplySectionDisplayOptions(viewport);
-				UpdateViewport(viewport);
+				// 描き直せなくても当てた値は残る（次に手で更新すれば絵に出る）ので、
+				// 戻り値は見ない＝当て直しそのものは失敗扱いにしない。
+				static_cast<void>(UpdateViewport(viewport));
 				if (inspect)
 				{
 					displayNote += " ｜ 再設定後 " + SnapshotDisplayOptions(viewport);
