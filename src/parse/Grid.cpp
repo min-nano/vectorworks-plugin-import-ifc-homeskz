@@ -24,11 +24,6 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// X 通り／Y 通りのクラス名。Python 版 ifc/grid.py の CLASS_X / CLASS_Y と一致させる
-		// （'01作図-01線-01基準線-01通り芯-X通り' 等）。ROADMAP.md M1「X/Y でクラス分け」。
-		constexpr const char* kGridClassX = "01作図-01線-01基準線-01通り芯-X通り";
-		constexpr const char* kGridClassY = "01作図-01線-01基準線-01通り芯-Y通り";
-
 		// 2 本が幾何的に同一の線分か（向きの反転も同一とみなす）。重複線除去に使う。
 		// 点の同一判定（許容 core::kPointEps）は core/Geometry の samePoint を使う
 		// ——core/Document の縮退判定と同じ述語・同じ閾値である必要があるため。
