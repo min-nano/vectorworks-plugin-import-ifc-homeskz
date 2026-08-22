@@ -188,6 +188,17 @@ namespace HomeskzIfcImport::core
 			return !tag.style.empty() && tag.memberIndex < memberCount;
 		}
 
+		// ビューポートの表示レイヤ・非表示クラスの名前がすべて非空か。伏図・軸組図が同じ
+		// 規則で見る（空の名前はどのレイヤ／クラスも指さないので、描画側で黙って読み飛ばされる
+		// ＝命令として意味を持たない）。**表示レイヤは 1 枚以上**要る（0 枚なら何も映らない
+		// ビューポートになる）が、非表示クラスは 0 個でよい（伏図は指定しない）。
+		bool hasValidNames(const ViewportCommand& viewport)
+		{
+			const auto isEmpty = [](const std::string& name) { return name.empty(); };
+			return !viewport.layers.empty() && std::ranges::none_of(viewport.layers, isEmpty) &&
+				   std::ranges::none_of(viewport.hiddenClasses, isEmpty);
+		}
+
 		// ビューポート 1 枚のタグがすべて妥当か。伏図・軸組図が同じ規則で見る。
 		bool areValidTags(const ViewportCommand& viewport, std::size_t memberCount)
 		{
@@ -195,8 +206,8 @@ namespace HomeskzIfcImport::core
 									   { return isValidTag(tag, memberCount); });
 		}
 
-		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを
-		// **1 つ以上**持ち、そのレイヤ名がどれも非空であること。図面タイトル・図番は空でも
+		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートの名前（表示レイヤ・
+		// 非表示クラス）が妥当であること（hasValidNames）。図面タイトル・図番は空でも
 		// 描ける（ラベルが空になるだけ）ので弾かない——Python 版が型だけを見るのと同じ扱い。
 		// 表示レイヤが 0 枚の伏図は「何も映らないビューポート」なので作らせない。
 		bool isValidSheet(const SheetCommand& sheet)
@@ -206,23 +217,18 @@ namespace HomeskzIfcImport::core
 			// 「何も並ばない空の箱」にしかならない。凡例を載せない伏図（＝空の optional）は妥当。
 			if (sheet.legend.has_value() && sheet.legend->style.empty())
 				return false;
-			return !sheet.number.empty() && !sheet.title.empty() &&
-				   !sheet.viewport.layers.empty() &&
-				   std::ranges::none_of(sheet.viewport.layers,
-										[](const std::string& layer) { return layer.empty(); });
+			return !sheet.number.empty() && !sheet.title.empty() && hasValidNames(sheet.viewport);
 		}
 
 		// 断面ビューポート（軸組図）1 枚が妥当か（Python 版 _validate_section 相当）。
-		// 配置先シートレイヤ番号（＝レイヤ名）とタイトルが非空で、表示レイヤを 1 つ以上持ち
-		// （伏図と同じ理由＝何も映らないビューポートを作らせない）、**断面指示線が縮退して
-		// いない**（始点≠終点。縮退した線からは切断面が決まらない）こと。断面の範囲は
+		// 配置先シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートの名前が妥当で
+		// （hasValidNames。伏図と同じ関門）、**断面指示線が縮退していない**（始点≠終点。
+		// 縮退した線からは切断面が決まらない）こと。断面の範囲は
 		// 命令が持たない（core/Document.h の SectionCommand 参照）ので見ない。
 		bool isValidSection(const SectionCommand& section)
 		{
 			return !section.number.empty() && !section.title.empty() &&
-				   !section.viewport.layers.empty() &&
-				   std::ranges::none_of(section.viewport.layers,
-										[](const std::string& layer) { return layer.empty(); }) &&
+				   hasValidNames(section.viewport) &&
 				   !samePoint(section.lineStart, section.lineEnd);
 		}
 

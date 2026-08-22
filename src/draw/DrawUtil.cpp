@@ -46,8 +46,11 @@ namespace HomeskzIfcImport::draw
 
 		// SetViewportClassVisibility の表示種別。SDK の EClassVisibility（VWFC/VWObjects/
 		// VWClass.h）が Normal=0 / Invisible=-1 / Grayed=2 と定めており、**VS の 0/1/2 とは
-		// 値が違う**（1 は「非表示」ではない）。表示に戻すのが目的なので Normal だけを使う。
+		// 値が違う**（1 は「非表示」ではない）。既定は「全クラスを表示へ戻す」で、命令が
+		// hiddenClasses を挙げたときだけ Invisible へ落とす（グレー＝2 は薄く残るので使わない
+		// ——レイヤの非表示と同じ理由）。
 		constexpr short kClassVisible = 0;
+		constexpr short kClassHidden = -1;
 
 		// 図面の**デザインレイヤ**を先頭から順に辿る。VWDocument::GetDrawingHeaderFristMember
 		// （SDK の綴りママ）が図面のオブジェクト列の先頭＝最初のレイヤで、以降は NextObject で
@@ -515,6 +518,20 @@ namespace HomeskzIfcImport::draw
 
 		// クラス: 1 つずつ表示へ戻す（ヘッダ「クラスをわざわざ数え上げる理由」）。
 		const std::size_t applied = ShowViewportClasses(viewport, setup.classes);
+
+		// そのうえで、命令が挙げたクラスだけを非表示へ落とす（軸組図が切断面に平行な
+		// 通り芯を消すのに使う。core/Document.h の ViewportCommand）。**表示へ戻した後で
+		// 落とす**順序が要る——先に落としても上の一括表示で戻されてしまう。
+		// 名前→索引は AddClass（＝既にあればその索引を返す）で引く。図形が身に付けている
+		// クラスは既に図面にあるので新設は起きないが、万一無ければ空のクラスができるだけで
+		// 図面は壊れない（SetClassByName と同じ引き方）。
+		for (const std::string& className : command.hiddenClasses)
+		{
+			if (className.empty())
+				continue;
+			const InternalIndex index = gSDK->AddClass(TXString(className.c_str()));
+			gSDK->SetViewportClassVisibility(viewport, index, kClassHidden);
+		}
 
 		// 縮尺・ラベル・更新。**縮尺は表示レイヤを絞った後に読む**（映すレイヤの縮尺に
 		// 合わせるため）。設定に失敗しても図そのものは残す。
