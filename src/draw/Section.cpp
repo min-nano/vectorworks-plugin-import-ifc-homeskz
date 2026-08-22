@@ -274,7 +274,7 @@ namespace HomeskzIfcImport::draw
 		MCObjectHandle AnnotationGroupOf(MCObjectHandle viewport)
 		{
 			// 使い捨ての 2 点ポリライン（draw/Grid のパスと同じ作り方。カレントレイヤに出る）。
-			VWPolygon2DObj probe({VWPoint2D(0.0, 0.0), VWPoint2D(1.0, 0.0)});
+			const VWPolygon2DObj probe({VWPoint2D(0.0, 0.0), VWPoint2D(1.0, 0.0)});
 			const MCObjectHandle probeHandle = probe.GetThisObject();
 			if (probeHandle == nil)
 				return nil;
