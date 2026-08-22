@@ -33,25 +33,28 @@
 //	断面の範囲は、**奥行きは無制限**（0 を渡す）・**高さは建物を包む実寸＋余白**・**長さは
 //	断面線の長さ**（指示線を十分外まで延ばして実質無制限にする）。
 //
-//	【通り芯（グリッド線）の写り込み・調査中】VW のグリッド線は**デザインレイヤのレイヤ平面に
-//	置かれた平面図形**で、ビューポートには**インスタンス**として出る。VW ヘルプによれば、
-//	断面・立面ビューポートに出せるのは**視線に直交するグリッド線だけ**（平行なものはインスタンスを
+//	【通り芯（グリッド線）の写り込み】VW のグリッド線は**デザインレイヤのレイヤ平面に置かれた
+//	平面図形**で、ビューポートには**インスタンス**として出る。VW ヘルプによれば、断面・立面
+//	ビューポートに出せるのは**視線に直交するグリッド線だけ**（平行なものはインスタンスを
 //	作れない＝ダイアログ上でもグレーになる）。ところが**このプラグインが作った断面ビューポート
-//	には、切断面に平行な通り芯が紙面に平行な水平線として写り込む**。ローカル確認で分かっている
-//	ことは次のとおり:
+//	には、切断面に平行な通り芯が紙面に平行な水平線として写り込む**。ローカル確認で分かった
+//	ことは次のとおり（ROADMAP.md M14 に切り分けの経過）:
 //	  * **同じ書類で手で作った断面ビューポートには写らない**（＝通り芯オブジェクトやレイヤの
 //	    表示ではなく、CreateSectionViewport が作るビューポート側の設定差）。
-//	  * 2D コンポーネント（1059）とプレイナー図形（1035）は**手作りのものと同じ値**
-//	    （表示／非表示）で、差ではない。
-//	残る差は「奥／手前を出すか」と断面の範囲なので、本実装は
-//	  * **1065（切断面より手前）も false にする**（軸組図は切断面の軸組を見る図なので素直な
-//	    指定でもある）、
-//	  * 4 つの表示設定を**設定の前後で読み出して**完了ダイアログへ出す（SnapshotDisplayOptions。
-//	    CreateSectionViewport の既定値と、設定が効いたかを実機から読むための一時的な診断）、
+//	  * 設定の前後で読み戻した実測で、**1059（2D コンポーネント）だけ true を書いても入らない**
+//	    と判明した（作成直後＝非表示、更新後も非表示。1064・1035 は同じ書き方で入っている）。
+//	    手作りビューポートは**表示**なので、これが差だった。
+//	そこで本実装は
+//	  * 表示設定を当てた後に**読み戻して確かめ、入っていなければ更新の後にもう一度当てて更新
+//	    し直す**（SetObjectVariable は書けなかったことを教えてくれないので推測しない）、
+//	  * 1065（切断面より手前）も false にする（軸組図は切断面の軸組を見る図なので素直な指定。
+//	    実測では作成直後から非表示だった）、
+//	  * 4 つの表示設定を各段階で読み出して完了ダイアログへ出す（SnapshotDisplayOptions。
+//	    **原因調査中の一時的な診断**）、
 //	  * 切断面に平行な通り芯のクラスを、その軸組図でだけ非表示にする（命令の hiddenClasses。
 //	    値は parse/Section の gridClassFor が決める。VW 自身の規則をクラス指定で実現するもので、
 //	    表示設定の効き方に依らず効く）
-//	の 3 つを重ねる。原因が確定したら、診断と重複した対処は整理する。
+//	を重ねる。当て直しで入ることが確認できたら、診断と重複した対処は整理する。
 //
 //	【範囲を「無限」にはできない（調べ尽くした結論）】UI で断面ビューポートを手で作ると
 //	〈長さ・高さの範囲〉は既定で〈無限〉になるが、**SDK からその状態にする手段は無い**。
@@ -75,6 +78,9 @@
 #include "draw/Tag.h"
 #include "core/Document.h"
 #include "core/Progress.h"
+
+// ビューポートの更新（表示設定を当て直したときに描き直す）に使う VWFC ラッパー。
+#include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
 #include <array>
@@ -126,12 +132,15 @@ namespace HomeskzIfcImport::draw
 
 		// 軸組図としてこうあってほしい値と、診断に出す表示名。
 		//
-		// **1065（切断面より手前）を足したのは、手で作った断面ビューポートとの差を潰すため。**
-		// 同じ書類の中で「プラグインが作ったビューポートには切断面に平行な通り芯が水平線として
-		// 写るが、手で作ったビューポートには写らない」ことがローカル確認で分かっており、
-		// 表示設定のうち 2D コンポーネント（1059）とプレイナー図形（1035）は**両者で同じ**
-		// だと確認済み。残る差は「奥／手前を出すか」と断面の範囲しかない。軸組図は切断面の
-		// 軸組を見る図なので、**手前も出さない**のが素直な指定でもある。
+		// **1059（2D コンポーネント）は書いても効かないことがある**——実機の読み戻しで、
+		// CreateSectionViewport の直後は**非表示**で、true を書いてビューポートを更新しても
+		// **非表示のまま**だった（1064・1035 は同じ書き方で入っている＝読み出しは正しい）。
+		// 手で作った断面ビューポートは**表示**なので、これが「切断面に平行な通り芯が水平線と
+		// して写る／写らない」の差になっている（ROADMAP.md M14）。そこで**更新のあとに当て
+		// 直す**（drawSections の retryApply）。
+		//
+		// 1065（切断面より手前）は手作りビューポートとの差を潰すために足したもの。軸組図は
+		// 切断面の軸組を見る図なので素直な指定でもある（実測では作成直後から非表示だった）。
 		struct DisplayOption
 		{
 			short selector = 0;
@@ -174,11 +183,41 @@ namespace HomeskzIfcImport::draw
 											   endHeight, sheetLayer);
 		}
 
-		// 軸組図としての見え方を整える（要件。ConfigureViewport＝更新より**前**に呼ぶ）。
+		// 軸組図としての見え方を整える（要件。ConfigureViewport＝更新より**前**に呼び、
+		// 効いていなければ更新の**後**にもう一度呼ぶ）。
 		void ApplySectionDisplayOptions(MCObjectHandle viewport)
 		{
 			for (const DisplayOption& option : kDisplayOptions)
 				SetBooleanVariable(viewport, option.selector, static_cast<Boolean>(option.wanted));
+		}
+
+		// 表示設定がすべて要件どおりに**読み戻せる**か。読めない項目があれば false
+		// （＝「効いていない」側に倒す。当て直しを試す価値があるため）。
+		bool MatchesDisplayOptions(MCObjectHandle viewport)
+		{
+			for (const DisplayOption& option : kDisplayOptions)
+			{
+				bool actual = false;
+				if (!ReadBooleanVariable(viewport, option.selector, actual))
+					return false;
+				if (actual != option.wanted)
+					return false;
+			}
+			return true;
+		}
+
+		// ビューポートを描き直す（表示設定を当て直したあとに要る）。失敗しても図は残るので
+		// 黙って戻る（ConfigureViewport の Update と同じ扱い）。
+		void UpdateViewport(MCObjectHandle viewport)
+		{
+			try
+			{
+				VWViewportObj vp(viewport);
+				vp.Update();
+			}
+			catch (...)
+			{
+			}
 		}
 
 		// **ビューポートの表示設定をそのまま読み出す**（"1064 奥=表示 / 1035 プレイナー=非表示"
@@ -282,6 +321,8 @@ namespace HomeskzIfcImport::draw
 		// 表示設定（1064/1035/1059/1065）の実測（SnapshotDisplayOptions）。設定の前後で読み、
 		// 完了ダイアログへ出す。**原因調査中の一時的な診断**（ROADMAP.md M14）。
 		std::string displayNote;
+		// 更新後の当て直しを試すか。1 枚目で効かなければ false にして以降は省く。
+		bool retryApply = true;
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
 		const ObjectHandles emptyHandles;
 		const ObjectHandleTable& members =
@@ -324,12 +365,29 @@ namespace HomeskzIfcImport::draw
 			// 読み出しておき（1 枚目だけ。全命令で同じ設定なので診断行を命令の数だけ並べない）、
 			// **CreateSectionViewport の既定値と、設定が効いたか**を診断へ出す。
 			const bool inspect = drawn == 0;
-			const std::string before = inspect ? SnapshotDisplayOptions(viewport) : std::string();
+			if (inspect)
+				displayNote = "作成直後 " + SnapshotDisplayOptions(viewport);
 			ApplySectionDisplayOptions(viewport);
+			if (inspect)
+				displayNote += " ｜ 設定直後 " + SnapshotDisplayOptions(viewport);
 			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport);
 			if (inspect)
-				displayNote =
-					"作成直後 " + before + " ｜ 更新後 " + SnapshotDisplayOptions(viewport);
+				displayNote += " ｜ 更新後 " + SnapshotDisplayOptions(viewport);
+
+			// **更新の後にもう一度当てる**。1059（2D コンポーネント）は作成直後に書いても
+			// 入らないので、更新後に当て直して描き直す（kDisplayOptions のコメント）。
+			// **1 枚目で効果が無ければ以降はやらない**（retryApply）——効かない当て直しの
+			// ために全枚数を 2 回更新すると、取り込みが遅くなるだけになる。
+			if (retryApply && !MatchesDisplayOptions(viewport))
+			{
+				ApplySectionDisplayOptions(viewport);
+				UpdateViewport(viewport);
+				if (inspect)
+				{
+					displayNote += " ｜ 再設定後 " + SnapshotDisplayOptions(viewport);
+					retryApply = MatchesDisplayOptions(viewport);
+				}
+			}
 
 			// 断面寸法データタグ。**並べ替え（ArrangeViewports）より前**に置く——注釈は
 			// ビューポートと一緒に動くので、先に置いておけば移動しても図の上に留まる。
