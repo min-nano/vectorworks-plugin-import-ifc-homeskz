@@ -322,7 +322,12 @@ namespace HomeskzIfcImport::draw
 			// **更新より前**に設定する（ConfigureViewport の最後が更新）。
 			if (!ApplySectionDisplayOptions(viewport))
 				++missingRenderMode;
-			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport);
+			// **投影は触らない**（ViewportProjection::Keep）——断面の向きで作られているので、
+			// 伏図がやる 2D/平面への作り直し（draw/DrawUtil.h の ViewportProjection）は
+			// ここでは意味を成さない。
+			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport,
+												ViewportProjection::Keep)
+								  .classesApplied;
 			if (Display2DComponentsMissing(viewport))
 				++missing2DComponents;
 

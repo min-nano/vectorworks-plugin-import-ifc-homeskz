@@ -497,6 +497,36 @@ namespace HomeskzIfcImport::draw
 		return layer;
 	}
 
+	namespace
+	{
+		// ビューポートの向き（オブジェクト変数 1007）。3D の「上」＝standardViewTop（7）。
+		// 2D/平面かどうかは向きではなく Project 2D（1005）が持つので、**この 2 つは組で
+		// 扱う**（DrawUtil.h の ViewportProjection）。
+		constexpr TStandardView kViewTop = standardViewTop;
+
+		// ビューポートを 2D/平面（Top/Plan）で**正しく描かせる**。作り直せたら true。
+		//
+		// 【なぜ「OFF → 更新 → ON」なのか】ただ Project 2D を ON にするだけでは足りない
+		// ——生成直後のビューポートはパレット上こそ「2D/平面」だが、描画キャッシュは 3D の
+		// 「上」ビューのままで、**更新ボタンを押しても作り直されない**（実機の症状）。
+		// 手動での唯一の対処が「いったん『上』を選んでから『2D/平面』へ戻す」ことなので、
+		// その操作をそのままなぞる: 向きを「上」にし、Project 2D を OFF にして**更新を
+		// 挟み**（＝3D の「上」でキャッシュを作り直させ）、その上で ON へ戻す。最後の更新は
+		// 呼び出し元（ConfigureViewport の末尾）が行い、そこで 2D/平面のキャッシュができる。
+		// Python 版 vw/sheet.py の force_plan_view と同じ手順。
+		//
+		// **入ったかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも黙って
+		// 何もしないので、戻り値の無いまま「設定したつもり」で終わらせない。
+		bool ForcePlanView(VWViewportObj& viewport)
+		{
+			viewport.SetViewType(kViewTop);
+			viewport.SetProject2D(false);
+			viewport.Update();
+			viewport.SetProject2D(true);
+			return viewport.GetProject2D();
+		}
+	} // namespace
+
 	// --- シートレイヤとビューポート（伏図＝M13・軸組図＝M14 が共有する）------------------
 	//
 	// 使う SDK API は ISDK（gSDK）／VWFC の実在シグネチャに合わせている
@@ -513,6 +543,10 @@ namespace HomeskzIfcImport::draw
 	//   * VWViewportObj(vp).SetScale / SetDescription / SetLocator / Update
 	//                                                     … 縮尺（1003）・図面タイトル（1032）・
 	//                                                       図番（1033）・描画更新
+	//   * VWViewportObj(vp).SetViewType / SetProject2D / GetProject2D
+	//                                                     … ビューの向き（1007）・2D/平面か
+	//                                                       （1005）。伏図の作り直しに使う
+	//                                                       （DrawUtil.h の ViewportProjection）
 	ViewportSetup PrepareViewportSetup()
 	{
 		ViewportSetup setup;
@@ -555,9 +589,12 @@ namespace HomeskzIfcImport::draw
 		return ShowClasses(viewport, AllClasses());
 	}
 
-	std::size_t ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
-								  const ViewportSetup& setup, const core::ViewportCommand& command)
+	ViewportFinish ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
+									 const ViewportSetup& setup,
+									 const core::ViewportCommand& command,
+									 ViewportProjection projection)
 	{
+		ViewportFinish finish;
 		// 表示レイヤ: まず全部隠し、命令に挙げたものだけ表示へ戻す。**存在しないレイヤ名は
 		// 黙って読み飛ばす**（要素の描画がスキップされてレイヤが無い場合など。図自体は残す）。
 		for (const MCObjectHandle layer : setup.layers)
@@ -574,16 +611,19 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// クラス: 全クラスを 1 つずつ表示へ戻す（ヘッダ「クラスを表示へ戻す理由」）。
-		const std::size_t applied = ShowClasses(viewport, setup.classes);
+		finish.classesApplied = ShowClasses(viewport, setup.classes);
+		finish.planViewApplied = projection == ViewportProjection::Keep;
 
-		// 縮尺・ラベル・更新。**縮尺は表示レイヤを絞った後に読む**（映すレイヤの縮尺に
-		// 合わせるため）。設定に失敗しても図そのものは残す。
+		// 縮尺・［投影の作り直し］・ラベル・更新。**縮尺は表示レイヤを絞った後に読む**
+		// （映すレイヤの縮尺に合わせるため）。設定に失敗しても図そのものは残す。
 		const double scale = LayerScaleFor(command);
 		try
 		{
 			VWViewportObj vp(viewport);
 			if (scale > 0.0)
 				vp.SetScale(scale);
+			if (projection == ViewportProjection::Plan)
+				finish.planViewApplied = ForcePlanView(vp);
 			vp.SetDescription(TXString(command.drawingTitle.c_str()));
 			vp.SetLocator(TXString(command.drawingNumber.c_str()));
 			vp.Update();
@@ -591,9 +631,9 @@ namespace HomeskzIfcImport::draw
 		catch (...)
 		{
 			// ラベル・縮尺が付かなくてもビューポートは図面に残るので、ここで戻る。
-			return applied;
+			return finish;
 		}
-		return applied;
+		return finish;
 	}
 
 	// 「命令インデックス → ハンドル」の対応表の所有者。**表の中身（MCObjectHandle）は
