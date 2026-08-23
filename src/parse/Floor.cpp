@@ -27,13 +27,6 @@ namespace HomeskzIfcImport::parse
 	using core::StoryBoundCommand;
 	using core::Vec2;
 
-	namespace
-	{
-		// スラブスタイル名の接尾辞と、最上階（屋根）の接頭辞。
-		constexpr const char* kStyleSuffix = "-床スタイル";
-		constexpr const char* kRoofStylePrefix = "屋根";
-	} // namespace
-
 	bool isFloorSlab(const Entity& element)
 	{
 		if (element.type != "IFCSLAB")
@@ -120,14 +113,6 @@ namespace HomeskzIfcImport::parse
 		return storyHasLoftFloor(context, storeyId);
 	}
 
-	std::string floorSlabStyleName(std::size_t index, bool isTop)
-	{
-		// 一般階は "{階}F-床スタイル"、最上階は "屋根-床スタイル"（小屋裏収納・ロフトの床）。
-		if (isTop)
-			return std::string(kRoofStylePrefix) + kStyleSuffix;
-		return std::to_string(index + 1) + "F" + kStyleSuffix;
-	}
-
 	std::vector<FloorCommand> buildFloorCommands(Context& context)
 	{
 		const Model& model = context.model();
@@ -172,9 +157,6 @@ namespace HomeskzIfcImport::parse
 			// 基準面のストーリレベル上の絶対 Z（段差 0 のときの基準面の高さ）。
 			const double datumBaseAbs = story.isTop ? beamTopAbs : story.elevation;
 
-			// スラブスタイルは階ごとに 1 つ（階により構成が異なることが多いため）。
-			const std::string styleName = floorSlabStyleName(i, story.isTop);
-
 			// 床 1 枚の命令を組み立てる。boundary は IFC の生座標（ここで通り芯センタリング
 			// を掛ける）、levelDelta は基準レベル（一般階＝FL／屋根階＝軒高）からの高低差。
 			const auto makeCommand = [&](std::vector<Vec2> boundary, double levelDelta)
@@ -188,7 +170,6 @@ namespace HomeskzIfcImport::parse
 				cmd.layer = layer;
 				cmd.drawClass = CLASS_FLOOR;
 				cmd.boundary = std::move(boundary);
-				cmd.styleName = styleName;
 				cmd.components = {ComponentCommand{kFloorFinishName, finishThickness},
 								  ComponentCommand{kSubfloorName, kSubfloorThickness}};
 				cmd.datum = datum;

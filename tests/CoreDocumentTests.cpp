@@ -152,7 +152,6 @@ namespace
 		floor.drawClass = "04構造-02木造-06耐力面材-02床";
 		floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, core::Vec2{1000.0, 2000.0},
 						  core::Vec2{0.0, 2000.0}};
-		floor.styleName = "1F-床スタイル";
 		floor.components = {core::ComponentCommand{"床仕上げ", 96.0},
 							core::ComponentCommand{"床下地", 24.0}};
 		floor.elevation = 0.0;
@@ -209,16 +208,6 @@ TEST(validate_rejects_floor_with_empty_bound_level)
 	core::Document document;
 	core::FloorCommand floor = validFloor();
 	floor.bound.level = "";
-	document.floors.push_back(floor);
-	CHECK(!core::validateDocument(document));
-}
-
-TEST(validate_rejects_floor_with_empty_style_name)
-{
-	// スラブスタイル名が空だと構成を持つスタイルを用意できない。
-	core::Document document;
-	core::FloorCommand floor = validFloor();
-	floor.styleName = "";
 	document.floors.push_back(floor);
 	CHECK(!core::validateDocument(document));
 }
@@ -615,7 +604,6 @@ namespace
 		wall.start = core::Vec2{0.0, 0.0};
 		wall.end = core::Vec2{3640.0, 0.0};
 		wall.thickness = 120.0;
-		wall.styleName = "基礎立上り - コンクリート 120mm";
 		wall.components = {core::ComponentCommand{"コンクリート", 120.0}};
 		wall.bottomBound = core::StoryBoundCommand{0, core::kLevelGL, -100.0};
 		wall.topBound = core::StoryBoundCommand{1, core::kLevelBeamTop, -190.0};
@@ -630,7 +618,6 @@ namespace
 		slab.drawClass = "04構造-01基礎-02基礎スラブ";
 		slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}, core::Vec2{3640.0, 2730.0},
 						 core::Vec2{0.0, 2730.0}};
-		slab.styleName = "基礎スラブ - コンクリート 150mm / 捨てコン 30mm / 砕石 100mm";
 		slab.components = {core::ComponentCommand{"コンクリート", 150.0},
 						   core::ComponentCommand{"捨てコン", 30.0},
 						   core::ComponentCommand{"砕石", 100.0}};
@@ -665,17 +652,11 @@ TEST(validate_rejects_wall_with_empty_layer_or_class)
 	CHECK(!core::validateDocument(drawClass));
 }
 
-TEST(validate_rejects_wall_with_empty_style_or_no_components)
+TEST(validate_rejects_wall_without_components)
 {
-	// 壁スタイル名と構成層は描画側が壁厚ごとのスタイルを作るのに要る（底盤と同じ関門）。
-	core::Document style;
-	core::WallCommand wall = validWall();
-	wall.styleName = "";
-	style.walls.push_back(wall);
-	CHECK(!core::validateDocument(style));
-
+	// 構成層は描画側が壁へ直接組む（合計＝壁厚）ので、無い壁は描けない（底盤と同じ関門）。
 	core::Document components;
-	wall = validWall();
+	core::WallCommand wall = validWall();
 	wall.components.clear();
 	components.walls.push_back(wall);
 	CHECK(!core::validateDocument(components));
@@ -718,7 +699,7 @@ TEST(validate_rejects_wall_with_empty_bound_level)
 	CHECK(!core::validateDocument(topEmpty));
 }
 
-TEST(validate_rejects_slab_with_empty_layer_class_or_style)
+TEST(validate_rejects_slab_with_empty_layer_or_class)
 {
 	core::Document layer;
 	core::SlabCommand slab = validSlab();
@@ -731,12 +712,6 @@ TEST(validate_rejects_slab_with_empty_layer_class_or_style)
 	slab.drawClass = "";
 	drawClass.slabs.push_back(slab);
 	CHECK(!core::validateDocument(drawClass));
-
-	core::Document style;
-	slab = validSlab();
-	slab.styleName = "";
-	style.slabs.push_back(slab);
-	CHECK(!core::validateDocument(style));
 }
 
 TEST(validate_rejects_slab_with_too_few_boundary_points)
@@ -751,7 +726,7 @@ TEST(validate_rejects_slab_with_too_few_boundary_points)
 
 TEST(validate_rejects_slab_with_nonpositive_thickness)
 {
-	// コンクリート厚 0 の底盤はスラブスタイルを作れない。
+	// コンクリート厚 0 の底盤は構成層のコンクリート層を持てない。
 	core::Document document;
 	core::SlabCommand slab = validSlab();
 	slab.thickness = 0.0;

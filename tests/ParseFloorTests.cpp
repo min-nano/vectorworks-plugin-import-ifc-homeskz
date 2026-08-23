@@ -34,7 +34,6 @@ using HomeskzIfcImport::core::FloorCommand;
 using HomeskzIfcImport::parse::buildFloorCommands;
 using HomeskzIfcImport::parse::CLASS_FLOOR;
 using HomeskzIfcImport::parse::collectStories;
-using HomeskzIfcImport::parse::floorSlabStyleName;
 using HomeskzIfcImport::parse::kSubfloorThickness;
 using HomeskzIfcImport::parse::loadIfc;
 using HomeskzIfcImport::parse::loadIfcFromText;
@@ -145,8 +144,6 @@ TEST(extracts_floor_slab_from_minimal_model)
 	const FloorCommand& floor = floors.front();
 	CHECK_EQ(floor.layer, std::string("1-FL"));
 	CHECK_EQ(floor.drawClass, std::string(CLASS_FLOOR));
-	// スラブスタイルは階ごと（1 階なので "1F-床スタイル"）。
-	CHECK_EQ(floor.styleName, std::string("1F-床スタイル"));
 	// スラブ構成は上から 床仕上げ（FL 0 − 横架材天端 -120 − 床下地 24 = 96）＋ 床下地 24。
 	// IFC の押し出し厚（28）は使わない。
 	CHECK_EQ(floor.components.size(), static_cast<std::size_t>(2));
@@ -215,7 +212,6 @@ TEST(top_story_floor_is_a_loft)
 		return;
 	const FloorCommand& loft = floors.front();
 	CHECK_EQ(loft.layer, std::string("R-FL"));
-	CHECK_EQ(loft.styleName, std::string("屋根-床スタイル"));
 	CHECK_EQ(loft.components.size(), static_cast<std::size_t>(2));
 	if (loft.components.size() == 2)
 	{
@@ -242,34 +238,6 @@ TEST(story_has_floor_slab_detects_loft)
 	Model const model = loadIfcFromText(text);
 	CHECK(HomeskzIfcImport::parse::storyHasFloorSlab(model, 11));
 	CHECK(!HomeskzIfcImport::parse::storyHasFloorSlab(model, 10));
-}
-
-// ---------------------------------------------------------------------------
-// スラブスタイル名（階ごと）
-// ---------------------------------------------------------------------------
-
-TEST(slab_style_name_is_per_story)
-{
-	// 一般階は "{階}F-床スタイル"。階により構成（床仕上げ厚）が異なるため階ごとに作る。
-	CHECK_EQ(floorSlabStyleName(0, false), std::string("1F-床スタイル"));
-	CHECK_EQ(floorSlabStyleName(1, false), std::string("2F-床スタイル"));
-	CHECK_EQ(floorSlabStyleName(2, false), std::string("3F-床スタイル"));
-	// 最上階は "屋根-床スタイル"（屋根の床＝小屋裏収納・ロフトの床）。
-	CHECK_EQ(floorSlabStyleName(3, true), std::string("屋根-床スタイル"));
-}
-
-TEST(sample1_style_name_matches_layer)
-{
-	// 実フィクスチャでも命令のスタイル名が階（レイヤ接頭辞）と対応する。
-	bool ok = false;
-	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
-	CHECK(ok);
-	for (const FloorCommand& floor : buildFloorCommands(model))
-	{
-		// "1-FL" → "1F-床スタイル"、"2-FL" → "2F-床スタイル"。
-		const std::string prefix = floor.layer.substr(0, floor.layer.find('-'));
-		CHECK_EQ(floor.styleName, prefix + "F-床スタイル");
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -541,7 +509,6 @@ TEST(loft_floor_is_synthesised_from_floor_beams)
 
 	const FloorCommand& loft = floors.front();
 	CHECK_EQ(loft.layer, std::string("R-FL"));
-	CHECK_EQ(loft.styleName, std::string("屋根-床スタイル"));
 	CHECK_EQ(loft.drawClass, std::string(CLASS_FLOOR));
 	// 構成・基準面・バインド先は床版から作るロフト床と同じ（床仕上げ 12 ＋ 床下地 24）。
 	CHECK(near(totalThickness(loft), 36.0));

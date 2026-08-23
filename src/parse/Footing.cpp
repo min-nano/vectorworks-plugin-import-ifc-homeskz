@@ -1351,23 +1351,6 @@ namespace HomeskzIfcImport::parse
 		return name.find(kBaseSlabToken) != std::string::npos;
 	}
 
-	std::string foundationSlabStyleName(double concreteThickness)
-	{
-		// "基礎スラブ - コンクリート 150mm / 捨てコン 30mm / 砕石 100mm"。厚みは整数 mm
-		// （命令の thickness は解析側で丸め済みだが、名前を作るここでも整数化して揺れを断つ）。
-		const auto mm = [](double value) { return std::to_string(std::llround(value)) + "mm"; };
-		return std::string("基礎スラブ - ") + kConcreteComponentName + " " + mm(concreteThickness) +
-			   " / " + kSlabLeanConcreteName + " " + mm(kSlabLeanConcreteThickness) + " / " +
-			   kSlabGravelName + " " + mm(kSlabGravelThickness);
-	}
-
-	std::string foundationWallStyleName(double thickness)
-	{
-		// "基礎立上り - コンクリート 150mm"。底盤のスタイル名と同じ流儀（厚みは整数 mm）。
-		return std::string("基礎立上り - ") + kConcreteComponentName + " " +
-			   std::to_string(std::llround(thickness)) + "mm";
-	}
-
 	std::vector<ComponentCommand> foundationWallComponents(double thickness)
 	{
 		// 立上りはコンクリート 1 層（総厚＝壁厚）。
@@ -2086,9 +2069,8 @@ namespace HomeskzIfcImport::parse
 			cmd.start = start;
 			cmd.end = end;
 			cmd.thickness = thickness;
-			// 壁スタイルは壁厚ごとに 1 つ（構成はコンクリート 1 層＝壁厚）。描画側はこの名前で
-			// **新しいスタイルを作る**（既存リソースには触れない。draw/Footing.cpp 参照）。
-			cmd.styleName = foundationWallStyleName(thickness);
+			// 構成はコンクリート 1 層＝壁厚。描画側はこれを**壁へ直接**組む（スタイルは
+			// 作らない。draw/Footing.cpp 参照）。
 			cmd.components = foundationWallComponents(thickness);
 			// 下端は IFC 実形状のまま（呑み込みはしない。parse/Footing.h「下端は IFC 実形状の
 			// まま」参照）。
@@ -2459,7 +2441,6 @@ namespace HomeskzIfcImport::parse
 			cmd.layer = kLayerFoundationSlab;
 			cmd.drawClass = CLASS_FOUNDATION_SLAB;
 			cmd.boundary = std::move(boundary);
-			cmd.styleName = foundationSlabStyleName(concrete);
 			cmd.components = foundationSlabComponents(concrete);
 			cmd.datum = core::SlabDatum::Top; // 基準面はコンクリート天端
 			cmd.thickness = concrete;

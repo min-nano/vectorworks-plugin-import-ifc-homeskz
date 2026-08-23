@@ -169,28 +169,6 @@ namespace HomeskzIfcImport::draw
 				return 0;
 			return count;
 		}
-
-		// baseName から**まだ使われていない**名前付きリソース名を作って out に入れる。
-		// 埋まっていれば " (2)" … と連番を付ける。既存のリソースには触れないので、そこで
-		// 設定済みのクラス・マテリアル・用途が失われることが構造的に起きない。連番の上限は
-		// 「同名が延々と埋まっている」異常時に無限ループしないための歯止めで、実運用で届く
-		// 数ではない。baseName が空・空きが見つからないときは false。
-		bool FindFreeResourceName(const std::string& baseName, std::string& out)
-		{
-			if (baseName.empty())
-				return false;
-
-			constexpr int kMaxAttempts = 1000;
-			std::string name = baseName;
-			for (int attempt = 2; gSDK->GetNamedObject(TXString(name.c_str())) != nil; ++attempt)
-			{
-				if (attempt > kMaxAttempts)
-					return false;
-				name = baseName + " (" + std::to_string(attempt) + ")";
-			}
-			out = name;
-			return true;
-		}
 	} // namespace
 
 	void SetClassByName(MCObjectHandle object, const std::string& className)
@@ -268,71 +246,16 @@ namespace HomeskzIfcImport::draw
 		gSDK->SetComponentDatumIsTopOfComponent(object, componentIndex, datumIsTop);
 	}
 
-	InternalIndex ResolveSlabStyle(const std::string& styleName,
-								   const std::vector<core::ComponentCommand>& components,
-								   core::SlabDatum datum)
+	void SetWallComponents(MCObjectHandle wall,
+						   const std::vector<core::ComponentCommand>& components)
 	{
-		if (styleName.empty())
-			return 0;
+		if (components.empty())
+			return;
 
-		const TXString name(styleName.c_str());
-		MCObjectHandle style = gSDK->GetNamedObject(name);
-		if (style == nil)
-			style = gSDK->CreateSlabStyle(name);
-		if (style == nil)
-			return 0;
+		SetComponents(wall, components);
 
-		SetComponents(style, components);
-		// 基準面（構成要素とその上端／下端）はスタイルが持つので、スタイル側へ設定する。
-		SetSlabDatum(style, datum, static_cast<short>(components.size()));
-		return gSDK->GetObjectInternalIndex(style);
-	}
-
-	InternalIndex CreateUniqueSlabStyle(const std::string& baseName,
-										const std::vector<core::ComponentCommand>& components,
-										core::SlabDatum datum, std::string* outName)
-	{
-		std::string name;
-		if (!FindFreeResourceName(baseName, name))
-			return 0;
-
-		MCObjectHandle style = gSDK->CreateSlabStyle(TXString(name.c_str()));
-		if (style == nil)
-			return 0;
-
-		SetComponents(style, components);
-		// 基準面（構成要素とその上端／下端）はスタイルが持つので、スタイル側へ設定する。
-		SetSlabDatum(style, datum, static_cast<short>(components.size()));
-		if (outName != nullptr)
-			*outName = name;
-		return gSDK->GetObjectInternalIndex(style);
-	}
-
-	InternalIndex CreateUniqueWallStyle(const std::string& baseName,
-										const std::vector<core::ComponentCommand>& components,
-										std::string* outName)
-	{
-		std::string name;
-		if (!FindFreeResourceName(baseName, name))
-			return 0;
-
-		MCObjectHandle style = gSDK->CreateWallStyle(TXString(name.c_str()));
-		if (style == nil)
-			return 0;
-
-		// 壁は構成層の合計がそのまま壁厚になるので、スラブと違って基準面の設定は要らない。
-		SetComponents(style, components);
-
-		// **コア構成要素**を指定する（VW が結合部で構成要素を融合する基準になる。指定が無いと
-		// 壁結合しても平面で層が繋がらず、取り合いに面線が残る＝ローカル確認で判明した T 字の
-		// 線。ROADMAP.md M10）。基礎の立上りは構成が 1 層（コンクリート）なので、その 1 枚が
-		// コアになる。索引は SetComponents と同じ **0 始まり**（draw/DrawUtil.h 参照）。
-		if (!components.empty())
-			gSDK->SetCoreWallComponent(style, 0);
-
-		if (outName != nullptr)
-			*outName = name;
-		return gSDK->GetObjectInternalIndex(style);
+		// **コア構成要素**を指定する（draw/DrawUtil.h 参照）。立上りは 1 層なので索引 0。
+		gSDK->SetCoreWallComponent(wall, 0);
 	}
 
 	TXString ResolveParamName(const VWParametricObj& pio, const char* universalName,

@@ -41,8 +41,6 @@
 #include "core/Document.h"
 #include "parse/Step.h"
 
-#include <cstddef>
-#include <string>
 #include <vector>
 
 namespace HomeskzIfcImport::parse
@@ -102,12 +100,6 @@ namespace HomeskzIfcImport::parse
 
 	// 同上。共有コンテキストのキャッシュ済みロフト床を使う（parse/Context.h）。
 	bool storyHasLoftFloor(Context& context, int storeyId);
-
-	// 床のスラブスタイル名を返す。**階により構成（床仕上げ厚）が異なることが多いため、
-	// スタイルは階ごとに 1 つ**作る。一般階は "{階}F-床スタイル"（"1F-床スタイル" …）、
-	// 最上階は "屋根-床スタイル"（屋根の床＝小屋裏収納・ロフトの床）。index は 0 始まりの
-	// 階インデックス（collectStories の並び）で、isTop は最上階か。
-	std::string floorSlabStyleName(std::size_t index, bool isTop);
 
 	// STEP Model から床板の描画命令を組み立てる（Python 版 build_floor_commands 相当）。
 	//

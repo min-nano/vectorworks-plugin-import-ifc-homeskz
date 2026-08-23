@@ -19,9 +19,8 @@
 //	  1. 外形を閉じた 2D ポリゴンにする
 //	  2. CreateSlab(プロファイル) でスラブを生成する
 //	  3. クラス分けと描画属性の by-class 設定
-//	  4. **階ごとのスラブスタイル**（"1F-床スタイル" / "屋根-床スタイル" 等）を用意して
-//	     適用する。スタイルの構成層は命令どおりに作り直す（上から 床仕上げ → 床下地）。
-//	     スタイルを用意できないときだけ、スラブ本体のコンポーネントを直接組む
+//	  4. **スラブ本体へ直接**構成層を組む（上から 床仕上げ → 床下地）。スラブスタイルは
+//	     作らない・当てない（draw/DrawUtil.h「複合オブジェクトの構成」）
 //	  5. 高さの基準面（データム）を命令に合わせる（一般階＝床仕上げ上端／ロフト＝床下地
 //	     下端）。SetSlabHeight にはその基準面の絶対 Z を渡す（SetSlabHeight は厚みではなく
 //	     高さを設定する関数。Python 版 #70 の不具合と同じ落とし穴）
@@ -29,8 +28,8 @@
 //	     （一般階＝FL レベル／ロフト＝軒高レベル。offset はそこからの高低差で一般部は 0）
 //	  7. ResetObject で反映
 //	スラブが作れない場合は外形ポリゴンにフォールバックする（1 枚の失敗で全体を止めない）。
-//	**この手順そのもの（構成層・基準面・スタイルの用意）は draw/DrawUtil に置いてあり、
-//	基礎の底盤（draw/Footing。M9）と共有する**——違うのはスタイル名と層の中身だけ。
+//	**この手順そのもの（構成層・基準面の設定）は draw/DrawUtil に置いてあり、基礎の底盤
+//	（draw/Footing。M9）と共有する**——違うのは層の中身だけ。
 //
 //	実描画（天端の与え方・厚み・バインドのアンカー・2D 表現）はローカルの VectorWorks で
 //	目視確認する方針（ROADMAP.md M5「ローカル確認」）。
@@ -74,21 +73,13 @@ namespace HomeskzIfcImport::draw
 			SetClassByName(slab, floor.drawClass);
 			SetAllAttributesByClass(slab);
 
-			// 構成は階ごとのスラブスタイルで与える（階により構成が異なることが多いため、
-			// スタイルは階ごとに 1 つ）。スタイルを用意できない場合だけ、スタイルを外して
-			// スラブ本体のコンポーネントを直接組む（構成の欠落で床を失わないための保険）。
-			const InternalIndex style =
-				ResolveSlabStyle(floor.styleName, floor.components, floor.datum);
-			if (style != 0)
-			{
-				gSDK->SetSlabStyle(slab, style);
-			}
-			else
-			{
-				gSDK->ConvertToUnstyledSlab(slab);
-				SetComponents(slab, floor.components);
-				SetSlabDatum(slab, floor.datum, static_cast<short>(floor.components.size()));
-			}
+			// 構成（床仕上げ／床下地）と基準面は**このスラブへ直接**与える。スラブスタイルは
+			// 作らない・当てない（draw/DrawUtil.h「複合オブジェクトの構成」）。CreateSlab は
+			// 文書の既定スタイルを引き継ぐことがあるので、明示的にスタイル無しへ落としてから
+			// 構成を組む。
+			gSDK->ConvertToUnstyledSlab(slab);
+			SetComponents(slab, floor.components);
+			SetSlabDatum(slab, floor.datum, static_cast<short>(floor.components.size()));
 
 			// SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する（Python 版 #70 と
 			// 同じ落とし穴）。命令の elevation は基準面の絶対 Z なのでそのまま渡す。

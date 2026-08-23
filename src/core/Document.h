@@ -164,7 +164,8 @@ namespace HomeskzIfcImport::core
 	//   name      … 層の名前（"床仕上げ" / "コンクリート" …）
 	//   thickness … 層厚（mm。0 以上）
 	// 並び順は**上から下**（スラブ）／**外から内**（壁）で、先頭が最初の層。層厚の合計が
-	// そのオブジェクトの総厚（スラブ厚・壁厚）になる。
+	// そのオブジェクトの総厚（スラブ厚・壁厚）になる。**構成はスタイルではなく各オブジェクト
+	// へ直接**与える（draw/DrawUtil.h「複合オブジェクトの構成」）。
 	struct ComponentCommand
 	{
 		std::string name;
@@ -185,16 +186,16 @@ namespace HomeskzIfcImport::core
 	//   一般階 … 床仕上げ＝FL 高さ − 横架材天端高さ − 床下地厚。合計＝FL 高さ − 横架材天端
 	//            高さ、すなわちスラブ下端は（一般部では）横架材天端に一致する。
 	//   ロフト … 合計＝軒高からの標準床レベル（36mm。仮定値）なので 床仕上げ 12 ＋ 床下地 24。
-	// 構成は**階ごとのスラブスタイル**（styleName）として作り、床はそのスタイルを適用して
-	// 描く（階により構成が異なることが多いため、スタイルは階ごとに 1 つ）。
+	// 構成は**そのスラブへ直接**与える（スタイルは作らない・当てない。draw/DrawUtil.h
+	// 「複合オブジェクトの構成」）。階により構成（床仕上げ厚）が異なるので、階ごとに
+	// 命令が持つ層がそのまま床の構成になる。
 	//
 	// Python 版キーとの対応（Python 版は床ツール＋厚み 24mm 固定なので構成が異なる）:
 	//   layer      ← 'layer'     … 配置先デザインレイヤ名（"1-FL" 等。既存のみ・無ければスキップ）
 	//   drawClass  ← 'class'     … クラス名（床板。予約語 class を機械置換）
 	//   boundary   ← 'boundary'  … 床の平面外形（mm・グリッド中心オフセット済み。閉じた
 	//                              ポリゴンの頂点列で、末尾に始点を重複させない）
-	//   styleName  （Python 版に対応なし）… スラブスタイル名（"1F-床スタイル" 等）
-	//   components （Python 版に対応なし）… スタイルの構成層（上から）
+	//   components （Python 版に対応なし）… スラブの構成層（上から）
 	//   datum      （Python 版に対応なし）… 高さ基準の面（一般階＝Top・ロフト＝Bottom）
 	//   elevation  ← 'elevation' … **基準面**の絶対 Z（mm。Python 版は床下端）
 	//   bound      ← 'bound'     … 基準面の高さ基準（一般階＝FL レベル、ロフト＝軒高レベル、
@@ -204,7 +205,6 @@ namespace HomeskzIfcImport::core
 		std::string layer;
 		std::string drawClass;
 		std::vector<Vec2> boundary;
-		std::string styleName;
 		std::vector<ComponentCommand> components;
 		SlabDatum datum = SlabDatum::Top;
 		double elevation = 0.0;
@@ -398,8 +398,7 @@ namespace HomeskzIfcImport::core
 	//   start       ← 'start'        … 壁芯の始点（センタリング済みの平面座標）
 	//   end         ← 'end'          … 壁芯の終点（同上）
 	//   thickness   ← 'thickness'    … 壁厚（矩形断面の幅。mm）
-	//   styleName   （Python 版は描画側の定数）… 壁スタイル名（"基礎立上り - コンクリート 150mm"）
-	//   components  （Python 版に対応なし）… スタイルの構成層（コンクリート 1 層）
+	//   components  （Python 版に対応なし）… 壁の構成層（コンクリート 1 層。合計＝壁厚）
 	//   bottomBound ← 'bottom_bound' … 下端の高さ基準（基礎の GL レベル）
 	//   topBound    ← 'top_bound'    … 上端の高さ基準（1 階の横架材天端レベル）
 	//   capStart    （Python 版に対応なし）… 壁芯**始点側**の端部を閉じるか
@@ -416,10 +415,10 @@ namespace HomeskzIfcImport::core
 	// で、これは壁結合命令の capped（WallJoinCommand）と同じ判断を**端ごと**に写したもの。
 	// 算出は parse/Footing の applyWallCaps。
 	//
-	// 【壁スタイルは厚みごとに 1 つ】Python 版は既製の `基礎 - 木造ベタ基礎150mm` を全ての
-	// 立上りへ当てるが、本移植は**壁厚ごとのスタイルを解析側が名乗り、描画側がコード上の
-	// 構成から新規作成する**（実データの壁厚は 120 / 150 / 300mm と混在するので、150mm 固定の
-	// 既製スタイルでは厚みが合わない）。既存リソースは上書きしない（draw/Footing.cpp 参照）。
+	// 【壁スタイルは使わない】Python 版は既製の `基礎 - 木造ベタ基礎150mm` を全ての立上りへ
+	// 当てるが、本移植は**スタイル無しの壁へ構成層を直接与える**（実データの壁厚は
+	// 120 / 150 / 300mm と混在するので、150mm 固定の既製スタイルでは厚みが合わない。
+	// 構成層の合計＝壁厚なので、命令の厚みがそのまま保たれる。draw/DrawUtil.h 参照）。
 	struct WallCommand
 	{
 		std::string layer;
@@ -427,7 +426,6 @@ namespace HomeskzIfcImport::core
 		Vec2 start;
 		Vec2 end;
 		double thickness = 0.0;
-		std::string styleName;
 		std::vector<ComponentCommand> components;
 		StoryBoundCommand bottomBound;
 		StoryBoundCommand topBound;
@@ -536,7 +534,7 @@ namespace HomeskzIfcImport::core
 
 	// 基礎の底盤をスラブオブジェクトとして描く命令。Python 版 document.py の SlabCommand
 	// （dict）に対応する。draw/Footing がこれをスラブへ変換する（ROADMAP.md M9）。床板
-	// （FloorCommand）と描画の作法は同じで、構成層とスタイル名の中身だけが基礎向けになる。
+	// （FloorCommand）と描画の作法は同じで、構成層の中身だけが基礎向けになる。
 	//
 	// 【高さの持ち方】elevation は**コンクリート天端**（＝底盤天端）の絶対 Z で、datum は
 	// 常に Top（最上層＝コンクリートの上端）。基礎ストーリは GL=0 なので、この絶対 Z は
@@ -544,16 +542,15 @@ namespace HomeskzIfcImport::core
 	// 底盤天端レベル（面積最大の天端 Z）の差（主たる底盤は ≈0、独立基礎底盤等はずれる）。
 	//
 	// 【スラブ構成】components は上から コンクリート（thickness）＋ 捨てコン ＋ 砕石。
-	// styleName はコンクリート厚ごとに 1 つ（"基礎スラブ - コンクリート 150mm / 捨てコン
-	// 30mm / 砕石 100mm"）で、厚みの違う底盤は別スタイルになる（parse/Footing.h）。
+	// 構成は**そのスラブへ直接**与える（スタイルは作らない・当てない。draw/DrawUtil.h
+	// 「複合オブジェクトの構成」）。
 	//
 	// Python 版キーとの対応（reinforcement＝配筋は M10 の残り）:
 	//   layer      ← 'layer'      … 配置先デザインレイヤ名（"F-底盤"）
 	//   drawClass  ← 'class'      … クラス名（基礎スラブ。予約語 class を機械置換）
 	//   boundary   ← 'boundary'   … 平面外形（mm・グリッド中心オフセット済み。閉じた
 	//                               ポリゴンの頂点列で、末尾に始点を重複させない）
-	//   styleName  （Python 版は描画側が厚みから引く）… スラブスタイル名
-	//   components （同上）… スタイルの構成層（上から）
+	//   components （Python 版は描画側が厚みから引く）… スラブの構成層（上から）
 	//   datum      （同上）… 高さ基準の面（底盤は常に Top＝コンクリート天端）
 	//   thickness  ← 'thickness'  … コンクリート厚（mm。整数に丸めた値）
 	//   elevation  ← 'elevation'  … コンクリート天端の絶対 Z
@@ -564,7 +561,6 @@ namespace HomeskzIfcImport::core
 		std::string layer;
 		std::string drawClass;
 		std::vector<Vec2> boundary;
-		std::string styleName;
 		std::vector<ComponentCommand> components;
 		SlabDatum datum = SlabDatum::Top;
 		double thickness = 0.0;
