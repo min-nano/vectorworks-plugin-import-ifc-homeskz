@@ -229,8 +229,11 @@ namespace HomeskzIfcImport::draw
 		// 幅が高さを上回るものを「寝ている」と判定する。
 
 		// グリッド線の PIO 名（VW 標準。draw/Grid が CreateCustomObjectPath へ渡すのと同じ
-		// universal 名）。インスタンスも同じ PIO なので、この名前で拾える。
+		// universal 名）と、その内部 ID（Kernel/API/MiniCadHookIntf.h の
+		// kInternalID_GridAxis。ci-debug の sdk-grep で確認）。**どちらかが合えば通り芯**
+		// として扱う（IsGridAxisObject）。
 		constexpr const char* kGridAxisPlugin = "GridAxis";
+		constexpr int kGridAxisInternalID = 647;
 
 		// 注釈の走査結果（診断用）。
 		struct AnnotationCounts
@@ -265,30 +268,37 @@ namespace HomeskzIfcImport::draw
 			return width > height ? Orientation::Flat : Orientation::Upright;
 		}
 
-		// オブジェクトの種別名。PIO なら universal 名（"GridAxis" 等）、そうでなければ
-		// "t<型番号>"（GetObjectTypeN）。棚卸しの見出しに使う。
+		// オブジェクトの種別名。PIO なら "PIO#<内部 ID>"、そうでなければ "t<型番号>"
+		// （GetObjectTypeN）。棚卸しの見出しに使う。
+		//
+		// **PIO 名（TXString）は使わない**——UTF-16 なので std::string へ直に入らないうえ、
+		// 棚卸しに要るのは「何が何個あるか」だけで、内部 ID（通り芯なら
+		// kGridAxisInternalID）で十分に見分けが付く。
 		std::string TypeLabelOf(MCObjectHandle object)
 		{
 			try
 			{
 				const VWParametricObj pio(object);
-				return std::string(pio.GetParametricName().GetData());
+				return "PIO#" + std::to_string(static_cast<int>(pio.GetInternalID()));
 			}
 			catch (...)
 			{
-				// PIO ではない。型番号で表す（名前は要らない——「何が何個あるか」だけ分かれば
-				// 寝た 1 本の居場所は特定できる）。
+				// PIO ではない。型番号で表す。
 				return "t" + std::to_string(static_cast<int>(gSDK->GetObjectTypeN(object)));
 			}
 		}
 
-		// オブジェクトが通り芯（GridAxis）の PIO か。PIO でなければ VWParametricObj の構築が
-		// 例外を投げるので、それを掴んで false にする。
+		// オブジェクトが通り芯（グリッド線）の PIO か。**PIO 名と内部 ID のどちらかが合えば
+		// 通り芯とみなす**——インスタンスの PIO 名が定義と同じかどうかは実機でしか分からない
+		// ので、取りこぼさないよう両方で拾う。PIO でなければ VWParametricObj の構築が例外を
+		// 投げるので、それを掴んで false にする。
 		bool IsGridAxisObject(MCObjectHandle object)
 		{
 			try
 			{
 				const VWParametricObj pio(object);
+				if (static_cast<int>(pio.GetInternalID()) == kGridAxisInternalID)
+					return true;
 				return pio.GetParametricName() == TXString(kGridAxisPlugin);
 			}
 			catch (...)
