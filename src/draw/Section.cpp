@@ -48,10 +48,15 @@
 //	    （1064・1035・1065 は同じ書き方で入る）。VW の UI でもオブジェクト情報パレットや
 //	    オーガナイザからは変更できず、**作成時のダイアログかビューポートスタイルでしか
 //	    決まらない**設定で、後から書き換える手立てが無い。
-//	そこで**設定を直すのは諦め、作られてしまったインスタンスを注釈から消す**
+//	  * **オブジェクト情報パレットで見比べると、インスタンスが作るビューポートには
+//	    「2D コンポーネントを表示」の項目そのものが無い**（手作りには在ってチェック済み）。
+//	そこで**設定を直すのは諦め、作られてしまったインスタンスを消す**
 //	（RemoveGridAxisInstances）。消すのは**寝ているもの**（外接矩形が横長＝平面の姿のまま
 //	写ったもの）だけで、直交する通り芯のインスタンス（鉛直線＋通り名バブル。軸組図に通り名を
-//	出す目的そのもの）はそのまま残す。
+//	出す目的そのもの）はそのまま残す。**注釈だけを見た版では消えなかった**（注釈はたどれて
+//	通り芯インスタンスも見つかったのに図に残った＝寝た 1 本は注釈の外に居る）ので、
+//	ビューポートの子コンテナをすべて見る。居場所は完了ダイアログの棚卸し（原因調査中の
+//	一時的な診断）で実機から確かめる。
 //
 //	【範囲を「無限」にはできない（調べ尽くした結論）】UI で断面ビューポートを手で作ると
 //	〈長さ・高さの範囲〉は既定で〈無限〉になるが、**SDK からその状態にする手段は無い**。
@@ -234,17 +239,47 @@ namespace HomeskzIfcImport::draw
 			std::size_t unreachable = 0; // 注釈グループを取れなかったビューポート
 			std::size_t gridInstances = 0; // 見つけた通り芯インスタンス
 			std::size_t removed = 0;	   // うち寝ていて消したもの
+			// **1 枚目のビューポートの中身の棚卸し**（原因調査中の一時的な診断）。
+			// 「注釈はたどれて通り芯インスタンスも見つかったのに、寝た 1 本が消えない」という
+			// 実機の症状は、**その 1 本が注釈以外のコンテナに居る**か**PIO 名が違う**かの
+			// どちらかでしか説明が付かない。憶測を止めるために、ビューポートの子コンテナと
+			// その中身を種別・向きごとに数えて出す。
+			std::string inventory;
 		};
 
-		// オブジェクトが「寝ている」（外接矩形が横長）か。測れなければ false（消さない側へ倒す）。
-		bool IsLyingFlat(MCObjectHandle object)
+		// オブジェクトの向き。外接矩形の幅と高さで決める（測れなければ Unknown）。
+		enum class Orientation
+		{
+			Flat,	 // 横長＝寝ている（平面の姿のまま写ったもの）
+			Upright, // 縦長＝立っている（断面用に描かれたもの）
+			Unknown, // 測れなかった
+		};
+
+		Orientation OrientationOf(MCObjectHandle object)
 		{
 			WorldRect bounds;
 			if (!gSDK->GetObjectBounds(object, bounds))
-				return false;
+				return Orientation::Unknown;
 			const double width = std::abs(bounds.right - bounds.left);
 			const double height = std::abs(bounds.top - bounds.bottom);
-			return width > height;
+			return width > height ? Orientation::Flat : Orientation::Upright;
+		}
+
+		// オブジェクトの種別名。PIO なら universal 名（"GridAxis" 等）、そうでなければ
+		// "t<型番号>"（GetObjectTypeN）。棚卸しの見出しに使う。
+		std::string TypeLabelOf(MCObjectHandle object)
+		{
+			try
+			{
+				const VWParametricObj pio(object);
+				return std::string(pio.GetParametricName().GetData());
+			}
+			catch (...)
+			{
+				// PIO ではない。型番号で表す（名前は要らない——「何が何個あるか」だけ分かれば
+				// 寝た 1 本の居場所は特定できる）。
+				return "t" + std::to_string(static_cast<int>(gSDK->GetObjectTypeN(object)));
+			}
 		}
 
 		// オブジェクトが通り芯（GridAxis）の PIO か。PIO でなければ VWParametricObj の構築が
@@ -262,6 +297,53 @@ namespace HomeskzIfcImport::draw
 				// VW の作る図形も入るので、ここは素通りが正常。
 				return false;
 			}
+		}
+
+		// コンテナの中身を「種別 横n/縦m/不明k」の形に数え上げる（棚卸し）。中身が無ければ
+		// "空"。**コンテナでないもの**（FirstMemberObj が nil）も "空" になる。
+		std::string InventoryOf(MCObjectHandle container)
+		{
+			// 種別ごとの [横, 縦, 不明]。並びを決定的にするため map（名前順）で持つ。
+			std::map<std::string, std::array<std::size_t, 3>> tally;
+			std::size_t members = 0;
+			for (MCObjectHandle member = gSDK->FirstMemberObj(container); member != nil;
+				 member = gSDK->NextObject(member))
+			{
+				++members;
+				// 数が多い図面で文字列が際限なく伸びないよう、数える対象は上限で打ち切る
+				// （打ち切っても「何が居るか」は分かる）。
+				if (members > 200U)
+					break;
+				std::array<std::size_t, 3>& counts = tally[TypeLabelOf(member)];
+				switch (OrientationOf(member))
+				{
+				case Orientation::Flat:
+					++counts[0];
+					break;
+				case Orientation::Upright:
+					++counts[1];
+					break;
+				case Orientation::Unknown:
+					++counts[2];
+					break;
+				}
+			}
+			if (tally.empty())
+				return "空";
+			std::string text;
+			for (const auto& [label, counts] : tally)
+			{
+				if (!text.empty())
+					text += ", ";
+				text += label;
+				if (counts[0] > 0)
+					text += " 横" + std::to_string(counts[0]);
+				if (counts[1] > 0)
+					text += " 縦" + std::to_string(counts[1]);
+				if (counts[2] > 0)
+					text += " 不明" + std::to_string(counts[2]);
+			}
+			return text;
 		}
 
 		// ビューポートの**注釈グループ**を返す。取れなければ nil。
@@ -290,27 +372,47 @@ namespace HomeskzIfcImport::draw
 			return group;
 		}
 
-		// ビューポートの注釈から、寝ている通り芯インスタンスを消す。
-		void RemoveGridAxisInstances(MCObjectHandle viewport, AnnotationCounts& counts)
+		// ビューポートの子コンテナを棚卸しして 1 行にまとめる（原因調査中の一時的な診断）。
+		// 注釈グループには印を付ける（どれが注釈かを実機で確かめるため）。
+		std::string InventoryOfViewport(MCObjectHandle viewport, MCObjectHandle annotation)
 		{
-			const MCObjectHandle group = AnnotationGroupOf(viewport);
-			if (group == nil)
+			std::string text;
+			std::size_t index = 0;
+			for (MCObjectHandle child = gSDK->FirstMemberObj(viewport); child != nil;
+				 child = gSDK->NextObject(child))
 			{
-				++counts.unreachable;
-				return;
+				++index;
+				if (index > 8U)
+				{
+					text += " …";
+					break;
+				}
+				if (!text.empty())
+					text += " ";
+				text += "[";
+				if (child == annotation)
+					text += "注釈 ";
+				text += "t" + std::to_string(static_cast<int>(gSDK->GetObjectTypeN(child))) + ": " +
+						InventoryOf(child) + "]";
 			}
-			++counts.viewports;
+			if (text.empty())
+				text = "（子コンテナ無し）";
+			return text;
+		}
 
+		// コンテナ 1 つから、寝ている通り芯インスタンスを消す。見つけた数・消した数を足し込む。
+		void RemoveFlatGridAxes(MCObjectHandle container, AnnotationCounts& counts)
+		{
 			// **消す前に一覧を作る**——走査しながら消すと、消した図形から NextObject を
 			// たどることになる。
 			std::vector<MCObjectHandle> doomed;
-			for (MCObjectHandle member = gSDK->FirstMemberObj(group); member != nil;
+			for (MCObjectHandle member = gSDK->FirstMemberObj(container); member != nil;
 				 member = gSDK->NextObject(member))
 			{
 				if (!IsGridAxisObject(member))
 					continue;
 				++counts.gridInstances;
-				if (IsLyingFlat(member))
+				if (OrientationOf(member) == Orientation::Flat)
 					doomed.push_back(member);
 			}
 			for (const MCObjectHandle member : doomed)
@@ -320,20 +422,48 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// 注釈の走査を人が読める 1 行にする（異常が無ければ空文字）。**通り芯インスタンスを
-		// 1 つも見つけられなかった**ときも出す——「消したつもりで消せていない」を黙らせない。
+		// ビューポートから、寝ている通り芯インスタンスを消す。
+		//
+		// **注釈だけでなくビューポートの子コンテナすべてを見る**——注釈だけを見た版では
+		// 「注釈はたどれて通り芯インスタンスも見つかったのに、寝た 1 本が図に残る」という
+		// 実機の症状になった（＝寝た 1 本は注釈の外に居る）。どこに居るかは棚卸し
+		// （counts.inventory）で分かるので、それまでは見つけたところで消す。
+		void RemoveGridAxisInstances(MCObjectHandle viewport, AnnotationCounts& counts)
+		{
+			const MCObjectHandle annotation = AnnotationGroupOf(viewport);
+			// **1 枚目だけ棚卸しする**（全命令で同じ構造なので、診断行を命令の数だけ並べない）。
+			const bool inspect = counts.viewports == 0 && counts.unreachable == 0;
+			if (inspect)
+				counts.inventory = InventoryOfViewport(viewport, annotation);
+			if (annotation == nil)
+				++counts.unreachable;
+			else
+				++counts.viewports;
+
+			for (MCObjectHandle child = gSDK->FirstMemberObj(viewport); child != nil;
+				 child = gSDK->NextObject(child))
+				RemoveFlatGridAxes(child, counts);
+
+			// 消した後をもう一度棚卸しする（**消えたことを図面から確かめる**ため。消えているのに
+			// 図に残るなら、VW があとで作り直しているということになる）。
+			if (inspect)
+				counts.inventory += " → 削除後: " + InventoryOfViewport(viewport, annotation);
+		}
+
+		// 走査の結果を人が読める 1 行にする。**原因調査中は毎回出す**——「注釈はたどれて
+		// 通り芯インスタンスも見つかったのに、寝た 1 本が図に残る」という症状の居場所を
+		// 実機の棚卸しから突き止めるため（原因が確定したら異常時だけに戻す）。
 		std::string AnnotationDiagnostics(const AnnotationCounts& counts)
 		{
-			std::string text;
+			std::string text =
+				"軸組図の通り芯インスタンス: 注釈 " + std::to_string(counts.viewports) + " 枚";
 			if (counts.unreachable > 0)
-				text += "注釈をたどれなかったビューポート " + std::to_string(counts.unreachable) +
-						" 枚。";
-			if (counts.viewports > 0 && counts.gridInstances == 0)
-				text += "通り芯インスタンスが 1 つも見つかりませんでした（寝た通り芯が残ります）。";
-			if (text.empty())
-				return text;
-			return "軸組図の通り芯インスタンス: " + text + "（消した数 " +
-				   std::to_string(counts.removed) + "）";
+				text += "（たどれず " + std::to_string(counts.unreachable) + " 枚）";
+			text += " / 見つけた " + std::to_string(counts.gridInstances) + " / 消した " +
+					std::to_string(counts.removed);
+			if (!counts.inventory.empty())
+				text += " ｜ 1 枚目: " + counts.inventory;
+			return text;
 		}
 
 		// できたビューポートをシートレイヤ上で重ならないように格子状へ並べる（Python 版
@@ -454,8 +584,8 @@ namespace HomeskzIfcImport::draw
 			if (drawn == 0)
 				displayNote = CheckDisplayOptions(viewport);
 
-			// **更新のあと**に、切断面へ平行なまま作られてしまった通り芯インスタンスを注釈から
-			// 消す（上記 RemoveGridAxisInstances）。インスタンスは更新で作られるので、
+			// **更新のあと**に、切断面へ平行なまま作られてしまった通り芯インスタンスを消す
+			// （上記 RemoveGridAxisInstances）。インスタンスは更新で作られるので、
 			// ConfigureViewport（最後が更新）より前にやっても消すものが無い。
 			RemoveGridAxisInstances(viewport, annotations);
 
