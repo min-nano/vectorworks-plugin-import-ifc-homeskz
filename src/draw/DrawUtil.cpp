@@ -114,7 +114,10 @@ namespace HomeskzIfcImport::draw
 			{
 				// 列挙中の異常で図全体を落とさない（CLAUDE.md「エラーハンドリング」）。
 				// そこまでに拾えたクラスだけを返す（取りこぼしたクラスは、そのクラスの
-				// 図形がビューポートに映らないだけで済む）。
+				// 図形がビューポートに映らないだけで済む）。**catch の中で return する**のは
+				// AllLayers と同じ形で、clang-tidy の bugprone-empty-catch（コメントだけの
+				// catch は握り潰しとみなす）を避けるためでもある。
+				return {classes.begin(), classes.end()};
 			}
 			return {classes.begin(), classes.end()};
 		}
