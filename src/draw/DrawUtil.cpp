@@ -12,6 +12,7 @@
 #include "draw/DrawUtil.h"
 #include "draw/ObjectHandles.h"
 
+#include "VWFC/VWObjects/VWClass.h"
 #include "VWFC/VWObjects/VWDocument.h"
 #include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWLayerObj.h"
@@ -26,7 +27,6 @@
 #include <cstdio>
 #include <set>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -56,9 +56,8 @@ namespace HomeskzIfcImport::draw
 		//
 		// **シートレイヤは除く**（VWLayerObj::GetLayerType が kLayerSheet=2 を返すもの）。
 		// ビューポートに映るのはデザインレイヤだけなので、シートレイヤを混ぜても
-		// SetViewportLayerVisibility は意味を持たず、CollectUsedClasses が既にできている
-		// ビューポートの中身まで辿る無駄が増える。**軸組図は伏図の後に走る**ので、除かないと
-		// 伏図の作ったシートレイヤ（"1" / "2" …）がそのまま入ってくる。
+		// SetViewportLayerVisibility は意味を持たない。**軸組図は伏図の後に走る**ので、
+		// 除かないと伏図の作ったシートレイヤ（"1" / "2" …）がそのまま入ってくる。
 		std::vector<MCObjectHandle> AllLayers()
 		{
 			std::vector<MCObjectHandle> layers;
@@ -84,55 +83,56 @@ namespace HomeskzIfcImport::draw
 			return layers;
 		}
 
-		// 図面で実際に使われているクラスの索引を集める（DrawUtil.h の ViewportSetup 参照）。
-		// **コンテナは中まで辿る**のが要点で、通り芯（GridAxis PIO）のラベルのように
-		// 「PIO / シンボルの中の図形が、スタイルの決めたクラスを持つ」ものは、外側の
-		// オブジェクトのクラスだけ見ても拾えない（ラベルだけ消える。ローカル確認で判明）。
+		// 図面のクラスをすべて集める（昇順・重複なしの vector で返す）。
 		//
-		// 走査中は重複除去のために std::set を使い、**返すのは昇順・重複なしの vector**
-		// （ViewportSetup が std::set を持てない理由は DrawUtil.h 参照）。
-		// 図形の連なり（と、その入れ子）が身に付けているクラスを集める。heads は走査を
-		// 始める先頭オブジェクトの列。
-		std::set<InternalIndex> CollectClassesFrom(const std::vector<MCObjectHandle>& heads)
+		// **ビューポートはクラスの表示を明示しないと非表示のまま**なので（M13 のローカル確認
+		// で判明。レイヤは命令どおりなのに図形が 1 つも出なかった）、映したいクラスを 1 つずつ
+		// 表示へ戻す必要がある。ここは Python 版と同じく**ドキュメントの全クラスを表示**に
+		// する——ビューポートごとに映る/映らないをクラスで絞る要件は無く（Python 版の
+		// hidden_classes はどの伏図でも使われていない）、絞らないなら「どのクラスが要るか」を
+		// 推し量る必要も無い。
+		//
+		// 列挙は VWClass::ForEachClass（ISDK::ForEachClass の VWFC 版）。**受け取った VWClass は
+		// そのまま InternalIndex へ変換できる**（VWClass::operator InternalIndex）。
+		// doGuestClasses=true は参照ファイル由来（ゲスト）のクラスも含める指定で、
+		// 「全クラス表示」の趣旨どおり含める（ビューポートへ設定できないものは
+		// SetViewportClassVisibility が false を返すだけで無害）。
+		std::vector<InternalIndex> AllClasses()
 		{
 			std::set<InternalIndex> classes;
-			// 入れ子（グループ・シンボル・PIO）は深さ上限つきで辿る。上限は「PIO の中の
-			// グループの中の図形」に十分で、壊れたデータで無限に潜らない値。
-			constexpr int kMaxDepth = 6;
-			std::vector<std::pair<MCObjectHandle, int>> pending;
-			pending.reserve(heads.size());
-			for (const MCObjectHandle head : heads)
+			try
 			{
-				if (head != nil)
-					pending.emplace_back(head, 0);
+				VWClass::ForEachClass(true,
+									  [&classes](const VWClass& clas)
+									  {
+										  const InternalIndex index = clas;
+										  if (index != 0)
+											  classes.insert(index);
+									  });
 			}
-			while (!pending.empty())
+			catch (...)
 			{
-				const auto [head, depth] = pending.back();
-				pending.pop_back();
-				for (MCObjectHandle h = head; h != nil; h = gSDK->NextObject(h))
-				{
-					const InternalIndex index = gSDK->GetObjectClass(h);
-					if (index != 0)
-						classes.insert(index);
-					if (depth >= kMaxDepth)
-						continue;
-					const MCObjectHandle child = gSDK->FirstMemberObj(h);
-					if (child != nil)
-						pending.emplace_back(child, depth + 1);
-				}
+				// 列挙中の異常で図全体を落とさない（CLAUDE.md「エラーハンドリング」）。
+				// そこまでに拾えたクラスだけを返す（取りこぼしたクラスは、そのクラスの
+				// 図形がビューポートに映らないだけで済む）。**catch の中で return する**のは
+				// AllLayers と同じ形で、clang-tidy の bugprone-empty-catch（コメントだけの
+				// catch は握り潰しとみなす）を避けるためでもある。
+				return {classes.begin(), classes.end()};
 			}
-			return classes;
+			return {classes.begin(), classes.end()};
 		}
 
-		std::vector<InternalIndex> CollectUsedClasses(const std::vector<MCObjectHandle>& layers)
+		// ビューポートで指定のクラスを表示へ戻す（戻せた数を返す）。**表示種別の値を
+		// ここ 1 か所に閉じ込める**ためのもの。
+		std::size_t ShowClasses(MCObjectHandle viewport, const std::vector<InternalIndex>& classes)
 		{
-			std::vector<MCObjectHandle> heads;
-			heads.reserve(layers.size());
-			for (const MCObjectHandle layer : layers)
-				heads.push_back(gSDK->FirstMemberObj(layer));
-			const std::set<InternalIndex> classes = CollectClassesFrom(heads);
-			return {classes.begin(), classes.end()};
+			std::size_t applied = 0;
+			for (const InternalIndex index : classes)
+			{
+				if (gSDK->SetViewportClassVisibility(viewport, index, kClassVisible))
+					++applied;
+			}
+			return applied;
 		}
 
 		// 表示するデザインレイヤの縮尺を返す（Python 版 configure_viewport_scale）。図が映す
@@ -507,28 +507,17 @@ namespace HomeskzIfcImport::draw
 	//   * gSDK->GetNamedLayer / CreateLayer               … シートレイヤの取得・生成
 	//   * VWLayerObj(h).SetDescription / GetScale         … シートレイヤのタイトル・縮尺
 	//   * gSDK->SetViewportLayerVisibility(vp, layer, v)  … 表示レイヤの絞り込み（0=表示/1=非表示）
-	//   * gSDK->FirstMemberObj / GetObjectClass           … 図形が使うクラスの数え上げ
-	//   * gSDK->ClassNameToID(name)                       … クラス名 → InternalIndex
+	//   * VWClass::ForEachClass(true, cb)                 … 図面の全クラスの列挙
+	//                                                       （ISDK::ForEachClass の VWFC 版）
 	//   * gSDK->SetViewportClassVisibility(vp, idx, 0)    … クラス表示（既定は非表示）
 	//   * VWViewportObj(vp).SetScale / SetDescription / SetLocator / Update
 	//                                                     … 縮尺（1003）・図面タイトル（1032）・
 	//                                                       図番（1033）・描画更新
-	ViewportSetup PrepareViewportSetup(const core::Document& document)
+	ViewportSetup PrepareViewportSetup()
 	{
 		ViewportSetup setup;
 		setup.layers = AllLayers();
-		setup.classes = CollectUsedClasses(setup.layers);
-		// 命令セットが名乗るクラスも足す（まだ図形が無いクラスや、走査で辿れなかったものの
-		// 取りこぼしを防ぐ保険）。足した後に昇順・重複なしへ整える。
-		for (const std::string& name : core::documentClassNames(document))
-		{
-			const InternalIndex index = gSDK->ClassNameToID(TXString(name.c_str()));
-			if (index != 0)
-				setup.classes.push_back(index);
-		}
-		std::ranges::sort(setup.classes);
-		const auto duplicates = std::ranges::unique(setup.classes);
-		setup.classes.erase(duplicates.begin(), duplicates.end());
+		setup.classes = AllClasses();
 		return setup;
 	}
 
@@ -561,22 +550,9 @@ namespace HomeskzIfcImport::draw
 		return layer;
 	}
 
-	std::vector<InternalIndex> CollectObjectClasses(MCObjectHandle object)
+	std::size_t ShowAllViewportClasses(MCObjectHandle viewport)
 	{
-		const std::set<InternalIndex> classes = CollectClassesFrom({object});
-		return {classes.begin(), classes.end()};
-	}
-
-	std::size_t ShowViewportClasses(MCObjectHandle viewport,
-									const std::vector<InternalIndex>& classes)
-	{
-		std::size_t applied = 0;
-		for (const InternalIndex index : classes)
-		{
-			if (gSDK->SetViewportClassVisibility(viewport, index, kClassVisible))
-				++applied;
-		}
-		return applied;
+		return ShowClasses(viewport, AllClasses());
 	}
 
 	std::size_t ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
@@ -597,8 +573,8 @@ namespace HomeskzIfcImport::draw
 				gSDK->SetViewportLayerVisibility(viewport, layer, kLayerVisible);
 		}
 
-		// クラス: 1 つずつ表示へ戻す（ヘッダ「クラスをわざわざ数え上げる理由」）。
-		const std::size_t applied = ShowViewportClasses(viewport, setup.classes);
+		// クラス: 全クラスを 1 つずつ表示へ戻す（ヘッダ「クラスを表示へ戻す理由」）。
+		const std::size_t applied = ShowClasses(viewport, setup.classes);
 
 		// 縮尺・ラベル・更新。**縮尺は表示レイヤを絞った後に読む**（映すレイヤの縮尺に
 		// 合わせるため）。設定に失敗しても図そのものは残す。

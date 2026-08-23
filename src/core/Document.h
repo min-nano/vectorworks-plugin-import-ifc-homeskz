@@ -1028,18 +1028,6 @@ namespace HomeskzIfcImport::core
 	// 各命令リストの追加に合わせて検証規則を足していく。
 	bool validateDocument(const Document& document);
 
-	// 命令セットが使うクラス名（drawClass）を重複なく昇順で返す。空文字（無クラス）は含めない。
-	//
-	// **伏図ビューポートのクラス表示に使う**（draw/Sheet）。VW のビューポートはクラスの表示を
-	// 明示しないと**全クラスが非表示**になり、レイヤを正しく絞っても図形が 1 つも出ない
-	// （M13 のローカル確認で判明）。ところが ISDK には「ドキュメントの全クラスを列挙する」
-	// 呼び出しが無い（VWClass にあるのは名前↔索引の変換だけ）。そこで、**プラグインが自分で
-	// 割り当てたクラスは命令セットから分かる**ことを使い、その名前を数え上げて表示へ戻す。
-	//
-	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder と
-	// 同じ立ち位置。CLAUDE.md「テスト方針」）。並びは昇順で、命令の並び順に依存しない。
-	std::vector<std::string> documentClassNames(const Document& document);
-
 	// 断面（軸組図）の高さ範囲に足す上下の余白（mm）。基礎の底や屋根の頂部を切り落とさない
 	// ための遊びで、sectionHeightRange とその期待値を書くテストが共有する。
 	inline constexpr double kSectionHeightMargin = 1000.0;
@@ -1055,8 +1043,8 @@ namespace HomeskzIfcImport::core
 	// 0 を渡すと**奥行きは無限**になるが**高さは「有限 0〜0」**になってしまい、断面から
 	// 建物が消えかねない。そこで高さだけは実寸＋余白の有限値を渡す（ROADMAP.md M14）。
 	//
-	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder・
-	// documentClassNames と同じ立ち位置。CLAUDE.md「テスト方針」）。
+	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder と
+	// 同じ立ち位置。CLAUDE.md「テスト方針」）。
 	bool sectionHeightRange(const Document& document, double& start, double& end);
 
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す

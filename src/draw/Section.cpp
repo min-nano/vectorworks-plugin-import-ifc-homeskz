@@ -250,8 +250,8 @@ namespace HomeskzIfcImport::draw
 		if (commands.empty())
 			return 0;
 
-		// レイヤの走査とクラスの数え上げは全命令で共通なので 1 回だけ行う（draw/DrawUtil）。
-		const ViewportSetup setup = PrepareViewportSetup(document);
+		// レイヤとクラスの列挙は全命令で共通なので 1 回だけ行う（draw/DrawUtil）。
+		const ViewportSetup setup = PrepareViewportSetup();
 
 		// 断面の高さ範囲も全命令で共通（建物を包む実寸＋余白。core::sectionHeightRange）。
 		// **求まらないときは描かない**——高さの分かる要素が 1 つも無い文書では out が
