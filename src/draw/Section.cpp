@@ -14,6 +14,8 @@
 //	                                        あるので、後段は伏図と同じ手順（draw/DrawUtil の
 //	                                        ConfigureViewport）で仕上げる。
 //	  * gSDK->SetObjectVariable(h, 1064/1035/1059, …) … 断面の見え方（下記）
+//	  * gSDK->GetObjectVariable(h, 1059, …)  … 2D コンポーネント表示が入ったかの読み戻し
+//	  * VWViewportObj::SetRenderType(renderFinalHiddenLine) … レンダリング（下記）
 //	  * gSDK->GetObjectBounds(h, WorldRect&) … できたビューポートの実寸（並べるのに使う）
 //	  * gSDK->MoveObject(h, dx, dy)          … シートレイヤ上での移動
 //
@@ -31,6 +33,23 @@
 //	レイヤ平面）図形は表示せず**、**2D コンポーネントは表示する**（下記のオブジェクト変数）。
 //	断面の範囲は、**奥行きは無制限**（0 を渡す）・**高さは建物を包む実寸＋余白**・**長さは
 //	断面線の長さ**（指示線を十分外まで延ばして実質無制限にする）。
+//
+//	【レンダリングは〈隠線消去〉にする（オブジェクト情報パレットの項目が減る原因）】
+//	インポートした軸組図を選ぶと、**手で作った断面ビューポートには在る項目がパレットから
+//	丸ごと消えている**という実機の症状があった（〈2D コンポーネントを表示〉と〈2D の面を
+//	表示〉が無い・〈切断面より手前を表示〉が灰色で押せない）。原因は**ビューポートの
+//	レンダリング（バックグラウンド）**の違いで、手作りは〈隠線消去〉、`CreateSectionViewport`
+//	が作ったものは〈シェイド〉になっていた（1 枚目・2 枚目のパレットを見比べると、
+//	消えている項目は**すべて隠線消去でしか意味を持たない項目**で、それ以外の項目は同じ）。
+//	VW は**その描き方で効かない設定をパレットから隠す**（SDK にも読み取り専用の
+//	`ovViewportHiddenLineDisplay2DFillsAllowed`＝「2D の面を出せる状態か」という変数がある）
+//	ので、シェイドのままでは項目が出ない。**2D コンポーネント（1059）へ true を書いても
+//	入らなかった**のも同じ理由と考えられる（ハイブリッドシンボルの 2D 表現は隠線消去・
+//	ワイヤーフレームでしか描かれない）。
+//	そこで**作った直後・更新より前にレンダリングを `renderFinalHiddenLine`（隠線消去）へ
+//	揃える**。これで手作りの断面と同じ項目が並び、同じように設定を変えられる。
+//	なお〈切断面より奥の範囲〉の中の項目が灰色なのは**〈切断面より奥を表示〉が off だから**で
+//	（要件どおり。手作りでも off にすれば同じく灰色になる）、こちらは不具合ではない。
 //
 //	【範囲を「無限」にはできない（調べ尽くした結論）】UI で断面ビューポートを手で作ると
 //	〈長さ・高さの範囲〉は既定で〈無限〉になるが、**SDK からその状態にする手段は無い**。
@@ -54,6 +73,9 @@
 #include "draw/Tag.h"
 #include "core/Document.h"
 #include "core/Progress.h"
+
+// レンダリングの設定に使う VWFC ラッパー（draw/DrawUtil が縮尺・図番で使うのと同じもの）。
+#include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
 #include <cmath>
@@ -93,7 +115,10 @@ namespace HomeskzIfcImport::draw
 		//   1064 … 切断面より**奥**の図形を表示するか（要件: 表示しない）
 		//   1035 … プレイナー（レイヤ平面）／2D 図形を表示するか（要件: 表示しない）
 		//   1059 … ハイブリッドシンボル等の 2D コンポーネントを表示するか（要件: 表示する。
-		//          既定でも表示だが、既定値に頼らず明示する）
+		//          **CreateSectionViewport の直後は非表示**で、しかも**レンダリングが
+		//          シェイドのままでは書いても入らない**——先に隠線消去へ揃えること
+		//          （ファイル冒頭「レンダリングは〈隠線消去〉にする」）。入ったかどうかは
+		//          読み戻して診断へ残す）
 		// **どれもビューポートの更新より前に設定する**（更新時の描画へ効かせるため。
 		// CreateSectionViewport のヘッダコメントも「表示設定は呼び出し後、更新はその後」）。
 		constexpr short kOVDisplayObjectsBeyondCutPlane = 1064;
@@ -102,6 +127,13 @@ namespace HomeskzIfcImport::draw
 		constexpr Boolean kShowObjectsBeyondCutPlane = false;
 		constexpr Boolean kShowPlanarObjects = false;
 		constexpr Boolean kShow2DComponents = true;
+
+		// ビューポートのレンダリング（バックグラウンド）。**手で作った断面ビューポートと
+		// 同じ〈隠線消去〉**に揃える（ファイル冒頭「レンダリングは〈隠線消去〉にする」）。
+		// TRenderMode は Kernel/API/MiniCadCallBacks.h（renderFinalHiddenLine = 6 が
+		// VW の UI の〈隠線消去〉、renderOpenGL = 11 が〈シェイド〉）。
+		// **レンダリング（輪郭）は触らない**——手作りも既定の〈なし〉で、こちらは差が無い。
+		constexpr TRenderMode kSectionRenderMode = renderFinalHiddenLine;
 
 		// オブジェクト変数へ真偽値を書き込む（draw/Footing の SetBooleanVariable と同じ流儀）。
 		void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value)
@@ -122,13 +154,61 @@ namespace HomeskzIfcImport::draw
 											   endHeight, sheetLayer);
 		}
 
-		// 軸組図としての見え方を整える（要件。ConfigureViewport＝更新より**前**に呼ぶ）。
-		void ApplySectionDisplayOptions(MCObjectHandle viewport)
+		// オブジェクト変数の真偽値を読む。読めなければ false を返し out は触らない
+		// （＝「読めない」と「false だった」を取り違えない）。
+		bool ReadBooleanVariable(MCObjectHandle object, short variable, bool& out)
 		{
+			TVariableBlock block;
+			if (!gSDK->GetObjectVariable(object, variable, block))
+				return false;
+			return block.GetBoolean(out);
+		}
+
+		// レンダリング（バックグラウンド）を〈隠線消去〉にする。できたら true
+		// （ファイル冒頭「レンダリングは〈隠線消去〉にする」）。
+		bool ApplySectionRenderMode(MCObjectHandle viewport)
+		{
+			try
+			{
+				VWViewportObj(viewport).SetRenderType(kSectionRenderMode);
+			}
+			catch (...)
+			{
+				// レンダリングを変えられなくても断面そのものは図面に残る（見え方だけの
+				// 設定）。1 枚の失敗で残りを止めず、件数だけ診断へ残す。
+				return false;
+			}
+			return true;
+		}
+
+		// 軸組図としての見え方を整える（要件。ConfigureViewport＝更新より**前**に呼ぶ）。
+		// レンダリングを揃えられたら true。
+		//
+		// **レンダリングを先に決める**——2D コンポーネント（1059）のような「その描き方でしか
+		// 意味を持たない設定」は、レンダリングがシェイドのままだと書いても入らない
+		// （ファイル冒頭「レンダリングは〈隠線消去〉にする」）。順番を入れ替えないこと。
+		bool ApplySectionDisplayOptions(MCObjectHandle viewport)
+		{
+			const bool rendered = ApplySectionRenderMode(viewport);
 			SetBooleanVariable(viewport, kOVDisplayObjectsBeyondCutPlane,
 							   kShowObjectsBeyondCutPlane);
 			SetBooleanVariable(viewport, kOVDisplayPlanarObjects, kShowPlanarObjects);
 			SetBooleanVariable(viewport, kOVDisplay2DComponents, kShow2DComponents);
+			return rendered;
+		}
+
+		// 2D コンポーネント表示が**本当に入ったか**を読み戻す。入っていなければ true。
+		//
+		// 【なぜ読むか】SetObjectVariable は書けなかったときも黙って何もしない（返り値が
+		// 無い）ので、「設定したつもりで効いていない」は目視では見抜けない。この 1 項目は
+		// 実機で**書いても入らない**ことが分かっている問題の当事者なので、直ったかどうかを
+		// 完了ダイアログの診断行で分かるようにしておく（読めない環境では false＝黙る）。
+		bool Display2DComponentsMissing(MCObjectHandle viewport)
+		{
+			bool actual = false;
+			if (!ReadBooleanVariable(viewport, kOVDisplay2DComponents, actual))
+				return false;
+			return actual != static_cast<bool>(kShow2DComponents);
 		}
 
 		// できたビューポートをシートレイヤ上で重ならないように格子状へ並べる（Python 版
@@ -198,6 +278,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		std::size_t missingSheetLayers = 0;
 		std::size_t missingViewports = 0;
+		std::size_t missing2DComponents = 0;
+		std::size_t missingRenderMode = 0;
 		std::size_t classesApplied = 0;
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
 		const ObjectHandles emptyHandles;
@@ -238,8 +320,11 @@ namespace HomeskzIfcImport::draw
 
 			// 表示の作法（奥を出さない・プレイナー図形を出さない・2D コンポーネントは出す）は
 			// **更新より前**に設定する（ConfigureViewport の最後が更新）。
-			ApplySectionDisplayOptions(viewport);
+			if (!ApplySectionDisplayOptions(viewport))
+				++missingRenderMode;
 			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport);
+			if (Display2DComponentsMissing(viewport))
+				++missing2DComponents;
 
 			// 断面寸法データタグ。**並べ替え（ArrangeViewports）より前**に置く——注釈は
 			// ビューポートと一緒に動くので、先に置いておけば移動しても図の上に留まる。
@@ -255,7 +340,8 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetCurrentLayer(previousLayer);
 
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
-		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken))
+		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
+								missing2DComponents > 0 || missingRenderMode > 0))
 		{
 			std::string text = "軸組図の診断: ";
 			if (missingSheetLayers > 0)
@@ -267,6 +353,13 @@ namespace HomeskzIfcImport::draw
 			if (classesBroken)
 				text += "クラスを表示に戻せませんでした（対象 " +
 						std::to_string(setup.classes.size()) + " クラス）。図形が映りません。";
+			if (missingRenderMode > 0)
+				text += "レンダリングを〈隠線消去〉にできなかった軸組図 " +
+						std::to_string(missingRenderMode) + " 枚。";
+			if (missing2DComponents > 0)
+				text += "2D コンポーネントを表示にできなかった軸組図 " +
+						std::to_string(missing2DComponents) +
+						" 枚（ハイブリッドシンボルの 2D 表現が出ません）。";
 			if (!note->empty())
 				*note += "\n";
 			*note += text;
