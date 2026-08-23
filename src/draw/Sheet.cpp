@@ -24,6 +24,12 @@
 //	  * gSDK->CreateViewport(sheetLayer)  … 平面ビューポート生成
 //	  * gSDK->GetCurrentLayer / SetCurrentLayer … カレントレイヤの退避と復帰
 //
+//	【投影は 2D/平面へ作り直させる】`CreateViewport` が作ったビューポートは、パレット上は
+//	「2D/平面」なのに**描画は 3D の「上」ビューのまま**という食い違いを起こす（更新ボタンを
+//	押しても直らない）。伏図なので `ViewportProjection::Plan` を渡して作り直させる——
+//	手順と理由は draw/DrawUtil.h の ViewportProjection、Python 版は vw/sheet.py の
+//	force_plan_view。**軸組図（draw/Section）は Keep** で、こちらだけの手当て。
+//
 //	【重ね順はここでは扱わない】床・野地板が柱・梁を覆わないようにする件は、**ドキュメントの
 //	デザインレイヤの並べ替え**（draw/Story の reorderStoryLayers）が担う。per-viewport の
 //	上書き（SetViewportLayerStackingOverride）は実機で効かなかった——呼び出しは true を
@@ -67,6 +73,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingViewports = 0;
 		// クラス表示は「設定できた数」を数える（0 なら図形が 1 つも映らない）。
 		std::size_t classesApplied = 0;
+		// 2D/平面へ作り直せなかった枚数（＝3D の「上」に見えるビューポートの数）。
+		std::size_t missingPlanView = 0;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
 		// （渡されなければ空の表＝関連付け無しで置く。draw/Tag.h）。
 		const ObjectHandles emptyHandles;
@@ -110,7 +118,11 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport);
+			const ViewportFinish finish = ConfigureViewport(
+				viewport, sheetLayer, setup, command.viewport, ViewportProjection::Plan);
+			classesApplied += finish.classesApplied;
+			if (!finish.planViewApplied)
+				++missingPlanView;
 
 			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport の
 			// 最後が更新で、注釈はその後に足しても図に出る。Python 版 execute_sheets も
@@ -136,7 +148,8 @@ namespace HomeskzIfcImport::draw
 		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 枚」のときに、シートレイヤを
 		// 作れないのか、ビューポートを作れないのかを切り分けられる。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
-		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken))
+		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
+								missingPlanView > 0))
 		{
 			std::string text = "伏図の診断: ";
 			if (missingSheetLayers > 0)
@@ -148,6 +161,9 @@ namespace HomeskzIfcImport::draw
 			if (classesBroken)
 				text += "クラスを表示に戻せませんでした（対象 " +
 						std::to_string(setup.classes.size()) + " クラス）。図形が映りません。";
+			if (missingPlanView > 0)
+				text += "2D/平面（Top/Plan）にできなかった伏図 " + std::to_string(missingPlanView) +
+						" 枚（3D の「上」ビューのように描かれます）。";
 			*note = std::move(text);
 		}
 
