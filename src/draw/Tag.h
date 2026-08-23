@@ -44,10 +44,10 @@
 //	     からの相対」で決める作りを試したが、実測はどの基準点候補からも数 m 外れた
 //	     （parse/Tag.h「［遠回りの記録］」）。位置は必ず命令の position で決める。
 //	  3. **注釈へ後から足した図形のクラスはビューポートで非表示のまま**。ビューポートの
-//	     クラス表示を決める PrepareViewportSetup はデザインレイヤしか走査しないので、
-//	     注釈のデータタグ（とスタイルが決めるその中身）のクラスが数え上げに入らない。
-//	     置いた後に CollectObjectClasses で拾って ShowViewportClasses で戻し、
-//	     ビューポートを再更新する。
+//	     クラス表示を決める ConfigureViewport はタグを置く前に走るので、タグのスタイルが
+//	     その時点で文書に無かったクラスを持ち込むと（タグの中身はスタイルが決める）
+//	     そのクラスが非表示のまま残る。置いた後に ShowAllViewportClasses で全クラスを
+//	     表示へ戻し、ビューポートを再更新する。
 //	  4. **断面（軸組図）の注釈空間は横方向の原点がモデルと違う**（高さは合うのに横だけ
 //	     一定量ずれた）。補正は解析側が持つ（parse/Tag の sectionAlongOrigin）。
 //	     **ローカル確認で正しい位置に出ることを確認済み。**
@@ -77,7 +77,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t failed = 0; // PIO を作れなかった／注釈に入れられなかった
 		std::size_t unassociated = 0; // 関連付け先の横架材ハンドルが無かった
 		std::size_t leaderLeft = 0; // 引出線を OFF にできなかった（引出線が残る）
-		std::size_t classesShown = 0; // タグのクラスを表示へ戻せた数（0 ならタグが映らない）
+		std::size_t classesShown = 0; // タグを置いた後に表示へ戻せたクラス数（0 なら映らない）
 		std::size_t updateFailed = 0; // クラスを戻した後の再更新に失敗したビューポート
 		std::size_t unmeasured = 0; // 実位置を測れず動かせなかったタグ
 		bool styleMissing = false;	// "断面寸法" スタイルが文書に無い

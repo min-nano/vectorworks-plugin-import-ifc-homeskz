@@ -253,15 +253,21 @@ namespace HomeskzIfcImport::draw
 
 	// ビューポート共通の下ごしらえ。図面の全レイヤと、**表示に戻すクラス**の索引を持つ。
 	//
-	// 【クラスをわざわざ数え上げる理由】ビューポートはクラスの表示を明示しないと**非表示の
-	// まま**（M13 のローカル確認で判明。レイヤは命令どおりなのに図形が 1 つも出なかった）。
-	// ところが ISDK には「ドキュメントの全クラスを列挙する」呼び出しが無い（VWClass にあるのは
-	// 名前↔索引の変換だけ）。そこで**図形が身に付けているクラス**を全レイヤ走査で数え上げ、
-	// 命令セットが名乗るクラス（core::documentClassNames）も取りこぼし防止に足す。
+	// 【クラスを表示へ戻す理由】ビューポートはクラスの表示を明示しないと**非表示のまま**
+	// （M13 のローカル確認で判明。レイヤは命令どおりなのに図形が 1 つも出なかった）。
+	// そこで **Python 版と同じくドキュメントの全クラスを表示へ戻す**——列挙は
+	// VWClass::ForEachClass（＝ISDK::ForEachClass の VWFC 版）で行う。
+	//
+	// **［訂正の記録］**M13 では「ISDK にドキュメントの全クラスを列挙する呼び出しが無い」と
+	// 判断し、図形が身に付けているクラスを全レイヤ走査で数え上げ、命令セットが名乗るクラス名
+	// （当時の core::documentClassNames）も保険で足していた。**この前提が誤りで**、SDK には
+	// ForEachClass がある（sdk-grep で確認）。走査による推し量りは、拾い漏れれば図形が消える
+	// うえに、ビューポート注釈のように後から足したものを別経路で拾い直す必要もあった。
+	// 全クラス表示なら「どのクラスが要るか」を推し量る必要そのものが無くなる。
 	//
 	// classes は**昇順・重複なしの vector**（集合として使うが std::set では持たない）。
 	// Windows の clang-tidy が std::set を持つ構造体の暗黙の特殊メンバに
-	// bugprone-exception-escape を出すため、走査中だけ set を使い、結果は vector へ移す
+	// bugprone-exception-escape を出すため、列挙中だけ set を使い、結果は vector へ移す
 	// （用途は「1 つずつ表示へ戻す」走査だけなので、連続領域の方が素直でもある）。
 	struct ViewportSetup
 	{
@@ -272,24 +278,18 @@ namespace HomeskzIfcImport::draw
 	// 上の下ごしらえを行う。図面の規模なりに走査するので、**ビューポートを作るフェーズごとに
 	// 1 回だけ**呼ぶこと（伏図・軸組図がそれぞれ 1 回。フェーズをまたいで持ち回さないのは、
 	// 要素ごとの draw/*.h に SDK 型を出さない約束を守るため。DrawUtil.h 冒頭参照）。
-	ViewportSetup PrepareViewportSetup(const core::Document& document);
+	ViewportSetup PrepareViewportSetup();
 
 	// シートレイヤを用意する（同じ番号のものがあれば再利用）。**シートレイヤ番号はレイヤ名が
 	// 担う**（Python 版と同じ）。タイトルはレイヤの説明＝オブジェクト変数 159
 	// （ovLayerDescription。"only used for sheet layers"）へ入れる。用意できなければ nil。
 	MCObjectHandle PrepareSheetLayer(const std::string& number, const std::string& title);
 
-	// オブジェクト（PIO・グループ・シンボル）が**中身も含めて**身に付けているクラスを
-	// 昇順・重複なしで返す。**後から注釈へ足した図形のクラスを表示へ戻す**のに使う
-	// ——PrepareViewportSetup はデザインレイヤしか走査しないので、ビューポート注釈に
-	// 置いたデータタグ（とスタイルが決めるその中身）のクラスは数え上げに入らない
-	// （ローカル確認で「タグに含まれるクラスが非表示」と判明。draw/Tag）。
-	std::vector<InternalIndex> CollectObjectClasses(MCObjectHandle object);
-
-	// ビューポートで指定のクラスを表示へ戻す（戻せた数を返す）。ConfigureViewport が
-	// 使うのと同じ規約で、**表示種別の値をここ 1 か所に閉じ込める**ためのもの。
-	std::size_t ShowViewportClasses(MCObjectHandle viewport,
-									const std::vector<InternalIndex>& classes);
+	// ビューポートで**いまドキュメントにある全クラス**を表示へ戻す（戻せた数を返す）。
+	// ConfigureViewport が使うのと同じ列挙・同じ表示種別で、**ビューポートを仕上げた後に
+	// 増えたクラス**を拾い直すためのもの——注釈へ後から置いたデータタグは、スタイルが
+	// 決める中身と一緒に新しいクラスを文書へ持ち込むことがある（draw/Tag）。
+	std::size_t ShowAllViewportClasses(MCObjectHandle viewport);
 
 	// 生成済みのビューポートを命令どおりに仕上げる（表示レイヤの絞り込み → クラス表示 →
 	// 縮尺 → 図面タイトル・図番 → 更新）。**表示に戻せたクラスの数**を返す（0 なら図形が

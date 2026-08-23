@@ -32,7 +32,6 @@
 #include <cmath>
 #include <cstddef>
 #include <map>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -217,8 +216,8 @@ namespace HomeskzIfcImport::draw
 			VectorWorks::Extension::IID_DataTagSupport);
 
 		// 置けたタグ。**注釈へ足した図形のクラスはビューポートで非表示のまま**なので
-		// （PrepareViewportSetup はデザインレイヤしか走査しない。ローカル確認で判明）、
-		// 全部置いてから、そのクラスをまとめて表示へ戻す。
+		// （ConfigureViewport はタグを置く前に走る。ローカル確認で判明）、全部置いてから
+		// 改めて全クラスを表示へ戻す。
 		std::vector<MCObjectHandle> placed;
 		placed.reserve(command.tags.size());
 
@@ -249,30 +248,22 @@ namespace HomeskzIfcImport::draw
 
 		MovePendingTags(pending);
 
-		// タグ（とスタイルが決めるその中身）のクラスを表示へ戻し、ビューポートを更新して
-		// 反映する。ConfigureViewport は**タグを置く前**に走っているので、ここで足さないと
-		// 注釈だけが空白のまま残る。
+		// クラスを表示へ戻し、ビューポートを更新して反映する。ConfigureViewport は**タグを
+		// 置く前**に走っているので、**スタイルがその時点で文書に無かったクラスを持ち込んだ
+		// 場合**（タグの中身はスタイルが決める）、ここで戻さないと注釈だけが空白のまま残る。
+		// 戻すのはビューポートと同じく**全クラス**（draw/DrawUtil の ShowAllViewportClasses）
+		// ——タグが身に付けているクラスを数え上げる必要はない。
 		if (!placed.empty())
 		{
-			std::set<InternalIndex> classes;
-			for (const MCObjectHandle object : placed)
+			counts.classesShown += ShowAllViewportClasses(viewport);
+			try
 			{
-				const std::vector<InternalIndex> used = CollectObjectClasses(object);
-				classes.insert(used.begin(), used.end());
+				VWViewportObj(viewport).Update();
 			}
-			if (!classes.empty())
+			catch (...)
 			{
-				counts.classesShown +=
-					ShowViewportClasses(viewport, {classes.begin(), classes.end()});
-				try
-				{
-					VWViewportObj(viewport).Update();
-				}
-				catch (...)
-				{
-					// 更新できなくてもタグ自体は図面に残る（表示は次の更新で追いつく）。
-					++counts.updateFailed;
-				}
+				// 更新できなくてもタグ自体は図面に残る（表示は次の更新で追いつく）。
+				++counts.updateFailed;
 			}
 		}
 		return drawn;

@@ -55,8 +55,8 @@ namespace HomeskzIfcImport::draw
 		if (commands.empty())
 			return 0;
 
-		// レイヤの走査とクラスの数え上げは全シートで共通なので 1 回だけ行う（draw/DrawUtil）。
-		const ViewportSetup setup = PrepareViewportSetup(document);
+		// レイヤとクラスの列挙は全シートで共通なので 1 回だけ行う（draw/DrawUtil）。
+		const ViewportSetup setup = PrepareViewportSetup();
 
 		// 描画の前後でカレントレイヤが変わると以降のフェーズ（軸組図＝M14）に響くので、
 		// 元のレイヤへ戻せるよう控えておく。
