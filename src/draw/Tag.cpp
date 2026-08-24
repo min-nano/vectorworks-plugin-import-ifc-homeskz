@@ -463,6 +463,14 @@ namespace HomeskzIfcImport::draw
 		record.style = static_cast<RefNumber>(gSDK->GetObjectInternalIndex(symDef));
 		if (record.style == 0)
 			record.failure = "作ったスタイルを参照できませんでした";
+
+		// **取り消しでスタイルも消えるようにする**（draw/DrawUtil の RecordCreatedObject）。
+		// スタイルはレイヤの上の図形ではなく**資源**なので、レイヤを消しても残る——申告して
+		// おかないと、取り込みと取り消しを繰り返すたびに `断面寸法`、`断面寸法-2` … が
+		// 文書に積み上がる。**最後に（＝作り切ってから）申告する**——途中で捨てる経路では
+		// こちらが削除するので、先に申告すると undo 表に消えたものが残ってしまう。
+		// 中のテキスト・グループは申告しない（スタイルごと消えるものを二重に登録しない）。
+		RecordCreatedObject(symDef);
 	}
 
 	std::string tagStyleDiagnostics(const TagStyle& style)
