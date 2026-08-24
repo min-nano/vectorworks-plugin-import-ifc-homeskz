@@ -31,6 +31,15 @@ namespace HomeskzIfcImport::parse
 		{
 			return std::min(aTop, bTop) - std::max(aBottom, bBottom) > kJointZOverlapTol;
 		}
+
+		// 判定する 1 端分（基準点・部材内側へ向かう方向・レイヤ平面からの相対 Z）。始端と
+		// 終端で 3 つ組が変わるだけなので、同じループで両端を回すためにまとめる。
+		struct JointEnd
+		{
+			Vec2 point;
+			Vec2 inward;
+			double zOffset = 0.0;
+		};
 	} // namespace
 
 	MemberGeom memberGeom(const MemberCommand& command)
@@ -139,12 +148,14 @@ namespace HomeskzIfcImport::parse
 			if (!geom.valid)
 				continue;
 
-			// 始端（内側方向は +軸）・終端（内側方向は −軸）の順に判定する。
-			const std::array<std::pair<Vec2, Vec2>, 2> ends = {
-				std::pair<Vec2, Vec2>{geom.start, geom.axis},
-				std::pair<Vec2, Vec2>{geom.end, Vec2{-geom.axis.x, -geom.axis.y}},
+			// 始端（内側方向は +軸・高さは startBound）・終端（内側方向は −軸・高さは
+			// endBound）の順に判定する。高さはレイヤ平面からの相対 Z＝その端部のバウンド
+			// offset（parse/Joint.h「高さも梁端の天端に合わせる」）。
+			const std::array<JointEnd, 2> ends = {
+				JointEnd{geom.start, geom.axis, members[i].startBound.offset},
+				JointEnd{geom.end, Vec2{-geom.axis.x, -geom.axis.y}, members[i].endBound.offset},
 			};
-			for (const auto& [point, inward] : ends)
+			for (const auto& [point, inward, zOffset] : ends)
 			{
 				if (!endHasReceiver(i, point, geoms, members, columnGeoms))
 					continue;
@@ -155,6 +166,7 @@ namespace HomeskzIfcImport::parse
 				command.position = point;
 				// 梁軸に沿って端部から部材内側へ向かう方向（度・反時計回り）。
 				command.angle = std::atan2(inward.y, inward.x) * 180.0 / std::numbers::pi;
+				command.zOffset = zOffset;
 				commands.push_back(std::move(command));
 			}
 		}

@@ -14,6 +14,7 @@
 //	  * VWSymbolObj(name, VWPoint2D(x, y), angleDeg)      … シンボルインスタンスの配置
 //	  * VWSymbolObj::IsSymbolObject(handle, name)         … 置けたものが本当にそれか
 //	  * gSDK->AddObjectToContainer(handle, layer)         … 配置先レイヤへ入れ直す
+//	  * gSDK->MoveObject3D(handle, 0, 0, dz)              … レイヤ平面からの高さ調整（下記）
 //	VWSymbolObj のこの構築子が VS の vs.Symbol(name, point, angle) にあたる。
 //
 //	【VW 2026 SDK の落とし穴】ISDK にシンボルを配置する呼び出しは無く（在るのは
@@ -36,8 +37,23 @@
 //	シンボルを名前で置くだけ。定義が無ければ**黙って何も置かない**のではなく、件数を
 //	診断行に出して「命令はあるのに見えない」原因が分かるようにする。
 //
-//	配置角度・基準姿勢（火打の 45 度補正が正しいか等）はローカルの VectorWorks で
-//	目視確認する（ROADMAP.md M11「ローカル確認」）。
+//	【高さはレイヤ平面からの相対移動で合わせる】シンボルは構造材・スラブと違い
+//	**ストーリバウンド（SetObjectStoryBound）を持てない**ので、命令の高さ（zOffset）は
+//	「置いてから 3D で動かす」形でしか反映できない。zOffset は配置先レイヤ平面からの相対 Z
+//	（mm）なので、配置直後に `MoveObject3D(handle, 0, 0, zOffset)` を一度だけ呼ぶ
+//	（レイヤ平面の絶対 Z を描画側で引き直す必要が無い）。zOffset = 0 の要素（アンカーボルト・
+//	床束・火打）では呼ばないので、それらの挙動は従来のまま変わらない。
+//
+//	**高さは相対移動だけで扱い、配置行列（SetEntityMatrix）には書かない。** 行列は
+//	「与えるときは Z が絶対・読み戻すときは Z がレイヤ相対」という混在があり
+//	（draw/Rafter.cpp「高さは配置行列の絶対 Z で与える」で切り分け済み）、命令が持つのは
+//	レイヤ平面からの相対値なので、行列へ書くと絶対／相対を取り違えてシンボルを地面へ
+//	落としかねない。相対移動にはその曖昧さが無い（地中梁の可視ソリッドの位置合わせでも
+//	同じ MoveObject3D を使っている。draw/Footing.cpp）。
+//
+//	配置角度・基準姿勢（火打の 45 度補正が正しいか等）と**仕口の高さ**（傾斜した登り梁の
+//	両端・母屋・段差梁）はローカルの VectorWorks で目視確認する（ROADMAP.md M11
+//	「ローカル確認」）。
 //
 
 #include "PluginPrefix.h"
@@ -50,6 +66,7 @@
 #include "VWFC/VWObjects/VWSymbolObj.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <map>
 #include <string>
@@ -73,10 +90,24 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
+		// 高さ調整をするかどうかの閾値（mm）。丸め誤差で 3D 移動を呼ばない程度に小さく、
+		// 図面で見える差より十分小さい値。**平らな梁（offset ≈ 0）は動かさない**。
+		constexpr double kZOffsetTol = 0.001;
+
+		// 置いたシンボルをレイヤ平面から zOffset だけ持ち上げる（ファイル冒頭「高さは
+		// レイヤ平面からの相対移動で合わせる」）。**相対移動 1 回だけ**で、平面位置
+		// （dx / dy）には触らない。
+		void RaiseToOffset(MCObjectHandle handle, double zOffset)
+		{
+			if (std::abs(zOffset) <= kZOffsetTol)
+				return;
+			gSDK->MoveObject3D(handle, 0.0, 0.0, zOffset);
+		}
+
 		// シンボル 1 つを配置する（Python 版 draw_anchor_bolt ほかに対応）。センタリング
-		// 済みの絶対座標と回転角（度）をそのまま渡す。高さはアクティブレイヤ（＝配置先の
-		// ストーリレベル）の平面で決まるので、命令は高さを持たない。layer は
-		// ActivateExistingLayer が返したアクティブレイヤ。
+		// 済みの絶対座標と回転角（度）をそのまま渡す。高さの基準はアクティブレイヤ（＝配置先の
+		// ストーリレベル）の平面で、命令の zOffset がそこからの差（非 0 なのは仕口だけ）。
+		// layer は ActivateExistingLayer が返したアクティブレイヤ。
 		//
 		// **「その名前のシンボルインスタンスができ、配置先レイヤに載った」ときだけ true。**
 		// 2 つの作法（生成後に入れ直す／非 nil を成功と見なさない）はファイル冒頭を参照。
@@ -94,7 +125,11 @@ namespace HomeskzIfcImport::draw
 					return false;
 				if (symbol.GetParentLayer() != layer)
 					gSDK->AddObjectToContainer(handle, layer);
-				return symbol.GetParentLayer() == layer;
+				if (symbol.GetParentLayer() != layer)
+					return false;
+				// **配置先レイヤへ入れてから**動かす（レイヤ平面が高さの基準になるため）。
+				RaiseToOffset(handle, command.zOffset);
+				return true;
 			}
 			catch (...)
 			{

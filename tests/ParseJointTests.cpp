@@ -9,6 +9,7 @@
 //	検証項目（ROADMAP.md M11）: 端点が相手材の footprint に入るかの判定・平行（継ぎ手・
 //	側並び）とレイヤ違いと Z 分離の除外・登り梁だけレイヤ一致を外すこと・柱に受けられる
 //	端部・退化した材のスキップ・基準点（梁端の中央上端）と回転角（端部から内側へ）・
+//	**高さ（zOffset＝その端部のバウンド offset）**・
 //	配置先レイヤ（横架材と同じ）・並び順に依存しない決定性・実フィクスチャの通し。
 //	実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -59,9 +60,12 @@ using HomeskzIfcTests::near;
 namespace
 {
 	// 横架材命令（Python 版 _member）。既定は幅 120 / せい 180 / 天端 425 の水平材。
+	// バウンド offset（レベルの絶対 Z から天端 Z までの距離）は既定 0＝レイヤ平面ちょうど。
+	// 仕口の高さはこの offset をそのまま写すので、高さを見るテストだけ明示的に入れる。
 	MemberCommand member(const std::string& layer, Vec2 start, Vec2 end, double width = 120.0,
 						 double height = 180.0, double elevation = 425.0,
-						 double endElevation = 425.0)
+						 double endElevation = 425.0, double startOffset = 0.0,
+						 double endOffset = 0.0)
 	{
 		MemberCommand command;
 		command.layer = layer;
@@ -75,6 +79,8 @@ namespace
 		command.endElevation = endElevation;
 		command.startBound.level = "横架材天端";
 		command.endBound.level = "横架材天端";
+		command.startBound.offset = startOffset;
+		command.endBound.offset = endOffset;
 		return command;
 	}
 
@@ -408,6 +414,79 @@ TEST(joint_result_is_order_independent)
 	CHECK(keysOf(buildJointCommands({a, b, c})) == keysOf(buildJointCommands({c, b, a})));
 }
 
+// --- 高さ（zOffset）------------------------------------------------------
+
+TEST(joint_flat_member_keeps_layer_plane_height)
+{
+	// レベルちょうどに載る平らな梁（バウンド offset = 0）は高さ調整をしない＝従来どおり
+	// レイヤ平面に載る。
+	const MemberCommand a = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0});
+	const MemberCommand b = member("1-横架材天端", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0});
+
+	const std::vector<SymbolCommand> commands = buildJointCommands({a, b});
+	CHECK_EQ(commands.size(), std::size_t{1});
+	CHECK(near(commands.front().zOffset, 0.0));
+}
+
+TEST(joint_height_follows_end_bound_offset)
+{
+	// 段差梁（天端がレベルより 150mm 下）の仕口はレイヤ平面から 150mm 下がる。
+	const MemberCommand girder = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 120.0,
+										180.0, 275.0, 275.0, -150.0, -150.0);
+	const MemberCommand beam = member("1-横架材天端", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0},
+									  120.0, 180.0, 275.0, 275.0, -150.0, -150.0);
+
+	const std::vector<SymbolCommand> commands = buildJointCommands({girder, beam});
+	CHECK_EQ(commands.size(), std::size_t{1});
+	CHECK(near(commands.front().zOffset, -150.0));
+}
+
+TEST(joint_sloped_member_uses_the_offset_of_its_own_end)
+{
+	// 登り梁は両端で天端 Z が違う（軒桁 425 ↔ 棟木 6000）。両端に仕口が付くとき、始端の
+	// 仕口は startBound、終端の仕口は endBound の offset を持つ——1 本の梁に一律の高さを
+	// 与えるのではなく、**端部ごとに**梁の天端へ合わせる。
+	MemberCommand eaves = member("R-軒高", Vec2{-2000.0, 0.0}, Vec2{2000.0, 0.0}, 120.0, 180.0,
+								 425.0, 425.0, 0.0, 0.0);
+	MemberCommand munagi = member("R-母屋", Vec2{-2000.0, 3000.0}, Vec2{2000.0, 3000.0}, 120.0,
+								  180.0, 6000.0, 6000.0, 5575.0, 5575.0);
+	MemberCommand nobori = member("R-登り梁", Vec2{0.0, 60.0}, Vec2{0.0, 2940.0}, 120.0, 180.0,
+								  425.0, 6000.0, 0.0, 5575.0);
+	nobori.drawClass = CLASS_NOBORIBARI;
+
+	double startZ = 0.0;
+	double endZ = 0.0;
+	std::size_t onNobori = 0;
+	for (const SymbolCommand& command : buildJointCommands({eaves, munagi, nobori}))
+	{
+		if (command.layer != "R-登り梁")
+			continue;
+		++onNobori;
+		if (near(command.position.y, 60.0))
+			startZ = command.zOffset;
+		else
+			endZ = command.zOffset;
+	}
+	CHECK_EQ(onNobori, std::size_t{2});
+	CHECK(near(startZ, 0.0));
+	CHECK(near(endZ, 5575.0));
+}
+
+TEST(joint_height_is_taken_from_the_receiving_member_independent_bound)
+{
+	// 高さは**仕口が載る梁自身**の端部から取る（受ける材の高さではない）。受ける材の
+	// offset を変えても、仕口の高さは変わらない。
+	const MemberCommand girder = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 120.0,
+										180.0, 425.0, 425.0, 0.0, 0.0);
+	const MemberCommand beam = member("1-横架材天端", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0},
+									  120.0, 180.0, 425.0, 425.0, 120.0, 120.0);
+
+	const std::vector<SymbolCommand> commands = buildJointCommands({girder, beam});
+	CHECK_EQ(commands.size(), std::size_t{1});
+	CHECK(near(commands.front().position.y, 60.0)); // 仕口は beam の始端
+	CHECK(near(commands.front().zOffset, 120.0)); // beam の startBound（girder の 0 ではない）
+}
+
 // --- 実フィクスチャ（Python 版 TestBuildFromFixture / …WithColumns）----------
 
 TEST(joint_fixture_shape_and_layers)
@@ -495,6 +574,43 @@ TEST(joint_added_joints_land_on_columns)
 									  { return pointInColumn(joint.position, geom); }));
 		}
 	}
+}
+
+TEST(joint_fixture_height_matches_member_ends)
+{
+	// 実データでも、各仕口の高さはその位置・レイヤに端部を持つ横架材のバウンド offset と
+	// 一致する。かつ**レイヤ平面から外れる仕口が実際に出る**（登り梁・母屋・段差梁）——
+	// ここが 0 件なら、この高さ調整は何も直していないことになる。
+	std::size_t raised = 0;
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		const Model& model = fixture(name, ok);
+		CHECK(ok);
+
+		const std::vector<MemberCommand> members = buildMemberCommands(model);
+		for (const SymbolCommand& joint : buildJointCommands(members))
+		{
+			// 同じレイヤに同じ端点を持つ横架材のうち、その端部の offset が仕口の高さと
+			// 一致するものが必ずある。
+			const bool matched = std::ranges::any_of(
+				members,
+				[&joint](const MemberCommand& m)
+				{
+					if (m.layer != joint.layer)
+						return false;
+					return (near(m.start.x, joint.position.x) &&
+							near(m.start.y, joint.position.y) &&
+							near(m.startBound.offset, joint.zOffset)) ||
+						   (near(m.end.x, joint.position.x) && near(m.end.y, joint.position.y) &&
+							near(m.endBound.offset, joint.zOffset));
+				});
+			CHECK(matched);
+			if (std::abs(joint.zOffset) > 1.0)
+				++raised;
+		}
+	}
+	CHECK(raised > 0);
 }
 
 TEST(joint_all_fixtures_build)
