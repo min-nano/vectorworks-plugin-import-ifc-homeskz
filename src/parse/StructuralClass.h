@@ -26,6 +26,8 @@
 //	      04梁桁   / 01小屋梁・02軒桁・03床梁・04胴差
 //	      05小屋組 / 02小屋束・03母屋・04棟木・05垂木・06登り梁
 //	      06耐力面材 / 01壁・02床・03屋根
+//	  z構成要素（複合オブジェクトの構成要素＝素材のクラス）
+//	    コンクリート・捨てコンクリート・砕石・合板・フローリング
 //
 
 #pragma once
@@ -68,6 +70,22 @@ namespace HomeskzIfcImport::parse
 	//                     底盤に噛み合う一体の形状なので同じクラスで描く。
 	inline constexpr const char* CLASS_FOUNDATION_WALL = "04構造-01基礎-03立ち上がり";
 	inline constexpr const char* CLASS_FOUNDATION_SLAB = "04構造-01基礎-02基礎スラブ";
+
+	// 複合オブジェクト（スラブ・壁）の**構成要素**へ割り当てるクラス（core::ComponentCommand の
+	// drawClass）。部材そのもののクラス（上の 04構造-… ＝「その部材が何か」）とは別の軸で、
+	// **層が何でできているか**＝素材を表す。断面のハッチング・線の見え方を素材で揃えるため、
+	// 層の描画属性はすべてこのクラスの属性に従わせる（draw/DrawUtil の SetComponents）。
+	//
+	// 接頭辞 "z" は VW のクラス一覧（名前順）で構造クラス（04構造-…）の後ろへ回すためのもの。
+	// 素材ごとに 1 つで、要素をまたいで共有する（コンクリートは底盤と立上りが同じクラス）:
+	//   床     … 床仕上げ＝フローリング、床下地＝合板
+	//   底盤   … コンクリート／捨てコンクリート／砕石
+	//   立上り … コンクリート
+	inline constexpr const char* CLASS_COMPONENT_CONCRETE = "z構成要素-コンクリート";
+	inline constexpr const char* CLASS_COMPONENT_LEAN_CONCRETE = "z構成要素-捨てコンクリート";
+	inline constexpr const char* CLASS_COMPONENT_GRAVEL = "z構成要素-砕石";
+	inline constexpr const char* CLASS_COMPONENT_PLYWOOD = "z構成要素-合板";
+	inline constexpr const char* CLASS_COMPONENT_FLOORING = "z構成要素-フローリング";
 
 	// IFC Name から部材種別トークンを取り出す（Python 版 member_type_of_name 相当）。
 	// "木梁:{種別}:{連番}" は中央の種別（例 "土台"・"軒桁"）を、"火打:0_1" /

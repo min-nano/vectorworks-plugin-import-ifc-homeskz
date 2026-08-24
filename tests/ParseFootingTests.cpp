@@ -53,6 +53,9 @@ using HomeskzIfcImport::parse::buildFoundationStoryCommand;
 using HomeskzIfcImport::parse::buildSlabCommands;
 using HomeskzIfcImport::parse::buildWallCommands;
 using HomeskzIfcImport::parse::buildWallJoinCommands;
+using HomeskzIfcImport::parse::CLASS_COMPONENT_CONCRETE;
+using HomeskzIfcImport::parse::CLASS_COMPONENT_GRAVEL;
+using HomeskzIfcImport::parse::CLASS_COMPONENT_LEAN_CONCRETE;
 using HomeskzIfcImport::parse::CLASS_FOUNDATION_SLAB;
 using HomeskzIfcImport::parse::CLASS_FOUNDATION_WALL;
 using HomeskzIfcImport::parse::Context;
@@ -753,9 +756,13 @@ TEST(wall_commands_shape)
 		CHECK(cmd.thickness > 0.0);
 		CHECK(!core::samePoint(cmd.start, cmd.end));
 		// 構成層（コンクリート 1 層）の総厚が壁厚に一致する（壁厚は構成層が決める）。
+		// 層のクラスは素材（コンクリート）。
 		CHECK_EQ(cmd.components.size(), std::size_t{1});
 		if (cmd.components.size() == 1)
+		{
 			CHECK(near(cmd.components[0].thickness, cmd.thickness));
+			CHECK_EQ(cmd.components[0].drawClass, std::string(CLASS_COMPONENT_CONCRETE));
+		}
 		// 下端は基礎（自階）の GL、上端は 1 階（上階）の横架材天端。
 		CHECK_EQ(cmd.bottomBound.storyOffset, 0);
 		CHECK_EQ(cmd.bottomBound.level, std::string(kLevelGL));
@@ -838,7 +845,13 @@ TEST(slab_commands_shape)
 		CHECK(near(cmd.thickness, std::round(cmd.thickness)));
 		CHECK_EQ(cmd.components.size(), std::size_t{3});
 		if (cmd.components.size() == 3)
+		{
 			CHECK(near(cmd.components[0].thickness, cmd.thickness));
+			// 層のクラスは素材（上から コンクリート → 捨てコンクリート → 砕石）。
+			CHECK_EQ(cmd.components[0].drawClass, std::string(CLASS_COMPONENT_CONCRETE));
+			CHECK_EQ(cmd.components[1].drawClass, std::string(CLASS_COMPONENT_LEAN_CONCRETE));
+			CHECK_EQ(cmd.components[2].drawClass, std::string(CLASS_COMPONENT_GRAVEL));
+		}
 		CHECK(cmd.datum == core::SlabDatum::Top);
 		if (near(cmd.bound.offset, 0.0, 0.1))
 			sawMainSlab = true;
