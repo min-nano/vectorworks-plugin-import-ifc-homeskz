@@ -137,19 +137,12 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kSlabLeanConcreteThickness = 30.0;
 	inline constexpr double kSlabGravelThickness = 100.0;
 
-	// 底盤のスラブスタイル名（"基礎スラブ - コンクリート 150mm / 捨てコン 30mm / 砕石
-	// 100mm"）。**コンクリート厚ごとに 1 つ**で、厚みの違う底盤は別スタイルになる。
-	std::string foundationSlabStyleName(double concreteThickness);
-
 	// 底盤スラブの構成層を組み立てる（上から コンクリート → 捨てコン → 砕石）。
 	std::vector<core::ComponentCommand> foundationSlabComponents(double concreteThickness);
 
-	// 立上りの壁スタイル名（"基礎立上り - コンクリート 150mm"）。**壁厚ごとに 1 つ**で、
-	// 厚みの違う立上りは別スタイルになる（実データの壁厚は 120 / 150 / 300mm と混在するため、
-	// Python 版のように 150mm 固定の既製スタイルを全てへ当てると厚みが合わない）。
-	std::string foundationWallStyleName(double thickness);
-
-	// 立上りの壁の構成層を組み立てる（コンクリート 1 層。総厚＝壁厚）。
+	// 立上りの壁の構成層を組み立てる（コンクリート 1 層。総厚＝壁厚）。**スタイルは使わず
+	// 壁へ直接組む**ので、厚みの違う立上り（実データは 120 / 150 / 300mm が混在）もそれぞれ
+	// 命令どおりの構成になる（draw/DrawUtil.h「複合オブジェクトの構成」）。
 	std::vector<core::ComponentCommand> foundationWallComponents(double thickness);
 
 	// Name による基礎要素の判別（Python 版 _is_wall / _is_ground_beam / _is_base_slab）。

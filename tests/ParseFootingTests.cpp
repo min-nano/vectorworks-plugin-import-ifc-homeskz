@@ -58,8 +58,6 @@ using HomeskzIfcImport::parse::CLASS_FOUNDATION_WALL;
 using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::extendDeeperCollinearEnds;
 using HomeskzIfcImport::parse::extendFreeWallEnds;
-using HomeskzIfcImport::parse::foundationSlabStyleName;
-using HomeskzIfcImport::parse::foundationWallStyleName;
 using HomeskzIfcImport::parse::hasFoundation;
 using HomeskzIfcImport::parse::isBaseSlab;
 using HomeskzIfcImport::parse::isFoundationWall;
@@ -99,7 +97,6 @@ namespace
 		cmd.start = start;
 		cmd.end = end;
 		cmd.thickness = thickness;
-		cmd.styleName = foundationWallStyleName(thickness);
 		cmd.components = HomeskzIfcImport::parse::foundationWallComponents(thickness);
 		cmd.bottomBound = StoryBoundCommand{0, kLevelGL, bottomOffset};
 		cmd.topBound = StoryBoundCommand{1, kLevelBeamTop, topOffset};
@@ -113,7 +110,6 @@ namespace
 		cmd.layer = kLayerFoundationSlab;
 		cmd.drawClass = CLASS_FOUNDATION_SLAB;
 		cmd.boundary = std::move(boundary);
-		cmd.styleName = foundationSlabStyleName(thickness);
 		cmd.components = HomeskzIfcImport::parse::foundationSlabComponents(thickness);
 		cmd.thickness = thickness;
 		cmd.elevation = 50.0 + offset;
@@ -756,8 +752,7 @@ TEST(wall_commands_shape)
 		CHECK_EQ(cmd.drawClass, std::string(CLASS_FOUNDATION_WALL));
 		CHECK(cmd.thickness > 0.0);
 		CHECK(!core::samePoint(cmd.start, cmd.end));
-		// 壁スタイルは壁厚ごとに 1 つで、構成層（コンクリート 1 層）の総厚が壁厚に一致する。
-		CHECK_EQ(cmd.styleName, foundationWallStyleName(cmd.thickness));
+		// 構成層（コンクリート 1 層）の総厚が壁厚に一致する（壁厚は構成層が決める）。
 		CHECK_EQ(cmd.components.size(), std::size_t{1});
 		if (cmd.components.size() == 1)
 			CHECK(near(cmd.components[0].thickness, cmd.thickness));
@@ -838,10 +833,9 @@ TEST(slab_commands_shape)
 		CHECK_EQ(cmd.bound.level, std::string(kLevelSlabTop));
 		// elevation は天端の絶対 Z、bound.offset は底盤天端（絶対）との差。
 		CHECK(near(cmd.elevation, slabTop + cmd.bound.offset, 1e-6));
-		// 厚みは正の整数 mm（スラブスタイル名と構成層のコンクリート層に一致する）。
+		// 厚みは正の整数 mm（構成層のコンクリート層に一致する）。
 		CHECK(cmd.thickness > 0.0);
 		CHECK(near(cmd.thickness, std::round(cmd.thickness)));
-		CHECK_EQ(cmd.styleName, foundationSlabStyleName(cmd.thickness));
 		CHECK_EQ(cmd.components.size(), std::size_t{3});
 		if (cmd.components.size() == 3)
 			CHECK(near(cmd.components[0].thickness, cmd.thickness));

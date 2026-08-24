@@ -12,35 +12,31 @@
 //	     DoubLines(壁厚) → Wall(壁芯) という 2 手順は要らない**——ISDK の CreateWall は
 //	     壁厚を引数に取る（ci-debug の sdk-grep で確認）。
 //	  2. クラス分けと描画属性の by-class 設定。
-//	  3. **壁厚ごとの壁スタイル**を当てる（下記「スタイルは常に新規作成する」）。
+//	  3. **この壁へ直接**構成層（コンクリート 1 層＝壁厚）とコア構成要素を組む
+//	     （下記「スタイルは作らない」）。
 //	  4. SetWallOverallHeights で下端・上端をストーリレベルへバインドする。
 //	     **壁だけは汎用の SetObjectStoryBound では高さ基準が確定せず**、デザインレイヤの
 //	     「壁の高さ（レイヤ設定）」に従ってしまう（構造材・スラブでは SetObjectStoryBound が
 //	     効くが、壁は専用関数が要る。Python 版 CLAUDE.md「基礎」節）。命令の
 //	     bottomBound / topBound の storyOffset（0=自階・1=上階）がそのまま story 引数になる。
-//	     **スタイルより後に置く**のは Python 版 draw_wall と同じ順序で、スタイル適用が壁の
-//	     属性を作り直しても高さが残るようにするため。
+//	     **構成より後に置く**のは Python 版 draw_wall がスタイルを先に当てていたのと同じ
+//	     順序で、構成の変更が壁の属性を作り直しても高さが残るようにするため。
 //	  5. ResetObject で反映。
 //	壁を作れない場合は壁芯の直線にフォールバックする（1 本の失敗で全体を止めない）。
 //
 //	【底盤の描画手順】床板（draw/Floor）と同じ作法で、共通部分は draw/DrawUtil にある
-//	（SetComponents / SetSlabDatum）。違うのはスタイル名（"基礎スラブ - コンクリート …"）と
-//	構成層（コンクリート／捨てコン／砕石）だけ。SetSlabHeight は厚みではなく**基準面の高さ**
-//	（絶対 Z）を設定する関数である点に注意（Python 版 #70 と同じ落とし穴）。基礎ストーリは
-//	GL=0 なので絶対 Z がそのまま渡せる。
+//	（SetComponents / SetSlabDatum）。違うのは構成層（コンクリート／捨てコン／砕石）だけ。
+//	SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する関数である点に注意
+//	（Python 版 #70 と同じ落とし穴）。基礎ストーリは GL=0 なので絶対 Z がそのまま渡せる。
 //
-//	【スタイルは常に新規作成する（立上り・底盤とも）】**既存の同名スタイルには一切触れない**
-//	（CreateUniqueWallStyle / CreateUniqueSlabStyle）。名前が空いていなければ " (2)" … と
-//	連番を付けて作る。当初は「名前で引いて、あれば構成層を組み直す」形にしていたが、
-//	ドキュメントのテンプレートに同名のスタイルがあると、そこで設定済みのクラス・マテリアル・
-//	用途が既定値へ戻ってしまった（ローカル確認で判明。ROADMAP.md M9）。構成をテンプレートに
-//	頼らずコード側から与える方が将来の変更が容易、という方針に基づく。同じ命令スタイル名の
-//	立上り／底盤どうしは 1 つのスタイルを共有する（drawWalls / drawSlabs の対応表）。
+//	【スタイルは作らない（立上り・底盤とも）】壁・スラブとも**スタイル無し（unstyled）**で
+//	描き、構成層・基準面は**各オブジェクトへ直接**与える（draw/DrawUtil.h「複合オブジェクトの
+//	構成」）。**既存の同名スタイルに触れない**という M9 の要件はこれで自明に満たされ、
+//	インポートのたびに名前付きリソースが増えることも無くなる。
 //
-//	立上りのスタイルは**壁厚ごと**（"基礎立上り - コンクリート 150mm"）。Python 版は既製の
-//	`基礎 - 木造ベタ基礎150mm` を全ての立上りへ当てるが、実データの壁厚は 120 / 150 / 300mm と
-//	混在するので 150mm 固定のスタイルでは厚みが合わない（構成層＝コンクリート 1 層の合計が
-//	そのまま壁厚になるので、スタイルを当てても命令の壁厚が保たれる）。
+//	構成層の合計＝壁厚なので、立上りの厚みは命令どおりに保たれる（実データの壁厚は
+//	120 / 150 / 300mm と混在する。Python 版は既製の `基礎 - 木造ベタ基礎150mm` を全ての
+//	立上りへ当てるので、そもそも厚みが合わない）。
 //
 //	【端部のキャップ（M10・ローカル確認で判明）】VW の壁は端部を閉じる線（キャップ）を
 //	**壁ごとに**持ち、明示しなければドキュメントの壁ツール設定に従う。実機では
@@ -60,8 +56,8 @@
 //	噛み合う台形プリズム（core::ModifierCommand）を **2 回**作って表す:
 //	  1. **削り取りモディファイア** … プリズム群を 1 つのグループにまとめ、
 //	     SetCustomObjectProfileGroup で通常スラブ（CreateSlab）へ渡すと底盤を**削り取る**。
-//	     地中梁の位置で底盤のスラブスタイルの層（コンクリート・捨てコン・砕石）が消え、
-//	     断面に写り込まなくなる。
+//	     地中梁の位置で底盤の構成層（コンクリート・捨てコン・砕石）が消え、断面に
+//	     写り込まなくなる。
 //	  2. **可視の 3D ソリッド** … 同じプリズムを独立したソリッドとして同じレイヤ・同じ
 //	     基礎スラブクラスで置き、削り取った位置を地中梁のコンクリートで埋める。
 //	     こちらだけ天端を底盤へ 10mm 呑み込ませ（core::raiseModifierTop）、天端と底盤底面が
@@ -85,10 +81,10 @@
 //
 //	【Python 版と異なる点・意図的】地中梁の可視ソリッドに**マテリアルを設定しない**。
 //	Python 版は文書に登録済みの "基礎コンクリート MT" を名前で引いて割り当てるが、本移植は
-//	既存リソースに依存しない（スタイルを名前で作るのと同じ方針。draw/Footing.cpp の
-//	「スタイルは常に新規作成する」）。見え方はクラス（基礎スラブ）の by-class 属性で決まる。
+//	既存リソースに依存しない（構成をコード側から与えるのと同じ方針。上記「スタイルは
+//	作らない」）。見え方はクラス（基礎スラブ）の by-class 属性で決まる。
 //
-//	実描画（壁の高さ基準・壁スタイル・底盤の天端とスラブスタイル・壁結合の詰まり方・
+//	実描画（壁の高さ基準・壁の構成層・底盤の天端と構成層・壁結合の詰まり方・
 //	地中梁の向きと削り取り）はローカルの VectorWorks で目視確認する方針
 //	（ROADMAP.md M9 / M10「ローカル確認」）。
 //
@@ -117,15 +113,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// SetWallStyle に渡す壁芯からのオフセット（選択側／置換側とも 0＝壁芯に揃える）。
-		// **名前は SDK 側の引数名（selectedOffset / replacingOffset）に寄せてある**: 似た並びの
-		// InternalIndex + WorldCoord を渡すため、名前が違うと clang-tidy の
-		// readability-suspicious-call-argument が「引数が入れ替わっているのでは」と誤検知する
-		// （"…StyleOffset" という名前がスタイル引数と紛らわしいと判定された。draw/DrawUtil の
-		// SetSlabDatum と同じ理由・同じ対処）。
-		constexpr double kSelectedOffset = 0.0;
-		constexpr double kReplacingOffset = 0.0;
-
 		// SetObjectStoryBound に渡すバウンド ID。スラブは高さ基準を 1 つだけ持つ
 		// （draw/Floor と同じ）。型は SDK の TObjectBoundID（= Sint32）だが、その別名は
 		// SDK の名前空間の中にあるため、ここでは実体の Sint32 で持つ（暗黙変換で同じ）。
@@ -319,8 +306,7 @@ namespace HomeskzIfcImport::draw
 
 		// 立上り 1 本を壁として描く。壁を作れなければ壁芯の直線にフォールバックする。
 		// 配置できた壁のハンドル（フォールバックしたときは nil）を返す。
-		MCObjectHandle DrawOneWall(const core::WallCommand& wall, InternalIndex wallStyle,
-								   bool& outPlaced)
+		MCObjectHandle DrawOneWall(const core::WallCommand& wall, bool& outPlaced)
 		{
 			const WorldPt start(wall.start.x, wall.start.y);
 			const WorldPt end(wall.end.x, wall.end.y);
@@ -348,11 +334,16 @@ namespace HomeskzIfcImport::draw
 			SetClassByName(object, wall.drawClass);
 			SetAllAttributesByClass(object);
 
-			// スタイルは高さバインドより**先に**当てる（Python 版 draw_wall と同じ順序）。
-			// スタイル適用が壁の属性を作り直す場合でも、後から入れる高さが残るようにする。
-			// スタイルは壁厚ごとに作ってあるので、当てても壁厚は命令どおりのままになる。
-			if (wallStyle != 0)
-				gSDK->SetWallStyle(object, wallStyle, kSelectedOffset, kReplacingOffset);
+			// 構成（コンクリート 1 層）は**この壁へ直接**与える。壁スタイルは作らない・
+			// 当てない（draw/DrawUtil.h「複合オブジェクトの構成」）。CreateWall は文書の
+			// 既定スタイルを引き継ぐことがあるので、明示的にスタイル無しへ落としてから
+			// 構成を組む。構成層の合計＝命令の壁厚なので、組んでも壁厚は変わらない。
+			//
+			// 構成は高さバインドより**先に**入れる（Python 版 draw_wall がスタイルを先に
+			// 当てていたのと同じ順序）。構成の変更が壁の属性を作り直しても、後から入れる
+			// 高さが残るようにするため。
+			gSDK->ConvertToUnstyledWall(object);
+			SetWallComponents(object, wall.components);
 
 			// 高さは壁専用の SetWallOverallHeights でストーリレベルへバインドする
 			// （ヘッダ冒頭「立上りの描画手順」3）。
@@ -370,7 +361,7 @@ namespace HomeskzIfcImport::draw
 		// 底盤 1 枚をスラブとして描く。スラブを作れなければ外形ポリゴンにフォールバックする。
 		// 配置できたら true。手順は draw/Floor の DrawOne と同じ（共通部分は draw/DrawUtil）。
 		// 地中梁を持つ底盤は、削り取りモディファイア＋可視ソリッドの 2 つを併せて置く。
-		bool DrawOneSlab(const core::SlabCommand& slab, InternalIndex style)
+		bool DrawOneSlab(const core::SlabCommand& slab)
 		{
 			const MCObjectHandle profile = CreateClosedPolygon(slab.boundary);
 			if (profile == nil)
@@ -391,7 +382,7 @@ namespace HomeskzIfcImport::draw
 			SetAllAttributesByClass(object);
 
 			// 地中梁（台形プリズム）を持つ底盤は、プリズム群を**削り取りモディファイア**として
-			// 渡して底盤を clip する（スラブスタイルの層が地中梁の位置から消える）。可視の
+			// 渡して底盤を clip する（底盤の構成層が地中梁の位置から消える）。可視の
 			// ソリッドは下で別に置く（ヘッダ冒頭「地中梁の描画」）。
 			if (!slab.modifiers.empty())
 			{
@@ -400,19 +391,12 @@ namespace HomeskzIfcImport::draw
 					gSDK->SetCustomObjectProfileGroup(object, group);
 			}
 
-			// 構成はコンクリート厚ごとのスラブスタイルで与える（呼び出し側が用意して渡す）。
-			// 用意できない場合だけ、スタイルを外してスラブ本体のコンポーネントを直接組む
-			// （構成の欠落で底盤を失わないための保険。draw/Floor と同じ）。
-			if (style != 0)
-			{
-				gSDK->SetSlabStyle(object, style);
-			}
-			else
-			{
-				gSDK->ConvertToUnstyledSlab(object);
-				SetComponents(object, slab.components);
-				SetSlabDatum(object, slab.datum, static_cast<short>(slab.components.size()));
-			}
+			// 構成（コンクリート／捨てコン／砕石）と基準面は**このスラブへ直接**与える。
+			// スラブスタイルは作らない・当てない（draw/Floor と同じ。draw/DrawUtil.h
+			// 「複合オブジェクトの構成」）。
+			gSDK->ConvertToUnstyledSlab(object);
+			SetComponents(object, slab.components);
+			SetSlabDatum(object, slab.datum, static_cast<short>(slab.components.size()));
 
 			// SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する。命令の
 			// elevation はコンクリート天端の絶対 Z なのでそのまま渡す。
@@ -469,11 +453,6 @@ namespace HomeskzIfcImport::draw
 	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress,
 						  ObjectHandles* handles)
 	{
-		// 命令のスタイル名 → このインポートで作ったスタイルの索引（底盤と同じ作法）。
-		// 同じ壁厚の立上りは 1 つのスタイルを共有する。既存リソースには触れないので、
-		// 実際の名前は連番付きになりうる。
-		std::map<std::string, InternalIndex> styles;
-
 		std::size_t drawn = 0;
 		for (std::size_t index = 0; index < document.walls.size(); ++index)
 		{
@@ -489,17 +468,8 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(wall.layer) == nil)
 				continue;
 
-			const auto found = styles.find(wall.styleName);
-			const InternalIndex wallStyle =
-				(found != styles.end())
-					? found->second
-					: styles
-						  .emplace(wall.styleName,
-								   CreateUniqueWallStyle(wall.styleName, wall.components))
-						  .first->second;
-
 			bool placed = false;
-			const MCObjectHandle object = DrawOneWall(wall, wallStyle, placed);
+			const MCObjectHandle object = DrawOneWall(wall, placed);
 			if (placed)
 				++drawn;
 			// 壁結合が引けるよう、**壁を作れた命令だけ**を対応表へ記録する（フォールバック
@@ -587,11 +557,6 @@ namespace HomeskzIfcImport::draw
 
 	std::size_t drawSlabs(const core::Document& document, core::ProgressReporter& progress)
 	{
-		// 命令のスタイル名 → このインポートで作ったスタイルの索引。同じコンクリート厚の
-		// 底盤は 1 つのスタイルを共有する（毎回作ると厚みの数だけでなく枚数ぶんスタイルが
-		// 増えてしまう）。既存リソースには触れないので、実際の名前は連番付きになりうる。
-		std::map<std::string, InternalIndex> styles;
-
 		std::size_t drawn = 0;
 		for (const core::SlabCommand& slab : document.slabs)
 		{
@@ -603,16 +568,7 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(slab.layer) == nil)
 				continue;
 
-			const auto found = styles.find(slab.styleName);
-			const InternalIndex style =
-				(found != styles.end())
-					? found->second
-					: styles
-						  .emplace(slab.styleName, CreateUniqueSlabStyle(
-													   slab.styleName, slab.components, slab.datum))
-						  .first->second;
-
-			if (DrawOneSlab(slab, style))
+			if (DrawOneSlab(slab))
 				++drawn;
 		}
 		return drawn;

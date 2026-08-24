@@ -52,14 +52,14 @@ namespace HomeskzIfcImport::core
 			return !component.name.empty() && component.thickness >= 0.0;
 		}
 
-		// 床板 1 枚が妥当か（Python 版 _validate_floor 相当）。配置先レイヤ名・クラス名・
-		// スラブスタイル名が非空で、平面外形が 3 点以上（面になる）で、高さ基準のレベル種別が
-		// 非空で、構成層が 1 枚以上あり総厚が正であること。elevation / bound.offset は数値
-		// （double なので常に成立）。
+		// 床板 1 枚が妥当か（Python 版 _validate_floor 相当）。配置先レイヤ名・クラス名が
+		// 非空で、平面外形が 3 点以上（面になる）で、高さ基準のレベル種別が非空で、構成層が
+		// 1 枚以上あり総厚が正であること。elevation / bound.offset は数値（double なので
+		// 常に成立）。
 		bool isValidFloor(const FloorCommand& floor)
 		{
 			if (floor.layer.empty() || floor.drawClass.empty() || floor.boundary.size() < 3 ||
-				floor.bound.level.empty() || floor.styleName.empty() || floor.components.empty())
+				floor.bound.level.empty() || floor.components.empty())
 				return false;
 			if (!std::ranges::all_of(floor.components, isValidComponent))
 				return false;
@@ -108,16 +108,15 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 基礎の立上り 1 本が妥当か（Python 版 _validate_wall 相当）。配置先レイヤ名・
-		// クラス名・壁スタイル名が非空で、壁厚が正で、壁芯の始点と終点が縮退していないこと
+		// クラス名が非空で、壁厚が正で、壁芯の始点と終点が縮退していないこと
 		// （判定は core/Geometry の samePoint）。上下端の高さ基準のレベル種別も非空（空だと
 		// SetWallOverallHeights が解決できず、レイヤの「壁の高さ」設定に落ちる）。構成層は
-		// 1 枚以上あり総厚が正であること（スラブと同じ関門）。
+		// 1 枚以上あり総厚が正であること（スラブと同じ関門。構成層の合計＝壁厚）。
 		bool isValidWall(const WallCommand& wall)
 		{
-			if (wall.layer.empty() || wall.drawClass.empty() || wall.styleName.empty() ||
-				wall.thickness <= 0.0 || samePoint(wall.start, wall.end) ||
-				wall.bottomBound.level.empty() || wall.topBound.level.empty() ||
-				wall.components.empty())
+			if (wall.layer.empty() || wall.drawClass.empty() || wall.thickness <= 0.0 ||
+				samePoint(wall.start, wall.end) || wall.bottomBound.level.empty() ||
+				wall.topBound.level.empty() || wall.components.empty())
 				return false;
 			if (!std::ranges::all_of(wall.components, isValidComponent))
 				return false;
@@ -137,14 +136,13 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 基礎の底盤 1 枚が妥当か（Python 版 _validate_slab 相当）。床板と同じ関門
-		// （レイヤ名・クラス名・スタイル名が非空／外形 3 点以上／高さ基準のレベル種別が
-		// 非空／構成層が 1 枚以上あり総厚が正）に、コンクリート厚が正であることと、
-		// 噛み合う地中梁がすべて妥当であることを足す（厚み 0 のスラブスタイルは作れない）。
+		// （レイヤ名・クラス名が非空／外形 3 点以上／高さ基準のレベル種別が非空／構成層が
+		// 1 枚以上あり総厚が正）に、コンクリート厚が正であることと、噛み合う地中梁がすべて
+		// 妥当であることを足す（厚み 0 の構成層は VW が受け付けない）。
 		bool isValidSlab(const SlabCommand& slab)
 		{
 			if (slab.layer.empty() || slab.drawClass.empty() || slab.boundary.size() < 3 ||
-				slab.bound.level.empty() || slab.styleName.empty() || slab.components.empty() ||
-				slab.thickness <= 0.0)
+				slab.bound.level.empty() || slab.components.empty() || slab.thickness <= 0.0)
 				return false;
 			if (!std::ranges::all_of(slab.components, isValidComponent))
 				return false;

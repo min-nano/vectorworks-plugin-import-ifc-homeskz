@@ -165,7 +165,8 @@ src/
 
   draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
     ExecuteDocument.{h,cpp} execute_document 相当のディスパッチ
-    DrawUtil.{h,cpp}        クラス分け・by-class 属性・スタイル解決・レイヤ用意・スラブの共通ヘルパー
+    DrawUtil.{h,cpp}        クラス分け・by-class 属性・プラグインスタイル解決・レイヤ用意・
+                            スラブ／壁の構成層の共通ヘルパー
     StructuralMember.{h,cpp} 構造材ツール（StructuralMember PIO）1 本の生成・設定（横架材／柱で共有）
     ProgressDialog.{h,cpp}  core::ProgressReporter を VW の進捗ダイアログへ橋渡し（唯一の実装）
     Grid.{h,cpp}            grid 命令 → GridAxis（旧 vw/grid.py）
@@ -221,7 +222,8 @@ tests/
 鉛直とみなす閾値**（`kVerticalExtrudeTol`。平面外形の求め方と、人通口・地中梁の「水平押し出しか」
 判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・許容値（統合・自由端・**人通口・
 壁結合・地中梁**）は `parse/Footing.h`、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・
-スタイル解決・**構成層／基準面／スタイルの新規作成**——床板・底盤・立上りが共有する）は
+プラグインスタイル解決・**構成層／基準面を各オブジェクトへ直接与える手順**——床板・底盤・
+立上りが共有する。スラブ・壁は**スタイルを作らない・当てない**）は
 `draw/DrawUtil`、**シートレイヤの用意とビューポートの仕上げ**（表示レイヤの絞り込み・クラス表示・
 縮尺・図番／図面タイトル・更新——伏図と軸組図が共有する唯一の実装）も `draw/DrawUtil`、
 **断面寸法データタグ**（スタイル名は `parse/Tag` の `kTagStyle`、断面の注釈空間への投影は
