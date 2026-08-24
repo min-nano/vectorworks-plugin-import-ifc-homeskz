@@ -26,6 +26,14 @@
 //	  * **配置**: 始点側の支持材芯から 910mm・1820mm・… と並べる。最後の床束と終点側の
 //	    支持材芯との間隔は 910mm 未満の半端でよい。支持材芯そのものには置かない（端部は
 //	    支持材が受ける）ので、支持材芯区間が 910mm 以下の大引には床束が 0 本になる。
+//	  * **立上り（基礎梁）と重なる位置には置かない**（overlapsFoundationWall）。910mm の
+//	    決め打ちで割り付けるため、大引が立上りを跨ぐ位置に床束が来ることがある。床束は
+//	    底盤の上に立つ部材なので、立上りのコンクリートと重なる位置には**そもそも立てられない**
+//	    （実機で立上りの上に床束が描かれていた）。しかもその位置の大引は立上り（とその上の
+//	    土台）が受けているので床束は要らない——**間隔を詰め替えるのではなく、その 1 本を
+//	    落とす**（両隣は立上りから 910mm 以内に収まる）。**Python 版にはこの判定が無い**
+//	    （立上りの命令を参照していないため。ホームズ君 IFC も床束を持たないので、この規則は
+//	    移植元ではなく実機の見た目が出どころ）。
 //	  * **高さは命令に持たせない**——基準は基礎底盤上端（底盤天端）で、配置先レイヤ
 //	    "F-床束" のストーリレベルが担う。
 //	  * **基礎が無いモデルでは空**（parse/Footing の hasFoundation）。配置先レイヤも
@@ -62,6 +70,12 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kFloorPostSegTol = 1.0; // 交点が支持材区間からはみ出す余裕
 	inline constexpr double kFloorPostShinMargin = 1.0; // 大引端が支持材 footprint に載る余裕
 
+	// 床束と立上りの重なり判定に足す余裕（mm）。床束の平面の大きさは**その床束が受ける
+	// 大引の断面幅**で代表させ（床束は大引の直下に立ち、慣習的に大引と同寸）、立上りの
+	// footprint を半床束幅ぶん広げてから点で判定する。この定数はそこへさらに足す、座標の
+	// 丸め誤差ぶんの余裕（立上りの外面ちょうどに来た床束を「重なっている」と読むための下駄）。
+	inline constexpr double kFloorPostWallMargin = 1.0;
+
 	// 同一直線上の大引の継手（継目）判定の許容値（Python 版 _COLLINEAR_ANGLE_TOL /
 	// _COLLINEAR_PERP_TOL / _JOINT_GAP_TOL）。
 	inline constexpr double kCollinearAngleTol = 1e-6; // 方向の外積（sin 角）がこれ以下なら平行
@@ -84,10 +98,15 @@ namespace HomeskzIfcImport::parse
 	};
 
 	// 大引 1 本（または継手で統合した 1 連）の平面芯線（Python 版 _OhbikiRun）。
+	//   start / end … 芯線の両端
+	//   width       … 断面幅。**この大引の下に立つ床束の平面の大きさ**として使い、立上りと
+	//                  重なる床束を落とすのに要る（overlapsFoundationWall）。継手で統合した
+	//                  連は成分の最大値を採る（安全側。Python 版は width を持たない）。
 	struct OhbikiRun
 	{
 		core::Vec2 start;
 		core::Vec2 end;
+		double width = 0.0;
 	};
 
 	// 支持材芯区間 1 つに沿った床束の配置位置（始点側の支持材芯からの距離）を返す
@@ -121,6 +140,20 @@ namespace HomeskzIfcImport::parse
 	// 全端点を射影した最小〜最大区間の 1 本にする。統合は入力順に依存しない（代表は最小
 	// インデックス、出力は代表インデックス昇順）。
 	std::vector<OhbikiRun> mergeCollinearOhbiki(const std::vector<OhbikiRun>& lines);
+
+	// 床束（position を中心・平面の大きさ postWidth）が立上り（基礎梁）の平面 footprint と
+	// 重なるかを返す。position と walls は**どちらもセンタリング済み**の座標で渡す
+	// （walls は parse/Footing の buildWallCommands が出したもの＝人通口の分割・切り下げまで
+	// 反映済み。開口で立上りが消える区間には壁が無いので、そこの床束は落ちない）。
+	//
+	// 判定は壁芯を軸にした 2 方向の距離で行う。直交方向は 半壁厚 + 半床束幅 +
+	// kFloorPostWallMargin まで、沿軸方向は区間 [0, 壁長] の外側へ 半床束幅 +
+	// kFloorPostWallMargin まで（半壁厚は直交方向の寸法なので沿軸には効かない）。これで
+	// 立上りの端に寄りかかる床束も重なりとみなす。角の付近だけ丸い床束を仮定した近似に
+	// なるが、落としすぎても両隣の床束が 910mm 以内で受けるので実害が無い側へ倒れる。
+	// 長さ 0 の立上り（縮退）は向きが定まらないので飛ばす。
+	bool overlapsFoundationWall(const core::Vec2& position, double postWidth,
+								const std::vector<core::WallCommand>& walls);
 
 	// STEP Model から床束のシンボル配置命令を組み立てる（Python 版
 	// build_floor_post_commands）。基礎が無いモデルでは空を返す。並びは大引の連ごと
