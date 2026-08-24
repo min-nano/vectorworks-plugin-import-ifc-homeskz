@@ -170,8 +170,9 @@ namespace HomeskzIfcImport::parse
 				cmd.layer = layer;
 				cmd.drawClass = CLASS_FLOOR;
 				cmd.boundary = std::move(boundary);
-				cmd.components = {ComponentCommand{kFloorFinishName, finishThickness},
-								  ComponentCommand{kSubfloorName, kSubfloorThickness}};
+				cmd.components = {
+					ComponentCommand{kFloorFinishName, CLASS_COMPONENT_FLOORING, finishThickness},
+					ComponentCommand{kSubfloorName, CLASS_COMPONENT_PLYWOOD, kSubfloorThickness}};
 				cmd.datum = datum;
 				cmd.elevation = datumBaseAbs + levelDelta;
 				cmd.bound = StoryBoundCommand{0, boundLevel, levelDelta};

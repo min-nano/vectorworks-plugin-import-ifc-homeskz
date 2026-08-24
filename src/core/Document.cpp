@@ -46,10 +46,14 @@ namespace HomeskzIfcImport::core
 				   std::ranges::all_of(story.levels, isValidLevel);
 		}
 
-		// 構成層（スラブ・壁）1 枚が妥当か。名前が非空で、層厚が 0 以上（負の層は作れない）。
+		// 構成層（スラブ・壁）1 枚が妥当か。名前とクラス名が非空で、層厚が 0 以上
+		// （負の層は作れない）。クラス名は「層が何でできているか」を表し、層の描画属性を
+		// そのクラス属性に従わせるための唯一の手掛かりなので、空を通さない
+		// （core/Document.h「構成要素のクラス」）。
 		bool isValidComponent(const ComponentCommand& component)
 		{
-			return !component.name.empty() && component.thickness >= 0.0;
+			return !component.name.empty() && !component.drawClass.empty() &&
+				   component.thickness >= 0.0;
 		}
 
 		// 床板 1 枚が妥当か（Python 版 _validate_floor 相当）。配置先レイヤ名・クラス名が

@@ -117,6 +117,13 @@ namespace HomeskzIfcImport::draw
 	// ★コンポーネントの索引は **0 始まり**（実機で確認: 索引 1 に挿入すると既定層の後ろへ
 	// 入り、索引 = 層数 で削除すると範囲外で失敗した）。GetNumberOfComponents が返すのは
 	// 「個数」なので、有効な索引は 0 … 個数−1。
+	//
+	// 併せて**層ごとのクラス（素材）と by-class 属性**を設定する。命令の drawClass
+	// （"z構成要素-コンクリート" 等。core/Document.h「構成要素のクラス」）を層へ割り当て、
+	// 層が持つ描画属性——**塗り**（SetComponentUseFillClassAttr）と**左右のペン**
+	// （SetComponentUsePenClassAttr）——をすべてそのクラスの属性に従わせる。オブジェクト
+	// 本体に対する SetClassByName ＋ SetAllAttributesByClass と同じ意図で、クラスを
+	// 割り当てただけでは挿入時の既定値（0）が by-instance のまま残るため、明示的に指定する。
 	void SetComponents(MCObjectHandle object,
 					   const std::vector<core::ComponentCommand>& components);
 

@@ -152,8 +152,8 @@ namespace
 		floor.drawClass = "04構造-02木造-06耐力面材-02床";
 		floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, core::Vec2{1000.0, 2000.0},
 						  core::Vec2{0.0, 2000.0}};
-		floor.components = {core::ComponentCommand{"床仕上げ", 96.0},
-							core::ComponentCommand{"床下地", 24.0}};
+		floor.components = {core::ComponentCommand{"床仕上げ", "z構成要素-フローリング", 96.0},
+							core::ComponentCommand{"床下地", "z構成要素-合板", 24.0}};
 		floor.elevation = 0.0;
 		floor.bound = core::StoryBoundCommand{0, "FL", 0.0};
 		return floor;
@@ -227,6 +227,16 @@ TEST(validate_rejects_floor_component_with_empty_name)
 	core::Document document;
 	core::FloorCommand floor = validFloor();
 	floor.components[0].name = "";
+	document.floors.push_back(floor);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_floor_component_with_empty_class)
+{
+	// 層のクラスは描画属性をクラス属性に従わせる唯一の手掛かりなので、空は通さない。
+	core::Document document;
+	core::FloorCommand floor = validFloor();
+	floor.components[0].drawClass = "";
 	document.floors.push_back(floor);
 	CHECK(!core::validateDocument(document));
 }
@@ -604,7 +614,7 @@ namespace
 		wall.start = core::Vec2{0.0, 0.0};
 		wall.end = core::Vec2{3640.0, 0.0};
 		wall.thickness = 120.0;
-		wall.components = {core::ComponentCommand{"コンクリート", 120.0}};
+		wall.components = {core::ComponentCommand{"コンクリート", "z構成要素-コンクリート", 120.0}};
 		wall.bottomBound = core::StoryBoundCommand{0, core::kLevelGL, -100.0};
 		wall.topBound = core::StoryBoundCommand{1, core::kLevelBeamTop, -190.0};
 		return wall;
@@ -618,9 +628,9 @@ namespace
 		slab.drawClass = "04構造-01基礎-02基礎スラブ";
 		slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}, core::Vec2{3640.0, 2730.0},
 						 core::Vec2{0.0, 2730.0}};
-		slab.components = {core::ComponentCommand{"コンクリート", 150.0},
-						   core::ComponentCommand{"捨てコン", 30.0},
-						   core::ComponentCommand{"砕石", 100.0}};
+		slab.components = {core::ComponentCommand{"コンクリート", "z構成要素-コンクリート", 150.0},
+						   core::ComponentCommand{"捨てコン", "z構成要素-捨てコンクリート", 30.0},
+						   core::ComponentCommand{"砕石", "z構成要素-砕石", 100.0}};
 		slab.datum = core::SlabDatum::Top;
 		slab.thickness = 150.0;
 		slab.elevation = 50.0;
@@ -1320,8 +1330,8 @@ TEST(section_height_range_covers_floors_and_rafters)
 	// 基準面 3000 の床の下端は 2838）。ここが範囲の下端になる。
 	core::FloorCommand floor;
 	floor.elevation = 3000.0;
-	floor.components.push_back(core::ComponentCommand{"仕上げ", 12.0});
-	floor.components.push_back(core::ComponentCommand{"床下地", 150.0});
+	floor.components.push_back(core::ComponentCommand{"仕上げ", "z構成要素-フローリング", 12.0});
+	floor.components.push_back(core::ComponentCommand{"床下地", "z構成要素-合板", 150.0});
 	document.floors.push_back(floor);
 
 	// 垂木は勾配があるので**両端**を見る（軒 5000・棟 7000）。棟が範囲の上端になる。

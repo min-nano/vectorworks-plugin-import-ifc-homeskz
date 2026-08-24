@@ -1354,14 +1354,16 @@ namespace HomeskzIfcImport::parse
 	std::vector<ComponentCommand> foundationWallComponents(double thickness)
 	{
 		// 立上りはコンクリート 1 層（総厚＝壁厚）。
-		return {ComponentCommand{kConcreteComponentName, thickness}};
+		return {ComponentCommand{kConcreteComponentName, CLASS_COMPONENT_CONCRETE, thickness}};
 	}
 
 	std::vector<ComponentCommand> foundationSlabComponents(double concreteThickness)
 	{
-		return {ComponentCommand{kConcreteComponentName, concreteThickness},
-				ComponentCommand{kSlabLeanConcreteName, kSlabLeanConcreteThickness},
-				ComponentCommand{kSlabGravelName, kSlabGravelThickness}};
+		return {
+			ComponentCommand{kConcreteComponentName, CLASS_COMPONENT_CONCRETE, concreteThickness},
+			ComponentCommand{kSlabLeanConcreteName, CLASS_COMPONENT_LEAN_CONCRETE,
+							 kSlabLeanConcreteThickness},
+			ComponentCommand{kSlabGravelName, CLASS_COMPONENT_GRAVEL, kSlabGravelThickness}};
 	}
 
 	std::vector<int> collectFootingElements(const Model& model)
