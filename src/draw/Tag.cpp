@@ -64,6 +64,9 @@ namespace HomeskzIfcImport::draw
 		bool renamed = false; // 基準名が埋まっていて別名になった
 		bool layoutCreated = false; // タグレイアウト（プロファイルグループ）を自分で作った
 		bool layoutCopied = false; // 渡したグループを VW が複製して持った
+		bool styleMapSet = false; // スタイルのパラメータ対応表を「スタイル依存」にできた
+		bool notAStyle = false; // 作った資源を VW がプラグインスタイルとみなさない
+		std::size_t lociRemoved = 0; // 既定レイアウトから取り除いたロクスの数
 		bool layoutRejected = false; // 渡してもレイアウトとして持ってくれなかった
 		std::size_t layoutPrefilled = 0; // PIO が最初から持っていたレイアウトの中身の数
 		std::size_t layoutCount = 0; // 最終的にレイアウトへ載った中身の数（0 なら空のまま）
@@ -365,6 +368,24 @@ namespace HomeskzIfcImport::draw
 			return count;
 		}
 
+		// 既定のタグレイアウトに入っているロクス（kLocusNode）を取り除いて、取り除いた数を返す。
+		//
+		// **なぜ消すか**: 生成したばかりのデータタグはレイアウトにロクスを 1 つ持っている。
+		// ユーザーが手で作った（実際に寸法が出ている）スタイルのレイアウトを実機でダンプすると
+		// **テキスト 1 つだけ**でロクスは無い。中身の並びを見本へ合わせる（ローカル確認の
+		// 構造ダンプで判明。draw/Tag.h「実機から持ち帰った見本」）。
+		std::size_t RemoveDefaultLoci(MCObjectHandle layout)
+		{
+			// 走査しながら消すとリンクが切れるので、先に集めてから消す。
+			std::vector<MCObjectHandle> loci;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(layout); h != nil; h = gSDK->NextObject(h))
+				if (gSDK->GetObjectTypeN(h) == kLocusNode)
+					loci.push_back(h);
+			for (MCObjectHandle h : loci)
+				gSDK->DeleteObject(h, true);
+			return loci.size();
+		}
+
 		// PIO がいま持っているタグレイアウト。**2 つの入り口を両方見る**——VW2020 で
 		// 「プロファイルグループは aux コンテナに持つ」経路が足されており
 		// （ISDK::GetCustomObjectProfileGroupInAux）、スタイルの中の PIO のように図面上に
@@ -396,6 +417,7 @@ namespace HomeskzIfcImport::draw
 			if (held != nil)
 			{
 				record.layoutPrefilled = ContainerCount(held);
+				record.lociRemoved = RemoveDefaultLoci(held);
 				if (!CreateTagField(held, record))
 					return nil;
 				record.layoutCount = ContainerCount(held);
@@ -604,6 +626,15 @@ namespace HomeskzIfcImport::draw
 		if (support)
 			support->UpdateUserDefinedTextsUIDs(symDef);
 
+		// **スタイルのパラメータ対応表を「スタイル依存」にする。** これを作らないと、
+		// シンボル定義は形だけのスタイルで、当てたインスタンスは自分の値（＝空の既定
+		// レイアウト）を使い続ける——実機で「オブジェクトは出るのにタグの中身が空」に
+		// なったのがこれ（ローカル確認）。手で作ったスタイルでは VW の
+		// 「スタイルを作成」がこの表を用意している。
+		gSDK->SetAllPluginStyleParameters(symDef, kPluginStyleParameter_ByStyle);
+		record.styleMapSet = true;
+		record.notAStyle = !gSDK->IsPluginStyle(symDef);
+
 		// 作ったスタイルの構造を控える（診断行へ出す。上記「参照見本」と並べて読む）。
 		record.structure = DescribeStyle(symDef);
 
@@ -643,6 +674,11 @@ namespace HomeskzIfcImport::draw
 			text += "タグレイアウトは新しく作りました。";
 		if (record.layoutCopied)
 			text += "渡したレイアウトは VW 側で複製されました。";
+		if (record.notAStyle)
+			text += "VW がこの資源をプラグインスタイルとみなしていません。";
+		if (record.lociRemoved > 0)
+			text += "既定レイアウトのロクス " + std::to_string(record.lociRemoved) +
+					" 個を外しました。";
 		if (record.layoutPrefilled > 0)
 			text += "データタグが最初から持っていたレイアウトの中身 " +
 					std::to_string(record.layoutPrefilled) + " 件。";
@@ -711,6 +747,33 @@ namespace HomeskzIfcImport::draw
 
 		MovePendingTags(pending);
 
+		// **置いたタグ 1 本の実際の姿を控える**（診断行へ出す。1 枚目のビューポートの 1 本目
+		// だけ）。「スタイルは作れているのにタグの中身が空」のとき、原因が
+		//   * インスタンスにスタイルが当たっていない（スタイル名が出ない）
+		//   * 当たってはいるがレイアウトが空（中身 0 件）
+		// のどちらなのかを実機から持ち帰るための目。
+		if (counts.firstTag.empty() && !placed.empty())
+		{
+			const MCObjectHandle tag = placed.front();
+			std::string text;
+			MCObjectHandle styleSymbol = nil;
+			if (gSDK->GetPluginStyleSymbol(tag, styleSymbol) && styleSymbol != nil)
+			{
+				TXString name;
+				gSDK->GetObjectName(styleSymbol, name);
+				text = "スタイル「" + name.GetStdString() + "」";
+			}
+			else
+			{
+				text = "スタイル無し";
+			}
+			const MCObjectHandle layout = HeldTagLayout(tag);
+			text +=
+				"・レイアウト" + (layout == nil ? std::string("無し")
+												: std::to_string(ContainerCount(layout)) + "件");
+			counts.firstTag = std::move(text);
+		}
+
 		// クラスを表示へ戻し、ビューポートを更新して反映する。ConfigureViewport は**タグを
 		// 置く前**に走っているので、**スタイルがその時点で文書に無かったクラスを持ち込んだ
 		// 場合**（タグの中身はスタイルが決める）、ここで戻さないと注釈だけが空白のまま残る。
@@ -737,12 +800,16 @@ namespace HomeskzIfcImport::draw
 		// **タグを 1 つでも置いたのにクラスを 1 つも表示へ戻せていない**のも異常として扱う
 		// （注釈にタグはあるのに図には出ない、という一番分かりにくい壊れ方になる）。
 		const bool classesBroken = counts.drawn > 0 && counts.classesShown == 0;
+		// **タグを置けたときは実際の姿を必ず出す**（中身が空で出る問題の切り分けが
+		// 実機の 1 回で済むように）。異常が無ければ他の行は付かない。
 		if (counts.failed == 0 && counts.unassociated == 0 && counts.leaderLeft == 0 &&
 			counts.updateFailed == 0 && counts.unmeasured == 0 && !classesBroken &&
-			!counts.styleMissing)
+			!counts.styleMissing && counts.firstTag.empty())
 			return {};
 
 		std::string text = label + "の断面寸法タグの診断: ";
+		if (!counts.firstTag.empty())
+			text += "置いたタグの実際: " + counts.firstTag + "。";
 		if (counts.styleMissing)
 			text += "データタグスタイルを作れていないので、スタイル無しで置きました。";
 		if (counts.failed > 0)

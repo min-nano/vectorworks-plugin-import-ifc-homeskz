@@ -14,7 +14,6 @@
 //	                                        あるので、後段は伏図と同じ手順（draw/DrawUtil の
 //	                                        ConfigureViewport）で仕上げる。
 //	  * gSDK->SetObjectVariable(h, 1064/1035/1059, …) … 断面の見え方（下記）
-//	  * gSDK->GetObjectVariable(h, 1059, …)  … 2D コンポーネント表示が入ったかの読み戻し
 //	  * VWViewportObj::SetRenderType(renderFinalHiddenLine) … レンダリング（下記）
 //	  * gSDK->GetObjectBounds(h, WorldRect&) … できたビューポートの実寸（並べるのに使う）
 //	  * gSDK->MoveObject(h, dx, dy)          … シートレイヤ上での移動
@@ -154,16 +153,6 @@ namespace HomeskzIfcImport::draw
 											   endHeight, sheetLayer);
 		}
 
-		// オブジェクト変数の真偽値を読む。読めなければ false を返し out は触らない
-		// （＝「読めない」と「false だった」を取り違えない）。
-		bool ReadBooleanVariable(MCObjectHandle object, short variable, bool& out)
-		{
-			TVariableBlock block;
-			if (!gSDK->GetObjectVariable(object, variable, block))
-				return false;
-			return block.GetBoolean(out);
-		}
-
 		// レンダリング（バックグラウンド）を〈隠線消去〉にする。できたら true
 		// （ファイル冒頭「レンダリングは〈隠線消去〉にする」）。
 		bool ApplySectionRenderMode(MCObjectHandle viewport)
@@ -194,21 +183,12 @@ namespace HomeskzIfcImport::draw
 							   kShowObjectsBeyondCutPlane);
 			SetBooleanVariable(viewport, kOVDisplayPlanarObjects, kShowPlanarObjects);
 			SetBooleanVariable(viewport, kOVDisplay2DComponents, kShow2DComponents);
+			// 【読み戻して確かめない】以前は 2D コンポーネント（1059）を読み戻して
+			// 「入らなかった」を診断へ出していたが、**実機ではハイブリッドシンボルの 2D
+			// 表現がちゃんと出ているのに読み戻しは false を返す**（ローカル確認）。
+			// 読める値が実際の表示と一致しない以上、この読み戻しは誤警報しか生まないので
+			// 外した。書き込みはそのまま残す。
 			return rendered;
-		}
-
-		// 2D コンポーネント表示が**本当に入ったか**を読み戻す。入っていなければ true。
-		//
-		// 【なぜ読むか】SetObjectVariable は書けなかったときも黙って何もしない（返り値が
-		// 無い）ので、「設定したつもりで効いていない」は目視では見抜けない。この 1 項目は
-		// 実機で**書いても入らない**ことが分かっている問題の当事者なので、直ったかどうかを
-		// 完了ダイアログの診断行で分かるようにしておく（読めない環境では false＝黙る）。
-		bool Display2DComponentsMissing(MCObjectHandle viewport)
-		{
-			bool actual = false;
-			if (!ReadBooleanVariable(viewport, kOVDisplay2DComponents, actual))
-				return false;
-			return actual != static_cast<bool>(kShow2DComponents);
 		}
 
 		// できたビューポートをシートレイヤ上で重ならないように格子状へ並べる（Python 版
@@ -279,7 +259,6 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		std::size_t missingSheetLayers = 0;
 		std::size_t missingViewports = 0;
-		std::size_t missing2DComponents = 0;
 		std::size_t missingRenderMode = 0;
 		std::size_t classesApplied = 0;
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
@@ -332,9 +311,6 @@ namespace HomeskzIfcImport::draw
 			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport,
 												ViewportProjection::Keep)
 								  .classesApplied;
-			if (Display2DComponentsMissing(viewport))
-				++missing2DComponents;
-
 			// 断面寸法データタグ。**並べ替え（ArrangeViewports）より前**に置く——注釈は
 			// ビューポートと一緒に動くので、先に置いておけば移動しても図の上に留まる。
 			drawViewportTags(viewport, command.viewport, members, style, tags);
@@ -350,7 +326,7 @@ namespace HomeskzIfcImport::draw
 
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
 		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
-								missing2DComponents > 0 || missingRenderMode > 0))
+								missingRenderMode > 0))
 		{
 			std::string text = "軸組図の診断: ";
 			if (missingSheetLayers > 0)
@@ -365,10 +341,6 @@ namespace HomeskzIfcImport::draw
 			if (missingRenderMode > 0)
 				text += "レンダリングを〈隠線消去〉にできなかった軸組図 " +
 						std::to_string(missingRenderMode) + " 枚。";
-			if (missing2DComponents > 0)
-				text += "2D コンポーネントを表示にできなかった軸組図 " +
-						std::to_string(missing2DComponents) +
-						" 枚（ハイブリッドシンボルの 2D 表現が出ません）。";
 			if (!note->empty())
 				*note += "\n";
 			*note += text;
