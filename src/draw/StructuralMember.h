@@ -54,6 +54,11 @@ namespace HomeskzIfcImport::draw
 	// 読み直す**ので、書き手と読み手が同じ定義を見る必要がある（CLAUDE.md「構造材ツールの
 	// フィールド名・値・生成手順は draw/StructuralMember」）。残りのフィールド名は書き手
 	// しか使わないので .cpp のまま。
+	// 構造材ツールの universal 名（プラグイン名）。**描く側だけのものではない**——断面寸法
+	// データタグの式（draw/Tag の TagFieldFormula）が「どのオブジェクトのどのフィールドを
+	// 読むか」をこの名前で指すので、書き手と式が同じ定義を見る必要がある。
+	inline constexpr const char* kStructuralMemberPlugin = "StructuralMember";
+
 	inline constexpr const char* kFieldStructuralUse = "StructuralUse"; // 構造用途
 	inline constexpr const char* kFieldMajorBreadth = "MajorBreadth";	// 断面幅
 	inline constexpr const char* kFieldMajorDepth = "MajorDepth";		// 断面せい

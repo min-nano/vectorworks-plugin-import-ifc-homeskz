@@ -11,6 +11,20 @@
 //	平らな tag 命令をレイヤ名で振り分けていたが、断面（軸組図）はレイヤでは選べないので、
 //	振り分けごと解析側へ寄せてある（parse/Tag.h 冒頭）。
 //
+//	【スタイルは作って使う（既存のスタイルに頼らない）】タグの中身（断面寸法の書式）も
+//	見た目もデータタグスタイルが決めるので、**そのスタイルを取り込みのたびに文書へ作る**
+//	（createTagStyle）。以前は「文書に用意された "断面寸法" スタイルを名前で引く」形だったが、
+//	それだと**受け取った文書にスタイルが無ければタグが空で並ぶ**——テンプレートを配る運用が
+//	要るうえ、失敗が図面の上でしか分からない。作るのは
+//	  * プラグインオブジェクトスタイル＝**サブタイプにデータタグの内部 ID を持つシンボル定義**
+//	    （VWFC の VWSymbolDefObj::HasPluginStyleSupport が GetSymbolDefSubType > 0 で判定して
+//	    いるのがその実体。SetSymbolDefSubType で作れる）
+//	  * その中に置くデータタグ PIO 1 つ（スタイルのパラメータの持ち主）
+//	  * PIO のプロファイルグループ＝**タグレイアウト**。中身は「断面寸法」フィールド 1 つ
+//	    （リンクされたテキスト＝IDataTagTextLinkSupport で式を持たせたテキスト）
+//	**名前は既存の資源とぶつけない**（同名のスタイルを持つ文書へ取り込んでも、ユーザーの
+//	スタイルを乗っ取らない）。基準名で空いていなければ "-2"、"-3" … と後ろを足す。
+//
 //	【SDK 型を公開するヘッダ】ビューポートのハンドルを引数に取るため、このヘッダは
 //	draw/DrawUtil.h・draw/StructuralMember.h と同じく**SDK 型を公開する共通ヘッダ**で、
 //	自分で PluginPrefix.h を（DrawUtil.h 経由で）取り込む。したがって**要素ごとの draw/*.h から
@@ -59,6 +73,7 @@
 #pragma once
 
 #include "draw/DrawUtil.h"
+#include "draw/TagStyle.h"
 
 #include "core/Document.h"
 
@@ -80,7 +95,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t classesShown = 0; // タグを置いた後に表示へ戻せたクラス数（0 なら映らない）
 		std::size_t updateFailed = 0; // クラスを戻した後の再更新に失敗したビューポート
 		std::size_t unmeasured = 0; // 実位置を測れず動かせなかったタグ
-		bool styleMissing = false;	// "断面寸法" スタイルが文書に無い
+		bool styleMissing = false; // 生成したデータタグスタイルが無い（スタイル無しで置いた）
 	};
 
 	// データタグ PIO の定義を**設定ダイアログを出さない**で用意する。タグを 1 つでも置く
@@ -93,11 +108,23 @@ namespace HomeskzIfcImport::draw
 	// ——定義は文書ごとなので、次の文書へのインポートで抜けてしまう。
 	void prepareDataTagPlugin();
 
+	// 断面寸法データタグスタイルを**この取り込みのために文書へ作る**（下記「スタイルは
+	// 作って使う」）。命令セットに載っているタグのスタイル名（core::TagCommand::style ＝
+	// parse/Tag の kTagStyle）を**基準名**として、文書で空いている名前を選んで作る。
+	// タグが 1 つも無い文書では何もしない（使わない資源を文書へ足さない）。
+	//
+	// 作れたかどうか・付いた名前は style（draw/TagStyle）に残り、tagStyleDiagnostics が
+	// 1 行にする。**作れなくてもタグは置く**（スタイル無しで置く。位置だけでも正しい
+	// タグが残る方が原因を追いやすい）。
+	void createTagStyle(const core::Document& document, TagStyle& style);
+
 	// ビューポート 1 枚ぶんのタグを注釈として置く。置けた数を返し、内訳を counts へ積む
 	// （複数のビューポートぶんを 1 つの counts へ積んでよい）。memberHandles は drawMembers が
-	// 記録した「命令インデックス → 横架材ハンドル」の対応表。
+	// 記録した「命令インデックス → 横架材ハンドル」の対応表。style は createTagStyle が
+	// 作ったスタイル（作れていなければスタイル無しで置く）。
 	std::size_t drawViewportTags(MCObjectHandle viewport, const core::ViewportCommand& command,
-								 const ObjectHandleTable& memberHandles, TagCounts& counts);
+								 const ObjectHandleTable& memberHandles, const TagStyle& style,
+								 TagCounts& counts);
 
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空文字）。label は図の種別
 	// （"伏図" / "軸組図"）。

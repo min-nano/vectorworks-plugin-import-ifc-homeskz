@@ -10,9 +10,20 @@
 //	  * gSDK->AddViewportAnnotationObject(viewport, object)         … ビューポート注釈へ移す
 //	  * gSDK->ResetObject / DeleteObject                            … 反映・後始末
 //	  * VectorWorks::Extension::IDataTagSupport（VCOM）
-//	      SetDataTagStyle    … データタグスタイル（"断面寸法"）の関連付け
+//	      SetDataTagStyle    … データタグスタイルの関連付け
 //	      AssociateWithObject … 対象の横架材へ関連付け（Python 版 DT_AssociateWithObj）
 //	      UpdateDataTag       … 関連付け後の再計算（Python 版 DT_UpdateTaggedTags）
+//
+//	スタイルを作るとき（createTagStyle）に使う SDK API:
+//	  * gSDK->GetNamedObject                        … 名前が空いているかを見る
+//	  * gSDK->CreateSymbolDefinition(inoutName)     … スタイルの実体＝シンボル定義
+//	  * gSDK->SetSymbolDefSubType(symDef, 内部 ID)  … そのシンボル定義を**スタイルにする**
+//	  * gSDK->AddObjectToContainer                  … PIO・テキストを容れ物へ入れる
+//	  * gSDK->GetCustomObjectProfileGroup / SetCustomObjectProfileGroup … タグレイアウト
+//	  * gSDK->CreateGroup / CreateTextBlock / SetObjectName / SetTextStyleRef … レイアウトの中身
+//	  * VectorWorks::Extension::IDataTagTextLinkSupport（VCOM）
+//	      SetIsLinked / SetFormula … テキストを**タグフィールド**にする（式を持たせる）
+//	  * IDataTagSupport::UpdateUserDefinedTextsUIDs … スタイルにフィールドを認識させる
 //
 //	【注釈に入らなかったタグは消す】AddViewportAnnotationObject に失敗すると、タグは
 //	**生成したときのカレントレイヤ（シートレイヤ）に residue として残る**——図面の上に
@@ -22,6 +33,7 @@
 #include "PluginPrefix.h"
 #include "draw/Tag.h"
 #include "draw/DrawUtil.h"
+#include "draw/StructuralMember.h"
 #include "core/Document.h"
 
 #include "Interfaces/VectorWorks/Extension/IDataTagSupport.h"
@@ -31,17 +43,73 @@
 
 #include <cmath>
 #include <cstddef>
-#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
 {
+	// 生成したスタイルの実体（宣言は draw/TagStyle.h）。**実描画はローカルの VW でしか
+	// 確認できない**ので、「どこまでできたか」を段階ごとに残す（tagStyleDiagnostics が
+	// 1 行にする）。
+	struct TagStyleRecord
+	{
+		RefNumber style = 0; // 生成できたスタイル（0＝作れなかった＝スタイル無しで置く）
+		std::string requested; // 求めた基準名（命令のスタイル名）
+		std::string name; // 実際に付いた名前（基準名が埋まっていれば "-2" 等が付く）
+		std::string failure; // 躓いた段階（空＝最後まで作れた）
+		bool attempted = false; // 生成を試みたか（1 回の取り込みで 1 回だけ試みる）
+		bool renamed = false; // 基準名が埋まっていて別名になった
+		bool layoutCreated = false; // タグレイアウト（プロファイルグループ）を自分で作った
+		bool textStyleMissing = false; // 文字スタイル（"寸法(6pt)"）が文書に無かった
+		bool labelMissing = false; // フィールドラベル（テキストの名前）を付けられなかった
+		bool linkMissing = false; // テキストをタグフィールドにできなかった（式が入らない）
+		bool leaderLeft = false; // スタイル側の引出線を OFF にできなかった
+	};
+
 	namespace
 	{
 		// データタグの内部プラグイン名（Python 版 vw/sheet.py _DATA_TAG_PLUGIN）。VW 標準の
 		// データタグツールの universal 名で、表示名（"データタグ"）とは別物。
 		constexpr const char* kDataTagPlugin = "Data Tag";
+
+		// --- 生成するスタイルの中身（draw/Tag.h「スタイルは作って使う」）-----------------
+
+		// タグフィールドのラベル。VW はレイアウトの中の**テキストの名前**をフィールドの
+		// ラベルとして扱う（タグデータの取り出し口 IDataTagSupport::GetDataTagExtractedData も
+		// ラベルで引く）ので、テキストへこの名前を付ける。
+		constexpr const char* kFieldLabel = "断面寸法";
+
+		// フィールドの文字スタイル。**文書にあれば当て、無ければ大きさだけを直接与える**
+		// （テンプレート由来の資源なので、無い文書でも寸法が読める大きさにはしておく）。
+		constexpr const char* kTextStyleName = "寸法(6pt)";
+		constexpr double kTextSizePoints = 6.0;
+
+		// スタイル名が埋まっていたときに足す通し番号の上限。ここまで埋まっている文書は
+		// 事実上あり得ないが、無限ループにしないための歯止め。
+		constexpr int kNameSuffixLimit = 999;
+
+		// タグフィールドの式（VW のタグフィールド定義式）。構造材の断面幅×せいを mm 整数で
+		// 並べ、勾配（IPZL）が 0 でないときだけ括弧付きで添える。**レコード名・フィールド名は
+		// draw/StructuralMember の定義から組む**——構造材を書いているのはこちらなので、
+		// 名前を 2 か所に書かない（CLAUDE.md「重複を作らない置き場所」）。
+		TXString TagFieldFormula()
+		{
+			TXString formula;
+			formula += "#";
+			formula += kStructuralMemberPlugin;
+			formula += "#.#";
+			formula += kFieldMajorBreadth;
+			formula += "##mm_0_0#×#";
+			formula += kStructuralMemberPlugin;
+			formula += "#.#";
+			formula += kFieldMajorDepth;
+			formula += "##mm_0_0#";
+			// 勾配の添え書き。式の記法（条件・区切り）は VW のタグフィールド定義そのままで、
+			// 意味を持たせずに写す。
+			formula += R"FML(" ("@#IPZL#<>0:""#IPZL##thsep#sign#@#IPZL#<>0:""")"@#IPZL#<>0:"")FML";
+			return formula;
+		}
 
 		// 「引出線を表示」パラメータ（既定 ON）。部材の面ちょうどに置いても ON のままだと
 		// 引出線が描かれるので OFF にする（Python 版 _LEADER_FIELD / _LEADER_OFF）。
@@ -49,6 +117,26 @@ namespace HomeskzIfcImport::draw
 		// ResolveParamName。名前が 1 つ違うだけで setter は黙って無視される）。
 		constexpr const char* kFieldUseLeader = "Use Leader";
 		constexpr const char* kLocalizedUseLeader = "引出線を表示";
+
+		// 引出線を OFF にする（消せたら true）。**タグ本体とスタイルの中の PIO で同じ手順を
+		// 使う**ので 1 か所に置く。universal 名で引けない環境（日本語 UI）に備えて OIP の
+		// 表示名でも引き直す（ResolveParamName）。
+		bool TurnOffLeader(MCObjectHandle object)
+		{
+			try
+			{
+				VWParametricObj pio(object);
+				const TXString param = ResolveParamName(pio, kFieldUseLeader, kLocalizedUseLeader);
+				pio.SetParamBool(param, false);
+				return true;
+			}
+			catch (...)
+			{
+				// 引出線が残るだけでタグ自体は使えるので、失敗しても続ける（呼び出し側が
+				// 件数を数えて診断へ回す）。
+				return false;
+			}
+		}
 
 		// タグの逃がし量（offset の向きに沿ったタグの差し渡しの半分）。命令の position は
 		// **部材の辺の中央**で、そこへタグの下端中央が接するようにしたい。タグの実寸は
@@ -120,9 +208,9 @@ namespace HomeskzIfcImport::draw
 			else
 				++counts.unassociated;
 
-			// スタイル（"断面寸法"）。文書に無ければ**スタイル無しで置く**——タグを失うより、
-			// 位置だけでも正しいタグを残した方が原因を追いやすい（構造材のプラグイン
-			// スタイルと同じ方針。draw/DrawUtil の ResolvePluginStyle）。
+			// スタイル（createTagStyle がこの取り込みのために作ったもの）。作れていなければ
+			// **スタイル無しで置く**——タグを失うより、位置だけでも正しいタグを残した方が
+			// 原因を追いやすい（構造材のプラグインスタイルと同じ方針）。
 			//
 			// **skipValidation=true** を渡して検証を止める。関連付けを先に済ませてあれば
 			// 本来は通るはずだが、この検証は**ダイアログでユーザーに聞く**造りなので、
@@ -132,19 +220,9 @@ namespace HomeskzIfcImport::draw
 			if (style != 0 && support)
 				support->SetDataTagStyle(object, style, /*skipValidation=*/true);
 
-			// 引出線を OFF にする。
-			try
-			{
-				VWParametricObj pio(object);
-				const TXString param = ResolveParamName(pio, kFieldUseLeader, kLocalizedUseLeader);
-				pio.SetParamBool(param, false);
-			}
-			catch (...)
-			{
-				// 引出線が残るだけでタグ自体は使えるので、失敗しても続ける（件数だけ
-				// 数えて診断へ回す）。
+			// 引出線を OFF にする（スタイル側でも切ってあるが、命令ごとに念を入れる）。
+			if (!TurnOffLeader(object))
 				++counts.leaderLeft;
-			}
 
 			gSDK->ResetObject(object);
 
@@ -191,7 +269,235 @@ namespace HomeskzIfcImport::draw
 			++counts.drawn;
 			return true;
 		}
+
+		// 文書で空いている名前。基準名がそのまま空いていればそれを、埋まっていれば
+		// "-2"、"-3" … と後ろを足す（**既存のスタイルを乗っ取らない**。draw/Tag.h）。
+		// どれも埋まっていれば空文字（呼び出し側はスタイル無しへ落ちる）。
+		TXString UnusedResourceName(const std::string& base, bool& outRenamed)
+		{
+			outRenamed = false;
+			const TXString wanted(base.c_str());
+			if (gSDK->GetNamedObject(wanted) == nil)
+				return wanted;
+
+			outRenamed = true;
+			for (int suffix = 2; suffix <= kNameSuffixLimit; ++suffix)
+			{
+				const TXString candidate((base + "-" + std::to_string(suffix)).c_str());
+				if (gSDK->GetNamedObject(candidate) == nil)
+					return candidate;
+			}
+			return TXString();
+		}
+
+		// フィールドの文字を整える。文書に文字スタイル（"寸法(6pt)"）があればそれを当て、
+		// 無ければ大きさだけを直接与える（**その文書でも寸法が読める**ようにする）。
+		void ApplyFieldTextStyle(MCObjectHandle text, Sint32 length, TagStyleRecord& record)
+		{
+			const MCObjectHandle resource = gSDK->GetNamedObject(TXString(kTextStyleName));
+			if (resource != nil)
+			{
+				gSDK->SetTextStyleRef(text, gSDK->GetObjectInternalIndex(resource));
+				return;
+			}
+
+			// 文字スタイルが無い文書。大きさだけを与えて先へ進む（診断に残す）。
+			record.textStyleMissing = true;
+			gSDK->SetTextSize(text, 0, length, kTextSizePoints);
+		}
+
+		// タグレイアウト（＝タグの中身を描くグループ）を用意する。PIO が既に持っていれば
+		// それを使い、無ければ作って与える。**プロファイルグループ**は PIO が持つ「編集できる
+		// 中身」の入れ物で、データタグではこれがタグレイアウトにあたる。
+		MCObjectHandle ResolveTagLayout(MCObjectHandle pio, TagStyleRecord& record)
+		{
+			MCObjectHandle layout = gSDK->GetCustomObjectProfileGroup(pio);
+			if (layout != nil)
+				return layout;
+
+			layout = gSDK->CreateGroup();
+			if (layout == nil)
+				return nil;
+			record.layoutCreated = true;
+			if (!gSDK->SetCustomObjectProfileGroup(pio, layout))
+			{
+				gSDK->DeleteObject(layout, true);
+				return nil;
+			}
+			return layout;
+		}
+
+		// レイアウトへ断面寸法フィールドを 1 つ置く。フィールドの実体は**式を持たせた
+		// テキスト**（リンクされたテキスト）で、ラベルはテキストの名前。
+		bool AddTagField(MCObjectHandle layout, TagStyleRecord& record)
+		{
+			const TXString formula = TagFieldFormula();
+
+			// 式そのものを本文にしておく（スタイルが評価するまでの見た目であり、評価後は
+			// 断面寸法に置き換わる）。fixedSize=false で幅は中身なり。
+			const MCObjectHandle text = gSDK->CreateTextBlock(formula, WorldPt(0.0, 0.0), false, 0);
+			if (text == nil)
+				return false;
+
+			if (!gSDK->AddObjectToContainer(text, layout))
+			{
+				gSDK->DeleteObject(text, true);
+				return false;
+			}
+
+			ApplyFieldTextStyle(text, static_cast<Sint32>(formula.GetLength()), record);
+
+			// フィールドラベル＝テキストの名前。既に同じ名前の資源がある文書では付かない
+			// （ラベルが無いだけでタグは出るので、診断に残して先へ進む）。
+			if (gSDK->SetObjectName(text, TXString(kFieldLabel)) != 0)
+				record.labelMissing = true;
+
+			// **ここでテキストがタグフィールドになる。** リンクを立てて式を持たせる。
+			const VectorWorks::Extension::IDataTagTextLinkSupportPtr link(
+				VectorWorks::Extension::IID_DataTagTextLinkSupport);
+			if (!link)
+			{
+				record.linkMissing = true;
+				return true;
+			}
+			link->SetIsLinked(text, true);
+			link->SetFormula(text, formula);
+			return true;
+		}
+
+		// 命令セットが求めているスタイル名（＝ parse/Tag の kTagStyle）。タグが 1 つも無ければ
+		// 空文字。**名前の持ち主は解析側**なので、描画側は命令から受け取る（draw/ は parse/ を
+		// include しない。CLAUDE.md「依存の向きは厳守する」）。
+		std::string RequestedStyleName(const core::Document& document)
+		{
+			for (const core::SheetCommand& sheet : document.sheets)
+				for (const core::TagCommand& tag : sheet.viewport.tags)
+					if (!tag.style.empty())
+						return tag.style;
+			for (const core::SectionCommand& section : document.sections)
+				for (const core::TagCommand& tag : section.viewport.tags)
+					if (!tag.style.empty())
+						return tag.style;
+			return {};
+		}
 	} // namespace
+
+	TagStyle::TagStyle() : fRecord(std::make_unique<TagStyleRecord>()) {}
+
+	TagStyle::~TagStyle() = default;
+
+	void createTagStyle(const core::Document& document, TagStyle& style)
+	{
+		TagStyleRecord& record = style.record();
+		if (record.attempted)
+			return; // 1 回の取り込みで 1 つ（伏図・軸組図が同じスタイルを共有する）
+
+		record.requested = RequestedStyleName(document);
+		if (record.requested.empty())
+			return; // タグが 1 つも無い文書には資源を足さない
+
+		record.attempted = true;
+
+		// スタイルの中に置く PIO を作るので、タグ本体と同じく**設定ダイアログを出さない**
+		// 定義を先に用意する（draw/Tag.h の prepareDataTagPlugin）。
+		prepareDataTagPlugin();
+
+		bool renamed = false;
+		TXString name = UnusedResourceName(record.requested, renamed);
+		if (name.IsEmpty())
+		{
+			record.failure = "名前が空いていません";
+			return;
+		}
+		record.renamed = renamed;
+
+		// **プラグインオブジェクトスタイルの実体はシンボル定義**で、そのサブタイプに PIO の
+		// 内部 ID が入っているものがスタイルとして扱われる（draw/Tag.h）。名前は in/out で、
+		// VW が調整することがあるので**戻ってきた方**を控える。
+		const MCObjectHandle symDef = gSDK->CreateSymbolDefinition(name);
+		if (symDef == nil)
+		{
+			record.failure = "シンボル定義を作れませんでした";
+			return;
+		}
+		record.name = name.GetStdString();
+		gSDK->SetSymbolDefSubType(symDef, kInternalID_DataTag);
+
+		// スタイルが持つパラメータの本体＝データタグ PIO 1 つ。図面には出さない
+		// （bInsert=false で作ってシンボル定義へ入れる）。
+		const MCObjectHandle pio =
+			gSDK->CreateCustomObject(TXString(kDataTagPlugin), WorldPt(0.0, 0.0), 0.0, false);
+		if (pio == nil || !gSDK->AddObjectToContainer(pio, symDef))
+		{
+			if (pio != nil)
+				gSDK->DeleteObject(pio, true);
+			gSDK->DeleteSymbolDefinition(symDef, true);
+			record.name.clear();
+			record.failure = "スタイルの中のデータタグを作れませんでした";
+			return;
+		}
+
+		// 引出線はスタイルの側でも切っておく（タグは部材の面ちょうどに置く。parse/Tag.h）。
+		record.leaderLeft = !TurnOffLeader(pio);
+
+		// タグレイアウト（断面寸法フィールド 1 つ）。**ここが空だとタグは何も表示しない**ので、
+		// 作れなければスタイルごと捨ててスタイル無しへ落とす（中身の無いスタイルを文書へ
+		// 残さない）。
+		const MCObjectHandle layout = ResolveTagLayout(pio, record);
+		if (layout == nil || !AddTagField(layout, record))
+		{
+			gSDK->DeleteSymbolDefinition(symDef, true);
+			record.name.clear();
+			record.failure = "タグレイアウトを作れませんでした";
+			return;
+		}
+
+		gSDK->ResetObject(pio);
+
+		// スタイルにフィールドを認識させる（これをしないとタグ側が式を拾わない）。
+		const VectorWorks::Extension::IDataTagSupportPtr support(
+			VectorWorks::Extension::IID_DataTagSupport);
+		if (support)
+			support->UpdateUserDefinedTextsUIDs(symDef);
+
+		record.style = static_cast<RefNumber>(gSDK->GetObjectInternalIndex(symDef));
+		if (record.style == 0)
+			record.failure = "作ったスタイルを参照できませんでした";
+	}
+
+	std::string tagStyleDiagnostics(const TagStyle& style)
+	{
+		const TagStyleRecord& record = style.record();
+		if (!record.attempted)
+			return {}; // タグの無い文書（何も作っていない）
+
+		std::string text = "断面寸法データタグスタイルの診断: ";
+		if (record.style == 0)
+		{
+			return text + "スタイルを作れませんでした（" +
+				   (record.failure.empty() ? std::string("原因不明") : record.failure) +
+				   "）。タグはスタイル無しで置きます。";
+		}
+
+		// 作れたときは**付いた名前**を必ず出す（どのスタイルが増えたかが図面と突き合わせ
+		// られる）。以降は引っかかった点だけを足す。
+		text += "「" + record.name + "」を作りました。";
+		if (record.renamed)
+			text += "（基準名「" + record.requested + "」は文書に在るので別名にしました。）";
+		if (record.layoutCreated)
+			text += "タグレイアウトは新しく作りました。";
+		if (record.textStyleMissing)
+			text += std::string("文字スタイル「") + kTextStyleName +
+					"」が文書に無いので大きさだけを与えました。";
+		if (record.labelMissing)
+			text += std::string("フィールドラベル「") + kFieldLabel +
+					"」を付けられませんでした（同じ名前の資源があります）。";
+		if (record.linkMissing)
+			text += "タグフィールドの式を入れられませんでした（寸法が空になります）。";
+		if (record.leaderLeft)
+			text += "スタイルの引出線を OFF にできませんでした。";
+		return text;
+	}
 
 	void prepareDataTagPlugin()
 	{
@@ -199,15 +505,18 @@ namespace HomeskzIfcImport::draw
 	}
 
 	std::size_t drawViewportTags(MCObjectHandle viewport, const core::ViewportCommand& command,
-								 const ObjectHandleTable& memberHandles, TagCounts& counts)
+								 const ObjectHandleTable& memberHandles, const TagStyle& style,
+								 TagCounts& counts)
 	{
 		if (viewport == nil || command.tags.empty())
 			return 0;
 
-		// スタイル名 → RefNumber。**タグ 1 つごとに文書のリソースを引き直すと図面の規模なりに
-		// 効いてくる**（1 枚の伏図に横架材の本数だけタグが載る）ので、このビューポートの中では
-		// 名前ごとに 1 回だけ引く。引けなければ 0＝スタイル無しで置く。
-		std::map<std::string, RefNumber> styles;
+		// スタイルは**この取り込みのために作った 1 つ**（createTagStyle）。文書のリソースを
+		// 名前で引き直さないので、タグの本数ぶんの検索も要らない。作れていなければ 0＝
+		// スタイル無しで置く（原因は tagStyleDiagnostics が別行で説明する）。
+		const RefNumber styleRef = style.record().style;
+		if (styleRef == 0)
+			counts.styleMissing = true;
 
 		// VCOM のデータタグ支援インターフェース（関連付け・スタイル・更新）。ビューポート
 		// 1 枚につき 1 回だけ取る。取れなければ**タグは置くが関連付けとスタイルは省く**
@@ -228,21 +537,11 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		for (const core::TagCommand& tag : command.tags)
 		{
-			auto style = styles.find(tag.style);
-			if (style == styles.end())
-			{
-				const RefNumber resolved = ResolvePluginStyle(TXString(tag.style.c_str()));
-				style = styles.emplace(tag.style, resolved).first;
-				// 「1 度でも引けなかったか」だけを持ち帰る（診断行が長くならないように）。
-				if (resolved == 0)
-					counts.styleMissing = true;
-			}
-
 			const auto found = memberHandles.handles.find(tag.memberIndex);
 			const MCObjectHandle member =
 				found == memberHandles.handles.end() ? nil : found->second;
 
-			if (PlaceOne(viewport, tag, style->second, member, support, counts, placed, pending))
+			if (PlaceOne(viewport, tag, styleRef, member, support, counts, placed, pending))
 				++drawn;
 		}
 
@@ -281,8 +580,7 @@ namespace HomeskzIfcImport::draw
 
 		std::string text = label + "の断面寸法タグの診断: ";
 		if (counts.styleMissing)
-			text +=
-				"データタグスタイル「断面寸法」が文書にありません（スタイル無しで置きました）。";
+			text += "データタグスタイルを作れていないので、スタイル無しで置きました。";
 		if (counts.failed > 0)
 			text += "タグを置けなかった命令 " + std::to_string(counts.failed) + " 件。";
 		if (counts.leaderLeft > 0)

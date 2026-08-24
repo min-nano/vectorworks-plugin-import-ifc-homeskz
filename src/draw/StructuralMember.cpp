@@ -37,7 +37,7 @@ namespace HomeskzIfcImport::draw
 		// 構造材ツールの PIO 名（VW 実機の登録名に一致させる）。柱も横架材もこの 1 つの
 		// ツールで描く（柱・間柱ツールはスクリプト操作に対して不安定なため、Python 版が
 		// 標準の構造材ツールへ置き換えた判断をそのまま引き継ぐ。parse/Column.h）。
-		const TXString kStructuralMember("StructuralMember");
+		const TXString kStructuralMember(kStructuralMemberPlugin);
 
 		// SetObjectStoryBound に渡すバウンド ID。構造材は始端＝0・終端＝1 の 2 つを持つ
 		// （Python 版 vw/member.py と同じ規約。柱では下端＝0・上端＝1 に対応する）。
