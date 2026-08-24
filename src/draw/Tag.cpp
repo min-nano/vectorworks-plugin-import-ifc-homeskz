@@ -21,6 +21,8 @@
 //	  * gSDK->AddObjectToContainer                  … PIO・テキストを容れ物へ入れる
 //	  * gSDK->GetCustomObjectProfileGroup / SetCustomObjectProfileGroup … タグレイアウト
 //	  * gSDK->CreateGroup / CreateTextBlock / SetObjectName / SetTextStyleRef … レイアウトの中身
+//	  * gSDK->GetCustomObjectProfileGroupInAux                          … レイアウトのもう 1 つの入り口
+//	  * gSDK->FirstMemberObj / NextObject / GetObjectTypeN / GetObjectName … 構造ダンプ（診断）
 //	  * VectorWorks::Extension::IDataTagTextLinkSupport（VCOM）
 //	      SetIsLinked / SetFormula … テキストを**タグフィールド**にする（式を持たせる）
 //	  * IDataTagSupport::UpdateUserDefinedTextsUIDs … スタイルにフィールドを認識させる
@@ -61,6 +63,12 @@ namespace HomeskzIfcImport::draw
 		bool attempted = false; // 生成を試みたか（1 回の取り込みで 1 回だけ試みる）
 		bool renamed = false; // 基準名が埋まっていて別名になった
 		bool layoutCreated = false; // タグレイアウト（プロファイルグループ）を自分で作った
+		bool layoutCopied = false; // 渡したグループを VW が複製して持った
+		bool layoutRejected = false; // 渡してもレイアウトとして持ってくれなかった
+		std::size_t layoutPrefilled = 0; // PIO が最初から持っていたレイアウトの中身の数
+		std::size_t layoutCount = 0; // 最終的にレイアウトへ載った中身の数（0 なら空のまま）
+		std::string structure; // 作ったスタイルの構造（実機から持ち帰る目）
+		std::string existingStructure; // 同名の既存スタイルの構造（参照見本）
 		bool textStyleMissing = false; // 文字スタイル（"寸法(6pt)"）が文書に無かった
 		bool labelMissing = false; // フィールドラベル（テキストの名前）を付けられなかった
 		bool linkMissing = false; // テキストをタグフィールドにできなかった（式が入らない）
@@ -308,30 +316,9 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetTextSize(text, 0, length, kTextSizePoints);
 		}
 
-		// タグレイアウト（＝タグの中身を描くグループ）を用意する。PIO が既に持っていれば
-		// それを使い、無ければ作って与える。**プロファイルグループ**は PIO が持つ「編集できる
-		// 中身」の入れ物で、データタグではこれがタグレイアウトにあたる。
-		MCObjectHandle ResolveTagLayout(MCObjectHandle pio, TagStyleRecord& record)
-		{
-			MCObjectHandle layout = gSDK->GetCustomObjectProfileGroup(pio);
-			if (layout != nil)
-				return layout;
-
-			layout = gSDK->CreateGroup();
-			if (layout == nil)
-				return nil;
-			record.layoutCreated = true;
-			if (!gSDK->SetCustomObjectProfileGroup(pio, layout))
-			{
-				gSDK->DeleteObject(layout, true);
-				return nil;
-			}
-			return layout;
-		}
-
-		// レイアウトへ断面寸法フィールドを 1 つ置く。フィールドの実体は**式を持たせた
-		// テキスト**（リンクされたテキスト）で、ラベルはテキストの名前。
-		bool AddTagField(MCObjectHandle layout, TagStyleRecord& record)
+		// レイアウトへ置く断面寸法フィールドを 1 つ作って container へ入れる。フィールドの
+		// 実体は**式を持たせたテキスト**（リンクされたテキスト）で、ラベルはテキストの名前。
+		bool CreateTagField(MCObjectHandle container, TagStyleRecord& record)
 		{
 			const TXString formula = TagFieldFormula();
 
@@ -341,7 +328,7 @@ namespace HomeskzIfcImport::draw
 			if (text == nil)
 				return false;
 
-			if (!gSDK->AddObjectToContainer(text, layout))
+			if (!gSDK->AddObjectToContainer(text, container))
 			{
 				gSDK->DeleteObject(text, true);
 				return false;
@@ -365,6 +352,152 @@ namespace HomeskzIfcImport::draw
 			link->SetIsLinked(text, true);
 			link->SetFormula(text, formula);
 			return true;
+		}
+
+		// container の中身の数。レイアウトが本当に載ったかを数で確かめる（ローカル確認で
+		// 「レイアウトが空」と分かったときに、どこで落ちたかを診断へ出すため）。
+		std::size_t ContainerCount(MCObjectHandle container)
+		{
+			std::size_t count = 0;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil;
+				 h = gSDK->NextObject(h))
+				++count;
+			return count;
+		}
+
+		// PIO がいま持っているタグレイアウト。**2 つの入り口を両方見る**——VW2020 で
+		// 「プロファイルグループは aux コンテナに持つ」経路が足されており
+		// （ISDK::GetCustomObjectProfileGroupInAux）、スタイルの中の PIO のように図面上に
+		// 無いオブジェクトではそちらにしか出ないことがある。
+		MCObjectHandle HeldTagLayout(MCObjectHandle pio)
+		{
+			const MCObjectHandle direct = gSDK->GetCustomObjectProfileGroup(pio);
+			if (direct != nil)
+				return direct;
+			return gSDK->GetCustomObjectProfileGroupInAux(pio);
+		}
+
+		// タグレイアウト（＝タグの中身を描くグループ）を PIO へ持たせる。
+		//
+		// **中身を入れてから渡す。** 以前は空のグループを先に SetCustomObjectProfileGroup で
+		// 渡し、返ってきたハンドルへテキストを足していたが、それだと**渡した時点で VW が
+		// グループを複製して持った場合に、足したテキストが迷子のグループへ入る**——実機では
+		// これが「オブジェクトは出るのにタグレイアウトが空」という形で現れた（ローカル確認）。
+		// 順序を逆にすれば、複製されても中身ごと複製される。
+		//
+		// 渡した後は**実際に PIO が持っているレイアウトを取り直して**数を確かめ、複製された
+		// ときはこちらのグループを消す（図面に空のグループを残さない）。取り直したものが
+		// 空だったときだけ、そちらへフィールドを作り直す。
+		MCObjectHandle ResolveTagLayout(MCObjectHandle pio, TagStyleRecord& record)
+		{
+			// 既に持っていればそれを使う（データタグ PIO が生成時にレイアウトを持つ実装で
+			// あれば、こちらが作る必要はない）。
+			MCObjectHandle held = HeldTagLayout(pio);
+			if (held != nil)
+			{
+				record.layoutPrefilled = ContainerCount(held);
+				if (!CreateTagField(held, record))
+					return nil;
+				record.layoutCount = ContainerCount(held);
+				return held;
+			}
+
+			MCObjectHandle group = gSDK->CreateGroup();
+			if (group == nil)
+				return nil;
+			record.layoutCreated = true;
+			if (!CreateTagField(group, record))
+			{
+				gSDK->DeleteObject(group, true);
+				return nil;
+			}
+
+			if (!gSDK->SetCustomObjectProfileGroup(pio, group))
+			{
+				gSDK->DeleteObject(group, true);
+				return nil;
+			}
+
+			held = HeldTagLayout(pio);
+			if (held == nil)
+			{
+				// PIO が持ってくれなかった（＝データタグのレイアウトはプロファイルグループ
+				// ではない）。こちらのグループは図面上の residue なので消し、スタイルは
+				// 中身無しとして扱う（呼び出し側がスタイルごと捨てる）。
+				record.layoutRejected = true;
+				gSDK->DeleteObject(group, true);
+				return nil;
+			}
+
+			if (held != group)
+			{
+				// VW が複製して持った。中身まで複製されていなければフィールドを作り直し、
+				// こちらのグループは消す。
+				record.layoutCopied = true;
+				if (ContainerCount(held) == 0 && !CreateTagField(held, record))
+					return nil;
+				gSDK->DeleteObject(group, true);
+			}
+
+			record.layoutCount = ContainerCount(held);
+			return held;
+		}
+
+		// オブジェクト 1 つの見出し（型番号と名前）。診断へ出す構造ダンプの部品。
+		std::string DescribeObject(MCObjectHandle object)
+		{
+			std::string text = "型" + std::to_string(gSDK->GetObjectTypeN(object));
+			TXString name;
+			gSDK->GetObjectName(object, name);
+			if (!name.IsEmpty())
+				text += "「" + name.GetStdString() + "」";
+
+			// テキストなら**タグフィールドになっているか**が知りたい（式が入っていなければ
+			// タグは空で出る）。
+			const VectorWorks::Extension::IDataTagTextLinkSupportPtr link(
+				VectorWorks::Extension::IID_DataTagTextLinkSupport);
+			if (link && link->IsSupported(object))
+				text += link->GetIsLinked(object) ? "[式あり]" : "[式なし]";
+			return text;
+		}
+
+		// データタグスタイル（シンボル定義）の中身を 1 行に畳む。**実描画はローカルの VW で
+		// しか見られない**ので、「レイアウトがどこに入っているか」を実機から持ち帰るための
+		// 目。ユーザーが手で作った既存のスタイルへ当てれば、VW が本当はどこへレイアウトを
+		// 置くのかがそのまま読める（こちらの作り方と突き合わせる）。
+		std::string DescribeStyle(MCObjectHandle symDef)
+		{
+			std::string text;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(symDef); h != nil; h = gSDK->NextObject(h))
+			{
+				if (!text.empty())
+					text += ", ";
+				text += DescribeObject(h);
+
+				// PIO ならレイアウトの入り口を両方見て、中身の数まで出す。
+				const MCObjectHandle direct = gSDK->GetCustomObjectProfileGroup(h);
+				const MCObjectHandle aux = gSDK->GetCustomObjectProfileGroupInAux(h);
+				if (direct != nil)
+					text += "{プロファイル " + std::to_string(ContainerCount(direct)) + "件}";
+				if (aux != nil && aux != direct)
+					text += "{aux " + std::to_string(ContainerCount(aux)) + "件}";
+				const MCObjectHandle layout = direct != nil ? direct : aux;
+				if (layout != nil)
+					for (MCObjectHandle in = gSDK->FirstMemberObj(layout); in != nil;
+						 in = gSDK->NextObject(in))
+						text += "(" + DescribeObject(in) + ")";
+			}
+			return text.empty() ? std::string("空") : text;
+		}
+
+		// 文書に既にある同名のデータタグスタイル（＝ユーザーが手で作ったもの）の構造。
+		// **参照見本**として診断へ出す。無ければ空文字。
+		std::string DescribeExistingStyle(const std::string& baseName)
+		{
+			const MCObjectHandle existing = gSDK->GetNamedObject(TXString(baseName.c_str()));
+			if (existing == nil || gSDK->GetSymbolDefSubType(existing) != kInternalID_DataTag)
+				return {};
+			return DescribeStyle(existing);
 		}
 
 		// 命令セットが求めているスタイル名（＝ parse/Tag の kTagStyle）。タグが 1 つも無ければ
@@ -442,15 +575,24 @@ namespace HomeskzIfcImport::draw
 		// 引出線はスタイルの側でも切っておく（タグは部材の面ちょうどに置く。parse/Tag.h）。
 		record.leaderLeft = !TurnOffLeader(pio);
 
+		// **参照見本を先に控える**（スタイルを作る前）。基準名がそのまま空いていれば見本は
+		// 無い＝空文字。**ここが実機から持ち帰る唯一の目**で、ユーザーが手で作った既存の
+		// 「断面寸法」スタイルの構造がそのまま診断行に出る（VW が本当はどこへタグレイアウトを
+		// 置くのか、こちらの作り方と突き合わせられる）。
+		record.existingStructure = DescribeExistingStyle(record.requested);
+
 		// タグレイアウト（断面寸法フィールド 1 つ）。**ここが空だとタグは何も表示しない**ので、
 		// 作れなければスタイルごと捨ててスタイル無しへ落とす（中身の無いスタイルを文書へ
-		// 残さない）。
+		// 残さない）。中身は ResolveTagLayout が入れる（**空のグループを先に渡さない**。
+		// 同関数の頭の説明）。
 		const MCObjectHandle layout = ResolveTagLayout(pio, record);
-		if (layout == nil || !AddTagField(layout, record))
+		if (layout == nil || record.layoutCount == 0)
 		{
 			gSDK->DeleteSymbolDefinition(symDef, true);
 			record.name.clear();
-			record.failure = "タグレイアウトを作れませんでした";
+			record.failure = record.layoutRejected
+								 ? "データタグがタグレイアウトを受け取りませんでした"
+								 : "タグレイアウトを作れませんでした";
 			return;
 		}
 
@@ -461,6 +603,9 @@ namespace HomeskzIfcImport::draw
 			VectorWorks::Extension::IID_DataTagSupport);
 		if (support)
 			support->UpdateUserDefinedTextsUIDs(symDef);
+
+		// 作ったスタイルの構造を控える（診断行へ出す。上記「参照見本」と並べて読む）。
+		record.structure = DescribeStyle(symDef);
 
 		record.style = static_cast<RefNumber>(gSDK->GetObjectInternalIndex(symDef));
 		if (record.style == 0)
@@ -496,6 +641,15 @@ namespace HomeskzIfcImport::draw
 			text += "（基準名「" + record.requested + "」は文書に在るので別名にしました。）";
 		if (record.layoutCreated)
 			text += "タグレイアウトは新しく作りました。";
+		if (record.layoutCopied)
+			text += "渡したレイアウトは VW 側で複製されました。";
+		if (record.layoutPrefilled > 0)
+			text += "データタグが最初から持っていたレイアウトの中身 " +
+					std::to_string(record.layoutPrefilled) + " 件。";
+		text += "レイアウトの中身 " + std::to_string(record.layoutCount) + " 件。";
+		text += "構造: " + record.structure + "。";
+		if (!record.existingStructure.empty())
+			text += "同名の既存スタイルの構造: " + record.existingStructure + "。";
 		if (record.textStyleMissing)
 			text += std::string("文字スタイル「") + kTextStyleName +
 					"」が文書に無いので大きさだけを与えました。";
