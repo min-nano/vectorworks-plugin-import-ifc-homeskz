@@ -131,6 +131,7 @@ namespace HomeskzIfcImport::parse
 
 	// 基礎の構成層の名前。立上りは コンクリート 1 層、底盤は 上から コンクリート → 捨てコン →
 	// 砕石。コンクリート厚は要素ソリッドの実寸（整数 mm に丸めたもの）で、捨てコン・砕石は既定値。
+	// 各層のクラス（素材）は parse/StructuralClass.h の CLASS_COMPONENT_*（層名と 1 対 1）。
 	inline constexpr const char* kConcreteComponentName = "コンクリート";
 	inline constexpr const char* kSlabLeanConcreteName = "捨てコン";
 	inline constexpr const char* kSlabGravelName = "砕石";
