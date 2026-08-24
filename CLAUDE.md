@@ -182,7 +182,11 @@ src/
                             （壁→壁結合が使う。実体は draw/DrawUtil）
     Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）
     Tag.{h,cpp}             ビューポート注釈の断面寸法データタグ（旧 vw/sheet.py の draw_tag）。
-                            伏図・軸組図が共有する唯一の実装（振り分けは parse/Tag 済み）
+                            伏図・軸組図が共有する唯一の実装（振り分けは parse/Tag 済み）。
+                            **データタグスタイル自体もここで作る**（既存のスタイルに
+                            頼らない。createTagStyle）
+    TagStyle.h              作ったデータタグスタイルの持ち主（伏図・軸組図で 1 つを共有する
+                            ための入れ物。実体は draw/Tag.cpp の pimpl）
     Legend.{h,cpp}          伏図のグラフィック凡例（旧 vw/sheet.py の draw_legend）。
                             ビューポート注釈ではなく**シートレイヤ（用紙）**に置く。
                             凡例に並ぶ中身は VW 側のグラフィック凡例スタイルが決める
@@ -226,9 +230,11 @@ tests/
 立上りが共有する。スラブ・壁は**スタイルを作らない・当てない**）は
 `draw/DrawUtil`、**シートレイヤの用意とビューポートの仕上げ**（表示レイヤの絞り込み・クラス表示・
 縮尺・図番／図面タイトル・更新——伏図と軸組図が共有する唯一の実装）も `draw/DrawUtil`、
-**断面寸法データタグ**（スタイル名は `parse/Tag` の `kTagStyle`、断面の注釈空間への投影は
-同じく `parse/Tag` の `sectionAnnotationPoint`、`Data Tag` PIO の登録名・引出線パラメータと
-配置手順は `draw/Tag`——伏図と軸組図が共有する唯一の実装）、**グラフィック凡例**
+**断面寸法データタグ**（スタイルの**基準名**は `parse/Tag` の `kTagStyle`、断面の注釈空間への
+投影は同じく `parse/Tag` の `sectionAnnotationPoint`、`Data Tag` PIO の登録名・引出線パラメータと
+配置手順、そして**スタイルの作り方**——名前の付け方（既存の資源とぶつけない）・タグレイアウトの
+式・フィールドラベル・文字スタイル名——は `draw/Tag`（`createTagStyle`。伏図と軸組図が共有する
+唯一の実装で、作ったスタイルは `draw/TagStyle` の入れ物で持ち回す）、**グラフィック凡例**
 （スタイル名と配置点は `parse/Sheet` の `kFoundationLegendStyle` / `kFloorLegendStyle` /
 `kLegendPosition`、`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗りと配置手順は
 `draw/Legend`）、
