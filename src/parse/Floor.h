@@ -54,7 +54,9 @@ namespace HomeskzIfcImport::parse
 	// 押し出し厚は使わない（ホームズ君は 28mm 等を出力するが、作図上は 24mm で統一する）。
 	inline constexpr double kSubfloorThickness = 24.0;
 
-	// スラブ構成層の名前。上から 床仕上げ → 床下地。
+	// スラブ構成層の名前。上から 床仕上げ → 床下地。各層のクラス（素材）は
+	// parse/StructuralClass.h の CLASS_COMPONENT_*（床仕上げ＝フローリング、
+	// 床下地＝合板）。
 	inline constexpr const char* kFloorFinishName = "床仕上げ";
 	inline constexpr const char* kSubfloorName = "床下地";
 

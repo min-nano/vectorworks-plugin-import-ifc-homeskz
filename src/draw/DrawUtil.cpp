@@ -169,6 +169,29 @@ namespace HomeskzIfcImport::draw
 				return 0;
 			return count;
 		}
+
+		// 構成要素（層）1 枚のクラスを名前で設定する。オブジェクト本体の SetClassByName と
+		// 同じ作法（AddClass は既存なら索引を返し、無ければ作る）で、クラス名が空なら
+		// 何もしない（層は無クラス＝既定クラスのまま）。
+		void SetComponentClassByName(MCObjectHandle object, short componentIndex,
+									 const std::string& className)
+		{
+			if (className.empty())
+				return;
+			const InternalIndex classID = gSDK->AddClass(TXString(className.c_str()));
+			gSDK->SetComponentClass(object, componentIndex, classID);
+		}
+
+		// 構成要素（層）1 枚の描画属性をすべてクラス属性に従わせる。層が持つ属性は
+		// **塗り**と**左右のペン**の 2 系統だけで、クラスを割り当てただけでは
+		// by-instance の既定値（挿入時に渡した 0）のまま残るため、オブジェクト本体の
+		// SetAllAttributesByClass と同じく明示的に by-class を指定する。
+		void SetComponentAttributesByClass(MCObjectHandle object, short componentIndex)
+		{
+			gSDK->SetComponentUseFillClassAttr(object, componentIndex, true);
+			// 左右のペン（層の境界線）はどちらもクラス属性に従わせる。
+			gSDK->SetComponentUsePenClassAttr(object, componentIndex, true, true);
+		}
 	} // namespace
 
 	void SetClassByName(MCObjectHandle object, const std::string& className)
@@ -211,14 +234,17 @@ namespace HomeskzIfcImport::draw
 		const auto wanted = static_cast<short>(components.size());
 
 		// 1. 命令の層を先頭から順に挿入する（索引 i の層の「手前」に入るので、0,1,… の順に
-		//    入れると命令どおりの並びが先頭にできる）。fill / ペン太さ / 線種は文書の既定に
-		//    任せ（0）、描画属性はクラスに従わせる。
+		//    入れると命令どおりの並びが先頭にできる）。InsertNewComponentN へ渡す
+		//    fill / ペン太さ / 線種は文書の既定に任せ（0）、描画属性は下の
+		//    SetComponentAttributesByClass で層のクラスに従わせる。
 		for (short index = 0; index < wanted; ++index)
 		{
 			const core::ComponentCommand& component = components[static_cast<std::size_t>(index)];
 			gSDK->InsertNewComponentN(object, index, component.thickness, 0, 0, 0, 0, 0);
 			gSDK->SetComponentWidth(object, index, component.thickness);
 			gSDK->SetComponentName(object, index, TXString(component.name.c_str()));
+			SetComponentClassByName(object, index, component.drawClass);
+			SetComponentAttributesByClass(object, index);
 		}
 
 		// 2. 挿入した層の直後に並んでいる元の層を、前から順に削除する（索引 wanted は常に

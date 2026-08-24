@@ -32,6 +32,8 @@
 using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::FloorCommand;
 using HomeskzIfcImport::parse::buildFloorCommands;
+using HomeskzIfcImport::parse::CLASS_COMPONENT_FLOORING;
+using HomeskzIfcImport::parse::CLASS_COMPONENT_PLYWOOD;
 using HomeskzIfcImport::parse::CLASS_FLOOR;
 using HomeskzIfcImport::parse::collectStories;
 using HomeskzIfcImport::parse::kSubfloorThickness;
@@ -150,8 +152,10 @@ TEST(extracts_floor_slab_from_minimal_model)
 	if (floor.components.size() == 2)
 	{
 		CHECK_EQ(floor.components[0].name, std::string("床仕上げ"));
+		CHECK_EQ(floor.components[0].drawClass, std::string(CLASS_COMPONENT_FLOORING));
 		CHECK(near(floor.components[0].thickness, 96.0));
 		CHECK_EQ(floor.components[1].name, std::string("床下地"));
+		CHECK_EQ(floor.components[1].drawClass, std::string(CLASS_COMPONENT_PLYWOOD));
 		CHECK(near(floor.components[1].thickness, 24.0));
 	}
 	CHECK(near(totalThickness(floor), 120.0));
@@ -215,7 +219,9 @@ TEST(top_story_floor_is_a_loft)
 	CHECK_EQ(loft.components.size(), static_cast<std::size_t>(2));
 	if (loft.components.size() == 2)
 	{
+		CHECK_EQ(loft.components[0].drawClass, std::string(CLASS_COMPONENT_FLOORING));
 		CHECK(near(loft.components[0].thickness, 12.0)); // 36 − 24
+		CHECK_EQ(loft.components[1].drawClass, std::string(CLASS_COMPONENT_PLYWOOD));
 		CHECK(near(loft.components[1].thickness, 24.0));
 	}
 	CHECK(near(totalThickness(loft), 36.0));
