@@ -57,6 +57,25 @@ namespace HomeskzIfcImport::parse
 			return true;
 		}
 
+		// 床束（position を中心）が立上り 1 本の footprint を clearance だけ広げた領域に
+		// 入っているか。壁芯を軸に、直交方向は 半壁厚 + clearance、沿軸方向は区間の外側へ
+		// clearance まで見る（半壁厚は直交方向の寸法なので沿軸には効かない）。
+		bool wallCovers(const core::WallCommand& wall, const Vec2& position, double clearance)
+		{
+			const Vec2 delta = wall.end - wall.start;
+			const double wallLength = std::hypot(delta.x, delta.y);
+			if (wallLength <= 0.0)
+				return false; // 縮退した立上りは向きが定まらない
+			const Vec2 u{delta.x / wallLength, delta.y / wallLength};
+
+			const Vec2 r = position - wall.start;
+			const double along = (r.x * u.x) + (r.y * u.y); // 壁芯に沿った位置
+			if (along < -clearance || along > wallLength + clearance)
+				return false;
+			const double perp = std::abs((u.x * r.y) - (u.y * r.x)); // 壁芯からの直交距離
+			return perp <= (wall.thickness / 2.0) + clearance;
+		}
+
 		// Union-Find の代表を引く（経路圧縮つき）。
 		std::size_t findRoot(std::vector<std::size_t>& parent, std::size_t index)
 		{
@@ -130,7 +149,7 @@ namespace HomeskzIfcImport::parse
 				double width = 0.0;
 				if (!memberCenterLine(model, *element, origin, direction, length, width))
 					continue;
-				lines.push_back(OhbikiRun{origin, origin + (direction * length)});
+				lines.push_back(OhbikiRun{origin, origin + (direction * length), width});
 			}
 		}
 		return lines;
@@ -262,9 +281,22 @@ namespace HomeskzIfcImport::parse
 					}
 				}
 			}
-			runs.push_back(OhbikiRun{head.start + (u * lo), head.start + (u * hi)});
+			// 統合した連の床束幅は成分の最大値（安全側＝立上りとの重なりを拾い漏らさない）。
+			double width = 0.0;
+			for (const std::size_t index : members)
+				width = std::max(width, lines[index].width);
+			runs.push_back(OhbikiRun{head.start + (u * lo), head.start + (u * hi), width});
 		}
 		return runs;
+	}
+
+	bool overlapsFoundationWall(const Vec2& position, double postWidth,
+								const std::vector<core::WallCommand>& walls)
+	{
+		// 床束の半幅ぶん（＋丸め誤差の下駄）だけ立上りの footprint を広げてから点で判定する。
+		const double clearance = (postWidth / 2.0) + kFloorPostWallMargin;
+		return std::ranges::any_of(walls, [&position, clearance](const core::WallCommand& wall)
+								   { return wallCovers(wall, position, clearance); });
 	}
 
 	std::vector<SymbolCommand> buildFloorPostCommands(Context& context)
@@ -278,6 +310,9 @@ namespace HomeskzIfcImport::parse
 		const Vec2 center = context.gridCenter();
 		const std::vector<SupportLine> supports = collectSupportLines(model);
 		const std::vector<OhbikiRun> runs = mergeCollinearOhbiki(collectOhbikiLines(model));
+		// 立上りは**センタリング済み**の命令（人通口の分割・切り下げまで反映済み）。
+		// コンテキストが 1 回だけ組み立てたものを共有する（parse/Context）。
+		const std::vector<core::WallCommand>& walls = context.walls();
 
 		std::vector<SymbolCommand> commands;
 		for (const OhbikiRun& run : runs)
@@ -298,10 +333,16 @@ namespace HomeskzIfcImport::parse
 
 			for (const double distance : floorPostOffsets(spanLength))
 			{
+				const Vec2 position = start + (direction * distance) - center;
+				// 立上りと重なる位置には立てられない（その位置の大引は立上りが受ける）ので
+				// **その 1 本だけ落とす**——間隔は詰め替えない（parse/FloorPost.h の doc）。
+				if (overlapsFoundationWall(position, run.width, walls))
+					continue;
+
 				SymbolCommand command;
 				command.layer = kLayerFoundationFloorPost;
 				command.symbol = kSymbolFloorPost;
-				command.position = start + (direction * distance) - center;
+				command.position = position;
 				// 回転角は持たない（床束は軸対称）。SymbolCommand::angle の既定 0 のまま。
 				commands.push_back(std::move(command));
 			}
