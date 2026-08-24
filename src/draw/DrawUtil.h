@@ -291,15 +291,52 @@ namespace HomeskzIfcImport::draw
 	// 決める中身と一緒に新しいクラスを文書へ持ち込むことがある（draw/Tag）。
 	std::size_t ShowAllViewportClasses(MCObjectHandle viewport);
 
+	// ビューポートの投影をどう扱うか（ConfigureViewport の引数）。
+	//
+	// 【伏図は 2D/平面（Top/Plan）へ作り直す必要がある】`CreateViewport` が作る平面
+	// ビューポートは、**オブジェクト情報パレット上は「2D/平面」と表示されるのに、実際の
+	// 描画は 3D の「上」ビューのまま**という食い違いを起こす（実機で確認された症状。
+	// 更新ボタンを押しても直らず、パレットでいったん「上」を選んでから「2D/平面」へ
+	// 戻すと正しく描かれる）。Python 版も同じ症状に当たっており、対処は
+	// `vw/sheet.py` の `force_plan_view`——**ユーザーの手動対処をそのまま SDK でなぞる**、
+	// すなわち Project 2D（オブジェクト変数 1005）をいったん OFF にして**更新を挟み**、
+	// 再度 ON に戻して 2D/平面のキャッシュを作り直す。C++ への移植でこの手当てが
+	// 抜け落ちていたのが原因なので、同じ手順を移植する。
+	//
+	// **軸組図（断面ビューポート）は Keep**——あちらは断面の向きで作られており、平面へ
+	// 倒しては意味を成さない。
+	enum class ViewportProjection
+	{
+		Keep, // いまの投影のまま触らない（軸組図＝断面ビューポート）
+		Plan, // 2D/平面（Top/Plan）へ作り直す（伏図）
+	};
+
+	// ConfigureViewport の結果。**どちらも「効かなかったこと」を呼び出し側の診断行へ
+	// 出すためのもの**で、図そのものは失敗しても残る。
+	struct ViewportFinish
+	{
+		// 表示へ戻せたクラスの数（0 なら図形が 1 つも映らない）。
+		std::size_t classesApplied = 0;
+		// 2D/平面へ作り直せたか（`ViewportProjection::Keep` のときは常に true）。
+		// **書けたかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも
+		// 黙って何もしないので、「設定したつもりで効いていない」は目視では見抜けない。
+		bool planViewApplied = true;
+	};
+
 	// 生成済みのビューポートを命令どおりに仕上げる（表示レイヤの絞り込み → クラス表示 →
-	// 縮尺 → 図面タイトル・図番 → 更新）。**表示に戻せたクラスの数**を返す（0 なら図形が
-	// 1 つも映らないので、呼び出し側は診断行に出す）。
+	// 縮尺 → ［伏図なら 2D/平面の作り直し］→ 図面タイトル・図番 → 更新）。
 	//
 	// 表示レイヤは「まず全部隠してから、命令に挙げたものだけ表示へ戻す」——ビューポートは
 	// 既定でドキュメントの表示状態を引き継ぐため、挙げていないレイヤが映り込む。グレー表示
 	// （2）は薄く残るので使わず、必ず非表示（1）にする。
-	std::size_t ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
-								  const ViewportSetup& setup, const core::ViewportCommand& command);
+	//
+	// **投影の作り直しは「表示レイヤを絞った後・最後の更新の前」**に行う（上の
+	// ViewportProjection）。作り直しは更新を 1 回挟むので、レイヤを絞る前に行うと図面の
+	// 全レイヤを描くことになり、無駄に重い。順番を入れ替えないこと。
+	ViewportFinish ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
+									 const ViewportSetup& setup,
+									 const core::ViewportCommand& command,
+									 ViewportProjection projection);
 
 	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
 	// （draw/ObjectHandles.h の ObjectHandles）は SDK 非依存のヘッダに置いてあり、
