@@ -276,18 +276,20 @@ namespace HomeskzIfcImport::draw
 		TXString UnusedResourceName(const std::string& base, bool& outRenamed)
 		{
 			outRenamed = false;
-			const TXString wanted(base.c_str());
+			// const にしない: 返すときの自動 move が効かなくなる（clang-tidy
+			// performance-no-automatic-move）。
+			TXString wanted(base.c_str());
 			if (gSDK->GetNamedObject(wanted) == nil)
 				return wanted;
 
 			outRenamed = true;
 			for (int suffix = 2; suffix <= kNameSuffixLimit; ++suffix)
 			{
-				const TXString candidate((base + "-" + std::to_string(suffix)).c_str());
+				TXString candidate((base + "-" + std::to_string(suffix)).c_str());
 				if (gSDK->GetNamedObject(candidate) == nil)
 					return candidate;
 			}
-			return TXString();
+			return {};
 		}
 
 		// フィールドの文字を整える。文書に文字スタイル（"寸法(6pt)"）があればそれを当て、
