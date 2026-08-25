@@ -12,7 +12,6 @@
 #include <cmath>
 #include <cstddef>
 #include <numbers>
-#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::parse
@@ -138,13 +137,12 @@ namespace HomeskzIfcImport::parse
 			const double half = member.width / 2.0;
 
 			core::TagCommand tag;
-			tag.style = kTagStyle;
 			tag.memberIndex = i;
 			tag.position = core::Vec2{(member.start.x + member.end.x) / 2.0 + side.x * half,
 									  (member.start.y + member.end.y) / 2.0 + side.y * half};
 			tag.offset = side;
 			tag.angle = tagAngle(dx, dy);
-			commands.push_back(std::move(tag));
+			commands.push_back(tag);
 		}
 		return commands;
 	}
@@ -169,7 +167,6 @@ namespace HomeskzIfcImport::parse
 														  section.direction, alongOrigin);
 
 			core::TagCommand tag;
-			tag.style = kTagStyle;
 			tag.memberIndex = i;
 			tag.position = core::Vec2{(start.x + end.x) / 2.0, (start.y + end.y) / 2.0};
 			// 断面では天端線がそのまま部材の上辺なので、逃がす向きは**その線の法線のうち
@@ -177,7 +174,7 @@ namespace HomeskzIfcImport::parse
 			tag.offset = upwardNormal(end.x - start.x, end.y - start.y);
 			// 傾斜材（登り梁・隅木）は立面でも傾くので、文字も天端線に沿わせる。
 			tag.angle = tagAngle(end.x - start.x, end.y - start.y);
-			commands.push_back(std::move(tag));
+			commands.push_back(tag);
 		}
 		return commands;
 	}

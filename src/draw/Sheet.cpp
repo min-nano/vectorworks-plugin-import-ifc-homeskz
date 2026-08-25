@@ -53,8 +53,7 @@
 namespace HomeskzIfcImport::draw
 {
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
-						   std::string* note, const ObjectHandles* memberHandles,
-						   const TagStyle* tagStyle)
+						   std::string* note, const ObjectHandles* memberHandles)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
@@ -79,9 +78,6 @@ namespace HomeskzIfcImport::draw
 		const ObjectHandles emptyHandles;
 		const ObjectHandleTable& members =
 			memberHandles != nullptr ? memberHandles->table() : emptyHandles.table();
-		// スタイルは executeDocument が作った 1 つを共有する（渡されなければスタイル無し）。
-		const TagStyle emptyStyle;
-		const TagStyle& style = tagStyle != nullptr ? *tagStyle : emptyStyle;
 		TagCounts tags;
 		// タグ PIO の定義を先に用意する（最初の 1 個で設定ダイアログが出るのを防ぐ。draw/Tag.h）。
 		// タグが 1 つも無い文書では定義そのものを作らない（使わない PIO を文書へ足さない）。
@@ -128,7 +124,7 @@ namespace HomeskzIfcImport::draw
 
 			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport
 			// の最後が更新で、注釈はその後に足しても図に出る）。
-			drawViewportTags(viewport, command.viewport, members, style, tags);
+			drawViewportTags(viewport, command.viewport, members, tags);
 
 			// グラフィック凡例は**ビューポートではなくシートレイヤ**に載せる（用紙の上）。
 			// タグの後に置くのは、凡例がカレントレイヤをこのシートレイヤへ移すため——

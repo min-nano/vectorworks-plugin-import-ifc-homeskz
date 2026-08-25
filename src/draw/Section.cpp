@@ -222,8 +222,7 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
-							 std::string* note, const ObjectHandles* memberHandles,
-							 const TagStyle* tagStyle)
+							 std::string* note, const ObjectHandles* memberHandles)
 	{
 		const std::vector<core::SectionCommand>& commands = document.sections;
 		if (commands.empty())
@@ -263,9 +262,6 @@ namespace HomeskzIfcImport::draw
 		const ObjectHandles emptyHandles;
 		const ObjectHandleTable& members =
 			memberHandles != nullptr ? memberHandles->table() : emptyHandles.table();
-		// スタイルは executeDocument が作った 1 つを共有する（伏図と同じ。draw/Tag.h）。
-		const TagStyle emptyStyle;
-		const TagStyle& style = tagStyle != nullptr ? *tagStyle : emptyStyle;
 		TagCounts tags;
 		// タグ PIO の定義を先に用意する（伏図と同じ。draw/Tag.h）。タグが 1 つも無い文書では
 		// 定義そのものを作らない。
@@ -311,7 +307,7 @@ namespace HomeskzIfcImport::draw
 								  .classesApplied;
 			// 断面寸法データタグ。**並べ替え（ArrangeViewports）より前**に置く——注釈は
 			// ビューポートと一緒に動くので、先に置いておけば移動しても図の上に留まる。
-			drawViewportTags(viewport, command.viewport, members, style, tags);
+			drawViewportTags(viewport, command.viewport, members, tags);
 			viewports.push_back(viewport);
 			++drawn;
 		}

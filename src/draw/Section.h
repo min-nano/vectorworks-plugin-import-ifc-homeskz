@@ -22,7 +22,6 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 #include "draw/ObjectHandles.h"
-#include "draw/TagStyle.h"
 
 #include <cstddef>
 #include <string>
@@ -40,10 +39,8 @@ namespace HomeskzIfcImport::draw
 	// 図面に残る。note には異常（ビューポートを作れなかった等）の説明を入れる（無ければ空）。
 	//
 	// memberHandles には drawMembers が記録した「命令インデックス → 横架材ハンドル」の
-	// 対応表を渡す（断面寸法データタグの関連付け先。伏図と同じ。draw/Tag.h）。tagStyle は
-	// createTagStyle が作ったデータタグスタイル（伏図と**同じ 1 つ**を共有する）。
+	// 対応表を渡す（断面寸法データタグの関連付け先。伏図と同じ。draw/Tag.h）。
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
 							 std::string* note = nullptr,
-							 const ObjectHandles* memberHandles = nullptr,
-							 const TagStyle* tagStyle = nullptr);
+							 const ObjectHandles* memberHandles = nullptr);
 } // namespace HomeskzIfcImport::draw

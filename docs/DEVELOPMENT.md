@@ -52,7 +52,8 @@ src/
     ObjectHandles.h           「命令インデックス → 描いたオブジェクトのハンドル」の対応表
     ProgressDialog.{h,cpp}    core::ProgressReporter を VW の進捗ダイアログへ橋渡し
     Symbol.{h,cpp}            ハイブリッドシンボルの配置（4 要素で共有する唯一の実装）
-    Tag.{h,cpp} / TagStyle.h  断面寸法データタグとそのスタイル生成（伏図・軸組図で共有）
+    Tag.{h,cpp}               断面寸法データタグ（伏図・軸組図で共有。スタイルは当てず、
+                              タグの中身はタグ 1 本ずつへ直接組む）
     Grid / Story / Floor / Member / Column / Rafter / Roof / Footing /
     ColumnMark / Sheet / Legend / Section   要素ごとの描画
   Updater*.{h,cpp}          同梱した更新スクリプトを起動してアップデートを駆動する
