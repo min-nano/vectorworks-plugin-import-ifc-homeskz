@@ -28,6 +28,7 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 #include "draw/ObjectHandles.h"
+#include "draw/TagStyle.h"
 
 #include <cstddef>
 #include <string>
@@ -48,7 +49,11 @@ namespace HomeskzIfcImport::draw
 	// memberHandles には drawMembers が記録した「命令インデックス → 横架材ハンドル」の
 	// 対応表を渡す。**断面寸法データタグの関連付け先**で、渡さない（nullptr）とタグは
 	// 置かれるが寸法が空になる（draw/Tag.h）。
+	//
+	// tagStyle には createTagStyle が作った断面寸法データタグスタイルを渡す（軸組図と
+	// **同じ 1 つ**を共有する）。渡さない（nullptr）とタグはスタイル無しで置かれる。
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
 						   std::string* note = nullptr,
-						   const ObjectHandles* memberHandles = nullptr);
+						   const ObjectHandles* memberHandles = nullptr,
+						   const TagStyle* tagStyle = nullptr);
 } // namespace HomeskzIfcImport::draw
