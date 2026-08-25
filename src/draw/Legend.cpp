@@ -103,7 +103,7 @@ namespace HomeskzIfcImport::draw
 		{
 			std::array<char, 32> buffer{};
 			std::snprintf(buffer.data(), buffer.size(), "1:%g", viewportScale);
-			return TXString(buffer.data());
+			return {buffer.data()};
 		}
 
 		// 縮率のパラメータ 1 つへ書く（書けたら true）。**フィールドの種別で入れ方を変える**
