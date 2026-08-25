@@ -577,6 +577,7 @@ namespace HomeskzIfcImport::draw
 		{
 			// 用紙の大きさが読めなかった。既定（A3 横）で割り付ける——用紙が読めないことで
 			// 図を捨てるより、既定で置いてローカルで直す方がよい。
+			size = core::kDefaultPaperSize;
 		}
 		// ★用紙は原点中心（DrawUtil.h の SheetPageArea）。
 		return core::PaperArea{core::Vec2{-size.x / 2.0, -size.y / 2.0},

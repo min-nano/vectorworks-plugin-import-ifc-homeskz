@@ -1402,6 +1402,102 @@ TEST(plan_content_bounds_wraps_every_command_with_margin)
 	CHECK(near(max.y, -3000.0 + core::kPlanContentMargin));
 }
 
+TEST(plan_content_bounds_sees_every_kind_of_command)
+{
+	// **座標を持つ命令はどれも広がりに効く**ことを、種類ごとに 1 つずつ載せて確かめる。
+	// 命令リストを 1 本足したときにここへ足し忘れると、その要素だけが図からはみ出す
+	// （縮尺の見積もりに入らない）ので、種類の網羅そのものが検証項目になる。
+	core::Document document;
+
+	const auto boundaryAt = [](double half)
+	{
+		return std::vector<core::Vec2>{core::Vec2{-half, -half}, core::Vec2{half, -half},
+									   core::Vec2{half, half}, core::Vec2{-half, half}};
+	};
+
+	core::FloorCommand floor;
+	floor.layer = "1-FL";
+	floor.boundary = boundaryAt(1000.0);
+	document.floors.push_back(floor);
+
+	core::SlabCommand slab;
+	slab.layer = "F-底盤";
+	slab.boundary = boundaryAt(1100.0);
+	document.slabs.push_back(slab);
+
+	core::RoofCommand roof;
+	roof.layer = "R-野地板";
+	roof.boundary = boundaryAt(1200.0);
+	document.roofs.push_back(roof);
+
+	core::MemberCommand member;
+	member.layer = "1-横架材天端";
+	member.start = core::Vec2{-1300.0, -1300.0};
+	member.end = core::Vec2{1300.0, 1300.0};
+	document.members.push_back(member);
+
+	core::WallCommand wall;
+	wall.layer = "F-立上り";
+	wall.start = core::Vec2{-1400.0, 0.0};
+	wall.end = core::Vec2{1400.0, 0.0};
+	document.walls.push_back(wall);
+
+	core::RafterCommand rafter;
+	rafter.layer = "R-垂木";
+	rafter.start = core::Vec2{-1500.0, 0.0};
+	rafter.end = core::Vec2{1500.0, 0.0};
+	document.rafters.push_back(rafter);
+
+	core::ColumnCommand column;
+	column.layer = "1to2-柱";
+	column.position = core::Vec2{1600.0, 0.0};
+	document.columns.push_back(column);
+
+	core::ColumnMarkCommand mark;
+	mark.layer = "2-柱伏図記号";
+	mark.position = core::Vec2{-1700.0, 0.0};
+	document.columnMarks.push_back(mark);
+
+	// シンボル置換系 4 種（同じ命令型なので 4 本のリストすべてを見ていることを確かめる）。
+	const auto symbolAt = [](const char* layer, const core::Vec2& position)
+	{
+		core::SymbolCommand symbol;
+		symbol.layer = layer;
+		symbol.position = position;
+		return symbol;
+	};
+	document.anchorBolts.push_back(symbolAt("F-アンカーボルト", core::Vec2{0.0, 1800.0}));
+	document.floorPosts.push_back(symbolAt("F-床束", core::Vec2{0.0, -1900.0}));
+	document.fireBraces.push_back(symbolAt("1-横架材天端", core::Vec2{2000.0, 0.0}));
+	document.joints.push_back(symbolAt("1-横架材天端", core::Vec2{-2100.0, 0.0}));
+
+	core::GridCommand grid;
+	grid.layer = core::kGridLayer;
+	grid.start = core::Vec2{-2200.0, -2200.0};
+	grid.end = core::Vec2{2200.0, 2200.0};
+	document.grids.push_back(grid);
+
+	core::Vec2 min;
+	core::Vec2 max;
+	CHECK(core::planContentBounds(document, {}, min, max));
+	CHECK(near(min.x, -2200.0 - core::kPlanContentMargin));
+	CHECK(near(max.x, 2200.0 + core::kPlanContentMargin));
+	CHECK(near(min.y, -2200.0 - core::kPlanContentMargin));
+	CHECK(near(max.y, 2200.0 + core::kPlanContentMargin));
+
+	// レイヤで絞ると、線分・外形・点のどれも同じ規則で外れる（立上りだけが残る）。
+	CHECK(core::planContentBounds(document, {"F-立上り"}, min, max));
+	CHECK(near(min.x, -1400.0 - core::kPlanContentMargin));
+	CHECK(near(max.x, 1400.0 + core::kPlanContentMargin));
+	CHECK(near(min.y, 0.0 - core::kPlanContentMargin));
+	CHECK(near(max.y, 0.0 + core::kPlanContentMargin));
+
+	// 点だけのレイヤ（アンカーボルト）でも同じ。
+	CHECK(core::planContentBounds(document, {"F-アンカーボルト"}, min, max));
+	CHECK(near(min.y, 1800.0 - core::kPlanContentMargin));
+	CHECK(near(max.y, 1800.0 + core::kPlanContentMargin));
+}
+
 TEST(plan_content_bounds_fails_without_coordinates)
 {
 	// 座標を持つ命令が 1 つも無ければ広がりは求まらない（out は触らない）。
@@ -1443,6 +1539,16 @@ TEST(section_content_size_pairs_plan_width_with_section_height)
 	// 何も無い文書では求まらない。
 	core::Vec2 untouched{7.0, 8.0};
 	CHECK(!core::sectionContentSize(core::Document{}, untouched));
+	CHECK(near(untouched.x, 7.0));
+
+	// 平面が決まっても**高さの分かる要素が 1 つも無ければ**求まらない（通り芯だけの文書）。
+	core::Document flat;
+	core::GridCommand grid;
+	grid.layer = core::kGridLayer;
+	grid.start = core::Vec2{-1000.0, 0.0};
+	grid.end = core::Vec2{1000.0, 0.0};
+	flat.grids.push_back(grid);
+	CHECK(!core::sectionContentSize(flat, untouched));
 	CHECK(near(untouched.x, 7.0));
 }
 
