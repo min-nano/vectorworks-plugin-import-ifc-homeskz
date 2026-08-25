@@ -414,11 +414,22 @@ M16 で「用紙と建物の大きさから縮尺を自動で決め、重なら�
   VWFC の `VWObject.cpp` が使う `IGraphicLegendCoreSupport` /
   `IGraphicLegendCoreOperationsSupport` は**ヘッダが SDK に同梱されていない**内部
   インターフェースなので、こちらからは呼べない。
-- したがって残る道は**PIO のパラメトリックレコード**。フィルタは OIP でボタンが有効なまま＝
-  **スタイルに焼けない per-instance の設定**なので、どこかに永続化されているはずで、
-  「UI で手作業をした凡例」と「していない凡例」のダンプを見比べれば分かる。そのための
-  読み取り専用ダンプが [`scripts/vw-dump-pio-fields.py`](../scripts/vw-dump-pio-fields.py)
-  （実機の「スクリプト編集」に貼って走らせる。設定の前と後で 2 回取って diff する）。
+- **フィルタはパラメトリックレコードにも載っていない**（実機のダンプで確認）。UI で
+  「ビューポートでフィルタ」を掛けた前後で、36 フィールド中**変わるのは `BoxWidth` だけ**で、
+  それも「並ぶセルが減って凡例が細くなった」結果にすぎない（153.99 → 48.80）。
+  ついでに分かった中身: 中身を決める 5 つ（`DefineSource` / `DefineImage` /
+  `EditCellLayout` / `EditTitleLayout` / `ImageClasses`）は**値を持たない type=14＝ボタン**で、
+  集計・ソートの軸（`SummarizeBy` / `SortBy` / `SummarizeByExt`…）はスタイル側から来る。
+- **次に当たるのは関連（association）と PIO の中身。** フィルタは OIP でボタンが有効なまま＝
+  **スタイルに焼けない per-instance の設定**なので、どこかに永続化されているはず。
+  凡例はフィルタ先のビューポートが変われば作り直しが要るので、
+  `GetNumAssociations` / `GetAssociation`（VS にもある「消したら一緒に消える／リセットされる」
+  リンク）が第一候補で、次が凡例 PIO の中に生成された図形。それも空振りなら
+  オブジェクト変数、最後が補助オブジェクト（`FirstAuxObject`。**VS からは触れないので
+  dev ビルドの一時診断が要る**——`ModifySlab` の調査と同じ道）。
+  読み取り専用ダンプは [`scripts/vw-dump-pio-fields.py`](../scripts/vw-dump-pio-fields.py)
+  （**文書内の全グラフィック凡例を関連ごと並べる**ので、1 枚だけ手でフィルタしておけば
+  1 回の実行でフィルタ済み／未フィルタを見比べられる）。
 
 ### Undo（取り消し）
 
