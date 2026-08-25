@@ -584,11 +584,14 @@ jobs:
       contents: write
 
     # ビルド対象の解決はビルドジョブと同じ（理由と各式の意味は build-mac の env 参照）。
-    # このジョブは公開するだけなので、必要なのはコミットとブランチ名の 2 つ——チャンネルと
-    # バンドル名は使わない（下の 2 つの公開ステップが資産名を直接書いている）。
+    # このジョブは公開するだけなので、必要なのはコミットとブランチ名、それに PR 番号だけ
+    # ——チャンネルとバンドル名は使わない（下の 2 つの公開ステップが資産名を直接書いて
+    # いる）。PR 番号は dev プレリリースの公開が「PR がまだ開いているか」を確かめるのに
+    # 使う（下の pr_state 参照。main への push では空だが、そちらでは参照しない）。
     env:
       BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       BUILD_BRANCH: ${{ github.head_ref || github.ref_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
 
     steps:
       # Pull both build jobs' zips into a single dist/ folder. The macOS job
@@ -675,17 +678,19 @@ jobs:
           commit=${BUILD_SHA}
           built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
-          # Guard against a delete/publish race. The branch may have been
-          # deleted after the PR was opened but before this (slow) build
-          # finished. If so, cleanup-dev-release.yml has already run and found
-          # no prerelease to delete (this job had not published one yet), so
-          # creating one now would orphan it forever. Skip publishing when the
-          # branch no longer exists.
-          branch_exists() {
-            gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1
+          # Guard against a close/publish race. The PR may have been closed
+          # (merged or not) after this build started but before it finished.
+          # If so, cleanup-dev-release.yml has already run and found no
+          # prerelease to delete (this job had not published one yet), so
+          # creating one now would orphan it forever. Skip publishing unless
+          # the PR is still open. A transient API error yields an empty state
+          # and therefore also skips: a missing dev build is just a job re-run
+          # away, an orphaned prerelease is never cleaned up.
+          pr_state() {
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .state 2>/dev/null || true
           }
-          if ! branch_exists; then
-            echo "Branch '$branch' no longer exists; skipping dev prerelease publish to avoid orphaning it."
+          if [ "$(pr_state)" != "open" ]; then
+            echo "PR #${PR_NUMBER} is no longer open; skipping dev prerelease publish to avoid orphaning it."
             exit 0
           fi
           # Dev builds are only used while actively working on a branch, so no
@@ -701,10 +706,13 @@ jobs:
             --title "Dev: ${branch} (${short})" \
             --notes-file notes.txt \
             --prerelease
-          # Close the narrow window where the branch is deleted between the
-          # check above and now: if cleanup ran during publish, it may have
-          # missed the release. Re-check and clean up our own release if so.
-          if ! branch_exists; then
-            echo "Branch '$branch' was deleted during publish; removing the prerelease just created."
+          # Close the narrow window where the PR is closed between the check
+          # above and now: if cleanup ran during publish, it may have missed
+          # the release. Re-check and clean up our own release if so. Here the
+          # test is the strict "closed" (not "not open"): the release already
+          # exists, so an empty state from a transient API error must not be
+          # read as a reason to throw it away.
+          if [ "$(pr_state)" = "closed" ]; then
+            echo "PR #${PR_NUMBER} was closed during publish; removing the prerelease just created."
             gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
           fi
