@@ -43,7 +43,9 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <ranges>
 #include <string>
 #include <vector>
@@ -86,9 +88,28 @@ namespace HomeskzIfcImport::draw
 				RecordCreatedLayer(layer);
 			}
 		}
+
+		// wanted（図面のオブジェクト列と同じ**背面→前面**の並び）が、いまの図面でその順に
+		// 並んでいるか。**間に別のレイヤが挟まっていてもよい**（ユーザーが自分で作った
+		// レイヤの位置には口を出さない）——見るのは wanted どうしの前後関係だけ。
+		bool MatchesStackOrder(const std::vector<MCObjectHandle>& wanted)
+		{
+			const std::vector<MCObjectHandle> chain = DesignLayersInStackOrder();
+			std::size_t at = 0;
+			for (const MCObjectHandle layer : wanted)
+			{
+				// chain を前から舐めて wanted を順に拾えるなら、前後関係は希望どおり。
+				const auto found =
+					std::find(chain.begin() + static_cast<std::ptrdiff_t>(at), chain.end(), layer);
+				if (found == chain.end())
+					return false;
+				at = static_cast<std::size_t>(found - chain.begin()) + 1;
+			}
+			return true;
+		}
 	} // namespace
 
-	std::size_t reorderStoryLayers(const core::Document& document)
+	LayerOrderResult reorderStoryLayers(const core::Document& document)
 	{
 		// 希望順は**前面→背面**（"共通" が先頭＝最前面。core::desiredStoryLayerOrder）。
 		// 伏図記号レイヤ（"{to}-柱伏図記号"。M12）はストーリに属さない独立レイヤで story
@@ -97,25 +118,38 @@ namespace HomeskzIfcImport::draw
 		const std::vector<std::string> desired =
 			core::desiredStoryLayerOrder(document.stories, planMarkLayerNames(document));
 
-		// 図面のオブジェクト列は**背面→前面**（先頭が最背面で、NextObject が前面へ向かう）。
-		// したがって希望順を**逆から**辿り、直前に置いたレイヤの「後ろ」へ次を挿していくと、
-		// 列全体が希望どおりの重ね順になる。
-		//
-		// 希望順に出てこないレイヤ（ユーザーが別途作ったもの・まだ生成されていないもの）は
-		// 触らない。GetNamedLayer が nil を返すレイヤは黙って飛ばす（要素の描画がスキップ
-		// されてレイヤが無い場合など）。
-		std::size_t moved = 0;
-		MCObjectHandle previous = nil;
+		// 図面のオブジェクト列は**背面→前面**（先頭が最背面で、NextObject が前面へ向かう）ので、
+		// 希望順を逆に辿って「あるべき列の並び」を作る。希望順に出てこないレイヤ（ユーザーが
+		// 別途作ったもの）は触らない。GetNamedLayer が nil を返すレイヤは黙って飛ばす
+		// （要素の描画がスキップされてレイヤが無い場合など）。
+		std::vector<MCObjectHandle> wanted;
 		for (const std::string& name : std::ranges::reverse_view(desired))
 		{
 			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
-			if (layer == nil)
-				continue;
+			if (layer != nil)
+				wanted.push_back(layer);
+		}
+
+		// **既に希望どおりなら 1 つも動かさない。** 呼び直しても図面を触らないので、
+		// 「描画の前に並べて、伏図の直前に確かめる」という 2 度呼びが安全にできる。
+		LayerOrderResult result;
+		result.ordered = MatchesStackOrder(wanted);
+		if (result.ordered)
+			return result;
+
+		// 直前に置いたレイヤの「後ろ」（＝前面側）へ次を挿していくと、列全体が希望どおりになる。
+		MCObjectHandle previous = nil;
+		for (const MCObjectHandle layer : wanted)
+		{
 			if (previous != nil && gSDK->InsertObjectAfter(layer, previous))
-				++moved;
+				++result.moved;
 			previous = layer;
 		}
-		return moved;
+
+		// **並び替わったかは読み戻して確かめる**（moved は「呼び出しが true を返した数」で
+		// しかない）。ここが false なら伏図で床・野地板が柱・梁を覆う。
+		result.ordered = MatchesStackOrder(wanted);
+		return result;
 	}
 
 	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress)

@@ -96,6 +96,28 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("通り芯を描画しています…", document.grids.size(), core::DrawPhase::Grids))
 			counts.grids = drawGrids(document, progress);
 
+		// M3 の【決定】の実装箇所: **デザインレイヤのスタック順を希望順へ並べ替える**（床・
+		// 野地板が伏図で柱・梁を覆わないようにする。per-viewport の重ね順上書きは実機で
+		// 効かなかった。draw/Story.h の reorderStoryLayers）。
+		//
+		// **要素を 1 つも描く前のここで行う。** M13 では「伏図の直前（＝ビューポート生成より
+		// 前）なら足りる」と考えて全要素の描画後に置いていたが、実機では取り込み直後の伏図
+		// だけが並べ替え前の重ね順で描かれ（図面の並び自体は並べ替え後で、ユーザーが「更新」を
+		// 1 回押すと正しくなる）、out-of-date を立てて更新し直しても変わらなかった。並べ替えの
+		// 結果が同じ取り込みの中で作るビューポートへ届いていない、ということなので、**届く
+		// までの時間を作る**——ここで並べ、以後の全要素の描画を挟んでから伏図を作る。
+		//
+		// 並べ替えの対象になるにはレイヤが実在していないといけないので、ストーリに属さない
+		// 伏図記号レイヤ（"{to}-柱伏図記号"。M12）だけはここで先に用意する。
+		if (!progress.cancelled())
+		{
+			preparePlanMarkLayers(document);
+			const LayerOrderResult order = reorderStoryLayers(document);
+			if (!order.ordered && !document.stories.empty())
+				addDiagnostics("レイヤの重ね順を並べ替えられませんでした"
+							   "（伏図で床・野地板が柱・梁を覆います）。");
+		}
+
 		// M9/M10 基礎を描く。立上り（壁）→ 壁結合 → 底盤（スラブ）の順。**壁結合は立上りの
 		// ハンドルを引く**ので、立上りをすべて配置した直後に置く（対応表は WallHandles
 		// で受け渡す。draw/Footing.h）。配置先の "F-立上り" / "F-底盤" レイヤは基礎ストーリの
@@ -191,18 +213,19 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 		}
 
-		// M3 の【決定】の実装箇所（M13 で確定）: **デザインレイヤのスタック順を希望順へ
-		// 並べ替える**。伏図ビューポートはドキュメントの重ね順で描かれるので、床・野地板が
-		// 柱・梁を覆わないようにするにはここで並べ替えるしかない（per-viewport の重ね順
-		// 上書きは実機で効かなかった。draw/Story.h の reorderStoryLayers）。**必ず伏図より
-		// 前**に行う——ビューポートは生成時の重ね順で描かれるため。
+		// 重ね順の**確かめ直し**。並べ替え自体は通り芯の直後で済ませてあるので、ここは
+		// 「描画の途中で並びが崩れていないか」を見るだけ——崩れていなければ 1 つも動かさない
+		// （reorderStoryLayers は既に希望どおりなら図面を触らない）。記号レイヤはここまでに
+		// 記号が置かれて実在するので、前倒しで作れていなかった場合もここで拾える。
 		if (!progress.cancelled())
 		{
-			// 並べ替えは図面から効いたか分かる（動かせたレイヤ数）。0 件なら伏図で床・野地板が
-			// 柱・梁を覆うので、原因の切り分け材料として診断行に出す。
-			const std::size_t reordered = reorderStoryLayers(document);
-			if (reordered == 0 && !document.stories.empty())
-				addDiagnostics("レイヤの重ね順を並べ替えられませんでした（0 件）。");
+			const LayerOrderResult order = reorderStoryLayers(document);
+			if (!order.ordered && !document.stories.empty())
+				addDiagnostics("レイヤの重ね順を並べ替えられませんでした"
+							   "（伏図で床・野地板が柱・梁を覆います）。");
+			else if (order.moved > 0)
+				addDiagnostics("レイヤの重ね順が描画中に崩れたので並べ直しました（" +
+							   std::to_string(order.moved) + " 件）。");
 		}
 
 		// M13 シート（伏図）。**必ず最後**に置く: ビューポートはデザインレイヤ（＝ここまでに

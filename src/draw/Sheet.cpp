@@ -32,11 +32,10 @@
 //	デザインレイヤの並べ替え**（draw/Story の reorderStoryLayers）が担う。per-viewport の
 //	上書き（SetViewportLayerStackingOverride）は実機で効かなかった——呼び出しは true を
 //	返すのに GetNumViewportLayerStackingOverrides は 0 のままで、OIP も「順序を上書き:
-//	いいえ」だった——ので捨てた。**並べ替えはビューポート生成より前**に済ませる必要がある
-//	（生成時の重ね順で描かれるため。draw/ExecuteDocument の実行順）。さらに**仕上げの更新は
-//	out-of-date を立ててから**行う（draw/DrawUtil の ForceUpdate）——並べ替えも投影の切り替えも
-//	VW は out-of-date を立ててくれないので、素の更新だと生成時のキャッシュが残り、取り込み直後
-//	だけ床が柱・梁を覆う（ユーザーが「更新」を 1 回押すと直る）。
+//	いいえ」だった——ので捨てた。**並べ替えは要素を 1 つも描く前**に済ませる（draw/Story.h の
+//	reorderStoryLayers。「ビューポート生成より前」では足りず、取り込み直後だけ床が柱・梁を
+//	覆う症状が残った）。仕上げの更新が out-of-date を立ててから行われることも要る
+//	（draw/DrawUtil の ForceUpdate）。
 //
 
 #include "PluginPrefix.h"
@@ -76,6 +75,9 @@ namespace HomeskzIfcImport::draw
 		std::size_t classesApplied = 0;
 		// 2D/平面へ作り直せなかった枚数（＝3D の「上」に見えるビューポートの数）。
 		std::size_t missingPlanView = 0;
+		// 仕上げの更新が走らなかった枚数（out-of-date が下りないまま戻ってきたもの）。
+		// **0 でないなら、その図はユーザーが「更新」を押すまで生成時のキャッシュのまま**。
+		std::size_t notUpdated = 0;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
 		// （渡されなければ空の表＝関連付け無しで置く。draw/Tag.h）。
 		const ObjectHandles emptyHandles;
@@ -124,6 +126,8 @@ namespace HomeskzIfcImport::draw
 			classesApplied += finish.classesApplied;
 			if (!finish.planViewApplied)
 				++missingPlanView;
+			if (!finish.updated)
+				++notUpdated;
 
 			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport
 			// の最後が更新で、注釈はその後に足しても図に出る）。
@@ -149,7 +153,7 @@ namespace HomeskzIfcImport::draw
 		// 作れないのか、ビューポートを作れないのかを切り分けられる。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
 		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
-								missingPlanView > 0))
+								missingPlanView > 0 || notUpdated > 0))
 		{
 			std::string text = "伏図の診断: ";
 			if (missingSheetLayers > 0)
@@ -164,6 +168,10 @@ namespace HomeskzIfcImport::draw
 			if (missingPlanView > 0)
 				text += "2D/平面（Top/Plan）にできなかった伏図 " + std::to_string(missingPlanView) +
 						" 枚（3D の「上」ビューのように描かれます）。";
+			if (notUpdated > 0)
+				text +=
+					"更新が走らなかった伏図 " + std::to_string(notUpdated) +
+					" 枚（オブジェクト情報パレットの「更新」を押すまで生成時のまま描かれます）。";
 			*note = std::move(text);
 		}
 

@@ -123,6 +123,20 @@ namespace HomeskzIfcImport::draw
 		return drawn;
 	}
 
+	std::size_t preparePlanMarkLayers(const core::Document& document)
+	{
+		// 作るだけで、置く記号は drawColumnMarks が改めて ActivateExistingLayer / PrepareLayer
+		// で取り直す（ここで作ったものが見つかる）。カレントレイヤは PrepareLayer が動かすが、
+		// 以降の要素はそれぞれ自分の配置先を有効にしてから描くので影響しない。
+		std::size_t prepared = 0;
+		for (const std::string& name : planMarkLayerNames(document))
+		{
+			if (PrepareLayer(name) != nil)
+				++prepared;
+		}
+		return prepared;
+	}
+
 	std::vector<std::string> planMarkLayerNames(const core::Document& document)
 	{
 		std::vector<std::string> names;

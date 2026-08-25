@@ -58,29 +58,11 @@ namespace HomeskzIfcImport::draw
 		// ビューポートに映るのはデザインレイヤだけなので、シートレイヤを混ぜても
 		// SetViewportLayerVisibility は意味を持たない。**軸組図は伏図の後に走る**ので、
 		// 除かないと伏図の作ったシートレイヤ（"1" / "2" …）がそのまま入ってくる。
+		//
+		// 実体は公開関数 DesignLayersInStackOrder（この走査は図面に 1 か所だけ）。
 		std::vector<MCObjectHandle> AllLayers()
 		{
-			std::vector<MCObjectHandle> layers;
-			try
-			{
-				for (MCObjectHandle h = VWDocument::GetDrawingHeaderFristMember(); h != nil;
-					 h = gSDK->NextObject(h))
-				{
-					if (!VWLayerObj::IsLayerObject(h))
-						continue;
-					if (VWLayerObj(h).GetLayerType() == kLayerSheet)
-						continue;
-					layers.push_back(h);
-				}
-			}
-			catch (...)
-			{
-				// 走査中の異常で図全体を落とさない（CLAUDE.md「エラーハンドリング」）。
-				// そこまでに拾えたレイヤだけを返す（絞り込みの取りこぼしは、そのレイヤが
-				// 図に映り込むだけで済む）。
-				return layers;
-			}
-			return layers;
+			return DesignLayersInStackOrder();
 		}
 
 		// 図面のクラスをすべて集める（昇順・重複なしの vector で返す）。
@@ -432,6 +414,31 @@ namespace HomeskzIfcImport::draw
 		return layer;
 	}
 
+	std::vector<MCObjectHandle> DesignLayersInStackOrder()
+	{
+		std::vector<MCObjectHandle> layers;
+		try
+		{
+			for (MCObjectHandle h = VWDocument::GetDrawingHeaderFristMember(); h != nil;
+				 h = gSDK->NextObject(h))
+			{
+				if (!VWLayerObj::IsLayerObject(h))
+					continue;
+				if (VWLayerObj(h).GetLayerType() == kLayerSheet)
+					continue;
+				layers.push_back(h);
+			}
+		}
+		catch (...)
+		{
+			// 走査中の異常で図全体を落とさない（CLAUDE.md「エラーハンドリング」）。
+			// そこまでに拾えたレイヤだけを返す（絞り込みの取りこぼしは、そのレイヤが
+			// 図に映り込むだけで済む）。
+			return layers;
+		}
+		return layers;
+	}
+
 	MCObjectHandle ActivateExistingLayer(const std::string& layerName)
 	{
 		MCObjectHandle layer = gSDK->GetNamedLayer(TXString(layerName.c_str()));
@@ -454,20 +461,28 @@ namespace HomeskzIfcImport::draw
 		// ビューポートを**必ず描き直させる**（＝オブジェクト情報パレットの「更新」ボタン相当）。
 		//
 		// 【なぜ SetDirty が要るか】`VWViewportObj::Update()` は「out-of-date なら描き直す」
-		// であって「無条件に描き直す」ではない。設定を書き換えても VW が out-of-date を立てて
-		// くれない種類の変更——**投影（Project 2D）の切り替え**と**デザインレイヤの重ね順の
-		// 並べ替え**（draw/Story の reorderStoryLayers。ビューポートは自分より前に動いた
-		// レイヤの並びを知らない）——では、`Update()` が黙って何もせず、**生成時のキャッシュ
-		// （3D の「上」ビューのまま・並べ替え前の重ね順のまま）が残る**。取り込み直後の伏図で
-		// 床（"n-FL"）が柱・梁を覆って見え、ユーザーが「更新」を 1 回押すと直る、という症状は
-		// これ（docs/DEV-NOTES.md「ビューポート（伏図・断面）」）。
+		// であって「無条件に描き直す」ではない。**投影（Project 2D）の切り替え**のように VW が
+		// out-of-date を立ててくれない変更のあとでは、`Update()` が黙って何もせず生成時の
+		// キャッシュが残り得る。立ててから更新すれば「更新」ボタンと同じ扱いになる。
+		//
+		// **［効かなかったことの記録］**取り込み直後の伏図で床（"n-FL"）が柱・梁を覆う件
+		// （ユーザーが「更新」を 1 回押すと直る）は、**これでは直らなかった**——立てて更新し
+		// 直しても重ね順は並べ替え前のままだった。あちらの手当ては「並べ替えを要素の描画より
+		// 前へ前倒しする」方（draw/Story.h の reorderStoryLayers、docs/DEV-NOTES.md
+		// 「レイヤ・ストーリ・重ね順」）。ここは投影の作り直しと、更新が走ったかの読み戻しのため
+		// に残す。
 		//
 		// `IsDirty` / `SetDirty` が out-of-date フラグそのもので、**立ててから更新すれば
 		// 「更新」ボタンと同じ全面的な作り直しになる**。更新の直前に必ずこれを通すこと。
-		void ForceUpdate(VWViewportObj& viewport)
+		//
+		// **描き直したかどうかは読み戻して確かめる**（戻り値）。更新から戻っても out-of-date
+		// が下りていなければ、その更新は**走っていない**（＝図はキャッシュのまま）。呼び出し側は
+		// これを診断行へ出す——「設定したつもりで効いていない」を目視で見抜くのは無理なので。
+		bool ForceUpdate(VWViewportObj& viewport)
 		{
 			viewport.SetDirty(true);
 			viewport.Update();
+			return !viewport.IsDirty();
 		}
 
 		// ビューポートを 2D/平面（Top/Plan）で**正しく描かせる**。作り直せたら true。
@@ -489,7 +504,9 @@ namespace HomeskzIfcImport::draw
 		{
 			viewport.SetViewType(kViewTop);
 			viewport.SetProject2D(false);
-			ForceUpdate(viewport);
+			// ここの更新が走ったかは問わない（作り直しの途中経過なので、最後の更新が
+			// 走っていれば図は正しくなる）。効いたかを報告するのは呼び出し元の最後の更新。
+			static_cast<void>(ForceUpdate(viewport));
 			viewport.SetProject2D(true);
 			return viewport.GetProject2D();
 		}
@@ -601,7 +618,7 @@ namespace HomeskzIfcImport::draw
 			// **この更新はビューポートの最後の全面的な描き直し**なので、必ず out-of-date を
 			// 立ててから行う（ForceUpdate）。ここで素の Update() を呼ぶと、重ね順の並べ替えも
 			// 投影の切り替えも反映されないキャッシュがそのまま残る。
-			ForceUpdate(vp);
+			finish.updated = ForceUpdate(vp);
 		}
 		catch (...)
 		{

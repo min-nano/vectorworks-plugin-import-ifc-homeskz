@@ -48,4 +48,15 @@ namespace HomeskzIfcImport::draw
 	// reorderStoryLayers が、ストーリに属さない独立レイヤとして希望スタック順の
 	// 上段（通り芯 "共通" の直下）へ差し込むのに使う。
 	std::vector<std::string> planMarkLayerNames(const core::Document& document);
+
+	// 伏図記号レイヤ（"{to}-柱伏図記号"）を**記号を置くより前に**用意する（作れた数を返す）。
+	//
+	// 【なぜ前倒しするのか】レイヤの重ね順の並べ替え（draw/Story の reorderStoryLayers）は
+	// **要素を 1 つも描く前**に済ませたい（同ヘッダ「できるだけ早く呼ぶこと」）。並べ替えの
+	// 対象になるにはレイヤが実在していないといけないので、記号レイヤだけは先に作る。
+	//
+	// 「空のレイヤを先に作らない」（CLAUDE.md 開発の基本方針 5）には反しない——作るのは
+	// planMarkLayerNames が返すレイヤ、つまり**この取り込みで記号を置くことが命令セットから
+	// 確定している**ものだけ。
+	std::size_t preparePlanMarkLayers(const core::Document& document);
 } // namespace HomeskzIfcImport::draw

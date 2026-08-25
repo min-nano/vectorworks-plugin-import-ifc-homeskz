@@ -238,6 +238,13 @@ namespace HomeskzIfcImport::draw
 	// レイヤを作らない。
 	MCObjectHandle ActivateExistingLayer(const std::string& layerName);
 
+	// 図面の**デザインレイヤ**を**図面のオブジェクト列の順**（＝背面→前面。先頭が最背面）で
+	// 返す。シートレイヤは含めない。ISDK に「レイヤだけを列挙する」呼び出しは無いので、
+	// この走査（VWDocument::GetDrawingHeaderFristMember ＋ NextObject）が唯一の手立てで、
+	// **図面に 1 つだけ**置く。重ね順の並べ替え（draw/Story の reorderStoryLayers）と
+	// ビューポートの表示レイヤの絞り込み（PrepareViewportSetup）が共有する。
+	std::vector<MCObjectHandle> DesignLayersInStackOrder();
+
 	// --- シートレイヤとビューポート（伏図＝M13・軸組図＝M14 が共有する作法）------------
 	//
 	// 伏図（draw/Sheet）と軸組図（draw/Section）は、ビューポートの**種類が違うだけ**で
@@ -319,17 +326,19 @@ namespace HomeskzIfcImport::draw
 		// **書けたかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも
 		// 黙って何もしないので、「設定したつもりで効いていない」は目視では見抜けない。
 		bool planViewApplied = true;
+		// 最後の更新が**実際に走ったか**（out-of-date が下りたか）。false なら図は生成時の
+		// キャッシュのままで、ユーザーが「更新」を押すまで正しく描かれない。
+		bool updated = true;
 	};
 
 	// 生成済みのビューポートを命令どおりに仕上げる（表示レイヤの絞り込み → クラス表示 →
 	// 縮尺 → ［伏図なら 2D/平面の作り直し］→ 図面タイトル・図番 → 更新）。
 	//
 	// **最後の更新は out-of-date を立ててから行う**（＝オブジェクト情報パレットの「更新」
-	// ボタン相当）。`VWViewportObj::Update()` は「out-of-date なら描き直す」であって
-	// 「無条件に描き直す」ではなく、**投影の切り替え**と**デザインレイヤの重ね順の並べ替え**
-	// （draw/Story の reorderStoryLayers）はどちらも out-of-date を立ててくれない——素の
-	// Update() ではキャッシュが生成時のまま残り、取り込み直後の伏図で床（"n-FL"）が柱・梁を
-	// 覆ったまま／ユーザーが「更新」を 1 回押すと直る、という症状になる（.cpp の ForceUpdate）。
+	// ボタン相当。.cpp の ForceUpdate）。`VWViewportObj::Update()` は「out-of-date なら
+	// 描き直す」であって「無条件に描き直す」ではなく、投影の切り替えのあとは out-of-date が
+	// 立たないことがあるため。**走ったかどうかは IsDirty を読み戻して確かめ**、走らなかった
+	// ときは ViewportFinish::updated で呼び出し側の診断行へ出す。
 	//
 	// 表示レイヤは「まず全部隠してから、命令に挙げたものだけ表示へ戻す」——ビューポートは
 	// 既定でドキュメントの表示状態を引き継ぐため、挙げていないレイヤが映り込む。グレー表示
