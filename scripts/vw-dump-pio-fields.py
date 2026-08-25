@@ -41,8 +41,16 @@ DUMP_OBJECT_VARIABLES = False
 OBJECT_VARIABLE_RANGE = range(1, 2200)
 
 
-def _safe(call, *args):
-	"""VW の API は引数が型に合わないと例外を投げることがある。調査スクリプトなので握り潰す。"""
+def _safe(name, *args):
+	"""`vs` の関数を**名前で引いて**呼ぶ。戻り値はそのまま、駄目なら "<error: …>" を返す。
+
+	名前で引くのは、**VW のバージョンによって在ったり無かったりする関数がある**ため
+	（`vs.GetObjectUuid` は 2018.4 以降）。`_safe(vs.Foo, …)` と書くと、呼ぶ前の属性参照の
+	時点で AttributeError になってスクリプトごと止まる——調査の道具がそれで死んでは困る。
+	"""
+	call = getattr(vs, name, None)
+	if call is None:
+		return "<missing: vs.%s>" % name
 	try:
 		return call(*args)
 	except Exception as error:  # noqa: BLE001 - 何が飛んでも調査は続ける
@@ -51,16 +59,16 @@ def _safe(call, *args):
 
 def _dump_record(out, handle, record, title):
 	"""レコード 1 つのフィールドを「番号 名前 (型) = 値」で書き出す。"""
-	name = _safe(vs.GetName, record)
-	count = _safe(vs.NumFields, record)
+	name = _safe("GetName", record)
+	count = _safe("NumFields", record)
 	out.append("")
 	out.append("--- %s: %s (fields=%s) ---" % (title, name, count))
 	if not isinstance(count, int):
 		return
 	for index in range(1, count + 1):
-		field = _safe(vs.GetFldName, record, index)
-		kind = _safe(vs.GetFldType, record, index)
-		value = _safe(vs.GetRField, handle, name, field)
+		field = _safe("GetFldName", record, index)
+		kind = _safe("GetFldType", record, index)
+		value = _safe("GetRField", handle, name, field)
 		out.append("%4d  %-44s (type=%s) = %s" % (index, field, kind, value))
 
 
@@ -69,24 +77,24 @@ def _dump_object_variables(out, handle):
 	out.append("")
 	out.append("--- object variables (non-default only) ---")
 	getters = (
-		("int", vs.GetObjectVariableInt),
-		("bool", vs.GetObjectVariableBoolean),
-		("real", vs.GetObjectVariableReal),
-		("string", vs.GetObjectVariableString),
-		("handle", vs.GetObjectVariableHandle),
+		("int", "GetObjectVariableInt"),
+		("bool", "GetObjectVariableBoolean"),
+		("real", "GetObjectVariableReal"),
+		("string", "GetObjectVariableString"),
+		("handle", "GetObjectVariableHandle"),
 	)
 	for index in OBJECT_VARIABLE_RANGE:
 		for kind, getter in getters:
 			value = _safe(getter, handle, index)
-			if value in (0, 0.0, False, None, "", "<error: ", "NULL"):
+			if value in (0, 0.0, False, None, "", "NULL"):
 				continue
-			if isinstance(value, str) and value.startswith("<error:"):
+			if isinstance(value, str) and (value.startswith("<error:") or value.startswith("<missing:")):
 				continue
 			if kind == "handle":
 				value = "%s (name=%s type=%s)" % (
 					value,
-					_safe(vs.GetName, value),
-					_safe(vs.GetTypeN, value),
+					_safe("GetName", value),
+					_safe("GetTypeN", value),
 				)
 			out.append("%5d %-6s = %s" % (index, kind, value))
 
@@ -100,10 +108,10 @@ def _dump_viewports(out):
 	def collect(handle):
 		rows.append(
 			"name=%-24s uuid=%-40s type=%s"
-			% (_safe(vs.GetName, handle), _safe(vs.GetObjectUUID, handle), _safe(vs.GetTypeN, handle))
+			% (_safe("GetName", handle), _safe("GetObjectUuid", handle), _safe("GetTypeN", handle))
 		)
 
-	_safe(vs.ForEachObject, collect, "(T=VIEWPORT)")
+	_safe("ForEachObject", collect, "(T=VIEWPORT)")
 	out.extend(sorted(rows))
 
 
@@ -116,22 +124,22 @@ def main():
 	out = []
 	out.append("vw-dump-pio-fields  %s" % time.strftime("%Y-%m-%d %H:%M:%S"))
 	out.append("selected: type=%s name=%s uuid=%s" % (
-		_safe(vs.GetTypeN, handle),
-		_safe(vs.GetName, handle),
-		_safe(vs.GetObjectUUID, handle),
+		_safe("GetTypeN", handle),
+		_safe("GetName", handle),
+		_safe("GetObjectUuid", handle),
 	))
 
-	parametric = _safe(vs.GetParametricRecord, handle)
+	parametric = _safe("GetParametricRecord", handle)
 	if parametric:
 		_dump_record(out, handle, parametric, "parametric record")
 	else:
 		out.append("")
 		out.append("--- parametric record: なし（PIO ではない） ---")
 
-	attached = _safe(vs.NumRecords, handle)
+	attached = _safe("NumRecords", handle)
 	if isinstance(attached, int):
 		for index in range(1, attached + 1):
-			record = _safe(vs.GetRecord, handle, index)
+			record = _safe("GetRecord", handle, index)
 			if record:
 				_dump_record(out, handle, record, "attached record #%d" % index)
 
