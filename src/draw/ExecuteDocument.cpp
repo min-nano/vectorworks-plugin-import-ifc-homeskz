@@ -29,7 +29,6 @@
 #include "draw/Sheet.h"
 #include "draw/Story.h"
 #include "draw/Symbol.h"
-#include "draw/Tag.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -209,23 +208,13 @@ namespace HomeskzIfcImport::draw
 				addDiagnostics("レイヤの重ね順を並べ替えられませんでした（0 件）。");
 		}
 
-		// M13 断面寸法データタグのスタイル。**伏図と軸組図が同じ 1 つを使う**ので、
-		// どちらのフェーズよりも前に、ここで 1 回だけ作る（作り方と理由は draw/Tag.h
-		// 「スタイルは作って使う」）。タグの無い文書では何も作らない。
-		TagStyle tagStyle;
-		if (!progress.cancelled())
-		{
-			createTagStyle(document, tagStyle);
-			addDiagnostics(tagStyleDiagnostics(tagStyle));
-		}
-
 		// M13 シート（伏図）。**必ず最後**に置く: ビューポートはデザインレイヤ（＝ここまでに
 		// 描いたモデル）を映すので、全要素の描画が済んでいないと空の図になる。表示レイヤの
 		// 絞り込みも、対象のレイヤが揃っていて初めて効く（draw/Sheet.h）。
 		if (beginPhase("伏図を作成しています…", document.sheets.size(), core::DrawPhase::Sheets))
 		{
 			std::string note;
-			counts.sheets = drawSheets(document, progress, &note, &memberHandles, &tagStyle);
+			counts.sheets = drawSheets(document, progress, &note, &memberHandles);
 			addDiagnostics(note);
 		}
 
@@ -236,7 +225,7 @@ namespace HomeskzIfcImport::draw
 					   core::DrawPhase::Sections))
 		{
 			std::string note;
-			counts.sections = drawSections(document, progress, &note, &memberHandles, &tagStyle);
+			counts.sections = drawSections(document, progress, &note, &memberHandles);
 			addDiagnostics(note);
 		}
 

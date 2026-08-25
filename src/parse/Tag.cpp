@@ -141,7 +141,6 @@ namespace HomeskzIfcImport::parse
 			const double half = member.width / 2.0;
 
 			core::TagCommand tag;
-			tag.style = kTagStyle;
 			tag.memberIndex = i;
 			tag.position = core::Vec2{(member.start.x + member.end.x) / 2.0 + side.x * half,
 									  (member.start.y + member.end.y) / 2.0 + side.y * half};
@@ -172,7 +171,6 @@ namespace HomeskzIfcImport::parse
 														  section.direction, alongOrigin);
 
 			core::TagCommand tag;
-			tag.style = kTagStyle;
 			tag.memberIndex = i;
 			tag.position = core::Vec2{(start.x + end.x) / 2.0, (start.y + end.y) / 2.0};
 			// 断面では天端線がそのまま部材の上辺なので、逃がす向きは**その線の法線のうち

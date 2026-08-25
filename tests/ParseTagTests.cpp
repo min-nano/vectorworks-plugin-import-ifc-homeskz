@@ -36,7 +36,6 @@ using HomeskzIfcImport::core::ViewportCommand;
 using HomeskzIfcImport::parse::attachTagCommands;
 using HomeskzIfcImport::parse::buildPlanTagCommands;
 using HomeskzIfcImport::parse::buildSectionTagCommands;
-using HomeskzIfcImport::parse::kTagStyle;
 using HomeskzIfcImport::parse::sectionAlongOrigin;
 using HomeskzIfcImport::parse::sectionAnnotationPoint;
 using HomeskzIfcImport::parse::tagAngle;
@@ -145,7 +144,6 @@ TEST(PlanTagsSitOnTheMemberEdge)
 
 	// 1 本目: 東西材。軸中央 (1000, 0) から上へ 幅/2 = 60（＝上辺の中央）。逃がす向きは上。
 	CHECK(tags[0].memberIndex == 0);
-	CHECK(tags[0].style == std::string(kTagStyle));
 	CHECK(near(tags[0].position.x, 1000.0, 1e-9));
 	CHECK(near(tags[0].position.y, 60.0, 1e-9));
 	CHECK(near(tags[0].offset.x, 0.0, 1e-9));
@@ -207,7 +205,6 @@ TEST(SectionTagsOnlyCoverMembersOnTheCutPlane)
 	// 1 本目: 水平材。注釈座標は (Y の中点 − 横原点, 天端 Z)。逃がす向きは真上。
 	// 横原点は断面線の終点（この試験用の断面では Y=10000）。
 	CHECK(tags[0].memberIndex == 0);
-	CHECK(tags[0].style == std::string(kTagStyle));
 	CHECK(near(tags[0].position.x, 1820.0 - 10000.0, 1e-9));
 	CHECK(near(tags[0].position.y, 3000.0, 1e-9));
 	CHECK(near(tags[0].offset.x, 0.0, 1e-9));

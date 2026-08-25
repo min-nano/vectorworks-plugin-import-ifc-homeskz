@@ -1192,7 +1192,6 @@ namespace
 	core::TagCommand validTag()
 	{
 		core::TagCommand tag;
-		tag.style = "断面寸法";
 		tag.memberIndex = 0;
 		tag.position = core::Vec2{1000.0, 60.0};
 		tag.angle = 0.0;
@@ -1230,18 +1229,6 @@ TEST(validate_rejects_tag_pointing_past_the_members)
 	section.viewport.tags.push_back(outOfRange);
 	bySection.sections.push_back(section);
 	CHECK(!core::validateDocument(bySection));
-}
-
-TEST(validate_rejects_tag_without_style)
-{
-	// スタイルが無いと寸法の書式が決まらない（VW 側の「断面寸法」スタイルが担う）。
-	core::Document document = documentWithOneMember();
-	core::SheetCommand sheet = validSheet();
-	core::TagCommand noStyle = validTag();
-	noStyle.style.clear();
-	sheet.viewport.tags.push_back(noStyle);
-	document.sheets.push_back(sheet);
-	CHECK(!core::validateDocument(document));
 }
 
 // ---------------------------------------------------------------------------

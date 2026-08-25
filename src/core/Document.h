@@ -712,8 +712,12 @@ namespace HomeskzIfcImport::core
 	// 測って目標との差だけ動かすので、VW がどこへ置いたかに依らず同じ結果になる
 	// （draw/Tag.cpp「置いた後に測って直す」）。
 	//
+	// 【スタイルは持たない】タグの見た目も中身（断面寸法の書式）も、描画側が**タグ 1 本ずつへ
+	// 直接組むタグレイアウト**が決める——データタグスタイルは作らないし当てない（draw/Tag.h の
+	// ★。スラブ・壁が構成層をオブジェクトへ直接与えるのと同じ扱い）。そのため Python 版の
+	// 'style'（"断面寸法"）に当たるフィールドは持たない。
+	//
 	// Python 版キーとの対応:
-	//   style       ← 'style'        … データタグスタイル名（"断面寸法"）
 	//   memberIndex ← 'member_index' … 関連付け先の横架材（Document::members の添字）
 	//   position    ← 'position'     … 注釈空間での**部材の辺の中央**（タグの下端中央が接する点）
 	//   offset      （Python 版に対応なし）… 部材から逃がす向き（単位ベクトル）。Python 版は
@@ -721,9 +725,9 @@ namespace HomeskzIfcImport::core
 	//                                 本移植は**タグ自身の大きさ**も要るので向きのまま持つ
 	//   angle       ← 'angle'        … 文字角度（度。(-90, 90] に正規化済み）
 	//   （'layer' は持たない。上記のとおり振り分けは解析側で済ませるため）
+	//   （'style' は持たない。上記【スタイルは持たない】）
 	struct TagCommand
 	{
-		std::string style;
 		std::size_t memberIndex = 0;
 		Vec2 position;
 		Vec2 offset;
