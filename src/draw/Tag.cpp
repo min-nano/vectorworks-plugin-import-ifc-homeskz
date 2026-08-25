@@ -24,6 +24,10 @@
 //	  * VectorWorks::Extension::IDataTagTextLinkSupport（VCOM）
 //	      SetIsLinked / SetFormula … テキストを**タグフィールド**にする（式を持たせる）
 //
+//	クラス分け（draw/DrawUtil の SetClassByName / SetAllAttributesByClass）は**タグ本体と
+//	レイアウトの中のテキストの両方**へ行う（どちらも "寸法" クラス・描画属性は全て by-class）。
+//	他の要素と同じ定型で、見え方を図面側のクラスに預けるため（下記 kTagClass）。
+//
 //	【注釈に入らなかったタグは消す】AddViewportAnnotationObject に失敗すると、タグは
 //	**生成したときのカレントレイヤ（シートレイヤ）に residue として残る**——図面の上に
 //	寸法だけが浮くので、失敗したら必ず削除する。
@@ -59,6 +63,17 @@ namespace HomeskzIfcImport::draw
 		// （テンプレート由来の資源なので、無い文書でも寸法が読める大きさにはしておく）。
 		constexpr const char* kTextStyleName = "寸法(6pt)";
 		constexpr double kTextSizePoints = 6.0;
+
+		// 断面寸法タグのクラス。**タグ本体（PIO）とタグレイアウトの中のテキストの両方**を
+		// このクラスに置き、描画属性（ペン・塗り・線の太さ・不透明度…）はすべてクラス属性に
+		// 従わせる（SetAllAttributesByClass）。他の要素が「その部材が何か」でクラス分けする
+		// のと同じ流儀で、寸法の見え方（色・線の太さ）を図面側のクラスで一括して決められる
+		// ようにするため——タグ 1 本ずつへ属性を焼き込むと、後から図面で色を変えられない。
+		// 存在しないクラスは SetClassByName（AddClass）が作る。
+		//
+		// **タグの中のテキストにも要る**——タグレイアウトの中身はタグ本体のクラスを継ぐわけ
+		// ではないので、本体だけに与えても文字は既定クラスのままになる。
+		constexpr const char* kTagClass = "寸法";
 
 		// タグフィールドの式（VW のタグフィールド定義式）。構造材の断面幅×せいを mm 整数で
 		// 並べ、勾配（IPZL）が 0 でないときだけ括弧付きで添える。**レコード名・フィールド名は
@@ -185,6 +200,12 @@ namespace HomeskzIfcImport::draw
 			}
 
 			ApplyFieldTextStyle(text, static_cast<Sint32>(formula.GetLength()), counts);
+
+			// **文字スタイルを当てた後に**クラスと by-class を与える（描画属性はクラスの
+			// ものが最終的に効く）。文字スタイルは書体・大きさを、クラスは色・線の太さを
+			// 受け持つ。
+			SetClassByName(text, kTagClass);
+			SetAllAttributesByClass(text);
 
 			// **フィールドラベルはテキストの名前ではない。** 実機の構造ダンプで、手で作った
 			// （寸法が出ている）タグのレイアウトのテキストには**名前が付いていない**ことを
@@ -322,6 +343,13 @@ namespace HomeskzIfcImport::draw
 				++counts.failed;
 				return false;
 			}
+
+			// **タグオブジェクト自体も寸法クラス**にし、描画属性はクラス属性に従わせる
+			// （中のテキストは CreateTagField が同じクラスに置く）。注釈へ移した後にビュー
+			// ポートのクラス表示を戻す後処理（ShowAllViewportClasses）が下にあるので、ここで
+			// 新しいクラスを持ち込んでもタグが映らなくなることはない。
+			SetClassByName(object, kTagClass);
+			SetAllAttributesByClass(object);
 
 			// **関連付けを先に行う**（中身を組むより前）。タグの本文は関連付け先のレコードから
 			// 取るので、相手を決めてからレイアウトを組み、最後に UpdateDataTag で流し込む。
