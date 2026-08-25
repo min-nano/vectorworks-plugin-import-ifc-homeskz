@@ -82,6 +82,11 @@ scripts/
   ci-debug.sh               CI デバッグ実行を起動し、完了まで待って結果を取り出す
                             （SDK が手元に無い環境から SDK 依存の調査を行うため）
   ci-debug-job.sh           同・ランナー側の本体。調査モードの実装はこちらにある
+  vw-dump-pio-fields.py     VW 実機の「スクリプト編集」に貼って走らせる読み取り専用の
+                            ダンプ（選択オブジェクトのパラメトリックレコード・付いて
+                            いるレコード・オブジェクト変数・文書内のビューポート一覧）。
+                            SDK に API の無い PIO の設定を、UI で手作業したものと
+                            見比べて突き止めるための道具（CI では使わない）
 .clang-format               C/C++ フォーマット規則（タブ・Allman ブレース等）
 .clang-tidy                 C/C++ 静的解析チェックの設定（WarningsAsErrors）
 .cmake-format.yaml          CMake の整形（cmake-format）＋ lint（cmake-lint）設定
