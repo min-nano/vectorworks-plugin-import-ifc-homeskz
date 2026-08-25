@@ -378,16 +378,21 @@ ISDK にシンボルを配置する呼び出しは無く（在るのは `CreateS
   ついでに分かった中身: 中身を決める 5 つ（`DefineSource` / `DefineImage` /
   `EditCellLayout` / `EditTitleLayout` / `ImageClasses`）は**値を持たない type=14＝ボタン**で、
   集計・ソートの軸（`SummarizeBy` / `SortBy` / `SummarizeByExt`…）はスタイル側から来る。
-- **次に当たるのは関連（association）と PIO の中身。** フィルタは OIP でボタンが有効なまま＝
-  **スタイルに焼けない per-instance の設定**なので、どこかに永続化されているはず。
-  凡例はフィルタ先のビューポートが変われば作り直しが要るので、
-  `GetNumAssociations` / `GetAssociation`（VS にもある「消したら一緒に消える／リセットされる」
-  リンク）が第一候補で、次が凡例 PIO の中に生成された図形。それも空振りなら
-  オブジェクト変数、最後が補助オブジェクト（`FirstAuxObject`。**VS からは触れないので
-  dev ビルドの一時診断が要る**——`ModifySlab` の調査と同じ道）。
-  読み取り専用ダンプは [`scripts/vw-dump-pio-fields.py`](../scripts/vw-dump-pio-fields.py)
-  （**文書内の全グラフィック凡例を関連ごと並べる**ので、1 枚だけ手でフィルタしておけば
-  1 回の実行でフィルタ済み／未フィルタを見比べられる）。
+- **関連（association）でもない。** フィルタを掛けた凡例で `associations=0`。ビューポート側に
+  出る `associations=3` は**断面ビューポート（軸組図）だけ**に付いていて（伏図の
+  ビューポートは 0）、凡例とは無関係。
+- **凡例の中の図形が UUID で持っているのでもない。** 凡例の中身はセルごとに
+  グループ（`type=11`）＋ `GraphicLegendFrame`（＋画像は `GraphicLegendImage` か
+  **画像描画用のビューポート `type=122`**）で、**UUID を値に持つレコード欄は 1 つも無い**。
+  ——ここまでで per-instance の設定を置く「普通の場所」は出尽くした。
+- **残るのは補助オブジェクト**（`FirstAuxObject` / `NextAuxObject`）。**VectorScript からは
+  触れない**ので、確かめるには dev ビルドの一時診断が要る（`ModifySlab` の調査と同じ道）。
+  その前に、フィルタ済みの凡例と未フィルタの凡例を**オブジェクト変数の総なめと中身の型
+  ヒストグラムで機械的に見比べる**——それが
+  [`scripts/vw-dump-pio-fields.py`](../scripts/vw-dump-pio-fields.py) の compare 節
+  （1 枚だけ手でフィルタしておけば 1 回の実行で diff できる）。
+  **もし補助オブジェクトだったときは `ModifySlab` と同じ壁**（`type=121` のノードは SDK から
+  作れない・タグの中身も分からない）に当たる見込みで、そのときは打ち切りの判断になる。
 
 ### Undo（取り消し）
 
