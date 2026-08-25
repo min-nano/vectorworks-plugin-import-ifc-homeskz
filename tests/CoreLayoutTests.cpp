@@ -120,6 +120,11 @@ TEST(PlanLayoutKeepsTheLegendColumnClearOfTheDrawing)
 	const double drawnRight = layout.viewportCenter.x + ((8000.0 / layout.scale) / 2.0);
 	CHECK(drawnRight <= planRight);
 
+	// 図が占めてよい領域も同じ計算（描いた図が収まったかを描画側が測って確かめる）。
+	CHECK(layout.plan.max.x == planRight);
+	CHECK(layout.plan.min.x == area.min.x);
+	CHECK(layout.plan.height() == area.height());
+
 	// 凡例は作図域の右上に付く（＝空けた 1 列の中）。
 	CHECK(layout.legendTopRight.x == area.max.x);
 	CHECK(layout.legendTopRight.y == area.max.y);

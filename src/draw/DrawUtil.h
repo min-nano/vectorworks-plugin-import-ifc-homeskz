@@ -352,13 +352,16 @@ namespace HomeskzIfcImport::draw
 	core::PaperArea SheetPageArea(MCObjectHandle sheetLayer);
 
 	// ビューポートを用紙の上で動かし、**その外形の中心**を center（用紙 mm）へ合わせる。
-	// 測れなければ何もせず false（並びが崩れるだけで図は残る）。
+	// 測れなければ何もせず false（並びが崩れるだけで図は残る）。size が非 nullptr なら、
+	// 測った外形の大きさ（用紙 mm）を書き戻す——**見積もった縮尺で本当に収まったか**を
+	// 呼び出し側が確かめて診断へ残すために使う（core/Layout.h の PlanLayout::plan）。
 	//
 	// 【なぜ測るのか】ビューポートの実寸は**描いてみるまで分からない**（映る図形の広がりで
 	// 決まる）。したがって「どこに置くか」は生成・更新の後に測ってから決める（データタグを
 	// 置いた後に測って直すのと同じ考え方。draw/Tag）。**注釈（データタグ）を置く前に呼ぶこと**
 	// ——注釈まで含めた外形で測ると、タグの有無で図の位置がずれる。
-	bool PlaceViewport(MCObjectHandle viewport, const core::Vec2& center);
+	bool PlaceViewport(MCObjectHandle viewport, const core::Vec2& center,
+					   core::Vec2* size = nullptr);
 
 	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
 	// （draw/ObjectHandles.h の ObjectHandles）は SDK 非依存のヘッダに置いてあり、

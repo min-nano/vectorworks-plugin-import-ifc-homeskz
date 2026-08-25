@@ -53,6 +53,7 @@ namespace HomeskzIfcImport::core
 
 		PlanLayout layout;
 		layout.scale = fitScale(content, plan.size());
+		layout.plan = plan;
 		layout.viewportCenter = plan.center();
 		layout.legendTopRight = area.max;
 		return layout;

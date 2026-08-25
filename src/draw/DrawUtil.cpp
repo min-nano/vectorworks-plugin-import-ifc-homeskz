@@ -583,14 +583,18 @@ namespace HomeskzIfcImport::draw
 							   core::Vec2{size.x / 2.0, size.y / 2.0}};
 	}
 
-	bool PlaceViewport(MCObjectHandle viewport, const core::Vec2& center)
+	bool PlaceViewport(MCObjectHandle viewport, const core::Vec2& center, core::Vec2* size)
 	{
 		WorldRect bounds;
 		if (!gSDK->GetObjectBounds(viewport, bounds))
 			return false;
-		// WorldRect は top > bottom（Y 上向き）。中心は上下どちらから見ても同じ式でよい。
+		// WorldRect は top > bottom（Y 上向き）。中心は上下どちらから見ても同じ式でよいが、
+		// 大きさは絶対値で見る。
 		const double x = (bounds.left + bounds.right) / 2.0;
 		const double y = (bounds.top + bounds.bottom) / 2.0;
+		if (size != nullptr)
+			*size = core::Vec2{std::abs(bounds.right - bounds.left),
+							   std::abs(bounds.top - bounds.bottom)};
 		gSDK->MoveObject(viewport, center.x - x, center.y - y);
 		return true;
 	}

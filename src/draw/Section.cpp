@@ -125,6 +125,9 @@ namespace HomeskzIfcImport::draw
 		constexpr Boolean kShowPlanarObjects = false;
 		constexpr Boolean kShow2DComponents = true;
 
+		// 「マスに収まったか」を測って確かめるときの遊び（用紙 mm。伏図と同じ）。
+		constexpr double kFitTol = 1.0;
+
 		// ビューポートのレンダリング（バックグラウンド）。**手で作った断面ビューポートと
 		// 同じ〈隠線消去〉**に揃える（ファイル冒頭「レンダリングは〈隠線消去〉にする」）。
 		// TRenderMode は Kernel/API/MiniCadCallBacks.h（renderFinalHiddenLine = 6 が
@@ -259,6 +262,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t classesApplied = 0;
 		// 用紙の上で位置を合わせられなかった枚数（外形を測れなかった＝置いた場所のまま）。
 		std::size_t missingPlacement = 0;
+		// 見積もった縮尺ではマスに収まらなかった枚数（隣の図と重なる）。
+		std::size_t oversized = 0;
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
 		const ObjectHandles emptyHandles;
 		const ObjectHandleTable& members =
@@ -315,8 +320,16 @@ namespace HomeskzIfcImport::draw
 			// 用紙の上の割り当てられたマスへ置く。**注釈（データタグ）より前に置く**
 			// ——注釈まで含めた外形で測ると、タグの有無で図の位置がずれる。注釈は
 			// ビューポートと一緒に動くので、後から足しても図の上に留まる。
-			if (arrange && !PlaceViewport(viewport, core::sectionSlotCenter(layout, slot)))
-				++missingPlacement;
+			if (arrange)
+			{
+				core::Vec2 drawn;
+				if (!PlaceViewport(viewport, core::sectionSlotCenter(layout, slot), &drawn))
+					++missingPlacement;
+				// マス（layout.cell）に収まったかを測って確かめる。はみ出していれば隣の図と
+				// 重なるので、黙って重ねずに診断へ残す（伏図と同じ考え方。M16）。
+				else if (drawn.x > layout.cell.x + kFitTol || drawn.y > layout.cell.y + kFitTol)
+					++oversized;
+			}
 			drawViewportTags(viewport, command.viewport, members, tags);
 			++drawn;
 		}
@@ -325,8 +338,9 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetCurrentLayer(previousLayer);
 
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
-		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
-								missingRenderMode > 0 || missingPlacement > 0 || !arrange))
+		if (note != nullptr &&
+			(missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
+			 missingRenderMode > 0 || missingPlacement > 0 || oversized > 0 || !arrange))
 		{
 			std::string text = "軸組図の診断: ";
 			if (missingSheetLayers > 0)
@@ -347,6 +361,9 @@ namespace HomeskzIfcImport::draw
 			if (missingPlacement > 0)
 				text += "用紙の上で位置を合わせられなかった軸組図 " +
 						std::to_string(missingPlacement) + " 枚（外形を測れませんでした）。";
+			if (oversized > 0)
+				text += "割り当てたマスに収まらなかった軸組図 " + std::to_string(oversized) +
+						" 枚（縮尺の見積もりより図が大きくなりました）。";
 			if (!note->empty())
 				*note += "\n";
 			*note += text;

@@ -60,6 +60,13 @@
 
 namespace HomeskzIfcImport::draw
 {
+	namespace
+	{
+		// 「用紙に収まったか」を測って確かめるときの遊び（用紙 mm）。線の太さのぶん外形が
+		// わずかに広がるので、ぴったりの図を「はみ出した」と数えない。
+		constexpr double kFitTol = 1.0;
+	} // namespace
+
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
 						   std::string* note, const ObjectHandles* memberHandles)
 	{
@@ -97,6 +104,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingPlanView = 0;
 		// 用紙の上で位置を合わせられなかった枚数（外形を測れなかった＝置いた場所のまま）。
 		std::size_t missingPlacement = 0;
+		// 見積もった縮尺では用紙に収まらなかった枚数（測った外形が作図域より大きい）。
+		std::size_t oversized = 0;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
 		// （渡されなければ空の表＝関連付け無しで置く。draw/Tag.h）。
 		const ObjectHandles emptyHandles;
@@ -172,8 +181,15 @@ namespace HomeskzIfcImport::draw
 												 (sheetMin.y + sheetMax.y) / 2.0};
 					target = target + ((sheetCenter - anchor) * (1.0 / layout->scale));
 				}
-				if (!PlaceViewport(viewport, target))
+				core::Vec2 drawn;
+				if (!PlaceViewport(viewport, target, &drawn))
 					++missingPlacement;
+				// **見積もりどおりに収まったかを測って確かめる**（core/Layout.h の
+				// PlanLayout::plan）。命令の座標には現れないもの（通り芯の丸など）が図に
+				// 出るぶん、実際の図は見積もりより大きくなりうる。
+				else if (drawn.x > layout->plan.width() + kFitTol ||
+						 drawn.y > layout->plan.height() + kFitTol)
+					++oversized;
 			}
 
 			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport
@@ -201,8 +217,9 @@ namespace HomeskzIfcImport::draw
 		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 枚」のときに、シートレイヤを
 		// 作れないのか、ビューポートを作れないのかを切り分けられる。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
-		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
-								missingPlanView > 0 || missingPlacement > 0 || !haveContent))
+		if (note != nullptr &&
+			(missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
+			 missingPlanView > 0 || missingPlacement > 0 || oversized > 0 || !haveContent))
 		{
 			std::string text = "伏図の診断: ";
 			if (missingSheetLayers > 0)
@@ -222,6 +239,9 @@ namespace HomeskzIfcImport::draw
 			if (missingPlacement > 0)
 				text += "用紙の上で位置を合わせられなかった伏図 " +
 						std::to_string(missingPlacement) + " 枚（外形を測れませんでした）。";
+			if (oversized > 0)
+				text += "用紙に収まらなかった伏図 " + std::to_string(oversized) +
+						" 枚（縮尺の見積もりより図が大きくなりました）。";
 			*note = std::move(text);
 		}
 
