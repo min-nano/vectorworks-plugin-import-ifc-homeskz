@@ -94,9 +94,9 @@ namespace HomeskzIfcImport::parse
 	// logPath はクラッシュ診断ログ（core/Trace）の場所（無効なら空）。空でなければ
 	// 「どこを見れば直前のフェーズが分かるか」を本文の最後で案内する。
 	//
-	// **なぜ要るか**: ネイティブプラグインの未捕捉例外は Python 版と違って VectorWorks
-	// 本体を巻き込んで落とす。フェーズ境界（Extensions/ExtMenu の DoInterface）で必ず
-	// 受け止め、ユーザーへ 1 通のエラーダイアログとして見せる（docs/DEV-NOTES.md M15「例外処理」）。
-	// 文言はここに置いて無 SDK でテストする（完了文言と同じ理由）。
+	// **なぜ要るか**: ネイティブプラグインの未捕捉例外は VectorWorks 本体を巻き込んで落とす。
+	// フェーズ境界（Extensions/ExtMenu の DoInterface）で必ず受け止め、ユーザーへ
+	// 1 通のエラーダイアログとして見せる（docs/DEV-NOTES.md M15「例外処理」）。文言はここに置
+	// いて無 SDK でテストする（完了文言と同じ理由）。
 	std::string formatImportError(const std::string& detail, const std::string& logPath = {});
 } // namespace HomeskzIfcImport::parse

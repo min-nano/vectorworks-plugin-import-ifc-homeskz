@@ -1,9 +1,8 @@
 //
 //	draw/ExecuteDocument.cpp
 //
-//	executeDocument の実装。Python 版 vw/__init__.py execute_document に対応。
-//	【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include する。したがって
-//	この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の
+//	executeDocument の実装。【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include する。
+//	したがってこの翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の
 //	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（立上り・底盤）→
@@ -50,7 +49,7 @@ namespace HomeskzIfcImport::draw
 	{
 		DrawCounts counts;
 
-		// 検証を通らない Document は描画しない（Python 版 validateDocument と同じ関門）。
+		// 検証を通らない Document は描画しない。
 		if (!core::validateDocument(document))
 			return counts;
 		counts.valid = true;
@@ -88,9 +87,8 @@ namespace HomeskzIfcImport::draw
 			return true;
 		};
 
-		// M3 ストーリを先に描く。以降の要素はここで生成したストーリレベル・デザイン
-		// レイヤに配置されるため、通り芯や他要素より前に用意する（Python 版 execute_document
-		// が execute_stories を先頭で呼ぶのと同じ）。
+		// M3 ストーリを先に描く。以降の要素はここで生成したストーリレベル・デザインレイヤに配
+		// 置されるため、通り芯や他要素より前に用意する。
 		if (beginPhase("ストーリとレイヤを作成しています…", document.stories.size(),
 					   core::DrawPhase::Stories))
 			counts.stories = drawStories(document, progress);
@@ -99,11 +97,11 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("通り芯を描画しています…", document.grids.size(), core::DrawPhase::Grids))
 			counts.grids = drawGrids(document, progress);
 
-		// M9/M10 基礎を描く。立上り（壁）→ 壁結合 → 底盤（スラブ）の順（Python 版
-		// execute_document と同じ）。**壁結合は立上りのハンドルを引く**ので、立上りを
-		// すべて配置した直後に置く（対応表は WallHandles で受け渡す。draw/Footing.h）。
-		// 配置先の "F-立上り" / "F-底盤" レイヤは基礎ストーリの story 命令が作るので、必ず
-		// drawStories の後に置く（レイヤが無い命令はそれぞれがスキップする）。
+		// M9/M10 基礎を描く。立上り（壁）→ 壁結合 → 底盤（スラブ）の順。**壁結合は立上りの
+		// ハンドルを引く**ので、立上りをすべて配置した直後に置く（対応表は WallHandles
+		// で受け渡す。draw/Footing.h）。配置先の "F-立上り" / "F-底盤" レイヤは基礎ストーリの
+		// story 命令が作るので、必ず drawStories の後に置く（レイヤが無い命令はそれぞれが
+		// スキップする）。
 		ObjectHandles wallHandles;
 		if (beginPhase("基礎の立上りを描画しています…", document.walls.size(),
 					   core::DrawPhase::Walls))
@@ -150,11 +148,10 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 		}
 
-		// M6 屋根組を描く。垂木 → 野地板 の順（Python 版 execute_document の実行順と同じで、
-		// 野地板は垂木の上に載る）。配置先の "n-垂木" / "n-野地板" レイヤも drawStories が
-		// 作るので、必ずその後に置く（レイヤが無い命令はそれぞれがスキップする）。以降の
-		// マイルストーンで footing … と命令ごとに draw モジュールへのディスパッチを
-		// 足していく（docs/DEV-NOTES.md）。
+		// M6 屋根組を描く。垂木 → 野地板 の順。配置先の "n-垂木" / "n-野地板" レイヤも
+		// drawStories が作るので、必ずその後に置く（レイヤが無い命令はそれぞれがスキップする）。
+		// 以降のマイルストーンで footing … と命令ごとに draw モジュールへのディスパッチを足し
+		// ていく（docs/DEV-NOTES.md）。
 		if (beginPhase("垂木を描画しています…", document.rafters.size(), core::DrawPhase::Rafters))
 			counts.rafters = drawRafters(document, progress);
 		if (beginPhase("野地板を描画しています…", document.roofs.size(), core::DrawPhase::Roofs))
@@ -229,9 +226,9 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 		}
 
-		// M14 軸組図（断面ビューポート）。**伏図の後**に置く: どちらもモデルを映すので全要素の
-		// 描画が済んでいる必要があり、シートレイヤの番号も伏図（"1" / "2" …）の後に "A" が
-		// 続く並びになる（Python 版 execute_document も伏図 → 軸組図の順）。
+		// M14 軸組図（断面ビューポート）。**伏図の後**に置く: どちらもモデルを映すので全要素
+		// の描画が済んでいる必要があり、シートレイヤの番号も伏図（"1" / "2" …）の後に "A"
+		// が続く並びになる。
 		if (beginPhase("軸組図を作成しています…", document.sections.size(),
 					   core::DrawPhase::Sections))
 		{

@@ -1,8 +1,8 @@
 //
 //	parse/Section.cpp
 //
-//	軸組図（断面ビューポート）の解析。Python 版 ifc/section.py に対応する（docs/DEV-NOTES.md M14）。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない。
+//	軸組図（断面ビューポート）の解析（docs/DEV-NOTES.md M14）。【SDK 非依存】ここでは
+//	VectorWorks SDK を include しない。
 //
 //	このモジュールも parse/Sheet と同じく IFC の幾何をほとんど見ない——**他のモジュールが
 //	既に出した答え**（柱・横架材の命令／通り芯の線分／ストーリの作るレイヤ）を組み合わせて
@@ -33,16 +33,15 @@ namespace HomeskzIfcImport::parse
 	{
 		using core::SectionDirection;
 
-		// 切断位置の判定で「梁」とみなさない横架材のクラス（Python 版 _NON_BEAM_CLASSES）。
-		// 大引（床組）・母屋（小屋組）は軸組の主要材ではないので、それらだけが柱と重なる
-		// 通りは軸組図にしない。
+		// 切断位置の判定で「梁」とみなさない横架材のクラス。大引（床組）・母屋（小屋組）
+		// は軸組の主要材ではないので、それらだけが柱と重なる通りは軸組図にしない。
 		bool isNonBeamClass(const std::string& drawClass)
 		{
 			return drawClass == CLASS_OOBIKI || drawClass == CLASS_MOYA;
 		}
 
-		// いろは順の 48 文字（Python 版 _IROHA）。通り芯名がこれだけで構成されていれば
-		// 「いろは書式」とみなし、中間の通りを `又` で連番する。
+		// いろは順の 48 文字。通り芯名がこれだけで構成されていれば「いろは書式」とみなし、
+		// 中間の通りを `又` で連番する。
 		constexpr const char* kIroha =
 			"いろはにほへとちりぬるをわかよたれそつねならむうゐのおくやま"
 			"けふこえてあさきゆめみしゑひもせす";
@@ -74,7 +73,7 @@ namespace HomeskzIfcImport::parse
 			return chars;
 		}
 
-		// 通り芯名がいろは文字だけで構成されるか（Python 版 _is_iroha_name）。
+		// 通り芯名がいろは文字だけで構成されるか。
 		bool isIrohaName(const std::string& name)
 		{
 			static const std::vector<std::string> iroha = splitUtf8(kIroha);
@@ -100,8 +99,8 @@ namespace HomeskzIfcImport::parse
 			bool hasBeam = false;
 		};
 
-		// 座標を昇順に並べ、隣との差が tol を超えるところで切ってクラスタにする
-		// （Python 版 _clusters）。クラスタの座標はその平均＝柱梁の芯。
+		// 座標を昇順に並べ、隣との差が tol を超えるところで切ってクラスタにする。
+		// クラスタの座標はその平均＝柱梁の芯。
 		std::vector<Cluster> clusterCoords(std::vector<Tagged> tagged, double tol)
 		{
 			if (tagged.empty())
@@ -388,8 +387,7 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::SectionCommand> buildSectionCommands(Context& context,
 														   const core::Document& document)
 	{
-		// 通り芯が無いと平面の広がり（指示線の長さ）も通り名も決められないので作らない
-		// （Python 版 build_section_commands と同じ）。
+		// 通り芯が無いと平面の広がり（指示線の長さ）も通り名も決められないので作らない。
 		PlanBounds bounds;
 		if (!gridPlanBounds(context.gridLines(), context.gridCenter(), bounds))
 			return {};

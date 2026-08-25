@@ -1,10 +1,9 @@
 //
 //	ParseSectionTests.cpp
 //
-//	軸組図（断面ビューポート）解析（src/parse/Section）の単体テスト。VectorWorks SDK を
-//	一切 include せず、無 SDK のテストハーネス（TestFramework.h）で走る
-//	（CLAUDE.md「テスト方針」）。Python 版 test_ifc_section.py のケースを写しつつ、期待値は
-//	手書きする（docs/DEV-NOTES.md「Python 版出力との比較はしない」）。
+//	軸組図（断面ビューポート）解析（src/parse/Section）の単体テスト。VectorWorks SDK を一切
+//	include せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
+//	**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
 //	検証項目（docs/DEV-NOTES.md M14）: 柱と梁の**両方**が通る通りだけを切断位置にすること
 //	（大引・母屋は梁とみなさない）・名前付き通り芯への照合と中間通りの命名（`'` / `又`）・
@@ -12,9 +11,8 @@
 //	通り名の並ぶ側を向くこと・映すレイヤがストーリの作るレイヤに実在すること・
 //	命令の並び順に依存しない決定性。
 //
-//	Python 版が `resolve_lines` を monkeypatch していたところは、**最小の STEP テキストから
-//	Model を作る**（loadIfcFromText）ことで置き換える——通り芯の読み方は parse/Grid の
-//	担当で、ここでは「通り芯がこう並んでいるとき何を切るか」だけを見たいため。
+//	通り芯は**最小の STEP テキストから Model を作って**与える（loadIfcFromText）——通り芯の読み
+//	方は parse/Grid の担当で、ここでは「通り芯がこう並んでいるとき何を切るか」だけを見たいため。
 //
 
 #include "Fixtures.h"
@@ -53,9 +51,8 @@ using HomeskzIfcTests::near;
 
 namespace
 {
-	// 試験用の通り芯（Python 版テストの _LINES と同じ配置）。X通り（縦線）= X1/X2/X3、
-	// Y通り（横線）= い/ろ。bbox は x∈[0,8000]・y∈[0,6000] で中心は (4000,3000) なので、
-	// センタリング後は Python 版テストと同じ ±4000 / ±3000 になる。
+	// 試験用の通り芯。X 通り（縦線）= X1/X2/X3、Y 通り（横線）= い/ろ。bbox は x∈[0,8000]・
+	// y∈[0,6000] で中心は (4000,3000) なので、センタリング後は ±4000 / ±3000 になる。
 	//
 	// 実データに寄せて、次の 3 つも混ぜてある（いずれも bbox は広げない）:
 	//   * **宣言順は座標順ではない**（X3 → X1 → X2）。並べ替えが効いていることを見る。
@@ -111,7 +108,7 @@ namespace
 		return command;
 	}
 
-	// 柱: X1∩い・X2∩い・X2∩ろ・中間 (X=2000, Y=0)。Python 版テストの _COLUMNS と同じ。
+	// 柱: X1∩い・X2∩い・X2∩ろ・中間 (X=2000, Y=0)。
 	std::vector<core::ColumnCommand> sampleColumns()
 	{
 		return {column(-4000.0, -3000.0), column(0.0, -3000.0), column(0.0, 3000.0),
@@ -349,8 +346,8 @@ TEST(BuildSectionCommandsPlacesCutsAndNames)
 	Model const model = sampleGridModel();
 	const std::vector<SectionCommand> commands = buildSectionCommands(model, sampleDocument());
 
-	// X通り 3 本（X1 / X2 / X2'）→ Y通り 2 本（い / 又い）の順。**既製ビューポートの枚数に
-	// 縛られない**（Python 版は 20 枚が上限だった）。
+	// X通り 3 本（X1 / X2 / X2'）→ Y通り 2 本（い / 又い）の順。**既製ビューポートの枚数に縛
+	// られない**。
 	CHECK(drawingNumbers(commands) == (std::vector<std::string>{"X1", "X2", "X2'", "い", "又い"}));
 	CHECK(commands[0].viewport.drawingTitle == std::string("X1") + kSectionTitleSuffix);
 	CHECK(commands[4].viewport.drawingTitle == std::string("又い") + kSectionTitleSuffix);
@@ -440,8 +437,8 @@ TEST(BuildSectionCommandsPassDocumentValidation)
 {
 	Model const model = sampleGridModel();
 	// **section 命令だけ**を空の Document に載せて検証する（試験用の柱・横架材はレイヤ名や
-	// クラス名を持たない骨だけの命令なので、そのまま検証へ回すと section とは無関係な
-	// 理由で落ちる。Python 版テストも section 以外を空にした文書を検証している）。
+	// クラス名を持たない骨だけの命令なので、そのまま検証へ回すと section とは無関係な理由で落
+	// ちる）。
 	core::Document document;
 	document.sections = buildSectionCommands(model, sampleDocument());
 	CHECK(!document.sections.empty());

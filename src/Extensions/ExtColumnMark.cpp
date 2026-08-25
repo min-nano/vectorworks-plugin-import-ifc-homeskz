@@ -53,12 +53,9 @@ namespace HomeskzIfcImport
 		// 点 PIO（シンボルのように 1 点で挿入する）。
 		//
 		// 【移動・回転でリセットする】記号の絵は対象レイヤの柱の**ワールド位置**に描くが、
-		// PIO のジオメトリは挿入点からの相対で保持される。したがって PIO 自体を動かすと
-		// 記号がまるごとずれ、柱と食い違ったまま戻らない（実機で確認）。リセットすれば
-		// 実物から描き直されて正しい位置へ戻るので、移動・回転を契機にしておく。
-		// Python 版（姉妹プロジェクトの「柱束伏図記号」）もスクリプト PIO のリセット条件を
-		// プラグインエディタで同じように設定してあり、「動かしても柱位置に描かれる」のは
-		// この設定によるもの。
+		// PIO のジオメトリは挿入点からの相対で保持される。したがって PIO 自体を動かすと記号が
+		// まるごとずれ、柱と食い違ったまま戻らない（実機で確認）。リセットすれば実物から描き
+		// 直されて正しい位置へ戻るので、移動・回転を契機にしておく。
 		const SParametricDef& parametricDef()
 		{
 			static const SParametricDef def = {/*LocalizedName*/ {PLUGIN_VWR_ID, "columnMarkName"},
@@ -177,8 +174,8 @@ namespace HomeskzIfcImport
 		}
 	} // namespace
 
-	// ---------------------------------------------------------------------------
-	// NOLINTBEGIN(misc-const-correctness)
+	// --------------------------------------------------------------------------
+	// - NOLINTBEGIN(misc-const-correctness)
 #ifdef VW_DEV_BUILD
 	// UUID: 5c1f0a76-2d4e-4b93-9a11-7e6c8d240f31  (dev build)
 	IMPLEMENT_VWParametricExtension(

@@ -1,10 +1,9 @@
 //
 //	ParseFloorPostTests.cpp
 //
-//	床束解析（src/parse/FloorPost）の単体テスト。VectorWorks SDK を一切 include せず、
-//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
-//	Python 版 test_ifc_floor_post.py のケースを 1 対 1 で写している（期待値は手書き。
-//	docs/DEV-NOTES.md「Python 版出力との比較はしない」）。
+//	床束解析（src/parse/FloorPost）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK
+//	のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。**期待値は手書きで持
+//	つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
 //	検証項目（docs/DEV-NOTES.md M11）: 910mm 間隔の割り付け（端点には置かない）・支持材芯の探索
 //	（半支持材厚以内・区間内・平行は除外）・同一直線上の継手統合（すき間 ≤ 半モジュール）・
@@ -57,8 +56,8 @@ using HomeskzIfcTests::near;
 
 namespace
 {
-	// 幅 105mm の支持材（土台または他の大引）を x=0 の位置に Y 方向へ通す
-	// （芯線 x=0、区間 y ∈ [−1000, 1000]）。Python 版 TestShinReference.SUPPORT と同じ。
+	// 幅 105mm の支持材（土台または他の大引）を x=0 の位置に Y 方向へ通す（芯線 x=0、区間 y
+	// ∈ [−1000, 1000]）。
 	const std::vector<SupportLine> kSupport = {
 		SupportLine{Vec2{0.0, -1000.0}, Vec2{0.0, 1.0}, 2000.0, 105.0}};
 
@@ -74,7 +73,7 @@ namespace
 	}
 } // namespace
 
-// --- 配置間隔（Python 版 TestPostOffsets）------------------------------------
+// --- 配置間隔------------------------------------
 
 TEST(floor_post_single_module_gets_no_post)
 {
@@ -116,7 +115,7 @@ TEST(floor_post_zero_length_returns_empty)
 	CHECK(floorPostOffsets(-100.0).empty());
 }
 
-// --- 支持材芯の探索（Python 版 TestShinReference）----------------------------
+// --- 支持材芯の探索----------------------------
 
 TEST(floor_post_end_inset_from_support_returns_shin)
 {
@@ -152,7 +151,7 @@ TEST(floor_post_outside_support_segment_returns_none)
 	CHECK(!shinReference(Vec2{52.5, 5000.0}, Vec2{1.0, 0.0}, kSupport).has_value());
 }
 
-// --- 継手の統合（Python 版 TestMergeCollinear）-------------------------------
+// --- 継手の統合-------------------------------
 
 TEST(floor_post_gap_none_when_not_parallel)
 {
@@ -272,7 +271,7 @@ TEST(floor_post_merge_is_order_independent)
 			   std::max(b.front().start.x, b.front().end.x)));
 }
 
-// --- 基礎が無いモデル（Python 版 test_no_foundation_returns_empty）-----------
+// --- 基礎が無いモデル-----------
 
 TEST(floor_post_without_foundation_is_empty)
 {
@@ -284,7 +283,7 @@ TEST(floor_post_without_foundation_is_empty)
 
 TEST(floor_post_foundation_detected_from_base_slab)
 {
-	// 底盤の IfcSlab があれば基礎あり（Python 版 _iter_footing_elements / has_foundation）。
+	// 底盤の IfcSlab があれば基礎あり。
 	CHECK(hasFoundation(loadIfcFromText("#1=IFCSLAB('s',$,'基礎底盤',$,$,$,$,$,$);\n")));
 	// 立上り（基礎梁…）の IfcFooting でも基礎あり。
 	CHECK(hasFoundation(loadIfcFromText("#1=IFCFOOTING('f',$,'基礎梁:1',$,$,$,$,$,$);\n")));
@@ -292,7 +291,7 @@ TEST(floor_post_foundation_detected_from_base_slab)
 	CHECK(!hasFoundation(loadIfcFromText("#1=IFCSLAB('s',$,'床版',$,$,$,$,$,$);\n")));
 }
 
-// --- 実フィクスチャ（Python 版 TestBuildFromFixture）-------------------------
+// --- 実フィクスチャ-------------------------
 
 TEST(floor_post_fixture_shape)
 {

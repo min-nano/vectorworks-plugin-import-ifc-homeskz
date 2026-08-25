@@ -1,8 +1,8 @@
 //
 //	parse/Sheet.cpp
 //
-//	シート（伏図）の解析。Python 版 ifc/sheet.py に対応する（docs/DEV-NOTES.md M13）。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない。
+//	シート（伏図）の解析（docs/DEV-NOTES.md M13）。【SDK 非依存】ここでは VectorWorks SDK を
+//	include しない。
 //
 //	どの伏図に何を映すかは「取り込んだ要素の有無」から決まる。したがってこのモジュールは
 //	IFC の幾何をほとんど見ず、**他のモジュールが既に出した答え**（ストーリ一覧・柱の span・
@@ -33,10 +33,9 @@ namespace HomeskzIfcImport::parse
 {
 	namespace
 	{
-		// 伏図 1 枚の sheet 命令を組み立てる。番号・タイトルは図面タイトル／図番と同じ値を
-		// 使う（Python 版と同じ: シートレイヤ番号がそのまま図番になる）。legendStyle が
-		// 非 nullptr なら、そのスタイルのグラフィック凡例をシートレイヤに載せる
-		// （空の凡例を作らないための出し分けは呼び出し側が持つ。ヘッダ冒頭）。
+		// 伏図 1 枚の sheet 命令を組み立てる。番号・タイトルは図面タイトル／図番と同じ値を使
+		// う。legendStyle が非 nullptr なら、そのスタイルのグラフィック凡例をシートレイヤに載
+		// せる（空の凡例を作らないための出し分けは呼び出し側が持つ。ヘッダ冒頭）。
 		core::SheetCommand makeSheet(std::string number, std::string title,
 									 std::vector<std::string> layers,
 									 const char* legendStyle = nullptr)
@@ -104,15 +103,14 @@ namespace HomeskzIfcImport::parse
 		if (!hasFoundation(context.model()))
 			return {};
 
-		// 底盤 → 立上り → 床束 → アンカーボルト → 通り芯（Python 版 FOUNDATION_PLAN_LAYERS
-		// と同じ並び。並びは重ね順ではない＝重なりはビューポートのレイヤ順が決める）。
+		// 底盤 → 立上り → 床束 → アンカーボルト → 通り芯（並びは重ね順ではない＝重なりは
+		// ビューポートのレイヤ順が決める）。
 		std::vector<std::string> layers{kLayerFoundationSlab, kLayerFoundationWall,
 										kLayerFoundationFloorPost, kLayerFoundationAnchor,
 										core::kGridLayer};
-		// グラフィック凡例は**アンカーボルトを 1 本でも置いたときだけ**載せる。凡例に並ぶ
-		// のは基礎伏図に映るシンボル（＝アンカーボルト）なので、1 本も無ければ中身の無い
-		// 箱が図面に残るだけになる（Python 版 build_legend_commands と同じ判断。あちらは
-		// 「載せるシンボルが 1 つも無ければ空リスト」と書いていた）。
+		// グラフィック凡例は**アンカーボルトを 1 本でも置いたときだけ**載せる。凡例に並ぶのは
+		// 基礎伏図に映るシンボル（＝アンカーボルト）なので、1 本も無ければ中身の無い箱が図面
+		// に残るだけになる（あちらは「載せるシンボルが 1 つも無ければ空リスト」と書いていた）。
 		const char* const legendStyle =
 			context.anchorBolts().empty() ? nullptr : kFoundationLegendStyle;
 
@@ -161,8 +159,8 @@ namespace HomeskzIfcImport::parse
 
 			std::string title = floorPlanTitle(i, isTop, stories.size());
 			std::string number = std::to_string(kFloorPlanStartNumber + static_cast<int>(i));
-			// グラフィック凡例は常に載せる（何が並ぶかはスタイルが決めるので、ここでは
-			// 中身の有無を判断できない。Python 版 build_floor_legend_commands と同じ）。
+			// グラフィック凡例は常に載せる（何が並ぶかはスタイルが決めるので、ここでは中身の
+			// 有無を判断できない）。
 			commands.push_back(makeSheet(std::move(number), std::move(title), std::move(layers),
 										 kFloorLegendStyle));
 		}
@@ -223,8 +221,8 @@ namespace HomeskzIfcImport::parse
 			std::string title = moyaPlanTitle(i);
 			std::string number = std::to_string(baseNumber + seq);
 			++seq;
-			// 柱梁伏図と同じスタイルの凡例を載せる（母屋伏図に映るシンボルも同じ
-			// "床伏図凡例" が集める。Python 版 build_floor_legend_commands）。
+			// 柱梁伏図と同じスタイルの凡例を載せる（母屋伏図に映るシンボルも同じ"床伏図凡例"
+			// が集める）。
 			commands.push_back(makeSheet(std::move(number), std::move(title), std::move(layers),
 										 kFloorLegendStyle));
 		}

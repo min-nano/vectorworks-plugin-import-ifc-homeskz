@@ -1,15 +1,15 @@
 //
 //	parse/Joint.h
 //
-//	Phase 1（IFC 解析）の仕口モジュール。Python 版 ifc/joint.py に対応する
-//	（docs/DEV-NOTES.md M11「シンボル置換系」）。**IFC を直接見ない**唯一の解析モジュールで、
-//	既に組み立て済みの横架材命令（parse/Member）と柱命令（parse/Column）の平面ジオメトリ
-//	だけから「受ける材のある横架材端部」を判定し、そこへ仕口シンボルを置く。
+//	Phase 1（IFC 解析）の仕口モジュール（docs/DEV-NOTES.md M11「シンボル置換系」）。**IFC
+//	を直接見ない**唯一の解析モジュールで、既に組み立て済みの横架材命令（parse/Member）
+//	と柱命令（parse/Column）の平面ジオメトリだけから「受ける材のある横架材端部」を判定し、
+//	そこへ仕口シンボルを置く。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。ここは core/Document の
 //	命令構造体しか触らないので、STEP グラフにも依存しない純粋なジオメトリ計算になる。
 //
-//	要件（Python 版 CLAUDE.md「仕口」節）:
+//	要件:
 //	  * **受ける材のある端部にだけ置く**。横架材の端点が、同じレイヤ・Z 範囲が重なる別の
 //	    横架材（受ける材）の footprint（矩形）に載る場合を「受ける材のある端部」とする。
 //	    **柱の側面に取り付く端部も同様**で、端点が Z 範囲の重なる柱の断面矩形に入る場合も
@@ -49,20 +49,19 @@
 
 namespace HomeskzIfcImport::parse
 {
-	// 置換するハイブリッドシンボル名（Python 版 SYMBOL_JOINT）。
+	// 置換するハイブリッドシンボル名。
 	inline constexpr const char* kSymbolJoint = "仕口";
 
-	// 受ける材の判定に使う許容値（mm。横架材の食い込み調整と同じ考え方。Python 版
-	// _PARALLEL_TOL / _ALONG_TOL / _FACE_TOL / _Z_OVERLAP_TOL / _MIN_LENGTH）。
+	// 受ける材の判定に使う許容値（mm。横架材の食い込み調整と同じ考え方）。
 	inline constexpr double kJointParallelTol = 1e-6; // 平行な相手は受ける材にしない
 	inline constexpr double kJointAlongTol = 1.0; // 相手材の軸方向の範囲判定の余裕
 	inline constexpr double kJointFaceTol = 1.0; // 相手材の面ちょうどに載る端部の余裕
 	inline constexpr double kJointZOverlapTol = 1.0; // これ以下の Z 重なりは取り付きでない
 	inline constexpr double kJointMinLength = 1.0; // 平面投影長がこれ未満の材はスキップ
 
-	// 受ける材判定用の横架材ジオメトリ（Python 版 _Geom）。天端中央線の端点・単位軸・
-	// 平面投影長・半幅・実体の Z 範囲（[天端下端, 天端上端]。傾斜梁も覆う）。
-	// valid=false は平面投影長が極小＝端部・向きが定まらない材（判定から外す）。
+	// 受ける材判定用の横架材ジオメトリ。天端中央線の端点・単位軸・平面投影長・半幅・実体の Z
+	// 範囲（[天端下端, 天端上端]。傾斜梁も覆う）。valid=false は平面投影長が極小＝端部・
+	// 向きが定まらない材（判定から外す）。
 	struct MemberGeom
 	{
 		bool valid = false;
@@ -75,10 +74,10 @@ namespace HomeskzIfcImport::parse
 		double zTop = 0.0;
 	};
 
-	// 受ける柱判定用の柱ジオメトリ（Python 版 _ColGeom）。配置中心・断面の半幅／半成・
-	// Z 範囲（[下端, 上端]）。柱は断面矩形を配置座標中心に**軸平行**で持つものとして扱う
-	// （ColumnCommand に回転情報が無いため。木造柱は正方形断面が主で回転の影響は小さい）。
-	// 柱は退化しない（平面投影長 0 にならない）ので valid フラグを持たない。
+	// 受ける柱判定用の柱ジオメトリ。配置中心・断面の半幅／半成・ Z 範囲（[下端, 上端]）。
+	// 柱は断面矩形を配置座標中心に**軸平行**で持つものとして扱う（ColumnCommand
+	// に回転情報が無いため。木造柱は正方形断面が主で回転の影響は小さい）。柱は退化しない（平
+	// 面投影長 0 にならない）ので valid フラグを持たない。
 	struct ColumnGeom
 	{
 		core::Vec2 center;
@@ -88,30 +87,30 @@ namespace HomeskzIfcImport::parse
 		double zTop = 0.0;
 	};
 
-	// member 命令から受ける材判定用のジオメトリを作る（Python 版 _member_geom）。
+	// member 命令から受ける材判定用のジオメトリを作る。
 	MemberGeom memberGeom(const core::MemberCommand& command);
 
-	// column 命令から受ける柱判定用のジオメトリを作る（Python 版 _column_geom）。
+	// column 命令から受ける柱判定用のジオメトリを作る。
 	ColumnGeom columnGeom(const core::ColumnCommand& command);
 
-	// 端点が相手材の footprint（矩形）に入るか（Python 版 _point_in_member）。相手の
-	// 中心線からの軸方向位置が [0, length]（端＝コーナーの余裕を含む）にあり、直交距離が
-	// 半幅＋余裕以内（面ちょうどに載る端部も含む）なら取り付き。
+	// 端点が相手材の footprint（矩形）に入るか。相手の中心線からの軸方向位置が [0,
+	// length]（端＝コーナーの余裕を含む）にあり、直交距離が半幅＋余裕以内（面ちょうどに載る端
+	// 部も含む）なら取り付き。
 	bool pointInMember(const core::Vec2& point, const MemberGeom& other);
 
-	// 端点が柱の断面矩形（軸平行）に入るか（Python 版 _point_in_column）。
+	// 端点が柱の断面矩形（軸平行）に入るか。
 	bool pointInColumn(const core::Vec2& point, const ColumnGeom& column);
 
-	// 端点に取り付く受ける材（別の横架材または柱）があるか（Python 版 _end_has_receiver）。
-	// index は判定対象の横架材の位置で、geoms / members は同じ並び。
+	// 端点に取り付く受ける材（別の横架材または柱）があるか。index は判定対象の横架材の位置で、
+	// geoms / members は同じ並び。
 	bool endHasReceiver(std::size_t index, const core::Vec2& point,
 						const std::vector<MemberGeom>& geoms,
 						const std::vector<core::MemberCommand>& members,
 						const std::vector<ColumnGeom>& columnGeoms);
 
-	// 横架材の member 命令（と柱の column 命令）から仕口のシンボル配置命令を組み立てる
-	// （Python 版 build_joint_commands）。横架材の始端・終端ごとに受ける材の有無を判定し、
-	// 取り付く端部にだけ仕口を置く。並びは members の並び順→端部（始端・終端）の順で、
+	// 横架材の member 命令（と柱の column 命令）から仕口のシンボル配置命令を組み立てる。
+	// 横架材の始端・終端ごとに受ける材の有無を判定し、取り付く端部にだけ仕口を置く。並びは
+	// members の並び順→端部（始端・終端）の順で、
 	// **判定自体は入力の並びに依存しない**（各端部の可否がジオメトリだけで決まるため）。
 	// 高さ（zOffset）はその端部のバウンド offset をそのまま写す（上記「高さも梁端の天端に
 	// 合わせる」）。

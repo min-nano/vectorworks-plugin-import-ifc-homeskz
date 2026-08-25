@@ -1,9 +1,8 @@
 //
 //	draw/ExecuteDocument.h
 //
-//	Phase 2（VW 描画）のディスパッチ。Python 版 vw/__init__.py の execute_document
-//	に対応する。命令セット（core::Document）を検証してから、命令ごとに要素の
-//	draw モジュール（Grid / Story / Member …）へ振り分けて SDK API で描画する。
+//	Phase 2（VW 描画）のディスパッチ。命令セット（core::Document）を検証してから、
+//	命令ごとに要素の draw モジュール（Grid / Story / Member …）へ振り分けて SDK API で描画する。
 //
 //	【SDK 依存】draw/ は VectorWorks SDK のみに依存し、IFC / STEP の知識を持たない。
 //	.cpp は PluginPrefix.h（SDK）を include するため、SDK ビルドでのみコンパイル

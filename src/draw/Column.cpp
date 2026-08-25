@@ -1,13 +1,12 @@
 //
 //	draw/Column.cpp
 //
-//	柱描画の実装。命令セット（ColumnCommand）を**構造材ツール（StructuralMember）**の
-//	鉛直材として配置する。Python 版 vw/column.py に対応する。
-//	【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include するため、この翻訳単位は
-//	プラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse ライブラリには
-//	入れない（CLAUDE.md「依存の向きは厳守する」）。
+//	柱描画の実装。命令セット（ColumnCommand）を**構造材ツール（StructuralMember）
+//	**の鉛直材として配置する。【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include するため、
+//	この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse
+//	ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	描画手順（Python 版 draw_column と同じ意図。実現手段は SDK の作法に合わせる）:
+//	描画手順:
 //	  1. **パス**＝柱下端 (x, y, 下端 Z) から上端 (x, y, 下端 Z + 高さ) へ立つ鉛直曲線。
 //	  2. **プロファイル**＝断面の矩形（幅 × せい）を**原点中心**に置いたグループ
 //	     （断面基準点は AxisAlign＝中央。draw/DrawUtil の CreateRectangleProfileGroup）。
@@ -27,18 +26,17 @@
 //	  3 周目 … パス 2 点（Add3DVertex。下記）＋ 管柱はバウンド差＝柱高さ／小屋束は差 0
 //	           → **管柱は正しく描かれ、小屋束だけが高さ 0** のままだった。
 //	つまり VW 2026 の構造材 PIO では**バウンドの差が高さを支配し**、鉛直パスはその高さで
-//	実体を作るために要る。Python 版が小屋束の上端 offset を下端と同値にする対策（#116。
-//	VS では offset 差がパス長へ加算されて二重になる）は**この SDK では当てはまらず**、
-//	同値にすると高さ 0 になる（parse/Column.h の「Python 版との差異」）。
+//	実体を作るために要る。したがって**どの柱でも「バウンドの差＝柱高さ」**にする——上端
+//	offset を下端と同値（差 0）にすると高さ 0 になる（parse/Column.h 参照）。
 //
 //	【柱のパスは鉛直な 2 点の NURBS 曲線】M7 の横架材が使っていた 2D ポリラインでは鉛直材を
-//	表せない（平面へ落とすと 1 点に潰れる）。Python 版と同じく
+//	表せない（平面へ落とすと 1 点に潰れる）。
 //	    gSDK->CreateNurbsCurve(下端, byCtrlPts=false, degree=1)   ← VS CreateNurbsCurve
 //	  ＋ gSDK->Add3DVertex(曲線, 上端)                            ← VS AddVertex3D
 //	で作る。**`Add3DVertex` が VS の `AddVertex3D` にあたる**（当初 `Insert3DVertex` を
 //	使っていたが別物で、頂点が増えず 1 点のままだった＝上記 1 周目・2 周目の原因）。M7 の
 //	コメントにあった「頂点を足す呼び出しが無い」も同じ取りこぼしで、`VWNURBSCurve` が
-//	評価専用（制御点から構築できない）なのは事実だが、ISDK 側に追加の呼び出しがある。
+//	評価専用（制御点から構築できない）のは事実だが、ISDK 側に頂点を足す呼び出しがある。
 //	**M7 で長さ 0 になった VWPolygon3DObj のパスは使わない。**
 //
 //	この経路は**横架材と共通**（draw/StructuralMember の CreatePath）。水平材も鉛直材も
@@ -74,15 +72,15 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// プラグインスタイル名（VW 実機の登録名に一致させる）。PIO は横架材と同じ構造材
-		// ツールで、スタイルだけが柱・束用に分かれる（柱・間柱ツールはスクリプト操作に
-		// 対して不安定なため、Python 版が標準の構造材ツールへ置き換えた判断を引き継ぐ）。
+		// プラグインスタイル名（VW 実機の登録名に一致させる）。PIO は横架材と同じ構造材ツール
+		// で、スタイルだけが柱・束用に分かれる（柱・間柱ツールはスクリプトからの操作に対して
+		// 不安定なので、柱も標準の構造材ツールで描く）。
 		const TXString kColumnStyle("木質構造材_柱・束");
 
-		// 柱 1 本を構造材ツールで描く。PIO を作れなければ断面の矩形でフォールバックする
-		// （Python 版 draw_column と同じフォールバック）。何か 1 つでも配置できたら true。
-		// outObject には**構造材ツールで作れたときだけ**そのハンドルを入れる（伏図記号の
-		// データタグはこれに関連付ける。フォールバックの矩形はタグを付ける相手にしない）。
+		// 柱 1 本を構造材ツールで描く。PIO を作れなければ断面の矩形でフォールバックする。
+		// 何か 1 つでも配置できたら true。outObject には**構造材ツールで作れたときだけ**その
+		// ハンドルを入れる（伏図記号のデータタグはこれに関連付ける。フォールバックの矩形は
+		// タグを付ける相手にしない）。
 		bool DrawOne(const core::ColumnCommand& column, RefNumber style,
 					 std::size_t& outPathFailures, std::size_t& outSectionFailures,
 					 MCObjectHandle& outObject)
@@ -186,7 +184,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// 全配置後に 1 回だけスタイル更新を掛けて、by-style の描画属性を反映する
-		// （SetPluginObjectStyle は関連付けまでで描画属性をプッシュしない。Python 版 #56）。
+		// （SetPluginObjectStyle は関連付けまでで描画属性をプッシュしない）。
 		if (drawn > 0 && style != 0)
 			gSDK->UpdateStyledObjects(style);
 

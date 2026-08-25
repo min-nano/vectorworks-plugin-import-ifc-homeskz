@@ -61,9 +61,8 @@ namespace HomeskzIfcImport::parse
 			if (element == nullptr)
 				return;
 			// IfcProduct.Representation（属性 6）＝ IfcProductDefinitionShape。その
-			// Representations（属性 2）が IfcShapeRepresentation の列で、各 Items（属性 3）に
-			// 形状アイテムが入る（Python 版 rep.Representations → shape_rep.Items と同じ道筋。
-			// Body/Axis 等の表現識別子で絞らないのも Python 版と同じ）。
+			// Representations（属性 2）が IfcShapeRepresentation の列で、各 Items（属性 3）
+			// に形状アイテムが入る（Body/Axis 等の表現識別子では絞らない）。
 			const Entity* shape = model.resolve(element->attribute(attr::kProductRepresentation));
 			if (shape == nullptr)
 				return;
@@ -178,8 +177,8 @@ namespace HomeskzIfcImport::parse
 		if (element == nullptr)
 			return Mat4::identity();
 
-		// element.ObjectPlacement（IfcLocalPlacement）→ その RelativePlacement のみ。
-		// 親 PlacementRelTo は辿らない（ヘッダの★参照。Python 版と一致）。
+		// element.ObjectPlacement（IfcLocalPlacement）→ その RelativePlacement のみ。親
+		// PlacementRelTo は辿らない（ヘッダの★参照）。
 		const Entity* placement = model.resolve(element->attribute(attr::kProductObjectPlacement));
 		if (placement == nullptr || placement->type != "IFCLOCALPLACEMENT")
 			return Mat4::identity();
@@ -203,9 +202,8 @@ namespace HomeskzIfcImport::parse
 
 			const double hx = xDim * 0.5;
 			const double hy = yDim * 0.5;
-			// 中心原点の 4 隅を反時計回り（左下→右下→右上→左上）に並べる。
-			// Position は Location の平行移動のみ足す（Python 版 _profile_points に一致。
-			// RefDirection の回転は反映しない）。
+			// 中心原点の 4 隅を反時計回り（左下→右下→右上→左上）に並べる。Position は
+			// Location の平行移動のみ足す（RefDirection の回転は反映しない）。
 			Vec2 offset{0.0, 0.0};
 			const Entity* pos = model.resolve(profileDef->attribute(attr::kProfilePosition));
 			if (pos != nullptr && pos->type == "IFCAXIS2PLACEMENT2D")
@@ -280,8 +278,7 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<Vec3> WorldSolid::base() const
 	{
-		// プロファイル 2D 頂点 (u,v) を origin + xAxis·u + yAxis·v で世界系へ写す
-		// （Python 版 _footprint / to_world の base と一致）。
+		// プロファイル 2D 頂点 (u,v) を origin + xAxis·u + yAxis·v で世界系へ写す。
 		std::vector<Vec3> result;
 		result.reserve(profile.size());
 		for (const Vec2& p : profile)
@@ -318,7 +315,7 @@ namespace HomeskzIfcImport::parse
 			return false;
 
 		// Position はプロファイルを 3D（オブジェクト座標）へ据える。要素配置と合成すると
-		// プロファイル 2D 点 (u,v,0) をそのまま世界系へ写せる（Python 版 _compose に対応）。
+		// プロファイル 2D 点 (u,v,0) をそのまま世界系へ写せる。
 		const Mat4 position = resolveAxis2Placement3D(
 			model, model.resolve(solid->attribute(attr::kExtrudedAreaSolidPosition)));
 		const Mat4 full = placement * position;
@@ -333,7 +330,7 @@ namespace HomeskzIfcImport::parse
 				dir = nd;
 		}
 
-		// 配置基底（origin/軸）を full から取り出す（Python 版 _Placement=(origin,lX,lY,lZ)）。
+		// 配置基底（origin/軸）を full から取り出す。
 		out.origin = full.transformPoint(Vec3{0.0, 0.0, 0.0});
 		out.xAxis = full.transformDirection(Vec3{1.0, 0.0, 0.0});
 		out.yAxis = full.transformDirection(Vec3{0.0, 1.0, 0.0});
@@ -380,8 +377,8 @@ namespace HomeskzIfcImport::parse
 
 	const Entity* firstExtrudedSolid(const Model& model, const Entity* element)
 	{
-		// 最初に見つかった押し出しを採る（Python 版 _first_extruded_solid と同じ）。差演算
-		// （端部が他材で削られた形状）は第 1 オペランド＝素のソリッドを使う。
+		// 最初に見つかった押し出しを採る。差演算（端部が他材で削られた形状）は第 1
+		// オペランド＝素のソリッドを使う。
 		const Entity* found = nullptr;
 		forEachShapeItem(model, element,
 						 [&model, &found](const Entity* item)
@@ -411,7 +408,7 @@ namespace HomeskzIfcImport::parse
 			return false;
 
 		// 平面外形はプロファイル頂点をワールドへ写した底面ループ（origin + xAxis·u + yAxis·v）。
-		// 3 点未満（面にならない）屋根版は扱わない（Python 版と同じ関門）。
+		// 3 点未満（面にならない）屋根版は扱わない。
 		std::vector<Vec3> vertices = solid.base();
 		if (vertices.size() < 3)
 			return false;
@@ -491,8 +488,8 @@ namespace HomeskzIfcImport::parse
 
 	void zTopAndThickness(const WorldSolid& solid, double& outTop, double& outThickness)
 	{
-		// 底面ループと天面ループの Z を集めて最大／振幅を採る（Python 版と同じ手順。
-		// 押し出し方向が鉛直でも水平でも同じ式で正しい）。
+		// 底面ループと天面ループの Z を集めて最大／振幅を採る（押し出し方向が鉛直でも水平でも
+		// 同じ式で正しい）。
 		const std::vector<Vec3> baseLoop = solid.base();
 		if (baseLoop.empty())
 		{

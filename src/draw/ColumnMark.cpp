@@ -6,9 +6,8 @@
 //	【SDK 依存】PluginPrefix.h を include するため、この翻訳単位はプラグインビルド
 //	（SDK あり）でのみコンパイルされる（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	手順は Python 版 vw/column_mark.py と同じ:
-//	  配置先レイヤを用意 → CreateCustomObject で PIO を作る → 本体のクラスを設定 →
-//	  パラメータ（検索対象レイヤ・クラス・記号スタイル・シンボル）を書く → ResetObject
+//	手順:配置先レイヤを用意 → CreateCustomObject で PIO を作る → 本体のクラスを設定
+//	→パラメータ（検索対象レイヤ・クラス・記号スタイル・シンボル）を書く → ResetObject
 //	リセットで PIO 本体（Extensions/ExtColumnMark）が対象レイヤを検索して記号を描く。
 //
 //	**パラメータは PIO 本体と同じ名前**でなければ黙って無視される（M6 の垂木で実証済み。

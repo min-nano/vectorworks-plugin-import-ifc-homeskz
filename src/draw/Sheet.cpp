@@ -1,11 +1,9 @@
 //
 //	draw/Sheet.cpp
 //
-//	シート（伏図）描画の実装。Python 版 vw/sheet.py の execute_sheets / draw_sheet /
-//	configure_viewport_layers / configure_viewport_scale に対応する。【SDK 依存】
-//	PluginPrefix.h（VectorWorks SDK）を include するため、この翻訳単位はプラグイン
-//	ビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse ライブラリには入れない
-//	（CLAUDE.md「依存の向きは厳守する」）。
+//	シート（伏図）描画の実装。【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include するため、
+//	この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse
+//	ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	【シートレイヤに載るのはビューポートだけではない】伏図には**グラフィック凡例**
 //	（VW 標準の "GraphicLegend" PIO）も 1 つ載る（M13）。凡例はビューポート注釈では
@@ -24,11 +22,11 @@
 //	  * gSDK->CreateViewport(sheetLayer)  … 平面ビューポート生成
 //	  * gSDK->GetCurrentLayer / SetCurrentLayer … カレントレイヤの退避と復帰
 //
-//	【投影は 2D/平面へ作り直させる】`CreateViewport` が作ったビューポートは、パレット上は
-//	「2D/平面」なのに**描画は 3D の「上」ビューのまま**という食い違いを起こす（更新ボタンを
-//	押しても直らない）。伏図なので `ViewportProjection::Plan` を渡して作り直させる——
-//	手順と理由は draw/DrawUtil.h の ViewportProjection、Python 版は vw/sheet.py の
-//	force_plan_view。**軸組図（draw/Section）は Keep** で、こちらだけの手当て。
+//	【投影は 2D/平面へ作り直させる】`CreateViewport` が作ったビューポートは、パレット上は「2D/
+//	平面」なのに**描画は 3D の「上」ビューのまま**という食い違いを起こす（更新ボタンを押しても
+//	直らない）。伏図なので `ViewportProjection::Plan` を渡して作り直させる——手順と理由は
+//	draw/DrawUtil.h の ViewportProjection。**軸組図（draw/Section）は Keep** で、
+//	こちらだけの手当て。
 //
 //	【重ね順はここでは扱わない】床・野地板が柱・梁を覆わないようにする件は、**ドキュメントの
 //	デザインレイヤの並べ替え**（draw/Story の reorderStoryLayers）が担う。per-viewport の
@@ -128,9 +126,8 @@ namespace HomeskzIfcImport::draw
 			if (!finish.planViewApplied)
 				++missingPlanView;
 
-			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport の
-			// 最後が更新で、注釈はその後に足しても図に出る。Python 版 execute_sheets も
-			// ビューポートを作り終えてからタグを置く）。
+			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport
+			// の最後が更新で、注釈はその後に足しても図に出る）。
 			drawViewportTags(viewport, command.viewport, members, style, tags);
 
 			// グラフィック凡例は**ビューポートではなくシートレイヤ**に載せる（用紙の上）。

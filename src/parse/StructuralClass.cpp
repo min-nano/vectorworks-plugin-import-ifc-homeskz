@@ -1,9 +1,8 @@
 //
 //	parse/StructuralClass.cpp
 //
-//	構造クラス判定の実装。Python 版 ifc/structural_class.py に対応する。
-//	【SDK 非依存・幾何非依存】純粋な文字列／整数ロジックだけで完結する（core/parse の
-//	他モジュールにも依存しない。ヘッダの <optional> / <string> のみ）。
+//	構造クラス判定の実装。【SDK 非依存・幾何非依存】純粋な文字列／整数ロジックだけで完結する
+//	（core/parse の他モジュールにも依存しない。ヘッダの <optional> / <string> のみ）。
 //
 
 #include "parse/StructuralClass.h"
@@ -15,15 +14,13 @@ namespace HomeskzIfcImport::parse
 {
 	namespace
 	{
-		// 小屋束を識別する Name の接頭辞（Python 版 COLUMN_KOYAZUKA_NAME_PREFIX）。
-		// ObjectType による判定（kStandColumnObjectType）はヘッダ側にあり、parse/Column の
-		// 柱種別名の変換と共有する。
+		// 小屋束を識別する Name の接頭辞。ObjectType による判定（kStandColumnObjectType）
+		// はヘッダ側にあり、parse/Column の柱種別名の変換と共有する。
 		constexpr const char* kKoyazukaNamePrefix = "小屋束";
 
-		// 文字列を区切り文字 delim で分割する（Python の str.split(delim) と同じ挙動）。
-		// 空文字は要素 1 個の [""] を返す（Python の ''.split(':') == [''] に合わせる。
-		// これにより memberTypeOfName("") が空文字を返す）。delim は ASCII 1 文字（':'）で、
-		// UTF-8 では継続バイトに現れないため日本語トークンを壊さず分割できる。
+		// 文字列を区切り文字 delim で分割する。空文字は要素 1 個の [""] を返す（これにより
+		// memberTypeOfName("") が空文字を返す）。delim は ASCII 1 文字（':'）で、UTF-8
+		// では継続バイトに現れないため日本語トークンを壊さず分割できる。
 		std::vector<std::string> split(const std::string& text, char delim)
 		{
 			std::vector<std::string> parts;
@@ -44,7 +41,7 @@ namespace HomeskzIfcImport::parse
 			return parts;
 		}
 
-		// text が prefix で始まるか（Python の str.startswith 相当）。
+		// text が prefix で始まるか。
 		bool startsWith(const std::string& text, const std::string& prefix)
 		{
 			return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
@@ -63,8 +60,8 @@ namespace HomeskzIfcImport::parse
 	std::optional<std::string> memberClassFromName(const std::string& name)
 	{
 		// IFC Name の種別トークン → 横架材クラス（ホームズ君 IFC の記録を信用する直接対応）。
-		// 床小梁・床大梁・甲乙梁はいずれも床組の梁なので床梁クラスにまとめる。Python 版
-		// _MEMBER_CLASS_BY_TYPE と一致させる。直接対応が無ければ std::nullopt。
+		// 床小梁・床大梁・甲乙梁はいずれも床組の梁なので床梁クラスにまとめる。直接対応が無け
+		// れば std::nullopt。
 		const std::string type = memberTypeOfName(name);
 		if (type == "土台")
 			return CLASS_DODAI;
@@ -95,7 +92,7 @@ namespace HomeskzIfcImport::parse
 		// 名前で判別できればそれを信用する。
 		if (const std::optional<std::string> cls = memberClassFromName(name))
 			return *cls;
-		// 判別できない部材は階と高さで推定する（Python 版 resolve_member_class と同じ順序）。
+		// 判別できない部材は階と高さで推定する。
 		if (index >= topIndex)
 			// 最上階（屋根）: 軒高付近は小屋梁、それより高ければ母屋。
 			return aboveEaves ? CLASS_MOYA : CLASS_KOYABARI;

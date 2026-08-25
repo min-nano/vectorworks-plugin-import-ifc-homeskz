@@ -24,9 +24,9 @@
 
 namespace HomeskzIfcTests
 {
-	// 試験用の片流れ屋根面: XY 平面上の 4m×3m 矩形が +Y 方向へ立ち上がる。軒（y=0）で
-	// z=1000、棟（y=3000）で z=2000 なので z(x, y) = 1000 + y/3 ⇒ 法線 ∝ (0, −1/3, 1)、
-	// 上向き単位法線は (0, −1, 3)/√10（Python 版テストと同じ平面）。
+	// 試験用の片流れ屋根面: XY 平面上の 4m×3m 矩形が +Y 方向へ立ち上がる。軒（y=0）で z=1000、
+	// 棟（y=3000）で z=2000 なので z(x, y) = 1000 + y/3 ⇒ 法線 ∝ (0, −1/3, 1)、上向き単位法線
+	// は (0, −1, 3)/√10。
 	inline HomeskzIfcImport::parse::RoofPlane shedPlane()
 	{
 		using HomeskzIfcImport::core::Vec3;

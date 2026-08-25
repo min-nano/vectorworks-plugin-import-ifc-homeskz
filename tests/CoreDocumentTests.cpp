@@ -24,8 +24,8 @@
 
 using namespace HomeskzIfcImport;
 
-// ---------------------------------------------------------------------------
-// core::Document / validateDocument
+// --------------------------------------------------------------------------
+// - core::Document / validateDocument
 // ---------------------------------------------------------------------------
 
 TEST(empty_document_has_current_version)
@@ -194,7 +194,7 @@ TEST(validate_rejects_floor_with_empty_class)
 
 TEST(validate_rejects_floor_with_too_few_boundary_points)
 {
-	// 3 点未満は面にならない（Python 版 _validate_floor と同じ関門）。
+	// 3 点未満は面にならない。
 	core::Document document;
 	core::FloorCommand floor = validFloor();
 	floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}};
@@ -581,7 +581,7 @@ TEST(validate_rejects_roof_with_empty_layer)
 
 TEST(validate_rejects_roof_with_too_few_boundary_points)
 {
-	// 3 点未満は面にならない（Python 版 _validate_roof と同じ関門）。
+	// 3 点未満は面にならない。
 	core::Document document;
 	core::RoofCommand roof = validRoof();
 	roof.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{4000.0, 0.0}};
@@ -858,8 +858,8 @@ TEST(validate_rejects_degenerate_ground_beam_modifier)
 	CHECK(!core::validateDocument(depth));
 }
 
-// ---------------------------------------------------------------------------
-// core::raiseModifierTop（地中梁の可視ソリッドを底盤へ呑み込ませる）
+// --------------------------------------------------------------------------
+// - core::raiseModifierTop（地中梁の可視ソリッドを底盤へ呑み込ませる）
 // ---------------------------------------------------------------------------
 
 TEST(raise_modifier_top_extends_along_the_slanted_side)
@@ -1244,8 +1244,8 @@ TEST(validate_rejects_tag_without_style)
 	CHECK(!core::validateDocument(document));
 }
 
-// ---------------------------------------------------------------------------
-// sectionHeightRange（軸組図の高さ範囲。docs/DEV-NOTES.md M14）
+// --------------------------------------------------------------------------
+// - sectionHeightRange（軸組図の高さ範囲。docs/DEV-NOTES.md M14）
 //
 // 断面ビューポートの高さ範囲は CreateSectionViewport の引数でしか与えられず、SDK に
 // 「無限」を指定する手段が無い。そこで取り込んだ要素の Z から建物を包む範囲を求める。
@@ -1357,8 +1357,8 @@ TEST(section_height_range_fails_without_elements)
 	CHECK(std::abs(end - (-2.0)) < 1e-6);
 }
 
-// ---------------------------------------------------------------------------
-// parse::buildDocument（読み込めないパスでは空の Document が返る）
+// --------------------------------------------------------------------------
+// - parse::buildDocument（読み込めないパスでは空の Document が返る）
 // ---------------------------------------------------------------------------
 
 TEST(build_document_skeleton_returns_valid_empty_document)
@@ -1446,8 +1446,8 @@ TEST(validate_accepts_section_mark_without_symbol)
 	CHECK(core::validateDocument(document));
 }
 
-// ---------------------------------------------------------------------------
-// core::Geometry（型が使えることの確認。数式そのものは GeometryTests で検証する）
+// --------------------------------------------------------------------------
+// - core::Geometry（型が使えることの確認。数式そのものは GeometryTests で検証する）
 // ---------------------------------------------------------------------------
 
 TEST(geometry_vectors_default_to_origin)

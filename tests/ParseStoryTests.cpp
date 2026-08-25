@@ -1,10 +1,10 @@
 //
 //	ParseStoryTests.cpp
 //
-//	ストーリ解析（src/parse/Story）＋希望レイヤ順の計算（src/core/desiredStoryLayerOrder）の
-//	単体テスト。VectorWorks SDK を一切 include せず、無 SDK のテストハーネス
-//	（TestFramework.h）で走る（CLAUDE.md「テスト方針」: core/ parse/ は無 SDK で単体
-//	テスト）。Python 版 test_ifc_story.py の意図を写す。
+//	ストーリ解析（src/parse/Story）＋希望レイヤ順の計算（src/core/desiredStoryLayerOrder）
+//	の単体テスト。VectorWorks SDK を一切 include せず、無 SDK のテストハーネス
+//	（TestFramework.h）で走る（CLAUDE.md「テスト方針」: core/ parse/ は無 SDK で単体テスト）。
+//	**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
 //	検証項目（docs/DEV-NOTES.md M3）: ローカル配置 Z 抽出・横架材天端オフセット（列挙順に
 //	依存しない最大負値）・ストーリ収集（Elevation 昇順・最上階判定・非 FL 除外）・
@@ -81,8 +81,8 @@ namespace
 	}
 } // namespace
 
-// ---------------------------------------------------------------------------
-// getLocalPlacementZ: ローカル配置 Z の抽出
+// --------------------------------------------------------------------------
+// - getLocalPlacementZ: ローカル配置 Z の抽出
 // ---------------------------------------------------------------------------
 
 TEST(get_local_placement_z_extracts_z)
@@ -144,8 +144,8 @@ TEST(get_local_placement_z_false_when_coords_2d)
 	CHECK(column != nullptr && !getLocalPlacementZ(model, *column, z));
 }
 
-// ---------------------------------------------------------------------------
-// collectStoryElements: 階に属する要素の列挙
+// --------------------------------------------------------------------------
+// - collectStoryElements: 階に属する要素の列挙
 // ---------------------------------------------------------------------------
 
 TEST(collect_story_elements_lists_contained_elements)
@@ -177,8 +177,8 @@ TEST(collect_story_elements_empty_when_storey_unreferenced)
 	CHECK(HomeskzIfcImport::parse::collectStoryElements(model, 20).empty());
 }
 
-// ---------------------------------------------------------------------------
-// resolveBeamTopOffset: 横架材天端オフセット
+// --------------------------------------------------------------------------
+// - resolveBeamTopOffset: 横架材天端オフセット
 // ---------------------------------------------------------------------------
 
 TEST(beam_top_offset_finds_column)
@@ -261,7 +261,7 @@ TEST(beam_top_offset_ignores_non_negative_z)
 TEST(beam_top_offset_returns_maximum_regardless_of_order)
 {
 	// 柱 -36 と床版 -48 の両方があるとき、床に最も近接した（0 以下の最大）-36 を返す。
-	// 列挙順に依らない決定性（Python 版 test_returns_maximum_offset_regardless_of_order）。
+	// 列挙順に依らない決定性。
 	Model const model =
 		loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,-36.));\n"
 						"#11=IFCAXIS2PLACEMENT3D(#10,$,$);\n"
@@ -276,8 +276,8 @@ TEST(beam_top_offset_returns_maximum_regardless_of_order)
 	CHECK(near(resolveBeamTopOffset(model, 20), -36.0));
 }
 
-// ---------------------------------------------------------------------------
-// collectStories: Elevation 昇順・最上階判定・非 FL 除外
+// --------------------------------------------------------------------------
+// - collectStories: Elevation 昇順・最上階判定・非 FL 除外
 // ---------------------------------------------------------------------------
 
 TEST(collect_stories_sorts_and_marks_top)
@@ -337,8 +337,8 @@ TEST(collect_stories_empty_returns_empty)
 	CHECK_EQ(collectStories(model).size(), static_cast<std::size_t>(0));
 }
 
-// ---------------------------------------------------------------------------
-// buildStoryCommands: 命令の組み立て（M3 は基本レベルのみ）
+// --------------------------------------------------------------------------
+// - buildStoryCommands: 命令の組み立て（M3 は基本レベルのみ）
 // ---------------------------------------------------------------------------
 
 TEST(build_commands_for_three_stories)
@@ -413,8 +413,8 @@ TEST(build_commands_empty_returns_empty)
 	CHECK_EQ(buildStoryCommands(model).size(), static_cast<std::size_t>(0));
 }
 
-// ---------------------------------------------------------------------------
-// desiredStoryLayerOrder: 希望レイヤ順の計算（SDK 非依存部）
+// --------------------------------------------------------------------------
+// - desiredStoryLayerOrder: 希望レイヤ順の計算（SDK 非依存部）
 // ---------------------------------------------------------------------------
 
 TEST(desired_layer_order_grid_top_then_stories_top_down)
@@ -502,9 +502,9 @@ TEST(reads_sample_house_fixture)
 
 TEST(moya_level_only_on_stories_with_moya_member)
 {
-	// 母屋（"木梁:母屋:…"）を 1 本だけ持つ最上階。母屋レベルが軒高の直上に積まれ、
-	// レイヤ "R-母屋" ができる。判定は**組み立てた横架材命令の配置先レイヤ**で、名前判定
-	// ではない（parse/Story.cpp の「Python 版との差異」）。
+	// 母屋（"木梁:母屋:…"）を 1 本だけ持つ最上階。母屋レベルが軒高の直上に積まれ、レイヤ
+	// "R-母屋" ができる。判定は**組み立てた横架材命令の配置先レイヤ**で、名前判定ではない
+	// （parse/Story.cpp の「レベルを足す条件」）。
 	const std::string moya = "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
 							 "#2=IFCDIRECTION((1.,0.,0.));\n"
 							 "#3=IFCAXIS2PLACEMENT3D(#1,#2,$);\n"
@@ -734,8 +734,7 @@ TEST(desired_layer_order_sends_roof_sheathing_to_background)
 }
 
 // ---------------------------------------------------------------------------
-// span 柱レイヤ名（"{from}to{to}-柱"。Python 版 test_ifc_column_span.py の
-// TestSpanLayerName / TestParseSpanLayer を移植。M8）
+// span 柱レイヤ名（"{from}to{to}-柱"。組み立てと分解の往復。M8）
 // ---------------------------------------------------------------------------
 
 TEST(span_layer_name_integer_levels_have_no_decimal)
@@ -788,8 +787,8 @@ TEST(parse_span_layer_rejects_malformed_core)
 	CHECK(!parseSpanLayer("1to2to3-柱", from, to));
 }
 
-// ---------------------------------------------------------------------------
-// span 柱レベル（柱の命令がある階にだけ足す。M8）
+// --------------------------------------------------------------------------
+// - span 柱レベル（柱の命令がある階にだけ足す。M8）
 // ---------------------------------------------------------------------------
 
 TEST(span_column_levels_are_stacked_on_top)

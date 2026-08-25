@@ -1,15 +1,14 @@
 //
 //	parse/FloorPost.h
 //
-//	Phase 1（IFC 解析）の床束モジュール。Python 版 ifc/floor_post.py に対応する
-//	（docs/DEV-NOTES.md M11「シンボル置換系」）。床束をハイブリッドシンボル "床束" として
-//	配置する core::SymbolCommand を組み立てる。
+//	Phase 1（IFC 解析）の床束モジュール（docs/DEV-NOTES.md M11「シンボル置換系」）。
+//	床束をハイブリッドシンボル "床束" として配置する core::SymbolCommand を組み立てる。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ
 //	グラフ（parse/Step）・横架材の配置／断面（parse/Member）・構造クラス
 //	（parse/StructuralClass）・基礎の有無（parse/Footing）だけで完結する。
 //
-//	解析の要点（Python 版 CLAUDE.md「床束」節）:
+//	解析の要点:
 //	  * **ホームズ君 EX の IFC に床束は出力されない**（オブジェクト・型・プロパティの
 //	    いずれにも現れない）。したがって IFC から抽出できず、要件どおり**大引の下に
 //	    一定間隔（910mm＝半間）で決め打ち配置**する。
@@ -26,14 +25,14 @@
 //	  * **配置**: 始点側の支持材芯から 910mm・1820mm・… と並べる。最後の床束と終点側の
 //	    支持材芯との間隔は 910mm 未満の半端でよい。支持材芯そのものには置かない（端部は
 //	    支持材が受ける）ので、支持材芯区間が 910mm 以下の大引には床束が 0 本になる。
-//	  * **立上り（基礎梁）と重なる位置には置かない**（overlapsFoundationWall）。910mm の
-//	    決め打ちで割り付けるため、大引が立上りを跨ぐ位置に床束が来ることがある。床束は
-//	    底盤の上に立つ部材なので、立上りのコンクリートと重なる位置には**そもそも立てられない**
-//	    （実機で立上りの上に床束が描かれていた）。しかもその位置の大引は立上り（とその上の
-//	    土台）が受けているので床束は要らない——**間隔を詰め替えるのではなく、その 1 本を
-//	    落とす**（両隣は立上りから 910mm 以内に収まる）。**Python 版にはこの判定が無い**
-//	    （立上りの命令を参照していないため。ホームズ君 IFC も床束を持たないので、この規則は
-//	    移植元ではなく実機の見た目が出どころ）。
+//	  * **立上り（基礎梁）と重なる位置には置かない**（overlapsFoundationWall）。910mm
+//	    の決め打ちで割り付けるため、大引が立上りを跨ぐ位置に床束が来ることがある。
+//	    床束は底盤の上に立つ部材なので、立上りのコンクリートと重なる位置には**そもそも立てられ
+//	    ない**（実機で立上りの上に床束が描かれていた）。しかもその位置の大引は立上り（とその上
+//	    の土台）が受けているので床束は要らない——**間隔を詰め替えるのではなく、その
+//	    1 本を落とす**（両隣は立上りから 910mm 以内に収まる）。この規則の出どころは IFC
+//	    ではなく**実機の見た目**（基礎伏図で立上りの帯の上に床束の記号が乗っていた）で、
+//	    判定には立上りの命令（parse/Context の walls）を使う。
 //	  * **高さは命令に持たせない**——基準は基礎底盤上端（底盤天端）で、配置先レイヤ
 //	    "F-床束" のストーリレベルが担う。
 //	  * **基礎が無いモデルでは空**（parse/Footing の hasFoundation）。配置先レイヤも
@@ -58,14 +57,13 @@ namespace HomeskzIfcImport::parse
 {
 	class Context;
 
-	// 置換するハイブリッドシンボル名（Python 版 SYMBOL_FLOOR_POST）。
+	// 置換するハイブリッドシンボル名。
 	inline constexpr const char* kSymbolFloorPost = "床束";
 
-	// 床束の配置間隔（mm）。IFC に床束が無いための決め打ち値（半間＝910mm。Python 版
-	// _POST_INTERVAL）。
+	// 床束の配置間隔（mm）。IFC に床束が無いための決め打ち値（半間＝910mm）。
 	inline constexpr double kFloorPostInterval = 910.0;
 
-	// 支持材芯の探索許容値（mm。Python 版 _PARALLEL_TOL / _SEG_TOL / _SHIN_MARGIN）。
+	// 支持材芯の探索許容値（mm）。
 	inline constexpr double kFloorPostParallelTol = 1e-9; // 芯線がほぼ平行な支持材は対象外
 	inline constexpr double kFloorPostSegTol = 1.0; // 交点が支持材区間からはみ出す余裕
 	inline constexpr double kFloorPostShinMargin = 1.0; // 大引端が支持材 footprint に載る余裕
@@ -76,15 +74,14 @@ namespace HomeskzIfcImport::parse
 	// 丸め誤差ぶんの余裕（立上りの外面ちょうどに来た床束を「重なっている」と読むための下駄）。
 	inline constexpr double kFloorPostWallMargin = 1.0;
 
-	// 同一直線上の大引の継手（継目）判定の許容値（Python 版 _COLLINEAR_ANGLE_TOL /
-	// _COLLINEAR_PERP_TOL / _JOINT_GAP_TOL）。
+	// 同一直線上の大引の継手（継目）判定の許容値。
 	inline constexpr double kCollinearAngleTol = 1e-6; // 方向の外積（sin 角）がこれ以下なら平行
 	inline constexpr double kCollinearPerpTol = 1.0; // 相手端の芯線からの直交距離
 	// 継手のすき間（支持材幅 ≈ 105mm）は半モジュール（455mm）を大きく下回り、別々の大引の
 	// 間隔（≥ 1 モジュール ≈ 1000mm）を大きく下回るので、この値で継手と別材を切り分けられる。
 	inline constexpr double kJointGapTol = kFloorPostInterval / 2.0;
 
-	// 支持材 1 本の平面芯線（Python 版 _SupportLine）。
+	// 支持材 1 本の平面芯線。
 	//   origin    … 芯線の始点
 	//   direction … 単位方向
 	//   length    … 芯線長
@@ -97,11 +94,11 @@ namespace HomeskzIfcImport::parse
 		double width = 0.0;
 	};
 
-	// 大引 1 本（または継手で統合した 1 連）の平面芯線（Python 版 _OhbikiRun）。
+	// 大引 1 本（または継手で統合した 1 連）の平面芯線。
 	//   start / end … 芯線の両端
 	//   width       … 断面幅。**この大引の下に立つ床束の平面の大きさ**として使い、立上りと
-	//                  重なる床束を落とすのに要る（overlapsFoundationWall）。継手で統合した
-	//                  連は成分の最大値を採る（安全側。Python 版は width を持たない）。
+	//                 重なる床束を落とすのに要る（overlapsFoundationWall）。継手で統合した
+	//                 連は成分の最大値を採る（安全側）。
 	struct OhbikiRun
 	{
 		core::Vec2 start;
@@ -109,36 +106,33 @@ namespace HomeskzIfcImport::parse
 		double width = 0.0;
 	};
 
-	// 支持材芯区間 1 つに沿った床束の配置位置（始点側の支持材芯からの距離）を返す
-	// （Python 版 _post_offsets）。910mm・1820mm・… と並べ、終点ちょうど以遠には置かない。
+	// 支持材芯区間 1 つに沿った床束の配置位置（始点側の支持材芯からの距離）を返す。910mm・
+	// 1820mm・… と並べ、終点ちょうど以遠には置かない。
 	std::vector<double> floorPostOffsets(double length);
 
-	// 大引を受ける支持材（土台・大引）の平面芯線を集める（Python 版
-	// _collect_support_lines）。座標はグリッド中心オフセット**前**の生値。土台だけでなく
-	// 他の大引も含めることで、二次大引の端も支持材芯を基準にできる（自身の芯線・同一直線上の
-	// 大引は shinReference の平行判定で除外される）。
+	// 大引を受ける支持材（土台・大引）の平面芯線を集める。座標はグリッド中心オフセット**前**
+	// の生値。土台だけでなく他の大引も含めることで、二次大引の端も支持材芯を基準にできる（自
+	// 身の芯線・同一直線上の大引は shinReference の平行判定で除外される）。
 	std::vector<SupportLine> collectSupportLines(const Model& model);
 
-	// 大引（CLASS_OOBIKI）の平面芯線を集める（Python 版 _collect_ohbiki_lines）。
-	// 座標はグリッド中心オフセット**前**の生値。
+	// 大引（CLASS_OOBIKI）の平面芯線を集める。座標はグリッド中心オフセット**前**の生値。
 	std::vector<OhbikiRun> collectOhbikiLines(const Model& model);
 
-	// 大引端 point を受けている支持材（土台・大引）の芯（交点）を返す（Python 版
-	// _shin_reference）。大引の芯線（点 point・方向 direction）と各支持材の芯線の交点のうち、
-	// 交点が支持材の区間内にあり、かつ大引端から半支持材厚（＋ kFloorPostShinMargin）以内に
-	// あるものの中で最も近い交点を返す。平行な支持材（自身の芯線・同一直線上の大引を含む）は
-	// 交点が定まらないため除外する。受けている支持材が無ければ nullopt。
+	// 大引端 point を受けている支持材（土台・大引）の芯（交点）を返す。大引の芯線（点 point・
+	// 方向 direction）と各支持材の芯線の交点のうち、交点が支持材の区間内にあり、
+	// かつ大引端から半支持材厚（＋ kFloorPostShinMargin）以内にあるものの中で最も近い交点を返
+	// す。平行な支持材（自身の芯線・同一直線上の大引を含む）は交点が定まらないため除外する。
+	// 受けている支持材が無ければ nullopt。
 	std::optional<core::Vec2> shinReference(const core::Vec2& point, const core::Vec2& direction,
 											const std::vector<SupportLine>& supports);
 
-	// 大引 a・b が同一直線上にあるとき、区間のすき間（重なり／接触は 0）を返す（Python 版
-	// _collinear_gap）。平行でない／別の直線上にある（直交距離が大きい）ときは nullopt。
+	// 大引 a・b が同一直線上にあるとき、区間のすき間（重なり／接触は 0）を返す。
+	// 平行でない／別の直線上にある（直交距離が大きい）ときは nullopt。
 	std::optional<double> collinearGap(const OhbikiRun& first, const OhbikiRun& second);
 
-	// 同一直線上で継手（すき間 ≤ kJointGapTol）の大引を 1 連に統合する（Python 版
-	// _merge_collinear_ohbiki）。Union-Find で連結成分にまとめ、各成分を先頭の芯線方向へ
-	// 全端点を射影した最小〜最大区間の 1 本にする。統合は入力順に依存しない（代表は最小
-	// インデックス、出力は代表インデックス昇順）。
+	// 同一直線上で継手（すき間 ≤ kJointGapTol）の大引を 1 連に統合する。Union-Find
+	// で連結成分にまとめ、各成分を先頭の芯線方向へ全端点を射影した最小〜最大区間の 1 本にする。
+	// 統合は入力順に依存しない（代表は最小インデックス、出力は代表インデックス昇順）。
 	std::vector<OhbikiRun> mergeCollinearOhbiki(const std::vector<OhbikiRun>& lines);
 
 	// 床束（position を中心・平面の大きさ postWidth）が立上り（基礎梁）の平面 footprint と
@@ -155,9 +149,9 @@ namespace HomeskzIfcImport::parse
 	bool overlapsFoundationWall(const core::Vec2& position, double postWidth,
 								const std::vector<core::WallCommand>& walls);
 
-	// STEP Model から床束のシンボル配置命令を組み立てる（Python 版
-	// build_floor_post_commands）。基礎が無いモデルでは空を返す。並びは大引の連ごと
-	// （collectOhbikiLines の #id 昇順に由来）→ 連内は始点からの距離順で決定的。
+	// STEP Model から床束のシンボル配置命令を組み立てる。基礎が無いモデルでは空を返す。
+	// 並びは大引の連ごと（collectOhbikiLines の #id 昇順に由来）→ 連内は始点からの距離順で決
+	// 定的。
 	std::vector<core::SymbolCommand> buildFloorPostCommands(const Model& model);
 
 	// 同上。共有コンテキストのセンタリング中心を使う（parse/Context.h）。

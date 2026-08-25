@@ -1,13 +1,12 @@
 //
 //	parse/Footing.cpp
 //
-//	基礎解析の実装。Python 版 ifc/footing.py の build_foundation_story_command /
-//	build_wall_commands / build_slab_commands（および統合・外面合わせ）に対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	基礎解析の実装（基礎ストーリ・立上り・底盤と、その統合・外面合わせ）。【SDK 非依存】
+//	ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
 //
 //	M10 で人通口（立上りの分割・切り下げ）・壁結合・地中梁（底盤のモディファイア）を足した。
-//	**配筋は保留**（Python 版 ifc/reinforcement.py。足すときは wallSectionKey / slabMergeKey
-//	にも足す。理由は各キーの doc コメント）。
+//	**配筋は保留**（足すときは wallSectionKey / slabMergeKey にも足す。理由は各キーの doc
+//	コメント）。
 //
 
 #include "parse/Footing.h"
@@ -52,7 +51,7 @@ namespace HomeskzIfcImport::parse
 			return name.size() >= prefix.size() && name.compare(0, prefix.size(), prefix) == 0;
 		}
 
-		// 多角形の面積（絶対値。Python 版 _shoelace_area）。
+		// 多角形の面積（絶対値）。
 		double shoelaceArea(const std::vector<Vec2>& pts)
 		{
 			double total = 0.0;
@@ -66,7 +65,7 @@ namespace HomeskzIfcImport::parse
 			return std::abs(total) / 2.0;
 		}
 
-		// 符号付き面積（CCW で正・CW で負。Python 版 _shoelace_signed）。
+		// 符号付き面積（CCW で正・CW で負）。
 		double shoelaceSigned(const std::vector<Vec2>& pts)
 		{
 			double total = 0.0;
@@ -80,9 +79,8 @@ namespace HomeskzIfcImport::parse
 			return total / 2.0;
 		}
 
-		// 許容値で丸めた整数キー（グループ化の鍵。Python 版 round(v / tol) / round(v, 3)）。
-		// std::llround は 0.5 を 0 から離れる向きへ丸める（Python の銀行家丸めとは境界だけ
-		// 挙動が違うが、実座標がちょうど半端に乗ることは無いので実害は無い）。
+		// 許容値で丸めた整数キー（グループ化の鍵）。std::llround は 0.5 を 0 から離れる向きへ
+		// 丸める（実座標がちょうど半端に乗ることは無いので、境界の丸め方は結果に影響しない）。
 		long long roundKey(double value, double tolerance)
 		{
 			return std::llround(value / tolerance);
@@ -90,10 +88,10 @@ namespace HomeskzIfcImport::parse
 
 		// --- 立上り（壁）------------------------------------------------------------
 
-		// 立上りの断面形状（統合可否）を表すキー（Python 版 _wall_section_key）。レイヤ・
-		// クラス・壁厚・上下端の高さ基準がすべて一致する立上り同士だけを統合対象にする。
-		// **配筋（M10）を足すときはこのキーにも足す**（配筋の違う立上りを 1 本へ統合すると
-		// 片方の配筋が失われるため。Python 版はキーに含めている）。
+		// 立上りの断面形状（統合可否）を表すキー。レイヤ・クラス・壁厚・上下端の高さ基準がす
+		// べて一致する立上り同士だけを統合対象にする。
+		// **配筋（M10）を足すときはこのキーにも足す**（配筋の違う立上りを 1 本へ統合すると片
+		// 方の配筋が失われるため）。
 		using WallKey = std::tuple<std::string, std::string, long long, int, std::string, long long,
 								   int, std::string, long long>;
 
@@ -142,8 +140,8 @@ namespace HomeskzIfcImport::parse
 			return true;
 		}
 
-		// 立上り a・b が同一直線上にあり、区間が重なる／接触するか（Python 版
-		// _walls_connected_collinear）。同一直線判定は wallsOnSameLine と共有する。
+		// 立上り a・b が同一直線上にあり、区間が重なる／接触するか。同一直線判定は
+		// wallsOnSameLine と共有する。
 		bool wallsConnectedCollinear(const WallCommand& a, const WallCommand& b)
 		{
 			double lo = 0.0;
@@ -165,9 +163,9 @@ namespace HomeskzIfcImport::parse
 			return a;
 		}
 
-		// 同一断面の立上り群のうち、同一直線上で連続するものを 1 本に統合する
-		// （Python 版 _merge_wall_group）。成分の代表は最小インデックスで、出力は代表
-		// インデックス昇順＝入力順に準ずる（列挙順に依存しない決定的な並び）。
+		// 同一断面の立上り群のうち、同一直線上で連続するものを 1 本に統合する。成分の代表は最
+		// 小インデックスで、出力は代表インデックス昇順＝入力順に準ずる（列挙順に依存しない決
+		// 定的な並び）。
 		std::vector<WallCommand> mergeWallGroup(const std::vector<WallCommand>& walls)
 		{
 			const std::size_t n = walls.size();
@@ -232,8 +230,8 @@ namespace HomeskzIfcImport::parse
 			return merged;
 		}
 
-		// 立上り a・b の壁芯の交点と、その交点が各壁芯の端点か内部かを求める（Python 版
-		// _wall_intersection）。平行（交点が定まらない）・区間外で交わる立上りは false。
+		// 立上り a・b の壁芯の交点と、その交点が各壁芯の端点か内部かを求める。平行（交点が定
+		// まらない）・区間外で交わる立上りは false。
 		//
 		// **端点許容は相手壁の半壁厚を含める**: ホームズ君 IFC の立上りは直交する相手壁の
 		// 外面までモデル化されるため、コーナーでは壁芯どうしの交点が壁の端から半壁厚ほど
@@ -294,9 +292,9 @@ namespace HomeskzIfcImport::parse
 			outAtEnd = hi >= la - kWallMergeDistTol;
 		}
 
-		// 自由端の終端柱（柱芯）を壁芯上に射影した基準点を返す（Python 版
-		// _terminal_column_base）。(ux, uy) は自由端で壁の外側を向く単位ベクトル。終端柱が
-		// 見つからなければ自由端そのものを返す（柱芯 = 自由端とみなす）。
+		// 自由端の終端柱（柱芯）を壁芯上に射影した基準点を返す。(ux, uy) は自由端で壁の外側を
+		// 向く単位ベクトル。終端柱が見つからなければ自由端そのものを返す（柱芯 =
+		// 自由端とみなす）。
 		Vec2 terminalColumnBase(const Vec2& point, double ux, double uy, double half,
 								const std::vector<ColumnCommand>& columns)
 		{
@@ -324,10 +322,9 @@ namespace HomeskzIfcImport::parse
 
 		// --- 人通口（立上りの切り下げ）------------------------------------------------
 
-		// 人通口の区間が乗っている立上りの添字を返す（Python 版 _find_opening_wall）。
-		// 開口が (1) 壁芯と平行で (2) 壁芯線上（直交距離が許容内）にあり (3) 開口の中点が
-		// 壁芯区間内にある立上りを探す。側並び（直交距離が半壁厚ある平行壁）には乗らない。
-		// 見つからなければ walls.size()。
+		// 人通口の区間が乗っている立上りの添字を返す。開口が (1) 壁芯と平行で (2)
+		// 壁芯線上（直交距離が許容内）にあり (3) 開口の中点が壁芯区間内にある立上りを探す。
+		// 側並び（直交距離が半壁厚ある平行壁）には乗らない。見つからなければ walls.size()。
 		std::size_t findOpeningWall(const std::vector<WallCommand>& walls,
 									const WallOpening& opening)
 		{
@@ -363,9 +360,9 @@ namespace HomeskzIfcImport::parse
 			return walls.size();
 		}
 
-		// 人通口の区間で立上りを分割／切り下げた列を返す（Python 版 _carve_wall_opening）。
-		// 開口の下端が底盤天端以下なら中間区間を出さず両側だけを、それより高ければ天端を
-		// 開口下端へ切り下げた中間区間を挟む。端部の長さ補正はしない（実寸法のまま）。
+		// 人通口の区間で立上りを分割／切り下げた列を返す。開口の下端が底盤天端以下なら中間区
+		// 間を出さず両側だけを、それより高ければ天端を開口下端へ切り下げた中間区間を挟む。
+		// 端部の長さ補正はしない（実寸法のまま）。
 		std::vector<WallCommand> carveWallOpening(const WallCommand& wall,
 												  const WallOpening& opening, double slabTopAbs,
 												  double beamTopAbs)
@@ -411,16 +408,16 @@ namespace HomeskzIfcImport::parse
 
 		// --- 壁結合 --------------------------------------------------------------------
 
-		// 立上りの天端高さの比較値（Python 版 _wall_top）。基礎の立上りはすべて同じレベル
-		// （1 階の横架材天端）へ上端をバインドするので、offset だけで高低を比べられる。
+		// 立上りの天端高さの比較値。基礎の立上りはすべて同じレベル（1 階の横架材天端）
+		// へ上端をバインドするので、offset だけで高低を比べられる。
 		double wallTop(const WallCommand& wall)
 		{
 			return wall.topBound.offset;
 		}
 
-		// 壁芯上の点が立上りの端点とみなせるか（Python 版 _wall_point_at_end）。端からの距離が
-		// 半壁厚 + kWallEndpointTol 以内なら端点（立上りは相手壁の外面まで伸びるため、コーナーの
-		// 交点が壁の端から半壁厚離れる。wallIntersection と同じ考え）。
+		// 壁芯上の点が立上りの端点とみなせるか。端からの距離が半壁厚 + kWallEndpointTol
+		// 以内なら端点（立上りは相手壁の外面まで伸びるため、コーナーの交点が壁の端から半壁厚
+		// 離れる。wallIntersection と同じ考え）。
 		bool wallPointAtEnd(const WallCommand& wall, const Vec2& point)
 		{
 			const Vec2 axis = wall.end - wall.start;
@@ -448,8 +445,8 @@ namespace HomeskzIfcImport::parse
 			return Vec2{junction.x + (delta.x * step), junction.y + (delta.y * step)};
 		}
 
-		// 交点から「残す側」（＝交点から遠い端点の方向）へ寄せたピック点を返す（Python 版
-		// _kept_side_pick）。壁芯長 0 の壁は交点をそのまま返す。
+		// 交点から「残す側」（＝交点から遠い端点の方向）へ寄せたピック点を返す。壁芯長
+		// 0 の壁は交点をそのまま返す。
 		Vec2 keptSidePick(const WallCommand& wall, const Vec2& junction, double offset)
 		{
 			const double d1 = std::hypot(wall.start.x - junction.x, wall.start.y - junction.y);
@@ -457,7 +454,7 @@ namespace HomeskzIfcImport::parse
 			return sidePick(wall, junction, offset, d2 >= d1);
 		}
 
-		// 立上りの壁芯方向ベクトルと長さ（Python 版 _line_dir）。
+		// 立上りの壁芯方向ベクトルと長さ。
 		void wallDirection(const WallCommand& wall, double& outDx, double& outDy, double& outLength)
 		{
 			outDx = wall.end.x - wall.start.x;
@@ -472,10 +469,10 @@ namespace HomeskzIfcImport::parse
 			std::vector<std::size_t> walls; // 添字昇順
 		};
 
-		// 交差する立上りのペアから、同一交点に集まる立上りの集合を作る（Python 版
-		// _wall_junctions）。全ペアの壁芯交点を求め、kJoinClusterTol 以内で近い交点を
-		// Union-Find で 1 つのジャンクションへ束ねる（3 本以上が 1 点に集まる場合、その全ペアの
-		// 交点は数学的に同一点になるので 1 つに束ねられる）。並びは代表エッジの添字昇順。
+		// 交差する立上りのペアから、同一交点に集まる立上りの集合を作る。全ペアの壁芯交点を求
+		// め、kJoinClusterTol 以内で近い交点を Union-Find で 1 つのジャンクションへ束ねる
+		// （3 本以上が 1 点に集まる場合、その全ペアの交点は数学的に同一点になるので
+		// 1 つに束ねられる）。並びは代表エッジの添字昇順。
 		std::vector<Junction> wallJunctions(const std::vector<WallCommand>& walls)
 		{
 			struct JoinEdge
@@ -544,15 +541,15 @@ namespace HomeskzIfcImport::parse
 
 		// --- 地中梁（底盤のモディファイア）----------------------------------------------
 
-		// 地中梁の押し出し方向（方位角）の水平単位ベクトル（Python 版 _ground_beam_axis_dir）。
+		// 地中梁の押し出し方向（方位角）の水平単位ベクトル。
 		Vec2 groundBeamAxisDir(const core::ModifierCommand& modifier)
 		{
 			const double phi = modifier.azimuth * std::numbers::pi / 180.0;
 			return Vec2{std::cos(phi), std::sin(phi)};
 		}
 
-		// 断面形状（統合可否）を表す正規化キー（Python 版 _ground_beam_profile_key）。頂点を
-		// 許容値で丸め、巻きを CCW に揃えたうえで辞書順最小の頂点から始まる回転に正規化する。
+		// 断面形状（統合可否）を表す正規化キー。頂点を許容値で丸め、巻きを CCW に揃えたうえで
+		// 辞書順最小の頂点から始まる回転に正規化する。
 		// **頂点の絶対 (u, v) 位置は保つ**ので、軸に対する横位置（u オフセット）の違う地中梁は
 		// 別キーになり統合されない。
 		using GroundBeamProfileKey = std::vector<std::pair<long long, long long>>;
@@ -581,8 +578,8 @@ namespace HomeskzIfcImport::parse
 			return key;
 		}
 
-		// 統合対象を粗くまとめるグループキー（高さ＝下端 z・方位角・断面形状。Python 版
-		// _ground_beam_group_key）。実際に同一軸線上かは modifiersCollinear が判定する。
+		// 統合対象を粗くまとめるグループキー（高さ＝下端 z・方位角・断面形状）。
+		// 実際に同一軸線上かは modifiersCollinear が判定する。
 		using GroundBeamKey = std::tuple<long long, long long, GroundBeamProfileKey>;
 
 		GroundBeamKey groundBeamGroupKey(const core::ModifierCommand& modifier)
@@ -592,9 +589,9 @@ namespace HomeskzIfcImport::parse
 								 groundBeamProfileKey(modifier)};
 		}
 
-		// 地中梁 a・b が同一軸線上（同一高さ）にあり区間が連続するか（Python 版
-		// _modifiers_collinear）。(1) 高さが一致、(2) 方向が平行、(3) b の原点が a の軸線上、
-		// (4) a の区間 [0, depth] と b の射影区間が重なる／接触する。
+		// 地中梁 a・b が同一軸線上（同一高さ）にあり区間が連続するか。(1) 高さが一致、(2)
+		// 方向が平行、(3) b の原点が a の軸線上、(4) a の区間 [0, depth] と b の射影区間が重
+		// なる／接触する。
 		bool modifiersCollinear(const core::ModifierCommand& a, const core::ModifierCommand& b)
 		{
 			if (std::abs(a.origin.z - b.origin.z) > kGroundBeamMergeTol)
@@ -614,9 +611,8 @@ namespace HomeskzIfcImport::parse
 			return hi >= -kGroundBeamMergeTol && lo <= a.depth + kGroundBeamMergeTol;
 		}
 
-		// 同一軸線上の地中梁群を 1 本の台形プリズムへ統合する（Python 版
-		// _merge_ground_beam_component）。先頭の軸方向へ全端点を射影し、最小〜最大区間を
-		// 新しい押し出しにする（断面・方位角・高さは先頭を引き継ぐ）。
+		// 同一軸線上の地中梁群を 1 本の台形プリズムへ統合する。先頭の軸方向へ全端点を射影し、
+		// 最小〜最大区間を新しい押し出しにする（断面・方位角・高さは先頭を引き継ぐ）。
 		core::ModifierCommand
 		mergeGroundBeamComponent(const std::vector<core::ModifierCommand>& members)
 		{
@@ -647,8 +643,8 @@ namespace HomeskzIfcImport::parse
 			return merged;
 		}
 
-		// 同一断面・同一向きの地中梁群のうち、同一軸線上で連続するものを統合する（Python 版
-		// _merge_ground_beam_group）。成分の代表は最小添字で、出力は代表添字昇順。
+		// 同一断面・同一向きの地中梁群のうち、同一軸線上で連続するものを統合する。
+		// 成分の代表は最小添字で、出力は代表添字昇順。
 		std::vector<core::ModifierCommand>
 		mergeGroundBeamGroup(const std::vector<core::ModifierCommand>& modifiers)
 		{
@@ -691,10 +687,10 @@ namespace HomeskzIfcImport::parse
 			return merged;
 		}
 
-		// 地中梁 1 本の押し出しソリッドを台形プリズムのモディファイアにする（Python 版
-		// _ground_beam_modifier）。押し出し方向の水平成分から方位角を求め、断面頂点を
-		// 幅軸 u（走る向きを +90 度回した水平単位ベクトル w）・鉛直軸 v（ワールド Z の差分）へ
-		// 取り直す。押し出しが水平でない（鉛直）ソリッドは地中梁でないので false。
+		// 地中梁 1 本の押し出しソリッドを台形プリズムのモディファイアにする。押し出し方向の水
+		// 平成分から方位角を求め、断面頂点を幅軸 u（走る向きを +90 度回した水平単位ベクトル w）
+		// ・鉛直軸 v（ワールド Z の差分）へ取り直す。押し出しが水平でない（鉛直）
+		// ソリッドは地中梁でないので false。
 		bool groundBeamModifier(const WorldSolid& solid, const Vec2& center,
 								core::ModifierCommand& out)
 		{
@@ -726,7 +722,7 @@ namespace HomeskzIfcImport::parse
 			return true;
 		}
 
-		// 多角形の重心（頂点の相加平均。Python 版 _polygon_centroid）。
+		// 多角形の重心（頂点の相加平均）。
 		Vec2 polygonCentroid(const std::vector<Vec2>& pts)
 		{
 			double sx = 0.0;
@@ -740,7 +736,7 @@ namespace HomeskzIfcImport::parse
 			return Vec2{sx / n, sy / n};
 		}
 
-		// 平面外形の代表点（重心・各頂点・各辺の中点。Python 版 _footprint_samples）。
+		// 平面外形の代表点（重心・各頂点・各辺の中点）。
 		std::vector<Vec2> footprintSamples(const std::vector<Vec2>& pts)
 		{
 			std::vector<Vec2> samples;
@@ -760,11 +756,11 @@ namespace HomeskzIfcImport::parse
 		// --- 底盤（スラブ）----------------------------------------------------------
 		//
 		// 多角形の和（union）は「頂点を丸めて厳密比較できるようにし、全辺を交点で細分し、
-		// すぐ右（外側）がどの多角形にも入らない有向辺だけを境界として残してつなぐ」という
-		// 手順で求める（Python 版 _polygon_union）。丸めた点をキーにするので、集合・辞書は
-		// 素直な std::set / std::map（辞書順比較）で足りる。
+		// すぐ右（外側）がどの多角形にも入らない有向辺だけを境界として残してつなぐ」
+		// という手順で求める。丸めた点をキーにするので、集合・辞書は素直な std::set /
+		// std::map（辞書順比較）で足りる。
 
-		// 交点計算で頂点を丸める小数桁（1e-4 mm = 0.1 ミクロン。Python 版 _SLAB_ROUND）。
+		// 交点計算で頂点を丸める小数桁（1e-4 mm = 0.1 ミクロン）。
 		constexpr double kSlabRoundScale = 1e4;
 
 		// 丸めた平面点。std::set / std::map の鍵にするので、Vec2 ではなく比較可能な pair。
@@ -782,7 +778,7 @@ namespace HomeskzIfcImport::parse
 			return roundPt(p.x, p.y);
 		}
 
-		// 境界を丸めた頂点列にし、末尾の閉じ重複・連続する同一点を除く（Python 版 _clean_ring）。
+		// 境界を丸めた頂点列にし、末尾の閉じ重複・連続する同一点を除く。
 		std::vector<Pt2> cleanRing(const std::vector<Vec2>& boundary)
 		{
 			std::vector<Pt2> out;
@@ -811,9 +807,9 @@ namespace HomeskzIfcImport::parse
 			return total / 2.0;
 		}
 
-		// 点 (x, y) が単純多角形の内部（境界は含めない近似）にあるか（Python 版
-		// _point_in_poly）。水平レイキャスト（半開ルール）。呼び出し側は辺から法線方向へ
-		// kSlabSideEps ずらした点を渡すので、辺ちょうどの縮退は問題にならない。
+		// 点 (x, y) が単純多角形の内部（境界は含めない近似）にあるか。水平レイキャスト（半開
+		// ルール）。呼び出し側は辺から法線方向へ kSlabSideEps ずらした点を渡すので、
+		// 辺ちょうどの縮退は問題にならない。
 		bool pointInPoly(double x, double y, const std::vector<Pt2>& poly)
 		{
 			bool inside = false;
@@ -834,9 +830,9 @@ namespace HomeskzIfcImport::parse
 			return inside;
 		}
 
-		// 線分 ab を分割すべき点（線分 cd との交点）を ab 上の点として返す（Python 版
-		// _seg_split_points）。非平行なら区間内の交点、共線なら cd の端点を ab 上へ射影した
-		// 点（区間内）。これで交差・T 字接合・共線オーバーラップの分割点をすべて拾う。
+		// 線分 ab を分割すべき点（線分 cd との交点）を ab 上の点として返す。非平行なら区間内
+		// の交点、共線なら cd の端点を ab 上へ射影した点（区間内）。これで交差・T 字接合・
+		// 共線オーバーラップの分割点をすべて拾う。
 		std::vector<Pt2> segSplitPoints(const Pt2& a, const Pt2& b, const Pt2& c, const Pt2& d)
 		{
 			const double rx = b.first - a.first;
@@ -874,7 +870,7 @@ namespace HomeskzIfcImport::parse
 			return out;
 		}
 
-		// 有向辺 a→b を分割点 cuts で細分した有向部分辺のリスト（Python 版 _split_edge）。
+		// 有向辺 a→b を分割点 cuts で細分した有向部分辺のリスト。
 		std::vector<Edge> splitEdge(const Pt2& a, const Pt2& b, const std::set<Pt2>& cuts)
 		{
 			const double rx = b.first - a.first;
@@ -914,8 +910,7 @@ namespace HomeskzIfcImport::parse
 			return out;
 		}
 
-		// 境界追跡で分岐点に来たとき、内側を左に保つ次の辺（最も時計回り）を選ぶ
-		// （Python 版 _next_boundary_edge）。
+		// 境界追跡で分岐点に来たとき、内側を左に保つ次の辺（最も時計回り）を選ぶ。
 		Edge nextBoundaryEdge(const Edge& current, const std::vector<Edge>& options)
 		{
 			const double reverse = std::atan2(current.first.second - current.second.second,
@@ -934,7 +929,7 @@ namespace HomeskzIfcImport::parse
 									 { return clockwise(lhs) < clockwise(rhs); });
 		}
 
-		// 閉リングから共線の中間点を除いた頂点列（Python 版 _simplify_ring）。
+		// 閉リングから共線の中間点を除いた頂点列。
 		std::vector<Pt2> simplifyRing(const std::vector<Pt2>& ring)
 		{
 			std::vector<Pt2> pts = ring;
@@ -955,8 +950,8 @@ namespace HomeskzIfcImport::parse
 			return out;
 		}
 
-		// 有向境界辺をつないで閉ループのリストにする（Python 版 _chain_boundary）。
-		// 開ループが生じたら false（統合できない成分として呼び出し側が元のまま残す）。
+		// 有向境界辺をつないで閉ループのリストにする。開ループが生じたら false（統合できない
+		// 成分として呼び出し側が元のまま残す）。
 		bool chainBoundary(const std::vector<Edge>& edges, std::vector<std::vector<Pt2>>& out)
 		{
 			std::map<Pt2, std::vector<Edge>> fromMap;
@@ -967,7 +962,7 @@ namespace HomeskzIfcImport::parse
 			std::vector<std::vector<Pt2>> loops;
 			while (!remaining.empty())
 			{
-				const Edge start = *remaining.begin(); // std::set は辞書順＝Python の min
+				const Edge start = *remaining.begin(); // std::set は辞書順なので決定的
 				Edge cur = start;
 				std::vector<Pt2> ring{cur.first};
 				while (true)
@@ -998,8 +993,8 @@ namespace HomeskzIfcImport::parse
 			return true;
 		}
 
-		// 任意向きの単純多角形群の和（union）の境界ループ（Python 版 _polygon_union）。
-		// 各多角形を CCW（内部が左）に揃え、全辺を他辺との交点で細分し、細分した有向辺のうち
+		// 任意向きの単純多角形群の和（union）の境界ループ。各多角形を CCW（内部が左）に揃え、
+		// 全辺を他辺との交点で細分し、細分した有向辺のうち
 		// **すぐ右（外側）がどの多角形にも含まれない**ものだけを境界として残してつなぐ
 		// （共有辺は両隣の多角形が右側に来て打ち消され、外周辺だけ残る）。開ループなら false。
 		bool polygonUnion(const std::vector<std::vector<Pt2>>& polys,
@@ -1069,7 +1064,7 @@ namespace HomeskzIfcImport::parse
 			return chainBoundary(boundary, out);
 		}
 
-		// 共線の線分 ab・cd の重なり長さ（共線でなければ 0。Python 版 _collinear_overlap）。
+		// 共線の線分 ab・cd の重なり長さ（共線でなければ 0）。
 		double collinearOverlap(const Pt2& a, const Pt2& b, const Pt2& c, const Pt2& d)
 		{
 			const double rx = b.first - a.first;
@@ -1096,7 +1091,7 @@ namespace HomeskzIfcImport::parse
 			return (hi > lo) ? (hi - lo) * rLen : 0.0;
 		}
 
-		// 線分 a→b 上の点 p の正規化パラメータ（0=a, 1=b。Python 版 _param_on）。
+		// 線分 a→b 上の点 p の正規化パラメータ（0=a, 1=b）。
 		double paramOn(const Pt2& a, const Pt2& b, const Pt2& p)
 		{
 			const double rx = b.first - a.first;
@@ -1107,8 +1102,8 @@ namespace HomeskzIfcImport::parse
 			return (((p.first - a.first) * rx) + ((p.second - a.second) * ry)) / length2;
 		}
 
-		// 底盤ポリゴン a・b が連続する（境界を共有 or 面で重なる）か（Python 版
-		// _polys_connected）。角（点）だけで接する場合は連続としない。
+		// 底盤ポリゴン a・b が連続する（境界を共有 or 面で重なる）か。角（点）だけで接する場
+		// 合は連続としない。
 		bool polysConnected(const std::vector<Pt2>& a, const std::vector<Pt2>& b)
 		{
 			const std::size_t na = a.size();
@@ -1141,9 +1136,9 @@ namespace HomeskzIfcImport::parse
 									   { return pointInPoly(p.first, p.second, a); });
 		}
 
-		// 底盤の統合可否を表すキー（Python 版 _slab_merge_key）。レイヤ・クラス・コンクリート
-		// 厚・高さ基準がすべて一致する底盤同士だけを統合対象にする。**配筋（M10）を足すときは
-		// このキーにも足す**（配筋の違う底盤を 1 枚へ統合すると片方が失われるため）。
+		// 底盤の統合可否を表すキー。レイヤ・クラス・コンクリート厚・高さ基準がすべて一致する
+		// 底盤同士だけを統合対象にする。**配筋（M10）を足すときはこのキーにも足す**（配筋の違
+		// う底盤を 1 枚へ統合すると片方が失われるため）。
 		using SlabKey =
 			std::tuple<std::string, std::string, long long, int, std::string, long long>;
 
@@ -1157,8 +1152,8 @@ namespace HomeskzIfcImport::parse
 						   roundKey(slab.bound.offset, kSlabMergeTol)};
 		}
 
-		// 連続する底盤（polysConnected）の連結成分をインデックス集合で返す（Python 版
-		// _slab_components）。成分は昇順・成分内も昇順で決定的。
+		// 連続する底盤（polysConnected）の連結成分をインデックス集合で返す。成分は昇順・
+		// 成分内も昇順で決定的。
 		std::vector<std::vector<std::size_t>>
 		slabComponents(const std::map<std::size_t, std::vector<Pt2>>& polys)
 		{
@@ -1207,8 +1202,8 @@ namespace HomeskzIfcImport::parse
 			return result;
 		}
 
-		// 底盤の辺 a→b に沿う立上りの半壁厚（該当が無ければ 0。Python 版
-		// _wall_half_thickness_for_edge）。最も重なりの大きい立上りの半壁厚を採る。
+		// 底盤の辺 a→b に沿う立上りの半壁厚（該当が無ければ 0）。最も重なりの大きい立上りの半
+		// 壁厚を採る。
 		double wallHalfThicknessForEdge(const Vec2& a, const Vec2& b,
 										const std::vector<WallCommand>& walls)
 		{
@@ -1248,7 +1243,7 @@ namespace HomeskzIfcImport::parse
 			return best;
 		}
 
-		// 点 p・方向 d の 2 直線の交点（平行なら false。Python 版 _line_intersection）。
+		// 点 p・方向 d の 2 直線の交点（平行なら false）。
 		bool lineIntersection(const Vec2& p1, const Vec2& d1, const Vec2& p2, const Vec2& d2,
 							  Vec2& out)
 		{
@@ -1262,9 +1257,8 @@ namespace HomeskzIfcImport::parse
 			return true;
 		}
 
-		// CCW ポリゴンの各辺 i を外向きへ dists[i] だけ移動した頂点列（Python 版
-		// _offset_polygon）。隣接する移動後の辺（直線）の交点を新しい頂点にするので、凸角は
-		// 外側へ伸び、凹角（入隅）は詰まる。
+		// CCW ポリゴンの各辺 i を外向きへ dists[i] だけ移動した頂点列。隣接する移動後の辺（直
+		// 線）の交点を新しい頂点にするので、凸角は外側へ伸び、凹角（入隅）は詰まる。
 		std::vector<Vec2> offsetPolygon(const std::vector<Vec2>& pts,
 										const std::vector<double>& dists)
 		{
@@ -1307,9 +1301,8 @@ namespace HomeskzIfcImport::parse
 			return out;
 		}
 
-		// 底盤外形の各辺を、沿っている立上りの外面まで外側へ広げた外形（Python 版
-		// _offset_boundary_to_walls）。立上りに沿う辺が 1 つも無ければ false（呼び出し側は
-		// 元の外形をそのまま使う）。
+		// 底盤外形の各辺を、沿っている立上りの外面まで外側へ広げた外形。立上りに沿う辺が
+		// 1 つも無ければ false（呼び出し側は元の外形をそのまま使う）。
 		bool offsetBoundaryToWalls(const std::vector<Vec2>& boundary,
 								   const std::vector<WallCommand>& walls, std::vector<Vec2>& out)
 		{
@@ -1472,8 +1465,8 @@ namespace HomeskzIfcImport::parse
 		if (!resolveSlabTopElevation(model, slabTop))
 			slabTop = 0.0; // 底盤の無い基礎（立上りのみ）は GL に揃える
 
-		// 基礎天端はアンカーボルト（M11）の高さ基準＝立上りの天端。立上りが無い基礎
-		// （底盤のみ）は底盤天端へフォールバックする（Python 版と同じ）。
+		// 基礎天端はアンカーボルト（M11）の高さ基準＝立上りの天端。立上りが無い基礎（底盤のみ）
+		// は底盤天端へフォールバックする。
 		double foundationTop = slabTop;
 		if (!resolveFoundationTopElevation(model, foundationTop))
 			foundationTop = slabTop;
@@ -1809,14 +1802,13 @@ namespace HomeskzIfcImport::parse
 				cmd.a = a;
 				cmd.b = b;
 				cmd.point = point;
-				// ピック点は**種別に関係なく**「残す側」へ寄せた壁芯上の点にする（Python 版
-				// `_kept_side_pick` と同じ。X 結合では VW が壁を詰めないので寄せは無害、という
-				// のが Python 版の実証済みの結論）。
+				// ピック点は**種別に関係なく**「残す側」へ寄せた壁芯上の点にする（X 結合では
+				// VW が壁を詰めないので、寄せても無害）。
 				//
-				// 一度「X 結合だけ交点そのものを渡す」ことを試した（交差では四方すべてが残るので
-				// 「残す側」に意味が無く、片側を指すせいで VW が交点で壁を切って別の立上りを
-				// 作っているのではないかと疑った）が、**実機で症状は変わらなかった**ので、
-				// 根拠の無い Python 版との差異を残さないためにこちらへ戻した（docs/DEV-NOTES.md M10）。
+				// 一度「X 結合だけ交点そのものを渡す」ことを試した（交差では四方すべてが残る
+				// ので「残す側」に意味が無く、片側を指すせいで VW が交点で壁を切って別の立上
+				// りを作っているのではないかと疑った）が、**実機で症状は変わらなかった**ので、
+				// 根拠の無い場合分けを残さないために元へ戻した（docs/DEV-NOTES.md M10）。
 				cmd.pickA = keptSidePick(walls[a], point, pickOffset);
 				cmd.pickB = keptSidePick(walls[b], point, pickOffset);
 				cmd.joinType = type;
@@ -2091,9 +2083,9 @@ namespace HomeskzIfcImport::parse
 		if (openings.empty())
 			return walls;
 
-		// 開口下端が底盤天端以下なら「その区間に立上りは生じない」。底盤が 1 枚も無い基礎
-		// （立上りだけ）では比較相手が無いので、常に「開口下端の方が高い」＝切り下げに
-		// なるよう十分小さい値を使う（Python 版が -inf を渡すのと同じ意図）。
+		// 開口下端が底盤天端以下なら「その区間に立上りは生じない」。底盤が 1 枚も無い基礎（立
+		// 上りだけ）では比較相手が無いので、常に「開口下端の方が高い」＝切り下げになるよう十
+		// 分小さい値を使う。
 		double slabTopAbs = -std::numeric_limits<double>::infinity();
 		double resolved = 0.0;
 		if (resolveSlabTopElevation(model, resolved))
@@ -2428,8 +2420,8 @@ namespace HomeskzIfcImport::parse
 			double topAbs = 0.0;
 			double thickness = 0.0;
 			zTopAndThickness(solid, topAbs, thickness);
-			// スラブスタイルのコンクリート厚は整数 mm に丸める（同厚の底盤が別スタイルへ
-			// 散らないようにする。Python 版 float(round(thickness)) と同値）。
+			// スラブスタイルのコンクリート厚は整数 mm に丸める（同厚の底盤が別スタイルへ散ら
+			// ないようにする）。
 			const double concrete = std::round(thickness);
 
 			std::vector<Vec2> boundary = footprint(solid);

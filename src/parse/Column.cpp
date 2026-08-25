@@ -1,8 +1,8 @@
 //
 //	parse/Column.cpp
 //
-//	柱解析の実装。Python 版 ifc/column.py の build_column_commands ほかに対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	柱解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse
+//	のみ依存）。
 //
 
 #include "parse/Column.h"
@@ -30,15 +30,15 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 小屋束の断面幅を合わせる対象＝小屋組の上端材（Python 版
-		// _KOYAZUKA_TOP_MEMBER_CLASSES）。母屋・棟木・登り梁だけを見る（軒桁等は対象外）。
+		// 小屋束の断面幅を合わせる対象＝小屋組の上端材。母屋・棟木・登り梁だけを見る（軒桁等
+		// は対象外）。
 		bool isKoyazukaTopMemberClass(const std::string& memberClass)
 		{
 			return memberClass == CLASS_MOYA || memberClass == CLASS_MUNAGI ||
 				   memberClass == CLASS_NOBORIBARI;
 		}
 
-		// 金物と柱を対応付ける XY 位置キー（Python 版 _position_key の round(…, 3) 相当）。
+		// 金物と柱を対応付ける XY 位置キー。
 		// 0.001mm 単位の整数へ丸めるので、浮動小数の最下位ビット差で照合が外れない。
 		using PositionKey = std::pair<long long, long long>;
 
@@ -47,8 +47,8 @@ namespace HomeskzIfcImport::parse
 			return PositionKey{std::llround(x * 1000.0), std::llround(y * 1000.0)};
 		}
 
-		// 階に属する柱頭・柱脚金物を XY 位置で索引する（Python 版 _collect_column_hardware）。
-		// 柱頭・柱脚金物は柱と同じストーリに含まれ、柱と同じ平面座標へ立方体として置かれる。
+		// 階に属する柱頭・柱脚金物を XY 位置で索引する。柱頭・柱脚金物は柱と同じストーリに含
+		// まれ、柱と同じ平面座標へ立方体として置かれる。
 		struct ColumnHardware
 		{
 			std::map<PositionKey, std::string> heads; // 柱頭金物
@@ -80,8 +80,8 @@ namespace HomeskzIfcImport::parse
 				const std::string spec = columnHardwareSpec(fastenerTypeName(model, *element));
 				if (spec.empty())
 					continue;
-				// 同じ位置に複数あれば**先に見つけたものを残す**（Python 版 setdefault。
-				// storyElements の並びは決定的なので結果も決定的）。
+				// 同じ位置に複数あれば**先に見つけたものを残す**（storyElements
+				// の並びは決定的なので結果も決定的）。
 				target->emplace(positionKey(position.x, position.y), spec);
 			}
 			return hardware;
@@ -96,8 +96,7 @@ namespace HomeskzIfcImport::parse
 		}
 	} // namespace
 
-	// 型は IfcRelDefinesByType 経由で辿る（Python 版は逆方向属性名がスキーマで異なるため
-	// IsTypedBy / IsDefinedBy の両方を走査するが、こちらは逆参照を辿るので 1 度で済む）。
+	// 型は IfcRelDefinesByType 経由で辿る。
 	std::string fastenerTypeName(const Model& model, const Entity& fastener)
 	{
 		for (const int relId : model.referrers(fastener.id))
@@ -173,8 +172,8 @@ namespace HomeskzIfcImport::parse
 	std::optional<double> memberWidthOnTop(double px, double py, double topAbs,
 										   const std::vector<MemberCommand>& members)
 	{
-		// 最良候補のキー（|材下端 − 小屋束上端|, 直交距離, 幅）を辞書順で比べる（Python 版と
-		// 同じ順序）。同点は幅の小さい方＝入力順に依存しない決定的な選択になる。
+		// 最良候補のキー（|材下端 − 小屋束上端|, 直交距離, 幅）を辞書順で比べる。
+		// 同点は幅の小さい方＝入力順に依存しない決定的な選択になる。
 		bool found = false;
 		double bestGap = 0.0;
 		double bestPerp = 0.0;

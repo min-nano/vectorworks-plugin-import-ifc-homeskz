@@ -1,20 +1,19 @@
 //
 //	parse/Column.h
 //
-//	Phase 1（IFC 解析）の柱モジュール。Python 版 ifc/column.py に対応する
-//	（docs/DEV-NOTES.md M8「柱」）。管柱・通し柱・小屋束——ホームズ君 IFC の IfcColumn を
-//	すべてここで解析し、core::ColumnCommand へ変換する。
+//	Phase 1（IFC 解析）の柱モジュール（docs/DEV-NOTES.md M8「柱」）。管柱・通し柱・
+//	小屋束——ホームズ君 IFC の IfcColumn をすべてここで解析し、core::ColumnCommand へ変換する。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ
 //	グラフ（parse/Step）・ストーリ（parse/Story）・横架材（parse/Member の断面抽出）・
 //	構造クラス（parse/StructuralClass）だけで完結する（CLAUDE.md「Phase 1」）。
 //
-//	解析の要点（Python 版 CLAUDE.md「柱」節）:
-//	  * **柱も横架材と同じ構造材ツール（StructuralMember）で描く**。拡張パッケージの
-//	    柱・間柱ツールはスクリプト操作に対して不安定なため、Python 版が標準の構造材ツールへ
-//	    置き換えた判断をそのまま引き継ぐ。種別の違いは**構造用途**（structuralUse）で表し、
-//	    管柱・通し柱＝柱（"4"）、小屋束＝小屋束（"5"）。小屋束を柱用途で描くと VW が柱の
-//	    高さモデルを適用して上端高さが崩れる。
+//	解析の要点:
+//	  * **柱も横架材と同じ構造材ツール（StructuralMember）で描く**。拡張パッケージの柱・
+//	    間柱ツールはスクリプトからの操作に対して不安定なので、柱も標準の構造材ツールで描く。
+//	    種別の違いは**構造用途**（structuralUse）で表し、管柱・通し柱＝柱（"4"）、
+//	    小屋束＝小屋束（"5"）。小屋束を柱用途で描くと VW が柱の高さモデルを適用して上端高さが
+//	    崩れる。
 //	  * **span（またぐレベル区間）レイヤ**: 柱は階のレイヤではなく "{from}to{to}-柱" へ置く
 //	    （parse/Story の spanLayerName）。from は柱が立つ床レベル（1 始まり・GL=0）、to は
 //	    上端が届く床／屋根面レベル（resolveColumnToLevel）。管柱は次階の整数、屋根束
@@ -32,12 +31,10 @@
 //	    **実際の下端／上端の絶対 Z までの距離**を入れる（小屋束の上端 offset ＝ 下端 offset
 //	    ＋ 柱高さ）。こうすると**どの柱でもバウンドの差＝柱高さ＝パス長**になる。
 //
-//	    ［Python 版との差異・意図的］Python 版は小屋束の上端 offset を下端と**同値**にする
-//	    （#116。VS では上下端バウンドの offset 差がパス由来の部材長へ加算され、柱高さが
-//	    二重になるため）。**VW 2026 の ISDK では二重加算は起きず、逆にバウンドが高さを
-//	    支配する**——M8 のローカル確認で、同値にした小屋束は（鉛直パスが正しくても）高さ 0
-//	    で描かれ、同じパスを持つ管柱はバウンドの差が実高さのため正しく描かれた。
-//	    したがって同値にはせず、常に差が柱高さになるようにする。
+//	    **上端 offset は「下端 ＋ 柱高さ」にする（小屋束も例外にしない）。** VW 2026 の
+//	    構造材 PIO では**バウンドの差が高さを支配する**ので、上下端を同値（差 0）にすると
+//	    鉛直パスが正しくても高さ 0 で描かれる——M8 のローカル確認で、同値にした小屋束だけが
+//	    高さ 0 になり、差が実高さの管柱は正しく描かれた（docs/DEV-NOTES.md M8）。
 //	  * **小屋束の断面はホームズ君 IFC の値が当てにならない**（適当な値）ので、直上に乗る
 //	    横架材（母屋・棟木・登り梁）の断面幅に合わせた正方形へ置き換える（90mm 幅の母屋なら
 //	    90mm 角）。上に乗る材が見つからない小屋束は IFC の断面をそのまま使う。
@@ -61,9 +58,8 @@ namespace HomeskzIfcImport::parse
 {
 	class Context;
 
-	// 構造材ツールの構造用途（StructuralUse）値。VW の構造用途プルダウンの並び順に
-	// 対応する（<自動>, 梁="1", 桁, 根太, 柱="4", 小屋束="5", …）。Python 版
-	// STRUCTURAL_USE_COLUMN / STRUCTURAL_USE_KOYAZUKA と同値。
+	// 構造材ツールの構造用途（StructuralUse）値。VW の構造用途プルダウンの並び順に対応する
+	// （<自動>, 梁="1", 桁, 根太, 柱="4", 小屋束="5", …）。
 	//
 	// **実体は core/Document.h**（記号 PIO も同じ値で柱／小屋束を見分けるため、両フェーズが
 	// 見てよい唯一の置き場に定義がある）。ここは解析側の読みやすい別名で、レベル種別名
@@ -80,18 +76,16 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kHardwareTopKeyword = "柱頭金物";
 	inline constexpr const char* kHardwareBottomKeyword = "柱脚金物";
 
-	// 柱の上端が上階の床（次階 FL）をこれだけ超えていれば通し柱とみなす（mm。Python 版
-	// THROUGH_COLUMN_TOL）。管柱の上端は次階の横架材天端＝次階 FL より梁背ぶん下で止まる
-	// ため、次階 FL をわずかに超えただけで通し柱と判定してよい。
+	// 柱の上端が上階の床（次階 FL）をこれだけ超えていれば通し柱とみなす（mm）。管柱の上端は次
+	// 階の横架材天端＝次階 FL より梁背ぶん下で止まるため、次階 FL をわずかに超えただけで通し
+	// 柱と判定してよい。
 	inline constexpr double kThroughColumnTol = 100.0;
 
-	// span の to レベル判定の許容値（mm。Python 版 SPAN_LEVEL_TOL）。柱上端が上階の横架材
-	// 下端に達したかの判定に使う。
+	// span の to レベル判定の許容値（mm）。柱上端が上階の横架材下端に達したかの判定に使う。
 	inline constexpr double kSpanLevelTol = 1.0;
 
-	// 小屋束の断面幅を「上に乗る横架材」へ合わせるときの許容値（mm。Python 版
-	// _KOYAZUKA_MATCH_*）。小屋束は材の直下に立つため直交距離はほぼ 0 だが、モデリング
-	// 誤差・傾斜梁の天端中央線ずれを吸収する。
+	// 小屋束の断面幅を「上に乗る横架材」へ合わせるときの許容値（mm）。小屋束は材の直下に立つ
+	// ため直交距離はほぼ 0 だが、モデリング誤差・傾斜梁の天端中央線ずれを吸収する。
 	inline constexpr double kKoyazukaMatchPerpTol = 40.0; // 平面の直交距離（半幅への上乗せ）
 	inline constexpr double kKoyazukaMatchAlongTol = 50.0; // 材の軸方向の範囲（棟束は端に立つ）
 	inline constexpr double kKoyazukaMatchZTol = 30.0; // 小屋束上端が材の Z 範囲に収まる余裕
@@ -100,56 +94,52 @@ namespace HomeskzIfcImport::parse
 	// 同じ述語を使う**ため、判定はここに一本化する。
 	bool isColumnElement(const Entity& element);
 
-	// IfcColumn.ObjectType を柱種別名へ変換する（Python 版 resolve_column_type）。
-	// 未設定（空文字）・未知の値は既定種別（管柱）として扱う。
+	// IfcColumn.ObjectType を柱種別名へ変換する。未設定（空文字）・未知の値は既定種別（管柱）
+	// として扱う。
 	std::string resolveColumnType(const std::string& objectType);
 
-	// 金物（IfcMechanicalFastener）の型（IfcMechanicalFastenerType）の名前を返す（Python 版
-	// _get_fastener_type_name）。型は IfcRelDefinesByType の逆参照から辿る。型が付いていない
-	// ／名前が無ければ空文字。referrers は #id 昇順なので、複数あっても常に同じものを選ぶ
-	// （決定的）。
+	// 金物（IfcMechanicalFastener）の型（IfcMechanicalFastenerType）の名前を返す。型は
+	// IfcRelDefinesByType の逆参照から辿る。型が付いていない／名前が無ければ空文字。
+	// referrers は #id 昇順なので、複数あっても常に同じものを選ぶ（決定的）。
 	//
 	// **ここに 1 つだけ置く**: 柱頭・柱脚金物（本モジュール）とアンカーボルト
-	// （parse/AnchorBolt）はどちらも IfcMechanicalFastener で、型名から仕様／シンボルを
-	// 決める。Python 版も ifc/anchor_bolt.py が ifc/column.py の同関数を import している。
+	// （parse/AnchorBolt）はどちらも IfcMechanicalFastener で、型名から仕様／シンボルを決める。
 	std::string fastenerTypeName(const Model& model, const Entity& fastener);
 
-	// 金物の型名を仕様文字列として返す（Python 版 _hardware_spec）。**加工しない**:
-	// ホームズ君側で金物定義をカスタマイズしていると型名が想定の "柱頭金物:(ろ)" 形式とは
-	// 限らず、コロン分割等の加工で文字列が失われる（空欄になる）ため、型名全体を登録する。
+	// 金物の型名を仕様文字列として返す。**加工しない**:ホームズ君側で金物定義をカスタマイズし
+	// ていると型名が想定の "柱頭金物:(ろ)" 形式とは限らず、コロン分割等の加工で文字列が失われ
+	// る（空欄になる）ため、型名全体を登録する。
 	std::string columnHardwareSpec(const std::string& typeName);
 
-	// 柱の構造材 ID を組み立てる（Python 版 make_column_member_id）。
-	// "{幅}×{成} - {種別}" を基本とし、柱頭・柱脚金物の仕様（空でないもの）を " / " 区切りで
-	// 連結する。構造材ツールに金物専用フィールドが無いため、金物仕様は ID に含めて保持する。
-	// 例: makeColumnMemberId(105, 105, "管柱", "柱頭金物:(ろ)", "柱脚金物:(い)")
-	//       → "105×105 - 管柱 / 柱頭金物:(ろ) / 柱脚金物:(い)"
+	// 柱の構造材 ID を組み立てる。"{幅}×{成} - {種別}" を基本とし、柱頭・柱脚金物の仕様（空で
+	// ないもの）を " / " 区切りで連結する。構造材ツールに金物専用フィールドが無いため、
+	// 金物仕様は ID に含めて保持する。例: makeColumnMemberId(105, 105, "管柱", "柱頭金物:(ろ)
+	// ", "柱脚金物:(い)")→ "105×105 - 管柱 / 柱頭金物:(ろ) / 柱脚金物:(い)"
 	std::string makeColumnMemberId(double width, double depth, const std::string& columnType,
 								   const std::string& topHardware,
 								   const std::string& bottomHardware);
 
-	// 要素のローカル配置から 2D 配置座標を取り出す（Python 版 _get_position_2d）。
-	// ホームズ君 IFC ではストーリの XY 原点が (0, 0) なので、ローカル配置 Location の XY を
-	// そのまま平面座標として扱える（横架材と同じ座標系・同じセンタリングで補正できる）。
-	// 取得できなければ false（親 PlacementRelTo は辿らない。M2 と同じ規約）。
+	// 要素のローカル配置から 2D 配置座標を取り出す。ホームズ君 IFC ではストーリの XY 原点が
+	// (0, 0) なので、ローカル配置 Location の XY をそのまま平面座標として扱える（横架材と同じ
+	// 座標系・同じセンタリングで補正できる）。取得できなければ false（親 PlacementRelTo
+	// は辿らない。M2 と同じ規約）。
 	bool columnPosition2D(const Model& model, const Entity& element, core::Vec2& out);
 
-	// 小屋束の直上に乗る横架材（母屋・棟木・登り梁）の断面幅を返す（Python 版
-	// _member_width_on_top）。小屋束の平面位置 (px, py)（センタリング済み）と上端の絶対 Z
-	// topAbs を横架材命令と突き合わせ、①平面 footprint が小屋束を覆い（中心線からの直交
-	// 距離が半幅＋許容以内）、②小屋束上端がその材の Z 範囲（下端〜天端）に収まる材を探す。
-	// ②は材が小屋束に乗る（材下端 ≈ 小屋束上端）場合も、小屋束が材を貫いて天端付近まで
-	// 伸びる（棟束）場合も拾う。最も小屋束上端に近い材の幅を返し、見つからなければ nullopt。
-	// 傾斜梁（登り梁）は天端 Z が軸方向に変化するため小屋束位置で補間する。判定は members の
-	// 並び順に依存しない決定的な結果になる。
+	// 小屋束の直上に乗る横架材（母屋・棟木・登り梁）の断面幅を返す。小屋束の平面位置 (px,
+	// py)（センタリング済み）と上端の絶対 Z topAbs を横架材命令と突き合わせ、①平面 footprint
+	// が小屋束を覆い（中心線からの直交距離が半幅＋許容以内）、②小屋束上端がその材の Z
+	// 範囲（下端〜天端）に収まる材を探す。②は材が小屋束に乗る（材下端 ≈ 小屋束上端）場合も、
+	// 小屋束が材を貫いて天端付近まで伸びる（棟束）場合も拾う。最も小屋束上端に近い材の幅を返
+	// し、見つからなければ nullopt。傾斜梁（登り梁）は天端 Z が軸方向に変化するため小屋束位置
+	// で補間する。判定は members の並び順に依存しない決定的な結果になる。
 	std::optional<double> memberWidthOnTop(double px, double py, double topAbs,
 										   const std::vector<core::MemberCommand>& members);
 
-	// 柱の上端が上階の床（次階 FL）を貫いていれば通し柱（true）とみなす（Python 版
-	// is_through_column）。上階が無い（最上階）ときは常に false。
+	// 柱の上端が上階の床（次階 FL）を貫いていれば通し柱（true）とみなす。上階が無い（最上階）
+	// ときは常に false。
 	bool isThroughColumn(double topAbs, const std::optional<double>& nextFloorElevation);
 
-	// 柱上端が届く span の to レベル（1 始まり）を求める（Python 版 resolve_column_to_level）。
+	// 柱上端が届く span の to レベル（1 始まり）を求める。
 	//
 	// baseIndex は 0 起点のストーリ番号で、柱の下端はその階の床（span では baseIndex + 1）に
 	// ある。上端 topAbs を base より上の各階の横架材（床梁）の**下端** beamBottoms と比べ、
@@ -164,8 +154,7 @@ namespace HomeskzIfcImport::parse
 								const std::vector<double>& beamBottoms,
 								const std::vector<double>& beamTops);
 
-	// column 命令から実在する span 柱レイヤを列挙した 1 件（Python 版 collect_column_spans の
-	// タプル (from, to, layer)）。
+	// column 命令から実在する span 柱レイヤを列挙した 1 件。
 	struct ColumnSpan
 	{
 		double from = 0.0;
@@ -173,17 +162,16 @@ namespace HomeskzIfcImport::parse
 		std::string layer;
 	};
 
-	// column 命令から実在する span 柱レイヤを (from, to) 昇順で列挙する（Python 版
-	// collect_column_spans）。重複は除く。伏図（M13）が切断レベルで表示レイヤを絞るのに使う。
+	// column 命令から実在する span 柱レイヤを (from, to) 昇順で列挙する。重複は除く。
+	// 伏図（M13）が切断レベルで表示レイヤを絞るのに使う。
 	std::vector<ColumnSpan> collectColumnSpans(const std::vector<core::ColumnCommand>& columns);
 
-	// span 柱レイヤを base ストーリ（0 起点 index ＝ from − 1）ごとにまとめる（Python 版
-	// collect_column_layers_by_story）。各ストーリのレイヤは (from, to) 昇順。parse/Story が
-	// 各ストーリへ span レベルを作るのに使う。
+	// span 柱レイヤを base ストーリ（0 起点 index ＝ from − 1）ごとにまとめる。各ストーリの
+	// レイヤは (from, to) 昇順。parse/Story が各ストーリへ span レベルを作るのに使う。
 	std::map<int, std::vector<std::string>>
 	collectColumnLayersByStory(const std::vector<core::ColumnCommand>& columns);
 
-	// STEP Model から柱の描画命令を組み立てる（Python 版 build_column_commands）。
+	// STEP Model から柱の描画命令を組み立てる。
 	//
 	// FL ストーリ（parse/Story の collectStories）を Elevation 昇順に走査し、各階に含まれる
 	// IfcColumn を解析する。配置先は span レイヤ（"{from}to{to}-柱"）で、座標は通り芯と同じ

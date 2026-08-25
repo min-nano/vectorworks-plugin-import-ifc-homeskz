@@ -1,8 +1,8 @@
 //
 //	parse/Roof.cpp
 //
-//	野地板解析の実装。Python 版 ifc/roof.py の build_roof_commands ほかに対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	野地板解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse
+//	のみ依存）。
 //
 
 #include "parse/Roof.h"
@@ -25,8 +25,7 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// footprint の広がり（軒方向・勾配方向）がこれ未満なら退化とみなしスキップ（mm。
-		// Python 版 _MIN_SPAN）。
+		// footprint の広がり（軒方向・勾配方向）がこれ未満なら退化とみなしスキップ（mm）。
 		constexpr double kMinSpan = 1.0;
 	} // namespace
 
@@ -54,9 +53,9 @@ namespace HomeskzIfcImport::parse
 		if (eSpan < kMinSpan || dSpan < kMinSpan)
 			return std::nullopt; // 退化した屋根版（線状・点状）
 
-		// 軒（屋根軸）の基準点 = 最も低い（最も +d 側＝軒側）の頂点。ここを通り e 方向に
-		// 伸ばした軸なら footprint 全体が軸の棟側（upslope 側）に来る。最大値が複数あるときは
-		// 最初の頂点を採る（Python 版 max(range(...), key=…) と同じ＝決定的）。
+		// 軒（屋根軸）の基準点 = 最も低い（最も +d 側＝軒側）の頂点。ここを通り e
+		// 方向に伸ばした軸なら footprint 全体が軸の棟側（upslope 側）に来る。最大値が複数ある
+		// ときは最初の頂点を採る。
 		std::size_t eaveIndex = 0;
 		double eaveD = 0.0;
 		for (std::size_t i = 0; i < plan.size(); ++i)
@@ -78,17 +77,14 @@ namespace HomeskzIfcImport::parse
 		const Vec2 axisEnd{ax + (slope.along.x * eSpan), ay + (slope.along.y * eSpan)};
 		const Vec2 upslope{ax - (slope.down.x * dSpan), ay - (slope.down.y * dSpan)};
 
-		// 野地板は垂木の上に載る（野地板下端＝垂木上端）。垂木下端が屋根版の平面に一致すること
-		// が Python 版の VW 上の実測で確認されているため、屋根版の平面（zAt）から垂木せい
-		// （屋根面に直交する寸法）を鉛直換算（÷cosθ、cosθ＝単位法線の鉛直成分＝slope.run）して
-		// 持ち上げた Z を軒（軸）の目標にする。
+		// 野地板は垂木の上に載る（野地板下端＝垂木上端）。垂木下端は屋根版の平面に一致する
+		// （実機で確認済み）ので、屋根版の平面（zAt）から垂木せい（屋根面に直交する寸法）
+		// を鉛直換算（÷cosθ、cosθ＝単位法線の鉛直成分＝slope.run）して持ち上げた Z を軒（軸）
+		// の目標にする。
 		//
-		// ［仕様メモ］Python 版 CLAUDE.md「野地板」節の文言は「垂木せい＋野地板厚を鉛直換算」と
-		// 読めるが、実装（ifc/roof.py）とそのテスト（test_ifc_roof.py の
-		// test_elevation_is_rafter_top_plus_sheathing）はいずれも**垂木せいのみ**を持ち上げて
-		// おり（＝軸 Z は野地板の下端＝垂木上端で、厚みは軸から上へ伸びる）、ローカル確認済みの
-		// 実装がこちら。実装＝実証済みの資産に合わせる（CLAUDE.md「移植の基本方針」）。厚みが
-		// 軸のどちら側へ伸びるかは VW 実機での目視確認項目にする（docs/DEV-NOTES.md M6）。
+		// ［仕様メモ］持ち上げるのは**垂木せいのみ**（＝軸 Z は野地板の下端＝垂木上端で、
+		// 厚みは軸から上へ伸びる）。野地板厚まで足すと 1 枚ぶん浮くので足さない。
+		// 厚みが軸のどちら側へ伸びるかは実機での目視確認項目（docs/DEV-NOTES.md M6）。
 		const double lift = kDefaultRafterHeight / slope.run;
 
 		RoofCommand cmd;

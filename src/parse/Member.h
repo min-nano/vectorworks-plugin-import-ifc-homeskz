@@ -1,15 +1,15 @@
 //
 //	parse/Member.h
 //
-//	Phase 1（IFC 解析）の横架材モジュール。Python 版 ifc/member.py に対応する
-//	（docs/DEV-NOTES.md M7「横架材」）。土台・梁・桁・母屋・棟木・登り梁——ホームズ君 IFC の
-//	IfcBeam / IfcMember をすべてここで解析し、core::MemberCommand へ変換する。
+//	Phase 1（IFC 解析）の横架材モジュール（docs/DEV-NOTES.md M7「横架材」）。土台・梁・桁・
+//	母屋・棟木・登り梁——ホームズ君 IFC の IfcBeam / IfcMember をすべてここで解析し、
+//	core::MemberCommand へ変換する。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ
 //	グラフ（parse/Step）・幾何（parse/IfcGeometry）・ストーリ（parse/Story）・構造クラス
 //	（parse/StructuralClass）だけで完結する（CLAUDE.md「Phase 1」）。
 //
-//	解析の要点（Python 版 CLAUDE.md「横架材」節）:
+//	解析の要点:
 //	  * **基準点補正**: ホームズ君 IFC の梁は**断面中心線**（プロファイル中心の押し出し軸）で
 //	    配置されるが、VW 構造材ツールの断面基準点は**左右中央・上端＝天端中央**。そこで
 //	    断面中心線を「軸に直交し軸を含む鉛直面内で上向き」の方向へ せい/2 持ち上げた
@@ -58,32 +58,30 @@ namespace HomeskzIfcImport::parse
 {
 	class Context;
 
-	// 母屋（棟木を含む小屋組の上端材）・登り梁のレベル／レイヤ名（Python 版 LEVEL_MOYA /
-	// LEVEL_NOBORIBARI）。配置先レイヤは "{接頭辞}-母屋" / "{接頭辞}-登り梁"。文字列の定義は
-	// core/Document.h（命令セットの語彙）にあり、ここはその再公開（parse/Story.h の
-	// kLevelFL ほか、parse/Rafter.h の kLevelTaruki と同じ流儀）。
+	// 母屋（棟木を含む小屋組の上端材）・登り梁のレベル／レイヤ名。配置先レイヤは
+	// "{接頭辞}-母屋" / "{接頭辞}-登り梁"。文字列の定義は core/Document.h（命令セットの語彙）
+	// にあり、ここはその再公開（parse/Story.h の kLevelFL ほか、parse/Rafter.h の
+	// kLevelTaruki と同じ流儀）。
 	inline constexpr const char* kLevelMoya = core::kLevelMoya;
 	inline constexpr const char* kLevelNoboribari = core::kLevelNoboribari;
 
-	// 軸の XY 成分がこれ以下の材は鉛直材（横架材でない＝火打等）とみなしスキップする
-	// （Python 版 _VERTICAL_AXIS_TOL）。
+	// 軸の XY 成分がこれ以下の材は鉛直材（横架材でない＝火打等）とみなしスキップする。
 	inline constexpr double kVerticalAxisTol = 1e-9;
 
-	// 両端の天端 Z の差がこの値以下なら水平材とみなす（mm。Python 版 _SLOPE_TOL）。
-	// クラス推定の「軒高超え」判定と、食い込み調整の対象外判定（傾斜梁）に使う。
+	// 両端の天端 Z の差がこの値以下なら水平材とみなす（mm）。クラス推定の「軒高超え」判定と、
+	// 食い込み調整の対象外判定（傾斜梁）に使う。
 	inline constexpr double kSlopeTol = 1.0;
 
 	// 要素が横架材（IfcBeam / IfcMember）か。**母屋・登り梁の判定（parse/Story の
 	// レベル追加）と解析本体で同じ述語を使う**ため、ここに一本化する。
 	bool isMemberElement(const Entity& element);
 
-	// 断面寸法と材種名から構造材 ID を組み立てる（Python 版 make_member_id）。
-	// 例: makeMemberId(120, 180, "杉対称異等級集成材E105-F355")
-	//       → "120×180 - 杉対称異等級集成材E105-F355"
-	//     材種が空なら "120×180"。寸法は整数へ丸める（表示用の ID なので端数不要）。
+	// 断面寸法と材種名から構造材 ID を組み立てる。例: makeMemberId(120, 180, "杉対称異等級集
+	// 成材 E105-F355")→ "120×180 - 杉対称異等級集成材E105-F355"材種が空なら "120×180"。
+	// 寸法は整数へ丸める（表示用の ID なので端数不要）。
 	std::string makeMemberId(double width, double height, const std::string& material);
 
-	// 横架材のローカル配置（Python 版 _get_placement_3d の戻り）。
+	// 横架材のローカル配置。
 	//   x / y      … 配置点（断面中心）のワールド XY
 	//   z / hasZ   … 配置点のローカル Z。Location の座標が 2 つしか無ければ hasZ=false で、
 	//                 呼び出し側がレイヤ基準高さへフォールバックする
@@ -98,14 +96,13 @@ namespace HomeskzIfcImport::parse
 		core::Vec3 axis{1.0, 0.0, 0.0};
 	};
 
-	// 要素のローカル配置から MemberPlacement を得る（Python 版 _get_placement_3d）。
-	// ObjectPlacement が無い／IfcLocalPlacement でない／RelativePlacement が
-	// IfcAxis2Placement3D でない／Location が無いときは false。親 PlacementRelTo は辿らない
-	// （parse/IfcGeometry の resolveObjectPlacement と同じ規約。階高は描画側が反映する）。
+	// 要素のローカル配置から MemberPlacement を得る。ObjectPlacement が無い／
+	// IfcLocalPlacement でない／RelativePlacement が IfcAxis2Placement3D でない／Location
+	// が無いときは false。親 PlacementRelTo は辿らない（parse/IfcGeometry の
+	// resolveObjectPlacement と同じ規約。階高は描画側が反映する）。
 	bool memberPlacement3D(const Model& model, const Entity& element, MemberPlacement& out);
 
-	// 矩形断面の寸法（Python 版 _get_profile_dims の戻り）。width=XDim・height=YDim・
-	// length=押し出し長。
+	// 矩形断面の寸法。width=XDim・height=YDim ・ length=押し出し長。
 	struct MemberProfile
 	{
 		double width = 0.0;
@@ -113,14 +110,13 @@ namespace HomeskzIfcImport::parse
 		double length = 0.0;
 	};
 
-	// 要素の Body 表現から矩形断面の寸法を得る（Python 版 _get_profile_dims）。
+	// 要素の Body 表現から矩形断面の寸法を得る。
 	// **RepresentationIdentifier が "Body" の表現の、素の IfcExtrudedAreaSolid ＋
 	// IfcRectangleProfileDef だけ**を見る（差演算は剥がさない。剥がすと登り梁の任意断面と
 	// 見分けが付かなくなる）。見つからなければ false ＝ 呼び出し側が登り梁経路へ回す。
 	bool memberProfileDims(const Model& model, const Entity& element, MemberProfile& out);
 
-	// 任意断面（平行四辺形の側面シルエット）を厚み方向へ押し出した傾斜梁＝登り梁の幾何
-	// （Python 版 _sloped_member_geometry の戻り）。
+	// 任意断面（平行四辺形の側面シルエット）を厚み方向へ押し出した傾斜梁＝登り梁の幾何。
 	//   origin … 中心軸の一端のワールド座標（XY 絶対・Z はストーリ相対）
 	//   axis   … 中心軸の単位ベクトル（origin → もう一端）
 	//   width  … 幅（＝押し出し長＝材の厚み）
@@ -135,22 +131,21 @@ namespace HomeskzIfcImport::parse
 		double length = 0.0;
 	};
 
-	// 要素から登り梁の幾何を導出する（Python 版 _sloped_member_geometry）。
+	// 要素から登り梁の幾何を導出する。
 	// **矩形断面（通常の横架材が memberProfileDims で処理する）・4 頂点でないプロファイル
 	// （火打の footprint や筋かいの 6 頂点）・解釈不能な材は false**。
 	bool slopedMemberGeometry(const Model& model, const Entity& element, SlopedMemberGeometry& out);
 
-	// 要素に関連付けられた材種名を返す（Python 版 _get_material_name）。
-	// IfcRelAssociatesMaterial を逆参照から辿り、IfcMaterial / IfcMaterialList /
-	// IfcMaterialLayerSetUsage の順に名前を拾う。見つからなければ空文字。
-	// 逆参照は #id 昇順なので、エンティティ列挙順に依存しない決定的な結果になる。
+	// 要素に関連付けられた材種名を返す。IfcRelAssociatesMaterial を逆参照から辿り、
+	// IfcMaterial / IfcMaterialList / IfcMaterialLayerSetUsage の順に名前を拾う。
+	// 見つからなければ空文字。逆参照は #id 昇順なので、エンティティ列挙順に依存しない決定的な
+	// 結果になる。
 	std::string memberMaterialName(const Model& model, const Entity& element);
 
 	// 端点 point・外向き単位ベクトル outward が、相手梁の矩形（中心線の始点 otherStart・
-	// 単位軸 otherAxis・長さ otherLength・半幅 otherHalfWidth）に食い込む量を返す
-	// （Python 版 _penetration_depth）。端点が矩形の内部にあるとき、端点を −outward 方向へ
-	// 引き戻して相手の手前の面まで出すのに必要な距離（>= 0）。食い込んでいない・ほぼ平行
-	// （＝食い込みでなく継ぎ手）なら 0。
+	// 単位軸 otherAxis・長さ otherLength・半幅 otherHalfWidth）に食い込む量を返す。
+	// 端点が矩形の内部にあるとき、端点を −outward 方向へ引き戻して相手の手前の面まで出すのに
+	// 必要な距離（>= 0）。食い込んでいない・ほぼ平行（＝食い込みでなく継ぎ手）なら 0。
 	//
 	// T 字（相手の途中に突き当たる）と L 字（相手の端部で突き当たる）を区別せず、軸方向の
 	// 位置は相手の端まで許容する。勝ち負けの判定は呼び出し側が相互の食い込み量を比べて行う。
@@ -159,8 +154,7 @@ namespace HomeskzIfcImport::parse
 								  const core::Vec2& otherStart, const core::Vec2& otherAxis,
 								  double otherLength, double otherHalfWidth);
 
-	// 横架材同士の食い込み（T 字・L 字の取り合い）を解消するよう端部を詰める
-	// （Python 版 resolve_member_interferences）。
+	// 横架材同士の食い込み（T 字・L 字の取り合い）を解消するよう端部を詰める。
 	//
 	// ある横架材の端点が別の横架材の矩形に食い込み、かつ配置レイヤが一致し Z 範囲
 	// （[天端 − せい, 天端]）が重なる場合、相手の手前の面まで端点を引き戻す。ただし相互の
@@ -174,7 +168,7 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::MemberCommand>
 	resolveMemberInterferences(const std::vector<core::MemberCommand>& commands);
 
-	// STEP Model から横架材の描画命令を組み立てる（Python 版 build_member_commands）。
+	// STEP Model から横架材の描画命令を組み立てる。
 	//
 	// FL ストーリ（parse/Story の collectStories）を Elevation 昇順に走査し、各階に含まれる
 	// IfcBeam / IfcMember を解析する。配置先レイヤは一般階が "n-横架材天端"、最上階が

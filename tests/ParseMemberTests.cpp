@@ -1,10 +1,9 @@
 //
 //	ParseMemberTests.cpp
 //
-//	横架材解析（src/parse/Member）の単体テスト。VectorWorks SDK を一切 include せず、
-//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
-//	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_member.py のケースを
-//	1 対 1 で写している（期待値は手書き。docs/DEV-NOTES.md「Python 版出力との比較はしない」）。
+//	横架材解析（src/parse/Member）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK
+//	のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:core/ parse/ は無 SDK
+//	で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
 //	検証項目（docs/DEV-NOTES.md M7）: 配置と断面の抽出・構造材 ID・材種名・**天端中央線への
 //	基準点補正**（水平材と軸直交切りの傾斜材）・梁ごとのローカル Z からの高さ・レイヤ基準
@@ -59,8 +58,7 @@ using HomeskzIfcTests::near;
 namespace
 {
 	// -----------------------------------------------------------------------
-	// 合成 IFC（STEP テキスト）の組み立て。Python 版 test_ifc_member.py の
-	// make_storey / make_beam / make_sloped_beam / make_grid_axis に対応する。
+	// 合成 IFC（STEP テキスト）の組み立て（ストーリ・梁・傾斜梁・通り芯の最小構成）。
 	// -----------------------------------------------------------------------
 
 	// #id を採番しながら STEP 行を溜めるだけの器。
@@ -124,7 +122,7 @@ namespace
 				 ref(storey) + ")");
 	}
 
-	// 矩形断面の横架材（Python 版 make_beam）。
+	// 矩形断面の横架材。
 	struct BeamSpec
 	{
 		double ox = 0.0;
@@ -173,7 +171,7 @@ namespace
 		return beam;
 	}
 
-	// 登り梁（任意断面＝平行四辺形の側面を厚み方向へ押し出した材。Python 版 make_sloped_beam）。
+	// 登り梁（任意断面＝平行四辺形の側面を厚み方向へ押し出した材）。
 	struct SlopedBeamSpec
 	{
 		double ox = 0.0;
@@ -284,7 +282,7 @@ namespace
 	}
 
 	// -----------------------------------------------------------------------
-	// 命令レベルのテスト用ヘルパー（Python 版 _member に対応）
+	// 命令レベルのテスト用ヘルパー
 	// -----------------------------------------------------------------------
 	struct MemberSpec
 	{
@@ -341,8 +339,8 @@ namespace
 	}
 } // namespace
 
-// ---------------------------------------------------------------------------
-// makeMemberId
+// --------------------------------------------------------------------------
+// - makeMemberId
 // ---------------------------------------------------------------------------
 
 TEST(make_member_id_joins_section_and_material)
@@ -361,8 +359,8 @@ TEST(make_member_id_rounds_dimensions)
 	CHECK_EQ(makeMemberId(119.6, 180.4, ""), "120×180");
 }
 
-// ---------------------------------------------------------------------------
-// memberPlacement3D / memberProfileDims / memberMaterialName
+// --------------------------------------------------------------------------
+// - memberPlacement3D / memberProfileDims / memberMaterialName
 // ---------------------------------------------------------------------------
 
 TEST(member_placement_reads_origin_and_axis)
@@ -486,7 +484,7 @@ TEST(member_material_name_empty_without_association)
 
 TEST(member_material_name_reads_material_list)
 {
-	// IfcMaterialList は先頭の材種名を採る（Python 版 _get_material_name の分岐）。
+	// IfcMaterialList は先頭の材種名を採る。
 	StepText step;
 	const int storey = makeStorey(step, "1FL", 0.0);
 	const int beam = makeBeam(step, storey, BeamSpec{});
@@ -754,8 +752,8 @@ TEST(sloped_geometry_false_for_degenerate_profile)
 	CHECK(element != nullptr && !slopedMemberGeometry(model, *element, geometry));
 }
 
-// ---------------------------------------------------------------------------
-// buildMemberCommands: レイヤ・高さ・バインド
+// --------------------------------------------------------------------------
+// - buildMemberCommands: レイヤ・高さ・バインド
 // ---------------------------------------------------------------------------
 
 TEST(build_member_commands_empty_model_is_empty)
@@ -1233,8 +1231,8 @@ TEST(build_trims_interfering_beam_end)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// resolveMemberInterferences
+// --------------------------------------------------------------------------
+// - resolveMemberInterferences
 // ---------------------------------------------------------------------------
 
 TEST(trims_t_joint_end_to_face)
@@ -1429,8 +1427,8 @@ TEST(non_interfering_beam_unchanged)
 	CHECK(near(result[1].end.x, 200.0));
 }
 
-// ---------------------------------------------------------------------------
-// slopedMemberGeometry（登り梁の任意断面）
+// --------------------------------------------------------------------------
+// - slopedMemberGeometry（登り梁の任意断面）
 // ---------------------------------------------------------------------------
 
 TEST(sloped_geometry_derives_section_and_centre_axis)
@@ -1597,8 +1595,8 @@ TEST(noboribari_uses_vertical_cut_top_without_xy_shift)
 
 TEST(noboribari_level_added_to_its_story)
 {
-	// 登り梁の命令がある階にだけ "登り梁" レベル（＝レイヤ "1-登り梁"）ができる
-	// （parse/Story が命令の配置先レイヤで判定する。Story.cpp の「Python 版との差異」）。
+	// 登り梁の命令がある階にだけ "登り梁" レベル（＝レイヤ "1-登り梁"）ができる（parse/Story
+	// が命令の配置先レイヤで判定する。Story.cpp の「レベルを足す条件」）。
 	StepText step;
 	const int storey = makeStorey(step, "1FL", 473.0);
 	makeStorey(step, "RFL", 5973.0);

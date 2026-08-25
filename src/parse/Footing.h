@@ -1,9 +1,9 @@
 //
 //	parse/Footing.h
 //
-//	Phase 1（IFC 解析）の基礎モジュール。Python 版 ifc/footing.py に対応する
-//	（docs/DEV-NOTES.md M9「基礎（立上り＝壁・底盤＝スラブ）＋基礎ストーリ」）。ホームズ君 IFC の
-//	基礎要素（IfcFooting と底盤の IfcSlab）を Name で分類し、別々のオブジェクトへ変換する。
+//	Phase 1（IFC 解析）の基礎モジュール（docs/DEV-NOTES.md M9「基礎（立上り＝壁・底盤＝スラブ）
+//	＋基礎ストーリ」）。ホームズ君 IFC の基礎要素（IfcFooting と底盤の IfcSlab）を Name
+//	で分類し、別々のオブジェクトへ変換する。
 //
 //	  * 立上り（基礎梁。Name が "基礎梁" 始まりの IfcFooting）→ **壁**（core::WallCommand）
 //	  * 底盤（Name に "底盤" を含む IfcSlab / IfcFooting）→ **スラブ**（core::SlabCommand）
@@ -18,12 +18,11 @@
 //	グラフ（parse/Step）・幾何（parse/IfcGeometry）・ストーリ（parse/Story）だけで完結し、
 //	通常の C++ ツールチェインでコンパイル・単体テストできる（CLAUDE.md「Phase 1」）。
 //
-//	【基礎ストーリのレベルは 4 つ】スタック順（上→下）に 基礎天端（アンカーボルト）→
-//	GL（立上り）→ 床束 → 底盤天端 で、Python 版と同じ構成。M9 の時点では描画対象のある
-//	2 つ（GL・底盤天端）だけを作っていたが、**M11 でアンカーボルト・床束を導入したので
-//	残る 2 つを挿し込んだ**（「描画対象の無いレベルは先に作らない＝空レイヤを作らない」
-//	方針の下で、対象が入った時点で足す）。基礎天端・床束は M11 のシンボルの高さ基準で、
-//	シンボル自身は高さを持たない。
+//	【基礎ストーリのレベルは 4 つ】スタック順（上→下）に 基礎天端（アンカーボルト）→ GL（立上り）
+//	→ 床束 → 底盤天端。M9 の時点では描画対象のある 2 つ（GL・底盤天端）だけを作っていたが、
+//	**M11 でアンカーボルト・床束を導入したので残る 2 つを挿し込んだ**（「描画対象の無いレベル
+//	は先に作らない＝空レイヤを作らない」方針の下で、対象が入った時点で足す）。基礎天端・
+//	床束は M11 のシンボルの高さ基準で、シンボル自身は高さを持たない。
 //
 //	【立上りの後処理は 3 段】ホームズ君 IFC の立上りは通り芯の交点等で細かく分断され、かつ
 //	自由端が柱芯までの長さで入力されている。そこで
@@ -55,13 +54,12 @@ namespace HomeskzIfcImport::parse
 {
 	class Context;
 
-	// 基礎要素を分類する Name の接頭辞・部分文字列（Python 版 _WALL_PREFIX /
-	// _GROUND_BEAM_TOKEN / _BASE_SLAB_TOKEN）。
+	// 基礎要素を分類する Name の接頭辞・部分文字列。
 	inline constexpr const char* kFoundationWallPrefix = "基礎梁";
 	inline constexpr const char* kGroundBeamToken = "地中梁";
 	inline constexpr const char* kBaseSlabToken = "底盤";
 
-	// 基礎ストーリの名前・接尾辞（Python 版 STORY_FOUNDATION / FOUNDATION_SUFFIX）。
+	// 基礎ストーリの名前・接尾辞。
 	inline constexpr const char* kStoryFoundation = "基礎";
 	inline constexpr const char* kFoundationSuffix = "F";
 
@@ -73,9 +71,9 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kLevelFoundationTop = core::kLevelFoundationTop;
 	inline constexpr const char* kLevelFloorPost = core::kLevelFloorPost;
 
-	// 基礎のデザインレイヤ名（Python 版 LAYER_FOUNDATION_WALL / …_SLAB）。**一般階のように
-	// "{接頭辞}-{レベル種別}" では組み立てられない**（レベル "GL" に対してレイヤは "F-立上り"）
-	// ので、規約ではなく名前そのものをここに 1 つずつ置く。
+	// 基礎のデザインレイヤ名。**一般階のように"{接頭辞}-{レベル種別}" では組み立てられない**
+	// （レベル "GL" に対してレイヤは "F-立上り"）ので、規約ではなく名前そのものをここに
+	// 1 つずつ置く。
 	inline constexpr const char* kLayerFoundationWall = "F-立上り";
 	inline constexpr const char* kLayerFoundationSlab = "F-底盤";
 	// 同じく M11 のシンボルの配置先（アンカーボルト＝基礎天端レベル、床束＝床束レベル）。
@@ -85,46 +83,40 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kLayerFoundationAnchor = "F-アンカーボルト";
 	inline constexpr const char* kLayerFoundationFloorPost = "F-床束";
 
-	// 立上りのマージ・自由端判定の許容値（mm / sin 角。Python 版 _WALL_MERGE_DIST_TOL /
-	// _WALL_MERGE_ANGLE_TOL / _JOIN_ENDPOINT_TOL）。同一直線判定の直交距離・区間の
-	// 重なり／接触の隙間・断面キーの丸め桁に使う。
+	// 立上りのマージ・自由端判定の許容値（mm / sin 角）。同一直線判定の直交距離・
+	// 区間の重なり／接触の隙間・断面キーの丸め桁に使う。
 	inline constexpr double kWallMergeDistTol = 1.0;
 	inline constexpr double kWallMergeAngleTol = 1e-3;
 	inline constexpr double kWallEndpointTol = 1.0;
 
-	// 人通口（立上りに開けた人が通る開口）の許容値（mm。Python 版 _OPENING_MATCH_TOL /
-	// _OPENING_MIN_SEGMENT）。順に「開口が壁芯上に乗っているとみなす直交距離」と「分割で
-	// 残す区間の最小長」（これ以下の切れ端は作らない）。
+	// 人通口（立上りに開けた人が通る開口）の許容値（mm）。順に「開口が壁芯上に乗っているとみ
+	// なす直交距離」と「分割で残す区間の最小長」（これ以下の切れ端は作らない）。
 	inline constexpr double kOpeningMatchTol = 2.0;
 	inline constexpr double kOpeningMinSegment = 1.0;
 
-	// 壁結合のジャンクション（同一交点に集まる立上りの集合）をまとめる距離許容（mm。
-	// Python 版 _JOIN_CLUSTER_TOL）。3 本以上が 1 点に集まるとき、全ペアの交点は数学的に
-	// 同一点になるので、この許容内の交点を 1 つのジャンクションへ束ねる。
+	// 壁結合のジャンクション（同一交点に集まる立上りの集合）をまとめる距離許容（mm）。
+	// 3 本以上が 1 点に集まるとき、全ペアの交点は数学的に同一点になるので、この許容内の交点を
+	// 1 つのジャンクションへ束ねる。
 	inline constexpr double kJoinClusterTol = 1.0;
 
-	// ピック点を交点から「残す側」へ寄せる量の上限（交点〜遠い端点の距離に対する割合。
-	// Python 版 _PICK_OFFSET_FRAC）。寄せすぎて遠い端点が最寄りになると VW が残す／詰める
-	// 側を取り違えるので、控えめに寄せる。
+	// ピック点を交点から「残す側」へ寄せる量の上限（交点〜遠い端点の距離に対する割合）。
+	// 寄せすぎて遠い端点が最寄りになると VW が残す／詰める側を取り違えるので、控えめに寄せる。
 	inline constexpr double kPickOffsetFrac = 0.4;
 
-	// 地中梁のマージ許容値（Python 版 _GROUND_BEAM_MERGE_TOL / …_ANGLE_TOL /
-	// …_PROFILE_TOL / …_AZIMUTH_TOL）。順に 距離（mm）・平行判定（sin 角）・断面キーの
-	// 丸め（mm）・方位角キーの丸め（度）。
+	// 地中梁のマージ許容値。順に 距離（mm）・平行判定（sin 角）・断面キーの丸め（mm）・
+	// 方位角キーの丸め（度）。
 	inline constexpr double kGroundBeamMergeTol = 1.0;
 	inline constexpr double kGroundBeamMergeAngleTol = 1e-3;
 	inline constexpr double kGroundBeamProfileTol = 1.0;
 	inline constexpr double kGroundBeamAzimuthTol = 0.1;
 
-	// 自由端の終端柱（柱芯）を探す許容値（mm。Python 版 _FREE_END_COLUMN_ALONG_TOL /
-	// _FREE_END_COLUMN_PERP_TOL）。沿軸距離は土台の半材せい（≤ ~75mm）を覆いつつ、隣接する
-	// 1 モジュール（≥455mm）先の柱を拾わない値。直交距離は半壁厚に加える許容。
+	// 自由端の終端柱（柱芯）を探す許容値（mm）。沿軸距離は土台の半材せい（≤ ~75mm）を覆いつつ、
+	// 隣接する 1 モジュール（≥455mm）先の柱を拾わない値。直交距離は半壁厚に加える許容。
 	inline constexpr double kFreeEndColumnAlongTol = 150.0;
 	inline constexpr double kFreeEndColumnPerpTol = 20.0;
 
-	// 底盤のマージ・外面合わせの許容値（Python 版 _SLAB_MERGE_TOL / _SLAB_ANGLE_TOL /
-	// _SLAB_SIDE_EPS）。順に 距離（mm）・平行判定（sin 角）・境界辺の「すぐ右（外側）」を
-	// 見るサンプル距離（mm。部材寸法より十分小さく、頂点丸めより十分大きい）。
+	// 底盤のマージ・外面合わせの許容値。順に 距離（mm）・平行判定（sin 角）・境界辺の「すぐ右
+	// （外側）」を見るサンプル距離（mm。部材寸法より十分小さく、頂点丸めより十分大きい）。
 	inline constexpr double kSlabMergeTol = 1.0;
 	inline constexpr double kSlabAngleTol = 1e-3;
 	inline constexpr double kSlabSideEps = 1e-2;
@@ -146,42 +138,39 @@ namespace HomeskzIfcImport::parse
 	// 命令どおりの構成になる（draw/DrawUtil.h「複合オブジェクトの構成」）。
 	std::vector<core::ComponentCommand> foundationWallComponents(double thickness);
 
-	// Name による基礎要素の判別（Python 版 _is_wall / _is_ground_beam / _is_base_slab）。
+	// Name による基礎要素の判別。
 	// **述語はここが唯一の定義**で、解析も判定（hasFoundation）も同じ関数を通る。
 	bool isFoundationWall(const std::string& name);
 	bool isGroundBeam(const std::string& name);
 	bool isBaseSlab(const std::string& name);
 
-	// 基礎の対象要素（IfcFooting すべてと、底盤の IfcSlab）の #id を返す（Python 版
-	// _iter_footing_elements）。IfcFooting → IfcSlab の順・型内は #id 昇順で決定的。
+	// 基礎の対象要素（IfcFooting すべてと、底盤の IfcSlab）の #id を返す。IfcFooting →
+	// IfcSlab の順・型内は #id 昇順で決定的。
 	std::vector<int> collectFootingElements(const Model& model);
 
-	// 底盤天端の絶対 Z（Python 版 resolve_slab_top_elevation）。底盤の天端 Z ごとに平面
-	// 面積を合計し、**合計面積が最大**の天端 Z を採る（最初に見つかった値ではないので、
-	// エンティティ列挙順に依存しない決定的な高さになる。同一面積なら高い方）。底盤が
-	// 1 枚も無ければ false（out は変更しない）。
+	// 底盤天端の絶対 Z。底盤の天端 Z ごとに平面面積を合計し、**合計面積が最大**の天端 Z
+	// を採る（最初に見つかった値ではないので、エンティティ列挙順に依存しない決定的な高さにな
+	// る。同一面積なら高い方）。底盤が 1 枚も無ければ false（out は変更しない）。
 	bool resolveSlabTopElevation(const Model& model, double& out);
 
-	// 基礎天端＝**立上り（基礎梁）の天端**の絶対 Z（Python 版
-	// resolve_foundation_top_elevation）。アンカーボルト（M11）の高さ基準になる。立上りの
-	// 天端 Z のうち**最大値**を採る（最初に見つかった値ではないので、エンティティ列挙順に
-	// 依存しない決定的な高さ）。立上りが 1 つも無い基礎（底盤のみ）は false で、呼び出し側が
-	// 底盤天端へフォールバックする。
+	// 基礎天端＝**立上り（基礎梁）の天端**の絶対 Z。アンカーボルト（M11）の高さ基準になる。
+	// 立上りの天端 Z のうち**最大値**を採る（最初に見つかった値ではないので、エンティティ列挙
+	// 順に依存しない決定的な高さ）。立上りが 1 つも無い基礎（底盤のみ）は false で、
+	// 呼び出し側が底盤天端へフォールバックする。
 	bool resolveFoundationTopElevation(const Model& model, double& out);
 
-	// 基礎（立上り・底盤・地中梁）が 1 つでもあるか（Python 版 has_foundation）。
+	// 基礎（立上り・底盤・地中梁）が 1 つでもあるか。
 	bool hasFoundation(const Model& model);
 
-	// 基礎ストーリの story 命令を組み立てる（Python 版 build_foundation_story_command）。
-	// 基礎要素が 1 つも無ければ false（out は変更しない）。ストーリ高さは GL=0（常に）で、
-	// levels の並びは**希望するデザインレイヤのスタック順（上→下）**に
-	//   基礎天端（立上り天端の絶対 Z・"F-アンカーボルト"）→ GL（0・"F-立上り"）→
-	//   床束（底盤天端の絶対 Z・"F-床束"）→ 底盤天端（同・"F-底盤"）
-	// の 4 つ（ヘッダ冒頭「基礎ストーリのレベルは 4 つ」）。立上りが無い基礎は基礎天端を
-	// 底盤天端へフォールバックする。
+	// 基礎ストーリの story 命令を組み立てる。基礎要素が 1 つも無ければ false（out
+	// は変更しない）。ストーリ高さは GL=0（常に）で、levels の並びは**希望するデザインレイヤ
+	// のスタック順（上→下）**に基礎天端（立上り天端の絶対 Z・"F-アンカーボルト"）→ GL（0・
+	// "F-立上り"）→床束（底盤天端の絶対 Z・"F-床束"）→ 底盤天端（同・"F-底盤"）の
+	// 4 つ（ヘッダ冒頭「基礎ストーリのレベルは 4 つ」）。立上りが無い基礎は基礎天端を底盤天端
+	// へフォールバックする。
 	bool buildFoundationStoryCommand(const Model& model, core::StoryCommand& out);
 
-	// 立上り（基礎梁）から wall 命令を組み立てる（Python 版 build_wall_commands）。
+	// 立上り（基礎梁）から wall 命令を組み立てる。
 	//
 	// 壁芯は配置原点から押し出し方向へ伸ばした線、壁厚は矩形断面の幅（XDim）。**非矩形断面の
 	// 立上りは壁厚が定まらないのでスキップする**。下端は基礎（自階）の GL、上端は 1 階
@@ -190,12 +179,12 @@ namespace HomeskzIfcImport::parse
 	//
 	// 【下端は IFC 実形状のまま】ホームズ君は基礎梁を**底盤の底面まで**の全高でモデリングする
 	// （実測: 伏図次郎・サンプル1 は全本が Z=−100＝底盤天端 50 − 底盤厚 150、スキップフロアは
-	// −100 と −150 が混在）。したがって下端はソリッドの下端をそのまま使い、**Python 版の
-	// 呑み込み（_SLAB_BITE = 10mm 下げ）は行わない**。Python 版のねらいは「底盤に少し
-	// 呑み込ませて coplanar による断面の境界線を防ぐ」ことだったが、下端は既に底盤の底面と
-	// 一致しているので下へ 10mm 伸ばしても**底盤の下に突き出すだけ**で、意図と逆の結果に
-	// なっていた（ローカル確認で判明。docs/DEV-NOTES.md M9）。深さの差（外周が深い等）は
-	// 地中梁（M10）が持つので、基礎梁側で作り込まない。
+	// −100 と −150 が混在）。したがって下端はソリッドの下端をそのまま使い、**底盤への呑み込み
+	// （下端を 10mm 下げる）は行わない**。呑み込みのねらいは「底盤に少し埋めて coplanar
+	// による断面の境界線を防ぐ」ことだが、下端は既に底盤の底面と一致しているので、
+	// 下へ伸ばしても**底盤の下に突き出すだけ**で意図と逆になる（ローカル確認で判明。
+	// docs/DEV-NOTES.md M9）。深さの差（外周が深い等）は地中梁（M10）が持つので、
+	// 基礎梁側で作り込まない。
 	//
 	// 組み立てたあと mergeWallCommands → extendFreeWallEnds → applyWallOpenings（人通口）を
 	// 通す。自由端を柱芯へ寄せるのに柱命令（columns）を使う（未指定なら端点から半壁厚延長
@@ -206,20 +195,20 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::WallCommand>
 	buildWallCommands(Context& context, const std::vector<core::ColumnCommand>& columns);
 
-	// 同一直線上にあり同一断面（壁厚・上下端の高さ基準が一致）の立上りを 1 本へ統合する
-	// （Python 版 merge_wall_commands）。断面キーごとにグループ化し、各グループ内で
-	// Union-Find により「同一直線上で区間が重なる／接触する」立上りの連結成分をまとめ、
-	// 成分ごとに先頭の壁芯方向へ全端点を射影した最小〜最大区間の 1 本にする。
+	// 同一直線上にあり同一断面（壁厚・上下端の高さ基準が一致）の立上りを 1 本へ統合する。
+	// 断面キーごとにグループ化し、各グループ内で Union-Find により「同一直線上で区間が重なる／
+	// 接触する」立上りの連結成分をまとめ、成分ごとに先頭の壁芯方向へ全端点を射影した最小〜最
+	// 大区間の 1 本にする。
 	//
 	// **統合しないもの**: 断面が違う（壁厚・高さの違う）立上り／同一直線上でも隙間がある
 	// 立上り／平行だが別の線上（直交距離が壁厚ぶんある側並び）の立上り。隙間を橋渡しして
 	// 実在しない壁を作らないため。グループ化・成分処理とも入力順に対して決定的。
 	std::vector<core::WallCommand> mergeWallCommands(const std::vector<core::WallCommand>& walls);
 
-	// 他の立上りと交差しない端点（自由端）を、柱芯を基準に半壁厚だけ外側へ延長する
-	// （Python 版 _extend_free_wall_ends）。ホームズ君 IFC の自由端は基本的に柱芯までの
-	// 長さで入力されているが、実際の立上りはそこから半壁厚だけ長い。交差する端点
-	// （コーナー・T 字）は相手壁の外面までモデル化済みなので触らない。
+	// 他の立上りと交差しない端点（自由端）を、柱芯を基準に半壁厚だけ外側へ延長する。
+	// ホームズ君 IFC の自由端は基本的に柱芯までの長さで入力されているが、実際の立上りはそこか
+	// ら半壁厚だけ長い。交差する端点（コーナー・T 字）は相手壁の外面までモデル化済みなので触
+	// らない。
 	//
 	// **同一直線上で突き合わせになっている端は自由端ではない**（延長すると隣へ食い込む）。
 	// 交点判定は平行な立上りを除外するので、上端／下端が違って統合できなかった隣どうしが
@@ -235,10 +224,10 @@ namespace HomeskzIfcImport::parse
 	extendFreeWallEnds(const std::vector<core::WallCommand>& walls,
 					   const std::vector<core::ColumnCommand>& columns);
 
-	// 人通口（立上りに開けた人が通る開口）の削り取り区間（Python 版 _WallOpening）。
-	// start / end は削り取りソリッドの壁芯方向の両端（センタリング済みの平面座標）、
-	// zBottom / zTop はワールド絶対 Z の下端／上端。人通口は立上りの**天端から下方へ**
-	// 削り取られるので、zBottom が「削り残る立上りの新しい天端」になる。
+	// 人通口（立上りに開けた人が通る開口）の削り取り区間。start / end は削り取りソリッドの壁
+	// 芯方向の両端（センタリング済みの平面座標）、zBottom / zTop はワールド絶対 Z
+	// の下端／上端。人通口は立上りの**天端から下方へ**削り取られるので、zBottom
+	// が「削り残る立上りの新しい天端」になる。
 	struct WallOpening
 	{
 		core::Vec2 start;
@@ -247,8 +236,8 @@ namespace HomeskzIfcImport::parse
 		double zTop = 0.0;
 	};
 
-	// 立上り（基礎梁）に設定された人通口をすべて集める（Python 版 _collect_wall_openings）。
-	// 人通口は立上りソリッドから差演算（IfcBooleanResult の DIFFERENCE）で削り取られた
+	// 立上り（基礎梁）に設定された人通口をすべて集める。人通口は立上りソリッドから差演算
+	// （IfcBooleanResult の DIFFERENCE）で削り取られた
 	// **第 2 オペランド**として表される（人通口は通り芯ではなく実寸法でモデル化される）。
 	//
 	// **端部が他材で削られた全高の差演算を人通口と誤認しない**ため、(1) 天端が素の立上りの
@@ -257,9 +246,9 @@ namespace HomeskzIfcImport::parse
 	// center は通り芯のセンタリング中心（buildWallCommands と同じ補正を掛けるため）。
 	std::vector<WallOpening> collectWallOpenings(const Model& model, const core::Vec2& center);
 
-	// 人通口を、統合・自由端延長まで済んだ立上りに当てはめて分割／切り下げる（Python 版
-	// _apply_wall_openings）。各開口が乗る立上り（壁芯と平行・直交距離が kOpeningMatchTol
-	// 以内・開口の中点が区間内）を探し、その 1 本を分割後の列に置き換える。
+	// 人通口を、統合・自由端延長まで済んだ立上りに当てはめて分割／切り下げる。各開口が乗る立
+	// 上り（壁芯と平行・直交距離が kOpeningMatchTol 以内・開口の中点が区間内）を探し、その
+	// 1 本を分割後の列に置き換える。
 	//
 	//   * 開口の下端（zBottom）が**底盤天端以下**なら、その区間には立上りが生じない
 	//     （底盤だけになる）ので**区間を空けて両側の立上りだけ**を出す。
@@ -294,9 +283,8 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::WallCommand>
 	extendDeeperCollinearEnds(const std::vector<core::WallCommand>& walls);
 
-	// 交差する立上りどうしの壁結合命令を組み立てる（Python 版 build_wall_join_commands）。
-	// walls は buildWallCommands が返した（＝Document::walls と同じ並びの）立上りで、命令の
-	// a / b はその添字をそのまま指す。
+	// 交差する立上りどうしの壁結合命令を組み立てる。walls は buildWallCommands が返した（＝
+	// Document::walls と同じ並びの）立上りで、命令の a / b はその添字をそのまま指す。
 	//
 	// 壁芯が交差する立上りを**同一交点ごとのジャンクション**にまとめ、ジャンクションごとに
 	//   * 内部で交わる通し壁があれば … 天端が最も高い通し壁をバックボーンにして他の通し壁を
@@ -328,19 +316,17 @@ namespace HomeskzIfcImport::parse
 	void applyWallCaps(std::vector<core::WallCommand>& walls,
 					   const std::vector<core::WallJoinCommand>& joins);
 
-	// 地中梁を台形プリズムのモディファイアへ変換する（Python 版 _build_ground_beam_modifiers
-	// ＋ _ground_beam_modifier）。各地中梁は水平押し出しの台形断面ソリッドなので、押し出し
-	// 方向の方位角と、幅軸 u（走る向きを +90 度回した水平単位ベクトル）・鉛直軸 v で
-	// 取り直した断面を命令にする。組み立てたあと mergeGroundBeamModifiers を通す。
+	// 地中梁を台形プリズムのモディファイアへ変換する。各地中梁は水平押し出しの台形断面
+	// ソリッドなので、押し出し方向の方位角と、幅軸 u（走る向きを +90 度回した水平単位ベクトル）
+	// ・鉛直軸 v で取り直した断面を命令にする。組み立てたあと mergeGroundBeamModifiers を通す。
 	// center は通り芯のセンタリング中心。押し出しが水平でない要素は落とす。
 	std::vector<core::ModifierCommand> buildGroundBeamModifiers(const Model& model,
 																const core::Vec2& center);
 
-	// 同一直線上に並ぶ同一断面形状の地中梁を 1 本の台形プリズムへ統合する（Python 版
-	// _merge_ground_beam_modifiers）。グループキー（高さ＝下端 z・方位角・断面形状）ごとに
-	// まとめ、グループ内で同一軸線上・区間が連続するものを Union-Find で連結成分にし、成分
-	// ごとに先頭の軸方向へ全端点を射影した最小〜最大区間の 1 本にする（断面・向き・高さは
-	// 先頭を引き継ぐ）。
+	// 同一直線上に並ぶ同一断面形状の地中梁を 1 本の台形プリズムへ統合する。グループキー（高さ
+	// ＝下端 z・方位角・断面形状）ごとにまとめ、グループ内で同一軸線上・区間が連続するものを
+	// Union-Find で連結成分にし、成分ごとに先頭の軸方向へ全端点を射影した最小〜最大区間の
+	// 1 本にする（断面・向き・高さは先頭を引き継ぐ）。
 	//
 	// **統合しないもの**: 断面が違う／向き（方位角）が違う／別の軸線上（直交距離がある）／
 	// 高さが違う／同一直線上でも隙間がある地中梁（隙間を橋渡しして実在しない梁を作らない）。
@@ -349,22 +335,21 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::ModifierCommand>
 	mergeGroundBeamModifiers(const std::vector<core::ModifierCommand>& modifiers);
 
-	// 地中梁（台形プリズム）の平面外形＝断面の u 範囲を軸方向へ depth だけ掃引した矩形
-	// （Python 版 _modifier_footprint）。底盤への振り分け判定に使う。
+	// 地中梁（台形プリズム）の平面外形＝断面の u 範囲を軸方向へ depth だけ掃引した矩形。
+	// 底盤への振り分け判定に使う。
 	std::vector<core::Vec2> modifierFootprint(const core::ModifierCommand& modifier);
 
-	// 地中梁を、平面外形が最も重なる底盤の modifiers へ振り分ける（Python 版
-	// _attach_ground_beam_modifiers）。代表点（重心・各頂点・各辺の中点）が外形内に入る数が
-	// 最大の底盤を選び、どの底盤にも入らない（継目・下屋等の）地中梁は重心が最も近い底盤へ
-	// フォールバックして取りこぼさない。底盤が 1 枚も無ければ付けられないので捨てる。
-	// 入力順に対して決定的。
+	// 地中梁を、平面外形が最も重なる底盤の modifiers へ振り分ける。代表点（重心・各頂点・
+	// 各辺の中点）が外形内に入る数が最大の底盤を選び、どの底盤にも入らない（継目・下屋等の）
+	// 地中梁は重心が最も近い底盤へフォールバックして取りこぼさない。底盤が 1 枚も無ければ付け
+	// られないので捨てる。入力順に対して決定的。
 	void attachGroundBeamModifiers(std::vector<core::SlabCommand>& slabs,
 								   const std::vector<core::ModifierCommand>& modifiers);
 
-	// 底盤から slab 命令を組み立てる（Python 版 build_slab_commands）。平面外形をグリッド
-	// 中心オフセットで補正して格納し、天端の絶対 Z を elevation に、Z 厚を整数 mm に丸めた
-	// 値を thickness（＝スラブスタイルのコンクリート厚）に入れる。天端は底盤天端レベルへ
-	// バインドし、offset は実天端 Z と底盤天端の絶対 Z の差（主たる底盤は ≈0）。
+	// 底盤から slab 命令を組み立てる。平面外形をグリッド中心オフセットで補正して格納し、
+	// 天端の絶対 Z を elevation に、Z 厚を整数 mm に丸めた値を thickness（＝スラブスタイルの
+	// コンクリート厚）に入れる。天端は底盤天端レベルへバインドし、offset は実天端 Z
+	// と底盤天端の絶対 Z の差（主たる底盤は ≈0）。
 	//
 	// 組み立てたあと mergeSlabCommands → alignSlabsToWallFaces → attachGroundBeamModifiers を
 	// 通す（外面合わせに使う立上りは walls）。**地中梁はスラブにせず**、統合・外面合わせの
@@ -373,22 +358,22 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::SlabCommand> buildSlabCommands(Context& context,
 													 const std::vector<core::WallCommand>& walls);
 
-	// 同じ厚さ・同じ高さで連続する底盤を 1 枚へ統合する（Python 版 merge_slab_commands）。
-	// 断面キーごとにグループ化し、各グループ内で「辺を共有／面で重なる」底盤の連結成分を
-	// 求め、成分ごとに**任意向きの単純多角形の和**を 1 枚にする（軸平行の矩形に限らず、
-	// 傾いた底盤や 45 度取合いの斜め辺も統合できる）。
+	// 同じ厚さ・同じ高さで連続する底盤を 1 枚へ統合する。断面キーごとにグループ化し、
+	// 各グループ内で「辺を共有／面で重なる」底盤の連結成分を求め、成分ごとに**任意向きの単純
+	// 多角形の和**を 1 枚にする（軸平行の矩形に限らず、傾いた底盤や 45 度取合いの斜め辺も統合
+	// できる）。
 	//
 	// **統合しないもの**: 単独の底盤／和が穴を含む・複数の外形に分かれる成分（＝布基礎の
 	// 升目状ラティス。ベタで埋めると部屋の下までコンクリートになり誤り）／和の計算に
 	// 失敗した成分（開ループ）。入力順に対して決定的。
 	std::vector<core::SlabCommand> mergeSlabCommands(const std::vector<core::SlabCommand>& slabs);
 
-	// 底盤の外周を立上りの外面へ合わせて外側へ広げる（Python 版 align_slabs_to_wall_faces）。
-	// ホームズ君 IFC の底盤外形は立上りの**壁心**に一致しているため、各辺に沿う立上りを
-	// 探して（辺と壁芯が平行・同一直線上で区間が重なる。最も重なりの大きいものを採る）、
-	// その**半壁厚**だけ辺を外向き法線方向へ平行移動し、隣接する移動後の辺の交点を新しい
-	// 頂点にする（凸角は外へ伸び、入隅は詰まる）。立上りに沿う辺が 1 つも無い底盤
-	// （独立基礎底盤等）は動かさない。walls が空なら無変更。入力順に対して決定的。
+	// 底盤の外周を立上りの外面へ合わせて外側へ広げる。ホームズ君 IFC の底盤外形は立上りの**壁
+	// 心**に一致しているため、各辺に沿う立上りを探して（辺と壁芯が平行・同一直線上で区間が重
+	// なる。最も重なりの大きいものを採る）、その**半壁厚**だけ辺を外向き法線方向へ平行移動し、
+	// 隣接する移動後の辺の交点を新しい頂点にする（凸角は外へ伸び、入隅は詰まる）。
+	// 立上りに沿う辺が 1 つも無い底盤（独立基礎底盤等）は動かさない。walls が空なら無変更。
+	// 入力順に対して決定的。
 	std::vector<core::SlabCommand>
 	alignSlabsToWallFaces(const std::vector<core::SlabCommand>& slabs,
 						  const std::vector<core::WallCommand>& walls);

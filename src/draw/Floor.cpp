@@ -6,24 +6,22 @@
 //	プラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse ライブラリには
 //	入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	【Python 版（床ツール）との差異・意図的】Python 版 vw/floor.py は床ツール
-//	（Floor オブジェクト）で描くが、本移植では**スラブツール（Slab オブジェクト）**を使う。
-//	床ツールは実体としては押し出しの派生でオブジェクト構造がほぼ押し出しと変わらないのに対し、
-//	スラブは BIM オブジェクトとして機能（コンポーネント構成・スタイル・データ連携）が
-//	強化されており、今後の発展性が高い。ISDK にも Floor の生成 API は無く Slab には
-//	一式（CreateSlab / SetSlabHeight / スタイル・コンポーネント）が揃っているため、
-//	SDK の作法にも素直に乗る（CLAUDE.md「移植の基本方針」: 仕様の意図を再現し、実現手段は
-//	C++ SDK の作法に合わせる）。2D 表現は床ツールと異なる点に注意（ローカル確認項目）。
+//	【床は床ツールではなくスラブで描く】床ツール（Floor オブジェクト）ではなく**スラブツール
+//	（Slab オブジェクト）**を使う。床ツールは実体としては押し出しの派生でオブジェクト構造がほ
+//	ぼ押し出しと変わらないのに対し、スラブは BIM オブジェクトとして機能（コンポーネント構成
+//	・スタイル・データ連携）が強化されており、今後の発展性が高い。ISDK にも Floor の生成 API
+//	は無く Slab には一式（CreateSlab / SetSlabHeight / スタイル・コンポーネント）
+//	が揃っているため、SDK の作法にも素直に乗る。2D 表現は床ツールと異なる点に注意。
 //
-//	描画手順（Python 版 vw/footing.py の draw_slab と同じ作法。底盤＝M9 と共通）:
+//	描画手順（底盤＝ M9 と共通の作法）:
 //	  1. 外形を閉じた 2D ポリゴンにする
 //	  2. CreateSlab(プロファイル) でスラブを生成する
 //	  3. クラス分けと描画属性の by-class 設定
 //	  4. **スラブ本体へ直接**構成層を組む（上から 床仕上げ → 床下地）。スラブスタイルは
 //	     作らない・当てない（draw/DrawUtil.h「複合オブジェクトの構成」）
 //	  5. 高さの基準面（データム）を命令に合わせる（一般階＝床仕上げ上端／ロフト＝床下地
-//	     下端）。SetSlabHeight にはその基準面の絶対 Z を渡す（SetSlabHeight は厚みではなく
-//	     高さを設定する関数。Python 版 #70 の不具合と同じ落とし穴）
+//	     下端）。SetSlabHeight にはその基準面の絶対 Z を渡す（**SetSlabHeight は厚みではなく
+//	     高さを設定する関数**。名前に釣られて厚みを渡すと床が地面に落ちる）
 //	  6. SetObjectStoryBound で基準面の高さ基準をストーリレベルへバインドする
 //	     （一般階＝FL レベル／ロフト＝軒高レベル。offset はそこからの高低差で一般部は 0）
 //	  7. ResetObject で反映
@@ -47,10 +45,9 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// SetObjectStoryBound に渡すバウンド ID。スラブは高さ基準を 1 つだけ持ち、
-		// Python 版 vw/footing.py の draw_slab も 0 を渡している。型は SDK の
-		// TObjectBoundID（= Sint32）だが、その別名は SDK の名前空間の中にあるため、
-		// ここでは実体の Sint32 で持つ（暗黙変換で同じ）。
+		// SetObjectStoryBound に渡すバウンド ID。スラブは高さ基準を 1 つだけ持つので常に
+		// 0 を渡す。型は SDK の TObjectBoundID（= Sint32）だが、その別名は SDK の名前空間の中
+		// にあるため、ここでは実体の Sint32 で持つ（暗黙変換で同じ）。
 		constexpr Sint32 kSlabBoundID = 0;
 
 		// 床 1 枚をスラブとして描く。スラブを作れなければ外形ポリゴンにフォールバックする。
@@ -81,8 +78,8 @@ namespace HomeskzIfcImport::draw
 			SetComponents(slab, floor.components);
 			SetSlabDatum(slab, floor.datum, static_cast<short>(floor.components.size()));
 
-			// SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する（Python 版 #70 と
-			// 同じ落とし穴）。命令の elevation は基準面の絶対 Z なのでそのまま渡す。
+			// SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する。命令の
+			// elevation は基準面の絶対 Z なのでそのまま渡す。
 			gSDK->SetSlabHeight(slab, floor.elevation);
 
 			// 基準面（一般階＝床仕上げ上端／ロフト＝床下地下端）を、命令が指すストーリレベル

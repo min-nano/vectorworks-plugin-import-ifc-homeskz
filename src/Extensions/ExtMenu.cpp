@@ -8,11 +8,10 @@
 #include "BuildConfig.h"
 #include "Extensions/ExtMenu.h"
 
-// Phase 1（IFC 解析）と Phase 2（VW 描画）の入口。SDK 非依存の core/parse
-// ライブラリ（HomeskzIfcCore）に解析があり、SDK 依存の draw/ が描画する。この
-// メニューコマンドが両フェーズをオーケストレーションする（Python 版 run() が
-// ifc.build_document → vw.execute_document を呼ぶのと同じ立ち位置）。ヘッダは
-// いずれも core::Document までしか参照せず、SDK / STEP を相互に引き込まない。
+// Phase 1（IFC 解析）と Phase 2（VW 描画）の入口。SDK 非依存の core/parse ライブラリ
+// （HomeskzIfcCore）に解析があり、SDK 依存の draw/ が描画する。このメニューコマンドが両
+// フェーズをオーケストレーションする。ヘッダはいずれも core::Document までしか参照せず、SDK
+// / STEP を相互に引き込まない。
 #include "parse/BuildDocument.h"
 #include "parse/Summary.h"
 #include "core/Trace.h"
@@ -267,10 +266,10 @@ namespace HomeskzIfcImport
 } // namespace HomeskzIfcImport
 
 // ---------------------------------------------------------------------------
-// 文書アクティブ時のみ有効化（＝文書が無ければグレーアウト）は menuDef() の
-// Needs = EMenuEnableFlags::DocIsActive で宣言的に行う（上のコメント参照）。
-// このコマンドは追加の動的な有効／無効判定を持たないので GetItemEnabled() は
-// override せず、基底の VWMenu_EventSink::GetItemEnabled()（常に true）に委ねる。
+// 文書アクティブ時のみ有効化（＝文書が無ければグレーアウト）は menuDef() の Needs =
+// EMenuEnableFlags::DocIsActive で宣言的に行う（上のコメント参照）。このコマンドは追加の動的
+// な有効／無効判定を持たないので GetItemEnabled() は override せず、基底の VWMenu_EventSink::
+// GetItemEnabled()（常に true）に委ねる。
 void CImportIfcMenu_EventSink::DoInterface()
 {
 	// Note: the dev-build picker is NOT run here. It runs once at Vectorworks
@@ -279,11 +278,10 @@ void CImportIfcMenu_EventSink::DoInterface()
 	// re-invoked programmatically — a picker on the command path would then pop up
 	// repeatedly. So the command just does its work below, every time it runs.
 
-	// 縦切りの通し処理: ファイルを選ぶ → parse（Phase 1）で IFC を Document へ →
-	// draw（Phase 2）で VectorWorks へ描く → 件数をダイアログに出す。要素が増えても
-	// 入口はこの形のまま（各要素の追加は Document と draw 側で行う。docs/DEV-NOTES.md）。
-	// Python 版 run() が ifc.build_document → vw.execute_document を呼ぶのと同じ入口で、
-	// ここが両フェーズのオーケストレーションを担う。
+	// 縦切りの通し処理: ファイルを選ぶ → parse（Phase 1）で IFC を Document へ → draw（Phase 2）
+	// で VectorWorks へ描く → 件数をダイアログに出す。要素が増えても入口はこの形のまま（各要
+	// 素の追加は Document と draw 側で行う。docs/DEV-NOTES.md）。ここが両フェーズの
+	// オーケストレーションを担う唯一の場所になる。
 
 	// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら静かに終える。
 	std::string ifcPath;
@@ -291,11 +289,10 @@ void CImportIfcMenu_EventSink::DoInterface()
 		return;
 
 	// 2. インポート本体。**例外を SDK コールバックの外へ漏らさない**（CLAUDE.md
-	//    「エラーハンドリング・所有権」）。ネイティブプラグインの未捕捉例外は Python 版と
-	//    違って **VectorWorks 本体を巻き込んで落とす**ので、フェーズ境界であるここで必ず
-	//    受け止め、ユーザーへは 1 通のダイアログとして見せる。1 要素の欠損で全体を止めない
-	//    寛容さ（parse / draw の中で continue する）は従来どおりで、ここへ来るのは
-	//    「そこでも吸収できなかった異常」だけ。
+	// 「エラーハンドリング・所有権」）。ネイティブプラグインの未捕捉例外は **VectorWorks
+	// 本体を巻き込んで落とす**ので、フェーズ境界であるここで必ず受け止め、ユーザーへは
+	// 1 通のダイアログとして見せる。1 要素の欠損で全体を止めない寛容さ（parse / draw の中で
+	// continue する）は従来どおりで、ここへ来るのは「そこでも吸収できなかった異常」だけ。
 	std::string body;
 	try
 	{

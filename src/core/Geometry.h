@@ -1,10 +1,9 @@
 //
 //	core/Geometry.h
 //
-//	フェーズ非依存の自前幾何型。parse/ は VectorWorks SDK を include しないため、
-//	SDK の幾何型（WorldPt3 / TransformMatrix 等）を使えない。Python 版が
-//	ifcopenshell 抜きで手計算している配置行列・断面・押し出しの数式を、この
-//	ヘッダの Vec2 / Vec3 / Mat4 の上に移植する（詳細は docs/DEV-NOTES.md M2）。
+//	フェーズ非依存の自前幾何型。parse/ は VectorWorks SDK を include しないため、SDK
+//	の幾何型（WorldPt3 / TransformMatrix 等）を使えない。配置行列・断面・押し出しの数式は、
+//	このヘッダの Vec2 / Vec3 / Mat4 の上に自前で組む（詳細は docs/DEV-NOTES.md M2）。
 //
 //	提供する型:
 //	  * Vec2 / Vec3 … 平面／空間ベクトル（点・方向の双方に使う）と基本演算。

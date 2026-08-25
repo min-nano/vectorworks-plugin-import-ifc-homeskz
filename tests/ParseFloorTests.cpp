@@ -1,10 +1,9 @@
 //
 //	ParseFloorTests.cpp
 //
-//	床板解析（src/parse/Floor）の単体テスト。VectorWorks SDK を一切 include せず、
-//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
-//	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_floor.py の全ケースを
-//	1 対 1 で写している。
+//	床板解析（src/parse/Floor）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK
+//	のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:core/ parse/ は無 SDK
+//	で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
 //	検証項目（docs/DEV-NOTES.md M5）: 床版（IfcSlab "床版"）の抽出・FL レイヤ振り分け（最上階の
 //	床はロフト＝小屋裏収納の床として "R-FL" へ・基準面は軒高）・スラブ構成（上から

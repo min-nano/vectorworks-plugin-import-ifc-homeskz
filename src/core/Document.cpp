@@ -1,8 +1,7 @@
 //
 //	core/Document.cpp
 //
-//	validateDocument の実装。Python 版 document.py の validateDocument に対応する。
-//	SDK 非依存（core/ は VectorWorks SDK を一切 include しない）。
+//	validateDocument の実装。SDK 非依存（core/ は VectorWorks SDK を一切 include しない）。
 //
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
 //	walls / slabs（M9）・wallJoins / 底盤の modifiers＝地中梁（M10）・rafters / roofs（M6）・
@@ -30,16 +29,16 @@ namespace HomeskzIfcImport::core
 {
 	namespace
 	{
-		// ストーリレベル 1 つが妥当か（Python 版 _validate_level 相当）。種別・レイヤ名が
-		// 非空であること。offset は数値（C++ では double なので常に成立）。
+		// ストーリレベル 1 つが妥当か。種別・レイヤ名が非空であること。offset は数値（C++
+		// では double なので常に成立）。
 		bool isValidLevel(const LevelCommand& level)
 		{
 			return !level.type.empty() && !level.layer.empty();
 		}
 
-		// ストーリ 1 つが妥当か（Python 版 _validate_story 相当）。名前・接尾辞が非空で
-		// （空 suffix は VW 2026 で 2 回目以降の CreateStory が失敗するため不可）、各レベルが
-		// 妥当であること。elevation は数値（double なので常に成立）。
+		// ストーリ 1 つが妥当か。名前・接尾辞が非空で（空 suffix は VW 2026 で 2 回目以降の
+		// CreateStory が失敗するため不可）、各レベルが妥当であること。elevation
+		// は数値（double なので常に成立）。
 		bool isValidStory(const StoryCommand& story)
 		{
 			return !story.name.empty() && !story.suffix.empty() &&
@@ -56,10 +55,9 @@ namespace HomeskzIfcImport::core
 				   component.thickness >= 0.0;
 		}
 
-		// 床板 1 枚が妥当か（Python 版 _validate_floor 相当）。配置先レイヤ名・クラス名が
-		// 非空で、平面外形が 3 点以上（面になる）で、高さ基準のレベル種別が非空で、構成層が
-		// 1 枚以上あり総厚が正であること。elevation / bound.offset は数値（double なので
-		// 常に成立）。
+		// 床板 1 枚が妥当か。配置先レイヤ名・クラス名が非空で、平面外形が 3 点以上（面になる）
+		// で、高さ基準のレベル種別が非空で、構成層が 1 枚以上あり総厚が正であること。
+		// elevation / bound.offset は数値（double なので常に成立）。
 		bool isValidFloor(const FloorCommand& floor)
 		{
 			if (floor.layer.empty() || floor.drawClass.empty() || floor.boundary.size() < 3 ||
@@ -74,23 +72,22 @@ namespace HomeskzIfcImport::core
 			return total > 0.0;
 		}
 
-		// 垂木 1 本が妥当か（Python 版 _validate_rafter 相当）。配置先レイヤ名・クラス名が
-		// 非空で、断面（幅・せい）が正で、平面の始点（軒側＝支持点）と終点（棟側）が縮退して
-		// いないこと（縮退＝始点と終点が同じ点。判定は core/Geometry の samePoint）。
-		// elevation / endElevation / overhang / embedment は数値（double なので常に成立）。
-		// Python 版は型だけを見るが、C++ は型が静的なので「描けない値」を弾く幾何の関門に
-		// 読み替える（床板と同じ方針）。
+		// 垂木 1 本が妥当か。配置先レイヤ名・クラス名が非空で、断面（幅・せい）が正で、
+		// 平面の始点（軒側＝支持点）と終点（棟側）が縮退していないこと（縮退＝始点と終点が同
+		// じ点。判定は core/Geometry の samePoint）。elevation / endElevation / overhang /
+		// embedment は数値（double なので常に成立）。型で保証できるもの（数値であること等）
+		// は見ず、「描けない値」を弾く幾何の関門に絞る（床板と同じ方針）。
 		bool isValidRafter(const RafterCommand& rafter)
 		{
 			return !rafter.layer.empty() && !rafter.drawClass.empty() && rafter.width > 0.0 &&
 				   rafter.height > 0.0 && !samePoint(rafter.start, rafter.end);
 		}
 
-		// 横架材 1 本が妥当か（Python 版 _validate_member 相当）。配置先レイヤ名・クラス名・
-		// 構造材 ID が非空で、断面（幅・せい）が正で、天端中央線の始端・終端が縮退していない
-		// こと（判定は core/Geometry の samePoint）。始端・終端の高さ基準のレベル種別も非空
-		// （空だと SetObjectStoryBound が解決できず、高さがレイヤ基準へリセットされる）。
-		// elevation / endElevation は数値（double なので常に成立）。
+		// 横架材 1 本が妥当か。配置先レイヤ名・クラス名・構造材 ID が非空で、断面（幅・せい）
+		// が正で、天端中央線の始端・終端が縮退していないこと（判定は core/Geometry の
+		// samePoint）。始端・終端の高さ基準のレベル種別も非空（空だと SetObjectStoryBound
+		// が解決できず、高さがレイヤ基準へリセットされる）。elevation / endElevation
+		// は数値（double なので常に成立）。
 		bool isValidMember(const MemberCommand& member)
 		{
 			return !member.layer.empty() && !member.drawClass.empty() && !member.memberId.empty() &&
@@ -99,10 +96,10 @@ namespace HomeskzIfcImport::core
 				   !member.endBound.level.empty();
 		}
 
-		// 柱 1 本が妥当か（Python 版 _validate_column 相当）。配置先レイヤ名（span レイヤ）・
-		// クラス名・構造材 ID・構造用途が非空で、断面（幅・せい）と柱高さが正で、上下端の
-		// 高さ基準のレベル種別が非空であること（空だと SetObjectStoryBound が解決できず、
-		// 高さがレイヤ基準へリセットされる）。elevation は数値（double なので常に成立）。
+		// 柱 1 本が妥当か。配置先レイヤ名（span レイヤ）・クラス名・構造材 ID・構造用途が非空
+		// で、断面（幅・せい）と柱高さが正で、上下端の高さ基準のレベル種別が非空であること
+		// （空だと SetObjectStoryBound が解決できず、高さがレイヤ基準へリセットされる）。
+		// elevation は数値（double なので常に成立）。
 		bool isValidColumn(const ColumnCommand& column)
 		{
 			return !column.layer.empty() && !column.drawClass.empty() && !column.memberId.empty() &&
@@ -111,11 +108,11 @@ namespace HomeskzIfcImport::core
 				   !column.topBound.level.empty();
 		}
 
-		// 基礎の立上り 1 本が妥当か（Python 版 _validate_wall 相当）。配置先レイヤ名・
-		// クラス名が非空で、壁厚が正で、壁芯の始点と終点が縮退していないこと
-		// （判定は core/Geometry の samePoint）。上下端の高さ基準のレベル種別も非空（空だと
-		// SetWallOverallHeights が解決できず、レイヤの「壁の高さ」設定に落ちる）。構成層は
-		// 1 枚以上あり総厚が正であること（スラブと同じ関門。構成層の合計＝壁厚）。
+		// 基礎の立上り 1 本が妥当か。配置先レイヤ名・クラス名が非空で、壁厚が正で、
+		// 壁芯の始点と終点が縮退していないこと（判定は core/Geometry の samePoint）。
+		// 上下端の高さ基準のレベル種別も非空（空だと SetWallOverallHeights が解決できず、
+		// レイヤの「壁の高さ」設定に落ちる）。構成層は 1 枚以上あり総厚が正であること（スラブ
+		// と同じ関門。構成層の合計＝壁厚）。
 		bool isValidWall(const WallCommand& wall)
 		{
 			if (wall.layer.empty() || wall.drawClass.empty() || wall.thickness <= 0.0 ||
@@ -131,18 +128,18 @@ namespace HomeskzIfcImport::core
 			return total > 0.0;
 		}
 
-		// 地中梁（台形プリズム）1 本が妥当か（Python 版 _validate_modifier 相当）。断面が
-		// 3 点以上（面になる）で、押し出し長が正であること（長さ 0 のプリズムは描けない）。
-		// origin / azimuth は数値（double なので常に成立）。
+		// 地中梁（台形プリズム）1 本が妥当か。断面が 3 点以上（面になる）で、押し出し長が正で
+		// あること（長さ 0 のプリズムは描けない）。origin / azimuth は数値（double
+		// なので常に成立）。
 		bool isValidModifier(const ModifierCommand& modifier)
 		{
 			return modifier.profile.size() >= 3 && modifier.depth > 0.0;
 		}
 
-		// 基礎の底盤 1 枚が妥当か（Python 版 _validate_slab 相当）。床板と同じ関門
-		// （レイヤ名・クラス名が非空／外形 3 点以上／高さ基準のレベル種別が非空／構成層が
-		// 1 枚以上あり総厚が正）に、コンクリート厚が正であることと、噛み合う地中梁がすべて
-		// 妥当であることを足す（厚み 0 の構成層は VW が受け付けない）。
+		// 基礎の底盤 1 枚が妥当か。床板と同じ関門（レイヤ名・クラス名が非空／外形
+		// 3 点以上／高さ基準のレベル種別が非空／構成層が 1 枚以上あり総厚が正）に、
+		// コンクリート厚が正であることと、噛み合う地中梁がすべて妥当であることを足す（厚み
+		// 0 の構成層は VW が受け付けない）。
 		bool isValidSlab(const SlabCommand& slab)
 		{
 			if (slab.layer.empty() || slab.drawClass.empty() || slab.boundary.size() < 3 ||
@@ -159,30 +156,29 @@ namespace HomeskzIfcImport::core
 			return total > 0.0;
 		}
 
-		// 壁結合 1 件が妥当か（Python 版 _validate_wall_join 相当）。結合する 2 本が**異なる**
-		// 立上りで、どちらも walls の範囲内を指すこと（範囲外の添字は描画側でハンドルを
-		// 引けず、黙って結合されないだけになるので検証で弾く）。結合種別は enum なので
-		// 値域は型が保証する。ピック点・交点は数値（double なので常に成立）。
+		// 壁結合 1 件が妥当か。結合する 2 本が**異なる**立上りで、どちらも walls
+		// の範囲内を指すこと（範囲外の添字は描画側でハンドルを引けず、黙って結合されないだけ
+		// になるので検証で弾く）。結合種別は enum なので値域は型が保証する。ピック点・
+		// 交点は数値（double なので常に成立）。
 		bool isValidWallJoin(const WallJoinCommand& join, std::size_t wallCount)
 		{
 			return join.a != join.b && join.a < wallCount && join.b < wallCount;
 		}
 
-		// 野地板 1 枚が妥当か（Python 版 _validate_roof 相当）。配置先レイヤ名・クラス名が
-		// 非空で、平面外形が 3 点以上（面になる）で、厚みが正であること。勾配（rise/run）と
-		// 高さは数値（double なので常に成立）で、退化した勾配は描画側がフォールバックで
-		// 扱うためここでは弾かない（1 枚の異常で文書全体を描かないのは過剰）。
+		// 野地板 1 枚が妥当か。配置先レイヤ名・クラス名が非空で、平面外形が 3 点以上（面にな
+		// る）で、厚みが正であること。勾配（rise/run）と高さは数値（double なので常に成立）で、
+		// 退化した勾配は描画側がフォールバックで扱うためここでは弾かない（1 枚の異常で文書全
+		// 体を描かないのは過剰）。
 		bool isValidRoof(const RoofCommand& roof)
 		{
 			return !roof.layer.empty() && !roof.drawClass.empty() && roof.boundary.size() >= 3 &&
 				   roof.thickness > 0.0;
 		}
 
-		// シート（伏図）1 枚が妥当か（Python 版 _validate_sheet / _validate_viewport 相当）。
-		// ビューポート注釈の断面寸法データタグ 1 つが妥当か（Python 版 _validate_tag 相当）。
-		// スタイル名が非空で、関連付け先の横架材が members の範囲内であること（範囲外の
-		// 添字は「どの部材にも付かないタグ」＝図面に寸法の出ない空のタグが残る）。position /
-		// angle は数値（double なので常に成立）で値域の制限は無い。
+		// シート（伏図）1 枚が妥当か。ビューポート注釈の断面寸法データタグ 1 つが妥当か。
+		// スタイル名が非空で、関連付け先の横架材が members の範囲内であること（範囲外の添字は
+		// 「どの部材にも付かないタグ」＝図面に寸法の出ない空のタグが残る）。position / angle
+		// は数値（double なので常に成立）で値域の制限は無い。
 		bool isValidTag(const TagCommand& tag, std::size_t memberCount)
 		{
 			return !tag.style.empty() && tag.memberIndex < memberCount;
@@ -196,9 +192,9 @@ namespace HomeskzIfcImport::core
 		}
 
 		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを
-		// **1 つ以上**持ち、そのレイヤ名がどれも非空であること。図面タイトル・図番は空でも
-		// 描ける（ラベルが空になるだけ）ので弾かない——Python 版が型だけを見るのと同じ扱い。
-		// 表示レイヤが 0 枚の伏図は「何も映らないビューポート」なので作らせない。
+		// **1 つ以上**持ち、そのレイヤ名がどれも非空であること。図面タイトル・図番は空でも描
+		// ける（ラベルが空になるだけ）ので弾かない。表示レイヤが 0 枚の伏図は「何も映らない
+		// ビューポート」なので作らせない。
 		bool isValidSheet(const SheetCommand& sheet)
 		{
 			// グラフィック凡例（M13）を載せるなら、スタイル名が非空であること。凡例の中身は
@@ -212,11 +208,11 @@ namespace HomeskzIfcImport::core
 										[](const std::string& layer) { return layer.empty(); });
 		}
 
-		// 断面ビューポート（軸組図）1 枚が妥当か（Python 版 _validate_section 相当）。
-		// 配置先シートレイヤ番号（＝レイヤ名）とタイトルが非空で、表示レイヤを 1 つ以上持ち
-		// （伏図と同じ理由＝何も映らないビューポートを作らせない）、**断面指示線が縮退して
-		// いない**（始点≠終点。縮退した線からは切断面が決まらない）こと。断面の範囲は
-		// 命令が持たない（core/Document.h の SectionCommand 参照）ので見ない。
+		// 断面ビューポート（軸組図）1 枚が妥当か。配置先シートレイヤ番号（＝レイヤ名）
+		// とタイトルが非空で、表示レイヤを 1 つ以上持ち（伏図と同じ理由＝何も映らない
+		// ビューポートを作らせない）、**断面指示線が縮退していない**（始点≠終点。
+		// 縮退した線からは切断面が決まらない）こと。断面の範囲は命令が持たない
+		// （core/Document.h の SectionCommand 参照）ので見ない。
 		bool isValidSection(const SectionCommand& section)
 		{
 			return !section.number.empty() && !section.title.empty() &&
@@ -226,10 +222,9 @@ namespace HomeskzIfcImport::core
 				   !samePoint(section.lineStart, section.lineEnd);
 		}
 
-		// シンボル配置 1 件が妥当か（Python 版 _validate_anchor_bolt / _validate_floor_post /
-		// _validate_fire_brace / _validate_joint と同じ関門を 1 つにまとめたもの）。配置先
-		// レイヤ名とシンボル名が非空であること。position / angle は数値（double なので常に
-		// 成立）で、値域の制限は無い（角度は 0〜360 に正規化しない。VW 側が受け取る）。
+		// シンボル配置 1 件が妥当か。配置先レイヤ名とシンボル名が非空であること。position /
+		// angle は数値（double なので常に成立）で、値域の制限は無い（角度は 0〜360 に正規化し
+		// ない。VW 側が受け取る）。
 		bool isValidSymbol(const SymbolCommand& symbol)
 		{
 			return !symbol.layer.empty() && !symbol.symbol.empty();
@@ -252,54 +247,53 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// ストーリ: 名前・接尾辞が非空で、各ストーリレベルの種別・レイヤ名が非空であること
-		// （Python 版 _validate_story / _validate_level と同じ関門。docs/DEV-NOTES.md M3）。
+		// （docs/DEV-NOTES.md M3）。
 		if (!std::ranges::all_of(document.stories, isValidStory))
 			return false;
 
 		// 床板: 配置先レイヤ名・クラス名・スタイル名が非空で、外形が 3 点以上、高さ基準の
 		// レベル種別が非空、構成層が 1 枚以上あり総厚が正であること（isValidFloor 参照。
-		// Python 版 _validate_floor と同じ関門。docs/DEV-NOTES.md M5）。
+		// docs/DEV-NOTES.md M5）。
 		if (!std::ranges::all_of(document.floors, isValidFloor))
 			return false;
 
 		// 横架材: 配置先レイヤ名・クラス名・構造材 ID が非空で、断面が正・天端中央線が非縮退、
-		// 両端の高さ基準のレベル種別が非空であること（isValidMember 参照。Python 版
-		// _validate_member と同じ関門。docs/DEV-NOTES.md M7）。
+		// 両端の高さ基準のレベル種別が非空であること（isValidMember 参照。docs/DEV-NOTES.md
+		// M7）。
 		if (!std::ranges::all_of(document.members, isValidMember))
 			return false;
 
-		// 柱: 配置先レイヤ名（span レイヤ）・クラス名・構造材 ID・構造用途が非空で、断面と
-		// 柱高さが正、上下端の高さ基準のレベル種別が非空であること（isValidColumn 参照。
-		// Python 版 _validate_column と同じ関門。docs/DEV-NOTES.md M8）。
+		// 柱: 配置先レイヤ名（span レイヤ）・クラス名・構造材 ID・構造用途が非空で、
+		// 断面と柱高さが正、上下端の高さ基準のレベル種別が非空であること（isValidColumn 参照。
+		// docs/DEV-NOTES.md M8）。
 		if (!std::ranges::all_of(document.columns, isValidColumn))
 			return false;
 
-		// 基礎: 立上りは壁厚が正・壁芯が非縮退・上下端のレベル種別が非空、底盤は床板と同じ
-		// 関門＋コンクリート厚が正であること（isValidWall / isValidSlab 参照。Python 版
-		// _validate_wall / _validate_slab と同じ関門。docs/DEV-NOTES.md M9）。
+		// 基礎: 立上りは壁厚が正・壁芯が非縮退・上下端のレベル種別が非空、底盤は床板と同じ関
+		// 門＋コンクリート厚が正であること（isValidWall / isValidSlab 参照。docs/DEV-NOTES.md
+		// M9）。
 		if (!std::ranges::all_of(document.walls, isValidWall))
 			return false;
 		if (!std::ranges::all_of(document.slabs, isValidSlab))
 			return false;
 
 		// 壁結合（M10）: 結合する 2 本が異なり、どちらも walls の範囲内であること
-		// （isValidWallJoin 参照。Python 版 _validate_wall_join と同じ関門。docs/DEV-NOTES.md M10）。
-		// 地中梁は底盤の modifiers として isValidSlab が併せて見る。
+		// （isValidWallJoin 参照。docs/DEV-NOTES.md M10）。地中梁は底盤の modifiers として
+		// isValidSlab が併せて見る。
 		if (!std::ranges::all_of(document.wallJoins, [&document](const WallJoinCommand& join)
 								 { return isValidWallJoin(join, document.walls.size()); }))
 			return false;
 
 		// 垂木・野地板: 配置先レイヤ名・クラス名が非空で、垂木は断面が正・平面が非縮退、
-		// 野地板は外形 3 点以上・厚みが正であること（Python 版 _validate_rafter /
-		// _validate_roof と同じ関門。docs/DEV-NOTES.md M6）。
+		// 野地板は外形 3 点以上・厚みが正であること（docs/DEV-NOTES.md M6）。
 		if (!std::ranges::all_of(document.rafters, isValidRafter))
 			return false;
 		if (!std::ranges::all_of(document.roofs, isValidRoof))
 			return false;
 
-		// シンボル置換系（アンカーボルト・床束・火打・仕口）: 配置先レイヤ名とシンボル名が
-		// 非空であること（isValidSymbol 参照。Python 版 _validate_anchor_bolt ほかと同じ関門。
-		// docs/DEV-NOTES.md M11）。4 種は同じ命令型なので同じ規則で見る。
+		// シンボル置換系（アンカーボルト・床束・火打・仕口）: 配置先レイヤ名とシンボル名が非
+		// 空であること（isValidSymbol 参照。docs/DEV-NOTES.md M11）。4 種は同じ命令型なので同
+		// じ規則で見る。
 		if (!std::ranges::all_of(document.anchorBolts, isValidSymbol) ||
 			!std::ranges::all_of(document.floorPosts, isValidSymbol) ||
 			!std::ranges::all_of(document.fireBraces, isValidSymbol) ||
@@ -313,8 +307,7 @@ namespace HomeskzIfcImport::core
 
 		// シート（伏図）: シートレイヤ番号・タイトルが非空で、ビューポートが非空のレイヤ名を
 		// 1 つ以上持ち、グラフィック凡例を載せるならそのスタイル名も非空であること
-		// （isValidSheet 参照。Python 版 _validate_sheet / _validate_viewport / _validate_legend と
-		// 同じ関門。docs/DEV-NOTES.md M13）。
+		// （isValidSheet 参照。docs/DEV-NOTES.md M13）。
 		if (!std::ranges::all_of(document.sheets, isValidSheet))
 			return false;
 
@@ -335,10 +328,9 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。
-		// 同一判定は parse/Grid の重複線除去と同じ core/Geometry の samePoint を通す
-		// （閾値がズレると「畳まれた線が検証では非縮退」のような食い違いが起こる）。
-		// クラス名は空でもよい（無クラス＝既定クラスへ）。1 本でも不正なら描画しない
-		// （Python 版 validateDocument と同じ関門。docs/DEV-NOTES.md M1）。
+		// 同一判定は parse/Grid の重複線除去と同じ core/Geometry の samePoint を通す（閾値が
+		// ズレると「畳まれた線が検証では非縮退」のような食い違いが起こる）。クラス名は空でも
+		// よい（無クラス＝既定クラスへ）。1 本でも不正なら描画しない（docs/DEV-NOTES.md M1）。
 		//
 		// TODO: 命令リストが増えたら、要素ごとの all_of を && で連ねてここに積む
 		// （anchorBolt … の検証。docs/DEV-NOTES.md）。
@@ -455,10 +447,10 @@ namespace HomeskzIfcImport::core
 
 	namespace
 	{
-		// スタック最下段（背面）へ回すレベル種別か（Python 版 _BACKGROUND_LEVEL_TYPES）。
-		// 床（FL）・野地板のレイヤは伏図ビューポートで柱・梁を覆い隠さないよう全ストーリ
-		// 分をまとめて背面へ集める（野地板レベルは M6 で追加済み。この並びの適用先は
-		// M13 の per-viewport 上書き。desiredStoryLayerOrder の doc コメント参照）。
+		// スタック最下段（背面）へ回すレベル種別か。床（FL）・野地板のレイヤは伏図
+		// ビューポートで柱・梁を覆い隠さないよう全ストーリ分をまとめて背面へ集める（野地板
+		// レベルは M6 で追加済み。この並びの適用先は M13 の per-viewport 上書き。
+		// desiredStoryLayerOrder の doc コメント参照）。
 		bool isBackgroundLevel(const std::string& type)
 		{
 			return type == kLevelFL || type == kLevelNojiita;

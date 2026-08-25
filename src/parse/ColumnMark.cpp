@@ -1,8 +1,8 @@
 //
 //	parse/ColumnMark.cpp
 //
-//	断面記号・伏図記号の解析の実装（parse/ColumnMark.h の意図・Python 版との差異は
-//	そちらのヘッダを参照）。IFC は見ず、柱の命令だけから記号を組み立てる。
+//	断面記号・伏図記号の解析の実装（意図と規約は parse/ColumnMark.h を参照）。IFC は見ず、
+//	柱の命令だけから記号を組み立てる。
 //
 
 #include "parse/ColumnMark.h"
@@ -17,8 +17,8 @@ namespace HomeskzIfcImport::parse
 {
 	namespace
 	{
-		// span レイヤの種別（構造用途）から伏図記号のシンボル名を選ぶ（Python 版
-		// _span_symbol）。span レイヤは単一種別なので、そのレイヤの柱 1 本で決まる。
+		// span レイヤの種別（構造用途）から伏図記号のシンボル名を選ぶ。span レイヤは単一種別
+		// なので、そのレイヤの柱 1 本で決まる。
 		const char* spanSymbol(const std::string& structuralUse)
 		{
 			return structuralUse == kStructuralUseKoyazuka ? kPlanMarkSymbolKoyazuka
@@ -34,15 +34,14 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::ColumnMarkCommand>
 	buildColumnMarkCommands(const std::vector<core::ColumnCommand>& columns)
 	{
-		// span レイヤ → そのレイヤの構造用途（単一種別なので最初に見つかった値でよい。
-		// Python 版 use_by_layer）。
+		// span レイヤ → そのレイヤの構造用途（単一種別なので最初に見つかった値でよい）。
 		std::map<std::string, std::string> useByLayer;
 		for (const core::ColumnCommand& column : columns)
 			useByLayer.emplace(column.layer, column.structuralUse);
 
 		const std::vector<ColumnSpan> spans = collectColumnSpans(columns);
 
-		// 断面記号をすべて先に、続けて伏図記号をすべて（Python 版の並び）。
+		// 断面記号をすべて先に、続けて伏図記号をすべて。
 		std::vector<core::ColumnMarkCommand> commands;
 		commands.reserve(spans.size() * 2);
 		for (const ColumnSpan& span : spans)
@@ -51,8 +50,8 @@ namespace HomeskzIfcImport::parse
 			mark.layer = span.layer; // 配置先＝その span レイヤ自身
 			mark.drawClass = kSectionMarkClass;
 			mark.targetLayer = span.layer;
-			// targetClass は空＝全クラス（Python 版と同じ。構造用途 4/5 で絞れるので
-			// クラスまで指定する必要が無く、クラス名を変えても記号が消えない）。
+			// targetClass は空＝全クラス（構造用途 4/5 で絞れるのでクラスまで指定する必要が無
+			// く、クラス名を変えても記号が消えない）。
 			mark.style = core::ColumnMarkStyle::Section;
 			commands.push_back(std::move(mark));
 		}

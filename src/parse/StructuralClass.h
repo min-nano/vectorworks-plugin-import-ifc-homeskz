@@ -1,9 +1,9 @@
 //
 //	parse/StructuralClass.h
 //
-//	Phase 1（IFC 解析）の構造クラス判定モジュール。Python 版 ifc/structural_class.py に
-//	対応する（docs/DEV-NOTES.md M4「構造クラス判定（純ロジック）」）。柱・横架材へ割り当てる
-//	VectorWorks クラス名（04構造-02木造-… 階層の葉クラス）を定義し、部材種別を判定する。
+//	Phase 1（IFC 解析）の構造クラス判定モジュール（docs/DEV-NOTES.md M4「構造クラス判定（純
+//	ロジック）」）。柱・横架材へ割り当てる VectorWorks クラス名（04構造-02木造-…
+//	階層の葉クラス）を定義し、部材種別を判定する。
 //
 //	ホームズ君 IFC の Name フィールドには部材種別が埋め込まれている
 //	（例: "木梁:土台:1" / "木梁:軒桁:1_1" / "木梁:母屋:1_2" / "小屋束:1_1"）。
@@ -37,11 +37,10 @@
 
 namespace HomeskzIfcImport::parse
 {
-	// 構造材（柱・横架材）と面材（床板・野地板）へ割り当てる VW クラス名。Python 版
-	// ifc/structural_class.py の CLASS_* 定数と一字一句合わせる（04構造-02木造 を共通
-	// 接頭辞に持つ葉クラス。番号と名称の間にスペースを入れず、全パスを "-" で連結する）。
-	// constexpr const char* なので
-	// 動的初期化を持たず、std::string / std::optional<std::string> と直接比較できる。
+	// 構造材（柱・横架材）と面材（床板・野地板）へ割り当てる VW クラス名（04構造-02木造
+	// を共通接頭辞に持つ葉クラス。番号と名称の間にスペースを入れず、全パスを "-" で連結する）。
+	// constexpr const char* なので動的初期化を持たず、std::string / std::optional<std::
+	// string> と直接比較できる。
 	inline constexpr const char* CLASS_DODAI = "04構造-02木造-01土台-01土台";
 	inline constexpr const char* CLASS_OOBIKI = "04構造-02木造-02床組-01大引";
 	inline constexpr const char* CLASS_NEDA = "04構造-02木造-02床組-02根太";
@@ -63,8 +62,8 @@ namespace HomeskzIfcImport::parse
 	// 同じく梁（小屋梁・軒桁）と重なって見にくいため専用レイヤ（n-登り梁）に分離する。
 	inline constexpr const char* CLASS_NOBORIBARI = "04構造-02木造-05小屋組-06登り梁";
 
-	// 基礎（04構造-01基礎 階層）。木造（02木造）ではなく基礎（01基礎）の下に置く。Python 版は
-	// ifc/footing.py が持つが、本移植はクラス名の定義をここへ集約する（M4 の枠。docs/DEV-NOTES.md M9）。
+	// 基礎（04構造-01基礎 階層）。木造（02木造）ではなく基礎（01基礎）の下に置く。
+	// **クラス名の定義はこのヘッダに集約する**（要素ごとのヘッダへ散らさない）。
 	//   立上り（基礎梁）… 壁オブジェクト（parse/Footing の buildWallCommands）
 	//   底盤            … スラブオブジェクト（同 buildSlabCommands）。地中梁（M10）も
 	//                     底盤に噛み合う一体の形状なので同じクラスで描く。
@@ -87,19 +86,19 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* CLASS_COMPONENT_PLYWOOD = "z構成要素-合板";
 	inline constexpr const char* CLASS_COMPONENT_FLOORING = "z構成要素-フローリング";
 
-	// IFC Name から部材種別トークンを取り出す（Python 版 member_type_of_name 相当）。
-	// "木梁:{種別}:{連番}" は中央の種別（例 "土台"・"軒桁"）を、"火打:0_1" /
-	// "筋かい:1FL_1" のような 2 要素名は接頭辞を返す。未設定（空文字）は空文字を返す。
+	// IFC Name から部材種別トークンを取り出す。"木梁:{種別}:{連番}" は中央の種別（例 "土台"・
+	// "軒桁"）を、"火打:0_1" / "筋かい:1FL_1" のような 2 要素名は接頭辞を返す。未設定（空文字）
+	// は空文字を返す。
 	std::string memberTypeOfName(const std::string& name);
 
-	// IFC Name の種別から横架材クラスを返す（Python 版 member_class_from_name 相当）。
-	// 直接対応が無ければ std::nullopt（未知種別＝火打・隅木谷木・無名等）。
+	// IFC Name の種別から横架材クラスを返す。直接対応が無ければ std::nullopt（未知種別＝火打
+	// ・隅木谷木・無名等）。
 	std::optional<std::string> memberClassFromName(const std::string& name);
 
-	// 横架材のクラスを決定する（Python 版 resolve_member_class 相当）。
+	// 横架材のクラスを決定する。
 	//
-	// IFC Name の種別で判別できればそれを信用する。判別できない部材（火打・隅木谷木・
-	// 無名等）は階と高さの状況から、次の**優先順**で推定する（Python 版と同じ順序）:
+	// IFC Name の種別で判別できればそれを信用する。判別できない部材（火打・隅木谷木・無名等）
+	// は階と高さの状況から、次の**優先順**で推定する:
 	//   1. 最上階（index >= topIndex）の地廻り（軒）高さの横架材   → 小屋梁
 	//   2. 最上階のそれより高い横架材（aboveEaves）               → 母屋
 	//   3. 最下階（index <= 0）の横架材                          → 土台
@@ -108,13 +107,13 @@ namespace HomeskzIfcImport::parse
 	std::string resolveMemberClass(const std::string& name, int index, int topIndex,
 								   bool aboveEaves);
 
-	// 小屋束を識別する IfcColumn.ObjectType（Python 版 COLUMN_STANDCOLUMN_OBJECT_TYPE）。
+	// 小屋束を識別する IfcColumn.ObjectType。
 	// **この定義が唯一**で、クラス判定（resolveColumnClass）と柱種別名の変換
 	// （parse/Column の resolveColumnType）が同じ文字列を見る（片方だけ直すと、
 	// クラスは小屋束なのに構造材 ID の種別が管柱のまま、といったズレが起こる）。
 	inline constexpr const char* kStandColumnObjectType = "STANDCOLUMN";
 
-	// 柱のクラスを決定する（Python 版 resolve_column_class 相当）。
+	// 柱のクラスを決定する。
 	//
 	// 小屋束は IFC 記録（objectType == "STANDCOLUMN" または name が "小屋束" で始まる）で
 	// 判別する。記録が無くても最上階（屋根＝index >= topIndex）の柱は小屋束として扱う。

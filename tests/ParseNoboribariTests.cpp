@@ -1,10 +1,10 @@
 //
 //	ParseNoboribariTests.cpp
 //
-//	登り梁の位置補正（src/parse/Noboribari）の単体テスト。VectorWorks SDK を一切
-//	include せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
-//	Python 版 test_ifc_noboribari.py のケースを写している（柱を参照するケースは M8 で柱を
-//	導入するときに足す。docs/DEV-NOTES.md M7）。
+//	登り梁の位置補正（src/parse/Noboribari）の単体テスト。VectorWorks SDK を一切 include せず、
+//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
+//	**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）（柱を参照する
+//	ケースは M8 で柱を導入するときに足す。docs/DEV-NOTES.md M7）。
 //
 //	検証項目（docs/DEV-NOTES.md M7）: 屋根面の天端 Z と内包判定・受ける材への端部詰め（Z 範囲で
 //	絞る・極小の食い込みは詰めない・詰めすぎになるなら詰めない）・登り梁の真上の屋根面の
@@ -55,8 +55,8 @@ using HomeskzIfcTests::near;
 
 namespace
 {
-	// 平面外形が広い矩形の屋根面を作る（Python 版 _flat_roof_plane）。
-	// zAt(x, y) = zAtOrigin + slope · x になるよう法線を定める（+x へ進むと slope ぶん上がる）。
+	// 平面外形が広い矩形の屋根面を作る。zAt(x, y) = zAtOrigin + slope · x になるよう法線を定
+	// める（+x へ進むと slope ぶん上がる）。
 	NoboribariRoofPlane flatRoofPlane(double slope, double zAtOrigin)
 	{
 		// 平面 z = slope·x（ストーリ相対）。法線は (−slope, 0, 1) を正規化したもの。
@@ -163,8 +163,8 @@ namespace
 	}
 } // namespace
 
-// ---------------------------------------------------------------------------
-// NoboribariRoofPlane
+// --------------------------------------------------------------------------
+// - NoboribariRoofPlane
 // ---------------------------------------------------------------------------
 
 TEST(roof_plane_z_at_follows_slope)
@@ -190,8 +190,8 @@ TEST(roof_plane_without_footprint_contains_nothing)
 	CHECK(!degenerate.contains(0.0, 0.0));
 }
 
-// ---------------------------------------------------------------------------
-// noboribariEndTrim
+// --------------------------------------------------------------------------
+// - noboribariEndTrim
 // ---------------------------------------------------------------------------
 
 TEST(end_trim_trims_to_member_face)
@@ -221,8 +221,8 @@ TEST(end_trim_ignores_degenerate_receiver)
 			   0.0));
 }
 
-// ---------------------------------------------------------------------------
-// noboribariColumnPenetration / 柱を受け材にした端部詰め（M8）
+// --------------------------------------------------------------------------
+// - noboribariColumnPenetration / 柱を受け材にした端部詰め（M8）
 // ---------------------------------------------------------------------------
 
 TEST(column_penetration_trims_to_near_face)
@@ -297,8 +297,8 @@ TEST(correct_one_trims_the_end_against_a_column)
 	CHECK(near(out.start.x, 0.0)); // 始端は受けるものが無く不変
 }
 
-// ---------------------------------------------------------------------------
-// roofPlaneFor
+// --------------------------------------------------------------------------
+// - roofPlaneFor
 // ---------------------------------------------------------------------------
 
 TEST(roof_plane_for_selects_aligned_plane)
@@ -325,8 +325,8 @@ TEST(roof_plane_for_none_for_degenerate_length)
 	CHECK(roofPlaneFor(command, planes, Vec2{0.0, 0.0}) == nullptr);
 }
 
-// ---------------------------------------------------------------------------
-// correctOneNoboribari（端部詰め → 屋根スナップ）
+// --------------------------------------------------------------------------
+// - correctOneNoboribari（端部詰め → 屋根スナップ）
 // ---------------------------------------------------------------------------
 
 TEST(snaps_pitch_and_height_to_roof)
@@ -420,8 +420,8 @@ TEST(snap_uses_trimmed_end_position)
 	CHECK(near(out.endElevation, 900.0 + (0.25 * 947.5)));
 }
 
-// ---------------------------------------------------------------------------
-// correctNoboribari / collectRoofPlanes（IFC 連携）
+// --------------------------------------------------------------------------
+// - correctNoboribari / collectRoofPlanes（IFC 連携）
 // ---------------------------------------------------------------------------
 
 TEST(passes_non_noboribari_through_unchanged)

@@ -1,9 +1,9 @@
 //
 //	draw/Sheet.h
 //
-//	Phase 2（VW 描画）のシート（伏図）モジュール。Python 版 vw/sheet.py の execute_sheets /
-//	draw_sheet に対応する（docs/DEV-NOTES.md M13）。命令セット（core::SheetCommand の列）から
-//	シートレイヤ 1 枚とその上のビューポート 1 枚を作り、表示するデザインレイヤを絞り込む。
+//	Phase 2（VW 描画）のシート（伏図）モジュール（docs/DEV-NOTES.md M13）。命令セット（core::
+//	SheetCommand の列）からシートレイヤ 1 枚とその上のビューポート 1 枚を作り、表示する
+//	デザインレイヤを絞り込む。
 //
 //	【SDK 依存】draw/ は VectorWorks SDK のみに依存し、IFC / STEP の知識を持たない。
 //	.cpp は PluginPrefix.h（SDK）を include するため SDK ビルドでのみコンパイルされ、
@@ -13,11 +13,11 @@
 //	【レイヤの重ね順はここでは決めない】床・野地板が柱・梁を覆い隠さないようにする件は、
 //	**デザインレイヤ自体の並べ替え**（draw/Story の reorderStoryLayers）が担う。当初は
 //	ビューポート単位の重ね順オーバーライド（SetViewportLayerStackingOverride）へ委ねたが、
-//	**実機で効かなかった**（呼び出しは true を返すのに上書き件数は 0 のまま）ので、Python 版と
-//	同じドキュメント重ね順の並べ替えに戻してある（経緯は draw/Story.h の reorderStoryLayers）。
-//	ビューポートは**生成時の重ね順で描かれる**ので、並べ替えは drawSheets より前に済ませる
-//	（順序は draw/ExecuteDocument が持つ）。ここが持つのは**表示レイヤの絞り込みとクラス表示**
-//	だけになる。
+//	**実機で効かなかった**（呼び出しは true を返すのに上書き件数は 0 のまま）ので、
+//	ドキュメントのレイヤ重ね順そのものを並べ替える（経緯は draw/Story.h の reorderStoryLayers）。
+//	ビューポートは**生成時の重ね順で描かれる**ので、並べ替えは drawSheets より前に済ませる（順
+//	序は draw/ExecuteDocument が持つ）。ここが持つのは**表示レイヤの絞り込みとクラス表示**だけ
+//	になる。
 //
 //	実描画（ビューポートの見え方・縮尺・表示レイヤ）はローカルの VectorWorks で目視確認する
 //	（docs/DEV-NOTES.md M13「ローカル確認」）。

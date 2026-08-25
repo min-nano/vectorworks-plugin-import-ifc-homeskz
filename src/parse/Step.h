@@ -1,16 +1,15 @@
 //
 //	parse/Step.h
 //
-//	最小 STEP リーダ（ISO 10303-21）。ホームズ君 IFC が出力する既知サブセット向けに、
-//	STEP トークナイザ＋エンティティグラフを提供する。Python 版が ifcopenshell を
-//	「エンティティグラフの読み取り」だけに使っているのと同じ立ち位置で、幾何エンジン
-//	（OpenCASCADE 等）は持たない。配置行列・断面・押し出しの幾何計算は parse/IfcGeometry
-//	＋ core/Geometry へ別途移植する（docs/DEV-NOTES.md M2）。
+//	最小 STEP リーダ（ISO 10303-21）。ホームズ君 IFC が出力する既知サブセット向けに、STEP
+//	トークナイザ＋エンティティグラフを提供する。担うのは**エンティティグラフの読み取りだけ**で、
+//	幾何エンジン（OpenCASCADE 等）は持たない。配置行列・断面・押し出しの幾何計算は
+//	parse/IfcGeometry ＋ core/Geometry が受け持つ（docs/DEV-NOTES.md M2）。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。通常の C++
 //	ツールチェインだけでコンパイル・単体実行・テストできる（CLAUDE.md「Phase 1」）。
 //
-//	提供する読み取り API（Python 版 ifcopenshell の open / by_type / 逆参照に対応）:
+//	提供する読み取り API:
 //	  * Model::entity(id)     … #id のエンティティ（無ければ nullptr）
 //	  * Model::byType(name)   … 型名（大文字）に属する #id 群（id 昇順で決定的）
 //	  * Model::referrers(id)  … #id を属性のどこかで参照するエンティティの #id 群
@@ -29,7 +28,7 @@
 
 namespace HomeskzIfcImport::parse
 {
-	// STEP 属性値の種別。Python 版が ifcopenshell から受け取る値の型に対応する。
+	// STEP 属性値の種別。
 	enum class ValueType
 	{
 		Null,	   // $      … 未設定（省略）
@@ -139,7 +138,7 @@ namespace HomeskzIfcImport::parse
 	// エスケープを UTF-8 へデコードする。パーサが文字列値を読むたびに通すので
 	// Value::text は常に UTF-8 になる。ホームズ君 IFC の日本語（"床版" 等の Name）は
 	// \X2\5E8A\X0\ 形式（UTF-16 コード単位列）で出力されるため、これを解かないと
-	// 名前による要素判別が一切通らない（ifcopenshell と同じ扱いに揃える）。
+	// 名前による要素判別が一切通らない。
 	//   \X2\<hex…>\X0\ … UTF-16 コード単位列（サロゲートペア対応）
 	//   \X\HH           … 1 バイト（ISO 8859-1 のコードポイント）
 	//   \S\c            … c のコードポイント + 128

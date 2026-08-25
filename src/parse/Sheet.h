@@ -1,14 +1,13 @@
 //
 //	parse/Sheet.h
 //
-//	Phase 1（IFC 解析）のシート（伏図）モジュール。Python 版 ifc/sheet.py に対応する
-//	（docs/DEV-NOTES.md M13）。**IFC からシート構成を読み取るわけではない**——取り込んだ要素の
-//	有無（基礎があるか・屋根版を持つ階はどれか・柱の span はどう分かれたか）から
-//	「どの伏図を作り、そこに何を映すか」を決める。
+//	Phase 1（IFC 解析）のシート（伏図）モジュール（docs/DEV-NOTES.md M13）。**IFC
+//	からシート構成を読み取るわけではない**——取り込んだ要素の有無（基礎があるか・屋根版を持つ階
+//	はどれか・柱の span はどう分かれたか）から「どの伏図を作り、そこに何を映すか」を決める。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。
 //
-//	作る伏図は 3 種（Python 版と同じ。番号もこの順に "1" から振る）:
+//	作る伏図は 3 種（番号もこの順に "1" から振る）:
 //	  * **基礎伏図**（buildFoundationSheetCommands）… 基礎要素があるときだけ 1 枚。
 //	    表示レイヤは 底盤・立上り・床束・アンカーボルト・通り芯。
 //	  * **柱梁伏図**（buildFloorFramingSheetCommands）… FL ストーリ 1 つにつき 1 枚。
@@ -38,15 +37,15 @@
 //	ここが決めるのは「どの伏図にどのスタイルの凡例を載せるか」だけになる:
 //	  * 基礎伏図 … "基礎伏図凡例"。**アンカーボルトを 1 本でも置いたときだけ**
 //	    （置かなければ凡例に並ぶものが無く、空の箱が図面に残る）。
-//	  * 柱梁伏図・母屋伏図 … "床伏図凡例"（常に載せる）。
-//	凡例は SheetCommand の中に入れ子で持つので、Python 版のように番号で突き合わせる
-//	必要が無い（タグを ViewportCommand の中に持たせたのと同じ考え方）。
+//	  * 柱梁伏図・母屋伏図 … "床伏図凡例"（常に載せる）。凡例は SheetCommand の中に入れ子で持
+//	    つので、番号で突き合わせる必要が無い（タグを ViewportCommand の中に持たせたのと同じ考
+//	    え方）。
 //
-//	［Python 版との差異・意図的］
-//	  * **母屋伏図を作る条件は「屋根版を持つ階」だけ**（Python 版は `is_top or roof_flags[i]`）。
-//	    本移植は屋根版のある階にしか垂木・野地板レベルを作らないので（parse/Story）、屋根版の
-//	    無い最上階に伏図を作ると空のビューポートが残る。ホームズ君の出力では最上階は必ず
-//	    主屋根の屋根版を含むため、実データでの結果は Python 版と一致する。
+//	【設計上の要点】
+//	  * **母屋伏図を作る条件は「屋根版を持つ階」だけ**。本移植は屋根版のある階にしか垂木・
+//	    野地板レベルを作らないので（parse/Story）、屋根版の無い最上階に伏図を作ると空の
+//	    ビューポートが残る。ホームズ君の出力では最上階は必ず主屋根の屋根版を含むので、
+//	    実データでは「最上階＋下屋根のある階」に落ち着く。
 //	  * **小屋組のレイヤは命令の配置先で判定する**（母屋・登り梁）。parse/Story がレベルを
 //	    作る条件と同じ述語（横架材命令の配置先レイヤ）を通すので、「レイヤは無いのに伏図が
 //	    映そうとする」という齟齬が構造的に起きない。
@@ -66,47 +65,46 @@ namespace HomeskzIfcImport::parse
 {
 	class Context;
 
-	// 基礎伏図のシートレイヤ番号・タイトル（Python 版 FOUNDATION_PLAN_SHEET_NUMBER /
-	// _TITLE）。番号は文字列で、**シートレイヤ名がそのまま番号を担う**（描画側 draw/Sheet）。
+	// 基礎伏図のシートレイヤ番号・タイトル。番号は文字列で、**シートレイヤ名がそのまま番号を
+	// 担う**（描画側 draw/Sheet）。
 	inline constexpr const char* kFoundationSheetNumber = "1";
 	inline constexpr const char* kFoundationSheetTitle = "基礎伏図";
 
-	// 柱梁伏図のシートレイヤ番号の開始値（Python 版 FLOOR_PLAN_START_NUMBER）。基礎伏図
-	// （番号 1）に続けて 2 から振る。**基礎が無い文書でも 2 から始める**（Python 版と同じ。
-	// 番号が階に対して一定になり、基礎の有無で図番が動かない）。
+	// 柱梁伏図のシートレイヤ番号の開始値。基礎伏図（番号 1）に続けて 2 から振る。
+	// **基礎が無い文書でも 2 から始める**（番号が階に対して一定になり、基礎の有無で図番が動か
+	// ない）。
 	inline constexpr int kFloorPlanStartNumber = 2;
 
-	// 柱梁伏図（床伏図・小屋伏図）の切断レベル＝その階の床レベル（1 始まり＝index+1）+ 0.25
-	// （Python 版 FLOOR_PLAN_CUT_OFFSET。index からの相対なので 1.25）。1 階床伏図＝1.25 /
-	// 2 階床伏図＝2.25 / 2 階小屋伏図＝3.25。
+	// 柱梁伏図（床伏図・小屋伏図）の切断レベル＝その階の床レベル（1 始まり＝index+1）+
+	// 0.25（index からの相対なので 1.25）。1 階床伏図＝1.25 / 2 階床伏図＝2.25 /
+	// 2 階小屋伏図＝3.25。
 	inline constexpr double kFloorPlanCutOffset = 1.25;
 
-	// 母屋伏図の切断レベル＝その階の床レベル + 0.75（Python 版 MOYA_PLAN_CUT_OFFSET）。
+	// 母屋伏図の切断レベル＝その階の床レベル + 0.75。
 	// **その階の小屋束（span [i+1, i+1.5]）を超え、上階の床（i+2）には届かない高さ**を
 	// サンプルするので、屋根を貫く主屋の柱だけが載る。1 階母屋伏図＝2.75 / 2 階母屋伏図＝3.75。
 	inline constexpr double kMoyaPlanCutOffset = 1.75;
 
-	// 伏図タイトルの種別ラベル（Python 版 FLOOR_PLAN_FLOOR_LABEL / _ROOF_LABEL /
-	// MOYA_PLAN_LABEL）。階番号と組み合わせて "{n}階床伏図" のように使う。
+	// 伏図タイトルの種別ラベル。階番号と組み合わせて "{n}階床伏図" のように使う。
 	inline constexpr const char* kFloorPlanFloorLabel = "床";
 	inline constexpr const char* kFloorPlanRoofLabel = "小屋";
 	inline constexpr const char* kMoyaPlanLabel = "母屋";
 
-	// 柱梁伏図のタイトル（Python 版 floor_plan_title）。最上階は主屋根が架かる階番号を
-	// 付けた "{count-1}階小屋伏図"、それ以外は "{index+1}階床伏図"。小屋組（母屋・垂木・
-	// 野地板）は専用の母屋伏図へ分けるので、ここに母屋の表記は付けない。
+	// 柱梁伏図のタイトル。最上階は主屋根が架かる階番号を付けた "{count-1}階小屋伏図"、
+	// それ以外は "{index+1}階床伏図"。小屋組（母屋・垂木・野地板）は専用の母屋伏図へ分けるの
+	// で、ここに母屋の表記は付けない。
 	std::string floorPlanTitle(std::size_t index, bool isTop, std::size_t count);
 
-	// 母屋伏図のタイトル（Python 版 moya_plan_title）。屋根が架かる階番号（0 起点の
-	// ストーリ index をそのまま用いる）を付けた "{index}階母屋伏図"。2 階建てなら
-	// 主屋根（index=2）＝"2階母屋伏図"、中間階の下屋根（index=1）＝"1階母屋伏図"。
+	// 母屋伏図のタイトル。屋根が架かる階番号（0 起点のストーリ index をそのまま用いる）
+	// を付けた "{index}階母屋伏図"。2 階建てなら主屋根（index=2）＝"2階母屋伏図"、
+	// 中間階の下屋根（index=1）＝"1階母屋伏図"。
 	std::string moyaPlanTitle(std::size_t index);
 
-	// span 柱レイヤのうち切断レベル cut を含む（from ≤ cut ≤ to）ものを (from, to) 昇順で
-	// 返す（Python 版 _span_layers_at_cut）。spans は parse/Column の collectColumnSpans。
+	// span 柱レイヤのうち切断レベル cut を含む（from ≤ cut ≤ to）ものを (from, to) 昇順で返す。
+	// spans は parse/Column の collectColumnSpans。
 	std::vector<std::string> spanLayersAtCut(const std::vector<ColumnSpan>& spans, double cut);
 
-	// グラフィック凡例スタイル名（Python 版 FOUNDATION_LEGEND_STYLE / FLOOR_LEGEND_STYLE）。
+	// グラフィック凡例スタイル名。
 	// **ユーザーが VW 側で用意したスタイル**の名前で、凡例に並べるシンボル・ラベル・
 	// ソース定義（どのビューポートのシンボルを集めるか）はそのスタイルが持つ
 	// （core/Document.h の LegendCommand）。名前が一致しないとスタイルが当たらず、
@@ -114,37 +112,32 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kFoundationLegendStyle = "基礎伏図凡例";
 	inline constexpr const char* kFloorLegendStyle = "床伏図凡例";
 
-	// 凡例のシートレイヤ上の配置点（用紙座標 mm。Python 版 FOUNDATION_LEGEND_POSITION /
-	// FLOOR_LEGEND_POSITION と同じく原点）。**ビューポートと重ならない位置はローカルの
+	// 凡例のシートレイヤ上の配置点（用紙座標 mm）。**ビューポートと重ならない位置はローカルの
 	// VectorWorks で最終調整する**——ビューポートの実寸は描いてみるまで分からないので、
 	// 解析側では決められない（docs/DEV-NOTES.md M13）。
 	inline constexpr core::Vec2 kLegendPosition{0.0, 0.0};
 
-	// 基礎伏図の sheet 命令（無ければ空）。基礎要素が 1 つも無ければ空を返す——表示すべき
-	// "F-底盤" ほかのレイヤが生成されず、ビューポートが空になるため（Python 版
-	// build_foundation_sheet_commands）。
+	// 基礎伏図の sheet 命令（無ければ空）。基礎要素が 1 つも無ければ空を返す——表示すべき"F-底
+	// 盤" ほかのレイヤが生成されず、ビューポートが空になるため。
 	//
-	// グラフィック凡例（"基礎伏図凡例"）は**アンカーボルトを 1 本でも置いたときだけ**
-	// 載せる（Python 版 build_legend_commands の判断。凡例に並ぶものが無ければ空の箱が
-	// 残るため）。
+	// グラフィック凡例（"基礎伏図凡例"）は**アンカーボルトを 1 本でも置いたときだけ**載せる
+	// （凡例に並ぶものが無ければ空の箱が残るため）。
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(const Model& model);
 
-	// 各階の柱梁伏図の sheet 命令（ストーリが無ければ空）。グラフィック凡例
-	// （"床伏図凡例"）を各シートに 1 つ載せる。Python 版
-	// build_floor_framing_sheet_commands ＋ build_floor_legend_commands。
+	// 各階の柱梁伏図の sheet 命令（ストーリが無ければ空）。グラフィック凡例（"床伏図凡例"）
+	// を各シートに 1 つ載せる。
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(const Model& model);
 
-	// 屋根版を持つ階ごとの母屋伏図の sheet 命令（無ければ空）。番号は柱梁伏図の最後に
-	// 続けて Elevation 昇順（最下階→最上階）に振る。柱梁伏図と同じくグラフィック凡例
-	// （"床伏図凡例"）を 1 つ載せる（Python 版 build_moya_sheet_commands ＋
-	// build_floor_legend_commands）。
+	// 屋根版を持つ階ごとの母屋伏図の sheet 命令（無ければ空）。番号は柱梁伏図の最後に続けて
+	// Elevation 昇順（最下階→最上階）に振る。柱梁伏図と同じくグラフィック凡例（"床伏図凡例"）
+	// を 1 つ載せる。
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(const Model& model);
 
-	// 上の 3 種を 基礎伏図 → 柱梁伏図 → 母屋伏図 の順に連ねた sheet 命令（Python 版
-	// build_sheet_commands）。シートレイヤ番号もこの並びと一致する。
+	// 上の 3 種を 基礎伏図 → 柱梁伏図 → 母屋伏図 の順に連ねた sheet 命令。シートレイヤ番号も
+	// この並びと一致する。
 	std::vector<core::SheetCommand> buildSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildSheetCommands(const Model& model);
 } // namespace HomeskzIfcImport::parse

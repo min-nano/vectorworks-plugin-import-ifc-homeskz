@@ -1,8 +1,8 @@
 //
 //	parse/Noboribari.cpp
 //
-//	登り梁の位置補正の実装。Python 版 ifc/noboribari.py の correct_noboribari ほかに対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	登り梁の位置補正の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない
+//	（core/parse のみ依存）。
 //
 
 #include "parse/Noboribari.h"
@@ -31,7 +31,7 @@ namespace HomeskzIfcImport::parse
 
 	bool NoboribariRoofPlane::contains(double x, double y) const
 	{
-		// 走査線法（Python 版 _RoofPlane.contains と同じ半開判定）。
+		// 走査線法。
 		bool inside = false;
 		const std::size_t count = plan.size();
 		if (count < 3)

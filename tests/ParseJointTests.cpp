@@ -1,10 +1,9 @@
 //
 //	ParseJointTests.cpp
 //
-//	仕口解析（src/parse/Joint）の単体テスト。VectorWorks SDK を一切 include せず、
-//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
-//	Python 版 test_ifc_joint.py のケースを 1 対 1 で写している（期待値は手書き。
-//	docs/DEV-NOTES.md「Python 版出力との比較はしない」）。
+//	仕口解析（src/parse/Joint）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK
+//	のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。**期待値は手書きで持
+//	つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
 //	検証項目（docs/DEV-NOTES.md M11）: 端点が相手材の footprint に入るかの判定・平行（継ぎ手・
 //	側並び）とレイヤ違いと Z 分離の除外・登り梁だけレイヤ一致を外すこと・柱に受けられる
@@ -59,9 +58,9 @@ using HomeskzIfcTests::near;
 
 namespace
 {
-	// 横架材命令（Python 版 _member）。既定は幅 120 / せい 180 / 天端 425 の水平材。
-	// バウンド offset（レベルの絶対 Z から天端 Z までの距離）は既定 0＝レイヤ平面ちょうど。
-	// 仕口の高さはこの offset をそのまま写すので、高さを見るテストだけ明示的に入れる。
+	// 横架材命令。既定は幅 120 / せい 180 / 天端 425 の水平材。バウンド offset（レベルの絶対
+	// Z から天端 Z までの距離）は既定 0＝レイヤ平面ちょうど。仕口の高さはこの offset
+	// をそのまま写すので、高さを見るテストだけ明示的に入れる。
 	MemberCommand member(const std::string& layer, Vec2 start, Vec2 end, double width = 120.0,
 						 double height = 180.0, double elevation = 425.0,
 						 double endElevation = 425.0, double startOffset = 0.0,
@@ -84,7 +83,7 @@ namespace
 		return command;
 	}
 
-	// 柱命令（Python 版 _column）。既定は 105 角・下端 245・高さ 2844。
+	// 柱命令。既定は 105 角・下端 245・高さ 2844。
 	ColumnCommand column(Vec2 position, double elevation = 245.0, double height = 2844.0,
 						 double width = 105.0, double depth = 105.0)
 	{
@@ -139,7 +138,7 @@ namespace
 	}
 } // namespace
 
-// --- 端点が相手材の footprint に入るか（Python 版 TestPointInMember）---------
+// --- 端点が相手材の footprint に入るか---------
 
 TEST(joint_point_in_member)
 {
@@ -155,7 +154,7 @@ TEST(joint_point_in_member)
 	CHECK(!pointInMember(Vec2{4000.0, 0.0}, other));   // 軸方向に範囲外
 }
 
-// --- 受ける材の有無（Python 版 TestEndHasReceiver）---------------------------
+// --- 受ける材の有無---------------------------
 
 TEST(joint_t_junction_stem_end_is_received)
 {
@@ -249,7 +248,7 @@ TEST(joint_noboribari_parallel_and_z_separation_still_excluded)
 	CHECK(!endHasReceiver(1, Vec2{1500.0, 60.0}, geomsOf(zCase), zCase, {}));
 }
 
-// --- 柱に受けられる端部（Python 版 TestColumnReceiver）-----------------------
+// --- 柱に受けられる端部-----------------------
 
 TEST(joint_beam_end_on_column_is_received)
 {
@@ -319,7 +318,7 @@ TEST(joint_build_places_joint_at_column_supported_end)
 	CHECK(near(std::abs(commands.front().angle), 180.0));
 }
 
-// --- 退化した材（Python 版 TestDegenerateMembers）----------------------------
+// --- 退化した材----------------------------
 
 TEST(joint_degenerate_member_is_skipped)
 {
@@ -341,7 +340,7 @@ TEST(joint_end_has_receiver_rejects_out_of_range_index)
 	CHECK(!endHasReceiver(5, Vec2{0.0, 0.0}, geomsOf(members), members, {}));
 }
 
-// --- 命令の組み立て（Python 版 TestBuildJointCommands）-----------------------
+// --- 命令の組み立て-----------------------
 
 TEST(joint_t_junction_places_single_joint_at_stem_end)
 {
@@ -487,7 +486,7 @@ TEST(joint_height_is_taken_from_the_receiving_member_independent_bound)
 	CHECK(near(commands.front().zOffset, 120.0)); // beam の startBound（girder の 0 ではない）
 }
 
-// --- 実フィクスチャ（Python 版 TestBuildFromFixture / …WithColumns）----------
+// --- 実フィクスチャ----------
 
 TEST(joint_fixture_shape_and_layers)
 {

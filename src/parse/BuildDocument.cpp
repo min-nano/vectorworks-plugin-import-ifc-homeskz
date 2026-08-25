@@ -1,8 +1,7 @@
 //
 //	parse/BuildDocument.cpp
 //
-//	buildDocument の実装。Python 版 ifc/__init__.py build_document に対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない。
+//	buildDocument の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない。
 //
 //	処理の順は、
 //	  1. parse/Loader … IFC を読み込む（parse/Step でトークナイズ＋エンティティグラフ構築。
@@ -68,10 +67,10 @@ namespace HomeskzIfcImport::parse
 
 		core::Document document;
 
-		// M8 柱: 横架材（Context が 1 回だけ解析する）を入力に柱命令を組み立てる。span の
-		// to レベル判定に上階の横架材下端が要るためで、Python 版 build_document の順序
-		// （members → columns → correct_noboribari）と同じ。柱もストーリ（span レベル）・
-		// 登り梁の端部詰めが共有するので、Context がキャッシュする（parse/Context.h の columns）。
+		// M8 柱: 横架材（Context が 1 回だけ解析する）を入力に柱命令を組み立てる。span の to
+		// レベル判定に上階の横架材下端が要るので、横架材 → 柱 → 登り梁の補正の順で組み立てる。
+		// 柱もストーリ（span レベル）・登り梁の端部詰めが共有するので、Context がキャッシュす
+		// る（parse/Context.h の columns）。
 		document.columns = context.columns();
 		progress.step();
 
@@ -100,19 +99,19 @@ namespace HomeskzIfcImport::parse
 		progress.step();
 
 		// M6 屋根面・屋根組: 屋根版（IfcSlab "屋根版"）から垂木・野地板を導出する
-		// （parse/Rafter / parse/Roof）。屋根面は建物形状の要で、上の登り梁はここで確定した
-		// 屋根面へスナップ補正されている（形状先行）。垂木の差し込みに使う桁幅は**補正後の**
-		// 横架材命令から引く（Python 版 build_document と同じ順序）。以降のマイルストーンで
-		// Column … の解析を同様に足していく（docs/DEV-NOTES.md）。
+		// （parse/Rafter / parse/Roof）。屋根面は建物形状の要で、上の登り梁はここで確定した屋
+		// 根面へスナップ補正されている（形状先行）。垂木の差し込みに使う桁幅は**補正後の**横
+		// 架材命令から引く。以降のマイルストーンで Column … の解析を同様に足していく
+		// （docs/DEV-NOTES.md）。
 		document.rafters = buildRafterCommands(context, document.members);
 		progress.step();
 		document.roofs = buildRoofCommands(context);
 		progress.step();
 
 		// M9 基礎: 立上り（壁）→ 底盤（スラブ）。立上りは自由端を柱芯へ寄せるので柱命令を、
-		// 底盤は外周を立上りの外面へ合わせるので立上りの命令を入力に取る（Python 版
-		// build_document と同じ依存の向き）。Context が立上りを 1 回だけ組み立てて両者へ配る。
-		// 立上りには人通口の分割・切り下げまで反映されている（M10。parse/Footing.h）。
+		// 底盤は外周を立上りの外面へ合わせるので立上りの命令を入力に取る。Context が立上りを
+		// 1 回だけ組み立てて両者へ配る。立上りには人通口の分割・切り下げまで反映されている
+		// （M10。parse/Footing.h）。
 		document.walls = context.walls();
 		progress.step();
 		// M10 壁結合: 交差する立上りどうしの結合命令。命令の a / b は **walls の添字**なので、
@@ -124,19 +123,18 @@ namespace HomeskzIfcImport::parse
 		document.slabs = buildSlabCommands(context, document.walls);
 		progress.step();
 
-		// 基礎要素があれば**基礎ストーリを stories の先頭（最下層）へ**置く（Python 版
-		// build_document と同じ）。Elevation=0 で最下層になり、レイヤの希望スタック順
-		// （最上階→最下階）でも最下段に積まれる。基礎ストーリは FL 階の命令を変えない。
+		// 基礎要素があれば**基礎ストーリを stories の先頭（最下層）へ**置く。Elevation=0
+		// で最下層になり、レイヤの希望スタック順（最上階→最下階）でも最下段に積まれる。
+		// 基礎ストーリは FL 階の命令を変えない。
 		core::StoryCommand foundationStory;
 		if (buildFoundationStoryCommand(model, foundationStory))
 			document.stories.insert(document.stories.begin(), std::move(foundationStory));
 
 		// M11 シンボル置換系（アンカーボルト・床束・火打・仕口）。互いに独立だが、
-		// **仕口だけは横架材・柱の命令から導出する**ので、上の members / columns が確定した
-		// 後に置く（Python 版 build_document と同じ順序）。仕口が見る横架材は登り梁の屋根
-		// スナップ**後**——受ける材との取り合いは補正後の位置で決まる。
-		// アンカーボルトはコンテキストが 1 回だけ組み立てる（伏図のグラフィック凡例が
-		// 「1 本でも置いたか」を見るため。parse/Sheet）。
+		// **仕口だけは横架材・柱の命令から導出する**ので、上の members / columns
+		// が確定した後に置く。仕口が見る横架材は登り梁の屋根スナップ**後**——受ける材との取り
+		// 合いは補正後の位置で決まる。アンカーボルトはコンテキストが 1 回だけ組み立てる（伏図
+		// のグラフィック凡例が「1 本でも置いたか」を見るため。parse/Sheet）。
 		document.anchorBolts = context.anchorBolts();
 		progress.step();
 		document.floorPosts = buildFloorPostCommands(context);
@@ -165,10 +163,10 @@ namespace HomeskzIfcImport::parse
 		document.sections = buildSectionCommands(context, document);
 		progress.step();
 
-		// M13 断面寸法データタグ: 伏図・軸組図の**両方**のビューポート注釈に、横架材の断面
-		// 寸法を示すデータタグを載せる（Python 版は伏図だけ）。タグはビューポート命令の中に
-		// 入るので、**sheets / sections が確定した後**でなければ置き場所が決まらない
-		// ——したがってここが最後になる（parse/Tag）。
+		// M13 断面寸法データタグ: 伏図・軸組図の**両方**のビューポート注釈に、横架材の断面寸
+		// 法を示すデータタグを載せる。タグはビューポート命令の中に入るので、**sheets /
+		// sections が確定した後**でなければ置き場所が決まらない——したがってここが最後になる
+		// （parse/Tag）。
 		attachTagCommands(document);
 		progress.step();
 

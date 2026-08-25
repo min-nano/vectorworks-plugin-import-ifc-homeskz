@@ -1,8 +1,8 @@
 //
 //	parse/AnchorBolt.cpp
 //
-//	アンカーボルト解析の実装。Python 版 ifc/anchor_bolt.py の build_anchor_bolt_commands
-//	ほかに対応。【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	アンカーボルト解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない
+//	（core/parse のみ依存）。
 //
 
 #include "parse/AnchorBolt.h"
@@ -27,7 +27,7 @@ namespace HomeskzIfcImport::parse
 	std::string resolveAnchorBoltSymbol(const std::string& typeName)
 	{
 		// 座金なし（型名に "座金なし" を含む）は M16、そうでなければ（Z1/Z2 等の角座金付き）
-		// M12。Python 版 resolve_anchor_bolt_symbol と同じ振り分け。
+		// M12。
 		if (typeName.find(kWasherlessToken) != std::string::npos)
 			return kSymbolAnchorBoltM16;
 		return kSymbolAnchorBoltM12;

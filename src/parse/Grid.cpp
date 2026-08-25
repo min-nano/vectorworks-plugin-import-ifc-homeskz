@@ -1,8 +1,8 @@
 //
 //	parse/Grid.cpp
 //
-//	通り芯（グリッド）解析の実装。Python 版 ifc/grid.py の build_grid_commands に対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	通り芯（グリッド）解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include
+//	しない（core/parse のみ依存）。
 //
 
 #include "parse/Grid.h"
@@ -24,8 +24,8 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// X 通り／Y 通りのクラス名。Python 版 ifc/grid.py の CLASS_X / CLASS_Y と一致させる
-		// （'01作図-01線-01基準線-01通り芯-X通り' 等）。docs/DEV-NOTES.md M1「X/Y でクラス分け」。
+		// X 通り／Y 通りのクラス名（'01作図-01線-01基準線-01通り芯-X通り' 等）。
+		// docs/DEV-NOTES.md M1「X/Y でクラス分け」。
 		constexpr const char* kGridClassX = "01作図-01線-01基準線-01通り芯-X通り";
 		constexpr const char* kGridClassY = "01作図-01線-01基準線-01通り芯-Y通り";
 
@@ -38,12 +38,9 @@ namespace HomeskzIfcImport::parse
 				   (samePoint(a.start, b.end) && samePoint(a.end, b.start));
 		}
 
-		// 1 本の IfcGridAxis から AxisCurve(IfcPolyline) の全点を平面座標で集める。
-		// Python 版 resolve_lines の
-		//   pts = [(float(pt.Coordinates[0]), float(pt.Coordinates[1])) for pt in curve.Points]
-		// に対応する。曲線が IfcPolyline でない／点が 2 つ未満／いずれかの点を解決できない
-		// ときは false を返し、その軸ごとスキップさせる（Python は点にアクセスして例外に
-		// なる＝実質その軸を捨てる。1 軸の欠損で全体を止めない）。label も同時に受け取る。
+		// 1 本の IfcGridAxis から AxisCurve(IfcPolyline) の全点を平面座標で集める。曲線が
+		// IfcPolyline でない／点が 2 つ未満／いずれかの点を解決できないときは false を返し、
+		// その軸ごとスキップさせる（1 軸の欠損で全体を止めない）。label も同時に受け取る。
 		bool polylinePoints(const Model& model, const Entity& axis, std::string& label,
 							std::vector<Vec2>& pts)
 		{
@@ -51,7 +48,7 @@ namespace HomeskzIfcImport::parse
 			label = entityString(axis, attr::kGridAxisTag);
 
 			const Entity* curve = model.resolve(axis.attribute(attr::kGridAxisCurve));
-			// Python は curve.is_a('IfcPolyline') を確認する。型名で判定（常に大文字保持）。
+			// 曲線が IfcPolyline かを型名で判定する（STEP の型名は常に大文字で保持している）。
 			if (curve == nullptr || curve->type != "IFCPOLYLINE")
 				return false;
 			const Value& points = curve->attribute(attr::kPolylinePoints);
@@ -99,9 +96,8 @@ namespace HomeskzIfcImport::parse
 	std::vector<GridLine> collectGridLines(const Model& model)
 	{
 		// 各 IfcGridAxis の全点を集め、連続する点対（線分）ごとに 1 本の通り芯を作る
-		// （Python 版 resolve_lines の `for i in range(len(pts) - 1)` に対応。ポリラインが
-		// 多点でも各区間が 1 本になる）。幾何的に重複する線分（向き反転も同一）は全体で
-		// 1 本に畳む（最初に現れた 1 本を残す）。#id 昇順・点順で決定的。
+		// （ポリラインが多点でも各区間が 1 本になる）。幾何的に重複する線分（向き反転も同一）
+		// は全体で 1 本に畳む（最初に現れた 1 本を残す）。#id 昇順・点順で決定的。
 		std::vector<GridLine> lines;
 		for (const int id : model.byType("IFCGRIDAXIS"))
 		{
