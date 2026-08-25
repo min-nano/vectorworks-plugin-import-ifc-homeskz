@@ -451,6 +451,25 @@ namespace HomeskzIfcImport::draw
 		// 扱う**（DrawUtil.h の ViewportProjection）。
 		constexpr TStandardView kViewTop = standardViewTop;
 
+		// ビューポートを**必ず描き直させる**（＝オブジェクト情報パレットの「更新」ボタン相当）。
+		//
+		// 【なぜ SetDirty が要るか】`VWViewportObj::Update()` は「out-of-date なら描き直す」
+		// であって「無条件に描き直す」ではない。設定を書き換えても VW が out-of-date を立てて
+		// くれない種類の変更——**投影（Project 2D）の切り替え**と**デザインレイヤの重ね順の
+		// 並べ替え**（draw/Story の reorderStoryLayers。ビューポートは自分より前に動いた
+		// レイヤの並びを知らない）——では、`Update()` が黙って何もせず、**生成時のキャッシュ
+		// （3D の「上」ビューのまま・並べ替え前の重ね順のまま）が残る**。取り込み直後の伏図で
+		// 床（"n-FL"）が柱・梁を覆って見え、ユーザーが「更新」を 1 回押すと直る、という症状は
+		// これ（docs/DEV-NOTES.md「ビューポート（伏図・断面）」）。
+		//
+		// `IsDirty` / `SetDirty` が out-of-date フラグそのもので、**立ててから更新すれば
+		// 「更新」ボタンと同じ全面的な作り直しになる**。更新の直前に必ずこれを通すこと。
+		void ForceUpdate(VWViewportObj& viewport)
+		{
+			viewport.SetDirty(true);
+			viewport.Update();
+		}
+
 		// ビューポートを 2D/平面（Top/Plan）で**正しく描かせる**。作り直せたら true。
 		//
 		// 【なぜ「OFF → 更新 → ON」なのか】ただ Project 2D を ON にするだけでは足りない——生成
@@ -461,13 +480,16 @@ namespace HomeskzIfcImport::draw
 		// （＝ 3D の「上」でキャッシュを作り直させ）、その上で ON へ戻す。最後の更新は呼び出し
 		// 元（ConfigureViewport の末尾）が行い、そこで 2D/平面のキャッシュができる。
 		//
+		// **更新は必ず ForceUpdate で行う**——投影の切り替えでは out-of-date が立たないので、
+		// 素の `Update()` では OFF 側のキャッシュも作り直されず、この「なぞり」が空振りする。
+		//
 		// **入ったかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも黙って
 		// 何もしないので、戻り値の無いまま「設定したつもり」で終わらせない。
 		bool ForcePlanView(VWViewportObj& viewport)
 		{
 			viewport.SetViewType(kViewTop);
 			viewport.SetProject2D(false);
-			viewport.Update();
+			ForceUpdate(viewport);
 			viewport.SetProject2D(true);
 			return viewport.GetProject2D();
 		}
@@ -493,6 +515,10 @@ namespace HomeskzIfcImport::draw
 	//                                                     … ビューの向き（1007）・2D/平面か
 	//                                                       （1005）。伏図の作り直しに使う
 	//                                                       （DrawUtil.h の ViewportProjection）
+	//   * VWViewportObj(vp).SetDirty(true)                … out-of-date（更新が要る）を立てる。
+	//                                                       **更新の直前に必ず**（ForceUpdate。
+	//                                                       Update() は out-of-date でなければ
+	//                                                       何もしない）
 	ViewportSetup PrepareViewportSetup()
 	{
 		ViewportSetup setup;
@@ -572,7 +598,10 @@ namespace HomeskzIfcImport::draw
 				finish.planViewApplied = ForcePlanView(vp);
 			vp.SetDescription(TXString(command.drawingTitle.c_str()));
 			vp.SetLocator(TXString(command.drawingNumber.c_str()));
-			vp.Update();
+			// **この更新はビューポートの最後の全面的な描き直し**なので、必ず out-of-date を
+			// 立ててから行う（ForceUpdate）。ここで素の Update() を呼ぶと、重ね順の並べ替えも
+			// 投影の切り替えも反映されないキャッシュがそのまま残る。
+			ForceUpdate(vp);
 		}
 		catch (...)
 		{

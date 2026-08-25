@@ -488,6 +488,10 @@ namespace HomeskzIfcImport::draw
 		// 場合**、ここで戻さないと注釈だけが空白のまま残る。
 		// 戻すのはビューポートと同じく**全クラス**（draw/DrawUtil の ShowAllViewportClasses）
 		// ——タグが身に付けているクラスを数え上げる必要はない。
+		// **ここは素の更新のまま**にする（out-of-date を立てる ForceUpdate ではない）——
+		// 注釈を足した時点でビューポートは out-of-date になっており、全面的な描き直しは
+		// ConfigureViewport の仕上げで済んでいる。ここまで force すると伏図・軸組図の枚数だけ
+		// 全体の描き直しが 1 回ずつ増える（軸組図は数十枚あり、取り込みが目に見えて遅くなる）。
 		if (!placed.empty())
 		{
 			counts.classesShown += ShowAllViewportClasses(viewport);

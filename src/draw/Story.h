@@ -55,5 +55,10 @@ namespace HomeskzIfcImport::draw
 	// **伏図より前に呼ぶこと。** ビューポートは生成時の重ね順で描かれるので、並べ替えを後にす
 	// ると既存のビューポートへ反映されない。draw/ExecuteDocument は全要素の描画後・
 	// drawSheets の直前に呼ぶ。
+	//
+	// **並べ替えは既存ビューポートを out-of-date にしない。** 前に呼んでいても、ビューポート
+	// 側の更新が「out-of-date なら描き直す」だけの素の `Update()` だと、生成時のキャッシュ
+	// （＝並べ替え前の重ね順）が残る。仕上げの更新は必ず out-of-date を立ててから行うこと
+	// （draw/DrawUtil の ForceUpdate。取り込み直後だけ床が柱・梁を覆う症状の正体）。
 	std::size_t reorderStoryLayers(const core::Document& document);
 } // namespace HomeskzIfcImport::draw

@@ -33,7 +33,10 @@
 //	上書き（SetViewportLayerStackingOverride）は実機で効かなかった——呼び出しは true を
 //	返すのに GetNumViewportLayerStackingOverrides は 0 のままで、OIP も「順序を上書き:
 //	いいえ」だった——ので捨てた。**並べ替えはビューポート生成より前**に済ませる必要がある
-//	（生成時の重ね順で描かれるため。draw/ExecuteDocument の実行順）。
+//	（生成時の重ね順で描かれるため。draw/ExecuteDocument の実行順）。さらに**仕上げの更新は
+//	out-of-date を立ててから**行う（draw/DrawUtil の ForceUpdate）——並べ替えも投影の切り替えも
+//	VW は out-of-date を立ててくれないので、素の更新だと生成時のキャッシュが残り、取り込み直後
+//	だけ床が柱・梁を覆う（ユーザーが「更新」を 1 回押すと直る）。
 //
 
 #include "PluginPrefix.h"

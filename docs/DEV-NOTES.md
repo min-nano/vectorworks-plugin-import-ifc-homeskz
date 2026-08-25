@@ -280,8 +280,12 @@ ISDK にシンボルを配置する呼び出しは無く（在るのは `CreateS
   呼び出しは true を返すのに `GetNumViewportLayerStackingOverrides` は 0 のままで、OIP も
   「順序を上書き: いいえ」。実機 2 周で「設定 33 件・図面に記録 0 件」を確認して捨てた。
 - **並べ替えはビューポート生成より前に行う**（ビューポートは生成時の重ね順で描かれる）。
-  この順序を守れば、VectorScript 版が「並べ替えても既存ビューポートに反映されず手動更新が
-  要る」と諦めていた制約は起きない。
+- **並べ替えだけでは足りない。ビューポートの更新は out-of-date を立ててから行う。**
+  生成より前に並べ替えても、取り込み直後の伏図は**床（"n-FL"）が柱・梁を覆ったまま**で、
+  ユーザーが「更新」を 1 回押すと正しくなる——OIP のレイヤ一覧は並べ替え後の順を出しており、
+  順序そのものは合っている。原因は `VWViewportObj::Update()` が**「out-of-date なら描き直す」
+  であって「無条件に描き直す」ではない**こと（下の「ビューポート（伏図・断面）」も同じ落とし穴）。
+  `SetDirty(true)` を立ててから更新する（`draw/DrawUtil` の `ForceUpdate`）。
 - **レイヤ高さを取得する呼び出し（`GetLayerElevation` 相当）が無い。** 高さは命令の絶対 Z を
   そのまま渡す。レイヤ相対へ切り替えられるよう、渡す 1 か所（`draw/Rafter` の `SetOffset` /
   `draw/Roof` の `ovSlabHeight` / `draw/Member` の `kPathZ`）に名前を付けてある。
@@ -298,6 +302,13 @@ ISDK にシンボルを配置する呼び出しは無く（在るのは `CreateS
   **ユーザーの手動操作をそのままなぞる**——ビューの向きを〈上〉（`standardViewTop` = **1007**）
   にし、Project 2D をいったん OFF にして**更新を挟み**、再度 ON に戻して最後の更新を行う
   （`draw/DrawUtil` の `ConfigureViewport`。表示レイヤを絞った後・最後の更新の前）。
+- **`Update()` は「out-of-date なら描き直す」。無条件ではない。** VW が out-of-date を立てて
+  くれない種類の変更——**投影（Project 2D）の切り替え**と**デザインレイヤの重ね順の並べ替え**
+  ——では素の `Update()` が黙って何もせず、**生成時のキャッシュが残る**。これが「取り込み直後
+  だけ床が柱・梁を覆う／更新ボタンで直る」の正体で、上の作り直し手順も途中の更新が空振りして
+  いた。`VWViewportObj::IsDirty` / `SetDirty` が out-of-date フラグそのものなので、
+  **更新の直前に必ず `SetDirty(true)`**（`draw/DrawUtil` の `ForceUpdate`）。オブジェクト変数
+  側にこれに当たるものは無い（`ov…` の一覧に viewport の更新・キャッシュ・dirty は 1 件も無い）。
   入ったかは `GetProject2D` で**読み戻して**確かめる。
 - **断面ビューポートは `ISDK::CreateSectionViewport` で新規作成できる**
   （pt1, pt2, pt3, depth, startHeight, endHeight, layer）。pt3 は「見る側」を示す点。
