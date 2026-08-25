@@ -24,8 +24,8 @@
 
 using namespace HomeskzIfcImport;
 
-// ---------------------------------------------------------------------------
-// core::Document / validateDocument
+// --------------------------------------------------------------------------
+// - core::Document / validateDocument
 // ---------------------------------------------------------------------------
 
 TEST(empty_document_has_current_version)
@@ -194,7 +194,7 @@ TEST(validate_rejects_floor_with_empty_class)
 
 TEST(validate_rejects_floor_with_too_few_boundary_points)
 {
-	// 3 点未満は面にならない（Python 版 _validate_floor と同じ関門）。
+	// 3 点未満は面にならない。
 	core::Document document;
 	core::FloorCommand floor = validFloor();
 	floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}};
@@ -273,7 +273,7 @@ TEST(validate_rejects_floor_with_zero_total_thickness)
 }
 
 // ---------------------------------------------------------------------------
-// 横架材の検証（ROADMAP.md M7）
+// 横架材の検証（docs/DEV-NOTES.md M7）
 // ---------------------------------------------------------------------------
 
 namespace
@@ -373,7 +373,7 @@ TEST(validate_rejects_member_with_empty_bound_level)
 }
 
 // ---------------------------------------------------------------------------
-// 柱の検証（ROADMAP.md M8）
+// 柱の検証（docs/DEV-NOTES.md M8）
 // ---------------------------------------------------------------------------
 
 namespace
@@ -476,7 +476,7 @@ TEST(validate_rejects_column_with_empty_bound_level)
 }
 
 // ---------------------------------------------------------------------------
-// 垂木・野地板の検証（ROADMAP.md M6）
+// 垂木・野地板の検証（docs/DEV-NOTES.md M6）
 // ---------------------------------------------------------------------------
 
 namespace
@@ -581,7 +581,7 @@ TEST(validate_rejects_roof_with_empty_layer)
 
 TEST(validate_rejects_roof_with_too_few_boundary_points)
 {
-	// 3 点未満は面にならない（Python 版 _validate_roof と同じ関門）。
+	// 3 点未満は面にならない。
 	core::Document document;
 	core::RoofCommand roof = validRoof();
 	roof.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{4000.0, 0.0}};
@@ -600,7 +600,7 @@ TEST(validate_rejects_roof_with_nonpositive_thickness)
 }
 
 // ---------------------------------------------------------------------------
-// 基礎（立上り＝壁・底盤＝スラブ）の検証（ROADMAP.md M9）
+// 基礎（立上り＝壁・底盤＝スラブ）の検証（docs/DEV-NOTES.md M9）
 // ---------------------------------------------------------------------------
 
 namespace
@@ -760,7 +760,7 @@ TEST(validate_rejects_slab_with_no_components_or_empty_bound_level)
 }
 
 // ---------------------------------------------------------------------------
-// 基礎の高度化（壁結合・地中梁＝底盤のモディファイア）の検証（ROADMAP.md M10）
+// 基礎の高度化（壁結合・地中梁＝底盤のモディファイア）の検証（docs/DEV-NOTES.md M10）
 // ---------------------------------------------------------------------------
 
 namespace
@@ -858,8 +858,8 @@ TEST(validate_rejects_degenerate_ground_beam_modifier)
 	CHECK(!core::validateDocument(depth));
 }
 
-// ---------------------------------------------------------------------------
-// core::raiseModifierTop（地中梁の可視ソリッドを底盤へ呑み込ませる）
+// --------------------------------------------------------------------------
+// - core::raiseModifierTop（地中梁の可視ソリッドを底盤へ呑み込ませる）
 // ---------------------------------------------------------------------------
 
 TEST(raise_modifier_top_extends_along_the_slanted_side)
@@ -906,7 +906,7 @@ TEST(raise_modifier_top_is_a_no_op_without_bite)
 }
 
 // ---------------------------------------------------------------------------
-// シンボル置換系（アンカーボルト・床束・火打・仕口。ROADMAP.md M11）
+// シンボル置換系（アンカーボルト・床束・火打・仕口。docs/DEV-NOTES.md M11）
 //
 // 4 種は同じ命令型（core::SymbolCommand）なので検証規則も 1 つ。関門は「配置先レイヤ名と
 // シンボル名が非空」だけで、位置・角度に値域の制限は無い（角度は正規化しない）。
@@ -986,7 +986,7 @@ TEST(validate_accepts_symbol_with_any_angle)
 }
 
 // ---------------------------------------------------------------------------
-// シート（伏図。ROADMAP.md M13）
+// シート（伏図。docs/DEV-NOTES.md M13）
 //
 // 関門は「シートレイヤ番号（＝レイヤ名）とタイトルが非空」「ビューポートが非空のレイヤ名を
 // 1 つ以上持つ」「グラフィック凡例を載せるならそのスタイル名が非空」の 3 つ。図面タイトル・
@@ -1095,7 +1095,7 @@ TEST(validate_rejects_sheet_with_legend_without_style)
 }
 
 // ---------------------------------------------------------------------------
-// 断面ビューポート（軸組図。ROADMAP.md M14）
+// 断面ビューポート（軸組図。docs/DEV-NOTES.md M14）
 //
 // 伏図の関門（シートレイヤ番号・タイトル・非空の表示レイヤ）に加えて、**指示線が縮退して
 // いない**ことを見る（縮退した線からは切断面の向きが決まらない）。断面の範囲（長さ・高さ・
@@ -1160,7 +1160,7 @@ TEST(validate_rejects_section_with_degenerate_line)
 }
 
 // ---------------------------------------------------------------------------
-// 断面寸法データタグ（ビューポート注釈。ROADMAP.md M13）
+// 断面寸法データタグ（ビューポート注釈。docs/DEV-NOTES.md M13）
 //
 // タグはビューポート命令の中に住む（伏図・軸組図で同じ形）。関門は「スタイル名が非空」と
 // 「関連付け先の横架材が members の範囲内」の 2 つ——範囲外の添字はどの部材にも付かない
@@ -1244,8 +1244,8 @@ TEST(validate_rejects_tag_without_style)
 	CHECK(!core::validateDocument(document));
 }
 
-// ---------------------------------------------------------------------------
-// sectionHeightRange（軸組図の高さ範囲。ROADMAP.md M14）
+// --------------------------------------------------------------------------
+// - sectionHeightRange（軸組図の高さ範囲。docs/DEV-NOTES.md M14）
 //
 // 断面ビューポートの高さ範囲は CreateSectionViewport の引数でしか与えられず、SDK に
 // 「無限」を指定する手段が無い。そこで取り込んだ要素の Z から建物を包む範囲を求める。
@@ -1357,8 +1357,8 @@ TEST(section_height_range_fails_without_elements)
 	CHECK(std::abs(end - (-2.0)) < 1e-6);
 }
 
-// ---------------------------------------------------------------------------
-// parse::buildDocument（読み込めないパスでは空の Document が返る）
+// --------------------------------------------------------------------------
+// - parse::buildDocument（読み込めないパスでは空の Document が返る）
 // ---------------------------------------------------------------------------
 
 TEST(build_document_skeleton_returns_valid_empty_document)
@@ -1446,8 +1446,8 @@ TEST(validate_accepts_section_mark_without_symbol)
 	CHECK(core::validateDocument(document));
 }
 
-// ---------------------------------------------------------------------------
-// core::Geometry（型が使えることの確認。数式そのものは GeometryTests で検証する）
+// --------------------------------------------------------------------------
+// - core::Geometry（型が使えることの確認。数式そのものは GeometryTests で検証する）
 // ---------------------------------------------------------------------------
 
 TEST(geometry_vectors_default_to_origin)

@@ -1,16 +1,16 @@
 //
 //	parse/Floor.h
 //
-//	Phase 1（IFC 解析）の床板モジュール。Python 版 ifc/floor.py に対応する。
-//	ホームズ君 IFC の床板（Name が "床版" の IfcSlab。鉛直押し出しで、押し出し
-//	プロファイルがそのまま床の平面外形になる）を各階の FL レイヤ（"n-FL"）へ描くための
-//	命令（core::FloorCommand）に変換する（描画オブジェクトはスラブ。draw/Floor.h 参照）。
+//	Phase 1（IFC 解析）の床板モジュール。ホームズ君 IFC の床板（Name が "床版" の IfcSlab。
+//	鉛直押し出しで、押し出しプロファイルがそのまま床の平面外形になる）を各階の FL
+//	レイヤ（"n-FL"）へ描くための命令（core::FloorCommand）に変換する（描画オブジェクトはスラブ。
+//	draw/Floor.h 参照）。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ
 //	グラフ（parse/Step）・幾何（parse/IfcGeometry）・ストーリ（parse/Story）だけで
 //	完結し、通常の C++ ツールチェインでコンパイル・単体テストできる。
 //
-//	要件（Python 版 CLAUDE.md「床板」節＋本移植でのスラブ化。ROADMAP.md M5）:
+//	要件（docs/DEV-NOTES.md M5）:
 //	  * 床のある場所は IFC から抽出する（床版の平面外形をそのまま床の外形にする）。
 //	  * 高さは **IFC の床位置を尊重する**（段差＝スキップフロアを表現する）。命令が持つ
 //	    高さは**床仕上げ上端**の絶対 Z で、一般部は FL と同じ、部分的に床レベルを指定して
@@ -33,7 +33,7 @@
 //	    あればそちらを優先する。
 //
 //	床は「建物形状の一次情報」で、以降の横架材・柱はこの位置に合わせて載せていく
-//	（ROADMAP.md「実装順序の方針（形状先行）」）。
+//	（docs/DEV-NOTES.md「実装順序の方針（形状先行）」）。
 //
 
 #pragma once
@@ -47,11 +47,11 @@ namespace HomeskzIfcImport::parse
 {
 	class Context;
 
-	// 床板を識別する IfcSlab の Name（Python 版 FLOOR_SLAB_NAME）。
+	// 床板を識別する IfcSlab の Name。
 	inline constexpr const char* kFloorSlabName = "床版";
 
-	// 床下地の厚み（mm）。要件により 24mm 固定（Python 版 FLOOR_THICKNESS と同値）。IFC の
-	// 押し出し厚は使わない（ホームズ君は 28mm 等を出力するが、作図上は 24mm で統一する）。
+	// 床下地の厚み（mm）。要件により 24mm 固定。IFC の押し出し厚は使わない（ホームズ君は
+	// 28mm 等を出力するが、作図上は 24mm で統一する）。
 	inline constexpr double kSubfloorThickness = 24.0;
 
 	// スラブ構成層の名前。上から 床仕上げ → 床下地。各層のクラス（素材）は
@@ -65,7 +65,7 @@ namespace HomeskzIfcImport::parse
 	// この高さを床仕上げ上端とみなす。スラブ構成は 床仕上げ（36−24＝12）＋ 床下地（24）。
 	inline constexpr double kLoftFloorLevelOffset = 36.0;
 
-	// 要素が床板（IfcSlab かつ Name が "床版"）か（Python 版 _is_floor_slab）。
+	// 要素が床板（IfcSlab かつ Name が "床版"）か。
 	bool isFloorSlab(const Entity& element);
 
 	// 階（#storeyId）が床板（Name が "床版" の IfcSlab）を含むか。
@@ -97,13 +97,13 @@ namespace HomeskzIfcImport::parse
 
 	// 屋根階（#storeyId）にロフトの床（床版、または床梁から合成できる領域）があるか。
 	// あるときだけ屋根ストーリへ FL レベル（軒高 + kLoftFloorLevelOffset）を足すために
-	// parse/Story が使う（Python 版 story_has_moya / story_has_roof と同じ枠組み）。
+	// parse/Story が使う。
 	bool storyHasLoftFloor(const Model& model, int storeyId);
 
 	// 同上。共有コンテキストのキャッシュ済みロフト床を使う（parse/Context.h）。
 	bool storyHasLoftFloor(Context& context, int storeyId);
 
-	// STEP Model から床板の描画命令を組み立てる（Python 版 build_floor_commands 相当）。
+	// STEP Model から床板の描画命令を組み立てる。
 	//
 	// FL ストーリ（parse/Story の collectStories）を Elevation 昇順に走査し、各階について
 	// その階に属する床版（Name=="床版" の IfcSlab）を FloorCommand にする（最上階も対象で、

@@ -1,12 +1,11 @@
 //
 //	ParseRoofTests.cpp
 //
-//	野地板解析（src/parse/Roof）の単体テスト。VectorWorks SDK を一切 include せず、
-//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
-//	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_roof.py の全ケースを
-//	1 対 1 で写している。
+//	野地板解析（src/parse/Roof）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK
+//	のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:core/ parse/ は無 SDK
+//	で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
-//	検証項目（ROADMAP.md M6）: 厚み 12mm 固定・クラスとレイヤ・平面外形（footprint）・
+//	検証項目（docs/DEV-NOTES.md M6）: 厚み 12mm 固定・クラスとレイヤ・平面外形（footprint）・
 //	軒（屋根軸）が最も低い辺に乗ること・upslope が棟側を指すこと・勾配（rise/run）・
 //	軒の目標 Z（屋根版の平面＋垂木せいの鉛直換算）・センタリング・退化面のスキップ・
 //	屋根版 1 面 = 野地板 1 枚・決定性。実フィクスチャのパスは CMake が
@@ -65,8 +64,8 @@ namespace
 	}
 } // namespace
 
-// ---------------------------------------------------------------------------
-// 1 つの屋根面からの野地板（roofCommandForPlane）
+// --------------------------------------------------------------------------
+// - 1 つの屋根面からの野地板（roofCommandForPlane）
 // ---------------------------------------------------------------------------
 
 TEST(default_thickness_is_12mm)
@@ -139,9 +138,9 @@ TEST(elevation_is_rafter_top)
 	bool ok = false;
 	RoofCommand const roof = shedRoof(ok, 6300.0);
 	CHECK(ok);
-	// 軒の目標 Z ＝ 屋根版の平面（1000 ＋ ストーリ Elevation）から垂木せい（45）を
-	// 鉛直換算（÷cosθ＝nz）して持ち上げた値（野地板下端＝垂木上端。垂木下端＝屋根版の
-	// 平面は Python 版の VW 上の実測で確認済み）。
+	// 軒の目標 Z ＝ 屋根版の平面（1000 ＋ ストーリ Elevation）から垂木せい（45）
+	// を鉛直換算（÷cosθ＝nz）して持ち上げた値（野地板下端＝垂木上端。垂木下端＝屋根版の平面で
+	// あることは実機で確認済み）。
 	const double nz = 3.0 / std::sqrt(10.0);
 	const double lift = kDefaultRafterHeight / nz;
 	CHECK(near(roof.elevation, 1000.0 + 6300.0 + lift));

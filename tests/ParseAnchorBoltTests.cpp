@@ -1,12 +1,11 @@
 //
 //	ParseAnchorBoltTests.cpp
 //
-//	アンカーボルト解析（src/parse/AnchorBolt）の単体テスト。VectorWorks SDK を一切
-//	include せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md
-//	「テスト方針」）。Python 版 test_ifc_anchor_bolt.py のケースを 1 対 1 で写している
-//	（期待値は手書き。ROADMAP.md「Python 版出力との比較はしない」）。
+//	アンカーボルト解析（src/parse/AnchorBolt）の単体テスト。VectorWorks SDK を一切 include
+//	せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
+//	**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
-//	検証項目（ROADMAP.md M11）: 型名によるボルト本体／座金の判別・座金の有無による
+//	検証項目（docs/DEV-NOTES.md M11）: 型名によるボルト本体／座金の判別・座金の有無による
 //	シンボル振り分け（M12／M16）・配置先レイヤ（F-アンカーボルト）・軸芯座標のセンタリング・
 //	決定性・全フィクスチャの通し。実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -71,8 +70,8 @@ namespace
 		return "#" + std::to_string(id);
 	}
 
-	// IfcMechanicalFastener（ボルト本体または座金）と、その型（IfcMechanicalFastenerType）を
-	// 1 組で作る。type 名がボルト本体／座金／柱頭金物の区別を担う（Python 版 make_bolt）。
+	// IfcMechanicalFastener（ボルト本体または座金）と、その型（IfcMechanicalFastenerType）
+	// を 1 組で作る。type 名がボルト本体／座金／柱頭金物の区別を担う。
 	void makeFastener(StepText& step, double x, double y, const std::string& typeName)
 	{
 		const int location = step.add("IFCCARTESIANPOINT((" + num(x) + "," + num(y) + ",0.))");
@@ -86,7 +85,7 @@ namespace
 	}
 } // namespace
 
-// --- 型名からのシンボル振り分け（Python 版 TestResolveSymbol）------------------
+// --- 型名からのシンボル振り分け------------------
 
 TEST(anchor_bolt_washered_is_m12)
 {
@@ -101,7 +100,7 @@ TEST(anchor_bolt_washerless_is_m16)
 			 kSymbolAnchorBoltM16);
 }
 
-// --- ボルト本体の判別（Python 版 TestIsAnchorBolt）----------------------------
+// --- ボルト本体の判別----------------------------
 
 TEST(anchor_bolt_type_matches)
 {
@@ -177,12 +176,12 @@ TEST(anchor_bolt_positions_are_centered_by_grid)
 	CHECK(near(bolts.front().position.y, 200.0));
 }
 
-// --- 実フィクスチャ（Python 版 TestBuildFromFixture）-------------------------
+// --- 実フィクスチャ-------------------------
 
 TEST(anchor_bolt_fixture_counts)
 {
-	// 伏図次郎: 84 本が座金付き（M12）、1 本が座金なし（M16）。Python 版 test_ifc_anchor_bolt.py
-	// の test_counts_match_washered_and_washerless と同じ値（移植ズレの検出点）。
+	// 伏図次郎: 84 本が座金付き（M12）、1 本が座金なし（M16）。解析を変えたときに件数が動けば
+	// 気付けるようにするための固定値。
 	bool ok = false;
 	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);

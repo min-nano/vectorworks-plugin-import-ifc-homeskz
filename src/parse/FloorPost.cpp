@@ -1,8 +1,8 @@
 //
 //	parse/FloorPost.cpp
 //
-//	床束解析の実装。Python 版 ifc/floor_post.py の build_floor_post_commands ほかに対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	床束解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse
+//	のみ依存）。
 //
 
 #include "parse/FloorPost.h"
@@ -29,7 +29,7 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 横架材の型（Python 版 _IFC_MEMBER_TYPES）。大引・土台はどちらの型でも出てくる。
+		// 横架材の型。大引・土台はどちらの型でも出てくる。
 		constexpr std::array<const char*, 2> kMemberTypes = {"IFCBEAM", "IFCMEMBER"};
 
 		// 要素の平面芯線（始点・単位方向・長さ・断面幅）を取り出す。配置・断面を解決
@@ -110,8 +110,8 @@ namespace HomeskzIfcImport::parse
 				const Entity* element = model.entity(elementId);
 				if (element == nullptr)
 					continue;
-				// 大引を受けるのは土台と他の大引。それ以外の横架材（梁・桁）は床下に
-				// 無いので支持材に数えない（Python 版 _SUPPORT_CLASSES と同じ）。
+				// 大引を受けるのは土台と他の大引。それ以外の横架材（梁・桁）は床下に無いので
+				// 支持材に数えない。
 				const std::optional<std::string> memberClass =
 					memberClassFromName(entityName(*element));
 				if (!memberClass.has_value() ||

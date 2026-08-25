@@ -1,9 +1,8 @@
 //
 //	Extensions/ExtColumnMark.h
 //
-//	柱・小屋束の記号を描く PIO（パラメトリックオブジェクト）。ROADMAP.md M12 の
-//	【決定】でこのプラグインに同梱すると決めたもので、Python 版が使う姉妹プロジェクトの
-//	カスタム PIO「柱束伏図記号」に相当する。
+//	柱・小屋束の記号を描く PIO（パラメトリックオブジェクト）。記号は素のジオメトリではなく
+//	PIO で描き、その PIO をこのプラグインへ同梱する（理由は docs/DEV-NOTES.md M12）。
 //
 //	【何をするか】リセットのたびに、パラメータで指定された**対象レイヤ**の構造材
 //	（構造用途 4＝柱 / 5＝小屋束）を検索し、見つけた 1 本ごとに記号を描く。
@@ -17,8 +16,8 @@
 //	ColumnMarkCommand 参照）。VW は PIO が描いたジオメトリを図面に保存するので、
 //	プラグインを入れていない環境でも図面はそのまま表示できる（更新だけができない）。
 //
-//	【登録名は Python 版と分ける】姉妹プロジェクトの "柱束伏図記号" と同じ名前で登録すると、
-//	両方を入れた環境で衝突する。ユニバーサル名は "HomeskzColumnMark" にしてある。
+//	【登録名はこのプラグイン固有にする】同種の記号 PIO を提供する別のプラグインと同じ名前で登
+//	録すると、両方を入れた環境で衝突する。ユニバーサル名は "HomeskzColumnMark" にしてある。
 //
 
 #pragma once
@@ -35,15 +34,14 @@ namespace HomeskzIfcImport
 	// CreateCustomObject へ渡す名前**なので、draw/ColumnMark と共有する。
 	constexpr const char* kColumnMarkUniversalName = "HomeskzColumnMark";
 
-	// パラメータのユニバーサル名（Python 版 PARAM_* に対応）。**draw/ColumnMark が
-	// 書く名前とここが食い違うと setter は黙って無視される**ので、定義はここ 1 か所。
+	// パラメータのユニバーサル名。**draw/ColumnMark が書く名前とここが食い違うと setter
+	// は黙って無視される**ので、定義はここ 1 か所。
 	constexpr const char* kParamTargetLayer = "TargetLayer"; // 検索対象のデザインレイヤ名
 	constexpr const char* kParamTargetClass = "TargetClass"; // 検索対象クラス（空＝全クラス）
 	constexpr const char* kParamMarkStyle = "MarkStyle";   // 記号スタイル（下記）
 	constexpr const char* kParamMarkSymbol = "MarkSymbol"; // 平面記号のシンボル名
 
-	// MarkStyle の値。ユニバーサル名なので言語に依存しない綴りにする（Python 版は
-	// '断面' / '平面' だったが、自前の PIO なので英語の universal 名で持つ）。
+	// MarkStyle の値。ユニバーサル名なので言語に依存しない綴りにする。
 	constexpr const char* kMarkStyleSection = "Section"; // 実断面の対角線（柱×・小屋束／）
 	constexpr const char* kMarkStylePlan = "Plan"; // 各柱位置にシンボル
 

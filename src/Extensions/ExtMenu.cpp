@@ -8,11 +8,10 @@
 #include "BuildConfig.h"
 #include "Extensions/ExtMenu.h"
 
-// Phase 1（IFC 解析）と Phase 2（VW 描画）の入口。SDK 非依存の core/parse
-// ライブラリ（HomeskzIfcCore）に解析があり、SDK 依存の draw/ が描画する。この
-// メニューコマンドが両フェーズをオーケストレーションする（Python 版 run() が
-// ifc.build_document → vw.execute_document を呼ぶのと同じ立ち位置）。ヘッダは
-// いずれも core::Document までしか参照せず、SDK / STEP を相互に引き込まない。
+// Phase 1（IFC 解析）と Phase 2（VW 描画）の入口。SDK 非依存の core/parse ライブラリ
+// （HomeskzIfcCore）に解析があり、SDK 依存の draw/ が描画する。このメニューコマンドが両
+// フェーズをオーケストレーションする。ヘッダはいずれも core::Document までしか参照せず、SDK
+// / STEP を相互に引き込まない。
 #include "parse/BuildDocument.h"
 #include "parse/Summary.h"
 #include "core/Trace.h"
@@ -181,7 +180,7 @@ namespace HomeskzIfcImport
 {
 	namespace
 	{
-		// undo イベントの状態を診断ログへ 1 行残す（ROADMAP.md M15「Undo」）。
+		// undo イベントの状態を診断ログへ 1 行残す（docs/DEV-NOTES.md M15「Undo」）。
 		//
 		// **実機でしか分からない挙動なので残してある。** 実測では start=no / afterParse=no /
 		// afterDraw=yes で、「VW は取り込みの開始時にイベントを開かない」「SDK 内部が描画の
@@ -193,7 +192,7 @@ namespace HomeskzIfcImport
 							 (gSDK->IsCurrentlyBuildingAnUndoEvent() ? "yes" : "no"));
 		}
 
-		// クラッシュ診断ログを開く（ROADMAP.md M15「core/Trace」）。**dev ビルドでは常に、
+		// クラッシュ診断ログを開く（docs/DEV-NOTES.md M15「core/Trace」）。**dev ビルドでは常に、
 		// stable では環境変数 HOMESKZ_IFC_TRACE があるときだけ**開く——常時ログを吐くのは
 		// 実運用では余計で、しかし不具合を追うときには「落ちた直前のフェーズ」が唯一の
 		// 手掛かりになるので、dev には既定で残す。開けなくても黙って続ける（付随機能）。
@@ -244,7 +243,7 @@ namespace HomeskzIfcImport
 			progress.close();
 
 			// 本文の組み立ては**無 SDK 側**（parse/Summary）が持つ。要素が増えても
-			// ここは変わらない（ROADMAP.md M15「完了文言の集約」）。
+			// ここは変わらない（docs/DEV-NOTES.md M15「完了文言の集約」）。
 			// 診断ログが有効ならその場所も本文へ載せる（一時ディレクトリは macOS では
 			// /var/folders/… という当てられない場所なので、毎回ここで案内する）。
 			const std::string body =
@@ -267,10 +266,10 @@ namespace HomeskzIfcImport
 } // namespace HomeskzIfcImport
 
 // ---------------------------------------------------------------------------
-// 文書アクティブ時のみ有効化（＝文書が無ければグレーアウト）は menuDef() の
-// Needs = EMenuEnableFlags::DocIsActive で宣言的に行う（上のコメント参照）。
-// このコマンドは追加の動的な有効／無効判定を持たないので GetItemEnabled() は
-// override せず、基底の VWMenu_EventSink::GetItemEnabled()（常に true）に委ねる。
+// 文書アクティブ時のみ有効化（＝文書が無ければグレーアウト）は menuDef() の Needs =
+// EMenuEnableFlags::DocIsActive で宣言的に行う（上のコメント参照）。このコマンドは追加の動的
+// な有効／無効判定を持たないので GetItemEnabled() は override せず、基底の VWMenu_EventSink::
+// GetItemEnabled()（常に true）に委ねる。
 void CImportIfcMenu_EventSink::DoInterface()
 {
 	// Note: the dev-build picker is NOT run here. It runs once at Vectorworks
@@ -279,11 +278,10 @@ void CImportIfcMenu_EventSink::DoInterface()
 	// re-invoked programmatically — a picker on the command path would then pop up
 	// repeatedly. So the command just does its work below, every time it runs.
 
-	// 縦切りの通し処理: ファイルを選ぶ → parse（Phase 1）で IFC を Document へ →
-	// draw（Phase 2）で VectorWorks へ描く → 件数をダイアログに出す。要素が増えても
-	// 入口はこの形のまま（各要素の追加は Document と draw 側で行う。ROADMAP.md）。
-	// Python 版 run() が ifc.build_document → vw.execute_document を呼ぶのと同じ入口で、
-	// ここが両フェーズのオーケストレーションを担う。
+	// 縦切りの通し処理: ファイルを選ぶ → parse（Phase 1）で IFC を Document へ → draw（Phase 2）
+	// で VectorWorks へ描く → 件数をダイアログに出す。要素が増えても入口はこの形のまま（各要
+	// 素の追加は Document と draw 側で行う。docs/DEV-NOTES.md）。ここが両フェーズの
+	// オーケストレーションを担う唯一の場所になる。
 
 	// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら静かに終える。
 	std::string ifcPath;
@@ -291,11 +289,10 @@ void CImportIfcMenu_EventSink::DoInterface()
 		return;
 
 	// 2. インポート本体。**例外を SDK コールバックの外へ漏らさない**（CLAUDE.md
-	//    「エラーハンドリング・所有権」）。ネイティブプラグインの未捕捉例外は Python 版と
-	//    違って **VectorWorks 本体を巻き込んで落とす**ので、フェーズ境界であるここで必ず
-	//    受け止め、ユーザーへは 1 通のダイアログとして見せる。1 要素の欠損で全体を止めない
-	//    寛容さ（parse / draw の中で continue する）は従来どおりで、ここへ来るのは
-	//    「そこでも吸収できなかった異常」だけ。
+	// 「エラーハンドリング・所有権」）。ネイティブプラグインの未捕捉例外は **VectorWorks
+	// 本体を巻き込んで落とす**ので、フェーズ境界であるここで必ず受け止め、ユーザーへは
+	// 1 通のダイアログとして見せる。1 要素の欠損で全体を止めない寛容さ（parse / draw の中で
+	// continue する）は従来どおりで、ここへ来るのは「そこでも吸収できなかった異常」だけ。
 	std::string body;
 	try
 	{

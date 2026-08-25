@@ -1,12 +1,11 @@
 //
 //	ParseFireBraceTests.cpp
 //
-//	火打解析（src/parse/FireBrace）の単体テスト。VectorWorks SDK を一切 include せず、
-//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
-//	Python 版 test_ifc_fire_brace.py のケースを 1 対 1 で写している（期待値は手書き。
-//	ROADMAP.md「Python 版出力との比較はしない」）。
+//	火打解析（src/parse/FireBrace）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK
+//	のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。**期待値は手書きで持
+//	つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
-//	検証項目（ROADMAP.md M11）: 火打の判別（Name 接頭辞＋IfcBeam/IfcMember）・端面の識別
+//	検証項目（docs/DEV-NOTES.md M11）: 火打の判別（Name 接頭辞＋IfcBeam/IfcMember）・端面の識別
 //	（プロファイル局所 v の符号反転）・端面の延長交点（＝内角＝基準点）・回転角（内角の
 //	二等分方向＋シンボル基準姿勢の 45 度補正）・配置先レイヤ（横架材天端／最上階は軒高）・
 //	センタリング・決定性・全フィクスチャの通し。実フィクスチャのパスは CMake が
@@ -46,8 +45,8 @@ using HomeskzIfcTests::near;
 
 namespace
 {
-	// 中心線 v=0 に対称な footprint（長辺 v=±5、端面が v をまたぐ）。ワールド座標は
-	// 簡単のため局所座標と一致させる（Python 版 TestEndFacesAndBasePoint と同じ入力）。
+	// 中心線 v=0 に対称な footprint（長辺 v=±5、端面が v をまたぐ）。ワールド座標は簡単のため
+	// 局所座標と一致させる。
 	const std::vector<Vec2> kLocal = {{0.0, -5.0}, {0.0, 5.0}, {10.0, 5.0}, {12.0, -5.0}};
 	const std::vector<Vec2> kWorld = kLocal;
 
@@ -59,7 +58,7 @@ namespace
 	}
 } // namespace
 
-// --- 端面の延長交点（Python 版 TestSegmentIntersection）----------------------
+// --- 端面の延長交点----------------------
 
 TEST(fire_brace_perpendicular_lines_intersect)
 {
@@ -77,7 +76,7 @@ TEST(fire_brace_parallel_lines_have_no_intersection)
 			   .has_value());
 }
 
-// --- 端面の識別と基準点（Python 版 TestEndFacesAndBasePoint）-----------------
+// --- 端面の識別と基準点-----------------
 
 TEST(fire_brace_end_faces_are_the_v_crossing_edges)
 {
@@ -113,7 +112,7 @@ TEST(fire_brace_end_faces_need_matching_vertex_counts)
 	CHECK(fireBraceEndFaces(kWorld, {{0.0, -5.0}, {0.0, 5.0}}).empty());
 }
 
-// --- 回転角（Python 版 TestAngle）--------------------------------------------
+// --- 回転角--------------------------------------------
 
 TEST(fire_brace_angle_points_from_base_to_centroid)
 {
@@ -130,7 +129,7 @@ TEST(fire_brace_angle_applies_symbol_offset)
 	CHECK(near(fireBraceAngle(Vec2{0.0, 0.0}, world), 45.0));
 }
 
-// --- 火打の判別（Python 版 TestIsFireBrace）----------------------------------
+// --- 火打の判別----------------------------------
 
 TEST(fire_brace_is_matched_by_name_and_type)
 {
@@ -171,12 +170,12 @@ TEST(fire_brace_without_storeys_is_empty)
 			  .empty());
 }
 
-// --- 実フィクスチャ（Python 版 TestBuildFromFixture）-------------------------
+// --- 実フィクスチャ-------------------------
 
 TEST(fire_brace_fixture_count_and_shape)
 {
-	// 伏図次郎: 28 本。Python 版 test_ifc_fire_brace.py の test_count_matches と同じ値
-	// （移植ズレの検出点）。レイヤは横架材と同じ（一般階＝横架材天端、最上階＝軒高）。
+	// 伏図次郎: 28 本（解析を変えたときに件数が動けば気付けるようにするための固定値）。
+	// レイヤは横架材と同じ（一般階＝横架材天端、最上階＝軒高）。
 	bool ok = false;
 	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);

@@ -1,8 +1,8 @@
 //
 //	parse/FireBrace.cpp
 //
-//	火打解析の実装。Python 版 ifc/fire_brace.py の build_fire_brace_commands ほかに対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	火打解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse
+//	のみ依存）。
 //
 
 #include "parse/FireBrace.h"
@@ -27,10 +27,9 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 火打の平面外形を「ワールド XY 頂点列」と「プロファイル局所頂点列」の対で返す
-		// （Python 版 _world_footprint）。局所頂点はワールド頂点と同じ並びで、端面
-		// （局所 Y の符号が始終点で反転する辺）の識別に使う。押し出しソリッドを解決
-		// できなければ false。
+		// 火打の平面外形を「ワールド XY 頂点列」と「プロファイル局所頂点列」の対で返す。
+		// 局所頂点はワールド頂点と同じ並びで、端面（局所 Y の符号が始終点で反転する辺）
+		// の識別に使う。押し出しソリッドを解決できなければ false。
 		bool worldFootprint(const Model& model, const Entity& element, std::vector<Vec2>& outWorld,
 							std::vector<Vec2>& outLocal)
 		{
@@ -38,9 +37,8 @@ namespace HomeskzIfcImport::parse
 			if (!resolveElementWorldSolid(model, &element, solid))
 				return false;
 
-			// base() は origin + xAxis·u + yAxis·v（Python 版の
-			// (origin[0] + u*lx[0] + v*ly[0], …) と同じ）。火打は鉛直押し出しなので、
-			// この底面ループの XY がそのまま平面外形になる。
+			// base() は origin + xAxis·u + yAxis·v。火打は鉛直押し出しなので、この底面ループ
+			// の XY がそのまま平面外形になる。
 			const std::vector<Vec3> base = solid.base();
 			outWorld.clear();
 			outWorld.reserve(base.size());

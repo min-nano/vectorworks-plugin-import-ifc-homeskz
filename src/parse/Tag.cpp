@@ -19,13 +19,11 @@ namespace HomeskzIfcImport::parse
 {
 	namespace
 	{
-		// 軸方向の XY 成分がこれ以下だと向きを決められないため既定（上）を使う
-		// （Python 版 _DIR_TOL）。
+		// 軸方向の XY 成分がこれ以下だと向きを決められないため既定（上）を使う。
 		constexpr double kDirTol = 1e-9;
 
-		// 「上または左」の比較を Python 版（小数 9 桁へ丸めたタプル比較）と同じ粒度で
-		// 行うための丸め。厳密な等値比較を避けつつ、`py` がほぼ 0（材が南北向き）のときに
-		// 「左」の判定へ落ちるようにする。
+		// 「上または左」の比較を小数 9 桁の粒度で行うための丸め。厳密な等値比較を避けつつ、
+		// `py` がほぼ 0（材が南北向き）のときに「左」の判定へ落ちるようにする。
 		double RoundToCompare(double value)
 		{
 			constexpr double kScale = 1e9;
@@ -89,8 +87,8 @@ namespace HomeskzIfcImport::parse
 		if (length <= kDirTol)
 			return core::Vec2{0.0, 1.0};
 
-		// 軸直交（±90 度回転）の 2 候補。py が大きい（上）方を選び、同等なら px が小さい
-		// （左）方を選ぶ（Python 版 _offset_side のタプル比較と同じ規則）。
+		// 軸直交（±90 度回転）の 2 候補。py が大きい（上）方を選び、同等なら px が小さい（左）
+		// 方を選ぶ。
 		const double px = -dy / length;
 		const double py = dx / length;
 		const double up = RoundToCompare(py);
@@ -126,8 +124,7 @@ namespace HomeskzIfcImport::parse
 		for (std::size_t i = 0; i < members.size(); ++i)
 		{
 			const core::MemberCommand& member = members[i];
-			// その伏図が映すレイヤに乗る横架材だけにタグを置く（Python 版 execute_sheets の
-			// 振り分けと同じ条件を、こちらは解析側で済ませる）。
+			// その伏図が映すレイヤに乗る横架材だけにタグを置く。
 			if (std::ranges::find(viewport.layers, member.layer) == viewport.layers.end())
 				continue;
 

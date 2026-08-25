@@ -1,13 +1,11 @@
 //
 //	ParseColumnTests.cpp
 //
-//	柱解析（src/parse/Column）の単体テスト。VectorWorks SDK を一切 include せず、
-//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
-//	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_column.py と
-//	test_ifc_column_span.py のケースを 1 対 1 で写している（期待値は手書き。
-//	ROADMAP.md「Python 版出力との比較はしない」）。
+//	柱解析（src/parse/Column）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK
+//	のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:core/ parse/ は無 SDK
+//	で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
-//	検証項目（ROADMAP.md M8）: 配置座標と断面の抽出・柱種別／構造材 ID・柱頭/柱脚金物の
+//	検証項目（docs/DEV-NOTES.md M8）: 配置座標と断面の抽出・柱種別／構造材 ID・柱頭/柱脚金物の
 //	対応付け・**span（またぐレベル区間）の to レベル判定**（管柱／通し柱／屋根束）・
 //	span レイヤへの振り分けと base ごとのまとめ・上下端のストーリバウンド（柱＝当階と上階、
 //	小屋束＝当階のみ。**差は常に柱高さ**）・構造用途・クラス割り当て・**小屋束の断面を直上の
@@ -65,8 +63,7 @@ using HomeskzIfcTests::near;
 namespace
 {
 	// -----------------------------------------------------------------------
-	// 合成 IFC（STEP テキスト）の組み立て。Python 版 test_ifc_column.py の
-	// make_storey / make_column / make_hardware / make_grid_axis に対応する。
+	// 合成 IFC（STEP テキスト）の組み立て（ストーリ・柱・金物・通り芯の最小構成）。
 	// -----------------------------------------------------------------------
 
 	// #id を採番しながら STEP 行を溜めるだけの器（ParseMemberTests と同じ形）。
@@ -124,7 +121,7 @@ namespace
 				 ref(storey) + ")");
 	}
 
-	// 柱（Python 版 make_column）。押し出しは局所 Z 方向で、Depth が柱高さ。
+	// 柱。押し出しは局所 Z 方向で、Depth が柱高さ。
 	struct ColumnSpec
 	{
 		double ox = 0.0;
@@ -167,8 +164,8 @@ namespace
 		return column;
 	}
 
-	// 柱頭／柱脚金物（Python 版 make_hardware）。Name に "柱頭金物" / "柱脚金物" を含めると
-	// その種別として扱われ、型（IfcMechanicalFastenerType）の名前が仕様になる。
+	// 柱頭／柱脚金物。Name に "柱頭金物" / "柱脚金物" を含めるとその種別として扱われ、
+	// 型（IfcMechanicalFastenerType）の名前が仕様になる。
 	void makeHardware(StepText& step, int storey, double ox, double oy, const std::string& name,
 					  const std::string& typeName)
 	{
@@ -194,7 +191,7 @@ namespace
 	}
 
 	// -----------------------------------------------------------------------
-	// 命令レベルのテスト用ヘルパー（Python 版 _top_member / _column に対応）
+	// 命令レベルのテスト用ヘルパー
 	// -----------------------------------------------------------------------
 
 	// 小屋束の上に乗る横架材命令（母屋等）。topZ は天端の絶対 Z で、断面下端は topZ − height。
@@ -227,7 +224,7 @@ namespace
 		return command;
 	}
 
-	// span の列挙だけを見るテスト用の最小 column 命令（Python 版 _column）。
+	// span の列挙だけを見るテスト用の最小 column 命令。
 	ColumnCommand columnOnLayer(const std::string& layer)
 	{
 		ColumnCommand command;
@@ -242,8 +239,8 @@ namespace
 	}
 } // namespace
 
-// ---------------------------------------------------------------------------
-// columnPosition2D（Python 版 _get_position_2d）
+// --------------------------------------------------------------------------
+// - columnPosition2D
 // ---------------------------------------------------------------------------
 
 TEST(position_extracts_origin)
@@ -320,8 +317,8 @@ TEST(position_false_when_no_placement)
 	CHECK(!columnPosition2D(model, *model.entity(columns.front()), position));
 }
 
-// ---------------------------------------------------------------------------
-// resolveColumnType / columnHardwareSpec / makeColumnMemberId
+// --------------------------------------------------------------------------
+// - resolveColumnType / columnHardwareSpec / makeColumnMemberId
 // ---------------------------------------------------------------------------
 
 TEST(column_type_unset_is_kudabashira)
@@ -370,8 +367,8 @@ TEST(member_id_appends_only_present_hardware)
 			 std::string("105×105 - 小屋束 / 柱頭金物:(ろ)"));
 }
 
-// ---------------------------------------------------------------------------
-// memberWidthOnTop（小屋束の直上に乗る材の幅。Python 版 _member_width_on_top）
+// --------------------------------------------------------------------------
+// - memberWidthOnTop（小屋束の直上に乗る材の幅）
 // ---------------------------------------------------------------------------
 
 TEST(width_on_top_returns_width_of_member_resting_on_top)
@@ -493,8 +490,8 @@ TEST(width_on_top_interpolates_sloped_noboribari)
 	CHECK(near(width.value_or(0.0), 120.0));
 }
 
-// ---------------------------------------------------------------------------
-// isThroughColumn / resolveColumnToLevel（span の to レベル判定）
+// --------------------------------------------------------------------------
+// - isThroughColumn / resolveColumnToLevel（span の to レベル判定）
 // ---------------------------------------------------------------------------
 
 TEST(through_column_false_without_upper_story)
@@ -565,8 +562,8 @@ TEST(to_level_column_reaching_top_story_at_eaves_stays_integer)
 	CHECK(near(resolveColumnToLevel(0, 3200.0, bottoms, tops), 2.0));
 }
 
-// ---------------------------------------------------------------------------
-// collectColumnSpans / collectColumnLayersByStory
+// --------------------------------------------------------------------------
+// - collectColumnSpans / collectColumnLayersByStory
 // ---------------------------------------------------------------------------
 
 TEST(collect_spans_distinct_and_sorted)
@@ -606,8 +603,8 @@ TEST(collect_layers_by_story_groups_by_base_index)
 	CHECK(sameVec(byStory.at(2), {"3to3.5-柱"}));
 }
 
-// ---------------------------------------------------------------------------
-// buildColumnCommands（合成 IFC）
+// --------------------------------------------------------------------------
+// - buildColumnCommands（合成 IFC）
 // ---------------------------------------------------------------------------
 
 TEST(build_empty_ifc_returns_empty)
@@ -695,9 +692,9 @@ TEST(build_column_binds_bottom_current_top_upper_floor)
 
 TEST(build_koyazuka_binds_both_ends_to_current_eaves)
 {
-	// 小屋束は上下端とも当階の横架材天端（最上階は軒高）へバインドし、offset にはそれぞれ
-	// 実際の下端／上端 Z までの距離を入れる（＝**バウンドの差が柱高さ**になる。同値にすると
-	// 高さ 0 の柱になる。parse/Column.h の「Python 版との差異」）。
+	// 小屋束は上下端とも当階の横架材天端（最上階は軒高）へバインドし、offset にはそれぞれ実際
+	// の下端／上端 Z までの距離を入れる（＝**バウンドの差が柱高さ**になる。同値にすると高さ
+	// 0 の柱になる。parse/Column.h 参照）。
 	StepText step;
 	makeStorey(step, "1FL", 600.0);
 	const int storey = makeStorey(step, "RFL", 6300.0);

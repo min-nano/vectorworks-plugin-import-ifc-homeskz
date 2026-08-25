@@ -11,8 +11,8 @@
 //	  * gSDK->ResetObject / DeleteObject                            … 反映・後始末
 //	  * VectorWorks::Extension::IDataTagSupport（VCOM）
 //	      SetDataTagStyle    … データタグスタイルの関連付け
-//	      AssociateWithObject … 対象の横架材へ関連付け（Python 版 DT_AssociateWithObj）
-//	      UpdateDataTag       … 関連付け後の再計算（Python 版 DT_UpdateTaggedTags）
+//	      AssociateWithObject … 対象の横架材へ関連付け
+//	      UpdateDataTag       … 関連付け後の再計算
 //
 //	スタイルを作るとき（createTagStyle）に使う SDK API:
 //	  * gSDK->GetNamedObject                        … 名前が空いているかを見る
@@ -79,8 +79,8 @@ namespace HomeskzIfcImport::draw
 
 	namespace
 	{
-		// データタグの内部プラグイン名（Python 版 vw/sheet.py _DATA_TAG_PLUGIN）。VW 標準の
-		// データタグツールの universal 名で、表示名（"データタグ"）とは別物。
+		// データタグの内部プラグイン名。VW 標準のデータタグツールの universal 名で、
+		// 表示名（"データタグ"）とは別物。
 		constexpr const char* kDataTagPlugin = "Data Tag";
 
 		// --- 生成するスタイルの中身（draw/Tag.h「スタイルは作って使う」）-----------------
@@ -116,10 +116,10 @@ namespace HomeskzIfcImport::draw
 			return formula;
 		}
 
-		// 「引出線を表示」パラメータ（既定 ON）。部材の面ちょうどに置いても ON のままだと
-		// 引出線が描かれるので OFF にする（Python 版 _LEADER_FIELD / _LEADER_OFF）。
-		// universal 名で見つからなければ OIP の日本語名で引き直す（draw/DrawUtil の
-		// ResolveParamName。名前が 1 つ違うだけで setter は黙って無視される）。
+		// 「引出線を表示」パラメータ（既定 ON）。部材の面ちょうどに置いても ON のままだと引出
+		// 線が描かれるので OFF にする。universal 名で見つからなければ OIP の日本語名で引き直
+		// す（draw/DrawUtil の ResolveParamName。名前が 1 つ違うだけで setter は黙って無視され
+		// る）。
 		constexpr const char* kFieldUseLeader = "Use Leader";
 		constexpr const char* kLocalizedUseLeader = "引出線を表示";
 
@@ -203,11 +203,11 @@ namespace HomeskzIfcImport::draw
 				return false;
 			}
 
-			// **関連付けを先に行う**（スタイルより前）。関連付け先の無いタグにスタイルを
-			// 当てると、VW が「互換性のないデータタグスタイルを選択しています」の警告
-			// ダイアログを出してインポートが止まる（ローカル確認で判明。タグの数だけ出る）。
-			// フォールバックの直線になった横架材はハンドルが無いので関連付けを省く
-			// （Python 版と同じ。タグは置く）。
+			// **関連付けを先に行う**（スタイルより前）。関連付け先の無いタグにスタイルを当て
+			// ると、VW が「互換性のないデータタグスタイルを選択しています」の警告ダイアログを
+			// 出してインポートが止まる（ローカル確認で判明。タグの数だけ出る）。
+			// フォールバックの直線になった横架材はハンドルが無いので関連付けを省く（タグ自体
+			// は置く）。
 			if (member != nil && support)
 				support->AssociateWithObject(object, member);
 			else
@@ -240,8 +240,8 @@ namespace HomeskzIfcImport::draw
 				return false;
 			}
 
-			// 関連付け後の再計算（Python 版 DT_UpdateTaggedTags）。これをしないと、関連付けた
-			// 横架材の断面寸法が本文へ流し込まれない。
+			// 関連付け後の再計算。これをしないと、関連付けた横架材の断面寸法が本文へ流し込ま
+			// れない。
 			if (support)
 				support->UpdateDataTag(object);
 

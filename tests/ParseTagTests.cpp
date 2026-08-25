@@ -1,12 +1,11 @@
 //
 //	ParseTagTests.cpp
 //
-//	断面寸法データタグの解析（src/parse/Tag）の単体テスト。VectorWorks SDK を一切
-//	include せず、無 SDK のテストハーネス（TestFramework.h）で走る
-//	（CLAUDE.md「テスト方針」）。Python 版 test_ifc_tag.py が見ていた性質を写しつつ、
-//	期待値は手書きする（ROADMAP.md「Python 版出力との比較はしない」）。
+//	断面寸法データタグの解析（src/parse/Tag）の単体テスト。VectorWorks SDK を一切 include せず、
+//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
+//	**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
-//	検証項目（ROADMAP.md M13）: 文字角度の (-90, 90] 正規化・タグを寄せる側（上または左）・
+//	検証項目（docs/DEV-NOTES.md M13）: 文字角度の (-90, 90] 正規化・タグを寄せる側（上または左）・
 //	伏図では表示レイヤに乗る横架材だけが対象で位置が部材の辺の中央になること・軸組図では
 //	**切断面に乗る横架材だけ**が対象で位置が断面の注釈空間（切断線に沿った距離, 天端 Z）に
 //	なること・memberIndex が members の添字を指すこと・実フィクスチャでの通し（全タグが

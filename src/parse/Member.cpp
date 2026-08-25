@@ -1,8 +1,8 @@
 //
 //	parse/Member.cpp
 //
-//	横架材解析の実装。Python 版 ifc/member.py の build_member_commands ほかに対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	横架材解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse
+//	のみ依存）。
 //
 
 #include "parse/Member.h"
@@ -28,8 +28,7 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 食い込み調整（T 字・L 字の取り合い）の許容値（mm）。Python 版 ifc/member.py の
-		// モジュール定数と同値。
+		// 食い込み調整（T 字・L 字の取り合い）の許容値（mm）。
 		constexpr double kZOverlapTol = 1.0; // これ以下の Z 重なりは干渉とみなさない
 		constexpr double kParallelTol = 1e-6; // 軸がほぼ平行な相手は対象外（継ぎ手）
 		constexpr double kAlongTol = 1.0; // 相手軸方向の範囲判定の余裕（角部も含める）
@@ -52,8 +51,8 @@ namespace HomeskzIfcImport::parse
 			bool valid = false;
 		};
 
-		// 2 つの横架材の Z 範囲（[天端 − せい, 天端]）が重なるか（Python 版 _z_overlaps）。
-		// 重なりが許容値以下（段差で上下に離れている等）なら干渉とみなさない。
+		// 2 つの横架材の Z 範囲（[天端 − せい, 天端]）が重なるか。重なりが許容値以下（段差で
+		// 上下に離れている等）なら干渉とみなさない。
 		bool zOverlaps(double elevA, double heightA, double elevB, double heightB)
 		{
 			const double topA = elevA;
@@ -63,10 +62,10 @@ namespace HomeskzIfcImport::parse
 			return std::min(topA, topB) - std::max(bottomA, bottomB) > kZOverlapTol;
 		}
 
-		// 端点 point・外向き outward を相手梁群 others の面まで詰める量（>= 0）を返す
-		// （Python 版 _trim_for_end）。自分が相手 B に食い込む量 sAB が、B の端部が自分に
-		// 食い込む量 sBA を上回る（＝ B が「通し材」側で勝ち）ときだけ詰める。対称なら触らない。
-		// 複数の相手に食い込むときは、すべての面より外側になるよう最大値を採る。
+		// 端点 point・外向き outward を相手梁群 others の面まで詰める量（>= 0）を返す。
+		// 自分が相手 B に食い込む量 sAB が、B の端部が自分に食い込む量 sBA を上回る（＝ B
+		// が「通し材」側で勝ち）ときだけ詰める。対称なら触らない。複数の相手に食い込むときは、
+		// すべての面より外側になるよう最大値を採る。
 		double trimForEnd(const Vec2& point, const Vec2& outward, const MemberGeom& self,
 						  double selfHalfWidth,
 						  const std::vector<std::pair<MemberGeom, double>>& others)
@@ -113,7 +112,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// IfcMaterial / IfcMaterialList / IfcMaterialLayerSetUsage から材種名を取り出す。
-		// 対応しない型は空文字（Python 版 _get_material_name の分岐と同じ）。
+		// 対応しない型は空文字。
 		std::string materialNameOf(const Model& model, const Entity* material)
 		{
 			if (material == nullptr)
@@ -192,7 +191,7 @@ namespace HomeskzIfcImport::parse
 			result.hasZ = true;
 		}
 
-		// 梁軸＝押し出し方向はローカル Z（Axis）。未設定なら (1,0,0)（Python 版と同じ既定）。
+		// 梁軸＝押し出し方向はローカル Z（Axis）。未設定なら (1,0,0)。
 		Vec3 axis;
 		if (resolveDirection(model, axisPlacement->attribute(attr::kAxis2PlacementAxis), axis))
 		{
@@ -220,7 +219,7 @@ namespace HomeskzIfcImport::parse
 			const Entity* representation = model.resolve(representationRef);
 			if (representation == nullptr)
 				continue;
-			// Body 表現だけを見る（Python 版 _get_profile_dims と同じ関門）。
+			// Body 表現だけを見る。
 			if (entityString(*representation, attr::kShapeRepresentationIdentifier) !=
 				kBodyRepresentation)
 				continue;
@@ -330,9 +329,8 @@ namespace HomeskzIfcImport::parse
 
 	std::string memberMaterialName(const Model& model, const Entity& element)
 	{
-		// element を RelatedObjects に持つ IfcRelAssociatesMaterial を逆参照から辿る
-		// （Python 版は element.HasAssociations。同じ逆関係）。referrers は #id 昇順なので、
-		// 複数あっても常に同じものを選ぶ（決定的）。
+		// element を RelatedObjects に持つ IfcRelAssociatesMaterial を逆参照から辿る（同じ逆
+		// 関係）。referrers は #id 昇順なので、複数あっても常に同じものを選ぶ（決定的）。
 		for (const int relId : model.referrers(element.id))
 		{
 			const Entity* rel = model.entity(relId);

@@ -1,11 +1,9 @@
 //
 //	parse/IfcGeometry.h
 //
-//	IFC の配置・断面・押し出しを自前で解決する幾何ユーティリティ（ROADMAP.md M2
-//	「幾何の土台」）。Python 版が ifcopenshell の行列計算に頼らず手計算している部分
-//	（ifc/member.py の _get_placement_3d / _get_profile_dims、ifc/footing.py の
-//	_world_solid 相当）を C++ へ移植する。M3 以降のほぼ全要素がここを共有するので、
-//	描画を伴わずに先に固めて de-risk する。
+//	IFC の配置・断面・押し出しを自前で解決する幾何ユーティリティ（docs/DEV-NOTES.md
+//	M2「幾何の土台」）。幾何エンジンには頼らず、配置行列・断面・押し出しをここで自前に解く。
+//	M3 以降のほぼ全要素がここを共有するので、描画を伴わずに先に固めて de-risk する。
 //
 //	扱う IFC エンティティ（ホームズ君 IFC の既知サブセット。IFC2X3 / IFC4 共通の
 //	座標系ジオメトリ）:
@@ -52,34 +50,33 @@ namespace HomeskzIfcImport::parse
 	bool resolvePoint2D(const Model& model, const Value& ref, Vec2& out);
 
 	// IfcAxis2Placement3D → ローカル変換行列。Axis(=局所 Z)・RefDirection(≈局所 X)から
-	// Gram-Schmidt で正規直交基底を作る（X = 正規化(RefDir − (RefDir·Z)Z)、Y = Z×X）。
-	// Axis 省略時は Z=(0,0,1)、RefDirection 省略時は X=(1,0,0)。placement が nullptr /
-	// 型不一致なら単位行列（原点のみ反映）を返す。Python 版 footing._axis_placement と一致。
+	// Gram-Schmidt で正規直交基底を作る（X = 正規化(RefDir − (RefDir·Z)Z)、Y = Z×X）。Axis
+	// 省略時は Z=(0,0,1)、RefDirection 省略時は X=(1,0,0)。placement が nullptr /
+	// 型不一致なら単位行列（原点のみ反映）を返す。
 	//
-	// ［Python 版との差異・意図的］RefDirection が Axis と平行で基底が縮退する場合、Python は
-	// X=(1,0,0) に固定する（Axis が Z でないと基底が非直交になる）。本実装は Axis に直交する
-	// X へフォールバックして正規直交を保つ。ホームズ君 IFC では RefDirection は常に Axis と
-	// 直交（多くは省略）するため縮退は起きず、実データでの出力は完全に一致する。
+	// 【縮退時のフォールバック】RefDirection が Axis と平行で基底が縮退する場合は、Axis
+	// に直交する X へフォールバックして正規直交を保つ（X=(1,0,0) に固定すると Axis が Z
+	// でないとき基底が非直交になる）。ホームズ君 IFC では RefDirection は常に Axis
+	// と直交（多くは省略）するため、実データでこの経路に入ることは無い。
 	Mat4 resolveAxis2Placement3D(const Model& model, const Entity* placement);
 
 	// 要素（IfcProduct）の ObjectPlacement から配置行列を返す。
 	//
-	// ★重要（Python 版と一致させるための設計）: ObjectPlacement(IfcLocalPlacement) の
-	//   RelativePlacement（要素自身の IfcAxis2Placement3D）だけを使い、**親 PlacementRelTo は
-	//   合成しない**。ホームズ君 IFC は要素座標を（親＝階/建物の配置ではなく）階基準で直接
-	//   与えており、階の高さ（親配置の Z オフセット）は描画フェーズがストーリバウンドで別途
-	//   反映する。親を合成すると階高が二重計上される（実測: ある柱で要素 Z=−174 に親階の
-	//   Z=+600 が乗り +426 になってしまう）。Python 版は member/footing/story/column の全てで
-	//   要素自身の RelativePlacement のみを読み、PlacementRelTo を一切辿らない。これに揃える。
+	// ★重要: ObjectPlacement(IfcLocalPlacement) の RelativePlacement（要素自身の
+	// IfcAxis2Placement3D）だけを使い、**親 PlacementRelTo は合成しない**。ホームズ君 IFC
+	// は要素座標を（親＝階/建物の配置ではなく）階基準で直接与えており、階の高さ（親配置の Z
+	// オフセット）は描画フェーズがストーリバウンドで別途反映する。親を合成すると階高が二重計
+	// 上される（実測: ある柱で要素 Z=−174 に親階の Z=+600 が乗り +426 になってしまう）。
+	// 要素の種類によらず、この規約で統一する。
 	//
 	// ObjectPlacement は IfcProduct の属性 5（GlobalId, OwnerHistory, Name, Description,
 	// ObjectType, ObjectPlacement, Representation, …）。解決できない・型不一致なら単位行列。
 	//
-	// ［M7/M8 への注意］最終的な要素高さ（elevation）は「ストーリ高さ ＋ ローカル配置 Z」で
-	// 決まる（Python 版 column.py 等）。本行列の Z はローカル配置 Z のみを表すので、階の高さは
-	// 各要素の描画側で別途足す。また Python 版 _get_placement_3d は Location が 2 座標のとき Z を
-	// 「未設定（レイヤ基準高さへフォールバック）」として扱い、梁軸方向に Axis を使う。これらの
-	// 要素固有の解釈は M7 横架材・M8 柱の要素解析で行い、本関数は純粋な配置行列だけを返す。
+	// ［M7/M8 への注意］最終的な要素高さ（elevation）は「ストーリ高さ ＋ ローカル配置 Z」
+	// で決まる。本行列の Z はローカル配置 Z のみを表すので、階の高さは各要素の描画側で別途足
+	// す。また Location が 2 座標のときの Z の扱い（未設定＝レイヤ基準高さへフォールバック）
+	// や、梁軸方向に Axis を使うといった**要素固有の解釈**は各要素の解析（parse/Member ・
+	// parse/Column）が行い、本関数は純粋な配置行列だけを返す。
 	Mat4 resolveObjectPlacement(const Model& model, const Entity* element);
 
 	// 断面プロファイル（2D、プロファイル定義のローカル座標系）。outer は閉じた外形の
@@ -94,32 +91,30 @@ namespace HomeskzIfcImport::parse
 		double yDim = 0.0;		// rectangle のときの YDim（高さ）
 	};
 
-	// IfcProfileDef（IfcRectangleProfileDef / IfcArbitraryClosedProfileDef）を解決して
-	// 2D 外形を得る。Python 版 footing._profile_points と一致させる:
-	//   * 矩形は中心原点の 4 隅（−hx,−hy）(hx,−hy)(hx,hy)(−hx,hy) に Position の**平行移動
-	//     のみ**（Location 座標）を足す。RefDirection の回転は反映しない（Python 版に合わせる。
-	//     ホームズ君 IFC の矩形断面 Position は RefDirection を持たないので実データでは同一）。
+	// IfcProfileDef（IfcRectangleProfileDef / IfcArbitraryClosedProfileDef）を解決して 2D
+	// 外形を得る:
+	// * 矩形は中心原点の 4 隅（−hx,−hy）(hx,−hy)(hx,hy)(−hx,hy) に Position の**平行移動のみ
+	// **（Location 座標）を足す。RefDirection の回転は反映しない（ホームズ君 IFC の矩形断面
+	// Position は RefDirection を持たないので実データでは同一）。
 	//   * 任意断面は OuterCurve(IfcPolyline) の点列をそのまま。始点＝終点の重複は 1 つ落とす。
 	// 未対応の型・欠損・点数不足は false。
 	bool resolveProfile(const Model& model, const Entity* profileDef, Profile& out);
 
-	// 押し出しソリッドのワールド情報（Python 版 footing._Solid に対応）。配置基底
-	// （origin/xAxis/yAxis/zAxis = Python の (origin, lX, lY, lZ)）・押し出し単位方向
-	// （extrudeDir = Python の extrude）・押し出し長（depth）・プロファイル 2D 頂点
-	// （profile = Python の pts）・矩形寸法（rectangle/xDim/yDim = Python の dims）を保持する。
-	// ワールド底面点はプロファイル頂点 (u,v) を origin + xAxis·u + yAxis·v で写して得る
-	// （base() が返す。M9 基礎の _footprint / _z_top_and_thickness、M6/M7 の傾斜部材
-	// （_sloped_member_geometry）をこの情報から直接移植できるよう、2D プロファイルと基底を
-	// 分けて残す）。
+	// 押し出しソリッドのワールド情報。配置基底（origin / xAxis / yAxis / zAxis）・
+	// 押し出し単位方向（extrudeDir）・押し出し長（depth）・プロファイル 2D 頂点（profile）・
+	// 矩形寸法（rectangle / xDim / yDim）を保持する。ワールド底面点はプロファイル頂点 (u,v)
+	// を origin + xAxis·u + yAxis·v で写して得る（base() が返す。**2D プロファイルと基底を分
+	// けて持つ**のは、平面外形・ Z 範囲・傾斜部材の断面といった要素側の計算がこの
+	// 2 つから直に組み立てられるようにするため）。
 	struct WorldSolid
 	{
 		Vec3 origin;	 // 配置原点（ワールド）
-		Vec3 xAxis;		 // 局所 X 軸（ワールド。Python lX）
-		Vec3 yAxis;		 // 局所 Y 軸（ワールド。Python lY）
-		Vec3 zAxis;		 // 局所 Z 軸（ワールド。Python lZ）
-		Vec3 extrudeDir; // 押し出し単位方向（ワールド。Python extrude）
+		Vec3 xAxis;		 // 局所 X 軸（ワールド）
+		Vec3 yAxis;		 // 局所 Y 軸（ワールド）
+		Vec3 zAxis;		 // 局所 Z 軸（ワールド）
+		Vec3 extrudeDir; // 押し出し単位方向（ワールド）
 		double depth = 0.0;
-		std::vector<Vec2> profile; // プロファイル 2D 頂点（Python pts）
+		std::vector<Vec2> profile; // プロファイル 2D 頂点
 		bool rectangle = false;
 		double xDim = 0.0;
 		double yDim = 0.0;
@@ -132,26 +127,23 @@ namespace HomeskzIfcImport::parse
 		std::vector<Vec3> top() const;
 	};
 
-	// IfcExtrudedAreaSolid をワールド座標のソリッド情報へ変換する。
-	//   placement … 対象要素の配置行列（resolveObjectPlacement の戻り。要素自身の
-	//               RelativePlacement のみ＝親非合成）。solid.Position はこの上に合成される
-	//               （Python 版 _compose(element_pl, item_pl) に対応）。要素配置を持たない
-	//               単体テストでは単位行列を渡せばオブジェクト座標系で得られる。
-	// 押し出し方向（ExtrudedDirection、単位化）を同じ基底で世界系へ変換し extrudeDir に、
-	// Depth を depth に入れる。SweptArea の解決に失敗した・型が押し出しでないときは false。
+	// IfcExtrudedAreaSolid をワールド座標のソリッド情報へ変換する。placement … 対象要素の配置
+	// 行列（resolveObjectPlacement の戻り。要素自身の RelativePlacement のみ＝親非合成）。
+	// solid.Position はこの上に合成される。要素配置を持たない単体テストでは単位行列を渡せば
+	// オブジェクト座標系で得られる。押し出し方向（ExtrudedDirection、単位化）を同じ基底で世界
+	// 系へ変換し extrudeDir に、Depth を depth に入れる。SweptArea の解決に失敗した・
+	// 型が押し出しでないときは false。
 	bool resolveExtrudedAreaSolid(const Model& model, const Entity* solid, const Mat4& placement,
 								  WorldSolid& out);
 
-	// IfcBooleanResult / IfcBooleanClippingResult の FirstOperand を素のソリッドまで
-	// 辿る（差演算で削られる前の基のソリッドを取り出す。Python 版 footing の
-	// 「第 1 オペランドを辿る」に対応）。boolean でない要素はそれ自身を返す。参照が
-	// 解決できない・深さ上限に達したときは nullptr。
+	// IfcBooleanResult / IfcBooleanClippingResult の FirstOperand を素のソリッドまで辿る（差
+	// 演算で削られる前の基のソリッドを取り出す）。boolean でない要素はそれ自身を返す。
+	// 参照が解決できない・深さ上限に達したときは nullptr。
 	const Entity* resolveBaseSolid(const Model& model, const Entity* item);
 
-	// 要素（IfcProduct）の形状表現から**削り取られる側**（差演算の第 2 オペランド）の
-	// 押し出しソリッドを列挙する（Python 版 footing._void_solids / _element_void_solids
-	// 相当）。基礎の立上りに開けた人通口は、立上りソリッドから天端下方へ削り取った別の
-	// IfcExtrudedAreaSolid として表される（ROADMAP.md M10）。
+	// 要素（IfcProduct）の形状表現から**削り取られる側**（差演算の第 2 オペランド）
+	// の押し出しソリッドを列挙する。基礎の立上りに開けた人通口は、立上りソリッドから天端下方
+	// へ削り取った別の IfcExtrudedAreaSolid として表される（docs/DEV-NOTES.md M10）。
 	//
 	// 複数の削りは ((base − void1) − void2) のように第 1 オペランドが入れ子の差演算に
 	// なるので、第 1 オペランドを辿りながら各差演算の第 2 オペランドを集める（＝
@@ -159,30 +151,26 @@ namespace HomeskzIfcImport::parse
 	// （回転体・ブレップ等）は解析外なので落とす。並びは表現の出現順で決定的。
 	std::vector<const Entity*> elementVoidSolids(const Model& model, const Entity* element);
 
-	// 要素（IfcProduct）の形状表現から最初の IfcExtrudedAreaSolid を返す（Python 版
-	// footing._first_extruded_solid 相当）。Representation → Representations →
-	// Items を順に辿り、各アイテムは resolveBaseSolid で差演算を剥がしてから押し出し
-	// かどうかを見る。見つからなければ nullptr（1 要素の欠損で全体を止めない）。
+	// 要素（IfcProduct）の形状表現から最初の IfcExtrudedAreaSolid を返す。Representation →
+	// Representations → Items を順に辿り、各アイテムは resolveBaseSolid で差演算を剥がしてから
+	// 押し出しかどうかを見る。見つからなければ nullptr（1 要素の欠損で全体を止めない）。
 	const Entity* firstExtrudedSolid(const Model& model, const Entity* element);
 
-	// 要素の押し出しソリッドをワールド座標へ変換する（Python 版 footing._world_solid
-	// 相当）。firstExtrudedSolid ＋ resolveObjectPlacement ＋ resolveExtrudedAreaSolid の
-	// 組み合わせで、要素配置とアイテム配置（solid.Position）を合成した結果を返す。
-	// 押し出しが無い・解決できないときは false。
+	// 要素の押し出しソリッドをワールド座標へ変換する。firstExtrudedSolid ＋
+	// resolveObjectPlacement ＋ resolveExtrudedAreaSolid の組み合わせで、要素配置とアイテム配
+	// 置（solid.Position）を合成した結果を返す。押し出しが無い・解決できないときは false。
 	bool resolveElementWorldSolid(const Model& model, const Entity* element, WorldSolid& out);
 
-	// ソリッドのワールド最上端 Z と Z 方向の厚みを返す（Python 版 footing の
-	// _z_top_and_thickness 相当）。底面ループと天面ループの Z の最大／最大−最小。
-	// 床板は「最下端 Z = top − thickness」を床下端（絶対 Z）として使う。
+	// ソリッドのワールド最上端 Z と Z 方向の厚みを返す。底面ループと天面ループの Z
+	// の最大／最大−最小。床板は「最下端 Z = top − thickness」を床下端（絶対 Z）として使う。
 	void zTopAndThickness(const WorldSolid& solid, double& outTop, double& outThickness);
 
-	// 屋根面（屋根版＝IfcSlab "屋根版" の勾配した平面）。Python 版 rafter._roof_plane の
-	// 戻り値 (verts, normal) に対応する。
-	//   vertices … ワールド座標の平面外形頂点列（末尾に始点を重複させない）。Z は要素配置
-	//              基準＝**ストーリ相対**（階高は要素側で Elevation を足して絶対値にする。
-	//              parse/IfcGeometry の resolveObjectPlacement が親を合成しないため）。
-	//   normal   … 面の単位法線。**必ず上向き**（z 成分 ≥ 0）に揃える（平面式・勾配方向は
-	//              符号反転に対して不変だが、上向きに固定して勾配計算の分母 nz を正にする）。
+	// 屋根面（屋根版＝IfcSlab "屋根版" の勾配した平面）。vertices … ワールド座標の平面外形頂
+	// 点列（末尾に始点を重複させない）。Z は要素配置基準＝**ストーリ相対**（階高は要素側で
+	// Elevation を足して絶対値にする。parse/IfcGeometry の resolveObjectPlacement
+	// が親を合成しないため）。normal   … 面の単位法線。**必ず上向き**（z 成分 ≥ 0）
+	// に揃える（平面式・勾配方向は符号反転に対して不変だが、上向きに固定して勾配計算の分母
+	// nz を正にする）。
 	struct RoofPlane
 	{
 		std::vector<Vec3> vertices;
@@ -222,9 +210,9 @@ namespace HomeskzIfcImport::parse
 									double& outMin, double& outMax);
 	};
 
-	// 屋根面の退化（ほぼ水平／鉛直）を判定する法線成分の許容（Python 版 _FLAT_TOL）。
-	// 垂木（parse/Rafter）と野地板（parse/Roof）は同じ屋根面を共有するので、**同じ面を
-	// 一方だけが退化と見なすことが無いよう**閾値はここに 1 つだけ置く。
+	// 屋根面の退化（ほぼ水平／鉛直）を判定する法線成分の許容。垂木（parse/Rafter）
+	// と野地板（parse/Roof）は同じ屋根面を共有するので、**同じ面を一方だけが退化と見なすこと
+	// が無いよう**閾値はここに 1 つだけ置く。
 	inline constexpr double kRoofFlatTol = 1e-6;
 
 	// 屋根面から勾配の座標系を作る。ほぼ水平な面（法線の水平成分が flatTol 以下＝勾配方向が
@@ -232,21 +220,21 @@ namespace HomeskzIfcImport::parse
 	// false（out は変更しない）。頂点が空の面も false。
 	bool roofSlope(const RoofPlane& plane, RoofSlope& out, double flatTol = kRoofFlatTol);
 
-	// 屋根版（IfcSlab）から屋根面を取り出す（Python 版 rafter._roof_plane 相当）。屋根版は
-	// 勾配した平面外形を鉛直に押し出したソリッド（押し出し＝屋根の厚み）なので、
-	// resolveElementWorldSolid の配置基底＋プロファイル頂点（base()）がそのまま平面外形に、
-	// 配置の局所 Z 軸（zAxis）が面法線になる。ソリッドを解決できない・頂点が 3 点未満
-	// （面にならない）ときは false（out は変更しない）。**垂木（parse/Rafter）と野地板
-	// （parse/Roof）が同じ面を共有する**ため、M7 の登り梁スナップも本関数を使う。
+	// 屋根版（IfcSlab）から屋根面を取り出す。屋根版は勾配した平面外形を鉛直に押し出した
+	// ソリッド（押し出し＝屋根の厚み）なので、resolveElementWorldSolid の配置基底＋
+	// プロファイル頂点（base()）がそのまま平面外形に、配置の局所 Z 軸（zAxis）が面法線になる。
+	// ソリッドを解決できない・頂点が 3 点未満（面にならない）ときは false（out は変更しない）。
+	// **垂木（parse/Rafter）と野地板（parse/Roof）が同じ面を共有する**ため、M7 の登り梁
+	// スナップも本関数を使う。
 	bool roofPlane(const Model& model, const Entity* element, RoofPlane& out);
 
-	// 押し出し方向が**鉛直**とみなす Z 成分の閾値（|extrudeDir.z| > これ。Python 版 footing の
-	// _VERTICAL_EXTRUDE_TOL と同値）。床版・底盤は鉛直押し出し、立上り・地中梁・人通口は
-	// 水平押し出し。**平面外形の求め方（footprint）と、人通口・地中梁の「水平押し出しか」
-	// 判定（parse/Footing）が同じ閾値を見る**必要があるので、ここに 1 つだけ置く。
+	// 押し出し方向が**鉛直**とみなす Z 成分の閾値（|extrudeDir.z| > これ）。床版・
+	// 底盤は鉛直押し出し、立上り・地中梁・人通口は水平押し出し。**平面外形の求め方（footprint）
+	// と、人通口・地中梁の「水平押し出しか」判定（parse/Footing）が同じ閾値を見る**必要がある
+	// ので、ここに 1 つだけ置く。
 	inline constexpr double kVerticalExtrudeTol = 0.9;
 
-	// ソリッドの平面外形（XY 頂点列）を返す（Python 版 footing._footprint 相当）。
+	// ソリッドの平面外形（XY 頂点列）を返す。
 	//   * 鉛直押し出し（床版・底盤）: プロファイルがそのまま平面外形（底面ループの XY）。
 	//   * 水平押し出し（立上り・地中梁）: プロファイルは鉛直面内にあるため、断面の水平
 	//     方向の幅（プロファイル第 1 座標 u の範囲）を押し出し方向へ掃引した矩形を返す。

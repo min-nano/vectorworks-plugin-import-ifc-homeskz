@@ -1,10 +1,10 @@
 //
 //	draw/Grid.cpp
 //
-//	通り芯描画の実装。Python 版 vw/grid.py に対応する。命令セット（GridCommand）を
-//	GridAxis オブジェクトとして配置する。【SDK 依存】PluginPrefix.h（VectorWorks SDK）
-//	を include するため、この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、
-//	無 SDK の core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
+//	通り芯描画の実装。命令セット（GridCommand）を GridAxis オブジェクトとして配置する。【SDK
+//	依存】PluginPrefix.h（VectorWorks SDK）を include するため、この翻訳単位はプラグインビルド
+//	（SDK あり）でのみコンパイルされ、無 SDK の core/parse ライブラリには入れない（CLAUDE.md
+//	「依存の向きは厳守する」）。
 //
 //	使用する SDK API はすべて ISDK（gSDK）／VWFC の実在シグネチャに合わせている
 //	（Vectorworks 2026 SDK の Interfaces/VectorWorks/ISDK.h・VWFC/VWObjects）:
@@ -16,18 +16,18 @@
 //	  * VWParametricObj(h).SetParamString(name,value)      … PIO パラメータ（Label / 基点バブル）
 //	  * gSDK->ResetObject(h)                               … パラメータ変更の反映
 //
-//	Python 版 vw/grid.py（draw_grid）に忠実に写している: BeginPoly/MoveTo/LineTo/EndPoly の
-//	開いたポリラインを**パス**に、空グループ（BeginGroup/EndGroup）を**プロファイル**に
-//	渡して CreateCustomObjectPath('GridAxis', path, profile) で生成し、SetClass・
-//	Label・ShowBubbleAt='Start Point' を設定して ResetObject で反映する。
+//	手順: 開いたポリライン（BeginPoly/MoveTo/LineTo/EndPoly 相当）を**パス**に、空グループ
+//	（BeginGroup/EndGroup）を**プロファイル**に渡して CreateCustomObjectPath('GridAxis',
+//	path, profile) で生成し、SetClass ・ Label・ShowBubbleAt='Start Point' を設定して
+//	ResetObject で反映する。
 //
-//	【設計上の要点】GridAxis PIO の線の向き・端点・基点バブルの位置は、渡した**パスの
-//	頂点**から決まる。したがってパスは頂点を持つ「開いたポリライン」で渡す（頂点を持たない
-//	Line で渡すと PIO が端点を取れず、バブルが挿入点に固定され向きも定まらない）。座標は
-//	センタリング済みの絶対座標をそのまま頂点にする（Python 版と同じく後段の平行移動は不要）。
+//	【設計上の要点】GridAxis PIO の線の向き・端点・基点バブルの位置は、渡した**パスの頂点**か
+//	ら決まる。したがってパスは頂点を持つ「開いたポリライン」で渡す（頂点を持たない Line
+//	で渡すと PIO が端点を取れず、バブルが挿入点に固定され向きも定まらない）。座標は
+//	センタリング済みの絶対座標をそのまま頂点にする。
 //
 //	実描画（クラス分け・軸名ラベル・基点バブルの位置と向き）はローカルの VectorWorks で
-//	目視確認する（ROADMAP.md M1「ローカル確認」）。GridAxis PIO のパラメータ名や座標単位は
+//	目視確認する（docs/DEV-NOTES.md M1「ローカル確認」）。GridAxis PIO のパラメータ名や座標単位は
 //	VW 実機でのみ最終確認できる。
 //
 
@@ -49,10 +49,10 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 1 本の通り芯を描く（Python 版 vw/grid.py draw_grid に対応）。開いたポリラインを
-		// パスに、空グループをプロファイルにして GridAxis PIO を生成し、クラス・軸名ラベル・
-		// 基点バブルを設定して再計算する。PIO 生成に失敗したらパスのポリライン（絶対座標の
-		// 直線）をそのままクラス付けしてフォールバックする。何か 1 つでも配置できたら true。
+		// 1 本の通り芯を描く。開いたポリラインをパスに、空グループをプロファイルにして
+		// GridAxis PIO を生成し、クラス・軸名ラベル・基点バブルを設定して再計算する。PIO
+		// 生成に失敗したらパスのポリライン（絶対座標の直線）をそのままクラス付けして
+		// フォールバックする。何か 1 つでも配置できたら true。
 		bool DrawOne(const core::GridCommand& grid)
 		{
 			// パス: センタリング済み絶対座標の始点→終点を頂点に持つ「開いた」2D ポリライン。
@@ -64,7 +64,7 @@ namespace HomeskzIfcImport::draw
 			if (pathHandle == nil)
 				return false;
 
-			// プロファイル: 空グループ（Python 版の BeginGroup/EndGroup に対応）。
+			// プロファイル: 空グループ。
 			const VWGroupObj profileGroup;
 
 			// **この 2 つは「自分が追加したもの」として undo イベントへ申告する。**
@@ -85,9 +85,8 @@ namespace HomeskzIfcImport::draw
 			{
 				// クラス分け（X 通り／Y 通り）。
 				SetClassByName(object, grid.drawClass);
-				// 軸名ラベルと基点バブルをパラメータで設定する（Python 版の
-				// SetRField(handle,'GridAxis','Label'/'ShowBubbleAt',…) に対応。PIO の
-				// ユニバーサルパラメータ名でアクセスする）。設定後に再計算して反映する。
+				// 軸名ラベルと基点バブルをパラメータで設定する（PIO のユニバーサルパラメータ
+				// 名 'Label' / 'ShowBubbleAt' でアクセスする）。設定後に再計算して反映する。
 				VWParametricObj pio(object);
 				if (!grid.label.empty())
 					pio.SetParamString("Label", TXString(grid.label.c_str()));

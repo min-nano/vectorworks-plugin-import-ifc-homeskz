@@ -23,8 +23,8 @@ using namespace HomeskzIfcImport::parse;
 
 TEST(loads_nonstandard_entity_without_stripping)
 {
-	// IFC2X3 に無い IFC4 専用 IFCFOOTINGTYPE が混入していても、ifcopenshell と違い
-	// 自前リーダは中断せずそのまま読む（本プラグインは参照しないので無害）。
+	// IFC2X3 に無い IFC4 専用 IFCFOOTINGTYPE が混入していても、スキーマ検証をしないので自前
+	// リーダは中断せずそのまま読む（本プラグインは参照しないので無害）。
 	std::string const text = "DATA;\n"
 							 "#1=IFCFOOTINGTYPE('g',$,'FT1',$);\n"
 							 "#2=IFCGRIDAXIS('X1',#3,.T.);\n"
@@ -104,12 +104,11 @@ TEST(missing_file_reports_not_ok)
 }
 
 // ---------------------------------------------------------------------------
-// Python 版から流用した実 IFC フィクスチャの読み込み
+// 実 IFC フィクスチャの読み込み
 // ---------------------------------------------------------------------------
 //
-//	姉妹リポジトリ（Python 版）の tests/fixtures/ から流用したホームズ君 EX 出力の
-//	実 IFC 群（tests/fixtures/README.md）を、自前 STEP リーダで丸ごと読めることを
-//	確かめる。要素ごとの解析（通り芯・横架材…）は今後のマイルストーンで parse
+//	ホームズ君 EX 出力の実 IFC 群（tests/fixtures/README.md）を、自前 STEP リーダで丸ごと読め
+//	ることを確かめる。要素ごとの解析（通り芯・横架材…）は今後のマイルストーンで parse
 //	モジュールのテストとして個別に検証するため、ここでは「実データを中断せず読み切り、
 //	期待するエンティティ型が存在する」ことだけを確認する（CLAUDE.md「小さく機能追加」）。
 

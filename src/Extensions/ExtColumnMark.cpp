@@ -19,7 +19,7 @@
 //	  ハンドルを返す公開 API が無く、Recalculate() も引数を取らないため、VWFC が
 //	  Execute で詰めるこのメンバが唯一の入口）。
 //	実際の見え方（線の太さ・シンボルの向き・リセットの契機）はローカルの VectorWorks で
-//	目視確認する（ROADMAP.md M12「ローカル確認」）。
+//	目視確認する（docs/DEV-NOTES.md M12「ローカル確認」）。
 //
 //	【生成時にダイアログを出さない】PIO の既定は「作るたびに設定ダイアログを出す」
 //	（`DefineCustomObject` の `prefWhen` 既定＝`kCustomObjectPrefAlways`）。記号は
@@ -53,12 +53,9 @@ namespace HomeskzIfcImport
 		// 点 PIO（シンボルのように 1 点で挿入する）。
 		//
 		// 【移動・回転でリセットする】記号の絵は対象レイヤの柱の**ワールド位置**に描くが、
-		// PIO のジオメトリは挿入点からの相対で保持される。したがって PIO 自体を動かすと
-		// 記号がまるごとずれ、柱と食い違ったまま戻らない（実機で確認）。リセットすれば
-		// 実物から描き直されて正しい位置へ戻るので、移動・回転を契機にしておく。
-		// Python 版（姉妹プロジェクトの「柱束伏図記号」）もスクリプト PIO のリセット条件を
-		// プラグインエディタで同じように設定してあり、「動かしても柱位置に描かれる」のは
-		// この設定によるもの。
+		// PIO のジオメトリは挿入点からの相対で保持される。したがって PIO 自体を動かすと記号が
+		// まるごとずれ、柱と食い違ったまま戻らない（実機で確認）。リセットすれば実物から描き
+		// 直されて正しい位置へ戻るので、移動・回転を契機にしておく。
 		const SParametricDef& parametricDef()
 		{
 			static const SParametricDef def = {/*LocalizedName*/ {PLUGIN_VWR_ID, "columnMarkName"},
@@ -177,8 +174,8 @@ namespace HomeskzIfcImport
 		}
 	} // namespace
 
-	// ---------------------------------------------------------------------------
-	// NOLINTBEGIN(misc-const-correctness)
+	// --------------------------------------------------------------------------
+	// - NOLINTBEGIN(misc-const-correctness)
 #ifdef VW_DEV_BUILD
 	// UUID: 5c1f0a76-2d4e-4b93-9a11-7e6c8d240f31  (dev build)
 	IMPLEMENT_VWParametricExtension(
@@ -227,7 +224,7 @@ namespace HomeskzIfcImport
 
 		// 印刷・書き出しの直前にリセットする。**図面として外へ出る瞬間に必ず実物と
 		// 一致させる**ための最後の砦で、柱を編集してから記号をリセットし忘れても、
-		// 印刷／書き出したものは正しい（ROADMAP.md M12「追随の契機」）。
+		// 印刷／書き出したものは正しい（docs/DEV-NOTES.md M12「追随の契機」）。
 		gSDK->SetObjectProperty(objectID, kObjXPropResetBeforeExport, true);
 		return result;
 	}

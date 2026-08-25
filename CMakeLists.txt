@@ -4,9 +4,8 @@ cmake_minimum_required(VERSION 3.20)
 # HomeskzIfcImport - the ホームズ君 IFC import plug-in for Vectorworks 2026.
 #
 # The build produces a loadable plug-in that adds a single menu command; running
-# it picks an IFC file and draws what has been ported so far (the import is
-# built up element by element — see ROADMAP.md). It builds on BOTH platforms
-# Vectorworks 2026 supports, from the same sources:
+# it picks an IFC file and draws the model it describes (see README.md). It
+# builds on BOTH platforms Vectorworks 2026 supports, from the same sources:
 #
 #   * macOS   -> "HomeskzIfcImport.vwlibrary" bundle (the .vwr resource lives inside
 #                the bundle at Contents/Resources).
@@ -115,7 +114,7 @@ if(VW_BUILD_PLUGIN
 endif()
 
 # --- SDK-free core/parse library ---------------------------------------------
-# The 2-phase architecture (CLAUDE.md / ROADMAP.md M0) keeps IFC parsing
+# The 2-phase architecture (CLAUDE.md / docs/DEV-NOTES.md) keeps IFC parsing
 # (src/parse/) and the phase-independent foundation (src/core/) STRICTLY free of
 # the Vectorworks SDK, so they compile, run and unit-test on any toolchain — the
 # same footing as the updater's SDK-free logic. This library is that code, built

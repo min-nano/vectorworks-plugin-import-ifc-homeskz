@@ -1,9 +1,9 @@
 //
 //	draw/Footing.h
 //
-//	Phase 2（VW 描画）の基礎モジュール。Python 版 vw/footing.py に対応する。
-//	命令セットの立上り（core::WallCommand）を**壁オブジェクト**へ、底盤
-//	（core::SlabCommand）を**スラブオブジェクト**へ変換して配置する（ROADMAP.md M9）。
+//	Phase 2（VW 描画）の基礎モジュール。命令セットの立上り（core::WallCommand）を**壁
+//	オブジェクト**へ、底盤（core::SlabCommand）を**スラブオブジェクト**へ変換して配置する
+//	（docs/DEV-NOTES.md M9）。
 //
 //	【SDK 依存】.cpp は PluginPrefix.h（VectorWorks SDK）を include するため、
 //	SDK ビルドでのみコンパイルされる。この宣言ヘッダ自体は core::Document / core::Progress
@@ -27,16 +27,15 @@ namespace HomeskzIfcImport::draw
 	// 立上り（wall 命令）を壁オブジェクトとして描く。配置先レイヤ（"F-立上り"）が無い命令は
 	// スキップする（レイヤは基礎ストーリの story 命令が作る）。実際に配置できた本数を返す。
 	//
-	// handles を渡すと、**命令のインデックスをキーに**配置した壁ハンドルを記録する（壁結合
-	// が引く。フォールバック描画＝壁を作れなかった命令とレイヤ未生成でスキップした命令は
-	// 記録しない）。描画は必ず**底盤より先**に行う（Python 版の実行順 walls → wall_joins →
-	// slabs に揃えてある）。
+	// handles を渡すと、**命令のインデックスをキーに**配置した壁ハンドルを記録する（壁結合が
+	// 引く。フォールバック描画＝壁を作れなかった命令とレイヤ未生成でスキップした命令は記録し
+	// ない）。描画は必ず**底盤より先**に行う。
 	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress,
 						  ObjectHandles* handles = nullptr);
 
 	// 壁結合（wallJoin 命令）を実行して交差する立上りを結合する。結合できた件数を返す。
-	// handles は drawWalls が記録した対応表で、a / b の**どちらかが未配置の命令はスキップ**
-	// する。実行は立上りの直後・底盤の前（Python 版 execute_wall_joins と同じ位置）。
+	// handles は drawWalls が記録した対応表で、a / b の**どちらかが未配置の命令はスキップ**す
+	// る。実行は立上りの直後・底盤の前。
 	//
 	// 結合の**後に各立上りの端部キャップを命令どおりへ揃え直し、壁をリセットする**
 	// （JoinWalls が結合した端のキャップを書き換え、平面の 2D 表現も作り直すまで古いまま

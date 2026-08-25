@@ -1,8 +1,8 @@
 //
 //	parse/Story.cpp
 //
-//	ストーリ解析の実装。Python 版 ifc/story.py の build_story_commands ほかに対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	ストーリ解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse
+//	のみ依存）。
 //
 
 #include "parse/Story.h"
@@ -29,9 +29,9 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 最上階のストーリ名。Python 版 STORY_ROOF と一致。
+		// 最上階のストーリ名。
 		constexpr const char* kStoryRoof = "屋根";
-		// 最上階のストーリ接尾辞・レイヤ接頭辞（Roof）。Python 版 story_suffix_for と一致。
+		// 最上階のストーリ接尾辞・レイヤ接頭辞（Roof）。
 		constexpr const char* kRoofSuffix = "R";
 
 		// 1 バイトずつ std::toupper を掛けた文字列を返す（"FL" 判定は ASCII なのでこれで
@@ -48,7 +48,7 @@ namespace HomeskzIfcImport::parse
 			return out;
 		}
 
-		// 名前が（大文字化して）"FL" で終わるか（Python 版 (Name or '').upper().endswith('FL')）。
+		// 名前が（大文字化して）"FL" で終わるか。
 		bool nameEndsWithFL(const std::string& name)
 		{
 			if (name.size() < 2)
@@ -57,8 +57,8 @@ namespace HomeskzIfcImport::parse
 			return upper.compare(upper.size() - 2, 2, "FL") == 0;
 		}
 
-		// index（0 始まり）と最上階フラグから VectorWorks のストーリ名を返す
-		// （Python 版 story_name_for）。最上階は "屋根"、それ以外は "{index+1}階"。
+		// index（0 始まり）と最上階フラグから VectorWorks のストーリ名を返す。最上階は "屋根"、
+		// それ以外は "{index+1}階"。
 		std::string storyNameFor(std::size_t index, bool isTop)
 		{
 			if (isTop)
@@ -66,8 +66,8 @@ namespace HomeskzIfcImport::parse
 			return std::to_string(index + 1) + "階";
 		}
 
-		// 横架材命令のどれかが layer を配置先に指しているか。母屋・登り梁レベルを足すかの
-		// 判定に使う（buildStoryCommands の「Python 版との差異」参照）。
+		// 横架材命令のどれかが layer を配置先に指しているか。母屋・登り梁レベルを足すかの判定
+		// に使う（buildStoryCommands の「レベルを足す条件」参照）。
 		bool anyMemberOnLayer(const std::vector<core::MemberCommand>& members,
 							  const std::string& layer)
 		{
@@ -127,8 +127,7 @@ namespace HomeskzIfcImport::parse
 		const std::size_t separator = core.find("to");
 		if (separator == std::string::npos)
 			return false;
-		// "to" が 2 つ以上あるレイヤ名（"1to2to3-柱"）は分解できないので span でないとする
-		// （Python 版の core.split('to') が 2 要素でなければ None を返すのと同じ関門）。
+		// "to" が 2 つ以上あるレイヤ名（"1to2to3-柱"）は分解できないので span でないとする。
 		if (core.find("to", separator + 2) != std::string::npos)
 			return false;
 
@@ -180,9 +179,9 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<int> collectStoryElements(const Model& model, int storeyId)
 	{
-		// storey を RelatingStructure に持つ IfcRelContainedInSpatialStructure を、逆参照
-		// （referrers）から辿る（Python 版は storey.ContainsElements。同じ逆関係）。
-		// 誰からも参照されていない階（要素を 1 つも持たない階）は即座に空を返す。
+		// storey を RelatingStructure に持つ IfcRelContainedInSpatialStructure を、
+		// 逆参照（referrers）から辿る（同じ逆関係）。誰からも参照されていない階（要素を
+		// 1 つも持たない階）は即座に空を返す。
 		if (model.referrers(storeyId).empty())
 			return {};
 
@@ -286,9 +285,9 @@ namespace HomeskzIfcImport::parse
 	std::vector<StoryCommand> buildStoryCommands(Context& context)
 	{
 		const std::vector<StoryInfo> stories = context.stories();
-		// 母屋・登り梁レベルの有無は、実際に組み立てた横架材命令の配置先レイヤから決める
-		// （下記「Python 版との差異」）。コンテキストが 1 度だけ解析するので、垂木・登り梁の
-		// 補正と同じ結果を共有する。
+		// 母屋・登り梁レベルの有無は、実際に組み立てた横架材命令の配置先レイヤから決める（下
+		// 記「レベルを足す条件」）。コンテキストが 1 度だけ解析するので、垂木・登り梁の補正と
+		// 同じ結果を共有する。
 		const std::vector<core::MemberCommand>& members = context.members();
 		// span 柱レイヤ（"{from}to{to}-柱"）は実在する柱から決まる。コンテキストが柱命令を
 		// 1 度だけ組み立てるので、ここと Document の columns は同じ結果を共有する
@@ -315,12 +314,11 @@ namespace HomeskzIfcImport::parse
 			// 追加する（ヘッダ参照）。levels の並び順は希望するデザインレイヤのスタック順（上→下）。
 			if (info.isTop)
 			{
-				// 最上階（屋根）は軒高（オフセット 0）。ロフト（小屋裏収納）の床がある
-				// ときだけ、その標準床レベル FL（軒高 + kLoftFloorLevelOffset）を足す
-				// （床の無い屋根に空の FL レイヤを作らない。Python 版が story_has_moya /
-				// story_has_roof で条件付きにレベルを足すのと同じ枠組み）。この FL が
-				// ロフト床の配置先レイヤ "R-FL" になる。ロフトの床は床版（IfcSlab）でも
-				// 床梁から合成した領域でもよい（parse/Floor の storyHasLoftFloor）。
+				// 最上階（屋根）は軒高（オフセット 0）。ロフト（小屋裏収納）の床があるときだ
+				// け、その標準床レベル FL（軒高 + kLoftFloorLevelOffset）を足す（床の無い屋根
+				// に空の FL レイヤを作らない）。この FL がロフト床の配置先レイヤ "R-FL"
+				// になる。ロフトの床は床版（IfcSlab）でも床梁から合成した領域でもよい
+				// （parse/Floor の storyHasLoftFloor）。
 				if (storyHasLoftFloor(context, info.id))
 				{
 					cmd.levels.push_back(
@@ -355,13 +353,12 @@ namespace HomeskzIfcImport::parse
 			// 重なって見にくいため専用レイヤへ分離する（parse/Member）。そのレイヤはここで作る。
 			// スタックは 横架材天端/軒高 ← 登り梁 ← 母屋 なので、登り梁 → 母屋 の順に挿入する。
 			//
-			// ［Python 版との差異・意図的］Python 版は名前判定（story_has_moya /
-			// story_has_noboribari）でレベルを足し、さらに最上階には母屋レベルを無条件で足す。
-			// 本移植は**実際に組み立てた横架材命令の配置先レイヤ**で判定する。理由は 2 つ:
-			//   * 名前判定は「名前では判別できないが高さで母屋と推定された最上階の材」
-			//     （隅木谷木等）を取りこぼす。Python 版はそれを最上階の無条件追加で救っている。
-			//   * その無条件追加は、母屋を持たない最上階に空レイヤを残す（本移植は空レイヤを
-			//     作らない方針。M5 ロフト FL・M6 垂木/野地板と同じ）。
+			// ［レベルを足す条件］**実際に組み立てた横架材命令の配置先レイヤ**で判定する
+			// （IFC の名前で「母屋がある階か」を見ない）。理由は 2 つ:
+			//   * 名前判定は「名前では判別できないが高さで母屋と推定された材」（隅木谷木等）を
+			//     取りこぼし、その材だけ置き場所を失う。
+			//   * 名前で拾えない材を救おうと最上階へ無条件に足すと、母屋を持たない最上階に
+			//     空レイヤが残る（空レイヤを作らない方針。ロフト FL・垂木/野地板と同じ）。
 			// 命令の配置先で判定すれば、**レイヤは命令があるときだけ・命令があれば必ず**でき、
 			// 両方の齟齬が構造的に起きない。
 			for (const char* levelType : {kLevelNoboribari, kLevelMoya})
@@ -374,27 +371,25 @@ namespace HomeskzIfcImport::parse
 			// "n-野地板" レイヤ）を足す。スタックは 横架材天端/軒高 ← 登り梁 ← 母屋 ← 垂木 ←
 			// 野地板（上ほど上段）なので、垂木・野地板の順に挿入する。
 			//
-			// ［Python 版との差異・意図的］Python 版は最上階（屋根）には屋根版の有無に関わらず
-			// 垂木・野地板レベルを持たせる（is_top or roof_flags[i]）。本移植は**屋根版がある階
-			// だけ**に絞る: 垂木・野地板の命令は屋根版からのみ生まれるので、屋根版の無い階に
-			// レベルを作ると空レイヤが残るだけになる（ロフトの FL レベルを床版の有無で絞るのと
-			// 同じ方針）。ホームズ君の出力では最上階は必ず主屋根の屋根版を含むため、実データでの
-			// 結果は Python 版と一致する。
+			// ［レベルを足す条件］**屋根版がある階だけ**に絞る（最上階だから足す、とはしない）:
+			// 垂木・野地板の命令は屋根版からのみ生まれるので、屋根版の無い階にレベルを作ると
+			// 空レイヤが残るだけになる（ロフトの FL レベルを床版の有無で絞るのと同じ方針）。
+			// ホームズ君の出力では最上階が必ず主屋根の屋根版を含むので、実データでは
+			// 「最上階＋下屋根のある階」に落ち着く。
 			if (storyHasRoofSlab(context, info.id))
 			{
 				insertAboveBeamTop(kLevelTaruki);
 				insertAboveBeamTop(kLevelNojiita);
 			}
 
-			// M8 柱: この階を base（from = i+1）とする span レイヤ（"{from}to{to}-柱"）の
-			// レベルを、levels の**先頭＝スタック最上段**（FL／軒高レイヤの直上）へ (from, to)
-			// 昇順で積む。レベル種別はレイヤ名そのもの（span ごとに一意な文字列が要るため。
-			// Python 版と同じ）。高さは横架材天端（最上階は軒高）に揃えるが、柱の上下端は
-			// bottomBound / topBound が指すレベルで決まるのでこのオフセットには依存しない。
+			// M8 柱: この階を base（from = i+1）とする span レイヤ（"{from}to{to}-柱"）
+			// のレベルを、levels の**先頭＝スタック最上段**（FL／軒高レイヤの直上）へ (from,
+			// to)昇順で積む。レベル種別はレイヤ名そのもの（span ごとに一意な文字列が要るため）。
+			// 高さは横架材天端（最上階は軒高）に揃えるが、柱の上下端は bottomBound /
+			// topBound が指すレベルで決まるのでこのオフセットには依存しない。
 			//
-			// レイヤは**実在する柱から決まる**ので、母屋・登り梁と同じく「命令があるときだけ・
-			// 命令があれば必ず」できる（空レイヤを作らない。Python 版も span レイヤは
-			// collect_column_layers_by_story 由来で同じ）。
+			// レイヤは**実在する柱から決まる**ので、母屋・登り梁と同じく「命令があるときだけ
+			// ・命令があれば必ず」できる（空レイヤを作らない）。
 			const auto spanLayers = columnLayers.find(static_cast<int>(i));
 			if (spanLayers != columnLayers.end())
 			{

@@ -1,8 +1,7 @@
 //
 //	parse/Joint.cpp
 //
-//	仕口解析の実装。Python 版 ifc/joint.py の build_joint_commands ほかに対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core のみ依存）。
+//	仕口解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない（core のみ依存）。
 //
 
 #include "parse/Joint.h"
@@ -26,7 +25,7 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 2 つの Z 範囲が許容値を超えて重なるか（Python 版 _z_ranges_overlap）。
+		// 2 つの Z 範囲が許容値を超えて重なるか。
 		bool zRangesOverlap(double aBottom, double aTop, double bBottom, double bTop)
 		{
 			return std::min(aTop, bTop) - std::max(aBottom, bBottom) > kJointZOverlapTol;
