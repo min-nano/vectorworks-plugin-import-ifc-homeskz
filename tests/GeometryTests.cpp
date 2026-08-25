@@ -3,7 +3,7 @@
 //
 //	幾何の土台（src/core/Geometry ＋ src/parse/IfcGeometry）の単体テスト。
 //	VectorWorks SDK を一切 include せず、無 SDK のテストハーネス（TestFramework.h）で
-//	走る（CLAUDE.md「テスト方針」: core/ parse/ は無 SDK で単体テスト）。ROADMAP.md M2
+//	走る（CLAUDE.md「テスト方針」: core/ parse/ は無 SDK で単体テスト）。docs/DEV-NOTES.md M2
 //	「幾何の土台」の検証にあたる。M3 以降のほぼ全要素がここを共有するため、後工程へ
 //	ズレを持ち越さないよう、数式を手計算値と許容誤差で突き合わせる。
 //
@@ -12,7 +12,7 @@
 //	  * IfcDirection / IfcCartesianPoint の解決（2D/3D、欠損スキップ）。
 //	  * IfcAxis2Placement3D（既定・回転・Gram-Schmidt・縮退フォールバック）。
 //	  * IfcObjectPlacement（要素自身の RelativePlacement のみ＝★親 PlacementRelTo 非合成。
-//	    Python 版と一致。階高の二重計上を防ぐ最重要のパリティ）。
+//	    階高の二重計上を防ぐ最重要の性質）。
 //	  * IfcRectangleProfileDef（Position は平行移動のみ・RefDirection 回転は無視）/
 //	    IfcArbitraryClosedProfileDef の外形。
 //	  * IfcExtrudedAreaSolid（鉛直押し出し・水平押し出し・要素配置との合成、WorldSolid の基底）。
@@ -62,8 +62,8 @@ namespace
 	}
 } // namespace
 
-// ---------------------------------------------------------------------------
-// Vec2 / Vec3 演算
+// --------------------------------------------------------------------------
+// - Vec2 / Vec3 演算
 // ---------------------------------------------------------------------------
 
 TEST(vec3_arithmetic_and_products)
@@ -97,8 +97,8 @@ TEST(vec3_length_and_normalize)
 	CHECK(nearVec(core::normalized(Vec3{0.0, 0.0, 0.0}), Vec3{0.0, 0.0, 0.0}));
 }
 
-// ---------------------------------------------------------------------------
-// Mat4
+// --------------------------------------------------------------------------
+// - Mat4
 // ---------------------------------------------------------------------------
 
 TEST(mat4_identity_and_translation)
@@ -145,8 +145,8 @@ TEST(mat4_multiply_composes_transforms)
 	CHECK(nearVec(sameR.transformPoint(Vec3{1.0, 0.0, 0.0}), Vec3{0.0, 1.0, 0.0}));
 }
 
-// ---------------------------------------------------------------------------
-// IfcDirection / IfcCartesianPoint の解決
+// --------------------------------------------------------------------------
+// - IfcDirection / IfcCartesianPoint の解決
 // ---------------------------------------------------------------------------
 
 TEST(resolves_direction_and_point_3d_and_2d)
@@ -183,8 +183,8 @@ TEST(resolves_direction_and_point_3d_and_2d)
 	CHECK(nearVec(keep, Vec3{9.0, 9.0, 9.0}));
 }
 
-// ---------------------------------------------------------------------------
-// IfcAxis2Placement3D
+// --------------------------------------------------------------------------
+// - IfcAxis2Placement3D
 // ---------------------------------------------------------------------------
 
 TEST(axis2placement3d_default_is_translation_only)
@@ -259,8 +259,8 @@ TEST(axis2placement3d_null_entity_is_identity)
 	CHECK(nearVec(m.transformPoint(Vec3{3.0, 4.0, 5.0}), Vec3{3.0, 4.0, 5.0}));
 }
 
-// ---------------------------------------------------------------------------
-// IfcObjectPlacement（要素配置。★親 PlacementRelTo を合成しない ＝ Python 版一致）
+// --------------------------------------------------------------------------
+// - IfcObjectPlacement（要素配置。★親 PlacementRelTo を合成しない）
 // ---------------------------------------------------------------------------
 
 TEST(object_placement_uses_element_own_relative_placement)
@@ -278,10 +278,10 @@ TEST(object_placement_uses_element_own_relative_placement)
 
 TEST(object_placement_ignores_parent_placement)
 {
-	// ★最重要（Python 版パリティ）: 親（階）配置に Z=+600 があっても、要素配置は
-	// 要素自身の Location（Z=−174）だけを返し、親の +600 を合成しない（階高の二重計上防止）。
-	// 実測（サンプル邸の柱）を再現: 要素 Z=−174 / 親階 Z=+600。合成すると +426 になるが、
-	// Python 版はそうせず −174 を使う。
+	// ★最重要: 親（階）配置に Z=+600 があっても、要素配置は要素自身の Location（Z=−174）
+	// だけを返し、親の +600 を合成しない（階高の二重計上防止）。実測（サンプル邸の柱）
+	// を再現: 要素 Z=−174 / 親階 Z=+600。合成すると +426 になってしまうので、−174 をそのまま
+	// 使う。
 	Model const model =
 		loadIfcFromText("#4=IFCCARTESIANPOINT((0.,0.,0.));\n"
 						"#5=IFCAXIS2PLACEMENT3D(#4,$,$);\n"
@@ -347,9 +347,9 @@ TEST(rectangle_profile_honors_position)
 
 TEST(rectangle_profile_ignores_position_rotation)
 {
-	// ★Python 版パリティ: 矩形 Position は Location の平行移動だけを反映し、RefDirection の
-	// 回転は無視する（_profile_points に一致）。RefDirection=(0,1) を与えても 4 隅は回転せず、
-	// 軸並行の中心 (0,0) 矩形のまま（回転していれば (±30,±50) 等の並びが変わるはず）。
+	// ★矩形 Position は Location の平行移動だけを反映し、RefDirection の回転は無視する。
+	// RefDirection=(0,1) を与えても 4 隅は回転せず、軸並行の中心 (0,0) 矩形のまま（回転してい
+	// れば (±30,±50) 等の並びが変わるはず）。
 	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.));\n"
 										"#11=IFCDIRECTION((0.,1.));\n"
 										"#12=IFCAXIS2PLACEMENT2D(#10,#11);\n"
@@ -432,8 +432,8 @@ TEST(arbitrary_profile_rejects_non_polyline_or_short)
 	CHECK(!parse::resolveProfile(model, model.entity(23), prof));
 }
 
-// ---------------------------------------------------------------------------
-// IfcExtrudedAreaSolid
+// --------------------------------------------------------------------------
+// - IfcExtrudedAreaSolid
 // ---------------------------------------------------------------------------
 
 TEST(extrude_vertical_with_world_placement)
@@ -452,7 +452,7 @@ TEST(extrude_vertical_with_world_placement)
 	WorldSolid solid;
 	CHECK(parse::resolveExtrudedAreaSolid(model, model.entity(46), placement, solid));
 
-	// WorldSolid は 2D プロファイル＋基底を保持（Python _Solid 相当）。
+	// WorldSolid は 2D プロファイル＋基底を保持する。
 	CHECK_EQ(solid.profile.size(), static_cast<std::size_t>(4));
 	CHECK(solid.rectangle);
 	CHECK(near(solid.depth, 2844.0));
@@ -522,8 +522,8 @@ TEST(extrude_rejects_non_solid)
 	CHECK(!parse::resolveExtrudedAreaSolid(model, nullptr, Mat4::identity(), solid));
 }
 
-// ---------------------------------------------------------------------------
-// IfcBooleanResult の第 1 オペランド辿り
+// --------------------------------------------------------------------------
+// - IfcBooleanResult の第 1 オペランド辿り
 // ---------------------------------------------------------------------------
 
 TEST(boolean_result_walks_to_base_solid)
@@ -751,8 +751,8 @@ TEST(element_world_solid_composes_element_placement)
 	CHECK(!parse::resolveElementWorldSolid(noRep, noRep.entity(40), none));
 }
 
-// ---------------------------------------------------------------------------
-// zTopAndThickness / footprint（床板・基礎が共有する平面外形と Z 範囲）
+// --------------------------------------------------------------------------
+// - zTopAndThickness / footprint（床板・基礎が共有する平面外形と Z 範囲）
 // ---------------------------------------------------------------------------
 
 TEST(z_top_and_thickness_of_vertical_extrusion)
@@ -844,8 +844,8 @@ TEST(footprint_of_empty_profile_is_empty)
 	CHECK(parse::footprint(empty).empty());
 }
 
-// ---------------------------------------------------------------------------
-// RoofSlope（屋根面の勾配座標系。垂木 parse/Rafter と野地板 parse/Roof が共有する）
+// --------------------------------------------------------------------------
+// - RoofSlope（屋根面の勾配座標系。垂木 parse/Rafter と野地板 parse/Roof が共有する）
 // ---------------------------------------------------------------------------
 
 // 試験用の片流れ屋根面（4m×3m が +Y へ立ち上がる）は tests/RoofSample.h が唯一の定義で、

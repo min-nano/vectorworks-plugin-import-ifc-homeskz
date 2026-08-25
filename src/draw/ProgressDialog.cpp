@@ -5,10 +5,9 @@
 //	この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse
 //	ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	使う SDK API は VWFC の進捗ダイアログ（VWFC/Tools/ProgressDlg.h の
-//	VWFC::Tools::CProgressDlg）。VectorScript の ProgressDlg* 一式に 1 対 1 で対応する
-//	薄いラッパーで、Python 版が持っていなかった（Python 版は vs.Message でステータスバーに
-//	文字を出すだけだった）進捗バーとキャンセルをそのまま使える:
+//	使う SDK API は VWFC の進捗ダイアログ（VWFC/Tools/ProgressDlg.h の VWFC::Tools::
+//	CProgressDlg）。VectorScript の ProgressDlg* 一式に 1 対 1 で対応する薄いラッパーで、
+//	進捗バーとキャンセルをそのまま使える:
 //
 //	  * Open(title, canCancel)        … ダイアログを開く（ProgressDlgOpen）
 //	  * SetTopText / SetMeterText     … 上段の 1 行／メーター横の 1 行（ProgressDlgSetTopMsg /
@@ -28,7 +27,7 @@
 //	しておくと見出しが最後まで出てこない。
 //
 //	実挙動（ダイアログの見た目・キャンセルの効き・yield の頻度が重すぎないか）は
-//	ローカルの VectorWorks で確認する（ROADMAP.md M15「ローカル確認」）。
+//	ローカルの VectorWorks で確認する（docs/DEV-NOTES.md M15「ローカル確認」）。
 //
 
 #include "PluginPrefix.h"

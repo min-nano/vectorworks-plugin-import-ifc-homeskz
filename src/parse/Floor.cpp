@@ -1,8 +1,8 @@
 //
 //	parse/Floor.cpp
 //
-//	床板解析の実装。Python 版 ifc/floor.py の build_floor_commands に対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	床板解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse
+//	のみ依存）。
 //
 
 #include "parse/Floor.h"

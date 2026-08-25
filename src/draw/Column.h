@@ -1,11 +1,11 @@
 //
 //	draw/Column.h
 //
-//	Phase 2（VW 描画）の柱モジュール。Python 版 vw/column.py に対応する。
-//	命令セット（core::ColumnCommand）を**構造材ツール（StructuralMember）**の鉛直材として
-//	配置する（ROADMAP.md M8）。管柱・通し柱・小屋束を同じ経路で描き、違いは構造用途
-//	（StructuralUse）とクラス・配置先の span レイヤだけ。**柱の高さは上下端のストーリ
-//	バウンドだけで決まる**（パスは配置点しか与えない。draw/Column.cpp 冒頭）。
+//	Phase 2（VW 描画）の柱モジュール。命令セット（core::ColumnCommand）を**構造材ツール
+//	（StructuralMember）**の鉛直材として配置する（docs/DEV-NOTES.md M8）。管柱・通し柱・
+//	小屋束を同じ経路で描き、違いは構造用途（StructuralUse）とクラス・配置先の span レイヤだけ。
+//	**柱の高さは上下端のストーリバウンドだけで決まる**（パスは配置点しか与えない。
+//	draw/Column.cpp 冒頭）。
 //
 //	【SDK 依存】実装（draw/Column.cpp）は PluginPrefix.h（VectorWorks SDK）を include する。
 //	このヘッダは core/Document.h までしか参照しないので、SDK を持たない翻訳単位からも
@@ -25,9 +25,9 @@ namespace HomeskzIfcImport::draw
 {
 	// Document の column 命令を描く。配置した本数を返す。
 	//
-	// 配置先の span レイヤ（"1to2-柱" 等）が無い命令はスキップする（レイヤは story 命令が
-	// 作るので、無い＝そのストーリの生成がスキップされたということ。柱のために勝手にレイヤを
-	// 作らない。Python 版 execute_columns と同じ規約）。
+	// 配置先の span レイヤ（"1to2-柱" 等）が無い命令はスキップする（レイヤは story
+	// 命令が作るので、無い＝そのストーリの生成がスキップされたということ。柱のために勝手に
+	// レイヤを作らない）。
 	//
 	// outDiagnostics に非 nullptr を渡すと、「配置はできたが断面を設定できなかった本数」
 	// 「プラグインスタイルが見つからない」といった**描画側の異常**を人が読める 1 行として

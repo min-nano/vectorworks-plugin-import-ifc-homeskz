@@ -65,8 +65,8 @@
 
 **描画側（`src/draw/`）に単体テストはありません。** SDK と実際の図面が要るためで、
 代わりに (a) SDK から切り離せるロジックは `core/` へ寄せて無 SDK でテストし
-（`desiredStoryLayerOrder` など）、(b) 実描画は各マイルストーンの「ローカル確認
-チェックリスト」（`ROADMAP.md`）に沿って VectorWorks 実機で目視確認します。
+（`desiredStoryLayerOrder` など）、(b) 実描画は VectorWorks 実機で目視確認します
+（確認の作法は `docs/DEV-NOTES.md`「実機確認の作法」）。
 
 ### 2. アップデータ（テンプレート由来）
 

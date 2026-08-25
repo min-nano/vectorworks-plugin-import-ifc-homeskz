@@ -1,20 +1,18 @@
 //
 //	draw/Rafter.cpp
 //
-//	垂木描画の実装。命令セット（RafterCommand）を**軸組ツール（FramingMember、部材種別
-//	rafter）**のオブジェクトとして配置する。Python 版 vw/rafter.py に対応する。
-//	【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include するため、この翻訳単位は
-//	プラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse ライブラリには
-//	入れない（CLAUDE.md「依存の向きは厳守する」）。
+//	垂木描画の実装。命令セット（RafterCommand）を**軸組ツール（FramingMember、部材種別 rafter）
+//	**のオブジェクトとして配置する。【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include
+//	するため、この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の
+//	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	描画手順（Python 版 draw_rafter と同じ意図。実現手段は SDK の作法に合わせる）:
+//	描画手順:
 //	  1. 命令の軒側 start（＝支持点）・棟側 end の平面座標と両端の天端 Z から、**水平投影長
 //	     （スパン）・平面方位角・勾配**を求める。
 //	  2. **配置行列**（Z 軸まわりに回し、支持点へ平行移動）から軸組ツールの PIO を生成する。
-//	     Python 版は「原点に生成 → Rotate3D → Move3D」の 3 手順だが、ISDK には VectorScript の
-//	     3D 変換状態（ResetOrientation3D / Rotate3D）が無く、代わりに配置行列から直接 PIO を
-//	     作れる（CreateCustomObjectByMatrix）。勾配は本体の勾配パラメータが担い、支持点
-//	     （下端基準）から棟側へ立ち上がる。
+//	     ISDK には VectorScript の 3D 変換状態（ResetOrientation3D / Rotate3D / Move3D）が
+//	     無いが、配置行列から直接 PIO を作れる（CreateCustomObjectByMatrix）。勾配は本体の
+//	     勾配パラメータが担い、支持点（下端基準）から棟側へ立ち上がる。
 //	  3. クラス（小屋組-垂木）を割り当て、描画属性をすべてクラス属性に従わせる。
 //	  4. 断面・配置・2D 表示・軒の出・差し込み・仕様ラベル・構造用途・材質の各パラメータを
 //	     設定して ResetObject で反映する。
@@ -39,14 +37,15 @@
 //	実際の範囲は Y[3387.5, 12820.0] Z[7985.0, 9906.9]（＝挿入点から +Y へ上る）になり、
 //	渡した角度の符号が反転して効いていることが数値で確認できた。
 //
-//	【フィールド名は VW 実機の登録から採る】軸組ツールのパラメータ名は、当初 Python 版の
-//	VectorScript エクスポートから推定していたが、ローカル確認で PIO の全パラメータの universal
-//	名とローカライズ名を出したところ、勾配（pitch ではなく **PitchAngle**。pitch という名前の
-//	内部パラメータが別にあり、そちらは __NNA_DO_NOT_CHANGE）・構造用途（**先頭が小文字**の
-//	structuralUse）・ラベル（label ではなく **showLabel** ＋ **labelText** の 2 つ）が名前違いで
+//	【フィールド名は VW 実機の登録から採る】軸組ツールのパラメータ名は、当初 VectorScript
+//	エクスポートから推定していたが、ローカル確認で PIO の全パラメータの universal
+//	名とローカライズ名を出したところ、勾配（pitch ではなく **PitchAngle**。pitch
+//	という名前の内部パラメータが別にあり、そちらは __NNA_DO_NOT_CHANGE）・構造用途（**先頭が小
+//	文字**の structuralUse）・ラベル（label ではなく **showLabel** ＋ **labelText** の 2 つ）
+//	が名前違いで
 //	**黙って無視されていた**ことが判明した。スパン（LineLength）は水平投影長で、部材に沿った
 //	実長は別パラメータ（LineLengthReal）。ポップアップの値は表示文字ではなく**キー**を渡す。
-//	最終挙動は VW 実機で確認する（ROADMAP.md M6「ローカル確認」）。名前付き定数に集約する。
+//	最終挙動は VW 実機で確認する（docs/DEV-NOTES.md M6「ローカル確認」）。名前付き定数に集約する。
 //
 
 #include "PluginPrefix.h"
@@ -83,12 +82,12 @@ namespace HomeskzIfcImport::draw
 		// 軸組ツールの PIO 名と部材種別（垂木は 'rafter'）。VW の登録名に一致させる。
 		const TXString kFramingMember("FramingMember");
 
-		// PIO 生成時に「オブジェクトの設定」ダイアログを出さない設定（Python 版
-		// CreateCustomObjectN(showPref=False) 相当）。ISDK の CreateCustomObject 系には
-		// VectorScript のような showPref 引数が無く、代わりに PIO ごとの「設定ダイアログを
-		// いつ出すか」を DefineCustomObject で切り替える（kCustomObjectPrefNever＝
-		// 「生成時に決して出さない」。Kernel/API/MiniCadCallBacks.h）。これを呼ばないと
-		// インポート中に垂木 1 本ごとにダイアログが開いて手入力を求められる（ローカル確認で判明）。
+		// PIO 生成時に「オブジェクトの設定」ダイアログを出さない設定。ISDK の
+		// CreateCustomObject 系には VectorScript のような showPref 引数が無く、代わりに PIO
+		// ごとの「設定ダイアログをいつ出すか」を DefineCustomObject で切り替える
+		// （kCustomObjectPrefNever＝「生成時に決して出さない」。Kernel/API/MiniCadCallBacks.h）。
+		// これを呼ばないとインポート中に垂木 1 本ごとにダイアログが開いて手入力を求められる
+		// （ローカル確認で判明）。
 		void SuppressSettingsDialog()
 		{
 			gSDK->DefineCustomObject(kFramingMember, kCustomObjectPrefNever);
@@ -100,10 +99,11 @@ namespace HomeskzIfcImport::draw
 		// 2D 表示（2DDisplay）。要件により「幅」表示にする。
 		constexpr const char* k2DDisplayWidth = "width";
 
-		// 以下のフィールド名は VW 実機の FramingMember 登録から採った（ローカル確認で PIO の
-		// 全パラメータの universal 名とローカライズ名をダイアログに出して確定させた。それまでは
-		// Python 版の VectorScript エクスポートから推定した名前を使っており、勾配・構造用途・
-		// ラベルが**名前違いで黙って無視されていた**）。括弧内は実機のローカライズ名。
+		// 以下のフィールド名は VW 実機の FramingMember 登録から採った（ローカル確認で PIO
+		// の全パラメータの universal 名とローカライズ名をダイアログに出して確定させた。
+		// それまでは VectorScript エクスポートから推定した名前を使っており、勾配・
+		// 構造用途・ラベルが**名前違いで黙って無視されていた**）。括弧内は実機のローカライズ
+		// 名。
 		constexpr const char* kFieldType = "type";			   // タイプ
 		constexpr const char* kFieldWidth = "width";		   // 幅
 		constexpr const char* kFieldHeight = "height";		   // 高さ
@@ -133,8 +133,8 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kMaterialWoodText = "木";
 		constexpr const char* kMaterialWoodKey = "wood";
 
-		// 角度を PIO の角度パラメータへ渡す文字列にする（度記号付き。Python 版 f'{pitch}°'）。
-		// "%g" で余分な 0 を落とす。
+		// 角度を PIO の角度パラメータへ渡す文字列にする（度記号付き）。"%g" で余分な
+		// 0 を落とす。
 		TXString AngleText(double degrees)
 		{
 			std::array<char, 32> buffer{};

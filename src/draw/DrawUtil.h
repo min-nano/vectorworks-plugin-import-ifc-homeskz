@@ -33,16 +33,14 @@
 
 namespace HomeskzIfcImport::draw
 {
-	// オブジェクトのクラスを名前で設定する（Python 版の vs.SetClass(handle, class) に対応）。
-	// AddClass は既存なら索引を返し、無ければクラスを作る。クラス名が空なら何もしない
-	// （無クラス＝既定クラスのまま）。
+	// オブジェクトのクラスを名前で設定する。AddClass は既存なら索引を返し、無ければクラスを作
+	// る。クラス名が空なら何もしない（無クラス＝既定クラスのまま）。
 	void SetClassByName(MCObjectHandle object, const std::string& className);
 
 	// 描画属性（線幅・色・パターン・矢印・透明度）をすべてクラス属性に従わせる。
 	// SetObjectClass はクラスを割り当てるだけで各属性は by-instance の既定値のまま残るため、
-	// 属性ごとに by-class を指定する（Python 版 _set_all_attributes_by_class と同じ意図。
-	// ISDK の関数名は VS と異なる: PColors=ペン色 / FColors=面色 / PPat=線種 /
-	// FPat=面パターン / Arrow=マーカー）。
+	// 属性ごとに by-class を指定する（ISDK の関数名は VS と異なる: PColors=ペン色 /
+	// FColors=面色 / PPat=線種 / FPat=面パターン / Arrow=マーカー）。
 	void SetAllAttributesByClass(MCObjectHandle object);
 
 	// PIO のパラメータ名を解決する。universal 名で見つかればそれを使い、見つからなければ
@@ -61,10 +59,9 @@ namespace HomeskzIfcImport::draw
 							 double tolerance = 1e-6);
 
 	// 構造材ツール（StructuralMember）へ渡す**断面プロファイルのグループ**を作る。
-	// 矩形（[minX, minY]〜[maxX, maxY]）1 枚を閉じたポリゴンとしてグループへ入れて返す
-	// （Python 版の BeginGroup / ClosePoly / Poly(…) / EndGroup に対応）。矩形の位置は
-	// 呼び出し側の**断面基準点の規約**で決まる: 横架材は天端中央基準なので原点が上辺中央、
-	// 柱は断面中心基準なので原点が中心（AxisAlign の設定と一致させる）。
+	// 矩形（[minX, minY]〜[maxX, maxY]）1 枚を閉じたポリゴンとしてグループへ入れて返す。
+	// 矩形の位置は呼び出し側の**断面基準点の規約**で決まる: 横架材は天端中央基準なので原点が
+	// 上辺中央、柱は断面中心基準なので原点が中心（AxisAlign の設定と一致させる）。
 	//
 	// **グループへは VWFC の VWGroupObj::AddObject で入れる**。gSDK->AddObjectToContainer を
 	// 直に呼ぶと「レイヤに作ってから移す」形になり、移動に失敗すると**空のグループ**が残る。
@@ -139,20 +136,20 @@ namespace HomeskzIfcImport::draw
 	// そのまま壁厚になる（立上りはコンクリート 1 層＝壁厚。parse/Footing）。
 	//
 	// 併せて**コア構成要素**を指定する（VW が結合部で構成要素を融合する基準になる。指定が
-	// 無いと壁結合しても平面で層が繋がらず、取り合いに面線が残りうる。ROADMAP.md M10）。
+	// 無いと壁結合しても平面で層が繋がらず、取り合いに面線が残りうる。docs/DEV-NOTES.md M10）。
 	// 立上りは構成が 1 層なので、その 1 枚（索引 0）がコアになる。索引は SetComponents と
 	// 同じ **0 始まり**（上記 ★）と解釈している——VS 版 SetCoreWallComponent の説明は
 	// 「0 はコア無しにする」だが、VS の構成要素索引は 1 始まりで ISDK のそれは 0 始まりなので、
 	// ここは先頭の層を指す。スタイルへ同じ呼び出しをしていた M10 でも、これが原因で困った
-	// 事象は出ていない（T 字の面線の原因は ResetObject 不足だった。ROADMAP.md M10）。
+	// 事象は出ていない（T 字の面線の原因は ResetObject 不足だった。docs/DEV-NOTES.md M10）。
 	// 構成層が空なら何もしない。
 	void SetWallComponents(MCObjectHandle wall,
 						   const std::vector<core::ComponentCommand>& components);
 
-	// --- 取り込み全体の Undo（ROADMAP.md M15）--------------------------------------
+	// --- 取り込み全体の Undo（docs/DEV-NOTES.md M15）--------------------------------------
 	//
 	// 【なぜレイヤを記録するのか】VectorWorks は取り込みの開始時に undo イベントを開かない
-	// （実機の診断ログで確認。ROADMAP.md M15）。そこで**自分でイベントを開き**、
+	// （実機の診断ログで確認。docs/DEV-NOTES.md M15）。そこで**自分でイベントを開き**、
 	// `AddAfterSwapObject` で「あとで消してよいもの」を登録する。登録するのは
 	// **このインポートが新しく作ったレイヤだけ**——レイヤを消せばその上の図形も消えるので、
 	// 図形を 1 つずつ登録する必要は無く、**二重登録（レイヤと中身の両方）で undo が既に
@@ -168,7 +165,7 @@ namespace HomeskzIfcImport::draw
 	// 取り込みの図面変更をまるごと包む undo イベント。**構築で開き、破棄で閉じる**
 	// （途中で例外が出ても閉じる）。記録が 1 件も無ければ、閉じるときにイベントごと
 	// 捨てる——空のイベントを残すと「取り消し」が中途半端に効いて図面が壊れるため
-	// （実機で確認。ROADMAP.md M15）。
+	// （実機で確認。docs/DEV-NOTES.md M15）。
 	class ImportUndoScope final
 	{
 	public:
@@ -235,11 +232,10 @@ namespace HomeskzIfcImport::draw
 	// 変えない。**通り芯の "共通" レイヤのように、その要素が自分で用意してよいレイヤ専用。**
 	MCObjectHandle PrepareLayer(const std::string& layerName);
 
-	// 既存の名前付きデザインレイヤをアクティブにする。**存在しなければ何もせず nil**
-	// （レイヤを作らない）。ストーリ由来のレイヤ（"1-FL" / "n-垂木" / "n-野地板"）は
-	// story 命令が作るので、無い＝そのストーリの生成がスキップされたということ。要素の
-	// ために勝手にレイヤを作らない（Python 版 execute_floors / execute_rafters /
-	// execute_roofs と同じ規約）。
+	// 既存の名前付きデザインレイヤをアクティブにする。**存在しなければ何もせず nil**（レイヤ
+	// を作らない）。ストーリ由来のレイヤ（"1-FL" / "n-垂木" / "n-野地板"）は story
+	// 命令が作るので、無い＝そのストーリの生成がスキップされたということ。要素のために勝手に
+	// レイヤを作らない。
 	MCObjectHandle ActivateExistingLayer(const std::string& layerName);
 
 	// --- シートレイヤとビューポート（伏図＝M13・軸組図＝M14 が共有する作法）------------
@@ -253,10 +249,10 @@ namespace HomeskzIfcImport::draw
 
 	// ビューポート共通の下ごしらえ。図面の全レイヤと、**表示に戻すクラス**の索引を持つ。
 	//
-	// 【クラスを表示へ戻す理由】ビューポートはクラスの表示を明示しないと**非表示のまま**
-	// （M13 のローカル確認で判明。レイヤは命令どおりなのに図形が 1 つも出なかった）。
-	// そこで **Python 版と同じくドキュメントの全クラスを表示へ戻す**——列挙は
-	// VWClass::ForEachClass（＝ISDK::ForEachClass の VWFC 版）で行う。
+	// 【クラスを表示へ戻す理由】ビューポートはクラスの表示を明示しないと**非表示のまま**（M13
+	// のローカル確認で判明。レイヤは命令どおりなのに図形が 1 つも出なかった）。そこで**
+	// ドキュメントの全クラスを表示へ戻す**——列挙は VWClass::ForEachClass（＝ISDK::
+	// ForEachClass の VWFC 版）で行う。
 	//
 	// **［訂正の記録］**M13 では「ISDK にドキュメントの全クラスを列挙する呼び出しが無い」と
 	// 判断し、図形が身に付けているクラスを全レイヤ走査で数え上げ、命令セットが名乗るクラス名
@@ -281,8 +277,8 @@ namespace HomeskzIfcImport::draw
 	ViewportSetup PrepareViewportSetup();
 
 	// シートレイヤを用意する（同じ番号のものがあれば再利用）。**シートレイヤ番号はレイヤ名が
-	// 担う**（Python 版と同じ）。タイトルはレイヤの説明＝オブジェクト変数 159
-	// （ovLayerDescription。"only used for sheet layers"）へ入れる。用意できなければ nil。
+	// 担う**。タイトルはレイヤの説明＝オブジェクト変数 159（ovLayerDescription。"only used
+	// for sheet layers"）へ入れる。用意できなければ nil。
 	MCObjectHandle PrepareSheetLayer(const std::string& number, const std::string& title);
 
 	// ビューポートで**いまドキュメントにある全クラス**を表示へ戻す（戻せた数を返す）。
@@ -294,14 +290,12 @@ namespace HomeskzIfcImport::draw
 	// ビューポートの投影をどう扱うか（ConfigureViewport の引数）。
 	//
 	// 【伏図は 2D/平面（Top/Plan）へ作り直す必要がある】`CreateViewport` が作る平面
-	// ビューポートは、**オブジェクト情報パレット上は「2D/平面」と表示されるのに、実際の
-	// 描画は 3D の「上」ビューのまま**という食い違いを起こす（実機で確認された症状。
-	// 更新ボタンを押しても直らず、パレットでいったん「上」を選んでから「2D/平面」へ
-	// 戻すと正しく描かれる）。Python 版も同じ症状に当たっており、対処は
-	// `vw/sheet.py` の `force_plan_view`——**ユーザーの手動対処をそのまま SDK でなぞる**、
-	// すなわち Project 2D（オブジェクト変数 1005）をいったん OFF にして**更新を挟み**、
-	// 再度 ON に戻して 2D/平面のキャッシュを作り直す。C++ への移植でこの手当てが
-	// 抜け落ちていたのが原因なので、同じ手順を移植する。
+	// ビューポートは、**オブジェクト情報パレット上は「2D/平面」と表示されるのに、
+	// 実際の描画は 3D の「上」ビューのまま**という食い違いを起こす（実機で確認された症状。
+	// 更新ボタンを押しても直らず、パレットでいったん「上」を選んでから「2D/平面」
+	// へ戻すと正しく描かれる）。対処は**ユーザーの手動対処をそのまま SDK でなぞる**こと——
+	// Project 2D（オブジェクト変数 1005）をいったん OFF にして**更新を挟み**、再度 ON
+	// に戻して 2D/平面のキャッシュを作り直す。
 	//
 	// **軸組図（断面ビューポート）は Keep**——あちらは断面の向きで作られており、平面へ
 	// 倒しては意味を成さない。

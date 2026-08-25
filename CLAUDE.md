@@ -5,62 +5,54 @@
 
 ## このリポジトリについて
 
-姉妹リポジトリ **`vectorworks-plugin-script-import-ifc-homeskz`**（VectorScript /
-Python プラグイン）を、**C++ SDK によるネイティブ VectorWorks 2026 プラグイン**へ
-移植するプロジェクトです。
-
 **ホームズ君構造EX** が出力する木造軸組工法建築物の IFC ファイルをパースし、
-VectorWorks のネイティブオブジェクトに変換して配置するというコンセプトは
-Python 版と変わりません。
+VectorWorks 2026 のネイティブオブジェクトへ変換して配置する、**C++ SDK 製のネイティブ
+プラグイン**です。
 
-このリポジトリはもともと Vectorworks ネイティブプラグインの**テンプレート**
-（`vectorworks-plugin-native-template`）から出発しており、以下がすでに整っています。
+要素（ストーリ・通り芯・基礎・床・横架材・柱・屋根組・シンボル・記号・伏図・軸組図）は
+一通り実装済みで、**ここから先は独自のプラグインとして改良していきます**。
 
-- macOS / Windows 両対応の CMake ビルド
-- stable / dev 2 系統の共存ビルド（`VW_DEV_BUILD` スイッチ）
-- ビルド配布・自動アップデートの仕組み（`scripts/vw-update.*`）
-- CI（`build.yml` / `lint.yml` / `test.yml` / `codeql.yml`）
-- lint 設定（clang-format / clang-tidy / cmake-format / yamllint / editorconfig / PSScriptAnalyzer）
-- **SDK 非依存ロジックを無 SDK で単体テストする**土台（`src/UpdaterParse.h` などを
-  `tests/` の極小ハーネス `TestFramework.h` でテスト）
+ドキュメントの分担:
 
-移植作業は、この土台を活かして**小さく機能を積み上げていく**（下記「移植の基本方針」）。
+| ファイル | 中身 |
+| --- | --- |
+| `README.md` | 利用者向け。何をするプラグインか・取り込むもの・使い方・インストール・既知の制限 |
+| `docs/DEVELOPMENT.md` | 開発ガイド。ソースの構成・ビルド・テスト・lint・CI・リリース・自動アップデートの仕組み |
+| `docs/DEV-NOTES.md` | **開発メモ**。VW SDK の実測知見（実機でしか判明しなかった落とし穴）・設計の考え方・打ち切った調査・実装の経緯（M0〜M15） |
+| `tests/README.md` | テストの一覧・方針・何をテストしていないか |
+| `CLAUDE.md`（本ファイル） | 作業時の規約。アーキテクチャ・置き場所・コード規約・PR とマージ・CI の待ち方 |
 
-## 移植の基本方針
+**新しいことが分かったら `docs/DEV-NOTES.md` へ足す。** とくに「実機でしか出なかった
+落とし穴」「SDK に無い／効かない API」「試して駄目だった方式」は、書いておかないと必ず
+もう一度同じ道を通る。逆に**そこに書いてあることは再調査しない**（「打ち切った調査」節）。
 
-1. **概念は不変、完全一致は非目標**。ホームズ君 IFC をパースして VectorWorks
-   ネイティブデータへ変換する、という目的は同じ。ただし Python API（`vs`）には制限が
-   多く、Python 版には**トリッキーな実装や未実現の挙動**がある。C++ SDK は API が
-   広いため、Python 版とバイト単位で同じ描画を再現することは目標にしない。
-   **仕様の意図（何を・なぜ描くか）を再現し、実現手段は C++ SDK の作法に合わせる。**
+## 開発の基本方針
 
-2. **IFC パースの「方法」は Python 版から取り入れる**。ホームズ君が出力する IFC の
-   読み方——どのエンティティ（`IfcGridAxis` / `IfcBeam` / `IfcColumn` / `IfcFooting` /
-   `IfcSlab` / `IfcBuildingStorey` / `IfcMechanicalFastener` …）を、どの属性・逆参照
-   （`IfcRelContainedInSpatialStructure` / `IfcRelDefinesByType` /
-   `IfcRelDefinesByProperties`→`Pset`）で辿り、ホームズ君固有の命名規約
-   （`木梁:{種別}:{連番}`、`STANDCOLUMN`、`基礎梁…`、`底盤…`、`地中梁…` 等）を
-   どう解釈するか——は Python 版が実証済みの資産。**そのロジックを C++ へ移植する。**
+1. **小さく機能追加を重ねる。** プラグインの実描画は**ローカルの VectorWorks でしか
+   最終確認できない**。したがって 1 変更＝1 要素（または 1 サブ機能）とし、
+   「IFC パース → 命令セット → VW 描画 → ローカル目視確認」の 1 周が回る**縦切り**で
+   完成させる。
 
-3. **2 フェーズ分離を維持する**（下記「アーキテクチャ」）。これが Python 版の設計の
-   核であり、テンプレートの「SDK 非依存ロジック＋無 SDK テスト」パターンと完全に噛み合う。
+2. **2 フェーズ分離を維持する**（下記「アーキテクチャ」）。これが設計の核であり、
+   「SDK 非依存ロジック＋無 SDK テスト」という CI の土台と完全に噛み合っている。
+   ここを崩す変更は、他がどれだけ良く見えても採らない。
 
-4. **小さく機能追加を重ねる**。プラグインの実描画は**ローカルの VectorWorks でしか
-   最終確認できない**。したがって 1 マイルストーン＝1 要素（または 1 サブ機能）とし、
-   各マイルストーンを「IFC パース → 命令セット → VW 描画 → ローカル目視確認」の
-   1 周が回る**縦切り**で完成させる。詳細は `ROADMAP.md`。
+3. **仕様の根拠はコードとメモに書く。** ホームズ君 IFC の癖・VW SDK の落とし穴・
+   なぜその値なのかは、対応するコメント（`なぜ` を書く）と `docs/DEV-NOTES.md` に残す。
 
-5. **Python 版の CLAUDE.md を仕様の一次資料とする**。姉妹リポジトリの
-   `CLAUDE.md`（約 186KB）に各要素の解析・描画の詳細仕様が日本語で書かれている。
-   C++ で 1 要素を移植するときは、まずそのリポジトリの該当節と実装
-   （`src/vectorworks_plugin_import_ifc_homeskz/ifc/<要素>.py` /
-   `vw/<要素>.py`）とテスト（`tests/`）を読み、意図を写す。
+4. **既存の図面リソースを作らない・書き換えない。** ユーザーの図面に名前付きリソースを
+   増やさない。スラブ／ウォールスタイルもデータタグスタイルも作らず、構成層・基準面・
+   タグレイアウトは**各オブジェクトへ直接**与える。
+
+5. **空のもの（レイヤ・レベル・凡例）を先に作らない。** 描画対象がある要素にだけ作る。
+
+6. **決定性を守る。** エンティティ列挙順に依存しない結果を出す。ソート・集約は明示的に。
 
 ## アーキテクチャ: 2 フェーズ分離
 
 処理は **IFC 解析フェーズ** と **VectorWorks 描画フェーズ** に完全分離する。
 両フェーズは**命令セット（Document）**だけで接続し、SDK との密結合を解析側に
-持ち込まない。Python 版の `ifc` / `vw` 分離をそのまま C++ へ写す。
+持ち込まない。
 
 ```
 IFC ファイル
@@ -72,28 +64,24 @@ Document（命令セット。プレーンな構造体の集まり）
 VectorWorks ネイティブオブジェクト
 ```
 
-### Phase 1 — `parse/`（旧 `ifc/`）: SDK 非依存
+### Phase 1 — `parse/`: SDK 非依存
 
 - **VectorWorks SDK を一切 include しない。** 通常の C++ ツールチェインだけで
   コンパイル・単体実行・テストできる（テンプレートの `UpdaterParse` と同じ立ち位置）。
 - **最小 STEP リーダ**（自前）で IFC を読む。ホームズ君が出す既知サブセット向けに、
   STEP トークナイザ＋エンティティグラフ（`byType(name)` / インデックスによる属性
   アクセス / 逆参照 lookup）を提供する。**幾何エンジン（OpenCASCADE 等）は使わない**
-  ——Python 版も ifcopenshell を「エンティティグラフの読み取り」だけに使い、配置行列・
-  断面・押し出しの幾何計算は自前で行っている。その幾何計算を C++ へ移植する。
-- **読み込み時サニタイズは不要**（`ifc/loader.py` との相違点）: Python 版が
-  ホームズ君 IFC2X3 に混入する `IFCFOOTINGTYPE`（IFC4 専用エンティティ）を STEP
-  テキストから除去していたのは、**ifcopenshell が IFC2X3 スキーマに無い非正規
-  エンティティに出会うと処理を中断してしまう**からで、除去はその回避策だった。
-  自前 STEP リーダ（`parse/Step`）は**スキーマ検証をせず非正規エンティティも
-  そのまま読める**ため、除去は不要。本プラグインはそれらの型を参照しないので、
-  グラフ上に残っていても無害（挙動は Python 版の除去と同値）。したがって
-  `parse/Loader` はファイル読み込み（テキスト→STEP グラフ）だけを担い、
-  サニタイズ処理は持たない。
-- 出力は **Document**（下記）。ここに `vs`/SDK ハンドルや STEP エンティティポインタ等の
+  ——配置行列・断面・押し出しの幾何計算は `core/Geometry` ＋ `parse/IfcGeometry` の
+  自前計算で行う。
+- **読み込み時サニタイズは不要**: ホームズ君の IFC2X3 には IFC4 専用エンティティ
+  （`IFCFOOTINGTYPE`）が混入するが、自前 STEP リーダ（`parse/Step`）は**スキーマ検証を
+  せず非正規エンティティもそのまま読める**。本プラグインはそれらの型を参照しないので、
+  グラフ上に残っていても無害。したがって `parse/Loader` はファイル読み込み
+  （テキスト→STEP グラフ）だけを担い、サニタイズ処理は持たない。
+- 出力は **Document**（下記）。ここに SDK ハンドルや STEP エンティティポインタ等の
   「フェーズ間で運べないもの」を入れない。
 
-### Phase 2 — `draw/`（旧 `vw/`）: VectorWorks SDK 依存
+### Phase 2 — `draw/`: VectorWorks SDK 依存
 
 - **VectorWorks SDK のみに依存**し、IFC / STEP の知識を持たない。
 - Document を**検証**（`validateDocument` 相当）してから SDK API で描画する。
@@ -101,111 +89,28 @@ VectorWorks ネイティブオブジェクト
 
 ### 命令セット（Document）
 
-- Python 版では JSON 直列化可能な dict。C++ では**プレーンな構造体**
-  （`std::vector`・`std::string`・`double`・`enum` 等の集約）で表す。
-- スキーマ（`stories` / `grids` / `members` / `columns` / `walls` / `slabs` / `floors` /
-  `rafters` / `roofs` / `anchorBolts` / `floorPosts` / `fireBraces` / `joints` /
-  `columnMarks` / `sheets` / `sections` / `tags` / `legends` …）は Python 版
-  `document.py` の `TypedDict` 群に対応させる。**フィールド名・意味は Python 版に
-  合わせる**（対応が追いやすく、仕様のブレを防ぐ）。ただし**同型の TypedDict が並ぶところは
-  構造体 1 つへまとめる**——`anchorBolts` / `floorPosts` / `fireBraces` / `joints` は
-  Python 版では 4 つの TypedDict だが中身が同じなので、C++ は `core::SymbolCommand` 1 つで
-  受け、要素の区別は「Document のどのリストか」が担う（`core/Document.h` の doc コメント参照）。
-- フェーズ間の受け渡しは**構造体のまま**行う。JSON 直列化は**予定に無い**——Python 版
-  出力との突き合わせ（ゴールデンテスト）は行わない方針のため、唯一の用途が消えた
-  （理由は `ROADMAP.md`「Python 版出力との比較はしない」）。デバッグでダンプが要る場面が
-  実際に出てきたら、そのときに最小限を足す。
+- **プレーンな構造体**（`std::vector`・`std::string`・`double`・`enum` 等の集約）で表す。
+- スキーマは `stories` / `grids` / `members` / `columns` / `walls` / `wallJoins` / `slabs` /
+  `floors` / `rafters` / `roofs` / `anchorBolts` / `floorPosts` / `fireBraces` / `joints` /
+  `columnMarks` / `sheets` / `sections`。**同型が並ぶところは構造体 1 つへまとめる**
+  ——`anchorBolts` / `floorPosts` / `fireBraces` / `joints` は中身が同じなので
+  `core::SymbolCommand` 1 つで受け、要素の区別は「Document のどのリストか」が担う
+  （`core/Document.h` の doc コメント参照）。
+- **突き合わせが要る関係は入れ子で持つ**（データタグは `ViewportCommand::tags`、
+  グラフィック凡例は `SheetCommand` の中）。平らに並べて番号で突き合わせる形にしない。
+- フェーズ間の受け渡しは**構造体のまま**行う。JSON 直列化は**予定に無い**。デバッグで
+  ダンプが要る場面が実際に出てきたら、そのときに最小限を足す。
 - スキーマを変えるときは、構造体定義・`validateDocument`・テストを同時に更新する。
 
-## ディレクトリ構造（目標）
+## ディレクトリ構造
 
-移植が進むにつれて `src/` を次の形に育てる（M0 で骨組みを用意）。
+`src/` の全体像（どのファイルが何を担うか）は
+[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)「ソースの構成」にある。ここには**作業する
+ときに守る置き場所の規約**だけを書く。
 
-```
-src/
-  ModuleMain.cpp            モジュールのエントリポイント（既存）
-  Extensions/
-    ExtMenu.{h,cpp}         「IFC インポート」メニューコマンド（既存 Sample から改名・改修）
-    ExtColumnMark.{h,cpp}   柱・小屋束の記号 PIO（対象レイヤの構造材を検索して ×／／・
-                            平面記号を描く。M12。登録名は Python 版と分ける）
-  BuildConfig.h             stable/dev 識別（既存）
-  PluginPrefix.h            SDK を取り込む共有プレフィックス（既存。parse/ からは include しない）
-  Updater*.{h,cpp}          自動アップデータ（既存・テンプレート由来。基本触らない）
-
-  core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
-    Geometry.{h,cpp}        Vec2 / Vec3 / Mat4 等の自前数学型（parse が SDK 非依存のため必須）
-    Document.{h,cpp}        命令セットの構造体定義と validateDocument（1 対で持つ。分割は不要）
-    Region.{h,cpp}          部品が囲む平面領域の合成（ロフト床の外形。M5 で追加）
-    Progress.{h,cpp}        進捗の報告先（ProgressReporter）と文言整形・バー配分（M15 の先行実装）
-    Trace.{h,cpp}           クラッシュ診断ログ（フェーズの区切りを 1 行ずつ・毎行フラッシュ。M15）
-
-  parse/                    Phase 1: IFC 解析（SDK 非依存）… 旧 ifc/
-    Step.{h,cpp}            最小 STEP リーダ（トークナイザ＋エンティティグラフ）
-    Loader.{h,cpp}          ファイル読み込み: テキスト→STEP グラフ（旧 loader.py。サニタイズは不要）
-    IfcAttr.h               IFC 属性インデックスの唯一の定義（番号を散らさない）
-    IfcGeometry.{h,cpp}     配置行列・押し出しソリッド・断面・屋根面の解決（旧 footing._world_solid 等）
-    Context.{h,cpp}         解析中の共有キャッシュ（下記「共有コンテキスト」）
-    BuildDocument.{h,cpp}   build_document 相当のオーケストレーション
-    Summary.{h,cpp}         完了・エラーダイアログの本文（要素の一覧＝件数の表を 1 つ持つ。M15）
-    Grid.{h,cpp}            通り芯（旧 ifc/grid.py）
-    Story.{h,cpp}           ストーリ（旧 ifc/story.py）
-    Member.{h,cpp}          横架材（旧 ifc/member.py）
-    Footing.{h,cpp}         基礎（立上り＝壁・底盤＝スラブ・基礎ストーリ・人通口・壁結合・
-                            地中梁。旧 ifc/footing.py）
-    Joint.{h,cpp}           仕口（旧 ifc/joint.py。IFC ではなく member/column 命令から導出）
-    Sheet.{h,cpp}           シート＝伏図（旧 ifc/sheet.py の sheet 命令。IFC ではなく
-                            取り込んだ要素の有無・柱の span から決まる）
-    Section.{h,cpp}         軸組図＝断面ビューポート（旧 ifc/section.py。柱梁の芯を通る通りを
-                            検出し、切断線・視線の向き・表示レイヤを決める。断面の範囲と
-                            表示の作法は draw/Section が持つ）
-    Tag.{h,cpp}             断面寸法データタグ（旧 ifc/tag.py。IFC ではなく member 命令から
-                            導出する。**Python 版と違い伏図だけでなく軸組図にも載せる**ので、
-                            どのビューポートに載るかの振り分けもここが持つ）
-    …                       以降、要素ごとに 1 対 1 で追加
-
-  draw/                     Phase 2: VW 描画（SDK 依存）… 旧 vw/
-    ExecuteDocument.{h,cpp} execute_document 相当のディスパッチ
-    DrawUtil.{h,cpp}        クラス分け・by-class 属性・プラグインスタイル解決・レイヤ用意・
-                            スラブ／壁の構成層の共通ヘルパー
-    StructuralMember.{h,cpp} 構造材ツール（StructuralMember PIO）1 本の生成・設定（横架材／柱で共有）
-    ProgressDialog.{h,cpp}  core::ProgressReporter を VW の進捗ダイアログへ橋渡し（唯一の実装）
-    Grid.{h,cpp}            grid 命令 → GridAxis（旧 vw/grid.py）
-    Story.{h,cpp}           story 命令 → ストーリ・レベル・レイヤ（旧 vw/story.py）。
-                            デザインレイヤの重ね順の並べ替えもここが唯一の適用箇所
-    Footing.{h,cpp}         wall/wallJoin/slab 命令 → 壁・壁結合・スラブ（地中梁の
-                            台形プリズムを含む。旧 vw/footing.py）
-    Symbol.{h,cpp}          シンボル配置（旧 vw/{anchor_bolt,floor_post,fire_brace,joint}.py
-                            の 4 本を 1 本に。要素の区別は呼び出し側が持つ）
-    ColumnMark.{h,cpp}      記号 PIO の設置（旧 vw/column_mark.py）。PIO 本体は
-                            Extensions/ExtColumnMark（ROADMAP.md M12 の【決定】）
-    ObjectHandles.{h,cpp}   「命令インデックス → 描いたオブジェクトのハンドル」の対応表
-                            （壁→壁結合が使う。実体は draw/DrawUtil）
-    Sheet.{h,cpp}           sheet 命令 → シートレイヤ・ビューポート（旧 vw/sheet.py）
-    Tag.{h,cpp}             ビューポート注釈の断面寸法データタグ（旧 vw/sheet.py の draw_tag）。
-                            伏図・軸組図が共有する唯一の実装（振り分けは parse/Tag 済み）。
-                            **データタグスタイルは作らない・当てない**——タグの中身
-                            （タグレイアウト）は**タグ 1 本ずつへ直接**組む（スラブ・壁と
-                            同じ扱い。draw/DrawUtil の ★）
-    Legend.{h,cpp}          伏図のグラフィック凡例（旧 vw/sheet.py の draw_legend）。
-                            ビューポート注釈ではなく**シートレイヤ（用紙）**に置く。
-                            凡例に並ぶ中身は VW 側のグラフィック凡例スタイルが決める
-    Section.{h,cpp}         section 命令 → 断面ビューポート（旧 vw/section.py）。**Python 版と
-                            違い ISDK::CreateSectionViewport で新規作成する**（既製 40 枚の
-                            流用はしない。ROADMAP.md M14 の【決定】）。断面の範囲（奥行きだけ
-                            0＝無限・高さは建物の実寸＋余白・長さは断面線の長さ）と
-                            表示の作法（奥を出さない・プレイナー図形を出さない・2D
-                            コンポーネントは出す）の唯一の置き場所
-    …                       以降、要素ごとに 1 対 1 で追加
-
-tests/
-  TestFramework.h           既存の極小ハーネス（無 SDK）
-  Fixtures.h                フィクスチャの読み込み・近似比較・フィクスチャ一覧（共通）
-  RoofSample.h              試験用の屋根面と最小の屋根版 IFC（垂木/野地板/幾何で共有）
-  fixtures/                 ホームズ君 IFC（Python 版 tests/fixtures から流用）
-  StepTests.cpp             STEP リーダ
-  GeometryTests.cpp         幾何計算（Python 版の値と突き合わせ）
-  ParseGridTests.cpp        parse/Grid …（要素ごと）
-```
+要素を 1 つ足すときの型は決まっている: `parse/<要素>.{h,cpp}`（解析）＋
+`core/Document.h` の命令構造体と `validateDocument` の検証＋`draw/<要素>.{h,cpp}`（描画）＋
+`tests/Parse<要素>Tests.cpp`（無 SDK テスト）＋`parse/Summary.cpp` の `kElements` に 1 行。
 
 **共有コンテキスト（`parse/Context`）**: 各要素の解析は「ストーリ一覧」「通り芯の
 センタリング中心」「階に属する要素」「屋根面」を共通して必要とする（加えて横架材・柱・
@@ -255,8 +160,7 @@ tests/
 
 **依存の向きは厳守する:** `parse/` と `core/` は VectorWorks SDK を include しない。
 `draw/` は STEP / IFC を include しない。両者をつなぐのは `core/Document.h` だけ。
-この規律は Python 版の「`ifc` に `vs` を持ち込まない」規約の C++ 版であり、CI で
-**parse/core を無 SDK でコンパイル・テストできること**によって担保する。
+この規律は CI で**parse/core を無 SDK でコンパイル・テストできること**によって担保する。
 
 ## C++ コード規約
 
@@ -285,88 +189,62 @@ tests/
 - **SDK 拡張クラス**は SDK の作法（`CExt…` / `…_EventSink`）に従う（既存 `ExtMenu` に倣う）。
 - **フェーズ非依存コード**（`core/` `parse/`）は素直な C++ 命名でよい:
   型は `PascalCase`、関数・変数は `camelCase`、定数は `kPascalCase` または
-  `UPPER_SNAKE`（ファイル内で統一）。Python 版の関数名（`build_grid_commands` 等）は
-  `buildGridCommands` のように機械的に対応させ、**追跡しやすさを優先**する。
-- **Document のフィールド名**は Python 版のキー（`class` は予約語なので `drawClass` /
-  `className` 等へ機械的に置換）に対応させ、対応表を各構造体の doc コメントに書く。
+  `UPPER_SNAKE`（ファイル内で統一）。要素ごとの組み立て関数は `buildGridCommands` /
+  `buildFootingCommands` のように `build<要素>Commands` で揃える。
+- **Document のフィールド名**は図面側の語彙に合わせる（`class` は予約語なので `drawClass` /
+  `className`）。意味は各構造体の doc コメントに書く。
 
 ### 幾何の型
 
 - `parse/` は SDK 非依存なので、**SDK の幾何型（`WorldPt3` 等）を使えない**。
-  `core/Geometry.h` に自前の `Vec2` / `Vec3` / `Mat4`（配置行列合成用）を定義し、
-  Python 版が手計算している行列・断面・押し出しの数式をここへ移植する。
+  `core/Geometry.h` の自前 `Vec2` / `Vec3` / `Mat4`（配置行列合成用）を使い、行列・断面・
+  押し出しの数式はここに置く。
 - `draw/` では SDK の幾何型と自前 `Vec*` を相互変換する薄いヘルパーを 1 か所に置く
   （変換規約を分散させない）。
 
 ### エラーハンドリング・所有権
 
-- **STEP パースの失敗・想定外エンティティ**は Python 版の寛容さ（`continue` して
-  スキップ、フォールバック描画）を踏襲する。1 要素の欠損で全体を止めない。
+- **STEP パースの失敗・想定外エンティティ**には寛容にふるまう（`continue` してスキップ、
+  フォールバック描画）。1 要素の欠損で全体を止めない。
 - **例外は parse 内部の局所処理に留める**。フェーズ境界（`buildDocument` の戻り）は
   値で返す。SDK コールバック（`plugin_module_main` / `DoInterface`）へ例外を漏らさない。
 - **RAII で所有権を明示**。生ポインタの所有は避け、SDK ハンドルは Document に載せない
-  （フェーズ間で運べない）。描画で必要なハンドルの受け渡しは Python 版と同じく
-  「命令インデックス → ハンドル」の対応（`std::unordered_map<size_t, Handle>` 等）で行う
-  （横架材ハンドル→タグ、壁ハンドル→壁結合など）。
-- **決定性を守る**。エンティティ列挙順に依存しない結果を出す（Python 版が随所で
-  「入力順に依存しない決定的な結果」を保証しているのと同じ）。ソート・集約は明示的に。
+  （フェーズ間で運べない）。描画で必要なハンドルの受け渡しは「命令インデックス →
+  ハンドル」の対応（`draw/ObjectHandles`）で行う（横架材ハンドル→タグ、壁ハンドル→壁結合
+  など）。
+- **決定性を守る**。エンティティ列挙順に依存しない結果を出す。ソート・集約は明示的に。
 
 ### コメント・言語
 
-- **日本語コメントを基本**とする（Python 版・テンプレート README と揃える）。
-  既存ソースの重厚な手折りコメントの density に合わせる。`ReflowComments: false` の
-  ため折り返しは著者責任。
-- **なぜ（意図・仕様の根拠）を書く**。ホームズ君 IFC の癖・VW SDK の落とし穴・
-  Python 版で判明済みの不具合（#番号）への対処は、対応する Python 版 CLAUDE.md の
-  節を参照する形で残す。
+- **日本語コメントを基本**とする。既存ソースの重厚な手折りコメントの density に合わせる。
+  `ReflowComments: false` のため折り返しは著者責任。
+- **なぜ（意図・仕様の根拠）を書く**。ホームズ君 IFC の癖・VW SDK の落とし穴・実機で
+  切り分けた経緯は、そのコードの近くに残す（大きな知見は `docs/DEV-NOTES.md` にも足し、
+  コメントからはその節を指す）。
 
 ## テスト方針
 
-Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テストは vs モックで実行」
-という分離を C++ でも守る。
+テストの一覧・何をテストしていないかは `tests/README.md`。ここは方針だけ。
 
-- **`core/` `parse/`**: **無 SDK で単体テスト**（既存 `TestFramework.h` を使う）。
-  - STEP リーダ・幾何計算・各 parse モジュールを、Python 版と同じ**実 IFC フィクスチャ**
-    （`tests/fixtures/` へ流用）に対してテストする。
-  - **期待値は手書きする。** Python 版 `build_document` の出力と機械的に突き合わせる
-    （ゴールデンテスト）ことはしない——Python 版は仕様の一次資料であって出力の契約では
-    なく、意図的な差が積み上がるほど除外リストが育つだけになる（`ROADMAP.md`
-    「Python 版出力との比較はしない」）。移植ズレは Python 版の該当節・実装・テストを
-    読んで期待値へ写すことで防ぐ。数値は許容誤差付きで比較する。
-  - CI（`lint.yml` / ランナー）で無 SDK ビルドとして常時回す。
+- **`core/` `parse/`**: **無 SDK で単体テスト**（`tests/TestFramework.h` を使う）。
+  - STEP リーダ・幾何計算・各 parse モジュールを、**実 IFC フィクスチャ**
+    （`tests/fixtures/`）に対してテストする。全フィクスチャで `buildDocument` が例外なく
+    通ること（＋決定性）は、要素を足すたびに確認する。
+  - **期待値は手書きする。** 数値は許容誤差付きで比較する。
+  - CI（`test.yml`）で ASan + UBSan 付き・カバレッジ付きで常時回す。
 - **`draw/`**: SDK 依存のため CI での完全な実行は難しい。
-  - ロジック（レイヤ順の並べ替え計算、命令→SDK 呼び出し列の組み立て等）で
-    SDK から切り離せる部分は `core/` 側へ寄せて無 SDK テストする。
-  - 実描画は**ローカルの VectorWorks で目視確認**する（各マイルストーンの
-    「ローカル確認チェックリスト」に沿う。`ROADMAP.md`）。SDK 呼び出しの薄い
-    ラッパーは、必要なら SDK モックで「正しい引数で呼んだか」を検証する程度に留める。
+  - ロジック（レイヤ順の並べ替え計算、地中梁の呑み込み等）で SDK から切り離せる部分は
+    `core/` 側へ寄せて無 SDK テストする。
+  - 実描画は**ローカルの VectorWorks で目視確認**する（作法は
+    `docs/DEV-NOTES.md`「実機確認の作法」）。SDK 呼び出しの薄いラッパーは、必要なら
+    SDK モックで「正しい引数で呼んだか」を検証する程度に留める。
 
-## Python 版との対応表
+## 既知の制限・非目標
 
-| Python | C++（目標） | 役割 |
-| --- | --- | --- |
-| `ifc/loader.py` | `parse/Loader` + `parse/Step` | 読み込み・STEP グラフ（サニタイズは不要） |
-| `ifc/__init__.py` `build_document` | `parse/BuildDocument` | 解析オーケストレーション |
-| `ifc/grid.py` … `ifc/section.py` | `parse/Grid` … `parse/Section` | 要素ごとの解析 |
-| `ifc/tag.py` | `parse/Tag` | 断面寸法データタグ（伏図＋**軸組図**） |
-| `ifc/footing.py` | `parse/Footing` | 基礎（立上り・底盤・基礎ストーリ） |
-| `ifc/structural_class.py` | `parse/StructuralClass` | 構造クラス判定（純ロジック） |
-| （ifcopenshell の行列・幾何） | `parse/IfcGeometry` + `core/Geometry` | 配置行列・押し出し・断面 |
-| `document.py` | `core/Document`（検証も同ファイル） | 命令セット・検証・描画結果の件数（`DrawCounts`） |
-| （`main.py` の完了メッセージ） | `parse/Summary` | 完了・エラーダイアログの本文 |
-| `tracing.py` | `core/Trace` | クラッシュ診断ログ（フェーズ単位・毎行フラッシュ） |
-| `vw/__init__.py` `execute_document` | `draw/ExecuteDocument` | 描画ディスパッチ |
-| `vw/grid.py` … `vw/section.py` | `draw/Grid` … `draw/Section` | 要素ごとの描画 |
-| `vw/sheet.py` `draw_tag` | `draw/Tag` | データタグの配置・関連付け・注釈への追加 |
-| `vw/footing.py` | `draw/Footing` | 基礎の描画（壁・スラブ） |
-| `main.py` / `__init__.py` `run()` | `Extensions/ExtMenu`（コマンド本体） | ファイル選択→解析→描画→完了ダイアログ |
-
-## 移植上の既知の制限・非目標
-
-- Python 版の**バイト単位の再現は非目標**。VW ビューポート再描画の手動反映依存など、
-  Python 版が「VW の制約として許容」した挙動は、C++ SDK でより良く扱えるなら差し替えてよい。
 - **ホームズ君 IFC 以外の汎用 IFC 対応は非目標**。既知サブセット前提で最小 STEP リーダを組む。
-- 1 マイルストーンで**全要素を一度に移植しない**。`ROADMAP.md` の順序で 1 つずつ。
+- **一度に全部を変えない。** 1 変更＝1 要素（または 1 サブ機能）で、実機確認まで含めて閉じる。
+- そのほかの制限（床版の開口・配筋・ロフト床の近似・柱記号の追随・断面の範囲）は
+  `README.md`「既知の制限」と `docs/DEV-NOTES.md`「残っている宿題」にある。
 
 ## 開発プロセス: PR とマージ
 
@@ -378,29 +256,27 @@ Python 版の「`ifc`/`document` テストは vs モック不要、`vw` テス�
    （`draw/` を含む PR）は勝手にマージしない**——ユーザーが VectorWorks 実機で確認し、
    「確認できた」と伝えるまで PR を open のまま待つ。理由は本リポジトリの前提そのもので、
    **実描画（高さ・傾き・スタイル・PIO の挙動）は CI では検証できず、ローカルの VW でしか
-   最終確認できない**（「テスト方針」「移植の基本方針」4）。確認前にマージすると、
+   最終確認できない**（「テスト方針」「開発の基本方針」1）。確認前にマージすると、
    **未確認の描画が main に積み上がり、後で不具合が出たときにどの変更が原因か切り分けられなく
-   なる**。ROADMAP の進捗記号でいえば 🟨（コード実装済み・目視確認待ち）はマージの合図では
-   ない。
+   なる**。「コード実装済み・CI green」は目視確認の代わりにならない。
 
 3. **実機確認の要らない変更は CI green で自動マージしてよい**（`core/` `parse/` だけの変更・
    テスト・ドキュメント・CI 設定など、描画に触れないもの）。判断に迷うなら 2 に倒す。
 
-4. **姉妹リポジトリ（Python 版）の CLAUDE.md にある「CI が全て green なら自動的にマージする」は
-   本リポジトリには当てはまらない。** あちらは `vs` スクリプトで実行のたびに差し替えられるが、
-   本リポジトリはネイティブプラグインで、リリースが dev プレリリースとして配布される。
-   **この節が本リポジトリの規則で、あちらの記述より優先する。**
+4. **「CI が green なら自動マージ」は本リポジトリの規則ではない。** ネイティブプラグインで
+   あり、リリースが stable / dev のビルドとして配布されるので、描画に触れる変更は必ず
+   実機確認を挟む（上記 2）。
 
 5. **コミットメッセージ**には Claude セッション URL を入れる
    （`https://claude.ai/code/session_<SESSION_ID>` の形式）。
 
 ## ビルド・リント・リリース
 
-テンプレートの `README.md` に、ローカルビルド（`VW_SDK_DIR` 指定）・dual build
-（`VW_DEV_BUILD`）・lint（`scripts/lint.sh`）・自動アップデート・CI の詳細がある。
-移植でこれらの仕組みは基本そのまま使う。**プレースホルダー識別子
-（`SamplePlugin` / `com.example…` / UUID 等）の置換**は M0 で完了済み（現在の識別子は
-README「プラグイン識別子」節を参照。プラグイン名は `HomeskzIfcImport`）。
+`docs/DEVELOPMENT.md` に、ローカルビルド（`VW_SDK_DIR` 指定）・dual build
+（`VW_DEV_BUILD`）・テストとカバレッジ・lint（`scripts/lint.sh`）・CI とリリース・
+自動アップデートの詳細がある。プラグイン識別子（バンドル名・VCOM ユニバーサル名・
+拡張機能 UUID など）の一覧も同ファイルの「プラグイン識別子」節にある
+（プラグイン名は `HomeskzIfcImport`）。
 
 ## CI の完了を待つ（待機は必ず `ci-wait` / `ci-debug` で行う）
 

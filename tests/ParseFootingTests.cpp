@@ -3,11 +3,11 @@
 //
 //	基礎解析（src/parse/Footing）の単体テスト。VectorWorks SDK を一切 include せず、
 //	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
-//	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_footing.py の
-//	**M9 / M10 に相当するケース**（立上り・底盤・基礎ストーリ・人通口・壁結合・地中梁）を
-//	1 対 1 で写している（配筋のケースは保留）。
+//	core/ parse/ は無 SDK で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と
+//	機械的に突き合わせることはしない）。対象は立上り・底盤・基礎ストーリ・人通口・
+//	壁結合・地中梁（配筋は未対応なのでケースも無い）。
 //
-//	検証項目（ROADMAP.md M9）:
+//	検証項目（docs/DEV-NOTES.md M9）:
 //	  * Name による基礎要素の判別（立上り／地中梁／底盤）
 //	  * 基礎ストーリ（"基礎" / suffix "F" / GL=0・レベルとレイヤ）
 //	  * 底盤天端＝面積最大の天端 Z、立上り下端＝IFC 実形状（呑み込み補正なし）
@@ -90,7 +90,7 @@ using HomeskzIfcTests::near;
 
 namespace
 {
-	// 合成の立上り命令（Python 版 test_ifc_footing.py の _wall と同じ既定値）。
+	// 合成の立上り命令。
 	WallCommand wall(Vec2 start, Vec2 end, double thickness = 120.0, double bottomOffset = -100.0,
 					 double topOffset = -190.0)
 	{
@@ -106,7 +106,7 @@ namespace
 		return cmd;
 	}
 
-	// 合成の底盤命令（Python 版 _slab / _rect_boundary と同じ既定値）。
+	// 合成の底盤命令。
 	SlabCommand slab(std::vector<Vec2> boundary, double thickness = 150.0, double offset = 0.0)
 	{
 		SlabCommand cmd;
@@ -181,7 +181,7 @@ namespace
 } // namespace
 
 // ---------------------------------------------------------------------------
-// Name による基礎要素の判別（Python 版 _is_wall / _is_ground_beam / _is_base_slab）
+// Name による基礎要素の判別
 // ---------------------------------------------------------------------------
 
 TEST(name_predicates_classify_footing_elements)
@@ -210,7 +210,7 @@ TEST(name_predicates_classify_footing_elements)
 }
 
 // ---------------------------------------------------------------------------
-// 立上りの統合（mergeWallCommands）— Python 版 TestMergeWallCommands
+// 立上りの統合（mergeWallCommands）
 // ---------------------------------------------------------------------------
 
 TEST(merge_walls_collinear_touching_into_one)
@@ -291,7 +291,7 @@ TEST(merge_walls_empty_returns_empty)
 }
 
 // ---------------------------------------------------------------------------
-// 自由端の延長（extendFreeWallEnds）— Python 版 TestExtendFreeWallEnds
+// 自由端の延長（extendFreeWallEnds）
 // ---------------------------------------------------------------------------
 
 TEST(extend_free_ends_of_isolated_wall)
@@ -459,7 +459,7 @@ TEST(extend_empty_returns_empty)
 }
 
 // ---------------------------------------------------------------------------
-// 底盤の統合（mergeSlabCommands）— Python 版 TestMergeSlabCommands
+// 底盤の統合（mergeSlabCommands）
 // ---------------------------------------------------------------------------
 
 TEST(merge_slabs_two_adjacent_rects_into_one)
@@ -596,7 +596,7 @@ TEST(merge_slabs_empty_returns_empty)
 }
 
 // ---------------------------------------------------------------------------
-// 外面合わせ（alignSlabsToWallFaces）— Python 版 TestAlignSlabsToWallFaces
+// 外面合わせ（alignSlabsToWallFaces）
 // ---------------------------------------------------------------------------
 
 TEST(align_offsets_edges_on_wall_centerlines_outward)
@@ -641,7 +641,7 @@ TEST(align_uses_per_edge_wall_thickness)
 }
 
 // ---------------------------------------------------------------------------
-// 実フィクスチャからの組み立て（Python 版 TestBuildFromFixture）
+// 実フィクスチャからの組み立て
 // ---------------------------------------------------------------------------
 
 TEST(slab_top_elevation_is_largest_area_height)
@@ -700,8 +700,8 @@ TEST(foundation_top_is_the_highest_wall_top)
 
 TEST(foundation_top_falls_back_to_slab_top_without_walls)
 {
-	// 立上りが 1 つも無い基礎（底盤のみ）は基礎天端が定まらないので、ストーリは
-	// 基礎天端レベルを底盤天端へフォールバックする（Python 版と同じ）。
+	// 立上りが 1 つも無い基礎（底盤のみ）は基礎天端が定まらないので、ストーリは基礎天端レベル
+	// を底盤天端へフォールバックする。
 	bool ok = false;
 	const Model& model = fixture("minimal_grid.ifc", ok);
 	CHECK(ok);
@@ -883,7 +883,7 @@ TEST(base_slab_outer_boundary_matches_wall_outer_face)
 TEST(all_fixtures_parse_without_error)
 {
 	// 全フィクスチャで立上り・底盤・基礎ストーリが例外なく組み立てられ、命令が命令セットの
-	// 検証を通ること（ROADMAP.md の完了条件 1）。
+	// 検証を通ること（docs/DEV-NOTES.md の完了条件 1）。
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
@@ -935,7 +935,7 @@ TEST(is_deterministic)
 }
 
 // ---------------------------------------------------------------------------
-// 人通口（applyWallOpenings）— ROADMAP.md M10
+// 人通口（applyWallOpenings）— docs/DEV-NOTES.md M10
 // ---------------------------------------------------------------------------
 
 TEST(opening_below_slab_top_splits_wall_without_middle)
@@ -1142,7 +1142,7 @@ TEST(openings_come_from_the_real_fixtures)
 }
 
 // ---------------------------------------------------------------------------
-// 壁結合（buildWallJoinCommands）— ROADMAP.md M10
+// 壁結合（buildWallJoinCommands）— docs/DEV-NOTES.md M10
 // ---------------------------------------------------------------------------
 
 TEST(join_corner_of_two_walls_is_an_L_join)
@@ -1191,13 +1191,13 @@ TEST(join_crossing_interiors_is_an_X_join)
 		return;
 	CHECK(joins[0].joinType == core::WallJoinType::X);
 	// **十字は縦横 2 本の壁のまま**にして交差結合（X）で繋ぐ。分割して T 結合 2 つに
-	// 置き換えるのは別処理で、モデルとしても誤り（ROADMAP.md M10）。
+	// 置き換えるのは別処理で、モデルとしても誤り（docs/DEV-NOTES.md M10）。
 	// VW の X 結合は **a を交点で 2 本に分割し、b（load bearing wall）を丸ごと残す**ので、
 	// **バックボーン（天端が最も高い＝同点なら添字の小さい通し壁）を b にする**。
 	CHECK_EQ(joins[0].a, std::size_t{1});
 	CHECK_EQ(joins[0].b, std::size_t{0});
-	// ピック点は種別に関係なく「残す側」へ寄せた点（Python 版 `_kept_side_pick` と同じ。
-	// X 結合では VW が壁を詰めないので寄せは無害）。交点そのものは渡さない。
+	// ピック点は種別に関係なく「残す側」へ寄せた点（X 結合では VW が壁を詰めないので寄せは無
+	// 害）。交点そのものは渡さない。
 	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickA, joins[0].point));
 	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickB, joins[0].point));
 	// 寄せる先は交点から遠い端点の方向で、それぞれの壁芯上に乗る
@@ -1368,7 +1368,7 @@ TEST(joins_reference_valid_walls_in_the_real_fixtures)
 }
 
 // ---------------------------------------------------------------------------
-// 端部のキャップ（applyWallCaps）— ROADMAP.md M10（ローカル確認で判明した項目）
+// 端部のキャップ（applyWallCaps）— docs/DEV-NOTES.md M10（ローカル確認で判明した項目）
 // ---------------------------------------------------------------------------
 
 TEST(caps_close_free_ends_and_open_joined_ends)
@@ -1401,8 +1401,7 @@ TEST(caps_open_the_stem_end_of_a_tee)
 
 TEST(caps_stay_closed_against_a_wall_of_a_different_top)
 {
-	// 天端の違う立上りとだけ取り合う端は閉じたまま（低いほうの端部が見える＝Python 版の
-	// capped=true と同じ判断）。
+	// 天端の違う立上りとだけ取り合う端は閉じたまま（低いほうの端部が見える＝ capped）。
 	std::vector<WallCommand> walls = {
 		wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 120.0, -100.0, -190.0),
 		wall(Vec2{3000.0, 0.0}, Vec2{3000.0, 3000.0}, 120.0, -100.0, -500.0)};
@@ -1439,8 +1438,8 @@ TEST(caps_default_to_closed_without_joins)
 }
 
 // ---------------------------------------------------------------------------
-// 地中梁（mergeGroundBeamModifiers / modifierFootprint / attachGroundBeamModifiers）
-// — ROADMAP.md M10
+// 地中梁（mergeGroundBeamModifiers / modifierFootprint / attachGroundBeamModifiers）—
+// docs/DEV-NOTES.md M10
 // ---------------------------------------------------------------------------
 
 TEST(merge_ground_beams_collinear_touching_into_one)

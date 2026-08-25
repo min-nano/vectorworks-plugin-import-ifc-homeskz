@@ -1,11 +1,11 @@
 //
 //	ParseGridTests.cpp
 //
-//	通り芯解析（src/parse/Grid）の単体テスト。VectorWorks SDK を一切 include せず、
-//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
-//	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_grid.py の意図を写す。
+//	通り芯解析（src/parse/Grid）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK
+//	のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:core/ parse/ は無 SDK
+//	で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
-//	検証項目（ROADMAP.md M1）: ポリライン端点の取得・重複線除去・bbox 中心での
+//	検証項目（docs/DEV-NOTES.md M1）: ポリライン端点の取得・重複線除去・bbox 中心での
 //	センタリング・X/Y 通り判定（名前優先／幾何フォールバック）・クラス付与・決定性。
 //	実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -30,7 +30,7 @@ using HomeskzIfcTests::near;
 
 namespace
 {
-	// Python 版 ifc/grid.py の CLASS_X / CLASS_Y と一致するクラス名。
+	// X 通り／Y 通りのクラス名（parse/Grid の定義と一致させる）。
 	const std::string kClassX = "01作図-01線-01基準線-01通り芯-X通り";
 	const std::string kClassY = "01作図-01線-01基準線-01通り芯-Y通り";
 
@@ -210,7 +210,7 @@ TEST(skips_axes_with_bad_points)
 
 TEST(skips_non_polyline_curve)
 {
-	// AxisCurve がポリラインでない軸はスキップする（Python の is_a('IfcPolyline') 判定）。
+	// AxisCurve がポリラインでない軸はスキップする（型名で判定する）。
 	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
 										"#11=IFCCARTESIANPOINT((0.,1000.,0.));\n"
 										"#20=IFCPOLYLINE((#10,#11));\n"
@@ -230,8 +230,8 @@ TEST(skips_non_polyline_curve)
 
 TEST(emits_one_line_per_polyline_segment)
 {
-	// 3 点のポリラインは連続する点対ごとに 2 本の線分になる（Python resolve_lines の
-	// `for i in range(len(pts) - 1)`）。(0,0)-(0,1000)-(0,2000) は同名 X1 の 2 区間。
+	// 3 点のポリラインは連続する点対ごとに 2 本の線分になる。(0,0)-(0,1000)-(0,2000) は同名
+	// X1 の 2 区間。
 	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
 										"#11=IFCCARTESIANPOINT((0.,1000.,0.));\n"
 										"#12=IFCCARTESIANPOINT((0.,2000.,0.));\n"

@@ -1,10 +1,9 @@
 //
 //	draw/Section.cpp
 //
-//	軸組図（断面ビューポート）描画の実装。Python 版 vw/section.py の execute_sections /
-//	_place_section_line / _arrange_viewports に対応する。【SDK 依存】PluginPrefix.h
-//	（VectorWorks SDK）を include するため、この翻訳単位はプラグインビルド（SDK あり）でのみ
-//	コンパイルされ、無 SDK の core/parse ライブラリには入れない。
+//	軸組図（断面ビューポート）描画の実装。【SDK 依存】PluginPrefix.h（VectorWorks SDK）を
+//	include するため、この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK
+//	の core/parse ライブラリには入れない。
 //
 //	使用する SDK API（Vectorworks 2026 SDK。ci-debug の sdk-grep / shell で確認済み）:
 //	  * gSDK->CreateSectionViewport(pt1, pt2, pt3, depth, startHeight, endHeight, layer)
@@ -86,8 +85,7 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// シートレイヤ上でビューポートを並べるレイアウト（用紙上・mm。Python 版 vw/section.py の
-		// _ARRANGE_ORIGIN / _ARRANGE_COLUMNS / _ARRANGE_GAP と同じ値）。左上を基準に 1 行
+		// シートレイヤ上でビューポートを並べるレイアウト（用紙上・ mm）。左上を基準に 1 行
 		// kArrangeColumns 枚ずつ、各ビューポートの実寸に余白を足して詰める。
 		constexpr double kArrangeOriginX = 0.0;
 		constexpr double kArrangeOriginY = 0.0;
@@ -104,7 +102,7 @@ namespace HomeskzIfcImport::draw
 		// 同じ 0 を高さへ渡すと〈高さの範囲: 有限・始点 0・終点 0〉になり、断面から建物が
 		// 消えてしまうことがローカル確認で分かった。**高さ・長さを「無限」にする手段は
 		// SDK に無い**（ファイル冒頭「範囲を『無限』にはできない」）ので、実寸＋余白の
-		// 有限範囲で建物全体を収める（ROADMAP.md M14）。
+		// 有限範囲で建物全体を収める（docs/DEV-NOTES.md M14）。
 		//
 		// 長さの範囲も同じ理由で〈断面線の長さ〉のままになる。こちらは**指示線を通り芯の
 		// bbox より十分外まで延ばす**ことで実質無制限にしている（parse/Section の
@@ -191,9 +189,9 @@ namespace HomeskzIfcImport::draw
 			return rendered;
 		}
 
-		// できたビューポートをシートレイヤ上で重ならないように格子状へ並べる（Python 版
-		// _arrange_viewports）。**実寸は描いてみるまで分からない**ので、GetObjectBounds で
-		// 測ってから左上を合わせる。測れないものはその場に残す（並びが崩れるだけで図は残る）。
+		// できたビューポートをシートレイヤ上で重ならないように格子状へ並べる。**実寸は描いて
+		// みるまで分からない**ので、GetObjectBounds で測ってから左上を合わせる。
+		// 測れないものはその場に残す（並びが崩れるだけで図は残る）。
 		void ArrangeViewports(const std::vector<MCObjectHandle>& viewports)
 		{
 			double cursorX = kArrangeOriginX;

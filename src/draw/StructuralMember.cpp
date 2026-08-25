@@ -16,11 +16,10 @@
 //	StructuralMemberResult::sectionOk 経由で呼び出し側の診断へ流す。
 //
 //	【スタイルは関連付けだけでは効かない】ISDK の SetPluginObjectStyle はスタイルの関連付け
-//	（パラメータ）までで、スタイルが決める描画属性（コンポーネントのクラス／マテリアル）は
-//	オブジェクトへプッシュされない（Python 版 #56 と同じ）。全配置後に UpdateStyledObjects を
-//	1 回呼ぶのは呼び出し側の責務（横架材・柱でスタイルが別なので、ここでは行わない）。
-//	個別フィールドはスタイル関連付けの**後**に設定するので、スタイル既定のパラメータは
-//	本命令の実測値で上書きされる。
+//	（パラメータ）までで、スタイルが決める描画属性（コンポーネントのクラス／マテリアル）
+//	はオブジェクトへプッシュされない。全配置後に UpdateStyledObjects を 1 回呼ぶのは呼び出し側
+//	の責務（横架材・柱でスタイルが別なので、ここでは行わない）。個別フィールドはスタイル関連付
+//	けの**後**に設定するので、スタイル既定のパラメータは本命令の実測値で上書きされる。
 //
 
 #include "PluginPrefix.h"
@@ -34,29 +33,27 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 構造材ツールの PIO 名（VW 実機の登録名に一致させる）。柱も横架材もこの 1 つの
-		// ツールで描く（柱・間柱ツールはスクリプト操作に対して不安定なため、Python 版が
-		// 標準の構造材ツールへ置き換えた判断をそのまま引き継ぐ。parse/Column.h）。
+		// 構造材ツールの PIO 名（VW 実機の登録名に一致させる）。柱も横架材もこの
+		// 1 つのツールで描く（柱・間柱ツールはスクリプトからの操作に対して不安定なので、
+		// 柱も標準の構造材ツールで描く。parse/Column.h）。
 		const TXString kStructuralMember(kStructuralMemberPlugin);
 
-		// SetObjectStoryBound に渡すバウンド ID。構造材は始端＝0・終端＝1 の 2 つを持つ
-		// （Python 版 vw/member.py と同じ規約。柱では下端＝0・上端＝1 に対応する）。
-		// 型は SDK の TObjectBoundID（= Sint32）だが、その別名は SDK の名前空間の中にあるため
-		// 実体の Sint32 で持つ（暗黙変換で同じ）。
+		// SetObjectStoryBound に渡すバウンド ID。構造材は始端＝0・終端＝1 の 2 つを持つ（柱で
+		// は下端＝0・上端＝1 に対応する）。型は SDK の TObjectBoundID（= Sint32）だが、
+		// その別名は SDK の名前空間の中にあるため実体の Sint32 で持つ（暗黙変換で同じ）。
 		constexpr Sint32 kStartBoundID = 0;
 		constexpr Sint32 kEndBoundID = 1;
 
-		// 鉛直パス（NURBS 曲線）の次数。直線 1 本なので 1。byCtrlPts=false ＝ 通過点で
-		// 定義する（Python 版 CreateNurbsCurve と同じ引数）。
+		// 鉛直パス（NURBS 曲線）の次数。直線 1 本なので 1。byCtrlPts=false ＝ 通過点で定義す
+		// る。
 		constexpr short kPathDegree = 1;
 		// 鉛直パスに必要な頂点数（下端・上端）。読み戻して診断に使う。
 		constexpr Sint32 kPathPointCount = 2;
 
-		// 構造材ツールのフィールド名（Python 版 vw/member.py・vw/column.py の SetRField と
-		// 同じ universal 名）。**名前が 1 つ違うだけで setter は黙って無視される**（M6 の
-		// 垂木で実証済み。draw/Rafter.cpp 冒頭）ので、寸法は読み戻して確かめる。
-		// 記号 PIO も読む 3 つ（kFieldStructuralUse / kFieldMajorBreadth / kFieldMajorDepth）と
-		// そのローカライズ名は draw/StructuralMember.h にある。ここは書き手だけが使う残り。
+		// 構造材ツールのフィールド名。**名前が 1 つ違うだけで setter は黙って無視される**（M6
+		// の垂木で実証済み。draw/Rafter.cpp 冒頭）ので、寸法は読み戻して確かめる。記号 PIO
+		// も読む 3 つ（kFieldStructuralUse / kFieldMajorBreadth / kFieldMajorDepth）
+		// とそのローカライズ名は draw/StructuralMember.h にある。ここは書き手だけが使う残り。
 		constexpr const char* kFieldMemberID = "MemberID";			   // 構造材 ID
 		constexpr const char* kFieldProfileShape = "ProfileShape";	   // 断面形状
 		constexpr const char* kFieldB = "B";						   // 幅（矩形断面）
@@ -70,10 +67,9 @@ namespace HomeskzIfcImport::draw
 		// universal 名で引けなかったときに使う OIP のローカライズ名（ResolveParamName）。
 		constexpr const char* kLocalizedProfileShape = "断面形状";
 
-		// フィールドに渡す値（Python 版と同じ。ポップアップはキーで保持されるため数値文字列）。
+		// フィールドに渡す値（ポップアップはキーで保持されるため数値文字列）。
 		constexpr const char* kProfileShapeRectangle = "Rectangle";
-		// 部材種別は横架材（梁）・柱とも "2"（Python 版 vw/member.py・vw/column.py で同値。
-		// 種別の違いは構造用途＝StructuralUse の方に出る）。
+		// 部材種別は横架材（梁）・柱とも "2"（種別の違いは構造用途＝StructuralUse の方に出る）。
 		constexpr const char* kMemberTypeStructural = "2";
 		constexpr const char* kAxisAlignTopCentre = "1"; // 天端中央（3×3 グリッドの上段中央）
 		constexpr const char* kAxisAlignCentre = "4";	 // 中央（同 0 始まり中央）

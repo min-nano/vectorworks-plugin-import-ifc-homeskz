@@ -1,14 +1,14 @@
 //
 //	ParseRafterTests.cpp
 //
-//	垂木解析（src/parse/Rafter）の単体テスト。VectorWorks SDK を一切 include せず、
-//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
-//	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_rafter.py のケースを
-//	1 対 1 で写している。桁幅参照（girderWidthAt）は M7 で横架材が入って実寸を引けるように
-//	なったので、実寸の選択・垂木と平行な材の除外・見つからないときの既定値フォールバックを
-//	それぞれ検証する（ROADMAP.md M6「依存メモ」/ M7）。
+//	垂木解析（src/parse/Rafter）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK
+//	のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:core/ parse/ は無 SDK
+//	で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
+//	桁幅参照（girderWidthAt）は M7 で横架材が入って実寸を引けるようになったので、実寸の選択・
+//	垂木と平行な材の除外・見つからないときの既定値フォールバックをそれぞれ検証する
+//	（docs/DEV-NOTES.md M6「依存メモ」/ M7）。
 //
-//	検証項目（ROADMAP.md M6）: 屋根面の掃引（両端は半幅内側・内部 455 以下・中間 455 ちょうど・
+//	検証項目（docs/DEV-NOTES.md M6）: 屋根面の掃引（両端は半幅内側・内部 455 以下・中間 455 ちょうど・
 //	端数は両端へ等分）・走査線クリップ（非凸面の分割）・勾配（start=軒側の支持点／end=棟側）・
 //	支持点（屋根面と横架材天端 Z の交点）・軒の出と差し込み・仕様ラベル・断面とクラス・
 //	センタリング・ストーリ Elevation の加算・レイヤ振り分け・決定性。実フィクスチャのパスは
@@ -170,8 +170,8 @@ TEST(sweep_degenerate_width_single_center)
 		CHECK(near(pos.front(), 1015.0));
 }
 
-// ---------------------------------------------------------------------------
-// 1 つの屋根面からの垂木（raftersForPlane）
+// --------------------------------------------------------------------------
+// - 1 つの屋根面からの垂木（raftersForPlane）
 // ---------------------------------------------------------------------------
 
 TEST(rafters_at_both_ends_interior_455)
@@ -439,15 +439,14 @@ TEST(no_overhang_when_beam_top_at_or_below_eave_tip)
 
 TEST(embedment_defaults_to_half_default_girder)
 {
-	// 受ける軒桁（横架材命令）を渡さなければ差し込みは既定桁幅の半分（M6 の挙動と同じ値。
-	// Python 版も members が空のときはこの値になる）。
+	// 受ける軒桁（横架材命令）を渡さなければ差し込みは既定桁幅の半分（M6 の挙動と同じ値）。
 	CHECK(near(kDefaultGirderWidth, 105.0));
 	for (const RafterCommand& rafter : shedRaftersWithBeamTop(1500.0))
 		CHECK(near(rafter.embedment, kDefaultGirderWidth / 2.0));
 }
 
-// ---------------------------------------------------------------------------
-// girderWidthAt: 支持点の真下の軒桁から桁幅を引く（M7 で横架材が入って有効になった）
+// --------------------------------------------------------------------------
+// - girderWidthAt: 支持点の真下の軒桁から桁幅を引く（M7 で横架材が入って有効になった）
 // ---------------------------------------------------------------------------
 
 TEST(girder_width_uses_nearest_perpendicular_member)

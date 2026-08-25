@@ -1,8 +1,8 @@
 //
 //	parse/Rafter.cpp
 //
-//	垂木解析の実装。Python 版 ifc/rafter.py の build_rafter_commands ほかに対応。
-//	【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	垂木解析の実装。【SDK 非依存】ここでは VectorWorks SDK を include しない（core/parse
+//	のみ依存）。
 //
 
 #include "parse/Rafter.h"
@@ -27,12 +27,11 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// クリップした垂木の平面投影長がこれ未満（隅木際の極小片等）なら配置しない（mm。
-		// Python 版 _MIN_RAFTER_LENGTH）。
+		// クリップした垂木の平面投影長がこれ未満（隅木際の極小片等）なら配置しない（mm）。
 		constexpr double kMinRafterLength = 100.0;
 
-		// 掃引線と外形辺の交点判定の許容（mm。Python 版 _EDGE_TOL）。両端の掃引線を半幅
-		// 内側へ寄せた実効幅がこの 2 倍以下なら、区間が取れない極小面として中央 1 本にする。
+		// 掃引線と外形辺の交点判定の許容（mm）。両端の掃引線を半幅内側へ寄せた実効幅がこの
+		// 2 倍以下なら、区間が取れない極小面として中央 1 本にする。
 		constexpr double kEdgeTol = 1.0;
 
 		// 走査線と外形辺の交点 1 つ（勾配方向 d の座標＋平面座標）。d 昇順に並べると
@@ -49,7 +48,7 @@ namespace HomeskzIfcImport::parse
 	{
 		if (element.type != "IFCSLAB")
 			return false;
-		// Python 版の element.is_a('IfcSlab') and Name.startswith('屋根版') と同じ判定。
+		// IfcSlab で Name が "屋根版" で始まるものを屋根版とみなす。
 		const std::string name = entityName(element);
 		const std::string prefix(kRoofSlabPrefix);
 		return name.size() >= prefix.size() && name.compare(0, prefix.size(), prefix) == 0;
@@ -74,8 +73,8 @@ namespace HomeskzIfcImport::parse
 
 	std::string rafterLabel()
 	{
-		// 断面・間隔が決め打ちなので全垂木で共通のラベル（"45×45@455"）。整数へ丸めて
-		// 組み立てるのは Python 版 _rafters_for_plane と同じ（表示用のラベルなので端数不要）。
+		// 断面・間隔が決め打ちなので全垂木で共通のラベル（"45×45@455"）。整数へ丸めて組み立て
+		// る（表示用のラベルなので端数は要らない）。
 		const long long w = std::llround(kDefaultRafterWidth);
 		const long long h = std::llround(kDefaultRafterHeight);
 		const long long interval = std::llround(kRafterInterval);
@@ -93,8 +92,7 @@ namespace HomeskzIfcImport::parse
 			return {(eMin + eMax) / 2.0};
 		}
 
-		// interval 以下に割る最小の区間数（1e-9 は「ちょうど整数倍」を切り上げない保険。
-		// Python 版と同値）。
+		// interval 以下に割る最小の区間数（1e-9 は「ちょうど整数倍」を切り上げない保険）。
 		const auto n = static_cast<long long>(std::ceil((width / interval) - 1e-9));
 		std::vector<double> positions;
 		if (n <= 1)
@@ -209,9 +207,7 @@ namespace HomeskzIfcImport::parse
 			if (hits.size() < 2)
 				continue;
 
-			// d 昇順（同値は x → y で安定）に並べ、[偶, 奇] の対が面内の区間になる
-			// （Python 版が交点タプル (d, x, y) をそのままソートするのと同じ順序で、
-			// 交点の検出順に依存しない決定的な並びになる）。
+			// d 昇順（同値は x → y で安定）に並べ、[偶, 奇] の対が面内の区間になる。
 			std::ranges::sort(hits,
 							  [](const Hit& a, const Hit& b)
 							  {
@@ -242,7 +238,7 @@ namespace HomeskzIfcImport::parse
 				// 寄り切って部材が残らない（隅棟際の三角形の先端。下記）——これらは受ける
 				// 軒桁が無いので、支持点を採らず**軒先そのものを挿入点＝高さの基準**にし、
 				// 差し込み・軒の出を 0 にして**長さと高さを実形状に合わせる**
-				// （ROADMAP.md M6「ローカル確認」の指示）。描画側は start の XY と elevation を
+				// （docs/DEV-NOTES.md M6「ローカル確認」の指示）。描画側は start の XY と elevation を
 				// 挿入点に、start→end の水平投影長をスパンにするので、これで OIP の
 				// 長さ・高さが実形状どおりになる（draw/Rafter.cpp）。
 				//
@@ -324,7 +320,7 @@ namespace HomeskzIfcImport::parse
 			// 支持点が乗る横架材天端の絶対 Z（最上階は軒高＝オフセット 0）。
 			const double beamTopZ =
 				story.isTop ? story.elevation : story.elevation + story.beamOffset;
-			// 桁幅の参照先は同じ階の横架材だけ（レイヤ接頭辞 "{n}-" で絞る。Python 版と同じ）。
+			// 桁幅の参照先は同じ階の横架材だけ（レイヤ接頭辞 "{n}-" で絞る）。
 			const std::string layerPrefix = storyLayerPrefix(i, story.isTop) + "-";
 			std::vector<core::MemberCommand> storyMembers;
 			for (const core::MemberCommand& member : members)

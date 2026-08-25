@@ -1,10 +1,10 @@
 //
 //	ParseStructuralClassTests.cpp
 //
-//	構造クラス判定（src/parse/StructuralClass）の単体テスト。VectorWorks SDK を一切
-//	include せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md
-//	「テスト方針」: core/ parse/ は無 SDK で単体テスト）。Python 版
-//	test_ifc_structural_class.py の意図を 1 対 1 で写す（ROADMAP.md M4）。
+//	構造クラス判定（src/parse/StructuralClass）の単体テスト。VectorWorks SDK を一切 include
+//	せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」: core/
+//	parse/ は無 SDK で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わ
+//	せることはしない）（docs/DEV-NOTES.md M4）。
 //
 //	検証項目: 種別トークン抽出（"木梁:{種別}:{連番}" は中央・2 要素名は接頭辞・空/未設定）・
 //	種別→クラスの直接対応（床小梁/床大梁/甲乙梁→床梁、登り梁、未知は無し）・横架材クラス
@@ -36,7 +36,7 @@ using HomeskzIfcImport::parse::memberTypeOfName;
 using HomeskzIfcImport::parse::resolveColumnClass;
 using HomeskzIfcImport::parse::resolveMemberClass;
 
-// --- memberTypeOfName（Python 版 TestMemberTypeOfName） --------------------------
+// --- memberTypeOfName --------------------------
 
 // "木梁:{種別}:{連番}" は中央の種別トークンを使う。
 TEST(member_type_wood_beam_uses_middle_token)
@@ -53,13 +53,13 @@ TEST(member_type_two_part_name_uses_prefix)
 	CHECK_EQ(memberTypeOfName("筋かい:1FL_1"), std::string("筋かい"));
 }
 
-// 空文字（未設定）は空文字を返す（Python の None/'' 相当。C++ は空文字で表す）。
+// 空文字（未設定）は空文字を返す（「種別が無い」は空文字で表す）。
 TEST(member_type_handles_empty)
 {
 	CHECK_EQ(memberTypeOfName(""), std::string(""));
 }
 
-// --- memberClassFromName（Python 版 TestMemberClassFromName） ----------------------
+// --- memberClassFromName ----------------------
 
 // 既知種別は直接クラスへ対応する（_MEMBER_CLASS_BY_TYPE の全対応を網羅する。床小梁・
 // 床大梁・甲乙梁はまとめて床梁、登り梁は小屋組の登り梁クラス）。
@@ -88,7 +88,7 @@ TEST(member_class_unknown_types_return_nullopt)
 	CHECK(!memberClassFromName("").has_value());
 }
 
-// --- resolveMemberClass（Python 版 TestResolveMemberClass） ------------------------
+// --- resolveMemberClass ------------------------
 
 // 名前で判別できれば階・高さに依らずその種別クラスにする。
 TEST(resolve_member_name_is_trusted_over_position)
@@ -124,7 +124,7 @@ TEST(resolve_member_fallback_top_story_above_eaves_is_moya)
 			 std::string(CLASS_MOYA));
 }
 
-// --- resolveColumnClass（Python 版 TestResolveColumnClass） ------------------------
+// --- resolveColumnClass ------------------------
 
 // ObjectType=STANDCOLUMN は小屋束。
 TEST(resolve_column_standcolumn_object_type_is_koyazuka)

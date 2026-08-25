@@ -31,22 +31,19 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// グラフィック凡例の内部プラグイン名（Python 版 vw/sheet.py _GRAPHIC_LEGEND_PLUGIN）。
-		// **表示名「グラフィック凡例」とは別物**で、登録名はスペース無しの "GraphicLegend"
-		// （Python 版が VW 上で実オブジェクトのパラメトリックレコードから確認済み）。
+		// グラフィック凡例の内部プラグイン名。
+		// **表示名「グラフィック凡例」とは別物**で、登録名はスペース無しの "GraphicLegend"。
 		constexpr const char* kGraphicLegendPlugin = "GraphicLegend";
 
-		// 箱幅パラメータ（Python 版 _LEGEND_WIDTH_FIELD / _LEGEND_BOX_WIDTH）。凡例は
-		// 矩形モードの PIO なので、点で生成すると幅 0 のまま潰れる（draw/Legend.h）。
-		// 用紙上（ドキュメント単位 mm）の適当な幅を与えて可視化し、**ローカルの VW で
-		// 最終調整する**。高さは行の内容から自動で決まるので与えない。
+		// 箱幅パラメータ。凡例は矩形モードの PIO なので、点で生成すると幅 0 のまま潰れる
+		// （draw/Legend.h）。用紙上（ドキュメント単位 mm）の適当な幅を与えて可視化し、
+		// **ローカルの VW で最終調整する**。高さは行の内容から自動で決まるので与えない。
 		constexpr const char* kFieldBoxWidth = "BoxWidth";
 		constexpr double kBoxWidth = 150.0;
 
-		// 見た目（Python 版 _LEGEND_LINE_WEIGHT_MILS / _LEGEND_FILL_NONE）。凡例 PIO が
-		// 内部で描く枠線・セルは**クラスでは制御できない**ので、オブジェクトの属性として
-		// 直接与える（draw/Legend.h）。線の太さの単位はミル（1/1000 インチ）で、
-		// 5 ミル = 0.127mm を VW は 0.13mm と表示する。塗りパターン 0 = なし。
+		// 見た目。凡例 PIO が内部で描く枠線・セルは**クラスでは制御できない**ので、
+		// オブジェクトの属性として直接与える（draw/Legend.h）。線の太さの単位はミル（1/1000
+		// インチ）で、5 ミル = 0.127mm を VW は 0.13mm と表示する。塗りパターン 0 = なし。
 		constexpr short kLineWeightMils = 5;
 		constexpr InternalIndex kFillNone = 0;
 	} // namespace
@@ -110,9 +107,8 @@ namespace HomeskzIfcImport::draw
 
 		gSDK->ResetObject(object);
 
-		// 見た目はクラスでは効かないのでオブジェクトの属性として直接与える。**ResetObject の
-		// 後・UpdateStyledObjects より前**に置くと by-instance の属性として保たれる
-		// （Python 版 draw_legend と同じ順）。
+		// 見た目はクラスでは効かないのでオブジェクトの属性として直接与える。**ResetObject
+		// の後・ UpdateStyledObjects より前**に置くと by-instance の属性として保たれる。
 		gSDK->SetLineWeight(object, kLineWeightMils);
 		gSDK->SetFillPat(object, kFillNone);
 

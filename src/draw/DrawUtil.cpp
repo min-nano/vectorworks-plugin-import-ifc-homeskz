@@ -40,7 +40,7 @@ namespace HomeskzIfcImport::draw
 		constexpr short kSheetLayerType = 2;
 
 		// SetViewportLayerVisibility の表示種別。**2（グレー）は使わない**——対象外のレイヤを
-		// グレーにすると図に薄く残る（Python 版 vw/sheet.py の注記と同じ）。
+		// グレーにすると図に薄く残る。
 		constexpr short kLayerVisible = 0;
 		constexpr short kLayerHidden = 1;
 
@@ -86,11 +86,10 @@ namespace HomeskzIfcImport::draw
 		// 図面のクラスをすべて集める（昇順・重複なしの vector で返す）。
 		//
 		// **ビューポートはクラスの表示を明示しないと非表示のまま**なので（M13 のローカル確認
-		// で判明。レイヤは命令どおりなのに図形が 1 つも出なかった）、映したいクラスを 1 つずつ
-		// 表示へ戻す必要がある。ここは Python 版と同じく**ドキュメントの全クラスを表示**に
-		// する——ビューポートごとに映る/映らないをクラスで絞る要件は無く（Python 版の
-		// hidden_classes はどの伏図でも使われていない）、絞らないなら「どのクラスが要るか」を
-		// 推し量る必要も無い。
+		// で判明。レイヤは命令どおりなのに図形が 1 つも出なかった）、映したいクラスを
+		// 1 つずつ表示へ戻す必要がある。ここでは**ドキュメントの全クラスを表示**にする——
+		// ビューポートごとに映る/映らないをクラスで絞る要件は無く、絞らないなら「どのクラスが
+		// 要るか」を推し量る必要も無い。
 		//
 		// 列挙は VWClass::ForEachClass（ISDK::ForEachClass の VWFC 版）。**受け取った VWClass は
 		// そのまま InternalIndex へ変換できる**（VWClass::operator InternalIndex）。
@@ -135,9 +134,8 @@ namespace HomeskzIfcImport::draw
 			return applied;
 		}
 
-		// 表示するデザインレイヤの縮尺を返す（Python 版 configure_viewport_scale）。図が映す
-		// レイヤの縮尺は揃っているので、最初に取れたものを採る。取れなければ 0（＝ビューポートの
-		// 既定縮尺のままにする）。
+		// 表示するデザインレイヤの縮尺を返す。図が映すレイヤの縮尺は揃っているので、
+		// 最初に取れたものを採る。取れなければ 0（＝ビューポートの既定縮尺のままにする）。
 		double LayerScaleFor(const core::ViewportCommand& command)
 		{
 			for (const std::string& name : command.layers)
@@ -375,7 +373,7 @@ namespace HomeskzIfcImport::draw
 		{
 			// 何も登録できていない＝「取り消し」しても取り込みは戻らない。それでも
 			// イベントを残すと、SDK 内部が途中で開いた記録（断面ビューポート等）が
-			// 取り消しの対象になり、**図面が壊れる**（実機で確認。ROADMAP.md M15）。
+			// 取り消しの対象になり、**図面が壊れる**（実機で確認。docs/DEV-NOTES.md M15）。
 			// テーブルから取り除いておく——取り込み前のユーザー自身の履歴は残る。
 			gSDK->EndAndRemoveUndoEvent();
 			return;
@@ -455,14 +453,13 @@ namespace HomeskzIfcImport::draw
 
 		// ビューポートを 2D/平面（Top/Plan）で**正しく描かせる**。作り直せたら true。
 		//
-		// 【なぜ「OFF → 更新 → ON」なのか】ただ Project 2D を ON にするだけでは足りない
-		// ——生成直後のビューポートはパレット上こそ「2D/平面」だが、描画キャッシュは 3D の
-		// 「上」ビューのままで、**更新ボタンを押しても作り直されない**（実機の症状）。
+		// 【なぜ「OFF → 更新 → ON」なのか】ただ Project 2D を ON にするだけでは足りない——生成
+		// 直後のビューポートはパレット上こそ「2D/平面」だが、描画キャッシュは 3D の「上」
+		// ビューのままで、**更新ボタンを押しても作り直されない**（実機の症状）。
 		// 手動での唯一の対処が「いったん『上』を選んでから『2D/平面』へ戻す」ことなので、
-		// その操作をそのままなぞる: 向きを「上」にし、Project 2D を OFF にして**更新を
-		// 挟み**（＝3D の「上」でキャッシュを作り直させ）、その上で ON へ戻す。最後の更新は
-		// 呼び出し元（ConfigureViewport の末尾）が行い、そこで 2D/平面のキャッシュができる。
-		// Python 版 vw/sheet.py の force_plan_view と同じ手順。
+		// その操作をそのままなぞる: 向きを「上」にし、Project 2D を OFF にして**更新を挟み**
+		// （＝ 3D の「上」でキャッシュを作り直させ）、その上で ON へ戻す。最後の更新は呼び出し
+		// 元（ConfigureViewport の末尾）が行い、そこで 2D/平面のキャッシュができる。
 		//
 		// **入ったかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも黙って
 		// 何もしないので、戻り値の無いまま「設定したつもり」で終わらせない。
