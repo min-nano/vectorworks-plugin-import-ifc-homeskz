@@ -276,6 +276,50 @@ def _custom_group_lines(handle):
 	return lines
 
 
+# 補助オブジェクトの連鎖の先頭（`ovFirstAuxObject`。SDK ヘッダに
+# "MCObjectHandle, read/write : used to manipulate the Aux list - Public for VS" とある）。
+OV_FIRST_AUX_OBJECT = 703
+AUX_MAX = 50
+
+
+def _aux_lines(handle):
+	"""補助オブジェクトの連鎖を頭からたどる。**「ビューポートでフィルタ」の保存先はここ**
+	（フィルタ済みの凡例だけ、先頭がデータオブジェクト `type=76` になっていた）。"""
+	lines = []
+	aux = _safe("GetObjectVariableHandle", handle, OV_FIRST_AUX_OBJECT)
+	count = 0
+	while aux and not _bad(aux) and count < AUX_MAX:
+		count += 1
+		lines.append("[aux %d] %s record=%s" % (count, _describe(aux), _record_name(aux)))
+		histogram = _child_histogram(aux)
+		if histogram:
+			lines.append("         children: %s" % histogram)
+		# 付いているレコードは**全欄**出す（データオブジェクトが UUID を抱えていないか）。
+		attached = _safe("NumRecords", aux)
+		if isinstance(attached, int):
+			for index in range(1, attached + 1):
+				record = _safe("GetRecord", aux, index)
+				if not record or _bad(record):
+					continue
+				name = _safe("GetName", record)
+				fields = _safe("NumFields", record)
+				lines.append("         record[%d] %s (fields=%s)" % (index, name, fields))
+				if isinstance(fields, int):
+					for field_index in range(1, fields + 1):
+						field = _safe("GetFldName", record, field_index)
+						lines.append("           %-32s = %s"
+									 % (field, _safe("GetRField", aux, name, field)))
+		nested = _safe("GetObjectVariableHandle", aux, OV_FIRST_AUX_OBJECT)
+		if nested and not _bad(nested):
+			lines.append("         (this aux has its own aux list: %s)" % _describe(nested))
+		aux = _safe("NextObj", aux)
+	if count == 0:
+		lines.append("(補助オブジェクトなし)")
+	elif count >= AUX_MAX:
+		lines.append("… (%d 個で打ち切り)" % AUX_MAX)
+	return lines
+
+
 def _dump_comparison(out, selected):
 	"""**フィルタ済みの凡例と、していない凡例**を同じ形で並べる。1 回の実行で diff できる。"""
 	others = []
@@ -301,6 +345,8 @@ def _dump_comparison(out, selected):
 			_safe("GetRField", handle, "GraphicLegend", "BoxWidth"),
 		))
 		out.append("[%s] children: %s" % (label, _child_histogram(handle)))
+		for line in _aux_lines(handle):
+			out.append("[%s] %s" % (label, line))
 		for line in _custom_group_lines(handle):
 			out.append("[%s] %s" % (label, line))
 		if DUMP_OBJECT_VARIABLES:

@@ -385,14 +385,23 @@ ISDK にシンボルを配置する呼び出しは無く（在るのは `CreateS
   グループ（`type=11`）＋ `GraphicLegendFrame`（＋画像は `GraphicLegendImage` か
   **画像描画用のビューポート `type=122`**）で、**UUID を値に持つレコード欄は 1 つも無い**。
   ——ここまでで per-instance の設定を置く「普通の場所」は出尽くした。
-- **残るのは補助オブジェクト**（`FirstAuxObject` / `NextAuxObject`）。**VectorScript からは
-  触れない**ので、確かめるには dev ビルドの一時診断が要る（`ModifySlab` の調査と同じ道）。
-  その前に、フィルタ済みの凡例と未フィルタの凡例を**オブジェクト変数の総なめと中身の型
-  ヒストグラムで機械的に見比べる**——それが
-  [`scripts/vw-dump-pio-fields.py`](../scripts/vw-dump-pio-fields.py) の compare 節
-  （1 枚だけ手でフィルタしておけば 1 回の実行で diff できる）。
-  **もし補助オブジェクトだったときは `ModifySlab` と同じ壁**（`type=121` のノードは SDK から
-  作れない・タグの中身も分からない）に当たる見込みで、そのときは打ち切りの判断になる。
+- **保存先は補助オブジェクト（aux list）だった。** フィルタ済みの凡例と未フィルタの凡例を
+  オブジェクト変数の総なめで見比べると、**違うのは `ovFirstAuxObject`（703）だけ**——
+  フィルタを掛けた方は補助オブジェクトの先頭が**データオブジェクト（`type=76`）**で、
+  掛けていない方は選択群のグループ（`type=11`）だった。703 のヘッダの但し書きは
+  "MCObjectHandle, read/write : used to manipulate the Aux list - **Public for VS**"。
+  * したがって**VectorScript でも連鎖はたどれる**（「補助オブジェクトは VS から触れない」は
+    誤り）。ただし**データオブジェクトの中身（バイト列）は VS からは読めない**ので、
+    タグと中身を見るには dev ビルドの一時診断が要る。
+  * SDK 側の道具は揃っている: `FindDataObject(owner, tag)`（**タグ `'****'` で任意の
+    データオブジェクトに当たる**）・`NextDataObject`・`NewDataObject(attachTo, tag, size)`・
+    `AttachAuxObject`。**`ModifySlab` のときの `type=121` と違い、データオブジェクトは SDK で
+    作れる型**（"Graphsoft reserves all tags consisting entirely of lowercase letters"）なので、
+    タグと中身の作り方さえ分かれば再現できる見込みがある。
+  * 中身が VWFC のタグ付きデータ（`VWFC/Tools/TaggedData.h` の `CTaggedDataContainer`）なら、
+    バイト列を手で解く必要は無い——**オブジェクト参照の配列**を持てる型
+    （`eTaggedDataType_InternalIndex` ＝ `kTaggedDataObjectRefArrayTypeID`）があり、
+    「フィルタ先のビューポートの並び」はいかにもこれで持たれていそう。
 
 ### Undo（取り消し）
 
