@@ -276,12 +276,51 @@ ISDK にシンボルを配置する呼び出しは無く（在るのは `CreateS
   `VWDocument::GetDrawingHeaderFristMember` ＋ `NextObject` で辿れ、
   **`InsertObjectAfter` / `InsertObjectBefore`** が VS の `HMoveForward` に当たる。
   これがレイヤ重ね順を変える唯一の手段（`draw/Story` の `reorderStoryLayers`）。
-- **per-viewport の重ね順上書き（`SetViewportLayerStackingOverride`）は効かない。**
-  呼び出しは true を返すのに `GetNumViewportLayerStackingOverrides` は 0 のままで、OIP も
-  「順序を上書き: いいえ」。実機 2 周で「設定 33 件・図面に記録 0 件」を確認して捨てた。
-- **並べ替えはビューポート生成より前に行う**（ビューポートは生成時の重ね順で描かれる）。
-  この順序を守れば、VectorScript 版が「並べ替えても既存ビューポートに反映されず手動更新が
-  要る」と諦めていた制約は起きない。
+- **ビューポート単位の重ね順上書き（`SetViewportLayerStackingOverride`）は 1 回目の実装で
+  効かなかった**（呼び出しは true を返すのに `GetNumViewportLayerStackingOverrides` は 0 の
+  まま・OIP も「順序を上書き: いいえ」・実機 2 周で「設定 33 件・記録 0 件」）。ただし
+  **当時の呼び方には少なくとも 3 つの誤りがあった**ので、「SDK からこの機能に触れない」と
+  までは言えない。SDK ヘッダを読み直して分かったことは次のとおり:
+    - 上書きは**種類ごとに別の族**で、`CreateViewportLayerOverride` は**レイヤの色・不透明度**
+      の上書き（`SViewportLayerOverride` は `fFillFore` / `fPenFore` / `fPercentOpacity`）。
+      重ね順とは無関係で、1 回目はこれを先に呼んでいた。
+    - 重ね順の族（`GetNum…` / `Get…Layer` / `Get…` / `Set…` / `Remove…`）にだけ **`Create…` が
+      無い**。つまり `Set…` が記録の作成も兼ねる建て付けで、事前に何かを作る必要は無い。
+    - **位置は「その図に映るレイヤの中での位置」**とみて、図面の全レイヤに 0,1,2,… を振っては
+      ならない（GUI の「レイヤの重ね順を上書き」も、映っているレイヤの並べ替えとして出る）。
+      1 回目は全レイヤに通し番号を振っていた。
+    - ビューポート側の API は**レイヤをハンドルではなく `InternalIndex` で指す**
+      （`VWViewportObj::SetLayerVisibility` も索引を取る。`ISDK::SetViewportLayerVisibility`
+      だけがハンドル）。索引が正しいかは
+      `VWViewportObj::GetLayerVisibility(索引, …)` が読めるかで確かめられる。
+    - 有効/無効を切り替える**オブジェクト変数は無い**（`ObjectVariables.h` に該当なし。
+      `ovSheetSaveStackLayers` / `ovSheetStackLayersStatus` は保存ビューの「レイヤを重ねる」で
+      別物）。VectorScript にも重ね順上書きの関数は無い（`vs.py` に該当なし）ので、
+      SDK 以外に手掛かりは無い。
+  そこで**まず上書きを試し、1 枚目で 1 件も記録されなければデザインレイヤの並べ替えへ落ちる**
+  形にした（`draw/Sheet` の `drawSheets`）。
+- **位置の与え方は実機で読み出して確定した。** SDK ヘッダは `Sint32` の "stacking position"
+  としか書いておらず基点も向きも範囲も載っていないので、**GUI で「順序を上書き」を付けた
+  ビューポートを読み出して**（`draw/DrawUtil` の `ReadStackingOverrideDiagnostics`）実物を見た:
+
+  ```
+  共通=1  2-柱伏図記号=2 … 1-FL=17 … R-野地板=25  2-FL=26  2-野地板=27
+  ```
+
+  ここから 3 つ確定した。**どれか 1 つでも外すと 1 件も記録されない**（`Set…` は true を
+  返すのに `GetNum…` が 0 のまま）:
+    1. 位置は **1 始まり**（0 は使わない）
+    2. **1 が最前面**（最背面がレイヤ枚数と同じ番号）
+    3. **図面の全デザインレイヤに位置を与える**——「その図に映るレイヤだけ」ではない。
+       GUI も上書きを ON にした時点で全レイヤぶんを記録する。
+- **`GetObjectInternalIndex(レイヤ)` はビューポートの上書き API に通じる正しい索引。**
+  読み出した索引から `GetNamedLayer` 経由で作った対応表でレイヤ名が全件引けた（実測）。
+  索引が疑わしいときは `VWViewportObj::GetLayerVisibility(索引, …)` が読めるかで確かめられる
+  （表示状態はハンドル指定で書いた直後なので、索引が正しければ必ず読める）。
+- **並べ替え（退避路）はビューポート生成より前に行う**（ビューポートは生成時の重ね順で
+  描かれる）。この順序を守れば、VectorScript 版が「並べ替えても既存ビューポートに反映されず
+  手動更新が要る」と諦めていた制約は起きない。退避路へ落ちたときは 1 枚目のビューポートを
+  作り直すのがこのため。
 - **レイヤ高さを取得する呼び出し（`GetLayerElevation` 相当）が無い。** 高さは命令の絶対 Z を
   そのまま渡す。レイヤ相対へ切り替えられるよう、渡す 1 か所（`draw/Rafter` の `SetOffset` /
   `draw/Roof` の `ovSlabHeight` / `draw/Member` の `kPathZ`）に名前を付けてある。
@@ -499,11 +538,6 @@ UI で手作りすると〈無限〉が既定なので、公開ヘッダに載�
 範囲はオブジェクト変数の外に保持されており、SDK からは触れない。建物の大きさから決めた
 有限範囲で確定（実用上は無限と同じ見え方になる）。
 
-### per-viewport のレイヤ重ね順上書き
-
-`SetViewportLayerStackingOverride` は**呼び出しが true を返すのに図面に 1 件も記録されない**
-（「設定 33 件・記録 0 件」）。デザインレイヤの並べ替え（`InsertObjectAfter`）が正解。
-
 ### `VWNURBSCurve` を制御点から構築する
 
 `VWNURBSCurve` は評価専用で、制御点から構築できない。**ただし `ISDK` 側に `Add3DVertex` が
@@ -569,7 +603,7 @@ UI で手作りすると〈無限〉が既定なので、公開ヘッダに載�
 | **M0** | 基盤整備 | 2 フェーズの骨組み・CMake 分割（無 SDK `HomeskzIfcCore` ＋ SDK 依存の本体）・最小 STEP リーダ・無 SDK テスト土台。手動ディスパッチ専用の CI デバッグ（`ci-debug`）もここで整備 |
 | **M1** | 通り芯 | 最初の縦切り。`IfcGridAxis` → 区間ごとに 1 本・重複除去・センタリング・X/Y 判定 → `GridAxis` PIO |
 | **M2** | 幾何の土台 | 配置行列（Gram-Schmidt で正規直交化）・押し出しソリッド・断面・boolean 辿り。描画なし＝テストのみ |
-| **M3** | ストーリ | 階・ストーリレベル・デザインレイヤ。**レイヤ重ね順**の決定箇所（当初 per-viewport 上書きに委ねたが M13 で並べ替えへ差し替え） |
+| **M3** | ストーリ | 階・ストーリレベル・デザインレイヤ。**レイヤ重ね順**の決定箇所（M13 でデザインレイヤの並べ替えへ差し替え → その後ビューポート単位の上書きを本命・並べ替えを退避路に） |
 | **M4** | 構造クラス判定 | 部材種別 → `04構造-…` クラスの純ロジック。STEP にも SDK にも依存しない |
 | **M5** | 床板 | 形状先行①。各階 `n-FL` にスラブで床。ロフト床は床梁から領域合成、開口付き断面に対応、STEP の日本語エスケープをデコード。**床はスラブで描く**（VectorScript 版の床ツールから意図的に変更） |
 | **M6** | 屋根面・屋根組 | 形状先行②。屋根版から垂木・野地板を導出。`VWRoofFaceObj` と配置行列の作法がここで確定 |

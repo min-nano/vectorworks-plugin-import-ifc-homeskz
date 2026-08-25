@@ -28,8 +28,8 @@
 //
 //	レイヤのスタック順の並べ替え（reorderStoryLayers）もここに置く。**ISDK の
 //	InsertObjectAfter / InsertObjectBefore** で図面のオブジェクト列（＝レイヤの並び）を
-//	組み替える——M3 では「重ね順を変える呼び出しが無い」と見て per-viewport 上書きへ
-//	委ねたが、実機でそちらは効かず、この 2 つが VS の HMoveForward 相当だと分かった
+//	組み替える（VS の HMoveForward 相当）。これは**ビューポート単位の重ね順上書きが効か
+//	なかったときの退避路**で、図面のレイヤの並びを動かしてしまうため本命ではない
 //	（ヘッダの reorderStoryLayers 参照）。
 //
 //	実描画（ストーリ高さ・レベルのバインド・単位）はローカルの VectorWorks で目視確認する

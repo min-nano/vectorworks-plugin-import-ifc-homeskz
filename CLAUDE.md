@@ -150,6 +150,9 @@ VectorWorks ネイティブオブジェクト
 （span 柱レイヤと伏図記号レイヤが共有）、「命令インデックス → ハンドル」の対応表は
 `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`）は `core/Document`、
+**レイヤ重ね順の適用**は 2 か所だけ——ビューポート単位の上書き（本命）は
+`draw/DrawUtil` の `ConfigureViewport`、デザインレイヤの並べ替え（退避路）は `draw/Story` の
+`reorderStoryLayers` で、**どちらへ落ちるかを決めるのは `draw/Sheet` の `drawSheets` ただ 1 か所**、
 進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
 （整形と配分の計算）に**それぞれ 1 つだけ**置く。**完了ダイアログに並ぶ要素の一覧**
 （表示名・助数詞・命令数の取り出し・描けた数）は `parse/Summary` の `kElements` ただ 1 つの表で、

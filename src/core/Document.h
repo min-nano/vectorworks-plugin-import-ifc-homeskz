@@ -1044,9 +1044,11 @@ namespace HomeskzIfcImport::core
 	// で単体テストする（CLAUDE.md「テスト方針」: レイヤ順の並べ替え計算のような SDK
 	// から切り離せる部分は core へ寄せてテストする）。
 	//
-	// 適用先は **draw/Story の reorderStoryLayers**（InsertObjectAfter でレイヤの並びを
-	// 希望順へ揃える）ただ 1 か所。当初は per-viewport の重ね順上書きへ委ねたが実機で
-	// 効かなかった（経緯は draw/Story.h の reorderStoryLayers）。
+	// 適用先は 2 つあり、**この 1 本の希望順を両方が使う**（順の決め方を二重に持たない）:
+	//   1. ビューポート単位の重ね順上書き（draw/DrawUtil の ConfigureViewport へこの並びを
+	//      そのまま渡す）——**図面のレイヤの並びを動かさずに済む本命**。
+	//   2. デザインレイヤの並べ替え（draw/Story の reorderStoryLayers）——1 が図面に記録
+	//      されなかったときの**退避路**（経緯は draw/Story.h の reorderStoryLayers）。
 	//
 	// 並び: 最上段に通り芯レイヤ "共通" → topLayers（伏図記号レイヤ "{to}-柱伏図記号" 等・
 	// ストーリ非依存の独立レイヤ。M12 で reorderStoryLayers が渡すようになった）→

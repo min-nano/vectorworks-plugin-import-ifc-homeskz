@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <ranges>
 #include <set>
 #include <string>
 #include <vector>
@@ -43,6 +44,11 @@ namespace HomeskzIfcImport::draw
 		// グレーにすると図に薄く残る。
 		constexpr short kLayerVisible = 0;
 		constexpr short kLayerHidden = 1;
+
+		// レイヤ重ね順の上書きで**最前面**を表す位置。位置は 1 始まりで 1 が最前面、最背面が
+		// レイヤ枚数と同じ番号になる（実機で GUI の上書きを読んで確かめた。ApplyLayerStacking
+		// の「位置の与え方は実機で確かめた」）。
+		constexpr Sint32 kFrontStackingPosition = 1;
 
 		// SetViewportClassVisibility の表示種別。SDK の EClassVisibility（VWFC/VWObjects/
 		// VWClass.h）が Normal=0 / Invisible=-1 / Grayed=2 と定めており、**VS の 0/1/2 とは
@@ -132,6 +138,83 @@ namespace HomeskzIfcImport::draw
 					++applied;
 			}
 			return applied;
+		}
+
+		// ビューポート単位のレイヤ重ね順を設定し、**図面に記録された数**を返す。
+		// frontToBack は前面→背面の希望順（core::desiredStoryLayerOrder）。
+		//
+		// 【位置の与え方は実機で確かめた】SDK ヘッダは Sint32 の "stacking position" としか
+		// 書いておらず、基点も向きも範囲も載っていない。そこで**GUI で「順序を上書き」を
+		// 付けたビューポートを読み出して**（ReadStackingOverrideDiagnostics）実物を見た:
+		//
+		//     共通=1  2-柱伏図記号=2 … 1-FL=17 … R-野地板=25  2-FL=26  2-野地板=27
+		//
+		// ここから 3 つ確定した。**どれか 1 つでも外すと 1 件も記録されない**（実測）:
+		//   1. 位置は **1 始まり**（0 は使わない）
+		//   2. **1 が最前面**（最背面が枚数と同じ番号）
+		//   3. **図面の全デザインレイヤに位置を与える**——「その図に映るレイヤだけ」ではない。
+		//      GUI も上書きを ON にした時点で全レイヤぶんを記録する。
+		//
+		// したがって希望順（映る映らないに関わらず全ストーリのレイヤが並ぶ）を前から 1,2,3,…
+		// と振り、希望順に出てこないデザインレイヤ（ユーザーが別途作ったもの）は末尾＝最背面へ
+		// 続ける。位置に欠番を作らないため、名前で引けなかったレイヤのぶんは詰める。
+		//
+		// 【索引の検証】layerIndexVerified は「レイヤの InternalIndex が、ビューポートの
+		// 上書き API に通じる索引かどうか」。上書きが 1 件も記録されなかったときに原因を
+		// 切り分けるためだけに見る。判定は **VWViewportObj::GetLayerVisibility(索引)** で、
+		// 直前に（ハンドル指定の SetViewportLayerVisibility で）表示状態を書いたレイヤなら、
+		// 索引が正しければ必ず読めるはず——読めなければ索引の方が違う。
+		std::size_t ApplyLayerStacking(MCObjectHandle viewport,
+									   const std::vector<std::string>& frontToBack,
+									   const std::vector<MCObjectHandle>& allLayers,
+									   std::size_t& outRequested, bool& outIndexVerified)
+		{
+			// 前面→背面の索引列。希望順を先に並べ、そこに出てこないデザインレイヤを背面へ足す。
+			std::vector<InternalIndex> ordered;
+			ordered.reserve(allLayers.size() + frontToBack.size());
+			std::set<InternalIndex> seen;
+			const auto take = [&ordered, &seen](InternalIndex index)
+			{
+				if (index != 0 && seen.insert(index).second)
+					ordered.push_back(index);
+			};
+			for (const std::string& name : frontToBack)
+			{
+				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
+				if (layer != nil)
+					take(gSDK->GetObjectInternalIndex(layer));
+			}
+			for (const MCObjectHandle layer : allLayers)
+				take(gSDK->GetObjectInternalIndex(layer));
+
+			Sint32 position = kFrontStackingPosition;
+			for (const InternalIndex index : ordered)
+			{
+				gSDK->SetViewportLayerStackingOverride(viewport, index, position);
+				++position;
+			}
+			outRequested = ordered.size();
+
+			// 記録されたか（setter の戻り値は当てにしない。M13 の 1 回目も今回の 1 回目も
+			// true を返しながら 1 件も記録されなかった）。索引の検証は空振りしたときだけ見る。
+			const std::size_t recorded = gSDK->GetNumViewportLayerStackingOverrides(viewport);
+			if (recorded == 0 && !ordered.empty())
+			{
+				try
+				{
+					const VWViewportObj vp(viewport);
+					// 値は見ない（読めたかどうかだけが知りたい）ので、列挙子の名前に
+					// 依存しないよう値初期化で受ける。
+					ELayerVisibility visibility{};
+					outIndexVerified = vp.GetLayerVisibility(ordered.front(), visibility);
+				}
+				catch (...)
+				{
+					// 検証できなかっただけ。上書きの成否そのものは recorded が語る。
+					outIndexVerified = false;
+				}
+			}
+			return recorded;
 		}
 
 		// 表示するデザインレイヤの縮尺を返す。図が映すレイヤの縮尺は揃っているので、
@@ -486,6 +569,17 @@ namespace HomeskzIfcImport::draw
 	//   * VWClass::ForEachClass(true, cb)                 … 図面の全クラスの列挙
 	//                                                       （ISDK::ForEachClass の VWFC 版）
 	//   * gSDK->SetViewportClassVisibility(vp, idx, 0)    … クラス表示（既定は非表示）
+	//   * gSDK->GetObjectInternalIndex(layer)             … レイヤの InternalIndex（重ね順の
+	//                                                       上書きはハンドルでなく索引で指す）
+	//   * gSDK->SetViewportLayerStackingOverride(vp, idx, pos) /
+	//     gSDK->GetNumViewportLayerStackingOverrides(vp) /
+	//     gSDK->GetViewportLayerStackingOverrideLayer(vp, i) /
+	//     gSDK->GetViewportLayerStackingOverride(vp, idx, pos)
+	//                                                     … ビューポート単位のレイヤ重ね順
+	//                                                       （設定と読み戻し。DrawUtil.h の
+	//                                                       ConfigureViewport「重ね順」）
+	//   * VWViewportObj::IsViewportObject(h) /
+	//     VWViewportObj(vp).GetLayerVisibility(idx, v)    … 既存ビューポートの走査と索引の検証
 	//   * VWViewportObj(vp).SetScale / SetDescription / SetLocator / Update
 	//                                                     … 縮尺（1003）・図面タイトル（1032）・
 	//                                                       図番（1033）・描画更新
@@ -535,10 +629,74 @@ namespace HomeskzIfcImport::draw
 		return ShowClasses(viewport, AllClasses());
 	}
 
+	std::string ReadStackingOverrideDiagnostics(const std::vector<std::string>& layerNames)
+	{
+		// 索引 → レイヤ名の対応表（渡された名前ぶんだけ）。
+		std::map<InternalIndex, std::string> names;
+		for (const std::string& name : layerNames)
+		{
+			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
+			if (layer == nil)
+				continue;
+			if (const InternalIndex index = gSDK->GetObjectInternalIndex(layer); index != 0)
+				names.emplace(index, name);
+		}
+
+		std::size_t total = 0;
+		std::string sample; // 最初に見つかったビューポートの中身（"レイヤ名=位置" を並べる）
+		try
+		{
+			// **シートレイヤだけ**を辿る（ビューポートはシートレイヤの上に住む。AllLayers は
+			// 逆にデザインレイヤだけなので使えない）。デザインレイヤを覗くと、取り込んだ
+			// 構造材を 1 つずつ見ることになって無駄に重い。
+			for (MCObjectHandle layer = VWDocument::GetDrawingHeaderFristMember(); layer != nil;
+				 layer = gSDK->NextObject(layer))
+			{
+				if (!VWLayerObj::IsLayerObject(layer))
+					continue;
+				if (VWLayerObj(layer).GetLayerType() != kLayerSheet)
+					continue;
+				for (MCObjectHandle h = gSDK->FirstMemberObj(layer); h != nil;
+					 h = gSDK->NextObject(h))
+				{
+					if (!VWViewportObj::IsViewportObject(h))
+						continue;
+					const std::size_t count = gSDK->GetNumViewportLayerStackingOverrides(h);
+					total += count;
+					if (count == 0 || !sample.empty())
+						continue;
+					for (std::size_t i = 0; i < count; ++i)
+					{
+						const InternalIndex index =
+							gSDK->GetViewportLayerStackingOverrideLayer(h, i);
+						Sint32 position = -1;
+						if (!gSDK->GetViewportLayerStackingOverride(h, index, position))
+							continue;
+						const auto found = names.find(index);
+						sample += found != names.end()
+									  ? found->second
+									  : ("#" + std::to_string(static_cast<long>(index)));
+						sample += "=" + std::to_string(static_cast<long>(position)) + " ";
+					}
+				}
+			}
+		}
+		catch (...)
+		{
+			// 診断のための走査なので、異常時は「何も分からなかった」で構わない。
+			return {};
+		}
+		if (total == 0)
+			return {};
+		return "既存ビューポートのレイヤ重ね順上書き " + std::to_string(total) + " 件を検出（" +
+			   sample + "）。";
+	}
+
 	ViewportFinish ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
 									 const ViewportSetup& setup,
 									 const core::ViewportCommand& command,
-									 ViewportProjection projection)
+									 ViewportProjection projection,
+									 const std::vector<std::string>& stackingOrder)
 	{
 		ViewportFinish finish;
 		// 表示レイヤ: まず全部隠し、命令に挙げたものだけ表示へ戻す。**存在しないレイヤ名は
@@ -554,6 +712,15 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
 			if (layer != nil)
 				gSDK->SetViewportLayerVisibility(viewport, layer, kLayerVisible);
+		}
+
+		// 重ね順: **表示レイヤを絞った後**に、このビューポートの中だけの並びとして与える
+		// （ヘッダ「重ね順（stackingOrder）」）。渡されなければ何もしない。
+		if (!stackingOrder.empty())
+		{
+			finish.stackingRecorded =
+				ApplyLayerStacking(viewport, stackingOrder, setup.layers, finish.stackingRequested,
+								   finish.layerIndexVerified);
 		}
 
 		// クラス: 全クラスを 1 つずつ表示へ戻す（ヘッダ「クラスを表示へ戻す理由」）。
