@@ -92,12 +92,17 @@ VectorWorks ネイティブオブジェクト
 - **プレーンな構造体**（`std::vector`・`std::string`・`double`・`enum` 等の集約）で表す。
 - スキーマは `stories` / `grids` / `members` / `columns` / `walls` / `wallJoins` / `slabs` /
   `floors` / `rafters` / `roofs` / `anchorBolts` / `floorPosts` / `fireBraces` / `joints` /
-  `columnMarks` / `sheets` / `sections`。**同型が並ぶところは構造体 1 つへまとめる**
+  `columnMarks` / `sheets` / `sections` / `sectionSheet`。**同型が並ぶところは構造体 1 つへまとめる**
   ——`anchorBolts` / `floorPosts` / `fireBraces` / `joints` は中身が同じなので
   `core::SymbolCommand` 1 つで受け、要素の区別は「Document のどのリストか」が担う
   （`core/Document.h` の doc コメント参照）。
 - **突き合わせが要る関係は入れ子で持つ**（データタグは `ViewportCommand::tags`、
   グラフィック凡例は `SheetCommand` の中）。平らに並べて番号で突き合わせる形にしない。
+- **描くときにしか決まらないものは命令に持たせない。** 用紙の大きさはシートレイヤから
+  SDK で読むものなので、それに依る値——縮尺・用紙上の位置・軸組図が何枚の用紙に分かれるか
+  ——は解析側では決められない。命令が持つのは**枚数や用紙に依らない指示**だけにする
+  （軸組図なら `sectionSheet` の「番号の始まり（伏図の続き）とタイトルの基」）。
+  決め方そのものは SDK と無関係な算数なので `core/Layout` に置き、無 SDK でテストする。
 - フェーズ間の受け渡しは**構造体のまま**行う。JSON 直列化は**予定に無い**。デバッグで
   ダンプが要る場面が実際に出てきたら、そのときに最小限を足す。
 - スキーマを変えるときは、構造体定義・`validateDocument`・テストを同時に更新する。
@@ -133,23 +138,29 @@ VectorWorks ネイティブオブジェクト
 プラグインスタイル解決・**構成層／基準面を各オブジェクトへ直接与える手順**——床板・底盤・
 立上りが共有する。スラブ・壁は**スタイルを作らない・当てない**）は
 `draw/DrawUtil`、**シートレイヤの用意とビューポートの仕上げ**（表示レイヤの絞り込み・クラス表示・
-縮尺・図番／図面タイトル・更新——伏図と軸組図が共有する唯一の実装）も `draw/DrawUtil`、
+縮尺・図番／図面タイトル・更新に加え、**用紙の大きさの読み取り**（`SheetPageArea`。インチ→mm と
+「用紙は原点中心」の規約）と**測って動かす位置合わせ**（`PlaceViewport`）——伏図と軸組図が
+共有する唯一の実装）も `draw/DrawUtil`、**用紙の割り付けの決め方**（縮尺の階梯と選び方・伏図の
+縮尺と位置・凡例のために空ける幅 `kLegendBoxWidth`・軸組図の上下 2 段とシートの分割・
+タイトルの連番）は `core/Layout`、
 **断面寸法データタグ**（断面の注釈空間への投影は `parse/Tag` の `sectionAnnotationPoint`、
 `Data Tag` PIO の登録名・引出線パラメータと配置手順、そして**タグレイアウト（＝タグ 1 本の
 中身）の組み方**——式・フィールドラベル・文字スタイル名・**クラス名（"寸法"。タグ本体と中の
 文字の両方に与える）**——は `draw/Tag`。伏図と軸組図が共有する
 唯一の実装で、**スタイルは作らないし当てない**（スラブ・壁と同じく各オブジェクトへ直接設定
 する））、**グラフィック凡例**
-（スタイル名と配置点は `parse/Sheet` の `kFoundationLegendStyle` / `kFloorLegendStyle` /
-`kLegendPosition`、`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗りと配置手順は
-`draw/Legend`）、
+（スタイル名は `parse/Sheet` の `kFoundationLegendStyle` / `kFloorLegendStyle`、
+`GraphicLegend` PIO の登録名・線の太さ／塗りと配置手順は `draw/Legend`。**箱幅は
+`core::kLegendBoxWidth`**＝用紙の割り付けが凡例のために空ける幅そのもので、置き場所は
+`core::planLayout` の `legendTopRight`）、
 構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
 実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名は
 `parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`
 （span 柱レイヤと伏図記号レイヤが共有）、「命令インデックス → ハンドル」の対応表は
 `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
-`desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`）は `core/Document`、
+`desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの
+広がり `planContentBounds` / `sectionContentSize`）は `core/Document`、
 進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
 （整形と配分の計算）に**それぞれ 1 つだけ**置く。**完了ダイアログに並ぶ要素の一覧**
 （表示名・助数詞・命令数の取り出し・描けた数）は `parse/Summary` の `kElements` ただ 1 つの表で、

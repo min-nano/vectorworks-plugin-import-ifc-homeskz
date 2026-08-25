@@ -761,8 +761,13 @@ namespace HomeskzIfcImport::core
 	// フィールド:
 	//   style                 … グラフィック凡例スタイル名（基礎伏図＝"基礎伏図凡例"、
 	//                           床伏図・母屋伏図＝"床伏図凡例"）
-	//   position              … シートレイヤ上の配置点（用紙座標 mm）
 	//   （'number' は持たない。上記のとおり入れ子で表すため）
+	//
+	// 【置き場所は持たない】凡例をどこへ置くかは**用紙の大きさが決まってから**でないと
+	// 決められない（M16）。用紙の大きさはシートレイヤから SDK で読むものなので、解析側には
+	// 分からない——描画側が core::planLayout の legendTopRight（＝ビューポートのために空けた
+	// 右の 1 列の右上）へ寄せる。かつては固定の配置点（用紙原点）を命令が持っていたが、
+	// 「ローカルの VW で最終調整する」と書き置いたまま図と重なる位置に出ていた。
 	//
 	// 【載せるシンボルの一覧は持たない】凡例に何が並ぶかはスタイルが決めるので、
 	// 描画側が一覧を使う経路が無い（使われない枠を先に作らない。ColumnMarkCommand が記号サイズ
@@ -771,7 +776,6 @@ namespace HomeskzIfcImport::core
 	struct LegendCommand
 	{
 		std::string style;
-		Vec2 position;
 	};
 
 	// シートレイヤ 1 枚（＋その上のビューポート 1 枚）を生成する命令。draw/Sheet がこれを
@@ -810,9 +814,6 @@ namespace HomeskzIfcImport::core
 	// その枚数に縛られることも無い（parse/Section.h 参照）。
 	//
 	// フィールド:
-	//   number                        … 配置先シートレイヤ番号
-	//                                （＝レイヤ名。全 section 命令で同じ "A"）
-	//   title                         … シートレイヤのタイトル（"軸組図"）
 	//   direction                     … X通り / Y通り
 	//   lineStart                     … 断面指示線の始点（切断位置。センタリング済みの平面座標）
 	//   lineEnd                       … 同 終点
@@ -833,15 +834,35 @@ namespace HomeskzIfcImport::core
 	// **並べる位置も持たない**: シートレイヤ上での配置は、実際にできたビューポートの大きさに
 	// 合わせて詰める必要があり、大きさは描いてみるまで分からない（draw/Section が
 	// GetObjectBounds で測って並べる）。
+	//
+	// **シートレイヤ番号・タイトルも持たない**（M16）: 軸組図は 1 枚の用紙に複数並び、
+	// **何枚の用紙に分かれるかは用紙の大きさと縮尺が決める**ので、命令ごとに配置先の
+	// シートレイヤを名指しできない（用紙の大きさは描くときにしか分からない）。番号の
+	// 始まりとタイトルの基は文書に 1 つ（SectionSheetCommand）だけ持ち、実際の割り付けは
+	// 描画側が core::sectionLayout で決める。
 	struct SectionCommand
 	{
-		std::string number;
-		std::string title;
 		SectionDirection direction = SectionDirection::X;
 		Vec2 lineStart;
 		Vec2 lineEnd;
 		Vec2 viewPoint;
 		ViewportCommand viewport;
+	};
+
+	// 軸組図を載せるシートレイヤの**通し方**（docs/DEV-NOTES.md M16）。軸組図は 1 枚の用紙に
+	// 複数並び、収まらなければシートレイヤを足していく——その**枚数は用紙の大きさと縮尺が
+	// 決める**ので解析側では分からない。ここが持つのは枚数に依らない 2 つだけ:
+	//
+	//   startNumber           … 最初のシートレイヤ番号。**伏図の続き**（伏図が 1〜7 なら 8）。
+	//                           2 枚目以降は 9・10 … と 1 ずつ増やす（描画側）。
+	//   title                 … シートタイトルの基（"軸組図"）。複数枚に分かれるときは
+	//                           "軸組図(1)" … と連番になる（core::sectionSheetTitle）。
+	//
+	// sections が空のときは使われない（既定値のまま）。
+	struct SectionSheetCommand
+	{
+		int startNumber = 0;
+		std::string title;
 	};
 
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
@@ -942,6 +963,11 @@ namespace HomeskzIfcImport::core
 		// 伏図と同じくモデルを映すので、描画は **全要素の描画が済んだ後**（伏図の後）に
 		// 処理する（draw/ExecuteDocument）。
 		std::vector<SectionCommand> sections;
+
+		// M16 軸組図のシートレイヤの通し方（番号の始まり＝伏図の続き・タイトルの基）。
+		// **何枚に分かれるかは描くときに決まる**ので、枚数に依らないこの 2 つだけを持つ
+		// （SectionSheetCommand 参照）。sections が空なら使われない。
+		SectionSheetCommand sectionSheet;
 	};
 
 	// ------------------------------------------------------------------------
@@ -1038,6 +1064,34 @@ namespace HomeskzIfcImport::core
 	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder と
 	// 同じ立ち位置。CLAUDE.md「テスト方針」）。
 	bool sectionHeightRange(const Document& document, double& start, double& end);
+
+	// 平面（伏図）の広がりに足す四方の余白（mm）。通り芯の丸（通り名の吹き出し）や部材の
+	// 太さは命令の座標には現れないので、その分の遊びを持たせる。planContentBounds とその
+	// 期待値を書くテストが共有する。
+	inline constexpr double kPlanContentMargin = 500.0;
+
+	// 取り込んだ要素の平面座標から、図に映るものを包む矩形（センタリング済みの平面座標。
+	// 四方に kPlanContentMargin の余白つき）を返す。layers が空でなければ**そのレイヤに
+	// 載る命令だけ**を見る（伏図 1 枚が映す範囲）。座標を持つ命令が 1 つも無ければ false
+	// （out は変更しない）。
+	//
+	// **なぜ要るか**（docs/DEV-NOTES.md M16）: 用紙に合わせて縮尺を選ぶには「図がどれだけの
+	// 広がりを持つか」が要る。ビューポートの実寸は描いてみるまで分からないが、**そこに何が
+	// 映るかは命令セットが全部知っている**ので、実寸を測る前に縮尺を決められる。
+	// 併せて、**用紙をめくっても図が動かない**ように置くのにも使う——伏図ごとに映すレイヤが
+	// 違えば図の中身の広がりも違うので、シートごとの広がり（layers 指定）と文書全体の
+	// 広がり（layers 空）の差が、そのシートで図をどれだけずらせばよいかを与える。
+	//
+	// SDK を触らない純計算なので core に置いて無 SDK でテストする（sectionHeightRange と
+	// 同じ立ち位置）。
+	bool planContentBounds(const Document& document, const std::vector<std::string>& layers,
+						   Vec2& min, Vec2& max);
+
+	// 軸組図 1 枚ぶんの広がり（実寸 mm）。幅は**平面の広がりの大きい方**——X通りは Y 方向の
+	// 広がりを、Y通りは X 方向の広がりを映すので、どちらも同じ大きさのマスに収まるように
+	// 大きい方を採る（用紙の上で段が揃う）。高さは断面の高さ範囲（sectionHeightRange）。
+	// どちらかが求まらなければ false（out は変更しない）。
+	bool sectionContentSize(const Document& document, Vec2& size);
 
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す。draw/Story がこの順を適
 	// 用する（レベルの高さには依存しない）。SDK を触らない純計算なので core に置いて無 SDK

@@ -209,18 +209,26 @@ namespace HomeskzIfcImport::core
 										[](const std::string& layer) { return layer.empty(); });
 		}
 
-		// 断面ビューポート（軸組図）1 枚が妥当か。配置先シートレイヤ番号（＝レイヤ名）
-		// とタイトルが非空で、表示レイヤを 1 つ以上持ち（伏図と同じ理由＝何も映らない
-		// ビューポートを作らせない）、**断面指示線が縮退していない**（始点≠終点。
-		// 縮退した線からは切断面が決まらない）こと。断面の範囲は命令が持たない
-		// （core/Document.h の SectionCommand 参照）ので見ない。
+		// 断面ビューポート（軸組図）1 枚が妥当か。表示レイヤを 1 つ以上持ち（伏図と同じ
+		// 理由＝何も映らないビューポートを作らせない）、**断面指示線が縮退していない**
+		// （始点≠終点。縮退した線からは切断面が決まらない）こと。断面の範囲も配置先の
+		// シートレイヤも命令が持たない（core/Document.h の SectionCommand 参照）ので見ない
+		// ——シートレイヤの通し方は文書に 1 つの SectionSheetCommand が持ち、下の
+		// isValidSectionSheet が見る。
 		bool isValidSection(const SectionCommand& section)
 		{
-			return !section.number.empty() && !section.title.empty() &&
-				   !section.viewport.layers.empty() &&
+			return !section.viewport.layers.empty() &&
 				   std::ranges::none_of(section.viewport.layers,
 										[](const std::string& layer) { return layer.empty(); }) &&
 				   !samePoint(section.lineStart, section.lineEnd);
+		}
+
+		// 軸組図のシートレイヤの通し方が妥当か（軸組図が 1 枚でもあるときだけ見る）。
+		// 番号の始まりが正（シートレイヤ名になるので 0 や負では伏図の続きにならない）で、
+		// タイトルの基が非空であること。
+		bool isValidSectionSheet(const SectionSheetCommand& sheet)
+		{
+			return sheet.startNumber > 0 && !sheet.title.empty();
 		}
 
 		// シンボル配置 1 件が妥当か。配置先レイヤ名とシンボル名が非空であること。position /
@@ -316,6 +324,11 @@ namespace HomeskzIfcImport::core
 		// 縮退していないこと（isValidSection 参照。docs/DEV-NOTES.md M14）。
 		if (!std::ranges::all_of(document.sections, isValidSection))
 			return false;
+		// 軸組図があるなら、その配置先シートレイヤの通し方（番号の始まり・タイトルの基）も
+		// 埋まっていること（M16）。**軸組図が 1 枚も無ければ見ない**——使わない値なので、
+		// 空のままでも文書は妥当。
+		if (!document.sections.empty() && !isValidSectionSheet(document.sectionSheet))
+			return false;
 
 		// 断面寸法データタグ（M13）: 伏図・軸組図どちらのビューポート注釈も、関連付け先の
 		// 横架材が members の範囲内であること（areValidTags 参照）。
@@ -406,6 +419,96 @@ namespace HomeskzIfcImport::core
 			return false;
 		start = low - kSectionHeightMargin;
 		end = high + kSectionHeightMargin;
+		return true;
+	}
+
+	bool planContentBounds(const Document& document, const std::vector<std::string>& layers,
+						   Vec2& min, Vec2& max)
+	{
+		double minX = std::numeric_limits<double>::max();
+		double maxX = std::numeric_limits<double>::lowest();
+		double minY = minX;
+		double maxY = maxX;
+		bool any = false;
+
+		// layers が空なら全部見る（文書全体の広がり）。指定があればそのレイヤに載る命令だけ
+		// ——伏図 1 枚が映す範囲になる。
+		const auto wanted = [&layers](const std::string& layer)
+		{ return layers.empty() || std::ranges::find(layers, layer) != layers.end(); };
+		const auto take = [&](const Vec2& point)
+		{
+			minX = std::min(minX, point.x);
+			maxX = std::max(maxX, point.x);
+			minY = std::min(minY, point.y);
+			maxY = std::max(maxY, point.y);
+			any = true;
+		};
+		const auto takePoint = [&](const std::string& layer, const Vec2& point)
+		{
+			if (wanted(layer))
+				take(point);
+		};
+		const auto takeSegment = [&](const std::string& layer, const Vec2& start, const Vec2& end)
+		{
+			if (!wanted(layer))
+				return;
+			take(start);
+			take(end);
+		};
+		const auto takeBoundary = [&](const std::string& layer, const std::vector<Vec2>& boundary)
+		{
+			if (!wanted(layer))
+				return;
+			for (const Vec2& point : boundary)
+				take(point);
+		};
+
+		for (const GridCommand& grid : document.grids)
+			takeSegment(grid.layer, grid.start, grid.end);
+		for (const FloorCommand& floor : document.floors)
+			takeBoundary(floor.layer, floor.boundary);
+		for (const SlabCommand& slab : document.slabs)
+			takeBoundary(slab.layer, slab.boundary);
+		for (const RoofCommand& roof : document.roofs)
+			takeBoundary(roof.layer, roof.boundary);
+		for (const MemberCommand& member : document.members)
+			takeSegment(member.layer, member.start, member.end);
+		for (const WallCommand& wall : document.walls)
+			takeSegment(wall.layer, wall.start, wall.end);
+		for (const RafterCommand& rafter : document.rafters)
+			takeSegment(rafter.layer, rafter.start, rafter.end);
+		for (const ColumnCommand& column : document.columns)
+			takePoint(column.layer, column.position);
+		for (const ColumnMarkCommand& mark : document.columnMarks)
+			takePoint(mark.layer, mark.position);
+		// シンボル置換系 4 種は同じ命令型（SymbolCommand）なので同じ扱いで畳む。
+		for (const std::vector<SymbolCommand>* list :
+			 {&document.anchorBolts, &document.floorPosts, &document.fireBraces, &document.joints})
+		{
+			for (const SymbolCommand& symbol : *list)
+				takePoint(symbol.layer, symbol.position);
+		}
+
+		if (!any)
+			return false;
+		min = Vec2{minX - kPlanContentMargin, minY - kPlanContentMargin};
+		max = Vec2{maxX + kPlanContentMargin, maxY + kPlanContentMargin};
+		return true;
+	}
+
+	bool sectionContentSize(const Document& document, Vec2& size)
+	{
+		Vec2 min;
+		Vec2 max;
+		if (!planContentBounds(document, {}, min, max))
+			return false;
+		double start = 0.0;
+		double end = 0.0;
+		if (!sectionHeightRange(document, start, end))
+			return false;
+		// 幅は平面の広がりの**大きい方**（X通りは Y 方向を、Y通りは X 方向を映すので、
+		// どちらも同じ大きさのマスに収まるように大きい方で揃える）。
+		size = Vec2{std::max(max.x - min.x, max.y - min.y), end - start};
 		return true;
 	}
 

@@ -134,31 +134,6 @@ namespace HomeskzIfcImport::draw
 			return applied;
 		}
 
-		// 表示するデザインレイヤの縮尺を返す。図が映すレイヤの縮尺は揃っているので、
-		// 最初に取れたものを採る。取れなければ 0（＝ビューポートの既定縮尺のままにする）。
-		double LayerScaleFor(const core::ViewportCommand& command)
-		{
-			for (const std::string& name : command.layers)
-			{
-				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
-				if (layer == nil)
-					continue;
-				try
-				{
-					const VWLayerObj design(layer);
-					const double scale = design.GetScale();
-					if (scale > 0.0)
-						return scale;
-				}
-				catch (...)
-				{
-					// このレイヤからは縮尺を取れなかった。次の候補を見る。
-					continue;
-				}
-			}
-			return 0.0;
-		}
-
 		// 既存のコンポーネント（層）数。取得できなければ 0（＝層を持たない）とみなす。
 		short CountComponents(MCObjectHandle object)
 		{
@@ -446,6 +421,10 @@ namespace HomeskzIfcImport::draw
 
 	namespace
 	{
+		// インチ → mm。用紙の大きさだけが**インチで返る**唯一の値なので、換算はここに 1 つ
+		// だけ置く（SheetPageArea）。
+		constexpr double kMillimetersPerInch = 25.4;
+
 		// ビューポートの向き（オブジェクト変数 1007）。3D の「上」＝standardViewTop（7）。
 		// 2D/平面かどうかは向きではなく Project 2D（1005）が持つので、**この 2 つは組で
 		// 扱う**（DrawUtil.h の ViewportProjection）。
@@ -538,7 +517,7 @@ namespace HomeskzIfcImport::draw
 	ViewportFinish ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
 									 const ViewportSetup& setup,
 									 const core::ViewportCommand& command,
-									 ViewportProjection projection)
+									 ViewportProjection projection, double scale)
 	{
 		ViewportFinish finish;
 		// 表示レイヤ: まず全部隠し、命令に挙げたものだけ表示へ戻す。**存在しないレイヤ名は
@@ -560,9 +539,8 @@ namespace HomeskzIfcImport::draw
 		finish.classesApplied = ShowClasses(viewport, setup.classes);
 		finish.planViewApplied = projection == ViewportProjection::Keep;
 
-		// 縮尺・［投影の作り直し］・ラベル・更新。**縮尺は表示レイヤを絞った後に読む**
-		// （映すレイヤの縮尺に合わせるため）。設定に失敗しても図そのものは残す。
-		const double scale = LayerScaleFor(command);
+		// 縮尺・［投影の作り直し］・ラベル・更新。**縮尺は呼び出し側が用紙と建物の大きさから
+		// 決めて渡す**（DrawUtil.h の ConfigureViewport）。設定に失敗しても図そのものは残す。
 		try
 		{
 			VWViewportObj vp(viewport);
@@ -580,6 +558,41 @@ namespace HomeskzIfcImport::draw
 			return finish;
 		}
 		return finish;
+	}
+
+	core::PaperArea SheetPageArea(MCObjectHandle sheetLayer)
+	{
+		core::Vec2 size = core::kDefaultPaperSize;
+		try
+		{
+			const VWLayerObj sheet(sheetLayer);
+			// **インチで返る**（SDK ヘッダのコメント: "value in inches. Use (result * 25.4)
+			// to get mm"）。図面座標は mm なので必ず換算する。
+			const double width = sheet.GetSheetWidht() * kMillimetersPerInch;
+			const double height = sheet.GetSheetHeight() * kMillimetersPerInch;
+			if (width > 0.0 && height > 0.0)
+				size = core::Vec2{width, height};
+		}
+		catch (...)
+		{
+			// 用紙の大きさが読めなかった。既定（A3 横）で割り付ける——用紙が読めないことで
+			// 図を捨てるより、既定で置いてローカルで直す方がよい。
+		}
+		// ★用紙は原点中心（DrawUtil.h の SheetPageArea）。
+		return core::PaperArea{core::Vec2{-size.x / 2.0, -size.y / 2.0},
+							   core::Vec2{size.x / 2.0, size.y / 2.0}};
+	}
+
+	bool PlaceViewport(MCObjectHandle viewport, const core::Vec2& center)
+	{
+		WorldRect bounds;
+		if (!gSDK->GetObjectBounds(viewport, bounds))
+			return false;
+		// WorldRect は top > bottom（Y 上向き）。中心は上下どちらから見ても同じ式でよい。
+		const double x = (bounds.left + bounds.right) / 2.0;
+		const double y = (bounds.top + bounds.bottom) / 2.0;
+		gSDK->MoveObject(viewport, center.x - x, center.y - y);
+		return true;
 	}
 
 	// 「命令インデックス → ハンドル」の対応表の所有者。**表の中身（MCObjectHandle）は

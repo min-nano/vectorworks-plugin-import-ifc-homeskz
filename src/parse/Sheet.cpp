@@ -50,7 +50,6 @@ namespace HomeskzIfcImport::parse
 			{
 				core::LegendCommand legend;
 				legend.style = legendStyle;
-				legend.position = kLegendPosition;
 				sheet.legend = legend;
 			}
 			return sheet;

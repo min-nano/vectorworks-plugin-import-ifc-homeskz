@@ -29,6 +29,8 @@ src/
   core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
     Document.{h,cpp}          命令セットの構造体定義・validateDocument・描画結果の件数
     Geometry.{h,cpp}          自前の Vec2 / Vec3 / Mat4（配置行列）
+    Layout.{h,cpp}            用紙の割り付け（縮尺の階梯と選び方・伏図の位置と凡例の列・
+                              軸組図の上下 2 段とシートの分割）
     Region.{h,cpp}            部品が囲む平面領域の合成（ロフト床の外形）
     Progress.{h,cpp}          進捗の報告先・文言整形・バー配分（実測の重み）
     Trace.{h,cpp}             クラッシュ診断ログ（フェーズ単位・毎行フラッシュ）
@@ -47,7 +49,8 @@ src/
   draw/                     Phase 2: VW 描画（SDK 依存）
     ExecuteDocument.{h,cpp}   命令セットを検証して要素ごとにディスパッチ
     DrawUtil.{h,cpp}          クラス分け・by-class 属性・レイヤ／シートレイヤの用意・
-                              構成層・ビューポートの仕上げ・Undo スコープの共通ヘルパー
+                              構成層・ビューポートの仕上げ（縮尺・用紙の大きさ・位置合わせ）・
+                              Undo スコープの共通ヘルパー
     StructuralMember.{h,cpp}  構造材ツール 1 本の生成・設定（横架材／柱で共有）
     ObjectHandles.h           「命令インデックス → 描いたオブジェクトのハンドル」の対応表
     ProgressDialog.{h,cpp}    core::ProgressReporter を VW の進捗ダイアログへ橋渡し

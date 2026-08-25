@@ -22,6 +22,7 @@
 #include "PluginPrefix.h"
 
 #include "core/Document.h"
+#include "core/Layout.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
@@ -327,10 +328,37 @@ namespace HomeskzIfcImport::draw
 	// **投影の作り直しは「表示レイヤを絞った後・最後の更新の前」**に行う（上の
 	// ViewportProjection）。作り直しは更新を 1 回挟むので、レイヤを絞る前に行うと図面の
 	// 全レイヤを描くことになり、無駄に重い。順番を入れ替えないこと。
+	//
+	// scale は縮尺の分母（1/100 なら 100.0）。**用紙と建物の大きさから呼び出し側が決める**
+	// （core::planLayout / core::sectionLayout。M16）。0 以下なら縮尺には触らない
+	// ——ビューポートの既定のままになる。かつてはここが「映すデザインレイヤの縮尺」を読んで
+	// 当てていたが、デザインレイヤの縮尺は用紙に対する図の大きさとは関係が無く、図が用紙から
+	// はみ出しても気付けなかった。
 	ViewportFinish ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
 									 const ViewportSetup& setup,
 									 const core::ViewportCommand& command,
-									 ViewportProjection projection);
+									 ViewportProjection projection, double scale);
+
+	// シートレイヤの用紙（＝作図する紙）の矩形（用紙 mm）。読めなければ
+	// core::kDefaultPaperSize（A3 横）で代用する（用紙が読めないだけで図を捨てない）。
+	//
+	// ★**用紙は原点を中心に置かれている前提**で矩形を組む。SDK が返すのは大きさ
+	// （VWLayerObj::GetSheetWidht / GetSheetHeight。**インチ**なので 25.4 倍して mm にする）
+	// だけで、用紙が図面座標のどこに在るかを返す呼び出しは無い（ObjectVariables にも
+	// ovLayerSheetWidth / Height と用紙サイズ（167/168）しか無く、位置の変数は無い。
+	// ci-debug で確認）。VWLayerObj::GetSheetOrigin() はあるが、それが用紙の中心を指すのか
+	// 隅を指すのかはヘッダからは決まらないので**使わない**——意味の分からない値を使うより、
+	// 規約を 1 つ決めて実機で確かめる方がよい（docs/DEV-NOTES.md M16「用紙の位置」）。
+	core::PaperArea SheetPageArea(MCObjectHandle sheetLayer);
+
+	// ビューポートを用紙の上で動かし、**その外形の中心**を center（用紙 mm）へ合わせる。
+	// 測れなければ何もせず false（並びが崩れるだけで図は残る）。
+	//
+	// 【なぜ測るのか】ビューポートの実寸は**描いてみるまで分からない**（映る図形の広がりで
+	// 決まる）。したがって「どこに置くか」は生成・更新の後に測ってから決める（データタグを
+	// 置いた後に測って直すのと同じ考え方。draw/Tag）。**注釈（データタグ）を置く前に呼ぶこと**
+	// ——注釈まで含めた外形で測ると、タグの有無で図の位置がずれる。
+	bool PlaceViewport(MCObjectHandle viewport, const core::Vec2& center);
 
 	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
 	// （draw/ObjectHandles.h の ObjectHandles）は SDK 非依存のヘッダに置いてあり、

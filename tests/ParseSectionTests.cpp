@@ -35,9 +35,9 @@ using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::SectionCommand;
 using HomeskzIfcImport::core::SectionDirection;
 using HomeskzIfcImport::parse::buildSectionCommands;
+using HomeskzIfcImport::parse::buildSectionSheetCommand;
 using HomeskzIfcImport::parse::kAxisMatchTol;
 using HomeskzIfcImport::parse::kSectionLineMargin;
-using HomeskzIfcImport::parse::kSectionSheetNumber;
 using HomeskzIfcImport::parse::kSectionSheetTitle;
 using HomeskzIfcImport::parse::kSectionTitleSuffix;
 using HomeskzIfcImport::parse::loadIfcFromText;
@@ -47,6 +47,7 @@ using HomeskzIfcImport::parse::NamedAxis;
 using HomeskzIfcImport::parse::nameSectionCuts;
 using HomeskzIfcImport::parse::sectionCutPositions;
 using HomeskzIfcImport::parse::sectionLayers;
+using HomeskzIfcImport::parse::sectionSheetStartNumber;
 using HomeskzIfcTests::near;
 
 namespace
@@ -352,12 +353,10 @@ TEST(BuildSectionCommandsPlacesCutsAndNames)
 	CHECK(commands[0].viewport.drawingTitle == std::string("X1") + kSectionTitleSuffix);
 	CHECK(commands[4].viewport.drawingTitle == std::string("又い") + kSectionTitleSuffix);
 
-	// シートレイヤは全命令で同じ（軸組図 1 枚に並べる）。断面の範囲（長さ・高さ・奥行き）は
-	// 命令が持たない——軸組図は範囲を限らないので、描画側の定数が受け持つ。
+	// 断面の範囲（長さ・高さ・奥行き）も配置先のシートレイヤも命令は持たない——範囲は
+	// 描画側の定数が、シートレイヤは用紙の割り付け（M16）が受け持つ。
 	for (const SectionCommand& command : commands)
 	{
-		CHECK(command.number == kSectionSheetNumber);
-		CHECK(command.title == kSectionSheetTitle);
 		CHECK(command.viewport.layers ==
 			  (std::vector<std::string>{"1-FL", "1-横架材天端", core::kGridLayer}));
 	}
@@ -433,6 +432,33 @@ TEST(BuildSectionCommandsIsDeterministic)
 	}
 }
 
+TEST(SectionSheetNumbersContinueAfterThePlanSheets)
+{
+	// 伏図が 1〜7 なら軸組図は 8 から（要件「シートレイヤ番号は伏図に続けて」）。
+	std::vector<core::SheetCommand> sheets;
+	for (int i = 1; i <= 7; ++i)
+	{
+		core::SheetCommand sheet;
+		sheet.number = std::to_string(i);
+		sheets.push_back(sheet);
+	}
+	CHECK(sectionSheetStartNumber(sheets) == 8);
+
+	// 伏図が 1 枚も無ければ 1 から。
+	CHECK(sectionSheetStartNumber({}) == 1);
+
+	// 数字として読めない番号は読み飛ばす（番号を巻き戻して伏図と衝突させない）。
+	core::SheetCommand odd;
+	odd.number = "A";
+	sheets.push_back(odd);
+	CHECK(sectionSheetStartNumber(sheets) == 8);
+
+	// タイトルの基も一緒に決まる（連番は描画側が用紙の枚数から付ける）。
+	const core::SectionSheetCommand command = buildSectionSheetCommand(sheets);
+	CHECK(command.startNumber == 8);
+	CHECK(command.title == kSectionSheetTitle);
+}
+
 TEST(BuildSectionCommandsPassDocumentValidation)
 {
 	Model const model = sampleGridModel();
@@ -441,6 +467,8 @@ TEST(BuildSectionCommandsPassDocumentValidation)
 	// ちる）。
 	core::Document document;
 	document.sections = buildSectionCommands(model, sampleDocument());
+	// 軸組図があるならシートレイヤの通し方（番号の始まり・タイトルの基）も要る（M16）。
+	document.sectionSheet = buildSectionSheetCommand(document.sheets);
 	CHECK(!document.sections.empty());
 	CHECK(core::validateDocument(document));
 }
@@ -467,8 +495,6 @@ TEST(FixtureSectionsCutRealGridLinesAndShowExistingLayers)
 	std::set<std::string> numbers;
 	for (const core::SectionCommand& section : document.sections)
 	{
-		CHECK(section.number == kSectionSheetNumber);
-		CHECK(section.title == kSectionSheetTitle);
 		// 図番は通りごとに一意（同じ図番のビューポートが 2 枚できない）。
 		CHECK(numbers.insert(section.viewport.drawingNumber).second);
 		CHECK(!section.viewport.drawingNumber.empty());
@@ -490,6 +516,13 @@ TEST(FixtureSectionsCutRealGridLinesAndShowExistingLayers)
 		for (const std::string& layer : section.viewport.layers)
 			CHECK(storyLayers.contains(layer));
 	}
+
+	// シートレイヤ番号は**伏図の続き**（M16）。伏図の最後の番号の次から始まる。
+	int lastPlan = 0;
+	for (const core::SheetCommand& sheet : document.sheets)
+		lastPlan = std::max(lastPlan, std::stoi(sheet.number));
+	CHECK(document.sectionSheet.startNumber == lastPlan + 1);
+	CHECK(document.sectionSheet.title == kSectionSheetTitle);
 
 	// 命令セット全体が検証を通る（描画フェーズへ渡せる）。
 	CHECK(core::validateDocument(document));

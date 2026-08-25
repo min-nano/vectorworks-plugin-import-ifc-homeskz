@@ -14,8 +14,8 @@
 //	                                        ConfigureViewport）で仕上げる。
 //	  * gSDK->SetObjectVariable(h, 1064/1035/1059, …) … 断面の見え方（下記）
 //	  * VWViewportObj::SetRenderType(renderFinalHiddenLine) … レンダリング（下記）
-//	  * gSDK->GetObjectBounds(h, WorldRect&) … できたビューポートの実寸（並べるのに使う）
-//	  * gSDK->MoveObject(h, dx, dy)          … シートレイヤ上での移動
+//	  * draw/DrawUtil の PlaceViewport   … できたビューポートを測って用紙のマスへ置く
+//	                                        （GetObjectBounds ＋ MoveObject。M16）
 //
 //	【切断面の与え方（ローカル確認で実証済み）】ISDK の引数名は 3 点とも "sectionLinePt" だが、
 //	VW の UI は「切断線の点を 2 つ以上クリック → **切断の向き**をクリック → 奥行きを指定」
@@ -49,6 +49,14 @@
 //	なお〈切断面より奥の範囲〉の中の項目が灰色なのは**〈切断面より奥を表示〉が off だから**で
 //	（要件どおり。手作りでも off にすれば同じく灰色になる）、こちらは不具合ではない。
 //
+//	【用紙の割り付け（M16）】軸組図は 1 枚の用紙に複数並ぶ。**上下 2 段**になる縮尺を選び
+//	（core::sectionLayout）、1 段の枚数は用紙の幅が決める。入りきらないぶんはシートレイヤを
+//	足し、タイトルを "軸組図(1)" … と連番にする（core::sectionSheetTitle）。シートレイヤ番号は
+//	**伏図の続き**で、その始まりだけを命令セットが持つ（core::SectionSheetCommand）。
+//	**用紙の大きさはシートレイヤからしか読めない**のに、タイトルの連番は「何枚に分かれるか」
+//	＝用紙が分からないと決まらないので、**先に 1 枚目のシートレイヤを用意して**用紙を読み、
+//	割り付けを決めてからタイトルを付け直す（PrepareSheetLayer は同じ番号なら作り直さない）。
+//
 //	【範囲を「無限」にはできない（調べ尽くした結論）】UI で断面ビューポートを手で作ると
 //	〈長さ・高さの範囲〉は既定で〈無限〉になるが、**SDK からその状態にする手段は無い**。
 //	  * 断面まわりの API は CreateSectionViewport / CreateSectionLineInstance /
@@ -76,7 +84,6 @@
 #include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -85,13 +92,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// シートレイヤ上でビューポートを並べるレイアウト（用紙上・ mm）。左上を基準に 1 行
-		// kArrangeColumns 枚ずつ、各ビューポートの実寸に余白を足して詰める。
-		constexpr double kArrangeOriginX = 0.0;
-		constexpr double kArrangeOriginY = 0.0;
-		constexpr int kArrangeColumns = 5;
-		constexpr double kArrangeGap = 300.0;
-
 		// 切断面より奥の範囲に渡す値。**0 が「無限」**（ローカル確認で実測: 0 を渡した
 		// ビューポートの「断面の詳細設定」で〈切断面より奥の範囲: 無限〉になっていた）。
 		// 奥は表示しない設定（下記 1064）なので実際には効かないが、範囲の指定としては
@@ -189,36 +189,6 @@ namespace HomeskzIfcImport::draw
 			return rendered;
 		}
 
-		// できたビューポートをシートレイヤ上で重ならないように格子状へ並べる。**実寸は描いて
-		// みるまで分からない**ので、GetObjectBounds で測ってから左上を合わせる。
-		// 測れないものはその場に残す（並びが崩れるだけで図は残る）。
-		void ArrangeViewports(const std::vector<MCObjectHandle>& viewports)
-		{
-			double cursorX = kArrangeOriginX;
-			double cursorY = kArrangeOriginY;
-			double rowHeight = 0.0;
-			int column = 0;
-			for (const MCObjectHandle viewport : viewports)
-			{
-				WorldRect bounds;
-				if (!gSDK->GetObjectBounds(viewport, bounds))
-					continue;
-				const double width = bounds.right - bounds.left;
-				// WorldRect は top > bottom（Y 上向き）。高さは絶対値で見る。
-				const double height = std::abs(bounds.top - bounds.bottom);
-				gSDK->MoveObject(viewport, cursorX - bounds.left, cursorY - bounds.top);
-				cursorX += width + kArrangeGap;
-				rowHeight = std::max(rowHeight, height);
-				++column;
-				if (column >= kArrangeColumns)
-				{
-					column = 0;
-					cursorX = kArrangeOriginX;
-					cursorY -= rowHeight + kArrangeGap;
-					rowHeight = 0.0;
-				}
-			}
-		}
 	} // namespace
 
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
@@ -250,6 +220,35 @@ namespace HomeskzIfcImport::draw
 			return 0;
 		}
 
+		// M16 用紙の割り付け。軸組図は 1 枚の用紙に**上下 2 段**で並べ、収まらなければ
+		// シートレイヤを足す。1 枚ぶんの広がり（幅＝建物の平面の広がり・高さ＝断面の高さ
+		// 範囲）から縮尺と段組みを決める（core::sectionLayout）。
+		core::Vec2 content;
+		const bool haveContent = core::sectionContentSize(document, content);
+
+		// シートレイヤ番号は**伏図の続き**、タイトルは複数枚なら "軸組図(1)" … と連番
+		// （命令セットが持つのはその始まりと基だけ。core/Document.h の SectionSheetCommand）。
+		// **番号が正でタイトルが非空であることは検証済み**（core::validateDocument が
+		// 軸組図のある文書に要求する）。ここでは素直に使う。
+		const int startNumber = document.sectionSheet.startNumber;
+		const std::string& baseTitle = document.sectionSheet.title;
+		const auto sheetNumber = [startNumber](std::size_t page)
+		{ return std::to_string(startNumber + static_cast<int>(page)); };
+
+		// **用紙の大きさを読むために 1 枚目のシートレイヤを先に用意する**（用紙は
+		// シートレイヤからしか読めず、一方で「何枚に分かれるか＝タイトルの連番」は用紙が
+		// 分からないと決まらない）。タイトルはこの後の本番のループで付け直す。
+		core::SectionLayout layout;
+		std::size_t pages = 1;
+		bool arrange = false;
+		if (const MCObjectHandle first = PrepareSheetLayer(sheetNumber(0), baseTitle);
+			first != nil && haveContent)
+		{
+			layout = core::sectionLayout(content, SheetPageArea(first));
+			pages = core::sectionSheetCount(layout, commands.size());
+			arrange = true;
+		}
+
 		// 描画の前後でカレントレイヤが変わらないようにする（伏図と同じ作法）。
 		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();
 
@@ -258,6 +257,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingViewports = 0;
 		std::size_t missingRenderMode = 0;
 		std::size_t classesApplied = 0;
+		// 用紙の上で位置を合わせられなかった枚数（外形を測れなかった＝置いた場所のまま）。
+		std::size_t missingPlacement = 0;
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
 		const ObjectHandles emptyHandles;
 		const ObjectHandleTable& members =
@@ -268,17 +269,21 @@ namespace HomeskzIfcImport::draw
 		if (std::ranges::any_of(commands, [](const core::SectionCommand& section)
 								{ return !section.viewport.tags.empty(); }))
 			prepareDataTagPlugin();
-		std::vector<MCObjectHandle> viewports;
-		viewports.reserve(commands.size());
 
-		for (const core::SectionCommand& command : commands)
+		for (std::size_t index = 0; index < commands.size(); ++index)
 		{
+			const core::SectionCommand& command = commands[index];
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。
 			if (progress.cancelled())
 				break;
 			progress.step();
 
-			const MCObjectHandle sheetLayer = PrepareSheetLayer(command.number, command.title);
+			// 何枚目の用紙のどのマスか。割り付けが決まらなかった文書（建物の広がりが
+			// 求まらない）では 1 枚目へ全部載せ、縮尺も位置も触らない。
+			const std::size_t page = arrange ? index / layout.perSheet() : 0;
+			const std::size_t slot = arrange ? index % layout.perSheet() : 0;
+			const MCObjectHandle sheetLayer = PrepareSheetLayer(
+				sheetNumber(page), core::sectionSheetTitle(baseTitle, page, pages));
 			if (sheetLayer == nil)
 			{
 				++missingSheetLayers;
@@ -302,25 +307,26 @@ namespace HomeskzIfcImport::draw
 			// **投影は触らない**（ViewportProjection::Keep）——断面の向きで作られているので、
 			// 伏図がやる 2D/平面への作り直し（draw/DrawUtil.h の ViewportProjection）は
 			// ここでは意味を成さない。
-			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport,
-												ViewportProjection::Keep)
-								  .classesApplied;
-			// 断面寸法データタグ。**並べ替え（ArrangeViewports）より前**に置く——注釈は
-			// ビューポートと一緒に動くので、先に置いておけば移動しても図の上に留まる。
+			classesApplied +=
+				ConfigureViewport(viewport, sheetLayer, setup, command.viewport,
+								  ViewportProjection::Keep, arrange ? layout.scale : 0.0)
+					.classesApplied;
+
+			// 用紙の上の割り当てられたマスへ置く。**注釈（データタグ）より前に置く**
+			// ——注釈まで含めた外形で測ると、タグの有無で図の位置がずれる。注釈は
+			// ビューポートと一緒に動くので、後から足しても図の上に留まる。
+			if (arrange && !PlaceViewport(viewport, core::sectionSlotCenter(layout, slot)))
+				++missingPlacement;
 			drawViewportTags(viewport, command.viewport, members, tags);
-			viewports.push_back(viewport);
 			++drawn;
 		}
-
-		// 作ったぶんをシート上に並べる（中止で途中まででも、描けたものは重ならないようにする）。
-		ArrangeViewports(viewports);
 
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
 		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
-								missingRenderMode > 0))
+								missingRenderMode > 0 || missingPlacement > 0 || !arrange))
 		{
 			std::string text = "軸組図の診断: ";
 			if (missingSheetLayers > 0)
@@ -335,6 +341,12 @@ namespace HomeskzIfcImport::draw
 			if (missingRenderMode > 0)
 				text += "レンダリングを〈隠線消去〉にできなかった軸組図 " +
 						std::to_string(missingRenderMode) + " 枚。";
+			if (!arrange)
+				text += "用紙の割り付けを決められなかったため、縮尺と位置を調整せずに"
+						"1 枚のシートレイヤへ載せました。";
+			if (missingPlacement > 0)
+				text += "用紙の上で位置を合わせられなかった軸組図 " +
+						std::to_string(missingPlacement) + " 枚（外形を測れませんでした）。";
 			if (!note->empty())
 				*note += "\n";
 			*note += text;

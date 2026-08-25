@@ -58,7 +58,6 @@ using HomeskzIfcImport::parse::kFoundationLegendStyle;
 using HomeskzIfcImport::parse::kFoundationSheetNumber;
 using HomeskzIfcImport::parse::kFoundationSheetTitle;
 using HomeskzIfcImport::parse::kLayerFoundationAnchor;
-using HomeskzIfcImport::parse::kLegendPosition;
 using HomeskzIfcImport::parse::kMoyaPlanCutOffset;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::moyaPlanTitle;
@@ -348,11 +347,7 @@ TEST(FoundationSheetLegendFollowsAnchorBolts)
 		const bool expected = !buildAnchorBoltCommands(model).empty();
 		CHECK(sheets[0].legend.has_value() == expected);
 		if (expected)
-		{
 			CHECK(sheets[0].legend->style == kFoundationLegendStyle);
-			CHECK(sheets[0].legend->position.x == kLegendPosition.x);
-			CHECK(sheets[0].legend->position.y == kLegendPosition.y);
-		}
 	}
 }
 

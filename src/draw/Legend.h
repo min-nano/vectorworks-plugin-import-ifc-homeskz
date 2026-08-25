@@ -8,7 +8,8 @@
 //
 //	【ビューポート注釈ではない】データタグ（draw/Tag）はビューポートの注釈空間に入るが、
 //	凡例は**シートレイヤに直接置く**（＝用紙の上に載る）。したがって位置は用紙座標で、
-//	ビューポートの中身とは無関係に決まる。
+//	ビューポートの中身とは無関係に決まる。**置き場所は命令ではなく用紙の割り付けが決める**
+//	（M16。core::planLayout が凡例のために空けた右の 1 列の右上へ寄せる）。
 //
 //	【中身はスタイルが決める・スタイルは当てるだけでは効かない】凡例に何が並ぶか
 //	（ソース定義・集計基準・行レイアウト・ラベル）は PIO のパラメータでは設定できず、
@@ -64,6 +65,10 @@ namespace HomeskzIfcImport::draw
 		// UpdateStyledObjects を呼ぶ**ために覚える（ヘッダ冒頭「スタイルは当てるだけでは
 		// 効かない」）。
 		std::vector<RefNumber> styles;
+
+		// 置いた凡例そのもの。**中身が流し込まれた後に大きさが決まる**ので、位置合わせは
+		// updateLegendStyles の最後にまとめて行う（下記）。
+		std::vector<MCObjectHandle> objects;
 	};
 
 	// グラフィック凡例 PIO の定義を**設定ダイアログを出さない**で用意する。凡例を 1 つでも
@@ -76,12 +81,22 @@ namespace HomeskzIfcImport::draw
 	// 凡例 1 つをシートレイヤの上に置く。置けたら true を返し、内訳を counts へ積む
 	// （複数のシートぶんを 1 つの counts へ積んでよい）。**カレントレイヤをそのシートレイヤへ
 	// 移す**（PIO はカレントレイヤに入るため）ので、呼び出し側は必要なら後で戻すこと。
+	//
+	// topRight は**凡例の右上を合わせる点**（用紙 mm。core::planLayout の legendTopRight）。
+	// ここでは生成位置に使うだけで、**最終的な位置合わせは updateLegendStyles が行う**
+	// （凡例の大きさは並ぶ中身が決まって初めて定まるため。下記）。
 	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::LegendCommand& command,
-						 LegendCounts& counts);
+						 const core::Vec2& topRight, LegendCounts& counts);
 
-	// 置いた凡例の中身をスタイルから流し込む。**すべての凡例を置き終えてから 1 回だけ**
-	// 呼ぶ（使ったスタイルごとに UpdateStyledObjects を 1 回。ヘッダ冒頭）。
-	void updateLegendStyles(const LegendCounts& counts);
+	// 置いた凡例の中身をスタイルから流し込み、**右上を topRight へ揃える**。
+	// **すべての凡例を置き終えてから 1 回だけ**呼ぶ（使ったスタイルごとに
+	// UpdateStyledObjects を 1 回。ヘッダ冒頭）。
+	//
+	// 位置合わせをここでやるのは、**凡例の高さが「並ぶ行数」で決まる**ため——中身を流し込む
+	// 前に測った大きさは当てにならない。流し込んだ後に GetObjectBounds で測り、右上が
+	// topRight に来るよう動かす（「置いた後に測って直す」作法。データタグ・ビューポートと
+	// 同じ。M16）。こうすると、ビューポートのために空けた右の 1 列に収まり、図と重ならない。
+	void updateLegendStyles(const LegendCounts& counts, const core::Vec2& topRight);
 
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空文字）。
 	std::string legendDiagnostics(const LegendCounts& counts);

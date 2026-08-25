@@ -112,10 +112,9 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kFoundationLegendStyle = "基礎伏図凡例";
 	inline constexpr const char* kFloorLegendStyle = "床伏図凡例";
 
-	// 凡例のシートレイヤ上の配置点（用紙座標 mm）。**ビューポートと重ならない位置はローカルの
-	// VectorWorks で最終調整する**——ビューポートの実寸は描いてみるまで分からないので、
-	// 解析側では決められない（docs/DEV-NOTES.md M13）。
-	inline constexpr core::Vec2 kLegendPosition{0.0, 0.0};
+	// **凡例の配置点はここでは決めない**（M16）。用紙の大きさは描くときにシートレイヤから
+	// 読むもので解析側には分からないため、置き場所は描画側が用紙の割り付け
+	// （core::planLayout の legendTopRight＝ビューポートのために空けた右の 1 列）から決める。
 
 	// 基礎伏図の sheet 命令（無ければ空）。基礎要素が 1 つも無ければ空を返す——表示すべき"F-底
 	// 盤" ほかのレイヤが生成されず、ビューポートが空になるため。

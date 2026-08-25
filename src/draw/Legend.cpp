@@ -36,10 +36,10 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kGraphicLegendPlugin = "GraphicLegend";
 
 		// 箱幅パラメータ。凡例は矩形モードの PIO なので、点で生成すると幅 0 のまま潰れる
-		// （draw/Legend.h）。用紙上（ドキュメント単位 mm）の適当な幅を与えて可視化し、
-		// **ローカルの VW で最終調整する**。高さは行の内容から自動で決まるので与えない。
+		// （draw/Legend.h）。幅は**用紙の割り付けが凡例のために空ける幅**そのもの
+		// （core::kLegendBoxWidth）を与える——同じ値を 2 か所に書くと、空けた列より広い凡例が
+		// 置かれて図に重なる。高さは行の内容から自動で決まるので与えない。
 		constexpr const char* kFieldBoxWidth = "BoxWidth";
-		constexpr double kBoxWidth = 150.0;
 
 		// 見た目。凡例 PIO が内部で描く枠線・セルは**クラスでは制御できない**ので、
 		// オブジェクトの属性として直接与える（draw/Legend.h）。線の太さの単位はミル（1/1000
@@ -54,7 +54,7 @@ namespace HomeskzIfcImport::draw
 	}
 
 	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::LegendCommand& command,
-						 LegendCounts& counts)
+						 const core::Vec2& topRight, LegendCounts& counts)
 	{
 		if (sheetLayer == nil)
 		{
@@ -66,9 +66,10 @@ namespace HomeskzIfcImport::draw
 		// レイヤへ入るので、先にそのシートレイヤをアクティブにする。
 		gSDK->SetCurrentLayer(sheetLayer);
 
-		const MCObjectHandle object =
-			gSDK->CreateCustomObject(TXString(kGraphicLegendPlugin),
-									 WorldPt(command.position.x, command.position.y), 0.0, true);
+		// 生成位置は仮（右上に合わせるのは中身が流し込まれて大きさが定まってから＝
+		// updateLegendStyles）。
+		const MCObjectHandle object = gSDK->CreateCustomObject(
+			TXString(kGraphicLegendPlugin), WorldPt(topRight.x, topRight.y), 0.0, true);
 		if (object == nil)
 		{
 			++counts.failed;
@@ -96,7 +97,7 @@ namespace HomeskzIfcImport::draw
 		try
 		{
 			VWParametricObj pio(object);
-			if (!SetParamRealChecked(pio, TXString(kFieldBoxWidth), kBoxWidth))
+			if (!SetParamRealChecked(pio, TXString(kFieldBoxWidth), core::kLegendBoxWidth))
 				++counts.widthLeft;
 		}
 		catch (...)
@@ -112,17 +113,27 @@ namespace HomeskzIfcImport::draw
 		gSDK->SetLineWeight(object, kLineWeightMils);
 		gSDK->SetFillPat(object, kFillNone);
 
+		// 位置合わせのために覚えておく（updateLegendStyles が中身を流し込んだ後に動かす）。
+		counts.objects.push_back(object);
 		++counts.drawn;
 		return true;
 	}
 
-	void updateLegendStyles(const LegendCounts& counts)
+	void updateLegendStyles(const LegendCounts& counts, const core::Vec2& topRight)
 	{
 		// スタイルが決める中身（ソースから集めたセル＝並ぶシンボル）をインスタンスへ
 		// プッシュする。**関連付けただけでは流し込まれない**ので、これを呼ばないと凡例は
 		// 空のまま（draw/Legend.h）。by-instance の箱幅・線の太さ・塗りは保たれる。
 		for (const RefNumber style : counts.styles)
 			gSDK->UpdateStyledObjects(style);
+
+		// 中身が入って大きさが定まったので、**測って右上を揃える**（draw/Legend.h の
+		// updateLegendStyles）。測れないものはその場に残す（凡例は出る。位置だけずれる）。
+		for (const MCObjectHandle object : counts.objects)
+		{
+			if (WorldRect bounds; gSDK->GetObjectBounds(object, bounds))
+				gSDK->MoveObject(object, topRight.x - bounds.right, topRight.y - bounds.top);
+		}
 	}
 
 	std::string legendDiagnostics(const LegendCounts& counts)
