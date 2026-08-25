@@ -8,8 +8,8 @@
 //	検証項目（docs/DEV-NOTES.md M13）: 伏図のタイトル（床／小屋／母屋）・切断レベルによる span 柱
 //	レイヤの絞り込み・シートレイヤ番号の連番（基礎伏図 1 →柱梁伏図 2… →母屋伏図）・
 //	基礎の有無による基礎伏図とアンカーボルトの出し分け・母屋伏図を作る階（屋根版のある階）・
-//	**グラフィック凡例**（柱梁伏図・母屋伏図は常に "床伏図凡例"、基礎伏図はアンカーボルトを
-//	置いたときだけ "基礎伏図凡例"）・
+//	**グラフィック凡例**（柱梁伏図・母屋伏図は常に載せる。基礎伏図はアンカーボルトを
+//	置いたときだけ）・
 //	**表示レイヤが必ずストーリの作るレイヤに実在すること**（レイヤ名の規約がズレていない）・
 //	並び順に依存しない決定性。実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -51,10 +51,8 @@ using HomeskzIfcImport::parse::ColumnSpan;
 using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::floorPlanTitle;
 using HomeskzIfcImport::parse::hasFoundation;
-using HomeskzIfcImport::parse::kFloorLegendStyle;
 using HomeskzIfcImport::parse::kFloorPlanCutOffset;
 using HomeskzIfcImport::parse::kFloorPlanStartNumber;
-using HomeskzIfcImport::parse::kFoundationLegendStyle;
 using HomeskzIfcImport::parse::kFoundationSheetNumber;
 using HomeskzIfcImport::parse::kFoundationSheetTitle;
 using HomeskzIfcImport::parse::kLayerFoundationAnchor;
@@ -349,7 +347,6 @@ TEST(FoundationSheetLegendFollowsAnchorBolts)
 		CHECK(sheets[0].legend.has_value() == expected);
 		if (expected)
 		{
-			CHECK(sheets[0].legend->style == kFoundationLegendStyle);
 			CHECK(sheets[0].legend->position.x == kLegendPosition.x);
 			CHECK(sheets[0].legend->position.y == kLegendPosition.y);
 		}
@@ -364,15 +361,17 @@ TEST(FloorAndMoyaSheetsAlwaysCarryFloorLegend)
 		const Model& model = fixture(name, ok);
 		CHECK(ok);
 
-		// 柱梁伏図・母屋伏図は**必ず**凡例を載せる（何が並ぶかはスタイルが決めるので、
-		// 解析側では中身の有無を判断できない）。スタイルは基礎伏図とは別のもの。
+		// 柱梁伏図・母屋伏図は**必ず**凡例を載せる（何が並ぶかは凡例オブジェクト自身の
+		// ソース定義が決めるので、解析側では中身の有無を判断できない）。凡例が持つのは
+		// 配置点だけで、基礎伏図の凡例との違いも「どの伏図に載るか」しかない。
 		for (const std::vector<SheetCommand>& sheets :
 			 {buildFloorFramingSheetCommands(model), buildMoyaSheetCommands(model)})
 		{
 			for (const SheetCommand& sheet : sheets)
 			{
 				CHECK(sheet.legend.has_value());
-				CHECK(sheet.legend->style == kFloorLegendStyle);
+				CHECK(sheet.legend->position.x == kLegendPosition.x);
+				CHECK(sheet.legend->position.y == kLegendPosition.y);
 			}
 		}
 	}
@@ -395,8 +394,6 @@ TEST(SheetCommandsAreDeterministic)
 			CHECK(first[i].title == second[i].title);
 			CHECK(first[i].viewport.layers == second[i].viewport.layers);
 			CHECK(first[i].legend.has_value() == second[i].legend.has_value());
-			if (first[i].legend.has_value() && second[i].legend.has_value())
-				CHECK(first[i].legend->style == second[i].legend->style);
 		}
 	}
 }

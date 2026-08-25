@@ -567,7 +567,10 @@ namespace HomeskzIfcImport::draw
 		{
 			VWViewportObj vp(viewport);
 			if (scale > 0.0)
+			{
 				vp.SetScale(scale);
+				finish.scale = scale;
+			}
 			if (projection == ViewportProjection::Plan)
 				finish.planViewApplied = ForcePlanView(vp);
 			vp.SetDescription(TXString(command.drawingTitle.c_str()));

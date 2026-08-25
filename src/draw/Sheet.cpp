@@ -8,9 +8,10 @@
 //	【シートレイヤに載るのはビューポートだけではない】伏図には**グラフィック凡例**
 //	（VW 標準の "GraphicLegend" PIO）も 1 つ載る（M13）。凡例はビューポート注釈では
 //	なくシートレイヤ（＝用紙）へ直接置くので、置き方は draw/Legend が持つ。ここは
-//	ビューポートを仕上げた後にそれを呼び、**全シートを置き終えてからスタイルごとの
-//	反映**（updateLegendStyles）をまとめて 1 回行う（draw/Legend.h「スタイルは当てる
-//	だけでは効かない」）。
+//	ビューポートを仕上げた後にそれを呼び、**そのビューポートに設定した縮尺**
+//	（ConfigureViewport が持ち帰る `ViewportFinish::scale`）を渡す——凡例のイメージの縮率を
+//	図と揃えるため（draw/Legend.h）。凡例は**スタイル無しで置く**ので、置いた後にスタイルを
+//	反映させる手当ては要らない。
 //
 //	【シートレイヤとビューポートの手当ては draw/DrawUtil が持つ】シートレイヤの用意
 //	（PrepareSheetLayer）・表示レイヤの絞り込み・クラス表示・縮尺・図面タイトル/図番・更新
@@ -130,14 +131,12 @@ namespace HomeskzIfcImport::draw
 			// タグの後に置くのは、凡例がカレントレイヤをこのシートレイヤへ移すため——
 			// タグは生成したカレントレイヤに一旦入ってから注釈へ移るので、順序を逆にすると
 			// タグがシートレイヤを経由することになる（結果は同じだが、経路は素直な方がよい）。
+			// 縮尺は**いま仕上げたこのビューポートのもの**を渡す（凡例のイメージの縮率を
+			// 図と揃える。draw/Legend.h）。
 			if (command.legend.has_value())
-				drawSheetLegend(sheetLayer, *command.legend, legends);
+				drawSheetLegend(sheetLayer, *command.legend, finish.scale, legends);
 			++drawn;
 		}
-
-		// 凡例の中身（スタイルのソースから集めたセル）を流し込む。**全部置いてから
-		// スタイルごとに 1 回**（draw/Legend.h「スタイルは当てるだけでは効かない」）。
-		updateLegendStyles(legends);
 
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);

@@ -7,8 +7,9 @@
 //	どの伏図に何を映すかは「取り込んだ要素の有無」から決まる。したがってこのモジュールは
 //	IFC の幾何をほとんど見ず、**他のモジュールが既に出した答え**（ストーリ一覧・柱の span・
 //	横架材命令の配置先レイヤ・屋根版の有無・基礎の有無）を組み合わせるだけになる。
-//	グラフィック凡例（M13）も同じ性格で、決めるのは「どの伏図にどのスタイルの凡例を
-//	載せるか」だけ——並ぶ中身は VW 側のスタイルが持つ（core/Document.h の LegendCommand）。
+//	グラフィック凡例（M13）も同じ性格で、決めるのは「どの伏図に凡例を載せるか」だけ
+//	——凡例は**スタイル無しのオブジェクト**として置き、並ぶ中身は凡例オブジェクト自身の
+//	ソース定義が決める（core/Document.h の LegendCommand）。
 //	レイヤ名を自前で組み立てず parse/Story の storyLayerName を通すのも同じ理由で、
 //	**ストーリがレイヤを作るときと同じ規約**でしか名前を作らない（規約がズレると、命令は
 //	あるのにビューポートが空になる）。
@@ -34,11 +35,10 @@ namespace HomeskzIfcImport::parse
 	namespace
 	{
 		// 伏図 1 枚の sheet 命令を組み立てる。番号・タイトルは図面タイトル／図番と同じ値を使
-		// う。legendStyle が非 nullptr なら、そのスタイルのグラフィック凡例をシートレイヤに載
-		// せる（空の凡例を作らないための出し分けは呼び出し側が持つ。ヘッダ冒頭）。
+		// う。withLegend なら、グラフィック凡例をシートレイヤに載せる（空の凡例を作らないため
+		// の出し分けは呼び出し側が持つ。ヘッダ冒頭）。
 		core::SheetCommand makeSheet(std::string number, std::string title,
-									 std::vector<std::string> layers,
-									 const char* legendStyle = nullptr)
+									 std::vector<std::string> layers, bool withLegend = false)
 		{
 			core::SheetCommand sheet;
 			sheet.number = std::move(number);
@@ -46,10 +46,9 @@ namespace HomeskzIfcImport::parse
 			sheet.viewport.drawingNumber = sheet.number;
 			sheet.viewport.drawingTitle = sheet.title;
 			sheet.viewport.layers = std::move(layers);
-			if (legendStyle != nullptr)
+			if (withLegend)
 			{
 				core::LegendCommand legend;
-				legend.style = legendStyle;
 				legend.position = kLegendPosition;
 				sheet.legend = legend;
 			}
@@ -111,12 +110,11 @@ namespace HomeskzIfcImport::parse
 		// グラフィック凡例は**アンカーボルトを 1 本でも置いたときだけ**載せる。凡例に並ぶのは
 		// 基礎伏図に映るシンボル（＝アンカーボルト）なので、1 本も無ければ中身の無い箱が図面
 		// に残るだけになる（あちらは「載せるシンボルが 1 つも無ければ空リスト」と書いていた）。
-		const char* const legendStyle =
-			context.anchorBolts().empty() ? nullptr : kFoundationLegendStyle;
+		const bool withLegend = !context.anchorBolts().empty();
 
 		std::vector<core::SheetCommand> commands;
 		commands.push_back(makeSheet(kFoundationSheetNumber, kFoundationSheetTitle,
-									 std::move(layers), legendStyle));
+									 std::move(layers), withLegend));
 		return commands;
 	}
 
@@ -159,10 +157,10 @@ namespace HomeskzIfcImport::parse
 
 			std::string title = floorPlanTitle(i, isTop, stories.size());
 			std::string number = std::to_string(kFloorPlanStartNumber + static_cast<int>(i));
-			// グラフィック凡例は常に載せる（何が並ぶかはスタイルが決めるので、ここでは中身の
-			// 有無を判断できない）。
-			commands.push_back(makeSheet(std::move(number), std::move(title), std::move(layers),
-										 kFloorLegendStyle));
+			// グラフィック凡例は常に載せる（何が並ぶかは凡例オブジェクトのソース定義が決める
+			// ので、ここでは中身の有無を判断できない）。
+			commands.push_back(
+				makeSheet(std::move(number), std::move(title), std::move(layers), true));
 		}
 		return commands;
 	}
@@ -221,10 +219,9 @@ namespace HomeskzIfcImport::parse
 			std::string title = moyaPlanTitle(i);
 			std::string number = std::to_string(baseNumber + seq);
 			++seq;
-			// 柱梁伏図と同じスタイルの凡例を載せる（母屋伏図に映るシンボルも同じ"床伏図凡例"
-			// が集める）。
-			commands.push_back(makeSheet(std::move(number), std::move(title), std::move(layers),
-										 kFloorLegendStyle));
+			// 柱梁伏図と同じく凡例を載せる（母屋伏図に映るシンボルも同じ形で集まる）。
+			commands.push_back(
+				makeSheet(std::move(number), std::move(title), std::move(layers), true));
 		}
 		return commands;
 	}
