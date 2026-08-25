@@ -1,7 +1,7 @@
 //
 //	parse/Sheet.cpp
 //
-//	シート（伏図）の解析。Python 版 ifc/sheet.py に対応する（ROADMAP.md M13）。
+//	シート（伏図）の解析。Python 版 ifc/sheet.py に対応する（docs/DEV-NOTES.md M13）。
 //	【SDK 非依存】ここでは VectorWorks SDK を include しない。
 //
 //	どの伏図に何を映すかは「取り込んだ要素の有無」から決まる。したがってこのモジュールは

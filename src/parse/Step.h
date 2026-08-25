@@ -5,7 +5,7 @@
 //	STEP トークナイザ＋エンティティグラフを提供する。Python 版が ifcopenshell を
 //	「エンティティグラフの読み取り」だけに使っているのと同じ立ち位置で、幾何エンジン
 //	（OpenCASCADE 等）は持たない。配置行列・断面・押し出しの幾何計算は parse/IfcGeometry
-//	＋ core/Geometry へ別途移植する（ROADMAP.md M2）。
+//	＋ core/Geometry へ別途移植する（docs/DEV-NOTES.md M2）。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。通常の C++
 //	ツールチェインだけでコンパイル・単体実行・テストできる（CLAUDE.md「Phase 1」）。

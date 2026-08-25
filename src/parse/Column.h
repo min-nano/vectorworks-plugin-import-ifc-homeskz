@@ -2,7 +2,7 @@
 //	parse/Column.h
 //
 //	Phase 1（IFC 解析）の柱モジュール。Python 版 ifc/column.py に対応する
-//	（ROADMAP.md M8「柱」）。管柱・通し柱・小屋束——ホームズ君 IFC の IfcColumn を
+//	（docs/DEV-NOTES.md M8「柱」）。管柱・通し柱・小屋束——ホームズ君 IFC の IfcColumn を
 //	すべてここで解析し、core::ColumnCommand へ変換する。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ

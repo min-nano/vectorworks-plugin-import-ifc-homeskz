@@ -139,20 +139,20 @@ namespace HomeskzIfcImport::draw
 	// そのまま壁厚になる（立上りはコンクリート 1 層＝壁厚。parse/Footing）。
 	//
 	// 併せて**コア構成要素**を指定する（VW が結合部で構成要素を融合する基準になる。指定が
-	// 無いと壁結合しても平面で層が繋がらず、取り合いに面線が残りうる。ROADMAP.md M10）。
+	// 無いと壁結合しても平面で層が繋がらず、取り合いに面線が残りうる。docs/DEV-NOTES.md M10）。
 	// 立上りは構成が 1 層なので、その 1 枚（索引 0）がコアになる。索引は SetComponents と
 	// 同じ **0 始まり**（上記 ★）と解釈している——VS 版 SetCoreWallComponent の説明は
 	// 「0 はコア無しにする」だが、VS の構成要素索引は 1 始まりで ISDK のそれは 0 始まりなので、
 	// ここは先頭の層を指す。スタイルへ同じ呼び出しをしていた M10 でも、これが原因で困った
-	// 事象は出ていない（T 字の面線の原因は ResetObject 不足だった。ROADMAP.md M10）。
+	// 事象は出ていない（T 字の面線の原因は ResetObject 不足だった。docs/DEV-NOTES.md M10）。
 	// 構成層が空なら何もしない。
 	void SetWallComponents(MCObjectHandle wall,
 						   const std::vector<core::ComponentCommand>& components);
 
-	// --- 取り込み全体の Undo（ROADMAP.md M15）--------------------------------------
+	// --- 取り込み全体の Undo（docs/DEV-NOTES.md M15）--------------------------------------
 	//
 	// 【なぜレイヤを記録するのか】VectorWorks は取り込みの開始時に undo イベントを開かない
-	// （実機の診断ログで確認。ROADMAP.md M15）。そこで**自分でイベントを開き**、
+	// （実機の診断ログで確認。docs/DEV-NOTES.md M15）。そこで**自分でイベントを開き**、
 	// `AddAfterSwapObject` で「あとで消してよいもの」を登録する。登録するのは
 	// **このインポートが新しく作ったレイヤだけ**——レイヤを消せばその上の図形も消えるので、
 	// 図形を 1 つずつ登録する必要は無く、**二重登録（レイヤと中身の両方）で undo が既に
@@ -168,7 +168,7 @@ namespace HomeskzIfcImport::draw
 	// 取り込みの図面変更をまるごと包む undo イベント。**構築で開き、破棄で閉じる**
 	// （途中で例外が出ても閉じる）。記録が 1 件も無ければ、閉じるときにイベントごと
 	// 捨てる——空のイベントを残すと「取り消し」が中途半端に効いて図面が壊れるため
-	// （実機で確認。ROADMAP.md M15）。
+	// （実機で確認。docs/DEV-NOTES.md M15）。
 	class ImportUndoScope final
 	{
 	public:

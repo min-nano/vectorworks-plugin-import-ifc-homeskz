@@ -3,7 +3,7 @@
 //
 //	Phase 2（VW 描画）の柱モジュール。Python 版 vw/column.py に対応する。
 //	命令セット（core::ColumnCommand）を**構造材ツール（StructuralMember）**の鉛直材として
-//	配置する（ROADMAP.md M8）。管柱・通し柱・小屋束を同じ経路で描き、違いは構造用途
+//	配置する（docs/DEV-NOTES.md M8）。管柱・通し柱・小屋束を同じ経路で描き、違いは構造用途
 //	（StructuralUse）とクラス・配置先の span レイヤだけ。**柱の高さは上下端のストーリ
 //	バウンドだけで決まる**（パスは配置点しか与えない。draw/Column.cpp 冒頭）。
 //

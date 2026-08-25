@@ -6,7 +6,7 @@
 //	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_roof.py の全ケースを
 //	1 対 1 で写している。
 //
-//	検証項目（ROADMAP.md M6）: 厚み 12mm 固定・クラスとレイヤ・平面外形（footprint）・
+//	検証項目（docs/DEV-NOTES.md M6）: 厚み 12mm 固定・クラスとレイヤ・平面外形（footprint）・
 //	軒（屋根軸）が最も低い辺に乗ること・upslope が棟側を指すこと・勾配（rise/run）・
 //	軒の目標 Z（屋根版の平面＋垂木せいの鉛直換算）・センタリング・退化面のスキップ・
 //	屋根版 1 面 = 野地板 1 枚・決定性。実フィクスチャのパスは CMake が

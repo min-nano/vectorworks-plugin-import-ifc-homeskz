@@ -2,7 +2,7 @@
 //	draw/Legend.h
 //
 //	Phase 2（VW 描画）のグラフィック凡例モジュール。Python 版 vw/sheet.py の draw_legend に
-//	対応する（ROADMAP.md M13）。シート命令が持つ凡例（core::SheetCommand::legend）を
+//	対応する（docs/DEV-NOTES.md M13）。シート命令が持つ凡例（core::SheetCommand::legend）を
 //	**そのシートレイヤの上**に VW 標準の "GraphicLegend" PIO で置き、ユーザーが VW 側で
 //	用意したグラフィック凡例スタイルを関連付ける。
 //
@@ -37,7 +37,7 @@
 //	    **オブジェクトの属性として直接**設定する。
 //
 //	実描画（凡例の中身・大きさ・位置）はローカルの VectorWorks で目視確認する
-//	（ROADMAP.md M13「ローカル確認」）。
+//	（docs/DEV-NOTES.md M13「ローカル確認」）。
 //
 
 #pragma once

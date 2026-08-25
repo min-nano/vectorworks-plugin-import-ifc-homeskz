@@ -28,7 +28,7 @@
 //	しておくと見出しが最後まで出てこない。
 //
 //	実挙動（ダイアログの見た目・キャンセルの効き・yield の頻度が重すぎないか）は
-//	ローカルの VectorWorks で確認する（ROADMAP.md M15「ローカル確認」）。
+//	ローカルの VectorWorks で確認する（docs/DEV-NOTES.md M15「ローカル確認」）。
 //
 
 #include "PluginPrefix.h"

@@ -252,38 +252,38 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// ストーリ: 名前・接尾辞が非空で、各ストーリレベルの種別・レイヤ名が非空であること
-		// （Python 版 _validate_story / _validate_level と同じ関門。ROADMAP.md M3）。
+		// （Python 版 _validate_story / _validate_level と同じ関門。docs/DEV-NOTES.md M3）。
 		if (!std::ranges::all_of(document.stories, isValidStory))
 			return false;
 
 		// 床板: 配置先レイヤ名・クラス名・スタイル名が非空で、外形が 3 点以上、高さ基準の
 		// レベル種別が非空、構成層が 1 枚以上あり総厚が正であること（isValidFloor 参照。
-		// Python 版 _validate_floor と同じ関門。ROADMAP.md M5）。
+		// Python 版 _validate_floor と同じ関門。docs/DEV-NOTES.md M5）。
 		if (!std::ranges::all_of(document.floors, isValidFloor))
 			return false;
 
 		// 横架材: 配置先レイヤ名・クラス名・構造材 ID が非空で、断面が正・天端中央線が非縮退、
 		// 両端の高さ基準のレベル種別が非空であること（isValidMember 参照。Python 版
-		// _validate_member と同じ関門。ROADMAP.md M7）。
+		// _validate_member と同じ関門。docs/DEV-NOTES.md M7）。
 		if (!std::ranges::all_of(document.members, isValidMember))
 			return false;
 
 		// 柱: 配置先レイヤ名（span レイヤ）・クラス名・構造材 ID・構造用途が非空で、断面と
 		// 柱高さが正、上下端の高さ基準のレベル種別が非空であること（isValidColumn 参照。
-		// Python 版 _validate_column と同じ関門。ROADMAP.md M8）。
+		// Python 版 _validate_column と同じ関門。docs/DEV-NOTES.md M8）。
 		if (!std::ranges::all_of(document.columns, isValidColumn))
 			return false;
 
 		// 基礎: 立上りは壁厚が正・壁芯が非縮退・上下端のレベル種別が非空、底盤は床板と同じ
 		// 関門＋コンクリート厚が正であること（isValidWall / isValidSlab 参照。Python 版
-		// _validate_wall / _validate_slab と同じ関門。ROADMAP.md M9）。
+		// _validate_wall / _validate_slab と同じ関門。docs/DEV-NOTES.md M9）。
 		if (!std::ranges::all_of(document.walls, isValidWall))
 			return false;
 		if (!std::ranges::all_of(document.slabs, isValidSlab))
 			return false;
 
 		// 壁結合（M10）: 結合する 2 本が異なり、どちらも walls の範囲内であること
-		// （isValidWallJoin 参照。Python 版 _validate_wall_join と同じ関門。ROADMAP.md M10）。
+		// （isValidWallJoin 参照。Python 版 _validate_wall_join と同じ関門。docs/DEV-NOTES.md M10）。
 		// 地中梁は底盤の modifiers として isValidSlab が併せて見る。
 		if (!std::ranges::all_of(document.wallJoins, [&document](const WallJoinCommand& join)
 								 { return isValidWallJoin(join, document.walls.size()); }))
@@ -291,7 +291,7 @@ namespace HomeskzIfcImport::core
 
 		// 垂木・野地板: 配置先レイヤ名・クラス名が非空で、垂木は断面が正・平面が非縮退、
 		// 野地板は外形 3 点以上・厚みが正であること（Python 版 _validate_rafter /
-		// _validate_roof と同じ関門。ROADMAP.md M6）。
+		// _validate_roof と同じ関門。docs/DEV-NOTES.md M6）。
 		if (!std::ranges::all_of(document.rafters, isValidRafter))
 			return false;
 		if (!std::ranges::all_of(document.roofs, isValidRoof))
@@ -299,7 +299,7 @@ namespace HomeskzIfcImport::core
 
 		// シンボル置換系（アンカーボルト・床束・火打・仕口）: 配置先レイヤ名とシンボル名が
 		// 非空であること（isValidSymbol 参照。Python 版 _validate_anchor_bolt ほかと同じ関門。
-		// ROADMAP.md M11）。4 種は同じ命令型なので同じ規則で見る。
+		// docs/DEV-NOTES.md M11）。4 種は同じ命令型なので同じ規則で見る。
 		if (!std::ranges::all_of(document.anchorBolts, isValidSymbol) ||
 			!std::ranges::all_of(document.floorPosts, isValidSymbol) ||
 			!std::ranges::all_of(document.fireBraces, isValidSymbol) ||
@@ -307,19 +307,19 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// 断面記号・伏図記号（M12）: PIO のレイヤ名・作図クラス名・検索対象レイヤ名が非空で、
-		// 伏図記号はシンボル名も非空であること（isValidColumnMark 参照。ROADMAP.md M12）。
+		// 伏図記号はシンボル名も非空であること（isValidColumnMark 参照。docs/DEV-NOTES.md M12）。
 		if (!std::ranges::all_of(document.columnMarks, isValidColumnMark))
 			return false;
 
 		// シート（伏図）: シートレイヤ番号・タイトルが非空で、ビューポートが非空のレイヤ名を
 		// 1 つ以上持ち、グラフィック凡例を載せるならそのスタイル名も非空であること
 		// （isValidSheet 参照。Python 版 _validate_sheet / _validate_viewport / _validate_legend と
-		// 同じ関門。ROADMAP.md M13）。
+		// 同じ関門。docs/DEV-NOTES.md M13）。
 		if (!std::ranges::all_of(document.sheets, isValidSheet))
 			return false;
 
 		// 断面ビューポート（軸組図）: シートレイヤ番号・タイトル・表示レイヤに加え、指示線が
-		// 縮退していないこと（isValidSection 参照。ROADMAP.md M14）。
+		// 縮退していないこと（isValidSection 参照。docs/DEV-NOTES.md M14）。
 		if (!std::ranges::all_of(document.sections, isValidSection))
 			return false;
 
@@ -338,10 +338,10 @@ namespace HomeskzIfcImport::core
 		// 同一判定は parse/Grid の重複線除去と同じ core/Geometry の samePoint を通す
 		// （閾値がズレると「畳まれた線が検証では非縮退」のような食い違いが起こる）。
 		// クラス名は空でもよい（無クラス＝既定クラスへ）。1 本でも不正なら描画しない
-		// （Python 版 validateDocument と同じ関門。ROADMAP.md M1）。
+		// （Python 版 validateDocument と同じ関門。docs/DEV-NOTES.md M1）。
 		//
 		// TODO: 命令リストが増えたら、要素ごとの all_of を && で連ねてここに積む
-		// （anchorBolt … の検証。ROADMAP.md）。
+		// （anchorBolt … の検証。docs/DEV-NOTES.md）。
 		return std::ranges::all_of(
 			document.grids, [](const GridCommand& grid)
 			{ return !grid.layer.empty() && !samePoint(grid.start, grid.end); });

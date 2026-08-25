@@ -96,7 +96,7 @@ namespace HomeskzIfcImport::parse
 	//
 	// **なぜ要るか**: ネイティブプラグインの未捕捉例外は Python 版と違って VectorWorks
 	// 本体を巻き込んで落とす。フェーズ境界（Extensions/ExtMenu の DoInterface）で必ず
-	// 受け止め、ユーザーへ 1 通のエラーダイアログとして見せる（ROADMAP.md M15「例外処理」）。
+	// 受け止め、ユーザーへ 1 通のエラーダイアログとして見せる（docs/DEV-NOTES.md M15「例外処理」）。
 	// 文言はここに置いて無 SDK でテストする（完了文言と同じ理由）。
 	std::string formatImportError(const std::string& detail, const std::string& logPath = {});
 } // namespace HomeskzIfcImport::parse

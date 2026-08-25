@@ -3,7 +3,7 @@
 //
 //	Phase 2（VW 描画）の横架材モジュール。Python 版 vw/member.py に対応する。
 //	命令セット（core::MemberCommand）を**構造材ツール（StructuralMember）**のオブジェクトと
-//	して配置する（ROADMAP.md M7）。土台・梁・桁だけでなく、母屋・棟木・登り梁も同じ経路で
+//	して配置する（docs/DEV-NOTES.md M7）。土台・梁・桁だけでなく、母屋・棟木・登り梁も同じ経路で
 //	描く（違いは配置先レイヤと高さ基準レベルだけ）。
 //
 //	【SDK 依存】実装（draw/Member.cpp）は PluginPrefix.h（VectorWorks SDK）を include する。

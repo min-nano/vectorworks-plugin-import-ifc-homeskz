@@ -3,7 +3,7 @@
 //
 //	Phase 2（VW 描画）の基礎モジュール。Python 版 vw/footing.py に対応する。
 //	命令セットの立上り（core::WallCommand）を**壁オブジェクト**へ、底盤
-//	（core::SlabCommand）を**スラブオブジェクト**へ変換して配置する（ROADMAP.md M9）。
+//	（core::SlabCommand）を**スラブオブジェクト**へ変換して配置する（docs/DEV-NOTES.md M9）。
 //
 //	【SDK 依存】.cpp は PluginPrefix.h（VectorWorks SDK）を include するため、
 //	SDK ビルドでのみコンパイルされる。この宣言ヘッダ自体は core::Document / core::Progress

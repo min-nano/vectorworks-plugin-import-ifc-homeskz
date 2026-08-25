@@ -4,9 +4,9 @@
 //	断面記号・伏図記号の解析（src/parse/ColumnMark）の単体テスト。VectorWorks SDK を
 //	一切 include せず、無 SDK のテストハーネス（TestFramework.h）で走る
 //	（CLAUDE.md「テスト方針」）。Python 版 test_ifc_column_mark.py が見ていた性質を
-//	写しつつ、期待値は手書きする（ROADMAP.md「Python 版出力との比較はしない」）。
+//	写しつつ、期待値は手書きする（docs/DEV-NOTES.md「Python 版出力との比較はしない」）。
 //
-//	検証項目（ROADMAP.md M12）: span レイヤごとに断面記号・伏図記号が 1 つずつ出ること・
+//	検証項目（docs/DEV-NOTES.md M12）: span レイヤごとに断面記号・伏図記号が 1 つずつ出ること・
 //	配置先と検索対象レイヤ（断面記号＝span レイヤ自身／伏図記号＝"{to}-柱伏図記号"）・
 //	作図クラス・シンボルの選択（柱／小屋束）・対象クラスが空＝全クラスであること・
 //	並び（断面記号が先）・伏図記号レイヤの列挙と「切断の直下」の選び方・実フィクスチャ

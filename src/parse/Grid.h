@@ -9,7 +9,7 @@
 //	グラフ（parse/Step の Model）と自前幾何（core/Geometry の Vec2）だけで完結し、
 //	通常の C++ ツールチェインでコンパイル・単体テストできる（CLAUDE.md「Phase 1」）。
 //
-//	通り芯が最初の縦切り（ROADMAP.md M1）である理由: 配置行列・断面・ストーリを一切
+//	通り芯が最初の縦切り（docs/DEV-NOTES.md M1）である理由: 配置行列・断面・ストーリを一切
 //	必要とせず、IfcGridAxis → IfcPolyline の端点 → 中心オフセット → GridAxis という
 //	最短経路で 2 フェーズが端から端まで通ることを実証できる。
 //
@@ -59,7 +59,7 @@ namespace HomeskzIfcImport::parse
 
 	// STEP Model から通り芯の描画命令を組み立てる（Python 版 build_grid_commands 相当）。
 	//
-	// 手順（ROADMAP.md M1 / Python 版 ifc/grid.py resolve_lines）:
+	// 手順（docs/DEV-NOTES.md M1 / Python 版 ifc/grid.py resolve_lines）:
 	//   1. IfcGridAxis の AxisCurve(IfcPolyline) の全点を取り、連続する点対（線分）
 	//      ごとに 1 本を作る（多点ポリラインは複数本になる）。
 	//   2. 幾何的に重複する線分を除去（反転も同一とみなす）。

@@ -2,7 +2,7 @@
 //	parse/Section.h
 //
 //	Phase 1（IFC 解析）の断面ビューポート（軸組図）モジュール。Python 版 ifc/section.py に
-//	対応する（ROADMAP.md M14）。伏図（parse/Sheet）がモデルを真上から見た図なのに対し、
+//	対応する（docs/DEV-NOTES.md M14）。伏図（parse/Sheet）がモデルを真上から見た図なのに対し、
 //	軸組図は建物を**鉛直面で切った図**を通りごとにシートへ並べる。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。

@@ -11,7 +11,7 @@
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。屋根面の取り出しは垂木と
 //	同じ parse/IfcGeometry の roofPlane を共有する（いずれも屋根版から屋根面を得る）。
 //
-//	組み立てる内容（Python 版 CLAUDE.md「野地板」節。ROADMAP.md M6）:
+//	組み立てる内容（Python 版 CLAUDE.md「野地板」節。docs/DEV-NOTES.md M6）:
 //	  * **軒（屋根軸）**… 屋根面の最も低い（最も軒側＝勾配方向 d への射影が最大の）頂点を
 //	    通り、軒に平行な方向 e へ footprint の広がりぶん伸ばした線分。屋根オブジェクトは
 //	    この軸から棟側（upslope）へ勾配なりに立ち上がるので、footprint 全体が軸の棟側に

@@ -3,7 +3,7 @@
 //
 //	幾何の土台（src/core/Geometry ＋ src/parse/IfcGeometry）の単体テスト。
 //	VectorWorks SDK を一切 include せず、無 SDK のテストハーネス（TestFramework.h）で
-//	走る（CLAUDE.md「テスト方針」: core/ parse/ は無 SDK で単体テスト）。ROADMAP.md M2
+//	走る（CLAUDE.md「テスト方針」: core/ parse/ は無 SDK で単体テスト）。docs/DEV-NOTES.md M2
 //	「幾何の土台」の検証にあたる。M3 以降のほぼ全要素がここを共有するため、後工程へ
 //	ズレを持ち越さないよう、数式を手計算値と許容誤差で突き合わせる。
 //

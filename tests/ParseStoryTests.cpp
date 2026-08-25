@@ -6,7 +6,7 @@
 //	（TestFramework.h）で走る（CLAUDE.md「テスト方針」: core/ parse/ は無 SDK で単体
 //	テスト）。Python 版 test_ifc_story.py の意図を写す。
 //
-//	検証項目（ROADMAP.md M3）: ローカル配置 Z 抽出・横架材天端オフセット（列挙順に
+//	検証項目（docs/DEV-NOTES.md M3）: ローカル配置 Z 抽出・横架材天端オフセット（列挙順に
 //	依存しない最大負値）・ストーリ収集（Elevation 昇順・最上階判定・非 FL 除外）・
 //	story 命令の組み立て（一般階=FL＋横架材天端、最上階=軒高。屋根版のある階は 垂木・野地板 を
 //	その直上に積む＝M6。柱のある階は span 柱レベルを最上段に積む＝M8）・

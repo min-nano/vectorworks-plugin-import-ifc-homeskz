@@ -2,7 +2,7 @@
 //	parse/Sheet.h
 //
 //	Phase 1（IFC 解析）のシート（伏図）モジュール。Python 版 ifc/sheet.py に対応する
-//	（ROADMAP.md M13）。**IFC からシート構成を読み取るわけではない**——取り込んだ要素の
+//	（docs/DEV-NOTES.md M13）。**IFC からシート構成を読み取るわけではない**——取り込んだ要素の
 //	有無（基礎があるか・屋根版を持つ階はどれか・柱の span はどう分かれたか）から
 //	「どの伏図を作り、そこに何を映すか」を決める。
 //
@@ -117,7 +117,7 @@ namespace HomeskzIfcImport::parse
 	// 凡例のシートレイヤ上の配置点（用紙座標 mm。Python 版 FOUNDATION_LEGEND_POSITION /
 	// FLOOR_LEGEND_POSITION と同じく原点）。**ビューポートと重ならない位置はローカルの
 	// VectorWorks で最終調整する**——ビューポートの実寸は描いてみるまで分からないので、
-	// 解析側では決められない（ROADMAP.md M13）。
+	// 解析側では決められない（docs/DEV-NOTES.md M13）。
 	inline constexpr core::Vec2 kLegendPosition{0.0, 0.0};
 
 	// 基礎伏図の sheet 命令（無ければ空）。基礎要素が 1 つも無ければ空を返す——表示すべき

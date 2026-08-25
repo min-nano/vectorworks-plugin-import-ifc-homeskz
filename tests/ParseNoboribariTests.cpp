@@ -4,9 +4,9 @@
 //	登り梁の位置補正（src/parse/Noboribari）の単体テスト。VectorWorks SDK を一切
 //	include せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
 //	Python 版 test_ifc_noboribari.py のケースを写している（柱を参照するケースは M8 で柱を
-//	導入するときに足す。ROADMAP.md M7）。
+//	導入するときに足す。docs/DEV-NOTES.md M7）。
 //
-//	検証項目（ROADMAP.md M7）: 屋根面の天端 Z と内包判定・受ける材への端部詰め（Z 範囲で
+//	検証項目（docs/DEV-NOTES.md M7）: 屋根面の天端 Z と内包判定・受ける材への端部詰め（Z 範囲で
 //	絞る・極小の食い込みは詰めない・詰めすぎになるなら詰めない）・登り梁の真上の屋根面の
 //	選択（勾配方向が平行・外形が内包）・天端の屋根面スナップ（勾配・高さ・バインド offset）・
 //	登り梁でない材の素通し・実フィクスチャからの屋根面収集。実フィクスチャのパスは CMake が

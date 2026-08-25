@@ -4,7 +4,7 @@
 //	Phase 2（VW 描画）のストーリモジュール。Python 版 vw/story.py に対応する。
 //	命令セット（core::StoryCommand の列）から VectorWorks のストーリ・ストーリレベル・
 //	デザインレイヤを生成する。ExecuteDocument から通り芯より先にディスパッチされる
-//	（以降の要素はここで作ったレベルに配置される。ROADMAP.md M3）。
+//	（以降の要素はここで作ったレベルに配置される。docs/DEV-NOTES.md M3）。
 //
 //	【SDK 依存】draw/ は VectorWorks SDK のみに依存し、IFC / STEP の知識を持たない。
 //	.cpp は PluginPrefix.h（SDK）を include するため SDK ビルドでのみコンパイルされ、

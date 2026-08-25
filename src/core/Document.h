@@ -13,7 +13,7 @@
 //	現状は「バージョン＋ stories / grids / floors / members / columns / rafters / roofs /
 //	walls / wallJoins / slabs」を持つ（M1 通り芯・M3 ストーリ・M5 床板・M6 屋根組・M7 横架材・
 //	M8 柱・M9 基礎・M10 基礎の高度化ぶん）。残りの命令リスト（anchorBolts …）は、対応する
-//	マイルストーンで要素を移植するたびに 1 つずつ追加する（ROADMAP.md）。
+//	マイルストーンで要素を移植するたびに 1 つずつ追加する（docs/DEV-NOTES.md）。
 //
 
 #pragma once
@@ -77,7 +77,7 @@ namespace HomeskzIfcImport::core
 	inline constexpr const char* kStructuralUseKoyazuka = "5"; // 小屋束
 
 	// 通り芯（グリッド）1 本の描画命令。Python 版 document.py の GridCommand（dict）に
-	// 対応する。draw/Grid がこれを GridAxis オブジェクトへ変換する（ROADMAP.md M1）。
+	// 対応する。draw/Grid がこれを GridAxis オブジェクトへ変換する（docs/DEV-NOTES.md M1）。
 	//
 	// Python 版キーとの対応:
 	//   label     ← 'label'  … 軸名（IfcGridAxis の AxisTag。例 "X1" / "Y1"）
@@ -86,7 +86,7 @@ namespace HomeskzIfcImport::core
 	//   start     ← 'start'  … 始点（bbox 中心でセンタリング済みの平面座標）
 	//   end       ← 'end'    … 終点（同上）
 	// start/end は 3D ではなく平面（Vec2）: 通り芯は配置行列・断面・ストーリを要さず、
-	// ポリラインの端点だけで決まる（M1 が最初の縦切りである理由。ROADMAP.md M1）。
+	// ポリラインの端点だけで決まる（M1 が最初の縦切りである理由。docs/DEV-NOTES.md M1）。
 	struct GridCommand
 	{
 		std::string label;
@@ -113,7 +113,7 @@ namespace HomeskzIfcImport::core
 
 	// ストーリ・ストーリレベル・デザインレイヤを生成する命令。Python 版 document.py の
 	// StoryCommand（dict）に対応する。draw/Story がこれを CreateStory＋レベルテンプレート
-	// によるレイヤ生成へ変換する（ROADMAP.md M3）。
+	// によるレイヤ生成へ変換する（docs/DEV-NOTES.md M3）。
 	//
 	// Python 版キーとの対応:
 	//   name      ← 'name'      … VectorWorks のストーリ名（"1階" / "2階" / "屋根"）
@@ -182,7 +182,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 床板（IfcSlab "床版"）を描く命令。Python 版 document.py の FloorCommand（dict）に
-	// 対応する。draw/Floor がこれをスラブオブジェクトへ変換する（ROADMAP.md M5。Python 版は
+	// 対応する。draw/Floor がこれをスラブオブジェクトへ変換する（docs/DEV-NOTES.md M5。Python 版は
 	// 床ツールで描くが、本移植は BIM 機能の充実したスラブを使う。draw/Floor.h 参照）。
 	//
 	// 【高さの持ち方】elevation は datum が指す**基準面**の絶対 Z（一般階＝床仕上げ上端、
@@ -222,7 +222,7 @@ namespace HomeskzIfcImport::core
 
 	// 垂木（軸組ツール FramingMember、部材種別 rafter）を描く命令。Python 版 document.py の
 	// RafterCommand（dict）に対応する。draw/Rafter がこれを軸組ツールへ変換する
-	// （ROADMAP.md M6）。垂木はホームズ君 IFC に一切出力されないため、**屋根版（IfcSlab の
+	// （docs/DEV-NOTES.md M6）。垂木はホームズ君 IFC に一切出力されないため、**屋根版（IfcSlab の
 	// 屋根面）の勾配・外形から導出**した結果がこの命令になる（parse/Rafter.h 参照）。
 	//
 	// 【高さと両端の持ち方】start は**軒側＝支持点**（屋根面が横架材天端／軒高の Z レベルと
@@ -260,7 +260,7 @@ namespace HomeskzIfcImport::core
 
 	// 野地板（屋根の下地合板）を屋根面オブジェクト（Roof Face）として描く命令。Python 版
 	// document.py の RoofCommand（dict）に対応する。draw/Roof がこれを屋根面オブジェクトへ
-	// 変換する（ROADMAP.md M6。Python 版の BeginRoof に相当する呼び出しは ISDK に無いため、
+	// 変換する（docs/DEV-NOTES.md M6。Python 版の BeginRoof に相当する呼び出しは ISDK に無いため、
 	// VWFC の VWRoofFaceObj を組み立てる。draw/Roof.cpp 冒頭参照）。屋根版（IfcSlab の
 	// 屋根面）**1 面につき 1 枚**で、垂木のように間隔で割らない。
 	//
@@ -297,7 +297,7 @@ namespace HomeskzIfcImport::core
 
 	// 横架材（構造材ツール StructuralMember）を描く命令。Python 版 document.py の
 	// MemberCommand（dict）に対応する。draw/Member がこれを構造材オブジェクトへ変換する
-	// （ROADMAP.md M7）。土台・梁・桁のほか、母屋・棟木・登り梁もこの命令で表し、
+	// （docs/DEV-NOTES.md M7）。土台・梁・桁のほか、母屋・棟木・登り梁もこの命令で表し、
 	// 配置先レイヤと高さ基準レベルだけが専用のもの（"n-母屋" / "n-登り梁"）になる。
 	//
 	// 【高さと両端の持ち方】start / end は**天端中央線**（断面基準点＝左右中央・上端が
@@ -339,7 +339,7 @@ namespace HomeskzIfcImport::core
 
 	// 柱（構造材ツール StructuralMember）を鉛直材として描く命令。Python 版 document.py の
 	// ColumnCommand（dict）に対応する。draw/Column がこれを構造材オブジェクトへ変換する
-	// （ROADMAP.md M8）。管柱・通し柱・小屋束をこの命令で表し、種別の違いは drawClass と
+	// （docs/DEV-NOTES.md M8）。管柱・通し柱・小屋束をこの命令で表し、種別の違いは drawClass と
 	// structuralUse（構造用途）に出る。
 	//
 	// 【配置先レイヤは span（またぐレベル区間）】柱は階のレイヤではなく "{from}to{to}-柱"
@@ -388,7 +388,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 基礎の立上り（基礎梁）を壁オブジェクトとして描く命令。Python 版 document.py の
-	// WallCommand（dict）に対応する。draw/Footing がこれを壁へ変換する（ROADMAP.md M9）。
+	// WallCommand（dict）に対応する。draw/Footing がこれを壁へ変換する（docs/DEV-NOTES.md M9）。
 	//
 	// 【高さの持ち方】立上りは基礎ストーリの GL（下端）と 1 階（上階）の横架材天端（上端）に
 	// バインドし、実形状の絶対 Z との差を各 offset に入れる。**壁だけは高さ基準に汎用の
@@ -448,7 +448,7 @@ namespace HomeskzIfcImport::core
 	// （Python 版 _JOIN_T / _JOIN_L / _JOIN_X。Auto は Python 版に無い）。
 	// T 字結合・隅（L）結合・交差（X）結合は VW の壁結合の 3 モードで、**交差結合は T 字結合
 	// 2 つとは別処理**。十字は縦横 2 本の壁のままにして X で繋ぐ（切って T 2 件に置き換えるのは
-	// モデルとして誤り。ROADMAP.md M10）。
+	// モデルとして誤り。docs/DEV-NOTES.md M10）。
 	enum class WallJoinType
 	{
 		T = 1, // 端点で突き当たる壁（stem）を通し壁（through）へ延長して繋ぐ
@@ -459,7 +459,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 交差する立上り（壁）2 本を結合する命令。Python 版 document.py の WallJoinCommand
-	// （dict）に対応する。draw/Footing がこれを JoinWalls へ変換する（ROADMAP.md M10）。
+	// （dict）に対応する。draw/Footing がこれを JoinWalls へ変換する（docs/DEV-NOTES.md M10）。
 	//
 	// 【壁ハンドルは命令インデックスで受け渡す】a / b は Document::walls の**添字**で、
 	// 描画側は立上りを描くときに「命令インデックス → 壁ハンドル」の対応表を作り、ここから
@@ -492,7 +492,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 地中梁（台形断面プリズム）1 本。Python 版 document.py の ModifierCommand（dict）に
-	// 対応し、底盤（SlabCommand::modifiers）にぶら下がる（ROADMAP.md M10）。
+	// 対応し、底盤（SlabCommand::modifiers）にぶら下がる（docs/DEV-NOTES.md M10）。
 	//
 	// 【なぜスラブ命令にしないか】地中梁は**台形断面**（下端が狭く上端が広い下り梁）なので、
 	// 一様な厚みしか持てない単一のスラブでは描けない。底盤のコンクリートに噛み合う
@@ -542,7 +542,7 @@ namespace HomeskzIfcImport::core
 	inline constexpr double kModifierTopVertexTol = 0.5;
 
 	// 基礎の底盤をスラブオブジェクトとして描く命令。Python 版 document.py の SlabCommand
-	// （dict）に対応する。draw/Footing がこれをスラブへ変換する（ROADMAP.md M9）。床板
+	// （dict）に対応する。draw/Footing がこれをスラブへ変換する（docs/DEV-NOTES.md M9）。床板
 	// （FloorCommand）と描画の作法は同じで、構成層の中身だけが基礎向けになる。
 	//
 	// 【高さの持ち方】elevation は**コンクリート天端**（＝底盤天端）の絶対 Z で、datum は
@@ -579,7 +579,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// ハイブリッドシンボルを平面座標＋回転角で置く命令。アンカーボルト・床束・火打・仕口の
-	// 4 種（ROADMAP.md M11「シンボル置換系」）が共通で使う。draw/Symbol がこれをシンボル
+	// 4 種（docs/DEV-NOTES.md M11「シンボル置換系」）が共通で使う。draw/Symbol がこれをシンボル
 	// オブジェクトへ変換する。
 	//
 	// ［Python 版との差異・意図的］Python 版は AnchorBoltCommand / FloorPostCommand /
@@ -629,7 +629,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 柱・小屋束の記号（断面記号・伏図記号）を **PIO 1 つ**で描く命令。Python 版
-	// document.py の ColumnMarkCommand（dict）に対応する（ROADMAP.md M12）。
+	// document.py の ColumnMarkCommand（dict）に対応する（docs/DEV-NOTES.md M12）。
 	//
 	// 【柱 1 本ごとではなく span レイヤごとに 1 つ】記号は PIO がリセット時に
 	// **対象レイヤ（targetLayer）の構造材を検索して描く**ので、命令は「どのレイヤの
@@ -672,7 +672,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 断面寸法データタグ 1 つ（ビューポート注釈のデータタグ）。Python 版 document.py の
-	// TagCommand（dict）に対応する（ROADMAP.md M13）。横架材 1 本の断面寸法（"120×180"）を
+	// TagCommand（dict）に対応する（docs/DEV-NOTES.md M13）。横架材 1 本の断面寸法（"120×180"）を
 	// その図の上に表示するための命令で、**IFC ではなく横架材命令（MemberCommand）から
 	// 導出する**（parse/Tag）。
 	//
@@ -732,7 +732,7 @@ namespace HomeskzIfcImport::core
 
 	// シートレイヤに載せるビューポート 1 枚。Python 版 document.py の ViewportCommand
 	// （dict）に対応する。伏図は「特定のデザインレイヤ群だけを見下げた図」なので、命令が
-	// 持つのは**どのレイヤを見せるか**と図面タイトル・図番だけになる（ROADMAP.md M13）。
+	// 持つのは**どのレイヤを見せるか**と図面タイトル・図番だけになる（docs/DEV-NOTES.md M13）。
 	//
 	// Python 版キーとの対応:
 	//   drawingTitle  ← 'drawing_title'  … 図面タイトル（"1階床伏図" 等）
@@ -761,7 +761,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 伏図のグラフィック凡例 1 つ（VW 標準の "GraphicLegend" PIO）。Python 版 document.py の
-	// LegendCommand（dict）に対応する（ROADMAP.md M13）。**シートレイヤの上**に置く
+	// LegendCommand（dict）に対応する（docs/DEV-NOTES.md M13）。**シートレイヤの上**に置く
 	// ——ビューポート注釈ではない（データタグとはそこが違う）。
 	//
 	// 【中身はスタイルが決める】凡例に何を並べるか——ソース定義（どのビューポートの
@@ -797,7 +797,7 @@ namespace HomeskzIfcImport::core
 
 	// シートレイヤ 1 枚（＋その上のビューポート 1 枚）を生成する命令。Python 版
 	// document.py の SheetCommand（dict）に対応する。draw/Sheet がこれをシートレイヤと
-	// ビューポートへ変換する（ROADMAP.md M13）。
+	// ビューポートへ変換する（docs/DEV-NOTES.md M13）。
 	//
 	// Python 版キーとの対応:
 	//   number   ← 'number'   … シートレイヤ番号（**レイヤ名がこれを担う**。"1" / "2" …）
@@ -826,7 +826,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 断面ビューポート（軸組図）1 枚を**新規作成**する命令。Python 版 document.py の
-	// SectionCommand（dict）に対応する（ROADMAP.md M14）。
+	// SectionCommand（dict）に対応する（docs/DEV-NOTES.md M14）。
 	//
 	// 【Python 版との最大の差異＝新規作成する】Python 版（VectorScript）は断面ビューポートを
 	// 作れないため、シートレイヤ "A" にあらかじめ用意した 40 枚（X1..X20 / Y1..Y20）の指示線・
@@ -980,7 +980,7 @@ namespace HomeskzIfcImport::core
 	// Document から取れる）。valid は validateDocument を通ったか。
 	//
 	// **なぜ core にあるか**: 完了文言の整形は無 SDK 側で行いたい（要素が増えるたびに
-	// SDK 側の文字列を手で伸ばす作業を無くす。ROADMAP.md M15「完了文言の集約」）。
+	// SDK 側の文字列を手で伸ばす作業を無くす。docs/DEV-NOTES.md M15「完了文言の集約」）。
 	// そのためには parse/Summary から件数を読めなければならないが、parse/ は draw/ を
 	// include できない（依存の向き。CLAUDE.md）。命令セットと対になる「その実行結果」
 	// なので、フェーズをつなぐ唯一の境界であるこのヘッダに置き、draw/ExecuteDocument.h は
@@ -1059,7 +1059,7 @@ namespace HomeskzIfcImport::core
 	// 変数が無く、断面まわりの呼び出しは CreateSectionViewport / CreateSectionLineInstance /
 	// IsSectionLineLinkedToViewport / UpdateSectionLineInstances だけ。ci-debug で確認）。
 	// 0 を渡すと**奥行きは無限**になるが**高さは「有限 0〜0」**になってしまい、断面から
-	// 建物が消えかねない。そこで高さだけは実寸＋余白の有限値を渡す（ROADMAP.md M14）。
+	// 建物が消えかねない。そこで高さだけは実寸＋余白の有限値を渡す（docs/DEV-NOTES.md M14）。
 	//
 	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder と
 	// 同じ立ち位置。CLAUDE.md「テスト方針」）。

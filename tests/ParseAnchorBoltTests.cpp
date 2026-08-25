@@ -4,9 +4,9 @@
 //	アンカーボルト解析（src/parse/AnchorBolt）の単体テスト。VectorWorks SDK を一切
 //	include せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md
 //	「テスト方針」）。Python 版 test_ifc_anchor_bolt.py のケースを 1 対 1 で写している
-//	（期待値は手書き。ROADMAP.md「Python 版出力との比較はしない」）。
+//	（期待値は手書き。docs/DEV-NOTES.md「Python 版出力との比較はしない」）。
 //
-//	検証項目（ROADMAP.md M11）: 型名によるボルト本体／座金の判別・座金の有無による
+//	検証項目（docs/DEV-NOTES.md M11）: 型名によるボルト本体／座金の判別・座金の有無による
 //	シンボル振り分け（M12／M16）・配置先レイヤ（F-アンカーボルト）・軸芯座標のセンタリング・
 //	決定性・全フィクスチャの通し。実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //

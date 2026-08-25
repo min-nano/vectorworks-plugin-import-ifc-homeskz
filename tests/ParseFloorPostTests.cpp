@@ -4,9 +4,9 @@
 //	床束解析（src/parse/FloorPost）の単体テスト。VectorWorks SDK を一切 include せず、
 //	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
 //	Python 版 test_ifc_floor_post.py のケースを 1 対 1 で写している（期待値は手書き。
-//	ROADMAP.md「Python 版出力との比較はしない」）。
+//	docs/DEV-NOTES.md「Python 版出力との比較はしない」）。
 //
-//	検証項目（ROADMAP.md M11）: 910mm 間隔の割り付け（端点には置かない）・支持材芯の探索
+//	検証項目（docs/DEV-NOTES.md M11）: 910mm 間隔の割り付け（端点には置かない）・支持材芯の探索
 //	（半支持材厚以内・区間内・平行は除外）・同一直線上の継手統合（すき間 ≤ 半モジュール）・
 //	支持材に土台だけでなく大引も含めること・**立上りと重なる床束を落とすこと**・基礎が
 //	無いモデルは空・配置先レイヤ（F-床束）・センタリング・決定性。実フィクスチャのパスは

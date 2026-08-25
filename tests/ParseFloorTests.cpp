@@ -6,7 +6,7 @@
 //	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_floor.py の全ケースを
 //	1 対 1 で写している。
 //
-//	検証項目（ROADMAP.md M5）: 床版（IfcSlab "床版"）の抽出・FL レイヤ振り分け（最上階の
+//	検証項目（docs/DEV-NOTES.md M5）: 床版（IfcSlab "床版"）の抽出・FL レイヤ振り分け（最上階の
 //	床はロフト＝小屋裏収納の床として "R-FL" へ・基準面は軒高）・スラブ構成（上から
 //	床仕上げ＝FL−横架材天端−24 と 床下地＝24）・クラス・**IFC の床位置を尊重した高さ**
 //	（elevation ＝ 床仕上げ上端 ＝ FL ＋ bound.offset の不変条件、スキップフロアの段差、

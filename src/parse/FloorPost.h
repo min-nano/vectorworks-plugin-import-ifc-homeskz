@@ -2,7 +2,7 @@
 //	parse/FloorPost.h
 //
 //	Phase 1（IFC 解析）の床束モジュール。Python 版 ifc/floor_post.py に対応する
-//	（ROADMAP.md M11「シンボル置換系」）。床束をハイブリッドシンボル "床束" として
+//	（docs/DEV-NOTES.md M11「シンボル置換系」）。床束をハイブリッドシンボル "床束" として
 //	配置する core::SymbolCommand を組み立てる。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ

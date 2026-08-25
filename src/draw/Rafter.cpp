@@ -46,7 +46,7 @@
 //	structuralUse）・ラベル（label ではなく **showLabel** ＋ **labelText** の 2 つ）が名前違いで
 //	**黙って無視されていた**ことが判明した。スパン（LineLength）は水平投影長で、部材に沿った
 //	実長は別パラメータ（LineLengthReal）。ポップアップの値は表示文字ではなく**キー**を渡す。
-//	最終挙動は VW 実機で確認する（ROADMAP.md M6「ローカル確認」）。名前付き定数に集約する。
+//	最終挙動は VW 実機で確認する（docs/DEV-NOTES.md M6「ローカル確認」）。名前付き定数に集約する。
 //
 
 #include "PluginPrefix.h"

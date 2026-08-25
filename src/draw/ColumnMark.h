@@ -2,7 +2,7 @@
 //	draw/ColumnMark.h
 //
 //	Phase 2（VW 描画）の断面記号・伏図記号モジュール。Python 版 vw/column_mark.py に
-//	対応する（ROADMAP.md M12）。命令 1 つにつき **PIO を 1 つ**置き、検索対象レイヤ・
+//	対応する（docs/DEV-NOTES.md M12）。命令 1 つにつき **PIO を 1 つ**置き、検索対象レイヤ・
 //	クラス・記号スタイル・シンボルをパラメータへ書いてリセットする。記号そのものを
 //	描くのは PIO 本体（Extensions/ExtColumnMark）で、ここはその設置だけを担う。
 //

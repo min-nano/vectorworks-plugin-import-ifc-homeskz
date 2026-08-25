@@ -2,7 +2,7 @@
 //	parse/ColumnMark.h
 //
 //	Phase 1（IFC 解析）の断面記号・伏図記号モジュール。Python 版 ifc/column_mark.py に
-//	対応する（ROADMAP.md M12）。**IFC のジオメトリは一切参照しない**——記号の位置・
+//	対応する（docs/DEV-NOTES.md M12）。**IFC のジオメトリは一切参照しない**——記号の位置・
 //	大きさ・種別は、すでに組み立て終えた**柱の命令**（core::ColumnCommand）だけで決まる。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。

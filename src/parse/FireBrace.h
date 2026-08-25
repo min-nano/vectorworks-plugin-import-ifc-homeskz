@@ -2,7 +2,7 @@
 //	parse/FireBrace.h
 //
 //	Phase 1（IFC 解析）の火打（火打梁）モジュール。Python 版 ifc/fire_brace.py に
-//	対応する（ROADMAP.md M11「シンボル置換系」）。火打をハイブリッドシンボル "鋼製火打"
+//	対応する（docs/DEV-NOTES.md M11「シンボル置換系」）。火打をハイブリッドシンボル "鋼製火打"
 //	へ置換する core::SymbolCommand を組み立てる。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ

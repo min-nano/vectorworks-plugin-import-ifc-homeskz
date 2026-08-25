@@ -3,7 +3,7 @@
 //
 //	Phase 2（VW 描画）の床板モジュール。Python 版 vw/floor.py に対応する。
 //	命令セット（core::FloorCommand の列）を**スラブオブジェクト**として VectorWorks に
-//	配置する。ExecuteDocument からディスパッチされる（ROADMAP.md M5）。
+//	配置する。ExecuteDocument からディスパッチされる（docs/DEV-NOTES.md M5）。
 //
 //	Python 版は床ツール（Floor オブジェクト）で描くが、床ツールは実体が押し出しの派生で
 //	オブジェクト構造が押し出しとほぼ変わらない。スラブは BIM オブジェクトとして機能が

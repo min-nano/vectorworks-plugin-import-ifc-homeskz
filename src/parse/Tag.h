@@ -2,7 +2,7 @@
 //	parse/Tag.h
 //
 //	Phase 1（IFC 解析）の断面寸法データタグモジュール。Python 版 ifc/tag.py に対応する
-//	（ROADMAP.md M13）。各横架材の断面寸法（"120×180" 等）を図の上に表示するための
+//	（docs/DEV-NOTES.md M13）。各横架材の断面寸法（"120×180" 等）を図の上に表示するための
 //	データタグ命令（core::TagCommand）を組み立てる。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。

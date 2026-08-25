@@ -2,7 +2,7 @@
 //	parse/StructuralClass.h
 //
 //	Phase 1（IFC 解析）の構造クラス判定モジュール。Python 版 ifc/structural_class.py に
-//	対応する（ROADMAP.md M4「構造クラス判定（純ロジック）」）。柱・横架材へ割り当てる
+//	対応する（docs/DEV-NOTES.md M4「構造クラス判定（純ロジック）」）。柱・横架材へ割り当てる
 //	VectorWorks クラス名（04構造-02木造-… 階層の葉クラス）を定義し、部材種別を判定する。
 //
 //	ホームズ君 IFC の Name フィールドには部材種別が埋め込まれている
@@ -64,7 +64,7 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* CLASS_NOBORIBARI = "04構造-02木造-05小屋組-06登り梁";
 
 	// 基礎（04構造-01基礎 階層）。木造（02木造）ではなく基礎（01基礎）の下に置く。Python 版は
-	// ifc/footing.py が持つが、本移植はクラス名の定義をここへ集約する（M4 の枠。ROADMAP.md M9）。
+	// ifc/footing.py が持つが、本移植はクラス名の定義をここへ集約する（M4 の枠。docs/DEV-NOTES.md M9）。
 	//   立上り（基礎梁）… 壁オブジェクト（parse/Footing の buildWallCommands）
 	//   底盤            … スラブオブジェクト（同 buildSlabCommands）。地中梁（M10）も
 	//                     底盤に噛み合う一体の形状なので同じクラスで描く。

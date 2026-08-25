@@ -2,7 +2,7 @@
 //	parse/Member.h
 //
 //	Phase 1（IFC 解析）の横架材モジュール。Python 版 ifc/member.py に対応する
-//	（ROADMAP.md M7「横架材」）。土台・梁・桁・母屋・棟木・登り梁——ホームズ君 IFC の
+//	（docs/DEV-NOTES.md M7「横架材」）。土台・梁・桁・母屋・棟木・登り梁——ホームズ君 IFC の
 //	IfcBeam / IfcMember をすべてここで解析し、core::MemberCommand へ変換する。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ
@@ -42,7 +42,7 @@
 //	    出隅の L 字）の端部を相手の面まで詰める（resolveMemberInterferences）。
 //
 //	【M7 のスコープ】登り梁の端部詰め（parse/Noboribari）は受ける材＝本モジュールの
-//	横架材だけを見る。柱（M8）を参照する最終化は柱の導入時に行う（ROADMAP.md M7/M8）。
+//	横架材だけを見る。柱（M8）を参照する最終化は柱の導入時に行う（docs/DEV-NOTES.md M7/M8）。
 //
 
 #pragma once

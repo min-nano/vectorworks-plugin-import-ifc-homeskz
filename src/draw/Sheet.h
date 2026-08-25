@@ -2,7 +2,7 @@
 //	draw/Sheet.h
 //
 //	Phase 2（VW 描画）のシート（伏図）モジュール。Python 版 vw/sheet.py の execute_sheets /
-//	draw_sheet に対応する（ROADMAP.md M13）。命令セット（core::SheetCommand の列）から
+//	draw_sheet に対応する（docs/DEV-NOTES.md M13）。命令セット（core::SheetCommand の列）から
 //	シートレイヤ 1 枚とその上のビューポート 1 枚を作り、表示するデザインレイヤを絞り込む。
 //
 //	【SDK 依存】draw/ は VectorWorks SDK のみに依存し、IFC / STEP の知識を持たない。
@@ -20,7 +20,7 @@
 //	だけになる。
 //
 //	実描画（ビューポートの見え方・縮尺・表示レイヤ）はローカルの VectorWorks で目視確認する
-//	（ROADMAP.md M13「ローカル確認」）。
+//	（docs/DEV-NOTES.md M13「ローカル確認」）。
 //
 
 #pragma once

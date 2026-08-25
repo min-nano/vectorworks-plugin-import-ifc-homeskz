@@ -28,7 +28,7 @@ namespace HomeskzIfcImport::parse
 	// （スキップ・フォールバック）を踏襲する。
 	//
 	// TODO(M7〜): 横架材（M7）以降の要素ごとの parse モジュールを呼び、Document を
-	// さらに肉付けする（ROADMAP.md）。
+	// さらに肉付けする（docs/DEV-NOTES.md）。
 	core::Document buildDocument(const std::string& ifcPath);
 
 	// 進捗を報告しながら解析する。読み込みと要素ごとの解析を core/Progress の

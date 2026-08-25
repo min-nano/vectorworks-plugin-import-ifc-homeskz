@@ -242,7 +242,7 @@ namespace HomeskzIfcImport::parse
 				// 寄り切って部材が残らない（隅棟際の三角形の先端。下記）——これらは受ける
 				// 軒桁が無いので、支持点を採らず**軒先そのものを挿入点＝高さの基準**にし、
 				// 差し込み・軒の出を 0 にして**長さと高さを実形状に合わせる**
-				// （ROADMAP.md M6「ローカル確認」の指示）。描画側は start の XY と elevation を
+				// （docs/DEV-NOTES.md M6「ローカル確認」の指示）。描画側は start の XY と elevation を
 				// 挿入点に、start→end の水平投影長をスパンにするので、これで OIP の
 				// 長さ・高さが実形状どおりになる（draw/Rafter.cpp）。
 				//

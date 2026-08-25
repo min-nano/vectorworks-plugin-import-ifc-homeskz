@@ -30,7 +30,7 @@ namespace HomeskzIfcImport::draw
 	// あり、draw/ 側はこの別名で受ける。**命令セットと対になる「その実行結果」なので、
 	// フェーズをつなぐ唯一の境界であるあちらに置いてある**——完了文言の整形を無 SDK 側
 	// （parse/Summary）で行うために、parse/ からも同じ型を読める必要があるため
-	// （ROADMAP.md M15「完了文言の集約」／CLAUDE.md「依存の向きは厳守する」）。
+	// （docs/DEV-NOTES.md M15「完了文言の集約」／CLAUDE.md「依存の向きは厳守する」）。
 	using DrawCounts = core::DrawCounts;
 
 	// 命令セットを描画する。validateDocument を通してから、命令ごとに要素の draw モジュール

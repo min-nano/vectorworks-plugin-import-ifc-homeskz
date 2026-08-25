@@ -2,7 +2,7 @@
 //	draw/Symbol.h
 //
 //	Phase 2（VW 描画）のシンボル配置モジュール。Python 版 vw/anchor_bolt.py /
-//	vw/floor_post.py / vw/fire_brace.py / vw/joint.py に対応する（ROADMAP.md M11）。
+//	vw/floor_post.py / vw/fire_brace.py / vw/joint.py に対応する（docs/DEV-NOTES.md M11）。
 //	命令セット（core::SymbolCommand）をハイブリッドシンボルのインスタンスとして配置する。
 //
 //	［Python 版との差異・意図的］Python 版は要素ごとに 4 つの vw モジュールを持つが、

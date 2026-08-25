@@ -55,7 +55,7 @@ namespace HomeskzIfcImport::draw
 			return counts;
 		counts.valid = true;
 
-		// **取り込みの図面変更をまるごと 1 つの undo イベントで包む**（ROADMAP.md M15）。
+		// **取り込みの図面変更をまるごと 1 つの undo イベントで包む**（docs/DEV-NOTES.md M15）。
 		// VW は取り込みの開始時にイベントを開かないので、ここで自分から開く。構築で開き、
 		// 破棄で閉じる RAII なので、途中で例外が出ても・中止されても閉じる。
 		// 何が登録され何が戻らないかは draw/DrawUtil.h「取り込み全体の Undo」を参照。
@@ -154,7 +154,7 @@ namespace HomeskzIfcImport::draw
 		// 野地板は垂木の上に載る）。配置先の "n-垂木" / "n-野地板" レイヤも drawStories が
 		// 作るので、必ずその後に置く（レイヤが無い命令はそれぞれがスキップする）。以降の
 		// マイルストーンで footing … と命令ごとに draw モジュールへのディスパッチを
-		// 足していく（ROADMAP.md）。
+		// 足していく（docs/DEV-NOTES.md）。
 		if (beginPhase("垂木を描画しています…", document.rafters.size(), core::DrawPhase::Rafters))
 			counts.rafters = drawRafters(document, progress);
 		if (beginPhase("野地板を描画しています…", document.roofs.size(), core::DrawPhase::Roofs))

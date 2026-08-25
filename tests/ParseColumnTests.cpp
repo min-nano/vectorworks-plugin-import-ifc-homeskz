@@ -5,9 +5,9 @@
 //	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
 //	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_column.py と
 //	test_ifc_column_span.py のケースを 1 対 1 で写している（期待値は手書き。
-//	ROADMAP.md「Python 版出力との比較はしない」）。
+//	docs/DEV-NOTES.md「Python 版出力との比較はしない」）。
 //
-//	検証項目（ROADMAP.md M8）: 配置座標と断面の抽出・柱種別／構造材 ID・柱頭/柱脚金物の
+//	検証項目（docs/DEV-NOTES.md M8）: 配置座標と断面の抽出・柱種別／構造材 ID・柱頭/柱脚金物の
 //	対応付け・**span（またぐレベル区間）の to レベル判定**（管柱／通し柱／屋根束）・
 //	span レイヤへの振り分けと base ごとのまとめ・上下端のストーリバウンド（柱＝当階と上階、
 //	小屋束＝当階のみ。**差は常に柱高さ**）・構造用途・クラス割り当て・**小屋束の断面を直上の

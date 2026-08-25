@@ -3,7 +3,7 @@
 //
 //	Phase 2（VW 描画）の野地板モジュール。Python 版 vw/roof.py に対応する。
 //	命令セット（core::RoofCommand）を**屋根面オブジェクト（Roof Face）**として配置する
-//	（ROADMAP.md M6）。屋根版 1 面＝野地板 1 枚。Python 版の BeginRoof に相当する呼び出しは
+//	（docs/DEV-NOTES.md M6）。屋根版 1 面＝野地板 1 枚。Python 版の BeginRoof に相当する呼び出しは
 //	ISDK に無いため、VWFC の VWRoofFaceObj を外形・オブジェクト変数から組み立てる
 //	（実現手段の差異と理由は draw/Roof.cpp 冒頭）。
 //

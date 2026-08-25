@@ -3,7 +3,7 @@
 //
 //	Phase 2（VW 描画）の通り芯モジュール。Python 版 vw/grid.py に対応する。
 //	命令セット（core::GridCommand の列）を GridAxis オブジェクトとして VectorWorks に
-//	配置する。ExecuteDocument からディスパッチされる（ROADMAP.md M1）。
+//	配置する。ExecuteDocument からディスパッチされる（docs/DEV-NOTES.md M1）。
 //
 //	【SDK 依存】draw/ は VectorWorks SDK のみに依存し、IFC / STEP の知識を持たない。
 //	.cpp は PluginPrefix.h（SDK）を include するため SDK ビルドでのみコンパイルされ、

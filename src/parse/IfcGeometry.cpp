@@ -1,7 +1,7 @@
 //
 //	parse/IfcGeometry.cpp
 //
-//	IFC 配置・断面・押し出しの幾何解決（ROADMAP.md M2）。宣言は IfcGeometry.h、
+//	IFC 配置・断面・押し出しの幾何解決（docs/DEV-NOTES.md M2）。宣言は IfcGeometry.h、
 //	方針・扱う型はそちらの doc コメントを参照。【SDK 非依存】STEP グラフ（parse/Step）
 //	と自前幾何型（core/Geometry）だけに依存する。
 //
@@ -232,8 +232,8 @@ namespace HomeskzIfcImport::parse
 		// 位置（属性 2）は同じなので、同じ経路で外形だけを読む。
 		// ［既知の制限］InnerCurves（階段の吹抜け等の開口）は無視するので、床は開口を
 		// 塞いだ形で入る。開口ごと落として床を丸ごと失うよりは良い、という判断
-		// （CLAUDE.md「1 要素の欠損で全体を止めない」）。開口の再現は ROADMAP の
-		// 後続課題。
+		// （CLAUDE.md「1 要素の欠損で全体を止めない」）。開口の再現は今後の課題
+		// （docs/DEV-NOTES.md「残っている宿題」）。
 		if (profileDef->type == "IFCARBITRARYCLOSEDPROFILEDEF" ||
 			profileDef->type == "IFCARBITRARYPROFILEDEFWITHVOIDS")
 		{

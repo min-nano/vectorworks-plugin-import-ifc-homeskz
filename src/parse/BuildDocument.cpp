@@ -8,7 +8,7 @@
 //	  1. parse/Loader … IFC を読み込む（parse/Step でトークナイズ＋エンティティグラフ構築。
 //	                    サニタイズはしない。理由は parse/Loader.h 参照）
 //	  2. parse/Story … parse/Grid … parse/Floor … 要素ごとに Document を組み立てる
-//	で、以降のマイルストーンでは 2 に要素を足していく（ROADMAP.md）。
+//	で、以降のマイルストーンでは 2 に要素を足していく（docs/DEV-NOTES.md）。
 //
 //	各要素の解析は「ストーリ一覧」「通り芯のセンタリング中心」「階に属する要素」「屋根面」を
 //	共通して必要とするので、**共有コンテキスト（parse/Context）を 1 つだけ作って全要素へ
@@ -103,7 +103,7 @@ namespace HomeskzIfcImport::parse
 		// （parse/Rafter / parse/Roof）。屋根面は建物形状の要で、上の登り梁はここで確定した
 		// 屋根面へスナップ補正されている（形状先行）。垂木の差し込みに使う桁幅は**補正後の**
 		// 横架材命令から引く（Python 版 build_document と同じ順序）。以降のマイルストーンで
-		// Column … の解析を同様に足していく（ROADMAP.md）。
+		// Column … の解析を同様に足していく（docs/DEV-NOTES.md）。
 		document.rafters = buildRafterCommands(context, document.members);
 		progress.step();
 		document.roofs = buildRoofCommands(context);

@@ -181,7 +181,7 @@ namespace HomeskzIfcImport
 {
 	namespace
 	{
-		// undo イベントの状態を診断ログへ 1 行残す（ROADMAP.md M15「Undo」）。
+		// undo イベントの状態を診断ログへ 1 行残す（docs/DEV-NOTES.md M15「Undo」）。
 		//
 		// **実機でしか分からない挙動なので残してある。** 実測では start=no / afterParse=no /
 		// afterDraw=yes で、「VW は取り込みの開始時にイベントを開かない」「SDK 内部が描画の
@@ -193,7 +193,7 @@ namespace HomeskzIfcImport
 							 (gSDK->IsCurrentlyBuildingAnUndoEvent() ? "yes" : "no"));
 		}
 
-		// クラッシュ診断ログを開く（ROADMAP.md M15「core/Trace」）。**dev ビルドでは常に、
+		// クラッシュ診断ログを開く（docs/DEV-NOTES.md M15「core/Trace」）。**dev ビルドでは常に、
 		// stable では環境変数 HOMESKZ_IFC_TRACE があるときだけ**開く——常時ログを吐くのは
 		// 実運用では余計で、しかし不具合を追うときには「落ちた直前のフェーズ」が唯一の
 		// 手掛かりになるので、dev には既定で残す。開けなくても黙って続ける（付随機能）。
@@ -244,7 +244,7 @@ namespace HomeskzIfcImport
 			progress.close();
 
 			// 本文の組み立ては**無 SDK 側**（parse/Summary）が持つ。要素が増えても
-			// ここは変わらない（ROADMAP.md M15「完了文言の集約」）。
+			// ここは変わらない（docs/DEV-NOTES.md M15「完了文言の集約」）。
 			// 診断ログが有効ならその場所も本文へ載せる（一時ディレクトリは macOS では
 			// /var/folders/… という当てられない場所なので、毎回ここで案内する）。
 			const std::string body =
@@ -281,7 +281,7 @@ void CImportIfcMenu_EventSink::DoInterface()
 
 	// 縦切りの通し処理: ファイルを選ぶ → parse（Phase 1）で IFC を Document へ →
 	// draw（Phase 2）で VectorWorks へ描く → 件数をダイアログに出す。要素が増えても
-	// 入口はこの形のまま（各要素の追加は Document と draw 側で行う。ROADMAP.md）。
+	// 入口はこの形のまま（各要素の追加は Document と draw 側で行う。docs/DEV-NOTES.md）。
 	// Python 版 run() が ifc.build_document → vw.execute_document を呼ぶのと同じ入口で、
 	// ここが両フェーズのオーケストレーションを担う。
 

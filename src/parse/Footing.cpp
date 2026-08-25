@@ -275,7 +275,7 @@ namespace HomeskzIfcImport::parse
 		// 【なぜ要るか】交点判定（wallIntersection）は平行な立上りを除外するので、**同一直線上で
 		// 端どうしが接する立上り**はどちらの端も自由端に見える。そのまま半壁厚ずつ延長すると
 		// 互いに食い込み、実データで 75mm（片側）・150mm（両側）の重なりになっていた（統合
-		// できない＝上端／下端の違う隣どうしで顕在化する。ROADMAP.md M10）。
+		// できない＝上端／下端の違う隣どうしで顕在化する。docs/DEV-NOTES.md M10）。
 		void collinearAbutment(const WallCommand& a, const WallCommand& b, bool& outAtStart,
 							   bool& outAtEnd)
 		{
@@ -1816,7 +1816,7 @@ namespace HomeskzIfcImport::parse
 				// 一度「X 結合だけ交点そのものを渡す」ことを試した（交差では四方すべてが残るので
 				// 「残す側」に意味が無く、片側を指すせいで VW が交点で壁を切って別の立上りを
 				// 作っているのではないかと疑った）が、**実機で症状は変わらなかった**ので、
-				// 根拠の無い Python 版との差異を残さないためにこちらへ戻した（ROADMAP.md M10）。
+				// 根拠の無い Python 版との差異を残さないためにこちらへ戻した（docs/DEV-NOTES.md M10）。
 				cmd.pickA = keptSidePick(walls[a], point, pickOffset);
 				cmd.pickB = keptSidePick(walls[b], point, pickOffset);
 				cmd.joinType = type;
@@ -1833,7 +1833,7 @@ namespace HomeskzIfcImport::parse
 			// いる必要があり、1 本目が 2 本の壁に分かれる）。したがって a に渡した壁が分割され、
 			// b に渡した壁が丸ごと残る。**丸ごと残すべきはバックボーン**（天端が最も高い通し壁）
 			// なので、a＝other・b＝root にする。root は最も高いので、天端が違うときの
-			// 「低いほうを a」も同時に満たす（ROADMAP.md M10）。
+			// 「低いほうを a」も同時に満たす（docs/DEV-NOTES.md M10）。
 			const auto makeLX = [&](std::size_t other, std::size_t root, core::WallJoinType type)
 			{
 				const bool capped = std::abs(tops.at(other) - tops.at(root)) > kWallMergeDistTol;
@@ -1893,7 +1893,7 @@ namespace HomeskzIfcImport::parse
 			// ジャンクションとして入ってくる（例: 一直線に並ぶ 2 本の突き合わせ位置を別の
 			// 立上りが横切る）。そこへ L / T 結合を出すと、コーナーにならないので VW が
 			// 拒否する——実データで「壁結合: 1 件を VW が拒否しました (T:1): (6370,1820)」の
-			// 正体がこれだった（ROADMAP.md M10）。同一直線上の突き合わせは結合ではなく
+			// 正体がこれだった（docs/DEV-NOTES.md M10）。同一直線上の突き合わせは結合ではなく
 			// 端部のキャップ（applyWallCaps の collinearAbutment）で 1 本に見せる。
 			//
 			// あわせて、**同じ通し壁の同じ交点へ 2 本目以降の stem が取り付く T 結合は Auto へ
@@ -1901,7 +1901,7 @@ namespace HomeskzIfcImport::parse
 			// 実行した 1 本だけが結合されて見えた**（拒否件数は増えない）。通し壁側のピック点を
 			// 反対側へ寄せて区別させる案は実機で描画が変わらず外れたので、`kAutoWallJoin`
 			// （ピック点を無視して VW に種別を判断させる）で通す。1 本目は従来どおり T なので、
-			// **交点に stem が 1 本だけの既存の T 結合の引数は変わらない**（ROADMAP.md M10）。
+			// **交点に stem が 1 本だけの既存の T 結合の引数は変わらない**（docs/DEV-NOTES.md M10）。
 			// 数えるのは**実際に出した命令だけ**（同一直線で落とす stem を数えると 1 本目が
 			// Auto になってしまう）。
 			std::map<std::size_t, std::size_t> stemsPerThrough;
@@ -2009,7 +2009,7 @@ namespace HomeskzIfcImport::parse
 		// その壁を使う結合が残っていると、**分割された片方だけを相手にしてしまう**。実機で
 		// まさにこれが起きた: 交差する横の立上りは両端に T 結合を持ち、X 結合（交点）→
 		// T 結合（端）の順に実行されたため、**分割後の半分の壁が T 結合されて全長の壁は
-		// 結合されないまま**になった（ROADMAP.md M10）。X を最後に回せば、分割の時点で
+		// 結合されないまま**になった（docs/DEV-NOTES.md M10）。X を最後に回せば、分割の時点で
 		// 他の結合はすべて全長の壁に対して済んでいる。
 		//
 		// 安定ソートなので X 以外の並び（ジャンクション順・capped 順）は変わらない。
@@ -2080,7 +2080,7 @@ namespace HomeskzIfcImport::parse
 			cmd.topBound = StoryBoundCommand{1, kLevelBeamTop, topAbs - beamTopAbs};
 			commands.push_back(std::move(cmd));
 		}
-		// 統合 → 自由端の延長 → 深いほうの延長 → 人通口の当てはめ（ROADMAP.md M10）。
+		// 統合 → 自由端の延長 → 深いほうの延長 → 人通口の当てはめ（docs/DEV-NOTES.md M10）。
 		// **人通口は統合・延長の後**に当てはめるので、開口を跨いで統合された立上りも開口位置で
 		// 正しく分割され、開口境界の端は実寸法のまま（延長しない）になる。深いほうの延長は
 		// 自由端の延長の**後**（自由端ではない端＝直交する立上りの壁芯で止まっている端が対象で、
@@ -2450,7 +2450,7 @@ namespace HomeskzIfcImport::parse
 			cmd.bound = StoryBoundCommand{0, kLevelSlabTop, topAbs - slabTopAbs};
 			commands.push_back(std::move(cmd));
 		}
-		// 統合 → 外面合わせ → 地中梁の振り分け（ROADMAP.md M10）。地中梁は**単独のスラブ命令に
+		// 統合 → 外面合わせ → 地中梁の振り分け（docs/DEV-NOTES.md M10）。地中梁は**単独のスラブ命令に
 		// せず**、外形の確定した底盤の modifiers へ付ける（台形断面は単一のスラブで描けない）。
 		std::vector<SlabCommand> slabs = alignSlabsToWallFaces(mergeSlabCommands(commands), walls);
 		attachGroundBeamModifiers(slabs, buildGroundBeamModifiers(model, center));

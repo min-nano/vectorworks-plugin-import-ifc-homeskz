@@ -1,7 +1,7 @@
 //
 //	parse/IfcGeometry.h
 //
-//	IFC の配置・断面・押し出しを自前で解決する幾何ユーティリティ（ROADMAP.md M2
+//	IFC の配置・断面・押し出しを自前で解決する幾何ユーティリティ（docs/DEV-NOTES.md M2
 //	「幾何の土台」）。Python 版が ifcopenshell の行列計算に頼らず手計算している部分
 //	（ifc/member.py の _get_placement_3d / _get_profile_dims、ifc/footing.py の
 //	_world_solid 相当）を C++ へ移植する。M3 以降のほぼ全要素がここを共有するので、
@@ -151,7 +151,7 @@ namespace HomeskzIfcImport::parse
 	// 要素（IfcProduct）の形状表現から**削り取られる側**（差演算の第 2 オペランド）の
 	// 押し出しソリッドを列挙する（Python 版 footing._void_solids / _element_void_solids
 	// 相当）。基礎の立上りに開けた人通口は、立上りソリッドから天端下方へ削り取った別の
-	// IfcExtrudedAreaSolid として表される（ROADMAP.md M10）。
+	// IfcExtrudedAreaSolid として表される（docs/DEV-NOTES.md M10）。
 	//
 	// 複数の削りは ((base − void1) − void2) のように第 1 オペランドが入れ子の差演算に
 	// なるので、第 1 オペランドを辿りながら各差演算の第 2 オペランドを集める（＝

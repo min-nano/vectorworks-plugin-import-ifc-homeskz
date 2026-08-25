@@ -2,7 +2,7 @@
 //	draw/Tag.h
 //
 //	Phase 2（VW 描画）の断面寸法データタグモジュール。Python 版 vw/sheet.py の draw_tag に
-//	対応する（ROADMAP.md M13）。ビューポート命令が持つタグ（core::ViewportCommand::tags）を
+//	対応する（docs/DEV-NOTES.md M13）。ビューポート命令が持つタグ（core::ViewportCommand::tags）を
 //	**そのビューポートの注釈**としてデータタグ（PIO "Data Tag"）で置き、対象の横架材へ
 //	関連付ける。
 //
@@ -85,7 +85,7 @@
 //	     **ローカル確認で正しい位置に出ることを確認済み。**
 //
 //	実描画（タグの見え方・スタイルの効き・注釈空間での位置）はローカルの VectorWorks で
-//	目視確認する（ROADMAP.md M13「ローカル確認」）。
+//	目視確認する（docs/DEV-NOTES.md M13「ローカル確認」）。
 //
 
 #pragma once

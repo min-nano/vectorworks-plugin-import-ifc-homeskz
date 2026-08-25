@@ -7,7 +7,7 @@
 //	**M9 / M10 に相当するケース**（立上り・底盤・基礎ストーリ・人通口・壁結合・地中梁）を
 //	1 対 1 で写している（配筋のケースは保留）。
 //
-//	検証項目（ROADMAP.md M9）:
+//	検証項目（docs/DEV-NOTES.md M9）:
 //	  * Name による基礎要素の判別（立上り／地中梁／底盤）
 //	  * 基礎ストーリ（"基礎" / suffix "F" / GL=0・レベルとレイヤ）
 //	  * 底盤天端＝面積最大の天端 Z、立上り下端＝IFC 実形状（呑み込み補正なし）
@@ -883,7 +883,7 @@ TEST(base_slab_outer_boundary_matches_wall_outer_face)
 TEST(all_fixtures_parse_without_error)
 {
 	// 全フィクスチャで立上り・底盤・基礎ストーリが例外なく組み立てられ、命令が命令セットの
-	// 検証を通ること（ROADMAP.md の完了条件 1）。
+	// 検証を通ること（docs/DEV-NOTES.md の完了条件 1）。
 	for (const std::string& name : allFixtures())
 	{
 		bool ok = false;
@@ -935,7 +935,7 @@ TEST(is_deterministic)
 }
 
 // ---------------------------------------------------------------------------
-// 人通口（applyWallOpenings）— ROADMAP.md M10
+// 人通口（applyWallOpenings）— docs/DEV-NOTES.md M10
 // ---------------------------------------------------------------------------
 
 TEST(opening_below_slab_top_splits_wall_without_middle)
@@ -1142,7 +1142,7 @@ TEST(openings_come_from_the_real_fixtures)
 }
 
 // ---------------------------------------------------------------------------
-// 壁結合（buildWallJoinCommands）— ROADMAP.md M10
+// 壁結合（buildWallJoinCommands）— docs/DEV-NOTES.md M10
 // ---------------------------------------------------------------------------
 
 TEST(join_corner_of_two_walls_is_an_L_join)
@@ -1191,7 +1191,7 @@ TEST(join_crossing_interiors_is_an_X_join)
 		return;
 	CHECK(joins[0].joinType == core::WallJoinType::X);
 	// **十字は縦横 2 本の壁のまま**にして交差結合（X）で繋ぐ。分割して T 結合 2 つに
-	// 置き換えるのは別処理で、モデルとしても誤り（ROADMAP.md M10）。
+	// 置き換えるのは別処理で、モデルとしても誤り（docs/DEV-NOTES.md M10）。
 	// VW の X 結合は **a を交点で 2 本に分割し、b（load bearing wall）を丸ごと残す**ので、
 	// **バックボーン（天端が最も高い＝同点なら添字の小さい通し壁）を b にする**。
 	CHECK_EQ(joins[0].a, std::size_t{1});
@@ -1368,7 +1368,7 @@ TEST(joins_reference_valid_walls_in_the_real_fixtures)
 }
 
 // ---------------------------------------------------------------------------
-// 端部のキャップ（applyWallCaps）— ROADMAP.md M10（ローカル確認で判明した項目）
+// 端部のキャップ（applyWallCaps）— docs/DEV-NOTES.md M10（ローカル確認で判明した項目）
 // ---------------------------------------------------------------------------
 
 TEST(caps_close_free_ends_and_open_joined_ends)
@@ -1440,7 +1440,7 @@ TEST(caps_default_to_closed_without_joins)
 
 // ---------------------------------------------------------------------------
 // 地中梁（mergeGroundBeamModifiers / modifierFootprint / attachGroundBeamModifiers）
-// — ROADMAP.md M10
+// — docs/DEV-NOTES.md M10
 // ---------------------------------------------------------------------------
 
 TEST(merge_ground_beams_collinear_touching_into_one)

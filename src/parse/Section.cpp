@@ -1,7 +1,7 @@
 //
 //	parse/Section.cpp
 //
-//	軸組図（断面ビューポート）の解析。Python 版 ifc/section.py に対応する（ROADMAP.md M14）。
+//	軸組図（断面ビューポート）の解析。Python 版 ifc/section.py に対応する（docs/DEV-NOTES.md M14）。
 //	【SDK 非依存】ここでは VectorWorks SDK を include しない。
 //
 //	このモジュールも parse/Sheet と同じく IFC の幾何をほとんど見ない——**他のモジュールが

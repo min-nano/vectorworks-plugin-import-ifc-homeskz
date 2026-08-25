@@ -25,7 +25,7 @@ namespace HomeskzIfcImport::parse
 	namespace
 	{
 		// X 通り／Y 通りのクラス名。Python 版 ifc/grid.py の CLASS_X / CLASS_Y と一致させる
-		// （'01作図-01線-01基準線-01通り芯-X通り' 等）。ROADMAP.md M1「X/Y でクラス分け」。
+		// （'01作図-01線-01基準線-01通り芯-X通り' 等）。docs/DEV-NOTES.md M1「X/Y でクラス分け」。
 		constexpr const char* kGridClassX = "01作図-01線-01基準線-01通り芯-X通り";
 		constexpr const char* kGridClassY = "01作図-01線-01基準線-01通り芯-Y通り";
 
@@ -73,7 +73,7 @@ namespace HomeskzIfcImport::parse
 
 	} // namespace
 
-	// 軸が X 通りか Y 通りかを判定する（ROADMAP.md M1）。まず軸名の先頭文字が
+	// 軸が X 通りか Y 通りかを判定する（docs/DEV-NOTES.md M1）。まず軸名の先頭文字が
 	// X/Y ならそれに従い（大文字小文字を無視）、判別できなければ線の向きで決める
 	// （|Δx|<|Δy| すなわち縦長の線を X 通り＝X 軸上に並ぶ縦線とみなす。ホームズ君の
 	// x1/x2… は実際に鉛直線として出力される）。
@@ -136,7 +136,7 @@ namespace HomeskzIfcImport::parse
 	bool gridCenterOf(const std::vector<GridLine>& lines, Vec2& out)
 	{
 		// 全端点の bbox 中心を求める（原点へ寄せるオフセット。VW 上で図面が原点付近に
-		// 来るようにする。ROADMAP.md M1「原点付近にセンタリング」）。
+		// 来るようにする。docs/DEV-NOTES.md M1「原点付近にセンタリング」）。
 		if (lines.empty())
 			return false;
 

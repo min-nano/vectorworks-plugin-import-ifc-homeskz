@@ -2,7 +2,7 @@
 //	parse/Footing.h
 //
 //	Phase 1（IFC 解析）の基礎モジュール。Python 版 ifc/footing.py に対応する
-//	（ROADMAP.md M9「基礎（立上り＝壁・底盤＝スラブ）＋基礎ストーリ」）。ホームズ君 IFC の
+//	（docs/DEV-NOTES.md M9「基礎（立上り＝壁・底盤＝スラブ）＋基礎ストーリ」）。ホームズ君 IFC の
 //	基礎要素（IfcFooting と底盤の IfcSlab）を Name で分類し、別々のオブジェクトへ変換する。
 //
 //	  * 立上り（基礎梁。Name が "基礎梁" 始まりの IfcFooting）→ **壁**（core::WallCommand）
@@ -194,7 +194,7 @@ namespace HomeskzIfcImport::parse
 	// 呑み込み（_SLAB_BITE = 10mm 下げ）は行わない**。Python 版のねらいは「底盤に少し
 	// 呑み込ませて coplanar による断面の境界線を防ぐ」ことだったが、下端は既に底盤の底面と
 	// 一致しているので下へ 10mm 伸ばしても**底盤の下に突き出すだけ**で、意図と逆の結果に
-	// なっていた（ローカル確認で判明。ROADMAP.md M9）。深さの差（外周が深い等）は
+	// なっていた（ローカル確認で判明。docs/DEV-NOTES.md M9）。深さの差（外周が深い等）は
 	// 地中梁（M10）が持つので、基礎梁側で作り込まない。
 	//
 	// 組み立てたあと mergeWallCommands → extendFreeWallEnds → applyWallOpenings（人通口）を
@@ -224,7 +224,7 @@ namespace HomeskzIfcImport::parse
 	// **同一直線上で突き合わせになっている端は自由端ではない**（延長すると隣へ食い込む）。
 	// 交点判定は平行な立上りを除外するので、上端／下端が違って統合できなかった隣どうしが
 	// 端で接している場合、そのままでは両端とも自由端に見えて互いに半壁厚ずつ重なる
-	// （実データで 75mm / 150mm の重なりとして現れた。ROADMAP.md M10）。
+	// （実データで 75mm / 150mm の重なりとして現れた。docs/DEV-NOTES.md M10）。
 	//
 	// **半島状の立上り**（スラブの取り付かない外部へ突き出す自由端）は、端部を受ける管柱の
 	// 柱芯より外側に土台の半材せい（約 50mm）ぶん長く入力されていることがある。そのまま
@@ -290,7 +290,7 @@ namespace HomeskzIfcImport::parse
 	//
 	// より正確なのは「同一直線上の立上りを 1 本に統合して下端の違いを切り欠きで表す」ことだが、
 	// VW の壁は下端の切り欠きを構成層でも高さバインドでも表せず、別途ソリッドで削る仕組みが
-	// 要るため採らない（ROADMAP.md M10）。
+	// 要るため採らない（docs/DEV-NOTES.md M10）。
 	std::vector<core::WallCommand>
 	extendDeeperCollinearEnds(const std::vector<core::WallCommand>& walls);
 

@@ -4,9 +4,9 @@
 //	仕口解析（src/parse/Joint）の単体テスト。VectorWorks SDK を一切 include せず、
 //	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
 //	Python 版 test_ifc_joint.py のケースを 1 対 1 で写している（期待値は手書き。
-//	ROADMAP.md「Python 版出力との比較はしない」）。
+//	docs/DEV-NOTES.md「Python 版出力との比較はしない」）。
 //
-//	検証項目（ROADMAP.md M11）: 端点が相手材の footprint に入るかの判定・平行（継ぎ手・
+//	検証項目（docs/DEV-NOTES.md M11）: 端点が相手材の footprint に入るかの判定・平行（継ぎ手・
 //	側並び）とレイヤ違いと Z 分離の除外・登り梁だけレイヤ一致を外すこと・柱に受けられる
 //	端部・退化した材のスキップ・基準点（梁端の中央上端）と回転角（端部から内側へ）・
 //	**高さ（zOffset＝その端部のバウンド offset）**・

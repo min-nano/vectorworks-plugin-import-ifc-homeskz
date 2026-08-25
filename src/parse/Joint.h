@@ -2,7 +2,7 @@
 //	parse/Joint.h
 //
 //	Phase 1（IFC 解析）の仕口モジュール。Python 版 ifc/joint.py に対応する
-//	（ROADMAP.md M11「シンボル置換系」）。**IFC を直接見ない**唯一の解析モジュールで、
+//	（docs/DEV-NOTES.md M11「シンボル置換系」）。**IFC を直接見ない**唯一の解析モジュールで、
 //	既に組み立て済みの横架材命令（parse/Member）と柱命令（parse/Column）の平面ジオメトリ
 //	だけから「受ける材のある横架材端部」を判定し、そこへ仕口シンボルを置く。
 //

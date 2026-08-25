@@ -2,7 +2,7 @@
 //	parse/AnchorBolt.h
 //
 //	Phase 1（IFC 解析）のアンカーボルトモジュール。Python 版 ifc/anchor_bolt.py に
-//	対応する（ROADMAP.md M11「シンボル置換系」）。IfcMechanicalFastener のうちボルト
+//	対応する（docs/DEV-NOTES.md M11「シンボル置換系」）。IfcMechanicalFastener のうちボルト
 //	本体だけを拾い、ハイブリッドシンボルへ置換する core::SymbolCommand を組み立てる。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ

@@ -2,7 +2,7 @@
 //	draw/Section.h
 //
 //	Phase 2（VW 描画）の軸組図（断面ビューポート）モジュール。Python 版 vw/section.py に
-//	対応する（ROADMAP.md M14）。命令セット（core::SectionCommand の列）から、通りごとの
+//	対応する（docs/DEV-NOTES.md M14）。命令セット（core::SectionCommand の列）から、通りごとの
 //	**断面ビューポートを新規に作って**シートレイヤへ並べる。
 //
 //	【SDK 依存】draw/ は VectorWorks SDK のみに依存し、IFC / STEP の知識を持たない。
@@ -17,7 +17,7 @@
 //	要らず、図面テンプレートに 40 枚を用意しておく必要も無くなる。
 //
 //	実描画（切断位置・視線の向き・奥行き・高さ範囲の効き方、シート上の並び）はローカルの
-//	VectorWorks で目視確認する（ROADMAP.md M14「ローカル確認」）。
+//	VectorWorks で目視確認する（docs/DEV-NOTES.md M14「ローカル確認」）。
 //
 
 #pragma once

@@ -88,7 +88,7 @@ namespace HomeskzIfcImport::parse
 		// test_elevation_is_rafter_top_plus_sheathing）はいずれも**垂木せいのみ**を持ち上げて
 		// おり（＝軸 Z は野地板の下端＝垂木上端で、厚みは軸から上へ伸びる）、ローカル確認済みの
 		// 実装がこちら。実装＝実証済みの資産に合わせる（CLAUDE.md「移植の基本方針」）。厚みが
-		// 軸のどちら側へ伸びるかは VW 実機での目視確認項目にする（ROADMAP.md M6）。
+		// 軸のどちら側へ伸びるかは VW 実機での目視確認項目にする（docs/DEV-NOTES.md M6）。
 		const double lift = kDefaultRafterHeight / slope.run;
 
 		RoofCommand cmd;

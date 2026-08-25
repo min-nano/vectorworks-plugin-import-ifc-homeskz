@@ -4,7 +4,7 @@
 //	構造クラス判定（src/parse/StructuralClass）の単体テスト。VectorWorks SDK を一切
 //	include せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md
 //	「テスト方針」: core/ parse/ は無 SDK で単体テスト）。Python 版
-//	test_ifc_structural_class.py の意図を 1 対 1 で写す（ROADMAP.md M4）。
+//	test_ifc_structural_class.py の意図を 1 対 1 で写す（docs/DEV-NOTES.md M4）。
 //
 //	検証項目: 種別トークン抽出（"木梁:{種別}:{連番}" は中央・2 要素名は接頭辞・空/未設定）・
 //	種別→クラスの直接対応（床小梁/床大梁/甲乙梁→床梁、登り梁、未知は無し）・横架材クラス

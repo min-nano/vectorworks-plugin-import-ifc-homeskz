@@ -19,7 +19,7 @@
 //	  ハンドルを返す公開 API が無く、Recalculate() も引数を取らないため、VWFC が
 //	  Execute で詰めるこのメンバが唯一の入口）。
 //	実際の見え方（線の太さ・シンボルの向き・リセットの契機）はローカルの VectorWorks で
-//	目視確認する（ROADMAP.md M12「ローカル確認」）。
+//	目視確認する（docs/DEV-NOTES.md M12「ローカル確認」）。
 //
 //	【生成時にダイアログを出さない】PIO の既定は「作るたびに設定ダイアログを出す」
 //	（`DefineCustomObject` の `prefWhen` 既定＝`kCustomObjectPrefAlways`）。記号は
@@ -227,7 +227,7 @@ namespace HomeskzIfcImport
 
 		// 印刷・書き出しの直前にリセットする。**図面として外へ出る瞬間に必ず実物と
 		// 一致させる**ための最後の砦で、柱を編集してから記号をリセットし忘れても、
-		// 印刷／書き出したものは正しい（ROADMAP.md M12「追随の契機」）。
+		// 印刷／書き出したものは正しい（docs/DEV-NOTES.md M12「追随の契機」）。
 		gSDK->SetObjectProperty(objectID, kObjXPropResetBeforeExport, true);
 		return result;
 	}

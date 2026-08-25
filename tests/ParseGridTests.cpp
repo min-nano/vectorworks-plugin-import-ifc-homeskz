@@ -5,7 +5,7 @@
 //	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:
 //	core/ parse/ は無 SDK で単体テスト）。Python 版 test_ifc_grid.py の意図を写す。
 //
-//	検証項目（ROADMAP.md M1）: ポリライン端点の取得・重複線除去・bbox 中心での
+//	検証項目（docs/DEV-NOTES.md M1）: ポリライン端点の取得・重複線除去・bbox 中心での
 //	センタリング・X/Y 通り判定（名前優先／幾何フォールバック）・クラス付与・決定性。
 //	実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //

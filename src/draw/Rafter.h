@@ -3,7 +3,7 @@
 //
 //	Phase 2（VW 描画）の垂木モジュール。Python 版 vw/rafter.py に対応する。
 //	命令セット（core::RafterCommand）を**軸組ツール（FramingMember、部材種別 rafter）**の
-//	オブジェクトとして配置する（ROADMAP.md M6）。
+//	オブジェクトとして配置する（docs/DEV-NOTES.md M6）。
 //
 //	【SDK 依存】実装（draw/Rafter.cpp）は PluginPrefix.h（VectorWorks SDK）を include する。
 //	このヘッダは core/Document.h までしか参照しないので、SDK を持たない翻訳単位からも

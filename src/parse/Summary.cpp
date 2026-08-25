@@ -84,7 +84,7 @@ namespace HomeskzIfcImport::parse
 	{
 		// 完了ダイアログに並べる要素の表。**ここが唯一の一覧**で、要素を 1 つ足すときに
 		// 触るのはこの表の 1 行だけ（以前は Extensions/ExtMenu.cpp の文字列連結と命令数の
-		// 足し算の 2 か所を手で伸ばしていた。ROADMAP.md M15「完了文言の集約」）。
+		// 足し算の 2 か所を手で伸ばしていた。docs/DEV-NOTES.md M15「完了文言の集約」）。
 		//
 		// commands は「解析が出した命令の数」を Document から、placed は「描画が実際に
 		// 描けた数」を DrawCounts から取り出す関数。キャプチャの無いラムダは関数ポインタへ

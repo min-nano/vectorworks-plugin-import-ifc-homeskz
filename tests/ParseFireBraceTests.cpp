@@ -4,9 +4,9 @@
 //	火打解析（src/parse/FireBrace）の単体テスト。VectorWorks SDK を一切 include せず、
 //	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
 //	Python 版 test_ifc_fire_brace.py のケースを 1 対 1 で写している（期待値は手書き。
-//	ROADMAP.md「Python 版出力との比較はしない」）。
+//	docs/DEV-NOTES.md「Python 版出力との比較はしない」）。
 //
-//	検証項目（ROADMAP.md M11）: 火打の判別（Name 接頭辞＋IfcBeam/IfcMember）・端面の識別
+//	検証項目（docs/DEV-NOTES.md M11）: 火打の判別（Name 接頭辞＋IfcBeam/IfcMember）・端面の識別
 //	（プロファイル局所 v の符号反転）・端面の延長交点（＝内角＝基準点）・回転角（内角の
 //	二等分方向＋シンボル基準姿勢の 45 度補正）・配置先レイヤ（横架材天端／最上階は軒高）・
 //	センタリング・決定性・全フィクスチャの通し。実フィクスチャのパスは CMake が
