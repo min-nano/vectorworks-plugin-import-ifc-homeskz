@@ -90,6 +90,11 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kTextStyleName = "寸法(6pt)";
 		constexpr double kTextSizePoints = 6.0;
 
+		// タグレイアウトに置く断面寸法フィールド（テキスト）のクラス。他の要素の描画クラス
+		// （drawClass）と同じく、色・線幅等の描画属性はすべてこのクラスへ従わせる
+		// （draw/DrawUtil の SetClassByName ＋ SetAllAttributesByClass）。
+		constexpr const char* kDimensionClass = "寸法";
+
 		// スタイル名が埋まっていたときに足す通し番号の上限。ここまで埋まっている文書は
 		// 事実上あり得ないが、無限ループにしないための歯止め。
 		constexpr int kNameSuffixLimit = 999;
@@ -330,6 +335,11 @@ namespace HomeskzIfcImport::draw
 				gSDK->DeleteObject(text, true);
 				return false;
 			}
+
+			// 「寸法」クラスへ入れ、描画属性はすべてそのクラスに従わせる（他の要素の
+			// drawClass と同じ意図。draw/DrawUtil の SetClassByName ＋ SetAllAttributesByClass）。
+			SetClassByName(text, kDimensionClass);
+			SetAllAttributesByClass(text);
 
 			ApplyFieldTextStyle(text, static_cast<Sint32>(formula.GetLength()), record);
 
