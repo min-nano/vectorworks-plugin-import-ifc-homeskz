@@ -20,7 +20,7 @@
 //	  * gSDK->SetSymbolDefSubType(symDef, 内部 ID)  … そのシンボル定義を**スタイルにする**
 //	  * gSDK->AddObjectToContainer                  … PIO・テキストを容れ物へ入れる
 //	  * gSDK->GetCustomObjectProfileGroup / SetCustomObjectProfileGroup … タグレイアウト
-//	  * gSDK->CreateGroup / CreateTextBlock / SetObjectName / SetTextStyleRef … レイアウトの中身
+//	  * gSDK->CreateGroup / CreateTextBlock / SetTextStyleRef … レイアウトの中身
 //	  * gSDK->GetCustomObjectProfileGroupInAux                          … レイアウトのもう 1 つの入り口
 //	  * gSDK->FirstMemberObj / NextObject / GetObjectTypeN / GetObjectName … 構造ダンプ（診断）
 //	  * VectorWorks::Extension::IDataTagTextLinkSupport（VCOM）
@@ -73,7 +73,6 @@ namespace HomeskzIfcImport::draw
 		std::string structure; // 作ったスタイルの構造（実機から持ち帰る目）
 		std::string existingStructure; // 同名の既存スタイルの構造（参照見本）
 		bool textStyleMissing = false; // 文字スタイル（"寸法(6pt)"）が文書に無かった
-		bool labelMissing = false; // フィールドラベル（テキストの名前）を付けられなかった
 		bool linkMissing = false; // テキストをタグフィールドにできなかった（式が入らない）
 		bool leaderLeft = false; // スタイル側の引出線を OFF にできなかった
 	};
@@ -85,11 +84,6 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kDataTagPlugin = "Data Tag";
 
 		// --- 生成するスタイルの中身（draw/Tag.h「スタイルは作って使う」）-----------------
-
-		// タグフィールドのラベル。VW はレイアウトの中の**テキストの名前**をフィールドの
-		// ラベルとして扱う（タグデータの取り出し口 IDataTagSupport::GetDataTagExtractedData も
-		// ラベルで引く）ので、テキストへこの名前を付ける。
-		constexpr const char* kFieldLabel = "断面寸法";
 
 		// フィールドの文字スタイル。**文書にあれば当て、無ければ大きさだけを直接与える**
 		// （テンプレート由来の資源なので、無い文書でも寸法が読める大きさにはしておく）。
@@ -339,10 +333,10 @@ namespace HomeskzIfcImport::draw
 
 			ApplyFieldTextStyle(text, static_cast<Sint32>(formula.GetLength()), record);
 
-			// フィールドラベル＝テキストの名前。既に同じ名前の資源がある文書では付かない
-			// （ラベルが無いだけでタグは出るので、診断に残して先へ進む）。
-			if (gSDK->SetObjectName(text, TXString(kFieldLabel)) != 0)
-				record.labelMissing = true;
+			// **フィールドラベルはテキストの名前ではない。** 実機の構造ダンプで、手で作った
+			// （寸法が出ている）スタイルのレイアウトのテキストには**名前が付いていない**ことを
+			// 確かめた（draw/Tag.h「実機から持ち帰った見本」）。名前を付けようとすると文書の
+			// 資源名とぶつかるだけなので、何もしない。
 
 			// **ここでテキストがタグフィールドになる。** リンクを立てて式を持たせる。
 			const VectorWorks::Extension::IDataTagTextLinkSupportPtr link(
@@ -670,28 +664,31 @@ namespace HomeskzIfcImport::draw
 		text += "「" + record.name + "」を作りました。";
 		if (record.renamed)
 			text += "（基準名「" + record.requested + "」は文書に在るので別名にしました。）";
-		if (record.layoutCreated)
-			text += "タグレイアウトは新しく作りました。";
-		if (record.layoutCopied)
-			text += "渡したレイアウトは VW 側で複製されました。";
-		if (record.notAStyle)
-			text += "VW がこの資源をプラグインスタイルとみなしていません。";
-		if (record.lociRemoved > 0)
-			text += "既定レイアウトのロクス " + std::to_string(record.lociRemoved) +
-					" 個を外しました。";
-		if (record.layoutPrefilled > 0)
-			text += "データタグが最初から持っていたレイアウトの中身 " +
-					std::to_string(record.layoutPrefilled) + " 件。";
-		text += "レイアウトの中身 " + std::to_string(record.layoutCount) + " 件。";
-		text += "構造: " + record.structure + "。";
-		if (!record.existingStructure.empty())
-			text += "同名の既存スタイルの構造: " + record.existingStructure + "。";
+		// **構造は異常のときだけ出す。** 中身の並びのダンプは「タグが空で出る」を実機から
+		// 追うために足したもので（draw/Tag.h）、うまくいっている取り込みでは読み手に
+		// とって雑音でしかない。作り方に引っかかりがあったとき——スタイルとして認識され
+		// ない・レイアウトが空・VW が複製した——だけ、見本と並べて出す。
+		const bool suspicious = record.notAStyle || record.layoutCount == 0 || record.layoutCopied;
+		if (suspicious)
+		{
+			if (record.notAStyle)
+				text += "VW がこの資源をプラグインスタイルとみなしていません。";
+			if (record.layoutCopied)
+				text += "渡したレイアウトは VW 側で複製されました。";
+			if (record.layoutCreated)
+				text += "タグレイアウトは新しく作りました。";
+			if (!record.styleMapSet)
+				text += "スタイルのパラメータ対応表を作れませんでした。";
+			text += "データタグが最初から持っていた中身 " + std::to_string(record.layoutPrefilled) +
+					" 件（うちロクス " + std::to_string(record.lociRemoved) + " 個を外した）。";
+			text += "レイアウトの中身 " + std::to_string(record.layoutCount) + " 件。";
+			text += "構造: " + record.structure + "。";
+			if (!record.existingStructure.empty())
+				text += "同名の既存スタイルの構造: " + record.existingStructure + "。";
+		}
 		if (record.textStyleMissing)
 			text += std::string("文字スタイル「") + kTextStyleName +
 					"」が文書に無いので大きさだけを与えました。";
-		if (record.labelMissing)
-			text += std::string("フィールドラベル「") + kFieldLabel +
-					"」を付けられませんでした（同じ名前の資源があります）。";
 		if (record.linkMissing)
 			text += "タグフィールドの式を入れられませんでした（寸法が空になります）。";
 		if (record.leaderLeft)
@@ -755,23 +752,32 @@ namespace HomeskzIfcImport::draw
 		if (counts.firstTag.empty() && !placed.empty())
 		{
 			const MCObjectHandle tag = placed.front();
-			std::string text;
 			MCObjectHandle styleSymbol = nil;
-			if (gSDK->GetPluginStyleSymbol(tag, styleSymbol) && styleSymbol != nil)
-			{
-				TXString name;
-				gSDK->GetObjectName(styleSymbol, name);
-				text = "スタイル「" + name.GetStdString() + "」";
-			}
-			else
-			{
-				text = "スタイル無し";
-			}
+			const bool styled = gSDK->GetPluginStyleSymbol(tag, styleSymbol) && styleSymbol != nil;
 			const MCObjectHandle layout = HeldTagLayout(tag);
-			text +=
-				"・レイアウト" + (layout == nil ? std::string("無し")
-												: std::to_string(ContainerCount(layout)) + "件");
-			counts.firstTag = std::move(text);
+			const std::size_t items = layout == nil ? 0 : ContainerCount(layout);
+
+			// **正常なら黙る。** スタイルが当たっていてレイアウトに中身があるなら、この行は
+			// 読み手にとって雑音でしかない（タグを見れば分かる）。当たっていない・中身が
+			// 無い——つまり「タグはあるのに寸法が出ない」ときだけ、どちらなのかを実機から
+			// 持ち帰る。
+			if (!styled || items == 0)
+			{
+				std::string text;
+				if (styled)
+				{
+					TXString name;
+					gSDK->GetObjectName(styleSymbol, name);
+					text = "スタイル「" + name.GetStdString() + "」";
+				}
+				else
+				{
+					text = "スタイル無し";
+				}
+				text += "・レイアウト" +
+						(layout == nil ? std::string("無し") : std::to_string(items) + "件");
+				counts.firstTag = std::move(text);
+			}
 		}
 
 		// クラスを表示へ戻し、ビューポートを更新して反映する。ConfigureViewport は**タグを
