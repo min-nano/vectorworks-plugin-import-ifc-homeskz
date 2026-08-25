@@ -1,35 +1,52 @@
 name: Clean up dev prerelease
 
-# When a branch is deleted, remove the matching "dev-<branch>" prerelease (and
-# its tag) that build.yml published for it, so old dev builds don't pile up.
+# When a pull request is closed (merged or not), remove the matching
+# "dev-<branch>" prerelease (and its tag) that build.yml published for it, so
+# old dev builds don't pile up.
 #
-# NOTE: `delete`-triggered workflows always run from the copy of this file on
-# the DEFAULT branch, so this only takes effect once it is merged to main; it
-# then fires for branches deleted after that point.
+# WHY THE PULL REQUEST, NOT THE BRANCH: the prerelease exists because a PR was
+# open — build.yml only publishes it on `pull_request` — so the PR closing is
+# the moment it stops being useful. Keying the cleanup on branch deletion
+# instead left the prerelease alive for every merged PR whose branch was kept
+# (and for every PR closed without merging), and it fired for branches that
+# never had a PR at all.
+#
+# NOTE: a `pull_request` workflow runs from the copy of this file on the PR's
+# merge ref (head merged into base), so this only takes effect once it is on
+# main — a PR that predates the merge picks it up as soon as its merge ref is
+# recomputed against the updated main.
 on:
-  delete:
+  pull_request:
+    types: [closed]
 
 permissions:
   contents: write
 
 jobs:
   cleanup:
-    # Only branch deletions (not tag deletions) map to a dev prerelease.
-    if: github.event.ref_type == 'branch' && github.event.ref != 'main'
+    # Only same-repo PRs ever published a prerelease (a fork PR's GITHUB_TOKEN
+    # is read-only, so build.yml's release job skips them). Excluding forks here
+    # also keeps a fork from choosing a branch name that maps onto someone
+    # else's dev tag and deleting that release by closing its PR.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - name: Delete the branch's dev prerelease
+      - name: Delete the pull request's dev prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          # Pass the branch through the environment rather than interpolating
+          # ${{ }} into the script: the name comes from the PR and must not be
+          # able to become shell syntax.
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          branch="${{ github.event.ref }}"
           # Same slug rule as the "Publish dev prerelease" step in build.yml.
-          slug="$(printf '%s' "$branch" | tr '/:@ ' '----' | tr -c 'A-Za-z0-9._-' '-')"
+          slug="$(printf '%s' "$BRANCH" | tr '/:@ ' '----' | tr -c 'A-Za-z0-9._-' '-')"
           tag="dev-${slug}"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Deleting release + tag: $tag (branch: $branch)"
+            echo "Deleting release + tag: $tag (PR #${PR_NUMBER}, branch: $BRANCH)"
             gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
           else
-            echo "No dev release for '$branch' (expected tag '$tag'); nothing to clean up."
+            echo "No dev release for PR #${PR_NUMBER} (expected tag '$tag'); nothing to clean up."
           fi
