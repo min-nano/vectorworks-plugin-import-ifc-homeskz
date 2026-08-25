@@ -345,9 +345,13 @@ namespace HomeskzIfcImport::draw
 	// これが本命で、退避路（デザインレイヤの並べ替え＝draw/Story の reorderStoryLayers）は
 	// 記録されなかったときだけ使う。軸組図（断面）は重ね順に意味が無いので渡さない。
 	//
-	// **希望順に挙がっていないデザインレイヤにも位置が要る**——「その図に映るレイヤだけ」に
-	// 与えると 1 件も記録されない（実機で確認）ので、setup.layers の残りを最背面へ続ける。
-	// 位置の基点・向きと合わせて DrawUtil.cpp の ApplyLayerStacking に書いてある。
+	// 【与える条件は実機で 2 つ分かっている】どちらを外しても `Set…` は true を返しながら
+	// 1 件も記録されない:
+	//   * **図面の全デザインレイヤに位置が要る**（「その図に映るレイヤだけ」では駄目）。
+	//     希望順に挙がっていないレイヤは setup.layers の残りを最背面へ続ける。
+	//   * **ビューポートが出来上がってから与える**（生成直後・最初の更新より前では駄目）。
+	//     そのためこの設定だけは**最後の更新の後**に行い、記録できたらもう一度更新する。
+	// 位置の基点・向きと併せて DrawUtil.cpp の ApplyLayerStacking に書いてある。
 	ViewportFinish ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
 									 const ViewportSetup& setup,
 									 const core::ViewportCommand& command,

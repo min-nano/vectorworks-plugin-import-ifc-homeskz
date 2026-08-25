@@ -149,11 +149,16 @@ namespace HomeskzIfcImport::draw
 		//
 		//     共通=1  2-柱伏図記号=2 … 1-FL=17 … R-野地板=25  2-FL=26  2-野地板=27
 		//
-		// ここから 3 つ確定した。**どれか 1 つでも外すと 1 件も記録されない**（実測）:
+		// ここから 3 つ確定した:
 		//   1. 位置は **1 始まり**（0 は使わない）
 		//   2. **1 が最前面**（最背面が枚数と同じ番号）
 		//   3. **図面の全デザインレイヤに位置を与える**——「その図に映るレイヤだけ」ではない。
 		//      GUI も上書きを ON にした時点で全レイヤぶんを記録する。
+		//
+		// **これだけでは足りなかった。** 1〜3 を揃えても、生成直後のビューポート（最初の更新
+		// より前）へ与えると `Set…` は true を返しながら 1 件も記録されない（実測: 与えた
+		// 27 件・記録 0 件）。GUI で上書きを付けられるのも「既にある・更新済みの」ビュー
+		// ポートなので、**呼び出しは最後の更新の後**に置いてある（ConfigureViewport）。
 		//
 		// したがって希望順（映る映らないに関わらず全ストーリのレイヤが並ぶ）を前から 1,2,3,…
 		// と振り、希望順に出てこないデザインレイヤ（ユーザーが別途作ったもの）は末尾＝最背面へ
@@ -714,15 +719,6 @@ namespace HomeskzIfcImport::draw
 				gSDK->SetViewportLayerVisibility(viewport, layer, kLayerVisible);
 		}
 
-		// 重ね順: **表示レイヤを絞った後**に、このビューポートの中だけの並びとして与える
-		// （ヘッダ「重ね順（stackingOrder）」）。渡されなければ何もしない。
-		if (!stackingOrder.empty())
-		{
-			finish.stackingRecorded =
-				ApplyLayerStacking(viewport, stackingOrder, setup.layers, finish.stackingRequested,
-								   finish.layerIndexVerified);
-		}
-
 		// クラス: 全クラスを 1 つずつ表示へ戻す（ヘッダ「クラスを表示へ戻す理由」）。
 		finish.classesApplied = ShowClasses(viewport, setup.classes);
 		finish.planViewApplied = projection == ViewportProjection::Keep;
@@ -745,6 +741,29 @@ namespace HomeskzIfcImport::draw
 		{
 			// ラベル・縮尺が付かなくてもビューポートは図面に残るので、ここで戻る。
 			return finish;
+		}
+
+		// 重ね順は**ビューポートが出来上がってから**与える（ヘッダ「重ね順（stackingOrder）」）。
+		// 生成直後・最初の更新より前に設定しても 1 件も記録されない（実機で確認）。GUI で
+		// 上書きを付けられるのも「既にある・更新済みの」ビューポートで、そこに合わせている。
+		// 記録できたら、その並びで描き直すためにもう一度更新する。
+		if (!stackingOrder.empty())
+		{
+			finish.stackingRecorded =
+				ApplyLayerStacking(viewport, stackingOrder, setup.layers, finish.stackingRequested,
+								   finish.layerIndexVerified);
+			if (finish.stackingRecorded > 0)
+			{
+				try
+				{
+					VWViewportObj(viewport).Update();
+				}
+				catch (...)
+				{
+					// 更新できなくても上書きは図面に残る（次に開いたときに効く）。
+					return finish;
+				}
+			}
 		}
 		return finish;
 	}
