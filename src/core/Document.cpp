@@ -128,11 +128,12 @@ namespace HomeskzIfcImport::core
 			return total > 0.0;
 		}
 
-		// 床付け（捨てコン・砕石）1 層が妥当か。断面が 3 点以上（面になる）で、素材クラス名が
-		// 非空であること（押し出しは地中梁と共有するのでここでは見ない）。
+		// 床付け（捨てコン・砕石）1 区間が妥当か。断面が 3 点以上（面になる）で、素材クラス名が
+		// 非空で、押し出し長が正であること（長さ 0 のプリズムは描けない。向きと断面の座標系は
+		// 地中梁と共有するのでここでは見ない）。
 		bool isValidBedding(const BeddingCommand& bedding)
 		{
-			return bedding.profile.size() >= 3 && !bedding.drawClass.empty();
+			return bedding.profile.size() >= 3 && !bedding.drawClass.empty() && bedding.depth > 0.0;
 		}
 
 		// 地中梁（台形プリズム）1 本が妥当か。断面が 3 点以上（面になる）で、押し出し長が正で

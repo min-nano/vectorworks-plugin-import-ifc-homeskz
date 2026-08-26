@@ -60,8 +60,9 @@
 //	     こちらだけ天端を底盤へ 10mm 呑み込ませ（core::raiseModifierTop）、天端と底盤底面が
 //	     面ちょうど接する（coplanar）ことによる断面の境界線を防ぐ。
 //	  3. **床付け（捨てコン・砕石）のソリッド** … 地中梁の下に敷く層（M16。
-//	     core::BeddingCommand）。同じ押し出しで断面だけが違うので、同じ手順で作って素材の
-//	     クラスを付ける。呑み込みは掛けない（接する相手が別素材なので境界線が出てよい）。
+//	     core::BeddingCommand）。同じ押し出しの向きで断面と区間だけが違うので、同じ手順で
+//	     作って素材のクラスを付ける（区間は断面原点を押し出し方向へ送って表す）。呑み込みは
+//	     掛けない（接する相手が別素材なので境界線が出てよい）。
 //	スラブへ「足す」噛み合わせ（ModifySlab）は実機で失敗するため使えない——調査の記録は
 //	docs/DEV-NOTES.md「打ち切った調査」。
 //
@@ -307,14 +308,19 @@ namespace HomeskzIfcImport::draw
 					SetBooleanVariable(solid, ovIsStructural, true);
 				}
 
-				// 床付けは地中梁と押し出し（origin / azimuth / depth）を共有し、断面だけが
-				// 違う（core::BeddingCommand）。プリズムの作り方は同じなので、断面を差し替えた
-				// 命令を渡す。
+				// 床付けは地中梁と押し出しの向き（azimuth）と断面の座標系を共有し、断面と
+				// 押し出し方向の区間だけが違う（core::BeddingCommand）。プリズムの作り方は
+				// 同じなので、断面を差し替え、断面原点を区間の始まりへ送った命令を渡す。
+				const double phi = modifier.azimuth * std::numbers::pi / 180.0;
+				const core::Vec2 axis{std::cos(phi), std::sin(phi)};
 				for (const core::BeddingCommand& bedding : modifier.beddings)
 				{
 					core::ModifierCommand prism = modifier;
 					prism.profile = bedding.profile;
 					prism.beddings.clear();
+					prism.origin.x += axis.x * bedding.start;
+					prism.origin.y += axis.y * bedding.start;
+					prism.depth = bedding.depth;
 					const MCObjectHandle bed = CreateModifierPrism(prism);
 					if (bed == nil)
 						continue;

@@ -482,23 +482,32 @@ namespace HomeskzIfcImport::core
 		bool capped = false;
 	};
 
-	// 地中梁の下に敷く床付け（捨てコン・砕石）1 層。地中梁（ModifierCommand::beddings）に
-	// ぶら下がり、押し出し（origin / azimuth / depth）は**その地中梁と共有**して断面だけが
-	// 違う（docs/DEV-NOTES.md M16「基礎の床付け」）。draw/Footing は地中梁の可視ソリッドと
-	// 同じ手順で 3D ソリッドとして置く。
+	// 地中梁の下に敷く床付け（捨てコン・砕石）1 区間。地中梁（ModifierCommand::beddings）に
+	// ぶら下がり、**押し出しの向き（azimuth）と断面の座標系は地中梁と共有**して、断面と
+	// 押し出し方向の区間だけが違う（docs/DEV-NOTES.md M16「基礎の床付け」）。draw/Footing は
+	// 地中梁の可視ソリッドと同じ手順で 3D ソリッドとして置く。
 	//
 	// 【なぜ底盤の構成層にできないか】底盤（スラブ）の構成層は**一様な厚みの水平な層**しか
 	// 表せない。床付けは地中梁の下で深さが変わり、傾斜部では法線方向に厚みを持つので、
 	// 層ではなく地中梁と同じ押し出しソリッドとして描くしかない（地中梁のコンクリート自身を
 	// 台形プリズムで表すのと同じ理由）。
 	//
+	// 【なぜ区間に分かれるか】床付けは 1 本の地中梁の中でも断面が変わる。傾斜部を覆う砕石の
+	// 帯は、**直交する地中梁と取り合う区間では相手のコンクリートへ食い込む**ので、その区間
+	// だけ帯を切り下げる（parse/Footing.h 冒頭「床付け」）。切り下げる高さが同じ区間は
+	// 1 つにまとめてあるので、取り合いの無い地中梁では区間は 1 つ（＝地中梁の全長）になる。
+	//
 	// フィールド:
 	//   profile             … 断面の 2D 頂点列（u, v）。座標系は ModifierCommand と同じ
 	//   drawClass           … クラス名（構成要素の素材クラス。z構成要素-砕石 等）
+	//   start               … 地中梁の origin から押し出し方向へ何 mm の位置から始まるか
+	//   depth               … 押し出し長（mm。start + depth ≤ 地中梁の depth）
 	struct BeddingCommand
 	{
 		std::vector<Vec2> profile;
 		std::string drawClass;
+		double start = 0.0;
+		double depth = 0.0;
 	};
 
 	// 地中梁（台形断面プリズム）1 本。底盤（SlabCommand::modifiers）にぶら下がる
@@ -518,9 +527,9 @@ namespace HomeskzIfcImport::core
 	// draw/Footing の ModifierPrism）。
 	//
 	// 【床付け（beddings）】地中梁の下には捨てコン・砕石を敷く（M16）。同じ押し出しの中で
-	// 断面だけが違うので、プリズム 1 本ぶんの origin / azimuth / depth を共有する入れ子に
+	// 断面と区間だけが違うので、プリズム 1 本ぶんの origin / azimuth を共有する入れ子に
 	// して持つ（平らに並べて番号で突き合わせない。CLAUDE.md「命令セット」）。並びは
-	// **上から**（捨てコン → 砕石）。床付けを求められなかった地中梁では空になる。
+	// **区間ごとに 上から**（捨てコン → 砕石）。床付けを求められなかった地中梁では空になる。
 	//
 	// フィールド:
 	//   profile             … 断面の 2D 頂点列（u, v）

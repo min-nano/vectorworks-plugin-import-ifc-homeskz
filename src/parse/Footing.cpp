@@ -1459,6 +1459,154 @@ namespace HomeskzIfcImport::parse
 			low = outside(uLo - kBeddingOutsideProbe);
 			high = outside(uHi + kBeddingOutsideProbe);
 		}
+
+		// 断面を半平面 v ≤ top で切った多角形（Sutherland-Hodgman）。床付けの帯を切り上げる
+		// のに使う（上記「地中梁の床付け」）。**切っても 2 つに割れない**ことは形が保証する
+		// ——床付けは下端の下で全幅に繋がっており、top は必ずその繋がりより上にあるので、
+		// 落ちるのは左右の帯の上端だけになる。面にならなくなったら空を返す。
+		std::vector<Vec2> clipProfileBelow(const std::vector<Vec2>& profile, double top)
+		{
+			std::vector<Vec2> out;
+			const std::size_t n = profile.size();
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				const Vec2& a = profile[i];
+				const Vec2& b = profile[(i + 1) % n];
+				const bool aIn = a.y <= top;
+				const bool bIn = b.y <= top;
+				if (aIn)
+					out.push_back(a);
+				if (aIn != bIn)
+				{
+					const double dv = b.y - a.y;
+					const double t = (top - a.y) / dv; // aIn != bIn なので dv は 0 でない
+					out.push_back(Vec2{a.x + ((b.x - a.x) * t), top});
+				}
+			}
+			out = dedupeRing(out);
+			return out.size() >= 3 ? out : std::vector<Vec2>{};
+		}
+
+		// 床付けを 1 つ足す。**同じ層（クラスと断面が同じ）で押し出し方向に続く区間は
+		// 1 本へ繋ぐ**（区間を切ったせいで、断面の変わらない捨てコンまで細切れのソリッドに
+		// なるのを防ぐ）。
+		void appendBedding(std::vector<core::BeddingCommand>& out, core::BeddingCommand bedding)
+		{
+			for (core::BeddingCommand& previous : out)
+			{
+				if (previous.drawClass != bedding.drawClass ||
+					previous.profile.size() != bedding.profile.size() ||
+					std::abs((previous.start + previous.depth) - bedding.start) > kBeddingEdgeEps)
+					continue;
+				bool same = true;
+				for (std::size_t i = 0; i < previous.profile.size() && same; ++i)
+					same =
+						core::samePoint(previous.profile[i], bedding.profile[i], kBeddingEdgeEps);
+				if (!same)
+					continue;
+				previous.depth = (bedding.start + bedding.depth) - previous.start;
+				return;
+			}
+			out.push_back(std::move(bedding));
+		}
+
+		// 押し出し方向の区間 [start, start + depth) と、その区間で床付けを切り上げる高さ。
+		struct BeddingSpan
+		{
+			double start = 0.0;
+			double depth = 0.0;
+			double top = 0.0;
+		};
+
+		// 地中梁 A の床付けを、押し出し方向の区間へ切り分ける。取り合う地中梁が 1 つも無ければ
+		// 全長 1 区間（top = 底盤の砕石の底）。掛かる地中梁がある区間は、その相手の**下端**まで
+		// 切り下げる（相手のコンクリートがある高さには床付けを置かない）。
+		//
+		// 掛かるかどうかは A の**床付けの平面外形**（帯を含む幅）と相手のコンクリートの平面外形
+		// で見る。相手の外形の 4 隅を A の (t, u) 座標へ写した外接矩形を使うので、直交・平行な
+		// 取り合い（実データはこの 2 通りしか無い）では厳密、斜めでは安全側（広めに切る）になる。
+		std::vector<BeddingSpan> beddingSpans(const std::vector<core::ModifierCommand>& beams,
+											  std::size_t self, double slabTop,
+											  double beddingWidthLo, double beddingWidthHi)
+		{
+			const core::ModifierCommand& modifier = beams[self];
+			const Vec2 axis = groundBeamAxisDir(modifier);
+			const Vec2 width{-axis.y, axis.x};
+
+			// 掛かる区間（[t0, t1] と、そこで切り下げる高さ）を集める。**自分自身は除く**
+			// （添字で外す。同じ値の写しを持ち回るのでアドレス比較では外れない）。
+			std::vector<BeddingSpan> blocks;
+			for (std::size_t i = 0; i < beams.size(); ++i)
+			{
+				if (i == self)
+					continue;
+				const core::ModifierCommand& other = beams[i];
+				if (other.profile.empty())
+					continue; // 断面を持たない地中梁は掛かりようがない
+				// 断面が非空なら平面外形も非空（modifierFootprint）。
+				const std::vector<Vec2> footprint = modifierFootprint(other);
+				double tLo = 0.0;
+				double tHi = 0.0;
+				double uLo = 0.0;
+				double uHi = 0.0;
+				bool first = true;
+				for (const Vec2& corner : footprint)
+				{
+					const double dx = corner.x - modifier.origin.x;
+					const double dy = corner.y - modifier.origin.y;
+					const double t = (dx * axis.x) + (dy * axis.y);
+					const double u = (dx * width.x) + (dy * width.y);
+					tLo = first ? t : std::min(tLo, t);
+					tHi = first ? t : std::max(tHi, t);
+					uLo = first ? u : std::min(uLo, u);
+					uHi = first ? u : std::max(uHi, u);
+					first = false;
+				}
+				if (uHi <= beddingWidthLo || uLo >= beddingWidthHi)
+					continue; // 幅方向で離れている（床付けに掛からない）
+				const double start = std::max(tLo, 0.0);
+				const double end = std::min(tHi, modifier.depth);
+				if (end - start <= kBeddingEdgeEps)
+					continue; // 押し出し方向で離れている
+				blocks.push_back(
+					BeddingSpan{start, end - start, other.origin.z - modifier.origin.z});
+			}
+
+			if (blocks.empty())
+				return {BeddingSpan{0.0, modifier.depth, slabTop}};
+
+			// 区切り位置で細切れにし、各区間の切り上げ高さ＝掛かる相手の下端の最小値
+			// （と底盤の砕石の底）を採る。並びは押し出し方向で決定的。
+			std::vector<double> breaks{0.0, modifier.depth};
+			for (const BeddingSpan& block : blocks)
+			{
+				breaks.push_back(block.start);
+				breaks.push_back(block.start + block.depth);
+			}
+			std::ranges::sort(breaks);
+
+			std::vector<BeddingSpan> spans;
+			for (std::size_t i = 0; i + 1 < breaks.size(); ++i)
+			{
+				const double start = breaks[i];
+				const double end = breaks[i + 1];
+				if (end - start <= kBeddingEdgeEps)
+					continue;
+				const double middle = (start + end) / 2.0;
+				double top = slabTop;
+				for (const BeddingSpan& block : blocks)
+				{
+					if (middle > block.start && middle < block.start + block.depth)
+						top = std::min(top, block.top);
+				}
+				// 切り上げ高さの同じ区間は 1 つにまとめる（無用な継目を作らない）。
+				if (!spans.empty() && std::abs(spans.back().top - top) <= kBeddingEdgeEps)
+					spans.back().depth = end - spans.back().start;
+				else
+					spans.push_back(BeddingSpan{start, end - start, top});
+			}
+			return spans;
+		}
 	} // namespace
 
 	// --- 公開 API ------------------------------------------------------------------
@@ -2532,7 +2680,8 @@ namespace HomeskzIfcImport::parse
 	}
 
 	std::vector<core::BeddingCommand> groundBeamBedding(const core::ModifierCommand& modifier,
-														bool lowPerimeter, bool highPerimeter)
+														bool lowPerimeter, bool highPerimeter,
+														double topLimit)
 	{
 		std::vector<Vec2> path;
 		std::size_t first = 0;
@@ -2627,18 +2776,24 @@ namespace HomeskzIfcImport::parse
 				inner.push_back(path[i - 1]); // 下端（u 小さい側）→ 天端
 		}
 
+		// 各層は最後に v ≤ topLimit で切り上げる（傾斜部の帯が直交する地中梁へ食い込むのを
+		// 防ぐ。ヘッダ冒頭「傾斜部の帯は切り上げる」）。面にならなくなった層は落とす。
 		std::vector<core::BeddingCommand> beddings;
 		// 捨てコンは下端の平らな面の直下だけ（傾斜部は砕石のみ）。
-		beddings.push_back(
-			core::BeddingCommand{{Vec2{uLeanLow, leanBottom}, Vec2{uLeanHigh, leanBottom},
-								  Vec2{uLeanHigh, vBot}, Vec2{uLeanLow, vBot}},
-								 CLASS_COMPONENT_LEAN_CONCRETE});
+		std::vector<Vec2> lean =
+			clipProfileBelow({Vec2{uLeanLow, leanBottom}, Vec2{uLeanHigh, leanBottom},
+							  Vec2{uLeanHigh, vBot}, Vec2{uLeanLow, vBot}},
+							 topLimit);
+		if (!lean.empty())
+			beddings.push_back(core::BeddingCommand{std::move(lean), CLASS_COMPONENT_LEAN_CONCRETE,
+													0.0, modifier.depth});
 
 		std::vector<Vec2> gravel = outer;
 		gravel.insert(gravel.end(), inner.begin(), inner.end());
-		gravel = dedupeRing(gravel);
-		if (gravel.size() >= 3)
-			beddings.push_back(core::BeddingCommand{std::move(gravel), CLASS_COMPONENT_GRAVEL});
+		gravel = clipProfileBelow(dedupeRing(gravel), topLimit);
+		if (!gravel.empty())
+			beddings.push_back(core::BeddingCommand{std::move(gravel), CLASS_COMPONENT_GRAVEL, 0.0,
+													modifier.depth});
 		return beddings;
 	}
 
@@ -2653,12 +2808,54 @@ namespace HomeskzIfcImport::parse
 			for (const Vec2& p : slab.boundary)
 				ring.emplace_back(p.x, p.y);
 
-			for (core::ModifierCommand& modifier : slab.modifiers)
+			// 底盤の砕石の底（絶対 Z）。ここから上は底盤スラブの砕石層が埋めているので、
+			// 傾斜部の帯はここで切り上げてよい（ヘッダ冒頭「傾斜部の帯は切り上げる」）。
+			double slabTotal = 0.0;
+			for (const core::ComponentCommand& component : slab.components)
+				slabTotal += component.thickness;
+			const double beddingBottomAbs = slab.elevation - slabTotal;
+
+			// 取り合いの判定は**床付けを付ける前の**地中梁どうしで行う（付けながら書き換える
+			// と、後の地中梁が前の地中梁の床付けを見てしまう）。
+			const std::vector<core::ModifierCommand> beams = slab.modifiers;
+			for (std::size_t index = 0; index < slab.modifiers.size(); ++index)
 			{
+				core::ModifierCommand& modifier = slab.modifiers[index];
 				bool lowPerimeter = false;
 				bool highPerimeter = false;
 				groundBeamPerimeterSides(modifier, ring, lowPerimeter, highPerimeter);
-				modifier.beddings = groundBeamBedding(modifier, lowPerimeter, highPerimeter);
+
+				// 帯を含む床付けの幅（区間の判定に使う）。まず全長ぶんを組み立てて幅を測る。
+				const double slabTop =
+					std::max(beddingBottomAbs - modifier.origin.z, 0.0); // 下端より下は切らない
+				const std::vector<core::BeddingCommand> full =
+					groundBeamBedding(modifier, lowPerimeter, highPerimeter, slabTop);
+				modifier.beddings.clear();
+				if (full.empty())
+					continue;
+
+				double widthLo = full.front().profile.front().x;
+				double widthHi = widthLo;
+				for (const core::BeddingCommand& bedding : full)
+				{
+					for (const Vec2& p : bedding.profile)
+					{
+						widthLo = std::min(widthLo, p.x);
+						widthHi = std::max(widthHi, p.x);
+					}
+				}
+
+				for (const BeddingSpan& span :
+					 beddingSpans(beams, index, slabTop, widthLo, widthHi))
+				{
+					for (core::BeddingCommand bedding :
+						 groundBeamBedding(modifier, lowPerimeter, highPerimeter, span.top))
+					{
+						bedding.start = span.start;
+						bedding.depth = span.depth;
+						appendBedding(modifier.beddings, std::move(bedding));
+					}
+				}
 			}
 		}
 	}

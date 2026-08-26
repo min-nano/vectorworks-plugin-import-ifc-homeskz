@@ -860,15 +860,17 @@ TEST(validate_rejects_degenerate_ground_beam_modifier)
 
 TEST(validate_checks_the_ground_beam_bedding)
 {
-	// 床付け（捨てコン・砕石）は地中会の押し出しを共有するので、断面が面になることと
-	// 素材クラス名が非空であることだけを見る。
+	// 床付け（捨てコン・砕石）は地中梁と押し出しの向き・断面の座標系を共有するので、断面が
+	// 面になること・素材クラス名が非空であること・押し出し長が正であることだけを見る。
 	core::Document document;
 	core::SlabCommand slab = validSlab();
 	core::ModifierCommand modifier = validModifier();
 	modifier.beddings.push_back(
 		core::BeddingCommand{{core::Vec2{-150.0, -130.0}, core::Vec2{150.0, -130.0},
 							  core::Vec2{150.0, 0.0}, core::Vec2{-150.0, 0.0}},
-							 "z構成要素-砕石"});
+							 "z構成要素-砕石",
+							 0.0,
+							 modifier.depth});
 	slab.modifiers.push_back(modifier);
 	document.slabs.push_back(slab);
 	CHECK(core::validateDocument(document));
@@ -888,6 +890,14 @@ TEST(validate_checks_the_ground_beam_bedding)
 	slab.modifiers.push_back(bad);
 	degenerate.slabs.push_back(slab);
 	CHECK(!core::validateDocument(degenerate));
+
+	core::Document noDepth;
+	bad = modifier;
+	bad.beddings[0].depth = 0.0;
+	slab = validSlab();
+	slab.modifiers.push_back(bad);
+	noDepth.slabs.push_back(slab);
+	CHECK(!core::validateDocument(noDepth));
 }
 
 // --------------------------------------------------------------------------
@@ -1345,7 +1355,9 @@ TEST(section_height_range_reaches_ground_beam_bottom)
 	document.slabs.front().modifiers.front().beddings.push_back(
 		core::BeddingCommand{{core::Vec2{-75.0, -130.0}, core::Vec2{75.0, -130.0},
 							  core::Vec2{75.0, 0.0}, core::Vec2{-75.0, 0.0}},
-							 "z構成要素-砕石"});
+							 "z構成要素-砕石",
+							 0.0,
+							 2000.0});
 	CHECK(core::sectionHeightRange(document, start, end));
 	CHECK(std::abs(start - (-830.0 - core::kSectionHeightMargin)) < 1e-6);
 }
