@@ -45,7 +45,10 @@ namespace HomeskzIfcImport::draw
 	{
 		// グラフィック凡例の内部プラグイン名（draw/Legend.cpp の kGraphicLegendPlugin と同じ値。
 		// **一時計装なのであちらを include して結びつけない**——消すときにこのファイルだけで済む）。
+		// **日本語 UI の VW では `GetParametricName()` が表示名を返すことがある**ので、
+		// どちらでも当たるように両方持つ（実機で計装が空振りした原因の第 1 候補）。
 		constexpr const char* kGraphicLegendPlugin = "GraphicLegend";
+		constexpr const char* kGraphicLegendLocalized = "グラフィック凡例";
 
 		// データオブジェクトの型（Kernel/API/Objs.TDType.h の kUserDataNode = 76）と
 		// ビューポートの型（Appendix D: Viewport = 122）。
@@ -241,18 +244,27 @@ namespace HomeskzIfcImport::draw
 			return text;
 		}
 
-		// その PIO がグラフィック凡例か。
-		bool IsGraphicLegend(MCObjectHandle object)
+		// その PIO の登録名（読めなければ空）。**判定にも診断にも使う**——空振りしたときに
+		// 「実際は何という名前だったのか」がダンプに残らないと、原因を実機へ聞き直すことに
+		// なる。
+		std::string ParametricName(MCObjectHandle object)
 		{
 			try
 			{
 				const VWParametricObj pio(object);
-				return pio.GetParametricName() == TXString(kGraphicLegendPlugin);
+				return Std(pio.GetParametricName());
 			}
 			catch (...)
 			{
-				return false;
+				return {};
 			}
+		}
+
+		// その PIO がグラフィック凡例か。**universal 名でも表示名でも当たるようにする。**
+		bool IsGraphicLegend(MCObjectHandle object)
+		{
+			const std::string name = ParametricName(object);
+			return name == kGraphicLegendPlugin || name == kGraphicLegendLocalized;
 		}
 
 		// 文書内のグラフィック凡例をすべて集める（レイヤ → その上のオブジェクトの順に走査）。
@@ -286,9 +298,9 @@ namespace HomeskzIfcImport::draw
 		// 凡例 1 枚ぶん。
 		std::string DumpLegend(MCObjectHandle legend, std::size_t index)
 		{
-			std::string text =
-				"== [凡例 " + std::to_string(index) + "] " + DescribeObject(legend) +
-				" internalIndex=" + std::to_string(gSDK->GetObjectInternalIndex(legend)) + " ==\n";
+			std::string text = "== [凡例 " + std::to_string(index) + "] " + DescribeObject(legend) +
+							   " 登録名=\"" + ParametricName(legend) + "\" internalIndex=" +
+							   std::to_string(gSDK->GetObjectInternalIndex(legend)) + " ==\n";
 			try
 			{
 				const VWParametricObj pio(legend);
@@ -322,26 +334,39 @@ namespace HomeskzIfcImport::draw
 		// stable では計装を動かさない（ユーザーの手元で余計なことをしない）。
 		return {};
 #else
-		// **グラフィック凡例を選んだときだけ**働く。他のものが選ばれていても、
-		// 呼び出し側が普通のインポートを続けられるように空文字を返す。
+		// **何か 1 つでも選ばれていれば働く。** 以前は「選択がグラフィック凡例なら」と
+		// 絞っていたが、実機で空振りした（凡例を選んでいたのにインポートが始まった）。
+		// 判定を通す条件を厳しくするほど原因が分からなくなるので、**選択があれば必ず
+		// 書き出し、判定に落ちた理由（型・登録名）をダンプの頭に残す**。選択が無ければ
+		// 空文字を返し、呼び出し側は普通のインポートへ進む。
 		const MCObjectHandle selected = gSDK->FirstSelectedObject();
-		if (selected == nil || !IsGraphicLegend(selected))
+		if (selected == nil)
 			return {};
 
 		const std::vector<MCObjectHandle> legends = CollectLegends();
-		std::string text =
-			"グラフィック凡例 " + std::to_string(legends.size()) + " 枚\n" +
-			"（選択中: internalIndex=" + std::to_string(gSDK->GetObjectInternalIndex(selected)) +
-			"）\n\n";
+		std::string text = "選択中のオブジェクト: " + DescribeObject(selected) + " 登録名=\"" +
+						   ParametricName(selected) + "\"" +
+						   (IsGraphicLegend(selected) ? "（グラフィック凡例と判定）"
+													  : "（**凡例と判定できず**）") +
+						   "\n文書内のグラフィック凡例: " + std::to_string(legends.size()) +
+						   " 枚\n\n";
+
 		std::size_t index = 0;
+		bool selectedIsListed = false;
 		for (const MCObjectHandle legend : legends)
 		{
 			++index;
+			selectedIsListed = selectedIsListed || legend == selected;
 			text += DumpLegend(legend, index);
 			text += "\n";
 		}
-		if (legends.empty())
-			text += DumpLegend(selected, 1);
+
+		// 走査で拾えなかった（＝登録名が想定と違う）ときも、選んだものだけは必ず出す。
+		if (!selectedIsListed)
+		{
+			text += DumpLegend(selected, index + 1);
+			text += "\n";
+		}
 		return text;
 #endif
 	}
