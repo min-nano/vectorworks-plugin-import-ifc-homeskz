@@ -43,9 +43,11 @@ namespace HomeskzIfcImport::core
 	inline constexpr std::array<double, 13> kScaleDenominators{
 		5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0};
 
-	// 用紙端に残す余白（用紙 mm）。図枠を持たない素の用紙に置くので、印刷の余白ぶんだけ
-	// 内側へ寄せる。
-	inline constexpr double kSheetMargin = 15.0;
+	// **用紙端の余白は定数で持たない**（M17。ローカル確認を経ての結論）。かつては四辺
+	// 15mm と決め打ちしていたが、余白は用紙ではなく**印刷の設定**が決めるものなので、
+	// 仮定すると実際より狭い（または広い）領域で縮尺を選んでしまう。描画側が
+	// シートレイヤから**印刷可能領域そのもの**を読み（draw/DrawUtil の SheetPaperArea。
+	// ISDK::GetPageMargins ＋ 用紙の大きさ）、この割り付けへはその矩形を渡す。
 
 	// ビューポート同士・ビューポートと凡例の間隔（用紙 mm）。
 	inline constexpr double kViewportGap = 15.0;
@@ -59,7 +61,7 @@ namespace HomeskzIfcImport::core
 	// planLayout へ渡す形にしてある。
 
 	// 用紙の大きさが読めなかったときに使う既定（A3 横。用紙 mm）。**シートレイヤから
-	// 読めた値があれば必ずそちらを使う**（draw/DrawUtil の SheetPageArea）。
+	// 読めた値があれば必ずそちらを使う**（draw/DrawUtil の SheetPaperArea）。
 	inline constexpr Vec2 kDefaultPaperSize{420.0, 297.0};
 
 	// 軸組図の段数。**上下 2 段**（要件）。1 段に何枚入るかは用紙の幅と縮尺が決める。
@@ -92,11 +94,6 @@ namespace HomeskzIfcImport::core
 		}
 	};
 
-	// 用紙の外形から作図可能域（四辺を kSheetMargin だけ内側へ寄せた矩形）を作る。
-	// 余白を引くと潰れてしまうほど小さい用紙では、外形をそのまま返す（0 幅の作図域を
-	// 作らない）。
-	PaperArea drawingArea(const PaperArea& page);
-
 	// content（実寸 mm）が available（用紙 mm）に収まる最大の図＝**最小の分母**を階梯から
 	// 選ぶ。どれにも収まらなければ最大の分母（＝いちばん小さい図）を返す——**図がはみ出す
 	// くらいなら小さく描く**。content・available が退化している（0 以下）ときも同じ。
@@ -106,9 +103,9 @@ namespace HomeskzIfcImport::core
 	// 用紙をめくってもビューポートの位置が変わらない。
 	//
 	//   scale          … 縮尺の分母（全伏図で共通）
-	//   plan           … 図が占めてよい領域（用紙 mm。＝作図可能域から凡例のぶんを引いた残り）
+	//   plan           … 図が占めてよい領域（用紙 mm。＝印刷可能領域から凡例のぶんを引いた残り）
 	//   viewportCenter … 図の中心を合わせる点（用紙 mm）。**建物の中心**がここへ来る
-	//   legendTopRight … グラフィック凡例の右上を合わせる点（用紙 mm。作図可能域の右上）
+	//   legendTopRight … グラフィック凡例の右上を合わせる点（用紙 mm。印刷可能領域の右上）
 	//
 	// plan を持つのは、**描けた図が本当に用紙へ収まったかを描画側が測って確かめられる**
 	// ようにするため（M17）。縮尺は「命令セットから求めた建物の広がり」で決めるが、実際に
@@ -124,8 +121,8 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 伏図の割り付けを決める。content は**文書全体**の平面の広がり（実寸 mm）、
-	// legendWidth は**実際に置いた凡例の幅**（用紙 mm。いちばん広いもの。凡例が 1 つも
-	// 無ければ 0）。
+	// area は**印刷可能領域**（用紙 mm。描画側がシートレイヤから読む）、legendWidth は
+	// **実際に置いた凡例の幅**（用紙 mm。いちばん広いもの。凡例が 1 つも無ければ 0）。
 	//
 	// ★**縮尺は凡例の幅を引いてから決める**（要件）。用紙いっぱいで縮尺を決めると、建物が
 	// ギリギリの大きさのときに凡例を置くスペースが無くなる——凡例も図面の一部なので、
@@ -134,14 +131,14 @@ namespace HomeskzIfcImport::core
 	//
 	// **幅を実測で受け取る理由**は上記（凡例は図面の内容で伸び縮みするので、定数で
 	// 決め打ちにすると余らせたぶんだけ縮尺が落ちる）。
-	PlanLayout planLayout(const Vec2& content, const PaperArea& page, double legendWidth);
+	PlanLayout planLayout(const Vec2& content, const PaperArea& area, double legendWidth);
 
 	// 軸組図の割り付け（**上下 2 段**・シートレイヤ 1 枚＝用紙 1 枚）。
 	//
 	//   scale   … 縮尺の分母（全軸組図で共通）
 	//   columns … 1 段に並ぶ枚数（1 以上）
 	//   cell    … 1 枚ぶんの大きさ（用紙 mm。間隔は含まない）
-	//   area    … 作図可能域（用紙 mm）
+	//   area    … 印刷可能領域（用紙 mm。渡されたものをそのまま持つ）
 	struct SectionLayout
 	{
 		double scale = 1.0;
@@ -157,12 +154,12 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 軸組図の割り付けを決める。content は**軸組図 1 枚ぶん**の広がり（実寸 mm。幅は建物の
-	// 平面の広がり、高さは断面の高さ範囲）。**2 段が縦に収まること**を条件に縮尺を選ぶので、
+	// 平面の広がり、高さは断面の高さ範囲）、area は**印刷可能領域**（用紙 mm）。**2 段が縦に収まること**を条件に縮尺を選ぶので、
 	// 1 段しか置かないときも余白は 2 段ぶんのままになる（用紙をまたいで段の位置が揃う）。
-	SectionLayout sectionLayout(const Vec2& content, const PaperArea& page);
+	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area);
 
 	// シート内 index 番目（0 起点。左上から右へ、埋まったら下段へ）のマスの中心（用紙 mm）。
-	// 段組み全体は作図域の中央に置く。範囲外の index は最後のマスへ丸める。
+	// 段組み全体は印刷可能領域の中央に置く。範囲外の index は最後のマスへ丸める。
 	Vec2 sectionSlotCenter(const SectionLayout& layout, std::size_t indexInSheet);
 
 	// viewports 枚の軸組図に要るシートレイヤの枚数（0 枚なら 0）。

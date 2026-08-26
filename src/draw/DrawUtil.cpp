@@ -421,8 +421,9 @@ namespace HomeskzIfcImport::draw
 
 	namespace
 	{
-		// インチ → mm。用紙の大きさだけが**インチで返る**唯一の値なので、換算はここに 1 つ
-		// だけ置く（SheetPageArea）。
+		// インチ → mm。用紙まわりの長さは SDK では一貫して**インチで返る**（用紙・
+		// シートレイヤの大きさ。余白は単位が書かれていない）ので、換算はここに 1 つだけ
+		// 置く（SheetPaperArea）。
 		constexpr double kMillimetersPerInch = 25.4;
 
 		// ビューポートの向き（オブジェクト変数 1007）。3D の「上」＝standardViewTop（7）。
@@ -560,28 +561,126 @@ namespace HomeskzIfcImport::draw
 		return finish;
 	}
 
-	core::PaperArea SheetPageArea(MCObjectHandle sheetLayer)
+	SheetPaper SheetPaperArea(MCObjectHandle sheetLayer)
 	{
-		core::Vec2 size = core::kDefaultPaperSize;
+		SheetPaper paper;
+
+		// --- 用紙とシートレイヤの大きさ（どちらも**インチで返る**）--------------------
+		//
+		// 用紙（page/paper）とシートレイヤは**別の値**として定義されている
+		// （ObjectVariables.h: 165/166 が sheet layer、167/168 が layer page/paper。
+		// ci-debug で確認）。用紙の大きさは 167/168 を第一に採り、読めなければ
+		// VWLayerObj（＝165/166）で代用する。
+		const auto inches = [sheetLayer](short selector, double& out)
+		{
+			TVariableBlock value;
+			double raw = 0.0;
+			if (gSDK->GetObjectVariable(sheetLayer, selector, value) == 0 || !value.GetReal64(raw))
+				return false;
+			if (raw <= 0.0)
+				return false;
+			out = raw * kMillimetersPerInch;
+			return true;
+		};
+
 		try
 		{
 			const VWLayerObj sheet(sheetLayer);
-			// **インチで返る**（SDK ヘッダのコメント: "value in inches. Use (result * 25.4)
-			// to get mm"）。図面座標は mm なので必ず換算する。
 			const double width = sheet.GetSheetWidht() * kMillimetersPerInch;
 			const double height = sheet.GetSheetHeight() * kMillimetersPerInch;
 			if (width > 0.0 && height > 0.0)
-				size = core::Vec2{width, height};
+				paper.sheet = core::Vec2{width, height};
 		}
 		catch (...)
 		{
-			// 用紙の大きさが読めなかった。既定（A3 横）で割り付ける——用紙が読めないことで
-			// 図を捨てるより、既定で置いてローカルで直す方がよい。
-			size = core::kDefaultPaperSize;
+			// シートレイヤとして読めなかった。用紙のオブジェクト変数だけで進む。
+			paper.sheet = core::Vec2{};
 		}
-		// ★用紙は原点中心（DrawUtil.h の SheetPageArea）。
-		return core::PaperArea{core::Vec2{-size.x / 2.0, -size.y / 2.0},
-							   core::Vec2{size.x / 2.0, size.y / 2.0}};
+
+		core::Vec2 size;
+		if (!inches(ovLayerSheetPaperWidth, size.x) || !inches(ovLayerSheetPaperHeight, size.y))
+			size = paper.sheet;
+		if (size.x <= 0.0 || size.y <= 0.0)
+			// 用紙が読めなかった。既定（A3 横）で割り付ける——用紙が読めないことで図を捨てる
+			// より、既定で置いてローカルで直す方がよい。
+			size = core::kDefaultPaperSize;
+		paper.paper = size;
+
+		// --- 印刷可能領域（用紙 − 余白）----------------------------------------------
+		//
+		// ★**余白は仮定せず SDK から読む**（M17。かつては四辺 15mm と決め打ちしていたが、
+		// 余白は用紙ではなく印刷の設定が決めるものなので、仮定した瞬間に実際とずれる）。
+		// ISDK::GetPageMargins は 4 辺を返すが**単位がヘッダに書かれていない**ので、
+		// 次の順で決める:
+		//   1. インチとみなした値で「用紙 − 余白」がシートレイヤの大きさ（165/166）と
+		//      一致するなら**インチ**。用紙まわりの長さは SDK では一貫してインチなので、
+		//      これが本命。
+		//   2. mm とみなした値で一致するなら **mm**。
+		//   3. どちらとも一致しない（＝シートレイヤの大きさが用紙と同じ等）ときは、
+		//      **用紙に収まる方**を採る。両方収まるならインチ（1 の理由）。
+		// 読めなかった・4 辺とも 0 のときは余白なし＝用紙いっぱいを印刷可能領域とする。
+		// **どの解釈を採ったかは生の値ごと診断へ出す**（draw/Sheet）ので、実機で確かめられる。
+		double left = 0.0;
+		double right = 0.0;
+		double bottom = 0.0;
+		double top = 0.0;
+		try
+		{
+			gSDK->GetPageMargins(sheetLayer, left, right, bottom, top);
+		}
+		catch (...)
+		{
+			// 余白が読めなかった。用紙いっぱいを使う（狭める方向の仮定を置かない）。
+			left = right = bottom = top = 0.0;
+		}
+		paper.rawMargins = SheetMargins{left, right, bottom, top};
+
+		const bool any = left > 0.0 || right > 0.0 || bottom > 0.0 || top > 0.0;
+		const bool sane = left >= 0.0 && right >= 0.0 && bottom >= 0.0 && top >= 0.0;
+		if (any && sane)
+		{
+			const auto fits = [&size](double scale, double lo, double hi, bool horizontal)
+			{
+				const double span = horizontal ? size.x : size.y;
+				return ((lo + hi) * scale) < span;
+			};
+			const auto matchesSheet = [&](double scale)
+			{
+				if (paper.sheet.x <= 0.0 || paper.sheet.y <= 0.0)
+					return false;
+				constexpr double kTol = 0.5;
+				return std::abs((size.x - ((left + right) * scale)) - paper.sheet.x) <= kTol &&
+					   std::abs((size.y - ((bottom + top) * scale)) - paper.sheet.y) <= kTol;
+			};
+
+			double scale = 0.0;
+			if (matchesSheet(kMillimetersPerInch))
+				scale = kMillimetersPerInch;
+			else if (matchesSheet(1.0))
+				scale = 1.0;
+			else if (fits(kMillimetersPerInch, left, right, true) &&
+					 fits(kMillimetersPerInch, bottom, top, false))
+				scale = kMillimetersPerInch;
+			else if (fits(1.0, left, right, true) && fits(1.0, bottom, top, false))
+				scale = 1.0;
+
+			if (scale > 0.0)
+			{
+				paper.marginsInInches = scale == kMillimetersPerInch;
+				paper.marginsRead = true;
+				paper.margins =
+					SheetMargins{left * scale, right * scale, bottom * scale, top * scale};
+			}
+		}
+
+		// ★用紙は原点中心（DrawUtil.h の SheetPaperArea）。印刷可能領域は、その用紙から
+		// 4 辺の余白を引いた矩形——**余白は左右・上下で異なりうる**ので、中心もそのぶん
+		// ずれる（引いた後の矩形をそのまま使い、中心へ寄せ直したりしない）。
+		paper.printable = core::PaperArea{
+			core::Vec2{(-size.x / 2.0) + paper.margins.left,
+					   (-size.y / 2.0) + paper.margins.bottom},
+			core::Vec2{(size.x / 2.0) - paper.margins.right, (size.y / 2.0) - paper.margins.top}};
+		return paper;
 	}
 
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size)

@@ -52,8 +52,10 @@
 #include "core/Progress.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <optional>
 #include <string>
 #include <vector>
@@ -113,7 +115,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingPlacement = 0;
 		// 確定した縮尺を当て直せなかった枚数（仮の縮尺のまま残る）。
 		std::size_t missingScale = 0;
-		// 見積もった縮尺では用紙に収まらなかった枚数（測った外形が作図域より大きい）。
+		// 見積もった縮尺では用紙に収まらなかった枚数（測った外形が図の領域より大きい）。
 		std::size_t oversized = 0;
 		// 凡例と重なった枚数（図が広くて右上の空きへ避けきれなかった）。
 		std::size_t legendOverlap = 0;
@@ -153,7 +155,7 @@ namespace HomeskzIfcImport::draw
 		// ままで、最初のシートレイヤで埋める——2 つの optional を連動させると
 		// 「片方が入っていればもう片方も入っている」ことをコンパイラにも clang-tidy にも
 		// 説明できず、bugprone-unchecked-optional-access に引っかかる。
-		std::optional<core::PaperArea> page;
+		std::optional<SheetPaper> paper;
 		core::PlanLayout provisional;
 
 		for (const core::SheetCommand& command : commands)
@@ -173,11 +175,11 @@ namespace HomeskzIfcImport::draw
 
 			// 用紙の大きさは**最初に用意できたシートレイヤ**から読む（どのシートも同じ用紙
 			// という前提。M17）。仮の割り付けもここで 1 回だけ作る。
-			if (!page.has_value())
+			if (!paper.has_value())
 			{
-				page = SheetPageArea(sheetLayer);
-				provisional =
-					core::planLayout(haveContent ? contentSize : core::Vec2{}, *page, 0.0);
+				paper = SheetPaperArea(sheetLayer);
+				provisional = core::planLayout(haveContent ? contentSize : core::Vec2{},
+											   paper->printable, 0.0);
 			}
 
 			const MCObjectHandle viewport = gSDK->CreateViewport(sheetLayer);
@@ -216,16 +218,16 @@ namespace HomeskzIfcImport::draw
 		updateLegendStyles(legends);
 		const double legendWidth = measureLegendWidth(legends);
 		const core::PlanLayout layout =
-			page.has_value()
-				? core::planLayout(haveContent ? contentSize : core::Vec2{}, *page, legendWidth)
-				: core::PlanLayout{};
+			paper.has_value() ? core::planLayout(haveContent ? contentSize : core::Vec2{},
+												 paper->printable, legendWidth)
+							  : core::PlanLayout{};
 
 		// --- 2 巡目: 確定した縮尺を当て、タグを置き、用紙の上へ動かす ----------------
 		//
 		// **縮尺が変わったときだけ**当て直す（更新は重い。draw/DrawUtil の
 		// ApplyViewportScale）。凡例が細くて仮の割り付けと同じ縮尺に落ち着くなら、
 		// 1 巡目の図をそのまま使える。
-		const bool rescale = haveContent && page.has_value() && layout.scale != provisional.scale;
+		const bool rescale = haveContent && paper.has_value() && layout.scale != provisional.scale;
 		for (const PlacedSheet& sheet : placed)
 		{
 			const core::SheetCommand& command = *sheet.command;
@@ -251,7 +253,7 @@ namespace HomeskzIfcImport::draw
 				measuredMax.y = std::max(measuredMax.y, drawnSize.y);
 			}
 			core::Vec2 delta;
-			if (haveContent && page.has_value())
+			if (haveContent && paper.has_value())
 			{
 				core::Vec2 target = layout.viewportCenter;
 				core::Vec2 sheetMin;
@@ -312,18 +314,38 @@ namespace HomeskzIfcImport::draw
 			*note += text;
 		};
 
-		// M17 割り付けの実測値。**異常が無くても必ず残す**——縮尺は「用紙の大きさ・凡例の
+		// M17 割り付けの実測値。**異常が無くても必ず残す**——縮尺は「印刷可能領域・凡例の
 		// 幅・建物の広がり」の 3 つだけで決まるので、期待と違う縮尺になったときに
 		// どれが効いたのかを、ローカル確認の場で数字のまま切り分けられるようにする
 		// （実際に「1/50 のはずが 1/75 になる」の切り分けで要った。docs/DEV-NOTES.md M17）。
-		if (note != nullptr && page.has_value())
+		// 用紙まわりは**生の値も含めて**出す——余白は SDK が単位を明かさないまま返すので
+		// （draw/DrawUtil の SheetPaperArea）、こちらの解釈が正しいかは実機の数字でしか
+		// 確かめられない。
+		if (note != nullptr && paper.has_value())
 		{
 			const auto mm = [](double value) { return std::to_string(std::lround(value)); };
-			const core::PaperArea area = core::drawingArea(*page);
-			std::string text = "伏図の割り付け（mm）: 用紙 " + mm(page->width()) + "×" +
-							   mm(page->height()) + " / 作図域 " + mm(area.width()) + "×" +
-							   mm(area.height()) + " / 凡例 " + mm(legendWidth) + " / 図の領域 " +
-							   mm(layout.plan.width()) + "×" + mm(layout.plan.height());
+			// 生の余白は**丸めずに**出す（単位の判定材料そのものなので、0.25 と 6.35 の
+			// 違いが消えては意味が無い）。
+			const auto raw3 = [](double value)
+			{
+				std::array<char, 32> buffer{};
+				std::snprintf(buffer.data(), buffer.size(), "%.3f", value);
+				return std::string(buffer.data());
+			};
+			const SheetMargins& raw = paper->rawMargins;
+			const SheetMargins& used = paper->margins;
+			std::string text = "伏図の割り付け（mm）: 用紙 " + mm(paper->paper.x) + "×" +
+							   mm(paper->paper.y) + " / シートレイヤ " + mm(paper->sheet.x) + "×" +
+							   mm(paper->sheet.y) + " / 余白 生(左" + raw3(raw.left) + " 右" +
+							   raw3(raw.right) + " 下" + raw3(raw.bottom) + " 上" + raw3(raw.top) +
+							   ")";
+			text += paper->marginsRead ? std::string(paper->marginsInInches ? " →インチ" : " →mm") +
+											 " 左" + mm(used.left) + " 右" + mm(used.right) +
+											 " 下" + mm(used.bottom) + " 上" + mm(used.top)
+									   : std::string(" →余白なし");
+			text += " / 印刷可能 " + mm(paper->printable.width()) + "×" +
+					mm(paper->printable.height()) + " / 凡例 " + mm(legendWidth) + " / 図の領域 " +
+					mm(layout.plan.width()) + "×" + mm(layout.plan.height());
 			if (haveContent)
 				text += " / 建物 " + mm(contentSize.x) + "×" + mm(contentSize.y) + " → 用紙上 " +
 						mm(contentSize.x / layout.scale) + "×" + mm(contentSize.y / layout.scale) +

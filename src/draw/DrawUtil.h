@@ -339,17 +339,55 @@ namespace HomeskzIfcImport::draw
 									 const core::ViewportCommand& command,
 									 ViewportProjection projection, double scale);
 
-	// シートレイヤの用紙（＝作図する紙）の矩形（用紙 mm）。読めなければ
-	// core::kDefaultPaperSize（A3 横）で代用する（用紙が読めないだけで図を捨てない）。
+	// シートレイヤの 4 辺の余白（用紙 mm。生の値を持つときは SDK が返したままの単位）。
+	struct SheetMargins
+	{
+		double left = 0.0;
+		double right = 0.0;
+		double bottom = 0.0;
+		double top = 0.0;
+	};
+
+	// シートレイヤの用紙まわりの実測値（長さはすべて用紙 mm）。
 	//
-	// ★**用紙は原点を中心に置かれている前提**で矩形を組む。SDK が返すのは大きさ
-	// （VWLayerObj::GetSheetWidht / GetSheetHeight。**インチ**なので 25.4 倍して mm にする）
-	// だけで、用紙が図面座標のどこに在るかを返す呼び出しは無い（ObjectVariables にも
-	// ovLayerSheetWidth / Height と用紙サイズ（167/168）しか無く、位置の変数は無い。
-	// ci-debug で確認）。VWLayerObj::GetSheetOrigin() はあるが、それが用紙の中心を指すのか
-	// 隅を指すのかはヘッダからは決まらないので**使わない**——意味の分からない値を使うより、
-	// 規約を 1 つ決めて実機で確かめる方がよい（docs/DEV-NOTES.md M17「用紙の位置」）。
-	core::PaperArea SheetPageArea(MCObjectHandle sheetLayer);
+	//   printable       … **印刷可能領域**（＝図を置いてよい矩形）。割り付けはこれを使う
+	//   paper           … 用紙の外形の大きさ（ovLayerSheetPaperWidth/Height＝167/168）
+	//   sheet           … シートレイヤの大きさ（VWLayerObj::GetSheetWidht＝165/166）
+	//   margins         … 解釈後の 4 辺の余白（mm）。読めなければすべて 0
+	//   rawMargins      … ISDK::GetPageMargins が返した**生の値**（単位不明のまま）
+	//   marginsRead     … 余白を意味のある値として解釈できたか
+	//   marginsInInches … その解釈が「インチ」だったか（false なら mm とみなした）
+	struct SheetPaper
+	{
+		core::PaperArea printable;
+		core::Vec2 paper;
+		core::Vec2 sheet;
+		SheetMargins margins;
+		SheetMargins rawMargins;
+		bool marginsRead = false;
+		bool marginsInInches = false;
+	};
+
+	// シートレイヤの用紙と印刷可能領域を読む。用紙が読めなければ core::kDefaultPaperSize
+	// （A3 横）で代用する（用紙が読めないだけで図を捨てない）。
+	//
+	// ★**用紙の大きさと印刷可能領域は別物**（M17）。かつては用紙の大きさだけを読み、
+	// 余白は四辺 15mm と決め打ちしていたが、余白は用紙ではなく**印刷の設定**が決めるので、
+	// 仮定した瞬間に実際とずれる（狭く見積もれば図が 1 段階小さくなり、広く見積もれば
+	// 印刷で切れる）。SDK には両方がある——用紙は ovLayerSheetPaperWidth/Height（167/168）、
+	// 余白は ISDK::GetPageMargins（4 辺）で、シートレイヤの大きさ（165/166＝
+	// VWLayerObj::GetSheetWidht。**インチ**なので 25.4 倍して mm にする）はまた別値。
+	// **GetPageMargins だけ単位がヘッダに書かれていない**ので、インチと mm のどちらとして
+	// 読むかは「用紙 − 余白」がシートレイヤの大きさと一致するかで決め、決められなければ
+	// 用紙に収まる方を採る（実装のコメント参照）。**採った解釈と生の値は診断へ出す**
+	// （draw/Sheet）ので、実機で確かめられる。
+	//
+	// ★**用紙は原点を中心に置かれている前提**で矩形を組む。用紙が図面座標のどこに在るかを
+	// 返す呼び出しは無い（ObjectVariables にも位置の変数は無い。ci-debug で確認）。
+	// VWLayerObj::GetSheetOrigin() はあるが、それが用紙の中心を指すのか隅を指すのかは
+	// ヘッダからは決まらないので**使わない**——意味の分からない値を使うより、規約を 1 つ
+	// 決めて実機で確かめる方がよい（docs/DEV-NOTES.md M17「用紙の位置」）。
+	SheetPaper SheetPaperArea(MCObjectHandle sheetLayer);
 
 	// ビューポートの外形（用紙 mm）を測る。中心と大きさを書き戻し、測れれば true。
 	//

@@ -14,16 +14,6 @@
 
 namespace HomeskzIfcImport::core
 {
-	PaperArea drawingArea(const PaperArea& page)
-	{
-		// 余白を引くと潰れる（＝図が 1 つも置けない）ほど小さい用紙では、外形をそのまま
-		// 使う。0 幅の作図域を返すと以降の割り算がすべて意味を失う。
-		if (page.width() <= 2.0 * kSheetMargin || page.height() <= 2.0 * kSheetMargin)
-			return page;
-		return PaperArea{Vec2{page.min.x + kSheetMargin, page.min.y + kSheetMargin},
-						 Vec2{page.max.x - kSheetMargin, page.max.y - kSheetMargin}};
-	}
-
 	double fitScale(const Vec2& content, const Vec2& available)
 	{
 		// 階梯は昇順（図が大きくなる順）なので、最初に収まったものが「収まる中で最も大きい
@@ -40,10 +30,8 @@ namespace HomeskzIfcImport::core
 		return smallest;
 	}
 
-	PlanLayout planLayout(const Vec2& content, const PaperArea& page, double legendWidth)
+	PlanLayout planLayout(const Vec2& content, const PaperArea& area, double legendWidth)
 	{
-		const PaperArea area = drawingArea(page);
-
 		// ★**縮尺は凡例のぶんを差し引いてから決める**（要件）。用紙いっぱいで縮尺を決めて
 		// しまうと、建物がギリギリの大きさのときに凡例を置く場所が残らない——凡例は図面の
 		// 一部なので、置けなくなるくらいなら図を 1 段階小さく描く。差し引くのは
@@ -62,18 +50,18 @@ namespace HomeskzIfcImport::core
 		layout.plan = plan;
 		// 図は**凡例のぶんを除いた領域の中央**へ置く（左端に寄せると右が間延びする）。
 		layout.viewportCenter = plan.center();
-		// 凡例は作図域の右上——図のために空けた帯の中で、いちばん端へ寄せる。
+		// 凡例は印刷可能領域の右上——図のために空けた帯の中で、いちばん端へ寄せる。
 		layout.legendTopRight = area.max;
 		return layout;
 	}
 
-	SectionLayout sectionLayout(const Vec2& content, const PaperArea& page)
+	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area)
 	{
 		SectionLayout layout;
-		layout.area = drawingArea(page);
+		layout.area = area;
 
 		// **上下 2 段が縦に収まる**ことを条件に縮尺を選ぶ（要件）。段の間に間隔が 1 つ
-		// 入るので、1 段に使える高さは (作図域の高さ − 間隔) ÷ 2。
+		// 入るので、1 段に使える高さは (印刷可能領域の高さ − 間隔) ÷ 2。
 		const auto rows = static_cast<double>(kSectionRows);
 		const double perRow = (layout.area.height() - ((rows - 1.0) * kViewportGap)) / rows;
 		layout.scale = fitScale(content, Vec2{layout.area.width(), perRow});
@@ -101,7 +89,7 @@ namespace HomeskzIfcImport::core
 		const std::size_t row = index / columns;
 		const std::size_t column = index % columns;
 
-		// 段組み全体を作図域の中央に置く（左に寄せると右が間延びする）。
+		// 段組み全体を印刷可能領域の中央に置く（左に寄せると右が間延びする）。
 		const double totalWidth = (static_cast<double>(columns) * layout.cell.x) +
 								  (static_cast<double>(columns - 1) * kViewportGap);
 		const double totalHeight = (static_cast<double>(kSectionRows) * layout.cell.y) +

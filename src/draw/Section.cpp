@@ -247,7 +247,7 @@ namespace HomeskzIfcImport::draw
 		if (const MCObjectHandle first = PrepareSheetLayer(sheetNumber(0), baseTitle);
 			first != nil && haveContent)
 		{
-			layout = core::sectionLayout(content, SheetPageArea(first));
+			layout = core::sectionLayout(content, SheetPaperArea(first).printable);
 			pages = core::sectionSheetCount(layout, commands.size());
 			arrange = true;
 		}
