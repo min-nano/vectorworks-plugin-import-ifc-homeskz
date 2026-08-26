@@ -11,6 +11,8 @@
 //	  * gSDK->CreateCustomObject("GraphicLegend", 位置, 0, bInsert)      … 凡例 PIO の生成
 //	  * gSDK->SetCurrentLayer(sheetLayer)                                … 置き場所（用紙）の指定
 //	  * gSDK->SetLineWeight / SetFillPat                                 … 見た目（線の太さ・塗り）
+//	  * gSDK->GetObjectInternalIndex(viewport)                           … フィルタ先の参照
+//	  * gSDK->TaggedDataCreate / TaggedDataSet                           … フィルタの書き込み
 //	  * gSDK->ResetObject                                                … 反映（中身の計算）
 //	  * VWParametricObj の GetParamsCount / GetParamName / GetParamLocalizedName
 //	                                                        … パラメータ名の解決（下記）
@@ -190,6 +192,44 @@ namespace HomeskzIfcImport::draw
 				++counts.paramsFailed;
 			}
 		}
+
+		// 「ビューポートでフィルタ」の保存先（draw/Legend.h 冒頭・docs/DEV-NOTES.md）。
+		//
+		// **`'GrLg'` を文字リテラルで書かない**のは、多文字リテラルが処理系定義で警告の
+		// 対象になるため。値は 'G'=0x47 / 'r'=0x72 / 'L'=0x4C / 'g'=0x67 を並べたもので、
+		// 実機のダンプではデータオブジェクトの中身の +86 にこの並びで入っていた。
+		constexpr OSType kFilterContainer = 0x47724C67; // 'GrLg'（Graphic Legend）
+
+		// オブジェクト参照の配列（Kernel/API/MiniCadCallBacks.h の
+		// kTaggedDataObjectRefArrayTypeID）と、その中でフィルタが使うタグ。
+		constexpr Sint32 kFilterDataType = 15;
+		constexpr Sint32 kFilterDataTag = 5;
+		constexpr Sint32 kFilterElementCount = 1;
+
+		// 凡例を「そのシートのビューポートに映っているものだけ」に絞る。書けたら true。
+		//
+		// **UI の「ビューポートでフィルタ…」と同じ状態**を作る。VW はこれを凡例にぶら下がる
+		// データオブジェクトのタグ付きデータとして持っており、SDK からは
+		// TaggedDataCreate ＋ TaggedDataSet で書ける（読み書きの API はあるが、**凡例の
+		// フィルタ専用の呼び出しは SDK にも VectorScript にも無い**——容れ物と型とタグは
+		// 実機のバイト列から突き止めた。docs/DEV-NOTES.md「グラフィック凡例」）。
+		bool ApplyViewportFilter(MCObjectHandle legend, MCObjectHandle viewport)
+		{
+			if (legend == nil || viewport == nil)
+				return false;
+
+			// フィルタ先は**オブジェクトの内部参照**で持つ。0 は「参照が無い」なので、
+			// そのまま書くと「フィルタ無し」と区別が付かない状態を作ってしまう。
+			const InternalIndex reference = gSDK->GetObjectInternalIndex(viewport);
+			if (reference == 0)
+				return false;
+
+			if (!gSDK->TaggedDataCreate(legend, kFilterContainer, kFilterDataType, kFilterDataTag,
+										kFilterElementCount))
+				return false;
+			return gSDK->TaggedDataSet(legend, kFilterContainer, kFilterDataType, kFilterDataTag, 0,
+									   &reference) != 0;
+		}
 	} // namespace
 
 	void prepareGraphicLegendPlugin()
@@ -198,7 +238,7 @@ namespace HomeskzIfcImport::draw
 	}
 
 	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::LegendCommand& command,
-						 double viewportScale, LegendCounts& counts)
+						 double viewportScale, MCObjectHandle filterViewport, LegendCounts& counts)
 	{
 		if (sheetLayer == nil)
 		{
@@ -223,6 +263,14 @@ namespace HomeskzIfcImport::draw
 		// 凡例の姿を決めるのはこのオブジェクトのパラメータだけになる。
 		ApplyParams(object, viewportScale, counts);
 
+		// そのシートのビューポートで絞る（**ResetObject より前**——凡例の作り直しで
+		// 並ぶセルが決まるため）。書けなくても凡例自体は残るので、件数だけ持ち帰って続ける
+		// （文書中の全シンボルが並ぶ状態になる）。
+		if (ApplyViewportFilter(object, filterViewport))
+			++counts.filtered;
+		else
+			++counts.filterLeft;
+
 		gSDK->ResetObject(object);
 
 		// 見た目はクラスでは効かないのでオブジェクトの属性として直接与える。**ResetObject
@@ -237,7 +285,7 @@ namespace HomeskzIfcImport::draw
 	std::string legendDiagnostics(const LegendCounts& counts)
 	{
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.scaleLeft == 0 &&
-			counts.scaleUnknown == 0 && counts.paramsFailed == 0)
+			counts.scaleUnknown == 0 && counts.paramsFailed == 0 && counts.filterLeft == 0)
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -259,6 +307,9 @@ namespace HomeskzIfcImport::draw
 			if (!counts.scaleParams.empty())
 				text += "凡例のパラメータ: " + counts.scaleParams + "。";
 		}
+		if (counts.filterLeft > 0)
+			text += "ビューポートで絞れなかった凡例 " + std::to_string(counts.filterLeft) +
+					" 件（その図に無いシンボルも並びます）。";
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw

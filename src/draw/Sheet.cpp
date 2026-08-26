@@ -132,9 +132,11 @@ namespace HomeskzIfcImport::draw
 			// タグは生成したカレントレイヤに一旦入ってから注釈へ移るので、順序を逆にすると
 			// タグがシートレイヤを経由することになる（結果は同じだが、経路は素直な方がよい）。
 			// 縮尺は**いま仕上げたこのビューポートのもの**を渡す（凡例のイメージの縮率を
-			// 図と揃える。draw/Legend.h）。
+			// 図と揃える。draw/Legend.h）。あわせて、凡例に並ぶのは**このシートのビューポート
+			// に映っているシンボルだけ**にしたいので、そのビューポートも渡す
+			// （draw/Legend.h「そのシートのビューポートでフィルタする」）。
 			if (command.legend.has_value())
-				drawSheetLegend(sheetLayer, *command.legend, finish.scale, legends);
+				drawSheetLegend(sheetLayer, *command.legend, finish.scale, viewport, legends);
 			++drawn;
 		}
 
