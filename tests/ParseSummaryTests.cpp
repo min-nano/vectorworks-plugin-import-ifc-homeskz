@@ -237,8 +237,7 @@ TEST(format_import_result_tells_to_update_viewports_only_when_drawings_were_made
 	DrawCounts sections;
 	sections.valid = true;
 	sections.sections = 1;
-	CHECK(formatImportResult(sampleDocument(), sections).find("1 回「更新」") !=
-		  std::string::npos);
+	CHECK(formatImportResult(sampleDocument(), sections).find("1 回「更新」") != std::string::npos);
 
 	// 図を 1 枚も作っていない取り込みでは出さない（関係のない案内で埋めない）。
 	DrawCounts none;
