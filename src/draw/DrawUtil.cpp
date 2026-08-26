@@ -639,11 +639,10 @@ namespace HomeskzIfcImport::draw
 		const bool sane = left >= 0.0 && right >= 0.0 && bottom >= 0.0 && top >= 0.0;
 		if (any && sane)
 		{
-			const auto fits = [&size](double scale, double lo, double hi, bool horizontal)
-			{
-				const double span = horizontal ? size.x : size.y;
-				return ((lo + hi) * scale) < span;
-			};
+			// 候補は 2 つだけ。**インチが先**（用紙まわりの長さは SDK では一貫してインチ）。
+			constexpr std::array<double, 2> kUnits{kMillimetersPerInch, 1.0};
+			const auto fits = [&](double scale)
+			{ return ((left + right) * scale) < size.x && ((bottom + top) * scale) < size.y; };
 			const auto matchesSheet = [&](double scale)
 			{
 				if (paper.sheet.x <= 0.0 || paper.sheet.y <= 0.0)
@@ -653,16 +652,25 @@ namespace HomeskzIfcImport::draw
 					   std::abs((size.y - ((bottom + top) * scale)) - paper.sheet.y) <= kTol;
 			};
 
+			// 1. 「用紙 − 余白」がシートレイヤの大きさと一致する単位。両方の候補を先に
+			//    見てから 2 へ落ちる（一致は「収まる」より強い根拠なので順序を混ぜない）。
+			// 2. どちらとも一致しなければ、用紙に収まる方。
 			double scale = 0.0;
-			if (matchesSheet(kMillimetersPerInch))
-				scale = kMillimetersPerInch;
-			else if (matchesSheet(1.0))
-				scale = 1.0;
-			else if (fits(kMillimetersPerInch, left, right, true) &&
-					 fits(kMillimetersPerInch, bottom, top, false))
-				scale = kMillimetersPerInch;
-			else if (fits(1.0, left, right, true) && fits(1.0, bottom, top, false))
-				scale = 1.0;
+			for (const double unit : kUnits)
+			{
+				if (matchesSheet(unit))
+				{
+					scale = unit;
+					break;
+				}
+			}
+			for (const double unit : kUnits)
+			{
+				if (scale > 0.0)
+					break;
+				if (fits(unit))
+					scale = unit;
+			}
 
 			if (scale > 0.0)
 			{
