@@ -628,9 +628,9 @@ namespace
 		slab.drawClass = "04構造-01基礎-02基礎スラブ";
 		slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}, core::Vec2{3640.0, 2730.0},
 						 core::Vec2{0.0, 2730.0}};
+		// 底盤の下は砕石 1 層（厚みは捨てコン + 砕石ぶん。M16）。
 		slab.components = {core::ComponentCommand{"コンクリート", "z構成要素-コンクリート", 150.0},
-						   core::ComponentCommand{"捨てコン", "z構成要素-捨てコンクリート", 30.0},
-						   core::ComponentCommand{"砕石", "z構成要素-砕石", 100.0}};
+						   core::ComponentCommand{"砕石", "z構成要素-砕石", 130.0}};
 		slab.datum = core::SlabDatum::Top;
 		slab.thickness = 150.0;
 		slab.elevation = 50.0;
@@ -856,6 +856,38 @@ TEST(validate_rejects_degenerate_ground_beam_modifier)
 	slab.modifiers.push_back(modifier);
 	depth.slabs.push_back(slab);
 	CHECK(!core::validateDocument(depth));
+}
+
+TEST(validate_checks_the_ground_beam_bedding)
+{
+	// 床付け（捨てコン・砕石）は地中会の押し出しを共有するので、断面が面になることと
+	// 素材クラス名が非空であることだけを見る。
+	core::Document document;
+	core::SlabCommand slab = validSlab();
+	core::ModifierCommand modifier = validModifier();
+	modifier.beddings.push_back(
+		core::BeddingCommand{{core::Vec2{-150.0, -130.0}, core::Vec2{150.0, -130.0},
+							  core::Vec2{150.0, 0.0}, core::Vec2{-150.0, 0.0}},
+							 "z構成要素-砕石"});
+	slab.modifiers.push_back(modifier);
+	document.slabs.push_back(slab);
+	CHECK(core::validateDocument(document));
+
+	core::Document noClass;
+	core::ModifierCommand bad = modifier;
+	bad.beddings[0].drawClass = "";
+	slab = validSlab();
+	slab.modifiers.push_back(bad);
+	noClass.slabs.push_back(slab);
+	CHECK(!core::validateDocument(noClass));
+
+	core::Document degenerate;
+	bad = modifier;
+	bad.beddings[0].profile.resize(2);
+	slab = validSlab();
+	slab.modifiers.push_back(bad);
+	degenerate.slabs.push_back(slab);
+	CHECK(!core::validateDocument(degenerate));
 }
 
 // --------------------------------------------------------------------------
@@ -1308,6 +1340,14 @@ TEST(section_height_range_reaches_ground_beam_bottom)
 	CHECK(core::sectionHeightRange(document, start, end));
 	CHECK(std::abs(start - (-700.0 - core::kSectionHeightMargin)) < 1e-6);
 	CHECK(std::abs(end - (50.0 + core::kSectionHeightMargin)) < 1e-6);
+
+	// 床付け（捨てコン・砕石）を敷くと**最深部はその下端**になる（梁下端から更に 130mm 下）。
+	document.slabs.front().modifiers.front().beddings.push_back(
+		core::BeddingCommand{{core::Vec2{-75.0, -130.0}, core::Vec2{75.0, -130.0},
+							  core::Vec2{75.0, 0.0}, core::Vec2{-75.0, 0.0}},
+							 "z構成要素-砕石"});
+	CHECK(core::sectionHeightRange(document, start, end));
+	CHECK(std::abs(start - (-830.0 - core::kSectionHeightMargin)) < 1e-6);
 }
 
 TEST(section_height_range_covers_floors_and_rafters)

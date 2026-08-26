@@ -24,7 +24,7 @@
 //	壁を作れない場合は壁芯の直線にフォールバックする（1 本の失敗で全体を止めない）。
 //
 //	【底盤の描画手順】床板（draw/Floor）と同じ作法で、共通部分は draw/DrawUtil にある
-//	（SetComponents / SetSlabDatum）。違うのは構成層（コンクリート／捨てコン／砕石）だけ。
+//	（SetComponents / SetSlabDatum）。違うのは構成層（コンクリート／砕石）だけ。
 //	SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する関数である点に注意。
 //	基礎ストーリは GL=0 なので絶対 Z がそのまま渡せる。
 //
@@ -54,12 +54,14 @@
 //	噛み合う台形プリズム（core::ModifierCommand）を **2 回**作って表す:
 //	  1. **削り取りモディファイア** … プリズム群を 1 つのグループにまとめ、
 //	     SetCustomObjectProfileGroup で通常スラブ（CreateSlab）へ渡すと底盤を**削り取る**。
-//	     地中梁の位置で底盤の構成層（コンクリート・捨てコン・砕石）が消え、断面に
-//	     写り込まなくなる。
+//	     地中梁の位置で底盤の構成層（コンクリート・砕石）が消え、断面に写り込まなくなる。
 //	  2. **可視の 3D ソリッド** … 同じプリズムを独立したソリッドとして同じレイヤ・同じ
 //	     基礎スラブクラスで置き、削り取った位置を地中梁のコンクリートで埋める。
 //	     こちらだけ天端を底盤へ 10mm 呑み込ませ（core::raiseModifierTop）、天端と底盤底面が
 //	     面ちょうど接する（coplanar）ことによる断面の境界線を防ぐ。
+//	  3. **床付け（捨てコン・砕石）のソリッド** … 地中梁の下に敷く層（M16。
+//	     core::BeddingCommand）。同じ押し出しで断面だけが違うので、同じ手順で作って素材の
+//	     クラスを付ける。呑み込みは掛けない（接する相手が別素材なので境界線が出てよい）。
 //	スラブへ「足す」噛み合わせ（ModifySlab）は実機で失敗するため使えない——調査の記録は
 //	docs/DEV-NOTES.md「打ち切った調査」。
 //
@@ -127,7 +129,7 @@ namespace HomeskzIfcImport::draw
 		//          モディファイアに false が立つのに合わせる）。削り取り・可視の両方へ。
 		//   ovIsStructural（702）… 「断面ビューポートで構造用図形として扱う」（Mark Object as
 		//          Structural）。断面で底盤など他の構造用図形と一体にマージ表示させる。
-		//          **可視ソリッドだけ**（底盤を clip するだけのモディファイアには不要）。
+		//          **可視ソリッドと床付けだけ**（底盤を clip するだけのモディファイアには不要）。
 
 		// JoinWalls の showAlerts。結合に失敗してもダイアログを出さない（インポート中に手動操
 		// 作を求めない）。
@@ -285,6 +287,12 @@ namespace HomeskzIfcImport::draw
 		// 地中梁を**可視の 3D ソリッド**として置く（削り取りとは別の 2 つ目の実体）。底盤と
 		// 同じクラスを付けて一体に見せ、天端を底盤へ呑み込ませる。断面ビューポートで
 		// 構造用図形として扱わせる（オブジェクト変数 702）。
+		//
+		// 続けて**その下の床付け（捨てコン・砕石）**も同じ押し出しのソリッドとして置く（M16）。
+		// クラスは命令が持つ素材クラス（z構成要素-捨てコンクリート / z構成要素-砕石）で、
+		// **呑み込み（bite）は掛けない**——呑み込みは「同じ素材どうしが面ちょうど接して境界線が
+		// 出る」のを防ぐための細工で、床付けの天端が接する相手は**別素材**（地中梁のコンクリート・
+		// 捨てコン）なので、そこに線が出るのはむしろ正しい。
 		void DrawBeamSolids(const std::vector<core::ModifierCommand>& modifiers,
 							const std::string& className)
 		{
@@ -292,11 +300,28 @@ namespace HomeskzIfcImport::draw
 			{
 				const MCObjectHandle solid =
 					CreateModifierPrism(core::raiseModifierTop(modifier, kGroundBeamSlabBite));
-				if (solid == nil)
-					continue;
-				SetClassByName(solid, className);
-				SetAllAttributesByClass(solid);
-				SetBooleanVariable(solid, ovIsStructural, true);
+				if (solid != nil)
+				{
+					SetClassByName(solid, className);
+					SetAllAttributesByClass(solid);
+					SetBooleanVariable(solid, ovIsStructural, true);
+				}
+
+				// 床付けは地中梁と押し出し（origin / azimuth / depth）を共有し、断面だけが
+				// 違う（core::BeddingCommand）。プリズムの作り方は同じなので、断面を差し替えた
+				// 命令を渡す。
+				for (const core::BeddingCommand& bedding : modifier.beddings)
+				{
+					core::ModifierCommand prism = modifier;
+					prism.profile = bedding.profile;
+					prism.beddings.clear();
+					const MCObjectHandle bed = CreateModifierPrism(prism);
+					if (bed == nil)
+						continue;
+					SetClassByName(bed, bedding.drawClass);
+					SetAllAttributesByClass(bed);
+					SetBooleanVariable(bed, ovIsStructural, true);
+				}
 			}
 		}
 
@@ -355,7 +380,7 @@ namespace HomeskzIfcImport::draw
 
 		// 底盤 1 枚をスラブとして描く。スラブを作れなければ外形ポリゴンにフォールバックする。
 		// 配置できたら true。手順は draw/Floor の DrawOne と同じ（共通部分は draw/DrawUtil）。
-		// 地中梁を持つ底盤は、削り取りモディファイア＋可視ソリッドの 2 つを併せて置く。
+		// 地中梁を持つ底盤は、削り取りモディファイア＋可視ソリッド＋床付けを併せて置く。
 		bool DrawOneSlab(const core::SlabCommand& slab)
 		{
 			const MCObjectHandle profile = CreateClosedPolygon(slab.boundary);
@@ -366,7 +391,8 @@ namespace HomeskzIfcImport::draw
 			if (object == nil)
 			{
 				// フォールバック: 外形ポリゴンをクラス付きで残す。**スラブを作れなくても
-				// 地中梁自体は描く**（削り取る相手が無いだけで、可視ソリッドは意味を持つ）。
+				// 地中梁自体は描く**（削り取る相手が無いだけで、可視ソリッドと床付けは
+				// 意味を持つ）。
 				SetClassByName(profile, slab.drawClass);
 				SetAllAttributesByClass(profile);
 				DrawBeamSolids(slab.modifiers, slab.drawClass);
@@ -386,7 +412,7 @@ namespace HomeskzIfcImport::draw
 					gSDK->SetCustomObjectProfileGroup(object, group);
 			}
 
-			// 構成（コンクリート／捨てコン／砕石）と基準面は**このスラブへ直接**与える。
+			// 構成（コンクリート／砕石）と基準面は**このスラブへ直接**与える。
 			// スラブスタイルは作らない・当てない（draw/Floor と同じ。draw/DrawUtil.h
 			// 「複合オブジェクトの構成」）。
 			gSDK->ConvertToUnstyledSlab(object);

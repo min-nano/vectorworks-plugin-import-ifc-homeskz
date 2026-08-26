@@ -46,6 +46,7 @@ using HomeskzIfcImport::core::StoryCommand;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::core::WallCommand;
 using HomeskzIfcImport::parse::alignSlabsToWallFaces;
+using HomeskzIfcImport::parse::applyGroundBeamBedding;
 using HomeskzIfcImport::parse::applyWallCaps;
 using HomeskzIfcImport::parse::applyWallOpenings;
 using HomeskzIfcImport::parse::attachGroundBeamModifiers;
@@ -61,10 +62,13 @@ using HomeskzIfcImport::parse::CLASS_FOUNDATION_WALL;
 using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::extendDeeperCollinearEnds;
 using HomeskzIfcImport::parse::extendFreeWallEnds;
+using HomeskzIfcImport::parse::foundationSlabComponents;
+using HomeskzIfcImport::parse::groundBeamBedding;
 using HomeskzIfcImport::parse::hasFoundation;
 using HomeskzIfcImport::parse::isBaseSlab;
 using HomeskzIfcImport::parse::isFoundationWall;
 using HomeskzIfcImport::parse::isGroundBeam;
+using HomeskzIfcImport::parse::kBeddingPerimeterMargin;
 using HomeskzIfcImport::parse::kFoundationSuffix;
 using HomeskzIfcImport::parse::kLayerFoundationAnchor;
 using HomeskzIfcImport::parse::kLayerFoundationFloorPost;
@@ -75,6 +79,8 @@ using HomeskzIfcImport::parse::kLevelFloorPost;
 using HomeskzIfcImport::parse::kLevelFoundationTop;
 using HomeskzIfcImport::parse::kLevelGL;
 using HomeskzIfcImport::parse::kLevelSlabTop;
+using HomeskzIfcImport::parse::kSlabBeddingThickness;
+using HomeskzIfcImport::parse::kSlabLeanConcreteThickness;
 using HomeskzIfcImport::parse::kStoryFoundation;
 using HomeskzIfcImport::parse::mergeGroundBeamModifiers;
 using HomeskzIfcImport::parse::mergeSlabCommands;
@@ -843,14 +849,15 @@ TEST(slab_commands_shape)
 		// 厚みは正の整数 mm（構成層のコンクリート層に一致する）。
 		CHECK(cmd.thickness > 0.0);
 		CHECK(near(cmd.thickness, std::round(cmd.thickness)));
-		CHECK_EQ(cmd.components.size(), std::size_t{3});
-		if (cmd.components.size() == 3)
+		CHECK_EQ(cmd.components.size(), std::size_t{2});
+		if (cmd.components.size() == 2)
 		{
 			CHECK(near(cmd.components[0].thickness, cmd.thickness));
-			// 層のクラスは素材（上から コンクリート → 捨てコンクリート → 砕石）。
+			// 層のクラスは素材（上から コンクリート → 砕石）。**捨てコンの層は無い**——
+			// 底盤の下は砕石だけで、その厚みが捨てコン + 砕石ぶんになる（M16）。
 			CHECK_EQ(cmd.components[0].drawClass, std::string(CLASS_COMPONENT_CONCRETE));
-			CHECK_EQ(cmd.components[1].drawClass, std::string(CLASS_COMPONENT_LEAN_CONCRETE));
-			CHECK_EQ(cmd.components[2].drawClass, std::string(CLASS_COMPONENT_GRAVEL));
+			CHECK_EQ(cmd.components[1].drawClass, std::string(CLASS_COMPONENT_GRAVEL));
+			CHECK(near(cmd.components[1].thickness, kSlabBeddingThickness));
 		}
 		CHECK(cmd.datum == core::SlabDatum::Top);
 		if (near(cmd.bound.offset, 0.0, 0.1))
@@ -1580,6 +1587,191 @@ TEST(ground_beam_tops_meet_the_slab_bottom)
 		}
 	}
 	CHECK(checked > 0);
+}
+
+// 床付け（捨てコン・砕石）— foundationSlabComponents / groundBeamBedding /
+// applyGroundBeamBedding（M16）
+// ------------------------------------------------------------------------------
+
+namespace
+{
+	// 床付けの断面をテストする合成の地中梁。断面は 45 度の傾斜を持つ台形（下端が幅 200mm・
+	// 天端が幅 400mm・せい 100mm）で、v=0 が梁下端。45 度にしてあるので、法線方向へ 130mm
+	// オフセットした位置が「水平・鉛直とも 130/√2」で手計算できる。
+	core::ModifierCommand beddingBeam()
+	{
+		core::ModifierCommand cmd;
+		cmd.profile = {Vec2{-100.0, 0.0}, Vec2{100.0, 0.0}, Vec2{200.0, 100.0},
+					   Vec2{-200.0, 100.0}};
+		cmd.depth = 1000.0;
+		cmd.origin = core::Vec3{0.0, 0.0, -240.0};
+		cmd.azimuth = 0.0;
+		return cmd;
+	}
+
+	// 頂点列に (u, v) の点が（許容 0.01mm で）含まれるか。
+	bool hasVertex(const std::vector<Vec2>& profile, double u, double v)
+	{
+		return std::ranges::any_of(profile, [u, v](const Vec2& p)
+								   { return near(p.x, u, 0.01) && near(p.y, v, 0.01); });
+	}
+
+} // namespace
+
+TEST(foundation_slab_components_are_concrete_over_gravel)
+{
+	// 底盤の構成層は コンクリート + 砕石 の 2 層で、砕石の厚みは捨てコンと砕石を合わせた
+	// ぶん（M16。捨てコンは地中梁の下だけに打つ）。
+	const std::vector<core::ComponentCommand> components = foundationSlabComponents(150.0);
+	CHECK_EQ(components.size(), std::size_t{2});
+	if (components.size() != 2)
+		return;
+	CHECK_EQ(components[0].drawClass, std::string(CLASS_COMPONENT_CONCRETE));
+	CHECK(near(components[0].thickness, 150.0));
+	CHECK_EQ(components[1].drawClass, std::string(CLASS_COMPONENT_GRAVEL));
+	CHECK(near(components[1].thickness, kSlabBeddingThickness));
+	CHECK(near(kSlabBeddingThickness, 130.0));
+}
+
+TEST(ground_beam_bedding_wraps_the_underside)
+{
+	// 外周部でない地中梁の床付け: 下端の下は 捨てコン 30 + 砕石 100、傾斜部は砕石のみで
+	// 法線方向に 130。45 度の傾斜なので、オフセット後の頂点は 130/√2 ずつ斜めに動く。
+	const std::vector<core::BeddingCommand> beddings =
+		groundBeamBedding(beddingBeam(), false, false);
+	CHECK_EQ(beddings.size(), std::size_t{2});
+	if (beddings.size() != 2)
+		return;
+
+	// 1 枚目＝捨てコン（下端の平らな面の直下だけ。傾斜部には無い）。
+	CHECK_EQ(beddings[0].drawClass, std::string(CLASS_COMPONENT_LEAN_CONCRETE));
+	CHECK_EQ(beddings[0].profile.size(), std::size_t{4});
+	CHECK(hasVertex(beddings[0].profile, -100.0, -kSlabLeanConcreteThickness));
+	CHECK(hasVertex(beddings[0].profile, 100.0, -kSlabLeanConcreteThickness));
+	CHECK(hasVertex(beddings[0].profile, -100.0, 0.0));
+	CHECK(hasVertex(beddings[0].profile, 100.0, 0.0));
+
+	// 2 枚目＝砕石。下端の下は 130 まで、傾斜部は法線方向に 130（＝斜辺方向へ 130√2 ぶん
+	// 外へ出た位置で天端に達する）。
+	const std::vector<Vec2>& gravel = beddings[1].profile;
+	CHECK_EQ(beddings[1].drawClass, std::string(CLASS_COMPONENT_GRAVEL));
+	CHECK(near(minY(gravel), -kSlabBeddingThickness));
+	CHECK(near(maxY(gravel), 100.0)); // 天端＝地中梁の天端（底盤の底面）まで立ち上がる
+	const double diagonal = kSlabBeddingThickness * std::sqrt(2.0); // 183.848…
+	// 天端での外側の端＝傾斜の天端から水平に 130√2。
+	CHECK(hasVertex(gravel, -(200.0 + diagonal), 100.0));
+	CHECK(hasVertex(gravel, 200.0 + diagonal, 100.0));
+	// 下端の外側の角（マイター）＝下端の角から水平に 130√2 − 130。
+	CHECK(hasVertex(gravel, -(100.0 + diagonal - kSlabBeddingThickness), -kSlabBeddingThickness));
+	CHECK(hasVertex(gravel, 100.0 + diagonal - kSlabBeddingThickness, -kSlabBeddingThickness));
+	// 内側は地中梁の下面をなぞり、下端の下では捨てコンの底を通る。
+	CHECK(hasVertex(gravel, -100.0, -kSlabLeanConcreteThickness));
+	CHECK(hasVertex(gravel, 100.0, -kSlabLeanConcreteThickness));
+	CHECK(hasVertex(gravel, -200.0, 100.0));
+	CHECK(hasVertex(gravel, 200.0, 100.0));
+}
+
+TEST(ground_beam_bedding_spills_out_at_the_perimeter)
+{
+	// 外周部の側面では、床付けは側面を回り込まずに 50mm 張り出して終わる（建物の外には
+	// コンクリートが無いので、回り込ませると外に砕石の壁が立つ）。
+	const std::vector<core::BeddingCommand> beddings =
+		groundBeamBedding(beddingBeam(), false, true);
+	CHECK_EQ(beddings.size(), std::size_t{2});
+	if (beddings.size() != 2)
+		return;
+
+	// 捨てコンは外周側だけ 50mm 広い。
+	CHECK(hasVertex(beddings[0].profile, 100.0 + kBeddingPerimeterMargin,
+					-kSlabLeanConcreteThickness));
+	CHECK(hasVertex(beddings[0].profile, -100.0, -kSlabLeanConcreteThickness));
+
+	const std::vector<Vec2>& gravel = beddings[1].profile;
+	// 外周側は張り出した位置で鉛直に切れる（天端まで立ち上がらない）。
+	CHECK(hasVertex(gravel, 100.0 + kBeddingPerimeterMargin, -kSlabBeddingThickness));
+	CHECK(hasVertex(gravel, 100.0 + kBeddingPerimeterMargin, -kSlabLeanConcreteThickness));
+	const double diagonal = kSlabBeddingThickness * std::sqrt(2.0);
+	CHECK(!hasVertex(gravel, 200.0 + diagonal, 100.0));
+	// 外周部でない側は変わらず天端まで立ち上がる。
+	CHECK(hasVertex(gravel, -(200.0 + diagonal), 100.0));
+	CHECK(near(maxY(gravel), 100.0));
+}
+
+TEST(ground_beam_bedding_of_the_real_fixtures)
+{
+	// 実フィクスチャ: すべての地中梁に 捨てコン + 砕石 の 2 層が付き、床付けの下端は
+	// 梁下端から 130mm 下・捨てコンは梁下端から 30mm 下、砕石の天端は梁の天端に届く。
+	std::size_t checked = 0;
+	std::size_t perimeter = 0;
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		const Model& model = fixture(name, ok);
+		CHECK(ok);
+		for (const SlabCommand& slab : buildSlabCommands(model))
+		{
+			for (const core::ModifierCommand& modifier : slab.modifiers)
+			{
+				CHECK_EQ(modifier.beddings.size(), std::size_t{2});
+				if (modifier.beddings.size() != 2)
+					continue;
+				const std::vector<Vec2>& lean = modifier.beddings[0].profile;
+				const std::vector<Vec2>& gravel = modifier.beddings[1].profile;
+				CHECK_EQ(modifier.beddings[0].drawClass,
+						 std::string(CLASS_COMPONENT_LEAN_CONCRETE));
+				CHECK_EQ(modifier.beddings[1].drawClass, std::string(CLASS_COMPONENT_GRAVEL));
+				CHECK(near(minY(lean), -kSlabLeanConcreteThickness));
+				CHECK(near(maxY(lean), 0.0));
+				CHECK(near(minY(gravel), -kSlabBeddingThickness));
+
+				// 捨てコンの幅は、地中梁の下端の幅（＋外周部なら片側 50mm ずつ）。
+				double bottomLo = 0.0;
+				double bottomHi = 0.0;
+				bool first = true;
+				for (const Vec2& p : modifier.profile)
+				{
+					if (!near(p.y, 0.0, 0.5))
+						continue;
+					bottomLo = first ? p.x : std::min(bottomLo, p.x);
+					bottomHi = first ? p.x : std::max(bottomHi, p.x);
+					first = false;
+				}
+				const double spillLow = bottomLo - minX(lean);
+				const double spillHigh = maxX(lean) - bottomHi;
+				CHECK(near(spillLow, 0.0, 0.01) || near(spillLow, kBeddingPerimeterMargin, 0.01));
+				CHECK(near(spillHigh, 0.0, 0.01) || near(spillHigh, kBeddingPerimeterMargin, 0.01));
+
+				// 外周部でない側面があれば、砕石はその側面を覆って地中梁の天端（＝底盤の
+				// 底面）まで立ち上がり、底盤下の砕石へ連続する。両側とも外周部の地中梁
+				// （底盤の外に出た独立の梁）は張り出しで終わるので、天端は捨てコンの底まで。
+				if (spillLow > 0.0 && spillHigh > 0.0)
+					CHECK(near(maxY(gravel), -kSlabLeanConcreteThickness));
+				else
+					CHECK(near(maxY(gravel), maxY(modifier.profile)));
+				if (spillLow > 0.0 || spillHigh > 0.0)
+					++perimeter;
+				++checked;
+			}
+		}
+	}
+	CHECK(checked > 0);
+	// 実データの外周の地中梁は必ず外周部として拾われる（1 本も無ければ判定が壊れている）。
+	CHECK(perimeter > 0);
+}
+
+TEST(ground_beam_bedding_needs_a_flat_bottom)
+{
+	// 下端の辺が無い断面（三角形）からは床付けを組み立てられない。1 本の欠損で全体を
+	// 止めず、その地中梁だけ床付け無しになる。
+	core::ModifierCommand wedge = beddingBeam();
+	wedge.profile = {Vec2{0.0, 0.0}, Vec2{200.0, 100.0}, Vec2{-200.0, 100.0}};
+	CHECK(groundBeamBedding(wedge, false, false).empty());
+
+	// applyGroundBeamBedding は底盤に付いた地中梁だけを触る（底盤が無ければ何もしない）。
+	std::vector<SlabCommand> slabs = {slab(rect(0.0, 0.0, 2000.0, 2000.0))};
+	slabs[0].modifiers.push_back(wedge);
+	applyGroundBeamBedding(slabs);
+	CHECK(slabs[0].modifiers[0].beddings.empty());
 }
 
 TEST_MAIN()

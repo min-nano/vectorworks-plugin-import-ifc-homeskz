@@ -33,12 +33,24 @@
 //	統合された立上りも開口位置で正しく分割され、開口境界の端は実寸法のまま（延長しない）に
 //	なる。交差する立上りどうしの壁結合（buildWallJoinCommands）はこの結果に対して求める。
 //
-//	【底盤の後処理も 3 段】
+//	【底盤の後処理は 4 段】
 //	  1. mergeSlabCommands      … 同厚・同高で連続する底盤を多角形の和で 1 枚へ統合する
 //	  2. alignSlabsToWallFaces  … 外形が立上りの**壁心**に一致しているので、辺ごとに沿う
 //	                              立上りの**外面**（壁心 + 半壁厚）まで外側へ広げる
 //	  3. attachGroundBeamModifiers … 地中梁（台形プリズム）を平面で最も重なる底盤へ振り分ける
 //	                                 （M10。地中梁を単独のスラブ命令にはしない）
+//	  4. applyGroundBeamBedding … 地中梁の下に敷く床付け（捨てコン・砕石）の断面を組み立てる
+//	                              （M16。外周部の判定に振り分け先の底盤の外形を使うので、
+//	                              3 の後でなければならない）
+//
+//	【床付け（捨てコン・砕石）は 3 通り】M16 で実際の施工に合わせて分けた。
+//	  * 底盤の下     … **砕石のみ**（厚みは捨てコン + 砕石ぶん＝kSlabBeddingThickness）。
+//	                    底盤スラブの構成層として持つ（foundationSlabComponents）。
+//	  * 地中梁の下   … 捨てコン + 砕石（IFC の底盤仕様どおりの 30 + 100）。地中梁と同じ
+//	                    押し出しのソリッド（core::BeddingCommand）として持つ。
+//	  * 地中梁の傾斜部 … **砕石のみ**で、法線方向に底盤下と同じ厚み。
+//	加えて**外周部**（底盤の外形に面した側面）では捨てコン・砕石が地中梁の外側へ
+//	kBeddingPerimeterMargin だけ張り出す。
 //
 
 #pragma once
@@ -121,16 +133,31 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kSlabAngleTol = 1e-3;
 	inline constexpr double kSlabSideEps = 1e-2;
 
-	// 基礎の構成層の名前。立上りは コンクリート 1 層、底盤は 上から コンクリート → 捨てコン →
-	// 砕石。コンクリート厚は要素ソリッドの実寸（整数 mm に丸めたもの）で、捨てコン・砕石は既定値。
-	// 各層のクラス（素材）は parse/StructuralClass.h の CLASS_COMPONENT_*（層名と 1 対 1）。
+	// 基礎の構成層の名前。立上りは コンクリート 1 層、底盤は 上から コンクリート → 砕石。
+	// コンクリート厚は要素ソリッドの実寸（整数 mm に丸めたもの）で、床付け（捨てコン・砕石）は
+	// 既定値。各層のクラス（素材）は parse/StructuralClass.h の CLASS_COMPONENT_*（層名と
+	// 1 対 1）。
 	inline constexpr const char* kConcreteComponentName = "コンクリート";
 	inline constexpr const char* kSlabLeanConcreteName = "捨てコン";
 	inline constexpr const char* kSlabGravelName = "砕石";
 	inline constexpr double kSlabLeanConcreteThickness = 30.0;
 	inline constexpr double kSlabGravelThickness = 100.0;
 
-	// 底盤スラブの構成層を組み立てる（上から コンクリート → 捨てコン → 砕石）。
+	// 床付け（捨てコン ＋ 砕石）の総厚。**底盤の下はこの厚みの砕石 1 層**（捨てコンは打たない）、
+	// **地中梁の下は同じ総厚を捨てコン ＋ 砕石に分ける**、**地中梁の傾斜部は法線方向にこの厚みの
+	// 砕石**（M16。ヘッダ冒頭「床付け」）。3 か所が同じ厚みを指すので定数は 1 つ。
+	inline constexpr double kSlabBeddingThickness =
+		kSlabLeanConcreteThickness + kSlabGravelThickness;
+
+	// 外周部で床付けが地中梁の外側へはみ出す量（mm）。捨てコン・砕石とも同じだけ張り出す。
+	inline constexpr double kBeddingPerimeterMargin = 50.0;
+
+	// 地中梁の側面が外周部かを見分けるときに、その面のすぐ外側を突く距離（mm）。突いた点が
+	// 底盤の外形の外なら外周部とみなす（面は外形の上に乗っているので、1mm 外せば足りる）。
+	inline constexpr double kBeddingOutsideProbe = 1.0;
+
+	// 底盤スラブの構成層を組み立てる（上から コンクリート → 砕石）。**捨てコンの層は無い**
+	// ——底盤の下は砕石だけで、その厚みが kSlabBeddingThickness（捨てコン＋砕石）になる。
 	std::vector<core::ComponentCommand> foundationSlabComponents(double concreteThickness);
 
 	// 立上りの壁の構成層を組み立てる（コンクリート 1 層。総厚＝壁厚）。**スタイルは使わず
@@ -377,4 +404,25 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::SlabCommand>
 	alignSlabsToWallFaces(const std::vector<core::SlabCommand>& slabs,
 						  const std::vector<core::WallCommand>& walls);
+
+	// 地中梁 1 本の床付け（捨てコン・砕石）の断面を組み立てる（M16。ヘッダ冒頭「床付け」）。
+	// 戻りは**上から**（捨てコン → 砕石）で、地中梁の断面から床付けを求められない
+	// （天端／下端の辺が見つからない等）ときは空。
+	//
+	// lowPerimeter / highPerimeter は断面の **u が小さい側／大きい側の側面が外周部か**。
+	// 外周部の側面では床付けが側面から kBeddingPerimeterMargin だけ張り出して**そこで終わる**
+	// （建物の外なので上へ回り込まない）。外周部でない側面は、傾斜・鉛直によらず側面を
+	// kSlabBeddingThickness だけ法線方向へオフセットした砕石で覆い、天端（＝底盤の底面）
+	// まで立ち上げて底盤下の砕石へ連続させる。
+	//
+	// 捨てコンは**下端の平らな面の下だけ**（傾斜部は砕石のみ）で、厚みは
+	// kSlabLeanConcreteThickness。砕石はその残り全部（下端の下では
+	// kSlabGravelThickness、傾斜部・鉛直部では法線方向に kSlabBeddingThickness）。
+	std::vector<core::BeddingCommand> groundBeamBedding(const core::ModifierCommand& modifier,
+														bool lowPerimeter, bool highPerimeter);
+
+	// 底盤にぶら下がる地中梁すべてに床付けを付ける。外周部の判定には**その地中梁が付いた
+	// 底盤の外形**を使う（側面のすぐ外側を突いて、外形の外なら外周部）。attachGroundBeamModifiers
+	// の**後**に呼ぶ（どの底盤に付くかが決まっていないと外形を引けない）。入力順に対して決定的。
+	void applyGroundBeamBedding(std::vector<core::SlabCommand>& slabs);
 } // namespace HomeskzIfcImport::parse

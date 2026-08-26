@@ -17,6 +17,7 @@
 #include "parse/StructuralClass.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <iterator>
@@ -1325,6 +1326,139 @@ namespace HomeskzIfcImport::parse
 			out = offsetPolygon(pts, dists);
 			return true;
 		}
+
+		// --- 地中梁の床付け（捨てコン・砕石）--------------------------------------------
+		//
+		// 床付けは「地中梁の**下面**（側面 → 下端 → 側面 と続く折れ線。天端の辺は含まない）を
+		// 外向きへ kSlabBeddingThickness だけオフセットした帯」で表す（parse/Footing.h 冒頭
+		// 「床付け」）。オフセットは辺ごとに法線方向へ動かして隣どうしの交点（マイター）を新しい
+		// 頂点にするので、**傾斜部でも法線方向の厚みがそのまま保たれる**（下端の下では真下へ
+		// 130mm、45 度の傾斜部では斜め下へ 130mm）。帯のうち下端の直下の 30mm だけが捨てコンで、
+		// 残りは砕石になる。
+		//
+		// 外周部の側面（底盤の外形に面した側）は例外で、側面を回り込ませずに下端の床付けを
+		// kBeddingPerimeterMargin だけ横へ張り出して終わらせる（外にはコンクリートが無いので、
+		// 回り込ませると建物の外に砕石の壁が立ってしまう）。
+
+		// 床付けの断面を組み立てるときの許容値。天端／下端の辺とみなす v の差（mm）と、
+		// 辺の長さが 0 でないとみなす下限（mm）。
+		constexpr double kBeddingLevelTol = 0.5;
+		constexpr double kBeddingEdgeEps = 1e-6;
+
+		// 連続する同一点と末尾の閉じ重複を除いた頂点列。
+		std::vector<Vec2> dedupeRing(const std::vector<Vec2>& pts)
+		{
+			std::vector<Vec2> out;
+			out.reserve(pts.size());
+			for (const Vec2& p : pts)
+			{
+				if (out.empty() || !core::samePoint(out.back(), p, kBeddingEdgeEps))
+					out.push_back(p);
+			}
+			while (out.size() > 1 && core::samePoint(out.front(), out.back(), kBeddingEdgeEps))
+				out.pop_back();
+			return out;
+		}
+
+		// 地中梁の断面を**下面の折れ線**へ分解する。折れ線は天端の辺を除いた残りで、u が
+		// 小さい側の天端頂点から始まり、下端の辺を通って u が大きい側の天端頂点で終わる。
+		// first / last には折れ線のうち下端（v 最小）の辺の最初・最後の添字が入る。
+		// 天端の辺か下端の辺が見つからない断面（三角形・高さ 0 等）は false。
+		bool groundBeamUnderside(const std::vector<Vec2>& profile, std::vector<Vec2>& path,
+								 std::size_t& first, std::size_t& last)
+		{
+			std::vector<Vec2> ring = dedupeRing(profile);
+			if (ring.size() < 3)
+				return false;
+			if (shoelaceSigned(ring) < 0.0)
+				std::ranges::reverse(ring); // 以降は CCW（外向き法線＝進行方向の右）前提
+
+			double vTop = ring.front().y;
+			double vBot = ring.front().y;
+			for (const Vec2& p : ring)
+			{
+				vTop = std::max(vTop, p.y);
+				vBot = std::min(vBot, p.y);
+			}
+			if (vTop - vBot <= kBeddingLevelTol)
+				return false; // せいが無い（水平な板）
+
+			// 天端の辺＝両端が v 最大の辺。CCW なので u の大きい側 → 小さい側へ向かう。
+			const std::size_t n = ring.size();
+			std::size_t top = n;
+			for (std::size_t i = 0; i < n; ++i)
+			{
+				const Vec2& a = ring[i];
+				const Vec2& b = ring[(i + 1) % n];
+				if (a.y >= vTop - kBeddingLevelTol && b.y >= vTop - kBeddingLevelTol &&
+					b.x < a.x - kBeddingEdgeEps)
+				{
+					top = i;
+					break;
+				}
+			}
+			if (top == n)
+				return false;
+
+			path.clear();
+			path.reserve(n);
+			for (std::size_t k = 0; k < n; ++k)
+				path.push_back(ring[(top + 1 + k) % n]);
+
+			// 下端の辺＝v 最小の頂点が並ぶ区間。
+			bool found = false;
+			first = 0;
+			last = 0;
+			for (std::size_t i = 0; i < path.size(); ++i)
+			{
+				if (path[i].y > vBot + kBeddingLevelTol)
+					continue;
+				if (!found)
+				{
+					first = i;
+					found = true;
+				}
+				last = i;
+			}
+			return found && last > first && path[last].x > path[first].x + kBeddingEdgeEps;
+		}
+
+		// 地中梁の側面（断面 u の最小側・最大側）が外周部かを判定する。側面のすぐ外側を
+		// 押し出し方向の 3 か所で突き、**すべてが底盤の外形の外**なら外周部とみなす。
+		// 一部だけ外に出る（外形の角を跨ぐ）地中梁を外周部と読まないよう、全点一致にする。
+		void groundBeamPerimeterSides(const core::ModifierCommand& modifier,
+									  const std::vector<Pt2>& slabRing, bool& low, bool& high)
+		{
+			low = false;
+			high = false;
+			if (modifier.profile.empty() || slabRing.size() < 3)
+				return;
+			double uLo = modifier.profile.front().x;
+			double uHi = uLo;
+			for (const Vec2& p : modifier.profile)
+			{
+				uLo = std::min(uLo, p.x);
+				uHi = std::max(uHi, p.x);
+			}
+
+			const Vec2 axis = groundBeamAxisDir(modifier);
+			const Vec2 width{-axis.y, axis.x}; // 幅軸 w（groundBeamModifier の取り方と一致）
+			const auto outside = [&](double u)
+			{
+				constexpr std::array<double, 3> kProbeFractions{0.25, 0.5, 0.75};
+				return std::ranges::all_of(
+					kProbeFractions,
+					[&](double fraction)
+					{
+						const double along = modifier.depth * fraction;
+						return !pointInPoly(modifier.origin.x + (axis.x * along) + (width.x * u),
+											modifier.origin.y + (axis.y * along) + (width.y * u),
+											slabRing);
+					});
+			};
+			low = outside(uLo - kBeddingOutsideProbe);
+			high = outside(uHi + kBeddingOutsideProbe);
+		}
 	} // namespace
 
 	// --- 公開 API ------------------------------------------------------------------
@@ -1352,11 +1486,11 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<ComponentCommand> foundationSlabComponents(double concreteThickness)
 	{
+		// 底盤の下は**砕石 1 層**で、厚みは捨てコンと砕石を合わせたぶん（M16。捨てコンは
+		// 地中梁の下だけに打つので、底盤の下では砕石がその厚みまで受け持つ）。
 		return {
 			ComponentCommand{kConcreteComponentName, CLASS_COMPONENT_CONCRETE, concreteThickness},
-			ComponentCommand{kSlabLeanConcreteName, CLASS_COMPONENT_LEAN_CONCRETE,
-							 kSlabLeanConcreteThickness},
-			ComponentCommand{kSlabGravelName, CLASS_COMPONENT_GRAVEL, kSlabGravelThickness}};
+			ComponentCommand{kSlabGravelName, CLASS_COMPONENT_GRAVEL, kSlabBeddingThickness}};
 	}
 
 	std::vector<int> collectFootingElements(const Model& model)
@@ -2397,6 +2531,137 @@ namespace HomeskzIfcImport::parse
 		}
 	}
 
+	std::vector<core::BeddingCommand> groundBeamBedding(const core::ModifierCommand& modifier,
+														bool lowPerimeter, bool highPerimeter)
+	{
+		std::vector<Vec2> path;
+		std::size_t first = 0;
+		std::size_t last = 0;
+		if (!groundBeamUnderside(modifier.profile, path, first, last))
+			return {}; // 床付けを敷く下面を取り出せない断面（三角形・水平な板等）
+
+		const double vTop = path.front().y; // 天端＝底盤の底面
+		const double vBot = path[first].y;	// 下端（v=0。地中梁の底）
+		const double uLow = path[first].x;	// 下端の辺の u 小さい側
+		const double uHigh = path[last].x;	// 同 大きい側
+
+		// オフセットする辺の範囲。外周部の側面はここから外し、下端の床付けを横へ張り出して
+		// 終わらせる（上記「地中梁の床付け」）。
+		const std::size_t begin = lowPerimeter ? first : 0;
+		const std::size_t end = highPerimeter ? last : path.size() - 1;
+
+		// 各辺を外向き法線へ kSlabBeddingThickness だけ動かした線分。
+		struct OffsetEdge
+		{
+			Vec2 start;
+			Vec2 end;
+			Vec2 dir;
+		};
+		std::vector<OffsetEdge> edges;
+		edges.reserve(end - begin);
+		for (std::size_t i = begin; i < end; ++i)
+		{
+			const Vec2 delta = path[i + 1] - path[i];
+			const double length = std::hypot(delta.x, delta.y);
+			if (length <= kBeddingEdgeEps)
+				continue;
+			const Vec2 dir{delta.x / length, delta.y / length};
+			// CCW ポリゴンの外向き法線＝進行方向の右（offsetPolygon と同じ取り方）。
+			const Vec2 offset{dir.y * kSlabBeddingThickness, -dir.x * kSlabBeddingThickness};
+			edges.push_back(OffsetEdge{path[i] + offset, path[i + 1] + offset, dir});
+		}
+		if (edges.empty())
+			return {};
+
+		// オフセット線を天端（v = vTop）まで伸ばした点。ほぼ水平な辺では伸ばせないので
+		// 与えられた端点で代用する。
+		const auto atTop = [vTop](const Vec2& point, const Vec2& dir, const Vec2& fallback)
+		{
+			if (std::abs(dir.y) <= kBeddingEdgeEps)
+				return fallback;
+			const double t = (vTop - point.y) / dir.y;
+			return Vec2{point.x + (dir.x * t), vTop};
+		};
+
+		// 外側の折れ線（u の小さい側 → 大きい側）。
+		const double beddingBottom = vBot - kSlabBeddingThickness;
+		std::vector<Vec2> outer;
+		outer.reserve(edges.size() + 2);
+		outer.push_back(lowPerimeter
+							? Vec2{uLow - kBeddingPerimeterMargin, beddingBottom}
+							: atTop(edges.front().start, edges.front().dir, edges.front().start));
+		for (std::size_t i = 1; i < edges.size(); ++i)
+		{
+			Vec2 vertex;
+			if (!lineIntersection(edges[i - 1].start, edges[i - 1].dir, edges[i].start,
+								  edges[i].dir, vertex))
+				vertex = edges[i].start; // 平行（同一直線の連続辺）: マイターは要らない
+			outer.push_back(vertex);
+		}
+		outer.push_back(highPerimeter
+							? Vec2{uHigh + kBeddingPerimeterMargin, beddingBottom}
+							: atTop(edges.back().end, edges.back().dir, edges.back().end));
+
+		// 内側の折れ線（u の大きい側 → 小さい側）。地中梁の下面をなぞり、下端の下だけは
+		// 捨てコンの底（vBot − 30）を通る＝そこが砕石と捨てコンの境になる。
+		const double leanBottom = vBot - kSlabLeanConcreteThickness;
+		const double uLeanLow = lowPerimeter ? uLow - kBeddingPerimeterMargin : uLow;
+		const double uLeanHigh = highPerimeter ? uHigh + kBeddingPerimeterMargin : uHigh;
+		std::vector<Vec2> inner;
+		inner.reserve(path.size() + 4);
+		if (highPerimeter)
+		{
+			inner.push_back(Vec2{uLeanHigh, leanBottom});
+		}
+		else
+		{
+			for (std::size_t i = path.size(); i > last; --i)
+				inner.push_back(path[i - 1]); // 天端 → 下端（u 大きい側の側面）
+			inner.push_back(Vec2{uHigh, leanBottom});
+		}
+		inner.push_back(Vec2{uLeanLow, leanBottom});
+		if (!lowPerimeter)
+		{
+			for (std::size_t i = first + 1; i > 0; --i)
+				inner.push_back(path[i - 1]); // 下端（u 小さい側）→ 天端
+		}
+
+		std::vector<core::BeddingCommand> beddings;
+		// 捨てコンは下端の平らな面の直下だけ（傾斜部は砕石のみ）。
+		beddings.push_back(
+			core::BeddingCommand{{Vec2{uLeanLow, leanBottom}, Vec2{uLeanHigh, leanBottom},
+								  Vec2{uLeanHigh, vBot}, Vec2{uLeanLow, vBot}},
+								 CLASS_COMPONENT_LEAN_CONCRETE});
+
+		std::vector<Vec2> gravel = outer;
+		gravel.insert(gravel.end(), inner.begin(), inner.end());
+		gravel = dedupeRing(gravel);
+		if (gravel.size() >= 3)
+			beddings.push_back(core::BeddingCommand{std::move(gravel), CLASS_COMPONENT_GRAVEL});
+		return beddings;
+	}
+
+	void applyGroundBeamBedding(std::vector<SlabCommand>& slabs)
+	{
+		for (SlabCommand& slab : slabs)
+		{
+			// 外周部の判定に使う底盤の外形（pointInPoly が取る丸めた頂点列）。底盤ごとに
+			// 1 回だけ作る。
+			std::vector<Pt2> ring;
+			ring.reserve(slab.boundary.size());
+			for (const Vec2& p : slab.boundary)
+				ring.emplace_back(p.x, p.y);
+
+			for (core::ModifierCommand& modifier : slab.modifiers)
+			{
+				bool lowPerimeter = false;
+				bool highPerimeter = false;
+				groundBeamPerimeterSides(modifier, ring, lowPerimeter, highPerimeter);
+				modifier.beddings = groundBeamBedding(modifier, lowPerimeter, highPerimeter);
+			}
+		}
+	}
+
 	std::vector<SlabCommand> buildSlabCommands(Context& context,
 											   const std::vector<WallCommand>& walls)
 	{
@@ -2442,10 +2707,13 @@ namespace HomeskzIfcImport::parse
 			cmd.bound = StoryBoundCommand{0, kLevelSlabTop, topAbs - slabTopAbs};
 			commands.push_back(std::move(cmd));
 		}
-		// 統合 → 外面合わせ → 地中梁の振り分け（docs/DEV-NOTES.md M10）。地中梁は**単独のスラブ命令に
-		// せず**、外形の確定した底盤の modifiers へ付ける（台形断面は単一のスラブで描けない）。
+		// 統合 → 外面合わせ → 地中梁の振り分け（docs/DEV-NOTES.md M10）→ 床付け（M16）。
+		// 地中梁は**単独のスラブ命令にせず**、外形の確定した底盤の modifiers へ付ける
+		// （台形断面は単一のスラブで描けない）。床付けは外周部の判定に振り分け先の底盤の外形を
+		// 使うので、**振り分けの後**でなければ求められない（parse/Footing.h 冒頭「底盤の後処理」）。
 		std::vector<SlabCommand> slabs = alignSlabsToWallFaces(mergeSlabCommands(commands), walls);
 		attachGroundBeamModifiers(slabs, buildGroundBeamModifiers(model, center));
+		applyGroundBeamBedding(slabs);
 		return slabs;
 	}
 

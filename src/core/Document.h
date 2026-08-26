@@ -154,7 +154,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 複合オブジェクト（スラブ・壁）の構成層（VW の「構成要素」）1 枚。
-	//   スラブ … 床は「床仕上げ」「床下地」、基礎の底盤は「コンクリート」「捨てコン」「砕石」
+	//   スラブ … 床は「床仕上げ」「床下地」、基礎の底盤は「コンクリート」「砕石」
 	//   壁     … 基礎の立上りは「コンクリート」1 層
 	//
 	//   name       … 層の名前（"床仕上げ" / "コンクリート" …）
@@ -482,6 +482,25 @@ namespace HomeskzIfcImport::core
 		bool capped = false;
 	};
 
+	// 地中梁の下に敷く床付け（捨てコン・砕石）1 層。地中梁（ModifierCommand::beddings）に
+	// ぶら下がり、押し出し（origin / azimuth / depth）は**その地中梁と共有**して断面だけが
+	// 違う（docs/DEV-NOTES.md M16「基礎の床付け」）。draw/Footing は地中梁の可視ソリッドと
+	// 同じ手順で 3D ソリッドとして置く。
+	//
+	// 【なぜ底盤の構成層にできないか】底盤（スラブ）の構成層は**一様な厚みの水平な層**しか
+	// 表せない。床付けは地中梁の下で深さが変わり、傾斜部では法線方向に厚みを持つので、
+	// 層ではなく地中梁と同じ押し出しソリッドとして描くしかない（地中梁のコンクリート自身を
+	// 台形プリズムで表すのと同じ理由）。
+	//
+	// フィールド:
+	//   profile             … 断面の 2D 頂点列（u, v）。座標系は ModifierCommand と同じ
+	//   drawClass           … クラス名（構成要素の素材クラス。z構成要素-砕石 等）
+	struct BeddingCommand
+	{
+		std::vector<Vec2> profile;
+		std::string drawClass;
+	};
+
 	// 地中梁（台形断面プリズム）1 本。底盤（SlabCommand::modifiers）にぶら下がる
 	// （docs/DEV-NOTES.md M10）。
 	//
@@ -498,14 +517,21 @@ namespace HomeskzIfcImport::core
 	// 決まっている**ので、片方だけ変えてはいけない（parse/Footing の groundBeamModifier と
 	// draw/Footing の ModifierPrism）。
 	//
+	// 【床付け（beddings）】地中梁の下には捨てコン・砕石を敷く（M16）。同じ押し出しの中で
+	// 断面だけが違うので、プリズム 1 本ぶんの origin / azimuth / depth を共有する入れ子に
+	// して持つ（平らに並べて番号で突き合わせない。CLAUDE.md「命令セット」）。並びは
+	// **上から**（捨てコン → 砕石）。床付けを求められなかった地中梁では空になる。
+	//
 	// フィールド:
 	//   profile             … 断面の 2D 頂点列（u, v）
+	//   beddings            … この地中梁の下に敷く床付け（上から）。無ければ空
 	//   depth               … 押し出し長（軸方向。mm）
 	//   origin              … 断面原点のワールド絶対座標（[x, y, z]）
 	//   azimuth             … 押し出し方向の方位角（度）
 	struct ModifierCommand
 	{
 		std::vector<Vec2> profile;
+		std::vector<BeddingCommand> beddings;
 		double depth = 0.0;
 		Vec3 origin;
 		double azimuth = 0.0;
@@ -540,9 +566,10 @@ namespace HomeskzIfcImport::core
 	// ストーリ基準高さとも一致する。bound は底盤天端レベルへのバインドで、offset は実天端 Z と
 	// 底盤天端レベル（面積最大の天端 Z）の差（主たる底盤は ≈0、独立基礎底盤等はずれる）。
 	//
-	// 【スラブ構成】components は上から コンクリート（thickness）＋ 捨てコン ＋ 砕石。
-	// 構成は**そのスラブへ直接**与える（スタイルは作らない・当てない。draw/DrawUtil.h
-	// 「複合オブジェクトの構成」）。
+	// 【スラブ構成】components は上から コンクリート（thickness）＋ 砕石。**底盤の下は
+	// 砕石 1 層**で、その厚みは捨てコンと砕石を合わせた厚み（M16。捨てコンは地中梁の下
+	// だけに敷くので、底盤の下では砕石がその厚みまで受け持つ）。構成は**そのスラブへ直接**
+	// 与える（スタイルは作らない・当てない。draw/DrawUtil.h「複合オブジェクトの構成」）。
 	//
 	// フィールド:
 	//   layer                     … 配置先デザインレイヤ名（"F-底盤"）
@@ -554,7 +581,8 @@ namespace HomeskzIfcImport::core
 	//   thickness                 … コンクリート厚（mm。整数に丸めた値）
 	//   elevation                 … コンクリート天端の絶対 Z
 	//   bound                     … 天端の高さ基準（底盤天端レベル＋差分）
-	//   modifiers                 … この底盤に噛み合う地中梁（台形プリズム）。無ければ空
+	//   modifiers                 … この底盤に噛み合う地中梁（台形プリズム。床付けを含む）。
+	//                               無ければ空
 	struct SlabCommand
 	{
 		std::string layer;
