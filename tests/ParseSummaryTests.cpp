@@ -223,6 +223,29 @@ TEST(format_import_result_shows_shortfall_as_ratio)
 	CHECK(text.find("柱: 0/2 本") != std::string::npos);
 }
 
+TEST(format_import_result_tells_to_update_viewports_only_when_drawings_were_made)
+{
+	// **取り込み直後の伏図・軸組図は 1 回の「更新」が要る**（VW はレイヤを高さの降順で描くので、
+	// 床仕上げ天端が構造天端より上にある以上、そのままでは床が柱・梁を覆う。並べた重ね順は
+	// 図面には入っていて、更新すればそちらで描き直される。docs/DEV-NOTES.md）。
+	// 黙って誤った絵を見せないよう、図を 1 枚でも作ったなら必ず伝える。
+	DrawCounts drawn;
+	drawn.valid = true;
+	drawn.sheets = 1;
+	CHECK(formatImportResult(sampleDocument(), drawn).find("1 回「更新」") != std::string::npos);
+
+	DrawCounts sections;
+	sections.valid = true;
+	sections.sections = 1;
+	CHECK(formatImportResult(sampleDocument(), sections).find("1 回「更新」") != std::string::npos);
+
+	// 図を 1 枚も作っていない取り込みでは出さない（関係のない案内で埋めない）。
+	DrawCounts none;
+	none.valid = true;
+	none.members = 3;
+	CHECK(formatImportResult(sampleDocument(), none).find("1 回「更新」") == std::string::npos);
+}
+
 TEST(format_import_result_reports_cancel_and_diagnostics)
 {
 	DrawCounts counts;
