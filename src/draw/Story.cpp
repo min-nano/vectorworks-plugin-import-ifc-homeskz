@@ -153,7 +153,7 @@ namespace HomeskzIfcImport::draw
 		// 逆順だったかも見ておく（作る順序の向きが逆だった、という切り分けのため。
 		// draw/Story.cpp の kCreateFrontLayerFirst）。
 		{
-			std::vector<MCObjectHandle> reversed(wanted.rbegin(), wanted.rend());
+			const std::vector<MCObjectHandle> reversed(wanted.rbegin(), wanted.rend());
 			result.wasReversed = MatchesStackOrder(reversed);
 		}
 
