@@ -143,8 +143,12 @@ namespace HomeskzIfcImport::draw
 		// 幅を測って割り付けを確定し、2 巡目で縮尺と位置を仕上げる。
 		std::vector<PlacedSheet> placed;
 		placed.reserve(commands.size());
+		// **仮の割り付けは素の値で持つ**（optional にしない）。用紙が読めるまでは既定値の
+		// ままで、最初のシートレイヤで埋める——2 つの optional を連動させると
+		// 「片方が入っていればもう片方も入っている」ことをコンパイラにも clang-tidy にも
+		// 説明できず、bugprone-unchecked-optional-access に引っかかる。
 		std::optional<core::PaperArea> page;
-		std::optional<core::PlanLayout> provisional;
+		core::PlanLayout provisional;
 
 		for (const core::SheetCommand& command : commands)
 		{
@@ -179,7 +183,7 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			const double scale = haveContent ? provisional->scale : 0.0;
+			const double scale = haveContent ? provisional.scale : 0.0;
 			const ViewportFinish finish = ConfigureViewport(
 				viewport, sheetLayer, setup, command.viewport, ViewportProjection::Plan, scale);
 			classesApplied += finish.classesApplied;
@@ -190,7 +194,7 @@ namespace HomeskzIfcImport::draw
 			// 置き場所は仮——中身が流し込まれて大きさが定まってから右上へ揃える
 			// （draw/Legend の placeLegends）。
 			if (command.legend.has_value())
-				drawSheetLegend(sheetLayer, *command.legend, provisional->legendTopRight, legends);
+				drawSheetLegend(sheetLayer, *command.legend, provisional.legendTopRight, legends);
 
 			placed.push_back(PlacedSheet{&command, viewport});
 		}
@@ -211,8 +215,7 @@ namespace HomeskzIfcImport::draw
 		// **縮尺が変わったときだけ**当て直す（更新は重い。draw/DrawUtil の
 		// ApplyViewportScale）。凡例が細くて仮の割り付けと同じ縮尺に落ち着くなら、
 		// 1 巡目の図をそのまま使える。
-		const bool rescale =
-			haveContent && provisional.has_value() && layout.scale != provisional->scale;
+		const bool rescale = haveContent && page.has_value() && layout.scale != provisional.scale;
 		for (const PlacedSheet& sheet : placed)
 		{
 			const core::SheetCommand& command = *sheet.command;
