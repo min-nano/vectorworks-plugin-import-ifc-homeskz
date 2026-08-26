@@ -597,6 +597,24 @@ namespace HomeskzIfcImport::draw
 		return true;
 	}
 
+	bool ApplyViewportScale(MCObjectHandle viewport, double scale)
+	{
+		if (scale <= 0.0)
+			return false;
+		try
+		{
+			VWViewportObj vp(viewport);
+			vp.SetScale(scale);
+			vp.Update();
+		}
+		catch (...)
+		{
+			// 縮尺を変えられなくても図は残る（仮の縮尺のまま）。件数だけ診断へ回す。
+			return false;
+		}
+		return true;
+	}
+
 	void MoveViewportBy(MCObjectHandle viewport, const core::Vec2& delta)
 	{
 		gSDK->MoveObject(viewport, delta.x, delta.y);

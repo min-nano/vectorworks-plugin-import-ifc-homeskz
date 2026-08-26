@@ -11,6 +11,11 @@
 //	ビューポートの中身とは無関係に決まる。**置き場所は命令ではなく用紙の割り付けが決める**
 //	（M16。core::planLayout が凡例のために空けた右の 1 列の右上へ寄せる）。
 //
+//	【大きさは実測して割り付けへ返す】凡例の幅は**その図面に何が並ぶか**で決まるので、
+//	「これだけ空けておけば足りる」という定数を置かない（core/Layout.h「凡例の幅は定数で
+//	持たない」）。置いて・流し込んで・measureLegendWidth で測った幅を伏図の縮尺の計算へ
+//	渡し、最後に placeLegends で右上へ揃える。
+//
 //	【中身はスタイルが決める・スタイルは当てるだけでは効かない】凡例に何が並ぶか
 //	（ソース定義・集計基準・行レイアウト・ラベル）は PIO のパラメータでは設定できず、
 //	スタイルへ焼き込むしかない（理由は core/Document.h の LegendCommand）。しかも
@@ -82,21 +87,32 @@ namespace HomeskzIfcImport::draw
 	// （複数のシートぶんを 1 つの counts へ積んでよい）。**カレントレイヤをそのシートレイヤへ
 	// 移す**（PIO はカレントレイヤに入るため）ので、呼び出し側は必要なら後で戻すこと。
 	//
-	// topRight は**凡例の右上を合わせる点**（用紙 mm。core::planLayout の legendTopRight）。
-	// ここでは生成位置に使うだけで、**最終的な位置合わせは updateLegendStyles が行う**
-	// （凡例の大きさは並ぶ中身が決まって初めて定まるため。下記）。
+	// where は**生成位置**（用紙 mm）。仮の点でよい——**最終的な位置合わせは placeLegends
+	// が行う**（凡例の大きさは並ぶ中身が決まって初めて定まるため。下記）。
 	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::LegendCommand& command,
-						 const core::Vec2& topRight, LegendCounts& counts);
+						 const core::Vec2& where, LegendCounts& counts);
 
-	// 置いた凡例の中身をスタイルから流し込み、**右上を topRight へ揃える**。
-	// **すべての凡例を置き終えてから 1 回だけ**呼ぶ（使ったスタイルごとに
-	// UpdateStyledObjects を 1 回。ヘッダ冒頭）。
+	// 置いた凡例の中身をスタイルから流し込む。**すべての凡例を置き終えてから**呼ぶ
+	// （使ったスタイルごとに UpdateStyledObjects を 1 回。ヘッダ冒頭）。
 	//
-	// 位置合わせをここでやるのは、**凡例の高さが「並ぶ行数」で決まる**ため——中身を流し込む
-	// 前に測った大きさは当てにならない。流し込んだ後に GetObjectBounds で測り、右上が
-	// topRight に来るよう動かす（「置いた後に測って直す」作法。データタグ・ビューポートと
-	// 同じ。M16）。こうすると、ビューポートのために空けた右の 1 列に収まり、図と重ならない。
-	void updateLegendStyles(const LegendCounts& counts, const core::Vec2& topRight);
+	// **2 度呼んでよい**（同じスタイルへ何度プッシュしても結果は同じ）。伏図では
+	// 「凡例を置く → 流し込む → 幅を測って縮尺を決める → ビューポートを仕上げる →
+	// もう一度流し込む」という順で使う——凡例に並ぶのはビューポートに映るシンボルなので、
+	// 図が仕上がった後にもう一度流し込んで取りこぼしを無くす（draw/Sheet）。
+	void updateLegendStyles(const LegendCounts& counts);
+
+	// 置いた凡例のうち**いちばん広いものの幅**（用紙 mm）。凡例が 1 つも無い・どれも
+	// 測れないときは 0。
+	//
+	// **必ず updateLegendStyles の後に呼ぶ**——中身が流し込まれるまで凡例の大きさは
+	// 決まらない。この実測が伏図の縮尺を決める（core::planLayout の legendWidth）。
+	// 凡例の幅を定数で決め打ちにしない理由は core/Layout.h「凡例の幅は定数で持たない」。
+	double measureLegendWidth(const LegendCounts& counts);
+
+	// 置いた凡例の**右上を topRight へ揃える**（用紙 mm。core::planLayout の
+	// legendTopRight）。中身が流し込まれて大きさが定まった後に呼ぶこと。測れないものは
+	// その場に残す（凡例は出る。位置だけずれる）。
+	void placeLegends(const LegendCounts& counts, const core::Vec2& topRight);
 
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空文字）。
 	std::string legendDiagnostics(const LegendCounts& counts);

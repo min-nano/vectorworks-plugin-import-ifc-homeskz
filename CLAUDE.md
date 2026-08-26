@@ -141,7 +141,7 @@ VectorWorks ネイティブオブジェクト
 縮尺・図番／図面タイトル・更新に加え、**用紙の大きさの読み取り**（`SheetPageArea`。インチ→mm と
 「用紙は原点中心」の規約）と**測って動かす位置合わせ**（`PlaceViewport`）——伏図と軸組図が
 共有する唯一の実装）も `draw/DrawUtil`、**用紙の割り付けの決め方**（縮尺の階梯と選び方・伏図の
-縮尺と位置・凡例のために空ける幅 `kLegendBoxWidth`・軸組図の上下 2 段とシートの分割・
+縮尺と位置・凡例のために空ける幅（**実測した凡例の幅**を受け取る）・軸組図の上下 2 段とシートの分割・
 タイトルの連番）は `core/Layout`、
 **断面寸法データタグ**（断面の注釈空間への投影は `parse/Tag` の `sectionAnnotationPoint`、
 `Data Tag` PIO の登録名・引出線パラメータと配置手順、そして**タグレイアウト（＝タグ 1 本の
@@ -150,9 +150,9 @@ VectorWorks ネイティブオブジェクト
 唯一の実装で、**スタイルは作らないし当てない**（スラブ・壁と同じく各オブジェクトへ直接設定
 する））、**グラフィック凡例**
 （スタイル名は `parse/Sheet` の `kFoundationLegendStyle` / `kFloorLegendStyle`、
-`GraphicLegend` PIO の登録名・線の太さ／塗りと配置手順は `draw/Legend`。**箱幅は
-`core::kLegendBoxWidth`**＝用紙の割り付けが凡例のために空ける幅そのもので、置き場所は
-`core::planLayout` の `legendTopRight`）、
+`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗りと配置手順は `draw/Legend`。**用紙を
+どれだけ空けるかは定数ではなく実測**——`measureLegendWidth` で測った幅を
+`core::planLayout` へ渡し、置き場所はその `legendTopRight`）、
 構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
 実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名は

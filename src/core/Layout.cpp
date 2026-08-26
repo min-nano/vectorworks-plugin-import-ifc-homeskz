@@ -40,16 +40,20 @@ namespace HomeskzIfcImport::core
 		return smallest;
 	}
 
-	PlanLayout planLayout(const Vec2& content, const PaperArea& page)
+	PlanLayout planLayout(const Vec2& content, const PaperArea& page, double legendWidth)
 	{
 		const PaperArea area = drawingArea(page);
 
-		// グラフィック凡例のための右の 1 列を空ける。**空けられないほど用紙が狭いときは
-		// 空けない**——凡例が図に重なるのは困るが、それ以前に図が入らないのはもっと困る
-		// （凡例は載らない伏図もある）。
+		// グラフィック凡例のための右の 1 列を、**実際に置いた凡例の幅ぶんだけ**空ける
+		// （core/Layout.h「凡例の幅は定数で持たない」）。凡例が無ければ空けない。
+		// **空けられないほど用紙が狭いときも空けない**——凡例が図に重なるのは困るが、
+		// それ以前に図が入らないのはもっと困る。
 		PaperArea plan = area;
-		if (const double width = area.width() - (kLegendBoxWidth + kViewportGap); width > 0.0)
-			plan.max.x = area.min.x + width;
+		if (legendWidth > 0.0)
+		{
+			if (const double width = area.width() - (legendWidth + kViewportGap); width > 0.0)
+				plan.max.x = area.min.x + width;
+		}
 
 		PlanLayout layout;
 		layout.scale = fitScale(content, plan.size());

@@ -107,15 +107,16 @@ TEST(FitScaleOnlyEverReturnsLadderValues)
 
 TEST(PlanLayoutKeepsTheLegendColumnClearOfTheDrawing)
 {
-	// 8m × 5m の建物を A3 に。作図域は 390 × 267mm、凡例のぶん（60 + 15）を除くと
-	// 図に使えるのは 315 × 267mm → 1/30（266.7 × 166.7mm）が最大（1/25 では 320mm
-	// となって横にはみ出す）。
-	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3());
+	// 8m × 5m の建物を A3 に、**実測した凡例の幅 60mm** で。作図域は 390 × 267mm、
+	// 凡例のぶん（60 + 15）を除くと図に使えるのは 315 × 267mm → 1/30（266.7 × 166.7mm）
+	// が最大（1/25 では 320mm となって横にはみ出す）。
+	constexpr double kLegend = 60.0;
+	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3(), kLegend);
 	CHECK(layout.scale == 30.0);
 
 	// 図の中心は「凡例のぶんを除いた領域」の中心＝左寄り。図の右端が凡例の左端を越えない。
 	const PaperArea area = core::drawingArea(a3());
-	const double planRight = area.max.x - (core::kLegendBoxWidth + core::kViewportGap);
+	const double planRight = area.max.x - (kLegend + core::kViewportGap);
 	CHECK(layout.viewportCenter.x == (area.min.x + planRight) / 2.0);
 	CHECK(layout.viewportCenter.y == 0.0);
 	const double drawnRight = layout.viewportCenter.x + ((8000.0 / layout.scale) / 2.0);
@@ -129,14 +130,26 @@ TEST(PlanLayoutKeepsTheLegendColumnClearOfTheDrawing)
 	// 凡例は作図域の右上に付く（＝空けた 1 列の中）。
 	CHECK(layout.legendTopRight.x == area.max.x);
 	CHECK(layout.legendTopRight.y == area.max.y);
-	CHECK(layout.legendTopRight.x - core::kLegendBoxWidth >= planRight);
+	CHECK(layout.legendTopRight.x - kLegend >= planRight);
+}
+
+TEST(PlanLayoutWithoutLegendUsesTheWholeSheet)
+{
+	// 凡例を 1 つも置かなかった文書（幅 0）では右を空けない——使いもしない余白のせいで
+	// 図を小さくしない。8m × 5m を A3 の作図域 390 × 267mm いっぱいに → 1/25
+	// （320 × 200mm。1/20 では 400mm となって横にはみ出す）。
+	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3(), 0.0);
+	CHECK(layout.scale == 25.0);
+	const PaperArea area = core::drawingArea(a3());
+	CHECK(layout.plan.max.x == area.max.x);
+	CHECK(layout.viewportCenter.x == area.center().x);
 }
 
 TEST(PlanLayoutIsTheSameForEverySheet)
 {
 	// 同じ内容・同じ用紙なら何度計算しても同じ（伏図は全図が同じ縮尺・同じ位置。要件）。
-	const core::PlanLayout first = core::planLayout(Vec2{12000.0, 9000.0}, a2());
-	const core::PlanLayout second = core::planLayout(Vec2{12000.0, 9000.0}, a2());
+	const core::PlanLayout first = core::planLayout(Vec2{12000.0, 9000.0}, a2(), 60.0);
+	const core::PlanLayout second = core::planLayout(Vec2{12000.0, 9000.0}, a2(), 60.0);
 	CHECK(first.scale == second.scale);
 	CHECK(first.viewportCenter.x == second.viewportCenter.x);
 	CHECK(first.viewportCenter.y == second.viewportCenter.y);

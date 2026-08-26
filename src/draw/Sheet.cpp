@@ -65,6 +65,15 @@ namespace HomeskzIfcImport::draw
 		// 「用紙に収まったか」を測って確かめるときの遊び（用紙 mm）。線の太さのぶん外形が
 		// わずかに広がるので、ぴったりの図を「はみ出した」と数えない。
 		constexpr double kFitTol = 1.0;
+
+		// 1 巡目で作った伏図 1 枚（2 巡目で縮尺・タグ・位置を仕上げる。drawSheets）。
+		// 命令はポインタで持つ——commands は drawSheets の間ずっと生きている（呼び出し元の
+		// Document が所有する）ので、コピーせずに指しておけばよい。
+		struct PlacedSheet
+		{
+			const core::SheetCommand* command = nullptr;
+			MCObjectHandle viewport = nil;
+		};
 	} // namespace
 
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
@@ -89,8 +98,6 @@ namespace HomeskzIfcImport::draw
 		// めくっても図が動かない）。
 		const core::Vec2 anchor{(contentMin.x + contentMax.x) / 2.0,
 								(contentMin.y + contentMax.y) / 2.0};
-		std::optional<core::PlanLayout> layout;
-
 		// 描画の前後でカレントレイヤが変わると以降のフェーズ（軸組図＝M14）に響くので、
 		// 元のレイヤへ戻せるよう控えておく。
 		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();
@@ -104,6 +111,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingPlanView = 0;
 		// 用紙の上で位置を合わせられなかった枚数（外形を測れなかった＝置いた場所のまま）。
 		std::size_t missingPlacement = 0;
+		// 確定した縮尺を当て直せなかった枚数（仮の縮尺のまま残る）。
+		std::size_t missingScale = 0;
 		// 見積もった縮尺では用紙に収まらなかった枚数（測った外形が作図域より大きい）。
 		std::size_t oversized = 0;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
@@ -125,6 +134,18 @@ namespace HomeskzIfcImport::draw
 								{ return sheet.legend.has_value(); }))
 			prepareGraphicLegendPlugin();
 
+		// --- 1 巡目: シートレイヤ・ビューポート・凡例を作る -------------------------
+		//
+		// **縮尺はまだ確定できない。** 用紙をどれだけ凡例のために空けるかは
+		// 「実際に置いた凡例の幅」で決まり（core/Layout.h「凡例の幅は定数で持たない」）、
+		// その凡例に何が並ぶかは**ビューポートに映るもの**が決めるので、鶏と卵になる。
+		// そこで 1 巡目は**凡例のぶんを空けない仮の割り付け**で図を作り、凡例を置いてから
+		// 幅を測って割り付けを確定し、2 巡目で縮尺と位置を仕上げる。
+		std::vector<PlacedSheet> placed;
+		placed.reserve(commands.size());
+		std::optional<core::PaperArea> page;
+		std::optional<core::PlanLayout> provisional;
+
 		for (const core::SheetCommand& command : commands)
 		{
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は枚数で報告し、
@@ -140,13 +161,14 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			// 用紙の割り付け（縮尺・図の中心・凡例の右上）。**最初のシートレイヤで 1 回だけ**
-			// 決め、以降のシートはその値をそのまま使う（＝全伏図で同じ縮尺・同じ位置）。
-			// 建物の広がりが求まらない文書（座標を持つ命令が 1 つも無い）でも用紙の割り付け
-			// 自体は作る——縮尺と図の位置は触らないが、凡例の置き場所は用紙だけで決まる。
-			if (!layout.has_value())
-				layout = core::planLayout(haveContent ? contentSize : core::Vec2{},
-										  SheetPageArea(sheetLayer));
+			// 用紙の大きさは**最初に用意できたシートレイヤ**から読む（どのシートも同じ用紙
+			// という前提。M16）。仮の割り付けもここで 1 回だけ作る。
+			if (!page.has_value())
+			{
+				page = SheetPageArea(sheetLayer);
+				provisional =
+					core::planLayout(haveContent ? contentSize : core::Vec2{}, *page, 0.0);
+			}
 
 			const MCObjectHandle viewport = gSDK->CreateViewport(sheetLayer);
 			if (viewport == nil)
@@ -157,12 +179,45 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			const double scale = haveContent && layout.has_value() ? layout->scale : 0.0;
+			const double scale = haveContent ? provisional->scale : 0.0;
 			const ViewportFinish finish = ConfigureViewport(
 				viewport, sheetLayer, setup, command.viewport, ViewportProjection::Plan, scale);
 			classesApplied += finish.classesApplied;
 			if (!finish.planViewApplied)
 				++missingPlanView;
+
+			// グラフィック凡例は**ビューポートではなくシートレイヤ**に載せる（用紙の上）。
+			// 置き場所は仮——中身が流し込まれて大きさが定まってから右上へ揃える
+			// （draw/Legend の placeLegends）。
+			if (command.legend.has_value())
+				drawSheetLegend(sheetLayer, *command.legend, provisional->legendTopRight, legends);
+
+			placed.push_back(PlacedSheet{&command, viewport});
+		}
+
+		// --- 凡例を実測して割り付けを確定する ---------------------------------------
+		//
+		// **中身を流し込むまで凡例の大きさは決まらない**（draw/Legend.h）。流し込んでから
+		// いちばん広い凡例の幅を測り、そのぶんだけ右を空けた割り付けを作る。
+		updateLegendStyles(legends);
+		const double legendWidth = measureLegendWidth(legends);
+		const core::PlanLayout layout =
+			page.has_value()
+				? core::planLayout(haveContent ? contentSize : core::Vec2{}, *page, legendWidth)
+				: core::PlanLayout{};
+
+		// --- 2 巡目: 確定した縮尺を当て、タグを置き、用紙の上へ動かす ----------------
+		//
+		// **縮尺が変わったときだけ**当て直す（更新は重い。draw/DrawUtil の
+		// ApplyViewportScale）。凡例が細くて仮の割り付けと同じ縮尺に落ち着くなら、
+		// 1 巡目の図をそのまま使える。
+		const bool rescale =
+			haveContent && provisional.has_value() && layout.scale != provisional->scale;
+		for (const PlacedSheet& sheet : placed)
+		{
+			const core::SheetCommand& command = *sheet.command;
+			if (rescale && !ApplyViewportScale(sheet.viewport, layout.scale))
+				++missingScale;
 
 			// M16 用紙の上での位置。**この伏図に映る範囲**（命令の表示レイヤで絞った平面の
 			// 広がり）の中心が、用紙のどこへ来るべきかを計算して合わせる——伏図ごとに映す
@@ -176,18 +231,18 @@ namespace HomeskzIfcImport::draw
 			// 同じ量ずれる。注釈はビューポートと一緒に動くので、後から動かせば位置は保たれる。
 			core::Vec2 drawnCenter;
 			core::Vec2 drawnSize;
-			const bool measured = MeasureViewport(viewport, drawnCenter, drawnSize);
+			const bool measured = MeasureViewport(sheet.viewport, drawnCenter, drawnSize);
 			core::Vec2 delta;
-			if (haveContent && layout.has_value())
+			if (haveContent && page.has_value())
 			{
-				core::Vec2 target = layout->viewportCenter;
+				core::Vec2 target = layout.viewportCenter;
 				core::Vec2 sheetMin;
 				core::Vec2 sheetMax;
 				if (core::planContentBounds(document, command.viewport.layers, sheetMin, sheetMax))
 				{
 					const core::Vec2 sheetCenter{(sheetMin.x + sheetMax.x) / 2.0,
 												 (sheetMin.y + sheetMax.y) / 2.0};
-					target = target + ((sheetCenter - anchor) * (1.0 / layout->scale));
+					target = target + ((sheetCenter - anchor) * (1.0 / layout.scale));
 				}
 				if (!measured)
 					++missingPlacement;
@@ -197,8 +252,8 @@ namespace HomeskzIfcImport::draw
 					// **見積もりどおりに収まったかを測って確かめる**（core/Layout.h の
 					// PlanLayout::plan）。命令の座標には現れないもの（通り芯の丸など）が
 					// 図に出るぶん、実際の図は見積もりより大きくなりうる。
-					if (drawnSize.x > layout->plan.width() + kFitTol ||
-						drawnSize.y > layout->plan.height() + kFitTol)
+					if (drawnSize.x > layout.plan.width() + kFitTol ||
+						drawnSize.y > layout.plan.height() + kFitTol)
 						++oversized;
 				}
 			}
@@ -206,26 +261,18 @@ namespace HomeskzIfcImport::draw
 			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport
 			// の最後が更新で、注釈はその後に足しても図に出る）。**ビューポートを動かす前**
 			// でなければならない（上記 ★）。
-			drawViewportTags(viewport, command.viewport, members, tags);
+			drawViewportTags(sheet.viewport, command.viewport, members, tags);
 
 			// 用紙の上へ動かす（注釈も一緒に動く）。
 			if (measured)
-				MoveViewportBy(viewport, delta);
-
-			// グラフィック凡例は**ビューポートではなくシートレイヤ**に載せる（用紙の上）。
-			// タグの後に置くのは、凡例がカレントレイヤをこのシートレイヤへ移すため——
-			// タグは生成したカレントレイヤに一旦入ってから注釈へ移るので、順序を逆にすると
-			// タグがシートレイヤを経由することになる（結果は同じだが、経路は素直な方がよい）。
-			if (command.legend.has_value() && layout.has_value())
-				drawSheetLegend(sheetLayer, *command.legend, layout->legendTopRight, legends);
+				MoveViewportBy(sheet.viewport, delta);
 			++drawn;
 		}
 
-		// 凡例の中身（スタイルのソースから集めたセル）を流し込み、右上を揃える。**全部
-		// 置いてからスタイルごとに 1 回**（draw/Legend.h「スタイルは当てるだけでは効かない」）。
-		const core::Vec2 legendTopRight =
-			layout.has_value() ? layout->legendTopRight : core::Vec2{};
-		updateLegendStyles(legends, legendTopRight);
+		// 図が仕上がったので**もう一度**中身を流し込み（凡例に並ぶのはビューポートに映る
+		// シンボルなので、縮尺を当て直した後の図で取り直す）、右上を揃える。
+		updateLegendStyles(legends);
+		placeLegends(legends, layout.legendTopRight);
 
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
@@ -233,9 +280,9 @@ namespace HomeskzIfcImport::draw
 		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 枚」のときに、シートレイヤを
 		// 作れないのか、ビューポートを作れないのかを切り分けられる。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
-		if (note != nullptr &&
-			(missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
-			 missingPlanView > 0 || missingPlacement > 0 || oversized > 0 || !haveContent))
+		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
+								missingPlanView > 0 || missingPlacement > 0 || missingScale > 0 ||
+								oversized > 0 || !haveContent))
 		{
 			std::string text = "伏図の診断: ";
 			if (missingSheetLayers > 0)
@@ -255,6 +302,9 @@ namespace HomeskzIfcImport::draw
 			if (missingPlacement > 0)
 				text += "用紙の上で位置を合わせられなかった伏図 " +
 						std::to_string(missingPlacement) + " 枚（外形を測れませんでした）。";
+			if (missingScale > 0)
+				text += "縮尺を当て直せなかった伏図 " + std::to_string(missingScale) +
+						" 枚（凡例の幅から決めた縮尺が入らず、仮の縮尺のままです）。";
 			if (oversized > 0)
 				text += "用紙に収まらなかった伏図 " + std::to_string(oversized) +
 						" 枚（縮尺の見積もりより図が大きくなりました）。";

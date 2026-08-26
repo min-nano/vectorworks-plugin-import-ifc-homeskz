@@ -359,6 +359,15 @@ namespace HomeskzIfcImport::draw
 	// 収まったか**を確かめて診断へ残すのにも使う（core/Layout.h の PlanLayout::plan）。
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size);
 
+	// 生成済みのビューポートの**縮尺だけ**を差し替えて描き直す。書けたら true。
+	//
+	// ConfigureViewport で一度仕上げた後に縮尺を変えたいときに使う——伏図は
+	// **凡例の実測**（draw/Legend の measureLegendWidth）を待って初めて最終的な縮尺が
+	// 決まるが、その凡例に何が並ぶかはビューポートに映るものが決めるので、先に仮の縮尺で
+	// 図を作らざるを得ない（draw/Sheet の 2 巡）。更新を 1 回余分に走らせるので、
+	// **縮尺が実際に変わったときだけ**呼ぶこと。
+	bool ApplyViewportScale(MCObjectHandle viewport, double scale);
+
 	// ビューポートを用紙の上で delta（用紙 mm）だけ動かす。注釈（データタグ）は
 	// ビューポートと一緒に動く。
 	//
