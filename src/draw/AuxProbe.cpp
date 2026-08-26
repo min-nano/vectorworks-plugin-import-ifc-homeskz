@@ -27,6 +27,7 @@
 #include <cstddef>
 #include <cstring>
 #include <string>
+#include <string_view>
 
 namespace HomeskzIfcImport::draw
 {
@@ -43,6 +44,10 @@ namespace HomeskzIfcImport::draw
 		// タグ付きデータの「オブジェクト参照の配列」型 ID
 		//（Kernel/API/MiniCadCallBacks.h の kTaggedDataObjectRefArrayTypeID）。
 		constexpr Sint32 kObjectRefTypeID = 15;
+
+		// 16 進の桁。**C の配列は clang-tidy が禁じる**（cppcoreguidelines-avoid-c-arrays）ので
+		// string_view で持つ。
+		constexpr std::string_view kHexDigits = "0123456789abcdef";
 
 		// バイト列のダンプ上限と、参照らしき値を解くときの窓の大きさ。
 		constexpr std::size_t kMaxDumpBytes = 256;
@@ -119,7 +124,6 @@ namespace HomeskzIfcImport::draw
 		// 16 進ダンプ（1 行 16 バイト、先頭にオフセット）。
 		std::string HexDump(const Uint8* bytes, std::size_t size)
 		{
-			static constexpr char kDigits[] = "0123456789abcdef";
 			std::string text;
 			for (std::size_t offset = 0; offset < size; offset += 16)
 			{
@@ -127,8 +131,8 @@ namespace HomeskzIfcImport::draw
 				for (std::size_t i = offset; i < offset + 16 && i < size; ++i)
 				{
 					text += ' ';
-					text += kDigits[(bytes[i] >> 4U) & 0x0FU];
-					text += kDigits[bytes[i] & 0x0FU];
+					text += kHexDigits[(bytes[i] >> 4U) & 0x0FU];
+					text += kHexDigits[bytes[i] & 0x0FU];
 				}
 				text += "\n";
 			}
@@ -139,20 +143,21 @@ namespace HomeskzIfcImport::draw
 		// そのまま（ビッグエンディアン）と、先頭 3 欄をバイト反転したもの（Microsoft の GUID 並び）。
 		std::string UuidText(const Uint8* bytes, bool swapFirstFields)
 		{
-			static constexpr char kDigits[] = "0123456789abcdef";
-			static constexpr int kOrderPlain[16] = {0, 1, 2,  3,  4,  5,  6,  7,
-													8, 9, 10, 11, 12, 13, 14, 15};
-			static constexpr int kOrderSwapped[16] = {3, 2, 1,	0,	5,	4,	7,	6,
-													  8, 9, 10, 11, 12, 13, 14, 15};
-			const int* order = swapFirstFields ? kOrderSwapped : kOrderPlain;
+			// バイトを並べ替える順（**C の配列は使わない**。clang-tidy の avoid-c-arrays）。
+			static constexpr std::array<std::size_t, 16> kOrderPlain = {
+				0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+			static constexpr std::array<std::size_t, 16> kOrderSwapped = {
+				3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15};
+			const std::array<std::size_t, 16>& order =
+				swapFirstFields ? kOrderSwapped : kOrderPlain;
 			std::string text;
-			for (int i = 0; i < 16; ++i)
+			for (std::size_t i = 0; i < 16; ++i)
 			{
 				if (i == 4 || i == 6 || i == 8 || i == 10)
 					text += '-';
 				const Uint8 value = bytes[order[i]];
-				text += kDigits[(value >> 4U) & 0x0FU];
-				text += kDigits[value & 0x0FU];
+				text += kHexDigits[(value >> 4U) & 0x0FU];
+				text += kHexDigits[value & 0x0FU];
 			}
 			return text;
 		}
