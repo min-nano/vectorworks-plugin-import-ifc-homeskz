@@ -119,10 +119,6 @@ namespace HomeskzIfcImport::draw
 		std::size_t oversized = 0;
 		// 凡例と重なった枚数（図が広くて右上の空きへ避けきれなかった）。
 		std::size_t legendOverlap = 0;
-		// 実際に描けた図のいちばん大きい外形（用紙 mm）。**見積もりと実測を突き合わせる**
-		// ために持つ——縮尺が期待と違うとき、命令から見積もった広がりが実際より大きいのか、
-		// 用紙の測り方がおかしいのかは、この 2 つを並べて初めて切り分けられる。
-		core::Vec2 measuredMax;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
 		// （渡されなければ空の表＝関連付け無しで置く。draw/Tag.h）。
 		const ObjectHandles emptyHandles;
@@ -247,11 +243,6 @@ namespace HomeskzIfcImport::draw
 			core::Vec2 drawnCenter;
 			core::Vec2 drawnSize;
 			const bool measured = MeasureViewport(sheet.viewport, drawnCenter, drawnSize);
-			if (measured)
-			{
-				measuredMax.x = std::max(measuredMax.x, drawnSize.x);
-				measuredMax.y = std::max(measuredMax.y, drawnSize.y);
-			}
 			core::Vec2 delta;
 			if (haveContent && paper.has_value())
 			{
@@ -314,52 +305,38 @@ namespace HomeskzIfcImport::draw
 			*note += text;
 		};
 
-		// M18 割り付けの実測値。**異常が無くても必ず残す**——縮尺は「印刷可能領域・凡例の
-		// 幅・建物の広がり」の 3 つだけで決まるので、期待と違う縮尺になったときに
-		// どれが効いたのかを、ローカル確認の場で数字のまま切り分けられるようにする
-		// （実際に「1/50 のはずが 1/75 になる」の切り分けで要った。docs/DEV-NOTES.md M18）。
-		// 用紙まわりは**生の値も含めて**出す——余白は SDK が単位を明かさないまま返すので
-		// （draw/DrawUtil の SheetPaperArea）、こちらの解釈が正しいかは実機の数字でしか
-		// 確かめられない。
+		// M18 割り付けの結果。**縮尺は「印刷可能領域・凡例の幅・建物の広がり」の 3 つだけで
+		// 決まる**ので、その 3 つと結果の縮尺を残す——思ったより小さい（大きい）ときに、
+		// どれが効いたのかをローカル確認の場で確かめられる（実際に「1/50 のはずが 1/75 に
+		// なる」の切り分けで要った。docs/DEV-NOTES.md M18）。
+		//
+		// **調査のための値はここには出さない**（DEV-NOTES「実機確認の作法」の「役目を終えた
+		// 計装は消す」）。余白の生の値と単位の解釈は規約を詰めるために要ったもので、
+		// 実機で確定した（図面の単位で返る）ので、**解釈できなかったときだけ**下の診断行へ
+		// 出す。はみ出し・凡例との重なりも同じく件数として下で数える。
 		if (note != nullptr && paper.has_value())
 		{
 			const auto mm = [](double value) { return std::to_string(std::lround(value)); };
-			// 生の余白は**丸めずに**出す（単位の判定材料そのものなので、0.25 と 6.35 の
-			// 違いが消えては意味が無い）。
-			const auto raw3 = [](double value)
-			{
-				std::array<char, 32> buffer{};
-				std::snprintf(buffer.data(), buffer.size(), "%.3f", value);
-				return std::string(buffer.data());
-			};
-			const SheetMargins& raw = paper->rawMargins;
-			const SheetMargins& used = paper->margins;
 			std::string text = "伏図の割り付け（mm）: 用紙 " + mm(paper->paper.x) + "×" +
-							   mm(paper->paper.y) + " / シートレイヤ " + mm(paper->sheet.x) + "×" +
-							   mm(paper->sheet.y) + " / 余白 生(左" + raw3(raw.left) + " 右" +
-							   raw3(raw.right) + " 下" + raw3(raw.bottom) + " 上" + raw3(raw.top) +
-							   ")";
-			text += paper->marginsRead ? std::string(paper->marginsInInches ? " →インチ" : " →mm") +
-											 " 左" + mm(used.left) + " 右" + mm(used.right) +
-											 " 下" + mm(used.bottom) + " 上" + mm(used.top)
-									   : std::string(" →余白なし");
-			text += " / 印刷可能 " + mm(paper->printable.width()) + "×" +
-					mm(paper->printable.height()) + " / 凡例 " + mm(legendWidth) + " / 図の領域 " +
-					mm(layout.plan.width()) + "×" + mm(layout.plan.height());
+							   mm(paper->paper.y) + " / 印刷可能 " + mm(paper->printable.width()) +
+							   "×" + mm(paper->printable.height()) + " / 凡例 " + mm(legendWidth);
 			if (haveContent)
 				text += " / 建物 " + mm(contentSize.x) + "×" + mm(contentSize.y) + " → 用紙上 " +
 						mm(contentSize.x / layout.scale) + "×" + mm(contentSize.y / layout.scale) +
 						" / 縮尺 1/" + mm(layout.scale);
-			text += " / 実測の図 " + mm(measuredMax.x) + "×" + mm(measuredMax.y);
 			addNote(text);
 		}
 
 		// 「命令はあるのに 0 枚」のときに、シートレイヤを作れないのか、ビューポートを
 		// 作れないのかを切り分けられるようにする。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
-		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
-								missingPlanView > 0 || missingPlacement > 0 || missingScale > 0 ||
-								oversized > 0 || legendOverlap > 0 || !haveContent))
+		// 余白が読めなかった（＝用紙いっぱいで割り付けた）のは異常側。生の値を添えて、
+		// 単位の解釈を疑えるようにする（draw/DrawUtil の SheetPaperArea）。
+		const bool marginsUnread = paper.has_value() && !paper->marginsRead;
+		if (note != nullptr &&
+			(missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
+			 missingPlanView > 0 || missingPlacement > 0 || missingScale > 0 || oversized > 0 ||
+			 legendOverlap > 0 || !haveContent || marginsUnread))
 		{
 			std::string text = "伏図の診断: ";
 			if (missingSheetLayers > 0)
@@ -388,6 +365,20 @@ namespace HomeskzIfcImport::draw
 			if (legendOverlap > 0)
 				text += "凡例と重なった伏図 " + std::to_string(legendOverlap) +
 						" 枚（図が広く、右上の空きへ避けきれませんでした）。";
+			if (marginsUnread)
+			{
+				const auto raw = [](double value)
+				{
+					std::array<char, 32> buffer{};
+					std::snprintf(buffer.data(), buffer.size(), "%.3f", value);
+					return std::string(buffer.data());
+				};
+				const SheetMargins& margins = paper->rawMargins;
+				text += "用紙の余白を解釈できなかったので、用紙いっぱいで割り付けました"
+						"（SDK が返した値: 左" +
+						raw(margins.left) + " 右" + raw(margins.right) + " 下" +
+						raw(margins.bottom) + " 上" + raw(margins.top) + "）。";
+			}
 			addNote(text);
 		}
 
