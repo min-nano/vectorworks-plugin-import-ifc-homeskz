@@ -49,6 +49,12 @@ namespace HomeskzIfcImport::draw
 		// string_view で持つ。
 		constexpr std::string_view kHexDigits = "0123456789abcdef";
 
+		// **`'DMDT'` のデータオブジェクトは「入れ物の入れ物」**で、本当のタグ付きデータの
+		// 容れ物 ID は中身のこのオフセットに**リトルエンディアンで**入っている（実機のダンプで
+		// 判明。`67 4c 72 47` を 32 ビットで読むと `'GrLg'` ＝ Graphic Legend）。
+		// ここを見ずにデータオブジェクトのタグ（`'DMDT'`）で総なめしても 1 件も返らない。
+		constexpr std::size_t kContainerIdOffset = 86;
+
 		// バイト列のダンプ上限と、参照らしき値を解くときの窓の大きさ。
 		constexpr std::size_t kMaxDumpBytes = 256;
 		constexpr std::size_t kUuidBytes = 16;
@@ -232,7 +238,8 @@ namespace HomeskzIfcImport::draw
 					if (count <= 0)
 						continue;
 
-					text += "    tagged type=" + std::string(type.name) +
+					text += "    [" + FourCC(container) +
+							"] tagged type=" + std::string(type.name) +
 							" tag=" + std::to_string(tagID) + " count=" + std::to_string(count) +
 							" values:";
 					for (Sint32 index = 0; index < count && index < kMaxValuesPerTag; ++index)
@@ -298,8 +305,24 @@ namespace HomeskzIfcImport::draw
 
 			const OSType tag = gSDK->GetDataTag(aux);
 			text += " data tag='" + FourCC(tag) + "'";
+
+			// 中身の +86 に入っている「本当の容れ物 ID」。これで総なめすると中身が読める。
+			OSType embedded = 0;
+			std::size_t size = 0;
+			gSDK->GSGetHandleSize(aux, size);
+			const auto* bytes = reinterpret_cast<const Uint8*>(*aux);
+			if (bytes != nullptr && size >= kContainerIdOffset + sizeof(Uint32))
+			{
+				Uint32 value = 0;
+				std::memcpy(&value, bytes + kContainerIdOffset, sizeof(value));
+				embedded = static_cast<OSType>(value);
+				text += " container='" + FourCC(embedded) + "'";
+			}
+
 			text += DumpDataObject(aux);
 			text += ProbeTaggedContainer(selected, tag);
+			if (embedded != 0 && embedded != tag)
+				text += ProbeTaggedContainer(selected, embedded);
 		}
 		if (index == 0)
 			text += "(補助オブジェクトなし)\n";
