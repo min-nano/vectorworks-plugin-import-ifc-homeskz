@@ -42,7 +42,12 @@ namespace HomeskzIfcImport::draw
 		// 伸び縮みするので、決め打ちの幅を割り付けに使わない。高さは行の内容から自動で
 		// 決まるので与えない。
 		constexpr const char* kFieldBoxWidth = "BoxWidth";
-		constexpr double kBoxWidth = 60.0;
+		// ★**要求した幅がそのまま図の取り分を減らす。** 用紙に空ける幅は実測で決まるので
+		// （measureLegendWidth）、ここで広く頼むほど伏図の縮尺が落ちる。実機では並ぶ
+		// シンボルが 25mm ほどしか使っておらず、60mm を頼んでいたときは 1/50 に 330mm 要る
+		// 建物に対して使える幅が 315mm しか残らず 1/75 へ落ちていた（M16 のローカル確認）。
+		// **中身が必要とする幅より少し広い程度**に留める。
+		constexpr double kBoxWidth = 40.0;
 
 		// 見た目。凡例 PIO が内部で描く枠線・セルは**クラスでは制御できない**ので、
 		// オブジェクトの属性として直接与える（draw/Legend.h）。線の太さの単位はミル（1/1000

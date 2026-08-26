@@ -1068,7 +1068,12 @@ namespace HomeskzIfcImport::core
 	// 平面（伏図）の広がりに足す四方の余白（mm）。通り芯の丸（通り名の吹き出し）や部材の
 	// 太さは命令の座標には現れないので、その分の遊びを持たせる。planContentBounds とその
 	// 期待値を書くテストが共有する。
-	inline constexpr double kPlanContentMargin = 500.0;
+	//
+	// **通り芯の線そのものは既に広がりに入っている**（GridCommand の始点・終点を見るため）
+	// ので、ここで見込むのは丸と線の太さだけでよい。1/50 なら 300mm ＝ 用紙の 6mm で、
+	// 丸（用紙 4mm 前後）を十分覆う。当初の 500mm は 1/50 で 10mm と過剰で、境目の建物が
+	// 1 段階小さい縮尺へ落ちる原因になっていた（M16 のローカル確認）。
+	inline constexpr double kPlanContentMargin = 300.0;
 
 	// 取り込んだ要素の平面座標から、図に映るものを包む矩形（センタリング済みの平面座標。
 	// 四方に kPlanContentMargin の余白つき）を返す。layers が空でなければ**そのレイヤに
