@@ -43,7 +43,10 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 
+#include "VWFC/VWObjects/VWLayerObj.h" // レイヤ高さの読み取り（診断ログの計測）
+
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <iterator>
 #include <ranges>
@@ -104,19 +107,70 @@ namespace HomeskzIfcImport::draw
 		// wanted（図面のオブジェクト列と同じ**背面→前面**の並び）が、いまの図面でその順に
 		// 並んでいるか。**間に別のレイヤが挟まっていてもよい**（ユーザーが自分で作った
 		// レイヤの位置には口を出さない）——見るのは wanted どうしの前後関係だけ。
-		// 図面のレイヤの並びを**前面→背面**の 1 行にする（診断ログ用）。名前は
-		// gSDK->GetObjectName で引く。希望順に出てこないレイヤ（ユーザーが自分で作ったもの）も
-		// そのまま出す——「VW がどう並べているか」を見るのが目的なので、省くと分からなくなる。
+		// レイヤ 1 枚の素性を「名前[ストーリ/レベル種別/レベル高さ]」の形にする（診断ログ用）。
+		//
+		// **VW がストーリ従属レイヤをどんな規則で並べているかを突き止めるための計測。** 実機で
+		// 分かっているのは「作った順は完全に無視され、ストーリ単位でまとまって上階が前面・
+		// 各ストーリの先頭が n-FL」というところまで。残る候補はレベルの高さか、レベル種別の
+		// 登録順か、その他の内部順なので、突き合わせに要る値をそのまま並べる。
+		std::string DescribeLayer(MCObjectHandle layer)
+		{
+			TXString name;
+			gSDK->GetObjectName(layer, name);
+
+			std::string storyName = "-";
+			const MCObjectHandle story = gSDK->GetStoryOfLayer(layer);
+			if (story != nil)
+			{
+				TXString storyText;
+				gSDK->GetObjectName(story, storyText);
+				storyName = storyText.GetStdString();
+			}
+
+			std::string levelType = gSDK->GetLayerLevelType(layer).GetStdString();
+			if (levelType.empty())
+				levelType = "-";
+
+			std::string elevation;
+			try
+			{
+				elevation = std::to_string(std::llround(VWLayerObj(layer).GetElevation()));
+			}
+			catch (...)
+			{
+				// 高さを読めなくても他の値は出す（1 枚の欠損で計測を止めない）。
+				elevation = "?";
+			}
+
+			return name.GetStdString() + "[" + storyName + "/" + levelType + "/" + elevation + "]";
+		}
+
+		// 図面のレイヤの並びを**前面→背面**の 1 行にする（診断ログ用）。希望順に出てこない
+		// レイヤ（ユーザーが自分で作ったもの）もそのまま出す——「VW がどう並べているか」を
+		// 見るのが目的なので、省くと分からなくなる。
 		std::string DescribeStackOrder(const std::vector<MCObjectHandle>& chain)
 		{
 			std::string text;
 			for (const MCObjectHandle layer : std::ranges::reverse_view(chain))
 			{
-				TXString name;
-				gSDK->GetObjectName(layer, name);
 				if (!text.empty())
 					text += " | ";
-				text += name.GetStdString();
+				text += DescribeLayer(layer);
+			}
+			return text;
+		}
+
+		// レベル種別の**登録順**（診断ログ用）。VW の並べ方がこの順に沿っているかを見る。
+		std::string DescribeLevelTypes()
+		{
+			const short count = gSDK->GetNumLayerLevelTypes();
+			std::string text;
+			for (short index = 0; index < count; ++index)
+			{
+				if (!text.empty())
+					text += " | ";
+				text +=
+					std::to_string(index) + "=" + gSDK->GetLayerLevelTypeName(index).GetStdString();
 			}
 			return text;
 		}
@@ -173,7 +227,9 @@ namespace HomeskzIfcImport::draw
 				text += name;
 			}
 			return text;
-		}() + "\n実際（並べ替え前・前面→背面）: " +
+		}() +
+					   "\nレベル種別の登録順: " + DescribeLevelTypes() +
+					   "\n実際（並べ替え前・前面→背面。名前[ストーリ/レベル種別/レベル高さ]）: " +
 					   DescribeStackOrder(DesignLayersInStackOrder());
 
 		result.wasOrdered = MatchesStackOrder(wanted);
