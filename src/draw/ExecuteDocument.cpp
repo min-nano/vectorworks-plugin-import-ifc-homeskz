@@ -101,6 +101,17 @@ namespace HomeskzIfcImport::draw
 			return true;
 		};
 
+		// **レイヤは「前面に来るものから」作る。** 重ね順は作る順で決まるものとして扱う
+		// （draw/Story.cpp の kCreateFrontLayerFirst。並べ替えは取り込み中の描画へ届かない）。
+		// 希望順の最上段は通り芯の "共通"、その下が伏図記号レイヤなので、**ストーリのレイヤより
+		// 先に**この 2 つを用意する（どちらも描くものが確定している要素のレイヤなので、
+		// 「空のレイヤを先に作らない」には反しない）。
+		if (!progress.cancelled())
+		{
+			prepareGridLayer(document);
+			preparePlanMarkLayers(document);
+		}
+
 		// M3 ストーリを先に描く。以降の要素はここで生成したストーリレベル・デザインレイヤに配
 		// 置されるため、通り芯や他要素より前に用意する。
 		if (beginPhase("ストーリとレイヤを作成しています…", document.stories.size(),
@@ -115,6 +126,10 @@ namespace HomeskzIfcImport::draw
 		// 野地板が伏図で柱・梁を覆わないようにする。per-viewport の重ね順上書きは実機で
 		// 効かなかった。draw/Story.h の reorderStoryLayers）。
 		//
+		// **いまは並べ替えそのものが最後の砦**——レイヤは希望順に沿って**作って**あるので
+		// （draw/Story の drawStories と kCreateFrontLayerFirst）、ここは普通なら 1 つも
+		// 動かさない。動いたら「作る順序の向きが違う」ということなので、診断行に出す。
+		//
 		// **要素を 1 つも描く前のここで行う。** M13 では「伏図の直前（＝ビューポート生成より
 		// 前）なら足りる」と考えて全要素の描画後に置いていたが、実機では取り込み直後の伏図
 		// だけが並べ替え前の重ね順で描かれ（図面の並び自体は並べ替え後で、ユーザーが「更新」を
@@ -126,11 +141,18 @@ namespace HomeskzIfcImport::draw
 		// 伏図記号レイヤ（"{to}-柱伏図記号"。M12）だけはここで先に用意する。
 		if (!progress.cancelled())
 		{
-			preparePlanMarkLayers(document);
 			const LayerOrderResult order = reorderStoryLayers(document);
 			if (!order.ordered && !document.stories.empty())
 				addDiagnostics("レイヤの重ね順を並べ替えられませんでした"
 							   "（伏図で床・野地板が柱・梁を覆います）。");
+			else if (!order.wasOrdered && !document.stories.empty())
+				// **作った順だけでは希望どおりにならなかった**——並べ替えで直してはあるが、
+				// その並べ替えは取り込み中の描画へ届かない（draw/Story.h）。作る順序の向き
+				// （draw/Story.cpp の kCreateFrontLayerFirst）を見直す材料として出す。
+				addDiagnostics(std::string("レイヤの重ね順: 作ったままでは希望どおりに"
+										   "なりませんでした（") +
+							   (order.wasReversed ? "ちょうど逆順" : "逆順ではない並び") + "・" +
+							   std::to_string(order.moved) + " 件を並べ替え）。");
 		}
 
 		// M9/M10 基礎を描く。立上り（壁）→ 壁結合 → 底盤（スラブ）の順。**壁結合は立上りの

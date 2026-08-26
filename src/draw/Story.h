@@ -45,6 +45,12 @@ namespace HomeskzIfcImport::draw
 		std::size_t moved = 0;
 		// 呼び出し後の並びが希望順と一致しているか（読み戻して確かめた結果）。
 		bool ordered = false;
+		// **呼び出す前から**希望どおりだったか（＝作った順だけで並びが決まっていたか）。
+		// draw/Story.cpp の kCreateFrontLayerFirst が当たっていれば true。
+		bool wasOrdered = false;
+		// 呼び出す前の並びが希望順の**ちょうど逆**だったか。true なら
+		// kCreateFrontLayerFirst を反転させればよい（＝作る順序だけで解決する）。
+		bool wasReversed = false;
 	};
 
 	// デザインレイヤのスタック順を希望順（core::desiredStoryLayerOrder）へ並べ替える。
