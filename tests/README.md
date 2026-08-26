@@ -22,7 +22,8 @@
 | `LoaderTests` | `src/parse/Loader` | 非正規エンティティを**除去せず**読めること・実フィクスチャ全件の読み込み |
 | `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配（手計算値との突き合わせ） |
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
-| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付けを含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲 |
+| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付けを含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`） |
+| `CoreLayoutTests` | `src/core/Layout` | 用紙の割り付け（縮尺は階梯の値だけ・**渡された印刷可能領域をそのまま使う**（余白を仮定しない）・凡例の幅を引いてから収まる中で最大の図・伏図は全図同じ縮尺と位置・軸組図は上下 2 段でマスが重ならないこと・シート枚数とタイトルの連番） |
 | `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
 | `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |
 | `ParseStoryTests` | `src/parse/Story` | 階・レベル・レイヤ名（横架材天端オフセット・屋根組／母屋／span 柱レベルの追加条件・span レイヤ名の生成と分解） |

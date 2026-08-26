@@ -11,6 +11,7 @@
 //	隣の parse モジュールのテスト（ParseGridTests 等）で検証する。
 //
 
+#include "Fixtures.h"
 #include "TestFramework.h"
 
 #include "core/Document.h"
@@ -23,6 +24,7 @@
 #include <vector>
 
 using namespace HomeskzIfcImport;
+using HomeskzIfcTests::near;
 
 // --------------------------------------------------------------------------
 // - core::Document / validateDocument
@@ -1215,9 +1217,11 @@ TEST(validate_rejects_sheet_with_legend_without_style)
 // ---------------------------------------------------------------------------
 // 断面ビューポート（軸組図。docs/DEV-NOTES.md M14）
 //
-// 伏図の関門（シートレイヤ番号・タイトル・非空の表示レイヤ）に加えて、**指示線が縮退して
-// いない**ことを見る（縮退した線からは切断面の向きが決まらない）。断面の範囲（長さ・高さ・
-// 奥行き）は命令が持たない——軸組図は範囲を限らないので、描画側の定数が受け持つ。
+// 非空の表示レイヤに加えて、**指示線が縮退していない**ことを見る（縮退した線からは切断面の
+// 向きが決まらない）。断面の範囲（長さ・高さ・奥行き）は命令が持たない——軸組図は範囲を
+// 限らないので、描画側の定数が受け持つ。**配置先のシートレイヤも命令は持たない**（M18）
+// ——何枚の用紙に分かれるかは用紙の大きさと縮尺が決めるので、文書に 1 つの
+// SectionSheetCommand（番号の始まり・タイトルの基）だけを見る。
 // ---------------------------------------------------------------------------
 
 namespace
@@ -1225,8 +1229,6 @@ namespace
 	core::SectionCommand validSection()
 	{
 		core::SectionCommand section;
-		section.number = "A";
-		section.title = "軸組図";
 		section.direction = core::SectionDirection::X;
 		section.lineStart = core::Vec2{1000.0, -4000.0};
 		section.lineEnd = core::Vec2{1000.0, 4000.0};
@@ -1238,42 +1240,54 @@ namespace
 	}
 } // namespace
 
+namespace
+{
+	// 軸組図を 1 枚持つ妥当な文書（シートレイヤの通し方まで埋めたもの）。
+	core::Document documentWithSection()
+	{
+		core::Document document;
+		document.sections.push_back(validSection());
+		document.sectionSheet.startNumber = 8;
+		document.sectionSheet.title = "軸組図";
+		return document;
+	}
+} // namespace
+
 TEST(validate_accepts_document_with_valid_section)
 {
-	core::Document document;
-	document.sections.push_back(validSection());
-	CHECK(core::validateDocument(document));
+	CHECK(core::validateDocument(documentWithSection()));
 }
 
-TEST(validate_rejects_section_without_sheet_or_layers)
+TEST(validate_rejects_section_without_layers)
 {
-	// シートレイヤ番号・タイトル・表示レイヤは伏図と同じ関門。
-	core::Document byNumber;
-	core::SectionCommand noNumber = validSection();
-	noNumber.number.clear();
-	byNumber.sections.push_back(noNumber);
+	// 表示レイヤが 0 枚の軸組図は「何も映らないビューポート」なので作らせない（伏図と同じ）。
+	core::Document byLayers = documentWithSection();
+	byLayers.sections.front().viewport.layers.clear();
+	CHECK(!core::validateDocument(byLayers));
+}
+
+TEST(validate_rejects_section_sheet_without_number_or_title)
+{
+	// 軸組図があるなら、配置先シートレイヤの通し方（番号の始まり・タイトルの基）も
+	// 埋まっていること（M18）。
+	core::Document byNumber = documentWithSection();
+	byNumber.sectionSheet.startNumber = 0;
 	CHECK(!core::validateDocument(byNumber));
 
-	core::Document byTitle;
-	core::SectionCommand noTitle = validSection();
-	noTitle.title.clear();
-	byTitle.sections.push_back(noTitle);
+	core::Document byTitle = documentWithSection();
+	byTitle.sectionSheet.title.clear();
 	CHECK(!core::validateDocument(byTitle));
 
-	core::Document byLayers;
-	core::SectionCommand noLayers = validSection();
-	noLayers.viewport.layers.clear();
-	byLayers.sections.push_back(noLayers);
-	CHECK(!core::validateDocument(byLayers));
+	// **軸組図が 1 枚も無ければ見ない**（使わない値なので空のままでも妥当）。
+	core::Document empty;
+	CHECK(core::validateDocument(empty));
 }
 
 TEST(validate_rejects_section_with_degenerate_line)
 {
 	// 始点＝終点では切断面の向きが決まらない。
-	core::Document document;
-	core::SectionCommand section = validSection();
-	section.lineEnd = section.lineStart;
-	document.sections.push_back(section);
+	core::Document document = documentWithSection();
+	document.sections.front().lineEnd = document.sections.front().lineStart;
 	CHECK(!core::validateDocument(document));
 }
 
@@ -1327,6 +1341,9 @@ TEST(validate_accepts_viewport_tags_on_sheets_and_sections)
 	core::SectionCommand section = validSection();
 	section.viewport.tags.push_back(validTag());
 	document.sections.push_back(section);
+	// 軸組図があるならシートレイヤの通し方も埋まっていること（M18）。
+	document.sectionSheet.startNumber = 8;
+	document.sectionSheet.title = "軸組図";
 
 	CHECK(core::validateDocument(document));
 }
@@ -1470,6 +1487,197 @@ TEST(section_height_range_fails_without_elements)
 	CHECK(!core::sectionHeightRange(core::Document{}, start, end));
 	CHECK(std::abs(start - (-1.0)) < 1e-6);
 	CHECK(std::abs(end - (-2.0)) < 1e-6);
+}
+
+// ---------------------------------------------------------------------------
+// 平面の広がり（伏図の縮尺と位置を決めるのに使う。docs/DEV-NOTES.md M18）
+//
+// planContentBounds は「図に映るもの」を包む矩形を返す。layers を渡すとそのレイヤに載る
+// 命令だけを見る（伏図 1 枚が映す範囲）。sectionContentSize は軸組図 1 枚ぶんの広がり
+// （幅＝平面の広がりの大きい方・高さ＝断面の高さ範囲）。
+// ---------------------------------------------------------------------------
+
+TEST(plan_content_bounds_wraps_every_command_with_margin)
+{
+	core::Document document;
+	// 通り芯（−4000〜4000）と、その外へ出る野地板の軒（5000）。
+	core::GridCommand grid;
+	grid.layer = core::kGridLayer;
+	grid.start = core::Vec2{-4000.0, -3000.0};
+	grid.end = core::Vec2{4000.0, -3000.0};
+	document.grids.push_back(grid);
+
+	core::RoofCommand roof;
+	roof.layer = "1-野地板";
+	roof.drawClass = "野地板";
+	roof.boundary = {core::Vec2{-5000.0, -4000.0}, core::Vec2{5000.0, -4000.0},
+					 core::Vec2{5000.0, 4000.0}, core::Vec2{-5000.0, 4000.0}};
+	document.roofs.push_back(roof);
+
+	core::Vec2 min;
+	core::Vec2 max;
+	CHECK(core::planContentBounds(document, {}, min, max));
+	CHECK(near(min.x, -5000.0 - core::kPlanContentMargin));
+	CHECK(near(max.x, 5000.0 + core::kPlanContentMargin));
+	CHECK(near(min.y, -4000.0 - core::kPlanContentMargin));
+	CHECK(near(max.y, 4000.0 + core::kPlanContentMargin));
+
+	// レイヤを指定すると、そのレイヤに載る命令だけ（＝その伏図に映る範囲）。
+	CHECK(core::planContentBounds(document, {core::kGridLayer}, min, max));
+	CHECK(near(min.x, -4000.0 - core::kPlanContentMargin));
+	CHECK(near(max.x, 4000.0 + core::kPlanContentMargin));
+	CHECK(near(min.y, -3000.0 - core::kPlanContentMargin));
+	CHECK(near(max.y, -3000.0 + core::kPlanContentMargin));
+}
+
+TEST(plan_content_bounds_sees_every_kind_of_command)
+{
+	// **座標を持つ命令はどれも広がりに効く**ことを、種類ごとに 1 つずつ載せて確かめる。
+	// 命令リストを 1 本足したときにここへ足し忘れると、その要素だけが図からはみ出す
+	// （縮尺の見積もりに入らない）ので、種類の網羅そのものが検証項目になる。
+	core::Document document;
+
+	const auto boundaryAt = [](double half)
+	{
+		return std::vector<core::Vec2>{core::Vec2{-half, -half}, core::Vec2{half, -half},
+									   core::Vec2{half, half}, core::Vec2{-half, half}};
+	};
+
+	core::FloorCommand floor;
+	floor.layer = "1-FL";
+	floor.boundary = boundaryAt(1000.0);
+	document.floors.push_back(floor);
+
+	core::SlabCommand slab;
+	slab.layer = "F-底盤";
+	slab.boundary = boundaryAt(1100.0);
+	document.slabs.push_back(slab);
+
+	core::RoofCommand roof;
+	roof.layer = "R-野地板";
+	roof.boundary = boundaryAt(1200.0);
+	document.roofs.push_back(roof);
+
+	core::MemberCommand member;
+	member.layer = "1-横架材天端";
+	member.start = core::Vec2{-1300.0, -1300.0};
+	member.end = core::Vec2{1300.0, 1300.0};
+	document.members.push_back(member);
+
+	core::WallCommand wall;
+	wall.layer = "F-立上り";
+	wall.start = core::Vec2{-1400.0, 0.0};
+	wall.end = core::Vec2{1400.0, 0.0};
+	document.walls.push_back(wall);
+
+	core::RafterCommand rafter;
+	rafter.layer = "R-垂木";
+	rafter.start = core::Vec2{-1500.0, 0.0};
+	rafter.end = core::Vec2{1500.0, 0.0};
+	document.rafters.push_back(rafter);
+
+	core::ColumnCommand column;
+	column.layer = "1to2-柱";
+	column.position = core::Vec2{1600.0, 0.0};
+	document.columns.push_back(column);
+
+	core::ColumnMarkCommand mark;
+	mark.layer = "2-柱伏図記号";
+	mark.position = core::Vec2{-1700.0, 0.0};
+	document.columnMarks.push_back(mark);
+
+	// シンボル置換系 4 種（同じ命令型なので 4 本のリストすべてを見ていることを確かめる）。
+	const auto symbolAt = [](const char* layer, const core::Vec2& position)
+	{
+		core::SymbolCommand symbol;
+		symbol.layer = layer;
+		symbol.position = position;
+		return symbol;
+	};
+	document.anchorBolts.push_back(symbolAt("F-アンカーボルト", core::Vec2{0.0, 1800.0}));
+	document.floorPosts.push_back(symbolAt("F-床束", core::Vec2{0.0, -1900.0}));
+	document.fireBraces.push_back(symbolAt("1-横架材天端", core::Vec2{2000.0, 0.0}));
+	document.joints.push_back(symbolAt("1-横架材天端", core::Vec2{-2100.0, 0.0}));
+
+	core::GridCommand grid;
+	grid.layer = core::kGridLayer;
+	grid.start = core::Vec2{-2200.0, -2200.0};
+	grid.end = core::Vec2{2200.0, 2200.0};
+	document.grids.push_back(grid);
+
+	core::Vec2 min;
+	core::Vec2 max;
+	CHECK(core::planContentBounds(document, {}, min, max));
+	CHECK(near(min.x, -2200.0 - core::kPlanContentMargin));
+	CHECK(near(max.x, 2200.0 + core::kPlanContentMargin));
+	CHECK(near(min.y, -2200.0 - core::kPlanContentMargin));
+	CHECK(near(max.y, 2200.0 + core::kPlanContentMargin));
+
+	// レイヤで絞ると、線分・外形・点のどれも同じ規則で外れる（立上りだけが残る）。
+	CHECK(core::planContentBounds(document, {"F-立上り"}, min, max));
+	CHECK(near(min.x, -1400.0 - core::kPlanContentMargin));
+	CHECK(near(max.x, 1400.0 + core::kPlanContentMargin));
+	CHECK(near(min.y, 0.0 - core::kPlanContentMargin));
+	CHECK(near(max.y, 0.0 + core::kPlanContentMargin));
+
+	// 点だけのレイヤ（アンカーボルト）でも同じ。
+	CHECK(core::planContentBounds(document, {"F-アンカーボルト"}, min, max));
+	CHECK(near(min.y, 1800.0 - core::kPlanContentMargin));
+	CHECK(near(max.y, 1800.0 + core::kPlanContentMargin));
+}
+
+TEST(plan_content_bounds_fails_without_coordinates)
+{
+	// 座標を持つ命令が 1 つも無ければ広がりは求まらない（out は触らない）。
+	core::Vec2 min{1.0, 2.0};
+	core::Vec2 max{3.0, 4.0};
+	CHECK(!core::planContentBounds(core::Document{}, {}, min, max));
+	CHECK(near(min.x, 1.0));
+	CHECK(near(max.y, 4.0));
+
+	// 指定したレイヤに何も載っていないときも同じ（伏図の表示レイヤが 1 つも描かれなかった）。
+	core::Document document;
+	core::ColumnCommand column;
+	column.layer = "1to2-柱";
+	column.position = core::Vec2{0.0, 0.0};
+	document.columns.push_back(column);
+	CHECK(!core::planContentBounds(document, {"2to3-柱"}, min, max));
+}
+
+TEST(section_content_size_pairs_plan_width_with_section_height)
+{
+	core::Document document;
+	// 平面は 8m（X）× 12m（Y）。幅は**大きい方**＝ Y の広がりを採る（X通りの軸組図が
+	// 映すのは Y 方向の広がりなので、両方向が同じマスに収まるように揃える）。
+	core::MemberCommand member;
+	member.layer = "1-横架材天端";
+	member.start = core::Vec2{-4000.0, -6000.0};
+	member.end = core::Vec2{4000.0, 6000.0};
+	member.elevation = 3000.0;
+	member.endElevation = 3000.0;
+	member.height = 180.0;
+	document.members.push_back(member);
+
+	core::Vec2 size;
+	CHECK(core::sectionContentSize(document, size));
+	CHECK(near(size.x, 12000.0 + (2.0 * core::kPlanContentMargin)));
+	// 高さは断面の高さ範囲（天端 3000・下端 2820 に上下の余白）。
+	CHECK(near(size.y, (3000.0 - 2820.0) + (2.0 * core::kSectionHeightMargin)));
+
+	// 何も無い文書では求まらない。
+	core::Vec2 untouched{7.0, 8.0};
+	CHECK(!core::sectionContentSize(core::Document{}, untouched));
+	CHECK(near(untouched.x, 7.0));
+
+	// 平面が決まっても**高さの分かる要素が 1 つも無ければ**求まらない（通り芯だけの文書）。
+	core::Document flat;
+	core::GridCommand grid;
+	grid.layer = core::kGridLayer;
+	grid.start = core::Vec2{-1000.0, 0.0};
+	grid.end = core::Vec2{1000.0, 0.0};
+	flat.grids.push_back(grid);
+	CHECK(!core::sectionContentSize(flat, untouched));
+	CHECK(near(untouched.x, 7.0));
 }
 
 // --------------------------------------------------------------------------

@@ -43,10 +43,10 @@ namespace HomeskzIfcImport::parse
 {
 	class Context;
 
-	// 軸組図を載せるシートレイヤの番号（＝レイヤ名）とタイトル。伏図が "1" / "2" …
-	// と数字なので、軸組図は英字にして番号の連番と衝突させない。**全 section 命令が同じシート
-	// に載る**。
-	inline constexpr const char* kSectionSheetNumber = "A";
+	// 軸組図を載せるシートレイヤのタイトルの基。**用紙 1 枚に収まらなければシートレイヤを
+	// 足す**ので（M18）、複数枚になるときは "軸組図(1)" … と連番になる
+	// （core::sectionSheetTitle）。何枚になるかは用紙の大きさと縮尺が決めるため、ここでは
+	// 基の文字列だけを持つ。
 	inline constexpr const char* kSectionSheetTitle = "軸組図";
 
 	// 図面タイトルの接尾辞（図番 + これ）。"X1" → "X1通り"。
@@ -103,6 +103,16 @@ namespace HomeskzIfcImport::parse
 	// （"{to}-柱伏図記号"）は含まない**——平面用の 2D 記号なので断面には要らない（story 命令が
 	// 作るレイヤではないため、この実装では自然に外れる）。並びは stories の順＋通り芯。
 	std::vector<std::string> sectionLayers(const std::vector<core::StoryCommand>& stories);
+
+	// 軸組図のシートレイヤ番号の始まり＝**伏図の続き**（要件）。伏図の番号（数字の文字列）の
+	// 最大値 + 1 を返す。数字でない番号・空の番号は読み飛ばし、伏図が 1 枚も無ければ 1。
+	int sectionSheetStartNumber(const std::vector<core::SheetCommand>& sheets);
+
+	// 軸組図のシートレイヤの通し方（番号の始まり・タイトルの基）。**何枚に分かれるかは
+	// 用紙の大きさと縮尺が決める**ので、ここでは枚数に依らないこの 2 つだけを決める
+	// （core/Document.h の SectionSheetCommand）。
+	core::SectionSheetCommand
+	buildSectionSheetCommand(const std::vector<core::SheetCommand>& sheets);
 
 	// 軸組図の section 命令を組み立てる。X 通りの切断位置を昇順に並べ、続けて Y通りを並べる。
 	// 通り芯が 1 本も無い（平面の広がりが決まらない）・映すレイヤが無い・柱梁の芯が

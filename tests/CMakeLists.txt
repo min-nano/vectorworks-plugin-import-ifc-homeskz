@@ -106,6 +106,15 @@ target_link_libraries(CoreDocumentTests PRIVATE HomeskzIfcCore)
 vw_add_test(CoreProgressTests CoreProgressTests.cpp)
 target_link_libraries(CoreProgressTests PRIVATE HomeskzIfcCore)
 
+# Sheet-layer layout (src/core/Layout): the scale ladder and how a scale is picked
+# to fit the paper, the plan sheets' shared scale/centre with the legend column kept
+# clear, and the section sheets' two-row grid (slot centres, sheets needed, titles).
+# Pure arithmetic shared by both phases — the actual paper size comes from the SDK
+# (draw/DrawUtil's SheetPaperArea) and is verified on a real Vectorworks install.
+# SDK-free, no fixtures.
+vw_add_test(CoreLayoutTests CoreLayoutTests.cpp)
+target_link_libraries(CoreLayoutTests PRIVATE HomeskzIfcCore)
+
 # Crash-diagnosis log (src/core/Trace): enable/disable, per-line flushing (a crash
 # must not eat the last line), truncate-on-reopen, a non-fatal open failure, the
 # default temp-dir path, and the one place phases reach the log (core/Progress's

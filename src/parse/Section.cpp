@@ -194,8 +194,6 @@ namespace HomeskzIfcImport::parse
 			{
 				const double cut = cuts[i];
 				core::SectionCommand command;
-				command.number = kSectionSheetNumber;
-				command.title = kSectionSheetTitle;
 				command.direction = direction;
 				if (direction == SectionDirection::X)
 				{
@@ -366,6 +364,40 @@ namespace HomeskzIfcImport::parse
 			}
 		}
 		return names;
+	}
+
+	int sectionSheetStartNumber(const std::vector<core::SheetCommand>& sheets)
+	{
+		// 伏図の番号は数字の文字列（"1" / "2" …）。**数字として読めたものだけ**を見て、その
+		// 最大値の次を返す。読めない番号を 0 と扱って番号を巻き戻すより、読み飛ばす方が安全
+		// （番号が衝突すると別の伏図と同じシートレイヤへ軸組図を載せてしまう）。
+		int last = 0;
+		for (const core::SheetCommand& sheet : sheets)
+		{
+			int value = 0;
+			bool digits = !sheet.number.empty();
+			for (const char c : sheet.number)
+			{
+				if (c < '0' || c > '9')
+				{
+					digits = false;
+					break;
+				}
+				value = (value * 10) + (c - '0');
+			}
+			if (digits)
+				last = std::max(last, value);
+		}
+		return last + 1;
+	}
+
+	core::SectionSheetCommand
+	buildSectionSheetCommand(const std::vector<core::SheetCommand>& sheets)
+	{
+		core::SectionSheetCommand command;
+		command.startNumber = sectionSheetStartNumber(sheets);
+		command.title = kSectionSheetTitle;
+		return command;
 	}
 
 	std::vector<std::string> sectionLayers(const std::vector<core::StoryCommand>& stories)

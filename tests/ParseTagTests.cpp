@@ -78,8 +78,6 @@ namespace
 	SectionCommand makeSection(SectionDirection direction, double cut)
 	{
 		SectionCommand section;
-		section.number = "A";
-		section.title = "軸組図";
 		section.direction = direction;
 		section.lineStart =
 			direction == SectionDirection::X ? Vec2{cut, -10000.0} : Vec2{-10000.0, cut};
