@@ -44,6 +44,12 @@ namespace HomeskzIfcImport::draw
 		//（Kernel/API/MiniCadCallBacks.h の kTaggedDataObjectRefArrayTypeID）。
 		constexpr Sint32 kObjectRefTypeID = 15;
 
+		// バイト列のダンプ上限と、参照らしき値を解くときの窓の大きさ。
+		constexpr std::size_t kMaxDumpBytes = 256;
+		constexpr std::size_t kUuidBytes = 16;
+		// ビューポートのオブジェクト型（Appendix D: Viewport = 122）。**これが出たら当たり**。
+		constexpr short kViewportType = 122;
+
 		// 走査の上限（暴走よけ）。タグ ID は総なめするので広めに、値は先頭だけ見れば足りる。
 		constexpr int kMaxAuxObjects = 64;
 		constexpr Sint32 kMaxTaggedTagID = 64;
@@ -108,6 +114,102 @@ namespace HomeskzIfcImport::draw
 				return text;
 			}
 			return std::to_string(static_cast<int>(buffer[0]));
+		}
+
+		// 16 進ダンプ（1 行 16 バイト、先頭にオフセット）。
+		std::string HexDump(const Uint8* bytes, std::size_t size)
+		{
+			static constexpr char kDigits[] = "0123456789abcdef";
+			std::string text;
+			for (std::size_t offset = 0; offset < size; offset += 16)
+			{
+				text += "      +" + std::to_string(offset) + ":";
+				for (std::size_t i = offset; i < offset + 16 && i < size; ++i)
+				{
+					text += ' ';
+					text += kDigits[(bytes[i] >> 4U) & 0x0FU];
+					text += kDigits[bytes[i] & 0x0FU];
+				}
+				text += "\n";
+			}
+			return text;
+		}
+
+		// 16 バイトを UUID の文字列（8-4-4-4-12）に組む。**並びは 2 通り試す**——
+		// そのまま（ビッグエンディアン）と、先頭 3 欄をバイト反転したもの（Microsoft の GUID 並び）。
+		std::string UuidText(const Uint8* bytes, bool swapFirstFields)
+		{
+			static constexpr char kDigits[] = "0123456789abcdef";
+			static constexpr int kOrderPlain[16] = {0, 1, 2,  3,  4,  5,  6,  7,
+													8, 9, 10, 11, 12, 13, 14, 15};
+			static constexpr int kOrderSwapped[16] = {3, 2, 1,	0,	5,	4,	7,	6,
+													  8, 9, 10, 11, 12, 13, 14, 15};
+			const int* order = swapFirstFields ? kOrderSwapped : kOrderPlain;
+			std::string text;
+			for (int i = 0; i < 16; ++i)
+			{
+				if (i == 4 || i == 6 || i == 8 || i == 10)
+					text += '-';
+				const Uint8 value = bytes[order[i]];
+				text += kDigits[(value >> 4U) & 0x0FU];
+				text += kDigits[value & 0x0FU];
+			}
+			return text;
+		}
+
+		// バイト列に紛れている「他のオブジェクトへの参照」を解く。**ビューポート（型 122）に
+		// 当たったものだけ**を出す——それがフィルタ先で、他は雑音になる。
+		//   * 16 バイトの窓を UUID とみなして GetObjectByUuid で引く（並びは 2 通り）
+		//   * 4 バイトの窓を InternalIndex とみなして InternalIndexToHandle で引く
+		std::string ResolveReferences(const Uint8* bytes, std::size_t size)
+		{
+			std::string text;
+			for (std::size_t offset = 0; offset + kUuidBytes <= size; ++offset)
+			{
+				for (const bool swapped : {false, true})
+				{
+					const std::string uuid = UuidText(bytes + offset, swapped);
+					const MCObjectHandle found = gSDK->GetObjectByUuid(TXString(uuid.c_str()));
+					if (found == nil)
+						continue;
+					const short type = gSDK->GetObjectTypeN(found);
+					text += "      * +" + std::to_string(offset) + " uuid=" + uuid +
+							(swapped ? " (swapped)" : "") + " -> type=" + std::to_string(type) +
+							(type == kViewportType ? "  <== VIEWPORT" : "") + "\n";
+				}
+			}
+			for (std::size_t offset = 0; offset + sizeof(Sint32) <= size; ++offset)
+			{
+				Sint32 value = 0;
+				std::memcpy(&value, bytes + offset, sizeof(value));
+				if (value <= 0)
+					continue;
+				const MCObjectHandle found =
+					gSDK->InternalIndexToHandle(static_cast<InternalIndex>(value));
+				if (found == nil || gSDK->GetObjectTypeN(found) != kViewportType)
+					continue;
+				text += "      * +" + std::to_string(offset) +
+						" internalIndex=" + std::to_string(value) + " -> VIEWPORT\n";
+			}
+			return text;
+		}
+
+		// データオブジェクトの中身。**MCObjectHandle は GSHandle（= char**）**なので、
+		// 参照外しでそのままバイト列の先頭が得られる（Kernel/Base/TypesBase.h）。
+		std::string DumpDataObject(MCObjectHandle aux)
+		{
+			std::size_t size = 0;
+			gSDK->GSGetHandleSize(aux, size);
+			std::string text = " bytes=" + std::to_string(size) + "\n";
+			const auto* bytes = reinterpret_cast<const Uint8*>(*aux);
+			if (bytes == nullptr || size == 0)
+				return text;
+
+			text += HexDump(bytes, size < kMaxDumpBytes ? size : kMaxDumpBytes);
+			if (size > kMaxDumpBytes)
+				text += "      … (" + std::to_string(size - kMaxDumpBytes) + " バイト省略)\n";
+			text += ResolveReferences(bytes, size);
+			return text;
 		}
 
 		// データオブジェクトのタグを**タグ付きデータの容れ物**とみなして総なめする。
@@ -190,7 +292,8 @@ namespace HomeskzIfcImport::draw
 			}
 
 			const OSType tag = gSDK->GetDataTag(aux);
-			text += " data tag='" + FourCC(tag) + "'\n";
+			text += " data tag='" + FourCC(tag) + "'";
+			text += DumpDataObject(aux);
 			text += ProbeTaggedContainer(selected, tag);
 		}
 		if (index == 0)
