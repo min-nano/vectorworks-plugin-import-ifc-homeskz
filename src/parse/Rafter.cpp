@@ -23,6 +23,7 @@
 namespace HomeskzIfcImport::parse
 {
 	using core::RafterCommand;
+	using core::StoryBoundCommand;
 	using core::Vec2;
 
 	namespace
@@ -182,6 +183,11 @@ namespace HomeskzIfcImport::parse
 		const double dy = slope.down.y;
 
 		const std::string label = rafterLabel();
+		// 高さ基準（StoryBoundCommand）の基準になる垂木レベルの絶対 Z。垂木レベルは横架材
+		// 天端（最上階は軒高）に揃えてあるので（parse/Story.cpp の insertAboveBeamTop）、
+		// buildRafterCommands が渡す beamTopZ がそのままレベルの Z になる。beamTopZ を
+		// 渡さない呼び方（単体テストの直接呼び出し）ではストーリ高さを基準にする。
+		const double levelZ = beamTopZ.value_or(storeyElevation);
 		const std::size_t vertexCount = plan.size();
 		std::vector<RafterCommand> commands;
 		for (const double t :
@@ -238,9 +244,9 @@ namespace HomeskzIfcImport::parse
 				// 寄り切って部材が残らない（隅棟際の三角形の先端。下記）——これらは受ける
 				// 軒桁が無いので、支持点を採らず**軒先そのものを挿入点＝高さの基準**にし、
 				// 差し込み・軒の出を 0 にして**長さと高さを実形状に合わせる**
-				// （docs/DEV-NOTES.md M6「ローカル確認」の指示）。描画側は start の XY と elevation を
-				// 挿入点に、start→end の水平投影長をスパンにするので、これで OIP の
-				// 長さ・高さが実形状どおりになる（draw/Rafter.cpp）。
+				// （docs/DEV-NOTES.md M6「ローカル確認」の指示）。描画側は start の XY と
+				// elevation をパスの始端に、start→end の水平投影長をスパンにするので、これで
+				// OIP の長さ・高さが実形状どおりになる（draw/Rafter.cpp）。
 				//
 				// **s の丸めに頼らない。** 屋根面の棟側の端が軒高ちょうどに来る面では
 				// zRidge == beamTopZ となり s は本来ちょうど 1.0 だが、割り算の丸めで 1−ε に
@@ -281,7 +287,7 @@ namespace HomeskzIfcImport::parse
 				cmd.endElevation = zRidge;
 				// 差し込み（支持点→壁外面）＝支持点の真下にある軒桁の桁幅の半分。受ける
 				// 軒桁が見つからなければ既定桁幅（M6 の挙動と同じ値）。**軒桁に乗らない
-				// 垂木は 0**——差し込む相手が無く、VW は軒先を「挿入点＋差し込み＋軒の出」に
+				// 垂木は 0**——差し込む相手が無く、描画側は軒先を「支持点＋差し込み＋軒の出」に
 				// 置くので、0 でなければ実形状より長く描かれてしまう。
 				const double embedment =
 					restsOnGirder ? girderWidthAt(cmd.start.x, cmd.start.y, cmd.end.x - cmd.start.x,
@@ -289,12 +295,21 @@ namespace HomeskzIfcImport::parse
 										2.0
 								  : 0.0;
 				// 壁外面から軒先の距離（overhang）＝ 支持点→軒先（supportToTip）から支持部分の
-				// 差し込み（embedment ＝ 支持点→壁外面）を引いた残り。VW の垂木は軒先を
-				// 支持点＋差し込み＋軒の出 に置くため、両者の和が supportToTip になるようにする
+				// 差し込み（embedment ＝ 支持点→壁外面）を引いた残り。描画側は軒先を
+				// 支持点＋差し込み＋軒の出 に置く（core::rafterEaveEnd）ため、両者の和が
+				// supportToTip になるようにする
 				// （軒桁に乗らない垂木は supportToTip も embedment も 0 なので軒の出も 0）。
 				cmd.overhang = std::max(0.0, supportToTip - embedment);
 				cmd.embedment = embedment;
 				cmd.label = label;
+				// 高さ基準は配置先レイヤ（"n-垂木"）の垂木レベル。offset はそのレベルの絶対 Z
+				// から下面 Z までの距離で、支持点は横架材天端（軒高）ちょうどなのでふつう 0、
+				// 棟側は勾配ぶんの正の値になる（軒桁に乗らない垂木は支持点側も 0 でない）。
+				// 垂木レベルの Z は横架材天端（最上階は軒高）に揃えてあり、それが
+				// buildRafterCommands の渡す beamTopZ そのもの（parse/Story.cpp の
+				// insertAboveBeamTop）。
+				cmd.startBound = StoryBoundCommand{0, kLevelTaruki, supportZ - levelZ};
+				cmd.endBound = StoryBoundCommand{0, kLevelTaruki, zRidge - levelZ};
 				commands.push_back(std::move(cmd));
 			}
 		}

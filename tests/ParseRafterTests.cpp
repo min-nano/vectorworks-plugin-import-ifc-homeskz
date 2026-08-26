@@ -43,6 +43,7 @@ using HomeskzIfcImport::parse::girderWidthAt;
 using HomeskzIfcImport::parse::kDefaultGirderWidth;
 using HomeskzIfcImport::parse::kDefaultRafterHeight;
 using HomeskzIfcImport::parse::kDefaultRafterWidth;
+using HomeskzIfcImport::parse::kLevelTaruki;
 using HomeskzIfcImport::parse::kRafterInterval;
 using HomeskzIfcImport::parse::loadIfc;
 using HomeskzIfcImport::parse::loadIfcFromText;
@@ -445,6 +446,54 @@ TEST(embedment_defaults_to_half_default_girder)
 		CHECK(near(rafter.embedment, kDefaultGirderWidth / 2.0));
 }
 
+// ---------------------------------------------------------------------------
+// 高さ基準（構造材ツールのストーリバウンド。M16 で垂木を構造材ツールへ移した）
+// ---------------------------------------------------------------------------
+
+TEST(bounds_are_offsets_from_the_taruki_level)
+{
+	// 垂木レベルの Z は横架材天端（最上階は軒高）に揃えてあるので、beamTopZ がそのまま
+	// レベルの Z になる。beamTopZ=1500 なら支持点はそのレベルちょうど（offset 0）で、
+	// 棟側（z=2000）は +500。
+	const std::vector<RafterCommand> rafters = shedRaftersWithBeamTop(1500.0);
+	CHECK(!rafters.empty());
+	for (const RafterCommand& rafter : rafters)
+	{
+		CHECK_EQ(rafter.startBound.level, std::string(kLevelTaruki));
+		CHECK_EQ(rafter.endBound.level, std::string(kLevelTaruki));
+		CHECK_EQ(rafter.startBound.storyOffset, 0);
+		CHECK_EQ(rafter.endBound.storyOffset, 0);
+		CHECK(near(rafter.startBound.offset, 0.0));
+		CHECK(near(rafter.endBound.offset, 500.0));
+	}
+}
+
+TEST(bounds_follow_the_storey_elevation)
+{
+	// ストーリ高さを与えた呼び出し（支持点なし）ではレベルの Z はストーリ高さそのもの。
+	// 下面 Z は 1000／2000 ＋ ストーリ高さなので、offset はストーリ高さに依らず 1000／2000。
+	for (const RafterCommand& rafter : shedRafters(6300.0))
+	{
+		CHECK(near(rafter.elevation, 1000.0 + 6300.0));
+		CHECK(near(rafter.startBound.offset, 1000.0));
+		CHECK(near(rafter.endBound.offset, 2000.0));
+	}
+}
+
+TEST(bounds_match_the_drawn_elevations)
+{
+	// offset の差は両端の下面 Z の差と一致する（勾配はこの差だけで表され、パスには
+	// 持たせない。draw/Rafter.cpp 冒頭）。軒桁に乗らない垂木でも成り立つ。
+	for (const double beamTopZ : {800.0, 1500.0, 1990.0})
+	{
+		for (const RafterCommand& rafter : shedRaftersWithBeamTop(beamTopZ))
+		{
+			CHECK(near(rafter.endBound.offset - rafter.startBound.offset,
+					   rafter.endElevation - rafter.elevation));
+		}
+	}
+}
+
 // --------------------------------------------------------------------------
 // - girderWidthAt: 支持点の真下の軒桁から桁幅を引く（M7 で横架材が入って有効になった）
 // ---------------------------------------------------------------------------
@@ -668,6 +717,8 @@ TEST(rafters_are_deterministic)
 		CHECK(near(first[i].start.y, second[i].start.y));
 		CHECK(near(first[i].elevation, second[i].elevation));
 		CHECK(near(first[i].endElevation, second[i].endElevation));
+		CHECK(near(first[i].startBound.offset, second[i].startBound.offset));
+		CHECK(near(first[i].endBound.offset, second[i].endBound.offset));
 	}
 }
 
