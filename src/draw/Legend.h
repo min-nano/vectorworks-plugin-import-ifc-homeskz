@@ -6,6 +6,19 @@
 //	**そのシートレイヤの上**に VW 標準の "GraphicLegend" PIO で置き、ユーザーが VW 側で
 //	用意したグラフィック凡例スタイルを関連付ける。
 //
+//	【そのシートのビューポートでフィルタする】凡例に並ぶのは**そのシートのビューポートに
+//	映っているシンボルだけ**にする（＝OIP の「ビューポートでフィルタ…」を取り込み時に
+//	済ませる）。これを設定する API は SDK にも VectorScript にも無く、**凡例にぶら下がる
+//	データオブジェクトのタグ付きデータ**に保存されている——実機のバイト列で突き止めた
+//	（経緯と読み方は docs/DEV-NOTES.md「グラフィック凡例」）。書き込みに要るのは 4 つ:
+//	  * 容れ物 `'GrLg'`（0x47724C67。**データオブジェクトのタグ `'DMDT'` ではない**——
+//	    あれは入れ物の入れ物で、本当の容れ物 ID は中身の +86 に入っている）
+//	  * 型 15（`kTaggedDataObjectRefArrayTypeID` ＝ オブジェクト参照の配列）
+//	  * タグ 5
+//	  * 値＝フィルタ先ビューポートの `GetObjectInternalIndex`
+//	`ISDK::TaggedDataCreate` ＋ `TaggedDataSet` で書き、**`ResetObject` より前**に済ませる
+//	（凡例の作り直しでセルが決まるため）。
+//
 //	【ビューポート注釈ではない】データタグ（draw/Tag）はビューポートの注釈空間に入るが、
 //	凡例は**シートレイヤに直接置く**（＝用紙の上に載る）。したがって位置は用紙座標で、
 //	ビューポートの中身とは無関係に決まる。
@@ -58,6 +71,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;	   // シートレイヤに置けた凡例
 		std::size_t failed = 0;	   // PIO を作れなかった
 		std::size_t widthLeft = 0; // 箱幅を書けなかった（幅 0 のまま潰れる）
+		std::size_t filtered = 0;  // そのシートのビューポートでフィルタできた
+		std::size_t filterLeft = 0; // フィルタを書けなかった（文書中の全シンボルが並ぶ）
 		bool styleMissing = false; // 命令のスタイルが文書に無かった（中身が空になる）
 
 		// 実際に関連付けたスタイル（重複なし）。**置き終えた後に 1 つずつ
@@ -76,8 +91,12 @@ namespace HomeskzIfcImport::draw
 	// 凡例 1 つをシートレイヤの上に置く。置けたら true を返し、内訳を counts へ積む
 	// （複数のシートぶんを 1 つの counts へ積んでよい）。**カレントレイヤをそのシートレイヤへ
 	// 移す**（PIO はカレントレイヤに入るため）ので、呼び出し側は必要なら後で戻すこと。
+	//
+	// filterViewport には**そのシートに載せたビューポート**を渡す（nil なら絞り込まない）。
+	// 凡例はそのビューポートに映っているシンボルだけを並べる（ヘッダ冒頭「そのシートの
+	// ビューポートでフィルタする」）。
 	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::LegendCommand& command,
-						 LegendCounts& counts);
+						 LegendCounts& counts, MCObjectHandle filterViewport);
 
 	// 置いた凡例の中身をスタイルから流し込む。**すべての凡例を置き終えてから 1 回だけ**
 	// 呼ぶ（使ったスタイルごとに UpdateStyledObjects を 1 回。ヘッダ冒頭）。

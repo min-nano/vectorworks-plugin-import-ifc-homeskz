@@ -385,23 +385,37 @@ ISDK にシンボルを配置する呼び出しは無く（在るのは `CreateS
   グループ（`type=11`）＋ `GraphicLegendFrame`（＋画像は `GraphicLegendImage` か
   **画像描画用のビューポート `type=122`**）で、**UUID を値に持つレコード欄は 1 つも無い**。
   ——ここまでで per-instance の設定を置く「普通の場所」は出尽くした。
-- **保存先は補助オブジェクト（aux list）だった。** フィルタ済みの凡例と未フィルタの凡例を
-  オブジェクト変数の総なめで見比べると、**違うのは `ovFirstAuxObject`（703）だけ**——
-  フィルタを掛けた方は補助オブジェクトの先頭が**データオブジェクト（`type=76`）**で、
-  掛けていない方は選択群のグループ（`type=11`）だった。703 のヘッダの但し書きは
-  "MCObjectHandle, read/write : used to manipulate the Aux list - **Public for VS**"。
-  * したがって**VectorScript でも連鎖はたどれる**（「補助オブジェクトは VS から触れない」は
-    誤り）。ただし**データオブジェクトの中身（バイト列）は VS からは読めない**ので、
-    タグと中身を見るには dev ビルドの一時診断が要る。
-  * SDK 側の道具は揃っている: `FindDataObject(owner, tag)`（**タグ `'****'` で任意の
-    データオブジェクトに当たる**）・`NextDataObject`・`NewDataObject(attachTo, tag, size)`・
-    `AttachAuxObject`。**`ModifySlab` のときの `type=121` と違い、データオブジェクトは SDK で
-    作れる型**（"Graphsoft reserves all tags consisting entirely of lowercase letters"）なので、
-    タグと中身の作り方さえ分かれば再現できる見込みがある。
-  * 中身が VWFC のタグ付きデータ（`VWFC/Tools/TaggedData.h` の `CTaggedDataContainer`）なら、
-    バイト列を手で解く必要は無い——**オブジェクト参照の配列**を持てる型
-    （`eTaggedDataType_InternalIndex` ＝ `kTaggedDataObjectRefArrayTypeID`）があり、
-    「フィルタ先のビューポートの並び」はいかにもこれで持たれていそう。
+- **「ビューポートでフィルタ」の保存先は、凡例にぶら下がるデータオブジェクトのタグ付きデータ**
+  だった。実機のダンプで次の順に潰して突き止めた（もう一度やらないこと）:
+  * パラメトリックレコード … ✗（フィルタの前後で変わるのは `BoxWidth` だけ＝細くなった結果）
+  * 関連（association）… ✗（フィルタ済みでも 0。ビューポート側の 3 件は断面ビューポート固有）
+  * 凡例の中の図形 … ✗（セルは group ＋ `GraphicLegendFrame` ＋ 画像で、UUID を持つ欄は無い）
+  * オブジェクト変数 … **703 だけが違った**（`ovFirstAuxObject`。"read/write : used to
+    manipulate the Aux list - Public for VS"）＝**補助オブジェクトの連鎖**
+- **読み方（実機のバイト列）。** `MCObjectHandle` は `GSHandle`＝`char**` なので、参照外しで
+  そのまま中身が読める（大きさは `GSGetHandleSize`）。フィルタを掛けた凡例の先頭の補助
+  オブジェクトはこうなっていた:
+
+  | オフセット | 中身 |
+  | --- | --- |
+  | +80 | `54 44 4d 44` ＝ データオブジェクトのタグ `'DMDT'`（リトルエンディアン） |
+  | +86 | `67 4c 72 47` ＝ **本当のタグ付きデータの容れ物 ID `'GrLg'`**（Graphic Legend） |
+  | +96 | `05 00` ＝ タグ 5 |
+  | +108 | `0f 00` ＝ 型 15（`kTaggedDataObjectRefArrayTypeID`） |
+  | +110 | `01 00` ＝ 要素数 1 |
+  | +114 | `c0 01 00 00` ＝ 448 ＝ **フィルタ先ビューポートの `InternalIndex`** |
+
+  **`'DMDT'` は「入れ物の入れ物」**で、`ISDK::TaggedData*` に渡すべき容れ物 ID は +86 の方。
+  ここを取り違えると総なめしても 1 件も返らない（最初はそれで空振りした）。同じ構造の
+  補助オブジェクトが 12 個ぶら下がっていて、+86 は `'ptd_'` `'rwtt'`（SDK ヘッダの
+  `kTaggedDataContainerNNA_Internal*` そのもの）や `'GrLe'` `'modl'` など。`'FSTL'` は
+  文字スタイル（12pt ＝ 4.2333mm の double）で無関係。
+- **書き方。** `TaggedDataCreate(legend, 'GrLg', 15, 5, 1)` ＋
+  `TaggedDataSet(legend, 'GrLg', 15, 5, 0, &GetObjectInternalIndex(viewport))` を
+  **`ResetObject` より前**に呼ぶ（実装は `draw/Legend` の `ApplyViewportFilter`）。
+  `'GrLg'` は多文字リテラルを避けて `0x47724C67` と書く。
+  **`ModifySlab` のときの `type=121` と違い、データオブジェクトは SDK で扱える**ので、
+  UI と同じ状態を作れる。
 
 ### Undo（取り消し）
 
