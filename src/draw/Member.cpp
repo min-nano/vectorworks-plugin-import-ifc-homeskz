@@ -73,9 +73,6 @@ namespace HomeskzIfcImport::draw
 		// プラグインスタイル名（VW 実機の登録名に一致させる）。
 		const TXString kMemberStyle("木質構造材_横架材");
 
-		// 構造用途（横架材）。ポップアップはキーで保持されるため数値文字列。
-		constexpr const char* kStructuralUseBeam = "1";
-
 		// パスから取れた部材長（OIP「スパン」）。**書くためではなく読み戻して確かめるため**の
 		// 名前で、0 のままなら PIO がパスの長さを取れていない＝画面に何も描かれない。
 		constexpr const char* kFieldSpan = "Span";
@@ -119,7 +116,9 @@ namespace HomeskzIfcImport::draw
 			spec.profile = profile;
 			spec.memberId = member.memberId;
 			spec.drawClass = member.drawClass;
-			spec.structuralUse = kStructuralUseBeam;
+			// 構造用途（横架材）。ポップアップのキーは命令セットの語彙なので core が持つ
+			// （柱・小屋束・垂木と同じ置き場所。core/Document.h）。
+			spec.structuralUse = core::kStructuralUseBeam;
 			spec.width = member.width;
 			spec.depth = member.height;
 			spec.axisAlign = StructuralAxisAlign::TopCentre; // 命令の基準点（天端中央）と一致

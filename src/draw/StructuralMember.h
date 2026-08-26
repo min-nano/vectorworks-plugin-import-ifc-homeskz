@@ -71,11 +71,13 @@ namespace HomeskzIfcImport::draw
 
 	// 断面基準点（PIO の AxisAlign）。パスが断面のどこを通るかを決めるので、**呼び出し側が
 	// 渡す断面矩形の置き方と必ず一致させる**（天端中央なら原点が上辺中央、中央なら原点が
-	// 断面中心）。値は構造材ツールのポップアップのキー（DrawStructuralMember 内で変換）。
+	// 断面中心、中下なら原点が下辺中央）。値は構造材ツールのポップアップのキー
+	// （DrawStructuralMember 内で変換）。
 	enum class StructuralAxisAlign
 	{
-		TopCentre, // 天端中央（横架材。パスは天端中央線）
-		Centre,	   // 中央（柱。パスは断面中心を通る鉛直線）
+		TopCentre,	  // 天端中央（横架材。パスは天端中央線）
+		Centre,		  // 中央（柱。パスは断面中心を通る鉛直線）
+		BottomCentre, // 中下（垂木。パスは下面中央線＝屋根面が通る線）
 	};
 
 	// 構造材 1 本ぶんの描画仕様。path / profile は呼び出し側が用意する（下記の CreatePath と
@@ -86,9 +88,11 @@ namespace HomeskzIfcImport::draw
 		MCObjectHandle profile = nil; // 断面プロファイルのグループ（空は不可）
 		std::string memberId;		  // 構造材 ID（OIP の「構造材 ID」）
 		std::string drawClass;		  // クラス名（空ならクラスを割り当てない）
-		std::string structuralUse; // 構造用途のキー（横架材="1" / 柱="4" / 小屋束="5"）
-		double width = 0.0;		   // 断面幅（主幅。mm）
-		double depth = 0.0;		   // 断面せい（主せい。mm）
+		// 構造用途のキー。値の定義は core/Document.h（kStructuralUseBeam ほか）で、
+		// 横架材・柱・小屋束・垂木がある。
+		std::string structuralUse;
+		double width = 0.0; // 断面幅（主幅。mm）
+		double depth = 0.0; // 断面せい（主せい。mm）
 		StructuralAxisAlign axisAlign = StructuralAxisAlign::TopCentre;
 		core::StoryBoundCommand startBound; // 始端（柱は下端）の高さ基準
 		core::StoryBoundCommand endBound;	// 終端（柱は上端）の高さ基準
