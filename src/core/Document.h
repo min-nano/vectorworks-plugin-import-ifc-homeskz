@@ -64,16 +64,23 @@ namespace HomeskzIfcImport::core
 	inline constexpr const char* kLevelFloorPost = "床束";
 
 	// 構造用途（構造材ツールのポップアップのキー）。**命令セットの語彙なのでここが唯一の
-	// 定義**で、ColumnCommand::structuralUse に入る値がこれになる。parse/Column.h は
-	// 読みやすい名前で再公開するだけ（レベル種別名と同じ扱い）。
+	// 定義**で、ColumnCommand::structuralUse に入る値と、要素ごとに固定の用途——横架材
+	// （draw/Member）・垂木（draw/Rafter）——がこれになる。parse/Column.h は読みやすい名前で
+	// 再公開するだけ（レベル種別名と同じ扱い）。
 	//
 	// core が持つ理由: 記号 PIO（Extensions/ExtColumnMark）は、対象レイヤの構造材を
 	// **この値で**柱／小屋束に見分ける。PIO は SDK 側のコードなので parse/ を include
 	// できず（依存の向き）、かつては "4" / "5" を自前で書き写していた——parse 側で値を
 	// 変えると記号が黙って何も描かなくなる形だった。両フェーズが見てよい唯一の置き場が
 	// ここ（CLAUDE.md「両者をつなぐのは core/Document.h だけ」）。
+	//
+	// 値は OIP のポップアップの**並び順**（`<自動>` を 0 とする 0 始まりの索引）。実機の
+	// ドロップダウンを開いて確かめた全 17 項目は docs/DEV-NOTES.md「プラグインオブジェクト
+	// （PIO）」の表にある（ここには本プラグインが使うものだけを置く）。
+	inline constexpr const char* kStructuralUseBeam = "1"; // 梁（土台・梁・桁・母屋…）
 	inline constexpr const char* kStructuralUseColumn = "4";   // 柱（管柱・通し柱）
 	inline constexpr const char* kStructuralUseKoyazuka = "5"; // 小屋束
+	inline constexpr const char* kStructuralUseRafter = "8";   // 垂木
 
 	// 通り芯（グリッド）1 本の描画命令。draw/Grid がこれを GridAxis オブジェクトへ変換する
 	// （docs/DEV-NOTES.md M1）。
@@ -216,16 +223,24 @@ namespace HomeskzIfcImport::core
 		StoryBoundCommand bound;
 	};
 
-	// 垂木（軸組ツール FramingMember、部材種別 rafter）を描く命令。draw/Rafter がこれを軸組
-	// ツールへ変換する（docs/DEV-NOTES.md M6）。垂木はホームズ君 IFC に一切出力されないため、
-	// **屋根版（IfcSlab の屋根面）の勾配・外形から導出**した結果がこの命令になる
-	// （parse/Rafter.h 参照）。
+	// 垂木（構造材ツール StructuralMember、構造用途＝垂木）を描く命令。draw/Rafter がこれを
+	// 構造材オブジェクトへ変換する（docs/DEV-NOTES.md M6・M15）。垂木はホームズ君 IFC に一切
+	// 出力されないため、**屋根版（IfcSlab の屋根面）の勾配・外形から導出**した結果がこの命令に
+	// なる（parse/Rafter.h 参照）。
 	//
 	// 【高さと両端の持ち方】start は**軒側＝支持点**（屋根面が横架材天端／軒高の Z レベルと
-	// 交わる点＝受ける軒桁の芯線の真上）、end は**棟側**（高い端）。elevation /
-	// endElevation はそれぞれの天端 Z（絶対値）。描画フェーズはこの 2 点と両端 Z から
-	// 水平投影長・平面方位角・勾配（pitch）を求める。命令の高さは屋根面由来の絶対 Z なので、
-	// 配置先レイヤ（"n-垂木"）のレベルのオフセットには依存しない。
+	// 交わる点＝受ける軒桁の芯線の真上）、end は**棟側**（高い端）。elevation / endElevation
+	// はそれぞれ**下面**の絶対 Z（屋根面＝垂木下面がその点を通る高さ。断面基準点が中下＝
+	// 下面中央なので、この Z がそのまま部材の基準になる）。
+	//
+	// 【実際の材端は軒先で、start ではない】start は支持点なので、軒側へは差し込み
+	// （embedment）＋軒の出（overhang）だけ材が伸びている。**描画のパスはその軒先から棟まで**で、
+	// 軒先の位置・高さ・バインド offset は rafterEaveEnd が返す（軸組ツール時代は overhang /
+	// bearinginset パラメータが持っていた伸び。構造材ツールにその口は無いのでパスで表す）。
+	//
+	// 【傾斜はバインドの offset 差だけで表す】描画側は**パスに Z 成分を持たせない**
+	// （両端とも軒先の Z）。構造材ツールの高さバインドはパス由来の部材長へ加算されるため、
+	// パスにも傾斜を持たせると二重に適用される（横架材の登り梁と同じ。draw/Member.cpp 冒頭）。
 	//
 	// フィールド:
 	//   layer                            … 配置先デザインレイヤ名（"n-垂木"）
@@ -234,11 +249,14 @@ namespace HomeskzIfcImport::core
 	//   height                           … 断面せい（既定 45mm）
 	//   start                            … 軒側＝支持点の平面座標（センタリング済み）
 	//   end                              … 棟側の平面座標（同上）
-	//   elevation                        … 支持点の天端 Z（絶対値＝横架材天端／軒高）
-	//   endElevation                     … 棟側の天端 Z（絶対値）
+	//   elevation                        … 支持点の下面 Z（絶対値。屋根面が横架材天端／軒高と
+	//                                      交わる高さ）
+	//   endElevation                     … 棟側の下面 Z（絶対値）
 	//   overhang                         … 軒の出（壁外面から軒先までの水平距離）
 	//   embedment                        … 支持部分の差し込み（受ける軒桁の桁幅の半分）
-	//   label                            … 仕様ラベル（"45×45@455"）
+	//   label                            … 仕様ラベル（"45×45@455"）。構造材 ID に入れる
+	//   startBound                       … 支持点の高さ基準（垂木レベル＋下面 Z との差）
+	//   endBound                         … 棟側の高さ基準（同上）
 	struct RafterCommand
 	{
 		std::string layer;
@@ -252,7 +270,30 @@ namespace HomeskzIfcImport::core
 		double overhang = 0.0;
 		double embedment = 0.0;
 		std::string label;
+		StoryBoundCommand startBound;
+		StoryBoundCommand endBound;
 	};
+
+	// 垂木の**軒先側の材端**（＝実際に描かれる下端。支持点 start より軒側へ 差し込み ＋
+	// 軒の出 だけ出た点）。draw/Rafter がパスの始端とその高さ基準に使う。
+	//   point  … 平面座標（センタリング済み。start と同じ座標系）
+	//   z      … 下面の絶対 Z（勾配ぶん start より下がる）
+	//   offset … startBound と同じレベルから見た offset（＝ startBound.offset − 下がったぶん）
+	struct RafterEaveEnd
+	{
+		Vec2 point;
+		double z = 0.0;
+		double offset = 0.0;
+	};
+
+	// 垂木の軒先側の材端を求める。支持点 start から end と**逆向き**へ（overhang ＋
+	// embedment）だけ水平に伸ばし、その水平距離ぶん勾配（両端の下面 Z の差 ÷ 水平投影長）を
+	// 下げた点を返す。伸びが 0（軒桁に乗らない垂木）なら start そのものを返す。
+	//
+	// **core に置く理由**: SDK を触らない純計算で、無 SDK テストで検証できるため
+	// （raiseModifierTop・desiredStoryLayerOrder と同じ立ち位置。CLAUDE.md「テスト方針」:
+	// draw から切り離せるロジックは core へ寄せる）。
+	RafterEaveEnd rafterEaveEnd(const RafterCommand& rafter);
 
 	// 野地板（屋根の下地合板）を屋根面オブジェクト（Roof Face）として描く命令。draw/Roof がこ
 	// れを屋根面オブジェクトへ変換する（ISDK に屋根作成の一連の呼び出しが無いため、VWFC の
@@ -484,7 +525,7 @@ namespace HomeskzIfcImport::core
 
 	// 地中梁の下に敷く床付け（捨てコン・砕石）1 区間。地中梁（ModifierCommand::beddings）に
 	// ぶら下がり、**押し出しの向き（azimuth）と断面の座標系は地中梁と共有**して、断面と
-	// 押し出し方向の区間だけが違う（docs/DEV-NOTES.md M16「基礎の床付け」）。draw/Footing は
+	// 押し出し方向の区間だけが違う（docs/DEV-NOTES.md M17「基礎の床付け」）。draw/Footing は
 	// 地中梁の可視ソリッドと同じ手順で 3D ソリッドとして置く。
 	//
 	// 【なぜ底盤の構成層にできないか】底盤（スラブ）の構成層は**一様な厚みの水平な層**しか
@@ -526,7 +567,7 @@ namespace HomeskzIfcImport::core
 	// 決まっている**ので、片方だけ変えてはいけない（parse/Footing の groundBeamModifier と
 	// draw/Footing の ModifierPrism）。
 	//
-	// 【床付け（beddings）】地中梁の下には捨てコン・砕石を敷く（M16）。同じ押し出しの中で
+	// 【床付け（beddings）】地中梁の下には捨てコン・砕石を敷く（M17）。同じ押し出しの中で
 	// 断面と区間だけが違うので、プリズム 1 本ぶんの origin / azimuth を共有する入れ子に
 	// して持つ（平らに並べて番号で突き合わせない。CLAUDE.md「命令セット」）。並びは
 	// **区間ごとに 上から**（捨てコン → 砕石）。床付けを求められなかった地中梁では空になる。
@@ -576,7 +617,7 @@ namespace HomeskzIfcImport::core
 	// 底盤天端レベル（面積最大の天端 Z）の差（主たる底盤は ≈0、独立基礎底盤等はずれる）。
 	//
 	// 【スラブ構成】components は上から コンクリート（thickness）＋ 砕石。**底盤の下は
-	// 砕石 1 層**で、その厚みは捨てコンと砕石を合わせた厚み（M16。捨てコンは地中梁の下
+	// 砕石 1 層**で、その厚みは捨てコンと砕石を合わせた厚み（M17。捨てコンは地中梁の下
 	// だけに敷くので、底盤の下では砕石がその厚みまで受け持つ）。構成は**そのスラブへ直接**
 	// 与える（スタイルは作らない・当てない。draw/DrawUtil.h「複合オブジェクトの構成」）。
 	//
@@ -805,6 +846,12 @@ namespace HomeskzIfcImport::core
 	// 描画側が一覧を使う経路が無い（使われない枠を先に作らない。ColumnMarkCommand が記号サイズ
 	// を持たないのと同じ）。ただし**実際にアンカーボルトを配置したときだけ基礎伏図に凡例を出
 	// す**判断は解析側（parse/Sheet）が持つので、空の凡例が図面に出ることはない。
+	//
+	// 【どのビューポートで絞るかも持たない】凡例はさらに**そのシートのビューポートで
+	// フィルタ**され、その図に映っているシンボルだけが並ぶ（draw/Legend の
+	// ApplyViewportFilter）。絞り先は「このシートのビューポート」で構造から決まり、描画側が
+	// 同じループで持っているので、命令に持たせる必要が無い（凡例を SheetCommand の中に
+	// 入れ子で置いた効き目がここにも出ている）。
 	struct LegendCommand
 	{
 		std::string style;

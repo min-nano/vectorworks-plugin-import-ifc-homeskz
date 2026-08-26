@@ -17,10 +17,16 @@
 #	していないオブジェクトのダンプを見比べる**以外に突き止めようが無い（`ModifySlab` の
 #	噛み合わせも断面ビューポートの範囲も、同じやり方で決着した＝「打ち切った調査」）。
 #
-#	【分かっていること】「ビューポートでフィルタ」は**パラメトリックレコードには載らない**
-#	（実機のダンプで確認済み。フィルタの前後で 36 フィールド中 `BoxWidth` しか変わらない＝
-#	それは凡例が細くなった結果にすぎない）。したがって次に見るのは関連（association）と
-#	PIO の中身で、それがこの版で増えた 2 節。
+#	【分かっていること】「ビューポートでフィルタ」の保存先は、実機のダンプで次まで潰れている。
+#	  * **パラメトリックレコードには載らない**（フィルタの前後で 36 フィールド中 `BoxWidth`
+#	    しか変わらず、それは凡例が細くなった結果にすぎない）。
+#	  * **関連（association）でもない**（フィルタ済みの凡例で `associations=0`。ビューポート側に
+#	    出る `associations=3` は断面ビューポート固有で、凡例とは無関係）。
+#	  * **凡例の中の図形が UUID で持っているのでもない**（セルは group ＋ `GraphicLegendFrame`
+#	    ＋ 画像用のビューポートで、UUID を値に持つレコード欄は 1 つも無い）。
+#	そこでこの版は**フィルタ済みの凡例と、していない凡例を機械的に見比べる**——オブジェクト
+#	変数の総なめと中身の型ヒストグラムを 2 枚ぶん並べて出す。ここも空振りなら、残るのは
+#	補助オブジェクト（`FirstAuxObject`）で、それは VS から触れないので dev ビルドの一時診断へ。
 #
 #	【使い方】
 #	  1. VW で ツール > スクリプト > VectorScript 編集… に Python スクリプトとして貼る。
@@ -39,9 +45,9 @@ import time
 
 import vs
 
-# オブジェクト変数（1〜）の総なめ。既定は False ── 呼び出しが 1 万回を超えるので、
-# レコード・関連・中身で足りないと分かってから True にする。
-DUMP_OBJECT_VARIABLES = False
+# オブジェクト変数（1〜）の総なめ。**掛けるのは見比べる 2 枚だけ**なので既定で行う
+# （1 枚あたり 1 万回強の呼び出しで数秒）。
+DUMP_OBJECT_VARIABLES = True
 OBJECT_VARIABLE_RANGE = range(1, 2200)
 
 # PIO の中身をたどる深さと、書き出す行数の上限（凡例は中に画像・枠・文字を大量に持つ）。
@@ -214,10 +220,9 @@ def _dump_viewports(out):
 	out.extend(sorted(rows))
 
 
-def _dump_object_variables(out, handle):
+def _object_variable_lines(handle):
 	"""オブジェクト変数の総なめ。既定値（0 / False / 空文字 / NULL）は落とす。"""
-	out.append("")
-	out.append("--- object variables (non-default only) ---")
+	lines = []
 	getters = (
 		("int", "GetObjectVariableInt"),
 		("bool", "GetObjectVariableBoolean"),
@@ -231,8 +236,123 @@ def _dump_object_variables(out, handle):
 			if value in (0, 0.0, False, None, "", "NULL") or _bad(value):
 				continue
 			if kind == "handle":
-				value = "%s (%s)" % (value, _describe(value))
-			out.append("%5d %-6s = %s" % (index, kind, value))
+				value = "(%s)" % _describe(value)
+			lines.append("%5d %-6s = %s" % (index, kind, value))
+	return lines
+
+
+def _child_histogram(handle):
+	"""中身の型を数え上げる。**2 枚の凡例の構造を機械的に見比べる**ための要約で、
+	フィルタで増減する図形があれば数の差として出る。"""
+	counts = {}
+	budget = [CHILD_MAX_LINES * 4]
+
+	def walk(parent, depth):
+		if depth > CHILD_MAX_DEPTH or budget[0] <= 0:
+			return
+		child = _safe("FInGroup", parent)
+		while child and not _bad(child) and budget[0] > 0:
+			budget[0] -= 1
+			key = "type=%s%s" % (_safe("GetTypeN", child), (" " + _record_name(child)).rstrip())
+			counts[key] = counts.get(key, 0) + 1
+			walk(child, depth + 1)
+			child = _safe("NextObj", child)
+
+	walk(handle, 0)
+	return ", ".join("%s x%d" % (key, counts[key]) for key in sorted(counts))
+
+
+def _custom_group_lines(handle):
+	"""PIO が持つ「もう 1 つの入れ物」たち。中身とは別に per-instance のデータが
+	紛れ込んでいないかを見る。"""
+	lines = []
+	for name in ("GetCustomObjectProfileGroup", "GetCustomObjectPath",
+				 "GetCustomObjectSelectionGroup", "GetCustomObjectWallHoleGroup"):
+		group = _safe(name, handle)
+		if not group or _bad(group):
+			lines.append("%-32s = %s" % (name, group))
+			continue
+		lines.append("%-32s = %s [%s]" % (name, _describe(group), _child_histogram(group)))
+	return lines
+
+
+# 補助オブジェクトの連鎖の先頭（`ovFirstAuxObject`。SDK ヘッダに
+# "MCObjectHandle, read/write : used to manipulate the Aux list - Public for VS" とある）。
+OV_FIRST_AUX_OBJECT = 703
+AUX_MAX = 50
+
+
+def _aux_lines(handle):
+	"""補助オブジェクトの連鎖を頭からたどる。**「ビューポートでフィルタ」の保存先はここ**
+	（フィルタ済みの凡例だけ、先頭がデータオブジェクト `type=76` になっていた）。"""
+	lines = []
+	aux = _safe("GetObjectVariableHandle", handle, OV_FIRST_AUX_OBJECT)
+	count = 0
+	while aux and not _bad(aux) and count < AUX_MAX:
+		count += 1
+		lines.append("[aux %d] %s record=%s" % (count, _describe(aux), _record_name(aux)))
+		histogram = _child_histogram(aux)
+		if histogram:
+			lines.append("         children: %s" % histogram)
+		# 付いているレコードは**全欄**出す（データオブジェクトが UUID を抱えていないか）。
+		attached = _safe("NumRecords", aux)
+		if isinstance(attached, int):
+			for index in range(1, attached + 1):
+				record = _safe("GetRecord", aux, index)
+				if not record or _bad(record):
+					continue
+				name = _safe("GetName", record)
+				fields = _safe("NumFields", record)
+				lines.append("         record[%d] %s (fields=%s)" % (index, name, fields))
+				if isinstance(fields, int):
+					for field_index in range(1, fields + 1):
+						field = _safe("GetFldName", record, field_index)
+						lines.append("           %-32s = %s"
+									 % (field, _safe("GetRField", aux, name, field)))
+		nested = _safe("GetObjectVariableHandle", aux, OV_FIRST_AUX_OBJECT)
+		if nested and not _bad(nested):
+			lines.append("         (this aux has its own aux list: %s)" % _describe(nested))
+		aux = _safe("NextObj", aux)
+	if count == 0:
+		lines.append("(補助オブジェクトなし)")
+	elif count >= AUX_MAX:
+		lines.append("… (%d 個で打ち切り)" % AUX_MAX)
+	return lines
+
+
+def _dump_comparison(out, selected):
+	"""**フィルタ済みの凡例と、していない凡例**を同じ形で並べる。1 回の実行で diff できる。"""
+	others = []
+
+	def collect(handle):
+		if _record_name(handle) == "GraphicLegend" and handle != selected:
+			others.append(handle)
+
+	_safe("ForEachObject", collect, "(T=PLUGINOBJECT)")
+
+	pairs = [("A (selected)", selected)]
+	if others:
+		pairs.append(("B (other legend)", others[0]))
+
+	out.append("")
+	out.append("--- compare: selected legend vs another legend ---")
+	for label, handle in pairs:
+		out.append("")
+		out.append("[%s] %s layer=%s width=%s" % (
+			label,
+			_describe(handle),
+			_layer_name(handle),
+			_safe("GetRField", handle, "GraphicLegend", "BoxWidth"),
+		))
+		out.append("[%s] children: %s" % (label, _child_histogram(handle)))
+		for line in _aux_lines(handle):
+			out.append("[%s] %s" % (label, line))
+		for line in _custom_group_lines(handle):
+			out.append("[%s] %s" % (label, line))
+		if DUMP_OBJECT_VARIABLES:
+			lines = _object_variable_lines(handle)
+			out.append("[%s] object variables (non-default): %d" % (label, len(lines)))
+			out.extend("[%s]   %s" % (label, line) for line in lines)
 
 
 def main():
@@ -261,10 +381,7 @@ def main():
 
 	_dump_associations(out, handle, "associations of the selected object")
 	_dump_children(out, handle)
-
-	if DUMP_OBJECT_VARIABLES:
-		_dump_object_variables(out, handle)
-
+	_dump_comparison(out, handle)
 	_dump_legends(out, handle)
 	_dump_viewports(out)
 

@@ -71,9 +71,13 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kProfileShapeRectangle = "Rectangle";
 		// 部材種別は横架材（梁）・柱とも "2"（種別の違いは構造用途＝StructuralUse の方に出る）。
 		constexpr const char* kMemberTypeStructural = "2";
+		// 断面基準点は 3×3 グリッドを 0 始まり・行優先（上段 0,1,2 / 中段 3,4,5 / 下段
+		// 6,7,8）で並べたキー。天端中央＝1・中央＝4 は実機確認済みで、中下＝7 はその並びから
+		// 採った（ローカル確認の項目。docs/DEV-NOTES.md M16）。
 		constexpr const char* kAxisAlignTopCentre = "1"; // 天端中央（3×3 グリッドの上段中央）
-		constexpr const char* kAxisAlignCentre = "4";	 // 中央（同 0 始まり中央）
-		constexpr const char* kEndConditionSquare = "3"; // 直切り
+		constexpr const char* kAxisAlignCentre = "4";		// 中央（同 0 始まり中央）
+		constexpr const char* kAxisAlignBottomCentre = "7"; // 中下（同 下段中央）
+		constexpr const char* kEndConditionSquare = "3";	// 直切り
 		constexpr const char* kProfileSeriesDefault = "AISC (Inch)";
 
 		// 命令の高さ基準（StoryBoundCommand）を SDK の構造体へ写す。
@@ -90,7 +94,16 @@ namespace HomeskzIfcImport::draw
 		// 断面基準点 → 構造材ツールのポップアップのキー。
 		const char* AxisAlignKey(StructuralAxisAlign align)
 		{
-			return align == StructuralAxisAlign::Centre ? kAxisAlignCentre : kAxisAlignTopCentre;
+			switch (align)
+			{
+			case StructuralAxisAlign::Centre:
+				return kAxisAlignCentre;
+			case StructuralAxisAlign::BottomCentre:
+				return kAxisAlignBottomCentre;
+			case StructuralAxisAlign::TopCentre:
+			default:
+				return kAxisAlignTopCentre;
+			}
 		}
 	} // namespace
 

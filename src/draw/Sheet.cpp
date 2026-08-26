@@ -130,8 +130,11 @@ namespace HomeskzIfcImport::draw
 			// タグの後に置くのは、凡例がカレントレイヤをこのシートレイヤへ移すため——
 			// タグは生成したカレントレイヤに一旦入ってから注釈へ移るので、順序を逆にすると
 			// タグがシートレイヤを経由することになる（結果は同じだが、経路は素直な方がよい）。
+			// 凡例に並ぶのは**このシートのビューポートに映っているシンボルだけ**にしたいので、
+			// いま作ったビューポートを渡す（draw/Legend.h「そのシートのビューポートで
+			// フィルタする」）。
 			if (command.legend.has_value())
-				drawSheetLegend(sheetLayer, *command.legend, legends);
+				drawSheetLegend(sheetLayer, *command.legend, legends, viewport);
 			++drawn;
 		}
 

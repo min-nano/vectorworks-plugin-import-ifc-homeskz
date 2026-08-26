@@ -12,8 +12,8 @@
 //	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 //	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
-//	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み）。SDK を触らないので無 SDK テストで検証できる
-//	（CLAUDE.md「テスト方針」）。
+//	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み、rafterEaveEnd＝垂木の軒先
+//	側の材端）。SDK を触らないので無 SDK テストで検証できる（CLAUDE.md「テスト方針」）。
 //
 
 #include "core/Document.h"
@@ -74,13 +74,16 @@ namespace HomeskzIfcImport::core
 
 		// 垂木 1 本が妥当か。配置先レイヤ名・クラス名が非空で、断面（幅・せい）が正で、
 		// 平面の始点（軒側＝支持点）と終点（棟側）が縮退していないこと（縮退＝始点と終点が同
-		// じ点。判定は core/Geometry の samePoint）。elevation / endElevation / overhang /
-		// embedment は数値（double なので常に成立）。型で保証できるもの（数値であること等）
-		// は見ず、「描けない値」を弾く幾何の関門に絞る（床板と同じ方針）。
+		// じ点。判定は core/Geometry の samePoint）、そして**両端の高さ基準のレベル種別が
+		// 非空**であること（構造材ツールは両端をストーリレベルへバインドして高さを決めるので、
+		// レベル名が空だと高さが崩れる。横架材・柱と同じ関門）。elevation / endElevation /
+		// overhang / embedment は数値（double なので常に成立）。型で保証できるもの（数値で
+		// あること等）は見ず、「描けない値」を弾く幾何の関門に絞る（床板と同じ方針）。
 		bool isValidRafter(const RafterCommand& rafter)
 		{
 			return !rafter.layer.empty() && !rafter.drawClass.empty() && rafter.width > 0.0 &&
-				   rafter.height > 0.0 && !samePoint(rafter.start, rafter.end);
+				   rafter.height > 0.0 && !samePoint(rafter.start, rafter.end) &&
+				   !rafter.startBound.level.empty() && !rafter.endBound.level.empty();
 		}
 
 		// 横架材 1 本が妥当か。配置先レイヤ名・クラス名・構造材 ID が非空で、断面（幅・せい）
@@ -422,6 +425,32 @@ namespace HomeskzIfcImport::core
 		start = low - kSectionHeightMargin;
 		end = high + kSectionHeightMargin;
 		return true;
+	}
+
+	RafterEaveEnd rafterEaveEnd(const RafterCommand& rafter)
+	{
+		RafterEaveEnd eave;
+		eave.point = rafter.start;
+		eave.z = rafter.elevation;
+		eave.offset = rafter.startBound.offset;
+
+		// 支持点から軒先までの水平距離＝差し込み（支持点→壁外面）＋軒の出（壁外面→軒先）。
+		// 軒桁に乗らない垂木はどちらも 0 で、支持点がそのまま軒先（parse/Rafter.cpp）。
+		const double reach = rafter.overhang + rafter.embedment;
+		const double dx = rafter.end.x - rafter.start.x;
+		const double dy = rafter.end.y - rafter.start.y;
+		const double run = std::hypot(dx, dy);
+		if (reach <= 0.0 || run <= 0.0)
+			return eave;
+
+		// 棟へ向かう単位ベクトルの**逆向き**へ reach だけ進み、勾配（下面 Z の差 ÷ 水平投影
+		// 長）ぶん下げる。offset は同じ下がり幅ぶん startBound から引く（レベルは共通なので
+		// 差だけで済む）。
+		const double drop = (rafter.endElevation - rafter.elevation) / run * reach;
+		eave.point = Vec2{rafter.start.x - (dx / run * reach), rafter.start.y - (dy / run * reach)};
+		eave.z = rafter.elevation - drop;
+		eave.offset = rafter.startBound.offset - drop;
+		return eave;
 	}
 
 	ModifierCommand raiseModifierTop(const ModifierCommand& modifier, double bite)

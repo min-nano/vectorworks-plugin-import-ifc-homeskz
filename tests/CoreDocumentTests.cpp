@@ -496,6 +496,9 @@ namespace
 		rafter.overhang = 500.0;
 		rafter.embedment = 52.5;
 		rafter.label = "45×45@455";
+		// 高さ基準は垂木レベル。支持点は横架材天端ちょうど（offset 0）で、棟側は勾配ぶん高い。
+		rafter.startBound = core::StoryBoundCommand{0, core::kLevelTaruki, 0.0};
+		rafter.endBound = core::StoryBoundCommand{0, core::kLevelTaruki, 1000.0};
 		return rafter;
 	}
 
@@ -570,6 +573,79 @@ TEST(validate_rejects_degenerate_rafter)
 	CHECK(!core::validateDocument(document));
 }
 
+TEST(validate_rejects_rafter_without_bound_levels)
+{
+	// 構造材ツールは両端をストーリレベルへバインドして高さを決める（draw/Rafter）。
+	// レベル種別が空だと高さが崩れるので、横架材・柱と同じく命令の段階で弾く。
+	core::Document start;
+	core::RafterCommand noStart = validRafter();
+	noStart.startBound.level = "";
+	start.rafters.push_back(noStart);
+	CHECK(!core::validateDocument(start));
+
+	core::Document end;
+	core::RafterCommand noEnd = validRafter();
+	noEnd.endBound.level = "";
+	end.rafters.push_back(noEnd);
+	CHECK(!core::validateDocument(end));
+}
+
+// ---------------------------------------------------------------------------
+// - core::rafterEaveEnd（垂木の軒先側の材端＝構造材ツールのパスの始端）
+// ---------------------------------------------------------------------------
+
+TEST(rafter_eave_end_extends_beyond_the_support_point)
+{
+	// 支持点 (0, 0, 6300) から棟 (0, 3000, 7300) へ 3000mm で 1000mm 上る勾配。軒側へは
+	// 差し込み 52.5 ＋ 軒の出 500 ＝ 552.5mm 出るので、軒先は Y が −552.5、Z は勾配
+	// 1000/3000 ぶん下がって 6300 − 184.1666… になる。offset も同じだけ下がる。
+	const core::RafterEaveEnd eave = core::rafterEaveEnd(validRafter());
+	const double drop = 1000.0 / 3000.0 * 552.5;
+	CHECK(std::abs(eave.point.x - 0.0) < 1e-9);
+	CHECK(std::abs(eave.point.y + 552.5) < 1e-9);
+	CHECK(std::abs(eave.z - (6300.0 - drop)) < 1e-9);
+	CHECK(std::abs(eave.offset - (0.0 - drop)) < 1e-9);
+}
+
+TEST(rafter_eave_end_is_the_support_point_without_reach)
+{
+	// 軒桁に乗らない垂木は差し込みも軒の出も 0（start がそのまま軒先。parse/Rafter）。
+	core::RafterCommand rafter = validRafter();
+	rafter.overhang = 0.0;
+	rafter.embedment = 0.0;
+	const core::RafterEaveEnd eave = core::rafterEaveEnd(rafter);
+	CHECK(eave.point.x == rafter.start.x && eave.point.y == rafter.start.y);
+	CHECK(eave.z == rafter.elevation);
+	CHECK(eave.offset == rafter.startBound.offset);
+}
+
+TEST(rafter_eave_end_keeps_the_offset_relative_to_the_support_point)
+{
+	// startBound.offset が 0 でない（軒桁に乗らず軒先が基準レベルより下にある）垂木でも、
+	// 返る offset は「支持点の offset − 下がったぶん」。レベルは共通なので差だけで足りる。
+	core::RafterCommand rafter = validRafter();
+	rafter.startBound.offset = -120.0;
+	const core::RafterEaveEnd eave = core::rafterEaveEnd(rafter);
+	const double drop = 1000.0 / 3000.0 * 552.5;
+	CHECK(std::abs(eave.offset - (-120.0 - drop)) < 1e-9);
+	// 下面 Z（絶対値）は startBound とは独立に elevation から下がる。
+	CHECK(std::abs(eave.z - (6300.0 - drop)) < 1e-9);
+}
+
+TEST(rafter_eave_end_follows_the_plan_direction)
+{
+	// 軒先は「棟へ向かう向きの逆」。X 方向に架かる垂木では X が減る側へ出る。
+	core::RafterCommand rafter = validRafter();
+	rafter.start = core::Vec2{1000.0, 500.0};
+	rafter.end = core::Vec2{5000.0, 500.0};
+	rafter.elevation = 3000.0;
+	rafter.endElevation = 3000.0; // 水平（勾配 0）なら Z は下がらない
+	const core::RafterEaveEnd eave = core::rafterEaveEnd(rafter);
+	CHECK(std::abs(eave.point.x - (1000.0 - 552.5)) < 1e-9);
+	CHECK(std::abs(eave.point.y - 500.0) < 1e-9);
+	CHECK(std::abs(eave.z - 3000.0) < 1e-9);
+}
+
 TEST(validate_rejects_roof_with_empty_layer)
 {
 	core::Document document;
@@ -628,7 +704,7 @@ namespace
 		slab.drawClass = "04構造-01基礎-02基礎スラブ";
 		slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}, core::Vec2{3640.0, 2730.0},
 						 core::Vec2{0.0, 2730.0}};
-		// 底盤の下は砕石 1 層（厚みは捨てコン + 砕石ぶん。M16）。
+		// 底盤の下は砕石 1 層（厚みは捨てコン + 砕石ぶん。M17）。
 		slab.components = {core::ComponentCommand{"コンクリート", "z構成要素-コンクリート", 150.0},
 						   core::ComponentCommand{"砕石", "z構成要素-砕石", 130.0}};
 		slab.datum = core::SlabDatum::Top;

@@ -1634,7 +1634,7 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<ComponentCommand> foundationSlabComponents(double concreteThickness)
 	{
-		// 底盤の下は**砕石 1 層**で、厚みは捨てコンと砕石を合わせたぶん（M16。捨てコンは
+		// 底盤の下は**砕石 1 層**で、厚みは捨てコンと砕石を合わせたぶん（M17。捨てコンは
 		// 地中梁の下だけに打つので、底盤の下では砕石がその厚みまで受け持つ）。
 		return {
 			ComponentCommand{kConcreteComponentName, CLASS_COMPONENT_CONCRETE, concreteThickness},
@@ -2905,7 +2905,7 @@ namespace HomeskzIfcImport::parse
 			cmd.bound = StoryBoundCommand{0, kLevelSlabTop, topAbs - slabTopAbs};
 			commands.push_back(std::move(cmd));
 		}
-		// 統合 → 外面合わせ → 地中梁の振り分け（docs/DEV-NOTES.md M10）→ 床付け（M16）。
+		// 統合 → 外面合わせ → 地中梁の振り分け（docs/DEV-NOTES.md M10）→ 床付け（M17）。
 		// 地中梁は**単独のスラブ命令にせず**、外形の確定した底盤の modifiers へ付ける
 		// （台形断面は単一のスラブで描けない）。床付けは外周部の判定に振り分け先の底盤の外形を
 		// 使うので、**振り分けの後**でなければ求められない（parse/Footing.h 冒頭「底盤の後処理」）。

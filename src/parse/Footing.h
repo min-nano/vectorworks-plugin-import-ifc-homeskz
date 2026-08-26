@@ -40,10 +40,10 @@
 //	  3. attachGroundBeamModifiers … 地中梁（台形プリズム）を平面で最も重なる底盤へ振り分ける
 //	                                 （M10。地中梁を単独のスラブ命令にはしない）
 //	  4. applyGroundBeamBedding … 地中梁の下に敷く床付け（捨てコン・砕石）の断面を組み立てる
-//	                              （M16。外周部の判定に振り分け先の底盤の外形を使うので、
+//	                              （M17。外周部の判定に振り分け先の底盤の外形を使うので、
 //	                              3 の後でなければならない）
 //
-//	【床付け（捨てコン・砕石）は 3 通り】M16 で実際の施工に合わせて分けた。
+//	【床付け（捨てコン・砕石）は 3 通り】M17 で実際の施工に合わせて分けた。
 //	  * 底盤の下     … **砕石のみ**（厚みは捨てコン + 砕石ぶん＝kSlabBeddingThickness）。
 //	                    底盤スラブの構成層として持つ（foundationSlabComponents）。
 //	  * 地中梁の下   … 捨てコン + 砕石（IFC の底盤仕様どおりの 30 + 100）。地中梁と同じ
@@ -155,7 +155,7 @@ namespace HomeskzIfcImport::parse
 
 	// 床付け（捨てコン ＋ 砕石）の総厚。**底盤の下はこの厚みの砕石 1 層**（捨てコンは打たない）、
 	// **地中梁の下は同じ総厚を捨てコン ＋ 砕石に分ける**、**地中梁の傾斜部は法線方向にこの厚みの
-	// 砕石**（M16。ヘッダ冒頭「床付け」）。3 か所が同じ厚みを指すので定数は 1 つ。
+	// 砕石**（M17。ヘッダ冒頭「床付け」）。3 か所が同じ厚みを指すので定数は 1 つ。
 	inline constexpr double kSlabBeddingThickness =
 		kSlabLeanConcreteThickness + kSlabGravelThickness;
 
@@ -415,7 +415,7 @@ namespace HomeskzIfcImport::parse
 	alignSlabsToWallFaces(const std::vector<core::SlabCommand>& slabs,
 						  const std::vector<core::WallCommand>& walls);
 
-	// 地中梁 1 本の床付け（捨てコン・砕石）の断面を組み立てる（M16。ヘッダ冒頭「床付け」）。
+	// 地中梁 1 本の床付け（捨てコン・砕石）の断面を組み立てる（M17。ヘッダ冒頭「床付け」）。
 	// 戻りは**上から**（捨てコン → 砕石）で、地中梁の断面から床付けを求められない
 	// （天端／下端の辺が見つからない等）ときは空。start / depth は地中梁の全長で埋める
 	// （区間に切り分けるのは applyGroundBeamBedding）。

@@ -856,7 +856,7 @@ TEST(slab_commands_shape)
 		{
 			CHECK(near(cmd.components[0].thickness, cmd.thickness));
 			// 層のクラスは素材（上から コンクリート → 砕石）。**捨てコンの層は無い**——
-			// 底盤の下は砕石だけで、その厚みが捨てコン + 砕石ぶんになる（M16）。
+			// 底盤の下は砕石だけで、その厚みが捨てコン + 砕石ぶんになる（M17）。
 			CHECK_EQ(cmd.components[0].drawClass, std::string(CLASS_COMPONENT_CONCRETE));
 			CHECK_EQ(cmd.components[1].drawClass, std::string(CLASS_COMPONENT_GRAVEL));
 			CHECK(near(cmd.components[1].thickness, kSlabBeddingThickness));
@@ -1592,7 +1592,7 @@ TEST(ground_beam_tops_meet_the_slab_bottom)
 }
 
 // 床付け（捨てコン・砕石）— foundationSlabComponents / groundBeamBedding /
-// applyGroundBeamBedding（M16）
+// applyGroundBeamBedding（M17）
 // ------------------------------------------------------------------------------
 
 namespace
@@ -1707,7 +1707,7 @@ namespace
 TEST(foundation_slab_components_are_concrete_over_gravel)
 {
 	// 底盤の構成層は コンクリート + 砕石 の 2 層で、砕石の厚みは捨てコンと砕石を合わせた
-	// ぶん（M16。捨てコンは地中梁の下だけに打つ）。
+	// ぶん（M17。捨てコンは地中梁の下だけに打つ）。
 	const std::vector<core::ComponentCommand> components = foundationSlabComponents(150.0);
 	CHECK_EQ(components.size(), std::size_t{2});
 	if (components.size() != 2)
@@ -1818,7 +1818,7 @@ TEST(ground_beam_bedding_is_clipped_at_the_top_limit)
 TEST(ground_beam_bedding_never_bites_into_a_crossing_beam)
 {
 	// 直交する地中梁と取り合う区間では、傾斜部の帯を相手の下端まで切り下げる（実機で
-	// 「端部で直交する斜め部分の砕石が食い込む」と分かった。docs/DEV-NOTES.md M16）。
+	// 「端部で直交する斜め部分の砕石が食い込む」と分かった。docs/DEV-NOTES.md M17）。
 	// 実フィクスチャ全件で、床付けのどの点も他の地中梁のコンクリートの中に入らないことを見る。
 	for (const std::string& name : allFixtures())
 	{
