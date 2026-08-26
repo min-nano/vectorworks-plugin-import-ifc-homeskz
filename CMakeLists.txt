@@ -298,8 +298,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Section.cpp
 		src/draw/Sheet.cpp
 		src/draw/Tag.cpp
-		src/draw/Legend.cpp
-		src/draw/AuxProbe.cpp)
+		src/draw/Legend.cpp)
 
 	# add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])
 	#
