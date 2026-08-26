@@ -450,8 +450,8 @@ namespace HomeskzIfcImport::core
 	{
 		// スタック最下段（背面）へ回すレベル種別か。床（FL）・野地板のレイヤは伏図
 		// ビューポートで柱・梁を覆い隠さないよう全ストーリ分をまとめて背面へ集める（野地板
-		// レベルは M6 で追加済み。この並びの適用先は desiredStoryLayerOrder の doc コメント
-		// 参照）。
+		// レベルは M6 で追加済み。この並びの適用先は M13 の per-viewport 上書き。
+		// desiredStoryLayerOrder の doc コメント参照）。
 		bool isBackgroundLevel(const std::string& type)
 		{
 			return type == kLevelFL || type == kLevelNojiita;

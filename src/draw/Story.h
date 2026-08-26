@@ -11,12 +11,11 @@
 //	無 SDK の core/parse ライブラリには含めない。この宣言ヘッダ自体は core::Document
 //	しか参照せず、SDK ヘッダを引き込まない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	【レイヤのスタック順について】目的は「伏図ビューポートで床・野地板が柱・梁を覆い隠さない
-//	ようにする」こと。希望順の**計算**は SDK 非依存の core::desiredStoryLayerOrder が持ち
-//	（無 SDK テスト済み）、適用は 2 通りある——**本命はビューポート単位の重ね順上書き**
-//	（draw/DrawUtil の ConfigureViewport。図面のレイヤの並びを動かさない）で、下記の
-//	reorderStoryLayers は**それが図面に記録されなかったときの退避路**（draw/Sheet が
-//	1 枚目の読み戻しで判断して呼ぶ）。デザインレイヤ自体は命令の levels の並び順に生成される。
+//	【レイヤのスタック順について】並べ替えの目的は「伏図ビューポートで床・野地板が柱・梁を
+//	覆い隠さないようにする」こと。希望順の**計算**は SDK 非依存の
+//	core::desiredStoryLayerOrder が持ち（無 SDK テスト済み）、**適用は下記の
+//	reorderStoryLayers ただ 1 か所**が担う（デザインレイヤ自体は命令の levels の並び順に
+//	生成される）。
 //
 
 #pragma once
@@ -39,25 +38,22 @@ namespace HomeskzIfcImport::draw
 	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress);
 
 	// デザインレイヤのスタック順を希望順（core::desiredStoryLayerOrder）へ並べ替える。
-	// 動かせたレイヤ数を返す。**ビューポート単位の重ね順上書きが効かなかったときの退避路**で、
-	// 効く図面では 1 度も呼ばれない（判断と呼び出しは draw/Sheet の drawSheets）。
+	// 動かせたレイヤ数を返す。
 	//
-	// 【なぜ要るか】伏図ビューポートは、ビューポート単位の上書きが無ければ**ドキュメントの
-	// レイヤ重ね順で描かれる**ので、床（"n-FL"）・野地板が柱・梁より前面にあると覆い隠して
-	// しまう。希望順は「共通（通り芯）を最前面 → 最上階→最下階 → 床・野地板は最背面」で、
-	// 計算そのものは SDK 非依存の core::desiredStoryLayerOrder が持つ（無 SDK テスト済み）。
+	// 【なぜ要るか】伏図ビューポートは**ドキュメントのレイヤ重ね順で描かれる**ので、
+	// 床（"n-FL"）・野地板が柱・梁より前面にあると覆い隠してしまう。希望順は
+	// 「共通（通り芯）を最前面 → 最上階→最下階 → 床・野地板は最背面」で、計算そのものは
+	// SDK 非依存の core::desiredStoryLayerOrder が持つ（無 SDK テスト済み）。
 	//
-	// 【なぜ退避路なのか】これは**ユーザーの図面のレイヤの並びを組み替えてしまう**——伏図の
-	// ためにナビゲーションパレットの並びが変わるのは副作用として大きい。だからまず
-	// ビューポート単位の上書きを試し、記録されなかったときだけここへ落ちる
-	// （M13 の 1 回目は上書きが空振りしたため、当時はこちらが唯一の手段だった）。
+	// 【ドキュメントの重ね順を並べ替える（per-viewport の上書きではない）】
+	// **ISDK には InsertObjectAfter / InsertObjectBefore があり、レイヤは図面のオブジェクト
+	// 列に並んでいる**（VectorScript の HMoveForward に当たるのがこの 2 つ）ので、列そのものを
+	// 組み替える。ビューポート単位の上書き（SetViewportLayerStackingOverride）は**実機で
+	// 効かない**——呼び出しは true を返すのに GetNumViewportLayerStackingOverrides は 0 のまま
+	// で、OIP も「順序を上書き: いいえ」だった（docs/DEV-NOTES.md「打ち切った調査」）。
 	//
-	// 【並べ替えの手段】**ISDK には InsertObjectAfter / InsertObjectBefore があり、レイヤは
-	// 図面のオブジェクト列に並んでいる**（VectorScript の HMoveForward に当たるのがこの 2 つ）
-	// ので、列そのものを組み替える。
-	//
-	// **ビューポートを作る前に呼ぶこと。** ビューポートは生成時の重ね順で描かれるので、
-	// 並べ替えを後にすると既にある図には反映されない（drawSheets は退避路へ落ちた 1 枚目の
-	// ビューポートを作り直す）。
+	// **伏図より前に呼ぶこと。** ビューポートは生成時の重ね順で描かれるので、並べ替えを後にす
+	// ると既存のビューポートへ反映されない。draw/ExecuteDocument は全要素の描画後・
+	// drawSheets の直前に呼ぶ。
 	std::size_t reorderStoryLayers(const core::Document& document);
 } // namespace HomeskzIfcImport::draw

@@ -276,57 +276,12 @@ ISDK にシンボルを配置する呼び出しは無く（在るのは `CreateS
   `VWDocument::GetDrawingHeaderFristMember` ＋ `NextObject` で辿れ、
   **`InsertObjectAfter` / `InsertObjectBefore`** が VS の `HMoveForward` に当たる。
   これがレイヤ重ね順を変える唯一の手段（`draw/Story` の `reorderStoryLayers`）。
-- **ビューポート単位の重ね順上書き（`SetViewportLayerStackingOverride`）は 1 回目の実装で
-  効かなかった**（呼び出しは true を返すのに `GetNumViewportLayerStackingOverrides` は 0 の
-  まま・OIP も「順序を上書き: いいえ」・実機 2 周で「設定 33 件・記録 0 件」）。ただし
-  **当時の呼び方には少なくとも 3 つの誤りがあった**ので、「SDK からこの機能に触れない」と
-  までは言えない。SDK ヘッダを読み直して分かったことは次のとおり:
-    - 上書きは**種類ごとに別の族**で、`CreateViewportLayerOverride` は**レイヤの色・不透明度**
-      の上書き（`SViewportLayerOverride` は `fFillFore` / `fPenFore` / `fPercentOpacity`）。
-      重ね順とは無関係で、1 回目はこれを先に呼んでいた。
-    - 重ね順の族（`GetNum…` / `Get…Layer` / `Get…` / `Set…` / `Remove…`）にだけ **`Create…` が
-      無い**。つまり `Set…` が記録の作成も兼ねる建て付けで、事前に何かを作る必要は無い。
-    - **位置は「その図に映るレイヤの中での位置」**とみて、図面の全レイヤに 0,1,2,… を振っては
-      ならない（GUI の「レイヤの重ね順を上書き」も、映っているレイヤの並べ替えとして出る）。
-      1 回目は全レイヤに通し番号を振っていた。
-    - ビューポート側の API は**レイヤをハンドルではなく `InternalIndex` で指す**
-      （`VWViewportObj::SetLayerVisibility` も索引を取る。`ISDK::SetViewportLayerVisibility`
-      だけがハンドル）。索引が正しいかは
-      `VWViewportObj::GetLayerVisibility(索引, …)` が読めるかで確かめられる。
-    - 有効/無効を切り替える**オブジェクト変数は無い**（`ObjectVariables.h` に該当なし。
-      `ovSheetSaveStackLayers` / `ovSheetStackLayersStatus` は保存ビューの「レイヤを重ねる」で
-      別物）。VectorScript にも重ね順上書きの関数は無い（`vs.py` に該当なし）ので、
-      SDK 以外に手掛かりは無い。
-  そこで**まず上書きを試し、1 枚目で 1 件も記録されなければデザインレイヤの並べ替えへ落ちる**
-  形にした（`draw/Sheet` の `drawSheets`）。
-- **位置の与え方は実機で読み出して確定した。** SDK ヘッダは `Sint32` の "stacking position"
-  としか書いておらず基点も向きも範囲も載っていないので、**GUI で「順序を上書き」を付けた
-  ビューポートを読み出して**（`draw/DrawUtil` の `ReadStackingOverrideDiagnostics`）実物を見た:
-
-  ```
-  共通=1  2-柱伏図記号=2 … 1-FL=17 … R-野地板=25  2-FL=26  2-野地板=27
-  ```
-
-  ここから 3 つ確定した:
-    1. 位置は **1 始まり**（0 は使わない）
-    2. **1 が最前面**（最背面がレイヤ枚数と同じ番号）
-    3. **図面の全デザインレイヤに位置を与える**——「その図に映るレイヤだけ」ではない。
-       GUI も上書きを ON にした時点で全レイヤぶんを記録する。
-- **1〜3 を揃えても、生成直後のビューポートには記録されない**（実測: 与えた 27 件・記録
-  0 件・レイヤ索引は妥当）。`Set…` は true を返すのに `GetNum…` が 0 のまま、という同じ
-  症状になる。GUI で上書きを付けられるのは「既にある・更新済みの」ビューポートなので、
-  **呼び出しは最後の更新の後**に置いた（`draw/DrawUtil` の `ConfigureViewport`）。
-- **有効/無効の切り替えはオブジェクト変数に無い。** `ObjectVariables.h` を `stack` と
-  `override` で全文検索して該当なし（ヒットするのは寸法の補助線 `ovDimWitnessOverride` と
-  `ovViewportLightingDevice` だけ）。ビューポートの変数は 1030〜1079 に並ぶが重ね順は無い。
-- **`GetObjectInternalIndex(レイヤ)` はビューポートの上書き API に通じる正しい索引。**
-  読み出した索引から `GetNamedLayer` 経由で作った対応表でレイヤ名が全件引けた（実測）。
-  索引が疑わしいときは `VWViewportObj::GetLayerVisibility(索引, …)` が読めるかで確かめられる
-  （表示状態はハンドル指定で書いた直後なので、索引が正しければ必ず読める）。
-- **並べ替え（退避路）はビューポート生成より前に行う**（ビューポートは生成時の重ね順で
-  描かれる）。この順序を守れば、VectorScript 版が「並べ替えても既存ビューポートに反映されず
-  手動更新が要る」と諦めていた制約は起きない。退避路へ落ちたときは 1 枚目のビューポートを
-  作り直すのがこのため。
+- **ビューポート単位の重ね順上書き（`SetViewportLayerStackingOverride`）は SDK から書けない。**
+  読み出しはできるので、これが唯一の手段だと分かっている（詳しい実測は
+  [打ち切った調査](#打ち切った調査もう一度やらないこと)）。
+- **並べ替えはビューポート生成より前に行う**（ビューポートは生成時の重ね順で描かれる）。
+  この順序を守れば、VectorScript 版が「並べ替えても既存ビューポートに反映されず手動更新が
+  要る」と諦めていた制約は起きない。
 - **レイヤ高さを取得する呼び出し（`GetLayerElevation` 相当）が無い。** 高さは命令の絶対 Z を
   そのまま渡す。レイヤ相対へ切り替えられるよう、渡す 1 か所（`draw/Rafter` の `SetOffset` /
   `draw/Roof` の `ovSlabHeight` / `draw/Member` の `kPathZ`）に名前を付けてある。
@@ -569,6 +524,51 @@ UI で手作りすると〈無限〉が既定なので、公開ヘッダに載�
 範囲はオブジェクト変数の外に保持されており、SDK からは触れない。建物の大きさから決めた
 有限範囲で確定（実用上は無限と同じ見え方になる）。
 
+### ビューポート単位のレイヤ重ね順上書き
+
+伏図の重ね順を「図面のレイヤの並びを動かさずに」与えたくて 2 度（M13 と、その後の再挑戦で）
+試したが、**`SetViewportLayerStackingOverride` は書けない**。呼び出しは毎回 true を返すのに
+`GetNumViewportLayerStackingOverrides` は 0 のままで、OIP も「順序を上書き: いいえ」。
+デザインレイヤの並べ替え（`InsertObjectAfter`）が唯一の手段。
+
+**読み出しはできる**——GUI で「順序を上書き」を付けたビューポートを
+`GetNumViewportLayerStackingOverrides` / `GetViewportLayerStackingOverrideLayer` /
+`GetViewportLayerStackingOverride` で読むと 27 件が返り、レイヤ名も引けた:
+
+```
+共通=1  2-柱伏図記号=2 … 1-FL=17 … R-野地板=25  2-FL=26  2-野地板=27
+```
+
+つまり**記録の形式は分かっている**（位置は 1 始まり・**1 が最前面**・図面の全デザインレイヤに
+振る）。それでも書けない。実機で潰した呼び方は次の 3 通りで、いずれも記録 0 件:
+
+| 位置の基点・向き | 対象 | 呼ぶ時点 | 結果 |
+| --- | --- | --- | --- |
+| 0 始まり・0 が最背面 | その図に映るレイヤだけ（5 件） | 生成直後 | 記録 0 件 |
+| 1 始まり・1 が最前面 | 全デザインレイヤ（27 件） | 生成直後 | 記録 0 件 |
+| 1 始まり・1 が最前面 | 全デザインレイヤ（27 件） | **仕上げ・更新の後** | 記録 0 件 |
+
+同時に潰した可能性:
+
+- `CreateViewportLayerOverride` は**色・不透明度**の上書きの族（`SViewportLayerOverride` は
+  `fFillFore` / `fPenFore` / `fPercentOpacity`）で、重ね順とは別物。重ね順の族にだけ
+  `Create…` が無く、`Set…` が記録の作成を兼ねる建て付けなので、事前に作るものは無い。
+- **レイヤの索引は正しい。** ビューポート側の API はレイヤをハンドルではなく `InternalIndex`
+  で指す（`VWViewportObj::SetLayerVisibility` も索引。ハンドルを取るのは
+  `ISDK::SetViewportLayerVisibility` だけ）。`GetObjectInternalIndex(レイヤ)` がその索引で
+  あることは、読み出した索引からレイヤ名が全件引けたこと＋
+  `VWViewportObj::GetLayerVisibility(索引, …)` が読めることの両方で確認した。
+- **有効/無効を切り替えるオブジェクト変数は無い。** `ObjectVariables.h` を `stack` /
+  `override` で全文検索して該当なし（ヒットは `ovDimWitnessOverride` と
+  `ovViewportLightingDevice` だけ）。ビューポートの変数は 1030〜1079 に並ぶが重ね順は無い。
+  `ovSheetSaveStackLayers` / `ovSheetStackLayersStatus` は保存ビューの「レイヤを重ねる」で別物。
+- **VectorScript にも重ね順上書きの関数が無い**（`vs.py` に `Stacking` のヒット無し）ので、
+  SDK 以外に手掛かりも無い。
+
+> **教訓**: setter の戻り値を信用しない。この族は書けなくても true を返すので、
+> **読み戻しで確かめる**しかない。同じ形の setter（`SetUseDocumentClassVis` も同様だった）に
+> 当たったら、まず GUI で作った実物を読んで「読める形式」と「書けるか」を切り分ける。
+
 ### `VWNURBSCurve` を制御点から構築する
 
 `VWNURBSCurve` は評価専用で、制御点から構築できない。**ただし `ISDK` 側に `Add3DVertex` が
@@ -640,7 +640,7 @@ UI で手作りすると〈無限〉が既定なので、公開ヘッダに載�
 | **M0** | 基盤整備 | 2 フェーズの骨組み・CMake 分割（無 SDK `HomeskzIfcCore` ＋ SDK 依存の本体）・最小 STEP リーダ・無 SDK テスト土台。手動ディスパッチ専用の CI デバッグ（`ci-debug`）もここで整備 |
 | **M1** | 通り芯 | 最初の縦切り。`IfcGridAxis` → 区間ごとに 1 本・重複除去・センタリング・X/Y 判定 → `GridAxis` PIO |
 | **M2** | 幾何の土台 | 配置行列（Gram-Schmidt で正規直交化）・押し出しソリッド・断面・boolean 辿り。描画なし＝テストのみ |
-| **M3** | ストーリ | 階・ストーリレベル・デザインレイヤ。**レイヤ重ね順**の決定箇所（M13 でデザインレイヤの並べ替えへ差し替え → その後ビューポート単位の上書きを本命・並べ替えを退避路に） |
+| **M3** | ストーリ | 階・ストーリレベル・デザインレイヤ。**レイヤ重ね順**の決定箇所（当初 per-viewport 上書きに委ねたが M13 で並べ替えへ差し替え。上書きは 2 度目の挑戦でも書けず打ち切り） |
 | **M4** | 構造クラス判定 | 部材種別 → `04構造-…` クラスの純ロジック。STEP にも SDK にも依存しない |
 | **M5** | 床板 | 形状先行①。各階 `n-FL` にスラブで床。ロフト床は床梁から領域合成、開口付き断面に対応、STEP の日本語エスケープをデコード。**床はスラブで描く**（VectorScript 版の床ツールから意図的に変更） |
 | **M6** | 屋根面・屋根組 | 形状先行②。屋根版から垂木・野地板を導出。`VWRoofFaceObj` と配置行列の作法がここで確定 |

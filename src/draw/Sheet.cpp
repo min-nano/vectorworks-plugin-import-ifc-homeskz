@@ -28,25 +28,18 @@
 //	draw/DrawUtil.h の ViewportProjection。**軸組図（draw/Section）は Keep** で、
 //	こちらだけの手当て。
 //
-//	【重ね順の決め方はここが持つ】床・野地板が柱・梁を覆わないようにする件は、
-//	**ビューポート単位のレイヤ重ね順上書き**（draw/DrawUtil の ConfigureViewport に希望順を
-//	渡す）で行う。図面のレイヤの並びを動かさないので、ユーザーのナビゲーションパレットが
-//	勝手に組み変わらない（CLAUDE.md「既存の図面リソースを…書き換えない」の趣旨）。
-//
-//	ただしこの上書きは**書き方を外すと 1 件も記録されないまま true が返る**（M13 の 1 回目・
-//	その次の 1 回目とも空振りした。位置の与え方は draw/DrawUtil の ApplyLayerStacking）。
-//	そこで**1 枚目のビューポートで記録されたかを読み戻し**、0 件なら退避路——**デザイン
-//	レイヤの並べ替え**（draw/Story の reorderStoryLayers）——へ切り替える。並べ替えは
-//	**ビューポート生成より前**でないと効かないので、そのときは 1 枚目のビューポートを作り
-//	直す。どちらに落ちたかは診断行に出る。
+//	【重ね順はここでは扱わない】床・野地板が柱・梁を覆わないようにする件は、**ドキュメントの
+//	デザインレイヤの並べ替え**（draw/Story の reorderStoryLayers）が担う。per-viewport の
+//	上書き（SetViewportLayerStackingOverride）は実機で効かなかった——呼び出しは true を
+//	返すのに GetNumViewportLayerStackingOverrides は 0 のままで、OIP も「順序を上書き:
+//	いいえ」だった——ので捨てた。**並べ替えはビューポート生成より前**に済ませる必要がある
+//	（生成時の重ね順で描かれるため。draw/ExecuteDocument の実行順）。
 //
 
 #include "PluginPrefix.h"
 #include "draw/Sheet.h"
-#include "draw/ColumnMark.h"
 #include "draw/DrawUtil.h"
 #include "draw/Legend.h"
-#include "draw/Story.h"
 #include "draw/Tag.h"
 #include "core/Document.h"
 #include "core/Progress.h"
@@ -69,21 +62,6 @@ namespace HomeskzIfcImport::draw
 		// レイヤとクラスの列挙は全シートで共通なので 1 回だけ行う（draw/DrawUtil）。
 		const ViewportSetup setup = PrepareViewportSetup();
 
-		// 希望スタック順（前面→背面）。伏図記号レイヤ（"{to}-柱伏図記号"）はストーリに属さない
-		// 独立レイヤなので topLayers として通り芯 "共通" の直下へ差し込む（draw/ColumnMark）。
-		// **どのビューポートにも同じ並びを丸ごと与える**——重ね順の上書きは「その図に映る
-		// レイヤだけ」では記録されず、図面の全デザインレイヤに位置が要る（実機で確認。
-		// draw/DrawUtil の ApplyLayerStacking）。
-		const std::vector<std::string> desiredOrder =
-			core::desiredStoryLayerOrder(document.stories, planMarkLayerNames(document));
-
-		// 【診断】いま図面にあるビューポートの重ね順上書きを読む（**書き込みは一切しない**）。
-		// **これが位置の与え方を教えてくれた**——GUI で「順序を上書き」を付けたビューポートを
-		// 読んだら "共通=1 … 2-野地板=27" と並び、1 始まり・1 が最前面・全デザインレイヤに
-		// 位置が要ることが分かった（draw/DrawUtil の ApplyLayerStacking）。上書きが安定して
-		// 効くと分かったら外してよい（それ以降は自分が付けた上書きを読み上げるだけになる）。
-		const std::string existingStacking = ReadStackingOverrideDiagnostics(desiredOrder);
-
 		// 描画の前後でカレントレイヤが変わると以降のフェーズ（軸組図＝M14）に響くので、
 		// 元のレイヤへ戻せるよう控えておく。
 		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();
@@ -95,13 +73,6 @@ namespace HomeskzIfcImport::draw
 		std::size_t classesApplied = 0;
 		// 2D/平面へ作り直せなかった枚数（＝3D の「上」に見えるビューポートの数）。
 		std::size_t missingPlanView = 0;
-		// 重ね順: ビューポート単位の上書きを試し続けてよいか（1 枚目で空振りしたら false）。
-		bool stackingPerViewport = true;
-		// 退避路（デザインレイヤの並べ替え）へ落ちたときの記録。診断行に出す。
-		bool stackingFellBack = false;
-		bool stackingIndexVerified = true;
-		std::size_t stackingRequested = 0;
-		std::size_t reorderedLayers = 0;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
 		// （渡されなければ空の表＝関連付け無しで置く。draw/Tag.h）。
 		const ObjectHandles emptyHandles;
@@ -136,7 +107,7 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			MCObjectHandle viewport = gSDK->CreateViewport(sheetLayer);
+			const MCObjectHandle viewport = gSDK->CreateViewport(sheetLayer);
 			if (viewport == nil)
 			{
 				// シートレイヤは残る（＝図面に空のシートができる）。件数を診断へ残して
@@ -145,40 +116,8 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			// 重ね順（前面→背面）。退避路へ落ちた後は空を渡す（＝上書きしない。並べ替え
-			// 済みのドキュメント順で描かれる）。
-			const std::vector<std::string> stacking =
-				stackingPerViewport ? desiredOrder : std::vector<std::string>{};
-
-			ViewportFinish finish = ConfigureViewport(viewport, sheetLayer, setup, command.viewport,
-													  ViewportProjection::Plan, stacking);
-
-			// 上書きが**1 件も記録されなかった**ら、この VW では機能そのものが効いていない。
-			// 退避路（デザインレイヤの並べ替え）へ 1 度だけ切り替え、このビューポートを作り
-			// 直す——ビューポートは**生成時の重ね順**で描かれるので、並べ替えを後から行っても
-			// 既にある図には反映されない（docs/DEV-NOTES.md「レイヤ・ストーリ・重ね順」）。
-			// 判断は**2 枚以上のレイヤに位置を与えたとき**だけ行う（1 枚では並べようが無く、
-			// 記録 0 件が空振りの証拠にならない）。
-			if (stackingPerViewport && finish.stackingRequested >= 2 &&
-				finish.stackingRecorded == 0)
-			{
-				stackingPerViewport = false;
-				stackingFellBack = true;
-				stackingIndexVerified = finish.layerIndexVerified;
-				stackingRequested = finish.stackingRequested;
-				reorderedLayers = reorderStoryLayers(document);
-
-				gSDK->DeleteObject(viewport);
-				viewport = gSDK->CreateViewport(sheetLayer);
-				if (viewport == nil)
-				{
-					++missingViewports;
-					continue;
-				}
-				finish = ConfigureViewport(viewport, sheetLayer, setup, command.viewport,
-										   ViewportProjection::Plan, {});
-			}
-
+			const ViewportFinish finish = ConfigureViewport(
+				viewport, sheetLayer, setup, command.viewport, ViewportProjection::Plan);
 			classesApplied += finish.classesApplied;
 			if (!finish.planViewApplied)
 				++missingPlanView;
@@ -234,21 +173,6 @@ namespace HomeskzIfcImport::draw
 				*note += "\n";
 			*note += text;
 		};
-		// 重ね順の診断（別行）。**効いたときは何も出さない**——図面のレイヤの並びが動いて
-		// いないこと自体が、ビューポート単位の上書きが効いた証拠になる。
-		if (stackingFellBack)
-		{
-			std::string text = "伏図の重ね順: ビューポート単位の上書きが図面に記録されません"
-							   "でした（与えた " +
-							   std::to_string(stackingRequested) + " 件・記録 0 件・レイヤ索引は" +
-							   (stackingIndexVerified ? "妥当" : "不正の疑い") +
-							   "）。デザインレイヤの並べ替えへ切り替えました（動かせたレイヤ " +
-							   std::to_string(reorderedLayers) + " 件）。";
-			if (reorderedLayers == 0)
-				text += "並べ替えも 0 件のため、床・野地板が柱・梁を覆います。";
-			addNote(text);
-		}
-		addNote(existingStacking);
 		addNote(tagDiagnostics("伏図", tags));
 		addNote(legendDiagnostics(legends));
 		return drawn;

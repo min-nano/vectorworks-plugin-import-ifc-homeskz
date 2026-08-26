@@ -305,7 +305,7 @@ namespace HomeskzIfcImport::draw
 		Plan, // 2D/平面（Top/Plan）へ作り直す（伏図）
 	};
 
-	// ConfigureViewport の結果。**いずれも「効かなかったこと」を呼び出し側の診断行へ
+	// ConfigureViewport の結果。**どちらも「効かなかったこと」を呼び出し側の診断行へ
 	// 出すためのもの**で、図そのものは失敗しても残る。
 	struct ViewportFinish
 	{
@@ -315,17 +315,6 @@ namespace HomeskzIfcImport::draw
 		// **書けたかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも
 		// 黙って何もしないので、「設定したつもりで効いていない」は目視では見抜けない。
 		bool planViewApplied = true;
-
-		// 重ね順の上書きを与えたレイヤ数（stackingOrder を渡さなければ 0）。
-		std::size_t stackingRequested = 0;
-		// そのうち**図面に記録された**上書きの数（GetNumViewportLayerStackingOverrides
-		// の読み戻し）。requested が 2 以上なのにこれが 0 なら、この VW では
-		// ビューポート単位の上書きが効いていない（呼び出し側が退避路を採る手掛かり）。
-		std::size_t stackingRecorded = 0;
-		// レイヤの InternalIndex がビューポートの上書き API に通じる索引だと確認できたか。
-		// **上書きが記録されなかったときに、原因が「索引が違う」のか「機能そのものが
-		// 効かない」のかを切り分けるためだけの値**（判定の方法は DrawUtil.cpp）。
-		bool layerIndexVerified = true;
 	};
 
 	// 生成済みのビューポートを命令どおりに仕上げる（表示レイヤの絞り込み → クラス表示 →
@@ -338,43 +327,10 @@ namespace HomeskzIfcImport::draw
 	// **投影の作り直しは「表示レイヤを絞った後・最後の更新の前」**に行う（上の
 	// ViewportProjection）。作り直しは更新を 1 回挟むので、レイヤを絞る前に行うと図面の
 	// 全レイヤを描くことになり、無駄に重い。順番を入れ替えないこと。
-	//
-	// 【重ね順（stackingOrder）】空でなければ、**このビューポートの中だけ**のレイヤ重ね順
-	// として与える（前面→背面の希望順。core::desiredStoryLayerOrder の結果をそのまま渡す）。
-	// 図面のレイヤの並びには触らないので、ユーザーのナビゲーションパレットが動かない——
-	// これが本命で、退避路（デザインレイヤの並べ替え＝draw/Story の reorderStoryLayers）は
-	// 記録されなかったときだけ使う。軸組図（断面）は重ね順に意味が無いので渡さない。
-	//
-	// 【与える条件は実機で 2 つ分かっている】どちらを外しても `Set…` は true を返しながら
-	// 1 件も記録されない:
-	//   * **図面の全デザインレイヤに位置が要る**（「その図に映るレイヤだけ」では駄目）。
-	//     希望順に挙がっていないレイヤは setup.layers の残りを最背面へ続ける。
-	//   * **ビューポートが出来上がってから与える**（生成直後・最初の更新より前では駄目）。
-	//     そのためこの設定だけは**最後の更新の後**に行い、記録できたらもう一度更新する。
-	// 位置の基点・向きと併せて DrawUtil.cpp の ApplyLayerStacking に書いてある。
 	ViewportFinish ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
 									 const ViewportSetup& setup,
 									 const core::ViewportCommand& command,
-									 ViewportProjection projection,
-									 const std::vector<std::string>& stackingOrder = {});
-
-	// 図面に**既にある**ビューポートから「レイヤ重ね順の上書き」を読み出して 1 行にまとめる
-	// （何も記録されていなければ空文字列）。診断専用で、図面には一切書き込まない。
-	//
-	// 【なぜ要るか】ビューポート単位の上書きは SDK の setter が黙って何もしないことがあり
-	// （M13 の 1 回目）、そのとき「SDK の書き方が悪いのか、そもそも SDK から触れない機能
-	// なのか」が分からない。**GUI で手作業で付けた上書きが SDK から読めるか**を見れば、
-	// この 2 つを切り分けられる（読めるなら書き方の問題）。ついでに**位置の向き**
-	// （0 が最前面か最背面か）も分かる——SDK ヘッダに定義が無く、実機でしか確かめられない。
-	//
-	// 取り込み 2 回目以降の図面でしか手掛かりは出ない（1 回目は上書きがまだ無い）ので、
-	// 何も見つからないのが普通。docs/DEV-NOTES.md「レイヤ・ストーリ・重ね順」参照。
-	//
-	// layerNames は「名前を出したいレイヤ」（＝希望スタック順）。読み出せるのはレイヤの
-	// InternalIndex なので、名前で出すにはこちらから対応表を渡す必要がある（索引から名前を
-	// 引く SDK 呼び出しは TXString を返し、std::string への変換規約をこのために増やしたく
-	// ない）。表に無い索引は "#<索引>" のまま出す。
-	std::string ReadStackingOverrideDiagnostics(const std::vector<std::string>& layerNames);
+									 ViewportProjection projection);
 
 	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
 	// （draw/ObjectHandles.h の ObjectHandles）は SDK 非依存のヘッダに置いてあり、
