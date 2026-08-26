@@ -44,7 +44,7 @@ namespace HomeskzIfcImport::parse
 	class Context;
 
 	// 軸組図を載せるシートレイヤのタイトルの基。**用紙 1 枚に収まらなければシートレイヤを
-	// 足す**ので（M17）、複数枚になるときは "軸組図(1)" … と連番になる
+	// 足す**ので（M18）、複数枚になるときは "軸組図(1)" … と連番になる
 	// （core::sectionSheetTitle）。何枚になるかは用紙の大きさと縮尺が決めるため、ここでは
 	// 基の文字列だけを持つ。
 	inline constexpr const char* kSectionSheetTitle = "軸組図";

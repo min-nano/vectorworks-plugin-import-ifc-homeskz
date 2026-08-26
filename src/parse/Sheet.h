@@ -112,7 +112,7 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kFoundationLegendStyle = "基礎伏図凡例";
 	inline constexpr const char* kFloorLegendStyle = "床伏図凡例";
 
-	// **凡例の配置点はここでは決めない**（M17）。用紙の大きさは描くときにシートレイヤから
+	// **凡例の配置点はここでは決めない**（M18）。用紙の大きさは描くときにシートレイヤから
 	// 読むもので解析側には分からないため、置き場所は描画側が用紙の割り付け
 	// （core::planLayout の legendTopRight＝ビューポートのために空けた右の 1 列）から決める。
 

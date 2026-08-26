@@ -330,7 +330,7 @@ namespace HomeskzIfcImport::draw
 	// 全レイヤを描くことになり、無駄に重い。順番を入れ替えないこと。
 	//
 	// scale は縮尺の分母（1/100 なら 100.0）。**用紙と建物の大きさから呼び出し側が決める**
-	// （core::planLayout / core::sectionLayout。M17）。0 以下なら縮尺には触らない
+	// （core::planLayout / core::sectionLayout。M18）。0 以下なら縮尺には触らない
 	// ——ビューポートの既定のままになる。かつてはここが「映すデザインレイヤの縮尺」を読んで
 	// 当てていたが、デザインレイヤの縮尺は用紙に対する図の大きさとは関係が無く、図が用紙から
 	// はみ出しても気付けなかった。
@@ -371,7 +371,7 @@ namespace HomeskzIfcImport::draw
 	// シートレイヤの用紙と印刷可能領域を読む。用紙が読めなければ core::kDefaultPaperSize
 	// （A3 横）で代用する（用紙が読めないだけで図を捨てない）。
 	//
-	// ★**用紙の大きさと印刷可能領域は別物**（M17）。かつては用紙の大きさだけを読み、
+	// ★**用紙の大きさと印刷可能領域は別物**（M18）。かつては用紙の大きさだけを読み、
 	// 余白は四辺 15mm と決め打ちしていたが、余白は用紙ではなく**印刷の設定**が決めるので、
 	// 仮定した瞬間に実際とずれる（狭く見積もれば図が 1 段階小さくなり、広く見積もれば
 	// 印刷で切れる）。SDK には両方がある——用紙は ovLayerSheetPaperWidth/Height（167/168）、
@@ -386,7 +386,7 @@ namespace HomeskzIfcImport::draw
 	// 返す呼び出しは無い（ObjectVariables にも位置の変数は無い。ci-debug で確認）。
 	// VWLayerObj::GetSheetOrigin() はあるが、それが用紙の中心を指すのか隅を指すのかは
 	// ヘッダからは決まらないので**使わない**——意味の分からない値を使うより、規約を 1 つ
-	// 決めて実機で確かめる方がよい（docs/DEV-NOTES.md M17「用紙の位置」）。
+	// 決めて実機で確かめる方がよい（docs/DEV-NOTES.md M18「用紙の位置」）。
 	SheetPaper SheetPaperArea(MCObjectHandle sheetLayer);
 
 	// ビューポートの外形（用紙 mm）を測る。中心と大きさを書き戻し、測れれば true。
@@ -413,7 +413,7 @@ namespace HomeskzIfcImport::draw
 	// タグは「注釈へ置いた実位置を測って目標との差だけ動かす」作りで（draw/Tag の
 	// MovePendingTags）、**その実測はビューポートが用紙のどこに在るかに影響される**。
 	// 先にビューポートを動かしてからタグを置くと、動かした分だけタグが図からずれる
-	// （M17 のローカル確認で実測。伏図・軸組図とも全タグが同じ向きへ外れていた）。
+	// （M18 のローカル確認で実測。伏図・軸組図とも全タグが同じ向きへ外れていた）。
 	void MoveViewportBy(MCObjectHandle viewport, const core::Vec2& delta);
 
 	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
