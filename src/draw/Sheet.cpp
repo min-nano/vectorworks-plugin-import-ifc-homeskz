@@ -192,9 +192,13 @@ namespace HomeskzIfcImport::draw
 
 			// グラフィック凡例は**ビューポートではなくシートレイヤ**に載せる（用紙の上）。
 			// 置き場所は仮——中身が流し込まれて大きさが定まってから右上へ揃える
-			// （draw/Legend の placeLegends）。
+			// （draw/Legend の placeLegends）。凡例に並ぶのは**このシートのビューポートに
+			// 映っているシンボルだけ**にしたいので、いま作ったビューポートを渡す
+			// （draw/Legend.h「そのシートのビューポートでフィルタする」）——**凡例を
+			// ビューポートより後に作る**のはそのためでもある。
 			if (command.legend.has_value())
-				drawSheetLegend(sheetLayer, *command.legend, provisional.legendTopRight, legends);
+				drawSheetLegend(sheetLayer, *command.legend, provisional.legendTopRight, viewport,
+								legends);
 
 			placed.push_back(PlacedSheet{&command, viewport});
 		}
@@ -272,8 +276,8 @@ namespace HomeskzIfcImport::draw
 			++drawn;
 		}
 
-		// 図が仕上がったので**もう一度**中身を流し込み（凡例に並ぶのはビューポートに映る
-		// シンボルなので、縮尺を当て直した後の図で取り直す）、右上を揃える。
+		// 図が仕上がったので**もう一度**中身を流し込み（凡例に並ぶのはそのシートの
+		// ビューポートに映るシンボルなので、縮尺を当て直した後の図で取り直す）、右上を揃える。
 		updateLegendStyles(legends);
 		placeLegends(legends, layout.legendTopRight);
 
