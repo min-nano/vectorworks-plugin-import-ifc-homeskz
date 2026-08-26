@@ -2551,6 +2551,11 @@ namespace HomeskzIfcImport::parse
 		const std::size_t end = highPerimeter ? last : path.size() - 1;
 
 		// 各辺を外向き法線へ kSlabBeddingThickness だけ動かした線分。
+		//
+		// **辺は必ず 1 本以上あり、長さも必ず正**なので、空判定も 0 除算の番人も要らない:
+		// begin ≤ first < last ≤ end（下端の辺が 1 本以上あることは groundBeamUnderside が
+		// 保証する）だから範囲は空にならず、折れ線の連続する 2 点は dedupeRing が
+		// kBeddingEdgeEps 以上離れていることを保証している。
 		struct OffsetEdge
 		{
 			Vec2 start;
@@ -2563,15 +2568,11 @@ namespace HomeskzIfcImport::parse
 		{
 			const Vec2 delta = path[i + 1] - path[i];
 			const double length = std::hypot(delta.x, delta.y);
-			if (length <= kBeddingEdgeEps)
-				continue;
 			const Vec2 dir{delta.x / length, delta.y / length};
 			// CCW ポリゴンの外向き法線＝進行方向の右（offsetPolygon と同じ取り方）。
 			const Vec2 offset{dir.y * kSlabBeddingThickness, -dir.x * kSlabBeddingThickness};
 			edges.push_back(OffsetEdge{path[i] + offset, path[i + 1] + offset, dir});
 		}
-		if (edges.empty())
-			return {};
 
 		// オフセット線を天端（v = vTop）まで伸ばした点。ほぼ水平な辺では伸ばせないので
 		// 与えられた端点で代用する。

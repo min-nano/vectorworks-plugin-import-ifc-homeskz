@@ -1759,19 +1759,70 @@ TEST(ground_beam_bedding_of_the_real_fixtures)
 	CHECK(perimeter > 0);
 }
 
-TEST(ground_beam_bedding_needs_a_flat_bottom)
+TEST(ground_beam_bedding_skips_sections_it_cannot_read)
 {
-	// 下端の辺が無い断面（三角形）からは床付けを組み立てられない。1 本の欠損で全体を
-	// 止めず、その地中梁だけ床付け無しになる。
-	core::ModifierCommand wedge = beddingBeam();
-	wedge.profile = {Vec2{0.0, 0.0}, Vec2{200.0, 100.0}, Vec2{-200.0, 100.0}};
-	CHECK(groundBeamBedding(wedge, false, false).empty());
+	// 床付けを組み立てられない断面は**その地中梁だけ床付け無し**にして先へ進む
+	// （1 本の欠損で全体を止めない）。
+	core::ModifierCommand cmd = beddingBeam();
 
-	// applyGroundBeamBedding は底盤に付いた地中梁だけを触る（底盤が無ければ何もしない）。
+	// 下端の辺が無い（頂点 1 つで尖った下端）。
+	cmd.profile = {Vec2{0.0, 0.0}, Vec2{200.0, 100.0}, Vec2{-200.0, 100.0}};
+	CHECK(groundBeamBedding(cmd, false, false).empty());
+
+	// 天端の辺が無い（頂点 1 つで尖った天端）。
+	cmd.profile = {Vec2{-100.0, 0.0}, Vec2{100.0, 0.0}, Vec2{0.0, 100.0}};
+	CHECK(groundBeamBedding(cmd, false, false).empty());
+
+	// せいが無い（水平な板）。
+	cmd.profile = {Vec2{-100.0, 0.0}, Vec2{100.0, 0.0}, Vec2{100.0, 0.1}, Vec2{-100.0, 0.1}};
+	CHECK(groundBeamBedding(cmd, false, false).empty());
+
+	// 面にならない（重複を除くと 2 点）。
+	cmd.profile = {Vec2{-100.0, 0.0}, Vec2{100.0, 0.0}, Vec2{100.0, 0.0}};
+	CHECK(groundBeamBedding(cmd, false, false).empty());
+
+	// applyGroundBeamBedding も同じで、断面を持たない地中梁は床付け無しのまま残す
+	// （外周部の判定にも入らない）。
 	std::vector<SlabCommand> slabs = {slab(rect(0.0, 0.0, 2000.0, 2000.0))};
-	slabs[0].modifiers.push_back(wedge);
+	slabs[0].modifiers.emplace_back();
 	applyGroundBeamBedding(slabs);
 	CHECK(slabs[0].modifiers[0].beddings.empty());
+}
+
+TEST(ground_beam_bedding_handles_awkward_sections)
+{
+	// 実データには出ないが、断面の作りようで縮退する経路がある。**落とさずに組み立てる**
+	// ことだけを確かめる（形は素直な断面のテストが押さえている）。
+	core::ModifierCommand cmd = beddingBeam();
+
+	// 末尾が始点に戻る閉じた頂点列（重複は落として扱う）。
+	cmd.profile = {Vec2{-100.0, 0.0}, Vec2{100.0, 0.0}, Vec2{200.0, 100.0}, Vec2{-200.0, 100.0},
+				   Vec2{-100.0, 0.0}};
+	std::vector<core::BeddingCommand> beddings = groundBeamBedding(cmd, false, false);
+	CHECK_EQ(beddings.size(), std::size_t{2});
+	if (beddings.size() == 2)
+		CHECK(near(minY(beddings[1].profile), -kSlabBeddingThickness));
+
+	// 下端が同一直線上の 2 辺に割れている（オフセット線が平行になり、マイターが求まらない）。
+	cmd.profile = {Vec2{-100.0, 0.0}, Vec2{0.0, 0.0}, Vec2{100.0, 0.0}, Vec2{200.0, 100.0},
+				   Vec2{-200.0, 100.0}};
+	beddings = groundBeamBedding(cmd, false, false);
+	CHECK_EQ(beddings.size(), std::size_t{2});
+	if (beddings.size() == 2)
+	{
+		const double diagonal = kSlabBeddingThickness * std::sqrt(2.0);
+		CHECK(near(minY(beddings[1].profile), -kSlabBeddingThickness));
+		CHECK(hasVertex(beddings[1].profile, 100.0 + diagonal - kSlabBeddingThickness,
+						-kSlabBeddingThickness));
+	}
+
+	// 天端が水平に張り出している（その辺はオフセット線を天端まで伸ばせないので端点で代用）。
+	cmd.profile = {Vec2{200.0, 100.0}, Vec2{-200.0, 100.0}, Vec2{-300.0, 100.0}, Vec2{-100.0, 0.0},
+				   Vec2{100.0, 0.0}};
+	beddings = groundBeamBedding(cmd, false, false);
+	CHECK_EQ(beddings.size(), std::size_t{2});
+	if (beddings.size() == 2)
+		CHECK(near(minY(beddings[1].profile), -kSlabBeddingThickness));
 }
 
 TEST_MAIN()
