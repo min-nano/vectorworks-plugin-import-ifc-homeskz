@@ -15,6 +15,8 @@
 //	  * gSDK->GetDataTag(h)                             … データオブジェクトの 4 文字タグ
 //	  * gSDK->GSGetHandleSize(h, size)                  … ハンドルの中身の大きさ
 //	  * gSDK->TaggedDataGetNumElements / TaggedDataGet  … タグ付きデータの読み取り
+//	  * gSDK->TaggedDataGetNumElements / TaggedDataGet
+//	                       … **型とタグが分かっている容れ物だけ**を読む（'GrLg' のフィルタ）
 //	  * gSDK->InternalIndexToHandle(index)              … オブジェクト参照 → 実体
 //	  * VWParametricObj の GetParamsCount / GetParamName / GetParamLocalizedName /
 //	    GetParamStyle / GetParamValue                   … パラメトリックレコードの全欄
@@ -30,7 +32,6 @@
 #include "VWFC/VWObjects/VWLayerObj.h"
 #include "VWFC/VWObjects/VWDocument.h"
 
-#include <array>
 #include <cstddef>
 #include <cstring>
 #include <string>
@@ -63,38 +64,15 @@ namespace HomeskzIfcImport::draw
 		// 走査と出力の上限（暴走よけ。**タグ ID は 255 まで**——1 度目は 64 までしか見ておらず、
 		// 上の番号を使う設定があれば取りこぼしていた）。
 		constexpr int kMaxAuxObjects = 64;
-		constexpr Sint32 kMaxTaggedTagID = 255;
-		constexpr Sint32 kMaxValuesPerTag = 32;
-		constexpr std::size_t kMaxDumpBytes = 512;
-		constexpr std::size_t kMaxTextBytes = 1024;
+		constexpr std::size_t kMaxDumpBytes = 4096;
 		constexpr std::size_t kMaxLegends = 32;
-		constexpr std::size_t kMaxValueBufferBytes = 64;
 
-		// タグ付きデータの型 ID（Kernel/API/MiniCadCallBacks.h）。**要素の大きさが 0 のものは
-		// 件数だけ**出す（行列・点列まで解くと読み取りの手間の割に得るものが無い）。
-		// **文字列専用の型 ID は無い**——`CTaggedDataContainer::CreateTagString` は byte 配列
-		// （型 1）に載せるので、型 1 を文字列としても出すのが今回の肝（draw/AuxProbe.h）。
-		struct TaggedType
-		{
-			Sint32 id = 0;
-			const char* name = "";
-			std::size_t size = 0;
-		};
-		constexpr std::array<TaggedType, 13> kTaggedTypes = {{
-			{1, "byte/string", sizeof(Uint8)},
-			{2, "flags", sizeof(Sint32)},
-			{6, "double", sizeof(double)},
-			{7, "matrix", 0},
-			{8, "uint32", sizeof(Sint32)},
-			{13, "colorref", sizeof(Sint32)},
-			{15, "objectref", sizeof(Sint32)},
-			{17, "planarref", sizeof(Sint32)},
-			{18, "matrixarray", 0},
-			{20, "worldpt3", 0},
-			{21, "floatpt3", 0},
-			{22, "wallcompjoin", 0},
-			{23, "refnumber", sizeof(Sint32)},
-		}};
+		// 16 ビットで読み直して並べる開始位置。`'DMDT'` のデータオブジェクトは +80 に
+		// タグ、+86 に本当の容れ物 ID が入っており、その後ろがタグ表と中身になる
+		// （docs/DEV-NOTES.md「グラフィック凡例」）。**構造を決め打ちで解かない**
+		// ——16 進と 16 ビットの 2 通りで出しておけば、手で読むには足りる。
+		constexpr std::size_t kWordDumpStart = 86;
+		constexpr std::size_t kMaxWords = 128;
 
 		// TXString → std::string（UTF-8）。
 		std::string Std(const TXString& text)
@@ -150,18 +128,24 @@ namespace HomeskzIfcImport::draw
 			return text;
 		}
 
-		// バイト列を「読める文字」として出す。印字できないものは '.' に落とす
-		// （**UTF-16 のときは 1 バイトおきに 0 が入る**ので、そのまま出しても "H.e.l.l.o." の
-		// 形で読める＝どちらの符号化でも人には判る）。
-		std::string AsText(const std::vector<Uint8>& bytes)
+		// +86 から先を**16 ビットの並び**として出す。タグ付きデータの型は 6 種類しか無く
+		// （byte / uint32 / double / 行列 / ColorRef / オブジェクト参照）、16 ビット幅の値も
+		// 文字列も byte 配列に載るので、**中身は 16 ビットで読むと意味が見える**ことが多い
+		// （実例: ソース定義の `'GrLe'` は 11 個の 16 ビット値だった）。
+		std::string WordDump(const Uint8* bytes, std::size_t size)
 		{
-			std::string text;
-			for (std::size_t i = 0; i < bytes.size() && i < kMaxTextBytes; ++i)
+			if (size <= kWordDumpStart + 1)
+				return {};
+			std::string text = "      words(+" + std::to_string(kWordDumpStart) + "):";
+			std::size_t count = 0;
+			for (std::size_t offset = kWordDumpStart; offset + 1 < size && count < kMaxWords;
+				 offset += 2, ++count)
 			{
-				const Uint8 value = bytes[i];
-				text += (value >= 0x20 && value < 0x7F) ? static_cast<char>(value) : '.';
+				const auto value = static_cast<Uint32>(bytes[offset]) |
+								   (static_cast<Uint32>(bytes[offset + 1]) << 8U);
+				text += " " + std::to_string(value);
 			}
-			return text;
+			return text + "\n";
 		}
 
 		// パラメトリックレコードの全欄（universal 名・OIP の表示名・種別・値）。
@@ -190,81 +174,43 @@ namespace HomeskzIfcImport::draw
 			return text;
 		}
 
-		// タグ付きデータの 1 つの容れ物を総なめする。要素数が返る（＝そこに何か入っている）
-		// 組み合わせだけを書き出す。
-		std::string DumpTaggedContainer(MCObjectHandle owner, OSType container)
+		// **型とタグが分かっている容れ物だけ**を `TaggedData*` で読む。ここでは「ビューポート
+		// でフィルタ」（容れ物 `'GrLg'` ・型 15 ・タグ 5）——#86 で確定しているので、
+		// 何件でも（＝複数のビューポートを指定した凡例でも）実体まで解いて出せる。
+		//
+		// **総なめはしない。** `TaggedDataGetNumElements` は渡した型 ID を検証しないらしく、
+		// 実際に入っている型と違っても同じ件数を返し、`TaggedDataGet` はその型の大きさで
+		// 切り出したゴミを返す（1 度これに騙された。docs/DEV-NOTES.md「グラフィック凡例」）。
+		std::string DumpFilterTargets(MCObjectHandle legend)
 		{
-			std::string text;
-			for (const TaggedType& type : kTaggedTypes)
+			constexpr OSType kFilterContainer = 0x47724C67; // 'GrLg'
+			constexpr Sint32 kFilterType = 15;
+			constexpr Sint32 kFilterTag = 5;
+
+			Sint32 count = 0;
+			if (!gSDK->TaggedDataGetNumElements(legend, kFilterContainer, kFilterType, kFilterTag,
+												&count) ||
+				count <= 0)
+				return "  -- ビューポートでフィルタ: 無し --\n";
+
+			std::string text = "  -- ビューポートでフィルタ: " + std::to_string(count) + " 件 --\n";
+			for (Sint32 index = 0; index < count; ++index)
 			{
-				for (Sint32 tagID = 0; tagID <= kMaxTaggedTagID; ++tagID)
+				InternalIndex reference = 0;
+				if (!gSDK->TaggedDataGet(legend, kFilterContainer, kFilterType, kFilterTag, index,
+										 &reference))
 				{
-					Sint32 count = 0;
-					if (!gSDK->TaggedDataGetNumElements(owner, container, type.id, tagID, &count))
-						continue;
-					if (count <= 0)
-						continue;
-
-					text += "    [" + FourCC(container) + "] type=" + std::to_string(type.id) +
-							"(" + type.name + ") tag=" + std::to_string(tagID) +
-							" count=" + std::to_string(count) + "\n";
-					if (type.size == 0)
-						continue;
-
-					// byte 配列は**文字列としても**出す（ここに検索条件が載っている見込み）。
-					if (type.size == sizeof(Uint8))
-					{
-						std::vector<Uint8> bytes;
-						for (Sint32 index = 0; index < count && bytes.size() < kMaxTextBytes;
-							 ++index)
-						{
-							Uint8 value = 0;
-							if (!gSDK->TaggedDataGet(owner, container, type.id, tagID, index,
-													 &value))
-								break;
-							bytes.push_back(value);
-						}
-						if (bytes.empty())
-							continue;
-						text += "      text=\"" + AsText(bytes) + "\"\n";
-						text += HexDump(bytes.data(), bytes.size());
-						continue;
-					}
-
-					text += "      values:";
-					for (Sint32 index = 0; index < count && index < kMaxValuesPerTag; ++index)
-					{
-						std::array<Uint8, kMaxValueBufferBytes> buffer{};
-						if (!gSDK->TaggedDataGet(owner, container, type.id, tagID, index,
-												 buffer.data()))
-						{
-							text += " (読めず)";
-							break;
-						}
-						if (type.size == sizeof(double))
-						{
-							double value = 0.0;
-							std::memcpy(&value, buffer.data(), sizeof(value));
-							text += " " + std::to_string(value);
-							continue;
-						}
-						Sint32 value = 0;
-						std::memcpy(&value, buffer.data(), sizeof(value));
-						text += " " + std::to_string(value);
-						if (type.id == 15)
-						{
-							text += " -> " + DescribeObject(gSDK->InternalIndexToHandle(
-												 static_cast<InternalIndex>(value)));
-						}
-					}
-					text += "\n";
+					text += "    [" + std::to_string(index) + "] (読めず)\n";
+					continue;
 				}
+				text += "    [" + std::to_string(index) + "] " + std::to_string(reference) +
+						" -> " + DescribeObject(gSDK->InternalIndexToHandle(reference)) + "\n";
 			}
 			return text;
 		}
 
 		// 補助オブジェクト 1 つ（データオブジェクトなら中身と容れ物も）。
-		std::string DumpAuxObject(MCObjectHandle owner, MCObjectHandle aux, int index)
+		std::string DumpAuxObject(MCObjectHandle aux, int index)
 		{
 			const short type = gSDK->GetObjectTypeN(aux);
 			std::string text = "  [aux " + std::to_string(index) + "] type=" + std::to_string(type);
@@ -275,7 +221,6 @@ namespace HomeskzIfcImport::draw
 			text += " data tag='" + FourCC(tag) + "'";
 
 			// 中身の +86 に入っている「本当の容れ物 ID」。これで総なめすると中身が読める。
-			OSType embedded = 0;
 			std::size_t size = 0;
 			gSDK->GSGetHandleSize(aux, size);
 			text += " bytes=" + std::to_string(size) + "\n";
@@ -285,15 +230,14 @@ namespace HomeskzIfcImport::draw
 			{
 				Uint32 value = 0;
 				std::memcpy(&value, bytes + kContainerIdOffset, sizeof(value));
-				embedded = static_cast<OSType>(value);
-				text += "      container='" + FourCC(embedded) + "'\n";
+				text += "      container='" + FourCC(static_cast<OSType>(value)) + "'\n";
 			}
 			if (bytes != nullptr && size > 0)
-				text += HexDump(bytes, size < kMaxDumpBytes ? size : kMaxDumpBytes);
-
-			text += DumpTaggedContainer(owner, tag);
-			if (embedded != 0 && embedded != tag)
-				text += DumpTaggedContainer(owner, embedded);
+			{
+				const std::size_t shown = size < kMaxDumpBytes ? size : kMaxDumpBytes;
+				text += HexDump(bytes, shown);
+				text += WordDump(bytes, shown);
+			}
 			return text;
 		}
 
@@ -355,13 +299,15 @@ namespace HomeskzIfcImport::draw
 				text += "  (パラメトリックレコードを読めず)\n";
 			}
 
+			text += DumpFilterTargets(legend);
+
 			text += "  -- 補助オブジェクト --\n";
 			int aux = 0;
 			for (MCObjectHandle node = gSDK->FirstAuxObject(legend);
 				 node != nil && aux < kMaxAuxObjects; node = gSDK->NextObject(node))
 			{
 				++aux;
-				text += DumpAuxObject(legend, node, aux);
+				text += DumpAuxObject(node, aux);
 			}
 			if (aux == 0)
 				text += "  (補助オブジェクトなし)\n";
