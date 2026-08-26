@@ -16,6 +16,8 @@
 #include "parse/Summary.h"
 #include "core/Trace.h"
 #include "draw/ExecuteDocument.h"
+// 【一時計装 ── 役目を終えたら消す】dev ビルドでのみ働く凡例の補助オブジェクトのダンプ。
+#include "draw/AuxProbe.h"
 #include "draw/ProgressDialog.h"
 
 // ファイル選択ダイアログ（VCOM）。ネイティブの「開く」ダイアログを出し、選ばれた
@@ -25,6 +27,9 @@
 
 #include <cstddef>
 #include <exception>
+// 【一時計装】補助オブジェクトのダンプの書き出しに使う（dev ビルドのみ。役目を終えたら消す）。
+#include <fstream>
+#include <ios>
 #include <string>
 
 using namespace HomeskzIfcImport;
@@ -253,6 +258,33 @@ namespace HomeskzIfcImport
 			return body;
 		}
 
+#ifdef VW_DEV_BUILD
+		// 【一時計装 ── 役目を終えたら消す】グラフィック凡例を選んだ状態でこのコマンドを
+		// 実行したときだけ働く。「ビューポートでフィルタ」の保存先（凡例にぶら下がる
+		// データオブジェクト）の中身をファイルへ書き出し、**インポートはせずに終わる**。
+		// 何も選んでいなければ空振りして通常のインポートへ進む（draw/AuxProbe.h）。
+		//
+		// 書き出し先の決め方は診断ログと同じ（core/Trace の defaultLogPath。図面や IFC の
+		// 隣には置かない）。中身は複数行の素の文章なので、行ごとに経過時間が付く
+		// core::trace::log ではなく素直に ofstream で書く。
+		bool RunLegendAuxProbe()
+		{
+			const std::string dump = draw::probeSelectedLegendAuxData();
+			if (dump.empty())
+				return false;
+
+			const std::string path = core::trace::defaultLogPath("HomeskzIfcAuxProbe.txt");
+			std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+			if (stream)
+				stream << dump;
+			stream.close();
+
+			gSDK->AlertInform(dump.c_str(), path.c_str(),
+							  false /* not a minor alert: show a modal dialog */);
+			return true;
+		}
+#endif
+
 		// 例外で中断したときの後始末と本文づくり。診断ログに例外を書き残してから閉じ、
 		// ダイアログ本文（無 SDK 側が組み立てる）にログの場所を添えて返す。
 		std::string ReportImportError(const std::string& detail)
@@ -282,6 +314,14 @@ void CImportIfcMenu_EventSink::DoInterface()
 	// で VectorWorks へ描く → 件数をダイアログに出す。要素が増えても入口はこの形のまま（各要
 	// 素の追加は Document と draw 側で行う。docs/DEV-NOTES.md）。ここが両フェーズの
 	// オーケストレーションを担う唯一の場所になる。
+
+#ifdef VW_DEV_BUILD
+	// 0.【一時計装 ── 役目を終えたら消す】グラフィック凡例を選んだ状態で実行したときは、
+	//    インポートの代わりに補助オブジェクトのダンプを書き出して終わる（上の
+	//    RunLegendAuxProbe。何も選んでいなければ素通りする）。
+	if (RunLegendAuxProbe())
+		return;
+#endif
 
 	// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら静かに終える。
 	std::string ifcPath;
