@@ -251,6 +251,12 @@ namespace HomeskzIfcImport
 			// 最初に描くのは取り込みが終わった後の VW になり、そのとき並びは正しい
 			// （draw/ExecuteDocument.h の markImportedViewportsOutOfDate）。
 			const draw::ViewportRefresh refresh = draw::markImportedViewportsOutOfDate(viewports);
+			// **レイヤの重ね順の実測**を診断ログへ出す（完了ダイアログには出さない。長いので）。
+			// VW が図面のレイヤをどう並べているのかは実機でしか分からず、これが唯一の
+			// 持ち帰り手段（draw/Story の reorderStoryLayers が組み立てる）。
+			if (!drawn.trace.empty())
+				core::trace::log("layerOrder:\n" + drawn.trace);
+
 			core::trace::log("markViewportsOutOfDate: " + std::to_string(refresh.marked) + "/" +
 							 std::to_string(refresh.total));
 			if (refresh.marked < refresh.total)

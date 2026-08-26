@@ -1012,6 +1012,11 @@ namespace HomeskzIfcImport::core
 		// ローカルの VectorWorks でしか確認できないので、「命令はあるのに見えない」ときに
 		// 原因を解析側と描画側で切り分ける手掛かりをメニューコマンドの完了ダイアログへ持ち帰る。
 		std::string diagnostics;
+
+		// **診断ログにだけ出す控え**（完了ダイアログには出さない。長いので）。いまはレイヤの
+		// 重ね順の実測——VW が図面のレイヤをどう並べているか——を持ち帰るために使う
+		// （draw/Story の reorderStoryLayers が組み立て、Extensions/ExtMenu が書き出す）。
+		std::string trace;
 	};
 
 	// Document を描画前に検証する。draw/ は検証を通った Document だけを SDK API へ渡す。

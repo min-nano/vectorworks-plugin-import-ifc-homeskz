@@ -24,6 +24,7 @@
 #include "core/Progress.h"
 
 #include <cstddef>
+#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -51,6 +52,10 @@ namespace HomeskzIfcImport::draw
 		// 呼び出す前の並びが希望順の**ちょうど逆**だったか。true なら
 		// kCreateFrontLayerFirst を反転させればよい（＝作る順序だけで解決する）。
 		bool wasReversed = false;
+		// **診断ログ用**の 1 行（完了ダイアログには出さない。長いので）。呼び出し前後の
+		// 実際のレイヤの並びを**前面→背面**で並べたもの。VW がどんな規則でレイヤを並べて
+		// いるのか（作った順ではない）を実機から持ち帰るための唯一の手立て。
+		std::string trace;
 	};
 
 	// デザインレイヤのスタック順を希望順（core::desiredStoryLayerOrder）へ並べ替える。

@@ -104,6 +104,23 @@ namespace HomeskzIfcImport::draw
 		// wanted（図面のオブジェクト列と同じ**背面→前面**の並び）が、いまの図面でその順に
 		// 並んでいるか。**間に別のレイヤが挟まっていてもよい**（ユーザーが自分で作った
 		// レイヤの位置には口を出さない）——見るのは wanted どうしの前後関係だけ。
+		// 図面のレイヤの並びを**前面→背面**の 1 行にする（診断ログ用）。名前は
+		// gSDK->GetObjectName で引く。希望順に出てこないレイヤ（ユーザーが自分で作ったもの）も
+		// そのまま出す——「VW がどう並べているか」を見るのが目的なので、省くと分からなくなる。
+		std::string DescribeStackOrder(const std::vector<MCObjectHandle>& chain)
+		{
+			std::string text;
+			for (const MCObjectHandle layer : std::ranges::reverse_view(chain))
+			{
+				TXString name;
+				gSDK->GetObjectName(layer, name);
+				if (!text.empty())
+					text += " | ";
+				text += name.GetStdString();
+			}
+			return text;
+		}
+
 		bool MatchesStackOrder(const std::vector<MCObjectHandle>& wanted)
 		{
 			const std::vector<MCObjectHandle> chain = DesignLayersInStackOrder();
@@ -145,6 +162,20 @@ namespace HomeskzIfcImport::draw
 		// **既に希望どおりなら 1 つも動かさない。** 呼び直しても図面を触らないので、
 		// 「描画の前に並べて、伏図の直前に確かめる」という 2 度呼びが安全にできる。
 		LayerOrderResult result;
+		result.trace = "希望（前面→背面）: " +
+					   [&]
+		{
+			std::string text;
+			for (const std::string& name : desired)
+			{
+				if (!text.empty())
+					text += " | ";
+				text += name;
+			}
+			return text;
+		}() + "\n実際（並べ替え前・前面→背面）: " +
+					   DescribeStackOrder(DesignLayersInStackOrder());
+
 		result.wasOrdered = MatchesStackOrder(wanted);
 		result.ordered = result.wasOrdered;
 		if (result.ordered)
@@ -169,6 +200,8 @@ namespace HomeskzIfcImport::draw
 		// **並び替わったかは読み戻して確かめる**（moved は「呼び出しが true を返した数」で
 		// しかない）。ここが false なら伏図で床・野地板が柱・梁を覆う。
 		result.ordered = MatchesStackOrder(wanted);
+		result.trace +=
+			"\n実際（並べ替え後・前面→背面）: " + DescribeStackOrder(DesignLayersInStackOrder());
 		return result;
 	}
 
