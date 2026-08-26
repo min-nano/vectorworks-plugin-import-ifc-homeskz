@@ -413,16 +413,44 @@ ISDK にシンボルを配置する呼び出しは無く（在るのは `CreateS
   ついでに分かった中身: 中身を決める 5 つ（`DefineSource` / `DefineImage` /
   `EditCellLayout` / `EditTitleLayout` / `ImageClasses`）は**値を持たない type=14＝ボタン**で、
   集計・ソートの軸（`SummarizeBy` / `SortBy` / `SummarizeByExt`…）はスタイル側から来る。
-- **次に当たるのは関連（association）と PIO の中身。** フィルタは OIP でボタンが有効なまま＝
-  **スタイルに焼けない per-instance の設定**なので、どこかに永続化されているはず。
-  凡例はフィルタ先のビューポートが変われば作り直しが要るので、
-  `GetNumAssociations` / `GetAssociation`（VS にもある「消したら一緒に消える／リセットされる」
-  リンク）が第一候補で、次が凡例 PIO の中に生成された図形。それも空振りなら
-  オブジェクト変数、最後が補助オブジェクト（`FirstAuxObject`。**VS からは触れないので
-  dev ビルドの一時診断が要る**——`ModifySlab` の調査と同じ道）。
-  読み取り専用ダンプは [`scripts/vw-dump-pio-fields.py`](../scripts/vw-dump-pio-fields.py)
-  （**文書内の全グラフィック凡例を関連ごと並べる**ので、1 枚だけ手でフィルタしておけば
-  1 回の実行でフィルタ済み／未フィルタを見比べられる）。
+- **関連（association）でもない。** フィルタを掛けた凡例で `associations=0`。ビューポート側に
+  出る `associations=3` は**断面ビューポート（軸組図）だけ**に付いていて（伏図の
+  ビューポートは 0）、凡例とは無関係。
+- **凡例の中の図形が UUID で持っているのでもない。** 凡例の中身はセルごとに
+  グループ（`type=11`）＋ `GraphicLegendFrame`（＋画像は `GraphicLegendImage` か
+  **画像描画用のビューポート `type=122`**）で、**UUID を値に持つレコード欄は 1 つも無い**。
+  ——ここまでで per-instance の設定を置く「普通の場所」は出尽くした。
+- **「ビューポートでフィルタ」の保存先は、凡例にぶら下がるデータオブジェクトのタグ付きデータ**
+  だった。実機のダンプで次の順に潰して突き止めた（もう一度やらないこと）:
+  * パラメトリックレコード … ✗（フィルタの前後で変わるのは `BoxWidth` だけ＝細くなった結果）
+  * 関連（association）… ✗（フィルタ済みでも 0。ビューポート側の 3 件は断面ビューポート固有）
+  * 凡例の中の図形 … ✗（セルは group ＋ `GraphicLegendFrame` ＋ 画像で、UUID を持つ欄は無い）
+  * オブジェクト変数 … **703 だけが違った**（`ovFirstAuxObject`。"read/write : used to
+    manipulate the Aux list - Public for VS"）＝**補助オブジェクトの連鎖**
+- **読み方（実機のバイト列）。** `MCObjectHandle` は `GSHandle`＝`char**` なので、参照外しで
+  そのまま中身が読める（大きさは `GSGetHandleSize`）。フィルタを掛けた凡例の先頭の補助
+  オブジェクトはこうなっていた:
+
+  | オフセット | 中身 |
+  | --- | --- |
+  | +80 | `54 44 4d 44` ＝ データオブジェクトのタグ `'DMDT'`（リトルエンディアン） |
+  | +86 | `67 4c 72 47` ＝ **本当のタグ付きデータの容れ物 ID `'GrLg'`**（Graphic Legend） |
+  | +96 | `05 00` ＝ タグ 5 |
+  | +108 | `0f 00` ＝ 型 15（`kTaggedDataObjectRefArrayTypeID`） |
+  | +110 | `01 00` ＝ 要素数 1 |
+  | +114 | `c0 01 00 00` ＝ 448 ＝ **フィルタ先ビューポートの `InternalIndex`** |
+
+  **`'DMDT'` は「入れ物の入れ物」**で、`ISDK::TaggedData*` に渡すべき容れ物 ID は +86 の方。
+  ここを取り違えると総なめしても 1 件も返らない（最初はそれで空振りした）。同じ構造の
+  補助オブジェクトが 12 個ぶら下がっていて、+86 は `'ptd_'` `'rwtt'`（SDK ヘッダの
+  `kTaggedDataContainerNNA_Internal*` そのもの）や `'GrLe'` `'modl'` など。`'FSTL'` は
+  文字スタイル（12pt ＝ 4.2333mm の double）で無関係。
+- **書き方。** `TaggedDataCreate(legend, 'GrLg', 15, 5, 1)` ＋
+  `TaggedDataSet(legend, 'GrLg', 15, 5, 0, &GetObjectInternalIndex(viewport))` を
+  **`ResetObject` より前**に呼ぶ（実装は `draw/Legend` の `ApplyViewportFilter`）。
+  `'GrLg'` は多文字リテラルを避けて `0x47724C67` と書く。
+  **`ModifySlab` のときの `type=121` と違い、データオブジェクトは SDK で扱える**ので、
+  UI と同じ状態を作れる。
 
 ### Undo（取り消し）
 
