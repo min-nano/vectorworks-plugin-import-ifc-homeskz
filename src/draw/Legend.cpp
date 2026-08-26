@@ -12,10 +12,8 @@
 //	  * gSDK->SetCurrentLayer(sheetLayer)                                … 置き場所（用紙）の指定
 //	  * gSDK->SetLineWeight / SetFillPat                                 … 見た目（線の太さ・塗り）
 //	  * gSDK->GetObjectInternalIndex(viewport)                           … フィルタ先の参照
-//	  * gSDK->TaggedDataCreate / TaggedDataSet                           … フィルタの書き込み
+//	  * gSDK->TaggedDataCreate / TaggedDataSet          … フィルタとソース定義の書き込み
 //	  * gSDK->ResetObject                                                … 反映（中身の計算）
-//	  * VWParametricObj の GetParamsCount / GetParamName / GetParamLocalizedName
-//	                                                        … パラメータ名の解決（下記）
 //
 //	**スタイルは扱わない**（draw/Legend.h の ★）。`SetPluginObjectStyle` も
 //	`UpdateStyledObjects` も呼ばない——スタイル無しで置くので、中身は `ResetObject` の時点で
@@ -30,8 +28,8 @@
 #include "VWFC/VWObjects/VWParametricObj.h"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
-#include <cstdio>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -48,21 +46,12 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kFieldBoxWidth = "BoxWidth";
 		constexpr double kBoxWidth = 150.0;
 
-		// イメージの縮率（＝凡例に並ぶセルの中で部材を描く縮尺）のパラメータ名の候補。
-		// **正しい名前は SDK ヘッダにもマニュアルにも無い**（凡例は VW 同梱の PIO で、
-		// パラメータ名はその PIO のパラメトリックレコードにしか無い）。そこで
-		// universal 名の候補と**OIP の表示名**（日本語 UI での「イメージの縮率」）を順に
-		// 引き、最初に実在したものを使う（draw/DrawUtil の ResolveParamName と同じ考え方を、
-		// 候補が複数あるこちら用に広げたもの）。
-		constexpr std::array<const char*, 4> kImageScaleNames{"ImageScale", "Image Scale",
-															  "ImageScaleFactor", "イメージの縮率"};
-
-		// 縮率が「カスタム」のときに読まれる分母（OIP の「カスタム 1:」）。縮率のポップアップ
-		// が既定値の一覧（1:1 … 1:100）に無い縮尺を指せるように、**ポップアップより先に**
-		// 入れておく。無い環境（名前が違う）でも縮率そのものが入れば実害は無いので、
-		// 見つからなければ黙って飛ばす。
-		constexpr std::array<const char*, 4> kCustomScaleNames{"CustomScale", "ImageScaleCustom",
-															   "カスタム 1:", "カスタム 1"};
+		// 写したソース定義（下記 kSourceDefinition）に含まれるイメージの縮率。**書き換える
+		// 手立てがまだ無い**ので、伏図の縮尺がこれと違えば診断で知らせるだけにする
+		// （draw/Legend.h の scaleMismatch）。比較は許容付き——縮尺は表示レイヤから読んだ
+		// double なので、丸め誤差で「違う」と言い出さないようにする。
+		constexpr double kSourceImageScale = 50.0;
+		constexpr double kScaleEps = 1e-6;
 
 		// 見た目。凡例 PIO が内部で描く枠線・セルは**クラスでは制御できない**ので、
 		// オブジェクトの属性として直接与える（draw/Legend.h）。線の太さの単位はミル（1/1000
@@ -70,125 +59,26 @@ namespace HomeskzIfcImport::draw
 		constexpr short kLineWeightMils = 5;
 		constexpr InternalIndex kFillNone = 0;
 
-		// 診断へ出すパラメータ名の上限（凡例の PIO はパラメータが多いので頭から数個で切る）。
-		constexpr std::size_t kMaxParamNames = 24;
-
-		// 候補名（universal 名でも OIP の表示名でもよい）で実在するパラメータを探し、その
-		// universal 名を返す。**どれも無ければ空**——呼び出し側はそれを「このパラメータは
-		// この環境の PIO に無い」として扱う（存在しない名前へ書いても setter は黙って何も
-		// しないので、書く前に必ず引く）。
-		TXString FindParam(const VWParametricObj& pio, const std::array<const char*, 4>& names)
-		{
-			for (const char* candidate : names)
-			{
-				const TXString name(candidate);
-				if (pio.GetParamIndex(name) != static_cast<size_t>(-1))
-					return name;
-			}
-
-			const size_t count = pio.GetParamsCount();
-			for (const char* candidate : names)
-			{
-				const TXString localized(candidate);
-				for (size_t i = 0; i < count; ++i)
-				{
-					if (pio.GetParamLocalizedName(i) == localized)
-						return pio.GetParamName(i);
-				}
-			}
-			return {};
-		}
-
-		// 縮尺の表記（分母 50 → "1:50"）。ポップアップ・文字のフィールドはこの形の文字列で
-		// 縮尺を持つ（OIP の「イメージの縮率」に出ているのと同じ表記）。
-		TXString ScaleText(double viewportScale)
-		{
-			std::array<char, 32> buffer{};
-			std::snprintf(buffer.data(), buffer.size(), "1:%g", viewportScale);
-			return {buffer.data()};
-		}
-
-		// 縮率のパラメータ 1 つへ書く（書けたら true）。**フィールドの種別で入れ方を変える**
-		// ——ポップアップ（縮尺の一覧）と文字のフィールドは "1:50" という表記を持つので数値を
-		// 入れても効かず、逆に実数のフィールドへ "1:50" を入れても効かない。どちらの登録でも
-		// 入るように、種別で選んでから**読み戻して確かめる**（draw/DrawUtil の
-		// SetParamRealChecked と同じ用心。名前も型も 1 つ違えば setter は黙って無視される）。
-		bool WriteScale(VWParametricObj& pio, const TXString& param, double viewportScale)
-		{
-			const EFieldStyle style = pio.GetParamStyle(param);
-			if (style == kFieldPopUp || style == kFieldText)
-			{
-				const TXString text = ScaleText(viewportScale);
-				pio.SetParamString(param, text);
-				if (pio.GetParamString(param) == text)
-					return true;
-			}
-			return SetParamRealChecked(pio, param, viewportScale);
-		}
-
-		// イメージの縮率を viewportScale（1:50 なら 50）へ合わせる。書けたら true。
-		bool ApplyImageScale(VWParametricObj& pio, double viewportScale)
-		{
-			// カスタム欄が先（上記 kCustomScaleNames）。こちらは分母そのもの（50）を持つ
-			// 数値のフィールドなので、表記ではなく値を入れる。
-			if (const TXString custom = FindParam(pio, kCustomScaleNames); !custom.IsEmpty())
-				SetParamRealChecked(pio, custom, viewportScale);
-
-			const TXString scale = FindParam(pio, kImageScaleNames);
-			if (scale.IsEmpty())
-				return false;
-			return WriteScale(pio, scale, viewportScale);
-		}
-
-		// PIO のパラメータ名の一覧（"universal 名(表示名)" を空白区切り）。**縮率を書けな
-		// かったときだけ**診断へ出し、正しい名前を実機から持ち帰るための目にする
-		// （draw/Legend.h の scaleParams）。
-		std::string ParamNames(const VWParametricObj& pio)
-		{
-			const size_t count = pio.GetParamsCount();
-			std::string text;
-			for (size_t i = 0; i < count && i < kMaxParamNames; ++i)
-			{
-				if (!text.empty())
-					text += " ";
-				text += pio.GetParamName(i).GetStdString();
-				text += "(";
-				text += pio.GetParamLocalizedName(i).GetStdString();
-				text += ")";
-			}
-			if (count > kMaxParamNames)
-				text += " …";
-			return text;
-		}
-
-		// 生成した凡例のパラメータ（箱幅・イメージの縮率）を与える。**例外を外へ出さない**
-		// ——どちらも書けなくても凡例そのものは図面に残るので、件数だけ counts へ積む。
-		void ApplyParams(MCObjectHandle object, double viewportScale, LegendCounts& counts)
+		// 生成した凡例の箱幅を与える。**例外を外へ出さない**——書けなくても凡例そのものは
+		// 図面に残るので、件数だけ counts へ積む。
+		//
+		// **縮率（イメージの縮率）はここでは書けない。** レコードには `ImageScale` という
+		// 実数の欄があるが、**表示名が空＝OIP に出ない別物**で、実機ではデザインレイヤの
+		// 縮尺（100）が入ったまま OIP は 1:50 を表示していた。縮率は「イメージの定義...」
+		// ダイアログ側＝レコードの外にある（docs/DEV-NOTES.md「グラフィック凡例」）。
+		// パラメータ名を当てにいく実装はもう試して外れているので、書き直さないこと。
+		void ApplyBoxWidth(MCObjectHandle object, LegendCounts& counts)
 		{
 			try
 			{
 				VWParametricObj pio(object);
 				if (!SetParamRealChecked(pio, TXString(kFieldBoxWidth), kBoxWidth))
 					++counts.widthLeft;
-
-				// 縮尺が分からなかった伏図（表示レイヤから読めなかった）では触らない
-				// ——既定の縮率のまま置く方が、当てずっぽうの値を書くよりましである。
-				if (viewportScale <= 0.0)
-				{
-					++counts.scaleUnknown;
-					return;
-				}
-				if (!ApplyImageScale(pio, viewportScale))
-				{
-					++counts.scaleLeft;
-					if (counts.scaleParams.empty())
-						counts.scaleParams = ParamNames(pio);
-				}
 			}
 			catch (...)
 			{
-				// PIO として開けなかった（＝パラメータを 1 つも書けていない）。幅 0 のまま
-				// 潰れる・縮率が既定のままになるだけで凡例自体は図面に残るので、続ける。
+				// PIO として開けなかった（＝箱幅を書けていない）。幅 0 のまま潰れるだけで
+				// 凡例自体は図面に残るので、続ける。
 				++counts.paramsFailed;
 			}
 		}
@@ -230,6 +120,53 @@ namespace HomeskzIfcImport::draw
 			return gSDK->TaggedDataSet(legend, kFilterContainer, kFilterDataType, kFilterDataTag, 0,
 									   &reference) != 0;
 		}
+
+		// ソース定義（凡例に何を並べるか）の保存先。フィルタの `'GrLg'` と 1 文字違いの
+		// **`'GrLe'`**（'G'=0x47 / 'r'=0x72 / 'L'=0x4C / 'e'=0x65）で、実機のダンプでは
+		// **「凡例ソースの定義...」を手で設定した凡例にだけ**ぶら下がっていた。
+		constexpr OSType kSourceContainer = 0x47724C65; // 'GrLe'（Graphic Legend の別の容れ物）
+
+		// byte 配列（kTaggedDataByteArrayTypeID = 1）のタグ 0。**16 ビット幅の値も byte 配列に
+		// 載る**——タグ付きデータの型は 6 種類しか無く（byte / uint32 / double / matrix /
+		// colorref / objectref）、VWFC の `CTaggedDataContainer::CreateTagUint16` も byte 配列を
+		// 使う。したがってこの 22 バイトは 11 個の 16 ビット値と読める。
+		constexpr Sint32 kSourceDataType = 1;
+		constexpr Sint32 kSourceDataTag = 0;
+
+		// **手で設定した凡例からそのまま写した 22 バイト**（実機のダンプ）。ソース＝シンボル・
+		// 検索条件 `(INVIEWPORT & (T=SYMBOL))` の 3 枚が**完全に同じ中身**で、集計基準だけ
+		// 違う 3 枚だった（集計基準はパラメトリックレコード側なので辻褄が合う）。
+		// 16 ビットで読むと 666 / 662 / 798 / 662 / 777 / 15 / 1607 / 1637 / 1615 / 677 / 1680 で、
+		// `INVIEWPORT` などの文字列はどこにも出てこない＝**検索条件はトークン列（番号の列）**
+		// として保存されている。番号の意味はまだ解けていない。
+		//
+		// **これは実験である。** 既定のソースが空で、スタイルを当てないと凡例が何も表示しない
+		// （実機で確認）以上、ソース定義を per-instance で書き込む以外に道が無い。写した値が
+		// 文書をまたいで通用するか・VW の版が変わっても通用するかは**確かめられていない**ので、
+		// 実機で「並ぶかどうか」を見て判断する（docs/DEV-NOTES.md「グラフィック凡例」）。
+		constexpr std::array<Uint8, 22> kSourceDefinition{
+			0x9a, 0x02, 0x96, 0x02, 0x1e, 0x03, 0x96, 0x02, 0x09, 0x03, 0x0f,
+			0x00, 0x47, 0x06, 0x65, 0x06, 0x4f, 0x06, 0xa5, 0x02, 0x90, 0x06};
+
+		// ソース定義を書き込む（書けたら true）。フィルタと同じく**`ResetObject` より前**に
+		// 済ませる（凡例の作り直しでセルが決まるため）。
+		bool ApplySourceDefinition(MCObjectHandle legend)
+		{
+			if (legend == nil)
+				return false;
+			if (!gSDK->TaggedDataCreate(legend, kSourceContainer, kSourceDataType, kSourceDataTag,
+										static_cast<Sint32>(kSourceDefinition.size())))
+				return false;
+
+			for (std::size_t i = 0; i < kSourceDefinition.size(); ++i)
+			{
+				Uint8 value = kSourceDefinition[i];
+				if (gSDK->TaggedDataSet(legend, kSourceContainer, kSourceDataType, kSourceDataTag,
+										static_cast<Sint32>(i), &value) == 0)
+					return false;
+			}
+			return true;
+		}
 	} // namespace
 
 	void prepareGraphicLegendPlugin()
@@ -259,9 +196,16 @@ namespace HomeskzIfcImport::draw
 			return false;
 		}
 
-		// 箱幅とイメージの縮率。**スタイルは当てない**（draw/Legend.h の ★）ので、
-		// 凡例の姿を決めるのはこのオブジェクトのパラメータだけになる。
-		ApplyParams(object, viewportScale, counts);
+		// 箱幅。**スタイルは当てない**（draw/Legend.h の ★）ので、凡例の姿を決めるのは
+		// このオブジェクト自身の設定だけになる。
+		ApplyBoxWidth(object, counts);
+
+		// ソース定義（何を並べるか）。**既定のソースは空**なので、これを書かないと
+		// スタイル無しの凡例は 1 セットも表示しない（実機で確認）。
+		if (ApplySourceDefinition(object))
+			++counts.sourced;
+		else
+			++counts.sourceLeft;
 
 		// そのシートのビューポートで絞る（**ResetObject より前**——凡例の作り直しで
 		// 並ぶセルが決まるため）。書けなくても凡例自体は残るので、件数だけ持ち帰って続ける
@@ -270,6 +214,11 @@ namespace HomeskzIfcImport::draw
 			++counts.filtered;
 		else
 			++counts.filterLeft;
+
+		// 縮率は写したソース定義に含まれる 1:50 のままになる（書き込む手立てがまだ無い）。
+		// 伏図の縮尺がそれと違うなら、凡例のシンボルだけ図と大きさが揃わない。
+		if (viewportScale > 0.0 && std::fabs(viewportScale - kSourceImageScale) > kScaleEps)
+			++counts.scaleMismatch;
 
 		gSDK->ResetObject(object);
 
@@ -284,8 +233,8 @@ namespace HomeskzIfcImport::draw
 
 	std::string legendDiagnostics(const LegendCounts& counts)
 	{
-		if (counts.failed == 0 && counts.widthLeft == 0 && counts.scaleLeft == 0 &&
-			counts.scaleUnknown == 0 && counts.paramsFailed == 0 && counts.filterLeft == 0)
+		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
+			counts.sourceLeft == 0 && counts.filterLeft == 0 && counts.scaleMismatch == 0)
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -293,23 +242,20 @@ namespace HomeskzIfcImport::draw
 			text += "凡例を置けなかった命令 " + std::to_string(counts.failed) + " 件。";
 		if (counts.paramsFailed > 0)
 			text += "パラメータを書けなかった凡例 " + std::to_string(counts.paramsFailed) +
-					" 件（幅 0 に潰れ、縮率も既定のままになります）。";
+					" 件（幅 0 に潰れます）。";
 		if (counts.widthLeft > 0)
 			text += "箱幅を設定できなかった凡例 " + std::to_string(counts.widthLeft) +
 					" 件（幅 0 に潰れます）。";
-		if (counts.scaleUnknown > 0)
-			text += "伏図の縮尺が分からず既定の縮率で置いた凡例 " +
-					std::to_string(counts.scaleUnknown) + " 件。";
-		if (counts.scaleLeft > 0)
-		{
-			text += "イメージの縮率を設定できなかった凡例 " + std::to_string(counts.scaleLeft) +
-					" 件（凡例だけ図と縮尺が揃いません）。";
-			if (!counts.scaleParams.empty())
-				text += "凡例のパラメータ: " + counts.scaleParams + "。";
-		}
+		if (counts.sourceLeft > 0)
+			text += "ソース定義を書けなかった凡例 " + std::to_string(counts.sourceLeft) +
+					" 件（何も並びません）。";
 		if (counts.filterLeft > 0)
 			text += "ビューポートで絞れなかった凡例 " + std::to_string(counts.filterLeft) +
 					" 件（その図に無いシンボルも並びます）。";
+		if (counts.scaleMismatch > 0)
+			text += "イメージの縮率が伏図の縮尺と違う凡例 " + std::to_string(counts.scaleMismatch) +
+					" 件（凡例は 1:" + std::to_string(static_cast<int>(kSourceImageScale)) +
+					" 固定です）。";
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw
