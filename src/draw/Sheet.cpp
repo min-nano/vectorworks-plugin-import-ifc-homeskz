@@ -202,8 +202,7 @@ namespace HomeskzIfcImport::draw
 			// （draw/Legend.h「そのシートのビューポートでフィルタする」）——**凡例を
 			// ビューポートより後に作る**のはそのためでもある。
 			if (command.legend.has_value())
-				drawSheetLegend(sheetLayer, *command.legend, provisional.legendTopRight, viewport,
-								legends);
+				drawSheetLegend(sheetLayer, provisional.legendTopRight, viewport, legends);
 
 			placed.push_back(PlacedSheet{&command, viewport});
 		}

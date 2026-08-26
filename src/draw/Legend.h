@@ -123,15 +123,18 @@ namespace HomeskzIfcImport::draw
 	// （複数のシートぶんを 1 つの counts へ積んでよい）。**カレントレイヤをそのシートレイヤへ
 	// 移す**（PIO はカレントレイヤに入るため）ので、呼び出し側は必要なら後で戻すこと。
 	//
+	// **命令（core::LegendCommand）は受け取らない。** 中身も置き場所も縮率も命令には無く
+	// （core/Document.h の LegendCommand）、凡例が「有る」ことだけが意味を持つので、
+	// 呼び出し側が `has_value()` で判断すれば足りる。
+	//
 	// where は**生成位置**（用紙 mm）。仮の点でよい——**最終的な位置合わせは placeLegends
 	// が行う**（凡例の大きさは並ぶ中身が決まって初めて定まるため。下記）。
 	//
 	// filterViewport には**そのシートに載せたビューポート**を渡す（nil なら絞り込まない）。
 	// 凡例はそのビューポートに映っているシンボルだけを並べる（ヘッダ冒頭「そのシートの
 	// ビューポートでフィルタする」）。
-	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::LegendCommand& command,
-						 const core::Vec2& where, MCObjectHandle filterViewport,
-						 LegendCounts& counts);
+	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::Vec2& where,
+						 MCObjectHandle filterViewport, LegendCounts& counts);
 
 	// 置いた凡例を作り直して中身を流し込む。**すべての凡例を置き終えてから**呼ぶ。
 	//

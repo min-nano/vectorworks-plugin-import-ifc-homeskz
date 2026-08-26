@@ -192,9 +192,8 @@ namespace HomeskzIfcImport::draw
 		gSDK->DefineCustomObject(TXString(kGraphicLegendPlugin), kCustomObjectPrefNever);
 	}
 
-	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::LegendCommand& command,
-						 const core::Vec2& where, MCObjectHandle filterViewport,
-						 LegendCounts& counts)
+	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::Vec2& where,
+						 MCObjectHandle filterViewport, LegendCounts& counts)
 	{
 		if (sheetLayer == nil)
 		{
