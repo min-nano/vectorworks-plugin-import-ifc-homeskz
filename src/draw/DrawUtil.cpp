@@ -458,30 +458,21 @@ namespace HomeskzIfcImport::draw
 		// 扱う**（DrawUtil.h の ViewportProjection）。
 		constexpr TStandardView kViewTop = standardViewTop;
 
-		// ビューポートを 1 つ描き直させる（＝オブジェクト情報パレットの「更新」ボタン相当）。
-		// 走ったら true。
+		// ビューポートに「更新が要る（out-of-date）」の印を立てる。立てられたら true。
 		//
-		// **out-of-date を立ててから更新する。** `Update` 系は「out-of-date なら描き直す」で
-		// あって「無条件に描き直す」ではなく、**投影（Project 2D）の切り替え**のように VW が
-		// out-of-date を立ててくれない変更のあとでは黙って何もしない。`IsDirty` / `SetDirty`
-		// がそのフラグそのものなので、立ててから更新し、**下りたかを読み戻して**返す。
-		//
-		// 更新の口は **`ISDK::UpdateViewport`**（OIP の「更新」ボタンに当たる ISDK の呼び出し。
-		// SDK のビューポート API を全部並べても「描き直させる」口はこれ 1 つ）。VWFC の
-		// `VWViewportObj::Update()` とは別経路なので、そちらで効かなかった件（重ね順）を
-		// こちらで確かめられる。
-		bool RefreshOne(MCObjectHandle viewport)
+		// **描き直しはしない。** 取り込みの中で描き直すと、どうやってもレイヤの重ね順が
+		// 届かないため（下記「取り込み中に描き直さない理由」）。印だけ立てて、実際の描画は
+		// VW に任せる。
+		bool MarkOutOfDate(MCObjectHandle viewport)
 		{
 			try
 			{
 				VWViewportObj vp(viewport);
 				vp.SetDirty(true);
-				gSDK->UpdateViewport(viewport);
-				return !vp.IsDirty();
+				return vp.IsDirty();
 			}
 			catch (...)
 			{
-				// 描き直せなくても図面は残る（ユーザーが「更新」を押せば直る）。
 				return false;
 			}
 		}
@@ -496,18 +487,18 @@ namespace HomeskzIfcImport::draw
 		// （＝ 3D の「上」でキャッシュを作り直させ）、その上で ON へ戻す。最後の更新は呼び出し
 		// 元（ConfigureViewport の末尾）が行い、そこで 2D/平面のキャッシュができる。
 		//
-		// **途中の更新も必ず RefreshOne で行う**——投影の切り替えでは out-of-date が立たない
-		// ので、素の更新では OFF 側のキャッシュが作り直されず、この「なぞり」が空振りする。
-		// 走ったかどうかはここでは問わない（作り直しの途中経過。図を仕上げるのは取り込みの
-		// 最後の RefreshViewports）。
+		// **途中で描き直さない。** かつては「OFF → 更新 → ON」と手動操作をなぞっていたが、
+		// その更新も取り込み中の描き直しなので取りやめた（下記「取り込み中に描き直さない
+		// 理由」）。**そもそも描画キャッシュを 1 つも作らなければ、作り直す必要も無い**
+		// ——VW が最初に描くのは取り込みが終わった後（＝正しい状態）になる。
+		// 投影の切り替え自体は残す（OFF → ON。設定としては同じ値に落ち着く）。
 		//
 		// **入ったかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも黙って
 		// 何もしないので、戻り値の無いまま「設定したつもり」で終わらせない。
-		bool ForcePlanView(VWViewportObj& viewport, MCObjectHandle handle)
+		bool ForcePlanView(VWViewportObj& viewport)
 		{
 			viewport.SetViewType(kViewTop);
 			viewport.SetProject2D(false);
-			static_cast<void>(RefreshOne(handle));
 			viewport.SetProject2D(true);
 			return viewport.GetProject2D();
 		}
@@ -539,7 +530,8 @@ namespace HomeskzIfcImport::draw
 	//                                                       何もしない）
 	//   * gSDK->UpdateViewport(vp)                        … 描き直させる（OIP の「更新」相当）。
 	//                                                       SDK のビューポート API で「描き直す」
-	//                                                       口はこれ 1 つ
+	//                                                       口はこれ 1 つ。**取り込み中は呼ばない**
+	//                                                       （DrawUtil.h の MarkViewportsOutOfDate）
 	ViewportSetup PrepareViewportSetup()
 	{
 		ViewportSetup setup;
@@ -616,12 +608,11 @@ namespace HomeskzIfcImport::draw
 			if (scale > 0.0)
 				vp.SetScale(scale);
 			if (projection == ViewportProjection::Plan)
-				finish.planViewApplied = ForcePlanView(vp, viewport);
+				finish.planViewApplied = ForcePlanView(vp);
 			vp.SetDescription(TXString(command.drawingTitle.c_str()));
 			vp.SetLocator(TXString(command.drawingNumber.c_str()));
-			// **ここでは描き直さない。** out-of-date のまま残し、取り込みの最後（undo イベントを
-			// 閉じた後）に RefreshViewports がまとめて描き直す——取り込みの途中で描き直すと
-			// レイヤの重ね順の並べ替えが届かないため（DrawUtil.h の RefreshViewports）。
+			// **描き直さない。** 「更新が要る」印だけを立てて図は VW に描かせる
+			// （DrawUtil.h の MarkViewportsOutOfDate「取り込み中に描き直さない理由」）。
 			vp.SetDirty(true);
 		}
 		catch (...)
@@ -632,17 +623,17 @@ namespace HomeskzIfcImport::draw
 		return finish;
 	}
 
-	std::size_t RefreshViewports(const ObjectHandles& viewports)
+	std::size_t MarkViewportsOutOfDate(const ObjectHandles& viewports)
 	{
-		std::size_t refreshed = 0;
+		std::size_t marked = 0;
 		for (const auto& [index, viewport] : viewports.table().handles)
 		{
 			if (viewport == nil)
 				continue;
-			if (RefreshOne(viewport))
-				++refreshed;
+			if (MarkOutOfDate(viewport))
+				++marked;
 		}
-		return refreshed;
+		return marked;
 	}
 
 	// 「命令インデックス → ハンドル」の対応表の所有者。**表の中身（MCObjectHandle）は

@@ -488,9 +488,8 @@ namespace HomeskzIfcImport::draw
 		// 場合**、ここで戻さないと注釈だけが空白のまま残る。
 		// 戻すのはビューポートと同じく**全クラス**（draw/DrawUtil の ShowAllViewportClasses）
 		// ——タグが身に付けているクラスを数え上げる必要はない。
-		// **ここでは描き直さない。** 描き直しは取り込みのいちばん最後（undo イベントを閉じた
-		// 後）に RefreshViewports がまとめて行うので、ここで 1 枚ずつ描き直すと同じ図を 2 度
-		// 描くだけになる（軸組図は数十枚あり、取り込みが目に見えて遅くなる）。クラスを表示へ
+		// **ここでは描き直さない**（取り込み中は 1 枚も描かない。draw/ExecuteDocument.h の
+		// markImportedViewportsOutOfDate）。立てるのは「更新が要る」印だけ。クラスを表示へ
 		// 戻すのは**設定**なので、ここでやっておく必要がある。
 		if (!placed.empty())
 		{

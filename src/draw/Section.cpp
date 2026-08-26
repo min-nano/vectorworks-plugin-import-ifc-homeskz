@@ -310,7 +310,8 @@ namespace HomeskzIfcImport::draw
 				viewport, sheetLayer, setup, command.viewport, ViewportProjection::Keep);
 			classesApplied += finish.classesApplied;
 			// 描き直しは取り込みの最後（undo イベントを閉じた後）にまとめて行うので、
-			// それまでハンドルを預けておく（draw/DrawUtil の RefreshViewports）。
+			// それまでハンドルを預けておく（draw/ExecuteDocument の
+			// markImportedViewportsOutOfDate）。
 			if (outViewports != nullptr)
 				outViewports->table().handles.emplace(commandIndex, viewport);
 			// 断面寸法データタグ。**並べ替え（ArrangeViewports）より前**に置く——注釈は

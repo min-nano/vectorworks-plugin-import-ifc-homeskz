@@ -244,24 +244,24 @@ namespace HomeskzIfcImport
 			// 完了ダイアログの前に進捗ダイアログを閉じる（2 枚重ねない）。
 			progress.close();
 
-			// **伏図・軸組図をここで描き直す。** 取り込みの中——undo イベントの中でも、閉じた
-			// 直後でも——描き直すと、デザインレイヤの重ね順の並べ替えが描画へ届かず、床が
-			// 柱・梁を覆ったままの絵が焼き付く（実機で確認。ユーザーが「更新」を押す・ファイルを
-			// 開き直すと正しくなる）。共通しているのは「取り込みが終わっている」ことなので、
-			// **undo イベントも進捗ダイアログも閉じた、取り込みの外側のここ**まで遅らせる
-			// （draw/ExecuteDocument.h の refreshImportedViewports）。
-			const draw::ViewportRefresh refresh = draw::refreshImportedViewports(viewports);
-			core::trace::log("refreshViewports: " + std::to_string(refresh.refreshed) + "/" +
+			// **伏図・軸組図は自分で描かない。「更新が要る」印を立てるだけ。** 取り込みの中で
+			// 描き直すと——undo イベントの中でも、閉じた直後でも、進捗ダイアログを閉じた後の
+			// ここでも——デザインレイヤの重ね順の並べ替えが描画へ届かず、床が柱・梁を覆った
+			// ままの絵が焼き付く（実機で 4 通り確認）。描画キャッシュを 1 つも作らずに渡せば、
+			// 最初に描くのは取り込みが終わった後の VW になり、そのとき並びは正しい
+			// （draw/ExecuteDocument.h の markImportedViewportsOutOfDate）。
+			const draw::ViewportRefresh refresh = draw::markImportedViewportsOutOfDate(viewports);
+			core::trace::log("markViewportsOutOfDate: " + std::to_string(refresh.marked) + "/" +
 							 std::to_string(refresh.total));
-			if (refresh.refreshed < refresh.total)
+			if (refresh.marked < refresh.total)
 			{
-				// 描き直せなかった図は生成時のまま描かれる（ユーザーが「更新」を押すまで）。
-				// 黙って間違った絵を残さないよう、完了ダイアログの診断行で伝える。
+				// 印を立てられなかった図は古い絵のまま表示されることがある。黙って間違った
+				// 絵を残さないよう、完了ダイアログの診断行で伝える。
 				if (!drawn.diagnostics.empty())
 					drawn.diagnostics += "\n";
-				drawn.diagnostics += "描き直せなかった図 " +
-									 std::to_string(refresh.total - refresh.refreshed) +
-									 " 枚（オブジェクト情報パレットの「更新」を押すと直ります）。";
+				drawn.diagnostics += "「更新が要る」印を立てられなかった図 " +
+									 std::to_string(refresh.total - refresh.marked) +
+									 " 枚（古い絵のまま表示されることがあります）。";
 			}
 
 			// 本文の組み立ては**無 SDK 側**（parse/Summary）が持つ。要素が増えても

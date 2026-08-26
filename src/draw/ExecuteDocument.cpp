@@ -44,11 +44,11 @@ namespace HomeskzIfcImport::draw
 		return executeDocument(document, noProgress);
 	}
 
-	ViewportRefresh refreshImportedViewports(const ObjectHandles& viewports)
+	ViewportRefresh markImportedViewportsOutOfDate(const ObjectHandles& viewports)
 	{
 		ViewportRefresh result;
 		result.total = viewports.table().handles.size();
-		result.refreshed = RefreshViewports(viewports);
+		result.marked = MarkViewportsOutOfDate(viewports);
 		return result;
 	}
 
@@ -62,9 +62,9 @@ namespace HomeskzIfcImport::draw
 			return counts;
 		counts.valid = true;
 
-		// 作った伏図・軸組図のビューポートを預ける先。**描き直しは取り込みが終わり切ってから**
-		// 呼び出し側が行う（refreshImportedViewports）。ここで描き直すと、レイヤの重ね順の
-		// 並べ替えが描画へ届かない（draw/ExecuteDocument.h の refreshImportedViewports）。
+		// 作った伏図・軸組図のビューポートを預ける先。**描き直しはしない**——「更新が要る」印を
+		// 立てるのは取り込みが終わり切ってから呼び出し側が行う
+		// （draw/ExecuteDocument.h の markImportedViewportsOutOfDate）。
 		ObjectHandles ownViewports;
 		ObjectHandles& viewports = outViewports != nullptr ? *outViewports : ownViewports;
 
@@ -279,9 +279,9 @@ namespace HomeskzIfcImport::draw
 		counts.undoArmed = undoScope.armed();
 		counts.undoPartial = undoScope.partial();
 
-		// **図の描き直しはここではしない。** ビューポートは out-of-date のまま残し、取り込みが
-		// 終わり切ってから（undo イベントも進捗ダイアログも閉じた後）呼び出し側が
-		// refreshImportedViewports で描き直す。
+		// **図は描かない。** ビューポートは描画キャッシュを持たないまま残し、「更新が要る」印を
+		// 立てるのは取り込みが終わり切ってから（undo イベントも進捗ダイアログも閉じた後）
+		// 呼び出し側が行う（markImportedViewportsOutOfDate）。実際に描くのは VW。
 		return counts;
 	}
 } // namespace HomeskzIfcImport::draw

@@ -50,8 +50,9 @@ namespace HomeskzIfcImport::draw
 	// 置かれるが寸法が空になる（draw/Tag.h）。
 	//
 	// outViewports には作ったビューポートを命令の並び順で記録する（渡さなければ記録しない）。
-	// **描き直しは取り込みのいちばん最後にまとめて行う**ので、それまでハンドルを持ち回る必要が
-	// ある（draw/DrawUtil の RefreshViewports。ここで描き直すと重ね順が届かない）。
+	// **取り込み中は 1 枚も描かない**ので、「更新が要る」印を立てるところまでハンドルを持ち回る
+	// （draw/ExecuteDocument の markImportedViewportsOutOfDate。取り込み中に描くと重ね順が
+	// 届かない）。
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
 						   std::string* note = nullptr,
 						   const ObjectHandles* memberHandles = nullptr,

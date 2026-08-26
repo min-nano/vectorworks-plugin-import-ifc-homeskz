@@ -34,9 +34,9 @@
 //	返すのに GetNumViewportLayerStackingOverrides は 0 のままで、OIP も「順序を上書き:
 //	いいえ」だった——ので捨てた。**並べ替えは要素を 1 つも描く前**に済ませる（draw/Story.h の
 //	reorderStoryLayers。「ビューポート生成より前」では足りず、取り込み直後だけ床が柱・梁を
-//	覆う症状が残った）。**それでも足りず**、いまは図の描き直しそのものを取り込みの最後
-//	——undo イベントを閉じた後——へ回している（draw/DrawUtil の RefreshViewports）。
-//	ここは設定だけを行い、描き直さない。
+//	覆う症状が残った）。**それでも足りず**、いまは**取り込み中に 1 枚も描かない**——
+//	ビューポートは設定だけして「更新が要る」印を立て、実際に描くのは VW に任せる
+//	（draw/ExecuteDocument.h の markImportedViewportsOutOfDate に経緯）。
 //
 
 #include "PluginPrefix.h"
@@ -128,7 +128,8 @@ namespace HomeskzIfcImport::draw
 			if (!finish.planViewApplied)
 				++missingPlanView;
 			// 描き直しは取り込みの最後（undo イベントを閉じた後）にまとめて行うので、
-			// それまでハンドルを預けておく（draw/DrawUtil の RefreshViewports）。
+			// それまでハンドルを預けておく（draw/ExecuteDocument の
+			// markImportedViewportsOutOfDate）。
 			if (outViewports != nullptr)
 				outViewports->table().handles.emplace(commandIndex, viewport);
 

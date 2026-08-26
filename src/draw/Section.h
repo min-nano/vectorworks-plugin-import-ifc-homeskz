@@ -42,8 +42,8 @@ namespace HomeskzIfcImport::draw
 	// 対応表を渡す（断面寸法データタグの関連付け先。伏図と同じ。draw/Tag.h）。
 	//
 	// outViewports には作った断面ビューポートを命令の並び順で記録する（渡さなければ記録しない）。
-	// **描き直しは取り込みのいちばん最後にまとめて行う**ので、それまでハンドルを持ち回る
-	// （draw/DrawUtil の RefreshViewports。伏図と同じ理由）。
+	// **取り込み中は 1 枚も描かない**ので、「更新が要る」印を立てるところまでハンドルを持ち回る
+	// （draw/ExecuteDocument の markImportedViewportsOutOfDate。伏図と同じ理由）。
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
 							 std::string* note = nullptr,
 							 const ObjectHandles* memberHandles = nullptr,
