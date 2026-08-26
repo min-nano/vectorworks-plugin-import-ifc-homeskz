@@ -169,7 +169,15 @@ namespace HomeskzIfcImport::draw
 			// ものが違えば図の中身の広がりも違うので、単に外形の中心を用紙の中心へ置くと
 			// 用紙をめくるたびに建物がずれる。建物の中心（anchor）が常に同じ点へ来るよう、
 			// その差だけずらした位置へ外形の中心を合わせる。
-			// **データタグより前に置く**（注釈まで含めた外形で測るとタグの有無でずれる）。
+			//
+			// ★**測る → データタグを置く → 動かす**の順で行う（draw/DrawUtil の
+			// MoveViewportBy）。タグは注釈へ置いた実位置を測って直す作りで、その実測は
+			// ビューポートが用紙のどこに在るかに影響されるため、先に動かすとタグだけが
+			// 同じ量ずれる。注釈はビューポートと一緒に動くので、後から動かせば位置は保たれる。
+			core::Vec2 drawnCenter;
+			core::Vec2 drawnSize;
+			const bool measured = MeasureViewport(viewport, drawnCenter, drawnSize);
+			core::Vec2 delta;
 			if (haveContent && layout.has_value())
 			{
 				core::Vec2 target = layout->viewportCenter;
@@ -181,20 +189,28 @@ namespace HomeskzIfcImport::draw
 												 (sheetMin.y + sheetMax.y) / 2.0};
 					target = target + ((sheetCenter - anchor) * (1.0 / layout->scale));
 				}
-				core::Vec2 drawn;
-				if (!PlaceViewport(viewport, target, &drawn))
+				if (!measured)
 					++missingPlacement;
-				// **見積もりどおりに収まったかを測って確かめる**（core/Layout.h の
-				// PlanLayout::plan）。命令の座標には現れないもの（通り芯の丸など）が図に
-				// 出るぶん、実際の図は見積もりより大きくなりうる。
-				else if (drawn.x > layout->plan.width() + kFitTol ||
-						 drawn.y > layout->plan.height() + kFitTol)
-					++oversized;
+				else
+				{
+					delta = target - drawnCenter;
+					// **見積もりどおりに収まったかを測って確かめる**（core/Layout.h の
+					// PlanLayout::plan）。命令の座標には現れないもの（通り芯の丸など）が
+					// 図に出るぶん、実際の図は見積もりより大きくなりうる。
+					if (drawnSize.x > layout->plan.width() + kFitTol ||
+						drawnSize.y > layout->plan.height() + kFitTol)
+						++oversized;
+				}
 			}
 
 			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport
-			// の最後が更新で、注釈はその後に足しても図に出る）。
+			// の最後が更新で、注釈はその後に足しても図に出る）。**ビューポートを動かす前**
+			// でなければならない（上記 ★）。
 			drawViewportTags(viewport, command.viewport, members, tags);
+
+			// 用紙の上へ動かす（注釈も一緒に動く）。
+			if (measured)
+				MoveViewportBy(viewport, delta);
 
 			// グラフィック凡例は**ビューポートではなくシートレイヤ**に載せる（用紙の上）。
 			// タグの後に置くのは、凡例がカレントレイヤをこのシートレイヤへ移すため——

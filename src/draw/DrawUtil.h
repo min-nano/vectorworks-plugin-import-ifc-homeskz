@@ -351,17 +351,23 @@ namespace HomeskzIfcImport::draw
 	// 規約を 1 つ決めて実機で確かめる方がよい（docs/DEV-NOTES.md M16「用紙の位置」）。
 	core::PaperArea SheetPageArea(MCObjectHandle sheetLayer);
 
-	// ビューポートを用紙の上で動かし、**その外形の中心**を center（用紙 mm）へ合わせる。
-	// 測れなければ何もせず false（並びが崩れるだけで図は残る）。size が非 nullptr なら、
-	// 測った外形の大きさ（用紙 mm）を書き戻す——**見積もった縮尺で本当に収まったか**を
-	// 呼び出し側が確かめて診断へ残すために使う（core/Layout.h の PlanLayout::plan）。
+	// ビューポートの外形（用紙 mm）を測る。中心と大きさを書き戻し、測れれば true。
 	//
 	// 【なぜ測るのか】ビューポートの実寸は**描いてみるまで分からない**（映る図形の広がりで
 	// 決まる）。したがって「どこに置くか」は生成・更新の後に測ってから決める（データタグを
-	// 置いた後に測って直すのと同じ考え方。draw/Tag）。**注釈（データタグ）を置く前に呼ぶこと**
-	// ——注釈まで含めた外形で測ると、タグの有無で図の位置がずれる。
-	bool PlaceViewport(MCObjectHandle viewport, const core::Vec2& center,
-					   core::Vec2* size = nullptr);
+	// 置いた後に測って直すのと同じ考え方。draw/Tag）。大きさは**見積もった縮尺で本当に
+	// 収まったか**を確かめて診断へ残すのにも使う（core/Layout.h の PlanLayout::plan）。
+	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size);
+
+	// ビューポートを用紙の上で delta（用紙 mm）だけ動かす。注釈（データタグ）は
+	// ビューポートと一緒に動く。
+	//
+	// ★**測ってから動かすまでの間にデータタグを置くこと**（順序を入れ替えてはならない）。
+	// タグは「注釈へ置いた実位置を測って目標との差だけ動かす」作りで（draw/Tag の
+	// MovePendingTags）、**その実測はビューポートが用紙のどこに在るかに影響される**。
+	// 先にビューポートを動かしてからタグを置くと、動かした分だけタグが図からずれる
+	// （M16 のローカル確認で実測。伏図・軸組図とも全タグが同じ向きへ外れていた）。
+	void MoveViewportBy(MCObjectHandle viewport, const core::Vec2& delta);
 
 	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
 	// （draw/ObjectHandles.h の ObjectHandles）は SDK 非依存のヘッダに置いてあり、

@@ -107,10 +107,11 @@ TEST(FitScaleOnlyEverReturnsLadderValues)
 
 TEST(PlanLayoutKeepsTheLegendColumnClearOfTheDrawing)
 {
-	// 8m × 5m の建物を A3 に。作図域は 390 × 267mm、凡例のぶん（150 + 15）を除くと
-	// 図に使えるのは 225 × 267mm → 1/50（160 × 100mm）が最大。
+	// 8m × 5m の建物を A3 に。作図域は 390 × 267mm、凡例のぶん（60 + 15）を除くと
+	// 図に使えるのは 315 × 267mm → 1/30（266.7 × 166.7mm）が最大（1/25 では 320mm
+	// となって横にはみ出す）。
 	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3());
-	CHECK(layout.scale == 50.0);
+	CHECK(layout.scale == 30.0);
 
 	// 図の中心は「凡例のぶんを除いた領域」の中心＝左寄り。図の右端が凡例の左端を越えない。
 	const PaperArea area = core::drawingArea(a3());

@@ -317,20 +317,31 @@ namespace HomeskzIfcImport::draw
 								  ViewportProjection::Keep, arrange ? layout.scale : 0.0)
 					.classesApplied;
 
-			// 用紙の上の割り当てられたマスへ置く。**注釈（データタグ）より前に置く**
-			// ——注釈まで含めた外形で測ると、タグの有無で図の位置がずれる。注釈は
-			// ビューポートと一緒に動くので、後から足しても図の上に留まる。
+			// 用紙の上の割り当てられたマスへ置く。★**測る → データタグを置く → 動かす**の
+			// 順で行う（draw/DrawUtil の MoveViewportBy）——タグの位置合わせは注釈へ置いた
+			// 実位置の実測に依り、その実測はビューポートが用紙のどこに在るかに影響される。
+			// 先に動かすとタグだけが同じ量ずれる。
+			core::Vec2 drawnCenter;
+			core::Vec2 drawnSize;
+			const bool measured = MeasureViewport(viewport, drawnCenter, drawnSize);
+			core::Vec2 delta;
 			if (arrange)
 			{
-				core::Vec2 drawn;
-				if (!PlaceViewport(viewport, core::sectionSlotCenter(layout, slot), &drawn))
+				if (!measured)
 					++missingPlacement;
-				// マス（layout.cell）に収まったかを測って確かめる。はみ出していれば隣の図と
-				// 重なるので、黙って重ねずに診断へ残す（伏図と同じ考え方。M16）。
-				else if (drawn.x > layout.cell.x + kFitTol || drawn.y > layout.cell.y + kFitTol)
-					++oversized;
+				else
+				{
+					delta = core::sectionSlotCenter(layout, slot) - drawnCenter;
+					// マス（layout.cell）に収まったかを測って確かめる。はみ出していれば隣の
+					// 図と重なるので、黙って重ねずに診断へ残す（伏図と同じ考え方。M16）。
+					if (drawnSize.x > layout.cell.x + kFitTol ||
+						drawnSize.y > layout.cell.y + kFitTol)
+						++oversized;
+				}
 			}
 			drawViewportTags(viewport, command.viewport, members, tags);
+			if (arrange && measured)
+				MoveViewportBy(viewport, delta);
 			++drawn;
 		}
 

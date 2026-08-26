@@ -51,7 +51,13 @@ namespace HomeskzIfcImport::core
 	// グラフィック凡例の箱幅（用紙 mm）。**凡例のために用紙へ空けておく幅でもある**ので
 	// core が持ち、draw/Legend が PIO の BoxWidth へ与える値と共有する（同じ値を 2 か所に
 	// 書かない。CLAUDE.md「重複を作らない置き場所」）。
-	inline constexpr double kLegendBoxWidth = 150.0;
+	//
+	// ★**広く空けすぎると伏図が 1 段階小さい縮尺になる。** 当初は 150mm だったが、実機の
+	// 凡例は（アンカーボルト等が数行並ぶだけなので）25mm ほどの幅にしか広がらず、残りは
+	// ただの余白だった。A3 横だと 150mm を空けたぶんで図の領域が 225mm しか残らず、
+	// 1/50 で収まる建物が 1/75 まで落ちていた（M16 のローカル確認）。実際に要る幅に見合う
+	// 60mm へ縮める——凡例が横に伸びても収まり、図には 90mm 返る。
+	inline constexpr double kLegendBoxWidth = 60.0;
 
 	// 用紙の大きさが読めなかったときに使う既定（A3 横。用紙 mm）。**シートレイヤから
 	// 読めた値があれば必ずそちらを使う**（draw/DrawUtil の SheetPageArea）。
