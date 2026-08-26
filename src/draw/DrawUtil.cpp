@@ -486,7 +486,7 @@ namespace HomeskzIfcImport::draw
 	//   * VWClass::ForEachClass(true, cb)                 … 図面の全クラスの列挙
 	//                                                       （ISDK::ForEachClass の VWFC 版）
 	//   * gSDK->SetViewportClassVisibility(vp, idx, 0)    … クラス表示（既定は非表示）
-	//   * VWViewportObj(vp).SetScale / SetDescription / SetLocator / Update
+	//   * VWViewportObj(vp).SetScale / GetScale / SetDescription / SetLocator / Update
 	//                                                     … 縮尺（1003）・図面タイトル（1032）・
 	//                                                       図番（1033）・描画更新
 	//   * VWViewportObj(vp).SetViewType / SetProject2D / GetProject2D
@@ -567,15 +567,18 @@ namespace HomeskzIfcImport::draw
 		{
 			VWViewportObj vp(viewport);
 			if (scale > 0.0)
-			{
 				vp.SetScale(scale);
-				finish.scale = scale;
-			}
 			if (projection == ViewportProjection::Plan)
 				finish.planViewApplied = ForcePlanView(vp);
 			vp.SetDescription(TXString(command.drawingTitle.c_str()));
 			vp.SetLocator(TXString(command.drawingNumber.c_str()));
 			vp.Update();
+
+			// **持ち帰る縮尺は「書いた値」ではなく「仕上げ終わりのビューポートの値」**。
+			// 実機では 1:50 のレイヤを与えたビューポートが 1:100 のままになり、その値を
+			// 信じて書いた凡例の縮率だけが図とずれた（投影の作り直しで戻されている疑いが
+			// 濃い）。ここで読み直せば、凡例は必ず図に合う。
+			finish.scale = vp.GetScale();
 		}
 		catch (...)
 		{
