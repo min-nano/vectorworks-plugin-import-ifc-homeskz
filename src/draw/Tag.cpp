@@ -488,19 +488,16 @@ namespace HomeskzIfcImport::draw
 		// 場合**、ここで戻さないと注釈だけが空白のまま残る。
 		// 戻すのはビューポートと同じく**全クラス**（draw/DrawUtil の ShowAllViewportClasses）
 		// ——タグが身に付けているクラスを数え上げる必要はない。
-		// **ここでは描き直さない**（取り込み中は 1 枚も描かない。draw/ExecuteDocument.h の
-		// markImportedViewportsOutOfDate）。立てるのは「更新が要る」印だけ。クラスを表示へ
-		// 戻すのは**設定**なので、ここでやっておく必要がある。
 		if (!placed.empty())
 		{
 			counts.classesShown += ShowAllViewportClasses(viewport);
 			try
 			{
-				VWViewportObj(viewport).SetDirty(true);
+				VWViewportObj(viewport).Update();
 			}
 			catch (...)
 			{
-				// 立てられなくてもタグ自体は図面に残る（表示は次の描き直しで追いつく）。
+				// 更新できなくてもタグ自体は図面に残る（表示は次の更新で追いつく）。
 				++counts.updateFailed;
 			}
 		}

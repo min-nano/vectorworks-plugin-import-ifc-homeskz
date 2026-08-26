@@ -43,12 +43,7 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 
-#include "VWFC/VWObjects/VWLayerObj.h" // レイヤ高さの読み取り（診断ログの計測）
-
-#include <algorithm>
-#include <cmath>
 #include <cstddef>
-#include <iterator>
 #include <ranges>
 #include <string>
 #include <vector>
@@ -61,18 +56,6 @@ namespace HomeskzIfcImport::draw
 		// ストーリバウンドで決まるためここは器の既定。
 		constexpr double kTemplateScale = 1.0;
 		constexpr double kTemplateWallHeight = 2400.0;
-
-		// **レイヤを作る順序の向き。** true なら「前面に来るものから作る」。
-		//
-		// 【なぜ作る順序で決めるのか】並べ替え（reorderStoryLayers）の結果は、取り込み中に
-		// 作るビューポートの描画へ届かない（実機で 4 通り試して全滅。draw/Story.h）。届かない
-		// のは**並べ替え**であって、**作った順そのもの**は最初から図面の並びなので、希望順に
-		// 沿って作れば並べ替えが要らなくなる——というのがこの向きの意味。
-		//
-		// **どちらが正しいかは実機でしか分からない。** 取り込み後に reorderStoryLayers が
-		// 「1 つも動かさなかった」なら当たり、「逆順だった」と診断行に出たらこの定数を
-		// 反転させる（draw/ExecuteDocument の診断行）。
-		constexpr bool kCreateFrontLayerFirst = true;
 
 		// 1 つのストーリレベルをレベルテンプレート経由で生成し、紐づくレイヤを意図した名前へ
 		// リネームする。生成に失敗したら静かに戻る（1 レベルの欠損で全体を止めない）。
@@ -103,96 +86,9 @@ namespace HomeskzIfcImport::draw
 				RecordCreatedLayer(layer);
 			}
 		}
-
-		// wanted（図面のオブジェクト列と同じ**背面→前面**の並び）が、いまの図面でその順に
-		// 並んでいるか。**間に別のレイヤが挟まっていてもよい**（ユーザーが自分で作った
-		// レイヤの位置には口を出さない）——見るのは wanted どうしの前後関係だけ。
-		// レイヤ 1 枚の素性を「名前[ストーリ/レベル種別/レベル高さ]」の形にする（診断ログ用）。
-		//
-		// **VW がストーリ従属レイヤをどんな規則で並べているかを突き止めるための計測。** 実機で
-		// 分かっているのは「作った順は完全に無視され、ストーリ単位でまとまって上階が前面・
-		// 各ストーリの先頭が n-FL」というところまで。残る候補はレベルの高さか、レベル種別の
-		// 登録順か、その他の内部順なので、突き合わせに要る値をそのまま並べる。
-		std::string DescribeLayer(MCObjectHandle layer)
-		{
-			TXString name;
-			gSDK->GetObjectName(layer, name);
-
-			std::string storyName = "-";
-			const MCObjectHandle story = gSDK->GetStoryOfLayer(layer);
-			if (story != nil)
-			{
-				TXString storyText;
-				gSDK->GetObjectName(story, storyText);
-				storyName = storyText.GetStdString();
-			}
-
-			std::string levelType = gSDK->GetLayerLevelType(layer).GetStdString();
-			if (levelType.empty())
-				levelType = "-";
-
-			std::string elevation;
-			try
-			{
-				elevation = std::to_string(std::llround(VWLayerObj(layer).GetElevation()));
-			}
-			catch (...)
-			{
-				// 高さを読めなくても他の値は出す（1 枚の欠損で計測を止めない）。
-				elevation = "?";
-			}
-
-			return name.GetStdString() + "[" + storyName + "/" + levelType + "/" + elevation + "]";
-		}
-
-		// 図面のレイヤの並びを**前面→背面**の 1 行にする（診断ログ用）。希望順に出てこない
-		// レイヤ（ユーザーが自分で作ったもの）もそのまま出す——「VW がどう並べているか」を
-		// 見るのが目的なので、省くと分からなくなる。
-		std::string DescribeStackOrder(const std::vector<MCObjectHandle>& chain)
-		{
-			std::string text;
-			for (const MCObjectHandle layer : std::ranges::reverse_view(chain))
-			{
-				if (!text.empty())
-					text += " | ";
-				text += DescribeLayer(layer);
-			}
-			return text;
-		}
-
-		// レベル種別の**登録順**（診断ログ用）。VW の並べ方がこの順に沿っているかを見る。
-		std::string DescribeLevelTypes()
-		{
-			const short count = gSDK->GetNumLayerLevelTypes();
-			std::string text;
-			for (short index = 0; index < count; ++index)
-			{
-				if (!text.empty())
-					text += " | ";
-				text +=
-					std::to_string(index) + "=" + gSDK->GetLayerLevelTypeName(index).GetStdString();
-			}
-			return text;
-		}
-
-		bool MatchesStackOrder(const std::vector<MCObjectHandle>& wanted)
-		{
-			const std::vector<MCObjectHandle> chain = DesignLayersInStackOrder();
-			std::size_t at = 0;
-			for (const MCObjectHandle layer : wanted)
-			{
-				// chain を前から舐めて wanted を順に拾えるなら、前後関係は希望どおり。
-				const auto found =
-					std::find(chain.begin() + static_cast<std::ptrdiff_t>(at), chain.end(), layer);
-				if (found == chain.end())
-					return false;
-				at = static_cast<std::size_t>(found - chain.begin()) + 1;
-			}
-			return true;
-		}
 	} // namespace
 
-	LayerOrderResult reorderStoryLayers(const core::Document& document)
+	std::size_t reorderStoryLayers(const core::Document& document)
 	{
 		// 希望順は**前面→背面**（"共通" が先頭＝最前面。core::desiredStoryLayerOrder）。
 		// 伏図記号レイヤ（"{to}-柱伏図記号"。M12）はストーリに属さない独立レイヤで story
@@ -201,64 +97,25 @@ namespace HomeskzIfcImport::draw
 		const std::vector<std::string> desired =
 			core::desiredStoryLayerOrder(document.stories, planMarkLayerNames(document));
 
-		// 図面のオブジェクト列は**背面→前面**（先頭が最背面で、NextObject が前面へ向かう）ので、
-		// 希望順を逆に辿って「あるべき列の並び」を作る。希望順に出てこないレイヤ（ユーザーが
-		// 別途作ったもの）は触らない。GetNamedLayer が nil を返すレイヤは黙って飛ばす
-		// （要素の描画がスキップされてレイヤが無い場合など）。
-		std::vector<MCObjectHandle> wanted;
+		// 図面のオブジェクト列は**背面→前面**（先頭が最背面で、NextObject が前面へ向かう）。
+		// したがって希望順を**逆から**辿り、直前に置いたレイヤの「後ろ」へ次を挿していくと、
+		// 列全体が希望どおりの重ね順になる。
+		//
+		// 希望順に出てこないレイヤ（ユーザーが別途作ったもの・まだ生成されていないもの）は
+		// 触らない。GetNamedLayer が nil を返すレイヤは黙って飛ばす（要素の描画がスキップ
+		// されてレイヤが無い場合など）。
+		std::size_t moved = 0;
+		MCObjectHandle previous = nil;
 		for (const std::string& name : std::ranges::reverse_view(desired))
 		{
 			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
-			if (layer != nil)
-				wanted.push_back(layer);
-		}
-
-		// **既に希望どおりなら 1 つも動かさない。** 呼び直しても図面を触らないので、
-		// 「描画の前に並べて、伏図の直前に確かめる」という 2 度呼びが安全にできる。
-		LayerOrderResult result;
-		result.trace = "希望（前面→背面）: " +
-					   [&]
-		{
-			std::string text;
-			for (const std::string& name : desired)
-			{
-				if (!text.empty())
-					text += " | ";
-				text += name;
-			}
-			return text;
-		}() +
-					   "\nレベル種別の登録順: " + DescribeLevelTypes() +
-					   "\n実際（並べ替え前・前面→背面。名前[ストーリ/レベル種別/レベル高さ]）: " +
-					   DescribeStackOrder(DesignLayersInStackOrder());
-
-		result.wasOrdered = MatchesStackOrder(wanted);
-		result.ordered = result.wasOrdered;
-		if (result.ordered)
-			return result;
-
-		// 逆順だったかも見ておく（作る順序の向きが逆だった、という切り分けのため。
-		// draw/Story.cpp の kCreateFrontLayerFirst）。
-		{
-			const std::vector<MCObjectHandle> reversed(wanted.rbegin(), wanted.rend());
-			result.wasReversed = MatchesStackOrder(reversed);
-		}
-
-		// 直前に置いたレイヤの「後ろ」（＝前面側）へ次を挿していくと、列全体が希望どおりになる。
-		MCObjectHandle previous = nil;
-		for (const MCObjectHandle layer : wanted)
-		{
+			if (layer == nil)
+				continue;
 			if (previous != nil && gSDK->InsertObjectAfter(layer, previous))
-				++result.moved;
+				++moved;
 			previous = layer;
 		}
-
-		// **並び替わったかは読み戻して確かめる**（moved は「呼び出しが true を返した数」で
-		// しかない）。ここが false なら伏図で床・野地板が柱・梁を覆う。
-		result.ordered = MatchesStackOrder(wanted);
-		result.trace +=
-			"\n実際（並べ替え後・前面→背面）: " + DescribeStackOrder(DesignLayersInStackOrder());
-		return result;
+		return moved;
 	}
 
 	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress)
@@ -292,13 +149,7 @@ namespace HomeskzIfcImport::draw
 			gSDK->CreateLayerLevelType(levelTypeName);
 		}
 
-		// **ストーリを先に全部作り、レイヤは後からまとめて作る。** レイヤの重ね順は
-		// **作る順で決まる**ものとして扱い（並べ替えは取り込み中の描画へ届かない。
-		// draw/Story.h の reorderStoryLayers）、希望順に沿った順序で作りたいため、
-		// 「ストーリを作る」段と「レベル（＝レイヤ）を作る」段を分ける。
 		std::size_t count = 0;
-		std::vector<MCObjectHandle> stories; // commands と同じ並び（作れなかった階は nil）
-		stories.reserve(commands.size());
 		for (const core::StoryCommand& command : commands)
 		{
 			// 中止（進捗ダイアログのキャンセル）は残りを作らずに抜ける。進捗は階数で報告し、
@@ -317,72 +168,18 @@ namespace HomeskzIfcImport::draw
 				gSDK->CreateStory(storyName, suffix);
 				story = gSDK->GetNamedObject(storyName);
 			}
-			stories.push_back(story);
 			if (story == nil)
 				continue;
 
 			// ストーリ高さは CreateStory 直後・レベル追加前に設定する。直後に設定しないと
 			// 「既定高さ 0 のストーリが複数」となり次の CreateStory が衝突して失敗し得る。
 			gSDK->SetStoryElevation(story, command.elevation);
+
+			for (const core::LevelCommand& level : command.levels)
+				CreateStoryLevelViaTemplate(story, level.type, level.offset, level.layer);
+
 			++count;
 		}
-
-		// レイヤ（ストーリレベル）を**希望する重ね順に沿った順序で**作る。順序の意味は
-		// kCreateFrontLayerFirst（前面のものから作る＝新しいレイヤが背面へ入る、という
-		// VW の並べ方を前提にする）。希望順に出てこないレイヤ（想定外）は最後に作る。
-		std::vector<const core::LevelCommand*> levels; // 作る順
-		std::vector<MCObjectHandle> owners;			   // levels と同じ並びのストーリ
-		const std::vector<std::string> desired =
-			core::desiredStoryLayerOrder(commands, planMarkLayerNames(document));
-		const auto pushLevel = [&](const core::LevelCommand& level, MCObjectHandle story)
-		{
-			levels.push_back(&level);
-			owners.push_back(story);
-		};
-		std::vector<bool> queued; // levels に入れたか（命令の並びで持つ）
-		std::size_t levelCount = 0;
-		for (const core::StoryCommand& command : commands)
-			levelCount += command.levels.size();
-		queued.assign(levelCount, false);
-		const auto forEachLevel = [&](const auto& visit)
-		{
-			std::size_t index = 0;
-			for (std::size_t s = 0; s < commands.size() && s < stories.size(); ++s)
-			{
-				for (const core::LevelCommand& level : commands[s].levels)
-					visit(index++, level, stories[s]);
-			}
-		};
-		for (const std::string& name : desired)
-		{
-			forEachLevel(
-				[&](std::size_t index, const core::LevelCommand& level, MCObjectHandle story)
-				{
-					if (queued[index] || level.layer != name || story == nil)
-						return;
-					queued[index] = true;
-					pushLevel(level, story);
-				});
-		}
-		// 希望順に載っていないレベル（あれば）は最後に。
-		forEachLevel(
-			[&](std::size_t index, const core::LevelCommand& level, MCObjectHandle story)
-			{
-				if (queued[index] || story == nil)
-					return;
-				queued[index] = true;
-				pushLevel(level, story);
-			});
-
-		if (!kCreateFrontLayerFirst)
-		{
-			std::ranges::reverse(levels);
-			std::ranges::reverse(owners);
-		}
-		for (std::size_t i = 0; i < levels.size(); ++i)
-			CreateStoryLevelViaTemplate(owners[i], levels[i]->type, levels[i]->offset,
-										levels[i]->layer);
-
 		return count;
 	}
 } // namespace HomeskzIfcImport::draw

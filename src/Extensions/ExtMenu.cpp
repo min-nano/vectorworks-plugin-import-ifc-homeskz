@@ -236,39 +236,11 @@ namespace HomeskzIfcImport
 			// 図面変更は draw 側が自前の undo イベント（draw::ImportUndoScope）で包む。
 			// executeDocument から戻った時点でイベントは閉じているので、building=no に
 			// なっているはず——そこが崩れると「取り消し」で図面が壊れるので、ログで見る。
-			// 作った伏図・軸組図のビューポートを受け取る。**描き直しはここではしない**（下）。
-			draw::ObjectHandles viewports;
-			draw::DrawCounts drawn = draw::executeDocument(document, progress, &viewports);
+			const draw::DrawCounts drawn = draw::executeDocument(document, progress);
 			LogUndoState("afterDraw");
 
 			// 完了ダイアログの前に進捗ダイアログを閉じる（2 枚重ねない）。
 			progress.close();
-
-			// **伏図・軸組図は自分で描かない。「更新が要る」印を立てるだけ。** 取り込みの中で
-			// 描き直すと——undo イベントの中でも、閉じた直後でも、進捗ダイアログを閉じた後の
-			// ここでも——デザインレイヤの重ね順の並べ替えが描画へ届かず、床が柱・梁を覆った
-			// ままの絵が焼き付く（実機で 4 通り確認）。描画キャッシュを 1 つも作らずに渡せば、
-			// 最初に描くのは取り込みが終わった後の VW になり、そのとき並びは正しい
-			// （draw/ExecuteDocument.h の markImportedViewportsOutOfDate）。
-			const draw::ViewportRefresh refresh = draw::markImportedViewportsOutOfDate(viewports);
-			// **レイヤの重ね順の実測**を診断ログへ出す（完了ダイアログには出さない。長いので）。
-			// VW が図面のレイヤをどう並べているのかは実機でしか分からず、これが唯一の
-			// 持ち帰り手段（draw/Story の reorderStoryLayers が組み立てる）。
-			if (!drawn.trace.empty())
-				core::trace::log("layerOrder:\n" + drawn.trace);
-
-			core::trace::log("markViewportsOutOfDate: " + std::to_string(refresh.marked) + "/" +
-							 std::to_string(refresh.total));
-			if (refresh.marked < refresh.total)
-			{
-				// 印を立てられなかった図は古い絵のまま表示されることがある。黙って間違った
-				// 絵を残さないよう、完了ダイアログの診断行で伝える。
-				if (!drawn.diagnostics.empty())
-					drawn.diagnostics += "\n";
-				drawn.diagnostics += "「更新が要る」印を立てられなかった図 " +
-									 std::to_string(refresh.total - refresh.marked) +
-									 " 枚（古い絵のまま表示されることがあります）。";
-			}
 
 			// 本文の組み立ては**無 SDK 側**（parse/Summary）が持つ。要素が増えても
 			// ここは変わらない（docs/DEV-NOTES.md M15「完了文言の集約」）。

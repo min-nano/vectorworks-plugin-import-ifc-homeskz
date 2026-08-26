@@ -103,22 +103,13 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	bool prepareGridLayer(const core::Document& document)
-	{
-		if (document.grids.empty())
-			return false;
-		// 通り芯はすべて「共通」レイヤ（全命令で同一）。最初の命令のレイヤ名で用意する。
-		// 通り芯は**自分でレイヤを作ってよい**唯一の要素（他はストーリ由来のレイヤに乗る）。
-		return PrepareLayer(document.grids.front().layer) != nil;
-	}
-
 	std::size_t drawGrids(const core::Document& document, core::ProgressReporter& progress)
 	{
 		if (document.grids.empty())
 			return 0;
 
-		// レイヤは前倒しで用意済み（prepareGridLayer）。ここでは取り直してアクティブにする
-		// だけ——同じ呼び出しなので、まだ無ければこの場で作る。
+		// 通り芯はすべて「共通」レイヤ（全命令で同一）。最初の命令のレイヤ名で用意する。
+		// 通り芯は**自分でレイヤを作ってよい**唯一の要素（他はストーリ由来のレイヤに乗る）。
 		PrepareLayer(document.grids.front().layer);
 
 		std::size_t drawn = 0;

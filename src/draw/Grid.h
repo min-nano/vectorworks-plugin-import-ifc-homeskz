@@ -29,12 +29,4 @@ namespace HomeskzIfcImport::draw
 	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
 	// 決める）。描けたところまでは図面に残る。
 	std::size_t drawGrids(const core::Document& document, core::ProgressReporter& progress);
-
-	// 通り芯を置くデザインレイヤ（"共通"）を**通り芯を描くより前に**用意する（作れたら true）。
-	//
-	// 【なぜ前倒しするのか】レイヤの重ね順は**作る順で決まる**ものとして扱っている
-	// （draw/Story.cpp の kCreateFrontLayerFirst。並べ替えは取り込み中の描画へ届かない）。
-	// "共通" は希望順のいちばん前面なので、ストーリのレイヤより先に作る必要がある。
-	// 通り芯が 1 本も無ければ何もしない（空のレイヤを作らない）。
-	bool prepareGridLayer(const core::Document& document);
 } // namespace HomeskzIfcImport::draw

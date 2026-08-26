@@ -222,8 +222,7 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
-							 std::string* note, const ObjectHandles* memberHandles,
-							 ObjectHandles* outViewports)
+							 std::string* note, const ObjectHandles* memberHandles)
 	{
 		const std::vector<core::SectionCommand>& commands = document.sections;
 		if (commands.empty())
@@ -259,7 +258,6 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingViewports = 0;
 		std::size_t missingRenderMode = 0;
 		std::size_t classesApplied = 0;
-
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
 		const ObjectHandles emptyHandles;
 		const ObjectHandleTable& members =
@@ -273,10 +271,8 @@ namespace HomeskzIfcImport::draw
 		std::vector<MCObjectHandle> viewports;
 		viewports.reserve(commands.size());
 
-		std::size_t index = 0;
 		for (const core::SectionCommand& command : commands)
 		{
-			const std::size_t commandIndex = index++;
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。
 			if (progress.cancelled())
 				break;
@@ -306,14 +302,9 @@ namespace HomeskzIfcImport::draw
 			// **投影は触らない**（ViewportProjection::Keep）——断面の向きで作られているので、
 			// 伏図がやる 2D/平面への作り直し（draw/DrawUtil.h の ViewportProjection）は
 			// ここでは意味を成さない。
-			const ViewportFinish finish = ConfigureViewport(
-				viewport, sheetLayer, setup, command.viewport, ViewportProjection::Keep);
-			classesApplied += finish.classesApplied;
-			// 描き直しは取り込みの最後（undo イベントを閉じた後）にまとめて行うので、
-			// それまでハンドルを預けておく（draw/ExecuteDocument の
-			// markImportedViewportsOutOfDate）。
-			if (outViewports != nullptr)
-				outViewports->table().handles.emplace(commandIndex, viewport);
+			classesApplied += ConfigureViewport(viewport, sheetLayer, setup, command.viewport,
+												ViewportProjection::Keep)
+								  .classesApplied;
 			// 断面寸法データタグ。**並べ替え（ArrangeViewports）より前**に置く——注釈は
 			// ビューポートと一緒に動くので、先に置いておけば移動しても図の上に留まる。
 			drawViewportTags(viewport, command.viewport, members, tags);

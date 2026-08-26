@@ -44,16 +44,7 @@ namespace HomeskzIfcImport::draw
 		return executeDocument(document, noProgress);
 	}
 
-	ViewportRefresh markImportedViewportsOutOfDate(const ObjectHandles& viewports)
-	{
-		ViewportRefresh result;
-		result.total = viewports.table().handles.size();
-		result.marked = MarkViewportsOutOfDate(viewports);
-		return result;
-	}
-
-	DrawCounts executeDocument(const core::Document& document, core::ProgressReporter& progress,
-							   ObjectHandles* outViewports)
+	DrawCounts executeDocument(const core::Document& document, core::ProgressReporter& progress)
 	{
 		DrawCounts counts;
 
@@ -61,12 +52,6 @@ namespace HomeskzIfcImport::draw
 		if (!core::validateDocument(document))
 			return counts;
 		counts.valid = true;
-
-		// 作った伏図・軸組図のビューポートを預ける先。**描き直しはしない**——「更新が要る」印を
-		// 立てるのは取り込みが終わり切ってから呼び出し側が行う
-		// （draw/ExecuteDocument.h の markImportedViewportsOutOfDate）。
-		ObjectHandles ownViewports;
-		ObjectHandles& viewports = outViewports != nullptr ? *outViewports : ownViewports;
 
 		// **取り込みの図面変更をまるごと 1 つの undo イベントで包む**（docs/DEV-NOTES.md M15）。
 		// VW は取り込みの開始時にイベントを開かないので、ここで自分から開く。構築で開き、
@@ -101,17 +86,6 @@ namespace HomeskzIfcImport::draw
 			return true;
 		};
 
-		// **レイヤは「前面に来るものから」作る。** 重ね順は作る順で決まるものとして扱う
-		// （draw/Story.cpp の kCreateFrontLayerFirst。並べ替えは取り込み中の描画へ届かない）。
-		// 希望順の最上段は通り芯の "共通"、その下が伏図記号レイヤなので、**ストーリのレイヤより
-		// 先に**この 2 つを用意する（どちらも描くものが確定している要素のレイヤなので、
-		// 「空のレイヤを先に作らない」には反しない）。
-		if (!progress.cancelled())
-		{
-			prepareGridLayer(document);
-			preparePlanMarkLayers(document);
-		}
-
 		// M3 ストーリを先に描く。以降の要素はここで生成したストーリレベル・デザインレイヤに配
 		// 置されるため、通り芯や他要素より前に用意する。
 		if (beginPhase("ストーリとレイヤを作成しています…", document.stories.size(),
@@ -121,43 +95,6 @@ namespace HomeskzIfcImport::draw
 		// M1 通り芯を描く。
 		if (beginPhase("通り芯を描画しています…", document.grids.size(), core::DrawPhase::Grids))
 			counts.grids = drawGrids(document, progress);
-
-		// M3 の【決定】の実装箇所: **デザインレイヤのスタック順を希望順へ並べ替える**（床・
-		// 野地板が伏図で柱・梁を覆わないようにする。per-viewport の重ね順上書きは実機で
-		// 効かなかった。draw/Story.h の reorderStoryLayers）。
-		//
-		// **いまは並べ替えそのものが最後の砦**——レイヤは希望順に沿って**作って**あるので
-		// （draw/Story の drawStories と kCreateFrontLayerFirst）、ここは普通なら 1 つも
-		// 動かさない。動いたら「作る順序の向きが違う」ということなので、診断行に出す。
-		//
-		// **要素を 1 つも描く前のここで行う。** M13 では「伏図の直前（＝ビューポート生成より
-		// 前）なら足りる」と考えて全要素の描画後に置いていたが、実機では取り込み直後の伏図
-		// だけが並べ替え前の重ね順で描かれ（図面の並び自体は並べ替え後で、ユーザーが「更新」を
-		// 1 回押すと正しくなる）、out-of-date を立てて更新し直しても変わらなかった。並べ替えの
-		// 結果が同じ取り込みの中で作るビューポートへ届いていない、ということなので、**届く
-		// までの時間を作る**——ここで並べ、以後の全要素の描画を挟んでから伏図を作る。
-		//
-		// 並べ替えの対象になるにはレイヤが実在していないといけないので、ストーリに属さない
-		// 伏図記号レイヤ（"{to}-柱伏図記号"。M12）だけはここで先に用意する。
-		if (!progress.cancelled())
-		{
-			const LayerOrderResult order = reorderStoryLayers(document);
-			// 診断ログ用（ダイアログには出さない）。**2 回の測定を混ぜない**——1 回目は
-			// 「VW が自然に並べた状態」で、そこが知りたいところ。上書きすると 2 回目
-			// （並べ替え済み）で消えてしまう。
-			counts.trace = "測定 1（要素を描く前）:\n" + order.trace;
-			if (!order.ordered && !document.stories.empty())
-				addDiagnostics("レイヤの重ね順を並べ替えられませんでした"
-							   "（伏図で床・野地板が柱・梁を覆います）。");
-			else if (!order.wasOrdered && !document.stories.empty())
-				// **作った順だけでは希望どおりにならなかった**——並べ替えで直してはあるが、
-				// その並べ替えは取り込み中の描画へ届かない（draw/Story.h）。作る順序の向き
-				// （draw/Story.cpp の kCreateFrontLayerFirst）を見直す材料として出す。
-				addDiagnostics(std::string("レイヤの重ね順: 作ったままでは希望どおりに"
-										   "なりませんでした（") +
-							   (order.wasReversed ? "ちょうど逆順" : "逆順ではない並び") + "・" +
-							   std::to_string(order.moved) + " 件を並べ替え）。");
-		}
 
 		// M9/M10 基礎を描く。立上り（壁）→ 壁結合 → 底盤（スラブ）の順。**壁結合は立上りの
 		// ハンドルを引く**ので、立上りをすべて配置した直後に置く（対応表は WallHandles
@@ -254,23 +191,18 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 		}
 
-		// 重ね順の**確かめ直し**。並べ替え自体は通り芯の直後で済ませてあるので、ここは
-		// 「描画の途中で並びが崩れていないか」を見るだけ——崩れていなければ 1 つも動かさない
-		// （reorderStoryLayers は既に希望どおりなら図面を触らない）。記号レイヤはここまでに
-		// 記号が置かれて実在するので、前倒しで作れていなかった場合もここで拾える。
+		// M3 の【決定】の実装箇所（M13 で確定）: **デザインレイヤのスタック順を希望順へ
+		// 並べ替える**。伏図ビューポートはドキュメントの重ね順で描かれるので、床・野地板が
+		// 柱・梁を覆わないようにするにはここで並べ替えるしかない（per-viewport の重ね順
+		// 上書きは実機で効かなかった。draw/Story.h の reorderStoryLayers）。**必ず伏図より
+		// 前**に行う——ビューポートは生成時の重ね順で描かれるため。
 		if (!progress.cancelled())
 		{
-			const LayerOrderResult order = reorderStoryLayers(document);
-			// 診断ログ用（2 回目。1 回目を消さずに足す。上のコメント参照）。
-			if (!counts.trace.empty())
-				counts.trace += "\n";
-			counts.trace += "測定 2（伏図の直前）:\n" + order.trace;
-			if (!order.ordered && !document.stories.empty())
-				addDiagnostics("レイヤの重ね順を並べ替えられませんでした"
-							   "（伏図で床・野地板が柱・梁を覆います）。");
-			else if (order.moved > 0)
-				addDiagnostics("レイヤの重ね順が描画中に崩れたので並べ直しました（" +
-							   std::to_string(order.moved) + " 件）。");
+			// 並べ替えは図面から効いたか分かる（動かせたレイヤ数）。0 件なら伏図で床・野地板が
+			// 柱・梁を覆うので、原因の切り分け材料として診断行に出す。
+			const std::size_t reordered = reorderStoryLayers(document);
+			if (reordered == 0 && !document.stories.empty())
+				addDiagnostics("レイヤの重ね順を並べ替えられませんでした（0 件）。");
 		}
 
 		// M13 シート（伏図）。**必ず最後**に置く: ビューポートはデザインレイヤ（＝ここまでに
@@ -279,7 +211,7 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("伏図を作成しています…", document.sheets.size(), core::DrawPhase::Sheets))
 		{
 			std::string note;
-			counts.sheets = drawSheets(document, progress, &note, &memberHandles, &viewports);
+			counts.sheets = drawSheets(document, progress, &note, &memberHandles);
 			addDiagnostics(note);
 		}
 
@@ -290,13 +222,7 @@ namespace HomeskzIfcImport::draw
 					   core::DrawPhase::Sections))
 		{
 			std::string note;
-			// 軸組図のハンドルも同じ表へ預ける。**鍵は伏図の枚数ぶんずらす**（どちらも命令
-			// インデックスを鍵にするので、そのままだとぶつかる）。
-			ObjectHandles sectionViewports;
-			counts.sections =
-				drawSections(document, progress, &note, &memberHandles, &sectionViewports);
-			for (const auto& [index, viewport] : sectionViewports.table().handles)
-				viewports.table().handles.emplace(document.sheets.size() + index, viewport);
+			counts.sections = drawSections(document, progress, &note, &memberHandles);
 			addDiagnostics(note);
 		}
 
@@ -309,9 +235,6 @@ namespace HomeskzIfcImport::draw
 		counts.undoArmed = undoScope.armed();
 		counts.undoPartial = undoScope.partial();
 
-		// **図は描かない。** ビューポートは描画キャッシュを持たないまま残し、「更新が要る」印を
-		// 立てるのは取り込みが終わり切ってから（undo イベントも進捗ダイアログも閉じた後）
-		// 呼び出し側が行う（markImportedViewportsOutOfDate）。実際に描くのは VW。
 		return counts;
 	}
 } // namespace HomeskzIfcImport::draw

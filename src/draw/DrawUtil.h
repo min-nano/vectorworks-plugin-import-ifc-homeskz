@@ -22,7 +22,6 @@
 #include "PluginPrefix.h"
 
 #include "core/Document.h"
-#include "draw/ObjectHandles.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
@@ -239,13 +238,6 @@ namespace HomeskzIfcImport::draw
 	// レイヤを作らない。
 	MCObjectHandle ActivateExistingLayer(const std::string& layerName);
 
-	// 図面の**デザインレイヤ**を**図面のオブジェクト列の順**（＝背面→前面。先頭が最背面）で
-	// 返す。シートレイヤは含めない。ISDK に「レイヤだけを列挙する」呼び出しは無いので、
-	// この走査（VWDocument::GetDrawingHeaderFristMember ＋ NextObject）が唯一の手立てで、
-	// **図面に 1 つだけ**置く。重ね順の並べ替え（draw/Story の reorderStoryLayers）と
-	// ビューポートの表示レイヤの絞り込み（PrepareViewportSetup）が共有する。
-	std::vector<MCObjectHandle> DesignLayersInStackOrder();
-
 	// --- シートレイヤとビューポート（伏図＝M13・軸組図＝M14 が共有する作法）------------
 	//
 	// 伏図（draw/Sheet）と軸組図（draw/Section）は、ビューポートの**種類が違うだけ**で
@@ -307,10 +299,6 @@ namespace HomeskzIfcImport::draw
 	//
 	// **軸組図（断面ビューポート）は Keep**——あちらは断面の向きで作られており、平面へ
 	// 倒しては意味を成さない。
-	//
-	// **いまはこの「なぞり」の途中でも描き直さない**（.cpp の ForcePlanView）。描画キャッシュを
-	// 1 つも作らなければ作り直す必要も無い——最初に描くのは取り込みが終わった後の VW になる
-	// （上記 MarkViewportsOutOfDate）。投影の切り替え（OFF → ON）だけを残してある。
 	enum class ViewportProjection
 	{
 		Keep, // いまの投影のまま触らない（軸組図＝断面ビューポート）
@@ -332,10 +320,6 @@ namespace HomeskzIfcImport::draw
 	// 生成済みのビューポートを命令どおりに仕上げる（表示レイヤの絞り込み → クラス表示 →
 	// 縮尺 → ［伏図なら 2D/平面の作り直し］→ 図面タイトル・図番 → 更新）。
 	//
-	// **描き直しはしない。** ビューポートは out-of-date（「更新が要る」）のまま残し、実際に
-	// 描くのは VW に任せる（下記 MarkViewportsOutOfDate「取り込み中に描き直さない理由」）。
-	// ここでするのは設定だけ。
-	//
 	// 表示レイヤは「まず全部隠してから、命令に挙げたものだけ表示へ戻す」——ビューポートは
 	// 既定でドキュメントの表示状態を引き継ぐため、挙げていないレイヤが映り込む。グレー表示
 	// （2）は薄く残るので使わず、必ず非表示（1）にする。
@@ -347,26 +331,6 @@ namespace HomeskzIfcImport::draw
 									 const ViewportSetup& setup,
 									 const core::ViewportCommand& command,
 									 ViewportProjection projection);
-
-	// 作ったビューポートに「更新が要る（out-of-date）」の印を立てる（立てられた数を返す）。
-	// **描き直しはしない。**
-	//
-	// 【取り込み中に描き直さない理由】**取り込みの中で描き直すと、どうやってもデザイン
-	// レイヤの重ね順の並べ替え（draw/Story の reorderStoryLayers）が描画へ届かない。**
-	// 実機で 3 通り試して、いずれも取り込み直後の伏図は並べ替え前の重ね順（床が柱・梁を覆う）
-	// で描かれた:
-	//   1. 並べ替えをビューポート生成の直前に置く（M13 の形）。
-	//   2. 並べ替えを要素の描画より前へ前倒しし、`SetDirty(true)` を立てて更新し直す。
-	//   3. 描き直しを **undo イベントを閉じた後**へ回し、口も `ISDK::UpdateViewport` へ替える。
-	// どの回も**図面の並び自体は並べ替え後**（読み戻しでも OIP のレイヤ一覧でも正しい順）で、
-	// **描き直しは実際に走っている**（`IsDirty` が下りる）。にもかかわらず絵は古い重ね順。
-	// そして**ユーザーが「更新」を 1 回押すか、ファイルを開き直せば正しくなる**。
-	//
-	// つまり「取り込みコマンドの中で走る描き直し」だけが古い並びで描く。SDK には遅延実行の
-	// 口が無い（`ISDK` にあるのはダイアログのタイマーだけ）ので、**描かせる相手を VW に
-	// 変える**——キャッシュを 1 つも作らずに「更新が要る」印だけを立てておけば、最初に描くのは
-	// 取り込みが終わった後の VW になり、そのとき並びは正しい。
-	std::size_t MarkViewportsOutOfDate(const ObjectHandles& viewports);
 
 	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
 	// （draw/ObjectHandles.h の ObjectHandles）は SDK 非依存のヘッダに置いてあり、

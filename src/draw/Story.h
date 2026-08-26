@@ -24,7 +24,6 @@
 #include "core/Progress.h"
 
 #include <cstddef>
-#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -38,28 +37,8 @@ namespace HomeskzIfcImport::draw
 	// 決める）。描けたところまでは図面に残る。
 	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress);
 
-	// レイヤの重ね順を並べ替えた結果。**「動かせた数」だけでは足りない**——既に希望どおりなら
-	// 0 件で正常、並べ替えに失敗しても 0 件なので、両者を取り違えないよう並び自体を読み戻す。
-	struct LayerOrderResult
-	{
-		// 実際に動かしたレイヤの数（既に希望どおりなら 0）。
-		std::size_t moved = 0;
-		// 呼び出し後の並びが希望順と一致しているか（読み戻して確かめた結果）。
-		bool ordered = false;
-		// **呼び出す前から**希望どおりだったか（＝作った順だけで並びが決まっていたか）。
-		// draw/Story.cpp の kCreateFrontLayerFirst が当たっていれば true。
-		bool wasOrdered = false;
-		// 呼び出す前の並びが希望順の**ちょうど逆**だったか。true なら
-		// kCreateFrontLayerFirst を反転させればよい（＝作る順序だけで解決する）。
-		bool wasReversed = false;
-		// **診断ログ用**の 1 行（完了ダイアログには出さない。長いので）。呼び出し前後の
-		// 実際のレイヤの並びを**前面→背面**で並べたもの。VW がどんな規則でレイヤを並べて
-		// いるのか（作った順ではない）を実機から持ち帰るための唯一の手立て。
-		std::string trace;
-	};
-
 	// デザインレイヤのスタック順を希望順（core::desiredStoryLayerOrder）へ並べ替える。
-	// **既に希望どおりなら 1 つも動かさない**（呼び直しても図面を触らない）。
+	// 動かせたレイヤ数を返す。
 	//
 	// 【なぜ要るか】伏図ビューポートは**ドキュメントのレイヤ重ね順で描かれる**ので、
 	// 床（"n-FL"）・野地板が柱・梁より前面にあると覆い隠してしまう。希望順は
@@ -76,18 +55,5 @@ namespace HomeskzIfcImport::draw
 	// **伏図より前に呼ぶこと。** ビューポートは生成時の重ね順で描かれるので、並べ替えを後にす
 	// ると既存のビューポートへ反映されない。draw/ExecuteDocument は全要素の描画後・
 	// drawSheets の直前に呼ぶ。
-	//
-	// **並べ替えは既存ビューポートを out-of-date にしない。** 取り込みで作る図には別途
-	// 「更新が要る」印を立てる（draw/ExecuteDocument の markImportedViewportsOutOfDate）。
-	//
-	// **できるだけ早く——要素を 1 つも描く前に——呼ぶこと。** 取り込み直後の伏図だけが
-	// 「床が柱・梁を覆ったまま／ユーザーが更新を 1 回押すと直る」という症状を出していた件で、
-	// 図面の並び自体は（OIP のレイヤ一覧でも）並べ替え後の順になっていた。つまり**並べ替えの
-	// 結果が、同じ取り込みの中で作るビューポートの描画へ届いていない**。届かない理由は
-	// VW の内側なので確かめられないが、届かせる手立ては 1 つある——**並べ替えを描画の前に
-	// 済ませてしまう**こと。以後の要素描画（何千という図形の追加）を挟めば、ビューポートを
-	// 作る時点では並びはとうに落ち着いている。draw/ExecuteDocument は通り芯の直後
-	// （伏図記号レイヤを先に用意したうえ）でこれを呼び、伏図の直前にもう一度呼んで
-	// 「まだ希望どおりか」を確かめる（2 度目は普通 moved=0 で、図面を触らない）。
-	LayerOrderResult reorderStoryLayers(const core::Document& document);
+	std::size_t reorderStoryLayers(const core::Document& document);
 } // namespace HomeskzIfcImport::draw

@@ -32,11 +32,8 @@
 //	デザインレイヤの並べ替え**（draw/Story の reorderStoryLayers）が担う。per-viewport の
 //	上書き（SetViewportLayerStackingOverride）は実機で効かなかった——呼び出しは true を
 //	返すのに GetNumViewportLayerStackingOverrides は 0 のままで、OIP も「順序を上書き:
-//	いいえ」だった——ので捨てた。**並べ替えは要素を 1 つも描く前**に済ませる（draw/Story.h の
-//	reorderStoryLayers。「ビューポート生成より前」では足りず、取り込み直後だけ床が柱・梁を
-//	覆う症状が残った）。**それでも足りず**、いまは**取り込み中に 1 枚も描かない**——
-//	ビューポートは設定だけして「更新が要る」印を立て、実際に描くのは VW に任せる
-//	（draw/ExecuteDocument.h の markImportedViewportsOutOfDate に経緯）。
+//	いいえ」だった——ので捨てた。**並べ替えはビューポート生成より前**に済ませる必要がある
+//	（生成時の重ね順で描かれるため。draw/ExecuteDocument の実行順）。
 //
 
 #include "PluginPrefix.h"
@@ -56,8 +53,7 @@
 namespace HomeskzIfcImport::draw
 {
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
-						   std::string* note, const ObjectHandles* memberHandles,
-						   ObjectHandles* outViewports)
+						   std::string* note, const ObjectHandles* memberHandles)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
@@ -96,10 +92,8 @@ namespace HomeskzIfcImport::draw
 								{ return sheet.legend.has_value(); }))
 			prepareGraphicLegendPlugin();
 
-		std::size_t index = 0;
 		for (const core::SheetCommand& command : commands)
 		{
-			const std::size_t commandIndex = index++;
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は枚数で報告し、
 			// 描画の前に 1 件進める（＝「いま何枚目を作っているか」が見える）。
 			if (progress.cancelled())
@@ -127,14 +121,9 @@ namespace HomeskzIfcImport::draw
 			classesApplied += finish.classesApplied;
 			if (!finish.planViewApplied)
 				++missingPlanView;
-			// 描き直しは取り込みの最後（undo イベントを閉じた後）にまとめて行うので、
-			// それまでハンドルを預けておく（draw/ExecuteDocument の
-			// markImportedViewportsOutOfDate）。
-			if (outViewports != nullptr)
-				outViewports->table().handles.emplace(commandIndex, viewport);
 
-			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（注釈は描き直しの前に
-			// 置いておけば、最後の描き直しで一緒に図へ出る）。
+			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport
+			// の最後が更新で、注釈はその後に足しても図に出る）。
 			drawViewportTags(viewport, command.viewport, members, tags);
 
 			// グラフィック凡例は**ビューポートではなくシートレイヤ**に載せる（用紙の上）。
