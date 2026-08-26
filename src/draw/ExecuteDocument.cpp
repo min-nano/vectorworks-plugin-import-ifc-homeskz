@@ -152,7 +152,11 @@ namespace HomeskzIfcImport::draw
 		// 以降のマイルストーンで footing … と命令ごとに draw モジュールへのディスパッチを足し
 		// ていく（docs/DEV-NOTES.md）。
 		if (beginPhase("垂木を描画しています…", document.rafters.size(), core::DrawPhase::Rafters))
-			counts.rafters = drawRafters(document, progress);
+		{
+			std::string note;
+			counts.rafters = drawRafters(document, progress, &note);
+			addDiagnostics(note);
+		}
 		if (beginPhase("野地板を描画しています…", document.roofs.size(), core::DrawPhase::Roofs))
 			counts.roofs = drawRoofs(document, progress);
 

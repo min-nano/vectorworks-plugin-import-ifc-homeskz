@@ -161,7 +161,7 @@ namespace HomeskzIfcImport::parse
 		// 柱・横架材の命令から、映すレイヤはストーリの命令から、断面の高さ範囲は各要素の Z から
 		// 決まるので、ここが最後になる（parse/Section）。
 		document.sections = buildSectionCommands(context, document);
-		// 軸組図を載せるシートレイヤの通し方（番号は**伏図の続き**・タイトルの基）。M16。
+		// 軸組図を載せるシートレイヤの通し方（番号は**伏図の続き**・タイトルの基）。M17。
 		// **何枚の用紙に分かれるかは用紙の大きさと縮尺が決める**ので、ここでは枚数に依らない
 		// この 2 つだけを決める（core/Document.h の SectionSheetCommand）。軸組図が 1 枚も
 		// 無ければ使われないが、伏図の枚数だけで決まる値なので出し分けはしない。

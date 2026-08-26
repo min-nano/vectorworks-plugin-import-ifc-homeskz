@@ -15,7 +15,7 @@
 //	  * gSDK->SetObjectVariable(h, 1064/1035/1059, …) … 断面の見え方（下記）
 //	  * VWViewportObj::SetRenderType(renderFinalHiddenLine) … レンダリング（下記）
 //	  * draw/DrawUtil の PlaceViewport   … できたビューポートを測って用紙のマスへ置く
-//	                                        （GetObjectBounds ＋ MoveObject。M16）
+//	                                        （GetObjectBounds ＋ MoveObject。M17）
 //
 //	【切断面の与え方（ローカル確認で実証済み）】ISDK の引数名は 3 点とも "sectionLinePt" だが、
 //	VW の UI は「切断線の点を 2 つ以上クリック → **切断の向き**をクリック → 奥行きを指定」
@@ -49,7 +49,7 @@
 //	なお〈切断面より奥の範囲〉の中の項目が灰色なのは**〈切断面より奥を表示〉が off だから**で
 //	（要件どおり。手作りでも off にすれば同じく灰色になる）、こちらは不具合ではない。
 //
-//	【用紙の割り付け（M16）】軸組図は 1 枚の用紙に複数並ぶ。**上下 2 段**になる縮尺を選び
+//	【用紙の割り付け（M17）】軸組図は 1 枚の用紙に複数並ぶ。**上下 2 段**になる縮尺を選び
 //	（core::sectionLayout）、1 段の枚数は用紙の幅が決める。入りきらないぶんはシートレイヤを
 //	足し、タイトルを "軸組図(1)" … と連番にする（core::sectionSheetTitle）。シートレイヤ番号は
 //	**伏図の続き**で、その始まりだけを命令セットが持つ（core::SectionSheetCommand）。
@@ -223,7 +223,7 @@ namespace HomeskzIfcImport::draw
 			return 0;
 		}
 
-		// M16 用紙の割り付け。軸組図は 1 枚の用紙に**上下 2 段**で並べ、収まらなければ
+		// M17 用紙の割り付け。軸組図は 1 枚の用紙に**上下 2 段**で並べ、収まらなければ
 		// シートレイヤを足す。1 枚ぶんの広がり（幅＝建物の平面の広がり・高さ＝断面の高さ
 		// 範囲）から縮尺と段組みを決める（core::sectionLayout）。
 		core::Vec2 content;
@@ -333,7 +333,7 @@ namespace HomeskzIfcImport::draw
 				{
 					delta = core::sectionSlotCenter(layout, slot) - drawnCenter;
 					// マス（layout.cell）に収まったかを測って確かめる。はみ出していれば隣の
-					// 図と重なるので、黙って重ねずに診断へ残す（伏図と同じ考え方。M16）。
+					// 図と重なるので、黙って重ねずに診断へ残す（伏図と同じ考え方。M17）。
 					if (drawnSize.x > layout.cell.x + kFitTol ||
 						drawnSize.y > layout.cell.y + kFitTol)
 						++oversized;

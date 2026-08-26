@@ -354,7 +354,7 @@ TEST(BuildSectionCommandsPlacesCutsAndNames)
 	CHECK(commands[4].viewport.drawingTitle == std::string("又い") + kSectionTitleSuffix);
 
 	// 断面の範囲（長さ・高さ・奥行き）も配置先のシートレイヤも命令は持たない——範囲は
-	// 描画側の定数が、シートレイヤは用紙の割り付け（M16）が受け持つ。
+	// 描画側の定数が、シートレイヤは用紙の割り付け（M17）が受け持つ。
 	for (const SectionCommand& command : commands)
 	{
 		CHECK(command.viewport.layers ==
@@ -467,7 +467,7 @@ TEST(BuildSectionCommandsPassDocumentValidation)
 	// ちる）。
 	core::Document document;
 	document.sections = buildSectionCommands(model, sampleDocument());
-	// 軸組図があるならシートレイヤの通し方（番号の始まり・タイトルの基）も要る（M16）。
+	// 軸組図があるならシートレイヤの通し方（番号の始まり・タイトルの基）も要る（M17）。
 	document.sectionSheet = buildSectionSheetCommand(document.sheets);
 	CHECK(!document.sections.empty());
 	CHECK(core::validateDocument(document));
@@ -517,7 +517,7 @@ TEST(FixtureSectionsCutRealGridLinesAndShowExistingLayers)
 			CHECK(storyLayers.contains(layer));
 	}
 
-	// シートレイヤ番号は**伏図の続き**（M16）。伏図の最後の番号の次から始まる。
+	// シートレイヤ番号は**伏図の続き**（M17）。伏図の最後の番号の次から始まる。
 	int lastPlan = 0;
 	for (const core::SheetCommand& sheet : document.sheets)
 		lastPlan = std::max(lastPlan, std::stoi(sheet.number));
