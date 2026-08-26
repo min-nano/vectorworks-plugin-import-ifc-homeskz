@@ -28,7 +28,7 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWLayerObj.h"
-#include "VWFC/VWObjects/VWDocumentObj.h"
+#include "VWFC/VWObjects/VWDocument.h"
 
 #include <array>
 #include <cstddef>
