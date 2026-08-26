@@ -44,26 +44,26 @@ namespace HomeskzIfcImport::core
 	{
 		const PaperArea area = drawingArea(page);
 
+		// ★**縮尺は凡例のぶんを差し引いてから決める**（要件）。用紙いっぱいで縮尺を決めて
+		// しまうと、建物がギリギリの大きさのときに凡例を置く場所が残らない——凡例は図面の
+		// 一部なので、置けなくなるくらいなら図を 1 段階小さく描く。差し引くのは
+		// 「実測した凡例の幅＋間隔」で、凡例が 1 つも無ければ何も引かない。
+		PaperArea plan = area;
+		if (legendWidth > 0.0)
+		{
+			// 引くと潰れる（＝図の領域が無くなる）ほど凡例が広いときは引かない。0 幅の領域を
+			// 渡すと fitScale がいちばん小さい図を返すだけで、かえって読めない図になる。
+			if (const double width = area.width() - (legendWidth + kViewportGap); width > 0.0)
+				plan.max.x = area.min.x + width;
+		}
+
 		PlanLayout layout;
-		layout.plan = area;
+		layout.scale = fitScale(content, plan.size());
+		layout.plan = plan;
+		// 図は**凡例のぶんを除いた領域の中央**へ置く（左端に寄せると右が間延びする）。
+		layout.viewportCenter = plan.center();
+		// 凡例は作図域の右上——図のために空けた帯の中で、いちばん端へ寄せる。
 		layout.legendTopRight = area.max;
-
-		// ★**縮尺は凡例のぶんを差し引かずに決める**（用紙いっぱいで最大の図にする。要件）。
-		// 凡例のために幅を先取りすると、そのぶん図が 1 段階小さい縮尺へ落ちてしまう
-		// ——凡例は用紙の隅の空きへ置けば足りるので、図の大きさを削ってまで場所を確保しない。
-		layout.scale = fitScale(content, area.size());
-
-		// 置き場所だけが凡例を避ける。図は**左へ寄せて**右上に凡例のぶんの空きを作る:
-		//   * 避けきれる（図＋間隔＋凡例が横に並ぶ）… 凡例の帯を除いた領域の中央へ置く。
-		//     いたずらに左端へ寄せず、空きを図の左右へ分ける。
-		//   * 避けきれない（図が広すぎる）… 左端いっぱいへ寄せる。凡例とは重なるが、
-		//     **重なりが最も小さくなる置き方**になる（描画側が実測して診断へ残す）。
-		const double drawn = content.x / layout.scale;
-		const double avoid = legendWidth > 0.0 ? legendWidth + kViewportGap : 0.0;
-		const double free = area.width() - avoid;
-		const double centerX =
-			drawn <= free ? area.min.x + (free / 2.0) : area.min.x + (drawn / 2.0);
-		layout.viewportCenter = Vec2{centerX, area.center().y};
 		return layout;
 	}
 

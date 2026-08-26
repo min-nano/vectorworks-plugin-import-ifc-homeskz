@@ -52,10 +52,10 @@
 #include "core/Progress.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -117,6 +117,10 @@ namespace HomeskzIfcImport::draw
 		std::size_t oversized = 0;
 		// 凡例と重なった枚数（図が広くて右上の空きへ避けきれなかった）。
 		std::size_t legendOverlap = 0;
+		// 実際に描けた図のいちばん大きい外形（用紙 mm）。**見積もりと実測を突き合わせる**
+		// ために持つ——縮尺が期待と違うとき、命令から見積もった広がりが実際より大きいのか、
+		// 用紙の測り方がおかしいのかは、この 2 つを並べて初めて切り分けられる。
+		core::Vec2 measuredMax;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
 		// （渡されなければ空の表＝関連付け無しで置く。draw/Tag.h）。
 		const ObjectHandles emptyHandles;
@@ -241,6 +245,11 @@ namespace HomeskzIfcImport::draw
 			core::Vec2 drawnCenter;
 			core::Vec2 drawnSize;
 			const bool measured = MeasureViewport(sheet.viewport, drawnCenter, drawnSize);
+			if (measured)
+			{
+				measuredMax.x = std::max(measuredMax.x, drawnSize.x);
+				measuredMax.y = std::max(measuredMax.y, drawnSize.y);
+			}
 			core::Vec2 delta;
 			if (haveContent && page.has_value())
 			{
@@ -264,9 +273,10 @@ namespace HomeskzIfcImport::draw
 					if (drawnSize.x > layout.plan.width() + kFitTol ||
 						drawnSize.y > layout.plan.height() + kFitTol)
 						++oversized;
-					// 凡例の帯へ食い込んだか。**避けるのは置き場所だけ**（縮尺は用紙いっぱい
-					// で決める。core/Layout.h の planLayout）なので、図が広ければ重なりうる
-					// ——黙って重ねずに数えて診断へ残す。
+					// 凡例の帯へ食い込んだか。縮尺は凡例のぶんを引いてから決めている
+					// （core/Layout.h の planLayout）ので通常は重ならないが、命令の座標に
+					// 現れないもの（通り芯の丸など）のぶん実際の図は見積もりより大きく
+					// なりうる——黙って重ねずに数えて診断へ残す。
 					if (legendWidth > 0.0 && target.x + (drawnSize.x / 2.0) >
 												 layout.legendTopRight.x - legendWidth - kFitTol)
 						++legendOverlap;
@@ -292,8 +302,38 @@ namespace HomeskzIfcImport::draw
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
-		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 枚」のときに、シートレイヤを
-		// 作れないのか、ビューポートを作れないのかを切り分けられる。
+		// 診断行は要素ごとに 1 行ずつ足す（原因が別物なので混ぜない）。
+		const auto addNote = [note](const std::string& text)
+		{
+			if (note == nullptr || text.empty())
+				return;
+			if (!note->empty())
+				*note += "\n";
+			*note += text;
+		};
+
+		// M16 割り付けの実測値。**異常が無くても必ず残す**——縮尺は「用紙の大きさ・凡例の
+		// 幅・建物の広がり」の 3 つだけで決まるので、期待と違う縮尺になったときに
+		// どれが効いたのかを、ローカル確認の場で数字のまま切り分けられるようにする
+		// （実際に「1/50 のはずが 1/75 になる」の切り分けで要った。docs/DEV-NOTES.md M16）。
+		if (note != nullptr && page.has_value())
+		{
+			const auto mm = [](double value) { return std::to_string(std::lround(value)); };
+			const core::PaperArea area = core::drawingArea(*page);
+			std::string text = "伏図の割り付け（mm）: 用紙 " + mm(page->width()) + "×" +
+							   mm(page->height()) + " / 作図域 " + mm(area.width()) + "×" +
+							   mm(area.height()) + " / 凡例 " + mm(legendWidth) + " / 図の領域 " +
+							   mm(layout.plan.width()) + "×" + mm(layout.plan.height());
+			if (haveContent)
+				text += " / 建物 " + mm(contentSize.x) + "×" + mm(contentSize.y) + " → 用紙上 " +
+						mm(contentSize.x / layout.scale) + "×" + mm(contentSize.y / layout.scale) +
+						" / 縮尺 1/" + mm(layout.scale);
+			text += " / 実測の図 " + mm(measuredMax.x) + "×" + mm(measuredMax.y);
+			addNote(text);
+		}
+
+		// 「命令はあるのに 0 枚」のときに、シートレイヤを作れないのか、ビューポートを
+		// 作れないのかを切り分けられるようにする。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
 		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
 								missingPlanView > 0 || missingPlacement > 0 || missingScale > 0 ||
@@ -326,18 +366,9 @@ namespace HomeskzIfcImport::draw
 			if (legendOverlap > 0)
 				text += "凡例と重なった伏図 " + std::to_string(legendOverlap) +
 						" 枚（図が広く、右上の空きへ避けきれませんでした）。";
-			*note = std::move(text);
+			addNote(text);
 		}
 
-		// タグ・凡例の診断は伏図の診断とは別行にする（原因が別物なので混ぜない）。
-		const auto addNote = [note](const std::string& text)
-		{
-			if (note == nullptr || text.empty())
-				return;
-			if (!note->empty())
-				*note += "\n";
-			*note += text;
-		};
 		addNote(tagDiagnostics("伏図", tags));
 		addNote(legendDiagnostics(legends));
 		return drawn;

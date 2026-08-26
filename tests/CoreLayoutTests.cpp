@@ -105,65 +105,63 @@ TEST(FitScaleOnlyEverReturnsLadderValues)
 	}
 }
 
-TEST(PlanLayoutUsesTheWholeSheetForTheScale)
+TEST(PlanLayoutSubtractsTheLegendBeforeChoosingTheScale)
 {
-	// ★**縮尺は凡例のぶんを差し引かずに決める**（用紙いっぱいで最大の図。要件）。
-	// 8m × 5m を A3 の作図域 390 × 267mm へ → 1/25（320 × 200mm。1/20 では 400mm となって
-	// 横にはみ出す）。凡例が広かろうと狭かろうと**縮尺は変わらない**。
+	// ★**縮尺は凡例の幅を引いてから決める**（要件）。A3 の作図域は 390 × 267mm で、
+	// 凡例 60mm ＋ 間隔 15mm を引くと図の領域は 315 × 267mm。
+	//   * 引いた領域では 8m × 5m は 1/30（266.7 × 166.7mm。1/25 だと 320mm で入らない）
+	//   * 引かなければ 1/25 まで上がる——**凡例が縮尺を 1 段階下げる**のが意図した挙動で、
+	//     こうしないとギリギリの建物で凡例の置き場所が無くなる。
 	constexpr double kLegend = 60.0;
 	const core::PlanLayout wide = core::planLayout(Vec2{8000.0, 5000.0}, a3(), kLegend);
 	const core::PlanLayout none = core::planLayout(Vec2{8000.0, 5000.0}, a3(), 0.0);
-	CHECK(wide.scale == 25.0);
+	CHECK(wide.scale == 30.0);
 	CHECK(none.scale == 25.0);
 
-	// 図が占めてよい領域は作図域そのもの（凡例のぶんを引かない）。
+	// 図が占めてよい領域は、作図域から「凡例＋間隔」を引いた残り。
 	const PaperArea area = core::drawingArea(a3());
-	CHECK(wide.plan.max.x == area.max.x);
-	CHECK(wide.plan.width() == area.width());
+	CHECK(near(wide.plan.max.x, area.max.x - (kLegend + core::kViewportGap)));
+	CHECK(near(wide.plan.width(), area.width() - (kLegend + core::kViewportGap)));
+	// 高さは削らない（凡例は横に並ぶ）。
+	CHECK(wide.plan.height() == area.height());
 
-	// 凡例は作図域の右上に付く。
+	// 凡例は作図域の右上に付く（引いた帯の中でいちばん端）。
 	CHECK(wide.legendTopRight.x == area.max.x);
 	CHECK(wide.legendTopRight.y == area.max.y);
 }
 
-TEST(PlanLayoutShiftsTheDrawingClearOfTheLegend)
+TEST(PlanLayoutCentersTheDrawingClearOfTheLegend)
 {
-	// 6m × 4m を A3 へ → 1/20（300 × 200mm）。凡例 60mm ＋ 間隔 15mm を避けた 315mm に
-	// 300mm は収まるので、**その領域の中央**へ置く（左端へ寄せきらず、空きを左右へ分ける）。
+	// 図は「凡例のぶんを除いた領域」の中央へ置く。ここへ置けば、どんな内容でも図と凡例は
+	// 重ならない（縮尺の段階でスペースを確保してあるため）。
 	constexpr double kLegend = 60.0;
-	const core::PlanLayout layout = core::planLayout(Vec2{6000.0, 4000.0}, a3(), kLegend);
-	CHECK(layout.scale == 20.0);
+	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3(), kLegend);
 
 	const PaperArea area = core::drawingArea(a3());
 	const double planRight = area.max.x - (kLegend + core::kViewportGap);
 	CHECK(near(layout.viewportCenter.x, (area.min.x + planRight) / 2.0));
-	CHECK(layout.viewportCenter.y == area.center().y);
+	CHECK(near(layout.viewportCenter.y, area.center().y));
 
 	// 図の右端が凡例の左端を越えない＝重ならない。
-	const double drawnRight = layout.viewportCenter.x + ((6000.0 / layout.scale) / 2.0);
+	const double drawnRight = layout.viewportCenter.x + ((8000.0 / layout.scale) / 2.0);
 	CHECK(drawnRight <= planRight + kEdgeTol);
 	CHECK(drawnRight <= layout.legendTopRight.x - kLegend);
 }
 
-TEST(PlanLayoutHugsTheLeftEdgeWhenTheDrawingIsTooWide)
+TEST(PlanLayoutKeepsTheWholeSheetWhenTheLegendWouldEatIt)
 {
-	// 避けきれない広さ（8m ＝ 1/25 で 320mm > 315mm）では**左端いっぱい**へ寄せる。
-	// 凡例とは重なるが、重なりが最も小さくなる置き方になる（重なりは描画側が実測して
-	// 診断へ残す）。
-	constexpr double kLegend = 60.0;
-	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3(), kLegend);
+	// 凡例が作図域より広い（＝引くと図の領域が消える）ときは引かない。0 幅の領域を
+	// 渡すといちばん小さい図が返るだけで、かえって読めない図になる。
+	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3(), 400.0);
 	const PaperArea area = core::drawingArea(a3());
-	const double drawnLeft = layout.viewportCenter.x - ((8000.0 / layout.scale) / 2.0);
-	CHECK(near(drawnLeft, area.min.x));
-	// 用紙からははみ出さない。
-	const double drawnRight = layout.viewportCenter.x + ((8000.0 / layout.scale) / 2.0);
-	CHECK(drawnRight <= area.max.x + kEdgeTol);
+	CHECK(layout.plan.max.x == area.max.x);
+	CHECK(layout.scale == 25.0);
 }
 
 TEST(PlanLayoutWithoutLegendUsesTheWholeSheet)
 {
-	// 凡例を 1 つも置かなかった文書（幅 0）では避けるものが無いので、図は作図域の**中央**へ
-	// 来る。8m × 5m を A3 の作図域 390 × 267mm いっぱいに → 1/25。
+	// 凡例を 1 つも置かなかった文書（幅 0）では引くものが無いので、作図域いっぱいで縮尺を
+	// 決め、図は作図域の**中央**へ来る。8m × 5m を A3 の作図域 390 × 267mm へ → 1/25。
 	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3(), 0.0);
 	CHECK(layout.scale == 25.0);
 	const PaperArea area = core::drawingArea(a3());
