@@ -115,6 +115,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingScale = 0;
 		// 見積もった縮尺では用紙に収まらなかった枚数（測った外形が作図域より大きい）。
 		std::size_t oversized = 0;
+		// 凡例と重なった枚数（図が広くて右上の空きへ避けきれなかった）。
+		std::size_t legendOverlap = 0;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
 		// （渡されなければ空の表＝関連付け無しで置く。draw/Tag.h）。
 		const ObjectHandles emptyHandles;
@@ -262,6 +264,12 @@ namespace HomeskzIfcImport::draw
 					if (drawnSize.x > layout.plan.width() + kFitTol ||
 						drawnSize.y > layout.plan.height() + kFitTol)
 						++oversized;
+					// 凡例の帯へ食い込んだか。**避けるのは置き場所だけ**（縮尺は用紙いっぱい
+					// で決める。core/Layout.h の planLayout）なので、図が広ければ重なりうる
+					// ——黙って重ねずに数えて診断へ残す。
+					if (legendWidth > 0.0 && target.x + (drawnSize.x / 2.0) >
+												 layout.legendTopRight.x - legendWidth - kFitTol)
+						++legendOverlap;
 				}
 			}
 
@@ -289,7 +297,7 @@ namespace HomeskzIfcImport::draw
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
 		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
 								missingPlanView > 0 || missingPlacement > 0 || missingScale > 0 ||
-								oversized > 0 || !haveContent))
+								oversized > 0 || legendOverlap > 0 || !haveContent))
 		{
 			std::string text = "伏図の診断: ";
 			if (missingSheetLayers > 0)
@@ -315,6 +323,9 @@ namespace HomeskzIfcImport::draw
 			if (oversized > 0)
 				text += "用紙に収まらなかった伏図 " + std::to_string(oversized) +
 						" 枚（縮尺の見積もりより図が大きくなりました）。";
+			if (legendOverlap > 0)
+				text += "凡例と重なった伏図 " + std::to_string(legendOverlap) +
+						" 枚（図が広く、右上の空きへ避けきれませんでした）。";
 			*note = std::move(text);
 		}
 

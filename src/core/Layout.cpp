@@ -44,22 +44,26 @@ namespace HomeskzIfcImport::core
 	{
 		const PaperArea area = drawingArea(page);
 
-		// グラフィック凡例のための右の 1 列を、**実際に置いた凡例の幅ぶんだけ**空ける
-		// （core/Layout.h「凡例の幅は定数で持たない」）。凡例が無ければ空けない。
-		// **空けられないほど用紙が狭いときも空けない**——凡例が図に重なるのは困るが、
-		// それ以前に図が入らないのはもっと困る。
-		PaperArea plan = area;
-		if (legendWidth > 0.0)
-		{
-			if (const double width = area.width() - (legendWidth + kViewportGap); width > 0.0)
-				plan.max.x = area.min.x + width;
-		}
-
 		PlanLayout layout;
-		layout.scale = fitScale(content, plan.size());
-		layout.plan = plan;
-		layout.viewportCenter = plan.center();
+		layout.plan = area;
 		layout.legendTopRight = area.max;
+
+		// ★**縮尺は凡例のぶんを差し引かずに決める**（用紙いっぱいで最大の図にする。要件）。
+		// 凡例のために幅を先取りすると、そのぶん図が 1 段階小さい縮尺へ落ちてしまう
+		// ——凡例は用紙の隅の空きへ置けば足りるので、図の大きさを削ってまで場所を確保しない。
+		layout.scale = fitScale(content, area.size());
+
+		// 置き場所だけが凡例を避ける。図は**左へ寄せて**右上に凡例のぶんの空きを作る:
+		//   * 避けきれる（図＋間隔＋凡例が横に並ぶ）… 凡例の帯を除いた領域の中央へ置く。
+		//     いたずらに左端へ寄せず、空きを図の左右へ分ける。
+		//   * 避けきれない（図が広すぎる）… 左端いっぱいへ寄せる。凡例とは重なるが、
+		//     **重なりが最も小さくなる置き方**になる（描画側が実測して診断へ残す）。
+		const double drawn = content.x / layout.scale;
+		const double avoid = legendWidth > 0.0 ? legendWidth + kViewportGap : 0.0;
+		const double free = area.width() - avoid;
+		const double centerX =
+			drawn <= free ? area.min.x + (free / 2.0) : area.min.x + (drawn / 2.0);
+		layout.viewportCenter = Vec2{centerX, area.center().y};
 		return layout;
 	}
 

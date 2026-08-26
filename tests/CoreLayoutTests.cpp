@@ -105,44 +105,71 @@ TEST(FitScaleOnlyEverReturnsLadderValues)
 	}
 }
 
-TEST(PlanLayoutKeepsTheLegendColumnClearOfTheDrawing)
+TEST(PlanLayoutUsesTheWholeSheetForTheScale)
 {
-	// 8m × 5m の建物を A3 に、**実測した凡例の幅 60mm** で。作図域は 390 × 267mm、
-	// 凡例のぶん（60 + 15）を除くと図に使えるのは 315 × 267mm → 1/30（266.7 × 166.7mm）
-	// が最大（1/25 では 320mm となって横にはみ出す）。
+	// ★**縮尺は凡例のぶんを差し引かずに決める**（用紙いっぱいで最大の図。要件）。
+	// 8m × 5m を A3 の作図域 390 × 267mm へ → 1/25（320 × 200mm。1/20 では 400mm となって
+	// 横にはみ出す）。凡例が広かろうと狭かろうと**縮尺は変わらない**。
 	constexpr double kLegend = 60.0;
-	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3(), kLegend);
-	CHECK(layout.scale == 30.0);
+	const core::PlanLayout wide = core::planLayout(Vec2{8000.0, 5000.0}, a3(), kLegend);
+	const core::PlanLayout none = core::planLayout(Vec2{8000.0, 5000.0}, a3(), 0.0);
+	CHECK(wide.scale == 25.0);
+	CHECK(none.scale == 25.0);
 
-	// 図の中心は「凡例のぶんを除いた領域」の中心＝左寄り。図の右端が凡例の左端を越えない。
+	// 図が占めてよい領域は作図域そのもの（凡例のぶんを引かない）。
+	const PaperArea area = core::drawingArea(a3());
+	CHECK(wide.plan.max.x == area.max.x);
+	CHECK(wide.plan.width() == area.width());
+
+	// 凡例は作図域の右上に付く。
+	CHECK(wide.legendTopRight.x == area.max.x);
+	CHECK(wide.legendTopRight.y == area.max.y);
+}
+
+TEST(PlanLayoutShiftsTheDrawingClearOfTheLegend)
+{
+	// 6m × 4m を A3 へ → 1/20（300 × 200mm）。凡例 60mm ＋ 間隔 15mm を避けた 315mm に
+	// 300mm は収まるので、**その領域の中央**へ置く（左端へ寄せきらず、空きを左右へ分ける）。
+	constexpr double kLegend = 60.0;
+	const core::PlanLayout layout = core::planLayout(Vec2{6000.0, 4000.0}, a3(), kLegend);
+	CHECK(layout.scale == 20.0);
+
 	const PaperArea area = core::drawingArea(a3());
 	const double planRight = area.max.x - (kLegend + core::kViewportGap);
-	CHECK(layout.viewportCenter.x == (area.min.x + planRight) / 2.0);
-	CHECK(layout.viewportCenter.y == 0.0);
+	CHECK(near(layout.viewportCenter.x, (area.min.x + planRight) / 2.0));
+	CHECK(layout.viewportCenter.y == area.center().y);
+
+	// 図の右端が凡例の左端を越えない＝重ならない。
+	const double drawnRight = layout.viewportCenter.x + ((6000.0 / layout.scale) / 2.0);
+	CHECK(drawnRight <= planRight + kEdgeTol);
+	CHECK(drawnRight <= layout.legendTopRight.x - kLegend);
+}
+
+TEST(PlanLayoutHugsTheLeftEdgeWhenTheDrawingIsTooWide)
+{
+	// 避けきれない広さ（8m ＝ 1/25 で 320mm > 315mm）では**左端いっぱい**へ寄せる。
+	// 凡例とは重なるが、重なりが最も小さくなる置き方になる（重なりは描画側が実測して
+	// 診断へ残す）。
+	constexpr double kLegend = 60.0;
+	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3(), kLegend);
+	const PaperArea area = core::drawingArea(a3());
+	const double drawnLeft = layout.viewportCenter.x - ((8000.0 / layout.scale) / 2.0);
+	CHECK(near(drawnLeft, area.min.x));
+	// 用紙からははみ出さない。
 	const double drawnRight = layout.viewportCenter.x + ((8000.0 / layout.scale) / 2.0);
-	CHECK(drawnRight <= planRight);
-
-	// 図が占めてよい領域も同じ計算（描いた図が収まったかを描画側が測って確かめる）。
-	CHECK(layout.plan.max.x == planRight);
-	CHECK(layout.plan.min.x == area.min.x);
-	CHECK(layout.plan.height() == area.height());
-
-	// 凡例は作図域の右上に付く（＝空けた 1 列の中）。
-	CHECK(layout.legendTopRight.x == area.max.x);
-	CHECK(layout.legendTopRight.y == area.max.y);
-	CHECK(layout.legendTopRight.x - kLegend >= planRight);
+	CHECK(drawnRight <= area.max.x + kEdgeTol);
 }
 
 TEST(PlanLayoutWithoutLegendUsesTheWholeSheet)
 {
-	// 凡例を 1 つも置かなかった文書（幅 0）では右を空けない——使いもしない余白のせいで
-	// 図を小さくしない。8m × 5m を A3 の作図域 390 × 267mm いっぱいに → 1/25
-	// （320 × 200mm。1/20 では 400mm となって横にはみ出す）。
+	// 凡例を 1 つも置かなかった文書（幅 0）では避けるものが無いので、図は作図域の**中央**へ
+	// 来る。8m × 5m を A3 の作図域 390 × 267mm いっぱいに → 1/25。
 	const core::PlanLayout layout = core::planLayout(Vec2{8000.0, 5000.0}, a3(), 0.0);
 	CHECK(layout.scale == 25.0);
 	const PaperArea area = core::drawingArea(a3());
 	CHECK(layout.plan.max.x == area.max.x);
-	CHECK(layout.viewportCenter.x == area.center().x);
+	CHECK(near(layout.viewportCenter.x, area.center().x));
+	CHECK(near(layout.viewportCenter.y, area.center().y));
 }
 
 TEST(PlanLayoutIsTheSameForEverySheet)
