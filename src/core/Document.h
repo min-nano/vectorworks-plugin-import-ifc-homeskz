@@ -77,7 +77,7 @@ namespace HomeskzIfcImport::core
 	// 値は OIP のポップアップの**並び順**（`<自動>` を 0 とする 0 始まりの索引）。実機の
 	// ドロップダウンを開いて確かめた全 17 項目は docs/DEV-NOTES.md「プラグインオブジェクト
 	// （PIO）」の表にある（ここには本プラグインが使うものだけを置く）。
-	inline constexpr const char* kStructuralUseBeam = "1";	  // 梁（土台・梁・桁・母屋…）
+	inline constexpr const char* kStructuralUseBeam = "1"; // 梁（土台・梁・桁・母屋…）
 	inline constexpr const char* kStructuralUseColumn = "4";   // 柱（管柱・通し柱）
 	inline constexpr const char* kStructuralUseKoyazuka = "5"; // 小屋束
 	inline constexpr const char* kStructuralUseRafter = "8";   // 垂木
