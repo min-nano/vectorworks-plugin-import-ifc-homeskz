@@ -22,6 +22,7 @@
 #include "PluginPrefix.h"
 
 #include "core/Document.h"
+#include "draw/ObjectHandles.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
