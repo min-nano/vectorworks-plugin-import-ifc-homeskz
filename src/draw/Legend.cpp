@@ -28,7 +28,6 @@
 #include "VWFC/VWObjects/VWParametricObj.h"
 
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <string>
 
@@ -46,12 +45,10 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kFieldBoxWidth = "BoxWidth";
 		constexpr double kBoxWidth = 150.0;
 
-		// 写したソース定義（下記 kSourceDefinition）に含まれるイメージの縮率。**書き換える
-		// 手立てがまだ無い**ので、伏図の縮尺がこれと違えば診断で知らせるだけにする
-		// （draw/Legend.h の scaleMismatch）。比較は許容付き——縮尺は表示レイヤから読んだ
-		// double なので、丸め誤差で「違う」と言い出さないようにする。
-		constexpr double kSourceImageScale = 50.0;
-		constexpr double kScaleEps = 1e-6;
+		// イメージの縮率（OIP の「イメージの縮率」）。**分母を実数で持つ**欄で、1:50 なら 50。
+		// 実機のダンプで確定した（縮率 1:50 の凡例だけ 50 で、ほかは既定の 100 だった）。
+		// **表示名が空なので OIP の項目名からは引けない**——universal 名で直に書く。
+		constexpr const char* kFieldImageScale = "ImageScale";
 
 		// 見た目。凡例 PIO が内部で描く枠線・セルは**クラスでは制御できない**ので、
 		// オブジェクトの属性として直接与える（draw/Legend.h）。線の太さの単位はミル（1/1000
@@ -59,26 +56,30 @@ namespace HomeskzIfcImport::draw
 		constexpr short kLineWeightMils = 5;
 		constexpr InternalIndex kFillNone = 0;
 
-		// 生成した凡例の箱幅を与える。**例外を外へ出さない**——書けなくても凡例そのものは
-		// 図面に残るので、件数だけ counts へ積む。
-		//
-		// **縮率（イメージの縮率）はここでは書けない。** レコードには `ImageScale` という
-		// 実数の欄があるが、**表示名が空＝OIP に出ない別物**で、実機ではデザインレイヤの
-		// 縮尺（100）が入ったまま OIP は 1:50 を表示していた。縮率は「イメージの定義...」
-		// ダイアログ側＝レコードの外にある（docs/DEV-NOTES.md「グラフィック凡例」）。
-		// パラメータ名を当てにいく実装はもう試して外れているので、書き直さないこと。
-		void ApplyBoxWidth(MCObjectHandle object, LegendCounts& counts)
+		// 生成した凡例のパラメータ（箱幅・イメージの縮率）を与える。**例外を外へ出さない**
+		// ——書けなくても凡例そのものは図面に残るので、件数だけ counts へ積む。
+		void ApplyParams(MCObjectHandle object, double viewportScale, LegendCounts& counts)
 		{
 			try
 			{
 				VWParametricObj pio(object);
 				if (!SetParamRealChecked(pio, TXString(kFieldBoxWidth), kBoxWidth))
 					++counts.widthLeft;
+
+				// 縮尺が分からなかった伏図（表示レイヤから読めなかった）では触らない
+				// ——既定の縮率のまま置く方が、当てずっぽうの値を書くよりましである。
+				if (viewportScale <= 0.0)
+				{
+					++counts.scaleUnknown;
+					return;
+				}
+				if (!SetParamRealChecked(pio, TXString(kFieldImageScale), viewportScale))
+					++counts.scaleLeft;
 			}
 			catch (...)
 			{
-				// PIO として開けなかった（＝箱幅を書けていない）。幅 0 のまま潰れるだけで
-				// 凡例自体は図面に残るので、続ける。
+				// PIO として開けなかった（＝パラメータを 1 つも書けていない）。幅 0 のまま
+				// 潰れる・縮率が既定のままになるだけで凡例自体は図面に残るので、続ける。
 				++counts.paramsFailed;
 			}
 		}
@@ -164,7 +165,12 @@ namespace HomeskzIfcImport::draw
 
 			for (std::size_t i = 0; i < kSourceDefinition.size(); ++i)
 			{
+				// 6 番目の 16 ビット値だけは、条件が指す型（リトルエンディアン）で埋める。
 				Uint8 value = kSourceDefinition[i];
+				if (i == kCriteriaTypeOffset)
+					value = static_cast<Uint8>(kCriteriaObjectType & 0xFFU);
+				else if (i == kCriteriaTypeOffset + 1)
+					value = static_cast<Uint8>((kCriteriaObjectType >> 8U) & 0xFFU);
 				if (gSDK->TaggedDataSet(legend, kSourceContainer, kSourceDataType, kSourceDataTag,
 										static_cast<Sint32>(i), &value) == 0)
 					return false;
@@ -200,9 +206,9 @@ namespace HomeskzIfcImport::draw
 			return false;
 		}
 
-		// 箱幅。**スタイルは当てない**（draw/Legend.h の ★）ので、凡例の姿を決めるのは
-		// このオブジェクト自身の設定だけになる。
-		ApplyBoxWidth(object, counts);
+		// 箱幅とイメージの縮率。**スタイルは当てない**（draw/Legend.h の ★）ので、凡例の姿を
+		// 決めるのはこのオブジェクト自身の設定だけになる。
+		ApplyParams(object, viewportScale, counts);
 
 		// ソース定義（何を並べるか）。**既定のソースは空**なので、これを書かないと
 		// スタイル無しの凡例は 1 セットも表示しない（実機で確認）。
@@ -219,11 +225,6 @@ namespace HomeskzIfcImport::draw
 		else
 			++counts.filterLeft;
 
-		// 縮率は写したソース定義に含まれる 1:50 のままになる（書き込む手立てがまだ無い）。
-		// 伏図の縮尺がそれと違うなら、凡例のシンボルだけ図と大きさが揃わない。
-		if (viewportScale > 0.0 && std::fabs(viewportScale - kSourceImageScale) > kScaleEps)
-			++counts.scaleMismatch;
-
 		gSDK->ResetObject(object);
 
 		// 見た目はクラスでは効かないのでオブジェクトの属性として直接与える。**ResetObject
@@ -238,7 +239,8 @@ namespace HomeskzIfcImport::draw
 	std::string legendDiagnostics(const LegendCounts& counts)
 	{
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
-			counts.sourceLeft == 0 && counts.filterLeft == 0 && counts.scaleMismatch == 0)
+			counts.scaleLeft == 0 && counts.scaleUnknown == 0 && counts.sourceLeft == 0 &&
+			counts.filterLeft == 0)
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -246,7 +248,7 @@ namespace HomeskzIfcImport::draw
 			text += "凡例を置けなかった命令 " + std::to_string(counts.failed) + " 件。";
 		if (counts.paramsFailed > 0)
 			text += "パラメータを書けなかった凡例 " + std::to_string(counts.paramsFailed) +
-					" 件（幅 0 に潰れます）。";
+					" 件（幅 0 に潰れ、縮率も既定のままになります）。";
 		if (counts.widthLeft > 0)
 			text += "箱幅を設定できなかった凡例 " + std::to_string(counts.widthLeft) +
 					" 件（幅 0 に潰れます）。";
@@ -256,10 +258,12 @@ namespace HomeskzIfcImport::draw
 		if (counts.filterLeft > 0)
 			text += "ビューポートで絞れなかった凡例 " + std::to_string(counts.filterLeft) +
 					" 件（その図に無いシンボルも並びます）。";
-		if (counts.scaleMismatch > 0)
-			text += "イメージの縮率が伏図の縮尺と違う凡例 " + std::to_string(counts.scaleMismatch) +
-					" 件（凡例は 1:" + std::to_string(static_cast<int>(kSourceImageScale)) +
-					" 固定です）。";
+		if (counts.scaleUnknown > 0)
+			text += "伏図の縮尺が分からず既定の縮率で置いた凡例 " +
+					std::to_string(counts.scaleUnknown) + " 件。";
+		if (counts.scaleLeft > 0)
+			text += "イメージの縮率を設定できなかった凡例 " + std::to_string(counts.scaleLeft) +
+					" 件（凡例だけ図と縮尺が揃いません）。";
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw
