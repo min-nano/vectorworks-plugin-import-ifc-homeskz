@@ -82,6 +82,11 @@ scripts/
   ci-debug.sh               CI デバッグ実行を起動し、完了まで待って結果を取り出す
                             （SDK が手元に無い環境から SDK 依存の調査を行うため）
   ci-debug-job.sh           同・ランナー側の本体。調査モードの実装はこちらにある
+  vw-dump-pio-fields.py     VW 実機の「スクリプト編集」に貼って走らせる読み取り専用の
+                            ダンプ（選択オブジェクトのパラメトリックレコード・付いて
+                            いるレコード・オブジェクト変数・文書内のビューポート一覧）。
+                            SDK に API の無い PIO の設定を、UI で手作業したものと
+                            見比べて突き止めるための道具（CI では使わない）
 .clang-format               C/C++ フォーマット規則（タブ・Allman ブレース等）
 .clang-tidy                 C/C++ 静的解析チェックの設定（WarningsAsErrors）
 .cmake-format.yaml          CMake の整形（cmake-format）＋ lint（cmake-lint）設定
@@ -94,7 +99,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 .github/workflows/test.yml  CI: 無 SDK の単体テスト（ASan+UBSan）とカバレッジ
 .github/workflows/lint.yml  CI: ソース／非ソースを問わずコーディング規則を強制
 .github/workflows/codeql.yml            CI: CodeQL による静的解析（週次＋PR）
-.github/workflows/cleanup-dev-release.yml  ブランチ削除時に dev プレリリースを片付ける
+.github/workflows/cleanup-dev-release.yml  PR のクローズ時に dev プレリリースを片付ける
 .github/workflows/stable-release-healthcheck.yml
                             stable リリースの取りこぼしを検知して再ビルドする
 .github/workflows/ci-debug.yml  CI: 手動ディスパッチ専用のデバッグ実行（SDK 調査・
@@ -390,16 +395,30 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
   チェック結論は `skipped` で失敗ではないため、ブランチ保護や `ci-wait` の判定には
   影響しません。
 
-`.github/workflows/cleanup-dev-release.yml` は、ブランチが削除されたときにその
-`dev-<branch>` プレリリース（とタグ）を削除し、dev ビルドが溜まらないようにします。
-`delete` イベントで起動されるため、デフォルトブランチ上のコピーから実行され、この
-ワークフローが `main` に入った後に削除されたブランチだけを対象とします。
+`.github/workflows/cleanup-dev-release.yml` は、**PR がクローズされたとき**（マージの
+有無を問わない）にその `dev-<branch>` プレリリース（とタグ）を削除し、dev ビルドが
+溜まらないようにします。プレリリースは**PR が開いているあいだの成果物**（公開するのは
+`build.yml` の `pull_request` 実行だけ）なので、PR が閉じた時点が役目の終わりです。
+以前はブランチ削除（`delete` イベント）を合図にしていましたが、それだと**ブランチを
+残したままマージした PR**や**マージせず閉じた PR**のプレリリースが残り続け、逆に PR を
+持たないブランチの削除でも起動していました。
+
+`pull_request` の `closed` で起動するため、ワークフローの実体は PR のマージ ref
+（head を base にマージしたもの）側のコピーから実行されます。したがってこの変更が
+`main` に入って初めて有効になり、それ以前から開いている PR も、マージ ref が新しい
+`main` に対して作り直された時点でこの版を拾います。フォークからの PR は
+（そもそも `build.yml` がプレリリースを公開しないので）ジョブの `if` で除外します。
+
+これと対になる取り決めが `build.yml` 側にもあります。ビルドの実行中に PR が閉じられると、
+片付けの側は「まだ公開されていないプレリリース」を探して空振りするので、その後にビルドが
+公開すると**誰も消さないプレリリース**が残ります。これを避けるため、dev の公開ステップは
+**PR がまだ open か**を公開の前後で確かめます（以前はブランチの存在を見ていました）。
 
 `.github/workflows/stable-release-healthcheck.yml` はスケジュール（6 時間ごと）で
 安全網として実行されます。公開済みの `stable` リリースが `main` の先頭からずれている
 場合 — つまり stable の公開を取りこぼした場合 — `main` で `build.yml` を再ディスパッチ
-して再ビルド・再公開します。スケジュール／`delete` 系のワークフローと同様に
-デフォルトブランチから実行されるため、`main` にマージされて初めて有効になります。
+して再ビルド・再公開します。スケジュール起動のワークフローはデフォルトブランチから
+実行されるため、`main` にマージされて初めて有効になります。
 
 #### 手動ディスパッチ（`workflow_dispatch`）を持つワークフロー
 
@@ -413,7 +432,7 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 | `stable-release-healthcheck.yml` | あり | 6 時間の次回スケジュールを待たずに stable のずれを直したいとき |
 | `ci-debug.yml` | あり（専用） | 手動ディスパッチ**のみ**で起動する調査用ワークフロー |
 | `lint.yml` / `test.yml` / `codeql.yml` | なし | push / PR（+ CodeQL は週次スケジュール）で自動的に走る |
-| `cleanup-dev-release.yml` | なし | `delete` イベント専用 |
+| `cleanup-dev-release.yml` | なし | PR のクローズ（`pull_request` の `closed`）専用 |
 
 ### CI デバッグ（`ci-debug.yml`）
 
