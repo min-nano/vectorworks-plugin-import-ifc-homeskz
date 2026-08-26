@@ -298,7 +298,9 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Section.cpp
 		src/draw/Sheet.cpp
 		src/draw/Tag.cpp
-		src/draw/Legend.cpp)
+		src/draw/Legend.cpp
+		# 【一時計装 ── 役目を終えたら消す】凡例の設定の保存先を実機で突き止めるダンプ。
+		src/draw/AuxProbe.cpp)
 
 	# add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])
 	#
