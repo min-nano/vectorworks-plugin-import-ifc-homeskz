@@ -142,7 +142,10 @@ namespace HomeskzIfcImport::draw
 		if (!progress.cancelled())
 		{
 			const LayerOrderResult order = reorderStoryLayers(document);
-			counts.trace = order.trace; // 診断ログ用（ダイアログには出さない）
+			// 診断ログ用（ダイアログには出さない）。**2 回の測定を混ぜない**——1 回目は
+			// 「VW が自然に並べた状態」で、そこが知りたいところ。上書きすると 2 回目
+			// （並べ替え済み）で消えてしまう。
+			counts.trace = "測定 1（要素を描く前）:\n" + order.trace;
 			if (!order.ordered && !document.stories.empty())
 				addDiagnostics("レイヤの重ね順を並べ替えられませんでした"
 							   "（伏図で床・野地板が柱・梁を覆います）。");
@@ -258,7 +261,10 @@ namespace HomeskzIfcImport::draw
 		if (!progress.cancelled())
 		{
 			const LayerOrderResult order = reorderStoryLayers(document);
-			counts.trace = order.trace; // 診断ログ用（ダイアログには出さない）
+			// 診断ログ用（2 回目。1 回目を消さずに足す。上のコメント参照）。
+			if (!counts.trace.empty())
+				counts.trace += "\n";
+			counts.trace += "測定 2（伏図の直前）:\n" + order.trace;
 			if (!order.ordered && !document.stories.empty())
 				addDiagnostics("レイヤの重ね順を並べ替えられませんでした"
 							   "（伏図で床・野地板が柱・梁を覆います）。");
