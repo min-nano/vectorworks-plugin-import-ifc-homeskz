@@ -134,31 +134,6 @@ namespace HomeskzIfcImport::draw
 			return applied;
 		}
 
-		// 表示するデザインレイヤの縮尺を返す。図が映すレイヤの縮尺は揃っているので、
-		// 最初に取れたものを採る。取れなければ 0（＝ビューポートの既定縮尺のままにする）。
-		double LayerScaleFor(const core::ViewportCommand& command)
-		{
-			for (const std::string& name : command.layers)
-			{
-				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
-				if (layer == nil)
-					continue;
-				try
-				{
-					const VWLayerObj design(layer);
-					const double scale = design.GetScale();
-					if (scale > 0.0)
-						return scale;
-				}
-				catch (...)
-				{
-					// このレイヤからは縮尺を取れなかった。次の候補を見る。
-					continue;
-				}
-			}
-			return 0.0;
-		}
-
 		// 既存のコンポーネント（層）数。取得できなければ 0（＝層を持たない）とみなす。
 		short CountComponents(MCObjectHandle object)
 		{
@@ -446,6 +421,11 @@ namespace HomeskzIfcImport::draw
 
 	namespace
 	{
+		// インチ → mm。用紙まわりの長さは SDK では一貫して**インチで返る**（用紙・
+		// シートレイヤの大きさ。余白は単位が書かれていない）ので、換算はここに 1 つだけ
+		// 置く（SheetPaperArea）。
+		constexpr double kMillimetersPerInch = 25.4;
+
 		// ビューポートの向き（オブジェクト変数 1007）。3D の「上」＝standardViewTop（7）。
 		// 2D/平面かどうかは向きではなく Project 2D（1005）が持つので、**この 2 つは組で
 		// 扱う**（DrawUtil.h の ViewportProjection）。
@@ -486,7 +466,7 @@ namespace HomeskzIfcImport::draw
 	//   * VWClass::ForEachClass(true, cb)                 … 図面の全クラスの列挙
 	//                                                       （ISDK::ForEachClass の VWFC 版）
 	//   * gSDK->SetViewportClassVisibility(vp, idx, 0)    … クラス表示（既定は非表示）
-	//   * VWViewportObj(vp).SetScale / GetScale / SetDescription / SetLocator / Update
+	//   * VWViewportObj(vp).SetScale / SetDescription / SetLocator / Update
 	//                                                     … 縮尺（1003）・図面タイトル（1032）・
 	//                                                       図番（1033）・描画更新
 	//   * VWViewportObj(vp).SetViewType / SetProject2D / GetProject2D
@@ -538,7 +518,7 @@ namespace HomeskzIfcImport::draw
 	ViewportFinish ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
 									 const ViewportSetup& setup,
 									 const core::ViewportCommand& command,
-									 ViewportProjection projection)
+									 ViewportProjection projection, double scale)
 	{
 		ViewportFinish finish;
 		// 表示レイヤ: まず全部隠し、命令に挙げたものだけ表示へ戻す。**存在しないレイヤ名は
@@ -560,9 +540,8 @@ namespace HomeskzIfcImport::draw
 		finish.classesApplied = ShowClasses(viewport, setup.classes);
 		finish.planViewApplied = projection == ViewportProjection::Keep;
 
-		// 縮尺・［投影の作り直し］・ラベル・更新。**縮尺は表示レイヤを絞った後に読む**
-		// （映すレイヤの縮尺に合わせるため）。設定に失敗しても図そのものは残す。
-		const double scale = LayerScaleFor(command);
+		// 縮尺・［投影の作り直し］・ラベル・更新。**縮尺は呼び出し側が用紙と建物の大きさから
+		// 決めて渡す**（DrawUtil.h の ConfigureViewport）。設定に失敗しても図そのものは残す。
 		try
 		{
 			VWViewportObj vp(viewport);
@@ -573,12 +552,6 @@ namespace HomeskzIfcImport::draw
 			vp.SetDescription(TXString(command.drawingTitle.c_str()));
 			vp.SetLocator(TXString(command.drawingNumber.c_str()));
 			vp.Update();
-
-			// **持ち帰る縮尺は「書いた値」ではなく「仕上げ終わりのビューポートの値」**。
-			// 実機では 1:50 のレイヤを与えたビューポートが 1:100 のままになり、その値を
-			// 信じて書いた凡例の縮率だけが図とずれた（投影の作り直しで戻されている疑いが
-			// 濃い）。ここで読み直せば、凡例は必ず図に合う。
-			finish.scale = vp.GetScale();
 		}
 		catch (...)
 		{
@@ -586,6 +559,174 @@ namespace HomeskzIfcImport::draw
 			return finish;
 		}
 		return finish;
+	}
+
+	SheetPaper SheetPaperArea(MCObjectHandle sheetLayer)
+	{
+		SheetPaper paper;
+
+		// --- 用紙とシートレイヤの大きさ（どちらも**インチで返る**）--------------------
+		//
+		// 用紙（page/paper）とシートレイヤは**別の値**として定義されている
+		// （ObjectVariables.h: 165/166 が sheet layer、167/168 が layer page/paper。
+		// ci-debug で確認）。用紙の大きさは 167/168 を第一に採り、読めなければ
+		// VWLayerObj（＝165/166）で代用する。
+		const auto inches = [sheetLayer](short selector, double& out)
+		{
+			TVariableBlock value;
+			double raw = 0.0;
+			if (gSDK->GetObjectVariable(sheetLayer, selector, value) == 0 || !value.GetReal64(raw))
+				return false;
+			if (raw <= 0.0)
+				return false;
+			out = raw * kMillimetersPerInch;
+			return true;
+		};
+
+		try
+		{
+			const VWLayerObj sheet(sheetLayer);
+			const double width = sheet.GetSheetWidht() * kMillimetersPerInch;
+			const double height = sheet.GetSheetHeight() * kMillimetersPerInch;
+			if (width > 0.0 && height > 0.0)
+				paper.sheet = core::Vec2{width, height};
+		}
+		catch (...)
+		{
+			// シートレイヤとして読めなかった。用紙のオブジェクト変数だけで進む。
+			paper.sheet = core::Vec2{};
+		}
+
+		core::Vec2 size;
+		if (!inches(ovLayerSheetPaperWidth, size.x) || !inches(ovLayerSheetPaperHeight, size.y))
+			size = paper.sheet;
+		if (size.x <= 0.0 || size.y <= 0.0)
+			// 用紙が読めなかった。既定（A3 横）で割り付ける——用紙が読めないことで図を捨てる
+			// より、既定で置いてローカルで直す方がよい。
+			size = core::kDefaultPaperSize;
+		paper.paper = size;
+
+		// --- 印刷可能領域（用紙 − 余白）----------------------------------------------
+		//
+		// ★**余白は仮定せず SDK から読む**（M18。かつては四辺 15mm と決め打ちしていたが、
+		// 余白は用紙ではなく印刷の設定が決めるものなので、仮定した瞬間に実際とずれる）。
+		// ISDK::GetPageMargins は 4 辺を返すが**単位がヘッダに書かれていない**（実機では
+		// **図面の単位**で返った——mm の図面で 2.963 ＝ 3mm。M18 のローカル確認）ので、
+		// 次の順で決める。**「mm 固定」にはしない**: 単位が図面依存である以上、インチの
+		// 図面ではインチで返るはずで、そのときも同じ突き合わせで正しい方が選ばれる。
+		//   1. インチとみなした値で「用紙 − 余白」がシートレイヤの大きさ（165/166）と
+		//      一致するなら**インチ**。用紙まわりの長さは SDK では一貫してインチなので、
+		//      これが本命。
+		//   2. mm とみなした値で一致するなら **mm**。
+		//   3. どちらとも一致しない（＝シートレイヤの大きさが用紙と同じ等）ときは、
+		//      **用紙に収まる方**を採る。両方収まるならインチ（1 の理由）。
+		// 読めなかった・4 辺とも 0 のときは余白なし＝用紙いっぱいを印刷可能領域とする。
+		// **どの解釈を採ったかは生の値ごと診断へ出す**（draw/Sheet）ので、実機で確かめられる。
+		double left = 0.0;
+		double right = 0.0;
+		double bottom = 0.0;
+		double top = 0.0;
+		try
+		{
+			gSDK->GetPageMargins(sheetLayer, left, right, bottom, top);
+		}
+		catch (...)
+		{
+			// 余白が読めなかった。用紙いっぱいを使う（狭める方向の仮定を置かない）。
+			left = right = bottom = top = 0.0;
+		}
+		paper.rawMargins = SheetMargins{left, right, bottom, top};
+
+		const bool any = left > 0.0 || right > 0.0 || bottom > 0.0 || top > 0.0;
+		const bool sane = left >= 0.0 && right >= 0.0 && bottom >= 0.0 && top >= 0.0;
+		if (any && sane)
+		{
+			// 候補は 2 つだけ。**インチが先**（用紙まわりの長さは SDK では一貫してインチ）。
+			constexpr std::array<double, 2> kUnits{kMillimetersPerInch, 1.0};
+			const auto fits = [&](double scale)
+			{ return ((left + right) * scale) < size.x && ((bottom + top) * scale) < size.y; };
+			const auto matchesSheet = [&](double scale)
+			{
+				if (paper.sheet.x <= 0.0 || paper.sheet.y <= 0.0)
+					return false;
+				constexpr double kTol = 0.5;
+				return std::abs((size.x - ((left + right) * scale)) - paper.sheet.x) <= kTol &&
+					   std::abs((size.y - ((bottom + top) * scale)) - paper.sheet.y) <= kTol;
+			};
+
+			// 1. 「用紙 − 余白」がシートレイヤの大きさと一致する単位。両方の候補を先に
+			//    見てから 2 へ落ちる（一致は「収まる」より強い根拠なので順序を混ぜない）。
+			// 2. どちらとも一致しなければ、用紙に収まる方。
+			double scale = 0.0;
+			for (const double unit : kUnits)
+			{
+				if (matchesSheet(unit))
+				{
+					scale = unit;
+					break;
+				}
+			}
+			for (const double unit : kUnits)
+			{
+				if (scale > 0.0)
+					break;
+				if (fits(unit))
+					scale = unit;
+			}
+
+			if (scale > 0.0)
+			{
+				paper.marginsInInches = scale == kMillimetersPerInch;
+				paper.marginsRead = true;
+				paper.margins =
+					SheetMargins{left * scale, right * scale, bottom * scale, top * scale};
+			}
+		}
+
+		// ★用紙は原点中心（DrawUtil.h の SheetPaperArea）。印刷可能領域は、その用紙から
+		// 4 辺の余白を引いた矩形——**余白は左右・上下で異なりうる**ので、中心もそのぶん
+		// ずれる（引いた後の矩形をそのまま使い、中心へ寄せ直したりしない）。
+		paper.printable = core::PaperArea{
+			core::Vec2{(-size.x / 2.0) + paper.margins.left,
+					   (-size.y / 2.0) + paper.margins.bottom},
+			core::Vec2{(size.x / 2.0) - paper.margins.right, (size.y / 2.0) - paper.margins.top}};
+		return paper;
+	}
+
+	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size)
+	{
+		WorldRect bounds;
+		if (!gSDK->GetObjectBounds(viewport, bounds))
+			return false;
+		// WorldRect は top > bottom（Y 上向き）。中心は上下どちらから見ても同じ式でよいが、
+		// 大きさは絶対値で見る。
+		center = core::Vec2{(bounds.left + bounds.right) / 2.0, (bounds.top + bounds.bottom) / 2.0};
+		size =
+			core::Vec2{std::abs(bounds.right - bounds.left), std::abs(bounds.top - bounds.bottom)};
+		return true;
+	}
+
+	bool ApplyViewportScale(MCObjectHandle viewport, double scale)
+	{
+		if (scale <= 0.0)
+			return false;
+		try
+		{
+			VWViewportObj vp(viewport);
+			vp.SetScale(scale);
+			vp.Update();
+		}
+		catch (...)
+		{
+			// 縮尺を変えられなくても図は残る（仮の縮尺のまま）。件数だけ診断へ回す。
+			return false;
+		}
+		return true;
+	}
+
+	void MoveViewportBy(MCObjectHandle viewport, const core::Vec2& delta)
+	{
+		gSDK->MoveObject(viewport, delta.x, delta.y);
 	}
 
 	// 「命令インデックス → ハンドル」の対応表の所有者。**表の中身（MCObjectHandle）は

@@ -22,6 +22,7 @@
 #include "PluginPrefix.h"
 
 #include "core/Document.h"
+#include "core/Layout.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
@@ -315,15 +316,6 @@ namespace HomeskzIfcImport::draw
 		// **書けたかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも
 		// 黙って何もしないので、「設定したつもりで効いていない」は目視では見抜けない。
 		bool planViewApplied = true;
-		// **仕上げ終わりのビューポートの縮尺**（1:50 なら 50）。**シートレイヤに載せる
-		// グラフィック凡例のイメージの縮率をこの図に合わせる**ために持ち帰る（draw/Legend）。
-		// 縮尺を読むのはここ 1 か所だけにしたいので、凡例側で読み直さない。
-		//
-		// **「設定した値」ではなく「読み直した値」**である。実機では 1:50 のレイヤを与えた
-		// ビューポートが 1:100 のままになり、書いた値を信じた凡例の縮率だけが図とずれた
-		// （投影の作り直しで戻されている疑いが濃い）。0 は読めなかったという意味で、
-		// そのときは凡例の縮率を触らない。
-		double scale = 0.0;
 	};
 
 	// 生成済みのビューポートを命令どおりに仕上げる（表示レイヤの絞り込み → クラス表示 →
@@ -336,10 +328,96 @@ namespace HomeskzIfcImport::draw
 	// **投影の作り直しは「表示レイヤを絞った後・最後の更新の前」**に行う（上の
 	// ViewportProjection）。作り直しは更新を 1 回挟むので、レイヤを絞る前に行うと図面の
 	// 全レイヤを描くことになり、無駄に重い。順番を入れ替えないこと。
+	//
+	// scale は縮尺の分母（1/100 なら 100.0）。**用紙と建物の大きさから呼び出し側が決める**
+	// （core::planLayout / core::sectionLayout。M18）。0 以下なら縮尺には触らない
+	// ——ビューポートの既定のままになる。かつてはここが「映すデザインレイヤの縮尺」を読んで
+	// 当てていたが、デザインレイヤの縮尺は用紙に対する図の大きさとは関係が無く、図が用紙から
+	// はみ出しても気付けなかった。
 	ViewportFinish ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
 									 const ViewportSetup& setup,
 									 const core::ViewportCommand& command,
-									 ViewportProjection projection);
+									 ViewportProjection projection, double scale);
+
+	// シートレイヤの 4 辺の余白（用紙 mm。生の値を持つときは SDK が返したままの単位）。
+	struct SheetMargins
+	{
+		double left = 0.0;
+		double right = 0.0;
+		double bottom = 0.0;
+		double top = 0.0;
+	};
+
+	// シートレイヤの用紙まわりの実測値（長さはすべて用紙 mm）。
+	//
+	//   printable       … **印刷可能領域**（＝図を置いてよい矩形）。割り付けはこれを使う
+	//   paper           … 用紙の外形の大きさ（ovLayerSheetPaperWidth/Height＝167/168）
+	//   sheet           … シートレイヤの大きさ（VWLayerObj::GetSheetWidht＝165/166）
+	//   margins         … 解釈後の 4 辺の余白（mm）。読めなければすべて 0
+	//   rawMargins      … ISDK::GetPageMargins が返した**生の値**（単位不明のまま）
+	//   marginsRead     … 余白を意味のある値として解釈できたか
+	//   marginsInInches … その解釈が「インチ」だったか（false なら mm とみなした）
+	struct SheetPaper
+	{
+		core::PaperArea printable;
+		core::Vec2 paper;
+		core::Vec2 sheet;
+		SheetMargins margins;
+		SheetMargins rawMargins;
+		bool marginsRead = false;
+		bool marginsInInches = false;
+	};
+
+	// シートレイヤの用紙と印刷可能領域を読む。用紙が読めなければ core::kDefaultPaperSize
+	// （A3 横）で代用する（用紙が読めないだけで図を捨てない）。
+	//
+	// ★**用紙の大きさと印刷可能領域は別物**（M18）。かつては用紙の大きさだけを読み、
+	// 余白は四辺 15mm と決め打ちしていたが、余白は用紙ではなく**印刷の設定**が決めるので、
+	// 仮定した瞬間に実際とずれる（狭く見積もれば図が 1 段階小さくなり、広く見積もれば
+	// 印刷で切れる）。SDK には両方がある——用紙は ovLayerSheetPaperWidth/Height（167/168）、
+	// 余白は ISDK::GetPageMargins（4 辺）で、シートレイヤの大きさ（165/166＝
+	// VWLayerObj::GetSheetWidht。**インチ**なので 25.4 倍して mm にする）はまた別値。
+	// **GetPageMargins だけ単位がヘッダに書かれていない**ので、インチと mm のどちらとして
+	// 読むかは「用紙 − 余白」がシートレイヤの大きさと一致するかで決め、決められなければ
+	// 用紙に収まる方を採る（実装のコメント参照）。**実機では図面の単位で返った**
+	// （mm の図面で 2.963 → 420 − 5.969 = 414 ＝ シートレイヤの幅。M18 のローカル確認）
+	// が、単位が図面依存である以上インチの図面ではインチで返るはずなので、**「mm 固定」に
+	// はしない**。**採った解釈と生の値は診断へ出す**（draw/Sheet）ので、別の環境でも
+	// 実機で確かめられる。
+	//
+	// ★**用紙は原点を中心に置かれている前提**で矩形を組む。用紙が図面座標のどこに在るかを
+	// 返す呼び出しは無い（ObjectVariables にも位置の変数は無い。ci-debug で確認）。
+	// VWLayerObj::GetSheetOrigin() はあるが、それが用紙の中心を指すのか隅を指すのかは
+	// ヘッダからは決まらないので**使わない**——意味の分からない値を使うより、規約を 1 つ
+	// 決めて実機で確かめる方がよい（docs/DEV-NOTES.md M18「用紙の位置」）。
+	SheetPaper SheetPaperArea(MCObjectHandle sheetLayer);
+
+	// ビューポートの外形（用紙 mm）を測る。中心と大きさを書き戻し、測れれば true。
+	//
+	// 【なぜ測るのか】ビューポートの実寸は**描いてみるまで分からない**（映る図形の広がりで
+	// 決まる）。したがって「どこに置くか」は生成・更新の後に測ってから決める（データタグを
+	// 置いた後に測って直すのと同じ考え方。draw/Tag）。大きさは**見積もった縮尺で本当に
+	// 収まったか**を確かめて診断へ残すのにも使う（core/Layout.h の PlanLayout::plan）。
+	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size);
+
+	// 生成済みのビューポートの**縮尺だけ**を差し替えて描き直す。書けたら true。
+	//
+	// ConfigureViewport で一度仕上げた後に縮尺を変えたいときに使う——伏図は
+	// **凡例の実測**（draw/Legend の measureLegendWidth）を待って初めて最終的な縮尺が
+	// 決まるが、その凡例に何が並ぶかはビューポートに映るものが決めるので、先に仮の縮尺で
+	// 図を作らざるを得ない（draw/Sheet の 2 巡）。更新を 1 回余分に走らせるので、
+	// **縮尺が実際に変わったときだけ**呼ぶこと。
+	bool ApplyViewportScale(MCObjectHandle viewport, double scale);
+
+	// ビューポートを用紙の上で delta（用紙 mm）だけ動かす。注釈（データタグ）は
+	// ビューポートと一緒に動く。
+	//
+	// ★**測ってから動かすまでの間にデータタグを置くこと**（順序を入れ替えてはならない）。
+	// タグは「注釈へ置いた実位置を測って目標との差だけ動かす」作りで（draw/Tag の
+	// MovePendingTags）、**その実測はビューポートが用紙のどこに在るかに影響される**。
+	// 先にビューポートを動かしてからタグを置くと、動かした分だけタグが図からずれる
+	// （M18 のローカル確認で実測。伏図・軸組図とも全タグが同じ向きへ外れていた）。
+	void MoveViewportBy(MCObjectHandle viewport, const core::Vec2& delta);
 
 	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
 	// （draw/ObjectHandles.h の ObjectHandles）は SDK 非依存のヘッダに置いてあり、

@@ -56,7 +56,6 @@ using HomeskzIfcImport::parse::kFloorPlanStartNumber;
 using HomeskzIfcImport::parse::kFoundationSheetNumber;
 using HomeskzIfcImport::parse::kFoundationSheetTitle;
 using HomeskzIfcImport::parse::kLayerFoundationAnchor;
-using HomeskzIfcImport::parse::kLegendPosition;
 using HomeskzIfcImport::parse::kMoyaPlanCutOffset;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::moyaPlanTitle;
@@ -345,11 +344,6 @@ TEST(FoundationSheetLegendFollowsAnchorBolts)
 		// 置かない文書では凡例そのものを作らない**（空の箱を図面に残さない）。
 		const bool expected = !buildAnchorBoltCommands(model).empty();
 		CHECK(sheets[0].legend.has_value() == expected);
-		if (expected)
-		{
-			CHECK(sheets[0].legend->position.x == kLegendPosition.x);
-			CHECK(sheets[0].legend->position.y == kLegendPosition.y);
-		}
 	}
 }
 
@@ -362,16 +356,14 @@ TEST(FloorAndMoyaSheetsAlwaysCarryFloorLegend)
 		CHECK(ok);
 
 		// 柱梁伏図・母屋伏図は**必ず**凡例を載せる（何が並ぶかは凡例オブジェクト自身の
-		// ソース定義が決めるので、解析側では中身の有無を判断できない）。凡例が持つのは
-		// 配置点だけで、基礎伏図の凡例との違いも「どの伏図に載るか」しかない。
+		// ソース定義が決めるので、解析側では中身の有無を判断できない）。命令が持つのは
+		// 「凡例が有る」ことだけで、基礎伏図の凡例との違いも「どの伏図に載るか」しかない。
 		for (const std::vector<SheetCommand>& sheets :
 			 {buildFloorFramingSheetCommands(model), buildMoyaSheetCommands(model)})
 		{
 			for (const SheetCommand& sheet : sheets)
 			{
 				CHECK(sheet.legend.has_value());
-				CHECK(sheet.legend->position.x == kLegendPosition.x);
-				CHECK(sheet.legend->position.y == kLegendPosition.y);
 			}
 		}
 	}

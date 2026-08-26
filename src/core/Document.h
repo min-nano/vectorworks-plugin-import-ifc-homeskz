@@ -161,7 +161,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 複合オブジェクト（スラブ・壁）の構成層（VW の「構成要素」）1 枚。
-	//   スラブ … 床は「床仕上げ」「床下地」、基礎の底盤は「コンクリート」「捨てコン」「砕石」
+	//   スラブ … 床は「床仕上げ」「床下地」、基礎の底盤は「コンクリート」「砕石」
 	//   壁     … 基礎の立上りは「コンクリート」1 層
 	//
 	//   name       … 層の名前（"床仕上げ" / "コンクリート" …）
@@ -523,6 +523,34 @@ namespace HomeskzIfcImport::core
 		bool capped = false;
 	};
 
+	// 地中梁の下に敷く床付け（捨てコン・砕石）1 区間。地中梁（ModifierCommand::beddings）に
+	// ぶら下がり、**押し出しの向き（azimuth）と断面の座標系は地中梁と共有**して、断面と
+	// 押し出し方向の区間だけが違う（docs/DEV-NOTES.md M17「基礎の床付け」）。draw/Footing は
+	// 地中梁の可視ソリッドと同じ手順で 3D ソリッドとして置く。
+	//
+	// 【なぜ底盤の構成層にできないか】底盤（スラブ）の構成層は**一様な厚みの水平な層**しか
+	// 表せない。床付けは地中梁の下で深さが変わり、傾斜部では法線方向に厚みを持つので、
+	// 層ではなく地中梁と同じ押し出しソリッドとして描くしかない（地中梁のコンクリート自身を
+	// 台形プリズムで表すのと同じ理由）。
+	//
+	// 【なぜ区間に分かれるか】床付けは 1 本の地中梁の中でも断面が変わる。傾斜部を覆う砕石の
+	// 帯は、**直交する地中梁と取り合う区間では相手のコンクリートへ食い込む**ので、その区間
+	// だけ帯を切り下げる（parse/Footing.h 冒頭「床付け」）。切り下げる高さが同じ区間は
+	// 1 つにまとめてあるので、取り合いの無い地中梁では区間は 1 つ（＝地中梁の全長）になる。
+	//
+	// フィールド:
+	//   profile             … 断面の 2D 頂点列（u, v）。座標系は ModifierCommand と同じ
+	//   drawClass           … クラス名（構成要素の素材クラス。z構成要素-砕石 等）
+	//   start               … 地中梁の origin から押し出し方向へ何 mm の位置から始まるか
+	//   depth               … 押し出し長（mm。start + depth ≤ 地中梁の depth）
+	struct BeddingCommand
+	{
+		std::vector<Vec2> profile;
+		std::string drawClass;
+		double start = 0.0;
+		double depth = 0.0;
+	};
+
 	// 地中梁（台形断面プリズム）1 本。底盤（SlabCommand::modifiers）にぶら下がる
 	// （docs/DEV-NOTES.md M10）。
 	//
@@ -539,14 +567,21 @@ namespace HomeskzIfcImport::core
 	// 決まっている**ので、片方だけ変えてはいけない（parse/Footing の groundBeamModifier と
 	// draw/Footing の ModifierPrism）。
 	//
+	// 【床付け（beddings）】地中梁の下には捨てコン・砕石を敷く（M17）。同じ押し出しの中で
+	// 断面と区間だけが違うので、プリズム 1 本ぶんの origin / azimuth を共有する入れ子に
+	// して持つ（平らに並べて番号で突き合わせない。CLAUDE.md「命令セット」）。並びは
+	// **区間ごとに 上から**（捨てコン → 砕石）。床付けを求められなかった地中梁では空になる。
+	//
 	// フィールド:
 	//   profile             … 断面の 2D 頂点列（u, v）
+	//   beddings            … この地中梁の下に敷く床付け（上から）。無ければ空
 	//   depth               … 押し出し長（軸方向。mm）
 	//   origin              … 断面原点のワールド絶対座標（[x, y, z]）
 	//   azimuth             … 押し出し方向の方位角（度）
 	struct ModifierCommand
 	{
 		std::vector<Vec2> profile;
+		std::vector<BeddingCommand> beddings;
 		double depth = 0.0;
 		Vec3 origin;
 		double azimuth = 0.0;
@@ -581,9 +616,10 @@ namespace HomeskzIfcImport::core
 	// ストーリ基準高さとも一致する。bound は底盤天端レベルへのバインドで、offset は実天端 Z と
 	// 底盤天端レベル（面積最大の天端 Z）の差（主たる底盤は ≈0、独立基礎底盤等はずれる）。
 	//
-	// 【スラブ構成】components は上から コンクリート（thickness）＋ 捨てコン ＋ 砕石。
-	// 構成は**そのスラブへ直接**与える（スタイルは作らない・当てない。draw/DrawUtil.h
-	// 「複合オブジェクトの構成」）。
+	// 【スラブ構成】components は上から コンクリート（thickness）＋ 砕石。**底盤の下は
+	// 砕石 1 層**で、その厚みは捨てコンと砕石を合わせた厚み（M17。捨てコンは地中梁の下
+	// だけに敷くので、底盤の下では砕石がその厚みまで受け持つ）。構成は**そのスラブへ直接**
+	// 与える（スタイルは作らない・当てない。draw/DrawUtil.h「複合オブジェクトの構成」）。
 	//
 	// フィールド:
 	//   layer                     … 配置先デザインレイヤ名（"F-底盤"）
@@ -595,7 +631,8 @@ namespace HomeskzIfcImport::core
 	//   thickness                 … コンクリート厚（mm。整数に丸めた値）
 	//   elevation                 … コンクリート天端の絶対 Z
 	//   bound                     … 天端の高さ基準（底盤天端レベル＋差分）
-	//   modifiers                 … この底盤に噛み合う地中梁（台形プリズム）。無ければ空
+	//   modifiers                 … この底盤に噛み合う地中梁（台形プリズム。床付けを含む）。
+	//                               無ければ空
 	struct SlabCommand
 	{
 		std::string layer;
@@ -797,19 +834,25 @@ namespace HomeskzIfcImport::core
 	// 突き合わせ自体がバグの種になる）。
 	//
 	// フィールド:
-	//   position              … シートレイヤ上の配置点（用紙座標 mm）
-	//   （'number' は持たない。上記のとおり入れ子で表すため）
+	//   （フィールドは 1 つも無い。凡例が「有る」ことだけを表す＝SheetCommand の
+	//   　std::optional が立っているかどうかがすべて）
 	//
-	// 【縮尺も持たない】凡例のイメージの縮率は**その伏図ビューポートの縮尺**に合わせるが、
-	// その縮尺は描画時に表示レイヤから読むもの（draw/DrawUtil の ConfigureViewport）なので、
-	// 解析側では決められない。したがって命令には現れず、draw/Sheet が仕上げたビューポートの
-	// 縮尺をそのまま凡例へ渡す。
+	// 【置き場所は持たない】凡例をどこへ置くかは**用紙の大きさが決まってから**でないと
+	// 決められない（M18）。用紙の大きさはシートレイヤから SDK で読むものなので、解析側には
+	// 分からない——描画側が core::planLayout の legendTopRight（＝ビューポートのために空けた
+	// 右の 1 列の右上）へ寄せる。かつては固定の配置点（用紙原点）を命令が持っていたが、
+	// 「ローカルの VW で最終調整する」と書き置いたまま図と重なる位置に出ていた。
+	//
+	// 【スタイルも縮尺も持たない】凡例は**スタイル無し**で置き、中身（ソース定義）は
+	// タグ付きデータで与える（draw/Legend）。イメージの縮率はその伏図の縮尺に合わせるが、
+	// その縮尺は用紙への収まりから描画時に決まる（core::planLayout）ので、解析側では
+	// 決められない。
 	//
 	// 【載せるシンボルの一覧は持たない】凡例に何が並ぶかは凡例オブジェクト自身のソース定義
-	// （どのビューポートのオブジェクトを集めるか）が決めるので、描画側が一覧を使う経路が無い
-	// （使われない枠を先に作らない。ColumnMarkCommand が記号サイズを持たないのと同じ）。
-	// ただし**実際にアンカーボルトを配置したときだけ基礎伏図に凡例を出す**判断は解析側
-	// （parse/Sheet）が持つので、空の凡例が図面に出ることはない。
+	// が決めるので、描画側が一覧を使う経路が無い（使われない枠を先に作らない。
+	// ColumnMarkCommand が記号サイズを持たないのと同じ）。ただし**実際にアンカーボルトを
+	// 配置したときだけ基礎伏図に凡例を出す**判断は解析側（parse/Sheet）が持つので、空の凡例が
+	// 図面に出ることはない。
 	//
 	// 【どのビューポートで絞るかも持たない】凡例はさらに**そのシートのビューポートで
 	// フィルタ**され、その図に映っているシンボルだけが並ぶ（draw/Legend の
@@ -818,7 +861,6 @@ namespace HomeskzIfcImport::core
 	// 入れ子で置いた効き目がここにも出ている）。
 	struct LegendCommand
 	{
-		Vec2 position;
 	};
 
 	// シートレイヤ 1 枚（＋その上のビューポート 1 枚）を生成する命令。draw/Sheet がこれを
@@ -857,9 +899,6 @@ namespace HomeskzIfcImport::core
 	// その枚数に縛られることも無い（parse/Section.h 参照）。
 	//
 	// フィールド:
-	//   number                        … 配置先シートレイヤ番号
-	//                                （＝レイヤ名。全 section 命令で同じ "A"）
-	//   title                         … シートレイヤのタイトル（"軸組図"）
 	//   direction                     … X通り / Y通り
 	//   lineStart                     … 断面指示線の始点（切断位置。センタリング済みの平面座標）
 	//   lineEnd                       … 同 終点
@@ -880,15 +919,35 @@ namespace HomeskzIfcImport::core
 	// **並べる位置も持たない**: シートレイヤ上での配置は、実際にできたビューポートの大きさに
 	// 合わせて詰める必要があり、大きさは描いてみるまで分からない（draw/Section が
 	// GetObjectBounds で測って並べる）。
+	//
+	// **シートレイヤ番号・タイトルも持たない**（M18）: 軸組図は 1 枚の用紙に複数並び、
+	// **何枚の用紙に分かれるかは用紙の大きさと縮尺が決める**ので、命令ごとに配置先の
+	// シートレイヤを名指しできない（用紙の大きさは描くときにしか分からない）。番号の
+	// 始まりとタイトルの基は文書に 1 つ（SectionSheetCommand）だけ持ち、実際の割り付けは
+	// 描画側が core::sectionLayout で決める。
 	struct SectionCommand
 	{
-		std::string number;
-		std::string title;
 		SectionDirection direction = SectionDirection::X;
 		Vec2 lineStart;
 		Vec2 lineEnd;
 		Vec2 viewPoint;
 		ViewportCommand viewport;
+	};
+
+	// 軸組図を載せるシートレイヤの**通し方**（docs/DEV-NOTES.md M18）。軸組図は 1 枚の用紙に
+	// 複数並び、収まらなければシートレイヤを足していく——その**枚数は用紙の大きさと縮尺が
+	// 決める**ので解析側では分からない。ここが持つのは枚数に依らない 2 つだけ:
+	//
+	//   startNumber           … 最初のシートレイヤ番号。**伏図の続き**（伏図が 1〜7 なら 8）。
+	//                           2 枚目以降は 9・10 … と 1 ずつ増やす（描画側）。
+	//   title                 … シートタイトルの基（"軸組図"）。複数枚に分かれるときは
+	//                           "軸組図(1)" … と連番になる（core::sectionSheetTitle）。
+	//
+	// sections が空のときは使われない（既定値のまま）。
+	struct SectionSheetCommand
+	{
+		int startNumber = 0;
+		std::string title;
 	};
 
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
@@ -989,6 +1048,11 @@ namespace HomeskzIfcImport::core
 		// 伏図と同じくモデルを映すので、描画は **全要素の描画が済んだ後**（伏図の後）に
 		// 処理する（draw/ExecuteDocument）。
 		std::vector<SectionCommand> sections;
+
+		// M18 軸組図のシートレイヤの通し方（番号の始まり＝伏図の続き・タイトルの基）。
+		// **何枚に分かれるかは描くときに決まる**ので、枚数に依らないこの 2 つだけを持つ
+		// （SectionSheetCommand 参照）。sections が空なら使われない。
+		SectionSheetCommand sectionSheet;
 	};
 
 	// ------------------------------------------------------------------------
@@ -1085,6 +1149,39 @@ namespace HomeskzIfcImport::core
 	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder と
 	// 同じ立ち位置。CLAUDE.md「テスト方針」）。
 	bool sectionHeightRange(const Document& document, double& start, double& end);
+
+	// 平面（伏図）の広がりに足す四方の余白（mm）。通り芯の丸（通り名の吹き出し）や部材の
+	// 太さは命令の座標には現れないので、その分の遊びを持たせる。planContentBounds とその
+	// 期待値を書くテストが共有する。
+	//
+	// **通り芯の線そのものは既に広がりに入っている**（GridCommand の始点・終点を見るため）
+	// ので、ここで見込むのは丸と線の太さだけでよい。1/50 なら 300mm ＝ 用紙の 6mm で、
+	// 丸（用紙 4mm 前後）を十分覆う。当初の 500mm は 1/50 で 10mm と過剰で、境目の建物が
+	// 1 段階小さい縮尺へ落ちる原因になっていた（M18 のローカル確認）。
+	inline constexpr double kPlanContentMargin = 300.0;
+
+	// 取り込んだ要素の平面座標から、図に映るものを包む矩形（センタリング済みの平面座標。
+	// 四方に kPlanContentMargin の余白つき）を返す。layers が空でなければ**そのレイヤに
+	// 載る命令だけ**を見る（伏図 1 枚が映す範囲）。座標を持つ命令が 1 つも無ければ false
+	// （out は変更しない）。
+	//
+	// **なぜ要るか**（docs/DEV-NOTES.md M18）: 用紙に合わせて縮尺を選ぶには「図がどれだけの
+	// 広がりを持つか」が要る。ビューポートの実寸は描いてみるまで分からないが、**そこに何が
+	// 映るかは命令セットが全部知っている**ので、実寸を測る前に縮尺を決められる。
+	// 併せて、**用紙をめくっても図が動かない**ように置くのにも使う——伏図ごとに映すレイヤが
+	// 違えば図の中身の広がりも違うので、シートごとの広がり（layers 指定）と文書全体の
+	// 広がり（layers 空）の差が、そのシートで図をどれだけずらせばよいかを与える。
+	//
+	// SDK を触らない純計算なので core に置いて無 SDK でテストする（sectionHeightRange と
+	// 同じ立ち位置）。
+	bool planContentBounds(const Document& document, const std::vector<std::string>& layers,
+						   Vec2& min, Vec2& max);
+
+	// 軸組図 1 枚ぶんの広がり（実寸 mm）。幅は**平面の広がりの大きい方**——X通りは Y 方向の
+	// 広がりを、Y通りは X 方向の広がりを映すので、どちらも同じ大きさのマスに収まるように
+	// 大きい方を採る（用紙の上で段が揃う）。高さは断面の高さ範囲（sectionHeightRange）。
+	// どちらかが求まらなければ false（out は変更しない）。
+	bool sectionContentSize(const Document& document, Vec2& size);
 
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す。draw/Story がこの順を適
 	// 用する（レベルの高さには依存しない）。SDK を触らない純計算なので core に置いて無 SDK

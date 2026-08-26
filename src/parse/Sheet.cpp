@@ -48,9 +48,9 @@ namespace HomeskzIfcImport::parse
 			sheet.viewport.layers = std::move(layers);
 			if (withLegend)
 			{
-				core::LegendCommand legend;
-				legend.position = kLegendPosition;
-				sheet.legend = legend;
+				// 凡例は**有ることだけ**が意味を持つ（中身も置き場所も描画側が決める。
+				// core/Document.h の LegendCommand）。
+				sheet.legend = core::LegendCommand{};
 			}
 			return sheet;
 		}

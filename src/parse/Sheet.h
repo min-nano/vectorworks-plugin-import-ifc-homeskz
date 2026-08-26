@@ -104,10 +104,11 @@ namespace HomeskzIfcImport::parse
 	// spans は parse/Column の collectColumnSpans。
 	std::vector<std::string> spanLayersAtCut(const std::vector<ColumnSpan>& spans, double cut);
 
-	// 凡例のシートレイヤ上の配置点（用紙座標 mm）。**ビューポートと重ならない位置はローカルの
-	// VectorWorks で最終調整する**——ビューポートの実寸は描いてみるまで分からないので、
-	// 解析側では決められない（docs/DEV-NOTES.md M13）。
-	inline constexpr core::Vec2 kLegendPosition{0.0, 0.0};
+	// **凡例の配置点も中身もここでは決めない**（M18・スタイル無し化）。用紙の大きさは
+	// 描くときにシートレイヤから読むもので解析側には分からないため、置き場所は描画側が
+	// 用紙の割り付け（core::planLayout の legendTopRight＝ビューポートのために空けた右の
+	// 1 列）から決める。何を並べるか（ソース定義）も描画側がタグ付きデータで与える
+	// （draw/Legend）。
 
 	// 基礎伏図の sheet 命令（無ければ空）。基礎要素が 1 つも無ければ空を返す——表示すべき"F-底
 	// 盤" ほかのレイヤが生成されず、ビューポートが空になるため。

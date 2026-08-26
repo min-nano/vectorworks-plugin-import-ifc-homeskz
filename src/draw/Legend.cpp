@@ -27,7 +27,9 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <string>
 
@@ -40,10 +42,17 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kGraphicLegendPlugin = "GraphicLegend";
 
 		// 箱幅パラメータ。凡例は矩形モードの PIO なので、点で生成すると幅 0 のまま潰れる
-		// （draw/Legend.h）。用紙上（ドキュメント単位 mm）の適当な幅を与えて可視化し、
-		// **ローカルの VW で最終調整する**。高さは行の内容から自動で決まるので与えない。
+		// （draw/Legend.h）。ここで与えるのは**生成時の箱の幅**で、用紙をどれだけ空けるかは
+		// これではなく**置いた後の実測**が決める（measureLegendWidth）——凡例は図面の内容で
+		// 伸び縮みするので、決め打ちの幅を割り付けに使わない。高さは行の内容から自動で
+		// 決まるので与えない。
 		constexpr const char* kFieldBoxWidth = "BoxWidth";
-		constexpr double kBoxWidth = 150.0;
+		// ★**要求した幅がそのまま図の取り分を減らす。** 用紙に空ける幅は実測で決まるので
+		// （measureLegendWidth）、ここで広く頼むほど伏図の縮尺が落ちる。実機では並ぶ
+		// シンボルが 25mm ほどしか使っておらず、60mm を頼んでいたときは 1/50 に 330mm 要る
+		// 建物に対して使える幅が 315mm しか残らず 1/75 へ落ちていた（M18 のローカル確認）。
+		// **中身が必要とする幅より少し広い程度**に留める。
+		constexpr double kBoxWidth = 40.0;
 
 		// イメージの縮率（OIP の「イメージの縮率」）。**分母を実数で持つ**欄で、1:50 なら 50。
 		// 実機のダンプで確定した（縮率 1:50 の凡例だけ 50 で、ほかは既定の 100 だった）。
@@ -56,30 +65,24 @@ namespace HomeskzIfcImport::draw
 		constexpr short kLineWeightMils = 5;
 		constexpr InternalIndex kFillNone = 0;
 
-		// 生成した凡例のパラメータ（箱幅・イメージの縮率）を与える。**例外を外へ出さない**
-		// ——書けなくても凡例そのものは図面に残るので、件数だけ counts へ積む。
-		void ApplyParams(MCObjectHandle object, double viewportScale, LegendCounts& counts)
+		// 生成した凡例の箱幅を与える。**例外を外へ出さない**——書けなくても凡例そのものは
+		// 図面に残るので、件数だけ counts へ積む。
+		//
+		// **イメージの縮率はここでは書かない。** 縮尺は用紙への収まりで決まり、凡例の幅を
+		// 測った後に決め直されることがある（core::planLayout）ので、置き終えてから
+		// applyLegendImageScale でまとめて与える（draw/Legend.h）。
+		void ApplyBoxWidth(MCObjectHandle object, LegendCounts& counts)
 		{
 			try
 			{
 				VWParametricObj pio(object);
 				if (!SetParamRealChecked(pio, TXString(kFieldBoxWidth), kBoxWidth))
 					++counts.widthLeft;
-
-				// 縮尺が分からなかった伏図（表示レイヤから読めなかった）では触らない
-				// ——既定の縮率のまま置く方が、当てずっぽうの値を書くよりましである。
-				if (viewportScale <= 0.0)
-				{
-					++counts.scaleUnknown;
-					return;
-				}
-				if (!SetParamRealChecked(pio, TXString(kFieldImageScale), viewportScale))
-					++counts.scaleLeft;
 			}
 			catch (...)
 			{
-				// PIO として開けなかった（＝パラメータを 1 つも書けていない）。幅 0 のまま
-				// 潰れる・縮率が既定のままになるだけで凡例自体は図面に残るので、続ける。
+				// PIO として開けなかった（＝箱幅を書けていない）。幅 0 のまま潰れるだけで
+				// 凡例自体は図面に残るので、続ける。
 				++counts.paramsFailed;
 			}
 		}
@@ -190,7 +193,8 @@ namespace HomeskzIfcImport::draw
 	}
 
 	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::LegendCommand& command,
-						 double viewportScale, MCObjectHandle filterViewport, LegendCounts& counts)
+						 const core::Vec2& where, MCObjectHandle filterViewport,
+						 LegendCounts& counts)
 	{
 		if (sheetLayer == nil)
 		{
@@ -202,18 +206,19 @@ namespace HomeskzIfcImport::draw
 		// レイヤへ入るので、先にそのシートレイヤをアクティブにする。
 		gSDK->SetCurrentLayer(sheetLayer);
 
-		const MCObjectHandle object =
-			gSDK->CreateCustomObject(TXString(kGraphicLegendPlugin),
-									 WorldPt(command.position.x, command.position.y), 0.0, true);
+		// 生成位置は仮（右上に合わせるのは中身が流し込まれて大きさが定まってから＝
+		// placeLegends）。
+		const MCObjectHandle object = gSDK->CreateCustomObject(
+			TXString(kGraphicLegendPlugin), WorldPt(where.x, where.y), 0.0, true);
 		if (object == nil)
 		{
 			++counts.failed;
 			return false;
 		}
 
-		// 箱幅とイメージの縮率。**スタイルは当てない**（draw/Legend.h の ★）ので、凡例の姿を
-		// 決めるのはこのオブジェクト自身の設定だけになる。
-		ApplyParams(object, viewportScale, counts);
+		// 箱幅。**スタイルは当てない**（draw/Legend.h の ★）ので、凡例の姿を決めるのは
+		// このオブジェクト自身の設定だけになる。
+		ApplyBoxWidth(object, counts);
 
 		// ソース定義（何を並べるか）。**既定のソースは空**なので、これを書かないと
 		// スタイル無しの凡例は 1 セットも表示しない（実機で確認）。
@@ -237,15 +242,67 @@ namespace HomeskzIfcImport::draw
 		gSDK->SetLineWeight(object, kLineWeightMils);
 		gSDK->SetFillPat(object, kFillNone);
 
+		// 位置合わせのために覚えておく（中身を流し込んだ後に placeLegends が動かす）。
+		counts.objects.push_back(object);
 		++counts.drawn;
 		return true;
+	}
+
+	void refreshLegends(const LegendCounts& counts)
+	{
+		// **スタイルは使わない**ので、中身を決めるのは各オブジェクトに書き込んだソース定義と
+		// ビューポートのフィルタ（draw/Legend.h の ★）。作り直せばその時点の図の状態で
+		// セルが集まり直す。by-instance の箱幅・線の太さ・塗りは保たれる。
+		for (const MCObjectHandle object : counts.objects)
+			gSDK->ResetObject(object);
+	}
+
+	double measureLegendWidth(const LegendCounts& counts)
+	{
+		// **いちばん広いもの**を採る。伏図は全図が同じ位置・同じ縮尺なので、空ける幅は
+		// どのシートの凡例も収まる幅でなければならない（core::planLayout）。
+		double widest = 0.0;
+		for (const MCObjectHandle object : counts.objects)
+		{
+			if (WorldRect bounds; gSDK->GetObjectBounds(object, bounds))
+				widest = std::max(widest, std::abs(bounds.right - bounds.left));
+		}
+		return widest;
+	}
+
+	void placeLegends(const LegendCounts& counts, const core::Vec2& topRight)
+	{
+		for (const MCObjectHandle object : counts.objects)
+		{
+			if (WorldRect bounds; gSDK->GetObjectBounds(object, bounds))
+				gSDK->MoveObject(object, topRight.x - bounds.right, topRight.y - bounds.top);
+		}
+	}
+
+	void applyLegendImageScale(const LegendCounts& counts, double scale)
+	{
+		if (scale <= 0.0)
+			return;
+		for (const MCObjectHandle object : counts.objects)
+		{
+			try
+			{
+				VWParametricObj pio(object);
+				SetParamRealChecked(pio, TXString(kFieldImageScale), scale);
+			}
+			catch (...)
+			{
+				// PIO として開けなかった。縮率が既定のままになるだけなので続ける
+				// （凡例が出ない方が困る）。
+				continue;
+			}
+		}
 	}
 
 	std::string legendDiagnostics(const LegendCounts& counts)
 	{
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
-			counts.scaleLeft == 0 && counts.scaleUnknown == 0 && counts.sourceLeft == 0 &&
-			counts.filterLeft == 0)
+			counts.sourceLeft == 0 && counts.filterLeft == 0)
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -253,7 +310,7 @@ namespace HomeskzIfcImport::draw
 			text += "凡例を置けなかった命令 " + std::to_string(counts.failed) + " 件。";
 		if (counts.paramsFailed > 0)
 			text += "パラメータを書けなかった凡例 " + std::to_string(counts.paramsFailed) +
-					" 件（幅 0 に潰れ、縮率も既定のままになります）。";
+					" 件（幅 0 に潰れます）。";
 		if (counts.widthLeft > 0)
 			text += "箱幅を設定できなかった凡例 " + std::to_string(counts.widthLeft) +
 					" 件（幅 0 に潰れます）。";
@@ -263,12 +320,6 @@ namespace HomeskzIfcImport::draw
 		if (counts.filterLeft > 0)
 			text += "ビューポートで絞れなかった凡例 " + std::to_string(counts.filterLeft) +
 					" 件（その図に無いシンボルも並びます）。";
-		if (counts.scaleUnknown > 0)
-			text += "伏図の縮尺が分からず既定の縮率で置いた凡例 " +
-					std::to_string(counts.scaleUnknown) + " 件。";
-		if (counts.scaleLeft > 0)
-			text += "イメージの縮率を設定できなかった凡例 " + std::to_string(counts.scaleLeft) +
-					" 件（凡例だけ図と縮尺が揃いません）。";
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw
