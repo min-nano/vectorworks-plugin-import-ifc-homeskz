@@ -131,12 +131,21 @@ namespace HomeskzIfcImport::core
 			return total > 0.0;
 		}
 
+		// 床付け（捨てコン・砕石）1 区間が妥当か。断面が 3 点以上（面になる）で、素材クラス名が
+		// 非空で、押し出し長が正であること（長さ 0 のプリズムは描けない。向きと断面の座標系は
+		// 地中梁と共有するのでここでは見ない）。
+		bool isValidBedding(const BeddingCommand& bedding)
+		{
+			return bedding.profile.size() >= 3 && !bedding.drawClass.empty() && bedding.depth > 0.0;
+		}
+
 		// 地中梁（台形プリズム）1 本が妥当か。断面が 3 点以上（面になる）で、押し出し長が正で
 		// あること（長さ 0 のプリズムは描けない）。origin / azimuth は数値（double
-		// なので常に成立）。
+		// なので常に成立）。ぶら下がる床付けもすべて妥当であること。
 		bool isValidModifier(const ModifierCommand& modifier)
 		{
-			return modifier.profile.size() >= 3 && modifier.depth > 0.0;
+			return modifier.profile.size() >= 3 && modifier.depth > 0.0 &&
+				   std::ranges::all_of(modifier.beddings, isValidBedding);
 		}
 
 		// 基礎の底盤 1 枚が妥当か。床板と同じ関門（レイヤ名・クラス名が非空／外形
@@ -391,14 +400,20 @@ namespace HomeskzIfcImport::core
 		{
 			take(slab.elevation);
 			take(slab.elevation - slab.thickness);
-			// 地中梁（底盤にぶら下がる台形プリズム）。**モデルの最深部はふつう底盤の下端では
-			// なく地中梁の下端**なので、これを見ないと余白（kSectionHeightMargin）より深い
-			// 地中梁が軸組図の足元で切れる。断面原点が梁下端（v=0）で origin.z が絶対 Z
-			// なので、プロファイルの v をそのまま足せば上下端になる（ModifierCommand 参照）。
+			// 地中梁（底盤にぶら下がる台形プリズム）と、その下の床付け（捨てコン・砕石）。
+			// **モデルの最深部はふつう底盤の下端ではなく床付けの下端**なので、これを見ないと
+			// 余白（kSectionHeightMargin）より深い足元が軸組図で切れる。断面原点が梁下端
+			// （v=0）で origin.z が絶対 Z なので、プロファイルの v をそのまま足せば上下端に
+			// なる（床付けも同じ断面座標系＝ModifierCommand / BeddingCommand 参照）。
 			for (const ModifierCommand& modifier : slab.modifiers)
 			{
 				for (const Vec2& vertex : modifier.profile)
 					take(modifier.origin.z + vertex.y);
+				for (const BeddingCommand& bedding : modifier.beddings)
+				{
+					for (const Vec2& vertex : bedding.profile)
+						take(modifier.origin.z + vertex.y);
+				}
 			}
 		}
 		// ストーリ高さ（要素が 1 つも無い階でも範囲に含める）。
