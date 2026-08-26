@@ -458,31 +458,32 @@ namespace HomeskzIfcImport::draw
 		// 扱う**（DrawUtil.h の ViewportProjection）。
 		constexpr TStandardView kViewTop = standardViewTop;
 
-		// ビューポートを**必ず描き直させる**（＝オブジェクト情報パレットの「更新」ボタン相当）。
+		// ビューポートを 1 つ描き直させる（＝オブジェクト情報パレットの「更新」ボタン相当）。
+		// 走ったら true。
 		//
-		// 【なぜ SetDirty が要るか】`VWViewportObj::Update()` は「out-of-date なら描き直す」
-		// であって「無条件に描き直す」ではない。**投影（Project 2D）の切り替え**のように VW が
-		// out-of-date を立ててくれない変更のあとでは、`Update()` が黙って何もせず生成時の
-		// キャッシュが残り得る。立ててから更新すれば「更新」ボタンと同じ扱いになる。
+		// **out-of-date を立ててから更新する。** `Update` 系は「out-of-date なら描き直す」で
+		// あって「無条件に描き直す」ではなく、**投影（Project 2D）の切り替え**のように VW が
+		// out-of-date を立ててくれない変更のあとでは黙って何もしない。`IsDirty` / `SetDirty`
+		// がそのフラグそのものなので、立ててから更新し、**下りたかを読み戻して**返す。
 		//
-		// **［効かなかったことの記録］**取り込み直後の伏図で床（"n-FL"）が柱・梁を覆う件
-		// （ユーザーが「更新」を 1 回押すと直る）は、**これでは直らなかった**——立てて更新し
-		// 直しても重ね順は並べ替え前のままだった。あちらの手当ては「並べ替えを要素の描画より
-		// 前へ前倒しする」方（draw/Story.h の reorderStoryLayers、docs/DEV-NOTES.md
-		// 「レイヤ・ストーリ・重ね順」）。ここは投影の作り直しと、更新が走ったかの読み戻しのため
-		// に残す。
-		//
-		// `IsDirty` / `SetDirty` が out-of-date フラグそのもので、**立ててから更新すれば
-		// 「更新」ボタンと同じ全面的な作り直しになる**。更新の直前に必ずこれを通すこと。
-		//
-		// **描き直したかどうかは読み戻して確かめる**（戻り値）。更新から戻っても out-of-date
-		// が下りていなければ、その更新は**走っていない**（＝図はキャッシュのまま）。呼び出し側は
-		// これを診断行へ出す——「設定したつもりで効いていない」を目視で見抜くのは無理なので。
-		bool ForceUpdate(VWViewportObj& viewport)
+		// 更新の口は **`ISDK::UpdateViewport`**（OIP の「更新」ボタンに当たる ISDK の呼び出し。
+		// SDK のビューポート API を全部並べても「描き直させる」口はこれ 1 つ）。VWFC の
+		// `VWViewportObj::Update()` とは別経路なので、そちらで効かなかった件（重ね順）を
+		// こちらで確かめられる。
+		bool RefreshOne(MCObjectHandle viewport)
 		{
-			viewport.SetDirty(true);
-			viewport.Update();
-			return !viewport.IsDirty();
+			try
+			{
+				VWViewportObj vp(viewport);
+				vp.SetDirty(true);
+				gSDK->UpdateViewport(viewport);
+				return !vp.IsDirty();
+			}
+			catch (...)
+			{
+				// 描き直せなくても図面は残る（ユーザーが「更新」を押せば直る）。
+				return false;
+			}
 		}
 
 		// ビューポートを 2D/平面（Top/Plan）で**正しく描かせる**。作り直せたら true。
@@ -495,18 +496,18 @@ namespace HomeskzIfcImport::draw
 		// （＝ 3D の「上」でキャッシュを作り直させ）、その上で ON へ戻す。最後の更新は呼び出し
 		// 元（ConfigureViewport の末尾）が行い、そこで 2D/平面のキャッシュができる。
 		//
-		// **更新は必ず ForceUpdate で行う**——投影の切り替えでは out-of-date が立たないので、
-		// 素の `Update()` では OFF 側のキャッシュも作り直されず、この「なぞり」が空振りする。
+		// **途中の更新も必ず RefreshOne で行う**——投影の切り替えでは out-of-date が立たない
+		// ので、素の更新では OFF 側のキャッシュが作り直されず、この「なぞり」が空振りする。
+		// 走ったかどうかはここでは問わない（作り直しの途中経過。図を仕上げるのは取り込みの
+		// 最後の RefreshViewports）。
 		//
 		// **入ったかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも黙って
 		// 何もしないので、戻り値の無いまま「設定したつもり」で終わらせない。
-		bool ForcePlanView(VWViewportObj& viewport)
+		bool ForcePlanView(VWViewportObj& viewport, MCObjectHandle handle)
 		{
 			viewport.SetViewType(kViewTop);
 			viewport.SetProject2D(false);
-			// ここの更新が走ったかは問わない（作り直しの途中経過なので、最後の更新が
-			// 走っていれば図は正しくなる）。効いたかを報告するのは呼び出し元の最後の更新。
-			static_cast<void>(ForceUpdate(viewport));
+			static_cast<void>(RefreshOne(handle));
 			viewport.SetProject2D(true);
 			return viewport.GetProject2D();
 		}
@@ -532,10 +533,13 @@ namespace HomeskzIfcImport::draw
 	//                                                     … ビューの向き（1007）・2D/平面か
 	//                                                       （1005）。伏図の作り直しに使う
 	//                                                       （DrawUtil.h の ViewportProjection）
-	//   * VWViewportObj(vp).SetDirty(true)                … out-of-date（更新が要る）を立てる。
-	//                                                       **更新の直前に必ず**（ForceUpdate。
-	//                                                       Update() は out-of-date でなければ
+	//   * VWViewportObj(vp).SetDirty(true) / IsDirty()    … out-of-date（更新が要る）の設定と
+	//                                                       読み戻し。**更新の直前に必ず立てる**
+	//                                                       （更新は out-of-date でなければ
 	//                                                       何もしない）
+	//   * gSDK->UpdateViewport(vp)                        … 描き直させる（OIP の「更新」相当）。
+	//                                                       SDK のビューポート API で「描き直す」
+	//                                                       口はこれ 1 つ
 	ViewportSetup PrepareViewportSetup()
 	{
 		ViewportSetup setup;
@@ -612,13 +616,13 @@ namespace HomeskzIfcImport::draw
 			if (scale > 0.0)
 				vp.SetScale(scale);
 			if (projection == ViewportProjection::Plan)
-				finish.planViewApplied = ForcePlanView(vp);
+				finish.planViewApplied = ForcePlanView(vp, viewport);
 			vp.SetDescription(TXString(command.drawingTitle.c_str()));
 			vp.SetLocator(TXString(command.drawingNumber.c_str()));
-			// **この更新はビューポートの最後の全面的な描き直し**なので、必ず out-of-date を
-			// 立ててから行う（ForceUpdate）。ここで素の Update() を呼ぶと、重ね順の並べ替えも
-			// 投影の切り替えも反映されないキャッシュがそのまま残る。
-			finish.updated = ForceUpdate(vp);
+			// **ここでは描き直さない。** out-of-date のまま残し、取り込みの最後（undo イベントを
+			// 閉じた後）に RefreshViewports がまとめて描き直す——取り込みの途中で描き直すと
+			// レイヤの重ね順の並べ替えが届かないため（DrawUtil.h の RefreshViewports）。
+			vp.SetDirty(true);
 		}
 		catch (...)
 		{
@@ -626,6 +630,19 @@ namespace HomeskzIfcImport::draw
 			return finish;
 		}
 		return finish;
+	}
+
+	std::size_t RefreshViewports(const ObjectHandles& viewports)
+	{
+		std::size_t refreshed = 0;
+		for (const auto& [index, viewport] : viewports.table().handles)
+		{
+			if (viewport == nil)
+				continue;
+			if (RefreshOne(viewport))
+				++refreshed;
+		}
+		return refreshed;
 	}
 
 	// 「命令インデックス → ハンドル」の対応表の所有者。**表の中身（MCObjectHandle）は

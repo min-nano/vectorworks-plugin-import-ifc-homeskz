@@ -222,7 +222,8 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
-							 std::string* note, const ObjectHandles* memberHandles)
+							 std::string* note, const ObjectHandles* memberHandles,
+							 ObjectHandles* outViewports)
 	{
 		const std::vector<core::SectionCommand>& commands = document.sections;
 		if (commands.empty())
@@ -258,8 +259,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingViewports = 0;
 		std::size_t missingRenderMode = 0;
 		std::size_t classesApplied = 0;
-		// 仕上げの更新が走らなかった枚数（伏図と同じ。draw/DrawUtil の ViewportFinish）。
-		std::size_t notUpdated = 0;
+
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
 		const ObjectHandles emptyHandles;
 		const ObjectHandleTable& members =
@@ -273,8 +273,10 @@ namespace HomeskzIfcImport::draw
 		std::vector<MCObjectHandle> viewports;
 		viewports.reserve(commands.size());
 
+		std::size_t index = 0;
 		for (const core::SectionCommand& command : commands)
 		{
+			const std::size_t commandIndex = index++;
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。
 			if (progress.cancelled())
 				break;
@@ -307,8 +309,10 @@ namespace HomeskzIfcImport::draw
 			const ViewportFinish finish = ConfigureViewport(
 				viewport, sheetLayer, setup, command.viewport, ViewportProjection::Keep);
 			classesApplied += finish.classesApplied;
-			if (!finish.updated)
-				++notUpdated;
+			// 描き直しは取り込みの最後（undo イベントを閉じた後）にまとめて行うので、
+			// それまでハンドルを預けておく（draw/DrawUtil の RefreshViewports）。
+			if (outViewports != nullptr)
+				outViewports->table().handles.emplace(commandIndex, viewport);
 			// 断面寸法データタグ。**並べ替え（ArrangeViewports）より前**に置く——注釈は
 			// ビューポートと一緒に動くので、先に置いておけば移動しても図の上に留まる。
 			drawViewportTags(viewport, command.viewport, members, tags);
@@ -324,7 +328,7 @@ namespace HomeskzIfcImport::draw
 
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
 		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
-								missingRenderMode > 0 || notUpdated > 0))
+								missingRenderMode > 0))
 		{
 			std::string text = "軸組図の診断: ";
 			if (missingSheetLayers > 0)
@@ -339,10 +343,6 @@ namespace HomeskzIfcImport::draw
 			if (missingRenderMode > 0)
 				text += "レンダリングを〈隠線消去〉にできなかった軸組図 " +
 						std::to_string(missingRenderMode) + " 枚。";
-			if (notUpdated > 0)
-				text +=
-					"更新が走らなかった軸組図 " + std::to_string(notUpdated) +
-					" 枚（オブジェクト情報パレットの「更新」を押すまで生成時のまま描かれます）。";
 			if (!note->empty())
 				*note += "\n";
 			*note += text;

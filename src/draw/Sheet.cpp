@@ -34,8 +34,9 @@
 //	返すのに GetNumViewportLayerStackingOverrides は 0 のままで、OIP も「順序を上書き:
 //	いいえ」だった——ので捨てた。**並べ替えは要素を 1 つも描く前**に済ませる（draw/Story.h の
 //	reorderStoryLayers。「ビューポート生成より前」では足りず、取り込み直後だけ床が柱・梁を
-//	覆う症状が残った）。仕上げの更新が out-of-date を立ててから行われることも要る
-//	（draw/DrawUtil の ForceUpdate）。
+//	覆う症状が残った）。**それでも足りず**、いまは図の描き直しそのものを取り込みの最後
+//	——undo イベントを閉じた後——へ回している（draw/DrawUtil の RefreshViewports）。
+//	ここは設定だけを行い、描き直さない。
 //
 
 #include "PluginPrefix.h"
@@ -55,7 +56,8 @@
 namespace HomeskzIfcImport::draw
 {
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
-						   std::string* note, const ObjectHandles* memberHandles)
+						   std::string* note, const ObjectHandles* memberHandles,
+						   ObjectHandles* outViewports)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
@@ -75,9 +77,6 @@ namespace HomeskzIfcImport::draw
 		std::size_t classesApplied = 0;
 		// 2D/平面へ作り直せなかった枚数（＝3D の「上」に見えるビューポートの数）。
 		std::size_t missingPlanView = 0;
-		// 仕上げの更新が走らなかった枚数（out-of-date が下りないまま戻ってきたもの）。
-		// **0 でないなら、その図はユーザーが「更新」を押すまで生成時のキャッシュのまま**。
-		std::size_t notUpdated = 0;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
 		// （渡されなければ空の表＝関連付け無しで置く。draw/Tag.h）。
 		const ObjectHandles emptyHandles;
@@ -97,8 +96,10 @@ namespace HomeskzIfcImport::draw
 								{ return sheet.legend.has_value(); }))
 			prepareGraphicLegendPlugin();
 
+		std::size_t index = 0;
 		for (const core::SheetCommand& command : commands)
 		{
+			const std::size_t commandIndex = index++;
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は枚数で報告し、
 			// 描画の前に 1 件進める（＝「いま何枚目を作っているか」が見える）。
 			if (progress.cancelled())
@@ -126,11 +127,13 @@ namespace HomeskzIfcImport::draw
 			classesApplied += finish.classesApplied;
 			if (!finish.planViewApplied)
 				++missingPlanView;
-			if (!finish.updated)
-				++notUpdated;
+			// 描き直しは取り込みの最後（undo イベントを閉じた後）にまとめて行うので、
+			// それまでハンドルを預けておく（draw/DrawUtil の RefreshViewports）。
+			if (outViewports != nullptr)
+				outViewports->table().handles.emplace(commandIndex, viewport);
 
-			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport
-			// の最後が更新で、注釈はその後に足しても図に出る）。
+			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（注釈は描き直しの前に
+			// 置いておけば、最後の描き直しで一緒に図へ出る）。
 			drawViewportTags(viewport, command.viewport, members, tags);
 
 			// グラフィック凡例は**ビューポートではなくシートレイヤ**に載せる（用紙の上）。
@@ -153,7 +156,7 @@ namespace HomeskzIfcImport::draw
 		// 作れないのか、ビューポートを作れないのかを切り分けられる。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
 		if (note != nullptr && (missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
-								missingPlanView > 0 || notUpdated > 0))
+								missingPlanView > 0))
 		{
 			std::string text = "伏図の診断: ";
 			if (missingSheetLayers > 0)
@@ -168,10 +171,6 @@ namespace HomeskzIfcImport::draw
 			if (missingPlanView > 0)
 				text += "2D/平面（Top/Plan）にできなかった伏図 " + std::to_string(missingPlanView) +
 						" 枚（3D の「上」ビューのように描かれます）。";
-			if (notUpdated > 0)
-				text +=
-					"更新が走らなかった伏図 " + std::to_string(notUpdated) +
-					" 枚（オブジェクト情報パレットの「更新」を押すまで生成時のまま描かれます）。";
 			*note = std::move(text);
 		}
 

@@ -66,8 +66,8 @@ namespace HomeskzIfcImport::draw
 	// ると既存のビューポートへ反映されない。draw/ExecuteDocument は全要素の描画後・
 	// drawSheets の直前に呼ぶ。
 	//
-	// **並べ替えは既存ビューポートを out-of-date にしない。** 仕上げの更新は必ず out-of-date
-	// を立ててから行うこと（draw/DrawUtil の ForceUpdate）。
+	// **並べ替えは既存ビューポートを out-of-date にしない。** 図の描き直しは必ず out-of-date
+	// を立ててから行うこと（draw/DrawUtil の RefreshViewports）。
 	//
 	// **できるだけ早く——要素を 1 つも描く前に——呼ぶこと。** 取り込み直後の伏図だけが
 	// 「床が柱・梁を覆ったまま／ユーザーが更新を 1 回押すと直る」という症状を出していた件で、

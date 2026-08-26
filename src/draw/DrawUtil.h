@@ -307,9 +307,9 @@ namespace HomeskzIfcImport::draw
 	// **軸組図（断面ビューポート）は Keep**——あちらは断面の向きで作られており、平面へ
 	// 倒しては意味を成さない。
 	//
-	// **この「なぞり」の途中の更新も out-of-date を立ててから行う**（.cpp の ForceUpdate）。
-	// 投影を書き換えても VW は out-of-date を立てないので、素の Update() では OFF 側の
-	// キャッシュが作り直されず、手順そのものが空振りする。
+	// **この「なぞり」の途中の描き直しも out-of-date を立ててから行う**（.cpp の RefreshOne）。
+	// 投影を書き換えても VW は out-of-date を立てないので、素の更新では OFF 側のキャッシュが
+	// 作り直されず、手順そのものが空振りする。
 	enum class ViewportProjection
 	{
 		Keep, // いまの投影のまま触らない（軸組図＝断面ビューポート）
@@ -326,19 +326,14 @@ namespace HomeskzIfcImport::draw
 		// **書けたかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも
 		// 黙って何もしないので、「設定したつもりで効いていない」は目視では見抜けない。
 		bool planViewApplied = true;
-		// 最後の更新が**実際に走ったか**（out-of-date が下りたか）。false なら図は生成時の
-		// キャッシュのままで、ユーザーが「更新」を押すまで正しく描かれない。
-		bool updated = true;
 	};
 
 	// 生成済みのビューポートを命令どおりに仕上げる（表示レイヤの絞り込み → クラス表示 →
 	// 縮尺 → ［伏図なら 2D/平面の作り直し］→ 図面タイトル・図番 → 更新）。
 	//
-	// **最後の更新は out-of-date を立ててから行う**（＝オブジェクト情報パレットの「更新」
-	// ボタン相当。.cpp の ForceUpdate）。`VWViewportObj::Update()` は「out-of-date なら
-	// 描き直す」であって「無条件に描き直す」ではなく、投影の切り替えのあとは out-of-date が
-	// 立たないことがあるため。**走ったかどうかは IsDirty を読み戻して確かめ**、走らなかった
-	// ときは ViewportFinish::updated で呼び出し側の診断行へ出す。
+	// **仕上げに描き直しはしない。** ビューポートは out-of-date のまま残し、**取り込みの
+	// いちばん最後**に RefreshViewports がまとめて描き直す（下記。取り込み中に描き直すと
+	// レイヤの重ね順が届かないため）。ここでするのは設定だけ。
 	//
 	// 表示レイヤは「まず全部隠してから、命令に挙げたものだけ表示へ戻す」——ビューポートは
 	// 既定でドキュメントの表示状態を引き継ぐため、挙げていないレイヤが映り込む。グレー表示
@@ -351,6 +346,24 @@ namespace HomeskzIfcImport::draw
 									 const ViewportSetup& setup,
 									 const core::ViewportCommand& command,
 									 ViewportProjection projection);
+
+	// 作ったビューポートを**まとめて描き直させる**（out-of-date が下りた数を返す）。
+	//
+	// 【なぜ最後にまとめるのか】取り込みの途中でビューポートを更新すると、**デザインレイヤの
+	// 重ね順の並べ替え（draw/Story の reorderStoryLayers）が描画へ届かない**。実機で確かめた
+	// のは次の 3 つ:
+	//   * 並べ替えをビューポート生成の直前に置いても、要素を 1 つも描く前に置いても、
+	//     取り込み直後の伏図は並べ替え前の重ね順で描かれる。
+	//   * out-of-date を立てて（`SetDirty(true)`）更新し直しても変わらない。
+	//   * 図面の並び自体は並べ替え後（OIP のレイヤ一覧は正しい順）で、ユーザーが「更新」を
+	//     1 回押せば正しく描かれる。
+	// 残る違いは**いつ更新するか**——ユーザーが押すのは取り込みが終わった後、こちらは
+	// 取り込みの undo イベントの中。そこで描き直しをここへ切り出し、draw/ExecuteDocument が
+	// **undo イベントを閉じてから**呼ぶ。
+	//
+	// 更新の口は `ISDK::UpdateViewport`（＝OIP の「更新」ボタンに当たる ISDK の呼び出し。
+	// VWFC の `VWViewportObj::Update()` とは別経路）。走ったかどうかは `IsDirty` を読み戻す。
+	std::size_t RefreshViewports(const ObjectHandles& viewports);
 
 	// 「命令インデックス → 描いたオブジェクトのハンドル」の対応表の**中身**。所有者
 	// （draw/ObjectHandles.h の ObjectHandles）は SDK 非依存のヘッダに置いてあり、

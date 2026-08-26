@@ -236,11 +236,33 @@ namespace HomeskzIfcImport
 			// 図面変更は draw 側が自前の undo イベント（draw::ImportUndoScope）で包む。
 			// executeDocument から戻った時点でイベントは閉じているので、building=no に
 			// なっているはず——そこが崩れると「取り消し」で図面が壊れるので、ログで見る。
-			const draw::DrawCounts drawn = draw::executeDocument(document, progress);
+			// 作った伏図・軸組図のビューポートを受け取る。**描き直しはここではしない**（下）。
+			draw::ObjectHandles viewports;
+			draw::DrawCounts drawn = draw::executeDocument(document, progress, &viewports);
 			LogUndoState("afterDraw");
 
 			// 完了ダイアログの前に進捗ダイアログを閉じる（2 枚重ねない）。
 			progress.close();
+
+			// **伏図・軸組図をここで描き直す。** 取り込みの中——undo イベントの中でも、閉じた
+			// 直後でも——描き直すと、デザインレイヤの重ね順の並べ替えが描画へ届かず、床が
+			// 柱・梁を覆ったままの絵が焼き付く（実機で確認。ユーザーが「更新」を押す・ファイルを
+			// 開き直すと正しくなる）。共通しているのは「取り込みが終わっている」ことなので、
+			// **undo イベントも進捗ダイアログも閉じた、取り込みの外側のここ**まで遅らせる
+			// （draw/ExecuteDocument.h の refreshImportedViewports）。
+			const draw::ViewportRefresh refresh = draw::refreshImportedViewports(viewports);
+			core::trace::log("refreshViewports: " + std::to_string(refresh.refreshed) + "/" +
+							 std::to_string(refresh.total));
+			if (refresh.refreshed < refresh.total)
+			{
+				// 描き直せなかった図は生成時のまま描かれる（ユーザーが「更新」を押すまで）。
+				// 黙って間違った絵を残さないよう、完了ダイアログの診断行で伝える。
+				if (!drawn.diagnostics.empty())
+					drawn.diagnostics += "\n";
+				drawn.diagnostics += "描き直せなかった図 " +
+									 std::to_string(refresh.total - refresh.refreshed) +
+									 " 枚（オブジェクト情報パレットの「更新」を押すと直ります）。";
+			}
 
 			// 本文の組み立ては**無 SDK 側**（parse/Summary）が持つ。要素が増えても
 			// ここは変わらない（docs/DEV-NOTES.md M15「完了文言の集約」）。

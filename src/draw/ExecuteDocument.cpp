@@ -44,7 +44,16 @@ namespace HomeskzIfcImport::draw
 		return executeDocument(document, noProgress);
 	}
 
-	DrawCounts executeDocument(const core::Document& document, core::ProgressReporter& progress)
+	ViewportRefresh refreshImportedViewports(const ObjectHandles& viewports)
+	{
+		ViewportRefresh result;
+		result.total = viewports.table().handles.size();
+		result.refreshed = RefreshViewports(viewports);
+		return result;
+	}
+
+	DrawCounts executeDocument(const core::Document& document, core::ProgressReporter& progress,
+							   ObjectHandles* outViewports)
 	{
 		DrawCounts counts;
 
@@ -52,6 +61,12 @@ namespace HomeskzIfcImport::draw
 		if (!core::validateDocument(document))
 			return counts;
 		counts.valid = true;
+
+		// 作った伏図・軸組図のビューポートを預ける先。**描き直しは取り込みが終わり切ってから**
+		// 呼び出し側が行う（refreshImportedViewports）。ここで描き直すと、レイヤの重ね順の
+		// 並べ替えが描画へ届かない（draw/ExecuteDocument.h の refreshImportedViewports）。
+		ObjectHandles ownViewports;
+		ObjectHandles& viewports = outViewports != nullptr ? *outViewports : ownViewports;
 
 		// **取り込みの図面変更をまるごと 1 つの undo イベントで包む**（docs/DEV-NOTES.md M15）。
 		// VW は取り込みの開始時にイベントを開かないので、ここで自分から開く。構築で開き、
@@ -234,7 +249,7 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("伏図を作成しています…", document.sheets.size(), core::DrawPhase::Sheets))
 		{
 			std::string note;
-			counts.sheets = drawSheets(document, progress, &note, &memberHandles);
+			counts.sheets = drawSheets(document, progress, &note, &memberHandles, &viewports);
 			addDiagnostics(note);
 		}
 
@@ -245,7 +260,13 @@ namespace HomeskzIfcImport::draw
 					   core::DrawPhase::Sections))
 		{
 			std::string note;
-			counts.sections = drawSections(document, progress, &note, &memberHandles);
+			// 軸組図のハンドルも同じ表へ預ける。**鍵は伏図の枚数ぶんずらす**（どちらも命令
+			// インデックスを鍵にするので、そのままだとぶつかる）。
+			ObjectHandles sectionViewports;
+			counts.sections =
+				drawSections(document, progress, &note, &memberHandles, &sectionViewports);
+			for (const auto& [index, viewport] : sectionViewports.table().handles)
+				viewports.table().handles.emplace(document.sheets.size() + index, viewport);
 			addDiagnostics(note);
 		}
 
@@ -258,6 +279,9 @@ namespace HomeskzIfcImport::draw
 		counts.undoArmed = undoScope.armed();
 		counts.undoPartial = undoScope.partial();
 
+		// **図の描き直しはここではしない。** ビューポートは out-of-date のまま残し、取り込みが
+		// 終わり切ってから（undo イベントも進捗ダイアログも閉じた後）呼び出し側が
+		// refreshImportedViewports で描き直す。
 		return counts;
 	}
 } // namespace HomeskzIfcImport::draw

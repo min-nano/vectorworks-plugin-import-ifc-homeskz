@@ -488,20 +488,20 @@ namespace HomeskzIfcImport::draw
 		// 場合**、ここで戻さないと注釈だけが空白のまま残る。
 		// 戻すのはビューポートと同じく**全クラス**（draw/DrawUtil の ShowAllViewportClasses）
 		// ——タグが身に付けているクラスを数え上げる必要はない。
-		// **ここは素の更新のまま**にする（out-of-date を立てる ForceUpdate ではない）——
-		// 注釈を足した時点でビューポートは out-of-date になっており、全面的な描き直しは
-		// ConfigureViewport の仕上げで済んでいる。ここまで force すると伏図・軸組図の枚数だけ
-		// 全体の描き直しが 1 回ずつ増える（軸組図は数十枚あり、取り込みが目に見えて遅くなる）。
+		// **ここでは描き直さない。** 描き直しは取り込みのいちばん最後（undo イベントを閉じた
+		// 後）に RefreshViewports がまとめて行うので、ここで 1 枚ずつ描き直すと同じ図を 2 度
+		// 描くだけになる（軸組図は数十枚あり、取り込みが目に見えて遅くなる）。クラスを表示へ
+		// 戻すのは**設定**なので、ここでやっておく必要がある。
 		if (!placed.empty())
 		{
 			counts.classesShown += ShowAllViewportClasses(viewport);
 			try
 			{
-				VWViewportObj(viewport).Update();
+				VWViewportObj(viewport).SetDirty(true);
 			}
 			catch (...)
 			{
-				// 更新できなくてもタグ自体は図面に残る（表示は次の更新で追いつく）。
+				// 立てられなくてもタグ自体は図面に残る（表示は次の描き直しで追いつく）。
 				++counts.updateFailed;
 			}
 		}

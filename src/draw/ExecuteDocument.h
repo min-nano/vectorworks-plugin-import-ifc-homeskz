@@ -19,6 +19,7 @@
 
 #include "core/Document.h"
 #include "core/Progress.h"
+#include "draw/ObjectHandles.h"
 
 #include <cstddef>
 #include <string>
@@ -39,6 +40,27 @@ namespace HomeskzIfcImport::draw
 	// 検証を通らなかったときは valid=false で何も描かない。命令が空でも検証は通る（valid=true）。
 	DrawCounts executeDocument(const core::Document& document);
 
+	// 取り込みで作った図（伏図・軸組図）を描き直した結果。
+	struct ViewportRefresh
+	{
+		std::size_t total = 0;	   // 作った図の枚数
+		std::size_t refreshed = 0; // そのうち描き直せた枚数
+	};
+
+	// 取り込みで作った図を**描き直す**（executeDocument が outViewports へ預けたもの）。
+	//
+	// **必ず「取り込みが終わり切ってから」呼ぶこと**——undo イベントを閉じた後、かつ
+	// **進捗ダイアログを閉じた後**（Extensions/ExtMenu の RunImport）。取り込みの途中で
+	// 描き直すと、デザインレイヤの重ね順の並べ替えが描画へ届かず、床（"n-FL"）が柱・梁を
+	// 覆ったままの絵が焼き付く。実機で分かっているのは次のとおり:
+	//   * 並べ替えの位置（伏図の直前／要素を描く前）を変えても直らない。
+	//   * out-of-date を立てて（SetDirty）描き直しても直らない。並べ替え後の並びは
+	//     読み戻しでも OIP でも正しく、描き直し自体も走っている（IsDirty が下りる）。
+	//   * **ユーザーが「更新」を押す・ファイルを開き直す**と正しく描かれる。
+	// 共通しているのは「取り込みのコマンドが終わっている」こと。そこで描き直しだけを
+	// 取り込みの外へ出し、届く場所まで遅らせる（docs/DEV-NOTES.md「ビューポート（伏図・断面）」）。
+	ViewportRefresh refreshImportedViewports(const ObjectHandles& viewports);
+
 	// 進捗を報告しながら描画する。要素ごとに 1 フェーズを開き（進捗バーの配分は命令数の比。
 	// core::phaseShare）、1 件描くたびに 1 ステップ進める。**インポートの体感時間はほぼ
 	// すべてここ**なので、進捗ダイアログを出すのはこのオーバーロードの役目
@@ -46,5 +68,9 @@ namespace HomeskzIfcImport::draw
 	//
 	// 進捗の報告先が中止を返したら、その時点で残りを描かずに戻る（DrawCounts::cancelled）。
 	// 上のオーバーロードは NullProgressReporter で呼ぶだけ（＝振る舞いは同じ）。
-	DrawCounts executeDocument(const core::Document& document, core::ProgressReporter& progress);
+	//
+	// outViewports には作った伏図・軸組図のビューポートを預ける（渡さなければ預けない）。
+	// **描き直しは呼び出し側が取り込みの外で行う**（上の refreshImportedViewports）。
+	DrawCounts executeDocument(const core::Document& document, core::ProgressReporter& progress,
+							   ObjectHandles* outViewports = nullptr);
 } // namespace HomeskzIfcImport::draw

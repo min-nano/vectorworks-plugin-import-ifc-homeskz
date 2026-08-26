@@ -48,7 +48,12 @@ namespace HomeskzIfcImport::draw
 	// memberHandles には drawMembers が記録した「命令インデックス → 横架材ハンドル」の
 	// 対応表を渡す。**断面寸法データタグの関連付け先**で、渡さない（nullptr）とタグは
 	// 置かれるが寸法が空になる（draw/Tag.h）。
+	//
+	// outViewports には作ったビューポートを命令の並び順で記録する（渡さなければ記録しない）。
+	// **描き直しは取り込みのいちばん最後にまとめて行う**ので、それまでハンドルを持ち回る必要が
+	// ある（draw/DrawUtil の RefreshViewports。ここで描き直すと重ね順が届かない）。
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
 						   std::string* note = nullptr,
-						   const ObjectHandles* memberHandles = nullptr);
+						   const ObjectHandles* memberHandles = nullptr,
+						   ObjectHandles* outViewports = nullptr);
 } // namespace HomeskzIfcImport::draw
