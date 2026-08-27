@@ -31,7 +31,6 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <cstdio>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -55,14 +54,6 @@ namespace HomeskzIfcImport::draw
 		// **中身が必要とする幅より少し広い程度**に留める。
 		constexpr double kBoxWidth = 40.0;
 
-		// イメージの縮率（OIP の「イメージの縮率」）。**分母を実数で持つ**欄で、1:50 なら 50。
-		// 実機のダンプで確定した（縮率 1:50 の凡例だけ 50 で、ほかは既定の 100 だった）。
-		// **表示名が空なので OIP の項目名からは引けない**——universal 名で直に書く。
-		constexpr const char* kFieldImageScale = "ImageScale";
-
-		// 縮率の読み戻しで「同じ」とみなす許容（分母は整数の縮尺なので緩くてよい）。
-		constexpr double kScaleTol = 1e-6;
-
 		// 見た目。凡例 PIO が内部で描く枠線・セルは**クラスでは制御できない**ので、
 		// オブジェクトの属性として直接与える（draw/Legend.h）。線の太さの単位はミル（1/1000
 		// インチ）で、5 ミル = 0.127mm を VW は 0.13mm と表示する。塗りパターン 0 = なし。
@@ -72,9 +63,7 @@ namespace HomeskzIfcImport::draw
 		// 生成した凡例の箱幅を与える。**例外を外へ出さない**——書けなくても凡例そのものは
 		// 図面に残るので、件数だけ counts へ積む。
 		//
-		// **イメージの縮率はここでは書かない。** 縮尺は用紙への収まりで決まり、凡例の幅を
-		// 測った後に決め直されることがある（core::planLayout）ので、置き終えてから
-		// applyLegendImageScale でまとめて与える（draw/Legend.h）。
+		// **イメージの縮率は設定できない**（draw/Legend.h の「縮率は合わせられない」）。
 		void ApplyBoxWidth(MCObjectHandle object, LegendCounts& counts)
 		{
 			try
@@ -282,55 +271,10 @@ namespace HomeskzIfcImport::draw
 		}
 	}
 
-	void applyLegendImageScale(LegendCounts& counts, double scale)
-	{
-		if (scale <= 0.0)
-			return;
-		counts.scaleAsked = scale;
-		for (const MCObjectHandle object : counts.objects)
-		{
-			try
-			{
-				VWParametricObj pio(object);
-				SetParamRealChecked(pio, TXString(kFieldImageScale), scale);
-			}
-			catch (...)
-			{
-				// PIO として開けなかった。縮率が既定のままになるだけなので続ける
-				// （凡例が出ない方が困る）。
-				continue;
-			}
-		}
-	}
-
-	void verifyLegendImageScale(LegendCounts& counts)
-	{
-		// **書いた後・作り直した後に読み戻す。** 実機で「伏図が 1:50 でも 1:75 でも凡例は
-		// 1:50」になったので、(1) 書き込みが通っていない（作り直しで戻される等）のか、
-		// (2) `ImageScale` が OIP の「イメージの縮率」ではない（下の灰色の「カスタム 1:」で、
-		// 実際の縮率はイメージの定義側が持つ）のか、を切り分ける必要がある。読み戻した値を
-		// 診断へ出せば、次の 1 回で分かる（draw/Legend.h）。
-		counts.scaleLeft = 0;
-		for (const MCObjectHandle object : counts.objects)
-		{
-			try
-			{
-				const VWParametricObj pio(object);
-				counts.scaleGot = pio.GetParamReal(TXString(kFieldImageScale));
-				if (std::abs(counts.scaleGot - counts.scaleAsked) > kScaleTol)
-					++counts.scaleLeft;
-			}
-			catch (...)
-			{
-				continue;
-			}
-		}
-	}
-
 	std::string legendDiagnostics(const LegendCounts& counts)
 	{
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
-			counts.sourceLeft == 0 && counts.filterLeft == 0 && counts.scaleLeft == 0)
+			counts.sourceLeft == 0 && counts.filterLeft == 0)
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -348,14 +292,6 @@ namespace HomeskzIfcImport::draw
 		if (counts.filterLeft > 0)
 			text += "ビューポートで絞れなかった凡例 " + std::to_string(counts.filterLeft) +
 					" 件（その図に無いシンボルも並びます）。";
-		if (counts.scaleLeft > 0)
-		{
-			std::array<char, 64> buffer{};
-			std::snprintf(buffer.data(), buffer.size(), "1/%g を書いたのに 1/%g のまま",
-						  counts.scaleAsked, counts.scaleGot);
-			text += "イメージの縮率が図と揃わなかった凡例 " + std::to_string(counts.scaleLeft) +
-					" 件（" + buffer.data() + "）。";
-		}
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw

@@ -212,9 +212,6 @@ namespace HomeskzIfcImport::draw
 		// **中身を流し込むまで凡例の大きさは決まらない**（draw/Legend.h）。流し込んでから
 		// いちばん広い凡例の幅を測り、そのぶんだけ右を空けた割り付けを作る。
 		//
-		// **縮率を先に仮の縮尺へ合わせてから**測る——並ぶシンボルは縮率で大小するので、
-		// 既定の縮率のまま測ると幅が実際とずれる（下で確定した縮尺へ合わせ直す）。
-		applyLegendImageScale(legends, provisional.scale);
 		refreshLegends(legends);
 		const double legendWidth = measureLegendWidth(legends);
 		const core::PlanLayout layout =
@@ -291,12 +288,9 @@ namespace HomeskzIfcImport::draw
 			++drawn;
 		}
 
-		// 図が仕上がったので**確定した縮尺へ縮率を合わせ**、**もう一度**中身を流し込み
-		// （凡例に並ぶのはそのシートのビューポートに映るシンボルなので、縮尺を当て直した後の
-		// 図で取り直す）、右上を揃える。
-		applyLegendImageScale(legends, layout.scale);
+		// 図が仕上がったので**もう一度**中身を流し込み（凡例に並ぶのはそのシートの
+		// ビューポートに映るシンボルなので、縮尺を当て直した後の図で取り直す）、右上を揃える。
 		refreshLegends(legends);
-		verifyLegendImageScale(legends);
 		placeLegends(legends, layout.legendTopRight);
 
 		if (previousLayer != nil)
