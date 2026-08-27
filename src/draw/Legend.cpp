@@ -315,7 +315,7 @@ namespace HomeskzIfcImport::draw
 		{
 			try
 			{
-				VWParametricObj pio(object);
+				const VWParametricObj pio(object);
 				counts.scaleGot = pio.GetParamReal(TXString(kFieldImageScale));
 				if (std::abs(counts.scaleGot - counts.scaleAsked) > kScaleTol)
 					++counts.scaleLeft;
