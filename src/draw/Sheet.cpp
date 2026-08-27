@@ -293,6 +293,10 @@ namespace HomeskzIfcImport::draw
 		refreshLegends(legends);
 		placeLegends(legends, layout.legendTopRight);
 
+		// **縮率はいちばん最後に。** 作り直しが縮率を戻すので、ここより前に書くと効かない
+		// （draw/Legend.h の applyLegendImageScale）。
+		applyLegendImageScale(legends, layout.scale);
+
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
