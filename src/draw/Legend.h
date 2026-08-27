@@ -106,6 +106,12 @@ namespace HomeskzIfcImport::draw
 		std::size_t sourceLeft = 0; // ソース定義を書けなかった（何も並ばない）
 		std::size_t filtered = 0;	// そのシートのビューポートでフィルタできた
 		std::size_t filterLeft = 0; // フィルタを書けなかった（文書中の全シンボルが並ぶ）
+		std::size_t scaleLeft = 0; // 縮率が読み戻しで一致しなかった（図と揃わない）
+
+		// 縮率に**書いた値**と**読み戻した値**。一致しないときだけ診断へ出す
+		// （下の verifyLegendImageScale）。
+		double scaleAsked = 0.0;
+		double scaleGot = 0.0;
 
 		// 置いた凡例そのもの。**中身が流し込まれた後に大きさが決まる**ので、幅の実測と
 		// 位置合わせ、そしてイメージの縮率は**置き終えてから**まとめて行う（下記）。
@@ -150,7 +156,16 @@ namespace HomeskzIfcImport::draw
 	// 置いた凡例のイメージの縮率を scale（1:100 なら 100）に合わせる。**伏図の縮尺が
 	// 決まってから**呼ぶ——縮尺は用紙への収まりで決まり、凡例の幅を測った後に決め直される
 	// ことがある（core::planLayout。draw/Sheet の順序）。0 以下なら何もしない。
-	void applyLegendImageScale(const LegendCounts& counts, double scale);
+	void applyLegendImageScale(LegendCounts& counts, double scale);
+
+	// 縮率を**読み戻して**確かめる（最後の作り直しの後に呼ぶ）。一致しなければ件数と
+	// 「書いた値／読めた値」を counts へ残し、診断に出す。
+	//
+	// **なぜ確かめるか。** 実機で「伏図が 1:50 でも 1:75 でも凡例は 1:50」になった。
+	// 原因は 2 つのどちらか——(1) 書き込みが通っていない（作り直しで戻される等）、
+	// (2) `ImageScale` が OIP の「イメージの縮率」ではない（下の灰色の「カスタム 1:」に
+	// 当たり、実際の縮率はイメージの定義側が持つ）。読み戻した値が分かれば 1 回で切り分く。
+	void verifyLegendImageScale(LegendCounts& counts);
 
 	// 置いた凡例のうち**いちばん広いものの幅**（用紙 mm）。凡例が 1 つも無い・どれも
 	// 測れないときは 0。

@@ -296,6 +296,7 @@ namespace HomeskzIfcImport::draw
 		// 図で取り直す）、右上を揃える。
 		applyLegendImageScale(legends, layout.scale);
 		refreshLegends(legends);
+		verifyLegendImageScale(legends);
 		placeLegends(legends, layout.legendTopRight);
 
 		if (previousLayer != nil)
