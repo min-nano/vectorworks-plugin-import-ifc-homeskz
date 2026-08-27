@@ -645,16 +645,17 @@ namespace HomeskzIfcImport::core
 		// 帯の中心線（内法の対角線）。
 		const Vec2 low{risesToEnd ? clearStart : clearEnd, bottom};
 		const Vec2 high{risesToEnd ? clearEnd : clearStart, top};
+		// 上で内法の幅と高さが正だと確かめてあるので、対角線の長さも必ず正になる
+		// （length ≥ height > 0）。ゼロ除算の番人は要らない。
 		const Vec2 along{high.x - low.x, high.y - low.y};
 		const double length = std::hypot(along.x, along.y);
-		if (length < kGeomEps)
-			return {};
 
 		// 中心線に直交する半幅ぶんのオフセット。
 		const Vec2 offset{-along.y / length * width / 2.0, along.x / length * width / 2.0};
 		const std::vector<Vec2> band = {low - offset, high - offset, high + offset, low + offset};
-		return clipPolygonToRect(band, Vec2{std::min(clearStart, clearEnd), bottom},
-								 Vec2{std::max(clearStart, clearEnd), top});
+		const Vec2 clipMin{std::min(clearStart, clearEnd), bottom};
+		const Vec2 clipMax{std::max(clearStart, clearEnd), top};
+		return clipPolygonToRect(band, clipMin, clipMax);
 	}
 
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,

@@ -118,11 +118,8 @@ namespace HomeskzIfcImport::parse
 	// rel 由来）で、エンティティ列挙順に依存しない決定的な結果になる。解決できない要素は
 	// スキップする（1 枚の欠損で全体を止めない。CLAUDE.md「エラーハンドリング」）。
 	//
-	// columns は端点に対応づける柱の命令（**span レイヤ名から base ストーリを読む**ので、
-	// parse/Column が組み立てたものをそのまま渡す）。省略したオーバーロードは内部で組み立てる。
+	// 端点に対応づける柱の命令は内部で組み立てる（共有コンテキスト版は Context が持つものを使う）。
 	std::vector<core::ShearWallCommand> buildShearWallCommands(const Model& model);
-	std::vector<core::ShearWallCommand>
-	buildShearWallCommands(const Model& model, const std::vector<core::ColumnCommand>& columns);
 
 	// 同上。共有コンテキストのストーリ一覧・センタリング中心・階の要素・柱の命令を使う
 	// （parse/Context.h）。**Context 自身がこの結果をキャッシュする**（Context::shearWalls）

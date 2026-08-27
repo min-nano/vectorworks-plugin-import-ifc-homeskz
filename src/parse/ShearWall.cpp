@@ -513,13 +513,6 @@ namespace HomeskzIfcImport::parse
 		return buildShearWallCommands(context, context.columns());
 	}
 
-	std::vector<ShearWallCommand>
-	buildShearWallCommands(const Model& model, const std::vector<core::ColumnCommand>& columns)
-	{
-		Context context(model);
-		return buildShearWallCommands(context, columns);
-	}
-
 	std::vector<ShearWallCommand> buildShearWallCommands(const Model& model)
 	{
 		Context context(model);

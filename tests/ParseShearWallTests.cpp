@@ -194,6 +194,21 @@ TEST(shear_wall_vertical_extrusion_is_rejected)
 	CHECK(buildShearWallCommands(model).empty());
 }
 
+TEST(shear_wall_degenerate_solid_is_rejected)
+{
+	// 押し出し長 0 のソリッドは「厚みの無い壁」で、材厚も表裏も決まらない。壁面座標へ
+	// 落とした時点で弾く（1 枚の異常で全体を止めないための関門）。
+	const std::string zero =
+		std::string(kBraceText)
+			.replace(std::string(kBraceText).find("#21=IFCEXTRUDEDAREASOLID(#15,#19,#20,45.);"),
+					 std::string("#21=IFCEXTRUDEDAREASOLID(#15,#19,#20,45.);").size(),
+					 "#21=IFCEXTRUDEDAREASOLID(#15,#19,#20,0.);");
+	const Model model = loadIfcFromText(zero);
+	ShearWallPiece piece;
+	CHECK(!resolveShearWallPiece(model, *model.entity(29), true, piece));
+	CHECK(buildShearWallCommands(model).empty());
+}
+
 // --- 命令の組み立て ---------------------------------------------------------
 
 TEST(shear_wall_brace_command_from_synthetic_model)

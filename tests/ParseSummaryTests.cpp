@@ -158,6 +158,7 @@ namespace
 		document.fireBraces.resize(1);
 		document.joints.resize(1);
 		document.columnMarks.resize(1);
+		document.shearWalls.resize(1);
 		document.sheets.resize(1);
 		document.sections.resize(1);
 		return document;
@@ -183,6 +184,7 @@ namespace
 		counts.fireBraces = 1;
 		counts.joints = 1;
 		counts.columnMarks = 1;
+		counts.shearWalls = 1;
 		counts.sheets = 1;
 		counts.sections = 1;
 		return counts;
@@ -336,7 +338,7 @@ TEST(document_command_count_sums_every_element_list)
 {
 	// **要素を足したときに数え漏らさない**ための番人。Document の各リストに 1 件ずつ
 	// 入れたら、総数はリストの数と一致しなければならない（kElements の網羅性を固定する）。
-	CHECK_EQ(documentCommandCount(fullDocument()), static_cast<std::size_t>(17));
+	CHECK_EQ(documentCommandCount(fullDocument()), static_cast<std::size_t>(18));
 	CHECK_EQ(documentCommandCount(Document{}), static_cast<std::size_t>(0));
 }
 
@@ -361,6 +363,7 @@ TEST(format_import_result_covers_every_element)
 	CHECK(text.find("火打: 1 本") != std::string::npos);
 	CHECK(text.find("仕口: 1 箇所") != std::string::npos);
 	CHECK(text.find("柱記号: 1 個") != std::string::npos);
+	CHECK(text.find("耐力壁: 1 枚") != std::string::npos);
 	CHECK(text.find("伏図: 1 枚") != std::string::npos);
 	CHECK(text.find("軸組図: 1 枚") != std::string::npos);
 	// 並びは draw/ExecuteDocument のディスパッチ順（ストーリが先頭・軸組図が末尾）。
