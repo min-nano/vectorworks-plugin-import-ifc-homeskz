@@ -437,6 +437,38 @@ TEST(desired_layer_order_grid_top_then_stories_top_down)
 	}
 }
 
+TEST(desired_layer_order_brings_shear_wall_layers_to_the_front)
+{
+	// 耐力壁レイヤは階をまたいで集めて "共通"／topLayers の直後（最前面群）へ回す。
+	// 伏図へ出るのは注記（筋かいの三角・面材の丸）なので、横架材や柱の絵に隠されると
+	// 読めない（core::desiredStoryLayerOrder）。階の並び（最上階→最下階）は崩さない。
+	std::vector<StoryCommand> stories = {
+		{"1階",
+		 "1",
+		 0.0,
+		 {{"FL", 0.0, "1-FL"},
+		  {"耐力壁", -48.0, "1-耐力壁"},
+		  {"横架材天端", -48.0, "1-横架材天端"}}},
+		{"2階",
+		 "2",
+		 3000.0,
+		 {{"FL", 0.0, "2-FL"},
+		  {"耐力壁", -36.0, "2-耐力壁"},
+		  {"横架材天端", -36.0, "2-横架材天端"}}},
+	};
+	std::vector<std::string> const order = desiredStoryLayerOrder(stories, {"2-柱伏図記号"});
+
+	const std::vector<std::string> expected = {"共通",	   "2-柱伏図記号", "2-耐力壁",
+											   "1-耐力壁", "2-横架材天端", "1-横架材天端",
+											   "2-FL",	   "1-FL"};
+	CHECK_EQ(order.size(), expected.size());
+	if (order.size() == expected.size())
+	{
+		for (std::size_t i = 0; i < expected.size(); ++i)
+			CHECK_EQ(order[i], expected[i]);
+	}
+}
+
 TEST(desired_layer_order_prepends_top_layers)
 {
 	// topLayers（伏図記号レイヤ等・ストーリ非依存）は "共通" の直下に積む。

@@ -66,8 +66,16 @@ namespace HomeskzIfcImport
 		// 手で動かした耐力壁でも拾えるだけの余裕を取る。
 		constexpr double kColumnAlongTol = 300.0;
 
-		// 伏図記号が内法に対して大きくなりすぎない上限（内法の何分の 1 まで許すか）。
-		constexpr double kMarkSpanFraction = 3.0;
+		// 伏図記号の縦横比。三角記号は「壁と平行な脚＝MarkSize・壁に直交する脚＝その半分」、
+		// 丸印は「直径＝MarkSize の半分」で描く。**内法では割らない**——455mm 幅の壁だけ
+		// 記号が縮んで図が不揃いに見えたので、大きさは内法に依らず一定にした（M19 の実機
+		// 確認）。内法より長い三角だけは柱へはみ出すので、そのときだけ内法まで詰める。
+		constexpr double kMarkTriangleHeightRatio = 0.5;
+		constexpr double kMarkCircleDiameterRatio = 0.5;
+
+		// 面材の中心面の離れ（PanelOffset）が読めないときの見当（mm）。半柱幅（52.5）＋
+		// 板厚の半分ほど。**軸組図の面の位置にだけ効く**（伏図の記号は MarkOffset で置く）。
+		constexpr double kPanelOffsetFallback = 60.0;
 
 		// PIO の定義。**関数ローカル static** で持つ理由は ExtMenu の menuDef と同じ
 		// （SDK の非ローカル static を名前空間スコープの初期化子から参照しない）。
@@ -152,6 +160,12 @@ namespace HomeskzIfcImport
 				 {PLUGIN_VWR_ID, "shearWallMarkSize"},
 				 "300",
 				 "300",
+				 kFieldCoordDisp,
+				 0},
+				{kParamShearMarkOffset,
+				 {PLUGIN_VWR_ID, "shearWallMarkOffset"},
+				 "200",
+				 "200",
 				 kFieldCoordDisp,
 				 0},
 				{"", {}, "", "", kFieldText, 0}}; // 終端
@@ -341,17 +355,25 @@ namespace HomeskzIfcImport
 			}
 		}
 
-		// 伏図の三角記号 1 つ。底辺は内法の端（atStart なら始点側）で壁に直交し、頂点が
-		// **材が高くなる側**を指す。
-		void AddBraceTriangle(MCObjectHandle host, double clearStart, double clearEnd, double size,
-							  bool atStart)
+		// 伏図の筋かい記号 1 つ（**直角三角形**）。壁と平行な脚を y=offset の線に置き、
+		// 直角を**材が高くなる側**の端に立てるので、斜辺の傾きがそのまま筋かいの向き
+		// （足元→頂部）を表す。たすき掛けは risesToEnd を反転してもう 1 つ重ねる
+		// （同じ矩形の中で斜辺が交差する＝たすきに見える）。
+		//
+		// 置き場所は**内法の中央**。大きさが内法に依らないので、位置も内法に依らせない
+		// （端に寄せると、短い壁では柱の断面へ食い込む）。三角は**記号を寄せた側へさらに
+		// 外側**へ伸ばす（offset の符号に height を合わせる）ので、壁芯側へ戻って横架材と
+		// 重なることはない。
+		void AddBraceTriangle(MCObjectHandle host, double centre, double length, double height,
+							  double offset, bool risesToEnd)
 		{
-			const double base = atStart ? clearStart : clearEnd;
-			const double apex = atStart ? clearStart + size : clearEnd - size;
-			const double half = size / 2.0;
-			AddPolygon2D(host,
-						 {core::Vec2{base, half}, core::Vec2{base, -half}, core::Vec2{apex, 0.0}},
-						 kShearMarkClass);
+			const double half = length / 2.0;
+			const double foot = risesToEnd ? centre - half : centre + half;
+			const double head = risesToEnd ? centre + half : centre - half;
+			const double apex = offset + std::copysign(height, offset);
+			AddPolygon2D(
+				host, {core::Vec2{foot, offset}, core::Vec2{head, offset}, core::Vec2{head, apex}},
+				kShearMarkClass);
 		}
 
 		// 伏図の面材記号 1 つ。壁に平行な線と、その中央の丸印。
@@ -366,7 +388,7 @@ namespace HomeskzIfcImport
 				draw::SetAllAttributesByClass(line);
 			}
 
-			const double radius = size / 4.0;
+			const double radius = size * kMarkCircleDiameterRatio / 2.0;
 			const double centre = (clearStart + clearEnd) / 2.0;
 			WorldRect bounds;
 			bounds.left = centre - radius;
@@ -570,10 +592,11 @@ namespace HomeskzIfcImport
 			core::trace::log(std::string("  shearwall: 内法 ") + (fromColumns ? "柱から" : "控え") +
 							 " x=[" + Number(clearStart) + ", " + Number(clearEnd) + "]");
 
-			// 伏図記号の大きさ。内法に対して大きすぎると図が潰れるので頭打ちにする。
-			const double markSize =
-				std::min(ParamReal(self, kParamShearMarkSize, kShearMarkSizeDefault),
-						 span / kMarkSpanFraction);
+			// 伏図記号の大きさと壁芯からの離れ。**大きさは内法で割らない**——455mm 幅の壁
+			// だけ記号が縮んで不揃いに見えたので一定にした（ヘッダ「伏図と軸組図で描き分ける」）。
+			const double markSize = ParamReal(self, kParamShearMarkSize, kShearMarkSizeDefault);
+			const double markOffset =
+				ParamReal(self, kParamShearMarkOffset, kShearMarkOffsetDefault);
 
 			// 軸組内法の高さ。**ここが取れなくても伏図の記号は描く**——記号は平面だけで
 			// 決まるので、高さの取りこぼしで図面から耐力壁が丸ごと消えるのは割に合わない
@@ -593,18 +616,21 @@ namespace HomeskzIfcImport
 				const bool back = side == kShearSideBack || side == kShearSideBoth;
 				double offset = ParamReal(self, kParamShearPanelOffset);
 				if (offset <= 0.0)
-					offset = markSize / 2.0;
+					offset = kPanelOffsetFallback;
 
+				// 伏図の記号は**実物の離れ（offset）ではなく MarkOffset で置く**。実物の
+				// 離れは半柱幅ほどしかなく、壁芯に載る横架材（土台・胴差）の下へ必ず潜る。
+				// 表・裏の区別は「どちら側へ寄せるか」で保たれる。
 				if (front)
 				{
-					AddPanelMark(this->fhObject, clearStart, clearEnd, offset, markSize);
+					AddPanelMark(this->fhObject, clearStart, clearEnd, markOffset, markSize);
 					if (hasHeight)
 						AddPanelFace(this->fhObject, clearStart, clearEnd, bottom, top, offset,
 									 kShearPanelFrontClass);
 				}
 				if (back)
 				{
-					AddPanelMark(this->fhObject, clearStart, clearEnd, -offset, markSize);
+					AddPanelMark(this->fhObject, clearStart, clearEnd, -markOffset, markSize);
 					if (hasHeight)
 						AddPanelFace(this->fhObject, clearStart, clearEnd, bottom, top, -offset,
 									 kShearPanelBackClass);
@@ -620,10 +646,17 @@ namespace HomeskzIfcImport
 				draw::PioParamString(self, kParamShearBraceStyle) == kShearBraceDouble;
 			const double width = ParamReal(self, kParamShearWidth);
 
-			// 伏図: 材の**足元**へ三角記号を置く。たすき掛けは両端に 1 つずつ。
-			AddBraceTriangle(this->fhObject, clearStart, clearEnd, markSize, risesToEnd);
+			// 伏図: 内法の中央へ直角三角形を 1 つ。たすき掛けは**同じ場所へ反転して重ねる**
+			// （斜辺が交差してたすきに見える）。記号は壁芯に載る横架材を避けて表側へ寄せ、
+			// 三角はそこからさらに外側（+Y）へ伸びる。
+			const double markCentre = (clearStart + clearEnd) / 2.0;
+			const double markLength = std::min(markSize, span);
+			const double markHeight = markSize * kMarkTriangleHeightRatio;
+			AddBraceTriangle(this->fhObject, markCentre, markLength, markHeight, markOffset,
+							 risesToEnd);
 			if (doubleBrace)
-				AddBraceTriangle(this->fhObject, clearStart, clearEnd, markSize, !risesToEnd);
+				AddBraceTriangle(this->fhObject, markCentre, markLength, markHeight, markOffset,
+								 !risesToEnd);
 
 			// 軸組図: 形状どおりの帯。見付け幅が取れないと帯にならないので、そのときは
 			// 伏図の記号だけで済ませる。

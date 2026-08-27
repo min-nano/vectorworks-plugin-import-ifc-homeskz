@@ -1321,8 +1321,11 @@ namespace HomeskzIfcImport::core
 	// ストーリ非依存の独立レイヤ。M12 で reorderStoryLayers が渡すようになった）→
 	// **最上階→最下階**の順に各ストーリのレイヤ（stories は
 	// Elevation 昇順＝最下階→最上階なので逆順に辿る）。各ストーリ内は levels の並び順。
-	// ただし床（FL）・野地板レベルのレイヤは全ストーリ分をまとめてスタック最下段（背面）へ
-	// 回す（伏図ビューポートで柱・梁を覆い隠さないため）。
+	// ただし 2 種類のレベルだけは階をまたいで集めて端へ回す:
+	//   * 床（FL）・野地板 … スタック最下段（背面）。伏図ビューポートで柱・梁を覆い隠さない。
+	//   * 耐力壁（M19） … topLayers の直後（最前面群）。耐力壁が伏図へ出すのは**注記**
+	//     （筋かいの三角・面材の丸）で、横架材や柱の絵に隠されると読めない。実機で
+	//     「記号が横架材の後ろに隠れる」ことを確認して前面へ回した。
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
 													const std::vector<std::string>& topLayers = {});
 } // namespace HomeskzIfcImport::core

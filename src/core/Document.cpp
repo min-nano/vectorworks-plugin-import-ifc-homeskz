@@ -632,6 +632,15 @@ namespace HomeskzIfcImport::core
 		{
 			return type == kLevelFL || type == kLevelNojiita;
 		}
+
+		// 逆に、スタック最上段（前面）へ回すレベル種別か。耐力壁（M19）の伏図記号は
+		// **横架材・柱と同じ場所に重ねて読ませる注記**なので、実体（材）の絵に隠されると
+		// 用を成さない。実機で「記号が横架材の後ろに隠れる」ことを確認して前面へ回した
+		// （desiredStoryLayerOrder の doc コメント）。
+		bool isForegroundLevel(const std::string& type)
+		{
+			return type == kLevelShearWall;
+		}
 	} // namespace
 
 	std::vector<Vec2> shearWallBracePolygon(double clearStart, double clearEnd, double bottom,
@@ -668,17 +677,24 @@ namespace HomeskzIfcImport::core
 		order.insert(order.end(), topLayers.begin(), topLayers.end());
 
 		// stories は Elevation 昇順（最下階→最上階）。スタックは最上階→最下階なので逆順に辿る。
+		// 前面へ回すレベルは order の**先頭側**（通り芯・topLayers の直後）へ、背面へ回す
+		// レベルは末尾へ集める。どちらも階の並び（最上階→最下階）は崩さない。
+		std::vector<std::string> foreground;
 		std::vector<std::string> background;
 		for (const StoryCommand& command : std::views::reverse(stories))
 		{
 			for (const LevelCommand& level : command.levels)
 			{
-				if (isBackgroundLevel(level.type))
+				if (isForegroundLevel(level.type))
+					foreground.push_back(level.layer);
+				else if (isBackgroundLevel(level.type))
 					background.push_back(level.layer);
 				else
 					order.push_back(level.layer);
 			}
 		}
+		order.insert(order.begin() + static_cast<std::ptrdiff_t>(1 + topLayers.size()),
+					 foreground.begin(), foreground.end());
 		order.insert(order.end(), background.begin(), background.end());
 		return order;
 	}

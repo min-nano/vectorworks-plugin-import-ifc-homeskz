@@ -151,18 +151,19 @@ namespace HomeskzIfcImport::parse
 				!markLayer.empty())
 				layers.push_back(markLayer);
 
-			// M19 耐力壁: **その伏図が対象とする横架材の下**にある階の "n-耐力壁" レイヤを
-			// 1 枚だけ重ねる（2 階床伏図 → "1-耐力壁"）。伏図記号（"{to}-柱伏図記号"）が
-			// 切断の直下を映すのと同じ考え方で、筋かい・面材はその図の梁を下から支える階の
-			// ものが読みたい。最下階（1 階床伏図）には下の階が無いので何も載らない
-			// （最上階＝屋根の耐力壁も、その上の伏図が無いので伏図には出ない。軸組図には出る）。
-			if (i > 0)
-			{
-				const std::string shearLayer =
-					storyLayerName(i - 1, stories[i - 1].isTop, kLevelShearWall);
-				if (anyShearWallOnLayer(shearWalls, shearLayer))
-					layers.push_back(shearLayer);
-			}
+			// M19 耐力壁: **その階自身**の "n-耐力壁" レイヤを重ねる（1 階床＝土台伏図 →
+			// "1-耐力壁"、2 階床伏図 → "2-耐力壁"）。伏図記号（"{to}-柱伏図記号"）が
+			// 切断の**直下**を映すのとは規約が違う——耐力壁は「どの階の壁か」で呼ばれる
+			// ものなので、1 階の耐力壁は 1 階の伏図（土台伏図）に、2 階の耐力壁は 2 階床
+			// 伏図に出るのが図面としての読み方に合う（実機確認で決めた。M19）。
+			//
+			// **重ね順もこの規約に乗っている**: 同じ階のレイヤどうしなら 耐力壁レベルは
+			// 横架材天端の 1 段上（前面）に積まれるので、記号が横架材の後ろへ回らない
+			// （下の階のレイヤを載せていたときは、上の階の横架材に必ず隠れていた）。
+			// 加えて core::desiredStoryLayerOrder が耐力壁レイヤを最前面群へ回す。
+			if (const std::string shearLayer = storyLayerName(i, isTop, kLevelShearWall);
+				anyShearWallOnLayer(shearWalls, shearLayer))
+				layers.push_back(shearLayer);
 
 			if (!isTop)
 			{

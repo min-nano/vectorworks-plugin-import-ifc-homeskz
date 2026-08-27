@@ -496,23 +496,30 @@ TEST(shear_wall_stories_carry_the_shear_wall_level)
 	}
 }
 
-TEST(shear_wall_floor_plan_shows_the_storey_below)
+TEST(shear_wall_floor_plan_shows_its_own_storey)
 {
-	// 2 階床伏図（番号 3）は 1 階の耐力壁を映す——その図の梁を下から支える階のものが読みたい。
+	// 伏図には**その階自身**の耐力壁が載る（1 階床＝土台伏図 → "1-耐力壁"、
+	// 2 階床伏図 → "2-耐力壁"）。「n 階の耐力壁」は n 階の伏図で読む、という図面の
+	// 呼び方に合わせた規約（parse/Sheet の M19 のコメント）。
 	const Document& document = fixtureDocument("サンプル1 (住木邸新築工事).ifc");
-	bool checked = false;
+	std::size_t checked = 0;
 	for (const core::SheetCommand& sheet : document.sheets)
 	{
-		if (sheet.title != "2階床伏図")
+		const auto* const expected = sheet.title == "1階床伏図"	  ? "1-耐力壁"
+									 : sheet.title == "2階床伏図" ? "2-耐力壁"
+																  : nullptr;
+		if (expected == nullptr)
 			continue;
-		checked = true;
-		CHECK(std::ranges::find(sheet.viewport.layers, std::string("1-耐力壁")) !=
+		++checked;
+		CHECK(std::ranges::find(sheet.viewport.layers, std::string(expected)) !=
 			  sheet.viewport.layers.end());
-		// 自分の階（2 階）の耐力壁は載せない（切断より上になる）。
-		CHECK(std::ranges::find(sheet.viewport.layers, std::string("2-耐力壁")) ==
+		// 他の階の耐力壁は載せない（下の階のものを載せていたときは、上の階の横架材に
+		// 必ず隠れていた）。
+		const auto* const other = sheet.title == "1階床伏図" ? "2-耐力壁" : "1-耐力壁";
+		CHECK(std::ranges::find(sheet.viewport.layers, std::string(other)) ==
 			  sheet.viewport.layers.end());
 	}
-	CHECK(checked);
+	CHECK_EQ(checked, static_cast<std::size_t>(2));
 }
 
 TEST_MAIN();
