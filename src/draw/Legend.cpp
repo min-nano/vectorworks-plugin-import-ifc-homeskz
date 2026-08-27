@@ -54,11 +54,6 @@ namespace HomeskzIfcImport::draw
 		// **中身が必要とする幅より少し広い程度**に留める。
 		constexpr double kBoxWidth = 40.0;
 
-		// イメージの縮率（OIP の「イメージの縮率」）。**分母を実数で持つ**欄で、1:75 なら 75。
-		// **表示名が空なので OIP の項目名からは引けない**——universal 名で直に書く。
-		// 縮率だけを変えた 3 枚のダンプで確定した（docs/DEV-NOTES.md「グラフィック凡例」）。
-		constexpr const char* kFieldImageScale = "ImageScale";
-
 		// 見た目。凡例 PIO が内部で描く枠線・セルは**クラスでは制御できない**ので、
 		// オブジェクトの属性として直接与える（draw/Legend.h）。線の太さの単位はミル（1/1000
 		// インチ）で、5 ミル = 0.127mm を VW は 0.13mm と表示する。塗りパターン 0 = なし。
@@ -68,8 +63,8 @@ namespace HomeskzIfcImport::draw
 		// 生成した凡例の箱幅を与える。**例外を外へ出さない**——書けなくても凡例そのものは
 		// 図面に残るので、件数だけ counts へ積む。
 		//
-		// **イメージの縮率はここでは書かない**——作り直しで戻されるので、すべて置き終えて
-		// 作り直した**後**に applyLegendImageScale で与える（draw/Legend.h）。
+		// **イメージの縮率はここでも他のどこでも書かない**——レコードの `ImageScale` は
+		// 書けるのに実描画が 1:50 から動かない（draw/Legend.h 冒頭の「既知の制限」）。
 		void ApplyBoxWidth(MCObjectHandle object, LegendCounts& counts)
 		{
 			try
@@ -274,26 +269,6 @@ namespace HomeskzIfcImport::draw
 		{
 			if (WorldRect bounds; gSDK->GetObjectBounds(object, bounds))
 				gSDK->MoveObject(object, topRight.x - bounds.right, topRight.y - bounds.top);
-		}
-	}
-
-	void applyLegendImageScale(const LegendCounts& counts, double scale)
-	{
-		if (scale <= 0.0)
-			return;
-		for (const MCObjectHandle object : counts.objects)
-		{
-			try
-			{
-				VWParametricObj pio(object);
-				SetParamRealChecked(pio, TXString(kFieldImageScale), scale);
-			}
-			catch (...)
-			{
-				// PIO として開けなかった。縮率が既定のままになるだけなので続ける
-				// （凡例が出ない方が困る）。
-				continue;
-			}
 		}
 	}
 

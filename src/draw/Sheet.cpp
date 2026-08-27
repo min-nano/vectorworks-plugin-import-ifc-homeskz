@@ -8,10 +8,9 @@
 //	【シートレイヤに載るのはビューポートだけではない】伏図には**グラフィック凡例**
 //	（VW 標準の "GraphicLegend" PIO）も 1 つ載る（M13）。凡例はビューポート注釈では
 //	なくシートレイヤ（＝用紙）へ直接置くので、置き方は draw/Legend が持つ。ここは
-//	ビューポートを仕上げた後にそれを呼び、**そのビューポートに設定した縮尺**
-//	（ConfigureViewport が持ち帰る `ViewportFinish::scale`）を渡す——凡例のイメージの縮率を
-//	図と揃えるため（draw/Legend.h）。凡例は**スタイル無しで置く**ので、置いた後にスタイルを
-//	反映させる手当ては要らない。
+//	ビューポートを仕上げた後にそれを呼ぶ。凡例は**スタイル無しで置く**ので、置いた後に
+//	スタイルを反映させる手当ては要らない。**イメージの縮率は渡さない**——プラグインからは
+//	変えられないと分かったので PIO 既定の 1:50 のままにする（draw/Legend.h「既知の制限」）。
 //
 //	【シートレイヤとビューポートの手当ては draw/DrawUtil が持つ】シートレイヤの用意
 //	（PrepareSheetLayer）・表示レイヤの絞り込み・クラス表示・縮尺・図面タイトル/図番・更新
@@ -292,10 +291,6 @@ namespace HomeskzIfcImport::draw
 		// ビューポートに映るシンボルなので、縮尺を当て直した後の図で取り直す）、右上を揃える。
 		refreshLegends(legends);
 		placeLegends(legends, layout.legendTopRight);
-
-		// **縮率はいちばん最後に。** 作り直しが縮率を戻すので、ここより前に書くと効かない
-		// （draw/Legend.h の applyLegendImageScale）。
-		applyLegendImageScale(legends, layout.scale);
 
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
