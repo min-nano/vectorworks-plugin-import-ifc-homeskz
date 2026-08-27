@@ -487,11 +487,12 @@ TEST(reads_sample_house_fixture)
 
 	// 一般階は FL＋横架材天端の 2 レベル（順序は FL が上）。その上に span 柱レベル（M8）が
 	// (from, to) 昇順で積まれる: 1 階には 2 階で止まる管柱（"1to2-柱"）と、3 階床まで届く
-	// 通し柱（"1to3-柱"）がある。
+	// 通し柱（"1to3-柱"）がある。耐力壁（M19）の命令もあるので、横架材天端の直上に
+	// 耐力壁レベルが挟まる。
 	const StoryCommand* first = find(stories, "1階");
 	if (first != nullptr)
 	{
-		const std::vector<std::string> base = {"1to2-柱", "1to3-柱", "FL", "横架材天端"};
+		const std::vector<std::string> base = {"1to2-柱", "1to3-柱", "FL", "耐力壁", "横架材天端"};
 		CHECK(sameVec(levelTypes(*first), base));
 	}
 }

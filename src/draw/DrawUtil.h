@@ -51,6 +51,18 @@ namespace HomeskzIfcImport::draw
 	TXString ResolveParamName(const VWParametricObj& pio, const char* universalName,
 							  const char* localizedName);
 
+	// PIO の文字列パラメータを読む（無ければ・例外なら空）。**PIO 本体（Extensions/）が
+	// 自分や他のオブジェクトのパラメータを覗くときの唯一の入口**——柱記号（ExtColumnMark）と
+	// 耐力壁（ExtShearWall）がどちらも構造材の構造用途を読むので、try/catch ごとここに
+	// 1 つだけ置く。
+	std::string PioParamString(const VWParametricObj& pio, const char* name);
+
+	// オブジェクトが構造材ツール（StructuralMember）なら、その**構造用途**（"4"＝柱 /
+	// "5"＝小屋束 …。core::kStructuralUse*）を返す。構造材でなければ空。
+	//
+	// 記号 PIO と耐力壁 PIO が「対象レイヤの中から柱だけを拾う」のに共有する。
+	std::string StructuralUseOf(MCObjectHandle object);
+
 	// PIO に実数パラメータを書き、**読み戻して書けたか確かめる**。書けていれば true。
 	// 角度・寸法のような数値パラメータでも、PIO の登録次第で実数ではなく文字列として
 	// 保持されていることがあり、その場合 SetParamReal は黙って無視される。そこで実数で

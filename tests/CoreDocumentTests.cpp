@@ -1784,4 +1784,57 @@ TEST(geometry_vectors_default_to_origin)
 	CHECK_EQ(p3.z, 0.0);
 }
 
+// ---------------------------------------------------------------------------
+// - 耐力壁の筋かいの形（core::shearWallBracePolygon）。M19。
+// ---------------------------------------------------------------------------
+
+TEST(shear_wall_brace_polygon_is_clipped_to_the_frame)
+{
+	// 内法 3000×2400 に幅 100 の帯。帯の 4 つの角はそれぞれ内法の別の辺の外へ出るので、
+	// どの角も 2 頂点に切り分けられて八角形（端が斜めに落ちた形）になる。頂点はすべて
+	// 内法の中に収まる。
+	const std::vector<core::Vec2> brace =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+	CHECK_EQ(brace.size(), std::size_t{8});
+	for (const core::Vec2& point : brace)
+	{
+		CHECK(point.x >= -1e-9 && point.x <= 3000.0 + 1e-9);
+		CHECK(point.y >= -1e-9 && point.y <= 2400.0 + 1e-9);
+	}
+}
+
+TEST(shear_wall_brace_polygon_follows_the_rise_direction)
+{
+	// 傾きの向きで、下端に接する側が入れ替わる。始点側が下（risesToEnd=true）なら
+	// 内法の左下隅の近くに頂点があり、逆向きなら右下隅の近くにある。
+	const auto lowestX = [](const std::vector<core::Vec2>& poly)
+	{
+		double best = poly.front().x;
+		double bestY = poly.front().y;
+		for (const core::Vec2& point : poly)
+		{
+			if (point.y < bestY)
+			{
+				bestY = point.y;
+				best = point.x;
+			}
+		}
+		return best;
+	};
+	const std::vector<core::Vec2> up =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+	const std::vector<core::Vec2> down =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, false);
+	CHECK(lowestX(up) < 1500.0);
+	CHECK(lowestX(down) > 1500.0);
+}
+
+TEST(shear_wall_brace_polygon_rejects_a_degenerate_frame)
+{
+	// 内法が潰れている・幅が無いときは描けない（空を返す）。
+	CHECK(core::shearWallBracePolygon(0.0, 0.0, 0.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 2400.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, true).empty());
+}
+
 TEST_MAIN();

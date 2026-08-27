@@ -103,7 +103,7 @@ namespace HomeskzIfcImport::parse
 			std::size_t (*placed)(const core::DrawCounts&); // 描けた数
 		};
 
-		constexpr std::array<ElementDef, 17> kElements = {{
+		constexpr std::array<ElementDef, 18> kElements = {{
 			{"ストーリ", "層", [](const core::Document& d) { return d.stories.size(); },
 			 [](const core::DrawCounts& c) { return c.stories; }},
 			{"通り芯", "本", [](const core::Document& d) { return d.grids.size(); },
@@ -134,6 +134,8 @@ namespace HomeskzIfcImport::parse
 			 [](const core::DrawCounts& c) { return c.joints; }},
 			{"柱記号", "個", [](const core::Document& d) { return d.columnMarks.size(); },
 			 [](const core::DrawCounts& c) { return c.columnMarks; }},
+			{"耐力壁", "枚", [](const core::Document& d) { return d.shearWalls.size(); },
+			 [](const core::DrawCounts& c) { return c.shearWalls; }},
 			{"伏図", "枚", [](const core::Document& d) { return d.sheets.size(); },
 			 [](const core::DrawCounts& c) { return c.sheets; }},
 			{"軸組図", "枚", [](const core::Document& d) { return d.sections.size(); },
@@ -164,7 +166,7 @@ namespace HomeskzIfcImport::parse
 			// 解析は通ったが取り込める要素が 1 つも無かった（ホームズ君以外の IFC・
 			// 空のファイル等）。要素名を並べて「何を探したか」を示す。
 			out << "取り込める要素（ストーリ・通り芯・基礎・床・横架材・柱・屋根組・"
-				   "シンボル・柱記号・伏図・軸組図）が見つかりませんでした。";
+				   "シンボル・柱記号・耐力壁・伏図・軸組図）が見つかりませんでした。";
 		}
 		else
 		{

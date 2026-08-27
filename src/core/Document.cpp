@@ -260,6 +260,24 @@ namespace HomeskzIfcImport::core
 			return !mark.layer.empty() && !mark.drawClass.empty() && !mark.targetLayer.empty() &&
 				   (mark.style != ColumnMarkStyle::Plan || !mark.symbol.empty());
 		}
+
+		// 耐力壁 1 枚が妥当か。PIO を置くレイヤ名・作図クラス名が非空で、軸（柱芯どうし）が
+		// 縮退しておらず（縮退した軸からは向きも長さも決まらない。判定は core/Geometry の
+		// samePoint）、材厚と軸組内法（下端 < 上端）が正であること。
+		//
+		// **柱を探すレイヤ名（targetLayers）は空を許す**——柱の無い階（柱レイヤが 1 つも
+		// 生成されなかった）でも耐力壁そのものは描けるべきで、そのとき PIO は控えの内法
+		// （clearSpan）で描く。空を弾くと「柱が無いと耐力壁が丸ごと消える」という、
+		// 図面としては黙って欠ける最悪の形になる。
+		// 筋かいは見付け幅が正であること（幅 0 の帯は描けない）。面材は幅を使わない。
+		bool isValidShearWall(const ShearWallCommand& wall)
+		{
+			if (wall.layer.empty() || wall.drawClass.empty() || samePoint(wall.start, wall.end) ||
+				wall.thickness <= 0.0 || wall.topHeight <= wall.bottomHeight ||
+				wall.clearSpan <= 0.0)
+				return false;
+			return wall.kind != ShearWallKind::Brace || wall.width > 0.0;
+		}
 	} // namespace
 
 	bool validateDocument(const Document& document)
@@ -324,6 +342,11 @@ namespace HomeskzIfcImport::core
 		// 断面記号・伏図記号（M12）: PIO のレイヤ名・作図クラス名・検索対象レイヤ名が非空で、
 		// 伏図記号はシンボル名も非空であること（isValidColumnMark 参照。docs/DEV-NOTES.md M12）。
 		if (!std::ranges::all_of(document.columnMarks, isValidColumnMark))
+			return false;
+
+		// 耐力壁（M19）: レイヤ名・クラス名が非空で、軸が非縮退・材厚と軸組内法が正で
+		// あること（isValidShearWall 参照。docs/DEV-NOTES.md M19）。
+		if (!std::ranges::all_of(document.shearWalls, isValidShearWall))
 			return false;
 
 		// シート（伏図）: シートレイヤ番号・タイトルが非空で、ビューポートが非空のレイヤ名を
@@ -502,6 +525,9 @@ namespace HomeskzIfcImport::core
 			takePoint(column.layer, column.position);
 		for (const ColumnMarkCommand& mark : document.columnMarks)
 			takePoint(mark.layer, mark.position);
+		// 耐力壁（M19）は柱芯どうしを結ぶ線分。伏図に映る範囲へ含める。
+		for (const ShearWallCommand& wall : document.shearWalls)
+			takeSegment(wall.layer, wall.start, wall.end);
 		// シンボル置換系 4 種は同じ命令型（SymbolCommand）なので同じ扱いで畳む。
 		for (const std::vector<SymbolCommand>* list :
 			 {&document.anchorBolts, &document.floorPosts, &document.fireBraces, &document.joints})
@@ -607,6 +633,29 @@ namespace HomeskzIfcImport::core
 			return type == kLevelFL || type == kLevelNojiita;
 		}
 	} // namespace
+
+	std::vector<Vec2> shearWallBracePolygon(double clearStart, double clearEnd, double bottom,
+											double top, double width, bool risesToEnd)
+	{
+		const double span = clearEnd - clearStart;
+		const double height = top - bottom;
+		if (span <= 0.0 || height <= 0.0 || width <= 0.0)
+			return {};
+
+		// 帯の中心線（内法の対角線）。
+		const Vec2 low{risesToEnd ? clearStart : clearEnd, bottom};
+		const Vec2 high{risesToEnd ? clearEnd : clearStart, top};
+		const Vec2 along{high.x - low.x, high.y - low.y};
+		const double length = std::hypot(along.x, along.y);
+		if (length < kGeomEps)
+			return {};
+
+		// 中心線に直交する半幅ぶんのオフセット。
+		const Vec2 offset{-along.y / length * width / 2.0, along.x / length * width / 2.0};
+		const std::vector<Vec2> band = {low - offset, high - offset, high + offset, low + offset};
+		return clipPolygonToRect(band, Vec2{std::min(clearStart, clearEnd), bottom},
+								 Vec2{std::max(clearStart, clearEnd), top});
+	}
 
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
 													const std::vector<std::string>& topLayers)

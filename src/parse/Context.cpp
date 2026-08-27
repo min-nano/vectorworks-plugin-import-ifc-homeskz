@@ -107,4 +107,11 @@ namespace HomeskzIfcImport::parse
 			fAnchorBolts = buildAnchorBoltCommands(*this);
 		return *fAnchorBolts;
 	}
+
+	const std::vector<core::ShearWallCommand>& Context::shearWalls()
+	{
+		if (!fShearWalls.has_value())
+			fShearWalls = buildShearWallCommands(*this);
+		return *fShearWalls;
+	}
 } // namespace HomeskzIfcImport::parse

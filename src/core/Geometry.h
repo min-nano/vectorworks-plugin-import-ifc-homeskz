@@ -19,6 +19,7 @@
 
 #include <array>
 #include <cmath>
+#include <vector>
 
 namespace HomeskzIfcImport::core
 {
@@ -44,6 +45,19 @@ namespace HomeskzIfcImport::core
 	{
 		return std::abs(a.x - b.x) < tol && std::abs(a.y - b.y) < tol;
 	}
+
+	// 凸多角形を軸並行の矩形 [min, max] で切り取る（Sutherland–Hodgman）。頂点列は閉じた
+	// ポリゴン（末尾に始点を重複させない）で、周り方向は入力のまま保たれる。矩形の外へ
+	// 完全に出ている多角形は空を返す。
+	//
+	// 【何に使うか】耐力壁の筋かいは「軸組内法の対角線に沿った帯」で、その帯は内法の
+	// 矩形からはみ出す（帯の角が柱・横架材へ食い込む）。実物も内法へ切り詰めて納まるので、
+	// 描くときも矩形で切る（core::shearWallBracePolygon。docs/DEV-NOTES.md M19）。
+	//
+	// 凹多角形には使わない（Sutherland–Hodgman は凹の切り口で退化した辺を残す）。用途は
+	// いまのところ帯＝凸なのでこれで足りる。
+	std::vector<Vec2> clipPolygonToRect(const std::vector<Vec2>& polygon, const Vec2& min,
+										const Vec2& max);
 
 	// 3 次元ベクトル（ワールド座標の点・方向）。配置・押し出しに使う。
 	struct Vec3

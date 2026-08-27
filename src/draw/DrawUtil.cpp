@@ -11,6 +11,7 @@
 #include "PluginPrefix.h"
 #include "draw/DrawUtil.h"
 #include "draw/ObjectHandles.h"
+#include "draw/StructuralMember.h"
 
 #include "VWFC/VWObjects/VWClass.h"
 #include "VWFC/VWObjects/VWDocument.h"
@@ -173,6 +174,33 @@ namespace HomeskzIfcImport::draw
 			return;
 		const InternalIndex classID = gSDK->AddClass(TXString(className.c_str()));
 		gSDK->SetObjectClass(object, classID);
+	}
+
+	std::string PioParamString(const VWParametricObj& pio, const char* name)
+	{
+		try
+		{
+			return pio.GetParamString(TXString(name)).GetStdString();
+		}
+		catch (...)
+		{
+			// パラメータが無い PIO を覗いたときは例外が出る。呼び出し側は「読めなかった」
+			// を空文字で受ければよいので、ここで畳む（1 つの読み損ないで描画を止めない）。
+			return {};
+		}
+	}
+
+	std::string StructuralUseOf(MCObjectHandle object)
+	{
+		try
+		{
+			VWParametricObj pio(object);
+			return PioParamString(pio, kFieldStructuralUse);
+		}
+		catch (...)
+		{
+			return {}; // 構造材でない（PIO ですらない）オブジェクト
+		}
 	}
 
 	void SetAllAttributesByClass(MCObjectHandle object)

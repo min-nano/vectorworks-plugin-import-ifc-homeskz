@@ -15,6 +15,7 @@
 //
 
 #include "parse/Sheet.h"
+#include "parse/ShearWall.h"
 #include "core/Document.h"
 #include "parse/ColumnMark.h"
 #include "parse/Context.h"
@@ -125,6 +126,9 @@ namespace HomeskzIfcImport::parse
 		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns());
 		const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
 		const bool foundation = hasFoundation(context.model());
+		// 耐力壁レイヤは**命令があるときだけ**作られるので、載せる前に有無を確かめる
+		// （空のレイヤ名をビューポートへ渡さない）。
+		const std::vector<core::ShearWallCommand>& shearWalls = context.shearWalls();
 
 		std::vector<core::SheetCommand> commands;
 		commands.reserve(stories.size());
@@ -146,6 +150,19 @@ namespace HomeskzIfcImport::parse
 			if (const std::string markLayer = planMarkLayerBelowCut(markLayers, cut);
 				!markLayer.empty())
 				layers.push_back(markLayer);
+
+			// M19 耐力壁: **その伏図が対象とする横架材の下**にある階の "n-耐力壁" レイヤを
+			// 1 枚だけ重ねる（2 階床伏図 → "1-耐力壁"）。伏図記号（"{to}-柱伏図記号"）が
+			// 切断の直下を映すのと同じ考え方で、筋かい・面材はその図の梁を下から支える階の
+			// ものが読みたい。最下階（1 階床伏図）には下の階が無いので何も載らない
+			// （最上階＝屋根の耐力壁も、その上の伏図が無いので伏図には出ない。軸組図には出る）。
+			if (i > 0)
+			{
+				const std::string shearLayer =
+					storyLayerName(i - 1, stories[i - 1].isTop, kLevelShearWall);
+				if (anyShearWallOnLayer(shearWalls, shearLayer))
+					layers.push_back(shearLayer);
+			}
 
 			if (!isTop)
 			{
