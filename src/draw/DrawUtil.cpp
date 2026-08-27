@@ -194,7 +194,7 @@ namespace HomeskzIfcImport::draw
 	{
 		try
 		{
-			VWParametricObj pio(object);
+			const VWParametricObj pio(object);
 			return PioParamString(pio, kFieldStructuralUse);
 		}
 		catch (...)
