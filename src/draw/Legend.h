@@ -146,6 +146,19 @@ namespace HomeskzIfcImport::draw
 	// 書き込んだソース定義とビューポートのフィルタ。したがって「流し込む」＝`ResetObject`。
 	void refreshLegends(const LegendCounts& counts);
 
+	// 置いた凡例のうち**いちばん広いものの幅**（用紙 mm）。凡例が 1 つも無い・どれも
+	// 測れないときは 0。
+	//
+	// **必ず refreshLegends の後に呼ぶ**——中身が流し込まれるまで凡例の大きさは決まらない。
+	// この実測が伏図の縮尺を決める（core::planLayout の legendWidth）。凡例の幅を定数で
+	// 決め打ちにしない理由は core/Layout.h「凡例の幅は定数で持たない」。
+	double measureLegendWidth(const LegendCounts& counts);
+
+	// 置いた凡例の**右上を topRight へ揃える**（用紙 mm。core::planLayout の
+	// legendTopRight）。**必ず refreshLegends の後に呼ぶ**——中身が流し込まれるまで大きさが
+	// 決まらないので、先に動かしても揃わない。
+	void placeLegends(const LegendCounts& counts, const core::Vec2& topRight);
+
 	// 置いた凡例のイメージの縮率を scale（1:75 なら 75）に合わせる。
 	//
 	// ★**必ず最後に呼ぶ**（refreshLegends の後）。「書く → 作り直す」の順にしたら、書いた
