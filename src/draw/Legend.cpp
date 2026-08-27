@@ -14,6 +14,8 @@
 //	  * gSDK->GetObjectInternalIndex(viewport)                           … フィルタ先の参照
 //	  * gSDK->TaggedDataCreate / TaggedDataSet          … フィルタとソース定義の書き込み
 //	  * gSDK->ResetObject                                                … 反映（中身の計算）
+//	  * gSDK->FirstMemberObj / NextObject / GetObjectTypeN … 凡例の中の「凡例イメージ」探し
+//	  * gSDK->Get/SetWorksheetImageScaleFactor            … 凡例イメージの縮率
 //
 //	**スタイルは扱わない**（draw/Legend.h の ★）。`SetPluginObjectStyle` も
 //	`UpdateStyledObjects` も呼ばない——スタイル無しで置くので、中身は `ResetObject` の時点で
@@ -31,6 +33,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -54,6 +57,16 @@ namespace HomeskzIfcImport::draw
 		// **中身が必要とする幅より少し広い程度**に留める。
 		constexpr double kBoxWidth = 40.0;
 
+		// 凡例イメージの節点型（`Kernel/API/Objs.TDType.h` の `kWorksheetImageNode` ＝ 56）。
+		// **凡例のイメージはワークシートのイメージと同じ節点型**で、SDK にはこの型のハンドルを
+		// 取る縮率の API がある（`Get/SetWorksheetImageScaleFactor`）。凡例専用の縮率 API が
+		// SDK に無いのはそのためらしい（docs/DEV-NOTES.md「グラフィック凡例」）。
+		constexpr short kWorksheetImageNode = 56;
+
+		// 凡例の中を辿る深さの上限。凡例 → セル → 枠・イメージ・文字、と数段で足りるが、
+		// 万一の循環で回り続けないよう歯止めを置く。
+		constexpr int kImageSearchDepth = 8;
+
 		// 見た目。凡例 PIO が内部で描く枠線・セルは**クラスでは制御できない**ので、
 		// オブジェクトの属性として直接与える（draw/Legend.h）。線の太さの単位はミル（1/1000
 		// インチ）で、5 ミル = 0.127mm を VW は 0.13mm と表示する。塗りパターン 0 = なし。
@@ -63,8 +76,9 @@ namespace HomeskzIfcImport::draw
 		// 生成した凡例の箱幅を与える。**例外を外へ出さない**——書けなくても凡例そのものは
 		// 図面に残るので、件数だけ counts へ積む。
 		//
-		// **イメージの縮率はここでも他のどこでも書かない**——レコードの `ImageScale` は
-		// 書けるのに実描画が 1:50 から動かない（draw/Legend.h 冒頭の「既知の制限」）。
+		// **イメージの縮率はここでは書かない**——レコードの `ImageScale` は書けるのに実描画が
+		// 1:50 から動かないので、凡例イメージそのものへ与える（applyLegendImageScale）。
+		// 凡例イメージは中身を流し込んで初めて作られるので、置き終えた後でなければ届かない。
 		void ApplyBoxWidth(MCObjectHandle object, LegendCounts& counts)
 		{
 			try
@@ -78,6 +92,45 @@ namespace HomeskzIfcImport::draw
 				// PIO として開けなかった（＝箱幅を書けていない）。幅 0 のまま潰れるだけで
 				// 凡例自体は図面に残るので、続ける。
 				++counts.paramsFailed;
+			}
+		}
+
+		// container の中を辿って凡例イメージ（kWorksheetImageNode）に縮率を与え、内訳を
+		// counts へ積む。**入れ子を辿るのは、凡例イメージがセルの中にある**ため——凡例 →
+		// セル → イメージという段数は VW の版で変わりうるので、型で見つけるまで潜る
+		// （depth が歯止め）。
+		void ScaleImagesIn(MCObjectHandle container, double scale, int depth, LegendCounts& counts)
+		{
+			if (container == nil || depth <= 0)
+				return;
+
+			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil;
+				 h = gSDK->NextObject(h))
+			{
+				if (gSDK->GetObjectTypeN(h) != kWorksheetImageNode)
+				{
+					ScaleImagesIn(h, scale, depth - 1, counts);
+					continue;
+				}
+
+				// **単位の取り決めが SDK ヘッダに無いので、いま入っている値から決める**
+				// （draw/Legend.h）。1 以上なら「分母」（1:50 なら 50）、1 未満なら「倍率」
+				// （0.02）と見なす。既定が 1:50 なのでどちらでも判別がつく。
+				const double before = gSDK->GetWorksheetImageScaleFactor(h);
+				const double target = (before >= 1.0) ? scale : 1.0 / scale;
+				if (gSDK->SetWorksheetImageScaleFactor(h, target, true))
+					++counts.imagesScaled;
+				else
+					++counts.imagesLeft;
+
+				// 診断へ持ち帰るのは**最初に見つけた 1 つ**の前後だけ（全部持っても同じ値が
+				// 並ぶだけで、単位と効き目は 1 組あれば分かる）。
+				if (counts.imageScaleTarget == 0.0)
+				{
+					counts.imageScaleBefore = before;
+					counts.imageScaleTarget = target;
+					counts.imageScaleAfter = gSDK->GetWorksheetImageScaleFactor(h);
+				}
 			}
 		}
 
@@ -272,10 +325,26 @@ namespace HomeskzIfcImport::draw
 		}
 	}
 
+	void applyLegendImageScale(LegendCounts& counts, double scale)
+	{
+		if (scale <= 0.0)
+			return;
+		for (const MCObjectHandle object : counts.objects)
+			ScaleImagesIn(object, scale, kImageSearchDepth, counts);
+	}
+
 	std::string legendDiagnostics(const LegendCounts& counts)
 	{
+		// **縮率は異常のときだけ知らせる。** 効いていれば図を見れば分かるが、「凡例イメージが
+		// 1 つも見つからない」「書いたのに読み戻しが違う」は絵からは分からない
+		// （draw/Legend.h の applyLegendImageScale）。
+		const bool imageScaleLeft = counts.drawn > 0 && counts.imagesScaled == 0;
+		const bool imageScaleOdd = counts.imageScaleTarget != 0.0 &&
+								   std::abs(counts.imageScaleAfter - counts.imageScaleTarget) >
+									   std::abs(counts.imageScaleTarget) * 1.0e-6;
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
-			counts.sourceLeft == 0 && counts.filterLeft == 0)
+			counts.sourceLeft == 0 && counts.filterLeft == 0 && !imageScaleLeft &&
+			counts.imagesLeft == 0 && !imageScaleOdd)
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -293,6 +362,25 @@ namespace HomeskzIfcImport::draw
 		if (counts.filterLeft > 0)
 			text += "ビューポートで絞れなかった凡例 " + std::to_string(counts.filterLeft) +
 					" 件（その図に無いシンボルも並びます）。";
+		if (imageScaleLeft)
+			text += "凡例イメージが見つからず、イメージの縮率は既定（1:50）のままです。";
+		if (counts.imagesLeft > 0)
+			text += "縮率を書けなかった凡例イメージ " + std::to_string(counts.imagesLeft) +
+					" 件（そのイメージだけ既定の 1:50 のままです）。";
+		if (imageScaleOdd)
+		{
+			// 与えた値と読み戻しが食い違う＝単位の見立て（分母か倍率か）を外している見込み。
+			// 3 つの値をそのまま出せば、実機のダイアログの表示と突き合わせて判定できる。
+			const auto num = [](double value)
+			{
+				std::array<char, 32> buffer{};
+				std::snprintf(buffer.data(), buffer.size(), "%g", value);
+				return std::string(buffer.data());
+			};
+			text += "凡例イメージの縮率が書いた値と違います（" + num(counts.imageScaleBefore) +
+					" → " + num(counts.imageScaleTarget) + " と書いて " +
+					num(counts.imageScaleAfter) + "）。";
+		}
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw
