@@ -315,6 +315,11 @@ namespace HomeskzIfcImport
 		//
 		// **VWFC で作ったオブジェクトはどのコンテナにも入らない**ので、AddObjectToContainer
 		// で PIO（host）へ入れ直す。外すと静かに消える（draw/Symbol.cpp の 1 番目の作法）。
+		//
+		// ★**SetClosed(true) を忘れない。** VWPolygon2DObj は既定で開いた折れ線なので、
+		// 頂点を回しただけでは**最後の頂点から最初の頂点へ戻る辺が描かれない**（実機で
+		// 筋かいの三角の斜辺が 1 本だけ消えた。M19）。閉じ／開きは他の作図と同じく
+		// 明示する（draw/Roof・draw/Member の作法）。
 		void AddPolygon2D(MCObjectHandle host, const std::vector<core::Vec2>& points,
 						  const char* className)
 		{
@@ -323,6 +328,7 @@ namespace HomeskzIfcImport
 			VWPolygon2DObj poly;
 			for (const core::Vec2& point : points)
 				poly.AddVertex(point.x, point.y);
+			poly.SetClosed(true);
 			const MCObjectHandle handle = poly.GetThisObject();
 			if (handle == nil)
 				return;
