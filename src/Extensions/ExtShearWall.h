@@ -24,6 +24,18 @@
 //	    見分ける（ハッチングそのものはクラス属性なので、テンプレート側が持つ。
 //	    プラグインは図面リソースを作らない。CLAUDE.md「既存の図面リソースを作らない」）。
 //
+//	【絵を全部止めない】パラメータが 1 つ読めなくても、描けるところまでは描く。
+//	伏図の記号は平面（両端の柱と内法）だけで決まるので、**高さが取れなくても描く**——
+//	高さの取りこぼしで図面から耐力壁が丸ごと消えるのは、記号だけでも出ているより悪い。
+//	3D（帯・面）は高さが要るのでそこだけ諦める。書き手側（draw/ShearWall）も同じ考え方で、
+//	1 つ書けなかったパラメータのために残り全部とリセットを飛ばさない。
+//
+//	【診断】dev ビルド（と HOMESKZ_IFC_TRACE 指定時）は、PIO が実際に持っている
+//	パラメータの一覧と、読めた内法・高さを診断ログへ書く（core/Trace）。パラメータが
+//	登録されていなければ setter も getter も黙って通らないので、症状からは
+//	「解析が値を出していない」のか「PIO に届いていない」のか区別できない——一覧を
+//	1 行残しておけば、そのどちらかがすぐ分かる。
+//
 //	【登録名はこのプラグイン固有にする】同種の PIO を提供する別のプラグインと同じ名前で
 //	登録すると、両方を入れた環境で衝突する。ユニバーサル名は "HomeskzShearWall"。
 //
@@ -50,7 +62,6 @@ namespace HomeskzIfcImport
 	constexpr const char* kParamShearBraceRise = "BraceRise"; // 筋かいが高くなる側（下記）
 	constexpr const char* kParamShearPanelSide = "PanelSide"; // 面材を設ける面（下記）
 	constexpr const char* kParamShearWidth = "BraceWidth";	  // 筋かいの見付け幅（mm）
-	constexpr const char* kParamShearThickness = "Thickness"; // 材厚（mm）
 	constexpr const char* kParamShearPanelOffset = "PanelOffset"; // 面材の中心面の離れ（mm）
 	constexpr const char* kParamShearClearSpan = "ClearSpan";	  // 控えの内法（mm）
 	constexpr const char* kParamShearBottom = "BottomHeight"; // 内法の下端（mm・レイヤ基準）

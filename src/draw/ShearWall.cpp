@@ -24,6 +24,7 @@
 #include "VWFC/VWObjects/VWParametricObj.h"
 
 #include <cstddef>
+#include <functional>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -58,7 +59,14 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// 耐力壁 1 枚を置く。PIO を作って両端とパラメータを書き、リセットまでできたら true。
-		bool PlaceOne(const core::ShearWallCommand& wall)
+		// 書けなかったパラメータの数を outUnwritten に足す。
+		//
+		// ★**パラメータは 1 つずつ独立に書き、1 つ書けなくても残りとリセットを諦めない。**
+		// VWFC の setter は名前が通らないと例外を投げるので、まとめて 1 つの try に入れると
+		// **最初の 1 つで残り全部と ResetObject までが飛ぶ**——PIO は図面に残るのに絵が
+		// 1 つも描かれない、という「命令はあるのに見えない」最悪の形になる（M19 のローカル
+		// 確認で実際にこうなった。docs/DEV-NOTES.md M19「パラメータが 1 つ通らないと…」）。
+		bool PlaceOne(const core::ShearWallCommand& wall, std::size_t& outUnwritten)
 		{
 			// 挿入点は始端（柱芯）。第 4 引数 bInsert=true でアクティブレイヤへ入れる。
 			// 線分 PIO なので、この後 SetLinearObjectPos で両端を与え直す。
@@ -71,37 +79,63 @@ namespace HomeskzIfcImport::draw
 			// 描かれる（面材の表裏と伏図の記号だけは PIO 側でクラスを分ける）。
 			SetClassByName(object, wall.drawClass);
 
+			bool placed = false;
+			std::size_t unwritten = 0;
 			try
 			{
 				VWParametricObj pio(object);
-				// **両端＝柱芯**。ここが耐力壁の「どの柱とどの柱の間か」を表す。
-				pio.SetLinearObjectPos(VWPoint2D(wall.start.x, wall.start.y),
-									   VWPoint2D(wall.end.x, wall.end.y));
 
-				pio.SetParamString(kParamShearTargetLayers, TXString(wall.targetLayers.c_str()));
-				pio.SetParamString(kParamShearKind, TXString(KindValue(wall.kind)));
-				pio.SetParamString(kParamShearBraceStyle,
-								   TXString(BraceStyleValue(wall.braceStyle)));
-				pio.SetParamString(
-					kParamShearBraceRise,
-					TXString(wall.braceRisesToEnd ? kShearRiseEnd : kShearRiseStart));
-				pio.SetParamString(kParamShearPanelSide, TXString(PanelSideValue(wall.panelSide)));
-				SetParamRealChecked(pio, TXString(kParamShearWidth), wall.width);
-				SetParamRealChecked(pio, TXString(kParamShearThickness), wall.thickness);
-				SetParamRealChecked(pio, TXString(kParamShearPanelOffset), wall.panelOffset);
-				SetParamRealChecked(pio, TXString(kParamShearClearSpan), wall.clearSpan);
-				SetParamRealChecked(pio, TXString(kParamShearBottom), wall.bottomHeight);
-				SetParamRealChecked(pio, TXString(kParamShearTop), wall.topHeight);
+				// 1 つ書くたびに握る。失敗は数えるだけで、次のパラメータへ進む。
+				const auto write = [&unwritten](const std::function<void()>& put)
+				{
+					try
+					{
+						put();
+					}
+					catch (...)
+					{
+						++unwritten;
+					}
+				};
+
+				// **両端＝柱芯**。ここが耐力壁の「どの柱とどの柱の間か」を表す。
+				write(
+					[&]
+					{
+						pio.SetLinearObjectPos(VWPoint2D(wall.start.x, wall.start.y),
+											   VWPoint2D(wall.end.x, wall.end.y));
+						placed = true;
+					});
+
+				const auto putString = [&](const char* name, const TXString& value)
+				{ write([&] { pio.SetParamString(name, value); }); };
+				const auto putReal = [&](const char* name, double value)
+				{ write([&] { SetParamRealChecked(pio, TXString(name), value); }); };
+
+				putString(kParamShearTargetLayers, TXString(wall.targetLayers.c_str()));
+				putString(kParamShearKind, TXString(KindValue(wall.kind)));
+				putString(kParamShearBraceStyle, TXString(BraceStyleValue(wall.braceStyle)));
+				putString(kParamShearBraceRise,
+						  TXString(wall.braceRisesToEnd ? kShearRiseEnd : kShearRiseStart));
+				putString(kParamShearPanelSide, TXString(PanelSideValue(wall.panelSide)));
+				putReal(kParamShearWidth, wall.width);
+				putReal(kParamShearPanelOffset, wall.panelOffset);
+				putReal(kParamShearClearSpan, wall.clearSpan);
+				putReal(kParamShearBottom, wall.bottomHeight);
+				putReal(kParamShearTop, wall.topHeight);
 			}
 			catch (...)
 			{
-				// パラメータを書けなくても PIO は図面に残る（絵が出ないだけ）。
+				// PIO のラッパーそのものを作れなかった（＝パラメトリックでない）。
 				return false;
 			}
 
-			// リセットでここが本体の Recalculate を呼び、耐力壁が描かれる。
+			outUnwritten += unwritten;
+
+			// **リセットは必ず呼ぶ。** ここが本体の Recalculate を呼び、耐力壁が描かれる。
+			// パラメータを取りこぼしていても、描けるところまでは描かせる。
 			gSDK->ResetObject(object);
-			return true;
+			return placed;
 		}
 	} // namespace
 
@@ -111,6 +145,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		std::size_t missingLayers = 0;
 		std::size_t failed = 0;
+		std::size_t unwritten = 0;
 
 		// **1 枚も作る前に、PIO の定義を「設定ダイアログを出さない」で作っておく。**
 		// CreateCustomObject は定義が無ければ既定（kCustomObjectPrefAlways）で作るので、
@@ -133,19 +168,23 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			if (PlaceOne(wall))
+			if (PlaceOne(wall, unwritten))
 				++drawn;
 			else
 				++failed;
 		}
 
-		if (outNote != nullptr && (missingLayers > 0 || failed > 0))
+		if (outNote != nullptr && (missingLayers > 0 || failed > 0 || unwritten > 0))
 		{
 			std::string text = "耐力壁の診断: ";
 			if (missingLayers > 0)
 				text += "配置先レイヤを用意できない命令 " + std::to_string(missingLayers) + " 件。";
 			if (failed > 0)
 				text += "オブジェクトを作れなかった命令 " + std::to_string(failed) + " 件。";
+			// **書けなかったパラメータは黙って捨てない。** PIO は図面に在るのに絵が痩せる
+			// （最悪は何も描かれない）という、いちばん切り分けにくい症状の唯一の手掛かり。
+			if (unwritten > 0)
+				text += "PIO に書けなかったパラメータ " + std::to_string(unwritten) + " 個。";
 			*outNote = std::move(text);
 		}
 
