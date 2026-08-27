@@ -23,8 +23,10 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
+#include <cmath>
 #include <cstddef>
 #include <functional>
+#include <numbers>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -70,8 +72,16 @@ namespace HomeskzIfcImport::draw
 		{
 			// 挿入点は始端（柱芯）。第 4 引数 bInsert=true でアクティブレイヤへ入れる。
 			// 線分 PIO なので、この後 SetLinearObjectPos で両端を与え直す。
-			const MCObjectHandle object = gSDK->CreateCustomObject(
-				TXString(kShearWallUniversalName), WorldPt(wall.start.x, wall.start.y), 0.0, true);
+			//
+			// ★**角度もここで与える**（始端→終端の向き）。線分 PIO として置けていれば
+			// 両端がそのまま向きを決めるので角度は要らないが、**万一 1 点のオブジェクトと
+			// して置かれても、ローカル +X が壁の向きに揃う**——PIO 側は絵をローカル座標で
+			// 描くので、この 1 つで「向きだけ違う」という直しにくい壊れ方を塞げる。
+			const double angle = std::atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) *
+								 180.0 / std::numbers::pi;
+			const MCObjectHandle object =
+				gSDK->CreateCustomObject(TXString(kShearWallUniversalName),
+										 WorldPt(wall.start.x, wall.start.y), angle, true);
 			if (object == nil)
 				return false;
 

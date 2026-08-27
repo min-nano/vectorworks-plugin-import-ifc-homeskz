@@ -502,17 +502,49 @@ namespace HomeskzIfcImport
 			// +Y が表側になる（ヘッダ「座標系」）。
 			VWTransformMatrix toWorld;
 			self.GetObjectToWorldTransform(toWorld);
-			VWPoint2D worldStart;
-			VWPoint2D worldEnd;
-			self.GetLinearObjectPos(worldStart, worldEnd);
-			const VWPoint2D localStart = toWorld.InversePointTransform(worldStart);
-			const VWPoint2D localEnd = toWorld.InversePointTransform(worldEnd);
-			const double startX = localStart.x;
-			const double endX = localEnd.x;
-			core::trace::log("  shearwall: axis local x=[" + Number(startX) + ", " + Number(endX) +
-							 "]");
-			if (endX - startX < core::kPointEps)
-				return kObjectEventNoErr; // 両端が同じ＝向きが決まらない
+
+			// ★**両端が取れないことを想定する。** 線分として置けていれば
+			// GetLinearObjectPos が 2 点を返すが、1 点のオブジェクトとして置かれていれば
+			// 例外か縮退した 2 点が返る。そこで諦めると図面から耐力壁が丸ごと消える
+			// （症状からは何が起きたか分からない）ので、**控えの内法から軸を組み直す**——
+			// 挿入点は始端の柱芯・ローカル +X は壁の向き（draw/ShearWall が角度も与える）
+			// なので、原点から控えの内法ぶん伸ばせば柱の探索窓としては十分に近い。
+			double startX = 0.0;
+			double endX = 0.0;
+			bool haveAxis = false;
+			try
+			{
+				VWPoint2D worldStart;
+				VWPoint2D worldEnd;
+				self.GetLinearObjectPos(worldStart, worldEnd);
+				const VWPoint2D localStart = toWorld.InversePointTransform(worldStart);
+				const VWPoint2D localEnd = toWorld.InversePointTransform(worldEnd);
+				startX = localStart.x;
+				endX = localEnd.x;
+				haveAxis = (endX - startX) >= core::kPointEps;
+				core::trace::log("  shearwall: 線分 world=[(" + Number(worldStart.x) + ", " +
+								 Number(worldStart.y) + "), (" + Number(worldEnd.x) + ", " +
+								 Number(worldEnd.y) + ")] local x=[" + Number(startX) + ", " +
+								 Number(endX) + "]");
+			}
+			catch (...)
+			{
+				core::trace::log("  shearwall: 線分の両端を読めない（1 点として置かれている）");
+			}
+
+			const double fallbackSpan = ParamReal(self, kParamShearClearSpan);
+			if (!haveAxis)
+			{
+				if (fallbackSpan <= 0.0)
+				{
+					core::trace::log("  shearwall: 軸も控えの内法も無いので描かない");
+					return kObjectEventNoErr;
+				}
+				startX = 0.0;
+				endX = fallbackSpan;
+				core::trace::log("  shearwall: 軸を控えの内法から組み直す x=[0, " + Number(endX) +
+								 "]");
+			}
 
 			// 軸組内法。**実物の柱から引くのが本筋**で、見つからないときだけ控えを使う。
 			double clearStart = 0.0;
@@ -522,15 +554,14 @@ namespace HomeskzIfcImport
 														  endX, clearStart, clearEnd);
 			if (!fromColumns)
 			{
-				const double span = ParamReal(self, kParamShearClearSpan);
-				if (span <= 0.0)
+				if (fallbackSpan <= 0.0)
 				{
 					core::trace::log("  shearwall: 柱も控えの内法も無いので描かない");
 					return kObjectEventNoErr;
 				}
 				const double centre = (startX + endX) / 2.0;
-				clearStart = centre - (span / 2.0);
-				clearEnd = centre + (span / 2.0);
+				clearStart = centre - (fallbackSpan / 2.0);
+				clearEnd = centre + (fallbackSpan / 2.0);
 			}
 
 			const double span = clearEnd - clearStart;
