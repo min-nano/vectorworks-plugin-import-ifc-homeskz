@@ -15,7 +15,8 @@
 //	  * gSDK->TaggedDataCreate / TaggedDataSet          … フィルタとソース定義の書き込み
 //	  * gSDK->ResetObject                                                … 反映（中身の計算）
 //	  * gSDK->FirstMemberObj / NextObject / GetObjectTypeN … 凡例の中の「凡例イメージ」探し
-//	  * gSDK->Get/SetWorksheetImageScaleFactor            … 凡例イメージの縮率
+//	  * VWViewportObj::GetScale / ApplyViewportScale       … 凡例イメージ（＝ビューポート）の縮尺
+//	  * gSDK->Get/SetWorksheetImageScaleFactor            … 版が変わって型 56 が現れたとき用
 //
 //	**スタイルは扱わない**（draw/Legend.h の ★）。`SetPluginObjectStyle` も
 //	`UpdateStyledObjects` も呼ばない——スタイル無しで置くので、中身は `ResetObject` の時点で
@@ -28,6 +29,7 @@
 #include "core/Document.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
+#include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
 #include <array>
@@ -57,10 +59,18 @@ namespace HomeskzIfcImport::draw
 		// **中身が必要とする幅より少し広い程度**に留める。
 		constexpr double kBoxWidth = 40.0;
 
-		// 凡例イメージの節点型（`Kernel/API/Objs.TDType.h` の `kWorksheetImageNode` ＝ 56）。
-		// **凡例のイメージはワークシートのイメージと同じ節点型**で、SDK にはこの型のハンドルを
-		// 取る縮率の API がある（`Get/SetWorksheetImageScaleFactor`）。凡例専用の縮率 API が
-		// SDK に無いのはそのためらしい（docs/DEV-NOTES.md「グラフィック凡例」）。
+		// **凡例イメージはビューポート**（`Kernel/API/Objs.TDType.h` の `kViewportNode` ＝ 122）。
+		// 実機で凡例の中身の節点型を数えて分かった——`0×102, 3×66, 10×6, 11×36, 86×42,
+		// 122×12`、すなわち枠（kBoxNode）・文字（kTextNode）・グループ・PIO と、**凡例 1 つに
+		// つき 1 つのビューポート**。`ovGraphicLegendViewType` / `BgRenderMode` /
+		// `FgRenderMode`（ObjectVariables.h）がビューポートの属性そのものなのとも符合する。
+		// したがって縮率＝**そのビューポートの縮尺**で、伏図のビューポートと同じ
+		// `ApplyViewportScale` で与えられる（docs/DEV-NOTES.md「グラフィック凡例」）。
+		constexpr short kViewportNode = 122;
+
+		// ワークシートのイメージ（`kWorksheetImageNode` ＝ 56）。**実機の凡例には 1 つも
+		// 入っていなかった**が、`Get/SetWorksheetImageScaleFactor` という縮率の API がこの型に
+		// 対してだけ用意されているので、版が変われば現れる余地がある。見つけたら扱う。
 		constexpr short kWorksheetImageNode = 56;
 
 		// 凡例の中を辿る深さの上限。凡例 → セル → 枠・イメージ・文字、と数段で足りるが、
@@ -95,7 +105,31 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// container の中を辿って凡例イメージ（kWorksheetImageNode）に縮率を与え、内訳を
+		// ビューポートの縮尺。読めなければ 0（診断へ出すだけなので、読めないことは咎めない）。
+		double ViewportScale(MCObjectHandle viewport)
+		{
+			try
+			{
+				return VWViewportObj(viewport).GetScale();
+			}
+			catch (...)
+			{
+				return 0.0;
+			}
+		}
+
+		// 診断へ持ち帰るのは**最初に見つけた 1 つ**の前後だけ（全部持っても同じ値が並ぶだけで、
+		// 効き目は 1 組あれば分かる）。
+		void RecordFirstScale(LegendCounts& counts, double before, double target, double after)
+		{
+			if (counts.imageScaleTarget != 0.0)
+				return;
+			counts.imageScaleBefore = before;
+			counts.imageScaleTarget = target;
+			counts.imageScaleAfter = after;
+		}
+
+		// container の中を辿って凡例イメージ（kViewportNode / kWorksheetImageNode）に縮率を与え、内訳を
 		// counts へ積む。**入れ子を辿るのは、凡例イメージがセルの中にある**ため——凡例 →
 		// セル → イメージという段数は VW の版で変わりうるので、型で見つけるまで潜る
 		// （depth が歯止め）。
@@ -112,6 +146,20 @@ namespace HomeskzIfcImport::draw
 				const short type = gSDK->GetObjectTypeN(h);
 				++counts.memberTypes[type];
 
+				if (type == kViewportNode)
+				{
+					// **中へは潜らない。** ビューポートの中身はそれが映している図そのもので、
+					// 潜ると設計レイヤ全体を歩くことになる（1 度やって、数え上げが
+					// `86×42` などと膨らんだ）。
+					const double before = ViewportScale(h);
+					if (ApplyViewportScale(h, scale))
+						++counts.imagesScaled;
+					else
+						++counts.imagesLeft;
+					RecordFirstScale(counts, before, scale, ViewportScale(h));
+					continue;
+				}
+
 				if (type != kWorksheetImageNode)
 				{
 					ScaleImagesIn(h, scale, depth - 1, counts);
@@ -127,15 +175,7 @@ namespace HomeskzIfcImport::draw
 					++counts.imagesScaled;
 				else
 					++counts.imagesLeft;
-
-				// 診断へ持ち帰るのは**最初に見つけた 1 つ**の前後だけ（全部持っても同じ値が
-				// 並ぶだけで、単位と効き目は 1 組あれば分かる）。
-				if (counts.imageScaleTarget == 0.0)
-				{
-					counts.imageScaleBefore = before;
-					counts.imageScaleTarget = target;
-					counts.imageScaleAfter = gSDK->GetWorksheetImageScaleFactor(h);
-				}
+				RecordFirstScale(counts, before, target, gSDK->GetWorksheetImageScaleFactor(h));
 			}
 		}
 
