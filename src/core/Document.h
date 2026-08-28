@@ -806,6 +806,9 @@ namespace HomeskzIfcImport::core
 	//                            面材では 0）
 	//   thickness              … 材厚（mm。筋かい＝壁面に直交する厚み、面材＝板厚）
 	//   panelOffset            … 面材の中心面が軸から離れる距離（mm・正）。筋かいでは 0
+	//     ※ thickness / panelOffset は**測った実物の値の記録**で、いまの作図には使わない。
+	//        軸組図は通り芯（＝壁芯）で切った断面なので、面材の面も筋かいの帯も**壁芯の
+	//        鉛直面**に置く（実物の位置へ外すと切断面の外に出て図から消える。M19）。
 	//   clearSpan              … IFC から測った内法（mm）。柱が見つからないときの控え
 	//   bottomHeight           … 軸組内法の下端（**配置先レイヤ平面からの相対 Z**。mm）
 	//   topHeight              … 同 上端

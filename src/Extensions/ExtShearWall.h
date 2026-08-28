@@ -24,9 +24,13 @@
 //	    その面材のある側）。壁芯には横架材（土台・胴差）が同じ太さで載っていて、記号を
 //	    芯へ置くと必ず重なるため。大きさ（MarkSize）は**内法に依らず一定**にする——
 //	    455mm 幅の壁だけ丸が小さくなって図が不揃いに見えた（実機確認で決めた）。
+//	    どちらも**用紙 mm で持ち、レイヤの縮尺を掛けて図面 mm にする**（＝縮尺非追従。
+//	    記号は実物の大きさを表さない表記なので、図の縮尺で伸び縮みさせない）。
 //	  * 軸組図（3D）… 筋かいは**形状どおりの帯**（実幅の帯を内法の矩形で切ったもの）、
-//	    面材は**内法を埋める矩形**。表と裏はクラスを分けてあり、**ハッチングの向き**で
-//	    見分ける（ハッチングそのものはクラス属性なので、テンプレート側が持つ。
+//	    面材は**内法を埋める矩形**。どちらも**壁芯の鉛直面に置く**——軸組図は通り芯
+//	    （＝壁芯）で切った断面で、切断面より奥は表示しないので、実物どおり板の位置へ
+//	    外すと表も裏も図から消える（実機で確認。M19）。表と裏はクラスを分けてあり、
+//	    **ハッチングの向き**で見分ける（ハッチングそのものはクラス属性なので、テンプレート側が持つ。
 //	    プラグインは図面リソースを作らない。CLAUDE.md「既存の図面リソースを作らない」）。
 //
 //	【絵を全部止めない】パラメータが 1 つ読めなくても、描けるところまでは描く。
@@ -67,12 +71,12 @@ namespace HomeskzIfcImport
 	constexpr const char* kParamShearBraceRise = "BraceRise"; // 筋かいが高くなる側（下記）
 	constexpr const char* kParamShearPanelSide = "PanelSide"; // 面材を設ける面（下記）
 	constexpr const char* kParamShearWidth = "BraceWidth";	  // 筋かいの見付け幅（mm）
-	constexpr const char* kParamShearPanelOffset = "PanelOffset"; // 面材の中心面の離れ（mm）
-	constexpr const char* kParamShearClearSpan = "ClearSpan";	  // 控えの内法（mm）
+	constexpr const char* kParamShearClearSpan = "ClearSpan"; // 控えの内法（mm）
 	constexpr const char* kParamShearBottom = "BottomHeight"; // 内法の下端（mm・レイヤ基準）
 	constexpr const char* kParamShearTop = "TopHeight";		  // 内法の上端（mm・同上）
-	constexpr const char* kParamShearMarkSize = "MarkSize"; // 伏図記号の大きさ（mm）
-	constexpr const char* kParamShearMarkOffset = "MarkOffset"; // 伏図記号の壁芯からの離れ（mm）
+	constexpr const char* kParamShearMarkSize = "MarkSize"; // 伏図記号の大きさ（**用紙 mm**）
+	constexpr const char* kParamShearMarkOffset =
+		"MarkOffset"; // 伏図記号の壁芯からの離れ（**用紙 mm**）
 
 	// 値。ユニバーサル名なので言語に依存しない綴りにする。
 	constexpr const char* kShearKindBrace = "Brace";	// 筋かい
@@ -85,20 +89,22 @@ namespace HomeskzIfcImport
 	constexpr const char* kShearSideBack = "Back";		// 裏
 	constexpr const char* kShearSideBoth = "Both";		// 両面
 
-	// 伏図記号の既定の大きさ（mm。三角記号の長さ・丸印の直径の基）。
+	// 伏図記号の既定の大きさ（**用紙 mm**。三角記号の長さ・丸印の直径の基）。
 	//
 	// **柱記号（ExtColumnMark）と違って寸法をパラメータで持つ。** あちらは記号を柱の
 	// **実断面**から描くので外から与える経路そのものが無かったが、耐力壁の伏図記号は
-	// 実物の寸法とは無関係な**表記**（三角・丸）で、実物から導ける大きさが無い。既定値は
-	// 1/50 の伏図で 6mm 前後になるように選んである（用紙の上で読める最小限）。
-	constexpr double kShearMarkSizeDefault = 300.0;
+	// 実物の寸法とは無関係な**表記**（三角・丸）で、実物から導ける大きさが無い。
+	//
+	// ★**単位は用紙 mm＝縮尺非追従。** PIO はレイヤの縮尺を掛けて図面 mm にするので、
+	// 縮尺を変えても紙の上の大きさは変わらない（実機確認で決めた。M19）。記号は実物の
+	// 大きさを表さない**表記**なので、図の縮尺で伸び縮みしては読めない。
+	constexpr double kShearMarkSizeDefault = 6.0;
 
-	// 伏図記号を壁芯からどれだけ離すか（mm）。壁芯には横架材（土台・胴差）が幅 105 前後で
-	// 載っているので、その半幅（〜52.5）を確実に外へ出る値を既定にする。1/50 の伏図で
-	// 4mm——横架材の縁から 3mm ほど空く見当。**面材ならその面材のある側**（表＝+Y・
-	// 裏＝−Y）へ、筋かいは表側へ寄せる（筋かいは壁の中心にあり寄せる根拠が無いので、
-	// 決定性のために片側へ固定する）。
-	constexpr double kShearMarkOffsetDefault = 200.0;
+	// 伏図記号を壁芯からどれだけ離すか（**用紙 mm**。こちらも縮尺非追従）。壁芯には
+	// 横架材（土台・胴差）が載っているので、その下へ潜らない位置へ寄せるための値。
+	// **面材ならその面材のある側**（表＝+Y・裏＝−Y）へ、筋かいは表側へ寄せる（筋かいは
+	// 壁の中心にあり寄せる根拠が無いので、決定性のために片側へ固定する）。
+	constexpr double kShearMarkOffsetDefault = 4.0;
 
 	// PIO が**自分で描いたジオメトリ**へ与えるクラス。PIO 本体のクラス（命令の drawClass。
 	// parse/StructuralClass の CLASS_BRACE / CLASS_SHEAR_PANEL）とは役割が違い、こちらは

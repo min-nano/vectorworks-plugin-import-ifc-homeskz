@@ -129,7 +129,6 @@ namespace HomeskzIfcImport::draw
 						  TXString(wall.braceRisesToEnd ? kShearRiseEnd : kShearRiseStart));
 				putString(kParamShearPanelSide, TXString(PanelSideValue(wall.panelSide)));
 				putReal(kParamShearWidth, wall.width);
-				putReal(kParamShearPanelOffset, wall.panelOffset);
 				putReal(kParamShearClearSpan, wall.clearSpan);
 				putReal(kParamShearBottom, wall.bottomHeight);
 				putReal(kParamShearTop, wall.topHeight);

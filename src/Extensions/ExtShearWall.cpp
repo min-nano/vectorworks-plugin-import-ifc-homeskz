@@ -73,9 +73,11 @@ namespace HomeskzIfcImport
 		constexpr double kMarkTriangleHeightRatio = 0.5;
 		constexpr double kMarkCircleDiameterRatio = 0.5;
 
-		// 面材の中心面の離れ（PanelOffset）が読めないときの見当（mm）。半柱幅（52.5）＋
-		// 板厚の半分ほど。**軸組図の面の位置にだけ効く**（伏図の記号は MarkOffset で置く）。
-		constexpr double kPanelOffsetFallback = 60.0;
+		// 記号を壁芯から離す距離の下限（図面 mm）。離れは**用紙 mm × レイヤ縮尺**で決まる
+		// ので、縮尺の大きい図（1/20 等）では図面上の離れが小さくなり、壁芯に載る横架材
+		// （幅 105 前後＝半幅 52.5）の下へまた潜ってしまう。記号が横架材と重ならないことは
+		// 大きさより優先なので、ここだけは図面 mm の下限を置く。
+		constexpr double kMarkOffsetMinimum = 100.0;
 
 		// PIO の定義。**関数ローカル static** で持つ理由は ExtMenu の menuDef と同じ
 		// （SDK の非ローカル static を名前空間スコープの初期化子から参照しない）。
@@ -150,22 +152,16 @@ namespace HomeskzIfcImport
 				 kFieldText,
 				 0},
 				{kParamShearWidth, {PLUGIN_VWR_ID, "shearWallWidth"}, "0", "0", kFieldCoordDisp, 0},
-				{kParamShearPanelOffset,
-				 {PLUGIN_VWR_ID, "shearWallPanelOffset"},
-				 "0",
-				 "0",
-				 kFieldCoordDisp,
-				 0},
 				{kParamShearMarkSize,
 				 {PLUGIN_VWR_ID, "shearWallMarkSize"},
-				 "300",
-				 "300",
+				 "6",
+				 "6",
 				 kFieldCoordDisp,
 				 0},
 				{kParamShearMarkOffset,
 				 {PLUGIN_VWR_ID, "shearWallMarkOffset"},
-				 "200",
-				 "200",
+				 "4",
+				 "4",
 				 kFieldCoordDisp,
 				 0},
 				{"", {}, "", "", kFieldText, 0}}; // 終端
@@ -208,6 +204,30 @@ namespace HomeskzIfcImport
 				}
 			}
 			return read ? value : fallback;
+		}
+
+		// この PIO が載っているレイヤの縮尺（1/50 なら 50）。読めなければ 1。
+		//
+		// **伏図記号の大きさ・離れは用紙 mm で持ち、これを掛けて図面 mm にする**（縮尺
+		// 非追従＝縮尺を変えても紙の上の大きさが変わらない）。VW でこれができる手掛かりは
+		// レイヤの縮尺だけで、ビューポートの縮尺はデザインレイヤ上の図形からは分からない
+		// （1 つの図形が別々の縮尺のビューポートに映るため）。縮尺が変わったときに描き直す
+		// 約束は OnInitXProperties の kObjXPropHasLayerScaleDeps が引き受ける。
+		double LayerScaleOf(MCObjectHandle object)
+		{
+			// PIO → 親（レイヤ）と辿る。入れ子の中に居ても数段でレイヤへ行き着くので、
+			// 空回りしないよう段数で打ち切る。
+			constexpr int kMaxDepth = 8;
+			MCObjectHandle handle = object;
+			for (int depth = 0; depth < kMaxDepth && handle != nil; ++depth)
+			{
+				double scale = 0.0;
+				gSDK->GetLayerScaleN(handle, scale);
+				if (scale > 0.0)
+					return scale;
+				handle = gSDK->ParentObject(handle);
+			}
+			return 1.0;
 		}
 
 		// ";" 区切りのレイヤ名を分解する（空の要素は落とす）。
@@ -409,14 +429,22 @@ namespace HomeskzIfcImport
 			}
 		}
 
-		// 軸組図の面材 1 枚（軸組内法を埋める矩形を、法線方向 offset の鉛直面へ置く）。
+		// 軸組図の面材 1 枚（軸組内法を埋める矩形）。
+		//
+		// ★**面は壁芯（法線方向 0）へ置く。実物の離れ（板の中心面）へは置かない。**
+		// 軸組図は**通り芯＝壁芯で切った断面ビューポート**で、切断面より奥は表示しない
+		// 設定にしてある（draw/Section）。実物どおり壁芯から 58.5mm 外した面は、表側は
+		// 手前で切り落とされ裏側は奥に隠れて、**どちらも図に出ない**（実機で確認。M19）。
+		// 筋かいの帯が出るのは offset 0＝切断面の上に載っているからで、面材も同じ扱いにする。
+		// 両面のときは 2 枚が同じ位置に重なるが、ハッチングは重ねて見える（クラス属性の
+		// 塗りが透ける場合。表裏の見分けはそこに委ねる）。
 		void AddPanelFace(MCObjectHandle host, double clearStart, double clearEnd, double bottom,
-						  double top, double offset, const char* className)
+						  double top, const char* className)
 		{
 			AddPolygon3D(host,
 						 {core::Vec2{clearStart, bottom}, core::Vec2{clearEnd, bottom},
 						  core::Vec2{clearEnd, top}, core::Vec2{clearStart, top}},
-						 offset, className);
+						 0.0, className);
 		}
 
 		// 診断ログ用の数値（小数 1 桁）。
@@ -511,6 +539,11 @@ namespace HomeskzIfcImport
 		// 印刷・書き出しの直前にリセットする。図面として外へ出る瞬間に必ず実物（柱の位置）と
 		// 一致させるための最後の砦（柱記号 PIO と同じ。docs/DEV-NOTES.md M12「追随の契機」）。
 		gSDK->SetObjectProperty(objectID, kObjXPropResetBeforeExport, true);
+
+		// **レイヤの縮尺が変わったら描き直す。** 伏図記号は用紙 mm × レイヤ縮尺で描く
+		// （Recalculate の LayerScaleOf）ので、縮尺が変われば描き直さないと紙の上の
+		// 大きさが変わってしまう。
+		gSDK->SetObjectProperty(objectID, kObjXPropHasLayerScaleDeps, true);
 		return result;
 	}
 
@@ -598,11 +631,18 @@ namespace HomeskzIfcImport
 			core::trace::log(std::string("  shearwall: 内法 ") + (fromColumns ? "柱から" : "控え") +
 							 " x=[" + Number(clearStart) + ", " + Number(clearEnd) + "]");
 
-			// 伏図記号の大きさと壁芯からの離れ。**大きさは内法で割らない**——455mm 幅の壁
-			// だけ記号が縮んで不揃いに見えたので一定にした（ヘッダ「伏図と軸組図で描き分ける」）。
-			const double markSize = ParamReal(self, kParamShearMarkSize, kShearMarkSizeDefault);
+			// 伏図記号の大きさと壁芯からの離れ。どちらも**用紙 mm**で持ち、レイヤの縮尺を
+			// 掛けて図面 mm にする（＝縮尺非追従。縮尺を変えても紙の上の大きさが変わらない）。
+			// **大きさは内法でも割らない**——455mm 幅の壁だけ記号が縮んで不揃いに見えた
+			// （ヘッダ「伏図と軸組図で描き分ける」）。
+			const double scale = LayerScaleOf(this->fhObject);
+			const double markSize =
+				ParamReal(self, kParamShearMarkSize, kShearMarkSizeDefault) * scale;
 			const double markOffset =
-				ParamReal(self, kParamShearMarkOffset, kShearMarkOffsetDefault);
+				std::max(ParamReal(self, kParamShearMarkOffset, kShearMarkOffsetDefault) * scale,
+						 kMarkOffsetMinimum);
+			core::trace::log("  shearwall: レイヤ縮尺 1/" + Number(scale) + " 記号 " +
+							 Number(markSize) + "mm 離れ " + Number(markOffset) + "mm");
 
 			// 軸組内法の高さ。**ここが取れなくても伏図の記号は描く**——記号は平面だけで
 			// 決まるので、高さの取りこぼしで図面から耐力壁が丸ごと消えるのは割に合わない
@@ -620,25 +660,23 @@ namespace HomeskzIfcImport
 				const std::string side = draw::PioParamString(self, kParamShearPanelSide);
 				const bool front = side != kShearSideBack;
 				const bool back = side == kShearSideBack || side == kShearSideBoth;
-				double offset = ParamReal(self, kParamShearPanelOffset);
-				if (offset <= 0.0)
-					offset = kPanelOffsetFallback;
 
-				// 伏図の記号は**実物の離れ（offset）ではなく MarkOffset で置く**。実物の
+				// 伏図の記号は**実物の離れ（板の中心面）ではなく MarkOffset で置く**。実物の
 				// 離れは半柱幅ほどしかなく、壁芯に載る横架材（土台・胴差）の下へ必ず潜る。
 				// 表・裏の区別は「どちら側へ寄せるか」で保たれる。
+				// 軸組図の面は逆に**壁芯へ置く**（AddPanelFace の doc コメント）。
 				if (front)
 				{
 					AddPanelMark(this->fhObject, clearStart, clearEnd, markOffset, markSize);
 					if (hasHeight)
-						AddPanelFace(this->fhObject, clearStart, clearEnd, bottom, top, offset,
+						AddPanelFace(this->fhObject, clearStart, clearEnd, bottom, top,
 									 kShearPanelFrontClass);
 				}
 				if (back)
 				{
 					AddPanelMark(this->fhObject, clearStart, clearEnd, -markOffset, markSize);
 					if (hasHeight)
-						AddPanelFace(this->fhObject, clearStart, clearEnd, bottom, top, -offset,
+						AddPanelFace(this->fhObject, clearStart, clearEnd, bottom, top,
 									 kShearPanelBackClass);
 				}
 				return kObjectEventNoErr;
