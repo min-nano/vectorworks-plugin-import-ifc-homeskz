@@ -18,6 +18,7 @@
 #include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWLayerObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
+#include "VWFC/VWObjects/VWSymbolDefObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
@@ -227,6 +228,18 @@ namespace HomeskzIfcImport::draw
 		VWPolygon2DObj polygon(vertices);
 		polygon.SetClosed(true); // スラブのプロファイルは閉じた外形
 		return polygon.GetThisObject();
+	}
+
+	bool HasSymbolDefinition(const std::string& name)
+	{
+		try
+		{
+			return VWSymbolDefObj::IsSymbolDefObject(TXString(name.c_str()));
+		}
+		catch (...)
+		{
+			return false;
+		}
 	}
 
 	void SetComponents(MCObjectHandle object, const std::vector<core::ComponentCommand>& components)

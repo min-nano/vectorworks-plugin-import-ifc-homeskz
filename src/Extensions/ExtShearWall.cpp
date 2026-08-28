@@ -15,8 +15,8 @@
 //	使用する SDK API は ci-debug の sdk-grep で実在を確認したもの:
 //	  gSDK->GetNamedLayer / FirstMemberObj / NextObject / GetObjectBounds / CreateLine /
 //	  CreateOval / AddObjectToContainer、VWParametricObj（GetLinearObjectPos /
-//	  GetObjectToWorldTransform / パラメータの読み）、VWPolygon2DObj、VWPolygon3D ＋
-//	  VWPolygon3DObj。自分自身のハンドルは基底 VWParametric_EventSink の protected メンバ
+//	  GetObjectToWorldTransform / パラメータの読み）、VWSymbolObj（伏図記号の配置）、
+//	  VWPolygon3D ＋ VWPolygon3DObj。自分自身のハンドルは基底 VWParametric_EventSink の protected メンバ
 //	  fhObject から取る（柱記号 PIO と同じ。ExtColumnMark.cpp 冒頭）。
 //
 //	【座標系】PIO のジオメトリは**PIO 自身のローカル座標**で持たれる。線分 PIO なので
@@ -42,8 +42,8 @@
 
 #include "VWFC/Math/VWPolygon3D.h"
 #include "VWFC/VWObjects/VWParametricObj.h"
-#include "VWFC/VWObjects/VWPolygon2DObj.h"
 #include "VWFC/VWObjects/VWPolygon3DObj.h"
+#include "VWFC/VWObjects/VWSymbolObj.h"
 
 #include <algorithm>
 #include <array>
@@ -65,13 +65,6 @@ namespace HomeskzIfcImport
 		// 端の柱とみなす軸方向の許容（mm）。柱芯は耐力壁の端点そのものなので本来 0 だが、
 		// 手で動かした耐力壁でも拾えるだけの余裕を取る。
 		constexpr double kColumnAlongTol = 300.0;
-
-		// 伏図記号の縦横比。三角記号は「壁と平行な脚＝MarkSize・壁に直交する脚＝その半分」、
-		// 丸印は「直径＝MarkSize の半分」で描く。**内法では割らない**——455mm 幅の壁だけ
-		// 記号が縮んで図が不揃いに見えたので、大きさは内法に依らず一定にした（M19 の実機
-		// 確認）。内法より長い三角だけは柱へはみ出すので、そのときだけ内法まで詰める。
-		constexpr double kMarkTriangleHeightRatio = 0.5;
-		constexpr double kMarkCircleDiameterRatio = 0.5;
 
 		// 記号を壁芯から離す距離の下限（図面 mm）。離れは**用紙 mm × レイヤ縮尺**で決まる
 		// ので、縮尺の大きい図（1/20 等）では図面上の離れが小さくなり、壁芯に載る横架材
@@ -152,12 +145,6 @@ namespace HomeskzIfcImport
 				 kFieldText,
 				 0},
 				{kParamShearWidth, {PLUGIN_VWR_ID, "shearWallWidth"}, "0", "0", kFieldCoordDisp, 0},
-				{kParamShearMarkSize,
-				 {PLUGIN_VWR_ID, "shearWallMarkSize"},
-				 "6",
-				 "6",
-				 kFieldCoordDisp,
-				 0},
 				{kParamShearMarkOffset,
 				 {PLUGIN_VWR_ID, "shearWallMarkOffset"},
 				 "4",
@@ -331,32 +318,6 @@ namespace HomeskzIfcImport
 			return haveStart && haveEnd && outEnd > outStart;
 		}
 
-		// 2D の閉じたポリゴンを PIO のジオメトリとして置く。
-		//
-		// **VWFC で作ったオブジェクトはどのコンテナにも入らない**ので、AddObjectToContainer
-		// で PIO（host）へ入れ直す。外すと静かに消える（draw/Symbol.cpp の 1 番目の作法）。
-		//
-		// ★**SetClosed(true) を忘れない。** VWPolygon2DObj は既定で開いた折れ線なので、
-		// 頂点を回しただけでは**最後の頂点から最初の頂点へ戻る辺が描かれない**（実機で
-		// 筋かいの三角の斜辺が 1 本だけ消えた。M19）。閉じ／開きは他の作図と同じく
-		// 明示する（draw/Roof・draw/Member の作法）。
-		void AddPolygon2D(MCObjectHandle host, const std::vector<core::Vec2>& points,
-						  const char* className)
-		{
-			if (points.size() < 3)
-				return;
-			VWPolygon2DObj poly;
-			for (const core::Vec2& point : points)
-				poly.AddVertex(point.x, point.y);
-			poly.SetClosed(true);
-			const MCObjectHandle handle = poly.GetThisObject();
-			if (handle == nil)
-				return;
-			gSDK->AddObjectToContainer(handle, host);
-			draw::SetClassByName(handle, className);
-			draw::SetAllAttributesByClass(handle);
-		}
-
 		// 壁面内の 2D 点列（x＝軸方向・y＝高さ）を、法線方向 offset の鉛直面へ置いた
 		// 3D ポリゴンとして PIO のジオメトリに加える。className が空ならクラスを与えない
 		// （PIO 本体のクラスがそのまま効く）。
@@ -381,30 +342,32 @@ namespace HomeskzIfcImport
 			}
 		}
 
-		// 伏図の筋かい記号 1 つ（**直角三角形**）。壁と平行な脚を y=offset の線に置き、
-		// 直角を**材が高くなる側**の端に立てるので、斜辺の傾きがそのまま筋かいの向き
-		// （足元→頂部）を表す。たすき掛けは risesToEnd を反転してもう 1 つ重ねる
-		// （同じ矩形の中で斜辺が交差する＝たすきに見える）。
+		// 伏図記号のシンボルを 1 つ置く（三角・丸。大きさと形はシンボル定義が持つ）。
 		//
-		// 置き場所は**内法の中央**。大きさが内法に依らないので、位置も内法に依らせない
-		// （端に寄せると、短い壁では柱の断面へ食い込む）。三角は**記号を寄せた側へさらに
-		// 外側**へ伸ばす（offset の符号に height を合わせる）ので、壁芯側へ戻って横架材と
-		// 重なることはない。
-		void AddBraceTriangle(MCObjectHandle host, double centre, double length, double height,
-							  double offset, bool risesToEnd)
+		// 【シンボルは置いただけでは図面に現れない】VWSymbolObj の構築子はレガシーの
+		// PlaceSymbol を包んでおり、できたインスタンスはどのコンテナにも入らない
+		// （M11 のアンカーボルトで切り分けた落とし穴。draw/Symbol.cpp 冒頭）。PIO の中では
+		// 配置先が PIO 自身（host）になる。**非 nil を成功判定に使わない**のも同じ理由で、
+		// 定義が無くても空でないハンドルが返る。
+		void PlaceMarkSymbol(MCObjectHandle host, const char* name, double x, double y)
 		{
-			const double half = length / 2.0;
-			const double foot = risesToEnd ? centre - half : centre + half;
-			const double head = risesToEnd ? centre + half : centre - half;
-			const double apex = offset + std::copysign(height, offset);
-			AddPolygon2D(
-				host, {core::Vec2{foot, offset}, core::Vec2{head, offset}, core::Vec2{head, apex}},
-				kShearMarkClass);
+			const TXString symbol(name);
+			const VWSymbolObj instance(symbol, VWPoint2D(x, y), 0.0);
+			const MCObjectHandle handle = instance.GetThisObject();
+			if (handle == nil || !VWSymbolObj::IsSymbolObject(handle, symbol))
+			{
+				core::trace::log(std::string("  shearwall: 伏図記号のシンボルを置けない（") + name +
+								 "）");
+				return;
+			}
+			gSDK->AddObjectToContainer(handle, host);
 		}
 
-		// 伏図の面材記号 1 つ。壁に平行な線と、その中央の丸印。
-		void AddPanelMark(MCObjectHandle host, double clearStart, double clearEnd, double offset,
-						  double size)
+		// 伏図の面材記号 1 つ。壁に平行な線と、その中央の丸（丸はシンボル）。
+		//
+		// **線だけはシンボルにできない**——長さが軸組内法で変わるため。線は PIO が引き、
+		// 記号の作図クラスを与える（シンボルの側の属性はシンボル定義が持つ）。
+		void AddPanelMark(MCObjectHandle host, double clearStart, double clearEnd, double offset)
 		{
 			const MCObjectHandle line =
 				gSDK->CreateLine(WorldPt(clearStart, offset), WorldPt(clearEnd, offset));
@@ -414,19 +377,7 @@ namespace HomeskzIfcImport
 				draw::SetAllAttributesByClass(line);
 			}
 
-			const double radius = size * kMarkCircleDiameterRatio / 2.0;
-			const double centre = (clearStart + clearEnd) / 2.0;
-			WorldRect bounds;
-			bounds.left = centre - radius;
-			bounds.right = centre + radius;
-			bounds.bottom = offset - radius;
-			bounds.top = offset + radius;
-			const MCObjectHandle circle = gSDK->CreateOval(bounds);
-			if (circle != nil)
-			{
-				draw::SetClassByName(circle, kShearMarkClass);
-				draw::SetAllAttributesByClass(circle);
-			}
+			PlaceMarkSymbol(host, kShearSymbolPanel, (clearStart + clearEnd) / 2.0, offset);
 		}
 
 		// 軸組図の面材 1 枚（軸組内法を埋める矩形）。
@@ -631,18 +582,15 @@ namespace HomeskzIfcImport
 			core::trace::log(std::string("  shearwall: 内法 ") + (fromColumns ? "柱から" : "控え") +
 							 " x=[" + Number(clearStart) + ", " + Number(clearEnd) + "]");
 
-			// 伏図記号の大きさと壁芯からの離れ。どちらも**用紙 mm**で持ち、レイヤの縮尺を
-			// 掛けて図面 mm にする（＝縮尺非追従。縮尺を変えても紙の上の大きさが変わらない）。
-			// **大きさは内法でも割らない**——455mm 幅の壁だけ記号が縮んで不揃いに見えた
-			// （ヘッダ「伏図と軸組図で描き分ける」）。
+			// 記号を壁芯からどれだけ離すか。**用紙 mm**で持ち、レイヤの縮尺を掛けて
+			// 図面 mm にする（＝縮尺非追従。記号そのものの大きさは用紙基準のシンボル定義が
+			// 持つので、ここで扱うのは置き場所だけ）。
 			const double scale = LayerScaleOf(this->fhObject);
-			const double markSize =
-				ParamReal(self, kParamShearMarkSize, kShearMarkSizeDefault) * scale;
 			const double markOffset =
 				std::max(ParamReal(self, kParamShearMarkOffset, kShearMarkOffsetDefault) * scale,
 						 kMarkOffsetMinimum);
-			core::trace::log("  shearwall: レイヤ縮尺 1/" + Number(scale) + " 記号 " +
-							 Number(markSize) + "mm 離れ " + Number(markOffset) + "mm");
+			core::trace::log("  shearwall: レイヤ縮尺 1/" + Number(scale) + " 記号の離れ " +
+							 Number(markOffset) + "mm");
 
 			// 軸組内法の高さ。**ここが取れなくても伏図の記号は描く**——記号は平面だけで
 			// 決まるので、高さの取りこぼしで図面から耐力壁が丸ごと消えるのは割に合わない
@@ -667,14 +615,14 @@ namespace HomeskzIfcImport
 				// 軸組図の面は逆に**壁芯へ置く**（AddPanelFace の doc コメント）。
 				if (front)
 				{
-					AddPanelMark(this->fhObject, clearStart, clearEnd, markOffset, markSize);
+					AddPanelMark(this->fhObject, clearStart, clearEnd, markOffset);
 					if (hasHeight)
 						AddPanelFace(this->fhObject, clearStart, clearEnd, bottom, top,
 									 kShearPanelFrontClass);
 				}
 				if (back)
 				{
-					AddPanelMark(this->fhObject, clearStart, clearEnd, -markOffset, markSize);
+					AddPanelMark(this->fhObject, clearStart, clearEnd, -markOffset);
 					if (hasHeight)
 						AddPanelFace(this->fhObject, clearStart, clearEnd, bottom, top,
 									 kShearPanelBackClass);
@@ -690,17 +638,17 @@ namespace HomeskzIfcImport
 				draw::PioParamString(self, kParamShearBraceStyle) == kShearBraceDouble;
 			const double width = ParamReal(self, kParamShearWidth);
 
-			// 伏図: 内法の中央へ直角三角形を 1 つ。たすき掛けは**同じ場所へ反転して重ねる**
-			// （斜辺が交差してたすきに見える）。記号は壁芯に載る横架材を避けて表側へ寄せ、
-			// 三角はそこからさらに外側（+Y）へ伸びる。
+			// 伏図: 内法の中央へ直角三角形のシンボルを 1 つ。傾きの向きでシンボルを選び、
+			// たすき掛けは**同じ場所へ 2 つ重ねる**（斜辺が交差してたすきに見える）。
+			// 記号は壁芯に載る横架材を避けて表側（+Y）へ寄せる。
 			const double markCentre = (clearStart + clearEnd) / 2.0;
-			const double markLength = std::min(markSize, span);
-			const double markHeight = markSize * kMarkTriangleHeightRatio;
-			AddBraceTriangle(this->fhObject, markCentre, markLength, markHeight, markOffset,
-							 risesToEnd);
+			PlaceMarkSymbol(this->fhObject,
+							risesToEnd ? kShearSymbolBraceRise : kShearSymbolBraceFall, markCentre,
+							markOffset);
 			if (doubleBrace)
-				AddBraceTriangle(this->fhObject, markCentre, markLength, markHeight, markOffset,
-								 !risesToEnd);
+				PlaceMarkSymbol(this->fhObject,
+								risesToEnd ? kShearSymbolBraceFall : kShearSymbolBraceRise,
+								markCentre, markOffset);
 
 			// 軸組図: 形状どおりの帯。見付け幅が取れないと帯にならないので、そのときは
 			// 伏図の記号だけで済ませる。

@@ -28,11 +28,111 @@
 #include <functional>
 #include <numbers>
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
+		// ------------------------------------------------------------------
+		// 伏図記号のシンボル定義（PIO はこれを名前で置くだけ。Extensions/ExtShearWall.h）
+		//
+		// 【なぜプラグインが図面リソースを作るのか】記号は**利用者が描き直せる形**で
+		// 図面に持たせたい、というのがご要望（M19 の実機確認）。シンボルにしておけば
+		// 1 か所直せば全部の耐力壁に効き、用紙基準（ovSymDefPageBased）にできるので
+		// **縮尺非追従**にもなる。CLAUDE.md「既存の図面リソースを作らない」の唯一の例外で、
+		// 　* **無いときだけ作る**（在れば利用者が描き直したものとして触らない）、
+		// 　* 作るのは伏図記号のシンボル 3 つだけ、
+		// という 2 つの縛りを守る。
+
+		// 記号の寸法（**用紙 mm**）。用紙基準シンボルなので、この数字がそのまま紙の上の
+		// 大きさになる（1/50 でも 1/100 でも同じ）。1/50 の伏図で読める最小限として、
+		// 三角は 6×3mm・丸は直径 3mm にしてある。
+		constexpr double kMarkTriangleLength = 6.0; // 壁と平行な脚（＝斜辺の水平投影）
+		constexpr double kMarkTriangleHeight = 3.0; // 壁に直交する脚（＝直角を立てる側）
+		constexpr double kMarkCircleDiameter = 3.0;
+
+		// シンボル定義を「用紙基準」（＝レイヤ縮尺に追従しない）にするオブジェクト変数。
+		// Kernel/API/ObjectVariables.h の ovSymDefPageBased（130。"whether the symbol will
+		// have a constant page size"）。ci-debug の sdk-grep で確認済み。
+		constexpr short kOVSymDefPageBased = 130;
+
+		// 図形 1 つをシンボル定義の中へ入れ、記号の作図クラスを与える。
+		// **VWFC で作った図形はどのコンテナにも入らない**ので AddObjectToContainer で
+		// 入れ直す（draw/Symbol.cpp の 1 番目の作法）。gSDK->Create* で作ったものは
+		// アクティブレイヤに入っているので、同じ呼び出しで定義へ移す。
+		void AddToSymbol(MCObjectHandle shape, MCObjectHandle definition)
+		{
+			if (shape == nil || definition == nil)
+				return;
+			gSDK->AddObjectToContainer(shape, definition);
+			SetClassByName(shape, kShearMarkClass);
+			SetAllAttributesByClass(shape);
+		}
+
+		// 筋かい記号（直角三角形）1 つ分の頂点。挿入点は**壁と平行な脚の中央**で、
+		// 三角は +Y 側（記号を寄せた側のさらに外）へ立つ。直角は「材が高くなる側」の端に
+		// 置くので、斜辺の傾きがそのまま筋かいの向き（足元→頂部）を表す。
+		std::vector<core::Vec2> BraceTrianglePoints(bool rise)
+		{
+			const double half = kMarkTriangleLength / 2.0;
+			const double foot = rise ? -half : half;
+			const double head = rise ? half : -half;
+			return {core::Vec2{foot, 0.0}, core::Vec2{head, 0.0},
+					core::Vec2{head, kMarkTriangleHeight}};
+		}
+
+		// シンボル定義を 1 つ用意する。**在れば何もしない**（利用者が描き直したものを
+		// 上書きしない）。作れたら true。
+		bool EnsureSymbol(const char* name, const std::function<void(MCObjectHandle)>& build)
+		{
+			if (HasSymbolDefinition(name))
+				return true;
+
+			// CreateSymbolDefinition は名前を書き換えることがある（別のリソースと衝突した
+			// とき）。書き換えられたら PIO が名前で見つけられないので、使わない。
+			TXString created(name);
+			const MCObjectHandle definition = gSDK->CreateSymbolDefinition(created);
+			if (definition == nil || created != TXString(name))
+				return false;
+
+			build(definition);
+			// **用紙基準＝縮尺非追従**（この 1 行がご要望の本体）。
+			gSDK->SetObjectVariable(definition, kOVSymDefPageBased,
+									TVariableBlock(static_cast<Boolean>(true)));
+			return true;
+		}
+
+		// 伏図記号のシンボル 3 つを用意する。作れなかった数を返す（診断へ出す）。
+		std::size_t EnsureMarkSymbols()
+		{
+			std::size_t failed = 0;
+			const auto ensure =
+				[&failed](const char* name, const std::function<void(MCObjectHandle)>& build)
+			{
+				if (!EnsureSymbol(name, build))
+					++failed;
+			};
+
+			ensure(kShearSymbolBraceRise, [](MCObjectHandle definition)
+				   { AddToSymbol(CreateClosedPolygon(BraceTrianglePoints(true)), definition); });
+			ensure(kShearSymbolBraceFall, [](MCObjectHandle definition)
+				   { AddToSymbol(CreateClosedPolygon(BraceTrianglePoints(false)), definition); });
+			ensure(kShearSymbolPanel,
+				   [](MCObjectHandle definition)
+				   {
+					   const double radius = kMarkCircleDiameter / 2.0;
+					   WorldRect bounds;
+					   bounds.left = -radius;
+					   bounds.right = radius;
+					   bounds.bottom = -radius;
+					   bounds.top = radius;
+					   AddToSymbol(gSDK->CreateOval(bounds), definition);
+				   });
+			return failed;
+		}
+
+		// ------------------------------------------------------------------
 		// 種別・掛け方・面の値をパラメータの綴りへ落とす（Extensions/ExtShearWall.h の
 		// kShear* が唯一の定義）。
 		const char* KindValue(core::ShearWallKind kind)
@@ -155,6 +255,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingLayers = 0;
 		std::size_t failed = 0;
 		std::size_t unwritten = 0;
+		std::size_t missingSymbols = 0;
 
 		// **1 枚も作る前に、PIO の定義を「設定ダイアログを出さない」で作っておく。**
 		// CreateCustomObject は定義が無ければ既定（kCustomObjectPrefAlways）で作るので、
@@ -162,6 +263,12 @@ namespace HomeskzIfcImport::draw
 		// draw/ColumnMark.cpp）。
 		if (!document.shearWalls.empty())
 			gSDK->DefineCustomObject(TXString(kShearWallUniversalName), kCustomObjectPrefNever);
+
+		// **伏図記号のシンボルも 1 枚も置く前に用意する**（無ければ登録・在れば触らない。
+		// 上記「伏図記号のシンボル定義」）。作れなくても耐力壁自体は置く——記号が出ない
+		// だけで、内法も軸組図も読めるほうがまし。
+		if (!document.shearWalls.empty())
+			missingSymbols = EnsureMarkSymbols();
 
 		for (const core::ShearWallCommand& wall : document.shearWalls)
 		{
@@ -183,7 +290,8 @@ namespace HomeskzIfcImport::draw
 				++failed;
 		}
 
-		if (outNote != nullptr && (missingLayers > 0 || failed > 0 || unwritten > 0))
+		if (outNote != nullptr &&
+			(missingLayers > 0 || failed > 0 || unwritten > 0 || missingSymbols > 0))
 		{
 			std::string text = "耐力壁の診断: ";
 			if (missingLayers > 0)
@@ -194,6 +302,10 @@ namespace HomeskzIfcImport::draw
 			// （最悪は何も描かれない）という、いちばん切り分けにくい症状の唯一の手掛かり。
 			if (unwritten > 0)
 				text += "PIO に書けなかったパラメータ " + std::to_string(unwritten) + " 個。";
+			// 記号のシンボルを用意できないと、伏図に三角も丸も出ない（耐力壁自体は在る）。
+			if (missingSymbols > 0)
+				text += "登録できなかった伏図記号のシンボル " + std::to_string(missingSymbols) +
+						" 個。";
 			*outNote = std::move(text);
 		}
 
