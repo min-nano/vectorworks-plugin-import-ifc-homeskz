@@ -208,6 +208,7 @@ namespace HomeskzIfcImport
 #endif
 			if (!core::trace::open(core::trace::defaultLogPath("HomeskzIfcImport.log")))
 				return;
+			core::trace::log(std::string("build: ") + VW_BUILD_BRANCH + " / " + VW_BUILD_VERSION);
 			core::trace::log("import: " + ifcPath);
 		}
 
@@ -246,8 +247,14 @@ namespace HomeskzIfcImport
 			// ここは変わらない（docs/DEV-NOTES.md M15「完了文言の集約」）。
 			// 診断ログが有効ならその場所も本文へ載せる（一時ディレクトリは macOS では
 			// /var/folders/… という当てられない場所なので、毎回ここで案内する）。
-			const std::string body =
-				parse::formatImportResult(document, drawn, core::trace::path());
+			std::string body = parse::formatImportResult(document, drawn, core::trace::path());
+			// **どのビルドの結果かを本文に書く。** 実機確認を何度も往復する開発では、
+			// 出てきたダイアログが**どのコミットのものか**が分からないと切り分けが崩れる
+			// （実際に、前のビルドの出力を新しいビルドのものと取り違えて 1 往復無駄にした）。
+			// 出すのは診断ログと同じ条件——dev ビルドか HOMESKZ_IFC_TRACE 指定時だけで、
+			// ふだんの完了ダイアログには出ない。
+			if (!core::trace::path().empty())
+				body += std::string("\nビルド: ") + VW_BUILD_BRANCH + " / " + VW_BUILD_VERSION;
 			core::trace::log("done");
 			core::trace::close();
 			return body;
