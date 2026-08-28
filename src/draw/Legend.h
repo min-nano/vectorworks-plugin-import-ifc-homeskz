@@ -93,6 +93,7 @@
 #include "core/Document.h"
 
 #include <cstddef>
+#include <map>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -121,6 +122,12 @@ namespace HomeskzIfcImport::draw
 		double imageScaleBefore = 0.0;
 		double imageScaleTarget = 0.0;
 		double imageScaleAfter = 0.0;
+
+		// 凡例の中を辿って見えた**節点型の内訳**（型 → 件数）。凡例イメージが 1 つも
+		// 見つからなかったときに診断へ出す——**実機でしか中身の構造は分からない**ので、
+		// 「何が入っていたか」を持ち帰らないと次に何を探せばよいか決められない
+		// （実際に 1 度、型 56 で空振りした）。
+		std::map<short, std::size_t> memberTypes;
 
 		// 置いた凡例そのもの。**中身が流し込まれた後に大きさが決まる**ので、幅の実測と
 		// 位置合わせは**置き終えてから**まとめて行う（下記）。

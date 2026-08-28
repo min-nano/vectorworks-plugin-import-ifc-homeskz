@@ -107,7 +107,12 @@ namespace HomeskzIfcImport::draw
 			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil;
 				 h = gSDK->NextObject(h))
 			{
-				if (gSDK->GetObjectTypeN(h) != kWorksheetImageNode)
+				// **見えた型は全部数える。** 凡例イメージが 1 つも無かったときに、次に何を
+				// 探せばよいかを実機から持ち帰る唯一の手掛かりになる（draw/Legend.h）。
+				const short type = gSDK->GetObjectTypeN(h);
+				++counts.memberTypes[type];
+
+				if (type != kWorksheetImageNode)
 				{
 					ScaleImagesIn(h, scale, depth - 1, counts);
 					continue;
@@ -329,8 +334,22 @@ namespace HomeskzIfcImport::draw
 	{
 		if (scale <= 0.0)
 			return;
+
 		for (const MCObjectHandle object : counts.objects)
+		{
+			// **入口を 1 つに絞らない。** PIO の中身の入口は版によって 3 通りあり
+			// （draw/Tag の HeldTagLayout が同じ理由で 2 つ見ている）、加えて凡例は補助
+			// オブジェクトを何本もぶら下げている。どこに凡例イメージが居るか分からない
+			// うちは、辿れる先を全部辿る（見つけ次第どこであろうと縮率を与える）。
 			ScaleImagesIn(object, scale, kImageSearchDepth, counts);
+			ScaleImagesIn(gSDK->GetCustomObjectProfileGroup(object), scale, kImageSearchDepth,
+						  counts);
+			ScaleImagesIn(gSDK->GetCustomObjectProfileGroupInAux(object), scale, kImageSearchDepth,
+						  counts);
+			for (MCObjectHandle aux = gSDK->FirstAuxObject(object); aux != nil;
+				 aux = gSDK->NextObject(aux))
+				ScaleImagesIn(aux, scale, kImageSearchDepth, counts);
+		}
 	}
 
 	std::string legendDiagnostics(const LegendCounts& counts)
@@ -363,7 +382,27 @@ namespace HomeskzIfcImport::draw
 			text += "ビューポートで絞れなかった凡例 " + std::to_string(counts.filterLeft) +
 					" 件（その図に無いシンボルも並びます）。";
 		if (imageScaleLeft)
-			text += "凡例イメージが見つからず、イメージの縮率は既定（1:50）のままです。";
+		{
+			text += "凡例イメージが見つからず、イメージの縮率は既定（1:50）のままです";
+			if (counts.memberTypes.empty())
+			{
+				text += "（凡例の中身を 1 つも辿れませんでした）。";
+			}
+			else
+			{
+				// 型と件数をそのまま並べる。**多くても十数種類**なので全部出してよい。
+				text += "（凡例の中で見えた節点型: ";
+				bool first = true;
+				for (const auto& [type, count] : counts.memberTypes)
+				{
+					if (!first)
+						text += ", ";
+					first = false;
+					text += std::to_string(type) + "×" + std::to_string(count);
+				}
+				text += "）。";
+			}
+		}
 		if (counts.imagesLeft > 0)
 			text += "縮率を書けなかった凡例イメージ " + std::to_string(counts.imagesLeft) +
 					" 件（そのイメージだけ既定の 1:50 のままです）。";
