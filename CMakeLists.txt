@@ -284,6 +284,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/DrawUtil.cpp
 		src/draw/StructuralMember.cpp
 		src/draw/ProgressDialog.cpp
+		src/draw/ResultDialog.cpp
 		src/draw/ExecuteDocument.cpp
 		src/draw/Grid.cpp
 		src/draw/Story.cpp
