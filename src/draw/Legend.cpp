@@ -110,6 +110,51 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
+#ifdef VW_DEV_BUILD
+		// 【一時計装 ── 縮率の欄が特定できたら消す】凡例のレコードの欄を 1 行に並べる。
+		//
+		// **なぜ要るか**: `ImageScale` へ 75 を書いて読み戻しも 75 なのに、OIP の
+		// 「イメージの縮率」は 1:50 のままで枠も 1:50 で描かれた（実機）。OIP には
+		// 「イメージの縮率」（ポップアップ）と「カスタム 1:」（数値）が**別々に**あり、
+		// `ImageScale` は後者らしい——**ポップアップが 1:50 を選んでいる限りそちらが勝つ**。
+		// そのポップアップの欄名が分からないと先へ進めないので、欄の名前と種別を一度だけ
+		// 実機から持ち帰る。値まで出すのは縮率がらみの欄だけ（長くなるため）。
+		std::string DumpRecordFields(MCObjectHandle object)
+		{
+			std::string text;
+			try
+			{
+				const VWParametricObj pio(object);
+				const size_t count = pio.GetParamsCount();
+				for (size_t i = 0; i < count; ++i)
+				{
+					const TXString name = pio.GetParamName(i);
+					const std::string plain = name.GetStdString();
+					if (!text.empty())
+						text += " ";
+					text += plain;
+					try
+					{
+						text += "/" + std::to_string(static_cast<int>(pio.GetParamStyle(name)));
+						if (plain.find("cale") != std::string::npos ||
+							plain.find("Scale") != std::string::npos)
+							text += "=" + pio.GetParamValue(name).GetStdString();
+					}
+					catch (...)
+					{
+						// 値を読めない欄（ボタン等）は名前と種別だけで足りる。
+						continue;
+					}
+				}
+			}
+			catch (...)
+			{
+				return {};
+			}
+			return text;
+		}
+#endif
+
 		// ビューポートの縮尺。読めなければ 0（診断へ出すだけなので、読めないことは咎めない）。
 		double ViewportScale(MCObjectHandle viewport)
 		{
@@ -423,6 +468,9 @@ namespace HomeskzIfcImport::draw
 			// ——戻っていれば枠だけ 1:50 に居残る（実機でその形を 1 度見ている）。
 			if (counts.recordScale == 0.0)
 			{
+#ifdef VW_DEV_BUILD
+				counts.recordFields = DumpRecordFields(object);
+#endif
 				try
 				{
 					counts.recordScale =
@@ -452,7 +500,8 @@ namespace HomeskzIfcImport::draw
 								   std::abs(counts.imageScaleTarget) * 1.0e-6;
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
 			counts.sourceLeft == 0 && counts.filterLeft == 0 && !imageScaleLeft &&
-			counts.imagesLeft == 0 && !imageScaleOdd && counts.recordLeft == 0 && !recordOdd)
+			counts.imagesLeft == 0 && !imageScaleOdd && counts.recordLeft == 0 && !recordOdd &&
+			counts.recordFields.empty())
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -510,6 +559,9 @@ namespace HomeskzIfcImport::draw
 					num(counts.imageScaleTarget) + " と書いて " + num(counts.recordScale) +
 					"）。セルの枠だけ縮率が合いません。";
 		}
+		// 【一時計装】dev ビルドでのみ埋まる（draw/Legend.h の recordFields）。
+		if (!counts.recordFields.empty())
+			text += "凡例レコードの欄: " + counts.recordFields + "。";
 		if (imageScaleOdd)
 		{
 			// 与えた値と読み戻しが食い違う＝単位の見立て（分母か倍率か）を外している見込み。
