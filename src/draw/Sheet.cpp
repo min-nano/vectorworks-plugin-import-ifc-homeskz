@@ -10,8 +10,9 @@
 //	なくシートレイヤ（＝用紙）へ直接置くので、置き方は draw/Legend が持つ。ここは
 //	ビューポートを仕上げた後にそれを呼ぶ。凡例は**スタイル無しで置く**ので、置いた後に
 //	スタイルを反映させる手当ては要らない。**イメージの縮率は用紙の割り付けが決めた縮尺**
-//	（core::planLayout の scale）に合わせる——渡す先は凡例 PIO のレコードではなく、凡例の中の
-//	「凡例イメージ」オブジェクト（draw/Legend.h の applyLegendImageScale）。
+//	（core::planLayout の scale）に合わせる——**縮率は 2 か所にある**（セルの枠を決める
+//	レコードと、中身を描く凡例イメージ＝ビューポート）ので、両方へ与える
+//	（draw/Legend.h の applyLegendImageScale）。
 //
 //	【シートレイヤとビューポートの手当ては draw/DrawUtil が持つ】シートレイヤの用意
 //	（PrepareSheetLayer）・表示レイヤの絞り込み・クラス表示・縮尺・図面タイトル/図番・更新
@@ -291,12 +292,12 @@ namespace HomeskzIfcImport::draw
 		// 図が仕上がったので**もう一度**中身を流し込み（凡例に並ぶのはそのシートの
 		// ビューポートに映るシンボルなので、縮尺を当て直した後の図で取り直す）、右上を揃える。
 		refreshLegends(legends);
-		placeLegends(legends, layout.legendTopRight);
 
-		// **縮率はいちばん最後に。** 縮率を与える先は凡例の中の「凡例イメージ」で、それは
-		// 中身を流し込んだときに作られるので、作り直しより前には存在しない
-		// （draw/Legend.h の applyLegendImageScale）。
+		// **縮率は位置合わせの前に。** 縮率はセルの枠の大きさを変える＝凡例そのものの大きさが
+		// 変わるので、先に動かすと右上が揃わない（applyLegendImageScale は中で作り直しを
+		// 1 回挟む。draw/Legend.h）。
 		applyLegendImageScale(legends, layout.scale);
+		placeLegends(legends, layout.legendTopRight);
 
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
