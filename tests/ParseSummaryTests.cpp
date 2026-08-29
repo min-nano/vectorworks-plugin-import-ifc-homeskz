@@ -228,7 +228,7 @@ TEST(format_import_result_flags_a_shortfall_as_a_problem)
 
 	CHECK(text.find("うまくいかなかったところがあります") != std::string::npos);
 	CHECK(text.find("描いたもの: 3/5 件") != std::string::npos);
-	CHECK(text.find("内訳と原因はログにあります") != std::string::npos);
+	CHECK(text.find("くわしい内訳と原因はログにあります") != std::string::npos);
 }
 
 TEST(format_import_result_flags_draw_diagnostics_as_a_problem)
@@ -360,6 +360,9 @@ TEST(format_import_result_reports_empty_document)
 	std::string const text = formatImportResult(Document{}, counts);
 
 	CHECK(text.find("見つかりませんでした") != std::string::npos);
+	// 「ホームズ君の IFC か」を疑う場面なので、ここでもログへ誘導する
+	// （何を探して何が無かったのかはログにしか無い）。
+	CHECK(text.find("ログを表示") != std::string::npos);
 }
 
 TEST(import_outcome_classifies_the_run)

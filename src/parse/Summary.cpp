@@ -333,9 +333,11 @@ namespace HomeskzIfcImport::parse
 		if (outcome.status != ImportStatus::Invalid && outcome.status != ImportStatus::Empty)
 			out << "\n※ " << undoLine(counts);
 
-		// 問題があったときだけ、どこを読めばよいかを指す（ログはこのダイアログの中で開ける）。
-		if (outcome.status == ImportStatus::Warning || outcome.status == ImportStatus::Invalid)
-			out << "\n\n内訳と原因はログにあります（下の「ログを表示」）。";
+		// 思ったとおりに終わらなかったときだけ、どこを読めばよいかを指す（ログはこの
+		// ダイアログの中で開ける）。**「取り込める要素が無い」も含める**——ホームズ君の
+		// IFC かどうかを疑う場面で、何を探して何が無かったのかはログにしか無い。
+		if (outcome.status != ImportStatus::Success && outcome.status != ImportStatus::Cancelled)
+			out << "\n\nくわしい内訳と原因はログにあります（下の「ログを表示」）。";
 
 		// ログの場所は**必ず出す**——不具合の報告でファイルごと添えたいときの唯一の手掛かりで、
 		// 一時ディレクトリは macOS では `/var/folders/…/T/` のような当てられない場所にある。
