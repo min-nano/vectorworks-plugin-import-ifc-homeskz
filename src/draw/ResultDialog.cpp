@@ -142,10 +142,9 @@ namespace HomeskzIfcImport::draw
 				VWDialog::OnInitializeContent();
 				if (fHasLog)
 				{
-					// **中身はここで流し込む**（コントロールができているのはこの時点から）。
-					fLog.SetText(fLogText);
 					// 既定は畳んでおく。ふだん読むのは本文の数行だけで、ログは
-					// 「困ったときに開くもの」（M19）。
+					// 「困ったときに開くもの」（M19）。**中身は開いたときに流し込む**
+					// （下の OnToggleLog）。
 					this->ShowControl(kLogID, false);
 				}
 				fShown = true;
@@ -158,6 +157,13 @@ namespace HomeskzIfcImport::draw
 				if (!fHasLog)
 					return;
 				fLogVisible = !fLogVisible;
+				if (fLogVisible && !fLogLoaded)
+				{
+					// **開いたときに読み込む。** 畳んだままなら流し込まない（ログは
+					// 数十行とはいえ、要らない仕事はしない）。
+					fLog.SetText(fLogText);
+					fLogLoaded = true;
+				}
 				this->ShowControl(kLogID, fLogVisible);
 				fToggle.SetControlText(fLogVisible ? "ログを隠す" : "ログを表示");
 			}
@@ -179,6 +185,7 @@ namespace HomeskzIfcImport::draw
 			TXString fLogText;
 			bool fHasLog = false;
 			bool fLogVisible = false;
+			bool fLogLoaded = false;
 			bool fShown = false;
 		};
 
