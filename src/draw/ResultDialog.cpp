@@ -30,7 +30,7 @@
 #include "PluginPrefix.h"
 #include "draw/ResultDialog.h"
 
-#include <memory>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -79,12 +79,9 @@ namespace HomeskzIfcImport::draw
 		public:
 			CImportResultDialog(const std::string& title, const std::vector<std::string>& body,
 								const std::string& log)
-				: fTitle(title.c_str()), fLog(kLogID), fToggle(kToggleID), fLogText(log.c_str()),
-				  fHasLog(!log.empty())
+				: fTitle(title.c_str()), fBody(body), fLog(kLogID), fToggle(kToggleID),
+				  fLogText(log.c_str()), fHasLog(!log.empty())
 			{
-				TControlID id = kFirstBodyID;
-				for (const std::string& line : body)
-					fBody.push_back(BodyLine{std::make_unique<VWStaticTextCtrl>(id++), line});
 			}
 			~CImportResultDialog() override = default;
 
@@ -104,22 +101,29 @@ namespace HomeskzIfcImport::draw
 
 				// 本文は上から 1 行ずつ。空行はコントロールを作らず、**次の行の行間**で表す
 				// （空の静的テキストは高さを持たない環境がある）。
+				TControlID id = kFirstBodyID;
 				VWControl* previous = nullptr;
 				short pendingSpacing = 0;
-				for (BodyLine& line : fBody)
+				for (const std::string& line : fBody)
 				{
-					if (line.text.empty())
+					if (line.empty())
 					{
 						pendingSpacing = 1; // 次の行の前に 1 行ぶん空ける
 						continue;
 					}
-					if (!line.control->CreateControl(this, line.text.c_str()))
+					// **deque に直接作る。** 行数は本文で変わるので器が要るが、vector だと
+					// 追加のたびに既存の要素が動いてしまい（ダイアログは生存中ずっと
+					// コントロールのアドレスを持つ）、unique_ptr で逃がすと今度は静的解析が
+					// 「漏れるかもしれない」と誤検出する。deque は追加しても既存の要素を
+					// 動かさないので、どちらの問題も出ない。
+					VWStaticTextCtrl& control = fLines.emplace_back(id++);
+					if (!control.CreateControl(this, line.c_str()))
 						return false;
 					if (previous == nullptr)
-						this->AddFirstGroupControl(line.control.get());
+						this->AddFirstGroupControl(&control);
 					else
-						this->AddBelowControl(previous, line.control.get(), 0, pendingSpacing);
-					previous = line.control.get();
+						this->AddBelowControl(previous, &control, 0, pendingSpacing);
+					previous = &control;
 					pendingSpacing = 0;
 				}
 				if (previous == nullptr)
@@ -176,15 +180,9 @@ namespace HomeskzIfcImport::draw
 			DEFINE_EVENT_DISPATH_MAP;
 
 		private:
-			// 本文の 1 行と、それを出す静的テキスト（空行は control を使わない）。
-			struct BodyLine
-			{
-				std::unique_ptr<VWStaticTextCtrl> control;
-				std::string text;
-			};
-
 			TXString fTitle;
-			std::vector<BodyLine> fBody;
+			std::vector<std::string> fBody; // 本文（改行で切った 1 行ずつ）
+			std::deque<VWStaticTextCtrl> fLines; // その行を出す静的テキスト（空行の分は作らない）
 			VWEditTextCtrl fLog;
 			VWPushButtonCtrl fToggle;
 			TXString fLogText;
