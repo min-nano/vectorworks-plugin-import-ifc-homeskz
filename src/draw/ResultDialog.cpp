@@ -150,6 +150,11 @@ namespace HomeskzIfcImport::draw
 				fShown = true;
 			}
 
+			// DDX（コントロールと変数の結び付け）は使わない——このダイアログは値を集めず、
+			// 結果を見せるだけ。**それでも空実装が要る**（VWDialog の純粋仮想。SDK 自身の
+			// CStandardInfoDlg も同じく空で潰している）。
+			void OnDDXInitialize() override {}
+
 			// 「ログを表示 / 隠す」。**ダイアログの高さが追随するか**は実機で確かめる
 			// （ShowControl はレイアウトへ効くはずだが、SDK ヘッダには書かれていない）。
 			void OnToggleLog(TControlID /*controlID*/, VWDialogEventArgs& /*eventArg*/)

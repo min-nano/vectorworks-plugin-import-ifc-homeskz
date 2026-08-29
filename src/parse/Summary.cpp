@@ -184,8 +184,6 @@ namespace HomeskzIfcImport::parse
 		// フェーズごとの内訳は診断ログの行頭にある経過ミリ秒が持つ。
 		std::string formatDuration(double seconds)
 		{
-			if (seconds < 0.0)
-				return {};
 			std::ostringstream out;
 			if (seconds >= 60.0)
 			{
@@ -314,9 +312,9 @@ namespace HomeskzIfcImport::parse
 		{
 			out << (info.fileName.empty() ? "\n\n" : "\n")
 				<< "描いたもの: " << formatCount(outcome.placed, outcome.commands, "件");
-			const std::string duration = formatDuration(info.seconds);
-			if (info.seconds > 0.0 && !duration.empty())
-				out << " / 所要 " << duration;
+			// 所要が分からない（0）なら出さない。
+			if (info.seconds > 0.0)
+				out << " / 所要 " << formatDuration(info.seconds);
 		}
 
 		// **その場で操作が要ることだけ**を書き足す（Summary.h「例外として残す 2 行」）。
@@ -406,9 +404,8 @@ namespace HomeskzIfcImport::parse
 		std::ostringstream out;
 		out << "=== 結果 ===\n";
 		out << "結果: " << statusWord(outcome.status) << "\n";
-		const std::string duration = formatDuration(seconds);
-		if (seconds > 0.0 && !duration.empty())
-			out << "所要: " << duration << "\n";
+		if (seconds > 0.0)
+			out << "所要: " << formatDuration(seconds) << "\n";
 		out << "描いたもの: " << formatCount(outcome.placed, outcome.commands, "件") << "\n";
 
 		// 要素ごとの内訳。**命令の無い要素は行ごと出さない**（無い物の「0 件」は読む側の

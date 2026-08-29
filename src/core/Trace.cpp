@@ -164,18 +164,16 @@ namespace HomeskzIfcImport::core::trace
 		// localtime_r）。素の localtime は MSVC が C4996 を出し、無 SDK ライブラリは
 		// 警告をエラー扱いにするので、場合分けをここへ閉じ込める（Trace.h）。
 #if defined(_MSC_VER)
-		if (localtime_s(&local, &now) != 0)
-			return {};
+		const bool ok = localtime_s(&local, &now) == 0;
 #else
-		if (localtime_r(&now, &local) == nullptr)
-			return {};
+		const bool ok = localtime_r(&now, &local) != nullptr;
 #endif
 		std::array<char, 32> buffer{};
-		// strftime は書けなければ 0 を返す（そのときは空文字＝見出しに時刻を出さない）。
+		// 時刻を取れなければ書式化もしない。strftime も入り切らなければ 0 を返すので、
+		// **どちらの失敗も「書けた長さ 0」＝空文字**に畳んで 1 本の戻りにする
+		// （失敗ごとに return を分けると、まず起きない経路がテストで通らない行になる）。
 		const std::size_t written =
-			std::strftime(buffer.data(), buffer.size(), "%Y-%m-%d %H:%M:%S", &local);
-		if (written == 0)
-			return {};
+			ok ? std::strftime(buffer.data(), buffer.size(), "%Y-%m-%d %H:%M:%S", &local) : 0;
 		return {buffer.data(), written};
 	}
 

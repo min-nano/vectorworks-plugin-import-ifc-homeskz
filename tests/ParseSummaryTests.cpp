@@ -431,6 +431,16 @@ TEST(format_log_header_names_the_build_time_and_file)
 	CHECK(text.find("12.3 MB") != std::string::npos);
 }
 
+TEST(format_log_header_scales_the_file_size)
+{
+	// 大きさは桁に合わせて読める形にする（「12876543 バイト」では大小が掴めない）。
+	CHECK(formatLogHeader(BuildInfo{}, "a.ifc", 3ULL * 1024ULL * 1024ULL, "").find("3.0 MB") !=
+		  std::string::npos);
+	CHECK(formatLogHeader(BuildInfo{}, "a.ifc", 2048ULL, "").find("2.0 KB") != std::string::npos);
+	CHECK(formatLogHeader(BuildInfo{}, "a.ifc", 512ULL, "").find("512 バイト") !=
+		  std::string::npos);
+}
+
 TEST(format_log_header_fills_unknown_fields)
 {
 	// 素性が分からなくても行は落とさない（「無い」ことも情報なので黙らない）。
@@ -492,6 +502,34 @@ TEST(format_log_result_shows_shortfall_notes_and_records)
 	CHECK(text.find("記録:\n  伏図の割り付け") != std::string::npos);
 	// 所要が分からない（0）ときは行ごと出さない。
 	CHECK(text.find("所要:") == std::string::npos);
+}
+
+TEST(format_log_result_reports_an_empty_document)
+{
+	// 取り込める要素が 1 つも無かった取り込み（ホームズ君以外の IFC・空のファイル）。
+	// 内訳は無いが、**結末はログにも残す**——報告で「何も起きなかった」と言われたときに、
+	// 解析まで進んで 0 件だったのか、その手前で止まったのかを分けられる。
+	DrawCounts counts;
+	counts.valid = true;
+	std::string const text = formatLogResult(Document{}, counts, 0.5);
+	CHECK(text.find("結果: 対象なし") != std::string::npos);
+	CHECK(text.find("描いたもの: 0 件") != std::string::npos);
+	CHECK(text.find("所要: 0.5 秒") != std::string::npos);
+	CHECK(text.find("内訳:") == std::string::npos);
+}
+
+TEST(format_log_result_indents_multi_line_notes)
+{
+	// 描画側の説明は要素ごとに 1 行ずつ積まれる（draw/ExecuteDocument）。ログでは 2 字
+	// 下げて並べ、**空行は落とす**（積み方の都合で混じっても箇条書きが崩れない）。
+	DrawCounts counts;
+	counts.valid = true;
+	counts.members = 3;
+	counts.columns = 2;
+	counts.diagnostics = "1 行目\n\n2 行目";
+
+	std::string const text = formatLogResult(sampleDocument(), counts, 1.0);
+	CHECK(text.find("注意:\n  1 行目\n  2 行目\n") != std::string::npos);
 }
 
 TEST(format_log_result_reports_cancel_and_invalid)
