@@ -229,6 +229,10 @@ namespace HomeskzIfcImport::parse
 
 		// 「取り消し」がどこまで効くか（判断材料は描画側が置く。core::DrawCounts の
 		// undoArmed / undoPartial）。図形を 1 つでも描いたときだけ意味がある。
+		//
+		// **ダイアログに出すのは例外の 2 つだけ**（下の needsUndoWarning）。「取り消し」
+		// コマンドが有効なら取り消せるのは当たり前で、わざわざ書くとかえって読む量が増える。
+		// ログには常に残す——後から「戻せたはずでは」を確かめられるようにするため。
 		std::string undoLine(const core::DrawCounts& counts)
 		{
 			// **1 行に収める。** 但し書き（何が戻らないか）は README とログの内訳に譲る——
@@ -238,6 +242,14 @@ namespace HomeskzIfcImport::parse
 			if (counts.undoPartial)
 				return "「取り消し」で戻るのは、今回新しく作ったレイヤの分だけです。";
 			return "「取り消し」1 回で元に戻せます。";
+		}
+
+		// ダイアログで断りが要るか。**普通に 1 回で戻せるなら黙る**——メニューの
+		// 「取り消し」が効くのは当然だから。戻せない・一部しか戻らないのは当然ではないので
+		// 伝える（間違えたときの戻し方が変わる）。
+		bool needsUndoWarning(const core::DrawCounts& counts)
+		{
+			return !counts.undoArmed || counts.undoPartial;
 		}
 
 		// 結末の 1 行目。**ここだけ読めば終わったかどうかが分かる**ようにする。
@@ -326,9 +338,10 @@ namespace HomeskzIfcImport::parse
 		// docs/DEV-NOTES.md「レイヤ・ストーリ・重ね順」）。黙って誤った絵を見せない。
 		if (counts.sheets + counts.sections > 0)
 			out << "\n\n※ 伏図・軸組図はビューポートを 1 回「更新」してください。";
-		// 図形を 1 つでも描いたなら、ユーザーは「間違えたら取り消せばいい」と考えるのが
-		// 自然なので、そのとおりに戻せるのかを 1 行で伝える。
-		if (outcome.status != ImportStatus::Invalid && outcome.status != ImportStatus::Empty)
+		// 取り消しの効き方は**例外のときだけ**伝える（needsUndoWarning）。1 回で戻せるのは
+		// 当たり前なので書かない。
+		if (outcome.status != ImportStatus::Invalid && outcome.status != ImportStatus::Empty &&
+			needsUndoWarning(counts))
 			out << "\n※ " << undoLine(counts);
 
 		// 思ったとおりに終わらなかったときだけ、どこを読めばよいかを指す（ログはこの

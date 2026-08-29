@@ -115,7 +115,9 @@ namespace HomeskzIfcImport::parse
 	//
 	// 例外として残す 2 行は、どちらも**その場で操作が要る**もの:
 	//   * 伏図・軸組図を作ったなら「1 回更新してください」（黙ると誤った絵を見せる）
-	//   * 図形を描いたなら「取り消し」がどこまで効くか（間違えたときの戻し方）
+	//   * 「取り消し」が普通に効かないとき——戻せない／新しく作ったレイヤの分しか戻らない
+	//     （間違えたときの戻し方が変わる。**1 回で戻せるときは黙る**——「取り消し」が
+	//     効くのは当たり前で、書くと読む量が増えるだけ。ログには常に残す）
 	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts,
 								   const ImportInfo& info = {});
 

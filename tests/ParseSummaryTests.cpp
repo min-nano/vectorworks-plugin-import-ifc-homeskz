@@ -310,20 +310,19 @@ TEST(format_import_result_points_at_the_log)
 	CHECK(formatImportResult(sampleDocument(), counts).find("ログ: ") == std::string::npos);
 }
 
-TEST(format_import_result_tells_how_far_undo_reaches)
+TEST(format_import_result_warns_only_when_undo_falls_short)
 {
-	// 図形を描いたなら**取り消しがどこまで効くか**を必ず 1 行で伝える（ユーザーは
-	// 「間違えたら取り消せばいい」と考えるのが自然なので、戻せる／一部だけ／戻せないの
-	// 区別を黙らない。判断材料は描画側が置く。core::DrawCounts）。
+	// **1 回で戻せるなら黙る**——メニューの「取り消し」が効くのは当たり前で、書くと
+	// かえって読む量が増える。戻せない／一部しか戻らないのは当然ではないので伝える
+	// （間違えたときの戻し方が変わる。判断材料は描画側が置く。core::DrawCounts）。
 	DrawCounts counts;
 	counts.valid = true;
 	counts.members = 3;
 	counts.columns = 2;
 
-	// (1) undo イベントを張れた＝1 回で戻せる。
+	// (1) undo イベントを張れた＝1 回で戻せる。断りは要らない。
 	counts.undoArmed = true;
-	CHECK(formatImportResult(sampleDocument(), counts).find("「取り消し」1 回で元に戻せます") !=
-		  std::string::npos);
+	CHECK(formatImportResult(sampleDocument(), counts).find("取り消し") == std::string::npos);
 
 	// (2) 取り込み前から在ったレイヤへも描いた＝その分は戻らない。
 	counts.undoPartial = true;
@@ -340,6 +339,20 @@ TEST(format_import_result_tells_how_far_undo_reaches)
 	DrawCounts empty;
 	empty.valid = true;
 	CHECK(formatImportResult(Document{}, empty).find("取り消し") == std::string::npos);
+}
+
+TEST(format_log_result_always_records_how_far_undo_reaches)
+{
+	// **ログには常に残す**——ダイアログから外した「1 回で戻せる」も、後から
+	// 「戻せたはずでは」を確かめるときの手掛かりになる。
+	DrawCounts counts;
+	counts.valid = true;
+	counts.members = 3;
+	counts.columns = 2;
+	counts.undoArmed = true;
+
+	CHECK(formatLogResult(sampleDocument(), counts, 1.0).find("取り消し: 「取り消し」1 回で") !=
+		  std::string::npos);
 }
 
 TEST(format_import_result_reports_invalid_document)
