@@ -100,26 +100,23 @@ namespace HomeskzIfcImport::parse
 	// より優先する（中止したのに「問題あり」と言われると、原因を探しに行ってしまう）。
 	ImportOutcome importOutcome(const core::Document& document, const core::DrawCounts& counts);
 
-	// 完了ダイアログに載せる、命令セットの外側の事実。
-	struct ImportInfo
-	{
-		std::string fileName; // 取り込んだファイル名（空なら行を出さない）
-		double seconds = 0.0; // 所要時間（0 以下なら行を出さない）
-		std::string logPath;  // 診断ログの場所（空なら行を出さない）
-	};
-
 	// **インポート完了ダイアログの本文**（M19）。読むのは「どのファイルを・成功したのか・
-	// 問題はあったのか」の 3 つだけで済むよう短く保つ——要素ごとの内訳や原因はログにあり、
-	// ダイアログのログ欄から読める。**ここに一覧を戻さない**（読まれないものを毎回見せると、
-	// 肝心の「問題あり」が埋もれる）。
+	// 問題はあったのか」の 3 つだけで済むよう短く保つ——**件数も所要時間もログにある**ので
+	// ここには出さない（描けた数はうまくいっているときには読む必要が無く、うまくいって
+	// いないときはその数だけでは足りない）。**一覧も戻さない**（読まれないものを毎回
+	// 見せると、肝心の「問題あり」が埋もれる）。fileName は取り込んだファイル名
+	// （空なら行を出さない）。
 	//
 	// 例外として残す 2 行は、どちらも**その場で操作が要る**もの:
 	//   * 伏図・軸組図を作ったなら「1 回更新してください」（黙ると誤った絵を見せる）
 	//   * 「取り消し」が普通に効かないとき——戻せない／新しく作ったレイヤの分しか戻らない
 	//     （間違えたときの戻し方が変わる。**1 回で戻せるときは黙る**——「取り消し」が
 	//     効くのは当たり前で、書くと読む量が増えるだけ。ログには常に残す）
+	//
+	// **ログの場所もここには出さない。** ログ自身の見出しが持つ（formatLogHeader）ので、
+	// ダイアログの「ログを表示」を開けば 1 行目の近くで読める。
 	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts,
-								   const ImportInfo& info = {});
+								   const std::string& fileName = {});
 
 	// インポートが例外で中断したときのダイアログ本文。detail は例外の説明
 	// （std::exception::what()。分からなければ空）で、空なら「原因不明」として出す。
@@ -128,7 +125,7 @@ namespace HomeskzIfcImport::parse
 	// フェーズ境界（Extensions/ExtMenu の DoInterface）で必ず受け止め、ユーザーへ
 	// 1 通のエラーダイアログとして見せる（docs/DEV-NOTES.md M15「例外処理」）。文言はここに置
 	// いて無 SDK でテストする（完了文言と同じ理由）。
-	std::string formatImportError(const std::string& detail, const ImportInfo& info = {});
+	std::string formatImportError(const std::string& detail, const std::string& fileName = {});
 
 	// ------------------------------------------------------------------------
 	// 診断ログの本文（M19「短い完了・厚いログ」）
@@ -149,8 +146,14 @@ namespace HomeskzIfcImport::parse
 	// 「どのリビジョンを・いつ・どのファイルに対して動かしたか」なので、その 3 つを頭に置く
 	// （docs/DEV-NOTES.md M19）。startedAt は壁時計（core::trace::localTimestamp）、
 	// bytes は対象ファイルの大きさ（0 なら出さない）。
+	//
+	// logPath は**このログ自身の置き場所**（core::trace::path。書けなかったなら空）。
+	// **ダイアログではなくここに書く**——場所を知りたいのはログを見ようとしたときだけで、
+	// そのときログはもう目の前にある。書けなかったときは「ファイルは無い」と明示する
+	// （黙ると、出ていないログを探しに行かせる）。
 	std::string formatLogHeader(const BuildInfo& build, const std::string& ifcPath,
-								unsigned long long bytes, const std::string& startedAt);
+								unsigned long long bytes, const std::string& startedAt,
+								const std::string& logPath = {});
 
 	// **診断ログの結果**。結末・所要時間・要素ごとの内訳（描けた数／命令数）・描画側の注意・
 	// 平常の記録（用紙の割り付け等）・取り消しの効き方を、この順に並べる。完了ダイアログから

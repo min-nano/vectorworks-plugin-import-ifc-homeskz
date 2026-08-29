@@ -309,7 +309,7 @@ namespace HomeskzIfcImport::parse
 	} // namespace
 
 	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts,
-								   const ImportInfo& info)
+								   const std::string& fileName)
 	{
 		const ImportOutcome outcome = importOutcome(document, counts);
 
@@ -317,17 +317,10 @@ namespace HomeskzIfcImport::parse
 		out << statusHeadline(outcome.status);
 
 		// 「どのファイルを取り込んだのか」は、図面を何度も取り込む使い方では毎回の関心事。
-		if (!info.fileName.empty())
-			out << "\n\nファイル: " << info.fileName;
-		// 描いた総数は 1 行だけ。**要素ごとの内訳はログにある**（M19）。
-		if (outcome.status != ImportStatus::Invalid && outcome.status != ImportStatus::Empty)
-		{
-			out << (info.fileName.empty() ? "\n\n" : "\n")
-				<< "描いたもの: " << formatCount(outcome.placed, outcome.commands, "件");
-			// 所要が分からない（0）なら出さない。
-			if (info.seconds > 0.0)
-				out << " / 所要 " << formatDuration(info.seconds);
-		}
+		// **件数と所要時間は出さない**——うまくいっているときには読む必要が無く、うまく
+		// いっていないときはその数だけでは足りない。どちらもログにある（M19）。
+		if (!fileName.empty())
+			out << "\n\nファイル: " << fileName;
 
 		// **その場で操作が要ることだけ**を書き足す（Summary.h「例外として残す 2 行」）。
 		//
@@ -345,35 +338,29 @@ namespace HomeskzIfcImport::parse
 			out << "\n※ " << undoLine(counts);
 
 		// 思ったとおりに終わらなかったときだけ、どこを読めばよいかを指す（ログはこの
-		// ダイアログの中で開ける）。**「取り込める要素が無い」も含める**——ホームズ君の
-		// IFC かどうかを疑う場面で、何を探して何が無かったのかはログにしか無い。
+		// ダイアログの中で開ける。場所はログ自身の見出しにある）。**「取り込める要素が
+		// 無い」も含める**——ホームズ君の IFC かどうかを疑う場面で、何を探して何が
+		// 無かったのかはログにしか無い。
 		if (outcome.status != ImportStatus::Success && outcome.status != ImportStatus::Cancelled)
 			out << "\n\nくわしい内訳と原因はログにあります（下の「ログを表示」）。";
-
-		// ログの場所は**必ず出す**——不具合の報告でファイルごと添えたいときの唯一の手掛かりで、
-		// 一時ディレクトリは macOS では `/var/folders/…/T/` のような当てられない場所にある。
-		if (!info.logPath.empty())
-			out << "\n\nログ: " << info.logPath;
 		return out.str();
 	}
 
-	std::string formatImportError(const std::string& detail, const ImportInfo& info)
+	std::string formatImportError(const std::string& detail, const std::string& fileName)
 	{
 		std::ostringstream out;
 		out << "インポート中に予期しないエラーが発生したため、途中で中断しました。\n"
 			   "そこまでに描いたオブジェクトは図面に残っています"
 			   "（要らなければ「取り消し」で戻せます）。";
-		if (!info.fileName.empty())
-			out << "\n\nファイル: " << info.fileName;
+		if (!fileName.empty())
+			out << "\n\nファイル: " << fileName;
 		// 原因の手掛かりは**必ず出す**。ネイティブの異常は再現条件が分からなくなりがちで、
 		// ここで捨てるとユーザーからは「黙って途中で止まった」としか見えない。
-		out << (info.fileName.empty() ? "\n\n" : "\n")
+		out << (fileName.empty() ? "\n\n" : "\n")
 			<< "詳細: " << (detail.empty() ? std::string("原因不明") : detail);
 		// ログの**最終行**が「どのフェーズまで進んでいたか」で、その直後が原因箇所になる
 		// （core/Trace.h）。
 		out << "\n\nどこまで進んでいたかはログにあります（下の「ログを表示」）。";
-		if (!info.logPath.empty())
-			out << "\nログ: " << info.logPath;
 		return out.str();
 	}
 
@@ -382,7 +369,8 @@ namespace HomeskzIfcImport::parse
 	// ------------------------------------------------------------------------
 
 	std::string formatLogHeader(const BuildInfo& build, const std::string& ifcPath,
-								unsigned long long bytes, const std::string& startedAt)
+								unsigned long long bytes, const std::string& startedAt,
+								const std::string& logPath)
 	{
 		const auto orUnknown = [](const std::string& value)
 		{ return value.empty() ? std::string("不明") : value; };
@@ -406,6 +394,13 @@ namespace HomeskzIfcImport::parse
 		const std::string size = formatBytes(bytes);
 		if (!size.empty())
 			out << "（" << size << "）";
+		// **このログ自身の置き場所。** ダイアログには出さない（場所を知りたいのはログを
+		// 見ようとしたときだけで、そのときログはもう目の前にある）。書けなかったなら
+		// 「ファイルは無い」と明示する——黙ると、出ていないログを探しに行かせる。
+		out << "\nログ: "
+			<< (logPath.empty() ? std::string("（ファイルへは書けませんでした。この欄の内容を"
+											  "コピーしてください）")
+								: logPath);
 		return out.str();
 	}
 

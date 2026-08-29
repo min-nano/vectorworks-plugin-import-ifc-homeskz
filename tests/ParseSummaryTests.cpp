@@ -192,25 +192,23 @@ namespace
 TEST(format_import_result_is_short_and_names_the_file)
 {
 	// **完了ダイアログは短く保つ**（M19）。読むのは「どのファイルを・成功したのか・
-	// 問題はあったのか」の 3 つで、要素ごとの内訳はログにある。
+	// 問題はあったのか」の 3 つで、**件数も所要時間も要素ごとの内訳もログにある**。
 	DrawCounts counts;
 	counts.valid = true;
 	counts.members = 3;
 	counts.columns = 2;
 
-	ImportInfo info;
-	info.fileName = "安藤邸.ifc";
-	info.seconds = 71.4;
-
-	std::string const text = formatImportResult(sampleDocument(), counts, info);
+	std::string const text = formatImportResult(sampleDocument(), counts, "安藤邸.ifc");
 
 	CHECK(text.find("取り込みが完了しました。") != std::string::npos);
 	CHECK(text.find("ファイル: 安藤邸.ifc") != std::string::npos);
-	// 描いた数は**総数 1 行だけ**。要素ごとの行は出さない。
-	CHECK(text.find("描いたもの: 5 件") != std::string::npos);
-	CHECK(text.find("所要 1 分 11 秒") != std::string::npos);
+	// **件数も所要時間も要素の行も出さない**（どれもログにある）。
+	CHECK(text.find("描いたもの") == std::string::npos);
+	CHECK(text.find("所要") == std::string::npos);
 	CHECK(text.find("横架材") == std::string::npos);
 	CHECK(text.find("柱:") == std::string::npos);
+	// ログの場所も出さない（ログ自身の見出しが持つ）。
+	CHECK(text.find("ログ: ") == std::string::npos);
 	// 問題が無いのだから、ログを見に行かせる案内も出さない。
 	CHECK(text.find("ログを表示") == std::string::npos);
 }
@@ -227,8 +225,9 @@ TEST(format_import_result_flags_a_shortfall_as_a_problem)
 	std::string const text = formatImportResult(sampleDocument(), counts);
 
 	CHECK(text.find("うまくいかなかったところがあります") != std::string::npos);
-	CHECK(text.find("描いたもの: 3/5 件") != std::string::npos);
 	CHECK(text.find("くわしい内訳と原因はログにあります") != std::string::npos);
+	// 何件描けたかはログで読む（ダイアログには出さない）。
+	CHECK(text.find("3/5") == std::string::npos);
 }
 
 TEST(format_import_result_flags_draw_diagnostics_as_a_problem)
@@ -290,24 +289,6 @@ TEST(format_import_result_reports_cancel)
 
 	CHECK(text.find("キャンセルされたため、途中で中断しました") != std::string::npos);
 	CHECK(text.find("うまくいかなかった") == std::string::npos);
-}
-
-TEST(format_import_result_points_at_the_log)
-{
-	// **ログの場所は必ず出す**（不具合の報告でファイルごと添えるときの唯一の手掛かり。
-	// 一時ディレクトリは macOS では /var/folders/… という当てられない場所にある）。
-	DrawCounts counts;
-	counts.valid = true;
-	counts.members = 3;
-	counts.columns = 2;
-
-	ImportInfo info;
-	info.logPath = "/tmp/HomeskzIfcImport.log";
-	CHECK(formatImportResult(sampleDocument(), counts, info)
-			  .find("ログ: /tmp/HomeskzIfcImport.log") != std::string::npos);
-
-	// 開けなかったときは案内も出ない（存在しない場所を指さない）。
-	CHECK(formatImportResult(sampleDocument(), counts).find("ログ: ") == std::string::npos);
 }
 
 TEST(format_import_result_warns_only_when_undo_falls_short)
@@ -430,8 +411,8 @@ TEST(format_log_header_names_the_build_time_and_file)
 	build.branch = "claude/example";
 	build.platform = "macOS";
 
-	std::string const text =
-		formatLogHeader(build, "/Users/x/安藤邸.ifc", 12876543ULL, "2026-08-29 14:03:21");
+	std::string const text = formatLogHeader(build, "/Users/x/安藤邸.ifc", 12876543ULL,
+											 "2026-08-29 14:03:21", "/tmp/HomeskzIfcImport.log");
 
 	CHECK(text.find("日時: 2026-08-29 14:03:21") != std::string::npos);
 	CHECK(text.find("HomeskzIfcImportDev") != std::string::npos);
@@ -442,6 +423,17 @@ TEST(format_log_header_names_the_build_time_and_file)
 	// 対象は**フルパス**（同じ名前の IFC を版ごとに持つのが普通なので名前だけでは足りない）。
 	CHECK(text.find("対象: /Users/x/安藤邸.ifc") != std::string::npos);
 	CHECK(text.find("12.3 MB") != std::string::npos);
+	// **ログの置き場所はログ自身が持つ**（ダイアログには出さない。M19）。
+	CHECK(text.find("ログ: /tmp/HomeskzIfcImport.log") != std::string::npos);
+}
+
+TEST(format_log_header_says_when_there_is_no_log_file)
+{
+	// 一時ディレクトリへ書けなかったとき。**黙らない**——場所を出さないと、出ていない
+	// ファイルを探しに行かせる。本文はダイアログのログ欄に出ているので、そこを
+	// コピーすればよいと伝える。
+	std::string const text = formatLogHeader(BuildInfo{}, "a.ifc", 0, "2026-08-29 14:03:21");
+	CHECK(text.find("ログ: （ファイルへは書けませんでした") != std::string::npos);
 }
 
 TEST(format_log_header_scales_the_file_size)
@@ -575,19 +567,16 @@ TEST(format_import_error_without_detail_says_unknown)
 	// std::exception ですらないものを受けたときは説明が無い（catch(...)）。
 	std::string const text = formatImportError("");
 	CHECK(text.find("詳細: 原因不明") != std::string::npos);
-	// ログを開けなかったなら場所は案内しない（存在しない場所を指さない）。
-	CHECK(text.find("ログ: ") == std::string::npos);
 }
 
-TEST(format_import_error_points_at_the_log)
+TEST(format_import_error_names_the_file_and_points_at_the_log)
 {
-	// ログの最終行の直後が原因箇所（core/Trace.h）。場所とファイル名を添える。
-	ImportInfo info;
-	info.fileName = "安藤邸.ifc";
-	info.logPath = "/tmp/HomeskzIfcImport.log";
-	std::string const text = formatImportError("bad_alloc", info);
+	// ログの最終行の直後が原因箇所（core/Trace.h）。場所はログ自身の見出しにあるので、
+	// ここでは「ログを見てください」とファイル名だけを言う。
+	std::string const text = formatImportError("bad_alloc", "安藤邸.ifc");
 	CHECK(text.find("ファイル: 安藤邸.ifc") != std::string::npos);
-	CHECK(text.find("ログ: /tmp/HomeskzIfcImport.log") != std::string::npos);
+	CHECK(text.find("どこまで進んでいたかはログにあります") != std::string::npos);
+	CHECK(text.find("ログ: ") == std::string::npos);
 }
 
 TEST_MAIN();

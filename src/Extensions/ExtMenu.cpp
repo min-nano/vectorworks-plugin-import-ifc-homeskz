@@ -299,27 +299,18 @@ namespace HomeskzIfcImport
 			core::trace::note(parse::formatLogResult(document, drawn, seconds));
 			core::trace::close();
 
-			parse::ImportInfo info;
-			info.fileName = FileNameOf(ifcPath);
-			info.seconds = seconds;
-			// ログの場所は**閉じた後も残る**（core/Trace の path()）ので、そのまま案内に使える。
-			info.logPath = core::trace::path();
-			return parse::formatImportResult(document, drawn, info);
+			return parse::formatImportResult(document, drawn, FileNameOf(ifcPath));
 		}
 
 		// 例外で中断したときの後始末と本文づくり。診断ログに例外を書き残してから閉じ、
-		// ダイアログ本文（無 SDK 側が組み立てる）にログの場所を添えて返す。
+		// ダイアログ本文（無 SDK 側が組み立てる）を返す。ログの場所は見出しにあるので
+		// ここでは添えない。
 		std::string ReportImportError(const std::string& ifcPath, const std::string& detail)
 		{
 			core::trace::note("=== 結果 ===\n結果: エラーで中断\n詳細: " +
 							  (detail.empty() ? std::string("原因不明") : detail));
 			core::trace::close();
-
-			parse::ImportInfo info;
-			info.fileName = FileNameOf(ifcPath);
-			// パスは close() の後も残る（core/Trace の path()）ので、そのまま案内に使える。
-			info.logPath = core::trace::path();
-			return parse::formatImportError(detail, info);
+			return parse::formatImportError(detail, FileNameOf(ifcPath));
 		}
 	} // namespace
 } // namespace HomeskzIfcImport
