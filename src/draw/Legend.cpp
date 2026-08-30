@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <map>
 #include <vector>
 #include <string>
 
@@ -187,16 +188,15 @@ namespace HomeskzIfcImport::draw
 			return found;
 		}
 
-		// 【一時計装 ── 縮率が安定したら消す】レコードの**全欄を値ごと**並べる。
+		// 【一時計装 ── 縮率が安定したら消す】レコードの全欄を「欄名 → 値」で取る。
 		//
-		// **なぜ全欄なのか**: 「イメージの縮率」のポップアップに当たる欄は無い、と欄の名前と
-		// 種別だけを見て判断していたが、**値を見ていなかった**。種別 1（LongInt）や 2
-		// （Boolean）の欄がポップアップの実体である可能性を潰せていない（`World-based/2` は
-		// 縮率の解釈を切り替える欄に見える）。50 / 75 / true / false がどの欄に入っているかを
-		// 実機から一度だけ持ち帰る。
-		std::string DumpAllRecordFields(MCObjectHandle object)
+		// **なぜ要るか**: OIP の「カスタム 1:」の値はレコードのどの欄にも無い（全欄を出して
+		// 50 がどこにも現れなかった）。**手で正しく設定した凡例**と**こちらが置いた凡例**を
+		// 同じ文書で比べれば、違う欄がそのまま答えになる——ソース定義（`'GrLe'`）を突き止めた
+		// ときと同じやり方（docs/DEV-NOTES.md）。
+		std::map<std::string, std::string> RecordFieldsOf(MCObjectHandle object)
 		{
-			std::string text;
+			std::map<std::string, std::string> fields;
 			try
 			{
 				const VWParametricObj pio(object);
@@ -204,23 +204,51 @@ namespace HomeskzIfcImport::draw
 				for (size_t i = 0; i < count; ++i)
 				{
 					const TXString name = pio.GetParamName(i);
-					if (!text.empty())
-						text += " ";
-					text += name.GetStdString();
 					try
 					{
-						text += "=" + pio.GetParamValue(name).GetStdString();
+						fields[name.GetStdString()] = pio.GetParamValue(name).GetStdString();
 					}
 					catch (...)
 					{
-						text += "=?"; // 値を読めない欄（ボタン等）
+						continue; // 値を読めない欄（ボタン等）は比べようが無いので飛ばす
 					}
 				}
 			}
 			catch (...)
 			{
-				return {};
+				return fields;
 			}
+			return fields;
+		}
+
+		// 【一時計装 ── 縮率が安定したら消す】文書内の凡例を **#0 と比べて違う欄だけ**並べる。
+		//
+		// **全欄をそのまま出したら完了ダイアログに収まらなかった**（凡例 1 枚で 36 欄・
+		// 文書には何枚もある）。読めなければ計測した意味が無いので、差分だけにする。
+		std::string DescribeLegendDifferences(const std::vector<MCObjectHandle>& legends)
+		{
+			if (legends.size() < 2)
+				return "凡例 " + std::to_string(legends.size()) + " 枚（比べる相手が無し）";
+
+			const std::map<std::string, std::string> base = RecordFieldsOf(legends.front());
+			std::string text = "凡例 " + std::to_string(legends.size()) + " 枚。#0 との差分: ";
+			bool anyDiff = false;
+			for (std::size_t i = 1; i < legends.size(); ++i)
+			{
+				const std::map<std::string, std::string> other = RecordFieldsOf(legends[i]);
+				for (const auto& [name, value] : other)
+				{
+					const auto found = base.find(name);
+					if (found != base.end() && found->second == value)
+						continue;
+					anyDiff = true;
+					text += "#" + std::to_string(i) + " " + name + ": " +
+							(found == base.end() ? std::string("(無し)") : found->second) + " → " +
+							value + "; ";
+				}
+			}
+			if (!anyDiff)
+				text += "全欄一致";
 			return text;
 		}
 
@@ -645,15 +673,7 @@ namespace HomeskzIfcImport::draw
 #ifdef VW_DEV_BUILD
 		// 【一時計装】**文書内のすべての凡例**の全欄。手で設定した凡例が同じ文書にあれば、
 		// 並べて比べるだけで「どの欄が違うのか」が分かる（上の CollectAllLegends）。
-		{
-			const std::vector<MCObjectHandle> all = CollectAllLegends();
-			for (std::size_t i = 0; i < all.size(); ++i)
-			{
-				if (!counts.recordFields.empty())
-					counts.recordFields += " || ";
-				counts.recordFields += "#" + std::to_string(i) + " " + DumpAllRecordFields(all[i]);
-			}
-		}
+		counts.recordFields = DescribeLegendDifferences(CollectAllLegends());
 #endif
 
 		// **最終状態を実測して持ち帰る。** 縮尺の違うビューポートが混在していないか、レコードが
@@ -765,7 +785,7 @@ namespace HomeskzIfcImport::draw
 			text += "凡例の縮率の推移: " + counts.scaleReport + "。";
 		// 【一時計装】同じく dev ビルドのみ。**文書内の全凡例**のレコード全欄（draw/Legend.h）。
 		if (!counts.recordFields.empty())
-			text += "凡例レコードの全欄: " + counts.recordFields + "。";
+			text += "凡例レコードの比較: " + counts.recordFields + "。";
 		if (imageScaleReverted)
 		{
 			// 与えた縮尺のイメージが作り直しの後に 1 つも残っていない。何を何にしようとしたかを
