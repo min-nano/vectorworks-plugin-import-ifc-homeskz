@@ -129,6 +129,23 @@ namespace HomeskzIfcImport::draw
 			counts.imageScaleAfter = after;
 		}
 
+		// container の中で最初に見つけた凡例イメージ（ビューポート）の縮尺。見つからなければ 0。
+		// **作り直しの後に読み直す**ためのもので、図面は変えない。
+		double FirstViewportScaleIn(MCObjectHandle container, int depth)
+		{
+			if (container == nil || depth <= 0)
+				return 0.0;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil;
+				 h = gSDK->NextObject(h))
+			{
+				if (gSDK->GetObjectTypeN(h) == kViewportNode)
+					return ViewportScale(h);
+				if (const double found = FirstViewportScaleIn(h, depth - 1); found != 0.0)
+					return found;
+			}
+			return 0.0;
+		}
+
 		// container の中を辿って凡例イメージ（kViewportNode / kWorksheetImageNode）に縮率を与え、内訳を
 		// counts へ積む。**入れ子を辿るのは、凡例イメージがセルの中にある**ため——凡例 →
 		// セル → イメージという段数は VW の版で変わりうるので、型で見つけるまで潜る
@@ -375,11 +392,18 @@ namespace HomeskzIfcImport::draw
 		if (scale <= 0.0)
 			return;
 
-		// **縮率は 2 か所にあるが、こちらから動かせるのは片方だけ**（draw/Legend.h）:
-		//   * イメージの**中身**の縮尺 … 凡例イメージ（＝ビューポート）の縮尺 … **書ける**
-		//   * セルの**枠**の大きさ・OIP の表示 … レコードの `ImageScale` … **書いても戻される**
-		// 枠のほうは打ち切った（docs/DEV-NOTES.md「打ち切った調査」の「凡例の枠を伏図の縮尺に
-		// 合わせる」）。ここでやるのは中身だけ。
+		// ★**中身を先に、枠は作り直しに組み直させる。** セルの枠（`kBoxNode`。SDK の
+		// `kInternalID_GraphicLegendFrame` に当たる）も凡例イメージと同じく独立した
+		// オブジェクトで、**作り直しのときに中身に合わせて組み直される**。だから順序は
+		//
+		//   ビューポート（中身）の縮尺を変える → 作り直す → 枠が中身に合わせて組み直る
+		//
+		// でなければならない。**逆をやって外した**——レコードへ書いてから作り直し、その後で
+		// ビューポートを変えていたので、枠は「変える前の中身」に合わせたまま残っていた
+		// （docs/DEV-NOTES.md「グラフィック凡例」）。
+		//
+		// **作り直しがビューポートの縮尺を戻さない**ことは実測済み——取り込み後に VW 側の
+		// リセットが入っても中身は伏図の縮尺のままだった。
 		for (const MCObjectHandle object : counts.objects)
 		{
 			// **入口を 1 つに絞らない。** PIO の中身の入口は版によって 3 通りあり
@@ -394,6 +418,26 @@ namespace HomeskzIfcImport::draw
 			for (MCObjectHandle aux = gSDK->FirstAuxObject(object); aux != nil;
 				 aux = gSDK->NextObject(aux))
 				ScaleImagesIn(aux, scale, kImageSearchDepth, counts);
+		}
+
+		// 中身を変え終えてから**もう一度作り直す**。ここで枠が組み直る（上記 ★）。
+		// **縮率を 1 つも与えられていないなら作り直さない**——組み直す理由が無いうえ、
+		// 無駄なリセットで凡例の大きさが動くのを避ける。
+		if (counts.imagesScaled == 0)
+			return;
+		for (const MCObjectHandle object : counts.objects)
+			gSDK->ResetObject(object);
+
+		// **作り直した後の縮尺を 1 つだけ読み直す。** 戻されていれば枠も中身も既定のままで、
+		// 絵からは「何も変わらなかった」としか見えないので、診断で見分けられるようにする。
+		for (const MCObjectHandle object : counts.objects)
+		{
+			const double after = FirstViewportScaleIn(object, kImageSearchDepth);
+			if (after != 0.0)
+			{
+				counts.imageScaleAfter = after;
+				break;
+			}
 		}
 	}
 
