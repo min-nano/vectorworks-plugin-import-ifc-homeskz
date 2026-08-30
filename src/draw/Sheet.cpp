@@ -81,7 +81,8 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
-						   std::string* note, const ObjectHandles* memberHandles)
+						   std::string* note, const ObjectHandles* memberHandles,
+						   PendingLegendScale* pendingLegends)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
@@ -299,6 +300,16 @@ namespace HomeskzIfcImport::draw
 		applyLegendImageScale(legends, layout.scale);
 		placeLegends(legends, layout.legendTopRight);
 
+		// ★**縮率は取り込みの undo イベントを閉じた後にもう一度当てる。** ここで当てた値は
+		// イベントの閉じ際に VW が凡例を作り直して既定へ戻してしまう（draw/Legend.h の
+		// PendingLegendScale）。呼び出し側（draw/ExecuteDocument）へ持ち出しておく。
+		if (pendingLegends != nullptr)
+		{
+			pendingLegends->legends = legends;
+			pendingLegends->scale = layout.scale;
+			pendingLegends->topRight = layout.legendTopRight;
+		}
+
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
@@ -390,7 +401,11 @@ namespace HomeskzIfcImport::draw
 		}
 
 		addNote(tagDiagnostics("伏図", tags));
-		addNote(legendDiagnostics(legends));
+		// **凡例の診断はここでは出さない。** 縮率は undo イベントを閉じた後にもう一度当てる
+		// ので、最終状態が決まるのはあちら（draw/ExecuteDocument）。ここで出すと途中経過を
+		// 二重に載せてしまう。持ち出せなかったとき（pendingLegends == nullptr）だけ出す。
+		if (pendingLegends == nullptr)
+			addNote(legendDiagnostics(legends));
 		return drawn;
 	}
 } // namespace HomeskzIfcImport::draw

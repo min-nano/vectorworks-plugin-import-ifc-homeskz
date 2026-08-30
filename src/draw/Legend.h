@@ -141,6 +141,20 @@ namespace HomeskzIfcImport::draw
 		std::vector<MCObjectHandle> objects;
 	};
 
+	// 置いた凡例と、当てるべき縮尺。**取り込みの undo イベントを閉じた後**に縮率を当て直す
+	// ために、drawSheets から draw/ExecuteDocument まで持ち出す入れ物。
+	//
+	// ★**なぜ後で当て直すのか**: イベントの内側で当てても、閉じ際に VW が凡例を作り直して
+	// 既定（1:50）へ戻してしまう。実機で段階ごとに測って確定した——処理を終えた時点では
+	// 記録も中身も 75 なのに、取り込み後の OIP は 1:50 に戻っている
+	// （docs/DEV-NOTES.md「グラフィック凡例」）。
+	struct PendingLegendScale
+	{
+		LegendCounts legends;
+		double scale = 0.0; // 用紙の割り付けが決めた伏図の縮尺（1:75 なら 75）。0 なら当てない
+		core::Vec2 topRight{}; // 凡例の右上（用紙 mm）。当て直しで大きさが変わるので揃え直す
+	};
+
 	// グラフィック凡例 PIO の定義を**設定ダイアログを出さない**で用意する。凡例を 1 つでも
 	// 置くフェーズ（伏図）の先頭で 1 回呼ぶ。理由は draw/Tag の prepareDataTagPlugin と同じ
 	// （CreateCustomObject が最初の 1 個で定義を作るとき、既定ではダイアログが出て
