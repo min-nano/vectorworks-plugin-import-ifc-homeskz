@@ -475,31 +475,16 @@ namespace HomeskzIfcImport::draw
 		for (const MCObjectHandle object : counts.objects)
 			gSDK->ResetObject(object);
 
-		// ★**最後に OIP の表示欄（レコードの `ImageScale`）も合わせる。作り直しはもう挟まない。**
+		// ★**レコードの `ImageScale`（OIP の表示欄）は書かない。書くと絵が壊れる。**
 		//
-		// **表示が実描画と食い違ったまま放置しない。** OIP が 1:50 と出ているのは「設定が
-		// 入っていない」ということで、何かの拍子に凡例がその値で作り直されると**描画のほうが
-		// 1:50 へ戻ってしまう**（不意に壊れる）。表示と実際を一致させておけば、作り直されても
-		// 同じ絵になる。
+		// 実機で確かめた: すべて終えた後に 75 を書いたら、**ビューポートが 3 つとも 50 へ戻り、
+		// 作図まで 1/50 になった**（レコード自体は 75 で残る）。`SetParamReal` が PIO の再生成を
+		// 起こし、**その再生成は書き込み前の値で行われる**ためと読める——結果は「レコードは
+		// 75、絵は 1/50」という最悪の組み合わせになる。
 		//
-		// これまで「レコードは書いても戻される」と見えていたのは、**書いた後に作り直していた**
-		// ため——作り直しはこの欄を凡例イメージの状態から計算し直すので、中身がまだ既定の
-		// ままの段階で書いても上書きされる。中身を合わせ終えた**後**に書けば、計算し直す
-		// きっかけが無いので残る。
-		for (const MCObjectHandle object : counts.objects)
-		{
-			try
-			{
-				VWParametricObj pio(object);
-				if (!SetParamRealChecked(pio, TXString(kFieldImageScale), scale))
-					++counts.recordLeft;
-			}
-			catch (...)
-			{
-				++counts.recordLeft;
-			}
-		}
-
+		// したがって縮率はビューポートにだけ与え、OIP の表示は既定のままにしておく
+		// （docs/DEV-NOTES.md「打ち切った調査」）。表示と実描画が食い違うのは承知のうえで、
+		// **絵が正しいほうを採る**。
 		// **最終状態を実測して持ち帰る。** 縮尺の違うビューポートが混在していないか、レコードが
 		// 残ったかは絵からは分からない（docs/DEV-NOTES.md「グラフィック凡例」）。
 		counts.imageScaleAfter = 0.0;
@@ -540,14 +525,19 @@ namespace HomeskzIfcImport::draw
 		// ＝作り直しが既定へ戻した（draw/Legend.h の applyLegendImageScale）。
 		const bool imageScaleReverted =
 			counts.imageScaleTarget != 0.0 && counts.imageScaleAfter == 0.0;
-		// **OIP の表示が実描画と食い違っている。** 表示（レコード）が既定のままだと、何かの
-		// 拍子に凡例がその値で作り直されて**描画のほうが戻る**ので、黙って見過ごさない。
-		const bool recordOdd = counts.imageScaleTarget != 0.0 && counts.recordScale != 0.0 &&
-							   std::abs(counts.recordScale - counts.imageScaleTarget) >
-								   std::abs(counts.imageScaleTarget) * 1.0e-6;
+		// **OIP の表示と実描画の食い違い。** これは既知の制限（README）なので、ふだんの完了
+		// ダイアログには出さず、dev ビルドの調査でだけ見えるようにする。
+		const bool recordOdd =
+#ifdef VW_DEV_BUILD
+			counts.imageScaleTarget != 0.0 && counts.recordScale != 0.0 &&
+			std::abs(counts.recordScale - counts.imageScaleTarget) >
+				std::abs(counts.imageScaleTarget) * 1.0e-6;
+#else
+			false;
+#endif
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
 			counts.sourceLeft == 0 && counts.filterLeft == 0 && !imageScaleLeft &&
-			counts.imagesLeft == 0 && !imageScaleReverted && counts.recordLeft == 0 && !recordOdd &&
+			counts.imagesLeft == 0 && !imageScaleReverted && !recordOdd &&
 			counts.scaleReport.empty())
 			return {};
 
@@ -591,9 +581,6 @@ namespace HomeskzIfcImport::draw
 		if (counts.imagesLeft > 0)
 			text += "縮率を書けなかった凡例イメージ " + std::to_string(counts.imagesLeft) +
 					" 件（そのイメージだけ既定の 1:50 のままです）。";
-		if (counts.recordLeft > 0)
-			text += "イメージの縮率（OIP の表示）を書けなかった凡例 " +
-					std::to_string(counts.recordLeft) + " 件。";
 		if (recordOdd)
 		{
 			const auto num = [](double value)
@@ -602,9 +589,9 @@ namespace HomeskzIfcImport::draw
 				std::snprintf(buffer.data(), buffer.size(), "%g", value);
 				return std::string(buffer.data());
 			};
-			text += "OIP の「イメージの縮率」が実描画と食い違っています（表示 " +
+			text += "OIP の「イメージの縮率」は実描画と食い違います（表示 " +
 					num(counts.recordScale) + " / 実際 " + num(counts.imageScaleTarget) +
-					"）。凡例が作り直されると描画が表示側へ戻る恐れがあります。";
+					"。既知の制限）。";
 		}
 		// 【一時計装】dev ビルドでのみ埋まる（draw/Legend.h の scaleReport）。
 		if (!counts.scaleReport.empty())
