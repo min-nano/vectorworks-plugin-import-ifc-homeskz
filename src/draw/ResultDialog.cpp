@@ -12,6 +12,7 @@
 //	  * AddFirstGroupControl / AddBelowControl    … 上から順にコントロールを積む
 //	  * OnInitializeContent()                     … コントロールができた後の中身の流し込み
 //	  * ShowControl(id, visible)                  … コントロールの表示／非表示（＝折り畳み）
+//	  * Get/SetDialogSize(w, h)                   … ダイアログの大きさ（折り畳みで縮める）
 //	  * EVENT_DISPATCH_MAP + ADD_DISPATCH_EVENT   … ボタンのクリックを受ける
 //
 //	【本文は 1 行 1 コントロール】VWStaticTextCtrl は 1 行を出すためのもので、埋め込んだ
@@ -23,8 +24,11 @@
 //	（静的テキストではコピーできず、報告に貼れない）。編集はできてしまうが、閉じるときに
 //	捨てるだけなので害は無い。
 //
-//	実挙動（折り畳みでダイアログの高さが縮むか・ログ欄の見た目・コピーの可否）は
-//	ローカルの VectorWorks で確認する（docs/DEV-NOTES.md「実機確認の作法」）。
+//	【折り畳みは自分で縮める】実機で確かめたところ、`ShowControl` でログ欄を出すと
+//	ダイアログは**大きくなるが、隠しても小さくならない**（レイアウトはいちど広がった大きさを
+//	保つ）。そのままだと畳んだ後に空白の穴が残るので、**開く直前に畳んだ状態の大きさを
+//	実測しておき、隠すときに `SetDialogSize` でそこへ戻す**。開くときも同じで、2 回目以降は
+//	1 回目に測った「開いた大きさ」へ明示的に広げる（自動で広がるのを当てにしない）。
 //
 
 #include "PluginPrefix.h"
@@ -159,21 +163,43 @@ namespace HomeskzIfcImport::draw
 			// CStandardInfoDlg も同じく空で潰している）。
 			void OnDDXInitialize() override {}
 
-			// 「ログを表示 / 隠す」。**ダイアログの高さが追随するか**は実機で確かめる
-			// （ShowControl はレイアウトへ効くはずだが、SDK ヘッダには書かれていない）。
+			// 「ログを表示 / 隠す」。**大きさは自分で戻す**（冒頭「折り畳みは自分で縮める」）。
 			void OnToggleLog(TControlID /*controlID*/, VWDialogEventArgs& /*eventArg*/)
 			{
 				if (!fHasLog)
 					return;
 				fLogVisible = !fLogVisible;
-				if (fLogVisible && !fLogLoaded)
+				if (fLogVisible)
 				{
+					// **畳んだ状態の大きさは、広げる直前に測る。** いま画面に出ている
+					// ダイアログがまさにその大きさなので、ここが唯一確実に測れる瞬間。
+					if (!fSizesKnown)
+						this->GetDialogSize(fCollapsedWidth, fCollapsedHeight);
 					// **開いたときに読み込む。** 畳んだままなら流し込まない（ログは
 					// 数十行とはいえ、要らない仕事はしない）。
-					fLog.SetText(fLogText);
-					fLogLoaded = true;
+					if (!fLogLoaded)
+					{
+						fLog.SetText(fLogText);
+						fLogLoaded = true;
+					}
+					this->ShowControl(kLogID, true);
+					if (fSizesKnown)
+						this->SetDialogSize(fExpandedWidth, fExpandedHeight);
+					else
+					{
+						// 1 回目は VW が広げてくれるので、その結果を控えておく
+						// （2 回目からはこの大きさへ明示的に戻す）。
+						this->GetDialogSize(fExpandedWidth, fExpandedHeight);
+						fSizesKnown = true;
+					}
 				}
-				this->ShowControl(kLogID, fLogVisible);
+				else
+				{
+					this->ShowControl(kLogID, false);
+					// **隠しただけでは縮まない。** 測っておいた畳んだ大きさへ戻す。
+					if (fSizesKnown)
+						this->SetDialogSize(fCollapsedWidth, fCollapsedHeight);
+				}
 				fToggle.SetControlText(fLogVisible ? "ログを隠す" : "ログを表示");
 			}
 
@@ -190,6 +216,12 @@ namespace HomeskzIfcImport::draw
 			bool fLogVisible = false;
 			bool fLogLoaded = false;
 			bool fShown = false;
+			// 折り畳み／展開したときのダイアログの大きさ（1 回目の開閉で実測する）。
+			bool fSizesKnown = false;
+			ViewCoord fCollapsedWidth = 0;
+			ViewCoord fCollapsedHeight = 0;
+			ViewCoord fExpandedWidth = 0;
+			ViewCoord fExpandedHeight = 0;
 		};
 
 		// EVENT_DISPATCH_MAP_BEGIN は SDK のマクロ。展開に const 化できるローカルが出るが、

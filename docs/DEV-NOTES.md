@@ -671,10 +671,13 @@ M18 で「用紙と建物の大きさから縮尺を自動で決め、重なら�
 - **本文は 1 行 1 コントロールで積む。** `VWStaticTextCtrl` は 1 行を出すためのもので、
   埋め込んだ改行がそのまま行になる保証が無い。本文を改行で切って静的テキストを並べ、
   空行は `AddBelowControl` の行間で表す。
-- **折り畳みは `VWDialog::ShowControl(id, visible)`。** 初期状態は `OnInitializeContent`
-  で畳む。**ダイアログの高さが追随して縮むかは実機で確かめること**（SDK ヘッダに
-  レイアウトへの影響は書かれていない）。追随しないなら、開閉ボタンでダイアログを
-  作り直す形へ倒す。
+- **折り畳みは `VWDialog::ShowControl(id, visible)`。ただし縮むのは自分の仕事**（実機で
+  判明）。初期状態を `OnInitializeContent` で畳めばダイアログは小さく開くし、そこから
+  ログ欄を出せば**大きくなる**。しかし**隠しても小さくならない**——レイアウトはいちど
+  広がった大きさを保つので、畳んだ後に空白の穴が残る。`Get/SetDialogSize`
+  （`GS_Get/SetLayoutDialogSize`。単位はピクセル、`ViewCoord` は `Sint16`）で
+  **開く直前に畳んだ大きさを実測し、隠すときにそこへ戻す**。開くときも 1 回目に測った
+  「開いた大きさ」へ明示的に広げる（自動で広がるのを当てにしない）。
 - **ボタンのクリックは `EVENT_DISPATCH_MAP` で受ける。** `ADD_DISPATCH_EVENT(id, f)` の
   `f` は `void f(TControlID, VWDialogEventArgs&)`（`VWFC/VWUI/DialogEventArgs.h` の
   `CDialogEventHandlers`）。`CreateDialog(title, "OK", "", false)` のように**キャンセルを
