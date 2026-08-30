@@ -671,13 +671,18 @@ M18 で「用紙と建物の大きさから縮尺を自動で決め、重なら�
 - **本文は 1 行 1 コントロールで積む。** `VWStaticTextCtrl` は 1 行を出すためのもので、
   埋め込んだ改行がそのまま行になる保証が無い。本文を改行で切って静的テキストを並べ、
   空行は `AddBelowControl` の行間で表す。
-- **折り畳みは `VWDialog::ShowControl(id, visible)`。ただし縮むのは自分の仕事**（実機で
-  判明）。初期状態を `OnInitializeContent` で畳めばダイアログは小さく開くし、そこから
-  ログ欄を出せば**大きくなる**。しかし**隠しても小さくならない**——レイアウトはいちど
-  広がった大きさを保つので、畳んだ後に空白の穴が残る。`Get/SetDialogSize`
-  （`GS_Get/SetLayoutDialogSize`。単位はピクセル、`ViewCoord` は `Sint16`）で
-  **開く直前に畳んだ大きさを実測し、隠すときにそこへ戻す**。開くときも 1 回目に測った
-  「開いた大きさ」へ明示的に広げる（自動で広がるのを当てにしない）。
+- **レイアウトダイアログの大きさは、作るときに 1 度だけ決まる。** 折り畳みを
+  `ShowControl(id, false)` でやろうとして 2 度失敗した（いずれも実機で確認）:
+  ログ欄を出すとダイアログは大きくなるが**隠しても縮まない**し、`OnInitializeContent`
+  で最初から隠しておいても**その分の高さは空いたまま**だった。`Get/SetDialogSize`
+  （`GS_Get/SetLayoutDialogSize`。単位はピクセル、`ViewCoord` は `Sint16`）で押し込むのも
+  安定しない。**確実なのは、状態ごとにダイアログを作り直すこと**——畳んだ枚は
+  ログ欄そのものを作らないので、VW が計算する大きさが最初から正しい。
+- **ハンドラからダイアログを閉じるのは `VWDialog::SetDialogClose(bCloseWithOK)`**
+  （protected。押されたボタンを OK / キャンセルに差し替えてモーダルを閉じる）。
+  開閉ボタンはこれで閉じ、呼び出し側が反対の状態でもう 1 枚開く。**位置は
+  `Get/SetDialogPosition` で引き継ぐ**——引き継がないと画面中央へ飛び、開き直したのが
+  丸見えになる。
 - **ボタンのクリックは `EVENT_DISPATCH_MAP` で受ける。** `ADD_DISPATCH_EVENT(id, f)` の
   `f` は `void f(TControlID, VWDialogEventArgs&)`（`VWFC/VWUI/DialogEventArgs.h` の
   `CDialogEventHandlers`）。`CreateDialog(title, "OK", "", false)` のように**キャンセルを

@@ -11,8 +11,8 @@
 //	  * CreateDialog(title, ok, cancel, hasHelp)  … 枠を作る（ID 1=OK / 2=キャンセル は予約）
 //	  * AddFirstGroupControl / AddBelowControl    … 上から順にコントロールを積む
 //	  * OnInitializeContent()                     … コントロールができた後の中身の流し込み
-//	  * ShowControl(id, visible)                  … コントロールの表示／非表示（＝折り畳み）
-//	  * Get/SetDialogSize(w, h)                   … ダイアログの大きさ（折り畳みで縮める）
+//	  * SetDialogClose(bCloseWithOK)              … ハンドラの中からダイアログを閉じる
+//	  * Get/SetDialogPosition(left, top)          … 位置（開き直しても動かさないため）
 //	  * EVENT_DISPATCH_MAP + ADD_DISPATCH_EVENT   … ボタンのクリックを受ける
 //
 //	【本文は 1 行 1 コントロール】VWStaticTextCtrl は 1 行を出すためのもので、埋め込んだ
@@ -24,11 +24,15 @@
 //	（静的テキストではコピーできず、報告に貼れない）。編集はできてしまうが、閉じるときに
 //	捨てるだけなので害は無い。
 //
-//	【折り畳みは自分で縮める】実機で確かめたところ、`ShowControl` でログ欄を出すと
-//	ダイアログは**大きくなるが、隠しても小さくならない**（レイアウトはいちど広がった大きさを
-//	保つ）。そのままだと畳んだ後に空白の穴が残るので、**開く直前に畳んだ状態の大きさを
-//	実測しておき、隠すときに `SetDialogSize` でそこへ戻す**。開くときも同じで、2 回目以降は
-//	1 回目に測った「開いた大きさ」へ明示的に広げる（自動で広がるのを当てにしない）。
+//	【折り畳みはダイアログを作り直して行う】レイアウトダイアログの大きさは**作るときに
+//	1 度だけ決まる**。`ShowControl` で後からログ欄を隠しても縮まず、初期状態で隠しておいても
+//	その分の高さは空いたままで、`SetDialogSize` で押し込んでも安定しなかった（いずれも実機で
+//	確認。docs/DEV-NOTES.md「結果ダイアログ」）。
+//
+//	そこで**状態ごとにダイアログを作り直す**: 畳んだダイアログは**ログ欄そのものを作らない**
+//	ので、VW のレイアウトが計算する大きさが最初から正しい。開閉ボタンは自分の状態を
+//	記録して `SetDialogClose` でダイアログを閉じ、呼び出し側（showImportResult）が反対の
+//	状態でもう 1 枚開く。位置は引き継ぐので、その場で開き直したように見える。
 //
 
 #include "PluginPrefix.h"
@@ -75,16 +79,27 @@ namespace HomeskzIfcImport::draw
 			return lines;
 		}
 
-		// 取り込みの結果ダイアログ。本文（数行の静的テキスト）＋「ログを表示」ボタン＋
-		// 折り畳んだログ欄。ボタンは OK 1 つ（キャンセルは出さない——結果を見るだけの
-		// ダイアログで「取り消す」ものが無い）。
+		// ダイアログの置き場所（作り直すときに引き継ぐ）。known=false なら VW に任せる。
+		struct DialogPlacement
+		{
+			bool known = false;
+			ViewCoord left = 0;
+			ViewCoord top = 0;
+		};
+
+		// 取り込みの結果ダイアログ**1 枚**。本文（数行の静的テキスト）＋「ログを表示 /
+		// 隠す」ボタン＋（開いた状態なら）ログ欄。ボタンは OK 1 つ（キャンセルは出さない
+		// ——結果を見るだけのダイアログで「取り消す」ものが無い）。開閉はこの 1 枚の中では
+		// 行わず、閉じて反対の状態でもう 1 枚開く（冒頭「折り畳みは…」）。
 		class CImportResultDialog : public VWDialog
 		{
 		public:
 			CImportResultDialog(const std::string& title, const std::vector<std::string>& body,
-								const std::string& log)
+								const std::string& log, bool showLog,
+								const DialogPlacement& placement)
 				: fTitle(title.c_str()), fBody(body), fLog(kLogID), fToggle(kToggleID),
-				  fLogText(log.c_str()), fHasLog(!log.empty())
+				  fLogText(log.c_str()), fHasLog(!log.empty()), fShowLog(showLog && !log.empty()),
+				  fPlacement(placement)
 			{
 			}
 			~CImportResultDialog() override = default;
@@ -94,6 +109,18 @@ namespace HomeskzIfcImport::draw
 			bool Shown() const
 			{
 				return fShown;
+			}
+
+			// 開閉ボタンが押されたか（＝反対の状態で開き直してほしい）。
+			bool ToggleRequested() const
+			{
+				return fToggleRequested;
+			}
+
+			// 閉じたときの置き場所（作り直す側が引き継ぐ）。
+			const DialogPlacement& Placement() const
+			{
+				return fPlacement;
 			}
 
 		protected:
@@ -136,9 +163,13 @@ namespace HomeskzIfcImport::draw
 				// ログが無い（開けなかった）なら、開閉ボタンもログ欄も作らない。
 				if (!fHasLog)
 					return true;
-				if (!fToggle.CreateControl(this, "ログを表示"))
+				if (!fToggle.CreateControl(this, fShowLog ? "ログを隠す" : "ログを表示"))
 					return false;
 				this->AddBelowControl(previous, &fToggle, 0, 1);
+				// **畳んだ状態ではログ欄を作らない。** 作って隠すのでは高さが空いたままに
+				// なる（冒頭「折り畳みはダイアログを作り直して行う」）。
+				if (!fShowLog)
+					return true;
 				if (!fLog.CreateControl(this, "", kLogWidthChars, kLogHeightLines))
 					return false;
 				this->AddBelowControl(&fToggle, &fLog);
@@ -148,13 +179,14 @@ namespace HomeskzIfcImport::draw
 			void OnInitializeContent() override
 			{
 				VWDialog::OnInitializeContent();
-				if (fHasLog)
-				{
-					// 既定は畳んでおく。ふだん読むのは本文の数行だけで、ログは
-					// 「困ったときに開くもの」（M19）。**中身は開いたときに流し込む**
-					// （下の OnToggleLog）。
-					this->ShowControl(kLogID, false);
-				}
+				// ログ欄があるのは開いた状態のときだけ。中身はここで流し込む
+				// （畳んだ状態では欄そのものが無いので、何もしない）。
+				if (fShowLog)
+					fLog.SetText(fLogText);
+				// 開き直しのときは元の場所へ。**その場で開き直したように見せる**ため
+				// （引き継がないと画面中央へ飛ぶ）。
+				if (fPlacement.known)
+					this->SetDialogPosition(fPlacement.left, fPlacement.top);
 				fShown = true;
 			}
 
@@ -163,44 +195,20 @@ namespace HomeskzIfcImport::draw
 			// CStandardInfoDlg も同じく空で潰している）。
 			void OnDDXInitialize() override {}
 
-			// 「ログを表示 / 隠す」。**大きさは自分で戻す**（冒頭「折り畳みは自分で縮める」）。
+			// 「ログを表示 / 隠す」。**ここでは開閉しない**——状態を控えてダイアログを閉じ、
+			// 呼び出し側が反対の状態で開き直す（冒頭「折り畳みはダイアログを作り直して行う」）。
 			void OnToggleLog(TControlID /*controlID*/, VWDialogEventArgs& /*eventArg*/)
 			{
 				if (!fHasLog)
 					return;
-				fLogVisible = !fLogVisible;
-				if (fLogVisible)
-				{
-					// **畳んだ状態の大きさは、広げる直前に測る。** いま画面に出ている
-					// ダイアログがまさにその大きさなので、ここが唯一確実に測れる瞬間。
-					if (!fSizesKnown)
-						this->GetDialogSize(fCollapsedWidth, fCollapsedHeight);
-					// **開いたときに読み込む。** 畳んだままなら流し込まない（ログは
-					// 数十行とはいえ、要らない仕事はしない）。
-					if (!fLogLoaded)
-					{
-						fLog.SetText(fLogText);
-						fLogLoaded = true;
-					}
-					this->ShowControl(kLogID, true);
-					if (fSizesKnown)
-						this->SetDialogSize(fExpandedWidth, fExpandedHeight);
-					else
-					{
-						// 1 回目は VW が広げてくれるので、その結果を控えておく
-						// （2 回目からはこの大きさへ明示的に戻す）。
-						this->GetDialogSize(fExpandedWidth, fExpandedHeight);
-						fSizesKnown = true;
-					}
-				}
-				else
-				{
-					this->ShowControl(kLogID, false);
-					// **隠しただけでは縮まない。** 測っておいた畳んだ大きさへ戻す。
-					if (fSizesKnown)
-						this->SetDialogSize(fCollapsedWidth, fCollapsedHeight);
-				}
-				fToggle.SetControlText(fLogVisible ? "ログを隠す" : "ログを表示");
+				fToggleRequested = true;
+				// 開き直す先の位置（いまの場所）を控える。
+				const ViewPt position = this->GetDialogPosition();
+				fPlacement.known = true;
+				fPlacement.left = position.x;
+				fPlacement.top = position.y;
+				// OK として閉じる（押されたボタンは呼び出し側が見ないので、どちらでもよい）。
+				this->SetDialogClose(true);
 			}
 
 			DEFINE_EVENT_DISPATH_MAP;
@@ -212,16 +220,11 @@ namespace HomeskzIfcImport::draw
 			VWEditTextCtrl fLog;
 			VWPushButtonCtrl fToggle;
 			TXString fLogText;
-			bool fHasLog = false;
-			bool fLogVisible = false;
-			bool fLogLoaded = false;
-			bool fShown = false;
-			// 折り畳み／展開したときのダイアログの大きさ（1 回目の開閉で実測する）。
-			bool fSizesKnown = false;
-			ViewCoord fCollapsedWidth = 0;
-			ViewCoord fCollapsedHeight = 0;
-			ViewCoord fExpandedWidth = 0;
-			ViewCoord fExpandedHeight = 0;
+			bool fHasLog = false; // ログの本文があるか（無ければ開閉ボタンも出さない）
+			bool fShowLog = false;		   // この 1 枚はログ欄を持つか
+			bool fShown = false;		   // 実際に出せたか
+			bool fToggleRequested = false; // 開閉ボタンが押されたか
+			DialogPlacement fPlacement;	   // 開き直すときに引き継ぐ置き場所
 		};
 
 		// EVENT_DISPATCH_MAP_BEGIN は SDK のマクロ。展開に const 化できるローカルが出るが、
@@ -238,9 +241,23 @@ namespace HomeskzIfcImport::draw
 		if (lines.empty())
 			return false;
 
-		CImportResultDialog dialog(title, lines, log);
-		dialog.RunDialogLayout("");
-		// 押されたボタンは見ない（OK しか無い）。見るのは「出せたか」だけ。
-		return dialog.Shown();
+		// **開閉のたびに 1 枚ずつ開き直す。** 畳んだ枚はログ欄を持たないので、VW が
+		// 計算する大きさが最初から正しい（冒頭「折り畳みはダイアログを作り直して行う」）。
+		// 回るのは開閉ボタンが押されたときだけ——ユーザーの操作 1 回につき 1 周なので、
+		// 勝手に回り続けることはない。
+		bool showLog = false;
+		DialogPlacement placement;
+		for (;;)
+		{
+			CImportResultDialog dialog(title, lines, log, showLog, placement);
+			dialog.RunDialogLayout("");
+			// 押されたボタンは見ない（OK しか無い）。見るのは「出せたか」と「開閉か」。
+			if (!dialog.Shown())
+				return false;
+			if (!dialog.ToggleRequested())
+				return true;
+			showLog = !showLog;
+			placement = dialog.Placement();
+		}
 	}
 } // namespace HomeskzIfcImport::draw
