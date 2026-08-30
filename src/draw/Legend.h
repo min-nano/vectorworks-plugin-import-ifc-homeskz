@@ -126,6 +126,11 @@ namespace HomeskzIfcImport::draw
 		// 実描画と食い違うのが既定の状態で、その差を dev ビルドの診断で見えるようにしておく。
 		double recordScale = 0.0;
 
+		// 【一時計装 ── 縮率が安定したら消す】レコードの全欄（名前=値）。**dev ビルドでのみ
+		// 埋まる。** 「イメージの縮率」のポップアップがどの欄なのかを実機から持ち帰るため
+		// （draw/Legend.cpp の DumpAllRecordFields）。
+		std::string recordFields;
+
 		// 【一時計装 ── 縮率が安定したら消す】凡例の中のビューポートの縮尺を並べたもの。
 		// **dev ビルドでのみ埋まる**（draw/Legend.cpp の DescribeViewportScales）。
 		std::string scaleReport;

@@ -142,6 +142,43 @@ namespace HomeskzIfcImport::draw
 			return {buffer.data()};
 		}
 
+		// 【一時計装 ── 縮率が安定したら消す】レコードの**全欄を値ごと**並べる。
+		//
+		// **なぜ全欄なのか**: 「イメージの縮率」のポップアップに当たる欄は無い、と欄の名前と
+		// 種別だけを見て判断していたが、**値を見ていなかった**。種別 1（LongInt）や 2
+		// （Boolean）の欄がポップアップの実体である可能性を潰せていない（`World-based/2` は
+		// 縮率の解釈を切り替える欄に見える）。50 / 75 / true / false がどの欄に入っているかを
+		// 実機から一度だけ持ち帰る。
+		std::string DumpAllRecordFields(MCObjectHandle object)
+		{
+			std::string text;
+			try
+			{
+				const VWParametricObj pio(object);
+				const size_t count = pio.GetParamsCount();
+				for (size_t i = 0; i < count; ++i)
+				{
+					const TXString name = pio.GetParamName(i);
+					if (!text.empty())
+						text += " ";
+					text += name.GetStdString();
+					try
+					{
+						text += "=" + pio.GetParamValue(name).GetStdString();
+					}
+					catch (...)
+					{
+						text += "=?"; // 値を読めない欄（ボタン等）
+					}
+				}
+			}
+			catch (...)
+			{
+				return {};
+			}
+			return text;
+		}
+
 		// 【一時計装】凡例のレコードの `ImageScale`（OIP の「イメージの縮率」の表示元）。
 		double RecordScaleOf(MCObjectHandle object)
 		{
@@ -560,6 +597,11 @@ namespace HomeskzIfcImport::draw
 		for (const MCObjectHandle object : counts.objects)
 			scaleImages(object);
 		note("完了");
+#ifdef VW_DEV_BUILD
+		// 【一時計装】最終状態の全欄。どの欄が縮率のポップアップなのかを突き止めるため。
+		if (!counts.objects.empty())
+			counts.recordFields = DumpAllRecordFields(counts.objects.front());
+#endif
 
 		// **最終状態を実測して持ち帰る。** 縮尺の違うビューポートが混在していないか、レコードが
 		// 残ったかは絵からは分からない（docs/DEV-NOTES.md「グラフィック凡例」）。
@@ -609,7 +651,7 @@ namespace HomeskzIfcImport::draw
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
 			counts.sourceLeft == 0 && counts.filterLeft == 0 && !imageScaleLeft &&
 			counts.imagesLeft == 0 && !imageScaleReverted && !recordOdd &&
-			counts.scaleReport.empty())
+			counts.scaleReport.empty() && counts.recordFields.empty())
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -668,6 +710,9 @@ namespace HomeskzIfcImport::draw
 		// 「レコード」と「中身（ビューポート）」がどう動いたかが並ぶ。
 		if (!counts.scaleReport.empty())
 			text += "凡例の縮率の推移: " + counts.scaleReport + "。";
+		// 【一時計装】同じく dev ビルドのみ。最終状態のレコード全欄（draw/Legend.h）。
+		if (!counts.recordFields.empty())
+			text += "凡例レコードの全欄: " + counts.recordFields + "。";
 		if (imageScaleReverted)
 		{
 			// 与えた縮尺のイメージが作り直しの後に 1 つも残っていない。何を何にしようとしたかを
