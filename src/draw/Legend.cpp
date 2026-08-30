@@ -129,21 +129,30 @@ namespace HomeskzIfcImport::draw
 			counts.imageScaleAfter = after;
 		}
 
-		// container の中で最初に見つけた凡例イメージ（ビューポート）の縮尺。見つからなければ 0。
+		// container の中のビューポートに scale の縮尺のものが 1 つでもあるか。
 		// **作り直しの後に読み直す**ためのもので、図面は変えない。
-		double FirstViewportScaleIn(MCObjectHandle container, int depth)
+		//
+		// **「最初の 1 つ」を見てはいけない。** 凡例の中にはビューポートが複数あり、凡例
+		// イメージ以外を拾うと「戻された」と誤報する（実機で 1 度出した——描画は伏図の縮尺に
+		// なっているのに診断は「50 → 75 と書いて 50」だった）。**どれか 1 つでも目標の縮尺で
+		// あればよい**ので、全部見て 1 つ当たれば true。
+		bool HasViewportAtScale(MCObjectHandle container, double scale, int depth)
 		{
 			if (container == nil || depth <= 0)
-				return 0.0;
+				return false;
 			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil;
 				 h = gSDK->NextObject(h))
 			{
 				if (gSDK->GetObjectTypeN(h) == kViewportNode)
-					return ViewportScale(h);
-				if (const double found = FirstViewportScaleIn(h, depth - 1); found != 0.0)
-					return found;
+				{
+					if (std::abs(ViewportScale(h) - scale) <= std::abs(scale) * 1.0e-6)
+						return true;
+					continue; // ビューポートの中へは潜らない（ScaleImagesIn と同じ理由）
+				}
+				if (HasViewportAtScale(h, scale, depth - 1))
+					return true;
 			}
-			return 0.0;
+			return false;
 		}
 
 		// container の中を辿って凡例イメージ（kViewportNode / kWorksheetImageNode）に縮率を与え、内訳を
@@ -428,14 +437,16 @@ namespace HomeskzIfcImport::draw
 		for (const MCObjectHandle object : counts.objects)
 			gSDK->ResetObject(object);
 
-		// **作り直した後の縮尺を 1 つだけ読み直す。** 戻されていれば枠も中身も既定のままで、
+		// **作り直しが縮尺を戻していないかを見る。** 戻っていれば枠も中身も既定のままで、
 		// 絵からは「何も変わらなかった」としか見えないので、診断で見分けられるようにする。
+		// 目標の縮尺のビューポートが**どの凡例にも 1 つも無い**ときだけ異常とみなす。
+		// 見つからなければ 0 のままにして、それを「戻された」の印にする。
+		counts.imageScaleAfter = 0.0;
 		for (const MCObjectHandle object : counts.objects)
 		{
-			const double after = FirstViewportScaleIn(object, kImageSearchDepth);
-			if (after != 0.0)
+			if (HasViewportAtScale(object, scale, kImageSearchDepth))
 			{
-				counts.imageScaleAfter = after;
+				counts.imageScaleAfter = scale;
 				break;
 			}
 		}
@@ -447,12 +458,13 @@ namespace HomeskzIfcImport::draw
 		// 1 つも見つからない」「書いたのに読み戻しが違う」は絵からは分からない
 		// （draw/Legend.h の applyLegendImageScale）。
 		const bool imageScaleLeft = counts.drawn > 0 && counts.imagesScaled == 0;
-		const bool imageScaleOdd = counts.imageScaleTarget != 0.0 &&
-								   std::abs(counts.imageScaleAfter - counts.imageScaleTarget) >
-									   std::abs(counts.imageScaleTarget) * 1.0e-6;
+		// 縮尺を与えたのに、作り直しの後にその縮尺のイメージが 1 つも残っていない
+		// ＝作り直しが既定へ戻した（draw/Legend.h の applyLegendImageScale）。
+		const bool imageScaleReverted =
+			counts.imageScaleTarget != 0.0 && counts.imageScaleAfter == 0.0;
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
 			counts.sourceLeft == 0 && counts.filterLeft == 0 && !imageScaleLeft &&
-			counts.imagesLeft == 0 && !imageScaleOdd)
+			counts.imagesLeft == 0 && !imageScaleReverted)
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -495,19 +507,18 @@ namespace HomeskzIfcImport::draw
 		if (counts.imagesLeft > 0)
 			text += "縮率を書けなかった凡例イメージ " + std::to_string(counts.imagesLeft) +
 					" 件（そのイメージだけ既定の 1:50 のままです）。";
-		if (imageScaleOdd)
+		if (imageScaleReverted)
 		{
-			// 与えた値と読み戻しが食い違う＝単位の見立て（分母か倍率か）を外している見込み。
-			// 3 つの値をそのまま出せば、実機のダイアログの表示と突き合わせて判定できる。
+			// 与えた縮尺のイメージが作り直しの後に 1 つも残っていない。何を何にしようとしたかを
+			// そのまま出せば、実機の OIP の表示と突き合わせて判定できる。
 			const auto num = [](double value)
 			{
 				std::array<char, 32> buffer{};
 				std::snprintf(buffer.data(), buffer.size(), "%g", value);
 				return std::string(buffer.data());
 			};
-			text += "凡例イメージの縮率が書いた値と違います（" + num(counts.imageScaleBefore) +
-					" → " + num(counts.imageScaleTarget) + " と書いて " +
-					num(counts.imageScaleAfter) + "）。";
+			text += "凡例イメージの縮率が作り直しで戻されました（" + num(counts.imageScaleBefore) +
+					" → " + num(counts.imageScaleTarget) + " と書きました）。";
 		}
 		return text;
 	}
