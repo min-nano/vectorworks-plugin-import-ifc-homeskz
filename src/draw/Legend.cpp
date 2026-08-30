@@ -460,22 +460,29 @@ namespace HomeskzIfcImport::draw
 		if (scale <= 0.0)
 			return;
 
-		// ★**順序**: レコードへ書く → 作り直す → ビューポート（中身）を変える → 作り直す。
+		// ★**順序**: 中身 → 作り直し → **中身をもう一度** → レコード。以降は作り直さない。
 		//
-		// 実機で 3 通り試して、それぞれどこが動かないかが分かっている:
-		//   * レコード → 作り直し → ビューポート … 枠が「変える前の中身」に合ったまま残る
-		//     （枠は作り直しのときに中身から組み直るので、中身を変えるのが後だと間に合わない）
-		//   * ビューポート → 作り直し … 絵は揃うが OIP の表示（レコード）が既定のまま
-		//   * ビューポート → 作り直し → レコード … **絵が 1:50 へ戻る**。書き込みが起こす
-		//     再生成が「書く前の値」で走るため、レコードだけ 75 で絵は 1:50 という最悪の形
+		// 実機で各段階を測って確定した（診断の「凡例の縮率の推移」）:
 		//
-		// **書き込みの後に作り直しが来るように並べる**のがこの順序のねらい。レコードを先に
-		// 書いておけば、続く作り直しがその値を使う。中身はその後に与え、最後の作り直しで枠が
-		// 中身へ組み直る。
+		//   開始   記録=50 中身=[50,50,50]
+		//   記録後 記録=75 中身=[50,50,50]   ← レコードは書ける。中身は動かない
+		//   作直後 記録=75 中身=[50,50,50]   ← 作り直しはレコードを中身へ伝えない
+		//   中身後 記録=75 中身=[75,75,75]   ← 中身は書ける
+		//   完了   記録=75 中身=[50,50,50]   ← **作り直しが中身を既定へ戻す**
 		//
-		// 各段階の値は counts.scaleReport へ積む（dev ビルドのみ）。**どこで何が動くかを
-		// 実測で押さえる**ためで、これが無いと同じ推測を繰り返すことになる。
-		const auto note = [&counts, scale](const char* label)
+		// 読み取れること:
+		//   * **中身を戻すのは作り直し**であって、レコードへの書き込みではない（書き込みは
+		//     中身を動かさない）。かつて「書き込みが絵を壊す」と読んだのは誤りだった。
+		//   * 作り直しは中身もレコードも**凡例イメージの定義**から作り直す。定義は 1:50 の
+		//     ままなので、何を書いてあっても作り直せば 50 に戻る。
+		//   * 一方で**枠は作り直しのときに「その時点の中身」から組み直る**。だから中身を
+		//     先に変えておけば、枠は 75 で組まれる。
+		//
+		// よって「作り直しで枠を組ませ、その後に中身とレコードを入れ直す」のが唯一の並び。
+		// **最後に作り直さない**ことが肝で、作り直した瞬間に全部 50 へ戻る。
+		//
+		// 各段階の値は counts.scaleReport へ積む（dev ビルドのみ）。
+		const auto note = [&counts](const char* label)
 		{
 #ifdef VW_DEV_BUILD
 			if (counts.objects.empty())
@@ -488,38 +495,15 @@ namespace HomeskzIfcImport::draw
 #else
 			(void)label;
 			(void)counts;
-			(void)scale;
 #endif
 		};
 
-		note("開始");
-
-		// 1) レコード（OIP の「イメージの縮率」）へ書く。
-		for (const MCObjectHandle object : counts.objects)
-		{
-			try
-			{
-				VWParametricObj pio(object);
-				SetParamRealChecked(pio, TXString(kFieldImageScale), scale);
-			}
-			catch (...)
-			{
-				continue; // 書けなくても以降のビューポート側で絵は揃う
-			}
-		}
-		note("記録後");
-
-		// 2) 作り直す。**書き込みの後に来る作り直し**なので、ここで新しい値が使われるはず。
-		for (const MCObjectHandle object : counts.objects)
-			gSDK->ResetObject(object);
-		note("作直後");
-
-		// 3) 中身（凡例イメージ＝ビューポート）の縮尺を与える。
+		// 凡例イメージ（＝ビューポート）へ縮尺を与える。
 		//
 		// **入口を 1 つに絞らない。** PIO の中身の入口は版によって 3 通りあり（draw/Tag の
 		// HeldTagLayout が同じ理由で 2 つ見ている）、加えて凡例は補助オブジェクトを何本も
 		// ぶら下げている。どこに凡例イメージが居るか分からないうちは、辿れる先を全部辿る。
-		for (const MCObjectHandle object : counts.objects)
+		const auto scaleImages = [&counts, scale](MCObjectHandle object)
 		{
 			ScaleImagesIn(object, scale, kImageSearchDepth, counts);
 			ScaleImagesIn(gSDK->GetCustomObjectProfileGroup(object), scale, kImageSearchDepth,
@@ -529,16 +513,44 @@ namespace HomeskzIfcImport::draw
 			for (MCObjectHandle aux = gSDK->FirstAuxObject(object); aux != nil;
 				 aux = gSDK->NextObject(aux))
 				ScaleImagesIn(aux, scale, kImageSearchDepth, counts);
-		}
-		note("中身後");
+		};
 
-		// 4) もう一度作り直して、枠を中身へ組み直させる（セルの枠は kBoxNode ＝ SDK の
-		//    kInternalID_GraphicLegendFrame に当たる独立オブジェクトで、作り直しのときに
-		//    中身から組み直る）。**縮率を 1 つも与えられていないなら作り直さない。**
+		note("開始");
+
+		// 1) 中身を伏図の縮尺にする。
+		for (const MCObjectHandle object : counts.objects)
+			scaleImages(object);
+		note("中身");
+
+		// 2) 作り直して、枠を「いまの中身」に合わせて組み直させる。**この作り直しで中身は
+		//    既定へ戻る**が、枠は 75 で組まれた後なので崩れない。
+		//    **縮率を 1 つも与えられていないなら作り直さない。**
 		if (counts.imagesScaled == 0)
 			return;
 		for (const MCObjectHandle object : counts.objects)
 			gSDK->ResetObject(object);
+		note("作直");
+
+		// 3) 戻された中身を入れ直す。**ここから先は作り直さない。**
+		for (const MCObjectHandle object : counts.objects)
+			scaleImages(object);
+		note("再設定");
+
+		// 4) OIP の「イメージの縮率」（レコード）も合わせる。**表示と実描画を食い違わせない**
+		//    ——表示が既定のままだと、ユーザーがその欄を触った拍子に絵まで戻ってしまう。
+		//    書き込みは中身を動かさない（上の実測）。
+		for (const MCObjectHandle object : counts.objects)
+		{
+			try
+			{
+				VWParametricObj pio(object);
+				SetParamRealChecked(pio, TXString(kFieldImageScale), scale);
+			}
+			catch (...)
+			{
+				continue; // 表示が既定のままになるだけ。絵は中身側で揃っている
+			}
+		}
 		note("完了");
 
 		// **最終状態を実測して持ち帰る。** 縮尺の違うビューポートが混在していないか、レコードが
