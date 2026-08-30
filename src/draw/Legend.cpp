@@ -139,7 +139,7 @@ namespace HomeskzIfcImport::draw
 		{
 			std::array<char, 32> buffer{};
 			std::snprintf(buffer.data(), buffer.size(), "%g", value);
-			return std::string(buffer.data());
+			return {buffer.data()};
 		}
 
 		// 【一時計装】凡例のレコードの `ImageScale`（OIP の「イメージの縮率」の表示元）。
