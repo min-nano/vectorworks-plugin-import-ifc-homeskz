@@ -64,6 +64,14 @@ namespace HomeskzIfcImport::core
 	// 読めた値があれば必ずそちらを使う**（draw/DrawUtil の SheetPaperArea）。
 	inline constexpr Vec2 kDefaultPaperSize{420.0, 297.0};
 
+	// インチ → mm。用紙まわりの長さは SDK では一貫して**インチで返る**（用紙の大きさ・
+	// シートレイヤの大きさ）ので、換算の係数はここに 1 つだけ置く——描画側の実測
+	// （draw/DrawUtil の SheetPaperArea）と、下の resolvePageMargins が共有する唯一の定義。
+	inline constexpr double kMillimetersPerInch = 25.4;
+
+	// 「用紙 − 余白」とシートレイヤの大きさを突き合わせるときの遊び（用紙 mm）。
+	inline constexpr double kPageMarginMatchTol = 0.5;
+
 	// 軸組図の段数。**上下 2 段**（要件）。1 段に何枚入るかは用紙の幅と縮尺が決める。
 	inline constexpr std::size_t kSectionRows = 2;
 
@@ -93,6 +101,55 @@ namespace HomeskzIfcImport::core
 			return Vec2{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
 		}
 	};
+
+	// 用紙の 4 辺の余白。**解釈前は SDK が返した生の値**（単位が分からない）、解釈後は
+	// 用紙 mm（resolvePageMargins）。
+	struct PageMargins
+	{
+		double left = 0.0;
+		double right = 0.0;
+		double bottom = 0.0;
+		double top = 0.0;
+	};
+
+	// resolvePageMargins の結果。
+	//
+	//   margins  … 用紙 mm の余白。解釈できなければ 4 辺とも 0（＝用紙いっぱいを使う）
+	//   resolved … 意味のある値として解釈できたか。★**四辺 0 も「解釈できた」**
+	//   inInches … 生の値をインチとみなしたか（false なら mm）。四辺 0 のときはどちらでも
+	//              同じ値になるので意味を持たない（false のまま）
+	struct PageMarginsResolution
+	{
+		PageMargins margins;
+		bool resolved = false;
+		bool inInches = false;
+	};
+
+	// SDK が返した生の余白（raw）を用紙 mm の余白へ解釈する。paper は用紙の外形の大きさ、
+	// sheet はシートレイヤの大きさ（＝印刷可能領域。読めなければ 0 を渡す）で、どちらも
+	// 用紙 mm。
+	//
+	// 【なぜ core に置くか】余白を読むのは SDK の仕事だが、**読めた数字をどう解釈するか**
+	// は単位の突き合わせという算数でしかないので、描画側から切り離してここで無 SDK テスト
+	// する（CLAUDE.md「描画側から切り離せる純計算」）。
+	//
+	// ★**GetPageMargins だけ単位がヘッダに書かれていない**（M18。実機では図面の単位で
+	// 返った）ので、インチと mm のどちらで返ったかを次の順で決める。
+	//   1. インチとみなした値で「用紙 − 余白」がシートレイヤの大きさと一致するなら
+	//      **インチ**（用紙まわりの長さは SDK では一貫してインチなので、これが本命）。
+	//   2. mm とみなした値で一致するなら **mm**。
+	//   3. どちらとも一致しないときは**用紙に収まる方**。両方収まるならインチ（1 の理由）。
+	// どれでも決まらなければ resolved = false（描画側は用紙いっぱいで割り付け、生の値を
+	// 診断へ出す。draw/Sheet）。
+	//
+	// ★**四辺 0 は「読めなかった」ではない。** 縁なし印刷ができる機種では**余白 0 の用紙
+	// 設定が実際に選べる**ので、0 はそのまま「余白なし＝用紙いっぱいが印刷可能領域」として
+	// 受け取る（resolved = true）——ここを「読めなかった」に倒すと、正しい設定に警告が出る
+	// （M18 の後で実機から上がった誤判定）。例外は**シートレイヤが用紙より小さい**とき
+	// ——余白が在るはずなのに 0 が返ったということなので、そのときだけ解釈できなかった側へ
+	// 倒して生の値を診断に出させる。
+	PageMarginsResolution resolvePageMargins(const PageMargins& raw, const Vec2& paper,
+											 const Vec2& sheet);
 
 	// content（実寸 mm）が available（用紙 mm）に収まる最大の図＝**最小の分母**を階梯から
 	// 選ぶ。どれにも収まらなければ最大の分母（＝いちばん小さい図）を返す——**図がはみ出す

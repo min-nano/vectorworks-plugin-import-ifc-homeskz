@@ -12,6 +12,10 @@
 //	    同じ内容・同じ印刷可能領域なら**何度計算しても同じ**（用紙をめくっても図が動かない）。
 //	  * 軸組図は**上下 2 段**が縦に収まる縮尺になること・1 段の枚数が用紙の幅から決まること・
 //	    マスが重ならないこと・必要なシートレイヤの枚数とタイトルの連番。
+//	  * 用紙の余白の解釈（resolvePageMargins）——単位がインチか mm かを「用紙 − 余白 ＝
+//	    シートレイヤの大きさ」で決めること・**四辺 0 を「余白なし」として受け取る**こと
+//	    （縁なし印刷ができる機種の設定。ここを「読めなかった」に倒すと誤警告になる）・
+//	    そのうえで**シートレイヤが用紙より小さいときの 0 は信用しない**こと。
 //
 
 #include "Fixtures.h"
@@ -263,6 +267,93 @@ TEST(SectionSheetTitleNumbersOnlyWhenSplit)
 	// 複数枚なら 1 起点で振る。
 	CHECK(core::sectionSheetTitle("軸組図", 0, 3) == "軸組図(1)");
 	CHECK(core::sectionSheetTitle("軸組図", 2, 3) == "軸組図(3)");
+}
+
+TEST(PageMarginsZeroMeansNoMargin)
+{
+	// ★**四辺 0 は「読めなかった」ではない**（縁なし印刷ができる機種では余白 0 の用紙設定
+	// が実際に選べる）。用紙とシートレイヤの大きさが同じ＝余白の入る隙が無いのだから、
+	// 0 をそのまま受け取る（ここを false に倒すと、正しい設定に警告が出る）。
+	const core::PageMarginsResolution resolved =
+		core::resolvePageMargins(core::PageMargins{}, Vec2{420.0, 297.0}, Vec2{420.0, 297.0});
+	CHECK(resolved.resolved);
+	CHECK(resolved.margins.left == 0.0);
+	CHECK(resolved.margins.right == 0.0);
+	CHECK(resolved.margins.bottom == 0.0);
+	CHECK(resolved.margins.top == 0.0);
+
+	// シートレイヤの大きさが読めなかった（0 を渡した）ときも同じ——0 を疑う根拠が無い。
+	const core::PageMarginsResolution noSheet =
+		core::resolvePageMargins(core::PageMargins{}, Vec2{420.0, 297.0}, Vec2{});
+	CHECK(noSheet.resolved);
+}
+
+TEST(PageMarginsZeroIsRejectedWhenTheSheetIsSmallerThanThePaper)
+{
+	// 印刷可能領域（シートレイヤ 414 × 291）が用紙（420 × 297）より小さいのに余白 0 が
+	// 返るのは辻褄が合わない＝その 0 は信用できない。解釈できなかった側へ倒して、生の値を
+	// 診断へ出させる（draw/Sheet）。
+	const core::PageMarginsResolution resolved =
+		core::resolvePageMargins(core::PageMargins{}, Vec2{420.0, 297.0}, Vec2{414.0, 291.0});
+	CHECK(!resolved.resolved);
+	CHECK(resolved.margins.left == 0.0);
+}
+
+TEST(PageMarginsReadAsMillimetersWhenTheyMatchTheSheet)
+{
+	// 実機の実測値（M18。mm の図面で 左2.963 右3.006 下2.963 上2.963 が返り、
+	// 420 − 5.969 = 414.03 ≒ シートレイヤの 414）。mm とみなした方が一致するので mm。
+	const core::PageMargins raw{2.963, 3.006, 2.963, 2.963};
+	const core::PageMarginsResolution resolved =
+		core::resolvePageMargins(raw, Vec2{420.0, 297.0}, Vec2{414.0, 291.0});
+	CHECK(resolved.resolved);
+	CHECK(!resolved.inInches);
+	CHECK(near(resolved.margins.left, 2.963));
+	CHECK(near(resolved.margins.top, 2.963));
+}
+
+TEST(PageMarginsReadAsInchesWhenTheyMatchTheSheet)
+{
+	// 図面の単位がインチなら余白もインチで返るはず。四辺 0.25 インチ（6.35mm）なら
+	// 用紙 420 × 297 に対しシートレイヤは 407.3 × 284.3 になる——一致するのでインチ。
+	const core::PageMargins raw{0.25, 0.25, 0.25, 0.25};
+	const core::PageMarginsResolution resolved =
+		core::resolvePageMargins(raw, Vec2{420.0, 297.0}, Vec2{407.3, 284.3});
+	CHECK(resolved.resolved);
+	CHECK(resolved.inInches);
+	CHECK(near(resolved.margins.left, 6.35));
+}
+
+TEST(PageMarginsFallBackToWhicheverUnitFitsThePaper)
+{
+	// シートレイヤの大きさが読めない（0）ときは突き合わせができないので、用紙に収まる方を
+	// 採る。0.25 はインチでもmm でも収まる → **インチ**（用紙まわりの長さは SDK では
+	// 一貫してインチなので、そちらが本命）。
+	const core::PageMarginsResolution inches = core::resolvePageMargins(
+		core::PageMargins{0.25, 0.25, 0.25, 0.25}, Vec2{420.0, 297.0}, Vec2{});
+	CHECK(inches.resolved);
+	CHECK(inches.inInches);
+
+	// 四辺 100 はインチとみなすと 5080mm となって用紙に載らない → mm。
+	const core::PageMarginsResolution millimeters = core::resolvePageMargins(
+		core::PageMargins{100.0, 100.0, 100.0, 100.0}, Vec2{420.0, 297.0}, Vec2{});
+	CHECK(millimeters.resolved);
+	CHECK(!millimeters.inInches);
+	CHECK(near(millimeters.margins.left, 100.0));
+}
+
+TEST(PageMarginsRejectValuesThatCannotBeMeant)
+{
+	// 負の余白（読めていない）。
+	const core::PageMarginsResolution negative = core::resolvePageMargins(
+		core::PageMargins{-1.0, 0.0, 0.0, 0.0}, Vec2{420.0, 297.0}, Vec2{414.0, 291.0});
+	CHECK(!negative.resolved);
+
+	// どちらの単位でも用紙に載らない（＝解釈のしようがない）。用紙いっぱいで割り付ける。
+	const core::PageMarginsResolution huge = core::resolvePageMargins(
+		core::PageMargins{1000.0, 1000.0, 1000.0, 1000.0}, Vec2{420.0, 297.0}, Vec2{});
+	CHECK(!huge.resolved);
+	CHECK(huge.margins.left == 0.0);
 }
 
 TEST_MAIN();

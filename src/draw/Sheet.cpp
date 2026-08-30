@@ -319,9 +319,12 @@ namespace HomeskzIfcImport::draw
 		// 計装は消す」）。余白の生の値と単位の解釈は規約を詰めるために要ったもので、
 		// 実機で確定した（図面の単位で返る）ので、**解釈できなかったときだけ**下の診断行へ
 		// 出す。はみ出し・凡例との重なりも同じく件数として下で数える。
+
+		// 用紙まわりの長さは mm の整数で書く（下の割り付けの行と、余白の食い違いを説明する
+		// 行が共有する）。
+		const auto mm = [](double value) { return std::to_string(std::lround(value)); };
 		if (outInfo != nullptr && paper.has_value())
 		{
-			const auto mm = [](double value) { return std::to_string(std::lround(value)); };
 			std::string text = "伏図の割り付け（mm）: 用紙 " + mm(paper->paper.x) + "×" +
 							   mm(paper->paper.y) + " / 印刷可能 " + mm(paper->printable.width()) +
 							   "×" + mm(paper->printable.height()) + " / 凡例 " + mm(legendWidth);
@@ -335,8 +338,10 @@ namespace HomeskzIfcImport::draw
 		// 「命令はあるのに 0 枚」のときに、シートレイヤを作れないのか、ビューポートを
 		// 作れないのかを切り分けられるようにする。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
-		// 余白が読めなかった（＝用紙いっぱいで割り付けた）のは異常側。生の値を添えて、
+		// 余白を解釈できなかった（＝用紙いっぱいで割り付けた）のは異常側。生の値を添えて、
 		// 単位の解釈を疑えるようにする（draw/DrawUtil の SheetPaperArea）。
+		// ★**四辺 0 の用紙設定はここに来ない**（縁なし印刷ができる機種では余白 0 が実際に
+		// 選べるので、0 は「余白なし」として受け取る。core::resolvePageMargins）。
 		const bool marginsUnread = paper.has_value() && !paper->marginsRead;
 		if (note != nullptr &&
 			(missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
@@ -378,11 +383,32 @@ namespace HomeskzIfcImport::draw
 					std::snprintf(buffer.data(), buffer.size(), "%.3f", value);
 					return std::string(buffer.data());
 				};
-				const SheetMargins& margins = paper->rawMargins;
-				text += "用紙の余白を解釈できなかったので、用紙いっぱいで割り付けました"
-						"（SDK が返した値: 左" +
-						raw(margins.left) + " 右" + raw(margins.right) + " 下" +
-						raw(margins.bottom) + " 上" + raw(margins.top) + "）。";
+				const core::PageMargins& margins = paper->rawMargins;
+				const bool zero = margins.left <= 0.0 && margins.right <= 0.0 &&
+								  margins.bottom <= 0.0 && margins.top <= 0.0;
+				// 四辺 0 でここへ来る道は 2 つしかない（core::resolvePageMargins が 0 を
+				// 「余白なし」として受け取るため）——シートレイヤが用紙より小さい
+				// （＝余白が在るはずなのに 0 が返った）か、SDK から読み出せずに 0 のままか。
+				// **どちらなのかを書き分ける**（縁なし印刷の 0 と取り違えないため）。
+				const bool sheetSmaller =
+					paper->sheet.x > 0.0 && paper->sheet.y > 0.0 &&
+					((paper->paper.x - paper->sheet.x) > core::kPageMarginMatchTol ||
+					 (paper->paper.y - paper->sheet.y) > core::kPageMarginMatchTol);
+				text += "用紙の余白を解釈できなかったので、用紙いっぱいで割り付けました";
+				if (zero && !sheetSmaller)
+					text += "（SDK から余白を読み出せませんでした）。";
+				else
+				{
+					text += "（SDK が返した値: 左" + raw(margins.left) + " 右" +
+							raw(margins.right) + " 下" + raw(margins.bottom) + " 上" +
+							raw(margins.top) + "）。";
+					if (zero)
+						text += "四辺 0 ですが、シートレイヤ（" + mm(paper->sheet.x) + "×" +
+								mm(paper->sheet.y) + "）が用紙（" + mm(paper->paper.x) + "×" +
+								mm(paper->paper.y) +
+								"）より小さいので、余白なしとは見なして"
+								"いません。";
+				}
 			}
 			addNote(text);
 		}
