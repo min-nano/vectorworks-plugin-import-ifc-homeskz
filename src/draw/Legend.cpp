@@ -59,6 +59,10 @@ namespace HomeskzIfcImport::draw
 		// **中身が必要とする幅より少し広い程度**に留める。
 		constexpr double kBoxWidth = 40.0;
 
+		// OIP の「イメージの縮率」の表示元。**分母を実数で持つ**欄で、1:75 なら 75。
+		// 表示名が空なので OIP の項目名からは引けない——universal 名で直に書く。
+		constexpr const char* kFieldImageScale = "ImageScale";
+
 		// **凡例イメージはビューポート**（`Kernel/API/Objs.TDType.h` の `kViewportNode` ＝ 122）。
 		// 実機で凡例の中身の節点型を数えて分かった——`0×102, 3×66, 10×6, 11×36, 86×42,
 		// 122×12`、すなわち枠（kBoxNode）・文字（kTextNode）・グループ・PIO と、**凡例 1 つに
@@ -128,6 +132,40 @@ namespace HomeskzIfcImport::draw
 			counts.imageScaleTarget = target;
 			counts.imageScaleAfter = after;
 		}
+
+#ifdef VW_DEV_BUILD
+		// 【一時計装 ── 縮率が安定したら消す】container の中のビューポートの縮尺を順に並べる。
+		//
+		// **なぜ要るか**: 作り直しの後に「50 を返すビューポート」と「75 で描かれている絵」が
+		// 同居していた。凡例の中に縮尺の違うビューポートが複数あるのか、それとも読み方が
+		// おかしいのかは、**全部並べてみないと分からない**（draw/Legend.h）。
+		std::string DescribeViewportScales(MCObjectHandle container, int depth)
+		{
+			if (container == nil || depth <= 0)
+				return {};
+			std::string text;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil;
+				 h = gSDK->NextObject(h))
+			{
+				if (gSDK->GetObjectTypeN(h) == kViewportNode)
+				{
+					std::array<char, 32> buffer{};
+					std::snprintf(buffer.data(), buffer.size(), "%g", ViewportScale(h));
+					if (!text.empty())
+						text += ", ";
+					text += buffer.data();
+					continue; // 中へは潜らない
+				}
+				const std::string inner = DescribeViewportScales(h, depth - 1);
+				if (inner.empty())
+					continue;
+				if (!text.empty())
+					text += ", ";
+				text += inner;
+			}
+			return text;
+		}
+#endif
 
 		// container の中のビューポートに scale の縮尺のものが 1 つでもあるか。
 		// **作り直しの後に読み直す**ためのもので、図面は変えない。
@@ -437,10 +475,33 @@ namespace HomeskzIfcImport::draw
 		for (const MCObjectHandle object : counts.objects)
 			gSDK->ResetObject(object);
 
-		// **作り直しが縮尺を戻していないかを見る。** 戻っていれば枠も中身も既定のままで、
-		// 絵からは「何も変わらなかった」としか見えないので、診断で見分けられるようにする。
-		// 目標の縮尺のビューポートが**どの凡例にも 1 つも無い**ときだけ異常とみなす。
-		// 見つからなければ 0 のままにして、それを「戻された」の印にする。
+		// ★**最後に OIP の表示欄（レコードの `ImageScale`）も合わせる。作り直しはもう挟まない。**
+		//
+		// **表示が実描画と食い違ったまま放置しない。** OIP が 1:50 と出ているのは「設定が
+		// 入っていない」ということで、何かの拍子に凡例がその値で作り直されると**描画のほうが
+		// 1:50 へ戻ってしまう**（不意に壊れる）。表示と実際を一致させておけば、作り直されても
+		// 同じ絵になる。
+		//
+		// これまで「レコードは書いても戻される」と見えていたのは、**書いた後に作り直していた**
+		// ため——作り直しはこの欄を凡例イメージの状態から計算し直すので、中身がまだ既定の
+		// ままの段階で書いても上書きされる。中身を合わせ終えた**後**に書けば、計算し直す
+		// きっかけが無いので残る。
+		for (const MCObjectHandle object : counts.objects)
+		{
+			try
+			{
+				VWParametricObj pio(object);
+				if (!SetParamRealChecked(pio, TXString(kFieldImageScale), scale))
+					++counts.recordLeft;
+			}
+			catch (...)
+			{
+				++counts.recordLeft;
+			}
+		}
+
+		// **最終状態を実測して持ち帰る。** 縮尺の違うビューポートが混在していないか、レコードが
+		// 残ったかは絵からは分からない（docs/DEV-NOTES.md「グラフィック凡例」）。
 		counts.imageScaleAfter = 0.0;
 		for (const MCObjectHandle object : counts.objects)
 		{
@@ -450,6 +511,23 @@ namespace HomeskzIfcImport::draw
 				break;
 			}
 		}
+		for (const MCObjectHandle object : counts.objects)
+		{
+			try
+			{
+				counts.recordScale =
+					VWParametricObj(object).GetParamReal(TXString(kFieldImageScale));
+			}
+			catch (...)
+			{
+				counts.recordScale = 0.0;
+			}
+			break;
+		}
+#ifdef VW_DEV_BUILD
+		if (!counts.objects.empty())
+			counts.scaleReport = DescribeViewportScales(counts.objects.front(), kImageSearchDepth);
+#endif
 	}
 
 	std::string legendDiagnostics(const LegendCounts& counts)
@@ -462,9 +540,15 @@ namespace HomeskzIfcImport::draw
 		// ＝作り直しが既定へ戻した（draw/Legend.h の applyLegendImageScale）。
 		const bool imageScaleReverted =
 			counts.imageScaleTarget != 0.0 && counts.imageScaleAfter == 0.0;
+		// **OIP の表示が実描画と食い違っている。** 表示（レコード）が既定のままだと、何かの
+		// 拍子に凡例がその値で作り直されて**描画のほうが戻る**ので、黙って見過ごさない。
+		const bool recordOdd = counts.imageScaleTarget != 0.0 && counts.recordScale != 0.0 &&
+							   std::abs(counts.recordScale - counts.imageScaleTarget) >
+								   std::abs(counts.imageScaleTarget) * 1.0e-6;
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
 			counts.sourceLeft == 0 && counts.filterLeft == 0 && !imageScaleLeft &&
-			counts.imagesLeft == 0 && !imageScaleReverted)
+			counts.imagesLeft == 0 && !imageScaleReverted && counts.recordLeft == 0 && !recordOdd &&
+			counts.scaleReport.empty())
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -507,6 +591,24 @@ namespace HomeskzIfcImport::draw
 		if (counts.imagesLeft > 0)
 			text += "縮率を書けなかった凡例イメージ " + std::to_string(counts.imagesLeft) +
 					" 件（そのイメージだけ既定の 1:50 のままです）。";
+		if (counts.recordLeft > 0)
+			text += "イメージの縮率（OIP の表示）を書けなかった凡例 " +
+					std::to_string(counts.recordLeft) + " 件。";
+		if (recordOdd)
+		{
+			const auto num = [](double value)
+			{
+				std::array<char, 32> buffer{};
+				std::snprintf(buffer.data(), buffer.size(), "%g", value);
+				return std::string(buffer.data());
+			};
+			text += "OIP の「イメージの縮率」が実描画と食い違っています（表示 " +
+					num(counts.recordScale) + " / 実際 " + num(counts.imageScaleTarget) +
+					"）。凡例が作り直されると描画が表示側へ戻る恐れがあります。";
+		}
+		// 【一時計装】dev ビルドでのみ埋まる（draw/Legend.h の scaleReport）。
+		if (!counts.scaleReport.empty())
+			text += "凡例の中のビューポートの縮尺: " + counts.scaleReport + "。";
 		if (imageScaleReverted)
 		{
 			// 与えた縮尺のイメージが作り直しの後に 1 つも残っていない。何を何にしようとしたかを
