@@ -134,6 +134,27 @@ namespace HomeskzIfcImport::draw
 		}
 
 #ifdef VW_DEV_BUILD
+		// 【一時計装 ── 縮率が安定したら消す】実数を短く整形する。
+		std::string FormatScale(double value)
+		{
+			std::array<char, 32> buffer{};
+			std::snprintf(buffer.data(), buffer.size(), "%g", value);
+			return std::string(buffer.data());
+		}
+
+		// 【一時計装】凡例のレコードの `ImageScale`（OIP の「イメージの縮率」の表示元）。
+		double RecordScaleOf(MCObjectHandle object)
+		{
+			try
+			{
+				return VWParametricObj(object).GetParamReal(TXString(kFieldImageScale));
+			}
+			catch (...)
+			{
+				return 0.0;
+			}
+		}
+
 		// 【一時計装 ── 縮率が安定したら消す】container の中のビューポートの縮尺を順に並べる。
 		//
 		// **なぜ要るか**: 作り直しの後に「50 を返すビューポート」と「75 で描かれている絵」が
@@ -439,24 +460,67 @@ namespace HomeskzIfcImport::draw
 		if (scale <= 0.0)
 			return;
 
-		// ★**中身を先に、枠は作り直しに組み直させる。** セルの枠（`kBoxNode`。SDK の
-		// `kInternalID_GraphicLegendFrame` に当たる）も凡例イメージと同じく独立した
-		// オブジェクトで、**作り直しのときに中身に合わせて組み直される**。だから順序は
+		// ★**順序**: レコードへ書く → 作り直す → ビューポート（中身）を変える → 作り直す。
 		//
-		//   ビューポート（中身）の縮尺を変える → 作り直す → 枠が中身に合わせて組み直る
+		// 実機で 3 通り試して、それぞれどこが動かないかが分かっている:
+		//   * レコード → 作り直し → ビューポート … 枠が「変える前の中身」に合ったまま残る
+		//     （枠は作り直しのときに中身から組み直るので、中身を変えるのが後だと間に合わない）
+		//   * ビューポート → 作り直し … 絵は揃うが OIP の表示（レコード）が既定のまま
+		//   * ビューポート → 作り直し → レコード … **絵が 1:50 へ戻る**。書き込みが起こす
+		//     再生成が「書く前の値」で走るため、レコードだけ 75 で絵は 1:50 という最悪の形
 		//
-		// でなければならない。**逆をやって外した**——レコードへ書いてから作り直し、その後で
-		// ビューポートを変えていたので、枠は「変える前の中身」に合わせたまま残っていた
-		// （docs/DEV-NOTES.md「グラフィック凡例」）。
+		// **書き込みの後に作り直しが来るように並べる**のがこの順序のねらい。レコードを先に
+		// 書いておけば、続く作り直しがその値を使う。中身はその後に与え、最後の作り直しで枠が
+		// 中身へ組み直る。
 		//
-		// **作り直しがビューポートの縮尺を戻さない**ことは実測済み——取り込み後に VW 側の
-		// リセットが入っても中身は伏図の縮尺のままだった。
+		// 各段階の値は counts.scaleReport へ積む（dev ビルドのみ）。**どこで何が動くかを
+		// 実測で押さえる**ためで、これが無いと同じ推測を繰り返すことになる。
+		const auto note = [&counts, scale](const char* label)
+		{
+#ifdef VW_DEV_BUILD
+			if (counts.objects.empty())
+				return;
+			if (!counts.scaleReport.empty())
+				counts.scaleReport += " / ";
+			counts.scaleReport +=
+				std::string(label) + " 記録=" + FormatScale(RecordScaleOf(counts.objects.front())) +
+				" 中身=[" + DescribeViewportScales(counts.objects.front(), kImageSearchDepth) + "]";
+#else
+			(void)label;
+			(void)counts;
+			(void)scale;
+#endif
+		};
+
+		note("開始");
+
+		// 1) レコード（OIP の「イメージの縮率」）へ書く。
 		for (const MCObjectHandle object : counts.objects)
 		{
-			// **入口を 1 つに絞らない。** PIO の中身の入口は版によって 3 通りあり
-			// （draw/Tag の HeldTagLayout が同じ理由で 2 つ見ている）、加えて凡例は補助
-			// オブジェクトを何本もぶら下げている。どこに凡例イメージが居るか分からない
-			// うちは、辿れる先を全部辿る（見つけ次第どこであろうと縮率を与える）。
+			try
+			{
+				VWParametricObj pio(object);
+				SetParamRealChecked(pio, TXString(kFieldImageScale), scale);
+			}
+			catch (...)
+			{
+				continue; // 書けなくても以降のビューポート側で絵は揃う
+			}
+		}
+		note("記録後");
+
+		// 2) 作り直す。**書き込みの後に来る作り直し**なので、ここで新しい値が使われるはず。
+		for (const MCObjectHandle object : counts.objects)
+			gSDK->ResetObject(object);
+		note("作直後");
+
+		// 3) 中身（凡例イメージ＝ビューポート）の縮尺を与える。
+		//
+		// **入口を 1 つに絞らない。** PIO の中身の入口は版によって 3 通りあり（draw/Tag の
+		// HeldTagLayout が同じ理由で 2 つ見ている）、加えて凡例は補助オブジェクトを何本も
+		// ぶら下げている。どこに凡例イメージが居るか分からないうちは、辿れる先を全部辿る。
+		for (const MCObjectHandle object : counts.objects)
+		{
 			ScaleImagesIn(object, scale, kImageSearchDepth, counts);
 			ScaleImagesIn(gSDK->GetCustomObjectProfileGroup(object), scale, kImageSearchDepth,
 						  counts);
@@ -466,25 +530,17 @@ namespace HomeskzIfcImport::draw
 				 aux = gSDK->NextObject(aux))
 				ScaleImagesIn(aux, scale, kImageSearchDepth, counts);
 		}
+		note("中身後");
 
-		// 中身を変え終えてから**もう一度作り直す**。ここで枠が組み直る（上記 ★）。
-		// **縮率を 1 つも与えられていないなら作り直さない**——組み直す理由が無いうえ、
-		// 無駄なリセットで凡例の大きさが動くのを避ける。
+		// 4) もう一度作り直して、枠を中身へ組み直させる（セルの枠は kBoxNode ＝ SDK の
+		//    kInternalID_GraphicLegendFrame に当たる独立オブジェクトで、作り直しのときに
+		//    中身から組み直る）。**縮率を 1 つも与えられていないなら作り直さない。**
 		if (counts.imagesScaled == 0)
 			return;
 		for (const MCObjectHandle object : counts.objects)
 			gSDK->ResetObject(object);
+		note("完了");
 
-		// ★**レコードの `ImageScale`（OIP の表示欄）は書かない。書くと絵が壊れる。**
-		//
-		// 実機で確かめた: すべて終えた後に 75 を書いたら、**ビューポートが 3 つとも 50 へ戻り、
-		// 作図まで 1/50 になった**（レコード自体は 75 で残る）。`SetParamReal` が PIO の再生成を
-		// 起こし、**その再生成は書き込み前の値で行われる**ためと読める——結果は「レコードは
-		// 75、絵は 1/50」という最悪の組み合わせになる。
-		//
-		// したがって縮率はビューポートにだけ与え、OIP の表示は既定のままにしておく
-		// （docs/DEV-NOTES.md「打ち切った調査」）。表示と実描画が食い違うのは承知のうえで、
-		// **絵が正しいほうを採る**。
 		// **最終状態を実測して持ち帰る。** 縮尺の違うビューポートが混在していないか、レコードが
 		// 残ったかは絵からは分からない（docs/DEV-NOTES.md「グラフィック凡例」）。
 		counts.imageScaleAfter = 0.0;
@@ -496,23 +552,18 @@ namespace HomeskzIfcImport::draw
 				break;
 			}
 		}
-		for (const MCObjectHandle object : counts.objects)
+		if (!counts.objects.empty())
 		{
 			try
 			{
-				counts.recordScale =
-					VWParametricObj(object).GetParamReal(TXString(kFieldImageScale));
+				counts.recordScale = VWParametricObj(counts.objects.front())
+										 .GetParamReal(TXString(kFieldImageScale));
 			}
 			catch (...)
 			{
 				counts.recordScale = 0.0;
 			}
-			break;
 		}
-#ifdef VW_DEV_BUILD
-		if (!counts.objects.empty())
-			counts.scaleReport = DescribeViewportScales(counts.objects.front(), kImageSearchDepth);
-#endif
 	}
 
 	std::string legendDiagnostics(const LegendCounts& counts)
@@ -593,9 +644,10 @@ namespace HomeskzIfcImport::draw
 					num(counts.recordScale) + " / 実際 " + num(counts.imageScaleTarget) +
 					"。既知の制限）。";
 		}
-		// 【一時計装】dev ビルドでのみ埋まる（draw/Legend.h の scaleReport）。
+		// 【一時計装】dev ビルドでのみ埋まる（draw/Legend.h の scaleReport）。段階ごとに
+		// 「レコード」と「中身（ビューポート）」がどう動いたかが並ぶ。
 		if (!counts.scaleReport.empty())
-			text += "凡例の中のビューポートの縮尺: " + counts.scaleReport + "。";
+			text += "凡例の縮率の推移: " + counts.scaleReport + "。";
 		if (imageScaleReverted)
 		{
 			// 与えた縮尺のイメージが作り直しの後に 1 つも残っていない。何を何にしようとしたかを
