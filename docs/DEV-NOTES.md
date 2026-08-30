@@ -676,13 +676,18 @@ M18 で「用紙と建物の大きさから縮尺を自動で決め、重なら�
   ログ欄を出すとダイアログは大きくなるが**隠しても縮まない**し、`OnInitializeContent`
   で最初から隠しておいても**その分の高さは空いたまま**だった。`Get/SetDialogSize`
   （`GS_Get/SetLayoutDialogSize`。単位はピクセル、`ViewCoord` は `Sint16`）で押し込むのも
-  安定しない。**確実なのは、状態ごとにダイアログを作り直すこと**——畳んだ枚は
-  ログ欄そのものを作らないので、VW が計算する大きさが最初から正しい。
-- **ハンドラからダイアログを閉じるのは `VWDialog::SetDialogClose(bCloseWithOK)`**
-  （protected。押されたボタンを OK / キャンセルに差し替えてモーダルを閉じる）。
-  開閉ボタンはこれで閉じ、呼び出し側が反対の状態でもう 1 枚開く。**位置は
-  `Get/SetDialogPosition` で引き継ぐ**——引き継がないと画面中央へ飛び、開き直したのが
-  丸見えになる。
+  安定しない。**大きさを変えたいなら、その状態のダイアログを作り直すしかない**——
+  ログ欄を持たない枚は、VW が計算する大きさが最初から正しい。
+- **開閉できるように見せない。** 上のとおり畳むには作り直しが要り、押すたびに開き直る
+  ダイアログは落ち着かない。**ログは一方通行で開く**ことにして、開いたら閉じるまで
+  そのまま（M19）。
+- **ボタン行（OK のある行）へコントロールを足す API は無い。** その行は
+  `GS_CreateLayout` が `CreateDialog(title, ok, cancel, hasHelp)` の引数から作る。
+  OK の隣にボタンを出したいなら、**キャンセルのボタンに別の名前を付ける**のが唯一の手
+  （押されたことは `OnCancelButtonEvent` で分かる。Esc も同じ扱いになる点だけ注意）。
+- **作り直すときは位置を引き継ぐ**（`Get/SetDialogPosition`）——引き継がないと画面中央へ
+  飛び、開き直したのが丸見えになる。ハンドラの中からモーダルを閉じるのは
+  `VWDialog::SetDialogClose(bCloseWithOK)`（protected。押されたボタンを差し替える）。
 - **ボタンのクリックは `EVENT_DISPATCH_MAP` で受ける。** `ADD_DISPATCH_EVENT(id, f)` の
   `f` は `void f(TControlID, VWDialogEventArgs&)`（`VWFC/VWUI/DialogEventArgs.h` の
   `CDialogEventHandlers`）。`CreateDialog(title, "OK", "", false)` のように**キャンセルを
