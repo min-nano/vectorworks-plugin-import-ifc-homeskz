@@ -242,9 +242,17 @@ namespace HomeskzIfcImport::draw
 					if (found != base.end() && found->second == value)
 						continue;
 					anyDiff = true;
-					text += "#" + std::to_string(i) + " " + name + ": " +
-							(found == base.end() ? std::string("(無し)") : found->second) + " → " +
-							value + "; ";
+					// **1 つずつ append する。** 長い `+` の連鎖は一時文字列を積むので
+					// clang-tidy（performance-inefficient-string-concatenation）が落とす。
+					text += "#";
+					text += std::to_string(i);
+					text += " ";
+					text += name;
+					text += ": ";
+					text += (found == base.end()) ? "(無し)" : found->second;
+					text += " → ";
+					text += value;
+					text += "; ";
 				}
 			}
 			if (!anyDiff)
