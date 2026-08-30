@@ -1,14 +1,17 @@
 //
 //	core/Trace.cpp
 //
-//	クラッシュ診断ログ（core/Trace.h）の実装。状態は関数ローカル static に 1 つだけ持つ。
+//	診断ログ（core/Trace.h）の実装。状態は関数ローカル static に 1 つだけ持つ。
 //	【SDK 非依存】ここでは VectorWorks SDK を include しない。
 //
 
 #include "core/Trace.h"
 
+#include <array>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <string>
 
@@ -21,6 +24,10 @@ namespace HomeskzIfcImport::core::trace
 			std::ofstream out;
 			std::chrono::steady_clock::time_point start;
 			std::string path;
+			// 書いた本文の控え。完了ダイアログのログ欄がこれを見せる（Trace.h
+			// 「なぜ本文を持つか」）。ファイルを開けなかったときでも溜める。
+			std::string text;
+			bool open = false; // ファイルの有無に関わらず「セッションが開いている」か
 		};
 
 		// 名前空間スコープの変数にすると静的初期化順序に依存するので、関数ローカル
@@ -61,17 +68,22 @@ namespace HomeskzIfcImport::core::trace
 		if (s.out.is_open())
 			s.out.close();
 		s.path.clear();
+		// **本文は必ず溜め始める。** ファイルを開けなくてもログ自体は成り立ち（完了
+		// ダイアログのログ欄はメモリの本文を見せる）、そこで諦めると「書けない環境では
+		// 何も分からない」に逆戻りする。
+		s.text.clear();
+		s.start = std::chrono::steady_clock::now();
+		s.open = true;
 		s.out.open(path, std::ios::out | std::ios::trunc);
 		if (!s.out.is_open())
 			return false; // 書けない場所でも**インポートは続ける**（診断は付随機能）
 		s.path = path;
-		s.start = std::chrono::steady_clock::now();
 		return true;
 	}
 
 	bool isOpen()
 	{
-		return state().out.is_open();
+		return state().open;
 	}
 
 	const std::string& path()
@@ -79,17 +91,48 @@ namespace HomeskzIfcImport::core::trace
 		return state().path;
 	}
 
-	void log(const std::string& message)
+	namespace
 	{
-		State& s = state();
-		if (!s.out.is_open())
-			return;
-		const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now() - s.start);
-		s.out << "[" << elapsed.count() << " ms] " << message << "\n";
+		// 本文へ 1 ブロック足し、開いていればファイルへも書いて**即フラッシュする**。
 		// **1 行ごとにフラッシュする。** 落ちたときにバッファの中身は残らないので、
 		// これをしないと肝心の最終行（＝原因箇所の直前）が消える。
-		s.out.flush();
+		void emit(const std::string& block)
+		{
+			State& s = state();
+			if (!s.open)
+				return;
+			s.text += block;
+			s.text += "\n";
+			if (!s.out.is_open())
+				return;
+			s.out << block << "\n";
+			s.out.flush();
+		}
+	} // namespace
+
+	void log(const std::string& message)
+	{
+		emit("[" + std::to_string(elapsedMs()) + " ms] " + message);
+	}
+
+	void note(const std::string& text)
+	{
+		emit(text);
+	}
+
+	const std::string& text()
+	{
+		return state().text;
+	}
+
+	long long elapsedMs()
+	{
+		const State& s = state();
+		if (!s.open)
+			return 0;
+		return std::chrono::duration_cast<std::chrono::milliseconds>(
+				   std::chrono::steady_clock::now() - s.start)
+			.count();
 	}
 
 	void close()
@@ -97,12 +140,41 @@ namespace HomeskzIfcImport::core::trace
 		State& s = state();
 		if (s.out.is_open())
 			s.out.close();
-		// **パスは残す**（閉じた後に「診断ログはここ」と案内できるように。Trace.h の path()）。
+		s.open = false;
+		// **パスと本文は残す**（閉じた後に「診断ログはここ」と案内し、完了ダイアログの
+		// ログ欄に中身を出すため。Trace.h の path() / text()）。
+	}
+
+	std::string envValue(const char* name)
+	{
+		const char* value = envOrNull(name);
+		return (value != nullptr) ? std::string(value) : std::string();
 	}
 
 	bool envFlag(const char* name)
 	{
 		return envOrNull(name) != nullptr;
+	}
+
+	std::string localTimestamp()
+	{
+		const std::time_t now = std::time(nullptr);
+		std::tm local{};
+		// **スレッド安全版の綴りが処理系で違う**（MSVC は localtime_s、POSIX は
+		// localtime_r）。素の localtime は MSVC が C4996 を出し、無 SDK ライブラリは
+		// 警告をエラー扱いにするので、場合分けをここへ閉じ込める（Trace.h）。
+#if defined(_MSC_VER)
+		const bool ok = localtime_s(&local, &now) == 0;
+#else
+		const bool ok = localtime_r(&now, &local) != nullptr;
+#endif
+		std::array<char, 32> buffer{};
+		// 時刻を取れなければ書式化もしない。strftime も入り切らなければ 0 を返すので、
+		// **どちらの失敗も「書けた長さ 0」＝空文字**に畳んで 1 本の戻りにする
+		// （失敗ごとに return を分けると、まず起きない経路がテストで通らない行になる）。
+		const std::size_t written =
+			ok ? std::strftime(buffer.data(), buffer.size(), "%Y-%m-%d %H:%M:%S", &local) : 0;
+		return {buffer.data(), written};
 	}
 
 	std::string defaultLogPath(const std::string& fileName)

@@ -17,14 +17,17 @@
 #include "core/Trace.h"
 #include "draw/ExecuteDocument.h"
 #include "draw/ProgressDialog.h"
+#include "draw/ResultDialog.h"
 
 // ファイル選択ダイアログ（VCOM）。ネイティブの「開く」ダイアログを出し、選ばれた
 // ファイルの絶対パスを IFileIdentifier 経由で受け取る。
 #include "Interfaces/VectorWorks/Filing/IFileChooserDialog.h"
 #include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
 
+#include <chrono>
 #include <cstddef>
 #include <exception>
+#include <fstream>
 #include <string>
 
 using namespace HomeskzIfcImport;
@@ -127,6 +130,20 @@ namespace HomeskzIfcImport
 			return !outPath.empty();
 		}
 
+		// ファイルの大きさ（バイト）。読めなければ 0 で、そのときログは大きさを出さない。
+		// **診断ログの見出しに要る**——「読み込めない」の報告で、そもそも中身のある
+		// ファイルだったのかを最初に切り分けられる。
+		unsigned long long FileSizeOf(const std::string& path)
+		{
+			std::ifstream in(path, std::ios::binary | std::ios::ate);
+			if (!in)
+				return 0;
+			const std::streamoff size = in.tellg();
+			if (size < 0)
+				return 0;
+			return static_cast<unsigned long long>(size);
+		}
+
 		// パスから末尾のファイル名だけを取り出す（進捗ダイアログの上段に出す 1 行）。
 		// 区切りは POSIX とネイティブ Windows の両方を見る（SDK が返すパスは実行環境の
 		// 流儀に従う）。区切りが無ければパスそのものがファイル名。
@@ -192,23 +209,47 @@ namespace HomeskzIfcImport
 							 (gSDK->IsCurrentlyBuildingAnUndoEvent() ? "yes" : "no"));
 		}
 
-		// クラッシュ診断ログを開く（docs/DEV-NOTES.md M15「core/Trace」）。**dev ビルドでは常に、
-		// stable では環境変数 HOMESKZ_IFC_TRACE があるときだけ**開く——常時ログを吐くのは
-		// 実運用では余計で、しかし不具合を追うときには「落ちた直前のフェーズ」が唯一の
-		// 手掛かりになるので、dev には既定で残す。開けなくても黙って続ける（付随機能）。
+		// 動かしているビルドの素性（診断ログの見出しに出す）。**ここで詰めるのは、
+		// BuildConfig.h のマクロを見られるのが SDK 側だけ**だから——parse/Summary は
+		// 受け取った文字列を並べるだけで、ビルド種別を知らない。
+		parse::BuildInfo CurrentBuildInfo()
+		{
+			parse::BuildInfo build;
+			build.plugin = PLUGIN_VWR_ID;
+#ifdef VW_DEV_BUILD
+			build.channel = "dev";
+#else
+			build.channel = "stable";
+#endif
+			build.commit = VW_BUILD_VERSION;
+			build.branch = VW_BUILD_BRANCH;
+			// プラットフォームは PluginPrefix.h と同じ判定（SDK の GS_MAC / GS_WIN は
+			// 値で定義される流儀があるので、素の処理系マクロを見る）。
+#if defined(_WINDOWS)
+			build.platform = "Windows";
+#elif defined(__APPLE__)
+			build.platform = "macOS";
+#endif
+			return build;
+		}
+
+		// 診断ログを開き、見出しを書く（docs/DEV-NOTES.md M19「短い完了・厚いログ」）。
+		// **取り込みのたびに必ず開く**——完了ダイアログがログをそのまま見せて「困ったら
+		// これを貼る」経路にした以上、要るときに限って無いのでは意味がない（以前は
+		// dev ビルドと HOMESKZ_IFC_TRACE 指定時だけだった）。開けなくても黙って続ける
+		// （付随機能。本文はメモリに溜まるので、ダイアログのログ欄は変わらず読める）。
 		//
-		// 有効／無効の判断がここにあるのは、**BuildConfig.h（VW_DEV_BUILD）を見られるのが
-		// SDK 側だけ**だから。core/Trace 自身はビルド種別を知らない。
+		// HOMESKZ_IFC_TRACE に**パスを入れると出力先を差し替えられる**（一時ディレクトリ
+		// 以外へ出したいとき用の逃げ道。値が無ければ既定の場所）。
 		void OpenImportTrace(const std::string& ifcPath)
 		{
-#ifndef VW_DEV_BUILD
 			// 環境変数の読み取りは core/Trace が持つ（getenv の作法をあちこちに書かない）。
-			if (!core::trace::envFlag("HOMESKZ_IFC_TRACE"))
-				return;
-#endif
-			if (!core::trace::open(core::trace::defaultLogPath("HomeskzIfcImport.log")))
-				return;
-			core::trace::log("import: " + ifcPath);
+			const std::string custom = core::trace::envValue("HOMESKZ_IFC_TRACE");
+			const std::string path =
+				custom.empty() ? core::trace::defaultLogPath("HomeskzIfcImport.log") : custom;
+			core::trace::open(path); // 開けなくても本文は溜まる（core/Trace.h）
+			core::trace::note(parse::formatLogHeader(
+				CurrentBuildInfo(), ifcPath, FileSizeOf(ifcPath), core::trace::localTimestamp()));
 		}
 
 		// インポート本体（ファイル選択の後）。解析 → 描画を通し、完了ダイアログの本文を返す。
@@ -217,6 +258,8 @@ namespace HomeskzIfcImport
 		std::string RunImport(const std::string& ifcPath)
 		{
 			OpenImportTrace(ifcPath);
+			// 所要時間は**トレースとは別に**測る（ログを開けなくても完了ダイアログに出す）。
+			const auto started = std::chrono::steady_clock::now();
 			LogUndoState("start");
 
 			// 進捗ダイアログを開く。両フェーズへ**同じ 1 つ**を渡し、解析→描画を通して
@@ -227,6 +270,9 @@ namespace HomeskzIfcImport
 
 			// Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
 			// 読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
+			// フェーズの区切りは**ここだけ**が書く——各フェーズの行は進捗報告（core/Progress の
+			// beginPhase）が流し、要素側は `trace::log` を持たない（core/Trace.h「誰が書くか」）。
+			core::trace::note("=== 解析 ===");
 			const core::Document document = parse::buildDocument(ifcPath, progress);
 			LogUndoState("afterParse");
 
@@ -236,31 +282,35 @@ namespace HomeskzIfcImport
 			// 図面変更は draw 側が自前の undo イベント（draw::ImportUndoScope）で包む。
 			// executeDocument から戻った時点でイベントは閉じているので、building=no に
 			// なっているはず——そこが崩れると「取り消し」で図面が壊れるので、ログで見る。
+			core::trace::note("=== 描画 ===");
 			const draw::DrawCounts drawn = draw::executeDocument(document, progress);
 			LogUndoState("afterDraw");
 
 			// 完了ダイアログの前に進捗ダイアログを閉じる（2 枚重ねない）。
 			progress.close();
 
+			const double seconds =
+				std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+
 			// 本文の組み立ては**無 SDK 側**（parse/Summary）が持つ。要素が増えても
-			// ここは変わらない（docs/DEV-NOTES.md M15「完了文言の集約」）。
-			// 診断ログが有効ならその場所も本文へ載せる（一時ディレクトリは macOS では
-			// /var/folders/… という当てられない場所なので、毎回ここで案内する）。
-			const std::string body =
-				parse::formatImportResult(document, drawn, core::trace::path());
-			core::trace::log("done");
+			// ここは変わらない（docs/DEV-NOTES.md M15「完了文言の集約」）。**要素ごとの
+			// 内訳・注意・記録はログへ**、ダイアログには「どのファイルを・成功したか・
+			// 問題はあったか」だけ（M19）。
+			core::trace::note(parse::formatLogResult(document, drawn, seconds));
 			core::trace::close();
-			return body;
+
+			return parse::formatImportResult(document, drawn, FileNameOf(ifcPath));
 		}
 
 		// 例外で中断したときの後始末と本文づくり。診断ログに例外を書き残してから閉じ、
-		// ダイアログ本文（無 SDK 側が組み立てる）にログの場所を添えて返す。
-		std::string ReportImportError(const std::string& detail)
+		// ダイアログ本文（無 SDK 側が組み立てる）を返す。ログの場所は見出しにあるので
+		// ここでは添えない。
+		std::string ReportImportError(const std::string& ifcPath, const std::string& detail)
 		{
-			core::trace::log("error: " + (detail.empty() ? std::string("(unknown)") : detail));
+			core::trace::note("=== 結果 ===\n結果: エラーで中断\n詳細: " +
+							  (detail.empty() ? std::string("原因不明") : detail));
 			core::trace::close();
-			// パスは close() の後も残る（core/Trace の path()）ので、そのまま案内に使える。
-			return parse::formatImportError(detail, core::trace::path());
+			return parse::formatImportError(detail, FileNameOf(ifcPath));
 		}
 	} // namespace
 } // namespace HomeskzIfcImport
@@ -300,18 +350,24 @@ void CImportIfcMenu_EventSink::DoInterface()
 	}
 	catch (const std::exception& error)
 	{
-		body = ReportImportError(error.what());
+		body = ReportImportError(ifcPath, error.what());
 	}
 	catch (...)
 	{
 		// std::exception ですらないもの（サードパーティや処理系が投げるもの）。
 		// 何が起きたかは分からないが、**それでも VW を落とさない**ことが最優先。
-		body = ReportImportError("");
+		body = ReportImportError(ifcPath, "");
 	}
 
-	// 3. 結果をダイアログ表示。advice 行にファイルパス。false = 最小アラートでなくモーダルに
-	//    して本文と advice を両方見せる（Updater と同じ作法）。TXString は UTF-8 の
-	//    const char* から暗黙変換される。
-	gSDK->AlertInform(body.c_str(), ifcPath.c_str(),
-					  false /* not a minor alert: show a modal dialog */);
+	// 3. 結果をダイアログ表示。本文は短く、**診断ログは折り畳んだテキスト欄**として同じ
+	//    ダイアログに載せる（draw/ResultDialog.h。ふだんは開かず、不具合の報告のときに
+	//    開いて丸ごとコピーする）。
+	if (!draw::showImportResult("ホームズ君 IFC 取り込み", body, core::trace::text()))
+	{
+		// ダイアログを組めなかったときの逃げ道。結果を伝えられないまま黙って終わるのが
+		// 最悪なので、素のアラートへ落とす（advice 行にファイルパス。false = 最小アラート
+		// でなくモーダル）。TXString は UTF-8 の const char* から暗黙変換される。
+		gSDK->AlertInform(body.c_str(), ifcPath.c_str(),
+						  false /* not a minor alert: show a modal dialog */);
+	}
 }
