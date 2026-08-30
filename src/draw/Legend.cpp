@@ -30,12 +30,15 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
+#include "VWFC/VWObjects/VWLayerObj.h"
+#include "VWFC/VWObjects/VWDocument.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <vector>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -140,6 +143,48 @@ namespace HomeskzIfcImport::draw
 			std::array<char, 32> buffer{};
 			std::snprintf(buffer.data(), buffer.size(), "%g", value);
 			return {buffer.data()};
+		}
+
+		// 【一時計装 ── 縮率が安定したら消す】文書内のグラフィック凡例をすべて集める
+		// （レイヤ → その上のオブジェクトの順に走査）。
+		//
+		// **なぜ全部なのか**: OIP の「カスタム 1:」の値はレコードのどの欄にも無い（全欄を
+		// ダンプして 50 がどこにも出てこなかった）。**手で正しく設定した凡例**と**こちらが
+		// 置いた凡例**を同じ文書で並べて全欄を比べれば、違う欄がそのまま答えになる
+		// ——ソース定義（`'GrLe'`）を突き止めたときと同じやり方（docs/DEV-NOTES.md）。
+		std::vector<MCObjectHandle> CollectAllLegends()
+		{
+			constexpr std::size_t kMaxLegends = 32; // ダンプが長くなりすぎない程度に打ち切る
+			std::vector<MCObjectHandle> found;
+			try
+			{
+				for (MCObjectHandle layer = VWDocument::GetDrawingHeaderFristMember();
+					 layer != nil && found.size() < kMaxLegends; layer = gSDK->NextObject(layer))
+				{
+					if (!VWLayerObj::IsLayerObject(layer))
+						continue;
+					for (MCObjectHandle object = gSDK->FirstMemberObj(layer);
+						 object != nil && found.size() < kMaxLegends;
+						 object = gSDK->NextObject(object))
+					{
+						try
+						{
+							if (VWParametricObj(object).GetParametricName().GetStdString() ==
+								kGraphicLegendPlugin)
+								found.push_back(object);
+						}
+						catch (...)
+						{
+							continue; // PIO でないものは黙って飛ばす
+						}
+					}
+				}
+			}
+			catch (...)
+			{
+				return found; // そこまでに拾えたぶんで足りる（読み取りしかしない）
+			}
+			return found;
 		}
 
 		// 【一時計装 ── 縮率が安定したら消す】レコードの**全欄を値ごと**並べる。
@@ -598,9 +643,17 @@ namespace HomeskzIfcImport::draw
 			scaleImages(object);
 		note("完了");
 #ifdef VW_DEV_BUILD
-		// 【一時計装】最終状態の全欄。どの欄が縮率のポップアップなのかを突き止めるため。
-		if (!counts.objects.empty())
-			counts.recordFields = DumpAllRecordFields(counts.objects.front());
+		// 【一時計装】**文書内のすべての凡例**の全欄。手で設定した凡例が同じ文書にあれば、
+		// 並べて比べるだけで「どの欄が違うのか」が分かる（上の CollectAllLegends）。
+		{
+			const std::vector<MCObjectHandle> all = CollectAllLegends();
+			for (std::size_t i = 0; i < all.size(); ++i)
+			{
+				if (!counts.recordFields.empty())
+					counts.recordFields += " || ";
+				counts.recordFields += "#" + std::to_string(i) + " " + DumpAllRecordFields(all[i]);
+			}
+		}
 #endif
 
 		// **最終状態を実測して持ち帰る。** 縮尺の違うビューポートが混在していないか、レコードが
@@ -710,7 +763,7 @@ namespace HomeskzIfcImport::draw
 		// 「レコード」と「中身（ビューポート）」がどう動いたかが並ぶ。
 		if (!counts.scaleReport.empty())
 			text += "凡例の縮率の推移: " + counts.scaleReport + "。";
-		// 【一時計装】同じく dev ビルドのみ。最終状態のレコード全欄（draw/Legend.h）。
+		// 【一時計装】同じく dev ビルドのみ。**文書内の全凡例**のレコード全欄（draw/Legend.h）。
 		if (!counts.recordFields.empty())
 			text += "凡例レコードの全欄: " + counts.recordFields + "。";
 		if (imageScaleReverted)
