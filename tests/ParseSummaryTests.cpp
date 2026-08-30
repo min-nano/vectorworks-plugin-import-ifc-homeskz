@@ -123,7 +123,7 @@ TEST(summarize_ifc_missing_file_reports_not_loaded)
 }
 
 // ---------------------------------------------------------------------------
-// インポート完了ダイアログの本文（M15「完了文言の集約」）
+// インポート完了ダイアログの本文（M15「完了文言の集約」／M19「短い完了・厚いログ」）
 // ---------------------------------------------------------------------------
 
 namespace
@@ -189,29 +189,34 @@ namespace
 	}
 } // namespace
 
-TEST(format_import_result_lists_only_elements_with_commands)
+TEST(format_import_result_is_short_and_names_the_file)
 {
+	// **完了ダイアログは短く保つ**（M19）。読むのは「どのファイルを・成功したのか・
+	// 問題はあったのか」の 3 つで、**件数も所要時間も要素ごとの内訳もログにある**。
 	DrawCounts counts;
 	counts.valid = true;
 	counts.members = 3;
 	counts.columns = 2;
 
-	std::string const text = formatImportResult(sampleDocument(), counts);
+	std::string const text = formatImportResult(sampleDocument(), counts, "安藤邸.ifc");
 
-	// 命令のある要素は「ラベル: 件数 助数詞」で並ぶ。
-	CHECK(text.find("横架材: 3 本") != std::string::npos);
-	CHECK(text.find("柱: 2 本") != std::string::npos);
-	// 命令の無い要素（床・伏図…）は行ごと出さない。
-	CHECK(text.find("床") == std::string::npos);
-	CHECK(text.find("伏図") == std::string::npos);
-	// 中止も診断も無いので、その断り書きは出ない。
-	CHECK(text.find("キャンセル") == std::string::npos);
+	CHECK(text.find("取り込みが完了しました。") != std::string::npos);
+	CHECK(text.find("ファイル: 安藤邸.ifc") != std::string::npos);
+	// **件数も所要時間も要素の行も出さない**（どれもログにある）。
+	CHECK(text.find("描いたもの") == std::string::npos);
+	CHECK(text.find("所要") == std::string::npos);
+	CHECK(text.find("横架材") == std::string::npos);
+	CHECK(text.find("柱:") == std::string::npos);
+	// ログの場所も出さない（ログ自身の見出しが持つ）。
+	CHECK(text.find("ログ: ") == std::string::npos);
+	// 問題が無いのだから、ログを見に行かせる案内も出さない。
+	CHECK(text.find("ログを表示") == std::string::npos);
 }
 
-TEST(format_import_result_shows_shortfall_as_ratio)
+TEST(format_import_result_flags_a_shortfall_as_a_problem)
 {
-	// 命令はあるのに描けなかった要素は「描けた数/命令数」の形にして、描画側の問題だと
-	// 分かるようにする（配置先レイヤが無い・PIO を作れない等）。
+	// 命令はあるのに描けなかったなら「うまくいかなかったところがある」と言い、
+	// 内訳（どの要素が何本足りないか）はログへ送る。
 	DrawCounts counts;
 	counts.valid = true;
 	counts.members = 3;
@@ -219,8 +224,33 @@ TEST(format_import_result_shows_shortfall_as_ratio)
 
 	std::string const text = formatImportResult(sampleDocument(), counts);
 
-	CHECK(text.find("横架材: 3 本") != std::string::npos);
-	CHECK(text.find("柱: 0/2 本") != std::string::npos);
+	CHECK(text.find("うまくいかなかったところがあります") != std::string::npos);
+	CHECK(text.find("くわしい内訳と原因はログにあります") != std::string::npos);
+	// 何件描けたかはログで読む（ダイアログには出さない）。
+	CHECK(text.find("3/5") == std::string::npos);
+}
+
+TEST(format_import_result_flags_draw_diagnostics_as_a_problem)
+{
+	// 件数が揃っていても描画側が異常を持ち帰ったなら「問題あり」。**平常の記録（notes）は
+	// 問題にしない**——毎回出るものを問題にすると、ダイアログが常に「問題あり」になる。
+	DrawCounts counts;
+	counts.valid = true;
+	counts.members = 3;
+	counts.columns = 2;
+	counts.diagnostics = "横架材: 断面が入りませんでした";
+	CHECK(formatImportResult(sampleDocument(), counts).find("うまくいかなかった") !=
+		  std::string::npos);
+
+	DrawCounts quiet;
+	quiet.valid = true;
+	quiet.members = 3;
+	quiet.columns = 2;
+	quiet.notes = "伏図の割り付け（mm）: 用紙 594×420";
+	CHECK(formatImportResult(sampleDocument(), quiet).find("取り込みが完了しました") !=
+		  std::string::npos);
+	// 記録はダイアログには出さない（ログにだけ出る）。
+	CHECK(formatImportResult(sampleDocument(), quiet).find("割り付け") == std::string::npos);
 }
 
 TEST(format_import_result_tells_to_update_viewports_only_when_drawings_were_made)
@@ -243,57 +273,37 @@ TEST(format_import_result_tells_to_update_viewports_only_when_drawings_were_made
 	DrawCounts none;
 	none.valid = true;
 	none.members = 3;
+	none.columns = 2;
 	CHECK(formatImportResult(sampleDocument(), none).find("1 回「更新」") == std::string::npos);
 }
 
-TEST(format_import_result_reports_cancel_and_diagnostics)
+TEST(format_import_result_reports_cancel)
 {
+	// 中止は「描き切れなくて当然」なので、問題あり扱いにしない（原因を探しに行かせない）。
 	DrawCounts counts;
 	counts.valid = true;
 	counts.members = 1;
-	counts.columns = 0;
 	counts.cancelled = true;
-	counts.diagnostics = "横架材: 断面が入りませんでした";
 
 	std::string const text = formatImportResult(sampleDocument(), counts);
 
-	CHECK(text.find("横架材: 1/3 本") != std::string::npos);
-	CHECK(text.find("キャンセルされたため、途中で中断しました。") != std::string::npos);
-	CHECK(text.find("断面が入りませんでした") != std::string::npos);
+	CHECK(text.find("キャンセルされたため、途中で中断しました") != std::string::npos);
+	CHECK(text.find("うまくいかなかった") == std::string::npos);
 }
 
-TEST(format_import_result_points_at_the_trace_log)
+TEST(format_import_result_warns_only_when_undo_falls_short)
 {
-	// 診断ログが有効なとき（dev ビルド / HOMESKZ_IFC_TRACE 指定時）は場所を必ず案内する。
-	// 一時ディレクトリは macOS では /var/folders/… という当てられない場所なので、
-	// 「ログはどこ？」を毎回聞かれないようにするため。
+	// **1 回で戻せるなら黙る**——メニューの「取り消し」が効くのは当たり前で、書くと
+	// かえって読む量が増える。戻せない／一部しか戻らないのは当然ではないので伝える
+	// （間違えたときの戻し方が変わる。判断材料は描画側が置く。core::DrawCounts）。
 	DrawCounts counts;
 	counts.valid = true;
 	counts.members = 3;
 	counts.columns = 2;
 
-	std::string const text =
-		formatImportResult(sampleDocument(), counts, "/tmp/HomeskzIfcImport.log");
-	CHECK(text.find("診断ログ: /tmp/HomeskzIfcImport.log") != std::string::npos);
-
-	// 無効なら案内も出ない（存在しない場所を指さない）。
-	CHECK(formatImportResult(sampleDocument(), counts).find("診断ログ") == std::string::npos);
-}
-
-TEST(format_import_result_tells_how_far_undo_reaches)
-{
-	// 図形を描いたなら**取り消しがどこまで効くか**を必ず 1 行で伝える（ユーザーは
-	// 「間違えたら取り消せばいい」と考えるのが自然なので、戻せる／一部だけ／戻せないの
-	// 区別を黙らない。判断材料は描画側が置く。core::DrawCounts）。
-	DrawCounts counts;
-	counts.valid = true;
-	counts.members = 3;
-	counts.columns = 2;
-
-	// (1) undo イベントを張れた＝1 回で戻せる。
+	// (1) undo イベントを張れた＝1 回で戻せる。断りは要らない。
 	counts.undoArmed = true;
-	CHECK(formatImportResult(sampleDocument(), counts).find("「取り消し」1 回で元に戻せます") !=
-		  std::string::npos);
+	CHECK(formatImportResult(sampleDocument(), counts).find("取り消し") == std::string::npos);
 
 	// (2) 取り込み前から在ったレイヤへも描いた＝その分は戻らない。
 	counts.undoPartial = true;
@@ -312,6 +322,20 @@ TEST(format_import_result_tells_how_far_undo_reaches)
 	CHECK(formatImportResult(Document{}, empty).find("取り消し") == std::string::npos);
 }
 
+TEST(format_log_result_always_records_how_far_undo_reaches)
+{
+	// **ログには常に残す**——ダイアログから外した「1 回で戻せる」も、後から
+	// 「戻せたはずでは」を確かめるときの手掛かりになる。
+	DrawCounts counts;
+	counts.valid = true;
+	counts.members = 3;
+	counts.columns = 2;
+	counts.undoArmed = true;
+
+	CHECK(formatLogResult(sampleDocument(), counts, 1.0).find("取り消し: 「取り消し」1 回で") !=
+		  std::string::npos);
+}
+
 TEST(format_import_result_reports_invalid_document)
 {
 	// 検証に落ちたときは何も描いていないので、件数は並べず理由だけを返す。
@@ -319,7 +343,7 @@ TEST(format_import_result_reports_invalid_document)
 	std::string const text = formatImportResult(sampleDocument(), counts);
 
 	CHECK(text.find("検証に通らなかった") != std::string::npos);
-	CHECK(text.find("横架材") == std::string::npos);
+	CHECK(text.find("描いたもの") == std::string::npos);
 }
 
 TEST(format_import_result_reports_empty_document)
@@ -330,6 +354,38 @@ TEST(format_import_result_reports_empty_document)
 	std::string const text = formatImportResult(Document{}, counts);
 
 	CHECK(text.find("見つかりませんでした") != std::string::npos);
+	// 「ホームズ君の IFC か」を疑う場面なので、ここでもログへ誘導する
+	// （何を探して何が無かったのかはログにしか無い）。
+	CHECK(text.find("ログを表示") != std::string::npos);
+}
+
+TEST(import_outcome_classifies_the_run)
+{
+	// **ダイアログもログも同じ判断を使う**ので、「成功と言いながらログには問題が並ぶ」
+	// という食い違いが起きない。ここでその判断そのものを固定する。
+	DrawCounts success;
+	success.valid = true;
+	success.members = 3;
+	success.columns = 2;
+	CHECK(importOutcome(sampleDocument(), success).status == ImportStatus::Success);
+	CHECK_EQ(importOutcome(sampleDocument(), success).placed, static_cast<std::size_t>(5));
+	CHECK_EQ(importOutcome(sampleDocument(), success).commands, static_cast<std::size_t>(5));
+
+	DrawCounts warning = success;
+	warning.columns = 1;
+	CHECK(importOutcome(sampleDocument(), warning).status == ImportStatus::Warning);
+
+	// 中止は Warning より優先（描き切れないのが当たり前だから）。
+	DrawCounts cancelled = warning;
+	cancelled.cancelled = true;
+	CHECK(importOutcome(sampleDocument(), cancelled).status == ImportStatus::Cancelled);
+
+	DrawCounts const invalid; // valid=false
+	CHECK(importOutcome(sampleDocument(), invalid).status == ImportStatus::Invalid);
+
+	DrawCounts empty;
+	empty.valid = true;
+	CHECK(importOutcome(Document{}, empty).status == ImportStatus::Empty);
 }
 
 TEST(document_command_count_sums_every_element_list)
@@ -340,12 +396,77 @@ TEST(document_command_count_sums_every_element_list)
 	CHECK_EQ(documentCommandCount(Document{}), static_cast<std::size_t>(0));
 }
 
-TEST(format_import_result_covers_every_element)
+// ---------------------------------------------------------------------------
+// 診断ログの本文（M19「短い完了・厚いログ」）
+// ---------------------------------------------------------------------------
+
+TEST(format_log_header_names_the_build_time_and_file)
+{
+	// 報告に貼られたログから最初に知りたいのは「どのリビジョンを・いつ・どのファイルに
+	// 対して動かしたか」。その 3 つが必ず頭に並ぶ。
+	BuildInfo build;
+	build.plugin = "HomeskzIfcImportDev";
+	build.channel = "dev";
+	build.commit = "1a2b3c4";
+	build.branch = "claude/example";
+	build.platform = "macOS";
+
+	std::string const text = formatLogHeader(build, "/Users/x/安藤邸.ifc", 12876543ULL,
+											 "2026-08-29 14:03:21", "/tmp/HomeskzIfcImport.log");
+
+	CHECK(text.find("日時: 2026-08-29 14:03:21") != std::string::npos);
+	CHECK(text.find("HomeskzIfcImportDev") != std::string::npos);
+	CHECK(text.find("dev") != std::string::npos);
+	CHECK(text.find("commit 1a2b3c4") != std::string::npos);
+	CHECK(text.find("branch claude/example") != std::string::npos);
+	CHECK(text.find("macOS") != std::string::npos);
+	// 対象は**フルパス**（同じ名前の IFC を版ごとに持つのが普通なので名前だけでは足りない）。
+	CHECK(text.find("対象: /Users/x/安藤邸.ifc") != std::string::npos);
+	CHECK(text.find("12.3 MB") != std::string::npos);
+	// **ログの置き場所はログ自身が持つ**（ダイアログには出さない。M19）。
+	CHECK(text.find("ログ: /tmp/HomeskzIfcImport.log") != std::string::npos);
+}
+
+TEST(format_log_header_says_when_there_is_no_log_file)
+{
+	// 一時ディレクトリへ書けなかったとき。**黙らない**——場所を出さないと、出ていない
+	// ファイルを探しに行かせる。本文はダイアログのログ欄に出ているので、そこを
+	// コピーすればよいと伝える。
+	std::string const text = formatLogHeader(BuildInfo{}, "a.ifc", 0, "2026-08-29 14:03:21");
+	CHECK(text.find("ログ: （ファイルへは書けませんでした") != std::string::npos);
+}
+
+TEST(format_log_header_scales_the_file_size)
+{
+	// 大きさは桁に合わせて読める形にする（「12876543 バイト」では大小が掴めない）。
+	CHECK(formatLogHeader(BuildInfo{}, "a.ifc", 3ULL * 1024ULL * 1024ULL, "").find("3.0 MB") !=
+		  std::string::npos);
+	CHECK(formatLogHeader(BuildInfo{}, "a.ifc", 2048ULL, "").find("2.0 KB") != std::string::npos);
+	CHECK(formatLogHeader(BuildInfo{}, "a.ifc", 512ULL, "").find("512 バイト") !=
+		  std::string::npos);
+}
+
+TEST(format_log_header_fills_unknown_fields)
+{
+	// 素性が分からなくても行は落とさない（「無い」ことも情報なので黙らない）。
+	std::string const text = formatLogHeader(BuildInfo{}, "", 0, "");
+	CHECK(text.find("日時: 不明") != std::string::npos);
+	CHECK(text.find("ビルド: 不明") != std::string::npos);
+	CHECK(text.find("対象: 不明") != std::string::npos);
+	// 大きさが分からないときは括弧ごと出さない。
+	CHECK(text.find("（0") == std::string::npos);
+}
+
+TEST(format_log_result_lists_every_element_and_the_verdict)
 {
 	// 表（kElements）の**全行**を通し、表示名と助数詞をここで固定する。要素を足したときに
-	// 表へ書き忘れれば上の総数のケースが、ラベルや助数詞を取り違えればこのケースが落ちる。
-	std::string const text = formatImportResult(fullDocument(), fullCounts());
+	// 表へ書き忘れれば document_command_count のケースが、ラベルや助数詞を取り違えれば
+	// このケースが落ちる。**完了ダイアログから外した内訳はここにある。**
+	std::string const text = formatLogResult(fullDocument(), fullCounts(), 71.4);
 
+	CHECK(text.find("結果: 成功") != std::string::npos);
+	CHECK(text.find("所要: 1 分 11 秒") != std::string::npos);
+	CHECK(text.find("描いたもの: 17 件") != std::string::npos);
 	CHECK(text.find("ストーリ: 1 層") != std::string::npos);
 	CHECK(text.find("通り芯: 1 本") != std::string::npos);
 	CHECK(text.find("立上り: 1 本") != std::string::npos);
@@ -367,17 +488,69 @@ TEST(format_import_result_covers_every_element)
 	CHECK(text.find("ストーリ: 1 層") < text.find("軸組図: 1 枚"));
 }
 
-TEST(format_import_result_shortfall_for_every_element)
+TEST(format_log_result_shows_shortfall_notes_and_records)
 {
-	// どの要素でも「描けた数/命令数」で出せること（描画側の取りこぼしを要素によらず
-	// 同じ形で見せる）。全要素の命令はあるが 1 つも描けなかった、という極端な形で通す。
+	// 描けなかったぶんは「描けた数/命令数」で、原因（注意）と平常の記録（記録）は
+	// 見出しを分けて並べる——前者だけが「問題あり」の根拠になるから。
 	DrawCounts counts; // 件数はすべて 0 のまま
 	counts.valid = true;
-	std::string const text = formatImportResult(fullDocument(), counts);
+	counts.diagnostics = "柱: 断面が入りませんでした";
+	counts.notes = "伏図の割り付け（mm）: 用紙 594×420";
 
+	std::string const text = formatLogResult(fullDocument(), counts, 0.0);
+
+	CHECK(text.find("結果: 問題あり") != std::string::npos);
 	CHECK(text.find("ストーリ: 0/1 層") != std::string::npos);
 	CHECK(text.find("軸組図: 0/1 枚") != std::string::npos);
 	CHECK(text.find("アンカーボルト: 0/1 本") != std::string::npos);
+	CHECK(text.find("注意:\n  柱: 断面が入りませんでした") != std::string::npos);
+	CHECK(text.find("記録:\n  伏図の割り付け") != std::string::npos);
+	// 所要が分からない（0）ときは行ごと出さない。
+	CHECK(text.find("所要:") == std::string::npos);
+}
+
+TEST(format_log_result_reports_an_empty_document)
+{
+	// 取り込める要素が 1 つも無かった取り込み（ホームズ君以外の IFC・空のファイル）。
+	// 内訳は無いが、**結末はログにも残す**——報告で「何も起きなかった」と言われたときに、
+	// 解析まで進んで 0 件だったのか、その手前で止まったのかを分けられる。
+	DrawCounts counts;
+	counts.valid = true;
+	std::string const text = formatLogResult(Document{}, counts, 0.5);
+	CHECK(text.find("結果: 対象なし") != std::string::npos);
+	CHECK(text.find("描いたもの: 0 件") != std::string::npos);
+	CHECK(text.find("所要: 0.5 秒") != std::string::npos);
+	CHECK(text.find("内訳:") == std::string::npos);
+}
+
+TEST(format_log_result_indents_multi_line_notes)
+{
+	// 描画側の説明は要素ごとに 1 行ずつ積まれる（draw/ExecuteDocument）。ログでは 2 字
+	// 下げて並べ、**空行は落とす**（積み方の都合で混じっても箇条書きが崩れない）。
+	DrawCounts counts;
+	counts.valid = true;
+	counts.members = 3;
+	counts.columns = 2;
+	counts.diagnostics = "1 行目\n\n2 行目";
+
+	std::string const text = formatLogResult(sampleDocument(), counts, 1.0);
+	CHECK(text.find("注意:\n  1 行目\n  2 行目\n") != std::string::npos);
+}
+
+TEST(format_log_result_reports_cancel_and_invalid)
+{
+	DrawCounts cancelled;
+	cancelled.valid = true;
+	cancelled.members = 1;
+	cancelled.cancelled = true;
+	CHECK(formatLogResult(sampleDocument(), cancelled, 1.0).find("結果: 中断（キャンセル）") !=
+		  std::string::npos);
+
+	DrawCounts const invalid; // valid=false
+	std::string const text = formatLogResult(sampleDocument(), invalid, 1.0);
+	CHECK(text.find("結果: 失敗") != std::string::npos);
+	// 何も描いていないので内訳は並べない。
+	CHECK(text.find("横架材") == std::string::npos);
 }
 
 TEST(format_import_error_includes_detail)
@@ -394,15 +567,16 @@ TEST(format_import_error_without_detail_says_unknown)
 	// std::exception ですらないものを受けたときは説明が無い（catch(...)）。
 	std::string const text = formatImportError("");
 	CHECK(text.find("詳細: 原因不明") != std::string::npos);
-	// 診断ログが無効なら案内も出ない（存在しない場所を指さない）。
-	CHECK(text.find("診断ログ") == std::string::npos);
 }
 
-TEST(format_import_error_points_at_the_trace_log)
+TEST(format_import_error_names_the_file_and_points_at_the_log)
 {
-	// ログが有効なら場所を案内する（最終行の直後が原因箇所。core/Trace.h）。
-	std::string const text = formatImportError("bad_alloc", "/tmp/HomeskzIfcImport.log");
-	CHECK(text.find("診断ログ: /tmp/HomeskzIfcImport.log") != std::string::npos);
+	// ログの最終行の直後が原因箇所（core/Trace.h）。場所はログ自身の見出しにあるので、
+	// ここでは「ログを見てください」とファイル名だけを言う。
+	std::string const text = formatImportError("bad_alloc", "安藤邸.ifc");
+	CHECK(text.find("ファイル: 安藤邸.ifc") != std::string::npos);
+	CHECK(text.find("どこまで進んでいたかはログにあります") != std::string::npos);
+	CHECK(text.find("ログ: ") == std::string::npos);
 }
 
 TEST_MAIN();

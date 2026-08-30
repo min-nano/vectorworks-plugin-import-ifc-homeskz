@@ -163,11 +163,16 @@ VectorWorks ネイティブオブジェクト
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの
 広がり `planContentBounds` / `sectionContentSize`）は `core/Document`、
 進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
-（整形と配分の計算）に**それぞれ 1 つだけ**置く。**完了ダイアログに並ぶ要素の一覧**
+（整形と配分の計算）に**それぞれ 1 つだけ**置く。**要素の一覧**
 （表示名・助数詞・命令数の取り出し・描けた数）は `parse/Summary` の `kElements` ただ 1 つの表で、
-要素を足すときに触るのはその 1 行だけ（SDK 側は組み上がった本文を出すだけ）。**診断ログへの
-書き出し口**は `core/Progress` の `beginPhase` 1 か所（各要素へ `trace::log` を撒かない。
-開始・終了・例外だけを `Extensions/ExtMenu` が書く）。テスト側も同じで、フィクスチャ一覧・近似比較・**実 IFC の読み込みと命令セットの組み立てを
+要素を足すときに触るのはその 1 行だけ（診断ログの内訳もここから出る。SDK 側は組み上がった
+本文を出すだけ）。**完了・エラーの文言**（短い本文・結末の判断 `importOutcome`・ログの見出しと結果）も
+`parse/Summary` 1 か所で、**ダイアログの見た目**（短い本文＋折り畳んだログ欄）は
+`draw/ResultDialog` ただ 1 つ。**診断ログへの
+書き出し口**は `core/Progress` の `beginPhase`（フェーズの行）と `Extensions/ExtMenu`
+（見出し・区切り・結果・例外を `trace::note` で）の 2 か所だけ（各要素へ `trace::log` を撒かない）。
+**描画側が持ち帰る説明は行き先を分ける**——異常は `DrawCounts::diagnostics`（完了ダイアログの
+「問題あり」の根拠になる）、平常でも出る記録は `DrawCounts::notes`（ログにだけ出る）。テスト側も同じで、フィクスチャ一覧・近似比較・**実 IFC の読み込みと命令セットの組み立てを
 1 プロセス 1 回に畳むキャッシュ**（`fixture` / `fixtureDocument`）は `tests/Fixtures.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
 

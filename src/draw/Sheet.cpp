@@ -81,7 +81,8 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
-						   std::string* note, const ObjectHandles* memberHandles)
+						   std::string* note, const ObjectHandles* memberHandles,
+						   std::string* outInfo)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
@@ -302,15 +303,19 @@ namespace HomeskzIfcImport::draw
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
-		// 診断行は要素ごとに 1 行ずつ足す（原因が別物なので混ぜない）。
-		const auto addNote = [note](const std::string& text)
+		// 診断行は要素ごとに 1 行ずつ足す（原因が別物なので混ぜない）。**異常は note、
+		// 平常でも出る内訳は outInfo** と行き先を分ける（前者だけが完了ダイアログの
+		// 「問題あり」に効き、後者は診断ログにだけ出る。core::DrawCounts）。
+		const auto addTo = [](std::string* sink, const std::string& text)
 		{
-			if (note == nullptr || text.empty())
+			if (sink == nullptr || text.empty())
 				return;
-			if (!note->empty())
-				*note += "\n";
-			*note += text;
+			if (!sink->empty())
+				*sink += "\n";
+			*sink += text;
 		};
+		const auto addNote = [&addTo, note](const std::string& text) { addTo(note, text); };
+		const auto addInfo = [&addTo, outInfo](const std::string& text) { addTo(outInfo, text); };
 
 		// M18 割り付けの結果。**縮尺は「印刷可能領域・凡例の幅・建物の広がり」の 3 つだけで
 		// 決まる**ので、その 3 つと結果の縮尺を残す——思ったより小さい（大きい）ときに、
@@ -321,7 +326,7 @@ namespace HomeskzIfcImport::draw
 		// 計装は消す」）。余白の生の値と単位の解釈は規約を詰めるために要ったもので、
 		// 実機で確定した（図面の単位で返る）ので、**解釈できなかったときだけ**下の診断行へ
 		// 出す。はみ出し・凡例との重なりも同じく件数として下で数える。
-		if (note != nullptr && paper.has_value())
+		if (outInfo != nullptr && paper.has_value())
 		{
 			const auto mm = [](double value) { return std::to_string(std::lround(value)); };
 			std::string text = "伏図の割り付け（mm）: 用紙 " + mm(paper->paper.x) + "×" +
@@ -331,7 +336,7 @@ namespace HomeskzIfcImport::draw
 				text += " / 建物 " + mm(contentSize.x) + "×" + mm(contentSize.y) + " → 用紙上 " +
 						mm(contentSize.x / layout.scale) + "×" + mm(contentSize.y / layout.scale) +
 						" / 縮尺 1/" + mm(layout.scale);
-			addNote(text);
+			addInfo(text);
 		}
 
 		// 「命令はあるのに 0 枚」のときに、シートレイヤを作れないのか、ビューポートを

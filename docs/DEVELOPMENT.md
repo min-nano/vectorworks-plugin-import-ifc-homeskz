@@ -23,7 +23,8 @@ src/
                             起動時にアップデート確認を仕掛ける
   Extensions/
     ExtMenu.{h,cpp}           「IFC (ホームズ君) 取り込み…」メニューコマンド。
-                              ファイル選択 → parse → draw → 完了ダイアログを束ねる
+                              ファイル選択 → parse → draw → 完了ダイアログを束ね、
+                              診断ログの見出し・区切り・結果を書く
     ExtColumnMark.{h,cpp}     柱・小屋束の記号 PIO（対象レイヤの構造材を走査して
                               断面記号 ×／／ と平面記号を描く）
   core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
@@ -33,7 +34,7 @@ src/
                               軸組図の上下 2 段とシートの分割）
     Region.{h,cpp}            部品が囲む平面領域の合成（ロフト床の外形）
     Progress.{h,cpp}          進捗の報告先・文言整形・バー配分（実測の重み）
-    Trace.{h,cpp}             クラッシュ診断ログ（フェーズ単位・毎行フラッシュ）
+    Trace.{h,cpp}             診断ログ（フェーズ単位・毎行フラッシュ・本文はメモリにも控える）
   parse/                    Phase 1: IFC 解析（SDK 非依存）
     Step.{h,cpp}              最小 STEP リーダ（トークナイザ＋エンティティグラフ）
     Loader.{h,cpp}            ファイル読み込み（テキスト → STEP グラフ）
@@ -41,7 +42,8 @@ src/
     IfcGeometry.{h,cpp}       配置行列・断面・押し出し・屋根面の解決
     Context.{h,cpp}           解析中の共有キャッシュ（同じ前処理を繰り返さない）
     BuildDocument.{h,cpp}     解析のオーケストレーション
-    Summary.{h,cpp}           完了・エラーダイアログの本文（要素の一覧は kElements 表 1 つ）
+    Summary.{h,cpp}           完了・エラーダイアログの本文と診断ログの見出し／結果
+                              （要素の一覧は kElements 表 1 つ）
     StructuralClass.{h,cpp}   部材種別 → VW クラスの純ロジック
     Grid / Story / Floor / Member / Noboribari / Column / Rafter / Roof /
     Footing / AnchorBolt / FloorPost / FireBrace / Joint / ColumnMark /
@@ -54,6 +56,7 @@ src/
     StructuralMember.{h,cpp}  構造材ツール 1 本の生成・設定（横架材／柱で共有）
     ObjectHandles.h           「命令インデックス → 描いたオブジェクトのハンドル」の対応表
     ProgressDialog.{h,cpp}    core::ProgressReporter を VW の進捗ダイアログへ橋渡し
+    ResultDialog.{h,cpp}      完了・エラーのダイアログ（短い本文＋折り畳んだ診断ログ欄）
     Symbol.{h,cpp}            ハイブリッドシンボルの配置（4 要素で共有する唯一の実装）
     Tag.{h,cpp}               断面寸法データタグ（伏図・軸組図で共有。スタイルは当てず、
                               タグの中身はタグ 1 本ずつへ直接組む）
