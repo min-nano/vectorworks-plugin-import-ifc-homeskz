@@ -59,11 +59,6 @@ namespace HomeskzIfcImport::draw
 		// **中身が必要とする幅より少し広い程度**に留める。
 		constexpr double kBoxWidth = 40.0;
 
-		// イメージの縮率（OIP の「イメージの縮率」）。**分母を実数で持つ**欄で、1:75 なら 75。
-		// 表示名が空なので OIP の項目名からは引けない——universal 名で直に書く。
-		// **この欄が決めるのはセルの枠の大きさ**（と OIP の表示）で、中身の縮尺は別（下）。
-		constexpr const char* kFieldImageScale = "ImageScale";
-
 		// **凡例イメージはビューポート**（`Kernel/API/Objs.TDType.h` の `kViewportNode` ＝ 122）。
 		// 実機で凡例の中身の節点型を数えて分かった——`0×102, 3×66, 10×6, 11×36, 86×42,
 		// 122×12`、すなわち枠（kBoxNode）・文字（kTextNode）・グループ・PIO と、**凡例 1 つに
@@ -109,51 +104,6 @@ namespace HomeskzIfcImport::draw
 				++counts.paramsFailed;
 			}
 		}
-
-#ifdef VW_DEV_BUILD
-		// 【一時計装 ── 縮率の欄が特定できたら消す】凡例のレコードの欄を 1 行に並べる。
-		//
-		// **なぜ要るか**: `ImageScale` へ 75 を書いて読み戻しも 75 なのに、OIP の
-		// 「イメージの縮率」は 1:50 のままで枠も 1:50 で描かれた（実機）。OIP には
-		// 「イメージの縮率」（ポップアップ）と「カスタム 1:」（数値）が**別々に**あり、
-		// `ImageScale` は後者らしい——**ポップアップが 1:50 を選んでいる限りそちらが勝つ**。
-		// そのポップアップの欄名が分からないと先へ進めないので、欄の名前と種別を一度だけ
-		// 実機から持ち帰る。値まで出すのは縮率がらみの欄だけ（長くなるため）。
-		std::string DumpRecordFields(MCObjectHandle object)
-		{
-			std::string text;
-			try
-			{
-				const VWParametricObj pio(object);
-				const size_t count = pio.GetParamsCount();
-				for (size_t i = 0; i < count; ++i)
-				{
-					const TXString name = pio.GetParamName(i);
-					const std::string plain = name.GetStdString();
-					if (!text.empty())
-						text += " ";
-					text += plain;
-					try
-					{
-						text += "/" + std::to_string(static_cast<int>(pio.GetParamStyle(name)));
-						if (plain.find("cale") != std::string::npos ||
-							plain.find("Scale") != std::string::npos)
-							text += "=" + pio.GetParamValue(name).GetStdString();
-					}
-					catch (...)
-					{
-						// 値を読めない欄（ボタン等）は名前と種別だけで足りる。
-						continue;
-					}
-				}
-			}
-			catch (...)
-			{
-				return {};
-			}
-			return text;
-		}
-#endif
 
 		// ビューポートの縮尺。読めなければ 0（診断へ出すだけなので、読めないことは咎めない）。
 		double ViewportScale(MCObjectHandle viewport)
@@ -425,30 +375,11 @@ namespace HomeskzIfcImport::draw
 		if (scale <= 0.0)
 			return;
 
-		// **縮率は 2 か所にある**（実機で確かめた。draw/Legend.h）:
-		//   * セルの**枠の大きさ**と OIP の表示 … パラメトリックレコードの `ImageScale`
-		//   * イメージの**中身**の縮尺        … 凡例イメージ（＝ビューポート）の縮尺
-		// 片方だけだと食い違う（枠は 1:50・中身は 1:75 で、中身が枠の中で小さく浮く）。
-		//
-		// ★**レコード → 作り直し → ビューポート、の順でなければならない。** 枠の大きさは
-		// **作り直しのときに計算される**ので、レコードへ書いただけでは枠に効かない（これを
-		// 落としていたため「レコードは効かない」と読み違えた）。そして作り直しは中身を
-		// 作り直す＝ビューポートを既定の縮尺で作り直すので、ビューポートへ書くのはその後。
-		for (const MCObjectHandle object : counts.objects)
-		{
-			try
-			{
-				VWParametricObj pio(object);
-				if (!SetParamRealChecked(pio, TXString(kFieldImageScale), scale))
-					++counts.recordLeft;
-			}
-			catch (...)
-			{
-				++counts.recordLeft;
-			}
-			gSDK->ResetObject(object);
-		}
-
+		// **縮率は 2 か所にあるが、こちらから動かせるのは片方だけ**（draw/Legend.h）:
+		//   * イメージの**中身**の縮尺 … 凡例イメージ（＝ビューポート）の縮尺 … **書ける**
+		//   * セルの**枠**の大きさ・OIP の表示 … レコードの `ImageScale` … **書いても戻される**
+		// 枠のほうは打ち切った（docs/DEV-NOTES.md「打ち切った調査」の「凡例の枠を伏図の縮尺に
+		// 合わせる」）。ここでやるのは中身だけ。
 		for (const MCObjectHandle object : counts.objects)
 		{
 			// **入口を 1 つに絞らない。** PIO の中身の入口は版によって 3 通りあり
@@ -463,24 +394,6 @@ namespace HomeskzIfcImport::draw
 			for (MCObjectHandle aux = gSDK->FirstAuxObject(object); aux != nil;
 				 aux = gSDK->NextObject(aux))
 				ScaleImagesIn(aux, scale, kImageSearchDepth, counts);
-
-			// **最後にレコードを読み直す。** 作り直しが縮率を既定へ戻していないかを見る
-			// ——戻っていれば枠だけ 1:50 に居残る（実機でその形を 1 度見ている）。
-			if (counts.recordScale == 0.0)
-			{
-#ifdef VW_DEV_BUILD
-				counts.recordFields = DumpRecordFields(object);
-#endif
-				try
-				{
-					counts.recordScale =
-						VWParametricObj(object).GetParamReal(TXString(kFieldImageScale));
-				}
-				catch (...)
-				{
-					counts.recordScale = 0.0;
-				}
-			}
 		}
 	}
 
@@ -493,15 +406,9 @@ namespace HomeskzIfcImport::draw
 		const bool imageScaleOdd = counts.imageScaleTarget != 0.0 &&
 								   std::abs(counts.imageScaleAfter - counts.imageScaleTarget) >
 									   std::abs(counts.imageScaleTarget) * 1.0e-6;
-		// レコードが目標と違う＝**セルの枠だけ既定の縮率で残っている**（中身は合っているのに
-		// 枠が大きい、という見え方になる）。突き合わせる相手はビューポートへ与えた値。
-		const bool recordOdd = counts.recordScale != 0.0 && counts.imageScaleTarget != 0.0 &&
-							   std::abs(counts.recordScale - counts.imageScaleTarget) >
-								   std::abs(counts.imageScaleTarget) * 1.0e-6;
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
 			counts.sourceLeft == 0 && counts.filterLeft == 0 && !imageScaleLeft &&
-			counts.imagesLeft == 0 && !imageScaleOdd && counts.recordLeft == 0 && !recordOdd &&
-			counts.recordFields.empty())
+			counts.imagesLeft == 0 && !imageScaleOdd)
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -544,24 +451,6 @@ namespace HomeskzIfcImport::draw
 		if (counts.imagesLeft > 0)
 			text += "縮率を書けなかった凡例イメージ " + std::to_string(counts.imagesLeft) +
 					" 件（そのイメージだけ既定の 1:50 のままです）。";
-		if (counts.recordLeft > 0)
-			text += "イメージの縮率（レコード）を書けなかった凡例 " +
-					std::to_string(counts.recordLeft) + " 件（セルの枠だけ 1:50 で残ります）。";
-		if (recordOdd)
-		{
-			const auto num = [](double value)
-			{
-				std::array<char, 32> buffer{};
-				std::snprintf(buffer.data(), buffer.size(), "%g", value);
-				return std::string(buffer.data());
-			};
-			text += "イメージの縮率（レコード）が作り直しで戻されました（" +
-					num(counts.imageScaleTarget) + " と書いて " + num(counts.recordScale) +
-					"）。セルの枠だけ縮率が合いません。";
-		}
-		// 【一時計装】dev ビルドでのみ埋まる（draw/Legend.h の recordFields）。
-		if (!counts.recordFields.empty())
-			text += "凡例レコードの欄: " + counts.recordFields + "。";
 		if (imageScaleOdd)
 		{
 			// 与えた値と読み戻しが食い違う＝単位の見立て（分母か倍率か）を外している見込み。
