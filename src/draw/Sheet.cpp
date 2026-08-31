@@ -8,9 +8,9 @@
 //	【シートレイヤに載るのはビューポートだけではない】伏図には**グラフィック凡例**
 //	（VW 標準の "GraphicLegend" PIO）も 1 つ載る（M13）。凡例はビューポート注釈では
 //	なくシートレイヤ（＝用紙）へ直接置くので、置き方は draw/Legend が持つ。ここは
-//	ビューポートを仕上げた後にそれを呼び、**全シートを置き終えてからスタイルごとの
-//	反映**（updateLegendStyles）をまとめて 1 回行う（draw/Legend.h「スタイルは当てる
-//	だけでは効かない」）。
+//	ビューポートを仕上げた後にそれを呼ぶ。凡例は**スタイル無しで置く**ので、置いた後に
+//	スタイルを反映させる手当ては要らない。**イメージの縮率は触らない**（PIO 既定の 1:50 の
+//	まま。理由は draw/Legend.h「イメージの縮率」）。
 //
 //	【シートレイヤとビューポートの手当ては draw/DrawUtil が持つ】シートレイヤの用意
 //	（PrepareSheetLayer）・表示レイヤの絞り込み・クラス表示・縮尺・図面タイトル/図番・更新
@@ -202,8 +202,7 @@ namespace HomeskzIfcImport::draw
 			// （draw/Legend.h「そのシートのビューポートでフィルタする」）——**凡例を
 			// ビューポートより後に作る**のはそのためでもある。
 			if (command.legend.has_value())
-				drawSheetLegend(sheetLayer, *command.legend, provisional.legendTopRight, viewport,
-								legends);
+				drawSheetLegend(sheetLayer, provisional.legendTopRight, viewport, legends);
 
 			placed.push_back(PlacedSheet{&command, viewport});
 		}
@@ -212,7 +211,8 @@ namespace HomeskzIfcImport::draw
 		//
 		// **中身を流し込むまで凡例の大きさは決まらない**（draw/Legend.h）。流し込んでから
 		// いちばん広い凡例の幅を測り、そのぶんだけ右を空けた割り付けを作る。
-		updateLegendStyles(legends);
+		//
+		refreshLegends(legends);
 		const double legendWidth = measureLegendWidth(legends);
 		const core::PlanLayout layout =
 			paper.has_value() ? core::planLayout(haveContent ? contentSize : core::Vec2{},
@@ -290,7 +290,8 @@ namespace HomeskzIfcImport::draw
 
 		// 図が仕上がったので**もう一度**中身を流し込み（凡例に並ぶのはそのシートの
 		// ビューポートに映るシンボルなので、縮尺を当て直した後の図で取り直す）、右上を揃える。
-		updateLegendStyles(legends);
+		refreshLegends(legends);
+
 		placeLegends(legends, layout.legendTopRight);
 
 		if (previousLayer != nil)
