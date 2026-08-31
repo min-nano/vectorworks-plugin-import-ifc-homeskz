@@ -30,8 +30,6 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
-#include "VWFC/VWObjects/VWLayerObj.h"
-#include "VWFC/VWObjects/VWDocument.h"
 
 #include <algorithm>
 #include <array>
@@ -62,10 +60,6 @@ namespace HomeskzIfcImport::draw
 		// 建物に対して使える幅が 315mm しか残らず 1/75 へ落ちていた（M18 のローカル確認）。
 		// **中身が必要とする幅より少し広い程度**に留める。
 		constexpr double kBoxWidth = 40.0;
-
-		// OIP の「イメージの縮率」の表示元。**分母を実数で持つ**欄で、1:75 なら 75。
-		// 表示名が空なので OIP の項目名からは引けない——universal 名で直に書く。
-		constexpr const char* kFieldImageScale = "ImageScale";
 
 		// **凡例イメージはビューポート**（`Kernel/API/Objs.TDType.h` の `kViewportNode` ＝ 122）。
 		// 実機で凡例の中身の節点型を数えて分かった——`0×102, 3×66, 10×6, 11×36, 86×42,
@@ -136,175 +130,6 @@ namespace HomeskzIfcImport::draw
 			counts.imageScaleTarget = target;
 			counts.imageScaleAfter = after;
 		}
-
-#ifdef VW_DEV_BUILD
-		// 【一時計装 ── 縮率が安定したら消す】実数を短く整形する。
-		std::string FormatScale(double value)
-		{
-			std::array<char, 32> buffer{};
-			std::snprintf(buffer.data(), buffer.size(), "%g", value);
-			return {buffer.data()};
-		}
-
-		// 【一時計装 ── 縮率が安定したら消す】文書内のグラフィック凡例をすべて集める
-		// （レイヤ → その上のオブジェクトの順に走査）。
-		//
-		// **なぜ全部なのか**: OIP の「カスタム 1:」の値はレコードのどの欄にも無い（全欄を
-		// ダンプして 50 がどこにも出てこなかった）。**手で正しく設定した凡例**と**こちらが
-		// 置いた凡例**を同じ文書で並べて全欄を比べれば、違う欄がそのまま答えになる
-		// ——ソース定義（`'GrLe'`）を突き止めたときと同じやり方（docs/DEV-NOTES.md）。
-		std::vector<MCObjectHandle> CollectAllLegends()
-		{
-			constexpr std::size_t kMaxLegends = 32; // ダンプが長くなりすぎない程度に打ち切る
-			std::vector<MCObjectHandle> found;
-			try
-			{
-				for (MCObjectHandle layer = VWDocument::GetDrawingHeaderFristMember();
-					 layer != nil && found.size() < kMaxLegends; layer = gSDK->NextObject(layer))
-				{
-					if (!VWLayerObj::IsLayerObject(layer))
-						continue;
-					for (MCObjectHandle object = gSDK->FirstMemberObj(layer);
-						 object != nil && found.size() < kMaxLegends;
-						 object = gSDK->NextObject(object))
-					{
-						try
-						{
-							if (VWParametricObj(object).GetParametricName().GetStdString() ==
-								kGraphicLegendPlugin)
-								found.push_back(object);
-						}
-						catch (...)
-						{
-							continue; // PIO でないものは黙って飛ばす
-						}
-					}
-				}
-			}
-			catch (...)
-			{
-				return found; // そこまでに拾えたぶんで足りる（読み取りしかしない）
-			}
-			return found;
-		}
-
-		// 【一時計装 ── 縮率が安定したら消す】レコードの全欄を「欄名 → 値」で取る。
-		//
-		// **なぜ要るか**: OIP の「カスタム 1:」の値はレコードのどの欄にも無い（全欄を出して
-		// 50 がどこにも現れなかった）。**手で正しく設定した凡例**と**こちらが置いた凡例**を
-		// 同じ文書で比べれば、違う欄がそのまま答えになる——ソース定義（`'GrLe'`）を突き止めた
-		// ときと同じやり方（docs/DEV-NOTES.md）。
-		std::map<std::string, std::string> RecordFieldsOf(MCObjectHandle object)
-		{
-			std::map<std::string, std::string> fields;
-			try
-			{
-				const VWParametricObj pio(object);
-				const size_t count = pio.GetParamsCount();
-				for (size_t i = 0; i < count; ++i)
-				{
-					const TXString name = pio.GetParamName(i);
-					try
-					{
-						fields[name.GetStdString()] = pio.GetParamValue(name).GetStdString();
-					}
-					catch (...)
-					{
-						continue; // 値を読めない欄（ボタン等）は比べようが無いので飛ばす
-					}
-				}
-			}
-			catch (...)
-			{
-				return fields;
-			}
-			return fields;
-		}
-
-		// 【一時計装 ── 縮率が安定したら消す】文書内の凡例を **#0 と比べて違う欄だけ**並べる。
-		//
-		// **全欄をそのまま出したら完了ダイアログに収まらなかった**（凡例 1 枚で 36 欄・
-		// 文書には何枚もある）。読めなければ計測した意味が無いので、差分だけにする。
-		std::string DescribeLegendDifferences(const std::vector<MCObjectHandle>& legends)
-		{
-			if (legends.size() < 2)
-				return "凡例 " + std::to_string(legends.size()) + " 枚（比べる相手が無し）";
-
-			const std::map<std::string, std::string> base = RecordFieldsOf(legends.front());
-			std::string text = "凡例 " + std::to_string(legends.size()) + " 枚。#0 との差分: ";
-			bool anyDiff = false;
-			for (std::size_t i = 1; i < legends.size(); ++i)
-			{
-				const std::map<std::string, std::string> other = RecordFieldsOf(legends[i]);
-				for (const auto& [name, value] : other)
-				{
-					const auto found = base.find(name);
-					if (found != base.end() && found->second == value)
-						continue;
-					anyDiff = true;
-					// **1 つずつ append する。** 長い `+` の連鎖は一時文字列を積むので
-					// clang-tidy（performance-inefficient-string-concatenation）が落とす。
-					text += "#";
-					text += std::to_string(i);
-					text += " ";
-					text += name;
-					text += ": ";
-					text += (found == base.end()) ? "(無し)" : found->second;
-					text += " → ";
-					text += value;
-					text += "; ";
-				}
-			}
-			if (!anyDiff)
-				text += "全欄一致";
-			return text;
-		}
-
-		// 【一時計装】凡例のレコードの `ImageScale`（OIP の「イメージの縮率」の表示元）。
-		double RecordScaleOf(MCObjectHandle object)
-		{
-			try
-			{
-				return VWParametricObj(object).GetParamReal(TXString(kFieldImageScale));
-			}
-			catch (...)
-			{
-				return 0.0;
-			}
-		}
-
-		// 【一時計装 ── 縮率が安定したら消す】container の中のビューポートの縮尺を順に並べる。
-		//
-		// **なぜ要るか**: 作り直しの後に「50 を返すビューポート」と「75 で描かれている絵」が
-		// 同居していた。凡例の中に縮尺の違うビューポートが複数あるのか、それとも読み方が
-		// おかしいのかは、**全部並べてみないと分からない**（draw/Legend.h）。
-		std::string DescribeViewportScales(MCObjectHandle container, int depth)
-		{
-			if (container == nil || depth <= 0)
-				return {};
-			std::string text;
-			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil;
-				 h = gSDK->NextObject(h))
-			{
-				if (gSDK->GetObjectTypeN(h) == kViewportNode)
-				{
-					std::array<char, 32> buffer{};
-					std::snprintf(buffer.data(), buffer.size(), "%g", ViewportScale(h));
-					if (!text.empty())
-						text += ", ";
-					text += buffer.data();
-					continue; // 中へは潜らない
-				}
-				const std::string inner = DescribeViewportScales(h, depth - 1);
-				if (inner.empty())
-					continue;
-				if (!text.empty())
-					text += ", ";
-				text += inner;
-			}
-			return text;
-		}
-#endif
 
 		// container の中のビューポートに scale の縮尺のものが 1 つでもあるか。
 		// **作り直しの後に読み直す**ためのもので、図面は変えない。
@@ -578,44 +403,23 @@ namespace HomeskzIfcImport::draw
 		if (scale <= 0.0)
 			return;
 
-		// ★**順序**: 中身 → 作り直し → 記録（文字列で） → **中身をもう一度**。以降は作り直さない。
+		// ★**順序**: 中身 → 作り直し → **中身をもう一度**。以降は作り直さない。
 		//
-		// 実機で各段階を測って確定した（診断の「凡例の縮率の推移」）:
+		// 実機で各段階を測って確定した:
 		//
-		//   開始   記録=50 中身=[50,50,50]
-		//   記録後 記録=75 中身=[50,50,50]   ← レコードは書ける。中身は動かない
-		//   作直後 記録=75 中身=[50,50,50]   ← 作り直しはレコードを中身へ伝えない
-		//   中身後 記録=75 中身=[75,75,75]   ← 中身は書ける
-		//   完了   記録=75 中身=[50,50,50]   ← **作り直しが中身を既定へ戻す**
+		//   開始   中身=[50,50,50]
+		//   中身   中身=[75,75,75]   ← 凡例イメージ（ビューポート）の縮尺は書ける
+		//   作直   中身=[50,50,50]   ← **作り直しが中身を既定へ戻す**。ただし枠はこのとき
+		//                              「その時点の中身」から組み直るので 75 で組まれる
+		//   完了   中身=[75,75,75]   ← 戻された中身を入れ直す
 		//
-		// 読み取れること:
-		//   * **中身を戻すのは作り直し**であって、レコードへの書き込みではない（書き込みは
-		//     中身を動かさない）。かつて「書き込みが絵を壊す」と読んだのは誤りだった。
-		//   * 作り直しは中身もレコードも**凡例イメージの定義**から作り直す。定義は 1:50 の
-		//     ままなので、何を書いてあっても作り直せば 50 に戻る。
-		//   * 一方で**枠は作り直しのときに「その時点の中身」から組み直る**。だから中身を
-		//     先に変えておけば、枠は 75 で組まれる。
+		// **最後に作り直さない**ことが肝で、作り直した瞬間に中身が 50 へ戻る。
 		//
-		// よって「作り直しで枠を組ませ、その後にレコードと中身を入れ直す」という並びになる。
-		// **最後に作り直さない**ことが肝で、作り直した瞬間に全部 50 へ戻る。
+		// **レコードの `ImageScale`（OIP の「イメージの縮率」）は書かない。** 書いても絵は
+		// 変わらず、OIP の表示も変わらない——縮率の本体はレコードの外にあり、UI からの書き込み
+		// だけがそこへ届く（docs/DEV-NOTES.md「打ち切った調査」の
+		// 「凡例の OIP『イメージの縮率』表示を合わせる」）。実数でも文字列でも結果は同じ。
 		//
-		// 各段階の値は counts.scaleReport へ積む（dev ビルドのみ）。
-		const auto note = [&counts](const char* label)
-		{
-#ifdef VW_DEV_BUILD
-			if (counts.objects.empty())
-				return;
-			if (!counts.scaleReport.empty())
-				counts.scaleReport += " / ";
-			counts.scaleReport +=
-				std::string(label) + " 記録=" + FormatScale(RecordScaleOf(counts.objects.front())) +
-				" 中身=[" + DescribeViewportScales(counts.objects.front(), kImageSearchDepth) + "]";
-#else
-			(void)label;
-			(void)counts;
-#endif
-		};
-
 		// 凡例イメージ（＝ビューポート）へ縮尺を与える。
 		//
 		// **入口を 1 つに絞らない。** PIO の中身の入口は版によって 3 通りあり（draw/Tag の
@@ -633,13 +437,9 @@ namespace HomeskzIfcImport::draw
 				ScaleImagesIn(aux, scale, kImageSearchDepth, counts);
 		};
 
-		note("開始");
-
 		// 1) 中身を伏図の縮尺にする。
 		for (const MCObjectHandle object : counts.objects)
 			scaleImages(object);
-		note("中身");
-
 		// 2) 作り直して、枠を「いまの中身」に合わせて組み直させる。**この作り直しで中身は
 		//    既定へ戻る**が、枠は 75 で組まれた後なので崩れない。
 		//    **縮率を 1 つも与えられていないなら作り直さない。**
@@ -647,49 +447,13 @@ namespace HomeskzIfcImport::draw
 			return;
 		for (const MCObjectHandle object : counts.objects)
 			gSDK->ResetObject(object);
-		note("作直");
-
-		// 3) OIP の「イメージの縮率」（レコードの `ImageScale`）を、**文字列として**書く。
-		//
-		// ★**`SetParamReal` ではなく `SetParamAsString` を使う。** 実機で分かったのは
-		// 「欄が足りない」のではなく「**書き込み経路が違う**」ということだった:
-		//   * 手でポップアップを 1:5 にした凡例は、レコードが `ImageScale=5` になり、**絵も
-		//     1:5 に変わった**（同じ文書の凡例を比べて確認。差分は BoxWidth とこの欄だけ）
-		//   * こちらが `SetParamReal` で 75 を書くと、**レコードは 75 になるのに絵は変わらない**
-		// つまり `ImageScale` は縮率そのもの（ポップアップも「カスタム 1:」も同じ欄に落ちる）で、
-		// UI 側の書き込みだけがイメージの作り直しまで走らせている。OIP の欄は文字列で入るので、
-		// 文字列で書けば同じ経路（変換と通知）を通る見込み——それがこの試み。
-		//
-		// **効かなければ縮率はレコード経由では動かせないと確定する**（絵は中身側で揃っているので、
-		// そのときは OIP の表示だけ既定のまま残す。docs/DEV-NOTES.md「打ち切った調査」）。
-		for (const MCObjectHandle object : counts.objects)
-		{
-			try
-			{
-				std::array<char, 32> buffer{};
-				std::snprintf(buffer.data(), buffer.size(), "%g", scale);
-				VWParametricObj(object).SetParamAsString(TXString(kFieldImageScale),
-														 TXString(buffer.data()));
-			}
-			catch (...)
-			{
-				continue; // 表示が既定のままになるだけ。絵は中身側で揃っている
-			}
-		}
-		note("記録");
-
 		// 4) 作り直しで戻された中身を入れ直す。**いちばん最後。ここから先は作り直さない。**
 		for (const MCObjectHandle object : counts.objects)
 			scaleImages(object);
-		note("完了");
-#ifdef VW_DEV_BUILD
-		// 【一時計装】**文書内のすべての凡例**の全欄。手で設定した凡例が同じ文書にあれば、
-		// 並べて比べるだけで「どの欄が違うのか」が分かる（上の CollectAllLegends）。
-		counts.recordFields = DescribeLegendDifferences(CollectAllLegends());
-#endif
 
-		// **最終状態を実測して持ち帰る。** 縮尺の違うビューポートが混在していないか、レコードが
-		// 残ったかは絵からは分からない（docs/DEV-NOTES.md「グラフィック凡例」）。
+		// **作り直しが縮尺を戻していないかを見る。** 戻っていれば枠も中身も既定のままで、
+		// 絵からは「何も変わらなかった」としか見えないので、診断で見分けられるようにする。
+		// 目標の縮尺のビューポートが**どの凡例にも 1 つも無い**ときだけ異常とみなす。
 		counts.imageScaleAfter = 0.0;
 		for (const MCObjectHandle object : counts.objects)
 		{
@@ -697,18 +461,6 @@ namespace HomeskzIfcImport::draw
 			{
 				counts.imageScaleAfter = scale;
 				break;
-			}
-		}
-		if (!counts.objects.empty())
-		{
-			try
-			{
-				counts.recordScale = VWParametricObj(counts.objects.front())
-										 .GetParamReal(TXString(kFieldImageScale));
-			}
-			catch (...)
-			{
-				counts.recordScale = 0.0;
 			}
 		}
 	}
@@ -723,20 +475,9 @@ namespace HomeskzIfcImport::draw
 		// ＝作り直しが既定へ戻した（draw/Legend.h の applyLegendImageScale）。
 		const bool imageScaleReverted =
 			counts.imageScaleTarget != 0.0 && counts.imageScaleAfter == 0.0;
-		// **OIP の表示と実描画の食い違い。** これは既知の制限（README）なので、ふだんの完了
-		// ダイアログには出さず、dev ビルドの調査でだけ見えるようにする。
-		const bool recordOdd =
-#ifdef VW_DEV_BUILD
-			counts.imageScaleTarget != 0.0 && counts.recordScale != 0.0 &&
-			std::abs(counts.recordScale - counts.imageScaleTarget) >
-				std::abs(counts.imageScaleTarget) * 1.0e-6;
-#else
-			false;
-#endif
 		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
 			counts.sourceLeft == 0 && counts.filterLeft == 0 && !imageScaleLeft &&
-			counts.imagesLeft == 0 && !imageScaleReverted && !recordOdd &&
-			counts.scaleReport.empty() && counts.recordFields.empty())
+			counts.imagesLeft == 0 && !imageScaleReverted)
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
@@ -779,25 +520,6 @@ namespace HomeskzIfcImport::draw
 		if (counts.imagesLeft > 0)
 			text += "縮率を書けなかった凡例イメージ " + std::to_string(counts.imagesLeft) +
 					" 件（そのイメージだけ既定の 1:50 のままです）。";
-		if (recordOdd)
-		{
-			const auto num = [](double value)
-			{
-				std::array<char, 32> buffer{};
-				std::snprintf(buffer.data(), buffer.size(), "%g", value);
-				return std::string(buffer.data());
-			};
-			text += "OIP の「イメージの縮率」は実描画と食い違います（表示 " +
-					num(counts.recordScale) + " / 実際 " + num(counts.imageScaleTarget) +
-					"。既知の制限）。";
-		}
-		// 【一時計装】dev ビルドでのみ埋まる（draw/Legend.h の scaleReport）。段階ごとに
-		// 「レコード」と「中身（ビューポート）」がどう動いたかが並ぶ。
-		if (!counts.scaleReport.empty())
-			text += "凡例の縮率の推移: " + counts.scaleReport + "。";
-		// 【一時計装】同じく dev ビルドのみ。**文書内の全凡例**のレコード全欄（draw/Legend.h）。
-		if (!counts.recordFields.empty())
-			text += "凡例レコードの比較: " + counts.recordFields + "。";
 		if (imageScaleReverted)
 		{
 			// 与えた縮尺のイメージが作り直しの後に 1 つも残っていない。何を何にしようとしたかを

@@ -121,20 +121,6 @@ namespace HomeskzIfcImport::draw
 		double imageScaleTarget = 0.0;
 		double imageScaleAfter = 0.0;
 
-		// OIP の「イメージの縮率」の表示元（レコードの `ImageScale`）を、すべて終えた後に
-		// 読み直した値。**この欄は書かない**（書くと絵が 1:50 へ戻る。draw/Legend.cpp）ので
-		// 実描画と食い違うのが既定の状態で、その差を dev ビルドの診断で見えるようにしておく。
-		double recordScale = 0.0;
-
-		// 【一時計装 ── 縮率が安定したら消す】レコードの全欄（名前=値）。**dev ビルドでのみ
-		// 埋まる。** 「イメージの縮率」のポップアップがどの欄なのかを実機から持ち帰るため
-		// （draw/Legend.cpp の DumpAllRecordFields）。
-		std::string recordFields;
-
-		// 【一時計装 ── 縮率が安定したら消す】凡例の中のビューポートの縮尺を並べたもの。
-		// **dev ビルドでのみ埋まる**（draw/Legend.cpp の DescribeViewportScales）。
-		std::string scaleReport;
-
 		// 凡例の中を辿って見えた**節点型の内訳**（型 → 件数）。凡例イメージが 1 つも
 		// 見つからなかったときに診断へ出す——**実機でしか中身の構造は分からない**ので、
 		// 「何が入っていたか」を持ち帰らないと次に何を探せばよいか決められない
