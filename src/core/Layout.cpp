@@ -9,11 +9,86 @@
 #include "core/Geometry.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <string>
 
 namespace HomeskzIfcImport::core
 {
+	PageMarginsResolution resolvePageMargins(const PageMargins& raw, const Vec2& paper,
+											 const Vec2& sheet)
+	{
+		PageMarginsResolution resolution;
+
+		// 負の余白は意味を成さない（＝読めていない）。用紙いっぱいへ倒す。
+		if (raw.left < 0.0 || raw.right < 0.0 || raw.bottom < 0.0 || raw.top < 0.0)
+			return resolution;
+
+		const bool haveSheet = sheet.x > 0.0 && sheet.y > 0.0;
+		const double horizontal = raw.left + raw.right;
+		const double vertical = raw.bottom + raw.top;
+
+		// 「用紙 − 余白」がシートレイヤの大きさ（＝印刷可能領域）と一致するか。
+		const auto matchesSheet = [&](double scale)
+		{
+			if (!haveSheet)
+				return false;
+			return std::abs((paper.x - (horizontal * scale)) - sheet.x) <= kPageMarginMatchTol &&
+				   std::abs((paper.y - (vertical * scale)) - sheet.y) <= kPageMarginMatchTol;
+		};
+
+		if (horizontal <= 0.0 && vertical <= 0.0)
+		{
+			// ★**四辺 0 は「読めなかった」ではない**（Layout.h）。縁なし印刷ができる機種
+			// では余白 0 の用紙設定が実際に選べるので、そのまま「余白なし」として受け取る。
+			// 単位の突き合わせは要らない——0 はインチでも mm でも 0 なので、どちらの解釈でも
+			// 同じ矩形になる。
+			//
+			// 例外は**シートレイヤが用紙より小さい**とき。印刷可能領域が用紙より狭いのに
+			// 余白が 0 で返ったということなので、その 0 は信用しない（解釈できなかった側へ
+			// 倒し、生の値を診断へ出させる）。逆にシートレイヤが読めない・用紙と同じなら、
+			// 0 を疑う根拠が無いので受け取る。
+			const bool contradicted = haveSheet && ((paper.x - sheet.x) > kPageMarginMatchTol ||
+													(paper.y - sheet.y) > kPageMarginMatchTol);
+			resolution.resolved = !contradicted;
+			return resolution;
+		}
+
+		// 候補は 2 つだけ。**インチが先**（用紙まわりの長さは SDK では一貫してインチ）。
+		constexpr std::array<double, 2> kUnits{kMillimetersPerInch, 1.0};
+		const auto fits = [&](double scale)
+		{ return (horizontal * scale) < paper.x && (vertical * scale) < paper.y; };
+
+		// 1. 「用紙 − 余白」がシートレイヤの大きさと一致する単位。両方の候補を先に見てから
+		//    2 へ落ちる（一致は「収まる」より強い根拠なので順序を混ぜない）。
+		// 2. どちらとも一致しなければ、用紙に収まる方。
+		double scale = 0.0;
+		for (const double unit : kUnits)
+		{
+			if (matchesSheet(unit))
+			{
+				scale = unit;
+				break;
+			}
+		}
+		for (const double unit : kUnits)
+		{
+			if (scale > 0.0)
+				break;
+			if (fits(unit))
+				scale = unit;
+		}
+		if (scale <= 0.0)
+			return resolution;
+
+		resolution.resolved = true;
+		resolution.inInches = scale == kMillimetersPerInch;
+		resolution.margins =
+			PageMargins{raw.left * scale, raw.right * scale, raw.bottom * scale, raw.top * scale};
+		return resolution;
+	}
+
 	double fitScale(const Vec2& content, const Vec2& available)
 	{
 		// 階梯は昇順（図が大きくなる順）なので、最初に収まったものが「収まる中で最も大きい
