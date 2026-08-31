@@ -134,6 +134,15 @@ include しないので、SDK 無し（約 800MB のダウンロード無し）�
     平面へ落とすと 1 点に潰れるので 2D ポリラインでは表せない。`Add3DVertex` が VS の
     `AddVertex3D` に当たる（`Insert3DVertex` は別物で頂点が増えない）。`VWNURBSCurve` は
     評価専用で制御点から構築できないが、`ISDK` 側に `Add3DVertex` がある。
+- **シンボル定義を作るときは「作った」で終わらせない。** `VWSymbolDefObj`（名前の構築子が
+  `GS_GetNamedObject` → 無ければ `GS_CreateSymbolDefinition`）で定義を作り、`AddObject`
+  （中身は `GS_AddObjectToContainer`）で図形を入れる。**入ったかどうかは
+  `GetFirstMemberObject()` で必ず確かめる**——M19 で「名前だけ作って中身を入れ損ねた」
+  空のシンボルが 3 つ図面に残り、しかも次の取り込みでは「在る」と見なされて直せなく
+  なった。作った直後に名前の一致で成否を判定するのも同じ罠（VW が返す名前は正規化などで
+  元の綴りと一致しないことがある。**そこで打ち切ると空の定義だけが残る**）。
+  「触らない」の境目は**名前の有無ではなく中身の有無**にする。
+  用紙基準（縮尺非追従）は `VWSymbolDefObj::SetPageBased(true)`＝`ovSymDefPageBased`。
 - **紙の上の大きさを一定にしたい絵は「用紙 mm × レイヤ縮尺」で描く。** 縮尺を掛ける
   手掛かりは `GetLayerScaleN`（1/50 なら 50 が返る）だけで、引数はレイヤのハンドルなので
   `ParentObject` で PIO の親を辿って渡す。縮尺が変わったときに描き直させるには

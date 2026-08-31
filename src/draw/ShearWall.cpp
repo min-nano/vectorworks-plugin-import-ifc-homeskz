@@ -20,8 +20,10 @@
 #include "Extensions/ExtShearWall.h"
 #include "core/Document.h"
 #include "core/Progress.h"
+#include "core/Trace.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
+#include "VWFC/VWObjects/VWSymbolDefObj.h"
 
 #include <cmath>
 #include <cstddef>
@@ -52,22 +54,20 @@ namespace HomeskzIfcImport::draw
 		constexpr double kMarkTriangleHeight = 3.0; // 壁に直交する脚（＝直角を立てる側）
 		constexpr double kMarkCircleDiameter = 3.0;
 
-		// シンボル定義を「用紙基準」（＝レイヤ縮尺に追従しない）にするオブジェクト変数。
-		// Kernel/API/ObjectVariables.h の ovSymDefPageBased（130。"whether the symbol will
-		// have a constant page size"）。ci-debug の sdk-grep で確認済み。
-		constexpr short kOVSymDefPageBased = 130;
-
-		// 図形 1 つをシンボル定義の中へ入れ、記号の作図クラスを与える。
-		// **VWFC で作った図形はどのコンテナにも入らない**ので AddObjectToContainer で
-		// 入れ直す（draw/Symbol.cpp の 1 番目の作法）。gSDK->Create* で作ったものは
-		// アクティブレイヤに入っているので、同じ呼び出しで定義へ移す。
-		void AddToSymbol(MCObjectHandle shape, MCObjectHandle definition)
+		// 図形 1 つをシンボル定義の中へ入れ、記号の作図クラスを与える。入ったら true。
+		// **VWFC で作った図形はどのコンテナにも入らない**ので AddObject（中身は
+		// AddObjectToContainer）で入れ直す（draw/Symbol.cpp の 1 番目の作法）。
+		// gSDK->Create* で作ったものはアクティブレイヤに入っているので、同じ呼び出しで
+		// 定義へ移る。**入ったかどうかを必ず確かめる**——空のシンボルが図面に残ると、
+		// 次からは「在る」と見なして直せなくなる（下記 EnsureSymbol）。
+		bool AddToSymbol(MCObjectHandle shape, VWSymbolDefObj& definition)
 		{
-			if (shape == nil || definition == nil)
-				return;
-			gSDK->AddObjectToContainer(shape, definition);
+			if (shape == nil)
+				return false;
+			definition.AddObject(shape);
 			SetClassByName(shape, kShearMarkClass);
 			SetAllAttributesByClass(shape);
+			return definition.GetFirstMemberObject() != nil;
 		}
 
 		// 筋かい記号（直角三角形）1 つ分の頂点。挿入点は**壁と平行な脚の中央**で、
@@ -82,44 +82,66 @@ namespace HomeskzIfcImport::draw
 					core::Vec2{head, kMarkTriangleHeight}};
 		}
 
-		// シンボル定義を 1 つ用意する。**在れば何もしない**（利用者が描き直したものを
-		// 上書きしない）。作れたら true。
-		bool EnsureSymbol(const char* name, const std::function<void(MCObjectHandle)>& build)
+		// シンボル定義を 1 つ用意する。中身のあるシンボルが在れば true（何もしない）。
+		//
+		// 【触る／触らないの境目は「中身が在るか」】名前で在る／無いだけを見て打ち切ると、
+		// **空のまま登録されたシンボルを二度と直せない**——実機で実際にそうなった（M19。
+		// 名前だけ作って中身を入れ損ねた 3 つが図面に残り、次の取り込みでは「在る」と
+		// 見なされて空のままだった）。中身が 1 つでも入っていれば利用者が描いたもの
+		// （あるいは前回入れたもの）なので触らず、**空なら描き直す**。
+		//
+		// 名前で拾って無ければ作るのは VWSymbolDefObj の構築子がやってくれる
+		// （GS_GetNamedObject → 無ければ GS_CreateSymbolDefinition。SDK のソースで確認）。
+		// **作れたかどうかを名前の一致で判定しない**——VW が返す名前は正規化などで元の
+		// 綴りと一致しないことがあり、そこで打ち切ると「名前だけ在って空」を招く。
+		bool EnsureSymbol(const char* name, const std::function<MCObjectHandle()>& makeShape)
 		{
-			if (HasSymbolDefinition(name))
+			try
+			{
+				VWSymbolDefObj definition{TXString(name)};
+				if (definition.GetThisObject() == nil)
+				{
+					core::trace::log(std::string("shearwall: シンボル定義を作れない（") + name +
+									 "）");
+					return false;
+				}
+				if (definition.GetFirstMemberObject() != nil)
+					return true; // 中身が在る＝そのまま使う
+
+				if (!AddToSymbol(makeShape(), definition))
+				{
+					core::trace::log(std::string("shearwall: シンボルへ図形を入れられない（") +
+									 name + "）");
+					return false;
+				}
+				// **用紙基準＝縮尺非追従**（この 1 行がご要望の本体）。
+				definition.SetPageBased(true);
 				return true;
-
-			// CreateSymbolDefinition は名前を書き換えることがある（別のリソースと衝突した
-			// とき）。書き換えられたら PIO が名前で見つけられないので、使わない。
-			TXString created(name);
-			const MCObjectHandle definition = gSDK->CreateSymbolDefinition(created);
-			if (definition == nil || created != TXString(name))
+			}
+			catch (...)
+			{
+				core::trace::log(std::string("shearwall: シンボル定義で例外（") + name + "）");
 				return false;
-
-			build(definition);
-			// **用紙基準＝縮尺非追従**（この 1 行がご要望の本体）。
-			gSDK->SetObjectVariable(definition, kOVSymDefPageBased,
-									TVariableBlock(static_cast<Boolean>(true)));
-			return true;
+			}
 		}
 
-		// 伏図記号のシンボル 3 つを用意する。作れなかった数を返す（診断へ出す）。
+		// 伏図記号のシンボル 3 つを用意する。用意できなかった数を返す（診断へ出す）。
 		std::size_t EnsureMarkSymbols()
 		{
 			std::size_t failed = 0;
 			const auto ensure =
-				[&failed](const char* name, const std::function<void(MCObjectHandle)>& build)
+				[&failed](const char* name, const std::function<MCObjectHandle()>& makeShape)
 			{
-				if (!EnsureSymbol(name, build))
+				if (!EnsureSymbol(name, makeShape))
 					++failed;
 			};
 
-			ensure(kShearSymbolBraceRise, [](MCObjectHandle definition)
-				   { AddToSymbol(CreateClosedPolygon(BraceTrianglePoints(true)), definition); });
-			ensure(kShearSymbolBraceFall, [](MCObjectHandle definition)
-				   { AddToSymbol(CreateClosedPolygon(BraceTrianglePoints(false)), definition); });
+			ensure(kShearSymbolBraceRise,
+				   [] { return CreateClosedPolygon(BraceTrianglePoints(true)); });
+			ensure(kShearSymbolBraceFall,
+				   [] { return CreateClosedPolygon(BraceTrianglePoints(false)); });
 			ensure(kShearSymbolPanel,
-				   [](MCObjectHandle definition)
+				   []
 				   {
 					   const double radius = kMarkCircleDiameter / 2.0;
 					   WorldRect bounds;
@@ -127,7 +149,7 @@ namespace HomeskzIfcImport::draw
 					   bounds.right = radius;
 					   bounds.bottom = -radius;
 					   bounds.top = radius;
-					   AddToSymbol(gSDK->CreateOval(bounds), definition);
+					   return gSDK->CreateOval(bounds);
 				   });
 			return failed;
 		}
