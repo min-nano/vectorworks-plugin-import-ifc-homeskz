@@ -4,14 +4,19 @@
 //	IFC の読み取り結果サマリ。ホームズ君 IFC を読み込み、主要エンティティ型の件数を
 //	数えて返す（M0 の「ローカル確認」用の診断: パースが動いている確証を件数で示す）。
 //
-//	【2 つの役割】
+//	【3 つの役割】
 //	  * summarizeModel / formatSummary … Document を経由せず生の Model から「どの IFC 型が
 //	    何件あるか」を数える診断（M0 の名残。パースが動いている確証を件数で示す）。
-//	  * documentCommandCount / formatImportResult … **インポート完了ダイアログの本文**を
-//	    組み立てる（M15「完了文言の集約」）。以前は Extensions/ExtMenu.cpp に要素名を
-//	    手書きで連ねていたが、要素が増えるたびに SDK 側の文字列を伸ばす作業が必要で、
-//	    しかもその文言はテストできなかった。要素の一覧（ラベル・単位・命令数・描けた数）を
-//	    Summary.cpp の表 1 つに集約し、SDK 側は組み上がった本文を出すだけにしてある。
+//	  * documentCommandCount / importOutcome / formatImportResult … **インポート完了
+//	    ダイアログの本文**を組み立てる（M15「完了文言の集約」）。以前は
+//	    Extensions/ExtMenu.cpp に要素名を手書きで連ねていたが、要素が増えるたびに SDK 側の
+//	    文字列を伸ばす作業が必要で、しかもその文言はテストできなかった。要素の一覧
+//	    （ラベル・単位・命令数・描けた数）を Summary.cpp の表 1 つに集約し、SDK 側は
+//	    組み上がった本文を出すだけにしてある。
+//	  * formatLogHeader / formatLogResult … **診断ログの見出しと結果**を組み立てる（M19）。
+//	    完了ダイアログを「終わったか・問題があったか」だけに絞った代わりに、要素ごとの
+//	    内訳・注意・記録はすべてログへ回した。要素の一覧は上と**同じ表**から出すので、
+//	    要素を足すときに触るのは相変わらず 1 行だけ。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。
 //	ここは Model（parse/Step）を読むだけの純ロジックなので、通常の C++ ツールチェインで
@@ -65,7 +70,7 @@ namespace HomeskzIfcImport::parse
 	std::string formatSummary(const IfcSummary& summary);
 
 	// ------------------------------------------------------------------------
-	// インポート完了ダイアログの本文（M15「完了文言の集約」）
+	// インポート完了ダイアログの本文（M15「完了文言の集約」／M19「短い完了・厚いログ」）
 	// ------------------------------------------------------------------------
 
 	// 命令セットに含まれる命令の総数（要素ごとの命令数の合計）。0 なら「取り込める要素が
@@ -73,30 +78,86 @@ namespace HomeskzIfcImport::parse
 	// 要素を足すときに数え漏らすことがない。
 	std::size_t documentCommandCount(const core::Document& document);
 
-	// インポート結果を完了ダイアログの本文へ整形する。**実際に描けた数**を要素ごとに
-	// 1 行で並べ、命令はあるのに描けなかった要素は「3/12 本」の形にして、配置先
-	// レイヤが無い・オブジェクトを作れない等の描画側の問題をローカル確認で解析側と
-	// 切り分けられるようにする。命令が 0 件の要素は行ごと出さない（無い物の「0 件」は
-	// 読む側の邪魔になるだけで、行が無いこと自体が「解析で 0 件」を意味する）。
+	// インポートの結末。**完了ダイアログもログも同じ判断を使う**ので、「成功と言いながら
+	// ログには問題が並ぶ」という食い違いが起きない。
+	enum class ImportStatus
+	{
+		Empty,	 // 解析は通ったが取り込める要素が 1 つも無かった
+		Invalid, // 命令セットの検証に落ちた（何も描いていない）
+		Cancelled, // ユーザーが進捗ダイアログで中止した（描けたところまでは残る）
+		Warning, // 描き切れなかった要素があった／描画側の異常が出た
+		Success	 // 命令をすべて描けて、異常も無かった
+	};
+
+	struct ImportOutcome
+	{
+		ImportStatus status = ImportStatus::Empty;
+		std::size_t commands = 0; // 命令の総数
+		std::size_t placed = 0;	  // 実際に描けた総数
+	};
+
+	// 命令セットと描画結果から結末を求める。中止は「描き切れなくて当然」なので Warning
+	// より優先する（中止したのに「問題あり」と言われると、原因を探しに行ってしまう）。
+	ImportOutcome importOutcome(const core::Document& document, const core::DrawCounts& counts);
+
+	// **インポート完了ダイアログの本文**（M19）。読むのは「どのファイルを・成功したのか・
+	// 問題はあったのか」の 3 つだけで済むよう短く保つ——**件数も所要時間もログにある**ので
+	// ここには出さない（描けた数はうまくいっているときには読む必要が無く、うまくいって
+	// いないときはその数だけでは足りない）。**一覧も戻さない**（読まれないものを毎回
+	// 見せると、肝心の「問題あり」が埋もれる）。fileName は取り込んだファイル名
+	// （空なら行を出さない）。
 	//
-	// 検証に落ちたとき（counts.valid=false）・命令が 1 件も無いときはその旨だけを返す。
-	// 中止（counts.cancelled）と描画側の診断（counts.diagnostics）も末尾へ足すので、
-	// **呼び出し側（Extensions/ExtMenu）はこの戻り値をそのまま出すだけでよい**。
+	// 例外として残す 2 行は、どちらも**その場で操作が要る**もの:
+	//   * 伏図・軸組図を作ったなら「1 回更新してください」（黙ると誤った絵を見せる）
+	//   * 「取り消し」が普通に効かないとき——戻せない／新しく作ったレイヤの分しか戻らない
+	//     （間違えたときの戻し方が変わる。**1 回で戻せるときは黙る**——「取り消し」が
+	//     効くのは当たり前で、書くと読む量が増えるだけ。ログには常に残す）
 	//
-	// logPath はクラッシュ診断ログ（core/Trace）の場所（無効なら空）。**空でなければ必ず
-	// 出す**——一時ディレクトリは macOS では `/var/folders/…/T/` のような当てられない場所で、
-	// 「ログはどこ？」に毎回答えることになるため（エラーダイアログと同じ扱い）。
+	// **ログの場所もここには出さない。** ログ自身の見出しが持つ（formatLogHeader）ので、
+	// ダイアログの「ログを表示」を開けば 1 行目の近くで読める。
 	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts,
-								   const std::string& logPath = {});
+								   const std::string& fileName = {});
 
 	// インポートが例外で中断したときのダイアログ本文。detail は例外の説明
 	// （std::exception::what()。分からなければ空）で、空なら「原因不明」として出す。
-	// logPath はクラッシュ診断ログ（core/Trace）の場所（無効なら空）。空でなければ
-	// 「どこを見れば直前のフェーズが分かるか」を本文の最後で案内する。
 	//
 	// **なぜ要るか**: ネイティブプラグインの未捕捉例外は VectorWorks 本体を巻き込んで落とす。
 	// フェーズ境界（Extensions/ExtMenu の DoInterface）で必ず受け止め、ユーザーへ
 	// 1 通のエラーダイアログとして見せる（docs/DEV-NOTES.md M15「例外処理」）。文言はここに置
 	// いて無 SDK でテストする（完了文言と同じ理由）。
-	std::string formatImportError(const std::string& detail, const std::string& logPath = {});
+	std::string formatImportError(const std::string& detail, const std::string& fileName = {});
+
+	// ------------------------------------------------------------------------
+	// 診断ログの本文（M19「短い完了・厚いログ」）
+	// ------------------------------------------------------------------------
+
+	// 動かしているビルドの素性。**SDK 側（Extensions/ExtMenu）が BuildConfig.h から詰める**
+	// ——ビルド種別のマクロを見られるのはあちらだけで、こちらは受け取った文字列を並べるだけ。
+	struct BuildInfo
+	{
+		std::string plugin;	 // プラグイン名（"HomeskzIfcImport" / "…Dev"）
+		std::string channel; // 配布チャンネル（"stable" / "dev"）
+		std::string commit; // ビルドの短い識別子（git コミット。ローカルは "local"）
+		std::string branch;	  // ビルド元のブランチ
+		std::string platform; // 実行環境（"macOS" / "Windows"）
+	};
+
+	// **診断ログの見出し**。不具合の報告に貼られたとき、こちらが最初に知りたいのは
+	// 「どのリビジョンを・いつ・どのファイルに対して動かしたか」なので、その 3 つを頭に置く
+	// （docs/DEV-NOTES.md M19）。startedAt は壁時計（core::trace::localTimestamp）、
+	// bytes は対象ファイルの大きさ（0 なら出さない）。
+	//
+	// logPath は**このログ自身の置き場所**（core::trace::path。書けなかったなら空）。
+	// **ダイアログではなくここに書く**——場所を知りたいのはログを見ようとしたときだけで、
+	// そのときログはもう目の前にある。書けなかったときは「ファイルは無い」と明示する
+	// （黙ると、出ていないログを探しに行かせる）。
+	std::string formatLogHeader(const BuildInfo& build, const std::string& ifcPath,
+								unsigned long long bytes, const std::string& startedAt,
+								const std::string& logPath = {});
+
+	// **診断ログの結果**。結末・所要時間・要素ごとの内訳（描けた数／命令数）・描画側の注意・
+	// 平常の記録（用紙の割り付け等）・取り消しの効き方を、この順に並べる。完了ダイアログから
+	// 外した細かい情報はすべてここにある。
+	std::string formatLogResult(const core::Document& document, const core::DrawCounts& counts,
+								double seconds);
 } // namespace HomeskzIfcImport::parse

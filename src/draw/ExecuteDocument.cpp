@@ -67,15 +67,21 @@ namespace HomeskzIfcImport::draw
 		const double weightedTotal = core::drawWeightedTotal(document);
 
 		// 要素ごとの診断（無ければ空）を改行で連ねる。1 つの文字列を各 draw* へ渡すと
-		// 後の要素が前の要素の診断を上書きしてしまうため、ここで積む。
-		const auto addDiagnostics = [&counts](const std::string& note)
+		// 後の要素が前の要素の診断を上書きしてしまうため、ここで積む。**異常
+		// （diagnostics）と平常の内訳（notes）は積む先を分ける**——前者が空かどうかが
+		// 完了ダイアログの「問題あり」になるので、毎回出る内訳を混ぜられない
+		// （core::DrawCounts）。
+		const auto addTo = [](std::string& sink, const std::string& note)
 		{
 			if (note.empty())
 				return;
-			if (!counts.diagnostics.empty())
-				counts.diagnostics += "\n";
-			counts.diagnostics += note;
+			if (!sink.empty())
+				sink += "\n";
+			sink += note;
 		};
+		const auto addDiagnostics = [&](const std::string& note)
+		{ addTo(counts.diagnostics, note); };
+		const auto addNotes = [&](const std::string& note) { addTo(counts.notes, note); };
 
 		// フェーズを開く。中止済みなら false を返し、呼び出し側はそのフェーズごと飛ばす
 		// （各 draw* も自分のループの先頭で中止を見て抜けるので、途中で押されても止まる）。
@@ -228,8 +234,10 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("伏図を作成しています…", document.sheets.size(), core::DrawPhase::Sheets))
 		{
 			std::string note;
-			counts.sheets = drawSheets(document, progress, &note, &memberHandles);
+			std::string info;
+			counts.sheets = drawSheets(document, progress, &note, &memberHandles, &info);
 			addDiagnostics(note);
+			addNotes(info);
 		}
 
 		// M14 軸組図（断面ビューポート）。**伏図の後**に置く: どちらもモデルを映すので全要素

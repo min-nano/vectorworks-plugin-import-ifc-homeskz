@@ -462,11 +462,6 @@ namespace HomeskzIfcImport::draw
 
 	namespace
 	{
-		// インチ → mm。用紙まわりの長さは SDK では一貫して**インチで返る**（用紙・
-		// シートレイヤの大きさ。余白は単位が書かれていない）ので、換算はここに 1 つだけ
-		// 置く（SheetPaperArea）。
-		constexpr double kMillimetersPerInch = 25.4;
-
 		// ビューポートの向き（オブジェクト変数 1007）。3D の「上」＝standardViewTop（7）。
 		// 2D/平面かどうかは向きではなく Project 2D（1005）が持つので、**この 2 つは組で
 		// 扱う**（DrawUtil.h の ViewportProjection）。
@@ -620,15 +615,15 @@ namespace HomeskzIfcImport::draw
 				return false;
 			if (raw <= 0.0)
 				return false;
-			out = raw * kMillimetersPerInch;
+			out = raw * core::kMillimetersPerInch;
 			return true;
 		};
 
 		try
 		{
 			const VWLayerObj sheet(sheetLayer);
-			const double width = sheet.GetSheetWidht() * kMillimetersPerInch;
-			const double height = sheet.GetSheetHeight() * kMillimetersPerInch;
+			const double width = sheet.GetSheetWidht() * core::kMillimetersPerInch;
+			const double height = sheet.GetSheetHeight() * core::kMillimetersPerInch;
 			if (width > 0.0 && height > 0.0)
 				paper.sheet = core::Vec2{width, height};
 		}
@@ -652,76 +647,34 @@ namespace HomeskzIfcImport::draw
 		// ★**余白は仮定せず SDK から読む**（M18。かつては四辺 15mm と決め打ちしていたが、
 		// 余白は用紙ではなく印刷の設定が決めるものなので、仮定した瞬間に実際とずれる）。
 		// ISDK::GetPageMargins は 4 辺を返すが**単位がヘッダに書かれていない**（実機では
-		// **図面の単位**で返った——mm の図面で 2.963 ＝ 3mm。M18 のローカル確認）ので、
-		// 次の順で決める。**「mm 固定」にはしない**: 単位が図面依存である以上、インチの
-		// 図面ではインチで返るはずで、そのときも同じ突き合わせで正しい方が選ばれる。
-		//   1. インチとみなした値で「用紙 − 余白」がシートレイヤの大きさ（165/166）と
-		//      一致するなら**インチ**。用紙まわりの長さは SDK では一貫してインチなので、
-		//      これが本命。
-		//   2. mm とみなした値で一致するなら **mm**。
-		//   3. どちらとも一致しない（＝シートレイヤの大きさが用紙と同じ等）ときは、
-		//      **用紙に収まる方**を採る。両方収まるならインチ（1 の理由）。
-		// 読めなかった・4 辺とも 0 のときは余白なし＝用紙いっぱいを印刷可能領域とする。
+		// **図面の単位**で返った——mm の図面で 2.963 ＝ 3mm。M18 のローカル確認）。
+		// **読めた数字をどう解釈するかは無 SDK の純計算**なので core::resolvePageMargins に
+		// 置いてある（単位の決め方・**四辺 0 を余白なしとして受け取る**理由は core/Layout.h）。
+		// ここは「SDK から読む」ことと「読めなかったこと」だけを持つ。
 		// **どの解釈を採ったかは生の値ごと診断へ出す**（draw/Sheet）ので、実機で確かめられる。
-		double left = 0.0;
-		double right = 0.0;
-		double bottom = 0.0;
-		double top = 0.0;
+		core::PageMargins raw;
+		bool marginsQueried = true;
 		try
 		{
-			gSDK->GetPageMargins(sheetLayer, left, right, bottom, top);
+			gSDK->GetPageMargins(sheetLayer, raw.left, raw.right, raw.bottom, raw.top);
 		}
 		catch (...)
 		{
-			// 余白が読めなかった。用紙いっぱいを使う（狭める方向の仮定を置かない）。
-			left = right = bottom = top = 0.0;
+			// 余白を読めなかった。用紙いっぱいを使う（狭める方向の仮定を置かない）。
+			// **ここで得た 0 は「余白なし」ではない**ので、解釈にはかけずに落とす
+			// ——縁なし印刷の 0 と、読めなかった 0 を同じ扱いにしない。
+			raw = core::PageMargins{};
+			marginsQueried = false;
 		}
-		paper.rawMargins = SheetMargins{left, right, bottom, top};
+		paper.rawMargins = raw;
 
-		const bool any = left > 0.0 || right > 0.0 || bottom > 0.0 || top > 0.0;
-		const bool sane = left >= 0.0 && right >= 0.0 && bottom >= 0.0 && top >= 0.0;
-		if (any && sane)
+		if (marginsQueried)
 		{
-			// 候補は 2 つだけ。**インチが先**（用紙まわりの長さは SDK では一貫してインチ）。
-			constexpr std::array<double, 2> kUnits{kMillimetersPerInch, 1.0};
-			const auto fits = [&](double scale)
-			{ return ((left + right) * scale) < size.x && ((bottom + top) * scale) < size.y; };
-			const auto matchesSheet = [&](double scale)
-			{
-				if (paper.sheet.x <= 0.0 || paper.sheet.y <= 0.0)
-					return false;
-				constexpr double kTol = 0.5;
-				return std::abs((size.x - ((left + right) * scale)) - paper.sheet.x) <= kTol &&
-					   std::abs((size.y - ((bottom + top) * scale)) - paper.sheet.y) <= kTol;
-			};
-
-			// 1. 「用紙 − 余白」がシートレイヤの大きさと一致する単位。両方の候補を先に
-			//    見てから 2 へ落ちる（一致は「収まる」より強い根拠なので順序を混ぜない）。
-			// 2. どちらとも一致しなければ、用紙に収まる方。
-			double scale = 0.0;
-			for (const double unit : kUnits)
-			{
-				if (matchesSheet(unit))
-				{
-					scale = unit;
-					break;
-				}
-			}
-			for (const double unit : kUnits)
-			{
-				if (scale > 0.0)
-					break;
-				if (fits(unit))
-					scale = unit;
-			}
-
-			if (scale > 0.0)
-			{
-				paper.marginsInInches = scale == kMillimetersPerInch;
-				paper.marginsRead = true;
-				paper.margins =
-					SheetMargins{left * scale, right * scale, bottom * scale, top * scale};
-			}
+			const core::PageMarginsResolution resolution =
+				core::resolvePageMargins(raw, size, paper.sheet);
+			paper.margins = resolution.margins;
+			paper.marginsRead = resolution.resolved;
+			paper.marginsInInches = resolution.inInches;
 		}
 
 		// ★用紙は原点中心（DrawUtil.h の SheetPaperArea）。印刷可能領域は、その用紙から

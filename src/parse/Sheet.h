@@ -32,12 +32,12 @@
 //	ここはそれを呼ぶだけにしてある（名前の組み立てを 2 か所へ散らさない）。
 //
 //	【グラフィック凡例も同じ理由でここが決める】伏図のシートレイヤには、その図に出る
-//	シンボルの凡例（VW 標準の "GraphicLegend" PIO）を 1 つ載せる（M13）。**何が並ぶかは
-//	VW 側のグラフィック凡例スタイルが決める**ので（core/Document.h の LegendCommand）、
-//	ここが決めるのは「どの伏図にどのスタイルの凡例を載せるか」だけになる:
-//	  * 基礎伏図 … "基礎伏図凡例"。**アンカーボルトを 1 本でも置いたときだけ**
+//	シンボルの凡例（VW 標準の "GraphicLegend" PIO）を 1 つ載せる（M13）。凡例は**スタイル
+//	無しのオブジェクト**として置くので（core/Document.h の LegendCommand）、ここが決めるのは
+//	「どの伏図に凡例を載せるか」だけになる:
+//	  * 基礎伏図 … **アンカーボルトを 1 本でも置いたときだけ**載せる
 //	    （置かなければ凡例に並ぶものが無く、空の箱が図面に残る）。
-//	  * 柱梁伏図・母屋伏図 … "床伏図凡例"（常に載せる）。凡例は SheetCommand の中に入れ子で持
+//	  * 柱梁伏図・母屋伏図 … 常に載せる。凡例は SheetCommand の中に入れ子で持
 //	    つので、番号で突き合わせる必要が無い（タグを ViewportCommand の中に持たせたのと同じ考
 //	    え方）。
 //
@@ -104,34 +104,27 @@ namespace HomeskzIfcImport::parse
 	// spans は parse/Column の collectColumnSpans。
 	std::vector<std::string> spanLayersAtCut(const std::vector<ColumnSpan>& spans, double cut);
 
-	// グラフィック凡例スタイル名。
-	// **ユーザーが VW 側で用意したスタイル**の名前で、凡例に並べるシンボル・ラベル・
-	// ソース定義（どのビューポートのシンボルを集めるか）はそのスタイルが持つ
-	// （core/Document.h の LegendCommand）。名前が一致しないとスタイルが当たらず、
-	// 空の凡例になる。
-	inline constexpr const char* kFoundationLegendStyle = "基礎伏図凡例";
-	inline constexpr const char* kFloorLegendStyle = "床伏図凡例";
-
-	// **凡例の配置点はここでは決めない**（M18）。用紙の大きさは描くときにシートレイヤから
-	// 読むもので解析側には分からないため、置き場所は描画側が用紙の割り付け
-	// （core::planLayout の legendTopRight＝ビューポートのために空けた右の 1 列）から決める。
+	// **凡例の配置点も中身もここでは決めない**（M18・スタイル無し化）。用紙の大きさは
+	// 描くときにシートレイヤから読むもので解析側には分からないため、置き場所は描画側が
+	// 用紙の割り付け（core::planLayout の legendTopRight＝ビューポートのために空けた右の
+	// 1 列）から決める。何を並べるか（ソース定義）も描画側がタグ付きデータで与える
+	// （draw/Legend）。
 
 	// 基礎伏図の sheet 命令（無ければ空）。基礎要素が 1 つも無ければ空を返す——表示すべき"F-底
 	// 盤" ほかのレイヤが生成されず、ビューポートが空になるため。
 	//
-	// グラフィック凡例（"基礎伏図凡例"）は**アンカーボルトを 1 本でも置いたときだけ**載せる
+	// グラフィック凡例は**アンカーボルトを 1 本でも置いたときだけ**載せる
 	// （凡例に並ぶものが無ければ空の箱が残るため）。
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(const Model& model);
 
-	// 各階の柱梁伏図の sheet 命令（ストーリが無ければ空）。グラフィック凡例（"床伏図凡例"）
-	// を各シートに 1 つ載せる。
+	// 各階の柱梁伏図の sheet 命令（ストーリが無ければ空）。グラフィック凡例を各シートに
+	// 1 つ載せる。
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(const Model& model);
 
 	// 屋根版を持つ階ごとの母屋伏図の sheet 命令（無ければ空）。番号は柱梁伏図の最後に続けて
-	// Elevation 昇順（最下階→最上階）に振る。柱梁伏図と同じくグラフィック凡例（"床伏図凡例"）
-	// を 1 つ載せる。
+	// Elevation 昇順（最下階→最上階）に振る。柱梁伏図と同じくグラフィック凡例を 1 つ載せる。
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(const Model& model);
 

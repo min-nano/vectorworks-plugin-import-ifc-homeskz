@@ -1109,8 +1109,9 @@ TEST(validate_accepts_symbol_with_any_angle)
 // シート（伏図。docs/DEV-NOTES.md M13）
 //
 // 関門は「シートレイヤ番号（＝レイヤ名）とタイトルが非空」「ビューポートが非空のレイヤ名を
-// 1 つ以上持つ」「グラフィック凡例を載せるならそのスタイル名が非空」の 3 つ。図面タイトル・
-// 図番は空でも描ける（ラベルが空になるだけ）ので弾かない。
+// 1 つ以上持つ」の 2 つ。図面タイトル・図番は空でも描ける（ラベルが空になるだけ）ので弾かな
+// い。**グラフィック凡例は載せるか載せないかしか持たない**（スタイル名を持たない＝スタイル
+// 無しで置く。core/Document.h の LegendCommand）ので、凡例に関門は無い。
 // ---------------------------------------------------------------------------
 
 namespace
@@ -1183,13 +1184,12 @@ TEST(validate_accepts_sheet_without_drawing_label)
 
 TEST(validate_accepts_sheet_with_legend)
 {
-	// グラフィック凡例（M13）はスタイル名さえ非空なら妥当。中身（並ぶシンボル）は VW 側の
-	// スタイルが決めるので、命令には現れない（core/Document.h の LegendCommand）。
+	// グラフィック凡例（M13）は配置点しか持たない（スタイル無しで置き、並ぶ中身は凡例
+	// オブジェクト自身のソース定義が決めるので命令には現れない。core/Document.h の
+	// LegendCommand）。したがって既定構築の凡例を載せた伏図も妥当。
 	core::Document document;
 	core::SheetCommand sheet = validSheet();
-	core::LegendCommand legend;
-	legend.style = "床伏図凡例";
-	sheet.legend = legend;
+	sheet.legend = core::LegendCommand{};
 	document.sheets.push_back(sheet);
 	CHECK(core::validateDocument(document));
 }
@@ -1202,16 +1202,6 @@ TEST(validate_accepts_sheet_without_legend)
 	CHECK(!sheet.legend.has_value());
 	document.sheets.push_back(sheet);
 	CHECK(core::validateDocument(document));
-}
-
-TEST(validate_rejects_sheet_with_legend_without_style)
-{
-	// スタイル名が空の凡例は「何も並ばない空の箱」にしかならないので弾く。
-	core::Document document;
-	core::SheetCommand sheet = validSheet();
-	sheet.legend = core::LegendCommand{};
-	document.sheets.push_back(sheet);
-	CHECK(!core::validateDocument(document));
 }
 
 // ---------------------------------------------------------------------------

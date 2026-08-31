@@ -8,9 +8,9 @@
 //	【シートレイヤに載るのはビューポートだけではない】伏図には**グラフィック凡例**
 //	（VW 標準の "GraphicLegend" PIO）も 1 つ載る（M13）。凡例はビューポート注釈では
 //	なくシートレイヤ（＝用紙）へ直接置くので、置き方は draw/Legend が持つ。ここは
-//	ビューポートを仕上げた後にそれを呼び、**全シートを置き終えてからスタイルごとの
-//	反映**（updateLegendStyles）をまとめて 1 回行う（draw/Legend.h「スタイルは当てる
-//	だけでは効かない」）。
+//	ビューポートを仕上げた後にそれを呼ぶ。凡例は**スタイル無しで置く**ので、置いた後に
+//	スタイルを反映させる手当ては要らない。**イメージの縮率は触らない**（PIO 既定の 1:50 の
+//	まま。理由は draw/Legend.h「イメージの縮率」）。
 //
 //	【シートレイヤとビューポートの手当ては draw/DrawUtil が持つ】シートレイヤの用意
 //	（PrepareSheetLayer）・表示レイヤの絞り込み・クラス表示・縮尺・図面タイトル/図番・更新
@@ -79,7 +79,8 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
-						   std::string* note, const ObjectHandles* memberHandles)
+						   std::string* note, const ObjectHandles* memberHandles,
+						   std::string* outInfo)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
@@ -201,8 +202,7 @@ namespace HomeskzIfcImport::draw
 			// （draw/Legend.h「そのシートのビューポートでフィルタする」）——**凡例を
 			// ビューポートより後に作る**のはそのためでもある。
 			if (command.legend.has_value())
-				drawSheetLegend(sheetLayer, *command.legend, provisional.legendTopRight, viewport,
-								legends);
+				drawSheetLegend(sheetLayer, provisional.legendTopRight, viewport, legends);
 
 			placed.push_back(PlacedSheet{&command, viewport});
 		}
@@ -211,7 +211,8 @@ namespace HomeskzIfcImport::draw
 		//
 		// **中身を流し込むまで凡例の大きさは決まらない**（draw/Legend.h）。流し込んでから
 		// いちばん広い凡例の幅を測り、そのぶんだけ右を空けた割り付けを作る。
-		updateLegendStyles(legends);
+		//
+		refreshLegends(legends);
 		const double legendWidth = measureLegendWidth(legends);
 		const core::PlanLayout layout =
 			paper.has_value() ? core::planLayout(haveContent ? contentSize : core::Vec2{},
@@ -289,21 +290,26 @@ namespace HomeskzIfcImport::draw
 
 		// 図が仕上がったので**もう一度**中身を流し込み（凡例に並ぶのはそのシートの
 		// ビューポートに映るシンボルなので、縮尺を当て直した後の図で取り直す）、右上を揃える。
-		updateLegendStyles(legends);
+		refreshLegends(legends);
+
 		placeLegends(legends, layout.legendTopRight);
 
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
-		// 診断行は要素ごとに 1 行ずつ足す（原因が別物なので混ぜない）。
-		const auto addNote = [note](const std::string& text)
+		// 診断行は要素ごとに 1 行ずつ足す（原因が別物なので混ぜない）。**異常は note、
+		// 平常でも出る内訳は outInfo** と行き先を分ける（前者だけが完了ダイアログの
+		// 「問題あり」に効き、後者は診断ログにだけ出る。core::DrawCounts）。
+		const auto addTo = [](std::string* sink, const std::string& text)
 		{
-			if (note == nullptr || text.empty())
+			if (sink == nullptr || text.empty())
 				return;
-			if (!note->empty())
-				*note += "\n";
-			*note += text;
+			if (!sink->empty())
+				*sink += "\n";
+			*sink += text;
 		};
+		const auto addNote = [&addTo, note](const std::string& text) { addTo(note, text); };
+		const auto addInfo = [&addTo, outInfo](const std::string& text) { addTo(outInfo, text); };
 
 		// M18 割り付けの結果。**縮尺は「印刷可能領域・凡例の幅・建物の広がり」の 3 つだけで
 		// 決まる**ので、その 3 つと結果の縮尺を残す——思ったより小さい（大きい）ときに、
@@ -314,9 +320,12 @@ namespace HomeskzIfcImport::draw
 		// 計装は消す」）。余白の生の値と単位の解釈は規約を詰めるために要ったもので、
 		// 実機で確定した（図面の単位で返る）ので、**解釈できなかったときだけ**下の診断行へ
 		// 出す。はみ出し・凡例との重なりも同じく件数として下で数える。
-		if (note != nullptr && paper.has_value())
+
+		// 用紙まわりの長さは mm の整数で書く（下の割り付けの行と、余白の食い違いを説明する
+		// 行が共有する）。
+		const auto mm = [](double value) { return std::to_string(std::lround(value)); };
+		if (outInfo != nullptr && paper.has_value())
 		{
-			const auto mm = [](double value) { return std::to_string(std::lround(value)); };
 			std::string text = "伏図の割り付け（mm）: 用紙 " + mm(paper->paper.x) + "×" +
 							   mm(paper->paper.y) + " / 印刷可能 " + mm(paper->printable.width()) +
 							   "×" + mm(paper->printable.height()) + " / 凡例 " + mm(legendWidth);
@@ -324,14 +333,16 @@ namespace HomeskzIfcImport::draw
 				text += " / 建物 " + mm(contentSize.x) + "×" + mm(contentSize.y) + " → 用紙上 " +
 						mm(contentSize.x / layout.scale) + "×" + mm(contentSize.y / layout.scale) +
 						" / 縮尺 1/" + mm(layout.scale);
-			addNote(text);
+			addInfo(text);
 		}
 
 		// 「命令はあるのに 0 枚」のときに、シートレイヤを作れないのか、ビューポートを
 		// 作れないのかを切り分けられるようにする。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
-		// 余白が読めなかった（＝用紙いっぱいで割り付けた）のは異常側。生の値を添えて、
+		// 余白を解釈できなかった（＝用紙いっぱいで割り付けた）のは異常側。生の値を添えて、
 		// 単位の解釈を疑えるようにする（draw/DrawUtil の SheetPaperArea）。
+		// ★**四辺 0 の用紙設定はここに来ない**（縁なし印刷ができる機種では余白 0 が実際に
+		// 選べるので、0 は「余白なし」として受け取る。core::resolvePageMargins）。
 		const bool marginsUnread = paper.has_value() && !paper->marginsRead;
 		if (note != nullptr &&
 			(missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
@@ -373,11 +384,32 @@ namespace HomeskzIfcImport::draw
 					std::snprintf(buffer.data(), buffer.size(), "%.3f", value);
 					return std::string(buffer.data());
 				};
-				const SheetMargins& margins = paper->rawMargins;
-				text += "用紙の余白を解釈できなかったので、用紙いっぱいで割り付けました"
-						"（SDK が返した値: 左" +
-						raw(margins.left) + " 右" + raw(margins.right) + " 下" +
-						raw(margins.bottom) + " 上" + raw(margins.top) + "）。";
+				const core::PageMargins& margins = paper->rawMargins;
+				const bool zero = margins.left <= 0.0 && margins.right <= 0.0 &&
+								  margins.bottom <= 0.0 && margins.top <= 0.0;
+				// 四辺 0 でここへ来る道は 2 つしかない（core::resolvePageMargins が 0 を
+				// 「余白なし」として受け取るため）——シートレイヤが用紙より小さい
+				// （＝余白が在るはずなのに 0 が返った）か、SDK から読み出せずに 0 のままか。
+				// **どちらなのかを書き分ける**（縁なし印刷の 0 と取り違えないため）。
+				const bool sheetSmaller =
+					paper->sheet.x > 0.0 && paper->sheet.y > 0.0 &&
+					((paper->paper.x - paper->sheet.x) > core::kPageMarginMatchTol ||
+					 (paper->paper.y - paper->sheet.y) > core::kPageMarginMatchTol);
+				text += "用紙の余白を解釈できなかったので、用紙いっぱいで割り付けました";
+				if (zero && !sheetSmaller)
+					text += "（SDK から余白を読み出せませんでした）。";
+				else
+				{
+					text += "（SDK が返した値: 左" + raw(margins.left) + " 右" +
+							raw(margins.right) + " 下" + raw(margins.bottom) + " 上" +
+							raw(margins.top) + "）。";
+					if (zero)
+						text += "四辺 0 ですが、シートレイヤ（" + mm(paper->sheet.x) + "×" +
+								mm(paper->sheet.y) + "）が用紙（" + mm(paper->paper.x) + "×" +
+								mm(paper->paper.y) +
+								"）より小さいので、余白なしとは見なして"
+								"いません。";
+				}
 			}
 			addNote(text);
 		}

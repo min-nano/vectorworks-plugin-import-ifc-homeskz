@@ -155,9 +155,10 @@ VectorWorks ネイティブオブジェクト
 文字の両方に与える）**——は `draw/Tag`。伏図と軸組図が共有する
 唯一の実装で、**スタイルは作らないし当てない**（スラブ・壁と同じく各オブジェクトへ直接設定
 する））、**グラフィック凡例**
-（スタイル名は `parse/Sheet` の `kFoundationLegendStyle` / `kFloorLegendStyle`、
-`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗りと配置手順は `draw/Legend`。**用紙を
-どれだけ空けるかは定数ではなく実測**——`measureLegendWidth` で測った幅を
+（`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗りと配置手順、**ソース定義（何を並べるか）
+とイメージの縮率**は `draw/Legend`。**スタイルは作らないし当てない**——中身はタグ付きデータ
+（`'GrLe'`）で、縮率は用紙の割り付けが決めた伏図の縮尺（`core::planLayout` の `scale`）に
+合わせる。**用紙をどれだけ空けるかは定数ではなく実測**——`measureLegendWidth` で測った幅を
 `core::planLayout` へ渡し、置き場所はその `legendTopRight`）、
 構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
@@ -177,11 +178,16 @@ VectorWorks ネイティブオブジェクト
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの
 広がり `planContentBounds` / `sectionContentSize`）は `core/Document`、
 進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
-（整形と配分の計算）に**それぞれ 1 つだけ**置く。**完了ダイアログに並ぶ要素の一覧**
+（整形と配分の計算）に**それぞれ 1 つだけ**置く。**要素の一覧**
 （表示名・助数詞・命令数の取り出し・描けた数）は `parse/Summary` の `kElements` ただ 1 つの表で、
-要素を足すときに触るのはその 1 行だけ（SDK 側は組み上がった本文を出すだけ）。**診断ログへの
-書き出し口**は `core/Progress` の `beginPhase` 1 か所（各要素へ `trace::log` を撒かない。
-開始・終了・例外だけを `Extensions/ExtMenu` が書く）。テスト側も同じで、フィクスチャ一覧・近似比較・**実 IFC の読み込みと命令セットの組み立てを
+要素を足すときに触るのはその 1 行だけ（診断ログの内訳もここから出る。SDK 側は組み上がった
+本文を出すだけ）。**完了・エラーの文言**（短い本文・結末の判断 `importOutcome`・ログの見出しと結果）も
+`parse/Summary` 1 か所で、**ダイアログの見た目**（短い本文＋折り畳んだログ欄）は
+`draw/ResultDialog` ただ 1 つ。**診断ログへの
+書き出し口**は `core/Progress` の `beginPhase`（フェーズの行）と `Extensions/ExtMenu`
+（見出し・区切り・結果・例外を `trace::note` で）の 2 か所だけ（各要素へ `trace::log` を撒かない）。
+**描画側が持ち帰る説明は行き先を分ける**——異常は `DrawCounts::diagnostics`（完了ダイアログの
+「問題あり」の根拠になる）、平常でも出る記録は `DrawCounts::notes`（ログにだけ出る）。テスト側も同じで、フィクスチャ一覧・近似比較・**実 IFC の読み込みと命令セットの組み立てを
 1 プロセス 1 回に畳むキャッシュ**（`fixture` / `fixtureDocument`）は `tests/Fixtures.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
 

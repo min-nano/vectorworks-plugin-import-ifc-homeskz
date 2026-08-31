@@ -9,7 +9,9 @@
 #include "parse/Loader.h"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
+#include <iomanip>
 #include <sstream>
 #include <string>
 
@@ -82,7 +84,7 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 完了ダイアログに並べる要素の表。**ここが唯一の一覧**で、要素を 1 つ足すときに
+		// 要素の表。**ここが唯一の一覧**で、要素を 1 つ足すときに
 		// 触るのはこの表の 1 行だけ（以前は Extensions/ExtMenu.cpp の文字列連結と命令数の
 		// 足し算の 2 か所を手で伸ばしていた。docs/DEV-NOTES.md M15「完了文言の集約」）。
 		//
@@ -151,96 +153,297 @@ namespace HomeskzIfcImport::parse
 		return total;
 	}
 
-	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts,
-								   const std::string& logPath)
+	ImportOutcome importOutcome(const core::Document& document, const core::DrawCounts& counts)
 	{
-		std::ostringstream out;
-		if (!counts.valid)
+		ImportOutcome outcome;
+		for (const ElementDef& element : kElements)
 		{
-			// 検証に落ちたときは何も描いていない（draw/ExecuteDocument）。件数を並べても
-			// すべて 0 になるだけなので、理由だけを返す。
-			out << "命令セットの検証に通らなかったため、何も描きませんでした。";
-		}
-		else if (documentCommandCount(document) == 0)
-		{
-			// 解析は通ったが取り込める要素が 1 つも無かった（ホームズ君以外の IFC・
-			// 空のファイル等）。要素名を並べて「何を探したか」を示す。
-			out << "取り込める要素（ストーリ・通り芯・基礎・床・横架材・柱・屋根組・"
-				   "シンボル・柱記号・耐力壁・伏図・軸組図）が見つかりませんでした。";
-		}
-		else
-		{
-			out << "以下を描きました。\n";
-			for (const ElementDef& element : kElements)
-			{
-				const std::size_t commands = element.commands(document);
-				if (commands == 0)
-					continue; // 命令の無い要素は行ごと出さない（行が無い＝解析で 0 件）
-				const std::size_t placed = element.placed(counts);
-				out << "\n  " << element.label << ": ";
-				if (placed != commands)
-					out << placed << "/" << commands; // 描けなかったぶんが分かる形
-				else
-					out << placed;
-				out << " " << element.unit;
-			}
+			outcome.commands += element.commands(document);
+			outcome.placed += element.placed(counts);
 		}
 
-		// 中止されたときは件数が命令数に届かないのが正常なので、そう明示する（「描けなかった」
-		// と読み違えないように）。描けたところまでは図面に残っている。
-		if (counts.cancelled)
-			out << "\n\n（キャンセルされたため、途中で中断しました。）";
-		// **取り消しがどこまで効くかを黙っていない。** 図形を 1 つでも描いたなら、ユーザーは
-		// 「間違えたら取り消せばいい」と考えるのが自然なので、そのとおりに戻せるのか・
-		// 一部しか戻らないのか・まったく戻らないのかを 1 行で伝える（判断の材料は描画側が
-		// 置く。core::DrawCounts の undoArmed / undoPartial）。
-		if (counts.valid && documentCommandCount(document) != 0)
+		if (!counts.valid)
+			outcome.status = ImportStatus::Invalid;
+		else if (outcome.commands == 0)
+			outcome.status = ImportStatus::Empty;
+		else if (counts.cancelled)
+			// **中止は Warning より優先する。** 中止すれば描き切れないのが当たり前で、
+			// そこで「問題あり」と言われると原因を探しに行ってしまう。
+			outcome.status = ImportStatus::Cancelled;
+		else if (outcome.placed != outcome.commands || !counts.diagnostics.empty())
+			// 描き切れなかった（＝命令はあるのに図面に出ていない）か、描画側が異常を
+			// 持ち帰った（リソースが無い・PIO を作れない等）。どちらもログに理由がある。
+			outcome.status = ImportStatus::Warning;
+		else
+			outcome.status = ImportStatus::Success;
+		return outcome;
+	}
+
+	namespace
+	{
+		// 所要時間を人の言葉にする（"1 分 11 秒" / "12.3 秒" / "0.4 秒"）。ミリ秒まで
+		// 出さないのは、ここで見たいのが「待たされたかどうか」の桁だけだから——
+		// フェーズごとの内訳は診断ログの行頭にある経過ミリ秒が持つ。
+		std::string formatDuration(double seconds)
 		{
-			if (!counts.undoArmed)
-				out << "\n\n※ "
-					   "この取り込みは「取り消し」では戻せません。取り込み前に戻したいときは、"
-					   "保存せずに文書を閉じてください。";
-			else if (counts.undoPartial)
-				out << "\n\n※ "
-					   "「取り消し」で戻せるのは、この取り込みが新しく作ったレイヤの分だけです。"
-					   "取り込み前から在ったレイヤへ描いた分は残ります。";
+			std::ostringstream out;
+			if (seconds >= 60.0)
+			{
+				const long long total = std::llround(seconds);
+				out << (total / 60) << " 分 " << (total % 60) << " 秒";
+			}
 			else
-				out << "\n\n※ この取り込みは「取り消し」1 回で元に戻せます"
-					   "（クラス・スタイル・ストーリの定義は残ります）。";
+			{
+				out << std::fixed << std::setprecision(1) << seconds << " 秒";
+			}
+			return out.str();
 		}
-		// **取り込み直後の伏図・軸組図は 1 回の「更新」が要る。** VW はデザインレイヤを
+
+		// ファイルの大きさを人の言葉にする（0 は「分からない」なので空）。
+		std::string formatBytes(unsigned long long bytes)
+		{
+			if (bytes == 0)
+				return {};
+			std::ostringstream out;
+			out << std::fixed << std::setprecision(1);
+			if (bytes >= 1024ULL * 1024ULL)
+				out << (static_cast<double>(bytes) / (1024.0 * 1024.0)) << " MB";
+			else if (bytes >= 1024ULL)
+				out << (static_cast<double>(bytes) / 1024.0) << " KB";
+			else
+				return std::to_string(bytes) + " バイト";
+			return out.str();
+		}
+
+		// 要素 1 つぶんの件数表記（"270 本" / 描き切れなければ "3/12 本"）。完了ダイアログの
+		// 一覧を畳んだ後も、ログの内訳と総数はこの同じ書き方で読める。
+		std::string formatCount(std::size_t placed, std::size_t commands, const char* unit)
+		{
+			std::string text;
+			if (placed != commands)
+				text = std::to_string(placed) + "/" + std::to_string(commands);
+			else
+				text = std::to_string(placed);
+			text += " ";
+			text += unit;
+			return text;
+		}
+
+		// 「取り消し」がどこまで効くか（判断材料は描画側が置く。core::DrawCounts の
+		// undoArmed / undoPartial）。図形を 1 つでも描いたときだけ意味がある。
+		//
+		// **ダイアログに出すのは例外の 2 つだけ**（下の needsUndoWarning）。「取り消し」
+		// コマンドが有効なら取り消せるのは当たり前で、わざわざ書くとかえって読む量が増える。
+		// ログには常に残す——後から「戻せたはずでは」を確かめられるようにするため。
+		std::string undoLine(const core::DrawCounts& counts)
+		{
+			// **1 行に収める。** 但し書き（何が戻らないか）は README とログの内訳に譲る——
+			// ダイアログで説明を始めると、肝心の「成功したか」が読まれなくなる。
+			if (!counts.undoArmed)
+				return "「取り消し」では戻せません（保存せずに文書を閉じてください）。";
+			if (counts.undoPartial)
+				return "「取り消し」で戻るのは、今回新しく作ったレイヤの分だけです。";
+			return "「取り消し」1 回で元に戻せます。";
+		}
+
+		// ダイアログで断りが要るか。**普通に 1 回で戻せるなら黙る**——メニューの
+		// 「取り消し」が効くのは当然だから。戻せない・一部しか戻らないのは当然ではないので
+		// 伝える（間違えたときの戻し方が変わる）。
+		bool needsUndoWarning(const core::DrawCounts& counts)
+		{
+			return !counts.undoArmed || counts.undoPartial;
+		}
+
+		// 結末の 1 行目。**ここだけ読めば終わったかどうかが分かる**ようにする。
+		std::string statusHeadline(ImportStatus status)
+		{
+			switch (status)
+			{
+			case ImportStatus::Success:
+				return "取り込みが完了しました。";
+			case ImportStatus::Warning:
+				return "取り込みは終わりましたが、うまくいかなかったところがあります。";
+			case ImportStatus::Cancelled:
+				return "キャンセルされたため、途中で中断しました"
+					   "（描いたところまでは図面に残っています）。";
+			case ImportStatus::Invalid:
+				return "命令セットの検証に通らなかったため、何も描きませんでした。";
+			case ImportStatus::Empty:
+				break;
+			}
+			return "取り込める要素が見つかりませんでした"
+				   "（ホームズ君構造EX が書き出した IFC か確かめてください）。";
+		}
+
+		// ログの「結果:」に出す短い語。ダイアログの 1 行目と同じ判断から出す。
+		const char* statusWord(ImportStatus status)
+		{
+			switch (status)
+			{
+			case ImportStatus::Success:
+				return "成功";
+			case ImportStatus::Warning:
+				return "問題あり";
+			case ImportStatus::Cancelled:
+				return "中断（キャンセル）";
+			case ImportStatus::Invalid:
+				return "失敗（命令セットの検証に不合格）";
+			case ImportStatus::Empty:
+				break;
+			}
+			return "対象なし（取り込める要素が無い）";
+		}
+
+		// 改行区切りの説明を、ログの箇条書き（2 字下げ）へ組み替える。
+		std::string indentLines(const std::string& text)
+		{
+			std::string out;
+			std::istringstream in(text);
+			std::string line;
+			while (std::getline(in, line))
+			{
+				if (line.empty())
+					continue;
+				out += "  " + line + "\n";
+			}
+			return out;
+		}
+	} // namespace
+
+	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts,
+								   const std::string& fileName)
+	{
+		const ImportOutcome outcome = importOutcome(document, counts);
+
+		std::ostringstream out;
+		out << statusHeadline(outcome.status);
+
+		// 「どのファイルを取り込んだのか」は、図面を何度も取り込む使い方では毎回の関心事。
+		// **件数と所要時間は出さない**——うまくいっているときには読む必要が無く、うまく
+		// いっていないときはその数だけでは足りない。どちらもログにある（M19）。
+		if (!fileName.empty())
+			out << "\n\nファイル: " << fileName;
+
+		// **その場で操作が要ることだけ**を書き足す（Summary.h「例外として残す 2 行」）。
+		//
+		// 取り込み直後の伏図・軸組図は 1 回の「更新」が要る。VW はデザインレイヤを
 		// **高さの降順**（上にあるものが前面）で描くので、床仕上げ天端が構造天端より上にある
-		// 以上、取り込み直後は床・野地板が柱・梁を覆う。こちらで並べた重ね順は図面には入って
-		// いて、**ユーザーが 1 回更新すればそちらで描き直される**（ファイルを開き直しても同じ）。
-		// 黙って誤った絵を見せないよう、図を 1 枚でも作ったなら必ず伝える
-		// （経緯は docs/DEV-NOTES.md「レイヤ・ストーリ・重ね順」）。
+		// 以上、取り込み直後は床・野地板が柱・梁を覆う。こちらで並べた重ね順は図面には
+		// 入っていて、ユーザーが 1 回更新すればそちらで描き直される（経緯は
+		// docs/DEV-NOTES.md「レイヤ・ストーリ・重ね順」）。黙って誤った絵を見せない。
 		if (counts.sheets + counts.sections > 0)
-			out << "\n\n※ 伏図・軸組図は、取り込み直後は床・野地板が柱・梁を覆って見えます。"
-				   "ビューポートを 1 回「更新」すると、正しい重ね順で描き直されます"
-				   "（ファイルを開き直しても直ります）。";
-		// 描画側で起きた異常があれば足す（横架材の断面が入らない等。draw/Member 参照）。
-		if (!counts.diagnostics.empty())
-			out << "\n" << counts.diagnostics;
-		// 診断ログが有効なら場所を案内する（有効なのは dev ビルドか HOMESKZ_IFC_TRACE 指定時
-		// だけなので、ふだんの完了ダイアログには出ない）。
-		if (!logPath.empty())
-			out << "\n\n診断ログ: " << logPath;
+			out << "\n\n※ 伏図・軸組図はビューポートを 1 回「更新」してください。";
+		// 取り消しの効き方は**例外のときだけ**伝える（needsUndoWarning）。1 回で戻せるのは
+		// 当たり前なので書かない。
+		if (outcome.status != ImportStatus::Invalid && outcome.status != ImportStatus::Empty &&
+			needsUndoWarning(counts))
+			out << "\n※ " << undoLine(counts);
+
+		// 思ったとおりに終わらなかったときだけ、どこを読めばよいかを指す（ログはこの
+		// ダイアログの中で開ける。場所はログ自身の見出しにある）。**「取り込める要素が
+		// 無い」も含める**——ホームズ君の IFC かどうかを疑う場面で、何を探して何が
+		// 無かったのかはログにしか無い。
+		if (outcome.status != ImportStatus::Success && outcome.status != ImportStatus::Cancelled)
+			out << "\n\nくわしい内訳と原因はログにあります（下の「ログを表示」）。";
 		return out.str();
 	}
 
-	std::string formatImportError(const std::string& detail, const std::string& logPath)
+	std::string formatImportError(const std::string& detail, const std::string& fileName)
 	{
 		std::ostringstream out;
 		out << "インポート中に予期しないエラーが発生したため、途中で中断しました。\n"
 			   "そこまでに描いたオブジェクトは図面に残っています"
 			   "（要らなければ「取り消し」で戻せます）。";
+		if (!fileName.empty())
+			out << "\n\nファイル: " << fileName;
 		// 原因の手掛かりは**必ず出す**。ネイティブの異常は再現条件が分からなくなりがちで、
 		// ここで捨てるとユーザーからは「黙って途中で止まった」としか見えない。
-		out << "\n\n詳細: " << (detail.empty() ? std::string("原因不明") : detail);
-		// 診断ログが有効なら場所を案内する。ログの**最終行**が「どのフェーズまで進んで
-		// いたか」で、その直後が原因箇所になる（core/Trace.h）。
-		if (!logPath.empty())
-			out << "\n診断ログ: " << logPath;
+		out << (fileName.empty() ? "\n\n" : "\n")
+			<< "詳細: " << (detail.empty() ? std::string("原因不明") : detail);
+		// ログの**最終行**が「どのフェーズまで進んでいたか」で、その直後が原因箇所になる
+		// （core/Trace.h）。
+		out << "\n\nどこまで進んでいたかはログにあります（下の「ログを表示」）。";
+		return out.str();
+	}
+
+	// ------------------------------------------------------------------------
+	// 診断ログの本文（M19「短い完了・厚いログ」）
+	// ------------------------------------------------------------------------
+
+	std::string formatLogHeader(const BuildInfo& build, const std::string& ifcPath,
+								unsigned long long bytes, const std::string& startedAt,
+								const std::string& logPath)
+	{
+		const auto orUnknown = [](const std::string& value)
+		{ return value.empty() ? std::string("不明") : value; };
+
+		std::ostringstream out;
+		out << "=== ホームズ君 IFC インポート ===\n";
+		// **1 行目に日時。** 報告を受け取る側は、まずユーザーの記憶（「昼ごろ試した」）と
+		// ログを突き合わせる。
+		out << "日時: " << orUnknown(startedAt) << "\n";
+		// **どのリビジョンが動いているか。** dev ビルドは PR ごとに中身が違うので、
+		// これが無いと「直したはずの不具合」の報告を古いビルドと取り違える。
+		out << "ビルド: " << orUnknown(build.plugin);
+		if (!build.channel.empty())
+			out << "（" << build.channel << "）";
+		out << " / commit " << orUnknown(build.commit) << " / branch " << orUnknown(build.branch)
+			<< "\n";
+		out << "実行環境: " << orUnknown(build.platform) << "\n";
+		// **対象ファイルはフルパスで。** 同じ名前の IFC を版ごとに持っているのが普通なので、
+		// ファイル名だけでは特定できない。
+		out << "対象: " << orUnknown(ifcPath);
+		const std::string size = formatBytes(bytes);
+		if (!size.empty())
+			out << "（" << size << "）";
+		// **このログ自身の置き場所。** ダイアログには出さない（場所を知りたいのはログを
+		// 見ようとしたときだけで、そのときログはもう目の前にある）。書けなかったなら
+		// 「ファイルは無い」と明示する——黙ると、出ていないログを探しに行かせる。
+		out << "\nログ: "
+			<< (logPath.empty() ? std::string("（ファイルへは書けませんでした。この欄の内容を"
+											  "コピーしてください）")
+								: logPath);
+		return out.str();
+	}
+
+	std::string formatLogResult(const core::Document& document, const core::DrawCounts& counts,
+								double seconds)
+	{
+		const ImportOutcome outcome = importOutcome(document, counts);
+
+		std::ostringstream out;
+		out << "=== 結果 ===\n";
+		out << "結果: " << statusWord(outcome.status) << "\n";
+		if (seconds > 0.0)
+			out << "所要: " << formatDuration(seconds) << "\n";
+		out << "描いたもの: " << formatCount(outcome.placed, outcome.commands, "件") << "\n";
+
+		// 要素ごとの内訳。**命令の無い要素は行ごと出さない**（無い物の「0 件」は読む側の
+		// 邪魔になるだけで、行が無いこと自体が「解析で 0 件」を意味する）。検証に落ちた
+		// ときは 1 つも描いていないので、全要素が "0/n" と並ぶだけになる——理由は
+		// 「結果:」の行が言っているので、内訳ごと省く。
+		if (outcome.commands != 0 && counts.valid)
+		{
+			out << "内訳:\n";
+			for (const ElementDef& element : kElements)
+			{
+				const std::size_t commands = element.commands(document);
+				if (commands == 0)
+					continue;
+				out << "  " << element.label << ": "
+					<< formatCount(element.placed(counts), commands, element.unit) << "\n";
+			}
+		}
+
+		// 描画側が持ち帰った異常（リソースが無い・PIO を作れない等）。
+		if (!counts.diagnostics.empty())
+			out << "注意:\n" << indentLines(counts.diagnostics);
+		// 異常ではないが後から知りたい記録（用紙の割り付けの内訳など）。
+		if (!counts.notes.empty())
+			out << "記録:\n" << indentLines(counts.notes);
+
+		if (counts.valid && outcome.commands != 0)
+			out << "取り消し: " << undoLine(counts) << "\n";
 		return out.str();
 	}
 } // namespace HomeskzIfcImport::parse

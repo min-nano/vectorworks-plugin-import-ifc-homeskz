@@ -210,11 +210,9 @@ namespace HomeskzIfcImport::core
 		// ビューポート」なので作らせない。
 		bool isValidSheet(const SheetCommand& sheet)
 		{
-			// グラフィック凡例（M13）を載せるなら、スタイル名が非空であること。凡例の中身は
-			// スタイルが決めるので（core/Document.h の LegendCommand）、スタイル名が空の凡例は
-			// 「何も並ばない空の箱」にしかならない。凡例を載せない伏図（＝空の optional）は妥当。
-			if (sheet.legend.has_value() && sheet.legend->style.empty())
-				return false;
+			// グラフィック凡例（M13）は**載せるか載せないか**しか持たない（配置点は用紙座標
+			// なので値域の縛りが無く、スタイル名も持たない＝スタイル無しで置く。
+			// core/Document.h の LegendCommand）。したがって凡例そのものに検証する項目は無い。
 			return !sheet.number.empty() && !sheet.title.empty() &&
 				   !sheet.viewport.layers.empty() &&
 				   std::ranges::none_of(sheet.viewport.layers,
@@ -350,8 +348,7 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// シート（伏図）: シートレイヤ番号・タイトルが非空で、ビューポートが非空のレイヤ名を
-		// 1 つ以上持ち、グラフィック凡例を載せるならそのスタイル名も非空であること
-		// （isValidSheet 参照。docs/DEV-NOTES.md M13）。
+		// 1 つ以上持つこと（isValidSheet 参照。docs/DEV-NOTES.md M13）。
 		if (!std::ranges::all_of(document.sheets, isValidSheet))
 			return false;
 

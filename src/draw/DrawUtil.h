@@ -357,31 +357,24 @@ namespace HomeskzIfcImport::draw
 									 const core::ViewportCommand& command,
 									 ViewportProjection projection, double scale);
 
-	// シートレイヤの 4 辺の余白（用紙 mm。生の値を持つときは SDK が返したままの単位）。
-	struct SheetMargins
-	{
-		double left = 0.0;
-		double right = 0.0;
-		double bottom = 0.0;
-		double top = 0.0;
-	};
-
 	// シートレイヤの用紙まわりの実測値（長さはすべて用紙 mm）。
 	//
 	//   printable       … **印刷可能領域**（＝図を置いてよい矩形）。割り付けはこれを使う
 	//   paper           … 用紙の外形の大きさ（ovLayerSheetPaperWidth/Height＝167/168）
 	//   sheet           … シートレイヤの大きさ（VWLayerObj::GetSheetWidht＝165/166）
-	//   margins         … 解釈後の 4 辺の余白（mm）。読めなければすべて 0
+	//   margins         … 解釈後の 4 辺の余白（mm）。解釈できなければすべて 0
 	//   rawMargins      … ISDK::GetPageMargins が返した**生の値**（単位不明のまま）
-	//   marginsRead     … 余白を意味のある値として解釈できたか
+	//   marginsRead     … 余白を意味のある値として解釈できたか（**四辺 0 も「できた」**
+	//                     ——縁なし印刷ができる機種では余白 0 の用紙設定が実際に選べる。
+	//                     判定は core::resolvePageMargins）
 	//   marginsInInches … その解釈が「インチ」だったか（false なら mm とみなした）
 	struct SheetPaper
 	{
 		core::PaperArea printable;
 		core::Vec2 paper;
 		core::Vec2 sheet;
-		SheetMargins margins;
-		SheetMargins rawMargins;
+		core::PageMargins margins;
+		core::PageMargins rawMargins;
 		bool marginsRead = false;
 		bool marginsInInches = false;
 	};
@@ -397,7 +390,9 @@ namespace HomeskzIfcImport::draw
 	// VWLayerObj::GetSheetWidht。**インチ**なので 25.4 倍して mm にする）はまた別値。
 	// **GetPageMargins だけ単位がヘッダに書かれていない**ので、インチと mm のどちらとして
 	// 読むかは「用紙 − 余白」がシートレイヤの大きさと一致するかで決め、決められなければ
-	// 用紙に収まる方を採る（実装のコメント参照）。**実機では図面の単位で返った**
+	// 用紙に収まる方を採る（**解釈そのものは無 SDK の純計算**なので core/Layout の
+	// resolvePageMargins に置いてある。四辺 0 を「余白なし」として受け取る理由もそこ）。
+	// **実機では図面の単位で返った**
 	// （mm の図面で 2.963 → 420 − 5.969 = 414 ＝ シートレイヤの幅。M18 のローカル確認）
 	// が、単位が図面依存である以上インチの図面ではインチで返るはずなので、**「mm 固定」に
 	// はしない**。**採った解釈と生の値は診断へ出す**（draw/Sheet）ので、別の環境でも
