@@ -10,11 +10,14 @@
 //	  * gSDK->DefineCustomObject("GraphicLegend", kCustomObjectPrefNever) … 設定ダイアログ抑止
 //	  * gSDK->CreateCustomObject("GraphicLegend", 位置, 0, bInsert)      … 凡例 PIO の生成
 //	  * gSDK->SetCurrentLayer(sheetLayer)                                … 置き場所（用紙）の指定
-//	  * gSDK->SetPluginObjectStyle(object, style)                        … 凡例スタイルの関連付け
 //	  * gSDK->SetLineWeight / SetFillPat                                 … 見た目（線の太さ・塗り）
 //	  * gSDK->GetObjectInternalIndex(viewport)                           … フィルタ先の参照
-//	  * gSDK->TaggedDataCreate / TaggedDataSet                           … フィルタの書き込み
-//	  * gSDK->ResetObject / UpdateStyledObjects                          … 反映・中身の流し込み
+//	  * gSDK->TaggedDataCreate / TaggedDataSet          … フィルタとソース定義の書き込み
+//	  * gSDK->ResetObject                                                … 反映（中身の計算）
+//
+//	**スタイルは扱わない**（draw/Legend.h の ★）。`SetPluginObjectStyle` も
+//	`UpdateStyledObjects` も呼ばない——スタイル無しで置くので、中身は `ResetObject` の時点で
+//	決まる。
 //
 
 #include "PluginPrefix.h"
@@ -23,12 +26,16 @@
 #include "core/Document.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
+#include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
-#include <string>
+#include <cstdio>
+#include <map>
 #include <vector>
+#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -56,6 +63,26 @@ namespace HomeskzIfcImport::draw
 		// インチ）で、5 ミル = 0.127mm を VW は 0.13mm と表示する。塗りパターン 0 = なし。
 		constexpr short kLineWeightMils = 5;
 		constexpr InternalIndex kFillNone = 0;
+
+		// 生成した凡例の箱幅を与える。**例外を外へ出さない**——書けなくても凡例そのものは
+		// 図面に残るので、件数だけ counts へ積む。
+		//
+		// **イメージの縮率はどこでも書かない**（PIO 既定の 1:50 のまま。draw/Legend.h の ★）。
+		void ApplyBoxWidth(MCObjectHandle object, LegendCounts& counts)
+		{
+			try
+			{
+				VWParametricObj pio(object);
+				if (!SetParamRealChecked(pio, TXString(kFieldBoxWidth), kBoxWidth))
+					++counts.widthLeft;
+			}
+			catch (...)
+			{
+				// PIO として開けなかった（＝箱幅を書けていない）。幅 0 のまま潰れるだけで
+				// 凡例自体は図面に残るので、続ける。
+				++counts.paramsFailed;
+			}
+		}
 
 		// 「ビューポートでフィルタ」の保存先（draw/Legend.h 冒頭・docs/DEV-NOTES.md）。
 		//
@@ -94,6 +121,67 @@ namespace HomeskzIfcImport::draw
 			return gSDK->TaggedDataSet(legend, kFilterContainer, kFilterDataType, kFilterDataTag, 0,
 									   &reference) != 0;
 		}
+
+		// ソース定義（凡例に何を並べるか）の保存先。フィルタの `'GrLg'` と 1 文字違いの
+		// **`'GrLe'`**（'G'=0x47 / 'r'=0x72 / 'L'=0x4C / 'e'=0x65）で、実機のダンプでは
+		// **「凡例ソースの定義...」を手で設定した凡例にだけ**ぶら下がっていた。
+		constexpr OSType kSourceContainer = 0x47724C65; // 'GrLe'（Graphic Legend の別の容れ物）
+
+		// byte 配列（kTaggedDataByteArrayTypeID = 1）のタグ 0。**16 ビット幅の値も byte 配列に
+		// 載る**——タグ付きデータの型は 6 種類しか無く（byte / uint32 / double / matrix /
+		// colorref / objectref）、VWFC の `CTaggedDataContainer::CreateTagUint16` も byte 配列を
+		// 使う。したがってこの 22 バイトは 11 個の 16 ビット値と読める。
+		constexpr Sint32 kSourceDataType = 1;
+		constexpr Sint32 kSourceDataTag = 0;
+
+		// **手で設定した凡例からそのまま写した 22 バイト**（実機のダンプ）。検索条件は文字列
+		// ではなく **11 個の 16 ビット値のトークン列**で保存されていて（`(INVIEWPORT &
+		// (T=SYMBOL))` は ASCII で 25 文字あり、そもそも 22 バイトに入らない）、条件だけが
+		// 違う 4 枚を突き合わせると
+		// 666 / 662 / 798 / 662 / 777 / **型** / 1607 / 1637 / 1615 / 677 / 1680 と並んで
+		// **6 番目だけが変わった**（`T=SYMBOL` の 3 枚が 15、`T=PLUGINOBJECT` の 1 枚が 86）。
+		// つまり残りの 10 個は `( INVIEWPORT & ( T = … ) )` の器で、**6 番目にオブジェクトの
+		// 型番号を入れれば条件を差し替えられる**（下記 kCriteriaObjectType）。
+		//
+		// **これは実験である。** 既定のソースが空で、スタイルを当てないと凡例が何も表示しない
+		// （実機で確認）以上、ソース定義を per-instance で書き込む以外に道が無い。器の 10 個の
+		// 意味は解けていないので、文書や VW の版をまたいで通用するかは**確かめられていない**。
+		// 実機で「並ぶかどうか」を見て判断する（docs/DEV-NOTES.md「グラフィック凡例」）。
+		constexpr std::array<Uint8, 22> kSourceDefinition{
+			0x9a, 0x02, 0x96, 0x02, 0x1e, 0x03, 0x96, 0x02, 0x09, 0x03, 0x00,
+			0x00, 0x47, 0x06, 0x65, 0x06, 0x4f, 0x06, 0xa5, 0x02, 0x90, 0x06};
+
+		// 条件が指すオブジェクトの型（`T=…`）と、それが入る位置（6 番目の 16 ビット値＝
+		// 先頭から 10 バイト目）。**15 はシンボル**で、凡例を載せる基礎伏図に並べたいアンカー
+		// ボルトがこれ。構造材ツールの部材を並べたくなったら **86（プラグインオブジェクト）**
+		// にする——実機のダンプでその 1 枚が 86 で、ダンプ上の凡例自身も `type=86` だった。
+		constexpr std::size_t kCriteriaTypeOffset = 10;
+		constexpr Uint16 kCriteriaObjectType = 15;
+
+		// ソース定義を書き込む（書けたら true）。フィルタと同じく**`ResetObject` より前**に
+		// 済ませる（凡例の作り直しでセルが決まるため）。
+		bool ApplySourceDefinition(MCObjectHandle legend)
+		{
+			if (legend == nil)
+				return false;
+			if (!gSDK->TaggedDataCreate(legend, kSourceContainer, kSourceDataType, kSourceDataTag,
+										static_cast<Sint32>(kSourceDefinition.size())))
+				return false;
+
+			for (std::size_t i = 0; i < kSourceDefinition.size(); ++i)
+			{
+				// 6 番目の 16 ビット値だけは、条件が指す型（リトルエンディアン）で埋める。
+				Uint8 value = kSourceDefinition[i];
+				if (i == kCriteriaTypeOffset)
+					value = static_cast<Uint8>(kCriteriaObjectType & 0xFFU);
+				else if (i == kCriteriaTypeOffset + 1)
+					value = static_cast<Uint8>((kCriteriaObjectType >> 8U) & 0xFFU);
+				if (gSDK->TaggedDataSet(legend, kSourceContainer, kSourceDataType, kSourceDataTag,
+										static_cast<Sint32>(i), &value) == 0)
+					return false;
+			}
+			return true;
+		}
 	} // namespace
 
 	void prepareGraphicLegendPlugin()
@@ -101,9 +189,8 @@ namespace HomeskzIfcImport::draw
 		gSDK->DefineCustomObject(TXString(kGraphicLegendPlugin), kCustomObjectPrefNever);
 	}
 
-	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::LegendCommand& command,
-						 const core::Vec2& where, MCObjectHandle filterViewport,
-						 LegendCounts& counts)
+	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::Vec2& where,
+						 MCObjectHandle filterViewport, LegendCounts& counts)
 	{
 		if (sheetLayer == nil)
 		{
@@ -125,35 +212,16 @@ namespace HomeskzIfcImport::draw
 			return false;
 		}
 
-		// スタイル（"基礎伏図凡例" / "床伏図凡例"）。文書に無ければ**スタイル無しで置く**
-		// ——凡例を失うより、空でも箱が残っている方が「スタイルが無い」と分かりやすい
-		// （構造材・データタグと同じ方針。draw/DrawUtil の ResolvePluginStyle）。
-		const RefNumber style = ResolvePluginStyle(TXString(command.style.c_str()));
-		if (style != 0)
-		{
-			gSDK->SetPluginObjectStyle(object, style);
-			// 置き終えてから中身を流し込むために覚える（draw/Legend.h）。
-			if (std::ranges::find(counts.styles, style) == counts.styles.end())
-				counts.styles.push_back(style);
-		}
-		else
-		{
-			counts.styleMissing = true;
-		}
+		// 箱幅。**スタイルは当てない**（draw/Legend.h の ★）ので、凡例の姿を決めるのは
+		// このオブジェクト自身の設定だけになる。
+		ApplyBoxWidth(object, counts);
 
-		// 箱幅（スタイルの関連付けより**後**に書く。幅は by-instance のジオメトリで、
-		// スタイルが決めるものではない）。
-		try
-		{
-			VWParametricObj pio(object);
-			if (!SetParamRealChecked(pio, TXString(kFieldBoxWidth), kBoxWidth))
-				++counts.widthLeft;
-		}
-		catch (...)
-		{
-			// 幅 0 のまま潰れるだけで凡例自体は図面に残るので、失敗しても続ける。
-			++counts.widthLeft;
-		}
+		// ソース定義（何を並べるか）。**既定のソースは空**なので、これを書かないと
+		// スタイル無しの凡例は 1 セットも表示しない（実機で確認）。
+		if (ApplySourceDefinition(object))
+			++counts.sourced;
+		else
+			++counts.sourceLeft;
 
 		// そのシートのビューポートで絞る（**ResetObject より前**——凡例の作り直しで
 		// 並ぶセルが決まるため）。書けなくても凡例自体は残るので、件数だけ持ち帰って続ける
@@ -166,7 +234,7 @@ namespace HomeskzIfcImport::draw
 		gSDK->ResetObject(object);
 
 		// 見た目はクラスでは効かないのでオブジェクトの属性として直接与える。**ResetObject
-		// の後・ UpdateStyledObjects より前**に置くと by-instance の属性として保たれる。
+		// の後**に置くと by-instance の属性として保たれる。
 		gSDK->SetLineWeight(object, kLineWeightMils);
 		gSDK->SetFillPat(object, kFillNone);
 
@@ -176,13 +244,13 @@ namespace HomeskzIfcImport::draw
 		return true;
 	}
 
-	void updateLegendStyles(const LegendCounts& counts)
+	void refreshLegends(const LegendCounts& counts)
 	{
-		// スタイルが決める中身（ソースから集めたセル＝並ぶシンボル）をインスタンスへ
-		// プッシュする。**関連付けただけでは流し込まれない**ので、これを呼ばないと凡例は
-		// 空のまま（draw/Legend.h）。by-instance の箱幅・線の太さ・塗りは保たれる。
-		for (const RefNumber style : counts.styles)
-			gSDK->UpdateStyledObjects(style);
+		// **スタイルは使わない**ので、中身を決めるのは各オブジェクトに書き込んだソース定義と
+		// ビューポートのフィルタ（draw/Legend.h の ★）。作り直せばその時点の図の状態で
+		// セルが集まり直す。by-instance の箱幅・線の太さ・塗りは保たれる。
+		for (const MCObjectHandle object : counts.objects)
+			gSDK->ResetObject(object);
 	}
 
 	double measureLegendWidth(const LegendCounts& counts)
@@ -209,19 +277,22 @@ namespace HomeskzIfcImport::draw
 
 	std::string legendDiagnostics(const LegendCounts& counts)
 	{
-		if (counts.failed == 0 && counts.widthLeft == 0 && counts.filterLeft == 0 &&
-			!counts.styleMissing)
+		if (counts.failed == 0 && counts.widthLeft == 0 && counts.paramsFailed == 0 &&
+			counts.sourceLeft == 0 && counts.filterLeft == 0)
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
-		if (counts.styleMissing)
-			text += "グラフィック凡例スタイルが文書にありません（スタイル無しで置いたため"
-					"中身が空になります）。";
 		if (counts.failed > 0)
 			text += "凡例を置けなかった命令 " + std::to_string(counts.failed) + " 件。";
+		if (counts.paramsFailed > 0)
+			text += "パラメータを書けなかった凡例 " + std::to_string(counts.paramsFailed) +
+					" 件（幅 0 に潰れます）。";
 		if (counts.widthLeft > 0)
 			text += "箱幅を設定できなかった凡例 " + std::to_string(counts.widthLeft) +
 					" 件（幅 0 に潰れます）。";
+		if (counts.sourceLeft > 0)
+			text += "ソース定義を書けなかった凡例 " + std::to_string(counts.sourceLeft) +
+					" 件（何も並びません）。";
 		if (counts.filterLeft > 0)
 			text += "ビューポートで絞れなかった凡例 " + std::to_string(counts.filterLeft) +
 					" 件（その図に無いシンボルも並びます）。";

@@ -149,9 +149,10 @@ VectorWorks ネイティブオブジェクト
 文字の両方に与える）**——は `draw/Tag`。伏図と軸組図が共有する
 唯一の実装で、**スタイルは作らないし当てない**（スラブ・壁と同じく各オブジェクトへ直接設定
 する））、**グラフィック凡例**
-（スタイル名は `parse/Sheet` の `kFoundationLegendStyle` / `kFloorLegendStyle`、
-`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗りと配置手順は `draw/Legend`。**用紙を
-どれだけ空けるかは定数ではなく実測**——`measureLegendWidth` で測った幅を
+（`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗りと配置手順、**ソース定義（何を並べるか）
+とイメージの縮率**は `draw/Legend`。**スタイルは作らないし当てない**——中身はタグ付きデータ
+（`'GrLe'`）で、縮率は用紙の割り付けが決めた伏図の縮尺（`core::planLayout` の `scale`）に
+合わせる。**用紙をどれだけ空けるかは定数ではなく実測**——`measureLegendWidth` で測った幅を
 `core::planLayout` へ渡し、置き場所はその `legendTopRight`）、
 構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
