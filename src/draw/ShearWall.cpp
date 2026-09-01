@@ -20,19 +20,158 @@
 #include "Extensions/ExtShearWall.h"
 #include "core/Document.h"
 #include "core/Progress.h"
+#include "core/Trace.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
+#include "VWFC/VWObjects/VWGroupObj.h"
 
 #include <cmath>
 #include <cstddef>
 #include <functional>
 #include <numbers>
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
+		// ------------------------------------------------------------------
+		// 【一時的な調査】シンボル定義へ図形を入れられない件を実機で切り分ける（M19）。
+		//
+		// 分かっていること: 定義（GS_CreateSymbolDefinition）は作れて図面のリソースにも
+		// 並ぶのに、AddObjectToContainer で図形を入れても**実機のシンボル 2D 編集では
+		// 何も選べない**。一方 GetFirstMemberObject() は非 nil を返すので、
+		// 「入った／入っていない」がこちらから判断できていない。
+		//
+		// そこで**事実だけを採る**: 既存の（テンプレート由来の）シンボル定義と、
+		// こちらが作った定義を同じ API で覗いて並べ、入れ方を 3 通り試して結果を比べる。
+		// 切り分けが済んだらこの節ごと消す。
+		constexpr short kSymbolDefinitionNodeType = 16; // kSymDefNode（Objs.TDType.h）
+
+		// テスト用のシンボル名（実機で消せるよう "_" で始める）。
+		constexpr const char* kProbeSymbolA = "_耐力壁記号テストA";
+		constexpr const char* kProbeSymbolB = "_耐力壁記号テストB";
+		constexpr const char* kProbeSymbolC = "_耐力壁記号テストC";
+
+		// 記号の下描き（三角）。調査でも本番と同じ形を使う。
+		std::vector<core::Vec2> ProbeTriangle()
+		{
+			return {core::Vec2{-150.0, 0.0}, core::Vec2{150.0, 0.0}, core::Vec2{150.0, 150.0}};
+		}
+
+		// コンテナの中身を「件数と型番号」で書き出す。型番号は Objs.TDType.h
+		// （4=楕円 / 5=多角形 / 11=グループ / 16=シンボル定義）。
+		std::string DescribeMembers(MCObjectHandle container)
+		{
+			std::size_t count = 0;
+			std::string types;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil && count < 8;
+				 h = gSDK->NextObject(h))
+			{
+				++count;
+				types += " " + std::to_string(gSDK->GetObjectTypeN(h));
+			}
+			return std::to_string(count) + " 件 [" + types + " ]";
+		}
+
+		void DumpSymbolDefinition(const std::string& label, MCObjectHandle definition)
+		{
+			if (definition == nil)
+			{
+				core::trace::log("symprobe: " + label + " = nil");
+				return;
+			}
+			core::trace::log(
+				"symprobe: " + label + " type=" + std::to_string(gSDK->GetObjectTypeN(definition)) +
+				" defType=" + std::to_string(gSDK->GetSymbolDefinitionType(definition)) +
+				" 中身=" + DescribeMembers(definition));
+		}
+
+		// 図面に既にあるシンボル定義（テンプレート由来のもの）を数件ダンプする。
+		// **これが「正しく中身が入っているシンボル」の見え方**で、比較の基準になる。
+		void DumpExistingSymbols()
+		{
+			const MCObjectHandle header = gSDK->GetSymbolLibraryHeader();
+			if (header == nil)
+			{
+				core::trace::log("symprobe: シンボルライブラリを取れない");
+				return;
+			}
+			std::size_t seen = 0;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(header); h != nil && seen < 6;
+				 h = gSDK->NextObject(h))
+			{
+				if (gSDK->GetObjectTypeN(h) != kSymbolDefinitionNodeType)
+					continue; // フォルダ等は飛ばす
+				++seen;
+				DumpSymbolDefinition("既存#" + std::to_string(seen), h);
+			}
+			if (seen == 0)
+				core::trace::log("symprobe: 既存のシンボル定義が 1 つも見つからない");
+		}
+
+		// 入れ方を 3 通り試す。どれで中身が増えるかを見る。
+		void ProbeSymbolCreation()
+		{
+			// 方法 A: 図形を作ってから AddObjectToContainer（いままでのやり方）
+			{
+				TXString name(kProbeSymbolA);
+				const MCObjectHandle definition = gSDK->CreateSymbolDefinition(name);
+				core::trace::log(std::string("symprobe: A 作成 name=") + name.GetStdString() +
+								 " nil=" + (definition == nil ? "yes" : "no"));
+				const MCObjectHandle shape = CreateClosedPolygon(ProbeTriangle());
+				core::trace::log(
+					"symprobe: A 図形 nil=" + std::string(shape == nil ? "yes" : "no") +
+					" type=" + (shape == nil ? "-" : std::to_string(gSDK->GetObjectTypeN(shape))));
+				const bool added = gSDK->AddObjectToContainer(shape, definition);
+				core::trace::log(std::string("symprobe: A AddObjectToContainer=") +
+								 (added ? "true" : "false"));
+				DumpSymbolDefinition("A", definition);
+			}
+
+			// 方法 B: グループにまとめてからグループを入れる
+			{
+				TXString name(kProbeSymbolB);
+				const MCObjectHandle definition = gSDK->CreateSymbolDefinition(name);
+				VWGroupObj group;
+				group.AddObject(CreateClosedPolygon(ProbeTriangle()));
+				const MCObjectHandle groupHandle = group.GetThisObject();
+				core::trace::log(
+					"symprobe: B グループ 中身=" +
+					(groupHandle == nil ? std::string("nil") : DescribeMembers(groupHandle)));
+				const bool added = gSDK->AddObjectToContainer(groupHandle, definition);
+				core::trace::log(std::string("symprobe: B AddObjectToContainer=") +
+								 (added ? "true" : "false"));
+				DumpSymbolDefinition("B", definition);
+			}
+
+			// 方法 C: 定義を「アクティブなシンボル定義」にしてから図形を作る
+			// （作った先が定義になるか＝VectorScript の BeginSym/EndSym に当たる挙動か）
+			{
+				TXString name(kProbeSymbolC);
+				const MCObjectHandle definition = gSDK->CreateSymbolDefinition(name);
+				gSDK->SetActiveSymbolDef(definition);
+				const MCObjectHandle shape = CreateClosedPolygon(ProbeTriangle());
+				DumpSymbolDefinition("C（作っただけ）", definition);
+				const bool added = gSDK->AddObjectToContainer(shape, definition);
+				core::trace::log(std::string("symprobe: C AddObjectToContainer=") +
+								 (added ? "true" : "false"));
+				DumpSymbolDefinition("C（入れた後）", definition);
+			}
+		}
+
+		// 調査ひとまとめ。ログが開いているときだけ（dev ビルドと HOMESKZ_IFC_TRACE）。
+		void ProbeSymbolDefinitions()
+		{
+			if (!core::trace::isOpen())
+				return;
+			core::trace::log("symprobe: シンボル定義の調査（M19。分かったら消す）");
+			DumpExistingSymbols();
+			ProbeSymbolCreation();
+		}
+
+		// ------------------------------------------------------------------
 		// 種別・掛け方・面の値をパラメータの綴りへ落とす（Extensions/ExtShearWall.h の
 		// kShear* が唯一の定義）。
 		const char* KindValue(core::ShearWallKind kind)
@@ -168,6 +307,10 @@ namespace HomeskzIfcImport::draw
 		// draw/ColumnMark.cpp）。
 		if (!document.shearWalls.empty())
 			gSDK->DefineCustomObject(TXString(kShearWallUniversalName), kCustomObjectPrefNever);
+
+		// 【一時的】シンボル定義の調査（上記 ProbeSymbolDefinitions。分かったら消す）。
+		if (!document.shearWalls.empty())
+			ProbeSymbolDefinitions();
 
 		for (const core::ShearWallCommand& wall : document.shearWalls)
 		{
