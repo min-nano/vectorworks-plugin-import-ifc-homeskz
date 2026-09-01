@@ -97,10 +97,12 @@ namespace HomeskzIfcImport::draw
 	// 頂点が空なら nil。
 	MCObjectHandle CreateClosedPolygon(const std::vector<core::Vec2>& boundary);
 
-	// その名前のシンボル定義が図面に在るか（例外は false として扱う）。
-	// **シンボル置換系（draw/Symbol）と耐力壁の伏図記号（draw/ShearWall）が共有する
-	// 唯一の判定**。前者は「置けなかった理由を診断へ書き分ける」ために、後者は
-	// 「無いときだけ登録する（在れば利用者が描き直したものとして触らない）」ために使う。
+	// その名前のシンボル定義が図面に在るか（例外は false として扱う）。シンボル置換系
+	// （draw/Symbol）が「置けなかった理由を診断へ書き分ける」ために使う唯一の判定。
+	//
+	// ※ **中身が在るかは分からない**——空のシンボル定義でも true になるし、
+	// `GetFirstMemberObject()` も空の定義で非 nil を返す（M19 の実機確認。
+	// docs/DEV-NOTES.md「シンボル定義を SDK から組み立てるのは断念した」）。
 	bool HasSymbolDefinition(const std::string& name);
 
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
