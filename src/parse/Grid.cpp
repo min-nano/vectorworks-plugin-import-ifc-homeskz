@@ -129,10 +129,8 @@ namespace HomeskzIfcImport::parse
 		return lines;
 	}
 
-	bool gridCenterOf(const std::vector<GridLine>& lines, Vec2& out)
+	bool gridBounds(const std::vector<GridLine>& lines, Vec2& outMin, Vec2& outMax)
 	{
-		// 全端点の bbox 中心を求める（原点へ寄せるオフセット。VW 上で図面が原点付近に
-		// 来るようにする。docs/DEV-NOTES.md M1「原点付近にセンタリング」）。
 		if (lines.empty())
 			return false;
 
@@ -150,7 +148,20 @@ namespace HomeskzIfcImport::parse
 				maxY = std::max(maxY, p.y);
 			}
 		}
-		out = Vec2{(minX + maxX) * 0.5, (minY + maxY) * 0.5};
+		outMin = Vec2{minX, minY};
+		outMax = Vec2{maxX, maxY};
+		return true;
+	}
+
+	bool gridCenterOf(const std::vector<GridLine>& lines, Vec2& out)
+	{
+		// 全端点の bbox 中心を求める（原点へ寄せるオフセット。VW 上で図面が原点付近に
+		// 来るようにする。docs/DEV-NOTES.md M1「原点付近にセンタリング」）。
+		Vec2 min;
+		Vec2 max;
+		if (!gridBounds(lines, min, max))
+			return false;
+		out = Vec2{(min.x + max.x) * 0.5, (min.y + max.y) * 0.5};
 		return true;
 	}
 

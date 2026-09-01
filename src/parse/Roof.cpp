@@ -105,8 +105,7 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<RoofCommand> buildRoofCommands(Context& context)
 	{
-		const Model& model = context.model();
-		const std::vector<StoryInfo> stories = context.stories();
+		const std::vector<StoryInfo>& stories = context.stories();
 		if (stories.empty())
 			return {};
 
@@ -119,19 +118,10 @@ namespace HomeskzIfcImport::parse
 			const StoryInfo& story = stories[i];
 			const std::string layer = storyLayerName(i, story.isTop, kLevelNojiita);
 
-			for (const int elementId : context.storyElements(story.id))
+			// 屋根版の判定・屋根面の走査は垂木（parse/Rafter）・登り梁と共有する
+			// （Context::storyRoofPlanes。同じ屋根版を拾い、解決も 1 度で済む）。
+			for (const RoofPlane* plane : context.storyRoofPlanes(story.id))
 			{
-				const Entity* element = model.entity(elementId);
-				// 屋根版の判定は垂木（parse/Rafter）と同じで、屋根面を共有する両者が
-				// 同じ屋根版を拾うようにする。
-				if (element == nullptr || !isRoofSlab(*element))
-					continue;
-
-				// 屋根面は垂木（parse/Rafter）と共有する（コンテキストが 1 度だけ解決する）。
-				const RoofPlane* plane = context.roofPlane(elementId);
-				if (plane == nullptr)
-					continue; // 屋根面を解決できない屋根版はスキップ
-
 				std::optional<RoofCommand> command =
 					roofCommandForPlane(*plane, layer, story.elevation, center);
 				if (command.has_value())
