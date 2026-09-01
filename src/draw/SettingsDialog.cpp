@@ -222,8 +222,10 @@ namespace HomeskzIfcImport::draw
 					if (!preview.CreateControl(this, kPreviewSizePixels, kPreviewSizePixels,
 											   kPreviewMarginPixels))
 						return false;
-					// 行の頭（説明）は前の行の頭の下、プルダウンと絵はその右へ。
-					this->AddBelowControl(previousRow, &label, 0, 1);
+					// 行の頭（説明）は前の行の頭の下、プルダウンと絵はその右へ。行間を
+					// 空けるのは説明文の下（＝最初の行の上）だけ——絵が文字より背が高い
+					// ぶん、行そのものは詰めても窮屈にならない。
+					this->AddBelowControl(previousRow, &label, 0, row == 0 ? 1 : 0);
 					this->AddRightControl(&label, &popup);
 					this->AddRightControl(&popup, &preview);
 					previousRow = &label;
