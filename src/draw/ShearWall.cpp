@@ -23,10 +23,9 @@
 #include "core/Trace.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
-#include "VWFC/VWObjects/VWSymbolObj.h"
 #include "VWFC/VWObjects/VWSymbolDefObj.h"
-#include "VWFC/VWObjects/VWPolygon2DObj.h"
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <functional>
@@ -39,236 +38,141 @@ namespace HomeskzIfcImport::draw
 	namespace
 	{
 		// ------------------------------------------------------------------
-		// 【一時的な調査 v3】シンボル定義へ入れた図形が絵にならない件（M19）。
+		// 伏図記号のシンボル定義を用意する（Extensions/ExtShearWall.h の kShearMark*Symbol）。
 		//
-		// v2 で分かった事実:
-		//   * 定義（GS_CreateSymbolDefinition）は作れて、図面のリソースにも並ぶ。
-		//   * AddObjectToContainer は true を返し、**定義の中身は実際に増える**
-		//     （自作 = [5 0]。テンプレート由来の既存シンボルも [5 0] で同じ形）。
-		//   * それなのに配置したインスタンスの外接が -2147483648（＝大きさ無し）で、
-		//     実機のシンボル 2D 編集では何も選べない。
+		// 【なぜプラグインがシンボルを作るのか】記号をシンボルにしておくと、図面の側で
+		// 1 か所（シンボル定義）を編集するだけで**すべての耐力壁の記号を一括で差し替え・
+		// 調整**できる（ご要望）。CLAUDE.md「既存の図面リソースを作らない」の唯一の例外で、
+		// 作るのは**耐力壁を 1 枚でも描くときだけ**・名前が既にあれば**触らない**。
 		//
-		// 残る枝は 2 つ。**事実だけ**を採って片方に決める。
-		//   ① 入れている多角形そのものが空（頂点 0）。
-		//   ② 定義の側が「2D の絵を持つシンボル」になっていない（種別・キャッシュ）。
-		// そこで v3 では
-		//   * 図形の**頂点数・閉じているか・自分の外接・親**を入れる前後で見る（①）、
-		//   * 定義の**種別**（GetSymbolDefinitionType = 2D / 3D / ハイブリッド）と外接を、
-		//     **既存（正しく描ける）シンボル**と並べて見る（②）、
-		//   * 既存シンボルを 1 つ置いて外接を読む（＝こちらの測り方が正しいかの検算）、
-		//   * SetPageBased(true) が実際に効くか（実機で縮尺無視にならなかった件）、
-		// を一度に採る。切り分けが済んだらこの節ごと消す。
+		// 【★中身を入れたら ResetObject を呼ぶ】ここが M19 で 3 周かけたところ。
+		// `CreateSymbolDefinition` で定義を作り `AddObjectToContainer` で図形を入れる——
+		// これは**最初から正しく効いていた**（定義を辿ると多角形が実際に居る）。抜けて
+		// いたのは**入れた後の `ResetObject(定義)`** で、これが無いと**定義の外接が計算
+		// されない**。外接の無い定義は絵として成立せず、実機では
+		//   * シンボルの 2D 編集で「すべて選択」しても何も選べない、
+		//   * 配置したインスタンスの外接が無効値（大きさが無い）、
+		//   * 図には何も出ない、
+		// という「中身はあるのに空に見える」状態になる（docs/DEV-NOTES.md M19）。
+		//
+		// 【★空の定義が残っていたら作り直す】`CreateSymbolDefinition` は**名前が既に
+		// 使われていれば nil を返す**ので、上の不具合で壊れた（空の）定義を抱えた図面は
+		// 消してからでないと直せない。「中身があるか」は**型番号が 0 でないメンバが
+		// あるか**で見る——`FirstMemberObj` は空の定義でも非 nil（type 0 のレコード 1 つ）
+		// を返すので、非 nil を中身の有無に使ってはいけない。
 		constexpr short kSymbolDefinitionNodeType = 16; // kSymDefNode（Objs.TDType.h）
-		constexpr short kPolygonNodeType = 5;			// kPolygonNode
+		constexpr short kInternalRecordNodeType = 0; // 空の定義が 1 つだけ持つレコード
 
-		// テスト用のシンボル名（実機で消せるよう "_" で始める）。
-		constexpr const char* kProbeSymbolA = "_耐力壁記号テストA";
-
-		// 記号の下描き（三角）。調査でも本番と同じ形を使う。
-		std::vector<core::Vec2> ProbeTriangle()
+		// 定義が絵を持っているか（レコード以外のメンバが 1 つでもあるか）。
+		bool DefinitionHasContent(MCObjectHandle definition)
 		{
-			return {core::Vec2{-150.0, 0.0}, core::Vec2{150.0, 0.0}, core::Vec2{150.0, 150.0}};
+			for (MCObjectHandle h = gSDK->FirstMemberObj(definition); h != nil;
+				 h = gSDK->NextObject(h))
+				if (gSDK->GetObjectTypeN(h) != kInternalRecordNodeType)
+					return true;
+			return false;
 		}
 
-		// 外接を "幅x高さ" で。取れない／無効値（INT_MIN が入る）はそう書く。
-		std::string Extent(MCObjectHandle object)
+		// 図面のシンボルライブラリから名前で定義を探す（無ければ nil）。**作らない**——
+		// `VWSymbolDefObj` の名前の構築子は見つからなければ作ってしまうので使えない。
+		MCObjectHandle FindSymbolDefinition(const TXString& name)
 		{
-			WorldRect bounds;
-			if (object == nil || !gSDK->GetObjectBounds(object, bounds))
-				return "取れない";
-			const double width = bounds.right - bounds.left;
-			const double height = bounds.top - bounds.bottom;
-			if (!std::isfinite(width) || !std::isfinite(height) || std::fabs(width) > 1.0e9)
-				return "無効";
-			return std::to_string(static_cast<int>(width)) + "x" +
-				   std::to_string(static_cast<int>(height));
-		}
-
-		// 図形 1 つの素性。多角形なら頂点数と閉じているかも出す（枝①の判定はここ）。
-		std::string DescribeShape(MCObjectHandle object)
-		{
-			if (object == nil)
-				return "nil";
-			const short type = gSDK->GetObjectTypeN(object);
-			std::string text = "type=" + std::to_string(type) + " 外接=" + Extent(object);
-			if (type == kPolygonNodeType)
-			{
-				try
-				{
-					const VWPolygon2DObj polygon(object);
-					text += " 頂点=" + std::to_string(polygon.GetVertexCount()) +
-							" 閉=" + (polygon.IsClosed() ? "yes" : "no");
-				}
-				catch (...)
-				{
-					text += " 頂点=読めない";
-				}
-			}
-			const MCObjectHandle parent = gSDK->ParentObject(object);
-			text += " 親=";
-			text += (parent == nil ? std::string("nil")
-								   : "type" + std::to_string(gSDK->GetObjectTypeN(parent)));
-			return text;
-		}
-
-		// 定義 1 つを中身まで書き出す。**種別（defType）が肝**——2D の絵を持つ
-		// シンボルになっていなければ、中身があっても伏図には出ない。
-		void DumpDefinition(const std::string& label, MCObjectHandle definition)
-		{
-			if (definition == nil)
-			{
-				core::trace::log("symprobe: " + label + " = nil");
-				return;
-			}
-			core::trace::log(
-				"symprobe: " + label + " type=" + std::to_string(gSDK->GetObjectTypeN(definition)) +
-				" defType=" + std::to_string(gSDK->GetSymbolDefinitionType(definition)) +
-				" 外接=" + Extent(definition));
-			std::size_t index = 0;
-			for (MCObjectHandle h = gSDK->FirstMemberObj(definition); h != nil && index < 4;
-				 h = gSDK->NextObject(h), ++index)
-				core::trace::log("symprobe: " + label + " 中身[" + std::to_string(index) + "] " +
-								 DescribeShape(h));
-			if (index == 0)
-				core::trace::log("symprobe: " + label + " 中身なし");
-		}
-
-		// 図面に既にあるシンボル定義（テンプレート由来＝正しく描けるもの）を基準にする。
-		// **中身と種別の見え方が自作とどう違うか**が知りたい唯一のこと。
-		// 併せて 1 つ実際に置いてみて、外接の読み方そのものを検算する。
-		void DumpExistingSymbols()
-		{
-			const MCObjectHandle header = gSDK->GetSymbolLibraryHeader();
-			if (header == nil)
-			{
-				core::trace::log("symprobe: シンボルライブラリを取れない");
-				return;
-			}
-			std::size_t seen = 0;
-			MCObjectHandle first = nil;
-			for (MCObjectHandle h = gSDK->FirstMemberObj(header); h != nil && seen < 3;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(gSDK->GetSymbolLibraryHeader()); h != nil;
 				 h = gSDK->NextObject(h))
 			{
 				if (gSDK->GetObjectTypeN(h) != kSymbolDefinitionNodeType)
 					continue; // フォルダ等は飛ばす
-				if (first == nil)
-					first = h;
-				++seen;
-				DumpDefinition("既存#" + std::to_string(seen), h);
-			}
-			if (seen == 0)
-			{
-				core::trace::log("symprobe: 既存のシンボル定義が 1 つも見つからない");
-				return;
-			}
-
-			// ★検算: 正しく描けるシンボルを置いたとき、外接がまともに読めるか。
-			// ここが「無効」なら、自作シンボルの外接が無効なのは測り方の問題であって
-			// 定義の中身の話ではない、と分かる。
-			try
-			{
-				const VWSymbolDefObj definition(first);
-				const TXString name(definition.GetObjectName());
-				const VWSymbolObj instance(name, VWPoint2D(0.0, 0.0), 0.0);
-				core::trace::log("symprobe: 既存#1 を置いた name=" + name.GetStdString() + " " +
-								 DescribeShape(instance.GetThisObject()));
-			}
-			catch (...)
-			{
-				core::trace::log("symprobe: 既存#1 を置けない（名前が取れない）");
-			}
-		}
-
-		// 自作の定義に図形を入れ、**入れる前・入れた後・更新を促した後**で見比べる。
-		void ProbeSymbolCreation()
-		{
-			// CreateSymbolDefinition は名前を inout で受ける（重複時に採番して返す）ので
-			// 一時オブジェクトは渡せない。
-			TXString name(kProbeSymbolA);
-			const MCObjectHandle definition = gSDK->CreateSymbolDefinition(name);
-			core::trace::log("symprobe: A 作成 name=" + name.GetStdString() +
-							 " nil=" + (definition == nil ? "yes" : "no"));
-			DumpDefinition("A（作っただけ）", definition);
-
-			const MCObjectHandle shape = CreateClosedPolygon(ProbeTriangle());
-			// ★枝①の判定。ここで頂点が 3・外接が 300x150 なら図形そのものは正しい。
-			core::trace::log("symprobe: A 入れる前の図形 " + DescribeShape(shape));
-
-			const bool added = gSDK->AddObjectToContainer(shape, definition);
-			core::trace::log(std::string("symprobe: A AddObjectToContainer=") +
-							 (added ? "true" : "false"));
-			core::trace::log("symprobe: A 入れた後の図形 " + DescribeShape(shape));
-			DumpDefinition("A（入れた後）", definition);
-
-			// ★実機で「縮尺無視」に入らなかった件。setter が効いているのかを見る。
-			try
-			{
-				VWSymbolDefObj wrapper(definition);
-				wrapper.SetPageBased(true);
-				core::trace::log(std::string("symprobe: A 縮尺無視 GetPageBased=") +
-								 (wrapper.GetPageBased() ? "true" : "false"));
-			}
-			catch (...)
-			{
-				core::trace::log("symprobe: A 縮尺無視の設定で例外");
-			}
-
-			// ★枝②の判定。定義へ「中身が変わった」と知らせて外接・種別が付くか。
-			gSDK->ResetObject(definition);
-			DumpDefinition("A（ResetObject 後）", definition);
-
-			// ★枝③の判定。**中身を入れた定義が、図面のリソース一覧に居る同名の定義と
-			// 同じものか。** CreateSymbolDefinition は「名前が既に使われていれば nil を
-			// 返す」仕様（APIBase.Legacy.Defs.h の GS_CreateSymbolDefinition）なので、
-			// 名前の取り合いが起きていれば「作った先」と「一覧に見えるもの」が別物に
-			// なり得る——実機で中身が空に見えることの説明になる。
-			const MCObjectHandle header = gSDK->GetSymbolLibraryHeader();
-			MCObjectHandle listed = nil;
-			for (MCObjectHandle h = gSDK->FirstMemberObj(header); h != nil && listed == nil;
-				 h = gSDK->NextObject(h))
-			{
-				if (gSDK->GetObjectTypeN(h) != kSymbolDefinitionNodeType)
-					continue;
 				try
 				{
 					if (VWSymbolDefObj(h).GetObjectName() == name)
-						listed = h;
+						return h;
 				}
 				catch (...)
 				{
-					continue; // 名前を読めない定義は飛ばす（調査の対象ではない）
+					continue; // 名前を読めないものは対象外
 				}
 			}
-			const char* where = "no";
-			if (listed != nil)
-				where = listed == definition ? "同じ handle" : "別の handle";
-			core::trace::log(std::string("symprobe: A 一覧に居るか=") + where);
-			if (listed != nil && listed != definition)
-				DumpDefinition("A（一覧側）", listed);
+			return nil;
 		}
 
-		// 作った定義を素直に置いてみる（PIO の中ではなくアクティブレイヤへ）。
-		void ProbeSymbolPlacement()
+		// 筋かいの三角（**直角三角形**）。原点は壁と平行な脚の中央で、直角は
+		// risesToEnd なら +X 側（＝終端側）に立つ。頂点は +Y へ伸びる。
+		MCObjectHandle MakeBraceTriangle(bool risesToEnd)
 		{
-			const TXString name(kProbeSymbolA);
-			const VWSymbolObj instance(name, VWPoint2D(0.0, 0.0), 0.0);
-			const MCObjectHandle handle = instance.GetThisObject();
-			core::trace::log("symprobe: A を置いた シンボルか=" +
-							 std::string(handle != nil && VWSymbolObj::IsSymbolObject(handle, name)
-											 ? "yes"
-											 : "no") +
-							 " " + DescribeShape(handle));
+			const double half = kShearMarkTriangleLength / 2.0;
+			const double foot = risesToEnd ? -half : half;
+			const double head = risesToEnd ? half : -half;
+			return CreateClosedPolygon({core::Vec2{foot, 0.0}, core::Vec2{head, 0.0},
+										core::Vec2{head, kShearMarkTriangleHeight}});
 		}
 
-		// 調査ひとまとめ。ログが開いているときだけ（dev ビルドと HOMESKZ_IFC_TRACE）。
-		void ProbeSymbolDefinitions()
+		// 面材の丸印。原点が中心。
+		MCObjectHandle MakePanelCircle()
 		{
-			if (!core::trace::isOpen())
-				return;
-			core::trace::log("symprobe: シンボル定義の調査 v3（M19。分かったら消す）");
-			DumpExistingSymbols();
-			ProbeSymbolCreation();
-			ProbeSymbolPlacement();
+			const double radius = kShearMarkCircleDiameter / 2.0;
+			WorldRect bounds;
+			bounds.left = -radius;
+			bounds.right = radius;
+			bounds.bottom = -radius;
+			bounds.top = radius;
+			return gSDK->CreateOval(bounds);
+		}
+
+		// 定義を 1 つ用意する。使える定義が図面にある（か、作れた）なら true。
+		bool EnsureMarkSymbol(const char* name, const std::function<MCObjectHandle()>& makeShape)
+		{
+			const TXString wanted(name);
+			if (const MCObjectHandle existing = FindSymbolDefinition(wanted); existing != nil)
+			{
+				if (DefinitionHasContent(existing))
+					return true; // 図面のものを尊重してそのまま使う
+				// 空＝上記の不具合で壊れた定義。名前を空けないと作り直せない。
+				gSDK->DeleteSymbolDefinition(existing, true, false);
+			}
+
+			TXString created(name);
+			const MCObjectHandle definition = gSDK->CreateSymbolDefinition(created);
+			if (definition == nil)
+				return false;
+			if (created != wanted)
+				return false; // 名前を採番し直された＝別名の定義。PIO は名前で置くので使えない
+
+			const MCObjectHandle shape = makeShape();
+			if (shape == nil)
+				return false;
+			// ★**スクリーン平面の 2D 図形にする。** レイヤ平面のまま入れると定義が 3D
+			// 扱い（GetSymbolDefinitionType が k3DSym）になり、伏図に出ない恐れがある。
+			gSDK->SetPlanarRefID(shape, kPlanarRefID_ScreenPlane);
+			SetClassByName(shape, kShearMarkClass);
+			SetAllAttributesByClass(shape);
+			if (!gSDK->AddObjectToContainer(shape, definition))
+				return false;
+
+			gSDK->ResetObject(definition); // ★これが無いと外接が付かず「空のシンボル」になる
+			return true;
+		}
+
+		// 3 つまとめて。用意できなかった名前をログに残す（記号が出ない原因になるので、
+		// 黙って諦めない）。
+		void EnsureMarkSymbols()
+		{
+			struct Wanted
+			{
+				const char* name;
+				std::function<MCObjectHandle()> makeShape;
+			};
+			const std::array<Wanted, 3> wanted{
+				Wanted{kShearMarkBraceRightSymbol, [] { return MakeBraceTriangle(true); }},
+				Wanted{kShearMarkBraceLeftSymbol, [] { return MakeBraceTriangle(false); }},
+				Wanted{kShearMarkPanelSymbol, [] { return MakePanelCircle(); }}};
+
+			for (const Wanted& item : wanted)
+			{
+				const bool ready = EnsureMarkSymbol(item.name, item.makeShape);
+				if (core::trace::isOpen())
+					core::trace::log(std::string("  shearwall: 記号シンボル ") + item.name + " = " +
+									 (ready ? "用意できた" : "**用意できない**"));
+			}
 		}
 
 		// ------------------------------------------------------------------
@@ -408,9 +312,10 @@ namespace HomeskzIfcImport::draw
 		if (!document.shearWalls.empty())
 			gSDK->DefineCustomObject(TXString(kShearWallUniversalName), kCustomObjectPrefNever);
 
-		// 【一時的】シンボル定義の調査（上記 ProbeSymbolDefinitions。分かったら消す）。
+		// 伏図記号のシンボル定義を用意する（上記 EnsureMarkSymbols）。PIO は名前で置くので、
+		// 1 枚目を作る前に揃っていなければならない。
 		if (!document.shearWalls.empty())
-			ProbeSymbolDefinitions();
+			EnsureMarkSymbols();
 
 		for (const core::ShearWallCommand& wall : document.shearWalls)
 		{

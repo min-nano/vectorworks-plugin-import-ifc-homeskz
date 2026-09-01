@@ -105,6 +105,39 @@ namespace HomeskzIfcImport
 	constexpr const char* kShearPanelFrontClass = "04構造-02木造-06耐力面材-01壁-01表";
 	constexpr const char* kShearPanelBackClass = "04構造-02木造-06耐力面材-01壁-02裏";
 
+	// ------------------------------------------------------------------
+	// 伏図記号のシンボル定義名と寸法。
+	//
+	// **このプラグインが図面へ登録する唯一の名前付きリソース**（CLAUDE.md「既存の図面
+	// リソースを作らない」の例外。記号をシンボルにしたいというご要望による）。定義は
+	// draw/ShearWall の EnsureMarkSymbols が**耐力壁を 1 枚でも描くときにだけ**作り、
+	// PIO はそれを名前で置く。図面に同じ名前の定義が既にあれば**触らない**ので、
+	// 記号の絵を差し替えたい人はシンボルを編集すればよい。
+	//
+	// ★**シンボル定義は中身を入れた後に ResetObject を呼ばないと外接が付かず、
+	//   「中身はあるのに空に見える」定義になる**（M19。docs/DEV-NOTES.md）。
+	//
+	// 筋かいの三角は向きが 2 通り（斜辺が終端側へ上がるか始端側へ上がるか）あり、記号を
+	// 壁芯の表側／裏側どちらへ寄せるかで上下も入れ替わるので組み合わせは 4 通りになる。
+	// **180 度回せば 2 通りは作れる**ので定義は 2 つで足りる:
+	//
+	//   | 斜辺 | 寄せる側 | 置く定義 | 回転 |
+	//   | --- | --- | --- | --- |
+	//   | 終端側へ上がる | 表（+） | 右上がり | 0°   |
+	//   | 終端側へ上がる | 裏（−） | 左上がり | 180° |
+	//   | 始端側へ上がる | 表（+） | 左上がり | 0°   |
+	//   | 始端側へ上がる | 裏（−） | 右上がり | 180° |
+	constexpr const char* kShearMarkBraceRightSymbol = "耐力壁記号_筋かい_右上がり";
+	constexpr const char* kShearMarkBraceLeftSymbol = "耐力壁記号_筋かい_左上がり";
+	constexpr const char* kShearMarkPanelSymbol = "耐力壁記号_面材";
+
+	// 記号の寸法（**図面 mm**。1/50 の伏図で三角 6×3mm・丸 直径 3mm に読める）。内法では
+	// 割らない——455mm 幅の壁だけ記号が縮んで図が不揃いに見えた（M19）。シンボル定義の
+	// 中身を作る draw/ShearWall と、置き場所を決める PIO 本体が共有する唯一の定義。
+	constexpr double kShearMarkTriangleLength = 300.0; // 壁と平行な脚（＝斜辺の水平投影）
+	constexpr double kShearMarkTriangleHeight = 150.0; // 壁に直交する脚（＝直角を立てる側）
+	constexpr double kShearMarkCircleDiameter = 150.0;
+
 	// ------------------------------------------------------------------------
 	// リセット時に耐力壁を描く本体。
 	class CShearWall_EventSink : public VWParametric_EventSink

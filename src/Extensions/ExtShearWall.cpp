@@ -43,7 +43,7 @@
 #include "VWFC/Math/VWPolygon3D.h"
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWPolygon3DObj.h"
-#include "VWFC/VWObjects/VWPolygon2DObj.h"
+#include "VWFC/VWObjects/VWSymbolObj.h"
 
 #include <algorithm>
 #include <array>
@@ -65,12 +65,6 @@ namespace HomeskzIfcImport
 		// 端の柱とみなす軸方向の許容（mm）。柱芯は耐力壁の端点そのものなので本来 0 だが、
 		// 手で動かした耐力壁でも拾えるだけの余裕を取る。
 		constexpr double kColumnAlongTol = 300.0;
-
-		// 伏図記号の寸法（**図面 mm**。1/50 の伏図で三角 6×3mm・丸 直径 3mm に読める）。
-		// 内法では割らない——455mm 幅の壁だけ記号が縮んで図が不揃いに見えた（M19）。
-		constexpr double kMarkTriangleLength = 300.0; // 壁と平行な脚（＝斜辺の水平投影）
-		constexpr double kMarkTriangleHeight = 150.0; // 壁に直交する脚（＝直角を立てる側）
-		constexpr double kMarkCircleDiameter = 150.0;
 
 		// PIO の定義。**関数ローカル static** で持つ理由は ExtMenu の menuDef と同じ
 		// （SDK の非ローカル static を名前空間スコープの初期化子から参照しない）。
@@ -318,62 +312,47 @@ namespace HomeskzIfcImport
 			}
 		}
 
-		// 2D の閉じたポリゴンを PIO のジオメトリとして置く。
+		// 伏図記号 1 つ（シンボルの配置）。定義は draw/ShearWall の EnsureMarkSymbols が
+		// 用意しておく（Extensions/ExtShearWall.h の kShearMark*Symbol）。
 		//
-		// **VWFC で作ったオブジェクトはどのコンテナにも入らない**ので、AddObjectToContainer
-		// で PIO（host）へ入れ直す（draw/Symbol.cpp の 1 番目の作法）。
-		//
-		// ★**SetClosed(true) を忘れない。** VWPolygon2DObj は既定で開いた折れ線なので、
-		// 頂点を回しただけでは**最後の頂点から最初の頂点へ戻る辺が描かれない**（実機で
-		// 筋かいの三角の斜辺が 1 本だけ消えた。M19）。
-		void AddPolygon2D(MCObjectHandle host, const std::vector<core::Vec2>& points,
-						  const char* className)
+		// ★**VWFC で作ったシンボルインスタンスはどのコンテナにも入らない**ので
+		//   AddObjectToContainer で PIO（host）へ入れ直す（draw/Symbol.cpp の 1 番目の作法）。
+		//   同じ場所で使っている gSDK->CreateLine / CreateOval は PIO のジオメトリへ自動で
+		//   入るが、**シンボルは入らない**——ここを揃えて書くと静かに消える。
+		// ★**非 nil を成功と読まない**（PlaceSymbol は定義が無くても非 nil を返す。
+		//   draw/Symbol.cpp の 2 番目の作法）。定義が用意できていない図面では、記号を
+		//   置かずに黙って通す——ログには EnsureMarkSymbols が理由を残している。
+		void AddMarkSymbol(MCObjectHandle host, const char* name, double x, double y,
+						   double angleDeg)
 		{
-			if (points.size() < 3)
-				return;
-			VWPolygon2DObj poly;
-			for (const core::Vec2& point : points)
-				poly.AddVertex(point.x, point.y);
-			poly.SetClosed(true);
-			const MCObjectHandle handle = poly.GetThisObject();
-			if (handle == nil)
+			const TXString symbol(name);
+			const VWSymbolObj instance(symbol, VWPoint2D(x, y), angleDeg);
+			const MCObjectHandle handle = instance.GetThisObject();
+			if (handle == nil || !VWSymbolObj::IsSymbolObject(handle, symbol))
 				return;
 			gSDK->AddObjectToContainer(handle, host);
-			draw::SetClassByName(handle, className);
-			draw::SetAllAttributesByClass(handle);
+			draw::SetClassByName(handle, kShearMarkClass);
 		}
 
-		// 伏図の筋かい記号 1 つ（**直角三角形**）。壁と平行な脚を y=offset の線に置き、
-		// 直角を**材が高くなる側**の端に立てるので、斜辺の傾きがそのまま筋かいの向き
+		// 伏図の筋かい記号 1 つ（**直角三角形**）。斜辺の傾きがそのまま筋かいの向き
 		// （足元→頂部）を表す。たすき掛けは risesToEnd を反転してもう 1 つ重ねる
 		// （同じ矩形の中で斜辺が交差する＝たすきに見える）。置き場所は内法の中央で、
-		// 三角は**記号を寄せた側へさらに外側**へ伸ばす（offset の符号に高さを合わせる）。
+		// 三角は**記号を寄せた側へさらに外側**へ伸びる。
+		//
+		// 定義は右上がり・左上がりの 2 つで、**裏側（offset<0）へ寄せるときは 180 度
+		// 回した同じ定義**が要る向きになる（対応表は Extensions/ExtShearWall.h）。
 		void AddBraceTriangle(MCObjectHandle host, double centre, double offset, bool risesToEnd)
 		{
-			const double half = kMarkTriangleLength / 2.0;
-			const double foot = risesToEnd ? centre - half : centre + half;
-			const double head = risesToEnd ? centre + half : centre - half;
-			const double apex = offset + std::copysign(kMarkTriangleHeight, offset);
-			AddPolygon2D(
-				host, {core::Vec2{foot, offset}, core::Vec2{head, offset}, core::Vec2{head, apex}},
-				kShearMarkClass);
+			const bool front = offset >= 0.0;
+			const char* name =
+				risesToEnd == front ? kShearMarkBraceRightSymbol : kShearMarkBraceLeftSymbol;
+			AddMarkSymbol(host, name, centre, offset, front ? 0.0 : 180.0);
 		}
 
 		// 伏図の丸印 1 つ（面材の記号。壁に平行な線の中央に置く）。
 		void AddPanelCircle(MCObjectHandle host, double centre, double offset)
 		{
-			const double radius = kMarkCircleDiameter / 2.0;
-			WorldRect bounds;
-			bounds.left = centre - radius;
-			bounds.right = centre + radius;
-			bounds.bottom = offset - radius;
-			bounds.top = offset + radius;
-			const MCObjectHandle circle = gSDK->CreateOval(bounds);
-			if (circle != nil)
-			{
-				draw::SetClassByName(circle, kShearMarkClass);
-				draw::SetAllAttributesByClass(circle);
-			}
+			AddMarkSymbol(host, kShearMarkPanelSymbol, centre, offset, 0.0);
 		}
 
 		// 伏図の面材記号 1 つ。壁に平行な線と、その中央の丸。

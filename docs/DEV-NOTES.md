@@ -135,34 +135,41 @@ include しないので、SDK 無し（約 800MB のダウンロード無し）�
     平面へ落とすと 1 点に潰れるので 2D ポリラインでは表せない。`Add3DVertex` が VS の
     `AddVertex3D` に当たる（`Insert3DVertex` は別物で頂点が増えない）。`VWNURBSCurve` は
     評価専用で制御点から構築できないが、`ISDK` 側に `Add3DVertex` がある。
-- **シンボル定義を SDK から組み立てられていない（M19。切り分けの途中）。**
-  `GS_CreateSymbolDefinition`（`VWSymbolDefObj` の名前の構築子）で定義そのものは作れ、
-  図面のリソース一覧にも並ぶ。**図形も入る**——`AddObjectToContainer` は true を返し、
-  定義を `FirstMemberObj` / `NextObject` で辿ると多角形（type 5）が実際に居る。自作の
-  定義の中身 `[5 0]` は、テンプレート由来の**正しく描ける**シンボルの `[5 0]` と同じ形を
-  している。それでも実機では次のようになる:
-  * シンボルを 2D 編集して「すべて選択」しても何も選べない、
+- **シンボル定義に中身を入れたら `ResetObject` を呼ぶ（M19。ここに 3 周かけた）。**
+  `GS_CreateSymbolDefinition`（`VWSymbolDefObj` の名前の構築子）で定義を作り、
+  `AddObjectToContainer` で図形を入れる——ここまでは**最初から正しく効いていた**。
+  抜けていたのは**入れた後に `gSDK->ResetObject(定義のハンドル)` を呼ぶこと**で、
+  これが無いと**定義の外接が計算されない**。外接が無い定義は絵として成立せず、
+  * 実機のシンボル 2D 編集で「すべて選択」しても何も選べない、
   * 配置したインスタンスの外接が `-2147483648`（＝大きさが無い）、
-  * `SetPageBased(true)`（`ovSymDefPageBased`）が効かず、シンボルオプションは
-    〈寸法に合わせる-縮尺追従〉のまま。
-  API について**実測で分かっていること**（同じ道を通らないために残す）:
+  * 図には何も出ない、
+  という「中身はあるのに空に見える」状態になる。実測（`symprobe` v3）:
+
+    ```
+    A（入れた後）       type=16 defType=0 外接=無効     中身[0] type=5 外接=300x150 頂点=3 閉=yes
+    A（ResetObject 後） type=16 defType=1 外接=300x150  中身[0] type=5 外接=300x150 頂点=3 閉=yes
+    ```
+
+    中身は前後で同じ。**変わるのは定義の外接と種別だけ**。
+  ついでに分かったこと:
   * **`GetFirstMemberObject()` は空の定義でも非 nil を返す。** 空の定義は type 0 の
-    レコードを 1 つ持つので、「入ったか」の検証にこれを使ってはいけない（これに
-    騙されて「入った」と報告していた）。
+    レコードを 1 つ持つので、「入ったか」の検証にこれを使ってはいけない。
+    数えるなら `FirstMemberObj` / `NextObject` で辿って**型番号を見る**
+    （4=楕円 / 5=多角形 / 11=グループ / 16=シンボル定義）。
   * **`GS_CreateSymbolDefinition` は「名前が既に使われていれば nil を返す」**
-    （`APIBase.Legacy.Defs.h` の本文）。一度空の定義を作ってしまった図面では次から
-    作り直せず、**空のまま残り続ける**。作り直したいなら
-    `DeleteSymbolDefinition` してからになる。
-  * マニュアルは「`AddObjectToContainer` / `InsertObjectBefore` / `InsertObjectAfter`、
-    または返ってきたハンドルに対する `EnterContainer`」で中身を入れよと言うが、
-    **`EnterContainer` は ISDK に無い**（レガシー本文に名前が出るだけ）。VectorScript の
-    `BeginSym` / `EndSym` に当たる口も無い。
-  * `SetActiveSymbolDef` は作図先を切り替えない（VWFC のラッパーはアクティブ**レイヤ**へ
-    作られる）。グループに包んでから入れても結果は変わらない。
+    （`APIBase.Legacy.Defs.h` の本文）。**一度壊れた（空の）定義を作ってしまった図面では
+    次から作り直せず、空のまま残り続ける**。作り直したいなら
+    `DeleteSymbolDefinition` してから。
+  * マニュアルが挙げる `EnterContainer` は **ISDK に無い**（レガシー本文に名前が出るだけ）。
+    VectorScript の `BeginSym` / `EndSym` に当たる口も無い。`SetActiveSymbolDef` は
+    作図先を切り替えない（VWFC のラッパーはアクティブ**レイヤ**へ作られる）。
+    **入れる口は `AddObjectToContainer` ただ 1 つでよい。**
+  * `SetPageBased(true)`（`ovSymDefPageBased`）は効く（`GetPageBased()` が true を返す）。
   * 定義の種別は `GetSymbolDefinitionType`（`k2DSym`=0 / `k3DSym`=1 / `kHybridSym`=2）。
-  当面**記号は PIO が自分で描く**（figure を持つシンボルが要るなら、テンプレートに
-  用意してもらって名前で置くか、`CopySymbol` で外部ファイルから複製する）。切り分けの
-  続きは `draw/ShearWall.cpp` の `ProbeSymbolDefinitions`（一時的な診断。決着したら消す）。
+    **`ResetObject` の後、自作の定義は 3D（1）になった**——テンプレート由来の既存
+    シンボルは 3 つとも 2D（0）だったので、VWFC で作った 2D 多角形が「レイヤ平面の
+    図形」として入っているせいだと見ている（スクリーン平面へ寄せるなら
+    `SetPlanarRefID` ＋ `kPlanarRefID_ScreenPlane`）。
 - **紙の上の大きさを一定にしたい絵は「用紙 mm × レイヤ縮尺」で描く。** 縮尺を掛ける
   手掛かりは `GetLayerScaleN`（1/50 なら 50 が返る）だけで、引数はレイヤのハンドルなので
   `ParentObject` で PIO の親を辿って渡す。縮尺が変わったときに描き直させるには
