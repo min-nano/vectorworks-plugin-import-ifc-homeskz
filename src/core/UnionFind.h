@@ -36,10 +36,11 @@ namespace HomeskzIfcImport::core
 	// インデックス [0, count) を対称な述語 connected(i, j) で結んだ連結成分を返す。
 	// 成分の代表は最小インデックスで、外側は代表昇順・成分内はインデックス昇順
 	// ＝入力順に依存しない決定的な並び（先頭要素 front() が常に代表になる）。
-	// 述語は i < j の組に対して 1 回だけ呼ばれる（O(n²)。要素数は部材数程度の前提）。
+	// 述語は i < j の組に対して 1 回だけ呼ばれる（O(n²)。要素数は部材数程度の前提。
+	// 何度も呼ぶので転送参照ではなく const 参照で受ける）。
 	template <class Connected>
 	std::vector<std::vector<std::size_t>> connectedComponents(std::size_t count,
-															  Connected&& connected)
+															  const Connected& connected)
 	{
 		std::vector<std::size_t> parent(count);
 		for (std::size_t i = 0; i < count; ++i)
