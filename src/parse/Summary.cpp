@@ -6,6 +6,7 @@
 //
 
 #include "parse/Summary.h"
+#include "core/ImportOptions.h"
 #include "parse/Loader.h"
 
 #include <array>
@@ -442,6 +443,22 @@ namespace HomeskzIfcImport::parse
 
 		if (counts.valid && outcome.commands != 0)
 			out << "取り消し: " << undoLine(counts) << "\n";
+		return out.str();
+	}
+
+	std::string formatImportOptions(const core::ImportOptions& options)
+	{
+		// 並びは役割の表の順（core::symbolRoles()）＝設定ダイアログの行の順。表に 1 行
+		// 足せばログにも 1 行増える（CLAUDE.md「重複を作らない置き場所」）。
+		std::ostringstream out;
+		out << "設定: 配置するシンボル";
+		for (const core::SymbolRoleInfo& info : core::symbolRoles())
+		{
+			const std::string& name = options.symbol(info.role);
+			out << "\n  " << info.label << ": " << name;
+			if (name == info.defaultSymbol)
+				out << "（既定）";
+		}
 		return out.str();
 	}
 } // namespace HomeskzIfcImport::parse

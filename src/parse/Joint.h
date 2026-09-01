@@ -43,6 +43,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 
 #include <cstddef>
 #include <vector>
@@ -50,7 +51,9 @@
 namespace HomeskzIfcImport::parse
 {
 	// 置換するハイブリッドシンボル名。
-	inline constexpr const char* kSymbolJoint = "仕口";
+	// 置換するハイブリッドシンボル名は**取り込み設定が持つ**（core::SymbolRole::Joint。
+	// 既定は "仕口"）。設定ダイアログで図面の別のシンボルへ差し替えられる
+	// （core/ImportOptions.h）。
 
 	// 受ける材の判定に使う許容値（mm。横架材の食い込み調整と同じ考え方）。
 	inline constexpr double kJointParallelTol = 1e-6; // 平行な相手は受ける材にしない
@@ -114,7 +117,11 @@ namespace HomeskzIfcImport::parse
 	// **判定自体は入力の並びに依存しない**（各端部の可否がジオメトリだけで決まるため）。
 	// 高さ（zOffset）はその端部のバウンド offset をそのまま写す（上記「高さも梁端の天端に
 	// 合わせる」）。
+	//
+	// 置換するシンボル名は取り込み設定が持つ（core::SymbolRole::Joint。既定は "仕口"）。
+	// options を省いた呼び出しは既定の設定＝従来と同じ名前になる（単体テスト用）。
 	std::vector<core::SymbolCommand>
 	buildJointCommands(const std::vector<core::MemberCommand>& members,
-					   const std::vector<core::ColumnCommand>& columns = {});
+					   const std::vector<core::ColumnCommand>& columns = {},
+					   const core::ImportOptions& options = core::ImportOptions{});
 } // namespace HomeskzIfcImport::parse

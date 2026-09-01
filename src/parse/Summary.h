@@ -28,6 +28,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 #include "parse/Step.h"
 
 #include <cstddef>
@@ -160,4 +161,10 @@ namespace HomeskzIfcImport::parse
 	// 外した細かい情報はすべてここにある。
 	std::string formatLogResult(const core::Document& document, const core::DrawCounts& counts,
 								double seconds);
+
+	// **取り込み設定（置換するシンボルの対応）の記録**。設定ダイアログで選んだ結果を
+	// ログの見出しの次に置く（docs/DEV-NOTES.md M20）。**「シンボルが 1 つも置かれない」
+	// という報告の原因はまずここ**——既定と違う対応になっていないか、図面に無い名前の
+	// ままかが、ログだけで切り分けられる。既定のままの行には「（既定）」を添える。
+	std::string formatImportOptions(const core::ImportOptions& options);
 } // namespace HomeskzIfcImport::parse

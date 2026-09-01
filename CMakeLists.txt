@@ -134,6 +134,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		HomeskzIfcCore STATIC
 		src/core/Document.cpp
 		src/core/Geometry.cpp
+		src/core/ImportOptions.cpp
 		src/core/Layout.cpp
 		src/core/Progress.cpp
 		src/core/Region.cpp
@@ -285,6 +286,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/StructuralMember.cpp
 		src/draw/ProgressDialog.cpp
 		src/draw/ResultDialog.cpp
+		src/draw/SettingsDialog.cpp
 		src/draw/ExecuteDocument.cpp
 		src/draw/Grid.cpp
 		src/draw/Story.cpp

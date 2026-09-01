@@ -26,6 +26,7 @@
 
 #include "core/Geometry.h"
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 #include "parse/Column.h"
 #include "parse/Floor.h"
 #include "parse/Footing.h"
@@ -37,6 +38,7 @@
 
 #include <map>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::parse
@@ -49,9 +51,23 @@ namespace HomeskzIfcImport::parse
 	public:
 		explicit Context(const Model& model) : fModel(&model) {}
 
+		// 取り込み設定（置換するシンボルの対応）付き。設定は**取り込み 1 回で固定**なので
+		// 値で持ち、要素の解析はここから名前を引く（core/ImportOptions.h）。
+		Context(const Model& model, core::ImportOptions options)
+			: fModel(&model), fOptions(std::move(options))
+		{
+		}
+
 		const Model& model() const
 		{
 			return *fModel;
+		}
+
+		// 取り込み設定。設定ダイアログを通さずに作ったコンテキストでは既定（従来の
+		// 固定名）が入っている。
+		const core::ImportOptions& options() const
+		{
+			return fOptions;
 		}
 
 		// FL ストーリの一覧（Elevation 昇順・末尾が最上階）。parse/Story の collectStories。
@@ -107,6 +123,7 @@ namespace HomeskzIfcImport::parse
 
 	private:
 		const Model* fModel = nullptr;
+		core::ImportOptions fOptions;
 
 		std::optional<std::vector<StoryInfo>> fStories;
 		std::optional<std::vector<GridLine>> fGridLines;

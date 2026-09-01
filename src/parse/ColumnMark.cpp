@@ -6,6 +6,7 @@
 //
 
 #include "parse/ColumnMark.h"
+#include "core/ImportOptions.h"
 #include "parse/Story.h"
 
 #include <algorithm>
@@ -18,11 +19,14 @@ namespace HomeskzIfcImport::parse
 	namespace
 	{
 		// span レイヤの種別（構造用途）から伏図記号のシンボル名を選ぶ。span レイヤは単一種別
-		// なので、そのレイヤの柱 1 本で決まる。
-		const char* spanSymbol(const std::string& structuralUse)
+		// なので、そのレイヤの柱 1 本で決まる。**名前そのものは取り込み設定が持つ**
+		// （既定は従来と同じ "束伏図記号" / "柱伏図記号"）。
+		const std::string& spanSymbol(const std::string& structuralUse,
+									  const core::ImportOptions& options)
 		{
-			return structuralUse == kStructuralUseKoyazuka ? kPlanMarkSymbolKoyazuka
-														   : kPlanMarkSymbolColumn;
+			return options.symbol(structuralUse == kStructuralUseKoyazuka
+									  ? core::SymbolRole::PlanMarkKoyazuka
+									  : core::SymbolRole::PlanMarkColumn);
 		}
 	} // namespace
 
@@ -32,7 +36,8 @@ namespace HomeskzIfcImport::parse
 	}
 
 	std::vector<core::ColumnMarkCommand>
-	buildColumnMarkCommands(const std::vector<core::ColumnCommand>& columns)
+	buildColumnMarkCommands(const std::vector<core::ColumnCommand>& columns,
+							const core::ImportOptions& options)
 	{
 		// span レイヤ → そのレイヤの構造用途（単一種別なので最初に見つかった値でよい）。
 		std::map<std::string, std::string> useByLayer;
@@ -64,7 +69,8 @@ namespace HomeskzIfcImport::parse
 			mark.drawClass = kPlanMarkClass;
 			mark.targetLayer = span.layer;
 			mark.style = core::ColumnMarkStyle::Plan;
-			mark.symbol = spanSymbol(use != useByLayer.end() ? use->second : std::string());
+			mark.symbol =
+				spanSymbol(use != useByLayer.end() ? use->second : std::string(), options);
 			commands.push_back(std::move(mark));
 		}
 		return commands;

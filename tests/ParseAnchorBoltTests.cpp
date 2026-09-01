@@ -14,6 +14,7 @@
 #include "TestFramework.h"
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 #include "parse/AnchorBolt.h"
 #include "parse/Loader.h"
 #include "parse/Footing.h"
@@ -24,12 +25,13 @@
 #include <vector>
 
 using namespace HomeskzIfcImport;
+using HomeskzIfcImport::core::defaultSymbolName;
+using HomeskzIfcImport::core::ImportOptions;
 using HomeskzIfcImport::core::SymbolCommand;
+using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::parse::buildAnchorBoltCommands;
 using HomeskzIfcImport::parse::isAnchorBoltType;
 using HomeskzIfcImport::parse::kLayerFoundationAnchor;
-using HomeskzIfcImport::parse::kSymbolAnchorBoltM12;
-using HomeskzIfcImport::parse::kSymbolAnchorBoltM16;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::resolveAnchorBoltSymbol;
@@ -39,6 +41,11 @@ using HomeskzIfcTests::near;
 
 namespace
 {
+	// 既定のシンボル名。**唯一の定義は役割の表**（core::symbolRoles()）なので、
+	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
+	const std::string kSymbolAnchorBoltM12 = defaultSymbolName(SymbolRole::AnchorBoltM12);
+	const std::string kSymbolAnchorBoltM16 = defaultSymbolName(SymbolRole::AnchorBoltM16);
+
 	// #id を採番しながら STEP 行を溜めるだけの器（他の Parse*Tests と同じ形）。
 	class StepText
 	{
@@ -89,15 +96,31 @@ namespace
 
 TEST(anchor_bolt_washered_is_m12)
 {
-	// 座金付き（Z1/Z2 等）は M12。
-	CHECK_EQ(resolveAnchorBoltSymbol("アンカーボルト:Z1:定着長さ:360mm"), kSymbolAnchorBoltM12);
-	CHECK_EQ(resolveAnchorBoltSymbol("アンカーボルト:Z2:定着長さ:250mm"), kSymbolAnchorBoltM12);
+	// 座金付き（Z1/Z2 等）は M12。名前は取り込み設定が持つので、既定の設定で引く。
+	const ImportOptions options;
+	CHECK_EQ(resolveAnchorBoltSymbol("アンカーボルト:Z1:定着長さ:360mm", options),
+			 kSymbolAnchorBoltM12);
+	CHECK_EQ(resolveAnchorBoltSymbol("アンカーボルト:Z2:定着長さ:250mm", options),
+			 kSymbolAnchorBoltM12);
 }
 
 TEST(anchor_bolt_washerless_is_m16)
 {
-	CHECK_EQ(resolveAnchorBoltSymbol("アンカーボルト:座金なし:定着長さ:360mm"),
+	const ImportOptions options;
+	CHECK_EQ(resolveAnchorBoltSymbol("アンカーボルト:座金なし:定着長さ:360mm", options),
 			 kSymbolAnchorBoltM16);
+}
+
+TEST(anchor_bolt_symbol_follows_options)
+{
+	// 設定で差し替えた名前がそのまま出る（座金の有無の振り分けは変わらない）。
+	ImportOptions options;
+	options.setSymbol(SymbolRole::AnchorBoltM12, "別のボルト_M12");
+	options.setSymbol(SymbolRole::AnchorBoltM16, "別のボルト_M16");
+	CHECK_EQ(resolveAnchorBoltSymbol("アンカーボルト:Z1:定着長さ:360mm", options),
+			 std::string("別のボルト_M12"));
+	CHECK_EQ(resolveAnchorBoltSymbol("アンカーボルト:座金なし:定着長さ:360mm", options),
+			 std::string("別のボルト_M16"));
 }
 
 // --- ボルト本体の判別----------------------------
@@ -187,9 +210,9 @@ TEST(anchor_bolt_fixture_counts)
 	CHECK(ok);
 
 	const std::vector<SymbolCommand> bolts = buildAnchorBoltCommands(model);
-	const auto countOf = [&bolts](const char* symbol)
+	const auto countOf = [&bolts](const std::string& symbol)
 	{
-		return std::ranges::count_if(bolts, [symbol](const SymbolCommand& bolt)
+		return std::ranges::count_if(bolts, [&symbol](const SymbolCommand& bolt)
 									 { return bolt.symbol == symbol; });
 	};
 	CHECK_EQ(countOf(kSymbolAnchorBoltM12), 84);

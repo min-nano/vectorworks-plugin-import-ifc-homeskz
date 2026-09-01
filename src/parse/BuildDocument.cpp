@@ -15,6 +15,7 @@
 //
 
 #include "parse/BuildDocument.h"
+#include "core/ImportOptions.h"
 #include "core/Progress.h"
 #include "parse/AnchorBolt.h"
 #include "parse/Column.h"
@@ -49,6 +50,14 @@ namespace HomeskzIfcImport::parse
 
 	core::Document buildDocument(const std::string& ifcPath, core::ProgressReporter& progress)
 	{
+		// 設定を与えない呼び出し（単体テスト・従来の呼び出し口）。既定の対応＝従来の
+		// 固定名になる。
+		return buildDocument(ifcPath, progress, core::ImportOptions{});
+	}
+
+	core::Document buildDocument(const std::string& ifcPath, core::ProgressReporter& progress,
+								 const core::ImportOptions& options)
+	{
 		// Phase 1 の入口: Loader でファイルを読み、最小 STEP リーダで
 		// エンティティグラフ（Model）を構築する。読み込み失敗（存在しない・空）でも
 		// 例外を漏らさず、空の Model として先へ進む（1 要素の欠損で全体を止めない）。
@@ -63,7 +72,7 @@ namespace HomeskzIfcImport::parse
 
 		// Phase 1 の共有キャッシュ。以降の build*Commands はすべてこの 1 つを通すので、
 		// ストーリ収集・通り芯の線分収集・ロフト床の合成・屋根面の解決はそれぞれ 1 回で済む。
-		Context context(model);
+		Context context(model, options);
 
 		core::Document document;
 
@@ -141,13 +150,13 @@ namespace HomeskzIfcImport::parse
 		progress.step();
 		document.fireBraces = buildFireBraceCommands(context);
 		progress.step();
-		document.joints = buildJointCommands(document.members, document.columns);
+		document.joints = buildJointCommands(document.members, document.columns, options);
 		progress.step();
 
 		// M12 断面記号・伏図記号。柱の命令だけから決まる（IFC は見ない）ので columns の
 		// 後ならどこでもよいが、**伏図より前**に置く必要がある——伏図は伏図記号レイヤを
 		// 表示レイヤに載せるため、そのレイヤ名を決める側が先に確定していないといけない。
-		document.columnMarks = buildColumnMarkCommands(document.columns);
+		document.columnMarks = buildColumnMarkCommands(document.columns, options);
 		progress.step();
 
 		// M13 シート（伏図）: 基礎伏図・各階の柱梁伏図・母屋伏図。**どの伏図に何を映すかは

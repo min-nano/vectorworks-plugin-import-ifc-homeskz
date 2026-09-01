@@ -42,7 +42,9 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kFireBracePrefix = "火打";
 
 	// 置換するハイブリッドシンボル名。
-	inline constexpr const char* kSymbolFireBrace = "鋼製火打";
+	// 置換するハイブリッドシンボル名は**取り込み設定が持つ**（core::SymbolRole::FireBrace。
+	// 既定は "鋼製火打"）。設定ダイアログで図面の別のシンボルへ差し替えられる
+	// （core/ImportOptions.h）。
 
 	// 鋼製火打シンボルの基準姿勢（0 度での向き）の補正（度）。内角の二等分方向に対して
 	// シンボルの角度基準がずれているため、基準点まわりに反時計方向へ 45 度回す。

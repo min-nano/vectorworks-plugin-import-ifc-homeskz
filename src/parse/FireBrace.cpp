@@ -6,6 +6,7 @@
 //
 
 #include "parse/FireBrace.h"
+#include "core/ImportOptions.h"
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
@@ -150,7 +151,7 @@ namespace HomeskzIfcImport::parse
 
 				SymbolCommand command;
 				command.layer = layer;
-				command.symbol = kSymbolFireBrace;
+				command.symbol = context.options().symbol(core::SymbolRole::FireBrace);
 				command.position = *base - center;
 				command.angle = fireBraceAngle(*base, world);
 				commands.push_back(std::move(command));

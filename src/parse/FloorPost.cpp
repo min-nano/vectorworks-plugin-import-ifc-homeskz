@@ -6,6 +6,7 @@
 //
 
 #include "parse/FloorPost.h"
+#include "core/ImportOptions.h"
 #include "parse/Context.h"
 #include "parse/Footing.h"
 #include "parse/IfcAttr.h"
@@ -341,7 +342,7 @@ namespace HomeskzIfcImport::parse
 
 				SymbolCommand command;
 				command.layer = kLayerFoundationFloorPost;
-				command.symbol = kSymbolFloorPost;
+				command.symbol = context.options().symbol(core::SymbolRole::FloorPost);
 				command.position = position;
 				// 回転角は持たない（床束は軸対称）。SymbolCommand::angle の既定 0 のまま。
 				commands.push_back(std::move(command));

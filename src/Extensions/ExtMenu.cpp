@@ -14,10 +14,12 @@
 // / STEP を相互に引き込まない。
 #include "parse/BuildDocument.h"
 #include "parse/Summary.h"
+#include "core/ImportOptions.h"
 #include "core/Trace.h"
 #include "draw/ExecuteDocument.h"
 #include "draw/ProgressDialog.h"
 #include "draw/ResultDialog.h"
+#include "draw/SettingsDialog.h"
 
 // ファイル選択ダイアログ（VCOM）。ネイティブの「開く」ダイアログを出し、選ばれた
 // ファイルの絶対パスを IFileIdentifier 経由で受け取る。
@@ -255,9 +257,16 @@ namespace HomeskzIfcImport
 		// インポート本体（ファイル選択の後）。解析 → 描画を通し、完了ダイアログの本文を返す。
 		// 例外はここでは受けず、呼び出し元（DoInterface）が SDK コールバックの境界で 1 か所だけ
 		// 受け止める。進捗ダイアログは RAII なので、途中で例外が出てもデストラクタが閉じる。
-		std::string RunImport(const std::string& ifcPath)
+		std::string RunImport(const std::string& ifcPath, const core::ImportOptions& options,
+							  bool settingsShown)
 		{
 			OpenImportTrace(ifcPath);
+			// **見出しの次に設定を書く。** 「シンボルが 1 つも置かれない」の切り分けは
+			// まず対応表を見るところから始まる（parse/Summary の formatImportOptions）。
+			// 設定ダイアログを出せなかったときは、既定で続けたことも残す。
+			if (!settingsShown)
+				core::trace::note("設定: ダイアログを出せなかったため既定の対応で取り込みます");
+			core::trace::note(parse::formatImportOptions(options));
 			// 所要時間は**トレースとは別に**測る（ログを開けなくても完了ダイアログに出す）。
 			const auto started = std::chrono::steady_clock::now();
 			LogUndoState("start");
@@ -273,7 +282,7 @@ namespace HomeskzIfcImport
 			// フェーズの区切りは**ここだけ**が書く——各フェーズの行は進捗報告（core/Progress の
 			// beginPhase）が流し、要素側は `trace::log` を持たない（core/Trace.h「誰が書くか」）。
 			core::trace::note("=== 解析 ===");
-			const core::Document document = parse::buildDocument(ifcPath, progress);
+			const core::Document document = parse::buildDocument(ifcPath, progress, options);
 			LogUndoState("afterParse");
 
 			// Phase 2（SDK 依存）: 命令セットを検証してから各要素を描く。検証を通らなければ
@@ -338,7 +347,16 @@ void CImportIfcMenu_EventSink::DoInterface()
 	if (!ChooseIfcFile(ifcPath))
 		return;
 
-	// 2. インポート本体。**例外を SDK コールバックの外へ漏らさない**（CLAUDE.md
+	// 2. 取り込みの設定（配置するシンボルの対応）を決める。キャンセルなら静かに終える
+	//    ——ファイルは選んだが取り込みたくない、という意思表示なので何も描かない。
+	//    ダイアログを組めなかったときは**既定の対応でそのまま進む**（設定を出せない
+	//    ことを理由に取り込み自体を落とさない。draw/SettingsDialog.h）。
+	core::ImportOptions options;
+	const draw::SettingsOutcome settings = draw::showImportSettings(options);
+	if (settings == draw::SettingsOutcome::Cancelled)
+		return;
+
+	// 3. インポート本体。**例外を SDK コールバックの外へ漏らさない**（CLAUDE.md
 	// 「エラーハンドリング・所有権」）。ネイティブプラグインの未捕捉例外は **VectorWorks
 	// 本体を巻き込んで落とす**ので、フェーズ境界であるここで必ず受け止め、ユーザーへは
 	// 1 通のダイアログとして見せる。1 要素の欠損で全体を止めない寛容さ（parse / draw の中で
@@ -346,7 +364,7 @@ void CImportIfcMenu_EventSink::DoInterface()
 	std::string body;
 	try
 	{
-		body = RunImport(ifcPath);
+		body = RunImport(ifcPath, options, settings == draw::SettingsOutcome::Accepted);
 	}
 	catch (const std::exception& error)
 	{
@@ -359,7 +377,7 @@ void CImportIfcMenu_EventSink::DoInterface()
 		body = ReportImportError(ifcPath, "");
 	}
 
-	// 3. 結果をダイアログ表示。本文は短く、**診断ログは折り畳んだテキスト欄**として同じ
+	// 4. 結果をダイアログ表示。本文は短く、**診断ログは折り畳んだテキスト欄**として同じ
 	//    ダイアログに載せる（draw/ResultDialog.h。ふだんは開かず、不具合の報告のときに
 	//    開いて丸ごとコピーする）。
 	if (!draw::showImportResult("ホームズ君 IFC 取り込み", body, core::trace::text()))

@@ -6,6 +6,7 @@
 //
 
 #include "parse/AnchorBolt.h"
+#include "core/ImportOptions.h"
 #include "parse/Column.h"
 #include "parse/Context.h"
 #include "parse/Footing.h"
@@ -24,13 +25,15 @@ namespace HomeskzIfcImport::parse
 		return typeName.size() >= prefix.size() && typeName.compare(0, prefix.size(), prefix) == 0;
 	}
 
-	std::string resolveAnchorBoltSymbol(const std::string& typeName)
+	std::string resolveAnchorBoltSymbol(const std::string& typeName,
+										const core::ImportOptions& options)
 	{
-		// 座金なし（型名に "座金なし" を含む）は M16、そうでなければ（Z1/Z2 等の角座金付き）
-		// M12。
+		// 座金なし（型名に "座金なし" を含む）は M16 の役割、そうでなければ（Z1/Z2 等の
+		// 角座金付き）M12 の役割。**名前そのものは取り込み設定が持つ**（既定は従来と同じ
+		// "アンカーボルト_M16" / "アンカーボルト_M12"）。
 		if (typeName.find(kWasherlessToken) != std::string::npos)
-			return kSymbolAnchorBoltM16;
-		return kSymbolAnchorBoltM12;
+			return options.symbol(core::SymbolRole::AnchorBoltM16);
+		return options.symbol(core::SymbolRole::AnchorBoltM12);
 	}
 
 	std::vector<SymbolCommand> buildAnchorBoltCommands(Context& context)
@@ -61,7 +64,7 @@ namespace HomeskzIfcImport::parse
 
 			SymbolCommand command;
 			command.layer = kLayerFoundationAnchor;
-			command.symbol = resolveAnchorBoltSymbol(typeName);
+			command.symbol = resolveAnchorBoltSymbol(typeName, context.options());
 			command.position = position - center;
 			// 回転角は持たない（ボルトは軸対称）。SymbolCommand::angle の既定 0 のまま。
 			commands.push_back(std::move(command));
