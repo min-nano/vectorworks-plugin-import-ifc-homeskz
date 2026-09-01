@@ -5,15 +5,18 @@
 //
 //	フィクスチャのパス（HOMESKZ_FIXTURES_DIR）は CMake が各テストターゲットへ
 //	コンパイル定義で渡す（tests/CMakeLists.txt）。フィクスチャを読むヘルパー
-//	（fixture / allFixtures）は**その定義があるときだけ**現れるので、定義を受け取らない
-//	ターゲットで使えばコンパイルエラーになる（登録漏れは黙って通らない）。近似比較
-//	（near）はフィクスチャに依存しないので、フィクスチャを使わないテスト
-//	（CoreRegionTests 等）もこのヘッダから使える。
+//	（fixture / allFixtures / forEachFixture / forEachFixtureDocument）は**その定義がある
+//	ときだけ**現れるので、定義を受け取らないターゲットで使えばコンパイルエラーになる
+//	（登録漏れは黙って通らない）。近似比較（near）はフィクスチャに依存しないので、
+//	フィクスチャを使わないテスト（CoreRegionTests 等）もこのヘッダから使える。
 //
 //	【無 SDK】ここも他のテストと同じく VectorWorks SDK に触れない（CLAUDE.md「テスト方針」）。
 //
 
 #pragma once
+
+// forEachFixture の CHECK のため（マクロなので include の順に依らずここで要る）。
+#include "TestFramework.h"
 
 #include "core/Document.h"
 #include "parse/BuildDocument.h"
@@ -133,6 +136,34 @@ namespace HomeskzIfcTests
 			"スキップフロア_サンプル.ifc",
 		};
 		return names;
+	}
+
+	// 「全フィクスチャに対して回す」定型。読み込みの成否確認までをここで済ませ、
+	// 読めなかったフィクスチャは失敗を数えて飛ばす（**この定型が各テストに逐語複製されて
+	// いた**のを 1 か所に畳んだもの）。CHECK マクロは囲みスコープの failures 変数を使う
+	// 設計（TestFramework.h）なので、呼び出し側の failures を明示的に受け取る。ここの
+	// CHECK(ok) の失敗は Fixtures.h の行を指すが、失敗したテスト名は出るので特定はできる
+	// （どのフィクスチャで落ちたかまで要る検証は body 側の CHECK が担う）。
+	template <class Body>
+	inline void forEachFixture(int& failures, Body&& body) // body(name, model)
+	{
+		for (const std::string& name : allFixtures())
+		{
+			bool ok = false;
+			const HomeskzIfcImport::parse::Model& model = fixture(name, ok);
+			CHECK(ok);
+			if (!ok)
+				continue;
+			body(name, model);
+		}
+	}
+
+	// 同じ定型の Document 版（fixtureDocument を回す）。buildDocument は読み込みに失敗して
+	// も空の Document を返す（成否は中身で確かめる）ので、こちらに ok / failures は無い。
+	template <class Body> inline void forEachFixtureDocument(Body&& body) // body(name, document)
+	{
+		for (const std::string& name : allFixtures())
+			body(name, fixtureDocument(name));
 	}
 #endif // HOMESKZ_FIXTURES_DIR
 } // namespace HomeskzIfcTests
