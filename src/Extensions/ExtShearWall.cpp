@@ -339,20 +339,18 @@ namespace HomeskzIfcImport
 		// （同じ矩形の中で斜辺が交差する＝たすきに見える）。置き場所は内法の中央で、
 		// 三角は**記号を寄せた側へさらに外側**へ伸びる。
 		//
-		// 定義は右上がり・左上がりの 2 つで、**裏側（offset<0）へ寄せるときは 180 度
-		// 回した同じ定義**が要る向きになる（対応表は Extensions/ExtShearWall.h）。
+		// **定義は 1 つで、4 通りの向きは軸ごとの反転で作る**（対応表は
+		// Extensions/ExtShearWall.h）。斜辺の向きが X の反転、寄せる側が Y の反転。
 		void AddBraceTriangle(MCObjectHandle host, double centre, double offset, bool risesToEnd)
 		{
-			const bool front = offset >= 0.0;
-			const char* name =
-				risesToEnd == front ? kShearMarkBraceRightSymbol : kShearMarkBraceLeftSymbol;
-			AddMarkSymbol(host, name, centre, offset, front ? 0.0 : 180.0);
+			AddMarkSymbol(host, kShearMarkBraceSymbol, centre, offset, risesToEnd ? 1.0 : -1.0,
+						  offset >= 0.0 ? 1.0 : -1.0);
 		}
 
 		// 伏図の丸印 1 つ（面材の記号。壁に平行な線の中央に置く）。
 		void AddPanelCircle(MCObjectHandle host, double centre, double offset)
 		{
-			AddMarkSymbol(host, kShearMarkPanelSymbol, centre, offset, 0.0);
+			AddMarkSymbol(host, kShearMarkPanelSymbol, centre, offset, 1.0, 1.0);
 		}
 
 		// 伏図の面材記号 1 つ。壁に平行な線と、その中央の丸。

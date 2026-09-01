@@ -95,15 +95,14 @@ namespace HomeskzIfcImport::draw
 			return nil;
 		}
 
-		// 筋かいの三角（**直角三角形**）。原点は壁と平行な脚の中央で、直角は
-		// risesToEnd なら +X 側（＝終端側）に立つ。頂点は +Y へ伸びる。
-		MCObjectHandle MakeBraceTriangle(bool risesToEnd)
+		// 筋かいの三角（**直角三角形**）。原点は壁と平行な脚の中央、直角は +X 側、頂点は
+		// +Y 側——「終端側へ上がる・表へ寄せる」姿 1 つだけを作る。残る 3 通りは置くときに
+		// 軸ごと反転させる（Extensions/ExtShearWall.h の対応表）。
+		MCObjectHandle MakeBraceTriangle()
 		{
 			const double half = kShearMarkTriangleLength / 2.0;
-			const double foot = risesToEnd ? -half : half;
-			const double head = risesToEnd ? half : -half;
-			return CreateClosedPolygon({core::Vec2{foot, 0.0}, core::Vec2{head, 0.0},
-										core::Vec2{head, kShearMarkTriangleHeight}});
+			return CreateClosedPolygon({core::Vec2{-half, 0.0}, core::Vec2{half, 0.0},
+										core::Vec2{half, kShearMarkTriangleHeight}});
 		}
 
 		// 面材の丸印。原点が中心。
@@ -152,7 +151,7 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
-		// 3 つまとめて。用意できなかった名前をログに残す（記号が出ない原因になるので、
+		// まとめて。用意できなかった名前をログに残す（記号が出ない原因になるので、
 		// 黙って諦めない）。
 		void EnsureMarkSymbols()
 		{
@@ -161,9 +160,8 @@ namespace HomeskzIfcImport::draw
 				const char* name;
 				std::function<MCObjectHandle()> makeShape;
 			};
-			const std::array<Wanted, 3> wanted{
-				Wanted{kShearMarkBraceRightSymbol, [] { return MakeBraceTriangle(true); }},
-				Wanted{kShearMarkBraceLeftSymbol, [] { return MakeBraceTriangle(false); }},
+			const std::array<Wanted, 2> wanted{
+				Wanted{kShearMarkBraceSymbol, [] { return MakeBraceTriangle(); }},
 				Wanted{kShearMarkPanelSymbol, [] { return MakePanelCircle(); }}};
 
 			for (const Wanted& item : wanted)
