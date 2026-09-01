@@ -11,6 +11,7 @@
 //
 
 #include "Fixtures.h"
+#include "StepText.h"
 #include "TestFramework.h"
 
 #include "core/Document.h"
@@ -32,12 +33,14 @@ using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::parse::buildAnchorBoltCommands;
 using HomeskzIfcImport::parse::isAnchorBoltType;
 using HomeskzIfcImport::parse::kLayerFoundationAnchor;
-using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::resolveAnchorBoltSymbol;
-using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::forEachFixture;
 using HomeskzIfcTests::near;
+using HomeskzIfcTests::num;
+using HomeskzIfcTests::ref;
+using HomeskzIfcTests::StepText;
 
 namespace
 {
@@ -45,37 +48,6 @@ namespace
 	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
 	const std::string kSymbolAnchorBoltM12 = defaultSymbolName(SymbolRole::AnchorBoltM12);
 	const std::string kSymbolAnchorBoltM16 = defaultSymbolName(SymbolRole::AnchorBoltM16);
-
-	// #id を採番しながら STEP 行を溜めるだけの器（他の Parse*Tests と同じ形）。
-	class StepText
-	{
-	public:
-		int add(const std::string& body)
-		{
-			const int id = fNext++;
-			fText += "#" + std::to_string(id) + "=" + body + ";\n";
-			return id;
-		}
-
-		Model build() const
-		{
-			return loadIfcFromText(fText);
-		}
-
-	private:
-		int fNext = 1;
-		std::string fText;
-	};
-
-	std::string num(double value)
-	{
-		return std::to_string(value);
-	}
-
-	std::string ref(int id)
-	{
-		return "#" + std::to_string(id);
-	}
 
 	// IfcMechanicalFastener（ボルト本体または座金）と、その型（IfcMechanicalFastenerType）
 	// を 1 組で作る。type 名がボルト本体／座金／柱頭金物の区別を担う。
@@ -243,21 +215,19 @@ TEST(anchor_bolt_fixture_positions_are_centered)
 TEST(anchor_bolt_all_fixtures_build)
 {
 	// 全フィクスチャで命令が出て、レイヤ・シンボル・角度が命令の規約どおりであること。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		const std::vector<SymbolCommand> bolts = buildAnchorBoltCommands(model);
-		CHECK(!bolts.empty());
-		for (const SymbolCommand& bolt : bolts)
-		{
-			CHECK_EQ(bolt.layer, std::string(kLayerFoundationAnchor));
-			CHECK(bolt.symbol == kSymbolAnchorBoltM12 || bolt.symbol == kSymbolAnchorBoltM16);
-			CHECK(near(bolt.angle, 0.0));
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<SymbolCommand> bolts = buildAnchorBoltCommands(model);
+					   CHECK(!bolts.empty());
+					   for (const SymbolCommand& bolt : bolts)
+					   {
+						   CHECK_EQ(bolt.layer, std::string(kLayerFoundationAnchor));
+						   CHECK(bolt.symbol == kSymbolAnchorBoltM12 ||
+								 bolt.symbol == kSymbolAnchorBoltM16);
+						   CHECK(near(bolt.angle, 0.0));
+					   }
+				   });
 }
 
 TEST(anchor_bolt_is_deterministic)

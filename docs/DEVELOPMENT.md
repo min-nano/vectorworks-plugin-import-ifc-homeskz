@@ -30,10 +30,11 @@ src/
   core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
     Document.{h,cpp}          命令セットの構造体定義・validateDocument・描画結果の件数
     ImportOptions.{h,cpp}     取り込み設定（配置するシンボルの対応）と役割の表 1 つ
-    Geometry.{h,cpp}          自前の Vec2 / Vec3 / Mat4（配置行列）
+    Geometry.{h,cpp}          自前の Vec2 / Vec3 / Mat4（配置行列）と平面幾何の基本演算
     Layout.{h,cpp}            用紙の割り付け（縮尺の階梯と選び方・伏図の位置と凡例の列・
                               軸組図の上下 2 段とシートの分割）
     Region.{h,cpp}            部品が囲む平面領域の合成（ロフト床の外形）
+    UnionFind.h               ペア述語による連結成分（立上り・大引・地中梁の統合が共有）
     Progress.{h,cpp}          進捗の報告先・文言整形・バー配分（実測の重み）
     Trace.{h,cpp}             診断ログ（フェーズ単位・毎行フラッシュ・本文はメモリにも控える）
   parse/                    Phase 1: IFC 解析（SDK 非依存）

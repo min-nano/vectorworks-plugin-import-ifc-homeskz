@@ -158,26 +158,20 @@ namespace HomeskzIfcImport::parse
 			double maxY = 0.0;
 		};
 
-		// 通り芯（センタリング済み）の平面 bbox。線分が 1 本も無ければ false。
+		// 通り芯（センタリング済み）の平面 bbox。線分が 1 本も無ければ false。端点の走査は
+		// parse/Grid の gridBounds（センタリング中心と共有）で、ここではセンタリングを引く
+		// だけにする。
 		bool gridPlanBounds(const std::vector<GridLine>& lines, const core::Vec2& center,
 							PlanBounds& bounds)
 		{
-			if (lines.empty())
+			core::Vec2 min;
+			core::Vec2 max;
+			if (!gridBounds(lines, min, max))
 				return false;
-			bounds.minX = std::numeric_limits<double>::max();
-			bounds.maxX = std::numeric_limits<double>::lowest();
-			bounds.minY = bounds.minX;
-			bounds.maxY = bounds.maxX;
-			for (const GridLine& line : lines)
-			{
-				for (const core::Vec2& point : {line.start, line.end})
-				{
-					bounds.minX = std::min(bounds.minX, point.x - center.x);
-					bounds.maxX = std::max(bounds.maxX, point.x - center.x);
-					bounds.minY = std::min(bounds.minY, point.y - center.y);
-					bounds.maxY = std::max(bounds.maxY, point.y - center.y);
-				}
-			}
+			bounds.minX = min.x - center.x;
+			bounds.maxX = max.x - center.x;
+			bounds.minY = min.y - center.y;
+			bounds.maxY = max.y - center.y;
 			return true;
 		}
 

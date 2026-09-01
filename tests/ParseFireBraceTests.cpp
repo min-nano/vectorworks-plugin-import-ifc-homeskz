@@ -41,8 +41,8 @@ using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::Segment2D;
 using HomeskzIfcImport::parse::segmentIntersection;
-using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::forEachFixture;
 using HomeskzIfcTests::near;
 
 namespace
@@ -225,20 +225,18 @@ TEST(fire_brace_fixture_positions_are_centered)
 
 TEST(fire_brace_all_fixtures_build)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		const std::vector<SymbolCommand> braces = buildFireBraceCommands(model);
-		CHECK(!braces.empty());
-		for (const SymbolCommand& brace : braces)
-		{
-			CHECK_EQ(brace.symbol, std::string(kSymbolFireBrace));
-			CHECK(endsWith(brace.layer, "横架材天端") || endsWith(brace.layer, "軒高"));
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<SymbolCommand> braces = buildFireBraceCommands(model);
+					   CHECK(!braces.empty());
+					   for (const SymbolCommand& brace : braces)
+					   {
+						   CHECK_EQ(brace.symbol, std::string(kSymbolFireBrace));
+						   CHECK(endsWith(brace.layer, "横架材天端") ||
+								 endsWith(brace.layer, "軒高"));
+					   }
+				   });
 }
 
 TEST(fire_brace_is_deterministic)

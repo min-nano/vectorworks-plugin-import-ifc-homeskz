@@ -22,6 +22,7 @@
 | `LoaderTests` | `src/parse/Loader` | 非正規エンティティを**除去せず**読めること・実フィクスチャ全件の読み込み |
 | `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配（手計算値との突き合わせ） |
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
+| `CoreUnionFindTests` | `src/core/UnionFind` | ペア述語による連結成分（決定性の規約: 代表＝最小インデックス・代表昇順・成分内昇順） |
 | `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付けを含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`） |
 | `CoreLayoutTests` | `src/core/Layout` | 用紙の割り付け（縮尺は階梯の値だけ・**渡された印刷可能領域をそのまま使う**（余白を仮定しない）・凡例の幅を引いてから収まる中で最大の図・伏図は全図同じ縮尺と位置・軸組図は上下 2 段でマスが重ならないこと・シート枚数とタイトルの連番） |
 | `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
@@ -42,8 +43,11 @@
 | `CoreProgressTests` | `src/core/Progress` | 進捗の文言整形・フェーズ配分・件数の勘定・中止フラグのラッチ |
 | `CoreTraceTests` | `src/core/Trace` | 診断ログ（1 行ごとのフラッシュ・開き直しでの切り詰め・開けなくても本文はメモリに残ること・`note` に経過ミリ秒が付かないこと・壁時計の形・既定の出力先・進捗フェーズが行になること） |
 
-いずれも無 SDK の静的ライブラリ `HomeskzIfcCore` をリンクします。テスト間で共有する
-小道具は 2 つのヘッダに一本化してあります（同じものを各テストが持つと、片方だけ直したときに
+いずれも無 SDK の静的ライブラリ `HomeskzIfcCore` をリンクします（登録は
+`tests/CMakeLists.txt` の `vw_add_test(<名前> <ソース> CORE FIXTURES)` の 1 行。`CORE` が
+ライブラリのリンク・`FIXTURES` が `HOMESKZ_FIXTURES_DIR` の定義で、フィクスチャを使うのに
+`FIXTURES` を書き忘れるとコンパイルエラーになります）。テスト間で共有する
+小道具は 3 つのヘッダに一本化してあります（同じものを各テストが持つと、片方だけ直したときに
 テスト同士の前提が食い違うため）。
 
 - `tests/Fixtures.h` … フィクスチャのパス・読み込み・近似比較・**フィクスチャ一覧**。
@@ -61,6 +65,9 @@
   ファイルに 2 つあるだけで素の 2 倍の時間になります（実際 `ParseTagTests` がそうでした）。
   命令セットを**書き換える**テスト（べき等性の確認など）は、この参照から自分のコピーを
   作って使います——共有しているのは読み取り専用の原本、という約束です。
+- `tests/StepText.h` … 合成 STEP テキストの組み立て（`StepText` に行を足して
+  `loadIfcFromText` へ渡す）と、数値・参照・点・ストーリといった断片の整形ヘルパー。
+  かつて複数の `Parse*Tests` が同じクラスを逐語的に持っていました。
 - `tests/RoofSample.h` … 試験用の片流れ屋根面（`shedPlane`）と、それに対応する最小の
   屋根版 IFC（`minimalRoofText`）。垂木・野地板・勾配座標系は**同じ屋根面**に対する
   期待値でなければ意味がないので、`ParseRafterTests` / `ParseRoofTests` / `GeometryTests`

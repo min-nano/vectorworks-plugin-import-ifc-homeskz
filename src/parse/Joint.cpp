@@ -26,10 +26,11 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 2 つの Z 範囲が許容値を超えて重なるか。
+		// 2 つの Z 範囲が許容値（kJointZOverlapTol）を超えて重なるか。式は core/Document.h の
+		// zRangesOverlap（横架材の食い込み・登り梁の受け材と共有）。
 		bool zRangesOverlap(double aBottom, double aTop, double bBottom, double bTop)
 		{
-			return std::min(aTop, bTop) - std::max(aBottom, bBottom) > kJointZOverlapTol;
+			return core::zRangesOverlap(aBottom, aTop, bBottom, bTop, kJointZOverlapTol);
 		}
 
 		// 判定する 1 端分（基準点・部材内側へ向かう方向・レイヤ平面からの相対 Z）。始端と
@@ -46,7 +47,7 @@ namespace HomeskzIfcImport::parse
 	{
 		MemberGeom geom;
 		const Vec2 delta = command.end - command.start;
-		const double length = std::hypot(delta.x, delta.y);
+		const double length = core::length(delta);
 		if (length < kJointMinLength)
 			return geom; // valid=false（端部・向きが定まらない退化した材）
 
@@ -56,9 +57,10 @@ namespace HomeskzIfcImport::parse
 		geom.axis = Vec2{delta.x / length, delta.y / length};
 		geom.length = length;
 		geom.halfWidth = command.width / 2.0;
-		// 実体の Z 範囲。傾斜梁（elevation ≠ endElevation）も下端〜上端を覆う。
-		geom.zTop = std::max(command.elevation, command.endElevation);
-		geom.zBottom = std::min(command.elevation, command.endElevation) - command.height;
+		// 実体の Z 範囲。傾斜梁（elevation ≠ endElevation）も下端〜上端を覆う
+		// （core/Document.h の memberTopZ / memberBottomZ）。
+		geom.zTop = core::memberTopZ(command);
+		geom.zBottom = core::memberBottomZ(command);
 		return geom;
 	}
 
@@ -76,11 +78,11 @@ namespace HomeskzIfcImport::parse
 	bool pointInMember(const Vec2& point, const MemberGeom& other)
 	{
 		const Vec2 d = point - other.start;
-		const double along = (d.x * other.axis.x) + (d.y * other.axis.y);
+		const double along = core::dot(d, other.axis);
 		if (along < -kJointAlongTol || along > other.length + kJointAlongTol)
 			return false;
 		// 相手中心線からの直交距離（軸を 90 度回した向きへの射影）。
-		const double perp = (d.x * -other.axis.y) + (d.y * other.axis.x);
+		const double perp = core::cross(other.axis, d);
 		return std::abs(perp) <= other.halfWidth + kJointFaceTol;
 	}
 
@@ -109,8 +111,7 @@ namespace HomeskzIfcImport::parse
 				continue;
 			const MemberGeom& other = geoms[j];
 			// 平行（同一直線上の継ぎ手・側並び）は受ける材とみなさない。
-			if (std::abs((self.axis.x * other.axis.y) - (self.axis.y * other.axis.x)) <
-				kJointParallelTol)
+			if (std::abs(core::cross(self.axis, other.axis)) < kJointParallelTol)
 				continue;
 			if (!zRangesOverlap(self.zBottom, self.zTop, other.zBottom, other.zTop))
 				continue;

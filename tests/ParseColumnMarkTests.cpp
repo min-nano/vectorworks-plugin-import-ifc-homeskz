@@ -48,8 +48,7 @@ using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::PlanMarkLayer;
 using HomeskzIfcImport::parse::planMarkLayerBelowCut;
 using HomeskzIfcImport::parse::planMarkLayerName;
-using HomeskzIfcTests::allFixtures;
-using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::forEachFixture;
 using HomeskzIfcTests::near;
 
 namespace
@@ -212,63 +211,58 @@ TEST(MarksMatchTheSpansOnEveryFixture)
 	// 実フィクスチャ通し: 記号は span レイヤ 1 つにつき 2 つ（断面記号・伏図記号）で、
 	// 検索対象レイヤは必ず実在する span レイヤ、伏図記号のシンボルはその span の種別と
 	// 一致すること。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<ColumnCommand> columns = buildColumnCommands(model);
+					   const std::vector<ColumnSpan> spans = collectColumnSpans(columns);
+					   const std::vector<ColumnMarkCommand> marks =
+						   buildColumnMarkCommands(columns);
+					   CHECK(marks.size() == spans.size() * 2);
 
-		const std::vector<ColumnCommand> columns = buildColumnCommands(model);
-		const std::vector<ColumnSpan> spans = collectColumnSpans(columns);
-		const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns);
-		CHECK(marks.size() == spans.size() * 2);
+					   std::set<std::string> spanLayers;
+					   for (const ColumnSpan& span : spans)
+						   spanLayers.insert(span.layer);
 
-		std::set<std::string> spanLayers;
-		for (const ColumnSpan& span : spans)
-			spanLayers.insert(span.layer);
+					   std::set<std::string> markLayers;
+					   for (const PlanMarkLayer& layer : collectPlanMarkLayers(spans))
+						   markLayers.insert(layer.layer);
 
-		std::set<std::string> markLayers;
-		for (const PlanMarkLayer& layer : collectPlanMarkLayers(spans))
-			markLayers.insert(layer.layer);
-
-		for (const ColumnMarkCommand& mark : marks)
-		{
-			CHECK(spanLayers.count(mark.targetLayer) == 1);
-			if (mark.style == ColumnMarkStyle::Section)
-			{
-				CHECK(mark.layer == mark.targetLayer);
-				CHECK(mark.symbol.empty());
-			}
-			else
-			{
-				CHECK(markLayers.count(mark.layer) == 1);
-				CHECK(!mark.symbol.empty());
-			}
-		}
-	}
+					   for (const ColumnMarkCommand& mark : marks)
+					   {
+						   CHECK(spanLayers.count(mark.targetLayer) == 1);
+						   if (mark.style == ColumnMarkStyle::Section)
+						   {
+							   CHECK(mark.layer == mark.targetLayer);
+							   CHECK(mark.symbol.empty());
+						   }
+						   else
+						   {
+							   CHECK(markLayers.count(mark.layer) == 1);
+							   CHECK(!mark.symbol.empty());
+						   }
+					   }
+				   });
 }
 
 TEST(MarkCommandsAreDeterministic)
 {
 	// 同じ入力から 2 度組み立てても同じ並び・同じ値（CLAUDE.md「決定性を守る」）。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		const std::vector<ColumnCommand> columns = buildColumnCommands(model);
-		const std::vector<ColumnMarkCommand> a = buildColumnMarkCommands(columns);
-		const std::vector<ColumnMarkCommand> b = buildColumnMarkCommands(columns);
-		CHECK(a.size() == b.size());
-		for (std::size_t i = 0; i < a.size() && i < b.size(); ++i)
-		{
-			CHECK(a[i].layer == b[i].layer);
-			CHECK(a[i].targetLayer == b[i].targetLayer);
-			CHECK(a[i].symbol == b[i].symbol);
-			CHECK(a[i].style == b[i].style);
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<ColumnCommand> columns = buildColumnCommands(model);
+					   const std::vector<ColumnMarkCommand> a = buildColumnMarkCommands(columns);
+					   const std::vector<ColumnMarkCommand> b = buildColumnMarkCommands(columns);
+					   CHECK(a.size() == b.size());
+					   for (std::size_t i = 0; i < a.size() && i < b.size(); ++i)
+					   {
+						   CHECK(a[i].layer == b[i].layer);
+						   CHECK(a[i].targetLayer == b[i].targetLayer);
+						   CHECK(a[i].symbol == b[i].symbol);
+						   CHECK(a[i].style == b[i].style);
+					   }
+				   });
 }
 
 TEST_MAIN();

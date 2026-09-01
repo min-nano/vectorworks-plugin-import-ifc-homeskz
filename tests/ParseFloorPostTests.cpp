@@ -13,6 +13,7 @@
 //
 
 #include "Fixtures.h"
+#include "StepText.h"
 #include "TestFramework.h"
 
 #include "core/Document.h"
@@ -55,6 +56,9 @@ using HomeskzIfcImport::parse::shinReference;
 using HomeskzIfcImport::parse::SupportLine;
 using HomeskzIfcTests::fixture;
 using HomeskzIfcTests::near;
+using HomeskzIfcTests::num;
+using HomeskzIfcTests::ref;
+using HomeskzIfcTests::StepText;
 
 namespace
 {
@@ -467,46 +471,37 @@ TEST(floor_post_synthetic_run_places_posts_at_shin_pitch)
 	// 土台（幅 105mm）を x=0 と x=3640 に通し、その間へ大引を 1 本渡す。ホームズ君 IFC と
 	// 同じく大引の端は支持材芯より半支持材厚（52.5mm）内側に納まっている。支持材芯どうしの
 	// 区間 3640mm には 910/1820/2730 の 3 本が入る（端＝支持材芯には置かない）。
-	std::string text;
-	int next = 1;
-	const auto add = [&text, &next](const std::string& body)
-	{
-		const int id = next++;
-		text += "#" + std::to_string(id) + "=" + body + ";\n";
-		return id;
-	};
+	StepText step;
 	// 大引・土台を「配置点＋押し出し軸＋矩形断面」で作る（parse/Member の読み方に合わせる）。
-	const auto makeBeam = [&add](const std::string& name, double ox, double oy, double ax,
-								 double ay, double width, double height, double length)
+	const auto makeBeam = [&step](const std::string& name, double ox, double oy, double ax,
+								  double ay, double width, double height, double length)
 	{
-		const int location =
-			add("IFCCARTESIANPOINT((" + std::to_string(ox) + "," + std::to_string(oy) + ",0.))");
-		const int axis =
-			add("IFCDIRECTION((" + std::to_string(ax) + "," + std::to_string(ay) + ",0.))");
-		const int placement = add("IFCAXIS2PLACEMENT3D(#" + std::to_string(location) + ",#" +
-								  std::to_string(axis) + ",$)");
-		const int localPlacement = add("IFCLOCALPLACEMENT($,#" + std::to_string(placement) + ")");
-		const int profile = add("IFCRECTANGLEPROFILEDEF(.AREA.,$,$," + std::to_string(width) + "," +
-								std::to_string(height) + ")");
-		const int extrudeDir = add("IFCDIRECTION((0.,0.,1.))");
-		const int solid = add("IFCEXTRUDEDAREASOLID(#" + std::to_string(profile) + ",$,#" +
-							  std::to_string(extrudeDir) + "," + std::to_string(length) + ")");
+		const int location = step.add("IFCCARTESIANPOINT((" + num(ox) + "," + num(oy) + ",0.))");
+		const int axis = step.add("IFCDIRECTION((" + num(ax) + "," + num(ay) + ",0.))");
+		const int placement =
+			step.add("IFCAXIS2PLACEMENT3D(" + ref(location) + "," + ref(axis) + ",$)");
+		const int localPlacement = step.add("IFCLOCALPLACEMENT($," + ref(placement) + ")");
+		const int profile =
+			step.add("IFCRECTANGLEPROFILEDEF(.AREA.,$,$," + num(width) + "," + num(height) + ")");
+		const int extrudeDir = step.add("IFCDIRECTION((0.,0.,1.))");
+		const int solid = step.add("IFCEXTRUDEDAREASOLID(" + ref(profile) + ",$," +
+								   ref(extrudeDir) + "," + num(length) + ")");
 		const int shape =
-			add("IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#" + std::to_string(solid) + "))");
-		const int product = add("IFCPRODUCTDEFINITIONSHAPE($,$,(#" + std::to_string(shape) + "))");
-		add("IFCBEAM('b',$,'" + name + "',$,$,#" + std::to_string(localPlacement) + ",#" +
-			std::to_string(product) + ",$)");
+			step.add("IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(" + ref(solid) + "))");
+		const int product = step.add("IFCPRODUCTDEFINITIONSHAPE($,$,(" + ref(shape) + "))");
+		step.add("IFCBEAM('b',$,'" + name + "',$,$," + ref(localPlacement) + "," + ref(product) +
+				 ",$)");
 	};
 
 	// 基礎（底盤）が無いと床束は出ないので 1 枚置く。
-	add("IFCSLAB('s',$,'基礎底盤',$,$,$,$,$,$)");
+	step.add("IFCSLAB('s',$,'基礎底盤',$,$,$,$,$,$)");
 	// 土台 2 本（Y 方向・幅 105mm）。芯線 x=0 と x=3640。
 	makeBeam("木梁:土台:1", 0.0, -1000.0, 0.0, 1.0, 105.0, 105.0, 2000.0);
 	makeBeam("木梁:土台:2", 3640.0, -1000.0, 0.0, 1.0, 105.0, 105.0, 2000.0);
 	// 大引 1 本（X 方向）。端は支持材芯より 52.5mm 内側＝実長 3640 − 105 = 3535mm。
 	makeBeam("木梁:大引:1", 52.5, 0.0, 1.0, 0.0, 105.0, 105.0, 3535.0);
 
-	const std::vector<SymbolCommand> posts = buildFloorPostCommands(loadIfcFromText(text));
+	const std::vector<SymbolCommand> posts = buildFloorPostCommands(step.build());
 	CHECK_EQ(posts.size(), std::size_t{3});
 	// 通り芯が無いモデルなのでセンタリング補正は掛からない。
 	CHECK(hasPost(posts, 910.0, 0.0));

@@ -49,6 +49,11 @@ namespace HomeskzIfcImport::parse
 	// X 通りなのに軸組図では Y 通り」という食い違いが起きうる（CLAUDE.md「重複を作らない置き場所」）。
 	bool isXAxis(const GridLine& line);
 
+	// 線分群の全端点の bbox。線分が空なら false（out は変更しない）。**端点の走査はここに
+	// 1 つだけ**——センタリング中心（下の gridCenterOf）と軸組図の指示線の長さ
+	// （parse/Section の gridPlanBounds）が同じ bbox を各々計算していた。
+	bool gridBounds(const std::vector<GridLine>& lines, core::Vec2& outMin, core::Vec2& outMax);
+
 	// 線分群の bbox 中心（＝**全要素に共通のセンタリングオフセット**）を返す。床・屋根組・
 	// 基礎・部材はいずれもこのオフセットで平面座標を補正する（要素ごとに別の中心を使うと図面
 	// がずれる）。線分が空なら false（out は変更しない）＝補正しない。

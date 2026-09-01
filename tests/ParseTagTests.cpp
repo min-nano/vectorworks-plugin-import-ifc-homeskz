@@ -40,8 +40,7 @@ using HomeskzIfcImport::parse::sectionAnnotationPoint;
 using HomeskzIfcImport::parse::tagAngle;
 using HomeskzIfcImport::parse::tagOffsetSide;
 using HomeskzIfcImport::parse::upwardNormal;
-using HomeskzIfcTests::allFixtures;
-using HomeskzIfcTests::fixtureDocument;
+using HomeskzIfcTests::forEachFixtureDocument;
 using HomeskzIfcTests::near;
 
 namespace
@@ -260,39 +259,39 @@ TEST(AttachedTagsAreValidOnRealFixtures)
 	// 通ること（memberIndex が members の範囲内・スタイル名が非空）を確かめる。
 	std::size_t withPlanTags = 0;
 	std::size_t withSectionTags = 0;
-	for (const std::string& name : allFixtures())
-	{
-		// 命令セットは 1 プロセス 1 回だけ組み立てて共有する（tests/Fixtures.h の
-		// fixtureDocument）。ここは読むだけなので参照のまま使える。
-		const Document& document = fixtureDocument(name);
-		CHECK(core::validateDocument(document));
+	// 命令セットは 1 プロセス 1 回だけ組み立てて共有する（tests/Fixtures.h の
+	// fixtureDocument）。ここは読むだけなので参照のまま使える。
+	forEachFixtureDocument(
+		[&](const std::string&, const Document& document)
+		{
+			CHECK(core::validateDocument(document));
 
-		for (const auto& sheet : document.sheets)
-		{
-			if (!sheet.viewport.tags.empty())
-				++withPlanTags;
-			for (const TagCommand& tag : sheet.viewport.tags)
-				CHECK(tag.memberIndex < document.members.size());
-		}
-		for (const auto& section : document.sections)
-		{
-			if (!section.viewport.tags.empty())
-				++withSectionTags;
-			for (const TagCommand& tag : section.viewport.tags)
+			for (const auto& sheet : document.sheets)
 			{
-				CHECK(tag.memberIndex < document.members.size());
-				// 断面に載る材はその切断面に乗る（＝通りに沿って走る）はず。
-				const MemberCommand& member = document.members[tag.memberIndex];
-				const double along = section.direction == SectionDirection::X
-										 ? std::abs(member.end.y - member.start.y)
-										 : std::abs(member.end.x - member.start.x);
-				const double across = section.direction == SectionDirection::X
-										  ? std::abs(member.end.x - member.start.x)
-										  : std::abs(member.end.y - member.start.y);
-				CHECK(across < along);
+				if (!sheet.viewport.tags.empty())
+					++withPlanTags;
+				for (const TagCommand& tag : sheet.viewport.tags)
+					CHECK(tag.memberIndex < document.members.size());
 			}
-		}
-	}
+			for (const auto& section : document.sections)
+			{
+				if (!section.viewport.tags.empty())
+					++withSectionTags;
+				for (const TagCommand& tag : section.viewport.tags)
+				{
+					CHECK(tag.memberIndex < document.members.size());
+					// 断面に載る材はその切断面に乗る（＝通りに沿って走る）はず。
+					const MemberCommand& member = document.members[tag.memberIndex];
+					const double along = section.direction == SectionDirection::X
+											 ? std::abs(member.end.y - member.start.y)
+											 : std::abs(member.end.x - member.start.x);
+					const double across = section.direction == SectionDirection::X
+											  ? std::abs(member.end.x - member.start.x)
+											  : std::abs(member.end.y - member.start.y);
+					CHECK(across < along);
+				}
+			}
+		});
 	// どのフィクスチャにも横架材と伏図があるので、伏図のタグは必ず出る。
 	CHECK(withPlanTags > 0);
 	CHECK(withSectionTags > 0);
@@ -301,42 +300,42 @@ TEST(AttachedTagsAreValidOnRealFixtures)
 TEST(TagCommandsAreDeterministic)
 {
 	// 同じ入力から 2 度割り当てても同じ並び・同じ値（CLAUDE.md「決定性を守る」）。
-	for (const std::string& name : allFixtures())
-	{
-		// 原本は共有のキャッシュ（fixtureDocument）から借り、**書き換えるほうだけ**自分の
-		// コピーにする。原本を書き換えると同じフィクスチャを見る他のケースに漏れる。
-		const Document& a = fixtureDocument(name);
-		Document b = a;
-		// もう一度割り当てても結果が変わらない（べき等かつ決定的）。
-		attachTagCommands(b);
-		CHECK(a.sheets.size() == b.sheets.size());
-		for (std::size_t i = 0; i < a.sheets.size() && i < b.sheets.size(); ++i)
+	// 原本は共有のキャッシュ（fixtureDocument）から借り、**書き換えるほうだけ**自分の
+	// コピーにする。原本を書き換えると同じフィクスチャを見る他のケースに漏れる。
+	forEachFixtureDocument(
+		[&](const std::string&, const Document& a)
 		{
-			const std::vector<TagCommand>& lhs = a.sheets[i].viewport.tags;
-			const std::vector<TagCommand>& rhs = b.sheets[i].viewport.tags;
-			CHECK(lhs.size() == rhs.size());
-			for (std::size_t k = 0; k < lhs.size() && k < rhs.size(); ++k)
+			Document b = a;
+			// もう一度割り当てても結果が変わらない（べき等かつ決定的）。
+			attachTagCommands(b);
+			CHECK(a.sheets.size() == b.sheets.size());
+			for (std::size_t i = 0; i < a.sheets.size() && i < b.sheets.size(); ++i)
 			{
-				CHECK(lhs[k].memberIndex == rhs[k].memberIndex);
-				CHECK(near(lhs[k].position.x, rhs[k].position.x, 1e-9));
-				CHECK(near(lhs[k].position.y, rhs[k].position.y, 1e-9));
-				CHECK(near(lhs[k].angle, rhs[k].angle, 1e-9));
+				const std::vector<TagCommand>& lhs = a.sheets[i].viewport.tags;
+				const std::vector<TagCommand>& rhs = b.sheets[i].viewport.tags;
+				CHECK(lhs.size() == rhs.size());
+				for (std::size_t k = 0; k < lhs.size() && k < rhs.size(); ++k)
+				{
+					CHECK(lhs[k].memberIndex == rhs[k].memberIndex);
+					CHECK(near(lhs[k].position.x, rhs[k].position.x, 1e-9));
+					CHECK(near(lhs[k].position.y, rhs[k].position.y, 1e-9));
+					CHECK(near(lhs[k].angle, rhs[k].angle, 1e-9));
+				}
 			}
-		}
-		CHECK(a.sections.size() == b.sections.size());
-		for (std::size_t i = 0; i < a.sections.size() && i < b.sections.size(); ++i)
-		{
-			const std::vector<TagCommand>& lhs = a.sections[i].viewport.tags;
-			const std::vector<TagCommand>& rhs = b.sections[i].viewport.tags;
-			CHECK(lhs.size() == rhs.size());
-			for (std::size_t k = 0; k < lhs.size() && k < rhs.size(); ++k)
+			CHECK(a.sections.size() == b.sections.size());
+			for (std::size_t i = 0; i < a.sections.size() && i < b.sections.size(); ++i)
 			{
-				CHECK(lhs[k].memberIndex == rhs[k].memberIndex);
-				CHECK(near(lhs[k].position.x, rhs[k].position.x, 1e-9));
-				CHECK(near(lhs[k].position.y, rhs[k].position.y, 1e-9));
+				const std::vector<TagCommand>& lhs = a.sections[i].viewport.tags;
+				const std::vector<TagCommand>& rhs = b.sections[i].viewport.tags;
+				CHECK(lhs.size() == rhs.size());
+				for (std::size_t k = 0; k < lhs.size() && k < rhs.size(); ++k)
+				{
+					CHECK(lhs[k].memberIndex == rhs[k].memberIndex);
+					CHECK(near(lhs[k].position.x, rhs[k].position.x, 1e-9));
+					CHECK(near(lhs[k].position.y, rhs[k].position.y, 1e-9));
+				}
 			}
-		}
-	}
+		});
 }
 
 TEST_MAIN();

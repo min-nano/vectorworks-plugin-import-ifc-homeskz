@@ -54,9 +54,7 @@ namespace HomeskzIfcImport::parse
 	{
 		if (element.type != "IFCBEAM" && element.type != "IFCMEMBER")
 			return false;
-		const std::string name = entityName(element);
-		const std::string prefix(kFireBracePrefix);
-		return name.size() >= prefix.size() && name.compare(0, prefix.size(), prefix) == 0;
+		return entityName(element).starts_with(kFireBracePrefix);
 	}
 
 	std::optional<Vec2> segmentIntersection(const Segment2D& first, const Segment2D& second)
@@ -118,7 +116,7 @@ namespace HomeskzIfcImport::parse
 	std::vector<SymbolCommand> buildFireBraceCommands(Context& context)
 	{
 		const Model& model = context.model();
-		const std::vector<StoryInfo> stories = context.stories();
+		const std::vector<StoryInfo>& stories = context.stories();
 		if (stories.empty())
 			return {};
 
@@ -129,9 +127,9 @@ namespace HomeskzIfcImport::parse
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
 			const StoryInfo& story = stories[i];
-			// 火打は横架材と同じレイヤに置く。最上階には横架材天端が無いので軒高。
-			const std::string layer =
-				storyLayerName(i, story.isTop, story.isTop ? kLevelEaves : kLevelBeamTop);
+			// 火打は横架材と同じレイヤに置く（最上階には横架材天端が無いので軒高。
+			// beamTopLayerName が分岐を持つ）。
+			const std::string layer = beamTopLayerName(i, story);
 
 			for (const int elementId : context.storyElements(story.id))
 			{

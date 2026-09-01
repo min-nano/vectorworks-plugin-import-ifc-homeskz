@@ -54,8 +54,8 @@ using HomeskzIfcImport::parse::memberGeom;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::pointInColumn;
 using HomeskzIfcImport::parse::pointInMember;
-using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::forEachFixture;
 using HomeskzIfcTests::near;
 
 namespace
@@ -531,25 +531,24 @@ TEST(joint_columns_only_add_joints)
 	// 柱を渡しても横架材同士の仕口は消えない（受ける材判定は柱の有無に依らない）。かつ
 	// 実データでは柱に受けられる梁端の仕口が少なくとも 1 件は増える。
 	std::size_t totalAdded = 0;
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<MemberCommand> members = buildMemberCommands(model);
+					   const std::vector<ColumnCommand> columns =
+						   buildColumnCommands(model, members);
+					   const std::vector<SymbolCommand> without = buildJointCommands(members);
+					   const std::vector<SymbolCommand> withColumns =
+						   buildJointCommands(members, columns);
 
-		const std::vector<MemberCommand> members = buildMemberCommands(model);
-		const std::vector<ColumnCommand> columns = buildColumnCommands(model, members);
-		const std::vector<SymbolCommand> without = buildJointCommands(members);
-		const std::vector<SymbolCommand> withColumns = buildJointCommands(members, columns);
-
-		const std::multiset<JointKey> base = keysOf(without);
-		const std::multiset<JointKey> extended = keysOf(withColumns);
-		// 柱なしの各仕口は柱ありにも必ず同数以上含まれる（上位集合）。
-		for (const JointKey& key : base)
-			CHECK(extended.count(key) >= base.count(key));
-		CHECK(withColumns.size() >= without.size());
-		totalAdded += withColumns.size() - without.size();
-	}
+					   const std::multiset<JointKey> base = keysOf(without);
+					   const std::multiset<JointKey> extended = keysOf(withColumns);
+					   // 柱なしの各仕口は柱ありにも必ず同数以上含まれる（上位集合）。
+					   for (const JointKey& key : base)
+						   CHECK(extended.count(key) >= base.count(key));
+					   CHECK(withColumns.size() >= without.size());
+					   totalAdded += withColumns.size() - without.size();
+				   });
 	CHECK(totalAdded > 0);
 }
 
@@ -557,28 +556,26 @@ TEST(joint_added_joints_land_on_columns)
 {
 	// 柱ありでのみ現れる仕口（＝柱に受けられた梁端）は、いずれかの柱の断面 footprint に
 	// 載っている（実データでの幾何的な妥当性）。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		const std::vector<MemberCommand> members = buildMemberCommands(model);
-		const std::vector<ColumnCommand> columns = buildColumnCommands(model, members);
-		const std::vector<ColumnGeom> columnGeoms = columnGeomsOf(columns);
-		const std::multiset<JointKey> without = keysOf(buildJointCommands(members));
-
-		std::multiset<JointKey> seen;
-		for (const SymbolCommand& joint : buildJointCommands(members, columns))
+	forEachFixture(
+		failures,
+		[&](const std::string&, const Model& model)
 		{
-			const JointKey key = keyOf(joint);
-			seen.insert(key);
-			if (seen.count(key) <= without.count(key))
-				continue; // 柱なしでも出ていた仕口
-			CHECK(std::ranges::any_of(columnGeoms, [&joint](const ColumnGeom& geom)
-									  { return pointInColumn(joint.position, geom); }));
-		}
-	}
+			const std::vector<MemberCommand> members = buildMemberCommands(model);
+			const std::vector<ColumnCommand> columns = buildColumnCommands(model, members);
+			const std::vector<ColumnGeom> columnGeoms = columnGeomsOf(columns);
+			const std::multiset<JointKey> without = keysOf(buildJointCommands(members));
+
+			std::multiset<JointKey> seen;
+			for (const SymbolCommand& joint : buildJointCommands(members, columns))
+			{
+				const JointKey key = keyOf(joint);
+				seen.insert(key);
+				if (seen.count(key) <= without.count(key))
+					continue; // 柱なしでも出ていた仕口
+				CHECK(std::ranges::any_of(columnGeoms, [&joint](const ColumnGeom& geom)
+										  { return pointInColumn(joint.position, geom); }));
+			}
+		});
 }
 
 TEST(joint_fixture_height_matches_member_ends)
@@ -587,50 +584,46 @@ TEST(joint_fixture_height_matches_member_ends)
 	// 一致する。かつ**レイヤ平面から外れる仕口が実際に出る**（登り梁・母屋・段差梁）——
 	// ここが 0 件なら、この高さ調整は何も直していないことになる。
 	std::size_t raised = 0;
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		const std::vector<MemberCommand> members = buildMemberCommands(model);
-		for (const SymbolCommand& joint : buildJointCommands(members))
-		{
-			// 同じレイヤに同じ端点を持つ横架材のうち、その端部の offset が仕口の高さと
-			// 一致するものが必ずある。
-			const bool matched = std::ranges::any_of(
-				members,
-				[&joint](const MemberCommand& m)
-				{
-					if (m.layer != joint.layer)
-						return false;
-					return (near(m.start.x, joint.position.x) &&
-							near(m.start.y, joint.position.y) &&
-							near(m.startBound.offset, joint.zOffset)) ||
-						   (near(m.end.x, joint.position.x) && near(m.end.y, joint.position.y) &&
-							near(m.endBound.offset, joint.zOffset));
-				});
-			CHECK(matched);
-			if (std::abs(joint.zOffset) > 1.0)
-				++raised;
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<MemberCommand> members = buildMemberCommands(model);
+					   for (const SymbolCommand& joint : buildJointCommands(members))
+					   {
+						   // 同じレイヤに同じ端点を持つ横架材のうち、その端部の offset が仕口の高さと
+						   // 一致するものが必ずある。
+						   const bool matched = std::ranges::any_of(
+							   members,
+							   [&joint](const MemberCommand& m)
+							   {
+								   if (m.layer != joint.layer)
+									   return false;
+								   return (near(m.start.x, joint.position.x) &&
+										   near(m.start.y, joint.position.y) &&
+										   near(m.startBound.offset, joint.zOffset)) ||
+										  (near(m.end.x, joint.position.x) &&
+										   near(m.end.y, joint.position.y) &&
+										   near(m.endBound.offset, joint.zOffset));
+							   });
+						   CHECK(matched);
+						   if (std::abs(joint.zOffset) > 1.0)
+							   ++raised;
+					   }
+				   });
 	CHECK(raised > 0);
 }
 
 TEST(joint_all_fixtures_build)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		const std::vector<SymbolCommand> joints = buildJointCommands(buildMemberCommands(model));
-		CHECK(!joints.empty());
-		for (const SymbolCommand& joint : joints)
-			CHECK_EQ(joint.symbol, std::string(kSymbolJoint));
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<SymbolCommand> joints =
+						   buildJointCommands(buildMemberCommands(model));
+					   CHECK(!joints.empty());
+					   for (const SymbolCommand& joint : joints)
+						   CHECK_EQ(joint.symbol, std::string(kSymbolJoint));
+				   });
 }
 
 TEST(joint_fixture_result_is_order_independent_with_columns)
