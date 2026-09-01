@@ -236,11 +236,13 @@ namespace HomeskzIfcImport::draw
 				}
 				catch (...)
 				{
+					continue; // 名前を読めない定義は飛ばす（調査の対象ではない）
 				}
 			}
-			core::trace::log(
-				std::string("symprobe: A 一覧に居るか=") +
-				(listed == nil ? "no" : (listed == definition ? "同じ handle" : "別の handle")));
+			const char* where = "no";
+			if (listed != nil)
+				where = listed == definition ? "同じ handle" : "別の handle";
+			core::trace::log(std::string("symprobe: A 一覧に居るか=") + where);
 			if (listed != nil && listed != definition)
 				DumpDefinition("A（一覧側）", listed);
 		}
