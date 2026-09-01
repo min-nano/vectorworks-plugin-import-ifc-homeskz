@@ -18,7 +18,6 @@
 #include "core/Geometry.h"
 #include "parse/BuildDocument.h"
 
-#include <cmath>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -664,10 +663,10 @@ TEST(rafter_eave_end_extends_beyond_the_support_point)
 	// 1000/3000 ぶん下がって 6300 − 184.1666… になる。offset も同じだけ下がる。
 	const core::RafterEaveEnd eave = core::rafterEaveEnd(validRafter());
 	const double drop = 1000.0 / 3000.0 * 552.5;
-	CHECK(std::abs(eave.point.x - 0.0) < 1e-9);
-	CHECK(std::abs(eave.point.y + 552.5) < 1e-9);
-	CHECK(std::abs(eave.z - (6300.0 - drop)) < 1e-9);
-	CHECK(std::abs(eave.offset - (0.0 - drop)) < 1e-9);
+	CHECK(near(eave.point.x, 0.0, 1e-9));
+	CHECK(near(eave.point.y, -552.5, 1e-9));
+	CHECK(near(eave.z, 6300.0 - drop, 1e-9));
+	CHECK(near(eave.offset, 0.0 - drop, 1e-9));
 }
 
 TEST(rafter_eave_end_is_the_support_point_without_reach)
@@ -690,9 +689,9 @@ TEST(rafter_eave_end_keeps_the_offset_relative_to_the_support_point)
 	rafter.startBound.offset = -120.0;
 	const core::RafterEaveEnd eave = core::rafterEaveEnd(rafter);
 	const double drop = 1000.0 / 3000.0 * 552.5;
-	CHECK(std::abs(eave.offset - (-120.0 - drop)) < 1e-9);
+	CHECK(near(eave.offset, -120.0 - drop, 1e-9));
 	// 下面 Z（絶対値）は startBound とは独立に elevation から下がる。
-	CHECK(std::abs(eave.z - (6300.0 - drop)) < 1e-9);
+	CHECK(near(eave.z, 6300.0 - drop, 1e-9));
 }
 
 TEST(rafter_eave_end_follows_the_plan_direction)
@@ -704,9 +703,9 @@ TEST(rafter_eave_end_follows_the_plan_direction)
 	rafter.elevation = 3000.0;
 	rafter.endElevation = 3000.0; // 水平（勾配 0）なら Z は下がらない
 	const core::RafterEaveEnd eave = core::rafterEaveEnd(rafter);
-	CHECK(std::abs(eave.point.x - (1000.0 - 552.5)) < 1e-9);
-	CHECK(std::abs(eave.point.y - 500.0) < 1e-9);
-	CHECK(std::abs(eave.z - 3000.0) < 1e-9);
+	CHECK(near(eave.point.x, 1000.0 - 552.5, 1e-9));
+	CHECK(near(eave.point.y, 500.0, 1e-9));
+	CHECK(near(eave.z, 3000.0, 1e-9));
 }
 
 TEST(validate_rejects_roof_with_empty_layer)
@@ -1058,10 +1057,10 @@ TEST(raise_modifier_top_extends_along_the_slanted_side)
 	CHECK(raised.profile[1].x == 150.0 && raised.profile[1].y == 0.0);
 	// 天端の 2 点は v が +10、u は斜辺に沿って外側へ（左右対称）。
 	const double expected = 350.0 + (200.0 / 140.0 * 10.0);
-	CHECK(std::abs(raised.profile[2].x - expected) < 1e-9);
-	CHECK(std::abs(raised.profile[2].y - 150.0) < 1e-9);
-	CHECK(std::abs(raised.profile[3].x + expected) < 1e-9);
-	CHECK(std::abs(raised.profile[3].y - 150.0) < 1e-9);
+	CHECK(near(raised.profile[2].x, expected, 1e-9));
+	CHECK(near(raised.profile[2].y, 150.0, 1e-9));
+	CHECK(near(raised.profile[3].x, -expected, 1e-9));
+	CHECK(near(raised.profile[3].y, 150.0, 1e-9));
 	// 断面以外（押し出し長・原点・方位角）はそのまま。
 	CHECK(raised.depth == validModifier().depth);
 	CHECK(raised.origin.z == validModifier().origin.z);
@@ -1442,8 +1441,8 @@ TEST(section_height_range_wraps_elements_with_margin)
 	double start = 0.0;
 	double end = 0.0;
 	CHECK(core::sectionHeightRange(document, start, end));
-	CHECK(std::abs(start - (0.0 - core::kSectionHeightMargin)) < 1e-6);
-	CHECK(std::abs(end - (3000.0 + core::kSectionHeightMargin)) < 1e-6);
+	CHECK(near(start, 0.0 - core::kSectionHeightMargin, 1e-6));
+	CHECK(near(end, 3000.0 + core::kSectionHeightMargin, 1e-6));
 }
 
 TEST(section_height_range_covers_floors_roofs_slabs_and_stories)
@@ -1467,8 +1466,8 @@ TEST(section_height_range_covers_floors_roofs_slabs_and_stories)
 	double start = 0.0;
 	double end = 0.0;
 	CHECK(core::sectionHeightRange(document, start, end));
-	CHECK(std::abs(start - (-100.0 - core::kSectionHeightMargin)) < 1e-6);
-	CHECK(std::abs(end - (6000.0 + core::kSectionHeightMargin)) < 1e-6);
+	CHECK(near(start, -100.0 - core::kSectionHeightMargin, 1e-6));
+	CHECK(near(end, 6000.0 + core::kSectionHeightMargin, 1e-6));
 }
 
 TEST(section_height_range_reaches_ground_beam_bottom)
@@ -1492,8 +1491,8 @@ TEST(section_height_range_reaches_ground_beam_bottom)
 	double start = 0.0;
 	double end = 0.0;
 	CHECK(core::sectionHeightRange(document, start, end));
-	CHECK(std::abs(start - (-700.0 - core::kSectionHeightMargin)) < 1e-6);
-	CHECK(std::abs(end - (50.0 + core::kSectionHeightMargin)) < 1e-6);
+	CHECK(near(start, -700.0 - core::kSectionHeightMargin, 1e-6));
+	CHECK(near(end, 50.0 + core::kSectionHeightMargin, 1e-6));
 
 	// 床付け（捨てコン・砕石）を敷くと**最深部はその下端**になる（梁下端から更に 130mm 下）。
 	document.slabs.front().modifiers.front().beddings.push_back(
@@ -1503,7 +1502,7 @@ TEST(section_height_range_reaches_ground_beam_bottom)
 							 0.0,
 							 2000.0});
 	CHECK(core::sectionHeightRange(document, start, end));
-	CHECK(std::abs(start - (-830.0 - core::kSectionHeightMargin)) < 1e-6);
+	CHECK(near(start, -830.0 - core::kSectionHeightMargin, 1e-6));
 }
 
 TEST(section_height_range_covers_floors_and_rafters)
@@ -1526,8 +1525,8 @@ TEST(section_height_range_covers_floors_and_rafters)
 	double start = 0.0;
 	double end = 0.0;
 	CHECK(core::sectionHeightRange(document, start, end));
-	CHECK(std::abs(start - (2838.0 - core::kSectionHeightMargin)) < 1e-6);
-	CHECK(std::abs(end - (7000.0 + core::kSectionHeightMargin)) < 1e-6);
+	CHECK(near(start, 2838.0 - core::kSectionHeightMargin, 1e-6));
+	CHECK(near(end, 7000.0 + core::kSectionHeightMargin, 1e-6));
 }
 
 TEST(section_height_range_fails_without_elements)
@@ -1536,8 +1535,8 @@ TEST(section_height_range_fails_without_elements)
 	double start = -1.0;
 	double end = -2.0;
 	CHECK(!core::sectionHeightRange(core::Document{}, start, end));
-	CHECK(std::abs(start - (-1.0)) < 1e-6);
-	CHECK(std::abs(end - (-2.0)) < 1e-6);
+	CHECK(near(start, -1.0, 1e-6));
+	CHECK(near(end, -2.0, 1e-6));
 }
 
 // ---------------------------------------------------------------------------

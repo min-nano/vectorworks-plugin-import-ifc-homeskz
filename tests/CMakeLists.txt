@@ -40,8 +40,22 @@ endif()
 option(VW_REQUIRE_SCRIPT_TESTS
 	   "Fail rather than skip the updater-script tests when a tool is missing" OFF)
 
+# Registers one test executable. Options after the sources:
+#   * CORE     … links the HomeskzIfcCore library (the SDK-free src/core/ + src/parse/
+#                half). Every 2-phase test wants this; the updater tests do not.
+#   * FIXTURES … defines HOMESKZ_FIXTURES_DIR so the file-based cases find the
+#                checked-in fixtures (tests/fixtures/). Deliberately opt-in per
+#                target: tests/Fixtures.h compiles fixture() only under
+#                #ifdef HOMESKZ_FIXTURES_DIR, so a test that uses fixtures without
+#                declaring FIXTURES fails to compile instead of silently passing.
 function(vw_add_test name)
-	add_executable(${name} ${ARGN})
+	cmake_parse_arguments(
+		ARG
+		"CORE;FIXTURES"
+		""
+		""
+		${ARGN})
+	add_executable(${name} ${ARG_UNPARSED_ARGUMENTS})
 	target_compile_features(${name} PRIVATE cxx_std_20)
 	# Tests include the sources under "src" and the local "TestFramework.h".
 	target_include_directories(${name} PRIVATE "${CMAKE_SOURCE_DIR}/src"
@@ -71,6 +85,13 @@ function(vw_add_test name)
 							-fno-sanitize-recover=all)
 		target_link_options(${name} PRIVATE -fsanitize=address,undefined)
 	endif()
+	if(ARG_CORE)
+		target_link_libraries(${name} PRIVATE HomeskzIfcCore)
+	endif()
+	if(ARG_FIXTURES)
+		target_compile_definitions(
+			${name} PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+	endif()
 	add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
@@ -95,16 +116,14 @@ vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 # compiling those sources directly, which also proves the CMake target split
 # builds and links with no SDK present. Extend it whenever a command list is
 # added to core/Document.h.
-vw_add_test(CoreDocumentTests CoreDocumentTests.cpp)
-target_link_libraries(CoreDocumentTests PRIVATE HomeskzIfcCore)
+vw_add_test(CoreDocumentTests CoreDocumentTests.cpp CORE)
 
 # Progress reporting (src/core/Progress): the display-text formatting, the
 # proportional progress-bar share per phase, the step counting (reset per phase,
 # clamped to the total) and the latched cancellation flag. Pure logic shared by
 # both phases — the actual dialog (draw/ProgressDialog) is SDK-side and verified
 # on a real Vectorworks install. SDK-free, no fixtures.
-vw_add_test(CoreProgressTests CoreProgressTests.cpp)
-target_link_libraries(CoreProgressTests PRIVATE HomeskzIfcCore)
+vw_add_test(CoreProgressTests CoreProgressTests.cpp CORE)
 
 # Sheet-layer layout (src/core/Layout): the scale ladder and how a scale is picked
 # to fit the paper, the plan sheets' shared scale/centre with the legend column kept
@@ -112,15 +131,13 @@ target_link_libraries(CoreProgressTests PRIVATE HomeskzIfcCore)
 # Pure arithmetic shared by both phases — the actual paper size comes from the SDK
 # (draw/DrawUtil's SheetPaperArea) and is verified on a real Vectorworks install.
 # SDK-free, no fixtures.
-vw_add_test(CoreLayoutTests CoreLayoutTests.cpp)
-target_link_libraries(CoreLayoutTests PRIVATE HomeskzIfcCore)
+vw_add_test(CoreLayoutTests CoreLayoutTests.cpp CORE)
 
 # Crash-diagnosis log (src/core/Trace): enable/disable, per-line flushing (a crash
 # must not eat the last line), truncate-on-reopen, a non-fatal open failure, the
 # default temp-dir path, and the one place phases reach the log (core/Progress's
 # beginPhase). SDK-free; writes into the build tree and removes what it wrote.
-vw_add_test(CoreTraceTests CoreTraceTests.cpp)
-target_link_libraries(CoreTraceTests PRIVATE HomeskzIfcCore)
+vw_add_test(CoreTraceTests CoreTraceTests.cpp CORE)
 # Where the cases write their log files. Deliberately NOT the temp dir the plug-in
 # itself uses: deriving the path from TMPDIR/TEMP inside the test would make CodeQL
 # report an environment-variable-derived path reaching a file open (cpp/path-injection),
@@ -131,8 +148,7 @@ target_compile_definitions(CoreTraceTests
 # Minimal STEP reader (src/parse/Step): tokeniser + entity graph exercised on
 # small synthetic STEP snippets (references, numbers, strings, enums, nested
 # lists, typed values, referrers/resolve, determinism). SDK-free.
-vw_add_test(StepTests StepTests.cpp)
-target_link_libraries(StepTests PRIVATE HomeskzIfcCore)
+vw_add_test(StepTests StepTests.cpp CORE)
 
 # IFC loader (src/parse/Loader): proves the loader does NOT sanitise — the in-house
 # STEP reader has no schema, so non-standard entities (the IFC4-only IFCFOOTINGTYPE
@@ -140,26 +156,25 @@ target_link_libraries(StepTests PRIVATE HomeskzIfcCore)
 # Python version had to (see src/parse/Loader.h for why) — plus real-fixture file
 # loading. HOMESKZ_FIXTURES_DIR points the file-based cases at the checked-in
 # fixtures (tests/fixtures/), reused as parse modules land.
-vw_add_test(LoaderTests LoaderTests.cpp)
-target_link_libraries(LoaderTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(LoaderTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(LoaderTests LoaderTests.cpp CORE FIXTURES)
 
 # Grid (通り芯) parsing (src/parse/Grid): IfcGridAxis -> polyline endpoints, dedup,
 # bbox centering, X/Y classification (by name, else by orientation) and class
 # assignment. Exercised on synthetic STEP snippets and the checked-in fixtures;
 # SDK-free. HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseGridTests ParseGridTests.cpp)
-target_link_libraries(ParseGridTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseGridTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseGridTests ParseGridTests.cpp CORE FIXTURES)
 
 # Planar region synthesis (src/core/Region): the outline of the area a set of parts
 # encloses (enclosed voids plus the parts bounding them), used to synthesise the loft
 # floor from the roof storey's floor beams when homeskz emits no floor slab for it.
 # Pure geometry — no STEP, no SDK, no fixtures.
-vw_add_test(CoreRegionTests CoreRegionTests.cpp)
-target_link_libraries(CoreRegionTests PRIVATE HomeskzIfcCore)
+vw_add_test(CoreRegionTests CoreRegionTests.cpp CORE)
+
+# Connected components (src/core/UnionFind): the pairwise-predicate union-find that the
+# wall / ohbiki / ground-beam merges and the wall-join clustering all share. Pins down
+# the determinism contract (representative = smallest index, components in
+# representative order, ascending inside). Pure logic — no STEP, no SDK, no fixtures.
+vw_add_test(CoreUnionFindTests CoreUnionFindTests.cpp CORE)
 
 # Geometry foundation (src/core/Geometry + src/parse/IfcGeometry): placement-matrix
 # composition (IfcLocalPlacement / IfcAxis2Placement3D/2D), profile outlines
@@ -167,10 +182,7 @@ target_link_libraries(CoreRegionTests PRIVATE HomeskzIfcCore)
 # transform (vertical & horizontal extrusion) and IfcBooleanResult first-operand walk.
 # Exercised on hand-computed synthetic snippets and a real fixture; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(GeometryTests GeometryTests.cpp)
-target_link_libraries(GeometryTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(GeometryTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(GeometryTests GeometryTests.cpp CORE FIXTURES)
 
 # Story (ストーリ) parsing (src/parse/Story) + the SDK-free desired-layer-order
 # computation (src/core/desiredStoryLayerOrder): IfcBuildingStorey -> stories sorted by
@@ -179,10 +191,7 @@ target_compile_definitions(GeometryTests
 # ({from}to{to}-柱) with its per-storey levels, and the layer stack order (共通 first,
 # top→bottom, floor to background). Exercised on synthetic STEP snippets and a real fixture; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseStoryTests ParseStoryTests.cpp)
-target_link_libraries(ParseStoryTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseStoryTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseStoryTests ParseStoryTests.cpp CORE FIXTURES)
 
 # Sheet (伏図) parsing (src/parse/Sheet): which plan sheets to make and what each viewport
 # shows — the foundation plan (only when foundation elements exist), one framing plan per
@@ -191,10 +200,7 @@ target_compile_definitions(ParseStoryTests
 # ({from}to{to}-柱) a plan crosses. Also cross-checks that every layer a viewport lists is
 # one the story commands actually create. Exercised on the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseSheetTests ParseSheetTests.cpp)
-target_link_libraries(ParseSheetTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseSheetTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseSheetTests ParseSheetTests.cpp CORE FIXTURES)
 
 # Section (軸組図) parsing (src/parse/Section): which grid lines get a section viewport and
 # what each one cuts — the cut positions where both a column and a parallel beam run (大引 and
@@ -203,10 +209,7 @@ target_compile_definitions(ParseSheetTests
 # a margin), the view direction (so grid names read left to right), the height range that wraps
 # the model and the design layers a section shows. Synthetic STEP grid axes plus one real
 # fixture end to end; SDK-free. HOMESKZ_FIXTURES_DIR points the file-based case at fixtures/.
-vw_add_test(ParseSectionTests ParseSectionTests.cpp)
-target_link_libraries(ParseSectionTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseSectionTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseSectionTests ParseSectionTests.cpp CORE FIXTURES)
 
 # Data tags (src/parse/Tag): the 断面寸法 data tags that annotate each 横架材 on a
 # viewport — the readable text angle ((-90, 90] so it never reads upside down), the side the
@@ -216,18 +219,14 @@ target_compile_definitions(ParseSectionTests
 # viewport tags (only those lying on the cut plane) and how they project into the section's
 # annotation space (distance along the cut line, elevation). Runs end to end on the checked-in
 # fixtures; SDK-free. HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseTagTests ParseTagTests.cpp)
-target_link_libraries(ParseTagTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseTagTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseTagTests ParseTagTests.cpp CORE FIXTURES)
 
 # Structural-class assignment (src/parse/StructuralClass): the pure member-type ->
 # VW class logic (04構造-02木造-… leaf classes). Trusts the homeskz IFC Name token when
 # it identifies a type, else infers from story/height (member: dodai/yukabari/koyabari/
 # moya; column: koyazuka/toshibashira/kudabashira). No STEP graph, no fixtures — pure
 # string/index logic, so it links the library but needs no HOMESKZ_FIXTURES_DIR.
-vw_add_test(ParseStructuralClassTests ParseStructuralClassTests.cpp)
-target_link_libraries(ParseStructuralClassTests PRIVATE HomeskzIfcCore)
+vw_add_test(ParseStructuralClassTests ParseStructuralClassTests.cpp CORE)
 
 # Floor (床板) parsing (src/parse/Floor): IfcSlab "床版" -> per-storey FL-layer slab
 # commands — the per-storey slab style and its 床仕上げ/床下地 components, the datum
@@ -237,10 +236,7 @@ target_link_libraries(ParseStructuralClassTests PRIVATE HomeskzIfcCore)
 # loft floor synthesised from the roof storey's floor beams when no floor slab exists.
 # Exercised on synthetic STEP snippets and the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseFloorTests ParseFloorTests.cpp)
-target_link_libraries(ParseFloorTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseFloorTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseFloorTests ParseFloorTests.cpp CORE FIXTURES)
 
 # Rafter (垂木) parsing (src/parse/Rafter): roof slabs (IfcSlab "屋根版") -> per-storey
 # 垂木-layer rafter commands derived from the roof face — sweep spacing (ends inset by half
@@ -248,20 +244,14 @@ target_compile_definitions(ParseFloorTests
 # point where the roof face crosses the 横架材天端 level, overhang/embedment and the spec
 # label. Exercised on synthetic planes/STEP snippets and the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseRafterTests ParseRafterTests.cpp)
-target_link_libraries(ParseRafterTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseRafterTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseRafterTests ParseRafterTests.cpp CORE FIXTURES)
 
 # Roof sheathing (野地板) parsing (src/parse/Roof): one roof command per roof-slab face —
 # eaves axis on the lowest edge, upslope toward the ridge, slope as rise/run from the face
 # normal, the 12mm fixed thickness and the eaves Z lifted by the rafter depth. Exercised on
 # synthetic planes/STEP snippets and the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseRoofTests ParseRoofTests.cpp)
-target_link_libraries(ParseRoofTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseRoofTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseRoofTests ParseRoofTests.cpp CORE FIXTURES)
 
 # Member (横架材) parsing (src/parse/Member): IfcBeam / IfcMember -> structural-member
 # commands — the section-centre-to-top-centre reference correction, per-beam elevation from
@@ -269,10 +259,7 @@ target_compile_definitions(ParseRoofTests
 # sloped-beam (登り梁) arbitrary-profile extraction with its square-cut geometry, and the
 # T/L interference trimming. Exercised on synthetic STEP snippets and the checked-in
 # fixtures; SDK-free. HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseMemberTests ParseMemberTests.cpp)
-target_link_libraries(ParseMemberTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseMemberTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseMemberTests ParseMemberTests.cpp CORE FIXTURES)
 
 # Column (柱) parsing (src/parse/Column): IfcColumn -> vertical structural-member commands —
 # the span layer ({from}to{to}-柱) with its to-level rule (next floor for a 管柱, +0.5 for a roof
@@ -283,10 +270,7 @@ target_compile_definitions(ParseMemberTests
 # resized to the width of the 母屋/棟木/登り梁 resting on it. Exercised on synthetic STEP snippets
 # and the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseColumnTests ParseColumnTests.cpp)
-target_link_libraries(ParseColumnTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseColumnTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseColumnTests ParseColumnTests.cpp CORE FIXTURES)
 
 # Foundation (基礎) parsing (src/parse/Footing): IfcFooting "基礎梁…" -> wall commands and
 # IfcSlab/IfcFooting "…底盤…" -> slab commands, plus the 基礎 storey (suffix F, GL=0, the
@@ -302,30 +286,21 @@ target_compile_definitions(ParseColumnTests
 # turned into trapezoid-prism modifiers, merged along a shared axis and handed to the slab they
 # overlap. Exercised on synthetic commands and the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseFootingTests ParseFootingTests.cpp)
-target_link_libraries(ParseFootingTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseFootingTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseFootingTests ParseFootingTests.cpp CORE FIXTURES)
 
 # Sloped-beam (登り梁) correction (src/parse/Noboribari): trims the ends that homeskz sinks
 # into the receiving members and snaps the top centre line onto the roof face fixed in M6,
 # so the pitch and height match the rafter underside. Exercised on synthetic planes/commands
 # and the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseNoboribariTests ParseNoboribariTests.cpp)
-target_link_libraries(ParseNoboribariTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseNoboribariTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseNoboribariTests ParseNoboribariTests.cpp CORE FIXTURES)
 
 # Anchor-bolt (アンカーボルト) parsing (src/parse/AnchorBolt): IfcMechanicalFastener bolt
 # BODIES (never the washers, which share the axis and would double-count) -> symbol commands
 # on the foundation's F-アンカーボルト layer, with the M12 / M16 split driven by whether the
 # fastener type name says 座金なし. Exercised on synthetic STEP snippets and the checked-in
 # fixtures; SDK-free. HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseAnchorBoltTests ParseAnchorBoltTests.cpp)
-target_link_libraries(ParseAnchorBoltTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseAnchorBoltTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseAnchorBoltTests ParseAnchorBoltTests.cpp CORE FIXTURES)
 
 # Floor-post (床束) parsing (src/parse/FloorPost): homeskz emits no floor posts, so they are
 # placed at a fixed 910mm pitch under the 大引 — after merging the runs split by 継手 (a gap of
@@ -333,10 +308,7 @@ target_compile_definitions(ParseAnchorBoltTests
 # the 土台 / 大引 that supports it. Exercised on synthetic geometry/STEP snippets and the
 # checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseFloorPostTests ParseFloorPostTests.cpp)
-target_link_libraries(ParseFloorPostTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseFloorPostTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseFloorPostTests ParseFloorPostTests.cpp CORE FIXTURES)
 
 # Fire-brace (火打) parsing (src/parse/FireBrace): vertically extruded IfcBeam / IfcMember named
 # 火打… -> 鋼製火打 symbols on the beam layer — the two end faces picked out of the footprint by
@@ -344,30 +316,21 @@ target_compile_definitions(ParseFloorPostTests
 # point, and the angle bisector plus the symbol's 45-degree orientation offset. Exercised on
 # synthetic footprints/STEP snippets and the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseFireBraceTests ParseFireBraceTests.cpp)
-target_link_libraries(ParseFireBraceTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseFireBraceTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseFireBraceTests ParseFireBraceTests.cpp CORE FIXTURES)
 
 # Joint (仕口) parsing (src/parse/Joint): the only parse module that never touches IFC — it reads
 # the finished member/column commands and marks the beam ends that actually land on a receiving
 # member or column (parallel splices, other layers and separated Z ranges excluded; 登り梁 alone
 # may reach across layers). Exercised on synthetic commands and the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseJointTests ParseJointTests.cpp)
-target_link_libraries(ParseJointTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseJointTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseJointTests ParseJointTests.cpp CORE FIXTURES)
 
 # Column marks (src/parse/ColumnMark): the section marks (× / ／ drawn as plain lines on the
 # column's own span layer) and the plan marks (VW data tags on the independent "{to}-柱伏図記号"
 # layer). Like the joints, this module never touches IFC — the marks are derived from the finished
 # column commands, so the whole thing is exercised on synthetic commands plus the fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseColumnMarkTests ParseColumnMarkTests.cpp)
-target_link_libraries(ParseColumnMarkTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseColumnMarkTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseColumnMarkTests ParseColumnMarkTests.cpp CORE FIXTURES)
 
 # Shared parse context (src/parse/Context): the per-import cache that lets every
 # element's build*Commands reuse the same stories / grid centre / storey elements /
@@ -375,20 +338,14 @@ target_compile_definitions(ParseColumnMarkTests
 # answers are stable across repeated calls AND identical to the uncached functions —
 # the cache must not change behaviour. Exercised on the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
-vw_add_test(ParseContextTests ParseContextTests.cpp)
-target_link_libraries(ParseContextTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseContextTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseContextTests ParseContextTests.cpp CORE FIXTURES)
 
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
 # types and formats them into the dialog text the import command shows. SDK-free —
 # the counting + formatting is tested here; only the file picker and the alert
 # itself live in the SDK menu command. HOMESKZ_FIXTURES_DIR points the file-based
 # cases at the checked-in fixtures (tests/fixtures/).
-vw_add_test(ParseSummaryTests ParseSummaryTests.cpp)
-target_link_libraries(ParseSummaryTests PRIVATE HomeskzIfcCore)
-target_compile_definitions(ParseSummaryTests
-						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+vw_add_test(ParseSummaryTests ParseSummaryTests.cpp CORE FIXTURES)
 
 # --- 並列実行（ctest -j）の詰め方 ---------------------------------------------
 # ctest は COST の降順にテストを開始する。COST が無いと前回の実行の実測

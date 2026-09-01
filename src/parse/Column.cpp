@@ -8,6 +8,7 @@
 #include "parse/Column.h"
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
+#include "parse/IfcGeometry.h"
 #include "parse/Member.h"
 #include "parse/Story.h"
 #include "parse/StructuralClass.h"
@@ -152,20 +153,11 @@ namespace HomeskzIfcImport::parse
 
 	bool columnPosition2D(const Model& model, const Entity& element, Vec2& out)
 	{
-		const Entity* placement = model.resolve(element.attribute(attr::kProductObjectPlacement));
-		if (placement == nullptr || placement->type != "IFCLOCALPLACEMENT")
+		// ローカル配置原点の XY（鎖の解決は parse/IfcGeometry の resolveLocalPlacementOrigin）。
+		LocalOrigin origin;
+		if (!resolveLocalPlacementOrigin(model, element, origin))
 			return false;
-		const Entity* axis =
-			model.resolve(placement->attribute(attr::kLocalPlacementRelativePlacement));
-		if (axis == nullptr || axis->type != "IFCAXIS2PLACEMENT3D")
-			return false;
-		const Entity* point = model.resolve(axis->attribute(attr::kAxis2PlacementLocation));
-		if (point == nullptr)
-			return false;
-		const Value& coords = point->attribute(attr::kCartesianPointCoordinates);
-		if (!coords.isList() || coords.items.size() < 2)
-			return false;
-		out = Vec2{coords.items[0].asReal(), coords.items[1].asReal()};
+		out = Vec2{origin.x, origin.y};
 		return true;
 	}
 
@@ -309,7 +301,7 @@ namespace HomeskzIfcImport::parse
 												   const std::vector<MemberCommand>& members)
 	{
 		const Model& model = context.model();
-		const std::vector<StoryInfo> stories = context.stories();
+		const std::vector<StoryInfo>& stories = context.stories();
 		if (stories.empty())
 			return {};
 
@@ -321,8 +313,7 @@ namespace HomeskzIfcImport::parse
 		std::vector<double> beamTopAbs;
 		beamTopAbs.reserve(stories.size());
 		for (const StoryInfo& story : stories)
-			beamTopAbs.push_back(story.isTop ? story.elevation
-											 : story.elevation + story.beamOffset);
+			beamTopAbs.push_back(beamTopElevation(story));
 
 		// 各階の横架材（床梁）下端の最小値。span の to レベル判定の境界に使う（母屋・登り梁の
 		// 専用レイヤは含めず、横架材天端／軒高レイヤの床梁だけを見る）。梁が無い階は天端で代用。
@@ -330,16 +321,14 @@ namespace HomeskzIfcImport::parse
 		beamBottoms.reserve(stories.size());
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
-			const std::string beamLayer =
-				storyLayerName(i, stories[i].isTop, stories[i].isTop ? kLevelEaves : kLevelBeamTop);
+			const std::string beamLayer = beamTopLayerName(i, stories[i]);
 			bool found = false;
 			double lowest = 0.0;
 			for (const MemberCommand& member : members)
 			{
 				if (member.layer != beamLayer)
 					continue;
-				const double bottom =
-					std::min(member.elevation, member.endElevation) - member.height;
+				const double bottom = core::memberBottomZ(member);
 				if (!found || bottom < lowest)
 					lowest = bottom;
 				found = true;
@@ -420,7 +409,7 @@ namespace HomeskzIfcImport::parse
 				// offset はバインド先レベルの絶対 Z から実際の下端／上端 Z までの距離。
 				// **実体の高さはパス（下端 → 上端の鉛直線）が担い**、バインドは高さの基準を
 				// 与える（ヘッダ冒頭「高さはパスのジオメトリ…」）。
-				const char* currentLevel = story.isTop ? kLevelEaves : kLevelBeamTop;
+				const char* currentLevel = beamTopLevelType(story.isTop);
 				const double bottomOffset = bottomAbs - beamTopAbs[i];
 
 				// **上端は受ける横架材の天端（＝その芯線）に取り、梁せいぶんを端部オフセット
@@ -470,7 +459,7 @@ namespace HomeskzIfcImport::parse
 					// 管柱は seatTop がそのレベルそのものなので offset 0、通し柱は上の階の
 					// 横架材天端まで届くぶんだけ正になる。
 					const bool nextIsTop = (i + 1 == static_cast<std::size_t>(topIndex));
-					const char* nextLevel = nextIsTop ? kLevelEaves : kLevelBeamTop;
+					const char* nextLevel = beamTopLevelType(nextIsTop);
 					cmd.topBound = StoryBoundCommand{1, nextLevel, seatTop - beamTopAbs[i + 1]};
 				}
 				commands.push_back(std::move(cmd));

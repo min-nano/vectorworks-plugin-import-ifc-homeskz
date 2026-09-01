@@ -19,6 +19,7 @@
 
 #include "core/Geometry.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -183,6 +184,17 @@ namespace HomeskzIfcImport::core
 		std::string drawClass;
 		double thickness = 0.0;
 	};
+
+	// 構成層の総厚（スラブ厚・壁厚）。**この計算はここに 1 つだけ置く**——検証
+	// （isValid* の「総厚 > 0」）・断面の高さ範囲（床下端）・基礎の床付け深さ
+	// （parse/Footing）が同じ合計を要り、かつて各所が同じループを持っていた。
+	inline double totalThickness(const std::vector<ComponentCommand>& components)
+	{
+		double total = 0.0;
+		for (const ComponentCommand& component : components)
+			total += component.thickness;
+		return total;
+	}
 
 	// 床板（IfcSlab "床版"）を描く命令。draw/Floor がこれをスラブオブジェクトへ変換する（床は
 	// 床ツールではなく**スラブ**で描く。BIM オブジェクトとして構成層・スタイル・データ連携を
@@ -399,6 +411,28 @@ namespace HomeskzIfcImport::core
 		double startOffset = 0.0;
 		double endOffset = 0.0;
 	};
+
+	// 横架材の実体が占める Z 範囲。elevation / endElevation は**天端** Z で傾斜梁は両端で
+	// 異なるため、上端は両者の大きい方・下端は小さい方から背を引いた値になる。仕口の
+	// 取り付き判定（parse/Joint）・登り梁の受け材判定（parse/Noboribari）・柱下端の算出
+	// （parse/Column）が同じ式を要り、かつて各所が同じ 2 行を持っていた。
+	inline double memberTopZ(const MemberCommand& member)
+	{
+		return std::max(member.elevation, member.endElevation);
+	}
+
+	inline double memberBottomZ(const MemberCommand& member)
+	{
+		return std::min(member.elevation, member.endElevation) - member.height;
+	}
+
+	// 2 つの Z 範囲 [aBottom, aTop] と [bBottom, bTop] が tol を超えて重なるか。tol は
+	// 「重なりと呼ぶ最小量」で、要素ごとに意味が違う（仕口の取り付き・登り梁の受け・
+	// 横架材の食い込み）ので**呼び出し側の定数のまま**渡す——ここへ統合しないこと。
+	inline bool zRangesOverlap(double aBottom, double aTop, double bBottom, double bTop, double tol)
+	{
+		return std::min(aTop, bTop) - std::max(aBottom, bBottom) > tol;
+	}
 
 	// 柱（構造材ツール StructuralMember）を鉛直材として描く命令。draw/Column がこれを構造材
 	// オブジェクトへ変換する（docs/DEV-NOTES.md M8）。管柱・通し柱・小屋束をこの命令で表し、

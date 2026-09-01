@@ -325,48 +325,46 @@ TEST(walls_are_cached_and_match_the_plain_call)
 
 TEST(context_backed_commands_match_the_plain_commands)
 {
-	for (const std::string& name : HomeskzIfcTests::allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		// 1 つのコンテキストを全要素で共有した結果（＝buildDocument と同じ経路）と、
-		// 要素ごとに作り直した結果（＝従来の経路）が一致すること。
-		Context shared(model);
-		const std::vector<core::StoryCommand> stories = parse::buildStoryCommands(shared);
-		const std::vector<core::GridCommand> grids = parse::buildGridCommands(shared);
-		const std::vector<core::FloorCommand> floors = parse::buildFloorCommands(shared);
-		const std::vector<core::MemberCommand> members = parse::buildMemberCommands(shared);
-		const std::vector<core::RafterCommand> rafters = parse::buildRafterCommands(shared);
-		const std::vector<core::RoofCommand> roofs = parse::buildRoofCommands(shared);
-		const std::vector<core::SlabCommand> slabs =
-			parse::buildSlabCommands(shared, shared.walls());
-		// M11 シンボル置換系（仕口は命令から導出するのでコンテキストを取らない）。
-		const std::vector<core::SymbolCommand> bolts = parse::buildAnchorBoltCommands(shared);
-		const std::vector<core::SymbolCommand> posts = parse::buildFloorPostCommands(shared);
-		const std::vector<core::SymbolCommand> braces = parse::buildFireBraceCommands(shared);
-
-		CHECK_EQ(stories.size(), parse::buildStoryCommands(model).size());
-		CHECK_EQ(slabs.size(), parse::buildSlabCommands(model).size());
-		CHECK_EQ(bolts.size(), parse::buildAnchorBoltCommands(model).size());
-		CHECK_EQ(posts.size(), parse::buildFloorPostCommands(model).size());
-		CHECK_EQ(braces.size(), parse::buildFireBraceCommands(model).size());
-		CHECK_EQ(grids.size(), parse::buildGridCommands(model).size());
-		CHECK_EQ(members.size(), parse::buildMemberCommands(model).size());
-		CHECK_EQ(rafters.size(), parse::buildRafterCommands(model).size());
-		CHECK_EQ(roofs.size(), parse::buildRoofCommands(model).size());
-
-		const std::vector<core::FloorCommand> plainFloors = parse::buildFloorCommands(model);
-		CHECK_EQ(floors.size(), plainFloors.size());
-		for (std::size_t i = 0; i < floors.size(); ++i)
+	HomeskzIfcTests::forEachFixture(
+		failures,
+		[&](const std::string&, const Model& model)
 		{
-			CHECK_EQ(floors[i].layer, plainFloors[i].layer);
-			CHECK_EQ(floors[i].boundary.size(), plainFloors[i].boundary.size());
-			CHECK(near(floors[i].elevation, plainFloors[i].elevation));
-			CHECK(near(floors[i].bound.offset, plainFloors[i].bound.offset));
-		}
-	}
+			// 1 つのコンテキストを全要素で共有した結果（＝buildDocument と同じ経路）と、
+			// 要素ごとに作り直した結果（＝従来の経路）が一致すること。
+			Context shared(model);
+			const std::vector<core::StoryCommand> stories = parse::buildStoryCommands(shared);
+			const std::vector<core::GridCommand> grids = parse::buildGridCommands(shared);
+			const std::vector<core::FloorCommand> floors = parse::buildFloorCommands(shared);
+			const std::vector<core::MemberCommand> members = parse::buildMemberCommands(shared);
+			const std::vector<core::RafterCommand> rafters = parse::buildRafterCommands(shared);
+			const std::vector<core::RoofCommand> roofs = parse::buildRoofCommands(shared);
+			const std::vector<core::SlabCommand> slabs =
+				parse::buildSlabCommands(shared, shared.walls());
+			// M11 シンボル置換系（仕口は命令から導出するのでコンテキストを取らない）。
+			const std::vector<core::SymbolCommand> bolts = parse::buildAnchorBoltCommands(shared);
+			const std::vector<core::SymbolCommand> posts = parse::buildFloorPostCommands(shared);
+			const std::vector<core::SymbolCommand> braces = parse::buildFireBraceCommands(shared);
+
+			CHECK_EQ(stories.size(), parse::buildStoryCommands(model).size());
+			CHECK_EQ(slabs.size(), parse::buildSlabCommands(model).size());
+			CHECK_EQ(bolts.size(), parse::buildAnchorBoltCommands(model).size());
+			CHECK_EQ(posts.size(), parse::buildFloorPostCommands(model).size());
+			CHECK_EQ(braces.size(), parse::buildFireBraceCommands(model).size());
+			CHECK_EQ(grids.size(), parse::buildGridCommands(model).size());
+			CHECK_EQ(members.size(), parse::buildMemberCommands(model).size());
+			CHECK_EQ(rafters.size(), parse::buildRafterCommands(model).size());
+			CHECK_EQ(roofs.size(), parse::buildRoofCommands(model).size());
+
+			const std::vector<core::FloorCommand> plainFloors = parse::buildFloorCommands(model);
+			CHECK_EQ(floors.size(), plainFloors.size());
+			for (std::size_t i = 0; i < floors.size(); ++i)
+			{
+				CHECK_EQ(floors[i].layer, plainFloors[i].layer);
+				CHECK_EQ(floors[i].boundary.size(), plainFloors[i].boundary.size());
+				CHECK(near(floors[i].elevation, plainFloors[i].elevation));
+				CHECK(near(floors[i].bound.offset, plainFloors[i].bound.offset));
+			}
+		});
 }
 
 TEST_MAIN();

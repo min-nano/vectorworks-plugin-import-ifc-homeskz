@@ -50,20 +50,13 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<NoboribariRoofPlane> collectRoofPlanes(Context& context)
 	{
-		const Model& model = context.model();
 		std::vector<NoboribariRoofPlane> planes;
 		for (const StoryInfo& story : context.stories())
 		{
-			for (const int elementId : context.storyElements(story.id))
+			// 屋根面の走査は垂木・野地板と共有する（Context::storyRoofPlanes。解決も
+			// コンテキストが 1 度だけ行う）。
+			for (const RoofPlane* plane : context.storyRoofPlanes(story.id))
 			{
-				const Entity* element = model.entity(elementId);
-				if (element == nullptr || !isRoofSlab(*element))
-					continue;
-
-				// 屋根面は垂木・野地板と共有する（コンテキストが 1 度だけ解決する）。
-				const RoofPlane* plane = context.roofPlane(elementId);
-				if (plane == nullptr)
-					continue;
 				// 勾配方向が定まらない面（ほぼ水平）と平面式が発散する面（鉛直）は roofSlope が
 				// 弾く。垂木・野地板とまったく同じ関門なので、拾う面が三者でズレない。
 				RoofSlope slope;
@@ -163,10 +156,8 @@ namespace HomeskzIfcImport::parse
 			if (length < kNoboribariMinLength)
 				continue; // 平面投影長が極小の受け材は無視する
 
-			const double top = std::max(receiver.elevation, receiver.endElevation);
-			const double bottom =
-				std::min(receiver.elevation, receiver.endElevation) - receiver.height;
-			if (std::min(zTop, top) - std::max(zBottom, bottom) <= kNoboribariZOverlapTol)
+			if (!core::zRangesOverlap(zBottom, zTop, core::memberBottomZ(receiver),
+									  core::memberTopZ(receiver), kNoboribariZOverlapTol))
 				continue; // Z 範囲が離れた材は取り合いでない
 
 			best = std::max(best, memberPenetrationDepth(point, outward, receiverStart,
@@ -179,10 +170,8 @@ namespace HomeskzIfcImport::parse
 		// ぶん高く見える）。
 		for (const core::ColumnCommand& column : columns)
 		{
-			const double columnTop = core::columnDrawnTop(column);
-			const double columnBottom = core::columnDrawnBottom(column);
-			if (std::min(zTop, columnTop) - std::max(zBottom, columnBottom) <=
-				kNoboribariZOverlapTol)
+			if (!core::zRangesOverlap(zBottom, zTop, core::columnDrawnBottom(column),
+									  core::columnDrawnTop(column), kNoboribariZOverlapTol))
 				continue; // Z 範囲が離れた柱は取り合いでない
 			best = std::max(best, noboribariColumnPenetration(point, outward, column));
 		}
@@ -203,8 +192,8 @@ namespace HomeskzIfcImport::parse
 		const Vec2 axis{dx / length, dy / length};
 		const Vec2 backward{-axis.x, -axis.y};
 
-		const double zTop = std::max(command.elevation, command.endElevation);
-		const double zBottom = std::min(command.elevation, command.endElevation) - command.height;
+		const double zTop = core::memberTopZ(command);
+		const double zBottom = core::memberBottomZ(command);
 
 		// 1. 端部の食い込み解消: 始端は外向き −u、終端は外向き +u。詰めた後に極小長に
 		//    ならない範囲で端点を軸に沿って内側へ引き戻す。

@@ -14,6 +14,7 @@
 //
 
 #include "Fixtures.h"
+#include "StepText.h"
 #include "TestFramework.h"
 
 #include "core/Document.h"
@@ -51,76 +52,26 @@ using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::resolveMemberInterferences;
 using HomeskzIfcImport::parse::slopedMemberGeometry;
 using HomeskzIfcImport::parse::SlopedMemberGeometry;
-using HomeskzIfcTests::allFixtures;
+using HomeskzIfcTests::contain;
+using HomeskzIfcTests::direction;
 using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::forEachFixture;
+using HomeskzIfcTests::makeStorey;
 using HomeskzIfcTests::near;
+using HomeskzIfcTests::num;
+using HomeskzIfcTests::point2;
+using HomeskzIfcTests::point3;
+using HomeskzIfcTests::ref;
+using HomeskzIfcTests::StepText;
 
 namespace
 {
 	// -----------------------------------------------------------------------
 	// 合成 IFC（STEP テキスト）の組み立て（ストーリ・梁・傾斜梁・通り芯の最小構成）。
+	// 器と汎用ヘルパー（StepText / num / ref / point* / direction / makeStorey /
+	// contain）は tests/StepText.h の共有定義を使う。ここに残るのは梁の要素固有の
+	// 組み立てだけ。
 	// -----------------------------------------------------------------------
-
-	// #id を採番しながら STEP 行を溜めるだけの器。
-	class StepText
-	{
-	public:
-		int add(const std::string& body)
-		{
-			const int id = fNext++;
-			fText += "#" + std::to_string(id) + "=" + body + ";\n";
-			return id;
-		}
-
-		Model build() const
-		{
-			return loadIfcFromText(fText);
-		}
-
-	private:
-		int fNext = 1;
-		std::string fText;
-	};
-
-	std::string num(double value)
-	{
-		return std::to_string(value);
-	}
-
-	std::string ref(int id)
-	{
-		return "#" + std::to_string(id);
-	}
-
-	int point3(StepText& step, double x, double y, double z)
-	{
-		return step.add("IFCCARTESIANPOINT((" + num(x) + "," + num(y) + "," + num(z) + "))");
-	}
-
-	int point2(StepText& step, double x, double y)
-	{
-		return step.add("IFCCARTESIANPOINT((" + num(x) + "," + num(y) + "))");
-	}
-
-	int direction(StepText& step, double x, double y, double z)
-	{
-		return step.add("IFCDIRECTION((" + num(x) + "," + num(y) + "," + num(z) + "))");
-	}
-
-	// IfcBuildingStorey(GlobalId, OwnerHistory, Name=2, Description, ObjectType,
-	// ObjectPlacement, Representation, LongName, CompositionType, Elevation=9)。
-	int makeStorey(StepText& step, const std::string& name, double elevation)
-	{
-		return step.add("IFCBUILDINGSTOREY('s',$,'" + name + "',$,$,$,$,$,.ELEMENT.," +
-						num(elevation) + ")");
-	}
-
-	// 要素を階へ所属させる（IfcRelContainedInSpatialStructure）。
-	void contain(StepText& step, int storey, int element)
-	{
-		step.add("IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(" + ref(element) + ")," +
-				 ref(storey) + ")");
-	}
 
 	// 矩形断面の横架材。
 	struct BeamSpec
@@ -1692,29 +1643,24 @@ TEST(six_point_profile_beam_skipped)
 
 TEST(fixtures_produce_members_with_valid_fields)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		if (!ok)
-			continue;
-
-		const std::vector<MemberCommand> members = buildMemberCommands(model);
-		CHECK(!members.empty());
-		for (const MemberCommand& m : members)
-		{
-			CHECK(!m.layer.empty());
-			CHECK(!m.drawClass.empty());
-			CHECK(!m.memberId.empty());
-			CHECK(m.width > 0.0);
-			CHECK(m.height > 0.0);
-			CHECK(!m.startBound.level.empty());
-			CHECK(!m.endBound.level.empty());
-			// 天端中央線が縮退していない（描けない命令を出さない）。
-			CHECK(std::hypot(m.end.x - m.start.x, m.end.y - m.start.y) > 0.0);
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<MemberCommand> members = buildMemberCommands(model);
+					   CHECK(!members.empty());
+					   for (const MemberCommand& m : members)
+					   {
+						   CHECK(!m.layer.empty());
+						   CHECK(!m.drawClass.empty());
+						   CHECK(!m.memberId.empty());
+						   CHECK(m.width > 0.0);
+						   CHECK(m.height > 0.0);
+						   CHECK(!m.startBound.level.empty());
+						   CHECK(!m.endBound.level.empty());
+						   // 天端中央線が縮退していない（描けない命令を出さない）。
+						   CHECK(std::hypot(m.end.x - m.start.x, m.end.y - m.start.y) > 0.0);
+					   }
+				   });
 }
 
 TEST(fixture_member_end_offsets_land_on_the_winner_centreline)
@@ -1724,25 +1670,21 @@ TEST(fixture_member_end_offsets_land_on_the_winner_centreline)
 	//   * 実際に描かれる長さ（パス長 ＋ 両端のオフセット）は正のまま、
 	//   * オフセットの入った端が**必ず出る**（0 件ならこの調整は何も効いていない）。
 	std::size_t adjusted = 0;
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		if (!ok)
-			continue;
-
-		for (const MemberCommand& m : buildMemberCommands(model))
-		{
-			CHECK(m.startOffset <= 0.0);
-			CHECK(m.endOffset <= 0.0);
-			const double drawn =
-				std::hypot(m.end.x - m.start.x, m.end.y - m.start.y) + m.startOffset + m.endOffset;
-			CHECK(drawn > 0.0);
-			if (m.startOffset < 0.0 || m.endOffset < 0.0)
-				++adjusted;
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   for (const MemberCommand& m : buildMemberCommands(model))
+					   {
+						   CHECK(m.startOffset <= 0.0);
+						   CHECK(m.endOffset <= 0.0);
+						   const double drawn =
+							   std::hypot(m.end.x - m.start.x, m.end.y - m.start.y) +
+							   m.startOffset + m.endOffset;
+						   CHECK(drawn > 0.0);
+						   if (m.startOffset < 0.0 || m.endOffset < 0.0)
+							   ++adjusted;
+					   }
+				   });
 	CHECK(adjusted > 0);
 }
 

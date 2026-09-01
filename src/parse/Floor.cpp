@@ -36,13 +36,8 @@ namespace HomeskzIfcImport::parse
 
 	bool storyHasFloorSlab(Context& context, int storeyId)
 	{
-		const Model& model = context.model();
-		return std::ranges::any_of(context.storyElements(storeyId),
-								   [&model](int elementId)
-								   {
-									   const Entity* element = model.entity(elementId);
-									   return element != nullptr && isFloorSlab(*element);
-								   });
+		// 走査は屋根版の有無（parse/Rafter）と共有する（parse/Story の storyHasElement）。
+		return storyHasElement(context, storeyId, isFloorSlab);
 	}
 
 	bool storyHasFloorSlab(const Model& model, int storeyId)
@@ -116,7 +111,7 @@ namespace HomeskzIfcImport::parse
 	std::vector<FloorCommand> buildFloorCommands(Context& context)
 	{
 		const Model& model = context.model();
-		const std::vector<StoryInfo> stories = context.stories();
+		const std::vector<StoryInfo>& stories = context.stories();
 		if (stories.empty())
 			return {};
 
@@ -135,8 +130,7 @@ namespace HomeskzIfcImport::parse
 
 			// 床を受ける基準高さ（横架材天端＝床下地の下端）の絶対 Z。段差床はここからの
 			// 高低差でずれる。屋根階は軒高（ストーリ原点）がその高さにあたる。
-			const double beamTopAbs =
-				story.isTop ? story.elevation : story.elevation + story.beamOffset;
+			const double beamTopAbs = beamTopElevation(story);
 
 			// スラブ構成: 上から 床仕上げ ＋ 床下地（24mm 固定）。総厚は
 			//   一般階 … FL 高さ − 横架材天端高さ（下端が横架材天端・上端が FL に収まる）

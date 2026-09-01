@@ -20,8 +20,7 @@ namespace HomeskzIfcImport::parse
 
 	bool isAnchorBoltType(const std::string& typeName)
 	{
-		const std::string prefix(kAnchorBoltTypePrefix);
-		return typeName.size() >= prefix.size() && typeName.compare(0, prefix.size(), prefix) == 0;
+		return typeName.starts_with(kAnchorBoltTypePrefix);
 	}
 
 	std::string resolveAnchorBoltSymbol(const std::string& typeName)

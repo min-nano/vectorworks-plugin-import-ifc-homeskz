@@ -50,20 +50,13 @@ namespace HomeskzIfcImport::parse
 		if (element.type != "IFCSLAB")
 			return false;
 		// IfcSlab で Name が "屋根版" で始まるものを屋根版とみなす。
-		const std::string name = entityName(element);
-		const std::string prefix(kRoofSlabPrefix);
-		return name.size() >= prefix.size() && name.compare(0, prefix.size(), prefix) == 0;
+		return entityName(element).starts_with(kRoofSlabPrefix);
 	}
 
 	bool storyHasRoofSlab(Context& context, int storeyId)
 	{
-		const Model& model = context.model();
-		return std::ranges::any_of(context.storyElements(storeyId),
-								   [&model](int elementId)
-								   {
-									   const Entity* element = model.entity(elementId);
-									   return element != nullptr && isRoofSlab(*element);
-								   });
+		// 走査は床版の有無（parse/Floor）と共有する（parse/Story の storyHasElement）。
+		return storyHasElement(context, storeyId, isRoofSlab);
 	}
 
 	bool storyHasRoofSlab(const Model& model, int storeyId)
@@ -319,8 +312,7 @@ namespace HomeskzIfcImport::parse
 	std::vector<RafterCommand> buildRafterCommands(Context& context,
 												   const std::vector<core::MemberCommand>& members)
 	{
-		const Model& model = context.model();
-		const std::vector<StoryInfo> stories = context.stories();
+		const std::vector<StoryInfo>& stories = context.stories();
 		if (stories.empty())
 			return {};
 
@@ -333,28 +325,20 @@ namespace HomeskzIfcImport::parse
 			const StoryInfo& story = stories[i];
 			const std::string layer = storyLayerName(i, story.isTop, kLevelTaruki);
 			// 支持点が乗る横架材天端の絶対 Z（最上階は軒高＝オフセット 0）。
-			const double beamTopZ =
-				story.isTop ? story.elevation : story.elevation + story.beamOffset;
+			const double beamTopZ = beamTopElevation(story);
 			// 桁幅の参照先は同じ階の横架材だけ（レイヤ接頭辞 "{n}-" で絞る）。
 			const std::string layerPrefix = storyLayerPrefix(i, story.isTop) + "-";
 			std::vector<core::MemberCommand> storyMembers;
 			for (const core::MemberCommand& member : members)
 			{
-				if (member.layer.compare(0, layerPrefix.size(), layerPrefix) == 0)
+				if (member.layer.starts_with(layerPrefix))
 					storyMembers.push_back(member);
 			}
 
-			for (const int elementId : context.storyElements(story.id))
+			// 屋根面の走査は野地板・登り梁と共有する（Context::storyRoofPlanes。解決も
+			// コンテキストが 1 度だけ行う）。
+			for (const RoofPlane* plane : context.storyRoofPlanes(story.id))
 			{
-				const Entity* element = model.entity(elementId);
-				if (element == nullptr || !isRoofSlab(*element))
-					continue;
-
-				// 屋根面は野地板（parse/Roof）と共有する（コンテキストが 1 度だけ解決する）。
-				const RoofPlane* plane = context.roofPlane(elementId);
-				if (plane == nullptr)
-					continue; // 屋根面を解決できない屋根版はスキップ
-
 				std::vector<RafterCommand> rafters =
 					raftersForPlane(*plane, layer, story.elevation, center, beamTopZ, storyMembers);
 				for (RafterCommand& rafter : rafters)

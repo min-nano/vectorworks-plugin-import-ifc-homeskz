@@ -52,8 +52,8 @@ using HomeskzIfcImport::parse::raftersForPlane;
 using HomeskzIfcImport::parse::RoofPlane;
 using HomeskzIfcImport::parse::storyHasRoofSlab;
 using HomeskzIfcImport::parse::sweepPositions;
-using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::forEachFixture;
 using HomeskzIfcTests::minimalRoofText;
 using HomeskzIfcTests::near;
 using HomeskzIfcTests::shedPlane;
@@ -336,32 +336,28 @@ TEST(no_degenerate_rafters_in_any_fixture)
 	// サンプル1 で 8 本・グレー本モデルプラン1 で 7 本の縮退垂木が出ており、
 	// validateDocument がその 2 モデルの Document 全体を弾いていた（＝インポートしても
 	// 何も描かれなかった）。core::samePoint は validateDocument の isValidRafter と同じ述語。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		for (const RafterCommand& rafter : buildRafterCommands(model))
-			CHECK(!core::samePoint(rafter.start, rafter.end));
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   for (const RafterCommand& rafter : buildRafterCommands(model))
+						   CHECK(!core::samePoint(rafter.start, rafter.end));
+				   });
 }
 
 TEST(rafters_without_girder_support_have_no_extra_length_in_any_fixture)
 {
 	// 軒桁に乗らない垂木（embedment 0）は軒の出も 0 で、OIP のスパン（start→end の水平
 	// 投影長）がそのまま部材長になる＝**長さと高さが実形状と一致**する。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		for (const RafterCommand& rafter : buildRafterCommands(model))
-		{
-			if (rafter.embedment != 0.0)
-				continue;
-			CHECK(near(rafter.overhang, 0.0));
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   for (const RafterCommand& rafter : buildRafterCommands(model))
+					   {
+						   if (rafter.embedment != 0.0)
+							   continue;
+						   CHECK(near(rafter.overhang, 0.0));
+					   }
+				   });
 }
 
 TEST(non_convex_face_splits_into_multiple_segments)

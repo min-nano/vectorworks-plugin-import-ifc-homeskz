@@ -10,6 +10,7 @@
 //
 
 #include "parse/Footing.h"
+#include "core/UnionFind.h"
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
@@ -46,26 +47,6 @@ namespace HomeskzIfcImport::parse
 	{
 		// --- 小さな共通ヘルパー ---------------------------------------------------
 
-		// 名前が prefix で始まるか。
-		bool startsWith(const std::string& name, const std::string& prefix)
-		{
-			return name.size() >= prefix.size() && name.compare(0, prefix.size(), prefix) == 0;
-		}
-
-		// 多角形の面積（絶対値）。
-		double shoelaceArea(const std::vector<Vec2>& pts)
-		{
-			double total = 0.0;
-			const std::size_t n = pts.size();
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const Vec2& a = pts[i];
-				const Vec2& b = pts[(i + 1) % n];
-				total += (a.x * b.y) - (b.x * a.y);
-			}
-			return std::abs(total) / 2.0;
-		}
-
 		// 符号付き面積（CCW で正・CW で負）。
 		double shoelaceSigned(const std::vector<Vec2>& pts)
 		{
@@ -78,6 +59,12 @@ namespace HomeskzIfcImport::parse
 				total += (a.x * b.y) - (b.x * a.y);
 			}
 			return total / 2.0;
+		}
+
+		// 多角形の面積（絶対値）。符号付き面積の絶対値（同じループを 2 つ持たない）。
+		double shoelaceArea(const std::vector<Vec2>& pts)
+		{
+			return std::abs(shoelaceSigned(pts));
 		}
 
 		// 許容値で丸めた整数キー（グループ化の鍵）。std::llround は 0.5 を 0 から離れる向きへ
@@ -120,8 +107,8 @@ namespace HomeskzIfcImport::parse
 		{
 			const Vec2 da = a.end - a.start;
 			const Vec2 db = b.end - b.start;
-			const double la = std::hypot(da.x, da.y);
-			const double lb = std::hypot(db.x, db.y);
+			const double la = core::length(da);
+			const double lb = core::length(db);
 			if (la <= 0.0 || lb <= 0.0)
 				return false;
 			const double ux = da.x / la;
@@ -149,83 +136,33 @@ namespace HomeskzIfcImport::parse
 			double hi = 0.0;
 			if (!wallsOnSameLine(a, b, lo, hi))
 				return false;
-			const double la = std::hypot(a.end.x - a.start.x, a.end.y - a.start.y);
+			const double la = core::distance(a.start, a.end);
 			return hi >= -kWallMergeDistTol && lo <= la + kWallMergeDistTol;
 		}
 
-		// Union-Find の根を返す（経路圧縮つき）。
-		std::size_t findRoot(std::vector<std::size_t>& parent, std::size_t a)
-		{
-			while (parent[a] != a)
-			{
-				parent[a] = parent[parent[a]];
-				a = parent[a];
-			}
-			return a;
-		}
-
-		// 同一断面の立上り群のうち、同一直線上で連続するものを 1 本に統合する。成分の代表は最
-		// 小インデックスで、出力は代表インデックス昇順＝入力順に準ずる（列挙順に依存しない決
-		// 定的な並び）。
+		// 同一断面の立上り群のうち、同一直線上で連続するものを 1 本に統合する。連結成分の
+		// 骨格は core/UnionFind の connectedComponents（代表＝最小インデックス・出力は代表
+		// 昇順＝列挙順に依存しない決定的な並び。決定性の担保も同所）。
 		std::vector<WallCommand> mergeWallGroup(const std::vector<WallCommand>& walls)
 		{
-			const std::size_t n = walls.size();
-			std::vector<std::size_t> parent(n);
-			for (std::size_t i = 0; i < n; ++i)
-				parent[i] = i;
-
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				for (std::size_t j = i + 1; j < n; ++j)
-				{
-					if (!wallsConnectedCollinear(walls[i], walls[j]))
-						continue;
-					const std::size_t ri = findRoot(parent, i);
-					const std::size_t rj = findRoot(parent, j);
-					if (ri != rj)
-						parent[std::max(ri, rj)] = std::min(ri, rj);
-				}
-			}
-
-			std::map<std::size_t, std::vector<std::size_t>> components;
-			for (std::size_t i = 0; i < n; ++i)
-				components[findRoot(parent, i)].push_back(i);
+			const std::vector<std::vector<std::size_t>> components =
+				core::connectedComponents(walls.size(), [&walls](std::size_t i, std::size_t j)
+										  { return wallsConnectedCollinear(walls[i], walls[j]); });
 
 			std::vector<WallCommand> merged;
 			merged.reserve(components.size());
-			for (const auto& component : components)
+			for (const std::vector<std::size_t>& indices : components)
 			{
-				const std::vector<std::size_t>& indices = component.second;
 				const WallCommand& base = walls[indices.front()];
 				if (indices.size() == 1)
 				{
 					merged.push_back(base);
 					continue;
 				}
-				// 先頭の壁芯方向へ全端点を射影し、最小〜最大区間の 1 本にする
-				// （高さ基準・壁厚・クラスは先頭のものを引き継ぐ）。
-				const Vec2 axis = base.end - base.start;
-				const double la = std::hypot(axis.x, axis.y);
-				const double ux = axis.x / la;
-				const double uy = axis.y / la;
-				double lo = 0.0;
-				double hi = 0.0;
-				bool first = true;
-				for (const std::size_t index : indices)
-				{
-					for (const Vec2& p : {walls[index].start, walls[index].end})
-					{
-						const double t = (ux * (p.x - base.start.x)) + (uy * (p.y - base.start.y));
-						if (first || t < lo)
-							lo = t;
-						if (first || t > hi)
-							hi = t;
-						first = false;
-					}
-				}
+				// 先頭の壁芯方向へ全端点を射影し、最小〜最大区間の 1 本にする（core/Geometry
+				// の collinearSpan。高さ基準・壁厚・クラスは先頭のものを引き継ぐ）。
 				WallCommand cmd = base;
-				cmd.start = Vec2{base.start.x + (ux * lo), base.start.y + (uy * lo)};
-				cmd.end = Vec2{base.start.x + (ux * hi), base.start.y + (uy * hi)};
+				core::collinearSpan(walls, indices, cmd.start, cmd.end);
 				merged.push_back(cmd);
 			}
 			return merged;
@@ -243,8 +180,8 @@ namespace HomeskzIfcImport::parse
 		{
 			const Vec2 r = a.end - a.start;
 			const Vec2 s = b.end - b.start;
-			const double la = std::hypot(r.x, r.y);
-			const double lb = std::hypot(s.x, s.y);
+			const double la = core::length(r);
+			const double lb = core::length(s);
 			if (la <= 0.0 || lb <= 0.0)
 				return false;
 			const double rxs = (r.x * s.y) - (r.y * s.x);
@@ -284,7 +221,7 @@ namespace HomeskzIfcImport::parse
 			double hi = 0.0;
 			if (!wallsOnSameLine(a, b, lo, hi))
 				return; // 平行でない／別の線上
-			const double la = std::hypot(a.end.x - a.start.x, a.end.y - a.start.y);
+			const double la = core::distance(a.start, a.end);
 			if (hi < -kWallMergeDistTol || lo > la + kWallMergeDistTol)
 				return; // 同一直線上だが離れている（隙間がある）＝突き合わせではない
 			// b が a の端へ届いている（接する／越える）側だけを「突き合わせ」とみなす。
@@ -330,7 +267,7 @@ namespace HomeskzIfcImport::parse
 									const WallOpening& opening)
 		{
 			const Vec2 delta = opening.end - opening.start;
-			const double openingLength = std::hypot(delta.x, delta.y);
+			const double openingLength = core::length(delta);
 			if (openingLength <= 0.0)
 				return walls.size();
 			const double oux = delta.x / openingLength;
@@ -342,7 +279,7 @@ namespace HomeskzIfcImport::parse
 			{
 				const WallCommand& wall = walls[i];
 				const Vec2 axis = wall.end - wall.start;
-				const double length = std::hypot(axis.x, axis.y);
+				const double length = core::length(axis);
 				if (length <= 0.0)
 					continue;
 				const double ux = axis.x / length;
@@ -369,7 +306,7 @@ namespace HomeskzIfcImport::parse
 												  double beamTopAbs)
 		{
 			const Vec2 axis = wall.end - wall.start;
-			const double length = std::hypot(axis.x, axis.y);
+			const double length = core::length(axis);
 			if (length <= 0.0)
 				return {wall};
 			const double ux = axis.x / length;
@@ -422,7 +359,7 @@ namespace HomeskzIfcImport::parse
 		bool wallPointAtEnd(const WallCommand& wall, const Vec2& point)
 		{
 			const Vec2 axis = wall.end - wall.start;
-			const double length = std::hypot(axis.x, axis.y);
+			const double length = core::length(axis);
 			if (length <= 0.0)
 				return true;
 			const double t =
@@ -439,7 +376,7 @@ namespace HomeskzIfcImport::parse
 		{
 			const Vec2 target = towardEnd ? wall.end : wall.start;
 			const Vec2 delta = target - junction;
-			const double length = std::hypot(delta.x, delta.y);
+			const double length = core::length(delta);
 			if (length <= 0.0)
 				return junction;
 			const double step = std::min(offset, length * kPickOffsetFrac) / length;
@@ -450,8 +387,8 @@ namespace HomeskzIfcImport::parse
 		// 0 の壁は交点をそのまま返す。
 		Vec2 keptSidePick(const WallCommand& wall, const Vec2& junction, double offset)
 		{
-			const double d1 = std::hypot(wall.start.x - junction.x, wall.start.y - junction.y);
-			const double d2 = std::hypot(wall.end.x - junction.x, wall.end.y - junction.y);
+			const double d1 = core::distance(junction, wall.start);
+			const double d2 = core::distance(junction, wall.end);
 			return sidePick(wall, junction, offset, d2 >= d1);
 		}
 
@@ -500,40 +437,24 @@ namespace HomeskzIfcImport::parse
 				}
 			}
 
-			const std::size_t m = edges.size();
-			std::vector<std::size_t> parent(m);
-			for (std::size_t i = 0; i < m; ++i)
-				parent[i] = i;
-			for (std::size_t p = 0; p < m; ++p)
-			{
-				for (std::size_t q = p + 1; q < m; ++q)
-				{
-					if (std::hypot(edges[p].point.x - edges[q].point.x,
-								   edges[p].point.y - edges[q].point.y) > kJoinClusterTol)
-						continue;
-					const std::size_t rp = findRoot(parent, p);
-					const std::size_t rq = findRoot(parent, q);
-					if (rp != rq)
-						parent[std::max(rp, rq)] = std::min(rp, rq);
-				}
-			}
-
-			std::map<std::size_t, std::vector<std::size_t>> clusters;
-			for (std::size_t p = 0; p < m; ++p)
-				clusters[findRoot(parent, p)].push_back(p);
+			// 交点が近接するエッジ同士を 1 つの交差部にまとめる（連結成分の骨格は
+			// core/UnionFind の connectedComponents）。
+			const std::vector<std::vector<std::size_t>> clusters = core::connectedComponents(
+				edges.size(), [&edges](std::size_t p, std::size_t q)
+				{ return core::distance(edges[p].point, edges[q].point) <= kJoinClusterTol; });
 
 			std::vector<Junction> junctions;
 			junctions.reserve(clusters.size());
-			for (const auto& cluster : clusters)
+			for (const std::vector<std::size_t>& cluster : clusters)
 			{
 				std::set<std::size_t> indices;
-				for (const std::size_t edgeIndex : cluster.second)
+				for (const std::size_t edgeIndex : cluster)
 				{
 					indices.insert(edges[edgeIndex].a);
 					indices.insert(edges[edgeIndex].b);
 				}
 				Junction junction;
-				junction.point = edges[cluster.second.front()].point; // 代表＝最小エッジ添字
+				junction.point = edges[cluster.front()].point; // 代表＝最小エッジ添字
 				junction.walls.assign(indices.begin(), indices.end());
 				junctions.push_back(std::move(junction));
 			}
@@ -644,44 +565,27 @@ namespace HomeskzIfcImport::parse
 			return merged;
 		}
 
-		// 同一断面・同一向きの地中梁群のうち、同一軸線上で連続するものを統合する。
-		// 成分の代表は最小添字で、出力は代表添字昇順。
+		// 同一断面・同一向きの地中梁群のうち、同一軸線上で連続するものを統合する。連結成分の
+		// 骨格は core/UnionFind の connectedComponents（代表＝最小添字・出力は代表添字昇順）。
 		std::vector<core::ModifierCommand>
 		mergeGroundBeamGroup(const std::vector<core::ModifierCommand>& modifiers)
 		{
-			const std::size_t n = modifiers.size();
-			std::vector<std::size_t> parent(n);
-			for (std::size_t i = 0; i < n; ++i)
-				parent[i] = i;
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				for (std::size_t j = i + 1; j < n; ++j)
-				{
-					if (!modifiersCollinear(modifiers[i], modifiers[j]))
-						continue;
-					const std::size_t ri = findRoot(parent, i);
-					const std::size_t rj = findRoot(parent, j);
-					if (ri != rj)
-						parent[std::max(ri, rj)] = std::min(ri, rj);
-				}
-			}
-
-			std::map<std::size_t, std::vector<std::size_t>> components;
-			for (std::size_t i = 0; i < n; ++i)
-				components[findRoot(parent, i)].push_back(i);
+			const std::vector<std::vector<std::size_t>> components = core::connectedComponents(
+				modifiers.size(), [&modifiers](std::size_t i, std::size_t j)
+				{ return modifiersCollinear(modifiers[i], modifiers[j]); });
 
 			std::vector<core::ModifierCommand> merged;
 			merged.reserve(components.size());
-			for (const auto& component : components)
+			for (const std::vector<std::size_t>& component : components)
 			{
-				if (component.second.size() == 1)
+				if (component.size() == 1)
 				{
-					merged.push_back(modifiers[component.second.front()]);
+					merged.push_back(modifiers[component.front()]);
 					continue;
 				}
 				std::vector<core::ModifierCommand> members;
-				members.reserve(component.second.size());
-				for (const std::size_t i : component.second)
+				members.reserve(component.size());
+				for (const std::size_t i : component)
 					members.push_back(modifiers[i]);
 				merged.push_back(mergeGroundBeamComponent(members));
 			}
@@ -1613,7 +1517,7 @@ namespace HomeskzIfcImport::parse
 
 	bool isFoundationWall(const std::string& name)
 	{
-		return startsWith(name, kFoundationWallPrefix);
+		return name.starts_with(kFoundationWallPrefix);
 	}
 
 	bool isGroundBeam(const std::string& name)
@@ -1810,8 +1714,8 @@ namespace HomeskzIfcImport::parse
 		const auto mark = [&](std::size_t index, const Vec2& point)
 		{
 			const WallCommand& wall = walls[index];
-			const double toStart = std::hypot(wall.start.x - point.x, wall.start.y - point.y);
-			const double toEnd = std::hypot(wall.end.x - point.x, wall.end.y - point.y);
+			const double toStart = core::distance(point, wall.start);
+			const double toEnd = core::distance(point, wall.end);
 			if (toStart <= toEnd)
 				startJoined[index] = true;
 			else
@@ -1854,7 +1758,7 @@ namespace HomeskzIfcImport::parse
 		for (std::size_t i = 0; i < n; ++i)
 		{
 			WallCommand wall = walls[i];
-			const double length = std::hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+			const double length = core::distance(wall.start, wall.end);
 			if (length <= 0.0)
 			{
 				extended.push_back(wall);
@@ -1888,7 +1792,7 @@ namespace HomeskzIfcImport::parse
 		for (std::size_t i = 0; i < n; ++i)
 		{
 			const WallCommand& wall = walls[i];
-			const double length = std::hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+			const double length = core::distance(wall.start, wall.end);
 			if (length <= 0.0)
 				continue;
 			const double ux = (wall.end.x - wall.start.x) / length;
@@ -1949,7 +1853,7 @@ namespace HomeskzIfcImport::parse
 					// 端そのもの（丸め誤差ぶん）で交わっている場合だけが対象。半壁厚の許容
 					// （wallPointAtEnd）ではなく厳密に見る——相手の外面まで伸びている立上りを
 					// さらに伸ばさないため。
-					if (std::hypot(point.x - tip.x, point.y - tip.y) > kWallEndpointTol)
+					if (core::distance(tip, point) > kWallEndpointTol)
 						continue;
 					reach = std::max(reach, walls[j].thickness / 2.0);
 				}
@@ -2506,8 +2410,8 @@ namespace HomeskzIfcImport::parse
 			WallCommand& wall = walls[index];
 			if (!wallPointAtEnd(wall, point))
 				return; // 内部で交わる通し壁の端部は、この交点では閉じ方が決まらない
-			const double toStart = std::hypot(wall.start.x - point.x, wall.start.y - point.y);
-			const double toEnd = std::hypot(wall.end.x - point.x, wall.end.y - point.y);
+			const double toStart = core::distance(point, wall.start);
+			const double toEnd = core::distance(point, wall.end);
 			if (toStart <= toEnd)
 				wall.capStart = false;
 			else
@@ -2666,8 +2570,7 @@ namespace HomeskzIfcImport::parse
 				for (std::size_t i = 0; i < slabs.size(); ++i)
 				{
 					const Vec2 slabCentroid = polygonCentroid(slabs[i].boundary);
-					const double distance =
-						std::hypot(slabCentroid.x - centroid.x, slabCentroid.y - centroid.y);
+					const double distance = core::distance(centroid, slabCentroid);
 					if (i == 0 || distance < bestDistance)
 					{
 						best = i;
@@ -2716,7 +2619,7 @@ namespace HomeskzIfcImport::parse
 		for (std::size_t i = begin; i < end; ++i)
 		{
 			const Vec2 delta = path[i + 1] - path[i];
-			const double length = std::hypot(delta.x, delta.y);
+			const double length = core::length(delta);
 			const Vec2 dir{delta.x / length, delta.y / length};
 			// CCW ポリゴンの外向き法線＝進行方向の右（offsetPolygon と同じ取り方）。
 			const Vec2 offset{dir.y * kSlabBeddingThickness, -dir.x * kSlabBeddingThickness};

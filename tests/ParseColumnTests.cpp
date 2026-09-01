@@ -14,6 +14,7 @@
 //
 
 #include "Fixtures.h"
+#include "StepText.h"
 #include "TestFramework.h"
 
 #include "core/Document.h"
@@ -50,6 +51,7 @@ using HomeskzIfcImport::parse::columnPosition2D;
 using HomeskzIfcImport::parse::ColumnSpan;
 using HomeskzIfcImport::parse::Entity;
 using HomeskzIfcImport::parse::isThroughColumn;
+using HomeskzIfcImport::parse::kColumnSeatTol;
 using HomeskzIfcImport::parse::kSpanLevelTol;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::makeColumnMemberId;
@@ -58,70 +60,24 @@ using HomeskzIfcImport::parse::memberOnTop;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::resolveColumnToLevel;
 using HomeskzIfcImport::parse::resolveColumnType;
-using HomeskzIfcTests::allFixtures;
+using HomeskzIfcTests::contain;
 using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::forEachFixture;
+using HomeskzIfcTests::makeStorey;
 using HomeskzIfcTests::near;
+using HomeskzIfcTests::num;
+using HomeskzIfcTests::point2;
+using HomeskzIfcTests::point3;
+using HomeskzIfcTests::ref;
+using HomeskzIfcTests::StepText;
 
 namespace
 {
 	// -----------------------------------------------------------------------
 	// 合成 IFC（STEP テキスト）の組み立て（ストーリ・柱・金物・通り芯の最小構成）。
+	// 器と汎用ヘルパー（StepText / num / ref / point* / makeStorey / contain）は
+	// tests/StepText.h の共有定義を使う。ここに残るのは柱・金物の要素固有の組み立てだけ。
 	// -----------------------------------------------------------------------
-
-	// #id を採番しながら STEP 行を溜めるだけの器（ParseMemberTests と同じ形）。
-	class StepText
-	{
-	public:
-		int add(const std::string& body)
-		{
-			const int id = fNext++;
-			fText += "#" + std::to_string(id) + "=" + body + ";\n";
-			return id;
-		}
-
-		Model build() const
-		{
-			return loadIfcFromText(fText);
-		}
-
-	private:
-		int fNext = 1;
-		std::string fText;
-	};
-
-	std::string num(double value)
-	{
-		return std::to_string(value);
-	}
-
-	std::string ref(int id)
-	{
-		return "#" + std::to_string(id);
-	}
-
-	int point3(StepText& step, double x, double y, double z)
-	{
-		return step.add("IFCCARTESIANPOINT((" + num(x) + "," + num(y) + "," + num(z) + "))");
-	}
-
-	int point2(StepText& step, double x, double y)
-	{
-		return step.add("IFCCARTESIANPOINT((" + num(x) + "," + num(y) + "))");
-	}
-
-	// IfcBuildingStorey(GlobalId, OwnerHistory, Name=2, …, Elevation=9)。
-	int makeStorey(StepText& step, const std::string& name, double elevation)
-	{
-		return step.add("IFCBUILDINGSTOREY('s',$,'" + name + "',$,$,$,$,$,.ELEMENT.," +
-						num(elevation) + ")");
-	}
-
-	// 要素を階へ所属させる（IfcRelContainedInSpatialStructure）。
-	void contain(StepText& step, int storey, int element)
-	{
-		step.add("IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(" + ref(element) + ")," +
-				 ref(storey) + ")");
-	}
 
 	// 柱。押し出しは局所 Z 方向で、Depth が柱高さ。
 	struct ColumnSpec
@@ -1246,37 +1202,36 @@ TEST(all_fixtures_bounds_span_the_column_height)
 	//   * 上端バウンドの絶対 Z ＝ elevation + height（柱上端）
 	// 小屋束の上端 offset を下端と同値にしていた頃はここが崩れ、実機で高さ 0 の小屋束に
 	// なっていた（M8 のローカル確認 3 周目）。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		if (!ok)
-			continue;
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   // 各階の横架材天端（最上階は軒高）の絶対 Z ＝ バウンド先レベルの高さ。
+					   const std::vector<HomeskzIfcImport::parse::StoryInfo> stories =
+						   HomeskzIfcImport::parse::collectStories(model);
+					   std::vector<double> levelZ;
+					   levelZ.reserve(stories.size());
+					   for (const HomeskzIfcImport::parse::StoryInfo& story : stories)
+						   levelZ.push_back(story.isTop ? story.elevation
+														: story.elevation + story.beamOffset);
 
-		// 各階の横架材天端（最上階は軒高）の絶対 Z ＝ バウンド先レベルの高さ。
-		const std::vector<HomeskzIfcImport::parse::StoryInfo> stories =
-			HomeskzIfcImport::parse::collectStories(model);
-		std::vector<double> levelZ;
-		levelZ.reserve(stories.size());
-		for (const HomeskzIfcImport::parse::StoryInfo& story : stories)
-			levelZ.push_back(story.isTop ? story.elevation : story.elevation + story.beamOffset);
+					   for (const ColumnCommand& command : buildColumnCommands(model))
+					   {
+						   double from = 0.0;
+						   double to = 0.0;
+						   CHECK(HomeskzIfcImport::parse::parseSpanLayer(command.layer, from, to));
+						   const auto base = static_cast<std::size_t>(from) - 1;
+						   const std::size_t top =
+							   base + static_cast<std::size_t>(command.topBound.storyOffset);
+						   CHECK(base < levelZ.size() && top < levelZ.size());
+						   if (base >= levelZ.size() || top >= levelZ.size())
+							   continue;
 
-		for (const ColumnCommand& command : buildColumnCommands(model))
-		{
-			double from = 0.0;
-			double to = 0.0;
-			CHECK(HomeskzIfcImport::parse::parseSpanLayer(command.layer, from, to));
-			const auto base = static_cast<std::size_t>(from) - 1;
-			const std::size_t top = base + static_cast<std::size_t>(command.topBound.storyOffset);
-			CHECK(base < levelZ.size() && top < levelZ.size());
-			if (base >= levelZ.size() || top >= levelZ.size())
-				continue;
-
-			CHECK(near(levelZ[base] + command.bottomBound.offset, command.elevation));
-			CHECK(near(levelZ[top] + command.topBound.offset, command.elevation + command.height));
-		}
-	}
+						   CHECK(
+							   near(levelZ[base] + command.bottomBound.offset, command.elevation));
+						   CHECK(near(levelZ[top] + command.topBound.offset,
+									  command.elevation + command.height));
+					   }
+				   });
 }
 
 TEST(all_fixtures_top_offset_returns_the_ifc_extrusion_height)
@@ -1289,49 +1244,39 @@ TEST(all_fixtures_top_offset_returns_the_ifc_extrusion_height)
 	// オフセットの大きさは受ける梁のせいなので、木造でありうる範囲（kColumnSeatTol）に
 	// 収まっていることも見る。
 	std::size_t adjusted = 0;
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		if (!ok)
-			continue;
-
-		for (const ColumnCommand& command : buildColumnCommands(model))
-		{
-			CHECK(near(command.startOffset, 0.0));
-			CHECK(command.height + command.endOffset > 0.0);
-			CHECK(command.endOffset >= -HomeskzIfcImport::parse::kColumnSeatTol);
-			if (command.endOffset < 0.0)
-				++adjusted;
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   for (const ColumnCommand& command : buildColumnCommands(model))
+					   {
+						   CHECK(near(command.startOffset, 0.0));
+						   CHECK(command.height + command.endOffset > 0.0);
+						   CHECK(command.endOffset >= -kColumnSeatTol);
+						   if (command.endOffset < 0.0)
+							   ++adjusted;
+					   }
+				   });
 	CHECK(adjusted > 0);
 }
 
 TEST(all_fixtures_build_columns_deterministically)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		if (!ok)
-			continue;
-
-		const std::vector<ColumnCommand> first = buildColumnCommands(model);
-		CHECK(!first.empty());
-		const std::vector<ColumnCommand> second = buildColumnCommands(model);
-		CHECK_EQ(first.size(), second.size());
-		for (std::size_t i = 0; i < first.size() && i < second.size(); ++i)
-		{
-			CHECK_EQ(first[i].layer, second[i].layer);
-			CHECK_EQ(first[i].memberId, second[i].memberId);
-			CHECK(near(first[i].position.x, second[i].position.x));
-			CHECK(near(first[i].position.y, second[i].position.y));
-			CHECK(near(first[i].elevation, second[i].elevation));
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<ColumnCommand> first = buildColumnCommands(model);
+					   CHECK(!first.empty());
+					   const std::vector<ColumnCommand> second = buildColumnCommands(model);
+					   CHECK_EQ(first.size(), second.size());
+					   for (std::size_t i = 0; i < first.size() && i < second.size(); ++i)
+					   {
+						   CHECK_EQ(first[i].layer, second[i].layer);
+						   CHECK_EQ(first[i].memberId, second[i].memberId);
+						   CHECK(near(first[i].position.x, second[i].position.x));
+						   CHECK(near(first[i].position.y, second[i].position.y));
+						   CHECK(near(first[i].elevation, second[i].elevation));
+					   }
+				   });
 }
 
 TEST_MAIN();

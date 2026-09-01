@@ -79,6 +79,30 @@ namespace HomeskzIfcImport::parse
 	// parse/Column）が行い、本関数は純粋な配置行列だけを返す。
 	Mat4 resolveObjectPlacement(const Model& model, const Entity* element);
 
+	// 要素の RelativePlacement の Location（ローカル配置原点）の生座標。
+	struct LocalOrigin
+	{
+		double x = 0.0;
+		double y = 0.0;
+		double z = 0.0;	   // hasZ=false のとき 0
+		bool hasZ = false; // Location が 3 座標以上を持つか
+	};
+
+	// 要素（IfcProduct）の ObjectPlacement（IfcLocalPlacement）→ RelativePlacement
+	// （IfcAxis2Placement3D）→ Location の座標を取り出す。resolveObjectPlacement と同じく
+	// **親 PlacementRelTo は辿らない**（同関数の★重要参照）。鎖の途中の参照が解決できない
+	// ／型不一致・座標が 2 つ未満なら false（out は変更しない）。
+	//
+	// outAxisPlacement（省略可）には解決した IfcAxis2Placement3D を返す（Axis＝梁軸を続けて
+	// 読む横架材のため）。**この 4 段の鎖はここに 1 つだけ置く**——かつて柱
+	// （columnPosition2D）・横架材（memberPlacement3D）・ストーリ（getLocalPlacementZ）が
+	// 同じ鎖を各々書いていた。Location の型（IFCCARTESIANPOINT）は必ず確認する——
+	// IfcDirection 等も同じ属性位置に実数リストを持つため、型を見ないと方向比を座標として
+	// 誤読する。従来ストーリだけが確認していたが、柱・横架材も同じ誤読があり得るので厳格側
+	// に揃えた（ホームズ君 IFC の実データで挙動は同一。全フィクスチャで確認済み）。
+	bool resolveLocalPlacementOrigin(const Model& model, const Entity& element, LocalOrigin& out,
+									 const Entity** outAxisPlacement = nullptr);
+
 	// 断面プロファイル（2D、プロファイル定義のローカル座標系）。outer は閉じた外形の
 	// 頂点列で、末尾に始点を重複させない（N 頂点なら N 点）。矩形は rectangle=true と
 	// xDim/yDim を併せて持つ（描画側が PIO 寸法に使えるように）。頂点の周り方向
