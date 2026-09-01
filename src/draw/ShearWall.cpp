@@ -23,8 +23,9 @@
 #include "core/Trace.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
-#include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWSymbolObj.h"
+#include "VWFC/VWObjects/VWSymbolDefObj.h"
+#include "VWFC/VWObjects/VWPolygon2DObj.h"
 
 #include <cmath>
 #include <cstddef>
@@ -38,22 +39,30 @@ namespace HomeskzIfcImport::draw
 	namespace
 	{
 		// ------------------------------------------------------------------
-		// 【一時的な調査】シンボル定義へ図形を入れられない件を実機で切り分ける（M19）。
+		// 【一時的な調査 v3】シンボル定義へ入れた図形が絵にならない件（M19）。
 		//
-		// 分かっていること: 定義（GS_CreateSymbolDefinition）は作れて図面のリソースにも
-		// 並ぶのに、AddObjectToContainer で図形を入れても**実機のシンボル 2D 編集では
-		// 何も選べない**。一方 GetFirstMemberObject() は非 nil を返すので、
-		// 「入った／入っていない」がこちらから判断できていない。
+		// v2 で分かった事実:
+		//   * 定義（GS_CreateSymbolDefinition）は作れて、図面のリソースにも並ぶ。
+		//   * AddObjectToContainer は true を返し、**定義の中身は実際に増える**
+		//     （自作 = [5 0]。テンプレート由来の既存シンボルも [5 0] で同じ形）。
+		//   * それなのに配置したインスタンスの外接が -2147483648（＝大きさ無し）で、
+		//     実機のシンボル 2D 編集では何も選べない。
 		//
-		// そこで**事実だけを採る**: 既存の（テンプレート由来の）シンボル定義と、
-		// こちらが作った定義を同じ API で覗いて並べ、入れ方を 3 通り試して結果を比べる。
-		// 切り分けが済んだらこの節ごと消す。
+		// 残る枝は 2 つ。**事実だけ**を採って片方に決める。
+		//   ① 入れている多角形そのものが空（頂点 0）。
+		//   ② 定義の側が「2D の絵を持つシンボル」になっていない（種別・キャッシュ）。
+		// そこで v3 では
+		//   * 図形の**頂点数・閉じているか・自分の外接・親**を入れる前後で見る（①）、
+		//   * 定義の**種別**（GetSymbolDefinitionType = 2D / 3D / ハイブリッド）と外接を、
+		//     **既存（正しく描ける）シンボル**と並べて見る（②）、
+		//   * 既存シンボルを 1 つ置いて外接を読む（＝こちらの測り方が正しいかの検算）、
+		//   * SetPageBased(true) が実際に効くか（実機で縮尺無視にならなかった件）、
+		// を一度に採る。切り分けが済んだらこの節ごと消す。
 		constexpr short kSymbolDefinitionNodeType = 16; // kSymDefNode（Objs.TDType.h）
+		constexpr short kPolygonNodeType = 5;			// kPolygonNode
 
 		// テスト用のシンボル名（実機で消せるよう "_" で始める）。
 		constexpr const char* kProbeSymbolA = "_耐力壁記号テストA";
-		constexpr const char* kProbeSymbolB = "_耐力壁記号テストB";
-		constexpr const char* kProbeSymbolC = "_耐力壁記号テストC";
 
 		// 記号の下描き（三角）。調査でも本番と同じ形を使う。
 		std::vector<core::Vec2> ProbeTriangle()
@@ -61,22 +70,50 @@ namespace HomeskzIfcImport::draw
 			return {core::Vec2{-150.0, 0.0}, core::Vec2{150.0, 0.0}, core::Vec2{150.0, 150.0}};
 		}
 
-		// コンテナの中身を「件数と型番号」で書き出す。型番号は Objs.TDType.h
-		// （4=楕円 / 5=多角形 / 11=グループ / 16=シンボル定義）。
-		std::string DescribeMembers(MCObjectHandle container)
+		// 外接を "幅x高さ" で。取れない／無効値（INT_MIN が入る）はそう書く。
+		std::string Extent(MCObjectHandle object)
 		{
-			std::size_t count = 0;
-			std::string types;
-			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil && count < 8;
-				 h = gSDK->NextObject(h))
-			{
-				++count;
-				types += " " + std::to_string(gSDK->GetObjectTypeN(h));
-			}
-			return std::to_string(count) + " 件 [" + types + " ]";
+			WorldRect bounds;
+			if (object == nil || !gSDK->GetObjectBounds(object, bounds))
+				return "取れない";
+			const double width = bounds.right - bounds.left;
+			const double height = bounds.top - bounds.bottom;
+			if (!std::isfinite(width) || !std::isfinite(height) || std::fabs(width) > 1.0e9)
+				return "無効";
+			return std::to_string(static_cast<int>(width)) + "x" +
+				   std::to_string(static_cast<int>(height));
 		}
 
-		void DumpSymbolDefinition(const std::string& label, MCObjectHandle definition)
+		// 図形 1 つの素性。多角形なら頂点数と閉じているかも出す（枝①の判定はここ）。
+		std::string DescribeShape(MCObjectHandle object)
+		{
+			if (object == nil)
+				return "nil";
+			const short type = gSDK->GetObjectTypeN(object);
+			std::string text = "type=" + std::to_string(type) + " 外接=" + Extent(object);
+			if (type == kPolygonNodeType)
+			{
+				try
+				{
+					const VWPolygon2DObj polygon(object);
+					text += " 頂点=" + std::to_string(polygon.GetVertexCount()) +
+							" 閉=" + (polygon.IsClosed() ? "yes" : "no");
+				}
+				catch (...)
+				{
+					text += " 頂点=読めない";
+				}
+			}
+			const MCObjectHandle parent = gSDK->ParentObject(object);
+			text += " 親=";
+			text += (parent == nil ? std::string("nil")
+								   : "type" + std::to_string(gSDK->GetObjectTypeN(parent)));
+			return text;
+		}
+
+		// 定義 1 つを中身まで書き出す。**種別（defType）が肝**——2D の絵を持つ
+		// シンボルになっていなければ、中身があっても伏図には出ない。
+		void DumpDefinition(const std::string& label, MCObjectHandle definition)
 		{
 			if (definition == nil)
 			{
@@ -86,11 +123,19 @@ namespace HomeskzIfcImport::draw
 			core::trace::log(
 				"symprobe: " + label + " type=" + std::to_string(gSDK->GetObjectTypeN(definition)) +
 				" defType=" + std::to_string(gSDK->GetSymbolDefinitionType(definition)) +
-				" 中身=" + DescribeMembers(definition));
+				" 外接=" + Extent(definition));
+			std::size_t index = 0;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(definition); h != nil && index < 4;
+				 h = gSDK->NextObject(h), ++index)
+				core::trace::log("symprobe: " + label + " 中身[" + std::to_string(index) + "] " +
+								 DescribeShape(h));
+			if (index == 0)
+				core::trace::log("symprobe: " + label + " 中身なし");
 		}
 
-		// 図面に既にあるシンボル定義（テンプレート由来のもの）を数件ダンプする。
-		// **これが「正しく中身が入っているシンボル」の見え方**で、比較の基準になる。
+		// 図面に既にあるシンボル定義（テンプレート由来＝正しく描けるもの）を基準にする。
+		// **中身と種別の見え方が自作とどう違うか**が知りたい唯一のこと。
+		// 併せて 1 つ実際に置いてみて、外接の読み方そのものを検算する。
 		void DumpExistingSymbols()
 		{
 			const MCObjectHandle header = gSDK->GetSymbolLibraryHeader();
@@ -100,90 +145,117 @@ namespace HomeskzIfcImport::draw
 				return;
 			}
 			std::size_t seen = 0;
-			for (MCObjectHandle h = gSDK->FirstMemberObj(header); h != nil && seen < 6;
+			MCObjectHandle first = nil;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(header); h != nil && seen < 3;
 				 h = gSDK->NextObject(h))
 			{
 				if (gSDK->GetObjectTypeN(h) != kSymbolDefinitionNodeType)
 					continue; // フォルダ等は飛ばす
+				if (first == nil)
+					first = h;
 				++seen;
-				DumpSymbolDefinition("既存#" + std::to_string(seen), h);
+				DumpDefinition("既存#" + std::to_string(seen), h);
 			}
 			if (seen == 0)
+			{
 				core::trace::log("symprobe: 既存のシンボル定義が 1 つも見つからない");
+				return;
+			}
+
+			// ★検算: 正しく描けるシンボルを置いたとき、外接がまともに読めるか。
+			// ここが「無効」なら、自作シンボルの外接が無効なのは測り方の問題であって
+			// 定義の中身の話ではない、と分かる。
+			try
+			{
+				const VWSymbolDefObj definition(first);
+				const TXString name(definition.GetObjectName());
+				const VWSymbolObj instance(name, VWPoint2D(0.0, 0.0), 0.0);
+				core::trace::log("symprobe: 既存#1 を置いた name=" + name.GetStdString() + " " +
+								 DescribeShape(instance.GetThisObject()));
+			}
+			catch (...)
+			{
+				core::trace::log("symprobe: 既存#1 を置けない（名前が取れない）");
+			}
 		}
 
-		// 入れ方を 3 通り試す。どれで中身が増えるかを見る。
+		// 自作の定義に図形を入れ、**入れる前・入れた後・更新を促した後**で見比べる。
 		void ProbeSymbolCreation()
 		{
-			// 方法 A: 図形を作ってから AddObjectToContainer（いままでのやり方）
+			// CreateSymbolDefinition は名前を inout で受ける（重複時に採番して返す）ので
+			// 一時オブジェクトは渡せない。
+			TXString name(kProbeSymbolA);
+			const MCObjectHandle definition = gSDK->CreateSymbolDefinition(name);
+			core::trace::log("symprobe: A 作成 name=" + name.GetStdString() +
+							 " nil=" + (definition == nil ? "yes" : "no"));
+			DumpDefinition("A（作っただけ）", definition);
+
+			const MCObjectHandle shape = CreateClosedPolygon(ProbeTriangle());
+			// ★枝①の判定。ここで頂点が 3・外接が 300x150 なら図形そのものは正しい。
+			core::trace::log("symprobe: A 入れる前の図形 " + DescribeShape(shape));
+
+			const bool added = gSDK->AddObjectToContainer(shape, definition);
+			core::trace::log(std::string("symprobe: A AddObjectToContainer=") +
+							 (added ? "true" : "false"));
+			core::trace::log("symprobe: A 入れた後の図形 " + DescribeShape(shape));
+			DumpDefinition("A（入れた後）", definition);
+
+			// ★実機で「縮尺無視」に入らなかった件。setter が効いているのかを見る。
+			try
 			{
-				TXString name(kProbeSymbolA);
-				const MCObjectHandle definition = gSDK->CreateSymbolDefinition(name);
-				core::trace::log(std::string("symprobe: A 作成 name=") + name.GetStdString() +
-								 " nil=" + (definition == nil ? "yes" : "no"));
-				const MCObjectHandle shape = CreateClosedPolygon(ProbeTriangle());
-				core::trace::log(
-					"symprobe: A 図形 nil=" + std::string(shape == nil ? "yes" : "no") +
-					" type=" + (shape == nil ? "-" : std::to_string(gSDK->GetObjectTypeN(shape))));
-				const bool added = gSDK->AddObjectToContainer(shape, definition);
-				core::trace::log(std::string("symprobe: A AddObjectToContainer=") +
-								 (added ? "true" : "false"));
-				DumpSymbolDefinition("A", definition);
+				VWSymbolDefObj wrapper(definition);
+				wrapper.SetPageBased(true);
+				core::trace::log(std::string("symprobe: A 縮尺無視 GetPageBased=") +
+								 (wrapper.GetPageBased() ? "true" : "false"));
+			}
+			catch (...)
+			{
+				core::trace::log("symprobe: A 縮尺無視の設定で例外");
 			}
 
-			// 方法 B: グループにまとめてからグループを入れる
-			{
-				TXString name(kProbeSymbolB);
-				const MCObjectHandle definition = gSDK->CreateSymbolDefinition(name);
-				VWGroupObj group;
-				group.AddObject(CreateClosedPolygon(ProbeTriangle()));
-				const MCObjectHandle groupHandle = group.GetThisObject();
-				core::trace::log(
-					"symprobe: B グループ 中身=" +
-					(groupHandle == nil ? std::string("nil") : DescribeMembers(groupHandle)));
-				const bool added = gSDK->AddObjectToContainer(groupHandle, definition);
-				core::trace::log(std::string("symprobe: B AddObjectToContainer=") +
-								 (added ? "true" : "false"));
-				DumpSymbolDefinition("B", definition);
-			}
+			// ★枝②の判定。定義へ「中身が変わった」と知らせて外接・種別が付くか。
+			gSDK->ResetObject(definition);
+			DumpDefinition("A（ResetObject 後）", definition);
 
-			// 方法 C: 定義を「アクティブなシンボル定義」にしてから図形を作る
-			// （作った先が定義になるか＝VectorScript の BeginSym/EndSym に当たる挙動か）
+			// ★枝③の判定。**中身を入れた定義が、図面のリソース一覧に居る同名の定義と
+			// 同じものか。** CreateSymbolDefinition は「名前が既に使われていれば nil を
+			// 返す」仕様（APIBase.Legacy.Defs.h の GS_CreateSymbolDefinition）なので、
+			// 名前の取り合いが起きていれば「作った先」と「一覧に見えるもの」が別物に
+			// なり得る——実機で中身が空に見えることの説明になる。
+			const MCObjectHandle header = gSDK->GetSymbolLibraryHeader();
+			MCObjectHandle listed = nil;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(header); h != nil && listed == nil;
+				 h = gSDK->NextObject(h))
 			{
-				TXString name(kProbeSymbolC);
-				const MCObjectHandle definition = gSDK->CreateSymbolDefinition(name);
-				gSDK->SetActiveSymbolDef(definition);
-				const MCObjectHandle shape = CreateClosedPolygon(ProbeTriangle());
-				DumpSymbolDefinition("C（作っただけ）", definition);
-				const bool added = gSDK->AddObjectToContainer(shape, definition);
-				core::trace::log(std::string("symprobe: C AddObjectToContainer=") +
-								 (added ? "true" : "false"));
-				DumpSymbolDefinition("C（入れた後）", definition);
+				if (gSDK->GetObjectTypeN(h) != kSymbolDefinitionNodeType)
+					continue;
+				try
+				{
+					if (VWSymbolDefObj(h).GetObjectName() == name)
+						listed = h;
+				}
+				catch (...)
+				{
+				}
 			}
+			core::trace::log(
+				std::string("symprobe: A 一覧に居るか=") +
+				(listed == nil ? "no" : (listed == definition ? "同じ handle" : "別の handle")));
+			if (listed != nil && listed != definition)
+				DumpDefinition("A（一覧側）", listed);
 		}
 
-		// 作った定義を**素直に図面へ置いて**みる（PIO の中ではなくアクティブレイヤへ）。
-		// 定義側が正しければ三角がレイヤに 1 つ現れるはずで、そうなら「定義は作れている。
-		// 見えないのは PIO の中に置いたときだけ」と切り分けられる。
+		// 作った定義を素直に置いてみる（PIO の中ではなくアクティブレイヤへ）。
 		void ProbeSymbolPlacement()
 		{
 			const TXString name(kProbeSymbolA);
 			const VWSymbolObj instance(name, VWPoint2D(0.0, 0.0), 0.0);
 			const MCObjectHandle handle = instance.GetThisObject();
-			if (handle == nil)
-			{
-				core::trace::log("symprobe: 配置 nil");
-				return;
-			}
-			core::trace::log(
-				std::string("symprobe: 配置 type=") + std::to_string(gSDK->GetObjectTypeN(handle)) +
-				" シンボルか=" + (VWSymbolObj::IsSymbolObject(handle, name) ? "yes" : "no"));
-			WorldRect bounds;
-			gSDK->GetObjectBounds(handle, bounds);
-			core::trace::log(
-				"symprobe: 配置の外接 幅=" +
-				std::to_string(static_cast<int>(bounds.right - bounds.left)) +
-				" 高さ=" + std::to_string(static_cast<int>(bounds.top - bounds.bottom)));
+			core::trace::log("symprobe: A を置いた シンボルか=" +
+							 std::string(handle != nil && VWSymbolObj::IsSymbolObject(handle, name)
+											 ? "yes"
+											 : "no") +
+							 " " + DescribeShape(handle));
 		}
 
 		// 調査ひとまとめ。ログが開いているときだけ（dev ビルドと HOMESKZ_IFC_TRACE）。
@@ -191,7 +263,7 @@ namespace HomeskzIfcImport::draw
 		{
 			if (!core::trace::isOpen())
 				return;
-			core::trace::log("symprobe: シンボル定義の調査（M19。分かったら消す）");
+			core::trace::log("symprobe: シンボル定義の調査 v3（M19。分かったら消す）");
 			DumpExistingSymbols();
 			ProbeSymbolCreation();
 			ProbeSymbolPlacement();
