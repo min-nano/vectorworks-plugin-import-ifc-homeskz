@@ -138,7 +138,9 @@ namespace HomeskzIfcImport::draw
 			}
 			catch (...)
 			{
-				// 用紙基準にできなくても記号自体は出る。ここで止めない。
+				// 用紙基準にできなくても記号自体は出る（縮尺に追従するだけ）ので止めない。
+				// ただし黙って捨てない——「縮尺無視になっていない」の唯一の手掛かり。
+				core::trace::log("  shearwall: 記号シンボルを用紙基準にできない");
 			}
 			gSDK->ResetObject(definition);
 		}
