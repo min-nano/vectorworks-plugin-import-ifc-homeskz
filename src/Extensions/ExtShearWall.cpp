@@ -322,14 +322,20 @@ namespace HomeskzIfcImport
 		// ★**非 nil を成功と読まない**（PlaceSymbol は定義が無くても非 nil を返す。
 		//   draw/Symbol.cpp の 2 番目の作法）。定義が用意できていない図面では、記号を
 		//   置かずに黙って通す——ログには EnsureMarkSymbols が理由を残している。
-		void AddMarkSymbol(MCObjectHandle host, const char* name, double x, double y,
-						   double angleDeg)
+		void AddMarkSymbol(MCObjectHandle host, const char* name, double x, double y, double scaleX,
+						   double scaleY)
 		{
 			const TXString symbol(name);
-			const VWSymbolObj instance(symbol, VWPoint2D(x, y), angleDeg);
+			VWSymbolObj instance(symbol, VWPoint2D(x, y), 0.0);
 			const MCObjectHandle handle = instance.GetThisObject();
 			if (handle == nil || !VWSymbolObj::IsSymbolObject(handle, symbol))
 				return;
+			// **反転は負の倍率で与える**（VW が反転したシンボルを表す唯一の形。中身は
+			// ovSymbolXScaleFactor / ovSymbolYScaleFactor）。X と Y を別々に持たせるには
+			// 倍率の種別を**非対称**にしておく必要があるので、先に立てる。
+			instance.SetScaleType(kScaleTypeAsymmetric);
+			instance.SetScaleFactorX(scaleX);
+			instance.SetScaleFactorY(scaleY);
 			gSDK->AddObjectToContainer(handle, host);
 			draw::SetClassByName(handle, kShearMarkClass);
 		}
