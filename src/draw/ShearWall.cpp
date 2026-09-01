@@ -24,6 +24,7 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWGroupObj.h"
+#include "VWFC/VWObjects/VWSymbolObj.h"
 
 #include <cmath>
 #include <cstddef>
@@ -161,6 +162,30 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
+		// 作った定義を**素直に図面へ置いて**みる（PIO の中ではなくアクティブレイヤへ）。
+		// 定義側が正しければ三角がレイヤに 1 つ現れるはずで、そうなら「定義は作れている。
+		// 見えないのは PIO の中に置いたときだけ」と切り分けられる。
+		void ProbeSymbolPlacement()
+		{
+			const TXString name(kProbeSymbolA);
+			const VWSymbolObj instance(name, VWPoint2D(0.0, 0.0), 0.0);
+			const MCObjectHandle handle = instance.GetThisObject();
+			if (handle == nil)
+			{
+				core::trace::log("symprobe: 配置 nil");
+				return;
+			}
+			core::trace::log(
+				std::string("symprobe: 配置 type=") + std::to_string(gSDK->GetObjectTypeN(handle)) +
+				" シンボルか=" + (VWSymbolObj::IsSymbolObject(handle, name) ? "yes" : "no"));
+			WorldRect bounds;
+			gSDK->GetObjectBounds(handle, bounds);
+			core::trace::log(
+				"symprobe: 配置の外接 幅=" +
+				std::to_string(static_cast<int>(bounds.right - bounds.left)) +
+				" 高さ=" + std::to_string(static_cast<int>(bounds.top - bounds.bottom)));
+		}
+
 		// 調査ひとまとめ。ログが開いているときだけ（dev ビルドと HOMESKZ_IFC_TRACE）。
 		void ProbeSymbolDefinitions()
 		{
@@ -169,6 +194,7 @@ namespace HomeskzIfcImport::draw
 			core::trace::log("symprobe: シンボル定義の調査（M19。分かったら消す）");
 			DumpExistingSymbols();
 			ProbeSymbolCreation();
+			ProbeSymbolPlacement();
 		}
 
 		// ------------------------------------------------------------------
