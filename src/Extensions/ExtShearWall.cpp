@@ -66,12 +66,6 @@ namespace HomeskzIfcImport
 		// 手で動かした耐力壁でも拾えるだけの余裕を取る。
 		constexpr double kColumnAlongTol = 300.0;
 
-		// 記号を壁芯から離す距離の下限（図面 mm）。離れは**用紙 mm × レイヤ縮尺**で決まる
-		// ので、縮尺の大きい図（1/20 等）では図面上の離れが小さくなり、壁芯に載る横架材
-		// （幅 105 前後＝半幅 52.5）の下へまた潜ってしまう。記号が横架材と重ならないことは
-		// 大きさより優先なので、ここだけは図面 mm の下限を置く。
-		constexpr double kMarkOffsetMinimum = 100.0;
-
 		// PIO の定義。**関数ローカル static** で持つ理由は ExtMenu の menuDef と同じ
 		// （SDK の非ローカル static を名前空間スコープの初期化子から参照しない）。
 		// **線分 PIO**（両端の 2 点で置く）。
@@ -191,30 +185,6 @@ namespace HomeskzIfcImport
 				}
 			}
 			return read ? value : fallback;
-		}
-
-		// この PIO が載っているレイヤの縮尺（1/50 なら 50）。読めなければ 1。
-		//
-		// **伏図記号の大きさ・離れは用紙 mm で持ち、これを掛けて図面 mm にする**（縮尺
-		// 非追従＝縮尺を変えても紙の上の大きさが変わらない）。VW でこれができる手掛かりは
-		// レイヤの縮尺だけで、ビューポートの縮尺はデザインレイヤ上の図形からは分からない
-		// （1 つの図形が別々の縮尺のビューポートに映るため）。縮尺が変わったときに描き直す
-		// 約束は OnInitXProperties の kObjXPropHasLayerScaleDeps が引き受ける。
-		double LayerScaleOf(MCObjectHandle object)
-		{
-			// PIO → 親（レイヤ）と辿る。入れ子の中に居ても数段でレイヤへ行き着くので、
-			// 空回りしないよう段数で打ち切る。
-			constexpr int kMaxDepth = 8;
-			MCObjectHandle handle = object;
-			for (int depth = 0; depth < kMaxDepth && handle != nil; ++depth)
-			{
-				double scale = 0.0;
-				gSDK->GetLayerScaleN(handle, scale);
-				if (scale > 0.0)
-					return scale;
-				handle = gSDK->ParentObject(handle);
-			}
-			return 1.0;
 		}
 
 		// ";" 区切りのレイヤ名を分解する（空の要素は落とす）。
@@ -491,9 +461,8 @@ namespace HomeskzIfcImport
 		// 一致させるための最後の砦（柱記号 PIO と同じ。docs/DEV-NOTES.md M12「追随の契機」）。
 		gSDK->SetObjectProperty(objectID, kObjXPropResetBeforeExport, true);
 
-		// **レイヤの縮尺が変わったら描き直す。** 伏図記号は用紙 mm × レイヤ縮尺で描く
-		// （Recalculate の LayerScaleOf）ので、縮尺が変われば描き直さないと紙の上の
-		// 大きさが変わってしまう。
+		// **レイヤの縮尺が変わったら描き直す。** いまの記号は図面 mm（縮尺に依らない）
+		// なので必須ではないが、記号のシンボルを用紙基準に戻すなら要る印として残す。
 		gSDK->SetObjectProperty(objectID, kObjXPropHasLayerScaleDeps, true);
 		return result;
 	}
@@ -582,15 +551,11 @@ namespace HomeskzIfcImport
 			core::trace::log(std::string("  shearwall: 内法 ") + (fromColumns ? "柱から" : "控え") +
 							 " x=[" + Number(clearStart) + ", " + Number(clearEnd) + "]");
 
-			// 記号を壁芯からどれだけ離すか。**用紙 mm**で持ち、レイヤの縮尺を掛けて
-			// 図面 mm にする（＝縮尺非追従。記号そのものの大きさは用紙基準のシンボル定義が
-			// 持つので、ここで扱うのは置き場所だけ）。
-			const double scale = LayerScaleOf(this->fhObject);
+			// 記号を壁芯からどれだけ離すか（**図面 mm**）。記号そのものの大きさは
+			// シンボル定義が持つので、ここで扱うのは置き場所だけ。
 			const double markOffset =
-				std::max(ParamReal(self, kParamShearMarkOffset, kShearMarkOffsetDefault) * scale,
-						 kMarkOffsetMinimum);
-			core::trace::log("  shearwall: レイヤ縮尺 1/" + Number(scale) + " 記号の離れ " +
-							 Number(markOffset) + "mm");
+				ParamReal(self, kParamShearMarkOffset, kShearMarkOffsetDefault);
+			core::trace::log("  shearwall: 記号の離れ " + Number(markOffset) + "mm");
 
 			// 軸組内法の高さ。**ここが取れなくても伏図の記号は描く**——記号は平面だけで
 			// 決まるので、高さの取りこぼしで図面から耐力壁が丸ごと消えるのは割に合わない

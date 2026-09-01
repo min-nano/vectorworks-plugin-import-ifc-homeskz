@@ -22,10 +22,9 @@
 //	    **面や筋かいのポリゴンは描かない**——軸組材と重なって図が読めなくなる。
 //	    記号は壁芯ではなく**壁芯から MarkOffset だけ離した線の上**に置く（面材なら
 //	    その面材のある側）。壁芯には横架材（土台・胴差）が同じ太さで載っていて、記号を
-//	    芯へ置くと必ず重なるため。離れは**用紙 mm で持ち、レイヤの縮尺を掛けて図面 mm に
-//	    する**（＝縮尺非追従）。
-//	    **三角と丸はシンボル**（下記 kShearSymbol*）で、大きさ・形はシンボル定義が持つ。
-//	    用紙基準（ovSymDefPageBased）で登録してあるので、こちらも縮尺非追従になる。
+//	    芯へ置くと必ず重なるため。
+//	    **三角と丸はシンボル**（下記 kShearSymbol*）で、大きさ・形はシンボル定義が持つ
+//	    （利用者が描き直せば全部の耐力壁に効く）。
 //	    面材の線だけは長さが内法で変わるのでシンボルにできず、PIO が引く。
 //	  * 軸組図（3D）… 筋かいは**形状どおりの帯**（実幅の帯を内法の矩形で切ったもの）、
 //	    面材は**内法を埋める矩形**。どちらも**壁芯の鉛直面に置く**——軸組図は通り芯
@@ -75,8 +74,7 @@ namespace HomeskzIfcImport
 	constexpr const char* kParamShearClearSpan = "ClearSpan"; // 控えの内法（mm）
 	constexpr const char* kParamShearBottom = "BottomHeight"; // 内法の下端（mm・レイヤ基準）
 	constexpr const char* kParamShearTop = "TopHeight";		  // 内法の上端（mm・同上）
-	constexpr const char* kParamShearMarkOffset =
-		"MarkOffset"; // 伏図記号の壁芯からの離れ（**用紙 mm**）
+	constexpr const char* kParamShearMarkOffset = "MarkOffset"; // 伏図記号の壁芯からの離れ（mm）
 
 	// 値。ユニバーサル名なので言語に依存しない綴りにする。
 	constexpr const char* kShearKindBrace = "Brace";	// 筋かい
@@ -94,9 +92,11 @@ namespace HomeskzIfcImport
 	// **すでに在れば触らない**——利用者がシンボルを描き直せば、その形が全部の耐力壁へ
 	// そのまま効く（記号の大きさをオブジェクトごとのパラメータで持つのをやめた理由）。
 	//
-	// ★**用紙基準（ovSymDefPageBased）で登録する＝縮尺非追従。** 記号は実物の大きさを
-	// 表さない**表記**なので、図の縮尺で伸び縮みしては読めない。用紙基準のシンボルは
-	// レイヤ縮尺に関わらず紙の上で同じ大きさに描かれる。
+	// 大きさは**図面 mm**（1/50 の伏図で三角 6×3mm・丸 直径 3mm に読める寸法）。用紙基準
+	// （`ovSymDefPageBased`）にはしない——用紙基準は**レイヤの縮尺**を基準にする仕組みで、
+	// このプラグインが作るデザインレイヤは縮尺 1:1 なので、用紙 6mm の記号が図面でも 6mm
+	// ＝伏図（1/50）の紙の上で 0.12mm になり見えなかった（M19 の実機確認。
+	// 寸法の決め方は draw/ShearWall の kMark*）。
 	//
 	// 「右上がり／左上がり」は**壁の向き（始点→終点＝PIO のローカル +X）を右**に見たときの
 	// 傾き。筋かいが高くなる側で使い分け、たすき掛けは同じ場所へ 2 つ重ねる。
@@ -104,11 +104,11 @@ namespace HomeskzIfcImport
 	constexpr const char* kShearSymbolBraceFall = "耐力壁筋かい記号-左上がり";
 	constexpr const char* kShearSymbolPanel = "耐力壁面材記号";
 
-	// 伏図記号を壁芯からどれだけ離すか（**用紙 mm**。こちらも縮尺非追従）。壁芯には
+	// 伏図記号を壁芯からどれだけ離すか（**図面 mm**）。壁芯には
 	// 横架材（土台・胴差）が載っているので、その下へ潜らない位置へ寄せるための値。
 	// **面材ならその面材のある側**（表＝+Y・裏＝−Y）へ、筋かいは表側へ寄せる（筋かいは
 	// 壁の中心にあり寄せる根拠が無いので、決定性のために片側へ固定する）。
-	constexpr double kShearMarkOffsetDefault = 4.0;
+	constexpr double kShearMarkOffsetDefault = 200.0;
 
 	// PIO が**自分で描いたジオメトリ**へ与えるクラス。PIO 本体のクラス（命令の drawClass。
 	// parse/StructuralClass の CLASS_BRACE / CLASS_SHEAR_PANEL）とは役割が違い、こちらは

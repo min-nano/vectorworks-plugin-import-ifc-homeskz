@@ -41,18 +41,24 @@ namespace HomeskzIfcImport::draw
 		//
 		// 【なぜプラグインが図面リソースを作るのか】記号は**利用者が描き直せる形**で
 		// 図面に持たせたい、というのがご要望（M19 の実機確認）。シンボルにしておけば
-		// 1 か所直せば全部の耐力壁に効き、用紙基準（ovSymDefPageBased）にできるので
-		// **縮尺非追従**にもなる。CLAUDE.md「既存の図面リソースを作らない」の唯一の例外で、
+		// 1 か所直せば全部の耐力壁に効く。CLAUDE.md「既存の図面リソースを作らない」の
+		// 唯一の例外で、
 		// 　* **無いときだけ作る**（在れば利用者が描き直したものとして触らない）、
 		// 　* 作るのは伏図記号のシンボル 3 つだけ、
 		// という 2 つの縛りを守る。
 
-		// 記号の寸法（**用紙 mm**）。用紙基準シンボルなので、この数字がそのまま紙の上の
-		// 大きさになる（1/50 でも 1/100 でも同じ）。1/50 の伏図で読める最小限として、
-		// 三角は 6×3mm・丸は直径 3mm にしてある。
-		constexpr double kMarkTriangleLength = 6.0; // 壁と平行な脚（＝斜辺の水平投影）
-		constexpr double kMarkTriangleHeight = 3.0; // 壁に直交する脚（＝直角を立てる側）
-		constexpr double kMarkCircleDiameter = 3.0;
+		// 記号の寸法（**図面 mm**）。1/50 の伏図で三角 6×3mm・丸 直径 3mm に読めるよう、
+		// その 50 倍を入れてある。
+		//
+		// ★**用紙基準（ovSymDefPageBased）にはしない。** 用紙基準は「**レイヤの縮尺**を
+		// 基準に紙の上の大きさを保つ」仕組みで、このプラグインが作るデザインレイヤは
+		// 縮尺 1:1（PIO が読んだレイヤ縮尺も 1.0）。そこへ用紙 6mm の記号を置くと図面でも
+		// 6mm——1/50 の伏図では紙の上で 0.12mm になり、**シンボルは空に見え、図には何も
+		// 出ない**（M19 の実機確認。docs/DEV-NOTES.md）。図面 mm で持てば、伏図の縮尺
+		// （用紙への収まりから決まる。既定は 1/50）で読める大きさになる。
+		constexpr double kMarkTriangleLength = 300.0; // 壁と平行な脚（＝斜辺の水平投影）
+		constexpr double kMarkTriangleHeight = 150.0; // 壁に直交する脚（＝直角を立てる側）
+		constexpr double kMarkCircleDiameter = 150.0;
 
 		// 図形 1 つをシンボル定義の中へ入れ、記号の作図クラスを与える。入ったら true。
 		// **VWFC で作った図形はどのコンテナにも入らない**ので AddObject（中身は
@@ -105,8 +111,13 @@ namespace HomeskzIfcImport::draw
 									 "）");
 					return false;
 				}
-				if (definition.GetFirstMemberObject() != nil)
+				// **用紙基準のものは前のビルドが作った 6mm の記号**なので作り直す。
+				// 用紙基準は VW の既定が off で、こちらが一時的に立てていた印になっている
+				// （利用者が描き直したシンボルには立たない）。この一節は移行のためだけの
+				// ものなので、行き渡ったら消してよい。
+				if (definition.GetFirstMemberObject() != nil && !definition.GetPageBased())
 					return true; // 中身が在る＝そのまま使う
+				definition.DeleteAllInnerObjects();
 
 				if (!AddToSymbol(makeShape(), definition))
 				{
@@ -114,8 +125,9 @@ namespace HomeskzIfcImport::draw
 									 name + "）");
 					return false;
 				}
-				// **用紙基準＝縮尺非追従**（この 1 行がご要望の本体）。
-				definition.SetPageBased(true);
+				// 用紙基準にはしない（上記「記号の寸法」）。前のビルドで立ってしまって
+				// いるものはここで下ろす。
+				definition.SetPageBased(false);
 				return true;
 			}
 			catch (...)
