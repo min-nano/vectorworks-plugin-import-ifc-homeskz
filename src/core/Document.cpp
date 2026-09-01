@@ -55,21 +55,32 @@ namespace HomeskzIfcImport::core
 				   component.thickness >= 0.0;
 		}
 
+		// 構成層の並びが妥当か。1 枚以上あり、各層が妥当で、総厚（＝スラブ厚・壁厚）が正で
+		// あること（厚み 0 の複合オブジェクトは VW が受け付けない）。床板・立上り・底盤が
+		// 同じ関門を通る——かつて 3 者が同じ 3 条件を各々書いていた。
+		bool hasValidComponents(const std::vector<ComponentCommand>& components)
+		{
+			return !components.empty() && std::ranges::all_of(components, isValidComponent) &&
+				   totalThickness(components) > 0.0;
+		}
+
+		// ビューポートが表示レイヤを 1 つ以上持ち、そのレイヤ名がどれも非空であること。
+		// 表示レイヤ 0 枚は「何も映らないビューポート」なので作らせない。伏図（isValidSheet）
+		// と軸組図（isValidSection）が同じ規則で見る。
+		bool hasDrawableLayers(const ViewportCommand& viewport)
+		{
+			return !viewport.layers.empty() &&
+				   std::ranges::none_of(viewport.layers,
+										[](const std::string& layer) { return layer.empty(); });
+		}
+
 		// 床板 1 枚が妥当か。配置先レイヤ名・クラス名が非空で、平面外形が 3 点以上（面になる）
-		// で、高さ基準のレベル種別が非空で、構成層が 1 枚以上あり総厚が正であること。
+		// で、高さ基準のレベル種別が非空で、構成層が妥当（1 枚以上・総厚が正）であること。
 		// elevation / bound.offset は数値（double なので常に成立）。
 		bool isValidFloor(const FloorCommand& floor)
 		{
-			if (floor.layer.empty() || floor.drawClass.empty() || floor.boundary.size() < 3 ||
-				floor.bound.level.empty() || floor.components.empty())
-				return false;
-			if (!std::ranges::all_of(floor.components, isValidComponent))
-				return false;
-
-			double total = 0.0;
-			for (const ComponentCommand& component : floor.components)
-				total += component.thickness;
-			return total > 0.0;
+			return !floor.layer.empty() && !floor.drawClass.empty() && floor.boundary.size() >= 3 &&
+				   !floor.bound.level.empty() && hasValidComponents(floor.components);
 		}
 
 		// 垂木 1 本が妥当か。配置先レイヤ名・クラス名が非空で、断面（幅・せい）が正で、
@@ -114,21 +125,13 @@ namespace HomeskzIfcImport::core
 		// 基礎の立上り 1 本が妥当か。配置先レイヤ名・クラス名が非空で、壁厚が正で、
 		// 壁芯の始点と終点が縮退していないこと（判定は core/Geometry の samePoint）。
 		// 上下端の高さ基準のレベル種別も非空（空だと SetWallOverallHeights が解決できず、
-		// レイヤの「壁の高さ」設定に落ちる）。構成層は 1 枚以上あり総厚が正であること（スラブ
-		// と同じ関門。構成層の合計＝壁厚）。
+		// レイヤの「壁の高さ」設定に落ちる）。構成層も妥当であること（スラブと同じ関門。
+		// 構成層の合計＝壁厚）。
 		bool isValidWall(const WallCommand& wall)
 		{
-			if (wall.layer.empty() || wall.drawClass.empty() || wall.thickness <= 0.0 ||
-				samePoint(wall.start, wall.end) || wall.bottomBound.level.empty() ||
-				wall.topBound.level.empty() || wall.components.empty())
-				return false;
-			if (!std::ranges::all_of(wall.components, isValidComponent))
-				return false;
-
-			double total = 0.0;
-			for (const ComponentCommand& component : wall.components)
-				total += component.thickness;
-			return total > 0.0;
+			return !wall.layer.empty() && !wall.drawClass.empty() && wall.thickness > 0.0 &&
+				   !samePoint(wall.start, wall.end) && !wall.bottomBound.level.empty() &&
+				   !wall.topBound.level.empty() && hasValidComponents(wall.components);
 		}
 
 		// 床付け（捨てコン・砕石）1 区間が妥当か。断面が 3 点以上（面になる）で、素材クラス名が
@@ -149,23 +152,14 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 基礎の底盤 1 枚が妥当か。床板と同じ関門（レイヤ名・クラス名が非空／外形
-		// 3 点以上／高さ基準のレベル種別が非空／構成層が 1 枚以上あり総厚が正）に、
-		// コンクリート厚が正であることと、噛み合う地中梁がすべて妥当であることを足す（厚み
-		// 0 の構成層は VW が受け付けない）。
+		// 3 点以上／高さ基準のレベル種別が非空／構成層が妥当）に、コンクリート厚が正で
+		// あることと、噛み合う地中梁がすべて妥当であることを足す。
 		bool isValidSlab(const SlabCommand& slab)
 		{
-			if (slab.layer.empty() || slab.drawClass.empty() || slab.boundary.size() < 3 ||
-				slab.bound.level.empty() || slab.components.empty() || slab.thickness <= 0.0)
-				return false;
-			if (!std::ranges::all_of(slab.components, isValidComponent))
-				return false;
-			if (!std::ranges::all_of(slab.modifiers, isValidModifier))
-				return false;
-
-			double total = 0.0;
-			for (const ComponentCommand& component : slab.components)
-				total += component.thickness;
-			return total > 0.0;
+			return !slab.layer.empty() && !slab.drawClass.empty() && slab.boundary.size() >= 3 &&
+				   !slab.bound.level.empty() && slab.thickness > 0.0 &&
+				   hasValidComponents(slab.components) &&
+				   std::ranges::all_of(slab.modifiers, isValidModifier);
 		}
 
 		// 壁結合 1 件が妥当か。結合する 2 本が**異なる**立上りで、どちらも walls
@@ -204,32 +198,27 @@ namespace HomeskzIfcImport::core
 									   { return isValidTag(tag, memberCount); });
 		}
 
-		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを
-		// **1 つ以上**持ち、そのレイヤ名がどれも非空であること。図面タイトル・図番は空でも描
-		// ける（ラベルが空になるだけ）ので弾かない。表示レイヤが 0 枚の伏図は「何も映らない
-		// ビューポート」なので作らせない。
+		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを持つ
+		// こと（hasDrawableLayers）。図面タイトル・図番は空でも描ける（ラベルが空になる
+		// だけ）ので弾かない。
 		bool isValidSheet(const SheetCommand& sheet)
 		{
 			// グラフィック凡例（M13）は**載せるか載せないか**しか持たない（配置点は用紙座標
 			// なので値域の縛りが無く、スタイル名も持たない＝スタイル無しで置く。
 			// core/Document.h の LegendCommand）。したがって凡例そのものに検証する項目は無い。
 			return !sheet.number.empty() && !sheet.title.empty() &&
-				   !sheet.viewport.layers.empty() &&
-				   std::ranges::none_of(sheet.viewport.layers,
-										[](const std::string& layer) { return layer.empty(); });
+				   hasDrawableLayers(sheet.viewport);
 		}
 
-		// 断面ビューポート（軸組図）1 枚が妥当か。表示レイヤを 1 つ以上持ち（伏図と同じ
-		// 理由＝何も映らないビューポートを作らせない）、**断面指示線が縮退していない**
-		// （始点≠終点。縮退した線からは切断面が決まらない）こと。断面の範囲も配置先の
+		// 断面ビューポート（軸組図）1 枚が妥当か。表示レイヤを持ち（hasDrawableLayers。
+		// 伏図と同じ理由＝何も映らないビューポートを作らせない）、**断面指示線が縮退して
+		// いない**（始点≠終点。縮退した線からは切断面が決まらない）こと。断面の範囲も配置先の
 		// シートレイヤも命令が持たない（core/Document.h の SectionCommand 参照）ので見ない
 		// ——シートレイヤの通し方は文書に 1 つの SectionSheetCommand が持ち、下の
 		// isValidSectionSheet が見る。
 		bool isValidSection(const SectionCommand& section)
 		{
-			return !section.viewport.layers.empty() &&
-				   std::ranges::none_of(section.viewport.layers,
-										[](const std::string& layer) { return layer.empty(); }) &&
+			return hasDrawableLayers(section.viewport) &&
 				   !samePoint(section.lineStart, section.lineEnd);
 		}
 
@@ -276,6 +265,15 @@ namespace HomeskzIfcImport::core
 				return false;
 			return wall.kind != ShearWallKind::Brace || wall.width > 0.0;
 		}
+
+		// 通り芯 1 本が妥当か。配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）
+		// こと。同一判定は parse/Grid の重複線除去と同じ core/Geometry の samePoint を通す
+		// （閾値がズレると「畳まれた線が検証では非縮退」のような食い違いが起こる）。クラス名は
+		// 空でもよい（無クラス＝既定クラスへ）。
+		bool isValidGrid(const GridCommand& grid)
+		{
+			return !grid.layer.empty() && !samePoint(grid.start, grid.end);
+		}
 	} // namespace
 
 	bool validateDocument(const Document& document)
@@ -288,9 +286,9 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.stories, isValidStory))
 			return false;
 
-		// 床板: 配置先レイヤ名・クラス名・スタイル名が非空で、外形が 3 点以上、高さ基準の
-		// レベル種別が非空、構成層が 1 枚以上あり総厚が正であること（isValidFloor 参照。
-		// docs/DEV-NOTES.md M5）。
+		// 床板: 配置先レイヤ名・クラス名が非空で、外形が 3 点以上、高さ基準のレベル種別が
+		// 非空、構成層が妥当（1 枚以上・総厚が正）であること（isValidFloor 参照。
+		// docs/DEV-NOTES.md M5。スタイルは作らない・当てないのでスタイル名は持たない）。
 		if (!std::ranges::all_of(document.floors, isValidFloor))
 			return false;
 
@@ -373,16 +371,9 @@ namespace HomeskzIfcImport::core
 								 { return areValidTags(section.viewport, memberCount); }))
 			return false;
 
-		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと。
-		// 同一判定は parse/Grid の重複線除去と同じ core/Geometry の samePoint を通す（閾値が
-		// ズレると「畳まれた線が検証では非縮退」のような食い違いが起こる）。クラス名は空でも
-		// よい（無クラス＝既定クラスへ）。1 本でも不正なら描画しない（docs/DEV-NOTES.md M1）。
-		//
-		// TODO: 命令リストが増えたら、要素ごとの all_of を && で連ねてここに積む
-		// （anchorBolt … の検証。docs/DEV-NOTES.md）。
-		return std::ranges::all_of(
-			document.grids, [](const GridCommand& grid)
-			{ return !grid.layer.empty() && !samePoint(grid.start, grid.end); });
+		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと
+		// （isValidGrid 参照）。1 本でも不正なら描画しない（docs/DEV-NOTES.md M1）。
+		return std::ranges::all_of(document.grids, isValidGrid);
 	}
 
 	bool sectionHeightRange(const Document& document, double& start, double& end)
@@ -400,18 +391,15 @@ namespace HomeskzIfcImport::core
 		// 床（基準面と、構成層の合計だけ下がった下端）。
 		for (const FloorCommand& floor : document.floors)
 		{
-			double thickness = 0.0;
-			for (const ComponentCommand& component : floor.components)
-				thickness += component.thickness;
 			take(floor.elevation);
-			take(floor.elevation - thickness);
+			take(floor.elevation - totalThickness(floor.components));
 		}
 		// 横架材（天端と、せいのぶん下がった下端。傾斜梁は両端とも見る）。
 		for (const MemberCommand& member : document.members)
 		{
 			take(member.elevation);
 			take(member.endElevation);
-			take(std::min(member.elevation, member.endElevation) - member.height);
+			take(memberBottomZ(member));
 		}
 		// 柱（下端と上端）。
 		for (const ColumnCommand& column : document.columns)

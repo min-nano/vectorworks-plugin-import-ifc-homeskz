@@ -41,11 +41,6 @@ namespace HomeskzIfcImport::parse
 			return parts;
 		}
 
-		// text が prefix で始まるか。
-		bool startsWith(const std::string& text, const std::string& prefix)
-		{
-			return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
-		}
 	} // namespace
 
 	std::string memberTypeOfName(const std::string& name)
@@ -104,7 +99,7 @@ namespace HomeskzIfcImport::parse
 	std::string resolveColumnClass(const std::string& objectType, const std::string& name,
 								   int index, int topIndex, bool isThrough)
 	{
-		if (objectType == kStandColumnObjectType || startsWith(name, kKoyazukaNamePrefix) ||
+		if (objectType == kStandColumnObjectType || name.starts_with(kKoyazukaNamePrefix) ||
 			index >= topIndex)
 			return CLASS_KOYAZUKA;
 		return isThrough ? CLASS_TOSHIBASHIRA : CLASS_KUDABASHIRA;

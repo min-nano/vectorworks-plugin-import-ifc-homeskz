@@ -97,6 +97,50 @@ TEST(vec3_length_and_normalize)
 	CHECK(nearVec(core::normalized(Vec3{0.0, 0.0, 0.0}), Vec3{0.0, 0.0, 0.0}));
 }
 
+TEST(vec2_products_length_and_distance)
+{
+	const Vec2 a{1.0, 2.0};
+	const Vec2 b{4.0, 6.0};
+
+	// 内積 1*4 + 2*6 = 16。
+	CHECK(near(core::dot(a, b), 16.0));
+
+	// スカラー外積 1*6 − 2*4 = −2。引数順で符号が反転する（Geometry.h の注意書き）。
+	CHECK(near(core::cross(a, b), -2.0));
+	CHECK(near(core::cross(b, a), 2.0));
+	// 平行なら 0（平行判定の土台）。
+	CHECK(near(core::cross(a, a * 3.0), 0.0));
+
+	CHECK(near(core::length(Vec2{3.0, 4.0}), 5.0));
+	CHECK(near(core::distance(a, b), 5.0));
+	CHECK(near(core::distance(b, a), 5.0)); // 距離は対称
+}
+
+TEST(collinear_span_projects_all_endpoints_onto_head_axis)
+{
+	// start / end を持つ線分 3 本（同一直線上）。先頭が代表＝射影軸になる。
+	struct Seg
+	{
+		Vec2 start;
+		Vec2 end;
+	};
+	const std::vector<Seg> segs{
+		Seg{Vec2{2.0, 0.0}, Vec2{4.0, 0.0}}, // 代表（軸 +X）
+		Seg{Vec2{8.0, 0.0}, Vec2{6.0, 0.0}}, // 逆向きでも端点で見る
+		Seg{Vec2{-1.0, 0.0}, Vec2{1.0, 0.0}},
+	};
+	Vec2 start;
+	Vec2 end;
+	core::collinearSpan(segs, {0, 1, 2}, start, end);
+	// 全端点の射影の [最小, 最大] = [-1, 8]。
+	CHECK(near(start.x, -1.0) && near(start.y, 0.0));
+	CHECK(near(end.x, 8.0) && near(end.y, 0.0));
+
+	// 成分が代表 1 本だけなら区間はその線分そのもの。
+	core::collinearSpan(segs, {0}, start, end);
+	CHECK(near(start.x, 2.0) && near(end.x, 4.0));
+}
+
 // --------------------------------------------------------------------------
 // - Mat4
 // ---------------------------------------------------------------------------

@@ -17,8 +17,10 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <vector>
 
 namespace HomeskzIfcImport::core
@@ -82,6 +84,75 @@ namespace HomeskzIfcImport::core
 	inline Vec2 operator*(const Vec2& v, double s)
 	{
 		return Vec2{v.x * s, v.y * s};
+	}
+
+	// 内積。芯線に沿った射影（along = dot(相対位置, 単位方向)）に使う。
+	inline double dot(const Vec2& a, const Vec2& b)
+	{
+		return (a.x * b.x) + (a.y * b.y);
+	}
+
+	// スカラー外積（3 次元外積の z 成分）。符号は a から b への回転向き（正＝反時計回り）。
+	// 芯線からの直交距離（perp = cross(単位方向, 相対位置)）と平行判定に使う。**引数順で
+	// 符号が反転する**ので、符号に意味を持たせる呼び出し側（自由端の内外判定など）は
+	// 既存の式と同じ順で渡すこと。
+	inline double cross(const Vec2& a, const Vec2& b)
+	{
+		return (a.x * b.y) - (a.y * b.x);
+	}
+
+	// ユークリッドノルム。std::hypot（中間の桁あふれ・アンダーフローに強い）で計算する。
+	// 各所の手書き std::hypot(v.x, v.y) と数値的に同一——sqrt(dot(v,v)) に変えないこと。
+	inline double length(const Vec2& v)
+	{
+		return std::hypot(v.x, v.y);
+	}
+
+	// 2 点間の距離。
+	inline double distance(const Vec2& a, const Vec2& b)
+	{
+		return length(b - a);
+	}
+
+	// 同一直線上とみなした線分成分（start / end メンバを持つ構造体の並び）を、先頭要素の
+	// 芯線方向へ射影して [最小, 最大] 区間の 1 本ぶんの両端点にする。**この射影はここに
+	// 1 つだけ置く**——立上りの統合（parse/Footing）と大引の継手統合（parse/FloorPost）が
+	// 同じ計算を各々書いていた。
+	//
+	// 前提: 先頭要素（indices.front() ＝連結成分の代表）は非縮退であること。長さ 0 の線分は
+	// 同一直線判定の述語が必ず false を返すため単独成分に残り、この関数へは来ない——という
+	// 呼び出し側の不変条件に依っている（core/UnionFind.h の connectedComponents 参照）。
+	template <class T>
+	void collinearSpan(const std::vector<T>& items, const std::vector<std::size_t>& indices,
+					   Vec2& outStart, Vec2& outEnd)
+	{
+		const T& head = items[indices.front()];
+		const Vec2 d = head.end - head.start;
+		const double len = length(d);
+		const Vec2 u{d.x / len, d.y / len};
+
+		double lo = 0.0;
+		double hi = 0.0;
+		bool first = true;
+		for (const std::size_t index : indices)
+		{
+			for (const Vec2& point : {items[index].start, items[index].end})
+			{
+				const double t = dot(u, point - head.start);
+				if (first)
+				{
+					lo = hi = t;
+					first = false;
+				}
+				else
+				{
+					lo = std::min(lo, t);
+					hi = std::max(hi, t);
+				}
+			}
+		}
+		outStart = head.start + (u * lo);
+		outEnd = head.start + (u * hi);
 	}
 
 	// --- Vec3 演算 -----------------------------------------------------------

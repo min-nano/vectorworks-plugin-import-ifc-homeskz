@@ -6,6 +6,7 @@
 //
 
 #include "parse/FloorPost.h"
+#include "core/UnionFind.h"
 #include "parse/Context.h"
 #include "parse/Footing.h"
 #include "parse/IfcAttr.h"
@@ -46,7 +47,7 @@ namespace HomeskzIfcImport::parse
 			const Vec2 origin{placement.x, placement.y};
 			const Vec2 end{placement.x + (placement.axis.x * profile.length),
 						   placement.y + (placement.axis.y * profile.length)};
-			const double length = std::hypot(end.x - origin.x, end.y - origin.y);
+			const double length = core::distance(origin, end);
 			if (length <= 0.0)
 				return false;
 
@@ -63,29 +64,19 @@ namespace HomeskzIfcImport::parse
 		bool wallCovers(const core::WallCommand& wall, const Vec2& position, double clearance)
 		{
 			const Vec2 delta = wall.end - wall.start;
-			const double wallLength = std::hypot(delta.x, delta.y);
+			const double wallLength = core::length(delta);
 			if (wallLength <= 0.0)
 				return false; // 縮退した立上りは向きが定まらない
 			const Vec2 u{delta.x / wallLength, delta.y / wallLength};
 
 			const Vec2 r = position - wall.start;
-			const double along = (r.x * u.x) + (r.y * u.y); // 壁芯に沿った位置
+			const double along = core::dot(r, u); // 壁芯に沿った位置
 			if (along < -clearance || along > wallLength + clearance)
 				return false;
-			const double perp = std::abs((u.x * r.y) - (u.y * r.x)); // 壁芯からの直交距離
+			const double perp = std::abs(core::cross(u, r)); // 壁芯からの直交距離
 			return perp <= (wall.thickness / 2.0) + clearance;
 		}
 
-		// Union-Find の代表を引く（経路圧縮つき）。
-		std::size_t findRoot(std::vector<std::size_t>& parent, std::size_t index)
-		{
-			while (parent[index] != index)
-			{
-				parent[index] = parent[parent[index]];
-				index = parent[index];
-			}
-			return index;
-		}
 	} // namespace
 
 	std::vector<double> floorPostOffsets(double length)
@@ -162,16 +153,15 @@ namespace HomeskzIfcImport::parse
 		std::optional<Vec2> bestPoint;
 		for (const SupportLine& support : supports)
 		{
-			const double den =
-				(direction.x * support.direction.y) - (direction.y * support.direction.x);
+			const double den = core::cross(direction, support.direction);
 			// 平行（自身の芯線・同一直線上の大引を含む）は交点が定まらない。
 			if (std::abs(den) < kFloorPostParallelTol)
 				continue;
 
 			const Vec2 r = support.origin - point;
 			// t: 大引芯上のパラメータ（端からの符号付き距離）。s: 支持材芯上のパラメータ。
-			const double t = ((r.x * support.direction.y) - (r.y * support.direction.x)) / den;
-			const double s = ((r.x * direction.y) - (r.y * direction.x)) / den;
+			const double t = core::cross(r, support.direction) / den;
+			const double s = core::cross(r, direction) / den;
 			if (s < -kFloorPostSegTol || s > support.length + kFloorPostSegTol)
 				continue; // 交点が支持材の区間外＝受けていない
 			if (std::abs(t) > (support.width / 2.0) + kFloorPostShinMargin)
@@ -189,25 +179,25 @@ namespace HomeskzIfcImport::parse
 	std::optional<double> collinearGap(const OhbikiRun& first, const OhbikiRun& second)
 	{
 		const Vec2 da = first.end - first.start;
-		const double la = std::hypot(da.x, da.y);
+		const double la = core::length(da);
 		const Vec2 db = second.end - second.start;
-		const double lb = std::hypot(db.x, db.y);
+		const double lb = core::length(db);
 		if (la <= 0.0 || lb <= 0.0)
 			return std::nullopt;
 
 		const Vec2 u{da.x / la, da.y / la};
 		// 方向が平行でなければ同一直線上ではない。
-		if (std::abs((u.x * (db.y / lb)) - (u.y * (db.x / lb))) > kCollinearAngleTol)
+		if (std::abs(core::cross(u, Vec2{db.x / lb, db.y / lb})) > kCollinearAngleTol)
 			return std::nullopt;
 		// 平行でも別の直線上（芯線からの直交距離が大きい）なら継手ではない。
 		const Vec2 offset = second.start - first.start;
-		if (std::abs((u.x * offset.y) - (u.y * offset.x)) > kCollinearPerpTol)
+		if (std::abs(core::cross(u, offset)) > kCollinearPerpTol)
 			return std::nullopt;
 
 		// a 方向に射影した b の区間と a の区間 [0, la] のすき間（重なる／接触するなら 0）。
-		const double tb1 = (u.x * offset.x) + (u.y * offset.y);
+		const double tb1 = core::dot(u, offset);
 		const Vec2 offsetEnd = second.end - first.start;
-		const double tb2 = (u.x * offsetEnd.x) + (u.y * offsetEnd.y);
+		const double tb2 = core::dot(u, offsetEnd);
 		const double lo = std::min(tb1, tb2);
 		const double hi = std::max(tb1, tb2);
 		if (lo > la)
@@ -219,34 +209,20 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<OhbikiRun> mergeCollinearOhbiki(const std::vector<OhbikiRun>& lines)
 	{
-		const std::size_t n = lines.size();
-		std::vector<std::size_t> parent(n);
-		for (std::size_t i = 0; i < n; ++i)
-			parent[i] = i;
-
-		for (std::size_t i = 0; i < n; ++i)
-		{
-			for (std::size_t j = i + 1; j < n; ++j)
-			{
-				const std::optional<double> gap = collinearGap(lines[i], lines[j]);
-				if (!gap.has_value() || *gap > kJointGapTol)
-					continue;
-				const std::size_t ri = findRoot(parent, i);
-				const std::size_t rj = findRoot(parent, j);
-				// 代表は常に小さい方のインデックス＝入力順に依存しない決定的なまとめ方。
-				if (ri != rj)
-					parent[std::max(ri, rj)] = std::min(ri, rj);
-			}
-		}
-
-		// std::map なので代表インデックス昇順で走る（出力の並びが決定的になる）。
-		std::map<std::size_t, std::vector<std::size_t>> components;
-		for (std::size_t i = 0; i < n; ++i)
-			components[findRoot(parent, i)].push_back(i);
+		// 同一直線上（collinearGap）ですき間が継手許容以下の大引を 1 つの連にまとめる。
+		// 連結成分の骨格は core/UnionFind の connectedComponents（決定性の担保も同所）。
+		const std::vector<std::vector<std::size_t>> components =
+			core::connectedComponents(lines.size(),
+									  [&lines](std::size_t i, std::size_t j)
+									  {
+										  const std::optional<double> gap =
+											  collinearGap(lines[i], lines[j]);
+										  return gap.has_value() && *gap <= kJointGapTol;
+									  });
 
 		std::vector<OhbikiRun> runs;
 		runs.reserve(components.size());
-		for (const auto& [root, members] : components)
+		for (const std::vector<std::size_t>& members : components)
 		{
 			if (members.size() == 1)
 			{
@@ -254,38 +230,14 @@ namespace HomeskzIfcImport::parse
 				continue;
 			}
 
-			// 成分の先頭（＝代表）の芯線方向へ全端点を射影し、最小〜最大区間の 1 本にする。
-			const OhbikiRun& head = lines[members.front()];
-			const Vec2 d = head.end - head.start;
-			const double la = std::hypot(d.x, d.y);
-			const Vec2 u{d.x / la, d.y / la};
-
-			double lo = 0.0;
-			double hi = 0.0;
-			bool first = true;
+			// 成分の先頭（＝代表）の芯線方向へ全端点を射影し、最小〜最大区間の 1 本にする
+			// （core/Geometry の collinearSpan）。統合した連の床束幅は成分の最大値
+			// （安全側＝立上りとの重なりを拾い漏らさない）。
+			OhbikiRun run;
+			core::collinearSpan(lines, members, run.start, run.end);
 			for (const std::size_t index : members)
-			{
-				for (const Vec2& point : {lines[index].start, lines[index].end})
-				{
-					const Vec2 offset = point - head.start;
-					const double t = (u.x * offset.x) + (u.y * offset.y);
-					if (first)
-					{
-						lo = hi = t;
-						first = false;
-					}
-					else
-					{
-						lo = std::min(lo, t);
-						hi = std::max(hi, t);
-					}
-				}
-			}
-			// 統合した連の床束幅は成分の最大値（安全側＝立上りとの重なりを拾い漏らさない）。
-			double width = 0.0;
-			for (const std::size_t index : members)
-				width = std::max(width, lines[index].width);
-			runs.push_back(OhbikiRun{head.start + (u * lo), head.start + (u * hi), width});
+				run.width = std::max(run.width, lines[index].width);
+			runs.push_back(run);
 		}
 		return runs;
 	}
@@ -318,7 +270,7 @@ namespace HomeskzIfcImport::parse
 		for (const OhbikiRun& run : runs)
 		{
 			const Vec2 delta = run.end - run.start;
-			const double length = std::hypot(delta.x, delta.y);
+			const double length = core::length(delta);
 			if (length <= 0.0)
 				continue;
 			const Vec2 direction{delta.x / length, delta.y / length};

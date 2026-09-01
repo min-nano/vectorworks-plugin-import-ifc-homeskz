@@ -121,7 +121,7 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(Context& context)
 	{
-		const std::vector<StoryInfo> stories = context.stories();
+		const std::vector<StoryInfo>& stories = context.stories();
 		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns());
 		const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
 		const bool foundation = hasFoundation(context.model());
@@ -134,9 +134,9 @@ namespace HomeskzIfcImport::parse
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
 			const bool isTop = stories[i].isTop;
-			// その階の横架材レイヤ（一般階＝横架材天端・最上階＝軒高）。
-			std::vector<std::string> layers{
-				storyLayerName(i, isTop, isTop ? kLevelEaves : kLevelBeamTop)};
+			// その階の横架材レイヤ（一般階＝横架材天端・最上階＝軒高。beamTopLayerName が
+			// 分岐を持つ）。
+			std::vector<std::string> layers{beamTopLayerName(i, stories[i])};
 
 			// 切断レベル（その階の床レベル + 0.25）を span が含む柱レイヤ。
 			const double cut = static_cast<double>(i) + kFloorPlanCutOffset;
@@ -185,7 +185,7 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(Context& context)
 	{
-		const std::vector<StoryInfo> stories = context.stories();
+		const std::vector<StoryInfo>& stories = context.stories();
 		if (stories.empty())
 			return {};
 

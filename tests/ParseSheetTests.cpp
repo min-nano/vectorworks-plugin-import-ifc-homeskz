@@ -63,8 +63,7 @@ using HomeskzIfcImport::parse::PlanMarkLayer;
 using HomeskzIfcImport::parse::spanLayersAtCut;
 using HomeskzIfcImport::parse::storyHasRoofSlab;
 using HomeskzIfcImport::parse::storyLayerName;
-using HomeskzIfcTests::allFixtures;
-using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::forEachFixture;
 
 namespace
 {
@@ -165,131 +164,124 @@ TEST(SpanLayersAtCutHandlesEmptySpans)
 
 TEST(FoundationSheetOnlyWhenFoundationExists)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		const std::vector<SheetCommand> sheets = buildFoundationSheetCommands(model);
-		if (!hasFoundation(model))
-		{
-			CHECK(sheets.empty());
-			continue;
-		}
-		CHECK(sheets.size() == 1);
-		CHECK(sheets[0].number == kFoundationSheetNumber);
-		CHECK(sheets[0].title == kFoundationSheetTitle);
-		// 図番・図面タイトルはシートレイヤ番号・タイトルと同じ値。
-		CHECK(sheets[0].viewport.drawingNumber == sheets[0].number);
-		CHECK(sheets[0].viewport.drawingTitle == sheets[0].title);
-		// 底盤・立上り・床束・アンカーボルト・通り芯の 5 枚。
-		CHECK(sheets[0].viewport.layers.size() == 5);
-		CHECK(contains(sheets[0].viewport.layers, "F-底盤"));
-		CHECK(contains(sheets[0].viewport.layers, "F-立上り"));
-		CHECK(contains(sheets[0].viewport.layers, "F-床束"));
-		CHECK(contains(sheets[0].viewport.layers, kLayerFoundationAnchor));
-		CHECK(contains(sheets[0].viewport.layers, core::kGridLayer));
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<SheetCommand> sheets = buildFoundationSheetCommands(model);
+					   if (!hasFoundation(model))
+					   {
+						   CHECK(sheets.empty());
+						   return;
+					   }
+					   CHECK(sheets.size() == 1);
+					   CHECK(sheets[0].number == kFoundationSheetNumber);
+					   CHECK(sheets[0].title == kFoundationSheetTitle);
+					   // 図番・図面タイトルはシートレイヤ番号・タイトルと同じ値。
+					   CHECK(sheets[0].viewport.drawingNumber == sheets[0].number);
+					   CHECK(sheets[0].viewport.drawingTitle == sheets[0].title);
+					   // 底盤・立上り・床束・アンカーボルト・通り芯の 5 枚。
+					   CHECK(sheets[0].viewport.layers.size() == 5);
+					   CHECK(contains(sheets[0].viewport.layers, "F-底盤"));
+					   CHECK(contains(sheets[0].viewport.layers, "F-立上り"));
+					   CHECK(contains(sheets[0].viewport.layers, "F-床束"));
+					   CHECK(contains(sheets[0].viewport.layers, kLayerFoundationAnchor));
+					   CHECK(contains(sheets[0].viewport.layers, core::kGridLayer));
+				   });
 }
 
 TEST(FloorFramingSheetPerStoryWithBeamAndGridLayers)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		Context context(model);
-		const auto stories = collectStories(context);
-		const std::vector<SheetCommand> sheets = buildFloorFramingSheetCommands(model);
-		// ストーリ 1 つにつき伏図 1 枚。番号は 2 から連番。
-		CHECK(sheets.size() == stories.size());
-		for (std::size_t i = 0; i < sheets.size(); ++i)
+	forEachFixture(
+		failures,
+		[&](const std::string&, const Model& model)
 		{
-			const bool isTop = stories[i].isTop;
-			CHECK(sheets[i].number == std::to_string(kFloorPlanStartNumber + static_cast<int>(i)));
-			CHECK(sheets[i].title == floorPlanTitle(i, isTop, stories.size()));
+			Context context(model);
+			const auto stories = collectStories(context);
+			const std::vector<SheetCommand> sheets = buildFloorFramingSheetCommands(model);
+			// ストーリ 1 つにつき伏図 1 枚。番号は 2 から連番。
+			CHECK(sheets.size() == stories.size());
+			for (std::size_t i = 0; i < sheets.size(); ++i)
+			{
+				const bool isTop = stories[i].isTop;
+				CHECK(sheets[i].number ==
+					  std::to_string(kFloorPlanStartNumber + static_cast<int>(i)));
+				CHECK(sheets[i].title == floorPlanTitle(i, isTop, stories.size()));
 
-			// その階の横架材レイヤ（一般階＝横架材天端・最上階＝軒高）と通り芯は必ず載る。
-			CHECK(contains(sheets[i].viewport.layers,
-						   storyLayerName(i, isTop, isTop ? "軒高" : "横架材天端")));
-			CHECK(contains(sheets[i].viewport.layers, core::kGridLayer));
+				// その階の横架材レイヤ（一般階＝横架材天端・最上階＝軒高）と通り芯は必ず載る。
+				CHECK(contains(sheets[i].viewport.layers,
+							   storyLayerName(i, isTop, isTop ? "軒高" : "横架材天端")));
+				CHECK(contains(sheets[i].viewport.layers, core::kGridLayer));
 
-			// 最上階以外は床（FL）が載り、最下階は基礎があるときだけアンカーボルトが載る。
-			CHECK(contains(sheets[i].viewport.layers, storyLayerName(i, isTop, "FL")) == !isTop);
-			const bool expectAnchor = (i == 0) && !isTop && hasFoundation(model);
-			CHECK(contains(sheets[i].viewport.layers, kLayerFoundationAnchor) == expectAnchor);
-		}
-	}
+				// 最上階以外は床（FL）が載り、最下階は基礎があるときだけアンカーボルトが載る。
+				CHECK(contains(sheets[i].viewport.layers, storyLayerName(i, isTop, "FL")) ==
+					  !isTop);
+				const bool expectAnchor = (i == 0) && !isTop && hasFoundation(model);
+				CHECK(contains(sheets[i].viewport.layers, kLayerFoundationAnchor) == expectAnchor);
+			}
+		});
 }
 
 TEST(MoyaSheetPerStoryWithRoofSlab)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		Context context(model);
-		const auto stories = collectStories(context);
-		const std::vector<SheetCommand> sheets = buildMoyaSheetCommands(model);
-
-		// 屋根版を持つ階の数だけ作られ、番号は柱梁伏図の後に続く。
-		std::size_t expected = 0;
-		for (const auto& info : stories)
+	forEachFixture(
+		failures,
+		[&](const std::string&, const Model& model)
 		{
-			if (storyHasRoofSlab(context, info.id))
-				++expected;
-		}
-		CHECK(sheets.size() == expected);
+			Context context(model);
+			const auto stories = collectStories(context);
+			const std::vector<SheetCommand> sheets = buildMoyaSheetCommands(model);
 
-		std::size_t seq = 0;
-		for (std::size_t i = 0; i < stories.size(); ++i)
-		{
-			if (!storyHasRoofSlab(context, stories[i].id))
-				continue;
-			const SheetCommand& sheet = sheets[seq];
-			const int base = kFloorPlanStartNumber + static_cast<int>(stories.size());
-			CHECK(sheet.number == std::to_string(base + static_cast<int>(seq)));
-			CHECK(sheet.title == moyaPlanTitle(i));
-			// 屋根版のある階には必ず垂木・野地板レイヤが作られる（parse/Story）。
-			CHECK(contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "垂木")));
-			CHECK(contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "野地板")));
-			CHECK(contains(sheet.viewport.layers, core::kGridLayer));
-			// 母屋伏図には床（FL）を載せない（梁組と分ける図なので）。
-			CHECK(!contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "FL")));
-			++seq;
-		}
-	}
+			// 屋根版を持つ階の数だけ作られ、番号は柱梁伏図の後に続く。
+			std::size_t expected = 0;
+			for (const auto& info : stories)
+			{
+				if (storyHasRoofSlab(context, info.id))
+					++expected;
+			}
+			CHECK(sheets.size() == expected);
+
+			std::size_t seq = 0;
+			for (std::size_t i = 0; i < stories.size(); ++i)
+			{
+				if (!storyHasRoofSlab(context, stories[i].id))
+					continue;
+				const SheetCommand& sheet = sheets[seq];
+				const int base = kFloorPlanStartNumber + static_cast<int>(stories.size());
+				CHECK(sheet.number == std::to_string(base + static_cast<int>(seq)));
+				CHECK(sheet.title == moyaPlanTitle(i));
+				// 屋根版のある階には必ず垂木・野地板レイヤが作られる（parse/Story）。
+				CHECK(contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "垂木")));
+				CHECK(
+					contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "野地板")));
+				CHECK(contains(sheet.viewport.layers, core::kGridLayer));
+				// 母屋伏図には床（FL）を載せない（梁組と分ける図なので）。
+				CHECK(!contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "FL")));
+				++seq;
+			}
+		});
 }
 
 TEST(SheetNumbersAreUniqueAndConsecutive)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<SheetCommand> sheets = buildSheetCommands(model);
+					   CHECK(!sheets.empty());
 
-		const std::vector<SheetCommand> sheets = buildSheetCommands(model);
-		CHECK(!sheets.empty());
-
-		// 基礎がある文書は基礎伏図が先頭（番号 1）。無ければ柱梁伏図の 2 から始まる。
-		std::set<std::string> numbers;
-		int expected = hasFoundation(model) ? 1 : kFloorPlanStartNumber;
-		for (const SheetCommand& sheet : sheets)
-		{
-			CHECK(sheet.number == std::to_string(expected));
-			CHECK(!sheet.title.empty());
-			CHECK(!sheet.viewport.layers.empty());
-			numbers.insert(sheet.number);
-			++expected;
-		}
-		CHECK(numbers.size() == sheets.size());
-	}
+					   // 基礎がある文書は基礎伏図が先頭（番号 1）。無ければ柱梁伏図の 2 から始まる。
+					   std::set<std::string> numbers;
+					   int expected = hasFoundation(model) ? 1 : kFloorPlanStartNumber;
+					   for (const SheetCommand& sheet : sheets)
+					   {
+						   CHECK(sheet.number == std::to_string(expected));
+						   CHECK(!sheet.title.empty());
+						   CHECK(!sheet.viewport.layers.empty());
+						   numbers.insert(sheet.number);
+						   ++expected;
+					   }
+					   CHECK(numbers.size() == sheets.size());
+				   });
 }
 
 TEST(ViewportLayersExistAmongStoryLayers)
@@ -300,94 +292,83 @@ TEST(ViewportLayersExistAmongStoryLayers)
 	// 関門）。**伏図記号レイヤ（"{to}-柱伏図記号"）はストーリが作らない独立レイヤ**で、
 	// 通り芯 "共通" と同じく描画側（draw/ColumnMark）が用意するので、ここも通り芯と
 	// 同じ扱いで既知の名前に足す（規約を持つ parse/ColumnMark から引く）。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   std::set<std::string> known = storyLayerNames(model);
+					   known.insert(core::kGridLayer);
+					   core::StoryCommand foundation;
+					   if (buildFoundationStoryCommand(model, foundation))
+					   {
+						   for (const core::LevelCommand& level : foundation.levels)
+							   known.insert(level.layer);
+					   }
+					   for (const PlanMarkLayer& layer :
+							collectPlanMarkLayers(collectColumnSpans(buildColumnCommands(model))))
+						   known.insert(layer.layer);
 
-		std::set<std::string> known = storyLayerNames(model);
-		known.insert(core::kGridLayer);
-		core::StoryCommand foundation;
-		if (buildFoundationStoryCommand(model, foundation))
-		{
-			for (const core::LevelCommand& level : foundation.levels)
-				known.insert(level.layer);
-		}
-		for (const PlanMarkLayer& layer :
-			 collectPlanMarkLayers(collectColumnSpans(buildColumnCommands(model))))
-			known.insert(layer.layer);
-
-		for (const SheetCommand& sheet : buildSheetCommands(model))
-		{
-			for (const std::string& layer : sheet.viewport.layers)
-				CHECK(known.count(layer) == 1);
-		}
-	}
+					   for (const SheetCommand& sheet : buildSheetCommands(model))
+					   {
+						   for (const std::string& layer : sheet.viewport.layers)
+							   CHECK(known.count(layer) == 1);
+					   }
+				   });
 }
 
 // --- グラフィック凡例（M13） ------------------------------------------------
 
 TEST(FoundationSheetLegendFollowsAnchorBolts)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<SheetCommand> sheets = buildFoundationSheetCommands(model);
+					   if (sheets.empty())
+						   return;
 
-		const std::vector<SheetCommand> sheets = buildFoundationSheetCommands(model);
-		if (sheets.empty())
-			continue;
-
-		// 凡例に並ぶのは基礎伏図に映るシンボル（＝アンカーボルト）なので、**1 本も
-		// 置かない文書では凡例そのものを作らない**（空の箱を図面に残さない）。
-		const bool expected = !buildAnchorBoltCommands(model).empty();
-		CHECK(sheets[0].legend.has_value() == expected);
-	}
+					   // 凡例に並ぶのは基礎伏図に映るシンボル（＝アンカーボルト）なので、**1 本も
+					   // 置かない文書では凡例そのものを作らない**（空の箱を図面に残さない）。
+					   const bool expected = !buildAnchorBoltCommands(model).empty();
+					   CHECK(sheets[0].legend.has_value() == expected);
+				   });
 }
 
 TEST(FloorAndMoyaSheetsAlwaysCarryFloorLegend)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		// 柱梁伏図・母屋伏図は**必ず**凡例を載せる（何が並ぶかは凡例オブジェクト自身の
-		// ソース定義が決めるので、解析側では中身の有無を判断できない）。命令が持つのは
-		// 「凡例が有る」ことだけで、基礎伏図の凡例との違いも「どの伏図に載るか」しかない。
-		for (const std::vector<SheetCommand>& sheets :
-			 {buildFloorFramingSheetCommands(model), buildMoyaSheetCommands(model)})
+	forEachFixture(
+		failures,
+		[&](const std::string&, const Model& model)
 		{
-			for (const SheetCommand& sheet : sheets)
+			// 柱梁伏図・母屋伏図は**必ず**凡例を載せる（何が並ぶかは凡例オブジェクト自身の
+			// ソース定義が決めるので、解析側では中身の有無を判断できない）。命令が持つのは
+			// 「凡例が有る」ことだけで、基礎伏図の凡例との違いも「どの伏図に載るか」しかない。
+			for (const std::vector<SheetCommand>& sheets :
+				 {buildFloorFramingSheetCommands(model), buildMoyaSheetCommands(model)})
 			{
-				CHECK(sheet.legend.has_value());
+				for (const SheetCommand& sheet : sheets)
+				{
+					CHECK(sheet.legend.has_value());
+				}
 			}
-		}
-	}
+		});
 }
 
 TEST(SheetCommandsAreDeterministic)
 {
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-
-		const std::vector<SheetCommand> first = buildSheetCommands(model);
-		const std::vector<SheetCommand> second = buildSheetCommands(model);
-		CHECK(first.size() == second.size());
-		for (std::size_t i = 0; i < first.size(); ++i)
-		{
-			CHECK(first[i].number == second[i].number);
-			CHECK(first[i].title == second[i].title);
-			CHECK(first[i].viewport.layers == second[i].viewport.layers);
-			CHECK(first[i].legend.has_value() == second[i].legend.has_value());
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<SheetCommand> first = buildSheetCommands(model);
+					   const std::vector<SheetCommand> second = buildSheetCommands(model);
+					   CHECK(first.size() == second.size());
+					   for (std::size_t i = 0; i < first.size(); ++i)
+					   {
+						   CHECK(first[i].number == second[i].number);
+						   CHECK(first[i].title == second[i].title);
+						   CHECK(first[i].viewport.layers == second[i].viewport.layers);
+						   CHECK(first[i].legend.has_value() == second[i].legend.has_value());
+					   }
+				   });
 }
 
 #endif // HOMESKZ_FIXTURES_DIR

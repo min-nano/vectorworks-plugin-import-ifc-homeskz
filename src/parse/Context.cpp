@@ -8,6 +8,7 @@
 
 #include "parse/Context.h"
 #include "parse/AnchorBolt.h"
+#include "parse/Rafter.h"
 
 #include <utility>
 #include <vector>
@@ -78,6 +79,23 @@ namespace HomeskzIfcImport::parse
 		if (!cached.has_value())
 			return nullptr;
 		return &cached.value();
+	}
+
+	std::vector<const RoofPlane*> Context::storyRoofPlanes(int storeyId)
+	{
+		// キャッシュ（storyElements / roofPlane）の薄い合成なので、この一覧そのものは
+		// 覚えない（組み立てはポインタを並べるだけで軽い）。
+		std::vector<const RoofPlane*> planes;
+		for (const int elementId : storyElements(storeyId))
+		{
+			const Entity* element = fModel->entity(elementId);
+			if (element == nullptr || !isRoofSlab(*element))
+				continue;
+			const RoofPlane* plane = roofPlane(elementId);
+			if (plane != nullptr)
+				planes.push_back(plane);
+		}
+		return planes;
 	}
 
 	const std::vector<core::MemberCommand>& Context::members()

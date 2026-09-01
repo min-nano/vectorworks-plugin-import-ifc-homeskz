@@ -186,6 +186,45 @@ namespace HomeskzIfcImport::parse
 			model, model.resolve(placement->attribute(attr::kLocalPlacementRelativePlacement)));
 	}
 
+	bool resolveLocalPlacementOrigin(const Model& model, const Entity& element, LocalOrigin& out,
+									 const Entity** outAxisPlacement)
+	{
+		// element.ObjectPlacement（IfcLocalPlacement）→ RelativePlacement（IfcAxis2Placement3D）
+		// → Location の座標。親 PlacementRelTo は辿らない（resolveObjectPlacement と同じ規約）。
+		const Entity* placement = model.resolve(element.attribute(attr::kProductObjectPlacement));
+		if (placement == nullptr || placement->type != "IFCLOCALPLACEMENT")
+			return false;
+		const Entity* axisPlacement =
+			model.resolve(placement->attribute(attr::kLocalPlacementRelativePlacement));
+		if (axisPlacement == nullptr || axisPlacement->type != "IFCAXIS2PLACEMENT3D")
+			return false;
+		// Location の型は必ず確認する: IfcDirection 等も同じ属性位置に実数リストを持つため、
+		// 型を見ないと方向比を座標として誤読する（ParseStoryTests の
+		// get_local_placement_z_false_when_location_not_cartesian が守る仕様）。
+		const Entity* location =
+			model.resolve(axisPlacement->attribute(attr::kAxis2PlacementLocation));
+		if (location == nullptr || location->type != "IFCCARTESIANPOINT")
+			return false;
+		const Value& coords = location->attribute(attr::kCartesianPointCoordinates);
+		if (!coords.isList() || coords.items.size() < 2)
+			return false;
+
+		LocalOrigin origin;
+		origin.x = coords.items[0].asReal();
+		origin.y = coords.items[1].asReal();
+		// 座標が 2 要素しか無い（Z が無い）要素は hasZ=false のまま返し、Z の解釈
+		// （レイヤ基準高さへのフォールバック等）は呼び出し側に委ねる。
+		if (coords.items.size() >= 3)
+		{
+			origin.z = coords.items[2].asReal();
+			origin.hasZ = true;
+		}
+		out = origin;
+		if (outAxisPlacement != nullptr)
+			*outAxisPlacement = axisPlacement;
+		return true;
+	}
+
 	bool resolveProfile(const Model& model, const Entity* profileDef, Profile& out)
 	{
 		if (profileDef == nullptr)

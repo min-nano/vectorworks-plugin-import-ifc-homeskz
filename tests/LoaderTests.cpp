@@ -116,18 +116,16 @@ TEST(loads_all_homeskz_fixtures)
 {
 	// フィクスチャの一覧は tests/Fixtures.h が唯一の定義（各テストが独自の一覧を持つと、
 	// フィクスチャを足したときに一部のテストだけ素通りする）。
-	for (const std::string& name : HomeskzIfcTests::allFixtures())
-	{
-		bool ok = false;
-		const Model& model = HomeskzIfcTests::fixture(name, ok);
-		CHECK(ok);
-		// 実データは数千エンティティ規模。空でないことを確かめる。
-		CHECK(model.size() > 0);
-		// ホームズ君 IFC の骨格をなす型が存在する（通り芯・ストーリ・横架材）。
-		CHECK(!model.byType("IFCBUILDINGSTOREY").empty());
-		CHECK(!model.byType("IFCGRIDAXIS").empty());
-		CHECK(!model.byType("IFCBEAM").empty());
-	}
+	HomeskzIfcTests::forEachFixture(failures,
+									[&](const std::string&, const Model& model)
+									{
+										// 実データは数千エンティティ規模。空でないことを確かめる。
+										CHECK(model.size() > 0);
+										// ホームズ君 IFC の骨格をなす型が存在する（通り芯・ストーリ・横架材）。
+										CHECK(!model.byType("IFCBUILDINGSTOREY").empty());
+										CHECK(!model.byType("IFCGRIDAXIS").empty());
+										CHECK(!model.byType("IFCBEAM").empty());
+									});
 }
 
 TEST_MAIN();

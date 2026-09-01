@@ -52,14 +52,13 @@ namespace HomeskzIfcImport::parse
 		};
 
 		// 2 つの横架材の Z 範囲（[天端 − せい, 天端]）が重なるか。重なりが許容値以下（段差で
-		// 上下に離れている等）なら干渉とみなさない。
+		// 上下に離れている等）なら干渉とみなさない。式は core/Document.h の zRangesOverlap
+		// （仕口の取り付き・登り梁の受け材と共有。傾斜梁は geomOf が先に弾くので、ここは
+		// elevation だけで天端を代表できる）。
 		bool zOverlaps(double elevA, double heightA, double elevB, double heightB)
 		{
-			const double topA = elevA;
-			const double bottomA = elevA - heightA;
-			const double topB = elevB;
-			const double bottomB = elevB - heightB;
-			return std::min(topA, topB) - std::max(bottomA, bottomB) > kZOverlapTol;
+			return core::zRangesOverlap(elevA - heightA, elevA, elevB - heightB, elevB,
+										kZOverlapTol);
 		}
 
 		// 端点 point・外向き outward を相手梁群 others の面まで詰める量（>= 0）を返す。
@@ -166,30 +165,18 @@ namespace HomeskzIfcImport::parse
 
 	bool memberPlacement3D(const Model& model, const Entity& element, MemberPlacement& out)
 	{
-		const Entity* placement = model.resolve(element.attribute(attr::kProductObjectPlacement));
-		if (placement == nullptr || placement->type != "IFCLOCALPLACEMENT")
-			return false;
-		const Entity* axisPlacement =
-			model.resolve(placement->attribute(attr::kLocalPlacementRelativePlacement));
-		if (axisPlacement == nullptr || axisPlacement->type != "IFCAXIS2PLACEMENT3D")
-			return false;
-		const Entity* location =
-			model.resolve(axisPlacement->attribute(attr::kAxis2PlacementLocation));
-		if (location == nullptr)
-			return false;
-		const Value& coords = location->attribute(attr::kCartesianPointCoordinates);
-		if (!coords.isList() || coords.items.size() < 2)
+		// ローカル配置原点（鎖の解決は parse/IfcGeometry の resolveLocalPlacementOrigin）。
+		// 座標が 2 要素しか無い（Z が無い）梁は、呼び出し側がレイヤ基準高さへフォールバックする。
+		LocalOrigin origin;
+		const Entity* axisPlacement = nullptr;
+		if (!resolveLocalPlacementOrigin(model, element, origin, &axisPlacement))
 			return false;
 
 		MemberPlacement result;
-		result.x = coords.items[0].asReal();
-		result.y = coords.items[1].asReal();
-		// 座標が 2 要素しか無い（Z が無い）梁は、呼び出し側がレイヤ基準高さへフォールバックする。
-		if (coords.items.size() >= 3)
-		{
-			result.z = coords.items[2].asReal();
-			result.hasZ = true;
-		}
+		result.x = origin.x;
+		result.y = origin.y;
+		result.z = origin.z;
+		result.hasZ = origin.hasZ;
 
 		// 梁軸＝押し出し方向はローカル Z（Axis）。未設定なら (1,0,0)。
 		Vec3 axis;
@@ -432,7 +419,7 @@ namespace HomeskzIfcImport::parse
 	std::vector<MemberCommand> buildMemberCommands(Context& context)
 	{
 		const Model& model = context.model();
-		const std::vector<StoryInfo> stories = context.stories();
+		const std::vector<StoryInfo>& stories = context.stories();
 		if (stories.empty())
 			return {};
 
@@ -444,12 +431,10 @@ namespace HomeskzIfcImport::parse
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
 			const StoryInfo& story = stories[i];
-			// 最上階は横架材天端レイヤが無く軒高レイヤに配置する。
-			const char* layerSuffix = story.isTop ? kLevelEaves : kLevelBeamTop;
-			const std::string layerName = storyLayerName(i, story.isTop, layerSuffix);
-			// レベルの絶対 Z（バインド offset の基準。最上階は軒高＝ストーリ高さ）。
-			const double layerElevation =
-				story.isTop ? story.elevation : story.elevation + story.beamOffset;
+			// 最上階は横架材天端レイヤが無く軒高レイヤに配置する（beamTopLayerName が分岐を
+			// 持つ）。layerElevation はレベルの絶対 Z（バインド offset の基準）。
+			const std::string layerName = beamTopLayerName(i, story);
+			const double layerElevation = beamTopElevation(story);
 
 			for (const int elementId : context.storyElements(story.id))
 			{
@@ -558,7 +543,7 @@ namespace HomeskzIfcImport::parse
 				// 登り梁レベルは横架材天端（最上階は軒高）と同じ絶対 Z なので、layerElevation は
 				// 変わらず offset の算出はそのまま。
 				std::string elementLayer = layerName;
-				std::string boundLevel = layerSuffix;
+				std::string boundLevel = beamTopLevelType(story.isTop);
 				if (memberClass == CLASS_MOYA || memberClass == CLASS_MUNAGI)
 				{
 					elementLayer = storyLayerName(i, story.isTop, kLevelMoya);

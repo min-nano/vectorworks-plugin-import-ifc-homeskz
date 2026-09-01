@@ -10,6 +10,7 @@
 #include "parse/Context.h"
 #include "parse/Floor.h"
 #include "parse/IfcAttr.h"
+#include "parse/IfcGeometry.h"
 #include "parse/Member.h"
 #include "parse/Rafter.h"
 #include "parse/ShearWall.h"
@@ -158,24 +159,24 @@ namespace HomeskzIfcImport::parse
 
 	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ)
 	{
-		// element.ObjectPlacement（IfcLocalPlacement）→ RelativePlacement（IfcAxis2Placement3D）
-		// → Location（IfcCartesianPoint）の Z。親 PlacementRelTo は辿らない（M2 と同じ規約）。
-		const Entity* placement = model.resolve(element.attribute(attr::kProductObjectPlacement));
-		if (placement == nullptr || placement->type != "IFCLOCALPLACEMENT")
+		// ローカル配置原点の Z（鎖の解決は parse/IfcGeometry の resolveLocalPlacementOrigin。
+		// 親 PlacementRelTo は辿らない＝ M2 と同じ規約）。Z を持たない 2D 点は false。
+		LocalOrigin origin;
+		if (!resolveLocalPlacementOrigin(model, element, origin) || !origin.hasZ)
 			return false;
-		const Entity* axis =
-			model.resolve(placement->attribute(attr::kLocalPlacementRelativePlacement));
-		if (axis == nullptr || axis->type != "IFCAXIS2PLACEMENT3D")
-			return false;
-		const Entity* point = model.resolve(axis->attribute(attr::kAxis2PlacementLocation));
-		if (point == nullptr || point->type != "IFCCARTESIANPOINT")
-			return false;
-		// IfcCartesianPoint.Coordinates は実数のリスト。Z は 3 番目。
-		const Value& coords = point->attribute(attr::kCartesianPointCoordinates);
-		if (!coords.isList() || coords.items.size() < 3)
-			return false;
-		outZ = coords.items[2].asReal();
+		outZ = origin.z;
 		return true;
+	}
+
+	bool storyHasElement(Context& context, int storeyId, bool (*pred)(const Entity&))
+	{
+		const Model& model = context.model();
+		return std::ranges::any_of(context.storyElements(storeyId),
+								   [&model, pred](int elementId)
+								   {
+									   const Entity* element = model.entity(elementId);
+									   return element != nullptr && pred(*element);
+								   });
 	}
 
 	std::vector<int> collectStoryElements(const Model& model, int storeyId)
@@ -285,7 +286,7 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<StoryCommand> buildStoryCommands(Context& context)
 	{
-		const std::vector<StoryInfo> stories = context.stories();
+		const std::vector<StoryInfo>& stories = context.stories();
 		// 母屋・登り梁レベルの有無は、実際に組み立てた横架材命令の配置先レイヤから決める（下
 		// 記「レベルを足す条件」）。コンテキストが 1 度だけ解析するので、垂木・登り梁の補正と
 		// 同じ結果を共有する。
