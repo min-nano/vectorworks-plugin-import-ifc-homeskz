@@ -130,8 +130,7 @@ namespace HomeskzIfcImport::draw
 		{
 			if (mark.style != core::ColumnMarkStyle::Plan)
 				continue;
-			if (std::ranges::find(names, mark.layer) == names.end())
-				names.push_back(mark.layer);
+			PushUnique(names, mark.layer);
 		}
 		return names;
 	}

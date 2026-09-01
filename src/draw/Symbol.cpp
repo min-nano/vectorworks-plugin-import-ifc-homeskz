@@ -136,15 +136,6 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// 診断へ残す名前は 1 度だけ（同じ名前が何百件も並ばないように）。**参照を三項演算子で
-		// 束ねてから push_back しない**——clang-tidy の misc-const-correctness がその形の変更を
-		// 見落とし、束ねた先の vector に const を要求してくる（CI の tidy-mac / tidy-windows）。
-		void RememberOnce(std::vector<std::string>& names, const std::string& name)
-		{
-			if (std::ranges::find(names, name) == names.end())
-				names.push_back(name);
-		}
-
 		// 診断行へ名前の一覧を「・」区切りで足す。
 		void AppendNames(std::string& text, const std::vector<std::string>& names)
 		{
@@ -201,9 +192,9 @@ namespace HomeskzIfcImport::draw
 			++failed;
 			const auto defined = definedBefore.find(command.symbol);
 			if (defined != definedBefore.end() && defined->second)
-				RememberOnce(failedSymbols, command.symbol);
+				PushUnique(failedSymbols, command.symbol);
 			else
-				RememberOnce(undefinedSymbols, command.symbol);
+				PushUnique(undefinedSymbols, command.symbol);
 		}
 
 		// 診断行（何も無ければ空のまま）。「命令はあるのに 0 件」のときに、原因が配置先レイヤ

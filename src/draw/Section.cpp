@@ -125,21 +125,12 @@ namespace HomeskzIfcImport::draw
 		constexpr Boolean kShowPlanarObjects = false;
 		constexpr Boolean kShow2DComponents = true;
 
-		// 「マスに収まったか」を測って確かめるときの遊び（用紙 mm。伏図と同じ）。
-		constexpr double kFitTol = 1.0;
-
 		// ビューポートのレンダリング（バックグラウンド）。**手で作った断面ビューポートと
 		// 同じ〈隠線消去〉**に揃える（ファイル冒頭「レンダリングは〈隠線消去〉にする」）。
 		// TRenderMode は Kernel/API/MiniCadCallBacks.h（renderFinalHiddenLine = 6 が
 		// VW の UI の〈隠線消去〉、renderOpenGL = 11 が〈シェイド〉）。
 		// **レンダリング（輪郭）は触らない**——手作りも既定の〈なし〉で、こちらは差が無い。
 		constexpr TRenderMode kSectionRenderMode = renderFinalHiddenLine;
-
-		// オブジェクト変数へ真偽値を書き込む（draw/Footing の SetBooleanVariable と同じ流儀）。
-		void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value)
-		{
-			gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
-		}
 
 		// 断面ビューポートを 1 枚作る。作れなければ nil。奥行きは無制限、高さは建物を包む
 		// 実寸（上記）。
@@ -375,19 +366,12 @@ namespace HomeskzIfcImport::draw
 			if (oversized > 0)
 				text += "割り当てたマスに収まらなかった軸組図 " + std::to_string(oversized) +
 						" 枚（縮尺の見積もりより図が大きくなりました）。";
-			if (!note->empty())
-				*note += "\n";
-			*note += text;
+			AppendLine(note, text);
 		}
 
-		// タグの診断は軸組図の診断とは別行にする（原因が別物なので混ぜない）。
-		const std::string tagNote = tagDiagnostics("軸組図", tags);
-		if (note != nullptr && !tagNote.empty())
-		{
-			if (!note->empty())
-				*note += "\n";
-			*note += tagNote;
-		}
+		// タグの診断は軸組図の診断とは別行にする（原因が別物なので混ぜない。連結は
+		// draw/DrawUtil の AppendLine）。
+		AppendLine(note, tagDiagnostics("軸組図", tags));
 		return drawn;
 	}
 } // namespace HomeskzIfcImport::draw

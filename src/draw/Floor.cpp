@@ -45,11 +45,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// SetObjectStoryBound に渡すバウンド ID。スラブは高さ基準を 1 つだけ持つので常に
-		// 0 を渡す。型は SDK の TObjectBoundID（= Sint32）だが、その別名は SDK の名前空間の中
-		// にあるため、ここでは実体の Sint32 で持つ（暗黙変換で同じ）。
-		constexpr Sint32 kSlabBoundID = 0;
-
 		// 床 1 枚をスラブとして描く。スラブを作れなければ外形ポリゴンにフォールバックする。
 		// 配置できたら true。
 		bool DrawOne(const core::FloorCommand& floor)
@@ -85,13 +80,8 @@ namespace HomeskzIfcImport::draw
 			// 基準面（一般階＝床仕上げ上端／ロフト＝床下地下端）を、命令が指すストーリレベル
 			// （一般階＝"FL"／ロフト＝"軒高"）へバインドする。offset はそのレベルからの高低差
 			// （一般部 0・床レベル指定時は ±差分）。これをしないと編集時に高さがレイヤ基準へ
-			// リセットされて実形状と矛盾する。
-			VectorWorks::SStoryObjectData bound;
-			bound.fBound = VectorWorks::eStoryObjectBound_Story;
-			bound.fBoundStory = static_cast<Sint8>(floor.bound.storyOffset);
-			bound.fLayerLevelType = TXString(floor.bound.level.c_str());
-			bound.fOffset = floor.bound.offset;
-			gSDK->SetObjectStoryBound(slab, kSlabBoundID, bound);
+			// リセットされて実形状と矛盾する（変換とバウンド ID は draw/DrawUtil）。
+			gSDK->SetObjectStoryBound(slab, kSlabBoundID, StoryBoundData(floor.bound));
 
 			gSDK->ResetObject(slab);
 			return true;

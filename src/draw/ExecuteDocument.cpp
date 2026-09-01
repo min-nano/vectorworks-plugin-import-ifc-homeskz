@@ -64,22 +64,14 @@ namespace HomeskzIfcImport::draw
 		// 軸組図 33 枚が 3% しか進まない、という嘘の進捗になっていた）。
 		const double weightedTotal = core::drawWeightedTotal(document);
 
-		// 要素ごとの診断（無ければ空）を改行で連ねる。1 つの文字列を各 draw* へ渡すと
-		// 後の要素が前の要素の診断を上書きしてしまうため、ここで積む。**異常
-		// （diagnostics）と平常の内訳（notes）は積む先を分ける**——前者が空かどうかが
-		// 完了ダイアログの「問題あり」になるので、毎回出る内訳を混ぜられない
+		// 要素ごとの診断（無ければ空）を改行で連ねる（連結は draw/DrawUtil の AppendLine）。
+		// 1 つの文字列を各 draw* へ渡すと後の要素が前の要素の診断を上書きしてしまうため、
+		// ここで積む。**異常（diagnostics）と平常の内訳（notes）は積む先を分ける**——前者が
+		// 空かどうかが完了ダイアログの「問題あり」になるので、毎回出る内訳を混ぜられない
 		// （core::DrawCounts）。
-		const auto addTo = [](std::string& sink, const std::string& note)
-		{
-			if (note.empty())
-				return;
-			if (!sink.empty())
-				sink += "\n";
-			sink += note;
-		};
 		const auto addDiagnostics = [&](const std::string& note)
-		{ addTo(counts.diagnostics, note); };
-		const auto addNotes = [&](const std::string& note) { addTo(counts.notes, note); };
+		{ AppendLine(&counts.diagnostics, note); };
+		const auto addNotes = [&](const std::string& note) { AppendLine(&counts.notes, note); };
 
 		// フェーズを開く。中止済みなら false を返し、呼び出し側はそのフェーズごと飛ばす
 		// （各 draw* も自分のループの先頭で中止を見て抜けるので、途中で押されても止まる）。

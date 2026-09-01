@@ -84,17 +84,6 @@ namespace HomeskzIfcImport::draw
 		// へ正規化して渡す（例: 10 度 → rise≈4.479 / run=25.4）。
 		constexpr double kSlopeRunUnit = 25.4;
 
-		// オブジェクト変数へ 2D 点／実数を書き込む小さなヘルパー（呼び出しの定型を 1 か所に）。
-		void SetPointVariable(MCObjectHandle object, short variable, const core::Vec2& point)
-		{
-			gSDK->SetObjectVariable(object, variable, TVariableBlock(WorldPt(point.x, point.y)));
-		}
-
-		void SetRealVariable(MCObjectHandle object, short variable, double value)
-		{
-			gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
-		}
-
 		// 命令の平面外形を VWPoint2D の列にする（屋根面の外形・フォールバックの外形に共通）。
 		std::vector<VWPoint2D> BoundaryPoints(const std::vector<core::Vec2>& boundary)
 		{

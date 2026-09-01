@@ -1299,15 +1299,16 @@ M9 の当初は底盤スラブの構成層を「コンクリート / 捨てコ�
   （`tests/fixtures/README.md`）、合成モデル・合成命令でのみ検証されている。
 - **進捗バーの重みは 1 サンプルの粗い実測。** 別のモデルで大きくずれる要素があれば
   `core::drawWeight` の表を直す（診断ログの経過ミリ秒と見比べる）。
-- **draw/ 側の逐語コピーは未整理（M19.5 は無 SDK 領域だけ）。** 調査で確度が高いと分かって
-  いる候補: `StoryBoundCommand → SStoryObjectData` 変換が 3 コピー（`draw/Footing` /
-  `draw/StructuralMember` / `draw/Floor`。`kSlabBoundID = 0` も 2 コピー）、
-  `SetObjectVariable` の型別ラッパーが 3 コピー（`draw/Roof` / `draw/Footing` /
-  `draw/Section`。後の 2 つはコメントで「同じ流儀」と自認）、伏図と軸組図のフェーズ骨格
-  ・診断文言（`draw/Sheet` と `draw/Section` でほぼ同文）、スラブ描画手順（`draw/Floor` と
-  `draw/Footing` の生成〜Reset。`ConvertToUnstyledSlab` より**前**に削り取りを渡す順序を
-  崩さないこと）、要素ごとの描画ループ（進捗・レイヤ活性化・ハンドル記録が 12 か所で同型）。
-  いずれも実描画に触れるため、**着手する PR は必ず実機確認を挟む**。`kCosts`
-  （`core/Progress.cpp`）と `kElements`（`parse/Summary.cpp`）の命令数ラムダ 17 行の二重管理も
-  未統合（表の統合は無 SDK で閉じるが、`DrawPhase` の並びとの手合わせ規約を壊さないこと）。
+- **draw/ 側の逐語コピーは一部を M19.5 の第 2 弾で整理済み**（`StoryBoundData`・バウンド ID・
+  `SetObjectVariable` ラッパー・`AppendLine`・`PushUnique`・`kFitTol` → いずれも
+  `draw/DrawUtil`）。**残っている候補**: 伏図と軸組図のフェーズ骨格・診断文言（`draw/Sheet` と
+  `draw/Section` でほぼ同文。Sheet は 2 巡構造なので「1 枚ぶんの仕上げ」だけを切り出すこと）、
+  スラブ描画手順（`draw/Floor` と `draw/Footing` の生成〜Reset。`ConvertToUnstyledSlab` より
+  **前**に削り取りを渡す順序を崩さないこと）、要素ごとの描画ループ（進捗・レイヤ活性化・
+  ハンドル記録が 12 か所で同型。ただしレイヤ欠落を数えるかは要素で違う＝挙動判断が要る）、
+  `SetClassByName` と `SetAllAttributesByClass` の**対の当て漏れ**（フォールバック描画 4 か所は
+  片方しか呼んでおらず、揃えると見た目が変わりうる＝実機確認必須）。いずれも実描画に触れる
+  ため、**着手する PR は必ず実機確認を挟む**。`kCosts`（`core/Progress.cpp`）と `kElements`
+  （`parse/Summary.cpp`）の命令数ラムダ 17 行の二重管理も未統合（表の統合は無 SDK で閉じるが、
+  `DrawPhase` の並びとの手合わせ規約を壊さないこと）。
 - **完了報告をモーダルのままにするか**は実使用の感触待ち。

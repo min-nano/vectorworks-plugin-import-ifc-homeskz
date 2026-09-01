@@ -146,7 +146,11 @@ VectorWorks ネイティブオブジェクト
 判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・許容値（統合・自由端・**人通口・
 壁結合・地中梁・床付け**）は `parse/Footing.h`、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・
 プラグインスタイル解決・**構成層／基準面を各オブジェクトへ直接与える手順**——床板・底盤・
-立上りが共有する。スラブ・壁は**スタイルを作らない・当てない**）は
+立上りが共有する。スラブ・壁は**スタイルを作らない・当てない**。加えて**高さ基準の変換と
+バウンド ID**（`StoryBoundData` / `kSlabBoundID` / `kStartBoundID` / `kEndBoundID`。床板・底盤・
+構造材が共有）・**オブジェクト変数の書き込み**（`SetBooleanVariable` / `SetRealVariable` /
+`SetPointVariable`）・**診断行の連結**（`AppendLine`）・**登場順の dedupe**（`PushUnique`）・
+**収まり判定の遊び**（`kFitTol`。伏図と軸組図が共有）もここ）は
 `draw/DrawUtil`、**シートレイヤの用意とビューポートの仕上げ**（表示レイヤの絞り込み・クラス表示・
 縮尺・図番／図面タイトル・更新に加え、**用紙と印刷可能領域の読み取り**（`SheetPaperArea`。用紙は 167/168・余白は `GetPageMargins`・インチ→mm と
 「用紙は原点中心」の規約）と**測って動かす位置合わせ**（`PlaceViewport`）——伏図と軸組図が
