@@ -315,7 +315,12 @@ namespace HomeskzIfcImport::draw
 				continue;
 			if (!found.empty())
 				found += ", ";
-			found += universal + "(" + localized + ")";
+			// 1 つずつ append する（`a + "(" + b + ")"` は途中の一時 string を作るので
+			// clang-tidy の performance-inefficient-string-concatenation に掛かる）。
+			found += universal;
+			found += "(";
+			found += localized;
+			found += ")";
 		}
 		return found;
 	}
