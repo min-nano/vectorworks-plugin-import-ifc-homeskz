@@ -115,6 +115,9 @@ namespace HomeskzIfcImport::draw
 			{
 				// リソース一覧を作れない図面でも設定ダイアログ自体は出す（候補が
 				// 現在の対応だけになる）。1 つの失敗で取り込みの入口を塞がない。
+				// **途中まで採れていた名前は捨てる**——半端な一覧を「図面にあるもの」
+				// として見せると、無い名前が選べてしまう。
+				names.clear();
 			}
 			std::ranges::sort(names);
 			const auto duplicates = std::ranges::unique(names);
