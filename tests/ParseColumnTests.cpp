@@ -35,6 +35,7 @@ using HomeskzIfcImport::core::ColumnCommand;
 using HomeskzIfcImport::core::MemberCommand;
 using HomeskzIfcImport::core::StoryBoundCommand;
 using HomeskzIfcImport::core::Vec2;
+using HomeskzIfcImport::parse::beamSeatAbove;
 using HomeskzIfcImport::parse::buildColumnCommands;
 using HomeskzIfcImport::parse::CLASS_KOYAZUKA;
 using HomeskzIfcImport::parse::CLASS_KUDABASHIRA;
@@ -52,7 +53,8 @@ using HomeskzIfcImport::parse::isThroughColumn;
 using HomeskzIfcImport::parse::kSpanLevelTol;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::makeColumnMemberId;
-using HomeskzIfcImport::parse::memberWidthOnTop;
+using HomeskzIfcImport::parse::MemberOnTop;
+using HomeskzIfcImport::parse::memberOnTop;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::resolveColumnToLevel;
 using HomeskzIfcImport::parse::resolveColumnType;
@@ -368,7 +370,7 @@ TEST(member_id_appends_only_present_hardware)
 }
 
 // --------------------------------------------------------------------------
-// - memberWidthOnTop（小屋束の直上に乗る材の幅）
+// - memberOnTop（小屋束の直上に乗る材の幅と天端）
 // ---------------------------------------------------------------------------
 
 TEST(width_on_top_returns_width_of_member_resting_on_top)
@@ -379,14 +381,46 @@ TEST(width_on_top_returns_width_of_member_resting_on_top)
 	spec.end = Vec2{1000.0, 0.0};
 	spec.topZ = 7090.0;
 	const MemberCommand moya = topMember(spec);
-	const std::optional<double> width = memberWidthOnTop(0.0, 0.0, 7000.0, {moya});
-	CHECK(width.has_value());
-	CHECK(near(width.value_or(0.0), 90.0));
+	const std::optional<MemberOnTop> onTop = memberOnTop(0.0, 0.0, 7000.0, {moya});
+	CHECK(onTop.has_value());
+	CHECK(near(onTop.has_value() ? onTop->width : 0.0, 90.0));
+}
+
+TEST(member_on_top_returns_top_elevation_of_that_member)
+{
+	// 直上に乗る材の**天端 Z**（＝その材の芯線が通る高さ）も返す。小屋束の上端はここへ
+	// 合わせ、せいのぶんを端部オフセットへ入れる（core/Document.h「端部オフセット」）。
+	TopMemberSpec spec;
+	spec.start = Vec2{-1000.0, 0.0};
+	spec.end = Vec2{1000.0, 0.0};
+	spec.topZ = 7090.0;
+	const MemberCommand moya = topMember(spec);
+	const std::optional<MemberOnTop> onTop = memberOnTop(0.0, 0.0, 7000.0, {moya});
+	CHECK(onTop.has_value());
+	CHECK(near(onTop.has_value() ? onTop->topElevation : 0.0, 7090.0));
+}
+
+TEST(member_on_top_interpolates_top_elevation_of_sloped_member)
+{
+	// 傾斜梁（登り梁）の天端は軸方向に変化するので、小屋束の位置で補間した値を返す
+	// （始端 6000 → 終端 8000 の中央 ＝ 7000）。
+	TopMemberSpec spec;
+	spec.width = 120.0;
+	spec.start = Vec2{-1000.0, 0.0};
+	spec.end = Vec2{1000.0, 0.0};
+	spec.topZ = 6000.0;
+	spec.endTopZ = 8000.0;
+	spec.memberClass = CLASS_NOBORIBARI;
+	spec.layer = "R-登り梁";
+	const MemberCommand nobori = topMember(spec);
+	const std::optional<MemberOnTop> onTop = memberOnTop(0.0, 0.0, 6950.0, {nobori});
+	CHECK(onTop.has_value());
+	CHECK(near(onTop.has_value() ? onTop->topElevation : 0.0, 7000.0));
 }
 
 TEST(width_on_top_none_when_no_member)
 {
-	CHECK(!memberWidthOnTop(0.0, 0.0, 7000.0, {}).has_value());
+	CHECK(!memberOnTop(0.0, 0.0, 7000.0, {}).has_value());
 }
 
 TEST(width_on_top_ignores_non_roof_top_member)
@@ -400,7 +434,7 @@ TEST(width_on_top_ignores_non_roof_top_member)
 	spec.memberClass = CLASS_NOKIGETA;
 	spec.layer = "R-軒高";
 	const MemberCommand girder = topMember(spec);
-	CHECK(!memberWidthOnTop(0.0, 0.0, 7000.0, {girder}).has_value());
+	CHECK(!memberOnTop(0.0, 0.0, 7000.0, {girder}).has_value());
 }
 
 TEST(width_on_top_matches_member_pierced_by_post)
@@ -414,9 +448,9 @@ TEST(width_on_top_matches_member_pierced_by_post)
 	spec.topZ = 6859.0;
 	spec.height = 105.0;
 	const MemberCommand moya = topMember(spec);
-	const std::optional<double> width = memberWidthOnTop(0.0, 0.0, 6861.0, {moya});
-	CHECK(width.has_value());
-	CHECK(near(width.value_or(0.0), 105.0));
+	const std::optional<MemberOnTop> onTop = memberOnTop(0.0, 0.0, 6861.0, {moya});
+	CHECK(onTop.has_value());
+	CHECK(near(onTop.has_value() ? onTop->width : 0.0, 105.0));
 }
 
 TEST(width_on_top_ignores_degenerate_member)
@@ -427,7 +461,7 @@ TEST(width_on_top_ignores_degenerate_member)
 	spec.end = Vec2{0.0, 0.0};
 	spec.topZ = 7090.0;
 	const MemberCommand degenerate = topMember(spec);
-	CHECK(!memberWidthOnTop(0.0, 0.0, 7000.0, {degenerate}).has_value());
+	CHECK(!memberOnTop(0.0, 0.0, 7000.0, {degenerate}).has_value());
 }
 
 TEST(width_on_top_ignores_member_far_below)
@@ -437,7 +471,7 @@ TEST(width_on_top_ignores_member_far_below)
 	spec.end = Vec2{1000.0, 0.0};
 	spec.topZ = 5000.0;
 	const MemberCommand low = topMember(spec);
-	CHECK(!memberWidthOnTop(0.0, 0.0, 7000.0, {low}).has_value());
+	CHECK(!memberOnTop(0.0, 0.0, 7000.0, {low}).has_value());
 }
 
 TEST(width_on_top_ignores_member_off_to_the_side)
@@ -448,7 +482,7 @@ TEST(width_on_top_ignores_member_off_to_the_side)
 	spec.end = Vec2{0.0, 1500.0};
 	spec.topZ = 7090.0;
 	const MemberCommand moya = topMember(spec);
-	CHECK(!memberWidthOnTop(0.0, 0.0, 7000.0, {moya}).has_value());
+	CHECK(!memberOnTop(0.0, 0.0, 7000.0, {moya}).has_value());
 }
 
 TEST(width_on_top_prefers_member_closest_to_top)
@@ -467,9 +501,9 @@ TEST(width_on_top_prefers_member_closest_to_top)
 	farSpec.topZ = 7110.0;
 	farSpec.height = 120.0;
 	const MemberCommand farMember = topMember(farSpec);
-	const std::optional<double> width = memberWidthOnTop(0.0, 0.0, 7000.0, {farMember, nearMember});
-	CHECK(width.has_value());
-	CHECK(near(width.value_or(0.0), 90.0));
+	const std::optional<MemberOnTop> onTop = memberOnTop(0.0, 0.0, 7000.0, {farMember, nearMember});
+	CHECK(onTop.has_value());
+	CHECK(near(onTop.has_value() ? onTop->width : 0.0, 90.0));
 }
 
 TEST(width_on_top_interpolates_sloped_noboribari)
@@ -485,9 +519,49 @@ TEST(width_on_top_interpolates_sloped_noboribari)
 	spec.memberClass = CLASS_NOBORIBARI;
 	spec.layer = "R-登り梁";
 	const MemberCommand nobori = topMember(spec);
-	const std::optional<double> width = memberWidthOnTop(0.0, 0.0, 6950.0, {nobori});
-	CHECK(width.has_value());
-	CHECK(near(width.value_or(0.0), 120.0));
+	const std::optional<MemberOnTop> onTop = memberOnTop(0.0, 0.0, 6950.0, {nobori});
+	CHECK(onTop.has_value());
+	CHECK(near(onTop.has_value() ? onTop->width : 0.0, 120.0));
+}
+
+// --------------------------------------------------------------------------
+// - beamSeatAbove（柱の上端が受けている横架材天端）
+// ---------------------------------------------------------------------------
+
+TEST(beam_seat_above_takes_nearest_level_above_the_top)
+{
+	// 1 階（index 0）に立つ管柱。上端 2790 の直上にある 2 階の横架材天端 2940 を返す
+	// （差 150 ＝ 受ける梁のせい）。
+	const std::vector<double> tops = {-105.0, 2940.0, 5880.0};
+	CHECK(near(beamSeatAbove(2790.0, tops, 0), 2940.0));
+}
+
+TEST(beam_seat_above_skips_levels_below_the_top)
+{
+	// 通し柱。上端 5730 は 2 階の天端を越えているので、到達した 3 階の天端 5880 を返す。
+	const std::vector<double> tops = {-105.0, 2940.0, 5880.0};
+	CHECK(near(beamSeatAbove(5730.0, tops, 0), 5880.0));
+}
+
+TEST(beam_seat_above_keeps_top_when_no_level_is_close_enough)
+{
+	// 直上の天端まで梁せいとしてありえない距離しか無い柱は、上端を動かさない。
+	const std::vector<double> tops = {-105.0, 2940.0};
+	CHECK(near(beamSeatAbove(1000.0, tops, 0), 1000.0));
+}
+
+TEST(beam_seat_above_keeps_top_without_upper_story)
+{
+	// 上の階が無い（最上階に立つ）柱も動かさない。
+	const std::vector<double> tops = {-105.0, 2940.0};
+	CHECK(near(beamSeatAbove(2790.0, tops, 1), 2790.0));
+}
+
+TEST(beam_seat_above_accepts_top_exactly_at_the_level)
+{
+	// 上端がちょうど天端に届いている柱は差 0（＝端部オフセット 0）。
+	const std::vector<double> tops = {-105.0, 2940.0};
+	CHECK(near(beamSeatAbove(2940.0, tops, 0), 2940.0));
 }
 
 // --------------------------------------------------------------------------
@@ -679,15 +753,20 @@ TEST(build_column_binds_bottom_current_top_upper_floor)
 		return;
 	const ColumnCommand& command = commands[0];
 	CHECK(near(command.elevation, 600.0));
-	CHECK(near(command.height, 2718.0));
+	// 上端は**受ける横架材の天端**（上階の横架材天端 3500）に取るので、パス長は 2900。
+	// IFC の押し出し Depth 2718 との差 −182（＝受ける梁のせい）が端部オフセットに入り、
+	// 実際に描かれる高さは 2900 − 182 = 2718 に戻る（core/Document.h「端部オフセット」）。
+	CHECK(near(command.height, 2900.0));
+	CHECK(near(command.startOffset, 0.0));
+	CHECK(near(command.endOffset, -182.0));
 	// 下端は当階（storyOffset=0）の横架材天端、offset = 600 − 600 = 0。
 	CHECK_EQ(command.bottomBound.storyOffset, 0);
 	CHECK_EQ(command.bottomBound.level, std::string("横架材天端"));
 	CHECK(near(command.bottomBound.offset, 0.0));
-	// 上端は上階（storyOffset=1）の横架材天端、offset = (600+2718) − 3500。
+	// 上端は上階（storyOffset=1）の横架材天端そのものなので offset は 0。
 	CHECK_EQ(command.topBound.storyOffset, 1);
 	CHECK_EQ(command.topBound.level, std::string("横架材天端"));
-	CHECK(near(command.topBound.offset, 600.0 + 2718.0 - 3500.0));
+	CHECK(near(command.topBound.offset, 0.0));
 }
 
 TEST(build_koyazuka_binds_both_ends_to_current_eaves)
@@ -1198,6 +1277,36 @@ TEST(all_fixtures_bounds_span_the_column_height)
 			CHECK(near(levelZ[top] + command.topBound.offset, command.elevation + command.height));
 		}
 	}
+}
+
+TEST(all_fixtures_top_offset_returns_the_ifc_extrusion_height)
+{
+	// 上端は受ける横架材の天端に取り、梁せいぶんを端部オフセットへ入れる
+	// （core/Document.h「端部オフセット」）。実データで確かめるのは次の 3 点:
+	//   * 実際に描かれる高さ（パス長 ＋ 端部オフセット）が正のまま、
+	//   * 下端は動かさない（startOffset は 0）、
+	//   * 上端を動かした柱が**必ず出る**（0 件ならこの調整は何も効いていない）。
+	// オフセットの大きさは受ける梁のせいなので、木造でありうる範囲（kColumnSeatTol）に
+	// 収まっていることも見る。
+	std::size_t adjusted = 0;
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		const Model& model = fixture(name, ok);
+		CHECK(ok);
+		if (!ok)
+			continue;
+
+		for (const ColumnCommand& command : buildColumnCommands(model))
+		{
+			CHECK(near(command.startOffset, 0.0));
+			CHECK(command.height + command.endOffset > 0.0);
+			CHECK(command.endOffset >= -HomeskzIfcImport::parse::kColumnSeatTol);
+			if (command.endOffset < 0.0)
+				++adjusted;
+		}
+	}
+	CHECK(adjusted > 0);
 }
 
 TEST(all_fixtures_build_columns_deterministically)

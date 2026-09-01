@@ -51,6 +51,24 @@ namespace HomeskzIfcImport::draw
 	TXString ResolveParamName(const VWParametricObj& pio, const char* universalName,
 							  const char* localizedName);
 
+	// 候補が複数あるパラメータ名を解決する。universal 名の候補を順に引き、見つからなければ
+	// ローカライズ名（OIP に出る日本語）の候補を順に引く。**どれも無ければ空文字を返す**
+	// ——ResolveParamName と違って「書けたつもりで黙って無視される」ことがないので、
+	// 呼び出し側は空文字を「このパラメータは無い」と扱って診断へ回せる。
+	//
+	// **なぜ候補が要るか**: PIO のパラメータ名は SDK ヘッダのどこにも無く（ci-debug の
+	// sdk-grep で確認済み）、実機の OIP を読んで突き止めるしかない。VW 標準ツールのように
+	// 名前の候補が絞りきれないものは、ありうる universal 名とローカライズ名を並べて
+	// 引き、どれで当たったかを診断へ持ち帰る（docs/DEV-NOTES.md「プラグインオブジェクト」）。
+	TXString ResolveParamNameAmong(const VWParametricObj& pio,
+								   const std::vector<const char*>& universalNames,
+								   const std::vector<const char*>& localizedNames);
+
+	// PIO のパラメータ名（universal とローカライズ）のうち、needle を含むものを
+	// "universal(ローカライズ)" 形式で連ねて返す。**名前を突き止められなかったときだけ**
+	// 診断へ載せる（ローカルの VectorWorks でしか読めない情報を 1 周で持ち帰るため）。
+	std::string DescribeParamsContaining(const VWParametricObj& pio, const char* needle);
+
 	// PIO に実数パラメータを書き、**読み戻して書けたか確かめる**。書けていれば true。
 	// 角度・寸法のような数値パラメータでも、PIO の登録次第で実数ではなく文字列として
 	// 保持されていることがあり、その場合 SetParamReal は黙って無視される。そこで実数で

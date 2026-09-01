@@ -169,7 +169,7 @@ namespace HomeskzIfcImport::parse
 		return true;
 	}
 
-	std::optional<double> memberWidthOnTop(double px, double py, double topAbs,
+	std::optional<MemberOnTop> memberOnTop(double px, double py, double topAbs,
 										   const std::vector<MemberCommand>& members)
 	{
 		// 最良候補のキー（|材下端 − 小屋束上端|, 直交距離, 幅）を辞書順で比べる。
@@ -178,6 +178,7 @@ namespace HomeskzIfcImport::parse
 		double bestGap = 0.0;
 		double bestPerp = 0.0;
 		double bestWidth = 0.0;
+		double bestTop = 0.0;
 
 		for (const MemberCommand& member : members)
 		{
@@ -219,11 +220,26 @@ namespace HomeskzIfcImport::parse
 				bestGap = gap;
 				bestPerp = perp;
 				bestWidth = member.width;
+				bestTop = memberTop;
 			}
 		}
 		if (!found)
 			return std::nullopt;
-		return bestWidth;
+		return MemberOnTop{bestWidth, bestTop};
+	}
+
+	double beamSeatAbove(double topAbs, const std::vector<double>& beamTops, std::size_t baseIndex)
+	{
+		// 上の階の横架材天端のうち、柱上端以上でいちばん近いもの（＝直上で受けている材の
+		// 天端）。**階の並びは Elevation 昇順**なので、最初に見つかったものが最も近い。
+		for (std::size_t k = baseIndex + 1; k < beamTops.size(); ++k)
+		{
+			const double gap = beamTops[k] - topAbs;
+			if (gap < -kSpanLevelTol)
+				continue; // 柱上端より下の階の天端（まだ届いていない）
+			return gap <= kColumnSeatTol ? beamTops[k] : topAbs;
+		}
+		return topAbs;
 	}
 
 	bool isThroughColumn(double topAbs, const std::optional<double>& nextFloorElevation)
@@ -386,17 +402,18 @@ namespace HomeskzIfcImport::parse
 				// 崩れる。ヘッダ冒頭参照）。
 				const bool isKoyazuka = columnClass == CLASS_KOYAZUKA;
 
-				// ホームズ君 IFC の小屋束の断面寸法は適当な値なので、直上に乗る横架材
-				// （母屋・棟木・登り梁）の断面幅に合わせた正方形へ置き換える。上に乗る材が
-				// 見つからない小屋束は IFC の断面のまま。構造材 ID も補正後の寸法で作る。
-				if (isKoyazuka)
+				// 直上に乗る横架材（母屋・棟木・登り梁）。当階の横架材天端へ上端をバインドする
+				// 柱（小屋束と最上階の柱）は、この材の天端を上端に取る（下記）。
+				const std::optional<MemberOnTop> onTop =
+					isKoyazuka || story.isTop ? memberOnTop(px, py, topAbs, members) : std::nullopt;
+
+				// ホームズ君 IFC の小屋束の断面寸法は適当な値なので、直上に乗る横架材の断面幅
+				// に合わせた正方形へ置き換える。上に乗る材が見つからない小屋束は IFC の断面の
+				// まま。構造材 ID も補正後の寸法で作る。
+				if (isKoyazuka && onTop.has_value())
 				{
-					const std::optional<double> onTop = memberWidthOnTop(px, py, topAbs, members);
-					if (onTop.has_value())
-					{
-						width = *onTop;
-						depth = *onTop;
-					}
+					width = onTop->width;
+					depth = onTop->width;
 				}
 
 				// 上下端高さを横架材天端（最上階は軒高）のストーリレベルへバインドする。
@@ -405,6 +422,19 @@ namespace HomeskzIfcImport::parse
 				// 与える（ヘッダ冒頭「高さはパスのジオメトリ…」）。
 				const char* currentLevel = story.isTop ? kLevelEaves : kLevelBeamTop;
 				const double bottomOffset = bottomAbs - beamTopAbs[i];
+
+				// **上端は受ける横架材の天端（＝その芯線）に取り、梁せいぶんを端部オフセット
+				// へ入れる**（core/Document.h「端部オフセット」）。柱・束の上端を材が実際に
+				// 止まる高さ（梁の下端）に置くと、その座標はどの部材の芯線にも乗らず、座標
+				// だけを見て接合を言えない。受ける材が分からない柱は上端を動かさない
+				// （seatTop == topAbs → オフセット 0）。
+				double seat = beamSeatAbove(topAbs, beamTopAbs, i);
+				if (isKoyazuka || story.isTop)
+					seat = onTop.has_value() ? onTop->topElevation : topAbs;
+				// 受け材の天端が柱の下端を上回らない（＝パス長が残らない）異常なモデルでは
+				// 上端を動かさない。ここで潰れると命令が検証に落ち、取り込み全体が止まる。
+				const double seatTop = seat > bottomAbs ? seat : topAbs;
+				const double topEndOffset = topAbs - seatTop;
 
 				ColumnCommand cmd;
 				cmd.layer = spanLayerName(static_cast<double>(i + 1), toLevel);
@@ -415,25 +445,33 @@ namespace HomeskzIfcImport::parse
 				cmd.position = Vec2{px, py};
 				cmd.width = width;
 				cmd.depth = depth;
-				cmd.height = height;
+				// height は**パス長**（下端 → 上端）。実際に描かれる高さは height + endOffset
+				// ＝ IFC の押し出し Depth に戻る（core/Document.h の ColumnCommand）。
+				cmd.height = seatTop - bottomAbs;
 				cmd.elevation = bottomAbs;
 				cmd.topHardware = topHardware;
 				cmd.bottomHardware = bottomHardware;
+				// 下端は元から受け材（土台・梁）の天端＝その芯線に乗るので、端部オフセットは
+				// 0（下端の位置は変えない）。
+				cmd.startOffset = 0.0;
+				cmd.endOffset = topEndOffset;
 				cmd.bottomBound = StoryBoundCommand{0, currentLevel, bottomOffset};
 				if (isKoyazuka || story.isTop)
 				{
 					// 小屋束（および上階の無い最上階の柱）は上下端とも当階の横架材天端
-					// （最上階は軒高）へバインドし、**上端 offset には実際の上端 Z までの
-					// 距離**（＝下端 offset ＋ 柱高さ）を入れる。バウンドの差が柱高さに
+					// （最上階は軒高）へバインドし、**上端 offset には上端（受ける材の天端）
+					// までの距離**（＝下端 offset ＋ パス長）を入れる。バウンドの差がパス長に
 					// なるので、管柱・通し柱と同じ形になる（ヘッダ冒頭「高さは…」）。
-					cmd.topBound = StoryBoundCommand{0, currentLevel, topAbs - beamTopAbs[i]};
+					cmd.topBound = StoryBoundCommand{0, currentLevel, seatTop - beamTopAbs[i]};
 				}
 				else
 				{
 					// 柱（管柱・通し柱）は上端を上階（次階）の横架材天端へバインドする。
+					// 管柱は seatTop がそのレベルそのものなので offset 0、通し柱は上の階の
+					// 横架材天端まで届くぶんだけ正になる。
 					const bool nextIsTop = (i + 1 == static_cast<std::size_t>(topIndex));
 					const char* nextLevel = nextIsTop ? kLevelEaves : kLevelBeamTop;
-					cmd.topBound = StoryBoundCommand{1, nextLevel, topAbs - beamTopAbs[i + 1]};
+					cmd.topBound = StoryBoundCommand{1, nextLevel, seatTop - beamTopAbs[i + 1]};
 				}
 				commands.push_back(std::move(cmd));
 			}

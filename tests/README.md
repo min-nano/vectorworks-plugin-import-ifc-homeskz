@@ -22,15 +22,15 @@
 | `LoaderTests` | `src/parse/Loader` | 非正規エンティティを**除去せず**読めること・実フィクスチャ全件の読み込み |
 | `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配（手計算値との突き合わせ） |
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
-| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付けを含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`） |
+| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付けを含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`）・端部オフセットを戻した材の端（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop`） |
 | `CoreLayoutTests` | `src/core/Layout` | 用紙の割り付け（縮尺は階梯の値だけ・**渡された印刷可能領域をそのまま使う**（余白を仮定しない）・凡例の幅を引いてから収まる中で最大の図・伏図は全図同じ縮尺と位置・軸組図は上下 2 段でマスが重ならないこと・シート枚数とタイトルの連番） |
 | `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
 | `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |
 | `ParseStoryTests` | `src/parse/Story` | 階・レベル・レイヤ名（横架材天端オフセット・屋根組／母屋／span 柱レベルの追加条件・span レイヤ名の生成と分解） |
 | `ParseStructuralClassTests` | `src/parse/StructuralClass` | 部材種別 → VW クラスの純ロジック |
 | `ParseFloorTests` | `src/parse/Floor` | 床板（スラブ構成・基準面・段差・ロフト床の合成） |
-| `ParseColumnTests` | `src/parse/Column` | 柱（span レイヤの to レベル判定・上下端バインド・構造用途・柱頭/柱脚金物・小屋束の断面合わせ） |
-| `ParseMemberTests` | `src/parse/Member` | 横架材（天端中央線への補正・高さバインド・母屋／登り梁の分離・登り梁の任意断面・食い込み調整） |
+| `ParseColumnTests` | `src/parse/Column` | 柱（span レイヤの to レベル判定・上下端バインド・構造用途・柱頭/柱脚金物・小屋束の断面合わせ・上端を受ける横架材の天端へ合わせる端部オフセット） |
+| `ParseMemberTests` | `src/parse/Member` | 横架材（天端中央線への補正・高さバインド・母屋／登り梁の分離・登り梁の任意断面・取り合いの端点を勝ち側の芯線へ合わせる端部オフセット） |
 | `ParseNoboribariTests` | `src/parse/Noboribari` | 登り梁の位置補正（端部の食い込み解消・天端の屋根面スナップ） |
 | `ParseRafterTests` | `src/parse/Rafter` | 垂木（掃引割り付け・非凸面のクリップ・支持点・軒の出・桁幅参照・高さ基準） |
 | `ParseRoofTests` | `src/parse/Roof` | 野地板（軒軸・upslope・勾配・厚み・軒の Z） |

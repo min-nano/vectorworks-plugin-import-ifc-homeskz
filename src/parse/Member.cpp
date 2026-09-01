@@ -28,14 +28,13 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 食い込み調整（T 字・L 字の取り合い）の許容値（mm）。
+		// 取り合い（T 字の甲乙梁・L 字の出隅）の判定に使う許容値（mm）。
 		constexpr double kZOverlapTol = 1.0; // これ以下の Z 重なりは干渉とみなさない
 		constexpr double kParallelTol = 1e-6; // 軸がほぼ平行な相手は対象外（継ぎ手）
 		constexpr double kAlongTol = 1.0; // 相手軸方向の範囲判定の余裕（角部も含める）
-		constexpr double kFaceTol = 1.0; // 面ちょうどで止まる材を食い込みとみなさない余裕
-		constexpr double kMinTrim = 1.0; // これ未満の食い込みは調整しない
-		constexpr double kMinLength = 1.0; // 調整後にこの長さ未満になるなら調整しない
-		constexpr double kSymmetryTol = 1.0; // 相互の食い込み量がこの差以内なら対称とみなす
+		constexpr double kFaceTol = 1.0; // 面ちょうどで止まる端部も相手に載っているとみなす余裕
+		constexpr double kMinLength = 1.0; // 調整後に描かれる長さがこれ未満なら調整しない
+		constexpr double kSymmetryTol = 1.0; // 出隅で相互の食い込み量がこの差以内なら対称とみなす
 
 		// Body 表現の識別子（IfcShapeRepresentation.RepresentationIdentifier）。
 		constexpr const char* kBodyRepresentation = "Body";
@@ -62,32 +61,74 @@ namespace HomeskzIfcImport::parse
 			return std::min(topA, topB) - std::max(bottomA, bottomB) > kZOverlapTol;
 		}
 
-		// 端点 point・外向き outward を相手梁群 others の面まで詰める量（>= 0）を返す。
-		// 自分が相手 B に食い込む量 sAB が、B の端部が自分に食い込む量 sBA を上回る（＝ B
-		// が「通し材」側で勝ち）ときだけ詰める。対称なら触らない。複数の相手に食い込むときは、
-		// すべての面より外側になるよう最大値を採る。
-		double trimForEnd(const Vec2& point, const Vec2& outward, const MemberGeom& self,
-						  double selfHalfWidth,
-						  const std::vector<std::pair<MemberGeom, double>>& others)
+		// 端部 1 つぶんの調整量。reach ＝ 端点を芯線へ載せるための移動量（−outward 方向）、
+		// setback ＝ そこから材の端（相手の手前の面）まで戻す量（>= 0。端部オフセットは
+		// −setback）。取り合う相手がいなければ両方 0 ＝ 端点も材の端も動かさない。
+		struct EndAdjust
 		{
-			double best = 0.0;
+			double reach = 0.0;
+			double setback = 0.0;
+		};
+
+		// 相手 B の端部が自分（self）の**途中**へ取り付いているか。取り付いているなら
+		// 相互に負けている＝勝ち負けが付かない（従来の「相互の食い込み量が同等なら触らない」
+		// と同じ結論）。B 始端の外向きは −軸、終端は +軸。
+		bool jointsSelfInterior(const MemberGeom& b, const MemberGeom& self, double selfHalfWidth)
+		{
+			return memberEndJoint(b.start, Vec2{-b.axis.x, -b.axis.y}, self.start, self.axis,
+								  self.length, selfHalfWidth)
+					   .interior ||
+				   memberEndJoint(b.end, b.axis, self.start, self.axis, self.length, selfHalfWidth)
+					   .interior;
+		}
+
+		// 端点 point・外向き outward が相手 b に負けるか。
+		//   * 相手の**途中**へ取り付いている（T 字）なら負け。相手が通し材だからで、食い込みが
+		//     無い（既に相手の面で止まっている）取り合いもこれで拾える。ただし相手の端部も
+		//     自分の途中へ取り付いているとき（相互）は勝ち負けが付かない。
+		//   * 相手の**端部**での取り合い（L 字の出隅）は、従来どおり**相互の食い込み量**で
+		//     決める。自分の方が深く食い込むなら負け、同等（同寸の出隅・火打）なら触らない
+		//     ——ここを外すと、幅の違う出隅で負け側が詰められなくなる。
+		bool losesTo(const MemberJoint& joint, const Vec2& point, const Vec2& outward,
+					 const MemberGeom& self, double selfHalfWidth, const MemberGeom& b,
+					 double bHalfWidth)
+		{
+			if (!joint.found)
+				return false;
+			if (joint.interior)
+				return !jointsSelfInterior(b, self, selfHalfWidth);
+
+			const double sAB =
+				memberPenetrationDepth(point, outward, b.start, b.axis, b.length, bHalfWidth);
+			const double sBA =
+				std::max(memberPenetrationDepth(b.start, Vec2{-b.axis.x, -b.axis.y}, self.start,
+												self.axis, self.length, selfHalfWidth),
+						 memberPenetrationDepth(b.end, b.axis, self.start, self.axis, self.length,
+												selfHalfWidth));
+			return sAB > sBA + kSymmetryTol;
+		}
+
+		// 端点 point・外向き outward が相手梁群 others のどれに負けるかを決め、その調整量を
+		// 返す。複数の相手に取り付くときは、材の端が最も手前（すべての面より外側）になる
+		// 相手＝ reach + setback が最大の相手が支配する（従来の「食い込み量の最大値を採る」と
+		// 同じ選び方）。どれにも負けなければ両方 0 ＝ 端点も材の端も動かさない。
+		EndAdjust adjustForEnd(const Vec2& point, const Vec2& outward, const MemberGeom& self,
+							   double selfHalfWidth,
+							   const std::vector<std::pair<MemberGeom, double>>& others)
+		{
+			EndAdjust best;
+			bool found = false;
 			for (const std::pair<MemberGeom, double>& other : others)
 			{
 				const MemberGeom& b = other.first;
-				const double bHalfWidth = other.second;
-				const double sAB =
-					memberPenetrationDepth(point, outward, b.start, b.axis, b.length, bHalfWidth);
-				if (sAB <= kMinTrim)
+				const MemberJoint joint =
+					memberEndJoint(point, outward, b.start, b.axis, b.length, other.second);
+				if (!losesTo(joint, point, outward, self, selfHalfWidth, b, other.second))
 					continue;
 
-				// 相手 B の 2 端点が自分に食い込む量（B 始端の外向きは −軸、終端は +軸）。
-				const double sBA =
-					std::max(memberPenetrationDepth(b.start, Vec2{-b.axis.x, -b.axis.y}, self.start,
-													self.axis, self.length, selfHalfWidth),
-							 memberPenetrationDepth(b.end, b.axis, self.start, self.axis,
-													self.length, selfHalfWidth));
-				if (sAB > sBA + kSymmetryTol && sAB > best)
-					best = sAB;
+				if (!found || joint.reach + joint.setback > best.reach + best.setback)
+					best = EndAdjust{joint.reach, joint.setback};
+				found = true;
 			}
 			return best;
 		}
@@ -352,28 +393,48 @@ namespace HomeskzIfcImport::parse
 		return {};
 	}
 
-	double memberPenetrationDepth(const Vec2& point, const Vec2& outward, const Vec2& otherStart,
-								  const Vec2& otherAxis, double otherLength, double otherHalfWidth)
+	MemberJoint memberEndJoint(const Vec2& point, const Vec2& outward, const Vec2& otherStart,
+							   const Vec2& otherAxis, double otherLength, double otherHalfWidth)
 	{
+		MemberJoint joint;
 		// 相手梁の断面幅方向（中心線に直交する単位ベクトル）。
 		const Vec2 perpendicular{-otherAxis.y, otherAxis.x};
 		const double a = (outward.x * perpendicular.x) + (outward.y * perpendicular.y);
 		if (std::abs(a) < kParallelTol)
-			return 0.0; // ほぼ平行 → 食い込みではなく継ぎ手
+			return joint; // ほぼ平行 → 取り合いではなく継ぎ手
 
 		const double dx = point.x - otherStart.x;
 		const double dy = point.y - otherStart.y;
 		const double d =
 			(dx * perpendicular.x) + (dy * perpendicular.y); // 中心線からの符号付き距離
 		if (std::abs(d) > otherHalfWidth + kFaceTol)
-			return 0.0; // 端点が相手の幅の外（食い込んでいない）
+			return joint; // 端点が相手の幅の外（載っていない）
 		const double t = (dx * otherAxis.x) + (dy * otherAxis.y); // 相手軸方向の位置
 		if (t <= -kAlongTol || t >= otherLength + kAlongTol)
-			return 0.0; // 相手の長さの範囲外
+			return joint; // 相手の長さの範囲外
 
+		joint.found = true;
+		// 芯線まで（d を 0 にする移動量）と、そこから手前の面まで（半幅ぶん。斜交なら 1/cos）。
+		joint.reach = d / a;
+		joint.setback = otherHalfWidth / std::abs(a);
+		// 相手の**途中**での取り合いか。出隅（L 字）では取り合いが相手の端部に来るので、
+		// 端から半幅ぶんは「途中」とみなさない——直交する同寸の材が角で突き合う場合、
+		// 一方の芯線は他方の面（＝端から半幅）まで伸びているのが普通で、そこを途中と数えると
+		// 勝ち負けの付かない出隅を片側だけ動かしてしまう。
+		const double cornerTol = otherHalfWidth + kAlongTol;
+		joint.interior = t > cornerTol && t < otherLength - cornerTol;
+		return joint;
+	}
+
+	double memberPenetrationDepth(const Vec2& point, const Vec2& outward, const Vec2& otherStart,
+								  const Vec2& otherAxis, double otherLength, double otherHalfWidth)
+	{
+		const MemberJoint joint =
+			memberEndJoint(point, outward, otherStart, otherAxis, otherLength, otherHalfWidth);
+		if (!joint.found)
+			return 0.0;
 		// 端点が侵入してきた側（手前）の面まで引き戻す距離。
-		const double target = std::copysign(otherHalfWidth, -a);
-		const double s = (d - target) / a;
+		const double s = joint.reach + joint.setback;
 		return s > 0.0 ? s : 0.0;
 	}
 
@@ -414,15 +475,22 @@ namespace HomeskzIfcImport::parse
 			}
 
 			const Vec2 backward{-self.axis.x, -self.axis.y};
-			const double sEnd = trimForEnd(self.end, self.axis, self, selfHalfWidth, others);
-			const double sStart = trimForEnd(self.start, backward, self, selfHalfWidth, others);
-			if (self.length - sStart - sEnd > kMinLength)
+			const EndAdjust end = adjustForEnd(self.end, self.axis, self, selfHalfWidth, others);
+			const EndAdjust start = adjustForEnd(self.start, backward, self, selfHalfWidth, others);
+			// 実際に描かれる長さ（芯線間のパス長 − 両端の戻り）。従来「相手の面まで詰めた
+			// 長さ」と同じ値で、これが残らないなら取り合いの解釈が破綻しているので触らない。
+			const double drawn =
+				self.length - start.reach - end.reach - start.setback - end.setback;
+			if (drawn > kMinLength)
 			{
-				// 端部の詰めは平面座標（XY）のみを変える。高さバインドはそのまま。
-				command.start = Vec2{self.start.x + (self.axis.x * sStart),
-									 self.start.y + (self.axis.y * sStart)};
-				command.end =
-					Vec2{self.end.x - (self.axis.x * sEnd), self.end.y - (self.axis.y * sEnd)};
+				// 端点は相手の芯線上へ移す（平面座標のみ。高さバインドはそのまま）。材が実際に
+				// 止まる位置は端部オフセットで戻す（core/Document.h「端部オフセット」）。
+				command.start = Vec2{self.start.x + (self.axis.x * start.reach),
+									 self.start.y + (self.axis.y * start.reach)};
+				command.end = Vec2{self.end.x - (self.axis.x * end.reach),
+								   self.end.y - (self.axis.y * end.reach)};
+				command.startOffset = -start.setback;
+				command.endOffset = -end.setback;
 			}
 			result.push_back(std::move(command));
 		}

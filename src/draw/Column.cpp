@@ -81,8 +81,16 @@ namespace HomeskzIfcImport::draw
 		// 何か 1 つでも配置できたら true。outObject には**構造材ツールで作れたときだけ**その
 		// ハンドルを入れる（伏図記号のデータタグはこれに関連付ける。フォールバックの矩形は
 		// タグを付ける相手にしない）。
-		bool DrawOne(const core::ColumnCommand& column, RefNumber style,
-					 std::size_t& outPathFailures, std::size_t& outSectionFailures,
+		// 診断の集計（drawColumns が完了ダイアログ・診断ログへ載せる件数）。
+		struct ColumnFailures
+		{
+			std::size_t path = 0;	 // 鉛直パスが 2 点にならなかった
+			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
+			std::size_t offset = 0;	 // 端部オフセットを書けなかった
+			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
+		};
+
+		bool DrawOne(const core::ColumnCommand& column, RefNumber style, ColumnFailures& failures,
 					 MCObjectHandle& outObject)
 		{
 			// 断面の矩形（幅 × せい）は**原点中心**に置く（AxisAlign＝中央と一致させる。
@@ -102,7 +110,7 @@ namespace HomeskzIfcImport::draw
 											column.elevation + column.height},
 								 pathAppended);
 			if (path != nil && !pathAppended)
-				++outPathFailures;
+				++failures.path;
 
 			StructuralMemberSpec spec;
 			spec.path = path;
@@ -117,6 +125,10 @@ namespace HomeskzIfcImport::draw
 			spec.axisAlign = StructuralAxisAlign::Centre; // 断面中心（鉛直パスが通る点）
 			spec.startBound = column.bottomBound;		  // 始端＝下端
 			spec.endBound = column.topBound;			  // 終端＝上端
+			// 端部オフセット（負値）。上端は受ける横架材の天端＝その芯線に取ってあるので、
+			// 梁せいぶんをここで戻す（core/Document.h「端部オフセット」）。
+			spec.startOffset = column.startOffset;
+			spec.endOffset = column.endOffset;
 
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
@@ -142,7 +154,15 @@ namespace HomeskzIfcImport::draw
 			// **スパン（平面投影長）は数えない**——鉛直材では 0 が正常なので、横架材と同じ
 			// 数え方をすると全数を誤報する（冒頭「診断を必ず持ち帰る」）。
 			if (!result.sectionOk)
-				++outSectionFailures;
+				++failures.section;
+			// 端部オフセットを書けなかった本数。書けないと柱が受ける梁の天端まで伸びたまま
+			// 描かれる（＝梁せいぶん高い）ので、切り分けの手掛かりを 1 件だけ残す。
+			if (!result.endOffsetOk)
+			{
+				++failures.offset;
+				if (failures.offsetHint.empty())
+					failures.offsetHint = result.offsetParamHint;
+			}
 			outObject = result.object;
 			return true;
 		}
@@ -157,8 +177,7 @@ namespace HomeskzIfcImport::draw
 		const RefNumber style = ResolvePluginStyle(kColumnStyle);
 
 		std::size_t drawn = 0;
-		std::size_t pathFailures = 0;
-		std::size_t sectionFailures = 0;
+		ColumnFailures failures;
 		for (std::size_t index = 0; index < document.columns.size(); ++index)
 		{
 			const core::ColumnCommand& column = document.columns[index];
@@ -175,7 +194,7 @@ namespace HomeskzIfcImport::draw
 				continue;
 
 			MCObjectHandle object = nil;
-			if (DrawOne(column, style, pathFailures, sectionFailures, object))
+			if (DrawOne(column, style, failures, object))
 				++drawn;
 			// 伏図記号のデータタグが引けるよう、**構造材ツールで描けた柱だけ**を記録する
 			// （立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
@@ -191,13 +210,22 @@ namespace HomeskzIfcImport::draw
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「鉛直パスが 2 点に
 		// ならなかった」「断面が入らなかった」「スタイルが見つからなかった」を件数で持ち帰る
 		// （柱が見えないときの切り分け材料）。
-		if (outDiagnostics != nullptr && (pathFailures > 0 || sectionFailures > 0 || style == 0))
+		if (outDiagnostics != nullptr &&
+			(failures.path > 0 || failures.section > 0 || failures.offset > 0 || style == 0))
 		{
 			std::string note = "柱の診断: ";
-			if (pathFailures > 0)
-				note += "鉛直パスが 2 点にならなかった柱 " + std::to_string(pathFailures) + " 本。";
-			if (sectionFailures > 0)
-				note += "断面を設定できなかった柱 " + std::to_string(sectionFailures) + " 本。";
+			if (failures.path > 0)
+				note +=
+					"鉛直パスが 2 点にならなかった柱 " + std::to_string(failures.path) + " 本。";
+			if (failures.section > 0)
+				note += "断面を設定できなかった柱 " + std::to_string(failures.section) + " 本。";
+			if (failures.offset > 0)
+			{
+				note += "端部オフセットを設定できなかった柱 " + std::to_string(failures.offset) +
+						" 本。";
+				if (!failures.offsetHint.empty())
+					note += "（候補: " + failures.offsetHint + "）";
+			}
 			if (style == 0)
 				note += "プラグインスタイル『木質構造材_柱・束』が見つかりません。";
 			*outDiagnostics = std::move(note);

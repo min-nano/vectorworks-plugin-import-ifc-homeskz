@@ -1221,13 +1221,19 @@ TEST(build_trims_interfering_beam_end)
 	CHECK(otsu != nullptr && kou != nullptr);
 	if (otsu != nullptr && kou != nullptr)
 	{
-		// 乙の端部は甲の +x 面（x=60）まで詰められる。
-		CHECK(near(otsu->end.x, 60.0));
+		// 乙の端点は甲の**芯線**（x=0）に乗り、甲の +x 面（x=60）までの戻りが端部オフセット
+		// （−60）に入る（core/Document.h「端部オフセット」）。実際に描かれる範囲は
+		// x=60〜600 で、端点を面まで詰めていたころと同じ。
+		CHECK(near(otsu->end.x, 0.0));
 		CHECK(near(otsu->end.y, 500.0));
+		CHECK(near(otsu->endOffset, -60.0));
 		CHECK(near(otsu->start.x, 600.0));
+		CHECK(near(otsu->startOffset, 0.0)); // 自由端は動かさない
 		// 甲（通し材）は変更されない。
 		CHECK(near(kou->start.y, -1000.0));
 		CHECK(near(kou->end.y, 1000.0));
+		CHECK(near(kou->startOffset, 0.0));
+		CHECK(near(kou->endOffset, 0.0));
 	}
 }
 
@@ -1235,7 +1241,7 @@ TEST(build_trims_interfering_beam_end)
 // - resolveMemberInterferences
 // ---------------------------------------------------------------------------
 
-TEST(trims_t_joint_end_to_face)
+TEST(t_joint_end_snaps_to_winner_centreline)
 {
 	const MemberCommand primary =
 		member(MemberSpec{Vec2{0.0, -1000.0}, Vec2{0.0, 1000.0}, 120.0, 180.0, 473.0, 473.0,
@@ -1248,12 +1254,16 @@ TEST(trims_t_joint_end_to_face)
 	CHECK_EQ(result.size(), std::size_t(2));
 	if (result.size() == 2)
 	{
-		CHECK(near(result[1].end.x, 60.0));
+		// 端点は通し材の芯線（x=0）、面（x=60）までの戻りは端部オフセットへ。
+		CHECK(near(result[1].end.x, 0.0));
 		CHECK(near(result[1].end.y, 500.0));
+		CHECK(near(result[1].endOffset, -60.0));
 		CHECK(near(result[1].start.x, 600.0));
 		// 通し材は不変
 		CHECK(near(result[0].start.y, -1000.0));
 		CHECK(near(result[0].end.y, 1000.0));
+		CHECK(near(result[0].startOffset, 0.0));
+		CHECK(near(result[0].endOffset, 0.0));
 	}
 }
 
@@ -1284,8 +1294,11 @@ TEST(trims_both_ends_between_two_primaries)
 	CHECK(found != nullptr);
 	if (found != nullptr)
 	{
-		CHECK(near(found->start.x, -240.0));
-		CHECK(near(found->end.x, 240.0));
+		// 両端とも相手の芯線（∓300）に乗り、面（∓240）までの戻りが端部オフセットに入る。
+		CHECK(near(found->start.x, -300.0));
+		CHECK(near(found->end.x, 300.0));
+		CHECK(near(found->startOffset, -60.0));
+		CHECK(near(found->endOffset, -60.0));
 	}
 }
 
@@ -1325,10 +1338,15 @@ TEST(asymmetric_l_corner_trims_loser)
 	CHECK(winner != nullptr && loser != nullptr);
 	if (winner != nullptr && loser != nullptr)
 	{
-		CHECK(near(loser->end.x, 60.0));
+		// 出隅（相手の端部での取り合い）は相互の食い込み量で勝ち負けを決める。負け側の端点は
+		// 既に勝ち側の芯線（x=0）に乗っているので動かず、面（x=60）までの戻りだけが入る。
+		CHECK(near(loser->end.x, 0.0));
+		CHECK(near(loser->endOffset, -60.0));
 		CHECK(near(loser->start.x, 1000.0));
 		CHECK(near(winner->start.y, 0.0));
 		CHECK(near(winner->end.y, 2000.0));
+		CHECK(near(winner->startOffset, 0.0));
+		CHECK(near(winner->endOffset, 0.0));
 	}
 }
 
@@ -1697,6 +1715,35 @@ TEST(fixtures_produce_members_with_valid_fields)
 			CHECK(std::hypot(m.end.x - m.start.x, m.end.y - m.start.y) > 0.0);
 		}
 	}
+}
+
+TEST(fixture_member_end_offsets_land_on_the_winner_centreline)
+{
+	// 実データでも取り合いの端点が芯線へ移り、戻りが端部オフセットに入る。
+	//   * 端部オフセットは 0 以下（材を短くする向き）で、
+	//   * 実際に描かれる長さ（パス長 ＋ 両端のオフセット）は正のまま、
+	//   * オフセットの入った端が**必ず出る**（0 件ならこの調整は何も効いていない）。
+	std::size_t adjusted = 0;
+	for (const std::string& name : allFixtures())
+	{
+		bool ok = false;
+		const Model& model = fixture(name, ok);
+		CHECK(ok);
+		if (!ok)
+			continue;
+
+		for (const MemberCommand& m : buildMemberCommands(model))
+		{
+			CHECK(m.startOffset <= 0.0);
+			CHECK(m.endOffset <= 0.0);
+			const double drawn =
+				std::hypot(m.end.x - m.start.x, m.end.y - m.start.y) + m.startOffset + m.endOffset;
+			CHECK(drawn > 0.0);
+			if (m.startOffset < 0.0 || m.endOffset < 0.0)
+				++adjusted;
+		}
+	}
+	CHECK(adjusted > 0);
 }
 
 TEST(fixture_members_are_deterministic)

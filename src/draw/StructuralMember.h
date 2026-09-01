@@ -31,6 +31,14 @@
 //	命令どおりの offset も失われる。**パスとバウンドが同じ絶対 Z を指す**ようにするのが
 //	正しく、これは柱（M8）で実証済みの形でもある。水平材ではその Z が両端で等しいだけ。
 //
+//	【端部オフセット】パスの端点は**接合相手の芯線上**にあり（横架材の芯線は天端中央を通る
+//	ので、柱の上端なら受ける梁の天端、負け梁の端なら勝ち梁の天端中央線）、材が実際に止まる
+//	位置は PIO の端部オフセット（OIP の「始端オフセット」「終端オフセット」。負値が材を
+//	短くする）で戻す。命令が持つ値の決まり方は core/Document.h「端部オフセット」にある。
+//	**このパラメータの universal 名は SDK ヘッダのどこにも無い**（ci-debug の sdk-grep で
+//	確認）ので、ありうる名前とローカライズ名を並べて DrawUtil の ResolveParamNameAmong で
+//	引き、解決できなければ件数と手掛かりを診断へ持ち帰る。
+//
 //	【SDK 依存・include の規約】このヘッダは draw/DrawUtil.h と同じく SDK 型
 //	（MCObjectHandle / RefNumber）を公開するので、**draw/*.cpp からのみ include する**
 //	（要素ごとの draw/*.h は従来どおり core/Document.h までしか参照しない。
@@ -96,6 +104,11 @@ namespace HomeskzIfcImport::draw
 		StructuralAxisAlign axisAlign = StructuralAxisAlign::TopCentre;
 		core::StoryBoundCommand startBound; // 始端（柱は下端）の高さ基準
 		core::StoryBoundCommand endBound;	// 終端（柱は上端）の高さ基準
+		// 端部オフセット（mm。負値＝材を短くする）。パスの端点は接合相手の芯線上にあり、
+		// 材が実際に止まる位置はここで戻す（core/Document.h「端部オフセット」）。
+		// 0 なら端点がそのまま材の端（垂木・自由端の横架材）。
+		double startOffset = 0.0;
+		double endOffset = 0.0;
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
@@ -105,6 +118,14 @@ namespace HomeskzIfcImport::draw
 	{
 		MCObjectHandle object = nil; // 生成できなければ nil（呼び出し側はフォールバックへ）
 		bool sectionOk = false; // 主幅・主せいを読み戻しで確認できたか
+		// 端部オフセットを書けたか（要らない＝両端 0 のときは true）。false なら材が接合
+		// 相手の芯線まで伸びたまま描かれる（＝梁せい／半幅ぶん長い）ので、呼び出し側は
+		// 件数を診断へ載せる。
+		bool endOffsetOk = true;
+		// 端部オフセットのパラメータ名を解決できなかったときだけ、PIO が持つ「オフセット」を
+		// 含むパラメータ名の一覧（DescribeParamsContaining）。実機でしか読めない情報を
+		// 1 周で持ち帰るための手掛かりで、解決できていれば空。
+		std::string offsetParamHint;
 	};
 
 	// パス＝部材の芯線（始端 → 終端）を通る 2 点の NURBS 曲線。gSDK->CreateNurbsCurve で

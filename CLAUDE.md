@@ -131,7 +131,12 @@ VectorWorks ネイティブオブジェクト
 述語（`isFloorSlab` / `isRoofSlab` / `isFireBrace`、基礎の `isBaseSlab` 等）はその要素の
 ヘッダ、金物（`IfcMechanicalFastener`）の型名取得は `parse/Column` の `fastenerTypeName`
 （柱頭・柱脚金物とアンカーボルトが共有）、平面座標の同一判定と許容
-（`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値・**押し出しを
+（`samePoint` / `kPointEps`）は `core/Geometry.h`、**端部オフセット**（＝端点を接合相手の芯線に
+置き、材が実際に止まる位置をここで戻す。意味と値の決まり方）は `core/Document.h`「端部
+オフセット」・**オフセットを戻した「材の端」**（`memberDrawnStart` / `memberDrawnEnd` /
+`columnDrawnTop` / `columnDrawnBottom`。仕口の位置・登り梁の端部詰め・図に映るものの広がりが
+共有する）は `core/Document`・**横架材の端部と相手の取り合いの幾何**（`memberEndJoint`。
+取り合い調整と登り梁の端部詰めが共有する）は `parse/Member`、屋根面の勾配座標系と退化の閾値・**押し出しを
 鉛直とみなす閾値**（`kVerticalExtrudeTol`。平面外形の求め方と、人通口・地中梁の「水平押し出しか」
 判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・許容値（統合・自由端・**人通口・
 壁結合・地中梁・床付け**）は `parse/Footing.h`、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・

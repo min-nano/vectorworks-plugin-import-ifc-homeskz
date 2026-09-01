@@ -152,8 +152,13 @@ namespace HomeskzIfcImport::parse
 		double best = 0.0;
 		for (const MemberCommand& receiver : receivers)
 		{
-			const double dx = receiver.end.x - receiver.start.x;
-			const double dy = receiver.end.y - receiver.start.y;
+			// 受け材の footprint は**材が実際に占める範囲**（端部オフセットを戻した端点）で
+			// 見る。命令の端点は取り合い相手の芯線上まで伸びているので、そのままだと受け材が
+			// 実際より長く見える（core/Document.h「端部オフセット」）。
+			const Vec2 receiverStart = core::memberDrawnStart(receiver);
+			const Vec2 receiverEnd = core::memberDrawnEnd(receiver);
+			const double dx = receiverEnd.x - receiverStart.x;
+			const double dy = receiverEnd.y - receiverStart.y;
 			const double length = std::hypot(dx, dy);
 			if (length < kNoboribariMinLength)
 				continue; // 平面投影長が極小の受け材は無視する
@@ -164,17 +169,19 @@ namespace HomeskzIfcImport::parse
 			if (std::min(zTop, top) - std::max(zBottom, bottom) <= kNoboribariZOverlapTol)
 				continue; // Z 範囲が離れた材は取り合いでない
 
-			best = std::max(best, memberPenetrationDepth(point, outward, receiver.start,
+			best = std::max(best, memberPenetrationDepth(point, outward, receiverStart,
 														 Vec2{dx / length, dy / length}, length,
 														 receiver.width / 2.0));
 		}
 
-		// 柱（M8）。柱は方向を持たないので断面の軸平行矩形として扱う。Z 範囲は下端
-		// （elevation）〜上端（elevation + height）。
+		// 柱（M8）。柱は方向を持たないので断面の軸平行矩形として扱う。Z 範囲は**材が実際に
+		// 占める**下端〜上端（命令の上端は受ける横架材の天端なので、そのままだと柱が梁せい
+		// ぶん高く見える）。
 		for (const core::ColumnCommand& column : columns)
 		{
-			const double columnTop = column.elevation + column.height;
-			if (std::min(zTop, columnTop) - std::max(zBottom, column.elevation) <=
+			const double columnTop = core::columnDrawnTop(column);
+			const double columnBottom = core::columnDrawnBottom(column);
+			if (std::min(zTop, columnTop) - std::max(zBottom, columnBottom) <=
 				kNoboribariZOverlapTol)
 				continue; // Z 範囲が離れた柱は取り合いでない
 			best = std::max(best, noboribariColumnPenetration(point, outward, column));

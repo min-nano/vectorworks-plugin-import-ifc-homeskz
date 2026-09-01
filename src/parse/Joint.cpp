@@ -43,15 +43,22 @@ namespace HomeskzIfcImport::parse
 
 	MemberGeom memberGeom(const MemberCommand& command)
 	{
+		// **端部オフセットを戻した「材が実際に占める範囲」**を見る（core の memberDrawnStart /
+		// memberDrawnEnd）。命令の端点は取り合い相手の芯線上にあるので、そのまま使うと仕口
+		// シンボルが相手の材の中へ潜り込む——仕口が付くのは材の端（相手の面）である
+		// （core/Document.h「端部オフセット」）。
+		const Vec2 start = core::memberDrawnStart(command);
+		const Vec2 end = core::memberDrawnEnd(command);
+
 		MemberGeom geom;
-		const Vec2 delta = command.end - command.start;
+		const Vec2 delta = end - start;
 		const double length = std::hypot(delta.x, delta.y);
 		if (length < kJointMinLength)
 			return geom; // valid=false（端部・向きが定まらない退化した材）
 
 		geom.valid = true;
-		geom.start = command.start;
-		geom.end = command.end;
+		geom.start = start;
+		geom.end = end;
 		geom.axis = Vec2{delta.x / length, delta.y / length};
 		geom.length = length;
 		geom.halfWidth = command.width / 2.0;
@@ -67,8 +74,9 @@ namespace HomeskzIfcImport::parse
 		geom.center = command.position;
 		geom.halfWidth = command.width / 2.0;
 		geom.halfDepth = command.depth / 2.0;
-		geom.zBottom = command.elevation;
-		geom.zTop = command.elevation + command.height;
+		// 柱も同じく実際に材が占める Z 範囲（上端は受ける横架材の天端ではなく材の上端）。
+		geom.zBottom = core::columnDrawnBottom(command);
+		geom.zTop = core::columnDrawnTop(command);
 		return geom;
 	}
 
