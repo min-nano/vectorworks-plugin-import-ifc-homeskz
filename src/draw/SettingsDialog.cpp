@@ -140,7 +140,10 @@ namespace HomeskzIfcImport::draw
 			{
 				const bool inDocument = std::ranges::binary_search(documentSymbols, value);
 				const std::string label = inDocument ? value : value + kMissingSuffix;
-				candidates.push_back(Candidate{value, TXString(label.c_str())});
+				Candidate candidate;
+				candidate.value = value;
+				candidate.label = TXString(label.c_str());
+				candidates.push_back(std::move(candidate));
 			}
 			return candidates;
 		}
