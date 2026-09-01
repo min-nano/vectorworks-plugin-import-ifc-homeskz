@@ -92,8 +92,8 @@ using HomeskzIfcImport::parse::modifierFootprint;
 using HomeskzIfcImport::parse::resolveFoundationTopElevation;
 using HomeskzIfcImport::parse::resolveSlabTopElevation;
 using HomeskzIfcImport::parse::WallOpening;
-using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
+using HomeskzIfcTests::forEachFixture;
 using HomeskzIfcTests::near;
 
 namespace
@@ -721,22 +721,20 @@ TEST(foundation_story_levels_are_consistent_across_fixtures)
 {
 	// 全フィクスチャで 4 レベルが揃い、床束と底盤天端が同じ高さ（床束は底盤上端に立つ）で、
 	// 基礎天端が底盤天端以上（立上りは底盤より上へ出る）であること。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		StoryCommand story;
-		CHECK(buildFoundationStoryCommand(model, story));
-		CHECK_EQ(story.levels.size(), std::size_t{4});
-		if (story.levels.size() < 4)
-			continue;
-		CHECK_EQ(story.levels[0].type, std::string(kLevelFoundationTop));
-		CHECK_EQ(story.levels[2].type, std::string(kLevelFloorPost));
-		CHECK_EQ(story.levels[3].type, std::string(kLevelSlabTop));
-		CHECK(near(story.levels[2].offset, story.levels[3].offset));
-		CHECK(story.levels[0].offset >= story.levels[3].offset);
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   StoryCommand story;
+					   CHECK(buildFoundationStoryCommand(model, story));
+					   CHECK_EQ(story.levels.size(), std::size_t{4});
+					   if (story.levels.size() < 4)
+						   return;
+					   CHECK_EQ(story.levels[0].type, std::string(kLevelFoundationTop));
+					   CHECK_EQ(story.levels[2].type, std::string(kLevelFloorPost));
+					   CHECK_EQ(story.levels[3].type, std::string(kLevelSlabTop));
+					   CHECK(near(story.levels[2].offset, story.levels[3].offset));
+					   CHECK(story.levels[0].offset >= story.levels[3].offset);
+				   });
 }
 
 TEST(no_foundation_story_without_foundation_elements)
@@ -893,27 +891,25 @@ TEST(all_fixtures_parse_without_error)
 {
 	// 全フィクスチャで立上り・底盤・基礎ストーリが例外なく組み立てられ、命令が命令セットの
 	// 検証を通ること（docs/DEV-NOTES.md の完了条件 1）。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		Context context(model);
-		const std::vector<WallCommand> walls = buildWallCommands(model);
-		const std::vector<SlabCommand> slabs = buildSlabCommands(context, walls);
-		// 検証済みフィクスチャはいずれも基礎（立上り・底盤）を持つ。
-		CHECK(!walls.empty());
-		CHECK(!slabs.empty());
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   Context context(model);
+					   const std::vector<WallCommand> walls = buildWallCommands(model);
+					   const std::vector<SlabCommand> slabs = buildSlabCommands(context, walls);
+					   // 検証済みフィクスチャはいずれも基礎（立上り・底盤）を持つ。
+					   CHECK(!walls.empty());
+					   CHECK(!slabs.empty());
 
-		core::Document document;
-		document.walls = walls;
-		document.slabs = slabs;
-		CHECK(core::validateDocument(document));
+					   core::Document document;
+					   document.walls = walls;
+					   document.slabs = slabs;
+					   CHECK(core::validateDocument(document));
 
-		StoryCommand story;
-		CHECK(buildFoundationStoryCommand(model, story));
-		CHECK(!story.levels.empty());
-	}
+					   StoryCommand story;
+					   CHECK(buildFoundationStoryCommand(model, story));
+					   CHECK(!story.levels.empty());
+				   });
 }
 
 TEST(is_deterministic)
@@ -1211,8 +1207,8 @@ TEST(join_crossing_interiors_is_an_X_join)
 	CHECK(!HomeskzIfcImport::core::samePoint(joins[0].pickB, joins[0].point));
 	// 寄せる先は交点から遠い端点の方向で、それぞれの壁芯上に乗る
 	// （a＝縦の壁は x=3000・b＝横の壁は y=0）。
-	CHECK(std::abs(joins[0].pickA.x - 3000.0) < 1e-6);
-	CHECK(std::abs(joins[0].pickB.y - 0.0) < 1e-6);
+	CHECK(near(joins[0].pickA.x, 3000.0, 1e-6));
+	CHECK(near(joins[0].pickB.y, 0.0, 1e-6));
 }
 
 TEST(a_lone_stem_keeps_the_kept_side_pick_on_the_through_wall)
@@ -1345,35 +1341,35 @@ TEST(joins_reference_valid_walls_in_the_real_fixtures)
 {
 	// 実フィクスチャの壁結合は必ず walls の範囲内を指し、2 本は別の立上り
 	// （＝命令セットの検証を通る）。並びは決定的。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		const std::vector<WallCommand> walls = buildWallCommands(model);
-		const std::vector<core::WallJoinCommand> joins = buildWallJoinCommands(walls);
-		CHECK(!joins.empty()); // どのフィクスチャも交差する立上りを持つ
-		for (const core::WallJoinCommand& join : joins)
-		{
-			CHECK(join.a < walls.size());
-			CHECK(join.b < walls.size());
-			CHECK(join.a != join.b);
-		}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<WallCommand> walls = buildWallCommands(model);
+					   const std::vector<core::WallJoinCommand> joins =
+						   buildWallJoinCommands(walls);
+					   CHECK(!joins.empty()); // どのフィクスチャも交差する立上りを持つ
+					   for (const core::WallJoinCommand& join : joins)
+					   {
+						   CHECK(join.a < walls.size());
+						   CHECK(join.b < walls.size());
+						   CHECK(join.a != join.b);
+					   }
 
-		core::Document document;
-		document.walls = walls;
-		document.wallJoins = joins;
-		CHECK(core::validateDocument(document));
+					   core::Document document;
+					   document.walls = walls;
+					   document.wallJoins = joins;
+					   CHECK(core::validateDocument(document));
 
-		const std::vector<core::WallJoinCommand> again = buildWallJoinCommands(walls);
-		CHECK_EQ(again.size(), joins.size());
-		for (std::size_t i = 0; i < joins.size() && i < again.size(); ++i)
-		{
-			CHECK_EQ(again[i].a, joins[i].a);
-			CHECK_EQ(again[i].b, joins[i].b);
-			CHECK(again[i].joinType == joins[i].joinType);
-		}
-	}
+					   const std::vector<core::WallJoinCommand> again =
+						   buildWallJoinCommands(walls);
+					   CHECK_EQ(again.size(), joins.size());
+					   for (std::size_t i = 0; i < joins.size() && i < again.size(); ++i)
+					   {
+						   CHECK_EQ(again[i].a, joins[i].a);
+						   CHECK_EQ(again[i].b, joins[i].b);
+						   CHECK(again[i].joinType == joins[i].joinType);
+					   }
+				   });
 }
 
 // ---------------------------------------------------------------------------
@@ -1526,42 +1522,41 @@ TEST(ground_beams_of_the_real_fixtures_land_on_slabs)
 {
 	// 実フィクスチャ: 地中梁は 1 本も取りこぼさず底盤へ付く。断面は下端が v=0 で天端が
 	// 正（下り梁）、押し出し長は正。命令セットの検証も通る。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		Context context(model);
-		const std::vector<WallCommand> walls = buildWallCommands(model);
-		const std::vector<core::ModifierCommand> modifiers =
-			HomeskzIfcImport::parse::buildGroundBeamModifiers(model, context.gridCenter());
-		const std::vector<SlabCommand> slabs = buildSlabCommands(context, walls);
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   Context context(model);
+					   const std::vector<WallCommand> walls = buildWallCommands(model);
+					   const std::vector<core::ModifierCommand> modifiers =
+						   HomeskzIfcImport::parse::buildGroundBeamModifiers(model,
+																			 context.gridCenter());
+					   const std::vector<SlabCommand> slabs = buildSlabCommands(context, walls);
 
-		std::size_t attached = 0;
-		for (const SlabCommand& command : slabs)
-			attached += command.modifiers.size();
-		CHECK_EQ(attached, modifiers.size());
+					   std::size_t attached = 0;
+					   for (const SlabCommand& command : slabs)
+						   attached += command.modifiers.size();
+					   CHECK_EQ(attached, modifiers.size());
 
-		for (const core::ModifierCommand& modifier : modifiers)
-		{
-			CHECK(modifier.depth > 0.0);
-			CHECK(modifier.profile.size() >= 3);
-			double vMin = modifier.profile.front().y;
-			double vMax = modifier.profile.front().y;
-			for (const Vec2& point : modifier.profile)
-			{
-				vMin = std::min(vMin, point.y);
-				vMax = std::max(vMax, point.y);
-			}
-			CHECK(near(vMin, 0.0)); // 断面原点＝梁下端
-			CHECK(vMax > 0.0);
-		}
+					   for (const core::ModifierCommand& modifier : modifiers)
+					   {
+						   CHECK(modifier.depth > 0.0);
+						   CHECK(modifier.profile.size() >= 3);
+						   double vMin = modifier.profile.front().y;
+						   double vMax = modifier.profile.front().y;
+						   for (const Vec2& point : modifier.profile)
+						   {
+							   vMin = std::min(vMin, point.y);
+							   vMax = std::max(vMax, point.y);
+						   }
+						   CHECK(near(vMin, 0.0)); // 断面原点＝梁下端
+						   CHECK(vMax > 0.0);
+					   }
 
-		core::Document document;
-		document.walls = walls;
-		document.slabs = slabs;
-		CHECK(core::validateDocument(document));
-	}
+					   core::Document document;
+					   document.walls = walls;
+					   document.slabs = slabs;
+					   CHECK(core::validateDocument(document));
+				   });
 }
 
 TEST(ground_beam_tops_meet_the_slab_bottom)
@@ -1820,25 +1815,23 @@ TEST(ground_beam_bedding_never_bites_into_a_crossing_beam)
 	// 直交する地中梁と取り合う区間では、傾斜部の帯を相手の下端まで切り下げる（実機で
 	// 「端部で直交する斜め部分の砕石が食い込む」と分かった。docs/DEV-NOTES.md M17）。
 	// 実フィクスチャ全件で、床付けのどの点も他の地中梁のコンクリートの中に入らないことを見る。
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		for (const SlabCommand& slab : buildSlabCommands(model))
-		{
-			for (const core::ModifierCommand& beam : slab.modifiers)
-			{
-				for (const core::BeddingCommand& bedding : beam.beddings)
-				{
-					CHECK(bedding.depth > 0.0);
-					CHECK(bedding.start >= -1e-6);
-					CHECK(bedding.start + bedding.depth <= beam.depth + 1e-6);
-					CHECK(!beddingBitesAnyBeam(slab.modifiers, beam, bedding));
-				}
-			}
-		}
-	}
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   for (const SlabCommand& slab : buildSlabCommands(model))
+					   {
+						   for (const core::ModifierCommand& beam : slab.modifiers)
+						   {
+							   for (const core::BeddingCommand& bedding : beam.beddings)
+							   {
+								   CHECK(bedding.depth > 0.0);
+								   CHECK(bedding.start >= -1e-6);
+								   CHECK(bedding.start + bedding.depth <= beam.depth + 1e-6);
+								   CHECK(!beddingBitesAnyBeam(slab.modifiers, beam, bedding));
+							   }
+						   }
+					   }
+				   });
 }
 
 TEST(ground_beam_bedding_of_the_real_fixtures)
@@ -1848,87 +1841,86 @@ TEST(ground_beam_bedding_of_the_real_fixtures)
 	// 砕石の天端は底盤の砕石の底を越えない（越えると直交する地中梁へ食い込む）。
 	std::size_t checked = 0;
 	std::size_t perimeter = 0;
-	for (const std::string& name : allFixtures())
-	{
-		bool ok = false;
-		const Model& model = fixture(name, ok);
-		CHECK(ok);
-		for (const SlabCommand& slab : buildSlabCommands(model))
+	forEachFixture(
+		failures,
+		[&](const std::string&, const Model& model)
 		{
-			double slabTotal = 0.0;
-			for (const core::ComponentCommand& component : slab.components)
-				slabTotal += component.thickness;
-			const double beddingBottomAbs = slab.elevation - slabTotal;
-
-			for (const core::ModifierCommand& modifier : slab.modifiers)
+			for (const SlabCommand& slab : buildSlabCommands(model))
 			{
-				CHECK(modifier.beddings.size() >= 2);
-				if (modifier.beddings.size() < 2)
-					continue;
+				double slabTotal = 0.0;
+				for (const core::ComponentCommand& component : slab.components)
+					slabTotal += component.thickness;
+				const double beddingBottomAbs = slab.elevation - slabTotal;
 
-				// 地中梁の下端の幅（外周部の張り出しを測る基準）。
-				double bottomLo = 0.0;
-				double bottomHi = 0.0;
-				bool first = true;
-				for (const Vec2& p : modifier.profile)
+				for (const core::ModifierCommand& modifier : slab.modifiers)
 				{
-					if (!near(p.y, 0.0, 0.5))
+					CHECK(modifier.beddings.size() >= 2);
+					if (modifier.beddings.size() < 2)
 						continue;
-					bottomLo = first ? p.x : std::min(bottomLo, p.x);
-					bottomHi = first ? p.x : std::max(bottomHi, p.x);
-					first = false;
-				}
 
-				// 層ごとに区間を集めて、全長を隙間なく覆っているかを見る。
-				double leanCovered = 0.0;
-				double gravelCovered = 0.0;
-				double leanEnd = 0.0;
-				double gravelEnd = 0.0;
-				for (const core::BeddingCommand& bedding : modifier.beddings)
-				{
-					const bool lean = bedding.drawClass == CLASS_COMPONENT_LEAN_CONCRETE;
-					CHECK(lean || bedding.drawClass == CLASS_COMPONENT_GRAVEL);
-					if (lean)
+					// 地中梁の下端の幅（外周部の張り出しを測る基準）。
+					double bottomLo = 0.0;
+					double bottomHi = 0.0;
+					bool first = true;
+					for (const Vec2& p : modifier.profile)
 					{
-						CHECK(near(minY(bedding.profile), -kSlabLeanConcreteThickness));
-						CHECK(near(maxY(bedding.profile), 0.0));
-						// 捨てコンの幅は地中梁の下端の幅（＋外周部なら片側 50mm ずつ）。
-						const double spillLow = bottomLo - minX(bedding.profile);
-						const double spillHigh = maxX(bedding.profile) - bottomHi;
-						CHECK(near(spillLow, 0.0, 0.01) ||
-							  near(spillLow, kBeddingPerimeterMargin, 0.01));
-						CHECK(near(spillHigh, 0.0, 0.01) ||
-							  near(spillHigh, kBeddingPerimeterMargin, 0.01));
-						if (spillLow > 0.0 || spillHigh > 0.0)
-							++perimeter;
-						CHECK(bedding.start >= leanEnd - 0.01); // 区間は重ならず順に並ぶ
-						leanEnd = bedding.start + bedding.depth;
-						leanCovered += bedding.depth;
+						if (!near(p.y, 0.0, 0.5))
+							continue;
+						bottomLo = first ? p.x : std::min(bottomLo, p.x);
+						bottomHi = first ? p.x : std::max(bottomHi, p.x);
+						first = false;
 					}
-					else
+
+					// 層ごとに区間を集めて、全長を隙間なく覆っているかを見る。
+					double leanCovered = 0.0;
+					double gravelCovered = 0.0;
+					double leanEnd = 0.0;
+					double gravelEnd = 0.0;
+					for (const core::BeddingCommand& bedding : modifier.beddings)
 					{
-						CHECK(near(minY(bedding.profile), -kSlabBeddingThickness));
-						// 砕石の帯は底盤の砕石の底より上へは出さない（そこから上は底盤の
-						// 砕石層が埋めている）。梁下端が底盤の砕石の底より上にある地中梁
-						// （スキップフロアの下屋）では帯そのものが無くなる。
-						CHECK(maxY(bedding.profile) <=
-							  std::max(beddingBottomAbs - modifier.origin.z, 0.0) + 0.01);
-						CHECK(near(bedding.start, gravelEnd, 0.01)); // 隙間も重なりも無い
-						gravelEnd = bedding.start + bedding.depth;
-						gravelCovered += bedding.depth;
+						const bool lean = bedding.drawClass == CLASS_COMPONENT_LEAN_CONCRETE;
+						CHECK(lean || bedding.drawClass == CLASS_COMPONENT_GRAVEL);
+						if (lean)
+						{
+							CHECK(near(minY(bedding.profile), -kSlabLeanConcreteThickness));
+							CHECK(near(maxY(bedding.profile), 0.0));
+							// 捨てコンの幅は地中梁の下端の幅（＋外周部なら片側 50mm ずつ）。
+							const double spillLow = bottomLo - minX(bedding.profile);
+							const double spillHigh = maxX(bedding.profile) - bottomHi;
+							CHECK(near(spillLow, 0.0, 0.01) ||
+								  near(spillLow, kBeddingPerimeterMargin, 0.01));
+							CHECK(near(spillHigh, 0.0, 0.01) ||
+								  near(spillHigh, kBeddingPerimeterMargin, 0.01));
+							if (spillLow > 0.0 || spillHigh > 0.0)
+								++perimeter;
+							CHECK(bedding.start >= leanEnd - 0.01); // 区間は重ならず順に並ぶ
+							leanEnd = bedding.start + bedding.depth;
+							leanCovered += bedding.depth;
+						}
+						else
+						{
+							CHECK(near(minY(bedding.profile), -kSlabBeddingThickness));
+							// 砕石の帯は底盤の砕石の底より上へは出さない（そこから上は底盤の
+							// 砕石層が埋めている）。梁下端が底盤の砕石の底より上にある地中梁
+							// （スキップフロアの下屋）では帯そのものが無くなる。
+							CHECK(maxY(bedding.profile) <=
+								  std::max(beddingBottomAbs - modifier.origin.z, 0.0) + 0.01);
+							CHECK(near(bedding.start, gravelEnd, 0.01)); // 隙間も重なりも無い
+							gravelEnd = bedding.start + bedding.depth;
+							gravelCovered += bedding.depth;
+						}
 					}
+					// 砕石は全長を覆う。捨てコンは**それより 30mm しか厚みが無い**ので、
+					// 30mm 以上深い地中梁と取り合う区間では丸ごと落ちる（そこは相手の
+					// コンクリート）——実データにも出る（スキップフロアの外周 × 内部）ので、
+					// 覆う長さは全長以下であればよい。
+					CHECK(near(gravelCovered, modifier.depth, 0.01));
+					CHECK(leanCovered > 0.0);
+					CHECK(leanCovered <= modifier.depth + 0.01);
+					++checked;
 				}
-				// 砕石は全長を覆う。捨てコンは**それより 30mm しか厚みが無い**ので、
-				// 30mm 以上深い地中梁と取り合う区間では丸ごと落ちる（そこは相手の
-				// コンクリート）——実データにも出る（スキップフロアの外周 × 内部）ので、
-				// 覆う長さは全長以下であればよい。
-				CHECK(near(gravelCovered, modifier.depth, 0.01));
-				CHECK(leanCovered > 0.0);
-				CHECK(leanCovered <= modifier.depth + 0.01);
-				++checked;
 			}
-		}
-	}
+		});
 	CHECK(checked > 0);
 	// 実データの外周の地中梁は必ず外周部として拾われる（1 本も無ければ判定が壊れている）。
 	CHECK(perimeter > 0);

@@ -75,6 +75,13 @@ namespace HomeskzIfcImport::parse
 		// 野地板（parse/Roof）が同じ面を共有するので、押し出しソリッドの解決は 1 回で済む。
 		const RoofPlane* roofPlane(int elementId);
 
+		// 階（#storeyId）の屋根版から解決できた屋根面の一覧（要素 #id 順＝決定的）。
+		// 「階の要素 → 屋根版判定（isRoofSlab）→ roofPlane → 解決できないものはスキップ」
+		// という走査は垂木・野地板・登り梁の 3 者が同一で、**この走査はここに 1 つだけ置く**
+		// （判定・関門が三者でズレて拾う面が食い違うのを防ぐ）。返る指す先はキャッシュ
+		// （fRoofPlanes。std::map なので要素追加で無効化されない）。
+		std::vector<const RoofPlane*> storyRoofPlanes(int storeyId);
+
 		// 横架材の命令（parse/Member の buildMemberCommands。**登り梁の補正前**）。3 者が
 		// この 1 回の解析結果を共有する: ストーリ（母屋・登り梁レイヤを作るか）・垂木（差し込みに
 		// 使う軒桁の桁幅）・登り梁の位置補正（受ける材）。全 IfcBeam の配置・断面・材種を辿る

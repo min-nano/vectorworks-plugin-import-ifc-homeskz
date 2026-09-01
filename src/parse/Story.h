@@ -97,6 +97,11 @@ namespace HomeskzIfcImport::parse
 	// rel 内は RelatedElements の記述順で、エンティティ列挙順に依存しない決定的な結果になる。
 	std::vector<int> collectStoryElements(const Model& model, int storeyId);
 
+	// 階（#storeyId）に、要素判別述語 pred を満たす要素が 1 つでもあるか。屋根版の有無
+	// （parse/Rafter の storyHasRoofSlab）と床版の有無（parse/Floor の storyHasFloorSlab）が
+	// 同じ走査（要素一覧 → null チェック → 述語）を共有する。
+	bool storyHasElement(Context& context, int storeyId, bool (*pred)(const Entity&));
+
 	// 階（#storeyId）に属する IfcColumn / IfcSlab から横架材天端の相対オフセット（FL
 	// からの負値）を求める。ローカル配置 Z が負の要素のうち最大値（床に最も近接した負の
 	// オフセット）を返す。最初に見つかった値ではなく最大値を採るため、エンティティ列挙順に依
@@ -114,6 +119,30 @@ namespace HomeskzIfcImport::parse
 		double beamOffset = 0.0; // 横架材天端オフセット（負値。最上階は未使用で 0）
 		bool isTop = false; // 最上階（Elevation 最大）＝「屋根」か
 	};
+
+	// その階の横架材レベルの種別名。一般階は横架材天端、最上階は軒高（最上階に横架材天端
+	// レベルは無い）。**この分岐はここに 1 つだけ置く**——横架材・柱・火打・伏図の表示レイヤ
+	// が同じ分岐を要り、かつて各所が三項演算子を各々書いていた（片方だけ直すと配置先と
+	// バインド先のレベルがズレる）。
+	inline const char* beamTopLevelType(bool isTop)
+	{
+		return isTop ? kLevelEaves : kLevelBeamTop;
+	}
+
+	// その階の横架材天端（最上階は軒高＝ストーリ原点）の絶対 Z。バインド offset の基準や
+	// 床下地の下端の算出に使う。最上階の beamOffset は未使用（StoryInfo の doc コメント）
+	// なので足さない。
+	inline double beamTopElevation(const StoryInfo& story)
+	{
+		return story.isTop ? story.elevation : story.elevation + story.beamOffset;
+	}
+
+	// その階の横架材レイヤ名（"1-横架材天端" / "R-軒高"）。beamTopLevelType と
+	// storyLayerName を貫く定型で、横架材・火打の配置先と伏図の表示レイヤがこれを通る。
+	inline std::string beamTopLayerName(std::size_t index, const StoryInfo& story)
+	{
+		return storyLayerName(index, story.isTop, beamTopLevelType(story.isTop));
+	}
 
 	// IFC からストーリ情報を Elevation 昇順で集める。名前が "FL" で終わる IfcBuildingStorey
 	// だけを対象にし、末尾を最上階（isTop）とする。Elevation が同値の階は #id 昇順で安定に並

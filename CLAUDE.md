@@ -131,7 +131,17 @@ VectorWorks ネイティブオブジェクト
 述語（`isFloorSlab` / `isRoofSlab` / `isFireBrace`、基礎の `isBaseSlab` 等）はその要素の
 ヘッダ、金物（`IfcMechanicalFastener`）の型名取得は `parse/Column` の `fastenerTypeName`
 （柱頭・柱脚金物とアンカーボルトが共有）、平面座標の同一判定と許容
-（`samePoint` / `kPointEps`）は `core/Geometry.h`、屋根面の勾配座標系と退化の閾値・**押し出しを
+（`samePoint` / `kPointEps`）・**Vec2 の基本演算**（`dot` / `cross` / `length` / `distance`）・
+同一直線上の線分成分の芯線射影（`collinearSpan`）は `core/Geometry.h`、**ペア述語による連結成分**
+（Union-Find。立上り・大引・地中梁の統合と壁結合の交点クラスタが共有）は `core/UnionFind.h`、
+**構成層の総厚**（`totalThickness`）・**横架材の Z 範囲と重なり判定**（`memberTopZ` /
+`memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側が持つ）は `core/Document.h`、
+**ローカル配置原点の取り出し**（ObjectPlacement → Location の 4 段の鎖。柱・横架材・ストーリが
+共有）は `parse/IfcGeometry` の `resolveLocalPlacementOrigin`、**横架材レベルの定型**（一般階＝
+横架材天端・最上階＝軒高の分岐と、その絶対 Z・レイヤ名: `beamTopLevelType` / `beamTopElevation` /
+`beamTopLayerName`）と**階の要素の有無判定**（`storyHasElement`）は `parse/Story.h`、**階の屋根面の
+走査**（屋根版判定 → 屋根面解決 → 解決不能スキップ。垂木・野地板・登り梁が共有）は
+`parse/Context` の `storyRoofPlanes`、屋根面の勾配座標系と退化の閾値・**押し出しを
 鉛直とみなす閾値**（`kVerticalExtrudeTol`。平面外形の求め方と、人通口・地中梁の「水平押し出しか」
 判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・許容値（統合・自由端・**人通口・
 壁結合・地中梁・床付け**）は `parse/Footing.h`、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・
@@ -173,7 +183,9 @@ VectorWorks ネイティブオブジェクト
 （見出し・区切り・結果・例外を `trace::note` で）の 2 か所だけ（各要素へ `trace::log` を撒かない）。
 **描画側が持ち帰る説明は行き先を分ける**——異常は `DrawCounts::diagnostics`（完了ダイアログの
 「問題あり」の根拠になる）、平常でも出る記録は `DrawCounts::notes`（ログにだけ出る）。テスト側も同じで、フィクスチャ一覧・近似比較・**実 IFC の読み込みと命令セットの組み立てを
-1 プロセス 1 回に畳むキャッシュ**（`fixture` / `fixtureDocument`）は `tests/Fixtures.h`、
+1 プロセス 1 回に畳むキャッシュ**（`fixture` / `fixtureDocument`）と**全フィクスチャ走査**
+（`forEachFixture`）は `tests/Fixtures.h`、**合成 STEP テキストの組み立て**（`StepText` と
+`num` / `ref` / `point3` / `makeStorey` 等の断片ヘルパー）は `tests/StepText.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
 
 **依存の向きは厳守する:** `parse/` と `core/` は VectorWorks SDK を include しない。

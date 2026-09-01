@@ -10,6 +10,9 @@
 //	報告した内容が、そのままフックへ正しい形で届くこと」まで。
 //
 
+// Fixtures.h は near（実数の近似比較の唯一の定義）のため。フィクスチャ読み込み系の
+// ヘルパーは HOMESKZ_FIXTURES_DIR 無しでは現れないので、このターゲットでも使える。
+#include "Fixtures.h"
 #include "TestFramework.h"
 
 #include "core/Progress.h"
@@ -29,6 +32,7 @@ using HomeskzIfcImport::core::NullProgressReporter;
 using HomeskzIfcImport::core::phaseShare;
 using HomeskzIfcImport::core::ProgressReporter;
 using HomeskzIfcImport::core::ProgressStatus;
+using HomeskzIfcTests::near;
 
 namespace
 {
@@ -119,7 +123,7 @@ TEST(phase_shares_sum_to_the_draw_share)
 	for (std::size_t count : {std::size_t{4}, std::size_t{22}, std::size_t{3}, std::size_t{196},
 							  std::size_t{106}, std::size_t{9}})
 		sum += phaseShare(count, total, HomeskzIfcImport::core::kDrawShare);
-	CHECK(std::abs(sum - HomeskzIfcImport::core::kDrawShare) < 1e-9);
+	CHECK(near(sum, HomeskzIfcImport::core::kDrawShare, 1e-9));
 }
 
 TEST(phase_shares_of_all_phases_sum_to_one_hundred)
@@ -231,7 +235,7 @@ TEST(draw_weighted_total_sums_count_times_weight)
 
 	const double expected =
 		2.0 * drawWeight(DrawPhase::Members) + 3.0 * drawWeight(DrawPhase::Sections);
-	CHECK(std::fabs(drawWeightedTotal(document) - expected) < 1e-9);
+	CHECK(near(drawWeightedTotal(document), expected, 1e-9));
 	// 空の命令セットは 0（配分の分母が 0 ＝ バーを進めないフェーズだけになる）。
 	CHECK_EQ(drawWeightedTotal(Document{}), 0.0);
 }
@@ -250,7 +254,7 @@ TEST(draw_phase_share_follows_time_not_command_count)
 	const double sections = drawPhaseShare(33, DrawPhase::Sections, total, 100.0);
 
 	CHECK(sections > joints * 100.0); // 桁で違う（実測では 0.03 秒 対 17 秒）
-	CHECK(std::fabs(joints + sections - 100.0) < 1e-9); // 取りこぼしなく 100% を配る
+	CHECK(near(joints + sections, 100.0, 1e-9)); // 取りこぼしなく 100% を配る
 }
 
 TEST(draw_phase_share_handles_empty_and_single_phase)
