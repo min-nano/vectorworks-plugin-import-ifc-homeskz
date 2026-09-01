@@ -49,7 +49,12 @@ option(VW_REQUIRE_SCRIPT_TESTS
 #                #ifdef HOMESKZ_FIXTURES_DIR, so a test that uses fixtures without
 #                declaring FIXTURES fails to compile instead of silently passing.
 function(vw_add_test name)
-	cmake_parse_arguments(ARG "CORE;FIXTURES" "" "" ${ARGN})
+	cmake_parse_arguments(
+		ARG
+		"CORE;FIXTURES"
+		""
+		""
+		${ARGN})
 	add_executable(${name} ${ARG_UNPARSED_ARGUMENTS})
 	target_compile_features(${name} PRIVATE cxx_std_20)
 	# Tests include the sources under "src" and the local "TestFramework.h".
