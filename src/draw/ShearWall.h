@@ -36,4 +36,18 @@ namespace HomeskzIfcImport::draw
 	// （完了ダイアログの診断。draw/ColumnMark と同じ流儀）。
 	std::size_t drawShearWalls(const core::Document& document, core::ProgressReporter& progress,
 							   std::string* outNote = nullptr);
+
+	// 耐力壁レイヤ（"n-耐力壁"）の縮尺を伏図の縮尺へ揃える。揃えられたレイヤ数を返す。
+	//
+	// 【なぜ要るか】伏図記号のシンボルは**用紙基準（縮尺無視）**で、用紙基準の大きさは
+	// 「シンボル定義の図形（用紙 mm）× そのレイヤの縮尺」で決まる（実機で確認: 図形
+	// 300mm・用紙基準のシンボルを縮尺 1/100 のレイヤへ置くと外接 30000mm）。伏図は
+	// ビューポート越しに見るので、**レイヤの縮尺を伏図の縮尺に揃えて初めて**紙の上の
+	// 大きさが一定になる。揃っていないと記号が桁違いに大きく／小さく出る。
+	//
+	// **伏図の縮尺は用紙を読まないと決まらない**（core::planLayout）ので、レイヤを作る
+	// ときには分からない。したがってこれは**シートを組む側から**、割り付けが確定した
+	// あとに呼ぶ（draw/Sheet）。PIO はレイヤ縮尺の変化で描き直す印
+	// （kObjXPropHasLayerScaleDeps）を立ててあるので、呼べば記号が付いて回る。
+	std::size_t applyShearWallLayerScale(const core::Document& document, double scale);
 } // namespace HomeskzIfcImport::draw

@@ -25,11 +25,13 @@
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWSymbolDefObj.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <functional>
 #include <numbers>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -117,6 +119,30 @@ namespace HomeskzIfcImport::draw
 			return gSDK->CreateOval(bounds);
 		}
 
+		// 定義を「使える状態」にして返す（用紙基準にし、外接を計算し直す）。
+		//
+		// ★**中身がある定義にも ResetObject を呼ぶ。** 外接は中身と別に持たれていて、
+		// 中身があっても外接が無い定義は**図に何も出ない**（実機: 面材の丸は定義に
+		// 入っているのに図面へ出なかった。壊れた定義を作った版で図面に残ったものが、
+		// 「中身がある」判定でそのまま使われていた）。ResetObject は絵を書き換えないので、
+		// 「既にある定義は触らない」という約束（CLAUDE.md 4）とも矛盾しない。
+		void PrepareDefinition(MCObjectHandle definition)
+		{
+			// **用紙基準（縮尺無視）にする。** 記号は表記なので、伏図の縮尺が変わっても
+			// 紙の上の大きさは変えない（ご要望）。大きさは「定義の図形（用紙 mm）×
+			// レイヤの縮尺」で決まるので、耐力壁レイヤの縮尺を伏図の縮尺へ揃える
+			// （applyShearWallLayerScale）ところまでが 1 組。
+			try
+			{
+				VWSymbolDefObj(definition).SetPageBased(true);
+			}
+			catch (...)
+			{
+				// 用紙基準にできなくても記号自体は出る。ここで止めない。
+			}
+			gSDK->ResetObject(definition);
+		}
+
 		// 定義を 1 つ用意する。使える定義が図面にある（か、作れた）なら true。
 		bool EnsureMarkSymbol(const char* name, const std::function<MCObjectHandle()>& makeShape)
 		{
@@ -124,7 +150,11 @@ namespace HomeskzIfcImport::draw
 			if (const MCObjectHandle existing = FindSymbolDefinition(wanted); existing != nil)
 			{
 				if (DefinitionHasContent(existing))
-					return true; // 図面のものを尊重してそのまま使う
+				{
+					// 絵は図面のものを尊重してそのまま使い、外接と用紙基準だけ整える。
+					PrepareDefinition(existing);
+					return true;
+				}
 				// 空＝上記の不具合で壊れた定義。名前を空けないと作り直せない。
 				gSDK->DeleteSymbolDefinition(existing, true, false);
 			}
@@ -147,7 +177,7 @@ namespace HomeskzIfcImport::draw
 			if (!gSDK->AddObjectToContainer(shape, definition))
 				return false;
 
-			gSDK->ResetObject(definition); // ★これが無いと外接が付かず「空のシンボル」になる
+			PrepareDefinition(definition); // ★外接が付くのはここ（無いと空のシンボルに見える）
 			return true;
 		}
 
@@ -350,5 +380,38 @@ namespace HomeskzIfcImport::draw
 		}
 
 		return drawn;
+	}
+
+	std::size_t applyShearWallLayerScale(const core::Document& document, double scale)
+	{
+		if (document.shearWalls.empty() || !(scale > 0.0))
+			return 0;
+
+		// 命令に出てくるレイヤ名を**重複なく・決まった順で**集める（同じレイヤへ何度も
+		// 縮尺を書かない。順序に依らない結果にする＝CLAUDE.md「決定性を守る」）。
+		std::vector<std::string> layers;
+		layers.reserve(document.shearWalls.size());
+		for (const core::ShearWallCommand& wall : document.shearWalls)
+			layers.push_back(wall.layer);
+		std::ranges::sort(layers);
+		const auto duplicates = std::ranges::unique(layers);
+		layers.erase(duplicates.begin(), duplicates.end());
+
+		std::size_t applied = 0;
+		for (const std::string& name : layers)
+		{
+			// 無いレイヤは黙って飛ばす（その階の生成がスキップされただけ。描画と同じ規約）。
+			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
+			if (layer == nil)
+				continue;
+			gSDK->SetLayerScaleN(layer, scale);
+			++applied;
+		}
+
+		if (applied > 0 && core::trace::isOpen())
+			core::trace::log("  shearwall: 耐力壁レイヤ " + std::to_string(applied) +
+							 " 枚の縮尺を伏図に合わせた（1/" +
+							 std::to_string(static_cast<int>(scale)) + "）");
+		return applied;
 	}
 } // namespace HomeskzIfcImport::draw

@@ -134,12 +134,16 @@ namespace HomeskzIfcImport
 	constexpr const char* kShearMarkBraceSymbol = "耐力壁記号_筋かい";
 	constexpr const char* kShearMarkPanelSymbol = "耐力壁記号_面材";
 
-	// 記号の寸法（**図面 mm**。1/50 の伏図で三角 6×3mm・丸 直径 3mm に読める）。内法では
+	// 記号の寸法（**用紙 mm**。どの縮尺の伏図でも紙の上でこの大きさに出る）。内法では
 	// 割らない——455mm 幅の壁だけ記号が縮んで図が不揃いに見えた（M19）。シンボル定義の
-	// 中身を作る draw/ShearWall と、置き場所を決める PIO 本体が共有する唯一の定義。
-	constexpr double kShearMarkTriangleLength = 300.0; // 壁と平行な脚（＝斜辺の水平投影）
-	constexpr double kShearMarkTriangleHeight = 150.0; // 壁に直交する脚（＝直角を立てる側）
-	constexpr double kShearMarkCircleDiameter = 150.0;
+	// 中身を作る draw/ShearWall だけが使う（置き場所を決める PIO 本体は使わない）。
+	//
+	// ★**用紙 mm で持てるのはシンボルが用紙基準（縮尺無視）だから。** 用紙基準の
+	// 大きさは「この図形 × そのレイヤの縮尺」で決まるので、耐力壁レイヤの縮尺を伏図の
+	// 縮尺へ揃える必要がある（draw/ShearWall の applyShearWallLayerScale）。
+	constexpr double kShearMarkTriangleLength = 6.0; // 壁と平行な脚（＝斜辺の水平投影）
+	constexpr double kShearMarkTriangleHeight = 3.0; // 壁に直交する脚（＝直角を立てる側）
+	constexpr double kShearMarkCircleDiameter = 3.0;
 
 	// ------------------------------------------------------------------------
 	// リセット時に耐力壁を描く本体。
