@@ -251,7 +251,7 @@
   床梁で囲まれた吹抜けは塞がり、骨組みが閉じていない部分は床になりません。
 - **地中梁は「底盤を削り取るモディファイア」と「可視ソリッド」の 2 つ**で表現しています。
   スラブへ「足す」噛み合わせは、専用 API が実機で失敗するため使えません
-  （[`docs/DEV-NOTES.md`](docs/DEV-NOTES.md)「打ち切った調査」）。
+  （[SDK リファレンス「Slabs and Extrudes」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Slabs%20and%20Extrudes.md)）。
 - **地中梁の下の床付け（捨てコン・砕石）も押し出しソリッド**です。VW スラブの構成層は
   一様な厚みの水平な層しか表せず、地中梁の下で深さが変わる床付け・傾斜部の法線方向の
   厚みを表現できないためです（[`docs/DEV-NOTES.md`](docs/DEV-NOTES.md)「基礎の床付け」）。
@@ -261,12 +261,13 @@
   構造天端より上にある以上、そのままでは床が手前に来ます。プラグインは伏図向けの重ね順
   （床・野地板を背面へ）を図面へ入れていますが、**それが絵に反映されるのは更新のとき**です。
   ビューポートを 1 回更新するか、ファイルを開き直すと正しく描き直されます
-  （[`docs/DEV-NOTES.md`](docs/DEV-NOTES.md)「レイヤ・ストーリ・重ね順」）。
+  （[SDK リファレンス「Layers and Stories」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layers%20and%20Stories.md)）。
 - **グラフィック凡例のイメージの縮率は 1:50 のまま**です。伏図の縮尺は用紙への収まりから
   自動で決まる（1:75 など）ので、凡例のシンボルだけが図と違う大きさで並ぶことがあります。
   合わせたいときは、凡例を選んでオブジェクト情報パレットの**「イメージの縮率」**を伏図の
   縮尺（取り込みの記録に出ます）へ変えてください——**手で変えれば枠も中身も正しく変わります**。
-  プラグインからは変えられません（[`docs/DEV-NOTES.md`](docs/DEV-NOTES.md)「打ち切った調査」）。
+  プラグインからは変えられません
+  （[SDK リファレンス「Graphic Legends」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Graphic%20Legends.md)）。
 - **柱記号は柱を動かした瞬間には追随しません。** リセット・ファイルの再オープン・
   書き出し／印刷の直前に描き直されます（VW に「他の図形が変わったら再計算する」仕組みが
   ないため）。
@@ -280,8 +281,13 @@
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — ソースの構成、ビルド（`VW_SDK_DIR`）、
   テストとカバレッジ、lint、CI とリリース、SDK ドキュメントの在り処、自動アップデートの
   仕組み。
-- [`docs/DEV-NOTES.md`](docs/DEV-NOTES.md) — **開発メモ**。Vectorworks SDK の実測知見
-  （実機でしか判明しなかった落とし穴）、設計の考え方、打ち切った調査、実装の経緯。
+- [`docs/DEV-NOTES.md`](docs/DEV-NOTES.md) — **開発メモ**。設計の考え方、ホームズ君
+  IFC の癖、打ち切った調査（本プラグインの方針）、実装の経緯。
+- [SDK リファレンス（別リポジトリ）](https://github.com/min-nano/vectorworks-developer-sdk-reference)
+  — **Vectorworks SDK の実測知見**（実機でしか判明しなかった落とし穴・SDK に無い／
+  効かない API）。公式リファレンスのフォークに
+  [`Findings/`](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/README.md)
+  と調査用 CI を足したもの。
 - [`tests/README.md`](tests/README.md) — テストの一覧・方針・何をテストしていないか。
 - [`CLAUDE.md`](CLAUDE.md) — このリポジトリで作業するときの規約。
 

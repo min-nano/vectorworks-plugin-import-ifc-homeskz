@@ -50,7 +50,7 @@ namespace HomeskzIfcImport::draw
 	// 列に並んでいる**（VectorScript の HMoveForward に当たるのがこの 2 つ）ので、列そのものを
 	// 組み替える。ビューポート単位の上書き（SetViewportLayerStackingOverride）は**実機で
 	// 効かない**——呼び出しは true を返すのに GetNumViewportLayerStackingOverrides は 0 のまま
-	// で、OIP も「順序を上書き: いいえ」だった（docs/DEV-NOTES.md「打ち切った調査」）。
+	// で、OIP も「順序を上書き: いいえ」だった（SDK リファレンス Findings「Layers and Stories」）。
 	//
 	// **伏図より前に呼ぶこと。** ビューポートは生成時の重ね順で描かれるので、並べ替えを後にす
 	// ると既存のビューポートへ反映されない。draw/ExecuteDocument は全要素の描画後・
