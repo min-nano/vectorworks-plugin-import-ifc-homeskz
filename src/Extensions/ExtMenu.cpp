@@ -258,14 +258,18 @@ namespace HomeskzIfcImport
 		// 例外はここでは受けず、呼び出し元（DoInterface）が SDK コールバックの境界で 1 か所だけ
 		// 受け止める。進捗ダイアログは RAII なので、途中で例外が出てもデストラクタが閉じる。
 		std::string RunImport(const std::string& ifcPath, const core::ImportOptions& options,
-							  bool settingsShown)
+							  bool settingsShown, const std::string& settingsNote)
 		{
 			OpenImportTrace(ifcPath);
 			// **見出しの次に設定を書く。** 「シンボルが 1 つも置かれない」の切り分けは
 			// まず対応表を見るところから始まる（parse/Summary の formatImportOptions）。
-			// 設定ダイアログを出せなかったときは、既定で続けたことも残す。
+			// 設定ダイアログを出せなかったときは、既定で続けたことも残す。**ダイアログ側の
+			// 記録（どの形で出したか・何が駄目だったか）もここへ**——「設定ダイアログが
+			// 出ない」の切り分けはこの 1 行から始まる（draw/SettingsDialog.h）。
 			if (!settingsShown)
 				core::trace::note("設定: ダイアログを出せなかったため既定の対応で取り込みます");
+			if (!settingsNote.empty())
+				core::trace::note("設定ダイアログ: " + settingsNote);
 			core::trace::note(parse::formatImportOptions(options));
 			// 所要時間は**トレースとは別に**測る（ログを開けなくても完了ダイアログに出す）。
 			const auto started = std::chrono::steady_clock::now();
@@ -352,7 +356,8 @@ void CImportIfcMenu_EventSink::DoInterface()
 	//    ダイアログを組めなかったときは**既定の対応でそのまま進む**（設定を出せない
 	//    ことを理由に取り込み自体を落とさない。draw/SettingsDialog.h）。
 	core::ImportOptions options;
-	const draw::SettingsOutcome settings = draw::showImportSettings(options);
+	std::string settingsNote;
+	const draw::SettingsOutcome settings = draw::showImportSettings(options, &settingsNote);
 	if (settings == draw::SettingsOutcome::Cancelled)
 		return;
 
@@ -364,7 +369,8 @@ void CImportIfcMenu_EventSink::DoInterface()
 	std::string body;
 	try
 	{
-		body = RunImport(ifcPath, options, settings == draw::SettingsOutcome::Accepted);
+		body =
+			RunImport(ifcPath, options, settings == draw::SettingsOutcome::Accepted, settingsNote);
 	}
 	catch (const std::exception& error)
 	{

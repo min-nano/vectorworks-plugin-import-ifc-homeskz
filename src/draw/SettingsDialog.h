@@ -14,6 +14,10 @@
 //	ポップアップ**（VWImagePopupCtrl）——VectorWorks 自身の「鋼材断面を選択」などと同じ
 //	コントロールで、絵は VW がリソースに対して持っているサムネイルそのもの。
 //
+//	**それを組めなかったときは、名前のプルダウン＋シンボル表示コントロールという確実に出る
+//	形へ切り替えて開き直す。** 設定ダイアログが出ないままインポートが進むのが最悪なので、
+//	見た目より「必ず出ること」を優先する（どちらの形で出たかはログに残る。実装の冒頭）。
+//
 //	【行ごとに「取り込む」のチェックがある】置きたいシンボルが図面に無いことは普通にある
 //	（テンプレート未適用・その要素を使わない案件）。チェックを外せばその要素は取り込まれず、
 //	解析側は命令を 1 つも作らない。おかげで**候補は図面に実在するシンボルだけ**でよくなる
@@ -27,6 +31,8 @@
 #pragma once
 
 #include "core/ImportOptions.h"
+
+#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -53,5 +59,9 @@ namespace HomeskzIfcImport::draw
 	// Unavailable のときは options を触らない（呼び出し側は既定の対応でそのまま取り込む
 	// ——設定を出せないことを理由に取り込み自体を落とさない。docs/DEV-NOTES.md
 	// 「結果ダイアログ」の逃げ道と同じ考え方）。
-	SettingsOutcome showImportSettings(core::ImportOptions& options);
+	//
+	// note に nullptr でない値を渡すと、**どの形で出したか・出せなかったなら何が駄目だったか**
+	// を 1 行に入れる（何も無ければ空のまま）。呼び出し側はこれを取り込みログへ出す
+	// ——「設定ダイアログが出ない」という報告の切り分けは、ここを読むところから始まる。
+	SettingsOutcome showImportSettings(core::ImportOptions& options, std::string* note = nullptr);
 } // namespace HomeskzIfcImport::draw
