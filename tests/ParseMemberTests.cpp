@@ -18,6 +18,7 @@
 #include "TestFramework.h"
 
 #include "core/Document.h"
+#include "parse/Column.h"
 #include "parse/Loader.h"
 #include "parse/Member.h"
 #include "parse/Story.h"
@@ -34,6 +35,7 @@ using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::MemberCommand;
 using HomeskzIfcImport::core::StoryBoundCommand;
 using HomeskzIfcImport::core::Vec2;
+using HomeskzIfcImport::parse::buildColumnCommands;
 using HomeskzIfcImport::parse::buildMemberCommands;
 using HomeskzIfcImport::parse::CLASS_DODAI;
 using HomeskzIfcImport::parse::CLASS_DOUSASHI;
@@ -49,6 +51,7 @@ using HomeskzIfcImport::parse::memberPlacement3D;
 using HomeskzIfcImport::parse::MemberProfile;
 using HomeskzIfcImport::parse::memberProfileDims;
 using HomeskzIfcImport::parse::Model;
+using HomeskzIfcImport::parse::resolveMemberColumnJoints;
 using HomeskzIfcImport::parse::resolveMemberInterferences;
 using HomeskzIfcImport::parse::slopedMemberGeometry;
 using HomeskzIfcImport::parse::SlopedMemberGeometry;
@@ -246,6 +249,35 @@ namespace
 		std::string layer = "1-横架材天端";
 		std::string memberId = "m";
 	};
+
+	// 取り付く柱 1 本。position は断面中心、elevation 〜 elevation + height が**柱の軸**
+	// （M20 で上端が受ける横架材の天端になった）。既定は 1-横架材天端 の材（天端 473・せい
+	// 180）に取り付く 105 角の柱で、軸の上端が材の天端に一致する（管柱が下から受ける形）。
+	struct ColumnSpec
+	{
+		Vec2 position;
+		double width = 105.0;
+		double depth = 105.0;
+		double elevation = -2000.0;
+		double height = 2473.0; // 上端 = 473 = 材の天端
+	};
+
+	core::ColumnCommand column(const ColumnSpec& spec)
+	{
+		core::ColumnCommand command;
+		command.layer = "1to2-柱";
+		command.memberId = "105×105 - 管柱";
+		command.drawClass = "04構造-02木造-03柱-02管柱";
+		command.structuralUse = core::kStructuralUseColumn;
+		command.position = spec.position;
+		command.width = spec.width;
+		command.depth = spec.depth;
+		command.elevation = spec.elevation;
+		command.height = spec.height;
+		command.bottomBound = StoryBoundCommand{0, "横架材天端", 0.0};
+		command.topBound = StoryBoundCommand{1, "横架材天端", 0.0};
+		return command;
+	}
 
 	MemberCommand member(const MemberSpec& spec)
 	{
@@ -1274,6 +1306,44 @@ TEST(symmetric_l_corner_not_trimmed)
 	CHECK(near(result[1].end.y, 0.0));
 }
 
+TEST(outer_corner_loser_already_cut_at_the_face_snaps_to_the_centreline)
+{
+	// **外周の出隅**。ホームズ君は負け側を既に勝ち側の面で切っていることが多く、そのときは
+	// 相互の食い込みが両方 0 になって勝ち負けが付かない。端点が相手の芯線に**届いていない**
+	// ことを手掛かりに負けと判定し、芯線まで送る（実機で「外周部の負け側横架材の端点が短い
+	// まま」として出た件）。
+	//
+	// 勝ち: x=0 を南北に走る通し材（幅 120。南端は負け材の外面 y=−60 まで伸びている）
+	// 負け: y=0 を東西に走り、勝ち材の東面（x=60）で既に切られている
+	MemberSpec winnerSpec{Vec2{0.0, -60.0}, Vec2{0.0, 3000.0}};
+	winnerSpec.memberId = "win";
+	MemberSpec loserSpec{Vec2{2000.0, 0.0}, Vec2{60.0, 0.0}};
+	loserSpec.width = 105.0;
+	loserSpec.memberId = "lose";
+
+	const std::vector<MemberCommand> result =
+		resolveMemberInterferences({member(winnerSpec), member(loserSpec)});
+	const MemberCommand* winner = findById(result, "win");
+	const MemberCommand* loser = findById(result, "lose");
+	CHECK(winner != nullptr && loser != nullptr);
+	if (winner != nullptr && loser != nullptr)
+	{
+		// 端点は勝ち材の芯線（x=0）へ、面（x=60）までの戻りが端部オフセットに入る。
+		CHECK(near(loser->end.x, 0.0));
+		CHECK(near(loser->end.y, 0.0));
+		CHECK(near(loser->endOffset, -60.0));
+		// 実際に描かれる端は動かない（x=60 のまま）。
+		CHECK(near(core::memberDrawnEnd(*loser).x, 60.0));
+		CHECK(near(loser->start.x, 2000.0));
+		CHECK(near(loser->startOffset, 0.0));
+		// 勝ち材（通し材）は不変。
+		CHECK(near(winner->start.y, -60.0));
+		CHECK(near(winner->end.y, 3000.0));
+		CHECK(near(winner->startOffset, 0.0));
+		CHECK(near(winner->endOffset, 0.0));
+	}
+}
+
 TEST(asymmetric_l_corner_trims_loser)
 {
 	MemberSpec winnerSpec{Vec2{0.0, 0.0}, Vec2{0.0, 2000.0}};
@@ -1299,6 +1369,152 @@ TEST(asymmetric_l_corner_trims_loser)
 		CHECK(near(winner->startOffset, 0.0));
 		CHECK(near(winner->endOffset, 0.0));
 	}
+}
+
+// --------------------------------------------------------------------------
+// - resolveMemberColumnJoints（柱に取り付く端を柱芯へ）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 東西に走る材（y=0・幅 120・天端 473・せい 180）。end.x を変えて柱との位置関係を作る。
+	MemberCommand beamEndingAt(double endX)
+	{
+		MemberSpec spec{Vec2{2000.0, 0.0}, Vec2{endX, 0.0}};
+		spec.memberId = "beam";
+		return member(spec);
+	}
+} // namespace
+
+TEST(column_joint_sends_end_stopping_at_the_near_face_out_to_the_centre)
+{
+	// 柱芯 (0,0)・105 角なので手前の面は x=52.5。そこで止まっている端を柱芯へ送り、
+	// 戻り 52.5 を端部オフセットへ入れる。
+	const std::vector<MemberCommand> result =
+		resolveMemberColumnJoints({beamEndingAt(52.5)}, {column(ColumnSpec{Vec2{0.0, 0.0}})});
+	CHECK_EQ(result.size(), std::size_t(1));
+	if (result.empty())
+		return;
+	CHECK(near(result[0].end.x, 0.0));
+	CHECK(near(result[0].endOffset, -52.5));
+	// 実際に描かれる端は動かない。
+	CHECK(near(core::memberDrawnEnd(result[0]).x, 52.5));
+	CHECK(near(result[0].startOffset, 0.0)); // 反対側は自由端
+}
+
+TEST(column_joint_pulls_an_end_reaching_the_far_face_back_to_the_centre)
+{
+	// **実データではこちらが多い**——外周の桁が隅柱の向こうの面（x=−52.5）まで来ている。
+	// 端点を柱芯へ戻し、オフセットは**正値**（材を伸ばす向き）になる。
+	const std::vector<MemberCommand> result =
+		resolveMemberColumnJoints({beamEndingAt(-52.5)}, {column(ColumnSpec{Vec2{0.0, 0.0}})});
+	CHECK_EQ(result.size(), std::size_t(1));
+	if (result.empty())
+		return;
+	CHECK(near(result[0].end.x, 0.0));
+	CHECK(near(result[0].endOffset, 52.5));
+	CHECK(near(core::memberDrawnEnd(result[0]).x, -52.5)); // 描かれる端は動かない
+}
+
+TEST(column_joint_leaves_an_end_already_on_the_centre)
+{
+	const std::vector<MemberCommand> result =
+		resolveMemberColumnJoints({beamEndingAt(0.0)}, {column(ColumnSpec{Vec2{0.0, 0.0}})});
+	CHECK_EQ(result.size(), std::size_t(1));
+	if (result.empty())
+		return;
+	CHECK(near(result[0].end.x, 0.0));
+	CHECK(near(result[0].endOffset, 0.0));
+}
+
+TEST(column_joint_ignores_an_end_outside_the_column_section)
+{
+	// 柱の断面（105 角）から外れた端は取り付いていない。
+	const std::vector<MemberCommand> result =
+		resolveMemberColumnJoints({beamEndingAt(200.0)}, {column(ColumnSpec{Vec2{0.0, 0.0}})});
+	CHECK_EQ(result.size(), std::size_t(1));
+	if (result.empty())
+		return;
+	CHECK(near(result[0].end.x, 200.0));
+	CHECK(near(result[0].endOffset, 0.0));
+}
+
+TEST(column_joint_ignores_a_column_at_another_storey)
+{
+	// 柱の軸（−3000 〜 −500）が材の Z 範囲（293 〜 473）から離れている。
+	ColumnSpec spec{Vec2{0.0, 0.0}};
+	spec.elevation = -3000.0;
+	spec.height = 2500.0;
+	const std::vector<MemberCommand> result =
+		resolveMemberColumnJoints({beamEndingAt(52.5)}, {column(spec)});
+	CHECK_EQ(result.size(), std::size_t(1));
+	if (result.empty())
+		return;
+	CHECK(near(result[0].endOffset, 0.0));
+}
+
+TEST(column_joint_accepts_a_column_standing_on_the_member)
+{
+	// 材の上に立つ管柱（軸の下端＝材の天端 473）。接するだけで重ならないが同じ節点なので採る
+	// ——ここを「重なりだけ」で見ると、いちばん多い取り合いを丸ごと取りこぼす。
+	ColumnSpec spec{Vec2{0.0, 0.0}};
+	spec.elevation = 473.0;
+	spec.height = 2500.0;
+	const std::vector<MemberCommand> result =
+		resolveMemberColumnJoints({beamEndingAt(52.5)}, {column(spec)});
+	CHECK_EQ(result.size(), std::size_t(1));
+	if (result.empty())
+		return;
+	CHECK(near(result[0].end.x, 0.0));
+	CHECK(near(result[0].endOffset, -52.5));
+}
+
+TEST(column_joint_keeps_an_end_already_sent_to_a_member_centreline)
+{
+	// 横架材どうしの取り合いで既にオフセットが入っている端は触らない（節点が飛ぶため）。
+	MemberCommand beam = beamEndingAt(52.5);
+	beam.end = Vec2{0.0, 0.0};
+	beam.endOffset = -52.5;
+	const std::vector<MemberCommand> result =
+		resolveMemberColumnJoints({beam}, {column(ColumnSpec{Vec2{-100.0, 0.0}})});
+	CHECK_EQ(result.size(), std::size_t(1));
+	if (result.empty())
+		return;
+	CHECK(near(result[0].end.x, 0.0));
+	CHECK(near(result[0].endOffset, -52.5));
+}
+
+TEST(column_joint_ignores_sloped_members)
+{
+	// 傾斜梁（登り梁）は水平面内の扱いが成り立たないので対象外（端部詰めは parse/Noboribari）。
+	MemberSpec spec{Vec2{2000.0, 0.0}, Vec2{52.5, 0.0}};
+	spec.endElevation = 1500.0;
+	const std::vector<MemberCommand> result =
+		resolveMemberColumnJoints({member(spec)}, {column(ColumnSpec{Vec2{0.0, 0.0}})});
+	CHECK_EQ(result.size(), std::size_t(1));
+	if (result.empty())
+		return;
+	CHECK(near(result[0].end.x, 52.5));
+	CHECK(near(result[0].endOffset, 0.0));
+}
+
+TEST(column_joint_result_is_order_independent)
+{
+	// 複数の柱に載る端点は**いちばん近い柱芯**を採る（並び順に依存しない）。
+	const MemberCommand beam = beamEndingAt(52.5);
+	const core::ColumnCommand nearColumn = column(ColumnSpec{Vec2{0.0, 0.0}});
+	ColumnSpec farSpec{Vec2{60.0, 0.0}};
+	farSpec.width = 240.0;
+	farSpec.depth = 240.0;
+	const core::ColumnCommand farColumn = column(farSpec);
+	const std::vector<MemberCommand> a = resolveMemberColumnJoints({beam}, {nearColumn, farColumn});
+	const std::vector<MemberCommand> b = resolveMemberColumnJoints({beam}, {farColumn, nearColumn});
+	CHECK(near(a[0].end.x, b[0].end.x));
+	CHECK(near(a[0].endOffset, b[0].endOffset));
+	// 端点 52.5 のいちばん近い柱芯は 60.0（|−7.5| < |52.5|）。端点を 60.0 へ戻し、材は
+	// 7.5 伸ばす向きのオフセットになる。
+	CHECK(near(a[0].end.x, 60.0));
+	CHECK(near(a[0].endOffset, 7.5));
 }
 
 TEST(diagonal_brace_corner_not_trimmed)
@@ -1682,6 +1898,43 @@ TEST(fixture_member_end_offsets_land_on_the_winner_centreline)
 							   m.startOffset + m.endOffset;
 						   CHECK(drawn > 0.0);
 						   if (m.startOffset < 0.0 || m.endOffset < 0.0)
+							   ++adjusted;
+					   }
+				   });
+	CHECK(adjusted > 0);
+}
+
+TEST(fixture_column_joints_move_endpoints_without_moving_the_material)
+{
+	// 実データでも柱に取り付く端が柱芯へ移り、**材が実際に占める範囲は 1 つも動かない**
+	// ——これが端部オフセットの仕組みの要点で、崩れたら実描画が変わっている。
+	//   * 柱で動かした端が**必ず出る**（0 件ならこの関門は何も効いていない）、
+	//   * 動かした端の描かれる位置は移動前と一致する、
+	//   * 実際に描かれる長さは正のまま。
+	std::size_t adjusted = 0;
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   const std::vector<MemberCommand> before = buildMemberCommands(model);
+					   const std::vector<MemberCommand> after =
+						   resolveMemberColumnJoints(before, buildColumnCommands(model, before));
+					   CHECK_EQ(before.size(), after.size());
+					   if (before.size() != after.size())
+						   return;
+
+					   for (std::size_t i = 0; i < before.size(); ++i)
+					   {
+						   const core::Vec2 wasStart = core::memberDrawnStart(before[i]);
+						   const core::Vec2 wasEnd = core::memberDrawnEnd(before[i]);
+						   const core::Vec2 nowStart = core::memberDrawnStart(after[i]);
+						   const core::Vec2 nowEnd = core::memberDrawnEnd(after[i]);
+						   CHECK(near(wasStart.x, nowStart.x, 1e-9));
+						   CHECK(near(wasStart.y, nowStart.y, 1e-9));
+						   CHECK(near(wasEnd.x, nowEnd.x, 1e-9));
+						   CHECK(near(wasEnd.y, nowEnd.y, 1e-9));
+						   CHECK(std::hypot(nowEnd.x - nowStart.x, nowEnd.y - nowStart.y) > 0.0);
+						   if (before[i].startOffset != after[i].startOffset ||
+							   before[i].endOffset != after[i].endOffset)
 							   ++adjusted;
 					   }
 				   });

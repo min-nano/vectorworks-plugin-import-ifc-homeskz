@@ -104,7 +104,7 @@ namespace HomeskzIfcImport::draw
 		StructuralAxisAlign axisAlign = StructuralAxisAlign::TopCentre;
 		core::StoryBoundCommand startBound; // 始端（柱は下端）の高さ基準
 		core::StoryBoundCommand endBound;	// 終端（柱は上端）の高さ基準
-		// 端部オフセット（mm。負値＝材を短くする）。パスの端点は接合相手の芯線上にあり、
+		// 端部オフセット（mm。負＝材を短く・正＝長くする）。パスの端点は接合相手の芯線上にあり、
 		// 材が実際に止まる位置はここで戻す（core/Document.h「端部オフセット」）。
 		// 0 なら端点がそのまま材の端（垂木・自由端の横架材）。
 		double startOffset = 0.0;

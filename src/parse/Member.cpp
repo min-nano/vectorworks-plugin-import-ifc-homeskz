@@ -13,6 +13,7 @@
 #include "parse/StructuralClass.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <string>
@@ -33,6 +34,10 @@ namespace HomeskzIfcImport::parse
 		constexpr double kParallelTol = 1e-6; // 軸がほぼ平行な相手は対象外（継ぎ手）
 		constexpr double kAlongTol = 1.0; // 相手軸方向の範囲判定の余裕（角部も含める）
 		constexpr double kFaceTol = 1.0; // 面ちょうどで止まる端部も相手に載っているとみなす余裕
+		constexpr double kMinTrim = 1.0; // これ未満のずれは動かさない（既に節点に乗っている）
+		// 柱の軸と横架材の Z 範囲が「接する」とみなす余裕（mm）。管柱の軸の上端は受ける梁の
+		// 天端に**一致する**ので、丸め誤差を吸収できればよい。
+		constexpr double kColumnJointZTol = 1.0;
 		constexpr double kMinLength = 1.0; // 調整後に描かれる長さがこれ未満なら調整しない
 		constexpr double kSymmetryTol = 1.0; // 出隅で相互の食い込み量がこの差以内なら対称とみなす
 
@@ -85,9 +90,14 @@ namespace HomeskzIfcImport::parse
 		//   * 相手の**途中**へ取り付いている（T 字）なら負け。相手が通し材だからで、食い込みが
 		//     無い（既に相手の面で止まっている）取り合いもこれで拾える。ただし相手の端部も
 		//     自分の途中へ取り付いているとき（相互）は勝ち負けが付かない。
-		//   * 相手の**端部**での取り合い（L 字の出隅）は、従来どおり**相互の食い込み量**で
-		//     決める。自分の方が深く食い込むなら負け、同等（同寸の出隅・火打）なら触らない
-		//     ——ここを外すと、幅の違う出隅で負け側が詰められなくなる。
+		//   * 相手の**端部**での取り合い（L 字の出隅）は 2 通りで決める。
+		//     1. **端点が相手の芯線に届いていない**（reach が負＝手前で止まっている）なら負け。
+		//        外周の出隅はホームズ君が既に負け側を勝ち側の面で切っていることが多く、
+		//        食い込みが両方 0 になって勝ち負けが付かない——**そこを拾うのがこの規則**
+		//        （実機で「外周部の負け側横架材の端点が短いまま」として出た）。
+		//     2. 届いている（reach ≈ 0 以上）なら、従来どおり**相互の食い込み量**で決める。
+		//        自分の方が深く食い込むなら負け、同等（同寸の出隅・火打）なら触らない
+		//        ——両材が角で重なっているだけの対称な出隅を片側だけ短くしないため。
 		bool losesTo(const MemberJoint& joint, const Vec2& point, const Vec2& outward,
 					 const MemberGeom& self, double selfHalfWidth, const MemberGeom& b,
 					 double bHalfWidth)
@@ -96,6 +106,8 @@ namespace HomeskzIfcImport::parse
 				return false;
 			if (joint.interior)
 				return !jointsSelfInterior(b, self, selfHalfWidth);
+			if (joint.reach < -kMinTrim)
+				return true;
 
 			const double sAB =
 				memberPenetrationDepth(point, outward, b.start, b.axis, b.length, bHalfWidth);
@@ -130,6 +142,66 @@ namespace HomeskzIfcImport::parse
 				found = true;
 			}
 			return best;
+		}
+
+		// 端点 point・外向き outward が取り付く柱を探し、**端点から柱芯までの軸方向の符号付き
+		// 距離**を返す。取り付く柱が無ければ 0。
+		//   > 0 … 端点が柱芯の手前（柱の面で止まっている）。外へ送る。
+		//   < 0 … 端点が柱芯を通り越している（柱の向こうの面まで伸びている。外周の桁が隅柱の
+		//         外面まで来ている取り合いがこれで、実データではこちらの方が多い）。内へ戻す。
+		// どちらも端点は柱芯の軸位置へ動かし、端部オフセットに −（この距離）を入れる——
+		// つまり**材が実際に占める範囲は変わらない**（通り越している側はオフセットが正＝
+		// 伸ばす向きになる。core/Document.h「端部オフセット」）。
+		//
+		// 取り付く柱の条件は ①端点が柱の断面矩形（軸平行）に載っていること、②**柱の軸**
+		// （elevation 〜 elevation + height。M20 で上端が受ける横架材の天端になった）と材の
+		// Z 範囲が**接するか重なる**こと。
+		//
+		// **②で「接する」も採るのが要点**——管柱は梁を下から受けるので、柱の軸の上端は
+		// ちょうど梁の天端（＝梁の芯線）に一致し、範囲は重ならず接するだけになる。重なりだけを
+		// 見ると、いちばん多い「梁の端が柱の上に乗る」取り合いを丸ごと取りこぼす（実機で
+		// 「柱に取り付く梁の端点が短いまま」として出た）。柱の上に立つ管柱（軸の下端が梁の
+		// 天端）も同じ節点なので同様に採る。
+		//
+		// 返すのは軸方向の距離だけで、柱芯が材の芯線から横にずれていても材の向きは変えない
+		// （横架材どうしの取り合いで芯線の交点まで送るのと同じ考え方）。複数の柱に載る端点は
+		// **いちばん近い柱芯**（|距離| が最小）を採り、同距離なら柱の平面座標で決める
+		// （並び順に依存しない）。
+		double columnAxisReach(const Vec2& point, const Vec2& outward, double zBottom, double zTop,
+							   const std::vector<core::ColumnCommand>& columns)
+		{
+			bool found = false;
+			double best = 0.0;
+			Vec2 bestPos{0.0, 0.0};
+			for (const core::ColumnCommand& column : columns)
+			{
+				// 柱の軸（下端 〜 受ける横架材の天端）と材の Z 範囲が接するか重なるか。
+				const double columnAxisTop = column.elevation + column.height;
+				if (columnAxisTop < zBottom - kColumnJointZTol ||
+					column.elevation > zTop + kColumnJointZTol)
+					continue;
+				const double halfWidth = column.width / 2.0;
+				const double halfDepth = column.depth / 2.0;
+				if (std::abs(point.x - column.position.x) > halfWidth + kFaceTol ||
+					std::abs(point.y - column.position.y) > halfDepth + kFaceTol)
+					continue;
+
+				// 端点から柱芯までの軸方向の距離（負＝柱芯を通り越している）。
+				const double reach = ((column.position.x - point.x) * outward.x) +
+									 ((column.position.y - point.y) * outward.y);
+				const bool better =
+					!found || std::abs(reach) < std::abs(best) ||
+					(std::abs(reach) == std::abs(best) &&
+					 (column.position.x < bestPos.x ||
+					  (column.position.x == bestPos.x && column.position.y < bestPos.y)));
+				if (better)
+				{
+					found = true;
+					best = reach;
+					bestPos = column.position;
+				}
+			}
+			return found ? best : 0.0;
 		}
 
 		// 命令 1 件を平面の中心線へ落とす（傾斜梁・退化した材は valid=false）。
@@ -478,6 +550,54 @@ namespace HomeskzIfcImport::parse
 								   self.end.y - (self.axis.y * end.reach)};
 				command.startOffset = -start.setback;
 				command.endOffset = -end.setback;
+			}
+			result.push_back(std::move(command));
+		}
+		return result;
+	}
+
+	std::vector<MemberCommand>
+	resolveMemberColumnJoints(const std::vector<MemberCommand>& members,
+							  const std::vector<core::ColumnCommand>& columns)
+	{
+		std::vector<MemberCommand> result;
+		result.reserve(members.size());
+		for (const MemberCommand& member : members)
+		{
+			MemberCommand command = member;
+			const MemberGeom self = geomOf(command);
+			if (!self.valid)
+			{
+				result.push_back(std::move(command)); // 傾斜梁・退化した材は対象外
+				continue;
+			}
+
+			// 実体の Z 範囲（core/Document.h の memberTopZ / memberBottomZ）。
+			const double zTop = core::memberTopZ(command);
+			const double zBottom = core::memberBottomZ(command);
+
+			const Vec2 backward{-self.axis.x, -self.axis.y};
+			// 始端（外向きは −軸）・終端（＋軸）の順に、既にオフセットの入っていない端だけ見る。
+			const std::array<std::pair<Vec2, Vec2>, 2> ends = {
+				std::pair<Vec2, Vec2>{self.start, backward},
+				std::pair<Vec2, Vec2>{self.end, self.axis},
+			};
+			const std::array<double*, 2> offsets = {&command.startOffset, &command.endOffset};
+			const std::array<Vec2*, 2> points = {&command.start, &command.end};
+
+			for (std::size_t i = 0; i < ends.size(); ++i)
+			{
+				if (*offsets[i] != 0.0)
+					continue; // 横架材どうしの取り合いで既に節点へ送ってある端
+
+				const double reach =
+					columnAxisReach(ends[i].first, ends[i].second, zBottom, zTop, columns);
+				if (std::abs(reach) <= kMinTrim)
+					continue; // 取り付く柱が無い／既に柱芯に乗っている
+
+				*points[i] = Vec2{ends[i].first.x + (ends[i].second.x * reach),
+								  ends[i].first.y + (ends[i].second.y * reach)};
+				*offsets[i] = -reach;
 			}
 			result.push_back(std::move(command));
 		}

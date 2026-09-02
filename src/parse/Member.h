@@ -38,6 +38,8 @@
 //	    届かず、端部も (せい/2)·sinθ だけ軒側へずれて受ける柱との間に隙間ができる。
 //	    **この高さは屋根版が見つからないときのフォールバック**で、通常は parse/Noboribari の
 //	    屋根スナップが上書きする。
+//	  * **柱に取り付く端は柱芯へ**: 柱の面で止まる端は、柱命令が出そろってから端点を柱芯の
+//	    軸位置へ送る（resolveMemberColumnJoints。柱は横架材の後に組み上がるので別の関門）。
 //	  * **取り合いの端点は相手の芯線**: 命令を組み立てた後、甲乙梁の T 字で負ける側の端点を
 //	    勝ち側の**天端中央線（＝芯線）上**へ移し、そこから手前の面までの戻りを端部オフセット
 //	    に入れる（resolveMemberInterferences）。実際に描かれる材の範囲は「相手の面まで」で
@@ -203,6 +205,26 @@ namespace HomeskzIfcImport::parse
 	// しない決定的な結果になる。入力は変更せず、調整後の新しいリストを返す。
 	std::vector<core::MemberCommand>
 	resolveMemberInterferences(const std::vector<core::MemberCommand>& commands);
+
+	// 柱に取り付く横架材の端部が「柱の芯」で止まるよう、端点を柱芯の軸位置へ送る。
+	//
+	// 横架材の端点が柱の断面矩形に載り（許容つき）、実体の Z 範囲が重なっていて、かつ
+	// **端点が柱芯まで届いていない**（柱の面で止まっている）とき、端点を材の軸に沿って
+	// 柱芯の位置まで送り、送った距離を端部オフセット（負値）へ入れる。材が実際に止まる位置は
+	// 変わらない（core/Document.h「端部オフセット」）。
+	//
+	// **横架材どうしの取り合い（resolveMemberInterferences）とは別の関門**なのは、柱命令が
+	// 横架材命令の**後**に組み上がるため（parse/BuildDocument の順序）。既に横架材どうしの
+	// 取り合いでオフセットが入っている端は触らない——1 つの端が取り付く先は 1 つで、
+	// 二重に送ると節点が飛ぶ。
+	//
+	// 平面座標だけを変え、傾斜梁（登り梁。両端の天端 Z が異なる材）は対象にしない
+	// （端部詰めは parse/Noboribari が受け持つ）。柱は方向を持たないので断面を軸平行の矩形と
+	// して扱う（parse/Joint の ColumnGeom と同じ扱い）。判定は入力時点のジオメトリに対して
+	// 行うので、命令の並び順に依存しない決定的な結果になる。
+	std::vector<core::MemberCommand>
+	resolveMemberColumnJoints(const std::vector<core::MemberCommand>& members,
+							  const std::vector<core::ColumnCommand>& columns);
 
 	// STEP Model から横架材の描画命令を組み立てる。
 	//

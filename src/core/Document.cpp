@@ -98,7 +98,7 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 横架材が**実際に描かれる長さ**（mm）。パス（天端中央線）の平面長に両端の端部
-		// オフセットを足したもの（オフセットは負値で材を短くする。core/Document.h
+		// オフセットを足したもの（オフセットは負で短く・正で長くする。core/Document.h
 		// 「端部オフセット」）。
 		double drawnLength(const MemberCommand& member)
 		{
@@ -113,7 +113,8 @@ namespace HomeskzIfcImport::core
 		// **端部オフセットは材を消してはならない**: 端部オフセットは負値で材を短くするので
 		// （core/Document.h「端部オフセット」）、パス長に両端のオフセットを足した「実際に
 		// 描かれる長さ」が正であることを確かめる。ここが 0 以下だと、命令はあるのに材が
-		// 1mm も描かれない（＝図面に出ない）。
+		// 1mm も描かれない（＝図面に出ない）。正値（材を伸ばす向き）は長さを増やすだけなので
+		// この関門には掛からない。
 		bool isValidMember(const MemberCommand& member)
 		{
 			return !member.layer.empty() && !member.drawClass.empty() && !member.memberId.empty() &&

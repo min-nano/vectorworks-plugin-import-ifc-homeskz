@@ -359,7 +359,7 @@ TEST(validate_rejects_degenerate_member)
 
 TEST(validate_rejects_member_whose_end_offsets_consume_the_whole_length)
 {
-	// 端部オフセットは負値で材を短くするので、パス長を食い尽くすと材が 1mm も描かれない
+	// 端部オフセットが負値でパス長を食い尽くすと、材が 1mm も描かれない
 	// （core/Document.h「端部オフセット」）。
 	core::Document document;
 	core::MemberCommand member = validMember();

@@ -169,7 +169,9 @@ VectorWorks ネイティブオブジェクト
 「材の端」**（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`。
 仕口の位置・登り梁の端部詰め・図に映るものの広がりが共有する）は `core/Document.h`、
 **横架材の端部と相手の取り合いの幾何**（`memberEndJoint`。取り合い調整と登り梁の端部詰めが
-共有する）は `parse/Member`、
+共有する）と**柱に取り付く端を柱芯へ送る関門**（`resolveMemberColumnJoints`。柱命令は横架材の
+後に組み上がるので、横架材どうしの取り合いとは別に `parse/BuildDocument` が一度だけ通す）は
+`parse/Member`、
 **ローカル配置原点の取り出し**（ObjectPlacement → Location の 4 段の鎖。柱・横架材・ストーリが
 共有）は `parse/IfcGeometry` の `resolveLocalPlacementOrigin`、**横架材レベルの定型**（一般階＝
 横架材天端・最上階＝軒高の分岐と、その絶対 Z・レイヤ名: `beamTopLevelType` / `beamTopElevation` /

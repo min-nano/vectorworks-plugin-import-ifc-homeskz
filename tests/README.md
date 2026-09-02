@@ -31,7 +31,7 @@
 | `ParseStructuralClassTests` | `src/parse/StructuralClass` | 部材種別 → VW クラスの純ロジック |
 | `ParseFloorTests` | `src/parse/Floor` | 床板（スラブ構成・基準面・段差・ロフト床の合成） |
 | `ParseColumnTests` | `src/parse/Column` | 柱（span レイヤの to レベル判定・上下端バインド・構造用途・柱頭/柱脚金物・小屋束の断面合わせ・上端を受ける横架材の天端へ合わせる端部オフセット） |
-| `ParseMemberTests` | `src/parse/Member` | 横架材（天端中央線への補正・高さバインド・母屋／登り梁の分離・登り梁の任意断面・取り合いの端点を勝ち側の芯線へ合わせる端部オフセット） |
+| `ParseMemberTests` | `src/parse/Member` | 横架材（天端中央線への補正・高さバインド・母屋／登り梁の分離・登り梁の任意断面・取り合いの端点を勝ち側の芯線へ合わせる端部オフセット・柱に取り付く端を柱芯へ送る関門と「材が実際に占める範囲は動かない」不変条件） |
 | `ParseShearWallTests` | `src/parse/ShearWall` | 耐力壁（押し出し方向から取る壁の軸・回転キャリパの見付け幅・傾きの向き・たすき掛けの同名まとめ・表裏の面材のまとめと同じ通りの別壁を混ぜないこと・柱芯への吸着・レイヤと伏図の紐付け） |
 | `ParseNoboribariTests` | `src/parse/Noboribari` | 登り梁の位置補正（端部の食い込み解消・天端の屋根面スナップ） |
 | `ParseRafterTests` | `src/parse/Rafter` | 垂木（掃引割り付け・非凸面のクリップ・支持点・軒の出・桁幅参照・高さ基準） |
