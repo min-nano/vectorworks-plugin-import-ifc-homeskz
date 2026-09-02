@@ -153,9 +153,11 @@ namespace HomeskzIfcImport::draw
 		class CImportSettingsDialog : public VWDialog
 		{
 		public:
-			CImportSettingsDialog(const core::ImportOptions& seed, const SymbolResources& resources,
+			// resources は値で受ける（形を変えて開き直すことがあるので、呼び出し側は同じ
+			// 一覧を持ったまま。VWResourceList は参照カウント付きでコピーできる）。
+			CImportSettingsDialog(const core::ImportOptions& seed, SymbolResources resources,
 								  Form form)
-				: fIntro(kIntroID), fResources(resources), fForm(form)
+				: fIntro(kIntroID), fResources(std::move(resources)), fForm(form)
 			{
 				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
 				{
