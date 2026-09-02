@@ -330,7 +330,7 @@ namespace HomeskzIfcImport::parse
 		// **高さの降順**（上にあるものが前面）で描くので、床仕上げ天端が構造天端より上にある
 		// 以上、取り込み直後は床・野地板が柱・梁を覆う。こちらで並べた重ね順は図面には
 		// 入っていて、ユーザーが 1 回更新すればそちらで描き直される（経緯は
-		// docs/DEV-NOTES.md「レイヤ・ストーリ・重ね順」）。黙って誤った絵を見せない。
+		// SDK リファレンス Findings「Layers and Stories」）。黙って誤った絵を見せない。
 		if (counts.sheets + counts.sections > 0)
 			out << "\n\n※ 伏図・軸組図はビューポートを 1 回「更新」してください。";
 		// 取り消しの効き方は**例外のときだけ**伝える（needsUndoWarning）。1 回で戻せるのは
