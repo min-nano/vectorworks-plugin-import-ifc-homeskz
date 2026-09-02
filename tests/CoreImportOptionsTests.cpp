@@ -66,6 +66,35 @@ TEST(import_options_set_symbol_replaces_only_that_role)
 	CHECK_EQ(options.symbol(SymbolRole::FireBrace), std::string("鋼製火打"));
 }
 
+TEST(import_options_defaults_place_every_role)
+{
+	// 既定はどの役割も「取り込む」（設定を入れる前と同じ振る舞い）。
+	const ImportOptions options;
+	for (const auto& info : symbolRoles())
+		CHECK(options.isEnabled(info.role));
+}
+
+TEST(import_options_disabling_a_role_keeps_the_others)
+{
+	ImportOptions options;
+	options.setEnabled(SymbolRole::FireBrace, false);
+	CHECK(!options.isEnabled(SymbolRole::FireBrace));
+	CHECK(options.isEnabled(SymbolRole::Joint));
+	// 名前は触らない（取り込まない役割の名前は使われないだけで、消えはしない）。
+	CHECK_EQ(options.symbol(SymbolRole::FireBrace), std::string("鋼製火打"));
+}
+
+TEST(import_options_set_symbol_does_not_re_enable_a_role)
+{
+	// 名前の差し替えと「取り込むか」は独立（片方を触ってもう片方が戻ると、
+	// ダイアログの操作順で結果が変わってしまう）。
+	ImportOptions options;
+	options.setEnabled(SymbolRole::FloorPost, false);
+	options.setSymbol(SymbolRole::FloorPost, "床束_大");
+	CHECK(!options.isEnabled(SymbolRole::FloorPost));
+	CHECK_EQ(options.symbol(SymbolRole::FloorPost), std::string("床束_大"));
+}
+
 TEST(import_options_empty_name_falls_back_to_default)
 {
 	// 空の名前は「名前の無いシンボルを置け」という命令になり、描画側で必ず失敗する。

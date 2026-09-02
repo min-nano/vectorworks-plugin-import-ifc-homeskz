@@ -58,9 +58,12 @@ namespace HomeskzIfcImport::parse
 	// 型名がアンカーボルト**本体**（座金でない）を表すか。
 	bool isAnchorBoltType(const std::string& typeName);
 
-	// ボルト本体の型名から置換するシンボル名を返す。型名が座金なしなら座金なしの役割
-	// （既定 "アンカーボルト_M16"）、そうでなければ座金付きの役割（既定
-	// "アンカーボルト_M12"）に割り当てられたシンボル名。
+	// ボルト本体の型名から**役割**を決める。型名が座金なしなら座金なしの役割、そうでなければ
+	// （Z1/Z2 等の角座金付き）座金付きの役割。名前も「取り込むか」も、この役割を鍵に
+	// 取り込み設定から引く。
+	core::SymbolRole anchorBoltRole(const std::string& typeName);
+
+	// ボルト本体の型名から置換するシンボル名を返す（＝上の役割に割り当てられた名前）。
 	std::string resolveAnchorBoltSymbol(const std::string& typeName,
 										const core::ImportOptions& options);
 

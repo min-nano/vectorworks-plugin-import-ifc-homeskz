@@ -604,4 +604,17 @@ TEST(format_import_options_lists_every_role_and_marks_the_defaults)
 			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount));
 }
 
+TEST(format_import_options_says_which_roles_are_skipped)
+{
+	// 取り込まない役割は名前の代わりに「取り込まない」。名前を出すと「その名前で置いた
+	// はずなのに図面に無い」と読み違えさせる。
+	ImportOptions options;
+	options.setEnabled(SymbolRole::FireBrace, false);
+	std::string const text = formatImportOptions(options);
+
+	CHECK(text.find("火打: 取り込まない") != std::string::npos);
+	CHECK(text.find("火打: 鋼製火打") == std::string::npos);
+	CHECK(text.find("仕口: 仕口（既定）") != std::string::npos);
+}
+
 TEST_MAIN();

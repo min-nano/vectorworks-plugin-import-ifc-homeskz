@@ -254,6 +254,10 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<SymbolCommand> buildFloorPostCommands(Context& context)
 	{
+		// 取り込まない役割は命令を 1 つも作らない（core/ImportOptions.h）。
+		if (!context.options().isEnabled(core::SymbolRole::FloorPost))
+			return {};
+
 		const Model& model = context.model();
 		// 基礎が無いモデルは配置先レイヤ（F-床束）も高さ基準も定まらないので何も出さない。
 		if (!hasFoundation(model))

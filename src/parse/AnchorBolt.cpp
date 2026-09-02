@@ -24,15 +24,21 @@ namespace HomeskzIfcImport::parse
 		return typeName.starts_with(kAnchorBoltTypePrefix);
 	}
 
+	core::SymbolRole anchorBoltRole(const std::string& typeName)
+	{
+		// 座金なし（型名に "座金なし" を含む）は M16 の役割、そうでなければ（Z1/Z2 等の
+		// 角座金付き）M12 の役割。
+		if (typeName.find(kWasherlessToken) != std::string::npos)
+			return core::SymbolRole::AnchorBoltM16;
+		return core::SymbolRole::AnchorBoltM12;
+	}
+
 	std::string resolveAnchorBoltSymbol(const std::string& typeName,
 										const core::ImportOptions& options)
 	{
-		// 座金なし（型名に "座金なし" を含む）は M16 の役割、そうでなければ（Z1/Z2 等の
-		// 角座金付き）M12 の役割。**名前そのものは取り込み設定が持つ**（既定は従来と同じ
-		// "アンカーボルト_M16" / "アンカーボルト_M12"）。
-		if (typeName.find(kWasherlessToken) != std::string::npos)
-			return options.symbol(core::SymbolRole::AnchorBoltM16);
-		return options.symbol(core::SymbolRole::AnchorBoltM12);
+		// **名前そのものは取り込み設定が持つ**（既定は従来と同じ "アンカーボルト_M16" /
+		// "アンカーボルト_M12"）。
+		return options.symbol(anchorBoltRole(typeName));
 	}
 
 	std::vector<SymbolCommand> buildAnchorBoltCommands(Context& context)
@@ -61,9 +67,15 @@ namespace HomeskzIfcImport::parse
 			if (!columnPosition2D(model, *element, position))
 				continue;
 
+			// **取り込まない役割のボルトは命令を作らない。** 座金の有無で役割が分かれるので、
+			// 「M12 だけ置く」といった選び方ができる（core/ImportOptions.h）。
+			const core::SymbolRole role = anchorBoltRole(typeName);
+			if (!context.options().isEnabled(role))
+				continue;
+
 			SymbolCommand command;
 			command.layer = kLayerFoundationAnchor;
-			command.symbol = resolveAnchorBoltSymbol(typeName, context.options());
+			command.symbol = context.options().symbol(role);
 			command.position = position - center;
 			// 回転角は持たない（ボルトは軸対称）。SymbolCommand::angle の既定 0 のまま。
 			commands.push_back(std::move(command));

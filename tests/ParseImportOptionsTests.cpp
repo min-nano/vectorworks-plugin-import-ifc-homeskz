@@ -18,6 +18,7 @@
 #include "core/Progress.h"
 #include "parse/BuildDocument.h"
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -101,6 +102,58 @@ TEST(default_options_keep_the_previous_names)
 							  });
 		});
 	CHECK(sawSymbol); // 1 つも無いなら、この確認は何も守っていない
+}
+
+TEST(disabled_roles_produce_no_commands)
+{
+	// 「取り込まない」にした役割は、命令が 1 つも作られない——描画側で失敗させて診断に
+	// 出すのではなく、そもそも指示を出さない（core/ImportOptions.h）。
+	ImportOptions options;
+	for (const auto& info : symbolRoles())
+		options.setEnabled(info.role, false);
+
+	for (const std::string& name : allFixtures())
+	{
+		NullProgressReporter progress;
+		const Document document =
+			HomeskzIfcImport::parse::buildDocument(fixturePath(name), progress, options);
+		CHECK(document.anchorBolts.empty());
+		CHECK(document.floorPosts.empty());
+		CHECK(document.fireBraces.empty());
+		CHECK(document.joints.empty());
+		// 伏図記号だけが消え、**断面記号は残る**（あちらはシンボルを使わない）。
+		std::size_t planMarks = 0;
+		std::size_t sectionMarks = 0;
+		for (const auto& mark : document.columnMarks)
+		{
+			if (mark.style == HomeskzIfcImport::core::ColumnMarkStyle::Plan)
+				++planMarks;
+			else
+				++sectionMarks;
+		}
+		CHECK_EQ(planMarks, std::size_t{0});
+		CHECK(sectionMarks > 0);
+		// 命令セットとしては依然として正しい（伏図が消えたレイヤを指していても、描画側が
+		// 存在しない表示レイヤを読み飛ばす）。
+		CHECK(HomeskzIfcImport::core::validateDocument(document));
+	}
+}
+
+TEST(disabling_one_anchor_bolt_role_keeps_the_other)
+{
+	// アンカーボルトは座金の有無で役割が分かれる——片方だけ取り込むこともできる。
+	ImportOptions options;
+	options.setEnabled(HomeskzIfcImport::core::SymbolRole::AnchorBoltM16, false);
+
+	NullProgressReporter progress;
+	const Document document = HomeskzIfcImport::parse::buildDocument(
+		fixturePath("伏図次郎【2階】.ifc"), progress, options);
+	// 既定では M12 が 84 本・M16 が 1 本（ParseAnchorBoltTests の固定値）。M16 だけ消える。
+	CHECK_EQ(document.anchorBolts.size(), std::size_t{84});
+	const std::string m16 = HomeskzIfcImport::core::defaultSymbolName(
+		HomeskzIfcImport::core::SymbolRole::AnchorBoltM16);
+	for (const SymbolCommand& bolt : document.anchorBolts)
+		CHECK(bolt.symbol != m16);
 }
 
 TEST_MAIN();

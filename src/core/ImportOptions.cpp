@@ -53,7 +53,10 @@ namespace HomeskzIfcImport::core
 	ImportOptions::ImportOptions()
 	{
 		for (const SymbolRoleInfo& info : symbolRoles())
+		{
 			symbols[indexOf(info.role)] = info.defaultSymbol;
+			enabled[indexOf(info.role)] = true; // 既定は全要素を取り込む（従来どおり）
+		}
 	}
 
 	const std::string& ImportOptions::symbol(SymbolRole role) const
@@ -61,8 +64,18 @@ namespace HomeskzIfcImport::core
 		return symbols[indexOf(role)];
 	}
 
+	bool ImportOptions::isEnabled(SymbolRole role) const
+	{
+		return enabled[indexOf(role)];
+	}
+
 	void ImportOptions::setSymbol(SymbolRole role, const std::string& name)
 	{
 		symbols[indexOf(role)] = name.empty() ? defaultSymbolName(role) : name;
+	}
+
+	void ImportOptions::setEnabled(SymbolRole role, bool enable)
+	{
+		enabled[indexOf(role)] = enable;
 	}
 } // namespace HomeskzIfcImport::core

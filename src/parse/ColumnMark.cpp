@@ -18,15 +18,13 @@ namespace HomeskzIfcImport::parse
 {
 	namespace
 	{
-		// span レイヤの種別（構造用途）から伏図記号のシンボル名を選ぶ。span レイヤは単一種別
-		// なので、そのレイヤの柱 1 本で決まる。**名前そのものは取り込み設定が持つ**
-		// （既定は従来と同じ "束伏図記号" / "柱伏図記号"）。
-		const std::string& spanSymbol(const std::string& structuralUse,
-									  const core::ImportOptions& options)
+		// span レイヤの種別（構造用途）から伏図記号の**役割**を選ぶ。span レイヤは単一種別
+		// なので、そのレイヤの柱 1 本で決まる。名前も「取り込むか」も、この役割を鍵に
+		// 取り込み設定から引く（既定の名前は従来と同じ "束伏図記号" / "柱伏図記号"）。
+		core::SymbolRole spanRole(const std::string& structuralUse)
 		{
-			return options.symbol(structuralUse == kStructuralUseKoyazuka
-									  ? core::SymbolRole::PlanMarkKoyazuka
-									  : core::SymbolRole::PlanMarkColumn);
+			return structuralUse == kStructuralUseKoyazuka ? core::SymbolRole::PlanMarkKoyazuka
+														   : core::SymbolRole::PlanMarkColumn;
 		}
 	} // namespace
 
@@ -63,14 +61,22 @@ namespace HomeskzIfcImport::parse
 		for (const ColumnSpan& span : spans)
 		{
 			const auto use = useByLayer.find(span.layer);
+			// **取り込まない役割の伏図記号は作らない**（柱と小屋束は別の役割なので、
+			// 片方だけ置くこともできる）。記号レイヤはその span のぶんだけ作られなくなるが、
+			// 伏図は**存在しない表示レイヤを黙って読み飛ばす**ので図は成立する
+			// （draw/DrawUtil の FinishViewport）。断面記号（上のループ）はシンボルを
+			// 使わないので、この設定に左右されない。
+			const core::SymbolRole role =
+				spanRole(use != useByLayer.end() ? use->second : std::string());
+			if (!options.isEnabled(role))
+				continue;
 
 			core::ColumnMarkCommand mark;
 			mark.layer = planMarkLayerName(span.to); // 配置先＝専用の伏図記号レイヤ
 			mark.drawClass = kPlanMarkClass;
 			mark.targetLayer = span.layer;
 			mark.style = core::ColumnMarkStyle::Plan;
-			mark.symbol =
-				spanSymbol(use != useByLayer.end() ? use->second : std::string(), options);
+			mark.symbol = options.symbol(role);
 			commands.push_back(std::move(mark));
 		}
 		return commands;

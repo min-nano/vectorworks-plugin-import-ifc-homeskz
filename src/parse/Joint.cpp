@@ -133,6 +133,10 @@ namespace HomeskzIfcImport::parse
 												  const std::vector<ColumnCommand>& columns,
 												  const core::ImportOptions& options)
 	{
+		// 取り込まない役割は命令を 1 つも作らない（core/ImportOptions.h）。
+		if (!options.isEnabled(core::SymbolRole::Joint))
+			return {};
+
 		// シンボル名は端部ごとに変わらないので 1 回だけ引く。
 		const std::string& symbol = options.symbol(core::SymbolRole::Joint);
 

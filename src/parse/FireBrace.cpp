@@ -115,6 +115,10 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<SymbolCommand> buildFireBraceCommands(Context& context)
 	{
+		// 取り込まない役割は命令を 1 つも作らない（core/ImportOptions.h）。
+		if (!context.options().isEnabled(core::SymbolRole::FireBrace))
+			return {};
+
 		const Model& model = context.model();
 		const std::vector<StoryInfo>& stories = context.stories();
 		if (stories.empty())

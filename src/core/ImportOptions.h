@@ -66,21 +66,39 @@ namespace HomeskzIfcImport::core
 	// 役割の画面表示名。
 	const char* symbolRoleLabel(SymbolRole role);
 
-	// 取り込み 1 回ぶんの設定。既定では役割の表の defaultSymbol がそのまま入るので、
-	// **設定ダイアログを出さずに既定のまま使えば従来と同じ振る舞い**になる。
+	// 取り込み 1 回ぶんの設定。既定では役割の表の defaultSymbol がそのまま入り、どの役割も
+	// 「取り込む」なので、**設定ダイアログを出さずに既定のまま使えば従来と同じ振る舞い**になる。
+	//
+	// 【役割ごとに「取り込むかどうか」を持つ理由】置きたいシンボルが図面に無いことは普通に
+	// ある（テンプレートを当てていない図面・その要素を使わない案件）。そのとき**名前だけを
+	// 持たせて「あるつもり」で置きに行っても必ず失敗する**ので、はじめから「この役割は
+	// 取り込まない」と言えるようにする。解析側はその役割の命令を 1 つも作らない——描画側で
+	// 失敗させて診断に出すのではなく、**そもそも指示を出さない**（docs/DEV-NOTES.md
+	// 「取り込み設定の決め事（M20）」）。設定ダイアログの候補も、これで**図面に実在する
+	// シンボルだけ**にできる。
 	struct ImportOptions
 	{
 		// 役割 → シンボル名。添字は SymbolRole の値（symbol() / setSymbol() を通すこと）。
 		std::array<std::string, kSymbolRoleCount> symbols;
 
+		// 役割 → 取り込むか。既定はすべて true（従来どおり全要素を置く）。
+		std::array<bool, kSymbolRoleCount> enabled{};
+
 		ImportOptions();
 
-		// 役割に対応するシンボル名。
+		// 役割に対応するシンボル名。**取り込まない役割の名前は意味を持たない**
+		// （解析側は isEnabled() を先に見る）。
 		const std::string& symbol(SymbolRole role) const;
+
+		// その役割を取り込むか。
+		bool isEnabled(SymbolRole role) const;
 
 		// 役割のシンボル名を差し替える。**空文字は受け付けない**（空にすると
 		// 「名前の無いシンボルを置け」という命令になり、描画側で必ず失敗する）——
-		// 空を渡されたら既定名へ戻す。
+		// 空を渡されたら既定名へ戻す。取り込むかどうかは変えない。
 		void setSymbol(SymbolRole role, const std::string& name);
+
+		// その役割を取り込むかを決める。
+		void setEnabled(SymbolRole role, bool enabled);
 	};
 } // namespace HomeskzIfcImport::core

@@ -456,8 +456,16 @@ namespace HomeskzIfcImport::parse
 		out << "設定: 配置するシンボル";
 		for (const core::SymbolRoleInfo& info : core::symbolRoles())
 		{
+			out << "\n  " << info.label << ": ";
+			// **取り込まない役割は名前を出さない。** 名前は使われないので、出すと
+			// 「その名前で置いたはずなのに無い」と読み違えさせる。
+			if (!options.isEnabled(info.role))
+			{
+				out << "取り込まない";
+				continue;
+			}
 			const std::string& name = options.symbol(info.role);
-			out << "\n  " << info.label << ": " << name;
+			out << name;
 			if (name == info.defaultSymbol)
 				out << "（既定）";
 		}
