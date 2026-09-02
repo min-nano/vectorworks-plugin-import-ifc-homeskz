@@ -135,12 +135,6 @@ namespace HomeskzIfcImport::draw
 		// **レンダリング（輪郭）は触らない**——手作りも既定の〈なし〉で、こちらは差が無い。
 		constexpr TRenderMode kSectionRenderMode = renderFinalHiddenLine;
 
-		// オブジェクト変数へ真偽値を書き込む（draw/Footing の SetBooleanVariable と同じ流儀）。
-		void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value)
-		{
-			gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
-		}
-
 		// 断面ビューポートを 1 枚作る。作れなければ nil。奥行きは無制限、高さは建物を包む
 		// 実寸（上記）。
 		MCObjectHandle CreateSectionViewport(const core::SectionCommand& command,
