@@ -105,7 +105,7 @@ namespace HomeskzIfcImport::parse
 			std::size_t (*placed)(const core::DrawCounts&); // 描けた数
 		};
 
-		constexpr std::array<ElementDef, 17> kElements = {{
+		constexpr std::array<ElementDef, 18> kElements = {{
 			{"ストーリ", "層", [](const core::Document& d) { return d.stories.size(); },
 			 [](const core::DrawCounts& c) { return c.stories; }},
 			{"通り芯", "本", [](const core::Document& d) { return d.grids.size(); },
@@ -136,6 +136,8 @@ namespace HomeskzIfcImport::parse
 			 [](const core::DrawCounts& c) { return c.joints; }},
 			{"柱記号", "個", [](const core::Document& d) { return d.columnMarks.size(); },
 			 [](const core::DrawCounts& c) { return c.columnMarks; }},
+			{"耐力壁", "枚", [](const core::Document& d) { return d.shearWalls.size(); },
+			 [](const core::DrawCounts& c) { return c.shearWalls; }},
 			{"伏図", "枚", [](const core::Document& d) { return d.sheets.size(); },
 			 [](const core::DrawCounts& c) { return c.sheets; }},
 			{"軸組図", "枚", [](const core::Document& d) { return d.sections.size(); },
@@ -328,7 +330,7 @@ namespace HomeskzIfcImport::parse
 		// **高さの降順**（上にあるものが前面）で描くので、床仕上げ天端が構造天端より上にある
 		// 以上、取り込み直後は床・野地板が柱・梁を覆う。こちらで並べた重ね順は図面には
 		// 入っていて、ユーザーが 1 回更新すればそちらで描き直される（経緯は
-		// docs/DEV-NOTES.md「レイヤ・ストーリ・重ね順」）。黙って誤った絵を見せない。
+		// SDK リファレンス Findings「Layers and Stories」）。黙って誤った絵を見せない。
 		if (counts.sheets + counts.sections > 0)
 			out << "\n\n※ 伏図・軸組図はビューポートを 1 回「更新」してください。";
 		// 取り消しの効き方は**例外のときだけ**伝える（needsUndoWarning）。1 回で戻せるのは

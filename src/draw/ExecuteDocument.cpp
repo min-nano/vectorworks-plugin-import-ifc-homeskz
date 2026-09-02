@@ -7,7 +7,8 @@
 //
 //	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（立上り・底盤）→
 //	draw/Floor → draw/Member → draw/Column → draw/Rafter → draw/Roof → draw/Symbol
-//	（アンカーボルト・床束・火打・仕口）→ draw/ColumnMark（記号）→ draw/Sheet（伏図）→
+//	（アンカーボルト・床束・火打・仕口）→ draw/ColumnMark（記号）→ draw/ShearWall（耐力壁）→
+//	draw/Sheet（伏図）→
 //	draw/Section（軸組図）へディスパッチする。伏図・軸組図のビューポート注釈に載る断面寸法
 //	データタグ（draw/Tag）は、それぞれのフェーズの中で置かれる。
 //	実描画（高さ・傾き・スタイル・PIO の挙動）はローカルの VectorWorks で目視確認する。
@@ -25,6 +26,7 @@
 #include "draw/Rafter.h"
 #include "draw/Roof.h"
 #include "draw/Section.h"
+#include "draw/ShearWall.h"
 #include "draw/Sheet.h"
 #include "draw/Story.h"
 #include "draw/Symbol.h"
@@ -190,6 +192,17 @@ namespace HomeskzIfcImport::draw
 		{
 			std::string note;
 			counts.columnMarks = drawColumnMarks(document, progress, &note);
+			addDiagnostics(note);
+		}
+
+		// M19 耐力壁。**柱の後**に置く: PIO はリセット時に対象レイヤの柱を探して軸組内法を
+		// 決めるので、柱が置かれていないと控えの内法で描かれてしまう。配置先の "n-耐力壁"
+		// レイヤは drawStories が作る（レイヤが無い命令はスキップされる）。
+		if (beginPhase("耐力壁を描画しています…", document.shearWalls.size(),
+					   core::DrawPhase::ShearWalls))
+		{
+			std::string note;
+			counts.shearWalls = drawShearWalls(document, progress, &note);
 			addDiagnostics(note);
 		}
 

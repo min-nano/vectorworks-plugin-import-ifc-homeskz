@@ -29,6 +29,8 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
+#include <vector>
+
 namespace HomeskzIfcImport::draw
 {
 	namespace
@@ -60,6 +62,18 @@ namespace HomeskzIfcImport::draw
 
 		// universal 名で引けなかったときに使う OIP のローカライズ名（ResolveParamName）。
 		constexpr const char* kLocalizedProfileShape = "断面形状";
+
+		// 端部オフセット（OIP の「始端オフセット」「終端オフセット」）。**universal 名は
+		// SDK ヘッダに無い**ので候補を並べて引く（ヘッダ冒頭「端部オフセット」）。順番は
+		// ありそうな順で、最初に見つかったものを使う。ローカライズ名は OIP の表示名。
+		const std::vector<const char*> kStartOffsetNames = {"StartOffset", "OffsetStart",
+															"StartExtension", "StartCutOffset"};
+		const std::vector<const char*> kEndOffsetNames = {"EndOffset", "OffsetEnd", "EndExtension",
+														  "EndCutOffset"};
+		const std::vector<const char*> kLocalizedStartOffset = {"始端オフセット"};
+		const std::vector<const char*> kLocalizedEndOffset = {"終端オフセット"};
+		// 名前を解決できなかったときに診断へ載せる候補の絞り込み（OIP の表示名に含まれる語）。
+		constexpr const char* kOffsetParamNeedle = "オフセット";
 
 		// フィールドに渡す値（ポップアップはキーで保持されるため数値文字列）。
 		constexpr const char* kProfileShapeRectangle = "Rectangle";
@@ -155,6 +169,27 @@ namespace HomeskzIfcImport::draw
 		pio.SetParamAsString(kFieldAxisAlign, AxisAlignKey(spec.axisAlign));
 		pio.SetParamAsString(kFieldStartCondition, kEndConditionSquare);
 		pio.SetParamAsString(kFieldEndCondition, kEndConditionSquare);
+
+		// 端部オフセット。**要らない（両端 0）なら触らない**——スタイル既定が 0 なので書く
+		// 必要が無く、名前を解決できない構成でも余計な診断を出さずに済む。
+		if (spec.startOffset != 0.0 || spec.endOffset != 0.0)
+		{
+			const TXString startOffset =
+				ResolveParamNameAmong(pio, kStartOffsetNames, kLocalizedStartOffset);
+			const TXString endOffset =
+				ResolveParamNameAmong(pio, kEndOffsetNames, kLocalizedEndOffset);
+			if (startOffset.IsEmpty() || endOffset.IsEmpty())
+			{
+				result.endOffsetOk = false;
+				result.offsetParamHint = DescribeParamsContaining(pio, kOffsetParamNeedle);
+			}
+			else
+			{
+				const bool startOk = SetParamRealChecked(pio, startOffset, spec.startOffset);
+				const bool endOk = SetParamRealChecked(pio, endOffset, spec.endOffset);
+				result.endOffsetOk = startOk && endOk;
+			}
+		}
 		gSDK->ResetObject(object);
 
 		result.object = object;

@@ -11,12 +11,14 @@
 #include "PluginPrefix.h"
 #include "draw/DrawUtil.h"
 #include "draw/ObjectHandles.h"
+#include "draw/StructuralMember.h"
 
 #include "VWFC/VWObjects/VWClass.h"
 #include "VWFC/VWObjects/VWDocument.h"
 #include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWLayerObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
+#include "VWFC/VWObjects/VWSymbolDefObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
@@ -175,6 +177,33 @@ namespace HomeskzIfcImport::draw
 		gSDK->SetObjectClass(object, classID);
 	}
 
+	std::string PioParamString(const VWParametricObj& pio, const char* name)
+	{
+		try
+		{
+			return pio.GetParamString(TXString(name)).GetStdString();
+		}
+		catch (...)
+		{
+			// パラメータが無い PIO を覗いたときは例外が出る。呼び出し側は「読めなかった」
+			// を空文字で受ければよいので、ここで畳む（1 つの読み損ないで描画を止めない）。
+			return {};
+		}
+	}
+
+	std::string StructuralUseOf(MCObjectHandle object)
+	{
+		try
+		{
+			const VWParametricObj pio(object);
+			return PioParamString(pio, kFieldStructuralUse);
+		}
+		catch (...)
+		{
+			return {}; // 構造材でない（PIO ですらない）オブジェクト
+		}
+	}
+
 	void SetAllAttributesByClass(MCObjectHandle object)
 	{
 		gSDK->SetPColorsByClass(object);
@@ -199,6 +228,18 @@ namespace HomeskzIfcImport::draw
 		VWPolygon2DObj polygon(vertices);
 		polygon.SetClosed(true); // スラブのプロファイルは閉じた外形
 		return polygon.GetThisObject();
+	}
+
+	bool HasSymbolDefinition(const std::string& name)
+	{
+		try
+		{
+			return VWSymbolDefObj::IsSymbolDefObject(TXString(name.c_str()));
+		}
+		catch (...)
+		{
+			return false;
+		}
 	}
 
 	void SetComponents(MCObjectHandle object, const std::vector<core::ComponentCommand>& components)
@@ -274,6 +315,55 @@ namespace HomeskzIfcImport::draw
 				return pio.GetParamName(i);
 		}
 		return universal;
+	}
+
+	TXString ResolveParamNameAmong(const VWParametricObj& pio,
+								   const std::vector<const char*>& universalNames,
+								   const std::vector<const char*>& localizedNames)
+	{
+		for (const char* name : universalNames)
+		{
+			TXString universal(name);
+			if (pio.GetParamIndex(universal) != static_cast<size_t>(-1))
+				return universal;
+		}
+
+		const size_t count = pio.GetParamsCount();
+		for (const char* name : localizedNames)
+		{
+			const TXString localized(name);
+			for (size_t i = 0; i < count; ++i)
+			{
+				if (pio.GetParamLocalizedName(i) == localized)
+					return pio.GetParamName(i);
+			}
+		}
+		return {};
+	}
+
+	std::string DescribeParamsContaining(const VWParametricObj& pio, const char* needle)
+	{
+		const std::string probe(needle);
+		std::string found;
+		const size_t count = pio.GetParamsCount();
+		for (size_t i = 0; i < count; ++i)
+		{
+			// TXString → UTF-8 std::string（GetStdString。ExtColumnMark と同じ変換）。
+			const std::string universal = pio.GetParamName(i).GetStdString();
+			const std::string localized = pio.GetParamLocalizedName(i).GetStdString();
+			if (universal.find(probe) == std::string::npos &&
+				localized.find(probe) == std::string::npos)
+				continue;
+			if (!found.empty())
+				found += ", ";
+			// 1 つずつ append する（`a + "(" + b + ")"` は途中の一時 string を作るので
+			// clang-tidy の performance-inefficient-string-concatenation に掛かる）。
+			found += universal;
+			found += "(";
+			found += localized;
+			found += ")";
+		}
+		return found;
 	}
 
 	bool SetParamRealChecked(VWParametricObj& pio, const TXString& param, double value,

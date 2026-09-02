@@ -64,6 +64,12 @@ namespace HomeskzIfcImport::core
 	inline constexpr const char* kLevelFoundationTop = "基礎天端";
 	inline constexpr const char* kLevelFloorPost = "床束";
 
+	// M19 耐力壁のレベル。筋かい・面材の PIO を載せる "n-耐力壁" レイヤの種別名で、レイヤ平面は
+	// **その階の横架材天端**（最上階は軒高）に合わせる（parse/Story）。耐力壁は土台天端から
+	// 梁下端までの内法に収まるので、この平面を基準にすれば命令が持つ高さ（bottomHeight /
+	// topHeight）がそのまま内法になる（ShearWallCommand 参照）。
+	inline constexpr const char* kLevelShearWall = "耐力壁";
+
 	// 構造用途（構造材ツールのポップアップのキー）。**命令セットの語彙なのでここが唯一の
 	// 定義**で、ColumnCommand::structuralUse に入る値と、要素ごとに固定の用途——横架材
 	// （draw/Member）・垂木（draw/Rafter）——がこれになる。parse/Column.h は読みやすい名前で
@@ -76,8 +82,8 @@ namespace HomeskzIfcImport::core
 	// ここ（CLAUDE.md「両者をつなぐのは core/Document.h だけ」）。
 	//
 	// 値は OIP のポップアップの**並び順**（`<自動>` を 0 とする 0 始まりの索引）。実機の
-	// ドロップダウンを開いて確かめた全 17 項目は docs/DEV-NOTES.md「プラグインオブジェクト
-	// （PIO）」の表にある（ここには本プラグインが使うものだけを置く）。
+	// ドロップダウンを開いて確かめた全 17 項目は SDK リファレンス Findings
+	// 「Parametric Objects」の表にある（ここには本プラグインが使うものだけを置く）。
 	inline constexpr const char* kStructuralUseBeam = "1"; // 梁（土台・梁・桁・母屋…）
 	inline constexpr const char* kStructuralUseColumn = "4";   // 柱（管柱・通し柱）
 	inline constexpr const char* kStructuralUseKoyazuka = "5"; // 小屋束
@@ -343,6 +349,28 @@ namespace HomeskzIfcImport::core
 		double elevation = 0.0;
 	};
 
+	// 【端部オフセット（endpoint offset）】構造材ツールは、パス（芯線）の端点から材の端面までの
+	// 距離を端ごとに持つ（OIP の「始端オフセット」「終端オフセット」）。**符号つきで、負値が
+	// 材を短く・正値が長くする。** 本プラグインはこれを使って「パスの端点＝接合相手の芯線上の
+	// 点（＝節点）」「実際の材の端＝ IFC が描いていた位置」という持ち方をする。
+	//
+	// なぜ端点を芯線の交点に置くか: 横架材の芯線は**天端中央**（断面基準点＝AxisAlign）を通る
+	// ので、柱が受ける梁の芯線は梁の天端にある。柱の上端を梁の下端（＝材が実際に止まる高さ）に
+	// 置くと、その座標はどの部材の芯線にも乗らず、**座標だけを見て「どことどこが接合している
+	// か」を言えない**。端点を芯線の交点へ置き、実際の材の範囲は端部オフセットで戻せば、
+	// 命令セットがそのままフレーム（節点と部材）のモデルになる——将来フレーム解析モデルを
+	// 取り込んで組み立てるときの土台になる。
+	//
+	// 値の決まり方:
+	//   柱・束の上端      … −（受ける横架材のせい）。上に梁せい 150mm が乗るなら −150。
+	//   横架材の負け側端  … −（勝ち側の半幅 ÷ 交差角の余弦）。直交する 105mm の梁なら −52.5。
+	//   横架材の柱に付く端 … −（端点から柱芯までの軸方向の距離）。柱の手前の面で止まっていた
+	//                       端は負値、**柱の向こうの面まで来ていた端は正値**（外周の桁が
+	//                       隅柱の外面まで伸びている取り合い。実データではこちらが多い）。
+	// 実際に描かれる材の長さは「パス長 ＋ 始端オフセット ＋ 終端オフセット」で、この値は
+	// 端部オフセットを入れる前（＝ IFC の形）と一致する——**描かれる形は変えず、命令が持つ
+	// 端点の意味だけを変える**のがこの仕組みの要点。
+	//
 	// 横架材（構造材ツール StructuralMember）を描く命令。draw/Member がこれを構造材
 	// オブジェクトへ変換する（docs/DEV-NOTES.md M7）。土台・梁・桁のほか、母屋・棟木・
 	// 登り梁もこの命令で表し、配置先レイヤと高さ基準レベルだけが専用のもの（"n-母屋" /
@@ -370,6 +398,15 @@ namespace HomeskzIfcImport::core
 	//   endElevation                    … 終端の天端 Z（絶対値）
 	//   startBound                      … 始端の高さ基準（配置先レベル＋天端との差）
 	//   endBound                        … 終端の高さ基準（同上）
+	//   startOffset                     … 始端の端部オフセット（mm。負＝短く・正＝長く。上記）
+	//   endOffset                       … 終端の端部オフセット（同上）
+	//
+	// 【start / end は「芯線の交点」】勝ち側の横架材へ突き当たる端（負け側）は、相手の面では
+	// なく**相手の天端中央線（＝芯線）上の点**に置き、面までの戻りを startOffset / endOffset
+	// に入れる（上記「端部オフセット」。parse/Member の resolveMemberInterferences）。
+	// **柱に取り付く端**も同じで、端点は柱芯の軸位置に置く（parse/Member の
+	// resolveMemberColumnJoints）。取り付く相手のいない端はオフセット 0 で、端点がそのまま
+	// 材の端になる。
 	struct MemberCommand
 	{
 		std::string layer;
@@ -383,6 +420,8 @@ namespace HomeskzIfcImport::core
 		double endElevation = 0.0;
 		StoryBoundCommand startBound;
 		StoryBoundCommand endBound;
+		double startOffset = 0.0;
+		double endOffset = 0.0;
 	};
 
 	// 横架材の実体が占める Z 範囲。elevation / endElevation は**天端** Z で傾斜梁は両端で
@@ -417,8 +456,9 @@ namespace HomeskzIfcImport::core
 	// 止まる半整数・通し柱＝複数階ぶん上）。伏図が切断レベルで表示レイヤを絞れるようにする
 	// ための分け方で、下屋の小屋束が上階の小屋伏図へ写り込まない（parse/Column.h 参照）。
 	//
-	// 【高さの持ち方】elevation は**柱下端**の絶対 Z、height は柱高さ（押し出し Depth）で、
-	// 上端は elevation + height。描画側はこの 2 つから鉛直パスを作り、加えて上下端を
+	// 【高さの持ち方】elevation は**柱下端**の絶対 Z、height は**パス長**（下端 → 上端）で、
+	// 上端は elevation + height。上端は受ける横架材の天端に取るので（下記）、実際に描かれる
+	// 材の高さは height + endOffset（＝ IFC の押し出し Depth）になる。描画側はこの 2 つから鉛直パスを作り、加えて上下端を
 	// ストーリレベルへバインドする（bottomBound / topBound）——**どちらが欠けても正しい
 	// 高さで描かれない**（parse/Column.h 参照）。柱（管柱・通し柱）は下端を当階・上端を
 	// 上階（storyOffset=1）の横架材天端（最上階は軒高）へ、小屋束は上下端とも当階の
@@ -439,6 +479,16 @@ namespace HomeskzIfcImport::core
 	//   bottomHardware                     … 柱脚金物の仕様（同上）
 	//   bottomBound                        … 下端の高さ基準
 	//   topBound                           … 上端の高さ基準
+	//   startOffset                        … 下端の端部オフセット（mm。負＝短く・正＝長く）
+	//   endOffset                          … 上端の端部オフセット（同上）
+	//
+	// 【上端は受ける横架材の天端＝その芯線】柱・束の上端は、材が実際に止まる高さ（梁の下端）
+	// ではなく**受ける横架材の天端**——横架材の芯線が通る高さ——に置き、梁せいぶんの戻りを
+	// endOffset に入れる（上記「端部オフセット」。上に 150mm せいの梁が乗るなら −150）。
+	// elevation + height は**この上端**を指し、topBound.offset もこの高さとの差を表すので、
+	// 「バウンドの差＝パス長」という関係（M8）はそのまま保たれる。下端は元から受け材の天端
+	// （＝土台・梁の芯線）に乗るので startOffset は 0。受ける材を特定できない柱は上端も
+	// 動かさず、両オフセットとも 0 になる。
 	struct ColumnCommand
 	{
 		std::string layer;
@@ -454,6 +504,8 @@ namespace HomeskzIfcImport::core
 		std::string bottomHardware;
 		StoryBoundCommand bottomBound;
 		StoryBoundCommand topBound;
+		double startOffset = 0.0;
+		double endOffset = 0.0;
 	};
 
 	// 基礎の立上り（基礎梁）を壁オブジェクトとして描く命令。draw/Footing がこれを壁へ変換する
@@ -462,7 +514,7 @@ namespace HomeskzIfcImport::core
 	// 【高さの持ち方】立上りは基礎ストーリの GL（下端）と 1 階（上階）の横架材天端（上端）
 	// にバインドし、実形状の絶対 Z との差を各 offset に入れる。**壁だけは高さ基準に汎用の
 	// SetObjectStoryBound ではなく壁専用の SetWallOverallHeights を使う**（前者ではレイヤの
-	// 「壁の高さ」設定に引きずられる。docs/DEV-NOTES.md「壁」）。したがって bottomBound /
+	// 「壁の高さ」設定に引きずられる。SDK リファレンス Findings「Walls」）。したがって bottomBound /
 	// topBound の storyOffset は SetWallOverallHeights の story 引数（0=自階・1=上階）
 	// とそのまま一致する。
 	//
@@ -641,6 +693,22 @@ namespace HomeskzIfcImport::core
 	// raiseModifierTop と、その期待値を書くテストが共有する。
 	inline constexpr double kModifierTopVertexTol = 0.5;
 
+	// **端部オフセットを戻した「実際に材が占める範囲」**（core/Document.h 冒頭「端部
+	// オフセット」）。命令の端点は接合相手の芯線上にあるので、材そのものの端・上端が要る
+	// ところ（仕口シンボルを置く位置・登り梁が受け材の面まで詰める判定・図に映るものの
+	// 広がり）はこれを通す。
+	//
+	// **core に置く理由**: SDK を触らない純計算で、解析側（parse/Joint・parse/Noboribari）と
+	// 描画側から切り離せる計算（planContentBounds・sectionHeightRange）の**両方**が同じ
+	// 定義を要る（raiseModifierTop・rafterEaveEnd と同じ立ち位置。CLAUDE.md「テスト方針」）。
+	Vec2 memberDrawnStart(const MemberCommand& member);
+	Vec2 memberDrawnEnd(const MemberCommand& member);
+
+	// 柱・束が実際に占める下端／上端の絶対 Z。下端は elevation − startOffset、上端は
+	// elevation + height + endOffset（オフセットは負で短く・正で長くする）。
+	double columnDrawnBottom(const ColumnCommand& column);
+	double columnDrawnTop(const ColumnCommand& column);
+
 	// 基礎の底盤をスラブオブジェクトとして描く命令。draw/Footing がこれをスラブへ変換する
 	// （docs/DEV-NOTES.md M9）。床板（FloorCommand）と描画の作法は同じで、構成層の中身だけが
 	// 基礎向けになる。
@@ -766,6 +834,104 @@ namespace HomeskzIfcImport::core
 		Vec2 position;
 	};
 
+	// 耐力壁の種別（PIO の WallKind パラメータに対応する）。
+	enum class ShearWallKind
+	{
+		Brace, // 筋かい（IfcMember "筋かい…"）
+		Panel, // 面材（IfcWall "面材…"）
+	};
+
+	// 筋かいの掛け方（PIO の BraceStyle パラメータに対応する）。
+	enum class ShearWallBraceStyle
+	{
+		Single, // 片掛け（1 本）
+		Double, // たすき掛け（2 本。ホームズ君 IFC では "筋かいダブル" が同名 2 要素で出る）
+	};
+
+	// 面材を設ける面（PIO の PanelSide パラメータに対応する）。**表／裏は「軸（start→end）を
+	// 見て左手側が表」という幾何の約束**で、外部／内部といった実世界の意味は持たない
+	// （耐力壁の向きは IFC からは決まらない）。両面に設けた面材をハッチングの向きで
+	// 描き分けるために、どちら側かを決定的に言えればよい（parse/ShearWall.h「表と裏」）。
+	enum class ShearWallPanelSide
+	{
+		Front, // 表（軸の左手側）
+		Back,  // 裏（軸の右手側）
+		Both,  // 両面
+	};
+
+	// 耐力壁（筋かい・面材）を **PIO 1 つ**で描く命令（docs/DEV-NOTES.md M19）。draw/ShearWall
+	// がこれを線分 PIO（Extensions/ExtShearWall）へ変換する。
+	//
+	// 【なぜ PIO か】耐力壁は**両端の柱に紐付いて伸縮する**必要がある（柱を動かしたら追随
+	// する）。素のジオメトリでは柱が動いた瞬間に嘘になり、記号（柱記号 M12）と同じで
+	// 「間違った耐力壁が残る」＝無いより悪い状態になる。PIO はリセットのたびに対象レイヤの
+	// 柱を実際に探し、見つけた柱の**内法**へ絵を描き直す。VW は PIO が描いたジオメトリを
+	// 図面に保存するので、プラグインを入れていない環境でも図面はそのまま表示できる。
+	//
+	// 【線分 PIO】柱芯どうしを結ぶ 2 点で置く（kParametricSubType_Linear）。両端の
+	// ハンドルがそのまま「どの柱とどの柱の間か」を表すので、手で伸ばしても意味が保たれる。
+	//
+	// 【伏図と軸組図で描き分ける】PIO は 2D（平面）と 3D の両方を描き、VW が図に応じて
+	// 使い分ける（伏図＝2D、軸組図＝3D）:
+	//   * 伏図 … 筋かいは三角記号、面材は壁に平行な線と丸印。**面や筋かいのポリゴンは
+	//     描かない**（軸組材と被って図が読めなくなる）。
+	//   * 軸組図 … 筋かいは形状どおりの帯（軸組内法へクリップした実幅）、面材は軸組内法を
+	//     埋める矩形。表と裏はクラスを分け、**ハッチングの向き**で見分ける
+	//     （ハッチングそのものはクラス属性なので、テンプレート側が持つ。
+	//     プラグインはリソースを作らない。CLAUDE.md「既存の図面リソースを作らない」）。
+	//
+	// 【軸組内法は描くときに決まる】start / end は**柱芯**で、実際に絵を描く範囲（内法）は
+	// PIO が見つけた柱の断面から引く。柱が見つからない図面（柱レイヤが無い・柱を消した）
+	// でも絵が消えないよう、解析時に IFC から測った内法（clearSpan）を控えとして持たせる。
+	//
+	// フィールド:
+	//   layer                  … PIO を置くデザインレイヤ名（"1-耐力壁"。parse/ShearWall）
+	//   drawClass              … PIO 本体の作図クラス（予約語 class を機械置換）
+	//   targetLayers           … 柱を探すデザインレイヤ名を ";" で連ねたもの
+	//                            （"1to2-柱;1to3-柱"）。**その階を base とする span 柱レイヤ
+	//                            すべて**を渡す——管柱と通し柱が別レイヤに分かれるため、
+	//                            1 つでは片端の柱を取り逃がす（parse/Column の span レイヤ）
+	//   start                  … 軸の始点＝柱芯（センタリング済みの平面座標）
+	//   end                    … 同 終点。**start は (x, y) の辞書順で小さい方**に固定する
+	//                            ——表／裏の左右がこの向きで決まるので、列挙順で反転しては困る
+	//   kind                   … 種別（筋かい／面材）
+	//   braceStyle             … 筋かいの掛け方（面材では未使用）
+	//   braceRisesToEnd        … 片掛け筋かいが end 側で高くなるか（たすき掛け・面材では未使用）
+	//   panelSide              … 面材を設ける面（筋かいでは未使用）
+	//   width                  … 筋かいの見付け幅（mm。壁面内で筋かいの軸に直交する幅。
+	//                            面材では 0）
+	//   thickness              … 材厚（mm。筋かい＝壁面に直交する厚み、面材＝板厚）
+	//   panelOffset            … 面材の中心面が軸から離れる距離（mm・正）。筋かいでは 0
+	//     ※ thickness / panelOffset は**測った実物の値の記録**で、いまの作図には使わない。
+	//        軸組図は通り芯（＝壁芯）で切った断面なので、面材の面も筋かいの帯も**壁芯の
+	//        鉛直面**に置く（実物の位置へ外すと切断面の外に出て図から消える。M19）。
+	//   clearSpan              … IFC から測った内法（mm）。柱が見つからないときの控え
+	//   bottomHeight           … 軸組内法の下端（**配置先レイヤ平面からの相対 Z**。mm）
+	//   topHeight              … 同 上端
+	//
+	// 【高さは「レイヤ平面からの差」で持つ】配置先の "n-耐力壁" レイヤは**その階の横架材天端**
+	// に載る（parse/Story）ので、土台天端から梁下端までの内法はそのままこの 2 つで表せる。
+	// シンボル置換系（SymbolCommand::zOffset）と同じ考え方で、描画側が絶対 Z を引き直す
+	// 必要がない形にしてある。
+	struct ShearWallCommand
+	{
+		std::string layer;
+		std::string drawClass;
+		std::string targetLayers;
+		Vec2 start;
+		Vec2 end;
+		ShearWallKind kind = ShearWallKind::Brace;
+		ShearWallBraceStyle braceStyle = ShearWallBraceStyle::Single;
+		bool braceRisesToEnd = true;
+		ShearWallPanelSide panelSide = ShearWallPanelSide::Front;
+		double width = 0.0;
+		double thickness = 0.0;
+		double panelOffset = 0.0;
+		double clearSpan = 0.0;
+		double bottomHeight = 0.0;
+		double topHeight = 0.0;
+	};
+
 	// 断面寸法データタグ 1 つ（ビューポート注釈のデータタグ。docs/DEV-NOTES.md M13）。
 	// 横架材 1 本の断面寸法（"120×180"）をその図の上に表示するための命令で、**IFC
 	// ではなく横架材命令（MemberCommand）から導出する**（parse/Tag）。
@@ -858,7 +1024,7 @@ namespace HomeskzIfcImport::core
 	// **シートレイヤの上**に置く——ビューポート注釈ではない（データタグとはそこが違う）。
 	//
 	// 【スタイルは作らないし当てない】凡例は**スタイル無しのオブジェクト**として置く
-	// （スラブ・壁・データタグと同じ扱い。docs/DEV-NOTES.md「グラフィック凡例」）。したがって
+	// （スラブ・壁・データタグと同じ扱い。SDK リファレンス Findings「Graphic Legends」）。したがって
 	// 命令はスタイル名を持たない——ユーザーの図面に名前付きリソースを増やさず、取り込みごとに
 	// 同じ中身のスタイルが "-2"、"-3" … と並ぶこともない（CLAUDE.md 開発の基本方針 4）。
 	//
@@ -1071,6 +1237,12 @@ namespace HomeskzIfcImport::core
 		// 柱の span から決まるので columns より後に組み立てる。
 		std::vector<ColumnMarkCommand> columnMarks;
 
+		// M19 耐力壁。筋かい（IfcMember "筋かい…"）と面材（IfcWall "面材…"）を、両端を柱に
+		// 紐付けた線分 PIO 1 つずつで表す（parse/ShearWall）。配置先の "n-耐力壁" レイヤは
+		// stories が作り、柱を探す span 柱レイヤ（targetLayers）は columns から決まるので、
+		// その 2 つより後に組み立てる。
+		std::vector<ShearWallCommand> shearWalls;
+
 		// M13 シート（伏図）。基礎伏図 → 各階の柱梁伏図 → 屋根版を持つ階ごとの母屋伏図の
 		// 順で、シートレイヤ番号もその順に "1" から振る（parse/Sheet が組み立てる）。
 		// ビューポートが見せるデザインレイヤはすべて stories が作るので、描画は
@@ -1129,6 +1301,9 @@ namespace HomeskzIfcImport::core
 		// M12 断面記号・伏図記号。**span 柱レイヤごとに置いた記号 PIO の数**（記号そのものの
 		// 個数ではない——1 つの PIO がそのレイヤの柱すべてに記号を描く）。
 		std::size_t columnMarks = 0;
+
+		// M19 耐力壁。**置けた線分 PIO の枚数**（筋かい 1 組・面材 1 枚につき 1 つ）。
+		std::size_t shearWalls = 0;
 
 		// M13 シート（伏図）。**ビューポートまで作れた枚数**（シートレイヤだけできた場合は
 		// 数えない）。命令はあるのに 0 なら、原因は診断行に出る（draw/Sheet）。
@@ -1226,6 +1401,22 @@ namespace HomeskzIfcImport::core
 	// どちらかが求まらなければ false（out は変更しない）。
 	bool sectionContentSize(const Document& document, Vec2& size);
 
+	// 耐力壁の筋かい 1 本を、軸組内法に納まる多角形として返す（座標は **(軸方向, 高さ)**
+	// ＝壁面内の 2D で、PIO のローカル XZ にそのまま載る）。内法の矩形は
+	// [clearStart, clearEnd] × [bottom, top]。
+	//
+	// 【形】筋かいは内法の対角線に沿った幅 width の帯で、帯の角は内法の外へはみ出す。
+	// 実物も柱・横架材へ突き当たる形で納まるので、**内法の矩形で切って**返す
+	// （帯の 4 つの角がそれぞれ別の辺で落ちるので、切り口は端が斜めの八角形になる）。
+	// risesToEnd が真なら clearStart 側が下・clearEnd 側が上、偽ならその逆。
+	//
+	// 内法が潰れている（幅または高さが 0 以下）・幅が 0 以下のときは空を返す。
+	//
+	// **描画側から切り離せる純計算**なので core に置いて無 SDK でテストする
+	// （raiseModifierTop・rafterEaveEnd と同じ立ち位置。CLAUDE.md「テスト方針」）。
+	std::vector<Vec2> shearWallBracePolygon(double clearStart, double clearEnd, double bottom,
+											double top, double width, bool risesToEnd);
+
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す。draw/Story がこの順を適
 	// 用する（レベルの高さには依存しない）。SDK を触らない純計算なので core に置いて無 SDK
 	// で単体テストする（CLAUDE.md「テスト方針」: レイヤ順の並べ替え計算のような SDK
@@ -1239,8 +1430,11 @@ namespace HomeskzIfcImport::core
 	// ストーリ非依存の独立レイヤ。M12 で reorderStoryLayers が渡すようになった）→
 	// **最上階→最下階**の順に各ストーリのレイヤ（stories は
 	// Elevation 昇順＝最下階→最上階なので逆順に辿る）。各ストーリ内は levels の並び順。
-	// ただし床（FL）・野地板レベルのレイヤは全ストーリ分をまとめてスタック最下段（背面）へ
-	// 回す（伏図ビューポートで柱・梁を覆い隠さないため）。
+	// ただし 2 種類のレベルだけは階をまたいで集めて端へ回す:
+	//   * 床（FL）・野地板 … スタック最下段（背面）。伏図ビューポートで柱・梁を覆い隠さない。
+	//   * 耐力壁（M19） … topLayers の直後（最前面群）。耐力壁が伏図へ出すのは**注記**
+	//     （筋かいの三角・面材の丸）で、横架材や柱の絵に隠されると読めない。実機で
+	//     「記号が横架材の後ろに隠れる」ことを確認して前面へ回した。
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
 													const std::vector<std::string>& topLayers = {});
 } // namespace HomeskzIfcImport::core

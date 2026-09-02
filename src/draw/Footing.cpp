@@ -17,7 +17,7 @@
 //	  4. SetWallOverallHeights で下端・上端をストーリレベルへバインドする。
 //	     **壁だけは汎用の SetObjectStoryBound では高さ基準が確定せず**、デザインレイヤの
 //	     「壁の高さ（レイヤ設定）」に従ってしまう（構造材・スラブでは SetObjectStoryBound が
-//	     効くが、壁は専用関数が要る。docs/DEV-NOTES.md「壁」）。命令の
+//	     効くが、壁は専用関数が要る。SDK リファレンス Findings「Walls」）。命令の
 //	     bottomBound / topBound の storyOffset（0=自階・1=上階）がそのまま story 引数になる。
 //	     **構成より後に置く**のは、構成の変更が壁の属性を作り直しても高さが残るようにするため。
 //	  5. ResetObject で反映。
@@ -64,7 +64,7 @@
 //	     作って素材のクラスを付ける（区間は断面原点を押し出し方向へ送って表す）。呑み込みは
 //	     掛けない（接する相手が別素材なので境界線が出てよい）。
 //	スラブへ「足す」噛み合わせ（ModifySlab）は実機で失敗するため使えない——調査の記録は
-//	docs/DEV-NOTES.md「打ち切った調査」。
+//	SDK リファレンス Findings「Slabs and Extrudes」。
 //
 //	★**C++ SDK でも「足す」噛み合わせはできない（試して確認済み。もう試さないこと）。** ISDK
 //	には `ModifySlab(slab, modifier, isClipObject, componentFlags)`（"Adds to or clips from a
@@ -77,7 +77,7 @@
 //	その結果を解析して同じ構造を組み立てられないかも調べたが、
 //	**判別情報（`type=121` の補助オブジェクトと `OPhI` タグのデータオブジェクト）は SDK から
 //	作れない**（作れるのはデータオブジェクト＝`type=76` だけで、タグの定義もヘッダに無い）。
-//	詳細は docs/DEV-NOTES.md M10 の「調査済み・不可」を参照。
+//	詳細は SDK リファレンス Findings「Slabs and Extrudes」を参照（M10）。
 //
 //	【マテリアルは設定しない】地中梁の可視ソリッドに**マテリアルを設定しない**——図面に登録済み
 //	のリソースを名前で引く形にすると、その名前が無い文書で黙って外れる（構成をコード側から与え

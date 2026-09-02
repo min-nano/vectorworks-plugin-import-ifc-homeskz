@@ -38,6 +38,7 @@
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWSymbolObj.h"
 
+#include <array>
 #include <string>
 
 namespace HomeskzIfcImport
@@ -72,41 +73,31 @@ namespace HomeskzIfcImport
 		// パラメータ（すべて文字列）。既定値は空＝「対象レイヤ未指定なら何も描かない」。
 		const SParametricParamDef* paramDefs()
 		{
-			static const SParametricParamDef defs[] = {
-				{kParamTargetLayer,
-				 {PLUGIN_VWR_ID, "columnMarkTargetLayer"},
-				 "",
-				 "",
-				 kFieldText,
-				 0},
-				{kParamTargetClass,
-				 {PLUGIN_VWR_ID, "columnMarkTargetClass"},
-				 "",
-				 "",
-				 kFieldText,
-				 0},
-				{kParamMarkStyle,
-				 {PLUGIN_VWR_ID, "columnMarkStyle"},
-				 kMarkStyleSection,
-				 kMarkStyleSection,
-				 kFieldText,
-				 0},
-				{kParamMarkSymbol, {PLUGIN_VWR_ID, "columnMarkSymbol"}, "", "", kFieldText, 0},
-				{"", {}, "", "", kFieldText, 0}}; // 終端
-			return defs;
-		}
-
-		// PIO のパラメータを文字列で読む（無ければ空）。
-		std::string ParamString(VWParametricObj& pio, const char* name)
-		{
-			try
-			{
-				return pio.GetParamString(TXString(name)).GetStdString();
-			}
-			catch (...)
-			{
-				return {};
-			}
+			// SDK は「番兵で終わる配列の先頭ポインタ」を受け取る（SParametricParamDef*）。
+			// 器を std::array にしても .data() で同じポインタを渡せるので、C 配列にする
+			// 理由は無い（番兵は最後の要素としてそのまま残す）。
+			static const std::array<SParametricParamDef, 5> defs = {
+				{{kParamTargetLayer,
+				  {PLUGIN_VWR_ID, "columnMarkTargetLayer"},
+				  "",
+				  "",
+				  kFieldText,
+				  0},
+				 {kParamTargetClass,
+				  {PLUGIN_VWR_ID, "columnMarkTargetClass"},
+				  "",
+				  "",
+				  kFieldText,
+				  0},
+				 {kParamMarkStyle,
+				  {PLUGIN_VWR_ID, "columnMarkStyle"},
+				  kMarkStyleSection,
+				  kMarkStyleSection,
+				  kFieldText,
+				  0},
+				 {kParamMarkSymbol, {PLUGIN_VWR_ID, "columnMarkSymbol"}, "", "", kFieldText, 0},
+				 {"", {}, "", "", kFieldText, 0}}}; // 終端
+			return defs.data();
 		}
 
 		// 対象オブジェクトが構造材で、構造用途が柱／小屋束なら true。併せて断面寸法も返す。
@@ -120,8 +111,8 @@ namespace HomeskzIfcImport
 		{
 			try
 			{
-				VWParametricObj pio(object);
-				const std::string use = ParamString(pio, draw::kFieldStructuralUse);
+				const VWParametricObj pio(object);
+				const std::string use = draw::PioParamString(pio, draw::kFieldStructuralUse);
 				if (use != core::kStructuralUseColumn && use != core::kStructuralUseKoyazuka)
 					return false;
 				outKoyazuka = use == core::kStructuralUseKoyazuka;
@@ -175,7 +166,7 @@ namespace HomeskzIfcImport
 	} // namespace
 
 	// --------------------------------------------------------------------------
-	// - NOLINTBEGIN(misc-const-correctness)
+	// NOLINTBEGIN(misc-const-correctness)
 #ifdef VW_DEV_BUILD
 	// UUID: 5c1f0a76-2d4e-4b93-9a11-7e6c8d240f31  (dev build)
 	IMPLEMENT_VWParametricExtension(
@@ -238,15 +229,15 @@ namespace HomeskzIfcImport
 
 		try
 		{
-			VWParametricObj self(this->fhObject);
-			const std::string targetLayer = ParamString(self, kParamTargetLayer);
+			const VWParametricObj self(this->fhObject);
+			const std::string targetLayer = draw::PioParamString(self, kParamTargetLayer);
 			if (targetLayer.empty())
 				return kObjectEventNoErr; // 対象未指定なら何も描かない
 
-			const std::string style = ParamString(self, kParamMarkStyle);
+			const std::string style = draw::PioParamString(self, kParamMarkStyle);
 			const bool plan = style == kMarkStylePlan;
-			const TXString symbol(ParamString(self, kParamMarkSymbol).c_str());
-			const std::string targetClass = ParamString(self, kParamTargetClass);
+			const TXString symbol(draw::PioParamString(self, kParamMarkSymbol).c_str());
+			const std::string targetClass = draw::PioParamString(self, kParamTargetClass);
 
 			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(targetLayer.c_str()));
 			if (layer == nil)

@@ -51,6 +51,36 @@ namespace HomeskzIfcImport::draw
 	TXString ResolveParamName(const VWParametricObj& pio, const char* universalName,
 							  const char* localizedName);
 
+	// 候補が複数あるパラメータ名を解決する。universal 名の候補を順に引き、見つからなければ
+	// ローカライズ名（OIP に出る日本語）の候補を順に引く。**どれも無ければ空文字を返す**
+	// ——ResolveParamName と違って「書けたつもりで黙って無視される」ことがないので、
+	// 呼び出し側は空文字を「このパラメータは無い」と扱って診断へ回せる。
+	//
+	// **なぜ候補が要るか**: PIO のパラメータ名は SDK ヘッダのどこにも無く（ci-debug の
+	// sdk-grep で確認済み）、実機の OIP を読んで突き止めるしかない。VW 標準ツールのように
+	// 名前の候補が絞りきれないものは、ありうる universal 名とローカライズ名を並べて
+	// 引き、どれで当たったかを診断へ持ち帰る（SDK リファレンス Findings「Parametric Objects」）。
+	TXString ResolveParamNameAmong(const VWParametricObj& pio,
+								   const std::vector<const char*>& universalNames,
+								   const std::vector<const char*>& localizedNames);
+
+	// PIO のパラメータ名（universal とローカライズ）のうち、needle を含むものを
+	// "universal(ローカライズ)" 形式で連ねて返す。**名前を突き止められなかったときだけ**
+	// 診断へ載せる（ローカルの VectorWorks でしか読めない情報を 1 周で持ち帰るため）。
+	std::string DescribeParamsContaining(const VWParametricObj& pio, const char* needle);
+
+	// PIO の文字列パラメータを読む（無ければ・例外なら空）。**PIO 本体（Extensions/）が
+	// 自分や他のオブジェクトのパラメータを覗くときの唯一の入口**——柱記号（ExtColumnMark）と
+	// 耐力壁（ExtShearWall）がどちらも構造材の構造用途を読むので、try/catch ごとここに
+	// 1 つだけ置く。
+	std::string PioParamString(const VWParametricObj& pio, const char* name);
+
+	// オブジェクトが構造材ツール（StructuralMember）なら、その**構造用途**（"4"＝柱 /
+	// "5"＝小屋束 …。core::kStructuralUse*）を返す。構造材でなければ空。
+	//
+	// 記号 PIO と耐力壁 PIO が「対象レイヤの中から柱だけを拾う」のに共有する。
+	std::string StructuralUseOf(MCObjectHandle object);
+
 	// PIO に実数パラメータを書き、**読み戻して書けたか確かめる**。書けていれば true。
 	// 角度・寸法のような数値パラメータでも、PIO の登録次第で実数ではなく文字列として
 	// 保持されていることがあり、その場合 SetParamReal は黙って無視される。そこで実数で
@@ -84,6 +114,14 @@ namespace HomeskzIfcImport::draw
 	// 平面外形を閉じた 2D ポリゴンとして作る（スラブのプロファイル・フォールバック描画）。
 	// 頂点が空なら nil。
 	MCObjectHandle CreateClosedPolygon(const std::vector<core::Vec2>& boundary);
+
+	// その名前のシンボル定義が図面に在るか（例外は false として扱う）。シンボル置換系
+	// （draw/Symbol）が「置けなかった理由を診断へ書き分ける」ために使う唯一の判定。
+	//
+	// ※ **中身が在るかは分からない**——空のシンボル定義でも true になるし、
+	// `GetFirstMemberObject()` も空の定義で非 nil を返す（M19 の実機確認。
+	// docs/DEV-NOTES.md「シンボル定義を SDK から組み立てるのは断念した」）。
+	bool HasSymbolDefinition(const std::string& name);
 
 	// オブジェクト変数への書き込みの定型（TVariableBlock の組み立てを 1 か所に）。
 	// かつて野地板（2D 点・実数）と基礎・軸組図（真偽値。コメントで互いに「同じ流儀」と

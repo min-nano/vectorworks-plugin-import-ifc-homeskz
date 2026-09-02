@@ -9,8 +9,8 @@
 VectorWorks 2026 のネイティブオブジェクトへ変換して配置する、**C++ SDK 製のネイティブ
 プラグイン**です。
 
-要素（ストーリ・通り芯・基礎・床・横架材・柱・屋根組・シンボル・記号・伏図・軸組図）は
-一通り実装済みで、**ここから先は独自のプラグインとして改良していきます**。
+要素（ストーリ・通り芯・基礎・床・横架材・柱・屋根組・シンボル・記号・耐力壁・伏図・
+軸組図）は一通り実装済みで、**ここから先は独自のプラグインとして改良していきます**。
 
 ドキュメントの分担:
 
@@ -18,13 +18,24 @@ VectorWorks 2026 のネイティブオブジェクトへ変換して配置する
 | --- | --- |
 | `README.md` | 利用者向け。何をするプラグインか・取り込むもの・使い方・インストール・既知の制限 |
 | `docs/DEVELOPMENT.md` | 開発ガイド。ソースの構成・ビルド・テスト・lint・CI・リリース・自動アップデートの仕組み |
-| `docs/DEV-NOTES.md` | **開発メモ**。VW SDK の実測知見（実機でしか判明しなかった落とし穴）・設計の考え方・打ち切った調査・実装の経緯（M0〜M18） |
+| `docs/DEV-NOTES.md` | **開発メモ**。設計の考え方・ホームズ君 IFC の癖・打ち切った調査（本プラグインの方針）・実装の経緯（M0〜M19） |
+| [SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)の `Findings/` | **VW SDK の実測知見**（実機でしか判明しなかった落とし穴・SDK に無い／効かない API・SDK 側の打ち切った調査）。別リポジトリ |
 | `tests/README.md` | テストの一覧・方針・何をテストしていないか |
 | `CLAUDE.md`（本ファイル） | 作業時の規約。アーキテクチャ・置き場所・コード規約・PR とマージ・CI の待ち方 |
 
-**新しいことが分かったら `docs/DEV-NOTES.md` へ足す。** とくに「実機でしか出なかった
-落とし穴」「SDK に無い／効かない API」「試して駄目だった方式」は、書いておかないと必ず
-もう一度同じ道を通る。逆に**そこに書いてあることは再調査しない**（「打ち切った調査」節）。
+**新しいことが分かったら書き残す。行き先は 2 つに分かれる。**
+
+- **Vectorworks SDK の挙動**（実機でしか出なかった落とし穴・SDK に無い／効かない API・
+  試して駄目だった方式）は **[SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)の
+  `Findings/` へ**。本リポジトリの `docs/DEV-NOTES.md` には書かない。**SDK の調査そのものも
+  本リポジトリでは行わない**——調べたいことが出たら**あちらで issue を立て、リファレンスが
+  更新される（`Findings/` に反映される）のを待ってから**、その知見を根拠に実装する
+  （下記「SDK の調査はリファレンス側で行う」）。
+- **本プラグイン固有のこと**（設計判断・ホームズ君 IFC の癖・描き方の方針）は
+  `docs/DEV-NOTES.md` へ。
+
+書いておかないと必ずもう一度同じ道を通る。逆に**どちらかの「打ち切った調査」に書いて
+あることは再調査しない**。
 
 ## 開発の基本方針
 
@@ -37,16 +48,34 @@ VectorWorks 2026 のネイティブオブジェクトへ変換して配置する
    「SDK 非依存ロジック＋無 SDK テスト」という CI の土台と完全に噛み合っている。
    ここを崩す変更は、他がどれだけ良く見えても採らない。
 
-3. **仕様の根拠はコードとメモに書く。** ホームズ君 IFC の癖・VW SDK の落とし穴・
-   なぜその値なのかは、対応するコメント（`なぜ` を書く）と `docs/DEV-NOTES.md` に残す。
+3. **仕様の根拠はコードとメモに書く。** ホームズ君 IFC の癖・なぜその値なのかは、
+   対応するコメント（`なぜ` を書く）と `docs/DEV-NOTES.md` に残す。VW SDK の落とし穴は
+   [SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)の
+   `Findings/` に残す（上記「ドキュメントの分担」）。
 
 4. **既存の図面リソースを作らない・書き換えない。** ユーザーの図面に名前付きリソースを
    増やさない。スラブ／ウォールスタイルもデータタグスタイルも作らず、構成層・基準面・
    タグレイアウトは**各オブジェクトへ直接**与える。
 
+   **唯一の例外は耐力壁の伏図記号のシンボル定義**（`耐力壁記号_筋かい` /
+   `耐力壁記号_面材` の 2 つ。`Extensions/ExtShearWall.h`）。記号をシンボルに
+   しておくと、図面の側で 1 か所を編集するだけで**すべての耐力壁の記号を一括で
+   差し替え・調整**できる、というご要望による。例外の作法は次のとおりで、これを
+   満たせないなら例外にしない:
+   * **描く対象があるときだけ作る**（耐力壁が 1 枚も無い図面には作らない。上の 5 と同じ）。
+   * **同じ名前の定義が図面に既にあれば触らない**（利用者が編集した絵を尊重する）。
+   * 作った定義には**必ず `ResetObject` を呼ぶ**——これが無いと外接が計算されず
+     「中身はあるのに空に見える」定義になる（[SDK リファレンス「Symbols」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Symbols.md)）。
+   * スタイル（スラブ・ウォール・データタグ・凡例）は**引き続き作らない**。
+
 5. **空のもの（レイヤ・レベル・凡例）を先に作らない。** 描画対象がある要素にだけ作る。
 
 6. **決定性を守る。** エンティティ列挙順に依存しない結果を出す。ソート・集約は明示的に。
+
+7. **SDK の調査は本リポジトリでしない。** 「この API は SDK にあるか」「どう振る舞うか」が
+   分からないまま実装に入らず、[SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)で
+   issue を立てて、調査と `Findings/` への反映を待つ（下記「SDK の調査はリファレンス側で
+   行う」）。
 
 ## アーキテクチャ: 2 フェーズ分離
 
@@ -92,7 +121,7 @@ VectorWorks ネイティブオブジェクト
 - **プレーンな構造体**（`std::vector`・`std::string`・`double`・`enum` 等の集約）で表す。
 - スキーマは `stories` / `grids` / `members` / `columns` / `walls` / `wallJoins` / `slabs` /
   `floors` / `rafters` / `roofs` / `anchorBolts` / `floorPosts` / `fireBraces` / `joints` /
-  `columnMarks` / `sheets` / `sections` / `sectionSheet`。**同型が並ぶところは構造体 1 つへまとめる**
+  `columnMarks` / `shearWalls` / `sheets` / `sections` / `sectionSheet`。**同型が並ぶところは構造体 1 つへまとめる**
   ——`anchorBolts` / `floorPosts` / `fireBraces` / `joints` は中身が同じなので
   `core::SymbolCommand` 1 つで受け、要素の区別は「Document のどのリストか」が担う
   （`core/Document.h` の doc コメント参照）。
@@ -135,7 +164,14 @@ VectorWorks ネイティブオブジェクト
 同一直線上の線分成分の芯線射影（`collinearSpan`）は `core/Geometry.h`、**ペア述語による連結成分**
 （Union-Find。立上り・大引・地中梁の統合と壁結合の交点クラスタが共有）は `core/UnionFind.h`、
 **構成層の総厚**（`totalThickness`）・**横架材の Z 範囲と重なり判定**（`memberTopZ` /
-`memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側が持つ）は `core/Document.h`、
+`memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側が持つ）・**端部オフセット**（＝端点を接合
+相手の芯線に置き、材が実際に止まる位置をここで戻す。意味と値の決まり方）・**オフセットを戻した
+「材の端」**（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`。
+仕口の位置・登り梁の端部詰め・図に映るものの広がりが共有する）は `core/Document.h`、
+**横架材の端部と相手の取り合いの幾何**（`memberEndJoint`。取り合い調整と登り梁の端部詰めが
+共有する）と**柱に取り付く端を柱芯へ送る関門**（`resolveMemberColumnJoints`。柱命令は横架材の
+後に組み上がるので、横架材どうしの取り合いとは別に `parse/BuildDocument` が一度だけ通す）は
+`parse/Member`、
 **ローカル配置原点の取り出し**（ObjectPlacement → Location の 4 段の鎖。柱・横架材・ストーリが
 共有）は `parse/IfcGeometry` の `resolveLocalPlacementOrigin`、**横架材レベルの定型**（一般階＝
 横架材天端・最上階＝軒高の分岐と、その絶対 Z・レイヤ名: `beamTopLevelType` / `beamTopElevation` /
@@ -171,7 +207,16 @@ VectorWorks ネイティブオブジェクト
 構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
 実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名は
-`parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`
+`parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、**耐力壁**の要素判別
+（`isShearBrace` / `isShearPanel`）・レイヤレベル名・柱を探す許容は `parse/ShearWall.h`、
+耐力壁 PIO の登録名・パラメータ名・**PIO が自分の絵へ与えるクラス**（伏図記号／面材の表・裏。
+ハッチングの向きで表裏を分ける 2 クラス）は `Extensions/ExtShearWall.h`
+（**伏図記号の寸法**は PIO 本体 `Extensions/ExtShearWall.cpp` の `kMark*`）、
+**PIO のパラメータを読む口**（`PioParamString`）と**構造材の構造用途を読む述語**
+（`StructuralUseOf`。柱記号 PIO と耐力壁 PIO が共有）・**シンボル定義の有無の判定**
+（`HasSymbolDefinition`）は `draw/DrawUtil`、
+**凸多角形の矩形クリップ**は `core/Geometry` の `clipPolygonToRect`（耐力壁の筋かいの形
+`core::shearWallBracePolygon` が唯一の利用者）、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`
 （span 柱レイヤと伏図記号レイヤが共有）、「命令インデックス → ハンドル」の対応表は
 `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの
@@ -253,8 +298,9 @@ VectorWorks ネイティブオブジェクト
 - **日本語コメントを基本**とする。既存ソースの重厚な手折りコメントの density に合わせる。
   `ReflowComments: false` のため折り返しは著者責任。
 - **なぜ（意図・仕様の根拠）を書く**。ホームズ君 IFC の癖・VW SDK の落とし穴・実機で
-  切り分けた経緯は、そのコードの近くに残す（大きな知見は `docs/DEV-NOTES.md` にも足し、
-  コメントからはその節を指す）。
+  切り分けた経緯は、そのコードの近くに残す（大きな知見は、プラグイン固有なら
+  `docs/DEV-NOTES.md`、SDK の挙動なら SDK リファレンスの `Findings/` にも足し、
+  コメントからはその置き場所を指す）。
 
 ## テスト方針
 
@@ -394,16 +440,38 @@ HTTP 呼び出しの時間上限・締切判定・ウォッチドッグの三重
 **新しく「何かの完了を待つ」道具が要るときは、`poll_until` の上に probe を 1 つ書く。**
 待機ループを増やさない。
 
-## CI デバッグ（SDK 依存の調査は `ci-debug` を使う）
+## CI デバッグ（SDK 依存のビルド確認は `ci-debug` を使う）
 
 リモートセッション（クラウド上のコンテナ）には **Vectorworks SDK が無い**。したがって
-SDK 依存のビルドエラーの再現や「この API は SDK にあるか」という設計調査は、**CI 上で
-しか答えが出ない**。そのための専用ワークフローが `.github/workflows/ci-debug.yml` で、
-`workflow_dispatch` でしか起動しない（push / PR では**決して**走らない）。
+SDK 依存のビルドエラーの再現は、**CI 上でしか答えが出ない**。そのための専用ワークフローが
+`.github/workflows/ci-debug.yml` で、`workflow_dispatch` でしか起動しない（push / PR では
+**決して**走らない）。SDK そのものの調査（「この API は SDK にあるか」「どう振る舞うか」）
+はこのワークフローの用途ではない（下記「SDK の調査はリファレンス側で行う」）。
+
+### SDK の調査はリファレンス側で行う（本リポジトリでは調査しない）
+
+本リポジトリの `ci-debug` は、**本プラグインのコードが SDK でコンパイルできるかの確認**
+（`build` / `compile-one`）に使う。「この API は SDK にあるか」「どう振る舞うか」という
+**SDK そのものの調査は本リポジトリでは行わない**——`sdk-grep` / `sdk-ls` で当たりを
+付けるのも含めて、[SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)で
+issue を立て、あちらで調査（同型の ci-debug と `compile` モードがある）・実機確認・
+`Findings/` への反映が済むのを待ってから、その知見を根拠に実装する。本リポジトリで
+`sdk-grep` / `sdk-ls` を使うのは、**既に `Findings/` に載っている宣言を写し取る**
+（引数の型や名前を確かめる）ときだけ。
+
+調査の依頼と待ち方:
+
+1. リファレンス側で issue を立てる（テンプレート `調査`）。**どの機能で・何が分かれば
+   実装に入れるか**を書く。
+2. あちらの調査 PR がマージされ `Findings/` に反映されるまで、その部分の実装には入らない
+   （他の要素や、SDK に依らない `parse/` `core/` の作業を先に進める）。
+3. 反映されたら、その知見を根拠に実装し、コメント・PR 本文から該当の `Findings/` の
+   ページを参照する。**SDK の挙動として分かったことの書き残し先は常に `Findings/`**
+   （上記「ドキュメントの分担」）。
 
 **`build.yml` に一時的な調査ステップを挿してはならない。** 戻し忘れる・その commit が
 dev プレリリースとして公開される・ccache / SDK キャッシュを汚す、と副作用が大きい。
-調査は必ず下記の経路で行う。
+確認は必ず下記の経路で行う。
 
 ### 使い方（リモートセッションの AI はこの 2 手順）
 
@@ -453,7 +521,7 @@ scripts/ci-debug.sh run --mode sdk-grep --args 'GetLayerByName'
 
 | mode | 用途 | `--args` |
 | --- | --- | --- |
-| `sdk-grep` | SDK ヘッダを拡張正規表現で検索（**設計調査の主力**） | 検索パターン |
+| `sdk-grep` | SDK ヘッダを拡張正規表現で検索（`Findings/` に載っている宣言の写し取り用。**SDK の調査はリファレンス側**） | 検索パターン |
 | `sdk-ls` | ヘッダの全文表示 / パス部分一致の一覧 | ヘッダのパスまたは部分文字列 |
 | `build` | configure してビルド（リリース公開はしない） | 単一ターゲット名（省略可） |
 | `compile-one` | 1 翻訳単位だけコンパイル（数十秒。Windows 不可） | ソースのパス |
