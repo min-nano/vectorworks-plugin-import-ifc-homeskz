@@ -70,6 +70,7 @@ namespace HomeskzIfcImport::core
 			{0.2, [](const Document& d) { return d.fireBraces.size(); }},
 			{0.1, [](const Document& d) { return d.joints.size(); }},
 			{6.0, [](const Document& d) { return d.columnMarks.size(); }},
+			{6.0, [](const Document& d) { return d.shearWalls.size(); }},
 			{480.0, [](const Document& d) { return d.sheets.size(); }},
 			{520.0, [](const Document& d) { return d.sections.size(); }},
 		}};

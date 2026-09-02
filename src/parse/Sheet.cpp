@@ -16,6 +16,7 @@
 //
 
 #include "parse/Sheet.h"
+#include "parse/ShearWall.h"
 #include "core/Document.h"
 #include "parse/ColumnMark.h"
 #include "parse/Context.h"
@@ -123,6 +124,9 @@ namespace HomeskzIfcImport::parse
 		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns());
 		const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
 		const bool foundation = hasFoundation(context.model());
+		// 耐力壁レイヤは**命令があるときだけ**作られるので、載せる前に有無を確かめる
+		// （空のレイヤ名をビューポートへ渡さない）。
+		const std::vector<core::ShearWallCommand>& shearWalls = context.shearWalls();
 
 		std::vector<core::SheetCommand> commands;
 		commands.reserve(stories.size());
@@ -144,6 +148,20 @@ namespace HomeskzIfcImport::parse
 			if (const std::string markLayer = planMarkLayerBelowCut(markLayers, cut);
 				!markLayer.empty())
 				layers.push_back(markLayer);
+
+			// M19 耐力壁: **その階自身**の "n-耐力壁" レイヤを重ねる（1 階床＝土台伏図 →
+			// "1-耐力壁"、2 階床伏図 → "2-耐力壁"）。伏図記号（"{to}-柱伏図記号"）が
+			// 切断の**直下**を映すのとは規約が違う——耐力壁は「どの階の壁か」で呼ばれる
+			// ものなので、1 階の耐力壁は 1 階の伏図（土台伏図）に、2 階の耐力壁は 2 階床
+			// 伏図に出るのが図面としての読み方に合う（実機確認で決めた。M19）。
+			//
+			// **重ね順もこの規約に乗っている**: 同じ階のレイヤどうしなら 耐力壁レベルは
+			// 横架材天端の 1 段上（前面）に積まれるので、記号が横架材の後ろへ回らない
+			// （下の階のレイヤを載せていたときは、上の階の横架材に必ず隠れていた）。
+			// 加えて core::desiredStoryLayerOrder が耐力壁レイヤを最前面群へ回す。
+			if (const std::string shearLayer = storyLayerName(i, isTop, kLevelShearWall);
+				anyShearWallOnLayer(shearWalls, shearLayer))
+				layers.push_back(shearLayer);
 
 			if (!isTop)
 			{

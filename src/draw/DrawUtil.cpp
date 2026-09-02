@@ -11,6 +11,7 @@
 #include "PluginPrefix.h"
 #include "draw/DrawUtil.h"
 #include "draw/ObjectHandles.h"
+#include "draw/StructuralMember.h"
 
 #include "VWFC/VWObjects/VWClass.h"
 #include "VWFC/VWObjects/VWDocument.h"
@@ -18,6 +19,7 @@
 #include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWLayerObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
+#include "VWFC/VWObjects/VWSymbolDefObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
@@ -176,6 +178,33 @@ namespace HomeskzIfcImport::draw
 		gSDK->SetObjectClass(object, classID);
 	}
 
+	std::string PioParamString(const VWParametricObj& pio, const char* name)
+	{
+		try
+		{
+			return pio.GetParamString(TXString(name)).GetStdString();
+		}
+		catch (...)
+		{
+			// パラメータが無い PIO を覗いたときは例外が出る。呼び出し側は「読めなかった」
+			// を空文字で受ければよいので、ここで畳む（1 つの読み損ないで描画を止めない）。
+			return {};
+		}
+	}
+
+	std::string StructuralUseOf(MCObjectHandle object)
+	{
+		try
+		{
+			const VWParametricObj pio(object);
+			return PioParamString(pio, kFieldStructuralUse);
+		}
+		catch (...)
+		{
+			return {}; // 構造材でない（PIO ですらない）オブジェクト
+		}
+	}
+
 	void SetAllAttributesByClass(MCObjectHandle object)
 	{
 		gSDK->SetPColorsByClass(object);
@@ -269,6 +298,18 @@ namespace HomeskzIfcImport::draw
 				gSDK->MoveObject3D(handle, dx, dy, 0.0);
 		}
 		return handle;
+	}
+
+	bool HasSymbolDefinition(const std::string& name)
+	{
+		try
+		{
+			return VWSymbolDefObj::IsSymbolDefObject(TXString(name.c_str()));
+		}
+		catch (...)
+		{
+			return false;
+		}
 	}
 
 	void SetComponents(MCObjectHandle object, const std::vector<core::ComponentCommand>& components)

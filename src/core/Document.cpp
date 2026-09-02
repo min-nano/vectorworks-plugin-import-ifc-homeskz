@@ -240,6 +240,24 @@ namespace HomeskzIfcImport::core
 				   (mark.style != ColumnMarkStyle::Plan || !mark.symbol.empty());
 		}
 
+		// 耐力壁 1 枚が妥当か。PIO を置くレイヤ名・作図クラス名が非空で、軸（柱芯どうし）が
+		// 縮退しておらず（縮退した軸からは向きも長さも決まらない。判定は core/Geometry の
+		// samePoint）、材厚と軸組内法（下端 < 上端）が正であること。
+		//
+		// **柱を探すレイヤ名（targetLayers）は空を許す**——柱の無い階（柱レイヤが 1 つも
+		// 生成されなかった）でも耐力壁そのものは描けるべきで、そのとき PIO は控えの内法
+		// （clearSpan）で描く。空を弾くと「柱が無いと耐力壁が丸ごと消える」という、
+		// 図面としては黙って欠ける最悪の形になる。
+		// 筋かいは見付け幅が正であること（幅 0 の帯は描けない）。面材は幅を使わない。
+		bool isValidShearWall(const ShearWallCommand& wall)
+		{
+			if (wall.layer.empty() || wall.drawClass.empty() || samePoint(wall.start, wall.end) ||
+				wall.thickness <= 0.0 || wall.topHeight <= wall.bottomHeight ||
+				wall.clearSpan <= 0.0)
+				return false;
+			return wall.kind != ShearWallKind::Brace || wall.width > 0.0;
+		}
+
 		// 通り芯 1 本が妥当か。配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）
 		// こと。同一判定は parse/Grid の重複線除去と同じ core/Geometry の samePoint を通す
 		// （閾値がズレると「畳まれた線が検証では非縮退」のような食い違いが起こる）。クラス名は
@@ -302,6 +320,11 @@ namespace HomeskzIfcImport::core
 		// 断面記号・伏図記号（M12）: PIO のレイヤ名・作図クラス名・検索対象レイヤ名が非空で、
 		// 伏図記号はシンボル名も非空であること（isValidColumnMark 参照。docs/DEV-NOTES.md M12）。
 		if (!std::ranges::all_of(document.columnMarks, isValidColumnMark))
+			return false;
+
+		// 耐力壁（M19）: レイヤ名・クラス名が非空で、軸が非縮退・材厚と軸組内法が正で
+		// あること（isValidShearWall 参照。docs/DEV-NOTES.md M19）。
+		if (!std::ranges::all_of(document.shearWalls, isValidShearWall))
 			return false;
 
 		// シート（伏図）: シートレイヤ番号・タイトルが非空で、ビューポートが非空のレイヤ名を
@@ -478,6 +501,9 @@ namespace HomeskzIfcImport::core
 			takePoint(column.layer, column.position);
 		for (const ColumnMarkCommand& mark : document.columnMarks)
 			takePoint(mark.layer, mark.position);
+		// 耐力壁（M19）は柱芯どうしを結ぶ線分。伏図に映る範囲へ含める。
+		for (const ShearWallCommand& wall : document.shearWalls)
+			takeSegment(wall.layer, wall.start, wall.end);
 		// シンボル置換系 4 種は同じ命令型（SymbolCommand）なので同じ扱いで畳む。
 		for (const std::vector<SymbolCommand>* list :
 			 {&document.anchorBolts, &document.floorPosts, &document.fireBraces, &document.joints})
@@ -545,7 +571,40 @@ namespace HomeskzIfcImport::core
 		{
 			return type == kLevelFL || type == kLevelNojiita;
 		}
+
+		// 逆に、スタック最上段（前面）へ回すレベル種別か。耐力壁（M19）の伏図記号は
+		// **横架材・柱と同じ場所に重ねて読ませる注記**なので、実体（材）の絵に隠されると
+		// 用を成さない。実機で「記号が横架材の後ろに隠れる」ことを確認して前面へ回した
+		// （desiredStoryLayerOrder の doc コメント）。
+		bool isForegroundLevel(const std::string& type)
+		{
+			return type == kLevelShearWall;
+		}
 	} // namespace
+
+	std::vector<Vec2> shearWallBracePolygon(double clearStart, double clearEnd, double bottom,
+											double top, double width, bool risesToEnd)
+	{
+		const double span = clearEnd - clearStart;
+		const double height = top - bottom;
+		if (span <= 0.0 || height <= 0.0 || width <= 0.0)
+			return {};
+
+		// 帯の中心線（内法の対角線）。
+		const Vec2 low{risesToEnd ? clearStart : clearEnd, bottom};
+		const Vec2 high{risesToEnd ? clearEnd : clearStart, top};
+		// 上で内法の幅と高さが正だと確かめてあるので、対角線の長さも必ず正になる
+		// （length ≥ height > 0）。ゼロ除算の番人は要らない。
+		const Vec2 along{high.x - low.x, high.y - low.y};
+		const double length = std::hypot(along.x, along.y);
+
+		// 中心線に直交する半幅ぶんのオフセット。
+		const Vec2 offset{-along.y / length * width / 2.0, along.x / length * width / 2.0};
+		const std::vector<Vec2> band = {low - offset, high - offset, high + offset, low + offset};
+		const Vec2 clipMin{std::min(clearStart, clearEnd), bottom};
+		const Vec2 clipMax{std::max(clearStart, clearEnd), top};
+		return clipPolygonToRect(band, clipMin, clipMax);
+	}
 
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
 													const std::vector<std::string>& topLayers)
@@ -557,17 +616,24 @@ namespace HomeskzIfcImport::core
 		order.insert(order.end(), topLayers.begin(), topLayers.end());
 
 		// stories は Elevation 昇順（最下階→最上階）。スタックは最上階→最下階なので逆順に辿る。
+		// 前面へ回すレベルは order の**先頭側**（通り芯・topLayers の直後）へ、背面へ回す
+		// レベルは末尾へ集める。どちらも階の並び（最上階→最下階）は崩さない。
+		std::vector<std::string> foreground;
 		std::vector<std::string> background;
 		for (const StoryCommand& command : std::views::reverse(stories))
 		{
 			for (const LevelCommand& level : command.levels)
 			{
-				if (isBackgroundLevel(level.type))
+				if (isForegroundLevel(level.type))
+					foreground.push_back(level.layer);
+				else if (isBackgroundLevel(level.type))
 					background.push_back(level.layer);
 				else
 					order.push_back(level.layer);
 			}
 		}
+		order.insert(order.begin() + static_cast<std::ptrdiff_t>(1 + topLayers.size()),
+					 foreground.begin(), foreground.end());
 		order.insert(order.end(), background.begin(), background.end());
 		return order;
 	}

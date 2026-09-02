@@ -341,6 +341,19 @@ vw_add_test(ParseJointTests ParseJointTests.cpp CORE FIXTURES)
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
 vw_add_test(ParseColumnMarkTests ParseColumnMarkTests.cpp CORE FIXTURES)
 
+# Shear walls (src/parse/ShearWall): the braces (IfcMember 筋かい…) and the sheathing panels
+# (IfcWall 面材…) turned into ONE linear-PIO command each, with both ends pulled onto the
+# neighbouring column centres. Covers the wall-plane coordinate frame (axis taken from the
+# extrusion direction, canonical axis orientation, rotating-caliper face width, the brace's
+# rise direction), the two grouping rules (same-name braces = a crossed pair, same-line/same-run
+# panels = the two faces of one wall) and the storey layer / floor-plan wiring. Exercised on
+# synthetic STEP snippets and the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseShearWallTests ParseShearWallTests.cpp)
+target_link_libraries(ParseShearWallTests PRIVATE HomeskzIfcCore)
+target_compile_definitions(ParseShearWallTests
+						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
+
 # Shared parse context (src/parse/Context): the per-import cache that lets every
 # element's build*Commands reuse the same stories / grid centre / storey elements /
 # loft-floor regions / roof planes instead of recomputing them. Proves the cached

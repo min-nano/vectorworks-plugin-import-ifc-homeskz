@@ -159,6 +159,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/Rafter.cpp
 		src/parse/Roof.cpp
 		src/parse/Section.cpp
+		src/parse/ShearWall.cpp
 		src/parse/Sheet.cpp
 		src/parse/Tag.cpp
 		src/parse/StructuralClass.cpp
@@ -294,6 +295,8 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Column.cpp
 		src/draw/ColumnMark.cpp
 		src/Extensions/ExtColumnMark.cpp
+		src/draw/ShearWall.cpp
+		src/Extensions/ExtShearWall.cpp
 		src/Extensions/ExtFoundation.cpp
 		src/draw/Rafter.cpp
 		src/draw/Roof.cpp

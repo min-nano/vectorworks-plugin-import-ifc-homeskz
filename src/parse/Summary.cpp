@@ -105,7 +105,7 @@ namespace HomeskzIfcImport::parse
 			std::size_t (*placed)(const core::DrawCounts&); // 描けた数
 		};
 
-		constexpr std::array<ElementDef, 15> kElements = {{
+		constexpr std::array<ElementDef, 16> kElements = {{
 			{"ストーリ", "層", [](const core::Document& d) { return d.stories.size(); },
 			 [](const core::DrawCounts& c) { return c.stories; }},
 			{"通り芯", "本", [](const core::Document& d) { return d.grids.size(); },
@@ -133,6 +133,8 @@ namespace HomeskzIfcImport::parse
 			 [](const core::DrawCounts& c) { return c.joints; }},
 			{"柱記号", "個", [](const core::Document& d) { return d.columnMarks.size(); },
 			 [](const core::DrawCounts& c) { return c.columnMarks; }},
+			{"耐力壁", "枚", [](const core::Document& d) { return d.shearWalls.size(); },
+			 [](const core::DrawCounts& c) { return c.shearWalls; }},
 			{"伏図", "枚", [](const core::Document& d) { return d.sheets.size(); },
 			 [](const core::DrawCounts& c) { return c.sheets; }},
 			{"軸組図", "枚", [](const core::Document& d) { return d.sections.size(); },

@@ -1347,6 +1347,12 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	mark.position = core::Vec2{-1700.0, 0.0};
 	document.columnMarks.push_back(mark);
 
+	core::ShearWallCommand shear;
+	shear.layer = "1-耐力壁";
+	shear.start = core::Vec2{-1750.0, 0.0};
+	shear.end = core::Vec2{1750.0, 0.0};
+	document.shearWalls.push_back(shear);
+
 	// シンボル置換系 4 種（同じ命令型なので 4 本のリストすべてを見ていることを確かめる）。
 	const auto symbolAt = [](const char* layer, const core::Vec2& position)
 	{
@@ -1544,6 +1550,141 @@ TEST(geometry_vectors_default_to_origin)
 	CHECK_EQ(p3.x, 0.0);
 	CHECK_EQ(p3.y, 0.0);
 	CHECK_EQ(p3.z, 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// - 耐力壁の検証（core::validateDocument の isValidShearWall）。M19。
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 妥当な耐力壁 1 枚（筋かい）。各ケースはここから 1 か所だけ壊す。
+	core::ShearWallCommand validShearWall()
+	{
+		core::ShearWallCommand wall;
+		wall.layer = "1-耐力壁";
+		wall.drawClass = "04構造-02木造-07筋かい";
+		wall.targetLayers = "1to2-柱";
+		wall.start = core::Vec2{0.0, 0.0};
+		wall.end = core::Vec2{910.0, 0.0};
+		wall.kind = core::ShearWallKind::Brace;
+		wall.width = 90.0;
+		wall.thickness = 45.0;
+		wall.clearSpan = 805.0;
+		wall.bottomHeight = 0.0;
+		wall.topHeight = 2800.0;
+		return wall;
+	}
+
+	// 耐力壁 1 枚だけを載せた文書が検証を通るか。
+	bool acceptsShearWall(const core::ShearWallCommand& wall)
+	{
+		core::Document document;
+		document.shearWalls.push_back(wall);
+		return core::validateDocument(document);
+	}
+} // namespace
+
+TEST(validate_accepts_a_valid_shear_wall)
+{
+	CHECK(acceptsShearWall(validShearWall()));
+
+	// 柱の無い階でも描けなければならないので、探索先レイヤは空でも妥当
+	// （PIO は控えの内法で描く。core/Document.cpp の isValidShearWall）。
+	core::ShearWallCommand noColumns = validShearWall();
+	noColumns.targetLayers.clear();
+	CHECK(acceptsShearWall(noColumns));
+
+	// 面材は見付け幅を使わないので 0 のままで妥当。
+	core::ShearWallCommand panel = validShearWall();
+	panel.kind = core::ShearWallKind::Panel;
+	panel.width = 0.0;
+	CHECK(acceptsShearWall(panel));
+}
+
+TEST(validate_rejects_a_broken_shear_wall)
+{
+	// 描けない値を 1 つずつ入れて、そのたびに文書ごと弾かれること。
+	core::ShearWallCommand noLayer = validShearWall();
+	noLayer.layer.clear();
+	CHECK(!acceptsShearWall(noLayer));
+
+	core::ShearWallCommand noClass = validShearWall();
+	noClass.drawClass.clear();
+	CHECK(!acceptsShearWall(noClass));
+
+	core::ShearWallCommand degenerate = validShearWall();
+	degenerate.end = degenerate.start; // 軸が縮退＝向きも長さも決まらない
+	CHECK(!acceptsShearWall(degenerate));
+
+	core::ShearWallCommand noThickness = validShearWall();
+	noThickness.thickness = 0.0;
+	CHECK(!acceptsShearWall(noThickness));
+
+	core::ShearWallCommand flat = validShearWall();
+	flat.topHeight = flat.bottomHeight; // 軸組内法の高さが無い
+	CHECK(!acceptsShearWall(flat));
+
+	core::ShearWallCommand noSpan = validShearWall();
+	noSpan.clearSpan = 0.0; // 控えの内法が無い
+	CHECK(!acceptsShearWall(noSpan));
+
+	core::ShearWallCommand noWidth = validShearWall();
+	noWidth.width = 0.0; // 筋かいは見付け幅が要る（幅 0 の帯は描けない）
+	CHECK(!acceptsShearWall(noWidth));
+}
+
+// ---------------------------------------------------------------------------
+// - 耐力壁の筋かいの形（core::shearWallBracePolygon）。M19。
+// ---------------------------------------------------------------------------
+
+TEST(shear_wall_brace_polygon_is_clipped_to_the_frame)
+{
+	// 内法 3000×2400 に幅 100 の帯。帯の 4 つの角はそれぞれ内法の別の辺の外へ出るので、
+	// どの角も 2 頂点に切り分けられて八角形（端が斜めに落ちた形）になる。頂点はすべて
+	// 内法の中に収まる。
+	const std::vector<core::Vec2> brace =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+	CHECK_EQ(brace.size(), std::size_t{8});
+	for (const core::Vec2& point : brace)
+	{
+		CHECK(point.x >= -1e-9 && point.x <= 3000.0 + 1e-9);
+		CHECK(point.y >= -1e-9 && point.y <= 2400.0 + 1e-9);
+	}
+}
+
+TEST(shear_wall_brace_polygon_follows_the_rise_direction)
+{
+	// 傾きの向きで、下端に接する側が入れ替わる。始点側が下（risesToEnd=true）なら
+	// 内法の左下隅の近くに頂点があり、逆向きなら右下隅の近くにある。
+	const auto lowestX = [](const std::vector<core::Vec2>& poly)
+	{
+		double best = poly.front().x;
+		double bestY = poly.front().y;
+		for (const core::Vec2& point : poly)
+		{
+			if (point.y < bestY)
+			{
+				bestY = point.y;
+				best = point.x;
+			}
+		}
+		return best;
+	};
+	const std::vector<core::Vec2> up =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+	const std::vector<core::Vec2> down =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, false);
+	CHECK(lowestX(up) < 1500.0);
+	CHECK(lowestX(down) > 1500.0);
+}
+
+TEST(shear_wall_brace_polygon_rejects_a_degenerate_frame)
+{
+	// 内法が潰れている・幅が無いときは描けない（空を返す）。
+	CHECK(core::shearWallBracePolygon(0.0, 0.0, 0.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 2400.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, true).empty());
 }
 
 TEST_MAIN();

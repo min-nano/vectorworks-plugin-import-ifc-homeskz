@@ -9,6 +9,7 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtColumnMark.h"
+#include "Extensions/ExtShearWall.h"
 #include "Extensions/ExtFoundation.h"
 #include "Extensions/ExtMenu.h"
 #include "Updater.h"
@@ -90,6 +91,11 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// M12 柱・小屋束の記号 PIO。メニューコマンドと同じモジュールに同梱する
 	// （別プラグインにしない。Extensions/ExtColumnMark.h 冒頭）。
 	REGISTER_Extension<HomeskzIfcImport::CExtColumnMark>(
+		GROUPID_ExtensionParametric, action, moduleInfo, iid, inOutInterface, cbp, reply);
+
+	// M19 耐力壁（筋かい・面材）の PIO。柱記号と同じく同じモジュールへ同梱する
+	// （Extensions/ExtShearWall.h 冒頭）。
+	REGISTER_Extension<HomeskzIfcImport::CExtShearWall>(
 		GROUPID_ExtensionParametric, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
 	// M20 基礎の PIO（立上り・底盤・地中梁・床付けを 1 つの立体オブジェクトとして描き、
