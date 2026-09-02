@@ -33,6 +33,7 @@
 #include "parse/Grid.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Member.h"
+#include "parse/ShearWall.h"
 #include "parse/Step.h"
 #include "parse/Story.h"
 
@@ -128,6 +129,13 @@ namespace HomeskzIfcImport::parse
 		// 同じ走査が 2 回走る。
 		const std::vector<core::SymbolCommand>& anchorBolts();
 
+		// 耐力壁の命令（parse/ShearWall の buildShearWallCommands）。2 者がこの 1 回の解析
+		// 結果を共有する: Document の shearWalls と、ストーリ（その階に "n-耐力壁" レベルを
+		// 作るか）。全 IfcMember / IfcWall の押し出しソリッドを解決する重い解析なので、
+		// 要素ごとに組み立て直すと同じ走査が 2 回走る。柱芯へ端を寄せるので columns（上記）
+		// を入力に取る。
+		const std::vector<core::ShearWallCommand>& shearWalls();
+
 	private:
 		const Model* fModel = nullptr;
 		core::ImportOptions fOptions;
@@ -142,5 +150,6 @@ namespace HomeskzIfcImport::parse
 		std::optional<std::vector<core::ColumnCommand>> fColumns;
 		std::optional<std::vector<core::WallCommand>> fWalls;
 		std::optional<std::vector<core::SymbolCommand>> fAnchorBolts;
+		std::optional<std::vector<core::ShearWallCommand>> fShearWalls;
 	};
 } // namespace HomeskzIfcImport::parse

@@ -972,4 +972,42 @@ TEST(roof_slope_plan_and_projection_range)
 	CHECK(near(hi, 0.0));
 }
 
+// ---------------------------------------------------------------------------
+// 凸多角形の矩形クリップ（core::clipPolygonToRect）。耐力壁の筋かいの帯を軸組内法へ
+// 切り詰めるのに使う（M19）。
+// ---------------------------------------------------------------------------
+
+TEST(clip_polygon_keeps_a_polygon_already_inside)
+{
+	const std::vector<core::Vec2> square = {{1.0, 1.0}, {3.0, 1.0}, {3.0, 3.0}, {1.0, 3.0}};
+	const std::vector<core::Vec2> clipped =
+		core::clipPolygonToRect(square, core::Vec2{0.0, 0.0}, core::Vec2{4.0, 4.0});
+	CHECK_EQ(clipped.size(), std::size_t{4});
+}
+
+TEST(clip_polygon_cuts_the_corners_that_stick_out)
+{
+	// 矩形 [0,10]×[0,10] を斜めにまたぐ帯。4 つの角がそれぞれ別の辺の外へ出るので、
+	// どの角も 2 頂点に切り分けられて八角形になる（＝筋かいの端が斜めに落ちた形）。
+	const std::vector<core::Vec2> band = {{-2.0, 2.0}, {8.0, 12.0}, {12.0, 8.0}, {2.0, -2.0}};
+	const std::vector<core::Vec2> clipped =
+		core::clipPolygonToRect(band, core::Vec2{0.0, 0.0}, core::Vec2{10.0, 10.0});
+	CHECK_EQ(clipped.size(), std::size_t{8});
+	for (const core::Vec2& point : clipped)
+	{
+		CHECK(point.x >= -1e-9 && point.x <= 10.0 + 1e-9);
+		CHECK(point.y >= -1e-9 && point.y <= 10.0 + 1e-9);
+	}
+}
+
+TEST(clip_polygon_outside_the_rect_is_empty)
+{
+	const std::vector<core::Vec2> square = {{20.0, 20.0}, {30.0, 20.0}, {30.0, 30.0}};
+	CHECK(core::clipPolygonToRect(square, core::Vec2{0.0, 0.0}, core::Vec2{10.0, 10.0}).empty());
+	// 面にならない入力（2 点以下）も空。
+	CHECK(core::clipPolygonToRect({{0.0, 0.0}, {1.0, 1.0}}, core::Vec2{0.0, 0.0},
+								  core::Vec2{10.0, 10.0})
+			  .empty());
+}
+
 TEST_MAIN();

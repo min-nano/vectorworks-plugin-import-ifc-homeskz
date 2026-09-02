@@ -33,6 +33,7 @@
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
 #include "parse/Section.h"
+#include "parse/ShearWall.h"
 #include "parse/Sheet.h"
 #include "parse/Story.h"
 #include "parse/Tag.h"
@@ -88,6 +89,14 @@ namespace HomeskzIfcImport::parse
 		// （parse/Context.h の members）。**登り梁は屋根面へスナップ補正**してから Document に
 		// 載せる（形状先行。parse/Noboribari）。受ける材は横架材と柱の両方（M8 で最終化）。
 		document.members = correctNoboribari(context, context.members(), document.columns);
+		progress.step();
+
+		// M19 耐力壁: 筋かい（IfcMember "筋かい…"）・面材（IfcWall "面材…"）を線分 PIO の命令へ
+		// 変換する（parse/ShearWall）。両端を柱芯へ寄せるので columns の後に置く。**ストーリ
+		// より前**なのは、ストーリが「その階に耐力壁レベル（"n-耐力壁" レイヤ）を作るか」を
+		// この命令の配置先レイヤで決めるため（母屋・登り梁と同じ判定）。コンテキストが 1 回
+		// だけ解析して両者へ配る（parse/Context.h の shearWalls）。
+		document.shearWalls = context.shearWalls();
 		progress.step();
 
 		// M3 ストーリ: IfcBuildingStorey を解析して StoryCommand を積む（parse/Story）。

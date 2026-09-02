@@ -3,7 +3,9 @@
 このプラグインをビルド・テスト・lint し、CI とリリースを回すための手順です。
 
 - 利用者向けの説明（何をするプラグインか・使い方）は [`README.md`](../README.md)。
-- Vectorworks SDK の実測知見と設計判断は [`DEV-NOTES.md`](DEV-NOTES.md)。
+- 設計判断・ホームズ君 IFC の癖は [`DEV-NOTES.md`](DEV-NOTES.md)。**Vectorworks SDK の
+  実測知見は [SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)の
+  `Findings/`**（下記「SDK ドキュメント」）。
 - 作業時の規約（ディレクトリ・命名・依存の向き・PR とマージの規則・CI の待ち方）は
   [`CLAUDE.md`](../CLAUDE.md)。
 
@@ -111,8 +113,9 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 .github/workflows/cleanup-dev-release.yml  PR のクローズ時に dev プレリリースを片付ける
 .github/workflows/stable-release-healthcheck.yml
                             stable リリースの取りこぼしを検知して再ビルドする
-.github/workflows/ci-debug.yml  CI: 手動ディスパッチ専用のデバッグ実行（SDK 調査・
-                            ビルド再現）。push / PR では起動しない
+.github/workflows/ci-debug.yml  CI: 手動ディスパッチ専用のデバッグ実行（SDK 依存の
+                            ビルド再現）。push / PR では起動しない。SDK そのものの
+                            調査は SDK リファレンス側で行う（CLAUDE.md）
 ```
 
 **依存の向きは厳守します。** `parse/` と `core/` は Vectorworks SDK を include せず、
@@ -447,8 +450,11 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 
 `.github/workflows/ci-debug.yml` は、**手動ディスパッチ専用**の「CI 上で 1 コマンドだけ
 動かす」ワークフローです。SDK が手元に無い環境（クラウド上の開発セッションや、SDK を
-インストールしていないマシン）から、**SDK 依存のビルドエラーの再現**や
-**「この API は SDK にあるか」という調査**を行うためのものです。
+インストールしていないマシン）から、**SDK 依存のビルドエラーの再現**を行うためのものです。
+**「この API は SDK にあるか」「どう振る舞うか」という SDK そのものの調査は本リポジトリでは
+行わず**、[SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)で
+issue を立てて `Findings/` への反映を待ちます（[`CLAUDE.md`](../CLAUDE.md)「SDK の調査は
+リファレンス側で行う」）。
 
 `push` / `pull_request` では**決して起動せず**、リリースも公開しません（`contents: write`
 を持たない）。SDK キャッシュは `build.yml` と同じキーで **読み取り専用**に復元するので、
@@ -660,9 +666,18 @@ scripts/lint.sh --fix    # その場で自動修正（clang-format -i / clang-ti
 を参照）。旧 Wiki の URL（`index.php?title=SDK:...`）は現在このランディングページへ
 301 リダイレクトされます。
 
+**本プラグインの開発でまず参照するのは、公式リファレンスをフォークして実測知見
+（`Findings/`）と調査用 CI を足した
+[`min-nano/vectorworks-developer-sdk-reference`](https://github.com/min-nano/vectorworks-developer-sdk-reference)。**
+公式リファレンスに無い「実機でしか判明しない挙動」「SDK に無い／効かない API」は
+そちらの [`Findings/`](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/README.md)
+にあり、SDK の挙動について新しく分かったこともそちらへ足す（調査のフローは同
+リポジトリの CLAUDE.md）。
+
 | 内容 | リポジトリ |
 | --- | --- |
-| **C++ / VCOM SDK**（このテンプレートが対象） | <https://github.com/Vectorworks/developer-sdk> |
+| **C++ / VCOM SDK ＋ 実測知見**（このプラグインが参照する） | <https://github.com/min-nano/vectorworks-developer-sdk-reference> |
+| C++ / VCOM SDK（上記の fork 元。公式） | <https://github.com/Vectorworks/developer-sdk> |
 | Python / VectorScript / Marionette スクリプト | <https://github.com/Vectorworks/developer-scripting> |
 | ワークシート関数 | <https://github.com/Vectorworks/developer-worksheets> |
 

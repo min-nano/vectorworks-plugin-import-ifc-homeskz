@@ -47,6 +47,7 @@
 #include "draw/Sheet.h"
 #include "draw/DrawUtil.h"
 #include "draw/Legend.h"
+#include "draw/ShearWall.h"
 #include "draw/Tag.h"
 #include "core/Document.h"
 #include "core/Progress.h"
@@ -219,6 +220,18 @@ namespace HomeskzIfcImport::draw
 												 paper->printable, legendWidth)
 							  : core::PlanLayout{};
 
+		// --- 伏図記号の大きさを紙の上で一定にする ------------------------------------
+		//
+		// 耐力壁の伏図記号は**用紙基準（縮尺無視）のシンボル**で、その大きさは
+		// 「定義の図形（用紙 mm）× そのレイヤの縮尺」で決まる。伏図はビューポート越しに
+		// 見るので、**耐力壁レイヤの縮尺を伏図の縮尺へ揃えて初めて**紙の上で一定になる
+		// （draw/ShearWall.h の applyShearWallLayerScale）。
+		//
+		// **ここでしかできない。** 伏図の縮尺は用紙を読まないと決まらない（core::planLayout）
+		// ので、耐力壁を描く時点では分からない。ビューポートを仕上げる 2 巡目より**前**に
+		// 済ませて、更新が新しい縮尺を見るようにする。
+		applyShearWallLayerScale(document, layout.scale);
+
 		// --- 2 巡目: 確定した縮尺を当て、タグを置き、用紙の上へ動かす ----------------
 		//
 		// **縮尺が変わったときだけ**当て直す（更新は重い。draw/DrawUtil の
@@ -316,7 +329,7 @@ namespace HomeskzIfcImport::draw
 		// どれが効いたのかをローカル確認の場で確かめられる（実際に「1/50 のはずが 1/75 に
 		// なる」の切り分けで要った。docs/DEV-NOTES.md M18）。
 		//
-		// **調査のための値はここには出さない**（DEV-NOTES「実機確認の作法」の「役目を終えた
+		// **調査のための値はここには出さない**（DEV-NOTES「実機確認の作法」——「役目を終えた
 		// 計装は消す」）。余白の生の値と単位の解釈は規約を詰めるために要ったもので、
 		// 実機で確定した（図面の単位で返る）ので、**解釈できなかったときだけ**下の診断行へ
 		// 出す。はみ出し・凡例との重なりも同じく件数として下で数える。
