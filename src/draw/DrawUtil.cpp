@@ -317,6 +317,55 @@ namespace HomeskzIfcImport::draw
 		return universal;
 	}
 
+	TXString ResolveParamNameAmong(const VWParametricObj& pio,
+								   const std::vector<const char*>& universalNames,
+								   const std::vector<const char*>& localizedNames)
+	{
+		for (const char* name : universalNames)
+		{
+			TXString universal(name);
+			if (pio.GetParamIndex(universal) != static_cast<size_t>(-1))
+				return universal;
+		}
+
+		const size_t count = pio.GetParamsCount();
+		for (const char* name : localizedNames)
+		{
+			const TXString localized(name);
+			for (size_t i = 0; i < count; ++i)
+			{
+				if (pio.GetParamLocalizedName(i) == localized)
+					return pio.GetParamName(i);
+			}
+		}
+		return {};
+	}
+
+	std::string DescribeParamsContaining(const VWParametricObj& pio, const char* needle)
+	{
+		const std::string probe(needle);
+		std::string found;
+		const size_t count = pio.GetParamsCount();
+		for (size_t i = 0; i < count; ++i)
+		{
+			// TXString → UTF-8 std::string（GetStdString。ExtColumnMark と同じ変換）。
+			const std::string universal = pio.GetParamName(i).GetStdString();
+			const std::string localized = pio.GetParamLocalizedName(i).GetStdString();
+			if (universal.find(probe) == std::string::npos &&
+				localized.find(probe) == std::string::npos)
+				continue;
+			if (!found.empty())
+				found += ", ";
+			// 1 つずつ append する（`a + "(" + b + ")"` は途中の一時 string を作るので
+			// clang-tidy の performance-inefficient-string-concatenation に掛かる）。
+			found += universal;
+			found += "(";
+			found += localized;
+			found += ")";
+		}
+		return found;
+	}
+
 	bool SetParamRealChecked(VWParametricObj& pio, const TXString& param, double value,
 							 double tolerance)
 	{

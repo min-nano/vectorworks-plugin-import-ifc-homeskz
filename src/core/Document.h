@@ -349,6 +349,28 @@ namespace HomeskzIfcImport::core
 		double elevation = 0.0;
 	};
 
+	// 【端部オフセット（endpoint offset）】構造材ツールは、パス（芯線）の端点から材の端面までの
+	// 距離を端ごとに持つ（OIP の「始端オフセット」「終端オフセット」）。**符号つきで、負値が
+	// 材を短く・正値が長くする。** 本プラグインはこれを使って「パスの端点＝接合相手の芯線上の
+	// 点（＝節点）」「実際の材の端＝ IFC が描いていた位置」という持ち方をする。
+	//
+	// なぜ端点を芯線の交点に置くか: 横架材の芯線は**天端中央**（断面基準点＝AxisAlign）を通る
+	// ので、柱が受ける梁の芯線は梁の天端にある。柱の上端を梁の下端（＝材が実際に止まる高さ）に
+	// 置くと、その座標はどの部材の芯線にも乗らず、**座標だけを見て「どことどこが接合している
+	// か」を言えない**。端点を芯線の交点へ置き、実際の材の範囲は端部オフセットで戻せば、
+	// 命令セットがそのままフレーム（節点と部材）のモデルになる——将来フレーム解析モデルを
+	// 取り込んで組み立てるときの土台になる。
+	//
+	// 値の決まり方:
+	//   柱・束の上端      … −（受ける横架材のせい）。上に梁せい 150mm が乗るなら −150。
+	//   横架材の負け側端  … −（勝ち側の半幅 ÷ 交差角の余弦）。直交する 105mm の梁なら −52.5。
+	//   横架材の柱に付く端 … −（端点から柱芯までの軸方向の距離）。柱の手前の面で止まっていた
+	//                       端は負値、**柱の向こうの面まで来ていた端は正値**（外周の桁が
+	//                       隅柱の外面まで伸びている取り合い。実データではこちらが多い）。
+	// 実際に描かれる材の長さは「パス長 ＋ 始端オフセット ＋ 終端オフセット」で、この値は
+	// 端部オフセットを入れる前（＝ IFC の形）と一致する——**描かれる形は変えず、命令が持つ
+	// 端点の意味だけを変える**のがこの仕組みの要点。
+	//
 	// 横架材（構造材ツール StructuralMember）を描く命令。draw/Member がこれを構造材
 	// オブジェクトへ変換する（docs/DEV-NOTES.md M7）。土台・梁・桁のほか、母屋・棟木・
 	// 登り梁もこの命令で表し、配置先レイヤと高さ基準レベルだけが専用のもの（"n-母屋" /
@@ -376,6 +398,15 @@ namespace HomeskzIfcImport::core
 	//   endElevation                    … 終端の天端 Z（絶対値）
 	//   startBound                      … 始端の高さ基準（配置先レベル＋天端との差）
 	//   endBound                        … 終端の高さ基準（同上）
+	//   startOffset                     … 始端の端部オフセット（mm。負＝短く・正＝長く。上記）
+	//   endOffset                       … 終端の端部オフセット（同上）
+	//
+	// 【start / end は「芯線の交点」】勝ち側の横架材へ突き当たる端（負け側）は、相手の面では
+	// なく**相手の天端中央線（＝芯線）上の点**に置き、面までの戻りを startOffset / endOffset
+	// に入れる（上記「端部オフセット」。parse/Member の resolveMemberInterferences）。
+	// **柱に取り付く端**も同じで、端点は柱芯の軸位置に置く（parse/Member の
+	// resolveMemberColumnJoints）。取り付く相手のいない端はオフセット 0 で、端点がそのまま
+	// 材の端になる。
 	struct MemberCommand
 	{
 		std::string layer;
@@ -389,6 +420,8 @@ namespace HomeskzIfcImport::core
 		double endElevation = 0.0;
 		StoryBoundCommand startBound;
 		StoryBoundCommand endBound;
+		double startOffset = 0.0;
+		double endOffset = 0.0;
 	};
 
 	// 横架材の実体が占める Z 範囲。elevation / endElevation は**天端** Z で傾斜梁は両端で
@@ -423,8 +456,9 @@ namespace HomeskzIfcImport::core
 	// 止まる半整数・通し柱＝複数階ぶん上）。伏図が切断レベルで表示レイヤを絞れるようにする
 	// ための分け方で、下屋の小屋束が上階の小屋伏図へ写り込まない（parse/Column.h 参照）。
 	//
-	// 【高さの持ち方】elevation は**柱下端**の絶対 Z、height は柱高さ（押し出し Depth）で、
-	// 上端は elevation + height。描画側はこの 2 つから鉛直パスを作り、加えて上下端を
+	// 【高さの持ち方】elevation は**柱下端**の絶対 Z、height は**パス長**（下端 → 上端）で、
+	// 上端は elevation + height。上端は受ける横架材の天端に取るので（下記）、実際に描かれる
+	// 材の高さは height + endOffset（＝ IFC の押し出し Depth）になる。描画側はこの 2 つから鉛直パスを作り、加えて上下端を
 	// ストーリレベルへバインドする（bottomBound / topBound）——**どちらが欠けても正しい
 	// 高さで描かれない**（parse/Column.h 参照）。柱（管柱・通し柱）は下端を当階・上端を
 	// 上階（storyOffset=1）の横架材天端（最上階は軒高）へ、小屋束は上下端とも当階の
@@ -445,6 +479,16 @@ namespace HomeskzIfcImport::core
 	//   bottomHardware                     … 柱脚金物の仕様（同上）
 	//   bottomBound                        … 下端の高さ基準
 	//   topBound                           … 上端の高さ基準
+	//   startOffset                        … 下端の端部オフセット（mm。負＝短く・正＝長く）
+	//   endOffset                          … 上端の端部オフセット（同上）
+	//
+	// 【上端は受ける横架材の天端＝その芯線】柱・束の上端は、材が実際に止まる高さ（梁の下端）
+	// ではなく**受ける横架材の天端**——横架材の芯線が通る高さ——に置き、梁せいぶんの戻りを
+	// endOffset に入れる（上記「端部オフセット」。上に 150mm せいの梁が乗るなら −150）。
+	// elevation + height は**この上端**を指し、topBound.offset もこの高さとの差を表すので、
+	// 「バウンドの差＝パス長」という関係（M8）はそのまま保たれる。下端は元から受け材の天端
+	// （＝土台・梁の芯線）に乗るので startOffset は 0。受ける材を特定できない柱は上端も
+	// 動かさず、両オフセットとも 0 になる。
 	struct ColumnCommand
 	{
 		std::string layer;
@@ -460,6 +504,8 @@ namespace HomeskzIfcImport::core
 		std::string bottomHardware;
 		StoryBoundCommand bottomBound;
 		StoryBoundCommand topBound;
+		double startOffset = 0.0;
+		double endOffset = 0.0;
 	};
 
 	// 基礎の立上り（基礎梁）を壁オブジェクトとして描く命令。draw/Footing がこれを壁へ変換する
@@ -646,6 +692,22 @@ namespace HomeskzIfcImport::core
 	// 地中梁の天端とみなす頂点の許容差（mm）。最大 v からこの差以内の頂点を天端の辺とみなす。
 	// raiseModifierTop と、その期待値を書くテストが共有する。
 	inline constexpr double kModifierTopVertexTol = 0.5;
+
+	// **端部オフセットを戻した「実際に材が占める範囲」**（core/Document.h 冒頭「端部
+	// オフセット」）。命令の端点は接合相手の芯線上にあるので、材そのものの端・上端が要る
+	// ところ（仕口シンボルを置く位置・登り梁が受け材の面まで詰める判定・図に映るものの
+	// 広がり）はこれを通す。
+	//
+	// **core に置く理由**: SDK を触らない純計算で、解析側（parse/Joint・parse/Noboribari）と
+	// 描画側から切り離せる計算（planContentBounds・sectionHeightRange）の**両方**が同じ
+	// 定義を要る（raiseModifierTop・rafterEaveEnd と同じ立ち位置。CLAUDE.md「テスト方針」）。
+	Vec2 memberDrawnStart(const MemberCommand& member);
+	Vec2 memberDrawnEnd(const MemberCommand& member);
+
+	// 柱・束が実際に占める下端／上端の絶対 Z。下端は elevation − startOffset、上端は
+	// elevation + height + endOffset（オフセットは負で短く・正で長くする）。
+	double columnDrawnBottom(const ColumnCommand& column);
+	double columnDrawnTop(const ColumnCommand& column);
 
 	// 基礎の底盤をスラブオブジェクトとして描く命令。draw/Footing がこれをスラブへ変換する
 	// （docs/DEV-NOTES.md M9）。床板（FloorCommand）と描画の作法は同じで、構成層の中身だけが

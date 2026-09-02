@@ -357,6 +357,48 @@ TEST(validate_rejects_degenerate_member)
 	CHECK(!core::validateDocument(document));
 }
 
+TEST(validate_rejects_member_whose_end_offsets_consume_the_whole_length)
+{
+	// 端部オフセットが負値でパス長を食い尽くすと、材が 1mm も描かれない
+	// （core/Document.h「端部オフセット」）。
+	core::Document document;
+	core::MemberCommand member = validMember();
+	member.startOffset = -1500.0;
+	member.endOffset = -1500.0;
+	document.members.push_back(member);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_accepts_member_with_end_offsets_that_leave_material)
+{
+	core::Document document;
+	core::MemberCommand member = validMember();
+	member.startOffset = -52.5;
+	member.endOffset = -60.0;
+	document.members.push_back(member);
+	CHECK(core::validateDocument(document));
+}
+
+TEST(member_drawn_ends_pull_back_by_the_end_offsets)
+{
+	// 端点は取り合い相手の芯線上にあり、材が実際に占める端は内側へ |オフセット| 戻る。
+	core::MemberCommand member = validMember();
+	member.startOffset = -52.5;
+	member.endOffset = -60.0;
+	CHECK(near(core::memberDrawnStart(member).x, 52.5));
+	CHECK(near(core::memberDrawnStart(member).y, 0.0));
+	CHECK(near(core::memberDrawnEnd(member).x, 2940.0));
+	CHECK(near(core::memberDrawnEnd(member).y, 0.0));
+}
+
+TEST(member_drawn_ends_are_the_endpoints_without_offsets)
+{
+	// 取り合う相手のいない端（オフセット 0）は端点そのまま。
+	const core::MemberCommand member = validMember();
+	CHECK(near(core::memberDrawnStart(member).x, 0.0));
+	CHECK(near(core::memberDrawnEnd(member).x, 3000.0));
+}
+
 TEST(validate_rejects_member_with_empty_bound_level)
 {
 	// レベル種別が空だと SetObjectStoryBound が解決できず高さがレイヤ基準へ戻る。
@@ -474,6 +516,25 @@ TEST(validate_rejects_column_with_empty_bound_level)
 	column.topBound.level = "";
 	topEmpty.columns.push_back(column);
 	CHECK(!core::validateDocument(topEmpty));
+}
+
+TEST(validate_rejects_column_whose_end_offset_consumes_the_whole_height)
+{
+	// 端部オフセットがパス長を食い尽くすと柱が 1mm も描かれない（横架材と同じ関門）。
+	core::Document document;
+	core::ColumnCommand column = validColumn();
+	column.endOffset = -column.height;
+	document.columns.push_back(column);
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(column_drawn_top_pulls_back_by_the_end_offset)
+{
+	// 上端は受ける横架材の天端（＝その芯線）なので、材が実際に止まる高さは梁せいぶん下。
+	core::ColumnCommand column = validColumn();
+	column.endOffset = -150.0;
+	CHECK(near(core::columnDrawnBottom(column), 426.0));
+	CHECK(near(core::columnDrawnTop(column), 426.0 + 2844.0 - 150.0));
 }
 
 // ---------------------------------------------------------------------------
