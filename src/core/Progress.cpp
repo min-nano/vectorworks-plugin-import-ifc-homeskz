@@ -56,9 +56,10 @@ namespace HomeskzIfcImport::core
 		constexpr std::array<PhaseCost, static_cast<std::size_t>(DrawPhase::Count)> kCosts = {{
 			{5.0, [](const Document& d) { return d.stories.size(); }},
 			{4.0, [](const Document& d) { return d.grids.size(); }},
-			{50.0, [](const Document& d) { return d.walls.size(); }},
-			{20.0, [](const Document& d) { return d.wallJoins.size(); }},
-			{670.0, [](const Document& d) { return d.slabs.size(); }},
+			// 基礎は PIO 1 つに全部品（底盤・立上り・地中梁・床付け）が入る。M17 までの実測
+			// （立上り 50ms × 数十本 ＋ 底盤 670ms × 数枚）の合計に近い値を 1 件の重さにする。
+			{4000.0, [](const Document& d)
+			 { return d.foundation.has_value() ? std::size_t{1} : std::size_t{0}; }},
 			{360.0, [](const Document& d) { return d.floors.size(); }},
 			{130.0, [](const Document& d) { return d.members.size(); }},
 			{93.0, [](const Document& d) { return d.columns.size(); }},

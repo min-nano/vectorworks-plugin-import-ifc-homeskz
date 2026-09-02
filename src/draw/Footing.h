@@ -1,55 +1,32 @@
 //
 //	draw/Footing.h
 //
-//	Phase 2（VW 描画）の基礎モジュール。命令セットの立上り（core::WallCommand）を**壁
-//	オブジェクト**へ、底盤（core::SlabCommand）を**スラブオブジェクト**へ変換して配置する
-//	（docs/DEV-NOTES.md M9）。
+//	Phase 2（VW 描画）の基礎モジュール。命令セットの基礎（core::FoundationCommand）を
+//	**自作 PIO 1 つ**（Extensions/ExtFoundation）として配置する（docs/DEV-NOTES.md M20）。
+//	立上り・底盤・地中梁・床付けのソリッドは PIO 自身がリセット時に描くので、ここは
+//	「PIO を置いてパラメータと部品を書き、リセットする」だけ。
 //
 //	【SDK 依存】.cpp は PluginPrefix.h（VectorWorks SDK）を include するため、
 //	SDK ビルドでのみコンパイルされる。この宣言ヘッダ自体は core::Document / core::Progress
 //	しか参照せず SDK ヘッダを引き込まない（draw/*.h 共通の約束。draw/DrawUtil.h 参照）。
 //
-//	M10 で人通口（解析側で立上りが分割・切り下げ済みなので描画は変わらない）・壁結合
-//	（drawWallJoins）・地中梁（底盤の modifiers）を足した。配筋は保留。
+//	M9〜M17 の壁・スラブ・モディファイア・可視ソリッドによる描画は M20 で無くなった。
 //
 
 #pragma once
 
 #include "core/Document.h"
 #include "core/Progress.h"
-#include "draw/ObjectHandles.h"
 
 #include <cstddef>
 #include <string>
 
 namespace HomeskzIfcImport::draw
 {
-	// 立上り（wall 命令）を壁オブジェクトとして描く。配置先レイヤ（"F-立上り"）が無い命令は
-	// スキップする（レイヤは基礎ストーリの story 命令が作る）。実際に配置できた本数を返す。
-	//
-	// handles を渡すと、**命令のインデックスをキーに**配置した壁ハンドルを記録する（壁結合が
-	// 引く。フォールバック描画＝壁を作れなかった命令とレイヤ未生成でスキップした命令は記録し
-	// ない）。描画は必ず**底盤より先**に行う。
-	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress,
-						  ObjectHandles* handles = nullptr);
-
-	// 壁結合（wallJoin 命令）を実行して交差する立上りを結合する。結合できた件数を返す。
-	// handles は drawWalls が記録した対応表で、a / b の**どちらかが未配置の命令はスキップ**す
-	// る。実行は立上りの直後・底盤の前。
-	//
-	// 結合の**後に各立上りの端部キャップを命令どおりへ揃え直し、壁をリセットする**
-	// （JoinWalls が結合した端のキャップを書き換え、平面の 2D 表現も作り直すまで古いまま
-	// になるため。draw/Footing.cpp「端部のキャップ」）。VW に拒否された結合があれば outNote に
-	// 件数を残す（完了ダイアログの診断。draw/Member と同じ流儀）。
-	std::size_t drawWallJoins(const core::Document& document, core::ProgressReporter& progress,
-							  const ObjectHandles& handles, std::string* outNote = nullptr);
-
-	// 底盤（slab 命令）をスラブオブジェクトとして描く。配置先レイヤ（"F-底盤"）が無い命令は
-	// スキップする。実際に配置できた枚数を返す。手順は床板（draw/Floor）と同じで、共通部分は
-	// draw/DrawUtil（SetComponents / SetSlabDatum / ResolveSlabStyle）にある。
-	//
-	// **地中梁（modifiers）を持つ底盤は台形プリズムを 2 回作る**: 削り取りモディファイア
-	// （プロファイル群としてスラブへ渡し、底盤を clip する）と、可視の 3D ソリッド（削り取った
-	// 位置を地中梁のコンクリートで埋める）。詳細は draw/Footing.cpp 冒頭。
-	std::size_t drawSlabs(const core::Document& document, core::ProgressReporter& progress);
+	// 基礎（foundation 命令）を PIO として置く。命令が無ければ 0、置けたら 1 を返す。
+	// 配置先レイヤ（"F-基礎"）が無い・PIO を作れない・部品を PIO のレコードへ書けなかった・
+	// リセットしてもソリッドが 1 つも描かれなかった、という異常は outNote に残す（完了
+	// ダイアログの「問題あり」の根拠。draw/Member と同じ流儀）。
+	std::size_t drawFoundation(const core::Document& document, core::ProgressReporter& progress,
+							   std::string* outNote = nullptr);
 } // namespace HomeskzIfcImport::draw

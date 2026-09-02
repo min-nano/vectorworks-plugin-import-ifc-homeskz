@@ -23,7 +23,8 @@
 | `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配（手計算値との突き合わせ） |
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
 | `CoreUnionFindTests` | `src/core/UnionFind` | ペア述語による連結成分（決定性の規約: 代表＝最小インデックス・代表昇順・成分内昇順） |
-| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付けを含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`） |
+| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。基礎の部品を含む）・レイヤスタック順の計算・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`） |
+| `CoreFoundationTests` | `src/core/Foundation` | 基礎を 1 つのオブジェクトにする純計算（地中梁断面のパラメータ化と往復・代表値と差の配り方・ソリッドの組み立て（底盤・砕石・立上り・地中梁の呑み込み・床付け）・平面の外形・床付け＝捨てコン・砕石の断面と外周の張り出し・実フィクスチャ全件で直交する地中梁へ食い込まないこと・PIO のレコードへの直列化） |
 | `CoreLayoutTests` | `src/core/Layout` | 用紙の割り付け（縮尺は階梯の値だけ・**渡された印刷可能領域をそのまま使う**（余白を仮定しない）・凡例の幅を引いてから収まる中で最大の図・伏図は全図同じ縮尺と位置・軸組図は上下 2 段でマスが重ならないこと・シート枚数とタイトルの連番） |
 | `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
 | `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |
@@ -35,7 +36,7 @@
 | `ParseNoboribariTests` | `src/parse/Noboribari` | 登り梁の位置補正（端部の食い込み解消・天端の屋根面スナップ） |
 | `ParseRafterTests` | `src/parse/Rafter` | 垂木（掃引割り付け・非凸面のクリップ・支持点・軒の出・桁幅参照・高さ基準） |
 | `ParseRoofTests` | `src/parse/Roof` | 野地板（軒軸・upslope・勾配・厚み・軒の Z） |
-| `ParseFootingTests` | `src/parse/Footing` | 基礎（立上り・底盤・基礎ストーリ／人通口の分割・切り下げ／壁結合の L・T・X 判定／地中梁の統合と底盤への振り分け／床付け＝捨てコン・砕石の断面） |
+| `ParseFootingTests` | `src/parse/Footing` | 基礎（立上り・底盤・基礎ストーリ／人通口の分割・切り下げ／地中梁の統合と断面の当てはめ／基礎命令の部品・クラス・代表値・全フィクスチャでの検証と決定性） |
 | `ParseSheetTests` | `src/parse/Sheet` | シート（伏図。タイトル・切断レベルによる span 柱レイヤの絞り込み・番号の連番・基礎の有無による出し分け・表示レイヤがストーリの作るレイヤに実在すること） |
 | `ParseSummaryTests` | `src/parse/Summary` | 型別件数の集計、**完了／エラーダイアログ文言**（短い本文・結末の判断・「856/858 件」表記・中止・取り消しの案内）、**診断ログの見出しと結果**（ビルド／日時／対象・要素ごとの内訳・注意と記録の書き分け・要素表の網羅性） |
 | `CoreProgressTests` | `src/core/Progress` | 進捗の文言整形・フェーズ配分・件数の勘定・中止フラグのラッチ |

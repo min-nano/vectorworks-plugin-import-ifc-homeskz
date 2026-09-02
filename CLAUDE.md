@@ -18,7 +18,7 @@ VectorWorks 2026 のネイティブオブジェクトへ変換して配置する
 | --- | --- |
 | `README.md` | 利用者向け。何をするプラグインか・取り込むもの・使い方・インストール・既知の制限 |
 | `docs/DEVELOPMENT.md` | 開発ガイド。ソースの構成・ビルド・テスト・lint・CI・リリース・自動アップデートの仕組み |
-| `docs/DEV-NOTES.md` | **開発メモ**。設計の考え方・ホームズ君 IFC の癖・打ち切った調査（本プラグインの方針）・実装の経緯（M0〜M19） |
+| `docs/DEV-NOTES.md` | **開発メモ**。設計の考え方・ホームズ君 IFC の癖・打ち切った調査（本プラグインの方針）・実装の経緯（M0〜M20） |
 | [SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)の `Findings/` | **VW SDK の実測知見**（実機でしか判明しなかった落とし穴・SDK に無い／効かない API・SDK 側の打ち切った調査）。別リポジトリ |
 | `tests/README.md` | テストの一覧・方針・何をテストしていないか |
 | `CLAUDE.md`（本ファイル） | 作業時の規約。アーキテクチャ・置き場所・コード規約・PR とマージ・CI の待ち方 |
@@ -108,9 +108,11 @@ VectorWorks ネイティブオブジェクト
 ### 命令セット（Document）
 
 - **プレーンな構造体**（`std::vector`・`std::string`・`double`・`enum` 等の集約）で表す。
-- スキーマは `stories` / `grids` / `members` / `columns` / `walls` / `wallJoins` / `slabs` /
+- スキーマは `stories` / `grids` / `members` / `columns` / `foundation` /
   `floors` / `rafters` / `roofs` / `anchorBolts` / `floorPosts` / `fireBraces` / `joints` /
-  `columnMarks` / `sheets` / `sections` / `sectionSheet`。**同型が並ぶところは構造体 1 つへまとめる**
+  `columnMarks` / `sheets` / `sections` / `sectionSheet`。基礎（`foundation`）は立上り・底盤・
+  地中梁の**部品**と OIP の代表値をまとめた 1 つの命令（`core/Foundation.h`）で、描画は
+  自作 PIO 1 つ（M20）。**同型が並ぶところは構造体 1 つへまとめる**
   ——`anchorBolts` / `floorPosts` / `fireBraces` / `joints` は中身が同じなので
   `core::SymbolCommand` 1 つで受け、要素の区別は「Document のどのリストか」が担う
   （`core/Document.h` の doc コメント参照）。
@@ -137,7 +139,7 @@ VectorWorks ネイティブオブジェクト
 
 **共有コンテキスト（`parse/Context`）**: 各要素の解析は「ストーリ一覧」「通り芯の
 センタリング中心」「階に属する要素」「屋根面」を共通して必要とする（加えて横架材・柱・
-立上りの命令そのものも複数の要素が参照するのでキャッシュする）。`buildDocument` は
+立上りの中間表現そのものも複数の要素が参照するのでキャッシュする）。`buildDocument` は
 `Context` を **1 つだけ**作って全要素へ渡し、これらの前処理を 1 回で済ませる（要素ごとに
 求め直すと同じ走査が要素の数だけ走る）。単体テストの都合で `const Model&` を直接取る
 オーバーロードも各 `build*Commands` に残してあり、そちらは内部でコンテキストを作って捨てる。
@@ -151,7 +153,7 @@ VectorWorks ネイティブオブジェクト
 （柱頭・柱脚金物とアンカーボルトが共有）、平面座標の同一判定と許容
 （`samePoint` / `kPointEps`）・**Vec2 の基本演算**（`dot` / `cross` / `length` / `distance`）・
 同一直線上の線分成分の芯線射影（`collinearSpan`）は `core/Geometry.h`、**ペア述語による連結成分**
-（Union-Find。立上り・大引・地中梁の統合と壁結合の交点クラスタが共有）は `core/UnionFind.h`、
+（Union-Find。立上り・大引・地中梁の統合が共有）は `core/UnionFind.h`、
 **構成層の総厚**（`totalThickness`）・**横架材の Z 範囲と重なり判定**（`memberTopZ` /
 `memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側が持つ）は `core/Document.h`、
 **ローカル配置原点の取り出し**（ObjectPlacement → Location の 4 段の鎖。柱・横架材・ストーリが
@@ -161,10 +163,16 @@ VectorWorks ネイティブオブジェクト
 走査**（屋根版判定 → 屋根面解決 → 解決不能スキップ。垂木・野地板・登り梁が共有）は
 `parse/Context` の `storyRoofPlanes`、屋根面の勾配座標系と退化の閾値・**押し出しを
 鉛直とみなす閾値**（`kVerticalExtrudeTol`。平面外形の求め方と、人通口・地中梁の「水平押し出しか」
-判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・許容値（統合・自由端・**人通口・
-壁結合・地中梁・床付け**）は `parse/Footing.h`、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・
-プラグインスタイル解決・**構成層／基準面を各オブジェクトへ直接与える手順**——床板・底盤・
-立上りが共有する。スラブ・壁は**スタイルを作らない・当てない**）は
+判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・解析の許容値（統合・自由端・**人通口・
+地中梁**）は `parse/Footing.h`、**基礎の部品からソリッドを組み立てる純計算**（地中梁断面の
+パラメータ化 `fitFoundationBeam` / `beamPrism`・代表値と差の配り方 `applyFoundationParams`・
+押し出しの組み立て `foundationSolids`・床付けの断面と切り下げ `foundationBeddings`・
+PIO のレコードへの直列化 `encodeFoundation`）と床付けの既定値（捨てコン・砕石の厚み・外周の
+張り出し・呑み込み）は `core/Foundation`（PIO＝`Extensions/ExtFoundation` はこれを呼ぶだけで、
+基礎の形の知識を持たない）、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・
+プラグインスタイル解決・**構成層／基準面を各オブジェクトへ直接与える手順**（床板。スラブは
+**スタイルを作らない・当てない**）・**3D 多角形＋押し出しベクトルからの押し出しソリッド**
+（`CreateExtrudedSolid`。置いた後に測って寄せる）は
 `draw/DrawUtil`、**シートレイヤの用意とビューポートの仕上げ**（表示レイヤの絞り込み・クラス表示・
 縮尺・図番／図面タイトル・更新に加え、**用紙と印刷可能領域の読み取り**（`SheetPaperArea`。用紙は 167/168・余白は `GetPageMargins`・インチ→mm と
 「用紙は原点中心」の規約）と**測って動かす位置合わせ**（`PlaceViewport`）——伏図と軸組図が
@@ -188,8 +196,8 @@ VectorWorks ネイティブオブジェクト
 `parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`
 （span 柱レイヤと伏図記号レイヤが共有）、「命令インデックス → ハンドル」の対応表は
 `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
-`desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの
-広がり `planContentBounds` / `sectionContentSize`）は `core/Document`、
+`desiredStoryLayerOrder`・図に映るものの広がり `planContentBounds` / `sectionContentSize`）は
+`core/Document`（基礎のものは上記 `core/Foundation`）、
 進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
 （整形と配分の計算）に**それぞれ 1 つだけ**置く。**要素の一覧**
 （表示名・助数詞・命令数の取り出し・描けた数）は `parse/Summary` の `kElements` ただ 1 つの表で、
@@ -258,8 +266,7 @@ VectorWorks ネイティブオブジェクト
   値で返す。SDK コールバック（`plugin_module_main` / `DoInterface`）へ例外を漏らさない。
 - **RAII で所有権を明示**。生ポインタの所有は避け、SDK ハンドルは Document に載せない
   （フェーズ間で運べない）。描画で必要なハンドルの受け渡しは「命令インデックス →
-  ハンドル」の対応（`draw/ObjectHandles`）で行う（横架材ハンドル→タグ、壁ハンドル→壁結合
-  など）。
+  ハンドル」の対応（`draw/ObjectHandles`）で行う（横架材ハンドル→タグ など）。
 - **決定性を守る**。エンティティ列挙順に依存しない結果を出す。ソート・集約は明示的に。
 
 ### コメント・言語
@@ -282,8 +289,8 @@ VectorWorks ネイティブオブジェクト
   - **期待値は手書きする。** 数値は許容誤差付きで比較する。
   - CI（`test.yml`）で ASan + UBSan 付き・カバレッジ付きで常時回す。
 - **`draw/`**: SDK 依存のため CI での完全な実行は難しい。
-  - ロジック（レイヤ順の並べ替え計算、地中梁の呑み込み等）で SDK から切り離せる部分は
-    `core/` 側へ寄せて無 SDK テストする。
+  - ロジック（レイヤ順の並べ替え計算、基礎の部品からソリッドを組み立てる計算等）で SDK
+    から切り離せる部分は `core/` 側へ寄せて無 SDK テストする。
   - 実描画は**ローカルの VectorWorks で目視確認**する（作法は
     `docs/DEV-NOTES.md`「実機確認の作法」）。SDK 呼び出しの薄いラッパーは、必要なら
     SDK モックで「正しい引数で呼んだか」を検証する程度に留める。

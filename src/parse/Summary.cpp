@@ -105,17 +105,14 @@ namespace HomeskzIfcImport::parse
 			std::size_t (*placed)(const core::DrawCounts&); // 描けた数
 		};
 
-		constexpr std::array<ElementDef, 17> kElements = {{
+		constexpr std::array<ElementDef, 15> kElements = {{
 			{"ストーリ", "層", [](const core::Document& d) { return d.stories.size(); },
 			 [](const core::DrawCounts& c) { return c.stories; }},
 			{"通り芯", "本", [](const core::Document& d) { return d.grids.size(); },
 			 [](const core::DrawCounts& c) { return c.grids; }},
-			{"立上り", "本", [](const core::Document& d) { return d.walls.size(); },
-			 [](const core::DrawCounts& c) { return c.walls; }},
-			{"壁結合", "箇所", [](const core::Document& d) { return d.wallJoins.size(); },
-			 [](const core::DrawCounts& c) { return c.wallJoins; }},
-			{"底盤", "枚", [](const core::Document& d) { return d.slabs.size(); },
-			 [](const core::DrawCounts& c) { return c.slabs; }},
+			{"基礎", "体", [](const core::Document& d)
+			 { return d.foundation.has_value() ? std::size_t{1} : std::size_t{0}; },
+			 [](const core::DrawCounts& c) { return c.foundation; }},
 			{"床", "枚", [](const core::Document& d) { return d.floors.size(); },
 			 [](const core::DrawCounts& c) { return c.floors; }},
 			{"横架材", "本", [](const core::Document& d) { return d.members.size(); },

@@ -48,6 +48,7 @@
 
 #include "core/Document.h"
 #include "core/Geometry.h"
+#include "parse/Footing.h"
 #include "parse/Step.h"
 
 #include <optional>
@@ -147,7 +148,7 @@ namespace HomeskzIfcImport::parse
 	// なるが、落としすぎても両隣の床束が 910mm 以内で受けるので実害が無い側へ倒れる。
 	// 長さ 0 の立上り（縮退）は向きが定まらないので飛ばす。
 	bool overlapsFoundationWall(const core::Vec2& position, double postWidth,
-								const std::vector<core::WallCommand>& walls);
+								const std::vector<RiserPiece>& walls);
 
 	// STEP Model から床束のシンボル配置命令を組み立てる。基礎が無いモデルでは空を返す。
 	// 並びは大引の連ごと（collectOhbikiLines の #id 昇順に由来）→ 連内は始点からの距離順で決

@@ -108,19 +108,11 @@ namespace HomeskzIfcImport::parse
 		document.roofs = buildRoofCommands(context);
 		progress.step();
 
-		// M9 基礎: 立上り（壁）→ 底盤（スラブ）。立上りは自由端を柱芯へ寄せるので柱命令を、
-		// 底盤は外周を立上りの外面へ合わせるので立上りの命令を入力に取る。Context が立上りを
-		// 1 回だけ組み立てて両者へ配る。立上りには人通口の分割・切り下げまで反映されている
-		// （M10。parse/Footing.h）。
-		document.walls = context.walls();
-		progress.step();
-		// M10 壁結合: 交差する立上りどうしの結合命令。命令の a / b は **walls の添字**なので、
-		// walls を確定させた**直後**に組み立てる（並びが変わると添字がずれる）。続けて、その
-		// 結合から各立上りの**端部を閉じるか**（capStart / capEnd）を決めて書き戻す
-		// （VW の壁のキャップは結合任せにせず解析側で決める。core/Document.h 参照）。
-		document.wallJoins = buildWallJoinCommands(document.walls);
-		applyWallCaps(document.walls, document.wallJoins);
-		document.slabs = buildSlabCommands(context, document.walls);
+		// M9/M20 基礎: 立上り・底盤・地中梁を **1 つの命令**にまとめる。立上りは自由端を柱芯へ
+		// 寄せるので柱命令を、底盤は外周を立上りの外面へ合わせるので立上りを入力に取る
+		// （Context が立上りを 1 回だけ組み立てて床束とも共有する）。立上りには人通口の
+		// 分割・切り下げまで反映されている（M10。parse/Footing.h）。
+		document.foundation = buildFoundationCommand(context);
 		progress.step();
 
 		// 基礎要素があれば**基礎ストーリを stories の先頭（最下層）へ**置く。Elevation=0

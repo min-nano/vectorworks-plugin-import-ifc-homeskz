@@ -33,7 +33,6 @@
 using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::SymbolCommand;
 using HomeskzIfcImport::core::Vec2;
-using HomeskzIfcImport::core::WallCommand;
 using HomeskzIfcImport::parse::buildFloorPostCommands;
 using HomeskzIfcImport::parse::buildWallCommands;
 using HomeskzIfcImport::parse::collectGridLines;
@@ -50,6 +49,7 @@ using HomeskzIfcImport::parse::mergeCollinearOhbiki;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::OhbikiRun;
 using HomeskzIfcImport::parse::overlapsFoundationWall;
+using HomeskzIfcImport::parse::RiserPiece;
 using HomeskzIfcImport::parse::shinReference;
 using HomeskzIfcImport::parse::SupportLine;
 using HomeskzIfcTests::fixture;
@@ -352,7 +352,7 @@ TEST(floor_post_count_matches_merged_run_shin_spans)
 	// 立上りはセンタリング済み・大引はセンタリング前なので、比較は命令と同じ側へ揃える。
 	Vec2 center;
 	gridCenterOf(collectGridLines(model), center);
-	const std::vector<WallCommand> walls = buildWallCommands(model);
+	const std::vector<RiserPiece> walls = buildWallCommands(model);
 	const std::vector<SupportLine> supports = collectSupportLines(model);
 	const std::vector<OhbikiRun> runs = mergeCollinearOhbiki(collectOhbikiLines(model));
 	std::size_t placed = 0;
@@ -393,7 +393,7 @@ TEST(floor_post_count_matches_merged_run_shin_spans)
 TEST(floor_post_overlaps_wall_on_centerline)
 {
 	// 壁芯（0,0）→（0,3640）・壁厚 150mm の立上り。壁芯上の点は当然重なる。
-	std::vector<WallCommand> walls(1);
+	std::vector<RiserPiece> walls(1);
 	walls.front().start = Vec2{0.0, 0.0};
 	walls.front().end = Vec2{0.0, 3640.0};
 	walls.front().thickness = 150.0;
@@ -403,7 +403,7 @@ TEST(floor_post_overlaps_wall_on_centerline)
 
 TEST(floor_post_overlaps_wall_within_half_thickness_and_half_post)
 {
-	std::vector<WallCommand> walls(1);
+	std::vector<RiserPiece> walls(1);
 	walls.front().start = Vec2{0.0, 0.0};
 	walls.front().end = Vec2{0.0, 3640.0};
 	walls.front().thickness = 150.0;
@@ -417,7 +417,7 @@ TEST(floor_post_overlaps_wall_within_half_thickness_and_half_post)
 
 TEST(floor_post_beyond_wall_end_does_not_overlap)
 {
-	std::vector<WallCommand> walls(1);
+	std::vector<RiserPiece> walls(1);
 	walls.front().start = Vec2{0.0, 0.0};
 	walls.front().end = Vec2{0.0, 3640.0};
 	walls.front().thickness = 150.0;
@@ -431,7 +431,7 @@ TEST(floor_post_beyond_wall_end_does_not_overlap)
 TEST(floor_post_overlap_ignores_degenerate_wall)
 {
 	// 長さ 0 の立上りは向きが定まらないので判定に使わない（同じ点でも重なりにしない）。
-	std::vector<WallCommand> walls(1);
+	std::vector<RiserPiece> walls(1);
 	walls.front().start = Vec2{0.0, 0.0};
 	walls.front().end = Vec2{0.0, 0.0};
 	walls.front().thickness = 150.0;
@@ -448,7 +448,7 @@ TEST(floor_post_fixture_has_no_post_on_foundation_wall)
 	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
 
-	const std::vector<WallCommand> walls = buildWallCommands(model);
+	const std::vector<RiserPiece> walls = buildWallCommands(model);
 	CHECK(!walls.empty());
 
 	const std::vector<SymbolCommand> posts = buildFloorPostCommands(model);

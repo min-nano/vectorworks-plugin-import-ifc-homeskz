@@ -145,9 +145,7 @@ namespace
 		Document document;
 		document.stories.resize(1);
 		document.grids.resize(1);
-		document.walls.resize(1);
-		document.wallJoins.resize(1);
-		document.slabs.resize(1);
+		document.foundation.emplace();
 		document.floors.resize(1);
 		document.members.resize(1);
 		document.columns.resize(1);
@@ -170,9 +168,7 @@ namespace
 		counts.valid = true;
 		counts.stories = 1;
 		counts.grids = 1;
-		counts.walls = 1;
-		counts.wallJoins = 1;
-		counts.slabs = 1;
+		counts.foundation = 1;
 		counts.floors = 1;
 		counts.members = 1;
 		counts.columns = 1;
@@ -392,7 +388,7 @@ TEST(document_command_count_sums_every_element_list)
 {
 	// **要素を足したときに数え漏らさない**ための番人。Document の各リストに 1 件ずつ
 	// 入れたら、総数はリストの数と一致しなければならない（kElements の網羅性を固定する）。
-	CHECK_EQ(documentCommandCount(fullDocument()), static_cast<std::size_t>(17));
+	CHECK_EQ(documentCommandCount(fullDocument()), static_cast<std::size_t>(15));
 	CHECK_EQ(documentCommandCount(Document{}), static_cast<std::size_t>(0));
 }
 
@@ -466,12 +462,10 @@ TEST(format_log_result_lists_every_element_and_the_verdict)
 
 	CHECK(text.find("結果: 成功") != std::string::npos);
 	CHECK(text.find("所要: 1 分 11 秒") != std::string::npos);
-	CHECK(text.find("描いたもの: 17 件") != std::string::npos);
+	CHECK(text.find("描いたもの: 15 件") != std::string::npos);
 	CHECK(text.find("ストーリ: 1 層") != std::string::npos);
 	CHECK(text.find("通り芯: 1 本") != std::string::npos);
-	CHECK(text.find("立上り: 1 本") != std::string::npos);
-	CHECK(text.find("壁結合: 1 箇所") != std::string::npos);
-	CHECK(text.find("底盤: 1 枚") != std::string::npos);
+	CHECK(text.find("基礎: 1 体") != std::string::npos);
 	CHECK(text.find("床: 1 枚") != std::string::npos);
 	CHECK(text.find("横架材: 1 本") != std::string::npos);
 	CHECK(text.find("柱: 1 本") != std::string::npos);

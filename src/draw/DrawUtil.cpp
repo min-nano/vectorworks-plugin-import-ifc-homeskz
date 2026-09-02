@@ -14,6 +14,7 @@
 
 #include "VWFC/VWObjects/VWClass.h"
 #include "VWFC/VWObjects/VWDocument.h"
+#include "VWFC/VWObjects/VWExtrudeObj.h"
 #include "VWFC/VWObjects/VWGroupObj.h"
 #include "VWFC/VWObjects/VWLayerObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
@@ -199,6 +200,75 @@ namespace HomeskzIfcImport::draw
 		VWPolygon2DObj polygon(vertices);
 		polygon.SetClosed(true); // スラブのプロファイルは閉じた外形
 		return polygon.GetThisObject();
+	}
+
+	void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value)
+	{
+		gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
+	}
+
+	MCObjectHandle CreateExtrudedSolid(const std::vector<core::Vec3>& base,
+									   const core::Vec3& extent)
+	{
+		const double length = core::length(extent);
+		if (base.size() < 3 || length <= 0.0)
+			return nil;
+
+		// 面法線（Newell 法）。extent と逆を向いていたら頂点の並びを反転して、押し出しが
+		// extent の向きへ伸びるようにする。
+		std::vector<core::Vec3> vertices = base;
+		core::Vec3 normal{0.0, 0.0, 0.0};
+		const std::size_t count = vertices.size();
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			const core::Vec3& a = vertices[i];
+			const core::Vec3& b = vertices[(i + 1) % count];
+			normal.x += (a.y - b.y) * (a.z + b.z);
+			normal.y += (a.z - b.z) * (a.x + b.x);
+			normal.z += (a.x - b.x) * (a.y + b.y);
+		}
+		if (core::dot(normal, extent) < 0.0)
+			std::ranges::reverse(vertices);
+
+		VWPolygon3D polygon;
+		for (const core::Vec3& v : vertices)
+			polygon.AddVertex(v.x, v.y, v.z);
+		polygon.SetClosed(true);
+
+		const VWExtrudeObj extrude(polygon, length);
+		const MCObjectHandle handle = extrude.GetThisObject();
+		if (handle == nil)
+			return nil;
+		// 「2D スクリーンオブジェクトか」を false にしてレイヤ平面のワールド 3D として扱わせる
+		// （VW 自身のエクスポートで底盤のモディファイアに false が立つのに合わせる。M10）。
+		SetBooleanVariable(handle, ovPlanarObjIsSrceen, false);
+
+		// 平面の外接矩形の中心が命令どおりの位置（基面の外接矩形の中心 ＋ 押し出しの半分）に
+		// 来るよう実測して寄せ直す（ヘッダの doc コメント）。丸め誤差で毎回動かさない程度に
+		// 大きく、図面で見える差より十分小さい許容で比べる。
+		constexpr double kPlacementTol = 0.5;
+		double minX = base.front().x;
+		double maxX = minX;
+		double minY = base.front().y;
+		double maxY = minY;
+		for (const core::Vec3& v : base)
+		{
+			minX = std::min(minX, v.x);
+			maxX = std::max(maxX, v.x);
+			minY = std::min(minY, v.y);
+			maxY = std::max(maxY, v.y);
+		}
+		const double wantedX = ((minX + maxX) / 2.0) + (extent.x / 2.0);
+		const double wantedY = ((minY + maxY) / 2.0) + (extent.y / 2.0);
+		WorldRect bounds;
+		if (gSDK->GetObjectBounds(handle, bounds))
+		{
+			const double dx = wantedX - ((bounds.left + bounds.right) / 2.0);
+			const double dy = wantedY - ((bounds.top + bounds.bottom) / 2.0);
+			if (std::abs(dx) > kPlacementTol || std::abs(dy) > kPlacementTol)
+				gSDK->MoveObject3D(handle, dx, dy, 0.0);
+		}
+		return handle;
 	}
 
 	void SetComponents(MCObjectHandle object, const std::vector<core::ComponentCommand>& components)

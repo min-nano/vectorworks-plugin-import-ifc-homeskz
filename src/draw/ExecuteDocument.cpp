@@ -5,7 +5,7 @@
 //	したがってこの翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の
 //	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（立上り・底盤）→
+//	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（基礎の PIO）→
 //	draw/Floor → draw/Member → draw/Column → draw/Rafter → draw/Roof → draw/Symbol
 //	（アンカーボルト・床束・火打・仕口）→ draw/ColumnMark（記号）→ draw/Sheet（伏図）→
 //	draw/Section（軸組図）へディスパッチする。伏図・軸組図のビューポート注釈に載る断面寸法
@@ -102,25 +102,17 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("通り芯を描画しています…", document.grids.size(), core::DrawPhase::Grids))
 			counts.grids = drawGrids(document, progress);
 
-		// M9/M10 基礎を描く。立上り（壁）→ 壁結合 → 底盤（スラブ）の順。**壁結合は立上りの
-		// ハンドルを引く**ので、立上りをすべて配置した直後に置く（対応表は WallHandles
-		// で受け渡す。draw/Footing.h）。配置先の "F-立上り" / "F-底盤" レイヤは基礎ストーリの
-		// story 命令が作るので、必ず drawStories の後に置く（レイヤが無い命令はそれぞれが
-		// スキップする）。
-		ObjectHandles wallHandles;
-		if (beginPhase("基礎の立上りを描画しています…", document.walls.size(),
-					   core::DrawPhase::Walls))
-			counts.walls = drawWalls(document, progress, &wallHandles);
-		if (beginPhase("基礎の立上りを結合しています…", document.wallJoins.size(),
-					   core::DrawPhase::WallJoins))
+		// M9/M20 基礎を描く。立上り・底盤・地中梁・床付けをまとめた **1 つの PIO**
+		// （Extensions/ExtFoundation）を "F-基礎" レイヤへ置く。配置先レイヤは基礎ストーリの
+		// story 命令が作るので、必ず drawStories の後に置く（レイヤが無ければスキップして
+		// 診断行に出す）。
+		if (beginPhase("基礎を描画しています…", document.foundation.has_value() ? 1 : 0,
+					   core::DrawPhase::Foundation))
 		{
 			std::string note;
-			counts.wallJoins = drawWallJoins(document, progress, wallHandles, &note);
+			counts.foundation = drawFoundation(document, progress, &note);
 			addDiagnostics(note);
 		}
-		if (beginPhase("基礎の底盤を描画しています…", document.slabs.size(),
-					   core::DrawPhase::Slabs))
-			counts.slabs = drawSlabs(document, progress);
 
 		// M5 床板を描く。配置先の FL レイヤは上の drawStories が作るので、必ずその後に
 		// 置く（レイヤが無い命令は drawFloors がスキップする）。

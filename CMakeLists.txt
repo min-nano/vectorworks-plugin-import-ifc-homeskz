@@ -133,6 +133,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 	add_library(
 		HomeskzIfcCore STATIC
 		src/core/Document.cpp
+		src/core/Foundation.cpp
 		src/core/Geometry.cpp
 		src/core/Layout.cpp
 		src/core/Progress.cpp
@@ -293,6 +294,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Column.cpp
 		src/draw/ColumnMark.cpp
 		src/Extensions/ExtColumnMark.cpp
+		src/Extensions/ExtFoundation.cpp
 		src/draw/Rafter.cpp
 		src/draw/Roof.cpp
 		src/draw/Symbol.cpp

@@ -10,13 +10,15 @@
 //	の予約語と衝突するもの（class 等）は drawClass / className のように置き換える。
 //
 //	現状は「バージョン＋ stories / grids / floors / members / columns / rafters / roofs /
-//	walls / wallJoins / slabs」を持つ（M1 通り芯・M3 ストーリ・M5 床板・M6 屋根組・M7 横架材・
-//	M8 柱・M9 基礎・M10 基礎の高度化ぶん）。残りの命令リスト（anchorBolts …）は、対応する
-//	マイルストーンで要素を移植するたびに 1 つずつ追加する（docs/DEV-NOTES.md）。
+//	foundation / シンボル 4 種 / columnMarks / sheets / sections / sectionSheet」を持つ。
+//	基礎（立上り・底盤・地中梁・床付け）は M20 で **1 つの命令（FoundationCommand。
+//	core/Foundation.h）**にまとめ、自作 PIO 1 つで描く（それまでの walls / wallJoins /
+//	slabs は無くなった。docs/DEV-NOTES.md M20）。
 //
 
 #pragma once
 
+#include "core/Foundation.h"
 #include "core/Geometry.h"
 
 #include <algorithm>
@@ -53,14 +55,13 @@ namespace HomeskzIfcImport::core
 	// 専用レベル。母屋・棟木は "母屋"、登り梁は "登り梁"（parse/Member.h 参照）。
 	inline constexpr const char* kLevelMoya = "母屋";
 	inline constexpr const char* kLevelNoboribari = "登り梁";
-	// M9/M11 基礎ストーリのレベル。GL は基礎ストーリの原点（常に 0）で立上り（"F-立上り"）を、
-	// 底盤天端は底盤コンクリートの天端で底盤（"F-底盤"）を載せる（M9）。基礎天端は立上りの
-	// 天端でアンカーボルト（"F-アンカーボルト"）を、床束は底盤天端に揃えて床束（"F-床束"）を
-	// 載せる（M11。シンボルは高さを持たず、この 2 つのレベルが Z を決める）。
-	// スタック順は 基礎天端 → GL → 床束 → 底盤天端（parse/Footing の
-	// buildFoundationStoryCommand）。
+	// M9/M11/M20 基礎ストーリのレベル。GL は基礎ストーリの原点（常に 0）で基礎の PIO
+	// （"F-基礎"。部品の Z は GL 基準の絶対値なので高さ 0 のレイヤに置く）を載せる。基礎天端は
+	// 立上りの天端でアンカーボルト（"F-アンカーボルト"）を、床束は底盤天端に揃えて床束
+	// （"F-床束"）を載せる（M11。シンボルは高さを持たず、この 2 つのレベルが Z を決める）。
+	// スタック順は 基礎天端 → GL → 床束（parse/Footing の buildFoundationStoryCommand。
+	// M20 で底盤のレベル "底盤天端" は無くなった——底盤は基礎の PIO の中にある）。
 	inline constexpr const char* kLevelGL = "GL";
-	inline constexpr const char* kLevelSlabTop = "底盤天端";
 	inline constexpr const char* kLevelFoundationTop = "基礎天端";
 	inline constexpr const char* kLevelFloorPost = "床束";
 
@@ -303,7 +304,7 @@ namespace HomeskzIfcImport::core
 	// 下げた点を返す。伸びが 0（軒桁に乗らない垂木）なら start そのものを返す。
 	//
 	// **core に置く理由**: SDK を触らない純計算で、無 SDK テストで検証できるため
-	// （raiseModifierTop・desiredStoryLayerOrder と同じ立ち位置。CLAUDE.md「テスト方針」:
+	// （desiredStoryLayerOrder・core/Foundation の raiseBeamPrismTop と同じ立ち位置。CLAUDE.md「テスト方針」:
 	// draw から切り離せるロジックは core へ寄せる）。
 	RafterEaveEnd rafterEaveEnd(const RafterCommand& rafter);
 
@@ -456,229 +457,8 @@ namespace HomeskzIfcImport::core
 		StoryBoundCommand topBound;
 	};
 
-	// 基礎の立上り（基礎梁）を壁オブジェクトとして描く命令。draw/Footing がこれを壁へ変換する
-	// （docs/DEV-NOTES.md M9）。
-	//
-	// 【高さの持ち方】立上りは基礎ストーリの GL（下端）と 1 階（上階）の横架材天端（上端）
-	// にバインドし、実形状の絶対 Z との差を各 offset に入れる。**壁だけは高さ基準に汎用の
-	// SetObjectStoryBound ではなく壁専用の SetWallOverallHeights を使う**（前者ではレイヤの
-	// 「壁の高さ」設定に引きずられる。SDK リファレンス Findings「Walls」）。したがって bottomBound /
-	// topBound の storyOffset は SetWallOverallHeights の story 引数（0=自階・1=上階）
-	// とそのまま一致する。
-	//
-	// 【下端は IFC 実形状のまま】ホームズ君は基礎梁を底盤の底面までの全高でモデリングするので、
-	// bottomBound.offset にはソリッドの下端がそのまま入る（呑み込み等の補正はしない。
-	// parse/Footing.h「下端は IFC 実形状のまま」）。
-	//
-	// フィールド:
-	//   layer                        … 配置先デザインレイヤ名（"F-立上り"）
-	//   drawClass                    … クラス名（立ち上がり。予約語 class を機械置換）
-	//   start                        … 壁芯の始点（センタリング済みの平面座標）
-	//   end                          … 壁芯の終点（同上）
-	//   thickness                    … 壁厚（矩形断面の幅。mm）
-	//   components                 … 壁の構成層（コンクリート 1 層。合計＝壁厚）
-	//   bottomBound                  … 下端の高さ基準（基礎の GL レベル）
-	//   topBound                     … 上端の高さ基準（1 階の横架材天端レベル）
-	//   capStart                   … 壁芯**始点側**の端部を閉じるか
-	//   capEnd      （同上）          … 壁芯**終点側**の端部を閉じるか
-	//
-	// 【端部を閉じるかは解析側が決める】VW の壁は端部の「キャップ」（端を閉じる線）
-	// を壁ごとに持ち、既定値はドキュメントの壁ツール設定に従う。**結合（JoinWalls）
-	// 任せにすると、どの端が閉じるかがその設定と VW の結合実装に左右される**ので、
-	// 解析側で「その端が何と取り合うか」から決めて命令に載せ、描画側は SetWallCaps でそのまま
-	// 設定する。規則は
-	//   * 自由端（何とも結合しない端）              … 閉じる
-	//   * 同じ天端の立上りと結合する端              … 閉じない（コンクリートで一体）
-	//   * 天端の違う立上りとだけ結合する端          … 閉じる（低いほうの端部が見える）
-	// で、これは壁結合命令の capped（WallJoinCommand）と同じ判断を**端ごと**に写したもの。
-	// 算出は parse/Footing の applyWallCaps。
-	//
-	// 【壁スタイルは使わない】**スタイル無しの壁へ構成層を直接与える**（実データの壁厚は 120
-	// / 150 / 300mm と混在するので、厚みの決まった既製スタイルでは合わない。構成層の合計＝壁
-	// 厚なので、命令の厚みがそのまま保たれる。draw/DrawUtil.h 参照）。
-	struct WallCommand
-	{
-		std::string layer;
-		std::string drawClass;
-		Vec2 start;
-		Vec2 end;
-		double thickness = 0.0;
-		std::vector<ComponentCommand> components;
-		StoryBoundCommand bottomBound;
-		StoryBoundCommand topBound;
-		bool capStart = true;
-		bool capEnd = true;
-	};
-
-	// 交差する立上り（壁）同士を VW の壁結合（JoinWalls）で結合する種別。値は SDK の
-	// JoinModifierType（kTWallJoin=1 / kLWallJoin=2 / kXWallJoin=3 / kAutoWallJoin=4）
-	// と一致させてあり、draw/Footing はそのまま JoinWalls へ渡す。T 字結合・隅（L）結合・
-	// 交差（X）結合は VW の壁結合の 3 モードで、**交差結合は T 字結合 2 つとは別処理**。
-	// 十字は縦横 2 本の壁のままにして X で繋ぐ（切って T 2 件に置き換えるのはモデルとして誤り。
-	// docs/DEV-NOTES.md M10）。
-	enum class WallJoinType
-	{
-		T = 1, // 端点で突き当たる壁（stem）を通し壁（through）へ延長して繋ぐ
-		L = 2, // 端点どうしのコーナー（隅結合）
-		X = 3, // 内部どうしの十字（交差結合）
-		Auto = 4, // ピック点を無視して VW に種別を判断させる（parse/Footing.cpp の makeT。
-		// 同じ通し壁の同じ交点に 2 本目の stem が取り付くときだけ使う）
-	};
-
-	// 交差する立上り（壁）2 本を結合する命令。draw/Footing がこれを JoinWalls へ変換する
-	// （docs/DEV-NOTES.md M10）。
-	//
-	// 【壁ハンドルは命令インデックスで受け渡す】a / b は Document::walls の**添字**で、
-	// 描画側は立上りを描くときに「命令インデックス → 壁ハンドル」の対応表を作り、ここから
-	// 引く。**SDK ハンドルは Document に載せない**（フェーズ間で運べない。CLAUDE.md
-	// 「所有権」）。どちらかの壁が未配置（レイヤ未生成・フォールバック描画）の命令は
-	// 描画側がスキップする。
-	//
-	// フィールド:
-	//   a                      … 結合する壁の walls 内インデックス（T 結合では stem＝延長される側）
-	//   b                      … 同上（T 結合では through＝通し壁）
-	//   point                  … 2 壁の壁芯の交点（参照用。センタリング済み）
-	//   pickA                  … a に渡すピック点（**交点ではなく「残す側」へ寄せた点**）
-	//   pickB                  … b に渡すピック点（同上）
-	//   joinType               … 結合種別（JoinWalls の joinModifier）
-	//   capped                 … 結合部を閉じるか（天端高さの違う立上りどうしは閉じる）
-	// 【ピック点を交点からずらす理由】壁芯の交点は相手壁の壁芯上にも乗るため「どちら側を残す
-	// か」が曖昧になり、VW が L 結合でコーナーを詰めず立上りが相手壁の外面まで伸びたまま残る。
-	// 交点から**遠い端点の方向**へ控えめに寄せた点を渡して残す区間を明示する（算出は
-	// parse/Footing の keptSidePick）。
-	struct WallJoinCommand
-	{
-		std::size_t a = 0;
-		std::size_t b = 0;
-		Vec2 point;
-		Vec2 pickA;
-		Vec2 pickB;
-		WallJoinType joinType = WallJoinType::L;
-		bool capped = false;
-	};
-
-	// 地中梁の下に敷く床付け（捨てコン・砕石）1 区間。地中梁（ModifierCommand::beddings）に
-	// ぶら下がり、**押し出しの向き（azimuth）と断面の座標系は地中梁と共有**して、断面と
-	// 押し出し方向の区間だけが違う（docs/DEV-NOTES.md M17「基礎の床付け」）。draw/Footing は
-	// 地中梁の可視ソリッドと同じ手順で 3D ソリッドとして置く。
-	//
-	// 【なぜ底盤の構成層にできないか】底盤（スラブ）の構成層は**一様な厚みの水平な層**しか
-	// 表せない。床付けは地中梁の下で深さが変わり、傾斜部では法線方向に厚みを持つので、
-	// 層ではなく地中梁と同じ押し出しソリッドとして描くしかない（地中梁のコンクリート自身を
-	// 台形プリズムで表すのと同じ理由）。
-	//
-	// 【なぜ区間に分かれるか】床付けは 1 本の地中梁の中でも断面が変わる。傾斜部を覆う砕石の
-	// 帯は、**直交する地中梁と取り合う区間では相手のコンクリートへ食い込む**ので、その区間
-	// だけ帯を切り下げる（parse/Footing.h 冒頭「床付け」）。切り下げる高さが同じ区間は
-	// 1 つにまとめてあるので、取り合いの無い地中梁では区間は 1 つ（＝地中梁の全長）になる。
-	//
-	// フィールド:
-	//   profile             … 断面の 2D 頂点列（u, v）。座標系は ModifierCommand と同じ
-	//   drawClass           … クラス名（構成要素の素材クラス。z構成要素-砕石 等）
-	//   start               … 地中梁の origin から押し出し方向へ何 mm の位置から始まるか
-	//   depth               … 押し出し長（mm。start + depth ≤ 地中梁の depth）
-	struct BeddingCommand
-	{
-		std::vector<Vec2> profile;
-		std::string drawClass;
-		double start = 0.0;
-		double depth = 0.0;
-	};
-
-	// 地中梁（台形断面プリズム）1 本。底盤（SlabCommand::modifiers）にぶら下がる
-	// （docs/DEV-NOTES.md M10）。
-	//
-	// 【なぜスラブ命令にしないか】地中梁は**台形断面**（下端が狭く上端が広い下り梁）なので、
-	// 一様な厚みしか持てない単一のスラブでは描けない。底盤のコンクリートに噛み合う
-	// 台形プリズムとして表し、描画側はこれを **2 回**作る（draw/Footing.h 参照）:
-	//   1. 削り取りモディファイア … スラブのプロファイル群へ渡して底盤を clip する
-	//   2. 可視の 3D ソリッド     … 削り取った位置を地中梁のコンクリートで埋める
-	//
-	// 【断面の座標系】profile は断面の 2D 頂点列 (u, v) で、u＝幅軸（押し出し方向を +90 度
-	// 回した水平軸）・v＝鉛直軸（v=0 が断面原点＝梁下端）。origin は断面原点のワールド
-	// 絶対座標（XY はセンタリング済み・z は絶対値）で、azimuth は押し出し方向（梁の走る
-	// 向き）の方位角（度・+X から反時計回り）。**u 軸の取り方は描画側の復元規約と対で
-	// 決まっている**ので、片方だけ変えてはいけない（parse/Footing の groundBeamModifier と
-	// draw/Footing の ModifierPrism）。
-	//
-	// 【床付け（beddings）】地中梁の下には捨てコン・砕石を敷く（M17）。同じ押し出しの中で
-	// 断面と区間だけが違うので、プリズム 1 本ぶんの origin / azimuth を共有する入れ子に
-	// して持つ（平らに並べて番号で突き合わせない。CLAUDE.md「命令セット」）。並びは
-	// **区間ごとに 上から**（捨てコン → 砕石）。床付けを求められなかった地中梁では空になる。
-	//
-	// フィールド:
-	//   profile             … 断面の 2D 頂点列（u, v）
-	//   beddings            … この地中梁の下に敷く床付け（上から）。無ければ空
-	//   depth               … 押し出し長（軸方向。mm）
-	//   origin              … 断面原点のワールド絶対座標（[x, y, z]）
-	//   azimuth             … 押し出し方向の方位角（度）
-	struct ModifierCommand
-	{
-		std::vector<Vec2> profile;
-		std::vector<BeddingCommand> beddings;
-		double depth = 0.0;
-		Vec3 origin;
-		double azimuth = 0.0;
-	};
-
-	// 地中梁の**可視ソリッド**用に、天端（profile の最大 v）を底盤側へ bite だけ持ち上げた
-	// コピーを返す。地中梁の天端は底盤の底面とちょうど接する（coplanar）ため、そのままだと断
-	// 面ビューポートで境界線が不安定に出る。可視ソリッドだけを少し大きくして底盤本体に重ねる
-	// ことで境界線を消す（**削り取りモディファイアは実形状のまま**にする——削り取りも一緒に上
-	// げると底盤にできるノッチと可視ソリッドが再び面ちょうど接して境界線が残る）。
-	//
-	// 地中梁は台形断面で側辺が斜めなので、天端頂点を**真上へ**上げると側面の勾配が変わって
-	// 削り取りの斜面とずれる。そこで各天端頂点を隣接する側辺（下端側の頂点へ向かう斜辺）の
-	// 延長線上へ動かす（v を bite 上げるのに合わせて u も勾配ぶんずらす）。側辺が見つからない
-	// ／ほぼ水平な頂点は真上へ上げる。bite が 0 以下なら入力をそのまま返す。
-	//
-	// **core に置く理由**: SDK を触らない純計算で、無 SDK テストで検証できるため
-	// （desiredStoryLayerOrder と同じ立ち位置。CLAUDE.md「テスト方針」: draw から切り離せる
-	// ロジックは core へ寄せる）。
-	ModifierCommand raiseModifierTop(const ModifierCommand& modifier, double bite);
-
-	// 地中梁の天端とみなす頂点の許容差（mm）。最大 v からこの差以内の頂点を天端の辺とみなす。
-	// raiseModifierTop と、その期待値を書くテストが共有する。
-	inline constexpr double kModifierTopVertexTol = 0.5;
-
-	// 基礎の底盤をスラブオブジェクトとして描く命令。draw/Footing がこれをスラブへ変換する
-	// （docs/DEV-NOTES.md M9）。床板（FloorCommand）と描画の作法は同じで、構成層の中身だけが
-	// 基礎向けになる。
-	//
-	// 【高さの持ち方】elevation は**コンクリート天端**（＝底盤天端）の絶対 Z で、datum は
-	// 常に Top（最上層＝コンクリートの上端）。基礎ストーリは GL=0 なので、この絶対 Z は
-	// ストーリ基準高さとも一致する。bound は底盤天端レベルへのバインドで、offset は実天端 Z と
-	// 底盤天端レベル（面積最大の天端 Z）の差（主たる底盤は ≈0、独立基礎底盤等はずれる）。
-	//
-	// 【スラブ構成】components は上から コンクリート（thickness）＋ 砕石。**底盤の下は
-	// 砕石 1 層**で、その厚みは捨てコンと砕石を合わせた厚み（M17。捨てコンは地中梁の下
-	// だけに敷くので、底盤の下では砕石がその厚みまで受け持つ）。構成は**そのスラブへ直接**
-	// 与える（スタイルは作らない・当てない。draw/DrawUtil.h「複合オブジェクトの構成」）。
-	//
-	// フィールド:
-	//   layer                     … 配置先デザインレイヤ名（"F-底盤"）
-	//   drawClass                 … クラス名（基礎スラブ。予約語 class を機械置換）
-	//   boundary                  … 平面外形（mm・グリッド中心オフセット済み。閉じた
-	//                               ポリゴンの頂点列で、末尾に始点を重複させない）
-	//   components                … スラブの構成層（上から）
-	//   datum                     … 高さ基準の面（底盤は常に Top＝コンクリート天端）
-	//   thickness                 … コンクリート厚（mm。整数に丸めた値）
-	//   elevation                 … コンクリート天端の絶対 Z
-	//   bound                     … 天端の高さ基準（底盤天端レベル＋差分）
-	//   modifiers                 … この底盤に噛み合う地中梁（台形プリズム。床付けを含む）。
-	//                               無ければ空
-	struct SlabCommand
-	{
-		std::string layer;
-		std::string drawClass;
-		std::vector<Vec2> boundary;
-		std::vector<ComponentCommand> components;
-		SlabDatum datum = SlabDatum::Top;
-		double thickness = 0.0;
-		double elevation = 0.0;
-		StoryBoundCommand bound;
-		std::vector<ModifierCommand> modifiers;
-	};
+	// 基礎（立上り・底盤・地中梁・床付け）は 1 つの命令 FoundationCommand で表す
+	// （core/Foundation.h）。M9〜M17 の壁・スラブ・モディファイアの命令は M20 で無くなった。
 
 	// ハイブリッドシンボルを平面座標＋回転角で置く命令。アンカーボルト・床束・火打・仕口の
 	// 4 種（docs/DEV-NOTES.md M11「シンボル置換系」）が共通で使う。draw/Symbol がこれをシンボル
@@ -1028,23 +808,11 @@ namespace HomeskzIfcImport::core
 		// （"1to2-柱" 等）は stories が作るので、描画は stories の後に処理する。
 		std::vector<ColumnCommand> columns;
 
-		// M9 基礎の立上り。IfcFooting "基礎梁…" を解析して得た WallCommand の列
-		// （同一直線・同一断面のものを統合し、自由端を半壁厚延長した後の値。#id 昇順に
-		// 準ずる決定的な並び。parse/Footing が組み立てる）。配置先の "F-立上り" レイヤは
-		// 基礎ストーリ（stories の先頭）が作るので、描画は stories の後に処理する。
-		std::vector<WallCommand> walls;
-
-		// M10 基礎の立上りどうしの壁結合。交差する立上りのジャンクション（同一交点に集まる
-		// 立上りの集合）ごとに L / T / X の結合を組み立てた列（parse/Footing が walls から
-		// 導く決定的な並び）。a / b は **walls の添字**なので、walls を並べ替えたり足したり
-		// したらこの列も作り直す。描画は立上りの直後・底盤の前に行う（draw/ExecuteDocument）。
-		std::vector<WallJoinCommand> wallJoins;
-
-		// M9 基礎の底盤。IfcSlab / IfcFooting の "…底盤…" を解析して得た SlabCommand の列
-		// （連続する同厚・同高のものを統合し、外周を立上りの外面へ合わせた後の値。
-		// parse/Footing が組み立てる）。外面合わせに立上りを参照するので walls の後に作る。
-		// **地中梁（M10）は独立した命令にせず**、平面で最も重なる底盤の modifiers に付く。
-		std::vector<SlabCommand> slabs;
+		// M20 基礎。立上り・底盤・地中梁（＋床付け）を**1 つの命令**にまとめたもの
+		// （core/Foundation.h の FoundationCommand。parse/Footing の buildFoundationCommand が
+		// 組み立てる）。基礎要素が 1 つも無ければ空。配置先の "F-基礎" レイヤは基礎ストーリ
+		// （stories の先頭）が作るので、描画は stories の後に処理する。
+		std::optional<FoundationCommand> foundation;
 
 		// M11 アンカーボルト。IfcMechanicalFastener のボルト本体（座金は除く）を
 		// "アンカーボルト_M12" / "…_M16" へ置換する（parse/AnchorBolt）。配置先は基礎
@@ -1116,9 +884,9 @@ namespace HomeskzIfcImport::core
 		std::size_t columns = 0;
 		std::size_t rafters = 0;
 		std::size_t roofs = 0;
-		std::size_t walls = 0;
-		std::size_t wallJoins = 0;
-		std::size_t slabs = 0;
+		// M20 基礎。**置けた PIO の数**（0 か 1）。命令はあるのに 0 なら PIO を作れなかった
+		// （プラグインの登録漏れ・レイヤ未生成）。原因は診断行に出る（draw/Footing）。
+		std::size_t foundation = 0;
 		// M11 シンボル置換系。アンカーボルト・床束の配置先（"F-アンカーボルト" / "F-床束"）は
 		// 基礎ストーリのレイヤなので、基礎の無いモデルでは命令自体が出ない（parse 側で空になる）。
 		std::size_t anchorBolts = 0;

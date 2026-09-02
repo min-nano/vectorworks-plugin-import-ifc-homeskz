@@ -97,16 +97,15 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(Context& context)
 	{
-		// 基礎が無ければ表示すべきレイヤ（"F-底盤" ほか）自体が作られないので伏図も作らない
+		// 基礎が無ければ表示すべきレイヤ（"F-基礎" ほか）自体が作られないので伏図も作らない
 		// （空のビューポートを残さない）。
 		if (!hasFoundation(context.model()))
 			return {};
 
-		// 底盤 → 立上り → 床束 → アンカーボルト → 通り芯（並びは重ね順ではない＝重なりは
-		// ビューポートのレイヤ順が決める）。
-		std::vector<std::string> layers{kLayerFoundationSlab, kLayerFoundationWall,
-										kLayerFoundationFloorPost, kLayerFoundationAnchor,
-										core::kGridLayer};
+		// 基礎（M20 で底盤・立上り・地中梁は 1 つの PIO）→ 床束 → アンカーボルト → 通り芯
+		// （並びは重ね順ではない＝重なりはビューポートのレイヤ順が決める）。
+		std::vector<std::string> layers{kLayerFoundation, kLayerFoundationFloorPost,
+										kLayerFoundationAnchor, core::kGridLayer};
 		// グラフィック凡例は**アンカーボルトを 1 本でも置いたときだけ**載せる。凡例に並ぶのは
 		// 基礎伏図に映るシンボル（＝アンカーボルト）なので、1 本も無ければ中身の無い箱が図面
 		// に残るだけになる（あちらは「載せるシンボルが 1 つも無ければ空リスト」と書いていた）。

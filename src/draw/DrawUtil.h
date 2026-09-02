@@ -85,6 +85,29 @@ namespace HomeskzIfcImport::draw
 	// 頂点が空なら nil。
 	MCObjectHandle CreateClosedPolygon(const std::vector<core::Vec2>& boundary);
 
+	// 閉じた 3D 多角形（base。末尾に始点を重複させない）を extent の向きへ |extent| だけ
+	// 押し出したソリッドを作る。基礎の PIO（Extensions/ExtFoundation）が底盤・立上り・地中梁・
+	// 床付けのすべてをこれで描く（core::FoundationSolid をそのまま渡す）。作れなければ nil。
+	//
+	// **押し出しは基面ポリゴンの法線方向へ伸びる**ので、頂点の並びを「法線が extent を向く」
+	// 向きに揃えてから渡す（法線は Newell 法。逆巻きだと反対側へ伸びる）。
+	//
+	// **VW が置いた位置を実測して命令どおりへ寄せ直す。** VWExtrudeObj は押し出しを内部で
+	// 「2D 基面 ＋ 基準高さ ＋ 厚み」に持ち替えるため、3D ポリゴンから作ると基面の平面を
+	// 導出したうえで**配置先レイヤの高さを法線方向へ足す**。鉛直の押し出しなら「レイヤぶん
+	// 持ち上げる」だけだが、水平の押し出し（地中梁）ではそのまま**軸方向の横ずれ**として出る
+	// （実機で全ての地中梁が軸方向へレイヤ高さぶんずれていた。SDK リファレンス Findings
+	// 「Slabs and Extrudes」）。原因の値を当てにいかず、**平面の外接矩形の中心が命令どおりの
+	// 位置に来るよう実測して動かす**——ずれが無ければ何もしないので、VW 側の挙動が変わっても
+	// このままで正しい。高さ方向は実測できない（GetObjectBounds は平面のみ）ので、基礎の
+	// PIO は高さ 0 のレイヤ（"F-基礎"＝GL）に置く（parse/Footing.h の kLayerFoundation）。
+	MCObjectHandle CreateExtrudedSolid(const std::vector<core::Vec3>& base,
+									   const core::Vec3& extent);
+
+	// オブジェクト変数へ真偽値を書き込む（呼び出しの定型を 1 か所に。draw/Roof の
+	// SetPointVariable / SetRealVariable と同じ流儀）。
+	void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value);
+
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
 	//
 	// 床（draw/Floor）と底盤（draw/Footing）は**同じ手順**でスラブを描く（外形ポリゴン →

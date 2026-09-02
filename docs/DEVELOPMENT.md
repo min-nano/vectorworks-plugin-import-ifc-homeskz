@@ -29,8 +29,12 @@ src/
                               診断ログの見出し・区切り・結果を書く
     ExtColumnMark.{h,cpp}     柱・小屋束の記号 PIO（対象レイヤの構造材を走査して
                               断面記号 ×／／ と平面記号を描く）
+    ExtFoundation.{h,cpp}     基礎の PIO（レコードの部品と OIP の寸法から底盤・立上り・
+                              地中梁・床付けのソリッドを描く。幾何は core/Foundation）
   core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
     Document.{h,cpp}          命令セットの構造体定義・validateDocument・描画結果の件数
+    Foundation.{h,cpp}        基礎の命令（部品・代表値）と、部品からソリッドを組み立てる
+                              純計算・床付けの断面・PIO のレコードへの直列化
     Geometry.{h,cpp}          自前の Vec2 / Vec3 / Mat4（配置行列）と平面幾何の基本演算
     Layout.{h,cpp}            用紙の割り付け（縮尺の階梯と選び方・伏図の位置と凡例の列・
                               軸組図の上下 2 段とシートの分割）

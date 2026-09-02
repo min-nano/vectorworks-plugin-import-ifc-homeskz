@@ -4,7 +4,7 @@
 //	validateDocument の実装。SDK 非依存（core/ は VectorWorks SDK を一切 include しない）。
 //
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
-//	walls / slabs（M9）・wallJoins / 底盤の modifiers＝地中梁（M10）・rafters / roofs（M6）・
+//	foundation（M20。立上り・底盤・地中梁の部品）・rafters / roofs（M6）・
 //	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints）・
 //	sheets（M13。シートレイヤ上のグラフィック凡例を含む）・sections（M14）・
 //	ビューポート注釈の断面寸法データタグ（M13）の
@@ -12,8 +12,9 @@
 //	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 //	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
-//	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み、rafterEaveEnd＝垂木の軒先
-//	側の材端）。SDK を触らないので無 SDK テストで検証できる（CLAUDE.md「テスト方針」）。
+//	スタック順、rafterEaveEnd＝垂木の軒先側の材端）。基礎のソリッドの組み立ては
+//	core/Foundation にある。SDK を触らないので無 SDK テストで検証できる（CLAUDE.md
+//	「テスト方針」）。
 //
 
 #include "core/Document.h"
@@ -122,53 +123,44 @@ namespace HomeskzIfcImport::core
 				   !column.topBound.level.empty();
 		}
 
-		// 基礎の立上り 1 本が妥当か。配置先レイヤ名・クラス名が非空で、壁厚が正で、
-		// 壁芯の始点と終点が縮退していないこと（判定は core/Geometry の samePoint）。
-		// 上下端の高さ基準のレベル種別も非空（空だと SetWallOverallHeights が解決できず、
-		// レイヤの「壁の高さ」設定に落ちる）。構成層も妥当であること（スラブと同じ関門。
-		// 構成層の合計＝壁厚）。
-		bool isValidWall(const WallCommand& wall)
+		// 基礎の底盤 1 枚が妥当か。外形が 3 点以上（面になる）で、コンクリート厚が正であること。
+		// top は数値（double なので常に成立）。
+		bool isValidFoundationSlab(const FoundationSlab& slab)
 		{
-			return !wall.layer.empty() && !wall.drawClass.empty() && wall.thickness > 0.0 &&
-				   !samePoint(wall.start, wall.end) && !wall.bottomBound.level.empty() &&
-				   !wall.topBound.level.empty() && hasValidComponents(wall.components);
+			return slab.boundary.size() >= 3 && slab.thickness > 0.0;
 		}
 
-		// 床付け（捨てコン・砕石）1 区間が妥当か。断面が 3 点以上（面になる）で、素材クラス名が
-		// 非空で、押し出し長が正であること（長さ 0 のプリズムは描けない。向きと断面の座標系は
-		// 地中梁と共有するのでここでは見ない）。
-		bool isValidBedding(const BeddingCommand& bedding)
+		// 基礎の立上り 1 本が妥当か。幅が正で、壁芯が縮退しておらず（判定は core/Geometry の
+		// samePoint）、天端が下端より上にあること（高さ 0 の立上りは実体を持たない）。
+		bool isValidFoundationRiser(const FoundationRiser& riser)
 		{
-			return bedding.profile.size() >= 3 && !bedding.drawClass.empty() && bedding.depth > 0.0;
+			return riser.width > 0.0 && !samePoint(riser.start, riser.end) &&
+				   riser.top > riser.bottom;
 		}
 
-		// 地中梁（台形プリズム）1 本が妥当か。断面が 3 点以上（面になる）で、押し出し長が正で
-		// あること（長さ 0 のプリズムは描けない）。origin / azimuth は数値（double
-		// なので常に成立）。ぶら下がる床付けもすべて妥当であること。
-		bool isValidModifier(const ModifierCommand& modifier)
+		// 地中梁 1 本が妥当か。下端の中心線が縮退しておらず、下端幅・せいが正で、張り出し・
+		// 斜め部の高さが負でないこと（斜め部の高さがせいを超える分は組み立て側がクランプする）。
+		bool isValidFoundationBeam(const FoundationBeam& beam)
 		{
-			return modifier.profile.size() >= 3 && modifier.depth > 0.0 &&
-				   std::ranges::all_of(modifier.beddings, isValidBedding);
+			return !samePoint(beam.start, beam.end) && beam.bottomWidth > 0.0 && beam.depth > 0.0 &&
+				   beam.haunchLeft >= 0.0 && beam.haunchRight >= 0.0 && beam.haunchHeight >= 0.0;
 		}
 
-		// 基礎の底盤 1 枚が妥当か。床板と同じ関門（レイヤ名・クラス名が非空／外形
-		// 3 点以上／高さ基準のレベル種別が非空／構成層が妥当）に、コンクリート厚が正で
-		// あることと、噛み合う地中梁がすべて妥当であることを足す。
-		bool isValidSlab(const SlabCommand& slab)
+		// 基礎（M20）が妥当か。配置先レイヤ名・PIO 本体のクラス名・ソリッドの素材クラス名 4 つが
+		// 非空で（クラス名は PIO のレコードへ保存され、空だと描いたソリッドが既定クラスに
+		// 散る）、部品がすべて妥当で、**部品が 1 つ以上ある**こと（部品の無い基礎は空の PIO
+		// になるだけなので、解析側は命令を出さない＝std::optional を空にする）。代表値
+		// （params）は数値なので値域は見ない（0 も「取り込み時にその部品が無かった」として正常）。
+		bool isValidFoundation(const FoundationCommand& foundation)
 		{
-			return !slab.layer.empty() && !slab.drawClass.empty() && slab.boundary.size() >= 3 &&
-				   !slab.bound.level.empty() && slab.thickness > 0.0 &&
-				   hasValidComponents(slab.components) &&
-				   std::ranges::all_of(slab.modifiers, isValidModifier);
-		}
-
-		// 壁結合 1 件が妥当か。結合する 2 本が**異なる**立上りで、どちらも walls
-		// の範囲内を指すこと（範囲外の添字は描画側でハンドルを引けず、黙って結合されないだけ
-		// になるので検証で弾く）。結合種別は enum なので値域は型が保証する。ピック点・
-		// 交点は数値（double なので常に成立）。
-		bool isValidWallJoin(const WallJoinCommand& join, std::size_t wallCount)
-		{
-			return join.a != join.b && join.a < wallCount && join.b < wallCount;
+			return !foundation.layer.empty() && !foundation.drawClass.empty() &&
+				   !foundation.slabClass.empty() && !foundation.riserClass.empty() &&
+				   !foundation.leanConcreteClass.empty() && !foundation.gravelClass.empty() &&
+				   (!foundation.slabs.empty() || !foundation.risers.empty() ||
+					!foundation.beams.empty()) &&
+				   std::ranges::all_of(foundation.slabs, isValidFoundationSlab) &&
+				   std::ranges::all_of(foundation.risers, isValidFoundationRiser) &&
+				   std::ranges::all_of(foundation.beams, isValidFoundationBeam);
 		}
 
 		// 野地板 1 枚が妥当か。配置先レイヤ名・クラス名が非空で、平面外形が 3 点以上（面にな
@@ -286,19 +278,9 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.columns, isValidColumn))
 			return false;
 
-		// 基礎: 立上りは壁厚が正・壁芯が非縮退・上下端のレベル種別が非空、底盤は床板と同じ関
-		// 門＋コンクリート厚が正であること（isValidWall / isValidSlab 参照。docs/DEV-NOTES.md
-		// M9）。
-		if (!std::ranges::all_of(document.walls, isValidWall))
-			return false;
-		if (!std::ranges::all_of(document.slabs, isValidSlab))
-			return false;
-
-		// 壁結合（M10）: 結合する 2 本が異なり、どちらも walls の範囲内であること
-		// （isValidWallJoin 参照。docs/DEV-NOTES.md M10）。地中梁は底盤の modifiers として
-		// isValidSlab が併せて見る。
-		if (!std::ranges::all_of(document.wallJoins, [&document](const WallJoinCommand& join)
-								 { return isValidWallJoin(join, document.walls.size()); }))
+		// 基礎（M20）: 配置先レイヤ名・クラス名が非空で、底盤・立上り・地中梁の部品がすべて
+		// 妥当であること（isValidFoundation 参照。docs/DEV-NOTES.md M20）。
+		if (document.foundation.has_value() && !isValidFoundation(*document.foundation))
 			return false;
 
 		// 垂木・野地板: 配置先レイヤ名・クラス名が非空で、垂木は断面が正・平面が非縮退、
@@ -392,26 +374,27 @@ namespace HomeskzIfcImport::core
 		}
 		for (const RoofCommand& roof : document.roofs)
 			take(roof.elevation);
-		// 基礎の底盤（天端と、コンクリート厚のぶん下がった下端）。立上りは高さを絶対値で
-		// 持たない（レベルへのバインドで表す）ので、底盤とストーリで下端を代表させる。
-		for (const SlabCommand& slab : document.slabs)
+		// 基礎（M20）。底盤は天端と、その下の砕石（kSlabBeddingThickness）の底まで。立上りは
+		// 天端と下端。地中梁は天端（底盤の底面）と、下端の下に敷く床付けの底まで——**モデルの
+		// 最深部はふつう底盤の下端ではなく床付けの下端**なので、これを見ないと余白
+		// （kSectionHeightMargin）より深い足元が軸組図で切れる。
+		if (document.foundation.has_value())
 		{
-			take(slab.elevation);
-			take(slab.elevation - slab.thickness);
-			// 地中梁（底盤にぶら下がる台形プリズム）と、その下の床付け（捨てコン・砕石）。
-			// **モデルの最深部はふつう底盤の下端ではなく床付けの下端**なので、これを見ないと
-			// 余白（kSectionHeightMargin）より深い足元が軸組図で切れる。断面原点が梁下端
-			// （v=0）で origin.z が絶対 Z なので、プロファイルの v をそのまま足せば上下端に
-			// なる（床付けも同じ断面座標系＝ModifierCommand / BeddingCommand 参照）。
-			for (const ModifierCommand& modifier : slab.modifiers)
+			const FoundationCommand& foundation = *document.foundation;
+			for (const FoundationSlab& slab : foundation.slabs)
 			{
-				for (const Vec2& vertex : modifier.profile)
-					take(modifier.origin.z + vertex.y);
-				for (const BeddingCommand& bedding : modifier.beddings)
-				{
-					for (const Vec2& vertex : bedding.profile)
-						take(modifier.origin.z + vertex.y);
-				}
+				take(slab.top);
+				take(slab.top - slab.thickness - kSlabBeddingThickness);
+			}
+			for (const FoundationRiser& riser : foundation.risers)
+			{
+				take(riser.top);
+				take(riser.bottom);
+			}
+			for (const FoundationBeam& beam : foundation.beams)
+			{
+				take(beam.top);
+				take(beam.top - beam.depth - kSlabBeddingThickness);
 			}
 		}
 		// ストーリ高さ（要素が 1 つも無い階でも範囲に含める）。
@@ -470,14 +453,22 @@ namespace HomeskzIfcImport::core
 			takeSegment(grid.layer, grid.start, grid.end);
 		for (const FloorCommand& floor : document.floors)
 			takeBoundary(floor.layer, floor.boundary);
-		for (const SlabCommand& slab : document.slabs)
-			takeBoundary(slab.layer, slab.boundary);
+		// 基礎（M20）は部品ごとに平面の座標を持つ（底盤の外形・立上りの壁芯・地中梁の中心線）。
+		// どれも同じ "F-基礎" レイヤ上の 1 つの PIO に入る。
+		if (document.foundation.has_value())
+		{
+			const FoundationCommand& foundation = *document.foundation;
+			for (const FoundationSlab& slab : foundation.slabs)
+				takeBoundary(foundation.layer, slab.boundary);
+			for (const FoundationRiser& riser : foundation.risers)
+				takeSegment(foundation.layer, riser.start, riser.end);
+			for (const FoundationBeam& beam : foundation.beams)
+				takeSegment(foundation.layer, beam.start, beam.end);
+		}
 		for (const RoofCommand& roof : document.roofs)
 			takeBoundary(roof.layer, roof.boundary);
 		for (const MemberCommand& member : document.members)
 			takeSegment(member.layer, member.start, member.end);
-		for (const WallCommand& wall : document.walls)
-			takeSegment(wall.layer, wall.start, wall.end);
 		// 垂木は**軒先まで伸ばして描く**（M16。draw/Rafter が rafterEaveEnd でパスの始端を
 		// 軒先へ送る）ので、命令の start ではなく軒先を見る——ここで実際より狭く見積もると、
 		// 決めた縮尺では図が用紙に収まらない。
@@ -542,43 +533,6 @@ namespace HomeskzIfcImport::core
 		eave.z = rafter.elevation - drop;
 		eave.offset = rafter.startBound.offset - drop;
 		return eave;
-	}
-
-	ModifierCommand raiseModifierTop(const ModifierCommand& modifier, double bite)
-	{
-		if (bite <= 0.0 || modifier.profile.empty())
-			return modifier;
-
-		// 天端＝最大 v。そこから kModifierTopVertexTol 以内の頂点を天端の辺とみなす。
-		double vMax = modifier.profile.front().y;
-		for (const Vec2& p : modifier.profile)
-			vMax = std::max(vMax, p.y);
-		const auto isTop = [&](std::size_t i)
-		{ return modifier.profile[i].y >= vMax - kModifierTopVertexTol; };
-
-		const std::size_t n = modifier.profile.size();
-		ModifierCommand raised = modifier;
-		for (std::size_t i = 0; i < n; ++i)
-		{
-			if (!isTop(i))
-				continue;
-			const Vec2& top = modifier.profile[i];
-			// 隣接する 2 頂点のうち**下端側**（側辺の相手）を探し、その斜辺の延長線上へ
-			// 動かす。見つからない（天端が水平に分割された中間頂点）／側辺がほぼ水平なら
-			// 真上へ上げる。
-			double du = 0.0;
-			for (const std::size_t j : {(i + n - 1) % n, (i + 1) % n})
-			{
-				if (isTop(j))
-					continue;
-				const double dv = top.y - modifier.profile[j].y;
-				if (std::abs(dv) > kModifierTopVertexTol)
-					du = ((top.x - modifier.profile[j].x) / dv) * bite;
-				break;
-			}
-			raised.profile[i] = Vec2{top.x + du, top.y + bite};
-		}
-		return raised;
 	}
 
 	namespace

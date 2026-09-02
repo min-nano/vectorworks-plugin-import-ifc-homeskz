@@ -9,6 +9,7 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtColumnMark.h"
+#include "Extensions/ExtFoundation.h"
 #include "Extensions/ExtMenu.h"
 #include "Updater.h"
 
@@ -89,6 +90,11 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// M12 柱・小屋束の記号 PIO。メニューコマンドと同じモジュールに同梱する
 	// （別プラグインにしない。Extensions/ExtColumnMark.h 冒頭）。
 	REGISTER_Extension<HomeskzIfcImport::CExtColumnMark>(
+		GROUPID_ExtensionParametric, action, moduleInfo, iid, inOutInterface, cbp, reply);
+
+	// M20 基礎の PIO（立上り・底盤・地中梁・床付けを 1 つの立体オブジェクトとして描き、
+	// OIP で寸法を編集できる。Extensions/ExtFoundation.h 冒頭）。
+	REGISTER_Extension<HomeskzIfcImport::CExtFoundation>(
 		GROUPID_ExtensionParametric, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
 	return reply;

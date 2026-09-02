@@ -118,6 +118,15 @@ vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 # added to core/Document.h.
 vw_add_test(CoreDocumentTests CoreDocumentTests.cpp CORE)
 
+# The foundation as one object (src/core/Foundation): the parametric ground-beam
+# section (fit / rebuild round trip), the representative values and how an edit is
+# spread over the parts, the solids the PIO draws (slab, gravel, risers, beams with
+# the bite, the bedding under the ground beams incl. the perimeter spill and the
+# clipping against crossing beams), the plan outlines, and the record text the PIO
+# keeps its parts in (encode / decode). Uses the real fixtures for the bedding
+# invariants that M17 established.
+vw_add_test(CoreFoundationTests CoreFoundationTests.cpp CORE FIXTURES)
+
 # Progress reporting (src/core/Progress): the display-text formatting, the
 # proportional progress-bar share per phase, the step counting (reset per phase,
 # clamped to the total) and the latched cancellation flag. Pure logic shared by

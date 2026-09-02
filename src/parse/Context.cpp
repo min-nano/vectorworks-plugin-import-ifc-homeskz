@@ -112,7 +112,7 @@ namespace HomeskzIfcImport::parse
 		return *fColumns;
 	}
 
-	const std::vector<core::WallCommand>& Context::walls()
+	const std::vector<RiserPiece>& Context::walls()
 	{
 		if (!fWalls.has_value())
 			fWalls = buildWallCommands(*this, columns());

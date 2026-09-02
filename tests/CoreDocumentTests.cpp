@@ -677,351 +677,136 @@ TEST(validate_rejects_roof_with_nonpositive_thickness)
 }
 
 // ---------------------------------------------------------------------------
-// 基礎（立上り＝壁・底盤＝スラブ）の検証（docs/DEV-NOTES.md M9）
+// 基礎（1 つの PIO の命令。docs/DEV-NOTES.md M20）の検証
 // ---------------------------------------------------------------------------
 
 namespace
 {
-	// 検証を通る立上り命令（1 本）。個々のテストはここから 1 か所だけ崩す。
-	core::WallCommand validWall()
+	// 検証を通る基礎命令（底盤 1 枚・立上り 1 本・地中梁 1 本）。個々のテストはここから
+	// 1 か所だけ崩す。
+	core::FoundationCommand validFoundation()
 	{
-		core::WallCommand wall;
-		wall.layer = "F-立上り";
-		wall.drawClass = "04構造-01基礎-03立ち上がり";
-		wall.start = core::Vec2{0.0, 0.0};
-		wall.end = core::Vec2{3640.0, 0.0};
-		wall.thickness = 120.0;
-		wall.components = {core::ComponentCommand{"コンクリート", "z構成要素-コンクリート", 120.0}};
-		wall.bottomBound = core::StoryBoundCommand{0, core::kLevelGL, -100.0};
-		wall.topBound = core::StoryBoundCommand{1, core::kLevelBeamTop, -190.0};
-		return wall;
-	}
-
-	// 検証を通る底盤命令（1 枚）。
-	core::SlabCommand validSlab()
-	{
-		core::SlabCommand slab;
-		slab.layer = "F-底盤";
-		slab.drawClass = "04構造-01基礎-02基礎スラブ";
-		slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}, core::Vec2{3640.0, 2730.0},
-						 core::Vec2{0.0, 2730.0}};
-		// 底盤の下は砕石 1 層（厚みは捨てコン + 砕石ぶん。M17）。
-		slab.components = {core::ComponentCommand{"コンクリート", "z構成要素-コンクリート", 150.0},
-						   core::ComponentCommand{"砕石", "z構成要素-砕石", 130.0}};
-		slab.datum = core::SlabDatum::Top;
-		slab.thickness = 150.0;
-		slab.elevation = 50.0;
-		slab.bound = core::StoryBoundCommand{0, core::kLevelSlabTop, 0.0};
-		return slab;
+		core::FoundationCommand foundation;
+		foundation.layer = "F-基礎";
+		foundation.drawClass = "04構造-01基礎-02基礎スラブ";
+		foundation.slabClass = "04構造-01基礎-02基礎スラブ";
+		foundation.riserClass = "04構造-01基礎-03立ち上がり";
+		foundation.leanConcreteClass = "z構成要素-捨てコンクリート";
+		foundation.gravelClass = "z構成要素-砕石";
+		foundation.slabs.push_back(
+			core::FoundationSlab{{core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0},
+								  core::Vec2{3640.0, 2730.0}, core::Vec2{0.0, 2730.0}},
+								 50.0,
+								 150.0});
+		foundation.risers.push_back(core::FoundationRiser{
+			core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}, 120.0, -100.0, 400.0});
+		foundation.beams.push_back(core::FoundationBeam{core::Vec2{0.0, 1365.0},
+														core::Vec2{3640.0, 1365.0}, 300.0, 200.0,
+														200.0, 140.0, -100.0, 140.0});
+		foundation.params = core::foundationBaseParams(foundation);
+		return foundation;
 	}
 } // namespace
 
-TEST(validate_accepts_document_with_valid_wall_and_slab)
+TEST(validate_accepts_document_with_or_without_foundation)
 {
-	core::Document document;
-	document.walls.push_back(validWall());
-	document.slabs.push_back(validSlab());
-	CHECK(core::validateDocument(document));
+	core::Document with;
+	with.foundation = validFoundation();
+	CHECK(core::validateDocument(with));
+	// 基礎の無いモデル（命令が空）も妥当。
+	CHECK(core::validateDocument(core::Document{}));
 }
 
-TEST(validate_rejects_wall_with_empty_layer_or_class)
+TEST(validate_rejects_foundation_with_empty_layer_or_classes)
 {
-	core::Document layer;
-	core::WallCommand wall = validWall();
-	wall.layer = "";
-	layer.walls.push_back(wall);
-	CHECK(!core::validateDocument(layer));
-
-	core::Document drawClass;
-	wall = validWall();
-	wall.drawClass = "";
-	drawClass.walls.push_back(wall);
-	CHECK(!core::validateDocument(drawClass));
-}
-
-TEST(validate_rejects_wall_without_components)
-{
-	// 構成層は描画側が壁へ直接組む（合計＝壁厚）ので、無い壁は描けない（底盤と同じ関門）。
-	core::Document components;
-	core::WallCommand wall = validWall();
-	wall.components.clear();
-	components.walls.push_back(wall);
-	CHECK(!core::validateDocument(components));
-}
-
-TEST(validate_rejects_wall_with_nonpositive_thickness)
-{
-	// 壁厚 0 の立上りは実体を持たない（CreateWall に渡す厚みがそのまま 0 になる）。
-	core::Document document;
-	core::WallCommand wall = validWall();
-	wall.thickness = 0.0;
-	document.walls.push_back(wall);
-	CHECK(!core::validateDocument(document));
-}
-
-TEST(validate_rejects_degenerate_wall)
-{
-	// 壁芯の始点と終点が同じ立上りは向き・長さが決まらない。
-	core::Document document;
-	core::WallCommand wall = validWall();
-	wall.end = wall.start;
-	document.walls.push_back(wall);
-	CHECK(!core::validateDocument(document));
-}
-
-TEST(validate_rejects_wall_with_empty_bound_level)
-{
-	// レベル種別が空だと SetWallOverallHeights が解決できず、高さがレイヤの
-	// 「壁の高さ」設定に落ちる（構造材・スラブと同じ関門）。
-	core::Document bottomEmpty;
-	core::WallCommand wall = validWall();
-	wall.bottomBound.level = "";
-	bottomEmpty.walls.push_back(wall);
-	CHECK(!core::validateDocument(bottomEmpty));
-
-	core::Document topEmpty;
-	wall = validWall();
-	wall.topBound.level = "";
-	topEmpty.walls.push_back(wall);
-	CHECK(!core::validateDocument(topEmpty));
-}
-
-TEST(validate_rejects_slab_with_empty_layer_or_class)
-{
-	core::Document layer;
-	core::SlabCommand slab = validSlab();
-	slab.layer = "";
-	layer.slabs.push_back(slab);
-	CHECK(!core::validateDocument(layer));
-
-	core::Document drawClass;
-	slab = validSlab();
-	slab.drawClass = "";
-	drawClass.slabs.push_back(slab);
-	CHECK(!core::validateDocument(drawClass));
-}
-
-TEST(validate_rejects_slab_with_too_few_boundary_points)
-{
-	// 3 点未満は面にならない（床板と同じ関門）。
-	core::Document document;
-	core::SlabCommand slab = validSlab();
-	slab.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}};
-	document.slabs.push_back(slab);
-	CHECK(!core::validateDocument(document));
-}
-
-TEST(validate_rejects_slab_with_nonpositive_thickness)
-{
-	// コンクリート厚 0 の底盤は構成層のコンクリート層を持てない。
-	core::Document document;
-	core::SlabCommand slab = validSlab();
-	slab.thickness = 0.0;
-	document.slabs.push_back(slab);
-	CHECK(!core::validateDocument(document));
-}
-
-TEST(validate_rejects_slab_with_no_components_or_empty_bound_level)
-{
-	core::Document components;
-	core::SlabCommand slab = validSlab();
-	slab.components.clear();
-	components.slabs.push_back(slab);
-	CHECK(!core::validateDocument(components));
-
-	core::Document bound;
-	slab = validSlab();
-	slab.bound.level = "";
-	bound.slabs.push_back(slab);
-	CHECK(!core::validateDocument(bound));
-}
-
-// ---------------------------------------------------------------------------
-// 基礎の高度化（壁結合・地中梁＝底盤のモディファイア）の検証（docs/DEV-NOTES.md M10）
-// ---------------------------------------------------------------------------
-
-namespace
-{
-	// 検証を通る壁結合命令（walls に 2 本ある前提）。
-	core::WallJoinCommand validJoin()
-	{
-		core::WallJoinCommand join;
-		join.a = 0;
-		join.b = 1;
-		join.point = core::Vec2{3640.0, 0.0};
-		join.pickA = core::Vec2{3400.0, 0.0};
-		join.pickB = core::Vec2{3640.0, 240.0};
-		join.joinType = core::WallJoinType::L;
-		join.capped = false;
-		return join;
-	}
-
-	// 検証を通る地中梁（台形プリズム）。
-	core::ModifierCommand validModifier()
-	{
-		core::ModifierCommand modifier;
-		modifier.profile = {core::Vec2{-150.0, 0.0}, core::Vec2{150.0, 0.0},
-							core::Vec2{350.0, 140.0}, core::Vec2{-350.0, 140.0}};
-		modifier.depth = 2730.0;
-		modifier.origin = core::Vec3{0.0, 0.0, -240.0};
-		modifier.azimuth = 0.0;
-		return modifier;
-	}
-
-	// 立上り 2 本＋壁結合 1 件の Document（結合の検証は walls の本数を見るため対で作る）。
-	core::Document documentWithJoin(const core::WallJoinCommand& join)
+	// レイヤ名・PIO のクラス・ソリッドの素材クラス 4 つのどれが空でも弾く（クラス名は PIO の
+	// レコードへ保存され、空だとソリッドが既定クラスへ散る）。
+	for (std::string core::FoundationCommand::*field :
+		 {&core::FoundationCommand::layer, &core::FoundationCommand::drawClass,
+		  &core::FoundationCommand::slabClass, &core::FoundationCommand::riserClass,
+		  &core::FoundationCommand::leanConcreteClass, &core::FoundationCommand::gravelClass})
 	{
 		core::Document document;
-		document.walls.push_back(validWall());
-		core::WallCommand second = validWall();
-		second.start = core::Vec2{3640.0, 0.0};
-		second.end = core::Vec2{3640.0, 2730.0};
-		document.walls.push_back(second);
-		document.wallJoins.push_back(join);
-		return document;
+		core::FoundationCommand foundation = validFoundation();
+		foundation.*field = "";
+		document.foundation = foundation;
+		CHECK(!core::validateDocument(document));
 	}
-} // namespace
-
-TEST(validate_accepts_document_with_valid_wall_join)
-{
-	CHECK(core::validateDocument(documentWithJoin(validJoin())));
 }
 
-TEST(validate_rejects_wall_join_of_a_wall_with_itself)
+TEST(validate_rejects_foundation_without_parts)
 {
-	core::WallJoinCommand join = validJoin();
-	join.b = join.a;
-	CHECK(!core::validateDocument(documentWithJoin(join)));
-}
-
-TEST(validate_rejects_wall_join_pointing_outside_walls)
-{
-	// 範囲外の添字は描画側で壁ハンドルを引けず、黙って結合されないだけになるので弾く。
-	core::WallJoinCommand join = validJoin();
-	join.b = 2; // walls は 2 本（添字 0/1）
-	CHECK(!core::validateDocument(documentWithJoin(join)));
-
-	core::Document empty;
-	empty.wallJoins.push_back(validJoin()); // 立上りが 1 本も無い
-	CHECK(!core::validateDocument(empty));
-}
-
-TEST(validate_accepts_slab_with_ground_beam_modifiers)
-{
+	// 部品の無い基礎は空の PIO になるだけなので弾く（解析側は命令を出さない）。
 	core::Document document;
-	core::SlabCommand slab = validSlab();
-	slab.modifiers.push_back(validModifier());
-	document.slabs.push_back(slab);
-	CHECK(core::validateDocument(document));
+	core::FoundationCommand foundation = validFoundation();
+	foundation.slabs.clear();
+	foundation.risers.clear();
+	foundation.beams.clear();
+	document.foundation = foundation;
+	CHECK(!core::validateDocument(document));
 }
 
-TEST(validate_rejects_degenerate_ground_beam_modifier)
+TEST(validate_rejects_bad_slab_parts)
 {
-	// 断面が面にならない（2 点）・押し出し長が 0 のプリズムは描けない。
-	core::Document profile;
-	core::SlabCommand slab = validSlab();
-	core::ModifierCommand modifier = validModifier();
-	modifier.profile.resize(2);
-	slab.modifiers.push_back(modifier);
-	profile.slabs.push_back(slab);
-	CHECK(!core::validateDocument(profile));
+	// 外形が面にならない（2 点）／厚み 0 の底盤。
+	core::Document boundary;
+	core::FoundationCommand foundation = validFoundation();
+	foundation.slabs[0].boundary.resize(2);
+	boundary.foundation = foundation;
+	CHECK(!core::validateDocument(boundary));
 
-	core::Document depth;
-	slab = validSlab();
-	modifier = validModifier();
-	modifier.depth = 0.0;
-	slab.modifiers.push_back(modifier);
-	depth.slabs.push_back(slab);
-	CHECK(!core::validateDocument(depth));
+	core::Document thickness;
+	foundation = validFoundation();
+	foundation.slabs[0].thickness = 0.0;
+	thickness.foundation = foundation;
+	CHECK(!core::validateDocument(thickness));
 }
 
-TEST(validate_checks_the_ground_beam_bedding)
+TEST(validate_rejects_bad_riser_parts)
 {
-	// 床付け（捨てコン・砕石）は地中梁と押し出しの向き・断面の座標系を共有するので、断面が
-	// 面になること・素材クラス名が非空であること・押し出し長が正であることだけを見る。
-	core::Document document;
-	core::SlabCommand slab = validSlab();
-	core::ModifierCommand modifier = validModifier();
-	modifier.beddings.push_back(
-		core::BeddingCommand{{core::Vec2{-150.0, -130.0}, core::Vec2{150.0, -130.0},
-							  core::Vec2{150.0, 0.0}, core::Vec2{-150.0, 0.0}},
-							 "z構成要素-砕石",
-							 0.0,
-							 modifier.depth});
-	slab.modifiers.push_back(modifier);
-	document.slabs.push_back(slab);
-	CHECK(core::validateDocument(document));
-
-	core::Document noClass;
-	core::ModifierCommand bad = modifier;
-	bad.beddings[0].drawClass = "";
-	slab = validSlab();
-	slab.modifiers.push_back(bad);
-	noClass.slabs.push_back(slab);
-	CHECK(!core::validateDocument(noClass));
+	// 幅 0／壁芯が縮退／天端が下端以下の立上り。
+	core::Document width;
+	core::FoundationCommand foundation = validFoundation();
+	foundation.risers[0].width = 0.0;
+	width.foundation = foundation;
+	CHECK(!core::validateDocument(width));
 
 	core::Document degenerate;
-	bad = modifier;
-	bad.beddings[0].profile.resize(2);
-	slab = validSlab();
-	slab.modifiers.push_back(bad);
-	degenerate.slabs.push_back(slab);
+	foundation = validFoundation();
+	foundation.risers[0].end = foundation.risers[0].start;
+	degenerate.foundation = foundation;
 	CHECK(!core::validateDocument(degenerate));
 
-	core::Document noDepth;
-	bad = modifier;
-	bad.beddings[0].depth = 0.0;
-	slab = validSlab();
-	slab.modifiers.push_back(bad);
-	noDepth.slabs.push_back(slab);
-	CHECK(!core::validateDocument(noDepth));
+	core::Document flat;
+	foundation = validFoundation();
+	foundation.risers[0].top = foundation.risers[0].bottom;
+	flat.foundation = foundation;
+	CHECK(!core::validateDocument(flat));
 }
 
-// --------------------------------------------------------------------------
-// - core::raiseModifierTop（地中梁の可視ソリッドを底盤へ呑み込ませる）
-// ---------------------------------------------------------------------------
-
-TEST(raise_modifier_top_extends_along_the_slanted_side)
+TEST(validate_rejects_bad_beam_parts)
 {
-	// 台形の天端（最大 v）だけを bite ぶん上げる。側辺は斜めなので、u も勾配ぶんずらして
-	// **側面が実形状の斜面の直線延長**になるようにする（真上へ上げると勾配が変わる）。
-	// 下端 (±150, 0) → 天端 (±350, 140) の側辺は「v が 140 増える間に u が 200 増える」
-	// ので、bite=10 なら u は 200/140 × 10 ≈ 14.2857 ずれる。
-	const core::ModifierCommand raised = core::raiseModifierTop(validModifier(), 10.0);
-	CHECK_EQ(raised.profile.size(), std::size_t{4});
-	if (raised.profile.size() != 4)
-		return;
-	// 下端の 2 点は動かない。
-	CHECK(raised.profile[0].x == -150.0 && raised.profile[0].y == 0.0);
-	CHECK(raised.profile[1].x == 150.0 && raised.profile[1].y == 0.0);
-	// 天端の 2 点は v が +10、u は斜辺に沿って外側へ（左右対称）。
-	const double expected = 350.0 + (200.0 / 140.0 * 10.0);
-	CHECK(near(raised.profile[2].x, expected, 1e-9));
-	CHECK(near(raised.profile[2].y, 150.0, 1e-9));
-	CHECK(near(raised.profile[3].x, -expected, 1e-9));
-	CHECK(near(raised.profile[3].y, 150.0, 1e-9));
-	// 断面以外（押し出し長・原点・方位角）はそのまま。
-	CHECK(raised.depth == validModifier().depth);
-	CHECK(raised.origin.z == validModifier().origin.z);
-}
-
-TEST(raise_modifier_top_moves_vertical_sides_straight_up)
-{
-	// 側辺が鉛直な断面（矩形）は u が変わらず、天端だけが真上へ上がる。
-	core::ModifierCommand rectangular = validModifier();
-	rectangular.profile = {core::Vec2{-150.0, 0.0}, core::Vec2{150.0, 0.0},
-						   core::Vec2{150.0, 140.0}, core::Vec2{-150.0, 140.0}};
-	const core::ModifierCommand raised = core::raiseModifierTop(rectangular, 10.0);
-	CHECK(raised.profile[2].x == 150.0 && raised.profile[2].y == 150.0);
-	CHECK(raised.profile[3].x == -150.0 && raised.profile[3].y == 150.0);
-}
-
-TEST(raise_modifier_top_is_a_no_op_without_bite)
-{
-	// 呑み込み量が 0 以下なら実形状のまま（削り取りモディファイアはこちらを使う）。
-	const core::ModifierCommand same = core::raiseModifierTop(validModifier(), 0.0);
-	CHECK_EQ(same.profile.size(), validModifier().profile.size());
-	CHECK(same.profile[2].y == 140.0);
+	// 中心線が縮退／下端幅 0／せい 0／負の張り出しの地中梁。
+	const auto broken = [](auto mutate)
+	{
+		core::Document document;
+		core::FoundationCommand foundation = validFoundation();
+		mutate(foundation.beams[0]);
+		document.foundation = foundation;
+		return !core::validateDocument(document);
+	};
+	CHECK(broken([](core::FoundationBeam& beam) { beam.end = beam.start; }));
+	CHECK(broken([](core::FoundationBeam& beam) { beam.bottomWidth = 0.0; }));
+	CHECK(broken([](core::FoundationBeam& beam) { beam.depth = 0.0; }));
+	CHECK(broken([](core::FoundationBeam& beam) { beam.haunchLeft = -1.0; }));
+	CHECK(broken([](core::FoundationBeam& beam) { beam.haunchHeight = -1.0; }));
+	// 張り出し 0（矩形断面）・斜め部の高さ 0 は正常。
+	CHECK(!broken(
+		[](core::FoundationBeam& beam)
+		{
+			beam.haunchLeft = 0.0;
+			beam.haunchRight = 0.0;
+		}));
 }
 
 // ---------------------------------------------------------------------------
@@ -1384,14 +1169,14 @@ TEST(section_height_range_wraps_elements_with_margin)
 	CHECK(near(end, 3000.0 + core::kSectionHeightMargin, 1e-6));
 }
 
-TEST(section_height_range_covers_floors_roofs_slabs_and_stories)
+TEST(section_height_range_covers_floors_roofs_foundation_and_stories)
 {
 	core::Document document;
-	// 基礎の底盤（天端 50・厚 150 → 下端 −100）と屋根（軒 6000）で上下が決まる。
-	core::SlabCommand slab;
-	slab.elevation = 50.0;
-	slab.thickness = 150.0;
-	document.slabs.push_back(slab);
+	// 基礎の底盤（天端 50・厚 150 → 下端 −100）の下には砕石（130）が敷かれるので、
+	// 足元は −230 になる。屋根（軒 6000）で上が決まる。
+	core::FoundationCommand foundation;
+	foundation.slabs.push_back(core::FoundationSlab{{}, 50.0, 150.0});
+	document.foundation = foundation;
 
 	core::RoofCommand roof;
 	roof.elevation = 6000.0;
@@ -1405,43 +1190,30 @@ TEST(section_height_range_covers_floors_roofs_slabs_and_stories)
 	double start = 0.0;
 	double end = 0.0;
 	CHECK(core::sectionHeightRange(document, start, end));
-	CHECK(near(start, -100.0 - core::kSectionHeightMargin, 1e-6));
+	CHECK(near(start, -230.0 - core::kSectionHeightMargin, 1e-6));
 	CHECK(near(end, 6000.0 + core::kSectionHeightMargin, 1e-6));
 }
 
-TEST(section_height_range_reaches_ground_beam_bottom)
+TEST(section_height_range_reaches_ground_beam_bedding_bottom)
 {
 	core::Document document;
-	// 底盤（天端 50・厚 150 → 下端 −100）に、そこから更に深く垂れ下がる地中梁を 1 本。
-	// **モデルの最深部は底盤の下端ではなく地中梁の下端**なので、範囲はそこまで届く。
-	core::SlabCommand slab;
-	slab.elevation = 50.0;
-	slab.thickness = 150.0;
-
-	// 台形断面（v=0 が梁下端）。origin.z＝梁下端の絶対 Z なので、下端 −700・上端 −100。
-	core::ModifierCommand modifier;
-	modifier.origin = core::Vec3{0.0, 0.0, -700.0};
-	modifier.depth = 2000.0;
-	modifier.profile = {core::Vec2{-75.0, 0.0}, core::Vec2{75.0, 0.0}, core::Vec2{150.0, 600.0},
-						core::Vec2{-150.0, 600.0}};
-	slab.modifiers.push_back(modifier);
-	document.slabs.push_back(slab);
+	// 底盤（天端 50・厚 150 → 下端 −100）に、そこから更に深く垂れ下がる地中梁（せい 600 →
+	// 下端 −700）を 1 本。**モデルの最深部は底盤ではなく地中梁の下の床付けの底**（梁下端から
+	// 更に 130 下＝ −830）なので、範囲はそこまで届く。立上りの天端（400）は底盤天端より高い
+	// ので上端になる。
+	core::FoundationCommand foundation;
+	foundation.slabs.push_back(core::FoundationSlab{{}, 50.0, 150.0});
+	foundation.risers.push_back(
+		core::FoundationRiser{core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, 120.0, -100.0, 400.0});
+	foundation.beams.push_back(core::FoundationBeam{core::Vec2{0.0, 0.0}, core::Vec2{2000.0, 0.0},
+													150.0, 75.0, 75.0, 600.0, -100.0, 600.0});
+	document.foundation = foundation;
 
 	double start = 0.0;
 	double end = 0.0;
 	CHECK(core::sectionHeightRange(document, start, end));
-	CHECK(near(start, -700.0 - core::kSectionHeightMargin, 1e-6));
-	CHECK(near(end, 50.0 + core::kSectionHeightMargin, 1e-6));
-
-	// 床付け（捨てコン・砕石）を敷くと**最深部はその下端**になる（梁下端から更に 130mm 下）。
-	document.slabs.front().modifiers.front().beddings.push_back(
-		core::BeddingCommand{{core::Vec2{-75.0, -130.0}, core::Vec2{75.0, -130.0},
-							  core::Vec2{75.0, 0.0}, core::Vec2{-75.0, 0.0}},
-							 "z構成要素-砕石",
-							 0.0,
-							 2000.0});
-	CHECK(core::sectionHeightRange(document, start, end));
 	CHECK(near(start, -830.0 - core::kSectionHeightMargin, 1e-6));
+	CHECK(near(end, 400.0 + core::kSectionHeightMargin, 1e-6));
 }
 
 TEST(section_height_range_covers_floors_and_rafters)
@@ -1537,10 +1309,16 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	floor.boundary = boundaryAt(1000.0);
 	document.floors.push_back(floor);
 
-	core::SlabCommand slab;
-	slab.layer = "F-底盤";
-	slab.boundary = boundaryAt(1100.0);
-	document.slabs.push_back(slab);
+	// 基礎は底盤の外形・立上りの壁芯・地中梁の中心線のすべてを見る（1 つの PIO に入る）。
+	core::FoundationCommand foundation;
+	foundation.layer = "F-基礎";
+	foundation.slabs.push_back(core::FoundationSlab{boundaryAt(1100.0), 50.0, 150.0});
+	foundation.risers.push_back(core::FoundationRiser{
+		core::Vec2{-1400.0, 0.0}, core::Vec2{1400.0, 0.0}, 120.0, -100.0, 400.0});
+	foundation.beams.push_back(core::FoundationBeam{core::Vec2{0.0, -1450.0},
+													core::Vec2{0.0, 1450.0}, 300.0, 200.0, 200.0,
+													140.0, -100.0, 140.0});
+	document.foundation = foundation;
 
 	core::RoofCommand roof;
 	roof.layer = "R-野地板";
@@ -1552,12 +1330,6 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	member.start = core::Vec2{-1300.0, -1300.0};
 	member.end = core::Vec2{1300.0, 1300.0};
 	document.members.push_back(member);
-
-	core::WallCommand wall;
-	wall.layer = "F-立上り";
-	wall.start = core::Vec2{-1400.0, 0.0};
-	wall.end = core::Vec2{1400.0, 0.0};
-	document.walls.push_back(wall);
 
 	core::RafterCommand rafter;
 	rafter.layer = "R-垂木";
@@ -1602,12 +1374,13 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	CHECK(near(min.y, -2200.0 - core::kPlanContentMargin));
 	CHECK(near(max.y, 2200.0 + core::kPlanContentMargin));
 
-	// レイヤで絞ると、線分・外形・点のどれも同じ規則で外れる（立上りだけが残る）。
-	CHECK(core::planContentBounds(document, {"F-立上り"}, min, max));
+	// レイヤで絞ると、線分・外形・点のどれも同じ規則で外れる（基礎だけが残る＝底盤の外形
+	// ±1100・立上りの壁芯 ±1400・地中梁の中心線 ±1450 を包む）。
+	CHECK(core::planContentBounds(document, {"F-基礎"}, min, max));
 	CHECK(near(min.x, -1400.0 - core::kPlanContentMargin));
 	CHECK(near(max.x, 1400.0 + core::kPlanContentMargin));
-	CHECK(near(min.y, 0.0 - core::kPlanContentMargin));
-	CHECK(near(max.y, 0.0 + core::kPlanContentMargin));
+	CHECK(near(min.y, -1450.0 - core::kPlanContentMargin));
+	CHECK(near(max.y, 1450.0 + core::kPlanContentMargin));
 
 	// 点だけのレイヤ（アンカーボルト）でも同じ。
 	CHECK(core::planContentBounds(document, {"F-アンカーボルト"}, min, max));

@@ -61,7 +61,7 @@ namespace HomeskzIfcImport::parse
 		// 床束（position を中心）が立上り 1 本の footprint を clearance だけ広げた領域に
 		// 入っているか。壁芯を軸に、直交方向は 半壁厚 + clearance、沿軸方向は区間の外側へ
 		// clearance まで見る（半壁厚は直交方向の寸法なので沿軸には効かない）。
-		bool wallCovers(const core::WallCommand& wall, const Vec2& position, double clearance)
+		bool wallCovers(const RiserPiece& wall, const Vec2& position, double clearance)
 		{
 			const Vec2 delta = wall.end - wall.start;
 			const double wallLength = core::length(delta);
@@ -243,11 +243,11 @@ namespace HomeskzIfcImport::parse
 	}
 
 	bool overlapsFoundationWall(const Vec2& position, double postWidth,
-								const std::vector<core::WallCommand>& walls)
+								const std::vector<RiserPiece>& walls)
 	{
 		// 床束の半幅ぶん（＋丸め誤差の下駄）だけ立上りの footprint を広げてから点で判定する。
 		const double clearance = (postWidth / 2.0) + kFloorPostWallMargin;
-		return std::ranges::any_of(walls, [&position, clearance](const core::WallCommand& wall)
+		return std::ranges::any_of(walls, [&position, clearance](const RiserPiece& wall)
 								   { return wallCovers(wall, position, clearance); });
 	}
 
@@ -264,7 +264,7 @@ namespace HomeskzIfcImport::parse
 		const std::vector<OhbikiRun> runs = mergeCollinearOhbiki(collectOhbikiLines(model));
 		// 立上りは**センタリング済み**の命令（人通口の分割・切り下げまで反映済み）。
 		// コンテキストが 1 回だけ組み立てたものを共有する（parse/Context）。
-		const std::vector<core::WallCommand>& walls = context.walls();
+		const std::vector<RiserPiece>& walls = context.walls();
 
 		std::vector<SymbolCommand> commands;
 		for (const OhbikiRun& run : runs)

@@ -5,11 +5,10 @@
 //
 //	**SDK ハンドルは Document に載せられない**（フェーズ間で運べない。CLAUDE.md
 //	「所有権」）ので、あるものを描いた側と、それを後から参照する側は、命令の並びの
-//	インデックスで受け渡す。いま 2 か所が使う:
-//	  * 立上り（drawWalls が記録）→ 壁結合（drawWallJoins が a / b で引く）
-//	  * 柱（drawColumns が記録）→ 伏図記号（drawColumnPlanMarks がデータタグの
-//	    関連付け先として引く）
-//	M13 の断面寸法データタグ（横架材ハンドル → タグ）も同じ形になる。
+//	インデックスで受け渡す。いま使うのは
+//	  * 横架材（drawMembers が記録）→ 断面寸法データタグ（伏図・軸組図が関連付け先として引く）
+//	  * 柱（drawColumns が記録）
+//	で、M9〜M19 の立上り → 壁結合の受け渡しは M20（基礎を 1 つの PIO に）で無くなった。
 //
 //	【SDK 非依存のヘッダ】draw/*.h は Extensions/ExtMenu からも include されるので
 //	SDK 型を持てない（draw/DrawUtil.h 冒頭）。そこで**中身（MCObjectHandle の表）は

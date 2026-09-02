@@ -179,10 +179,9 @@ TEST(FoundationSheetOnlyWhenFoundationExists)
 					   // 図番・図面タイトルはシートレイヤ番号・タイトルと同じ値。
 					   CHECK(sheets[0].viewport.drawingNumber == sheets[0].number);
 					   CHECK(sheets[0].viewport.drawingTitle == sheets[0].title);
-					   // 底盤・立上り・床束・アンカーボルト・通り芯の 5 枚。
-					   CHECK(sheets[0].viewport.layers.size() == 5);
-					   CHECK(contains(sheets[0].viewport.layers, "F-底盤"));
-					   CHECK(contains(sheets[0].viewport.layers, "F-立上り"));
+					   // 基礎（M20 で 1 つの PIO）・床束・アンカーボルト・通り芯の 4 枚。
+					   CHECK(sheets[0].viewport.layers.size() == 4);
+					   CHECK(contains(sheets[0].viewport.layers, "F-基礎"));
 					   CHECK(contains(sheets[0].viewport.layers, "F-床束"));
 					   CHECK(contains(sheets[0].viewport.layers, kLayerFoundationAnchor));
 					   CHECK(contains(sheets[0].viewport.layers, core::kGridLayer));

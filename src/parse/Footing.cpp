@@ -1,10 +1,13 @@
 //
 //	parse/Footing.cpp
 //
-//	基礎解析の実装（基礎ストーリ・立上り・底盤と、その統合・外面合わせ）。【SDK 非依存】
-//	ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
+//	基礎解析の実装（基礎ストーリ・立上り・底盤・地中梁の部品と、その統合・外面合わせ、
+//	そして 1 つの基礎命令への組み立て）。【SDK 非依存】ここでは VectorWorks SDK を include
+//	しない（core/parse のみ依存）。
 //
-//	M10 で人通口（立上りの分割・切り下げ）・壁結合・地中梁（底盤のモディファイア）を足した。
+//	M10 で人通口（立上りの分割・切り下げ）・地中梁を足し、M20 で壁結合・端部のキャップ・
+//	床付けの計算を落とした（基礎は 1 つの PIO になり、床付けは PIO が描くときに
+//	core/Foundation が組み立てる。parse/Footing.h 冒頭）。
 //	**配筋は保留**（足すときは wallSectionKey / slabMergeKey にも足す。理由は各キーの doc
 //	コメント）。
 //
@@ -25,6 +28,7 @@
 #include <limits>
 #include <map>
 #include <numbers>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <string>
@@ -34,14 +38,11 @@
 
 namespace HomeskzIfcImport::parse
 {
+	using core::BeamPrism;
 	using core::ColumnCommand;
-	using core::ComponentCommand;
 	using core::LevelCommand;
-	using core::SlabCommand;
-	using core::StoryBoundCommand;
 	using core::StoryCommand;
 	using core::Vec2;
-	using core::WallCommand;
 
 	namespace
 	{
@@ -76,24 +77,16 @@ namespace HomeskzIfcImport::parse
 
 		// --- 立上り（壁）------------------------------------------------------------
 
-		// 立上りの断面形状（統合可否）を表すキー。レイヤ・クラス・壁厚・上下端の高さ基準がす
-		// べて一致する立上り同士だけを統合対象にする。
+		// 立上りの断面形状（統合可否）を表すキー。壁厚・下端・天端がすべて一致する立上り
+		// 同士だけを統合対象にする。
 		// **配筋（M10）を足すときはこのキーにも足す**（配筋の違う立上りを 1 本へ統合すると片
 		// 方の配筋が失われるため）。
-		using WallKey = std::tuple<std::string, std::string, long long, int, std::string, long long,
-								   int, std::string, long long>;
+		using WallKey = std::tuple<long long, long long, long long>;
 
-		WallKey wallSectionKey(const WallCommand& wall)
+		WallKey wallSectionKey(const RiserPiece& wall)
 		{
-			return WallKey{wall.layer,
-						   wall.drawClass,
-						   roundKey(wall.thickness, 1e-3),
-						   wall.bottomBound.storyOffset,
-						   wall.bottomBound.level,
-						   roundKey(wall.bottomBound.offset, kWallMergeDistTol),
-						   wall.topBound.storyOffset,
-						   wall.topBound.level,
-						   roundKey(wall.topBound.offset, kWallMergeDistTol)};
+			return WallKey{roundKey(wall.thickness, 1e-3), roundKey(wall.bottom, kWallMergeDistTol),
+						   roundKey(wall.top, kWallMergeDistTol)};
 		}
 
 		// 立上り b が a と**同一直線上**（平行かつ壁芯が同じ線）にあるか。区間の重なりは
@@ -102,8 +95,7 @@ namespace HomeskzIfcImport::parse
 		//
 		// **統合（重なり／接触が要る）と、自由端の延長制限（離れた隣も要る）が同じ「同一直線
 		// 判定」を共有する**ので、条件はここに 1 つだけ置く。
-		bool wallsOnSameLine(const WallCommand& a, const WallCommand& b, double& outLo,
-							 double& outHi)
+		bool wallsOnSameLine(const RiserPiece& a, const RiserPiece& b, double& outLo, double& outHi)
 		{
 			const Vec2 da = a.end - a.start;
 			const Vec2 db = b.end - b.start;
@@ -130,7 +122,7 @@ namespace HomeskzIfcImport::parse
 
 		// 立上り a・b が同一直線上にあり、区間が重なる／接触するか。同一直線判定は
 		// wallsOnSameLine と共有する。
-		bool wallsConnectedCollinear(const WallCommand& a, const WallCommand& b)
+		bool wallsConnectedCollinear(const RiserPiece& a, const RiserPiece& b)
 		{
 			double lo = 0.0;
 			double hi = 0.0;
@@ -143,17 +135,17 @@ namespace HomeskzIfcImport::parse
 		// 同一断面の立上り群のうち、同一直線上で連続するものを 1 本に統合する。連結成分の
 		// 骨格は core/UnionFind の connectedComponents（代表＝最小インデックス・出力は代表
 		// 昇順＝列挙順に依存しない決定的な並び。決定性の担保も同所）。
-		std::vector<WallCommand> mergeWallGroup(const std::vector<WallCommand>& walls)
+		std::vector<RiserPiece> mergeWallGroup(const std::vector<RiserPiece>& walls)
 		{
 			const std::vector<std::vector<std::size_t>> components =
 				core::connectedComponents(walls.size(), [&walls](std::size_t i, std::size_t j)
 										  { return wallsConnectedCollinear(walls[i], walls[j]); });
 
-			std::vector<WallCommand> merged;
+			std::vector<RiserPiece> merged;
 			merged.reserve(components.size());
 			for (const std::vector<std::size_t>& indices : components)
 			{
-				const WallCommand& base = walls[indices.front()];
+				const RiserPiece& base = walls[indices.front()];
 				if (indices.size() == 1)
 				{
 					merged.push_back(base);
@@ -161,7 +153,7 @@ namespace HomeskzIfcImport::parse
 				}
 				// 先頭の壁芯方向へ全端点を射影し、最小〜最大区間の 1 本にする（core/Geometry
 				// の collinearSpan。高さ基準・壁厚・クラスは先頭のものを引き継ぐ）。
-				WallCommand cmd = base;
+				RiserPiece cmd = base;
 				core::collinearSpan(walls, indices, cmd.start, cmd.end);
 				merged.push_back(cmd);
 			}
@@ -175,7 +167,7 @@ namespace HomeskzIfcImport::parse
 		// 外面までモデル化されるため、コーナーでは壁芯どうしの交点が壁の端から半壁厚ほど
 		// 離れた位置に来る。固定 1mm の許容だと外周コーナーが「両方とも内部で交わる」と
 		// 誤判定され、自由端の判定（延長する／しない）を取り違える。
-		bool wallIntersection(const WallCommand& a, const WallCommand& b, Vec2& outPoint,
+		bool wallIntersection(const RiserPiece& a, const RiserPiece& b, Vec2& outPoint,
 							  bool& outAAtEnd, bool& outBAtEnd)
 		{
 			const Vec2 r = a.end - a.start;
@@ -212,7 +204,7 @@ namespace HomeskzIfcImport::parse
 		// 端どうしが接する立上り**はどちらの端も自由端に見える。そのまま半壁厚ずつ延長すると
 		// 互いに食い込み、実データで 75mm（片側）・150mm（両側）の重なりになっていた（統合
 		// できない＝上端／下端の違う隣どうしで顕在化する。docs/DEV-NOTES.md M10）。
-		void collinearAbutment(const WallCommand& a, const WallCommand& b, bool& outAtStart,
+		void collinearAbutment(const RiserPiece& a, const RiserPiece& b, bool& outAtStart,
 							   bool& outAtEnd)
 		{
 			outAtStart = false;
@@ -263,7 +255,7 @@ namespace HomeskzIfcImport::parse
 		// 人通口の区間が乗っている立上りの添字を返す。開口が (1) 壁芯と平行で (2)
 		// 壁芯線上（直交距離が許容内）にあり (3) 開口の中点が壁芯区間内にある立上りを探す。
 		// 側並び（直交距離が半壁厚ある平行壁）には乗らない。見つからなければ walls.size()。
-		std::size_t findOpeningWall(const std::vector<WallCommand>& walls,
+		std::size_t findOpeningWall(const std::vector<RiserPiece>& walls,
 									const WallOpening& opening)
 		{
 			const Vec2 delta = opening.end - opening.start;
@@ -277,7 +269,7 @@ namespace HomeskzIfcImport::parse
 
 			for (std::size_t i = 0; i < walls.size(); ++i)
 			{
-				const WallCommand& wall = walls[i];
+				const RiserPiece& wall = walls[i];
 				const Vec2 axis = wall.end - wall.start;
 				const double length = core::length(axis);
 				if (length <= 0.0)
@@ -301,9 +293,8 @@ namespace HomeskzIfcImport::parse
 		// 人通口の区間で立上りを分割／切り下げた列を返す。開口の下端が底盤天端以下なら中間区
 		// 間を出さず両側だけを、それより高ければ天端を開口下端へ切り下げた中間区間を挟む。
 		// 端部の長さ補正はしない（実寸法のまま）。
-		std::vector<WallCommand> carveWallOpening(const WallCommand& wall,
-												  const WallOpening& opening, double slabTopAbs,
-												  double beamTopAbs)
+		std::vector<RiserPiece> carveWallOpening(const RiserPiece& wall, const WallOpening& opening,
+												 double slabTopAbs)
 		{
 			const Vec2 axis = wall.end - wall.start;
 			const double length = core::length(axis);
@@ -320,154 +311,35 @@ namespace HomeskzIfcImport::parse
 			if (o1 - o0 <= kOpeningMinSegment)
 				return {wall};
 
-			const auto segment = [&](double t0, double t1, const StoryBoundCommand& topBound)
+			const auto segment = [&](double t0, double t1, double top)
 			{
-				WallCommand cmd = wall;
+				RiserPiece cmd = wall;
 				cmd.start = Vec2{wall.start.x + (ux * t0), wall.start.y + (uy * t0)};
 				cmd.end = Vec2{wall.start.x + (ux * t1), wall.start.y + (uy * t1)};
-				cmd.topBound = topBound;
+				cmd.top = top;
 				return cmd;
 			};
 
-			std::vector<WallCommand> segments;
+			std::vector<RiserPiece> segments;
 			if (o0 > kOpeningMinSegment)
-				segments.push_back(segment(0.0, o0, wall.topBound));
+				segments.push_back(segment(0.0, o0, wall.top));
 			// 開口の下端が底盤天端より高ければ、その区間だけ天端を切り下げた立上りを挟む。
 			if (opening.zBottom > slabTopAbs + kWallMergeDistTol)
-			{
-				StoryBoundCommand lowered = wall.topBound;
-				lowered.offset = opening.zBottom - beamTopAbs;
-				segments.push_back(segment(o0, o1, lowered));
-			}
+				segments.push_back(segment(o0, o1, opening.zBottom));
 			if (length - o1 > kOpeningMinSegment)
-				segments.push_back(segment(o1, length, wall.topBound));
+				segments.push_back(segment(o1, length, wall.top));
 			return segments;
-		}
-
-		// --- 壁結合 --------------------------------------------------------------------
-
-		// 立上りの天端高さの比較値。基礎の立上りはすべて同じレベル（1 階の横架材天端）
-		// へ上端をバインドするので、offset だけで高低を比べられる。
-		double wallTop(const WallCommand& wall)
-		{
-			return wall.topBound.offset;
-		}
-
-		// 壁芯上の点が立上りの端点とみなせるか。端からの距離が半壁厚 + kWallEndpointTol
-		// 以内なら端点（立上りは相手壁の外面まで伸びるため、コーナーの交点が壁の端から半壁厚
-		// 離れる。wallIntersection と同じ考え）。
-		bool wallPointAtEnd(const WallCommand& wall, const Vec2& point)
-		{
-			const Vec2 axis = wall.end - wall.start;
-			const double length = core::length(axis);
-			if (length <= 0.0)
-				return true;
-			const double t =
-				(((point.x - wall.start.x) * axis.x) + ((point.y - wall.start.y) * axis.y)) /
-				(length * length);
-			const double frac = ((wall.thickness / 2.0) + kWallEndpointTol) / length;
-			return (t <= frac) || (t >= 1.0 - frac);
-		}
-
-		// 交点から wall の指定した端点の方向へ寄せた壁芯上の点を返す。寄せ量は offset を
-		// 「交点〜その端点の距離 × kPickOffsetFrac」でクランプした値。端点が交点と同じ位置なら
-		// 交点をそのまま返す。keptSidePick と、通し壁のピック点をずらす側の指定で共有する。
-		Vec2 sidePick(const WallCommand& wall, const Vec2& junction, double offset, bool towardEnd)
-		{
-			const Vec2 target = towardEnd ? wall.end : wall.start;
-			const Vec2 delta = target - junction;
-			const double length = core::length(delta);
-			if (length <= 0.0)
-				return junction;
-			const double step = std::min(offset, length * kPickOffsetFrac) / length;
-			return Vec2{junction.x + (delta.x * step), junction.y + (delta.y * step)};
-		}
-
-		// 交点から「残す側」（＝交点から遠い端点の方向）へ寄せたピック点を返す。壁芯長
-		// 0 の壁は交点をそのまま返す。
-		Vec2 keptSidePick(const WallCommand& wall, const Vec2& junction, double offset)
-		{
-			const double d1 = core::distance(junction, wall.start);
-			const double d2 = core::distance(junction, wall.end);
-			return sidePick(wall, junction, offset, d2 >= d1);
-		}
-
-		// 立上りの壁芯方向ベクトルと長さ。
-		void wallDirection(const WallCommand& wall, double& outDx, double& outDy, double& outLength)
-		{
-			outDx = wall.end.x - wall.start.x;
-			outDy = wall.end.y - wall.start.y;
-			outLength = std::hypot(outDx, outDy);
-		}
-
-		// 同一交点に集まる立上りの集合（ジャンクション）。point は代表エッジの交点。
-		struct Junction
-		{
-			Vec2 point;
-			std::vector<std::size_t> walls; // 添字昇順
-		};
-
-		// 交差する立上りのペアから、同一交点に集まる立上りの集合を作る。全ペアの壁芯交点を求
-		// め、kJoinClusterTol 以内で近い交点を Union-Find で 1 つのジャンクションへ束ねる
-		// （3 本以上が 1 点に集まる場合、その全ペアの交点は数学的に同一点になるので
-		// 1 つに束ねられる）。並びは代表エッジの添字昇順。
-		std::vector<Junction> wallJunctions(const std::vector<WallCommand>& walls)
-		{
-			struct JoinEdge
-			{
-				std::size_t a = 0;
-				std::size_t b = 0;
-				Vec2 point;
-			};
-
-			std::vector<JoinEdge> edges;
-			const std::size_t n = walls.size();
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				for (std::size_t j = i + 1; j < n; ++j)
-				{
-					if (walls[i].layer != walls[j].layer)
-						continue;
-					Vec2 point;
-					bool aAtEnd = false;
-					bool bAtEnd = false;
-					if (!wallIntersection(walls[i], walls[j], point, aAtEnd, bAtEnd))
-						continue;
-					edges.push_back(JoinEdge{i, j, point});
-				}
-			}
-
-			// 交点が近接するエッジ同士を 1 つの交差部にまとめる（連結成分の骨格は
-			// core/UnionFind の connectedComponents）。
-			const std::vector<std::vector<std::size_t>> clusters = core::connectedComponents(
-				edges.size(), [&edges](std::size_t p, std::size_t q)
-				{ return core::distance(edges[p].point, edges[q].point) <= kJoinClusterTol; });
-
-			std::vector<Junction> junctions;
-			junctions.reserve(clusters.size());
-			for (const std::vector<std::size_t>& cluster : clusters)
-			{
-				std::set<std::size_t> indices;
-				for (const std::size_t edgeIndex : cluster)
-				{
-					indices.insert(edges[edgeIndex].a);
-					indices.insert(edges[edgeIndex].b);
-				}
-				Junction junction;
-				junction.point = edges[cluster.front()].point; // 代表＝最小エッジ添字
-				junction.walls.assign(indices.begin(), indices.end());
-				junctions.push_back(std::move(junction));
-			}
-			return junctions;
 		}
 
 		// --- 地中梁（底盤のモディファイア）----------------------------------------------
 
-		// 地中梁の押し出し方向（方位角）の水平単位ベクトル。
-		Vec2 groundBeamAxisDir(const core::ModifierCommand& modifier)
+		// 地中梁の押し出し方向（方位角）の水平単位ベクトル（core::beamPrismAxes の axis）。
+		Vec2 groundBeamAxisDir(const BeamPrism& prism)
 		{
-			const double phi = modifier.azimuth * std::numbers::pi / 180.0;
-			return Vec2{std::cos(phi), std::sin(phi)};
+			Vec2 axis;
+			Vec2 width;
+			core::beamPrismAxes(prism, axis, width);
+			return axis;
 		}
 
 		// 断面形状（統合可否）を表す正規化キー。頂点を許容値で丸め、巻きを CCW に揃えたうえで
@@ -476,7 +348,7 @@ namespace HomeskzIfcImport::parse
 		// 別キーになり統合されない。
 		using GroundBeamProfileKey = std::vector<std::pair<long long, long long>>;
 
-		GroundBeamProfileKey groundBeamProfileKey(const core::ModifierCommand& modifier)
+		GroundBeamProfileKey groundBeamProfileKey(const BeamPrism& modifier)
 		{
 			std::vector<Vec2> pts;
 			pts.reserve(modifier.profile.size());
@@ -504,7 +376,7 @@ namespace HomeskzIfcImport::parse
 		// 実際に同一軸線上かは modifiersCollinear が判定する。
 		using GroundBeamKey = std::tuple<long long, long long, GroundBeamProfileKey>;
 
-		GroundBeamKey groundBeamGroupKey(const core::ModifierCommand& modifier)
+		GroundBeamKey groundBeamGroupKey(const BeamPrism& modifier)
 		{
 			return GroundBeamKey{roundKey(modifier.origin.z, kGroundBeamMergeTol),
 								 roundKey(modifier.azimuth, kGroundBeamAzimuthTol),
@@ -514,7 +386,7 @@ namespace HomeskzIfcImport::parse
 		// 地中梁 a・b が同一軸線上（同一高さ）にあり区間が連続するか。(1) 高さが一致、(2)
 		// 方向が平行、(3) b の原点が a の軸線上、(4) a の区間 [0, depth] と b の射影区間が重
 		// なる／接触する。
-		bool modifiersCollinear(const core::ModifierCommand& a, const core::ModifierCommand& b)
+		bool modifiersCollinear(const BeamPrism& a, const BeamPrism& b)
 		{
 			if (std::abs(a.origin.z - b.origin.z) > kGroundBeamMergeTol)
 				return false;
@@ -535,15 +407,14 @@ namespace HomeskzIfcImport::parse
 
 		// 同一軸線上の地中梁群を 1 本の台形プリズムへ統合する。先頭の軸方向へ全端点を射影し、
 		// 最小〜最大区間を新しい押し出しにする（断面・方位角・高さは先頭を引き継ぐ）。
-		core::ModifierCommand
-		mergeGroundBeamComponent(const std::vector<core::ModifierCommand>& members)
+		BeamPrism mergeGroundBeamComponent(const std::vector<BeamPrism>& members)
 		{
-			const core::ModifierCommand& base = members.front();
+			const BeamPrism& base = members.front();
 			const Vec2 axis = groundBeamAxisDir(base);
 			double lo = 0.0;
 			double hi = 0.0;
 			bool first = true;
-			for (const core::ModifierCommand& modifier : members)
+			for (const BeamPrism& modifier : members)
 			{
 				const double t0 = (axis.x * (modifier.origin.x - base.origin.x)) +
 								  (axis.y * (modifier.origin.y - base.origin.y));
@@ -558,7 +429,7 @@ namespace HomeskzIfcImport::parse
 					first = false;
 				}
 			}
-			core::ModifierCommand merged = base;
+			BeamPrism merged = base;
 			merged.depth = hi - lo;
 			merged.origin = core::Vec3{base.origin.x + (axis.x * lo), base.origin.y + (axis.y * lo),
 									   base.origin.z};
@@ -567,14 +438,13 @@ namespace HomeskzIfcImport::parse
 
 		// 同一断面・同一向きの地中梁群のうち、同一軸線上で連続するものを統合する。連結成分の
 		// 骨格は core/UnionFind の connectedComponents（代表＝最小添字・出力は代表添字昇順）。
-		std::vector<core::ModifierCommand>
-		mergeGroundBeamGroup(const std::vector<core::ModifierCommand>& modifiers)
+		std::vector<BeamPrism> mergeGroundBeamGroup(const std::vector<BeamPrism>& modifiers)
 		{
 			const std::vector<std::vector<std::size_t>> components = core::connectedComponents(
 				modifiers.size(), [&modifiers](std::size_t i, std::size_t j)
 				{ return modifiersCollinear(modifiers[i], modifiers[j]); });
 
-			std::vector<core::ModifierCommand> merged;
+			std::vector<BeamPrism> merged;
 			merged.reserve(components.size());
 			for (const std::vector<std::size_t>& component : components)
 			{
@@ -583,7 +453,7 @@ namespace HomeskzIfcImport::parse
 					merged.push_back(modifiers[component.front()]);
 					continue;
 				}
-				std::vector<core::ModifierCommand> members;
+				std::vector<BeamPrism> members;
 				members.reserve(component.size());
 				for (const std::size_t i : component)
 					members.push_back(modifiers[i]);
@@ -596,8 +466,7 @@ namespace HomeskzIfcImport::parse
 		// 平成分から方位角を求め、断面頂点を幅軸 u（走る向きを +90 度回した水平単位ベクトル w）
 		// ・鉛直軸 v（ワールド Z の差分）へ取り直す。押し出しが水平でない（鉛直）
 		// ソリッドは地中梁でないので false。
-		bool groundBeamModifier(const WorldSolid& solid, const Vec2& center,
-								core::ModifierCommand& out)
+		bool groundBeamPrism(const WorldSolid& solid, const Vec2& center, BeamPrism& out)
 		{
 			const double runLength = std::hypot(solid.extrudeDir.x, solid.extrudeDir.y);
 			if (runLength <= 0.0)
@@ -608,7 +477,7 @@ namespace HomeskzIfcImport::parse
 			const double wx = -uy;
 			const double wy = ux;
 
-			core::ModifierCommand cmd;
+			BeamPrism cmd;
 			cmd.profile.reserve(solid.profile.size());
 			for (const Vec2& p : solid.profile)
 			{
@@ -625,37 +494,6 @@ namespace HomeskzIfcImport::parse
 			cmd.azimuth = std::atan2(uy, ux) * 180.0 / std::numbers::pi;
 			out = std::move(cmd);
 			return true;
-		}
-
-		// 多角形の重心（頂点の相加平均）。
-		Vec2 polygonCentroid(const std::vector<Vec2>& pts)
-		{
-			double sx = 0.0;
-			double sy = 0.0;
-			for (const Vec2& p : pts)
-			{
-				sx += p.x;
-				sy += p.y;
-			}
-			const auto n = static_cast<double>(pts.size());
-			return Vec2{sx / n, sy / n};
-		}
-
-		// 平面外形の代表点（重心・各頂点・各辺の中点）。
-		std::vector<Vec2> footprintSamples(const std::vector<Vec2>& pts)
-		{
-			std::vector<Vec2> samples;
-			samples.reserve((pts.size() * 2) + 1);
-			samples.push_back(polygonCentroid(pts));
-			samples.insert(samples.end(), pts.begin(), pts.end());
-			const std::size_t n = pts.size();
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const Vec2& a = pts[i];
-				const Vec2& b = pts[(i + 1) % n];
-				samples.push_back(Vec2{(a.x + b.x) / 2.0, (a.y + b.y) / 2.0});
-			}
-			return samples;
 		}
 
 		// --- 底盤（スラブ）----------------------------------------------------------
@@ -1041,20 +879,14 @@ namespace HomeskzIfcImport::parse
 									   { return pointInPoly(p.first, p.second, a); });
 		}
 
-		// 底盤の統合可否を表すキー。レイヤ・クラス・コンクリート厚・高さ基準がすべて一致する
-		// 底盤同士だけを統合対象にする。**配筋（M10）を足すときはこのキーにも足す**（配筋の違
-		// う底盤を 1 枚へ統合すると片方が失われるため）。
-		using SlabKey =
-			std::tuple<std::string, std::string, long long, int, std::string, long long>;
+		// 底盤の統合可否を表すキー。コンクリート厚・天端の高さが一致する底盤同士だけを統合
+		// 対象にする。**配筋（M10）を足すときはこのキーにも足す**（配筋の違う底盤を 1 枚へ
+		// 統合すると片方が失われるため）。
+		using SlabKey = std::tuple<long long, long long>;
 
-		SlabKey slabMergeKey(const SlabCommand& slab)
+		SlabKey slabMergeKey(const SlabPiece& slab)
 		{
-			return SlabKey{slab.layer,
-						   slab.drawClass,
-						   roundKey(slab.thickness, 1e-3),
-						   slab.bound.storyOffset,
-						   slab.bound.level,
-						   roundKey(slab.bound.offset, kSlabMergeTol)};
+			return SlabKey{roundKey(slab.thickness, 1e-3), roundKey(slab.elevation, kSlabMergeTol)};
 		}
 
 		// 連続する底盤（polysConnected）の連結成分をインデックス集合で返す。成分は昇順・
@@ -1110,7 +942,7 @@ namespace HomeskzIfcImport::parse
 		// 底盤の辺 a→b に沿う立上りの半壁厚（該当が無ければ 0）。最も重なりの大きい立上りの半
 		// 壁厚を採る。
 		double wallHalfThicknessForEdge(const Vec2& a, const Vec2& b,
-										const std::vector<WallCommand>& walls)
+										const std::vector<RiserPiece>& walls)
 		{
 			const double ex = b.x - a.x;
 			const double ey = b.y - a.y;
@@ -1122,7 +954,7 @@ namespace HomeskzIfcImport::parse
 
 			double best = 0.0;
 			double bestOverlap = kSlabMergeTol;
-			for (const WallCommand& wall : walls)
+			for (const RiserPiece& wall : walls)
 			{
 				const double dx = wall.end.x - wall.start.x;
 				const double dy = wall.end.y - wall.start.y;
@@ -1209,7 +1041,7 @@ namespace HomeskzIfcImport::parse
 		// 底盤外形の各辺を、沿っている立上りの外面まで外側へ広げた外形。立上りに沿う辺が
 		// 1 つも無ければ false（呼び出し側は元の外形をそのまま使う）。
 		bool offsetBoundaryToWalls(const std::vector<Vec2>& boundary,
-								   const std::vector<WallCommand>& walls, std::vector<Vec2>& out)
+								   const std::vector<RiserPiece>& walls, std::vector<Vec2>& out)
 		{
 			std::vector<Vec2> pts = boundary;
 			if (pts.size() > 1 && core::samePoint(pts.front(), pts.back()))
@@ -1231,286 +1063,6 @@ namespace HomeskzIfcImport::parse
 			return true;
 		}
 
-		// --- 地中梁の床付け（捨てコン・砕石）--------------------------------------------
-		//
-		// 床付けは「地中梁の**下面**（側面 → 下端 → 側面 と続く折れ線。天端の辺は含まない）を
-		// 外向きへ kSlabBeddingThickness だけオフセットした帯」で表す（parse/Footing.h 冒頭
-		// 「床付け」）。オフセットは辺ごとに法線方向へ動かして隣どうしの交点（マイター）を新しい
-		// 頂点にするので、**傾斜部でも法線方向の厚みがそのまま保たれる**（下端の下では真下へ
-		// 130mm、45 度の傾斜部では斜め下へ 130mm）。帯のうち下端の直下の 30mm だけが捨てコンで、
-		// 残りは砕石になる。
-		//
-		// 外周部の側面（底盤の外形に面した側）は例外で、側面を回り込ませずに下端の床付けを
-		// kBeddingPerimeterMargin だけ横へ張り出して終わらせる（外にはコンクリートが無いので、
-		// 回り込ませると建物の外に砕石の壁が立ってしまう）。
-
-		// 床付けの断面を組み立てるときの許容値。天端／下端の辺とみなす v の差（mm）と、
-		// 辺の長さが 0 でないとみなす下限（mm）。
-		constexpr double kBeddingLevelTol = 0.5;
-		constexpr double kBeddingEdgeEps = 1e-6;
-
-		// 連続する同一点と末尾の閉じ重複を除いた頂点列。
-		std::vector<Vec2> dedupeRing(const std::vector<Vec2>& pts)
-		{
-			std::vector<Vec2> out;
-			out.reserve(pts.size());
-			for (const Vec2& p : pts)
-			{
-				if (out.empty() || !core::samePoint(out.back(), p, kBeddingEdgeEps))
-					out.push_back(p);
-			}
-			while (out.size() > 1 && core::samePoint(out.front(), out.back(), kBeddingEdgeEps))
-				out.pop_back();
-			return out;
-		}
-
-		// 地中梁の断面を**下面の折れ線**へ分解する。折れ線は天端の辺を除いた残りで、u が
-		// 小さい側の天端頂点から始まり、下端の辺を通って u が大きい側の天端頂点で終わる。
-		// first / last には折れ線のうち下端（v 最小）の辺の最初・最後の添字が入る。
-		// 天端の辺か下端の辺が見つからない断面（三角形・高さ 0 等）は false。
-		bool groundBeamUnderside(const std::vector<Vec2>& profile, std::vector<Vec2>& path,
-								 std::size_t& first, std::size_t& last)
-		{
-			std::vector<Vec2> ring = dedupeRing(profile);
-			if (ring.size() < 3)
-				return false;
-			if (shoelaceSigned(ring) < 0.0)
-				std::ranges::reverse(ring); // 以降は CCW（外向き法線＝進行方向の右）前提
-
-			double vTop = ring.front().y;
-			double vBot = ring.front().y;
-			for (const Vec2& p : ring)
-			{
-				vTop = std::max(vTop, p.y);
-				vBot = std::min(vBot, p.y);
-			}
-			if (vTop - vBot <= kBeddingLevelTol)
-				return false; // せいが無い（水平な板）
-
-			// 天端の辺＝両端が v 最大の辺。CCW なので u の大きい側 → 小さい側へ向かう。
-			const std::size_t n = ring.size();
-			std::size_t top = n;
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const Vec2& a = ring[i];
-				const Vec2& b = ring[(i + 1) % n];
-				if (a.y >= vTop - kBeddingLevelTol && b.y >= vTop - kBeddingLevelTol &&
-					b.x < a.x - kBeddingEdgeEps)
-				{
-					top = i;
-					break;
-				}
-			}
-			if (top == n)
-				return false;
-
-			path.clear();
-			path.reserve(n);
-			for (std::size_t k = 0; k < n; ++k)
-				path.push_back(ring[(top + 1 + k) % n]);
-
-			// 下端の辺＝v 最小の頂点が並ぶ区間。
-			bool found = false;
-			first = 0;
-			last = 0;
-			for (std::size_t i = 0; i < path.size(); ++i)
-			{
-				if (path[i].y > vBot + kBeddingLevelTol)
-					continue;
-				if (!found)
-				{
-					first = i;
-					found = true;
-				}
-				last = i;
-			}
-			return found && last > first && path[last].x > path[first].x + kBeddingEdgeEps;
-		}
-
-		// 地中梁の側面（断面 u の最小側・最大側）が外周部かを判定する。側面のすぐ外側を
-		// 押し出し方向の 3 か所で突き、**すべてが底盤の外形の外**なら外周部とみなす。
-		// 一部だけ外に出る（外形の角を跨ぐ）地中梁を外周部と読まないよう、全点一致にする。
-		void groundBeamPerimeterSides(const core::ModifierCommand& modifier,
-									  const std::vector<Pt2>& slabRing, bool& low, bool& high)
-		{
-			low = false;
-			high = false;
-			if (modifier.profile.empty() || slabRing.size() < 3)
-				return;
-			double uLo = modifier.profile.front().x;
-			double uHi = uLo;
-			for (const Vec2& p : modifier.profile)
-			{
-				uLo = std::min(uLo, p.x);
-				uHi = std::max(uHi, p.x);
-			}
-
-			const Vec2 axis = groundBeamAxisDir(modifier);
-			const Vec2 width{-axis.y, axis.x}; // 幅軸 w（groundBeamModifier の取り方と一致）
-			const auto outside = [&](double u)
-			{
-				constexpr std::array<double, 3> kProbeFractions{0.25, 0.5, 0.75};
-				return std::ranges::all_of(
-					kProbeFractions,
-					[&](double fraction)
-					{
-						const double along = modifier.depth * fraction;
-						return !pointInPoly(modifier.origin.x + (axis.x * along) + (width.x * u),
-											modifier.origin.y + (axis.y * along) + (width.y * u),
-											slabRing);
-					});
-			};
-			low = outside(uLo - kBeddingOutsideProbe);
-			high = outside(uHi + kBeddingOutsideProbe);
-		}
-
-		// 断面を半平面 v ≤ top で切った多角形（Sutherland-Hodgman）。床付けの帯を切り上げる
-		// のに使う（上記「地中梁の床付け」）。**切っても 2 つに割れない**ことは形が保証する
-		// ——床付けは下端の下で全幅に繋がっており、top は必ずその繋がりより上にあるので、
-		// 落ちるのは左右の帯の上端だけになる。面にならなくなったら空を返す。
-		std::vector<Vec2> clipProfileBelow(const std::vector<Vec2>& profile, double top)
-		{
-			std::vector<Vec2> out;
-			const std::size_t n = profile.size();
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const Vec2& a = profile[i];
-				const Vec2& b = profile[(i + 1) % n];
-				const bool aIn = a.y <= top;
-				const bool bIn = b.y <= top;
-				if (aIn)
-					out.push_back(a);
-				if (aIn != bIn)
-				{
-					const double dv = b.y - a.y;
-					const double t = (top - a.y) / dv; // aIn != bIn なので dv は 0 でない
-					out.push_back(Vec2{a.x + ((b.x - a.x) * t), top});
-				}
-			}
-			out = dedupeRing(out);
-			return out.size() >= 3 ? out : std::vector<Vec2>{};
-		}
-
-		// 床付けを 1 つ足す。**同じ層（クラスと断面が同じ）で押し出し方向に続く区間は
-		// 1 本へ繋ぐ**（区間を切ったせいで、断面の変わらない捨てコンまで細切れのソリッドに
-		// なるのを防ぐ）。
-		void appendBedding(std::vector<core::BeddingCommand>& out, core::BeddingCommand bedding)
-		{
-			for (core::BeddingCommand& previous : out)
-			{
-				if (previous.drawClass != bedding.drawClass ||
-					previous.profile.size() != bedding.profile.size() ||
-					std::abs((previous.start + previous.depth) - bedding.start) > kBeddingEdgeEps)
-					continue;
-				bool same = true;
-				for (std::size_t i = 0; i < previous.profile.size() && same; ++i)
-					same =
-						core::samePoint(previous.profile[i], bedding.profile[i], kBeddingEdgeEps);
-				if (!same)
-					continue;
-				previous.depth = (bedding.start + bedding.depth) - previous.start;
-				return;
-			}
-			out.push_back(std::move(bedding));
-		}
-
-		// 押し出し方向の区間 [start, start + depth) と、その区間で床付けを切り上げる高さ。
-		struct BeddingSpan
-		{
-			double start = 0.0;
-			double depth = 0.0;
-			double top = 0.0;
-		};
-
-		// 地中梁 A の床付けを、押し出し方向の区間へ切り分ける。取り合う地中梁が 1 つも無ければ
-		// 全長 1 区間（top = 底盤の砕石の底）。掛かる地中梁がある区間は、その相手の**下端**まで
-		// 切り下げる（相手のコンクリートがある高さには床付けを置かない）。
-		//
-		// 掛かるかどうかは A の**床付けの平面外形**（帯を含む幅）と相手のコンクリートの平面外形
-		// で見る。相手の外形の 4 隅を A の (t, u) 座標へ写した外接矩形を使うので、直交・平行な
-		// 取り合い（実データはこの 2 通りしか無い）では厳密、斜めでは安全側（広めに切る）になる。
-		std::vector<BeddingSpan> beddingSpans(const std::vector<core::ModifierCommand>& beams,
-											  std::size_t self, double slabTop,
-											  double beddingWidthLo, double beddingWidthHi)
-		{
-			const core::ModifierCommand& modifier = beams[self];
-			const Vec2 axis = groundBeamAxisDir(modifier);
-			const Vec2 width{-axis.y, axis.x};
-
-			// 掛かる区間（[t0, t1] と、そこで切り下げる高さ）を集める。**自分自身は除く**
-			// （添字で外す。同じ値の写しを持ち回るのでアドレス比較では外れない）。
-			std::vector<BeddingSpan> blocks;
-			for (std::size_t i = 0; i < beams.size(); ++i)
-			{
-				if (i == self)
-					continue;
-				const core::ModifierCommand& other = beams[i];
-				if (other.profile.empty())
-					continue; // 断面を持たない地中梁は掛かりようがない
-				// 断面が非空なら平面外形も非空（modifierFootprint）。
-				const std::vector<Vec2> footprint = modifierFootprint(other);
-				double tLo = 0.0;
-				double tHi = 0.0;
-				double uLo = 0.0;
-				double uHi = 0.0;
-				bool first = true;
-				for (const Vec2& corner : footprint)
-				{
-					const double dx = corner.x - modifier.origin.x;
-					const double dy = corner.y - modifier.origin.y;
-					const double t = (dx * axis.x) + (dy * axis.y);
-					const double u = (dx * width.x) + (dy * width.y);
-					tLo = first ? t : std::min(tLo, t);
-					tHi = first ? t : std::max(tHi, t);
-					uLo = first ? u : std::min(uLo, u);
-					uHi = first ? u : std::max(uHi, u);
-					first = false;
-				}
-				if (uHi <= beddingWidthLo || uLo >= beddingWidthHi)
-					continue; // 幅方向で離れている（床付けに掛からない）
-				const double start = std::max(tLo, 0.0);
-				const double end = std::min(tHi, modifier.depth);
-				if (end - start <= kBeddingEdgeEps)
-					continue; // 押し出し方向で離れている
-				blocks.push_back(
-					BeddingSpan{start, end - start, other.origin.z - modifier.origin.z});
-			}
-
-			if (blocks.empty())
-				return {BeddingSpan{0.0, modifier.depth, slabTop}};
-
-			// 区切り位置で細切れにし、各区間の切り上げ高さ＝掛かる相手の下端の最小値
-			// （と底盤の砕石の底）を採る。並びは押し出し方向で決定的。
-			std::vector<double> breaks{0.0, modifier.depth};
-			for (const BeddingSpan& block : blocks)
-			{
-				breaks.push_back(block.start);
-				breaks.push_back(block.start + block.depth);
-			}
-			std::ranges::sort(breaks);
-
-			std::vector<BeddingSpan> spans;
-			for (std::size_t i = 0; i + 1 < breaks.size(); ++i)
-			{
-				const double start = breaks[i];
-				const double end = breaks[i + 1];
-				if (end - start <= kBeddingEdgeEps)
-					continue;
-				const double middle = (start + end) / 2.0;
-				double top = slabTop;
-				for (const BeddingSpan& block : blocks)
-				{
-					if (middle > block.start && middle < block.start + block.depth)
-						top = std::min(top, block.top);
-				}
-				// 切り上げ高さの同じ区間は 1 つにまとめる（無用な継目を作らない）。
-				if (!spans.empty() && std::abs(spans.back().top - top) <= kBeddingEdgeEps)
-					spans.back().depth = end - spans.back().start;
-				else
-					spans.push_back(BeddingSpan{start, end - start, top});
-			}
-			return spans;
-		}
 	} // namespace
 
 	// --- 公開 API ------------------------------------------------------------------
@@ -1528,21 +1080,6 @@ namespace HomeskzIfcImport::parse
 	bool isBaseSlab(const std::string& name)
 	{
 		return name.find(kBaseSlabToken) != std::string::npos;
-	}
-
-	std::vector<ComponentCommand> foundationWallComponents(double thickness)
-	{
-		// 立上りはコンクリート 1 層（総厚＝壁厚）。
-		return {ComponentCommand{kConcreteComponentName, CLASS_COMPONENT_CONCRETE, thickness}};
-	}
-
-	std::vector<ComponentCommand> foundationSlabComponents(double concreteThickness)
-	{
-		// 底盤の下は**砕石 1 層**で、厚みは捨てコンと砕石を合わせたぶん（M17。捨てコンは
-		// 地中梁の下だけに打つので、底盤の下では砕石がその厚みまで受け持つ）。
-		return {
-			ComponentCommand{kConcreteComponentName, CLASS_COMPONENT_CONCRETE, concreteThickness},
-			ComponentCommand{kSlabGravelName, CLASS_COMPONENT_GRAVEL, kSlabBeddingThickness}};
 	}
 
 	std::vector<int> collectFootingElements(const Model& model)
@@ -1662,24 +1199,24 @@ namespace HomeskzIfcImport::parse
 		cmd.suffix = kFoundationSuffix;
 		cmd.elevation = 0.0; // GL は常に 0
 		// levels の並びは希望するデザインレイヤのスタック順（上→下）。上から
-		// 基礎天端（アンカーボルト）→ GL（立上り）→ 床束 → 底盤天端（底盤）。
+		// 基礎天端（アンカーボルト）→ GL（基礎の PIO）→ 床束。
 		// 床束は基礎底盤の上端に立つので、高さは底盤天端に揃える（レベルは分ける——
-		// 底盤レイヤに床束を混ぜないため）。
+		// 基礎のレイヤに床束を混ぜないため）。**GL のレイヤは高さ 0 でなければならない**
+		// （基礎の PIO は部品の Z を GL 基準の絶対値で持つ。core/Foundation.h）。
 		cmd.levels.push_back(
 			LevelCommand{kLevelFoundationTop, foundationTop, kLayerFoundationAnchor});
-		cmd.levels.push_back(LevelCommand{kLevelGL, 0.0, kLayerFoundationWall});
+		cmd.levels.push_back(LevelCommand{kLevelGL, 0.0, kLayerFoundation});
 		cmd.levels.push_back(LevelCommand{kLevelFloorPost, slabTop, kLayerFoundationFloorPost});
-		cmd.levels.push_back(LevelCommand{kLevelSlabTop, slabTop, kLayerFoundationSlab});
 		out = std::move(cmd);
 		return true;
 	}
 
-	std::vector<WallCommand> mergeWallCommands(const std::vector<WallCommand>& walls)
+	std::vector<RiserPiece> mergeWallCommands(const std::vector<RiserPiece>& walls)
 	{
 		// 断面キーごとにグループ化する（グループの並びは最初に現れた順＝入力順に決定的）。
 		std::map<WallKey, std::size_t> index;
-		std::vector<std::vector<WallCommand>> groups;
-		for (const WallCommand& wall : walls)
+		std::vector<std::vector<RiserPiece>> groups;
+		for (const RiserPiece& wall : walls)
 		{
 			const WallKey key = wallSectionKey(wall);
 			const auto found = index.find(key);
@@ -1695,17 +1232,17 @@ namespace HomeskzIfcImport::parse
 			}
 		}
 
-		std::vector<WallCommand> result;
-		for (const std::vector<WallCommand>& group : groups)
+		std::vector<RiserPiece> result;
+		for (const std::vector<RiserPiece>& group : groups)
 		{
-			for (WallCommand& merged : mergeWallGroup(group))
-				result.push_back(std::move(merged));
+			for (const RiserPiece& merged : mergeWallGroup(group))
+				result.push_back(merged);
 		}
 		return result;
 	}
 
-	std::vector<WallCommand> extendFreeWallEnds(const std::vector<WallCommand>& walls,
-												const std::vector<ColumnCommand>& columns)
+	std::vector<RiserPiece> extendFreeWallEnds(const std::vector<RiserPiece>& walls,
+											   const std::vector<ColumnCommand>& columns)
 	{
 		const std::size_t n = walls.size();
 		// 各壁の始点・終点が他の立上りとの交点に関与するか。
@@ -1713,7 +1250,7 @@ namespace HomeskzIfcImport::parse
 		std::vector<bool> endJoined(n, false);
 		const auto mark = [&](std::size_t index, const Vec2& point)
 		{
-			const WallCommand& wall = walls[index];
+			const RiserPiece& wall = walls[index];
 			const double toStart = core::distance(point, wall.start);
 			const double toEnd = core::distance(point, wall.end);
 			if (toStart <= toEnd)
@@ -1726,9 +1263,6 @@ namespace HomeskzIfcImport::parse
 		{
 			for (std::size_t j = i + 1; j < n; ++j)
 			{
-				if (walls[i].layer != walls[j].layer)
-					continue;
-
 				// 同一直線上で突き合わせになっている端は自由端ではない（延長すると隣へ
 				// 食い込む。collinearAbutment 参照）。**統合できなかった隣**——上端／下端の
 				// 違う立上り——との突き合わせがこれに当たる。
@@ -1753,11 +1287,11 @@ namespace HomeskzIfcImport::parse
 			}
 		}
 
-		std::vector<WallCommand> extended;
+		std::vector<RiserPiece> extended;
 		extended.reserve(n);
 		for (std::size_t i = 0; i < n; ++i)
 		{
-			WallCommand wall = walls[i];
+			RiserPiece wall = walls[i];
 			const double length = core::distance(wall.start, wall.end);
 			if (length <= 0.0)
 			{
@@ -1785,13 +1319,13 @@ namespace HomeskzIfcImport::parse
 		return extended;
 	}
 
-	std::vector<WallCommand> extendDeeperCollinearEnds(const std::vector<WallCommand>& walls)
+	std::vector<RiserPiece> extendDeeperCollinearEnds(const std::vector<RiserPiece>& walls)
 	{
 		const std::size_t n = walls.size();
-		std::vector<WallCommand> result = walls;
+		std::vector<RiserPiece> result = walls;
 		for (std::size_t i = 0; i < n; ++i)
 		{
-			const WallCommand& wall = walls[i];
+			const RiserPiece& wall = walls[i];
 			const double length = core::distance(wall.start, wall.end);
 			if (length <= 0.0)
 				continue;
@@ -1813,7 +1347,7 @@ namespace HomeskzIfcImport::parse
 				bool deepest = true;
 				for (std::size_t j = 0; j < n && deepest; ++j)
 				{
-					if (j == i || walls[j].layer != wall.layer)
+					if (j == i)
 						continue;
 					double lo = 0.0;
 					double hi = 0.0;
@@ -1825,12 +1359,11 @@ namespace HomeskzIfcImport::parse
 					if (!beyond)
 						continue;
 					// 天端が違う隣は「1 本に見せたい線」ではない（低い側の端部は閉じる）。
-					if (std::abs(wall.topBound.offset - walls[j].topBound.offset) >
-						kWallMergeDistTol)
+					if (std::abs(wall.top - walls[j].top) > kWallMergeDistTol)
 						continue;
 					lineContinues = true;
-					const double mine = wall.bottomBound.offset;
-					const double theirs = walls[j].bottomBound.offset;
+					const double mine = wall.bottom;
+					const double theirs = walls[j].bottom;
 					if (theirs < mine - kWallMergeDistTol ||
 						(std::abs(theirs - mine) <= kWallMergeDistTol && j < i))
 						deepest = false;
@@ -1843,7 +1376,7 @@ namespace HomeskzIfcImport::parse
 				double reach = 0.0;
 				for (std::size_t j = 0; j < n; ++j)
 				{
-					if (j == i || walls[j].layer != wall.layer)
+					if (j == i)
 						continue;
 					Vec2 point;
 					bool aAtEnd = false;
@@ -1922,18 +1455,18 @@ namespace HomeskzIfcImport::parse
 		return openings;
 	}
 
-	std::vector<WallCommand> applyWallOpenings(const std::vector<WallCommand>& walls,
-											   const std::vector<WallOpening>& openings,
-											   double slabTopAbs, double beamTopAbs)
+	std::vector<RiserPiece> applyWallOpenings(const std::vector<RiserPiece>& walls,
+											  const std::vector<WallOpening>& openings,
+											  double slabTopAbs)
 	{
-		std::vector<WallCommand> result = walls;
+		std::vector<RiserPiece> result = walls;
 		for (const WallOpening& opening : openings)
 		{
 			const std::size_t index = findOpeningWall(result, opening);
 			if (index >= result.size())
 				continue; // 乗る立上りが無い開口は無視する
-			const std::vector<WallCommand> carved =
-				carveWallOpening(result[index], opening, slabTopAbs, beamTopAbs);
+			const std::vector<RiserPiece> carved =
+				carveWallOpening(result[index], opening, slabTopAbs);
 			result.erase(result.begin() + static_cast<std::ptrdiff_t>(index));
 			result.insert(result.begin() + static_cast<std::ptrdiff_t>(index), carved.begin(),
 						  carved.end());
@@ -1941,284 +1474,13 @@ namespace HomeskzIfcImport::parse
 		return result;
 	}
 
-	std::vector<core::WallJoinCommand> buildWallJoinCommands(const std::vector<WallCommand>& walls)
-	{
-		std::vector<core::WallJoinCommand> commands;
-		for (const Junction& junction : wallJunctions(walls))
-		{
-			const std::vector<std::size_t>& indices = junction.walls;
-			if (indices.size() < 2)
-				continue;
-			const Vec2 point = junction.point;
-
-			// 交点が各壁芯の端点か内部か・天端高さ・ピック点の寄せ量（交点に集まる立上りの
-			// 最大壁厚。相手壁の footprint＝半壁厚を確実に越えて残す側へ寄せる）。
-			std::map<std::size_t, bool> atEnd;
-			std::map<std::size_t, double> tops;
-			double pickOffset = 0.0;
-			for (const std::size_t index : indices)
-			{
-				atEnd[index] = wallPointAtEnd(walls[index], point);
-				tops[index] = wallTop(walls[index]);
-				pickOffset = std::max(pickOffset, walls[index].thickness);
-			}
-
-			std::vector<std::size_t> interiors;
-			std::vector<std::size_t> ends;
-			for (const std::size_t index : indices)
-			{
-				if (atEnd.at(index))
-					ends.push_back(index);
-				else
-					interiors.push_back(index);
-			}
-
-			// 天端高さ降順・添字昇順（バックボーンに最も高い立上りを選ぶ）。
-			const auto byHeight = [&tops](std::size_t lhs, std::size_t rhs)
-			{
-				if (tops.at(lhs) != tops.at(rhs))
-					return tops.at(lhs) > tops.at(rhs);
-				return lhs < rhs;
-			};
-
-			const auto makeCommand =
-				[&](std::size_t a, std::size_t b, core::WallJoinType type, bool capped)
-			{
-				core::WallJoinCommand cmd;
-				cmd.a = a;
-				cmd.b = b;
-				cmd.point = point;
-				// ピック点は**種別に関係なく**「残す側」へ寄せた壁芯上の点にする（X 結合では
-				// VW が壁を詰めないので、寄せても無害）。
-				//
-				// 一度「X 結合だけ交点そのものを渡す」ことを試した（交差では四方すべてが残る
-				// ので「残す側」に意味が無く、片側を指すせいで VW が交点で壁を切って別の立上
-				// りを作っているのではないかと疑った）が、**実機で症状は変わらなかった**ので、
-				// 根拠の無い場合分けを残さないために元へ戻した（docs/DEV-NOTES.md M10）。
-				cmd.pickA = keptSidePick(walls[a], point, pickOffset);
-				cmd.pickB = keptSidePick(walls[b], point, pickOffset);
-				cmd.joinType = type;
-				cmd.capped = capped;
-				return cmd;
-			};
-
-			// L / X 結合。天端高さが違えば**低いほうを a**（高いほうへ結合）にして端部を
-			// 閉じる。同じ高さならルート（root）を a にして閉じない。
-			//
-			// **ただし X 結合（交差結合）だけは常に `other` を a にする。** VW の X 結合は
-			// 「**1 本目の壁を交点で 2 本に分割し、2 本目（load bearing wall）へ結合する**」
-			// という仕様（VW ヘルプ「X wall joins」: 両壁の長さは変わらない＝すでに交差して
-			// いる必要があり、1 本目が 2 本の壁に分かれる）。したがって a に渡した壁が分割され、
-			// b に渡した壁が丸ごと残る。**丸ごと残すべきはバックボーン**（天端が最も高い通し壁）
-			// なので、a＝other・b＝root にする。root は最も高いので、天端が違うときの
-			// 「低いほうを a」も同時に満たす（docs/DEV-NOTES.md M10）。
-			const auto makeLX = [&](std::size_t other, std::size_t root, core::WallJoinType type)
-			{
-				const bool capped = std::abs(tops.at(other) - tops.at(root)) > kWallMergeDistTol;
-				std::size_t a = root;
-				std::size_t b = other;
-				if (type == core::WallJoinType::X || (capped && tops.at(other) < tops.at(root)))
-				{
-					a = other;
-					b = root;
-				}
-				return makeCommand(a, b, type, capped);
-			};
-
-			// T 結合。stem（端点側＝延長される壁）を a、through（通し壁）を b にする。
-			// **2 本目以降の stem を Auto にする判定は pushJoin 側**（実際に出す命令だけを
-			// 数えるため。同一直線で落とす stem を数えてしまうと 1 本目が Auto になる）。
-			const auto makeT = [&](std::size_t stem, std::size_t through)
-			{
-				const bool capped = std::abs(tops.at(stem) - tops.at(through)) > kWallMergeDistTol;
-				return makeCommand(stem, through, core::WallJoinType::T, capped);
-			};
-
-			// stem が T 結合する通し壁を選ぶ（最も直交する壁。同点なら天端が高いほう、
-			// さらに同点なら添字の小さいほう）。
-			const auto pickThrough =
-				[&](std::size_t stem, const std::vector<std::size_t>& candidates)
-			{
-				double sdx = 0.0;
-				double sdy = 0.0;
-				double slen = 0.0;
-				wallDirection(walls[stem], sdx, sdy, slen);
-				std::size_t best = candidates.front();
-				double bestPerp = -1.0;
-				for (const std::size_t candidate : candidates)
-				{
-					double cdx = 0.0;
-					double cdy = 0.0;
-					double clen = 0.0;
-					wallDirection(walls[candidate], cdx, cdy, clen);
-					const double perp = (slen > 0.0 && clen > 0.0)
-											? std::abs((sdx * cdy) - (sdy * cdx)) / (slen * clen)
-											: 0.0;
-					if (bestPerp < 0.0 || perp > bestPerp ||
-						(perp == bestPerp &&
-						 (tops.at(candidate) > tops.at(best) ||
-						  (tops.at(candidate) == tops.at(best) && candidate < best))))
-					{
-						best = candidate;
-						bestPerp = perp;
-					}
-				}
-				return best;
-			};
-
-			// **同一直線上の 2 本には結合を出さない。** 平行な立上りは wallIntersection が
-			// 交点を作らないので普段は候補にならないが、**第 3 の壁が作った交点**には同じ
-			// ジャンクションとして入ってくる（例: 一直線に並ぶ 2 本の突き合わせ位置を別の
-			// 立上りが横切る）。そこへ L / T 結合を出すと、コーナーにならないので VW が
-			// 拒否する——実データで「壁結合: 1 件を VW が拒否しました (T:1): (6370,1820)」の
-			// 正体がこれだった（docs/DEV-NOTES.md M10）。同一直線上の突き合わせは結合ではなく
-			// 端部のキャップ（applyWallCaps の collinearAbutment）で 1 本に見せる。
-			//
-			// あわせて、**同じ通し壁の同じ交点へ 2 本目以降の stem が取り付く T 結合は Auto へ
-			// 落とす**。明示的な T では実機で **JoinWalls が両方 true を返すのに、図面では先に
-			// 実行した 1 本だけが結合されて見えた**（拒否件数は増えない）。通し壁側のピック点を
-			// 反対側へ寄せて区別させる案は実機で描画が変わらず外れたので、`kAutoWallJoin`
-			// （ピック点を無視して VW に種別を判断させる）で通す。1 本目は従来どおり T なので、
-			// **交点に stem が 1 本だけの既存の T 結合の引数は変わらない**（docs/DEV-NOTES.md M10）。
-			// 数えるのは**実際に出した命令だけ**（同一直線で落とす stem を数えると 1 本目が
-			// Auto になってしまう）。
-			std::map<std::size_t, std::size_t> stemsPerThrough;
-			const auto pushJoin =
-				[&](std::vector<core::WallJoinCommand>& into, core::WallJoinCommand cmd)
-			{
-				double lo = 0.0;
-				double hi = 0.0;
-				if (wallsOnSameLine(walls[cmd.a], walls[cmd.b], lo, hi))
-					return;
-				if (cmd.joinType == core::WallJoinType::T && stemsPerThrough[cmd.b]++ > 0)
-					cmd.joinType = core::WallJoinType::Auto;
-				into.push_back(cmd);
-			};
-
-			std::vector<core::WallJoinCommand> junctionCommands;
-			if (!interiors.empty())
-			{
-				// 交点に通し壁（内部で交わる壁）がある: 天端の最も高い通し壁をバックボーンに、
-				// 他の通し壁を X 結合、端点で突き当たる壁を T 結合にする。
-				std::vector<std::size_t> ordered = interiors;
-				std::ranges::sort(ordered, byHeight);
-				const std::size_t root = ordered.front();
-				for (const std::size_t other : ordered | std::views::drop(1))
-					pushJoin(junctionCommands, makeLX(other, root, core::WallJoinType::X));
-				std::vector<std::size_t> stems = ends;
-				std::ranges::sort(stems, byHeight);
-				for (const std::size_t stem : stems)
-					pushJoin(junctionCommands, makeT(stem, pickThrough(stem, interiors)));
-			}
-			else
-			{
-				// 通し壁の無い端点コーナー: 天端高さ降順ではじめの 2 本を L、それ以降を T
-				// （はじめの 2 本＝バックボーンへ突き当てる）。
-				std::vector<std::size_t> ordered = ends;
-				std::ranges::sort(ordered, byHeight);
-
-				// **ただし同一直線の 2 本がこの交点に集まっているなら、そこにコーナーは無い。**
-				// 上端が同じで下端だけ違って統合できなかった立上りが、直交する立上りの位置で
-				// 突き合わさるとこうなる（底盤厚が違う箇所。extendDeeperCollinearEnds 参照）。
-				// このとき「天端降順の先頭 2 本を L」にすると同一直線の 2 本が選ばれてしまい、
-				// コーナーにならないので VW が拒否する——実データの拒否 1 件 (6370,1820)。
-				//
-				// **深いほう（下端が低い。同値なら添字が小さいほう）を通し壁にして、直交する
-				// 立上りをそこへ T 結合する。** その通し壁は extendDeeperCollinearEnds が相手の
-				// 半壁厚だけ伸ばして交点を越えているので、T 結合が成立する。同一直線の隣とは
-				// 結合せず、端部のキャップ（applyWallCaps）で 1 本に見せる。
-				std::vector<std::size_t> collinearGroup;
-				for (const std::size_t index : ordered)
-				{
-					const auto sameLineAsIndex = [&](std::size_t other)
-					{
-						double lo = 0.0;
-						double hi = 0.0;
-						return other != index &&
-							   wallsOnSameLine(walls[index], walls[other], lo, hi);
-					};
-					if (std::ranges::any_of(ordered, sameLineAsIndex))
-						collinearGroup.push_back(index);
-				}
-
-				if (!collinearGroup.empty())
-				{
-					std::size_t through = collinearGroup.front();
-					for (const std::size_t index : collinearGroup)
-					{
-						const double mine = walls[index].bottomBound.offset;
-						const double best = walls[through].bottomBound.offset;
-						if (mine < best - kWallMergeDistTol ||
-							(std::abs(mine - best) <= kWallMergeDistTol && index < through))
-							through = index;
-					}
-					for (const std::size_t stem : ordered)
-					{
-						if (stem == through)
-							continue;
-						// 同一直線の隣は pushJoin が落とす（結合ではなくキャップで見せる）。
-						pushJoin(junctionCommands, makeT(stem, through));
-					}
-				}
-				else
-				{
-					const std::size_t root = ordered.front();
-					if (ordered.size() >= 2)
-						pushJoin(junctionCommands, makeLX(ordered[1], root, core::WallJoinType::L));
-					const std::vector<std::size_t> backbone(ordered.begin(), ordered.begin() + 2);
-					for (const std::size_t stem : ordered | std::views::drop(2))
-						pushJoin(junctionCommands, makeT(stem, pickThrough(stem, backbone)));
-				}
-			}
-
-			// capped=false（天端の高い立上りどうし）を先に、capped=true を後に並べる
-			// （高い者どうしを先に繋いでから低い者を突き当てる）。安定ソートで同順の
-			// 並びを保ち、入力順に対して決定的にする。
-			std::ranges::stable_sort(
-				junctionCommands,
-				[](const core::WallJoinCommand& lhs, const core::WallJoinCommand& rhs)
-				{ return static_cast<int>(lhs.capped) < static_cast<int>(rhs.capped); });
-			commands.insert(commands.end(), junctionCommands.begin(), junctionCommands.end());
-		}
-
-		// **X 結合（交差結合）はすべて最後に回す。** VW の X 結合は 1 本目の壁を交点で 2 本に
-		// 分割する仕様なので（makeLX の doc コメント）、分割された壁の**ハンドルが古くなる**。
-		// 描画側は「命令インデックス → 壁ハンドル」の対応表で壁を引くため、X 結合より後に
-		// その壁を使う結合が残っていると、**分割された片方だけを相手にしてしまう**。実機で
-		// まさにこれが起きた: 交差する横の立上りは両端に T 結合を持ち、X 結合（交点）→
-		// T 結合（端）の順に実行されたため、**分割後の半分の壁が T 結合されて全長の壁は
-		// 結合されないまま**になった（docs/DEV-NOTES.md M10）。X を最後に回せば、分割の時点で
-		// 他の結合はすべて全長の壁に対して済んでいる。
-		//
-		// 安定ソートなので X 以外の並び（ジャンクション順・capped 順）は変わらない。
-		std::ranges::stable_sort(
-			commands,
-			[](const core::WallJoinCommand& lhs, const core::WallJoinCommand& rhs)
-			{
-				const int lx = (lhs.joinType == core::WallJoinType::X) ? 1 : 0;
-				const int rx = (rhs.joinType == core::WallJoinType::X) ? 1 : 0;
-				return lx < rx;
-			});
-		return commands;
-	}
-
-	std::vector<WallCommand> buildWallCommands(Context& context,
-											   const std::vector<ColumnCommand>& columns)
+	std::vector<RiserPiece> buildWallCommands(Context& context,
+											  const std::vector<ColumnCommand>& columns)
 	{
 		const Model& model = context.model();
-		const std::vector<StoryInfo>& stories = context.stories();
-		if (stories.empty())
-			return {}; // 上端のバインド先（1 階の横架材天端）が決まらない
-
-		// 立上りの上端は 1 階（＝最下階の FL ストーリ）の横架材天端へバインドする。
-		const StoryInfo& first = stories.front();
-		const double beamOffset =
-			first.isTop ? resolveBeamTopOffset(context, first.id) : first.beamOffset;
-		const double beamTopAbs = first.elevation + beamOffset;
-
 		const Vec2 center = context.gridCenter();
 
-		std::vector<WallCommand> commands;
+		std::vector<RiserPiece> commands;
 		for (const int id : model.byType("IFCFOOTING"))
 		{
 			const Entity* element = model.entity(id);
@@ -2243,27 +1505,22 @@ namespace HomeskzIfcImport::parse
 			zTopAndThickness(solid, topAbs, zThickness);
 			const double bottomAbs = topAbs - height;
 
-			WallCommand cmd;
-			cmd.layer = kLayerFoundationWall;
-			cmd.drawClass = CLASS_FOUNDATION_WALL;
+			RiserPiece cmd;
 			cmd.start = start;
 			cmd.end = end;
 			cmd.thickness = thickness;
-			// 構成はコンクリート 1 層＝壁厚。描画側はこれを**壁へ直接**組む（スタイルは
-			// 作らない。draw/Footing.cpp 参照）。
-			cmd.components = foundationWallComponents(thickness);
 			// 下端は IFC 実形状のまま（呑み込みはしない。parse/Footing.h「下端は IFC 実形状の
-			// まま」参照）。
-			cmd.bottomBound = StoryBoundCommand{0, kLevelGL, bottomAbs};
-			cmd.topBound = StoryBoundCommand{1, kLevelBeamTop, topAbs - beamTopAbs};
-			commands.push_back(std::move(cmd));
+			// まま」参照）。天端も絶対 Z のまま持つ（M20 で高さ基準のレベルは無くなった）。
+			cmd.bottom = bottomAbs;
+			cmd.top = topAbs;
+			commands.push_back(cmd);
 		}
 		// 統合 → 自由端の延長 → 深いほうの延長 → 人通口の当てはめ（docs/DEV-NOTES.md M10）。
 		// **人通口は統合・延長の後**に当てはめるので、開口を跨いで統合された立上りも開口位置で
 		// 正しく分割され、開口境界の端は実寸法のまま（延長しない）になる。深いほうの延長は
 		// 自由端の延長の**後**（自由端ではない端＝直交する立上りの壁芯で止まっている端が対象で、
 		// 自由端の延長とは対象が重ならない。parse/Footing.h 参照）。
-		std::vector<WallCommand> walls =
+		std::vector<RiserPiece> walls =
 			extendDeeperCollinearEnds(extendFreeWallEnds(mergeWallCommands(commands), columns));
 		const std::vector<WallOpening> openings = collectWallOpenings(model, center);
 		if (openings.empty())
@@ -2276,16 +1533,16 @@ namespace HomeskzIfcImport::parse
 		double resolved = 0.0;
 		if (resolveSlabTopElevation(model, resolved))
 			slabTopAbs = resolved;
-		return applyWallOpenings(walls, openings, slabTopAbs, beamTopAbs);
+		return applyWallOpenings(walls, openings, slabTopAbs);
 	}
 
-	std::vector<WallCommand> buildWallCommands(const Model& model)
+	std::vector<RiserPiece> buildWallCommands(const Model& model)
 	{
 		Context context(model);
 		return buildWallCommands(context, context.columns());
 	}
 
-	std::vector<SlabCommand> mergeSlabCommands(const std::vector<SlabCommand>& slabs)
+	std::vector<SlabPiece> mergeSlabCommands(const std::vector<SlabPiece>& slabs)
 	{
 		// 断面キーごとにグループ化する（グループの並びは最初に現れた順＝入力順に決定的）。
 		std::map<SlabKey, std::size_t> index;
@@ -2307,7 +1564,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		std::set<std::size_t> dropped;
-		std::map<std::size_t, std::vector<SlabCommand>> mergedAt;
+		std::map<std::size_t, std::vector<SlabPiece>> mergedAt;
 		for (const std::vector<std::size_t>& group : groups)
 		{
 			std::map<std::size_t, std::vector<Pt2>> polys;
@@ -2345,7 +1602,7 @@ namespace HomeskzIfcImport::parse
 				if (outer.size() != 1 || hasHole)
 					continue;
 
-				SlabCommand merged = slabs[comp.front()];
+				SlabPiece merged = slabs[comp.front()];
 				merged.boundary.clear();
 				merged.boundary.reserve(outer.front().size());
 				for (const Pt2& p : outer.front())
@@ -2355,7 +1612,7 @@ namespace HomeskzIfcImport::parse
 			}
 		}
 
-		std::vector<SlabCommand> result;
+		std::vector<SlabPiece> result;
 		for (std::size_t i = 0; i < slabs.size(); ++i)
 		{
 			const auto found = mergedAt.find(i);
@@ -2368,15 +1625,15 @@ namespace HomeskzIfcImport::parse
 		return result;
 	}
 
-	std::vector<SlabCommand> alignSlabsToWallFaces(const std::vector<SlabCommand>& slabs,
-												   const std::vector<WallCommand>& walls)
+	std::vector<SlabPiece> alignSlabsToWallFaces(const std::vector<SlabPiece>& slabs,
+												 const std::vector<RiserPiece>& walls)
 	{
 		if (walls.empty())
 			return slabs;
 
-		std::vector<SlabCommand> result;
+		std::vector<SlabPiece> result;
 		result.reserve(slabs.size());
-		for (const SlabCommand& slab : slabs)
+		for (const SlabPiece& slab : slabs)
 		{
 			std::vector<Vec2> boundary;
 			if (!offsetBoundaryToWalls(slab.boundary, walls, boundary))
@@ -2384,76 +1641,16 @@ namespace HomeskzIfcImport::parse
 				result.push_back(slab);
 				continue;
 			}
-			SlabCommand adjusted = slab;
+			SlabPiece adjusted = slab;
 			adjusted.boundary = std::move(boundary);
 			result.push_back(std::move(adjusted));
 		}
 		return result;
 	}
 
-	void applyWallCaps(std::vector<WallCommand>& walls,
-					   const std::vector<core::WallJoinCommand>& joins)
+	std::vector<BeamPrism> buildGroundBeamPrisms(const Model& model, const Vec2& center)
 	{
-		// 既定は「閉じる」。閉じない結合（capped=false）が当たった端だけを開ける。
-		for (WallCommand& wall : walls)
-		{
-			wall.capStart = true;
-			wall.capEnd = true;
-		}
-
-		// 交点が壁芯のどちら側の端に当たるかは、端点までの距離が近いほうで決める
-		// （交点が壁の内部にある通し壁は端部を持たないので触らない）。
-		const auto openEnd = [&walls](std::size_t index, const Vec2& point)
-		{
-			if (index >= walls.size())
-				return;
-			WallCommand& wall = walls[index];
-			if (!wallPointAtEnd(wall, point))
-				return; // 内部で交わる通し壁の端部は、この交点では閉じ方が決まらない
-			const double toStart = core::distance(point, wall.start);
-			const double toEnd = core::distance(point, wall.end);
-			if (toStart <= toEnd)
-				wall.capStart = false;
-			else
-				wall.capEnd = false;
-		};
-
-		for (const core::WallJoinCommand& join : joins)
-		{
-			if (join.capped)
-				continue; // 天端の違う相手との結合は端部を閉じたままにする
-			openEnd(join.a, join.point);
-			openEnd(join.b, join.point);
-		}
-
-		// **同一直線上の突き合わせ**（交点判定に掛からない平行な隣）も、天端が同じなら
-		// コンクリートは連続しているので端部を閉じない。統合できなかった隣——上端／下端の
-		// 違う立上り——のうち、**下端だけが違うもの**は平面では 1 本に見えるべきで、天端の
-		// 違うものは段差が実在するので閉じたままにする（結合の capped と同じ判断）。
-		const std::size_t count = walls.size();
-		for (std::size_t i = 0; i < count; ++i)
-		{
-			for (std::size_t j = 0; j < count; ++j)
-			{
-				if (i == j || walls[i].layer != walls[j].layer)
-					continue;
-				if (std::abs(wallTop(walls[i]) - wallTop(walls[j])) > kWallMergeDistTol)
-					continue; // 天端が違う＝段差があるので閉じる
-				bool atStart = false;
-				bool atEnd = false;
-				collinearAbutment(walls[i], walls[j], atStart, atEnd);
-				if (atStart)
-					walls[i].capStart = false;
-				if (atEnd)
-					walls[i].capEnd = false;
-			}
-		}
-	}
-
-	std::vector<core::ModifierCommand> buildGroundBeamModifiers(const Model& model,
-																const Vec2& center)
-	{
-		std::vector<core::ModifierCommand> modifiers;
+		std::vector<BeamPrism> modifiers;
 		for (const int id : model.byType("IFCFOOTING"))
 		{
 			const Entity* element = model.entity(id);
@@ -2462,21 +1659,20 @@ namespace HomeskzIfcImport::parse
 			WorldSolid solid;
 			if (!resolveElementWorldSolid(model, element, solid))
 				continue;
-			core::ModifierCommand modifier;
-			if (!groundBeamModifier(solid, center, modifier))
+			BeamPrism modifier;
+			if (!groundBeamPrism(solid, center, modifier))
 				continue;
 			modifiers.push_back(std::move(modifier));
 		}
-		return mergeGroundBeamModifiers(modifiers);
+		return mergeGroundBeamPrisms(modifiers);
 	}
 
-	std::vector<core::ModifierCommand>
-	mergeGroundBeamModifiers(const std::vector<core::ModifierCommand>& modifiers)
+	std::vector<BeamPrism> mergeGroundBeamPrisms(const std::vector<BeamPrism>& prisms)
 	{
 		// グループキーごとにまとめる（グループの並びは最初に現れた順＝入力順に決定的）。
 		std::map<GroundBeamKey, std::size_t> index;
-		std::vector<std::vector<core::ModifierCommand>> groups;
-		for (const core::ModifierCommand& modifier : modifiers)
+		std::vector<std::vector<BeamPrism>> groups;
+		for (const BeamPrism& modifier : prisms)
 		{
 			const GroundBeamKey key = groundBeamGroupKey(modifier);
 			const auto found = index.find(key);
@@ -2492,288 +1688,21 @@ namespace HomeskzIfcImport::parse
 			}
 		}
 
-		std::vector<core::ModifierCommand> result;
-		for (const std::vector<core::ModifierCommand>& group : groups)
+		std::vector<BeamPrism> result;
+		for (const std::vector<BeamPrism>& group : groups)
 		{
-			for (core::ModifierCommand& merged : mergeGroundBeamGroup(group))
+			for (BeamPrism& merged : mergeGroundBeamGroup(group))
 				result.push_back(std::move(merged));
 		}
 		return result;
 	}
 
-	std::vector<Vec2> modifierFootprint(const core::ModifierCommand& modifier)
-	{
-		if (modifier.profile.empty())
-			return {};
-		const Vec2 axis = groundBeamAxisDir(modifier);
-		const Vec2 width{-axis.y, axis.x}; // 幅軸 w（groundBeamModifier の取り方と一致）
-		double uLo = modifier.profile.front().x;
-		double uHi = modifier.profile.front().x;
-		for (const Vec2& p : modifier.profile)
-		{
-			uLo = std::min(uLo, p.x);
-			uHi = std::max(uHi, p.x);
-		}
-		const Vec2 start{modifier.origin.x, modifier.origin.y};
-		const Vec2 end{start.x + (axis.x * modifier.depth), start.y + (axis.y * modifier.depth)};
-		return {Vec2{start.x + (width.x * uLo), start.y + (width.y * uLo)},
-				Vec2{start.x + (width.x * uHi), start.y + (width.y * uHi)},
-				Vec2{end.x + (width.x * uHi), end.y + (width.y * uHi)},
-				Vec2{end.x + (width.x * uLo), end.y + (width.y * uLo)}};
-	}
-
-	void attachGroundBeamModifiers(std::vector<SlabCommand>& slabs,
-								   const std::vector<core::ModifierCommand>& modifiers)
-	{
-		if (slabs.empty())
-			return; // 底盤が 1 枚も無ければ付けられない（地中梁だけの基礎は稀）
-
-		// 底盤の外形は pointInPoly（丸めた頂点列）で判定する。判定用の写しは 1 回だけ作る。
-		std::vector<std::vector<Pt2>> polys;
-		polys.reserve(slabs.size());
-		for (const SlabCommand& slab : slabs)
-		{
-			std::vector<Pt2> ring;
-			ring.reserve(slab.boundary.size());
-			for (const Vec2& p : slab.boundary)
-				ring.emplace_back(p.x, p.y);
-			polys.push_back(std::move(ring));
-		}
-
-		for (const core::ModifierCommand& modifier : modifiers)
-		{
-			const std::vector<Vec2> footprintPoly = modifierFootprint(modifier);
-			if (footprintPoly.empty())
-				continue;
-			const std::vector<Vec2> samples = footprintSamples(footprintPoly);
-
-			// 代表点が外形内に入る数が最大の底盤へ振り分ける（同数なら添字の小さいほう）。
-			std::size_t best = 0;
-			std::ptrdiff_t bestCount = 0;
-			for (std::size_t i = 0; i < polys.size(); ++i)
-			{
-				const auto count =
-					std::ranges::count_if(samples, [&polys, i](const Vec2& sample)
-										  { return pointInPoly(sample.x, sample.y, polys[i]); });
-				if (count > bestCount)
-				{
-					best = i;
-					bestCount = count;
-				}
-			}
-			if (bestCount == 0)
-			{
-				// どの底盤にも入らない（継目・下屋等）: 重心が最も近い底盤へフォールバック
-				// して取りこぼさない。
-				const Vec2 centroid = polygonCentroid(footprintPoly);
-				double bestDistance = 0.0;
-				for (std::size_t i = 0; i < slabs.size(); ++i)
-				{
-					const Vec2 slabCentroid = polygonCentroid(slabs[i].boundary);
-					const double distance = core::distance(centroid, slabCentroid);
-					if (i == 0 || distance < bestDistance)
-					{
-						best = i;
-						bestDistance = distance;
-					}
-				}
-			}
-			slabs[best].modifiers.push_back(modifier);
-		}
-	}
-
-	std::vector<core::BeddingCommand> groundBeamBedding(const core::ModifierCommand& modifier,
-														bool lowPerimeter, bool highPerimeter,
-														double topLimit)
-	{
-		std::vector<Vec2> path;
-		std::size_t first = 0;
-		std::size_t last = 0;
-		if (!groundBeamUnderside(modifier.profile, path, first, last))
-			return {}; // 床付けを敷く下面を取り出せない断面（三角形・水平な板等）
-
-		const double vTop = path.front().y; // 天端＝底盤の底面
-		const double vBot = path[first].y;	// 下端（v=0。地中梁の底）
-		const double uLow = path[first].x;	// 下端の辺の u 小さい側
-		const double uHigh = path[last].x;	// 同 大きい側
-
-		// オフセットする辺の範囲。外周部の側面はここから外し、下端の床付けを横へ張り出して
-		// 終わらせる（上記「地中梁の床付け」）。
-		const std::size_t begin = lowPerimeter ? first : 0;
-		const std::size_t end = highPerimeter ? last : path.size() - 1;
-
-		// 各辺を外向き法線へ kSlabBeddingThickness だけ動かした線分。
-		//
-		// **辺は必ず 1 本以上あり、長さも必ず正**なので、空判定も 0 除算の番人も要らない:
-		// begin ≤ first < last ≤ end（下端の辺が 1 本以上あることは groundBeamUnderside が
-		// 保証する）だから範囲は空にならず、折れ線の連続する 2 点は dedupeRing が
-		// kBeddingEdgeEps 以上離れていることを保証している。
-		struct OffsetEdge
-		{
-			Vec2 start;
-			Vec2 end;
-			Vec2 dir;
-		};
-		std::vector<OffsetEdge> edges;
-		edges.reserve(end - begin);
-		for (std::size_t i = begin; i < end; ++i)
-		{
-			const Vec2 delta = path[i + 1] - path[i];
-			const double length = core::length(delta);
-			const Vec2 dir{delta.x / length, delta.y / length};
-			// CCW ポリゴンの外向き法線＝進行方向の右（offsetPolygon と同じ取り方）。
-			const Vec2 offset{dir.y * kSlabBeddingThickness, -dir.x * kSlabBeddingThickness};
-			edges.push_back(OffsetEdge{path[i] + offset, path[i + 1] + offset, dir});
-		}
-
-		// オフセット線を天端（v = vTop）まで伸ばした点。ほぼ水平な辺では伸ばせないので
-		// 与えられた端点で代用する。
-		const auto atTop = [vTop](const Vec2& point, const Vec2& dir, const Vec2& fallback)
-		{
-			if (std::abs(dir.y) <= kBeddingEdgeEps)
-				return fallback;
-			const double t = (vTop - point.y) / dir.y;
-			return Vec2{point.x + (dir.x * t), vTop};
-		};
-
-		// 外側の折れ線（u の小さい側 → 大きい側）。
-		const double beddingBottom = vBot - kSlabBeddingThickness;
-		std::vector<Vec2> outer;
-		outer.reserve(edges.size() + 2);
-		outer.push_back(lowPerimeter
-							? Vec2{uLow - kBeddingPerimeterMargin, beddingBottom}
-							: atTop(edges.front().start, edges.front().dir, edges.front().start));
-		for (std::size_t i = 1; i < edges.size(); ++i)
-		{
-			Vec2 vertex;
-			if (!lineIntersection(edges[i - 1].start, edges[i - 1].dir, edges[i].start,
-								  edges[i].dir, vertex))
-				vertex = edges[i].start; // 平行（同一直線の連続辺）: マイターは要らない
-			outer.push_back(vertex);
-		}
-		outer.push_back(highPerimeter
-							? Vec2{uHigh + kBeddingPerimeterMargin, beddingBottom}
-							: atTop(edges.back().end, edges.back().dir, edges.back().end));
-
-		// 内側の折れ線（u の大きい側 → 小さい側）。地中梁の下面をなぞり、下端の下だけは
-		// 捨てコンの底（vBot − 30）を通る＝そこが砕石と捨てコンの境になる。
-		const double leanBottom = vBot - kSlabLeanConcreteThickness;
-		const double uLeanLow = lowPerimeter ? uLow - kBeddingPerimeterMargin : uLow;
-		const double uLeanHigh = highPerimeter ? uHigh + kBeddingPerimeterMargin : uHigh;
-		std::vector<Vec2> inner;
-		inner.reserve(path.size() + 4);
-		if (highPerimeter)
-		{
-			inner.push_back(Vec2{uLeanHigh, leanBottom});
-		}
-		else
-		{
-			for (std::size_t i = path.size(); i > last; --i)
-				inner.push_back(path[i - 1]); // 天端 → 下端（u 大きい側の側面）
-			inner.push_back(Vec2{uHigh, leanBottom});
-		}
-		inner.push_back(Vec2{uLeanLow, leanBottom});
-		if (!lowPerimeter)
-		{
-			for (std::size_t i = first + 1; i > 0; --i)
-				inner.push_back(path[i - 1]); // 下端（u 小さい側）→ 天端
-		}
-
-		// 各層は最後に v ≤ topLimit で切り上げる（傾斜部の帯が直交する地中梁へ食い込むのを
-		// 防ぐ。ヘッダ冒頭「傾斜部の帯は切り上げる」）。面にならなくなった層は落とす。
-		std::vector<core::BeddingCommand> beddings;
-		// 捨てコンは下端の平らな面の直下だけ（傾斜部は砕石のみ）。
-		std::vector<Vec2> lean =
-			clipProfileBelow({Vec2{uLeanLow, leanBottom}, Vec2{uLeanHigh, leanBottom},
-							  Vec2{uLeanHigh, vBot}, Vec2{uLeanLow, vBot}},
-							 topLimit);
-		if (!lean.empty())
-			beddings.push_back(core::BeddingCommand{std::move(lean), CLASS_COMPONENT_LEAN_CONCRETE,
-													0.0, modifier.depth});
-
-		std::vector<Vec2> gravel = outer;
-		gravel.insert(gravel.end(), inner.begin(), inner.end());
-		gravel = clipProfileBelow(dedupeRing(gravel), topLimit);
-		if (!gravel.empty())
-			beddings.push_back(core::BeddingCommand{std::move(gravel), CLASS_COMPONENT_GRAVEL, 0.0,
-													modifier.depth});
-		return beddings;
-	}
-
-	void applyGroundBeamBedding(std::vector<SlabCommand>& slabs)
-	{
-		for (SlabCommand& slab : slabs)
-		{
-			// 外周部の判定に使う底盤の外形（pointInPoly が取る丸めた頂点列）。底盤ごとに
-			// 1 回だけ作る。
-			std::vector<Pt2> ring;
-			ring.reserve(slab.boundary.size());
-			for (const Vec2& p : slab.boundary)
-				ring.emplace_back(p.x, p.y);
-
-			// 底盤の砕石の底（絶対 Z）。ここから上は底盤スラブの砕石層が埋めているので、
-			// 傾斜部の帯はここで切り上げてよい（ヘッダ冒頭「傾斜部の帯は切り上げる」）。
-			double slabTotal = 0.0;
-			for (const core::ComponentCommand& component : slab.components)
-				slabTotal += component.thickness;
-			const double beddingBottomAbs = slab.elevation - slabTotal;
-
-			// 取り合いの判定は**床付けを付ける前の**地中梁どうしで行う（付けながら書き換える
-			// と、後の地中梁が前の地中梁の床付けを見てしまう）。
-			const std::vector<core::ModifierCommand> beams = slab.modifiers;
-			for (std::size_t index = 0; index < slab.modifiers.size(); ++index)
-			{
-				core::ModifierCommand& modifier = slab.modifiers[index];
-				bool lowPerimeter = false;
-				bool highPerimeter = false;
-				groundBeamPerimeterSides(modifier, ring, lowPerimeter, highPerimeter);
-
-				// 帯を含む床付けの幅（区間の判定に使う）。まず全長ぶんを組み立てて幅を測る。
-				const double slabTop =
-					std::max(beddingBottomAbs - modifier.origin.z, 0.0); // 下端より下は切らない
-				const std::vector<core::BeddingCommand> full =
-					groundBeamBedding(modifier, lowPerimeter, highPerimeter, slabTop);
-				modifier.beddings.clear();
-				if (full.empty())
-					continue;
-
-				double widthLo = full.front().profile.front().x;
-				double widthHi = widthLo;
-				for (const core::BeddingCommand& bedding : full)
-				{
-					for (const Vec2& p : bedding.profile)
-					{
-						widthLo = std::min(widthLo, p.x);
-						widthHi = std::max(widthHi, p.x);
-					}
-				}
-
-				for (const BeddingSpan& span :
-					 beddingSpans(beams, index, slabTop, widthLo, widthHi))
-				{
-					for (core::BeddingCommand bedding :
-						 groundBeamBedding(modifier, lowPerimeter, highPerimeter, span.top))
-					{
-						bedding.start = span.start;
-						bedding.depth = span.depth;
-						appendBedding(modifier.beddings, std::move(bedding));
-					}
-				}
-			}
-		}
-	}
-
-	std::vector<SlabCommand> buildSlabCommands(Context& context,
-											   const std::vector<WallCommand>& walls)
+	std::vector<SlabPiece> buildSlabCommands(Context& context, const std::vector<RiserPiece>& walls)
 	{
 		const Model& model = context.model();
-		double slabTopAbs = 0.0;
-		if (!resolveSlabTopElevation(model, slabTopAbs))
-			slabTopAbs = 0.0;
-
 		const Vec2 center = context.gridCenter();
 
-		std::vector<SlabCommand> commands;
+		std::vector<SlabPiece> commands;
 		for (const int id : collectFootingElements(model))
 		{
 			const Entity* element = model.entity(id);
@@ -2797,30 +1726,74 @@ namespace HomeskzIfcImport::parse
 				p.y -= center.y;
 			}
 
-			SlabCommand cmd;
-			cmd.layer = kLayerFoundationSlab;
-			cmd.drawClass = CLASS_FOUNDATION_SLAB;
+			SlabPiece cmd;
 			cmd.boundary = std::move(boundary);
-			cmd.components = foundationSlabComponents(concrete);
-			cmd.datum = core::SlabDatum::Top; // 基準面はコンクリート天端
 			cmd.thickness = concrete;
 			cmd.elevation = topAbs;
-			cmd.bound = StoryBoundCommand{0, kLevelSlabTop, topAbs - slabTopAbs};
 			commands.push_back(std::move(cmd));
 		}
-		// 統合 → 外面合わせ → 地中梁の振り分け（docs/DEV-NOTES.md M10）→ 床付け（M17）。
-		// 地中梁は**単独のスラブ命令にせず**、外形の確定した底盤の modifiers へ付ける
-		// （台形断面は単一のスラブで描けない）。床付けは外周部の判定に振り分け先の底盤の外形を
-		// 使うので、**振り分けの後**でなければ求められない（parse/Footing.h 冒頭「底盤の後処理」）。
-		std::vector<SlabCommand> slabs = alignSlabsToWallFaces(mergeSlabCommands(commands), walls);
-		attachGroundBeamModifiers(slabs, buildGroundBeamModifiers(model, center));
-		applyGroundBeamBedding(slabs);
-		return slabs;
+		// 統合 → 外面合わせ（docs/DEV-NOTES.md M9）。地中梁の振り分けと床付け（M10 / M17）は
+		// M20 で PIO 側（core/Foundation）へ移った——パラメータの変更のたびに描き直すため。
+		return alignSlabsToWallFaces(mergeSlabCommands(commands), walls);
 	}
 
-	std::vector<SlabCommand> buildSlabCommands(const Model& model)
+	std::vector<SlabPiece> buildSlabCommands(const Model& model)
 	{
 		Context context(model);
 		return buildSlabCommands(context, context.walls());
+	}
+
+	std::optional<core::FoundationCommand> buildFoundationCommand(Context& context)
+	{
+		const Model& model = context.model();
+		if (!hasFoundation(model))
+			return std::nullopt;
+
+		// 立上り（統合・自由端の延長・人通口まで済んだもの）→ 底盤（統合・外面合わせ）→
+		// 地中梁（統合済みのプリズム）。立上りは床束（parse/FloorPost）も使うので Context が
+		// 1 回だけ組み立てる。
+		const std::vector<RiserPiece>& walls = context.walls();
+		const std::vector<SlabPiece> slabs = buildSlabCommands(context, walls);
+		const std::vector<BeamPrism> beams = buildGroundBeamPrisms(model, context.gridCenter());
+
+		core::FoundationCommand cmd;
+		cmd.layer = kLayerFoundation;
+		cmd.drawClass = CLASS_FOUNDATION_SLAB;
+		cmd.slabClass = CLASS_FOUNDATION_SLAB;
+		cmd.riserClass = CLASS_FOUNDATION_WALL;
+		cmd.leanConcreteClass = CLASS_COMPONENT_LEAN_CONCRETE;
+		cmd.gravelClass = CLASS_COMPONENT_GRAVEL;
+
+		for (const SlabPiece& slab : slabs)
+			cmd.slabs.push_back(
+				core::FoundationSlab{slab.boundary, slab.elevation, slab.thickness});
+		for (const RiserPiece& wall : walls)
+		{
+			cmd.risers.push_back(
+				core::FoundationRiser{wall.start, wall.end, wall.thickness, wall.bottom, wall.top});
+		}
+		for (const BeamPrism& prism : beams)
+		{
+			// 断面をパラメータ（下端幅・張り出し・せい）へ当てはめる。当てはまらない断面
+			// （3 点未満・押し出し長 0）は落とす（1 本の異常で全体を止めない）。
+			core::FoundationBeam beam;
+			if (core::fitFoundationBeam(prism, beam))
+				cmd.beams.push_back(beam);
+		}
+
+		// 名前だけ基礎で実体（押し出し）を解決できない IFC は命令にしない（部品の無い PIO を
+		// 置かない＝空のものを先に作らない方針）。
+		if (cmd.slabs.empty() && cmd.risers.empty() && cmd.beams.empty())
+			return std::nullopt;
+
+		// OIP に最初に出る代表値は部品から求める（core::foundationBaseParams）。
+		cmd.params = core::foundationBaseParams(cmd);
+		return cmd;
+	}
+
+	std::optional<core::FoundationCommand> buildFoundationCommand(const Model& model)
+	{
+		Context context(model);
+		return buildFoundationCommand(context);
 	}
 } // namespace HomeskzIfcImport::parse

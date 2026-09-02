@@ -297,7 +297,7 @@ TEST(columns_are_cached_and_match_the_plain_call)
 
 TEST(walls_are_cached_and_match_the_plain_call)
 {
-	// 立上りの解析は Document の walls と底盤の外面合わせが共有するので、コンテキストは
+	// 立上りの解析は基礎命令の組み立てと床束の配置が共有するので、コンテキストは
 	// 1 回だけ走らせて覚える。2 度目が同じ結果（同じ実体）を返し、キャッシュを通さない
 	// 呼び出しとも一致すること。
 	bool ok = false;
@@ -307,19 +307,18 @@ TEST(walls_are_cached_and_match_the_plain_call)
 		return;
 
 	Context context(model);
-	const std::vector<core::WallCommand>& first = context.walls();
-	const std::vector<core::WallCommand>& second = context.walls();
+	const std::vector<parse::RiserPiece>& first = context.walls();
+	const std::vector<parse::RiserPiece>& second = context.walls();
 	CHECK(&first == &second);
 
-	const std::vector<core::WallCommand> plain = parse::buildWallCommands(model);
+	const std::vector<parse::RiserPiece> plain = parse::buildWallCommands(model);
 	CHECK_EQ(first.size(), plain.size());
 	CHECK(!plain.empty());
 	for (std::size_t i = 0; i < first.size() && i < plain.size(); ++i)
 	{
-		CHECK_EQ(first[i].layer, plain[i].layer);
 		CHECK(near(first[i].thickness, plain[i].thickness));
 		CHECK(near(first[i].start.x, plain[i].start.x));
-		CHECK(near(first[i].topBound.offset, plain[i].topBound.offset));
+		CHECK(near(first[i].top, plain[i].top));
 	}
 }
 
@@ -338,7 +337,7 @@ TEST(context_backed_commands_match_the_plain_commands)
 			const std::vector<core::MemberCommand> members = parse::buildMemberCommands(shared);
 			const std::vector<core::RafterCommand> rafters = parse::buildRafterCommands(shared);
 			const std::vector<core::RoofCommand> roofs = parse::buildRoofCommands(shared);
-			const std::vector<core::SlabCommand> slabs =
+			const std::vector<parse::SlabPiece> slabs =
 				parse::buildSlabCommands(shared, shared.walls());
 			// M11 シンボル置換系（仕口は命令から導出するのでコンテキストを取らない）。
 			const std::vector<core::SymbolCommand> bolts = parse::buildAnchorBoltCommands(shared);
