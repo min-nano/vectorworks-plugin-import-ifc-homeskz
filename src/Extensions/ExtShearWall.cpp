@@ -91,62 +91,70 @@ namespace HomeskzIfcImport
 		// でたらめな絵を描くことはない。
 		const SParametricParamDef* paramDefs()
 		{
-			static const SParametricParamDef defs[] = {
-				// **並びは「絵にとってどれだけ要るか」の順**。OIP の上から重要な順に読める
-				// うえに、万一 VW 側が一覧を途中までしか登録しなくても、落ちるのは
-				// 既定値で代用が利くもの（記号の大きさ・面材の離れ・見付け幅）から順になる。
-				{kParamShearBottom,
-				 {PLUGIN_VWR_ID, "shearWallBottom"},
-				 "0",
-				 "0",
-				 kFieldCoordDisp,
-				 0},
-				{kParamShearTop, {PLUGIN_VWR_ID, "shearWallTop"}, "0", "0", kFieldCoordDisp, 0},
-				{kParamShearClearSpan,
-				 {PLUGIN_VWR_ID, "shearWallClearSpan"},
-				 "0",
-				 "0",
-				 kFieldCoordDisp,
-				 0},
-				{kParamShearTargetLayers,
-				 {PLUGIN_VWR_ID, "shearWallTargetLayers"},
-				 "",
-				 "",
-				 kFieldText,
-				 0},
-				{kParamShearKind,
-				 {PLUGIN_VWR_ID, "shearWallKind"},
-				 kShearKindBrace,
-				 kShearKindBrace,
-				 kFieldText,
-				 0},
-				{kParamShearBraceStyle,
-				 {PLUGIN_VWR_ID, "shearWallBraceStyle"},
-				 kShearBraceSingle,
-				 kShearBraceSingle,
-				 kFieldText,
-				 0},
-				{kParamShearBraceRise,
-				 {PLUGIN_VWR_ID, "shearWallBraceRise"},
-				 kShearRiseEnd,
-				 kShearRiseEnd,
-				 kFieldText,
-				 0},
-				{kParamShearPanelSide,
-				 {PLUGIN_VWR_ID, "shearWallPanelSide"},
-				 kShearSideFront,
-				 kShearSideFront,
-				 kFieldText,
-				 0},
-				{kParamShearWidth, {PLUGIN_VWR_ID, "shearWallWidth"}, "0", "0", kFieldCoordDisp, 0},
-				{kParamShearMarkOffset,
-				 {PLUGIN_VWR_ID, "shearWallMarkOffset"},
-				 "4",
-				 "4",
-				 kFieldCoordDisp,
-				 0},
-				{"", {}, "", "", kFieldText, 0}}; // 終端
-			return defs;
+			// SDK は「番兵で終わる配列の先頭ポインタ」を受け取る（SParametricParamDef*）。
+			// 器を std::array にしても .data() で同じポインタを渡せるので、C 配列にする
+			// 理由は無い（番兵は最後の要素としてそのまま残す）。
+			static const std::array<SParametricParamDef, 11> defs = {
+				{// **並びは「絵にとってどれだけ要るか」の順**。OIP の上から重要な順に読める
+				 // うえに、万一 VW 側が一覧を途中までしか登録しなくても、落ちるのは
+				 // 既定値で代用が利くもの（記号の大きさ・面材の離れ・見付け幅）から順になる。
+				 {kParamShearBottom,
+				  {PLUGIN_VWR_ID, "shearWallBottom"},
+				  "0",
+				  "0",
+				  kFieldCoordDisp,
+				  0},
+				 {kParamShearTop, {PLUGIN_VWR_ID, "shearWallTop"}, "0", "0", kFieldCoordDisp, 0},
+				 {kParamShearClearSpan,
+				  {PLUGIN_VWR_ID, "shearWallClearSpan"},
+				  "0",
+				  "0",
+				  kFieldCoordDisp,
+				  0},
+				 {kParamShearTargetLayers,
+				  {PLUGIN_VWR_ID, "shearWallTargetLayers"},
+				  "",
+				  "",
+				  kFieldText,
+				  0},
+				 {kParamShearKind,
+				  {PLUGIN_VWR_ID, "shearWallKind"},
+				  kShearKindBrace,
+				  kShearKindBrace,
+				  kFieldText,
+				  0},
+				 {kParamShearBraceStyle,
+				  {PLUGIN_VWR_ID, "shearWallBraceStyle"},
+				  kShearBraceSingle,
+				  kShearBraceSingle,
+				  kFieldText,
+				  0},
+				 {kParamShearBraceRise,
+				  {PLUGIN_VWR_ID, "shearWallBraceRise"},
+				  kShearRiseEnd,
+				  kShearRiseEnd,
+				  kFieldText,
+				  0},
+				 {kParamShearPanelSide,
+				  {PLUGIN_VWR_ID, "shearWallPanelSide"},
+				  kShearSideFront,
+				  kShearSideFront,
+				  kFieldText,
+				  0},
+				 {kParamShearWidth,
+				  {PLUGIN_VWR_ID, "shearWallWidth"},
+				  "0",
+				  "0",
+				  kFieldCoordDisp,
+				  0},
+				 {kParamShearMarkOffset,
+				  {PLUGIN_VWR_ID, "shearWallMarkOffset"},
+				  "4",
+				  "4",
+				  kFieldCoordDisp,
+				  0},
+				 {"", {}, "", "", kFieldText, 0}}}; // 終端
+			return defs.data();
 		}
 
 		// PIO の実数パラメータを読む。**長さフィールドでも文字列で保持されていることがある**
@@ -167,22 +175,28 @@ namespace HomeskzIfcImport
 			}
 			catch (...)
 			{
-				// 実数として読めないパラメータ。下の文字列読みへ回す。
+				read = false; // 実数として読めないパラメータ。下の文字列読みへ回す。
 			}
 			if (read && value != 0.0)
 				return value;
 
+			// 文字列としてなら読めることがある（単位付きの表記など）。読めた数だけ採る。
 			const std::string text = draw::PioParamString(pio, name);
 			if (!text.empty())
 			{
+				bool parsed = false;
+				double number = 0.0;
 				try
 				{
-					return std::stod(text);
+					number = std::stod(text);
+					parsed = true;
 				}
 				catch (...)
 				{
-					// 数値に見えない文字列（単位付き等）。下の判断へ落とす。
+					parsed = false; // 数値に見えない文字列。下の判断へ落とす。
 				}
+				if (parsed)
+					return number;
 			}
 			return read ? value : fallback;
 		}
@@ -435,7 +449,7 @@ namespace HomeskzIfcImport
 	} // namespace
 
 	// --------------------------------------------------------------------------
-	// - NOLINTBEGIN(misc-const-correctness)
+	// NOLINTBEGIN(misc-const-correctness)
 #ifdef VW_DEV_BUILD
 	// UUID: 8dc146c6-dcac-4c5e-957d-036756b40f88  (dev build)
 	IMPLEMENT_VWParametricExtension(
@@ -499,7 +513,7 @@ namespace HomeskzIfcImport
 
 		try
 		{
-			VWParametricObj self(this->fhObject);
+			const VWParametricObj self(this->fhObject);
 			TraceParameters(self);
 
 			// 両端（柱芯）をローカルへ落とす。線分 PIO のローカル X が壁の向き、
