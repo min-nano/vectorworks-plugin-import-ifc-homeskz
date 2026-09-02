@@ -37,6 +37,7 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -65,41 +66,49 @@ namespace HomeskzIfcImport
 		// 部品の直列化は文字列。既定値は 0／空＝「取り込みが書くまで何も描かない」。
 		const SParametricParamDef* paramDefs()
 		{
-			static const SParametricParamDef defs[] = {
-				{kParamSlabThickness,
-				 {PLUGIN_VWR_ID, "foundationSlabThickness"},
-				 "0",
-				 "0",
-				 kFieldCoordDisp,
-				 0},
-				{kParamSlabTop, {PLUGIN_VWR_ID, "foundationSlabTop"}, "0", "0", kFieldCoordDisp, 0},
-				{kParamRiserTop,
-				 {PLUGIN_VWR_ID, "foundationRiserTop"},
-				 "0",
-				 "0",
-				 kFieldCoordDisp,
-				 0},
-				{kParamBeamDepth,
-				 {PLUGIN_VWR_ID, "foundationBeamDepth"},
-				 "0",
-				 "0",
-				 kFieldCoordDisp,
-				 0},
-				{kParamHaunchWidth,
-				 {PLUGIN_VWR_ID, "foundationHaunchWidth"},
-				 "0",
-				 "0",
-				 kFieldCoordDisp,
-				 0},
-				{kParamHaunchHeight,
-				 {PLUGIN_VWR_ID, "foundationHaunchHeight"},
-				 "0",
-				 "0",
-				 kFieldCoordDisp,
-				 0},
-				{kParamData, {PLUGIN_VWR_ID, "foundationData"}, "", "", kFieldText, 0},
-				{"", {}, "", "", kFieldText, 0}}; // 終端
-			return defs;
+			// SDK は「番兵で終わる配列の先頭ポインタ」を受け取る（SParametricParamDef*）。
+			// 器を std::array にしても .data() で同じポインタを渡せるので、C 配列にする
+			// 理由は無い（番兵は最後の要素としてそのまま残す。ExtColumnMark と同じ）。
+			static const std::array<SParametricParamDef, 8> defs = {
+				{{kParamSlabThickness,
+				  {PLUGIN_VWR_ID, "foundationSlabThickness"},
+				  "0",
+				  "0",
+				  kFieldCoordDisp,
+				  0},
+				 {kParamSlabTop,
+				  {PLUGIN_VWR_ID, "foundationSlabTop"},
+				  "0",
+				  "0",
+				  kFieldCoordDisp,
+				  0},
+				 {kParamRiserTop,
+				  {PLUGIN_VWR_ID, "foundationRiserTop"},
+				  "0",
+				  "0",
+				  kFieldCoordDisp,
+				  0},
+				 {kParamBeamDepth,
+				  {PLUGIN_VWR_ID, "foundationBeamDepth"},
+				  "0",
+				  "0",
+				  kFieldCoordDisp,
+				  0},
+				 {kParamHaunchWidth,
+				  {PLUGIN_VWR_ID, "foundationHaunchWidth"},
+				  "0",
+				  "0",
+				  kFieldCoordDisp,
+				  0},
+				 {kParamHaunchHeight,
+				  {PLUGIN_VWR_ID, "foundationHaunchHeight"},
+				  "0",
+				  "0",
+				  kFieldCoordDisp,
+				  0},
+				 {kParamData, {PLUGIN_VWR_ID, "foundationData"}, "", "", kFieldText, 0},
+				 {"", {}, "", "", kFieldText, 0}}}; // 終端
+			return defs.data();
 		}
 
 		// PIO の寸法パラメータを読む（読めなければ 0）。

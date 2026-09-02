@@ -251,20 +251,23 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 集合演算の本体。すべての辺を交点で細分し、**左が領域の内・右が領域の外**の向きの
-		// 部分辺だけを境界として残してつなぐ。inRegion は点が結果の領域内かを答える述語で、
-		// 和と差はこれだけが違う（ヘッダ冒頭）。
-		template <typename InRegion>
-		bool booleanBoundary(const std::vector<Ring>& rings, const InRegion& inRegion,
+		// 部分辺だけを境界として残してつなぐ。領域は「subject のどれかの内側で、clip の
+		// どれの内側でもないところ」——clip が空なら和、空でなければ差になる（ヘッダ冒頭）。
+		bool booleanBoundary(const std::vector<Ring>& subject, const std::vector<Ring>& clip,
 							 std::vector<Ring>& out)
 		{
+			const auto inRegion = [&subject, &clip](double x, double y)
+			{ return inAnyRing(x, y, subject) && !inAnyRing(x, y, clip); };
+
 			std::vector<Edge> directed;
-			for (const Ring& ring : rings)
+			for (const std::vector<Ring>* rings : {&subject, &clip})
 			{
-				const std::size_t n = ring.size();
-				if (n < 3)
-					continue;
-				for (std::size_t i = 0; i < n; ++i)
-					directed.emplace_back(ring[i], ring[(i + 1) % n]);
+				for (const Ring& ring : *rings)
+				{
+					const std::size_t n = ring.size();
+					for (std::size_t i = 0; i < n; ++i)
+						directed.emplace_back(ring[i], ring[(i + 1) % n]);
+				}
 			}
 			if (directed.empty())
 			{
@@ -300,12 +303,12 @@ namespace HomeskzIfcImport::core
 					const double my = (part.first.second + part.second.second) / 2.0;
 					const double ex = part.second.first - part.first.first;
 					const double ey = part.second.second - part.first.second;
-					const double length = std::hypot(ex, ey);
-					if (length <= 0.0)
-						continue;
-					// 進行方向 p→q の右向き法線 (ey, −ex)/length。両側を突いて領域の内外を見る。
-					const double nx = kPolySideEps * ey / length;
-					const double ny = -kPolySideEps * ex / length;
+					const double len = std::hypot(ex, ey);
+					if (len <= 0.0)
+						continue; // 細分で長さ 0 の部分辺は出ないが、0 除算はしない
+					// 進行方向 p→q の右向き法線 (ey, −ex)/len。両側を突いて領域の内外を見る。
+					const double nx = kPolySideEps * ey / len;
+					const double ny = -kPolySideEps * ex / len;
 					const bool rightInside = inRegion(mx + nx, my + ny);
 					const bool leftInside = inRegion(mx - nx, my - ny);
 					if (leftInside == rightInside)
@@ -432,8 +435,7 @@ namespace HomeskzIfcImport::core
 		}
 
 		std::vector<Ring> loops;
-		if (!booleanBoundary(
-				rings, [&rings](double x, double y) { return inAnyRing(x, y, rings); }, loops))
+		if (!booleanBoundary(rings, {}, loops)) // 引く相手が空＝和
 			return false;
 
 		PolygonList result;
@@ -461,13 +463,8 @@ namespace HomeskzIfcImport::core
 				clipRings.push_back(std::move(ring));
 		}
 
-		std::vector<Ring> all = subjectRings;
-		all.insert(all.end(), clipRings.begin(), clipRings.end());
-
 		std::vector<Ring> loops;
-		if (!booleanBoundary(
-				all, [&subjectRings, &clipRings](double x, double y)
-				{ return inAnyRing(x, y, subjectRings) && !inAnyRing(x, y, clipRings); }, loops))
+		if (!booleanBoundary(subjectRings, clipRings, loops))
 			return false;
 
 		PolygonList result;

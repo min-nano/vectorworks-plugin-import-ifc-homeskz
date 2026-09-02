@@ -1082,6 +1082,18 @@ TEST(offset_polygon_moves_each_edge_outward_and_miters_the_corners)
 	if (shifted.size() != 5)
 		return;
 	CHECK(near(shifted[1].x, 50.0) && near(shifted[1].y, -10.0));
+
+	// 長さ 0 の辺（同じ点が連続する外形）は方向が決まらないので、その辺の線は動かさずに
+	// 隣の辺との交点を採る（頂点が落ちて数が減ったりしない）。
+	const std::vector<core::Vec2> repeated = {
+		{0.0, 0.0}, {0.0, 0.0}, {100.0, 0.0}, {100.0, 100.0}, {0.0, 100.0}};
+	const std::vector<core::Vec2> moved = core::offsetPolygon(repeated, {5.0, 5.0, 5.0, 5.0, 5.0});
+	CHECK_EQ(moved.size(), std::size_t{5});
+
+	// 距離の数が辺の数と合わない／面にならない入力は動かさずそのまま返す。
+	CHECK_EQ(core::offsetPolygon(square, {10.0}).size(), std::size_t{4});
+	CHECK(near(core::offsetPolygon(square, {10.0})[0].x, 0.0));
+	CHECK_EQ(core::offsetPolygon({{0.0, 0.0}, {1.0, 1.0}}, {1.0, 1.0}).size(), std::size_t{2});
 }
 
 TEST_MAIN();

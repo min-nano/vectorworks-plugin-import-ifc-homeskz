@@ -194,4 +194,57 @@ TEST(merge_folds_only_what_becomes_one_hole_free_loop)
 	CHECK(HomeskzIfcImport::core::mergePolygons({}).empty());
 }
 
+TEST(union_splits_polygons_that_only_touch_at_a_corner)
+{
+	// 角 1 点だけで接する 2 枚は、境界追跡がその点で**分岐**する（出て行く辺が 2 本ある）。
+	// 内側を左に保つ辺を選べば 2 つのループに分かれる——ここを取り違えると、和が 8 の字に
+	// つながって面積が壊れる。
+	PolygonList out;
+	CHECK(HomeskzIfcImport::core::polygonUnion(
+		{rect(0.0, 0.0, 100.0, 100.0), rect(100.0, 100.0, 200.0, 200.0)}, out));
+	CHECK_EQ(out.size(), std::size_t{2});
+	CHECK_EQ(holesIn(out), std::size_t{0});
+	for (const std::vector<Vec2>& loop : out)
+		CHECK(near(HomeskzIfcImport::core::polygonArea(loop), 10000.0, 1.0));
+
+	// 3 枚目で角が埋まると 1 つの L 字になる（分岐点でどちらへ進むかが効く）。
+	CHECK(HomeskzIfcImport::core::polygonUnion({rect(0.0, 0.0, 100.0, 100.0),
+												rect(100.0, 100.0, 200.0, 200.0),
+												rect(100.0, 0.0, 200.0, 100.0)},
+											   out));
+	CHECK_EQ(out.size(), std::size_t{1});
+	if (out.size() == 1)
+		CHECK(near(HomeskzIfcImport::core::polygonArea(out[0]), 30000.0, 1.0));
+}
+
+TEST(degenerate_polygons_are_ignored)
+{
+	// 面にならない入力（2 点以下）は落ちる。全部が面にならなければ結果は空。
+	PolygonList out;
+	CHECK(HomeskzIfcImport::core::polygonUnion({{Vec2{0.0, 0.0}, Vec2{100.0, 0.0}}, {}}, out));
+	CHECK(out.empty());
+	CHECK(HomeskzIfcImport::core::polygonDifference({{Vec2{0.0, 0.0}}}, {}, out));
+	CHECK(out.empty());
+
+	// 末尾に始点を重ねた（閉じた）頂点列は、重複を落として同じ 1 枚になる。
+	std::vector<Vec2> closed = rect(0.0, 0.0, 100.0, 100.0);
+	closed.push_back(closed.front());
+	CHECK(HomeskzIfcImport::core::polygonUnion({closed}, out));
+	CHECK_EQ(out.size(), std::size_t{1});
+	if (out.size() == 1)
+		CHECK_EQ(out[0].size(), std::size_t{4});
+
+	// 繋がりの判定・連結成分も、面にならない相手とは繋がらない。
+	CHECK(!HomeskzIfcImport::core::polygonsConnected(rect(0.0, 0.0, 100.0, 100.0),
+													 {Vec2{0.0, 0.0}, Vec2{50.0, 50.0}}));
+	const std::vector<std::vector<std::size_t>> comps = HomeskzIfcImport::core::polygonComponents(
+		{rect(0.0, 0.0, 100.0, 100.0), {Vec2{50.0, 50.0}}});
+	CHECK_EQ(comps.size(), std::size_t{2});
+	// 畳み込みでもそのまま残る（捨てない——描く側が面にならないものを落とす）。
+	CHECK_EQ(
+		HomeskzIfcImport::core::mergePolygons({rect(0.0, 0.0, 100.0, 100.0), {Vec2{50.0, 50.0}}})
+			.size(),
+		std::size_t{2});
+}
+
 TEST_MAIN()

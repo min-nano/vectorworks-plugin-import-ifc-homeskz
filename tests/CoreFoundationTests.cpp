@@ -212,6 +212,41 @@ TEST(fit_handles_the_real_data_profiles)
 	CHECK(core::shoelaceSigned(outline) > 0.0);
 }
 
+TEST(fit_reads_the_kink_on_the_side_that_flares)
+{
+	// 張り出しが片側だけ（+u 側）の断面でも、鉛直部の上端（下端と同じ u の中間頂点）を
+	// 見つけて斜め部の高さを読む。**張り出しのある側でしか探さない**ので、鉛直な側から
+	// 読んで全高になってしまわないこと。
+	FoundationBeamFit fit;
+	CHECK(core::fitFoundationBeam(trapezoid(300.0, 200.0, 0.0, 140.0, 40.0), fit));
+	CHECK(near(fit.haunchLeft, 200.0, 1e-6));
+	CHECK(near(fit.haunchRight, 0.0, 1e-6));
+	CHECK(near(fit.haunchHeight, 40.0, 1e-6));
+
+	// 末尾に始点を重ねた（閉じた）断面でも同じ値に当てはまる。
+	BeamPrism closed = trapezoid(300.0, 200.0, 200.0);
+	closed.profile.push_back(closed.profile.front());
+	CHECK(core::fitFoundationBeam(closed, fit));
+	CHECK(near(fit.bottomWidth, 300.0, 1e-6) && near(fit.depth, 140.0, 1e-6));
+}
+
+TEST(fit_rejects_profiles_without_height)
+{
+	// せいが無い（頂点が一直線に並ぶ）断面は、天端の辺も外接矩形も読めないので当てはまらない。
+	BeamPrism flat;
+	flat.profile = {Vec2{-100.0, 0.0}, Vec2{0.0, 0.0}, Vec2{100.0, 0.0}};
+	flat.depth = 1000.0;
+	flat.origin = Vec3{0.0, 0.0, -200.0};
+	FoundationBeamFit fit;
+	CHECK(!core::fitFoundationBeam(flat, fit));
+
+	// 同じ点が並ぶだけの断面（重複を落とすと 3 点に満たない）も当てはまらない。
+	BeamPrism collapsed;
+	collapsed.profile = {Vec2{0.0, 0.0}, Vec2{0.0, 0.0}, Vec2{0.0, 0.0}};
+	collapsed.depth = 1000.0;
+	CHECK(!core::fitFoundationBeam(collapsed, fit));
+}
+
 TEST(fit_falls_back_to_the_bounding_box_and_rejects_degenerate_prisms)
 {
 	// 天端の辺が無い三角形は外接矩形（下端幅＝u の幅・張り出し 0・せい＝v の幅）で近似する。
@@ -259,6 +294,37 @@ TEST(slab_bottom_comes_from_the_slab_under_the_outline)
 	cmd.slabs.clear();
 	CHECK(near(core::foundationSlabBottom(cmd, rect(0.0, 0.0, 100.0, 100.0)),
 			   cmd.params.slabTop - cmd.params.slabThickness));
+}
+
+TEST(beam_top_needs_a_slab_above_the_bottom)
+{
+	FoundationCommand cmd = sample();
+	const std::vector<Vec2> ring = cmd.beams[0].outlines[0];
+	double top = 0.0;
+	CHECK(core::foundationBeamTop(cmd, ring, -240.0, top));
+	CHECK(near(top, -100.0));
+
+	// 底が底盤の底面より下にない地中梁は、取り合う相手が無い（せいが決まらない）。
+	CHECK(!core::foundationBeamTop(cmd, ring, -100.0, top));
+	CHECK(!core::foundationBeamTop(cmd, ring, 0.0, top));
+
+	// 底盤が 1 グループも無ければ代表値から求め、それも底より下なら false。
+	FoundationCommand noSlab = cmd;
+	noSlab.slabs.clear();
+	CHECK(core::foundationBeamTop(noSlab, ring, -500.0, top));
+	CHECK(near(top, cmd.params.slabTop - cmd.params.slabThickness));
+	CHECK(!core::foundationBeamTop(noSlab, ring, 0.0, top));
+
+	// 高さの違う底盤が混在するときは**底より上にある**方を選ぶ（真下の低い底盤を選ぶと
+	// せいが 0 以下になって地中梁が消える）。
+	FoundationCommand mixed = cmd;
+	mixed.slabs.insert(mixed.slabs.begin(),
+					   FoundationSlabGroup{-500.0, 150.0, {rect(0.0, 0.0, 3640.0, 2730.0)}});
+	CHECK(core::foundationBeamTop(mixed, ring, -240.0, top));
+	CHECK(near(top, -100.0));
+	// その低い底盤の下へ潜る地中梁は、低い方に取り合う。
+	CHECK(core::foundationBeamTop(mixed, ring, -800.0, top));
+	CHECK(near(top, -650.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -449,6 +515,29 @@ TEST(slab_gravel_avoids_the_beam_concrete)
 	CHECK_EQ(whole, std::size_t{1});
 }
 
+TEST(slab_gravel_keeps_the_whole_outline_when_the_difference_would_leave_a_hole)
+{
+	// 底盤の内側だけに収まる地中梁を抜くと、砕石は穴あきの 1 枚になる。押し出しソリッドは
+	// 穴を表せないので、**抜くのをあきらめて底盤の外形のまま**敷く（重なるが、欠けたり
+	// 外形が壊れたりはしない。core/PolygonBool.h「穴の扱い」）。
+	FoundationCommand cmd = sample();
+	cmd.beams[0].outlines = {rect(1000.0, 1000.0, 2000.0, 2000.0)};
+	std::size_t gravel = 0;
+	for (const FoundationSolid& solid : core::foundationSolids(cmd))
+	{
+		double low = 0.0;
+		double high = 0.0;
+		zRange(solid, low, high);
+		if (solid.drawClass == kGravel && near(high, -100.0))
+		{
+			++gravel;
+			const std::vector<Vec2> plan = planOf(solid);
+			CHECK(near(minX(plan), 0.0) && near(maxX(plan), 3640.0));
+		}
+	}
+	CHECK_EQ(gravel, std::size_t{1});
+}
+
 TEST(beam_top_outline_widens_only_the_inner_edges)
 {
 	const FoundationCommand cmd = sample();
@@ -480,6 +569,73 @@ TEST(solids_skip_groups_that_have_no_body)
 	CHECK_EQ(countOf(solids, FoundationSolid::Kind::Riser), std::size_t{0});
 	for (const FoundationSolid& solid : solids)
 		CHECK(solid.base.size() >= 3);
+}
+
+TEST(degenerate_outlines_are_skipped_and_do_not_weigh_in)
+{
+	// 面にならない外形（2 点以下）・外形の無いグループ・長さ 0 の辺を混ぜても、ソリッドは
+	// 妥当なものだけになり、代表値の重み付けにも入らない。
+	FoundationCommand cmd = sample();
+	cmd.slabs.push_back(FoundationSlabGroup{-1000.0, 500.0, {}});				  // 外形なし
+	cmd.slabs.push_back(FoundationSlabGroup{-2000.0, 600.0, {{Vec2{0.0, 0.0}}}}); // 1 点
+	cmd.risers.push_back(FoundationRiserGroup{9000.0, {{Vec2{0.0, 0.0}}}});		  // 1 点
+	cmd.beams.push_back(FoundationBeamGroup{-3000.0, 50.0, 50.0, {}});			  // 外形なし
+	// 同じ点が連続する（長さ 0 の辺を持つ）地中梁の外形も、辺ごとの処理で落ちずに描ける。
+	cmd.beams.push_back(
+		FoundationBeamGroup{-240.0,
+							200.0,
+							140.0,
+							{{Vec2{500.0, 2000.0}, Vec2{500.0, 2000.0}, Vec2{1000.0, 2000.0},
+							  Vec2{1000.0, 2300.0}, Vec2{500.0, 2300.0}}}});
+	// 底盤の底面（−100）より上に底がある地中梁は、取り合う相手が無いので描かれない。
+	cmd.beams.push_back(FoundationBeamGroup{0.0, 200.0, 140.0, {rect(200.0, 200.0, 800.0, 500.0)}});
+
+	cmd.risers.push_back(
+		FoundationRiserGroup{400.0,
+							 {{Vec2{3000.0, 2000.0}, Vec2{3000.0, 2000.0}, Vec2{3600.0, 2000.0},
+							   Vec2{3600.0, 2100.0}, Vec2{3000.0, 2100.0}}}});
+
+	const FoundationParams params = core::foundationBaseParams(cmd);
+	CHECK(near(params.slabTop, 50.0)); // 外形の無いグループは重み 0 で数えない
+	CHECK(near(params.riserTop, 400.0));
+	CHECK(near(params.beamDepth, 140.0));
+
+	for (const FoundationSolid& solid : core::foundationSolids(cmd))
+	{
+		CHECK(solid.base.size() >= 3);
+		CHECK(core::length(core::Vec3{solid.extent.x, solid.extent.y, solid.extent.z}) > 0.0);
+	}
+	for (const core::FoundationPlanShape& shape : core::foundationPlanShapes(cmd))
+		CHECK(shape.outline.size() >= 3);
+}
+
+TEST(clockwise_outlines_are_normalised)
+{
+	// 外形の向きは問わない（描く側で反時計回りに揃える）。時計回りで渡しても同じ数・同じ
+	// 高さのソリッドになる。
+	FoundationCommand cmd = sample();
+	for (std::vector<Vec2>& outline : cmd.slabs[0].outlines)
+		std::ranges::reverse(outline);
+	for (std::vector<Vec2>& outline : cmd.risers[0].outlines)
+		std::ranges::reverse(outline);
+	for (std::vector<Vec2>& outline : cmd.beams[0].outlines)
+		std::ranges::reverse(outline);
+
+	const std::vector<FoundationSolid> reversed = core::foundationSolids(cmd);
+	const std::vector<FoundationSolid> forward = core::foundationSolids(sample());
+	CHECK_EQ(reversed.size(), forward.size());
+	for (std::size_t i = 0; i < reversed.size() && i < forward.size(); ++i)
+	{
+		CHECK(reversed[i].kind == forward[i].kind);
+		CHECK_EQ(reversed[i].base.size(), forward[i].base.size());
+		double low = 0.0;
+		double high = 0.0;
+		double lowRef = 0.0;
+		double highRef = 0.0;
+		zRange(reversed[i], low, high);
+		zRange(forward[i], lowRef, highRef);
+		CHECK(near(low, lowRef) && near(high, highRef));
+	}
 }
 
 TEST(plan_shapes_outline_slabs_risers_and_beam_tops)
@@ -592,6 +748,13 @@ TEST(decode_rejects_other_versions_and_broken_records)
 	CHECK(!core::decodeFoundation("HF2;C a|b|c|d;P 0 0 0 0 0 0;S 50 150 1 4 0 0 1 1;", decoded));
 	CHECK(!core::decodeFoundation("HF2;C a|b|c|d;P 0 0 0 0 0 0;R 400 x;", decoded));
 	CHECK_EQ(decoded.layer, std::string("untouched")); // 失敗しても out は触らない
+
+	// 余分な空白は読み飛ばす（項目の末尾に空白が残っていても壊れた記録とは見なさない）。
+	CHECK(core::decodeFoundation("HF2;C a|b|c|d;P 1 2 3 4 5 6 ;", decoded));
+	// 末尾の ";" が無くても読める。
+	CHECK(core::decodeFoundation("HF2;C a|b|c|d;P 1 2 3 4 5 6", decoded));
+	// 地中梁の項目が壊れている（外形の数が読めない）。
+	CHECK(!core::decodeFoundation("HF2;C a|b|c|d;P 1 2 3 4 5 6;B -240 200 140 x;", decoded));
 
 	// 最小の妥当な記録（部品無し）は通る。
 	CHECK(core::decodeFoundation("HF2;C a|b|c|d;P 1 2 3 4 5 6;", decoded));

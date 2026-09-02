@@ -573,11 +573,11 @@ namespace HomeskzIfcImport::core
 	namespace
 	{
 		// 外形の下（上）に来る底盤のグループを選ぶ。代表点（重心・頂点・辺の中点）が
-		// いちばん多く入る底盤を採り、同数なら重心が近い方（決定的）。accept が false を
-		// 返すグループは候補にしない。見つからなければ npos。
-		template <typename Accept>
+		// いちばん多く入る底盤を採り、同数なら重心が近い方（決定的）。aboveOnly なら
+		// 「底面が limit より上」の底盤だけを候補にする（地中梁の天端。ヘッダ
+		// foundationBeamTop）。見つからなければ npos。
 		std::size_t slabGroupFor(const FoundationCommand& command, const std::vector<Vec2>& outline,
-								 const Accept& accept)
+								 bool aboveOnly, double limit)
 		{
 			const std::vector<Vec2> samples = footprintSamples(outline);
 			const Vec2 centre = polygonCentroid(outline);
@@ -587,7 +587,7 @@ namespace HomeskzIfcImport::core
 			for (std::size_t index = 0; index < command.slabs.size(); ++index)
 			{
 				const FoundationSlabGroup& slab = command.slabs[index];
-				if (!accept(slab))
+				if (aboveOnly && slab.top - slab.thickness <= limit)
 					continue;
 				std::size_t hits = 0;
 				double nearest = std::numeric_limits<double>::max();
@@ -619,8 +619,7 @@ namespace HomeskzIfcImport::core
 		const double fallback = command.params.slabTop - command.params.slabThickness;
 		if (command.slabs.empty() || outline.empty())
 			return fallback;
-		const std::size_t best =
-			slabGroupFor(command, outline, [](const FoundationSlabGroup&) { return true; });
+		const std::size_t best = slabGroupFor(command, outline, false, 0.0);
 		if (best >= command.slabs.size())
 			return fallback;
 		return command.slabs[best].top - command.slabs[best].thickness;
@@ -637,9 +636,7 @@ namespace HomeskzIfcImport::core
 			out = fallback;
 			return true;
 		}
-		const std::size_t best =
-			slabGroupFor(command, outline, [bottom](const FoundationSlabGroup& slab)
-						 { return slab.top - slab.thickness > bottom; });
+		const std::size_t best = slabGroupFor(command, outline, true, bottom);
 		if (best >= command.slabs.size())
 			return false;
 		out = command.slabs[best].top - command.slabs[best].thickness;
