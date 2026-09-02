@@ -47,6 +47,7 @@
 #include "draw/Sheet.h"
 #include "draw/DrawUtil.h"
 #include "draw/Legend.h"
+#include "draw/ShearWall.h"
 #include "draw/Tag.h"
 #include "core/Document.h"
 #include "core/Progress.h"
@@ -218,6 +219,18 @@ namespace HomeskzIfcImport::draw
 			paper.has_value() ? core::planLayout(haveContent ? contentSize : core::Vec2{},
 												 paper->printable, legendWidth)
 							  : core::PlanLayout{};
+
+		// --- 伏図記号の大きさを紙の上で一定にする ------------------------------------
+		//
+		// 耐力壁の伏図記号は**用紙基準（縮尺無視）のシンボル**で、その大きさは
+		// 「定義の図形（用紙 mm）× そのレイヤの縮尺」で決まる。伏図はビューポート越しに
+		// 見るので、**耐力壁レイヤの縮尺を伏図の縮尺へ揃えて初めて**紙の上で一定になる
+		// （draw/ShearWall.h の applyShearWallLayerScale）。
+		//
+		// **ここでしかできない。** 伏図の縮尺は用紙を読まないと決まらない（core::planLayout）
+		// ので、耐力壁を描く時点では分からない。ビューポートを仕上げる 2 巡目より**前**に
+		// 済ませて、更新が新しい縮尺を見るようにする。
+		applyShearWallLayerScale(document, layout.scale);
 
 		// --- 2 巡目: 確定した縮尺を当て、タグを置き、用紙の上へ動かす ----------------
 		//

@@ -69,6 +69,18 @@ namespace HomeskzIfcImport::draw
 	// 診断へ載せる（ローカルの VectorWorks でしか読めない情報を 1 周で持ち帰るため）。
 	std::string DescribeParamsContaining(const VWParametricObj& pio, const char* needle);
 
+	// PIO の文字列パラメータを読む（無ければ・例外なら空）。**PIO 本体（Extensions/）が
+	// 自分や他のオブジェクトのパラメータを覗くときの唯一の入口**——柱記号（ExtColumnMark）と
+	// 耐力壁（ExtShearWall）がどちらも構造材の構造用途を読むので、try/catch ごとここに
+	// 1 つだけ置く。
+	std::string PioParamString(const VWParametricObj& pio, const char* name);
+
+	// オブジェクトが構造材ツール（StructuralMember）なら、その**構造用途**（"4"＝柱 /
+	// "5"＝小屋束 …。core::kStructuralUse*）を返す。構造材でなければ空。
+	//
+	// 記号 PIO と耐力壁 PIO が「対象レイヤの中から柱だけを拾う」のに共有する。
+	std::string StructuralUseOf(MCObjectHandle object);
+
 	// PIO に実数パラメータを書き、**読み戻して書けたか確かめる**。書けていれば true。
 	// 角度・寸法のような数値パラメータでも、PIO の登録次第で実数ではなく文字列として
 	// 保持されていることがあり、その場合 SetParamReal は黙って無視される。そこで実数で
@@ -102,6 +114,14 @@ namespace HomeskzIfcImport::draw
 	// 平面外形を閉じた 2D ポリゴンとして作る（スラブのプロファイル・フォールバック描画）。
 	// 頂点が空なら nil。
 	MCObjectHandle CreateClosedPolygon(const std::vector<core::Vec2>& boundary);
+
+	// その名前のシンボル定義が図面に在るか（例外は false として扱う）。シンボル置換系
+	// （draw/Symbol）が「置けなかった理由を診断へ書き分ける」ために使う唯一の判定。
+	//
+	// ※ **中身が在るかは分からない**——空のシンボル定義でも true になるし、
+	// `GetFirstMemberObject()` も空の定義で非 nil を返す（M19 の実機確認。
+	// docs/DEV-NOTES.md「シンボル定義を SDK から組み立てるのは断念した」）。
+	bool HasSymbolDefinition(const std::string& name);
 
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
 	//

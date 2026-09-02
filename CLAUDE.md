@@ -9,8 +9,8 @@
 VectorWorks 2026 のネイティブオブジェクトへ変換して配置する、**C++ SDK 製のネイティブ
 プラグイン**です。
 
-要素（ストーリ・通り芯・基礎・床・横架材・柱・屋根組・シンボル・記号・伏図・軸組図）は
-一通り実装済みで、**ここから先は独自のプラグインとして改良していきます**。
+要素（ストーリ・通り芯・基礎・床・横架材・柱・屋根組・シンボル・記号・耐力壁・伏図・
+軸組図）は一通り実装済みで、**ここから先は独自のプラグインとして改良していきます**。
 
 ドキュメントの分担:
 
@@ -27,8 +27,10 @@ VectorWorks 2026 のネイティブオブジェクトへ変換して配置する
 
 - **Vectorworks SDK の挙動**（実機でしか出なかった落とし穴・SDK に無い／効かない API・
   試して駄目だった方式）は **[SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)の
-  `Findings/` へ**。本リポジトリの `docs/DEV-NOTES.md` には書かない。まとまった調査は
-  あちらで issue を立てて行う（調査のフローと調査用 CI はあちらの CLAUDE.md）。
+  `Findings/` へ**。本リポジトリの `docs/DEV-NOTES.md` には書かない。**SDK の調査そのものも
+  本リポジトリでは行わない**——調べたいことが出たら**あちらで issue を立て、リファレンスが
+  更新される（`Findings/` に反映される）のを待ってから**、その知見を根拠に実装する
+  （下記「SDK の調査はリファレンス側で行う」）。
 - **本プラグイン固有のこと**（設計判断・ホームズ君 IFC の癖・描き方の方針）は
   `docs/DEV-NOTES.md` へ。
 
@@ -55,9 +57,25 @@ VectorWorks 2026 のネイティブオブジェクトへ変換して配置する
    増やさない。スラブ／ウォールスタイルもデータタグスタイルも作らず、構成層・基準面・
    タグレイアウトは**各オブジェクトへ直接**与える。
 
+   **唯一の例外は耐力壁の伏図記号のシンボル定義**（`耐力壁記号_筋かい` /
+   `耐力壁記号_面材` の 2 つ。`Extensions/ExtShearWall.h`）。記号をシンボルに
+   しておくと、図面の側で 1 か所を編集するだけで**すべての耐力壁の記号を一括で
+   差し替え・調整**できる、というご要望による。例外の作法は次のとおりで、これを
+   満たせないなら例外にしない:
+   * **描く対象があるときだけ作る**（耐力壁が 1 枚も無い図面には作らない。上の 5 と同じ）。
+   * **同じ名前の定義が図面に既にあれば触らない**（利用者が編集した絵を尊重する）。
+   * 作った定義には**必ず `ResetObject` を呼ぶ**——これが無いと外接が計算されず
+     「中身はあるのに空に見える」定義になる（[SDK リファレンス「Symbols」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Symbols.md)）。
+   * スタイル（スラブ・ウォール・データタグ・凡例）は**引き続き作らない**。
+
 5. **空のもの（レイヤ・レベル・凡例）を先に作らない。** 描画対象がある要素にだけ作る。
 
 6. **決定性を守る。** エンティティ列挙順に依存しない結果を出す。ソート・集約は明示的に。
+
+7. **SDK の調査は本リポジトリでしない。** 「この API は SDK にあるか」「どう振る舞うか」が
+   分からないまま実装に入らず、[SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)で
+   issue を立てて、調査と `Findings/` への反映を待つ（下記「SDK の調査はリファレンス側で
+   行う」）。
 
 ## アーキテクチャ: 2 フェーズ分離
 
@@ -103,7 +121,7 @@ VectorWorks ネイティブオブジェクト
 - **プレーンな構造体**（`std::vector`・`std::string`・`double`・`enum` 等の集約）で表す。
 - スキーマは `stories` / `grids` / `members` / `columns` / `walls` / `wallJoins` / `slabs` /
   `floors` / `rafters` / `roofs` / `anchorBolts` / `floorPosts` / `fireBraces` / `joints` /
-  `columnMarks` / `sheets` / `sections` / `sectionSheet`。**同型が並ぶところは構造体 1 つへまとめる**
+  `columnMarks` / `shearWalls` / `sheets` / `sections` / `sectionSheet`。**同型が並ぶところは構造体 1 つへまとめる**
   ——`anchorBolts` / `floorPosts` / `fireBraces` / `joints` は中身が同じなので
   `core::SymbolCommand` 1 つで受け、要素の区別は「Document のどのリストか」が担う
   （`core/Document.h` の doc コメント参照）。
@@ -183,7 +201,15 @@ VectorWorks ネイティブオブジェクト
 構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
 実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名は
-`parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`
+`parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、**耐力壁**の要素判別
+（`isShearBrace` / `isShearPanel`）・レイヤレベル名・柱を探す許容は `parse/ShearWall.h`、
+耐力壁 PIO の登録名・パラメータ名・**PIO が自分の絵へ与えるクラス**（伏図記号／面材の表・裏。
+ハッチングの向きで表裏を分ける 2 クラス）は `Extensions/ExtShearWall.h`
+（**伏図記号の寸法**は PIO 本体 `Extensions/ExtShearWall.cpp` の `kMark*`）、
+**PIO のパラメータを読む口**（`PioParamString`）と**構造材の構造用途を読む述語**
+（`StructuralUseOf`。柱記号 PIO と耐力壁 PIO が共有）は `draw/DrawUtil`、
+**凸多角形の矩形クリップ**は `core/Geometry` の `clipPolygonToRect`（耐力壁の筋かいの形
+`core::shearWallBracePolygon` が唯一の利用者）、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`
 （span 柱レイヤと伏図記号レイヤが共有）、「命令インデックス → ハンドル」の対応表は
 `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの
@@ -407,23 +433,38 @@ HTTP 呼び出しの時間上限・締切判定・ウォッチドッグの三重
 **新しく「何かの完了を待つ」道具が要るときは、`poll_until` の上に probe を 1 つ書く。**
 待機ループを増やさない。
 
-## CI デバッグ（SDK 依存の調査は `ci-debug` を使う）
+## CI デバッグ（SDK 依存のビルド確認は `ci-debug` を使う）
 
 リモートセッション（クラウド上のコンテナ）には **Vectorworks SDK が無い**。したがって
-SDK 依存のビルドエラーの再現や「この API は SDK にあるか」という設計調査は、**CI 上で
-しか答えが出ない**。そのための専用ワークフローが `.github/workflows/ci-debug.yml` で、
-`workflow_dispatch` でしか起動しない（push / PR では**決して**走らない）。
+SDK 依存のビルドエラーの再現は、**CI 上でしか答えが出ない**。そのための専用ワークフローが
+`.github/workflows/ci-debug.yml` で、`workflow_dispatch` でしか起動しない（push / PR では
+**決して**走らない）。SDK そのものの調査（「この API は SDK にあるか」「どう振る舞うか」）
+はこのワークフローの用途ではない（下記「SDK の調査はリファレンス側で行う」）。
 
-**使い分け**: 本プラグインのコードが絡む確認（`build` / `compile-one`、開発中の当たり
-付けの `sdk-grep`）はこちらで行う。**SDK そのものの挙動・API の有無を知見として残す
-まとまった調査**は、[SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)で
-issue を立てて行い（同型の ci-debug と `compile` モードがあちらにもある）、確定した
-結果を `Findings/` へ反映する。どちらで調べても、**SDK の挙動として分かったことの
-書き残し先は `Findings/`**（上記「ドキュメントの分担」）。
+### SDK の調査はリファレンス側で行う（本リポジトリでは調査しない）
+
+本リポジトリの `ci-debug` は、**本プラグインのコードが SDK でコンパイルできるかの確認**
+（`build` / `compile-one`）に使う。「この API は SDK にあるか」「どう振る舞うか」という
+**SDK そのものの調査は本リポジトリでは行わない**——`sdk-grep` / `sdk-ls` で当たりを
+付けるのも含めて、[SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)で
+issue を立て、あちらで調査（同型の ci-debug と `compile` モードがある）・実機確認・
+`Findings/` への反映が済むのを待ってから、その知見を根拠に実装する。本リポジトリで
+`sdk-grep` / `sdk-ls` を使うのは、**既に `Findings/` に載っている宣言を写し取る**
+（引数の型や名前を確かめる）ときだけ。
+
+調査の依頼と待ち方:
+
+1. リファレンス側で issue を立てる（テンプレート `調査`）。**どの機能で・何が分かれば
+   実装に入れるか**を書く。
+2. あちらの調査 PR がマージされ `Findings/` に反映されるまで、その部分の実装には入らない
+   （他の要素や、SDK に依らない `parse/` `core/` の作業を先に進める）。
+3. 反映されたら、その知見を根拠に実装し、コメント・PR 本文から該当の `Findings/` の
+   ページを参照する。**SDK の挙動として分かったことの書き残し先は常に `Findings/`**
+   （上記「ドキュメントの分担」）。
 
 **`build.yml` に一時的な調査ステップを挿してはならない。** 戻し忘れる・その commit が
 dev プレリリースとして公開される・ccache / SDK キャッシュを汚す、と副作用が大きい。
-調査は必ず下記の経路で行う。
+確認は必ず下記の経路で行う。
 
 ### 使い方（リモートセッションの AI はこの 2 手順）
 
@@ -473,7 +514,7 @@ scripts/ci-debug.sh run --mode sdk-grep --args 'GetLayerByName'
 
 | mode | 用途 | `--args` |
 | --- | --- | --- |
-| `sdk-grep` | SDK ヘッダを拡張正規表現で検索（**設計調査の主力**） | 検索パターン |
+| `sdk-grep` | SDK ヘッダを拡張正規表現で検索（`Findings/` に載っている宣言の写し取り用。**SDK の調査はリファレンス側**） | 検索パターン |
 | `sdk-ls` | ヘッダの全文表示 / パス部分一致の一覧 | ヘッダのパスまたは部分文字列 |
 | `build` | configure してビルド（リリース公開はしない） | 単一ターゲット名（省略可） |
 | `compile-one` | 1 翻訳単位だけコンパイル（数十秒。Windows 不可） | ソースのパス |

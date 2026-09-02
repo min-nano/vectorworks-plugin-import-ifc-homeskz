@@ -13,6 +13,7 @@
 #include "parse/IfcGeometry.h"
 #include "parse/Member.h"
 #include "parse/Rafter.h"
+#include "parse/ShearWall.h"
 #include "parse/Roof.h"
 
 #include <algorithm>
@@ -362,6 +363,15 @@ namespace HomeskzIfcImport::parse
 			//     空レイヤが残る（空レイヤを作らない方針。ロフト FL・垂木/野地板と同じ）。
 			// 命令の配置先で判定すれば、**レイヤは命令があるときだけ・命令があれば必ず**でき、
 			// 両方の齟齬が構造的に起きない。
+			// M19 耐力壁: 筋かい・面材の PIO を載せる "n-耐力壁" レイヤ。**横架材天端の
+			// すぐ上**（小屋組より下）へ置く。挿入は「後から挿したものが 1 段上」なので、
+			// 小屋組（登り梁・母屋・垂木・野地板）より**先に**挿す。
+			//
+			// ［レベルを足す条件］母屋・登り梁と同じく**実際に組み立てた耐力壁命令の配置先
+			// レイヤ**で判定する（命令があるときだけ・命令があれば必ずレイヤができる）。
+			if (anyShearWallOnLayer(context.shearWalls(), layerFor(kLevelShearWall)))
+				insertAboveBeamTop(kLevelShearWall);
+
 			for (const char* levelType : {kLevelNoboribari, kLevelMoya})
 			{
 				if (anyMemberOnLayer(members, layerFor(levelType)))
