@@ -103,7 +103,7 @@ namespace HomeskzIfcImport::parse
 		if (!hasFoundation(context.model()))
 			return {};
 
-		// 基礎（M20 で底盤・立上り・地中梁は 1 つの PIO）→ 床束 → アンカーボルト → 通り芯
+		// 基礎（M21 で底盤・立上り・地中梁は 1 つの PIO）→ 床束 → アンカーボルト → 通り芯
 		// （並びは重ね順ではない＝重なりはビューポートのレイヤ順が決める）。
 		std::vector<std::string> layers{kLayerFoundation, kLayerFoundationFloorPost,
 										kLayerFoundationAnchor, core::kGridLayer};

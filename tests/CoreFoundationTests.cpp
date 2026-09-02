@@ -5,7 +5,7 @@
 //	VectorWorks SDK を一切 include せず、無 SDK のテストハーネス（TestFramework.h）で走る
 //	（CLAUDE.md「テスト方針」）。**期待値は手書きで持つ**。
 //
-//	検証項目（docs/DEV-NOTES.md M20・M17）:
+//	検証項目（docs/DEV-NOTES.md M21・M17）:
 //	  * 地中梁の断面の当てはめ（BeamPrism → 底の面の外形と斜め寸法。実データの非対称な台形・
 //	    鉛直部つきの断面・読めない断面の外接矩形）
 //	  * 取り合いの高さ（外形の下に来る底盤の底面）

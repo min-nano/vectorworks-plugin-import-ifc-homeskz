@@ -79,7 +79,13 @@ namespace HomeskzIfcImport::parse
 		// 位置補正が同じ結果を必要とするため、Context が 1 回だけ解析して全員へ配る
 		// （parse/Context.h の members）。**登り梁は屋根面へスナップ補正**してから Document に
 		// 載せる（形状先行。parse/Noboribari）。受ける材は横架材と柱の両方（M8 で最終化）。
-		document.members = correctNoboribari(context, context.members(), document.columns);
+		//
+		// **柱に取り付く端は柱芯へ送る**のもここ（M20。parse/Member の
+		// resolveMemberColumnJoints）——柱命令が横架材の後に組み上がるので、横架材どうしの
+		// 取り合い（buildMemberCommands の中）とは別の関門になる。材が実際に止まる位置は
+		// 変わらないので、登り梁の端部詰めより後でも前でも結果は同じ（後に置く）。
+		document.members = resolveMemberColumnJoints(
+			correctNoboribari(context, context.members(), document.columns), document.columns);
 		progress.step();
 
 		// M19 耐力壁: 筋かい（IfcMember "筋かい…"）・面材（IfcWall "面材…"）を線分 PIO の命令へ
@@ -117,7 +123,7 @@ namespace HomeskzIfcImport::parse
 		document.roofs = buildRoofCommands(context);
 		progress.step();
 
-		// M9/M20 基礎: 立上り・底盤・地中梁を **1 つの命令**にまとめる。立上りは自由端を柱芯へ
+		// M9/M21 基礎: 立上り・底盤・地中梁を **1 つの命令**にまとめる。立上りは自由端を柱芯へ
 		// 寄せるので柱命令を、底盤は外周を立上りの外面へ合わせるので立上りを入力に取る
 		// （Context が立上りを 1 回だけ組み立てて床束とも共有する）。立上りには人通口の
 		// 分割・切り下げまで反映されている（M10。parse/Footing.h）。

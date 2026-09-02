@@ -18,7 +18,7 @@ VectorWorks 2026 のネイティブオブジェクトへ変換して配置する
 | --- | --- |
 | `README.md` | 利用者向け。何をするプラグインか・取り込むもの・使い方・インストール・既知の制限 |
 | `docs/DEVELOPMENT.md` | 開発ガイド。ソースの構成・ビルド・テスト・lint・CI・リリース・自動アップデートの仕組み |
-| `docs/DEV-NOTES.md` | **開発メモ**。設計の考え方・ホームズ君 IFC の癖・打ち切った調査（本プラグインの方針）・実装の経緯（M0〜M20） |
+| `docs/DEV-NOTES.md` | **開発メモ**。設計の考え方・ホームズ君 IFC の癖・打ち切った調査（本プラグインの方針）・実装の経緯（M0〜M21） |
 | [SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)の `Findings/` | **VW SDK の実測知見**（実機でしか判明しなかった落とし穴・SDK に無い／効かない API・SDK 側の打ち切った調査）。別リポジトリ |
 | `tests/README.md` | テストの一覧・方針・何をテストしていないか |
 | `CLAUDE.md`（本ファイル） | 作業時の規約。アーキテクチャ・置き場所・コード規約・PR とマージ・CI の待ち方 |
@@ -123,7 +123,7 @@ VectorWorks ネイティブオブジェクト
   `floors` / `rafters` / `roofs` / `anchorBolts` / `floorPosts` / `fireBraces` / `joints` /
   `columnMarks` / `shearWalls` / `sheets` / `sections` / `sectionSheet`。基礎（`foundation`）は立上り・底盤・
   地中梁の**部品**（同一仕様ごとに外形の多角形でまとめたグループ）と OIP の代表値をまとめた
-  1 つの命令（`core/Foundation.h`）で、描画は自作 PIO 1 つ（M20）。**同型が並ぶところは構造体 1 つへまとめる**
+  1 つの命令（`core/Foundation.h`）で、描画は自作 PIO 1 つ（M21）。**同型が並ぶところは構造体 1 つへまとめる**
   ——`anchorBolts` / `floorPosts` / `fireBraces` / `joints` は中身が同じなので
   `core::SymbolCommand` 1 つで受け、要素の区別は「Document のどのリストか」が担う
   （`core/Document.h` の doc コメント参照）。
@@ -171,7 +171,14 @@ VectorWorks ネイティブオブジェクト
 地中梁を抜く計算が共有する唯一の実装。**穴の扱いは呼び出し側が決める**）、**ペア述語による連結成分**
 （Union-Find。立上り・大引・地中梁の統合が共有）は `core/UnionFind.h`、
 **構成層の総厚**（`totalThickness`）・**横架材の Z 範囲と重なり判定**（`memberTopZ` /
-`memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側が持つ）は `core/Document.h`、
+`memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側が持つ）・**端部オフセット**（＝端点を接合
+相手の芯線に置き、材が実際に止まる位置をここで戻す。意味と値の決まり方）・**オフセットを戻した
+「材の端」**（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`。
+仕口の位置・登り梁の端部詰め・図に映るものの広がりが共有する）は `core/Document.h`、
+**横架材の端部と相手の取り合いの幾何**（`memberEndJoint`。取り合い調整と登り梁の端部詰めが
+共有する）と**柱に取り付く端を柱芯へ送る関門**（`resolveMemberColumnJoints`。柱命令は横架材の
+後に組み上がるので、横架材どうしの取り合いとは別に `parse/BuildDocument` が一度だけ通す）は
+`parse/Member`、
 **ローカル配置原点の取り出し**（ObjectPlacement → Location の 4 段の鎖。柱・横架材・ストーリが
 共有）は `parse/IfcGeometry` の `resolveLocalPlacementOrigin`、**横架材レベルの定型**（一般階＝
 横架材天端・最上階＝軒高の分岐と、その絶対 Z・レイヤ名: `beamTopLevelType` / `beamTopElevation` /

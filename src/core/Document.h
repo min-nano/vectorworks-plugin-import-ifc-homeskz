@@ -11,9 +11,9 @@
 //
 //	現状は「バージョン＋ stories / grids / floors / members / columns / rafters / roofs /
 //	foundation / シンボル 4 種 / columnMarks / sheets / sections / sectionSheet」を持つ。
-//	基礎（立上り・底盤・地中梁・床付け）は M20 で **1 つの命令（FoundationCommand。
+//	基礎（立上り・底盤・地中梁・床付け）は M21 で **1 つの命令（FoundationCommand。
 //	core/Foundation.h）**にまとめ、自作 PIO 1 つで描く（それまでの walls / wallJoins /
-//	slabs は無くなった。docs/DEV-NOTES.md M20）。
+//	slabs は無くなった。docs/DEV-NOTES.md M21）。
 //
 
 #pragma once
@@ -55,12 +55,12 @@ namespace HomeskzIfcImport::core
 	// 専用レベル。母屋・棟木は "母屋"、登り梁は "登り梁"（parse/Member.h 参照）。
 	inline constexpr const char* kLevelMoya = "母屋";
 	inline constexpr const char* kLevelNoboribari = "登り梁";
-	// M9/M11/M20 基礎ストーリのレベル。GL は基礎ストーリの原点（常に 0）で基礎の PIO
+	// M9/M11/M21 基礎ストーリのレベル。GL は基礎ストーリの原点（常に 0）で基礎の PIO
 	// （"F-基礎"。部品の Z は GL 基準の絶対値なので高さ 0 のレイヤに置く）を載せる。基礎天端は
 	// 立上りの天端でアンカーボルト（"F-アンカーボルト"）を、床束は底盤天端に揃えて床束
 	// （"F-床束"）を載せる（M11。シンボルは高さを持たず、この 2 つのレベルが Z を決める）。
 	// スタック順は 基礎天端 → GL → 床束（parse/Footing の buildFoundationStoryCommand。
-	// M20 で底盤のレベル "底盤天端" は無くなった——底盤は基礎の PIO の中にある）。
+	// M21 で底盤のレベル "底盤天端" は無くなった——底盤は基礎の PIO の中にある）。
 	inline constexpr const char* kLevelGL = "GL";
 	inline constexpr const char* kLevelFoundationTop = "基礎天端";
 	inline constexpr const char* kLevelFloorPost = "床束";
@@ -350,6 +350,28 @@ namespace HomeskzIfcImport::core
 		double elevation = 0.0;
 	};
 
+	// 【端部オフセット（endpoint offset）】構造材ツールは、パス（芯線）の端点から材の端面までの
+	// 距離を端ごとに持つ（OIP の「始端オフセット」「終端オフセット」）。**符号つきで、負値が
+	// 材を短く・正値が長くする。** 本プラグインはこれを使って「パスの端点＝接合相手の芯線上の
+	// 点（＝節点）」「実際の材の端＝ IFC が描いていた位置」という持ち方をする。
+	//
+	// なぜ端点を芯線の交点に置くか: 横架材の芯線は**天端中央**（断面基準点＝AxisAlign）を通る
+	// ので、柱が受ける梁の芯線は梁の天端にある。柱の上端を梁の下端（＝材が実際に止まる高さ）に
+	// 置くと、その座標はどの部材の芯線にも乗らず、**座標だけを見て「どことどこが接合している
+	// か」を言えない**。端点を芯線の交点へ置き、実際の材の範囲は端部オフセットで戻せば、
+	// 命令セットがそのままフレーム（節点と部材）のモデルになる——将来フレーム解析モデルを
+	// 取り込んで組み立てるときの土台になる。
+	//
+	// 値の決まり方:
+	//   柱・束の上端      … −（受ける横架材のせい）。上に梁せい 150mm が乗るなら −150。
+	//   横架材の負け側端  … −（勝ち側の半幅 ÷ 交差角の余弦）。直交する 105mm の梁なら −52.5。
+	//   横架材の柱に付く端 … −（端点から柱芯までの軸方向の距離）。柱の手前の面で止まっていた
+	//                       端は負値、**柱の向こうの面まで来ていた端は正値**（外周の桁が
+	//                       隅柱の外面まで伸びている取り合い。実データではこちらが多い）。
+	// 実際に描かれる材の長さは「パス長 ＋ 始端オフセット ＋ 終端オフセット」で、この値は
+	// 端部オフセットを入れる前（＝ IFC の形）と一致する——**描かれる形は変えず、命令が持つ
+	// 端点の意味だけを変える**のがこの仕組みの要点。
+	//
 	// 横架材（構造材ツール StructuralMember）を描く命令。draw/Member がこれを構造材
 	// オブジェクトへ変換する（docs/DEV-NOTES.md M7）。土台・梁・桁のほか、母屋・棟木・
 	// 登り梁もこの命令で表し、配置先レイヤと高さ基準レベルだけが専用のもの（"n-母屋" /
@@ -377,6 +399,15 @@ namespace HomeskzIfcImport::core
 	//   endElevation                    … 終端の天端 Z（絶対値）
 	//   startBound                      … 始端の高さ基準（配置先レベル＋天端との差）
 	//   endBound                        … 終端の高さ基準（同上）
+	//   startOffset                     … 始端の端部オフセット（mm。負＝短く・正＝長く。上記）
+	//   endOffset                       … 終端の端部オフセット（同上）
+	//
+	// 【start / end は「芯線の交点」】勝ち側の横架材へ突き当たる端（負け側）は、相手の面では
+	// なく**相手の天端中央線（＝芯線）上の点**に置き、面までの戻りを startOffset / endOffset
+	// に入れる（上記「端部オフセット」。parse/Member の resolveMemberInterferences）。
+	// **柱に取り付く端**も同じで、端点は柱芯の軸位置に置く（parse/Member の
+	// resolveMemberColumnJoints）。取り付く相手のいない端はオフセット 0 で、端点がそのまま
+	// 材の端になる。
 	struct MemberCommand
 	{
 		std::string layer;
@@ -390,6 +421,8 @@ namespace HomeskzIfcImport::core
 		double endElevation = 0.0;
 		StoryBoundCommand startBound;
 		StoryBoundCommand endBound;
+		double startOffset = 0.0;
+		double endOffset = 0.0;
 	};
 
 	// 横架材の実体が占める Z 範囲。elevation / endElevation は**天端** Z で傾斜梁は両端で
@@ -424,8 +457,9 @@ namespace HomeskzIfcImport::core
 	// 止まる半整数・通し柱＝複数階ぶん上）。伏図が切断レベルで表示レイヤを絞れるようにする
 	// ための分け方で、下屋の小屋束が上階の小屋伏図へ写り込まない（parse/Column.h 参照）。
 	//
-	// 【高さの持ち方】elevation は**柱下端**の絶対 Z、height は柱高さ（押し出し Depth）で、
-	// 上端は elevation + height。描画側はこの 2 つから鉛直パスを作り、加えて上下端を
+	// 【高さの持ち方】elevation は**柱下端**の絶対 Z、height は**パス長**（下端 → 上端）で、
+	// 上端は elevation + height。上端は受ける横架材の天端に取るので（下記）、実際に描かれる
+	// 材の高さは height + endOffset（＝ IFC の押し出し Depth）になる。描画側はこの 2 つから鉛直パスを作り、加えて上下端を
 	// ストーリレベルへバインドする（bottomBound / topBound）——**どちらが欠けても正しい
 	// 高さで描かれない**（parse/Column.h 参照）。柱（管柱・通し柱）は下端を当階・上端を
 	// 上階（storyOffset=1）の横架材天端（最上階は軒高）へ、小屋束は上下端とも当階の
@@ -446,6 +480,16 @@ namespace HomeskzIfcImport::core
 	//   bottomHardware                     … 柱脚金物の仕様（同上）
 	//   bottomBound                        … 下端の高さ基準
 	//   topBound                           … 上端の高さ基準
+	//   startOffset                        … 下端の端部オフセット（mm。負＝短く・正＝長く）
+	//   endOffset                          … 上端の端部オフセット（同上）
+	//
+	// 【上端は受ける横架材の天端＝その芯線】柱・束の上端は、材が実際に止まる高さ（梁の下端）
+	// ではなく**受ける横架材の天端**——横架材の芯線が通る高さ——に置き、梁せいぶんの戻りを
+	// endOffset に入れる（上記「端部オフセット」。上に 150mm せいの梁が乗るなら −150）。
+	// elevation + height は**この上端**を指し、topBound.offset もこの高さとの差を表すので、
+	// 「バウンドの差＝パス長」という関係（M8）はそのまま保たれる。下端は元から受け材の天端
+	// （＝土台・梁の芯線）に乗るので startOffset は 0。受ける材を特定できない柱は上端も
+	// 動かさず、両オフセットとも 0 になる。
 	struct ColumnCommand
 	{
 		std::string layer;
@@ -461,10 +505,28 @@ namespace HomeskzIfcImport::core
 		std::string bottomHardware;
 		StoryBoundCommand bottomBound;
 		StoryBoundCommand topBound;
+		double startOffset = 0.0;
+		double endOffset = 0.0;
 	};
 
 	// 基礎（立上り・底盤・地中梁・床付け）は 1 つの命令 FoundationCommand で表す
-	// （core/Foundation.h）。M9〜M17 の壁・スラブ・モディファイアの命令は M20 で無くなった。
+	// （core/Foundation.h）。M9〜M17 の壁・スラブ・モディファイアの命令は M21 で無くなった。
+
+	// **端部オフセットを戻した「実際に材が占める範囲」**（core/Document.h 冒頭「端部
+	// オフセット」）。命令の端点は接合相手の芯線上にあるので、材そのものの端・上端が要る
+	// ところ（仕口シンボルを置く位置・登り梁が受け材の面まで詰める判定・図に映るものの
+	// 広がり）はこれを通す。
+	//
+	// **core に置く理由**: SDK を触らない純計算で、解析側（parse/Joint・parse/Noboribari）と
+	// 描画側から切り離せる計算（planContentBounds・sectionHeightRange）の**両方**が同じ
+	// 定義を要る（rafterEaveEnd と同じ立ち位置。CLAUDE.md「テスト方針」）。
+	Vec2 memberDrawnStart(const MemberCommand& member);
+	Vec2 memberDrawnEnd(const MemberCommand& member);
+
+	// 柱・束が実際に占める下端／上端の絶対 Z。下端は elevation − startOffset、上端は
+	// elevation + height + endOffset（オフセットは負で短く・正で長くする）。
+	double columnDrawnBottom(const ColumnCommand& column);
+	double columnDrawnTop(const ColumnCommand& column);
 
 	// ハイブリッドシンボルを平面座標＋回転角で置く命令。アンカーボルト・床束・火打・仕口の
 	// 4 種（docs/DEV-NOTES.md M11「シンボル置換系」）が共通で使う。draw/Symbol がこれをシンボル
@@ -912,7 +974,7 @@ namespace HomeskzIfcImport::core
 		// （"1to2-柱" 等）は stories が作るので、描画は stories の後に処理する。
 		std::vector<ColumnCommand> columns;
 
-		// M20 基礎。立上り・底盤・地中梁（＋床付け）を**1 つの命令**にまとめたもの
+		// M21 基礎。立上り・底盤・地中梁（＋床付け）を**1 つの命令**にまとめたもの
 		// （core/Foundation.h の FoundationCommand。parse/Footing の buildFoundationCommand が
 		// 組み立てる）。基礎要素が 1 つも無ければ空。配置先の "F-基礎" レイヤは基礎ストーリ
 		// （stories の先頭）が作るので、描画は stories の後に処理する。
@@ -994,7 +1056,7 @@ namespace HomeskzIfcImport::core
 		std::size_t columns = 0;
 		std::size_t rafters = 0;
 		std::size_t roofs = 0;
-		// M20 基礎。**置けた PIO の数**（0 か 1）。命令はあるのに 0 なら PIO を作れなかった
+		// M21 基礎。**置けた PIO の数**（0 か 1）。命令はあるのに 0 なら PIO を作れなかった
 		// （プラグインの登録漏れ・レイヤ未生成）。原因は診断行に出る（draw/Footing）。
 		std::size_t foundation = 0;
 		// M11 シンボル置換系。アンカーボルト・床束の配置先（"F-アンカーボルト" / "F-床束"）は
@@ -1119,7 +1181,7 @@ namespace HomeskzIfcImport::core
 	// 内法が潰れている（幅または高さが 0 以下）・幅が 0 以下のときは空を返す。
 	//
 	// **描画側から切り離せる純計算**なので core に置いて無 SDK でテストする
-	// （raiseModifierTop・rafterEaveEnd と同じ立ち位置。CLAUDE.md「テスト方針」）。
+	// （rafterEaveEnd・core/Foundation の foundationSolids と同じ立ち位置。CLAUDE.md「テスト方針」）。
 	std::vector<Vec2> shearWallBracePolygon(double clearStart, double clearEnd, double bottom,
 											double top, double width, bool risesToEnd);
 

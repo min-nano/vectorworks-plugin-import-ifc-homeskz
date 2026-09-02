@@ -2,13 +2,13 @@
 //	core/Foundation.h
 //
 //	基礎を **1 つの立体オブジェクト**として描くための命令（FoundationCommand）と、その
-//	部品からソリッド群を組み立てる純計算（docs/DEV-NOTES.md M20「基礎を独自 PIO へ」）。
+//	部品からソリッド群を組み立てる純計算（docs/DEV-NOTES.md M21「基礎を独自 PIO へ」）。
 //
 //	【なぜ 1 つのオブジェクトか】M9〜M17 では立上りを壁・底盤をスラブ・地中梁をモディファイア
 //	＋可視ソリッドと**別々の VW オブジェクト**で描いていた。噛み合わせ（スラブへ「足す」
 //	モディファイア）は SDK から作れず（SDK リファレンス Findings「Slabs and Extrudes」）、
 //	壁結合・端部のキャップ・呑み込みといった**接ぎ目を隠すための細工**が要素の数だけ要った。
-//	M20 では基礎全体を**自作 PIO（Extensions/ExtFoundation）1 つ**にし、PIO が底盤・立上り・
+//	M21 では基礎全体を**自作 PIO（Extensions/ExtFoundation）1 つ**にし、PIO が底盤・立上り・
 //	地中梁・床付けを押し出しソリッドとして自分の中に描く。接ぎ目は同じ PIO の中の同素材の
 //	ソリッドどうしなので、断面では構造用図形として一体に表示される。
 //
@@ -77,9 +77,6 @@ namespace HomeskzIfcImport::core
 	// 接する（実データで確認: 天端 = 底盤天端 − 底盤厚）ため、地中梁だけを少し大きくして
 	// 底盤本体に重ね、断面ビューポートで境界線が不安定に出るのを防ぐ（M10 で実機確認）。
 	inline constexpr double kGroundBeamSlabBite = 10.0;
-
-	// 地中梁の天端とみなす頂点の許容差（mm）。最大 v からこの差以内の頂点を天端の辺とみなす。
-	inline constexpr double kModifierTopVertexTol = 0.5;
 
 	// 基礎の寸法を「同じ」とみなす許容（mm）。代表値の集計（同じ厚みの底盤をまとめる）と
 	// 地中梁断面の当てはめ（天端・下端の辺の判定）が共有する。
@@ -201,7 +198,7 @@ namespace HomeskzIfcImport::core
 		double haunchHeight = 0.0;
 	};
 
-	// 基礎全体を 1 つの PIO として描く命令（docs/DEV-NOTES.md M20）。draw/Footing がこれを
+	// 基礎全体を 1 つの PIO として描く命令（docs/DEV-NOTES.md M21）。draw/Footing がこれを
 	// 自作 PIO（Extensions/ExtFoundation）へ変換する。
 	//
 	// フィールド:

@@ -23,7 +23,7 @@
 | `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配・凸多角形の矩形クリップ（手計算値との突き合わせ） |
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
 | `CoreUnionFindTests` | `src/core/UnionFind` | ペア述語による連結成分（決定性の規約: 代表＝最小インデックス・代表昇順・成分内昇順） |
-| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。基礎の部品・耐力壁を含む）・レイヤスタック順の計算・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`）・耐力壁の筋かいの形（`shearWallBracePolygon`） |
+| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。基礎の部品・耐力壁を含む）・レイヤスタック順の計算・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`）・端部オフセットを戻した材の端（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop`）・耐力壁の筋かいの形（`shearWallBracePolygon`） |
 | `CorePolygonBoolTests` | `src/core/PolygonBool` | 平面多角形の集合演算（和・差・繋がりの判定・連結成分・畳めるものだけ畳む `mergePolygons`。升目状に囲んだ並びが穴を保ち、ベタで埋まらないこと） |
 | `CoreFoundationTests` | `src/core/Foundation` | 基礎を 1 つのオブジェクトにする純計算（地中梁断面の当てはめと底の面の外形・底盤への取り合い・代表値と差の配り方・ソリッドの組み立て（底盤・地中梁を抜いた砕石・立上り・地中梁の本体と辺ごとの斜め部・床付け）・平面の外形・実フィクスチャ全件でソリッドが組めて決定的なこと・PIO のレコードへの直列化） |
 | `CoreLayoutTests` | `src/core/Layout` | 用紙の割り付け（縮尺は階梯の値だけ・**渡された印刷可能領域をそのまま使う**（余白を仮定しない）・凡例の幅を引いてから収まる中で最大の図・伏図は全図同じ縮尺と位置・軸組図は上下 2 段でマスが重ならないこと・シート枚数とタイトルの連番） |
@@ -32,8 +32,8 @@
 | `ParseStoryTests` | `src/parse/Story` | 階・レベル・レイヤ名（横架材天端オフセット・屋根組／母屋／span 柱レベルの追加条件・span レイヤ名の生成と分解）＋希望レイヤ順（`core::desiredStoryLayerOrder`。床・野地板を背面へ、耐力壁を最前面へ） |
 | `ParseStructuralClassTests` | `src/parse/StructuralClass` | 部材種別 → VW クラスの純ロジック |
 | `ParseFloorTests` | `src/parse/Floor` | 床板（スラブ構成・基準面・段差・ロフト床の合成） |
-| `ParseColumnTests` | `src/parse/Column` | 柱（span レイヤの to レベル判定・上下端バインド・構造用途・柱頭/柱脚金物・小屋束の断面合わせ） |
-| `ParseMemberTests` | `src/parse/Member` | 横架材（天端中央線への補正・高さバインド・母屋／登り梁の分離・登り梁の任意断面・食い込み調整） |
+| `ParseColumnTests` | `src/parse/Column` | 柱（span レイヤの to レベル判定・上下端バインド・構造用途・柱頭/柱脚金物・小屋束の断面合わせ・上端を受ける横架材の天端へ合わせる端部オフセット） |
+| `ParseMemberTests` | `src/parse/Member` | 横架材（天端中央線への補正・高さバインド・母屋／登り梁の分離・登り梁の任意断面・取り合いの端点を勝ち側の芯線へ合わせる端部オフセット・柱に取り付く端を柱芯へ送る関門と「材が実際に占める範囲は動かない」不変条件） |
 | `ParseShearWallTests` | `src/parse/ShearWall` | 耐力壁（押し出し方向から取る壁の軸・回転キャリパの見付け幅・傾きの向き・たすき掛けの同名まとめ・表裏の面材のまとめと同じ通りの別壁を混ぜないこと・柱芯への吸着・レイヤと伏図の紐付け） |
 | `ParseNoboribariTests` | `src/parse/Noboribari` | 登り梁の位置補正（端部の食い込み解消・天端の屋根面スナップ） |
 | `ParseRafterTests` | `src/parse/Rafter` | 垂木（掃引割り付け・非凸面のクリップ・支持点・軒の出・桁幅参照・高さ基準） |

@@ -8,7 +8,7 @@
 //	インデックスで受け渡す。いま使うのは
 //	  * 横架材（drawMembers が記録）→ 断面寸法データタグ（伏図・軸組図が関連付け先として引く）
 //	  * 柱（drawColumns が記録）
-//	で、M9〜M19 の立上り → 壁結合の受け渡しは M20（基礎を 1 つの PIO に）で無くなった。
+//	で、M9〜M19 の立上り → 壁結合の受け渡しは M21（基礎を 1 つの PIO に）で無くなった。
 //
 //	【SDK 非依存のヘッダ】draw/*.h は Extensions/ExtMenu からも include されるので
 //	SDK 型を持てない（draw/DrawUtil.h 冒頭）。そこで**中身（MCObjectHandle の表）は

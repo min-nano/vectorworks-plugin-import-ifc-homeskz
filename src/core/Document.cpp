@@ -4,7 +4,7 @@
 //	validateDocument の実装。SDK 非依存（core/ は VectorWorks SDK を一切 include しない）。
 //
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
-//	foundation（M20。立上り・底盤・地中梁の部品）・rafters / roofs（M6）・
+//	foundation（M21。立上り・底盤・地中梁の部品）・rafters / roofs（M6）・
 //	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints）・
 //	sheets（M13。シートレイヤ上のグラフィック凡例を含む）・sections（M14）・
 //	ビューポート注釈の断面寸法データタグ（M13）の
@@ -98,29 +98,44 @@ namespace HomeskzIfcImport::core
 				   !rafter.startBound.level.empty() && !rafter.endBound.level.empty();
 		}
 
+		// 横架材が**実際に描かれる長さ**（mm）。パス（天端中央線）の平面長に両端の端部
+		// オフセットを足したもの（オフセットは負で短く・正で長くする。core/Document.h
+		// 「端部オフセット」）。
+		double drawnLength(const MemberCommand& member)
+		{
+			return distance(member.start, member.end) + member.startOffset + member.endOffset;
+		}
+
 		// 横架材 1 本が妥当か。配置先レイヤ名・クラス名・構造材 ID が非空で、断面（幅・せい）
 		// が正で、天端中央線の始端・終端が縮退していないこと（判定は core/Geometry の
 		// samePoint）。始端・終端の高さ基準のレベル種別も非空（空だと SetObjectStoryBound
 		// が解決できず、高さがレイヤ基準へリセットされる）。elevation / endElevation
 		// は数値（double なので常に成立）。
+		// **端部オフセットは材を消してはならない**: 端部オフセットは負値で材を短くするので
+		// （core/Document.h「端部オフセット」）、パス長に両端のオフセットを足した「実際に
+		// 描かれる長さ」が正であることを確かめる。ここが 0 以下だと、命令はあるのに材が
+		// 1mm も描かれない（＝図面に出ない）。正値（材を伸ばす向き）は長さを増やすだけなので
+		// この関門には掛からない。
 		bool isValidMember(const MemberCommand& member)
 		{
 			return !member.layer.empty() && !member.drawClass.empty() && !member.memberId.empty() &&
 				   member.width > 0.0 && member.height > 0.0 &&
 				   !samePoint(member.start, member.end) && !member.startBound.level.empty() &&
-				   !member.endBound.level.empty();
+				   !member.endBound.level.empty() && drawnLength(member) > 0.0;
 		}
 
 		// 柱 1 本が妥当か。配置先レイヤ名（span レイヤ）・クラス名・構造材 ID・構造用途が非空
-		// で、断面（幅・せい）と柱高さが正で、上下端の高さ基準のレベル種別が非空であること
-		// （空だと SetObjectStoryBound が解決できず、高さがレイヤ基準へリセットされる）。
-		// elevation は数値（double なので常に成立）。
+		// で、断面（幅・せい）とパス長（height）が正で、上下端の高さ基準のレベル種別が非空で
+		// あること（空だと SetObjectStoryBound が解決できず、高さがレイヤ基準へリセットされ
+		// る）。elevation は数値（double なので常に成立）。端部オフセットを足した「実際に
+		// 描かれる高さ」も正であること（isValidMember と同じ理由）。
 		bool isValidColumn(const ColumnCommand& column)
 		{
 			return !column.layer.empty() && !column.drawClass.empty() && !column.memberId.empty() &&
 				   !column.structuralUse.empty() && column.width > 0.0 && column.depth > 0.0 &&
 				   column.height > 0.0 && !column.bottomBound.level.empty() &&
-				   !column.topBound.level.empty();
+				   !column.topBound.level.empty() &&
+				   column.height + column.startOffset + column.endOffset > 0.0;
 		}
 
 		// 基礎の底盤のグループが妥当か。コンクリート厚が正で、外形が 1 つ以上あり、どの外形も
@@ -150,7 +165,7 @@ namespace HomeskzIfcImport::core
 									   { return outline.size() >= 3; });
 		}
 
-		// 基礎（M20）が妥当か。配置先レイヤ名・PIO 本体のクラス名・ソリッドの素材クラス名 4 つが
+		// 基礎（M21）が妥当か。配置先レイヤ名・PIO 本体のクラス名・ソリッドの素材クラス名 4 つが
 		// 非空で（クラス名は PIO のレコードへ保存され、空だと描いたソリッドが既定クラスに
 		// 散る）、部品がすべて妥当で、**部品が 1 つ以上ある**こと（部品の無い基礎は空の PIO
 		// になるだけなので、解析側は命令を出さない＝std::optional を空にする）。代表値
@@ -300,8 +315,8 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.columns, isValidColumn))
 			return false;
 
-		// 基礎（M20）: 配置先レイヤ名・クラス名が非空で、底盤・立上り・地中梁の部品がすべて
-		// 妥当であること（isValidFoundation 参照。docs/DEV-NOTES.md M20）。
+		// 基礎（M21）: 配置先レイヤ名・クラス名が非空で、底盤・立上り・地中梁の部品がすべて
+		// 妥当であること（isValidFoundation 参照。docs/DEV-NOTES.md M21）。
 		if (document.foundation.has_value() && !isValidFoundation(*document.foundation))
 			return false;
 
@@ -387,11 +402,12 @@ namespace HomeskzIfcImport::core
 			take(member.endElevation);
 			take(memberBottomZ(member));
 		}
-		// 柱（下端と上端）。
+		// 柱（下端と上端）。命令の上端は受ける横架材の天端＝材が実際に止まる高さより上なので、
+		// **端部オフセットを戻した実際の上端**を見る（core/Document.h「端部オフセット」）。
 		for (const ColumnCommand& column : document.columns)
 		{
-			take(column.elevation);
-			take(column.elevation + column.height);
+			take(columnDrawnBottom(column));
+			take(columnDrawnTop(column));
 		}
 		// 屋根組（垂木の両端・野地板の軒）。
 		for (const RafterCommand& rafter : document.rafters)
@@ -401,7 +417,7 @@ namespace HomeskzIfcImport::core
 		}
 		for (const RoofCommand& roof : document.roofs)
 			take(roof.elevation);
-		// 基礎（M20）。底盤は天端と、その下の砕石（kSlabBeddingThickness）の底まで。立上りは
+		// 基礎（M21）。底盤は天端と、その下の砕石（kSlabBeddingThickness）の底まで。立上りは
 		// 天端と下端。地中梁は天端（底盤の底面）と、下端の下に敷く床付けの底まで——**モデルの
 		// 最深部はふつう底盤の下端ではなく床付けの下端**なので、これを見ないと余白
 		// （kSectionHeightMargin）より深い足元が軸組図で切れる。
@@ -474,7 +490,7 @@ namespace HomeskzIfcImport::core
 			takeSegment(grid.layer, grid.start, grid.end);
 		for (const FloorCommand& floor : document.floors)
 			takeBoundary(floor.layer, floor.boundary);
-		// 基礎（M20）はグループごとに外形の多角形を持つ（底盤・立上りの天端・地中梁の底）。
+		// 基礎（M21）はグループごとに外形の多角形を持つ（底盤・立上りの天端・地中梁の底）。
 		// どれも同じ "F-基礎" レイヤ上の 1 つの PIO に入る。**床付けの張り出し（50〜130mm）は
 		// 見ない**——図の広がりの見積りとしては外形で足り、余白（用紙の割り付け）が吸収する。
 		if (document.foundation.has_value())
@@ -494,8 +510,10 @@ namespace HomeskzIfcImport::core
 		}
 		for (const RoofCommand& roof : document.roofs)
 			takeBoundary(roof.layer, roof.boundary);
+		// 横架材の端点は取り合い相手の芯線上にあるので、**実際に材が占める端**を見る
+		// （垂木を軒先まで見るのと同じ理由。過大でも過小でも縮尺の判断がずれる）。
 		for (const MemberCommand& member : document.members)
-			takeSegment(member.layer, member.start, member.end);
+			takeSegment(member.layer, memberDrawnStart(member), memberDrawnEnd(member));
 		// 垂木は**軒先まで伸ばして描く**（M16。draw/Rafter が rafterEaveEnd でパスの始端を
 		// 軒先へ送る）ので、命令の start ではなく軒先を見る——ここで実際より狭く見積もると、
 		// 決めた縮尺では図が用紙に収まらない。
@@ -563,6 +581,41 @@ namespace HomeskzIfcImport::core
 		eave.z = rafter.elevation - drop;
 		eave.offset = rafter.startBound.offset - drop;
 		return eave;
+	}
+
+	namespace
+	{
+		// 端点 from を、to へ向かう向き（材の内側）へ offset だけ戻した点。offset は負値で
+		// 材を短くするので、内側へ |offset| 動かすことになる（core/Document.h「端部
+		// オフセット」）。長さ 0 の材はそのまま返す。
+		Vec2 pullBack(const Vec2& from, const Vec2& to, double offset)
+		{
+			const Vec2 delta = to - from;
+			const double span = length(delta);
+			if (span <= 0.0)
+				return from;
+			return Vec2{from.x - ((delta.x / span) * offset), from.y - ((delta.y / span) * offset)};
+		}
+	} // namespace
+
+	Vec2 memberDrawnStart(const MemberCommand& member)
+	{
+		return pullBack(member.start, member.end, member.startOffset);
+	}
+
+	Vec2 memberDrawnEnd(const MemberCommand& member)
+	{
+		return pullBack(member.end, member.start, member.endOffset);
+	}
+
+	double columnDrawnBottom(const ColumnCommand& column)
+	{
+		return column.elevation - column.startOffset;
+	}
+
+	double columnDrawnTop(const ColumnCommand& column)
+	{
+		return column.elevation + column.height + column.endOffset;
 	}
 
 	namespace

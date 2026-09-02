@@ -104,7 +104,7 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("通り芯を描画しています…", document.grids.size(), core::DrawPhase::Grids))
 			counts.grids = drawGrids(document, progress);
 
-		// M9/M20 基礎を描く。立上り・底盤・地中梁・床付けをまとめた **1 つの PIO**
+		// M9/M21 基礎を描く。立上り・底盤・地中梁・床付けをまとめた **1 つの PIO**
 		// （Extensions/ExtFoundation）を "F-基礎" レイヤへ置く。配置先レイヤは基礎ストーリの
 		// story 命令が作るので、必ず drawStories の後に置く（レイヤが無ければスキップして
 		// 診断行に出す）。

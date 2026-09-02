@@ -1,7 +1,7 @@
 //
 //	parse/Footing.h
 //
-//	Phase 1（IFC 解析）の基礎モジュール（docs/DEV-NOTES.md M9「基礎」・M20「基礎を独自 PIO
+//	Phase 1（IFC 解析）の基礎モジュール（docs/DEV-NOTES.md M9「基礎」・M21「基礎を独自 PIO
 //	へ」）。ホームズ君 IFC の基礎要素（IfcFooting と底盤の IfcSlab）を Name で分類し、
 //	**基礎全体を 1 つの命令（core::FoundationCommand）**へ組み立てる。
 //
@@ -16,7 +16,7 @@
 //	・複数に分かれる成分はそのまま残す）。
 //
 //	M9〜M17 はこれらを壁・スラブ・モディファイアと**別々の VW オブジェクト**にしていたが、
-//	M20 で **1 つの自作 PIO**（Extensions/ExtFoundation）にまとめた。解析側の仕事は
+//	M21 で **1 つの自作 PIO**（Extensions/ExtFoundation）にまとめた。解析側の仕事は
 //	「IFC から部品の実寸を正しく取り出すこと」に絞られ、壁結合・端部のキャップ・床付けの
 //	組み立てといった**描き方の都合**はここから無くなった（床付けは PIO が描くたびに
 //	core/Foundation が組み立てる）。
@@ -30,7 +30,7 @@
 //
 //	【基礎ストーリのレベルは 3 つ】スタック順（上→下）に 基礎天端（アンカーボルト）→ GL
 //	（基礎の PIO）→ 床束。基礎天端・床束は M11 のシンボルの高さ基準で、シンボル自身は高さを
-//	持たない。M9〜M19 にあった "底盤天端"（"F-底盤"）は M20 で無くなった——底盤は基礎の PIO の
+//	持たない。M9〜M19 にあった "底盤天端"（"F-底盤"）は M21 で無くなった——底盤は基礎の PIO の
 //	中にあり、レイヤを分ける相手がいない。
 //
 //	【立上りの後処理は 3 段】ホームズ君 IFC の立上りは通り芯の交点等で細かく分断され、かつ
@@ -76,7 +76,7 @@ namespace HomeskzIfcImport::parse
 
 	// 基礎ストーリのレベル種別。**文字列の定義は core/Document.h（命令セットの語彙）**に
 	// あり、ここはその再公開（parse/Story の kLevelFL 等と同じ流儀）。GL は基礎の PIO
-	// （M20）、基礎天端・床束は M11（アンカーボルト・床束のシンボル）が使う。
+	// （M21）、基礎天端・床束は M11（アンカーボルト・床束のシンボル）が使う。
 	inline constexpr const char* kLevelGL = core::kLevelGL;
 	inline constexpr const char* kLevelFoundationTop = core::kLevelFoundationTop;
 	inline constexpr const char* kLevelFloorPost = core::kLevelFloorPost;
@@ -324,7 +324,7 @@ namespace HomeskzIfcImport::parse
 	std::vector<SlabPiece> alignSlabsToWallFaces(const std::vector<SlabPiece>& slabs,
 												 const std::vector<RiserPiece>& walls);
 
-	// 基礎全体を 1 つの命令（core::FoundationCommand）へ組み立てる（M20）。立上り
+	// 基礎全体を 1 つの命令（core::FoundationCommand）へ組み立てる（M21）。立上り
 	// （Context::walls）・底盤（buildSlabCommands）・地中梁（buildGroundBeamPrisms →
 	// core::fitFoundationBeam）を**同一仕様ごとの外形多角形のグループ**にし（ヘッダ冒頭）、
 	// 配置先レイヤ "F-基礎"・クラス（PIO 本体と底盤・地中梁＝基礎スラブ、立上り＝立ち上がり、

@@ -2,7 +2,7 @@
 //	draw/Footing.h
 //
 //	Phase 2（VW 描画）の基礎モジュール。命令セットの基礎（core::FoundationCommand）を
-//	**自作 PIO 1 つ**（Extensions/ExtFoundation）として配置する（docs/DEV-NOTES.md M20）。
+//	**自作 PIO 1 つ**（Extensions/ExtFoundation）として配置する（docs/DEV-NOTES.md M21）。
 //	立上り・底盤・地中梁・床付けのソリッドは PIO 自身がリセット時に描くので、ここは
 //	「PIO を置いてパラメータと部品を書き、リセットする」だけ。
 //
@@ -10,7 +10,7 @@
 //	SDK ビルドでのみコンパイルされる。この宣言ヘッダ自体は core::Document / core::Progress
 //	しか参照せず SDK ヘッダを引き込まない（draw/*.h 共通の約束。draw/DrawUtil.h 参照）。
 //
-//	M9〜M17 の壁・スラブ・モディファイア・可視ソリッドによる描画は M20 で無くなった。
+//	M9〜M17 の壁・スラブ・モディファイア・可視ソリッドによる描画は M21 で無くなった。
 //
 
 #pragma once

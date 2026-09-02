@@ -7,7 +7,7 @@
 //	機械的に突き合わせることはしない）。対象は立上り・底盤・基礎ストーリ・人通口・
 //	地中梁と、それらをまとめた基礎命令（配筋は未対応なのでケースも無い）。
 //
-//	検証項目（docs/DEV-NOTES.md M9 / M20）:
+//	検証項目（docs/DEV-NOTES.md M9 / M21）:
 //	  * Name による基礎要素の判別（立上り／地中梁／底盤）
 //	  * 基礎ストーリ（"基礎" / suffix "F" / GL=0・レベルとレイヤ）
 //	  * 底盤天端＝面積最大の天端 Z、立上り下端＝IFC 実形状（呑み込み補正なし）
@@ -16,8 +16,8 @@
 //	  * 底盤外周の外面合わせ（辺ごとに沿う立上りの半壁厚だけ外へ）
 //	  * 人通口（開口の区間で立上りを分割／天端を切り下げる。M10）
 //	  * 地中梁（同一軸線上の統合・掃引外形。M10）
-//	  * 基礎命令（部品・クラス・代表値・全フィクスチャで検証を通ること）と決定性（M20）
-//	床付けの断面・地中梁の底盤への振り分けは M20 で core/Foundation へ移った
+//	  * 基礎命令（部品・クラス・代表値・全フィクスチャで検証を通ること）と決定性（M21）
+//	床付けの断面・地中梁の底盤への振り分けは M21 で core/Foundation へ移った
 //	（tests/CoreFoundationTests.cpp）。
 //	実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -626,7 +626,7 @@ TEST(foundation_story_command_shape)
 	CHECK_EQ(story.suffix, std::string(kFoundationSuffix));
 	CHECK(near(story.elevation, 0.0)); // GL は常に 0
 	// レベルは希望スタック順（上→下）で 基礎天端（アンカーボルト）→ GL（基礎の PIO）→
-	// 床束 の 3 つ（M20 で底盤のレベルは無くなった）。
+	// 床束 の 3 つ（M21 で底盤のレベルは無くなった）。
 	CHECK_EQ(story.levels.size(), std::size_t{3});
 	if (story.levels.size() < 3)
 		return;
@@ -1191,7 +1191,7 @@ TEST(ground_beam_tops_meet_the_slab_bottom)
 }
 
 // ---------------------------------------------------------------------------
-// 基礎命令（buildFoundationCommand）— docs/DEV-NOTES.md M20
+// 基礎命令（buildFoundationCommand）— docs/DEV-NOTES.md M21
 // ---------------------------------------------------------------------------
 
 TEST(foundation_command_shape)

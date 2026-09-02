@@ -5,7 +5,7 @@
 //	そして 1 つの基礎命令への組み立て）。【SDK 非依存】ここでは VectorWorks SDK を include
 //	しない（core/parse のみ依存）。
 //
-//	M10 で人通口（立上りの分割・切り下げ）・地中梁を足し、M20 で壁結合・端部のキャップ・
+//	M10 で人通口（立上りの分割・切り下げ）・地中梁を足し、M21 で壁結合・端部のキャップ・
 //	床付けの計算を落とした（基礎は 1 つの PIO になり、床付けは PIO が描くときに
 //	core/Foundation が組み立てる。parse/Footing.h 冒頭）。
 //	**配筋は保留**（足すときは wallSectionKey / slabMergeKey にも足す。理由は各キーの doc
@@ -78,7 +78,7 @@ namespace HomeskzIfcImport::parse
 		};
 
 		// 立上りの**天端の面**の外形（壁芯 ± 半壁厚の矩形。反時計回り）。長さ 0・厚み 0 なら空。
-		// 芯線＋幅ではなく面で持つのが M20 の部品の形（core/Foundation.h 冒頭）。
+		// 芯線＋幅ではなく面で持つのが M21 の部品の形（core/Foundation.h 冒頭）。
 		std::vector<Vec2> riserTopOutline(const RiserPiece& wall)
 		{
 			const Vec2 span{wall.end.x - wall.start.x, wall.end.y - wall.start.y};
@@ -1040,7 +1040,7 @@ namespace HomeskzIfcImport::parse
 			cmd.end = end;
 			cmd.thickness = thickness;
 			// 下端は IFC 実形状のまま（呑み込みはしない。parse/Footing.h「下端は IFC 実形状の
-			// まま」参照）。天端も絶対 Z のまま持つ（M20 で高さ基準のレベルは無くなった）。
+			// まま」参照）。天端も絶対 Z のまま持つ（M21 で高さ基準のレベルは無くなった）。
 			cmd.bottom = bottomAbs;
 			cmd.top = topAbs;
 			commands.push_back(cmd);
@@ -1220,7 +1220,7 @@ namespace HomeskzIfcImport::parse
 			commands.push_back(std::move(cmd));
 		}
 		// 統合 → 外面合わせ（docs/DEV-NOTES.md M9）。地中梁の振り分けと床付け（M10 / M17）は
-		// M20 で PIO 側（core/Foundation）へ移った——パラメータの変更のたびに描き直すため。
+		// M21 で PIO 側（core/Foundation）へ移った——パラメータの変更のたびに描き直すため。
 		return alignSlabsToWallFaces(mergeSlabCommands(commands), walls);
 	}
 

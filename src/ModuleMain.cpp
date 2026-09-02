@@ -98,7 +98,7 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	REGISTER_Extension<HomeskzIfcImport::CExtShearWall>(
 		GROUPID_ExtensionParametric, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
-	// M20 基礎の PIO（立上り・底盤・地中梁・床付けを 1 つの立体オブジェクトとして描き、
+	// M21 基礎の PIO（立上り・底盤・地中梁・床付けを 1 つの立体オブジェクトとして描き、
 	// OIP で寸法を編集できる。Extensions/ExtFoundation.h 冒頭）。
 	REGISTER_Extension<HomeskzIfcImport::CExtFoundation>(
 		GROUPID_ExtensionParametric, action, moduleInfo, iid, inOutInterface, cbp, reply);
