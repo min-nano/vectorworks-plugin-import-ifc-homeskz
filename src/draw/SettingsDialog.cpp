@@ -7,29 +7,35 @@
 //	（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	使う SDK API は VWFC のレイアウトダイアログ（draw/ResultDialog と同じ作法）と、
-//	リソース一覧・シンボル表示:
+//	リソース一覧・サムネイル付きメニュー:
 //
 //	  * VWResourceList::BuildList(kSymDefNode, sort) … 図面のシンボル定義の一覧
 //	    （kSymDefNode = 16。Kernel/API/Objs.TDType.h）
 //	  * VWResourceList::GetResourceName(i, name)     … その名前（UTF-8 の TXString）
 //	  * VWCheckButtonCtrl                            … その要素を取り込むか
-//	  * VWPullDownMenuCtrl                           … 置くシンボルを名前で選ぶ
-//	  * VWSymbolDisplayCtrl::CreateControl(dlg, w, h, margin) / Update(name, render, view)
-//	                                                  … 選択中のシンボルの絵
-//	  * AddRightControl / AddBelowControl            … 行（4 つのコントロール）の並べ方
+//	  * VWImagePopupCtrl::AddItem(resourceList, i)   … サムネイル付きの項目を 1 つ足す
+//	  * VWImagePopupCtrl::Set/GetSelectedItemIndex   … 選択（項目の添字）
+//	  * VWImagePopupCtrl::ShowImage(true)            … 閉じているときも絵を出す
+//	  * AddRightControl / AddBelowControl            … 行（3 つのコントロール）の並べ方
 //	  * VWDialog::EnableControl(id, bool)            … チェックを外した行を灰色にする
 //
-//	【絵の出し方は VW のサムネイルに合わせる】Update に渡す描画モードとビューは、
-//	VectorWorks 自身がシンボルのサムネイルに使う既定値と同じ **Top/Plan（view = 2）＋
-//	ワイヤーフレーム（renderMode = 0）** にしてある（Kernel/API/MiniCadCallBacks.h の
-//	SymbolImgInfo の既定構築子。`SymbolImgInfo(-1, -1, -1, 2/*TopPlan*/, 0/*Wireframe*/, …)`）。
-//	**3D の標準ビュー（standardViewTop = 7）ではない**——伏図記号のような 2D 部品だけの
-//	シンボルは 3D ビューでは何も映らず、絵で選ぶという目的が果たせない。
+//	【シンボルは絵で選ぶ】VectorWorks 自身の「鋼材断面を選択」などと同じ、**サムネイルを
+//	並べたポップアップ**（VWImagePopupCtrl）で選ばせる。絵は VW がリソースに対して持っている
+//	サムネイルそのものなので、こちらで描画モードやビューを決める必要が無い。
 //
-//	【候補は図面にあるシンボルだけ】「取り込むか」のチェックがあるので、**図面に無い名前を
-//	候補に混ぜる必要が無い**——置くものが図面に無いなら、その要素はチェックを外せばよい
-//	（docs/DEV-NOTES.md「取り込み設定の決め事（M20）」）。名前の一覧が実在のリソースだけで
-//	済むぶん、将来サムネイル付きのメニュー（VWImagePopupCtrl）へ置き換える道も開けている。
+//	【項目は図面のシンボル定義そのもの】このコントロールの項目は**実在するリソース**で、
+//	名前だけの項目は作れない。行ごとの「取り込む」チェックがあるおかげでそれで足りる——
+//	置くものが図面に無いなら、その要素はチェックを外せばよい（core/ImportOptions.h、
+//	docs/DEV-NOTES.md「取り込み設定の決め事（M20）」）。
+//
+//	【リソース一覧はダイアログが持ち続ける】項目はリソース一覧を指しているので、一覧を
+//	先に捨てると項目の絵が引けなくなる。ダイアログのメンバとして生存させる
+//	（VWResourceList は参照カウント付きでコピーできる）。
+//
+//	【選択は OK が押された瞬間に読む】画像ポップアップの選択は DDX で受けず、
+//	OnDefaultButtonEvent（＝OK）でコントロールから読み取る。**ダイアログが閉じた後では
+//	コントロールから読めない**ため、押された瞬間に控えておく必要がある（チェックの方は
+//	AddDDX_CheckButton で受けられる）。
 //
 
 #include "PluginPrefix.h"
@@ -38,7 +44,6 @@
 
 #include "VWFC/Tools/VWResourceList.h"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <deque>
@@ -51,10 +56,10 @@ namespace HomeskzIfcImport::draw
 	namespace
 	{
 		// コントロール ID。1 = OK / 2 = キャンセルは SDK の予約。行 i は
-		// [チェック, 説明, プルダウン, 絵] の 4 つを kFirstRowID から 4 つ刻みで使う。
+		// [チェック, 説明, ポップアップ] の 3 つを kFirstRowID から 3 つ刻みで使う。
 		constexpr TControlID kIntroID = 3;
 		constexpr TControlID kFirstRowID = 10;
-		constexpr TControlID kRowStride = 4;
+		constexpr TControlID kRowStride = 3;
 
 		constexpr TControlID checkID(std::size_t row)
 		{
@@ -68,54 +73,46 @@ namespace HomeskzIfcImport::draw
 		{
 			return static_cast<TControlID>(checkID(row) + 2);
 		}
-		constexpr TControlID previewID(std::size_t row)
-		{
-			return static_cast<TControlID>(checkID(row) + 3);
-		}
 
-		// 行の大きさ。説明は**幅を固定して**左の列を揃える（可変幅だとプルダウンの左端が
-		// 行ごとにずれる。チェックは文字を持たないので幅が揃う）。絵はサムネイルとして
-		// 見分けが付く程度で、7 行並べても画面に収まる大きさ。
+		// 説明は**幅を固定して**左の列を揃える（可変幅だとポップアップの左端が行ごとに
+		// ずれる。チェックは文字を持たないので幅が揃う）。
 		constexpr short kLabelWidthChars = 22;
-		constexpr short kPopupWidthChars = 30;
-		constexpr short kPreviewSizePixels = 56;
-		constexpr short kPreviewMarginPixels = 2;
 
-		// シンボルの絵の出し方（冒頭「絵の出し方は VW のサムネイルに合わせる」）。
-		constexpr TRenderMode kPreviewRenderMode = 0; // ワイヤーフレーム
-		constexpr TStandardView kPreviewView = 2;	  // Top/Plan
-
-		// いま開いている図面のシンボル定義の名前（名前順・重複なし）。読めなければ空
-		// （＝どの要素も取り込めない。ダイアログは出せる）。
-		std::vector<std::string> DocumentSymbolNames()
+		// 図面のシンボル定義の一覧と、その並びのままの名前。**名前は添字で項目と対応する**
+		// ——ポップアップの項目はこの一覧の順に足すので、選択された項目の添字がそのまま
+		// 名前の添字になる。
+		struct SymbolResources
 		{
+			VWFC::Tools::VWResourceList list;
 			std::vector<std::string> names;
+		};
+
+		// いま開いている図面のシンボル定義（名前順）。読めなければ空（＝どの要素も
+		// 取り込めない。ダイアログ自体は出せる）。
+		SymbolResources CollectSymbolResources()
+		{
+			SymbolResources resources;
 			try
 			{
-				VWFC::Tools::VWResourceList list;
-				const std::size_t count = list.BuildList(kSymDefNode, true);
-				names.reserve(count);
+				const std::size_t count = resources.list.BuildList(kSymDefNode, true);
+				resources.names.reserve(count);
 				for (std::size_t i = 0; i < count; ++i)
 				{
 					TXString name;
-					list.GetResourceName(i, name);
-					std::string text = static_cast<const char*>(name);
-					if (!text.empty())
-						names.push_back(std::move(text));
+					resources.list.GetResourceName(i, name);
+					// 名前が取れなくても**枠は詰めない**（項目の添字と名前の添字が
+					// ずれると、選んだ絵と置かれるシンボルが食い違う）。
+					resources.names.emplace_back(static_cast<const char*>(name));
 				}
 			}
 			catch (...)
 			{
 				// リソース一覧を作れない図面でも設定ダイアログ自体は出す（候補が空になり、
 				// どの要素にもチェックが入らない）。1 つの失敗で取り込みの入口を塞がない。
-				// **途中まで採れていた名前は捨てる**——半端な一覧を「図面にあるもの」として
-				// 見せると、無い名前が選べてしまう。
-				names.clear();
+				// **途中まで採れていた名前は捨てる**——半端な一覧は項目と対応しない。
+				resources.names.clear();
 			}
-			std::ranges::sort(names);
-			const auto duplicates = std::ranges::unique(names);
-			names.erase(duplicates.begin(), duplicates.end());
-			return names;
+			return resources;
 		}
 
 		// 役割の並びは表の順（core::symbolRoles()）。行番号 → 役割。
@@ -130,22 +127,20 @@ namespace HomeskzIfcImport::draw
 		class CImportSettingsDialog : public VWDialog
 		{
 		public:
-			CImportSettingsDialog(const core::ImportOptions& seed,
-								  std::vector<std::string> candidates)
-				: fIntro(kIntroID), fCandidates(std::move(candidates))
+			CImportSettingsDialog(const core::ImportOptions& seed, SymbolResources resources)
+				: fIntro(kIntroID), fResources(std::move(resources))
 			{
 				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
 				{
 					fChecks.emplace_back(checkID(row));
 					fLabels.emplace_back(labelID(row));
 					fPopups.emplace_back(popupID(row));
-					fPreviews.emplace_back(previewID(row));
 
 					// **いまの対応先が図面にある役割だけを「取り込む」で開く。** 無い名前は
-					// 候補に出せない（＝置きようがない）ので、チェックを外した状態にする。
+					// 項目にできない（＝置きようがない）ので、チェックを外した状態にする。
 					const std::size_t index = IndexOf(seed.symbol(roleAt(row)));
-					fSelection[row] = index < fCandidates.size() ? index : 0;
-					fEnabled[row] = seed.isEnabled(roleAt(row)) && index < fCandidates.size();
+					fSelection[row] = index < fResources.names.size() ? index : 0;
+					fEnabled[row] = seed.isEnabled(roleAt(row)) && index < fResources.names.size();
 				}
 			}
 			~CImportSettingsDialog() override = default;
@@ -165,10 +160,10 @@ namespace HomeskzIfcImport::draw
 				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
 				{
 					const std::size_t index = fSelection[row];
-					const bool valid = index < fCandidates.size();
+					const bool valid = index < fResources.names.size();
 					options.setEnabled(roleAt(row), fEnabled[row] && valid);
 					if (valid)
-						options.setSymbol(roleAt(row), fCandidates[index]);
+						options.setSymbol(roleAt(row), fResources.names[index]);
 				}
 				return options;
 			}
@@ -182,7 +177,7 @@ namespace HomeskzIfcImport::draw
 					return false;
 				// 図面にシンボルが 1 つも無いなら、選ばせる前にそう言う。
 				const TXString intro =
-					fCandidates.empty()
+					fResources.names.empty()
 						? "この図面にはシンボルが登録されていないため、シンボルで置く要素は"
 						  "取り込めません。"
 						: "取り込む要素にチェックを入れ、置くシンボルを選んでください。";
@@ -195,8 +190,7 @@ namespace HomeskzIfcImport::draw
 				{
 					VWCheckButtonCtrl& check = fChecks[row];
 					VWStaticTextCtrl& label = fLabels[row];
-					VWPullDownMenuCtrl& popup = fPopups[row];
-					VWSymbolDisplayCtrl& preview = fPreviews[row];
+					VWImagePopupCtrl& popup = fPopups[row];
 					// チェックは文字を持たない（役割の名前は隣の説明が出す）——文字を
 					// 持たせると幅が行ごとに変わり、右の列が揃わない。
 					if (!check.CreateControl(this, ""))
@@ -204,10 +198,7 @@ namespace HomeskzIfcImport::draw
 					if (!label.CreateControl(this, core::symbolRoleLabel(roleAt(row)),
 											 kLabelWidthChars))
 						return false;
-					if (!popup.CreateControl(this, kPopupWidthChars))
-						return false;
-					if (!preview.CreateControl(this, kPreviewSizePixels, kPreviewSizePixels,
-											   kPreviewMarginPixels))
+					if (!popup.CreateControl(this))
 						return false;
 					// 行の頭（チェック）は前の行の頭の下、残りはその右へ。行間を空けるのは
 					// 説明文の下（＝最初の行の上）だけ——絵が文字より背が高いぶん、行そのものは
@@ -215,7 +206,6 @@ namespace HomeskzIfcImport::draw
 					this->AddBelowControl(previousRow, &check, 0, row == 0 ? 1 : 0);
 					this->AddRightControl(&check, &label);
 					this->AddRightControl(&label, &popup);
-					this->AddRightControl(&popup, &preview);
 					previousRow = &check;
 				}
 				return true;
@@ -226,41 +216,37 @@ namespace HomeskzIfcImport::draw
 				VWDialog::OnInitializeContent();
 				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
 				{
-					for (const std::string& candidate : fCandidates)
-						fPopups[row].AddItem(TXString(candidate.c_str()));
-					if (fSelection[row] < fCandidates.size())
-						fPopups[row].SelectIndex(fSelection[row]);
+					VWImagePopupCtrl& popup = fPopups[row];
+					// **項目はリソース一覧の順に足す**——項目の添字と名前の添字を一致させて
+					// おくと、選択をそのまま名前へ引き直せる。
+					popup.ShowImage(true); // 閉じているときも選択中の絵を出す
+					for (std::size_t i = 0; i < fResources.names.size(); ++i)
+						popup.AddItem(fResources.list, i);
+					if (fSelection[row] < fResources.names.size())
+						popup.SetSelectedItemIndex(fSelection[row]);
 					fChecks[row].SetState(fEnabled[row]);
 					UpdateRow(row);
 				}
 				fShown = true;
 			}
 
-			// コントロールと変数を結ぶ（OK で確定する）。
+			// チェックだけ DDX で受ける（選択は OnDefaultButtonEvent で読む。冒頭参照）。
 			void OnDDXInitialize() override
 			{
 				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
-				{
 					this->AddDDX_CheckButton(checkID(row), &fEnabled[row]);
-					this->AddDDX_PulldownMenu(popupID(row), &fSelection[row]);
-				}
 			}
 
-			// プルダウンが動いたら**その行の絵**を差し替える。DDX は OK のときにしか
-			// 流れないので、いまの選択はコントロールから直接読む。
-			void OnSymbolChanged(TControlID controlID, VWDialogEventArgs& /*eventArgs*/)
+			// OK が押された。**閉じる前に**各行の選択を控える（閉じた後のコントロールからは
+			// 読めない）。
+			void OnDefaultButtonEvent() override
 			{
 				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
-				{
-					if (popupID(row) != controlID)
-						continue;
-					fSelection[row] = fPopups[row].GetSelectedIndex();
-					UpdateRow(row);
-					return;
-				}
+					fSelection[row] = fPopups[row].GetSelectedItemIndex();
+				VWDialog::OnDefaultButtonEvent();
 			}
 
-			// チェックが変わったら、その行の選択肢と絵を有効／無効にする（取り込まない行が
+			// チェックが変わったら、その行の選択肢を有効／無効にする（取り込まない行が
 			// 見て分かるように）。
 			void OnEnabledChanged(TControlID controlID, VWDialogEventArgs& /*eventArgs*/)
 			{
@@ -277,27 +263,22 @@ namespace HomeskzIfcImport::draw
 			DEFINE_EVENT_DISPATH_MAP;
 
 		private:
-			// 名前 → 候補の添字。無ければ候補の数（＝範囲外）を返す。
+			// 名前 → 項目の添字。無ければ項目の数（＝範囲外）を返す。
 			std::size_t IndexOf(const std::string& value) const
 			{
-				for (std::size_t i = 0; i < fCandidates.size(); ++i)
-					if (fCandidates[i] == value)
+				for (std::size_t i = 0; i < fResources.names.size(); ++i)
+					if (fResources.names[i] == value)
 						return i;
-				return fCandidates.size();
+				return fResources.names.size();
 			}
 
-			// その行の見た目を今の状態に合わせる（絵の差し替えと、取り込まない行の無効化）。
-			// **候補が 1 つも無い行は常に無効**——選べるものが無いのにチェックできると、
-			// 「取り込むと言ったのに何も置かれない」ことになる。
+			// その行の見た目を今の状態に合わせる。**選ぶものが無い行は常に無効**——選べる
+			// ものが無いのにチェックできると、「取り込むと言ったのに何も置かれない」ことになる。
 			void UpdateRow(std::size_t row)
 			{
-				const std::size_t index = fSelection[row];
-				const bool valid = index < fCandidates.size();
-				const TXString name = valid ? TXString(fCandidates[index].c_str()) : TXString("");
-				fPreviews[row].Update(name, kPreviewRenderMode, kPreviewView);
-				this->EnableControl(checkID(row), valid);
-				this->EnableControl(popupID(row), valid && fEnabled[row]);
-				this->EnableControl(previewID(row), valid && fEnabled[row]);
+				const bool hasItems = !fResources.names.empty();
+				this->EnableControl(checkID(row), hasItems);
+				this->EnableControl(popupID(row), hasItems && fEnabled[row]);
 			}
 
 			VWStaticTextCtrl fIntro;
@@ -307,15 +288,14 @@ namespace HomeskzIfcImport::draw
 			// （draw/ResultDialog.cpp の本文行と同じ理由）。
 			std::deque<VWCheckButtonCtrl> fChecks;
 			std::deque<VWStaticTextCtrl> fLabels;
-			std::deque<VWPullDownMenuCtrl> fPopups;
-			std::deque<VWSymbolDisplayCtrl> fPreviews;
-			std::vector<std::string> fCandidates; // 図面にあるシンボル名（名前順）
+			std::deque<VWImagePopupCtrl> fPopups;
+			SymbolResources fResources; // 項目の元（ダイアログより長生きさせない）
 			std::array<std::size_t, core::kSymbolRoleCount> fSelection = {};
 			std::array<bool, core::kSymbolRoleCount> fEnabled = {};
 			bool fShown = false;
 		};
 
-		// 役割を 1 つ足したら、下のイベントマップにも 2 行足すこと（コントロールの ID は
+		// 役割を 1 つ足したら、下のイベントマップにも 1 行足すこと（コントロールの ID は
 		// コンパイル時の定数でなければならないので、ここだけは表から回せない）。
 		static_assert(core::kSymbolRoleCount == 7,
 					  "役割を増減したら CImportSettingsDialog のイベントマップも直すこと");
@@ -331,13 +311,6 @@ namespace HomeskzIfcImport::draw
 		ADD_DISPATCH_EVENT(checkID(4), OnEnabledChanged);
 		ADD_DISPATCH_EVENT(checkID(5), OnEnabledChanged);
 		ADD_DISPATCH_EVENT(checkID(6), OnEnabledChanged);
-		ADD_DISPATCH_EVENT(popupID(0), OnSymbolChanged);
-		ADD_DISPATCH_EVENT(popupID(1), OnSymbolChanged);
-		ADD_DISPATCH_EVENT(popupID(2), OnSymbolChanged);
-		ADD_DISPATCH_EVENT(popupID(3), OnSymbolChanged);
-		ADD_DISPATCH_EVENT(popupID(4), OnSymbolChanged);
-		ADD_DISPATCH_EVENT(popupID(5), OnSymbolChanged);
-		ADD_DISPATCH_EVENT(popupID(6), OnSymbolChanged);
 		EVENT_DISPATCH_MAP_END;
 
 		// 前回の選択（この VectorWorks を起動している間だけ覚えている）。初回は役割の表の
@@ -356,7 +329,7 @@ namespace HomeskzIfcImport::draw
 		try
 		{
 			core::ImportOptions& remembered = RememberedOptions();
-			CImportSettingsDialog dialog(remembered, DocumentSymbolNames());
+			CImportSettingsDialog dialog(remembered, CollectSymbolResources());
 			const auto button = dialog.RunDialogLayout("");
 			if (!dialog.Shown())
 				return SettingsOutcome::Unavailable; // レイアウトを組めなかった
