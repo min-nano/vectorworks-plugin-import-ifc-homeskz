@@ -9,8 +9,8 @@
 VectorWorks 2026 のネイティブオブジェクトへ変換して配置する、**C++ SDK 製のネイティブ
 プラグイン**です。
 
-要素（ストーリ・通り芯・基礎・床・横架材・柱・屋根組・シンボル・記号・伏図・軸組図）は
-一通り実装済みで、**ここから先は独自のプラグインとして改良していきます**。
+要素（ストーリ・通り芯・基礎・床・横架材・柱・屋根組・シンボル・記号・耐力壁・伏図・
+軸組図）は一通り実装済みで、**ここから先は独自のプラグインとして改良していきます**。
 
 ドキュメントの分担:
 
@@ -56,6 +56,17 @@ VectorWorks 2026 のネイティブオブジェクトへ変換して配置する
 4. **既存の図面リソースを作らない・書き換えない。** ユーザーの図面に名前付きリソースを
    増やさない。スラブ／ウォールスタイルもデータタグスタイルも作らず、構成層・基準面・
    タグレイアウトは**各オブジェクトへ直接**与える。
+
+   **唯一の例外は耐力壁の伏図記号のシンボル定義**（`耐力壁記号_筋かい` /
+   `耐力壁記号_面材` の 2 つ。`Extensions/ExtShearWall.h`）。記号をシンボルに
+   しておくと、図面の側で 1 か所を編集するだけで**すべての耐力壁の記号を一括で
+   差し替え・調整**できる、というご要望による。例外の作法は次のとおりで、これを
+   満たせないなら例外にしない:
+   * **描く対象があるときだけ作る**（耐力壁が 1 枚も無い図面には作らない。上の 5 と同じ）。
+   * **同じ名前の定義が図面に既にあれば触らない**（利用者が編集した絵を尊重する）。
+   * 作った定義には**必ず `ResetObject` を呼ぶ**——これが無いと外接が計算されず
+     「中身はあるのに空に見える」定義になる（[SDK リファレンス「Symbols」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Symbols.md)）。
+   * スタイル（スラブ・ウォール・データタグ・凡例）は**引き続き作らない**。
 
 5. **空のもの（レイヤ・レベル・凡例）を先に作らない。** 描画対象がある要素にだけ作る。
 
@@ -110,7 +121,7 @@ VectorWorks ネイティブオブジェクト
 - **プレーンな構造体**（`std::vector`・`std::string`・`double`・`enum` 等の集約）で表す。
 - スキーマは `stories` / `grids` / `members` / `columns` / `walls` / `wallJoins` / `slabs` /
   `floors` / `rafters` / `roofs` / `anchorBolts` / `floorPosts` / `fireBraces` / `joints` /
-  `columnMarks` / `sheets` / `sections` / `sectionSheet`。**同型が並ぶところは構造体 1 つへまとめる**
+  `columnMarks` / `shearWalls` / `sheets` / `sections` / `sectionSheet`。**同型が並ぶところは構造体 1 つへまとめる**
   ——`anchorBolts` / `floorPosts` / `fireBraces` / `joints` は中身が同じなので
   `core::SymbolCommand` 1 つで受け、要素の区別は「Document のどのリストか」が担う
   （`core/Document.h` の doc コメント参照）。
@@ -185,7 +196,15 @@ VectorWorks ネイティブオブジェクト
 構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
 実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名は
-`parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`
+`parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、**耐力壁**の要素判別
+（`isShearBrace` / `isShearPanel`）・レイヤレベル名・柱を探す許容は `parse/ShearWall.h`、
+耐力壁 PIO の登録名・パラメータ名・**PIO が自分の絵へ与えるクラス**（伏図記号／面材の表・裏。
+ハッチングの向きで表裏を分ける 2 クラス）は `Extensions/ExtShearWall.h`
+（**伏図記号の寸法**は PIO 本体 `Extensions/ExtShearWall.cpp` の `kMark*`）、
+**PIO のパラメータを読む口**（`PioParamString`）と**構造材の構造用途を読む述語**
+（`StructuralUseOf`。柱記号 PIO と耐力壁 PIO が共有）は `draw/DrawUtil`、
+**凸多角形の矩形クリップ**は `core/Geometry` の `clipPolygonToRect`（耐力壁の筋かいの形
+`core::shearWallBracePolygon` が唯一の利用者）、span レベルの表記（`1` / `2.5`）は `parse/Story` の `formatSpanLevel`
 （span 柱レイヤと伏図記号レイヤが共有）、「命令インデックス → ハンドル」の対応表は
 `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの

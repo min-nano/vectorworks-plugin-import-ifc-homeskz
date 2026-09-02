@@ -9,7 +9,8 @@
 //	使用する SDK API は ISDK（gSDK）／VWFC の実在シグネチャに合わせている
 //	（Vectorworks 2026 SDK。ci-debug の sdk-grep / sdk-ls で確認済み）:
 //	  * draw/DrawUtil の ActivateExistingLayer            … 配置先レイヤ（既存のみ）
-//	  * VWSymbolDefObj::IsSymbolDefObject(name)           … シンボル定義が図面に在るか
+//	  * draw/DrawUtil の HasSymbolDefinition               … シンボル定義が図面に在るか
+//	                                                        （耐力壁の伏図記号と共有）
 //	  * VWSymbolObj(name, VWPoint2D(x, y), angleDeg)      … シンボルインスタンスの配置
 //	  * VWSymbolObj::IsSymbolObject(handle, name)         … 置けたものが本当にそれか
 //	  * gSDK->AddObjectToContainer(handle, layer)         … 配置先レイヤへ入れ直す
@@ -61,7 +62,6 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 
-#include "VWFC/VWObjects/VWSymbolDefObj.h"
 #include "VWFC/VWObjects/VWSymbolObj.h"
 
 #include <algorithm>
@@ -75,20 +75,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// シンボル定義が図面に在るか。**配置を止める門にはしない**（下記 drawSymbols）——
-		// 配置に失敗した理由を診断に書き分けるためだけに使う。
-		bool HasSymbolDefinition(const std::string& name)
-		{
-			try
-			{
-				return VWSymbolDefObj::IsSymbolDefObject(TXString(name.c_str()));
-			}
-			catch (...)
-			{
-				return false;
-			}
-		}
-
 		// 高さ調整をするかどうかの閾値（mm）。丸め誤差で 3D 移動を呼ばない程度に小さく、
 		// 図面で見える差より十分小さい値。**平らな梁（offset ≈ 0）は動かさない**。
 		constexpr double kZOffsetTol = 0.001;

@@ -2,11 +2,15 @@
 //	core/Geometry.cpp
 //
 //	Mat4（4x4 同次変換行列）の実装。Vec2/Vec3 の演算はヘッダに inline で置き、
-//	行列の生成・合成・適用だけをここに分ける。純粋な数値計算で SDK 非依存
-//	（core/Geometry.h の方針に従う）。GeometryTests で手計算値と突き合わせる。
+//	行列の生成・合成・適用だけをここに分ける（凸多角形の矩形クリップも同じ理由でここ）。
+//	純粋な数値計算で SDK 非依存（core/Geometry.h の方針に従う）。GeometryTests で
+//	手計算値と突き合わせる。
 //
 
 #include "core/Geometry.h"
+
+#include <cstddef>
+#include <vector>
 
 namespace HomeskzIfcImport::core
 {
@@ -77,5 +81,110 @@ namespace HomeskzIfcImport::core
 			}
 		}
 		return result;
+	}
+
+	namespace
+	{
+		// 矩形の 4 辺。Sutherland–Hodgman はこの順に半平面で切っていく。
+		enum class ClipEdge
+		{
+			Left,
+			Right,
+			Bottom,
+			Top,
+		};
+
+		// 点が辺の内側（残す側）にあるか。
+		bool insideEdge(const Vec2& point, ClipEdge edge, const Vec2& min, const Vec2& max)
+		{
+			switch (edge)
+			{
+			case ClipEdge::Left:
+				return point.x >= min.x;
+			case ClipEdge::Right:
+				return point.x <= max.x;
+			case ClipEdge::Bottom:
+				return point.y >= min.y;
+			case ClipEdge::Top:
+				break;
+			}
+			return point.y <= max.y;
+		}
+
+		// 辺が「どの座標を何の値で切るか」。vertical なら x、そうでなければ y を limit で切る。
+		void edgeCut(ClipEdge edge, const Vec2& min, const Vec2& max, bool& outVertical,
+					 double& outLimit)
+		{
+			switch (edge)
+			{
+			case ClipEdge::Left:
+				outVertical = true;
+				outLimit = min.x;
+				return;
+			case ClipEdge::Right:
+				outVertical = true;
+				outLimit = max.x;
+				return;
+			case ClipEdge::Bottom:
+				outVertical = false;
+				outLimit = min.y;
+				return;
+			case ClipEdge::Top:
+				break;
+			}
+			outVertical = false;
+			outLimit = max.y;
+		}
+
+		// 線分 from→to が辺の直線と交わる点。呼び出し側は「一方が内側・他方が外側」と
+		// 分かっているときだけ呼ぶので、分母が 0 になることはない（それでも念のため
+		// 0 除算だけは避ける）。
+		Vec2 intersectEdge(const Vec2& from, const Vec2& to, ClipEdge edge, const Vec2& min,
+						   const Vec2& max)
+		{
+			bool vertical = false;
+			double limit = 0.0;
+			edgeCut(edge, min, max, vertical, limit);
+			const double span = vertical ? (to.x - from.x) : (to.y - from.y);
+			if (std::abs(span) < kGeomEps)
+				return to;
+			const double t = (limit - (vertical ? from.x : from.y)) / span;
+			return Vec2{from.x + ((to.x - from.x) * t), from.y + ((to.y - from.y) * t)};
+		}
+	} // namespace
+
+	std::vector<Vec2> clipPolygonToRect(const std::vector<Vec2>& polygon, const Vec2& min,
+										const Vec2& max)
+	{
+		std::vector<Vec2> current = polygon;
+		for (const ClipEdge edge :
+			 {ClipEdge::Left, ClipEdge::Right, ClipEdge::Bottom, ClipEdge::Top})
+		{
+			if (current.size() < 3)
+				return {};
+
+			std::vector<Vec2> next;
+			next.reserve(current.size() + 1);
+			const std::size_t count = current.size();
+			for (std::size_t i = 0; i < count; ++i)
+			{
+				const Vec2& from = current[(i + count - 1) % count];
+				const Vec2& to = current[i];
+				const bool fromIn = insideEdge(from, edge, min, max);
+				const bool toIn = insideEdge(to, edge, min, max);
+				if (toIn)
+				{
+					if (!fromIn)
+						next.push_back(intersectEdge(from, to, edge, min, max));
+					next.push_back(to);
+				}
+				else if (fromIn)
+				{
+					next.push_back(intersectEdge(from, to, edge, min, max));
+				}
+			}
+			current = std::move(next);
+		}
+		return current.size() >= 3 ? current : std::vector<Vec2>{};
 	}
 } // namespace HomeskzIfcImport::core
