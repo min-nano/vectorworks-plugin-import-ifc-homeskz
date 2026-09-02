@@ -111,8 +111,9 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 .github/workflows/cleanup-dev-release.yml  PR のクローズ時に dev プレリリースを片付ける
 .github/workflows/stable-release-healthcheck.yml
                             stable リリースの取りこぼしを検知して再ビルドする
-.github/workflows/ci-debug.yml  CI: 手動ディスパッチ専用のデバッグ実行（SDK 調査・
-                            ビルド再現）。push / PR では起動しない
+.github/workflows/ci-debug.yml  CI: 手動ディスパッチ専用のデバッグ実行（SDK 依存の
+                            ビルド再現）。push / PR では起動しない。SDK そのものの
+                            調査は SDK リファレンス側で行う（CLAUDE.md）
 ```
 
 **依存の向きは厳守します。** `parse/` と `core/` は Vectorworks SDK を include せず、
@@ -447,8 +448,11 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 
 `.github/workflows/ci-debug.yml` は、**手動ディスパッチ専用**の「CI 上で 1 コマンドだけ
 動かす」ワークフローです。SDK が手元に無い環境（クラウド上の開発セッションや、SDK を
-インストールしていないマシン）から、**SDK 依存のビルドエラーの再現**や
-**「この API は SDK にあるか」という調査**を行うためのものです。
+インストールしていないマシン）から、**SDK 依存のビルドエラーの再現**を行うためのものです。
+**「この API は SDK にあるか」「どう振る舞うか」という SDK そのものの調査は本リポジトリでは
+行わず**、[SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)で
+issue を立てて `Findings/` への反映を待ちます（[`CLAUDE.md`](../CLAUDE.md)「SDK の調査は
+リファレンス側で行う」）。
 
 `push` / `pull_request` では**決して起動せず**、リリースも公開しません（`contents: write`
 を持たない）。SDK キャッシュは `build.yml` と同じキーで **読み取り専用**に復元するので、
