@@ -103,7 +103,7 @@ namespace HomeskzIfcImport::draw
 		// データオブジェクトのタグ付きデータとして持っており、SDK からは
 		// TaggedDataCreate ＋ TaggedDataSet で書ける（読み書きの API はあるが、**凡例の
 		// フィルタ専用の呼び出しは SDK にも VectorScript にも無い**——容れ物と型とタグは
-		// 実機のバイト列から突き止めた。docs/DEV-NOTES.md「グラフィック凡例」）。
+		// 実機のバイト列から突き止めた。SDK リファレンス Findings「Graphic Legends」）。
 		bool ApplyViewportFilter(MCObjectHandle legend, MCObjectHandle viewport)
 		{
 			if (legend == nil || viewport == nil)
@@ -146,7 +146,7 @@ namespace HomeskzIfcImport::draw
 		// **これは実験である。** 既定のソースが空で、スタイルを当てないと凡例が何も表示しない
 		// （実機で確認）以上、ソース定義を per-instance で書き込む以外に道が無い。器の 10 個の
 		// 意味は解けていないので、文書や VW の版をまたいで通用するかは**確かめられていない**。
-		// 実機で「並ぶかどうか」を見て判断する（docs/DEV-NOTES.md「グラフィック凡例」）。
+		// 実機で「並ぶかどうか」を見て判断する（SDK リファレンス Findings「Graphic Legends」）。
 		constexpr std::array<Uint8, 22> kSourceDefinition{
 			0x9a, 0x02, 0x96, 0x02, 0x1e, 0x03, 0x96, 0x02, 0x09, 0x03, 0x00,
 			0x00, 0x47, 0x06, 0x65, 0x06, 0x4f, 0x06, 0xa5, 0x02, 0x90, 0x06};

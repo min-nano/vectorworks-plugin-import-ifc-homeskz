@@ -76,8 +76,8 @@ namespace HomeskzIfcImport::core
 	// ここ（CLAUDE.md「両者をつなぐのは core/Document.h だけ」）。
 	//
 	// 値は OIP のポップアップの**並び順**（`<自動>` を 0 とする 0 始まりの索引）。実機の
-	// ドロップダウンを開いて確かめた全 17 項目は docs/DEV-NOTES.md「プラグインオブジェクト
-	// （PIO）」の表にある（ここには本プラグインが使うものだけを置く）。
+	// ドロップダウンを開いて確かめた全 17 項目は SDK リファレンス Findings
+	// 「Parametric Objects」の表にある（ここには本プラグインが使うものだけを置く）。
 	inline constexpr const char* kStructuralUseBeam = "1"; // 梁（土台・梁・桁・母屋…）
 	inline constexpr const char* kStructuralUseColumn = "4";   // 柱（管柱・通し柱）
 	inline constexpr const char* kStructuralUseKoyazuka = "5"; // 小屋束
@@ -502,7 +502,7 @@ namespace HomeskzIfcImport::core
 	// 【高さの持ち方】立上りは基礎ストーリの GL（下端）と 1 階（上階）の横架材天端（上端）
 	// にバインドし、実形状の絶対 Z との差を各 offset に入れる。**壁だけは高さ基準に汎用の
 	// SetObjectStoryBound ではなく壁専用の SetWallOverallHeights を使う**（前者ではレイヤの
-	// 「壁の高さ」設定に引きずられる。docs/DEV-NOTES.md「壁」）。したがって bottomBound /
+	// 「壁の高さ」設定に引きずられる。SDK リファレンス Findings「Walls」）。したがって bottomBound /
 	// topBound の storyOffset は SetWallOverallHeights の story 引数（0=自階・1=上階）
 	// とそのまま一致する。
 	//
@@ -914,7 +914,7 @@ namespace HomeskzIfcImport::core
 	// **シートレイヤの上**に置く——ビューポート注釈ではない（データタグとはそこが違う）。
 	//
 	// 【スタイルは作らないし当てない】凡例は**スタイル無しのオブジェクト**として置く
-	// （スラブ・壁・データタグと同じ扱い。docs/DEV-NOTES.md「グラフィック凡例」）。したがって
+	// （スラブ・壁・データタグと同じ扱い。SDK リファレンス Findings「Graphic Legends」）。したがって
 	// 命令はスタイル名を持たない——ユーザーの図面に名前付きリソースを増やさず、取り込みごとに
 	// 同じ中身のスタイルが "-2"、"-3" … と並ぶこともない（CLAUDE.md 開発の基本方針 4）。
 	//

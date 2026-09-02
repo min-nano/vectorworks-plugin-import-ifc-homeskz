@@ -59,7 +59,7 @@ namespace HomeskzIfcImport::draw
 	// **なぜ候補が要るか**: PIO のパラメータ名は SDK ヘッダのどこにも無く（ci-debug の
 	// sdk-grep で確認済み）、実機の OIP を読んで突き止めるしかない。VW 標準ツールのように
 	// 名前の候補が絞りきれないものは、ありうる universal 名とローカライズ名を並べて
-	// 引き、どれで当たったかを診断へ持ち帰る（docs/DEV-NOTES.md「プラグインオブジェクト」）。
+	// 引き、どれで当たったかを診断へ持ち帰る（SDK リファレンス Findings「Parametric Objects」）。
 	TXString ResolveParamNameAmong(const VWParametricObj& pio,
 								   const std::vector<const char*>& universalNames,
 								   const std::vector<const char*>& localizedNames);
