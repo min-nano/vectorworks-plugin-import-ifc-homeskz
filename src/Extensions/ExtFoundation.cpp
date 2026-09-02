@@ -61,7 +61,7 @@ namespace HomeskzIfcImport
 			return def;
 		}
 
-		// パラメータ。寸法 7 つは**寸法欄**（kFieldCoordDisp。図面の単位で表示・編集される）、
+		// パラメータ。寸法 6 つは**寸法欄**（kFieldCoordDisp。図面の単位で表示・編集される）、
 		// 部品の直列化は文字列。既定値は 0／空＝「取り込みが書くまで何も描かない」。
 		const SParametricParamDef* paramDefs()
 		{
@@ -73,12 +73,6 @@ namespace HomeskzIfcImport
 				 kFieldCoordDisp,
 				 0},
 				{kParamSlabTop, {PLUGIN_VWR_ID, "foundationSlabTop"}, "0", "0", kFieldCoordDisp, 0},
-				{kParamRiserWidth,
-				 {PLUGIN_VWR_ID, "foundationRiserWidth"},
-				 "0",
-				 "0",
-				 kFieldCoordDisp,
-				 0},
 				{kParamRiserTop,
 				 {PLUGIN_VWR_ID, "foundationRiserTop"},
 				 "0",
@@ -121,13 +115,12 @@ namespace HomeskzIfcImport
 			}
 		}
 
-		// OIP の寸法 7 つを core::FoundationParams へ写す。
+		// OIP の寸法 6 つを core::FoundationParams へ写す。
 		core::FoundationParams ReadParams(VWParametricObj& pio)
 		{
 			core::FoundationParams params;
 			params.slabThickness = ParamReal(pio, kParamSlabThickness);
 			params.slabTop = ParamReal(pio, kParamSlabTop);
-			params.riserWidth = ParamReal(pio, kParamRiserWidth);
 			params.riserTop = ParamReal(pio, kParamRiserTop);
 			params.beamDepth = ParamReal(pio, kParamBeamDepth);
 			params.haunchWidth = ParamReal(pio, kParamHaunchWidth);

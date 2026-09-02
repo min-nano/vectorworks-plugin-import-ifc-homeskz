@@ -39,7 +39,7 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 代表値の 7 つを PIO へ書く。書けなかったパラメータ名を改行区切りで返す（空＝全部書けた）。
+		// 代表値の 6 つを PIO へ書く。書けなかったパラメータ名を改行区切りで返す（空＝全部書けた）。
 		std::string WriteParams(VWParametricObj& pio, const core::FoundationParams& params)
 		{
 			std::string failed;
@@ -54,7 +54,6 @@ namespace HomeskzIfcImport::draw
 			};
 			write(kParamSlabThickness, params.slabThickness);
 			write(kParamSlabTop, params.slabTop);
-			write(kParamRiserWidth, params.riserWidth);
 			write(kParamRiserTop, params.riserTop);
 			write(kParamBeamDepth, params.beamDepth);
 			write(kParamHaunchWidth, params.haunchWidth);

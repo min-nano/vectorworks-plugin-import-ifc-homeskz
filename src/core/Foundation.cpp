@@ -5,9 +5,25 @@
 //	レコードへ保存する直列化の実装。意図は core/Foundation.h を参照。
 //	【SDK 非依存】core/ は VectorWorks SDK を一切 include しない。
 //
-//	地中梁の床付け（捨てコン・砕石）の断面の組み立ては M17（docs/DEV-NOTES.md「基礎の
-//	床付け」）を parse/Footing からそのまま移したもの——PIO がパラメータの変更のたびに
-//	床付けを描き直すので、解析側ではなく**部品から描く側**（＝ここ）に住む。
+//	【外形多角形からソリッドへ】部品はどれも「平面の外形＋高さ」なので、ソリッドは 2 通りしか
+//	要らない:
+//	  * **鉛直の押し出し** … 外形をそのまま z の範囲だけ持ち上げる（底盤・立上り・地中梁の
+//	    鉛直部・床付けの平らな層）
+//	  * **辺に沿う押し出し** … 辺に垂直な鉛直断面を辺の方向へ掃く（地中梁の斜め部と、その
+//	    側面を覆う砕石の帯）
+//	どちらも「3D 多角形＋押し出しベクトル」で表せるので、描画側は 1 種類の呼び出し
+//	（draw/DrawUtil の CreateExtrudedSolid）で描ける。
+//
+//	【斜め部を辺ごとに作る】斜め部（ハンチ）は外形が高さとともに広がる形で、押し出しでは
+//	表せない。そこで**辺ごとに三角形断面のくさびを 1 つずつ**作り、隣り合うくさびは
+//	マイター（外側へ広げた外形の頂点＝offsetPolygon の頂点）まで伸ばして角の隙間を埋める。
+//	角では下の方が少し詰まる（本来はそこで細るはずが、天端と同じ幅で埋まる）が、**天端の
+//	外形からはみ出さない**ので平面には影響しない。コンクリートの入隅が詰まるのは実物でも
+//	同じなので、これを approximation として受け入れる（docs/DEV-NOTES.md M20）。
+//
+//	床付け（捨てコン・砕石）の考え方は M17（docs/DEV-NOTES.md「基礎の床付け」）から引き継ぐ:
+//	地中梁の下に捨てコン 30 + 砕石 100、外周部の辺では横へ 50 だけ張り出して終わり、
+//	外周でない辺では側面を法線方向に 130 の砕石で覆う（底盤の砕石の底までで打ち切る）。
 //
 
 #include "core/Foundation.h"
@@ -32,21 +48,13 @@ namespace HomeskzIfcImport::core
 	{
 		// --- 小さな共通ヘルパー ---------------------------------------------------
 
-		// 符号付き面積（CCW で正・CW で負）。
-		double shoelaceSigned(const std::vector<Vec2>& pts)
-		{
-			double total = 0.0;
-			const std::size_t n = pts.size();
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const Vec2& a = pts[i];
-				const Vec2& b = pts[(i + 1) % n];
-				total += (a.x * b.y) - (b.x * a.y);
-			}
-			return total / 2.0;
-		}
+		// 外形の長さ・高さが「ある」とみなす下限（mm）。
+		constexpr double kSolidEps = 1e-6;
 
-		// 多角形の重心（頂点の相加平均）。空なら原点。
+		// 床付けの断面を組み立てるときの許容値（天端／下端の辺とみなす v の差。mm）。
+		constexpr double kBeddingLevelTol = 0.5;
+		constexpr double kBeddingEdgeEps = 1e-6;
+
 		Vec2 polygonCentroid(const std::vector<Vec2>& pts)
 		{
 			if (pts.empty())
@@ -62,7 +70,7 @@ namespace HomeskzIfcImport::core
 			return Vec2{sx / n, sy / n};
 		}
 
-		// 平面外形の代表点（重心・各頂点・各辺の中点）。
+		// 平面外形の代表点（重心・各頂点・各辺の中点）。どの底盤の上／下かを数えるのに使う。
 		std::vector<Vec2> footprintSamples(const std::vector<Vec2>& pts)
 		{
 			std::vector<Vec2> samples;
@@ -79,63 +87,21 @@ namespace HomeskzIfcImport::core
 			return samples;
 		}
 
-		// 点が多角形の内側か（交差数の偶奇）。辺の上は「内側」に数える。
-		bool pointInPolygon(const Vec2& p, const std::vector<Vec2>& poly)
-		{
-			const std::size_t n = poly.size();
-			if (n < 3)
-				return false;
-			bool inside = false;
-			for (std::size_t i = 0, j = n - 1; i < n; j = i++)
-			{
-				const Vec2& a = poly[i];
-				const Vec2& b = poly[j];
-				if ((a.y > p.y) != (b.y > p.y))
-				{
-					const double x = a.x + ((p.y - a.y) * (b.x - a.x) / (b.y - a.y));
-					if (p.x < x)
-						inside = !inside;
-				}
-			}
-			return inside;
-		}
-
-		// 点 p・方向 d の 2 直線の交点（平行なら false）。
-		bool lineIntersection(const Vec2& p1, const Vec2& d1, const Vec2& p2, const Vec2& d2,
-							  Vec2& out)
-		{
-			const double denom = (d1.x * d2.y) - (d1.y * d2.x);
-			if (std::abs(denom) < 1e-12)
-				return false;
-			const double dx = p2.x - p1.x;
-			const double dy = p2.y - p1.y;
-			const double t = ((dx * d2.y) - (dy * d2.x)) / denom;
-			out = Vec2{p1.x + (t * d1.x), p1.y + (t * d1.y)};
-			return true;
-		}
-
 		// 許容値で丸めた整数キー（代表値の集計の鍵）。
 		long long roundKey(double value, double tolerance)
 		{
 			return std::llround(value / tolerance);
 		}
 
-		// --- 地中梁の床付け（捨てコン・砕石）--------------------------------------------
-		//
-		// 床付けは「地中梁の**下面**（側面 → 下端 → 側面 と続く折れ線。天端の辺は含まない）を
-		// 外向きへ kSlabBeddingThickness だけオフセットした帯」で表す。オフセットは辺ごとに
-		// 法線方向へ動かして隣どうしの交点（マイター）を新しい頂点にするので、**傾斜部でも
-		// 法線方向の厚みがそのまま保たれる**（下端の下では真下へ 130mm、45 度の傾斜部では
-		// 斜め下へ 130mm）。帯のうち下端の直下の 30mm だけが捨てコンで、残りは砕石になる。
-		//
-		// 外周部の側面（底盤の外形に面した側）は例外で、側面を回り込ませずに下端の床付けを
-		// kBeddingPerimeterMargin だけ横へ張り出して終わらせる（外にはコンクリートが無いので、
-		// 回り込ませると建物の外に砕石の壁が立ってしまう）。
-
-		// 床付けの断面を組み立てるときの許容値。天端／下端の辺とみなす v の差（mm）と、
-		// 辺の長さが 0 でないとみなす下限（mm）。
-		constexpr double kBeddingLevelTol = 0.5;
-		constexpr double kBeddingEdgeEps = 1e-6;
+		// 反時計回りに揃えた外形（外向き法線＝進行方向の右になる）。3 点未満なら空。
+		std::vector<Vec2> orientCcw(const std::vector<Vec2>& outline)
+		{
+			if (outline.size() < 3)
+				return {};
+			if (shoelaceSigned(outline) >= 0.0)
+				return outline;
+			return {outline.rbegin(), outline.rend()};
+		}
 
 		// 連続する同一点と末尾の閉じ重複を除いた頂点列。
 		std::vector<Vec2> dedupeRing(const std::vector<Vec2>& pts)
@@ -151,6 +117,162 @@ namespace HomeskzIfcImport::core
 				out.pop_back();
 			return out;
 		}
+
+		bool inAnyPolygon(const Vec2& point, const PolygonList& polys)
+		{
+			return std::ranges::any_of(polys, [&point](const std::vector<Vec2>& poly)
+									   { return pointInPolygon(point, poly); });
+		}
+
+		// --- 外形からソリッドへ ---------------------------------------------------
+
+		// 鉛直の押し出し（外形を zLow から zHigh まで）。高さが無ければ base を空にして返す
+		// （呼び出し側は空を捨てる）。
+		FoundationSolid verticalSolid(FoundationSolid::Kind kind, const std::string& drawClass,
+									  const std::vector<Vec2>& outline, double zLow, double zHigh)
+		{
+			FoundationSolid solid;
+			solid.kind = kind;
+			solid.drawClass = drawClass;
+			if (outline.size() < 3 || zHigh - zLow <= kSolidEps)
+				return solid;
+			solid.base.reserve(outline.size());
+			for (const Vec2& p : outline)
+				solid.base.push_back(Vec3{p.x, p.y, zLow});
+			solid.extent = Vec3{0.0, 0.0, zHigh - zLow};
+			return solid;
+		}
+
+		// 辺に沿う押し出し。section は辺に垂直な鉛直断面の頂点列で、x＝辺の外向き法線方向の
+		// 距離・y＝絶対 Z。断面を from に立て、辺の方向へ to まで掃く。
+		FoundationSolid edgeSolid(FoundationSolid::Kind kind, const std::string& drawClass,
+								  const Vec2& from, const Vec2& to, const Vec2& normal,
+								  const std::vector<Vec2>& section)
+		{
+			FoundationSolid solid;
+			solid.kind = kind;
+			solid.drawClass = drawClass;
+			const Vec2 span{to.x - from.x, to.y - from.y};
+			if (section.size() < 3 || length(span) <= kSolidEps)
+				return solid;
+			solid.base.reserve(section.size());
+			for (const Vec2& p : section)
+				solid.base.push_back(
+					Vec3{from.x + (normal.x * p.x), from.y + (normal.y * p.x), p.y});
+			solid.extent = Vec3{span.x, span.y, 0.0};
+			return solid;
+		}
+
+		void addSolid(std::vector<FoundationSolid>& out, FoundationSolid solid)
+		{
+			if (solid.base.size() >= 3)
+				out.push_back(std::move(solid));
+		}
+
+		// 外形の辺 i の始点・終点・単位方向・外向き単位法線・長さ。CCW 前提。
+		struct EdgeFrame
+		{
+			Vec2 from;
+			Vec2 to;
+			Vec2 dir;
+			Vec2 normal;
+			double length = 0.0;
+		};
+
+		EdgeFrame edgeFrame(const std::vector<Vec2>& ring, std::size_t index)
+		{
+			EdgeFrame frame;
+			frame.from = ring[index];
+			frame.to = ring[(index + 1) % ring.size()];
+			const Vec2 span{frame.to.x - frame.from.x, frame.to.y - frame.from.y};
+			frame.length = length(span);
+			if (frame.length <= kSolidEps)
+				return frame;
+			frame.dir = Vec2{span.x / frame.length, span.y / frame.length};
+			frame.normal = Vec2{frame.dir.y, -frame.dir.x}; // CCW なので右が外
+			return frame;
+		}
+
+		// 辺 i を外へ広げたときの、辺方向の区間 [t0, t1]（マイター点を辺へ射影したもの）。
+		// 凸角では辺より外へ、入隅では内へ寄るが、**必ず辺の全長を覆う**ように広げておく
+		// （隙間を作らない。重なりは同素材なので無害）。
+		void edgeMiterSpan(const EdgeFrame& frame, const std::vector<Vec2>& offset,
+						   std::size_t index, double& t0, double& t1)
+		{
+			const std::size_t n = offset.size();
+			const auto project = [&frame](const Vec2& p)
+			{ return ((p.x - frame.from.x) * frame.dir.x) + ((p.y - frame.from.y) * frame.dir.y); };
+			t0 = std::min(0.0, project(offset[index]));
+			t1 = std::max(frame.length, project(offset[(index + 1) % n]));
+		}
+
+		// 地中梁の辺の種類。斜め部・側面の砕石を付けるかと、床付けの張り出し量を決める。
+		enum class BeamEdgeKind
+		{
+			Free, // 内側の自由な面（斜め部を付ける・側面を砕石で覆う）
+			Perimeter, // 建物の外周に面する（鉛直のまま・床付けは 50 張り出して終わり）
+			Joint, // 他の地中梁と取り合う（相手のコンクリートの中なので何も付けない）
+		};
+
+		std::vector<BeamEdgeKind> classifyBeamEdges(const std::vector<Vec2>& ring,
+													const PolygonList& slabOutlines,
+													const PolygonList& others)
+		{
+			std::vector<BeamEdgeKind> kinds(ring.size(), BeamEdgeKind::Free);
+			for (std::size_t i = 0; i < ring.size(); ++i)
+			{
+				const EdgeFrame frame = edgeFrame(ring, i);
+				if (frame.length <= kSolidEps)
+					continue;
+				const Vec2 probe{
+					((frame.from.x + frame.to.x) / 2.0) + (frame.normal.x * kBeddingOutsideProbe),
+					((frame.from.y + frame.to.y) / 2.0) + (frame.normal.y * kBeddingOutsideProbe)};
+				if (!slabOutlines.empty() && !inAnyPolygon(probe, slabOutlines))
+					kinds[i] = BeamEdgeKind::Perimeter;
+				else if (inAnyPolygon(probe, others))
+					kinds[i] = BeamEdgeKind::Joint;
+			}
+			return kinds;
+		}
+
+		// --- 代表値の集計 ---------------------------------------------------------
+
+		// 重み付きの最頻値（許容 kFoundationTol で丸めた鍵ごとに重みを足し、最大の鍵の値を
+		// 返す。同率なら大きい値）。空なら 0。
+		double weightedMode(const std::vector<std::pair<double, double>>& valueWeights)
+		{
+			std::map<long long, std::pair<double, double>> groups; // 鍵 → (重み合計, 代表値)
+			for (const auto& [value, weight] : valueWeights)
+			{
+				auto& entry = groups[roundKey(value, kFoundationTol)];
+				if (entry.first == 0.0)
+					entry.second = value;
+				entry.first += weight;
+				entry.second = std::max(entry.second, value);
+			}
+			double bestWeight = -1.0;
+			double best = 0.0;
+			for (const auto& [key, entry] : groups)
+			{
+				if (entry.first > bestWeight || (entry.first == bestWeight && entry.second > best))
+				{
+					bestWeight = entry.first;
+					best = entry.second;
+				}
+			}
+			return best;
+		}
+
+		// グループの外形の面積合計（代表値の重み）。
+		double outlinesArea(const PolygonList& outlines)
+		{
+			double total = 0.0;
+			for (const std::vector<Vec2>& outline : outlines)
+				total += polygonArea(outline);
+			return total;
+		}
+
+		// --- 地中梁の断面の当てはめ -------------------------------------------------
 
 		// 地中梁の断面を**下面の折れ線**へ分解する。折れ線は天端の辺を除いた残りで、u が
 		// 小さい側の天端頂点から始まり、下端の辺を通って u が大きい側の天端頂点で終わる。
@@ -215,253 +337,6 @@ namespace HomeskzIfcImport::core
 			return found && last > first && path[last].x > path[first].x + kBeddingEdgeEps;
 		}
 
-		// 地中梁の側面（断面 u の最小側・最大側）が外周部かを判定する。側面のすぐ外側を
-		// 押し出し方向の 3 か所で突き、**すべてが底盤の外形の外**なら外周部とみなす。
-		// 一部だけ外に出る（外形の角を跨ぐ）地中梁を外周部と読まないよう、全点一致にする。
-		// 底盤の外形が無ければどちらも外周部ではない。
-		void groundBeamPerimeterSides(const BeamPrism& prism, const std::vector<Vec2>& slabRing,
-									  bool& low, bool& high)
-		{
-			low = false;
-			high = false;
-			if (prism.profile.empty() || slabRing.size() < 3)
-				return;
-			double uLo = prism.profile.front().x;
-			double uHi = uLo;
-			for (const Vec2& p : prism.profile)
-			{
-				uLo = std::min(uLo, p.x);
-				uHi = std::max(uHi, p.x);
-			}
-
-			Vec2 axis;
-			Vec2 width;
-			beamPrismAxes(prism, axis, width);
-			const auto outside = [&](double u)
-			{
-				constexpr std::array<double, 3> kProbeFractions{0.25, 0.5, 0.75};
-				return std::ranges::all_of(
-					kProbeFractions,
-					[&](double fraction)
-					{
-						const double along = prism.depth * fraction;
-						return !pointInPolygon(
-							Vec2{prism.origin.x + (axis.x * along) + (width.x * u),
-								 prism.origin.y + (axis.y * along) + (width.y * u)},
-							slabRing);
-					});
-			};
-			low = outside(uLo - kBeddingOutsideProbe);
-			high = outside(uHi + kBeddingOutsideProbe);
-		}
-
-		// 断面を半平面 v ≤ top で切った多角形（Sutherland-Hodgman）。床付けの帯を切り上げる
-		// のに使う。**切っても 2 つに割れない**ことは形が保証する——床付けは下端の下で全幅に
-		// 繋がっており、top は必ずその繋がりより上にあるので、落ちるのは左右の帯の上端だけに
-		// なる。面にならなくなったら空を返す。
-		std::vector<Vec2> clipProfileBelow(const std::vector<Vec2>& profile, double top)
-		{
-			std::vector<Vec2> out;
-			const std::size_t n = profile.size();
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const Vec2& a = profile[i];
-				const Vec2& b = profile[(i + 1) % n];
-				const bool aIn = a.y <= top;
-				const bool bIn = b.y <= top;
-				if (aIn)
-					out.push_back(a);
-				if (aIn != bIn)
-				{
-					const double dv = b.y - a.y;
-					const double t = (top - a.y) / dv; // aIn != bIn なので dv は 0 でない
-					out.push_back(Vec2{a.x + ((b.x - a.x) * t), top});
-				}
-			}
-			out = dedupeRing(out);
-			return out.size() >= 3 ? out : std::vector<Vec2>{};
-		}
-
-		// 床付けを 1 つ足す。**同じ層（クラスと断面が同じ）で押し出し方向に続く区間は
-		// 1 本へ繋ぐ**（区間を切ったせいで、断面の変わらない捨てコンまで細切れのソリッドに
-		// なるのを防ぐ）。
-		void appendBedding(std::vector<BeddingPrism>& out, BeddingPrism bedding)
-		{
-			for (BeddingPrism& previous : out)
-			{
-				if (previous.drawClass != bedding.drawClass ||
-					previous.profile.size() != bedding.profile.size() ||
-					std::abs((previous.start + previous.depth) - bedding.start) > kBeddingEdgeEps)
-					continue;
-				bool same = true;
-				for (std::size_t i = 0; i < previous.profile.size() && same; ++i)
-					same = samePoint(previous.profile[i], bedding.profile[i], kBeddingEdgeEps);
-				if (!same)
-					continue;
-				previous.depth = (bedding.start + bedding.depth) - previous.start;
-				return;
-			}
-			out.push_back(std::move(bedding));
-		}
-
-		// 押し出し方向の区間 [start, start + depth) と、その区間で床付けを切り上げる高さ。
-		struct BeddingSpan
-		{
-			double start = 0.0;
-			double depth = 0.0;
-			double top = 0.0;
-		};
-
-		// 地中梁 A の床付けを、押し出し方向の区間へ切り分ける。取り合う地中梁が 1 つも無ければ
-		// 全長 1 区間（top = 底盤の砕石の底）。掛かる地中梁がある区間は、その相手の**下端**まで
-		// 切り下げる（相手のコンクリートがある高さには床付けを置かない）。
-		//
-		// 掛かるかどうかは A の**床付けの平面外形**（帯を含む幅）と相手のコンクリートの平面外形
-		// で見る。相手の外形の 4 隅を A の (t, u) 座標へ写した外接矩形を使うので、直交・平行な
-		// 取り合い（実データはこの 2 通りしか無い）では厳密、斜めでは安全側（広めに切る）になる。
-		std::vector<BeddingSpan> beddingSpans(const std::vector<BeamPrism>& beams, std::size_t self,
-											  double slabTop, double beddingWidthLo,
-											  double beddingWidthHi)
-		{
-			const BeamPrism& prism = beams[self];
-			Vec2 axis;
-			Vec2 width;
-			beamPrismAxes(prism, axis, width);
-
-			// 掛かる区間（[t0, t1] と、そこで切り下げる高さ）を集める。**自分自身は除く**。
-			std::vector<BeddingSpan> blocks;
-			for (std::size_t i = 0; i < beams.size(); ++i)
-			{
-				if (i == self)
-					continue;
-				const BeamPrism& other = beams[i];
-				if (other.profile.empty())
-					continue; // 断面を持たない地中梁は掛かりようがない
-				const std::vector<Vec2> footprint = beamPrismFootprint(other);
-				double tLo = 0.0;
-				double tHi = 0.0;
-				double uLo = 0.0;
-				double uHi = 0.0;
-				bool first = true;
-				for (const Vec2& corner : footprint)
-				{
-					const double dx = corner.x - prism.origin.x;
-					const double dy = corner.y - prism.origin.y;
-					const double t = (dx * axis.x) + (dy * axis.y);
-					const double u = (dx * width.x) + (dy * width.y);
-					tLo = first ? t : std::min(tLo, t);
-					tHi = first ? t : std::max(tHi, t);
-					uLo = first ? u : std::min(uLo, u);
-					uHi = first ? u : std::max(uHi, u);
-					first = false;
-				}
-				if (uHi <= beddingWidthLo || uLo >= beddingWidthHi)
-					continue; // 幅方向で離れている（床付けに掛からない）
-				const double start = std::max(tLo, 0.0);
-				const double end = std::min(tHi, prism.depth);
-				if (end - start <= kBeddingEdgeEps)
-					continue; // 押し出し方向で離れている
-				blocks.push_back(BeddingSpan{start, end - start, other.origin.z - prism.origin.z});
-			}
-
-			if (blocks.empty())
-				return {BeddingSpan{0.0, prism.depth, slabTop}};
-
-			// 区切り位置で細切れにし、各区間の切り上げ高さ＝掛かる相手の下端の最小値
-			// （と底盤の砕石の底）を採る。並びは押し出し方向で決定的。
-			std::vector<double> breaks{0.0, prism.depth};
-			for (const BeddingSpan& block : blocks)
-			{
-				breaks.push_back(block.start);
-				breaks.push_back(block.start + block.depth);
-			}
-			std::ranges::sort(breaks);
-
-			std::vector<BeddingSpan> spans;
-			for (std::size_t i = 0; i + 1 < breaks.size(); ++i)
-			{
-				const double start = breaks[i];
-				const double end = breaks[i + 1];
-				if (end - start <= kBeddingEdgeEps)
-					continue;
-				const double middle = (start + end) / 2.0;
-				double top = slabTop;
-				for (const BeddingSpan& block : blocks)
-				{
-					if (middle > block.start && middle < block.start + block.depth)
-						top = std::min(top, block.top);
-				}
-				// 切り上げ高さの同じ区間は 1 つにまとめる（無用な継目を作らない）。
-				if (!spans.empty() && std::abs(spans.back().top - top) <= kBeddingEdgeEps)
-					spans.back().depth = end - spans.back().start;
-				else
-					spans.push_back(BeddingSpan{start, end - start, top});
-			}
-			return spans;
-		}
-
-		// --- 部品 → ソリッド ---------------------------------------------------------
-
-		// プリズム（断面 ＋ 水平押し出し）を 3D 多角形＋押し出しベクトルへ写す。断面原点
-		// （u=v=0）が origin、u 軸が幅軸・v 軸がワールド Z。
-		FoundationSolid solidFromPrism(const BeamPrism& prism, FoundationSolid::Kind kind,
-									   const std::string& drawClass)
-		{
-			Vec2 axis;
-			Vec2 width;
-			beamPrismAxes(prism, axis, width);
-			FoundationSolid solid;
-			solid.kind = kind;
-			solid.drawClass = drawClass;
-			solid.base.reserve(prism.profile.size());
-			for (const Vec2& p : prism.profile)
-			{
-				solid.base.push_back(Vec3{prism.origin.x + (width.x * p.x),
-										  prism.origin.y + (width.y * p.x), prism.origin.z + p.y});
-			}
-			solid.extent = Vec3{axis.x * prism.depth, axis.y * prism.depth, 0.0};
-			return solid;
-		}
-
-		// 立上りの平面矩形（壁芯の両側へ半幅）。長さ・幅が無ければ空。
-		std::vector<Vec2> riserFootprint(const FoundationRiser& riser)
-		{
-			const Vec2 delta = riser.end - riser.start;
-			const double length = core::length(delta);
-			if (length <= 0.0 || riser.width <= 0.0)
-				return {};
-			const double half = riser.width / 2.0;
-			const Vec2 n{-delta.y / length * half, delta.x / length * half};
-			return {riser.start - n, riser.end - n, riser.end + n, riser.start + n};
-		}
-
-		// 面積／長さで重み付けした最頻値。値は kFoundationTol で丸めた鍵でまとめ、重みの
-		// 合計が最大の鍵の値（同率なら大きい値）を返す。鍵の中では最大値を代表にする（同じ
-		// 鍵の値は許容内で同一とみなせる）。空なら 0。
-		double weightedMode(const std::vector<std::pair<double, double>>& valueWeights)
-		{
-			std::map<long long, std::pair<double, double>> groups; // 鍵 → (重み合計, 代表値)
-			for (const auto& [value, weight] : valueWeights)
-			{
-				auto& entry = groups[roundKey(value, kFoundationTol)];
-				if (entry.first == 0.0)
-					entry.second = value;
-				entry.first += weight;
-				entry.second = std::max(entry.second, value);
-			}
-			double bestWeight = -1.0;
-			double best = 0.0;
-			for (const auto& [key, entry] : groups)
-			{
-				if (entry.first > bestWeight || (entry.first == bestWeight && entry.second > best))
-				{
-					bestWeight = entry.first;
-					best = entry.second;
-				}
-			}
-			return best;
-		}
-
 		// --- 直列化 ---------------------------------------------------------------
 
 		// 数値を小数 3 桁までの最短表記にする（"150" / "-99.5" / "0.125"）。
@@ -488,10 +363,19 @@ namespace HomeskzIfcImport::core
 			out += formatNumber(value);
 		}
 
-		void appendPoint(std::string& out, const Vec2& point)
+		// 外形の列を「外形の数 → 各外形の（頂点数, x y …）」の順で書く。
+		void appendOutlines(std::string& out, const PolygonList& outlines)
 		{
-			appendNumber(out, point.x);
-			appendNumber(out, point.y);
+			appendNumber(out, static_cast<double>(outlines.size()));
+			for (const std::vector<Vec2>& outline : outlines)
+			{
+				appendNumber(out, static_cast<double>(outline.size()));
+				for (const Vec2& point : outline)
+				{
+					appendNumber(out, point.x);
+					appendNumber(out, point.y);
+				}
+			}
 		}
 
 		// 空白区切りの数値列を順に読む。読めなければ false。
@@ -516,9 +400,41 @@ namespace HomeskzIfcImport::core
 				return true;
 			}
 
-			bool nextPoint(Vec2& out)
+			// 個数として読める（非負の整数で、常識的な上限に収まる）値か。
+			bool nextCount(std::size_t& out)
 			{
-				return next(out.x) && next(out.y);
+				double value = 0.0;
+				if (!next(value) || value < 0.0 || value > 1e6 || value != std::floor(value))
+					return false;
+				out = static_cast<std::size_t>(value);
+				return true;
+			}
+
+			bool nextOutlines(PolygonList& out)
+			{
+				std::size_t count = 0;
+				if (!nextCount(count))
+					return false;
+				PolygonList outlines;
+				outlines.reserve(count);
+				for (std::size_t i = 0; i < count; ++i)
+				{
+					std::size_t vertices = 0;
+					if (!nextCount(vertices))
+						return false;
+					std::vector<Vec2> outline;
+					outline.reserve(vertices);
+					for (std::size_t v = 0; v < vertices; ++v)
+					{
+						Vec2 point;
+						if (!next(point.x) || !next(point.y))
+							return false;
+						outline.push_back(point);
+					}
+					outlines.push_back(std::move(outline));
+				}
+				out = std::move(outlines);
+				return true;
 			}
 
 			bool done()
@@ -533,7 +449,8 @@ namespace HomeskzIfcImport::core
 			std::size_t fPos = 0;
 		};
 
-		constexpr std::string_view kEncodingMagic = "HF1";
+		// 版の印。**部品の持ち方を変えたら上げる**（古い版は decodeFoundation が拒む）。
+		constexpr std::string_view kEncodingMagic = "HF2";
 	} // namespace
 
 	// --- 地中梁のプリズム -------------------------------------------------------------
@@ -545,215 +462,7 @@ namespace HomeskzIfcImport::core
 		width = Vec2{-axis.y, axis.x}; // 幅軸 u（走る向きを +90 度回した水平単位ベクトル）
 	}
 
-	std::vector<Vec2> beamPrismFootprint(const BeamPrism& prism)
-	{
-		if (prism.profile.empty())
-			return {};
-		Vec2 axis;
-		Vec2 width;
-		beamPrismAxes(prism, axis, width);
-		double uLo = prism.profile.front().x;
-		double uHi = prism.profile.front().x;
-		for (const Vec2& p : prism.profile)
-		{
-			uLo = std::min(uLo, p.x);
-			uHi = std::max(uHi, p.x);
-		}
-		const Vec2 start{prism.origin.x, prism.origin.y};
-		const Vec2 end{start.x + (axis.x * prism.depth), start.y + (axis.y * prism.depth)};
-		return {Vec2{start.x + (width.x * uLo), start.y + (width.y * uLo)},
-				Vec2{start.x + (width.x * uHi), start.y + (width.y * uHi)},
-				Vec2{end.x + (width.x * uHi), end.y + (width.y * uHi)},
-				Vec2{end.x + (width.x * uLo), end.y + (width.y * uLo)}};
-	}
-
-	BeamPrism raiseBeamPrismTop(const BeamPrism& prism, double bite)
-	{
-		if (bite <= 0.0 || prism.profile.empty())
-			return prism;
-
-		// 天端＝最大 v。そこから kModifierTopVertexTol 以内の頂点を天端の辺とみなす。
-		double vMax = prism.profile.front().y;
-		for (const Vec2& p : prism.profile)
-			vMax = std::max(vMax, p.y);
-		const auto isTop = [&](std::size_t i)
-		{ return prism.profile[i].y >= vMax - kModifierTopVertexTol; };
-
-		const std::size_t n = prism.profile.size();
-		BeamPrism raised = prism;
-		for (std::size_t i = 0; i < n; ++i)
-		{
-			if (!isTop(i))
-				continue;
-			const Vec2& top = prism.profile[i];
-			// 隣接する 2 頂点のうち**下端側**（側辺の相手）を探し、その斜辺の延長線上へ
-			// 動かす。見つからない（天端が水平に分割された中間頂点）／側辺がほぼ水平なら
-			// 真上へ上げる。
-			double du = 0.0;
-			for (const std::size_t j : {(i + n - 1) % n, (i + 1) % n})
-			{
-				if (isTop(j))
-					continue;
-				const double dv = top.y - prism.profile[j].y;
-				if (std::abs(dv) > kModifierTopVertexTol)
-					du = ((top.x - prism.profile[j].x) / dv) * bite;
-				break;
-			}
-			raised.profile[i] = Vec2{top.x + du, top.y + bite};
-		}
-		return raised;
-	}
-
-	std::vector<BeddingPrism> groundBeamBedding(const BeamPrism& prism, bool lowPerimeter,
-												bool highPerimeter, double topLimit,
-												const std::string& leanClass,
-												const std::string& gravelClass)
-	{
-		std::vector<Vec2> path;
-		std::size_t first = 0;
-		std::size_t last = 0;
-		if (!groundBeamUnderside(prism.profile, path, first, last))
-			return {}; // 床付けを敷く下面を取り出せない断面（三角形・水平な板等）
-
-		const double vTop = path.front().y; // 天端＝底盤の底面
-		const double vBot = path[first].y;	// 下端（v=0。地中梁の底）
-		const double uLow = path[first].x;	// 下端の辺の u 小さい側
-		const double uHigh = path[last].x;	// 同 大きい側
-
-		// オフセットする辺の範囲。外周部の側面はここから外し、下端の床付けを横へ張り出して
-		// 終わらせる。
-		const std::size_t begin = lowPerimeter ? first : 0;
-		const std::size_t end = highPerimeter ? last : path.size() - 1;
-
-		// 各辺を外向き法線へ kSlabBeddingThickness だけ動かした線分。
-		//
-		// **辺は必ず 1 本以上あり、長さも必ず正**なので、空判定も 0 除算の番人も要らない:
-		// begin ≤ first < last ≤ end（下端の辺が 1 本以上あることは groundBeamUnderside が
-		// 保証する）だから範囲は空にならず、折れ線の連続する 2 点は dedupeRing が
-		// kBeddingEdgeEps 以上離れていることを保証している。
-		struct OffsetEdge
-		{
-			Vec2 start;
-			Vec2 end;
-			Vec2 dir;
-		};
-		std::vector<OffsetEdge> edges;
-		edges.reserve(end - begin);
-		for (std::size_t i = begin; i < end; ++i)
-		{
-			const Vec2 delta = path[i + 1] - path[i];
-			const double length = core::length(delta);
-			const Vec2 dir{delta.x / length, delta.y / length};
-			// CCW ポリゴンの外向き法線＝進行方向の右。
-			const Vec2 offset{dir.y * kSlabBeddingThickness, -dir.x * kSlabBeddingThickness};
-			edges.push_back(OffsetEdge{path[i] + offset, path[i + 1] + offset, dir});
-		}
-
-		// オフセット線を天端（v = vTop）まで伸ばした点。ほぼ水平な辺では伸ばせないので
-		// 与えられた端点で代用する。
-		const auto atTop = [vTop](const Vec2& point, const Vec2& dir, const Vec2& fallback)
-		{
-			if (std::abs(dir.y) <= kBeddingEdgeEps)
-				return fallback;
-			const double t = (vTop - point.y) / dir.y;
-			return Vec2{point.x + (dir.x * t), vTop};
-		};
-
-		// 外側の折れ線（u の小さい側 → 大きい側）。
-		const double beddingBottom = vBot - kSlabBeddingThickness;
-		std::vector<Vec2> outer;
-		outer.reserve(edges.size() + 2);
-		outer.push_back(lowPerimeter
-							? Vec2{uLow - kBeddingPerimeterMargin, beddingBottom}
-							: atTop(edges.front().start, edges.front().dir, edges.front().start));
-		for (std::size_t i = 1; i < edges.size(); ++i)
-		{
-			Vec2 vertex;
-			if (!lineIntersection(edges[i - 1].start, edges[i - 1].dir, edges[i].start,
-								  edges[i].dir, vertex))
-				vertex = edges[i].start; // 平行（同一直線の連続辺）: マイターは要らない
-			outer.push_back(vertex);
-		}
-		outer.push_back(highPerimeter
-							? Vec2{uHigh + kBeddingPerimeterMargin, beddingBottom}
-							: atTop(edges.back().end, edges.back().dir, edges.back().end));
-
-		// 内側の折れ線（u の大きい側 → 小さい側）。地中梁の下面をなぞり、下端の下だけは
-		// 捨てコンの底（vBot − 30）を通る＝そこが砕石と捨てコンの境になる。
-		const double leanBottom = vBot - kSlabLeanConcreteThickness;
-		const double uLeanLow = lowPerimeter ? uLow - kBeddingPerimeterMargin : uLow;
-		const double uLeanHigh = highPerimeter ? uHigh + kBeddingPerimeterMargin : uHigh;
-		std::vector<Vec2> inner;
-		inner.reserve(path.size() + 4);
-		if (highPerimeter)
-		{
-			inner.push_back(Vec2{uLeanHigh, leanBottom});
-		}
-		else
-		{
-			for (std::size_t i = path.size(); i > last; --i)
-				inner.push_back(path[i - 1]); // 天端 → 下端（u 大きい側の側面）
-			inner.push_back(Vec2{uHigh, leanBottom});
-		}
-		inner.push_back(Vec2{uLeanLow, leanBottom});
-		if (!lowPerimeter)
-		{
-			for (std::size_t i = first + 1; i > 0; --i)
-				inner.push_back(path[i - 1]); // 下端（u 小さい側）→ 天端
-		}
-
-		// 各層は最後に v ≤ topLimit で切り上げる（傾斜部の帯が直交する地中梁へ食い込むのを
-		// 防ぐ）。面にならなくなった層は落とす。
-		std::vector<BeddingPrism> beddings;
-		// 捨てコンは下端の平らな面の直下だけ（傾斜部は砕石のみ）。
-		std::vector<Vec2> lean =
-			clipProfileBelow({Vec2{uLeanLow, leanBottom}, Vec2{uLeanHigh, leanBottom},
-							  Vec2{uLeanHigh, vBot}, Vec2{uLeanLow, vBot}},
-							 topLimit);
-		if (!lean.empty())
-			beddings.push_back(BeddingPrism{std::move(lean), leanClass, 0.0, prism.depth});
-
-		std::vector<Vec2> gravel = outer;
-		gravel.insert(gravel.end(), inner.begin(), inner.end());
-		gravel = clipProfileBelow(dedupeRing(gravel), topLimit);
-		if (!gravel.empty())
-			beddings.push_back(BeddingPrism{std::move(gravel), gravelClass, 0.0, prism.depth});
-		return beddings;
-	}
-
-	// --- 地中梁の断面のパラメータ化 -----------------------------------------------------
-
-	BeamPrism beamPrism(const FoundationBeam& beam)
-	{
-		BeamPrism prism;
-		const Vec2 delta = beam.end - beam.start;
-		const double length = core::length(delta);
-		prism.depth = length;
-		prism.origin = Vec3{beam.start.x, beam.start.y, beam.top - beam.depth};
-		if (length <= 0.0)
-			return prism; // 長さの無い地中梁は断面を持たない
-		prism.azimuth = std::atan2(delta.y, delta.x) * 180.0 / std::numbers::pi;
-
-		const double half = beam.bottomWidth / 2.0;
-		const double haunch = std::clamp(beam.haunchHeight, 0.0, beam.depth);
-		const double kink = beam.depth - haunch; // 鉛直部の上端（斜め部の始まり）
-		const double left = std::max(beam.haunchLeft, 0.0);
-		const double right = std::max(beam.haunchRight, 0.0);
-
-		// 下端 → +u 側の側面 → 天端 → −u 側の側面（CCW）。張り出しの無い側は鉛直 1 本で、
-		// 中間頂点を作らない。
-		prism.profile.push_back(Vec2{-half, 0.0});
-		prism.profile.push_back(Vec2{half, 0.0});
-		if (left > 0.0 && kink > 0.0)
-			prism.profile.push_back(Vec2{half, kink});
-		prism.profile.push_back(Vec2{half + left, beam.depth});
-		prism.profile.push_back(Vec2{-half - right, beam.depth});
-		if (right > 0.0 && kink > 0.0)
-			prism.profile.push_back(Vec2{-half, kink});
-		return prism;
-	}
-
-	bool fitFoundationBeam(const BeamPrism& prism, FoundationBeam& out)
+	bool fitFoundationBeam(const BeamPrism& prism, FoundationBeamFit& out)
 	{
 		if (prism.profile.size() < 3 || prism.depth <= 0.0)
 			return false;
@@ -766,7 +475,7 @@ namespace HomeskzIfcImport::core
 		double uHigh = 0.0;
 		double vTop = 0.0;
 		double vBot = 0.0;
-		FoundationBeam beam;
+		FoundationBeamFit beam;
 
 		std::vector<Vec2> path;
 		std::size_t first = 0;
@@ -844,52 +553,148 @@ namespace HomeskzIfcImport::core
 		return true;
 	}
 
+	std::vector<Vec2> beamFitOutline(const FoundationBeamFit& fit)
+	{
+		const Vec2 span{fit.end.x - fit.start.x, fit.end.y - fit.start.y};
+		const double len = length(span);
+		if (len <= kSolidEps || fit.bottomWidth <= kSolidEps)
+			return {};
+		const Vec2 dir{span.x / len, span.y / len};
+		const Vec2 side{-dir.y * fit.bottomWidth / 2.0, dir.x * fit.bottomWidth / 2.0};
+		// 進行方向の右 → 左の順で回ると反時計回りになる。
+		return {Vec2{fit.start.x - side.x, fit.start.y - side.y},
+				Vec2{fit.end.x - side.x, fit.end.y - side.y},
+				Vec2{fit.end.x + side.x, fit.end.y + side.y},
+				Vec2{fit.start.x + side.x, fit.start.y + side.y}};
+	}
+
+	// --- 取り合いの高さ ----------------------------------------------------------------
+
+	namespace
+	{
+		// 外形の下（上）に来る底盤のグループを選ぶ。代表点（重心・頂点・辺の中点）が
+		// いちばん多く入る底盤を採り、同数なら重心が近い方（決定的）。accept が false を
+		// 返すグループは候補にしない。見つからなければ npos。
+		template <typename Accept>
+		std::size_t slabGroupFor(const FoundationCommand& command, const std::vector<Vec2>& outline,
+								 const Accept& accept)
+		{
+			const std::vector<Vec2> samples = footprintSamples(outline);
+			const Vec2 centre = polygonCentroid(outline);
+			std::size_t best = command.slabs.size();
+			std::size_t bestHits = 0;
+			double bestDistance = std::numeric_limits<double>::max();
+			for (std::size_t index = 0; index < command.slabs.size(); ++index)
+			{
+				const FoundationSlabGroup& slab = command.slabs[index];
+				if (!accept(slab))
+					continue;
+				std::size_t hits = 0;
+				double nearest = std::numeric_limits<double>::max();
+				for (const std::vector<Vec2>& ring : slab.outlines)
+				{
+					if (ring.size() < 3)
+						continue;
+					for (const Vec2& sample : samples)
+					{
+						if (pointInPolygon(sample, ring))
+							++hits;
+					}
+					nearest = std::min(nearest, distance(centre, polygonCentroid(ring)));
+				}
+				if (best >= command.slabs.size() || hits > bestHits ||
+					(hits == bestHits && nearest < bestDistance))
+				{
+					best = index;
+					bestHits = hits;
+					bestDistance = nearest;
+				}
+			}
+			return best;
+		}
+	} // namespace
+
+	double foundationSlabBottom(const FoundationCommand& command, const std::vector<Vec2>& outline)
+	{
+		const double fallback = command.params.slabTop - command.params.slabThickness;
+		if (command.slabs.empty() || outline.empty())
+			return fallback;
+		const std::size_t best =
+			slabGroupFor(command, outline, [](const FoundationSlabGroup&) { return true; });
+		if (best >= command.slabs.size())
+			return fallback;
+		return command.slabs[best].top - command.slabs[best].thickness;
+	}
+
+	bool foundationBeamTop(const FoundationCommand& command, const std::vector<Vec2>& outline,
+						   double bottom, double& out)
+	{
+		if (command.slabs.empty() || outline.empty())
+		{
+			const double fallback = command.params.slabTop - command.params.slabThickness;
+			if (fallback <= bottom)
+				return false;
+			out = fallback;
+			return true;
+		}
+		const std::size_t best =
+			slabGroupFor(command, outline, [bottom](const FoundationSlabGroup& slab)
+						 { return slab.top - slab.thickness > bottom; });
+		if (best >= command.slabs.size())
+			return false;
+		out = command.slabs[best].top - command.slabs[best].thickness;
+		return true;
+	}
+
 	// --- 代表値とその適用 ------------------------------------------------------------
 
 	FoundationParams foundationBaseParams(const FoundationCommand& command)
 	{
 		std::vector<std::pair<double, double>> slabTops;
 		std::vector<std::pair<double, double>> slabThicknesses;
-		for (const FoundationSlab& slab : command.slabs)
+		for (const FoundationSlabGroup& slab : command.slabs)
 		{
-			const double area = std::abs(shoelaceSigned(slab.boundary));
-			slabTops.emplace_back(slab.top, area);
-			slabThicknesses.emplace_back(slab.thickness, area);
+			const double weight = outlinesArea(slab.outlines);
+			if (weight <= 0.0)
+				continue;
+			slabTops.emplace_back(slab.top, weight);
+			slabThicknesses.emplace_back(slab.thickness, weight);
 		}
 
-		std::vector<std::pair<double, double>> riserWidths;
 		std::vector<std::pair<double, double>> riserTops;
-		for (const FoundationRiser& riser : command.risers)
+		for (const FoundationRiserGroup& riser : command.risers)
 		{
-			const double length = distance(riser.start, riser.end);
-			riserWidths.emplace_back(riser.width, length);
-			riserTops.emplace_back(riser.top, length);
+			const double weight = outlinesArea(riser.outlines);
+			if (weight > 0.0)
+				riserTops.emplace_back(riser.top, weight);
 		}
 
 		std::vector<std::pair<double, double>> beamDepths;
 		std::vector<std::pair<double, double>> haunchWidths;
 		std::vector<std::pair<double, double>> haunchHeights;
-		for (const FoundationBeam& beam : command.beams)
+		for (const FoundationBeamGroup& beam : command.beams)
 		{
-			const double length = distance(beam.start, beam.end);
-			beamDepths.emplace_back(beam.depth, length);
-			// 斜め部は張り出しのある側だけを数える（鉛直な面は斜め部を持たない）。
-			bool haunched = false;
-			for (const double haunch : {beam.haunchLeft, beam.haunchRight})
+			const double weight = outlinesArea(beam.outlines);
+			if (weight <= 0.0)
+				continue;
+			// せいは「真上の底盤の底面 − 底」＝取り合いで決まる値なので、ここでも同じ計算を通す。
+			double depth = 0.0;
+			for (const std::vector<Vec2>& outline : beam.outlines)
 			{
-				if (haunch <= 0.0)
-					continue;
-				haunchWidths.emplace_back(haunch, length);
-				haunched = true;
+				double top = 0.0;
+				if (foundationBeamTop(command, outline, beam.bottom, top))
+					depth = std::max(depth, top - beam.bottom);
 			}
-			if (haunched)
-				haunchHeights.emplace_back(beam.haunchHeight, length);
+			beamDepths.emplace_back(depth, weight);
+			if (beam.haunchWidth > 0.0)
+				haunchWidths.emplace_back(beam.haunchWidth, weight);
+			if (beam.haunchHeight > 0.0)
+				haunchHeights.emplace_back(beam.haunchHeight, weight);
 		}
 
 		FoundationParams params;
 		params.slabTop = weightedMode(slabTops);
 		params.slabThickness = weightedMode(slabThicknesses);
-		params.riserWidth = weightedMode(riserWidths);
 		params.riserTop = weightedMode(riserTops);
 		params.beamDepth = weightedMode(beamDepths);
 		params.haunchWidth = weightedMode(haunchWidths);
@@ -900,230 +705,314 @@ namespace HomeskzIfcImport::core
 	FoundationCommand applyFoundationParams(const FoundationCommand& imported,
 											const FoundationParams& edited)
 	{
+		FoundationCommand result = imported;
+		result.params = edited;
+
 		const FoundationParams& base = imported.params;
 		const double dSlabTop = edited.slabTop - base.slabTop;
-		const double dThickness = edited.slabThickness - base.slabThickness;
-		const double dSlabBottom = dSlabTop - dThickness; // 底盤の底面の動き
-		const double dRiserWidth = edited.riserWidth - base.riserWidth;
+		const double dSlabThickness = edited.slabThickness - base.slabThickness;
+		const double dSlabBottom = dSlabTop - dSlabThickness; // 底盤の底面の動き
 		const double dRiserTop = edited.riserTop - base.riserTop;
 		const double dBeamDepth = edited.beamDepth - base.beamDepth;
 		const double dHaunchWidth = edited.haunchWidth - base.haunchWidth;
 		const double dHaunchHeight = edited.haunchHeight - base.haunchHeight;
 
-		FoundationCommand result = imported;
-		result.params = edited;
-		for (FoundationSlab& slab : result.slabs)
+		for (FoundationSlabGroup& slab : result.slabs)
 		{
 			slab.top += dSlabTop;
-			slab.thickness += dThickness;
+			slab.thickness = std::max(slab.thickness + dSlabThickness, 0.0);
 		}
-		for (FoundationRiser& riser : result.risers)
-		{
-			riser.width += dRiserWidth;
+		for (FoundationRiserGroup& riser : result.risers)
 			riser.top += dRiserTop;
-			riser.bottom += dSlabBottom;
-		}
-		for (FoundationBeam& beam : result.beams)
+		for (FoundationBeamGroup& beam : result.beams)
 		{
-			beam.top += dSlabBottom;
-			beam.depth += dBeamDepth;
-			if (beam.haunchLeft > 0.0)
-				beam.haunchLeft = std::max(beam.haunchLeft + dHaunchWidth, 0.0);
-			if (beam.haunchRight > 0.0)
-				beam.haunchRight = std::max(beam.haunchRight + dHaunchWidth, 0.0);
-			beam.haunchHeight =
-				std::clamp(beam.haunchHeight + dHaunchHeight, 0.0, std::max(beam.depth, 0.0));
+			// 天端は底盤の底面に追随するので、底を「底盤の動き − せいの増分」だけ動かせば
+			// せいが Δせいだけ変わる。
+			beam.bottom += dSlabBottom - dBeamDepth;
+			beam.haunchWidth = std::max(beam.haunchWidth + dHaunchWidth, 0.0);
+			beam.haunchHeight = std::max(beam.haunchHeight + dHaunchHeight, 0.0);
 		}
 		return result;
 	}
 
-	// --- ソリッドの組み立て ----------------------------------------------------------
+	// --- ソリッドの組み立て ------------------------------------------------------------
 
-	std::vector<std::size_t> attachBeamsToSlabs(const std::vector<FoundationSlab>& slabs,
-												const std::vector<BeamPrism>& beams)
+	std::vector<Vec2> beamTopOutline(const std::vector<Vec2>& outline, double haunchWidth,
+									 const PolygonList& slabOutlines, const PolygonList& others)
 	{
-		std::vector<std::size_t> result(beams.size(), std::numeric_limits<std::size_t>::max());
-		if (slabs.empty())
-			return result; // 底盤が 1 枚も無ければ付けられない
-
-		for (std::size_t b = 0; b < beams.size(); ++b)
+		std::vector<Vec2> ring = orientCcw(outline);
+		if (ring.empty() || haunchWidth <= kSolidEps)
+			return ring;
+		const std::vector<BeamEdgeKind> kinds = classifyBeamEdges(ring, slabOutlines, others);
+		std::vector<double> dists(ring.size(), 0.0);
+		for (std::size_t i = 0; i < ring.size(); ++i)
 		{
-			const std::vector<Vec2> footprint = beamPrismFootprint(beams[b]);
-			if (footprint.empty())
-				continue;
-			const std::vector<Vec2> samples = footprintSamples(footprint);
-
-			// 代表点が外形内に入る数が最大の底盤へ振り分ける（同数なら添字の小さいほう）。
-			std::size_t best = 0;
-			std::ptrdiff_t bestCount = 0;
-			for (std::size_t i = 0; i < slabs.size(); ++i)
-			{
-				const auto count =
-					std::ranges::count_if(samples, [&slabs, i](const Vec2& sample)
-										  { return pointInPolygon(sample, slabs[i].boundary); });
-				if (count > bestCount)
-				{
-					best = i;
-					bestCount = count;
-				}
-			}
-			if (bestCount == 0)
-			{
-				// どの底盤にも入らない（継目・下屋等）: 重心が最も近い底盤へフォールバック
-				// して取りこぼさない。
-				const Vec2 centroid = polygonCentroid(footprint);
-				double bestDistance = 0.0;
-				for (std::size_t i = 0; i < slabs.size(); ++i)
-				{
-					const double d = distance(centroid, polygonCentroid(slabs[i].boundary));
-					if (i == 0 || d < bestDistance)
-					{
-						best = i;
-						bestDistance = d;
-					}
-				}
-			}
-			result[b] = best;
+			if (kinds[i] == BeamEdgeKind::Free)
+				dists[i] = haunchWidth;
 		}
-		return result;
+		return offsetPolygon(ring, dists);
 	}
 
-	std::vector<std::vector<BeddingPrism>> foundationBeddings(const FoundationCommand& command)
+	namespace
 	{
-		std::vector<BeamPrism> beams;
-		beams.reserve(command.beams.size());
-		for (const FoundationBeam& beam : command.beams)
-			beams.push_back(beamPrism(beam));
-		const std::vector<std::size_t> slabOf = attachBeamsToSlabs(command.slabs, beams);
-
-		std::vector<std::vector<BeddingPrism>> result(beams.size());
-		for (std::size_t index = 0; index < beams.size(); ++index)
+		// 地中梁 1 枚ぶんの外形と、その所属グループ。斜め部・床付けは外形ごとに組み立てる。
+		struct BeamOutline
 		{
-			const BeamPrism& prism = beams[index];
-			if (prism.profile.empty())
-				continue;
-
-			// 付いた底盤の外形（外周部の判定）と、その砕石の底（帯を切り上げる高さ）。底盤に
-			// 付かない地中梁は外周部を持たず、帯は天端まで立ち上げる。
+			std::size_t group = 0;
 			std::vector<Vec2> ring;
-			double slabTop = prism.profile.front().y;
-			for (const Vec2& p : prism.profile)
-				slabTop = std::max(slabTop, p.y);
-			if (slabOf[index] < command.slabs.size())
-			{
-				const FoundationSlab& slab = command.slabs[slabOf[index]];
-				ring = slab.boundary;
-				const double beddingBottomAbs = slab.top - slab.thickness - kSlabBeddingThickness;
-				slabTop = std::max(beddingBottomAbs - prism.origin.z, 0.0); // 下端より下は切らない
-			}
-			bool lowPerimeter = false;
-			bool highPerimeter = false;
-			groundBeamPerimeterSides(prism, ring, lowPerimeter, highPerimeter);
+		};
 
-			// 帯を含む床付けの幅（区間の判定に使う）。まず全長ぶんを組み立てて幅を測る。
-			const std::vector<BeddingPrism> full =
-				groundBeamBedding(prism, lowPerimeter, highPerimeter, slabTop,
-								  command.leanConcreteClass, command.gravelClass);
-			if (full.empty())
-				continue;
-			double widthLo = full.front().profile.front().x;
-			double widthHi = widthLo;
-			for (const BeddingPrism& bedding : full)
+		std::vector<BeamOutline> collectBeamOutlines(const FoundationCommand& command)
+		{
+			std::vector<BeamOutline> out;
+			for (std::size_t g = 0; g < command.beams.size(); ++g)
 			{
-				for (const Vec2& p : bedding.profile)
+				for (const std::vector<Vec2>& outline : command.beams[g].outlines)
 				{
-					widthLo = std::min(widthLo, p.x);
-					widthHi = std::max(widthHi, p.x);
+					std::vector<Vec2> ring = orientCcw(outline);
+					if (!ring.empty())
+						out.push_back(BeamOutline{g, std::move(ring)});
 				}
 			}
-
-			for (const BeddingSpan& span : beddingSpans(beams, index, slabTop, widthLo, widthHi))
-			{
-				for (BeddingPrism bedding :
-					 groundBeamBedding(prism, lowPerimeter, highPerimeter, span.top,
-									   command.leanConcreteClass, command.gravelClass))
-				{
-					bedding.start = span.start;
-					bedding.depth = span.depth;
-					appendBedding(result[index], std::move(bedding));
-				}
-			}
+			return out;
 		}
-		return result;
-	}
+
+		// 自分以外の地中梁の外形（取り合いの判定に使う）。
+		PolygonList otherBeamRings(const std::vector<BeamOutline>& beams, std::size_t self)
+		{
+			PolygonList others;
+			others.reserve(beams.size());
+			for (std::size_t i = 0; i < beams.size(); ++i)
+			{
+				if (i != self)
+					others.push_back(beams[i].ring);
+			}
+			return others;
+		}
+
+		// 底盤の砕石の外形（地中梁のコンクリートを抜いたもの）。抜けない（穴が開く・計算に
+		// 失敗した）ときは外形をそのまま返す——押し出しソリッドは穴を表せないので、
+		// **抜くのをあきらめて重ねる**（core/PolygonBool.h「穴の扱い」）。
+		PolygonList slabGravelOutlines(const std::vector<Vec2>& ring, const PolygonList& beamTops)
+		{
+			if (beamTops.empty())
+				return {ring};
+			PolygonList pieces;
+			if (!polygonDifference({ring}, beamTops, pieces))
+				return {ring};
+			for (const std::vector<Vec2>& piece : pieces)
+			{
+				if (shoelaceSigned(piece) < 0.0)
+					return {ring}; // 穴（時計回りのループ）が出た
+			}
+			return pieces;
+		}
+	} // namespace
 
 	std::vector<FoundationSolid> foundationSolids(const FoundationCommand& command)
 	{
 		std::vector<FoundationSolid> solids;
 
-		// 底盤のコンクリートと、その下の砕石（kSlabBeddingThickness）。
-		for (const FoundationSlab& slab : command.slabs)
+		// 底盤の外形（CCW）。取り合いの高さと、外周部の判定に使う。
+		PolygonList slabOutlines;
+		for (const FoundationSlabGroup& slab : command.slabs)
 		{
-			if (slab.boundary.size() < 3 || slab.thickness <= 0.0)
-				continue;
-			const auto vertical = [&slab](double z, double thickness, FoundationSolid::Kind kind,
-										  const std::string& drawClass)
+			for (const std::vector<Vec2>& outline : slab.outlines)
 			{
-				FoundationSolid solid;
-				solid.kind = kind;
-				solid.drawClass = drawClass;
-				solid.base.reserve(slab.boundary.size());
-				for (const Vec2& p : slab.boundary)
-					solid.base.push_back(Vec3{p.x, p.y, z});
-				solid.extent = Vec3{0.0, 0.0, thickness};
-				return solid;
-			};
-			const double bottom = slab.top - slab.thickness;
-			solids.push_back(
-				vertical(bottom, slab.thickness, FoundationSolid::Kind::Slab, command.slabClass));
-			solids.push_back(vertical(bottom - kSlabBeddingThickness, kSlabBeddingThickness,
-									  FoundationSolid::Kind::Bedding, command.gravelClass));
+				std::vector<Vec2> ring = orientCcw(outline);
+				if (!ring.empty())
+					slabOutlines.push_back(std::move(ring));
+			}
 		}
 
-		// 立上り（壁芯の両側へ半幅の矩形を、下端から天端まで）。
-		for (const FoundationRiser& riser : command.risers)
+		// 底盤のコンクリート。
+		for (const FoundationSlabGroup& slab : command.slabs)
 		{
-			const std::vector<Vec2> footprint = riserFootprint(riser);
-			if (footprint.empty() || riser.top - riser.bottom <= 0.0)
-				continue;
-			FoundationSolid solid;
-			solid.kind = FoundationSolid::Kind::Riser;
-			solid.drawClass = command.riserClass;
-			for (const Vec2& p : footprint)
-				solid.base.push_back(Vec3{p.x, p.y, riser.bottom});
-			solid.extent = Vec3{0.0, 0.0, riser.top - riser.bottom};
-			solids.push_back(std::move(solid));
-		}
-
-		// 地中梁（天端を底盤へ呑み込ませる）。
-		for (const FoundationBeam& beam : command.beams)
-		{
-			const BeamPrism prism = beamPrism(beam);
-			if (prism.profile.size() < 3 || prism.depth <= 0.0 || beam.depth <= 0.0)
-				continue;
-			solids.push_back(solidFromPrism(raiseBeamPrismTop(prism, kGroundBeamSlabBite),
-											FoundationSolid::Kind::Beam, command.slabClass));
-		}
-
-		// 床付け（地中梁と押し出しの向きを共有し、断面と区間だけが違う）。
-		const std::vector<std::vector<BeddingPrism>> beddings = foundationBeddings(command);
-		for (std::size_t index = 0; index < command.beams.size(); ++index)
-		{
-			const BeamPrism prism = beamPrism(command.beams[index]);
-			Vec2 axis;
-			Vec2 width;
-			beamPrismAxes(prism, axis, width);
-			for (const BeddingPrism& bedding : beddings[index])
+			for (const std::vector<Vec2>& outline : slab.outlines)
 			{
-				if (bedding.profile.size() < 3 || bedding.depth <= 0.0)
+				const std::vector<Vec2> ring = orientCcw(outline);
+				if (ring.empty())
 					continue;
-				BeamPrism piece = prism;
-				piece.profile = bedding.profile;
-				piece.origin.x += axis.x * bedding.start;
-				piece.origin.y += axis.y * bedding.start;
-				piece.depth = bedding.depth;
-				solids.push_back(
-					solidFromPrism(piece, FoundationSolid::Kind::Bedding, bedding.drawClass));
+				addSolid(solids, verticalSolid(FoundationSolid::Kind::Slab, command.slabClass, ring,
+											   slab.top - slab.thickness, slab.top));
+			}
+		}
+
+		const std::vector<BeamOutline> beams = collectBeamOutlines(command);
+
+		// 地中梁の天端の外形（斜め部で広がった形）と、その梁が取り合う底盤の底面。
+		// 底盤の砕石を抜くのに使う。
+		PolygonList beamTops;
+		std::vector<double> beamSlabBottoms;
+		beamTops.reserve(beams.size());
+		beamSlabBottoms.reserve(beams.size());
+		for (std::size_t index = 0; index < beams.size(); ++index)
+		{
+			beamTops.push_back(beamTopOutline(beams[index].ring,
+											  command.beams[beams[index].group].haunchWidth,
+											  slabOutlines, otherBeamRings(beams, index)));
+			double slabBottom = 0.0;
+			if (!foundationBeamTop(command, beams[index].ring,
+								   command.beams[beams[index].group].bottom, slabBottom))
+				slabBottom = std::numeric_limits<double>::quiet_NaN(); // 描かれない地中梁
+			beamSlabBottoms.push_back(slabBottom);
+		}
+
+		// 底盤の下の砕石（地中梁のコンクリートと重ならないよう抜く）。抜く相手は**その底盤に
+		// 取り合う地中梁だけ**——高さの違う底盤が混在する図面で、隣の底盤にぶら下がる梁まで
+		// 抜くと砕石に穴が空く。
+		for (const FoundationSlabGroup& slab : command.slabs)
+		{
+			const double bottom = slab.top - slab.thickness;
+			PolygonList clip;
+			for (std::size_t index = 0; index < beamTops.size(); ++index)
+			{
+				if (std::abs(beamSlabBottoms[index] - bottom) <= kFoundationTol)
+					clip.push_back(beamTops[index]);
+			}
+			for (const std::vector<Vec2>& outline : slab.outlines)
+			{
+				const std::vector<Vec2> ring = orientCcw(outline);
+				if (ring.empty())
+					continue;
+				for (const std::vector<Vec2>& piece : slabGravelOutlines(ring, clip))
+					addSolid(solids,
+							 verticalSolid(FoundationSolid::Kind::Bedding, command.gravelClass,
+										   piece, bottom - kSlabBeddingThickness, bottom));
+			}
+		}
+
+		// 立上り（天端の面を、真下の底盤の底面まで下ろす）。
+		for (const FoundationRiserGroup& riser : command.risers)
+		{
+			for (const std::vector<Vec2>& outline : riser.outlines)
+			{
+				const std::vector<Vec2> ring = orientCcw(outline);
+				if (ring.empty())
+					continue;
+				addSolid(solids,
+						 verticalSolid(FoundationSolid::Kind::Riser, command.riserClass, ring,
+									   foundationSlabBottom(command, ring), riser.top));
+			}
+		}
+
+		// 地中梁（本体 → 斜め部 → 床付け）。
+		for (std::size_t index = 0; index < beams.size(); ++index)
+		{
+			const std::vector<Vec2>& ring = beams[index].ring;
+			const FoundationBeamGroup& group = command.beams[beams[index].group];
+			// 天端は**上に来る**底盤の底面。呑み込ませて境界線が不安定に出るのを防ぐ。
+			double slabBottom = 0.0;
+			if (!foundationBeamTop(command, ring, group.bottom, slabBottom))
+				continue; // 上に底盤が無い（せいが決まらない）地中梁は描かない
+			const double top = slabBottom + kGroundBeamSlabBite;
+			const double height = top - group.bottom;
+			const double haunchHeight = std::clamp(group.haunchHeight, 0.0, height);
+			const double haunchWidth = std::max(group.haunchWidth, 0.0);
+			const double bodyTop = top - haunchHeight;
+			const std::vector<BeamEdgeKind> kinds =
+				classifyBeamEdges(ring, slabOutlines, otherBeamRings(beams, index));
+
+			addSolid(solids, verticalSolid(FoundationSolid::Kind::Beam, command.slabClass, ring,
+										   group.bottom, bodyTop));
+
+			// 斜め部（辺ごとの三角形断面のくさび。マイターで角を埋める）。
+			if (haunchWidth > kSolidEps && haunchHeight > kSolidEps)
+			{
+				std::vector<double> dists(ring.size(), 0.0);
+				for (std::size_t i = 0; i < ring.size(); ++i)
+				{
+					if (kinds[i] == BeamEdgeKind::Free)
+						dists[i] = haunchWidth;
+				}
+				const std::vector<Vec2> offset = offsetPolygon(ring, dists);
+				for (std::size_t i = 0; i < ring.size(); ++i)
+				{
+					if (kinds[i] != BeamEdgeKind::Free)
+						continue;
+					const EdgeFrame frame = edgeFrame(ring, i);
+					if (frame.length <= kSolidEps)
+						continue;
+					double t0 = 0.0;
+					double t1 = 0.0;
+					edgeMiterSpan(frame, offset, i, t0, t1);
+					const Vec2 from{frame.from.x + (frame.dir.x * t0),
+									frame.from.y + (frame.dir.y * t0)};
+					const Vec2 to{frame.from.x + (frame.dir.x * t1),
+								  frame.from.y + (frame.dir.y * t1)};
+					const std::vector<Vec2> section{Vec2{0.0, bodyTop}, Vec2{0.0, top},
+													Vec2{haunchWidth, top}};
+					addSolid(solids, edgeSolid(FoundationSolid::Kind::Beam, command.slabClass, from,
+											   to, frame.normal, section));
+				}
+			}
+
+			// 床付け: 下は捨てコン 30 + 砕石 100。外周部の辺は 50 張り出して終わり、
+			// それ以外の辺は側面の帯（130）へ続くので同じだけ広げておく。
+			std::vector<double> beddingDists(ring.size(), kSlabBeddingThickness);
+			for (std::size_t i = 0; i < ring.size(); ++i)
+			{
+				if (kinds[i] == BeamEdgeKind::Perimeter)
+					beddingDists[i] = kBeddingPerimeterMargin;
+			}
+			const std::vector<Vec2> beddingRing = offsetPolygon(ring, beddingDists);
+			addSolid(solids,
+					 verticalSolid(FoundationSolid::Kind::Bedding, command.leanConcreteClass,
+								   beddingRing, group.bottom - kSlabLeanConcreteThickness,
+								   group.bottom));
+			addSolid(solids, verticalSolid(FoundationSolid::Kind::Bedding, command.gravelClass,
+										   beddingRing, group.bottom - kSlabBeddingThickness,
+										   group.bottom - kSlabLeanConcreteThickness));
+
+			// 側面の砕石の帯（外周部でも取り合いでもない辺だけ）。底盤の砕石の底で打ち切る
+			// ——そこから上は底盤の砕石が受け持つ。
+			const double gravelTop = slabBottom - kSlabBeddingThickness;
+			std::vector<double> bandDists(ring.size(), 0.0);
+			for (std::size_t i = 0; i < ring.size(); ++i)
+			{
+				if (kinds[i] == BeamEdgeKind::Free)
+					bandDists[i] = kSlabBeddingThickness;
+			}
+			const std::vector<Vec2> bandRing = offsetPolygon(ring, bandDists);
+			for (std::size_t i = 0; i < ring.size(); ++i)
+			{
+				if (kinds[i] != BeamEdgeKind::Free)
+					continue;
+				const EdgeFrame frame = edgeFrame(ring, i);
+				if (frame.length <= kSolidEps)
+					continue;
+				double t0 = 0.0;
+				double t1 = 0.0;
+				edgeMiterSpan(frame, bandRing, i, t0, t1);
+				const Vec2 from{frame.from.x + (frame.dir.x * t0),
+								frame.from.y + (frame.dir.y * t0)};
+				const Vec2 to{frame.from.x + (frame.dir.x * t1), frame.from.y + (frame.dir.y * t1)};
+
+				// 鉛直部を覆う帯。
+				const double vertTop = std::min(bodyTop, gravelTop);
+				if (vertTop > group.bottom + kSolidEps)
+				{
+					const std::vector<Vec2> section{
+						Vec2{0.0, group.bottom}, Vec2{kSlabBeddingThickness, group.bottom},
+						Vec2{kSlabBeddingThickness, vertTop}, Vec2{0.0, vertTop}};
+					addSolid(solids, edgeSolid(FoundationSolid::Kind::Bedding, command.gravelClass,
+											   from, to, frame.normal, section));
+				}
+
+				// 斜め部を覆う帯（斜面の法線方向に 130）。
+				if (haunchWidth > kSolidEps && haunchHeight > kSolidEps && gravelTop > bodyTop)
+				{
+					const double slope = std::hypot(haunchWidth, haunchHeight);
+					const Vec2 normal{kSlabBeddingThickness * haunchHeight / slope,
+									  -kSlabBeddingThickness * haunchWidth / slope};
+					std::vector<Vec2> section{Vec2{0.0, bodyTop}, Vec2{haunchWidth, top},
+											  Vec2{haunchWidth + normal.x, top + normal.y},
+											  Vec2{normal.x, bodyTop + normal.y}};
+					section =
+						clipPolygonToRect(section, Vec2{-1.0e9, -1.0e9}, Vec2{1.0e9, gravelTop});
+					addSolid(solids, edgeSolid(FoundationSolid::Kind::Bedding, command.gravelClass,
+											   from, to, frame.normal, section));
+				}
 			}
 		}
 		return solids;
@@ -1132,29 +1021,41 @@ namespace HomeskzIfcImport::core
 	std::vector<FoundationPlanShape> foundationPlanShapes(const FoundationCommand& command)
 	{
 		std::vector<FoundationPlanShape> shapes;
-		for (const FoundationSlab& slab : command.slabs)
+		PolygonList slabOutlines;
+		for (const FoundationSlabGroup& slab : command.slabs)
 		{
-			if (slab.boundary.size() < 3)
-				continue;
-			shapes.push_back(
-				FoundationPlanShape{FoundationSolid::Kind::Slab, command.slabClass, slab.boundary});
+			for (const std::vector<Vec2>& outline : slab.outlines)
+			{
+				std::vector<Vec2> ring = orientCcw(outline);
+				if (ring.empty())
+					continue;
+				slabOutlines.push_back(ring);
+				shapes.push_back(FoundationPlanShape{FoundationSolid::Kind::Slab, command.slabClass,
+													 std::move(ring)});
+			}
 		}
-		for (const FoundationRiser& riser : command.risers)
+		for (const FoundationRiserGroup& riser : command.risers)
 		{
-			std::vector<Vec2> footprint = riserFootprint(riser);
-			if (footprint.empty())
-				continue;
-			shapes.push_back(FoundationPlanShape{FoundationSolid::Kind::Riser, command.riserClass,
-												 std::move(footprint)});
+			for (const std::vector<Vec2>& outline : riser.outlines)
+			{
+				std::vector<Vec2> ring = orientCcw(outline);
+				if (ring.empty())
+					continue;
+				shapes.push_back(FoundationPlanShape{FoundationSolid::Kind::Riser,
+													 command.riserClass, std::move(ring)});
+			}
 		}
-		for (const FoundationBeam& beam : command.beams)
+		const std::vector<BeamOutline> beams = collectBeamOutlines(command);
+		for (std::size_t index = 0; index < beams.size(); ++index)
 		{
-			// 天端が最も広いので、断面の u 範囲の掃引＝天端幅の矩形になる。
-			std::vector<Vec2> footprint = beamPrismFootprint(beamPrism(beam));
-			if (footprint.empty())
+			// 天端が最も広いので、平面には斜め部で広がった外形を描く。
+			std::vector<Vec2> ring =
+				beamTopOutline(beams[index].ring, command.beams[beams[index].group].haunchWidth,
+							   slabOutlines, otherBeamRings(beams, index));
+			if (ring.size() < 3)
 				continue;
 			shapes.push_back(FoundationPlanShape{FoundationSolid::Kind::Beam, command.slabClass,
-												 std::move(footprint)});
+												 std::move(ring)});
 		}
 		return shapes;
 	}
@@ -1174,38 +1075,29 @@ namespace HomeskzIfcImport::core
 		out += command.gravelClass;
 		out += ";P";
 		const FoundationParams& p = command.params;
-		for (const double value : {p.slabTop, p.slabThickness, p.riserWidth, p.riserTop,
-								   p.beamDepth, p.haunchWidth, p.haunchHeight})
+		for (const double value :
+			 {p.slabTop, p.slabThickness, p.riserTop, p.beamDepth, p.haunchWidth, p.haunchHeight})
 			appendNumber(out, value);
-		for (const FoundationSlab& slab : command.slabs)
+		for (const FoundationSlabGroup& slab : command.slabs)
 		{
 			out += ";S";
 			appendNumber(out, slab.top);
 			appendNumber(out, slab.thickness);
-			appendNumber(out, static_cast<double>(slab.boundary.size()));
-			for (const Vec2& point : slab.boundary)
-				appendPoint(out, point);
+			appendOutlines(out, slab.outlines);
 		}
-		for (const FoundationRiser& riser : command.risers)
+		for (const FoundationRiserGroup& riser : command.risers)
 		{
 			out += ";R";
-			appendPoint(out, riser.start);
-			appendPoint(out, riser.end);
-			appendNumber(out, riser.width);
-			appendNumber(out, riser.bottom);
 			appendNumber(out, riser.top);
+			appendOutlines(out, riser.outlines);
 		}
-		for (const FoundationBeam& beam : command.beams)
+		for (const FoundationBeamGroup& beam : command.beams)
 		{
 			out += ";B";
-			appendPoint(out, beam.start);
-			appendPoint(out, beam.end);
-			appendNumber(out, beam.bottomWidth);
-			appendNumber(out, beam.haunchLeft);
-			appendNumber(out, beam.haunchRight);
+			appendNumber(out, beam.bottom);
+			appendNumber(out, beam.haunchWidth);
 			appendNumber(out, beam.haunchHeight);
-			appendNumber(out, beam.top);
-			appendNumber(out, beam.depth);
+			appendOutlines(out, beam.outlines);
 		}
 		out += ';';
 		return out;
@@ -1267,49 +1159,35 @@ namespace HomeskzIfcImport::core
 			{
 				FoundationParams& p = command.params;
 				if (!reader.next(p.slabTop) || !reader.next(p.slabThickness) ||
-					!reader.next(p.riserWidth) || !reader.next(p.riserTop) ||
-					!reader.next(p.beamDepth) || !reader.next(p.haunchWidth) ||
-					!reader.next(p.haunchHeight) || !reader.done())
+					!reader.next(p.riserTop) || !reader.next(p.beamDepth) ||
+					!reader.next(p.haunchWidth) || !reader.next(p.haunchHeight) || !reader.done())
 					return false;
 				paramsSeen = true;
 			}
 			else if (code == 'S')
 			{
-				FoundationSlab slab;
-				double count = 0.0;
-				if (!reader.next(slab.top) || !reader.next(slab.thickness) || !reader.next(count) ||
-					count < 0.0 || count > 1e6 || count != std::floor(count))
-					return false;
-				const auto vertices = static_cast<std::size_t>(count);
-				for (std::size_t i = 0; i < vertices; ++i)
-				{
-					Vec2 point;
-					if (!reader.nextPoint(point))
-						return false;
-					slab.boundary.push_back(point);
-				}
-				if (!reader.done())
+				FoundationSlabGroup slab;
+				if (!reader.next(slab.top) || !reader.next(slab.thickness) ||
+					!reader.nextOutlines(slab.outlines) || !reader.done())
 					return false;
 				command.slabs.push_back(std::move(slab));
 			}
 			else if (code == 'R')
 			{
-				FoundationRiser riser;
-				if (!reader.nextPoint(riser.start) || !reader.nextPoint(riser.end) ||
-					!reader.next(riser.width) || !reader.next(riser.bottom) ||
-					!reader.next(riser.top) || !reader.done())
+				FoundationRiserGroup riser;
+				if (!reader.next(riser.top) || !reader.nextOutlines(riser.outlines) ||
+					!reader.done())
 					return false;
-				command.risers.push_back(riser);
+				command.risers.push_back(std::move(riser));
 			}
 			else if (code == 'B')
 			{
-				FoundationBeam beam;
-				if (!reader.nextPoint(beam.start) || !reader.nextPoint(beam.end) ||
-					!reader.next(beam.bottomWidth) || !reader.next(beam.haunchLeft) ||
-					!reader.next(beam.haunchRight) || !reader.next(beam.haunchHeight) ||
-					!reader.next(beam.top) || !reader.next(beam.depth) || !reader.done())
+				FoundationBeamGroup beam;
+				if (!reader.next(beam.bottom) || !reader.next(beam.haunchWidth) ||
+					!reader.next(beam.haunchHeight) || !reader.nextOutlines(beam.outlines) ||
+					!reader.done())
 					return false;
-				command.beams.push_back(beam);
+				command.beams.push_back(std::move(beam));
 			}
 			else
 			{

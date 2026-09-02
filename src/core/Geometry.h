@@ -48,6 +48,36 @@ namespace HomeskzIfcImport::core
 		return std::abs(a.x - b.x) < tol && std::abs(a.y - b.y) < tol;
 	}
 
+	// 多角形の符号付き面積（CCW で正・CW で負。閉じた頂点列で、末尾に始点を重複させない）。
+	// **向きの判定と面積の重み付けはここに 1 つだけ置く**——底盤の外面合わせ（parse/Footing）と
+	// 基礎の部品（core/Foundation）が同じ式を各々持っていた。
+	double shoelaceSigned(const std::vector<Vec2>& polygon);
+
+	// 面積（絶対値）。代表値を面積で重み付けするときに使う。
+	inline double polygonArea(const std::vector<Vec2>& polygon)
+	{
+		return std::abs(shoelaceSigned(polygon));
+	}
+
+	// 点が多角形の内側か（水平レイキャストの偶奇判定）。辺の上は「どちらか」に落ちる
+	// （境界そのものを問う用途では使わない）。地中梁を底盤へ振り分ける・辺が外周かを見る、
+	// といった「どの外形の中か」の判定が共有する。
+	bool pointInPolygon(const Vec2& point, const std::vector<Vec2>& polygon);
+
+	// 点 p・方向 d の 2 直線の交点（平行なら false）。辺をオフセットした線どうしのマイター
+	// （下記 offsetPolygon）と、床付けの帯の頂点計算が共有する。
+	bool lineIntersection(const Vec2& p1, const Vec2& d1, const Vec2& p2, const Vec2& d2,
+						  Vec2& out);
+
+	// **CCW 多角形の辺 i を外向きへ dists[i] だけ動かした頂点列**。隣り合う移動後の辺（直線）の
+	// 交点を新しい頂点にするので、凸角は外側へ伸び、凹角（入隅）は詰まる。辺ごとに距離を変えられる
+	// ので、「立上りに沿う辺だけ半壁厚だけ広げる」「外周部の辺だけ張り出す」の両方に使える。
+	// 平行な連続辺（同一直線の分割）はマイターが求まらないので、法線方向へずらした点で代用する。
+	// **入力は CCW 前提**（呼び出し側で shoelaceSigned を見て揃える）。dists の数が辺の数
+	// （＝頂点の数）と違う／面にならない入力は、動かさずそのまま返す。
+	std::vector<Vec2> offsetPolygon(const std::vector<Vec2>& polygon,
+									const std::vector<double>& dists);
+
 	// 凸多角形を軸並行の矩形 [min, max] で切り取る（Sutherland–Hodgman）。頂点列は閉じた
 	// ポリゴン（末尾に始点を重複させない）で、周り方向は入力のまま保たれる。矩形の外へ
 	// 完全に出ている多角形は空を返す。

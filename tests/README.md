@@ -24,7 +24,8 @@
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
 | `CoreUnionFindTests` | `src/core/UnionFind` | ペア述語による連結成分（決定性の規約: 代表＝最小インデックス・代表昇順・成分内昇順） |
 | `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。基礎の部品・耐力壁を含む）・レイヤスタック順の計算・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`）・耐力壁の筋かいの形（`shearWallBracePolygon`） |
-| `CoreFoundationTests` | `src/core/Foundation` | 基礎を 1 つのオブジェクトにする純計算（地中梁断面のパラメータ化と往復・代表値と差の配り方・ソリッドの組み立て（底盤・砕石・立上り・地中梁の呑み込み・床付け）・平面の外形・床付け＝捨てコン・砕石の断面と外周の張り出し・実フィクスチャ全件で直交する地中梁へ食い込まないこと・PIO のレコードへの直列化） |
+| `CorePolygonBoolTests` | `src/core/PolygonBool` | 平面多角形の集合演算（和・差・繋がりの判定・連結成分・畳めるものだけ畳む `mergePolygons`。升目状に囲んだ並びが穴を保ち、ベタで埋まらないこと） |
+| `CoreFoundationTests` | `src/core/Foundation` | 基礎を 1 つのオブジェクトにする純計算（地中梁断面の当てはめと底の面の外形・底盤への取り合い・代表値と差の配り方・ソリッドの組み立て（底盤・地中梁を抜いた砕石・立上り・地中梁の本体と辺ごとの斜め部・床付け）・平面の外形・実フィクスチャ全件でソリッドが組めて決定的なこと・PIO のレコードへの直列化） |
 | `CoreLayoutTests` | `src/core/Layout` | 用紙の割り付け（縮尺は階梯の値だけ・**渡された印刷可能領域をそのまま使う**（余白を仮定しない）・凡例の幅を引いてから収まる中で最大の図・伏図は全図同じ縮尺と位置・軸組図は上下 2 段でマスが重ならないこと・シート枚数とタイトルの連番） |
 | `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
 | `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |

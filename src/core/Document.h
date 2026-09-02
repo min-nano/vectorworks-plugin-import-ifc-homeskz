@@ -310,7 +310,7 @@ namespace HomeskzIfcImport::core
 	// 下げた点を返す。伸びが 0（軒桁に乗らない垂木）なら start そのものを返す。
 	//
 	// **core に置く理由**: SDK を触らない純計算で、無 SDK テストで検証できるため
-	// （desiredStoryLayerOrder・core/Foundation の raiseBeamPrismTop と同じ立ち位置。CLAUDE.md「テスト方針」:
+	// （desiredStoryLayerOrder・core/Foundation の foundationSolids と同じ立ち位置。CLAUDE.md「テスト方針」:
 	// draw から切り離せるロジックは core へ寄せる）。
 	RafterEaveEnd rafterEaveEnd(const RafterCommand& rafter);
 

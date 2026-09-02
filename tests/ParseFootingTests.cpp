@@ -1110,25 +1110,26 @@ TEST(merge_ground_beams_keeps_gaps_and_differences)
 	CHECK_EQ(pair(base, wide), std::size_t{2});
 }
 
-TEST(modifier_footprint_sweeps_the_section_width)
+TEST(beam_fit_outline_sweeps_the_bottom_width)
 {
-	// 平面外形は「断面の u 範囲」を軸方向へ depth 掃引した矩形。方位角 0 なら軸＝+X・
-	// 幅軸＝+Y なので、Y 方向の広がりが断面の**最大幅**（天端の −350〜350）になる。
-	const std::vector<Vec2> footprint =
-		core::beamPrismFootprint(groundBeam(core::Vec3{0.0, 0.0, -240.0}, 0.0, 2000.0));
-	CHECK_EQ(footprint.size(), std::size_t{4});
-	if (footprint.size() != 4)
+	// 当てはめた地中梁の**底の面**の外形は「下端の幅」を軸方向へ掃引した矩形（天端の幅では
+	// ない——斜め部は描くときに辺ごとへ付ける。core/Foundation.h）。方位角 0 なら軸＝+X・
+	// 幅軸＝+Y なので、Y 方向の広がりが下端の幅（−150〜150）になる。
+	core::FoundationBeamFit fit;
+	CHECK(core::fitFoundationBeam(groundBeam(core::Vec3{0.0, 0.0, -240.0}, 0.0, 2000.0), fit));
+	const std::vector<Vec2> outline = core::beamFitOutline(fit);
+	CHECK_EQ(outline.size(), std::size_t{4});
+	if (outline.size() != 4)
 		return;
-	CHECK(near(minX(footprint), 0.0) && near(maxX(footprint), 2000.0));
-	CHECK(near(minY(footprint), -350.0) && near(maxY(footprint), 350.0));
+	CHECK(near(minX(outline), 0.0) && near(maxX(outline), 2000.0));
+	CHECK(near(minY(outline), -150.0) && near(maxY(outline), 150.0));
 }
 
 TEST(ground_beams_of_the_real_fixtures_fit_the_section_parameters)
 {
 	// 実フィクスチャ: 地中梁の断面は下端が v=0 で天端が正（下り梁）、押し出し長は正で、
-	// すべてが基礎命令の部品（下端幅・張り出し・せい）へ当てはまる。当てはめた断面から
-	// プリズムへ戻すと元の頂点の外接矩形の**大きさ**（u の幅・v の幅）と天端の高さが保たれる
-	// （u の位置は下端の中心へ正規化されるので比べない）。
+	// すべてが断面のパラメータ（下端幅・張り出し・せい）へ当てはまる。当てはめた値は断面の
+	// 外接矩形と整合する（下端幅 + 両側の張り出し＝u の幅、せい＝v の幅、天端＝原点 + せい）。
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)
 				   {
@@ -1136,13 +1137,6 @@ TEST(ground_beams_of_the_real_fixtures_fit_the_section_parameters)
 					   const std::vector<core::BeamPrism> prisms =
 						   HomeskzIfcImport::parse::buildGroundBeamPrisms(model,
 																		  context.gridCenter());
-					   const std::optional<core::FoundationCommand> foundation =
-						   buildFoundationCommand(context);
-					   CHECK(foundation.has_value());
-					   if (!foundation.has_value())
-						   return;
-					   CHECK_EQ(foundation->beams.size(), prisms.size());
-
 					   for (const core::BeamPrism& prism : prisms)
 					   {
 						   CHECK(prism.depth > 0.0);
@@ -1150,13 +1144,14 @@ TEST(ground_beams_of_the_real_fixtures_fit_the_section_parameters)
 						   CHECK(near(minY(prism.profile), 0.0)); // 断面原点＝梁下端
 						   CHECK(maxY(prism.profile) > 0.0);
 
-						   core::FoundationBeam beam;
-						   CHECK(core::fitFoundationBeam(prism, beam));
-						   const core::BeamPrism back = core::beamPrism(beam);
-						   CHECK(near(maxX(back.profile) - minX(back.profile),
+						   core::FoundationBeamFit fit;
+						   CHECK(core::fitFoundationBeam(prism, fit));
+						   CHECK(near(fit.bottomWidth + fit.haunchLeft + fit.haunchRight,
 									  maxX(prism.profile) - minX(prism.profile), 0.01));
-						   CHECK(near(maxY(back.profile), maxY(prism.profile), 0.01));
-						   CHECK(near(back.origin.z, prism.origin.z, 0.01));
+						   CHECK(near(fit.depth, maxY(prism.profile), 0.01));
+						   CHECK(near(fit.top, prism.origin.z + maxY(prism.profile), 0.01));
+						   CHECK(fit.haunchHeight > 0.0 && fit.haunchHeight <= fit.depth + 0.01);
+						   CHECK_EQ(core::beamFitOutline(fit).size(), std::size_t{4});
 					   }
 				   });
 }
@@ -1164,22 +1159,34 @@ TEST(ground_beams_of_the_real_fixtures_fit_the_section_parameters)
 TEST(ground_beam_tops_meet_the_slab_bottom)
 {
 	// 地中梁は底盤からぶら下がる下り梁なので、天端が**いずれかの底盤の底面**（底盤天端 −
-	// 厚み）に一致する。地中梁の天端を底盤へ呑み込ませる（core::kGroundBeamSlabBite）のは
-	// この coplanar のため（core/Foundation）。
+	// 厚み）に一致する。だから部品は**底の面**だけを持てばよく、天端は取り合いで決まる
+	// （core::foundationSlabBottom）。呑み込み（core::kGroundBeamSlabBite）はこの coplanar の
+	// ための手当て。
 	bool ok = false;
 	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
-	const std::optional<core::FoundationCommand> foundation = buildFoundationCommand(model);
+	Context context(model);
+	const std::optional<core::FoundationCommand> foundation = buildFoundationCommand(context);
 	CHECK(foundation.has_value());
 	if (!foundation.has_value())
 		return;
 	CHECK(!foundation->beams.empty());
-	for (const core::FoundationBeam& beam : foundation->beams)
+	const std::vector<core::BeamPrism> prisms =
+		HomeskzIfcImport::parse::buildGroundBeamPrisms(model, context.gridCenter());
+	CHECK(!prisms.empty());
+	for (const core::BeamPrism& prism : prisms)
 	{
+		const double top = prism.origin.z + maxY(prism.profile);
 		const bool meets =
-			std::ranges::any_of(foundation->slabs, [&beam](const core::FoundationSlab& slab)
-								{ return near(beam.top, slab.top - slab.thickness, 1.0); });
+			std::ranges::any_of(foundation->slabs, [top](const core::FoundationSlabGroup& slab)
+								{ return near(top, slab.top - slab.thickness, 1.0); });
 		CHECK(meets);
+	}
+	// グループの底は「取り合いの天端 − せい」なので、底盤の底面より必ず下にある。
+	for (const core::FoundationBeamGroup& beam : foundation->beams)
+	{
+		for (const std::vector<Vec2>& outline : beam.outlines)
+			CHECK(core::foundationSlabBottom(*foundation, outline) > beam.bottom);
 	}
 }
 
@@ -1190,9 +1197,10 @@ TEST(ground_beam_tops_meet_the_slab_bottom)
 TEST(foundation_command_shape)
 {
 	// 伏図次郎: 配置先は "F-基礎"、PIO 本体と底盤・地中梁は基礎スラブのクラス、立上りは
-	// 立ち上がり、床付けは素材クラス。部品は立上り・底盤・地中梁のそれぞれと同数。代表値は
-	// 面積・長さで最も多い実寸（底盤 天端 50・厚 150、立上り 幅 120・天端 400、地中梁は
-	// 外周の せい 200 と内部の 140 のうち長いほう）。
+	// 立ち上がり、床付けは素材クラス。部品は**同一仕様ごとのグループ**で、立上りは天端の
+	// 高さごと・底盤は厚さと天端ごと・地中梁は底と斜め寸法ごとに畳まれる。代表値は外形の
+	// 面積で最も多い実寸（底盤 天端 50・厚 150、立上り 天端 400、地中梁は外周の せい 200 と
+	// 内部の 140 のうち面積の大きいほう）。
 	bool ok = false;
 	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
@@ -1208,27 +1216,47 @@ TEST(foundation_command_shape)
 	CHECK_EQ(foundation->leanConcreteClass, std::string(CLASS_COMPONENT_LEAN_CONCRETE));
 	CHECK_EQ(foundation->gravelClass, std::string(CLASS_COMPONENT_GRAVEL));
 
-	CHECK_EQ(foundation->risers.size(), context.walls().size());
-	CHECK_EQ(foundation->slabs.size(), buildSlabCommands(context, context.walls()).size());
-	CHECK(!foundation->beams.empty());
-	for (std::size_t i = 0; i < foundation->risers.size() && i < context.walls().size(); ++i)
+	// グループの数は仕様の数（立上りより少ない）で、天端は重複しない。
+	CHECK(!foundation->risers.empty());
+	CHECK(foundation->risers.size() < context.walls().size());
+	for (std::size_t i = 0; i < foundation->risers.size(); ++i)
 	{
-		const core::FoundationRiser& riser = foundation->risers[i];
-		const RiserPiece& wall = context.walls()[i];
-		CHECK(near(riser.start.x, wall.start.x) && near(riser.end.y, wall.end.y));
-		CHECK(near(riser.width, wall.thickness));
-		CHECK(near(riser.bottom, wall.bottom) && near(riser.top, wall.top));
+		CHECK(!foundation->risers[i].outlines.empty());
+		for (std::size_t j = i + 1; j < foundation->risers.size(); ++j)
+			CHECK(!near(foundation->risers[i].top, foundation->risers[j].top, 1.0));
 	}
+	// どの立上りも、天端の同じグループのどれかの外形の中に壁芯の中点が入る。
+	for (const RiserPiece& wall : context.walls())
+	{
+		const Vec2 middle{(wall.start.x + wall.end.x) / 2.0, (wall.start.y + wall.end.y) / 2.0};
+		const bool covered = std::ranges::any_of(
+			foundation->risers,
+			[&](const core::FoundationRiserGroup& group)
+			{
+				return near(group.top, wall.top, 1.0) &&
+					   std::ranges::any_of(group.outlines, [&](const std::vector<Vec2>& outline)
+										   { return core::pointInPolygon(middle, outline); });
+			});
+		CHECK(covered);
+	}
+	// 底盤のグループは厚さ・天端ごと。外形の合計は統合後の底盤の枚数と同じ。
+	std::size_t slabOutlines = 0;
+	for (const core::FoundationSlabGroup& slab : foundation->slabs)
+	{
+		slabOutlines += slab.outlines.size();
+		CHECK(slab.thickness > 0.0);
+	}
+	CHECK_EQ(slabOutlines, buildSlabCommands(context, context.walls()).size());
+	CHECK(!foundation->beams.empty());
 
 	const core::FoundationParams& params = foundation->params;
 	CHECK(near(params.slabTop, 50.0));
 	CHECK(near(params.slabThickness, 150.0));
-	CHECK(near(params.riserWidth, 120.0));
 	CHECK(near(params.riserTop, 400.0));
 	CHECK(params.beamDepth == 200.0 || params.beamDepth == 140.0);
 	CHECK(params.haunchWidth > 0.0);
 	CHECK(near(params.haunchHeight, params.beamDepth)); // 実データは斜め部が全高
-	// 代表値は部品から求め直しても同じ（命令に載せた値がその計算結果）。
+	// 代表値はグループから求め直しても同じ（命令に載せた値がその計算結果）。
 	const core::FoundationParams again = core::foundationBaseParams(*foundation);
 	CHECK(near(again.slabTop, params.slabTop) && near(again.beamDepth, params.beamDepth));
 }
@@ -1266,8 +1294,9 @@ TEST(foundation_command_is_deterministic_and_round_trips_through_the_record)
 			CHECK(near(decoded.params.riserTop, first->params.riserTop, 1e-3));
 			for (std::size_t i = 0; i < decoded.beams.size() && i < first->beams.size(); ++i)
 			{
-				CHECK(near(decoded.beams[i].top, first->beams[i].top, 1e-3));
-				CHECK(near(decoded.beams[i].haunchLeft, first->beams[i].haunchLeft, 1e-3));
+				CHECK(near(decoded.beams[i].bottom, first->beams[i].bottom, 1e-3));
+				CHECK(near(decoded.beams[i].haunchWidth, first->beams[i].haunchWidth, 1e-3));
+				CHECK_EQ(decoded.beams[i].outlines.size(), first->beams[i].outlines.size());
 			}
 		});
 }

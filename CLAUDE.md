@@ -122,8 +122,8 @@ VectorWorks ネイティブオブジェクト
 - スキーマは `stories` / `grids` / `members` / `columns` / `foundation` /
   `floors` / `rafters` / `roofs` / `anchorBolts` / `floorPosts` / `fireBraces` / `joints` /
   `columnMarks` / `shearWalls` / `sheets` / `sections` / `sectionSheet`。基礎（`foundation`）は立上り・底盤・
-  地中梁の**部品**と OIP の代表値をまとめた 1 つの命令（`core/Foundation.h`）で、描画は
-  自作 PIO 1 つ（M20）。**同型が並ぶところは構造体 1 つへまとめる**
+  地中梁の**部品**（同一仕様ごとに外形の多角形でまとめたグループ）と OIP の代表値をまとめた
+  1 つの命令（`core/Foundation.h`）で、描画は自作 PIO 1 つ（M20）。**同型が並ぶところは構造体 1 つへまとめる**
   ——`anchorBolts` / `floorPosts` / `fireBraces` / `joints` は中身が同じなので
   `core::SymbolCommand` 1 つで受け、要素の区別は「Document のどのリストか」が担う
   （`core/Document.h` の doc コメント参照）。
@@ -163,7 +163,12 @@ VectorWorks ネイティブオブジェクト
 ヘッダ、金物（`IfcMechanicalFastener`）の型名取得は `parse/Column` の `fastenerTypeName`
 （柱頭・柱脚金物とアンカーボルトが共有）、平面座標の同一判定と許容
 （`samePoint` / `kPointEps`）・**Vec2 の基本演算**（`dot` / `cross` / `length` / `distance`）・
-同一直線上の線分成分の芯線射影（`collinearSpan`）は `core/Geometry.h`、**ペア述語による連結成分**
+同一直線上の線分成分の芯線射影（`collinearSpan`）・**平面多角形の基本**（符号付き面積と面積
+`shoelaceSigned` / `polygonArea`・内外判定 `pointInPolygon`・2 直線の交点 `lineIntersection`・
+**辺ごとの距離で外へ動かしてマイターする** `offsetPolygon`）は `core/Geometry.h`、
+**平面多角形の集合演算**（和 `polygonUnion`・差 `polygonDifference`・繋がりの判定と連結成分・
+畳めるものだけ畳む `mergePolygons`）は `core/PolygonBool.h`（基礎の外形の統合と、底盤の砕石から
+地中梁を抜く計算が共有する唯一の実装。**穴の扱いは呼び出し側が決める**）、**ペア述語による連結成分**
 （Union-Find。立上り・大引・地中梁の統合が共有）は `core/UnionFind.h`、
 **構成層の総厚**（`totalThickness`）・**横架材の Z 範囲と重なり判定**（`memberTopZ` /
 `memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側が持つ）は `core/Document.h`、
@@ -176,8 +181,9 @@ VectorWorks ネイティブオブジェクト
 鉛直とみなす閾値**（`kVerticalExtrudeTol`。平面外形の求め方と、人通口・地中梁の「水平押し出しか」
 判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・解析の許容値（統合・自由端・**人通口・
 地中梁**）は `parse/Footing.h`、**基礎の部品からソリッドを組み立てる純計算**（地中梁断面の
-パラメータ化 `fitFoundationBeam` / `beamPrism`・代表値と差の配り方 `applyFoundationParams`・
-押し出しの組み立て `foundationSolids`・床付けの断面と切り下げ `foundationBeddings`・
+読み取り `fitFoundationBeam` / `beamFitOutline`・**底盤への取り合い**
+`foundationSlabBottom` / `foundationBeamTop`・代表値と差の配り方 `applyFoundationParams`・
+押し出しの組み立て（辺ごとの斜め部と床付けの帯を含む）`foundationSolids`・
 PIO のレコードへの直列化 `encodeFoundation`）と床付けの既定値（捨てコン・砕石の厚み・外周の
 張り出し・呑み込み）は `core/Foundation`（PIO＝`Extensions/ExtFoundation` はこれを呼ぶだけで、
 基礎の形の知識を持たない）、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・

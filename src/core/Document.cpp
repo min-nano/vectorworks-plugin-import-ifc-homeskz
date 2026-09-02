@@ -123,27 +123,31 @@ namespace HomeskzIfcImport::core
 				   !column.topBound.level.empty();
 		}
 
-		// 基礎の底盤 1 枚が妥当か。外形が 3 点以上（面になる）で、コンクリート厚が正であること。
-		// top は数値（double なので常に成立）。
-		bool isValidFoundationSlab(const FoundationSlab& slab)
+		// 基礎の底盤のグループが妥当か。コンクリート厚が正で、外形が 1 つ以上あり、どの外形も
+		// 3 点以上（面になる）であること。top は数値（double なので常に成立）。
+		bool isValidFoundationSlabGroup(const FoundationSlabGroup& slab)
 		{
-			return slab.boundary.size() >= 3 && slab.thickness > 0.0;
+			return slab.thickness > 0.0 && !slab.outlines.empty() &&
+				   std::ranges::all_of(slab.outlines, [](const std::vector<Vec2>& outline)
+									   { return outline.size() >= 3; });
 		}
 
-		// 基礎の立上り 1 本が妥当か。幅が正で、壁芯が縮退しておらず（判定は core/Geometry の
-		// samePoint）、天端が下端より上にあること（高さ 0 の立上りは実体を持たない）。
-		bool isValidFoundationRiser(const FoundationRiser& riser)
+		// 基礎の立上りのグループが妥当か。天端の面の外形が 1 つ以上あり、どれも 3 点以上で
+		// あること（下端は底盤に取り合って決まるので、ここでは高さを見ない）。
+		bool isValidFoundationRiserGroup(const FoundationRiserGroup& riser)
 		{
-			return riser.width > 0.0 && !samePoint(riser.start, riser.end) &&
-				   riser.top > riser.bottom;
+			return !riser.outlines.empty() &&
+				   std::ranges::all_of(riser.outlines, [](const std::vector<Vec2>& outline)
+									   { return outline.size() >= 3; });
 		}
 
-		// 地中梁 1 本が妥当か。下端の中心線が縮退しておらず、下端幅・せいが正で、張り出し・
-		// 斜め部の高さが負でないこと（斜め部の高さがせいを超える分は組み立て側がクランプする）。
-		bool isValidFoundationBeam(const FoundationBeam& beam)
+		// 地中梁のグループが妥当か。斜め寸法が負でなく（せいを超える分は組み立て側がクランプ
+		// する）、底の面の外形が 1 つ以上あり、どれも 3 点以上であること。
+		bool isValidFoundationBeamGroup(const FoundationBeamGroup& beam)
 		{
-			return !samePoint(beam.start, beam.end) && beam.bottomWidth > 0.0 && beam.depth > 0.0 &&
-				   beam.haunchLeft >= 0.0 && beam.haunchRight >= 0.0 && beam.haunchHeight >= 0.0;
+			return beam.haunchWidth >= 0.0 && beam.haunchHeight >= 0.0 && !beam.outlines.empty() &&
+				   std::ranges::all_of(beam.outlines, [](const std::vector<Vec2>& outline)
+									   { return outline.size() >= 3; });
 		}
 
 		// 基礎（M20）が妥当か。配置先レイヤ名・PIO 本体のクラス名・ソリッドの素材クラス名 4 つが
@@ -158,9 +162,9 @@ namespace HomeskzIfcImport::core
 				   !foundation.leanConcreteClass.empty() && !foundation.gravelClass.empty() &&
 				   (!foundation.slabs.empty() || !foundation.risers.empty() ||
 					!foundation.beams.empty()) &&
-				   std::ranges::all_of(foundation.slabs, isValidFoundationSlab) &&
-				   std::ranges::all_of(foundation.risers, isValidFoundationRiser) &&
-				   std::ranges::all_of(foundation.beams, isValidFoundationBeam);
+				   std::ranges::all_of(foundation.slabs, isValidFoundationSlabGroup) &&
+				   std::ranges::all_of(foundation.risers, isValidFoundationRiserGroup) &&
+				   std::ranges::all_of(foundation.beams, isValidFoundationBeamGroup);
 		}
 
 		// 野地板 1 枚が妥当か。配置先レイヤ名・クラス名が非空で、平面外形が 3 点以上（面にな
@@ -404,21 +408,15 @@ namespace HomeskzIfcImport::core
 		if (document.foundation.has_value())
 		{
 			const FoundationCommand& foundation = *document.foundation;
-			for (const FoundationSlab& slab : foundation.slabs)
+			for (const FoundationSlabGroup& slab : foundation.slabs)
 			{
 				take(slab.top);
 				take(slab.top - slab.thickness - kSlabBeddingThickness);
 			}
-			for (const FoundationRiser& riser : foundation.risers)
-			{
+			for (const FoundationRiserGroup& riser : foundation.risers)
 				take(riser.top);
-				take(riser.bottom);
-			}
-			for (const FoundationBeam& beam : foundation.beams)
-			{
-				take(beam.top);
-				take(beam.top - beam.depth - kSlabBeddingThickness);
-			}
+			for (const FoundationBeamGroup& beam : foundation.beams)
+				take(beam.bottom - kSlabBeddingThickness);
 		}
 		// ストーリ高さ（要素が 1 つも無い階でも範囲に含める）。
 		for (const StoryCommand& story : document.stories)
@@ -476,17 +474,23 @@ namespace HomeskzIfcImport::core
 			takeSegment(grid.layer, grid.start, grid.end);
 		for (const FloorCommand& floor : document.floors)
 			takeBoundary(floor.layer, floor.boundary);
-		// 基礎（M20）は部品ごとに平面の座標を持つ（底盤の外形・立上りの壁芯・地中梁の中心線）。
-		// どれも同じ "F-基礎" レイヤ上の 1 つの PIO に入る。
+		// 基礎（M20）はグループごとに外形の多角形を持つ（底盤・立上りの天端・地中梁の底）。
+		// どれも同じ "F-基礎" レイヤ上の 1 つの PIO に入る。**床付けの張り出し（50〜130mm）は
+		// 見ない**——図の広がりの見積りとしては外形で足り、余白（用紙の割り付け）が吸収する。
 		if (document.foundation.has_value())
 		{
 			const FoundationCommand& foundation = *document.foundation;
-			for (const FoundationSlab& slab : foundation.slabs)
-				takeBoundary(foundation.layer, slab.boundary);
-			for (const FoundationRiser& riser : foundation.risers)
-				takeSegment(foundation.layer, riser.start, riser.end);
-			for (const FoundationBeam& beam : foundation.beams)
-				takeSegment(foundation.layer, beam.start, beam.end);
+			const auto takeGroup = [&](const PolygonList& outlines)
+			{
+				for (const std::vector<Vec2>& outline : outlines)
+					takeBoundary(foundation.layer, outline);
+			};
+			for (const FoundationSlabGroup& slab : foundation.slabs)
+				takeGroup(slab.outlines);
+			for (const FoundationRiserGroup& riser : foundation.risers)
+				takeGroup(riser.outlines);
+			for (const FoundationBeamGroup& beam : foundation.beams)
+				takeGroup(beam.outlines);
 		}
 		for (const RoofCommand& roof : document.roofs)
 			takeBoundary(roof.layer, roof.boundary);

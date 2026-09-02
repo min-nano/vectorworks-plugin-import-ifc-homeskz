@@ -13,6 +13,7 @@
 //
 
 #include "parse/Footing.h"
+#include "core/PolygonBool.h"
 #include "core/UnionFind.h"
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
@@ -48,32 +49,52 @@ namespace HomeskzIfcImport::parse
 	{
 		// --- 小さな共通ヘルパー ---------------------------------------------------
 
-		// 符号付き面積（CCW で正・CW で負）。
-		double shoelaceSigned(const std::vector<Vec2>& pts)
-		{
-			double total = 0.0;
-			const std::size_t n = pts.size();
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const Vec2& a = pts[i];
-				const Vec2& b = pts[(i + 1) % n];
-				total += (a.x * b.y) - (b.x * a.y);
-			}
-			return total / 2.0;
-		}
-
-		// 多角形の面積（絶対値）。符号付き面積の絶対値（同じループを 2 つ持たない）。
-		double shoelaceArea(const std::vector<Vec2>& pts)
-		{
-			return std::abs(shoelaceSigned(pts));
-		}
-
 		// 許容値で丸めた整数キー（グループ化の鍵）。std::llround は 0.5 を 0 から離れる向きへ
 		// 丸める（実座標がちょうど半端に乗ることは無いので、境界の丸め方は結果に影響しない）。
 		long long roundKey(double value, double tolerance)
 		{
 			return std::llround(value / tolerance);
 		}
+
+		// 同じ鍵のものを 1 つのグループへ畳むための小さな道具。at(key) は「その鍵のグループの
+		// 添字」を返し、初めての鍵なら**次の添字**（呼び出し側の vector の現在の大きさ）を
+		// 割り当てる（呼び出し側は戻りが size() と等しければグループを 1 つ足す）。
+		// グループの並びは鍵が最初に現れた順＝入力順に対して決定的。
+		template <typename Key> class GroupBuilder
+		{
+		public:
+			std::size_t at(const Key& key)
+			{
+				const auto found = fIndex.find(key);
+				if (found != fIndex.end())
+					return found->second;
+				const std::size_t next = fIndex.size();
+				fIndex.emplace(key, next);
+				return next;
+			}
+
+		private:
+			std::map<Key, std::size_t> fIndex;
+		};
+
+		// 立上りの**天端の面**の外形（壁芯 ± 半壁厚の矩形。反時計回り）。長さ 0・厚み 0 なら空。
+		// 芯線＋幅ではなく面で持つのが M20 の部品の形（core/Foundation.h 冒頭）。
+		std::vector<Vec2> riserTopOutline(const RiserPiece& wall)
+		{
+			const Vec2 span{wall.end.x - wall.start.x, wall.end.y - wall.start.y};
+			const double len = core::length(span);
+			if (len <= kWallMergeDistTol || wall.thickness <= 0.0)
+				return {};
+			const Vec2 dir{span.x / len, span.y / len};
+			const Vec2 side{-dir.y * wall.thickness / 2.0, dir.x * wall.thickness / 2.0};
+			return {Vec2{wall.start.x - side.x, wall.start.y - side.y},
+					Vec2{wall.end.x - side.x, wall.end.y - side.y},
+					Vec2{wall.end.x + side.x, wall.end.y + side.y},
+					Vec2{wall.start.x + side.x, wall.start.y + side.y}};
+		}
+
+		// 地中梁のグループの鍵（底の高さ・斜めの幅・斜めの高さ）。
+		using BeamGroupKey = std::tuple<long long, long long, long long>;
 
 		// --- 立上り（壁）------------------------------------------------------------
 
@@ -357,7 +378,7 @@ namespace HomeskzIfcImport::parse
 				pts.push_back(Vec2{static_cast<double>(roundKey(p.x, kGroundBeamProfileTol)),
 								   static_cast<double>(roundKey(p.y, kGroundBeamProfileTol))});
 			}
-			if (shoelaceSigned(pts) < 0.0)
+			if (core::shoelaceSigned(pts) < 0.0)
 				std::ranges::reverse(pts);
 
 			GroundBeamProfileKey key;
@@ -496,389 +517,6 @@ namespace HomeskzIfcImport::parse
 			return true;
 		}
 
-		// --- 底盤（スラブ）----------------------------------------------------------
-		//
-		// 多角形の和（union）は「頂点を丸めて厳密比較できるようにし、全辺を交点で細分し、
-		// すぐ右（外側）がどの多角形にも入らない有向辺だけを境界として残してつなぐ」
-		// という手順で求める。丸めた点をキーにするので、集合・辞書は素直な std::set /
-		// std::map（辞書順比較）で足りる。
-
-		// 交点計算で頂点を丸める小数桁（1e-4 mm = 0.1 ミクロン）。
-		constexpr double kSlabRoundScale = 1e4;
-
-		// 丸めた平面点。std::set / std::map の鍵にするので、Vec2 ではなく比較可能な pair。
-		using Pt2 = std::pair<double, double>;
-		using Edge = std::pair<Pt2, Pt2>;
-
-		Pt2 roundPt(double x, double y)
-		{
-			return Pt2{std::round(x * kSlabRoundScale) / kSlabRoundScale,
-					   std::round(y * kSlabRoundScale) / kSlabRoundScale};
-		}
-
-		Pt2 roundPt(const Vec2& p)
-		{
-			return roundPt(p.x, p.y);
-		}
-
-		// 境界を丸めた頂点列にし、末尾の閉じ重複・連続する同一点を除く。
-		std::vector<Pt2> cleanRing(const std::vector<Vec2>& boundary)
-		{
-			std::vector<Pt2> out;
-			out.reserve(boundary.size());
-			for (const Vec2& p : boundary)
-			{
-				const Pt2 rp = roundPt(p);
-				if (out.empty() || out.back() != rp)
-					out.push_back(rp);
-			}
-			if (out.size() > 1 && out.front() == out.back())
-				out.pop_back();
-			return out;
-		}
-
-		double shoelaceSigned(const std::vector<Pt2>& pts)
-		{
-			double total = 0.0;
-			const std::size_t n = pts.size();
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const Pt2& a = pts[i];
-				const Pt2& b = pts[(i + 1) % n];
-				total += (a.first * b.second) - (b.first * a.second);
-			}
-			return total / 2.0;
-		}
-
-		// 点 (x, y) が単純多角形の内部（境界は含めない近似）にあるか。水平レイキャスト（半開
-		// ルール）。呼び出し側は辺から法線方向へ kSlabSideEps ずらした点を渡すので、
-		// 辺ちょうどの縮退は問題にならない。
-		bool pointInPoly(double x, double y, const std::vector<Pt2>& poly)
-		{
-			bool inside = false;
-			const std::size_t n = poly.size();
-			std::size_t j = n - 1;
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const auto [xi, yi] = poly[i];
-				const auto [xj, yj] = poly[j];
-				if ((yi > y) != (yj > y))
-				{
-					const double xint = xi + ((y - yi) * (xj - xi) / (yj - yi));
-					if (x < xint)
-						inside = !inside;
-				}
-				j = i;
-			}
-			return inside;
-		}
-
-		// 線分 ab を分割すべき点（線分 cd との交点）を ab 上の点として返す。非平行なら区間内
-		// の交点、共線なら cd の端点を ab 上へ射影した点（区間内）。これで交差・T 字接合・
-		// 共線オーバーラップの分割点をすべて拾う。
-		std::vector<Pt2> segSplitPoints(const Pt2& a, const Pt2& b, const Pt2& c, const Pt2& d)
-		{
-			const double rx = b.first - a.first;
-			const double ry = b.second - a.second;
-			const double sx = d.first - c.first;
-			const double sy = d.second - c.second;
-			const double rLen = std::hypot(rx, ry);
-			const double sLen = std::hypot(sx, sy);
-			if (rLen <= 0.0 || sLen <= 0.0)
-				return {};
-
-			std::vector<Pt2> out;
-			const double denom = (rx * sy) - (ry * sx);
-			if (std::abs(denom) > kSlabAngleTol * rLen * sLen)
-			{
-				const double t =
-					(((c.first - a.first) * sy) - ((c.second - a.second) * sx)) / denom;
-				const double u =
-					(((c.first - a.first) * ry) - ((c.second - a.second) * rx)) / denom;
-				if (t >= -1e-9 && t <= 1.0 + 1e-9 && u >= -1e-9 && u <= 1.0 + 1e-9)
-					out.emplace_back(a.first + (t * rx), a.second + (t * ry));
-				return out;
-			}
-			// 平行: 共線ならオーバーラップ端点を分割点にする。
-			if (std::abs(((c.first - a.first) * ry) - ((c.second - a.second) * rx)) >
-				kSlabMergeTol * rLen)
-				return out;
-			for (const Pt2& p : {c, d})
-			{
-				const double t =
-					(((p.first - a.first) * rx) + ((p.second - a.second) * ry)) / (rLen * rLen);
-				if (t >= -1e-9 && t <= 1.0 + 1e-9)
-					out.emplace_back(a.first + (t * rx), a.second + (t * ry));
-			}
-			return out;
-		}
-
-		// 有向辺 a→b を分割点 cuts で細分した有向部分辺のリスト。
-		std::vector<Edge> splitEdge(const Pt2& a, const Pt2& b, const std::set<Pt2>& cuts)
-		{
-			const double rx = b.first - a.first;
-			const double ry = b.second - a.second;
-			const double length2 = (rx * rx) + (ry * ry);
-
-			std::map<Pt2, double> params;
-			const auto add = [&](const Pt2& raw)
-			{
-				const Pt2 rp = roundPt(raw.first, raw.second);
-				const double t =
-					(length2 > 0.0)
-						? ((((rp.first - a.first) * rx) + ((rp.second - a.second) * ry)) / length2)
-						: 0.0;
-				if (t >= -1e-9 && t <= 1.0 + 1e-9)
-					params[rp] = t;
-			};
-			add(a);
-			add(b);
-			for (const Pt2& cut : cuts)
-				add(cut);
-
-			std::vector<Pt2> ordered;
-			ordered.reserve(params.size());
-			for (const auto& entry : params)
-				ordered.push_back(entry.first);
-			std::stable_sort(ordered.begin(), ordered.end(),
-							 [&params](const Pt2& lhs, const Pt2& rhs)
-							 { return params.at(lhs) < params.at(rhs); });
-
-			std::vector<Edge> out;
-			for (std::size_t i = 0; i + 1 < ordered.size(); ++i)
-			{
-				if (ordered[i] != ordered[i + 1])
-					out.emplace_back(ordered[i], ordered[i + 1]);
-			}
-			return out;
-		}
-
-		// 境界追跡で分岐点に来たとき、内側を左に保つ次の辺（最も時計回り）を選ぶ。
-		Edge nextBoundaryEdge(const Edge& current, const std::vector<Edge>& options)
-		{
-			const double reverse = std::atan2(current.first.second - current.second.second,
-											  current.first.first - current.second.first);
-			const auto clockwise = [reverse](const Edge& edge)
-			{
-				const double d = std::atan2(edge.second.second - edge.first.second,
-											edge.second.first - edge.first.first);
-				double angle = std::fmod(reverse - d, 2.0 * std::numbers::pi);
-				if (angle < 0.0)
-					angle += 2.0 * std::numbers::pi;
-				return (angle > 1e-9) ? angle : 2.0 * std::numbers::pi;
-			};
-			return *std::min_element(options.begin(), options.end(),
-									 [&clockwise](const Edge& lhs, const Edge& rhs)
-									 { return clockwise(lhs) < clockwise(rhs); });
-		}
-
-		// 閉リングから共線の中間点を除いた頂点列。
-		std::vector<Pt2> simplifyRing(const std::vector<Pt2>& ring)
-		{
-			std::vector<Pt2> pts = ring;
-			if (pts.size() > 1 && pts.front() == pts.back())
-				pts.pop_back();
-			const std::size_t n = pts.size();
-			std::vector<Pt2> out;
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const Pt2& a = pts[(i + n - 1) % n];
-				const Pt2& b = pts[i];
-				const Pt2& c = pts[(i + 1) % n];
-				const double cross = ((b.first - a.first) * (c.second - b.second)) -
-									 ((b.second - a.second) * (c.first - b.first));
-				if (std::abs(cross) > kSlabMergeTol)
-					out.push_back(b);
-			}
-			return out;
-		}
-
-		// 有向境界辺をつないで閉ループのリストにする。開ループが生じたら false（統合できない
-		// 成分として呼び出し側が元のまま残す）。
-		bool chainBoundary(const std::vector<Edge>& edges, std::vector<std::vector<Pt2>>& out)
-		{
-			std::map<Pt2, std::vector<Edge>> fromMap;
-			for (const Edge& edge : edges)
-				fromMap[edge.first].push_back(edge);
-			std::set<Edge> remaining(edges.begin(), edges.end());
-
-			std::vector<std::vector<Pt2>> loops;
-			while (!remaining.empty())
-			{
-				const Edge start = *remaining.begin(); // std::set は辞書順なので決定的
-				Edge cur = start;
-				std::vector<Pt2> ring{cur.first};
-				while (true)
-				{
-					remaining.erase(cur);
-					ring.push_back(cur.second);
-					if (cur.second == start.first)
-						break;
-					std::vector<Edge> options;
-					const auto found = fromMap.find(cur.second);
-					if (found != fromMap.end())
-					{
-						for (const Edge& edge : found->second)
-						{
-							if (remaining.contains(edge))
-								options.push_back(edge);
-						}
-					}
-					if (options.empty())
-						return false;
-					cur = nextBoundaryEdge(cur, options);
-				}
-				std::vector<Pt2> simplified = simplifyRing(ring);
-				if (simplified.size() >= 3)
-					loops.push_back(std::move(simplified));
-			}
-			out = std::move(loops);
-			return true;
-		}
-
-		// 任意向きの単純多角形群の和（union）の境界ループ。各多角形を CCW（内部が左）に揃え、
-		// 全辺を他辺との交点で細分し、細分した有向辺のうち
-		// **すぐ右（外側）がどの多角形にも含まれない**ものだけを境界として残してつなぐ
-		// （共有辺は両隣の多角形が右側に来て打ち消され、外周辺だけ残る）。開ループなら false。
-		bool polygonUnion(const std::vector<std::vector<Pt2>>& polys,
-						  std::vector<std::vector<Pt2>>& out)
-		{
-			std::vector<std::vector<Pt2>> oriented;
-			oriented.reserve(polys.size());
-			for (const std::vector<Pt2>& poly : polys)
-			{
-				if (shoelaceSigned(poly) >= 0.0)
-				{
-					oriented.push_back(poly);
-				}
-				else
-				{
-					oriented.emplace_back(poly.rbegin(), poly.rend());
-				}
-			}
-
-			std::vector<Edge> directed;
-			for (const std::vector<Pt2>& poly : oriented)
-			{
-				const std::size_t n = poly.size();
-				for (std::size_t i = 0; i < n; ++i)
-					directed.emplace_back(poly[i], poly[(i + 1) % n]);
-			}
-
-			const std::size_t m = directed.size();
-			std::vector<std::set<Pt2>> cuts(m);
-			for (std::size_t i = 0; i < m; ++i)
-			{
-				for (std::size_t j = 0; j < m; ++j)
-				{
-					if (i == j)
-						continue;
-					for (const Pt2& pt : segSplitPoints(directed[i].first, directed[i].second,
-														directed[j].first, directed[j].second))
-						cuts[i].insert(roundPt(pt.first, pt.second));
-				}
-			}
-
-			std::vector<Edge> boundary;
-			std::set<Edge> seen;
-			for (std::size_t i = 0; i < m; ++i)
-			{
-				for (const Edge& part : splitEdge(directed[i].first, directed[i].second, cuts[i]))
-				{
-					if (!seen.insert(part).second)
-						continue;
-					const double mx = (part.first.first + part.second.first) / 2.0;
-					const double my = (part.first.second + part.second.second) / 2.0;
-					const double ex = part.second.first - part.first.first;
-					const double ey = part.second.second - part.first.second;
-					const double length = std::hypot(ex, ey);
-					if (length <= 0.0)
-						continue;
-					// 進行方向 p→q の右向き法線 (ey, −ex)/length。外側へはみ出した点。
-					const double rx = mx + (kSlabSideEps * ey / length);
-					const double ry = my - (kSlabSideEps * ex / length);
-					const bool insideAny =
-						std::ranges::any_of(oriented, [rx, ry](const std::vector<Pt2>& poly)
-											{ return pointInPoly(rx, ry, poly); });
-					if (!insideAny)
-						boundary.push_back(part);
-				}
-			}
-			return chainBoundary(boundary, out);
-		}
-
-		// 共線の線分 ab・cd の重なり長さ（共線でなければ 0）。
-		double collinearOverlap(const Pt2& a, const Pt2& b, const Pt2& c, const Pt2& d)
-		{
-			const double rx = b.first - a.first;
-			const double ry = b.second - a.second;
-			const double rLen = std::hypot(rx, ry);
-			if (rLen <= 0.0)
-				return 0.0;
-			const double sx = d.first - c.first;
-			const double sy = d.second - c.second;
-			const double sLen = std::hypot(sx, sy);
-			if (sLen <= 0.0)
-				return 0.0;
-			if (std::abs((rx * sy) - (ry * sx)) > kSlabAngleTol * rLen * sLen)
-				return 0.0;
-			if (std::abs(((c.first - a.first) * ry) - ((c.second - a.second) * rx)) >
-				kSlabMergeTol * rLen)
-				return 0.0;
-			const double tc =
-				(((c.first - a.first) * rx) + ((c.second - a.second) * ry)) / (rLen * rLen);
-			const double td =
-				(((d.first - a.first) * rx) + ((d.second - a.second) * ry)) / (rLen * rLen);
-			const double lo = std::max(0.0, std::min(tc, td));
-			const double hi = std::min(1.0, std::max(tc, td));
-			return (hi > lo) ? (hi - lo) * rLen : 0.0;
-		}
-
-		// 線分 a→b 上の点 p の正規化パラメータ（0=a, 1=b）。
-		double paramOn(const Pt2& a, const Pt2& b, const Pt2& p)
-		{
-			const double rx = b.first - a.first;
-			const double ry = b.second - a.second;
-			const double length2 = (rx * rx) + (ry * ry);
-			if (length2 <= 0.0)
-				return 0.0;
-			return (((p.first - a.first) * rx) + ((p.second - a.second) * ry)) / length2;
-		}
-
-		// 底盤ポリゴン a・b が連続する（境界を共有 or 面で重なる）か。角（点）だけで接する場
-		// 合は連続としない。
-		bool polysConnected(const std::vector<Pt2>& a, const std::vector<Pt2>& b)
-		{
-			const std::size_t na = a.size();
-			const std::size_t nb = b.size();
-			for (std::size_t i = 0; i < na; ++i)
-			{
-				const Pt2& a1 = a[i];
-				const Pt2& a2 = a[(i + 1) % na];
-				for (std::size_t j = 0; j < nb; ++j)
-				{
-					const Pt2& b1 = b[j];
-					const Pt2& b2 = b[(j + 1) % nb];
-					if (collinearOverlap(a1, a2, b1, b2) > kSlabMergeTol)
-						return true;
-					// 内部で交差（端点を含まない真の交差）
-					for (const Pt2& pt : segSplitPoints(a1, a2, b1, b2))
-					{
-						const double t = paramOn(a1, a2, pt);
-						const double u = paramOn(b1, b2, pt);
-						if (t > kSlabAngleTol && t < 1.0 - kSlabAngleTol && u > kSlabAngleTol &&
-							u < 1.0 - kSlabAngleTol)
-							return true;
-					}
-				}
-			}
-			if (std::ranges::any_of(a, [&b](const Pt2& p)
-									{ return pointInPoly(p.first, p.second, b); }))
-				return true;
-			return std::ranges::any_of(b, [&a](const Pt2& p)
-									   { return pointInPoly(p.first, p.second, a); });
-		}
-
 		// 底盤の統合可否を表すキー。コンクリート厚・天端の高さが一致する底盤同士だけを統合
 		// 対象にする。**配筋（M10）を足すときはこのキーにも足す**（配筋の違う底盤を 1 枚へ
 		// 統合すると片方が失われるため）。
@@ -887,56 +525,6 @@ namespace HomeskzIfcImport::parse
 		SlabKey slabMergeKey(const SlabPiece& slab)
 		{
 			return SlabKey{roundKey(slab.thickness, 1e-3), roundKey(slab.elevation, kSlabMergeTol)};
-		}
-
-		// 連続する底盤（polysConnected）の連結成分をインデックス集合で返す。成分は昇順・
-		// 成分内も昇順で決定的。
-		std::vector<std::vector<std::size_t>>
-		slabComponents(const std::map<std::size_t, std::vector<Pt2>>& polys)
-		{
-			std::vector<std::size_t> ids;
-			ids.reserve(polys.size());
-			for (const auto& entry : polys)
-				ids.push_back(entry.first);
-
-			std::map<std::size_t, std::size_t> parent;
-			for (const std::size_t id : ids)
-				parent[id] = id;
-			const auto find = [&parent](std::size_t a)
-			{
-				while (parent[a] != a)
-				{
-					parent[a] = parent[parent[a]];
-					a = parent[a];
-				}
-				return a;
-			};
-
-			for (std::size_t p = 0; p < ids.size(); ++p)
-			{
-				for (std::size_t q = p + 1; q < ids.size(); ++q)
-				{
-					if (!polysConnected(polys.at(ids[p]), polys.at(ids[q])))
-						continue;
-					const std::size_t ra = find(ids[p]);
-					const std::size_t rb = find(ids[q]);
-					if (ra != rb)
-						parent[std::max(ra, rb)] = std::min(ra, rb);
-				}
-			}
-
-			std::map<std::size_t, std::vector<std::size_t>> comps;
-			for (const std::size_t id : ids)
-				comps[find(id)].push_back(id);
-
-			std::vector<std::vector<std::size_t>> result;
-			result.reserve(comps.size());
-			for (auto& comp : comps)
-			{
-				std::ranges::sort(comp.second);
-				result.push_back(comp.second);
-			}
-			return result;
 		}
 
 		// 底盤の辺 a→b に沿う立上りの半壁厚（該当が無ければ 0）。最も重なりの大きい立上りの半
@@ -980,64 +568,6 @@ namespace HomeskzIfcImport::parse
 			return best;
 		}
 
-		// 点 p・方向 d の 2 直線の交点（平行なら false）。
-		bool lineIntersection(const Vec2& p1, const Vec2& d1, const Vec2& p2, const Vec2& d2,
-							  Vec2& out)
-		{
-			const double denom = (d1.x * d2.y) - (d1.y * d2.x);
-			if (std::abs(denom) < 1e-12)
-				return false;
-			const double dx = p2.x - p1.x;
-			const double dy = p2.y - p1.y;
-			const double t = ((dx * d2.y) - (dy * d2.x)) / denom;
-			out = Vec2{p1.x + (t * d1.x), p1.y + (t * d1.y)};
-			return true;
-		}
-
-		// CCW ポリゴンの各辺 i を外向きへ dists[i] だけ移動した頂点列。隣接する移動後の辺（直
-		// 線）の交点を新しい頂点にするので、凸角は外側へ伸び、凹角（入隅）は詰まる。
-		std::vector<Vec2> offsetPolygon(const std::vector<Vec2>& pts,
-										const std::vector<double>& dists)
-		{
-			const std::size_t n = pts.size();
-			std::vector<std::pair<Vec2, Vec2>> lines; // (点, 方向)
-			lines.reserve(n);
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const Vec2& a = pts[i];
-				const Vec2& b = pts[(i + 1) % n];
-				const double ex = b.x - a.x;
-				const double ey = b.y - a.y;
-				const double length = std::hypot(ex, ey);
-				if (length <= 0.0)
-				{
-					lines.emplace_back(a, Vec2{1.0, 0.0});
-					continue;
-				}
-				const double ux = ex / length;
-				const double uy = ey / length;
-				// CCW ポリゴンの外向き法線（進行方向の右）。
-				lines.emplace_back(Vec2{a.x + (dists[i] * uy), a.y - (dists[i] * ux)},
-								   Vec2{ux, uy});
-			}
-
-			std::vector<Vec2> out;
-			out.reserve(n);
-			for (std::size_t i = 0; i < n; ++i)
-			{
-				const auto& [q1, d1] = lines[(i + n - 1) % n];
-				const auto& [q2, d2] = lines[i];
-				Vec2 vertex;
-				if (!lineIntersection(q1, d1, q2, d2, vertex))
-				{
-					// 平行（同一直線の連続辺）: 法線方向へずらした点で代用する。
-					vertex = Vec2{pts[i].x + (dists[i] * d2.y), pts[i].y - (dists[i] * d2.x)};
-				}
-				out.push_back(vertex);
-			}
-			return out;
-		}
-
 		// 底盤外形の各辺を、沿っている立上りの外面まで外側へ広げた外形。立上りに沿う辺が
 		// 1 つも無ければ false（呼び出し側は元の外形をそのまま使う）。
 		bool offsetBoundaryToWalls(const std::vector<Vec2>& boundary,
@@ -1048,7 +578,7 @@ namespace HomeskzIfcImport::parse
 				pts.pop_back();
 			if (pts.size() < 3)
 				return false;
-			if (shoelaceSigned(pts) < 0.0)
+			if (core::shoelaceSigned(pts) < 0.0)
 				std::ranges::reverse(pts);
 
 			const std::size_t n = pts.size();
@@ -1059,7 +589,7 @@ namespace HomeskzIfcImport::parse
 			if (std::ranges::none_of(dists, [](double d) { return d > 0.0; }))
 				return false;
 
-			out = offsetPolygon(pts, dists);
+			out = core::offsetPolygon(pts, dists);
 			return true;
 		}
 
@@ -1110,7 +640,7 @@ namespace HomeskzIfcImport::parse
 			double thickness = 0.0;
 			zTopAndThickness(solid, top, thickness);
 			auto& entry = areas[roundKey(top, 1e-3)];
-			entry.first += shoelaceArea(footprint(solid));
+			entry.first += core::polygonArea(footprint(solid));
 			entry.second = top;
 		}
 		if (areas.empty())
@@ -1563,64 +1093,21 @@ namespace HomeskzIfcImport::parse
 			}
 		}
 
-		std::set<std::size_t> dropped;
-		std::map<std::size_t, std::vector<SlabPiece>> mergedAt;
+		// グループごとに、繋がる外形どうしを和で 1 枚へ畳む（畳めない成分は元のまま残る。
+		// 判断は core::mergePolygons が持つ）。厚み・高さはグループの先頭から引き継ぐ。
+		std::vector<SlabPiece> result;
 		for (const std::vector<std::size_t>& group : groups)
 		{
-			std::map<std::size_t, std::vector<Pt2>> polys;
+			core::PolygonList outlines;
+			outlines.reserve(group.size());
 			for (const std::size_t i : group)
+				outlines.push_back(slabs[i].boundary);
+			for (std::vector<Vec2>& merged : core::mergePolygons(outlines))
 			{
-				std::vector<Pt2> ring = cleanRing(slabs[i].boundary);
-				if (ring.size() >= 3)
-					polys.emplace(i, std::move(ring));
+				SlabPiece piece = slabs[group.front()];
+				piece.boundary = std::move(merged);
+				result.push_back(std::move(piece));
 			}
-			for (const std::vector<std::size_t>& comp : slabComponents(polys))
-			{
-				if (comp.size() < 2)
-					continue;
-				std::vector<std::vector<Pt2>> parts;
-				parts.reserve(comp.size());
-				for (const std::size_t i : comp)
-					parts.push_back(polys.at(i));
-
-				std::vector<std::vector<Pt2>> loops;
-				if (!polygonUnion(parts, loops))
-					continue; // 開ループ（和を作れない成分）はそのまま残す
-
-				std::vector<std::vector<Pt2>> outer;
-				bool hasHole = false;
-				for (const std::vector<Pt2>& loop : loops)
-				{
-					const double area = shoelaceSigned(loop);
-					if (area > 0.0)
-						outer.push_back(loop);
-					else if (area < 0.0)
-						hasHole = true;
-				}
-				// 単一の外形・穴無しの成分だけ 1 枚に統合する（穴があると単一境界で表せず、
-				// 部屋の下までコンクリートで埋めると誤りになるため見送る）。
-				if (outer.size() != 1 || hasHole)
-					continue;
-
-				SlabPiece merged = slabs[comp.front()];
-				merged.boundary.clear();
-				merged.boundary.reserve(outer.front().size());
-				for (const Pt2& p : outer.front())
-					merged.boundary.push_back(Vec2{p.first, p.second});
-				mergedAt[comp.front()].push_back(std::move(merged));
-				dropped.insert(comp.begin(), comp.end());
-			}
-		}
-
-		std::vector<SlabPiece> result;
-		for (std::size_t i = 0; i < slabs.size(); ++i)
-		{
-			const auto found = mergedAt.find(i);
-			if (found != mergedAt.end())
-				result.insert(result.end(), found->second.begin(), found->second.end());
-			if (dropped.contains(i))
-				continue;
-			result.push_back(slabs[i]);
 		}
 		return result;
 	}
@@ -1764,21 +1251,68 @@ namespace HomeskzIfcImport::parse
 		cmd.leanConcreteClass = CLASS_COMPONENT_LEAN_CONCRETE;
 		cmd.gravelClass = CLASS_COMPONENT_GRAVEL;
 
-		for (const SlabPiece& slab : slabs)
-			cmd.slabs.push_back(
-				core::FoundationSlab{slab.boundary, slab.elevation, slab.thickness});
-		for (const RiserPiece& wall : walls)
+		// 底盤: 厚さと天端が同じものを 1 グループへ。外形は buildSlabCommands が統合済み。
 		{
-			cmd.risers.push_back(
-				core::FoundationRiser{wall.start, wall.end, wall.thickness, wall.bottom, wall.top});
+			GroupBuilder<SlabKey> builder;
+			for (const SlabPiece& slab : slabs)
+			{
+				if (slab.boundary.size() < 3 || slab.thickness <= 0.0)
+					continue;
+				const std::size_t at = builder.at(slabMergeKey(slab));
+				if (at == cmd.slabs.size())
+					cmd.slabs.push_back(
+						core::FoundationSlabGroup{slab.elevation, slab.thickness, {}});
+				cmd.slabs[at].outlines.push_back(slab.boundary);
+			}
 		}
-		for (const BeamPrism& prism : beams)
+
+		// 立上り: **天端の面の外形**（壁芯 ± 半壁厚の矩形）を天端の高さごとに。繋がる外形は
+		// 和で 1 枚へ畳むので、L 字・T 字の取り合いは 1 つの多角形になる（升目に囲んで穴が
+		// できる並びは畳まずに残る。core::mergePolygons）。
 		{
-			// 断面をパラメータ（下端幅・張り出し・せい）へ当てはめる。当てはまらない断面
-			// （3 点未満・押し出し長 0）は落とす（1 本の異常で全体を止めない）。
-			core::FoundationBeam beam;
-			if (core::fitFoundationBeam(prism, beam))
-				cmd.beams.push_back(beam);
+			GroupBuilder<long long> builder;
+			for (const RiserPiece& wall : walls)
+			{
+				std::vector<Vec2> outline = riserTopOutline(wall);
+				if (outline.size() < 3)
+					continue;
+				const std::size_t at = builder.at(roundKey(wall.top, kWallMergeDistTol));
+				if (at == cmd.risers.size())
+					cmd.risers.push_back(core::FoundationRiserGroup{wall.top, {}});
+				cmd.risers[at].outlines.push_back(std::move(outline));
+			}
+			for (core::FoundationRiserGroup& group : cmd.risers)
+				group.outlines = core::mergePolygons(group.outlines);
+		}
+
+		// 地中梁: 断面を当てはめ（下端幅・張り出し・せい）、**底の面の外形**を 底の高さ・
+		// 斜め寸法ごとにまとめる。張り出しは外周側が鉛直・内側だけ広がる形なので、**広い方**を
+		// そのグループの斜め幅に採る（どの辺に付けるかは描くときに決まる。core/Foundation.h
+		// 「斜め部は外形の辺ごと」）。当てはまらない断面（3 点未満・押し出し長 0）は落とす
+		// （1 本の異常で全体を止めない）。
+		{
+			GroupBuilder<BeamGroupKey> builder;
+			for (const BeamPrism& prism : beams)
+			{
+				core::FoundationBeamFit fit;
+				if (!core::fitFoundationBeam(prism, fit))
+					continue;
+				std::vector<Vec2> outline = core::beamFitOutline(fit);
+				if (outline.size() < 3)
+					continue;
+				const double bottom = fit.top - fit.depth;
+				const double haunchWidth = std::max(fit.haunchLeft, fit.haunchRight);
+				const std::size_t at =
+					builder.at(BeamGroupKey{roundKey(bottom, kGroundBeamMergeTol),
+											roundKey(haunchWidth, kGroundBeamProfileTol),
+											roundKey(fit.haunchHeight, kGroundBeamProfileTol)});
+				if (at == cmd.beams.size())
+					cmd.beams.push_back(
+						core::FoundationBeamGroup{bottom, haunchWidth, fit.haunchHeight, {}});
+				cmd.beams[at].outlines.push_back(std::move(outline));
+			}
+			for (core::FoundationBeamGroup& group : cmd.beams)
+				group.outlines = core::mergePolygons(group.outlines);
 		}
 
 		// 名前だけ基礎で実体（押し出し）を解決できない IFC は命令にしない（部品の無い PIO を
@@ -1786,7 +1320,7 @@ namespace HomeskzIfcImport::parse
 		if (cmd.slabs.empty() && cmd.risers.empty() && cmd.beams.empty())
 			return std::nullopt;
 
-		// OIP に最初に出る代表値は部品から求める（core::foundationBaseParams）。
+		// OIP に最初に出る代表値はグループから求める（core::foundationBaseParams）。
 		cmd.params = core::foundationBaseParams(cmd);
 		return cmd;
 	}

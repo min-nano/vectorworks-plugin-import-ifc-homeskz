@@ -1010,4 +1010,78 @@ TEST(clip_polygon_outside_the_rect_is_empty)
 			  .empty());
 }
 
+// ---------------------------------------------------------------------------
+// 平面多角形の共有ヘルパー（core::shoelaceSigned / polygonArea / pointInPolygon /
+// lineIntersection / offsetPolygon）。基礎の外形（core/Foundation・parse/Footing）と
+// 集合演算（core/PolygonBool）が共有する。
+// ---------------------------------------------------------------------------
+
+TEST(shoelace_signs_the_winding_and_measures_the_area)
+{
+	const std::vector<core::Vec2> ccw = {{0.0, 0.0}, {100.0, 0.0}, {100.0, 50.0}, {0.0, 50.0}};
+	std::vector<core::Vec2> cw = ccw;
+	std::ranges::reverse(cw);
+	CHECK(near(core::shoelaceSigned(ccw), 5000.0));
+	CHECK(near(core::shoelaceSigned(cw), -5000.0));
+	CHECK(near(core::polygonArea(cw), 5000.0));
+	// 面にならない入力は 0（呼び出し側が落ちないための防御）。
+	CHECK(near(core::polygonArea({}), 0.0));
+	CHECK(near(core::polygonArea({{0.0, 0.0}, {1.0, 1.0}}), 0.0));
+}
+
+TEST(point_in_polygon_uses_the_even_odd_rule)
+{
+	const std::vector<core::Vec2> square = {{0.0, 0.0}, {100.0, 0.0}, {100.0, 100.0}, {0.0, 100.0}};
+	CHECK(core::pointInPolygon(core::Vec2{50.0, 50.0}, square));
+	CHECK(!core::pointInPolygon(core::Vec2{150.0, 50.0}, square));
+	CHECK(!core::pointInPolygon(core::Vec2{50.0, -1.0}, square));
+	// L 字の入隅の外側は「外」。
+	const std::vector<core::Vec2> ell = {{0.0, 0.0},   {100.0, 0.0},  {100.0, 50.0},
+										 {50.0, 50.0}, {50.0, 100.0}, {0.0, 100.0}};
+	CHECK(core::pointInPolygon(core::Vec2{25.0, 75.0}, ell));
+	CHECK(!core::pointInPolygon(core::Vec2{75.0, 75.0}, ell));
+	// 面にならない入力は常に外。
+	CHECK(!core::pointInPolygon(core::Vec2{0.0, 0.0}, {{0.0, 0.0}, {1.0, 1.0}}));
+}
+
+TEST(line_intersection_meets_and_rejects_parallels)
+{
+	core::Vec2 out;
+	CHECK(core::lineIntersection(core::Vec2{0.0, 0.0}, core::Vec2{1.0, 0.0}, core::Vec2{5.0, -5.0},
+								 core::Vec2{0.0, 1.0}, out));
+	CHECK(near(out.x, 5.0) && near(out.y, 0.0));
+	// 平行（同じ向き・逆向きとも）は交わらない。
+	CHECK(!core::lineIntersection(core::Vec2{0.0, 0.0}, core::Vec2{1.0, 0.0}, core::Vec2{0.0, 10.0},
+								  core::Vec2{1.0, 0.0}, out));
+	CHECK(!core::lineIntersection(core::Vec2{0.0, 0.0}, core::Vec2{1.0, 0.0}, core::Vec2{0.0, 10.0},
+								  core::Vec2{-1.0, 0.0}, out));
+}
+
+TEST(offset_polygon_moves_each_edge_outward_and_miters_the_corners)
+{
+	// 反時計回りの矩形を全辺 10 だけ外へ動かすと、角は交点＝一回り大きい矩形になる。
+	const std::vector<core::Vec2> square = {{0.0, 0.0}, {100.0, 0.0}, {100.0, 100.0}, {0.0, 100.0}};
+	const std::vector<core::Vec2> grown = core::offsetPolygon(square, {10.0, 10.0, 10.0, 10.0});
+	CHECK_EQ(grown.size(), std::size_t{4});
+	if (grown.size() != 4)
+		return;
+	CHECK(near(grown[0].x, -10.0) && near(grown[0].y, -10.0));
+	CHECK(near(grown[2].x, 110.0) && near(grown[2].y, 110.0));
+
+	// 辺ごとに距離を変えられる（南だけ 50 動かす）。動かさない辺はその位置のまま。
+	const std::vector<core::Vec2> one = core::offsetPolygon(square, {50.0, 0.0, 0.0, 0.0});
+	CHECK(near(one[0].y, -50.0) && near(one[1].y, -50.0));
+	CHECK(near(one[1].x, 100.0) && near(one[2].y, 100.0));
+
+	// 同一直線上に分割された連続辺（平行でマイターが求まらない）は法線方向へずらす。
+	const std::vector<core::Vec2> split = {
+		{0.0, 0.0}, {50.0, 0.0}, {100.0, 0.0}, {100.0, 100.0}, {0.0, 100.0}};
+	const std::vector<core::Vec2> shifted =
+		core::offsetPolygon(split, {10.0, 10.0, 10.0, 10.0, 10.0});
+	CHECK_EQ(shifted.size(), std::size_t{5});
+	if (shifted.size() != 5)
+		return;
+	CHECK(near(shifted[1].x, 50.0) && near(shifted[1].y, -10.0));
+}
+
 TEST_MAIN();

@@ -136,6 +136,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/core/Foundation.cpp
 		src/core/Geometry.cpp
 		src/core/Layout.cpp
+		src/core/PolygonBool.cpp
 		src/core/Progress.cpp
 		src/core/Region.cpp
 		src/core/Trace.cpp

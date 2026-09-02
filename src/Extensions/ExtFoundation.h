@@ -8,8 +8,8 @@
 //	【何をするか】リセットのたびに、レコードに保存した部品（取り込んだ IFC の実寸。
 //	core::decodeFoundation）と OIP の寸法パラメータから基礎の形を決め直し
 //	（core::applyFoundationParams）、底盤・その下の砕石・立上り・地中梁・床付けを押し出し
-//	ソリッドとして自分の中に描く（core::foundationSolids）。2D/平面向けには底盤の外形・
-//	立上りの矩形・地中梁の天端幅の矩形を描く（core::foundationPlanShapes）。幾何の計算は
+//	ソリッドとして自分の中に描く（core::foundationSolids）。2D/平面向けには底盤・立上りの
+//	天端・地中梁の天端の外形を描く（core::foundationPlanShapes）。幾何の計算は
 //	すべて core/Foundation（無 SDK・テスト済み）にあり、ここは SDK のオブジェクトを作るだけ。
 //
 //	【なぜ PIO か】M9〜M17 は立上り＝壁・底盤＝スラブ・地中梁＝モディファイア＋可視ソリッドと
@@ -19,9 +19,11 @@
 //	一体に表示される。さらに**寸法を後から変えられる**——スラブを厚くする・立上りを高くする
 //	といった設計変更を取り込み直さずに OIP で済ませられる。
 //
-//	【編集の規則】OIP の値は**代表値**（取り込み時に最も多かった実寸）で、変えた差を部品へ
-//	配る（core::applyFoundationParams の doc コメント）。実データは立上り幅が 120 / 150 /
-//	300 と混在するので、値そのものを一律に置き換えると細部が失われる。
+//	【編集の規則】OIP の値は**代表値**（取り込み時に最も多かった実寸）で、変えた差を仕様
+//	グループへ配る（core::applyFoundationParams の doc コメント）。実データは高さの違う底盤・
+//	地中梁が混在するので、値そのものを一律に置き換えると細部が失われる。**立上りの幅は
+//	パラメータに無い**——立上りは天端の面の多角形で持つので、幅は外形そのものが表す
+//	（core/Foundation.h 冒頭）。
 //
 //	【登録名はこのプラグイン固有にする】ユニバーサル名は "HomeskzFoundation"。
 //
@@ -50,8 +52,7 @@ namespace HomeskzIfcImport
 	// 黙って無視される**ので、定義はここ 1 か所。並びは OIP に出る順（core::FoundationParams
 	// と 1 対 1）。単位はすべて mm（図面の単位で表示される）。
 	constexpr const char* kParamSlabThickness = "SlabThickness"; // 底盤のコンクリート厚
-	constexpr const char* kParamSlabTop = "SlabTop";	   // 底盤天端の高さ（GL から）
-	constexpr const char* kParamRiserWidth = "RiserWidth"; // 立上りの幅
+	constexpr const char* kParamSlabTop = "SlabTop";	 // 底盤天端の高さ（GL から）
 	constexpr const char* kParamRiserTop = "RiserTop";	 // 立上り天端の高さ（GL から）
 	constexpr const char* kParamBeamDepth = "BeamDepth"; // 地中梁のせい（底盤底面から）
 	constexpr const char* kParamHaunchWidth = "HaunchWidth"; // 地中梁の斜め部の片側の幅

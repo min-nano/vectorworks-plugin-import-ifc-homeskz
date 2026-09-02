@@ -694,15 +694,20 @@ namespace
 		foundation.leanConcreteClass = "z構成要素-捨てコンクリート";
 		foundation.gravelClass = "z構成要素-砕石";
 		foundation.slabs.push_back(
-			core::FoundationSlab{{core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0},
-								  core::Vec2{3640.0, 2730.0}, core::Vec2{0.0, 2730.0}},
-								 50.0,
-								 150.0});
-		foundation.risers.push_back(core::FoundationRiser{
-			core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0}, 120.0, -100.0, 400.0});
-		foundation.beams.push_back(core::FoundationBeam{core::Vec2{0.0, 1365.0},
-														core::Vec2{3640.0, 1365.0}, 300.0, 200.0,
-														200.0, 140.0, -100.0, 140.0});
+			core::FoundationSlabGroup{50.0,
+									  150.0,
+									  {{core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0},
+										core::Vec2{3640.0, 2730.0}, core::Vec2{0.0, 2730.0}}}});
+		foundation.risers.push_back(
+			core::FoundationRiserGroup{400.0,
+									   {{core::Vec2{0.0, 0.0}, core::Vec2{3640.0, 0.0},
+										 core::Vec2{3640.0, 120.0}, core::Vec2{0.0, 120.0}}}});
+		foundation.beams.push_back(
+			core::FoundationBeamGroup{-240.0,
+									  200.0,
+									  140.0,
+									  {{core::Vec2{1670.0, 0.0}, core::Vec2{1970.0, 0.0},
+										core::Vec2{1970.0, 2730.0}, core::Vec2{1670.0, 2730.0}}}});
 		foundation.params = core::foundationBaseParams(foundation);
 		return foundation;
 	}
@@ -748,12 +753,18 @@ TEST(validate_rejects_foundation_without_parts)
 
 TEST(validate_rejects_bad_slab_parts)
 {
-	// 外形が面にならない（2 点）／厚み 0 の底盤。
+	// 外形が面にならない（2 点）／外形が 1 つも無い／厚み 0 の底盤。
 	core::Document boundary;
 	core::FoundationCommand foundation = validFoundation();
-	foundation.slabs[0].boundary.resize(2);
+	foundation.slabs[0].outlines[0].resize(2);
 	boundary.foundation = foundation;
 	CHECK(!core::validateDocument(boundary));
+
+	core::Document empty;
+	foundation = validFoundation();
+	foundation.slabs[0].outlines.clear();
+	empty.foundation = foundation;
+	CHECK(!core::validateDocument(empty));
 
 	core::Document thickness;
 	foundation = validFoundation();
@@ -764,29 +775,31 @@ TEST(validate_rejects_bad_slab_parts)
 
 TEST(validate_rejects_bad_riser_parts)
 {
-	// 幅 0／壁芯が縮退／天端が下端以下の立上り。
-	core::Document width;
-	core::FoundationCommand foundation = validFoundation();
-	foundation.risers[0].width = 0.0;
-	width.foundation = foundation;
-	CHECK(!core::validateDocument(width));
-
+	// 天端の面の外形が面にならない／1 つも無い立上り（下端は底盤に取り合って決まるので、
+	// 高さは検証しない）。
 	core::Document degenerate;
-	foundation = validFoundation();
-	foundation.risers[0].end = foundation.risers[0].start;
+	core::FoundationCommand foundation = validFoundation();
+	foundation.risers[0].outlines[0].resize(2);
 	degenerate.foundation = foundation;
 	CHECK(!core::validateDocument(degenerate));
 
-	core::Document flat;
+	core::Document empty;
 	foundation = validFoundation();
-	foundation.risers[0].top = foundation.risers[0].bottom;
-	flat.foundation = foundation;
-	CHECK(!core::validateDocument(flat));
+	foundation.risers[0].outlines.clear();
+	empty.foundation = foundation;
+	CHECK(!core::validateDocument(empty));
+
+	// 天端が底盤の底面より低くても命令としては妥当（描くときに落ちるだけ）。
+	core::Document low;
+	foundation = validFoundation();
+	foundation.risers[0].top = -1000.0;
+	low.foundation = foundation;
+	CHECK(core::validateDocument(low));
 }
 
 TEST(validate_rejects_bad_beam_parts)
 {
-	// 中心線が縮退／下端幅 0／せい 0／負の張り出しの地中梁。
+	// 底の面の外形が面にならない／1 つも無い／斜め寸法が負の地中梁。
 	const auto broken = [](auto mutate)
 	{
 		core::Document document;
@@ -795,17 +808,16 @@ TEST(validate_rejects_bad_beam_parts)
 		document.foundation = foundation;
 		return !core::validateDocument(document);
 	};
-	CHECK(broken([](core::FoundationBeam& beam) { beam.end = beam.start; }));
-	CHECK(broken([](core::FoundationBeam& beam) { beam.bottomWidth = 0.0; }));
-	CHECK(broken([](core::FoundationBeam& beam) { beam.depth = 0.0; }));
-	CHECK(broken([](core::FoundationBeam& beam) { beam.haunchLeft = -1.0; }));
-	CHECK(broken([](core::FoundationBeam& beam) { beam.haunchHeight = -1.0; }));
-	// 張り出し 0（矩形断面）・斜め部の高さ 0 は正常。
+	CHECK(broken([](core::FoundationBeamGroup& beam) { beam.outlines[0].resize(2); }));
+	CHECK(broken([](core::FoundationBeamGroup& beam) { beam.outlines.clear(); }));
+	CHECK(broken([](core::FoundationBeamGroup& beam) { beam.haunchWidth = -1.0; }));
+	CHECK(broken([](core::FoundationBeamGroup& beam) { beam.haunchHeight = -1.0; }));
+	// 斜め寸法 0（矩形断面）は正常。
 	CHECK(!broken(
-		[](core::FoundationBeam& beam)
+		[](core::FoundationBeamGroup& beam)
 		{
-			beam.haunchLeft = 0.0;
-			beam.haunchRight = 0.0;
+			beam.haunchWidth = 0.0;
+			beam.haunchHeight = 0.0;
 		}));
 }
 
@@ -1175,7 +1187,7 @@ TEST(section_height_range_covers_floors_roofs_foundation_and_stories)
 	// 基礎の底盤（天端 50・厚 150 → 下端 −100）の下には砕石（130）が敷かれるので、
 	// 足元は −230 になる。屋根（軒 6000）で上が決まる。
 	core::FoundationCommand foundation;
-	foundation.slabs.push_back(core::FoundationSlab{{}, 50.0, 150.0});
+	foundation.slabs.push_back(core::FoundationSlabGroup{50.0, 150.0, {}});
 	document.foundation = foundation;
 
 	core::RoofCommand roof;
@@ -1197,16 +1209,13 @@ TEST(section_height_range_covers_floors_roofs_foundation_and_stories)
 TEST(section_height_range_reaches_ground_beam_bedding_bottom)
 {
 	core::Document document;
-	// 底盤（天端 50・厚 150 → 下端 −100）に、そこから更に深く垂れ下がる地中梁（せい 600 →
-	// 下端 −700）を 1 本。**モデルの最深部は底盤ではなく地中梁の下の床付けの底**（梁下端から
-	// 更に 130 下＝ −830）なので、範囲はそこまで届く。立上りの天端（400）は底盤天端より高い
-	// ので上端になる。
+	// 底盤（天端 50・厚 150 → 下端 −100）に、そこから更に深く垂れ下がる地中梁（底 −700）を
+	// 1 本。**モデルの最深部は底盤ではなく地中梁の下の床付けの底**（梁の底から更に 130 下＝
+	// −830）なので、範囲はそこまで届く。立上りの天端（400）は底盤天端より高いので上端になる。
 	core::FoundationCommand foundation;
-	foundation.slabs.push_back(core::FoundationSlab{{}, 50.0, 150.0});
-	foundation.risers.push_back(
-		core::FoundationRiser{core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, 120.0, -100.0, 400.0});
-	foundation.beams.push_back(core::FoundationBeam{core::Vec2{0.0, 0.0}, core::Vec2{2000.0, 0.0},
-													150.0, 75.0, 75.0, 600.0, -100.0, 600.0});
+	foundation.slabs.push_back(core::FoundationSlabGroup{50.0, 150.0, {}});
+	foundation.risers.push_back(core::FoundationRiserGroup{400.0, {}});
+	foundation.beams.push_back(core::FoundationBeamGroup{-700.0, 75.0, 600.0, {}});
 	document.foundation = foundation;
 
 	double start = 0.0;
@@ -1309,15 +1318,20 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	floor.boundary = boundaryAt(1000.0);
 	document.floors.push_back(floor);
 
-	// 基礎は底盤の外形・立上りの壁芯・地中梁の中心線のすべてを見る（1 つの PIO に入る）。
+	// 基礎は底盤・立上りの天端・地中梁の底のすべての外形を見る（1 つの PIO に入る）。
 	core::FoundationCommand foundation;
 	foundation.layer = "F-基礎";
-	foundation.slabs.push_back(core::FoundationSlab{boundaryAt(1100.0), 50.0, 150.0});
-	foundation.risers.push_back(core::FoundationRiser{
-		core::Vec2{-1400.0, 0.0}, core::Vec2{1400.0, 0.0}, 120.0, -100.0, 400.0});
-	foundation.beams.push_back(core::FoundationBeam{core::Vec2{0.0, -1450.0},
-													core::Vec2{0.0, 1450.0}, 300.0, 200.0, 200.0,
-													140.0, -100.0, 140.0});
+	foundation.slabs.push_back(core::FoundationSlabGroup{50.0, 150.0, {boundaryAt(1100.0)}});
+	foundation.risers.push_back(
+		core::FoundationRiserGroup{400.0,
+								   {{core::Vec2{-1400.0, -60.0}, core::Vec2{1400.0, -60.0},
+									 core::Vec2{1400.0, 60.0}, core::Vec2{-1400.0, 60.0}}}});
+	foundation.beams.push_back(
+		core::FoundationBeamGroup{-240.0,
+								  200.0,
+								  140.0,
+								  {{core::Vec2{-150.0, -1450.0}, core::Vec2{150.0, -1450.0},
+									core::Vec2{150.0, 1450.0}, core::Vec2{-150.0, 1450.0}}}});
 	document.foundation = foundation;
 
 	core::RoofCommand roof;

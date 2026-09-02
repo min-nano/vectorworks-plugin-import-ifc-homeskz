@@ -179,6 +179,14 @@ vw_add_test(ParseGridTests ParseGridTests.cpp CORE FIXTURES)
 # Pure geometry — no STEP, no SDK, no fixtures.
 vw_add_test(CoreRegionTests CoreRegionTests.cpp CORE)
 
+# Polygon set operations (src/core/PolygonBool): the union that folds same-spec
+# foundation outlines together, the difference that keeps the slab's gravel out of the
+# ground-beam concrete, the "connected" predicate (shared edge / overlap, but not a bare
+# corner) and the component grouping. Pins down that a ring of bands keeps its hole, so
+# a lattice of strip footings is never folded into one filled slab. Pure geometry — no
+# STEP, no SDK, no fixtures.
+vw_add_test(CorePolygonBoolTests CorePolygonBoolTests.cpp CORE)
+
 # Connected components (src/core/UnionFind): the pairwise-predicate union-find that the
 # wall / ohbiki / ground-beam merges and the wall-join clustering all share. Pins down
 # the determinism contract (representative = smallest index, components in

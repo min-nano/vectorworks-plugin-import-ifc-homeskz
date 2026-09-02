@@ -9,7 +9,9 @@
 
 #include "core/Geometry.h"
 
+#include <cmath>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::core
@@ -186,5 +188,90 @@ namespace HomeskzIfcImport::core
 			current = std::move(next);
 		}
 		return current.size() >= 3 ? current : std::vector<Vec2>{};
+	}
+
+	// --- 多角形の基本（符号付き面積・内外判定・オフセット）----------------------------
+
+	double shoelaceSigned(const std::vector<Vec2>& polygon)
+	{
+		double total = 0.0;
+		const std::size_t n = polygon.size();
+		for (std::size_t i = 0; i < n; ++i)
+		{
+			const Vec2& a = polygon[i];
+			const Vec2& b = polygon[(i + 1) % n];
+			total += (a.x * b.y) - (b.x * a.y);
+		}
+		return total / 2.0;
+	}
+
+	bool pointInPolygon(const Vec2& point, const std::vector<Vec2>& polygon)
+	{
+		const std::size_t n = polygon.size();
+		if (n < 3)
+			return false;
+		bool inside = false;
+		for (std::size_t i = 0, j = n - 1; i < n; j = i++)
+		{
+			const Vec2& a = polygon[i];
+			const Vec2& b = polygon[j];
+			if ((a.y > point.y) != (b.y > point.y))
+			{
+				const double x = a.x + ((point.y - a.y) * (b.x - a.x) / (b.y - a.y));
+				if (point.x < x)
+					inside = !inside;
+			}
+		}
+		return inside;
+	}
+
+	bool lineIntersection(const Vec2& p1, const Vec2& d1, const Vec2& p2, const Vec2& d2, Vec2& out)
+	{
+		const double denom = cross(d1, d2);
+		if (std::abs(denom) < 1e-12)
+			return false;
+		const double t = cross(p2 - p1, d2) / denom;
+		out = p1 + (d1 * t);
+		return true;
+	}
+
+	std::vector<Vec2> offsetPolygon(const std::vector<Vec2>& polygon,
+									const std::vector<double>& dists)
+	{
+		const std::size_t n = polygon.size();
+		if (n < 3 || dists.size() != n)
+			return polygon; // 距離が辺の数と合わない入力は動かさない（呼び出し側の取り違え）
+		std::vector<std::pair<Vec2, Vec2>> lines; // (点, 方向)
+		lines.reserve(n);
+		for (std::size_t i = 0; i < n; ++i)
+		{
+			const Vec2& a = polygon[i];
+			const Vec2 edge = polygon[(i + 1) % n] - a;
+			const double len = length(edge);
+			if (len <= 0.0)
+			{
+				lines.emplace_back(a, Vec2{1.0, 0.0});
+				continue;
+			}
+			const Vec2 u{edge.x / len, edge.y / len};
+			// CCW 多角形の外向き法線＝進行方向の右。
+			lines.emplace_back(Vec2{a.x + (dists[i] * u.y), a.y - (dists[i] * u.x)}, u);
+		}
+
+		std::vector<Vec2> out;
+		out.reserve(n);
+		for (std::size_t i = 0; i < n; ++i)
+		{
+			const auto& [q1, d1] = lines[(i + n - 1) % n];
+			const auto& [q2, d2] = lines[i];
+			Vec2 vertex;
+			if (!lineIntersection(q1, d1, q2, d2, vertex))
+			{
+				// 平行（同一直線の連続辺）: 法線方向へずらした点で代用する。
+				vertex = Vec2{polygon[i].x + (dists[i] * d2.y), polygon[i].y - (dists[i] * d2.x)};
+			}
+			out.push_back(vertex);
+		}
+		return out;
 	}
 } // namespace HomeskzIfcImport::core

@@ -5,10 +5,15 @@
 //	へ」）。ホームズ君 IFC の基礎要素（IfcFooting と底盤の IfcSlab）を Name で分類し、
 //	**基礎全体を 1 つの命令（core::FoundationCommand）**へ組み立てる。
 //
-//	  * 立上り（基礎梁。Name が "基礎梁" 始まりの IfcFooting）→ 部品 FoundationRiser
-//	  * 底盤（Name に "底盤" を含む IfcSlab / IfcFooting）→ 部品 FoundationSlab
-//	  * 地中梁（Name に "地中梁" を含む IfcFooting）→ 部品 FoundationBeam（台形断面を
-//	    下端幅・張り出し・せいへ当てはめたもの。core::fitFoundationBeam）
+//	部品は**同一仕様ごとに外形の多角形でまとめたグループ**（core/Foundation.h 冒頭）:
+//	  * 立上り（基礎梁。Name が "基礎梁" 始まりの IfcFooting）→ **天端の面**の外形を天端の
+//	    高さごとに（FoundationRiserGroup）
+//	  * 底盤（Name に "底盤" を含む IfcSlab / IfcFooting）→ 外形を厚さと天端の高さごとに
+//	    （FoundationSlabGroup）
+//	  * 地中梁（Name に "地中梁" を含む IfcFooting）→ 台形断面を当てはめて（core::
+//	    fitFoundationBeam）**底の面**の外形を、底の高さと斜め寸法ごとに（FoundationBeamGroup）
+//	同じグループの中で繋がる外形は和で 1 枚へ畳む（core::mergePolygons。畳めない＝穴ができる
+//	・複数に分かれる成分はそのまま残す）。
 //
 //	M9〜M17 はこれらを壁・スラブ・モディファイアと**別々の VW オブジェクト**にしていたが、
 //	M20 で **1 つの自作 PIO**（Extensions/ExtFoundation）にまとめた。解析側の仕事は
@@ -42,7 +47,7 @@
 //	  1. mergeSlabCommands      … 同厚・同高で連続する底盤を多角形の和で 1 枚へ統合する
 //	  2. alignSlabsToWallFaces  … 外形が立上りの**壁心**に一致しているので、辺ごとに沿う
 //	                              立上りの**外面**（壁心 + 半壁厚）まで外側へ広げる
-//	地中梁の底盤への振り分けと床付け（M10 / M17）は PIO 側（core::foundationBeddings）へ移った。
+//	地中梁の底盤への振り分けと床付け（M10 / M17）は PIO 側（core::foundationSolids）へ移った。
 //
 
 #pragma once
@@ -300,13 +305,14 @@ namespace HomeskzIfcImport::parse
 											 const std::vector<RiserPiece>& walls);
 
 	// 同じ厚さ・同じ高さで連続する底盤を 1 枚へ統合する。断面キーごとにグループ化し、
-	// 各グループ内で「辺を共有／面で重なる」底盤の連結成分を求め、成分ごとに**任意向きの単純
-	// 多角形の和**を 1 枚にする（軸平行の矩形に限らず、傾いた底盤や 45 度取合いの斜め辺も統合
-	// できる）。
+	// グループごとに core::mergePolygons（連結成分 → 和）へ渡す。軸平行の矩形に限らず、
+	// 傾いた底盤や 45 度取合いの斜め辺も統合できる。
 	//
 	// **統合しないもの**: 単独の底盤／和が穴を含む・複数の外形に分かれる成分（＝布基礎の
 	// 升目状ラティス。ベタで埋めると部屋の下までコンクリートになり誤り）／和の計算に
-	// 失敗した成分（開ループ）。入力順に対して決定的。
+	// 失敗した成分（開ループ）。判断は core::mergePolygons が持つ。入力順に対して決定的で、
+	// **並びは断面キーの現れた順**（統合の有無で位置が入れ替わらない）。厚さ・高さは
+	// グループの先頭の値に揃う（同じキー＝許容内で同じ値）。
 	std::vector<SlabPiece> mergeSlabCommands(const std::vector<SlabPiece>& slabs);
 
 	// 底盤の外周を立上りの外面へ合わせて外側へ広げる。ホームズ君 IFC の底盤外形は立上りの**壁
@@ -320,10 +326,14 @@ namespace HomeskzIfcImport::parse
 
 	// 基礎全体を 1 つの命令（core::FoundationCommand）へ組み立てる（M20）。立上り
 	// （Context::walls）・底盤（buildSlabCommands）・地中梁（buildGroundBeamPrisms →
-	// core::fitFoundationBeam）を部品にし、配置先レイヤ "F-基礎"・クラス（PIO 本体と底盤・
-	// 地中梁＝基礎スラブ、立上り＝立ち上がり、床付け＝素材クラス）・代表値
-	// （core::foundationBaseParams）を入れる。基礎要素が無い／部品が 1 つも取れない IFC は
-	// 空（std::nullopt）。
+	// core::fitFoundationBeam）を**同一仕様ごとの外形多角形のグループ**にし（ヘッダ冒頭）、
+	// 配置先レイヤ "F-基礎"・クラス（PIO 本体と底盤・地中梁＝基礎スラブ、立上り＝立ち上がり、
+	// 床付け＝素材クラス）・代表値（core::foundationBaseParams）を入れる。基礎要素が無い／
+	// 部品が 1 つも取れない IFC は空（std::nullopt）。
+	//
+	// **高さの取り合いは命令に持たせない**——立上りの下端と地中梁の天端は「その真下／真上に
+	// 来る底盤の底面」なので、描くときに決まる（core::foundationSlabBottom）。解析側が持つのは
+	// 立上りの天端・地中梁の底という**実測できる値**だけ。
 	std::optional<core::FoundationCommand> buildFoundationCommand(Context& context);
 	std::optional<core::FoundationCommand> buildFoundationCommand(const Model& model);
 } // namespace HomeskzIfcImport::parse
