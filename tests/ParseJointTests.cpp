@@ -23,6 +23,7 @@
 #include "parse/Loader.h"
 #include "parse/Member.h"
 #include "parse/StructuralClass.h"
+#include "core/ImportOptions.h"
 
 #include <algorithm>
 #include <cmath>
@@ -34,8 +35,10 @@
 
 using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::ColumnCommand;
+using HomeskzIfcImport::core::defaultSymbolName;
 using HomeskzIfcImport::core::MemberCommand;
 using HomeskzIfcImport::core::SymbolCommand;
+using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::parse::buildColumnCommands;
 using HomeskzIfcImport::parse::buildJointCommands;
@@ -46,7 +49,6 @@ using HomeskzIfcImport::parse::CLASS_NOBORIBARI;
 using HomeskzIfcImport::parse::ColumnGeom;
 using HomeskzIfcImport::parse::columnGeom;
 using HomeskzIfcImport::parse::endHasReceiver;
-using HomeskzIfcImport::parse::kSymbolJoint;
 using HomeskzIfcImport::parse::MemberGeom;
 using HomeskzIfcImport::parse::memberGeom;
 using HomeskzIfcImport::parse::Model;
@@ -58,6 +60,10 @@ using HomeskzIfcTests::near;
 
 namespace
 {
+	// 既定のシンボル名。**唯一の定義は役割の表**（core::symbolRoles()）なので、
+	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
+	const std::string kSymbolJoint = defaultSymbolName(SymbolRole::Joint);
+
 	// 横架材命令。既定は幅 120 / せい 180 / 天端 425 の水平材。バウンド offset（レベルの絶対
 	// Z から天端 Z までの距離）は既定 0＝レイヤ平面ちょうど。仕口の高さはこの offset
 	// をそのまま写すので、高さを見るテストだけ明示的に入れる。

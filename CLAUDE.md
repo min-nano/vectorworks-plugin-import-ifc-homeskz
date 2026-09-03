@@ -146,6 +146,13 @@ VectorWorks ネイティブオブジェクト
 `core/Document.h` の命令構造体と `validateDocument` の検証＋`draw/<要素>.{h,cpp}`（描画）＋
 `tests/Parse<要素>Tests.cpp`（無 SDK テスト）＋`parse/Summary.cpp` の `kElements` に 1 行。
 
+**取り込み設定（`core/ImportOptions`）**: 「どの要素を図面のどのシンボルで置くか」は
+取り込みのたびに設定ダイアログ（`draw/SettingsDialog`）で決まる。**役割の表（表示名・
+既定名）は `core::symbolRoles()` ただ 1 つ**で、解析側はシンボル名の固定値を持たない
+（`parse/Context` の `options()`、または `build*Commands` の `options` 引数から引く）。
+設定は SDK も STEP も知らない値なので `core/` に置く——Document と同じ「フェーズ間で
+運ぶ値」で、決めるのは描画側・使うのは解析側になる。
+
 **共有コンテキスト（`parse/Context`）**: 各要素の解析は「ストーリ一覧」「通り芯の
 センタリング中心」「階に属する要素」「屋根面」を共通して必要とする（加えて横架材・柱・
 立上りの命令そのものも複数の要素が参照するのでキャッシュする）。`buildDocument` は

@@ -16,6 +16,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 #include "core/Progress.h"
 
 #include <string>
@@ -38,4 +39,12 @@ namespace HomeskzIfcImport::parse
 	// 終わり、途中で切り上げる意味が無い（体感時間はすべて描画側にある。
 	// core/Progress.h の配分の但し書き参照）。中止は描画側で効かせる。
 	core::Document buildDocument(const std::string& ifcPath, core::ProgressReporter& progress);
+
+	// 取り込み設定（置換するシンボルの対応。core/ImportOptions.h）を与えて解析する。
+	// 上の 2 つはこれを既定の設定で呼ぶだけ＝**設定を触らなければ従来と同じ結果**になる。
+	//
+	// 設定は解析の入口でだけ受け取り、共有コンテキスト（parse/Context）が全要素へ配る
+	// （要素ごとに引数を足していくと、シンボルを 1 つ増やすたびに経路が増える）。
+	core::Document buildDocument(const std::string& ifcPath, core::ProgressReporter& progress,
+								 const core::ImportOptions& options);
 } // namespace HomeskzIfcImport::parse

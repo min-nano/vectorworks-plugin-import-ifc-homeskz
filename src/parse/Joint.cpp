@@ -5,6 +5,7 @@
 //
 
 #include "parse/Joint.h"
+#include "core/ImportOptions.h"
 #include "parse/StructuralClass.h"
 
 #include <algorithm>
@@ -137,8 +138,16 @@ namespace HomeskzIfcImport::parse
 	}
 
 	std::vector<SymbolCommand> buildJointCommands(const std::vector<MemberCommand>& members,
-												  const std::vector<ColumnCommand>& columns)
+												  const std::vector<ColumnCommand>& columns,
+												  const core::ImportOptions& options)
 	{
+		// 取り込まない役割は命令を 1 つも作らない（core/ImportOptions.h）。
+		if (!options.isEnabled(core::SymbolRole::Joint))
+			return {};
+
+		// シンボル名は端部ごとに変わらないので 1 回だけ引く。
+		const std::string& symbol = options.symbol(core::SymbolRole::Joint);
+
 		std::vector<MemberGeom> geoms;
 		geoms.reserve(members.size());
 		for (const MemberCommand& member : members)
@@ -170,7 +179,7 @@ namespace HomeskzIfcImport::parse
 
 				SymbolCommand command;
 				command.layer = members[i].layer;
-				command.symbol = kSymbolJoint;
+				command.symbol = symbol;
 				command.position = point;
 				// 梁軸に沿って端部から部材内側へ向かう方向（度・反時計回り）。
 				command.angle = std::atan2(inward.y, inward.x) * 180.0 / std::numbers::pi;

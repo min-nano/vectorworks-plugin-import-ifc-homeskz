@@ -6,6 +6,7 @@
 //
 
 #include "parse/FireBrace.h"
+#include "core/ImportOptions.h"
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
@@ -114,6 +115,10 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<SymbolCommand> buildFireBraceCommands(Context& context)
 	{
+		// 取り込まない役割は命令を 1 つも作らない（core/ImportOptions.h）。
+		if (!context.options().isEnabled(core::SymbolRole::FireBrace))
+			return {};
+
 		const Model& model = context.model();
 		const std::vector<StoryInfo>& stories = context.stories();
 		if (stories.empty())
@@ -148,7 +153,7 @@ namespace HomeskzIfcImport::parse
 
 				SymbolCommand command;
 				command.layer = layer;
-				command.symbol = kSymbolFireBrace;
+				command.symbol = context.options().symbol(core::SymbolRole::FireBrace);
 				command.position = *base - center;
 				command.angle = fireBraceAngle(*base, world);
 				commands.push_back(std::move(command));

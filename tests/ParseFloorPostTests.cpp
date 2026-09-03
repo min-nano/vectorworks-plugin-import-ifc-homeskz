@@ -22,6 +22,7 @@
 #include "parse/Footing.h"
 #include "parse/Grid.h"
 #include "parse/Loader.h"
+#include "core/ImportOptions.h"
 
 #include <algorithm>
 #include <cmath>
@@ -31,7 +32,9 @@
 #include <vector>
 
 using namespace HomeskzIfcImport;
+using HomeskzIfcImport::core::defaultSymbolName;
 using HomeskzIfcImport::core::SymbolCommand;
+using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::core::WallCommand;
 using HomeskzIfcImport::parse::buildFloorPostCommands;
@@ -44,7 +47,6 @@ using HomeskzIfcImport::parse::floorPostOffsets;
 using HomeskzIfcImport::parse::gridCenterOf;
 using HomeskzIfcImport::parse::hasFoundation;
 using HomeskzIfcImport::parse::kLayerFoundationFloorPost;
-using HomeskzIfcImport::parse::kSymbolFloorPost;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::mergeCollinearOhbiki;
 using HomeskzIfcImport::parse::Model;
@@ -60,6 +62,10 @@ using HomeskzIfcTests::StepText;
 
 namespace
 {
+	// 既定のシンボル名。**唯一の定義は役割の表**（core::symbolRoles()）なので、
+	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
+	const std::string kSymbolFloorPost = defaultSymbolName(SymbolRole::FloorPost);
+
 	// 幅 105mm の支持材（土台または他の大引）を x=0 の位置に Y 方向へ通す（芯線 x=0、区間 y
 	// ∈ [−1000, 1000]）。
 	const std::vector<SupportLine> kSupport = {

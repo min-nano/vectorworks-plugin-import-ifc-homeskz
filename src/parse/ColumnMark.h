@@ -39,6 +39,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 #include "parse/Column.h"
 
 #include <string>
@@ -65,12 +66,12 @@ namespace HomeskzIfcImport::parse
 	// 伏図記号の作図クラス。記号クラス。
 	inline constexpr const char* kPlanMarkClass = "01作図-04記号-04構造-一般";
 
-	// 伏図記号で使うシンボル名。span レイヤは単一種別なので、そのレイヤの柱の構造用途（柱=4
-	// / 小屋束=5）でどちらかに決まる。
+	// 伏図記号で使うシンボル名は**取り込み設定が持つ**（core::SymbolRole の PlanMarkColumn /
+	// PlanMarkKoyazuka。既定は "柱伏図記号" / "束伏図記号"）。span レイヤは単一種別なので、
+	// そのレイヤの柱の構造用途（柱=4 / 小屋束=5）でどちらの役割かが決まる。
 	// **シンボル定義はプラグインが作らない**——テンプレートやリソースライブラリから
-	// 供給される前提（シンボル置換系と同じ作法。draw/Symbol.cpp）。
-	inline constexpr const char* kPlanMarkSymbolColumn = "柱伏図記号"; // 柱（管柱・通し柱）
-	inline constexpr const char* kPlanMarkSymbolKoyazuka = "束伏図記号"; // 小屋束
+	// 供給される前提（シンボル置換系と同じ作法。draw/Symbol.cpp）。設定ダイアログで図面の
+	// 別のシンボルへ差し替えられる（core/ImportOptions.h）。
 
 	// 柱命令から記号の命令を組み立てる。
 	//
@@ -80,8 +81,12 @@ namespace HomeskzIfcImport::parse
 	//
 	// 伏図記号のシンボルはその span レイヤの柱の構造用途で決める（span レイヤは単一種別＝
 	// 柱のみ、または小屋束のみ。parse/Column.h）。
+	//
+	// 伏図記号のシンボル名は取り込み設定が持つ。options を省いた呼び出しは既定の設定＝
+	// 従来と同じ名前になる（単体テスト用）。
 	std::vector<core::ColumnMarkCommand>
-	buildColumnMarkCommands(const std::vector<core::ColumnCommand>& columns);
+	buildColumnMarkCommands(const std::vector<core::ColumnCommand>& columns,
+							const core::ImportOptions& options = core::ImportOptions{});
 
 	// 実在する伏図記号レイヤを **to の昇順**で（重複を除いて）列挙する。伏図が「切断位置の
 	// 直下のレイヤ」を 1 枚選ぶのに使う（parse/Sheet）。

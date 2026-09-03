@@ -19,6 +19,7 @@
 #include "core/Geometry.h"
 #include "parse/FireBrace.h"
 #include "parse/Loader.h"
+#include "core/ImportOptions.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -27,14 +28,15 @@
 #include <vector>
 
 using namespace HomeskzIfcImport;
+using HomeskzIfcImport::core::defaultSymbolName;
 using HomeskzIfcImport::core::SymbolCommand;
+using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::parse::buildFireBraceCommands;
 using HomeskzIfcImport::parse::fireBraceAngle;
 using HomeskzIfcImport::parse::fireBraceBasePoint;
 using HomeskzIfcImport::parse::fireBraceEndFaces;
 using HomeskzIfcImport::parse::isFireBrace;
-using HomeskzIfcImport::parse::kSymbolFireBrace;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::Segment2D;
@@ -45,6 +47,10 @@ using HomeskzIfcTests::near;
 
 namespace
 {
+	// 既定のシンボル名。**唯一の定義は役割の表**（core::symbolRoles()）なので、
+	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
+	const std::string kSymbolFireBrace = defaultSymbolName(SymbolRole::FireBrace);
+
 	// 中心線 v=0 に対称な footprint（長辺 v=±5、端面が v をまたぐ）。ワールド座標は簡単のため
 	// 局所座標と一致させる。
 	const std::vector<Vec2> kLocal = {{0.0, -5.0}, {0.0, 5.0}, {10.0, 5.0}, {12.0, -5.0}};

@@ -58,7 +58,9 @@ namespace HomeskzIfcImport::parse
 	class Context;
 
 	// 置換するハイブリッドシンボル名。
-	inline constexpr const char* kSymbolFloorPost = "床束";
+	// 置換するハイブリッドシンボル名は**取り込み設定が持つ**（core::SymbolRole::FloorPost。
+	// 既定は "床束"）。設定ダイアログで図面の別のシンボルへ差し替えられる
+	// （core/ImportOptions.h）。
 
 	// 床束の配置間隔（mm）。IFC に床束が無いための決め打ち値（半間＝910mm）。
 	inline constexpr double kFloorPostInterval = 910.0;

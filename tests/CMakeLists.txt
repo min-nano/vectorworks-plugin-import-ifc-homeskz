@@ -360,6 +360,16 @@ vw_add_test(ParseContextTests ParseContextTests.cpp CORE FIXTURES)
 # cases at the checked-in fixtures (tests/fixtures/).
 vw_add_test(ParseSummaryTests ParseSummaryTests.cpp CORE FIXTURES)
 
+# Import options (src/core/ImportOptions): the role table (which element is placed
+# with which symbol) and its defaults. Pure logic, no fixtures.
+vw_add_test(CoreImportOptionsTests CoreImportOptionsTests.cpp CORE)
+
+# The options' path through the parse phase: every module that writes a symbol
+# name into a command must go through the settings (a missing hop would silently
+# keep the default name). Runs buildDocument over every fixture, so it is one of
+# the slower tests (see the COST list below).
+vw_add_test(ParseImportOptionsTests ParseImportOptionsTests.cpp CORE FIXTURES)
+
 # --- 並列実行（ctest -j）の詰め方 ---------------------------------------------
 # ctest は COST の降順にテストを開始する。COST が無いと前回の実行の実測
 # （build/Testing/Temporary/CTestCostData.txt）を使うが、CI は毎回まっさらな
@@ -376,6 +386,7 @@ vw_add_test(ParseSummaryTests ParseSummaryTests.cpp CORE FIXTURES)
 # 丸めたもの。CiWaitScriptTests だけは性質が違い、本物の締切を待つ**ほぼ純粋な
 # 待ち時間**なので、CPU を占有しない代わりに何を足しても短くならない。いちばん先に
 # 始めておくのが効く。
+set_tests_properties(ParseImportOptionsTests PROPERTIES COST 14)
 set_tests_properties(ParseRafterTests PROPERTIES COST 13)
 set_tests_properties(LoaderTests PROPERTIES COST 12)
 set_tests_properties(ParseFootingTests PROPERTIES COST 11)
