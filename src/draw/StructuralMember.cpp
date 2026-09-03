@@ -40,12 +40,6 @@ namespace HomeskzIfcImport::draw
 		// 柱も標準の構造材ツールで描く。parse/Column.h）。
 		const TXString kStructuralMember(kStructuralMemberPlugin);
 
-		// SetObjectStoryBound に渡すバウンド ID。構造材は始端＝0・終端＝1 の 2 つを持つ（柱で
-		// は下端＝0・上端＝1 に対応する）。型は SDK の TObjectBoundID（= Sint32）だが、
-		// その別名は SDK の名前空間の中にあるため実体の Sint32 で持つ（暗黙変換で同じ）。
-		constexpr Sint32 kStartBoundID = 0;
-		constexpr Sint32 kEndBoundID = 1;
-
 		// 鉛直パス（NURBS 曲線）の次数。直線 1 本なので 1。byCtrlPts=false ＝ 通過点で定義す
 		// る。
 		constexpr short kPathDegree = 1;
@@ -93,17 +87,6 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kAxisAlignBottomCentre = "7"; // 中下（同 下段中央）
 		constexpr const char* kEndConditionSquare = "3";	// 直切り
 		constexpr const char* kProfileSeriesDefault = "AISC (Inch)";
-
-		// 命令の高さ基準（StoryBoundCommand）を SDK の構造体へ写す。
-		VectorWorks::SStoryObjectData StoryBoundOf(const core::StoryBoundCommand& bound)
-		{
-			VectorWorks::SStoryObjectData data;
-			data.fBound = VectorWorks::eStoryObjectBound_Story;
-			data.fBoundStory = static_cast<Sint8>(bound.storyOffset);
-			data.fLayerLevelType = TXString(bound.level.c_str());
-			data.fOffset = bound.offset;
-			return data;
-		}
 
 		// 断面基準点 → 構造材ツールのポップアップのキー。
 		const char* AxisAlignKey(StructuralAxisAlign align)
@@ -165,8 +148,8 @@ namespace HomeskzIfcImport::draw
 		// 構造材ツールの高さ基準が「レイヤの高さ」・offset 0 のまま実ジオメトリと矛盾する
 		// ことがなくなり、編集時に高さがリセットされない。水平材の傾斜はこの offset 差で
 		// 表れ、鉛直材ではこの差が柱高さを支配する。
-		gSDK->SetObjectStoryBound(object, kStartBoundID, StoryBoundOf(spec.startBound));
-		gSDK->SetObjectStoryBound(object, kEndBoundID, StoryBoundOf(spec.endBound));
+		gSDK->SetObjectStoryBound(object, kStartBoundID, StoryBoundData(spec.startBound));
+		gSDK->SetObjectStoryBound(object, kEndBoundID, StoryBoundData(spec.endBound));
 
 		VWParametricObj pio(object);
 		const TXString breadth = ResolveParamName(pio, kFieldMajorBreadth, kLocalizedBreadth);

@@ -123,6 +123,49 @@ namespace HomeskzIfcImport::draw
 	// docs/DEV-NOTES.md「シンボル定義を SDK から組み立てるのは断念した」）。
 	bool HasSymbolDefinition(const std::string& name);
 
+	// オブジェクト変数への書き込みの定型（TVariableBlock の組み立てを 1 か所に）。
+	// かつて野地板（2D 点・実数）と基礎・軸組図（真偽値。コメントで互いに「同じ流儀」と
+	// 参照し合っていた）が同じラッパーを各々持っていた。型ごとに名前を分けるのは、
+	// オーバーロードにすると Boolean（unsigned char）と double の変換順位が並んで
+	// 呼び分けが曖昧になるため。
+	void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value);
+	void SetRealVariable(MCObjectHandle object, short variable, double value);
+	void SetPointVariable(MCObjectHandle object, short variable, const core::Vec2& point);
+
+	// 一覧に無ければ追加する（登場順の dedupe。診断へ残すシンボル名・伏図記号レイヤ名・
+	// レベル種別の事前登録が同じ形を各々書いていた）。**参照を三項演算子で束ねてから
+	// push_back する形にしない**——clang-tidy の misc-const-correctness がその形の変更を
+	// 見落とし、束ねた先の vector に const を要求してくる（CI の tidy-mac / tidy-windows）。
+	void PushUnique(std::vector<std::string>& values, const std::string& value);
+
+	// 診断・記録の行を改行区切りで積む（text が空なら無視・sink が nullptr なら何もしない）。
+	// 要素ごとの診断の連結（draw/ExecuteDocument）と伏図・軸組図の診断組み立て
+	// （draw/Sheet・draw/Section）が同じ 4 行を各々持っていた。
+	void AppendLine(std::string* sink, const std::string& text);
+
+	// 「用紙・マスに収まったか」を測って確かめるときの遊び（用紙 mm）。線の太さのぶん外形が
+	// わずかに広がるので、ぴったりの図を「はみ出した」と数えない。伏図（draw/Sheet）と
+	// 軸組図（draw/Section）が同じ値で判定する（値がズレると片方だけ「収まらなかった」と
+	// 診断される）。
+	inline constexpr double kFitTol = 1.0;
+
+	// --- 高さ基準（ストーリバウンド）の定型 ----------------------------------------------
+	//
+	// SetObjectStoryBound に渡すバウンド ID。型は SDK の TObjectBoundID（= Sint32）だが、
+	// その別名は SDK の名前空間の中にあるため実体の Sint32 で持つ（暗黙変換で同じ）。
+	//   * スラブ（床板・底盤）は高さ基準を 1 つだけ持つので常に kSlabBoundID。
+	//   * 構造材（横架材・垂木・柱）は始端＝kStartBoundID・終端＝kEndBoundID の 2 つ
+	//     （柱では下端＝始端・上端＝終端に対応する）。
+	inline constexpr Sint32 kSlabBoundID = 0;
+	inline constexpr Sint32 kStartBoundID = 0;
+	inline constexpr Sint32 kEndBoundID = 1;
+
+	// 命令の高さ基準（StoryBoundCommand）を SDK の SStoryObjectData へ写す。**この変換は
+	// ここに 1 つだけ置く**——かつて床板（インライン展開）・基礎（StoryBound）・構造材
+	// （StoryBoundOf）が同じ 6 行を各々持っており、フィールドを 1 つ足すと 3 か所を
+	// 直す形になっていた。
+	VectorWorks::SStoryObjectData StoryBoundData(const core::StoryBoundCommand& bound);
+
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
 	//
 	// 床（draw/Floor）と底盤（draw/Footing）は**同じ手順**でスラブを描く（外形ポリゴン →

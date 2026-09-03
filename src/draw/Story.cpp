@@ -124,24 +124,13 @@ namespace HomeskzIfcImport::draw
 		if (commands.empty())
 			return 0;
 
-		// 命令セットに登場するレベル種別を登場順に事前登録する。
+		// 命令セットに登場するレベル種別を登場順に事前登録する（dedupe は draw/DrawUtil の
+		// PushUnique）。
 		std::vector<std::string> levelTypes;
 		for (const core::StoryCommand& command : commands)
 		{
 			for (const core::LevelCommand& level : command.levels)
-			{
-				bool seen = false;
-				for (const std::string& t : levelTypes)
-				{
-					if (t == level.type)
-					{
-						seen = true;
-						break;
-					}
-				}
-				if (!seen)
-					levelTypes.push_back(level.type);
-			}
+				PushUnique(levelTypes, level.type);
 		}
 		for (const std::string& levelType : levelTypes)
 		{

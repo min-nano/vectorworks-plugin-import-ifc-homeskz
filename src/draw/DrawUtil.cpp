@@ -736,6 +736,46 @@ namespace HomeskzIfcImport::draw
 		return paper;
 	}
 
+	void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value)
+	{
+		gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
+	}
+
+	void SetRealVariable(MCObjectHandle object, short variable, double value)
+	{
+		gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
+	}
+
+	void SetPointVariable(MCObjectHandle object, short variable, const core::Vec2& point)
+	{
+		gSDK->SetObjectVariable(object, variable, TVariableBlock(WorldPt(point.x, point.y)));
+	}
+
+	void PushUnique(std::vector<std::string>& values, const std::string& value)
+	{
+		if (std::ranges::find(values, value) == values.end())
+			values.push_back(value);
+	}
+
+	void AppendLine(std::string* sink, const std::string& text)
+	{
+		if (sink == nullptr || text.empty())
+			return;
+		if (!sink->empty())
+			*sink += "\n";
+		*sink += text;
+	}
+
+	VectorWorks::SStoryObjectData StoryBoundData(const core::StoryBoundCommand& bound)
+	{
+		VectorWorks::SStoryObjectData data;
+		data.fBound = VectorWorks::eStoryObjectBound_Story;
+		data.fBoundStory = static_cast<Sint8>(bound.storyOffset);
+		data.fLayerLevelType = TXString(bound.level.c_str());
+		data.fOffset = bound.offset;
+		return data;
+	}
+
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size)
 	{
 		WorldRect bounds;

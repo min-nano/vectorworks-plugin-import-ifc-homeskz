@@ -65,10 +65,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 「用紙に収まったか」を測って確かめるときの遊び（用紙 mm）。線の太さのぶん外形が
-		// わずかに広がるので、ぴったりの図を「はみ出した」と数えない。
-		constexpr double kFitTol = 1.0;
-
 		// 1 巡目で作った伏図 1 枚（2 巡目で縮尺・タグ・位置を仕上げる。drawSheets）。
 		// 命令はポインタで持つ——commands は drawSheets の間ずっと生きている（呼び出し元の
 		// Document が所有する）ので、コピーせずに指しておけばよい。
@@ -310,19 +306,12 @@ namespace HomeskzIfcImport::draw
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
-		// 診断行は要素ごとに 1 行ずつ足す（原因が別物なので混ぜない）。**異常は note、
-		// 平常でも出る内訳は outInfo** と行き先を分ける（前者だけが完了ダイアログの
-		// 「問題あり」に効き、後者は診断ログにだけ出る。core::DrawCounts）。
-		const auto addTo = [](std::string* sink, const std::string& text)
-		{
-			if (sink == nullptr || text.empty())
-				return;
-			if (!sink->empty())
-				*sink += "\n";
-			*sink += text;
-		};
-		const auto addNote = [&addTo, note](const std::string& text) { addTo(note, text); };
-		const auto addInfo = [&addTo, outInfo](const std::string& text) { addTo(outInfo, text); };
+		// 診断行は要素ごとに 1 行ずつ足す（原因が別物なので混ぜない。連結は draw/DrawUtil の
+		// AppendLine）。**異常は note、平常でも出る内訳は outInfo** と行き先を分ける
+		// （前者だけが完了ダイアログの「問題あり」に効き、後者は診断ログにだけ出る。
+		// core::DrawCounts）。
+		const auto addNote = [note](const std::string& text) { AppendLine(note, text); };
+		const auto addInfo = [outInfo](const std::string& text) { AppendLine(outInfo, text); };
 
 		// M18 割り付けの結果。**縮尺は「印刷可能領域・凡例の幅・建物の広がり」の 3 つだけで
 		// 決まる**ので、その 3 つと結果の縮尺を残す——思ったより小さい（大きい）ときに、

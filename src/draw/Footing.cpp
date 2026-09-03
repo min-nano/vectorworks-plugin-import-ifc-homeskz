@@ -113,11 +113,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// SetObjectStoryBound に渡すバウンド ID。スラブは高さ基準を 1 つだけ持つ
-		// （draw/Floor と同じ）。型は SDK の TObjectBoundID（= Sint32）だが、その別名は
-		// SDK の名前空間の中にあるため、ここでは実体の Sint32 で持つ（暗黙変換で同じ）。
-		constexpr Sint32 kSlabBoundID = 0;
-
 		// 地中梁の可視ソリッドを底盤へ呑み込ませる量（mm）。地中梁の天端は底盤の底面とちょう
 		// ど接する（実データで確認: 天端 = 底盤天端 − 底盤厚）ため、可視ソリッドだけを少し大
 		// きくして底盤本体に重ね、断面ビューポートで境界線が不安定に出るのを防ぐ。
@@ -140,13 +135,6 @@ namespace HomeskzIfcImport::draw
 		// 丸め誤差で毎回動かさない程度に大きく、図面で見える差より十分小さい値。
 		constexpr double kPlacementTol = 0.5;
 
-		// オブジェクト変数へ真偽値を書き込む（呼び出しの定型を 1 か所に。draw/Roof の
-		// SetPointVariable / SetRealVariable と同じ流儀）。
-		void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value)
-		{
-			gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
-		}
-
 		// 壁の端部キャップ（端を閉じる線）を命令どおりに設定する。
 		//
 		// **既定値はドキュメントの壁ツール設定に従う**ため、明示的に設定しないと「自由端が
@@ -162,17 +150,6 @@ namespace HomeskzIfcImport::draw
 		{
 			gSDK->SetWallCaps(object, static_cast<Boolean>(wall.capStart),
 							  static_cast<Boolean>(wall.capEnd), false);
-		}
-
-		// 命令の高さ基準（StoryBoundCommand）を SDK の SStoryObjectData へ写す。
-		VectorWorks::SStoryObjectData StoryBound(const core::StoryBoundCommand& bound)
-		{
-			VectorWorks::SStoryObjectData data;
-			data.fBound = VectorWorks::eStoryObjectBound_Story;
-			data.fBoundStory = static_cast<Sint8>(bound.storyOffset);
-			data.fLayerLevelType = TXString(bound.level.c_str());
-			data.fOffset = bound.offset;
-			return data;
 		}
 
 		// 地中梁（台形プリズム）1 本を押し出しソリッドとして作る。作れなければ nil。
@@ -373,8 +350,8 @@ namespace HomeskzIfcImport::draw
 
 			// 高さは壁専用の SetWallOverallHeights でストーリレベルへバインドする
 			// （ヘッダ冒頭「立上りの描画手順」3）。
-			gSDK->SetWallOverallHeights(object, StoryBound(wall.bottomBound),
-										StoryBound(wall.topBound));
+			gSDK->SetWallOverallHeights(object, StoryBoundData(wall.bottomBound),
+										StoryBoundData(wall.topBound));
 
 			// 端部を閉じるかは命令どおりに設定する（ヘッダ冒頭「端部のキャップ」）。
 			SetWallCaps(object, wall);
@@ -430,7 +407,7 @@ namespace HomeskzIfcImport::draw
 			gSDK->SetSlabHeight(object, slab.elevation);
 
 			// 天端を底盤天端レベルへバインドする（offset はそのレベルからの差。主たる底盤は 0）。
-			gSDK->SetObjectStoryBound(object, kSlabBoundID, StoryBound(slab.bound));
+			gSDK->SetObjectStoryBound(object, kSlabBoundID, StoryBoundData(slab.bound));
 
 			gSDK->ResetObject(object);
 
