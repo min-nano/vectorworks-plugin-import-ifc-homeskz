@@ -39,6 +39,9 @@
 //	【項目は図面のシンボル定義そのもの】どちらの形でも候補は図面に実在するシンボルだけ。
 //	行ごとの「取り込む」チェックがあるのでそれで足りる——置くものが図面に無いなら、その要素は
 //	チェックを外せばよい（core/ImportOptions.h、docs/DEV-NOTES.md「取り込み設定の決め事」）。
+//	ただし**一覧をそのまま出さない**——`BuildList(kSymDefNode)` は VectorWorks 自身が
+//	プラグインオブジェクトのスタイルとして持っている定義まで返すので、`GetSymbolDefSubType`
+//	で外す（下記 IsPlaceableSymbol）。
 //
 //	【リソース一覧はダイアログが持ち続ける】サムネイルの項目はリソース一覧を **ID で**
 //	指しているので、一覧を先に捨てると絵が引けなくなる（VWResourceList は参照カウント式で、
@@ -47,8 +50,13 @@
 //	【選択は名前で引き取る】サムネイルの選択は DDX で受けられないので、OnDefaultButtonEvent
 //	（＝OK が押された瞬間。**閉じた後のコントロールからは読めない**）に読む。読むのは
 //	`GetSelectedItem()`（選ばれたリソースの InternalIndex）→ `InternalIndexToNameN` で
-//	**名前**——項目の添字と追加順の対応に頼らずに済む。名前を引けなかったときだけ添字
+//	**名前**——項目の添字と候補の対応に頼らずに済む（対応は取れているが、候補を絞って
+//	足している以上、名前で引く方が崩れない）。名前を引けなかったときだけ添字
 //	（`GetSelectedItemIndex()`）へ落とす。名前のプルダウンは AddDDX_PulldownMenu で受ける。
+//
+//	**「まだ選んでいない」は読み取れない**——項目を足した時点で先頭が選ばれた状態になる
+//	（実機で確認済み。上記 Findings）。この画面では行ごとの「取り込む」チェックが
+//	その役目を持つので、未選択を判別する必要は無い。
 //
 
 #include "PluginPrefix.h"
@@ -110,16 +118,37 @@ namespace HomeskzIfcImport::draw
 			NameList,
 		};
 
-		// 図面のシンボル定義の一覧と、その並びのままの名前。**名前は添字で項目と対応する**
-		// ——ポップアップの項目はこの一覧の順に足すので、選択された項目の添字がそのまま
-		// 名前の添字になる。
+		// 図面のシンボル定義の一覧と、そこから採った**候補**。names[i] が i 番目の候補の
+		// 名前で、listIndices[i] がその一覧側の添字（サムネイルの項目はこの添字で足す）。
+		// **候補の並びと項目の並びは 1 対 1**なので、選択された項目の添字がそのまま候補の
+		// 添字になる。
 		struct SymbolResources
 		{
 			VWFC::Tools::VWResourceList list;
 			std::vector<std::string> names;
+			std::vector<std::size_t> listIndices;
 		};
 
-		// いま開いている図面のシンボル定義（名前順）。読めなければ空（＝どの要素も
+		// そのシンボル定義が**ユーザが図面へ置く部品**か。
+		//
+		// 【なぜ要るか】`BuildList(kSymDefNode)` は図面のシンボル定義を**全部**返すので、
+		// VectorWorks 自身がプラグインオブジェクトのスタイルとして持っている定義
+		// （図面枠・データタグ・図面ラベル・立断面指示線・グラフィック凡例・木質構造材…）
+		// まで並ぶ。選択肢に出しても置けるものではないので外す。
+		//
+		// 切り分けは `GetSymbolDefSubType`——**0 なら普通のシンボル定義、0 以外はその
+		// プラグインオブジェクトのスタイル**（値は PIO の型）。フォルダ名では切り分けられない
+		// （"…スタイル" フォルダに入らないものがある）し、2D/3D/ハイブリッドの別も無関係
+		// （[SDK リファレンス「シンボル」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Symbols.md)
+		// の実測表）。
+		bool IsPlaceableSymbol(MCObjectHandle definition)
+		{
+			if (definition == nil)
+				return false;
+			return gSDK->GetSymbolDefSubType(definition) == 0;
+		}
+
+		// いま開いている図面の**置けるシンボル定義**（名前順）。読めなければ空（＝どの要素も
 		// 取り込めない。ダイアログ自体は出せる）。
 		SymbolResources CollectSymbolResources()
 		{
@@ -128,21 +157,27 @@ namespace HomeskzIfcImport::draw
 			{
 				const std::size_t count = resources.list.BuildList(kSymDefNode, true);
 				resources.names.reserve(count);
+				resources.listIndices.reserve(count);
 				for (std::size_t i = 0; i < count; ++i)
 				{
+					if (!IsPlaceableSymbol(resources.list.GetResource(i)))
+						continue;
 					TXString name;
 					resources.list.GetResourceName(i, name);
-					// 名前が取れなくても**枠は詰めない**（項目の添字と名前の添字が
-					// ずれると、選んだ絵と置かれるシンボルが食い違う）。
-					resources.names.emplace_back(static_cast<const char*>(name));
+					std::string text = static_cast<const char*>(name);
+					if (text.empty())
+						continue; // 名前で選ばせる以上、名前の無い定義は候補にしない
+					resources.names.push_back(std::move(text));
+					resources.listIndices.push_back(i);
 				}
 			}
 			catch (...)
 			{
 				// リソース一覧を作れない図面でも設定ダイアログ自体は出す（候補が空になり、
 				// どの要素にもチェックが入らない）。1 つの失敗で取り込みの入口を塞がない。
-				// **途中まで採れていた名前は捨てる**——半端な一覧は項目と対応しない。
+				// **途中まで採れていた候補は捨てる**——半端な一覧は項目と対応しない。
 				resources.names.clear();
+				resources.listIndices.clear();
 			}
 			return resources;
 		}
@@ -402,10 +437,11 @@ namespace HomeskzIfcImport::draw
 				if (fForm == Form::Thumbnail)
 				{
 					VWThumbnailPopupCtrl& popup = fThumbs[row];
-					// 項目はリソース一覧の **ID と添字**で足す（絵は VW が引く）。
+					// 項目はリソース一覧の **ID と（一覧側の）添字**で足す（絵は VW が引く）。
+					// **候補だけを候補の順に足す**ので、項目 i ＝ 候補 i になる。
 					const Sint32 listID = fResources.list.GetListID();
-					for (std::size_t i = 0; i < fResources.names.size(); ++i)
-						popup.AddImageFromResource(listID, i);
+					for (const std::size_t listIndex : fResources.listIndices)
+						popup.AddImageFromResource(listID, listIndex);
 					if (valid)
 						popup.SelectItem(fSelection[row]);
 					return;
