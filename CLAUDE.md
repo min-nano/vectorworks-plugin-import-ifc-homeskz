@@ -171,7 +171,14 @@ VectorWorks ネイティブオブジェクト
 同一直線上の線分成分の芯線射影（`collinearSpan`）は `core/Geometry.h`、**ペア述語による連結成分**
 （Union-Find。立上り・大引・地中梁の統合と壁結合の交点クラスタが共有）は `core/UnionFind.h`、
 **構成層の総厚**（`totalThickness`）・**横架材の Z 範囲と重なり判定**（`memberTopZ` /
-`memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側が持つ）は `core/Document.h`、
+`memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側が持つ）・**端部オフセット**（＝端点を接合
+相手の芯線に置き、材が実際に止まる位置をここで戻す。意味と値の決まり方）・**オフセットを戻した
+「材の端」**（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`。
+仕口の位置・登り梁の端部詰め・図に映るものの広がりが共有する）は `core/Document.h`、
+**横架材の端部と相手の取り合いの幾何**（`memberEndJoint`。取り合い調整と登り梁の端部詰めが
+共有する）と**柱に取り付く端を柱芯へ送る関門**（`resolveMemberColumnJoints`。柱命令は横架材の
+後に組み上がるので、横架材どうしの取り合いとは別に `parse/BuildDocument` が一度だけ通す）は
+`parse/Member`、
 **ローカル配置原点の取り出し**（ObjectPlacement → Location の 4 段の鎖。柱・横架材・ストーリが
 共有）は `parse/IfcGeometry` の `resolveLocalPlacementOrigin`、**横架材レベルの定型**（一般階＝
 横架材天端・最上階＝軒高の分岐と、その絶対 Z・レイヤ名: `beamTopLevelType` / `beamTopElevation` /

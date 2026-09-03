@@ -127,15 +127,24 @@ esac
 
 # --- 解析する翻訳単位（唯一の定義） ----------------------------------------
 #
-# SDK 依存のコードだけをここに置く。src/draw/ は**グロブで拾う**: あそこのモジュールは
-# 定義上すべて SDK 依存なので（CLAUDE.md「依存の向きは厳守する」）、新しい draw モジュールが
-# 増えた瞬間に解析対象へ入る。残りの 3 本は SDK にしか触れない glue で、マイルストーンごとに
-# 増えたりはしない。
+# SDK 依存のコードだけをここに置く。**ディレクトリ単位はグロブで拾う**——中のモジュールが
+# 定義上すべて SDK 依存で（CLAUDE.md「依存の向きは厳守する」）、マイルストーンごとに増える
+# ところだからである。
+#
+#   * src/draw/*.cpp       … 描画モジュール。要素を 1 つ足すたびに 1 本増える。
+#   * src/Extensions/*.cpp … SDK 拡張（メニューと自作 PIO の本体）。PIO も要素ごとに増える。
+#
+# **名前で列挙すると、足したファイルが黙って解析されないまま残る。** 実際 M12 の
+# ExtColumnMark.cpp と M19 の ExtShearWall.cpp は、ここが ExtMenu.cpp だけの列挙だったせいで
+# 一度も clang-tidy にかかっていなかった（PIO 本体は draw/ と同じ SDK の API を叩くので、
+# 同じ規則で見るべきコードである）。グロブなら次に PIO が増えても取りこぼさない。
+#
+# 残る 2 本は増えない glue なので名前で置く。
 #
 # src/UpdaterFlow.cpp は入れない。Vectorworks のヘッダを 1 つも include せず GS_MAC /
 # GS_WIN の分岐も無いので、SDK の要らない lint.yml が同じ規則で先に解析している。
 # （高価な SDK ジョブ 2 つで解析し直しても、Linux ジョブが見逃すものは何も出なかった。）
-FILES=(src/draw/*.cpp src/ModuleMain.cpp src/Extensions/ExtMenu.cpp src/Updater.cpp)
+FILES=(src/draw/*.cpp src/Extensions/*.cpp src/ModuleMain.cpp src/Updater.cpp)
 
 TOTAL="${#FILES[@]}"
 SHARD_LABEL=""

@@ -80,13 +80,23 @@ namespace HomeskzIfcImport::draw
 		// 部材長を「取れていない」とみなす閾値（mm）。読み戻した スパン がこれ以下なら 0 扱い。
 		constexpr double kZeroLengthTol = 1e-6;
 
+		// 診断の集計（完了ダイアログ・診断ログへ持ち帰る件数）。1 本ごとに増やすだけなので
+		// 出力引数をまとめて 1 つにする。
+		struct MemberFailures
+		{
+			std::size_t path = 0;	 // パスが 2 点にならなかった
+			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
+			std::size_t length = 0;	 // パスから部材長を取れなかった
+			std::size_t offset = 0;	 // 端部オフセットを書けなかった
+			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
+		};
+
 		// 横架材 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。**構造材ツールで描けたときだけ** outObject に
 		// そのハンドルを入れる（断面寸法データタグの関連付け先。フォールバックの直線は
 		// 断面寸法を持たないのでタグを付ける相手にしない。draw/Column の柱ハンドルと同じ扱い）。
-		bool DrawOne(const core::MemberCommand& member, RefNumber style,
-					 std::size_t& outPathFailures, std::size_t& outSectionFailures,
-					 std::size_t& outLengthFailures, MCObjectHandle& outObject)
+		bool DrawOne(const core::MemberCommand& member, RefNumber style, MemberFailures& failures,
+					 MCObjectHandle& outObject)
 		{
 			// 断面（プロファイルグループ）を**先に**用意する。作れなければ PIO を作らない
 			// ——断面の無い構造材は生成できても実体が描かれず、「オブジェクトはあるのに
@@ -109,7 +119,7 @@ namespace HomeskzIfcImport::draw
 								 core::Vec3{member.end.x, member.end.y, member.elevation},
 								 pathAppended);
 			if (path != nil && !pathAppended)
-				++outPathFailures;
+				++failures.path;
 
 			StructuralMemberSpec spec;
 			spec.path = path;
@@ -124,13 +134,21 @@ namespace HomeskzIfcImport::draw
 			spec.axisAlign = StructuralAxisAlign::TopCentre; // 命令の基準点（天端中央）と一致
 			spec.startBound = member.startBound;
 			spec.endBound = member.endBound;
+			// 端部オフセット（負値）。命令の端点は取り合い相手の芯線上なので、材が実際に
+			// 止まる位置はここで戻す（core/Document.h「端部オフセット」）。
+			spec.startOffset = member.startOffset;
+			spec.endOffset = member.endOffset;
 
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
 			{
-				// フォールバック: 平面投影の直線（クラス付き）を残す。
-				VWPolygon2DObj line({VWPoint2D(member.start.x, member.start.y),
-									 VWPoint2D(member.end.x, member.end.y)});
+				// フォールバック: 平面投影の直線（クラス付き）を残す。**端部オフセットを戻した
+				// 材の端**で引く——PIO が無い以上オフセットを効かせる先が無いので、線の側を
+				// 材の範囲に合わせる（core/Document.h「端部オフセット」）。
+				const core::Vec2 drawnStart = core::memberDrawnStart(member);
+				const core::Vec2 drawnEnd = core::memberDrawnEnd(member);
+				VWPolygon2DObj line(
+					{VWPoint2D(drawnStart.x, drawnStart.y), VWPoint2D(drawnEnd.x, drawnEnd.y)});
 				line.SetClosed(false);
 				const MCObjectHandle lineHandle = line.GetThisObject();
 				if (lineHandle == nil)
@@ -144,7 +162,15 @@ namespace HomeskzIfcImport::draw
 
 			// 断面が入らなかった本数を数える（診断。drawMembers が完了ダイアログへ載せる）。
 			if (!result.sectionOk)
-				++outSectionFailures;
+				++failures.section;
+			// 端部オフセットを書けなかった本数。書けないと材が相手の芯線まで伸びたまま
+			// 描かれる（＝勝ち側の半幅ぶん長い）ので、切り分けの手掛かりを 1 件だけ残す。
+			if (!result.endOffsetOk)
+			{
+				++failures.offset;
+				if (failures.offsetHint.empty())
+					failures.offsetHint = result.offsetParamHint;
+			}
 
 			// パスから部材長を取れたかを読み戻す。0 のままなら実体が無く画面に描かれない
 			// （冒頭「パスの遍歴」の 3D ポリラインで起きた症状そのもの）。**鉛直材（柱）では
@@ -159,7 +185,7 @@ namespace HomeskzIfcImport::draw
 			const TXString span = ResolveParamName(pio, kFieldSpan, kLocalizedSpan);
 			if (pio.GetParamIndex(span) != static_cast<size_t>(-1) &&
 				std::abs(pio.GetParamReal(span)) <= kZeroLengthTol)
-				++outLengthFailures;
+				++failures.length;
 			return true;
 		}
 	} // namespace
@@ -173,9 +199,7 @@ namespace HomeskzIfcImport::draw
 		const RefNumber style = ResolvePluginStyle(kMemberStyle);
 
 		std::size_t drawn = 0;
-		std::size_t pathFailures = 0;
-		std::size_t sectionFailures = 0;
-		std::size_t lengthFailures = 0;
+		MemberFailures failures;
 		for (std::size_t index = 0; index < document.members.size(); ++index)
 		{
 			const core::MemberCommand& member = document.members[index];
@@ -192,7 +216,7 @@ namespace HomeskzIfcImport::draw
 				continue;
 
 			MCObjectHandle object = nil;
-			if (DrawOne(member, style, pathFailures, sectionFailures, lengthFailures, object))
+			if (DrawOne(member, style, failures, object))
 				++drawn;
 
 			// **命令インデックス → ハンドル**の対応表へ記録する（断面寸法データタグが
@@ -210,16 +234,23 @@ namespace HomeskzIfcImport::draw
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「作れたが断面が
 		// 入らなかった」「スタイルが見つからなかった」を件数で持ち帰る。横架材が 1 本も
 		// 見えないときに、原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
-		if (outDiagnostics != nullptr &&
-			(pathFailures > 0 || sectionFailures > 0 || lengthFailures > 0 || style == 0))
+		if (outDiagnostics != nullptr && (failures.path > 0 || failures.section > 0 ||
+										  failures.length > 0 || failures.offset > 0 || style == 0))
 		{
 			std::string note = "横架材の診断: ";
-			if (pathFailures > 0)
-				note += "パスが 2 点にならなかった材 " + std::to_string(pathFailures) + " 本。";
-			if (sectionFailures > 0)
-				note += "断面を設定できなかった材 " + std::to_string(sectionFailures) + " 本。";
-			if (lengthFailures > 0)
-				note += "パスから長さを取れなかった材 " + std::to_string(lengthFailures) + " 本。";
+			if (failures.path > 0)
+				note += "パスが 2 点にならなかった材 " + std::to_string(failures.path) + " 本。";
+			if (failures.section > 0)
+				note += "断面を設定できなかった材 " + std::to_string(failures.section) + " 本。";
+			if (failures.length > 0)
+				note += "パスから長さを取れなかった材 " + std::to_string(failures.length) + " 本。";
+			if (failures.offset > 0)
+			{
+				note += "端部オフセットを設定できなかった材 " + std::to_string(failures.offset) +
+						" 本。";
+				if (!failures.offsetHint.empty())
+					note += "（候補: " + failures.offsetHint + "）";
+			}
 			if (style == 0)
 				note += "プラグインスタイル『木質構造材_横架材』が見つかりません。";
 			*outDiagnostics = std::move(note);

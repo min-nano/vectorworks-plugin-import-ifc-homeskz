@@ -591,18 +591,22 @@ TEST(joint_fixture_height_matches_member_ends)
 					   for (const SymbolCommand& joint : buildJointCommands(members))
 					   {
 						   // 同じレイヤに同じ端点を持つ横架材のうち、その端部の offset が仕口の高さと
-						   // 一致するものが必ずある。
+						   // 一致するものが必ずある。端点は**材が実際に占める端**（端部オフセットを
+						   // 戻した点。core/Document.h「端部オフセット」）で突き合わせる——命令の
+						   // 端点は取り合い相手の芯線上にあり、仕口はそこではなく材の端に付く。
 						   const bool matched = std::ranges::any_of(
 							   members,
 							   [&joint](const MemberCommand& m)
 							   {
 								   if (m.layer != joint.layer)
 									   return false;
-								   return (near(m.start.x, joint.position.x) &&
-										   near(m.start.y, joint.position.y) &&
+								   const Vec2 start = HomeskzIfcImport::core::memberDrawnStart(m);
+								   const Vec2 end = HomeskzIfcImport::core::memberDrawnEnd(m);
+								   return (near(start.x, joint.position.x) &&
+										   near(start.y, joint.position.y) &&
 										   near(m.startBound.offset, joint.zOffset)) ||
-										  (near(m.end.x, joint.position.x) &&
-										   near(m.end.y, joint.position.y) &&
+										  (near(end.x, joint.position.x) &&
+										   near(end.y, joint.position.y) &&
 										   near(m.endBound.offset, joint.zOffset));
 							   });
 						   CHECK(matched);
