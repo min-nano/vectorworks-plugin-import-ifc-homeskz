@@ -13,18 +13,22 @@
 //	    （kSymDefNode = 16。Kernel/API/Objs.TDType.h）
 //	  * VWResourceList::GetResourceName(i, name)     … その名前（UTF-8 の TXString）
 //	  * VWCheckButtonCtrl                            … その要素を取り込むか
-//	  * VWImagePopupCtrl::AddItem(resourceList, i)   … サムネイル付きの項目（本命の形）
+//	  * VWThumbnailPopupCtrl                         … サムネイル付きの選択（本命の形）
 //	  * VWPullDownMenuCtrl + VWSymbolDisplayCtrl     … 名前で選び、絵は隣に出す（退避の形）
 //	  * AddRightControl / AddBelowControl            … 行の並べ方
 //	  * VWDialog::EnableControl(id, bool)            … チェックを外した行を灰色にする
 //
-//	【2 つの形を持ち、出せた方を使う】シンボルは絵で選びたいので、**まず VectorWorks 自身の
-//	「鋼材断面を選択」などと同じサムネイル付きポップアップ**（VWImagePopupCtrl）で組む。
-//	ただしこのコントロールはレイアウトダイアログでの実績が薄く、**組めなかった／項目を
-//	入れられなかったときに黙って設定ダイアログごと出ないのが最悪**——実機で実際にそうなった
-//	（cd8a415 の実測）。そこで組み立てに失敗したら、**名前のプルダウン＋シンボル表示
-//	コントロール**という確実に出る形へ切り替えて開き直す。どちらの形で出したか（と、
-//	切り替えた理由）は取り込みログに残るので、原因が追える。
+//	【サムネイルは VWThumbnailPopupCtrl で出す（VWImagePopupCtrl ではない）】名前が似た
+//	コントロールが 2 つあり、**VWImagePopupCtrl は使えない**——`CreateControl` が
+//	`return false` のスタブで、呼び順や初期化に関わらず必ず失敗する（SDK 同梱の実装ソースで
+//	確定。[SDK リファレンス「レイアウトダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md)）。
+//	実装が生きているのは同じコンポーネント種別を指す双子の VWThumbnailPopupCtrl の方で、
+//	項目はリソース一覧の ID と添字で足す（AddImageFromResource）。
+//
+//	【2 つの形を持ち、出せた方を使う】それでも**組み立てに失敗したときに黙って設定
+//	ダイアログごと出ないのが最悪**なので（画像ポップアップで実際にそうなった。cd8a415 の
+//	実測）、失敗したら**名前のプルダウン＋シンボル表示コントロール**という確実に出る形へ
+//	切り替えて開き直す。どちらの形で出したか（と、切り替えた理由）は取り込みログに残る。
 //
 //	【絵の出し方（退避の形）】シンボル表示コントロールへ渡す描画モードとビューは、
 //	VectorWorks 自身がシンボルのサムネイルに使う既定値と同じ **Top/Plan（view = 2）＋
@@ -36,13 +40,15 @@
 //	行ごとの「取り込む」チェックがあるのでそれで足りる——置くものが図面に無いなら、その要素は
 //	チェックを外せばよい（core/ImportOptions.h、docs/DEV-NOTES.md「取り込み設定の決め事」）。
 //
-//	【リソース一覧はダイアログが持ち続ける】サムネイルの項目はリソース一覧を指しているので、
-//	一覧を先に捨てると絵が引けなくなる。ダイアログのメンバとして生存させる
-//	（VWResourceList は参照カウント付きでコピーできる）。
+//	【リソース一覧はダイアログが持ち続ける】サムネイルの項目はリソース一覧を **ID で**
+//	指しているので、一覧を先に捨てると絵が引けなくなる（VWResourceList は参照カウント式で、
+//	最後の 1 つが消えるときに一覧そのものを破棄する）。ダイアログのメンバとして生存させる。
 //
-//	【選択を読む時機】画像ポップアップの選択は DDX で受けられないので、OnDefaultButtonEvent
-//	（＝OK が押された瞬間）にコントロールから読む。**閉じた後では読めない**。名前の
-//	プルダウンは AddDDX_PulldownMenu で受ける。
+//	【選択は名前で引き取る】サムネイルの選択は DDX で受けられないので、OnDefaultButtonEvent
+//	（＝OK が押された瞬間。**閉じた後のコントロールからは読めない**）に読む。読むのは
+//	`GetSelectedItem()`（選ばれたリソースの InternalIndex）→ `InternalIndexToNameN` で
+//	**名前**——項目の添字と追加順の対応に頼らずに済む。名前を引けなかったときだけ添字
+//	（`GetSelectedItemIndex()`）へ落とす。名前のプルダウンは AddDDX_PulldownMenu で受ける。
 //
 
 #include "PluginPrefix.h"
@@ -100,7 +106,7 @@ namespace HomeskzIfcImport::draw
 		// ダイアログの形。**本命はサムネイル、退避は名前＋絵**（冒頭「2 つの形を持ち…」）。
 		enum class Form
 		{
-			ImagePopup,
+			Thumbnail,
 			NameList,
 		};
 
@@ -163,8 +169,8 @@ namespace HomeskzIfcImport::draw
 				{
 					fChecks.emplace_back(checkID(row));
 					fLabels.emplace_back(labelID(row));
-					if (fForm == Form::ImagePopup)
-						fImagePopups.emplace_back(popupID(row));
+					if (fForm == Form::Thumbnail)
+						fThumbs.emplace_back(popupID(row));
 					else
 					{
 						fPopups.emplace_back(popupID(row));
@@ -262,8 +268,8 @@ namespace HomeskzIfcImport::draw
 					// 詰めても窮屈にならない。
 					this->AddBelowControl(previousRow, &fChecks[row], 0, row == 0 ? 1 : 0);
 					this->AddRightControl(&fChecks[row], &fLabels[row]);
-					if (fForm == Form::ImagePopup)
-						this->AddRightControl(&fLabels[row], &fImagePopups[row]);
+					if (fForm == Form::Thumbnail)
+						this->AddRightControl(&fLabels[row], &fThumbs[row]);
 					else
 					{
 						this->AddRightControl(&fLabels[row], &fPopups[row]);
@@ -315,12 +321,12 @@ namespace HomeskzIfcImport::draw
 			// からは読めない）。
 			void OnDefaultButtonEvent() override
 			{
-				if (fForm == Form::ImagePopup)
+				if (fForm == Form::Thumbnail)
 				{
 					try
 					{
 						for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
-							fSelection[row] = fImagePopups[row].GetSelectedItemIndex();
+							fSelection[row] = SelectedIndexOf(row);
 					}
 					catch (...)
 					{
@@ -367,9 +373,9 @@ namespace HomeskzIfcImport::draw
 			// 行の選択コントロールを作る（形で中身が変わる唯一の場所）。
 			bool CreateSelector(std::size_t row)
 			{
-				if (fForm == Form::ImagePopup)
+				if (fForm == Form::Thumbnail)
 				{
-					if (fImagePopups[row].CreateControl(this))
+					if (fThumbs[row].CreateControl(this, kStandardSize))
 						return true;
 					fNote = "サムネイルの選択肢を作れませんでした";
 					return false;
@@ -393,14 +399,15 @@ namespace HomeskzIfcImport::draw
 			void FillSelector(std::size_t row)
 			{
 				const bool valid = fSelection[row] < fResources.names.size();
-				if (fForm == Form::ImagePopup)
+				if (fForm == Form::Thumbnail)
 				{
-					VWImagePopupCtrl& popup = fImagePopups[row];
-					popup.ShowImage(true); // 閉じているときも選択中の絵を出す
+					VWThumbnailPopupCtrl& popup = fThumbs[row];
+					// 項目はリソース一覧の **ID と添字**で足す（絵は VW が引く）。
+					const Sint32 listID = fResources.list.GetListID();
 					for (std::size_t i = 0; i < fResources.names.size(); ++i)
-						popup.AddItem(fResources.list, i);
+						popup.AddImageFromResource(listID, i);
 					if (valid)
-						popup.SetSelectedItemIndex(fSelection[row]);
+						popup.SelectItem(fSelection[row]);
 					return;
 				}
 				VWPullDownMenuCtrl& popup = fPopups[row];
@@ -408,6 +415,25 @@ namespace HomeskzIfcImport::draw
 					popup.AddItem(TXString(name.c_str()));
 				if (valid)
 					popup.SelectIndex(fSelection[row]);
+			}
+
+			// サムネイルで選ばれている項目を**名前で**引き当て、候補の添字にして返す
+			// （冒頭「選択は名前で引き取る」）。名前が引けなければ項目の添字に落とし、
+			// それも範囲外なら開いたときの選択のまま返す。
+			std::size_t SelectedIndexOf(std::size_t row) const
+			{
+				const VWThumbnailPopupCtrl& popup = fThumbs[row];
+				TXString name;
+				gSDK->InternalIndexToNameN(popup.GetSelectedItem(), name);
+				const std::string text = static_cast<const char*>(name);
+				if (!text.empty())
+				{
+					const std::size_t byName = IndexOf(text);
+					if (byName < fResources.names.size())
+						return byName;
+				}
+				const std::size_t byIndex = popup.GetSelectedItemIndex();
+				return byIndex < fResources.names.size() ? byIndex : fSelection[row];
 			}
 
 			// 名前 → 項目の添字。無ければ項目の数（＝範囲外）を返す。
@@ -444,11 +470,11 @@ namespace HomeskzIfcImport::draw
 			// （draw/ResultDialog.cpp の本文行と同じ理由）。
 			std::deque<VWCheckButtonCtrl> fChecks;
 			std::deque<VWStaticTextCtrl> fLabels;
-			std::deque<VWImagePopupCtrl> fImagePopups; // Form::ImagePopup のときだけ
+			std::deque<VWThumbnailPopupCtrl> fThumbs;  // Form::Thumbnail のときだけ
 			std::deque<VWPullDownMenuCtrl> fPopups;	   // Form::NameList のときだけ
 			std::deque<VWSymbolDisplayCtrl> fPreviews; // 同上
 			SymbolResources fResources; // 項目の元（ダイアログより長生きさせない）
-			Form fForm = Form::ImagePopup;
+			Form fForm = Form::Thumbnail;
 			std::array<std::size_t, core::kSymbolRoleCount> fSelection = {};
 			std::array<bool, core::kSymbolRoleCount> fEnabled = {};
 			bool fShown = false;
@@ -511,14 +537,14 @@ namespace HomeskzIfcImport::draw
 
 			// **本命（サムネイル）→ 退避（名前＋絵）の順に試す。** 前者で出せなかった
 			// ときだけ後者へ落ちる（冒頭「2 つの形を持ち、出せた方を使う」）。
-			for (const Form form : {Form::ImagePopup, Form::NameList})
+			for (const Form form : {Form::Thumbnail, Form::NameList})
 			{
 				CImportSettingsDialog dialog(remembered, resources, form);
 				const auto button = dialog.RunDialogLayout("");
 				if (dialog.Failed())
 				{
-					AddNote(note, (form == Form::ImagePopup ? "サムネイルの形で出せません: "
-															: "名前の形でも出せません: ") +
+					AddNote(note, (form == Form::Thumbnail ? "サムネイルの形で出せません: "
+														   : "名前の形でも出せません: ") +
 									  dialog.Note());
 					continue; // 次の形で開き直す
 				}
