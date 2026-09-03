@@ -211,8 +211,14 @@ namespace HomeskzIfcImport
 
 		int event = kObjectEventNoErr;
 		std::string error;
-		if (!use->recalculate(kVwPayloadPioShearWall, static_cast<void*>(this->fhObject), event,
-							  error))
+		// 境界はオブジェクトのハンドルを void* で運ぶ（src/PayloadAbi.h「SDK を include
+		// しない」）。MCObjectHandle は char** なので、この変換は
+		// bugprone-multi-level-implicit-pointer-conversion に当たる——**意図した変換**
+		// （受け取った本体が同じ型へ戻す）であり、明示キャストにしても消えないので、
+		// この 1 行だけ規則を外す。
+		// NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+		void* const handle = this->fhObject;
+		if (!use->recalculate(kVwPayloadPioShearWall, handle, event, error))
 			return kObjectEventNoErr;
 		return static_cast<EObjectEvent>(event);
 	}

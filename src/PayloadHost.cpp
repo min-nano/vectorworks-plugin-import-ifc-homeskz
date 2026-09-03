@@ -215,9 +215,11 @@ namespace HomeskzIfcImport
 		// FILETIME は 100ns 刻み。秒まで丸めれば「前と違うか」を見るには十分。
 		stamp.modified = static_cast<long long>(when.QuadPart / 10000000ULL);
 #else
-		// `stat` は関数名でもあるので、型は elaborated-type-specifier で綴る。中身は
-		// ::stat が埋めるので、成功したときだけ読む。
-		struct stat info;
+		// `stat` は関数名でもあるので型は elaborated-type-specifier で綴る。別名を挟むのは
+		// clang-format が `struct stat info{};` を型定義と読んで改行してしまうため。値初期化
+		// しておく（未初期化のままだと cppcoreguidelines-pro-type-member-init に当たる）。
+		using FileStat = struct stat;
+		FileStat info{};
 		if (::stat(path.c_str(), &info) != 0)
 			return stamp;
 		stamp.size = static_cast<unsigned long long>(info.st_size);
