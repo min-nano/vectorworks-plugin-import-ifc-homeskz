@@ -183,6 +183,10 @@ function New-BuildZip([string] $zipPath, [string] $vlbName) {
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.vlb") -Value 'dll' -NoNewline
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.commit") -Value 'newcommit' -NoNewline
+    # 本体と殻の ID も、実際のリリース zip と同じように入れる。**殻だけ入れて本体を
+    # 取りこぼす退行**を捕まえるため（src/PayloadAbi.h）。
+    Set-Content -LiteralPath (Join-Path $stage "$vlbName.vwpayload") -Value 'payload' -NoNewline
+    Set-Content -LiteralPath (Join-Path $stage "$vlbName.shell-id") -Value 'abc123def456' -NoNewline
     Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -Force
     Remove-Item -LiteralPath $stage -Recurse -Force
 }
@@ -258,9 +262,16 @@ T 'Invoke-DoInstall installs the .vlb and prints ok'
 $script:FakeDownloadFail = $false
 $script:FakeDownloadZip = $GoodZip
 $out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
-CheckEq $out 'ok' 'prints ok'
+CheckContains $out 'ok' 'prints ok'
 CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.vlb')) $true 'the .vlb landed'
 CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.commit')) $true 'the .commit sidecar landed'
+# **本体も入っていること。** 殻だけ入れて本体を取りこぼすと、次の起動でプラグインは
+# 何もできなくなる（src/PayloadHost.cpp が「本体が見つかりません」と言うだけ）。
+CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.vwpayload')) $true 'the .vwpayload landed'
+CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.shell-id')) $true 'the shell-id stamp landed'
+# 入れた殻の ID を先に出す。プラグインはこれを自分の VW_SHELL_ID と突き合わせて、
+# **本体の読み直しで済むなら再起動を尋ねない**（src/UpdaterParse.h）。
+CheckContains $out 'installed-shell=abc123def456' 'prints the installed shell id'
 
 T 'Invoke-DoInstall reports a download failure'
 $script:FakeDownloadFail = $true

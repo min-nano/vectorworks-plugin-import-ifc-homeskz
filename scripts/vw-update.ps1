@@ -103,6 +103,20 @@ function Get-InstalledCommit([string] $name) {
     return 'none'
 }
 
+# 殻（.vlb）の ID。ビルドが .vlb の隣へ置く "<name>.shell-id" から読む。**「アップデートに
+# Vectorworks の再起動が要るか」を決める鍵**で、プラグイン側は自分にコンパイルされた
+# VW_SHELL_ID と突き合わせる——一致するなら本体（.vwpayload）を読み直すだけで反映される
+# （src/PayloadAbi.h / src/UpdaterParse.h）。読めなければ空文字（＝判断できないので、
+# プラグイン側は安全側＝「再起動が要る」へ倒す）。
+function Get-InstalledShellId([string] $name) {
+    $f = Join-Path $VW_PLUGINS_DIR "$name.shell-id"
+    if (Test-Path -LiteralPath $f) {
+        $c = Get-Content -LiteralPath $f -Raw -ErrorAction SilentlyContinue
+        if ($c) { return $c.Trim() }
+    }
+    return ''
+}
+
 # Install $src at $dst, replacing whatever is there. A currently-loaded .vlb
 # cannot be deleted on Windows, but it CAN be renamed out of the way — so move any
 # existing file aside (best effort) before copying the new one in. Leftover
@@ -147,7 +161,11 @@ function Install-Build([string] $url, [string] $name) {
         Get-ChildItem -LiteralPath $VW_PLUGINS_DIR -Filter '*.old-*' -ErrorAction SilentlyContinue |
             ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop } catch {} }
 
-        foreach ($f in @("$name.vlb", "$name.vwr", "$name.commit", 'vw-update.ps1')) {
+        # "$name.vwpayload" が**本体**（殻が自分で読み込むモジュール）。これが入れ替われば
+        # Vectorworks を再起動しなくても次の操作から新しいコードが動く（src/PayloadAbi.h）。
+        # "$name.shell-id" は「殻まで変わったか」を次回の判断に使う控え。
+        foreach ($f in @("$name.vlb", "$name.vwpayload", "$name.vwr", "$name.commit",
+                         "$name.shell-id", 'vw-update.ps1')) {
             $s = Join-Path $work $f
             if (Test-Path -LiteralPath $s) {
                 try { Install-File $s (Join-Path $VW_PLUGINS_DIR $f) }
@@ -201,6 +219,12 @@ function Invoke-QDev {
 
 function Invoke-DoInstall([string] $url, [string] $name) {
     if (Install-Build $url $name) {
+        # **いま入れた殻の ID を先に出す。** プラグインはこれを自分の VW_SHELL_ID と
+        # 突き合わせて「再起動が要るか／本体の読み直しで済むか」を決める
+        # （src/UpdaterParse.h の NeedsRestartAfterInstall）。読めなければ行を出さない
+        # ＝プラグインは安全側へ倒す。
+        $shell = Get-InstalledShellId $name
+        if ($shell) { Write-Output "installed-shell=$shell" }
         Write-Output 'ok'
     }
     else {

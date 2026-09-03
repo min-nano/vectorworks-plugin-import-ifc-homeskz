@@ -26,29 +26,71 @@ namespace HomeskzIfcImport
 		// failure. The "could not start" wording is kept here, next to the flow,
 		// rather than in the host.
 		bool Install(IUpdaterHost& host, const std::string& url, const std::string& name,
-					 std::string& errorOut)
+					 std::string& installedShellIdOut, std::string& errorOut)
 		{
 			std::string out;
+			installedShellIdOut.clear();
 			if (!host.RunScript({"do-install", url, name}, out))
 			{
 				errorOut = "アップデータを起動できませんでした。";
 				return false;
 			}
 			if (InstallReportedOk(out))
+			{
+				// 入れたビルドの殻の ID。**「再起動が要るか」はこれで決まる**
+				// （UpdaterParse.h）。古いスクリプトはこの行を出さないので空になり、
+				// そのときは安全側＝再起動を尋ねる側へ倒れる。
+				installedShellIdOut = InstalledShellId(out);
 				return true;
+			}
 
 			errorOut = InstallErrorText(out, "インストールに失敗しました。");
 			return false;
 		}
 
-		// How every successful install ends. A compiled plug-in is only loaded at
-		// start-up, so the new build does nothing until Vectorworks restarts —
-		// hence this is a QUESTION with a 再起動 button rather than a notice that
-		// merely tells the user to restart on their own. Choosing 後で does
-		// nothing further: the dialog the user just dismissed already said a
-		// restart is needed, so a follow-up notice would only be nagging. The
-		// per-channel details (build / branch+commit) come in as `detail` and are
-		// shown above the shared restart wording.
+		// **入れ替えが済んだあとの結末。** プラグインは 2 つに割れていて（src/PayloadAbi.h）、
+		// Vectorworks が起動時にしか読み込めないのは**殻**だけ。中身（解析・描画・PIO の
+		// 作図）は殻が自分で読み込む**本体**にあるので、
+		//
+		//   * 本体だけが新しくなった（殻の ID が同じ）… 載っている本体を降ろすだけで、
+		//     次の取り込み・次の PIO リセットから新しいコードが動く。**再起動を尋ねない。**
+		//   * 殻まで変わった …………………………………… 読み込めるのは次の起動だけなので、
+		//     従来どおり再起動を尋ねる（OfferRestart）。
+		//
+		// 判断できないとき（スクリプトが ID を出さない古い版など）は「要る」へ倒れる。
+		void OfferRestart(IUpdaterHost& host, const std::string& text, const std::string& detail);
+
+		void FinishInstall(IUpdaterHost& host, const std::string& text, const std::string& detail,
+						   const std::string& runningShellId, const std::string& installedShellId)
+		{
+			if (!NeedsRestartAfterInstall(runningShellId, installedShellId))
+			{
+				// **ここでホットリロードが効く。** 降ろしておけば、次に本体を使うときに
+				// 新しいファイルが読み直される（src/PayloadSession.h）。降ろせなかった
+				// ——本体のコードがまだ走っている——ときだけ、次回の起動へ回す。
+				std::string advice = detail;
+				if (!advice.empty())
+					advice += "\n\n";
+				if (host.DropLoadedPayload())
+					advice += "Vectorworks の再起動は要りません。\n"
+							  "次の取り込みから新しいビルドが動きます。";
+				else
+					advice +=
+						"反映は次に Vectorworks を起動したときです。\n"
+						"（いま動いている処理があるため、その場では入れ替えられませんでした）";
+				host.Inform(text, advice);
+				return;
+			}
+
+			OfferRestart(host, text, detail);
+		}
+
+		// 殻まで変わったときの結末。コンパイル済みの殻は起動時にしか読み込まれないので、
+		// 新しいビルドは Vectorworks を再起動するまで動かない——だからこれは通知ではなく
+		// **再起動ボタンを持つ質問**にしてある。「後で」を選んだら何もしない: いま閉じた
+		// ダイアログが既に再起動の必要を告げているので、追い討ちの通知は小言にしかならない。
+		// チャンネルごとの詳細（build / branch+commit）は `detail` で受け取り、共通の
+		// 再起動の文言の上に出す。
 		void OfferRestart(IUpdaterHost& host, const std::string& text, const std::string& detail)
 		{
 			std::string advice = detail;
@@ -76,7 +118,7 @@ namespace HomeskzIfcImport
 		}
 	} // namespace
 
-	void RunStableStartupCheckWith(IUpdaterHost& host)
+	void RunStableStartupCheckWith(IUpdaterHost& host, const std::string& runningShellId)
 	{
 		std::string out;
 		if (!host.RunScript({"q-stable"}, out))
@@ -95,14 +137,16 @@ namespace HomeskzIfcImport
 			return;
 
 		std::string err;
-		if (Install(host, st.url, "HomeskzIfcImport", err))
-			OfferRestart(host, "HomeskzIfcImport を更新しました。", "build: " + st.latest);
+		std::string installedShellId;
+		if (Install(host, st.url, "HomeskzIfcImport", installedShellId, err))
+			FinishInstall(host, "HomeskzIfcImport を更新しました。", "build: " + st.latest,
+						  runningShellId, installedShellId);
 		else
 			host.Inform("更新に失敗しました。", err);
 	}
 
 	void RunDevStartupCheckWith(IUpdaterHost& host, const std::string& runningBranch,
-								const std::string& runningCommit)
+								const std::string& runningCommit, const std::string& runningShellId)
 	{
 		std::string out;
 		if (!host.RunScript({"q-dev"}, out) || !ValueOf(out, "error").empty())
@@ -141,9 +185,11 @@ namespace HomeskzIfcImport
 		// A different build was chosen: install it, then offer the restart that
 		// actually loads it.
 		std::string err;
-		if (Install(host, pick.url, "HomeskzIfcImportDev", err))
-			OfferRestart(host, "開発版ビルドをインストールしました。",
-						 "branch: " + pick.name + "\ncommit: " + pick.commit);
+		std::string installedShellId;
+		if (Install(host, pick.url, "HomeskzIfcImportDev", installedShellId, err))
+			FinishInstall(host, "開発版ビルドをインストールしました。",
+						  "branch: " + pick.name + "\ncommit: " + pick.commit, runningShellId,
+						  installedShellId);
 		else
 			host.Inform("インストールに失敗しました。", err);
 	}

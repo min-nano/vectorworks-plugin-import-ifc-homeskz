@@ -26,17 +26,17 @@
 //	インポートが自動生成するので、`OnInitXProperties` で `kCustomObjectPrefNever` を
 //	宣言しておかないとインポートが記号の数だけ止まる（実機で確認）。
 //
+//	【ここに残るのは登録と取り次ぎだけ】絵を描くところは本体（ペイロード）側の
+//	draw::recalculateColumnMark にある。PIO の登録は Vectorworks に番地を握られるので殻に
+//	残すほかないが、描き方は本体へ出せる——そうしておくと**記号の直しが Vectorworks の
+//	再起動なしに反映される**（src/PayloadAbi.h / src/PayloadSession.h）。
+//
 
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtColumnMark.h"
-#include "draw/DrawUtil.h"
-#include "draw/StructuralMember.h"
-
-#include "core/Document.h"
-
-#include "VWFC/VWObjects/VWParametricObj.h"
-#include "VWFC/VWObjects/VWSymbolObj.h"
+#include "PayloadAbi.h"
+#include "PayloadSession.h"
 
 #include <array>
 #include <string>
@@ -100,69 +100,6 @@ namespace HomeskzIfcImport
 			return defs.data();
 		}
 
-		// 対象オブジェクトが構造材で、構造用途が柱／小屋束なら true。併せて断面寸法も返す。
-		//
-		// **寸法は draw/DrawUtil の ResolveParamName を通して読む。** 構造材ツールの
-		// パラメータは universal 名で引けないことがあり（日本語環境。M6 の垂木で実証済み）、
-		// draw/StructuralMember は書くときに同じ解決でローカライズ名へ落ちる。読み手が
-		// universal 名だけを見ると、書けているのに 0 が返って全部の柱が弾かれる。
-		bool ColumnSection(MCObjectHandle object, bool& outKoyazuka, double& outWidth,
-						   double& outDepth)
-		{
-			try
-			{
-				const VWParametricObj pio(object);
-				const std::string use = draw::PioParamString(pio, draw::kFieldStructuralUse);
-				if (use != core::kStructuralUseColumn && use != core::kStructuralUseKoyazuka)
-					return false;
-				outKoyazuka = use == core::kStructuralUseKoyazuka;
-				outWidth = pio.GetParamReal(
-					draw::ResolveParamName(pio, draw::kFieldMajorBreadth, draw::kLocalizedBreadth));
-				outDepth = pio.GetParamReal(
-					draw::ResolveParamName(pio, draw::kFieldMajorDepth, draw::kLocalizedDepth));
-				return outWidth > 0.0 && outDepth > 0.0;
-			}
-			catch (...)
-			{
-				return false;
-			}
-		}
-
-		// 記号 1 つ分を描く。断面記号は実断面の対角線（柱＝×・小屋束＝／）、平面記号は
-		// シンボル 1 つ。作った図形は PIO（host）のジオメトリとして取り込まれる。
-		//
-		// 【シンボルは置いただけでは図面に現れない】VWSymbolObj の構築子はレガシーの
-		// PlaceSymbol を包んでおり、できたインスタンスはどのコンテナにも入らない——
-		// M11 のアンカーボルトで「シンボルがひとつも配置できない」ところから切り分けた
-		// 落とし穴で、**AddObjectToContainer を外すと静かに壊れる**（draw/Symbol.cpp 冒頭）。
-		// PIO の中では配置先が PIO 自身（host）になる。線（CreateLine）は自動で入るので
-		// この手当てが要るのはシンボルだけ。
-		void DrawMark(MCObjectHandle host, bool plan, const TXString& symbol, bool koyazuka,
-					  const WorldPt& centre, double width, double depth)
-		{
-			if (plan)
-			{
-				if (symbol.IsEmpty())
-					return;
-				const VWSymbolObj instance(symbol, VWPoint2D(centre.x, centre.y), 0.0);
-				const MCObjectHandle handle = instance.GetThisObject();
-				// 非 nil を成功判定にしない（定義が無くても空のハンドルが返る。
-				// draw/Symbol.cpp の 2 番目の作法）。
-				if (handle == nil || !VWSymbolObj::IsSymbolObject(handle, symbol))
-					return;
-				gSDK->AddObjectToContainer(handle, host);
-				return;
-			}
-
-			const double halfW = width / 2.0;
-			const double halfD = depth / 2.0;
-			// ／（左下→右上）。小屋束はこの 1 本だけ、柱はもう 1 本足して ×。
-			gSDK->CreateLine(WorldPt(centre.x - halfW, centre.y - halfD),
-							 WorldPt(centre.x + halfW, centre.y + halfD));
-			if (!koyazuka)
-				gSDK->CreateLine(WorldPt(centre.x + halfW, centre.y - halfD),
-								 WorldPt(centre.x - halfW, centre.y + halfD));
-		}
 	} // namespace
 
 	// --------------------------------------------------------------------------
@@ -220,71 +157,26 @@ namespace HomeskzIfcImport
 		return result;
 	}
 
+	// ---------------------------------------------------------------------------
+	// **描くのは本体（ペイロード）。** ここでするのは「本体を（必要なら読み直して）確保し、
+	// 自分のハンドルを渡す」だけ（PayloadSession.h）。読み込めなかったときは**黙って
+	// 何もしない**——リセットは図面の記号の数だけ走るので、ここでダイアログを出しても
+	// 使いものにならない。エラー表示（kObjectEventHadError）も返さない: 描けなかった
+	// ことより、既に描いてある記号を消さずに残すほうが害が少ない。
 	EObjectEvent CColumnMark_EventSink::Recalculate()
 	{
 		// 自分自身のハンドルは基底の protected メンバ（VWFC が Execute で詰める）。
-		// リセット以外の経路で空のまま呼ばれても落とさないよう nil を見ておく。
 		if (this->fhObject == nil)
 			return kObjectEventNoErr;
 
-		try
-		{
-			const VWParametricObj self(this->fhObject);
-			const std::string targetLayer = draw::PioParamString(self, kParamTargetLayer);
-			if (targetLayer.empty())
-				return kObjectEventNoErr; // 対象未指定なら何も描かない
-
-			const std::string style = draw::PioParamString(self, kParamMarkStyle);
-			const bool plan = style == kMarkStylePlan;
-			const TXString symbol(draw::PioParamString(self, kParamMarkSymbol).c_str());
-			const std::string targetClass = draw::PioParamString(self, kParamTargetClass);
-
-			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(targetLayer.c_str()));
-			if (layer == nil)
-				return kObjectEventNoErr; // レイヤが無い＝その階が生成されていない
-
-			// **PIO のジオメトリは PIO 自身のローカル座標で持たれる。** 柱はワールド座標で
-			// 見つかるので、描く前に必ずローカルへ落とす。これをしないと PIO を動かした量
-			// だけ記号がまるごとずれ、しかもリセットしても同じ相対位置に描き直すので直らない
-			// （実機で確認。ResetOnMove を立てただけでは解決しない）。InversePointTransform
-			// は回転も含めて戻すので、PIO を回しても記号は柱の上に残る。
-			VWTransformMatrix toWorld;
-			self.GetObjectToWorldTransform(toWorld);
-
-			for (MCObjectHandle h = gSDK->FirstMemberObj(layer); h != nil; h = gSDK->NextObject(h))
-			{
-				// クラスで絞る指定があれば、それ以外は飛ばす（空＝全クラス）。
-				if (!targetClass.empty())
-				{
-					const InternalIndex wanted = gSDK->ClassNameToID(TXString(targetClass.c_str()));
-					if (wanted == 0 || gSDK->GetObjectClass(h) != wanted)
-						continue;
-				}
-
-				bool koyazuka = false;
-				double width = 0.0;
-				double depth = 0.0;
-				if (!ColumnSection(h, koyazuka, width, depth))
-					continue;
-
-				// 位置は柱のバウンディングボックスの中心（鉛直材なので平面の中心＝柱心）。
-				// 求まるのはワールド座標なので、PIO のローカルへ落としてから描く（上記）。
-				WorldRect bounds;
-				gSDK->GetObjectBounds(h, bounds);
-				const VWPoint2D centre = toWorld.InversePointTransform(VWPoint2D(
-					(bounds.left + bounds.right) / 2.0, (bounds.top + bounds.bottom) / 2.0));
-
-				DrawMark(this->fhObject, plan, symbol, koyazuka, WorldPt(centre.x, centre.y), width,
-						 depth);
-			}
-		}
-		catch (...)
-		{
-			// 1 本の異常で記号全体を落とさない（CLAUDE.md「エラーハンドリング」）。
-			// kObjectEventHadError を返すと VW がオブジェクトをエラー表示にするので、
-			// ここまでに描けた記号を残したまま正常終了として抜ける。
+		PayloadUse use;
+		if (!use.ok())
 			return kObjectEventNoErr;
-		}
-		return kObjectEventNoErr;
+
+		int event = kObjectEventNoErr;
+		std::string error;
+		if (!use->recalculate(kVwPayloadPioColumnMark, this->fhObject, event, error))
+			return kObjectEventNoErr;
+		return static_cast<EObjectEvent>(event);
 	}
 } // namespace HomeskzIfcImport

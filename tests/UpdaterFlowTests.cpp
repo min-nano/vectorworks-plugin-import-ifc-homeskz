@@ -39,6 +39,9 @@ namespace
 		std::vector<bool> askAnswers;
 		int pickAnswer = 0;		   // what PickBuild returns
 		bool restartAnswer = true; // what Restart returns (false -> could not be arranged)
+		// 本体（ペイロード）を降ろせたか。false は「まだ走っているので降ろせなかった」
+		// ＝反映は次の起動、という分岐（src/UpdaterHost.h の DropLoadedPayload）。
+		bool dropAnswer = true;
 
 		// --- Recorded interactions ------------------------------------------
 		std::vector<std::vector<std::string>> scriptCalls;
@@ -48,6 +51,7 @@ namespace
 		int askCount = 0;
 		int pickCount = 0;
 		int restartCount = 0;
+		int dropCount = 0;
 		std::vector<std::string> lastPickItems;
 
 		bool RunScript(const std::vector<std::string>& args, std::string& out) override
@@ -106,6 +110,12 @@ namespace
 			return restartAnswer;
 		}
 
+		bool DropLoadedPayload() override
+		{
+			++dropCount;
+			return dropAnswer;
+		}
+
 		// Convenience: how many times a given mode was invoked.
 		int CountScript(const std::string& mode) const
 		{
@@ -124,6 +134,11 @@ namespace
 			return {};
 		}
 	};
+	// いま動いている殻の ID（実物ではコンパイル時に焼かれる VW_SHELL_ID）。既定の
+	// do-install 出力は "installed-shell=" の行を持たないので、下のほとんどのテストは
+	// 「殻の新旧を判断できない＝安全側の再起動」を通る（src/UpdaterParse.h の
+	// NeedsRestartAfterInstall）。ホットリロードの分岐だけ、その行を足して確かめる。
+	constexpr const char* kRunningShell = "aaaa1111bbbb";
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -134,7 +149,7 @@ TEST(stable_stays_silent_when_script_cannot_start)
 {
 	FakeHost h;
 	h.qStableStarts = false;
-	RunStableStartupCheckWith(h);
+	RunStableStartupCheckWith(h, kRunningShell);
 	CHECK_EQ(h.askCount, 0);
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
 }
@@ -145,7 +160,7 @@ TEST(stable_stays_silent_when_already_current)
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=abc1234\n"
 				   "url=https://ex.com/x.zip\n";
-	RunStableStartupCheckWith(h);
+	RunStableStartupCheckWith(h, kRunningShell);
 	CHECK_EQ(h.askCount, 0); // no dialog when up to date
 	CHECK_EQ(h.CountScript("do-install"), 0);
 }
@@ -154,7 +169,7 @@ TEST(stable_stays_silent_on_error_line)
 {
 	FakeHost h;
 	h.qStableOut = "error=offline\n";
-	RunStableStartupCheckWith(h);
+	RunStableStartupCheckWith(h, kRunningShell);
 	CHECK_EQ(h.askCount, 0);
 }
 
@@ -165,7 +180,7 @@ TEST(stable_declined_does_not_install)
 				   "latest=def5678\n"
 				   "url=https://ex.com/x.zip\n";
 	h.askAnswer = false; // user chose "後で"
-	RunStableStartupCheckWith(h);
+	RunStableStartupCheckWith(h, kRunningShell);
 	CHECK_EQ(h.askCount, 1);				  // was asked
 	CHECK_EQ(h.CountScript("do-install"), 0); // but nothing installed
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
@@ -179,7 +194,7 @@ TEST(stable_accepted_and_install_succeeds)
 				   "url=https://ex.com/HomeskzIfcImport.zip\n";
 	h.askAnswers = {true, false}; // install: yes, restart: later
 	h.doInstallOut = "ok";
-	RunStableStartupCheckWith(h);
+	RunStableStartupCheckWith(h, kRunningShell);
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	// Installed the right asset under the stable name.
@@ -217,7 +232,7 @@ TEST(stable_restart_button_restarts_vectorworks)
 				   "url=https://ex.com/HomeskzIfcImport.zip\n";
 	h.askAnswer = true; // says yes to both questions: install, then restart
 	h.doInstallOut = "ok";
-	RunStableStartupCheckWith(h);
+	RunStableStartupCheckWith(h, kRunningShell);
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	CHECK_EQ(h.restartCount, 1);
@@ -234,7 +249,7 @@ TEST(stable_restart_that_cannot_be_arranged_is_reported)
 	h.askAnswer = true;
 	h.doInstallOut = "ok";
 	h.restartAnswer = false; // e.g. the relaunch helper would not start
-	RunStableStartupCheckWith(h);
+	RunStableStartupCheckWith(h, kRunningShell);
 
 	CHECK_EQ(h.restartCount, 1);
 	// Pressing 再起動 must not look like it did nothing.
@@ -251,7 +266,7 @@ TEST(stable_accepted_but_install_reports_error)
 				   "url=https://ex.com/x.zip\n";
 	h.askAnswer = true;
 	h.doInstallOut = "error=ダウンロードに失敗しました。\n";
-	RunStableStartupCheckWith(h);
+	RunStableStartupCheckWith(h, kRunningShell);
 
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
@@ -274,7 +289,7 @@ TEST(stable_accepted_but_installer_cannot_start)
 				   "url=https://ex.com/x.zip\n";
 	h.askAnswer = true;
 	h.doInstallStarts = false; // installer could not be launched
-	RunStableStartupCheckWith(h);
+	RunStableStartupCheckWith(h, kRunningShell);
 
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
@@ -292,7 +307,7 @@ TEST(dev_stays_silent_when_script_cannot_start)
 {
 	FakeHost h;
 	h.qDevStarts = false;
-	RunDevStartupCheckWith(h, "main", "run1234");
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.pickCount, 0);
 	CHECK_EQ(h.CountScript("do-install"), 0);
 }
@@ -301,7 +316,7 @@ TEST(dev_stays_silent_on_error_line)
 {
 	FakeHost h;
 	h.qDevOut = "error=リリース一覧を取得できませんでした。\n";
-	RunDevStartupCheckWith(h, "main", "run1234");
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.pickCount, 0);
 }
 
@@ -310,7 +325,7 @@ TEST(dev_skips_picker_when_no_prereleases_exist)
 	FakeHost h;
 	// The script returned no build rows at all.
 	h.qDevOut = "installed=run1234\n";
-	RunDevStartupCheckWith(h, "main", "run1234");
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.pickCount, 0); // nothing to choose -> no dialog
 	CHECK_EQ(h.CountScript("do-install"), 0);
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
@@ -322,7 +337,7 @@ TEST(dev_skips_picker_when_only_prerelease_is_the_running_build)
 	// The only prerelease is the build already loaded (same commit).
 	h.qDevOut = "installed=run1234\n"
 				"build\trun1234\tmain\thttps://ex.com/main.zip\n";
-	RunDevStartupCheckWith(h, "main", "run1234");
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.pickCount, 0); // no alternative build -> no dialog
 	CHECK_EQ(h.CountScript("do-install"), 0);
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
@@ -337,7 +352,7 @@ TEST(dev_picker_lists_current_first_then_other_builds)
 				"build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n"
 				"build\tbbb2222\tfeature/y\thttps://ex.com/y.zip\n";
 	h.pickAnswer = 0; // keep current
-	RunDevStartupCheckWith(h, "main", "run1234");
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
 
 	CHECK_EQ(h.pickCount, 1);
 	// Entry 0 is the running build; the running build is NOT repeated among the
@@ -358,7 +373,7 @@ TEST(dev_cancelled_does_not_install)
 	FakeHost h;
 	h.qDevOut = "build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n";
 	h.pickAnswer = -1; // cancelled the dialog
-	RunDevStartupCheckWith(h, "main", "run1234");
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.CountScript("do-install"), 0);
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
 }
@@ -372,7 +387,7 @@ TEST(dev_selecting_a_build_installs_it)
 	h.pickAnswer = 2;		// entry 2 -> candidate index 1 (feature/y)
 	h.askAnswers = {false}; // restart: later
 	h.doInstallOut = "ok";
-	RunDevStartupCheckWith(h, "main", "run1234");
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	std::vector<std::string> args = h.DoInstallArgs();
@@ -407,7 +422,7 @@ TEST(dev_restart_button_restarts_vectorworks)
 	h.pickAnswer = 1;	// the only candidate
 	h.askAnswer = true; // presses 再起動
 	h.doInstallOut = "ok";
-	RunDevStartupCheckWith(h, "main", "run1234");
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	CHECK_EQ(h.restartCount, 1);
@@ -418,7 +433,7 @@ TEST(dev_out_of_range_selection_keeps_current)
 	FakeHost h;
 	h.qDevOut = "build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n";
 	h.pickAnswer = 5; // past the last candidate
-	RunDevStartupCheckWith(h, "main", "run1234");
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.CountScript("do-install"), 0); // safeguard -> no install
 }
 
@@ -429,7 +444,7 @@ TEST(dev_install_failure_is_reported)
 	h.pickAnswer = 1;	// the only candidate
 	h.askAnswer = true; // would press 再起動 if it were ever offered...
 	h.doInstallOut = "error=アーカイブの展開に失敗しました。\n";
-	RunDevStartupCheckWith(h, "main", "run1234");
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
 
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
@@ -440,6 +455,119 @@ TEST(dev_install_failure_is_reported)
 	// ...but the install failed, so it never is.
 	CHECK_EQ(h.askCount, 0);
 	CHECK_EQ(h.restartCount, 0);
+}
+
+// ---------------------------------------------------------------------------
+// ホットリロード（殻が同じなら再起動を尋ねない）
+//
+// プラグインは殻と本体に割れていて、Vectorworks が起動時にしか読み込めないのは殻だけ
+// （src/PayloadAbi.h）。**入れたビルドの殻が同じなら、本体を降ろすだけで次の操作から
+// 新しいコードが動く**ので、再起動を尋ねてはならない——それがこの分岐の全部である。
+// ---------------------------------------------------------------------------
+
+TEST(stable_same_shell_reloads_without_asking_to_restart)
+{
+	FakeHost h;
+	h.qStableOut = "installed=abc1234\n"
+				   "latest=def5678\n"
+				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+	h.askAnswer = true; // says yes to the install question
+	// 入れた殻はいま動いているものと同じ＝本体だけが新しい。
+	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok\n";
+	RunStableStartupCheckWith(h, kRunningShell);
+
+	CHECK_EQ(h.CountScript("do-install"), 1);
+	// 尋ねたのは「インストールしますか？」の 1 回だけ（再起動は尋ねない）。
+	CHECK_EQ(h.askCount, 1);
+	CHECK_EQ(h.restartCount, 0);
+	// 代わりに本体を降ろして、そう伝える。
+	CHECK_EQ(h.dropCount, 1);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+	{
+		CHECK_EQ(h.informs[0][0], "HomeskzIfcImport を更新しました。");
+		CHECK_EQ(h.informs[0][1], "build: def5678\n\n"
+								  "Vectorworks の再起動は要りません。\n"
+								  "次の取り込みから新しいビルドが動きます。");
+	}
+}
+
+TEST(stable_same_shell_but_payload_still_in_use_defers_to_next_start)
+{
+	FakeHost h;
+	h.qStableOut = "installed=abc1234\n"
+				   "latest=def5678\n"
+				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+	h.askAnswer = true;
+	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok\n";
+	h.dropAnswer = false; // 本体のコードがまだ走っている
+	RunStableStartupCheckWith(h, kRunningShell);
+
+	// それでも再起動は尋ねない（殻は同じなので、次の起動で確実に反映される）。
+	CHECK_EQ(h.askCount, 1);
+	CHECK_EQ(h.restartCount, 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+		CHECK_EQ(h.informs[0][1],
+				 "build: def5678\n\n"
+				 "反映は次に Vectorworks を起動したときです。\n"
+				 "（いま動いている処理があるため、その場では入れ替えられませんでした）");
+}
+
+TEST(stable_different_shell_still_offers_restart)
+{
+	FakeHost h;
+	h.qStableOut = "installed=abc1234\n"
+				   "latest=def5678\n"
+				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+	h.askAnswers = {true, false}; // install: yes, restart: 後で
+	h.doInstallOut = "installed-shell=cccc2222dddd\nok\n";
+	RunStableStartupCheckWith(h, kRunningShell);
+
+	// 殻まで変わったので、従来どおり再起動を尋ねる。本体は降ろさない
+	// （どうせ次の起動で殻ごと入れ替わる）。
+	CHECK_EQ(h.askCount, 2);
+	CHECK_EQ(h.dropCount, 0);
+	if (h.asks.size() == 2)
+		CHECK_EQ(h.asks[1][2], "再起動");
+}
+
+TEST(dev_same_shell_reloads_without_asking_to_restart)
+{
+	FakeHost h;
+	h.qDevOut = "build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n";
+	h.pickAnswer = 1; // the only candidate
+	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok\n";
+	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
+
+	CHECK_EQ(h.CountScript("do-install"), 1);
+	CHECK_EQ(h.askCount, 0); // 再起動を尋ねない
+	CHECK_EQ(h.restartCount, 0);
+	CHECK_EQ(h.dropCount, 1);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+	{
+		CHECK_EQ(h.informs[0][0], "開発版ビルドをインストールしました。");
+		CHECK_EQ(h.informs[0][1], "branch: feature/x\ncommit: aaa1111\n\n"
+								  "Vectorworks の再起動は要りません。\n"
+								  "次の取り込みから新しいビルドが動きます。");
+	}
+}
+
+TEST(install_without_a_shell_line_falls_back_to_restart)
+{
+	// 古い同梱スクリプト（installed-shell を出さない版）。**判断できないので安全側**
+	// ＝再起動を尋ねる（src/UpdaterParse.h の NeedsRestartAfterInstall）。
+	FakeHost h;
+	h.qStableOut = "installed=abc1234\n"
+				   "latest=def5678\n"
+				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+	h.askAnswers = {true, false};
+	h.doInstallOut = "ok\n";
+	RunStableStartupCheckWith(h, kRunningShell);
+
+	CHECK_EQ(h.askCount, 2);
+	CHECK_EQ(h.dropCount, 0);
 }
 
 // ---------------------------------------------------------------------------

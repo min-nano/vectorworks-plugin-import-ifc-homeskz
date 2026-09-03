@@ -274,14 +274,82 @@ if(VW_BUILD_PLUGIN)
 			CACHE STRING "Git branch this build came from")
 	endif()
 
-	# The plug-in sources: the module entry point + menu command + updater, plus
-	# the SDK-dependent draw/ phase (src/draw/). The SDK-free core/ + parse/ code
-	# is NOT listed here — it comes in via the HomeskzIfcCore library linked below.
-	set(VW_COMMON_SOURCES
+	# --- 殻の ID ---------------------------------------------------------------
+	# **「アップデートに再起動が要るか」を決める鍵**（src/UpdaterParse.h の
+	# NeedsRestartAfterInstall）。Vectorworks が読み込むのは殻だけなので、**本体
+	# （.vwpayload）しか変わっていないなら置き換えて読み直すだけで済み、殻まで変わって
+	# いれば再起動が要る**（src/PayloadAbi.h）。
+	#
+	# 値は**殻に入るものだけ**のハッシュにする。つまり draw/ や parse/ を直しても動かず、
+	# 殻の登録・更新・境界（src/PayloadAbi.h）を直せば必ず動く——後者が肝で、版の食い違った
+	# まま動かさないための歯止めになっている。
+	#
+	# 外部ツールを使わず file(SHA256) だけで出すのは、**mac と Windows の両方の CI で
+	# 同じ値が出ること**が要るため（片方でしか動かない道具を挟むと、そこが食い違った
+	# 瞬間に「毎回再起動が要る」に化ける）。
+	set(VW_SHELL_INPUTS
+		CMakeLists.txt
+		src/PluginPrefix.h
+		src/BuildConfig.h
+		src/Module-Info.plist.in
 		src/ModuleMain.cpp
-		src/Extensions/ExtMenu.cpp
+		src/PayloadAbi.h
+		src/PayloadHost.h
+		src/PayloadHost.cpp
+		src/PayloadSession.h
+		src/PayloadSession.cpp
+		src/Updater.h
 		src/Updater.cpp
 		src/UpdaterFlow.cpp
+		src/UpdaterHost.h
+		src/UpdaterParse.h
+		src/Extensions/ExtMenu.h
+		src/Extensions/ExtMenu.cpp
+		src/Extensions/ExtColumnMark.h
+		src/Extensions/ExtColumnMark.cpp
+		src/Extensions/ExtShearWall.h
+		src/Extensions/ExtShearWall.cpp
+		scripts/vw-update.sh
+		scripts/vw-update.ps1)
+	set(VW_SHELL_DIGEST_INPUT "")
+	foreach(vw_shell_input IN LISTS VW_SHELL_INPUTS)
+		if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${vw_shell_input}")
+			message(FATAL_ERROR "VW_SHELL_INPUTS が指すファイルがありません: ${vw_shell_input}")
+		endif()
+		file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${vw_shell_input}" VW_SHELL_INPUT_DIGEST)
+		string(APPEND VW_SHELL_DIGEST_INPUT "${vw_shell_input}:${VW_SHELL_INPUT_DIGEST}\n")
+	endforeach()
+	string(SHA256 vw_shell_digest "${VW_SHELL_DIGEST_INPUT}")
+	string(SUBSTRING "${vw_shell_digest}" 0 12 VW_SHELL_ID)
+	message(STATUS "殻の ID: ${VW_SHELL_ID}")
+
+	# --- 殻の sources ------------------------------------------------------------
+	# **Vectorworks が起動時に読み込むモジュールに入るもの。** メニューと 2 つの PIO の
+	# 「登録」、自動アップデート、そして本体（ペイロード）の読み込み。**実処理は 1 行も
+	# 入らない**——それが本体側にあることが、アップデートに Vectorworks の再起動を要らなく
+	# している（src/PayloadAbi.h）。
+	#
+	# ここは SDK 非依存ライブラリ（HomeskzIfcCore）を**リンクしない**。殻は core/ も parse/
+	# も呼ばないので、リンクしてしまうと「殻に入ってよいもの」の境界が曖昧になる。
+	set(VW_SHELL_SOURCES
+		src/ModuleMain.cpp
+		src/PayloadHost.cpp
+		src/PayloadSession.cpp
+		src/Extensions/ExtMenu.cpp
+		src/Extensions/ExtColumnMark.cpp
+		src/Extensions/ExtShearWall.cpp
+		src/Updater.cpp
+		src/UpdaterFlow.cpp)
+
+	# --- 本体（ペイロード）の sources ----------------------------------------------
+	# **殻が dlopen / LoadLibrary で読み込む側。** SDK 依存の draw/ フェーズがまるごと
+	# ここに入り、SDK 非依存の core/ + parse/ は HomeskzIfcCore として下でリンクする。
+	# Vectorworks はこのモジュールの存在を知らないので、**入れ替えに再起動が要らない**。
+	set(VW_PAYLOAD_SOURCES
+		src/payload/PayloadMain.cpp
+		src/draw/ImportCommand.cpp
+		src/draw/ColumnMarkPio.cpp
+		src/draw/ShearWallPio.cpp
 		src/draw/DrawUtil.cpp
 		src/draw/StructuralMember.cpp
 		src/draw/ProgressDialog.cpp
@@ -295,9 +363,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Member.cpp
 		src/draw/Column.cpp
 		src/draw/ColumnMark.cpp
-		src/Extensions/ExtColumnMark.cpp
 		src/draw/ShearWall.cpp
-		src/Extensions/ExtShearWall.cpp
 		src/draw/Rafter.cpp
 		src/draw/Roof.cpp
 		src/draw/Symbol.cpp
@@ -306,36 +372,18 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Tag.cpp
 		src/draw/Legend.cpp)
 
-	# add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])
+	# 殻と本体は**同じ SDK 設定でビルドする**（本体も libVWSDK.a を自分でリンクし、
+	# GS_InitializeVCOM を自分で呼ぶ。src/payload/PayloadMain.cpp）。設定を 2 か所へ
+	# 書き写すと片方だけ古くなるので、当てるところを 1 つにまとめてある。
 	#
-	# Defines one loadable plug-in ("<output-name>.vwlibrary" bundle on macOS,
-	# "<output-name>.vlb" module on Windows). The same sources build both the stable
-	# and dev plug-ins; passing DEV compiles them with VW_DEV_BUILD so the plug-in
-	# takes on its dev identity (see src/BuildConfig.h). Each plug-in packages its
-	# own "<output-name>.vwr" resource, whose base name must match the identifier
-	# returned by DefaultPluginVWRIdentifier().
-	function(
-		add_vw_plugin
-		target
-		output_name
-		bundle_id
-		channel)
-		cmake_parse_arguments(
-			ARG
-			"DEV"
-			""
-			""
-			${ARGN})
+	#   vw_apply_sdk_module(<target> <sources...>)
+	#
+	# ここに入らないのは「殻か本体かで違うもの」だけ——出力の形（バンドル / .vlb /
+	# .vwpayload）と、本体だけがリンクする HomeskzIfcCore。
+	function(vw_apply_sdk_module target)
+		set(VW_MODULE_SOURCES ${ARGN})
 
-		# MODULE: a plug-in loaded at run time, not linked against. On macOS this
-		# becomes the bundle; on Windows it becomes a DLL (renamed to .vlb below).
-		add_library(${target} MODULE ${VW_COMMON_SOURCES})
-
-		set_target_properties(
-			${target}
-			PROPERTIES CXX_STANDARD 20
-					   CXX_STANDARD_REQUIRED ON
-					   OUTPUT_NAME "${output_name}")
+		set_target_properties(${target} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 
 		# Shared SDK include paths. The platform-specific "OnlyMac"/"OnlyWin" folder
 		# is added in the per-platform blocks below.
@@ -346,10 +394,6 @@ if(VW_BUILD_PLUGIN)
 					"${VW_SDK_INCLUDE}/Interfaces"
 					"${VW_SDK_INCLUDE}/VWMM"
 					"${CMAKE_CURRENT_SOURCE_DIR}/src")
-
-		# The SDK-free Phase-1 code (core/ + parse/). draw/ (compiled into this
-		# target above) reaches parse output through core/Document.h.
-		target_link_libraries(${target} PRIVATE HomeskzIfcCore)
 
 		# Precompiled header. Every SDK-dependent TU begins with PluginPrefix.h,
 		# which pulls in the whole Vectorworks SDK umbrella header — by far the
@@ -367,40 +411,28 @@ if(VW_BUILD_PLUGIN)
 		endif()
 
 		# RELEASE_BLD: link against the Release SDK. VW_BUILD_VERSION/VW_BUILD_BRANCH:
-		# build stamp (commit + branch), shown in the menu command's alert.
+		# build stamp (commit + branch), shown in the dev build picker and the
+		# diagnostics log. VW_SHELL_ID: **本体だけの更新で済むかを決める鍵**
+		# （src/UpdaterParse.h）。
+		#
+		# **ビルドのたびに変わる値をここへ足さないこと**（時刻など）。この定義は殻と本体の
+		# 全 TU に効くので、configure ごとに動く値を入れるとコンパイラキャッシュ（ccache）が
+		# 毎回まるごと外れ、CI が丸ごと再ビルドになる。
 		target_compile_definitions(
-			${target} PRIVATE RELEASE_BLD=1 "VW_BUILD_VERSION=\"${VW_BUILD_VERSION}\""
-							  "VW_BUILD_BRANCH=\"${VW_BUILD_BRANCH}\"")
-		if(ARG_DEV)
-			target_compile_definitions(${target} PRIVATE VW_DEV_BUILD=1)
-		endif()
+			${target}
+			PRIVATE RELEASE_BLD=1 "VW_BUILD_VERSION=\"${VW_BUILD_VERSION}\""
+					"VW_BUILD_BRANCH=\"${VW_BUILD_BRANCH}\"" "VW_SHELL_ID=\"${VW_SHELL_ID}\"")
 
 		if(APPLE)
 			# Build the sources as Objective-C++ (see note on project() above). Set
 			# per target so each object is compiled with that target's definitions.
-			set_source_files_properties(${VW_COMMON_SOURCES} TARGET_DIRECTORY ${target}
+			set_source_files_properties(${VW_MODULE_SOURCES} TARGET_DIRECTORY ${target}
 										PROPERTIES LANGUAGE OBJCXX)
 
 			target_include_directories(${target} PRIVATE "${VW_SDK_INCLUDE}/OnlyMac")
 
-			# Fill in a per-target Info.plist from the shared template. The channel
-			# placeholder is deliberately NOT called VW_BUILD_CHANNEL: that name is
-			# the cache option above, whose domain includes "both", while the plist
-			# records the single channel THIS target belongs to ("stable"/"dev").
-			set(VW_BUNDLE_NAME "${output_name}")
-			set(VW_BUNDLE_ID "${bundle_id}")
-			set(VW_PLUGIN_CHANNEL "${channel}")
-			# VW_BUILD_BRANCH and VW_BUILD_VERSION come from the parent scope (CI/-D).
-			set(plist "${CMAKE_CURRENT_BINARY_DIR}/${target}-Info.plist")
-			configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/Module-Info.plist.in" "${plist}" @ONLY)
-
-			set_target_properties(
-				${target}
-				PROPERTIES OBJCXX_STANDARD 20
-						   OBJCXX_STANDARD_REQUIRED ON
-						   BUNDLE TRUE
-						   BUNDLE_EXTENSION "vwlibrary"
-						   MACOSX_BUNDLE_INFO_PLIST "${plist}")
+			set_target_properties(${target} PROPERTIES OBJCXX_STANDARD 20)
+			set_target_properties(${target} PROPERTIES OBJCXX_STANDARD_REQUIRED ON)
 
 			target_compile_options(${target} PRIVATE -stdlib=libc++ -Wno-deprecated-declarations)
 
@@ -414,15 +446,11 @@ if(VW_BUILD_PLUGIN)
 						"-framework Carbon"
 						"-framework Cocoa")
 		else()
-			# Windows: build a .vlb (a DLL) that self-exports plugin_module_main via
-			# __declspec(dllexport) (see GS_EXTERNAL_ENTRY in the SDK's Config.h).
 			target_include_directories(${target} PRIVATE "${VW_SDK_INCLUDE}/OnlyWin")
 
 			set_target_properties(
-				${target}
-				PROPERTIES PREFIX ""
-						   SUFFIX ".vlb"
-						   MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" # /MD, matches the SDK libs
+				${target} PROPERTIES MSVC_RUNTIME_LIBRARY
+									 "MultiThreadedDLL" # /MD, matches the SDK libs
 			)
 
 			# _WINDOWS switches the SDK headers into their GS_WIN configuration
@@ -460,6 +488,96 @@ if(VW_BUILD_PLUGIN)
 			# SDK references.
 			target_link_libraries(${target} PRIVATE "${VW_SDK_LIB}/VWSDK.lib"
 													"${VW_SDK_LIB}/VWMM.lib" USP10.lib Rpcrt4.lib)
+		endif()
+	endfunction()
+
+	# add_vw_plugin(<target> <output-name> <bundle-id> <channel> [DEV])
+	#
+	# Defines one loadable plug-in ("<output-name>.vwlibrary" bundle on macOS,
+	# "<output-name>.vlb" module on Windows). The same sources build both the stable
+	# and dev plug-ins; passing DEV compiles them with VW_DEV_BUILD so the plug-in
+	# takes on its dev identity (see src/BuildConfig.h). Each plug-in packages its
+	# own "<output-name>.vwr" resource, whose base name must match the identifier
+	# returned by DefaultPluginVWRIdentifier().
+	function(
+		add_vw_plugin
+		target
+		output_name
+		bundle_id
+		channel)
+		cmake_parse_arguments(
+			ARG
+			"DEV"
+			""
+			""
+			${ARGN})
+
+		# --- 殻 ------------------------------------------------------------------
+		# MODULE: a plug-in loaded at run time, not linked against. On macOS this
+		# becomes the bundle; on Windows it becomes a DLL (renamed to .vlb below).
+		add_library(${target} MODULE ${VW_SHELL_SOURCES})
+		set_target_properties(${target} PROPERTIES OUTPUT_NAME "${output_name}")
+		vw_apply_sdk_module(${target} ${VW_SHELL_SOURCES})
+
+		# --- 本体（ペイロード）-----------------------------------------------------
+		# **Vectorworks が読み込むのは上の殻だけで、こちらは殻が自分で dlopen /
+		# LoadLibrary する**——だから Vectorworks を再起動せずに入れ替えられる
+		# （src/PayloadAbi.h）。
+		#
+		# 置き場所は**殻の隣**（mac もバンドルの中ではない）。mac のバンドルは署名が
+		# リソースまで封をするので、中のファイルを差し替えると署名が壊れる。隣に置けば、
+		# 本体を何度置き換えても殻の署名に触れない。拡張子 .vwpayload は Vectorworks に
+		# プラグインとして拾わせないため（.vlb / .vwlibrary だと Plug-Ins の走査に
+		# 引っかかり、殻と二重に読み込まれてしまう）。
+		set(payload_target "${target}Payload")
+		add_library(${payload_target} MODULE ${VW_PAYLOAD_SOURCES})
+		#
+		# ARCHIVE_OUTPUT_NAME: Windows では export を持つ DLL に**インポートライブラリ**が
+		# 付いてくる。既定の名前は OUTPUT_NAME 由来なので、殻（`<name>.lib`）と本体で
+		# **同じファイルを 2 つのターゲットが作る**ことになり衝突する。本体側だけ名前を
+		# ずらす（実行時には使われないファイルで、配布物にも入らない）。
+		set_target_properties(
+			${payload_target}
+			PROPERTIES OUTPUT_NAME "${output_name}"
+					   ARCHIVE_OUTPUT_NAME "${output_name}Payload"
+					   BUNDLE FALSE
+					   PREFIX ""
+					   SUFFIX ".vwpayload")
+		vw_apply_sdk_module(${payload_target} ${VW_PAYLOAD_SOURCES})
+
+		# The SDK-free Phase-1 code (core/ + parse/). **殻はこれをリンクしない**——
+		# 解析も描画も本体の側にあるので、殻が core/ を引く理由が無い。
+		target_link_libraries(${payload_target} PRIVATE HomeskzIfcCore)
+
+		# 片方だけ作っても実機では動かない（殻は本体を隣から読む）。
+		add_dependencies(${target} ${payload_target})
+
+		if(ARG_DEV)
+			target_compile_definitions(${target} PRIVATE VW_DEV_BUILD=1)
+			target_compile_definitions(${payload_target} PRIVATE VW_DEV_BUILD=1)
+		endif()
+
+		if(APPLE)
+			# Fill in a per-target Info.plist from the shared template. The channel
+			# placeholder is deliberately NOT called VW_BUILD_CHANNEL: that name is
+			# the cache option above, whose domain includes "both", while the plist
+			# records the single channel THIS target belongs to ("stable"/"dev").
+			set(VW_BUNDLE_NAME "${output_name}")
+			set(VW_BUNDLE_ID "${bundle_id}")
+			set(VW_PLUGIN_CHANNEL "${channel}")
+			# VW_BUILD_BRANCH / VW_BUILD_VERSION / VW_SHELL_ID come from the parent scope.
+			set(plist "${CMAKE_CURRENT_BINARY_DIR}/${target}-Info.plist")
+			configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/Module-Info.plist.in" "${plist}" @ONLY)
+
+			set_target_properties(
+				${target}
+				PROPERTIES BUNDLE TRUE
+						   BUNDLE_EXTENSION "vwlibrary"
+						   MACOSX_BUNDLE_INFO_PLIST "${plist}")
+		else()
+			# Windows: build a .vlb (a DLL) that self-exports plugin_module_main via
+			# __declspec(dllexport) (see GS_EXTERNAL_ENTRY in the SDK's Config.h).
+			set_target_properties(${target} PROPERTIES PREFIX "" SUFFIX ".vlb")
 		endif()
 
 		# --- Package "<output-name>.vwr" -----------------------------------------
@@ -514,6 +632,11 @@ if(VW_BUILD_PLUGIN)
 			# plist instead). Written at configure time from the parent-scope stamp.
 			set(commit_file "${CMAKE_CURRENT_BINARY_DIR}/${output_name}.commit")
 			file(WRITE "${commit_file}" "${VW_BUILD_VERSION}\n")
+			# 殻の ID も同じやり方で控える。**「本体だけ入れ替えれば済むか」をアップデータが
+			# 判断する材料**で、mac 側は Info.plist の VWShellId から読む
+			# （scripts/vw-update.ps1 の Get-InstalledShellId と対）。
+			set(shell_id_file "${CMAKE_CURRENT_BINARY_DIR}/${output_name}.shell-id")
+			file(WRITE "${shell_id_file}" "${VW_SHELL_ID}\n")
 			add_custom_command(
 				TARGET ${target}
 				POST_BUILD
@@ -522,8 +645,10 @@ if(VW_BUILD_PLUGIN)
 					"$<TARGET_FILE_DIR:${target}>/vw-update.ps1"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${commit_file}"
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.commit"
+				COMMAND "${CMAKE_COMMAND}" -E copy "${shell_id_file}"
+						"$<TARGET_FILE_DIR:${target}>/${output_name}.shell-id"
 				VERBATIM
-				COMMENT "Bundling vw-update.ps1 and build stamp next to ${output_name}")
+				COMMENT "Bundling vw-update.ps1 and build stamps next to ${output_name}")
 		endif()
 	endfunction()
 

@@ -160,6 +160,44 @@ installed_commit() { # bundle-path -> stamped VWBuildCommit or "none"
 	fi
 }
 
+# 殻（バンドル）の ID。**「アップデートに Vectorworks の再起動が要るか」を決める鍵**で、
+# プラグイン側は自分にコンパイルされた VW_SHELL_ID と突き合わせる——一致するなら本体
+# （.vwpayload）を読み直すだけで反映される（src/PayloadAbi.h / src/UpdaterParse.h）。
+# 読めなければ空文字（＝判断できないので、プラグイン側は安全側＝「再起動が要る」へ倒す）。
+installed_shell_id() { # bundle-path -> stamped VWShellId or ""
+	local plist="$1/Contents/Info.plist"
+	if [ -f "$plist" ]; then
+		/usr/libexec/PlistBuddy -c "Print :VWShellId" "$plist" 2>/dev/null || echo ""
+	else
+		echo ""
+	fi
+}
+
+# install_payload: 本体（"<name>.vwpayload"）を殻の隣へ入れる。**殻とは別のファイルで、
+# これが入れ替わると Vectorworks を再起動しなくても次の操作から新しいコードが動く**
+# （src/PayloadAbi.h）。zip に入っていなければ**何もしないで成功扱い**にする——古い形の
+# リリース（本体を持たない）へ当たったときに、殻の入れ替えまで巻き添えで失敗させないため。
+#
+# 書き込みは必ず「別名へ書いてから mv」にする。走っている Vectorworks は入口ごとに
+# このファイルを見て読み直すので、**途中まで書かれたファイルを掴ませない**ことが要る
+# （src/PayloadSession.cpp）。
+install_payload() { # work-dir, name -> 0 on success (or nothing to do)
+	local work="$1" name="$2"
+	local src="$work/$name.vwpayload"
+	[ -f "$src" ] || return 0
+
+	# Gatekeeper: 殻と同じ手当て。dlopen する側なので、隔離属性が残っていると
+	# Apple Silicon では読み込めない。
+	xattr -d com.apple.quarantine "$src" 2>/dev/null || true
+	codesign --force --sign - "$src" >/dev/null 2>&1 || true
+
+	local dst="$VW_PLUGINS_DIR/$name.vwpayload"
+	rm -f "$dst.new"
+	cp "$src" "$dst.new" || return 1
+	mv -f "$dst.new" "$dst" || return 1
+	return 0
+}
+
 # install_zip: unzip a "<name>.vwlibrary.zip", de-quarantine, ad-hoc re-sign and
 # atomically swap it into the Plug-Ins folder.
 install_zip() { # zip, name
@@ -180,6 +218,7 @@ install_zip() { # zip, name
 	cp -R "$src" "$dst.new"
 	rm -rf "$dst"
 	mv "$dst.new" "$dst"
+	install_payload "$work" "$name" || { rm -rf "$work"; die "本体（$name.vwpayload）のインストールに失敗しました。"; }
 	rm -rf "$work"
 	echo "installed: $dst"
 }
@@ -377,7 +416,17 @@ do_install() {
 	fi
 	rm -rf "$dst"
 	mv "$dst.new" "$dst"
+	if ! install_payload "$work" "$name"; then
+		rm -rf "$tmp" "$work"; echo "error=本体（$name.vwpayload）のインストールに失敗しました。"; return 0
+	fi
 	rm -rf "$tmp" "$work"
+	# **いま入れた殻の ID を先に出す。** プラグインはこれを自分の VW_SHELL_ID と突き合わせて
+	# 「再起動が要るか／本体の読み直しで済むか」を決める（src/UpdaterParse.h の
+	# NeedsRestartAfterInstall）。読めなければ行を出さない＝プラグインは安全側へ倒す。
+	local shell_id; shell_id="$(installed_shell_id "$dst")"
+	if [ -n "$shell_id" ]; then
+		echo "installed-shell=$shell_id"
+	fi
 	echo "ok"
 }
 

@@ -180,6 +180,11 @@ download() { # url, out-file
 # "no bundle -> none" branch is unstubbed and tested separately below.
 installed_commit() { printf '%s\n' "${VW_TEST_INSTALLED:-none}"; }
 
+# installed_shell_id: 同上（実物はインストール済みバンドルの Info.plist から VWShellId を
+# PlistBuddy で読む）。既定は空＝「殻の新旧を判断できない」で、do_install はその行を
+# 出さない（src/UpdaterParse.h の NeedsRestartAfterInstall は安全側＝再起動へ倒れる）。
+installed_shell_id() { printf '%s\n' "${VW_TEST_SHELL_ID:-}"; }
+
 # codesign / xattr are macOS Gatekeeper tools do_install calls; no-op them so the
 # install path runs cleanly (and quietly) on Linux.
 codesign() { return 0; }
@@ -226,11 +231,15 @@ export VW_TEST_RELEASES_JSON="$RELEASES_JSON"
 
 # Build a real "HomeskzIfcImportDev.vwlibrary.zip" for the do-install tests, and a
 # malformed one whose top-level dir has the wrong name.
+# 本体（"<name>.vwpayload"）も一緒に入れる——**実際のリリース zip と同じ形**にしないと、
+# 殻だけ入れて本体を取りこぼす退行を捕まえられない（src/PayloadAbi.h）。
 build_zip() { # zip-path, bundle-dir-name
 	local dir="$WORK/stage-$$-$RANDOM"
+	local name="${2%.vwlibrary}"
 	mkdir -p "$dir/$2/Contents"
 	printf 'plist\n' >"$dir/$2/Contents/Info.plist"
-	( cd "$dir" && zip -qr "$1" "$2" )
+	printf 'payload\n' >"$dir/$name.vwpayload"
+	( cd "$dir" && zip -qr "$1" "$2" "$name.vwpayload" )
 	rm -rf "$dir"
 }
 GOOD_ZIP="$WORK/good.zip"
@@ -312,6 +321,25 @@ out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$GOOD_ZIP" \
 check_eq "$out" "ok" "do_install prints ok"
 if [ -f "$dest/HomeskzIfcImportDev.vwlibrary/Contents/Info.plist" ]; then installed=yes; else installed=no; fi
 check_eq "$installed" "yes" "the .vwlibrary landed in the plug-ins dir"
+# **本体も入っていること。** 殻だけ入れて本体を取りこぼすと、次の起動でプラグインは
+# 何もできなくなる（src/PayloadHost.cpp が「本体が見つかりません」と言うだけ）。
+if [ -f "$dest/HomeskzIfcImportDev.vwpayload" ]; then installed=yes; else installed=no; fi
+check_eq "$installed" "yes" "the .vwpayload landed next to the bundle"
+
+t "do_install reports the installed shell id so the plug-in can skip the restart"
+dest="$WORK/plugins-shellid"
+mkdir -p "$dest"
+out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$GOOD_ZIP" VW_TEST_SHELL_ID="abc123def456" \
+	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+check_contains "$out" "installed-shell=abc123def456" "prints the installed shell id"
+check_contains "$out" "ok" "still prints ok"
+
+t "do_install omits the shell id line when it cannot be read"
+dest="$WORK/plugins-noshellid"
+mkdir -p "$dest"
+out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$GOOD_ZIP" \
+	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+check_eq "$out" "ok" "no shell id -> just ok (the plug-in then asks to restart)"
 
 t "do_install reports a download failure"
 dest="$WORK/plugins-dlfail"

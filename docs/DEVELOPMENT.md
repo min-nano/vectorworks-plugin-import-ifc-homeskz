@@ -16,19 +16,49 @@
 **SDK を一切 include しない**ので、SDK 無しでコンパイル・単体テストできます
 （設計の詳細は [`DEV-NOTES.md`](DEV-NOTES.md)「設計の考え方」）。
 
+**ビルドの成果物も 2 つに割れています**（こちらはフェーズ分離とは別の軸）。
+
+```
+Vectorworks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb    … 起動時に 1 度きり
+                              │ dlopen / LoadLibrary
+                              ▼
+                          本体 <name>.vwpayload          … いつでも読み直せる
+```
+
+**殻**に入るのは「Vectorworks に番地を握られるもの」だけ——メニューと 2 つの PIO の*登録*、
+自動アップデート、そして本体を読み込む仕掛け（`src/PayloadHost.*` / `src/PayloadSession.*`）。
+**本体**に `core/` `parse/` `draw/` のすべてが入ります。境界は C の ABI
+（`src/PayloadAbi.h`）1 枚きりです。
+
+こう割ってあるのは、**アップデートに Vectorworks の再起動を要らなくする**ためです
+（下記「自動アップデートの仕組み」／[SDK リファレンス「プラグインモジュールの読み込みと
+入れ替え」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Plug-in%20Modules.md)）。
+
 ```
 CMakeLists.txt              macOS / Windows 両対応の CMake ビルド。SDK 非依存の
                             静的ライブラリ HomeskzIfcCore（core/ + parse/）と、
                             SDK 依存のプラグイン本体（draw/ ほか）に分かれる
 src/
   ModuleMain.cpp            モジュールのエントリポイント。拡張機能を登録し、
-                            起動時にアップデート確認を仕掛ける
-  Extensions/
-    ExtMenu.{h,cpp}           「IFC (ホームズ君) 取り込み…」メニューコマンド。
-                              ファイル選択 → 設定 → parse → draw → 完了ダイアログを束ね、
-                              診断ログの見出し・区切り・結果を書く
-    ExtColumnMark.{h,cpp}     柱・小屋束の記号 PIO（対象レイヤの構造材を走査して
-                              断面記号 ×／／ と平面記号を描く）
+                            起動時にアップデート確認を仕掛け、本体へ渡す
+                            CallBackPtr を預ける
+  PayloadAbi.h              **殻と本体の唯一の約束事**（C の ABI）。両方が include する
+                            ので SDK にもプラットフォームにも依存しない
+  PayloadHost.{h,cpp}       殻の側: 本体を一時ディレクトリへ複製して dlopen /
+                            LoadLibrary し、版を確かめ、呼び、降ろす
+  PayloadSession.{h,cpp}    殻の側: 「いま載っている本体」1 つと、入口ごとの載せ替え
+                            判定（同梱ファイルの印が変わっていたら読み直す）
+  PayloadHostHolder.h       本体の側: 殻から渡された構造体を**その場で写す**入れ物
+                            （持ち続けると実機で落ちる。回帰テストあり）
+  payload/
+    PayloadMain.cpp           本体のエントリポイント。GS_InitializeVCOM を自分で呼び、
+                              取り込みと PIO のリセットを中の実装へ取り次ぐ
+  Extensions/               **殻**に残る「登録」だけ（実処理は draw/ 側）
+    ExtMenu.{h,cpp}           「IFC (ホームズ君) 取り込み…」メニューコマンドの登録と、
+                              本体の draw::runImportCommand への取り次ぎ
+    ExtColumnMark.{h,cpp}     柱・小屋束の記号 PIO の登録（パラメータ定義・UUID）と、
+                              本体の draw::recalculateColumnMark への取り次ぎ
+    ExtShearWall.{h,cpp}      耐力壁 PIO の同上（→ draw::recalculateShearWall）
   core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
     Document.{h,cpp}          命令セットの構造体定義・validateDocument・描画結果の件数
     ImportOptions.{h,cpp}     取り込み設定（配置するシンボルの対応）と役割の表 1 つ
@@ -52,7 +82,14 @@ src/
     Grid / Story / Floor / Member / Noboribari / Column / Rafter / Roof /
     Footing / AnchorBolt / FloorPost / FireBrace / Joint / ColumnMark /
     Sheet / Tag / Section      要素ごとの解析
-  draw/                     Phase 2: VW 描画（SDK 依存）
+  draw/                     Phase 2: VW 描画（SDK 依存）。**まるごと本体に入る**
+    ImportCommand.{h,cpp}     取り込みコマンドの本体（ファイル選択 → 設定 → parse →
+                              draw → 完了ダイアログ）。診断ログの見出し・区切り・結果も
+                              ここが書く
+    ColumnMarkPio.{h,cpp}     柱・小屋束の記号 PIO のリセット本体（対象レイヤの構造材を
+                              走査して断面記号 ×／／ と平面記号を描く）
+    ShearWallPio.{h,cpp}      耐力壁 PIO のリセット本体（両端の柱から内法を求め、
+                              伏図記号 2D と軸組図の面 3D を描く）
     ExecuteDocument.{h,cpp}   命令セットを検証して要素ごとにディスパッチ
     DrawUtil.{h,cpp}          クラス分け・by-class 属性・レイヤ／シートレイヤの用意・
                               構成層・ビューポートの仕上げ（縮尺・用紙の大きさ・位置合わせ）・
@@ -748,12 +785,39 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
   プログラム内から再実行しうると毎回ダイアログが出てしまいます。コンパイル済みビルドは
   そもそも起動時にしか差し替わらないため、確認は起動時に一度だけ行います。
 
-### インストール後の再起動（stable / dev 共通）
+### インストール後（stable / dev 共通）— まず「再起動が要るか」を決める
 
-コンパイル済みプラグインは起動時にしか読み込まれないため、インストールしただけでは
-新しいビルドは動きません。そこでインストールが成功したときの表示は**通知ではなく質問**
-にしてあり、**「再起動」ボタン**をその場に出します（`src/UpdaterFlow.cpp` の
-`OfferRestart`）。
+プラグインは**殻**（`.vwlibrary` / `.vlb`）と**本体**（`.vwpayload`）に割れていて、
+Vectorworks が起動時にしか読み込めないのは殻だけです（上記「ソースの構成」／
+`src/PayloadAbi.h`）。したがってインストール直後の分岐は 2 つあります
+（`src/UpdaterFlow.cpp` の `FinishInstall`）。
+
+| 入れたビルド | どうなるか |
+| --- | --- |
+| **本体だけが新しい**（殻の ID が同じ） | 載っている本体を降ろすだけ。**再起動を尋ねません。** 次の取り込み・次の PIO リセットで新しいファイルが読み直されます |
+| **殻まで変わった** | 読み込めるのは次の起動だけなので、従来どおり「再起動」を尋ねます（下記） |
+| **判断できない**（同梱スクリプトが古く ID を出さない等） | **安全側＝再起動を尋ねる**へ倒します |
+
+判断の材料は**殻の ID**（`VW_SHELL_ID`）です。CMake が「殻に入るものだけ」のハッシュを
+計算してビルドへ焼き（`CMakeLists.txt` の `VW_SHELL_INPUTS`）、同じ値をインストール物にも
+控えます（mac: `Info.plist` の `VWShellId`、win: `<name>.shell-id`）。`do-install` は入れ終えた
+ビルドの ID を `installed-shell=<id>` として出し、プラグインは自分に焼かれた値と突き合わせ
+ます（`src/UpdaterParse.h` の `NeedsRestartAfterInstall`。純粋関数なので単体テスト済み）。
+
+`VW_SHELL_INPUTS` に `draw/` や `parse/` は**入っていません**。つまり描画やパースをいくら
+直しても殻の ID は動かず、逆に境界（`src/PayloadAbi.h`）や登録まわりを直せば必ず動きます
+——後者が肝で、**版の食い違った殻と本体を組ませない**ための歯止めになっています。
+
+実際に本体が読み直されるのは、次に本体を使うとき（取り込みコマンド・PIO のリセット）です。
+入口ごとに同梱ファイルの印（大きさ・更新時刻）を見て、読んだときと違っていれば降ろして
+読み直します（`src/PayloadSession.cpp`）。**本体のコードがスタックに載っている間は決して
+降ろしません**——降ろした瞬間にそのコードと静的データが消えるためです。
+
+### 殻まで変わったときの再起動
+
+コンパイル済みの殻は起動時にしか読み込まれないため、インストールしただけでは新しい殻は
+動きません。そこでこの場合の表示は**通知ではなく質問**にしてあり、**「再起動」ボタン**を
+その場に出します（`src/UpdaterFlow.cpp` の `OfferRestart`）。
 
 - **「再起動」** → 起動の完了後に Vectorworks を終了し、終了しきってから起動し直します
   （`src/Updater.cpp` の `CVectorworksUpdaterHost::Restart`）。終了要求は OS 経由なので
@@ -802,9 +866,23 @@ SDK の `CloseAllFilesAndQuitVectorworks` には「終了」と「終了後に�
 新しいビルドが実際にロードされるのは、この再起動（または手動での再起動）以降です。
 
 インストールそのものは OS ごとに事情が違います。macOS ではバンドルの隔離解除とアドホック
-再署名をスクリプトが行います。Windows では実行中の `.vlb` を削除できない（メモリにマップ
-されている）ため、スクリプトは古い `.vlb` をいったん退避（リネーム）してから新しいものを
-書き込みます。退避ファイル（`*.old-*`）は次回の更新時に掃除します。
+再署名をスクリプトが行います（**本体 `.vwpayload` にも個別に必要**です——バンドルの外に
+あるので `--deep` に含まれず、署名が無いと Apple Silicon の検証で `dlopen` に失敗します）。
+Windows では実行中の `.vlb` を削除できない（メモリにマップされている）ため、スクリプトは
+古い `.vlb` をいったん退避（リネーム）してから新しいものを書き込みます。退避ファイル
+（`*.old-*`）は次回の更新時に掃除します。
+
+**この形へ移る 1 回だけ、自動アップデートでは本体が入りません。** 更新を実行するのは
+「いま入っているビルドに同梱されていたスクリプト」であり、割る前のビルドのスクリプトは
+`.vwpayload` の存在を知らないからです（zip には入っているのにコピーされない）。その場合は
+殻だけが新しくなり、起動後に「本体が見つかりません」と案内が出るので、利用者が 1 度だけ
+手で入れ直します（README「自動アップデート」）。以後は同梱スクリプトも新しいものになる
+ので、両方が自動で入れ替わります。
+
+**本体（`.vwpayload`）は実行中でも置き換えられます。** 殻は同梱ファイルそのものではなく
+一時ディレクトリへ複製したものを読み込むので（`src/PayloadHost.h`「必ず複製してから読む」）、
+インストール先のファイルは常に空いています。スクリプトは別名へ書いてから `mv` する
+——**途中まで書かれたファイルを走行中の Vectorworks に掴ませない**ためです。
 
 プラグイン経由の更新は、**実行中のモジュール自身が置かれているフォルダ**（＝Vectorworks
 が実際に読み込んだ `Plug-Ins`）へインストールします（`src/Updater.cpp` が自分のパスを

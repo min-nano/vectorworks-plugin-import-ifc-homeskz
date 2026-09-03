@@ -575,7 +575,7 @@ TEST(install_reported_ok_false_otherwise)
 {
 	CHECK(!InstallReportedOk(""));
 	CHECK(!InstallReportedOk("error=ダウンロードに失敗しました。\n"));
-	CHECK(!InstallReportedOk("okay")); // must be exactly "ok"
+	CHECK(!InstallReportedOk("okay")); // 行として "ok" ちょうどでなければならない
 }
 
 TEST(install_error_text_uses_script_error)
@@ -589,6 +589,46 @@ TEST(install_error_text_falls_back_when_no_error)
 	// No error= line (e.g. garbled output): use the caller's fallback wording.
 	CHECK_EQ(InstallErrorText("something unexpected\n", "fallback"), "fallback");
 	CHECK_EQ(InstallErrorText("", "fallback"), "fallback");
+}
+
+// ---------------------------------------------------------------------------
+// ホットリロードの判断材料 — InstalledShellId / NeedsRestartAfterInstall
+//
+// プラグインは殻と本体に割れていて、Vectorworks が起動時にしか読み込めないのは殻だけ
+// （src/PayloadAbi.h）。**入れたビルドの殻が同じなら再起動は要らない**——その 1 点を
+// 決めるのがこの 2 つ。
+// ---------------------------------------------------------------------------
+
+TEST(install_reported_ok_accepts_extra_lines_before_ok)
+{
+	// do-install は "ok" の前に installed-shell= を出す。**その行があっても成功と読む**
+	// ——出力全体が "ok" であることを求めていた頃の書き方だと、成功が失敗に化ける。
+	CHECK(InstallReportedOk("installed-shell=abc123def456\nok\n"));
+	CHECK(InstallReportedOk("installed-shell=abc123def456\nok"));
+	// それでも error= だけの出力は失敗のまま。
+	CHECK(!InstallReportedOk("installed-shell=abc123def456\nerror=だめでした。\n"));
+}
+
+TEST(installed_shell_id_reads_the_line)
+{
+	CHECK_EQ(InstalledShellId("installed-shell=abc123def456\nok\n"), "abc123def456");
+	// 行が無ければ空（この行を出さない古いスクリプト）。
+	CHECK_EQ(InstalledShellId("ok\n"), "");
+	CHECK_EQ(InstalledShellId(""), "");
+	// installed= と取り違えない（前方一致ではなくキーの一致で引く）。
+	CHECK_EQ(InstalledShellId("installed=abc1234\nok\n"), "");
+}
+
+TEST(needs_restart_is_false_only_when_both_shells_are_known_and_equal)
+{
+	// 殻が同じ＝本体だけが新しい → 読み直すだけでよい。
+	CHECK(!NeedsRestartAfterInstall("abc123def456", "abc123def456"));
+	// 殻が違う → 次の起動でしか読み込めない。
+	CHECK(NeedsRestartAfterInstall("abc123def456", "cccc2222dddd"));
+	// **判断できないときは必ず「要る」へ倒す。** 食い違ったまま動かすほうが危ない。
+	CHECK(NeedsRestartAfterInstall("abc123def456", ""));
+	CHECK(NeedsRestartAfterInstall("", "abc123def456"));
+	CHECK(NeedsRestartAfterInstall("", ""));
 }
 
 // ---------------------------------------------------------------------------

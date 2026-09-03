@@ -198,12 +198,27 @@
 [GitHub のリリース](https://github.com/min-nano/vectorworks-plugin-import-ifc-homeskz/releases)
 から取得します（stable は `stable` リリース、dev は `dev-<ブランチ名>` プレリリース）。
 
+### 2 つのファイルで 1 つのプラグイン
+
+**配布物は 2 つに割れています。** どちらも `Plug-Ins` の同じ場所へ、**必ず一緒に**置いて
+ください（片方だけでは動きません）。
+
+| ファイル | 何か |
+| --- | --- |
+| `HomeskzIfcImport.vwlibrary`（mac）／ `HomeskzIfcImport.vlb`（win） | **殻**。Vectorworks が起動時に読み込む本体で、メニューと記号 PIO の登録・アップデートを持ちます |
+| `HomeskzIfcImport.vwpayload` | **中身**。取り込みの処理と記号の作図がすべて入っています。殻がこれを自分で読み込みます |
+
+こう割ってあるのは、**アップデートで Vectorworks を再起動しなくて済むように**するため
+です（下記「自動アップデート」）。`.vwpayload` は Vectorworks から見ればただのファイルなので、
+プラグインとして二重に読み込まれることはありません。
+
 ### macOS
 
 プラグインの入れ物は `HomeskzIfcImport.vwlibrary` バンドルで、リソースはバンドル内に
-含まれるのでこのフォルダだけで完結します。
+含まれます。**中身（`HomeskzIfcImport.vwpayload`）はバンドルの隣**に置きます（バンドルの
+署名はリソースまで封をするので、中に入れると差し替えたときに署名が壊れます）。
 
-1. **バンドルをローカルディスクに置きます**（iCloud Drive は不可 — iCloud が
+1. **バンドルと `.vwpayload` をローカルディスクに置きます**（iCloud Drive は不可 — iCloud が
    ダウンロード隔離フラグを付け直すことがあります）。置き場所は Vectorworks 2026 の
    ユーザフォルダ内の `Plug-Ins` ディレクトリです（Vectorworks ▸ 環境設定 ▸
    *ユーザフォルダ* から探せます）。
@@ -212,6 +227,7 @@
 
    ```sh
    xattr -dr com.apple.quarantine HomeskzIfcImport.vwlibrary
+   xattr -d  com.apple.quarantine HomeskzIfcImport.vwpayload
    ```
 
    CI ビルドは既に**アドホック署名済み**です（Apple Silicon がバイナリをロードするために
@@ -220,6 +236,7 @@
 
    ```sh
    codesign --force --deep --sign - HomeskzIfcImport.vwlibrary
+   codesign --force --sign - HomeskzIfcImport.vwpayload
    ```
 
 3. **Vectorworks を起動します。** プラグインが未署名のため、Vectorworks 2026 は起動時に
@@ -236,10 +253,11 @@
 プラグインの入れ物は `HomeskzIfcImport.vlb`（DLL）で、リソースは同名の別ファイルとして
 隣に置きます（SDK の Windows での作法）。
 
-1. **`HomeskzIfcImport.vlb` と `HomeskzIfcImport.vwr` を一緒に**、Vectorworks 2026 の
-   ユーザフォルダ内の `Plug-Ins` ディレクトリへ置きます。2 つは同名・同フォルダである
-   必要があります。自動アップデートも使うなら `HomeskzIfcImport.commit` と
-   `vw-update.ps1` も一緒に置きます（配布 zip にはこれらがすべて入っています）。
+1. **`HomeskzIfcImport.vlb` と `HomeskzIfcImport.vwpayload` と `HomeskzIfcImport.vwr` を
+   一緒に**、Vectorworks 2026 のユーザフォルダ内の `Plug-Ins` ディレクトリへ置きます。
+   3 つは同名・同フォルダである必要があります。自動アップデートも使うなら
+   `HomeskzIfcImport.commit`・`HomeskzIfcImport.shell-id`・`vw-update.ps1` も一緒に置きます
+   （配布 zip にはこれらがすべて入っています）。
 
 2. **Vectorworks を起動します**（未署名の警告は macOS と同じ）。
 
@@ -256,10 +274,27 @@
   （branch / commit）で、続いて他のブランチのプレリリースが並びます。キャンセルすれば
   何もしません。
 
-コンパイル済みプラグインは起動時にしか読み込まれないため、インストールが成功すると
-**「再起動」ボタン**をその場に出します。押すと、起動の完了後に Vectorworks を終了して
-起動し直します（開いているファイルは通常どおり保存を確認してから閉じられ、保存ダイアログで
-取り消せば Vectorworks は落ちません）。「後で」を選んだ場合は、次回の起動で反映されます。
+**ふつうは再起動が要りません。** プラグインは殻と中身の 2 つに割れていて（上記「2 つの
+ファイルで 1 つのプラグイン」）、Vectorworks が起動時にしか読み込めないのは殻だけです。
+更新のほとんどは中身（`.vwpayload`）だけが変わるので、その場合は
+
+> Vectorworks の再起動は要りません。次の取り込みから新しいビルドが動きます。
+
+とだけ出て終わります。実際に新しいコードへ切り替わるのは**次に取り込みを実行したとき**か
+**記号・耐力壁がリセットされたとき**で、開いている図面はそのままで構いません。
+
+**殻まで変わった更新のときだけ**、従来どおり**「再起動」ボタン**が出ます。押すと、起動の
+完了後に Vectorworks を終了して起動し直します（開いているファイルは通常どおり保存を
+確認してから閉じられ、保存ダイアログで取り消せば Vectorworks は落ちません）。「後で」を
+選んだ場合は、次回の起動で反映されます。
+
+> **この形になる前のビルドから更新するときだけ、1 度だけ手で入れ直してください。**
+> 中身（`.vwpayload`）は新しく増えたファイルなので、**古いビルドに同梱されていた
+> アップデータはそれをコピーしません**。自動アップデートで更新したあと「本体
+> （`HomeskzIfcImport.vwpayload`）が見つかりません」と出たら、
+> [リリース](https://github.com/min-nano/vectorworks-plugin-import-ifc-homeskz/releases)の
+> zip を落として、上記「インストール」の手順でもう一度置き直してください。以後の
+> アップデートは自動で両方入れ替わります。
 
 仕組みの詳細（同梱スクリプト・再起動をヘルパープロセスに任せている理由・手動実行）は
 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)「自動アップデートの仕組み」にあります。

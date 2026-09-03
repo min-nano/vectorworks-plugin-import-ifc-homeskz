@@ -152,7 +152,13 @@ jobs:
       # Vectorworks credentials; the plug-in is still "unsigned" in that sense and
       # will show the usual unknown-plug-in warning. Done after the build so the
       # signature seals the packaged .vwr resource too.
-      - name: Ad-hoc code-sign the bundle
+      #
+      # 本体（<name>.vwpayload）も同じアドホック署名で署名する。**殻が dlopen する側**
+      # なので、署名が無いと Apple Silicon のライブラリ検証に弾かれて読み込めない
+      # （SDK リファレンス「プラグインモジュールの読み込みと入れ替え」でアドホックで
+      # 足りることを実測済み）。バンドルの中ではなく隣に置いてあるので、--deep には
+      # 含まれず個別に署名する必要がある。
+      - name: Ad-hoc code-sign the bundle and payload
         run: |
           set -euo pipefail
           name="$VW_PLUGIN_NAME"
@@ -160,6 +166,10 @@ jobs:
           codesign --force --deep --sign - "$bundle"
           echo "Verifying signature for $name:"
           codesign --verify --strict --verbose=2 "$bundle"
+          payload="build/$name.vwpayload"
+          test -f "$payload" || { echo "::error::$payload was not produced"; exit 1; }
+          codesign --force --sign - "$payload"
+          codesign --verify --strict --verbose=2 "$payload"
 
       - name: Inspect built plug-in
         run: |
@@ -176,6 +186,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :VWBuildChannel" "$bundle/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :VWBuildBranch"  "$bundle/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :VWBuildCommit"  "$bundle/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :VWShellId"      "$bundle/Contents/Info.plist"
 
       # Zip each signed bundle keeping the "<name>.vwlibrary/" wrapper folder, so
       # the zip expands to a usable bundle (not a bare "Contents" folder). These
@@ -189,7 +200,12 @@ jobs:
           rm -rf "stage/$name"
           mkdir -p "stage/$name"
           cp -R "build/$name.vwlibrary" "stage/$name/"
-          ( cd "stage/$name" && zip -qry "$GITHUB_WORKSPACE/dist/$name.vwlibrary.zip" "$name.vwlibrary" )
+          # **本体を一緒に配る。** 殻はこれを自分の隣から読み込むので、片方だけでは
+          # 動かない（src/PayloadAbi.h）。バンドルの中に入れないのは、mac の署名が
+          # リソースまで封をするため——中を差し替えると署名が壊れる。
+          cp "build/$name.vwpayload" "stage/$name/"
+          ( cd "stage/$name" && zip -qry "$GITHUB_WORKSPACE/dist/$name.vwlibrary.zip" \
+              "$name.vwlibrary" "$name.vwpayload" )
           ls -l dist
 
       - name: Upload plug-in artifacts
@@ -274,7 +290,11 @@ jobs:
           test -f "$d/$name.vlb" || { echo "::error::$name.vlb was not produced"; exit 1; }
           test -f "$d/$name.vwr" || { echo "::error::$name.vwr was not packaged"; exit 1; }
           test -f "$d/$name.commit" || { echo "::error::$name.commit build stamp missing"; exit 1; }
+          test -f "$d/$name.vwpayload" \
+            || { echo "::error::$name.vwpayload (the payload module) was not produced"; exit 1; }
+          test -f "$d/$name.shell-id" || { echo "::error::$name.shell-id stamp missing"; exit 1; }
           echo "Build stamp: $(cat "$d/$name.commit")"
+          echo "Shell id: $(cat "$d/$name.shell-id")"
 
       # Zip each plug-in's flat files (module + resource + build stamp + updater)
       # into "<name>.vlb.zip". These are both the CI artifacts and the release
@@ -285,10 +305,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $name = $env:VW_PLUGIN_NAME
           New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
+          # $name.vwpayload が**本体**（殻が自分で読み込むモジュール）。片方だけでは
+          # 動かないので必ず一緒に配る（src/PayloadAbi.h）。$name.shell-id は
+          # 「殻まで変わったか」をアップデータが判断するための控え。
           $files = @(
             "build/Release/$name.vlb",
+            "build/Release/$name.vwpayload",
             "build/Release/$name.vwr",
             "build/Release/$name.commit",
+            "build/Release/$name.shell-id",
             "build/Release/vw-update.ps1"
           ) | Where-Object { Test-Path $_ }
           Compress-Archive -Path $files -DestinationPath "dist/$name.vlb.zip" -Force

@@ -109,6 +109,17 @@ vw_add_test(UpdaterFlowTests UpdaterFlowTests.cpp "${CMAKE_SOURCE_DIR}/src/Updat
 # they also guard against a refactor quietly breaking the parsing contract.
 vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 
+# 殻と本体の境界（src/PayloadAbi.h）のうち、SDK も実機も要らない 2 つ。
+#
+#   * PayloadPathTests       … 本体を探すパスの組み立て（src/PayloadHost.h の
+#                              payloadpath）。純粋な文字列操作。
+#   * PayloadHostHolderTests … **殻の記憶域を本体が持ち続けないこと**
+#                              （src/PayloadHostHolder.h）。実機で Vectorworks ごと
+#                              落ちた壊れ方の回帰テストで、渡した記憶域を後から
+#                              塗り潰しても中身が生きていることで確かめる。
+vw_add_test(PayloadPathTests PayloadPathTests.cpp)
+vw_add_test(PayloadHostHolderTests PayloadHostHolderTests.cpp)
+
 # The instruction set (src/core/Document): the command structs' invariants and
 # validateDocument's gate for every command list that has landed so far (stories,
 # grids, floors, members, columns, rafters, roofs), plus the desired layer-stack order.

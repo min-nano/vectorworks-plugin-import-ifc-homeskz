@@ -139,12 +139,16 @@ esac
 # 一度も clang-tidy にかかっていなかった（PIO 本体は draw/ と同じ SDK の API を叩くので、
 # 同じ規則で見るべきコードである）。グロブなら次に PIO が増えても取りこぼさない。
 #
-# 残る 2 本は増えない glue なので名前で置く。
+#   * src/payload/*.cpp    … 本体（ペイロード）の入口。殻との境界（src/PayloadAbi.h）。
+#
+# 残る 4 本は増えない glue なので名前で置く（PayloadHost / PayloadSession は SDK の型を
+# 使わないが、PluginPrefix.h を通しビルドの構成も殻と同じなので、ここで一緒に見る）。
 #
 # src/UpdaterFlow.cpp は入れない。Vectorworks のヘッダを 1 つも include せず GS_MAC /
 # GS_WIN の分岐も無いので、SDK の要らない lint.yml が同じ規則で先に解析している。
 # （高価な SDK ジョブ 2 つで解析し直しても、Linux ジョブが見逃すものは何も出なかった。）
-FILES=(src/draw/*.cpp src/Extensions/*.cpp src/ModuleMain.cpp src/Updater.cpp)
+FILES=(src/draw/*.cpp src/Extensions/*.cpp src/payload/*.cpp src/ModuleMain.cpp src/Updater.cpp
+	   src/PayloadHost.cpp src/PayloadSession.cpp)
 
 TOTAL="${#FILES[@]}"
 SHARD_LABEL=""
