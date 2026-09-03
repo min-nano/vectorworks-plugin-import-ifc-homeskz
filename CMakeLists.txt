@@ -284,9 +284,15 @@ if(VW_BUILD_PLUGIN)
 	# 殻の登録・更新・境界（src/PayloadAbi.h）を直せば必ず動く——後者が肝で、版の食い違った
 	# まま動かさないための歯止めになっている。
 	#
-	# 外部ツールを使わず file(SHA256) だけで出すのは、**mac と Windows の両方の CI で
-	# 同じ値が出ること**が要るため（片方でしか動かない道具を挟むと、そこが食い違った
+	# 外部ツールを使わず CMake 組み込みのハッシュだけで出すのは、**mac と Windows の両方の
+	# CI で同じ値が出ること**が要るため（片方でしか動かない道具を挟むと、そこが食い違った
 	# 瞬間に「毎回再起動が要る」に化ける）。
+	#
+	# **改行を正規化してから混ぜる。** Windows のランナーは CRLF でチェックアウトするので、
+	# 生のバイト列をそのままハッシュすると同じソースからプラットフォームごとに違う ID が
+	# 出る（実測: 同じコミットの mac と win のリリースで値が食い違った）。判定は必ず同じ
+	# プラットフォームの中で行われるので実害は無いが、**同じソースなら同じ ID** のほうが
+	# 追いやすい。
 	set(VW_SHELL_INPUTS
 		CMakeLists.txt
 		src/PluginPrefix.h
@@ -316,7 +322,9 @@ if(VW_BUILD_PLUGIN)
 		if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${vw_shell_input}")
 			message(FATAL_ERROR "VW_SHELL_INPUTS が指すファイルがありません: ${vw_shell_input}")
 		endif()
-		file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${vw_shell_input}" VW_SHELL_INPUT_DIGEST)
+		file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${vw_shell_input}" VW_SHELL_INPUT_TEXT)
+		string(REPLACE "\r\n" "\n" VW_SHELL_INPUT_TEXT "${VW_SHELL_INPUT_TEXT}")
+		string(SHA256 VW_SHELL_INPUT_DIGEST "${VW_SHELL_INPUT_TEXT}")
 		string(APPEND VW_SHELL_DIGEST_INPUT "${vw_shell_input}:${VW_SHELL_INPUT_DIGEST}\n")
 	endforeach()
 	string(SHA256 vw_shell_digest "${VW_SHELL_DIGEST_INPUT}")
