@@ -149,7 +149,9 @@ VW_PAYLOAD_EXPORT int vw_payload_recalculate(unsigned int kind, void* objectHand
 	{
 		if (outEvent == nullptr)
 			return kVwPayloadErrAbi;
-		*outEvent = kObjectEventNoErr;
+		// kObjectEventNoErr は VWFC::PluginSupport にあり、ここは大域スコープなので
+		// 修飾して引く（draw/ColumnMarkPio.h の注記と同じ理由）。
+		*outEvent = VWFC::PluginSupport::kObjectEventNoErr;
 		if (!gPayloadReady || gSDK == nil)
 			return kVwPayloadErrNotInit;
 

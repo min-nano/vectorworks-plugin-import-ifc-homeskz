@@ -18,6 +18,13 @@
 
 namespace HomeskzIfcImport
 {
+	// EObjectEvent / kObjectEvent* は **VWFC::PluginSupport** にある。SDK のアンブレラ
+	// （PluginPrefix.h）はこの名前空間を開かないので、**このヘッダ自身で開く**
+	// （Extensions/ExtColumnMark.h と同じ作法）。これが無いと、Ext*.h を先に include して
+	// いない翻訳単位——本体の入口 src/payload/PayloadMain.cpp——でだけ
+	// 「unknown type name 'EObjectEvent'」になる。
+	using namespace VWFC::PluginSupport;
+
 	namespace draw
 	{
 		// 記号 PIO 1 つぶんのリセット。object は PIO 自身のハンドル（殻の
