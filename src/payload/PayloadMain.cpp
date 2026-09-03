@@ -156,7 +156,7 @@ VW_PAYLOAD_EXPORT int vw_payload_recalculate(unsigned int kind, void* objectHand
 			return kVwPayloadErrNotInit;
 
 		// MCObjectHandle は境界を void* で渡る（src/PayloadAbi.h「SDK を include しない」）。
-		const MCObjectHandle object = reinterpret_cast<MCObjectHandle>(objectHandle);
+		const auto object = reinterpret_cast<MCObjectHandle>(objectHandle);
 		switch (kind)
 		{
 		case kVwPayloadPioColumnMark:

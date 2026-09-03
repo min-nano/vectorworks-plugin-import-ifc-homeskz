@@ -16,7 +16,6 @@
 #include "BuildConfig.h"
 #include "PayloadHost.h"
 
-#include <chrono>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -25,6 +24,7 @@
 #	include <Windows.h>
 #else
 #	include <dlfcn.h>
+#	include <sys/stat.h>
 #endif
 
 namespace HomeskzIfcImport
@@ -64,12 +64,6 @@ namespace HomeskzIfcImport
 	} // namespace
 
 	// -----------------------------------------------------------------------
-	PayloadModule::~PayloadModule()
-	{
-		// **ここでは降ろさない**（PayloadHost.h の注記）。open したまま捨てられた場合は
-		// モジュールがプロセスに残るだけで、壊れはしない。
-	}
-
 	bool PayloadModule::open(const std::string& path, std::string& error)
 	{
 		error.clear();
@@ -197,25 +191,38 @@ namespace HomeskzIfcImport
 #endif
 	}
 
+	// **std::filesystem を使わない。** MSVC の <filesystem> は file_size /
+	// last_write_time の中でフラグの enum を範囲外にキャストしており、clang-tidy の
+	// 静的解析（clang-analyzer-optin.core.EnumCastOutOfRange）がそれを我々の呼び出しの
+	// 経路として報告する（tidy-windows で実測）。**標準ライブラリの中の話を黙らせるより、
+	// OS の API を直に叩くほうが素直**で、ついでに「file_time_type の epoch は処理系依存」
+	// という但し書きも要らなくなる（st_mtime も FILETIME も実時刻である）。
 	PayloadStamp StampOf(const std::string& path)
 	{
 		PayloadStamp stamp;
 		if (path.empty())
 			return stamp;
 
-		std::error_code ec;
-		const std::uintmax_t size = std::filesystem::file_size(path, ec);
-		if (ec)
+#if defined(_WIN32)
+		WIN32_FILE_ATTRIBUTE_DATA info{};
+		if (::GetFileAttributesExW(Widen(path).c_str(), GetFileExInfoStandard, &info) == 0)
 			return stamp;
-		const std::filesystem::file_time_type when = std::filesystem::last_write_time(path, ec);
-		if (ec)
+		stamp.size = (static_cast<unsigned long long>(info.nFileSizeHigh) << 32) |
+					 static_cast<unsigned long long>(info.nFileSizeLow);
+		ULARGE_INTEGER when{};
+		when.LowPart = info.ftLastWriteTime.dwLowDateTime;
+		when.HighPart = info.ftLastWriteTime.dwHighDateTime;
+		// FILETIME は 100ns 刻み。秒まで丸めれば「前と違うか」を見るには十分。
+		stamp.modified = static_cast<long long>(when.QuadPart / 10000000ULL);
+#else
+		// `stat` は関数名でもあるので、型は elaborated-type-specifier で綴る。中身は
+		// ::stat が埋めるので、成功したときだけ読む。
+		struct stat info;
+		if (::stat(path.c_str(), &info) != 0)
 			return stamp;
-
-		stamp.size = static_cast<unsigned long long>(size);
-		// file_time_type の epoch は処理系依存なので、**絶対時刻としては使わない**。
-		// ここで要るのは「前と違うか」だけなので、生の tick をそのまま秒に丸めて持つ。
-		stamp.modified = static_cast<long long>(
-			std::chrono::duration_cast<std::chrono::seconds>(when.time_since_epoch()).count());
+		stamp.size = static_cast<unsigned long long>(info.st_size);
+		stamp.modified = static_cast<long long>(info.st_mtime);
+#endif
 		stamp.valid = true;
 		return stamp;
 	}

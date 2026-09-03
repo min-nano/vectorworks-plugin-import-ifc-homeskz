@@ -205,13 +205,14 @@ namespace HomeskzIfcImport
 		if (this->fhObject == nil)
 			return kObjectEventNoErr;
 
-		PayloadUse use;
+		const PayloadUse use;
 		if (!use.ok())
 			return kObjectEventNoErr;
 
 		int event = kObjectEventNoErr;
 		std::string error;
-		if (!use->recalculate(kVwPayloadPioShearWall, this->fhObject, event, error))
+		if (!use->recalculate(kVwPayloadPioShearWall, static_cast<void*>(this->fhObject), event,
+							  error))
 			return kObjectEventNoErr;
 		return static_cast<EObjectEvent>(event);
 	}

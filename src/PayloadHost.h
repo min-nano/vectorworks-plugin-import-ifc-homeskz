@@ -109,13 +109,15 @@ namespace HomeskzIfcImport
 	};
 
 	// -----------------------------------------------------------------------
-	// 読み込んだモジュール 1 つ（薄い包み）。**デストラクタでは降ろさない**——降ろす
-	// （close）のは明示的な操作で、失敗の理由を呼び出し側へ返す必要があるため。
+	// 読み込んだモジュール 1 つ（薄い包み）。**デストラクタでは降ろさない**（下記）。
 	class PayloadModule
 	{
 	public:
 		PayloadModule() = default;
-		~PayloadModule();
+		// **デストラクタでは降ろさない。** 降ろす（close）のは明示的な操作で、失敗の理由を
+		// 呼び出し側へ返す必要がある。open したまま捨てられた場合はモジュールがプロセスに
+		// 残るだけで、壊れはしない。
+		~PayloadModule() = default;
 
 		PayloadModule(const PayloadModule&) = delete;
 		PayloadModule& operator=(const PayloadModule&) = delete;

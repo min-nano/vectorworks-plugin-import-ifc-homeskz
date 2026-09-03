@@ -17,11 +17,8 @@
 
 #include <string>
 
-namespace HomeskzIfcImport
+namespace HomeskzIfcImport::draw
 {
-	namespace draw
-	{
-		// メニューコマンドが選ばれたときに走るもの。キャンセルは静かに何もせず返る。
-		void runImportCommand();
-	} // namespace draw
-} // namespace HomeskzIfcImport
+	// メニューコマンドが選ばれたときに走るもの。キャンセルは静かに何もせず返る。
+	void runImportCommand();
+} // namespace HomeskzIfcImport::draw

@@ -130,7 +130,7 @@ void CImportIfcMenu_EventSink::DoInterface()
 
 	// 本体を確保する。**ここは唯一「読み込めなかった」をユーザーへ見せられる場所**
 	// （PIO のリセットは黙って諦めるしかない——数百回出るダイアログに意味は無い）。
-	PayloadUse use;
+	const PayloadUse use;
 	if (!use.ok())
 	{
 		gSDK->AlertInform("プラグインの本体を読み込めませんでした。", use.error().c_str(),

@@ -27,59 +27,56 @@
 
 #include <cstddef>
 
-namespace HomeskzIfcImport
+namespace HomeskzIfcImport::payload
 {
-	namespace payload
+	class HostHolder
 	{
-		class HostHolder
+	public:
+		// 受け取って**写す**。版と大きさが合わなければ写さずに理由を返す
+		// （戻り値は VwPayloadStatus。0 が成功）。
+		int adopt(const VwPayloadHost* host);
+
+		// 手放す（降ろす直前・初期化に失敗したとき）。
+		void forget()
 		{
-		public:
-			// 受け取って**写す**。版と大きさが合わなければ写さずに理由を返す
-			// （戻り値は VwPayloadStatus。0 が成功）。
-			int adopt(const VwPayloadHost* host);
-
-			// 手放す（降ろす直前・初期化に失敗したとき）。
-			void forget()
-			{
-				fHost = VwPayloadHost{};
-				fValid = false;
-			}
-
-			bool valid() const
-			{
-				return fValid;
-			}
-
-			// SDK の CallBackPtr（GS_InitializeVCOM へ渡すもの）。
-			void* callbacks() const
-			{
-				return fValid ? fHost.callbacks : nullptr;
-			}
-
-		private:
-			VwPayloadHost fHost{};
-			bool fValid = false;
-		};
-
-		inline int HostHolder::adopt(const VwPayloadHost* host)
-		{
-			this->forget();
-			if (host == nullptr)
-				return kVwPayloadErrHost;
-			// 版と大きさの二重の歯止め（殻と本体は別々にビルドされ、別々に配られる）。
-			if (host->abiVersion != VW_PAYLOAD_ABI_VERSION)
-				return kVwPayloadErrAbi;
-			if (host->size < sizeof(VwPayloadHost))
-				return kVwPayloadErrAbi;
-			if (host->callbacks == nullptr)
-				return kVwPayloadErrHost;
-
-			// 大きさは確かめてあるので、**こちらが知っている分だけ**写せばよい（殻の
-			// ほうが新しく、後ろに知らない項目が付いていても構わない）。
-			fHost = *host;
-			fHost.size = static_cast<unsigned int>(sizeof(VwPayloadHost));
-			fValid = true;
-			return kVwPayloadOk;
+			fHost = VwPayloadHost{};
+			fValid = false;
 		}
-	} // namespace payload
-} // namespace HomeskzIfcImport
+
+		bool valid() const
+		{
+			return fValid;
+		}
+
+		// SDK の CallBackPtr（GS_InitializeVCOM へ渡すもの）。
+		void* callbacks() const
+		{
+			return fValid ? fHost.callbacks : nullptr;
+		}
+
+	private:
+		VwPayloadHost fHost{};
+		bool fValid = false;
+	};
+
+	inline int HostHolder::adopt(const VwPayloadHost* host)
+	{
+		this->forget();
+		if (host == nullptr)
+			return kVwPayloadErrHost;
+		// 版と大きさの二重の歯止め（殻と本体は別々にビルドされ、別々に配られる）。
+		if (host->abiVersion != VW_PAYLOAD_ABI_VERSION)
+			return kVwPayloadErrAbi;
+		if (host->size < sizeof(VwPayloadHost))
+			return kVwPayloadErrAbi;
+		if (host->callbacks == nullptr)
+			return kVwPayloadErrHost;
+
+		// 大きさは確かめてあるので、**こちらが知っている分だけ**写せばよい（殻の
+		// ほうが新しく、後ろに知らない項目が付いていても構わない）。
+		fHost = *host;
+		fHost.size = static_cast<unsigned int>(sizeof(VwPayloadHost));
+		fValid = true;
+		return kVwPayloadOk;
+	}
+} // namespace HomeskzIfcImport::payload
