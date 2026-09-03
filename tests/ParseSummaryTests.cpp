@@ -13,12 +13,16 @@
 #include "parse/Summary.h"
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 
+#include <algorithm>
 #include <string>
 
 using namespace HomeskzIfcImport::parse;
 using HomeskzIfcImport::core::Document;
 using HomeskzIfcImport::core::DrawCounts;
+using HomeskzIfcImport::core::ImportOptions;
+using HomeskzIfcImport::core::SymbolRole;
 
 namespace
 {
@@ -580,6 +584,37 @@ TEST(format_import_error_names_the_file_and_points_at_the_log)
 	CHECK(text.find("ファイル: 安藤邸.ifc") != std::string::npos);
 	CHECK(text.find("どこまで進んでいたかはログにあります") != std::string::npos);
 	CHECK(text.find("ログ: ") == std::string::npos);
+}
+
+TEST(format_import_options_lists_every_role_and_marks_the_defaults)
+{
+	// ログの見出しの次に置く 1 段落。「シンボルが 1 つも置かれない」の切り分けは
+	// まずここを読むところから始まるので、**全役割が必ず並ぶ**。
+	ImportOptions options;
+	options.setSymbol(SymbolRole::FloorPost, "床束_大");
+	std::string const text = formatImportOptions(options);
+
+	CHECK(text.find("設定: 配置するシンボル") != std::string::npos);
+	// 差し替えた行は名前だけ、触っていない行は「（既定）」付き。
+	CHECK(text.find("床束: 床束_大") != std::string::npos);
+	CHECK(text.find("床束: 床束_大（既定）") == std::string::npos);
+	CHECK(text.find("仕口: 仕口（既定）") != std::string::npos);
+	// 役割の数だけ行がある（見出しの 1 行を足した数）。
+	CHECK_EQ(std::ranges::count(text, '\n'),
+			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount));
+}
+
+TEST(format_import_options_says_which_roles_are_skipped)
+{
+	// 取り込まない役割は名前の代わりに「取り込まない」。名前を出すと「その名前で置いた
+	// はずなのに図面に無い」と読み違えさせる。
+	ImportOptions options;
+	options.setEnabled(SymbolRole::FireBrace, false);
+	std::string const text = formatImportOptions(options);
+
+	CHECK(text.find("火打: 取り込まない") != std::string::npos);
+	CHECK(text.find("火打: 鋼製火打") == std::string::npos);
+	CHECK(text.find("仕口: 仕口（既定）") != std::string::npos);
 }
 
 TEST_MAIN();

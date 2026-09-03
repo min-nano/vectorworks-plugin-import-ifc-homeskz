@@ -21,6 +21,7 @@
 #include "parse/ColumnMark.h"
 #include "parse/Loader.h"
 #include "parse/Story.h"
+#include "core/ImportOptions.h"
 
 #include <cstddef>
 #include <set>
@@ -31,6 +32,8 @@ using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::ColumnCommand;
 using HomeskzIfcImport::core::ColumnMarkCommand;
 using HomeskzIfcImport::core::ColumnMarkStyle;
+using HomeskzIfcImport::core::defaultSymbolName;
+using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::parse::buildColumnCommands;
 using HomeskzIfcImport::parse::buildColumnMarkCommands;
@@ -38,8 +41,6 @@ using HomeskzIfcImport::parse::collectColumnSpans;
 using HomeskzIfcImport::parse::collectPlanMarkLayers;
 using HomeskzIfcImport::parse::ColumnSpan;
 using HomeskzIfcImport::parse::kPlanMarkClass;
-using HomeskzIfcImport::parse::kPlanMarkSymbolColumn;
-using HomeskzIfcImport::parse::kPlanMarkSymbolKoyazuka;
 using HomeskzIfcImport::parse::kSectionMarkClass;
 using HomeskzIfcImport::parse::kStructuralUseColumn;
 using HomeskzIfcImport::parse::kStructuralUseKoyazuka;
@@ -52,6 +53,11 @@ using HomeskzIfcTests::near;
 
 namespace
 {
+	// 既定のシンボル名。**唯一の定義は役割の表**（core::symbolRoles()）なので、
+	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
+	const std::string kPlanMarkSymbolColumn = defaultSymbolName(SymbolRole::PlanMarkColumn);
+	const std::string kPlanMarkSymbolKoyazuka = defaultSymbolName(SymbolRole::PlanMarkKoyazuka);
+
 	// 試験用の柱 1 本。中心 (x, y)・断面 width×depth・span レイヤ・構造用途だけを持つ
 	// （記号の組み立てはこの 4 つしか見ない）。
 	ColumnCommand makeColumn(double x, double y, double width, double depth,
