@@ -15,7 +15,7 @@
 //	  * VWCheckButtonCtrl                            … その要素を取り込むか
 //	  * VWThumbnailPopupCtrl                         … サムネイル付きの選択（本命の形）
 //	  * VWPullDownMenuCtrl + VWSymbolDisplayCtrl     … 名前で選び、絵は隣に出す（退避の形）
-//	  * AddRightControl / AddBelowControl            … 行の並べ方
+//	  * AddRightControl / AddBelowControl            … 行と列の並べ方
 //	  * VWDialog::EnableControl(id, bool)            … チェックを外した行を灰色にする
 //
 //	【サムネイルは VWThumbnailPopupCtrl で出す（VWImagePopupCtrl ではない）】名前が似た
@@ -24,6 +24,11 @@
 //	確定。[SDK リファレンス「レイアウトダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md)）。
 //	実装が生きているのは同じコンポーネント種別を指す双子の VWThumbnailPopupCtrl の方で、
 //	項目はリソース一覧の ID と添字で足す（AddImageFromResource）。
+//
+//	【縦に積まず 2 列に折る】1 行の高さはサムネイルの高さで決まり、**サムネイルの大きさは
+//	選べない**（kStandardSize / kLineTypeSize の 2 つだけ。上記 Findings）。役割の数ぶん
+//	そのまま縦に積むと画面に対して細長くなりすぎるので、行を 2 列へ折って高さを半分にする
+//	（列の頭を「前の列の先頭行の右」へ置く。下記 kColumnCount / RowTail）。
 //
 //	【2 つの形を持ち、出せた方を使う】それでも**組み立てに失敗したときに黙って設定
 //	ダイアログごと出ないのが最悪**なので（画像ポップアップで実際にそうなった。cd8a415 の
@@ -106,6 +111,19 @@ namespace HomeskzIfcImport::draw
 		constexpr short kPopupWidthChars = 30;
 		constexpr short kPreviewSizePixels = 56;
 		constexpr short kPreviewMarginPixels = 2;
+
+		// 【行を 2 列に折る】1 行の高さはサムネイルの高さで決まり、**その大きさは選べない**
+		// （`ThumbnailSizeType` は kStandardSize / kLineTypeSize の 2 つだけで、後者は
+		// 線種用の細長い枠。[SDK リファレンス「レイアウトダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md)）。
+		// 役割の数（7）をそのまま縦に積むと画面の高さに対して細長くなりすぎるので、
+		// **列に折って高さを半分にする**。列の数を増やすときはこの定数だけを変える
+		// （割り切れない分は最後の列が短くなる）。
+		constexpr std::size_t kColumnCount = 2;
+		constexpr std::size_t kRowsPerColumn =
+			(core::kSymbolRoleCount + kColumnCount - 1) / kColumnCount;
+
+		// 列と列の間隔（標準文字幅）。0 だと左の列の絵と右の列のチェックがくっつく。
+		constexpr short kColumnGapChars = 2;
 
 		// 退避の形で使うシンボルの絵の出し方（冒頭「絵の出し方（退避の形）」）。
 		constexpr TRenderMode kPreviewRenderMode = 0; // ワイヤーフレーム
@@ -279,7 +297,6 @@ namespace HomeskzIfcImport::draw
 				}
 				this->AddFirstGroupControl(&fIntro);
 
-				VWControl* previousRow = &fIntro;
 				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
 				{
 					// チェックは文字を持たない（役割の名前は隣の説明が出す）——文字を
@@ -298,10 +315,20 @@ namespace HomeskzIfcImport::draw
 					if (!CreateSelector(row))
 						return false;
 
-					// 行の頭（チェック）は前の行の頭の下、残りはその右へ。行間を空けるのは
-					// 説明文の下（＝最初の行の上）だけ——絵が文字より背が高いぶん、行そのものは
-					// 詰めても窮屈にならない。
-					this->AddBelowControl(previousRow, &fChecks[row], 0, row == 0 ? 1 : 0);
+					// 行の頭（チェック）の置き場所は 3 通り。**列の先頭**は、1 列目なら
+					// 説明文の下（ここだけ 1 行ぶん空ける）、2 列目以降なら**前の列の
+					// 先頭行の右端の右**——列の頭どうしを揃えると、行の高さが全列で同じ
+					// なので以降の行も自然に揃う。**列の途中**は 1 つ上の行の頭の下で、
+					// 行間は空けない（絵が文字より背が高いぶん、詰めても窮屈にならない）。
+					if (row % kRowsPerColumn != 0)
+						this->AddBelowControl(&fChecks[row - 1], &fChecks[row]);
+					else if (row == 0)
+						this->AddBelowControl(&fIntro, &fChecks[row], 0, 1);
+					else
+						this->AddRightControl(RowTail(row - kRowsPerColumn), &fChecks[row],
+											  kColumnGapChars);
+
+					// 行の中身はチェックの右へ順に。
 					this->AddRightControl(&fChecks[row], &fLabels[row]);
 					if (fForm == Form::Thumbnail)
 						this->AddRightControl(&fLabels[row], &fThumbs[row]);
@@ -310,7 +337,6 @@ namespace HomeskzIfcImport::draw
 						this->AddRightControl(&fLabels[row], &fPopups[row]);
 						this->AddRightControl(&fPopups[row], &fPreviews[row]);
 					}
-					previousRow = &fChecks[row];
 				}
 				return true;
 			}
@@ -405,6 +431,15 @@ namespace HomeskzIfcImport::draw
 			DEFINE_EVENT_DISPATH_MAP;
 
 		private:
+			// その行の**右端**のコントロール（次の列を右へ置くときの相手）。何が右端かは
+			// 形で変わる——サムネイルの形は選択そのもの、名前の形は隣に出す絵。
+			VWControl* RowTail(std::size_t row)
+			{
+				if (fForm == Form::Thumbnail)
+					return &fThumbs[row];
+				return &fPreviews[row];
+			}
+
 			// 行の選択コントロールを作る（形で中身が変わる唯一の場所）。
 			bool CreateSelector(std::size_t row)
 			{
