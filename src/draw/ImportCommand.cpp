@@ -162,8 +162,14 @@ namespace HomeskzIfcImport::draw
 			const std::string path =
 				custom.empty() ? core::trace::defaultLogPath("HomeskzIfcImport.log") : custom;
 			core::trace::open(path); // 開けなくても本文は溜まる（core/Trace.h）
-			core::trace::note(parse::formatLogHeader(
-				CurrentBuildInfo(), ifcPath, FileSizeOf(ifcPath), core::trace::localTimestamp()));
+			// **`core::trace::path()` を必ず渡す。** ここを省くと `formatLogHeader` の
+			// 既定値（空）が効いて、**実際には書けているのに見出しが「ファイルへは
+			// 書けませんでした」と言う**（実機のログで発覚。M19 でこの見出しを足して以来
+			// ずっとそうなっていた）。`path()` は開けたときだけ値を持ち、開けなければ空を
+			// 返すので、そのまま渡せば両方の場合が正しくなる（core/Trace.h）。
+			core::trace::note(
+				parse::formatLogHeader(CurrentBuildInfo(), ifcPath, FileSizeOf(ifcPath),
+									   core::trace::localTimestamp(), core::trace::path()));
 		}
 
 		// インポート本体（ファイル選択の後）。解析 → 描画を通し、完了ダイアログの本文を返す。
