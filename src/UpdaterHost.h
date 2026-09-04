@@ -52,6 +52,17 @@ namespace HomeskzIfcImport
 		// negative value if the user cancelled.
 		virtual int PickBuild(const std::vector<std::string>& items, int initialSel) = 0;
 
+		// 載っている本体（ペイロード）を降ろす。**インストールした本体をこの実行のまま
+		// 効かせるための最後の一押し**で、次に本体を使うとき（取り込み・PIO のリセット）に
+		// 新しいファイルが読み直される（src/PayloadSession.h）。降ろせなかった——本体の
+		// コードがまだ走っている——ときだけ false。
+		//
+		// 起動時のチェックから呼ばれる限り、そもそも本体はまだ載っていないので、これは
+		// たいてい「何もせず true」である。それでも呼ぶのは、**この判断（再起動が要らない）
+		// と実際の載せ替えを 1 か所で完結させておく**ため——アップデートの確認をあとで
+		// コマンドからも走らせるようにしたとき、ここが無いと黙って古いまま動き続ける。
+		virtual bool DropLoadedPayload() = 0;
+
 		// Quit Vectorworks and start it again, so the build just installed is
 		// actually loaded (a compiled plug-in is only ever picked up at start-up).
 		// Returns false if the restart could not even be ARRANGED (the host could
@@ -67,7 +78,11 @@ namespace HomeskzIfcImport
 	// hold NO once-per-session state (the public wrappers in Updater.cpp do), so
 	// tests can drive them repeatedly. runningBranch/runningCommit identify the
 	// build currently loaded (compiled-in at run time; injected in tests).
-	void RunStableStartupCheckWith(IUpdaterHost& host);
+	// runningShellId は**いま動いている殻の ID**（コンパイル時に焼かれた VW_SHELL_ID。
+	// テストでは注入する）。入れたビルドの殻が同じなら、本体を読み直すだけで反映される
+	// ＝**再起動を尋ねない**（src/UpdaterParse.h の NeedsRestartAfterInstall）。
+	void RunStableStartupCheckWith(IUpdaterHost& host, const std::string& runningShellId);
 	void RunDevStartupCheckWith(IUpdaterHost& host, const std::string& runningBranch,
-								const std::string& runningCommit);
+								const std::string& runningCommit,
+								const std::string& runningShellId);
 } // namespace HomeskzIfcImport

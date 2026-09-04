@@ -23,6 +23,7 @@
 #include "Updater.h"
 #include "UpdaterHost.h"
 #include "UpdaterParse.h"
+#include "PayloadSession.h"
 
 #include <array>
 #include <cstdint>
@@ -548,6 +549,15 @@ namespace
 				return false;
 			return SpawnDetachedShell(command);
 		}
+
+		// **入れ替えた本体（ペイロード）をこの実行のまま効かせる。** 降ろしておけば、次に
+		// 本体を使うとき（取り込み・PIO のリセット）に新しいファイルが読み直される
+		// （src/PayloadSession.h）。起動時のチェックから呼ばれる限り本体はまだ載って
+		// いないので、たいていは「何もせず true」。
+		bool DropLoadedPayload() override
+		{
+			return HomeskzIfcImport::ReleaseLoadedPayload();
+		}
 	};
 } // namespace
 
@@ -567,7 +577,7 @@ namespace HomeskzIfcImport
 		sDone = true;
 
 		CVectorworksUpdaterHost host;
-		RunStableStartupCheckWith(host);
+		RunStableStartupCheckWith(host, VW_SHELL_ID);
 	}
 
 	void RunDevStartupCheck()
@@ -583,6 +593,6 @@ namespace HomeskzIfcImport
 		// (VW_BUILD_BRANCH/VERSION), so it is unambiguous even if a different
 		// build is staged on disk.
 		CVectorworksUpdaterHost host;
-		RunDevStartupCheckWith(host, VW_BUILD_BRANCH, VW_BUILD_VERSION);
+		RunDevStartupCheckWith(host, VW_BUILD_BRANCH, VW_BUILD_VERSION, VW_SHELL_ID);
 	}
 } // namespace HomeskzIfcImport

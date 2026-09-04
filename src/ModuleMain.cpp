@@ -12,6 +12,7 @@
 #include "Extensions/ExtShearWall.h"
 #include "Extensions/ExtMenu.h"
 #include "Updater.h"
+#include "PayloadSession.h"
 
 // Identifier used by Vectorworks to locate this plug-in's resources (.vwr) at
 // run time. Must match the base name of the packaged .vwr ("HomeskzIfcImport.vwr"
@@ -42,6 +43,13 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 {
 	// Initialize the VCOM (Vectorworks Component Object Model) mechanism.
 	::GS_InitializeVCOM(cbp);
+
+	// **本体（ペイロード）にも同じ材料が要る。** gSDK / gCBP は SDK の静的ライブラリが持つ
+	// モジュールごとのグローバルなので、殻が初期化しても本体の側は空のまま。ここで
+	// 預けておいた CallBackPtr を、本体を読み込むときに渡して初期化させる
+	// （src/PayloadAbi.h / src/PayloadSession.h）。**この 2 つに割ってあることが、
+	// アップデートに Vectorworks の再起動を要らなくしている全部である。**
+	HomeskzIfcImport::RememberSdkCallbacks(cbp);
 
 	// At Vectorworks start-up, offer to change the build in use. This runs when
 	// Vectorworks loads the module (which it does at start-up to build the

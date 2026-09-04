@@ -30,5 +30,10 @@
 	<string>@VW_BUILD_BRANCH@</string>
 	<key>VWBuildCommit</key>
 	<string>@VW_BUILD_VERSION@</string>
+	<!-- 殻（このバンドル）の ID。**アップデートに Vectorworks の再起動が要るかを
+	     決める鍵**で、本体（.vwpayload）だけが新しいならホットリロードで済む
+	     （src/PayloadAbi.h / src/UpdaterParse.h）。 -->
+	<key>VWShellId</key>
+	<string>@VW_SHELL_ID@</string>
 </dict>
 </plist>

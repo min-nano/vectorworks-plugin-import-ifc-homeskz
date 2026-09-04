@@ -48,6 +48,10 @@ VectorWorks 2026 のネイティブオブジェクトへ変換して配置する
    「SDK 非依存ロジック＋無 SDK テスト」という CI の土台と完全に噛み合っている。
    ここを崩す変更は、他がどれだけ良く見えても採らない。
 
+2.5 **殻と本体の分割も同じく維持する**（下記「アーキテクチャ: 殻と本体」）。**殻に実処理を
+   書かない**——1 行でも書くと、そこを直すたびに利用者へ VectorWorks の再起動を強いること
+   になり、ホットリロードの前提が静かに崩れる。
+
 3. **仕様の根拠はコードとメモに書く。** ホームズ君 IFC の癖・なぜその値なのかは、
    対応するコメント（`なぜ` を書く）と `docs/DEV-NOTES.md` に残す。VW SDK の落とし穴は
    [SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)の
@@ -136,6 +140,57 @@ VectorWorks ネイティブオブジェクト
   ダンプが要る場面が実際に出てきたら、そのときに最小限を足す。
 - スキーマを変えるときは、構造体定義・`validateDocument`・テストを同時に更新する。
 
+## アーキテクチャ: 殻と本体（ホットリロード）
+
+**2 フェーズ分離とは別の軸で、成果物が 2 つに割れている。** こちらは「アップデートに
+VectorWorks の再起動を要らなくする」ための分割で、境界は C の ABI（`src/PayloadAbi.h`）
+1 枚きり。
+
+```
+VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動時に 1 度きり
+                              │ dlopen / LoadLibrary
+                              ▼
+                          本体 <name>.vwpayload         … いつでも降ろして読み直せる
+```
+
+コンパイル済みプラグインは**起動時にしか読み込まれず、読み込み済みのモジュールは
+差し替えられない**（[SDK リファレンス「プラグインモジュールの読み込みと入れ替え」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Plug-in%20Modules.md)。
+実機で確認済み）。そこで**実処理を VectorWorks が知らない別モジュールへ出し、殻が自分で
+読み込む**。VectorWorks はその存在を知らないので、入れ替えに再起動が要らない。
+
+### どちらに何を置くか（迷ったらこの表）
+
+| | 入るもの | 入らないもの |
+| --- | --- | --- |
+| **殻**（`src/ModuleMain.cpp` / `src/Extensions/` / `src/Updater*` / `src/Payload{Host,Session}.*`） | VectorWorks に**番地を握られる**もの——メニューと PIO の**登録**（`SMenuDef` / `SParametricDef` / パラメータ定義 / UUID）、自動アップデート、本体の読み込み | **実処理を 1 行も書かない。** 解析も描画も PIO の作図もここには置かない |
+| **本体**（`src/payload/` / `src/draw/` / `src/parse/` / `src/core/`） | それ以外すべて（両フェーズまるごと） | 登録の定義（`.vwr` の文字列を引くもの）。本体は `.vwr` を持たない |
+
+**新しい入口（メニュー・PIO）を足すときも同じ。** 登録は殻に、絵と処理は
+`src/draw/<要素>Pio.{h,cpp}` に置き、殻の `Recalculate()` は `PayloadUse` で本体を確保して
+取り次ぐだけにする（既存の `ExtColumnMark` / `ExtShearWall` に倣う）。境界に口を足したら
+**`VW_PAYLOAD_ABI_VERSION` を必ず上げる**（殻と本体は別々に配られるので、食い違いは実行時に
+しか気付けない）。
+
+### 破ってはならない決めごと
+
+1. **境界は C の ABI に保つ。** 例外・C++ のオブジェクト・vtable・`std::string` を跨がせない
+   （降ろした瞬間にそのモジュールのコードと静的データが消える）。
+2. **境界を越えて来た構造体は、受け取った側がその場で写す。** 相手の記憶域がどこにあるかは
+   分からない。**これを落とすと実機で VectorWorks ごと落ちる**（SDK リファレンス側で実際に
+   落ちている。`src/PayloadHostHolder.h` と `tests/PayloadHostHolderTests.cpp`）。渡した側も
+   降ろすまで生かす——**両方やる**。
+3. **本体のコードがスタックに載っている間は降ろさない。** 入れ替えの判定は入口で、入れ子の
+   深さが 0 のときだけ（`src/PayloadSession.h`）。
+4. **本体は必ず一時ディレクトリへ複製してから読む。** Windows は読み込み中の DLL を置き換え
+   られないので、同梱物を直接読むと「動かしたまま入れ替える」が成立しなくなる。
+5. **本体をバンドルの中に置かない**（mac の署名がリソースまで封をするため）。殻の隣に置く。
+6. **殻の ID（`VW_SHELL_ID`）が「再起動が要るか」を決める。** `CMakeLists.txt` の
+   `VW_SHELL_INPUTS` は**殻に入るものだけ**を並べる——`draw/` や `parse/` を足すと、描画を
+   直しただけで毎回再起動が要る仕様に化ける。判断できないときは必ず「要る」へ倒す
+   （`src/UpdaterParse.h` の `NeedsRestartAfterInstall`）。
+7. **殻は `HomeskzIfcCore`（core/ + parse/）をリンクしない。** リンクできてしまうと「殻に
+   入れてよいもの」の境界が曖昧になる。
+
 ## ディレクトリ構造
 
 `src/` の全体像（どのファイルが何を担うか）は
@@ -145,6 +200,9 @@ VectorWorks ネイティブオブジェクト
 要素を 1 つ足すときの型は決まっている: `parse/<要素>.{h,cpp}`（解析）＋
 `core/Document.h` の命令構造体と `validateDocument` の検証＋`draw/<要素>.{h,cpp}`（描画）＋
 `tests/Parse<要素>Tests.cpp`（無 SDK テスト）＋`parse/Summary.cpp` の `kElements` に 1 行。
+**どれも本体（ペイロード）側**なので、足しても殻は変わらない＝利用者は再起動せずに受け取れる
+（上記「アーキテクチャ: 殻と本体」）。PIO を足すときだけ殻に登録が要るので、そちらは
+`Extensions/Ext<要素>.{h,cpp}`（登録と取り次ぎ）＋`draw/<要素>Pio.{h,cpp}`（作図）に割る。
 
 **取り込み設定（`core/ImportOptions`）**: 「どの要素を図面のどのシンボルで置くか」は
 取り込みのたびに設定ダイアログ（`draw/SettingsDialog`）で決まる。**役割の表（表示名・

@@ -53,3 +53,18 @@
 #ifndef VW_BUILD_BRANCH
 #	define VW_BUILD_BRANCH "local"
 #endif
+
+// **殻の ID**——「アップデートに Vectorworks の再起動が要るか」を決める鍵。
+//
+// プラグインは 2 つに割れている（src/PayloadAbi.h）: Vectorworks が起動時にしか読み込め
+// ない**殻**（このモジュール）と、殻が自分で読み込む**本体**（`<name>.vwpayload`）。本体
+// だけが新しくなったのなら次の操作で読み直されるので再起動は要らず、殻まで変わっていれば
+// 要る。CMake が「殻に入るものだけ」のハッシュを -DVW_SHELL_ID で渡し、インストール済みの
+// ビルドにも同じ値が控えられる（mac: Info.plist の VWShellId、win: `<name>.shell-id`）ので、
+// 更新の直後に両者を突き合わせられる（src/UpdaterParse.h の NeedsRestartAfterInstall）。
+//
+// 既定の "local" は保険にすぎない——プラグインのビルドでは CMake が必ず実際のハッシュを
+// 渡すので（CMakeLists.txt の VW_SHELL_INPUTS）、配布物がこの値を名乗ることはない。
+#ifndef VW_SHELL_ID
+#	define VW_SHELL_ID "local"
+#endif

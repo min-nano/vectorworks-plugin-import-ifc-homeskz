@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -403,9 +404,26 @@ namespace HomeskzIfcImport::UpdaterParse
 	}
 
 	// True if `do-install` reported success (its sole success token is "ok").
+	// The installer prints "ok" on a line of its own when it succeeded. It may
+	// print other key=value lines BEFORE it (installed-shell=..., below), so this
+	// looks for the line rather than comparing the whole output — a stricter
+	// "the whole output is ok" test would read every successful install with
+	// extra information as a failure.
 	inline bool InstallReportedOk(const std::string& out)
 	{
-		return Trim(out) == "ok";
+		std::size_t pos = 0;
+		while (pos <= out.size())
+		{
+			const std::size_t nl = out.find('\n', pos);
+			const std::string line =
+				Trim(out.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos));
+			if (line == "ok")
+				return true;
+			if (nl == std::string::npos)
+				break;
+			pos = nl + 1;
+		}
+		return false;
 	}
 
 	// The message to show when `do-install` did NOT succeed: the script's own
@@ -415,5 +433,33 @@ namespace HomeskzIfcImport::UpdaterParse
 	{
 		std::string const e = ValueOf(out, "error");
 		return e.empty() ? fallback : e;
+	}
+	// ---------------------------------------------------------------------
+	// アップデートの後始末: **Vectorworks の再起動が要るか。**
+	//
+	// プラグインは 2 つに割れている（src/PayloadAbi.h）——Vectorworks が起動時にしか
+	// 読み込めない**殻**と、殻が自分で読み込む**本体（.vwpayload）**。本体だけが新しく
+	// なったのなら、次の取り込み・次の PIO リセットで読み直されるので**再起動は要らない**。
+	// 殻まで変わっていれば、それを読み込めるのは次の起動だけなので要る。
+	// ---------------------------------------------------------------------
+
+	// `do-install` の出力から「いま入れた殻の ID」を取り出す。この行を出さない古い
+	// スクリプトが同梱されていた場合は空になる。
+	inline std::string InstalledShellId(const std::string& out)
+	{
+		return ValueOf(out, "installed-shell");
+	}
+
+	// 入れ替えたあと、Vectorworks の再起動が要るか。
+	//
+	// **判断できないとき（どちらかが空）は必ず「要る」へ倒す。** 殻と本体は別々に配られる
+	// ので、食い違ったまま動かすほうが危ない——本体の版が合わなければ殻はそれを読み込まず、
+	// プラグインは何もできない状態になる（src/PayloadHost.cpp の版チェック）。
+	inline bool NeedsRestartAfterInstall(const std::string& runningShellId,
+										 const std::string& installedShellId)
+	{
+		if (runningShellId.empty() || installedShellId.empty())
+			return true;
+		return runningShellId != installedShellId;
 	}
 } // namespace HomeskzIfcImport::UpdaterParse
