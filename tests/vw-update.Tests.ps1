@@ -289,6 +289,90 @@ $out = AsText (Invoke-DoInstall '' '')
 CheckContains $out 'error=' 'empty args -> error= line'
 
 # ===========================================================================
+# Get-PluginZipUrl — the distribution zip is found by exact name, and STILL found
+# after the asset is renamed. **これが効かないと、アセット名を変えた瞬間に
+# インストール済みの古いアップデータからは何も落とせなくなる**（利用者は手で落とす
+# しかなくなる）。
+# ===========================================================================
+T 'Get-PluginZipUrl prefers the exact asset name'
+$relExact = $script:FakeStableJson | ConvertFrom-Json
+CheckEq (Get-PluginZipUrl $relExact 'HomeskzIfcImport') 'https://example.test/dl/HomeskzIfcImport.vlb.zip' 'exact match wins'
+
+T 'Get-PluginZipUrl still finds the zip after the asset was renamed'
+$relRenamed = @'
+{
+  "target_commitish": "abc1234def5678",
+  "assets": [
+    { "name": "notes.txt", "browser_download_url": "https://example.test/dl/notes.txt" },
+    { "name": "SomethingElse.vlb.zip",
+      "browser_download_url": "https://example.test/dl/renamed.zip" }
+  ]
+}
+'@ | ConvertFrom-Json
+CheckEq (Get-PluginZipUrl $relRenamed 'HomeskzIfcImport') 'https://example.test/dl/renamed.zip' 'falls back to any *.vlb.zip'
+
+# ===========================================================================
+# do-install の委譲 — **この変更の要**。落とした zip に vw-install.ps1 が入っていたら、
+# 配置はそちらへ渡し、その機械可読な出力をそのまま流す。自前の配置（予備）は使わない。
+#
+# 偽インストーラは「自分が呼ばれた証拠」を残して ok を出すだけ。**自前の配置なら必ず
+# 置かれるはずの .vlb が置かれていないこと**を見て、委譲が起きたと判定する。
+# ===========================================================================
+function New-BuildZipWithInstaller([string] $zipPath, [string] $vlbName, [string] $installerBody) {
+    $stage = Join-Path $Work ("stage-inst-" + [System.IO.Path]::GetRandomFileName())
+    New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    Set-Content -LiteralPath (Join-Path $stage "$vlbName.vlb") -Value 'dll' -NoNewline
+    Set-Content -LiteralPath (Join-Path $stage "$vlbName.vwpayload") -Value 'payload' -NoNewline
+    # param() ブロックを持たない = 未知の名前付き引数も $args に落ちるだけで束縛エラーに
+    # ならない（本物の vw-install.ps1 と同じ作法）。
+    Set-Content -LiteralPath (Join-Path $stage 'vw-install.ps1') -Value $installerBody
+    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -Force
+    Remove-Item -LiteralPath $stage -Recurse -Force
+}
+
+$SavedPluginsDir = $VW_PLUGINS_DIR
+
+T 'Invoke-DoInstall hands the placement to the installer that came with the zip'
+$VW_PLUGINS_DIR = Join-Path $Work 'plugins-delegated'
+New-Item -ItemType Directory -Force -Path $VW_PLUGINS_DIR | Out-Null
+$env:VW_TEST_MARKER = Join-Path $Work 'installer-ran.txt'
+$DelegatedZip = Join-Path $Work 'delegated.zip'
+New-BuildZipWithInstaller $DelegatedZip 'HomeskzIfcImportDev' @'
+Set-Content -LiteralPath $env:VW_TEST_MARKER -Value 'ran' -NoNewline
+Write-Output 'installed-shell=from-installer'
+Write-Output 'ok'
+'@
+$script:FakeDownloadFail = $false
+$script:FakeDownloadZip = $DelegatedZip
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
+CheckContains $out 'installed-shell=from-installer' "the installer's lines are passed through"
+CheckContains $out 'ok' 'ok is passed through'
+CheckEq (Test-Path -LiteralPath $env:VW_TEST_MARKER) $true 'the bundled installer actually ran'
+CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.vlb')) $false 'the built-in placement was NOT used'
+
+T 'Invoke-DoInstall passes an installer error through unchanged'
+$VW_PLUGINS_DIR = Join-Path $Work 'plugins-delegated-err'
+New-Item -ItemType Directory -Force -Path $VW_PLUGINS_DIR | Out-Null
+$ErrZip = Join-Path $Work 'delegated-err.zip'
+New-BuildZipWithInstaller $ErrZip 'HomeskzIfcImportDev' "Write-Output 'error=インストーラからの理由'"
+$script:FakeDownloadZip = $ErrZip
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
+CheckContains $out 'error=インストーラからの理由' "the installer's error reaches the plug-in"
+CheckNotContains $out 'ok' 'no ok line'
+
+T 'Invoke-DoInstall falls back to its own placement when the installer says nothing'
+$VW_PLUGINS_DIR = Join-Path $Work 'plugins-mute'
+New-Item -ItemType Directory -Force -Path $VW_PLUGINS_DIR | Out-Null
+$MuteZip = Join-Path $Work 'delegated-mute.zip'
+New-BuildZipWithInstaller $MuteZip 'HomeskzIfcImportDev' "Write-Output 'something unexpected'"
+$script:FakeDownloadZip = $MuteZip
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
+CheckContains $out 'ok' 'the built-in placement reported success'
+CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.vwpayload')) $true 'a mute installer never counts as done'
+
+$VW_PLUGINS_DIR = $SavedPluginsDir
+
+# ===========================================================================
 Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
 Write-Output '---------------------------------------------------------------'
 if ($script:TestsFailed -eq 0) {

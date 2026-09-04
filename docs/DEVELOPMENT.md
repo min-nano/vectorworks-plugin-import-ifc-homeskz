@@ -116,9 +116,14 @@ resources/
   HomeskzIfcImport.vwr/…             stable プラグインのメニュー文字列
   HomeskzIfcImportDev.vwr/…          dev プラグインのメニュー文字列
 scripts/
-  vw-update.sh              CI ビルドをダウンロード／インストールする（macOS 用。
-                            バンドルに同梱され、プラグインから起動される）
+  vw-update.sh              CI ビルドを探して落としてくる（macOS 用。バンドルに同梱
+                            され、プラグインから起動される）。**配置はしない**
+                            ——落とした zip の中の vw-install.sh へ委ねる
   vw-update.ps1             同上の Windows 版（PowerShell。.vlb の隣に同梱される）
+  vw-install.sh             **配置の手順**（macOS 用）。配布 zip の直下に同梱され、
+                            リリースのアセットとしても公開される。手動インストールの
+                            入口でもある（下記「自動アップデートの仕組み」）
+  vw-install.ps1            同上の Windows 版
   lint.sh                   ローカルで全 lint（clang / cmake / yaml / shell …）
                             を実行する（CI と同じチェック。--fix で自動修正）
   clang-tidy-sdk.sh         SDK 依存の翻訳単位（src/draw/ ほか）に clang-tidy を
@@ -168,13 +173,13 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 
 | 種別 | 値 | 場所 |
 | --- | --- | --- |
-| バンドル／出力名 | `HomeskzIfcImport` / `HomeskzIfcImportDev` | `CMakeLists.txt`、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`scripts/vw-update.ps1`、`.github/workflows/build.yml` |
+| バンドル／出力名 | `HomeskzIfcImport` / `HomeskzIfcImportDev` | `CMakeLists.txt`、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`scripts/vw-update.ps1`、`.github/workflows/build.yml`（`scripts/vw-install.*` は名前を決め打ちせず、アーカイブから読み取ります） |
 | バンドル ID（macOS） | `io.github.min-nano.HomeskzIfcImport(Dev)` | `CMakeLists.txt` |
 | メニューカテゴリ | `ファイル`（コマンド名 `IFC (ホームズ君) 取り込み…`） | `resources/*/Strings/*.vwstrings` |
 | C++ 名前空間・クラス | `HomeskzIfcImport` / `CExtMenuImportIfc` / `CImportIfcMenu_EventSink` | `src/Extensions/ExtMenu.{h,cpp}`、`src/ModuleMain.cpp` |
 | VCOM ユニバーサル名 | `CExtMenuImportIfc_HomeskzIfcImport(Dev)` | `src/BuildConfig.h` |
 | 拡張機能 UUID | stable / dev 各 1 個 | `src/Extensions/ExtMenu.cpp`（一意である必要があるため `uuidgen` で再生成） |
-| リポジトリ | `min-nano/vectorworks-plugin-import-ifc-homeskz` | `scripts/vw-update.sh` / `scripts/vw-update.ps1` の `VW_REPO` 既定値 |
+| リポジトリ | `min-nano/vectorworks-plugin-import-ifc-homeskz` | `scripts/vw-update.{sh,ps1}` / `scripts/vw-install.{sh,ps1}` の `VW_REPO` 既定値 |
 
 `.vwstrings` は UTF-16LE（BOM 付き・CRLF 改行）です。編集時はエンコーディングを保持
 してください。現在の識別子は次で一覧できます。
@@ -265,8 +270,10 @@ macOS の `.vwlibrary` バンドルと違い、Windows のプラグインは `<n
   切り出し、更新フロー本体は `IUpdaterHost` のフェイク越しに丸ごと動かします。同梱
   スクリプトのバックエンド（`q-stable` / `q-dev` / `do-install`）も、ネットワーク境界だけを
   差し替えて SDK ／ネットワーク抜きにテストします — macOS 版 `scripts/vw-update.sh` は
-  `tests/vw-update.test.sh`（bash＋`curl`/`plutil` スタブ）、Windows 版
-  `scripts/vw-update.ps1` は `tests/vw-update.Tests.ps1`（PowerShell 7＋
+  `tests/vw-update.test.sh`（bash＋`curl`/`plutil` スタブ）、**配置を担うインストーラ**
+  `scripts/vw-install.sh` は `tests/vw-install.test.sh`、Windows 版
+  `scripts/vw-update.ps1` / `scripts/vw-install.ps1` は `tests/vw-update.Tests.ps1` /
+  `tests/vw-install.Tests.ps1`（PowerShell 7＋
   `Invoke-GH`/`Invoke-WebRequest` スタブ）で、いずれも Linux ランナー上で動きます。
   再起動のコマンド（終了要求 → 終了待ち → 起動し直し）は純粋関数が組み立てるので、生成
   される shell / PowerShell そのものを `tests/UpdaterParseTests.cpp` で検証します。
@@ -569,7 +576,7 @@ C/C++ を対象とするジョブ:
   静的解析します。
 - **`shellcheck`** — `scripts/` 配下のスタンドアロンなシェルスクリプトを解析
   します（ワークフロー内のインラインスクリプトは actionlint が担当）。
-- **`PSScriptAnalyzer`** — Windows 版アップデータ（`scripts/vw-update.ps1`）の
+- **`PSScriptAnalyzer`** — Windows 版アップデータとインストーラ（`scripts/*.ps1`）の
   PowerShell 静的解析です。未承認の動詞・未使用パラメータ・危険な null 比較など
   バグを招きやすいパターンを検出します。clang-tidy（`src/` の実ロジックのみ）や
   shellcheck（`scripts/*.sh` のみ）と同じく、テストハーネス（`tests/`）ではなく
@@ -749,8 +756,46 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 に集約され、ビルド時にインストール物と一緒に**同梱**されます:
 
 - **macOS** — `scripts/vw-update.sh`（bash）。バンドル内の
-  `Contents/Resources/vw-update.sh` に入り、隔離解除とアドホック再署名も行います。
+  `Contents/Resources/vw-update.sh` に入ります。
 - **Windows** — `scripts/vw-update.ps1`（PowerShell）。`.vlb` の隣に入ります。
+
+### 探すのは同梱スクリプト、置くのはリリース側のインストーラ
+
+**同梱スクリプトはファイルの配置を行いません。** 走るのは常に**インストール済みの
+（＝古い）**もので、そこに配置手順を持たせると「新しいビルドがどんなファイルでできて
+いるか」を永遠に知らないままになるためです。実際 M21 で本体（`.vwpayload`）が増えた
+とき、古いアップデータはそれを写さず、利用者は zip を手で落として置き直す羽目に
+なりました。
+
+そこで役割を 2 枚に割ってあります。
+
+| | 何をするか | どこにあるか | いつの版が走るか |
+| --- | --- | --- | --- |
+| **同梱スクリプト**（`vw-update.*`） | リリースを探す・比べる・落とす・ダイアログの受け答え | インストール済みプラグインの中／隣 | **古い**（インストール済みの版） |
+| **インストーラ**（`vw-install.*`） | **配置**（隔離解除・アドホック署名・差し替え・殻 ID の報告） | **配布 zip の直下**＋リリースのアセット | **新しい**（いま落としたビルドの版） |
+
+`do-install` は zip を展開したあと、その直下にある `vw-install.sh` /
+`vw-install.ps1` を `--machine --from <展開先> --name <プラグイン名> --plugins-dir <先>`
+で呼び、**その機械可読な出力（`installed-shell=` / `ok` / `error=`）をそのまま
+プラグインへ流します**（途中で組み直すと、将来キーが増えたときに落としてしまうため）。
+zip にインストーラが無い＝この仕組みより前のリリースへ当たったときだけ、同梱スクリプト
+自身の予備の配置へ落ちます。
+
+インストーラ側の配置の規則はひとつだけです——**zip の直下にあるものを、そのまま
+`Plug-Ins` へ置く**（除くのはインストーラ自身）。ファイル名を列挙しないので、構成が
+変わっても——ファイルが増えても——利用者は手で入れ直さずに済みます。これがこの設計の
+目的そのもので、テストの中心もそこにあります（`tests/vw-install.test.sh` /
+`tests/vw-install.Tests.ps1`）。
+
+**インストーラは殻の ID（`VW_SHELL_ID`）に入れません**（`CMakeLists.txt` の
+`VW_SHELL_INPUTS`）。殻に入らないものなので当然でもありますが、狙いは「配置の手順を
+直しただけで再起動を強いない」こと——それはこの仕組みが無くそうとしている手間その
+ものだからです。
+
+**アセット名も決め打ちにしません。** 同梱スクリプトはまず `<プラグイン名>.vwlibrary.zip`
+（Windows は `.vlb.zip`）を厳密に探し、無ければ**末尾がその拡張子のアセット**で拾い
+直します（`plugin_zip_url` / `Get-PluginZipUrl`）。名前を変えた瞬間に、古いアップデータ
+から何も落とせなくなる——つまりアップデートの経路そのものが切れる——のを避けるためです。
 
 プラグインはこのスクリプトを**非対話モード**（`q-stable` / `q-dev` / `do-install`）で
 呼び出して結果を受け取り、ユーザーへの表示はすべて自前のネイティブダイアログで行う
@@ -877,12 +922,16 @@ Windows では実行中の `.vlb` を削除できない（メモリにマップ�
 古い `.vlb` をいったん退避（リネーム）してから新しいものを書き込みます。退避ファイル
 （`*.old-*`）は次回の更新時に掃除します。
 
-**この形へ移る 1 回だけ、自動アップデートでは本体が入りません。** 更新を実行するのは
-「いま入っているビルドに同梱されていたスクリプト」であり、割る前のビルドのスクリプトは
-`.vwpayload` の存在を知らないからです（zip には入っているのにコピーされない）。その場合は
-殻だけが新しくなり、起動後に「本体が見つかりません」と案内が出るので、利用者が 1 度だけ
-手で入れ直します（README「自動アップデート」）。以後は同梱スクリプトも新しいものになる
-ので、両方が自動で入れ替わります。
+**同じ事故はもう起こりません。** M21 で本体（`.vwpayload`）が増えたときは、更新を実行
+するのが「いま入っているビルドに同梱されていたスクリプト」＝割る前の版で、`.vwpayload`
+の存在を知らなかったため、zip に入っているのにコピーされませんでした（殻だけが新しく
+なり、起動後に「本体が見つかりません」と出る）。いまは配置を**落とした zip の中の
+インストーラ**が行うので、増えたファイルはそのまま入ります（上記「探すのは同梱
+スクリプト、置くのはリリース側のインストーラ」）。
+
+ただし**この仕組みより前のビルドから更新する 1 回**は、まだ古い同梱スクリプトが配置を
+行います（そのときのファイル構成は変わっていないので、正しく入ります）。その更新で
+新しい同梱スクリプトが入り、以後は常にリリース側のインストーラが配置します。
 
 **本体（`.vwpayload`）は実行中でも置き換えられます。** 殻は同梱ファイルそのものではなく
 一時ディレクトリへ複製したものを読み込むので（`src/PayloadHost.h`「必ず複製してから読む」）、
@@ -908,6 +957,10 @@ Windows では実行中の `.vlb` を削除できない（メモリにマップ�
 
 ```sh
 # --- macOS (bash) -----------------------------------------------------------
+# 配置だけを行うインストーラ（リリースのアセットにもあるので、単独で落として実行できる）:
+./scripts/vw-install.sh                        # 最新の stable を入れる
+./scripts/vw-install.sh --tag dev-feature-x    # そのプレリリースを入れる
+./scripts/vw-install.sh --zip <file>           # 手元の zip から入れる
 # stable チャンネル（main → HomeskzIfcImport）:
 ./scripts/vw-update.sh stable
 # dev チャンネル — どのブランチのビルドを入れるか選ぶ（→ HomeskzIfcImportDev）:
@@ -922,6 +975,9 @@ Windows では実行中の `.vlb` を削除できない（メモリにマップ�
 
 ```pwsh
 # --- Windows (PowerShell) ---------------------------------------------------
+# 配置だけを行うインストーラ（リリースのアセットにもある）:
+powershell -ExecutionPolicy Bypass -File scripts\vw-install.ps1
+powershell -ExecutionPolicy Bypass -File scripts\vw-install.ps1 -Tag dev-feature-x
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 stable
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 dev
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1          # チャンネルを尋ねる

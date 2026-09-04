@@ -104,6 +104,14 @@ SDK と実際の図面が要るためで、代わりに (a) SDK から切り離�
 5. **`UpdaterScriptTestsPs`** … その Windows 版 `scripts/vw-update.ps1` を、同じ発想で
    `Invoke-GH` / `Invoke-WebRequest` を差し替えて検証します（`tests/vw-update.Tests.ps1`、
    後述）。PowerShell 7（`pwsh`）は Linux でも動くので、**同じ Linux ランナー**で回せます。
+6. **`InstallerScriptTests` / `InstallerScriptTestsPs`** … **配置を担うインストーラ**
+   `scripts/vw-install.sh` / `scripts/vw-install.ps1`（配布 zip の直下とリリースのアセット
+   として配られ、アップデータが配置を委ねる先）を検証します。中心の検査はひとつ——
+   **zip の直下にあるものが、列挙されていなくても全部入ること**。ここが取りこぼすと利用者の
+   `Plug-Ins` に半端なプラグインが残る、というのが実際に起きた事故で、この仕組みはその再発を
+   止めるためにあります（`tests/vw-install.test.sh` / `tests/vw-install.Tests.ps1`）。
+   アップデータ側には**委譲そのもの**のテストもあります（zip に入っていたインストーラが
+   走ったか・その出力が素通しされるか・黙っているインストーラを成功と取り違えないか）。
 
 以降の節（`IUpdaterHost` によるフロー全体のテスト・スクリプトのテスト・残る部分）は
 すべてこのアップデータ系統の話です。
@@ -221,10 +229,12 @@ ctest --test-dir build-tests --output-on-failure
 ## スクリプトのテスト（ソース＋スタブ方式）
 
 「更新の実体」を担う `scripts/vw-update.sh`（macOS）と `scripts/vw-update.ps1`
-（Windows。GitHub API 取得・zip 展開・インストール）も、C++ 側と同じ発想で
+（Windows。GitHub API 取得・zip 展開・委譲）、および**配置そのもの**を担う
+`scripts/vw-install.sh` / `scripts/vw-install.ps1` も、C++ 側と同じ発想で
 SDK ／ネットワーク抜きに単体テストします（`tests/vw-update.test.sh` /
-`tests/vw-update.Tests.ps1`）。Pester や bats などの外部フレームワークは使わず、
-`TestFramework.h` と同じ**依存ゼロの極小ハーネス**を各ファイルに同梱しています。
+`tests/vw-update.Tests.ps1` / `tests/vw-install.test.sh` / `tests/vw-install.Tests.ps1`）。
+Pester や bats などの外部フレームワークは使わず、`TestFramework.h` と同じ**依存ゼロの
+極小ハーネス**を各ファイルに同梱しています。
 
 いずれも「実行（プラグイン・手動）ではディスパッチが走り、テストでは `source`
 （dot-source）して個々の関数を直接呼ぶ」という**シーム**をスクリプト末尾に用意して
@@ -268,6 +278,17 @@ if ($MyInvocation.InvocationName -ne '.') {
 これで両スクリプトとも、`q-stable` の `installed` / `latest`（7 桁化）/ `url`、`q-dev` の
 `dev-*` フィルタとアセットのあるビルドだけの列挙、`do-install` の成功・各失敗経路
 （ダウンロード失敗／想定外の zip／引数不足）まで、**素の Linux ランナーで**検証できます。
+
+**インストーラ（`vw-install.*`）のテストはさらに実物寄り**です。差し替えるのは JSON 抽出
+（`jval`）と Gatekeeper のツール（`codesign` / `xattr`）と `PlistBuddy` だけで、配置そのもの
+——展開済みディレクトリの走査・差し替え・インストーラ自身の除外——は本物が temp ディレクトリ
+に対して動きます。要となる検査は次の 3 つです。
+
+* **列挙されていないファイルも入ること**（フィクスチャに `<name>.brand-new` を混ぜてある。
+  これが落ちたら、次にファイルが増えたとき利用者が手で入れ直す羽目になる）。
+* **インストーラ自身は `Plug-Ins` へ置かないこと**。
+* **知らないオプションで落ちないこと**（新しいアップデータが古い zip の中のインストーラを
+  呼ぶ向きが起こりうるため）。
 更新後の**再起動**はスクリプトの仕事ではありません。終了要求 → 終了待ち → 起動し直しを
 行う 1 行のコマンドは `src/UpdaterParse.h` が組み立てるので（同梱スクリプトの版ズレを避ける
 ため。理由は README「再起動を SDK に任せない理由」）、テストも C++ 側

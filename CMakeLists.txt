@@ -317,6 +317,11 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtShearWall.cpp
 		scripts/vw-update.sh
 		scripts/vw-update.ps1)
+	# **`scripts/vw-install.*`（インストーラ）はここに入れない。** あれは殻に入らず、
+	# リリースの zip とアセットとして配られるもので、走るのは「落としてきた新しい版」の
+	# ほう（scripts/vw-install.sh の冒頭）。ここへ足すと、配置の手順を直しただけで
+	# 利用者に Vectorworks の再起動を強いることになる——それは、この仕組みが無くそうと
+	# している手間そのもの。
 	set(VW_SHELL_DIGEST_INPUT "")
 	foreach(vw_shell_input IN LISTS VW_SHELL_INPUTS)
 		if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${vw_shell_input}")

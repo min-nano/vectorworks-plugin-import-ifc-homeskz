@@ -212,6 +212,34 @@
 です（下記「自動アップデート」）。`.vwpayload` は Vectorworks から見ればただのファイルなので、
 プラグインとして二重に読み込まれることはありません。
 
+### いちばん簡単な入れ方: インストーラを使う
+
+**リリースにはインストーラのスクリプトが一緒に置いてあります。** これを落として実行すれば、
+配布 zip の取得・展開・隔離解除・アドホック署名・`Plug-Ins` への配置まで全部やります。
+**構成ファイルが増えても、その時点の正しい構成で入ります**（インストーラはリリースごとに
+一緒に更新されるため）。
+
+```sh
+# --- macOS -------------------------------------------------------------------
+curl -fsSLO https://github.com/min-nano/vectorworks-plugin-import-ifc-homeskz/releases/download/stable/vw-install.sh
+bash vw-install.sh                       # 最新の stable を入れる
+bash vw-install.sh --tag dev-<ブランチ名> # 開発版を入れる
+```
+
+```pwsh
+# --- Windows -----------------------------------------------------------------
+iwr -UseBasicParsing -OutFile vw-install.ps1 `
+  https://github.com/min-nano/vectorworks-plugin-import-ifc-homeskz/releases/download/stable/vw-install.ps1
+powershell -ExecutionPolicy Bypass -File vw-install.ps1
+```
+
+インストール先は Vectorworks 2026 のユーザフォルダ内の `Plug-Ins` です。別の場所に
+入れたいときは `--plugins-dir <パス>`（Windows は `-PluginsDir <パス>`）を付けます。
+入れ終わったら、下記「macOS」の手順 3・4（Windows は 2・3）——Vectorworks を起動して
+コマンドをワークスペースに追加する——だけ行ってください。
+
+以下は、zip を自分で展開して置く**手作業の手順**です。
+
 ### macOS
 
 プラグインの入れ物は `HomeskzIfcImport.vwlibrary` バンドルで、リソースはバンドル内に
@@ -288,13 +316,17 @@
 確認してから閉じられ、保存ダイアログで取り消せば Vectorworks は落ちません）。「後で」を
 選んだ場合は、次回の起動で反映されます。
 
-> **この形になる前のビルドから更新するときだけ、1 度だけ手で入れ直してください。**
-> 中身（`.vwpayload`）は新しく増えたファイルなので、**古いビルドに同梱されていた
-> アップデータはそれをコピーしません**。自動アップデートで更新したあと「本体
-> （`HomeskzIfcImport.vwpayload`）が見つかりません」と出たら、
-> [リリース](https://github.com/min-nano/vectorworks-plugin-import-ifc-homeskz/releases)の
-> zip を落として、上記「インストール」の手順でもう一度置き直してください。以後の
-> アップデートは自動で両方入れ替わります。
+**構成ファイルが増えても、手で入れ直す必要はありません。** ファイルの配置は、
+インストール済みの（＝古い）アップデータではなく、**落としてきた zip に入っている
+インストーラ**が行います。インストーラはビルドと一緒に配られるので、常に「そのビルドの
+正しい構成」で置いてくれます。
+
+> **この仕組みより前のビルドから更新するときだけ、1 度は古い手順で入ります。**
+> そのときのファイル構成は変わっていないので正しく入り、その更新で新しいアップデータが
+> 入ります。以後は上のとおりです。
+> なお、それより前（中身 `.vwpayload` が増える前）のビルドから更新して「本体
+> （`HomeskzIfcImport.vwpayload`）が見つかりません」と出た場合は、上記
+> 「いちばん簡単な入れ方: インストーラを使う」を 1 度実行すれば直ります。
 
 仕組みの詳細（同梱スクリプト・再起動をヘルパープロセスに任せている理由・手動実行）は
 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)「自動アップデートの仕組み」にあります。
