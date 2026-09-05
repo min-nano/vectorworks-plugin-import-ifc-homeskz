@@ -13,9 +13,21 @@
     利用者は zip を手で落として置き直す羽目になった。そこで vw-update.ps1 は**落とした
     zip の中のこのスクリプトへ配置を委ねる**。
 
-    配置の規則はひとつ: **zip の直下にあるものを、そのまま Plug-Ins へ置く。**
+    配置の規則はひとつ: **zip の直下にあるものを、そのまま置く。**
     ファイル名を列挙しない——列挙した瞬間に「増えたファイルを取りこぼす」という、いま
     直している事故がそっくり戻ってくる。除くのはこのスクリプト自身だけ。
+
+    置き先は **Plug-Ins の直下ではなく、プラグインが自分で持つフォルダ**である:
+
+        <Plug-Ins>\HomeskzIfcImport\HomeskzIfcImport.vlb
+        <Plug-Ins>\HomeskzIfcImport\HomeskzIfcImport.vwpayload
+        <Plug-Ins>\HomeskzIfcImport\vw-uninstall.ps1  ほか
+
+    こうしておくとそのプラグインのものが 1 か所に閉じるので、取り除くのが「フォルダを
+    1 つ消す」で済む（vw-uninstall.ps1）。
+
+    入れる前に、**いま入っている版を、その版自身のアンインストーラで取り除く**
+    （下記 Uninstall-PreviousRelease）。
 
     Usage:
       powershell -ExecutionPolicy Bypass -File vw-install.ps1                     # stable
@@ -25,8 +37,8 @@
 
     Options:
       -Name <plugin>      HomeskzIfcImport / HomeskzIfcImportDev（既定は自動判定）
-      -PluginsDir <dir>   インストール先（既定は VW_PLUGINS_DIR、無ければ VW2026 の
-                          ユーザフォルダ）
+      -PluginsDir <dir>   Plug-Ins（またはプラグインのフォルダそのもの）。既定は
+                          VW_PLUGINS_DIR、無ければ VW2026 のユーザフォルダ
       -From <dir>         展開済みのディレクトリから入れる（ダウンロードしない）
       -Zip <file>         手元の zip から入れる
       -Url <url>          この zip を落として入れる
@@ -67,8 +79,11 @@ $VW_SHELL_EXT = '.vlb'
 # 配布 zip のアセット名の末尾。**プラグイン名が変わっても効く**ようにアセット名そのもの
 # ではなく末尾で照合する。
 $VW_ZIP_SUFFIX = '.vlb.zip'
-# Plug-Ins へは置かないもの（インストーラ自身。プラグインの一部ではない）。
+# 置かないもの（インストーラ自身。プラグインの一部ではない）。**アンインストーラは
+# 置く**——次のアップデートがこれを使う（Uninstall-PreviousRelease）。
 $VW_NOT_INSTALLED = @('vw-install.ps1', 'vw-install.sh', '__MACOSX')
+# インストール先へ一緒に置くアンインストーラ（scripts/vw-uninstall.ps1 の冒頭）。
+$VW_UNINSTALLER = 'vw-uninstall.ps1'
 
 $script:LastError = ''
 $script:Machine = $false
@@ -136,7 +151,7 @@ function Get-PluginName([string] $dir) {
 # （src/PayloadAbi.h / src/UpdaterParse.h）。読めなければ空＝プラグインは安全側
 # （再起動が要る）へ倒す。
 function Get-InstalledShellId([string] $name) {
-    $f = Join-Path $script:PluginsDir "$name.shell-id"
+    $f = Join-Path (Get-PluginDir $script:PluginsDir $name) "$name.shell-id"
     if (Test-Path -LiteralPath $f) {
         $c = Get-Content -LiteralPath $f -Raw -ErrorAction SilentlyContinue
         if ($c) { return $c.Trim() }
@@ -162,24 +177,78 @@ function Install-File([string] $src, [string] $dst) {
     Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
 }
 
-# Install-Tree: 展開済みディレクトリの直下にあるものを、そのまま Plug-Ins へ置く。
-# **列挙しない**のが肝（冒頭のコメント参照）。
+# Get-PluginDir: 実際に置くフォルダ。**プラグインは自分のフォルダを 1 つ持つ**
+# （<Plug-Ins>\<name>\。冒頭のコメント参照）。
+#
+# **渡された先が既にそのフォルダなら足さない。** 自動アップデートのとき、プラグインは
+# 「いま自分が読み込まれたフォルダ」を渡してくる——サブフォルダ化のあとはそれ自身が
+# <Plug-Ins>\<name> なので、無条件に足すと更新のたびに <name>\<name>\… と際限なく
+# 深くなる。vw-uninstall.ps1 の同名関数と**同じ規則**でなければならない。
+function Get-PluginDir([string] $root, [string] $name) {
+    if ((Split-Path -Leaf $root) -eq $name) { return $root }
+    return (Join-Path $root $name)
+}
+
+# Uninstall-PreviousRelease: **いま入っている版を、その版自身が置いていったアンインストーラで
+# 取り除く。** 置く側が「新しい版」の知識を持つのと対で、取り除く側は「いま入っている
+# 版」の知識を持つ（scripts/vw-uninstall.ps1 の冒頭）。
+#
+# 見つからなければ何もしない（初回インストール、あるいはこの仕組みより前の版）。失敗
+# しても続行する——このあとどのみち上書きするので、取り除けなかったことを理由に
+# インストールごと失敗させるのは損。
+#
+# **一時ディレクトリへ写してから走らせる。** アンインストーラは自分が消すフォルダの中に
+# 居るためで、写しておけば消えても走り切れる。
+# 動詞が "Uninstall" なのは意図的（"Remove" だと PSScriptAnalyzer が ShouldProcess の
+# 実装を要求する。scripts/vw-uninstall.ps1 の Uninstall-PluginDir と同じ理由）。
+function Uninstall-PreviousRelease([string] $dest, [string] $name) {
+    $src = Join-Path $dest $VW_UNINSTALLER
+    if (-not (Test-Path -LiteralPath $src)) { return }
+    # 写し先は**この関数が自分で作る**——呼び出し側から受け取ると、渡し忘れたときに変な
+    # 場所へ書きに行く（bash 版で実際にそれをやり、root では成功してしまってテストと
+    # CI の結果が食い違った）。
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('vwunin-' + [System.IO.Path]::GetRandomFileName())
+    try {
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        $copy = Join-Path $tmp $VW_UNINSTALLER
+        Copy-Item -LiteralPath $src -Destination $copy -Force
+        try { Unblock-File -LiteralPath $copy -ErrorAction SilentlyContinue } catch {}
+        Write-Note 'いま入っている版を取り除きます…'
+        try { & $copy -Machine -Name $name -PluginsDir $dest | Out-Null } catch {}
+    }
+    catch {}
+    finally {
+        try { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+    }
+}
+
+# Install-Tree: 展開済みディレクトリの直下にあるものを、そのままプラグインのフォルダへ
+# 置く。**列挙しない**のが肝（冒頭のコメント参照）。
 function Install-Tree([string] $work, [string] $name) {
+    # 取り違えた zip を黙って撒かないための最低限の確認。**取り除くより先に確かめる**
+    # ——ここで弾けなかったら、消しただけで入れられない状態になる。
     if (-not (Test-Path -LiteralPath (Join-Path $work "$name$VW_SHELL_EXT"))) {
         $script:LastError = "$name$VW_SHELL_EXT がアーカイブ内に見つかりません。"
         return $false
     }
-    if (-not (Test-Path -LiteralPath $script:PluginsDir)) {
-        New-Item -ItemType Directory -Force -Path $script:PluginsDir | Out-Null
+
+    $dest = Get-PluginDir $script:PluginsDir $name
+
+    # 入れる前に前の版を取り除く（上記）。
+    Uninstall-PreviousRelease -dest $dest -name $name
+
+    if (-not (Test-Path -LiteralPath $dest)) {
+        New-Item -ItemType Directory -Force -Path $dest | Out-Null
     }
 
-    # 前回のインストールが残した退避（Vectorworks が手を離した今なら消せる）を掃く。
-    Get-ChildItem -LiteralPath $script:PluginsDir -Filter '*.old-*' -ErrorAction SilentlyContinue |
+    # 退避（*.old-*）の掃除。アンインストールが退かしたものと、前回の更新が残したもの
+    # の両方が対象で、Vectorworks が手を離していれば消える。
+    Get-ChildItem -LiteralPath $dest -Filter '*.old-*' -ErrorAction SilentlyContinue |
         ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop } catch {} }
 
     foreach ($item in Get-ChildItem -LiteralPath $work -Force -ErrorAction SilentlyContinue) {
         if ($VW_NOT_INSTALLED -contains $item.Name) { continue }
-        try { Install-File $item.FullName (Join-Path $script:PluginsDir $item.Name) }
+        try { Install-File $item.FullName (Join-Path $dest $item.Name) }
         catch {
             $script:LastError = "インストール先へのコピーに失敗しました（$($item.Name)）。"
             return $false
@@ -283,7 +352,7 @@ function Invoke-Main([string[]] $argv) {
         $src = Resolve-Source $opt $tmp.FullName
         if ($src) {
             $name = $src.Name
-            $ok = Install-Tree $src.Dir $name
+            $ok = Install-Tree -work $src.Dir -name $name
         }
     }
     finally {
@@ -307,7 +376,7 @@ function Invoke-Main([string[]] $argv) {
     }
 
     if ($ok) {
-        Write-Host "インストールしました: $script:PluginsDir" -ForegroundColor Green
+        Write-Host "インストールしました: $(Get-PluginDir $script:PluginsDir $name)" -ForegroundColor Green
         Write-Host 'Vectorworks を起動してください（起動中なら再起動してください）。'
         return
     }

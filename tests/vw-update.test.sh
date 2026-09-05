@@ -319,11 +319,13 @@ mkdir -p "$dest"
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$GOOD_ZIP" \
 	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
 check_eq "$out" "ok" "do_install prints ok"
-if [ -f "$dest/HomeskzIfcImportDev.vwlibrary/Contents/Info.plist" ]; then installed=yes; else installed=no; fi
-check_eq "$installed" "yes" "the .vwlibrary landed in the plug-ins dir"
+# **プラグインは自分のフォルダを 1 つ持つ**（<Plug-Ins>/<name>/。scripts/vw-install.sh）。
+# 予備の配置もそこへ入れる——読む側（installed_bundle）と食い違わせないため。
+if [ -f "$dest/HomeskzIfcImportDev/HomeskzIfcImportDev.vwlibrary/Contents/Info.plist" ]; then installed=yes; else installed=no; fi
+check_eq "$installed" "yes" "the .vwlibrary landed in the plug-in's own folder"
 # **本体も入っていること。** 殻だけ入れて本体を取りこぼすと、次の起動でプラグインは
 # 何もできなくなる（src/PayloadHost.cpp が「本体が見つかりません」と言うだけ）。
-if [ -f "$dest/HomeskzIfcImportDev.vwpayload" ]; then installed=yes; else installed=no; fi
+if [ -f "$dest/HomeskzIfcImportDev/HomeskzIfcImportDev.vwpayload" ]; then installed=yes; else installed=no; fi
 check_eq "$installed" "yes" "the .vwpayload landed next to the bundle"
 
 t "do_install reports the installed shell id so the plug-in can skip the restart"
@@ -356,6 +358,24 @@ check_contains "$out" "error=" "wrong bundle name -> error= line"
 t "do_install rejects missing arguments"
 out="$(RUN do_install "" "")"
 check_contains "$out" "error=" "empty args -> error= line"
+
+# ===========================================================================
+# plugin_dir / installed_bundle — **プラグインは自分のフォルダを 1 つ持つ**。ここが
+# インストーラ（scripts/vw-install.sh の同名関数）とずれると、入れた場所と読む場所が
+# 食い違い、「更新したのに古いままに見える」事故になる。**渡された先が既にその
+# フォルダなら足さない**のが肝で、これを落とすと更新のたびに入れ子が深くなる。
+# ===========================================================================
+t "plugin_dir appends the plug-in's own folder"
+check_eq "$(RUN plugin_dir "/x/Plug-Ins" "HomeskzIfcImport")" "/x/Plug-Ins/HomeskzIfcImport" \
+	"Plug-Ins -> Plug-Ins/<name>"
+
+t "plugin_dir does not nest when it is already the plug-in's folder"
+check_eq "$(RUN plugin_dir "/x/Plug-Ins/HomeskzIfcImport" "HomeskzIfcImport")" \
+	"/x/Plug-Ins/HomeskzIfcImport" "already there -> unchanged"
+
+t "installed_bundle points inside the plug-in's own folder"
+check_eq "$(VW_PLUGINS_DIR=/x/Plug-Ins RUN installed_bundle "HomeskzIfcImport")" \
+	"/x/Plug-Ins/HomeskzIfcImport/HomeskzIfcImport.vwlibrary" "bundle path"
 
 # ===========================================================================
 # plugin_zip_url — the distribution zip is found by exact name, and STILL found
@@ -416,7 +436,7 @@ check_contains "$out" "installed-shell=from-installer" "the installer's lines ar
 check_contains "$out" "ok" "ok is passed through"
 if [ -f "$marker" ]; then ran=yes; else ran=no; fi
 check_eq "$ran" "yes" "the bundled installer actually ran"
-if [ -e "$dest/HomeskzIfcImportDev.vwlibrary" ]; then fellback=yes; else fellback=no; fi
+if [ -e "$dest/HomeskzIfcImportDev/HomeskzIfcImportDev.vwlibrary" ]; then fellback=yes; else fellback=no; fi
 check_eq "$fellback" "no" "the built-in placement was NOT used"
 
 t "do_install passes an installer error through unchanged"
@@ -438,7 +458,7 @@ build_zip_with_installer "$MUTE_ZIP" "HomeskzIfcImportDev.vwlibrary" 'exit 3'
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$MUTE_ZIP" \
 	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
 check_eq "$out" "ok" "the built-in placement reported success"
-if [ -f "$dest/HomeskzIfcImportDev.vwpayload" ]; then fellback=yes; else fellback=no; fi
+if [ -f "$dest/HomeskzIfcImportDev/HomeskzIfcImportDev.vwpayload" ]; then fellback=yes; else fellback=no; fi
 check_eq "$fellback" "yes" "a mute/broken installer never counts as done"
 
 # ===========================================================================

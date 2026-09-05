@@ -114,8 +114,16 @@ SDK と実際の図面が要るためで、代わりに (a) SDK から切り離�
    止めるためにあります（`tests/vw-install.test.sh` / `tests/vw-install.Tests.ps1`）。
    アップデータ側には**委譲そのもの**のテストもあります（zip に入っていたインストーラが
    走ったか・その出力が素通しされるか・黙っているインストーラを成功と取り違えないか）。
+7. **`UninstallerScriptTests` / `UninstallerScriptTestsPs`** … **取り除く**
+   `scripts/vw-uninstall.sh` / `scripts/vw-uninstall.ps1`。ここは本リポジトリで唯一
+   「利用者のディスク上のものを消す」コードなので、中心の検査は**削除の安全弁**です——
+   フォルダ名が一致し、かつ中に殻があるときだけ消し、`Plug-Ins` そのものや無関係な
+   フォルダを名指しされても消さないこと。あわせて「入っていなければ成功」（アップデートの
+   入口で無条件に叩ける）も押さえます（`tests/vw-uninstall.test.sh` /
+   `tests/vw-uninstall.Tests.ps1`）。**スタブはありません**——削除そのものが対象なので、
+   本物が temp ディレクトリに対して走ります。
 
-7. **`FeedbackScriptTests` / `FeedbackScriptTestsPs`** … **実機フィードバックを投稿する**
+8. **`FeedbackScriptTests` / `FeedbackScriptTestsPs`** … **実機フィードバックを投稿する**
    `scripts/vw-feedback.sh` / `.ps1`（`token-status` / `login` / `logout` / `find-pr` /
    `post`）を、ネットワークとトークンの保管だけ差し替えて検証します。要の検査は 3 つ——
    **トークンの探索順**（環境変数 → 保管 → `gh`）、**組み立てた JSON が本文をそのまま
@@ -241,12 +249,13 @@ ctest --test-dir build-tests --output-on-failure
 ## スクリプトのテスト（ソース＋スタブ方式）
 
 「更新の実体」を担う `scripts/vw-update.sh`（macOS）と `scripts/vw-update.ps1`
-（Windows。GitHub API 取得・zip 展開・委譲）、および**配置そのもの**を担う
-`scripts/vw-install.sh` / `scripts/vw-install.ps1` も、C++ 側と同じ発想で
-SDK ／ネットワーク抜きに単体テストします（`tests/vw-update.test.sh` /
-`tests/vw-update.Tests.ps1` / `tests/vw-install.test.sh` / `tests/vw-install.Tests.ps1`）。
-Pester や bats などの外部フレームワークは使わず、`TestFramework.h` と同じ**依存ゼロの
-極小ハーネス**を各ファイルに同梱しています。
+（Windows。GitHub API 取得・zip 展開・委譲）、**配置そのもの**を担う
+`scripts/vw-install.{sh,ps1}`、そして**取り除く** `scripts/vw-uninstall.{sh,ps1}` も、
+C++ 側と同じ発想で SDK ／ネットワーク抜きに単体テストします（`tests/vw-update.test.sh` /
+`tests/vw-update.Tests.ps1` / `tests/vw-install.test.sh` / `tests/vw-install.Tests.ps1` /
+`tests/vw-uninstall.test.sh` / `tests/vw-uninstall.Tests.ps1`）。Pester や bats などの
+外部フレームワークは使わず、`TestFramework.h` と同じ**依存ゼロの極小ハーネス**を各
+ファイルに同梱しています。
 
 いずれも「実行（プラグイン・手動）ではディスパッチが走り、テストでは `source`
 （dot-source）して個々の関数を直接呼ぶ」という**シーム**をスクリプト末尾に用意して
@@ -278,6 +287,22 @@ if ($MyInvocation.InvocationName -ne '.') {
 | `download` | `curl` でアセット取得 | ローカルの zip を配置（失敗も再現） |
 | `installed_commit` | `PlistBuddy`（macOS 専用） | 既定コミットを返す（「バンドル無し → none」の枝は本物を直接検証） |
 
+> **PowerShell のハーネスは、エラーの扱いをローカルと CI で変えている。** これは
+> 「CI では緩めない」という `VW_REQUIRE_SCRIPT_TESTS` の方針をそのまま延長したもので、
+> `$ErrorActionPreference` を **ローカルでは `Continue`・CI では `Stop`** にする。
+>
+> `Continue` のままだと、テスト本体の文が落ちても次へ進むため、その `CheckXxx` は
+> **呼ばれないまま数にも入らない**——検査が空振りしたのに「PASS: all N checks」と出て、
+> N だけが静かに減る。実際に `Join-Path 'C:\x' …`（Linux の pwsh に C: ドライブは無い）
+> で 2 件が黙って抜けた。CI 側を `Stop` にすると、その文でスクリプトが終了して exit 1 に
+> なるので、必ず気付ける。ローカルを `Continue` のままにしてあるのは、直すときは失敗を
+> 一覧できたほうが速いからで、これも skip / hard-fail の使い分けと同じ考え方である。
+>
+> **bash のハーネスには同じ手が使えない。** あちらは `RUN` の直後に `$?` を見る書き方を
+> しており（`check_eq "$?" "1"` など）、`set -e` にすると意図した失敗でハーネスごと
+> 止まってしまう。代わりに、各関数を `set -euo pipefail` の**サブシェル**で走らせて
+> 本物の挙動を保っている（`RUN`）。
+
 **`vw-update.ps1`（PowerShell 7）** — こちらは差し替えが 2 つで済み、より本物に近い形で
 動きます（`Get-InstalledCommit` は macOS ツールではなく `<name>.commit` テキストを読む
 だけなので実物、`Expand-Archive` / `Copy-Item` も pwsh の標準機能でそのまま動く）。
@@ -301,6 +326,9 @@ if ($MyInvocation.InvocationName -ne '.') {
 * **インストーラ自身は `Plug-Ins` へ置かないこと**。
 * **知らないオプションで落ちないこと**（新しいアップデータが古い zip の中のインストーラを
   呼ぶ向きが起こりうるため）。
+* **プラグインのフォルダに入り、入れ子にならないこと**（アップデータは「いま自分が
+  読み込まれたフォルダ」を渡してくるので、無条件に足すと更新のたびに深くなる）。
+* **入れる前に前の版が取り除かれること**（前の版にしか無かったファイルが残らない）。
 更新後の**再起動**はスクリプトの仕事ではありません。終了要求 → 終了待ち → 起動し直しを
 行う 1 行のコマンドは `src/UpdaterParse.h` が組み立てるので（同梱スクリプトの版ズレを避ける
 ため。理由は README「再起動を SDK に任せない理由」）、テストも C++ 側
@@ -319,7 +347,8 @@ C++ 側が `dladdr` / `gSDK` のグルーを対象外にしているのと同様
 になるのを防ぐため、`-DVW_REQUIRE_SCRIPT_TESTS=ON`（Tests ワークフローが指定）を付けると
 挙動が逆転します。インタプリタ（`bash` / `pwsh`）が無ければ **configure が FATAL_ERROR** で
 失敗し、ハーネスに渡す補助ツール（python3 / unzip / zip）が無ければ **ハーネスが SKIP では
-なく exit 1** で失敗します。この値は各ハーネスの環境変数 `VW_REQUIRE_SCRIPT_TESTS` として
+なく exit 1** で失敗します。**PowerShell のハーネスはあわせて `$ErrorActionPreference` も
+`Stop` へ切り替え**、想定外のエラーを見逃さないようにします（上記の注意書き）。この値は各ハーネスの環境変数 `VW_REQUIRE_SCRIPT_TESTS` として
 渡され、ローカル既定（OFF）では従来どおり穏やかに SKIP します。
 
 ## それでも残る部分（アップデータ）

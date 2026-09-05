@@ -72,7 +72,18 @@ $env:VW_PLUGINS_DIR = $PluginsDir
 # the harness; each function under test keeps its own try/catch.
 # ---------------------------------------------------------------------------
 . $Script
-$ErrorActionPreference = 'Continue'
+
+# **エラーの扱いはローカルと CI で変える。** これは「CI では緩めない」という
+# VW_REQUIRE_SCRIPT_TESTS の方針（上記 $RequireTools）をそのまま延長したもの。
+#
+#   * ローカル（Continue）… 落ちた文があっても最後まで走り、失敗を一覧できる。
+#   * CI（Stop）………………… 想定外のエラーでその場で終了し、exit 1 になる。
+#
+# Stop が要る理由: Continue だと**落ちた文の CheckXxx が呼ばれないまま**次へ進むので、
+# 検査が空振りしたのに「PASS: all N checks」と出る。実際に `Join-Path 'C:\x' …`
+# （Linux の pwsh に C: ドライブは無い）で 2 件が黙って抜け、N だけが減っていた。
+# ローカルを Continue のままにしてあるのは、直すときは失敗を一覧できたほうが速いから。
+$ErrorActionPreference = if ($RequireTools) { 'Stop' } else { 'Continue' }
 
 # ---------------------------------------------------------------------------
 # Tiny assertion harness, styled after tests/TestFramework.h / vw-update.test.sh.
@@ -212,8 +223,10 @@ CheckEq (Get-Short '') '' 'empty stays empty'
 # ===========================================================================
 # Get-InstalledCommit — reads the real "<name>.commit" sidecar (no OS tool).
 # ===========================================================================
-T 'Get-InstalledCommit reads the sidecar commit'
-Set-Content -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImport.commit') -Value "abc1234`n"
+T 'Get-InstalledCommit reads the sidecar commit from the plug-in folder'
+$ownStable = Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImport'
+New-Item -ItemType Directory -Force -Path $ownStable | Out-Null
+Set-Content -LiteralPath (Join-Path $ownStable 'HomeskzIfcImport.commit') -Value "abc1234`n"
 CheckEq (Get-InstalledCommit 'HomeskzIfcImport') 'abc1234' 'trimmed sidecar value'
 
 T 'Get-InstalledCommit is none when the sidecar is absent'
@@ -263,12 +276,15 @@ $script:FakeDownloadFail = $false
 $script:FakeDownloadZip = $GoodZip
 $out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
 CheckContains $out 'ok' 'prints ok'
-CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.vlb')) $true 'the .vlb landed'
-CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.commit')) $true 'the .commit sidecar landed'
+# **プラグインは自分のフォルダを 1 つ持つ**（<Plug-Ins>\<name>\。scripts/vw-install.ps1）。
+# 予備の配置もそこへ入れる——読む側（Get-InstalledCommit）と食い違わせないため。
+$own = Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev'
+CheckEq (Test-Path -LiteralPath (Join-Path $own 'HomeskzIfcImportDev.vlb')) $true 'the .vlb landed'
+CheckEq (Test-Path -LiteralPath (Join-Path $own 'HomeskzIfcImportDev.commit')) $true 'the .commit sidecar landed'
 # **本体も入っていること。** 殻だけ入れて本体を取りこぼすと、次の起動でプラグインは
 # 何もできなくなる（src/PayloadHost.cpp が「本体が見つかりません」と言うだけ）。
-CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.vwpayload')) $true 'the .vwpayload landed'
-CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.shell-id')) $true 'the shell-id stamp landed'
+CheckEq (Test-Path -LiteralPath (Join-Path $own 'HomeskzIfcImportDev.vwpayload')) $true 'the .vwpayload landed'
+CheckEq (Test-Path -LiteralPath (Join-Path $own 'HomeskzIfcImportDev.shell-id')) $true 'the shell-id stamp landed'
 # 入れた殻の ID を先に出す。プラグインはこれを自分の VW_SHELL_ID と突き合わせて、
 # **本体の読み直しで済むなら再起動を尋ねない**（src/UpdaterParse.h）。
 CheckContains $out 'installed-shell=abc123def456' 'prints the installed shell id'
@@ -294,6 +310,17 @@ CheckContains $out 'error=' 'empty args -> error= line'
 # インストール済みの古いアップデータからは何も落とせなくなる**（利用者は手で落とす
 # しかなくなる）。
 # ===========================================================================
+# ===========================================================================
+# Get-PluginDir — **インストーラと同じ規則**でなければならない（片方だけ変えると、
+# 入れた場所と読む場所が食い違う）。
+# ===========================================================================
+T "Get-PluginDir appends the plug-in's own folder"
+CheckEq (Get-PluginDir (Join-Path $Work 'Plug-Ins') 'HomeskzIfcImport') (Join-Path (Join-Path $Work 'Plug-Ins') 'HomeskzIfcImport') 'Plug-Ins -> Plug-Ins\<name>'
+
+T "Get-PluginDir does not nest when it is already the plug-in's folder"
+$alreadyThere = Join-Path (Join-Path $Work 'Plug-Ins') 'HomeskzIfcImport'
+CheckEq (Get-PluginDir $alreadyThere 'HomeskzIfcImport') $alreadyThere 'already there -> unchanged'
+
 T 'Get-PluginZipUrl prefers the exact asset name'
 $relExact = $script:FakeStableJson | ConvertFrom-Json
 CheckEq (Get-PluginZipUrl $relExact 'HomeskzIfcImport') 'https://example.test/dl/HomeskzIfcImport.vlb.zip' 'exact match wins'
@@ -348,7 +375,7 @@ $out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImpor
 CheckContains $out 'installed-shell=from-installer' "the installer's lines are passed through"
 CheckContains $out 'ok' 'ok is passed through'
 CheckEq (Test-Path -LiteralPath $env:VW_TEST_MARKER) $true 'the bundled installer actually ran'
-CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.vlb')) $false 'the built-in placement was NOT used'
+CheckEq (Test-Path -LiteralPath (Join-Path (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev') 'HomeskzIfcImportDev.vlb')) $false 'the built-in placement was NOT used'
 
 T 'Invoke-DoInstall passes an installer error through unchanged'
 $VW_PLUGINS_DIR = Join-Path $Work 'plugins-delegated-err'
@@ -368,7 +395,7 @@ New-BuildZipWithInstaller $MuteZip 'HomeskzIfcImportDev' "Write-Output 'somethin
 $script:FakeDownloadZip = $MuteZip
 $out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
 CheckContains $out 'ok' 'the built-in placement reported success'
-CheckEq (Test-Path -LiteralPath (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev.vwpayload')) $true 'a mute installer never counts as done'
+CheckEq (Test-Path -LiteralPath (Join-Path (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev') 'HomeskzIfcImportDev.vwpayload')) $true 'a mute installer never counts as done'
 
 $VW_PLUGINS_DIR = $SavedPluginsDir
 

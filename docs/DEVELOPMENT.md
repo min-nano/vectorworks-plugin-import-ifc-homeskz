@@ -132,6 +132,14 @@ scripts/
                             リリースのアセットとしても公開される。手動インストールの
                             入口でもある（下記「自動アップデートの仕組み」）
   vw-install.ps1            同上の Windows 版
+  vw-uninstall.sh           **取り除く手順**（macOS 用）。zip の直下に同梱され、
+                            **インストール先へ一緒に置かれる**——次のアップデートが
+                            「前の版を、その版自身の知識で取り除く」ために使う
+  vw-uninstall.ps1          同上の Windows 版
+  vw-feedback.sh            **実機フィードバックの投稿**（macOS 用。バンドルに同梱され、
+                            本体が殻越しに起動する）。トークンの保管・PR の特定・
+                            コメントの投稿だけを持つ（下記「実機フィードバックの往復」）
+  vw-feedback.ps1           同上の Windows 版（.vlb の隣に同梱される）
   lint.sh                   ローカルで全 lint（clang / cmake / yaml / shell …）
                             を実行する（CI と同じチェック。--fix で自動修正）
   clang-tidy-sdk.sh         SDK 依存の翻訳単位（src/draw/ ほか）に clang-tidy を
@@ -279,9 +287,10 @@ macOS の `.vwlibrary` バンドルと違い、Windows のプラグインは `<n
   スクリプトのバックエンド（`q-stable` / `q-dev` / `do-install`）も、ネットワーク境界だけを
   差し替えて SDK ／ネットワーク抜きにテストします — macOS 版 `scripts/vw-update.sh` は
   `tests/vw-update.test.sh`（bash＋`curl`/`plutil` スタブ）、**配置を担うインストーラ**
-  `scripts/vw-install.sh` は `tests/vw-install.test.sh`、Windows 版
-  `scripts/vw-update.ps1` / `scripts/vw-install.ps1` は `tests/vw-update.Tests.ps1` /
-  `tests/vw-install.Tests.ps1`（PowerShell 7＋
+  `scripts/vw-install.sh` は `tests/vw-install.test.sh`、**取り除くアンインストーラ**
+  `scripts/vw-uninstall.sh` は `tests/vw-uninstall.test.sh`、Windows 版はそれぞれ
+  `tests/vw-update.Tests.ps1` / `tests/vw-install.Tests.ps1` /
+  `tests/vw-uninstall.Tests.ps1`（PowerShell 7＋
   `Invoke-GH`/`Invoke-WebRequest` スタブ）で、いずれも Linux ランナー上で動きます。
   再起動のコマンド（終了要求 → 終了待ち → 起動し直し）は純粋関数が組み立てるので、生成
   される shell / PowerShell そのものを `tests/UpdaterParseTests.cpp` で検証します。
@@ -893,11 +902,57 @@ PR コメントは**公開**です。そこで**既定で案件が分かるも�
 zip にインストーラが無い＝この仕組みより前のリリースへ当たったときだけ、同梱スクリプト
 自身の予備の配置へ落ちます。
 
-インストーラ側の配置の規則はひとつだけです——**zip の直下にあるものを、そのまま
-`Plug-Ins` へ置く**（除くのはインストーラ自身）。ファイル名を列挙しないので、構成が
-変わっても——ファイルが増えても——利用者は手で入れ直さずに済みます。これがこの設計の
-目的そのもので、テストの中心もそこにあります（`tests/vw-install.test.sh` /
-`tests/vw-install.Tests.ps1`）。
+インストーラ側の配置の規則はひとつだけです——**zip の直下にあるものを、そのまま置く**
+（除くのはインストーラ自身）。ファイル名を列挙しないので、構成が変わっても——ファイルが
+増えても——利用者は手で入れ直さずに済みます。これがこの設計の目的そのもので、テストの
+中心もそこにあります（`tests/vw-install.test.sh` / `tests/vw-install.Tests.ps1`）。
+
+### プラグインは自分のフォルダを 1 つ持つ
+
+置き先は **`Plug-Ins` の直下ではなく、プラグイン名のフォルダ**です:
+
+```
+<Plug-Ins>/HomeskzIfcImport/HomeskzIfcImport.vwlibrary
+<Plug-Ins>/HomeskzIfcImport/HomeskzIfcImport.vwpayload
+<Plug-Ins>/HomeskzIfcImport/vw-uninstall.sh
+```
+
+Vectorworks が `Plug-Ins` のサブフォルダも読みに行くことは実機で確認済みです。こうして
+おくと**そのプラグインのものが 1 か所に閉じる**ので、取り除くのが「フォルダを 1 つ消す」
+で済みます（下記）。
+
+**渡された先が既にそのフォルダなら足しません。** 自動アップデートのとき、プラグインは
+「いま自分が読み込まれたフォルダ」を `VW_PLUGINS_DIR` として渡してきます——サブフォルダ化の
+あとはそれ自身が `<Plug-Ins>/<name>` なので、無条件に足すと更新のたびに `<name>/<name>/…`
+と際限なく深くなります。この規則（`plugin_dir` / `Get-PluginDir`）は**インストーラ・
+アンインストーラ・アップデータの 3 つで同じ**でなければなりません——片方だけ変えると、
+入れた場所と読む／消す場所が食い違います。回帰テストがそれぞれに入っています。
+
+### 入れる前に、前の版をその版自身のアンインストーラで取り除く
+
+リリースには `vw-uninstall.sh` / `vw-uninstall.ps1` も同梱され、**インストール先へ一緒に
+置かれます**（インストーラ自身は置かれません）。インストーラは配置に入る前に、
+**いま入っているフォルダの中にあるアンインストーラ**を一時ディレクトリへ写して
+`--machine --name <名前> --plugins-dir <そのフォルダ>` で叩きます。
+
+置く側が「新しい版」の知識を持つのと**ちょうど対**で、取り除く側は「いま入っている版」の
+知識を持ちます——その版が何を置いたかを正しく知っているのは、その版のアンインストーラ
+だけだからです。見つからなければ何もしません（初回インストール、あるいはこの仕組みより
+前の版）。失敗しても続行します——このあとどのみち上書きするので、取り除けなかったことを
+理由にインストールごと失敗させるのは損です。
+
+順序は **「アーカイブの検査 → 取り除く → 置く」** です。検査を先に済ませないと、
+取り違えた zip で「消しただけで入れられない」状態を作ってしまいます。
+
+アンインストーラが取り除くものの規則もひとつだけ——**そのプラグインのフォルダをまるごと。**
+**ただし消してよい形かどうかを必ず確かめます**（フォルダ名が一致し、かつ中に殻がある
+ときだけ）。ここは本リポジトリで唯一「利用者のディスク上のものを消す」コードなので、
+その安全弁は回帰テストの中心になっています（`tests/vw-uninstall.test.sh` /
+`tests/vw-uninstall.Tests.ps1`）。
+
+Windows では**読み込み中の `.vlb` を削除できない**ので、中身は「退かしてから消す」
+（消せなければ退かしたまま残す）。退いた `*.old-*` は拡張子が `.vlb` ではないので
+Vectorworks は読み込まず、次のインストールが掃きます。
 
 **インストーラは殻の ID（`VW_SHELL_ID`）に入れません**（`CMakeLists.txt` の
 `VW_SHELL_INPUTS`）。殻に入らないものなので当然でもありますが、狙いは「配置の手順を
@@ -1073,6 +1128,9 @@ Windows では実行中の `.vlb` を削除できない（メモリにマップ�
 ./scripts/vw-install.sh                        # 最新の stable を入れる
 ./scripts/vw-install.sh --tag dev-feature-x    # そのプレリリースを入れる
 ./scripts/vw-install.sh --zip <file>           # 手元の zip から入れる
+# 取り除く（リリースのアセットにもある）:
+./scripts/vw-uninstall.sh                      # 既定の場所から取り除く
+./scripts/vw-uninstall.sh --name HomeskzIfcImportDev
 # stable チャンネル（main → HomeskzIfcImport）:
 ./scripts/vw-update.sh stable
 # dev チャンネル — どのブランチのビルドを入れるか選ぶ（→ HomeskzIfcImportDev）:
@@ -1090,6 +1148,7 @@ Windows では実行中の `.vlb` を削除できない（メモリにマップ�
 # 配置だけを行うインストーラ（リリースのアセットにもある）:
 powershell -ExecutionPolicy Bypass -File scripts\vw-install.ps1
 powershell -ExecutionPolicy Bypass -File scripts\vw-install.ps1 -Tag dev-feature-x
+powershell -ExecutionPolicy Bypass -File scripts\vw-uninstall.ps1
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 stable
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 dev
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1          # チャンネルを尋ねる
