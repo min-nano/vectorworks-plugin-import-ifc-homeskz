@@ -13,6 +13,10 @@
 #
 #	    **zip の直下にあるものが、列挙されていなくても全部入ること。**
 #
+#	置き先が **`Plug-Ins` 直下ではなくプラグインのフォルダ**（`<Plug-Ins>/<name>/`）に
+#	なったので、そこも同じ重さで見る——**入れ子にならないこと**（アップデータは「いま
+#	自分が読み込まれたフォルダ」を渡してくる）と、**入れる前に前の版が取り除かれること**。
+#
 #	The script is SOURCED (its `main` is guarded, see the tail of vw-install.sh),
 #	so the real functions run in-process and only their outermost macOS-only
 #	leaves are replaced:
@@ -173,6 +177,9 @@ RUN() { (
 #                                          whole point of this suite
 #   vw-install.sh                          the installer itself (must NOT be
 #                                          installed into Plug-Ins)
+#   vw-uninstall.sh                        the uninstaller — **this one IS installed**
+#                                          (the next update re-runs it; see
+#                                          scripts/vw-uninstall.sh)
 make_tree() { # dir, name
 	local dir="$1" name="$2"
 	mkdir -p "$dir/$name.vwlibrary/Contents"
@@ -180,6 +187,9 @@ make_tree() { # dir, name
 	printf 'payload\n' >"$dir/$name.vwpayload"
 	printf 'a file added by a future layout\n' >"$dir/$name.brand-new"
 	printf '#!/bin/bash\n' >"$dir/vw-install.sh"
+	# 本物のアンインストーラを入れる。**前の版を取り除く段**（remove_installed）は
+	# これを写して走らせるので、偽物では意味が無い。
+	cp "${HERE}/../scripts/vw-uninstall.sh" "$dir/vw-uninstall.sh"
 }
 
 NAME="HomeskzIfcImportDev"
@@ -188,17 +198,43 @@ NAME="HomeskzIfcImportDev"
 # install_tree — **the core promise: everything at the root goes in, listed or
 # not; the installer itself does not.**
 # ===========================================================================
-t "install_tree installs every entry at the root, including unlisted ones"
+t "install_tree installs every entry into the plug-in's own folder"
 src="$WORK/tree-all"
 dest="$WORK/plugins-all"
 mkdir -p "$src"
 make_tree "$src" "$NAME"
 MACHINE=1 PLUGINS_DIR="$dest" RUN install_tree "$src" "$NAME"
 check_eq "$?" "0" "install_tree succeeds"
-check_file "$dest/$NAME.vwlibrary/Contents/Info.plist" "the shell bundle landed"
-check_file "$dest/$NAME.vwpayload" "the payload landed"
-check_file "$dest/$NAME.brand-new" "a file nobody enumerated still landed"
-check_no_file "$dest/vw-install.sh" "the installer itself is not installed"
+check_file "$dest/$NAME/$NAME.vwlibrary/Contents/Info.plist" "the shell bundle landed"
+check_file "$dest/$NAME/$NAME.vwpayload" "the payload landed"
+check_file "$dest/$NAME/$NAME.brand-new" "a file nobody enumerated still landed"
+check_no_file "$dest/$NAME.vwlibrary" "nothing is left directly in Plug-Ins"
+check_no_file "$dest/$NAME/vw-install.sh" "the installer itself is not installed"
+# **アンインストーラは置く。** 次のアップデートが「前の版を、その版自身の知識で
+# 取り除く」ために要る（scripts/vw-uninstall.sh の冒頭）。
+check_file "$dest/$NAME/vw-uninstall.sh" "the uninstaller travels with the install"
+
+# ===========================================================================
+# 入れ子にならないこと — **落とすと更新のたびに深くなる。** 自動アップデートでは
+# プラグインが「いま自分が読み込まれたフォルダ」を渡してくるので、そこは既に
+# <Plug-Ins>/<name> である。
+# ===========================================================================
+t "install_tree does not nest when handed the plug-in's own folder"
+MACHINE=1 PLUGINS_DIR="$dest/$NAME" RUN install_tree "$src" "$NAME"
+check_eq "$?" "0" "install_tree succeeds again"
+check_file "$dest/$NAME/$NAME.vwpayload" "still installed in the same place"
+check_no_file "$dest/$NAME/$NAME" "no <name>/<name> nesting"
+
+# ===========================================================================
+# 前の版を取り除いてから入れること — その版にしか無かったファイルが残らない
+# （残ると、消えたはずのものが Vectorworks から見え続ける）。
+# ===========================================================================
+t "install_tree removes the previously installed release first"
+printf 'only in the old release\n' >"$dest/$NAME/$NAME.only-in-old"
+MACHINE=1 PLUGINS_DIR="$dest/$NAME" RUN install_tree "$src" "$NAME"
+check_eq "$?" "0" "install_tree succeeds"
+check_no_file "$dest/$NAME/$NAME.only-in-old" "the old release's leftovers are gone"
+check_file "$dest/$NAME/$NAME.vwpayload" "the new release is in place"
 
 t "install_tree refuses an archive without the expected shell"
 src="$WORK/tree-wrong"
@@ -207,20 +243,30 @@ mkdir -p "$src"
 make_tree "$src" "SomethingElse"
 out="$(MACHINE=1 PLUGINS_DIR="$dest" RUN install_tree "$src" "$NAME" 2>&1)"
 check_eq "$?" "1" "install_tree fails on a mismatched archive"
-check_no_file "$dest/SomethingElse.vwpayload" "nothing is placed when the check fails"
+check_no_file "$dest/$NAME" "nothing is placed when the check fails"
 
 t "install_tree replaces what is already installed"
 src="$WORK/tree-replace"
 dest="$WORK/plugins-replace"
-mkdir -p "$src" "$dest/$NAME.vwlibrary/Contents"
-printf 'OLD\n' >"$dest/$NAME.vwlibrary/Contents/Info.plist"
-printf 'STALE\n' >"$dest/$NAME.vwlibrary/Contents/Stale.txt"
-printf 'OLD\n' >"$dest/$NAME.vwpayload"
+mkdir -p "$src" "$dest/$NAME/$NAME.vwlibrary/Contents"
+printf 'OLD\n' >"$dest/$NAME/$NAME.vwlibrary/Contents/Info.plist"
+printf 'STALE\n' >"$dest/$NAME/$NAME.vwlibrary/Contents/Stale.txt"
+printf 'OLD\n' >"$dest/$NAME/$NAME.vwpayload"
 make_tree "$src" "$NAME"
 MACHINE=1 PLUGINS_DIR="$dest" RUN install_tree "$src" "$NAME"
-check_eq "$(cat "$dest/$NAME.vwlibrary/Contents/Info.plist")" "plist" "the bundle was replaced"
-check_no_file "$dest/$NAME.vwlibrary/Contents/Stale.txt" "the old bundle's leftovers are gone"
-check_eq "$(cat "$dest/$NAME.vwpayload")" "payload" "the payload was replaced"
+check_eq "$(cat "$dest/$NAME/$NAME.vwlibrary/Contents/Info.plist")" "plist" "the bundle was replaced"
+check_no_file "$dest/$NAME/$NAME.vwlibrary/Contents/Stale.txt" "the old bundle's leftovers are gone"
+check_eq "$(cat "$dest/$NAME/$NAME.vwpayload")" "payload" "the payload was replaced"
+
+# ===========================================================================
+# plugin_dir — **インストーラとアンインストーラで同じ規則**でなければならない
+# （scripts/vw-uninstall.sh の同名関数）。
+# ===========================================================================
+t "plugin_dir appends the plug-in's own folder"
+check_eq "$(RUN plugin_dir "/x/Plug-Ins" "$NAME")" "/x/Plug-Ins/$NAME" "Plug-Ins -> Plug-Ins/<name>"
+
+t "plugin_dir does not nest when it is already the plug-in's folder"
+check_eq "$(RUN plugin_dir "/x/Plug-Ins/$NAME" "$NAME")" "/x/Plug-Ins/$NAME" "already there -> unchanged"
 
 # ===========================================================================
 # guess_name — the plug-in name is read from the archive, so `--name` is
@@ -303,8 +349,8 @@ t "main --machine installs from a zip and prints ok"
 dest="$WORK/plugins-machine"
 out="$(VW_TEST_SHELL_ID="" RUN main --machine --zip "$ZIP" --plugins-dir "$dest")"
 check_eq "$out" "ok" "machine mode prints just ok"
-check_file "$dest/$NAME.vwpayload" "the payload landed"
-check_file "$dest/$NAME.brand-new" "the unlisted file landed"
+check_file "$dest/$NAME/$NAME.vwpayload" "the payload landed"
+check_file "$dest/$NAME/$NAME.brand-new" "the unlisted file landed"
 
 t "main --machine reports the installed shell id when it can be read"
 dest="$WORK/plugins-machine-id"

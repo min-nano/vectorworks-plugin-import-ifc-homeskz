@@ -13,6 +13,10 @@
 #
 #       **zip の直下にあるものが、列挙されていなくても全部入ること。**
 #
+#   置き先が Plug-Ins 直下ではなく**プラグインのフォルダ**（<Plug-Ins>\<name>\）に
+#   なったので、そこも同じ重さで見る——入れ子にならないこと、そして入れる前に前の版が
+#   取り除かれること。
+#
 #   The script is DOT-SOURCEd (its dispatch is guarded, see its tail) so the real
 #   functions run in-process. Only the GitHub REST boundary needs faking; the
 #   placement itself (Copy-Item / Rename-Item / the rename-aside swap) runs for
@@ -103,6 +107,10 @@ function New-Tree([string] $dir, [string] $name) {
     Set-Content -LiteralPath (Join-Path $dir "$name.vwpayload") -Value 'payload' -NoNewline
     Set-Content -LiteralPath (Join-Path $dir "$name.brand-new") -Value 'future' -NoNewline
     Set-Content -LiteralPath (Join-Path $dir 'vw-install.ps1') -Value '# installer' -NoNewline
+    # 本物のアンインストーラを入れる。**前の版を取り除く段**（Remove-Installed）は
+    # これを写して走らせるので、偽物では意味が無い。
+    Copy-Item -LiteralPath (Join-Path $Here '..' 'scripts' 'vw-uninstall.ps1') `
+        -Destination (Join-Path $dir 'vw-uninstall.ps1') -Force
 }
 
 $Name = 'HomeskzIfcImportDev'
@@ -111,31 +119,64 @@ $Name = 'HomeskzIfcImportDev'
 # Install-Tree — **the core promise: everything at the root goes in, listed or
 # not; the installer itself does not.**
 # ===========================================================================
-T 'Install-Tree installs every entry at the root, including unlisted ones'
+$Tmp = Join-Path $Work 'tmp'
+New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+
+T "Install-Tree installs every entry into the plug-in's own folder"
 $src = Join-Path $Work 'tree-all'
 New-Tree $src $Name
 $script:PluginsDir = Join-Path $Work 'plugins-all'
-CheckEq (Install-Tree $src $Name) $true 'Install-Tree succeeds'
-CheckPath (Join-Path $script:PluginsDir "$Name.vlb") 'the shell landed'
-CheckPath (Join-Path $script:PluginsDir "$Name.vwpayload") 'the payload landed'
-CheckPath (Join-Path $script:PluginsDir "$Name.brand-new") 'a file nobody enumerated still landed'
-CheckNoPath (Join-Path $script:PluginsDir 'vw-install.ps1') 'the installer itself is not installed'
+$own = Join-Path $script:PluginsDir $Name
+CheckEq (Install-Tree $src $Name $Tmp) $true 'Install-Tree succeeds'
+CheckPath (Join-Path $own "$Name.vlb") 'the shell landed'
+CheckPath (Join-Path $own "$Name.vwpayload") 'the payload landed'
+CheckPath (Join-Path $own "$Name.brand-new") 'a file nobody enumerated still landed'
+CheckNoPath (Join-Path $script:PluginsDir "$Name.vlb") 'nothing is left directly in Plug-Ins'
+CheckNoPath (Join-Path $own 'vw-install.ps1') 'the installer itself is not installed'
+# **アンインストーラは置く。** 次のアップデートが「前の版を、その版自身の知識で
+# 取り除く」ために要る（scripts/vw-uninstall.ps1 の冒頭）。
+CheckPath (Join-Path $own 'vw-uninstall.ps1') 'the uninstaller travels with the install'
+
+T "Install-Tree does not nest when handed the plug-in's own folder"
+# 自動アップデートではプラグインが「いま自分が読み込まれたフォルダ」を渡してくる。
+$script:PluginsDir = $own
+CheckEq (Install-Tree $src $Name $Tmp) $true 'Install-Tree succeeds again'
+CheckPath (Join-Path $own "$Name.vwpayload") 'still installed in the same place'
+CheckNoPath (Join-Path $own $Name) 'no <name>\<name> nesting'
+
+T 'Install-Tree removes the previously installed release first'
+Set-Content -LiteralPath (Join-Path $own "$Name.only-in-old") -Value 'old' -NoNewline
+CheckEq (Install-Tree $src $Name $Tmp) $true 'Install-Tree succeeds'
+CheckNoPath (Join-Path $own "$Name.only-in-old") "the old release's leftovers are gone"
+CheckPath (Join-Path $own "$Name.vwpayload") 'the new release is in place'
 
 T 'Install-Tree refuses an archive without the expected shell'
 $src = Join-Path $Work 'tree-wrong'
 New-Tree $src 'SomethingElse'
 $script:PluginsDir = Join-Path $Work 'plugins-wrong'
-CheckEq (Install-Tree $src $Name) $false 'Install-Tree fails on a mismatched archive'
-CheckNoPath (Join-Path $script:PluginsDir 'SomethingElse.vwpayload') 'nothing is placed when the check fails'
+CheckEq (Install-Tree $src $Name $Tmp) $false 'Install-Tree fails on a mismatched archive'
+CheckNoPath (Join-Path $script:PluginsDir $Name) 'nothing is placed when the check fails'
 
 T 'Install-Tree replaces what is already installed'
 $src = Join-Path $Work 'tree-replace'
 New-Tree $src $Name
 $script:PluginsDir = Join-Path $Work 'plugins-replace'
-New-Item -ItemType Directory -Force -Path $script:PluginsDir | Out-Null
-Set-Content -LiteralPath (Join-Path $script:PluginsDir "$Name.vlb") -Value 'OLD' -NoNewline
-CheckEq (Install-Tree $src $Name) $true 'Install-Tree succeeds over an existing install'
-CheckEq (Get-Content -LiteralPath (Join-Path $script:PluginsDir "$Name.vlb") -Raw) 'dll' 'the shell was replaced'
+$own = Join-Path $script:PluginsDir $Name
+New-Item -ItemType Directory -Force -Path $own | Out-Null
+Set-Content -LiteralPath (Join-Path $own "$Name.vlb") -Value 'OLD' -NoNewline
+CheckEq (Install-Tree $src $Name $Tmp) $true 'Install-Tree succeeds over an existing install'
+CheckEq (Get-Content -LiteralPath (Join-Path $own "$Name.vlb") -Raw) 'dll' 'the shell was replaced'
+
+# ===========================================================================
+# Get-PluginDir — **アンインストーラと同じ規則**でなければならない
+# （scripts/vw-uninstall.ps1 の同名関数）。
+# ===========================================================================
+T "Get-PluginDir appends the plug-in's own folder"
+CheckEq (Get-PluginDir (Join-Path 'C:\x' 'Plug-Ins') $Name) (Join-Path (Join-Path 'C:\x' 'Plug-Ins') $Name) 'Plug-Ins -> Plug-Ins\<name>'
+
+T "Get-PluginDir does not nest when it is already the plug-in's folder"
+$already = Join-Path (Join-Path 'C:\x' 'Plug-Ins') $Name
+CheckEq (Get-PluginDir $already $Name) $already 'already there -> unchanged'
 
 # ===========================================================================
 # Get-PluginName — the plug-in name is read from the archive, so -Name is
@@ -156,10 +197,11 @@ T 'Get-InstalledShellId is empty when nothing is installed'
 $script:PluginsDir = Join-Path $Work 'nowhere'
 CheckEq (Get-InstalledShellId $Name) '' 'absent stamp -> empty'
 
-T 'Get-InstalledShellId reads the sidecar stamp'
+T 'Get-InstalledShellId reads the sidecar stamp from the plug-in folder'
 $script:PluginsDir = Join-Path $Work 'plugins-stamp'
-New-Item -ItemType Directory -Force -Path $script:PluginsDir | Out-Null
-Set-Content -LiteralPath (Join-Path $script:PluginsDir "$Name.shell-id") -Value "abc123def456`n"
+$own = Join-Path $script:PluginsDir $Name
+New-Item -ItemType Directory -Force -Path $own | Out-Null
+Set-Content -LiteralPath (Join-Path $own "$Name.shell-id") -Value "abc123def456`n"
 CheckEq (Get-InstalledShellId $Name) 'abc123def456' 'trimmed sidecar value'
 
 # ===========================================================================

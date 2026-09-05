@@ -112,6 +112,14 @@ SDK と実際の図面が要るためで、代わりに (a) SDK から切り離�
    止めるためにあります（`tests/vw-install.test.sh` / `tests/vw-install.Tests.ps1`）。
    アップデータ側には**委譲そのもの**のテストもあります（zip に入っていたインストーラが
    走ったか・その出力が素通しされるか・黙っているインストーラを成功と取り違えないか）。
+7. **`UninstallerScriptTests` / `UninstallerScriptTestsPs`** … **取り除く**
+   `scripts/vw-uninstall.sh` / `scripts/vw-uninstall.ps1`。ここは本リポジトリで唯一
+   「利用者のディスク上のものを消す」コードなので、中心の検査は**削除の安全弁**です——
+   フォルダ名が一致し、かつ中に殻があるときだけ消し、`Plug-Ins` そのものや無関係な
+   フォルダを名指しされても消さないこと。あわせて「入っていなければ成功」（アップデートの
+   入口で無条件に叩ける）も押さえます（`tests/vw-uninstall.test.sh` /
+   `tests/vw-uninstall.Tests.ps1`）。**スタブはありません**——削除そのものが対象なので、
+   本物が temp ディレクトリに対して走ります。
 
 以降の節（`IUpdaterHost` によるフロー全体のテスト・スクリプトのテスト・残る部分）は
 すべてこのアップデータ系統の話です。
@@ -229,12 +237,13 @@ ctest --test-dir build-tests --output-on-failure
 ## スクリプトのテスト（ソース＋スタブ方式）
 
 「更新の実体」を担う `scripts/vw-update.sh`（macOS）と `scripts/vw-update.ps1`
-（Windows。GitHub API 取得・zip 展開・委譲）、および**配置そのもの**を担う
-`scripts/vw-install.sh` / `scripts/vw-install.ps1` も、C++ 側と同じ発想で
-SDK ／ネットワーク抜きに単体テストします（`tests/vw-update.test.sh` /
-`tests/vw-update.Tests.ps1` / `tests/vw-install.test.sh` / `tests/vw-install.Tests.ps1`）。
-Pester や bats などの外部フレームワークは使わず、`TestFramework.h` と同じ**依存ゼロの
-極小ハーネス**を各ファイルに同梱しています。
+（Windows。GitHub API 取得・zip 展開・委譲）、**配置そのもの**を担う
+`scripts/vw-install.{sh,ps1}`、そして**取り除く** `scripts/vw-uninstall.{sh,ps1}` も、
+C++ 側と同じ発想で SDK ／ネットワーク抜きに単体テストします（`tests/vw-update.test.sh` /
+`tests/vw-update.Tests.ps1` / `tests/vw-install.test.sh` / `tests/vw-install.Tests.ps1` /
+`tests/vw-uninstall.test.sh` / `tests/vw-uninstall.Tests.ps1`）。Pester や bats などの
+外部フレームワークは使わず、`TestFramework.h` と同じ**依存ゼロの極小ハーネス**を各
+ファイルに同梱しています。
 
 いずれも「実行（プラグイン・手動）ではディスパッチが走り、テストでは `source`
 （dot-source）して個々の関数を直接呼ぶ」という**シーム**をスクリプト末尾に用意して
@@ -289,6 +298,9 @@ if ($MyInvocation.InvocationName -ne '.') {
 * **インストーラ自身は `Plug-Ins` へ置かないこと**。
 * **知らないオプションで落ちないこと**（新しいアップデータが古い zip の中のインストーラを
   呼ぶ向きが起こりうるため）。
+* **プラグインのフォルダに入り、入れ子にならないこと**（アップデータは「いま自分が
+  読み込まれたフォルダ」を渡してくるので、無条件に足すと更新のたびに深くなる）。
+* **入れる前に前の版が取り除かれること**（前の版にしか無かったファイルが残らない）。
 更新後の**再起動**はスクリプトの仕事ではありません。終了要求 → 終了待ち → 起動し直しを
 行う 1 行のコマンドは `src/UpdaterParse.h` が組み立てるので（同梱スクリプトの版ズレを避ける
 ため。理由は README「再起動を SDK に任せない理由」）、テストも C++ 側

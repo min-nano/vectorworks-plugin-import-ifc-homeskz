@@ -317,7 +317,8 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtShearWall.cpp
 		scripts/vw-update.sh
 		scripts/vw-update.ps1)
-	# **`scripts/vw-install.*`（インストーラ）はここに入れない。** あれは殻に入らず、
+	# **`scripts/vw-install.*`（インストーラ）と `scripts/vw-uninstall.*`
+	# （アンインストーラ）はここに入れない。** あれらは殻に入らず、
 	# リリースの zip とアセットとして配られるもので、走るのは「落としてきた新しい版」の
 	# ほう（scripts/vw-install.sh の冒頭）。ここへ足すと、配置の手順を直しただけで
 	# 利用者に Vectorworks の再起動を強いることになる——それは、この仕組みが無くそうと
