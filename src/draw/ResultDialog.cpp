@@ -42,6 +42,7 @@
 
 #include "PluginPrefix.h"
 #include "draw/ResultDialog.h"
+#include "draw/DrawUtil.h"
 
 #include <deque>
 #include <string>
@@ -62,27 +63,6 @@ namespace HomeskzIfcImport::draw
 		// 折り返さずに読める幅を採る。
 		constexpr short kLogWidthChars = 92;
 		constexpr short kLogHeightLines = 18;
-
-		// 本文を改行で切る（末尾の空行は落とす）。
-		std::vector<std::string> splitLines(const std::string& text)
-		{
-			std::vector<std::string> lines;
-			std::string::size_type start = 0;
-			while (start <= text.size())
-			{
-				const std::string::size_type end = text.find('\n', start);
-				if (end == std::string::npos)
-				{
-					lines.push_back(text.substr(start));
-					break;
-				}
-				lines.push_back(text.substr(start, end - start));
-				start = end + 1;
-			}
-			while (!lines.empty() && lines.back().empty())
-				lines.pop_back();
-			return lines;
-		}
 
 		// ダイアログの置き場所（作り直すときに引き継ぐ）。known=false なら VW に任せる。
 		struct DialogPlacement
@@ -237,7 +217,7 @@ namespace HomeskzIfcImport::draw
 
 	bool showImportResult(const std::string& title, const std::string& body, const std::string& log)
 	{
-		const std::vector<std::string> lines = splitLines(body);
+		const std::vector<std::string> lines = SplitLines(body);
 		if (lines.empty())
 			return false;
 

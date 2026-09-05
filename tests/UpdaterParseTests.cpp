@@ -531,6 +531,54 @@ TEST(dev_switch_candidates_empty_when_no_builds)
 }
 
 // ---------------------------------------------------------------------------
+// DevBuildBranch / FindDevBuildForBranch — pick the SAME branch's next build.
+// 実機フィードバックの往復（docs/DEV-NOTES.md M23）が、修正版のビルドを待つときに使う。
+// ---------------------------------------------------------------------------
+
+TEST(dev_build_branch_reads_the_ci_title)
+{
+	// CI が付ける題は "Dev: <branch> (<short sha>)"（.github/workflows/build.yml）。
+	CHECK_EQ(DevBuildBranch("Dev: claude/feedback (a1b2c3d)"), "claude/feedback");
+	// ブランチ名に丸括弧やスペースが入っても、**最後の** " (" で切る。
+	CHECK_EQ(DevBuildBranch("Dev: feature/x (2) (a1b2c3d)"), "feature/x (2)");
+}
+
+TEST(dev_build_branch_falls_back_to_the_name)
+{
+	// 題の形が違う（古いリリース・題を変えた）ときは名前そのもの。**外して黙るより、
+	// そのまま突き合わせて外れるほうが分かりやすい。**
+	CHECK_EQ(DevBuildBranch("feature/x"), "feature/x");
+	CHECK_EQ(DevBuildBranch("Dev: "), "Dev: ");
+	CHECK_EQ(DevBuildBranch(""), "");
+}
+
+TEST(find_dev_build_for_branch_picks_only_that_branch)
+{
+	const std::string out = "installed=c0ffee1\n"
+							"build\tdeadbee\tDev: feature/y (deadbee)\thttps://ex.com/b.zip\n"
+							"build\tfeed123\tDev: feature/x (feed123)\thttps://ex.com/c.zip\n";
+	const std::vector<DevBuild> builds = DevSwitchCandidates(out, "c0ffee1");
+	const int index = FindDevBuildForBranch(builds, "feature/x");
+	CHECK_EQ(index, 1);
+	if (index >= 0)
+		CHECK_EQ(builds[static_cast<std::size_t>(index)].commit, "feed123");
+
+	// **他のブランチのビルドへ乗り換えない**（絞らないとここが -1 にならない）。
+	CHECK_EQ(FindDevBuildForBranch(builds, "no-such-branch"), -1);
+	// ブランチが分からないとき（ローカルビルド）は何も選ばない。
+	CHECK_EQ(FindDevBuildForBranch(builds, ""), -1);
+}
+
+TEST(find_dev_build_for_branch_takes_the_first_match)
+{
+	// GitHub は新しい順に返すので、同じブランチが 2 つ並んだら先頭が新しい。
+	const std::string out = "build\tnewer11\tDev: feature/x (newer11)\thttps://ex.com/n.zip\n"
+							"build\tolder22\tDev: feature/x (older22)\thttps://ex.com/o.zip\n";
+	const std::vector<DevBuild> builds = DevSwitchCandidates(out, "running");
+	CHECK_EQ(FindDevBuildForBranch(builds, "feature/x"), 0);
+}
+
+// ---------------------------------------------------------------------------
 // ResolveDevSelection — map a picker index back to a candidate.
 // ---------------------------------------------------------------------------
 

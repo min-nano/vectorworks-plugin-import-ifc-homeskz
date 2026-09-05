@@ -143,6 +143,12 @@ namespace HomeskzIfcImport::draw
 	// （draw/Sheet・draw/Section）が同じ 4 行を各々持っていた。
 	void AppendLine(std::string* sink, const std::string& text);
 
+	// 本文を改行で切って 1 行ずつにする（末尾の空行は落とす）。**ダイアログの本文は
+	// 1 行 1 コントロール**で組むので、結果ダイアログ（draw/ResultDialog）と
+	// フィードバックのダイアログ（draw/Feedback）がこれを共有する——VWStaticTextCtrl は
+	// 埋め込んだ改行がそのまま行になる保証を持たないため、切るのは呼ぶ側の仕事になる。
+	std::vector<std::string> SplitLines(const std::string& text);
+
 	// 「用紙・マスに収まったか」を測って確かめるときの遊び（用紙 mm）。線の太さのぶん外形が
 	// わずかに広がるので、ぴったりの図を「はみ出した」と数えない。伏図（draw/Sheet）と
 	// 軸組図（draw/Section）が同じ値で判定する（値がズレると片方だけ「収まらなかった」と

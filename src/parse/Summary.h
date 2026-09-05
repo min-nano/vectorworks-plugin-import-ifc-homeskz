@@ -101,6 +101,29 @@ namespace HomeskzIfcImport::parse
 	// より優先する（中止したのに「問題あり」と言われると、原因を探しに行ってしまう）。
 	ImportOutcome importOutcome(const core::Document& document, const core::DrawCounts& counts);
 
+	// **要素ごとの内訳（表そのもの）。** ラベル・助数詞・命令数・描けた数を、Summary.cpp の
+	// kElements 表の順で返す。formatLogResult が文章に組み上げているのと同じ数字を、
+	// **整形せずに**渡す口である。
+	//
+	// **なぜ生の数字で要るか**: 実機フィードバック（parse/Feedback）は周回どうしで内訳を
+	// 突き合わせて「前回から何が増えたか」を出す。整形済みの文章から数字を読み戻す形に
+	// すると、文言を直した瞬間に差分が壊れる——表を読むのは表からにする。
+	struct ElementRow
+	{
+		std::string label;		  // 表示名（例: "横架材"）
+		std::string unit;		  // 助数詞（例: "本"）
+		std::size_t commands = 0; // 解析が出した命令の数
+		std::size_t placed = 0;	  // 描画が実際に描けた数
+	};
+
+	std::vector<ElementRow> elementRows(const core::Document& document,
+										const core::DrawCounts& counts);
+
+	// 結末を表す短い日本語（"成功" / "問題あり" …）。**診断ログの結果行と実機
+	// フィードバックの見出しが同じ語を使う**ための 1 か所（言い方が 2 つに割れると、
+	// 同じ取り込みの報告が場所によって違う結末を名乗る）。
+	const char* importStatusWord(ImportStatus status);
+
 	// **インポート完了ダイアログの本文**（M19）。読むのは「どのファイルを・成功したのか・
 	// 問題はあったのか」の 3 つだけで済むよう短く保つ——**件数も所要時間もログにある**ので
 	// ここには出さない（描けた数はうまくいっているときには読む必要が無く、うまくいって

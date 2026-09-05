@@ -168,10 +168,15 @@ namespace HomeskzIfcImport::UpdaterParse
 
 	// macOS: from the loaded binary path
 	//   .../<name>.vwlibrary/Contents/MacOS/<name>
-	// derive the bundled script
-	//   .../<name>.vwlibrary/Contents/Resources/vw-update.sh
+	// derive a bundled script
+	//   .../<name>.vwlibrary/Contents/Resources/<baseName>.sh
 	// Returns "" if the "/Contents/MacOS/" marker is not present.
-	inline std::string MacScriptPathFromBinary(const std::string& binaryPath)
+	//
+	// baseName は**拡張子を除いた名前**（"vw-update" / "vw-feedback"）。同梱スクリプトが
+	// 2 本になった（M23）ので名前を引数に取るが、既定はアップデータのまま——呼び出し側の
+	// ほとんどはそれで、ここを既定なしにすると綴りが 2 か所に散る。
+	inline std::string MacScriptPathFromBinary(const std::string& binaryPath,
+											   const std::string& baseName = "vw-update")
 	{
 		const std::string marker = "/Contents/MacOS/";
 		std::string::size_type const at = binaryPath.rfind(marker);
@@ -180,7 +185,7 @@ namespace HomeskzIfcImport::UpdaterParse
 
 		// substr up to and including "/Contents/" (10 chars), then Resources/…
 		std::string const contents = binaryPath.substr(0, at + std::string("/Contents/").size());
-		return contents + "Resources/vw-update.sh";
+		return contents + "Resources/" + baseName + ".sh";
 	}
 
 	// macOS: from the loaded binary path
@@ -232,12 +237,14 @@ namespace HomeskzIfcImport::UpdaterParse
 		return modulePath.substr(0, slash);
 	}
 
-	// Windows: the bundled updater script sits next to the module.
-	inline std::string WinScriptPathFromDir(const std::string& moduleDir)
+	// Windows: the bundled scripts sit next to the module. baseName は macOS 側と同じく
+	// 拡張子を除いた名前で、こちらは .ps1 が付く。
+	inline std::string WinScriptPathFromDir(const std::string& moduleDir,
+											const std::string& baseName = "vw-update")
 	{
 		if (moduleDir.empty())
 			return "";
-		return moduleDir + "\\vw-update.ps1";
+		return moduleDir + "\\" + baseName + ".ps1";
 	}
 
 	// ---------------------------------------------------------------------
@@ -393,6 +400,44 @@ namespace HomeskzIfcImport::UpdaterParse
 	// (as returned by DevSwitchCandidates). Entry 0 is "keep the current build",
 	// so a selection <= 0 -> -1. A selection past the last candidate is also
 	// treated as "keep current" (a safeguard) -> -1. Otherwise -> selection - 1.
+	// **dev プレリリースの表示名からブランチを取り出す。** CI が付ける題は
+	// "Dev: <branch> (<short sha>)"（.github/workflows/build.yml の
+	// `--title "Dev: ${branch} (${short})"`）なので、その形なら中身を返し、違う形なら
+	// 名前そのものを返す（古い形・題を変えたときに黙って外さないための保険）。
+	//
+	// **なぜ題から取るのか**: q-dev の 1 行が持つのは commit / name / url の 3 つだけで、
+	// タグ（dev-<slug>）は入っていない。列を足せば済む話ではない——このスクリプトは
+	// **インストール済みの（＝古い）**ものが走ることがあり、新旧で行の形が食い違うと
+	// アップデートの経路そのものが途切れる（scripts/vw-update.sh 冒頭）。
+	inline std::string DevBuildBranch(const std::string& name)
+	{
+		const std::string prefix = "Dev: ";
+		if (!name.starts_with(prefix))
+			return name;
+		const std::string::size_type open = name.rfind(" (");
+		if (open == std::string::npos || open <= prefix.size())
+			return name;
+		return name.substr(prefix.size(), open - prefix.size());
+	}
+
+	// **同じブランチの、いま動いているものとは違うビルド**を選ぶ（実機フィードバックの
+	// 往復。docs/DEV-NOTES.md M23）。見つかった添字、無ければ -1。
+	//
+	// **ブランチで絞るのが肝。** 絞らずに「自分と違う dev ビルド」を取ると、他人が別の
+	// ブランチを push しただけで、まったく関係の無いビルドへ乗り換えてしまう。候補が
+	// 複数あるときは先頭（GitHub が返すのは新しい順）を採る。
+	inline int FindDevBuildForBranch(const std::vector<DevBuild>& builds, const std::string& branch)
+	{
+		if (branch.empty())
+			return -1;
+		for (std::size_t i = 0; i < builds.size(); ++i)
+		{
+			if (DevBuildBranch(builds[i].name) == branch)
+				return static_cast<int>(i);
+		}
+		return -1;
+	}
+
 	inline int ResolveDevSelection(short selection, std::size_t candidateCount)
 	{
 		if (selection <= 0)

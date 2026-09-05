@@ -307,7 +307,7 @@ jobs:
           echo "Build stamp: $(cat "$d/$name.commit")"
           echo "Shell id: $(cat "$d/$name.shell-id")"
 
-      # Zip each plug-in's flat files (module + resource + build stamp + updater)
+      # Zip each plug-in's flat files (module + resource + build stamp + scripts)
       # into "<name>.vlb.zip". These are both the CI artifacts and the release
       # assets the Windows updater (vw-update.ps1) fetches.
       - name: Package module
@@ -319,6 +319,7 @@ jobs:
           # $name.vwpayload が**本体**（殻が自分で読み込むモジュール）。片方だけでは
           # 動かないので必ず一緒に配る（src/PayloadAbi.h）。$name.shell-id は
           # 「殻まで変わったか」をアップデータが判断するための控え。
+          # vw-feedback.ps1 は**実機フィードバックの投稿**（docs/DEV-NOTES.md M23）。
           # scripts/vw-install.ps1 が**インストーラ**。zip の直下に同梱しておくと、
           # インストール済みの（＝古い）vw-update.ps1 が配置をこちらへ委ねるので、
           # ファイル構成が変わっても利用者は手で入れ直さずに済む
@@ -332,6 +333,7 @@ jobs:
             "build/Release/$name.commit",
             "build/Release/$name.shell-id",
             "build/Release/vw-update.ps1",
+            "build/Release/vw-feedback.ps1",
             "scripts/vw-install.ps1",
             "scripts/vw-uninstall.ps1"
           ) | Where-Object { Test-Path $_ }

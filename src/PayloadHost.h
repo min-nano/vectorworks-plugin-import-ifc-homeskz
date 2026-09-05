@@ -189,9 +189,15 @@ namespace HomeskzIfcImport
 			return fStamp;
 		}
 
-		// 取り込みコマンドを走らせる（ファイル選択から結果ダイアログまで本体が行う）。
-		// 呼べなかったときだけ false。
-		bool runImport(std::string& error);
+		// 取り込みコマンドを**1 周ぶん**走らせる（ファイル選択から結果ダイアログまで
+		// 本体が行う）。呼べなかったときだけ false。
+		//
+		// againOut に true が入って戻ったら、**呼び出し側はこの Payload を手放してから
+		// もう一度呼ぶ**（実機フィードバックの往復。src/Extensions/ExtMenu.cpp）。手放す
+		// ことで、新しく入った本体がその場で読み直される——降ろせるのは本体のコードが
+		// スタックに 1 つも無いときだけなので、この形でなければホットリロードは成立しない
+		// （src/PayloadSession.h）。
+		bool runImport(bool& againOut, std::string& error);
 
 		// PIO のリセットを本体に描かせる。outEvent には EObjectEvent の値が入る。
 		bool recalculate(unsigned int kind, void* objectHandle, int& outEvent, std::string& error);

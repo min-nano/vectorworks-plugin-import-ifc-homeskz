@@ -17,6 +17,8 @@
 #include "PayloadHostHolder.h"
 
 #include <cstring>
+#include <string>
+#include <vector>
 
 using namespace HomeskzIfcImport::payload;
 
@@ -34,6 +36,27 @@ namespace
 
 	// 「殻の記憶域」の代わり。ここを塗り潰しても本体が無事なら、写せている。
 	int gCallbackTarget = 0;
+
+	// 殻が貸す体のスクリプト実行。呼ばれた引数を控え、決め打ちの出力を返す。
+	// **戻す文字列は「殻が所有し、次の呼び出しまで有効」**という契約なので、
+	// 実物と同じく static に置く（src/PayloadAbi.h）。
+	std::string gScriptCall;
+	std::string gScriptReply = "ok";
+	int gScriptStatus = kVwPayloadOk;
+
+	int FakeRunScript(const char* scriptName, const char* const* args, unsigned int argc,
+					  const char** out)
+	{
+		static std::string sOut;
+		gScriptCall = (scriptName != nullptr) ? scriptName : "";
+		for (unsigned int i = 0; i < argc; ++i)
+			gScriptCall +=
+				std::string(" ") + ((args != nullptr && args[i] != nullptr) ? args[i] : "?");
+		sOut = gScriptReply;
+		if (out != nullptr)
+			*out = sOut.c_str();
+		return gScriptStatus;
+	}
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -122,6 +145,78 @@ TEST(a_failed_adopt_forgets_what_was_there_before)
 	CHECK_EQ(holder.adopt(&good), static_cast<int>(kVwPayloadOk));
 	CHECK_EQ(holder.adopt(nullptr), static_cast<int>(kVwPayloadErrHost));
 	CHECK(!holder.valid());
+}
+
+// ---------------------------------------------------------------------------
+// 殻から借りるもの（M23）。**文字列は写す・関数ポインタは素通し**が守られているか。
+// ---------------------------------------------------------------------------
+
+TEST(adopt_copies_the_shell_id_out_of_the_callers_storage)
+{
+	HostHolder holder;
+	{
+		// **殻の ID も、構造体と同じくローカルに置かれうる。** 構造体を写しただけでは
+		// 中の const char* は相手の記憶域を指したままなので、文字列まで写せているかを
+		// 「渡した器を塗り潰してから読む」ことで確かめる。
+		std::string shellId = "abc123";
+		VwPayloadHost host = MakeHost(&gCallbackTarget);
+		host.shellId = shellId.c_str();
+		CHECK_EQ(holder.adopt(&host), static_cast<int>(kVwPayloadOk));
+		shellId.assign(shellId.size(), 'x');
+		std::memset(&host, 0xAB, sizeof(host));
+	}
+	CHECK_EQ(holder.shellId(), std::string("abc123"));
+}
+
+TEST(a_host_without_a_shell_id_is_accepted)
+{
+	// 古い殻（ID を貸さない）でも本体は動く——フィードバックの往復だけが使えなくなる。
+	HostHolder holder;
+	VwPayloadHost host = MakeHost(&gCallbackTarget);
+	CHECK_EQ(holder.adopt(&host), static_cast<int>(kVwPayloadOk));
+	CHECK(holder.shellId().empty());
+	CHECK(!holder.canRunScripts());
+	std::string out = "not touched";
+	CHECK(!holder.runScript("vw-feedback", {"token-status"}, out));
+	CHECK(out.empty()); // 失敗しても出力は空にして返す（呼び出し側が古い値を読まない）
+}
+
+TEST(run_script_passes_the_arguments_and_copies_the_reply)
+{
+	HostHolder holder;
+	VwPayloadHost host = MakeHost(&gCallbackTarget);
+	host.runBundledScript = &FakeRunScript;
+	CHECK_EQ(holder.adopt(&host), static_cast<int>(kVwPayloadOk));
+	CHECK(holder.canRunScripts());
+
+	gScriptReply = "source=keychain\nok=yes";
+	gScriptStatus = kVwPayloadOk;
+	std::string out;
+	CHECK(holder.runScript("vw-feedback", {"post", "o/r", "12"}, out));
+	CHECK_EQ(gScriptCall, std::string("vw-feedback post o/r 12"));
+	CHECK_EQ(out, std::string("source=keychain\nok=yes"));
+
+	// 引数が無くても呼べる（nullptr を渡す形になる）。
+	CHECK(holder.runScript("vw-update", {}, out));
+	CHECK_EQ(gScriptCall, std::string("vw-update"));
+
+	// 殻が失敗を返したら false（出力は使わせない）。
+	gScriptStatus = kVwPayloadErrHost;
+	CHECK(!holder.runScript("vw-feedback", {"token-status"}, out));
+	CHECK(out.empty());
+	gScriptStatus = kVwPayloadOk;
+}
+
+TEST(forget_drops_the_shell_id_and_the_script_hook)
+{
+	HostHolder holder;
+	VwPayloadHost host = MakeHost(&gCallbackTarget);
+	host.shellId = "abc123";
+	host.runBundledScript = &FakeRunScript;
+	CHECK_EQ(holder.adopt(&host), static_cast<int>(kVwPayloadOk));
+	holder.forget();
+	CHECK(holder.shellId().empty());
+	CHECK(!holder.canRunScripts());
 }
 
 // ---------------------------------------------------------------------------
