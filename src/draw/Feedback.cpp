@@ -556,7 +556,6 @@ namespace HomeskzIfcImport::draw
 		const bool accepted = dialog.RunDialogLayout("") == VWFC::VWUI::kDialogButton_Ok;
 		if (!dialog.Shown())
 			return false; // ダイアログを組めなかった → 呼び出し側が結果ダイアログへ落とす
-		shownResult = true;
 		if (!accepted)
 		{
 			// 「送らない」。**記憶は消す**——次の取り込みがひとりでに自動周回を始めると
@@ -611,6 +610,13 @@ namespace HomeskzIfcImport::draw
 			gSDK->AlertInform("フィードバックを投稿できませんでした。", error.c_str(), false);
 			return false;
 		}
+
+		// **ここで初めて「結果を見せ切った」ことにする。** 投稿できていれば内訳もログも
+		// PR にあるので、上のダイアログで足りている。逆に**送れなかった／送らなかった
+		// ときは、呼び出し側にいつもの結果ダイアログを出させる**——そちらにしか
+		// 「ログを表示」が無く、困ったときに貼るものへ手が届かなくなるため
+		// （draw/ResultDialog.h）。
+		shownResult = true;
 
 		// **投稿できたところで記憶を進める。** 投稿できていない周を数えると、次の
 		// コメントが「前の周からの変化」を持たないまま round だけ進む。
