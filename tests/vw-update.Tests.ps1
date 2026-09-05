@@ -72,7 +72,18 @@ $env:VW_PLUGINS_DIR = $PluginsDir
 # the harness; each function under test keeps its own try/catch.
 # ---------------------------------------------------------------------------
 . $Script
-$ErrorActionPreference = 'Continue'
+
+# **エラーの扱いはローカルと CI で変える。** これは「CI では緩めない」という
+# VW_REQUIRE_SCRIPT_TESTS の方針（上記 $RequireTools）をそのまま延長したもの。
+#
+#   * ローカル（Continue）… 落ちた文があっても最後まで走り、失敗を一覧できる。
+#   * CI（Stop）………………… 想定外のエラーでその場で終了し、exit 1 になる。
+#
+# Stop が要る理由: Continue だと**落ちた文の CheckXxx が呼ばれないまま**次へ進むので、
+# 検査が空振りしたのに「PASS: all N checks」と出る。実際に `Join-Path 'C:\x' …`
+# （Linux の pwsh に C: ドライブは無い）で 2 件が黙って抜け、N だけが減っていた。
+# ローカルを Continue のままにしてあるのは、直すときは失敗を一覧できたほうが速いから。
+$ErrorActionPreference = if ($RequireTools) { 'Stop' } else { 'Continue' }
 
 # ---------------------------------------------------------------------------
 # Tiny assertion harness, styled after tests/TestFramework.h / vw-update.test.sh.

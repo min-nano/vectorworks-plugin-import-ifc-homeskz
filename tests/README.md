@@ -275,13 +275,21 @@ if ($MyInvocation.InvocationName -ne '.') {
 | `download` | `curl` でアセット取得 | ローカルの zip を配置（失敗も再現） |
 | `installed_commit` | `PlistBuddy`（macOS 専用） | 既定コミットを返す（「バンドル無し → none」の枝は本物を直接検証） |
 
-> **PowerShell のハーネスは、文が例外を投げても PASS と出る。** `$ErrorActionPreference`
-> を `Continue` にしてある（スタブの意図的な失敗でハーネスごと止めないため）ので、
-> テスト本体の文が落ちても次の文へ進み、その `CheckXxx` は**呼ばれないまま数に入らない**。
-> 実際に `Join-Path 'C:\x' …`（Linux の pwsh には C: ドライブが無い）で 2 件の検査が
-> 黙って抜け、「PASS: all N checks」の N だけが減っていた。**チェック数が減っていないか、
-> 出力に例外が混じっていないかを見ること**（数を固定する仕掛けは、テストを足すたびに
-> 直す手間が勝つので入れていない）。
+> **PowerShell のハーネスは、エラーの扱いをローカルと CI で変えている。** これは
+> 「CI では緩めない」という `VW_REQUIRE_SCRIPT_TESTS` の方針をそのまま延長したもので、
+> `$ErrorActionPreference` を **ローカルでは `Continue`・CI では `Stop`** にする。
+>
+> `Continue` のままだと、テスト本体の文が落ちても次へ進むため、その `CheckXxx` は
+> **呼ばれないまま数にも入らない**——検査が空振りしたのに「PASS: all N checks」と出て、
+> N だけが静かに減る。実際に `Join-Path 'C:\x' …`（Linux の pwsh に C: ドライブは無い）
+> で 2 件が黙って抜けた。CI 側を `Stop` にすると、その文でスクリプトが終了して exit 1 に
+> なるので、必ず気付ける。ローカルを `Continue` のままにしてあるのは、直すときは失敗を
+> 一覧できたほうが速いからで、これも skip / hard-fail の使い分けと同じ考え方である。
+>
+> **bash のハーネスには同じ手が使えない。** あちらは `RUN` の直後に `$?` を見る書き方を
+> しており（`check_eq "$?" "1"` など）、`set -e` にすると意図した失敗でハーネスごと
+> 止まってしまう。代わりに、各関数を `set -euo pipefail` の**サブシェル**で走らせて
+> 本物の挙動を保っている（`RUN`）。
 
 **`vw-update.ps1`（PowerShell 7）** — こちらは差し替えが 2 つで済み、より本物に近い形で
 動きます（`Get-InstalledCommit` は macOS ツールではなく `<name>.commit` テキストを読む
@@ -327,7 +335,8 @@ C++ 側が `dladdr` / `gSDK` のグルーを対象外にしているのと同様
 になるのを防ぐため、`-DVW_REQUIRE_SCRIPT_TESTS=ON`（Tests ワークフローが指定）を付けると
 挙動が逆転します。インタプリタ（`bash` / `pwsh`）が無ければ **configure が FATAL_ERROR** で
 失敗し、ハーネスに渡す補助ツール（python3 / unzip / zip）が無ければ **ハーネスが SKIP では
-なく exit 1** で失敗します。この値は各ハーネスの環境変数 `VW_REQUIRE_SCRIPT_TESTS` として
+なく exit 1** で失敗します。**PowerShell のハーネスはあわせて `$ErrorActionPreference` も
+`Stop` へ切り替え**、想定外のエラーを見逃さないようにします（上記の注意書き）。この値は各ハーネスの環境変数 `VW_REQUIRE_SCRIPT_TESTS` として
 渡され、ローカル既定（OFF）では従来どおり穏やかに SKIP します。
 
 ## それでも残る部分（アップデータ）
