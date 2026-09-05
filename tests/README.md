@@ -275,6 +275,14 @@ if ($MyInvocation.InvocationName -ne '.') {
 | `download` | `curl` でアセット取得 | ローカルの zip を配置（失敗も再現） |
 | `installed_commit` | `PlistBuddy`（macOS 専用） | 既定コミットを返す（「バンドル無し → none」の枝は本物を直接検証） |
 
+> **PowerShell のハーネスは、文が例外を投げても PASS と出る。** `$ErrorActionPreference`
+> を `Continue` にしてある（スタブの意図的な失敗でハーネスごと止めないため）ので、
+> テスト本体の文が落ちても次の文へ進み、その `CheckXxx` は**呼ばれないまま数に入らない**。
+> 実際に `Join-Path 'C:\x' …`（Linux の pwsh には C: ドライブが無い）で 2 件の検査が
+> 黙って抜け、「PASS: all N checks」の N だけが減っていた。**チェック数が減っていないか、
+> 出力に例外が混じっていないかを見ること**（数を固定する仕掛けは、テストを足すたびに
+> 直す手間が勝つので入れていない）。
+
 **`vw-update.ps1`（PowerShell 7）** — こちらは差し替えが 2 つで済み、より本物に近い形で
 動きます（`Get-InstalledCommit` は macOS ツールではなく `<name>.commit` テキストを読む
 だけなので実物、`Expand-Archive` / `Copy-Item` も pwsh の標準機能でそのまま動く）。

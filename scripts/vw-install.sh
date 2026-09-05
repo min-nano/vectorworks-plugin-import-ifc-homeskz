@@ -264,10 +264,18 @@ remove_installed() { # dest-dir, name
 	local src="$dest/$VW_UNINSTALLER"
 	[ -f "$src" ] || return 0
 
-	local copy="$TMP_ROOT/$VW_UNINSTALLER"
-	cp "$src" "$copy" 2>/dev/null || return 0
-	say "いま入っている版を取り除きます…"
-	/bin/bash "$copy" --machine --name "$name" --plugins-dir "$dest" >/dev/null 2>&1 || true
+	# 写し先は**この関数が自分で作る**。main の一時ディレクトリを当てにすると、直接
+	# 呼ばれたとき（テスト、あるいは将来の呼び出し）に空文字を掴んで `/` へ書きに行く
+	# ——root なら成功してしまい、テストが「通ったのに何もしていない」状態になる（実際に
+	# それで CI と手元の結果が食い違った）。
+	local tmp
+	tmp="$(mktemp -d)" || return 0
+	local copy="$tmp/$VW_UNINSTALLER"
+	if cp "$src" "$copy" 2>/dev/null; then
+		say "いま入っている版を取り除きます…"
+		/bin/bash "$copy" --machine --name "$name" --plugins-dir "$dest" >/dev/null 2>&1 || true
+	fi
+	rm -rf "$tmp"
 	return 0
 }
 

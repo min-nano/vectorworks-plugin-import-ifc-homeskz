@@ -105,49 +105,49 @@ function New-Install([string] $root, [string] $name = $Name) {
 # Get-PluginDir — **インストーラと同じ規則**でなければならない。
 # ===========================================================================
 T "Get-PluginDir appends the plug-in's own folder"
-CheckEq (Get-PluginDir (Join-Path 'C:\x' 'Plug-Ins') $Name) (Join-Path (Join-Path 'C:\x' 'Plug-Ins') $Name) 'Plug-Ins -> Plug-Ins\<name>'
+CheckEq (Get-PluginDir (Join-Path $Work 'Plug-Ins') $Name) (Join-Path (Join-Path $Work 'Plug-Ins') $Name) 'Plug-Ins -> Plug-Ins\<name>'
 
 T "Get-PluginDir does not nest when it is already the plug-in's folder"
-$already = Join-Path (Join-Path 'C:\x' 'Plug-Ins') $Name
+$already = Join-Path (Join-Path $Work 'Plug-Ins') $Name
 CheckEq (Get-PluginDir $already $Name) $already 'already there -> unchanged'
 
 # ===========================================================================
 # 取り除く — フォルダごと。その版が増やしたファイルも一緒に消えること。
 # ===========================================================================
-T 'Remove-PluginDir removes the whole plug-in folder'
+T 'Uninstall-PluginDir removes the whole plug-in folder'
 $root = Join-Path $Work 'plugins-ok'
 $own = New-Install $root
 Set-Content -LiteralPath (Join-Path $own "$Name.some-future-file") -Value 'extra' -NoNewline
 $script:PluginsDir = $root
-CheckEq (Remove-PluginDir $own $Name) $true 'remove succeeds'
+CheckEq (Uninstall-PluginDir $own $Name) $true 'remove succeeds'
 CheckNoPath $own 'the plug-in folder is gone'
 CheckPath $root 'Plug-Ins itself is untouched'
 
 # ===========================================================================
 # **安全弁** — ここが本スイートの中心。
 # ===========================================================================
-T "Remove-PluginDir refuses a folder whose name is not the plug-in's"
+T "Uninstall-PluginDir refuses a folder whose name is not the plug-in's"
 $root = Join-Path $Work 'plugins-name'
 $other = Join-Path $root 'SomethingElse'
 New-Item -ItemType Directory -Force -Path $other | Out-Null
 Set-Content -LiteralPath (Join-Path $other 'keep.txt') -Value 'keep me' -NoNewline
-CheckEq (Remove-PluginDir $other $Name) $false 'refused'
+CheckEq (Uninstall-PluginDir $other $Name) $false 'refused'
 CheckPath (Join-Path $other 'keep.txt') 'nothing was deleted'
 
-T 'Remove-PluginDir refuses a folder that holds no shell'
+T 'Uninstall-PluginDir refuses a folder that holds no shell'
 # Plug-Ins そのものを名指しされた形。消すと利用者の他のプラグインごと消える。
 $root = Join-Path $Work 'Plug-Ins'
 New-Item -ItemType Directory -Force -Path (Join-Path $root 'SomeoneElsePlugin') | Out-Null
 Set-Content -LiteralPath (Join-Path $root 'important.txt') -Value 'keep me' -NoNewline
-CheckEq (Remove-PluginDir $root 'Plug-Ins') $false 'refused'
+CheckEq (Uninstall-PluginDir $root 'Plug-Ins') $false 'refused'
 CheckPath (Join-Path $root 'important.txt') 'the other plug-ins are untouched'
 CheckPath (Join-Path $root 'SomeoneElsePlugin') 'the other plug-ins are untouched'
 
 # ===========================================================================
 # 入っていなければ成功。
 # ===========================================================================
-T 'Remove-PluginDir succeeds when there is nothing installed'
-CheckEq (Remove-PluginDir (Join-Path (Join-Path $Work 'nowhere') $Name) $Name) $true 'absent -> success'
+T 'Uninstall-PluginDir succeeds when there is nothing installed'
+CheckEq (Uninstall-PluginDir (Join-Path (Join-Path $Work 'nowhere') $Name) $Name) $true 'absent -> success'
 
 # ===========================================================================
 # Get-InstalledName — 名前を渡されなくても、置かれているものから割り出す。

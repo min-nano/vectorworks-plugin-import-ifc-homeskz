@@ -12,7 +12,7 @@
 
     なぜ「インストール先へ一緒に置く」のか: **その版が置いたものを正しく取り除けるのは、
     その版自身のアンインストーラだけ**だから。アップデートは「前の版を取り除いてから
-    新しい版を入れる」順で走る（vw-install.ps1 の Remove-Installed）。
+    新しい版を入れる」順で走る（vw-install.ps1 の Uninstall-PreviousRelease）。
 
     取り除くものの規則もひとつだけ: **そのプラグインのフォルダをまるごと。**
     ファイル名を列挙しない。
@@ -97,7 +97,12 @@ function Get-InstalledName([string] $root) {
 # ---------------------------------------------------------------------------
 # 取り除く。**削除はここ 1 か所だけ**で、その手前に必ず安全弁を通す。
 # ---------------------------------------------------------------------------
-function Remove-PluginDir([string] $dir, [string] $name) {
+# 動詞が "Uninstall" なのは意図的。**"Remove" は PSScriptAnalyzer が「システムの状態を
+# 変える動詞」とみなし、ShouldProcess（-WhatIf / -Confirm）の実装を要求する**
+# （PSUseShouldProcessForStateChangingFunctions）。この関数は対話を持たない機械向けの
+# 部品で、確認は呼び出し側（人が叩く vw-uninstall / アップデートの流れ）が持つ。
+# 隣の vw-install.ps1 が Install-* を使っているのとも揃う。
+function Uninstall-PluginDir([string] $dir, [string] $name) {
     if (-not (Test-Path -LiteralPath $dir)) {
         Write-Note "取り除くものはありません（$dir は存在しません）。"
         return $true
@@ -164,7 +169,12 @@ function Read-Option([string[]] $argv) {
 # 結末は $script:ExitCode で返す（return した値は出力ストリームに混ざるため。
 # vw-install.ps1 の Invoke-Main と同じ理由）。
 function Invoke-Main([string[]] $argv) {
+    # **1 回ごとに結末の状態を初期化する。** 実行ファイルとしては 1 プロセス 1 回だが、
+    # テストは同じセッションで何度も呼ぶ——初期化を落とすと「前回取り除いた場所」を
+    # 持ち越して報告してしまう（実際にそれで落ちた）。
     $script:ExitCode = 0
+    $script:Removed = ''
+    $script:LastError = ''
     $opt = Read-Option $argv
     if ($opt.Help) { Show-Usage; return }
 
@@ -178,7 +188,7 @@ function Invoke-Main([string[]] $argv) {
         $ok = $true
     }
     else {
-        $ok = Remove-PluginDir (Get-PluginDir $script:PluginsDir $name) $name
+        $ok = Uninstall-PluginDir (Get-PluginDir $script:PluginsDir $name) $name
     }
 
     if ($script:Machine) {

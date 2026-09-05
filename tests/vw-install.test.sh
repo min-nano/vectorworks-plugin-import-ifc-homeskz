@@ -229,6 +229,8 @@ check_no_file "$dest/$NAME/$NAME" "no <name>/<name> nesting"
 # 前の版を取り除いてから入れること — その版にしか無かったファイルが残らない
 # （残ると、消えたはずのものが Vectorworks から見え続ける）。
 # ===========================================================================
+# 直接呼ぶので TMP_ROOT は空のまま——**取り除く段が自分で一時ディレクトリを作れる
+# こと**（呼び出し側の状態に頼っていないこと）も、ここで一緒に押さえている。
 t "install_tree removes the previously installed release first"
 printf 'only in the old release\n' >"$dest/$NAME/$NAME.only-in-old"
 MACHINE=1 PLUGINS_DIR="$dest/$NAME" RUN install_tree "$src" "$NAME"

@@ -27,7 +27,7 @@
     1 つ消す」で済む（vw-uninstall.ps1）。
 
     入れる前に、**いま入っている版を、その版自身のアンインストーラで取り除く**
-    （下記 Remove-Installed）。
+    （下記 Uninstall-PreviousRelease）。
 
     Usage:
       powershell -ExecutionPolicy Bypass -File vw-install.ps1                     # stable
@@ -80,7 +80,7 @@ $VW_SHELL_EXT = '.vlb'
 # ではなく末尾で照合する。
 $VW_ZIP_SUFFIX = '.vlb.zip'
 # 置かないもの（インストーラ自身。プラグインの一部ではない）。**アンインストーラは
-# 置く**——次のアップデートがこれを使う（Remove-Installed）。
+# 置く**——次のアップデートがこれを使う（Uninstall-PreviousRelease）。
 $VW_NOT_INSTALLED = @('vw-install.ps1', 'vw-install.sh', '__MACOSX')
 # インストール先へ一緒に置くアンインストーラ（scripts/vw-uninstall.ps1 の冒頭）。
 $VW_UNINSTALLER = 'vw-uninstall.ps1'
@@ -189,7 +189,7 @@ function Get-PluginDir([string] $root, [string] $name) {
     return (Join-Path $root $name)
 }
 
-# Remove-Installed: **いま入っている版を、その版自身が置いていったアンインストーラで
+# Uninstall-PreviousRelease: **いま入っている版を、その版自身が置いていったアンインストーラで
 # 取り除く。** 置く側が「新しい版」の知識を持つのと対で、取り除く側は「いま入っている
 # 版」の知識を持つ（scripts/vw-uninstall.ps1 の冒頭）。
 #
@@ -199,19 +199,32 @@ function Get-PluginDir([string] $root, [string] $name) {
 #
 # **一時ディレクトリへ写してから走らせる。** アンインストーラは自分が消すフォルダの中に
 # 居るためで、写しておけば消えても走り切れる。
-function Remove-Installed([string] $dest, [string] $name, [string] $tmp) {
+# 動詞が "Uninstall" なのは意図的（"Remove" だと PSScriptAnalyzer が ShouldProcess の
+# 実装を要求する。scripts/vw-uninstall.ps1 の Uninstall-PluginDir と同じ理由）。
+function Uninstall-PreviousRelease([string] $dest, [string] $name) {
     $src = Join-Path $dest $VW_UNINSTALLER
     if (-not (Test-Path -LiteralPath $src)) { return }
-    $copy = Join-Path $tmp $VW_UNINSTALLER
-    try { Copy-Item -LiteralPath $src -Destination $copy -Force } catch { return }
-    try { Unblock-File -LiteralPath $copy -ErrorAction SilentlyContinue } catch {}
-    Write-Note 'いま入っている版を取り除きます…'
-    try { & $copy -Machine -Name $name -PluginsDir $dest | Out-Null } catch {}
+    # 写し先は**この関数が自分で作る**——呼び出し側から受け取ると、渡し忘れたときに変な
+    # 場所へ書きに行く（bash 版で実際にそれをやり、root では成功してしまってテストと
+    # CI の結果が食い違った）。
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('vwunin-' + [System.IO.Path]::GetRandomFileName())
+    try {
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        $copy = Join-Path $tmp $VW_UNINSTALLER
+        Copy-Item -LiteralPath $src -Destination $copy -Force
+        try { Unblock-File -LiteralPath $copy -ErrorAction SilentlyContinue } catch {}
+        Write-Note 'いま入っている版を取り除きます…'
+        try { & $copy -Machine -Name $name -PluginsDir $dest | Out-Null } catch {}
+    }
+    catch {}
+    finally {
+        try { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+    }
 }
 
 # Install-Tree: 展開済みディレクトリの直下にあるものを、そのままプラグインのフォルダへ
 # 置く。**列挙しない**のが肝（冒頭のコメント参照）。
-function Install-Tree([string] $work, [string] $name, [string] $tmp) {
+function Install-Tree([string] $work, [string] $name) {
     # 取り違えた zip を黙って撒かないための最低限の確認。**取り除くより先に確かめる**
     # ——ここで弾けなかったら、消しただけで入れられない状態になる。
     if (-not (Test-Path -LiteralPath (Join-Path $work "$name$VW_SHELL_EXT"))) {
@@ -222,7 +235,7 @@ function Install-Tree([string] $work, [string] $name, [string] $tmp) {
     $dest = Get-PluginDir $script:PluginsDir $name
 
     # 入れる前に前の版を取り除く（上記）。
-    Remove-Installed $dest $name $tmp
+    Uninstall-PreviousRelease -dest $dest -name $name
 
     if (-not (Test-Path -LiteralPath $dest)) {
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
@@ -339,7 +352,7 @@ function Invoke-Main([string[]] $argv) {
         $src = Resolve-Source $opt $tmp.FullName
         if ($src) {
             $name = $src.Name
-            $ok = Install-Tree $src.Dir $name $tmp.FullName
+            $ok = Install-Tree -work $src.Dir -name $name
         }
     }
     finally {

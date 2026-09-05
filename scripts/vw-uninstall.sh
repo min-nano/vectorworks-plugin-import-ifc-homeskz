@@ -186,6 +186,10 @@ parse_args() {
 }
 
 main() {
+	# **1 回ごとに結末の状態を初期化する**（PowerShell 版と同じ理由。あちらは同じ
+	# セッションで何度も呼ばれて実際に持ち越した）。
+	REMOVED=""
+	LAST_ERROR=""
 	local parsed=0
 	parse_args "$@" || parsed=$?
 	[ "$parsed" -eq 2 ] && return 0

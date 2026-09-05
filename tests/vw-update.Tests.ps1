@@ -304,10 +304,10 @@ CheckContains $out 'error=' 'empty args -> error= line'
 # 入れた場所と読む場所が食い違う）。
 # ===========================================================================
 T "Get-PluginDir appends the plug-in's own folder"
-CheckEq (Get-PluginDir (Join-Path 'C:\x' 'Plug-Ins') 'HomeskzIfcImport') (Join-Path (Join-Path 'C:\x' 'Plug-Ins') 'HomeskzIfcImport') 'Plug-Ins -> Plug-Ins\<name>'
+CheckEq (Get-PluginDir (Join-Path $Work 'Plug-Ins') 'HomeskzIfcImport') (Join-Path (Join-Path $Work 'Plug-Ins') 'HomeskzIfcImport') 'Plug-Ins -> Plug-Ins\<name>'
 
 T "Get-PluginDir does not nest when it is already the plug-in's folder"
-$alreadyThere = Join-Path (Join-Path 'C:\x' 'Plug-Ins') 'HomeskzIfcImport'
+$alreadyThere = Join-Path (Join-Path $Work 'Plug-Ins') 'HomeskzIfcImport'
 CheckEq (Get-PluginDir $alreadyThere 'HomeskzIfcImport') $alreadyThere 'already there -> unchanged'
 
 T 'Get-PluginZipUrl prefers the exact asset name'
