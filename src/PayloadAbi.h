@@ -56,7 +56,9 @@
 
 // 境界の版。**形を変えたら上げる。**
 //   1 … 取り込みコマンドと 2 つの PIO のリセットを載せた最初の形
-#define VW_PAYLOAD_ABI_VERSION 1u
+//   2 … 実機フィードバックの往復（M23）。殻の ID と同梱スクリプトの実行を殻から借り、
+//       取り込みは「もう 1 周するか」を返すようになった
+#define VW_PAYLOAD_ABI_VERSION 2u
 
 // 本体側の export 指定。Windows は明示しないと DLL の外から見えない。
 #if defined(_WIN32)
@@ -81,6 +83,28 @@ extern "C"
 		// gSDK / gCBP / gVWMM を埋める（それらは静的ライブラリが持つ**モジュールごとの**
 		// グローバルなので、読み込んだだけでは空のまま）。
 		void* callbacks;
+
+		// **いま動いている殻の ID**（殻にコンパイルされた VW_SHELL_ID）。本体はこれを、
+		// 新しく入れたビルドの殻の ID と突き合わせて「再起動が要るか／本体の読み直しで
+		// 済むか」を決める（src/UpdaterParse.h の NeedsRestartAfterInstall）。**本体は
+		// 自分の殻の ID を知らない**——殻にしかコンパイルされていないので、ここで借りる。
+		// 文字列は殻が所有し、降ろすまで生きている（本体は受け取った時点で写す）。
+		const char* shellId;
+
+		// **同梱スクリプトを 1 本走らせて標準出力を受け取る。** 本体は自分の在り処から
+		// 同梱物へたどり着けない——読み込まれるのは**一時ディレクトリへ写した複製**なので
+		// （PayloadHost.h「必ず複製してから読む」）、dladdr / GetModuleFileName が返すのは
+		// バンドルの外の道である。だから殻の道具を借りる。
+		//
+		//   scriptName … 拡張子を除いた名前（"vw-update" / "vw-feedback"）。**どちらの
+		//                拡張子を付けるかは殻が決める**（mac は .sh、Windows は .ps1）。
+		//   args/argc  … スクリプトへ渡す引数（UTF-8）。
+		//   out        … 標準出力（UTF-8）。**殻が所有し、次にこの関数を呼ぶまで有効**——
+		//                本体は受け取ったその場で写すこと（返る文字列の寿命は他と同じ）。
+		//
+		// 戻り値は 0（kVwPayloadOk）で成功、それ以外は起動できなかったということ。
+		int (*runBundledScript)(const char* scriptName, const char* const* args, unsigned int argc,
+								const char** out);
 	};
 
 	// -----------------------------------------------------------------------
@@ -116,7 +140,12 @@ extern "C"
 	using VwPayloadAbiVersionFn = unsigned int (*)();
 	using VwPayloadInitFn = int (*)(const VwPayloadHost*);
 	using VwPayloadInfoFn = int (*)(VwPayloadInfo*);
-	using VwPayloadRunImportFn = int (*)();
+	// 取り込みコマンド 1 周ぶん。**outAgain に 0 以外が入って戻ったら、殻はもう一度
+	// 呼ぶ**（実機フィードバックの往復。src/Extensions/ExtMenu.cpp）。周と周のあいだに
+	// 殻が本体を手放すことで、**新しく入った本体がその場で読み直される**——降ろせるのは
+	// 本体のコードがスタックに 1 つも無いときだけなので、この形（戻ってから殻が回す）で
+	// なければホットリロードは成立しない（src/PayloadSession.h）。
+	using VwPayloadRunImportFn = int (*)(int* outAgain);
 	using VwPayloadRecalculateFn = int (*)(unsigned int, void*, int*);
 	using VwPayloadShutdownFn = void (*)();
 

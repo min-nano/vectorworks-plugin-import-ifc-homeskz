@@ -133,6 +133,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 	add_library(
 		HomeskzIfcCore STATIC
 		src/core/Document.cpp
+		src/core/FeedbackSession.cpp
 		src/core/Geometry.cpp
 		src/core/ImportOptions.cpp
 		src/core/Layout.cpp
@@ -141,6 +142,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/core/Trace.cpp
 		src/parse/BuildDocument.cpp
 		src/parse/Context.cpp
+		src/parse/Feedback.cpp
 		src/parse/Step.cpp
 		src/parse/Loader.cpp
 		src/parse/Summary.cpp
@@ -316,7 +318,9 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtShearWall.h
 		src/Extensions/ExtShearWall.cpp
 		scripts/vw-update.sh
-		scripts/vw-update.ps1)
+		scripts/vw-update.ps1
+		scripts/vw-feedback.sh
+		scripts/vw-feedback.ps1)
 	# **`scripts/vw-install.*`（インストーラ）はここに入れない。** あれは殻に入らず、
 	# リリースの zip とアセットとして配られるもので、走るのは「落としてきた新しい版」の
 	# ほう（scripts/vw-install.sh の冒頭）。ここへ足すと、配置の手順を直しただけで
@@ -361,6 +365,8 @@ if(VW_BUILD_PLUGIN)
 	set(VW_PAYLOAD_SOURCES
 		src/payload/PayloadMain.cpp
 		src/draw/ImportCommand.cpp
+		src/draw/Feedback.cpp
+		src/draw/HostServices.cpp
 		src/draw/ColumnMarkPio.cpp
 		src/draw/ShearWallPio.cpp
 		src/draw/DrawUtil.cpp
@@ -624,9 +630,12 @@ if(VW_BUILD_PLUGIN)
 			endif()
 		endif()
 
-		# --- Bundle the updater so the installed plug-in can update itself --------
-		# See src/Updater.cpp. macOS reads Contents/Resources/vw-update.sh from
-		# inside the bundle; Windows reads vw-update.ps1 from next to the .vlb.
+		# --- Bundle the scripts the installed plug-in drives ----------------------
+		# See src/Updater.cpp. macOS reads Contents/Resources/<name>.sh from inside
+		# the bundle; Windows reads <name>.ps1 from next to the .vlb.
+		#
+		#   vw-update    自動アップデート（殻が起動時に走らせる）
+		#   vw-feedback  実機フィードバックの投稿（本体が殻越しに走らせる。M23）
 		if(APPLE)
 			add_custom_command(
 				TARGET ${target}
@@ -636,8 +645,11 @@ if(VW_BUILD_PLUGIN)
 				COMMAND
 					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.sh"
 					"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-update.sh"
+				COMMAND
+					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-feedback.sh"
+					"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-feedback.sh"
 				VERBATIM
-				COMMENT "Bundling vw-update.sh into ${output_name}")
+				COMMENT "Bundling vw-update.sh / vw-feedback.sh into ${output_name}")
 		else()
 			# Windows has no Info.plist, so stamp the build commit into a sidecar
 			# "<name>.commit" file next to the module. The updater reads it to tell
@@ -656,12 +668,15 @@ if(VW_BUILD_PLUGIN)
 				COMMAND
 					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.ps1"
 					"$<TARGET_FILE_DIR:${target}>/vw-update.ps1"
+				COMMAND
+					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-feedback.ps1"
+					"$<TARGET_FILE_DIR:${target}>/vw-feedback.ps1"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${commit_file}"
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.commit"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${shell_id_file}"
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.shell-id"
 				VERBATIM
-				COMMENT "Bundling vw-update.ps1 and build stamps next to ${output_name}")
+				COMMENT "Bundling vw-update.ps1 / vw-feedback.ps1 and build stamps next to ${output_name}")
 		endif()
 	endfunction()
 

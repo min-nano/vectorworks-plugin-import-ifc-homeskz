@@ -128,19 +128,43 @@ void CImportIfcMenu_EventSink::DoInterface()
 	// only be swapped in at load time, and because the command may be re-invoked
 	// programmatically — a picker on the command path would then pop up repeatedly.
 
-	// 本体を確保する。**ここは唯一「読み込めなかった」をユーザーへ見せられる場所**
-	// （PIO のリセットは黙って諦めるしかない——数百回出るダイアログに意味は無い）。
-	const PayloadUse use;
-	if (!use.ok())
+	// **本体が「もう 1 周」と言う限り呼び直す。** 実機フィードバックの往復
+	// （draw/Feedback.h）で修正版のビルドが入ったときだけそうなる。
+	//
+	// **周と周のあいだに PayloadUse を壊すのが肝。** 本体を降ろせるのは、そのコードが
+	// スタックに 1 つも無いとき——つまり入れ子の深さが 0 のとき——だけで、次の
+	// PayloadUse がその判定と読み直しを行う（src/PayloadSession.h）。だから殻に要るのは
+	// この「呼び直す」1 行だけで、往復の中身（何を投稿し、どのビルドを待つか）は
+	// すべて本体側にある——殻に実処理を書かない、というこの分割の決めごとどおり
+	// （CLAUDE.md「アーキテクチャ: 殻と本体」）。
+	//
+	// 上限は歯止め。本体が壊れて常に「もう 1 周」を返しても、ここで必ず止まる。
+	constexpr int kMaxRounds = 50;
+	for (int round = 0; round < kMaxRounds; ++round)
 	{
-		gSDK->AlertInform("プラグインの本体を読み込めませんでした。", use.error().c_str(),
-						  false /* not a minor alert: show a modal dialog */);
-		return;
-	}
+		bool again = false;
+		{
+			// 本体を確保する。**ここは唯一「読み込めなかった」をユーザーへ見せられる場所**
+			// （PIO のリセットは黙って諦めるしかない——数百回出るダイアログに意味は無い）。
+			const PayloadUse use;
+			if (!use.ok())
+			{
+				gSDK->AlertInform("プラグインの本体を読み込めませんでした。", use.error().c_str(),
+								  false /* not a minor alert: show a modal dialog */);
+				return;
+			}
 
-	// 例外は本体側が境界の手前で受け止める（src/payload/PayloadMain.cpp）。ここへ返るのは
-	// 「そもそも呼べなかった」ときだけ。
-	std::string error;
-	if (!use->runImport(error))
-		gSDK->AlertInform("取り込みを開始できませんでした。", error.c_str(), false);
+			// 例外は本体側が境界の手前で受け止める（src/payload/PayloadMain.cpp）。ここへ
+			// 返るのは「そもそも呼べなかった」ときだけ。
+			std::string error;
+			if (!use->runImport(again, error))
+			{
+				gSDK->AlertInform("取り込みを開始できませんでした。", error.c_str(), false);
+				return;
+			}
+		} // ← ここで use が壊れ、深さが 0 に戻る（次の周で新しい本体が読み直される）
+
+		if (!again)
+			return;
+	}
 }

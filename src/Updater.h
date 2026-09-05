@@ -38,8 +38,22 @@
 
 #pragma once
 
+#include <string>
+#include <vector>
+
 namespace HomeskzIfcImport
 {
+	// Run ONE of the bundled scripts (baseName without its extension —
+	// "vw-update" / "vw-feedback"; macOS adds ".sh", Windows ".ps1") and capture
+	// its stdout. Returns false if the script could not be located or started.
+	//
+	// **本体（ペイロード）へ貸し出すためにここに口がある。** 本体は自分の在り処から
+	// 同梱物へたどり着けない（読み込まれるのは一時ディレクトリへ写した複製で、
+	// dladdr / GetModuleFileName はバンドルの外を指す）ので、殻の道具を借りる
+	// ——境界の関数ポインタ VwPayloadHost::runBundledScript の実体がこれである。
+	bool RunBundledScriptNamed(const std::string& baseName, const std::vector<std::string>& args,
+							   std::string& out);
+
 	// Stable plug-in only. At Vectorworks start-up, compare the installed stable
 	// build with the latest published one; if a newer one exists, ask (native
 	// dialog) whether to install it. Silent when already current or on a network

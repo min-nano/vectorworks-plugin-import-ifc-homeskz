@@ -26,6 +26,8 @@
 #include "PayloadAbi.h"
 
 #include <cstddef>
+#include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::payload
 {
@@ -40,6 +42,7 @@ namespace HomeskzIfcImport::payload
 		void forget()
 		{
 			fHost = VwPayloadHost{};
+			fShellId.clear();
 			fValid = false;
 		}
 
@@ -54,8 +57,48 @@ namespace HomeskzIfcImport::payload
 			return fValid ? fHost.callbacks : nullptr;
 		}
 
+		// **いま動いている殻の ID**（貸されていなければ空）。文字列は adopt のときに
+		// 写してある——ポインタのまま持たない、というこのファイルの決めごとどおり。
+		const std::string& shellId() const
+		{
+			return fShellId;
+		}
+
+		// 同梱スクリプトを走らせられるか（古い殻は貸してくれない）。
+		bool canRunScripts() const
+		{
+			return fValid && fHost.runBundledScript != nullptr;
+		}
+
+		// 同梱スクリプトを 1 本走らせて標準出力を受け取る。**返ってきた文字列は
+		// その場で写す**（殻が所有し、次の呼び出しまでしか生きていない。PayloadAbi.h）。
+		bool runScript(const std::string& baseName, const std::vector<std::string>& args,
+					   std::string& out) const
+		{
+			out.clear();
+			if (!this->canRunScripts())
+				return false;
+
+			// C の配列へ並べ替える（境界を越えるのは const char* の列だけ）。
+			std::vector<const char*> raw;
+			raw.reserve(args.size());
+			for (const std::string& arg : args)
+				raw.push_back(arg.c_str());
+
+			const char* result = nullptr;
+			const int status =
+				fHost.runBundledScript(baseName.c_str(), raw.empty() ? nullptr : raw.data(),
+									   static_cast<unsigned int>(raw.size()), &result);
+			if (status != kVwPayloadOk)
+				return false;
+			if (result != nullptr)
+				out = result; // ← ここで写す
+			return true;
+		}
+
 	private:
 		VwPayloadHost fHost{};
+		std::string fShellId; // 殻の ID の**写し**（相手の記憶域を持たない）
 		bool fValid = false;
 	};
 
@@ -76,6 +119,9 @@ namespace HomeskzIfcImport::payload
 		// ほうが新しく、後ろに知らない項目が付いていても構わない）。
 		fHost = *host;
 		fHost.size = static_cast<unsigned int>(sizeof(VwPayloadHost));
+		// **文字列はここで写す。** 構造体を写しただけでは中の const char* は相手の
+		// 記憶域を指したままで、このファイルが避けようとしている当のものになる。
+		fShellId = (host->shellId != nullptr) ? host->shellId : "";
 		fValid = true;
 		return kVwPayloadOk;
 	}

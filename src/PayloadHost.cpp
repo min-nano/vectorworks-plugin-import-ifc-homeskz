@@ -15,10 +15,12 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "PayloadHost.h"
+#include "Updater.h"
 
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #if defined(_WIN32)
 #	include <Windows.h>
@@ -309,6 +311,44 @@ namespace HomeskzIfcImport
 			static unsigned sGeneration = 0;
 			return ++sGeneration;
 		}
+
+		// **本体へ貸す「同梱スクリプトの実行」の実体**（src/PayloadAbi.h の
+		// VwPayloadHost::runBundledScript）。
+		//
+		// 戻す文字列は**殻が所有し、次にこの関数を呼ぶまで生かす**。だから関数ローカルの
+		// static に置く——本体側の記憶域に置くと、降ろした瞬間に消えるものを殻が指すことに
+		// なる（境界を越える記憶域の扱いは PayloadHostHolder.h と同じ理由で慎重にやる）。
+		//
+		// **例外を境界の外へ出さない。** 呼ぶのは本体（別モジュール）なので、ここから
+		// 投げると巻き戻せる保証が無い。
+		int ShellRunBundledScript(const char* scriptName, const char* const* args,
+								  unsigned int argc, const char** out)
+		{
+			static std::string sOutput; // 直前の出力（次の呼び出しまで有効）
+			try
+			{
+				sOutput.clear();
+				if (out != nullptr)
+					*out = "";
+				if (scriptName == nullptr)
+					return kVwPayloadErrHost;
+
+				std::vector<std::string> arguments;
+				arguments.reserve(argc);
+				for (unsigned int i = 0; i < argc; ++i)
+					arguments.emplace_back((args != nullptr && args[i] != nullptr) ? args[i] : "");
+
+				if (!RunBundledScriptNamed(scriptName, arguments, sOutput))
+					return kVwPayloadErrHost;
+				if (out != nullptr)
+					*out = sOutput.c_str();
+				return kVwPayloadOk;
+			}
+			catch (...)
+			{
+				return kVwPayloadErrException;
+			}
+		}
 	} // namespace
 
 	Payload::~Payload()
@@ -420,6 +460,12 @@ namespace HomeskzIfcImport
 		fHost.size = static_cast<unsigned int>(sizeof(VwPayloadHost));
 		fHost.abiVersion = VW_PAYLOAD_ABI_VERSION;
 		fHost.callbacks = callbacks;
+		// **殻の ID と、同梱スクリプトを走らせる道具を貸す**（src/PayloadAbi.h）。どちらも
+		// 本体からは手が届かないもので、前者は殻にしかコンパイルされておらず、後者は
+		// 同梱物の在り処（本体が読まれるのは一時ディレクトリの複製）を要する。
+		// VW_SHELL_ID は文字列リテラル＝この殻が生きている間ずっと有効。
+		fHost.shellId = VW_SHELL_ID;
+		fHost.runBundledScript = &ShellRunBundledScript;
 
 		const int status = initFn(&fHost);
 		if (status != kVwPayloadOk)
@@ -432,20 +478,23 @@ namespace HomeskzIfcImport
 		return true;
 	}
 
-	bool Payload::runImport(std::string& error)
+	bool Payload::runImport(bool& againOut, std::string& error)
 	{
 		error.clear();
+		againOut = false;
 		if (!fLoaded || fImportFn == nullptr)
 		{
 			error = "本体が読み込まれていません。";
 			return false;
 		}
-		const int status = fImportFn();
+		int again = 0;
+		const int status = fImportFn(&again);
 		if (status != kVwPayloadOk)
 		{
 			error = "取り込みを開始できませんでした（コード " + std::to_string(status) + "）。";
 			return false;
 		}
+		againOut = (again != 0);
 		return true;
 	}
 

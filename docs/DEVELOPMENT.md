@@ -62,6 +62,8 @@ src/
   core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
     Document.{h,cpp}          命令セットの構造体定義・validateDocument・描画結果の件数
     ImportOptions.{h,cpp}     取り込み設定（配置するシンボルの対応）と役割の表 1 つ
+    FeedbackSession.{h,cpp}   実機フィードバックの往復で覚えておく値（1 周目の選択）と
+                              その読み書き
     Geometry.{h,cpp}          自前の Vec2 / Vec3 / Mat4（配置行列）と平面幾何の基本演算
     Layout.{h,cpp}            用紙の割り付け（縮尺の階梯と選び方・伏図の位置と凡例の列・
                               軸組図の上下 2 段とシートの分割）
@@ -79,6 +81,8 @@ src/
     Summary.{h,cpp}           完了・エラーダイアログの本文と診断ログの見出し／結果
                               （要素の一覧は kElements 表 1 つ）
     StructuralClass.{h,cpp}   部材種別 → VW クラスの純ロジック
+    Feedback.{h,cpp}          実機フィードバックの PR コメント本文（内訳・前の周との差分・
+                              匿名化）
     Grid / Story / Floor / Member / Noboribari / Column / Rafter / Roof /
     Footing / AnchorBolt / FloorPost / FireBrace / Joint / ColumnMark /
     Sheet / Tag / Section      要素ごとの解析
@@ -99,12 +103,16 @@ src/
     ProgressDialog.{h,cpp}    core::ProgressReporter を VW の進捗ダイアログへ橋渡し
     ResultDialog.{h,cpp}      完了・エラーのダイアログ（短い本文＋折り畳んだ診断ログ欄）
     SettingsDialog.{h,cpp}    取り込み設定ダイアログ（配置するシンボルを名前と絵で選ぶ）
+    Feedback.{h,cpp}          実機フィードバックの往復（所見のダイアログ → PR へ投稿 →
+                              修正版のビルドを待って入れ替え）
+    HostServices.{h,cpp}      殻から借りた道具（同梱スクリプトの実行・殻の ID）の置き場所
     Symbol.{h,cpp}            ハイブリッドシンボルの配置（4 要素で共有する唯一の実装）
     Tag.{h,cpp}               断面寸法データタグ（伏図・軸組図で共有。スタイルは当てず、
                               タグの中身はタグ 1 本ずつへ直接組む）
     Grid / Story / Floor / Member / Column / Rafter / Roof / Footing /
     ColumnMark / Sheet / Legend / Section   要素ごとの描画
   Updater*.{h,cpp}          同梱した更新スクリプトを起動してアップデートを駆動する
+                            （同梱スクリプトの実行は本体へも貸し出す）
   BuildConfig.h             stable / dev の識別切り替えスイッチ（VW_DEV_BUILD）
   PluginPrefix.h            共有プレフィックスヘッダ（SDK を取り込む）
   Module-Info.plist.in      バンドルの Info.plist テンプレート（macOS 専用）
@@ -743,6 +751,110 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 - [The Vectorworks Environment](https://github.com/Vectorworks/developer-sdk/blob/main/Info/The%20Vectorworks%20Environment.md) — 実行環境
 - バージョン別の情報は [`Versions/`](https://github.com/Vectorworks/developer-sdk/tree/main/Versions)（2026 / 2025 / … ）にあります。
 
+
+## 実機フィードバックの往復（`draw/Feedback`）
+
+**`draw/` の実描画は CI では検証できず、ローカルの Vectorworks でしか確かめられません**
+（[`CLAUDE.md`](../CLAUDE.md)「テスト方針」）。そのため 1 往復ごとに
+
+> 新しいビルドを入れる → Vectorworks を再起動する → 図面を戻す → IFC を選ぶ →
+> 設定を選ぶ → 取り込む → ログを写して PR へ貼る
+
+という手作業が挟まり、**これが実装そのものより時間を食っていました**。M21 でアップデートに
+再起動が要らなくなった（＝新しい本体をその実行のまま読み直せる）ので、この往復を
+**プラグイン自身に回させられる**ようになりました。人がするのは「絵を見て一言書く」だけです。
+
+### 1 周の流れ
+
+```
+   ① 取り込み（1 周目だけ IFC と設定を選ぶ）
+        ↓
+   ② フィードバックのダイアログ  ← 結果の本文＋所見の記入欄＋宛先 PR＋続け方
+        ↓
+   ③ PR へコメントを投稿（scripts/vw-feedback.*）
+        ↓
+   ④ 同じブランチの新しい dev ビルドを待つ（30 秒ごとに確認・最長 90 分・中止できる）
+        ↓
+   ⑤ 出たら入れる → 本体だけなら**再起動なしで読み直し**、①へ戻る（2 周目からは無操作）
+```
+
+Claude 側はコメントを読んで直し、push するだけです。CI が dev プレリリースを出した瞬間に
+④ が拾い、次の周が回ります。
+
+### 使いはじめ（初回だけ）
+
+1. **dev ビルドを入れて起動します**（安定版では動きません。下記「境界」）。
+2. GitHub の **fine-grained personal access token** を 1 つ作ります。要るのは対象
+   リポジトリの **Pull requests: Read and write** だけです。
+   （`gh` CLI で認証済みの機械なら、この手順は要りません——スクリプトが `gh auth token`
+   を使います。）
+3. 取り込みを 1 回実行し、フィードバックのダイアログで **「PR へ送る」** を押します。
+   トークンが未登録なら 1 度だけ貼り付けを求められ、**macOS はキーチェーン**、
+   **Windows は DPAPI で暗号化したファイル**へ保存されます（図面にもログにも残りません）。
+4. 送信先の PR 番号は**ブランチから自動で引きます**（`find-pr`）。違っていればその場で
+   直せます。
+
+以後は「所見を書いて送る」だけで、②〜⑤ が回り続けます。やめたいときは④の中止ボタン、
+または次の周のダイアログで「送らない」を選びます（記憶が消えて往復が終わります）。
+
+### 覚えているもの（`core/FeedbackSession`）
+
+1 周目の選択（IFC のパス・取り込み設定・宛先 PR・続け方）は `key=value` のテキストで
+残ります。**ここが 2 周目以降を無操作にしている唯一の仕掛け**です。
+
+- macOS … `~/Library/Application Support/HomeskzIfcImport/feedback.txt`
+- Windows … `%LOCALAPPDATA%\HomeskzIfcImport\feedback.txt`
+
+手で消せば往復は終わります（次の取り込みはいつもどおり選択から始まります）。
+`HOMESKZ_IFC_FEEDBACK_STATE` に別のパスを指定して差し替えられます。
+
+### 公開されることと、伏せるもの
+
+PR コメントは**公開**です。そこで**既定で案件が分かるものを伏せます**:
+
+| 伏せるもの | どうなるか |
+| --- | --- |
+| IFC のファイル名 | `model-8f3a12.ifc`（**同じ入力なら毎回同じ仮名**。周回どうしの同一性は保たれる） |
+| パスのユーザー名 | `/Users/…` `C:\Users\…` |
+
+伏せないもの——要素ごとの命令数と描けた数、描画側の注意、所要時間、ログの本文——は
+**案件ではなくプラグインの話**で、これが無いと報告の意味がありません。フィクスチャや
+実案件の中身そのものは、そもそもコメントに載りません。
+
+**それでも公開したくない**ときは、投稿先を私有リポジトリへ向けられます（記憶の
+`repo=` を書き換える）。ただし Claude はその PR のイベントで起こされないので、
+**往復の自動性は落ちます**。
+
+### 境界（どこに何があるか）
+
+| | 役割 |
+| --- | --- |
+| `src/core/FeedbackSession.*` | 覚えておく値と、その読み書き（無 SDK・テストあり） |
+| `src/parse/Feedback.*` | **コメント本文**（Markdown）・前の周との差分・匿名化（無 SDK・テストあり） |
+| `src/draw/Feedback.*` | ダイアログ・投稿・ビルド待ち・入れ替え（SDK 依存） |
+| `src/draw/HostServices.*` | 殻から借りた道具（同梱スクリプトの実行・殻の ID）の置き場所 |
+| `scripts/vw-feedback.sh` / `.ps1` | **ネットワークとトークン**。`token-status` / `login` / `logout` / `find-pr` / `post` |
+
+**安定版（stable）では動きません。** 往復するのは PR のビルドであって main の配布物では
+なく、開発用でないビルドに「図面の情報が外へ出る経路」を持たせないためです
+（`draw::feedbackAvailable`）。
+
+**なぜ殻を経由して周回するのか**: 新しい本体をその実行のまま効かせるには載っている本体を
+降ろす必要があり、それができるのは**本体のコードがスタックに 1 つも無いとき**だけです
+（[`src/PayloadSession.h`](../src/PayloadSession.h)）。そこで「待って入れる」までを本体が
+行い、**入れ替えと呼び直しは殻に返してから**行います——殻に足したのは
+「本体が『もう 1 周』と言う限り呼び直す」ループ 1 つだけで、往復の中身はすべて本体側に
+あります（＝往復のふるまいを直しても再起動は要りません）。
+
+### 残っている手作業（1 クリック）
+
+2 周目以降、取り込みの前に **「図面を取り込み前の状態に戻してから続ける」** の確認が
+1 枚出ます。同じ文書へ 2 回描くと前の周の図形が二重に残るためで、プログラムから
+「取り消し」を掛ける手立ては未調査です（SDK の調査は
+[SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)側で
+行う決まり。[`CLAUDE.md`](../CLAUDE.md)）。ここが解ければ完全に無操作になります。
+
+---
 
 ## 自動アップデートの仕組み
 

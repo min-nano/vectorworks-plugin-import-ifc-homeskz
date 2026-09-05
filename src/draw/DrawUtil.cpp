@@ -766,6 +766,26 @@ namespace HomeskzIfcImport::draw
 		*sink += text;
 	}
 
+	std::vector<std::string> SplitLines(const std::string& text)
+	{
+		std::vector<std::string> lines;
+		std::string::size_type start = 0;
+		while (start <= text.size())
+		{
+			const std::string::size_type end = text.find('\n', start);
+			if (end == std::string::npos)
+			{
+				lines.push_back(text.substr(start));
+				break;
+			}
+			lines.push_back(text.substr(start, end - start));
+			start = end + 1;
+		}
+		while (!lines.empty() && lines.back().empty())
+			lines.pop_back();
+		return lines;
+	}
+
 	VectorWorks::SStoryObjectData StoryBoundData(const core::StoryBoundCommand& bound)
 	{
 		VectorWorks::SStoryObjectData data;

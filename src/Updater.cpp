@@ -69,15 +69,15 @@ namespace
 	// own loaded binary with dladdr() — its path is
 	//   <name>.vwlibrary/Contents/MacOS/<name>
 	// — and rewrite the trailing "MacOS/<name>" to "Resources/vw-update.sh".
-	std::string BundledScriptPath()
+	std::string BundledScriptPath(const std::string& baseName = "vw-update")
 	{
 		Dl_info info{};
 		if (::dladdr(reinterpret_cast<const void*>(&BundledScriptPath), &info) == 0 ||
 			info.dli_fname == nullptr)
 			return "";
 
-		// .../Contents/MacOS/<name> -> .../Contents/Resources/vw-update.sh
-		return MacScriptPathFromBinary(info.dli_fname);
+		// .../Contents/MacOS/<name> -> .../Contents/Resources/<baseName>.sh
+		return MacScriptPathFromBinary(info.dli_fname, baseName);
 	}
 
 	// Directory that CONTAINS this plug-in's .vwlibrary bundle — i.e. the exact
@@ -104,9 +104,10 @@ namespace
 
 	// Run "vw-update.sh <args>" and capture its stdout into out. Blocks until the
 	// script finishes. Returns false if the script could not be located/started.
-	bool RunBundledScript(const std::vector<std::string>& args, std::string& out)
+	bool RunBundledScript(const std::vector<std::string>& args, std::string& out,
+						  const std::string& baseName = "vw-update")
 	{
-		const std::string script = BundledScriptPath();
+		const std::string script = BundledScriptPath(baseName);
 		if (script.empty())
 			return false;
 
@@ -269,10 +270,10 @@ namespace
 		return WinModuleDirFromPath(OwnModulePath());
 	}
 
-	// The bundled updater script sits next to the module (see CMakeLists.txt).
-	std::string BundledScriptPath()
+	// The bundled scripts sit next to the module (see CMakeLists.txt).
+	std::string BundledScriptPath(const std::string& baseName = "vw-update")
 	{
-		return WinScriptPathFromDir(OwnModuleDir());
+		return WinScriptPathFromDir(OwnModuleDir(), baseName);
 	}
 
 	// The Plug-Ins folder this build was loaded from == the module's own folder.
@@ -283,9 +284,10 @@ namespace
 
 	// Run "vw-update.ps1 <args>" via PowerShell and capture its stdout into out.
 	// Blocks until the script finishes. Returns false if it could not be started.
-	bool RunBundledScript(const std::vector<std::string>& args, std::string& out)
+	bool RunBundledScript(const std::vector<std::string>& args, std::string& out,
+						  const std::string& baseName = "vw-update")
 	{
-		const std::string script = BundledScriptPath();
+		const std::string script = BundledScriptPath(baseName);
 		if (script.empty())
 			return false;
 
@@ -563,6 +565,17 @@ namespace
 
 namespace HomeskzIfcImport
 {
+	// **本体（ペイロード）へ貸し出す道具。** 本体は自分の在り処から同梱物へたどり着け
+	// ない——読み込まれるのは一時ディレクトリへ写した複製なので、dladdr /
+	// GetModuleFileName が返すのはバンドルの外の道である（src/PayloadHost.h「必ず複製
+	// してから読む」）。そこで殻がここを開けておき、境界越しに関数ポインタで渡す
+	// （src/PayloadAbi.h の VwPayloadHost::runBundledScript）。
+	bool RunBundledScriptNamed(const std::string& baseName, const std::vector<std::string>& args,
+							   std::string& out)
+	{
+		return RunBundledScript(args, out, baseName);
+	}
+
 	// The public entry points are thin: they enforce "run once per session" and
 	// wire the real host + compiled-in build identity into the SDK-independent
 	// flows (UpdaterFlow.cpp), which hold the actual logic (and the tests).
