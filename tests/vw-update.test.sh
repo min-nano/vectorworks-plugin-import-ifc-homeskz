@@ -358,6 +358,90 @@ out="$(RUN do_install "" "")"
 check_contains "$out" "error=" "empty args -> error= line"
 
 # ===========================================================================
+# plugin_zip_url — the distribution zip is found by exact name, and STILL found
+# after the asset is renamed. **これが効かないと、アセット名を変えた瞬間に
+# インストール済みの古いアップデータからは何も落とせなくなる**（利用者は手で
+# 落とすしかなくなる）。
+# ===========================================================================
+RENAMED_JSON="$WORK/renamed.json"
+cat >"$RENAMED_JSON" <<'JSON'
+{
+  "target_commitish": "abc1234def5678",
+  "assets": [
+    { "name": "notes.txt", "browser_download_url": "https://example.test/dl/notes.txt" },
+    { "name": "SomethingElse.vwlibrary.zip",
+      "browser_download_url": "https://example.test/dl/renamed.zip" }
+  ]
+}
+JSON
+
+t "plugin_zip_url prefers the exact asset name"
+out="$(RUN plugin_zip_url "$STABLE_JSON" "assets" "HomeskzIfcImport")"
+check_eq "$out" "https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" "exact match wins"
+
+t "plugin_zip_url still finds the zip after the asset was renamed"
+out="$(RUN plugin_zip_url "$RENAMED_JSON" "assets" "HomeskzIfcImport")"
+check_eq "$out" "https://example.test/dl/renamed.zip" "falls back to any *.vwlibrary.zip"
+
+# ===========================================================================
+# do-install の委譲 — **この変更の要**。落とした zip に vw-install.sh が入っていたら、
+# 配置はそちらへ渡し、その機械可読な出力をそのまま流す。自前の配置（下の予備）は
+# 使わない。
+#
+# 偽インストーラは「自分が呼ばれた証拠」を残して ok を出すだけ。**自前の配置なら必ず
+# 置かれるはずの .vwlibrary が置かれていないこと**を見て、委譲が起きたと判定する。
+# ===========================================================================
+# build_zip_with_installer <zip> <bundle-dir-name> <installer-body>
+build_zip_with_installer() {
+	local dir="$WORK/stage-inst-$$-$RANDOM"
+	local name="${2%.vwlibrary}"
+	mkdir -p "$dir/$2/Contents"
+	printf 'plist\n' >"$dir/$2/Contents/Info.plist"
+	printf 'payload\n' >"$dir/$name.vwpayload"
+	printf '%s\n' "$3" >"$dir/vw-install.sh"
+	( cd "$dir" && zip -qr "$1" "$2" "$name.vwpayload" vw-install.sh )
+	rm -rf "$dir"
+}
+
+t "do_install hands the placement to the installer that came with the zip"
+dest="$WORK/plugins-delegated"
+mkdir -p "$dest"
+DELEGATED_ZIP="$WORK/delegated.zip"
+build_zip_with_installer "$DELEGATED_ZIP" "HomeskzIfcImportDev.vwlibrary" \
+	'printf "installed-shell=from-installer\nok\n"; : >"$VW_TEST_MARKER"'
+marker="$WORK/installer-ran"
+out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$DELEGATED_ZIP" VW_TEST_MARKER="$marker" \
+	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+check_contains "$out" "installed-shell=from-installer" "the installer's lines are passed through"
+check_contains "$out" "ok" "ok is passed through"
+if [ -f "$marker" ]; then ran=yes; else ran=no; fi
+check_eq "$ran" "yes" "the bundled installer actually ran"
+if [ -e "$dest/HomeskzIfcImportDev.vwlibrary" ]; then fellback=yes; else fellback=no; fi
+check_eq "$fellback" "no" "the built-in placement was NOT used"
+
+t "do_install passes an installer error through unchanged"
+dest="$WORK/plugins-delegated-err"
+mkdir -p "$dest"
+ERR_ZIP="$WORK/delegated-err.zip"
+build_zip_with_installer "$ERR_ZIP" "HomeskzIfcImportDev.vwlibrary" \
+	'printf "error=インストーラからの理由\n"'
+out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$ERR_ZIP" \
+	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+check_contains "$out" "error=インストーラからの理由" "the installer's error reaches the plug-in"
+check_not_contains "$out" "ok" "no ok line"
+
+t "do_install falls back to its own placement when the installer says nothing"
+dest="$WORK/plugins-mute"
+mkdir -p "$dest"
+MUTE_ZIP="$WORK/delegated-mute.zip"
+build_zip_with_installer "$MUTE_ZIP" "HomeskzIfcImportDev.vwlibrary" 'exit 3'
+out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$MUTE_ZIP" \
+	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+check_eq "$out" "ok" "the built-in placement reported success"
+if [ -f "$dest/HomeskzIfcImportDev.vwpayload" ]; then fellback=yes; else fellback=no; fi
+check_eq "$fellback" "yes" "a mute/broken installer never counts as done"
+
+# ===========================================================================
 echo "---------------------------------------------------------------"
 if [ "$TESTS_FAILED" -eq 0 ]; then
 	echo "PASS: all ${TESTS_RUN} checks passed."

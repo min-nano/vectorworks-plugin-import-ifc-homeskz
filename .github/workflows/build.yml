@@ -204,8 +204,17 @@ jobs:
           # 動かない（src/PayloadAbi.h）。バンドルの中に入れないのは、mac の署名が
           # リソースまで封をするため——中を差し替えると署名が壊れる。
           cp "build/$name.vwpayload" "stage/$name/"
+          # **インストーラを zip の直下に同梱する。** インストール済みの（＝古い）
+          # vw-update.sh は、これを見つけたら配置をこちらへ委ねる——配置の知識が
+          # 「そのビルドと同じ版」の側にあるので、ファイル構成が変わっても利用者は
+          # 手で入れ直さずに済む（scripts/vw-install.sh の冒頭）。
+          cp scripts/vw-install.sh "stage/$name/"
+          chmod +x "stage/$name/vw-install.sh"
           ( cd "stage/$name" && zip -qry "$GITHUB_WORKSPACE/dist/$name.vwlibrary.zip" \
-              "$name.vwlibrary" "$name.vwpayload" )
+              "$name.vwlibrary" "$name.vwpayload" vw-install.sh )
+          # 同じものをリリースのアセットとしても出す（手動インストールの入口。
+          # README「インストール」）。
+          cp scripts/vw-install.sh dist/
           ls -l dist
 
       - name: Upload plug-in artifacts
@@ -308,15 +317,23 @@ jobs:
           # $name.vwpayload が**本体**（殻が自分で読み込むモジュール）。片方だけでは
           # 動かないので必ず一緒に配る（src/PayloadAbi.h）。$name.shell-id は
           # 「殻まで変わったか」をアップデータが判断するための控え。
+          # scripts/vw-install.ps1 が**インストーラ**。zip の直下に同梱しておくと、
+          # インストール済みの（＝古い）vw-update.ps1 が配置をこちらへ委ねるので、
+          # ファイル構成が変わっても利用者は手で入れ直さずに済む
+          # （scripts/vw-install.ps1 の冒頭）。
           $files = @(
             "build/Release/$name.vlb",
             "build/Release/$name.vwpayload",
             "build/Release/$name.vwr",
             "build/Release/$name.commit",
             "build/Release/$name.shell-id",
-            "build/Release/vw-update.ps1"
+            "build/Release/vw-update.ps1",
+            "scripts/vw-install.ps1"
           ) | Where-Object { Test-Path $_ }
           Compress-Archive -Path $files -DestinationPath "dist/$name.vlb.zip" -Force
+          # 同じものをリリースのアセットとしても出す（手動インストールの入口。
+          # README「インストール」）。
+          Copy-Item 'scripts/vw-install.ps1' -Destination 'dist/' -Force
           Get-ChildItem dist | Select-Object Name, Length
 
       - name: Upload plug-in artifacts
@@ -620,8 +637,10 @@ jobs:
 
     steps:
       # Pull both build jobs' zips into a single dist/ folder. The macOS job
-      # uploaded the ".vwlibrary.zip" bundles; the Windows job the ".vlb.zip"
-      # modules. After both downloads dist/ holds all four assets.
+      # uploaded the ".vwlibrary.zip" bundle and vw-install.sh; the Windows job
+      # the ".vlb.zip" module and vw-install.ps1. After both downloads dist/ holds
+      # every asset this release carries — the two platform zips plus the two
+      # installer scripts（手動インストールの入口。scripts/vw-install.sh の冒頭）。
       - name: Download macOS artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -666,6 +685,8 @@ jobs:
             gh release create stable \
               "dist/HomeskzIfcImport.vwlibrary.zip" \
               "dist/HomeskzIfcImport.vlb.zip" \
+              "dist/vw-install.sh" \
+              "dist/vw-install.ps1" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$BUILD_SHA" \
               --title "Stable (${short})" \
@@ -726,6 +747,8 @@ jobs:
           gh release create "$tag" \
             "dist/HomeskzIfcImportDev.vwlibrary.zip" \
             "dist/HomeskzIfcImportDev.vlb.zip" \
+            "dist/vw-install.sh" \
+            "dist/vw-install.ps1" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$BUILD_SHA" \
             --title "Dev: ${branch} (${short})" \

@@ -31,6 +31,16 @@
 # The interactive stable/dev modes below are the manual, run-from-a-terminal
 # fallback and keep using macOS (osascript) dialogs.
 #
+# **ファイルの配置はこのスクリプトが決めない。** 走るのは常に**インストール済みの
+# （＝古い）**この 1 本なので、ここに配置手順を持たせると「新しいビルドがどんなファイルで
+# できているか」を永遠に知らないままになる。実際 M21 で本体（.vwpayload）が増えたとき、
+# 古いアップデータはそれを写さず、利用者は zip を手で落として置き直す羽目になった。
+#
+# そこで配置は**落とした zip の中の scripts/vw-install.sh**（リリースのアセットとしても
+# 公開されている）へ委ねる。委ね先はそのビルドと同じ版なので、ファイル構成や手順が
+# 変わっても自動アップデートだけで追随できる。zip にインストーラが無い——この仕組みより
+# 前のリリース——ときだけ、下の自前の配置へ落ちる。
+#
 # Usage:
 #   ./scripts/vw-update.sh            # ask which channel (or double-click)
 #   ./scripts/vw-update.sh stable
@@ -52,6 +62,14 @@ set -euo pipefail
 VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-import-ifc-homeskz}"
 VW_PLUGINS_DIR="${VW_PLUGINS_DIR:-$HOME/Library/Application Support/Vectorworks/2026/Plug-Ins}"
 VW_API="https://api.github.com/repos/${VW_REPO}"
+
+# 配布 zip のアセット名の末尾。アセット名を丸ごと決め打ちにせず末尾で拾えるようにして
+# あるのは、**将来アセット名（プラグイン名）が変わっても、インストール済みの古いこの
+# スクリプトが「見つかりません」で止まらない**ようにするため（plugin_zip_url）。
+VW_ZIP_SUFFIX=".vwlibrary.zip"
+
+# 配置を委ねる先（落とした zip の直下にある）。冒頭のコメント参照。
+VW_INSTALLER="vw-install.sh"
 
 # ---------------------------------------------------------------------------
 # Small AppleScript UI helpers. Values are passed as argv (never interpolated
@@ -125,23 +143,50 @@ jval() { # json-file, keypath -> raw scalar value (empty if missing)
 	plutil -extract "$2" raw -o - "$1" 2>/dev/null || true
 }
 
-# asset_url: find the browser_download_url of an asset by name.
+# find_asset_url: walk an assets array and return the browser_download_url of the
+# first entry that matches.
 #   file   the JSON file
 #   prefix keypath of the assets array ("assets" for a single release object,
 #          "<i>.assets" for element i of a releases array)
-#   want   the asset file name to match
-asset_url() { # file, prefix, want
-	local f="$1" pfx="$2" want="$3" j=0 nm
+#   mode   "exact" (name equals value) or "suffix" (name ends with value)
+#   value  what to match against
+find_asset_url() { # file, prefix, mode, value
+	local f="$1" pfx="$2" mode="$3" value="$4" j=0 nm hit
 	while [ "$j" -lt 30 ]; do
 		nm="$(jval "$f" "${pfx}.${j}.name")"
 		[ -n "$nm" ] || break
-		if [ "$nm" = "$want" ]; then
+		hit=0
+		if [ "$mode" = "exact" ]; then
+			[ "$nm" = "$value" ] && hit=1
+		else
+			case "$nm" in
+				*"$value") hit=1 ;;
+			esac
+		fi
+		if [ "$hit" -eq 1 ]; then
 			jval "$f" "${pfx}.${j}.browser_download_url"
 			return 0
 		fi
 		j=$((j + 1))
 	done
 	return 1
+}
+
+# asset_url: find the browser_download_url of an asset by exact name.
+asset_url() { # file, prefix, want
+	find_asset_url "$1" "$2" exact "$3"
+}
+
+# plugin_zip_url: the download URL of the plug-in's distribution zip.
+#
+# **名前が完全一致しなければ、末尾が "<VW_ZIP_SUFFIX>" のアセットで拾い直す。** この
+# スクリプトはインストール済みの（＝古い）ものが走るので、アセット名を決め打ちにすると
+# 名前が変わった瞬間にアップデートの経路そのものが途切れる（利用者は手で落とすしかなく
+# なる）。1 つのリリースが持つ配布 zip はそのチャンネルの 1 つだけなので、末尾での照合で
+# 取り違えは起きない。
+plugin_zip_url() { # file, prefix, plugin-name
+	find_asset_url "$1" "$2" exact "$3${VW_ZIP_SUFFIX}" ||
+		find_asset_url "$1" "$2" suffix "${VW_ZIP_SUFFIX}"
 }
 
 download() { # url, out-file
@@ -173,8 +218,9 @@ installed_shell_id() { # bundle-path -> stamped VWShellId or ""
 	fi
 }
 
-# install_payload: 本体（"<name>.vwpayload"）を殻の隣へ入れる。**殻とは別のファイルで、
-# これが入れ替わると Vectorworks を再起動しなくても次の操作から新しいコードが動く**
+# install_payload: 本体（"<name>.vwpayload"）を殻の隣へ入れる。**予備の配置の一部**で、
+# 通常は zip 同梱の vw-install.sh がまとめて置く（下の run_zip_installer）。**殻とは別の
+# ファイルで、これが入れ替わると Vectorworks を再起動しなくても次の操作から新しいコードが動く**
 # （src/PayloadAbi.h）。zip に入っていなければ**何もしないで成功扱い**にする——古い形の
 # リリース（本体を持たない）へ当たったときに、殻の入れ替えまで巻き添えで失敗させないため。
 #
@@ -198,12 +244,52 @@ install_payload() { # work-dir, name -> 0 on success (or nothing to do)
 	return 0
 }
 
-# install_zip: unzip a "<name>.vwlibrary.zip", de-quarantine, ad-hoc re-sign and
-# atomically swap it into the Plug-Ins folder.
+# ---------------------------------------------------------------------------
+# 配置は zip の中のインストーラへ委ねる（冒頭のコメント参照）。ここから下の自前の配置は
+# **この仕組みより前のリリースへ当たったときだけ**使う予備。
+# ---------------------------------------------------------------------------
+
+# run_zip_installer: 展開済みの zip に入っている vw-install.sh へ配置を委ねる。委ねられた
+# ら、その機械可読な出力（installed-shell= / ok / error=）をそのまま stdout へ流して 0 を
+# 返す。委ねられなければ 1（呼び出し側は自前の配置へ落ちる）。
+#
+# 「委ねられた」の判定は**結末の行が返ってきたか**で行う——インストーラが古い／壊れて
+# いて何も言わないときに、成功したと取り違えないため。
+run_zip_installer() { # work-dir, name -> the installer's machine-readable output
+	local work="$1" name="$2"
+	local inst="$work/$VW_INSTALLER"
+	[ -f "$inst" ] || return 1
+
+	local out
+	out="$(/bin/bash "$inst" --machine --from "$work" --name "$name" \
+		--plugins-dir "$VW_PLUGINS_DIR" 2>/dev/null)" || return 1
+
+	printf '%s\n' "$out" | grep -qE '^(ok$|error=)' || return 1
+	printf '%s\n' "$out"
+}
+
+# installer_error_text: 機械可読な出力から error= の中身を取り出す（無ければ空）。
+installer_error_text() { # machine-output
+	printf '%s\n' "$1" | sed -n 's/^error=//p' | head -n 1
+}
+
+# install_zip: unzip a "<name>.vwlibrary.zip" and install it — first by handing the
+# unpacked tree to the installer that came WITH it, otherwise (older releases) by
+# the built-in de-quarantine / ad-hoc re-sign / atomic swap below.
 install_zip() { # zip, name
 	local zip="$1" name="$2"
 	local work; work="$(mktemp -d)"
 	unzip -q "$zip" -d "$work"
+
+	local out
+	if out="$(run_zip_installer "$work" "$name")"; then
+		rm -rf "$work"
+		local err; err="$(installer_error_text "$out")"
+		[ -z "$err" ] || die "$err"
+		echo "installed: $VW_PLUGINS_DIR/$name.vwlibrary"
+		return 0
+	fi
+
 	local src="$work/$name.vwlibrary"
 	[ -d "$src" ] || { rm -rf "$work"; die "$name.vwlibrary が zip 内に見つかりません。"; }
 
@@ -244,10 +330,10 @@ update_stable() {
 	local f; f="$(api_get "releases/tags/stable")" \
 		|| die "安定版リリース (stable) が見つかりません。main のビルドが完了しているか確認してください。"
 	local latest_full; latest_full="$(jval "$f" target_commitish)"
-	local url; url="$(asset_url "$f" "assets" "HomeskzIfcImport.vwlibrary.zip" || true)"
+	local url; url="$(plugin_zip_url "$f" "assets" "HomeskzIfcImport" || true)"
 	rm -f "$f"
 	[ -n "$latest_full" ] || die "安定版リリースの情報を取得できませんでした。"
-	[ -n "$url" ] || die "安定版のアセット (HomeskzIfcImport.vwlibrary.zip) が見つかりません。"
+	[ -n "$url" ] || die "安定版リリースに配布 zip (*.vwlibrary.zip) が見つかりません。"
 
 	local latest="${latest_full:0:7}"
 	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HomeskzIfcImport.vwlibrary")"
@@ -284,7 +370,7 @@ update_dev() {
 			dev-*)
 				name="$(jval "$f" "${i}.name")"
 				commit="$(jval "$f" "${i}.target_commitish")"
-				url="$(asset_url "$f" "${i}.assets" "HomeskzIfcImportDev.vwlibrary.zip" || true)"
+				url="$(plugin_zip_url "$f" "${i}.assets" "HomeskzIfcImportDev" || true)"
 				[ -n "$name" ] || name="$tag"
 				names+=("$name"); tags+=("$tag"); commits+=("$commit"); urls+=("$url")
 				;;
@@ -306,7 +392,7 @@ update_dev() {
 	[ "$idx" -ge 0 ] || die "選択したビルドを特定できませんでした。"
 
 	local url2="${urls[$idx]}" latest="${commits[$idx]:0:7}"
-	[ -n "$url2" ] || die "選択したビルドのアセット (HomeskzIfcImportDev.vwlibrary.zip) が見つかりません。"
+	[ -n "$url2" ] || die "選択したビルドに配布 zip (*.vwlibrary.zip) が見つかりません。"
 	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HomeskzIfcImportDev.vwlibrary")"
 
 	local same_note=""
@@ -342,7 +428,7 @@ q_stable() {
 	local f; f="$(api_get "releases/tags/stable")" \
 		|| { echo "error=stable リリースを取得できませんでした。"; return 0; }
 	local latest_full; latest_full="$(jval "$f" target_commitish)"
-	local url; url="$(asset_url "$f" "assets" "HomeskzIfcImport.vwlibrary.zip" || true)"
+	local url; url="$(plugin_zip_url "$f" "assets" "HomeskzIfcImport" || true)"
 	rm -f "$f"
 	if [ -z "$latest_full" ] || [ -z "$url" ]; then
 		echo "error=stable リリースの情報が不完全です。"; return 0
@@ -370,7 +456,7 @@ q_dev() {
 			dev-*)
 				name="$(jval "$f" "${i}.name")"
 				commit="$(jval "$f" "${i}.target_commitish")"
-				url="$(asset_url "$f" "${i}.assets" "HomeskzIfcImportDev.vwlibrary.zip" || true)"
+				url="$(plugin_zip_url "$f" "${i}.assets" "HomeskzIfcImportDev" || true)"
 				[ -n "$name" ] || name="$tag"
 				# Only list builds that actually have a downloadable asset.
 				[ -n "$url" ] && printf 'build\t%s\t%s\t%s\n' "${commit:0:7}" "$name" "$url"
@@ -398,6 +484,19 @@ do_install() {
 	if ! unzip -q "$tmp/$name.vwlibrary.zip" -d "$work" >/dev/null 2>&1; then
 		rm -rf "$tmp" "$work"; echo "error=アーカイブの展開に失敗しました。"; return 0
 	fi
+
+	# **配置は落とした zip の中のインストーラへ委ねる**（冒頭のコメント／
+	# run_zip_installer）。プラグインが読む契約（installed-shell= / ok / error=）は
+	# インストーラ側が満たすので、その出力をそのまま流す。
+	local out
+	if out="$(run_zip_installer "$work" "$name")"; then
+		rm -rf "$tmp" "$work"
+		printf '%s\n' "$out"
+		return 0
+	fi
+
+	# ここから下は予備——zip にインストーラが無い（この仕組みより前のリリース）とき
+	# だけ通る。
 	local src="$work/$name.vwlibrary"
 	if [ ! -d "$src" ]; then
 		rm -rf "$tmp" "$work"; echo "error=$name.vwlibrary が zip 内に見つかりません。"; return 0

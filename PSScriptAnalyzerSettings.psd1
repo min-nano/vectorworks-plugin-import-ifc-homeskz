@@ -1,6 +1,7 @@
 # PSScriptAnalyzer configuration — https://learn.microsoft.com/powershell/utility-modules/psscriptanalyzer/overview
 #
-# Static analysis for the Windows updater script (scripts/vw-update.ps1). This is
+# Static analysis for the Windows updater and installer scripts
+# (scripts/vw-update.ps1 / scripts/vw-install.ps1). This is
 # the PowerShell analogue of what clang-tidy does for the C/C++ updater logic and
 # shellcheck does for the bash scripts: it flags bug-prone patterns, unapproved
 # cmdlet verbs, unused parameters, unsafe comparisons and the like, BEFORE they
@@ -9,12 +10,12 @@
 #
 # Like clang-tidy (which lints the SDK-free src/ logic, not the tests) and
 # shellcheck (which lints scripts/*.sh, not tests/*.sh), the analyzer is pointed
-# at the production updater script under scripts/, not the test harness under
+# at the production scripts under scripts/, not the test harness under
 # tests/ — a test double legitimately overrides built-in cmdlets, leaves stub
 # parameters unused and calls helpers positionally, none of which is a defect.
 #
 # The full default rule set is enabled; only the handful of rules that conflict
-# with this script's deliberate, documented design are excluded, each with its
+# with these scripts' deliberate, documented design are excluded, each with its
 # reason below. Everything else — the rules that catch real mistakes — stays on.
 
 @{

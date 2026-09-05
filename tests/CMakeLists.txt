@@ -437,6 +437,23 @@ if(NOT WIN32)
 	endif()
 endif()
 
+# macOS installer (scripts/vw-install.sh) — the script that now owns the file
+# PLACEMENT (it ships inside every release zip and as a release asset, and the
+# installed updater hands the placement to it). Same bash + stubs approach.
+if(NOT WIN32)
+	find_program(BASH_PROGRAM bash)
+	if(BASH_PROGRAM)
+		add_test(NAME InstallerScriptTests COMMAND "${BASH_PROGRAM}"
+												   "${CMAKE_CURRENT_SOURCE_DIR}/vw-install.test.sh")
+		set_tests_properties(
+			InstallerScriptTests PROPERTIES ENVIRONMENT
+											"VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
+	elseif(VW_REQUIRE_SCRIPT_TESTS)
+		message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'bash' was not found: the macOS "
+							"installer-script tests (vw-install.test.sh) cannot run.")
+	endif()
+endif()
+
 # Windows updater (scripts/vw-update.ps1) via PowerShell 7 (pwsh) + stubbed
 # Invoke-GH/Invoke-WebRequest. No Pester needed — the harness is self-contained.
 find_program(PWSH_PROGRAM pwsh)
@@ -449,6 +466,19 @@ if(PWSH_PROGRAM)
 elseif(VW_REQUIRE_SCRIPT_TESTS)
 	message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'pwsh' (PowerShell 7) was not found: "
 						"the Windows updater-script tests (vw-update.Tests.ps1) cannot run.")
+endif()
+
+# Windows installer (scripts/vw-install.ps1) — the Windows half of the placement
+# owner above. Same pwsh harness.
+if(PWSH_PROGRAM)
+	add_test(NAME InstallerScriptTestsPs COMMAND "${PWSH_PROGRAM}" -NoProfile -File
+												 "${CMAKE_CURRENT_SOURCE_DIR}/vw-install.Tests.ps1")
+	set_tests_properties(
+		InstallerScriptTestsPs PROPERTIES ENVIRONMENT
+										  "VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
+elseif(VW_REQUIRE_SCRIPT_TESTS)
+	message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'pwsh' (PowerShell 7) was not found: "
+						"the Windows installer-script tests (vw-install.Tests.ps1) cannot run.")
 endif()
 
 # CI-wait clients (scripts/ci-common.sh + scripts/ci-wait.sh) via bash + a fake
