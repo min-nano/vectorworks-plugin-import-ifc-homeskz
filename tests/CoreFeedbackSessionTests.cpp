@@ -15,10 +15,13 @@
 #include "core/ImportOptions.h"
 
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 using HomeskzIfcImport::core::clearFeedbackSession;
+using HomeskzIfcImport::core::defaultFeedbackSessionPath;
 using HomeskzIfcImport::core::FeedbackSession;
 using HomeskzIfcImport::core::formatFeedbackSession;
 using HomeskzIfcImport::core::kSymbolRoleCount;
@@ -55,6 +58,46 @@ namespace
 		const std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
 		return (dir / name).string();
 	}
+
+	// 環境変数の付け外し。**置き場所の決め方は環境変数だけで決まる**ので、これが無いと
+	// その分岐（Windows 流・macOS 流・どちらも取れない）を確かめられない。綴りが処理系で
+	// 違うのでここに閉じ込める（core/Trace が getenv を 1 か所へ閉じ込めているのと同じ）。
+	void setEnv(const char* name, const char* value)
+	{
+#if defined(_WIN32)
+		_putenv_s(name, value != nullptr ? value : "");
+#else
+		if (value != nullptr)
+			setenv(name, value, 1);
+		else
+			unsetenv(name);
+#endif
+	}
+
+	// 環境変数を 1 つ預かって、抜けるときに元へ戻す（他のテストへ漏らさない）。
+	class ScopedEnv
+	{
+	public:
+		ScopedEnv(const char* name, const char* value) : fName(name)
+		{
+			const char* const previous = std::getenv(name);
+			fHad = previous != nullptr;
+			if (fHad)
+				fPrevious = previous;
+			setEnv(name, value);
+		}
+		~ScopedEnv()
+		{
+			setEnv(fName, fHad ? fPrevious.c_str() : nullptr);
+		}
+		ScopedEnv(const ScopedEnv&) = delete;
+		ScopedEnv& operator=(const ScopedEnv&) = delete;
+
+	private:
+		const char* fName;
+		std::string fPrevious;
+		bool fHad = false;
+	};
 } // namespace
 
 TEST(feedback_session_defaults_do_nothing)
@@ -95,14 +138,15 @@ TEST(feedback_session_round_trips_through_text)
 
 TEST(feedback_session_parse_skips_broken_lines)
 {
-	// 見出し・空行・"=" の無い行・知らないキー・範囲外の役割番号は黙って飛ばし、
-	// 読める行だけを拾う（古い版が書いたファイルで往復を止めない）。
+	// 見出し・空行・"=" の無い行・知らないキー・番号にならない／範囲外の役割は黙って
+	// 飛ばし、読める行だけを拾う（古い版が書いたファイルで往復を止めない）。
 	const std::string text = "# コメント\n"
 							 "\n"
-							 "これは key=value ではない\n"
+							 "イコールがまったく無い行\n"
 							 "unknown=なにか\n"
 							 "role.99.symbol=存在しない役割\n"
 							 "role.x.on=1\n"
+							 "roleでもドットが続かない=1\n"
 							 "pr=77\n"
 							 "send=yes\n"
 							 "auto=off\n";
@@ -110,6 +154,27 @@ TEST(feedback_session_parse_skips_broken_lines)
 	CHECK_EQ(session.pullRequest, 77);
 	CHECK(session.send);
 	CHECK(!session.autoContinue);
+}
+
+TEST(feedback_session_parse_keeps_defaults_for_unreadable_values)
+{
+	// 真偽にならない綴り・空の数・桁あふれは**既定のまま**（0 に潰さない・例外を投げない）。
+	const FeedbackSession session = parseFeedbackSession("send=たぶん\n"
+														 "anon=たぶん\n"
+														 "pr=\n"
+														 "round=99999999999\n");
+	CHECK(!session.send);	  // 既定（false）のまま
+	CHECK(session.anonymize); // 既定（true）のまま
+	CHECK_EQ(session.pullRequest, 0);
+	CHECK_EQ(session.round, 0);
+}
+
+TEST(feedback_session_parse_trims_blank_values)
+{
+	// 値が空白だけの行は「空」として読む（前後の空白を落とすので何も残らない）。
+	const FeedbackSession session = parseFeedbackSession("repo=   \nbranch= feature/x \n");
+	CHECK(session.repo.empty());
+	CHECK_EQ(session.branch, std::string("feature/x"));
 }
 
 TEST(feedback_session_parse_ignores_bad_numbers)
@@ -147,6 +212,54 @@ TEST(feedback_session_file_round_trip)
 	CHECK(!readFeedbackSession(path, gone));
 	// 二度消しても落ちない。
 	clearFeedbackSession(path);
+}
+
+TEST(feedback_session_write_reports_a_place_it_cannot_write)
+{
+	// 書けなくても往復は続けられる（2 周目が走らないだけ）ので、**例外ではなく false**。
+	// ファイルの下のパスは、ディレクトリとしても作れないので確実に失敗する。
+	const std::string file = tempPath("homeskz-feedback-not-a-dir.txt");
+	{
+		std::ofstream out(file, std::ios::trunc);
+		out << "これはファイルであってディレクトリではない\n";
+	}
+	CHECK(!writeFeedbackSession(file + "/child/feedback.txt", sample()));
+	std::error_code ec;
+	std::filesystem::remove(file, ec);
+}
+
+TEST(feedback_session_default_path_follows_the_platform)
+{
+	// **置き場所は環境変数だけで決まる。** 一時ディレクトリには置かない（消えると
+	// 2 周目が走らない）ので、ここが狂うと往復が静かに 1 周で終わる。
+	{
+		// 差し替え（試験用）が最優先。
+		const ScopedEnv custom("HOMESKZ_IFC_FEEDBACK_STATE", "/tmp/custom-feedback.txt");
+		CHECK_EQ(defaultFeedbackSessionPath(), std::string("/tmp/custom-feedback.txt"));
+	}
+	{
+		// Windows は %LOCALAPPDATA% の下。
+		const ScopedEnv custom("HOMESKZ_IFC_FEEDBACK_STATE", nullptr);
+		const ScopedEnv local("LOCALAPPDATA", "C:\\Users\\Taro\\AppData\\Local");
+		CHECK_EQ(defaultFeedbackSessionPath(),
+				 std::string("C:\\Users\\Taro\\AppData\\Local\\HomeskzIfcImport\\feedback.txt"));
+	}
+	{
+		// macOS は $HOME/Library/Application Support の下。
+		const ScopedEnv custom("HOMESKZ_IFC_FEEDBACK_STATE", nullptr);
+		const ScopedEnv local("LOCALAPPDATA", nullptr);
+		const ScopedEnv home("HOME", "/Users/hanako");
+		CHECK_EQ(defaultFeedbackSessionPath(),
+				 std::string("/Users/hanako/Library/Application Support/HomeskzIfcImport/"
+							 "feedback.txt"));
+	}
+	{
+		// どれも取れない環境では諦める（呼び出し側は記憶を持たずに 1 周で終わる）。
+		const ScopedEnv custom("HOMESKZ_IFC_FEEDBACK_STATE", nullptr);
+		const ScopedEnv local("LOCALAPPDATA", nullptr);
+		const ScopedEnv home("HOME", nullptr);
+		CHECK(defaultFeedbackSessionPath().empty());
+	}
 }
 
 TEST(feedback_session_empty_path_is_refused)

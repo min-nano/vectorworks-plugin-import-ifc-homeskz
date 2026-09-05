@@ -106,9 +106,13 @@ TEST(feedback_tally_diff_without_previous_is_empty)
 
 TEST(feedback_tally_diff_ignores_broken_entries)
 {
-	// 壊れた記憶を読んでも落ちない・止まらない。
-	const std::string diff = formatTallyDiff("こわれた,横架材:2/4", "横架材:4/4");
+	// 壊れた記憶を読んでも落ちない・止まらない。区切りの無い項目・数字でない数・
+	// 名前の無い項目は、どれも黙って飛ばす。
+	const std::string diff =
+		formatTallyDiff("こわれた,柱:x/2,:3/3,横架材:2/4,梁:4/y", "横架材:4/4");
 	CHECK(contains(diff, "横架材: 2/4 → 4/4"));
+	CHECK(!contains(diff, "柱"));
+	CHECK(!contains(diff, "梁"));
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +144,32 @@ TEST(feedback_redaction_removes_path_and_user_name)
 	CHECK(contains(clean, "model-"));
 	// 伏せるのは名前だけ。診断の中身（何をしたか）はそのまま残る。
 	CHECK(contains(clean, "読み込みました"));
+}
+
+TEST(feedback_anonymized_name_handles_odd_paths)
+{
+	// 区切りの無い名前（相対パス）でも仮名になる。
+	CHECK(contains(anonymizedFileName("model.ifc"), "model-"));
+	// 末尾が区切りで終わっていてファイル名が取れないときも、名前を作って返す
+	// （**空の仮名を出さない**——伏せたつもりの本名が出るより悪い）。
+	CHECK_EQ(anonymizedFileName("/Users/hanako/"), std::string("model-000000.ifc"));
+	// 拡張子が無ければ .ifc を付ける（取り込んだのが IFC であることは伏せる必要が無い）。
+	CHECK(contains(anonymizedFileName("/tmp/plan"), ".ifc"));
+}
+
+TEST(feedback_redaction_survives_paths_without_a_file_name)
+{
+	// 対象のパスがディレクトリで終わっていても落ちない・止まらない。
+	const std::string clean = redactText("どこかの /Users/hanako/ の中", "/Users/hanako/");
+	CHECK(!contains(clean, "hanako"));
+}
+
+TEST(feedback_redaction_masks_a_trailing_or_doubled_user_segment)
+{
+	// 区切りで終わらないユーザー名（ログの末尾）も伏せる。
+	CHECK(!contains(redactText("home=/Users/hanako", ""), "hanako"));
+	// 区切りが続いただけの箇所は、伏せるものが無いのでそのまま進む（無限に回らない）。
+	CHECK_EQ(redactText("/Users//tmp", ""), std::string("/Users//tmp"));
 }
 
 TEST(feedback_redaction_handles_windows_paths)
@@ -215,6 +245,44 @@ TEST(feedback_comment_says_when_nothing_changed)
 	round.previousTally = "横架材:4/4,柱:2/2";
 	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
 	CHECK(contains(body, "内訳に変化はありません"));
+}
+
+TEST(feedback_comment_shows_the_size_in_kb_or_nothing)
+{
+	// 1 MB 未満は KB で出す。
+	FeedbackRound small = sampleRound();
+	small.bytes = 4096;
+	CHECK(contains(formatFeedbackComment(small, sampleDocument(), sampleCounts()), "4.0 KB"));
+
+	// 大きさが取れなかった（0）ときは括弧ごと出さない——「0 バイトのファイルを
+	// 取り込んだ」と読み違えさせないため。
+	FeedbackRound unknown = sampleRound();
+	unknown.bytes = 0;
+	unknown.seconds = 0.0;
+	const std::string body = formatFeedbackComment(unknown, sampleDocument(), sampleCounts());
+	CHECK(!contains(body, "0.0 KB"));
+	CHECK(!contains(body, "所要"));
+}
+
+TEST(feedback_comment_says_when_there_are_no_commands)
+{
+	// 「取り込める要素が 1 つも無い」も報告の対象（ホームズ君の IFC かどうかを疑う場面）。
+	const Document empty;
+	DrawCounts counts;
+	counts.valid = true;
+	const std::string body = formatFeedbackComment(sampleRound(), empty, counts);
+	CHECK(contains(body, "命令が 1 つも出ていません"));
+	CHECK(contains(body, "対象なし"));
+}
+
+TEST(feedback_comment_folds_the_ordinary_notes)
+{
+	// 平常でも出る記録（用紙の割り付け等）は折り畳む——毎回開いて読むものではない。
+	DrawCounts counts = sampleCounts();
+	counts.notes = "伏図: 1:50 で 3 面";
+	const std::string body = formatFeedbackComment(sampleRound(), sampleDocument(), counts);
+	CHECK(contains(body, "記録（用紙の割り付けなど）"));
+	CHECK(contains(body, "1:50 で 3 面"));
 }
 
 TEST(feedback_comment_shows_draw_diagnostics_unfolded)

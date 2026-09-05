@@ -676,7 +676,9 @@ if(VW_BUILD_PLUGIN)
 				COMMAND "${CMAKE_COMMAND}" -E copy "${shell_id_file}"
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.shell-id"
 				VERBATIM
-				COMMENT "Bundling vw-update.ps1 / vw-feedback.ps1 and build stamps next to ${output_name}")
+				COMMENT
+					"Bundling vw-update.ps1 / vw-feedback.ps1 and build stamps next to ${output_name}"
+			)
 		endif()
 	endfunction()
 

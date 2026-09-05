@@ -56,6 +56,14 @@ function Get-TokenFilePath {
 # （DPAPI は Windows にしか無い）。テストはここだけを差し替え、login / logout / 探索順
 # といった本当のロジックは実物のまま走らせる（tests/vw-feedback.Tests.ps1）。
 function Protect-TokenText {
+    # PSAvoidUsingConvertToSecureStringWithPlainText は「平文から SecureString を作るな」
+    # という規則だが、ここでの SecureString は**保管を暗号化するための通り道**であって、
+    # 平文をメモリから隠すためのものではない（トークンは呼び出し元が平文で持っている）。
+    # ConvertFrom-SecureString は DPAPI で暗号化した文字列を返すので、**保存したユーザー
+    # 本人しか復号できないファイル**になる——それがここで欲しい唯一の性質である。
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingConvertToSecureStringWithPlainText', '',
+        Justification = 'SecureString is only the route to DPAPI-at-rest; the token is already plaintext here.')]
     param([string] $PlainText)
     $secure = ConvertTo-SecureString -String $PlainText -AsPlainText -Force
     return (ConvertFrom-SecureString -SecureString $secure)
