@@ -118,6 +118,16 @@ function Get-PluginZipUrl($release, [string] $name) {
     return $null
 }
 
+# Get-PluginDir: そのプラグインが持つフォルダ（<Plug-Ins>\<name>\）。**インストーラと
+# 同じ規則**でなければならない（scripts/vw-install.ps1 の同名関数。片方だけ変えると、
+# 入れた場所と読む場所が食い違う）。渡された先が既にそのフォルダなら足さない——
+# プラグインは「いま自分が読み込まれたフォルダ」を渡してくるので、そこが既に
+# <Plug-Ins>\<name> である。
+function Get-PluginDir([string] $root, [string] $name) {
+    if ((Split-Path -Leaf $root) -eq $name) { return $root }
+    return (Join-Path $root $name)
+}
+
 # First 7 chars of a commit-ish, or '' if empty/null.
 function Get-Short($commitish) {
     if (-not $commitish) { return '' }
@@ -129,7 +139,7 @@ function Get-Short($commitish) {
 # the build ships next to its .vlb, or "none". (The mac side reads VWBuildCommit
 # from the bundle's Info.plist; Windows has no plist, hence the sidecar.)
 function Get-InstalledCommit([string] $name) {
-    $f = Join-Path $VW_PLUGINS_DIR "$name.commit"
+    $f = Join-Path (Get-PluginDir $VW_PLUGINS_DIR $name) "$name.commit"
     if (Test-Path -LiteralPath $f) {
         $c = Get-Content -LiteralPath $f -Raw -ErrorAction SilentlyContinue
         if ($c) { return $c.Trim() }
@@ -143,7 +153,7 @@ function Get-InstalledCommit([string] $name) {
 # （src/PayloadAbi.h / src/UpdaterParse.h）。読めなければ空文字（＝判断できないので、
 # プラグイン側は安全側＝「再起動が要る」へ倒す）。
 function Get-InstalledShellId([string] $name) {
-    $f = Join-Path $VW_PLUGINS_DIR "$name.shell-id"
+    $f = Join-Path (Get-PluginDir $VW_PLUGINS_DIR $name) "$name.shell-id"
     if (Test-Path -LiteralPath $f) {
         $c = Get-Content -LiteralPath $f -Raw -ErrorAction SilentlyContinue
         if ($c) { return $c.Trim() }
@@ -231,12 +241,15 @@ function Install-Build([string] $url, [string] $name) {
             $script:LastError = "$name.vlb が zip 内に見つかりません。"; return $false
         }
 
-        if (-not (Test-Path -LiteralPath $VW_PLUGINS_DIR)) {
-            New-Item -ItemType Directory -Force -Path $VW_PLUGINS_DIR | Out-Null
+        # 予備の配置も**プラグインのフォルダへ**入れる（上の Get-PluginDir）。読む側
+        # （Get-InstalledCommit / Get-InstalledShellId）と食い違わせないため。
+        $dest = Get-PluginDir $VW_PLUGINS_DIR $name
+        if (-not (Test-Path -LiteralPath $dest)) {
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
         }
 
         # Sweep backups left by a previous update (now that VW has released them).
-        Get-ChildItem -LiteralPath $VW_PLUGINS_DIR -Filter '*.old-*' -ErrorAction SilentlyContinue |
+        Get-ChildItem -LiteralPath $dest -Filter '*.old-*' -ErrorAction SilentlyContinue |
             ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop } catch {} }
 
         # "$name.vwpayload" が**本体**（殻が自分で読み込むモジュール）。これが入れ替われば
@@ -246,7 +259,7 @@ function Install-Build([string] $url, [string] $name) {
                          "$name.shell-id", 'vw-update.ps1')) {
             $s = Join-Path $work $f
             if (Test-Path -LiteralPath $s) {
-                try { Install-File $s (Join-Path $VW_PLUGINS_DIR $f) }
+                try { Install-File $s (Join-Path $dest $f) }
                 catch { $script:LastError = 'インストール先へのコピーに失敗しました。'; return $false }
             }
         }

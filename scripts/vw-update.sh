@@ -196,6 +196,26 @@ download() { # url, out-file
 # ---------------------------------------------------------------------------
 # Plug-in / Vectorworks helpers.
 # ---------------------------------------------------------------------------
+
+# plugin_dir: そのプラグインが持つフォルダ（`<Plug-Ins>/<name>/`）。**インストーラと
+# 同じ規則**でなければならない（scripts/vw-install.sh の同名関数。片方だけ変えると、
+# 入れた場所と読む場所が食い違う）。渡された先が既にそのフォルダなら足さない——
+# プラグインは「いま自分が読み込まれたフォルダ」を渡してくるので、そこが既に
+# `<Plug-Ins>/<name>` である。
+plugin_dir() { # plugins-dir, name -> the plug-in's own folder
+	local root="$1" name="$2"
+	if [ "$(basename "$root")" = "$name" ]; then
+		printf '%s' "$root"
+	else
+		printf '%s' "$root/$name"
+	fi
+}
+
+# installed_bundle: インストール済みの殻のパス（上記のフォルダの中にある）。
+installed_bundle() { # name -> path to <name>.vwlibrary
+	printf '%s/%s.vwlibrary' "$(plugin_dir "$VW_PLUGINS_DIR" "$1")" "$1"
+}
+
 installed_commit() { # bundle-path -> stamped VWBuildCommit or "none"
 	local plist="$1/Contents/Info.plist"
 	if [ -f "$plist" ]; then
@@ -231,13 +251,15 @@ install_payload() { # work-dir, name -> 0 on success (or nothing to do)
 	local work="$1" name="$2"
 	local src="$work/$name.vwpayload"
 	[ -f "$src" ] || return 0
+	local dir
+	dir="$(plugin_dir "$VW_PLUGINS_DIR" "$name")"
 
 	# Gatekeeper: 殻と同じ手当て。dlopen する側なので、隔離属性が残っていると
 	# Apple Silicon では読み込めない。
 	xattr -d com.apple.quarantine "$src" 2>/dev/null || true
 	codesign --force --sign - "$src" >/dev/null 2>&1 || true
 
-	local dst="$VW_PLUGINS_DIR/$name.vwpayload"
+	local dst="$dir/$name.vwpayload"
 	rm -f "$dst.new"
 	cp "$src" "$dst.new" || return 1
 	mv -f "$dst.new" "$dst" || return 1
@@ -286,7 +308,7 @@ install_zip() { # zip, name
 		rm -rf "$work"
 		local err; err="$(installer_error_text "$out")"
 		[ -z "$err" ] || die "$err"
-		echo "installed: $VW_PLUGINS_DIR/$name.vwlibrary"
+		echo "installed: $(installed_bundle "$name")"
 		return 0
 	fi
 
@@ -298,8 +320,10 @@ install_zip() { # zip, name
 	xattr -dr com.apple.quarantine "$src" 2>/dev/null || true
 	codesign --force --deep --sign - "$src" >/dev/null 2>&1 || true
 
-	mkdir -p "$VW_PLUGINS_DIR"
-	local dst="$VW_PLUGINS_DIR/$name.vwlibrary"
+	local dir
+	dir="$(plugin_dir "$VW_PLUGINS_DIR" "$name")"
+	mkdir -p "$dir"
+	local dst="$dir/$name.vwlibrary"
 	rm -rf "$dst.new"
 	cp -R "$src" "$dst.new"
 	rm -rf "$dst"
@@ -336,7 +360,7 @@ update_stable() {
 	[ -n "$url" ] || die "安定版リリースに配布 zip (*.vwlibrary.zip) が見つかりません。"
 
 	local latest="${latest_full:0:7}"
-	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HomeskzIfcImport.vwlibrary")"
+	local installed; installed="$(installed_commit "$(installed_bundle HomeskzIfcImport)")"
 
 	if [ "$installed" = "$latest" ]; then
 		alert "HomeskzIfcImport (stable)" "既に最新です（build ${installed}）。"
@@ -393,7 +417,7 @@ update_dev() {
 
 	local url2="${urls[$idx]}" latest="${commits[$idx]:0:7}"
 	[ -n "$url2" ] || die "選択したビルドに配布 zip (*.vwlibrary.zip) が見つかりません。"
-	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HomeskzIfcImportDev.vwlibrary")"
+	local installed; installed="$(installed_commit "$(installed_bundle HomeskzIfcImportDev)")"
 
 	local same_note=""
 	[ "$installed" = "$latest" ] && same_note="（このビルドは既にインストール済みです）
@@ -433,7 +457,7 @@ q_stable() {
 	if [ -z "$latest_full" ] || [ -z "$url" ]; then
 		echo "error=stable リリースの情報が不完全です。"; return 0
 	fi
-	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HomeskzIfcImport.vwlibrary")"
+	local installed; installed="$(installed_commit "$(installed_bundle HomeskzIfcImport)")"
 	echo "installed=${installed}"
 	echo "latest=${latest_full:0:7}"
 	echo "url=${url}"
@@ -445,7 +469,7 @@ q_stable() {
 q_dev() {
 	local f; f="$(api_get "releases?per_page=100")" \
 		|| { echo "error=リリース一覧を取得できませんでした。"; return 0; }
-	local installed; installed="$(installed_commit "$VW_PLUGINS_DIR/HomeskzIfcImportDev.vwlibrary")"
+	local installed; installed="$(installed_commit "$(installed_bundle HomeskzIfcImportDev)")"
 	echo "installed=${installed}"
 
 	local i=0 tag name commit url
@@ -507,8 +531,10 @@ do_install() {
 	xattr -dr com.apple.quarantine "$src" 2>/dev/null || true
 	codesign --force --deep --sign - "$src" >/dev/null 2>&1 || true
 
-	mkdir -p "$VW_PLUGINS_DIR"
-	local dst="$VW_PLUGINS_DIR/$name.vwlibrary"
+	local dir
+	dir="$(plugin_dir "$VW_PLUGINS_DIR" "$name")"
+	mkdir -p "$dir"
+	local dst="$dir/$name.vwlibrary"
 	rm -rf "$dst.new"
 	if ! cp -R "$src" "$dst.new"; then
 		rm -rf "$tmp" "$work" "$dst.new"; echo "error=インストール先へのコピーに失敗しました。"; return 0

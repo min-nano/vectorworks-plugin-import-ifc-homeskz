@@ -454,6 +454,23 @@ if(NOT WIN32)
 	endif()
 endif()
 
+# macOS uninstaller (scripts/vw-uninstall.sh) — **本リポジトリで唯一「利用者のディスク上の
+# ものを消す」コード**なので、削除の安全弁（消してよい形のときだけ消す）を回帰テストで
+# 押さえる。スタブは無く、本物が temp ディレクトリに対して走る。
+if(NOT WIN32)
+	find_program(BASH_PROGRAM bash)
+	if(BASH_PROGRAM)
+		add_test(NAME UninstallerScriptTests
+				 COMMAND "${BASH_PROGRAM}" "${CMAKE_CURRENT_SOURCE_DIR}/vw-uninstall.test.sh")
+		set_tests_properties(
+			UninstallerScriptTests PROPERTIES ENVIRONMENT
+											  "VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
+	elseif(VW_REQUIRE_SCRIPT_TESTS)
+		message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'bash' was not found: the macOS "
+							"uninstaller-script tests (vw-uninstall.test.sh) cannot run.")
+	endif()
+endif()
+
 # Windows updater (scripts/vw-update.ps1) via PowerShell 7 (pwsh) + stubbed
 # Invoke-GH/Invoke-WebRequest. No Pester needed — the harness is self-contained.
 find_program(PWSH_PROGRAM pwsh)
@@ -479,6 +496,20 @@ if(PWSH_PROGRAM)
 elseif(VW_REQUIRE_SCRIPT_TESTS)
 	message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'pwsh' (PowerShell 7) was not found: "
 						"the Windows installer-script tests (vw-install.Tests.ps1) cannot run.")
+endif()
+
+# Windows uninstaller (scripts/vw-uninstall.ps1) — the Windows half of the deletion
+# safety net above.
+if(PWSH_PROGRAM)
+	add_test(NAME UninstallerScriptTestsPs
+			 COMMAND "${PWSH_PROGRAM}" -NoProfile -File
+					 "${CMAKE_CURRENT_SOURCE_DIR}/vw-uninstall.Tests.ps1")
+	set_tests_properties(
+		UninstallerScriptTestsPs PROPERTIES ENVIRONMENT
+											"VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
+elseif(VW_REQUIRE_SCRIPT_TESTS)
+	message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'pwsh' (PowerShell 7) was not found: "
+						"the Windows uninstaller-script tests (vw-uninstall.Tests.ps1) cannot run.")
 endif()
 
 # CI-wait clients (scripts/ci-common.sh + scripts/ci-wait.sh) via bash + a fake

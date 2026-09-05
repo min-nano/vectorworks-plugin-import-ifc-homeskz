@@ -198,9 +198,25 @@
 [GitHub のリリース](https://github.com/min-nano/vectorworks-plugin-import-ifc-homeskz/releases)
 から取得します（stable は `stable` リリース、dev は `dev-<ブランチ名>` プレリリース）。
 
+### 置き場所: プラグインは自分のフォルダを 1 つ持つ
+
+配布物は **`Plug-Ins` の直下ではなく、プラグイン名のフォルダ**に入ります。
+
+```
+~/Library/Application Support/Vectorworks/2026/Plug-Ins/
+  └── HomeskzIfcImport/
+        ├── HomeskzIfcImport.vwlibrary
+        ├── HomeskzIfcImport.vwpayload
+        └── vw-uninstall.sh
+```
+
+こうしておくと**そのプラグインのものが 1 か所に閉じる**ので、消したいときはフォルダを
+1 つ捨てるだけで済みます（同梱の `vw-uninstall.sh` / `vw-uninstall.ps1` も同じことを
+します）。下記のインストーラを使えば、この形は自動的に作られます。
+
 ### 2 つのファイルで 1 つのプラグイン
 
-**配布物は 2 つに割れています。** どちらも `Plug-Ins` の同じ場所へ、**必ず一緒に**置いて
+**配布物は 2 つに割れています。** どちらも上のフォルダへ、**必ず一緒に**置いて
 ください（片方だけでは動きません）。
 
 | ファイル | 何か |
@@ -233,10 +249,24 @@ iwr -UseBasicParsing -OutFile vw-install.ps1 `
 powershell -ExecutionPolicy Bypass -File vw-install.ps1
 ```
 
-インストール先は Vectorworks 2026 のユーザフォルダ内の `Plug-Ins` です。別の場所に
-入れたいときは `--plugins-dir <パス>`（Windows は `-PluginsDir <パス>`）を付けます。
-入れ終わったら、下記「macOS」の手順 3・4（Windows は 2・3）——Vectorworks を起動して
-コマンドをワークスペースに追加する——だけ行ってください。
+インストール先は Vectorworks 2026 のユーザフォルダ内の
+`Plug-Ins/HomeskzIfcImport/` です。別の場所に入れたいときは `--plugins-dir <パス>`
+（Windows は `-PluginsDir <パス>`）で `Plug-Ins` にあたる場所を指定してください
+（プラグイン名のフォルダはその中に作られます）。入れ終わったら、下記「macOS」の
+手順 3・4（Windows は 2・3）——Vectorworks を起動してコマンドをワークスペースに追加する
+——だけ行ってください。
+
+**取り除くとき**も同じ場所にスクリプトがあります（インストールすると
+`Plug-Ins/HomeskzIfcImport/vw-uninstall.sh` にも入ります）。
+
+```sh
+bash vw-uninstall.sh                             # stable を取り除く
+bash vw-uninstall.sh --name HomeskzIfcImportDev  # dev を取り除く
+```
+
+```pwsh
+powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
+```
 
 以下は、zip を自分で展開して置く**手作業の手順**です。
 
@@ -248,8 +278,9 @@ powershell -ExecutionPolicy Bypass -File vw-install.ps1
 
 1. **バンドルと `.vwpayload` をローカルディスクに置きます**（iCloud Drive は不可 — iCloud が
    ダウンロード隔離フラグを付け直すことがあります）。置き場所は Vectorworks 2026 の
-   ユーザフォルダ内の `Plug-Ins` ディレクトリです（Vectorworks ▸ 環境設定 ▸
-   *ユーザフォルダ* から探せます）。
+   ユーザフォルダ内の `Plug-Ins/HomeskzIfcImport/` です（`Plug-Ins` は
+   Vectorworks ▸ 環境設定 ▸ *ユーザフォルダ* から探せます。`HomeskzIfcImport`
+   フォルダは自分で作ります）。
 
 2. Gatekeeper がブロックしないよう、**macOS の隔離フラグを解除します**:
 
@@ -282,10 +313,11 @@ powershell -ExecutionPolicy Bypass -File vw-install.ps1
 隣に置きます（SDK の Windows での作法）。
 
 1. **`HomeskzIfcImport.vlb` と `HomeskzIfcImport.vwpayload` と `HomeskzIfcImport.vwr` を
-   一緒に**、Vectorworks 2026 のユーザフォルダ内の `Plug-Ins` ディレクトリへ置きます。
-   3 つは同名・同フォルダである必要があります。自動アップデートも使うなら
-   `HomeskzIfcImport.commit`・`HomeskzIfcImport.shell-id`・`vw-update.ps1` も一緒に置きます
-   （配布 zip にはこれらがすべて入っています）。
+   一緒に**、Vectorworks 2026 のユーザフォルダ内の `Plug-Ins/HomeskzIfcImport/` へ
+   置きます（`HomeskzIfcImport` フォルダは自分で作ります）。3 つは同名・同フォルダで
+   ある必要があります。自動アップデートも使うなら
+   `HomeskzIfcImport.commit`・`HomeskzIfcImport.shell-id`・`vw-update.ps1`・
+   `vw-uninstall.ps1` も一緒に置きます（配布 zip にはこれらがすべて入っています）。
 
 2. **Vectorworks を起動します**（未署名の警告は macOS と同じ）。
 
@@ -319,14 +351,16 @@ powershell -ExecutionPolicy Bypass -File vw-install.ps1
 **構成ファイルが増えても、手で入れ直す必要はありません。** ファイルの配置は、
 インストール済みの（＝古い）アップデータではなく、**落としてきた zip に入っている
 インストーラ**が行います。インストーラはビルドと一緒に配られるので、常に「そのビルドの
-正しい構成」で置いてくれます。
+正しい構成」で置いてくれます。更新は**前の版をいったん取り除いてから**入れるので
+（取り除くのは、その版と一緒に入っていたアンインストーラです）、古い版のファイルが
+残ることもありません。
 
-> **この仕組みより前のビルドから更新するときだけ、1 度は古い手順で入ります。**
-> そのときのファイル構成は変わっていないので正しく入り、その更新で新しいアップデータが
-> 入ります。以後は上のとおりです。
-> なお、それより前（中身 `.vwpayload` が増える前）のビルドから更新して「本体
-> （`HomeskzIfcImport.vwpayload`）が見つかりません」と出た場合は、上記
-> 「いちばん簡単な入れ方: インストーラを使う」を 1 度実行すれば直ります。
+> **フォルダ分けより前のビルドが `Plug-Ins` の直下に入っている場合は、1 度だけ手で
+> 片付けてください。** 新しい版は `Plug-Ins/HomeskzIfcImport/` に入るので、直下の
+> `HomeskzIfcImport.vwlibrary`（Windows は `.vlb` と `.vwr` ほか）と
+> `HomeskzIfcImport.vwpayload` が残っていると、**同じプラグインが二重に読み込まれます**。
+> 直下のものを捨ててから、上記「いちばん簡単な入れ方: インストーラを使う」を実行して
+> ください。以後の更新は自動です。
 
 仕組みの詳細（同梱スクリプト・再起動をヘルパープロセスに任せている理由・手動実行）は
 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)「自動アップデートの仕組み」にあります。

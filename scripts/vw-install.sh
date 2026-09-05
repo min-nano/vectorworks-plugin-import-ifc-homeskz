@@ -23,9 +23,23 @@
 # したがって **ここに書いてよいのは「配置に関わること」だけ**で、UI もチャンネルの選択も
 # 持たない（それは `vw-update.sh` の仕事）。
 #
-# 配置の規則はひとつ: **zip の直下にあるものを、そのまま Plug-Ins へ置く。**
+# 配置の規則はひとつ: **zip の直下にあるものを、そのまま置く。**
 # ファイル名を列挙しない——列挙した瞬間に「増えたファイルを取りこぼす」という、いま
 # 直している事故がそっくり戻ってくる。除くのはこのスクリプト自身だけ。
+#
+# 置き先は **`Plug-Ins` の直下ではなく、プラグインが自分で持つフォルダ**である:
+#
+#     <Plug-Ins>/HomeskzIfcImport/HomeskzIfcImport.vwlibrary
+#     <Plug-Ins>/HomeskzIfcImport/HomeskzIfcImport.vwpayload
+#     <Plug-Ins>/HomeskzIfcImport/vw-uninstall.sh
+#
+# こうしておくと**そのプラグインのものが 1 か所に閉じる**ので、取り除くのが「フォルダを
+# 1 つ消す」で済む（`vw-uninstall.sh`）。Vectorworks が `Plug-Ins` のサブフォルダも
+# 読みに行くことは実機で確認済み。
+#
+# 入れる前に、**いま入っている版を、その版自身のアンインストーラで取り除く**
+# （下記 `remove_installed`）。取り除く側が「いま入っている版」の知識を持つのは、
+# 置く側が「新しい版」の知識を持つのとちょうど対になっている。
 #
 # Usage:
 #   ./vw-install.sh                          # 最新の stable を入れる
@@ -36,8 +50,8 @@
 # Options:
 #   --name <plugin>      HomeskzIfcImport / HomeskzIfcImportDev（既定はアーカイブか
 #                        リリースのアセット名から判定する）
-#   --plugins-dir <dir>  インストール先（既定は VW_PLUGINS_DIR、無ければ VW2026 の
-#                        ユーザフォルダ）
+#   --plugins-dir <dir>  Plug-Ins（またはプラグインのフォルダそのもの）。既定は
+#                        VW_PLUGINS_DIR、無ければ VW2026 のユーザフォルダ
 #   --from <dir>         展開済みのディレクトリから入れる（ダウンロードしない）
 #   --zip <file>         手元の zip から入れる
 #   --url <url>          この zip を落として入れる
@@ -69,6 +83,10 @@ VW_SHELL_EXT=".vwlibrary"
 # 配布 zip のアセット名の末尾。リリースから拾うときの手掛かりで、**プラグイン名が変わっても
 # 効く**ようにアセット名そのものではなく末尾で照合する。
 VW_ZIP_SUFFIX="${VW_SHELL_EXT}.zip"
+# インストール先へ一緒に置くアンインストーラ。**これはインストール先へ置く**——次の
+# アップデートで「いま入っている版を、その版自身の知識で取り除く」ために要る
+# （下記 remove_installed、および scripts/vw-uninstall.sh の冒頭）。
+VW_UNINSTALLER="vw-uninstall.sh"
 
 MACHINE=0
 OPT_NAME=""
@@ -210,20 +228,78 @@ place_entry() { # src, dst -> 0 on success
 	return 0
 }
 
-# install_tree: 展開済みディレクトリの直下にあるものを、そのまま Plug-Ins へ置く。
-# **列挙しない**のが肝（冒頭のコメント参照）。
+# plugin_dir: 実際に置くフォルダ。**プラグインは自分のフォルダを 1 つ持つ**
+# （`<Plug-Ins>/<name>/`。冒頭のコメント参照）。
+#
+# **渡された先が既にそのフォルダなら足さない。** 自動アップデートのとき、プラグインは
+# 「いま自分が読み込まれたフォルダ」を渡してくる——サブフォルダ化のあとはそれ自身が
+# `<Plug-Ins>/<name>` なので、無条件に足すと更新のたびに `<name>/<name>/…` と際限なく
+# 深くなる。`vw-uninstall.sh` の同名関数と**同じ規則**でなければならない（片方だけ
+# 変えると、入れた場所と消す場所が食い違う）。
+plugin_dir() { # plugins-dir, name -> the plug-in's own folder
+	local root="$1" name="$2"
+	if [ "$(basename "$root")" = "$name" ]; then
+		printf '%s' "$root"
+	else
+		printf '%s' "$root/$name"
+	fi
+}
+
+# remove_installed: **いま入っている版を、その版自身が置いていったアンインストーラで
+# 取り除く。** 置く側が「新しい版」の知識を持つのと対で、取り除く側は「いま入っている
+# 版」の知識を持つ（scripts/vw-uninstall.sh の冒頭）。
+#
+# 見つからなければ何もしない（初回インストール、あるいはこの仕組みより前の版）。
+# 失敗しても**続行する**——このあとどのみち上書きするので、取り除けなかったことを
+# 理由にインストールごと失敗させるのは損。
+#
+# **一時ディレクトリへ写してから走らせる。** アンインストーラは自分が消すフォルダの中に
+# 居るので、その場で走らせると「実行中のスクリプトを消す」ことになる。
+#
+# （なお、走っている `vw-update.sh` は殻のバンドルの中に居るので、これも一緒に消える。
+# POSIX では開いたままの fd から読み続けられるので走り切れる——M21 以来、殻の入れ替えで
+# 同じことが起きていて実機で問題は出ていない。）
+remove_installed() { # dest-dir, name
+	local dest="$1" name="$2"
+	local src="$dest/$VW_UNINSTALLER"
+	[ -f "$src" ] || return 0
+
+	# 写し先は**この関数が自分で作る**。main の一時ディレクトリを当てにすると、直接
+	# 呼ばれたとき（テスト、あるいは将来の呼び出し）に空文字を掴んで `/` へ書きに行く
+	# ——root なら成功してしまい、テストが「通ったのに何もしていない」状態になる（実際に
+	# それで CI と手元の結果が食い違った）。
+	local tmp
+	tmp="$(mktemp -d)" || return 0
+	local copy="$tmp/$VW_UNINSTALLER"
+	if cp "$src" "$copy" 2>/dev/null; then
+		say "いま入っている版を取り除きます…"
+		/bin/bash "$copy" --machine --name "$name" --plugins-dir "$dest" >/dev/null 2>&1 || true
+	fi
+	rm -rf "$tmp"
+	return 0
+}
+
+# install_tree: 展開済みディレクトリの直下にあるものを、そのままプラグインのフォルダへ
+# 置く。**列挙しない**のが肝（冒頭のコメント参照）。
 install_tree() { # work-dir, plugin-name -> 0 on success
 	local work="$1" name="$2"
 
 	# 取り違えた zip を黙って撒かないための最低限の確認。殻はどのビルドにも必ず入って
-	# いる（これが無ければそもそもプラグインではない）。
+	# いる（これが無ければそもそもプラグインではない）。**取り除くより先に確かめる**
+	# ——ここで弾けなかったら、消しただけで入れられない状態になる。
 	if [ ! -d "$work/${name}${VW_SHELL_EXT}" ]; then
 		fail "${name}${VW_SHELL_EXT} がアーカイブ内に見つかりません。"
 		return 1
 	fi
 
-	if ! mkdir -p "$PLUGINS_DIR"; then
-		fail "インストール先を作成できませんでした: $PLUGINS_DIR"
+	local dest
+	dest="$(plugin_dir "$PLUGINS_DIR" "$name")"
+
+	# 入れる前に前の版を取り除く（上記）。
+	remove_installed "$dest" "$name"
+
+	if ! mkdir -p "$dest"; then
+		fail "インストール先を作成できませんでした: $dest"
 		return 1
 	fi
 
@@ -232,12 +308,13 @@ install_tree() { # work-dir, plugin-name -> 0 on success
 		[ -e "$entry" ] || continue
 		base="$(basename "$entry")"
 		case "$base" in
-			# インストーラ自身は Plug-Ins へ置かない（プラグインの一部ではない）。
+			# インストーラ自身は置かない（プラグインの一部ではない）。**アンインストーラは
+			# 置く**——次のアップデートがこれを使う（remove_installed）。
 			vw-install.sh | vw-install.ps1) continue ;;
 			# unzip / macOS が残す残骸。
 			__MACOSX | .DS_Store) continue ;;
 		esac
-		place_entry "$entry" "$PLUGINS_DIR/$base" || return 1
+		place_entry "$entry" "$dest/$base" || return 1
 		say "  置きました: $base"
 	done
 	return 0
@@ -249,7 +326,8 @@ install_tree() { # work-dir, plugin-name -> 0 on success
 # （src/PayloadAbi.h / src/UpdaterParse.h）。読めなければ空＝プラグインは安全側
 # （再起動が要る）へ倒す。
 installed_shell_id() { # plugin-name -> id or ""
-	local plist="$PLUGINS_DIR/$1${VW_SHELL_EXT}/Contents/Info.plist"
+	local plist
+	plist="$(plugin_dir "$PLUGINS_DIR" "$1")/$1${VW_SHELL_EXT}/Contents/Info.plist"
 	if [ -f "$plist" ]; then
 		/usr/libexec/PlistBuddy -c "Print :VWShellId" "$plist" 2>/dev/null || echo ""
 	else
@@ -420,7 +498,7 @@ main() {
 	fi
 
 	if [ "$ok" -eq 0 ]; then
-		printf '%s\n' "インストールしました: $PLUGINS_DIR"
+		printf '%s\n' "インストールしました: $(plugin_dir "$PLUGINS_DIR" "$PREPARED_NAME")"
 		printf '%s\n' "Vectorworks を起動してください（起動中なら再起動してください）。"
 		return 0
 	fi
