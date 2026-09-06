@@ -177,6 +177,16 @@ namespace HomeskzIfcImport::draw
 		EVENT_DISPATCH_MAP_BEGIN(CTokenDialog);
 		EVENT_DISPATCH_MAP_END;
 
+		// **もう投稿できる状態か**（尋ねない・何も出さない）。「送らない」を選んだ周にも
+		// 所見だけは訊くが、そのために**トークンの貼り付けダイアログを出すのは筋が違う**
+		// ——送らないと決めた人の前に登録を求めるモーダルが出るのでは、押しづらいだけの
+		// ボタンになる。登録済みのときだけ静かに訊く。
+		bool HaveToken()
+		{
+			std::string out;
+			return RunScript(kFeedbackScript, {"token-status"}, out) && ValueOf(out, "ok") == "yes";
+		}
+
 		// **投稿できる状態にする。** トークンが無ければ 1 度だけ尋ねて保存する。
 		// 使えるようになったら true。理由は note へ（呼び出し側が見せる）。
 		bool EnsureToken(std::string& note)
@@ -398,6 +408,26 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
+		// **所見を訊く仕事を別プロセスへ渡す。** こちらは待たない——`ask-note` は自分を
+		// 起こし直して即座に返るので、この呼び出しで Vectorworks が止まるのは一瞬だけで、
+		// 利用者は図面を拡大・レイヤ切り替えしながら所見を書ける（scripts/vw-feedback.sh）。
+		//
+		// **戻ってしまう以上こちらへは返せない**ので、尋ねてから投稿するところまであちらの
+		// 仕事になり、所見は独立した 1 通として PR へ載る。
+		//
+		// 起動できなくても取り込みそのものは済んでいるので、**黙って諦める**（所見が付か
+		// ないだけ。PR へ直接返信もできる）。宛先が分からないときも同じ。
+		void SpawnNoteDialog(const core::FeedbackSession& session, int round,
+							 const std::string& commit, const std::string& url, bool posted)
+		{
+			if (session.pullRequest == 0 || !HaveToken())
+				return;
+			std::string spawned;
+			RunScript(kFeedbackScript,
+					  {"ask-note", session.repo, std::to_string(session.pullRequest),
+					   std::to_string(round), commit, url, posted ? "yes" : "no"},
+					  spawned);
+		}
 	} // namespace
 
 	// -----------------------------------------------------------------------
@@ -455,9 +485,17 @@ namespace HomeskzIfcImport::draw
 			return false; // ダイアログを組めなかった → 呼び出し側が結果ダイアログへ落とす
 		if (!accepted)
 		{
-			// 「送らない」。**記憶は消す**——次の取り込みがひとりでに自動周回を始めると
-			// 驚くので、往復をやめる意思表示として扱う。
-			core::clearFeedbackSession(core::defaultFeedbackSessionPath());
+			// 「送らない」。**記憶は消さない。** この周を報告しないことと往復をやめることは
+			// 別で、やめるのは次の周の確認で「やめる」を押したときである
+			// （draw/ImportCommand.cpp）。ここで消すと、報告したくない周が 1 つあっただけで
+			// ファイルと設定を選び直す羽目になる。
+			//
+			// **それでも所見だけは訊く。** 送らないと決めた周にこそ、その理由や絵の様子と
+			// いった「こちらからは決して見えないもの」があることがある——ここで黙ると、
+			// その周は読む側から完全に消える（実機 round 4 の所見）。空のまま閉じれば
+			// 何も投稿されないので、本当に何も残したくないときの逃げ道も残る。
+			SpawnNoteDialog(session, session.round + 1, input.build.commit, /*url*/ "",
+							/*posted*/ false);
 			return false;
 		}
 
@@ -528,24 +566,12 @@ namespace HomeskzIfcImport::draw
 			return false;
 		}
 
-		// **所見は別プロセスで訊く。** 絵を見てから書くには Vectorworks を操作できなければ
-		// ならず、こちらのダイアログはモーダルでそれを塞ぐ（VW のレイアウトダイアログは
-		// モーダル前提で、モードレスにするには別の拡張種別が要る——[SDK リファレンス
-		// 「モードレス（非モーダル）なパレット」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md)。
+		// **所見は別プロセスで訊く**（SpawnNoteDialog）。絵を見てから書くには Vectorworks を
+		// 操作できなければならず、こちらのダイアログはモーダルでそれを塞ぐ（VW のレイアウト
+		// ダイアログはモーダル前提で、モードレスにするには別の拡張種別が要る——[SDK
+		// リファレンス「モードレス（非モーダル）なパレット」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md)。
 		// 実機未確認）。
-		//
-		// そこで**尋ねるのも投稿するのも同梱スクリプトへ渡し、こちらは待たない**。
-		// `ask-note` は自分を起こし直して即座に返るので、この呼び出しで Vectorworks が
-		// 止まるのは一瞬だけ——利用者は図面を拡大・レイヤ切り替えしながら、別プロセスの
-		// ダイアログに所見を書ける（scripts/vw-feedback.sh の冒頭）。
-		//
-		// 起動できなくても投稿そのものは済んでいるので、**黙って続ける**（所見が付かない
-		// だけ。PR へ直接返信もできる）。
-		std::string spawned;
-		RunScript(kFeedbackScript,
-				  {"ask-note", session.repo, std::to_string(session.pullRequest),
-				   std::to_string(session.round), input.build.commit, url},
-				  spawned);
+		SpawnNoteDialog(session, session.round, input.build.commit, url, /*posted*/ true);
 
 		// **ここで「投稿しました」を出さない。** モーダルのアラートは Vectorworks を
 		// 止めるので、いま出したばかりの所見のダイアログの前で図面を見られなくなる。

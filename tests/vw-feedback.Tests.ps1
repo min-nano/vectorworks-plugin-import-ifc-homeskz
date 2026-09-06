@@ -280,7 +280,13 @@ T 'ask-note returns immediately and hands the worker everything it needs'
 $script:Spawned = $null
 CheckEq (AsText (Invoke-AskNote -Repo 'o/r' -Number '123' -Round '2' -Build 'abc1234' `
             -Url 'https://example.test/c1')) 'ok'
-CheckEq $script:Spawned 'ask-note-worker o/r 123 2 abc1234 https://example.test/c1'
+CheckEq $script:Spawned 'ask-note-worker o/r 123 2 abc1234 https://example.test/c1 yes'
+
+T 'ask-note passes on that the round was NOT posted'
+$script:Spawned = $null
+CheckEq (AsText (Invoke-AskNote -Repo 'o/r' -Number '123' -Round '5' -Build 'abc1234' `
+            -Url '' -Posted 'no')) 'ok'
+CheckEq $script:Spawned 'ask-note-worker o/r 123 5 abc1234  no'
 
 T 'ask-note refuses a missing PR'
 CheckEq (AsText (Invoke-AskNote -Repo 'o/r' -Number '' -Round '1' -Build 'abc' -Url '')) `
@@ -297,7 +303,7 @@ Invoke-AskNoteWorker -Repo 'o/r' -Number '123' -Round '2' -Build 'abc1234' `
     -Url 'https://example.test/c1'
 $sent = [Text.Encoding]::UTF8.GetString($script:LastBody)
 $decoded = ($sent | ConvertFrom-Json).body
-CheckContains $decoded '<!-- homeskz-ifc-feedback-note v1 round=2 build=abc1234 -->' `
+CheckContains $decoded '<!-- homeskz-ifc-feedback-note v1 round=2 build=abc1234 posted=yes -->' `
     'marks the note as its own kind of comment'
 CheckContains $decoded '> 3 階の梁が浮いている' 'quotes what the person wrote'
 CheckContains $decoded '### 実機を見ての所見（round 2）' 'says which round it belongs to'
@@ -318,6 +324,24 @@ Invoke-AskNoteWorker -Repo 'o/r' -Number '123' -Round '2' -Build 'abc1234' `
     -Url 'https://example.test/c1'
 CheckEq ($null -eq $script:LastBody) $true 'nothing was posted'
 CheckEq $script:Opened 'https://example.test/c1' 'the posted comment is still opened'
+
+T 'the worker treats a round that was NOT posted differently'
+# **その周について PR に載るのはこの所見だけ**になるので、そう伝えたうえで訊く。黙って
+# 終わると、読む側からはその周が丸ごと消える（実機 round 4 の所見）。
+$script:NoteAnswer = '今回は絵を見たかっただけ'
+$script:Opened = 'まだ開いていない'
+Invoke-AskNoteWorker -Repo 'o/r' -Number '123' -Round '5' -Build 'abc1234' -Url '' -Posted 'no'
+$decoded = ([Text.Encoding]::UTF8.GetString($script:LastBody) | ConvertFrom-Json).body
+CheckContains $decoded '<!-- homeskz-ifc-feedback-note v1 round=5 build=abc1234 posted=no -->' `
+    'records that the round was not posted'
+CheckContains $decoded '### 実機を見ての所見（round 5・結果は未投稿）' 'says so in the heading'
+CheckContains $script:NotePrompt '唯一の記録' 'tells the person it is the only record'
+
+T 'an empty note on an unposted round leaves nothing behind'
+$script:LastBody = $null
+$script:NoteAnswer = $null
+Invoke-AskNoteWorker -Repo 'o/r' -Number '123' -Round '6' -Build 'abc1234' -Url '' -Posted 'no'
+CheckEq ($null -eq $script:LastBody) $true 'nothing was posted'
 
 T 'the worker says so when the note could not be posted'
 # プラグインはもう戻っているので、ここで黙ると書いた所見がどこにも残らないまま消える。

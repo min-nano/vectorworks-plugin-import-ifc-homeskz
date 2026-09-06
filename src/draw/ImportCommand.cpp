@@ -302,12 +302,22 @@ namespace HomeskzIfcImport::draw
 			// **図面を戻してもらう。** 同じ文書へ 2 回描くと前の周の図形が二重に残る。
 			// プログラムから「取り消し」を掛ける手立ては確かめていないので（SDK の
 			// 調査はリファレンス側で行う。CLAUDE.md）、ここは 1 クリックで頼む。
+			//
+			// **ここが「往復をやめる」唯一の入口でもある。** フィードバックのダイアログで
+			// 「送らない」を選んでも記憶は消えない（この周を報告しないだけで、やめる意思とは
+			// 限らないため。draw/Feedback.cpp）。やめたい人が押すのはこの「やめる」で、
+			// 押されたら記憶を捨てる——次の取り込みはいつもどおりファイル選択から始まる。
 			const std::string advice = "取り込み前の状態に戻してから（「取り消し」）"
 									   "「続ける」を押してください。\n\nファイル: " +
-									   FileNameOf(ifcPath);
+									   FileNameOf(ifcPath) +
+									   "\n\n「やめる」を押すと往復を終わりにします"
+									   "（次の取り込みはファイル選択から始まります）。";
 			if (gSDK->AlertQuestion("新しいビルドで同じ IFC を取り込み直します。", advice.c_str(),
 									/*defaultButton*/ 1, "続ける", "やめる", "", "") != 1)
+			{
+				core::clearFeedbackSession(core::defaultFeedbackSessionPath());
 				return false;
+			}
 			settingsNote = "前の周の設定をそのまま使いました（実機フィードバックの往復）";
 		}
 		else

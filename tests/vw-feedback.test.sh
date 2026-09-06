@@ -386,7 +386,13 @@ rm -f "$SPAWNED_FILE"
 check "ask-note: returns immediately with ok" \
 	"$(mode_ask_note "o/r" "123" "2" "abc1234" "https://example.test/c1")" "ok"
 check "ask-note: hands the worker everything it needs" "$(cat "$SPAWNED_FILE")" \
-	"ask-note-worker o/r 123 2 abc1234 https://example.test/c1"
+	"ask-note-worker o/r 123 2 abc1234 https://example.test/c1 yes"
+
+rm -f "$SPAWNED_FILE"
+check "ask-note: passes on that the round was NOT posted" \
+	"$(mode_ask_note "o/r" "123" "5" "abc1234" "" "no"; cat "$SPAWNED_FILE")" \
+	"ok
+ask-note-worker o/r 123 5 abc1234  no"
 check "ask-note: a missing PR is refused" "$(mode_ask_note "o/r" "" "1" "abc" "")" \
 	"error=引数が不足しています。"
 
@@ -420,7 +426,7 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     print(json.load(handle)["body"], end="")
 ' "$CURL_PAYLOAD")"
 check_contains "ask-note-worker: marks the note as its own kind of comment" "$decoded" \
-	"<!-- homeskz-ifc-feedback-note v1 round=2 build=abc1234 -->"
+	"<!-- homeskz-ifc-feedback-note v1 round=2 build=abc1234 posted=yes -->"
 check_contains "ask-note-worker: quotes what the person wrote" "$decoded" \
 	"> 3 階の梁が浮いている"
 check_contains "ask-note-worker: says which round it belongs to" "$decoded" \
@@ -429,6 +435,33 @@ check_contains "ask-note-worker: tells the person the round was posted" \
 	"$(cat "$WORK/note-prompt.txt")" "round 2 を投稿しました"
 check "ask-note-worker: opens the posted comment" "$(cat "$OPENED_FILE")" \
 	"https://example.test/c1"
+
+# --- 結果を投稿しなかった周（「送らない」を選んだとき） ----------------------
+# **その周について PR に載るのはこの所見だけ**になるので、そう伝えたうえで訊く。
+# 黙って終わると、読む側からはその周が丸ごと消える（実機 round 4 の所見）。
+rm -f "$OPENED_FILE" "$ALERTED_FILE"
+NOTE_CANCELLED=0
+NOTE_ANSWER="今回は絵を見たかっただけ"
+mode_ask_note_worker "o/r" "123" "5" "abc1234" "" "no"
+decoded="$(python3 -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle)["body"], end="")
+' "$CURL_PAYLOAD")"
+check_contains "ask-note-worker (unposted): records that the round was not posted" "$decoded" \
+	"<!-- homeskz-ifc-feedback-note v1 round=5 build=abc1234 posted=no -->"
+check_contains "ask-note-worker (unposted): says so in the heading" "$decoded" \
+	"### 実機を見ての所見（round 5・結果は未投稿）"
+check_contains "ask-note-worker (unposted): tells the person it is the only record" \
+	"$(cat "$WORK/note-prompt.txt")" "唯一の記録"
+check "ask-note-worker (unposted): opens nothing" "$(cat "$OPENED_FILE" 2>/dev/null)" ""
+
+# 空のまま送れば、投稿しなかった周には**何も残らない**（本当に何も言いたくない人の逃げ道）。
+CURL_PAYLOAD_BEFORE="$(cat "$CURL_PAYLOAD")"
+NOTE_ANSWER=""
+mode_ask_note_worker "o/r" "123" "6" "abc1234" "" "no"
+check "ask-note-worker (unposted): an empty note posts nothing" "$(cat "$CURL_PAYLOAD")" \
+	"$CURL_PAYLOAD_BEFORE"
 
 # 複数行を書かれても引用が崩れない。
 rm -f "$OPENED_FILE"

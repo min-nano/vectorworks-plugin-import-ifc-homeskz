@@ -16,8 +16,10 @@
 #   logout                     キーチェーンから消す
 #   find-pr <repo> <branch>    そのブランチの open な PR 番号を引く
 #   post <repo> <n> <body-file>  PR（= issue）へコメントを 1 通投稿する
-#   ask-note <repo> <n> <round> <build> [<url>]
+#   ask-note <repo> <n> <round> <build> [<url>] [yes|no]
 #                              **所見を尋ねて投稿する**。すぐ返り、ダイアログは別プロセスに残る
+#                              末尾は「結果を投稿したか」（既定 yes）。no なら文言が変わり、
+#                              その所見がその周の唯一の記録になることを伝える
 #
 # **ask-note が「待たない」のが肝。** プラグインは同梱スクリプトの出力を読み終わるまで
 # Vectorworks のメインスレッドを止める（popen）ので、ここでダイアログを出して待つと
@@ -312,11 +314,11 @@ spawn_self() { # args...
 # ask-note: **すぐ返る。** 自分自身を detached で起こし直し、`ok` を出して終わる。
 # ダイアログと投稿はその子（ask-note-worker）が引き受ける。
 mode_ask_note() {
-	local repo="${1:-}" number="${2:-}" round="${3:-}" build="${4:-}" url="${5:-}"
+	local repo="${1:-}" number="${2:-}" round="${3:-}" build="${4:-}" url="${5:-}" posted="${6:-yes}"
 	if [ -z "$number" ]; then
 		echo "error=引数が不足しています。"; return 0
 	fi
-	spawn_self ask-note-worker "$repo" "$number" "$round" "$build" "$url"
+	spawn_self ask-note-worker "$repo" "$number" "$round" "$build" "$url" "$posted"
 	echo "ok"
 }
 
@@ -326,9 +328,21 @@ mode_ask_note() {
 # 所見は**独立した 1 通**として投稿する（取り込み結果の本文へ差し込まない）。差し込む形に
 # すると、コメントの組み立てが C++ 側（parse/Feedback）とここの 2 か所に割れる。
 mode_ask_note_worker() {
-	local repo="${1:-}" number="${2:-}" round="${3:-}" build="${4:-}" url="${5:-}"
-	local prompt="round ${round} を投稿しました。
+	local repo="${1:-}" number="${2:-}" round="${3:-}" build="${4:-}" url="${5:-}" posted="${6:-yes}"
+
+	# **結果を投稿した周と、しなかった周で言うことが違う。** 投稿しなかった周は、この所見が
+	# その周について PR に載る**唯一のもの**になる——だからそう書いて、書く気になってもらう。
+	local prompt suffix
+	if [ "$posted" = "no" ]; then
+		prompt="round ${round} の結果は投稿しませんでした。
+伝えたいことがあれば書いてください（これがこの周の唯一の記録になります）。
+空のまま送れば、何も投稿せずに終わります。"
+		suffix="・結果は未投稿"
+	else
+		prompt="round ${round} を投稿しました。
 図面を確かめて、気付いたことがあれば書いてください（空のまま送れば所見なしで終わります）。"
+		suffix=""
+	fi
 
 	local note
 	if ! note="$(ask_note "実機フィードバック round ${round}" "$prompt")"; then
@@ -345,8 +359,9 @@ mode_ask_note_worker() {
 	{
 		# 機械可読の目印。取り込み結果のコメント（parse/Feedback）とは別の種別にして、
 		# **人が書いた所見だと読む側が判別できる**ようにする。
-		printf '<!-- homeskz-ifc-feedback-note v1 round=%s build=%s -->\n' "$round" "$build"
-		printf '### 実機を見ての所見（round %s）\n\n' "$round"
+		printf '<!-- homeskz-ifc-feedback-note v1 round=%s build=%s posted=%s -->\n' \
+			"$round" "$build" "$posted"
+		printf '### 実機を見ての所見（round %s%s）\n\n' "$round" "$suffix"
 		printf '%s\n' "$note" | awk '{ print "> " $0 }'
 	} > "$body"
 
@@ -372,10 +387,10 @@ main() {
 		logout)       mode_logout ;;
 		find-pr)      mode_find_pr "${1:-}" "${2:-}" ;;
 		post)         mode_post "${1:-}" "${2:-}" "${3:-}" ;;
-		ask-note)     mode_ask_note "${1:-}" "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
+		ask-note)     mode_ask_note "${1:-}" "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" ;;
 		# 内部用（ask-note が自分を起こし直すときの入口。人が直接呼ぶものではない）。
 		ask-note-worker)
-			mode_ask_note_worker "${1:-}" "${2:-}" "${3:-}" "${4:-}" "${5:-}" ;;
+			mode_ask_note_worker "${1:-}" "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" ;;
 		*)            echo "error=不明なモード: '${mode}'（token-status / login / logout / find-pr / post / ask-note）。" ;;
 	esac
 }

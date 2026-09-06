@@ -14,7 +14,7 @@
       logout                        保存したトークンを消す
       find-pr <repo> <branch>       そのブランチの open な PR 番号を引く
       post <repo> <n> <body-file>   PR へコメントを 1 通投稿する
-      ask-note <repo> <n> <round> <build> [<url>]
+      ask-note <repo> <n> <round> <build> [<url>] [yes|no]
                                     **所見を尋ねて投稿する**。すぐ返り、ダイアログは
                                     別プロセスに残る
 
@@ -289,14 +289,17 @@ function Invoke-SelfDetached {
 
 # ask-note: **すぐ返る。** 自分自身を別プロセスで起こし直し、'ok' を出して終わる。
 function Invoke-AskNote {
-    param([string] $Repo, [string] $Number, [string] $Round, [string] $Build, [string] $Url)
+    param([string] $Repo, [string] $Number, [string] $Round, [string] $Build, [string] $Url,
+        [string] $Posted = 'yes')
 
     if (-not $Number) {
         Write-Output 'error=引数が不足しています。'
         return
     }
+    if (-not $Posted) { $Posted = 'yes' }
     try {
-        Invoke-SelfDetached -ScriptArguments @('ask-note-worker', $Repo, $Number, $Round, $Build, $Url)
+        Invoke-SelfDetached -ScriptArguments @(
+            'ask-note-worker', $Repo, $Number, $Round, $Build, $Url, $Posted)
         Write-Output 'ok'
     } catch {
         Write-Output 'error=所見のダイアログを起動できませんでした。'
@@ -307,10 +310,24 @@ function Invoke-AskNote {
 # 投稿するところまでここでやり切る。所見は独立した 1 通として投稿する（取り込み結果の
 # 本文へ差し込まない——差し込むと組み立てが C++ 側とここの 2 か所に割れる）。
 function Invoke-AskNoteWorker {
-    param([string] $Repo, [string] $Number, [string] $Round, [string] $Build, [string] $Url)
+    param([string] $Repo, [string] $Number, [string] $Round, [string] $Build, [string] $Url,
+        [string] $Posted = 'yes')
 
-    $prompt = "round $Round を投稿しました。`n" +
-        '図面を確かめて、気付いたことがあれば書いてください（空のままなら所見なしで終わります）。'
+    if (-not $Posted) { $Posted = 'yes' }
+
+    # **結果を投稿した周と、しなかった周で言うことが違う。** 投稿しなかった周は、この所見が
+    # その周について PR に載る**唯一のもの**になる——だからそう書いて、書く気になってもらう。
+    if ($Posted -eq 'no') {
+        $prompt = "round $Round の結果は投稿しませんでした。`n" +
+            "伝えたいことがあれば書いてください（これがこの周の唯一の記録になります）。`n" +
+            '空のままなら、何も投稿せずに終わります。'
+        $suffix = '・結果は未投稿'
+    } else {
+        $prompt = "round $Round を投稿しました。`n" +
+            '図面を確かめて、気付いたことがあれば書いてください（空のままなら所見なしで終わります）。'
+        $suffix = ''
+    }
+
     $note = Get-Note -Title "実機フィードバック round $Round" -Prompt $prompt
     if (-not $note) {
         Open-Url $Url
@@ -318,8 +335,8 @@ function Invoke-AskNoteWorker {
     }
 
     $quoted = ($note -split "`r?`n" | ForEach-Object { "> $_" }) -join "`n"
-    $body = "<!-- homeskz-ifc-feedback-note v1 round=$Round build=$Build -->`n" +
-        "### 実機を見ての所見（round $Round）`n`n" + $quoted + "`n"
+    $body = "<!-- homeskz-ifc-feedback-note v1 round=$Round build=$Build posted=$Posted -->`n" +
+        "### 実機を見ての所見（round $Round$suffix）`n`n" + $quoted + "`n"
 
     $file = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
     Set-Content -LiteralPath $file -Value $body -NoNewline
@@ -359,13 +376,14 @@ function Invoke-Main {
         'ask-note'     {
             Invoke-AskNote -Repo (Get-Argument $Arguments 1) -Number (Get-Argument $Arguments 2) `
                 -Round (Get-Argument $Arguments 3) -Build (Get-Argument $Arguments 4) `
-                -Url (Get-Argument $Arguments 5)
+                -Url (Get-Argument $Arguments 5) -Posted (Get-Argument $Arguments 6)
         }
         # 内部用（ask-note が自分を起こし直すときの入口。人が直接呼ぶものではない）。
         'ask-note-worker' {
             Invoke-AskNoteWorker -Repo (Get-Argument $Arguments 1) `
                 -Number (Get-Argument $Arguments 2) -Round (Get-Argument $Arguments 3) `
-                -Build (Get-Argument $Arguments 4) -Url (Get-Argument $Arguments 5)
+                -Build (Get-Argument $Arguments 4) -Url (Get-Argument $Arguments 5) `
+                -Posted (Get-Argument $Arguments 6)
         }
         default        { Write-Output "error=不明なモード: '$mode'（token-status / login / logout / find-pr / post / ask-note）。" }
     }
