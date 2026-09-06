@@ -402,8 +402,8 @@ namespace
 
 		// **入れ替えた本体（ペイロード）をこの実行のまま効かせる。** 降ろしておけば、次に
 		// 本体を使うとき（取り込み・PIO のリセット）に新しいファイルが読み直される
-		// （src/PayloadSession.h）。起動時のチェックから呼ばれる限り本体はまだ載って
-		// いないので、たいていは「何もせず true」。
+		// （src/PayloadSession.h）。更新の確認は本体を確保する前に走るので、ここが
+		// 呼ばれる時点では本体はスタックに載っていない。
 		bool DropLoadedPayload() override
 		{
 			return HomeskzIfcImport::ReleaseLoadedPayload();

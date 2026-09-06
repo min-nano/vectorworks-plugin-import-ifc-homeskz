@@ -25,7 +25,7 @@ Vectorworks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb    … 起�
                           本体 <name>.vwpayload          … いつでも読み直せる
 ```
 
-**殻**に入るのは「Vectorworks に番地を握られるもの」だけ——メニューと 2 つの PIO の*登録*、
+**殻**に入るのは「Vectorworks に番地を握られるもの」だけ——メニュー 2 つと PIO 2 つの*登録*、
 自動アップデート、そして本体を読み込む仕掛け（`src/PayloadHost.*` / `src/PayloadSession.*`）。
 **本体**に `core/` `parse/` `draw/` のすべてが入ります。境界は C の ABI
 （`src/PayloadAbi.h`）1 枚きりです。
@@ -36,12 +36,12 @@ Vectorworks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb    … 起�
 
 ```
 CMakeLists.txt              macOS / Windows 両対応の CMake ビルド。SDK 非依存の
-                            静的ライブラリ HomeskzIfcCore（core/ + parse/）と、
+                            静的ライブラリ MinNanoStructureCore（core/ + parse/）と、
                             SDK 依存のプラグイン本体（draw/ ほか）に分かれる
 src/
-  ModuleMain.cpp            モジュールのエントリポイント。拡張機能を登録し、
-                            起動時にアップデート確認を仕掛け、本体へ渡す
-                            CallBackPtr を預ける
+  ModuleMain.cpp            モジュールのエントリポイント。拡張機能を登録し、本体へ
+                            渡す CallBackPtr を預ける（**アップデートの確認はここでは
+                            しない**——下記「自動アップデートの仕組み」）
   PayloadAbi.h              **殻と本体の唯一の約束事**（C の ABI）。両方が include する
                             ので SDK にもプラットフォームにも依存しない
   PayloadHost.{h,cpp}       殻の側: 本体を一時ディレクトリへ複製して dlopen /
@@ -55,7 +55,11 @@ src/
                               取り込みと PIO のリセットを中の実装へ取り次ぐ
   Extensions/               **殻**に残る「登録」だけ（実処理は draw/ 側）
     ExtMenu.{h,cpp}           「IFC (ホームズ君) 取り込み…」メニューコマンドの登録と、
-                              本体の draw::runImportCommand への取り次ぎ
+                              本体の draw::runImportCommand への取り次ぎ。実行の頭で
+                              静かなアップデート確認も行う
+    ExtUpdateMenu.{h,cpp}     「アップデータを確認 (みんなの構造設計支援)」メニュー
+                              コマンドの登録と実行（**殻に残る唯一の実処理**である
+                              自動アップデートを呼ぶ）
     ExtColumnMark.{h,cpp}     柱・小屋束の記号 PIO の登録（パラメータ定義・UUID）と、
                               本体の draw::recalculateColumnMark への取り次ぎ
     ExtShearWall.{h,cpp}      耐力壁 PIO の同上（→ draw::recalculateShearWall）
@@ -113,8 +117,8 @@ tests/                      無 SDK の単体テスト（詳細は tests/README.
   Fixtures.h / RoofSample.h 共有するフィクスチャ読み込み・近似比較・試験用屋根面
   fixtures/                 ホームズ君 EX 出力の実 IFC
 resources/
-  HomeskzIfcImport.vwr/…             stable プラグインのメニュー文字列
-  HomeskzIfcImportDev.vwr/…          dev プラグインのメニュー文字列
+  min-nano_structure.vwr/…           stable プラグインのメニュー文字列
+  min-nano_structureDev.vwr/…        dev プラグインのメニュー文字列
 scripts/
   vw-update.sh              CI ビルドを探して落としてくる（macOS 用。バンドルに同梱
                             され、プラグインから起動される）。**配置はしない**
@@ -177,12 +181,20 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 
 | 種別 | 値 | 場所 |
 | --- | --- | --- |
-| バンドル／出力名 | `HomeskzIfcImport` / `HomeskzIfcImportDev` | `CMakeLists.txt`、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`scripts/vw-update.ps1`、`.github/workflows/build.yml`（`scripts/vw-install.*` は名前を決め打ちせず、アーカイブから読み取ります） |
-| バンドル ID（macOS） | `io.github.min-nano.HomeskzIfcImport(Dev)` | `CMakeLists.txt` |
-| メニューカテゴリ | `ファイル`（コマンド名 `IFC (ホームズ君) 取り込み…`） | `resources/*/Strings/*.vwstrings` |
-| C++ 名前空間・クラス | `HomeskzIfcImport` / `CExtMenuImportIfc` / `CImportIfcMenu_EventSink` | `src/Extensions/ExtMenu.{h,cpp}`、`src/ModuleMain.cpp` |
-| VCOM ユニバーサル名 | `CExtMenuImportIfc_HomeskzIfcImport(Dev)` | `src/BuildConfig.h` |
-| 拡張機能 UUID | stable / dev 各 1 個 | `src/Extensions/ExtMenu.cpp`（一意である必要があるため `uuidgen` で再生成） |
+| プラグイン表示名 | `みんなの構造設計支援` / `みんなの構造設計支援Dev` | `resources/*/Strings/*.vwstrings`（コマンド名の中）、`src/UpdaterFlow.cpp`（ダイアログの文言） |
+| バンドル／出力名 | `min-nano_structure` / `min-nano_structureDev` | `CMakeLists.txt`、`src/BuildConfig.h`、`resources/` フォルダ名、`scripts/vw-update.sh`、`scripts/vw-update.ps1`、`.github/workflows/build.yml`（`scripts/vw-install.*` は名前を決め打ちせず、アーカイブから読み取ります） |
+| CMake のプロジェクト／ターゲット名 | `MinNanoStructure(Dev)` / `MinNanoStructureCore` | `CMakeLists.txt`、`tests/CMakeLists.txt` |
+| バンドル ID（macOS） | `io.github.min-nano.structure` / `io.github.min-nano.structure-dev` | `CMakeLists.txt` |
+| メニューカテゴリ | `ファイル`（コマンド名 `IFC (ホームズ君) 取り込み…` / `アップデータを確認 (みんなの構造設計支援)`） | `resources/*/Strings/*.vwstrings` |
+| C++ 名前空間・クラス | `min-nano_structure` / `CExtMenuImportIfc` / `CExtMenuCheckUpdate` | `src/Extensions/Ext*.{h,cpp}`、`src/ModuleMain.cpp` |
+| VCOM ユニバーサル名 | 取り込み: `CExtMenuImportIfc_HomeskzIfcImport(Dev)`／更新: `CExtMenuCheckUpdate_MinNanoStructure(Dev)` | `src/BuildConfig.h` |
+| 拡張機能 UUID | コマンド 2 つ × stable / dev の 4 個＋PIO 2 つ × 2 | `src/Extensions/Ext*.cpp`（一意である必要があるため `uuidgen` で再生成） |
+
+> **名前空間 `min-nano_structure` と取り込みコマンドのユニバーサル名・UUID は、改名後も
+> 据え置いています。** ユニバーサル名と UUID は**コマンドの同一性そのもの**で、付け替えると
+> 利用者のワークスペースからコマンドが消えます（登録し直しになります）。名前空間は
+> 図面にも配布物にも現れない内部の綴りなので、改名の巻き添えで 200 ファイル超を書き換える
+> 価値がありません。
 | リポジトリ | `min-nano/vectorworks-plugin-import-ifc-homeskz` | `scripts/vw-update.{sh,ps1}` / `scripts/vw-install.{sh,ps1}` の `VW_REPO` 既定値 |
 
 `.vwstrings` は UTF-16LE（BOM 付き・CRLF 改行）です。編集時はエンコーディングを保持
@@ -214,7 +226,7 @@ Xcode（Vectorworks 2026 は公式に **Xcode 16.2** を対象）と **mac SDK**
    cmake --build build --config Release
    ```
 
-   成果物は `build/HomeskzIfcImport.vwlibrary` です。
+   成果物は `build/min-nano_structure.vwlibrary` です。
 
 既定では Apple Silicon（`arm64`）向けにビルドします。ユニバーサルバイナリにするには:
 
@@ -238,9 +250,9 @@ Visual Studio 2022（v143 ツールセット、x64）と **win SDK** が必要�
    cmake --build build --config Release
    ```
 
-   成果物は `build/Release/HomeskzIfcImport.vlb`（DLL）と、その隣の
-   `build/Release/HomeskzIfcImport.vwr`（リソース）です。ビルドスタンプの
-   `HomeskzIfcImport.commit` と更新スクリプト `vw-update.ps1` も同じ場所に出力されます。
+   成果物は `build/Release/min-nano_structure.vlb`（DLL）と、その隣の
+   `build/Release/min-nano_structure.vwr`（リソース）です。ビルドスタンプの
+   `min-nano_structure.commit` と更新スクリプト `vw-update.ps1` も同じ場所に出力されます。
 
 macOS の `.vwlibrary` バンドルと違い、Windows のプラグインは `<name>.vlb` 本体と
 同名の `<name>.vwr` を**同じフォルダに一緒に**置く必要があります（`.commit` と
@@ -280,8 +292,9 @@ macOS の `.vwlibrary` バンドルと違い、Windows のプラグインは `<n
   `tests/vw-update.Tests.ps1` / `tests/vw-install.Tests.ps1` /
   `tests/vw-uninstall.Tests.ps1`（PowerShell 7＋
   `Invoke-GH`/`Invoke-WebRequest` スタブ）で、いずれも Linux ランナー上で動きます。
-  再起動のコマンド（終了要求 → 終了待ち → 起動し直し）は純粋関数が組み立てるので、生成
-  される shell / PowerShell そのものを `tests/UpdaterParseTests.cpp` で検証します。
+  更新の流れそのもの（尋ねる・入れる・再起動を尋ねる／本体だけ読み直す）は
+  `IUpdaterHost` の偽物を差し込んで `tests/UpdaterFlowTests.cpp` で検証します——
+  **手動確認と取り込み時確認の違い**（最新・オフラインを伝えるか黙るか）もここです。
 
 **テストの一覧・方針・何をテストしていないかは `tests/README.md`** に詳しくあります。
 
@@ -345,7 +358,7 @@ CI の `test` ジョブは常にこの設定（に `VW_ENABLE_COVERAGE=ON` を�
 
 **並列実行とカバレッジ**: テストを `-j` で同時に走らせても、計測結果は逐次実行と
 **完全に一致**します。共有されている状態は、どのテスト実行ファイルもリンクしている
-`HomeskzIfcCore` の `.gcda` カウンタだけで、libgcov はそこへ書き戻すときファイルを
+`MinNanoStructureCore` の `.gcda` カウンタだけで、libgcov はそこへ書き戻すときファイルを
 ロックするためです（この PR で逐次実行と付き合わせて確認済み: 行 4883/4994・
 分岐 4346/6300・関数 418/418 が両者で完全一致）。テスト実行ファイル同士は独立した
 プロセスなので、それ以外に共有するものはありません。
@@ -424,16 +437,16 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
   用意する手順そのものは `scripts/fetch-vw-sdk.sh` に 1 つだけあり、4 ジョブと
   `ci-debug.yml` が共有します（キャッシュがヒットしていれば検証だけして抜けます）。
 - 各ジョブは**その実行が公開するチャンネルだけ**をビルドします（`-DVW_BUILD_CHANNEL`。
-  `main` は `HomeskzIfcImport`、PR は `HomeskzIfcImportDev`）。コミットで刻印
+  `main` は `min-nano_structure`、PR は `min-nano_structureDev`）。コミットで刻印
   （`-DVW_BUILD_VERSION`）して成果物を確認・アップロードします（macOS はさらにアドホック
   署名）。PR ではエフェメラルなマージコミットではなく、PR の **head** コミット（あなたが
   push したもの）をビルドします。
 - **ダウンロード可能なリリースを公開**し、アップデータが取得できる安定した URL を用意
   します。1 つのリリースに **macOS と Windows 両方のアセット**が入ります:
   - `main` はローリングな **`stable`** リリースを更新します
-    （`HomeskzIfcImport.vwlibrary.zip` + `HomeskzIfcImport.vlb.zip`）。
+    （`min-nano_structure.vwlibrary.zip` + `min-nano_structure.vlb.zip`）。
   - PR はブランチごとの **`dev-<branch>`** プレリリースを更新します
-    （`HomeskzIfcImportDev.vwlibrary.zip` + `HomeskzIfcImportDev.vlb.zip`。トークンで公開でき
+    （`min-nano_structureDev.vwlibrary.zip` + `min-nano_structureDev.vlb.zip`。トークンで公開でき
     ないフォーク PR では `release` ジョブごとスキップされます）。
 
   リリースの公開は独立した **`release` ジョブ**が担当します。このジョブは 4 つのジョブ
@@ -796,9 +809,9 @@ zip にインストーラが無い＝この仕組みより前のリリースへ�
 置き先は **`Plug-Ins` の直下ではなく、プラグイン名のフォルダ**です:
 
 ```
-<Plug-Ins>/HomeskzIfcImport/HomeskzIfcImport.vwlibrary
-<Plug-Ins>/HomeskzIfcImport/HomeskzIfcImport.vwpayload
-<Plug-Ins>/HomeskzIfcImport/vw-uninstall.sh
+<Plug-Ins>/min-nano_structure/min-nano_structure.vwlibrary
+<Plug-Ins>/min-nano_structure/min-nano_structure.vwpayload
+<Plug-Ins>/min-nano_structure/vw-uninstall.sh
 ```
 
 Vectorworks が `Plug-Ins` のサブフォルダも読みに行くことは実機で確認済みです。こうして
@@ -855,31 +868,67 @@ Vectorworks は読み込まず、次のインストールが掃きます。
 方法（macOS は `dladdr`、Windows は `GetModuleFileName`）」と「起動するスクリプト」
 だけです。
 
-チャンネルごとに挙動が異なります。
+### いつ確認するか — 2 つの入口（起動時ではない）
 
-- **stable（`HomeskzIfcImport` / main）** — **Vectorworks 起動時**に、より新しい安定版
-  ビルドがないかを確認します（`src/ModuleMain.cpp` がモジュールロード時に一度だけ実行）。
-  - 既に最新なら**何も表示しません**（毎回の起動を邪魔しません）。
+**Vectorworks の起動時には確認しません。** 以前は `plugin_module_main` の中で 1 度だけ
+走らせていましたが、殻と本体に割れて以降（上記「殻と本体」）、機能追加以外の更新は
+**再起動なしでその場から効く**ようになったので、起動のたびに問う理由が無くなりました。
+起動を待たせずに済むうえ、後述のとおり**再起動を Vectorworks 自身に頼めるようになる**
+という副産物もあります。
+
+入口は次の 2 つで、`src/UpdaterHost.h` の `UpdateCheckKind` がこの違いを表します。
+
+| 入口 | kind | 新しいビルドが無かったとき |
+| --- | --- | --- |
+| メニューコマンド「アップデータを確認」（`src/Extensions/ExtUpdateMenu.cpp`） | `Manual` | **必ず伝える**（最新です／確認できませんでした） |
+| 取り込みコマンドの頭（`src/Extensions/ExtMenu.cpp`） | `Silent` | **黙って取り込みへ進む** |
+
+`Manual` が黙らないのは、押したのに何も起きないと「最新だった」のか「そもそも動いて
+いない」のかが利用者に区別できないためです。逆に `Silent` は取り込みたいだけの人の前に
+「最新です」を挟みません。
+
+取り込み側の確認は**本体（ペイロード）を確保する前**に置いてあります。そこで新しい本体が
+入れば `PayloadUse` がそれを読み直すので、**その 1 回目の取り込みからもう新しいコードが
+動きます**。確保したあとでは本体のコードがスタックに載っているぶん降ろせず、反映は次回に
+回ってしまいます。
+
+**PIO（柱記号・耐力壁）のリセットからは確認しません。** 取り込み直後には数百回リセットが
+走るので、そのたびに GitHub を叩くわけにはいきません。PIO の更新は、手動の確認か、
+取り込み時の更新に乗って入れ替わるのを待ちます。
+
+### チャンネルごとの挙動
+
+- **stable（`min-nano_structure` / main）** — より新しい安定版ビルドがないかを確認します。
   - 新しいビルドがあれば `AlertQuestion` で「インストールしますか？」と尋ね、選ばれた
     場合だけインストールします。インストール後は**再起動を促すのではなく尋ねます**
     （下記）。
+  - 既に最新なら `Manual` では「みんなの構造設計支援は最新です。」、`Silent` では無言。
   - ネットワーク確認は時間制限付き（`vw-update.sh` の `--max-time`）で、オフラインや
-    エラー時は静かに諦めます。
+    エラーは `Manual` では「更新を確認できませんでした。」、`Silent` では無言です。
 
-- **dev（`HomeskzIfcImportDev` / ブランチ）** — **Vectorworks 起動時**に、使用するビルドを
-  **ネイティブのプルダウンダイアログ**（`VWFC::VWUI::VWDialog` + `VWPullDownMenuCtrl`、
-  `src/Updater.cpp` の `CBuildPickerDialog`）で問い合わせます（`src/ModuleMain.cpp` が
-  モジュールロード時に一度だけ実行）。1 つのドロップダウンに候補を一覧表示します:
-  - 先頭は**現在ロードされているビルド**（branch / commit、「インストール済み」と明示）。
-  - 続いて**他のブランチのプレリリース**（現在のビルドと同じコミットは除外）。
-  - **インストール済み（先頭）を選ぶ／キャンセル** → 何もせず起動を続けます。
-  - **別のブランチを選ぶ** → それをインストールし、続けて再起動を尋ねます（下記）。
-  現在の実行ビルドの判定にはコンパイル時に埋め込まれた commit（`VW_BUILD_VERSION`）を
-  使うため、ディスク上に別ビルドが未反映で置かれていても取り違えません。
+- **dev（`min-nano_structureDev` / ブランチ）** — kind で挙動が大きく変わる唯一の流れです。
+  - `Manual` … 使用するビルドを**ネイティブのプルダウンダイアログ**
+    （`VWFC::VWUI::VWDialog` + `VWPullDownMenuCtrl`、`src/Updater.cpp` の
+    `CBuildPickerDialog`）で問い合わせます。1 つのドロップダウンに候補を一覧表示します:
+    - 先頭は**現在ロードされているビルド**（branch / commit、「インストール済み」と明示）。
+    - 続いて**他のブランチのプレリリース**（現在のビルドと同じコミットは除外）。
+    - **インストール済み（先頭）を選ぶ／キャンセル** → 何もしません。
+    - **別のブランチを選ぶ** → それをインストールし、続けて再起動を尋ねます（下記）。
+    - 選べるビルドが他に無ければ、その旨を伝えます（黙って終わりません）。
+  - `Silent` … **ダイアログを出さず**、**いま動いているのと同じブランチ**の新しいビルドが
+    あるときだけ「インストールしますか？」と尋ねます。取り込みのたびにブランチ選択が
+    出ては邪魔なので、拾うのは「自分のビルドが新しくなった」に当たるものだけです。
 
-  以前はこの確認を**コマンド実行時**に行っていましたが、プラグインが自身のコマンドを
-  プログラム内から再実行しうると毎回ダイアログが出てしまいます。コンパイル済みビルドは
-  そもそも起動時にしか差し替わらないため、確認は起動時に一度だけ行います。
+  現在の実行ビルドの判定にはコンパイル時に埋め込まれた commit（`VW_BUILD_VERSION`）と
+  ブランチ（`VW_BUILD_BRANCH`）を使うため、ディスク上に別ビルドが未反映で置かれていても
+  取り違えません。
+
+  ブランチの照合には `q-dev` の出力の**5 列目**（`build<TAB>commit<TAB>name<TAB>url<TAB>branch`）
+  を使います。表示名（`name`）は `"Dev: <branch> (<sha>)"` なので照合には使えず、素の
+  ブランチ名はリリース本文（CI が書く `branch=` の行）から読みます。**この列は任意**で、
+  インストール済みの（＝古い）同梱スクリプトが走ると空になります。そのときは照合できない
+  ので**何もしません**——別のブランチのビルドを勝手に入れるよりずっと安全です
+  （`src/UpdaterParse.h` の `ParseDevBuilds`）。
 
 ### インストール後（stable / dev 共通）— まず「再起動が要るか」を決める
 
@@ -920,49 +969,43 @@ Vectorworks が起動時にしか読み込めないのは殻だけです（上�
 動きません。そこでこの場合の表示は**通知ではなく質問**にしてあり、**「再起動」ボタン**を
 その場に出します（`src/UpdaterFlow.cpp` の `OfferRestart`）。
 
-- **「再起動」** → 起動の完了後に Vectorworks を終了し、終了しきってから起動し直します
-  （`src/Updater.cpp` の `CVectorworksUpdaterHost::Restart`）。終了要求は OS 経由なので
-  **押した直後ではなく、起動が終わってから**効きます。開いているファイルは**通常どおり
-  保存を確認**してから閉じられ、保存ダイアログで取り消せば Vectorworks は落ちません
-  （その場合もインストール済みのファイルはディスクに残るため、次回の起動で反映されます）。
-- **「後で」** → 何もせず起動を続けます。反映は次に Vectorworks を起動したときです。
+- **「再起動」** → **Vectorworks 自身に終了と起動し直しを頼みます**（`src/Updater.cpp` の
+  `CVectorworksUpdaterHost::Restart` → SDK の
+  `CloseAllFilesAndQuitVectorworks(bAskForSave: true, bRestart: true)`）。開いている
+  ファイルは**通常どおり保存を確認**してから閉じられ、保存ダイアログで取り消せば
+  Vectorworks は落ちません（その場合もインストール済みのファイルはディスクに残るため、
+  次回の起動で反映されます）。
+- **「後で」** → 何もしません。反映は次に Vectorworks を起動したときです。
 
 インストールに失敗したときは（当然）再起動を尋ねず、失敗の理由だけを表示します。再起動を
-**用意できなかった**とき（アプリを特定できない／ヘルパーを起動できない）は「手動で再起動して
-ください」と案内します——押しても何も起きないように見えるのを避けるためです。
+**頼めなかった**とき（SDK をまだ掴めていない）は「手動で再起動してください」と案内します
+——押しても何も起きないように見えるのを避けるためです。
 
-#### 再起動を SDK に任せない理由（実機で確かめた失敗）
+#### 以前は SDK に頼めなかった（実機で確かめた失敗と、その前提が消えた経緯）
 
-SDK の `CloseAllFilesAndQuitVectorworks` には「終了」と「終了後に起動し直す」
-（`bRestart`）がありますが、**どちらも使いません**。macOS 実機では次のように失敗しました。
+かつてこの再起動は、**終了要求も起動し直しも切り離した（detached）ヘルパープロセス**に
+任せていました。SDK の `CloseAllFilesAndQuitVectorworks` が macOS 実機で次のように
+失敗したためです。
 
 1. `bRestart: true`（終了＋再起動を SDK に任せる）→ 古いインスタンスが終了しきる前に新しい
    インスタンスが立ち上がり、**「サポートファイルの読み込みに失敗しました。」**で落ちる。
 2. `bRestart: false`（終了だけ SDK に任せ、起動し直しは自前）→ **同じダイアログが出る**。
-   アップデート確認は**プラグインのロード中**（スプラッシュ表示中）に走るため、Vectorworks
-   本体がまだ自分を終了させられる状態になっていないため、と考えられます。SDK には
-   「起動完了後に実行する」フックが無く（`RegisterNotificationProcedure` の通知一覧にも
-   起動完了に相当するものは無い）、いつ呼べば安全かを当てにいくのは筋が悪い。
 
-そこで**終了も起動し直しも、切り離した（detached）ヘルパープロセスに任せます**。プラグイン
-がすることは、そのヘルパーを起動することだけです。ヘルパーは
+原因は呼ぶ**時機**でした。当時のアップデート確認は**プラグインのロード中**（スプラッシュ
+表示中、`plugin_module_main` の中）に走っており、Vectorworks 本体がまだ自分を終了させ
+られる状態になっていなかったのです。SDK には「起動完了後に実行する」フックが無く
+（`RegisterNotificationProcedure` の通知一覧にも起動完了に相当するものは無い）、いつ呼べば
+安全かを当てにいくのは筋が悪いので、OS 経由の通常の終了要求（macOS: `quit` Apple event、
+Windows: `CloseMainWindow()`）を送るヘルパーへ逃がしていました。
 
-1. **OS の通常の終了要求**を送る（macOS: 自分のバンドル ID 宛の `quit` Apple event ＝ ⌘Q と
-   同じもの。Windows: メインウィンドウへ `CloseMainWindow()` ＝ 閉じるボタンと同じもの）。
-   OS はこれを**イベントループが回り始めてから**、つまり Vectorworks が処理できる状態に
-   なってから配送します——「いつ安全か」を推測する必要がありません。保存の確認も通常どおり。
-2. プロセスが**消えるまで待ち**（既定 300 秒。保存ダイアログで取り消して終了しなかった場合は
-   あきらめる——使用中のアプリを勝手に起動し直さないため）、
-3. 2 秒おいてから **macOS は `open -a <app>`**（LaunchServices 経由＝ダブルクリックと同じ）、
-   **Windows は `Start-Process <exe>`** で起動し直します。
+**その前提は M23 で消えました。** 確認の入口が起動時からメニューコマンドと取り込み
+コマンドへ移り（上記「いつ確認するか」）、**Vectorworks が完全に動いている最中にしか
+呼ばれなくなった**ので、素直に SDK へ頼めます。ヘルパーの一式（`MacRelaunchCommand` /
+`WinRelaunchCommand` / `PowerShellQuote` / `MacAppBundleFromExecutable` と、それらが
+組み立てる shell / PowerShell を検証していたテスト）はまとめて削除しました。
 
-ヘルパーに渡すコマンドは**同梱スクリプトのモードではなく、その場で組み立てた 1 行**です
-（`src/UpdaterParse.h` の `MacRelaunchCommand` / `WinRelaunchCommand`。純粋関数なので生成
-される shell / PowerShell はそのまま単体テストしてあります）。理由は、**インストール直後の
-ディスク上のスクリプトは「いま入れたビルドに同梱されていた版」**であり、実行中のコードより
-古いことがあるからです。実際に古い版を呼んでしまい
-**「エラー: 不明なチャンネル: 'relaunch'」**というダイアログが出ました。インラインのコマンド
-なら呼び出し側と食い違いようがありません。
+> **もし将来また起動時に確認したくなったら、この失敗を思い出してください。** SDK の
+> 終了は「Vectorworks が動いていること」を前提にしています。
 
 新しいビルドが実際にロードされるのは、この再起動（または手動での再起動）以降です。
 
@@ -1014,10 +1057,10 @@ Windows では実行中の `.vlb` を削除できない（メモリにマップ�
 ./scripts/vw-install.sh --zip <file>           # 手元の zip から入れる
 # 取り除く（リリースのアセットにもある）:
 ./scripts/vw-uninstall.sh                      # 既定の場所から取り除く
-./scripts/vw-uninstall.sh --name HomeskzIfcImportDev
-# stable チャンネル（main → HomeskzIfcImport）:
+./scripts/vw-uninstall.sh --name min-nano_structureDev
+# stable チャンネル（main → min-nano_structure）:
 ./scripts/vw-update.sh stable
-# dev チャンネル — どのブランチのビルドを入れるか選ぶ（→ HomeskzIfcImportDev）:
+# dev チャンネル — どのブランチのビルドを入れるか選ぶ（→ min-nano_structureDev）:
 ./scripts/vw-update.sh dev
 # 引数なし（または Finder でダブルクリック）: 最初にチャンネルを尋ねます。
 ./scripts/vw-update.sh

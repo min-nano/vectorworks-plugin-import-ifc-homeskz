@@ -57,10 +57,9 @@ namespace HomeskzIfcImport
 		// 新しいファイルが読み直される（src/PayloadSession.h）。降ろせなかった——本体の
 		// コードがまだ走っている——ときだけ false。
 		//
-		// 起動時のチェックから呼ばれる限り、そもそも本体はまだ載っていないので、これは
-		// たいてい「何もせず true」である。それでも呼ぶのは、**この判断（再起動が要らない）
-		// と実際の載せ替えを 1 か所で完結させておく**ため——アップデートの確認をあとで
-		// コマンドからも走らせるようにしたとき、ここが無いと黙って古いまま動き続ける。
+		// 更新の確認は本体を確保する**前**に走るので（src/Extensions/ExtMenu.cpp）、
+		// ここが呼ばれる時点で本体はスタックに載っていない——降ろせるのが常態である。
+		// 降ろせなかったときだけ false になり、反映は次の起動へ回る。
 		virtual bool DropLoadedPayload() = 0;
 
 		// Quit Vectorworks and start it again, so the build just installed is

@@ -257,7 +257,7 @@ namespace HomeskzIfcImport
 		{
 			// Nothing to choose between: no prereleases exist, or the only one is
 			// the running build itself. **メニューから明示的に呼ばれている**ので、
-			// 起動時のチェックだった頃と違って黙ってはいられない。
+			// 起動時に自動で走っていた頃と違って黙ってはいられない。
 			if (others.empty())
 			{
 				host.Inform("ほかに選べる開発版ビルドはありません。",

@@ -1,8 +1,22 @@
-# ホームズ君 IFC インポート（Vectorworks 2026 プラグイン）
+# みんなの構造設計支援（Vectorworks 2026 プラグイン）
+
+**構造設計に使う機能をまとめて収める** Vectorworks 2026 用のネイティブプラグイン
+（C++ SDK 製）です。プラグイン 1 つに複数のコマンドと PIO を同梱できるので、機能ごとに
+プラグインを分けず、この 1 つへ足していきます。
+
+いま入っている機能は次のとおりです。
+
+| 何 | どこから |
+| --- | --- |
+| **IFC (ホームズ君) 取り込み…** — ホームズ君構造EX の IFC を Vectorworks のネイティブオブジェクトへ変換して配置するコマンド | メニュー |
+| **アップデータを確認 (みんなの構造設計支援)** — 新しいビルドが出ていないか確かめ、あれば入れ替えるコマンド | メニュー |
+| **柱記号** / **耐力壁** — 取り込みが置く 2 つのプラグインオブジェクト（PIO） | 図面上のオブジェクト |
+
+## IFC (ホームズ君) 取り込み
 
 **ホームズ君構造EX** が出力する木造軸組工法建築物の IFC ファイルを読み込み、Vectorworks
 2026 の**ネイティブオブジェクト**（ストーリ・構造材・壁・スラブ・屋根面・シンボル・
-ビューポート）へ変換して図面に配置する、C++ SDK 製のネイティブプラグインです。
+ビューポート）へ変換して図面に配置します。
 
 メニューコマンドを 1 回実行するだけで、
 
@@ -169,7 +183,7 @@
 | 解析・描画のフェーズが 1 行ずつ（開始からの経過ミリ秒つき） | 何を処理したか・どこで時間を使ったか・**どこで止まったか** |
 | 結果（成功／問題あり／中断・所要時間・要素ごとの内訳・注意・記録・取り消しの効き方） | 何がどれだけ描けて、何がうまくいかなかったか |
 
-ファイルとしては一時ディレクトリの `HomeskzIfcImport.log` に書かれます。**場所はログの
+ファイルとしては一時ディレクトリの `min-nano_structure.log` に書かれます。**場所はログの
 見出し（「ログ:」の行）に書いてあります**——完了ダイアログには出しません（場所を知りたいのは
 ログを見ようとしたときだけで、そのときログはもう目の前にあるからです）。何かの事情で
 ファイルへ書けなかったときも、その旨が見出しに出ます（ログ欄の内容をコピーしてください）。
@@ -188,10 +202,12 @@
 **stable と dev の 2 つが共存できます。** 同じソースから、共存できる別名のプラグインを
 ビルドしています。
 
-- **`HomeskzIfcImport`** — *stable*。`main` からビルドされます。コマンド名は
-  **IFC (ホームズ君) 取り込み…**。
-- **`HomeskzIfcImportDev`** — *dev*。作業ブランチ／PR からビルドされます。コマンド名は
-  **IFC (ホームズ君) 取り込み… (Dev)**。
+- **`min-nano_structure`** — *stable*（表示名「みんなの構造設計支援」）。`main` から
+  ビルドされます。コマンド名は **IFC (ホームズ君) 取り込み…** と
+  **アップデータを確認 (みんなの構造設計支援)**。
+- **`min-nano_structureDev`** — *dev*（表示名「みんなの構造設計支援Dev」）。作業ブランチ
+  ／PR からビルドされます。コマンド名は **IFC (ホームズ君) 取り込み… (Dev)** と
+  **アップデータを確認 (みんなの構造設計支援Dev)**。
 
 出力名・リソース識別子・拡張機能 UUID がそれぞれ別なので、両方を同時に入れて使えます
 （通常利用は stable、作業中のブランチを試すのは dev）。ビルドは
@@ -204,9 +220,9 @@
 
 ```
 ~/Library/Application Support/Vectorworks/2026/Plug-Ins/
-  └── HomeskzIfcImport/
-        ├── HomeskzIfcImport.vwlibrary
-        ├── HomeskzIfcImport.vwpayload
+  └── min-nano_structure/
+        ├── min-nano_structure.vwlibrary
+        ├── min-nano_structure.vwpayload
         └── vw-uninstall.sh
 ```
 
@@ -221,8 +237,8 @@
 
 | ファイル | 何か |
 | --- | --- |
-| `HomeskzIfcImport.vwlibrary`（mac）／ `HomeskzIfcImport.vlb`（win） | **殻**。Vectorworks が起動時に読み込む本体で、メニューと記号 PIO の登録・アップデートを持ちます |
-| `HomeskzIfcImport.vwpayload` | **中身**。取り込みの処理と記号の作図がすべて入っています。殻がこれを自分で読み込みます |
+| `min-nano_structure.vwlibrary`（mac）／ `min-nano_structure.vlb`（win） | **殻**。Vectorworks が起動時に読み込む本体で、メニューと記号 PIO の登録・アップデートを持ちます |
+| `min-nano_structure.vwpayload` | **中身**。取り込みの処理と記号の作図がすべて入っています。殻がこれを自分で読み込みます |
 
 こう割ってあるのは、**アップデートで Vectorworks を再起動しなくて済むように**するため
 です（下記「自動アップデート」）。`.vwpayload` は Vectorworks から見ればただのファイルなので、
@@ -250,18 +266,18 @@ powershell -ExecutionPolicy Bypass -File vw-install.ps1
 ```
 
 インストール先は Vectorworks 2026 のユーザフォルダ内の
-`Plug-Ins/HomeskzIfcImport/` です。別の場所に入れたいときは `--plugins-dir <パス>`
+`Plug-Ins/min-nano_structure/` です。別の場所に入れたいときは `--plugins-dir <パス>`
 （Windows は `-PluginsDir <パス>`）で `Plug-Ins` にあたる場所を指定してください
 （プラグイン名のフォルダはその中に作られます）。入れ終わったら、下記「macOS」の
 手順 3・4（Windows は 2・3）——Vectorworks を起動してコマンドをワークスペースに追加する
 ——だけ行ってください。
 
 **取り除くとき**も同じ場所にスクリプトがあります（インストールすると
-`Plug-Ins/HomeskzIfcImport/vw-uninstall.sh` にも入ります）。
+`Plug-Ins/min-nano_structure/vw-uninstall.sh` にも入ります）。
 
 ```sh
 bash vw-uninstall.sh                             # stable を取り除く
-bash vw-uninstall.sh --name HomeskzIfcImportDev  # dev を取り除く
+bash vw-uninstall.sh --name min-nano_structureDev  # dev を取り除く
 ```
 
 ```pwsh
@@ -272,21 +288,21 @@ powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
 
 ### macOS
 
-プラグインの入れ物は `HomeskzIfcImport.vwlibrary` バンドルで、リソースはバンドル内に
-含まれます。**中身（`HomeskzIfcImport.vwpayload`）はバンドルの隣**に置きます（バンドルの
+プラグインの入れ物は `min-nano_structure.vwlibrary` バンドルで、リソースはバンドル内に
+含まれます。**中身（`min-nano_structure.vwpayload`）はバンドルの隣**に置きます（バンドルの
 署名はリソースまで封をするので、中に入れると差し替えたときに署名が壊れます）。
 
 1. **バンドルと `.vwpayload` をローカルディスクに置きます**（iCloud Drive は不可 — iCloud が
    ダウンロード隔離フラグを付け直すことがあります）。置き場所は Vectorworks 2026 の
-   ユーザフォルダ内の `Plug-Ins/HomeskzIfcImport/` です（`Plug-Ins` は
-   Vectorworks ▸ 環境設定 ▸ *ユーザフォルダ* から探せます。`HomeskzIfcImport`
+   ユーザフォルダ内の `Plug-Ins/min-nano_structure/` です（`Plug-Ins` は
+   Vectorworks ▸ 環境設定 ▸ *ユーザフォルダ* から探せます。`min-nano_structure`
    フォルダは自分で作ります）。
 
 2. Gatekeeper がブロックしないよう、**macOS の隔離フラグを解除します**:
 
    ```sh
-   xattr -dr com.apple.quarantine HomeskzIfcImport.vwlibrary
-   xattr -d  com.apple.quarantine HomeskzIfcImport.vwpayload
+   xattr -dr com.apple.quarantine min-nano_structure.vwlibrary
+   xattr -d  com.apple.quarantine min-nano_structure.vwpayload
    ```
 
    CI ビルドは既に**アドホック署名済み**です（Apple Silicon がバイナリをロードするために
@@ -294,8 +310,8 @@ powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
    言う場合は、自分で署名し直してください:
 
    ```sh
-   codesign --force --deep --sign - HomeskzIfcImport.vwlibrary
-   codesign --force --sign - HomeskzIfcImport.vwpayload
+   codesign --force --deep --sign - min-nano_structure.vwlibrary
+   codesign --force --sign - min-nano_structure.vwpayload
    ```
 
 3. **Vectorworks を起動します。** プラグインが未署名のため、Vectorworks 2026 は起動時に
@@ -305,48 +321,75 @@ powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
 
 4. **コマンドをワークスペースに追加します:** ツール ▸ ワークスペース ▸ 現在の
    ワークスペースを編集 ▸ *メニュー*。**ファイル** カテゴリの中に
-   **IFC (ホームズ君) 取り込み…** があるので、メニューへドラッグしてください。
+   **IFC (ホームズ君) 取り込み…** と **アップデータを確認 (みんなの構造設計支援)** が
+   あるので、メニューへドラッグしてください（2 つとも足しておくと、更新を思い立った
+   ときにすぐ確認できます）。
 
 ### Windows
 
-プラグインの入れ物は `HomeskzIfcImport.vlb`（DLL）で、リソースは同名の別ファイルとして
+プラグインの入れ物は `min-nano_structure.vlb`（DLL）で、リソースは同名の別ファイルとして
 隣に置きます（SDK の Windows での作法）。
 
-1. **`HomeskzIfcImport.vlb` と `HomeskzIfcImport.vwpayload` と `HomeskzIfcImport.vwr` を
-   一緒に**、Vectorworks 2026 のユーザフォルダ内の `Plug-Ins/HomeskzIfcImport/` へ
-   置きます（`HomeskzIfcImport` フォルダは自分で作ります）。3 つは同名・同フォルダで
+1. **`min-nano_structure.vlb` と `min-nano_structure.vwpayload` と `min-nano_structure.vwr` を
+   一緒に**、Vectorworks 2026 のユーザフォルダ内の `Plug-Ins/min-nano_structure/` へ
+   置きます（`min-nano_structure` フォルダは自分で作ります）。3 つは同名・同フォルダで
    ある必要があります。自動アップデートも使うなら
-   `HomeskzIfcImport.commit`・`HomeskzIfcImport.shell-id`・`vw-update.ps1`・
+   `min-nano_structure.commit`・`min-nano_structure.shell-id`・`vw-update.ps1`・
    `vw-uninstall.ps1` も一緒に置きます（配布 zip にはこれらがすべて入っています）。
 
 2. **Vectorworks を起動します**（未署名の警告は macOS と同じ）。
 
 3. **コマンドをワークスペースに追加します**（macOS の手順 4 と同じ）。
 
-## 自動アップデート
+## アップデート
 
-プラグイン自身が、**Vectorworks の起動時に**ネイティブのダイアログでアップデートを扱います
-（ターミナルを開く必要はありません）。
+プラグイン自身が、ネイティブのダイアログでアップデートを扱います（ターミナルを開く必要は
+ありません）。**確認するきっかけは 2 つ**です。
 
-- **stable** … より新しい安定版ビルドがあるときだけ「インストールしますか？」と尋ねます。
-  最新なら何も表示しません。オフラインやエラー時は静かに諦めます。
+### 1. コマンド「アップデータを確認」
+
+メニューから **アップデータを確認 (みんなの構造設計支援)**（dev 版は
+**…(みんなの構造設計支援Dev)**）を実行すると、その場で確認します。**押した以上、結果は
+必ず出ます**。
+
+- **stable** … 新しい安定版ビルドがあれば「インストールしますか？」と尋ねます。最新なら
+  「みんなの構造設計支援は最新です。」、ネットワークに繋がらない・リリースを取得できない
+  ときは「更新を確認できませんでした。」と出ます。
 - **dev** … 使用するビルドをドロップダウンで尋ねます。先頭は現在ロードされているビルド
   （branch / commit）で、続いて他のブランチのプレリリースが並びます。キャンセルすれば
-  何もしません。
+  何もしません。選べるビルドが他に無ければ、その旨を出します。
 
-**ふつうは再起動が要りません。** プラグインは殻と中身の 2 つに割れていて（上記「2 つの
-ファイルで 1 つのプラグイン」）、Vectorworks が起動時にしか読み込めないのは殻だけです。
-更新のほとんどは中身（`.vwpayload`）だけが変わるので、その場合は
+図面を開いていなくても実行できます。
+
+### 2. 取り込みコマンドの実行時
+
+**IFC (ホームズ君) 取り込み…** を実行すると、ファイルを選ぶ前に更新の有無を確かめます。
+こちらは**更新があるときだけ**尋ね、オフラインなどで確認できなければ黙って取り込みへ
+進みます。dev 版では**いま動いているのと同じブランチ**の新しいビルドだけを拾います
+（取り込みのたびにブランチ選択が出ては邪魔なので）。
+
+ここで入れ替わったビルドは、**その 1 回目の取り込みからもう動きます**（下記）。
+
+> **Vectorworks の起動時には確認しません。** 以前は起動時に自動で確認していましたが、
+> 下記のとおり本体だけの更新なら再起動なしで反映されるようになったため、起動のたびに
+> 問う必要が無くなりました。**PIO（柱記号・耐力壁）はリセットのたびに確認できない**ので、
+> 手動の確認か、取り込み時の更新に乗って入れ替わるのを待ってください。
+
+### ふつうは再起動が要りません
+
+プラグインは殻と中身の 2 つに割れていて（上記「2 つのファイルで 1 つのプラグイン」）、
+Vectorworks が起動時にしか読み込めないのは殻だけです。更新のほとんどは中身
+（`.vwpayload`）だけが変わるので、その場合は
 
 > Vectorworks の再起動は要りません。次の取り込みから新しいビルドが動きます。
 
 とだけ出て終わります。実際に新しいコードへ切り替わるのは**次に取り込みを実行したとき**か
 **記号・耐力壁がリセットされたとき**で、開いている図面はそのままで構いません。
 
-**殻まで変わった更新のときだけ**、従来どおり**「再起動」ボタン**が出ます。押すと、起動の
-完了後に Vectorworks を終了して起動し直します（開いているファイルは通常どおり保存を
-確認してから閉じられ、保存ダイアログで取り消せば Vectorworks は落ちません）。「後で」を
-選んだ場合は、次回の起動で反映されます。
+**殻まで変わった更新のときだけ**、**「再起動」ボタン**が出ます。押すと Vectorworks が
+終了して起動し直します（開いているファイルは通常どおり保存を確認してから閉じられ、保存
+ダイアログで取り消せば Vectorworks は落ちません）。「後で」を選んだ場合は、次回の起動で
+反映されます。
 
 **構成ファイルが増えても、手で入れ直す必要はありません。** ファイルの配置は、
 インストール済みの（＝古い）アップデータではなく、**落としてきた zip に入っている
@@ -355,14 +398,14 @@ powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
 （取り除くのは、その版と一緒に入っていたアンインストーラです）、古い版のファイルが
 残ることもありません。
 
-> **フォルダ分けより前のビルドが `Plug-Ins` の直下に入っている場合は、1 度だけ手で
-> 片付けてください。** 新しい版は `Plug-Ins/HomeskzIfcImport/` に入るので、直下の
-> `HomeskzIfcImport.vwlibrary`（Windows は `.vlb` と `.vwr` ほか）と
-> `HomeskzIfcImport.vwpayload` が残っていると、**同じプラグインが二重に読み込まれます**。
-> 直下のものを捨ててから、上記「いちばん簡単な入れ方: インストーラを使う」を実行して
-> ください。以後の更新は自動です。
+> **改名（`HomeskzIfcImport` → `min-nano_structure`）より前の版が入っている場合は、
+> 1 度だけ手で入れ直してください。** フォルダ名もアセット名も変わったので、古い版の
+> アップデータは新しい版を自分の場所へは入れられません。古い
+> `Plug-Ins/HomeskzIfcImport/`（フォルダ分けより前の版なら `Plug-Ins` 直下の
+> `HomeskzIfcImport.*`）を捨ててから、上記「いちばん簡単な入れ方: インストーラを使う」を
+> 実行してください。以後の更新は自動です。
 
-仕組みの詳細（同梱スクリプト・再起動をヘルパープロセスに任せている理由・手動実行）は
+仕組みの詳細（同梱スクリプト・殻と本体の入れ替え・手動実行）は
 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)「自動アップデートの仕組み」にあります。
 
 ---

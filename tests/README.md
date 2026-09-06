@@ -44,7 +44,7 @@
 | `CoreProgressTests` | `src/core/Progress` | 進捗の文言整形・フェーズ配分・件数の勘定・中止フラグのラッチ |
 | `CoreTraceTests` | `src/core/Trace` | 診断ログ（1 行ごとのフラッシュ・開き直しでの切り詰め・開けなくても本文はメモリに残ること・`note` に経過ミリ秒が付かないこと・壁時計の形・既定の出力先・進捗フェーズが行になること） |
 
-いずれも無 SDK の静的ライブラリ `HomeskzIfcCore` をリンクします（登録は
+いずれも無 SDK の静的ライブラリ `MinNanoStructureCore` をリンクします（登録は
 `tests/CMakeLists.txt` の `vw_add_test(<名前> <ソース> CORE FIXTURES)` の 1 行。`CORE` が
 ライブラリのリンク・`FIXTURES` が `HOMESKZ_FIXTURES_DIR` の定義で、フィクスチャを使うのに
 `FIXTURES` を書き忘れるとコンパイルエラーになります）。テスト間で共有する
@@ -87,9 +87,12 @@ SDK と実際の図面が要るためで、代わりに (a) SDK から切り離�
 1. **`UpdaterParseTests`** … `src/UpdaterParse.h` の純粋ロジック（`std::string` /
    `std::vector` だけに依存し、`gSDK`・`dladdr`・Win32・VWFC ダイアログに一切触れない
    関数）を関数単位でテストします。
-2. **`UpdaterFlowTests`** … 起動時の更新フロー本体（`RunStableStartupCheckWith` /
-   `RunDevStartupCheckWith`、`src/UpdaterFlow.cpp`）を、**フェイクの `IUpdaterHost`**
-   越しに丸ごと動かして、分岐とダイアログ文言まで検証します（後述）。
+2. **`UpdaterFlowTests`** … 更新フロー本体（`RunStableUpdateCheckWith` /
+   `RunDevUpdateCheckWith`、`src/UpdaterFlow.cpp`）を、**フェイクの `IUpdaterHost`**
+   越しに丸ごと動かして、分岐とダイアログ文言まで検証します（後述）。**手で押した
+   確認（`UpdateCheckKind::Manual`）と取り込みのついでの確認（`Silent`）の違い**
+   ——最新・オフラインを伝えるか黙るか、dev がブランチ選択を出すか同じブランチの
+   ビルドだけ拾うか——もここで押さえます。
 3. **`UpdaterRobustnessTests`** … `src/UpdaterParse.h` のパーサに **予期しない外部入力**
    （壊れたスクリプト出力・埋め込み NUL・巨大／退化した行・ランダムなバイト列）を
    食わせ、境界外アクセスや未定義動作を起こさないこと、そして「戻り値の `url` は必ず
@@ -189,10 +192,10 @@ SDK と実際の図面が要るためで、代わりに (a) SDK から切り離�
 | `RunScript` | 同梱スクリプトを `popen` で実行 | 固定の stdout を返す |
 | `Inform` / `Ask` | `gSDK->AlertInform` / `AlertQuestion` | 呼び出しを記録／既定の回答を返す |
 | `PickBuild` | VWFC のプルダウンダイアログ | 選択インデックスを返す |
-| `Restart` | 終了要求 → 終了待ち → 起動し直しを行うヘルパーを切り離して起動する | 呼び出し回数を数える／成否を返す |
+| `Restart` | SDK の `CloseAllFilesAndQuitVectorworks(true, true)` を呼ぶ | 呼び出し回数を数える／成否を返す |
 | `DropLoadedPayload` | 載っている本体を降ろす（次の操作で新しいものが読み直される） | 呼び出し回数を数える／成否を返す |
 
-フロー本体（`RunStableStartupCheckWith` / `RunDevStartupCheckWith`、`src/UpdaterFlow.cpp`）
+フロー本体（`RunStableUpdateCheckWith` / `RunDevUpdateCheckWith`、`src/UpdaterFlow.cpp`）
 は `IUpdaterHost&` だけに依存し、SDK ヘッダを一切 include しません。よって
 
 - **本番** は `Updater.cpp` が `gSDK` / `popen` / VWFC で実装した本物の host を渡し、
@@ -317,12 +320,16 @@ if ($MyInvocation.InvocationName -ne '.') {
 * **プラグインのフォルダに入り、入れ子にならないこと**（アップデータは「いま自分が
   読み込まれたフォルダ」を渡してくるので、無条件に足すと更新のたびに深くなる）。
 * **入れる前に前の版が取り除かれること**（前の版にしか無かったファイルが残らない）。
-更新後の**再起動**はスクリプトの仕事ではありません。終了要求 → 終了待ち → 起動し直しを
-行う 1 行のコマンドは `src/UpdaterParse.h` が組み立てるので（同梱スクリプトの版ズレを避ける
-ため。理由は README「再起動を SDK に任せない理由」）、テストも C++ 側
-（`tests/UpdaterParseTests.cpp`）にあり、生成されるコマンド文字列そのものを検証します——
-**通常の終了要求を送ること**、**プロセスが消えるまで（上限付きで）待つこと**、**待った後で
-初めてアプリを開くこと**、そしてパスの引用が壊れないこと。
+更新後の**再起動**はスクリプトの仕事ではありません。Vectorworks 自身に頼むので
+（SDK の `CloseAllFilesAndQuitVectorworks`。`src/Updater.cpp` の `Restart`）、テストで
+押さえるのは**いつ再起動を尋ねるか**——殻まで変わったときだけで、本体だけなら尋ねずに
+降ろす——という判断のほうです（`UpdaterFlowTests`）。SDK 呼び出しそのものは
+`IUpdaterHost` の向こう側なので、実機での目視確認に委ねます。
+
+`q-dev` の出力に足した**5 列目（ブランチ名）**は両側で押さえてあります——スクリプトが
+リリース本文の `branch=` から拾えること（`tests/vw-update.test.sh` /
+`tests/vw-update.Tests.ps1`）と、**列が無い古い出力も読めること**
+（`tests/UpdaterParseTests.cpp` の `ParseDevBuilds`）。
 
 各スクリプトに残る OS 固有の面（`.sh` の osascript ダイアログ・`codesign` / `xattr` の
 再署名・`PlistBuddy`、`.ps1` の `%APPDATA%` 既定パス）は、その OS でしか動かないため、
@@ -373,7 +380,8 @@ ctest／CI に組み込み済みです。残るのは各 OS でしか動かな�
   切り出せるロジックを `core/` へ寄せたうえで、残りは実機での目視確認に委ねる。
 - **判断**は `UpdaterParse.h` の純粋関数に寄せ、関数単位で網羅的にテストする。
 - **フロー**は `IUpdaterHost` というシームを挟み、SDK 全体をモックするのではなく
-  プラグインが触る 5 つの副作用（スクリプト実行・通知・質問・ビルド選択・再起動）
+  プラグインが触る 6 つの副作用（スクリプト実行・通知・質問・ビルド選択・本体の
+  取り下ろし・再起動）
   だけをフェイク化して、分岐と文言まで丸ごとテストする
   （ユニット／コンポーネントテスト。e2e ではない）。
 - **スクリプト**は末尾のディスパッチをガードして `source`（dot-source）可能にし、
