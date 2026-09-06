@@ -35,6 +35,7 @@
 #include "VWFC/VWObjects/VWLayerObj.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -85,7 +86,7 @@ namespace HomeskzIfcImport::draw
 		std::string NameOfIndex(InternalIndex index)
 		{
 			if (index == 0)
-				return std::string();
+				return {};
 			TXString name;
 			gSDK->InternalIndexToNameN(index, name);
 			return Utf8(name);
@@ -189,8 +190,7 @@ namespace HomeskzIfcImport::draw
 			{
 				if (!VWLayerObj::IsLayerObject(h))
 					continue;
-				// SDK のラッパは const 修飾が揃っていないので非 const で持つ。
-				VWLayerObj layer(h);
+				const VWLayerObj layer(h);
 				const bool sheet = layer.GetLayerType() == kLayerSheet;
 				if (sheet && !includeSheets)
 					continue;
@@ -320,7 +320,7 @@ namespace HomeskzIfcImport::draw
 			{
 				if (!VWLayerObj::IsLayerObject(h))
 					continue;
-				VWLayerObj layer(h);
+				const VWLayerObj layer(h);
 				if (!only.empty() && Utf8(layer.GetObjectName()) != only)
 					continue;
 				for (MCObjectHandle member = gSDK->FirstMemberObj(h); member != nil;
@@ -371,7 +371,7 @@ namespace HomeskzIfcImport::draw
 			ToolFn run;
 		};
 
-		const Tool kTools[] = {
+		const auto kTools = std::to_array<Tool>({
 			{"vw_ping", "ブリッジが生きているかと、いま開いている図面の素性を返す。",
 			 R"({"type":"object","properties":{},"additionalProperties":false})", &PingTool},
 			{"vw_layers",
@@ -401,7 +401,7 @@ namespace HomeskzIfcImport::draw
 			 &ObjectCountsTool},
 			{"vw_stop_bridge", "ブリッジを止める（Vectorworks 側の進捗ダイアログが閉じる）。",
 			 R"({"type":"object","properties":{},"additionalProperties":false})", &StopTool},
-		};
+		});
 
 		// 表を MCP の tools/list が求める形（name / description / inputSchema）で返す。
 		Json ToolCatalog()
@@ -444,7 +444,7 @@ namespace HomeskzIfcImport::draw
 					if (request.tool != tool.name)
 						continue;
 					std::string error;
-					Json result = tool.run(request.args, error);
+					const Json result = tool.run(request.args, error);
 					if (!error.empty())
 					{
 						response.ok = false;
@@ -489,7 +489,7 @@ namespace HomeskzIfcImport::draw
 		{
 			const char* const chosen = std::getenv("VW_MCP_SPOOL");
 			if (chosen != nullptr && *chosen != '\0')
-				return std::string(chosen);
+				return {chosen};
 			return core::bridgeSpoolDir(HomeDirectory(), PLUGIN_VWR_ID);
 		}
 

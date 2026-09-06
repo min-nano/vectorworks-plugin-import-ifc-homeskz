@@ -11,6 +11,7 @@
 #include "core/Bridge.h"
 #include "core/Json.h"
 
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -245,6 +246,94 @@ TEST(bridge_spool_status_appears_and_disappears)
 	CHECK(!std::filesystem::exists(spool.dir() + "/" + kBridgeStatusFile));
 	// 2 回目は何もしない（止め損ねても落ちない）。
 	spool.removeStatus();
+}
+
+TEST(bridge_failure_response_carries_the_reason)
+{
+	// 失敗の応答は error だけを載せる（result は載せない）。壊れた要求へ応えるのに使う。
+	const BridgeResponse response = HomeskzIfcImport::core::bridgeFailure("abc", "読めません");
+	CHECK_EQ(response.id, std::string("abc"));
+	CHECK(!response.ok);
+	CHECK_EQ(HomeskzIfcImport::core::dumpBridgeResponse(response),
+			 std::string(R"({"id":"abc","ok":false,"error":"読めません"})"));
+}
+
+TEST(bridge_spool_prepare_reports_why_it_could_not)
+{
+	// 場所が決まらない（ホームが読めない等）。
+	BridgeSpool nowhere("");
+	std::string error;
+	CHECK(!nowhere.prepare(error));
+	CHECK(!error.empty());
+
+	// そこに**ファイル**があってディレクトリを作れない。
+	const TempDir temp("prepare");
+	const std::string occupied = temp.path() + "/occupied";
+	WriteFile(occupied, "じゃま");
+	BridgeSpool blocked(occupied);
+	error.clear();
+	CHECK(!blocked.prepare(error));
+	CHECK(!error.empty());
+}
+
+TEST(bridge_spool_is_quiet_when_the_directory_is_missing)
+{
+	// **開始前・止めた後でも落ちない。** 掃除は 0 件、要求は空。
+	const TempDir temp("missing");
+	BridgeSpool spool(temp.path() + "/not-created");
+	CHECK_EQ(spool.sweep(), std::size_t(0));
+	std::vector<std::string> broken;
+	CHECK(spool.poll(broken).empty());
+	CHECK(broken.empty());
+	// 印を消すのも安全（無くても何も言わない）。
+	spool.removeStatus();
+}
+
+TEST(bridge_spool_caps_how_many_it_takes_per_poll)
+{
+	// **1 周で捌く件数に上限がある**（溜まっていても Vectorworks を握り続けない）。
+	// 残りは次の周で拾われる。
+	const TempDir temp("cap");
+	BridgeSpool spool(temp.path() + "/mcp");
+	std::string error;
+	CHECK(spool.prepare(error));
+
+	const std::size_t placed = HomeskzIfcImport::core::kBridgeMaxRequestsPerPoll + 4;
+	for (std::size_t i = 0; i < placed; ++i)
+	{
+		char id[32] = {};
+		std::snprintf(id, sizeof(id), "%012zu-aaaa", i);
+		PutRequest(spool.dir(), id, "vw_ping");
+	}
+
+	std::vector<std::string> broken;
+	const std::vector<BridgeRequest> first = spool.poll(broken);
+	CHECK_EQ(first.size(), HomeskzIfcImport::core::kBridgeMaxRequestsPerPoll);
+	// 先頭から順に（名前の昇順）取られている。
+	CHECK_EQ(first[0].id, std::string("000000000000-aaaa"));
+	const std::vector<BridgeRequest> second = spool.poll(broken);
+	CHECK_EQ(second.size(), placed - HomeskzIfcImport::core::kBridgeMaxRequestsPerPoll);
+}
+
+TEST(bridge_spool_rejects_an_oversized_request)
+{
+	// **巨大な要求を丸ごと読み込まない**（上限を越えたら壊れた要求として 1 度だけ報告）。
+	const TempDir temp("oversized");
+	BridgeSpool spool(temp.path() + "/mcp");
+	std::string error;
+	CHECK(spool.prepare(error));
+
+	const std::string huge(HomeskzIfcImport::core::kBridgeMaxRequestBytes + 1024, 'x');
+	WriteFile(spool.dir() + "/000000000001-aaaa" + kBridgeRequestSuffix, huge);
+
+	std::vector<std::string> broken;
+	const std::vector<BridgeRequest> requests = spool.poll(broken);
+	CHECK(requests.empty());
+	CHECK_EQ(broken.size(), std::size_t(1));
+	CHECK_EQ(broken[0], std::string("000000000001-aaaa"));
+	// 消えている（毎周読み直さない）。
+	CHECK(!std::filesystem::exists(spool.dir() + "/000000000001-aaaa" +
+								   std::string(kBridgeRequestSuffix)));
 }
 
 TEST(bridge_spool_refuses_a_reply_with_a_bad_id)

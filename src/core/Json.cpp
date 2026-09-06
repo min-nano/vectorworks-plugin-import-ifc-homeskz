@@ -102,11 +102,29 @@ namespace HomeskzIfcImport::core
 				return;
 			}
 			// **ロケールを固定する**（小数点がカンマになる環境で壊れた JSON を吐かない）。
-			std::ostringstream oss;
-			oss.imbue(std::locale::classic());
-			oss.precision(std::numeric_limits<double>::max_digits10);
-			oss << value;
-			out += oss.str();
+			//
+			// **短く書けるなら短く書く。** max_digits10（17 桁）で一律に書くと 0.0125 が
+			// 0.012500000000000001 になり、読む側——人にとっても Claude にとっても——
+			// 雑音でしかない。15 → 16 → 17 桁の順に試し、**読み戻して同じ値になった
+			// 最初のもの**を採る（17 桁まで行けば必ず一致するので、値は失われない）。
+			for (int digits = 15; digits <= std::numeric_limits<double>::max_digits10; ++digits)
+			{
+				std::ostringstream oss;
+				oss.imbue(std::locale::classic());
+				oss.precision(digits);
+				oss << value;
+				const std::string text = oss.str();
+
+				std::istringstream iss(text);
+				iss.imbue(std::locale::classic());
+				double back = 0.0;
+				iss >> back;
+				if (back == value || digits == std::numeric_limits<double>::max_digits10)
+				{
+					out += text;
+					return;
+				}
+			}
 		}
 
 		void AppendValue(std::string& out, const Json& value)

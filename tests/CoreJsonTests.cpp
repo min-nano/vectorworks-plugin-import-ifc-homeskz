@@ -8,6 +8,7 @@
 #include "TestFramework.h"
 #include "core/Json.h"
 
+#include <limits>
 #include <string>
 
 using HomeskzIfcImport::core::Json;
@@ -125,6 +126,108 @@ TEST(json_parse_rejects_broken_input)
 		CHECK(!Json::parse(text, value, error));
 		CHECK(!error.empty());
 	}
+}
+
+TEST(json_dump_non_integral_and_non_finite)
+{
+	// 整数で表せない数はそのまま（**ロケールに依らず小数点は "."**）。
+	CHECK_EQ(Json::number(1.5).dump(), "1.5");
+	CHECK_EQ(Json::number(-0.0125).dump(), "-0.0125");
+	// 巨大な値は整数扱いの範囲を外れるので指数表記へ落ちる（JSON として正しい）。
+	CHECK(Json::number(1e300).dump().find('e') != std::string::npos);
+	// **短く書けるなら短く書くが、値は失わない**（17 桁要る値は 17 桁で書く）。
+	const double awkward = 0.1 + 0.2;
+	Json parsed;
+	std::string error;
+	CHECK(Json::parse(Json::number(awkward).dump(), parsed, error));
+	CHECK_EQ(parsed.asNumber(), awkward);
+	// **非有限は JSON で表せないので null にする**（1 つの異常値で応答全体を捨てない）。
+	const double inf = std::numeric_limits<double>::infinity();
+	CHECK_EQ(Json::number(inf).dump(), "null");
+	CHECK_EQ(Json::number(-inf).dump(), "null");
+	CHECK_EQ(Json::number(std::numeric_limits<double>::quiet_NaN()).dump(), "null");
+}
+
+TEST(json_dump_escapes_the_rest_of_the_control_characters)
+{
+	CHECK_EQ(jsonQuote("\r"), R"("\r")");
+	CHECK_EQ(jsonQuote("\b"), R"("\b")");
+	CHECK_EQ(jsonQuote("\f"), R"("\f")");
+}
+
+TEST(json_kind_mismatch_is_a_no_op)
+{
+	// 型の違う操作は**黙って何もしない**（呼ぶ側に型検査を撒かないための約束）。
+	Json number = Json::number(1);
+	number.push(Json::integer(2));
+	number.set("a", Json::integer(3));
+	CHECK_EQ(number.dump(), "1");
+	// 配列に set / オブジェクトに push も同じ。
+	Json array = Json::array();
+	array.set("a", Json::integer(1));
+	CHECK_EQ(array.dump(), "[]");
+	Json object = Json::object();
+	object.push(Json::integer(1));
+	CHECK_EQ(object.dump(), "{}");
+	// as*() は型が違えば既定値。
+	CHECK_EQ(number.asString("既定"), std::string("既定"));
+	CHECK_EQ(number.asBool(true), true);
+	CHECK_EQ(Json::string("x").asNumber(2.5), 2.5);
+}
+
+TEST(json_has_finds_only_present_keys)
+{
+	Json value = Json::object();
+	value.set("a", Json::integer(1));
+	CHECK(value.has("a"));
+	CHECK(!value.has("b"));
+	// オブジェクトでなければ常に false。
+	CHECK(!Json::array().has("a"));
+}
+
+TEST(json_parse_every_escape)
+{
+	Json value;
+	std::string error;
+	CHECK(Json::parse(R"("\/\b\f\n\r\t")", value, error));
+	CHECK_EQ(value.asString(), std::string("/\b\f\n\r\t"));
+
+	// \u は 1 / 2 / 3 バイトの UTF-8 へ（大文字の 16 進も読む）。
+	CHECK(Json::parse(R"("Aéあ")", value, error));
+	CHECK_EQ(value.asString(), std::string("Aéあ"));
+
+	// 知らない綴り・傍線で終わる・\u の桁が足りない／16 進でないものは受けない。
+	CHECK(!Json::parse(R"("\q")", value, error));
+	CHECK(!Json::parse("\"\\", value, error));
+	CHECK(!Json::parse(R"("\u12")", value, error));
+	CHECK(!Json::parse(R"("\uZZZZ")", value, error));
+}
+
+TEST(json_parse_surrogates)
+{
+	Json value;
+	std::string error;
+	// 上位サロゲートの後ろが \u でない → 単独の符号位置として読む（落ちない）。
+	CHECK(Json::parse(R"("\ud83dx")", value, error));
+	CHECK(!value.asString().empty());
+	// 上位の後ろが \u だが下位ではない → 位置を戻して両方を別々に読む。
+	CHECK(Json::parse(R"("\ud83dA")", value, error));
+	CHECK(!value.asString().empty());
+	// 上位の後ろの \u が壊れている → 受けない。
+	CHECK(!Json::parse(R"("\ud83d\uZZZZ")", value, error));
+}
+
+TEST(json_parse_rejects_more_broken_shapes)
+{
+	Json value;
+	std::string error;
+	// 鍵と鍵の間に区切りが無い / 入れ子の値が読めない / 指数の桁が無い。
+	CHECK(!Json::parse(R"({"a":1 "b":2})", value, error));
+	CHECK(!Json::parse("[1 2]", value, error));
+	CHECK(!Json::parse(R"({"a":@})", value, error));
+	CHECK(!Json::parse("[@]", value, error));
+	CHECK(!Json::parse("1e+", value, error));
+	CHECK(!Json::parse("1e", value, error));
 }
 
 TEST(json_parse_rejects_deep_nesting)
