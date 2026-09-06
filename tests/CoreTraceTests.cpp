@@ -172,11 +172,11 @@ TEST(local_timestamp_has_the_expected_shape)
 
 TEST(default_log_path_uses_temp_dir_and_single_separator)
 {
-	std::string const path = trace::defaultLogPath("HomeskzIfcImport.log");
-	CHECK(path.find("HomeskzIfcImport.log") != std::string::npos);
+	std::string const path = trace::defaultLogPath("min-nano_structure.log");
+	CHECK(path.find("min-nano_structure.log") != std::string::npos);
 	// 区切りは 1 つだけ（TMPDIR が末尾に "/" を持っていても "//" にしない）。
 	CHECK(path.find("//") == std::string::npos);
-	CHECK(path.size() > std::string("HomeskzIfcImport.log").size());
+	CHECK(path.size() > std::string("min-nano_structure.log").size());
 }
 
 TEST(progress_phases_land_in_the_trace)

@@ -4,8 +4,8 @@
 //	Central place for the plug-in's build-time identity. The exact same source
 //	code is compiled into two coexisting plug-ins:
 //
-//	  * the STABLE plug-in ("HomeskzIfcImport"),    built from the `main` branch, and
-//	  * the DEV plug-in    ("HomeskzIfcImportDev"), built from feature / PR branches.
+//	  * the STABLE plug-in ("min-nano_structure"),    built from the `main` branch, and
+//	  * the DEV plug-in    ("min-nano_structureDev"), built from feature / PR branches.
 //
 //	They must have DIFFERENT identifiers (bundle name, .vwr identifier, VCOM
 //	universal name and extension UUID) so Vectorworks can load BOTH at the same
@@ -19,13 +19,22 @@
 
 #ifdef VW_DEV_BUILD
 // Dev plug-in identity.
-#	define PLUGIN_VWR_ID "HomeskzIfcImportDev"
+#	define PLUGIN_VWR_ID "min-nano_structureDev"
 #	define PLUGIN_UNIVERSAL_NAME "CExtMenuImportIfc_HomeskzIfcImportDev"
+#	define PLUGIN_UPDATE_UNIVERSAL_NAME "CExtMenuCheckUpdate_MinNanoStructureDev"
 #else
 // Stable plug-in identity.
-#	define PLUGIN_VWR_ID "HomeskzIfcImport"
+#	define PLUGIN_VWR_ID "min-nano_structure"
 #	define PLUGIN_UNIVERSAL_NAME "CExtMenuImportIfc_HomeskzIfcImport"
+#	define PLUGIN_UPDATE_UNIVERSAL_NAME "CExtMenuCheckUpdate_MinNanoStructure"
 #endif
+
+// **ユニバーサル名（と UUID）は改名しても据え置く。** これはコマンドの同一性そのもので、
+// ワークスペースはこの名前でコマンドを覚えている——付け替えると、利用者のワークスペース
+// からコマンドが消える（作り直しになる）。プラグインの名前（表示名・ファイル名）が
+// 変わっただけでコマンドが別物になる理由は無いので、取り込みコマンドの
+// PLUGIN_UNIVERSAL_NAME は "HomeskzIfcImport" を名乗ったままにしてある。新しく足す
+// コマンド（アップデータの確認）だけが新しい綴りを名乗る。
 
 // NB: there is deliberately no build-channel macro here. The channel a build
 // belongs to ("stable" / "dev") is stamped into the packaged build by CMake —
@@ -40,7 +49,7 @@
 // each build (mac: the bundle's Info.plist, win: a "<name>.commit" sidecar) so
 // the updater scripts can compare the installed build against the published
 // one, and it is compiled in here so the dev build picker can name the build
-// that is actually loaded (see Updater.cpp RunDevStartupCheck).
+// that is actually loaded (see Updater.cpp CheckForUpdates).
 #ifndef VW_BUILD_VERSION
 #	define VW_BUILD_VERSION "local"
 #endif
@@ -48,8 +57,9 @@
 // Git branch the build came from ("main" for stable, the feature/PR branch for
 // a dev build, or "local" for a local build). CMake passes this in via
 // -DVW_BUILD_BRANCH=...; like the commit it is stamped into the Info.plist and
-// shown in the dev build picker at start-up, so a dev build can be traced to
-// its branch.
+// shown in the dev build picker, so a dev build can be traced to its branch.
+// **取り込みのついでの更新確認は、これで「同じブランチの新しいビルド」を選ぶ**
+// （src/UpdaterFlow.cpp の RunDevUpdateCheckWith）。
 #ifndef VW_BUILD_BRANCH
 #	define VW_BUILD_BRANCH "local"
 #endif

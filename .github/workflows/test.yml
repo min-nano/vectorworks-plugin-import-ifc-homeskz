@@ -108,7 +108,7 @@ jobs:
       #
       # -j runs the suite across all cores. The test executables are independent
       # processes, and the one shared piece of state — the .gcda counters of the
-      # HomeskzIfcCore objects every binary links — is safe to write concurrently:
+      # MinNanoStructureCore objects every binary links — is safe to write concurrently:
       # libgcov locks each .gcda file while it merges into it, so the totals come
       # out the same as a serial run (verified against one before this landed).
       # ctest buffers each test's output, so a failure still reads as one block.

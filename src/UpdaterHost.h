@@ -3,7 +3,7 @@
 //
 //	The seam that lets the update FLOWS be tested without the Vectorworks SDK.
 //
-//	RunStableStartupCheck / RunDevStartupCheck are two small state machines:
+//	RunStableUpdateCheck / RunDevUpdateCheck are two small state machines:
 //	"ask the script, decide, maybe show a dialog, maybe install, report". The
 //	decisions are already pure (UpdaterParse.h); what remained SDK-bound was the
 //	side-effecting operations those flows perform:
@@ -57,32 +57,50 @@ namespace HomeskzIfcImport
 		// 新しいファイルが読み直される（src/PayloadSession.h）。降ろせなかった——本体の
 		// コードがまだ走っている——ときだけ false。
 		//
-		// 起動時のチェックから呼ばれる限り、そもそも本体はまだ載っていないので、これは
-		// たいてい「何もせず true」である。それでも呼ぶのは、**この判断（再起動が要らない）
-		// と実際の載せ替えを 1 か所で完結させておく**ため——アップデートの確認をあとで
-		// コマンドからも走らせるようにしたとき、ここが無いと黙って古いまま動き続ける。
+		// 更新の確認は本体を確保する**前**に走るので（src/Extensions/ExtMenu.cpp）、
+		// ここが呼ばれる時点で本体はスタックに載っていない——降ろせるのが常態である。
+		// 降ろせなかったときだけ false になり、反映は次の起動へ回る。
 		virtual bool DropLoadedPayload() = 0;
 
 		// Quit Vectorworks and start it again, so the build just installed is
 		// actually loaded (a compiled plug-in is only ever picked up at start-up).
-		// Returns false if the restart could not even be ARRANGED (the host could
-		// not work out what to relaunch, or could not start the helper that does
-		// it) — Vectorworks is then left running untouched and the flow tells the
-		// user to restart by hand. A true return only means "the quit was
-		// requested": open documents still get the usual save prompt, and backing
-		// out there simply leaves the old build running until the next start-up.
+		// Returns false if the restart could not even be REQUESTED — Vectorworks is
+		// then left running untouched and the flow tells the user to restart by
+		// hand. A true return only means "the quit was requested": open documents
+		// still get the usual save prompt, and backing out there simply leaves the
+		// old build running until the next start-up.
 		virtual bool Restart() = 0;
 	};
 
+	// **更新の確認をどこから起こしたか。** 分かれるのは「新しいビルドが無かった」
+	// ときの振る舞いだけで、更新があるときの流れ（尋ねて入れて、要るなら再起動）は
+	// 同じである。
+	enum class UpdateCheckKind
+	{
+		// メニューコマンド「アップデータを確認」から。**必ず結果を伝える**——
+		// 押したのに何も起きないのでは、確認できたのか、そもそも動いていないのかが
+		// 分からない。取得に失敗した（オフライン等）ときもその旨を出す。
+		Manual,
+		// 取り込みコマンドのついで。**更新があるときだけ口を開く**——取り込みたい人の
+		// 前に「最新です」を挟まない。取得に失敗しても黙って取り込みへ進む。
+		Silent,
+	};
+
 	// The SDK-independent update flows, parameterized by the host above. These
-	// hold NO once-per-session state (the public wrappers in Updater.cpp do), so
-	// tests can drive them repeatedly. runningBranch/runningCommit identify the
-	// build currently loaded (compiled-in at run time; injected in tests).
+	// hold NO state, so tests can drive them repeatedly. runningBranch/runningCommit
+	// identify the build currently loaded (compiled-in at run time; injected in
+	// tests).
 	// runningShellId は**いま動いている殻の ID**（コンパイル時に焼かれた VW_SHELL_ID。
 	// テストでは注入する）。入れたビルドの殻が同じなら、本体を読み直すだけで反映される
 	// ＝**再起動を尋ねない**（src/UpdaterParse.h の NeedsRestartAfterInstall）。
-	void RunStableStartupCheckWith(IUpdaterHost& host, const std::string& runningShellId);
-	void RunDevStartupCheckWith(IUpdaterHost& host, const std::string& runningBranch,
-								const std::string& runningCommit,
-								const std::string& runningShellId);
+	void RunStableUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
+								  const std::string& runningShellId);
+
+	// 開発版。**kind で挙動が大きく変わる唯一の流れ**:
+	//   Manual … ビルドの選択ダイアログを出す（どのブランチのビルドを使うかを選ぶ）。
+	//   Silent … ダイアログは出さず、**いま動いているのと同じブランチ**の新しいビルド
+	//            だけを拾って尋ねる。取り込みのたびにブランチ選択が出ては邪魔になる。
+	void RunDevUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
+							   const std::string& runningBranch, const std::string& runningCommit,
+							   const std::string& runningShellId);
 } // namespace HomeskzIfcImport

@@ -160,7 +160,7 @@ namespace HomeskzIfcImport::draw
 			// 環境変数の読み取りは core/Trace が持つ（getenv の作法をあちこちに書かない）。
 			const std::string custom = core::trace::envValue("HOMESKZ_IFC_TRACE");
 			const std::string path =
-				custom.empty() ? core::trace::defaultLogPath("HomeskzIfcImport.log") : custom;
+				custom.empty() ? core::trace::defaultLogPath("min-nano_structure.log") : custom;
 			core::trace::open(path); // 開けなくても本文は溜まる（core/Trace.h）
 			// **`core::trace::path()` を必ず渡す。** ここを省くと `formatLogHeader` の
 			// 既定値（空）が効いて、**実際には書けているのに見出しが「ファイルへは
@@ -249,11 +249,11 @@ namespace HomeskzIfcImport::draw
 	// メニューコマンドの本体（draw/ImportCommand.h）。
 	void runImportCommand()
 	{
-		// Note: the dev-build picker is NOT run here. It runs once at Vectorworks
-		// start-up (see plugin_module_main -> RunDevStartupCheck) because a compiled
-		// plug-in can only be swapped in at load time, and because the command may be
-		// re-invoked programmatically — a picker on the command path would then pop up
-		// repeatedly. So the command just does its work below, every time it runs.
+		// Note: the update check is NOT run here — it happens in the SHELL, before
+		// the payload is even acquired (src/Extensions/ExtMenu.cpp). That ordering is
+		// what lets a freshly installed payload take effect on THIS very import: by
+		// the time this function runs, the payload is already loaded and cannot be
+		// swapped. So the command just does its work below, every time it runs.
 
 		// 縦切りの通し処理: ファイルを選ぶ → parse（Phase 1）で IFC を Document へ → draw（Phase 2）
 		// で VectorWorks へ描く → 件数をダイアログに出す。要素が増えても入口はこの形のまま（各要

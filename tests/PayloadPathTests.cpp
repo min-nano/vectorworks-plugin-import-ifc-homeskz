@@ -23,9 +23,9 @@ TEST(file_name_is_the_plugin_name_with_the_payload_extension)
 {
 	// 拡張子が .vwpayload なのは**Vectorworks にプラグインとして拾わせないため**
 	// （.vlb / .vwlibrary だと Plug-Ins の走査に引っかかり、殻と二重に読み込まれる）。
-	CHECK_EQ(FileNameFor("HomeskzIfcImport"), "HomeskzIfcImport.vwpayload");
+	CHECK_EQ(FileNameFor("min-nano_structure"), "min-nano_structure.vwpayload");
 	// stable と dev は名前が違う＝同じ Plug-Ins に同居しても取り違えない。
-	CHECK_EQ(FileNameFor("HomeskzIfcImportDev"), "HomeskzIfcImportDev.vwpayload");
+	CHECK_EQ(FileNameFor("min-nano_structureDev"), "min-nano_structureDev.vwpayload");
 }
 
 // ---------------------------------------------------------------------------
@@ -36,21 +36,22 @@ TEST(mac_payload_sits_next_to_the_bundle_not_inside_it)
 	// **バンドルの中には置かない。** mac の署名はリソースまで封をするので、
 	// Contents/Resources のファイルを差し替えると署名が壊れる（src/PayloadHost.h）。
 	const std::string binary = "/Users/me/Library/Application Support/Vectorworks/2026/Plug-ins/"
-							   "HomeskzIfcImport.vwlibrary/Contents/MacOS/HomeskzIfcImport";
-	CHECK_EQ(MacPayloadPathFromBinary(binary, "HomeskzIfcImport.vwpayload"),
+							   "min-nano_structure.vwlibrary/Contents/MacOS/min-nano_structure";
+	CHECK_EQ(MacPayloadPathFromBinary(binary, "min-nano_structure.vwpayload"),
 			 "/Users/me/Library/Application Support/Vectorworks/2026/Plug-ins/"
-			 "HomeskzIfcImport.vwpayload");
+			 "min-nano_structure.vwpayload");
 }
 
 TEST(mac_payload_path_is_empty_for_an_unexpected_shape)
 {
 	// マーカーが無い＝バンドルの中から読み込まれていない。**当てずっぽうのパスを
 	// 返さない**（呼び出し側は「置き場所を割り出せませんでした」と言える）。
-	CHECK_EQ(MacPayloadPathFromBinary("/tmp/HomeskzIfcImport", "x.vwpayload"), "");
+	CHECK_EQ(MacPayloadPathFromBinary("/tmp/min-nano_structure", "x.vwpayload"), "");
 	CHECK_EQ(MacPayloadPathFromBinary("", "x.vwpayload"), "");
 	// "/Contents/MacOS/" はあるが、その上に親フォルダが無い。
-	CHECK_EQ(MacPayloadPathFromBinary("HomeskzIfcImport.vwlibrary/Contents/MacOS/X", "x.vwpayload"),
-			 "");
+	CHECK_EQ(
+		MacPayloadPathFromBinary("min-nano_structure.vwlibrary/Contents/MacOS/X", "x.vwpayload"),
+		"");
 }
 
 // ---------------------------------------------------------------------------
@@ -59,18 +60,18 @@ TEST(mac_payload_path_is_empty_for_an_unexpected_shape)
 TEST(win_payload_sits_next_to_the_module)
 {
 	const std::string module = "C:\\Users\\me\\AppData\\Roaming\\Nemetschek\\Vectorworks\\2026\\"
-							   "Plug-ins\\HomeskzIfcImport.vlb";
-	CHECK_EQ(WinPayloadPathFromModule(module, "HomeskzIfcImport.vwpayload"),
+							   "Plug-ins\\min-nano_structure.vlb";
+	CHECK_EQ(WinPayloadPathFromModule(module, "min-nano_structure.vwpayload"),
 			 "C:\\Users\\me\\AppData\\Roaming\\Nemetschek\\Vectorworks\\2026\\"
-			 "Plug-ins\\HomeskzIfcImport.vwpayload");
+			 "Plug-ins\\min-nano_structure.vwpayload");
 	// 区切りは "/" でも通す（ツール経由のパスは混ざることがある）。
-	CHECK_EQ(WinPayloadPathFromModule("C:/plugins/HomeskzIfcImport.vlb", "P.vwpayload"),
+	CHECK_EQ(WinPayloadPathFromModule("C:/plugins/min-nano_structure.vlb", "P.vwpayload"),
 			 "C:/plugins/P.vwpayload");
 }
 
 TEST(win_payload_path_is_empty_without_a_separator)
 {
-	CHECK_EQ(WinPayloadPathFromModule("HomeskzIfcImport.vlb", "P.vwpayload"), "");
+	CHECK_EQ(WinPayloadPathFromModule("min-nano_structure.vlb", "P.vwpayload"), "");
 }
 
 // ---------------------------------------------------------------------------

@@ -15,6 +15,8 @@
 #include "Extensions/ExtMenu.h"
 #include "PayloadAbi.h"
 #include "PayloadSession.h"
+#include "Updater.h"
+#include "UpdaterHost.h"
 
 #include <string>
 
@@ -123,10 +125,28 @@ CImportIfcMenu_EventSink::~CImportIfcMenu_EventSink() = default;
 // （Vectorworks の再起動は要らない。src/PayloadSession.h）。
 void CImportIfcMenu_EventSink::DoInterface()
 {
-	// Note: the dev-build picker is NOT run here. It runs once at Vectorworks
-	// start-up (see plugin_module_main -> RunDevStartupCheck) because the SHELL can
-	// only be swapped in at load time, and because the command may be re-invoked
-	// programmatically — a picker on the command path would then pop up repeatedly.
+	// **取り込みの前に更新を確認する。** 起動時の自動確認をやめた代わりがここで
+	// （src/Updater.h）、更新があるときだけ尋ね、オフライン等は黙って取り込みへ進む
+	// （UpdateCheckKind::Silent）。
+	//
+	// **本体（ペイロード）を確保する前に置くことに意味がある。** ここで新しい本体が
+	// 入れば、下の PayloadUse がそれを読み直すので、**この 1 回目の取り込みからもう
+	// 新しいコードが動く**（src/PayloadSession.h）。確保したあとでは、本体のコードが
+	// スタックに載っているぶん降ろせず、反映は次回に回る。
+	//
+	// 例外はここで止める——更新は取り込みの付随でしかなく、失敗しても取り込みは
+	// 続けなければならない。
+	//
+	// NOLINTBEGIN(bugprone-empty-catch): 黙って諦めるのが**この場所では正しい**振る舞い
+	// （オフラインのときに無言なのと同じ扱い）。握り潰しを禁じる規則をここだけ外す。
+	try
+	{
+		CheckForUpdates(UpdateCheckKind::Silent);
+	}
+	catch (...)
+	{
+	}
+	// NOLINTEND(bugprone-empty-catch)
 
 	// 本体を確保する。**ここは唯一「読み込めなかった」をユーザーへ見せられる場所**
 	// （PIO のリセットは黙って諦めるしかない——数百回出るダイアログに意味は無い）。

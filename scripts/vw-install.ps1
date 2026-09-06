@@ -1,5 +1,5 @@
 <#
-    vw-install.ps1 — install ONE build of the HomeskzIfcImport Vectorworks plug-in
+    vw-install.ps1 — install ONE build of the min-nano_structure Vectorworks plug-in
     into a Vectorworks 2026 Plug-Ins folder (Windows).
 
     This is the Windows counterpart of scripts/vw-install.sh; see that file's
@@ -19,9 +19,9 @@
 
     置き先は **Plug-Ins の直下ではなく、プラグインが自分で持つフォルダ**である:
 
-        <Plug-Ins>\HomeskzIfcImport\HomeskzIfcImport.vlb
-        <Plug-Ins>\HomeskzIfcImport\HomeskzIfcImport.vwpayload
-        <Plug-Ins>\HomeskzIfcImport\vw-uninstall.ps1  ほか
+        <Plug-Ins>\min-nano_structure\min-nano_structure.vlb
+        <Plug-Ins>\min-nano_structure\min-nano_structure.vwpayload
+        <Plug-Ins>\min-nano_structure\vw-uninstall.ps1  ほか
 
     こうしておくとそのプラグインのものが 1 か所に閉じるので、取り除くのが「フォルダを
     1 つ消す」で済む（vw-uninstall.ps1）。
@@ -36,7 +36,7 @@
       powershell -ExecutionPolicy Bypass -File vw-install.ps1 -From <dir> -Machine
 
     Options:
-      -Name <plugin>      HomeskzIfcImport / HomeskzIfcImportDev（既定は自動判定）
+      -Name <plugin>      min-nano_structure / min-nano_structureDev（既定は自動判定）
       -PluginsDir <dir>   Plug-Ins（またはプラグインのフォルダそのもの）。既定は
                           VW_PLUGINS_DIR、無ければ VW2026 のユーザフォルダ
       -From <dir>         展開済みのディレクトリから入れる（ダウンロードしない）
@@ -96,8 +96,8 @@ function Write-Note([string] $message) {
 }
 
 function Show-Usage {
-    Write-Host 'vw-install.ps1 — HomeskzIfcImport を Vectorworks 2026 の Plug-Ins へ入れる'
-    Write-Host '  -Name <plugin>     HomeskzIfcImport / HomeskzIfcImportDev（既定は自動判定）'
+    Write-Host 'vw-install.ps1 — min-nano_structure を Vectorworks 2026 の Plug-Ins へ入れる'
+    Write-Host '  -Name <plugin>     min-nano_structure / min-nano_structureDev（既定は自動判定）'
     Write-Host '  -PluginsDir <dir>  インストール先（既定: VW2026 のユーザフォルダ）'
     Write-Host '  -From <dir>        展開済みのディレクトリから入れる'
     Write-Host '  -Zip <file>        手元の zip から入れる'

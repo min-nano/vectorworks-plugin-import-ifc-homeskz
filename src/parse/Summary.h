@@ -136,7 +136,7 @@ namespace HomeskzIfcImport::parse
 	// ——ビルド種別のマクロを見られるのはあちらだけで、こちらは受け取った文字列を並べるだけ。
 	struct BuildInfo
 	{
-		std::string plugin;	 // プラグイン名（"HomeskzIfcImport" / "…Dev"）
+		std::string plugin;	 // プラグイン名（"min-nano_structure" / "…Dev"）
 		std::string channel; // 配布チャンネル（"stable" / "dev"）
 		std::string commit; // ビルドの短い識別子（git コミット。ローカルは "local"）
 		std::string branch;	  // ビルド元のブランチ

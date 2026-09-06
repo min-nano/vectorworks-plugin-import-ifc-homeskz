@@ -245,21 +245,23 @@ TEST(only_newlines_and_blank_lines)
 
 TEST(build_rows_with_too_few_or_extra_tabs)
 {
-	const std::string out =
-		"build\n"								  // no tab after "build"
-		"build\t\n"								  // "build\t" then EOL: rest="" -> skip
-		"build\t\t\n"							  // one tab in rest, second missing -> skip
-		"build\t\t\t\n"							  // three empty fields -> url empty -> skip
-		"build\tc\tb\tu1\textra\tmore\n"		  // extra tabs: everything after 2nd tab is url
-		"build\tc2\tb2\thttps://ex.com/ok.zip\n"; // clean
+	const std::string out = "build\n"		// no tab after "build"
+							"build\t\n"		// "build\t" then EOL: rest="" -> skip
+							"build\t\t\n"	// one tab in rest, second missing -> skip
+							"build\t\t\t\n" // three empty fields -> url empty -> skip
+							"build\tc\tb\tu1\textra\tmore\n" // 4th field = branch, rest joins it
+							"build\tc2\tb2\thttps://ex.com/ok.zip\n"; // clean (no branch column)
 	std::vector<DevBuild> builds = ParseDevBuilds(out);
 	// Only the two rows whose url field is non-empty survive.
 	CHECK_EQ(builds.size(), static_cast<std::size_t>(2));
 	if (builds.size() == 2)
 	{
-		// The "extra tabs" row keeps the remainder (incl. the extra tabs) as url.
-		CHECK_EQ(builds[0].url, "u1\textra\tmore");
+		// 5 列目からはブランチ名。それ以上の列は分けずにブランチへ残す——余りを黙って
+		// 捨てるより、照合に失敗して「何もしない」へ倒れるほうが安全。
+		CHECK_EQ(builds[0].url, "u1");
+		CHECK_EQ(builds[0].branch, "extra\tmore");
 		CHECK_EQ(builds[1].url, "https://ex.com/ok.zip");
+		CHECK_EQ(builds[1].branch, "");
 	}
 }
 

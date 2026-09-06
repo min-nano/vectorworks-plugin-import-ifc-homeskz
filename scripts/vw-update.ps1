@@ -1,5 +1,5 @@
 <#
-    vw-update.ps1 — download the latest CI build of the HomeskzIfcImport Vectorworks
+    vw-update.ps1 — download the latest CI build of the min-nano_structure Vectorworks
     plug-in and install it into your Vectorworks 2026 Plug-Ins folder (Windows).
 
     This is the Windows counterpart of scripts/vw-update.sh. On Windows a
@@ -9,8 +9,8 @@
 
     Two channels, two separately-named plug-ins that can be installed at once:
 
-      stable  -> "HomeskzIfcImport.vlb"     from the rolling "stable" release (main).
-      dev     -> "HomeskzIfcImportDev.vlb"  from a per-branch "dev-<branch>" prerelease;
+      stable  -> "min-nano_structure.vlb"     from the rolling "stable" release (main).
+      dev     -> "min-nano_structureDev.vlb"  from a per-branch "dev-<branch>" prerelease;
                  you pick which branch's build to install.
 
     The plug-in itself drives its own updates by invoking this same script (it is
@@ -277,15 +277,37 @@ function Install-Build([string] $url, [string] $name) {
 # "error=<message>" line so the plug-in stays in control of what the user sees.
 # ---------------------------------------------------------------------------
 
+# Get-ReleaseBranch: リリース本文（notes）の "branch=<name>" 行を読む。公開時に CI が
+# 必ず書いている（.github/workflows/build.yml）。
+#
+# **なぜ表示名では駄目か。** dev プレリリースの name は "Dev: <branch> (<sha>)" なので、
+# 「いま動いているのと同じブランチか」の照合には使えない。取り込みコマンドのついでに
+# 走る確認は、**同じブランチの新しいビルドだけ**を拾ってブランチ選択のダイアログを
+# 出さずに済ませる（src/UpdaterFlow.cpp の RunDevUpdateCheckWith）ので、素のブランチ名が
+# 要る。読めなければ空——プラグイン側はそのとき何もしない側へ倒れる。
+#
+# **`body` は無いことがある**ので、直に `$rel.body` と書かない。GitHub の API は本文の
+# 無いリリースでもキー自体は返すが、テストの合成 JSON にはキーごと無い場合があり、
+# `Set-StrictMode -Version Latest` の下では「存在しないプロパティ」が例外になる
+# （tests/vw-update.Tests.ps1）。PSObject.Properties で有無を確かめてから読む。
+function Get-ReleaseBranch($rel) {
+    $prop = $rel.PSObject.Properties['body']
+    if (-not $prop -or -not $prop.Value) { return '' }
+    foreach ($line in ($prop.Value -split "`r?`n")) {
+        if ($line -like 'branch=*') { return $line.Substring(7).Trim() }
+    }
+    return ''
+}
+
 function Invoke-QStable {
     try { $rel = Invoke-GH 'releases/tags/stable' }
     catch { Write-Output 'error=stable リリースを取得できませんでした。'; return }
 
     $latestFull = $rel.target_commitish
-    $url = Get-PluginZipUrl $rel 'HomeskzIfcImport'
+    $url = Get-PluginZipUrl $rel 'min-nano_structure'
     if (-not $latestFull -or -not $url) { Write-Output 'error=stable リリースの情報が不完全です。'; return }
 
-    Write-Output ("installed=" + (Get-InstalledCommit 'HomeskzIfcImport'))
+    Write-Output ("installed=" + (Get-InstalledCommit 'min-nano_structure'))
     Write-Output ("latest=" + (Get-Short $latestFull))
     Write-Output ("url=" + $url)
 }
@@ -294,15 +316,16 @@ function Invoke-QDev {
     try { $rels = Invoke-GH 'releases?per_page=100' }
     catch { Write-Output 'error=リリース一覧を取得できませんでした。'; return }
 
-    Write-Output ("installed=" + (Get-InstalledCommit 'HomeskzIfcImportDev'))
+    Write-Output ("installed=" + (Get-InstalledCommit 'min-nano_structureDev'))
 
     foreach ($rel in $rels) {
         if ($rel.tag_name -like 'dev-*') {
-            $url = Get-PluginZipUrl $rel 'HomeskzIfcImportDev'
+            $url = Get-PluginZipUrl $rel 'min-nano_structureDev'
             if ($url) {
                 $name = if ($rel.name) { $rel.name } else { $rel.tag_name }
                 # Only list builds that actually have a downloadable asset.
-                Write-Output ("build`t" + (Get-Short $rel.target_commitish) + "`t" + $name + "`t" + $url)
+                Write-Output ("build`t" + (Get-Short $rel.target_commitish) + "`t" + $name + "`t" +
+                              $url + "`t" + (Get-ReleaseBranch $rel))
             }
         }
     }
@@ -337,11 +360,11 @@ function Invoke-Stable {
     try { $rel = Invoke-GH 'releases/tags/stable' }
     catch { Write-Host 'エラー: 安定版リリース (stable) が見つかりません。' -ForegroundColor Red; return }
 
-    $url = Get-PluginZipUrl $rel 'HomeskzIfcImport'
+    $url = Get-PluginZipUrl $rel 'min-nano_structure'
     $latest = Get-Short $rel.target_commitish
     if (-not $latest -or -not $url) { Write-Host 'エラー: 安定版リリースの情報が不完全です。' -ForegroundColor Red; return }
 
-    $installed = Get-InstalledCommit 'HomeskzIfcImport'
+    $installed = Get-InstalledCommit 'min-nano_structure'
     if ($installed -eq $latest) { Write-Host "既に最新です（build $installed）。"; return }
 
     Write-Host '新しい安定版ビルドがあります。'
@@ -349,7 +372,7 @@ function Invoke-Stable {
     Write-Host "  最新: $latest"
     if ((Read-Host 'インストールしますか？ [y/N]') -notmatch '^[yY]') { Write-Host 'スキップしました。'; return }
 
-    if (Install-Build $url 'HomeskzIfcImport') {
+    if (Install-Build $url 'min-nano_structure') {
         Write-Host '更新しました。反映するには Vectorworks を再起動してください。' -ForegroundColor Green
     }
     else { Write-Host ("更新に失敗しました: " + $script:LastError) -ForegroundColor Red }
@@ -362,7 +385,7 @@ function Invoke-Dev {
     $builds = @()
     foreach ($rel in $rels) {
         if ($rel.tag_name -like 'dev-*') {
-            $url = Get-PluginZipUrl $rel 'HomeskzIfcImportDev'
+            $url = Get-PluginZipUrl $rel 'min-nano_structureDev'
             if ($url) {
                 $builds += [pscustomobject]@{
                     Name   = if ($rel.name) { $rel.name } else { $rel.tag_name }
@@ -374,7 +397,7 @@ function Invoke-Dev {
     }
     if ($builds.Count -eq 0) { Write-Host '開発版ビルド (dev-*) がまだありません。対象ブランチを push してビルドを走らせてください。'; return }
 
-    Write-Host ("インストール済み: " + (Get-InstalledCommit 'HomeskzIfcImportDev'))
+    Write-Host ("インストール済み: " + (Get-InstalledCommit 'min-nano_structureDev'))
     Write-Host '利用可能な開発版ビルド:'
     for ($i = 0; $i -lt $builds.Count; $i++) {
         Write-Host ("  [{0}] {1} ({2})" -f ($i + 1), $builds[$i].Name, $builds[$i].Commit)
@@ -388,7 +411,7 @@ function Invoke-Dev {
     }
 
     $b = $builds[$n - 1]
-    if (Install-Build $b.Url 'HomeskzIfcImportDev') {
+    if (Install-Build $b.Url 'min-nano_structureDev') {
         Write-Host 'インストールしました。反映するには Vectorworks を再起動してください。' -ForegroundColor Green
     }
     else { Write-Host ("インストールに失敗しました: " + $script:LastError) -ForegroundColor Red }

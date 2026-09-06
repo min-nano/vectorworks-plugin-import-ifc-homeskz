@@ -105,7 +105,7 @@ RUN() { (
 	"$@"
 ); }
 
-NAME="HomeskzIfcImportDev"
+NAME="min-nano_structureDev"
 
 # make_install <plugins-dir> [name] — 実際のインストール後と同じ形を作る。
 make_install() {

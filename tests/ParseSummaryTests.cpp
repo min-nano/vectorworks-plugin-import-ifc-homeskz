@@ -411,17 +411,17 @@ TEST(format_log_header_names_the_build_time_and_file)
 	// 報告に貼られたログから最初に知りたいのは「どのリビジョンを・いつ・どのファイルに
 	// 対して動かしたか」。その 3 つが必ず頭に並ぶ。
 	BuildInfo build;
-	build.plugin = "HomeskzIfcImportDev";
+	build.plugin = "min-nano_structureDev";
 	build.channel = "dev";
 	build.commit = "1a2b3c4";
 	build.branch = "claude/example";
 	build.platform = "macOS";
 
 	std::string const text = formatLogHeader(build, "/Users/x/安藤邸.ifc", 12876543ULL,
-											 "2026-08-29 14:03:21", "/tmp/HomeskzIfcImport.log");
+											 "2026-08-29 14:03:21", "/tmp/min-nano_structure.log");
 
 	CHECK(text.find("日時: 2026-08-29 14:03:21") != std::string::npos);
-	CHECK(text.find("HomeskzIfcImportDev") != std::string::npos);
+	CHECK(text.find("min-nano_structureDev") != std::string::npos);
 	CHECK(text.find("dev") != std::string::npos);
 	CHECK(text.find("commit 1a2b3c4") != std::string::npos);
 	CHECK(text.find("branch claude/example") != std::string::npos);
@@ -430,7 +430,7 @@ TEST(format_log_header_names_the_build_time_and_file)
 	CHECK(text.find("対象: /Users/x/安藤邸.ifc") != std::string::npos);
 	CHECK(text.find("12.3 MB") != std::string::npos);
 	// **ログの置き場所はログ自身が持つ**（ダイアログには出さない。M19）。
-	CHECK(text.find("ログ: /tmp/HomeskzIfcImport.log") != std::string::npos);
+	CHECK(text.find("ログ: /tmp/min-nano_structure.log") != std::string::npos);
 }
 
 TEST(format_log_header_says_when_there_is_no_log_file)

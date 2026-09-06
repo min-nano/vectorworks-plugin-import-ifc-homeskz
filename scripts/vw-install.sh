@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# vw-install.sh — install ONE build of the HomeskzIfcImport Vectorworks plug-in
+# vw-install.sh — install ONE build of the min-nano_structure Vectorworks plug-in
 # into a Vectorworks 2026 Plug-Ins folder (macOS).
 #
 # **このスクリプトは「配置の手順」そのもので、リリースと一緒に配られる。**
@@ -29,9 +29,9 @@
 #
 # 置き先は **`Plug-Ins` の直下ではなく、プラグインが自分で持つフォルダ**である:
 #
-#     <Plug-Ins>/HomeskzIfcImport/HomeskzIfcImport.vwlibrary
-#     <Plug-Ins>/HomeskzIfcImport/HomeskzIfcImport.vwpayload
-#     <Plug-Ins>/HomeskzIfcImport/vw-uninstall.sh
+#     <Plug-Ins>/min-nano_structure/min-nano_structure.vwlibrary
+#     <Plug-Ins>/min-nano_structure/min-nano_structure.vwpayload
+#     <Plug-Ins>/min-nano_structure/vw-uninstall.sh
 #
 # こうしておくと**そのプラグインのものが 1 か所に閉じる**ので、取り除くのが「フォルダを
 # 1 つ消す」で済む（`vw-uninstall.sh`）。Vectorworks が `Plug-Ins` のサブフォルダも
@@ -48,7 +48,7 @@
 #   ./vw-install.sh --from <dir> --machine   # 展開済みから入れる（vw-update.sh 用）
 #
 # Options:
-#   --name <plugin>      HomeskzIfcImport / HomeskzIfcImportDev（既定はアーカイブか
+#   --name <plugin>      min-nano_structure / min-nano_structureDev（既定はアーカイブか
 #                        リリースのアセット名から判定する）
 #   --plugins-dir <dir>  Plug-Ins（またはプラグインのフォルダそのもの）。既定は
 #                        VW_PLUGINS_DIR、無ければ VW2026 のユーザフォルダ
@@ -115,13 +115,13 @@ say() {
 
 usage() {
 	cat <<'USAGE'
-vw-install.sh — HomeskzIfcImport を Vectorworks 2026 の Plug-Ins へ入れる（macOS）
+vw-install.sh — min-nano_structure を Vectorworks 2026 の Plug-Ins へ入れる（macOS）
 
   ./vw-install.sh                       最新の stable を入れる
   ./vw-install.sh --tag dev-feature-x   そのプレリリースを入れる
   ./vw-install.sh --zip <file>          手元の zip から入れる
 
-  --name <plugin>      HomeskzIfcImport / HomeskzIfcImportDev（既定は自動判定）
+  --name <plugin>      min-nano_structure / min-nano_structureDev（既定は自動判定）
   --plugins-dir <dir>  インストール先（既定: VW2026 のユーザフォルダ）
   --from <dir>         展開済みのディレクトリから入れる
   --zip <file>         手元の zip から入れる

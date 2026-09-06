@@ -100,7 +100,7 @@ function CheckNoPath([string] $path, [string] $label) {
 
 function AsText($lines) { return (@($lines) -join "`n") }
 
-$Name = 'HomeskzIfcImportDev'
+$Name = 'min-nano_structureDev'
 
 # 実際のインストール後と同じ形を作る。
 function New-Install([string] $root, [string] $name = $Name) {

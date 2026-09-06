@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# vw-update.sh — download the latest CI build of the HomeskzIfcImport Vectorworks plug-in
+# vw-update.sh — download the latest CI build of the min-nano_structure Vectorworks plug-in
 # and install it into your Vectorworks 2026 Plug-Ins folder.
 #
 # Two channels, two separately-named plug-ins that can be installed at once:
 #
-#   stable  -> "HomeskzIfcImport.vwlibrary"     from the rolling "stable" release (main).
-#   dev     -> "HomeskzIfcImportDev.vwlibrary"  from a per-branch "dev-<branch>" prerelease;
+#   stable  -> "min-nano_structure.vwlibrary"     from the rolling "stable" release (main).
+#   dev     -> "min-nano_structureDev.vwlibrary"  from a per-branch "dev-<branch>" prerelease;
 #              you pick which branch's build to install.
 #
 # Flow: check the latest build, tell you whether a newer one is available, then
@@ -23,7 +23,7 @@
 #                       installed=<commit|none> / latest=<commit> / url=<zip url>
 #                       (or error=<message>).
 #   q-dev               Print installed=<commit|none> then one TSV line per dev
-#                       build: "build<TAB>commit<TAB>name<TAB>url"
+#                       build: "build<TAB>commit<TAB>name<TAB>url<TAB>branch"
 #                       (or error=<message>).
 #   do-install <url> <name>   Download+install <name>.vwlibrary; print "ok" or
 #                             error=<message>. No dialogs.
@@ -93,7 +93,7 @@ APPLESCRIPT
 
 die() { # message
 	echo "error: $1" >&2
-	alert "HomeskzIfcImport アップデート" "エラー: $1"
+	alert "みんなの構造設計支援 アップデート" "エラー: $1"
 	exit 1
 }
 
@@ -141,6 +141,18 @@ api_get() { # api-subpath -> path to a temp file holding the JSON, or fail
 
 jval() { # json-file, keypath -> raw scalar value (empty if missing)
 	plutil -extract "$2" raw -o - "$1" 2>/dev/null || true
+}
+
+# release_branch: リリース本文（notes）の "branch=<name>" 行を読む。公開時に CI が
+# 必ず書いている（.github/workflows/build.yml）。
+#
+# **なぜ表示名では駄目か。** dev プレリリースの name は "Dev: <branch> (<sha>)" なので、
+# 「いま動いているのと同じブランチか」の照合には使えない。取り込みコマンドのついでに
+# 走る確認は、**同じブランチの新しいビルドだけ**を拾ってブランチ選択のダイアログを
+# 出さずに済ませる（src/UpdaterFlow.cpp の RunDevUpdateCheckWith）ので、素のブランチ名が
+# 要る。読めなければ空——プラグイン側はそのとき何もしない側へ倒れる。
+release_branch() { # file, index-prefix -> branch name or ""
+	jval "$1" "${2}.body" | sed -n 's/^branch=//p' | head -n 1 | tr -d '\r'
 }
 
 # find_asset_url: walk an assets array and return the browser_download_url of the
@@ -339,7 +351,7 @@ apply_choice() { # choice, zip, name
 	case "$choice" in
 		"更新だけ")
 			install_zip "$zip" "$name"
-			notify "HomeskzIfcImport アップデート" "更新しました。反映するには Vectorworks を再起動してください。"
+			notify "みんなの構造設計支援 アップデート" "更新しました。反映するには Vectorworks を再起動してください。"
 			;;
 		*)
 			echo "skipped."
@@ -354,20 +366,20 @@ update_stable() {
 	local f; f="$(api_get "releases/tags/stable")" \
 		|| die "安定版リリース (stable) が見つかりません。main のビルドが完了しているか確認してください。"
 	local latest_full; latest_full="$(jval "$f" target_commitish)"
-	local url; url="$(plugin_zip_url "$f" "assets" "HomeskzIfcImport" || true)"
+	local url; url="$(plugin_zip_url "$f" "assets" "min-nano_structure" || true)"
 	rm -f "$f"
 	[ -n "$latest_full" ] || die "安定版リリースの情報を取得できませんでした。"
 	[ -n "$url" ] || die "安定版リリースに配布 zip (*.vwlibrary.zip) が見つかりません。"
 
 	local latest="${latest_full:0:7}"
-	local installed; installed="$(installed_commit "$(installed_bundle HomeskzIfcImport)")"
+	local installed; installed="$(installed_commit "$(installed_bundle min-nano_structure)")"
 
 	if [ "$installed" = "$latest" ]; then
-		alert "HomeskzIfcImport (stable)" "既に最新です（build ${installed}）。"
+		alert "みんなの構造設計支援 (stable)" "既に最新です（build ${installed}）。"
 		return
 	fi
 
-	local choice; choice="$(ask2 "HomeskzIfcImport (stable)" "新しい安定版ビルドがあります。
+	local choice; choice="$(ask2 "みんなの構造設計支援 (stable)" "新しい安定版ビルドがあります。
 インストール済み: ${installed}
 最新: ${latest}
 
@@ -375,8 +387,8 @@ update_stable() {
 	[ "$choice" != "更新しない" ] || { echo "skipped."; return; }
 
 	local tmp; tmp="$(mktemp -d)"
-	download "$url" "$tmp/HomeskzIfcImport.vwlibrary.zip" || die "安定版アセットのダウンロードに失敗しました。"
-	apply_choice "$choice" "$tmp/HomeskzIfcImport.vwlibrary.zip" "HomeskzIfcImport"
+	download "$url" "$tmp/min-nano_structure.vwlibrary.zip" || die "安定版アセットのダウンロードに失敗しました。"
+	apply_choice "$choice" "$tmp/min-nano_structure.vwlibrary.zip" "min-nano_structure"
 	rm -rf "$tmp"
 }
 
@@ -394,7 +406,7 @@ update_dev() {
 			dev-*)
 				name="$(jval "$f" "${i}.name")"
 				commit="$(jval "$f" "${i}.target_commitish")"
-				url="$(plugin_zip_url "$f" "${i}.assets" "HomeskzIfcImportDev" || true)"
+				url="$(plugin_zip_url "$f" "${i}.assets" "min-nano_structureDev" || true)"
 				[ -n "$name" ] || name="$tag"
 				names+=("$name"); tags+=("$tag"); commits+=("$commit"); urls+=("$url")
 				;;
@@ -417,13 +429,13 @@ update_dev() {
 
 	local url2="${urls[$idx]}" latest="${commits[$idx]:0:7}"
 	[ -n "$url2" ] || die "選択したビルドに配布 zip (*.vwlibrary.zip) が見つかりません。"
-	local installed; installed="$(installed_commit "$(installed_bundle HomeskzIfcImportDev)")"
+	local installed; installed="$(installed_commit "$(installed_bundle min-nano_structureDev)")"
 
 	local same_note=""
 	[ "$installed" = "$latest" ] && same_note="（このビルドは既にインストール済みです）
 "
 
-	local choice; choice="$(ask2 "HomeskzIfcImport (dev)" "${chosen_name}
+	local choice; choice="$(ask2 "みんなの構造設計支援 (dev)" "${chosen_name}
 ${same_note}インストール済み: ${installed}
 選択したビルド: ${latest}
 
@@ -431,8 +443,8 @@ ${same_note}インストール済み: ${installed}
 	[ "$choice" != "更新しない" ] || { echo "skipped."; return; }
 
 	local tmp; tmp="$(mktemp -d)"
-	download "$url2" "$tmp/HomeskzIfcImportDev.vwlibrary.zip" || die "開発版アセットのダウンロードに失敗しました。"
-	apply_choice "$choice" "$tmp/HomeskzIfcImportDev.vwlibrary.zip" "HomeskzIfcImportDev"
+	download "$url2" "$tmp/min-nano_structureDev.vwlibrary.zip" || die "開発版アセットのダウンロードに失敗しました。"
+	apply_choice "$choice" "$tmp/min-nano_structureDev.vwlibrary.zip" "min-nano_structureDev"
 	rm -rf "$tmp"
 }
 
@@ -452,12 +464,12 @@ q_stable() {
 	local f; f="$(api_get "releases/tags/stable")" \
 		|| { echo "error=stable リリースを取得できませんでした。"; return 0; }
 	local latest_full; latest_full="$(jval "$f" target_commitish)"
-	local url; url="$(plugin_zip_url "$f" "assets" "HomeskzIfcImport" || true)"
+	local url; url="$(plugin_zip_url "$f" "assets" "min-nano_structure" || true)"
 	rm -f "$f"
 	if [ -z "$latest_full" ] || [ -z "$url" ]; then
 		echo "error=stable リリースの情報が不完全です。"; return 0
 	fi
-	local installed; installed="$(installed_commit "$(installed_bundle HomeskzIfcImport)")"
+	local installed; installed="$(installed_commit "$(installed_bundle min-nano_structure)")"
 	echo "installed=${installed}"
 	echo "latest=${latest_full:0:7}"
 	echo "url=${url}"
@@ -465,14 +477,16 @@ q_stable() {
 
 # q-dev: installed dev commit, then one line per downloadable dev build.
 #   installed=<commit|none>
-#   build<TAB>commit<TAB>name<TAB>url
+#   build<TAB>commit<TAB>name<TAB>url<TAB>branch
+# branch は空のことがある（リリース本文に branch= が無い古いリリース）。プラグイン側の
+# パーサはこの列が無い出力も読める（src/UpdaterParse.h の ParseDevBuilds）。
 q_dev() {
 	local f; f="$(api_get "releases?per_page=100")" \
 		|| { echo "error=リリース一覧を取得できませんでした。"; return 0; }
-	local installed; installed="$(installed_commit "$(installed_bundle HomeskzIfcImportDev)")"
+	local installed; installed="$(installed_commit "$(installed_bundle min-nano_structureDev)")"
 	echo "installed=${installed}"
 
-	local i=0 tag name commit url
+	local i=0 tag name commit url branch
 	while [ "$i" -lt 100 ]; do
 		tag="$(jval "$f" "${i}.tag_name")"
 		[ -n "$tag" ] || break
@@ -480,10 +494,12 @@ q_dev() {
 			dev-*)
 				name="$(jval "$f" "${i}.name")"
 				commit="$(jval "$f" "${i}.target_commitish")"
-				url="$(plugin_zip_url "$f" "${i}.assets" "HomeskzIfcImportDev" || true)"
+				url="$(plugin_zip_url "$f" "${i}.assets" "min-nano_structureDev" || true)"
+				branch="$(release_branch "$f" "$i")"
 				[ -n "$name" ] || name="$tag"
 				# Only list builds that actually have a downloadable asset.
-				[ -n "$url" ] && printf 'build\t%s\t%s\t%s\n' "${commit:0:7}" "$name" "$url"
+				[ -n "$url" ] && printf 'build\t%s\t%s\t%s\t%s\n' "${commit:0:7}" "$name" \
+					"$url" "$branch"
 				;;
 		esac
 		i=$((i + 1))

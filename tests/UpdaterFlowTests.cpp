@@ -1,8 +1,8 @@
 //
 //	UpdaterFlowTests.cpp
 //
-//	Tests for the update FLOWS (src/UpdaterFlow.cpp): RunStableStartupCheckWith
-//	and RunDevStartupCheckWith. They are driven through a FAKE IUpdaterHost that
+//	Tests for the update FLOWS (src/UpdaterFlow.cpp): RunStableUpdateCheckWith
+//	and RunDevUpdateCheckWith. They are driven through a FAKE IUpdaterHost that
 //	records every call and returns canned answers, so the entire flow — each
 //	branch and the exact dialog wording — is exercised WITHOUT the Vectorworks
 //	SDK. This is still a unit test: the flow is the unit, the fake host is a test
@@ -145,31 +145,31 @@ namespace
 // Stable flow
 // ---------------------------------------------------------------------------
 
-TEST(stable_stays_silent_when_script_cannot_start)
+TEST(stable_silent_check_says_nothing_when_script_cannot_start)
 {
 	FakeHost h;
 	h.qStableStarts = false;
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 	CHECK_EQ(h.askCount, 0);
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
 }
 
-TEST(stable_stays_silent_when_already_current)
+TEST(stable_silent_check_says_nothing_when_already_current)
 {
 	FakeHost h;
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=abc1234\n"
 				   "url=https://ex.com/x.zip\n";
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 	CHECK_EQ(h.askCount, 0); // no dialog when up to date
 	CHECK_EQ(h.CountScript("do-install"), 0);
 }
 
-TEST(stable_stays_silent_on_error_line)
+TEST(stable_silent_check_says_nothing_on_error_line)
 {
 	FakeHost h;
 	h.qStableOut = "error=offline\n";
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 	CHECK_EQ(h.askCount, 0);
 }
 
@@ -180,7 +180,7 @@ TEST(stable_declined_does_not_install)
 				   "latest=def5678\n"
 				   "url=https://ex.com/x.zip\n";
 	h.askAnswer = false; // user chose "後で"
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 	CHECK_EQ(h.askCount, 1);				  // was asked
 	CHECK_EQ(h.CountScript("do-install"), 0); // but nothing installed
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
@@ -191,10 +191,10 @@ TEST(stable_accepted_and_install_succeeds)
 	FakeHost h;
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=def5678\n"
-				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+				   "url=https://ex.com/min-nano_structure.zip\n";
 	h.askAnswers = {true, false}; // install: yes, restart: later
 	h.doInstallOut = "ok";
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	// Installed the right asset under the stable name.
@@ -202,8 +202,8 @@ TEST(stable_accepted_and_install_succeeds)
 	CHECK_EQ(static_cast<std::size_t>(args.size()), static_cast<std::size_t>(3));
 	if (args.size() == 3)
 	{
-		CHECK_EQ(args[1], "https://ex.com/HomeskzIfcImport.zip");
-		CHECK_EQ(args[2], "HomeskzIfcImport");
+		CHECK_EQ(args[1], "https://ex.com/min-nano_structure.zip");
+		CHECK_EQ(args[2], "min-nano_structure");
 	}
 	// Success is reported by the restart QUESTION (a plain notice would leave the
 	// user to work out that a restart is needed), not by an Inform.
@@ -211,12 +211,10 @@ TEST(stable_accepted_and_install_succeeds)
 	CHECK_EQ(static_cast<std::size_t>(h.asks.size()), static_cast<std::size_t>(2));
 	if (h.asks.size() == 2)
 	{
-		CHECK_EQ(h.asks[1][0], "HomeskzIfcImport を更新しました。");
-		CHECK_EQ(h.asks[1][1],
-				 "build: def5678\n\n"
-				 "反映するには Vectorworks の再起動が必要です。\n"
-				 "今すぐ再起動しますか？（起動の完了後に終了し、自動で起動し直します。\n"
-				 "開いているファイルは保存を確認します）");
+		CHECK_EQ(h.asks[1][0], "みんなの構造設計支援を更新しました。");
+		CHECK_EQ(h.asks[1][1], "build: def5678\n\n"
+							   "反映するには Vectorworks の再起動が必要です。\n"
+							   "今すぐ再起動しますか？（開いているファイルは保存を確認します）");
 		CHECK_EQ(h.asks[1][2], "再起動");
 		CHECK_EQ(h.asks[1][3], "後で");
 	}
@@ -229,10 +227,10 @@ TEST(stable_restart_button_restarts_vectorworks)
 	FakeHost h;
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=def5678\n"
-				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+				   "url=https://ex.com/min-nano_structure.zip\n";
 	h.askAnswer = true; // says yes to both questions: install, then restart
 	h.doInstallOut = "ok";
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	CHECK_EQ(h.restartCount, 1);
@@ -245,11 +243,11 @@ TEST(stable_restart_that_cannot_be_arranged_is_reported)
 	FakeHost h;
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=def5678\n"
-				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+				   "url=https://ex.com/min-nano_structure.zip\n";
 	h.askAnswer = true;
 	h.doInstallOut = "ok";
 	h.restartAnswer = false; // e.g. the relaunch helper would not start
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 
 	CHECK_EQ(h.restartCount, 1);
 	// Pressing 再起動 must not look like it did nothing.
@@ -266,7 +264,7 @@ TEST(stable_accepted_but_install_reports_error)
 				   "url=https://ex.com/x.zip\n";
 	h.askAnswer = true;
 	h.doInstallOut = "error=ダウンロードに失敗しました。\n";
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
@@ -289,7 +287,7 @@ TEST(stable_accepted_but_installer_cannot_start)
 				   "url=https://ex.com/x.zip\n";
 	h.askAnswer = true;
 	h.doInstallStarts = false; // installer could not be launched
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
@@ -303,44 +301,52 @@ TEST(stable_accepted_but_installer_cannot_start)
 // Dev flow
 // ---------------------------------------------------------------------------
 
-TEST(dev_stays_silent_when_script_cannot_start)
+TEST(dev_manual_check_reports_when_script_cannot_start)
 {
 	FakeHost h;
 	h.qDevStarts = false;
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.pickCount, 0);
 	CHECK_EQ(h.CountScript("do-install"), 0);
 }
 
-TEST(dev_stays_silent_on_error_line)
+TEST(dev_manual_check_reports_an_error_line)
 {
 	FakeHost h;
 	h.qDevOut = "error=リリース一覧を取得できませんでした。\n";
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.pickCount, 0);
 }
 
-TEST(dev_skips_picker_when_no_prereleases_exist)
+TEST(dev_manual_check_says_so_when_no_prereleases_exist)
 {
 	FakeHost h;
 	// The script returned no build rows at all.
 	h.qDevOut = "installed=run1234\n";
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
-	CHECK_EQ(h.pickCount, 0); // nothing to choose -> no dialog
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
+	CHECK_EQ(h.pickCount, 0); // nothing to choose -> no picker
 	CHECK_EQ(h.CountScript("do-install"), 0);
-	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+	// **黙って終わらない。** 手で押したコマンドなので、選べるものが無いことを言う。
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+	{
+		CHECK_EQ(h.informs[0][0], "ほかに選べる開発版ビルドはありません。");
+		CHECK_EQ(h.informs[0][1], "現在: main (run1234)");
+	}
 }
 
-TEST(dev_skips_picker_when_only_prerelease_is_the_running_build)
+TEST(dev_manual_check_says_so_when_only_prerelease_is_the_running_build)
 {
 	FakeHost h;
 	// The only prerelease is the build already loaded (same commit).
 	h.qDevOut = "installed=run1234\n"
 				"build\trun1234\tmain\thttps://ex.com/main.zip\n";
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
-	CHECK_EQ(h.pickCount, 0); // no alternative build -> no dialog
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
+	CHECK_EQ(h.pickCount, 0); // no alternative build -> no picker
 	CHECK_EQ(h.CountScript("do-install"), 0);
-	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+		CHECK_EQ(h.informs[0][0], "ほかに選べる開発版ビルドはありません。");
 }
 
 TEST(dev_picker_lists_current_first_then_other_builds)
@@ -352,7 +358,7 @@ TEST(dev_picker_lists_current_first_then_other_builds)
 				"build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n"
 				"build\tbbb2222\tfeature/y\thttps://ex.com/y.zip\n";
 	h.pickAnswer = 0; // keep current
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 
 	CHECK_EQ(h.pickCount, 1);
 	// Entry 0 is the running build; the running build is NOT repeated among the
@@ -373,7 +379,7 @@ TEST(dev_cancelled_does_not_install)
 	FakeHost h;
 	h.qDevOut = "build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n";
 	h.pickAnswer = -1; // cancelled the dialog
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.CountScript("do-install"), 0);
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
 }
@@ -387,7 +393,7 @@ TEST(dev_selecting_a_build_installs_it)
 	h.pickAnswer = 2;		// entry 2 -> candidate index 1 (feature/y)
 	h.askAnswers = {false}; // restart: later
 	h.doInstallOut = "ok";
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	std::vector<std::string> args = h.DoInstallArgs();
@@ -395,7 +401,7 @@ TEST(dev_selecting_a_build_installs_it)
 	if (args.size() == 3)
 	{
 		CHECK_EQ(args[1], "https://ex.com/y.zip"); // the SECOND candidate
-		CHECK_EQ(args[2], "HomeskzIfcImportDev");
+		CHECK_EQ(args[2], "min-nano_structureDev");
 	}
 	// Like the stable channel, success is reported by the restart question.
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
@@ -403,11 +409,9 @@ TEST(dev_selecting_a_build_installs_it)
 	if (h.asks.size() == 1)
 	{
 		CHECK_EQ(h.asks[0][0], "開発版ビルドをインストールしました。");
-		CHECK_EQ(h.asks[0][1],
-				 "branch: feature/y\ncommit: bbb2222\n\n"
-				 "反映するには Vectorworks の再起動が必要です。\n"
-				 "今すぐ再起動しますか？（起動の完了後に終了し、自動で起動し直します。\n"
-				 "開いているファイルは保存を確認します）");
+		CHECK_EQ(h.asks[0][1], "branch: feature/y\ncommit: bbb2222\n\n"
+							   "反映するには Vectorworks の再起動が必要です。\n"
+							   "今すぐ再起動しますか？（開いているファイルは保存を確認します）");
 		CHECK_EQ(h.asks[0][2], "再起動");
 		CHECK_EQ(h.asks[0][3], "後で");
 	}
@@ -422,7 +426,7 @@ TEST(dev_restart_button_restarts_vectorworks)
 	h.pickAnswer = 1;	// the only candidate
 	h.askAnswer = true; // presses 再起動
 	h.doInstallOut = "ok";
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	CHECK_EQ(h.restartCount, 1);
@@ -433,7 +437,7 @@ TEST(dev_out_of_range_selection_keeps_current)
 	FakeHost h;
 	h.qDevOut = "build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n";
 	h.pickAnswer = 5; // past the last candidate
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.CountScript("do-install"), 0); // safeguard -> no install
 }
 
@@ -444,7 +448,7 @@ TEST(dev_install_failure_is_reported)
 	h.pickAnswer = 1;	// the only candidate
 	h.askAnswer = true; // would press 再起動 if it were ever offered...
 	h.doInstallOut = "error=アーカイブの展開に失敗しました。\n";
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
@@ -455,6 +459,192 @@ TEST(dev_install_failure_is_reported)
 	// ...but the install failed, so it never is.
 	CHECK_EQ(h.askCount, 0);
 	CHECK_EQ(h.restartCount, 0);
+}
+
+// ---------------------------------------------------------------------------
+// 手で押したとき（UpdateCheckKind::Manual）は必ず結末を出す
+//
+// 起動時に自動で走っていた頃は「黙っている」が正しかった——起動の邪魔をしないため。
+// いまはメニューコマンドから呼ばれるので、**押したのに何も起きない**のでは、最新
+// だったのか、そもそも動いていないのかが区別できない（src/Updater.h）。
+// ---------------------------------------------------------------------------
+
+TEST(stable_manual_check_reports_being_up_to_date)
+{
+	FakeHost h;
+	h.qStableOut = "installed=abc1234\n"
+				   "latest=abc1234\n"
+				   "url=https://ex.com/x.zip\n";
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Manual, kRunningShell);
+
+	CHECK_EQ(h.askCount, 0);				  // 入れるものが無いので尋ねない
+	CHECK_EQ(h.CountScript("do-install"), 0); // 何も入れない
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+	{
+		CHECK_EQ(h.informs[0][0], "みんなの構造設計支援は最新です。");
+		CHECK_EQ(h.informs[0][1], "build: abc1234");
+	}
+}
+
+TEST(stable_manual_check_reports_an_offline_error)
+{
+	FakeHost h;
+	h.qStableOut = "error=stable リリースを取得できませんでした。\n";
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Manual, kRunningShell);
+
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+	{
+		CHECK_EQ(h.informs[0][0], "更新を確認できませんでした。");
+		// スクリプトの言い分を先に、続けて「繋がっていないのでは」を添える。
+		CHECK_EQ(h.informs[0][1],
+				 "stable リリースを取得できませんでした。\n\n"
+				 "ネットワークに繋がっていないか、リリースを取得できませんでした。\n"
+				 "しばらく待ってからもう一度お試しください。");
+	}
+}
+
+TEST(stable_manual_check_reports_when_the_script_cannot_start)
+{
+	FakeHost h;
+	h.qStableStarts = false;
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Manual, kRunningShell);
+
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+	{
+		CHECK_EQ(h.informs[0][0], "更新を確認できませんでした。");
+		CHECK(h.informs[0][1].find("アップデータを起動できませんでした。") == 0u);
+	}
+}
+
+TEST(stable_manual_check_reports_an_incomplete_release)
+{
+	// error= は無いが url が無い（配布 zip の付いていないリリース）。**最新だとは
+	// 言えない**——確認できていないので、そう伝える。
+	FakeHost h;
+	h.qStableOut = "installed=abc1234\n"
+				   "latest=def5678\n";
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Manual, kRunningShell);
+
+	CHECK_EQ(h.askCount, 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+	{
+		CHECK_EQ(h.informs[0][0], "更新を確認できませんでした。");
+		CHECK(h.informs[0][1].find("リリースの情報が不完全です。") == 0u);
+	}
+}
+
+TEST(stable_silent_check_says_nothing_about_an_incomplete_release)
+{
+	FakeHost h;
+	h.qStableOut = "installed=abc1234\nlatest=def5678\n";
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+// ---------------------------------------------------------------------------
+// 取り込みのついで（UpdateCheckKind::Silent）の開発版
+//
+// **ブランチ選択のダイアログを出さない。** 取り込みたいだけの人の前に「どのブランチを
+// 使いますか」を挟むのは邪魔でしかないので、拾うのは**いま動いているのと同じブランチの
+// 新しいビルド**だけにする（src/UpdaterFlow.cpp）。
+// ---------------------------------------------------------------------------
+
+TEST(dev_silent_check_offers_the_same_branchs_newer_build)
+{
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n"
+				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
+	h.askAnswers = {true, false}; // インストール: はい、再起動: 後で
+	h.doInstallOut = "ok";
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Silent, "feature/x", "run1234", kRunningShell);
+
+	CHECK_EQ(h.pickCount, 0); // 選択ダイアログは出さない
+	CHECK_EQ(h.CountScript("do-install"), 1);
+	std::vector<std::string> args = h.DoInstallArgs();
+	if (args.size() == 3)
+	{
+		CHECK_EQ(args[1], "https://ex.com/x.zip"); // 同じブランチのほう
+		CHECK_EQ(args[2], "min-nano_structureDev");
+	}
+	// 最初に出るのは「入れますか？」で、勝手には入れない。
+	if (!h.asks.empty())
+	{
+		CHECK_EQ(h.asks[0][0], "同じブランチの新しい開発版ビルドがあります。"
+							   "今すぐインストールしますか？");
+		CHECK_EQ(h.asks[0][1], "branch: feature/x\nインストール済み: run1234\n"
+							   "新しいビルド: aaa1111");
+	}
+	// 結末（再起動を尋ねる）には素のブランチ名が出る（表示名ではなく）。
+	if (h.asks.size() == 2)
+		CHECK_EQ(h.asks[1][1].find("branch: feature/x\ncommit: aaa1111"),
+				 static_cast<std::size_t>(0));
+}
+
+TEST(dev_silent_check_says_nothing_when_no_build_matches_the_branch)
+{
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Silent, "feature/x", "run1234", kRunningShell);
+
+	CHECK_EQ(h.pickCount, 0);
+	CHECK_EQ(h.askCount, 0);
+	CHECK_EQ(h.CountScript("do-install"), 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+TEST(dev_silent_check_says_nothing_when_the_script_omits_the_branch_column)
+{
+	// インストール済みの（＝古い）同梱スクリプトは 4 列しか出さない。照合できないので
+	// **何もしない**——別のブランチのビルドを勝手に入れるよりずっとよい。
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n";
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Silent, "feature/x", "run1234", kRunningShell);
+
+	CHECK_EQ(h.askCount, 0);
+	CHECK_EQ(h.CountScript("do-install"), 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+TEST(dev_silent_check_says_nothing_when_offline)
+{
+	FakeHost h;
+	h.qDevOut = "error=リリース一覧を取得できませんでした。\n";
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Silent, "feature/x", "run1234", kRunningShell);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+TEST(dev_silent_check_declined_does_not_install)
+{
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
+	h.askAnswer = false; // 「後で」
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Silent, "feature/x", "run1234", kRunningShell);
+
+	CHECK_EQ(h.askCount, 1);
+	CHECK_EQ(h.CountScript("do-install"), 0);
+}
+
+TEST(dev_manual_picker_shows_the_branch_when_the_script_reports_it)
+{
+	// 5 列目があるときは、表示名（"Dev: feature/x (aaa1111)"）ではなくブランチ名を出す
+	// ——コミットは隣に並ぶので、表示名では同じものが 2 度出る。
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
+	h.pickAnswer = 0;
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
+
+	CHECK_EQ(h.pickCount, 1);
+	if (h.lastPickItems.size() == 2)
+		CHECK_EQ(h.lastPickItems[1], "feature/x  (aaa1111)");
 }
 
 // ---------------------------------------------------------------------------
@@ -470,11 +660,11 @@ TEST(stable_same_shell_reloads_without_asking_to_restart)
 	FakeHost h;
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=def5678\n"
-				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+				   "url=https://ex.com/min-nano_structure.zip\n";
 	h.askAnswer = true; // says yes to the install question
 	// 入れた殻はいま動いているものと同じ＝本体だけが新しい。
 	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok\n";
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	// 尋ねたのは「インストールしますか？」の 1 回だけ（再起動は尋ねない）。
@@ -485,7 +675,7 @@ TEST(stable_same_shell_reloads_without_asking_to_restart)
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
 	{
-		CHECK_EQ(h.informs[0][0], "HomeskzIfcImport を更新しました。");
+		CHECK_EQ(h.informs[0][0], "みんなの構造設計支援を更新しました。");
 		CHECK_EQ(h.informs[0][1], "build: def5678\n\n"
 								  "Vectorworks の再起動は要りません。\n"
 								  "次の取り込みから新しいビルドが動きます。");
@@ -497,11 +687,11 @@ TEST(stable_same_shell_but_payload_still_in_use_defers_to_next_start)
 	FakeHost h;
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=def5678\n"
-				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+				   "url=https://ex.com/min-nano_structure.zip\n";
 	h.askAnswer = true;
 	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok\n";
 	h.dropAnswer = false; // 本体のコードがまだ走っている
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 
 	// それでも再起動は尋ねない（殻は同じなので、次の起動で確実に反映される）。
 	CHECK_EQ(h.askCount, 1);
@@ -519,10 +709,10 @@ TEST(stable_different_shell_still_offers_restart)
 	FakeHost h;
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=def5678\n"
-				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+				   "url=https://ex.com/min-nano_structure.zip\n";
 	h.askAnswers = {true, false}; // install: yes, restart: 後で
 	h.doInstallOut = "installed-shell=cccc2222dddd\nok\n";
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 
 	// 殻まで変わったので、従来どおり再起動を尋ねる。本体は降ろさない
 	// （どうせ次の起動で殻ごと入れ替わる）。
@@ -538,7 +728,7 @@ TEST(dev_same_shell_reloads_without_asking_to_restart)
 	h.qDevOut = "build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n";
 	h.pickAnswer = 1; // the only candidate
 	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok\n";
-	RunDevStartupCheckWith(h, "main", "run1234", kRunningShell);
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 
 	CHECK_EQ(h.CountScript("do-install"), 1);
 	CHECK_EQ(h.askCount, 0); // 再起動を尋ねない
@@ -561,10 +751,10 @@ TEST(install_without_a_shell_line_falls_back_to_restart)
 	FakeHost h;
 	h.qStableOut = "installed=abc1234\n"
 				   "latest=def5678\n"
-				   "url=https://ex.com/HomeskzIfcImport.zip\n";
+				   "url=https://ex.com/min-nano_structure.zip\n";
 	h.askAnswers = {true, false};
 	h.doInstallOut = "ok\n";
-	RunStableStartupCheckWith(h, kRunningShell);
+	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 
 	CHECK_EQ(h.askCount, 2);
 	CHECK_EQ(h.dropCount, 0);

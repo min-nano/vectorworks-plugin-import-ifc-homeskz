@@ -1,16 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
 
 #
-# HomeskzIfcImport - the ホームズ君 IFC import plug-in for Vectorworks 2026.
+# みんなの構造設計支援 (min-nano_structure) - a Vectorworks 2026 plug-in for
+# structural design work; today it imports ホームズ君構造EX IFC files.
 #
-# The build produces a loadable plug-in that adds a single menu command; running
-# it picks an IFC file and draws the model it describes (see README.md). It
-# builds on BOTH platforms Vectorworks 2026 supports, from the same sources:
+# The build produces a loadable plug-in carrying the plug-in's menu commands and
+# PIOs (see README.md). It builds on BOTH platforms Vectorworks 2026 supports,
+# from the same sources:
 #
-#   * macOS   -> "HomeskzIfcImport.vwlibrary" bundle (the .vwr resource lives inside
-#                the bundle at Contents/Resources).
-#   * Windows -> "HomeskzIfcImport.vlb" (a DLL) with a sibling "HomeskzIfcImport.vwr"
-#                resource file next to it, as the SDK expects on Windows.
+#   * macOS   -> "min-nano_structure.vwlibrary" bundle (the .vwr resource lives
+#                inside the bundle at Contents/Resources).
+#   * Windows -> "min-nano_structure.vlb" (a DLL) with a sibling
+#                "min-nano_structure.vwr" resource file next to it, as the SDK
+#                expects on Windows.
 #
 # The plug-in identifiers (target, output name, bundle id, menu category) are
 # documented in README.md ("プラグイン識別子"); this project derives them from the
@@ -53,7 +55,7 @@ endif()
 # On macOS the SDK headers are compiled as Objective-C++ (some mac headers
 # #import CoreFoundation), matching how the SDK's own Xcode projects build. On
 # Windows they are plain C++. So enable OBJCXX only where it exists.
-project(HomeskzIfcImport LANGUAGES CXX)
+project(MinNanoStructure LANGUAGES CXX)
 if(APPLE)
 	enable_language(OBJCXX)
 endif()
@@ -131,7 +133,7 @@ endif()
 # phases meet only through core/Document.h.
 if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 	add_library(
-		HomeskzIfcCore STATIC
+		MinNanoStructureCore STATIC
 		src/core/Document.cpp
 		src/core/Geometry.cpp
 		src/core/ImportOptions.cpp
@@ -164,17 +166,17 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/Tag.cpp
 		src/parse/StructuralClass.cpp
 		src/parse/IfcGeometry.cpp)
-	target_compile_features(HomeskzIfcCore PUBLIC cxx_std_20)
+	target_compile_features(MinNanoStructureCore PUBLIC cxx_std_20)
 	# PUBLIC so every consumer (plug-in + tests) resolves "core/..." / "parse/..."
 	# includes against src/ the same way.
-	target_include_directories(HomeskzIfcCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+	target_include_directories(MinNanoStructureCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 	# Our own SDK-free code is kept warning-clean, so warnings are errors here
 	# (unlike the plug-in target, whose SDK headers are not warning-clean).
 	if(MSVC)
-		target_compile_options(HomeskzIfcCore PRIVATE /W4 /WX)
+		target_compile_options(MinNanoStructureCore PRIVATE /W4 /WX)
 	else()
-		target_compile_options(HomeskzIfcCore PRIVATE -Wall -Wextra -Werror)
+		target_compile_options(MinNanoStructureCore PRIVATE -Wall -Wextra -Werror)
 	endif()
 
 	# Match the tests' instrumentation so, when the coverage or sanitizer job
@@ -182,7 +184,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 	# executables carry the corresponding link flags; see tests/CMakeLists.txt).
 	if(VW_ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 		target_compile_options(
-			HomeskzIfcCore
+			MinNanoStructureCore
 			PRIVATE -O0
 					-g
 					--coverage
@@ -191,8 +193,8 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 	endif()
 	if(VW_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 		target_compile_options(
-			HomeskzIfcCore PRIVATE -g -fno-omit-frame-pointer -fsanitize=address,undefined
-								   -fno-sanitize-recover=all)
+			MinNanoStructureCore PRIVATE -g -fno-omit-frame-pointer -fsanitize=address,undefined
+										 -fno-sanitize-recover=all)
 	endif()
 endif()
 
@@ -311,6 +313,8 @@ if(VW_BUILD_PLUGIN)
 		src/UpdaterParse.h
 		src/Extensions/ExtMenu.h
 		src/Extensions/ExtMenu.cpp
+		src/Extensions/ExtUpdateMenu.h
+		src/Extensions/ExtUpdateMenu.cpp
 		src/Extensions/ExtColumnMark.h
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.h
@@ -338,18 +342,19 @@ if(VW_BUILD_PLUGIN)
 	message(STATUS "殻の ID: ${VW_SHELL_ID}")
 
 	# --- 殻の sources ------------------------------------------------------------
-	# **Vectorworks が起動時に読み込むモジュールに入るもの。** メニューと 2 つの PIO の
+	# **Vectorworks が起動時に読み込むモジュールに入るもの。** メニュー 2 つと PIO 2 つの
 	# 「登録」、自動アップデート、そして本体（ペイロード）の読み込み。**実処理は 1 行も
 	# 入らない**——それが本体側にあることが、アップデートに Vectorworks の再起動を要らなく
 	# している（src/PayloadAbi.h）。
 	#
-	# ここは SDK 非依存ライブラリ（HomeskzIfcCore）を**リンクしない**。殻は core/ も parse/
+	# ここは SDK 非依存ライブラリ（MinNanoStructureCore）を**リンクしない**。殻は core/ も parse/
 	# も呼ばないので、リンクしてしまうと「殻に入ってよいもの」の境界が曖昧になる。
 	set(VW_SHELL_SOURCES
 		src/ModuleMain.cpp
 		src/PayloadHost.cpp
 		src/PayloadSession.cpp
 		src/Extensions/ExtMenu.cpp
+		src/Extensions/ExtUpdateMenu.cpp
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.cpp
 		src/Updater.cpp
@@ -357,7 +362,7 @@ if(VW_BUILD_PLUGIN)
 
 	# --- 本体（ペイロード）の sources ----------------------------------------------
 	# **殻が dlopen / LoadLibrary で読み込む側。** SDK 依存の draw/ フェーズがまるごと
-	# ここに入り、SDK 非依存の core/ + parse/ は HomeskzIfcCore として下でリンクする。
+	# ここに入り、SDK 非依存の core/ + parse/ は MinNanoStructureCore として下でリンクする。
 	# Vectorworks はこのモジュールの存在を知らないので、**入れ替えに再起動が要らない**。
 	set(VW_PAYLOAD_SOURCES
 		src/payload/PayloadMain.cpp
@@ -393,7 +398,7 @@ if(VW_BUILD_PLUGIN)
 	#   vw_apply_sdk_module(<target> <sources...>)
 	#
 	# ここに入らないのは「殻か本体かで違うもの」だけ——出力の形（バンドル / .vlb /
-	# .vwpayload）と、本体だけがリンクする HomeskzIfcCore。
+	# .vwpayload）と、本体だけがリンクする MinNanoStructureCore。
 	function(vw_apply_sdk_module target)
 		set(VW_MODULE_SOURCES ${ARGN})
 
@@ -561,7 +566,7 @@ if(VW_BUILD_PLUGIN)
 
 		# The SDK-free Phase-1 code (core/ + parse/). **殻はこれをリンクしない**——
 		# 解析も描画も本体の側にあるので、殻が core/ を引く理由が無い。
-		target_link_libraries(${payload_target} PRIVATE HomeskzIfcCore)
+		target_link_libraries(${payload_target} PRIVATE MinNanoStructureCore)
 
 		# 片方だけ作っても実機では動かない（殻は本体を隣から読む）。
 		add_dependencies(${target} ${payload_target})
@@ -676,14 +681,13 @@ if(VW_BUILD_PLUGIN)
 	endif()
 
 	if(VW_BUILD_CHANNEL STREQUAL "stable" OR VW_BUILD_CHANNEL STREQUAL "both")
-		add_vw_plugin(HomeskzIfcImport "HomeskzIfcImport" "io.github.min-nano.HomeskzIfcImport"
-					  "stable")
+		add_vw_plugin(MinNanoStructure "min-nano_structure" "io.github.min-nano.structure" "stable")
 	endif()
 	if(VW_BUILD_CHANNEL STREQUAL "dev" OR VW_BUILD_CHANNEL STREQUAL "both")
 		add_vw_plugin(
-			HomeskzIfcImportDev
-			"HomeskzIfcImportDev"
-			"io.github.min-nano.HomeskzIfcImportDev"
+			MinNanoStructureDev
+			"min-nano_structureDev"
+			"io.github.min-nano.structure-dev"
 			"dev"
 			DEV)
 	endif()
@@ -692,7 +696,7 @@ endif() # VW_BUILD_PLUGIN
 
 # --- Unit tests --------------------------------------------------------------
 # SDK-free tests: the import's parse side (src/core/ + src/parse/, via the
-# HomeskzIfcCore library) and the updater's parsing/quoting/path helpers. They
+# MinNanoStructureCore library) and the updater's parsing/quoting/path helpers. They
 # build on any platform, so a fast Linux job can run them and measure coverage.
 if(VW_BUILD_TESTS)
 	enable_testing()

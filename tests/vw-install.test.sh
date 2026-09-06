@@ -192,7 +192,7 @@ make_tree() { # dir, name
 	cp "${HERE}/../scripts/vw-uninstall.sh" "$dir/vw-uninstall.sh"
 }
 
-NAME="HomeskzIfcImportDev"
+NAME="min-nano_structureDev"
 
 # ===========================================================================
 # install_tree — **the core promise: everything at the root goes in, listed or
@@ -304,20 +304,20 @@ cat >"$REL_JSON" <<'JSON'
   "assets": [
     { "name": "notes.txt",
       "browser_download_url": "https://example.test/dl/notes.txt" },
-    { "name": "HomeskzIfcImport.vwlibrary.zip",
-      "browser_download_url": "https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" }
+    { "name": "min-nano_structure.vwlibrary.zip",
+      "browser_download_url": "https://example.test/dl/min-nano_structure.vwlibrary.zip" }
   ]
 }
 JSON
 
 t "release_zip finds the asset by exact plug-in name"
-check_eq "$(RUN release_zip "$REL_JSON" "HomeskzIfcImport")" \
-	"$(printf 'https://example.test/dl/HomeskzIfcImport.vwlibrary.zip\tHomeskzIfcImport')" \
+check_eq "$(RUN release_zip "$REL_JSON" "min-nano_structure")" \
+	"$(printf 'https://example.test/dl/min-nano_structure.vwlibrary.zip\tmin-nano_structure')" \
 	"exact match wins"
 
 t "release_zip falls back to any *.vwlibrary.zip and reports its plug-in name"
 check_eq "$(RUN release_zip "$REL_JSON" "")" \
-	"$(printf 'https://example.test/dl/HomeskzIfcImport.vwlibrary.zip\tHomeskzIfcImport')" \
+	"$(printf 'https://example.test/dl/min-nano_structure.vwlibrary.zip\tmin-nano_structure')" \
 	"suffix match yields url + name"
 
 t "release_zip returns nothing when the release carries no distribution zip"

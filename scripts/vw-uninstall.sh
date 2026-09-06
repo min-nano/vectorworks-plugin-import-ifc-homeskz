@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# vw-uninstall.sh — remove ONE installed build of the HomeskzIfcImport Vectorworks
+# vw-uninstall.sh — remove ONE installed build of the min-nano_structure Vectorworks
 # plug-in from a Vectorworks 2026 Plug-Ins folder (macOS).
 #
 # **これは `vw-install.sh` の裏返しで、同じ理由で同じところに配られる。**
@@ -24,12 +24,12 @@
 # ディレクトリを巻き込まないための歯止めで、これが唯一の削除の安全弁である。
 #
 # Usage:
-#   ./vw-uninstall.sh                          # 既定の場所から HomeskzIfcImport を消す
-#   ./vw-uninstall.sh --name HomeskzIfcImportDev
+#   ./vw-uninstall.sh                          # 既定の場所から min-nano_structure を消す
+#   ./vw-uninstall.sh --name min-nano_structureDev
 #   ./vw-uninstall.sh --plugins-dir <dir> --machine   # (vw-install.sh が使う)
 #
 # Options:
-#   --name <plugin>      HomeskzIfcImport / HomeskzIfcImportDev（既定は置かれている
+#   --name <plugin>      min-nano_structure / min-nano_structureDev（既定は置かれている
 #                        ものから判定する）
 #   --plugins-dir <dir>  Plug-Ins（またはプラグインのフォルダそのもの）。既定は
 #                        VW_PLUGINS_DIR、無ければ VW2026 のユーザフォルダ
@@ -74,12 +74,12 @@ say() {
 
 usage() {
 	cat <<'USAGE'
-vw-uninstall.sh — インストール済みの HomeskzIfcImport を取り除く（macOS）
+vw-uninstall.sh — インストール済みの min-nano_structure を取り除く（macOS）
 
   ./vw-uninstall.sh                              既定の場所から取り除く
-  ./vw-uninstall.sh --name HomeskzIfcImportDev   dev 版を取り除く
+  ./vw-uninstall.sh --name min-nano_structureDev   dev 版を取り除く
 
-  --name <plugin>      HomeskzIfcImport / HomeskzIfcImportDev（既定は自動判定）
+  --name <plugin>      min-nano_structure / min-nano_structureDev（既定は自動判定）
   --plugins-dir <dir>  Plug-Ins またはプラグインのフォルダ（既定: VW2026 のユーザフォルダ）
   --machine            機械可読な出力（removed= / ok / error=）
 USAGE

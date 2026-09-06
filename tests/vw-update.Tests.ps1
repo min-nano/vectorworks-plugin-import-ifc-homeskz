@@ -162,8 +162,8 @@ $script:FakeStableJson = @'
 {
   "target_commitish": "abc1234def5678",
   "assets": [
-    { "name": "HomeskzIfcImport.vlb.zip",
-      "browser_download_url": "https://example.test/dl/HomeskzIfcImport.vlb.zip" },
+    { "name": "min-nano_structure.vlb.zip",
+      "browser_download_url": "https://example.test/dl/min-nano_structure.vlb.zip" },
     { "name": "notes.txt",
       "browser_download_url": "https://example.test/dl/notes.txt" }
   ]
@@ -173,13 +173,14 @@ $script:FakeStableJson = @'
 $script:FakeReleasesJson = @'
 [
   { "tag_name": "stable", "name": "stable", "target_commitish": "zzz9999",
-    "assets": [ { "name": "HomeskzIfcImport.vlb.zip",
+    "assets": [ { "name": "min-nano_structure.vlb.zip",
                   "browser_download_url": "https://example.test/dl/stable.zip" } ] },
   { "tag_name": "dev-feature-x", "name": "feature/x", "target_commitish": "aaa1111ccc",
-    "assets": [ { "name": "HomeskzIfcImportDev.vlb.zip",
+    "body": "channel=dev\nbranch=feature/x\ncommit=aaa1111ccc\n",
+    "assets": [ { "name": "min-nano_structureDev.vlb.zip",
                   "browser_download_url": "https://example.test/dl/x.zip" } ] },
   { "tag_name": "dev-feature-y", "name": "feature/y", "target_commitish": "bbb2222ddd",
-    "assets": [ { "name": "HomeskzIfcImportDev.vlb.zip",
+    "assets": [ { "name": "min-nano_structureDev.vlb.zip",
                   "browser_download_url": "https://example.test/dl/y.zip" } ] },
   { "tag_name": "dev-nobuild", "name": "feature/z", "target_commitish": "ccc3333eee",
     "assets": [ { "name": "unrelated.zip",
@@ -203,7 +204,7 @@ function New-BuildZip([string] $zipPath, [string] $vlbName) {
 }
 $GoodZip = Join-Path $Work 'good.zip'
 $BadZip  = Join-Path $Work 'bad.zip'
-New-BuildZip $GoodZip 'HomeskzIfcImportDev'
+New-BuildZip $GoodZip 'min-nano_structureDev'
 New-BuildZip $BadZip  'WrongName'
 
 # ===========================================================================
@@ -211,7 +212,7 @@ New-BuildZip $BadZip  'WrongName'
 # ===========================================================================
 T 'Get-AssetUrl finds the matching asset'
 $rel = $script:FakeStableJson | ConvertFrom-Json
-CheckEq (Get-AssetUrl $rel 'HomeskzIfcImport.vlb.zip') 'https://example.test/dl/HomeskzIfcImport.vlb.zip' 'returns the URL'
+CheckEq (Get-AssetUrl $rel 'min-nano_structure.vlb.zip') 'https://example.test/dl/min-nano_structure.vlb.zip' 'returns the URL'
 
 T 'Get-AssetUrl returns null for an unknown asset'
 CheckEq (Get-AssetUrl $rel 'does-not-exist.zip') $null 'null when no asset matches'
@@ -224,13 +225,13 @@ CheckEq (Get-Short '') '' 'empty stays empty'
 # Get-InstalledCommit — reads the real "<name>.commit" sidecar (no OS tool).
 # ===========================================================================
 T 'Get-InstalledCommit reads the sidecar commit from the plug-in folder'
-$ownStable = Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImport'
+$ownStable = Join-Path $VW_PLUGINS_DIR 'min-nano_structure'
 New-Item -ItemType Directory -Force -Path $ownStable | Out-Null
-Set-Content -LiteralPath (Join-Path $ownStable 'HomeskzIfcImport.commit') -Value "abc1234`n"
-CheckEq (Get-InstalledCommit 'HomeskzIfcImport') 'abc1234' 'trimmed sidecar value'
+Set-Content -LiteralPath (Join-Path $ownStable 'min-nano_structure.commit') -Value "abc1234`n"
+CheckEq (Get-InstalledCommit 'min-nano_structure') 'abc1234' 'trimmed sidecar value'
 
 T 'Get-InstalledCommit is none when the sidecar is absent'
-CheckEq (Get-InstalledCommit 'HomeskzIfcImportDev') 'none' 'absent sidecar -> none'
+CheckEq (Get-InstalledCommit 'min-nano_structureDev') 'none' 'absent sidecar -> none'
 
 # ===========================================================================
 # q-stable — installed / latest / url, and the offline / incomplete paths.
@@ -240,7 +241,7 @@ $script:FakeApiFail = $false
 $out = AsText (Invoke-QStable)
 CheckContains $out 'installed=abc1234' 'installed line (from sidecar)'
 CheckContains $out 'latest=abc1234' 'latest is the 7-char commit prefix'
-CheckContains $out 'url=https://example.test/dl/HomeskzIfcImport.vlb.zip' 'url line'
+CheckContains $out 'url=https://example.test/dl/min-nano_structure.vlb.zip' 'url line'
 
 T 'Invoke-QStable emits an error line when the API is unreachable'
 $script:FakeApiFail = $true
@@ -255,8 +256,13 @@ $script:FakeApiFail = $false
 # ===========================================================================
 T 'Invoke-QDev lists only dev-* builds that have a downloadable asset'
 $out = AsText (Invoke-QDev)
-CheckContains $out ("build`taaa1111`tfeature/x`thttps://example.test/dl/x.zip") 'feature/x row'
-CheckContains $out ("build`tbbb2222`tfeature/y`thttps://example.test/dl/y.zip") 'feature/y row'
+# **5 列目はリリース本文（notes）の branch=。** 取り込みのついでの確認が「いま動いて
+# いるのと同じブランチのビルド」だけを拾うために要る（src/UpdaterFlow.cpp）。
+CheckContains $out ("build`taaa1111`tfeature/x`thttps://example.test/dl/x.zip`tfeature/x") `
+    'feature/x row carries the branch from the release body'
+# 本文に branch= が無いリリースでは空欄になる（プラグイン側は照合できず何もしない）。
+CheckContains $out ("build`tbbb2222`tfeature/y`thttps://example.test/dl/y.zip`t") `
+    'feature/y row (no body) leaves the branch empty'
 CheckNotContains $out 'feature/z' 'asset-less dev build is skipped'
 CheckNotContains $out ("build`tzzz9999") 'the stable (non dev-*) release is skipped'
 
@@ -274,30 +280,30 @@ $script:FakeApiFail = $false
 T 'Invoke-DoInstall installs the .vlb and prints ok'
 $script:FakeDownloadFail = $false
 $script:FakeDownloadZip = $GoodZip
-$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'min-nano_structureDev')
 CheckContains $out 'ok' 'prints ok'
 # **プラグインは自分のフォルダを 1 つ持つ**（<Plug-Ins>\<name>\。scripts/vw-install.ps1）。
 # 予備の配置もそこへ入れる——読む側（Get-InstalledCommit）と食い違わせないため。
-$own = Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev'
-CheckEq (Test-Path -LiteralPath (Join-Path $own 'HomeskzIfcImportDev.vlb')) $true 'the .vlb landed'
-CheckEq (Test-Path -LiteralPath (Join-Path $own 'HomeskzIfcImportDev.commit')) $true 'the .commit sidecar landed'
+$own = Join-Path $VW_PLUGINS_DIR 'min-nano_structureDev'
+CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.vlb')) $true 'the .vlb landed'
+CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.commit')) $true 'the .commit sidecar landed'
 # **本体も入っていること。** 殻だけ入れて本体を取りこぼすと、次の起動でプラグインは
 # 何もできなくなる（src/PayloadHost.cpp が「本体が見つかりません」と言うだけ）。
-CheckEq (Test-Path -LiteralPath (Join-Path $own 'HomeskzIfcImportDev.vwpayload')) $true 'the .vwpayload landed'
-CheckEq (Test-Path -LiteralPath (Join-Path $own 'HomeskzIfcImportDev.shell-id')) $true 'the shell-id stamp landed'
+CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.vwpayload')) $true 'the .vwpayload landed'
+CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.shell-id')) $true 'the shell-id stamp landed'
 # 入れた殻の ID を先に出す。プラグインはこれを自分の VW_SHELL_ID と突き合わせて、
 # **本体の読み直しで済むなら再起動を尋ねない**（src/UpdaterParse.h）。
 CheckContains $out 'installed-shell=abc123def456' 'prints the installed shell id'
 
 T 'Invoke-DoInstall reports a download failure'
 $script:FakeDownloadFail = $true
-$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'min-nano_structureDev')
 CheckContains $out 'error=' 'download failure -> error= line'
 $script:FakeDownloadFail = $false
 
 T 'Invoke-DoInstall reports a zip missing the expected .vlb'
 $script:FakeDownloadZip = $BadZip
-$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'min-nano_structureDev')
 CheckContains $out 'error=' 'wrong .vlb name -> error= line'
 
 T 'Invoke-DoInstall rejects missing arguments'
@@ -315,15 +321,15 @@ CheckContains $out 'error=' 'empty args -> error= line'
 # 入れた場所と読む場所が食い違う）。
 # ===========================================================================
 T "Get-PluginDir appends the plug-in's own folder"
-CheckEq (Get-PluginDir (Join-Path $Work 'Plug-Ins') 'HomeskzIfcImport') (Join-Path (Join-Path $Work 'Plug-Ins') 'HomeskzIfcImport') 'Plug-Ins -> Plug-Ins\<name>'
+CheckEq (Get-PluginDir (Join-Path $Work 'Plug-Ins') 'min-nano_structure') (Join-Path (Join-Path $Work 'Plug-Ins') 'min-nano_structure') 'Plug-Ins -> Plug-Ins\<name>'
 
 T "Get-PluginDir does not nest when it is already the plug-in's folder"
-$alreadyThere = Join-Path (Join-Path $Work 'Plug-Ins') 'HomeskzIfcImport'
-CheckEq (Get-PluginDir $alreadyThere 'HomeskzIfcImport') $alreadyThere 'already there -> unchanged'
+$alreadyThere = Join-Path (Join-Path $Work 'Plug-Ins') 'min-nano_structure'
+CheckEq (Get-PluginDir $alreadyThere 'min-nano_structure') $alreadyThere 'already there -> unchanged'
 
 T 'Get-PluginZipUrl prefers the exact asset name'
 $relExact = $script:FakeStableJson | ConvertFrom-Json
-CheckEq (Get-PluginZipUrl $relExact 'HomeskzIfcImport') 'https://example.test/dl/HomeskzIfcImport.vlb.zip' 'exact match wins'
+CheckEq (Get-PluginZipUrl $relExact 'min-nano_structure') 'https://example.test/dl/min-nano_structure.vlb.zip' 'exact match wins'
 
 T 'Get-PluginZipUrl still finds the zip after the asset was renamed'
 $relRenamed = @'
@@ -336,7 +342,7 @@ $relRenamed = @'
   ]
 }
 '@ | ConvertFrom-Json
-CheckEq (Get-PluginZipUrl $relRenamed 'HomeskzIfcImport') 'https://example.test/dl/renamed.zip' 'falls back to any *.vlb.zip'
+CheckEq (Get-PluginZipUrl $relRenamed 'min-nano_structure') 'https://example.test/dl/renamed.zip' 'falls back to any *.vlb.zip'
 
 # ===========================================================================
 # do-install の委譲 — **この変更の要**。落とした zip に vw-install.ps1 が入っていたら、
@@ -364,26 +370,26 @@ $VW_PLUGINS_DIR = Join-Path $Work 'plugins-delegated'
 New-Item -ItemType Directory -Force -Path $VW_PLUGINS_DIR | Out-Null
 $env:VW_TEST_MARKER = Join-Path $Work 'installer-ran.txt'
 $DelegatedZip = Join-Path $Work 'delegated.zip'
-New-BuildZipWithInstaller $DelegatedZip 'HomeskzIfcImportDev' @'
+New-BuildZipWithInstaller $DelegatedZip 'min-nano_structureDev' @'
 Set-Content -LiteralPath $env:VW_TEST_MARKER -Value 'ran' -NoNewline
 Write-Output 'installed-shell=from-installer'
 Write-Output 'ok'
 '@
 $script:FakeDownloadFail = $false
 $script:FakeDownloadZip = $DelegatedZip
-$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'min-nano_structureDev')
 CheckContains $out 'installed-shell=from-installer' "the installer's lines are passed through"
 CheckContains $out 'ok' 'ok is passed through'
 CheckEq (Test-Path -LiteralPath $env:VW_TEST_MARKER) $true 'the bundled installer actually ran'
-CheckEq (Test-Path -LiteralPath (Join-Path (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev') 'HomeskzIfcImportDev.vlb')) $false 'the built-in placement was NOT used'
+CheckEq (Test-Path -LiteralPath (Join-Path (Join-Path $VW_PLUGINS_DIR 'min-nano_structureDev') 'min-nano_structureDev.vlb')) $false 'the built-in placement was NOT used'
 
 T 'Invoke-DoInstall passes an installer error through unchanged'
 $VW_PLUGINS_DIR = Join-Path $Work 'plugins-delegated-err'
 New-Item -ItemType Directory -Force -Path $VW_PLUGINS_DIR | Out-Null
 $ErrZip = Join-Path $Work 'delegated-err.zip'
-New-BuildZipWithInstaller $ErrZip 'HomeskzIfcImportDev' "Write-Output 'error=インストーラからの理由'"
+New-BuildZipWithInstaller $ErrZip 'min-nano_structureDev' "Write-Output 'error=インストーラからの理由'"
 $script:FakeDownloadZip = $ErrZip
-$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'min-nano_structureDev')
 CheckContains $out 'error=インストーラからの理由' "the installer's error reaches the plug-in"
 CheckNotContains $out 'ok' 'no ok line'
 
@@ -391,11 +397,11 @@ T 'Invoke-DoInstall falls back to its own placement when the installer says noth
 $VW_PLUGINS_DIR = Join-Path $Work 'plugins-mute'
 New-Item -ItemType Directory -Force -Path $VW_PLUGINS_DIR | Out-Null
 $MuteZip = Join-Path $Work 'delegated-mute.zip'
-New-BuildZipWithInstaller $MuteZip 'HomeskzIfcImportDev' "Write-Output 'something unexpected'"
+New-BuildZipWithInstaller $MuteZip 'min-nano_structureDev' "Write-Output 'something unexpected'"
 $script:FakeDownloadZip = $MuteZip
-$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'HomeskzIfcImportDev')
+$out = AsText (Invoke-DoInstall 'https://example.test/dl/x.zip' 'min-nano_structureDev')
 CheckContains $out 'ok' 'the built-in placement reported success'
-CheckEq (Test-Path -LiteralPath (Join-Path (Join-Path $VW_PLUGINS_DIR 'HomeskzIfcImportDev') 'HomeskzIfcImportDev.vwpayload')) $true 'a mute installer never counts as done'
+CheckEq (Test-Path -LiteralPath (Join-Path (Join-Path $VW_PLUGINS_DIR 'min-nano_structureDev') 'min-nano_structureDev.vwpayload')) $true 'a mute installer never counts as done'
 
 $VW_PLUGINS_DIR = $SavedPluginsDir
 

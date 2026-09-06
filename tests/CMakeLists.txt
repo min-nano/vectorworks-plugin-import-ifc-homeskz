@@ -3,7 +3,7 @@
 #   * the updater tests (UpdaterParse / UpdaterFlow / UpdaterRobustness + the two
 #     bundled-script suites) — the template's own SDK-free logic;
 #   * the 2-phase tests (Core* / Step / Loader / Parse*) — the IFC import's
-#     SDK-free half (src/core/ + src/parse/), each linking the HomeskzIfcCore
+#     SDK-free half (src/core/ + src/parse/), each linking the MinNanoStructureCore
 #     library. A new parse module gets a new vw_add_test entry here.
 #
 # None of them links the Vectorworks SDK, so they build and run on any toolchain —
@@ -41,7 +41,7 @@ option(VW_REQUIRE_SCRIPT_TESTS
 	   "Fail rather than skip the updater-script tests when a tool is missing" OFF)
 
 # Registers one test executable. Options after the sources:
-#   * CORE     … links the HomeskzIfcCore library (the SDK-free src/core/ + src/parse/
+#   * CORE     … links the MinNanoStructureCore library (the SDK-free src/core/ + src/parse/
 #                half). Every 2-phase test wants this; the updater tests do not.
 #   * FIXTURES … defines HOMESKZ_FIXTURES_DIR so the file-based cases find the
 #                checked-in fixtures (tests/fixtures/). Deliberately opt-in per
@@ -86,7 +86,7 @@ function(vw_add_test name)
 		target_link_options(${name} PRIVATE -fsanitize=address,undefined)
 	endif()
 	if(ARG_CORE)
-		target_link_libraries(${name} PRIVATE HomeskzIfcCore)
+		target_link_libraries(${name} PRIVATE MinNanoStructureCore)
 	endif()
 	if(ARG_FIXTURES)
 		target_compile_definitions(
@@ -123,7 +123,7 @@ vw_add_test(PayloadHostHolderTests PayloadHostHolderTests.cpp)
 # The instruction set (src/core/Document): the command structs' invariants and
 # validateDocument's gate for every command list that has landed so far (stories,
 # grids, floors, members, columns, rafters, roofs), plus the desired layer-stack order.
-# Links the HomeskzIfcCore library (defined in the top-level CMakeLists.txt) rather than
+# Links the MinNanoStructureCore library (defined in the top-level CMakeLists.txt) rather than
 # compiling those sources directly, which also proves the CMake target split
 # builds and links with no SDK present. Extend it whenever a command list is
 # added to core/Document.h.
@@ -352,7 +352,7 @@ vw_add_test(ParseColumnMarkTests ParseColumnMarkTests.cpp CORE FIXTURES)
 # synthetic STEP snippets and the checked-in fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
 vw_add_test(ParseShearWallTests ParseShearWallTests.cpp)
-target_link_libraries(ParseShearWallTests PRIVATE HomeskzIfcCore)
+target_link_libraries(ParseShearWallTests PRIVATE MinNanoStructureCore)
 target_compile_definitions(ParseShearWallTests
 						   PRIVATE "HOMESKZ_FIXTURES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
