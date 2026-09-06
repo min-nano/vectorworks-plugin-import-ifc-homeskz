@@ -1,5 +1,5 @@
 <#
-    vw-uninstall.ps1 — remove ONE installed build of the HomeskzIfcImport Vectorworks
+    vw-uninstall.ps1 — remove ONE installed build of the min-nano_structure Vectorworks
     plug-in from a Vectorworks 2026 Plug-Ins folder (Windows).
 
     This is the Windows counterpart of scripts/vw-uninstall.sh; see that file's
@@ -27,11 +27,11 @@
 
     Usage:
       powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
-      powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1 -Name HomeskzIfcImportDev
+      powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1 -Name min-nano_structureDev
       powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1 -PluginsDir <dir> -Machine
 
     Options:
-      -Name <plugin>      HomeskzIfcImport / HomeskzIfcImportDev（既定は自動判定）
+      -Name <plugin>      min-nano_structure / min-nano_structureDev（既定は自動判定）
       -PluginsDir <dir>   Plug-Ins またはプラグインのフォルダ（既定: VW_PLUGINS_DIR、
                           無ければ VW2026 のユーザフォルダ）
       -Machine            機械可読な出力（removed= / ok / error=）
@@ -67,8 +67,8 @@ function Write-Note([string] $message) {
 }
 
 function Show-Usage {
-    Write-Host 'vw-uninstall.ps1 — インストール済みの HomeskzIfcImport を取り除く'
-    Write-Host '  -Name <plugin>     HomeskzIfcImport / HomeskzIfcImportDev（既定は自動判定）'
+    Write-Host 'vw-uninstall.ps1 — インストール済みの min-nano_structure を取り除く'
+    Write-Host '  -Name <plugin>     min-nano_structure / min-nano_structureDev（既定は自動判定）'
     Write-Host '  -PluginsDir <dir>  Plug-Ins またはプラグインのフォルダ'
     Write-Host '  -Machine           機械可読な出力（removed= / ok / error=）'
 }

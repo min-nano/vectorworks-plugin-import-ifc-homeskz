@@ -78,7 +78,7 @@ jobs:
       # stable リリースを公開するので stable だけ。
       VW_BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
       # 上のチャンネルに対応するバンドル名（署名・検査・パッケージの各ステップが使う）。
-      VW_PLUGIN_NAME: ${{ github.event_name == 'pull_request' && 'HomeskzIfcImportDev' || 'HomeskzIfcImport' }}
+      VW_PLUGIN_NAME: ${{ github.event_name == 'pull_request' && 'min-nano_structureDev' || 'min-nano_structure' }}
 
     steps:
       - name: Checkout
@@ -248,7 +248,7 @@ jobs:
       BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       VW_BUILD_BRANCH: ${{ github.head_ref || github.ref_name }}
       VW_BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
-      VW_PLUGIN_NAME: ${{ github.event_name == 'pull_request' && 'HomeskzIfcImportDev' || 'HomeskzIfcImport' }}
+      VW_PLUGIN_NAME: ${{ github.event_name == 'pull_request' && 'min-nano_structureDev' || 'min-nano_structure' }}
 
     steps:
       - name: Checkout
@@ -597,8 +597,8 @@ jobs:
   # builds rather than inside them, so keeping it as a gate costs no extra time. Splitting this
   # out of the build jobs means neither platform publishes on its own, so there
   # is no create/attach race between them:
-  #   main -> refresh the rolling "stable" release with the HomeskzIfcImport bundle.
-  #   PR   -> refresh a per-branch "dev-<branch>" prerelease with HomeskzIfcImportDev.
+  #   main -> refresh the rolling "stable" release with the min-nano_structure bundle.
+  #   PR   -> refresh a per-branch "dev-<branch>" prerelease with min-nano_structureDev.
   # Rolling tags are deleted and recreated so they always point at this build.
   # 公開する対象が無い実行（フォーク PR / main 以外での workflow_dispatch）では、
   # 下の job-level if でジョブごとスキップする。
@@ -689,8 +689,8 @@ jobs:
           publish() {
             gh release delete stable --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
             gh release create stable \
-              "dist/HomeskzIfcImport.vwlibrary.zip" \
-              "dist/HomeskzIfcImport.vlb.zip" \
+              "dist/min-nano_structure.vwlibrary.zip" \
+              "dist/min-nano_structure.vlb.zip" \
               "dist/vw-install.sh" \
               "dist/vw-install.ps1" \
               "dist/vw-uninstall.sh" \
@@ -753,8 +753,8 @@ jobs:
           # retry and has a scheduled health check.)
           gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
           gh release create "$tag" \
-            "dist/HomeskzIfcImportDev.vwlibrary.zip" \
-            "dist/HomeskzIfcImportDev.vlb.zip" \
+            "dist/min-nano_structureDev.vwlibrary.zip" \
+            "dist/min-nano_structureDev.vlb.zip" \
             "dist/vw-install.sh" \
             "dist/vw-install.ps1" \
             "dist/vw-uninstall.sh" \

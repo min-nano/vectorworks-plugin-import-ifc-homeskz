@@ -200,8 +200,8 @@ cat >"$STABLE_JSON" <<'JSON'
 {
   "target_commitish": "abc1234def5678",
   "assets": [
-    { "name": "HomeskzIfcImport.vwlibrary.zip",
-      "browser_download_url": "https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" },
+    { "name": "min-nano_structure.vwlibrary.zip",
+      "browser_download_url": "https://example.test/dl/min-nano_structure.vwlibrary.zip" },
     { "name": "notes.txt",
       "browser_download_url": "https://example.test/dl/notes.txt" }
   ]
@@ -212,13 +212,14 @@ RELEASES_JSON="$WORK/releases.json"
 cat >"$RELEASES_JSON" <<'JSON'
 [
   { "tag_name": "stable", "name": "stable", "target_commitish": "zzz9999",
-    "assets": [ { "name": "HomeskzIfcImport.vwlibrary.zip",
+    "assets": [ { "name": "min-nano_structure.vwlibrary.zip",
                   "browser_download_url": "https://example.test/dl/stable.zip" } ] },
   { "tag_name": "dev-feature-x", "name": "feature/x", "target_commitish": "aaa1111ccc",
-    "assets": [ { "name": "HomeskzIfcImportDev.vwlibrary.zip",
+    "body": "channel=dev\nbranch=feature/x\ncommit=aaa1111ccc\n",
+    "assets": [ { "name": "min-nano_structureDev.vwlibrary.zip",
                   "browser_download_url": "https://example.test/dl/x.zip" } ] },
   { "tag_name": "dev-feature-y", "name": "feature/y", "target_commitish": "bbb2222ddd",
-    "assets": [ { "name": "HomeskzIfcImportDev.vwlibrary.zip",
+    "assets": [ { "name": "min-nano_structureDev.vwlibrary.zip",
                   "browser_download_url": "https://example.test/dl/y.zip" } ] },
   { "tag_name": "dev-nobuild", "name": "feature/z", "target_commitish": "ccc3333eee",
     "assets": [ { "name": "unrelated.zip",
@@ -229,7 +230,7 @@ JSON
 export VW_TEST_STABLE_JSON="$STABLE_JSON"
 export VW_TEST_RELEASES_JSON="$RELEASES_JSON"
 
-# Build a real "HomeskzIfcImportDev.vwlibrary.zip" for the do-install tests, and a
+# Build a real "min-nano_structureDev.vwlibrary.zip" for the do-install tests, and a
 # malformed one whose top-level dir has the wrong name.
 # 本体（"<name>.vwpayload"）も一緒に入れる——**実際のリリース zip と同じ形**にしないと、
 # 殻だけ入れて本体を取りこぼす退行を捕まえられない（src/PayloadAbi.h）。
@@ -244,15 +245,15 @@ build_zip() { # zip-path, bundle-dir-name
 }
 GOOD_ZIP="$WORK/good.zip"
 BAD_ZIP="$WORK/bad.zip"
-build_zip "$GOOD_ZIP" "HomeskzIfcImportDev.vwlibrary"
+build_zip "$GOOD_ZIP" "min-nano_structureDev.vwlibrary"
 build_zip "$BAD_ZIP" "WrongName.vwlibrary"
 
 # ===========================================================================
 # asset_url — pick a browser_download_url out of an assets array by file name.
 # ===========================================================================
 t "asset_url finds the matching asset"
-out="$(RUN asset_url "$STABLE_JSON" "assets" "HomeskzIfcImport.vwlibrary.zip")"
-check_eq "$out" "https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" "asset_url returns the URL"
+out="$(RUN asset_url "$STABLE_JSON" "assets" "min-nano_structure.vwlibrary.zip")"
+check_eq "$out" "https://example.test/dl/min-nano_structure.vwlibrary.zip" "asset_url returns the URL"
 
 t "asset_url returns nothing for an unknown asset"
 out="$(RUN asset_url "$STABLE_JSON" "assets" "does-not-exist.zip" || true)"
@@ -279,7 +280,7 @@ t "q_stable reports installed, 7-char latest and the asset url"
 out="$(VW_TEST_INSTALLED=abc1234 RUN q_stable)"
 check_contains "$out" "installed=abc1234" "installed line"
 check_contains "$out" "latest=abc1234" "latest is the 7-char commit prefix"
-check_contains "$out" "url=https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" "url line"
+check_contains "$out" "url=https://example.test/dl/min-nano_structure.vwlibrary.zip" "url line"
 
 t "q_stable reports installed=none when nothing is installed"
 out="$(VW_TEST_INSTALLED=none RUN q_stable)"
@@ -293,14 +294,19 @@ check_not_contains "$out" "latest=" "no latest when offline"
 
 # ===========================================================================
 # q-dev — installed line + one TSV row per dev-* build that has a downloadable
-# HomeskzIfcImportDev asset (the stable release and the asset-less dev build are
-# both skipped).
+# min-nano_structureDev asset (the stable release and the asset-less dev build are
+# both skipped). Each row ends with the branch read from the release body.
 # ===========================================================================
 t "q_dev lists only dev-* builds that have a downloadable asset"
 out="$(VW_TEST_INSTALLED=run1234 RUN q_dev)"
 check_contains "$out" "installed=run1234" "installed line first"
-check_contains "$out" $'build\taaa1111\tfeature/x\thttps://example.test/dl/x.zip' "feature/x row"
-check_contains "$out" $'build\tbbb2222\tfeature/y\thttps://example.test/dl/y.zip' "feature/y row"
+# **5 列目はリリース本文（notes）の branch=。** 取り込みのついでの確認が「いま動いて
+# いるのと同じブランチのビルド」だけを拾うために要る（src/UpdaterFlow.cpp）。
+check_contains "$out" $'build\taaa1111\tfeature/x\thttps://example.test/dl/x.zip\tfeature/x' \
+	"feature/x row carries the branch from the release body"
+# 本文に branch= が無いリリースでは空欄になる（プラグイン側は照合できず何もしない）。
+check_contains "$out" $'build\tbbb2222\tfeature/y\thttps://example.test/dl/y.zip\t' \
+	"feature/y row (no body) leaves the branch empty"
 check_not_contains "$out" "feature/z" "asset-less dev build is skipped"
 check_not_contains "$out" $'build\tzzz9999' "the stable (non dev-*) release is skipped"
 
@@ -317,22 +323,22 @@ t "do_install installs the bundle and prints ok"
 dest="$WORK/plugins-ok"
 mkdir -p "$dest"
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$GOOD_ZIP" \
-	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+	RUN do_install "https://example.test/dl/x.zip" "min-nano_structureDev")"
 check_eq "$out" "ok" "do_install prints ok"
 # **プラグインは自分のフォルダを 1 つ持つ**（<Plug-Ins>/<name>/。scripts/vw-install.sh）。
 # 予備の配置もそこへ入れる——読む側（installed_bundle）と食い違わせないため。
-if [ -f "$dest/HomeskzIfcImportDev/HomeskzIfcImportDev.vwlibrary/Contents/Info.plist" ]; then installed=yes; else installed=no; fi
+if [ -f "$dest/min-nano_structureDev/min-nano_structureDev.vwlibrary/Contents/Info.plist" ]; then installed=yes; else installed=no; fi
 check_eq "$installed" "yes" "the .vwlibrary landed in the plug-in's own folder"
 # **本体も入っていること。** 殻だけ入れて本体を取りこぼすと、次の起動でプラグインは
 # 何もできなくなる（src/PayloadHost.cpp が「本体が見つかりません」と言うだけ）。
-if [ -f "$dest/HomeskzIfcImportDev/HomeskzIfcImportDev.vwpayload" ]; then installed=yes; else installed=no; fi
+if [ -f "$dest/min-nano_structureDev/min-nano_structureDev.vwpayload" ]; then installed=yes; else installed=no; fi
 check_eq "$installed" "yes" "the .vwpayload landed next to the bundle"
 
 t "do_install reports the installed shell id so the plug-in can skip the restart"
 dest="$WORK/plugins-shellid"
 mkdir -p "$dest"
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$GOOD_ZIP" VW_TEST_SHELL_ID="abc123def456" \
-	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+	RUN do_install "https://example.test/dl/x.zip" "min-nano_structureDev")"
 check_contains "$out" "installed-shell=abc123def456" "prints the installed shell id"
 check_contains "$out" "ok" "still prints ok"
 
@@ -340,19 +346,19 @@ t "do_install omits the shell id line when it cannot be read"
 dest="$WORK/plugins-noshellid"
 mkdir -p "$dest"
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$GOOD_ZIP" \
-	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+	RUN do_install "https://example.test/dl/x.zip" "min-nano_structureDev")"
 check_eq "$out" "ok" "no shell id -> just ok (the plug-in then asks to restart)"
 
 t "do_install reports a download failure"
 dest="$WORK/plugins-dlfail"
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_FAIL=1 \
-	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+	RUN do_install "https://example.test/dl/x.zip" "min-nano_structureDev")"
 check_contains "$out" "error=" "download failure -> error= line"
 
 t "do_install reports a zip missing the expected bundle"
 dest="$WORK/plugins-badzip"
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$BAD_ZIP" \
-	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+	RUN do_install "https://example.test/dl/x.zip" "min-nano_structureDev")"
 check_contains "$out" "error=" "wrong bundle name -> error= line"
 
 t "do_install rejects missing arguments"
@@ -366,16 +372,16 @@ check_contains "$out" "error=" "empty args -> error= line"
 # フォルダなら足さない**のが肝で、これを落とすと更新のたびに入れ子が深くなる。
 # ===========================================================================
 t "plugin_dir appends the plug-in's own folder"
-check_eq "$(RUN plugin_dir "/x/Plug-Ins" "HomeskzIfcImport")" "/x/Plug-Ins/HomeskzIfcImport" \
+check_eq "$(RUN plugin_dir "/x/Plug-Ins" "min-nano_structure")" "/x/Plug-Ins/min-nano_structure" \
 	"Plug-Ins -> Plug-Ins/<name>"
 
 t "plugin_dir does not nest when it is already the plug-in's folder"
-check_eq "$(RUN plugin_dir "/x/Plug-Ins/HomeskzIfcImport" "HomeskzIfcImport")" \
-	"/x/Plug-Ins/HomeskzIfcImport" "already there -> unchanged"
+check_eq "$(RUN plugin_dir "/x/Plug-Ins/min-nano_structure" "min-nano_structure")" \
+	"/x/Plug-Ins/min-nano_structure" "already there -> unchanged"
 
 t "installed_bundle points inside the plug-in's own folder"
-check_eq "$(VW_PLUGINS_DIR=/x/Plug-Ins RUN installed_bundle "HomeskzIfcImport")" \
-	"/x/Plug-Ins/HomeskzIfcImport/HomeskzIfcImport.vwlibrary" "bundle path"
+check_eq "$(VW_PLUGINS_DIR=/x/Plug-Ins RUN installed_bundle "min-nano_structure")" \
+	"/x/Plug-Ins/min-nano_structure/min-nano_structure.vwlibrary" "bundle path"
 
 # ===========================================================================
 # plugin_zip_url — the distribution zip is found by exact name, and STILL found
@@ -396,11 +402,11 @@ cat >"$RENAMED_JSON" <<'JSON'
 JSON
 
 t "plugin_zip_url prefers the exact asset name"
-out="$(RUN plugin_zip_url "$STABLE_JSON" "assets" "HomeskzIfcImport")"
-check_eq "$out" "https://example.test/dl/HomeskzIfcImport.vwlibrary.zip" "exact match wins"
+out="$(RUN plugin_zip_url "$STABLE_JSON" "assets" "min-nano_structure")"
+check_eq "$out" "https://example.test/dl/min-nano_structure.vwlibrary.zip" "exact match wins"
 
 t "plugin_zip_url still finds the zip after the asset was renamed"
-out="$(RUN plugin_zip_url "$RENAMED_JSON" "assets" "HomeskzIfcImport")"
+out="$(RUN plugin_zip_url "$RENAMED_JSON" "assets" "min-nano_structure")"
 check_eq "$out" "https://example.test/dl/renamed.zip" "falls back to any *.vwlibrary.zip"
 
 # ===========================================================================
@@ -427,26 +433,26 @@ t "do_install hands the placement to the installer that came with the zip"
 dest="$WORK/plugins-delegated"
 mkdir -p "$dest"
 DELEGATED_ZIP="$WORK/delegated.zip"
-build_zip_with_installer "$DELEGATED_ZIP" "HomeskzIfcImportDev.vwlibrary" \
+build_zip_with_installer "$DELEGATED_ZIP" "min-nano_structureDev.vwlibrary" \
 	'printf "installed-shell=from-installer\nok\n"; : >"$VW_TEST_MARKER"'
 marker="$WORK/installer-ran"
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$DELEGATED_ZIP" VW_TEST_MARKER="$marker" \
-	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+	RUN do_install "https://example.test/dl/x.zip" "min-nano_structureDev")"
 check_contains "$out" "installed-shell=from-installer" "the installer's lines are passed through"
 check_contains "$out" "ok" "ok is passed through"
 if [ -f "$marker" ]; then ran=yes; else ran=no; fi
 check_eq "$ran" "yes" "the bundled installer actually ran"
-if [ -e "$dest/HomeskzIfcImportDev/HomeskzIfcImportDev.vwlibrary" ]; then fellback=yes; else fellback=no; fi
+if [ -e "$dest/min-nano_structureDev/min-nano_structureDev.vwlibrary" ]; then fellback=yes; else fellback=no; fi
 check_eq "$fellback" "no" "the built-in placement was NOT used"
 
 t "do_install passes an installer error through unchanged"
 dest="$WORK/plugins-delegated-err"
 mkdir -p "$dest"
 ERR_ZIP="$WORK/delegated-err.zip"
-build_zip_with_installer "$ERR_ZIP" "HomeskzIfcImportDev.vwlibrary" \
+build_zip_with_installer "$ERR_ZIP" "min-nano_structureDev.vwlibrary" \
 	'printf "error=インストーラからの理由\n"'
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$ERR_ZIP" \
-	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+	RUN do_install "https://example.test/dl/x.zip" "min-nano_structureDev")"
 check_contains "$out" "error=インストーラからの理由" "the installer's error reaches the plug-in"
 check_not_contains "$out" "ok" "no ok line"
 
@@ -454,11 +460,11 @@ t "do_install falls back to its own placement when the installer says nothing"
 dest="$WORK/plugins-mute"
 mkdir -p "$dest"
 MUTE_ZIP="$WORK/delegated-mute.zip"
-build_zip_with_installer "$MUTE_ZIP" "HomeskzIfcImportDev.vwlibrary" 'exit 3'
+build_zip_with_installer "$MUTE_ZIP" "min-nano_structureDev.vwlibrary" 'exit 3'
 out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$MUTE_ZIP" \
-	RUN do_install "https://example.test/dl/x.zip" "HomeskzIfcImportDev")"
+	RUN do_install "https://example.test/dl/x.zip" "min-nano_structureDev")"
 check_eq "$out" "ok" "the built-in placement reported success"
-if [ -f "$dest/HomeskzIfcImportDev/HomeskzIfcImportDev.vwpayload" ]; then fellback=yes; else fellback=no; fi
+if [ -f "$dest/min-nano_structureDev/min-nano_structureDev.vwpayload" ]; then fellback=yes; else fellback=no; fi
 check_eq "$fellback" "yes" "a mute/broken installer never counts as done"
 
 # ===========================================================================

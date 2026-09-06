@@ -125,6 +125,45 @@ TEST(parsedevbuilds_parses_multiple_rows)
 	}
 }
 
+TEST(parsedevbuilds_reads_the_optional_branch_column)
+{
+	// 5 列目のブランチ名。取り込みのついでの確認は、これで「いま動いているのと同じ
+	// ブランチのビルド」だけを拾う（src/UpdaterFlow.cpp）。
+	const std::string out = "build\tc0ffee1\tDev: feature/one (c0ffee1)\t"
+							"https://ex.com/one.zip\tfeature/one\n";
+	std::vector<DevBuild> builds = ParseDevBuilds(out);
+	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
+	if (!builds.empty())
+	{
+		CHECK_EQ(builds[0].name, "Dev: feature/one (c0ffee1)");
+		CHECK_EQ(builds[0].url, "https://ex.com/one.zip");
+		CHECK_EQ(builds[0].branch, "feature/one");
+	}
+}
+
+TEST(parsedevbuilds_without_the_branch_column_leaves_it_empty)
+{
+	// インストール済みの（＝古い）同梱スクリプトは 4 列しか出さない。**それも読める
+	// こと**が要件で、ブランチが空なら黙って何もしない側へ倒れる。
+	const std::string out = "build\tc1\tfeature/x\thttps://ex.com/a.zip\n";
+	std::vector<DevBuild> builds = ParseDevBuilds(out);
+	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
+	if (!builds.empty())
+	{
+		CHECK_EQ(builds[0].url, "https://ex.com/a.zip");
+		CHECK_EQ(builds[0].branch, "");
+	}
+}
+
+TEST(parsedevbuilds_trims_the_branch_column)
+{
+	const std::string out = "build\tc1\tn\thttps://ex.com/a.zip\t  feature/x  \n";
+	std::vector<DevBuild> builds = ParseDevBuilds(out);
+	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
+	if (!builds.empty())
+		CHECK_EQ(builds[0].branch, "feature/x");
+}
+
 TEST(parsedevbuilds_ignores_non_build_lines)
 {
 	const std::string out = "error=\n"
@@ -239,10 +278,10 @@ TEST(cmdquote_keeps_spaces)
 
 TEST(mac_script_path_from_binary_typical)
 {
-	const std::string bin =
-		"/Users/me/Vectorworks/Plug-Ins/HomeskzIfcImport.vwlibrary/Contents/MacOS/HomeskzIfcImport";
+	const std::string bin = "/Users/me/Vectorworks/Plug-Ins/min-nano_structure.vwlibrary/Contents/"
+							"MacOS/min-nano_structure";
 	CHECK_EQ(MacScriptPathFromBinary(bin),
-			 "/Users/me/Vectorworks/Plug-Ins/HomeskzIfcImport.vwlibrary/Contents/Resources/"
+			 "/Users/me/Vectorworks/Plug-Ins/min-nano_structure.vwlibrary/Contents/Resources/"
 			 "vw-update.sh");
 }
 
@@ -266,8 +305,8 @@ TEST(mac_script_path_from_binary_no_marker_is_empty)
 
 TEST(mac_plugins_dir_from_binary_typical)
 {
-	const std::string bin =
-		"/Users/me/Vectorworks/Plug-Ins/HomeskzIfcImport.vwlibrary/Contents/MacOS/HomeskzIfcImport";
+	const std::string bin = "/Users/me/Vectorworks/Plug-Ins/min-nano_structure.vwlibrary/Contents/"
+							"MacOS/min-nano_structure";
 	CHECK_EQ(MacPluginsDirFromBinary(bin), "/Users/me/Vectorworks/Plug-Ins");
 }
 
@@ -293,132 +332,24 @@ TEST(mac_plugins_dir_from_binary_no_leading_slash_is_empty)
 }
 
 // ---------------------------------------------------------------------------
-// MacAppBundleFromExecutable — what the restart hands to `open -a`.
-// ---------------------------------------------------------------------------
-
-TEST(mac_app_bundle_from_executable_typical)
-{
-	const std::string exe =
-		"/Applications/Vectorworks 2026/Vectorworks.app/Contents/MacOS/Vectorworks";
-	CHECK_EQ(MacAppBundleFromExecutable(exe), "/Applications/Vectorworks 2026/Vectorworks.app");
-}
-
-TEST(mac_app_bundle_from_executable_not_in_a_bundle_is_empty)
-{
-	// A bare executable (no .app around it) gives nothing to relaunch.
-	CHECK_EQ(MacAppBundleFromExecutable("/usr/local/bin/vectorworks"), "");
-	CHECK_EQ(MacAppBundleFromExecutable(""), "");
-}
-
-TEST(mac_app_bundle_from_executable_uses_the_outermost_match)
-{
-	// A helper nested inside another .app: rfind takes the LAST marker, i.e. the
-	// bundle the executable actually belongs to.
-	const std::string exe = "/Applications/A.app/Contents/Helpers/B.app/Contents/MacOS/B";
-	CHECK_EQ(MacAppBundleFromExecutable(exe), "/Applications/A.app/Contents/Helpers/B.app");
-}
-
-// ---------------------------------------------------------------------------
-// PowerShellQuote
-// ---------------------------------------------------------------------------
-
-TEST(powershell_quote_wraps_in_single_quotes)
-{
-	CHECK_EQ(PowerShellQuote("C:\\Program Files\\Vectorworks 2026\\Vectorworks.exe"),
-			 "'C:\\Program Files\\Vectorworks 2026\\Vectorworks.exe'");
-}
-
-TEST(powershell_quote_doubles_embedded_single_quotes)
-{
-	// PowerShell's own escape inside a literal string.
-	CHECK_EQ(PowerShellQuote("C:\\it's here\\vw.exe"), "'C:\\it''s here\\vw.exe'");
-}
-
-// ---------------------------------------------------------------------------
-// The restart command. It is what the detached helper runs, so its exact text
-// IS the behaviour: ask the running Vectorworks to quit the ordinary way, wait
-// (bounded) for the process to be gone, and only then launch the application
-// again — never while it is still alive.
-// ---------------------------------------------------------------------------
-
-TEST(mac_relaunch_command_quits_waits_then_opens_the_bundle)
-{
-	const std::string cmd =
-		MacRelaunchCommand("4321", "/Applications/Vectorworks 2026/VW.app", "net.example.vw",
-						   /*wait*/ 300, /*retry*/ 15, /*settle*/ 2);
-
-	// 1. an ordinary quit request, addressed by bundle id (not by app name)...
-	CHECK(cmd.find("q() { osascript -e 'tell application id \"net.example.vw\" to quit'") ==
-		  static_cast<std::size_t>(0));
-	// ...sent right away, and once more if Vectorworks is still there later (the
-	// first one goes out while start-up is still finishing).
-	CHECK(cmd.find("; q; i=0;") != std::string::npos);
-	CHECK(cmd.find("[ \"$i\" -eq 15 ] && q;") != std::string::npos);
-	// 2. wait for OUR process to go away, giving up after the bounded wait.
-	CHECK(cmd.find("while kill -0 4321 2>/dev/null") != std::string::npos);
-	CHECK(cmd.find("[ \"$i\" -ge 300 ] && exit 0") != std::string::npos);
-	// 3. only then open the BUNDLE (LaunchServices), with the path quoted.
-	CHECK(cmd.find("sleep 2; exec open -a '/Applications/Vectorworks 2026/VW.app'") !=
-		  std::string::npos);
-	// The open must come after the wait loop, never before it.
-	CHECK(cmd.find("open -a") > cmd.find("while kill -0"));
-}
-
-TEST(mac_relaunch_command_quotes_a_hostile_app_path)
-{
-	const std::string cmd = MacRelaunchCommand("1", "/Apps/it's here.app", "id");
-	// The embedded quote is escaped, so the path stays one shell word.
-	CHECK(cmd.find("open -a '/Apps/it'\\''s here.app'") != std::string::npos);
-}
-
-TEST(mac_relaunch_command_strips_quotes_from_the_bundle_id)
-{
-	// The id is interpolated into an AppleScript string inside a shell word; a
-	// stray quote would break both, so it is dropped rather than escaped.
-	const std::string cmd = MacRelaunchCommand("1", "/A.app", "bad\"id'x");
-	CHECK(cmd.find("tell application id \"badidx\" to quit") != std::string::npos);
-}
-
-TEST(win_relaunch_command_closes_waits_then_starts_the_exe)
-{
-	const std::string cmd = WinRelaunchCommand("4321", "C:\\VW\\Vectorworks.exe", /*wait*/ 300,
-											   /*retry*/ 15, /*settle*/ 2);
-
-	// 1. WM_CLOSE — the same request as the window's close box, sent again after
-	// the retry window if Vectorworks is still running.
-	CHECK(cmd.find("$p = Get-Process -Id 4321; if ($p) { $null = $p.CloseMainWindow() }") !=
-		  std::string::npos);
-	// 2. bounded wait (retry window + the rest of the budget = 300s), and a hard
-	// stop if the process is still there.
-	CHECK(cmd.find("Wait-Process -Id 4321 -Timeout 15") != std::string::npos);
-	CHECK(cmd.find("Wait-Process -Id 4321 -Timeout 285") != std::string::npos);
-	CHECK(cmd.find("if (Get-Process -Id 4321) { exit }") != std::string::npos);
-	// 3. only then start it again.
-	CHECK(cmd.find("Start-Sleep -Seconds 2; Start-Process -FilePath "
-				   "'C:\\VW\\Vectorworks.exe'") != std::string::npos);
-	// No double quotes anywhere: the whole script is passed as one quoted argument.
-	CHECK(cmd.find('"') == std::string::npos);
-}
-
-// ---------------------------------------------------------------------------
 // WinModuleDirFromPath
 // ---------------------------------------------------------------------------
 
 TEST(win_module_dir_from_path_backslashes)
 {
-	CHECK_EQ(WinModuleDirFromPath("C:\\Users\\me\\Plug-Ins\\HomeskzIfcImport.vlb"),
+	CHECK_EQ(WinModuleDirFromPath("C:\\Users\\me\\Plug-Ins\\min-nano_structure.vlb"),
 			 "C:\\Users\\me\\Plug-Ins");
 }
 
 TEST(win_module_dir_from_path_forward_slashes)
 {
-	CHECK_EQ(WinModuleDirFromPath("C:/Users/me/Plug-Ins/HomeskzIfcImport.vlb"),
+	CHECK_EQ(WinModuleDirFromPath("C:/Users/me/Plug-Ins/min-nano_structure.vlb"),
 			 "C:/Users/me/Plug-Ins");
 }
 
 TEST(win_module_dir_from_path_no_separator_is_empty)
 {
-	CHECK_EQ(WinModuleDirFromPath("HomeskzIfcImport.vlb"), "");
+	CHECK_EQ(WinModuleDirFromPath("min-nano_structure.vlb"), "");
 	CHECK_EQ(WinModuleDirFromPath(""), "");
 }
 
@@ -445,12 +376,12 @@ TEST(evaluate_stable_offers_when_newer)
 {
 	const std::string out = "installed=abc1234\n"
 							"latest=def5678\n"
-							"url=https://ex.com/HomeskzIfcImport.vwlibrary.zip\n";
+							"url=https://ex.com/min-nano_structure.vwlibrary.zip\n";
 	StableStatus s = EvaluateStable(out);
 	CHECK(s.offerUpdate);
 	CHECK_EQ(s.installed, "abc1234");
 	CHECK_EQ(s.latest, "def5678");
-	CHECK_EQ(s.url, "https://ex.com/HomeskzIfcImport.vwlibrary.zip");
+	CHECK_EQ(s.url, "https://ex.com/min-nano_structure.vwlibrary.zip");
 }
 
 TEST(evaluate_stable_silent_when_already_current)

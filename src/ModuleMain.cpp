@@ -11,12 +11,12 @@
 #include "Extensions/ExtColumnMark.h"
 #include "Extensions/ExtShearWall.h"
 #include "Extensions/ExtMenu.h"
-#include "Updater.h"
+#include "Extensions/ExtUpdateMenu.h"
 #include "PayloadSession.h"
 
 // Identifier used by Vectorworks to locate this plug-in's resources (.vwr) at
-// run time. Must match the base name of the packaged .vwr ("HomeskzIfcImport.vwr"
-// for the stable build, "HomeskzIfcImportDev.vwr" for the dev build). See
+// run time. Must match the base name of the packaged .vwr ("min-nano_structure.vwr"
+// for the stable build, "min-nano_structureDev.vwr" for the dev build). See
 // BuildConfig.h.
 const char* DefaultPluginVWRIdentifier()
 {
@@ -51,47 +51,23 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// アップデートに Vectorworks の再起動を要らなくしている全部である。**
 	HomeskzIfcImport::RememberSdkCallbacks(cbp);
 
-	// At Vectorworks start-up, offer to change the build in use. This runs when
-	// Vectorworks loads the module (which it does at start-up to build the
-	// workspace) and each check is guarded so it fires only once per session. The
-	// network request is time-bounded (see vw-update.sh) so it can't hang start-up.
-	// Start-up is the right place because a compiled plug-in can only be swapped in
-	// at load time, and because a plug-in may re-invoke its own command
-	// programmatically — so the check must not live on the command path.
+	// **ここでアップデートの確認はしない。** 以前は起動時（この関数の中）で自動的に
+	// 走らせていたが、いまは
+	//   * メニューコマンド「アップデータを確認」（Extensions/ExtUpdateMenu.h）
+	//   * 取り込みコマンドの頭（Extensions/ExtMenu.cpp）
+	// の 2 つが入口である（src/Updater.h「いつ確認するか」）。
 	//
-	// 例外はここから外へ出さない（CLAUDE.md「エラーハンドリング・所有権」）。
-	// **起動時に呼ばれる SDK コールバックなので、ここで例外が漏れると
-	// VectorWorks の起動そのものを巻き込んで落とす。** 自動アップデートは
-	// あくまで付随機能であり、失敗してもプラグインの登録（この関数の本題）は
-	// 続けなければならないため、黙って諦める（オフライン時に無言なのと同じ扱い）。
-	//
-	// NOLINTBEGIN(bugprone-empty-catch): 起動時は報告先が無い（ここでダイアログを出すと
-	// 起動を妨げるだけ）。黙って諦めるのが**この場所では正しい**振る舞いなので、
-	// 握り潰しを禁じる規則をここだけ外す。
-	try
-	{
-#ifndef VW_DEV_BUILD
-		// Stable plug-in: check for a newer stable build and, if one exists, ask (with
-		// a native Vectorworks dialog) whether to install it. Silent when already
-		// current or offline.
-		HomeskzIfcImport::RunStableStartupCheck();
-#else
-		// Dev plug-in: let the user pick which branch's build to use — keep the
-		// installed one, or switch to another branch's prerelease (installed on
-		// choosing, then restart to load). Silent on a network error.
-		HomeskzIfcImport::RunDevStartupCheck();
-#endif
-	}
-	catch (...)
-	{
-	}
-	// NOLINTEND(bugprone-empty-catch)
+	// やめられたのは、プラグインが**殻と本体**に割れて、本体だけの更新なら再起動が
+	// 要らなくなったため（src/PayloadAbi.h）。起動のたびに問う必要が無くなったうえ、
+	// 起動を待たせず、**確認したいときに押せる**ほうが素直である。加えて、ここで
+	// 走らせていたせいで再起動を Vectorworks 自身に頼めなかった（読み込み中は
+	// 終了できない）という制約も、同時に外れている（src/Updater.cpp の Restart）。
 
 	Sint32 reply = 0L;
 
 	using namespace VWFC::PluginSupport;
 
-	// Register our single menu command extension.
+	// Register the IFC import menu command extension.
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuImportIfc>(
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
@@ -104,6 +80,11 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// （Extensions/ExtShearWall.h 冒頭）。
 	REGISTER_Extension<HomeskzIfcImport::CExtShearWall>(
 		GROUPID_ExtensionParametric, action, moduleInfo, iid, inOutInterface, cbp, reply);
+
+	// 「アップデータを確認」コマンド。起動時の自動確認をやめた代わりの入口
+	// （Extensions/ExtUpdateMenu.h）。
+	REGISTER_Extension<HomeskzIfcImport::CExtMenuCheckUpdate>(
+		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
 	return reply;
 }

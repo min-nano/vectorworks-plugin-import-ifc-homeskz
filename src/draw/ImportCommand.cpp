@@ -160,7 +160,7 @@ namespace HomeskzIfcImport::draw
 			// 環境変数の読み取りは core/Trace が持つ（getenv の作法をあちこちに書かない）。
 			const std::string custom = core::trace::envValue("HOMESKZ_IFC_TRACE");
 			const std::string path =
-				custom.empty() ? core::trace::defaultLogPath("HomeskzIfcImport.log") : custom;
+				custom.empty() ? core::trace::defaultLogPath("min-nano_structure.log") : custom;
 			core::trace::open(path); // 開けなくても本文は溜まる（core/Trace.h）
 			// **`core::trace::path()` を必ず渡す。** ここを省くと `formatLogHeader` の
 			// 既定値（空）が効いて、**実際には書けているのに見出しが「ファイルへは

@@ -124,7 +124,7 @@ function New-Tree([string] $dir, [string] $name) {
         -Destination (Join-Path $dir 'vw-uninstall.ps1') -Force
 }
 
-$Name = 'HomeskzIfcImportDev'
+$Name = 'min-nano_structureDev'
 
 # ===========================================================================
 # Install-Tree — **the core promise: everything at the root goes in, listed or
@@ -221,21 +221,21 @@ $Release = @'
 {
   "assets": [
     { "name": "notes.txt", "browser_download_url": "https://example.test/dl/notes.txt" },
-    { "name": "HomeskzIfcImport.vlb.zip",
-      "browser_download_url": "https://example.test/dl/HomeskzIfcImport.vlb.zip" }
+    { "name": "min-nano_structure.vlb.zip",
+      "browser_download_url": "https://example.test/dl/min-nano_structure.vlb.zip" }
   ]
 }
 '@ | ConvertFrom-Json
 
 T 'Get-ReleaseZip finds the asset by exact plug-in name'
-$hit = Get-ReleaseZip $Release 'HomeskzIfcImport'
-CheckEq $hit.Url 'https://example.test/dl/HomeskzIfcImport.vlb.zip' 'exact match wins'
-CheckEq $hit.Name 'HomeskzIfcImport' 'reports the plug-in name'
+$hit = Get-ReleaseZip $Release 'min-nano_structure'
+CheckEq $hit.Url 'https://example.test/dl/min-nano_structure.vlb.zip' 'exact match wins'
+CheckEq $hit.Name 'min-nano_structure' 'reports the plug-in name'
 
 T 'Get-ReleaseZip falls back to any *.vlb.zip and reports its plug-in name'
 $hit = Get-ReleaseZip $Release ''
-CheckEq $hit.Url 'https://example.test/dl/HomeskzIfcImport.vlb.zip' 'suffix match yields the url'
-CheckEq $hit.Name 'HomeskzIfcImport' 'name comes off the asset name'
+CheckEq $hit.Url 'https://example.test/dl/min-nano_structure.vlb.zip' 'suffix match yields the url'
+CheckEq $hit.Name 'min-nano_structure' 'name comes off the asset name'
 
 T 'Get-ReleaseZip returns null when the release carries no distribution zip'
 $noZip = '{ "assets": [ { "name": "notes.txt", "browser_download_url": "https://example.test/n" } ] }' | ConvertFrom-Json
