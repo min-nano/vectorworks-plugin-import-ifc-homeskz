@@ -19,6 +19,12 @@
 
 namespace HomeskzIfcImport::draw
 {
-	// メニューコマンドが選ばれたときに走るもの。キャンセルは静かに何もせず返る。
-	void runImportCommand();
+	// メニューコマンドが選ばれたときに走る**1 周ぶん**。キャンセルは静かに何もせず返る。
+	//
+	// 戻り値は「**もう 1 周してほしいか**」。実機フィードバックの往復（draw/Feedback.h）で
+	// 修正版のビルドを入れたときだけ true になり、殻はいったん本体を手放してから、この
+	// 関数を呼び直す——手放すことで**新しく入った本体がその場で読み直される**
+	// （src/PayloadSession.h）。2 周目以降はファイル選択も設定ダイアログも出ない
+	// （1 周目の選択を core::FeedbackSession が覚えている）。
+	bool runImportCommand();
 } // namespace HomeskzIfcImport::draw

@@ -40,8 +40,22 @@
 
 #include "UpdaterHost.h"
 
+#include <string>
+#include <vector>
+
 namespace HomeskzIfcImport
 {
+	// Run ONE of the bundled scripts (baseName without its extension —
+	// "vw-update" / "vw-feedback"; macOS adds ".sh", Windows ".ps1") and capture
+	// its stdout. Returns false if the script could not be located or started.
+	//
+	// **本体（ペイロード）へ貸し出すためにここに口がある。** 本体は自分の在り処から
+	// 同梱物へたどり着けない（読み込まれるのは一時ディレクトリへ写した複製で、
+	// dladdr / GetModuleFileName はバンドルの外を指す）ので、殻の道具を借りる
+	// ——境界の関数ポインタ VwPayloadHost::runBundledScript の実体がこれである。
+	bool RunBundledScriptNamed(const std::string& baseName, const std::vector<std::string>& args,
+							   std::string& out);
+
 	// このビルドのチャンネル（stable / dev）に応じた更新の確認を 1 回行う。呼ぶたびに
 	// 走る（起動時に 1 度きりだった頃の「済んだか」の見張りは持たない——手で押した
 	// コマンドが 2 度目に黙るのでは困る）。

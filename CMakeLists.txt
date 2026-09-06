@@ -135,6 +135,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 	add_library(
 		MinNanoStructureCore STATIC
 		src/core/Document.cpp
+		src/core/FeedbackSession.cpp
 		src/core/Geometry.cpp
 		src/core/ImportOptions.cpp
 		src/core/Layout.cpp
@@ -143,6 +144,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/core/Trace.cpp
 		src/parse/BuildDocument.cpp
 		src/parse/Context.cpp
+		src/parse/Feedback.cpp
 		src/parse/Step.cpp
 		src/parse/Loader.cpp
 		src/parse/Summary.cpp
@@ -282,9 +284,16 @@ if(VW_BUILD_PLUGIN)
 	# （.vwpayload）しか変わっていないなら置き換えて読み直すだけで済み、殻まで変わって
 	# いれば再起動が要る**（src/PayloadAbi.h）。
 	#
-	# 値は**殻に入るものだけ**のハッシュにする。つまり draw/ や parse/ を直しても動かず、
-	# 殻の登録・更新・境界（src/PayloadAbi.h）を直せば必ず動く——後者が肝で、版の食い違った
-	# まま動かさないための歯止めになっている。
+	# 値は**殻にコンパイルされるものだけ**のハッシュにする。つまり draw/ や parse/ を
+	# 直しても動かず、殻の登録・更新・境界（src/PayloadAbi.h）を直せば必ず動く——後者が
+	# 肝で、版の食い違ったまま動かさないための歯止めになっている。
+	#
+	# **入れる基準はひとつ——「起動のときにしか読まれないか」。** Vectorworks が読み込むのは
+	# 殻の**モジュール**だけで、そこへコンパイルされたものは次の起動まで入れ替わらない。
+	# 逆に、**プロセスへ読み込まれず、使うたびにディスクから読み直されるもの**は、置き換えた
+	# 瞬間から新しいほうが効く＝再起動は要らない。だから後者はここへ入れない。
+	# **最小限に保つこと**——1 つ余計に入れるたびに、そこを直しただけで利用者へ再起動を
+	# 強いることになる。
 	#
 	# 外部ツールを使わず CMake 組み込みのハッシュだけで出すのは、**mac と Windows の両方の
 	# CI で同じ値が出ること**が要るため（片方でしか動かない道具を挟むと、そこが食い違った
@@ -318,15 +327,27 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtColumnMark.h
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.h
-		src/Extensions/ExtShearWall.cpp
-		scripts/vw-update.sh
-		scripts/vw-update.ps1)
-	# **`scripts/vw-install.*`（インストーラ）と `scripts/vw-uninstall.*`
-	# （アンインストーラ）はここに入れない。** あれらは殻に入らず、
-	# リリースの zip とアセットとして配られるもので、走るのは「落としてきた新しい版」の
-	# ほう（scripts/vw-install.sh の冒頭）。ここへ足すと、配置の手順を直しただけで
-	# 利用者に Vectorworks の再起動を強いることになる——それは、この仕組みが無くそうと
-	# している手間そのもの。
+		src/Extensions/ExtShearWall.cpp)
+	# **同梱スクリプト（`scripts/vw-*.sh` / `.ps1`）はここに入れない。** どれも殻へ
+	# コンパイルされるものではなく、**呼ぶたびにパスからディスクを読む**（更新は
+	# `src/Updater.cpp` が、フィードバックの投稿は `src/draw/Feedback.cpp` が、いずれも
+	# その場でプロセスを起こす）。置き換えれば次の呼び出しから新しいほうが走るので、
+	# 再起動は要らない。
+	#
+	# M22.1 でプラグインのものが**プラグイン名のフォルダ 1 つ**に閉じ、インストーラが
+	# そのフォルダごと置き換えるようになったので、**ディスク上のスクリプトは常に
+	# 「いま入っているビルドのもの」**でもある。
+	#
+	# ここへ入れていたせいで実際に困った: M23 の実機 1 周目で見つかった
+	# `vw-feedback.sh` の不具合（macOS の bash 3.2 で空配列を展開して死ぬ）を直すだけで、
+	# 利用者に Vectorworks の再起動を強いることになった——**往復から再起動を無くす**のが
+	# この仕組みの目的なのに、その修正のたびに再起動が要るのでは本末転倒である。
+	#
+	# 代わりに守ること: **走っている殻より新しいスクリプトが来うる**（本体だけを入れ替えた
+	# 直後がそれ）。機械可読な出力の形（`installed=` / `build` 行 / `installed-shell=` /
+	# `ok` / `error=`）は、**新旧どちらの組み合わせでも通るよう**に保つこと。逆向き
+	# （古いスクリプト × 新しい殻）は以前からある前提で、`scripts/vw-update.sh` の冒頭が
+	# そのために配置をインストーラへ委ねている。
 	set(VW_SHELL_DIGEST_INPUT "")
 	foreach(vw_shell_input IN LISTS VW_SHELL_INPUTS)
 		if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${vw_shell_input}")
@@ -367,6 +388,8 @@ if(VW_BUILD_PLUGIN)
 	set(VW_PAYLOAD_SOURCES
 		src/payload/PayloadMain.cpp
 		src/draw/ImportCommand.cpp
+		src/draw/Feedback.cpp
+		src/draw/HostServices.cpp
 		src/draw/ColumnMarkPio.cpp
 		src/draw/ShearWallPio.cpp
 		src/draw/DrawUtil.cpp
@@ -630,9 +653,12 @@ if(VW_BUILD_PLUGIN)
 			endif()
 		endif()
 
-		# --- Bundle the updater so the installed plug-in can update itself --------
-		# See src/Updater.cpp. macOS reads Contents/Resources/vw-update.sh from
-		# inside the bundle; Windows reads vw-update.ps1 from next to the .vlb.
+		# --- Bundle the scripts the installed plug-in drives ----------------------
+		# See src/Updater.cpp. macOS reads Contents/Resources/<name>.sh from inside
+		# the bundle; Windows reads <name>.ps1 from next to the .vlb.
+		#
+		#   vw-update    自動アップデート（殻が起動時に走らせる）
+		#   vw-feedback  実機フィードバックの投稿（本体が殻越しに走らせる。M23）
 		if(APPLE)
 			add_custom_command(
 				TARGET ${target}
@@ -642,8 +668,11 @@ if(VW_BUILD_PLUGIN)
 				COMMAND
 					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.sh"
 					"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-update.sh"
+				COMMAND
+					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-feedback.sh"
+					"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-feedback.sh"
 				VERBATIM
-				COMMENT "Bundling vw-update.sh into ${output_name}")
+				COMMENT "Bundling vw-update.sh / vw-feedback.sh into ${output_name}")
 		else()
 			# Windows has no Info.plist, so stamp the build commit into a sidecar
 			# "<name>.commit" file next to the module. The updater reads it to tell
@@ -662,12 +691,17 @@ if(VW_BUILD_PLUGIN)
 				COMMAND
 					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.ps1"
 					"$<TARGET_FILE_DIR:${target}>/vw-update.ps1"
+				COMMAND
+					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-feedback.ps1"
+					"$<TARGET_FILE_DIR:${target}>/vw-feedback.ps1"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${commit_file}"
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.commit"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${shell_id_file}"
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.shell-id"
 				VERBATIM
-				COMMENT "Bundling vw-update.ps1 and build stamps next to ${output_name}")
+				COMMENT
+					"Bundling vw-update.ps1 / vw-feedback.ps1 and build stamps next to ${output_name}"
+			)
 		endif()
 	endfunction()
 

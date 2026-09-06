@@ -277,23 +277,6 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// ログの「結果:」に出す短い語。ダイアログの 1 行目と同じ判断から出す。
-		const char* statusWord(ImportStatus status)
-		{
-			switch (status)
-			{
-			case ImportStatus::Success:
-				return "成功";
-			case ImportStatus::Warning:
-				return "問題あり";
-			case ImportStatus::Cancelled:
-				return "中断（キャンセル）";
-			case ImportStatus::Invalid:
-				return "失敗（命令セットの検証に不合格）";
-			case ImportStatus::Empty:
-				break;
-			}
-			return "対象なし（取り込める要素が無い）";
-		}
 
 		// 改行区切りの説明を、ログの箇条書き（2 字下げ）へ組み替える。
 		std::string indentLines(const std::string& text)
@@ -407,6 +390,35 @@ namespace HomeskzIfcImport::parse
 		return out.str();
 	}
 
+	const char* importStatusWord(ImportStatus status)
+	{
+		switch (status)
+		{
+		case ImportStatus::Success:
+			return "成功";
+		case ImportStatus::Warning:
+			return "問題あり";
+		case ImportStatus::Cancelled:
+			return "中断（キャンセル）";
+		case ImportStatus::Invalid:
+			return "失敗（命令セットの検証に不合格）";
+		case ImportStatus::Empty:
+			break;
+		}
+		return "対象なし（取り込める要素が無い）";
+	}
+
+	std::vector<ElementRow> elementRows(const core::Document& document,
+										const core::DrawCounts& counts)
+	{
+		std::vector<ElementRow> rows;
+		rows.reserve(kElements.size());
+		for (const ElementDef& element : kElements)
+			rows.push_back(ElementRow{element.label, element.unit, element.commands(document),
+									  element.placed(counts)});
+		return rows;
+	}
+
 	std::string formatLogResult(const core::Document& document, const core::DrawCounts& counts,
 								double seconds)
 	{
@@ -414,7 +426,7 @@ namespace HomeskzIfcImport::parse
 
 		std::ostringstream out;
 		out << "=== 結果 ===\n";
-		out << "結果: " << statusWord(outcome.status) << "\n";
+		out << "結果: " << importStatusWord(outcome.status) << "\n";
 		if (seconds > 0.0)
 			out << "所要: " << formatDuration(seconds) << "\n";
 		out << "描いたもの: " << formatCount(outcome.placed, outcome.commands, "件") << "\n";
