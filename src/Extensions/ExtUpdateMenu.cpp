@@ -22,6 +22,10 @@ namespace HomeskzIfcImport
 		// PLUGIN_VWR_ID differs between the stable and dev builds (BuildConfig.h)
 		// so each shows its own name（「…(みんなの構造設計支援)」/「…Dev)」）。
 		//
+		// カテゴリは取り込みコマンドと**同じ "category"**（＝プラグイン名）を引く。
+		// このプラグインのコマンドはワークスペースの中で 1 か所にまとまっているのが
+		// 筋で、同じ文字列を .vwr へ 2 度書く理由も無い（Extensions/ExtMenu.cpp）。
+		//
 		// Needs = None: **文書が開いていなくても有効**。取り込みコマンドは描画先が要る
 		// ので DocIsActive を宣言しているが（Extensions/ExtMenu.cpp）、更新の確認に
 		// 図面は要らない。むしろ「取り込む前に新しくしておく」ために、文書を開く前に
@@ -35,7 +39,7 @@ namespace HomeskzIfcImport
 			static const SMenuDef def = {/*Needs*/ EMenuEnableFlags::None,
 										 /*NeedsNot*/ EMenuEnableFlags::None,
 										 /*Title*/ {PLUGIN_VWR_ID, "updateTitle"},
-										 /*Category*/ {PLUGIN_VWR_ID, "updateCategory"},
+										 /*Category*/ {PLUGIN_VWR_ID, "category"},
 										 /*HelpText*/ {PLUGIN_VWR_ID, "updateHelp"},
 										 /*VersionCreated*/ 31,
 										 /*VersionModified*/ 0,

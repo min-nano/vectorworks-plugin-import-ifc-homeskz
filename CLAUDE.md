@@ -174,6 +174,11 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 | **殻**（`src/ModuleMain.cpp` / `src/Extensions/` / `src/Updater*` / `src/Payload{Host,Session}.*`） | VectorWorks に**番地を握られる**もの——メニューと PIO の**登録**（`SMenuDef` / `SParametricDef` / パラメータ定義 / UUID）、自動アップデート（**殻に残る唯一の実処理**。本体を置き換える当人が本体の中にいては、自分の足元を外すことになる）、本体の読み込み | **実処理を 1 行も書かない。** 解析も描画も PIO の作図もここには置かない |
 | **本体**（`src/payload/` / `src/draw/` / `src/parse/` / `src/core/`） | それ以外すべて（両フェーズまるごと） | 登録の定義（`.vwr` の文字列を引くもの）。本体は `.vwr` を持たない |
 
+**メニューコマンドのカテゴリはプラグイン名で揃える**（`.vwr` の `"category"` ただ 1 つを
+すべてのメニュー定義が引く）。このプラグインは「構造設計に使う機能をまとめて収める入れ物」
+なので、コマンドはワークスペースの中でも 1 か所にまとまっているべきで、同じ文字列を
+`.vwr` へ何度も書く理由も無い。
+
 **新しい入口（メニュー・PIO）を足すときも同じ。** 登録は殻に、絵と処理は
 `src/draw/<要素>Pio.{h,cpp}` に置き、殻の `Recalculate()` は `PayloadUse` で本体を確保して
 取り次ぐだけにする（既存の `ExtColumnMark` / `ExtShearWall` に倣う）。境界に口を足したら
