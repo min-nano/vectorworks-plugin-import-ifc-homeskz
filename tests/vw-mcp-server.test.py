@@ -86,6 +86,8 @@ class FakeVectorworks(threading.Thread):
         try:
             os.remove(os.path.join(self.spool, "bridge.json"))
         except OSError:
+            # 代役の後始末。消せなくてもテストの結果は変わらない（作業ディレクトリごと
+            # 捨てる）ので、ここで止めない。
             pass
 
     def _beat(self):

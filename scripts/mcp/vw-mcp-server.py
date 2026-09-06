@@ -155,15 +155,21 @@ class Bridge:
                 try:
                     os.remove(response_path)
                 except OSError:
+                    # 消せなくても応答は手に入っている。残骸は次の開始時に
+                    # プラグイン側が掃除する（src/core/Bridge.h の sweep）。
                     pass
                 return response
             except (OSError, ValueError):
+                # **まだ書かれていない**（大半はこちら）か、書きかけを読んだ。
+                # どちらも「もう一度見る」が正しい——下の締切までは回り続ける。
                 pass
             if time.time() >= deadline:
                 # 置いたままの要求を引き上げる（次のセッションが拾わないように）。
                 try:
                     os.remove(request_path)
                 except OSError:
+                    # 引き上げられなくても害は小さい（拾われれば応答が 1 つ残るだけで、
+                    # それも次の開始時に掃除される）。諦めた理由は下で必ず伝える。
                     pass
                 if self.status() is None:
                     raise BridgeDown(
@@ -200,6 +206,8 @@ class Bridge:
                 json.dump(tools, handle, ensure_ascii=False)
             os.replace(temp, self._cache_path())
         except OSError:
+            # **キャッシュは無くても困らない**（次にブリッジへ繋がったときに取り直す）。
+            # 書けないことを理由に道具の一覧を返せなくするほうが困る。
             pass
 
     def _load_cache(self):
@@ -209,6 +217,8 @@ class Bridge:
             if isinstance(tools, list):
                 return tools
         except (OSError, ValueError):
+            # 一度も繋がっていない（＝キャッシュが無い）か、壊れている。
+            # どちらも「一覧はまだ分からない」で、下の空リストがその答え。
             pass
         return []
 
