@@ -464,7 +464,6 @@ namespace HomeskzIfcImport
 		// 本体からは手が届かないもので、前者は殻にしかコンパイルされておらず、後者は
 		// 同梱物の在り処（本体が読まれるのは一時ディレクトリの複製）を要する。
 		// VW_SHELL_ID は文字列リテラル＝この殻が生きている間ずっと有効。
-		fHost.shellId = VW_SHELL_ID;
 		fHost.runBundledScript = &ShellRunBundledScript;
 
 		const int status = initFn(&fHost);

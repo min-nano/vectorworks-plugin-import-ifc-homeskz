@@ -52,6 +52,9 @@ try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } c
 $VW_REPO = if ($env:VW_REPO) { $env:VW_REPO } else { 'min-nano/vectorworks-plugin-import-ifc-homeskz' }
 $VW_API = 'https://api.github.com'
 
+# 保存先のフォルダ名は**識別子なので据え置く**。プラグインの表示名やファイル名が変わっても
+# 付け替えない——付け替えた瞬間、既に入っているトークンが行方不明になり、利用者にもう一度
+# 貼り付けさせることになる（コマンドの UUID を据え置くのと同じ理由）。
 function Get-TokenFilePath {
     if ($env:VW_FEEDBACK_TOKEN_FILE) { return $env:VW_FEEDBACK_TOKEN_FILE }
     $dir = Join-Path $env:LOCALAPPDATA 'HomeskzIfcImport'

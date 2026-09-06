@@ -474,13 +474,37 @@ TEST(dev_build_branch_reads_the_ci_title)
 	CHECK_EQ(DevBuildBranch("Dev: feature/x (2) (a1b2c3d)"), "feature/x (2)");
 }
 
-TEST(dev_build_branch_falls_back_to_the_name)
+TEST(dev_build_branch_is_empty_when_the_title_does_not_match)
 {
-	// 題の形が違う（古いリリース・題を変えた）ときは名前そのもの。**外して黙るより、
-	// そのまま突き合わせて外れるほうが分かりやすい。**
-	CHECK_EQ(DevBuildBranch("feature/x"), "feature/x");
-	CHECK_EQ(DevBuildBranch("Dev: "), "Dev: ");
+	// 題の形が違う（古いリリース・題を変えた）ときは空。**これは 5 列目が無いときの
+	// 保険なので、当てずっぽうのブランチ名を作らない**——空なら「分からない」として
+	// 何も拾わない側へ倒れる（FindDevBuildForBranch）。
+	CHECK_EQ(DevBuildBranch("feature/x"), "");
+	CHECK_EQ(DevBuildBranch("Dev: "), "");
 	CHECK_EQ(DevBuildBranch(""), "");
+}
+
+TEST(parse_dev_builds_fills_the_branch_from_the_title_when_the_column_is_missing)
+{
+	// **古い同梱スクリプト（4 列）でも「同じブランチの新しいビルド」を拾える。**
+	// ここを空のまま通すと、古いスクリプトが入っている間だけ、取り込み時の確認も
+	// 実機フィードバックの往復も黙って死ぬ（UpdaterParse.h の ParseDevBuilds）。
+	const std::string out = "build\tfeed123\tDev: feature/x (feed123)\thttps://ex.com/c.zip\n";
+	const std::vector<DevBuild> builds = ParseDevBuilds(out);
+	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
+	if (!builds.empty())
+		CHECK_EQ(builds[0].branch, "feature/x");
+}
+
+TEST(parse_dev_builds_prefers_the_branch_column_over_the_title)
+{
+	// 5 列目があるならそちらが正。題は表示用でしかない。
+	const std::string out = "build\tfeed123\tDev: 題は当てにしない (feed123)\t"
+							"https://ex.com/c.zip\treal/branch\n";
+	const std::vector<DevBuild> builds = ParseDevBuilds(out);
+	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
+	if (!builds.empty())
+		CHECK_EQ(builds[0].branch, "real/branch");
 }
 
 TEST(find_dev_build_for_branch_picks_only_that_branch)

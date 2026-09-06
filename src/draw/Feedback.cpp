@@ -10,8 +10,15 @@
 //	（自動アップデートと同じ分担。src/Updater.h）。
 //
 //	【文字列の受け渡し】スクリプトの出力は `UpdaterParse` の純粋な関数で解く
-//	（ValueOf / ParseDevBuilds / InstalledShellId …）。**同じ解き方を 2 つ持たない**ため、
-//	殻の自動アップデートが使っているものをそのまま使う（CLAUDE.md「重複を作らない置き場所」）。
+//	（ValueOf / DevSwitchCandidates / FindDevBuildForBranch）。**同じ解き方を 2 つ持たない**
+//	ため、殻の自動アップデートが使っているものをそのまま使う
+//	（CLAUDE.md「重複を作らない置き場所」）。
+//
+//	【入れるのはここではない】新しいビルドを**待つ**のはここ（進捗ダイアログを出し、
+//	中止を受け付けるのは実処理なので本体の仕事）だが、**入れて差し替えるのは殻**
+//	（src/UpdaterFlow.cpp の UpdateCheckKind::Auto）。本体のコードがスタックに載って
+//	いる間は本体を降ろせないので、入れ替えはどのみち殻へ返ってからにしかできない
+//	（src/PayloadSession.h）。インストールの経路はこのリポジトリに 1 本だけである。
 //
 
 #include "PluginPrefix.h"
@@ -418,15 +425,19 @@ namespace HomeskzIfcImport::draw
 		// 待機の結末。
 		enum class WaitOutcome
 		{
-			Installed, // 新しいビルドを入れた（本体だけ＝そのまま次の周へ）
-			NeedsRestart, // 殻まで変わった（次の起動でしか効かない）
-			Cancelled,	  // 中止された
-			TimedOut,	  // 待ちきれなかった
-			Failed,		  // 取得・インストールに失敗した
+			Found,	   // 新しいビルドが出た（入れるのは殻の役目。下記）
+			Cancelled, // 中止された
+			TimedOut,  // 待ちきれなかった
 		};
 
-		// **同じブランチの新しい dev ビルド**が出るまで待って、出たら入れる。
-		// 待っている間は進捗ダイアログを出し、刻みごとに yield して中止を受け付ける。
+		// **同じブランチの新しい dev ビルドが出るまで待つ。** 待っている間は進捗
+		// ダイアログを出し、刻みごとに yield して中止を受け付ける。
+		//
+		// **入れるのはここではない。** インストールと入れ替えは殻が持つ更新の流れ
+		// （src/UpdaterFlow.cpp の UpdateCheckKind::Auto）の仕事で、本体は「出た」と
+		// 見届けて戻るだけ——本体のコードがスタックに載っている間は本体を降ろせない
+		// ので、入れ替えはどのみち殻へ返ってからにしかできない（src/PayloadSession.h）。
+		// おかげで**インストールの経路はこのリポジトリに 1 本だけ**になる。
 		WaitOutcome WaitForNextBuild(const std::string& branch, const std::string& runningCommit,
 									 std::string& detail)
 		{
@@ -445,34 +456,15 @@ namespace HomeskzIfcImport::draw
 				if (RunScript(kUpdateScript, {"q-dev"}, out) && ValueOf(out, "error").empty())
 				{
 					// 自分と同じコミットは候補から外れる（DevSwitchCandidates）。そのうえで
-					// **同じブランチのもの**だけを採る（UpdaterParse.h の FindDevBuildForBranch）。
+					// **同じブランチのもの**だけを採る（UpdaterParse.h の
+					// FindDevBuildForBranch。殻の更新の流れと同じ述語を使う）。
 					const std::vector<DevBuild> candidates =
 						DevSwitchCandidates(out, runningCommit);
 					const int index = FindDevBuildForBranch(candidates, branch);
 					if (index >= 0)
 					{
-						const DevBuild& build = candidates[static_cast<std::size_t>(index)];
-						progress.beginPhase("新しいビルド（" + build.commit + "）を入れています",
-											100, 0);
-						std::string install;
-						if (!RunScript(kUpdateScript, {"do-install", build.url, PLUGIN_VWR_ID},
-									   install))
-						{
-							detail = "アップデータを起動できませんでした。";
-							return WaitOutcome::Failed;
-						}
-						if (!InstallReportedOk(install))
-						{
-							detail = InstallErrorText(install, "インストールに失敗しました。");
-							return WaitOutcome::Failed;
-						}
-						detail = build.commit;
-						// **殻まで変わったなら、この実行では効かない**（コンパイル済みの
-						// 殻は起動時にしか読み込まれない。src/PayloadAbi.h）。
-						if (NeedsRestartAfterInstall(hostServices().shellId,
-													 InstalledShellId(install)))
-							return WaitOutcome::NeedsRestart;
-						return WaitOutcome::Installed;
+						detail = candidates[static_cast<std::size_t>(index)].commit;
+						return WaitOutcome::Found;
 					}
 				}
 
@@ -648,26 +640,15 @@ namespace HomeskzIfcImport::draw
 			return false;
 		}
 
-		// 新しいビルドを待つ。
+		// 新しいビルドが出るまで待つ。
 		std::string detail;
-		const WaitOutcome outcome = WaitForNextBuild(session.branch, input.build.commit, detail);
-		switch (outcome)
+		switch (WaitForNextBuild(session.branch, input.build.commit, detail))
 		{
-		case WaitOutcome::Installed:
-			// **ここでホットリロードに入る。** 呼び出し側は何もせずに戻り、殻が本体を
-			// 持ち直して取り込みを呼び直す（draw/Feedback.h「なぜ殻を経由して周回するか」）。
+		case WaitOutcome::Found:
+			// **ここでホットリロードに入る。** 呼び出し側は何もせずに戻り、殻が更新を
+			// 確認して（尋ねずに）入れ、本体を持ち直して取り込みを呼び直す
+			// （draw/Feedback.h「なぜ殻を経由して周回するか」）。
 			return true;
-		case WaitOutcome::NeedsRestart:
-		{
-			const std::string headline =
-				"新しいビルド（" + detail + "）を入れましたが、反映には再起動が必要です。";
-			gSDK->AlertInform(headline.c_str(),
-							  "殻（プラグインのモジュール）まで変わったため、この実行では"
-							  "入れ替えられません。\nVectorworks を再起動してから、もう一度"
-							  "取り込みを実行してください（同じ条件で続きから走ります）。",
-							  false);
-			return false;
-		}
 		case WaitOutcome::Cancelled:
 			gSDK->AlertInform("自動の続きをやめました。",
 							  "投稿は済んでいます。次の取り込みを手で実行すれば、同じ条件で"
@@ -675,15 +656,12 @@ namespace HomeskzIfcImport::draw
 							  false);
 			return false;
 		case WaitOutcome::TimedOut:
-			gSDK->AlertInform("修正版のビルドが出ませんでした。",
-							  "投稿は済んでいます。ビルドが出てから取り込みを手で実行すれば、"
-							  "同じ条件で続きから走ります。",
-							  false);
-			return false;
-		case WaitOutcome::Failed:
 			break;
 		}
-		gSDK->AlertInform("新しいビルドを入れられませんでした。", detail.c_str(), false);
+		gSDK->AlertInform("修正版のビルドが出ませんでした。",
+						  "投稿は済んでいます。ビルドが出てから取り込みを手で実行すれば、"
+						  "同じ条件で続きから走ります。",
+						  false);
 		return false;
 	}
 } // namespace HomeskzIfcImport::draw

@@ -42,7 +42,6 @@ namespace HomeskzIfcImport::payload
 		void forget()
 		{
 			fHost = VwPayloadHost{};
-			fShellId.clear();
 			fValid = false;
 		}
 
@@ -55,13 +54,6 @@ namespace HomeskzIfcImport::payload
 		void* callbacks() const
 		{
 			return fValid ? fHost.callbacks : nullptr;
-		}
-
-		// **いま動いている殻の ID**（貸されていなければ空）。文字列は adopt のときに
-		// 写してある——ポインタのまま持たない、というこのファイルの決めごとどおり。
-		const std::string& shellId() const
-		{
-			return fShellId;
 		}
 
 		// 同梱スクリプトを走らせられるか（古い殻は貸してくれない）。
@@ -98,7 +90,6 @@ namespace HomeskzIfcImport::payload
 
 	private:
 		VwPayloadHost fHost{};
-		std::string fShellId; // 殻の ID の**写し**（相手の記憶域を持たない）
 		bool fValid = false;
 	};
 
@@ -119,9 +110,6 @@ namespace HomeskzIfcImport::payload
 		// ほうが新しく、後ろに知らない項目が付いていても構わない）。
 		fHost = *host;
 		fHost.size = static_cast<unsigned int>(sizeof(VwPayloadHost));
-		// **文字列はここで写す。** 構造体を写しただけでは中の const char* は相手の
-		// 記憶域を指したままで、このファイルが避けようとしている当のものになる。
-		fShellId = (host->shellId != nullptr) ? host->shellId : "";
 		fValid = true;
 		return kVwPayloadOk;
 	}

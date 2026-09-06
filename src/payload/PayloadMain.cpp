@@ -103,7 +103,6 @@ VW_PAYLOAD_EXPORT int vw_payload_init(const VwPayloadHost* host)
 		// 読まれるのは一時ディレクトリの複製）、後者は殻にしかコンパイルされていない。
 		// **写して持つ**のは境界の決めごとどおり（PayloadHostHolder.h）。
 		draw::HostServices services;
-		services.shellId = gHost.shellId();
 		if (gHost.canRunScripts())
 		{
 			services.runScript = [](const std::string& baseName,

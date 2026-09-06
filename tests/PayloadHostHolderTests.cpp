@@ -148,33 +148,16 @@ TEST(a_failed_adopt_forgets_what_was_there_before)
 }
 
 // ---------------------------------------------------------------------------
-// 殻から借りるもの（M23）。**文字列は写す・関数ポインタは素通し**が守られているか。
+// 殻から借りるもの（M23）。**返ってきた文字列は写す・関数ポインタは素通し**。
 // ---------------------------------------------------------------------------
 
-TEST(adopt_copies_the_shell_id_out_of_the_callers_storage)
+TEST(a_host_without_a_script_hook_is_accepted)
 {
-	HostHolder holder;
-	{
-		// **殻の ID も、構造体と同じくローカルに置かれうる。** 構造体を写しただけでは
-		// 中の const char* は相手の記憶域を指したままなので、文字列まで写せているかを
-		// 「渡した器を塗り潰してから読む」ことで確かめる。
-		std::string shellId = "abc123";
-		VwPayloadHost host = MakeHost(&gCallbackTarget);
-		host.shellId = shellId.c_str();
-		CHECK_EQ(holder.adopt(&host), static_cast<int>(kVwPayloadOk));
-		shellId.assign(shellId.size(), 'x');
-		std::memset(&host, 0xAB, sizeof(host));
-	}
-	CHECK_EQ(holder.shellId(), std::string("abc123"));
-}
-
-TEST(a_host_without_a_shell_id_is_accepted)
-{
-	// 古い殻（ID を貸さない）でも本体は動く——フィードバックの往復だけが使えなくなる。
+	// 古い殻（スクリプトを貸さない）でも本体は動く——フィードバックの往復だけが
+	// 使えなくなる。
 	HostHolder holder;
 	VwPayloadHost host = MakeHost(&gCallbackTarget);
 	CHECK_EQ(holder.adopt(&host), static_cast<int>(kVwPayloadOk));
-	CHECK(holder.shellId().empty());
 	CHECK(!holder.canRunScripts());
 	std::string out = "not touched";
 	CHECK(!holder.runScript("vw-feedback", {"token-status"}, out));
@@ -207,15 +190,13 @@ TEST(run_script_passes_the_arguments_and_copies_the_reply)
 	gScriptStatus = kVwPayloadOk;
 }
 
-TEST(forget_drops_the_shell_id_and_the_script_hook)
+TEST(forget_drops_the_script_hook)
 {
 	HostHolder holder;
 	VwPayloadHost host = MakeHost(&gCallbackTarget);
-	host.shellId = "abc123";
 	host.runBundledScript = &FakeRunScript;
 	CHECK_EQ(holder.adopt(&host), static_cast<int>(kVwPayloadOk));
 	holder.forget();
-	CHECK(holder.shellId().empty());
 	CHECK(!holder.canRunScripts());
 }
 

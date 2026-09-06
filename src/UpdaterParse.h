@@ -70,16 +70,35 @@ namespace HomeskzIfcImport::UpdaterParse
 		return "";
 	}
 
+	// **dev プレリリースの表示名からブランチを取り出す。** CI が付ける題は
+	// "Dev: <branch> (<short sha>)"（.github/workflows/build.yml の
+	// `--title "Dev: ${branch} (${short})"`）。その形でなければ空を返す。
+	//
+	// **これは保険で、正規の出どころは q-dev の 5 列目**（DevBuild::branch）である。
+	// 列を出さない**古い同梱スクリプト**が走ることがあり（インストール済みのものが
+	// 走るので、新しい殻＋古いスクリプトという組み合わせが必ず起こる）、そのときに
+	// ブランチが分からないと「同じブランチの新しいビルド」を拾う経路が丸ごと死ぬ。
+	// 題からでも確実に取れるので、空欄はここで埋める（ParseDevBuilds）。
+	inline std::string DevBuildBranch(const std::string& name)
+	{
+		const std::string prefix = "Dev: ";
+		if (!name.starts_with(prefix))
+			return "";
+		const std::string::size_type open = name.rfind(" (");
+		if (open == std::string::npos || open <= prefix.size())
+			return "";
+		return name.substr(prefix.size(), open - prefix.size());
+	}
+
 	struct DevBuild
 	{
 		std::string commit;
 		std::string name;
 		std::string url;
-		// そのビルドが出たブランチ（"feature/x"）。**取り込みのついでの確認**が「いま
-		// 動いているのと同じブランチの新しいビルド」だけを拾うために要る（name は
-		// リリースの表示名 "Dev: <branch> (<sha>)" なので照合には使えない）。この列を
-		// 出さない古い同梱スクリプトでは空——そのときは黙って何もしない側へ倒れる
-		// （UpdaterFlow.cpp の RunDevUpdateCheckWith）。
+		// そのビルドが出たブランチ（"feature/x"）。**取り込みのついでの確認**と
+		// **実機フィードバックの往復**が「いま動いているのと同じブランチの新しい
+		// ビルド」だけを拾うために要る。正規の出どころは q-dev の 5 列目で、その列を
+		// 出さない古い同梱スクリプトのときは表示名から補う（DevBuildBranch）。
 		std::string branch;
 	};
 
@@ -89,6 +108,9 @@ namespace HomeskzIfcImport::UpdaterParse
 	//
 	// **branch は任意。** インストール済みの（＝古い）同梱スクリプトが走ることが
 	// あるので、4 列しか出さない出力も読めなければならない（src/Updater.cpp）。
+	// その場合は**表示名から補う**（DevBuildBranch）——ここを空のまま通すと、
+	// 「同じブランチの新しいビルド」を拾う経路（取り込み時の確認・実機フィードバックの
+	// 往復）が、古いスクリプトが入っている間だけ黙って死ぬ。
 	inline std::vector<DevBuild> ParseDevBuilds(const std::string& out)
 	{
 		std::vector<DevBuild> builds;
@@ -125,6 +147,8 @@ namespace HomeskzIfcImport::UpdaterParse
 				b.url = Trim(rest.substr(t2 + 1, t3 - (t2 + 1)));
 				b.branch = Trim(rest.substr(t3 + 1));
 			}
+			if (b.branch.empty())
+				b.branch = DevBuildBranch(b.name);
 			if (!b.url.empty())
 				builds.push_back(b);
 		}
@@ -296,26 +320,6 @@ namespace HomeskzIfcImport::UpdaterParse
 	// (as returned by DevSwitchCandidates). Entry 0 is "keep the current build",
 	// so a selection <= 0 -> -1. A selection past the last candidate is also
 	// treated as "keep current" (a safeguard) -> -1. Otherwise -> selection - 1.
-	// **dev プレリリースの表示名からブランチを取り出す。** CI が付ける題は
-	// "Dev: <branch> (<short sha>)"（.github/workflows/build.yml の
-	// `--title "Dev: ${branch} (${short})"`）なので、その形なら中身を返し、違う形なら
-	// 名前そのものを返す（古い形・題を変えたときに黙って外さないための保険）。
-	//
-	// **なぜ題から取るのか**: q-dev の 1 行が持つのは commit / name / url の 3 つだけで、
-	// タグ（dev-<slug>）は入っていない。列を足せば済む話ではない——このスクリプトは
-	// **インストール済みの（＝古い）**ものが走ることがあり、新旧で行の形が食い違うと
-	// アップデートの経路そのものが途切れる（scripts/vw-update.sh 冒頭）。
-	inline std::string DevBuildBranch(const std::string& name)
-	{
-		const std::string prefix = "Dev: ";
-		if (!name.starts_with(prefix))
-			return name;
-		const std::string::size_type open = name.rfind(" (");
-		if (open == std::string::npos || open <= prefix.size())
-			return name;
-		return name.substr(prefix.size(), open - prefix.size());
-	}
-
 	// **同じブランチの、いま動いているものとは違うビルド**を選ぶ（実機フィードバックの
 	// 往復。docs/DEV-NOTES.md M23）。見つかった添字、無ければ -1。
 	//
@@ -328,7 +332,7 @@ namespace HomeskzIfcImport::UpdaterParse
 			return -1;
 		for (std::size_t i = 0; i < builds.size(); ++i)
 		{
-			if (DevBuildBranch(builds[i].name) == branch)
+			if (builds[i].branch == branch)
 				return static_cast<int>(i);
 		}
 		return -1;

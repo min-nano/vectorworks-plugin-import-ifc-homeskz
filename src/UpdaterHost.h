@@ -84,6 +84,16 @@ namespace HomeskzIfcImport
 		// 取り込みコマンドのついで。**更新があるときだけ口を開く**——取り込みたい人の
 		// 前に「最新です」を挟まない。取得に失敗しても黙って取り込みへ進む。
 		Silent,
+		// **実機フィードバックの往復の 2 周目以降**（docs/DEV-NOTES.md M23）。Silent と
+		// 同じく「いま動いているのと同じブランチの新しいビルド」だけを拾うが、
+		// **尋ねずに入れる**。往復はもともと「新しいビルドが出たら試す」ためのもので、
+		// 周ごとに「インストールしますか？」を挟むのは、この仕組みが無くそうとしている
+		// 手間そのものだから。入れ替えたことも黙っている——モーダルのダイアログは
+		// Vectorworks を止めるので、絵を見ている人の前に立ちはだかる。
+		//
+		// **口を開くのは輪が止まるときだけ**（殻まで変わった・入れられなかった）。
+		// そのときは false が返り、呼び出し側は自動の周回をやめる。
+		Auto,
 	};
 
 	// The SDK-independent update flows, parameterized by the host above. These
@@ -93,14 +103,20 @@ namespace HomeskzIfcImport
 	// runningShellId は**いま動いている殻の ID**（コンパイル時に焼かれた VW_SHELL_ID。
 	// テストでは注入する）。入れたビルドの殻が同じなら、本体を読み直すだけで反映される
 	// ＝**再起動を尋ねない**（src/UpdaterParse.h の NeedsRestartAfterInstall）。
-	void RunStableUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
+	//
+	// 戻り値は「**この実行のまま自動で続けてよいか**」——殻まで変わった・入れられ
+	// なかった・降ろせなかったときに false。**見るのは Auto の呼び出し側だけ**で
+	// （実機フィードバックの往復。src/Extensions/ExtMenu.cpp）、Manual・Silent の
+	// 呼び出し側は捨ててよい: そちらの結末はその場のダイアログで伝え終えている。
+	bool RunStableUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
 								  const std::string& runningShellId);
 
 	// 開発版。**kind で挙動が大きく変わる唯一の流れ**:
 	//   Manual … ビルドの選択ダイアログを出す（どのブランチのビルドを使うかを選ぶ）。
 	//   Silent … ダイアログは出さず、**いま動いているのと同じブランチ**の新しいビルド
 	//            だけを拾って尋ねる。取り込みのたびにブランチ選択が出ては邪魔になる。
-	void RunDevUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
+	//   Auto … Silent と同じものを拾い、**尋ねずに入れて黙って続ける**。
+	bool RunDevUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
 							   const std::string& runningBranch, const std::string& runningCommit,
 							   const std::string& runningShellId);
 } // namespace HomeskzIfcImport

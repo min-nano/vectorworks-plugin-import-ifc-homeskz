@@ -433,16 +433,16 @@ namespace HomeskzIfcImport
 	// **「一度きり」の見張りは持たない。** 起動時に自動で走っていた頃は
 	// plugin_module_main が複数回呼ばれても 1 度で済ませる必要があったが、いまの入口は
 	// 手で押すコマンドと取り込みコマンドなので、呼ばれた回数だけ確認するのが正しい。
-	void CheckForUpdates(UpdateCheckKind kind)
+	bool CheckForUpdates(UpdateCheckKind kind)
 	{
 		CVectorworksUpdaterHost host;
 #ifdef VW_DEV_BUILD
 		// The build that is actually loaded and running right now is compiled in
 		// (VW_BUILD_BRANCH/VERSION), so it is unambiguous even if a different
 		// build is staged on disk.
-		RunDevUpdateCheckWith(host, kind, VW_BUILD_BRANCH, VW_BUILD_VERSION, VW_SHELL_ID);
+		return RunDevUpdateCheckWith(host, kind, VW_BUILD_BRANCH, VW_BUILD_VERSION, VW_SHELL_ID);
 #else
-		RunStableUpdateCheckWith(host, kind, VW_SHELL_ID);
+		return RunStableUpdateCheckWith(host, kind, VW_SHELL_ID);
 #endif
 	}
 } // namespace HomeskzIfcImport

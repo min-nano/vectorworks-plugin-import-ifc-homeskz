@@ -48,7 +48,7 @@ namespace
 	FeedbackRound sampleRound()
 	{
 		FeedbackRound round;
-		round.build.plugin = "HomeskzIfcImportDev";
+		round.build.plugin = "min-nano_structureDev";
 		round.build.channel = "dev";
 		round.build.commit = "a1b2c3d";
 		round.build.branch = "claude/feedback";
@@ -136,7 +136,7 @@ TEST(feedback_anonymized_name_is_stable_and_opaque)
 TEST(feedback_redaction_removes_path_and_user_name)
 {
 	const std::string log = "ファイル: /Users/hanako/Documents/物件A.ifc\n"
-							"ログ: /Users/hanako/Library/Logs/HomeskzIfcImport.log\n"
+							"ログ: /Users/hanako/Library/Logs/min-nano_structure.log\n"
 							"対象 物件A.ifc を読み込みました\n";
 	const std::string clean = redactText(log, "/Users/hanako/Documents/物件A.ifc");
 	CHECK(!contains(clean, "hanako"));

@@ -63,6 +63,9 @@ set -uo pipefail
 
 VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-import-ifc-homeskz}"
 VW_API="https://api.github.com"
+# キーチェーンの service 名は**識別子なので据え置く**。プラグインの表示名やファイル名が
+# 変わっても付け替えない——付け替えた瞬間、既に入っているトークンが行方不明になり、
+# 利用者にもう一度貼り付けさせることになる（コマンドの UUID を据え置くのと同じ理由）。
 VW_FEEDBACK_KEYCHAIN_SERVICE="${VW_FEEDBACK_KEYCHAIN_SERVICE:-HomeskzIfcFeedback}"
 
 # ---------------------------------------------------------------------------

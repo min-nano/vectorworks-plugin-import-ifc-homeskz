@@ -173,6 +173,12 @@ namespace HomeskzIfcImport::core
 
 		// Windows は LOCALAPPDATA、macOS は HOME/Library/Application Support。どちらの
 		// 環境変数も GUI アプリの子プロセスに必ず入っている。
+		//
+		// **フォルダ名（HomeskzIfcImport）は識別子なので、プラグインの改名に追随させない。**
+		// 付け替えると、進行中の往復の記憶（周回数・前の周の内訳・1 周目の選択）が黙って
+		// 行方不明になる。同梱スクリプトが同じフォルダへ置くトークンも同じ理由で据え置いて
+		// あり（scripts/vw-feedback.ps1 の Get-TokenFilePath）、**往復に要るものが 1 か所に
+		// まとまる**という利点もある。
 		const std::string localAppData = trace::envValue("LOCALAPPDATA");
 		if (!localAppData.empty())
 			return localAppData + "\\HomeskzIfcImport\\feedback.txt";

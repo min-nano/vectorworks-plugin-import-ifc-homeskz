@@ -60,7 +60,11 @@ namespace HomeskzIfcImport
 	// 走る（起動時に 1 度きりだった頃の「済んだか」の見張りは持たない——手で押した
 	// コマンドが 2 度目に黙るのでは困る）。
 	//
+	// 戻り値は「**この実行のまま自動で続けてよいか**」（UpdaterHost.h）。見るのは
+	// UpdateCheckKind::Auto の呼び出し側——実機フィードバックの往復——だけで、
+	// 手で押したコマンドからの呼び出しは捨ててよい。
+	//
 	// 例外は投げない。呼び出し側（SDK のコールバック）へ漏らさないための最後の壁は
 	// それぞれの入口が持つ。
-	void CheckForUpdates(UpdateCheckKind kind);
+	bool CheckForUpdates(UpdateCheckKind kind);
 } // namespace HomeskzIfcImport
