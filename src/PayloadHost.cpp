@@ -376,11 +376,13 @@ namespace HomeskzIfcImport
 		auto initFn = reinterpret_cast<VwPayloadInitFn>(fModule.symbol(VW_PAYLOAD_SYM_INIT));
 		auto infoFn = reinterpret_cast<VwPayloadInfoFn>(fModule.symbol(VW_PAYLOAD_SYM_INFO));
 		fImportFn = reinterpret_cast<VwPayloadRunImportFn>(fModule.symbol(VW_PAYLOAD_SYM_IMPORT));
+		fBridgeFn =
+			reinterpret_cast<VwPayloadRunMcpBridgeFn>(fModule.symbol(VW_PAYLOAD_SYM_BRIDGE));
 		fRecalcFn = reinterpret_cast<VwPayloadRecalculateFn>(fModule.symbol(VW_PAYLOAD_SYM_RECALC));
 		fShutdownFn =
 			reinterpret_cast<VwPayloadShutdownFn>(fModule.symbol(VW_PAYLOAD_SYM_SHUTDOWN));
 		if (abiFn == nullptr || initFn == nullptr || infoFn == nullptr || fImportFn == nullptr ||
-			fRecalcFn == nullptr || fShutdownFn == nullptr)
+			fBridgeFn == nullptr || fRecalcFn == nullptr || fShutdownFn == nullptr)
 		{
 			error = "本体の形が違います（必要な関数が見つかりません）。\n"
 					"殻と本体の版が食い違っている可能性があります。";
@@ -449,6 +451,23 @@ namespace HomeskzIfcImport
 		return true;
 	}
 
+	bool Payload::runMcpBridge(std::string& error)
+	{
+		error.clear();
+		if (!fLoaded || fBridgeFn == nullptr)
+		{
+			error = "本体が読み込まれていません。";
+			return false;
+		}
+		const int status = fBridgeFn();
+		if (status != kVwPayloadOk)
+		{
+			error = "MCP ブリッジを開始できませんでした（コード " + std::to_string(status) + "）。";
+			return false;
+		}
+		return true;
+	}
+
 	bool Payload::recalculate(unsigned int kind, void* objectHandle, int& outEvent,
 							  std::string& error)
 	{
@@ -475,6 +494,7 @@ namespace HomeskzIfcImport
 			fShutdownFn();
 		fLoaded = false;
 		fImportFn = nullptr;
+		fBridgeFn = nullptr;
 		fRecalcFn = nullptr;
 		fShutdownFn = nullptr;
 		fCommit.clear();

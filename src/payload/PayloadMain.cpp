@@ -29,6 +29,7 @@
 #include "PayloadHostHolder.h"
 #include "draw/ColumnMarkPio.h"
 #include "draw/ImportCommand.h"
+#include "draw/McpBridge.h"
 #include "draw/ShearWallPio.h"
 
 #include <exception>
@@ -135,6 +136,23 @@ VW_PAYLOAD_EXPORT int vw_payload_run_import()
 		// （draw/ImportCommand.cpp）。ここは**境界の最後の砦**として、そこで漏れたものを
 		// 受けるだけ。
 		draw::runImportCommand();
+		return kVwPayloadOk;
+	}
+	catch (...)
+	{
+		return kVwPayloadErrException;
+	}
+}
+
+VW_PAYLOAD_EXPORT int vw_payload_run_mcp_bridge()
+{
+	try
+	{
+		if (!gPayloadReady || gSDK == nil)
+			return kVwPayloadErrNotInit;
+		// ブリッジは**止められるまで戻らない**（draw/McpBridge.h）。中で例外を受け、
+		// 利用者にはダイアログで見せる。ここは境界の最後の砦。
+		draw::runMcpBridge();
 		return kVwPayloadOk;
 	}
 	catch (...)

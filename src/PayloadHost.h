@@ -193,6 +193,10 @@ namespace HomeskzIfcImport
 		// 呼べなかったときだけ false。
 		bool runImport(std::string& error);
 
+		// MCP ブリッジを走らせる（止められるまで戻らない。src/draw/McpBridge.h）。
+		// 呼べなかったときだけ false。
+		bool runMcpBridge(std::string& error);
+
 		// PIO のリセットを本体に描かせる。outEvent には EObjectEvent の値が入る。
 		bool recalculate(unsigned int kind, void* objectHandle, int& outEvent, std::string& error);
 
@@ -208,6 +212,7 @@ namespace HomeskzIfcImport
 		std::string fBranch;
 		PayloadStamp fStamp;
 		VwPayloadRunImportFn fImportFn = nullptr;
+		VwPayloadRunMcpBridgeFn fBridgeFn = nullptr;
 		VwPayloadRecalculateFn fRecalcFn = nullptr;
 		VwPayloadShutdownFn fShutdownFn = nullptr;
 		bool fLoaded = false;

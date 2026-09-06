@@ -41,6 +41,16 @@ namespace HomeskzIfcImport::draw
 		// 明示的に閉じる（2 回呼んでも安全）。
 		void close();
 
+		// **終わりの見えない待ちで 1 周ぶん息をする。** バーは進めず（いつ終わるか
+		// 分からないものの進み具合を騙って見せない）、VectorWorks へ制御を返して
+		// 再描画とキャンセル操作を受け付けさせ、［キャンセル］が押されていたら true。
+		//
+		// core::ProgressReporter の step() とは用途が違う——あちらは「N 件のうち i 件目」
+		// を進める口で、こちらは件数の分からない待ち（MCP ブリッジ draw/McpBridge.cpp の
+		// ループ）が唯一の利用者である。SDK の進捗ダイアログを触る場所を 1 つに保つために
+		// ここへ置く（CLAUDE.md「重複を作らない置き場所」）。
+		bool keepAlive(const std::string& meterText);
+
 	protected:
 		// core::ProgressReporter のフック。見出しの更新・1 件ぶんの前進（＝yield）・
 		// キャンセルの問い合わせを、それぞれ SDK の進捗ダイアログへ流す。

@@ -10,6 +10,7 @@
 #include "BuildConfig.h"
 #include "Extensions/ExtColumnMark.h"
 #include "Extensions/ExtShearWall.h"
+#include "Extensions/ExtMcpMenu.h"
 #include "Extensions/ExtMenu.h"
 #include "Extensions/ExtUpdateMenu.h"
 #include "PayloadSession.h"
@@ -84,6 +85,11 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// 「アップデータを確認」コマンド。起動時の自動確認をやめた代わりの入口
 	// （Extensions/ExtUpdateMenu.h）。
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuCheckUpdate>(
+		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
+
+	// 「MCP ブリッジを開始」コマンド。Claude から図面を読める橋を架ける
+	// （Extensions/ExtMcpMenu.h）。登録だけがここにあり、実処理は本体側。
+	REGISTER_Extension<HomeskzIfcImport::CExtMenuMcpBridge>(
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
 	return reply;
