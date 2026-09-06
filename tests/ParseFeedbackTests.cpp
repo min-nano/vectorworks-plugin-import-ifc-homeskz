@@ -307,12 +307,15 @@ TEST(feedback_comment_trims_an_oversized_log)
 	CHECK(contains(body, "を省略"));
 }
 
-TEST(feedback_comment_without_auto_continue_says_so)
+TEST(feedback_comment_asks_for_one_more_run_after_the_fix)
 {
-	FeedbackRound round = sampleRound();
-	round.autoContinue = false;
+	// **「もう一度実行してください」と書く。** 待つのをやめた（＝待つあいだ図面が
+	// 見られないので）以上、次の周は人が取り込みを 1 回実行して始まる。ここを黙ると、
+	// 読む側（Claude）が「push すれば勝手に回る」と思い込んだままになる。
+	const FeedbackRound round = sampleRound();
 	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
-	CHECK(contains(body, "自動継続は切ってあるので"));
+	CHECK(contains(body, "取り込みをもう一度実行してください"));
+	CHECK(contains(body, "ファイル選択も設定ダイアログも再起動も要りません"));
 }
 
 TEST_MAIN();

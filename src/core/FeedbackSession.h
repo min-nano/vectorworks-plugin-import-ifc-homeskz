@@ -56,10 +56,6 @@ namespace HomeskzIfcImport::core
 		std::string ifcPath;
 		ImportOptions options;
 
-		// 投稿したあと、新しいビルドを待って自動で取り込み直すか。false なら 1 周で終わる
-		// （投稿だけしたい・手元で続きを見たい場合）。
-		bool autoContinue = false;
-
 		// 投稿する本文から、案件が分かるもの（ファイル名・パス・ユーザー名）を伏せるか。
 		// **既定は伏せる**——PR コメントは公開されるので、既定が「出す」であってはならない。
 		bool anonymize = true;

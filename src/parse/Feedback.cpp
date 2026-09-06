@@ -347,15 +347,12 @@ namespace HomeskzIfcImport::parse
 		// ことはしない——次に何が起きるかが読めなくなると、往復が人の手に戻る）。
 		std::ostringstream tail;
 		tail << "\n---\n";
-		if (round.autoContinue)
-			tail << "この投稿は VectorWorks 上の開発版プラグインが自動生成しました。**`"
-				 << round.build.branch
-				 << "` へ修正を push すると、この Vectorworks が新しい dev "
-					"ビルドを自動で取り込み直し、round "
-				 << (round.round + 1) << " を投稿します**（再起動も再選択も要りません）。\n";
-		else
-			tail << "この投稿は VectorWorks 上の開発版プラグインが自動生成しました（自動継続は"
-					"切ってあるので、次の周は手動で走らせます）。\n";
+		tail << "この投稿は VectorWorks 上の開発版プラグインが自動生成しました。**`"
+			 << round.build.branch
+			 << "` へ修正を push したら、Vectorworks で取り込みをもう一度実行してください**"
+				"——新しい dev ビルドが尋ねずに入り、同じ条件（同じ IFC・同じ設定）で round "
+			 << (round.round + 1)
+			 << " を投稿します。ファイル選択も設定ダイアログも再起動も要りません。\n";
 		tail << "**実機を見ての所見は、この後に別のコメントとして届きます**（絵を見ながら"
 				"書けるよう、プラグインは所見を待たずに戻ります）。所見が付かなければ"
 				"「見て特に言うことは無かった」か、書かずに閉じたかのどちらかです。\n";

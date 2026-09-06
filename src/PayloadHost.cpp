@@ -477,23 +477,23 @@ namespace HomeskzIfcImport
 		return true;
 	}
 
-	bool Payload::runImport(bool& againOut, std::string& error)
+	bool Payload::runImport(bool& autoUpdateOut, std::string& error)
 	{
 		error.clear();
-		againOut = false;
+		autoUpdateOut = false;
 		if (!fLoaded || fImportFn == nullptr)
 		{
 			error = "本体が読み込まれていません。";
 			return false;
 		}
-		int again = 0;
-		const int status = fImportFn(&again);
+		int autoUpdate = 0;
+		const int status = fImportFn(&autoUpdate);
 		if (status != kVwPayloadOk)
 		{
 			error = "取り込みを開始できませんでした（コード " + std::to_string(status) + "）。";
 			return false;
 		}
-		againOut = (again != 0);
+		autoUpdateOut = (autoUpdate != 0);
 		return true;
 	}
 

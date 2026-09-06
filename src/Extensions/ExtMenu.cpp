@@ -125,80 +125,68 @@ CImportIfcMenu_EventSink::~CImportIfcMenu_EventSink() = default;
 // （Vectorworks の再起動は要らない。src/PayloadSession.h）。
 void CImportIfcMenu_EventSink::DoInterface()
 {
-	// **本体が「もう 1 周」と言う限り呼び直す。** 実機フィードバックの往復
-	// （draw/Feedback.h）で、修正版のビルドが出たときだけそうなる。
+	// **次の取り込みで更新を尋ねるかどうか。** 本体が「往復の最中だ」と教えてきたら、
+	// 次の 1 回だけ尋ねずに入れる（下記）。**殻に置くのは、本体が入れ替わっても残って
+	// ほしいから**——ここが消えると、入れ替えた次の周でまた尋ねることになる。
+	// Vectorworks を閉じれば消えてよい類の覚えなので、ファイルには落とさない。
+	static bool sAutoUpdateNextImport = false;
+
+	// **取り込みの前に更新を確認する。** 起動時の自動確認をやめた代わりがここで
+	// （src/Updater.h）、ふだんは更新があるときだけ尋ね、オフライン等は黙って取り込みへ
+	// 進む（UpdateCheckKind::Silent）。
 	//
-	// **周と周のあいだに PayloadUse を壊すのが肝。** 本体を降ろせるのは、そのコードが
-	// スタックに 1 つも無いとき——つまり入れ子の深さが 0 のとき——だけで、次の
-	// PayloadUse がその判定と読み直しを行う（src/PayloadSession.h）。だから殻に要るのは
-	// この「更新を確認して、呼び直す」だけで、往復の中身（何を投稿し、どのビルドを
-	// 待つか）はすべて本体側にある——殻に実処理を書かない、というこの分割の決めごと
-	// どおり（CLAUDE.md「アーキテクチャ: 殻と本体」）。
+	// **実機フィードバックの往復の最中だけは尋ねない**（UpdateCheckKind::Auto）。その人は
+	// 「直したから、もう一度実行してほしい」と言われて実行しているので、そこへ「新しい
+	// ビルドがあります。インストールしますか？」を挟むのは、この往復が無くそうとしている
+	// 手間そのものになる。**一度きり**で、次の周は本体がまたそう言ってきたときだけ。
 	//
-	// 上限は歯止め。本体が壊れて常に「もう 1 周」を返しても、ここで必ず止まる。
-	constexpr int kMaxRounds = 50;
-	for (int round = 0; round < kMaxRounds; ++round)
+	// **本体（ペイロード）を確保する前に置くことに意味がある。** ここで新しい本体が
+	// 入れば、下の PayloadUse がそれを読み直すので、**この取り込みからもう新しいコードが
+	// 動く**（src/PayloadSession.h）。確保したあとでは、本体のコードがスタックに載って
+	// いるぶん降ろせず、反映は次回に回る。
+	//
+	// 例外はここで止める——更新は取り込みの付随でしかなく、失敗しても取り込みは
+	// 続けなければならない。
+	//
+	// NOLINTBEGIN(bugprone-empty-catch): 黙って諦めるのが**この場所では正しい**振る舞い
+	// （オフラインのときに無言なのと同じ扱い）。握り潰しを禁じる規則をここだけ外す。
+	const bool autoUpdate = sAutoUpdateNextImport;
+	sAutoUpdateNextImport = false;
+	bool proceed = true;
+	try
 	{
-		// **取り込みの前に更新を確認する。** 起動時の自動確認をやめた代わりがここで
-		// （src/Updater.h）、1 周目は更新があるときだけ尋ね、オフライン等は黙って
-		// 取り込みへ進む（UpdateCheckKind::Silent）。
-		//
-		// **2 周目以降は尋ねない**（UpdateCheckKind::Auto）。そこにいるのは実機
-		// フィードバックの往復で、本体が「新しいビルドが出た」と見届けて戻ってきた
-		// 直後である——周ごとに「インストールしますか？」を挟むのは、この仕組みが
-		// 無くそうとしている手間そのものになる。輪が止まるとき（殻まで変わった・
-		// 入れられなかった）だけ false が返り、そこで打ち切る。
-		//
-		// **本体（ペイロード）を確保する前に置くことに意味がある。** ここで新しい本体が
-		// 入れば、下の PayloadUse がそれを読み直すので、**この周からもう新しいコードが
-		// 動く**（src/PayloadSession.h）。確保したあとでは、本体のコードがスタックに
-		// 載っているぶん降ろせず、反映は次回に回る。
-		//
-		// 例外はここで止める——更新は取り込みの付随でしかなく、失敗しても取り込みは
-		// 続けなければならない。
-		//
-		// NOLINTBEGIN(bugprone-empty-catch): 黙って諦めるのが**この場所では正しい**振る舞い
-		// （オフラインのときに無言なのと同じ扱い）。握り潰しを禁じる規則をここだけ外す。
-		bool keepGoing = true;
-		try
-		{
-			keepGoing =
-				CheckForUpdates(round == 0 ? UpdateCheckKind::Silent : UpdateCheckKind::Auto);
-		}
-		catch (...)
-		{
-		}
-		// NOLINTEND(bugprone-empty-catch)
-
-		// 1 周目は結末に関わらず取り込みへ進む（更新は付随でしかない）。2 周目以降で
-		// false なら、新しい本体は載っていない——同じ結果をもう一度出しても仕方がない
-		// ので、輪をここで止める（理由は更新の側が伝え終えている）。
-		if (round > 0 && !keepGoing)
-			return;
-
-		bool again = false;
-		{
-			// 本体を確保する。**ここは唯一「読み込めなかった」をユーザーへ見せられる場所**
-			// （PIO のリセットは黙って諦めるしかない——数百回出るダイアログに意味は無い）。
-			const PayloadUse use;
-			if (!use.ok())
-			{
-				gSDK->AlertInform("プラグインの本体を読み込めませんでした。", use.error().c_str(),
-								  false /* not a minor alert: show a modal dialog */);
-				return;
-			}
-
-			// 例外は本体側が境界の手前で受け止める（src/payload/PayloadMain.cpp）。ここへ
-			// 返るのは「そもそも呼べなかった」ときだけ。
-			std::string error;
-			if (!use->runImport(again, error))
-			{
-				gSDK->AlertInform("取り込みを開始できませんでした。", error.c_str(), false);
-				return;
-			}
-		} // ← ここで use が壊れ、深さが 0 に戻る（次の周で新しい本体が読み直される）
-
-		if (!again)
-			return;
+		proceed = CheckForUpdates(autoUpdate ? UpdateCheckKind::Auto : UpdateCheckKind::Silent);
 	}
+	catch (...)
+	{
+	}
+	// NOLINTEND(bugprone-empty-catch)
+
+	// **尋ねずに入れたのに効かせられなかったときだけ、取り込みへ進まない。** 殻まで
+	// 変わった・入れられなかった、のどちらかで、更新の側が理由を出し終えている
+	// （src/UpdaterFlow.cpp）。古い本体のまま 1 分以上かけて取り込み、前の周と同じ結果を
+	// もう一度 PR へ投げても仕方がない。
+	if (!proceed)
+		return;
+
+	// 本体を確保する。**ここは唯一「読み込めなかった」をユーザーへ見せられる場所**
+	// （PIO のリセットは黙って諦めるしかない——数百回出るダイアログに意味は無い）。
+	const PayloadUse use;
+	if (!use.ok())
+	{
+		gSDK->AlertInform("プラグインの本体を読み込めませんでした。", use.error().c_str(),
+						  false /* not a minor alert: show a modal dialog */);
+		return;
+	}
+
+	// 例外は本体側が境界の手前で受け止める（src/payload/PayloadMain.cpp）。ここへ返るのは
+	// 「そもそも呼べなかった」ときだけ。
+	std::string error;
+	bool autoUpdateNext = false;
+	if (!use->runImport(autoUpdateNext, error))
+	{
+		gSDK->AlertInform("取り込みを開始できませんでした。", error.c_str(), false);
+		return;
+	}
+	sAutoUpdateNextImport = autoUpdateNext;
 }

@@ -4,21 +4,22 @@
 //	実機フィードバックの往復の実装（意図と 1 周の形は draw/Feedback.h 参照）。
 //	【SDK 依存】PluginPrefix.h（VectorWorks SDK）と VWFC のダイアログを include する。
 //
-//	使う SDK API はダイアログ 2 種（draw/ResultDialog と同じ作法。VWFC/VWUI/…）と
-//	進捗ダイアログ（draw/ProgressDialog）だけで、**ネットワークには一切触れない**——
+//	使う SDK API はダイアログ 2 種（draw/ResultDialog と同じ作法。VWFC/VWUI/…）だけで、
+//	**ネットワークには一切触れない**——
 //	投稿もビルドの取得も同梱スクリプトが行い、こちらはその機械可読な出力を読む
 //	（自動アップデートと同じ分担。src/Updater.h）。
 //
 //	【文字列の受け渡し】スクリプトの出力は `UpdaterParse` の純粋な関数で解く
-//	（ValueOf / DevSwitchCandidates / FindDevBuildForBranch）。**同じ解き方を 2 つ持たない**
+//	（`ValueOf`）。**同じ解き方を 2 つ持たない**
 //	ため、殻の自動アップデートが使っているものをそのまま使う
 //	（CLAUDE.md「重複を作らない置き場所」）。
 //
-//	【入れるのはここではない】新しいビルドを**待つ**のはここ（進捗ダイアログを出し、
-//	中止を受け付けるのは実処理なので本体の仕事）だが、**入れて差し替えるのは殻**
-//	（src/UpdaterFlow.cpp の UpdateCheckKind::Auto）。本体のコードがスタックに載って
-//	いる間は本体を降ろせないので、入れ替えはどのみち殻へ返ってからにしかできない
-//	（src/PayloadSession.h）。インストールの経路はこのリポジトリに 1 本だけである。
+//	【待たないし、入れもしない】**新しいビルドをここで待ってはいけない。** 待つあいだ
+//	モーダルのダイアログが Vectorworks を止め、その周の絵が見られなくなる——絵を見るために
+//	回している往復で、それでは本末転倒である（実機 round 3 で判明。docs/DEV-NOTES.md M23）。
+//	入れるのも殻の仕事で（src/UpdaterFlow.cpp）、本体のコードがスタックに載っている間は
+//	本体を降ろせない以上どのみち殻へ返ってからにしかできない（src/PayloadSession.h）。
+//	ここがするのは「投稿して、**次の取り込みでは尋ねずに入れてよい**と伝えて戻る」だけ。
 //
 
 #include "PluginPrefix.h"
@@ -32,7 +33,6 @@
 #include "core/Trace.h"
 #include "draw/DrawUtil.h"
 #include "draw/HostServices.h"
-#include "draw/ProgressDialog.h"
 #include "parse/Feedback.h"
 #include "parse/Summary.h"
 
@@ -43,7 +43,6 @@
 #include <fstream>
 #include <string>
 #include <system_error>
-#include <thread>
 #include <vector>
 
 using namespace HomeskzIfcImport::UpdaterParse;
@@ -54,16 +53,6 @@ namespace HomeskzIfcImport::draw
 	{
 		// 同梱スクリプトの名前（拡張子は殻が付ける。src/PayloadAbi.h）。
 		constexpr const char* kFeedbackScript = "vw-feedback";
-		constexpr const char* kUpdateScript = "vw-update";
-
-		// 新しいビルドを待つときの刻み。**30 秒ごとに 1 回問い合わせ**、待つのは
-		// 最長 90 分。CI（ビルド + clang-tidy）は 20〜40 分かかるので、1 往復ぶんに
-		// 十分な余裕を取りつつ、間違って始めた待機が半日居座らない長さにしてある。
-		constexpr int kPollSeconds = 30;
-		constexpr int kMaxWaitMinutes = 90;
-		// 眠りを刻む幅（ms）。**この刻みごとに進捗ダイアログへ yield する**ので、
-		// 待っている間も Vectorworks が固まって見えず、中止も効く。
-		constexpr int kSleepSliceMs = 250;
 
 		// ダイアログのコントロール ID（1 = OK / 2 = キャンセルは SDK の予約）。
 		// kNoteLabelID / kNoteID はトークンの貼り付けダイアログが使う（**所見の欄は
@@ -72,7 +61,6 @@ namespace HomeskzIfcImport::draw
 		constexpr TControlID kNoteID = 5;
 		constexpr TControlID kPrLabelID = 6;
 		constexpr TControlID kPrID = 7;
-		constexpr TControlID kAutoID = 8;
 		constexpr TControlID kAnonID = 9;
 		constexpr TControlID kFirstBodyID = 20;
 
@@ -235,7 +223,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// -------------------------------------------------------------------
-		// フィードバックのダイアログ（結果の本文＋所見＋宛先＋続け方）。
+		// フィードバックのダイアログ（結果の本文＋宛先＋伏せるかどうか）。
 		// -------------------------------------------------------------------
 
 		class CFeedbackDialog : public VWDialog
@@ -244,9 +232,8 @@ namespace HomeskzIfcImport::draw
 			CFeedbackDialog(const std::string& title, const std::vector<std::string>& body,
 							const core::FeedbackSession& session)
 				: fTitle(title.c_str()), fBody(body), fPrLabel(kPrLabelID), fPr(kPrID),
-				  fAuto(kAutoID), fAnon(kAnonID),
-				  fPrText(std::to_string(session.pullRequest).c_str()),
-				  fAutoContinue(session.autoContinue), fAnonymize(session.anonymize)
+				  fAnon(kAnonID), fPrText(std::to_string(session.pullRequest).c_str()),
+				  fAnonymize(session.anonymize)
 			{
 			}
 			~CFeedbackDialog() override = default;
@@ -258,10 +245,6 @@ namespace HomeskzIfcImport::draw
 			std::string PullRequest() const
 			{
 				return static_cast<const char*>(fPrText);
-			}
-			bool AutoContinue() const
-			{
-				return fAutoContinue;
 			}
 			bool Anonymize() const
 			{
@@ -309,12 +292,9 @@ namespace HomeskzIfcImport::draw
 					return false;
 				this->AddRightControl(&fPrLabel, &fPr);
 
-				if (!fAuto.CreateControl(this, "修正版のビルドが出たら、待って自動で取り込み直す"))
-					return false;
-				this->AddBelowControl(&fPrLabel, &fAuto, 0, 1);
 				if (!fAnon.CreateControl(this, "ファイル名とユーザー名を伏せて投稿する"))
 					return false;
-				this->AddBelowControl(&fAuto, &fAnon);
+				this->AddBelowControl(&fPrLabel, &fAnon, 0, 1);
 				return true;
 			}
 
@@ -325,7 +305,6 @@ namespace HomeskzIfcImport::draw
 				// （draw/SettingsDialog も同じく SetState を明示している）——ここが空だと
 				// 「前回どおりでよい」ときに毎回打ち直すことになる。
 				fPr.SetText(fPrText);
-				fAuto.SetState(fAutoContinue);
 				fAnon.SetState(fAnonymize);
 				fShown = true;
 			}
@@ -333,7 +312,6 @@ namespace HomeskzIfcImport::draw
 			void OnDDXInitialize() override
 			{
 				this->AddDDX_EditText(kPrID, &fPrText);
-				this->AddDDX_CheckButton(kAutoID, &fAutoContinue);
 				this->AddDDX_CheckButton(kAnonID, &fAnonymize);
 			}
 
@@ -345,10 +323,8 @@ namespace HomeskzIfcImport::draw
 			std::deque<VWStaticTextCtrl> fLines;
 			VWStaticTextCtrl fPrLabel;
 			VWEditTextCtrl fPr;
-			VWCheckButtonCtrl fAuto;
 			VWCheckButtonCtrl fAnon;
 			TXString fPrText;
-			bool fAutoContinue = true;
 			bool fAnonymize = true;
 			bool fShown = false;
 		};
@@ -422,64 +398,6 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
-		// 待機の結末。
-		enum class WaitOutcome
-		{
-			Found,	   // 新しいビルドが出た（入れるのは殻の役目。下記）
-			Cancelled, // 中止された
-			TimedOut,  // 待ちきれなかった
-		};
-
-		// **同じブランチの新しい dev ビルドが出るまで待つ。** 待っている間は進捗
-		// ダイアログを出し、刻みごとに yield して中止を受け付ける。
-		//
-		// **入れるのはここではない。** インストールと入れ替えは殻が持つ更新の流れ
-		// （src/UpdaterFlow.cpp の UpdateCheckKind::Auto）の仕事で、本体は「出た」と
-		// 見届けて戻るだけ——本体のコードがスタックに載っている間は本体を降ろせない
-		// ので、入れ替えはどのみち殻へ返ってからにしかできない（src/PayloadSession.h）。
-		// おかげで**インストールの経路はこのリポジトリに 1 本だけ**になる。
-		WaitOutcome WaitForNextBuild(const std::string& branch, const std::string& runningCommit,
-									 std::string& detail)
-		{
-			detail.clear();
-			ProgressDialog progress("実機フィードバック", "ブランチ " + branch, true);
-
-			const int slicesPerPoll = (kPollSeconds * 1000) / kSleepSliceMs;
-			const int polls = (kMaxWaitMinutes * 60) / kPollSeconds;
-			progress.beginPhase("修正版のビルドを待っています（中止で終われます）", 100,
-								static_cast<std::size_t>(polls) *
-									static_cast<std::size_t>(slicesPerPoll));
-
-			for (int poll = 0; poll < polls; ++poll)
-			{
-				std::string out;
-				if (RunScript(kUpdateScript, {"q-dev"}, out) && ValueOf(out, "error").empty())
-				{
-					// 自分と同じコミットは候補から外れる（DevSwitchCandidates）。そのうえで
-					// **同じブランチのもの**だけを採る（UpdaterParse.h の
-					// FindDevBuildForBranch。殻の更新の流れと同じ述語を使う）。
-					const std::vector<DevBuild> candidates =
-						DevSwitchCandidates(out, runningCommit);
-					const int index = FindDevBuildForBranch(candidates, branch);
-					if (index >= 0)
-					{
-						detail = candidates[static_cast<std::size_t>(index)].commit;
-						return WaitOutcome::Found;
-					}
-				}
-
-				// 次の問い合わせまで眠る。**刻んで眠り、刻みごとに yield する**ので、
-				// 待っている間も画面が更新され、中止が効く。
-				for (int slice = 0; slice < slicesPerPoll; ++slice)
-				{
-					if (progress.cancelled())
-						return WaitOutcome::Cancelled;
-					std::this_thread::sleep_for(std::chrono::milliseconds(kSleepSliceMs));
-					progress.step();
-				}
-			}
-			return WaitOutcome::TimedOut;
-		}
 	} // namespace
 
 	// -----------------------------------------------------------------------
@@ -544,7 +462,6 @@ namespace HomeskzIfcImport::draw
 		}
 
 		session.send = true;
-		session.autoContinue = dialog.AutoContinue();
 		session.anonymize = dialog.Anonymize();
 		session.pullRequest = ParsePullRequest(dialog.PullRequest());
 		session.ifcPath = input.ifcPath;
@@ -576,7 +493,6 @@ namespace HomeskzIfcImport::draw
 		round.previousCommit = session.lastCommit;
 		round.previousTally = session.lastTally;
 		round.anonymize = session.anonymize;
-		round.autoContinue = session.autoContinue;
 
 		const std::string commentBody =
 			parse::formatFeedbackComment(round, *input.document, *input.counts);
@@ -604,8 +520,8 @@ namespace HomeskzIfcImport::draw
 		if (!core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session))
 		{
 			gSDK->AlertInform("投稿しました。",
-							  ("ただし、次の周のための記憶を保存できませんでした（自動継続は"
-							   "できません）。\n" +
+							  ("ただし、次の周のための記憶を保存できませんでした（次の取り込みは"
+							   "ファイル選択からになります）。\n" +
 							   url)
 								  .c_str(),
 							  false);
@@ -631,37 +547,20 @@ namespace HomeskzIfcImport::draw
 				   std::to_string(session.round), input.build.commit, url},
 				  spawned);
 
-		if (!session.autoContinue)
-		{
-			// **ここで「投稿しました」を出さない。** モーダルのアラートは Vectorworks を
-			// 止めるので、いま出したばかりの所見のダイアログの前で図面を見られなくなる。
-			// 投稿できたことは、そのダイアログの文言（「round N を投稿しました」）と、
-			// ブラウザで開くコメントが伝える。
-			return false;
-		}
+		// **ここで「投稿しました」を出さない。** モーダルのアラートは Vectorworks を
+		// 止めるので、いま出したばかりの所見のダイアログの前で図面を見られなくなる。
+		// 投稿できたことは、そのダイアログの文言（「round N を投稿しました」）と、
+		// ブラウザで開くコメントが伝える。
 
-		// 新しいビルドが出るまで待つ。
-		std::string detail;
-		switch (WaitForNextBuild(session.branch, input.build.commit, detail))
-		{
-		case WaitOutcome::Found:
-			// **ここでホットリロードに入る。** 呼び出し側は何もせずに戻り、殻が更新を
-			// 確認して（尋ねずに）入れ、本体を持ち直して取り込みを呼び直す
-			// （draw/Feedback.h「なぜ殻を経由して周回するか」）。
-			return true;
-		case WaitOutcome::Cancelled:
-			gSDK->AlertInform("自動の続きをやめました。",
-							  "投稿は済んでいます。次の取り込みを手で実行すれば、同じ条件で"
-							  "続きから走ります。",
-							  false);
-			return false;
-		case WaitOutcome::TimedOut:
-			break;
-		}
-		gSDK->AlertInform("修正版のビルドが出ませんでした。",
-						  "投稿は済んでいます。ビルドが出てから取り込みを手で実行すれば、"
-						  "同じ条件で続きから走ります。",
-						  false);
-		return false;
+		// **次の取り込みでは尋ねずに入れてよい。** この人はいま往復の最中にいるので、
+		// 次に取り込みを実行するときには「新しいビルドがあります。インストールします
+		// か？」を挟まない（src/Extensions/ExtMenu.cpp が UpdateCheckKind::Auto を選ぶ）。
+		//
+		// **待つのはこちらの仕事ではない。** 以前はここで新しいビルドが出るまで待って
+		// いたが、待つあいだ進捗ダイアログが Vectorworks を止めてしまい、**その周の絵を
+		// 見られない**（実機 round 3 で判明。docs/DEV-NOTES.md M23）。絵を見られないなら
+		// 往復の意味が無いので、待つのをやめて即座に戻る——次の周は、新しいビルドが出た
+		// あとに取り込みをもう一度実行すれば始まる（ファイル選択も設定も出ない）。
+		return true;
 	}
 } // namespace HomeskzIfcImport::draw

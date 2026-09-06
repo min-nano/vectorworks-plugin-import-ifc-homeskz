@@ -56,8 +56,7 @@ namespace HomeskzIfcImport::parse
 		std::string previousCommit; // 前の周のビルド（空なら 1 周目）
 		std::string previousTally;	// 前の周の内訳（formatTally の 1 行表現）
 
-		bool anonymize = true;	  // 案件が分かるものを伏せるか
-		bool autoContinue = true; // 次の周を自動で回すか（末尾の案内が変わる）
+		bool anonymize = true; // 案件が分かるものを伏せるか
 	};
 
 	// **内訳の 1 行表現**（`ストーリ:3/3,通り芯:44/44,…`）。命令が 0 の要素は載せない

@@ -141,24 +141,23 @@ VW_PAYLOAD_EXPORT int vw_payload_info(VwPayloadInfo* out)
 	}
 }
 
-VW_PAYLOAD_EXPORT int vw_payload_run_import(int* outAgain)
+VW_PAYLOAD_EXPORT int vw_payload_run_import(int* outAutoUpdate)
 {
 	try
 	{
-		if (outAgain != nullptr)
-			*outAgain = 0;
+		if (outAutoUpdate != nullptr)
+			*outAutoUpdate = 0;
 		if (!gPayloadReady || gSDK == nil)
 			return kVwPayloadErrNotInit;
 		// 取り込みは自分の中で例外を受け、ユーザーへはダイアログで見せる
 		// （draw/ImportCommand.cpp）。ここは**境界の最後の砦**として、そこで漏れたものを
 		// 受けるだけ。
 		//
-		// **戻り値の「もう 1 周」を素通しする。** 実機フィードバックの往復で新しい本体が
-		// 入ったときだけ立ち、殻はいったんこの本体を降ろしてから呼び直す
-		// （src/PayloadAbi.h / src/Extensions/ExtMenu.cpp）。
-		const bool again = draw::runImportCommand();
-		if (outAgain != nullptr)
-			*outAgain = again ? 1 : 0;
+		// **戻り値の「次は尋ねずに入れてよい」を素通しする。** 実機フィードバックの往復で
+		// 投稿できたときだけ立つ（src/PayloadAbi.h / src/Extensions/ExtMenu.cpp）。
+		const bool autoUpdate = draw::runImportCommand();
+		if (outAutoUpdate != nullptr)
+			*outAutoUpdate = autoUpdate ? 1 : 0;
 		return kVwPayloadOk;
 	}
 	catch (...)

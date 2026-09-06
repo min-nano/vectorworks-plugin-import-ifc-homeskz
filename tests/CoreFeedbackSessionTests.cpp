@@ -41,7 +41,6 @@ namespace
 		session.pullRequest = 123;
 		session.branch = "claude/plugin-feedback-automation-01bi93";
 		session.ifcPath = "/Users/someone/Documents/物件A.ifc";
-		session.autoContinue = true;
 		session.anonymize = false;
 		session.round = 3;
 		session.lastCommit = "a1b2c3d";
@@ -105,7 +104,6 @@ TEST(feedback_session_defaults_do_nothing)
 	// 記憶が無いとき（＝1 周目）にそのまま使っても、従来どおりの手動の取り込みになる。
 	const FeedbackSession session;
 	CHECK(!session.send);
-	CHECK(!session.autoContinue);
 	CHECK(session.anonymize); // **公開される側が既定**。伏せるほうを既定にする。
 	CHECK_EQ(session.round, 0);
 	CHECK_EQ(session.pullRequest, 0);
@@ -122,7 +120,6 @@ TEST(feedback_session_round_trips_through_text)
 	CHECK_EQ(after.pullRequest, before.pullRequest);
 	CHECK_EQ(after.branch, before.branch);
 	CHECK_EQ(after.ifcPath, before.ifcPath);
-	CHECK_EQ(after.autoContinue, before.autoContinue);
 	CHECK_EQ(after.anonymize, before.anonymize);
 	CHECK_EQ(after.round, before.round);
 	CHECK_EQ(after.lastCommit, before.lastCommit);
@@ -149,11 +146,10 @@ TEST(feedback_session_parse_skips_broken_lines)
 							 "roleでもドットが続かない=1\n"
 							 "pr=77\n"
 							 "send=yes\n"
-							 "auto=off\n";
+							 "auto=off\n"; // 昔の版が書いた行。知らない鍵は黙って飛ばす
 	const FeedbackSession session = parseFeedbackSession(text);
 	CHECK_EQ(session.pullRequest, 77);
 	CHECK(session.send);
-	CHECK(!session.autoContinue);
 }
 
 TEST(feedback_session_parse_keeps_defaults_for_unreadable_values)

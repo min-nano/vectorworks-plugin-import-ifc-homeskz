@@ -56,8 +56,8 @@
 
 // 境界の版。**形を変えたら上げる。**
 //   1 … 取り込みコマンドと 2 つの PIO のリセットを載せた最初の形
-//   2 … 実機フィードバックの往復（M23）。殻の ID と同梱スクリプトの実行を殻から借り、
-//       取り込みは「もう 1 周するか」を返すようになった
+//   2 … 実機フィードバックの往復（M23）。同梱スクリプトの実行を殻から借り、取り込みは
+//       「次は更新を尋ねずに入れてよいか」を返すようになった
 #define VW_PAYLOAD_ABI_VERSION 2u
 
 // 本体側の export 指定。Windows は明示しないと DLL の外から見えない。
@@ -133,12 +133,15 @@ extern "C"
 	using VwPayloadAbiVersionFn = unsigned int (*)();
 	using VwPayloadInitFn = int (*)(const VwPayloadHost*);
 	using VwPayloadInfoFn = int (*)(VwPayloadInfo*);
-	// 取り込みコマンド 1 周ぶん。**outAgain に 0 以外が入って戻ったら、殻はもう一度
-	// 呼ぶ**（実機フィードバックの往復。src/Extensions/ExtMenu.cpp）。周と周のあいだに
-	// 殻が本体を手放すことで、**新しく入った本体がその場で読み直される**——降ろせるのは
-	// 本体のコードがスタックに 1 つも無いときだけなので、この形（戻ってから殻が回す）で
-	// なければホットリロードは成立しない（src/PayloadSession.h）。
-	using VwPayloadRunImportFn = int (*)(int* outAgain);
+	// 取り込みコマンド 1 周ぶん。**outAutoUpdate に 0 以外が入って戻ったら、次にこの
+	// コマンドが走るときは更新を尋ねずに入れる**（実機フィードバックの往復。
+	// src/Extensions/ExtMenu.cpp）。往復の最中にいる人へ周ごとに「インストールします
+	// か？」を出さないためのもので、判断できるのは本体（記憶を持っている側）だけ。
+	//
+	// **入れ替えを頼むのではない。** 本体を降ろせるのはそのコードがスタックに 1 つも
+	// 無いときだけなので、入れ替えはこの関数から戻ったあと、次の呼び出しの頭で起きる
+	// （src/PayloadSession.h）。
+	using VwPayloadRunImportFn = int (*)(int* outAutoUpdate);
 	using VwPayloadRecalculateFn = int (*)(unsigned int, void*, int*);
 	using VwPayloadShutdownFn = void (*)();
 

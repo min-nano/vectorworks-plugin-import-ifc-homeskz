@@ -90,7 +90,6 @@ namespace HomeskzIfcImport::core
 		out << "pr=" << session.pullRequest << "\n";
 		out << "branch=" << sanitize(session.branch) << "\n";
 		out << "ifc=" << sanitize(session.ifcPath) << "\n";
-		out << "auto=" << boolText(session.autoContinue) << "\n";
 		out << "anon=" << boolText(session.anonymize) << "\n";
 		out << "round=" << session.round << "\n";
 		out << "build=" << sanitize(session.lastCommit) << "\n";
@@ -133,8 +132,6 @@ namespace HomeskzIfcImport::core
 				session.branch = value;
 			else if (key == "ifc")
 				session.ifcPath = value;
-			else if (key == "auto")
-				session.autoContinue = parseBool(value, session.autoContinue);
 			else if (key == "anon")
 				session.anonymize = parseBool(value, session.anonymize);
 			else if (key == "round")

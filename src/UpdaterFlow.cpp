@@ -11,10 +11,11 @@
 //	だったが、いまは
 //	  * メニューコマンド「アップデータを確認」……… UpdateCheckKind::Manual
 //	  * 取り込みコマンドのついで ………………………… UpdateCheckKind::Silent
-//	  * 実機フィードバックの往復の 2 周目以降 ……… UpdateCheckKind::Auto
+//	  * 実機フィードバックの往復の最中 …………… UpdateCheckKind::Auto
 //	の 3 つの入口から呼ばれる。分かれるのは**どこで口を開くか**だけで（UpdaterHost.h の
 //	UpdateCheckKind）、更新があるときの流れ——入れて、要るなら再起動——は同じである。
-//	Auto だけは尋ねも報せもせず、**輪が止まるときだけ**口を開いて false を返す。
+//	Auto だけは尋ねも報せもせず、**入れたのに効かせられなかったときだけ**口を開いて
+//	false（＝この実行では取り込みへ進むな）を返す。
 //
 
 #include "UpdaterHost.h"
@@ -71,15 +72,6 @@ namespace HomeskzIfcImport
 			return b.branch.empty() ? b.name : b.branch;
 		}
 
-		// **何も入れずに戻るときの答え。** Auto にとって「入らなかった」は「何も変わって
-		// いない」——同じ周をもう一度回しても同じ結果が出るだけで、しかも本体は毎周
-		// PR へコメントを投げるので、放っておくと同じ報告が並ぶ。だから輪を止める。
-		// Manual / Silent の呼び出し側は戻り値を見ないので true でよい。
-		bool NothingInstalled(UpdateCheckKind kind)
-		{
-			return kind != UpdateCheckKind::Auto;
-		}
-
 		// **確認そのものができなかった。** オフライン・GitHub の一時的な不調・同梱
 		// スクリプトを起動できない、のいずれか。
 		//
@@ -120,7 +112,7 @@ namespace HomeskzIfcImport
 			{
 				// **Auto は黙って入れ替える。** 往復の 1 周ごとにモーダルのダイアログを
 				// 出しては、絵を見ている人の前に立ちはだかるだけになる。降ろせなかった
-				// ときだけ輪を止める——古い本体のまま次の周を回しても、同じ結果が出る
+				// ときだけ false——古い本体のまま取り込んでも、前の周と同じ結果が出る
 				// だけで意味が無い。
 				if (kind == UpdateCheckKind::Auto)
 					return host.DropLoadedPayload();
@@ -143,8 +135,8 @@ namespace HomeskzIfcImport
 			}
 
 			// **殻まで変わった。** Auto では再起動を仕掛けない——利用者は図面を開いた
-			// まま輪を回しているので、勝手に終了させるわけにいかない。伝えて輪を止め、
-			// 再起動するかどうかはその人に委ねる。
+			// まま往復を回しているので、勝手に終了させるわけにいかない。伝えて取り込みを
+			// 見送り、再起動するかどうかはその人に委ねる。
 			if (kind == UpdateCheckKind::Auto)
 			{
 				host.Inform(text, detail + "\n\n殻（プラグインのモジュール）まで変わったため、"
@@ -250,14 +242,14 @@ namespace HomeskzIfcImport
 		if (!host.RunScript({"q-dev"}, out))
 		{
 			ReportCheckFailed(host, kind, "アップデータを起動できませんでした。");
-			return NothingInstalled(kind);
+			return true;
 		}
 
 		const std::string scriptError = ValueOf(out, "error");
 		if (!scriptError.empty())
 		{
 			ReportCheckFailed(host, kind, scriptError);
-			return NothingInstalled(kind);
+			return true;
 		}
 
 		// Candidates to switch TO: every prerelease except the running build.
@@ -273,7 +265,7 @@ namespace HomeskzIfcImport
 			// ブランチが分からないときは何も拾わない＝黙って取り込みへ進む。
 			int const idx = FindDevBuildForBranch(others, runningBranch);
 			if (idx < 0)
-				return NothingInstalled(kind);
+				return true;
 			pick = others[static_cast<std::size_t>(idx)];
 
 			// **Auto は尋ねない。** 往復は「新しいビルドが出たら試す」ためのもので、
@@ -328,8 +320,9 @@ namespace HomeskzIfcImport
 								 "branch: " + DevBuildLabel(pick) + "\ncommit: " + pick.commit,
 								 runningShellId, installedShellId);
 
-		// **入れられなかった。** Auto でもここは黙らない——輪が止まる理由を伝えないと、
-		// 待っていた人には「同じ結果がもう一度出た」ようにしか見えない。
+		// **入れられなかった。** Auto でも黙らない——尋ねずに入れる約束で呼ばれている
+		// のだから、入らなかったことは伝えなければならない。取り込みへは進ませない
+		// （古い本体で 1 分以上かけて、前の周と同じ結果をもう一度出すだけになる）。
 		host.Inform("インストールに失敗しました。", err);
 		return false;
 	}

@@ -290,8 +290,7 @@ namespace HomeskzIfcImport::draw
 		//    そのまま使い、ファイル選択も設定ダイアログも出さない——ここで人の操作を挟むと、
 		//    往復を自動にした意味が無くなる（draw/Feedback.h）。
 		const core::FeedbackSession session = draw::loadFeedbackSession(build.branch);
-		const bool continuing =
-			session.send && session.autoContinue && session.round > 0 && !session.ifcPath.empty();
+		const bool continuing = session.send && session.round > 0 && !session.ifcPath.empty();
 
 		std::string ifcPath = session.ifcPath;
 		core::ImportOptions options = session.options;
@@ -352,10 +351,10 @@ namespace HomeskzIfcImport::draw
 			failed = true;
 		}
 
-		// 4. 実機フィードバック（dev ビルドのみ）。結果の本文と所見を 1 枚で見せて PR へ
-		//    投稿し、「自動で続ける」なら修正版のビルドを待って入れる。**そのダイアログが
-		//    結果ダイアログを兼ねる**ので、出せたなら下の結果ダイアログは出さない。
-		//    エラーで中断した周は送らない（送るべき内訳がそもそも無い）。
+		// 4. 実機フィードバック（dev ビルドのみ）。結果の本文と宛先を 1 枚で見せて PR へ
+		//    投稿する。**そのダイアログが結果ダイアログを兼ねる**ので、出せたなら下の
+		//    結果ダイアログは出さない。エラーで中断した周は送らない（送るべき内訳が
+		//    そもそも無い）。
 		bool shownResult = false;
 		if (!failed && draw::feedbackAvailable())
 		{
@@ -371,7 +370,7 @@ namespace HomeskzIfcImport::draw
 			input.resultBody = round.body;
 			input.log = core::trace::text();
 			if (draw::runFeedbackRound(input, shownResult))
-				return true; // 新しい本体が入った → 殻が持ち直して、もう 1 周
+				return true; // 往復の最中 → 次の取り込みでは更新を尋ねずに入れる
 		}
 
 		// 5. 結果をダイアログ表示。本文は短く、**診断ログは折り畳んだテキスト欄**として同じ
