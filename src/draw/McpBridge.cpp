@@ -247,9 +247,8 @@ namespace HomeskzIfcImport::draw
 			auto limit = static_cast<long long>(args.at("limit").asNumber(50.0));
 			if (limit <= 0)
 				limit = 50;
-			auto skip = static_cast<long long>(args.at("offset").asNumber(0.0));
-			if (skip < 0)
-				skip = 0;
+			const long long skip =
+				std::max<long long>(static_cast<long long>(args.at("offset").asNumber(0.0)), 0);
 			// 種別で絞る（省略＝絞らない）。
 			const bool filtered = args.has("type");
 			const auto wanted = static_cast<short>(args.at("type").asNumber(0.0));
@@ -266,7 +265,8 @@ namespace HomeskzIfcImport::draw
 				++matched;
 				if (matched <= skip)
 					continue;
-				if (static_cast<long long>(list.items().size()) >= limit)
+				// 符号の違う型を比べるので std::cmp_*（size() は符号なし・limit は符号つき）。
+				if (std::cmp_greater_equal(list.items().size(), limit))
 					continue; // 数え上げは続ける（total を正しく返すため）
 
 				Json entry = Json::object();
@@ -330,9 +330,9 @@ namespace HomeskzIfcImport::draw
 					++total;
 				}
 			}
-			std::sort(tally.begin(), tally.end(),
-					  [](const std::pair<short, long long>& a, const std::pair<short, long long>& b)
-					  { return a.first < b.first; });
+			std::ranges::sort(tally, [](const std::pair<short, long long>& a,
+										const std::pair<short, long long>& b)
+							  { return a.first < b.first; });
 
 			Json list = Json::array();
 			for (const auto& entry : tally)
