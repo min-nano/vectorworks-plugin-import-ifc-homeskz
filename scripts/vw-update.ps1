@@ -285,9 +285,15 @@ function Install-Build([string] $url, [string] $name) {
 # 走る確認は、**同じブランチの新しいビルドだけ**を拾ってブランチ選択のダイアログを
 # 出さずに済ませる（src/UpdaterFlow.cpp の RunDevUpdateCheckWith）ので、素のブランチ名が
 # 要る。読めなければ空——プラグイン側はそのとき何もしない側へ倒れる。
+#
+# **`body` は無いことがある**ので、直に `$rel.body` と書かない。GitHub の API は本文の
+# 無いリリースでもキー自体は返すが、テストの合成 JSON にはキーごと無い場合があり、
+# `Set-StrictMode -Version Latest` の下では「存在しないプロパティ」が例外になる
+# （tests/vw-update.Tests.ps1）。PSObject.Properties で有無を確かめてから読む。
 function Get-ReleaseBranch($rel) {
-    if (-not $rel.body) { return '' }
-    foreach ($line in ($rel.body -split "`r?`n")) {
+    $prop = $rel.PSObject.Properties['body']
+    if (-not $prop -or -not $prop.Value) { return '' }
+    foreach ($line in ($prop.Value -split "`r?`n")) {
         if ($line -like 'branch=*') { return $line.Substring(7).Trim() }
     }
     return ''
