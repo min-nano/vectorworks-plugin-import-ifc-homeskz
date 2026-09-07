@@ -432,8 +432,64 @@ Claude ──MCP──▶ vw-mcp-server.py ──ファイル──▶ Vectorwor
 
 1. **プラグインを入れる**（下記「インストール」）。インストール先のフォルダに
    `vw-mcp-server.py` が一緒に置かれます。
-2. **Claude Code に登録する。** Python 3.8 以降が要ります（macOS には最初から入っています）。
+2. **Claude に登録する。** Python 3.8 以降が要ります（macOS には最初から入っています）。
    `<プラグインのフォルダ>` は上記「置き場所」の `Plug-Ins/min-nano_structure/` です。
+   登録は 1 回だけで、以降は Vectorworks 側でメニューを実行するだけになります。
+
+   お使いの Claude によって手順が違います。
+
+   #### Claude のデスクトップアプリ（GUI）の場合
+
+   **設定ファイルに書きます。** アプリの中に「MCP サーバを追加」のような入力欄は無く、
+   `claude_desktop_config.json` を編集するのが正規の手順です。
+
+   | | 設定ファイルの場所 |
+   | --- | --- |
+   | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+   | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+
+   アプリの **設定 ▸ 開発者 ▸ 構成を編集**（Settings ▸ Developer ▸ Edit Config）から
+   このファイルのある場所を開けます。無ければ自分で作ってください。中身は次のとおりです
+   （**既に他のサーバを登録している場合は `mcpServers` の中へ 1 項目足す**だけ）。
+
+   ```jsonc
+   // macOS
+   {
+     "mcpServers": {
+       "vectorworks": {
+         "type": "stdio",
+         "command": "/usr/bin/python3",
+         "args": ["<プラグインのフォルダ>/vw-mcp-server.py"],
+         "env": {}
+       }
+     }
+   }
+   ```
+
+   ```jsonc
+   // Windows（\ は 2 つ重ねて書きます）
+   {
+     "mcpServers": {
+       "vectorworks": {
+         "type": "stdio",
+         "command": "C:\\Users\\<ユーザー名>\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+         "args": ["<プラグインのフォルダ>\\vw-mcp-server.py"],
+         "env": {}
+       }
+     }
+   }
+   ```
+
+   **`command` は Python の絶対パスにしてください。** アプリがサーバを起動するときの
+   `PATH` は端末とは別物なので、`python3` / `python` とだけ書くと見つからないことが
+   あります。場所は、macOS のターミナルなら `which python3`、Windows の PowerShell なら
+   `(Get-Command python).Source` で分かります。
+
+   **書き換えたら Claude のアプリを終了して開き直してください**（設定ファイルは起動時に
+   読まれます）。うまく登録できていれば、Claude に「`vw_bridge_status` を実行して」と
+   頼むと答えが返ります。
+
+   #### Claude Code（コマンドライン）の場合
 
    ```bash
    # macOS
@@ -445,9 +501,15 @@ Claude ──MCP──▶ vw-mcp-server.py ──ファイル──▶ Vectorwor
    claude mcp add vectorworks -- python "<プラグインのフォルダ>\vw-mcp-server.py"
    ```
 
-   開発版（Dev）を使うときは、フォルダを `min-nano_structureDev` に読み替えたうえで、
-   環境変数 `VW_MCP_PLUGIN=min-nano_structureDev` を渡してください（スプールの場所が
-   安定版と別になります）。
+   #### 開発版（Dev）を使うとき
+
+   フォルダを `min-nano_structureDev` に読み替えたうえで、環境変数
+   `VW_MCP_PLUGIN=min-nano_structureDev` を渡してください（スプールの場所が安定版と
+   別になります）。デスクトップアプリなら設定ファイルの `env` に書きます。
+
+   ```jsonc
+   "env": { "VW_MCP_PLUGIN": "min-nano_structureDev" }
+   ```
 
 ### 使う
 
@@ -483,6 +545,10 @@ Claude ──MCP──▶ vw-mcp-server.py ──ファイル──▶ Vectorwor
   ため）。
 - 種別番号（`vw_layer_objects` の `type`）は Vectorworks の内部の番号です。名前が分かって
   いるものだけ `type_name` を添えていますが、多くは番号のままです。
+- **繋がらないときは、まず Claude に `vw_bridge_status` を実行させてください。**
+  ブリッジが動いていなければ、探した場所の一覧と対処が返ります。道具の一覧に
+  `vw_bridge_status` すら出てこない場合は、登録（上記 2）か Claude の再起動が
+  済んでいません。
 
 ---
 
