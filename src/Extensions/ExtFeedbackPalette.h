@@ -73,18 +73,20 @@ namespace HomeskzIfcImport
 
 	private:
 		// 1 関数 1 ハンドラ。いずれも駆動へ取り次いで、見え方（JSON）を Promise で返す。
-		void OnTick(const TXString& objName, const TXString& functionName,
-					const std::vector<nlohmann::json>& args,
-					VectorWorks::UI::IJSFunctionCallbackContext* context);
-		void OnStop(const TXString& objName, const TXString& functionName,
-					const std::vector<nlohmann::json>& args,
-					VectorWorks::UI::IJSFunctionCallbackContext* context);
-		void OnCheckNow(const TXString& objName, const TXString& functionName,
-						const std::vector<nlohmann::json>& args,
-						VectorWorks::UI::IJSFunctionCallbackContext* context);
-		void OnHide(const TXString& objName, const TXString& functionName,
-					const std::vector<nlohmann::json>& args,
-					VectorWorks::UI::IJSFunctionCallbackContext* context);
+		// **static**——駆動は殻の中で 1 つ（FeedbackLoopHost.h の TheFeedbackLoop）なので、
+		// ここに this は要らない（clang-tidy の readability-convert-member-functions-to-static）。
+		static void OnTick(const TXString& objName, const TXString& functionName,
+						   const std::vector<nlohmann::json>& args,
+						   VectorWorks::UI::IJSFunctionCallbackContext* context);
+		static void OnStop(const TXString& objName, const TXString& functionName,
+						   const std::vector<nlohmann::json>& args,
+						   VectorWorks::UI::IJSFunctionCallbackContext* context);
+		static void OnCheckNow(const TXString& objName, const TXString& functionName,
+							   const std::vector<nlohmann::json>& args,
+							   VectorWorks::UI::IJSFunctionCallbackContext* context);
+		static void OnHide(const TXString& objName, const TXString& functionName,
+						   const std::vector<nlohmann::json>& args,
+						   VectorWorks::UI::IJSFunctionCallbackContext* context);
 	};
 
 	// ------------------------------------------------------------------------

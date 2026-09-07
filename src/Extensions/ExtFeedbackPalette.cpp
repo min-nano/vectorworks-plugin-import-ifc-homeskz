@@ -110,13 +110,13 @@ void CFeedbackPaletteJS::OnFunctionCall(const TXString& objName, const TXString&
 										VectorWorks::UI::IJSFunctionCallbackContext* context)
 {
 	if (functionName == "tick")
-		this->OnTick(objName, functionName, args, context);
+		OnTick(objName, functionName, args, context);
 	else if (functionName == "stop")
-		this->OnStop(objName, functionName, args, context);
+		OnStop(objName, functionName, args, context);
 	else if (functionName == "checkNow")
-		this->OnCheckNow(objName, functionName, args, context);
+		OnCheckNow(objName, functionName, args, context);
 	else if (functionName == "hide")
-		this->OnHide(objName, functionName, args, context);
+		OnHide(objName, functionName, args, context);
 	else if (context != nullptr)
 		context->Reject("unknown function"); // 知らない名前は黙って落とさず JS へ返す
 }
@@ -221,7 +221,7 @@ void CExtFeedbackPalette::DefineSinks()
 
 TXString VCOM_CALLTYPE CExtFeedbackPalette::GetTitle()
 {
-	return TXString("実機フィードバックの往復 (みんなの構造設計支援Dev)");
+	return {"実機フィードバックの往復 (みんなの構造設計支援Dev)"};
 }
 
 bool VCOM_CALLTYPE CExtFeedbackPalette::GetInitialSize(ViewCoord& outCX, ViewCoord& outCY)
