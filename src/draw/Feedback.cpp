@@ -68,6 +68,7 @@ namespace HomeskzIfcImport::draw
 		constexpr TControlID kLeadID = 10;
 		constexpr TControlID kSendsID = 11;
 		constexpr TControlID kQuietID = 12;
+		constexpr TControlID kNextID = 13;
 
 		// トークンの貼り付け欄の幅（標準文字数）と、PR 番号の欄の幅。
 		constexpr short kNoteWidthChars = 72;
@@ -240,10 +241,11 @@ namespace HomeskzIfcImport::draw
 		class CFeedbackDialog : public VWDialog
 		{
 		public:
-			CFeedbackDialog(const std::string& title, const core::FeedbackSession& session)
-				: fTitle(title.c_str()), fLead(kLeadID), fSends(kSendsID), fQuiet(kQuietID),
-				  fPrLabel(kPrLabelID), fPr(kPrID), fAnon(kAnonID),
-				  fPrText(std::to_string(session.pullRequest).c_str()),
+			CFeedbackDialog(const std::string& title, const std::string& lead,
+							const core::FeedbackSession& session)
+				: fTitle(title.c_str()), fLeadText(lead.c_str()), fLead(kLeadID), fSends(kSendsID),
+				  fQuiet(kQuietID), fNext(kNextID), fPrLabel(kPrLabelID), fPr(kPrID),
+				  fAnon(kAnonID), fPrText(std::to_string(session.pullRequest).c_str()),
 				  fAnonymize(session.anonymize)
 			{
 			}
@@ -270,8 +272,7 @@ namespace HomeskzIfcImport::draw
 				if (!this->CreateDialog(fTitle, "取り込み結果を送る", "送らない", false))
 					return false;
 
-				if (!fLead.CreateControl(this,
-										 "取り込みが終わったら、結果を PR へ自動で投稿します。"))
+				if (!fLead.CreateControl(this, fLeadText))
 					return false;
 				this->AddFirstGroupControl(&fLead);
 				if (!fSends.CreateControl(this,
@@ -284,10 +285,17 @@ namespace HomeskzIfcImport::draw
 						this, "投稿したあとは何も尋ねません（実行したら離れて構いません）。"))
 					return false;
 				this->AddBelowControl(&fSends, &fQuiet);
+				// **次の周に人がすることも、ここで言い切る。** 2 周目以降はダイアログを
+				// 1 枚も出さないので、頼めるのはこの 1 枚だけである（draw/Feedback.h
+				// 「取り込み前へ戻すのは人の手仕事」）。
+				if (!fNext.CreateControl(this, "次の周からは、実行する前に「取り消し」で図面を"
+											   "取り込み前へ戻してください。"))
+					return false;
+				this->AddBelowControl(&fQuiet, &fNext);
 
 				if (!fPrLabel.CreateControl(this, "送信先の PR 番号:"))
 					return false;
-				this->AddBelowControl(&fQuiet, &fPrLabel, 0, 1);
+				this->AddBelowControl(&fNext, &fPrLabel, 0, 1);
 				if (!fPr.CreateControl(this, "", kPrWidthChars, 1))
 					return false;
 				this->AddRightControl(&fPrLabel, &fPr);
@@ -319,9 +327,11 @@ namespace HomeskzIfcImport::draw
 
 		private:
 			TXString fTitle;
+			TXString fLeadText;
 			VWStaticTextCtrl fLead;
 			VWStaticTextCtrl fSends;
 			VWStaticTextCtrl fQuiet;
+			VWStaticTextCtrl fNext;
 			VWStaticTextCtrl fPrLabel;
 			VWEditTextCtrl fPr;
 			VWCheckButtonCtrl fAnon;
@@ -453,14 +463,43 @@ namespace HomeskzIfcImport::draw
 				plan.session.pullRequest =
 					ResolvePullRequest(plan.session.repo, plan.session.branch);
 
-			CFeedbackDialog dialog("実機フィードバック（round " +
-									   std::to_string(plan.session.round + 1) + "）",
-								   plan.session);
+			// **1 行目は「いまどこにいるか」を言う。** 記憶が残っているのにここへ来たと
+			// いうことは、追っているブランチに新しい dev ビルドがまだ出ていない、という
+			// ことである（続きの周なら planFeedbackRound はそもそも尋ねない。
+			// draw/ImportCommand.cpp）。黙ってファイル選択から始めると、人は「往復が
+			// 壊れた」と読む。
+			const bool waitingForNewBuild = remembered.send && remembered.round > 0;
+			const std::string lead =
+				waitingForNewBuild
+					? ("`" + build.branch + "` に新しいビルドはまだ出ていません（前の周は round " +
+					   std::to_string(remembered.round) + "）。新しく 1 周目として取り込みます。")
+					: std::string("取り込みが終わったら、結果を PR へ自動で投稿します。");
+
+			const int shownRound = waitingForNewBuild ? 1 : plan.session.round + 1;
+			const std::string title =
+				"実機フィードバック（round " + std::to_string(shownRound) + "）";
+			CFeedbackDialog dialog(title, lead, plan.session);
 			const bool accepted = dialog.RunDialogLayout("") == VWFC::VWUI::kDialogButton_Ok;
 			if (!dialog.Shown())
 				return FeedbackPlan{}; // ダイアログを組めなかった → 従来どおり取り込むだけ
 			if (!accepted)
-				return FeedbackPlan{}; // 「送らない」
+			{
+				// **「送らない」が往復の終わり方である。** このダイアログが出ているのは
+				// 「続きの周ではない」ときだけなので、ここで送らないと決めたのなら、
+				// この人はもう往復を回していない——記憶を捨てておかないと、次に新しい
+				// ビルドが出た日に、忘れたころの IFC が黙って取り込まれる。
+				if (waitingForNewBuild)
+					core::clearFeedbackSession(core::defaultFeedbackSessionPath());
+				return FeedbackPlan{};
+			}
+			// **新しい 1 周目として数え直す。** 前の往復の続きではないので、round を
+			// 引き継ぐと「前の周からの変化」が別の IFC との比較になりかねない。
+			if (waitingForNewBuild)
+			{
+				plan.session.round = 0;
+				plan.session.lastCommit.clear();
+				plan.session.lastTally.clear();
+			}
 			plan.session.anonymize = dialog.Anonymize();
 			plan.session.pullRequest = ParsePullRequest(dialog.PullRequest());
 			plan.send = true;

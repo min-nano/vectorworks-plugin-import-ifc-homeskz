@@ -272,6 +272,24 @@ TEST(feedback_comment_says_when_there_are_no_commands)
 	CHECK(contains(body, "対象なし"));
 }
 
+TEST(feedback_comment_reports_whether_the_drawing_was_restored)
+{
+	// **数字は戻したかどうかで変わらない**（内訳は命令の数）。読む側が「絵が壊れて
+	// いるのは実装のせいか、前の周を戻し忘れたのか」を切り分けられるよう、描画側の
+	// 実測（undoPartial）を必ず 1 行載せる。
+	DrawCounts fresh = sampleCounts();
+	fresh.undoPartial = false;
+	const std::string clean = formatFeedbackComment(sampleRound(), sampleDocument(), fresh);
+	CHECK(contains(clean, "図面の状態:"));
+	CHECK(contains(clean, "今回作ったレイヤだけに描きました"));
+
+	DrawCounts stacked = sampleCounts();
+	stacked.undoPartial = true;
+	const std::string over = formatFeedbackComment(sampleRound(), sampleDocument(), stacked);
+	CHECK(contains(over, "取り込み前から在ったレイヤへも描きました"));
+	CHECK(contains(over, "前の周を戻さずに重ねた可能性があります"));
+}
+
 TEST(feedback_comment_folds_the_ordinary_notes)
 {
 	// 平常でも出る記録（用紙の割り付け等）は折り畳む——毎回開いて読むものではない。
@@ -314,7 +332,9 @@ TEST(feedback_comment_asks_for_one_more_run_after_the_fix)
 	const FeedbackRound round = sampleRound();
 	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
 	CHECK(contains(body, "取り込みをもう一度実行してください"));
-	CHECK(contains(body, "ファイル選択も設定ダイアログも再起動も要りません"));
+	CHECK(contains(body, "ファイル選択も設定ダイアログも確認も再起動も要りません"));
+	// **戻すのは人の手仕事**なので、そこだけは毎回頼む（ダイアログでは頼まない）。
+	CHECK(contains(body, "「取り消し」で取り込み前へ戻してから"));
 }
 
 TEST_MAIN();

@@ -290,7 +290,14 @@ namespace HomeskzIfcImport::draw
 		//    そのまま使い、ファイル選択も設定ダイアログも出さない——ここで人の操作を挟むと、
 		//    往復を自動にした意味が無くなる（draw/Feedback.h）。
 		const core::FeedbackSession session = draw::loadFeedbackSession(build.branch);
-		const bool continuing = session.send && session.round > 0 && !session.ifcPath.empty();
+
+		// **続きの周は「新しいビルドが来たとき」だけ。** 記憶に残っているのは直近の周を
+		// 走らせたビルドの sha なので、それと同じ物が動いているなら新しい版はまだ来て
+		// いない——同じビルドで取り込み直しても、前の周と同じ数字が並ぶだけである。
+		// **これが往復の終わり方でもある**: Claude が push をやめれば新しい dev ビルドは
+		// 出ず、続きの周はそれ以上走らない（やめるためのボタンを持たなくて済む）。
+		const bool continuing = session.send && session.round > 0 && !session.ifcPath.empty() &&
+								session.lastCommit != build.commit;
 
 		std::string ifcPath = session.ifcPath;
 		core::ImportOptions options = session.options;
@@ -299,29 +306,12 @@ namespace HomeskzIfcImport::draw
 
 		if (continuing)
 		{
-			// **図面を戻してもらう。** 同じ文書へ 2 回描くと前の周の図形が二重に残る。
-			// プログラムから「取り消し」を掛ける手立ては確かめていないので（SDK の
-			// 調査はリファレンス側で行う。CLAUDE.md）、ここは 1 クリックで頼む。
-			//
-			// **ここが「往復をやめる」唯一の入口でもある。** フィードバックのダイアログで
-			// 「送らない」を選んでも記憶は消えない（この周を報告しないだけで、やめる意思とは
-			// 限らないため。draw/Feedback.cpp）。やめたい人が押すのはこの「やめる」で、
-			// 押されたら記憶を捨てる——次の取り込みはいつもどおりファイル選択から始まる。
-			// **ボタンは結末そのものを名乗る。** 「やめる」だけでは「この取り込みをやめる」
-			// とも読めてしまい、往復が終わることが伝わらない（実機の指摘。
-			// docs/DEV-NOTES.md M23「ボタンが何を指しているのか分からなかった」）。
-			const std::string advice = "取り込み前の状態に戻してから（「取り消し」）"
-									   "「続ける」を押してください。\n\nファイル: " +
-									   FileNameOf(ifcPath) +
-									   "\n\n「往復を終える」を押すと、この IFC と設定の記憶を"
-									   "捨てて往復を終わりにします\n"
-									   "（次の取り込みはファイル選択から始まります）。";
-			if (gSDK->AlertQuestion("新しいビルドで同じ IFC を取り込み直します。", advice.c_str(),
-									/*defaultButton*/ 1, "続ける", "往復を終える", "", "") != 1)
-			{
-				core::clearFeedbackSession(core::defaultFeedbackSessionPath());
-				return false;
-			}
+			// **続きの周は何も出さない。** 図面を取り込み前へ戻すのは人の手仕事だが、
+			// それを頼む確認をここへ置くと、周が回るたびにボタンが 1 つ増える——しかも
+			// 押されたかどうかで戻したことにはならないので、確認は嘘をつく。頼むのは
+			// 1 周目のダイアログ（draw/Feedback.cpp）で 1 度だけにし、**実際に戻ったか
+			// どうかは押した／押さないではなく描画側の実測**（DrawCounts::undoPartial）で
+			// PR コメントへ載せる（parse/Feedback.cpp）。読む側はそれを見る。
 			settingsNote = "前の周の設定をそのまま使いました（実機フィードバックの往復）";
 		}
 		else
