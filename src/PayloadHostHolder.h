@@ -26,6 +26,8 @@
 #include "PayloadAbi.h"
 
 #include <cstddef>
+#include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::payload
 {
@@ -52,6 +54,38 @@ namespace HomeskzIfcImport::payload
 		void* callbacks() const
 		{
 			return fValid ? fHost.callbacks : nullptr;
+		}
+
+		// 同梱スクリプトを走らせられるか（古い殻は貸してくれない）。
+		bool canRunScripts() const
+		{
+			return fValid && fHost.runBundledScript != nullptr;
+		}
+
+		// 同梱スクリプトを 1 本走らせて標準出力を受け取る。**返ってきた文字列は
+		// その場で写す**（殻が所有し、次の呼び出しまでしか生きていない。PayloadAbi.h）。
+		bool runScript(const std::string& baseName, const std::vector<std::string>& args,
+					   std::string& out) const
+		{
+			out.clear();
+			if (!this->canRunScripts())
+				return false;
+
+			// C の配列へ並べ替える（境界を越えるのは const char* の列だけ）。
+			std::vector<const char*> raw;
+			raw.reserve(args.size());
+			for (const std::string& arg : args)
+				raw.push_back(arg.c_str());
+
+			const char* result = nullptr;
+			const int status =
+				fHost.runBundledScript(baseName.c_str(), raw.empty() ? nullptr : raw.data(),
+									   static_cast<unsigned int>(raw.size()), &result);
+			if (status != kVwPayloadOk)
+				return false;
+			if (result != nullptr)
+				out = result; // ← ここで写す
+			return true;
 		}
 
 	private:

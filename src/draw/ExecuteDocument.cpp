@@ -251,6 +251,7 @@ namespace HomeskzIfcImport::draw
 		// だけ描いた場合で、そのときイベントはスコープの破棄で捨てられる。
 		counts.undoArmed = undoScope.armed();
 		counts.undoPartial = undoScope.partial();
+		counts.existingLayers = undoScope.existingLayers();
 
 		return counts;
 	}

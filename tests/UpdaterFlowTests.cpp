@@ -598,10 +598,11 @@ TEST(dev_silent_check_says_nothing_when_no_build_matches_the_branch)
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
 }
 
-TEST(dev_silent_check_says_nothing_when_the_script_omits_the_branch_column)
+TEST(dev_silent_check_says_nothing_when_the_branch_cannot_be_told)
 {
-	// インストール済みの（＝古い）同梱スクリプトは 4 列しか出さない。照合できないので
-	// **何もしない**——別のブランチのビルドを勝手に入れるよりずっとよい。
+	// 4 列しか出さない**古い同梱スクリプト**でも、題が CI の形なら照合できる
+	// （UpdaterParse.h の ParseDevBuilds）。ここはその形ですらない場合——照合の
+	// しようが無いので**何もしない**。別のブランチのビルドを勝手に入れるよりよい。
 	FakeHost h;
 	h.qDevOut = "installed=run1234\n"
 				"build\taaa1111\tfeature/x\thttps://ex.com/x.zip\n";
@@ -610,6 +611,19 @@ TEST(dev_silent_check_says_nothing_when_the_script_omits_the_branch_column)
 	CHECK_EQ(h.askCount, 0);
 	CHECK_EQ(h.CountScript("do-install"), 0);
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+TEST(dev_silent_check_reads_the_branch_from_the_title_when_the_column_is_missing)
+{
+	// **古いスクリプトでも往復が回る。** 5 列目が無くても、CI の題
+	// "Dev: <branch> (<sha>)" からブランチが読めるので同じブランチを拾える。
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\n";
+	h.askAnswer = false; // 「後で」——ここで見たいのは「尋ねたかどうか」だけ
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Silent, "feature/x", "run1234", kRunningShell);
+
+	CHECK_EQ(h.askCount, 1);
 }
 
 TEST(dev_silent_check_says_nothing_when_offline)
@@ -628,6 +642,141 @@ TEST(dev_silent_check_declined_does_not_install)
 	h.askAnswer = false; // 「後で」
 	RunDevUpdateCheckWith(h, UpdateCheckKind::Silent, "feature/x", "run1234", kRunningShell);
 
+	CHECK_EQ(h.askCount, 1);
+	CHECK_EQ(h.CountScript("do-install"), 0);
+}
+
+// ---------------------------------------------------------------------------
+// 実機フィードバックの往復（UpdateCheckKind::Auto）
+//
+// **尋ねない・報せない・再起動しない。** 往復の最中に呼ばれるので、周ごとにダイアログを
+// 挟むのはこの仕組みが無くそうとしている手間そのものになる（src/UpdaterHost.h の
+// UpdateCheckKind::Auto）。口を開いて false（＝この実行では取り込みへ進むな）を返すのは、
+// **入れたのに効かせられなかったとき**だけ。
+// ---------------------------------------------------------------------------
+
+TEST(dev_auto_check_installs_the_same_branchs_build_without_asking)
+{
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n"
+				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
+	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
+	const bool proceed =
+		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
+
+	CHECK(proceed);			  // そのまま取り込みへ進む
+	CHECK_EQ(h.askCount, 0);  // 尋ねない
+	CHECK_EQ(h.pickCount, 0); // 選ばせない
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0)); // 報せない
+	CHECK_EQ(h.restartCount, 0); // 再起動しない
+	CHECK_EQ(h.CountScript("do-install"), 1);
+	CHECK_EQ(h.dropCount, 1); // 本体は降ろす（＝次の周で読み直される）
+	const std::vector<std::string> args = h.DoInstallArgs();
+	if (args.size() == 3)
+		CHECK_EQ(args[1], "https://ex.com/x.zip"); // 同じブランチのほう
+}
+
+TEST(dev_auto_check_is_silent_and_proceeds_when_no_new_build_matches)
+{
+	// **まだ新しいビルドが出ていないだけ。** 人は自分の判断で取り込みを実行している
+	// のだから、黙って通す（往復を回すかどうかはその人が決める）。
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
+	const bool proceed =
+		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
+
+	CHECK(proceed);
+	CHECK_EQ(h.askCount, 0);
+	CHECK_EQ(h.CountScript("do-install"), 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+TEST(dev_auto_check_is_silent_and_proceeds_when_offline)
+{
+	// 確認できなかっただけで、取り込みを止める理由にはならない（更新は付随でしかない）。
+	FakeHost h;
+	h.qDevOut = "error=リリース一覧を取得できませんでした。\n";
+	const bool proceed =
+		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
+
+	CHECK(proceed);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+TEST(dev_auto_check_is_silent_and_proceeds_when_the_script_cannot_start)
+{
+	FakeHost h;
+	h.qDevStarts = false;
+	const bool proceed =
+		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
+
+	CHECK(proceed);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+}
+
+TEST(dev_auto_check_skips_the_import_when_the_shell_changed)
+{
+	// **殻まで変わったら勝手に再起動しない。** 図面を開いたまま往復を回している人を
+	// 落とすわけにいかないので、伝えて取り込みを見送り、判断はその人に委ねる。
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
+	h.doInstallOut = "installed-shell=DIFFERENT\nok";
+	const bool proceed =
+		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
+
+	CHECK(!proceed);
+	CHECK_EQ(h.askCount, 0); // 「再起動しますか？」は出さない
+	CHECK_EQ(h.restartCount, 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+		CHECK(h.informs[0][1].find("再起動") != std::string::npos);
+}
+
+TEST(dev_auto_check_skips_the_import_when_the_payload_cannot_be_dropped)
+{
+	// 降ろせなければ古い本体のまま。前の周と同じ結果をもう一度出しても意味が無い。
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
+	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
+	h.dropAnswer = false;
+	const bool proceed =
+		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
+
+	CHECK(!proceed);
+	CHECK_EQ(h.dropCount, 1);
+}
+
+TEST(dev_auto_check_reports_and_skips_the_import_when_the_install_fails)
+{
+	// **入れられなかったときは黙らない。** 尋ねずに入れる約束で呼ばれているのだから、
+	// 入らなかったことは伝える。
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
+	h.doInstallOut = "error=ダウンロードに失敗しました。\n";
+	const bool proceed =
+		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
+
+	CHECK(!proceed);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+		CHECK_EQ(h.informs[0][0], "インストールに失敗しました。");
+}
+
+TEST(stable_auto_check_never_installs_without_asking)
+{
+	// **安定版に Auto は無い。** 往復するのは PR のビルドであって main の配布物では
+	// ないので、万一 Auto で呼ばれても Silent と同じ扱い＝必ず尋ねる。
+	FakeHost h;
+	h.qStableOut = "installed=old\nlatest=new\nurl=https://ex.com/s.zip\n";
+	h.askAnswer = false; // 「後で」
+	const bool proceed = RunStableUpdateCheckWith(h, UpdateCheckKind::Auto, kRunningShell);
+
+	CHECK(proceed);
 	CHECK_EQ(h.askCount, 1);
 	CHECK_EQ(h.CountScript("do-install"), 0);
 }
