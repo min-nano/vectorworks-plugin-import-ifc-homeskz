@@ -23,9 +23,12 @@
 #   claude mcp add vectorworks -- python3 <この scripts/mcp/vw-mcp-server.py のパス>
 #
 # 【スプールは探す】プラグイン側は自分の一時ディレクトリへ置くが、一時ディレクトリは
-# 環境変数で決まるので両側で食い違いうる（macOS の $TMPDIR は利用者ごとで、ssh や cron
-# から起動したプロセスには無い）。そこでこちらが候補を順に見て、**生きた印がある場所**を
-# 使う（spool_candidates / Bridge.status）。
+# 環境変数で決まるので両側で食い違いうる。**実機ではこれが実際に起きた**——Claude の
+# デスクトップアプリはこのサーバを $TMPDIR の無い環境で起動するので gettempdir() は
+# /tmp に落ちるが、Vectorworks（GUI アプリ）のそれは利用者ごとの /var/folders/…/T/ で、
+# 橋は動いているのに見つけられなかった（DEV-NOTES M24）。そこでこちらが候補を順に見て、
+# **生きた印がある場所**を使う（spool_candidates / Bridge.status）。利用者ごとの一時
+# ディレクトリは環境変数ではなく利用者から決まるので、confstr で直に引ける。
 #
 # 環境変数:
 #   VW_MCP_SPOOL   スプールの場所を明示する（プラグイン側と同じ値にすること）
@@ -36,9 +39,12 @@
 # （.tmp へ書いてから rename）・生存の印の見方は src/core/Bridge.h に書いてある。
 # どちらかを変えるときは必ず両方を直す。
 
+import glob
 import json
 import os
 import secrets
+import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -67,14 +73,93 @@ def log(message):
     print("[vw-mcp] " + message, file=sys.stderr, flush=True)
 
 
+# confstr の名前。**CPython の os.confstr_names には載っていない**ので、名前では引けず
+# 番号で引く（macOS の <unistd.h> の _CS_DARWIN_USER_TEMP_DIR）。
+CS_DARWIN_USER_TEMP_DIR = 65537
+
+
+def darwin_user_temp_dir():
+    """macOS の利用者ごとの一時ディレクトリ（`/var/folders/…/T/`）を環境変数に頼らず引く。
+
+    **実機で繋がらなかったのは正にここである。** Claude のデスクトップアプリは MCP サーバを
+    **$TMPDIR の無い環境で起動する**ので、こちらの `gettempdir()` は `/tmp` に落ちる。
+    一方 Vectorworks（GUI アプリ）の一時ディレクトリは利用者ごとの `/var/folders/…/T/` で、
+    スプールはそちらに在る——探す場所が `/tmp` だけになり、動いている橋を見つけられない。
+
+    この値は環境変数ではなく利用者から決まるので、**同じ利用者なら両側で必ず一致する**。
+    引き方は 3 手: 名前（将来 CPython の表に載ったとき）→ 番号 → getconf(1)。
+    """
+    if sys.platform != "darwin":
+        return ""
+    for name in ("CS_DARWIN_USER_TEMP_DIR", CS_DARWIN_USER_TEMP_DIR):
+        try:
+            value = os.confstr(name)
+        except (AttributeError, OSError, ValueError):
+            # 名前が表に無い（いまの CPython はこちら）か、この環境には無い。次の手へ。
+            continue
+        if value:
+            return value
+    try:
+        done = subprocess.run(
+            ["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # getconf が無い・動かない。候補が 1 つ減るだけで、下の走査がまだ残っている。
+        return ""
+    if done.returncode != 0:
+        return ""
+    return done.stdout.decode("utf-8", "replace").strip()
+
+
+def darwin_spool_scan(plugin):
+    """最後の手段: `/var/folders` を走って、**自分のもの**のスプールを拾う。
+
+    上の 3 手がすべて外れても（別の bootstrap セッションから起動された等）、ここで
+    見つかる。他人のディレクトリは読めずに素通りし、読めたものも持ち主を確かめる。
+    """
+    if sys.platform != "darwin":
+        return []
+    found = []
+    for path in sorted(glob.glob("/var/folders/*/*/T/" + plugin + "-mcp")):
+        if spool_is_safe(path):
+            found.append(path)
+    return found
+
+
+def spool_is_safe(directory):
+    """そのスプールを使ってよいか（持ち主と権限）。
+
+    **`/tmp` は同じ計算機の誰でも書ける。** 偽の印を置かれれば、こちらは要求をそこへ書いて
+    しまい——引数（レイヤ名など）が漏れ、偽の応答を掴まされる。プラグイン側は自分が作る
+    場所を 0700・自分の持ち物に限っている（`src/core/Bridge.cpp` の prepare）ので、
+    こちらも同じ物差しで見て、合わないものは使わない。
+    """
+    if os.name == "nt":
+        # Windows の ACL は stat では測れない。プラグイン側と同じくここでは見ない。
+        return True
+    try:
+        info = os.stat(directory)
+    except OSError:
+        return False  # 無い（大半はこちら）。「ここではない」で正しい。
+    if not stat.S_ISDIR(info.st_mode):
+        return False
+    if info.st_uid != os.geteuid():
+        return False
+    return (info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)) == 0
+
+
 def spool_candidates():
     """スプールの候補を、確からしい順に並べて返す。
 
     **探すのはこちらの仕事である。** プラグイン側は自分の一時ディレクトリへ素直に置く
     （`<temp>/<プラグイン名>-mcp`）が、一時ディレクトリは環境変数で決まるので**両側で
-    食い違いうる**——macOS の $TMPDIR は利用者ごとの `/var/folders/…` で、ssh や cron から
-    起動したプロセスにはそれが無く `/tmp` に落ちる。そこで候補を順に見て、**生きた印
-    （bridge.json）があるところ**を使う（Bridge.status）。
+    食い違いうる**——macOS の $TMPDIR は利用者ごとの `/var/folders/…` で、Claude の
+    デスクトップアプリから起動されたこちらにはそれが無く `/tmp` に落ちる。そこで候補を
+    順に見て、**生きた印（bridge.json）があるところ**を使う（Bridge.status）。
 
     VW_MCP_SPOOL が指定されていれば、それだけを候補にする（両側で同じ値にすること）。
     """
@@ -89,21 +174,20 @@ def spool_candidates():
         if root and root not in roots:
             roots.append(root)
 
+    # **利用者ごとの一時ディレクトリを最初に見る。** GUI アプリ（＝Vectorworks）が使うのは
+    # ここで、$TMPDIR を渡されないこちらの gettempdir() は /tmp に落ちるため。
+    add(darwin_user_temp_dir())
     add(tempfile.gettempdir())
-    # macOS の利用者ごとの一時ディレクトリ。$TMPDIR が無い経路（ssh 等）から起動しても、
-    # GUI アプリ（＝Vectorworks）が使うこの場所を直に引ける。
-    try:
-        if "CS_DARWIN_USER_TEMP_DIR" in os.confstr_names:
-            add(os.confstr("CS_DARWIN_USER_TEMP_DIR"))
-    except (AttributeError, OSError, ValueError):
-        # この環境には無い（Linux / Windows）。候補が 1 つ減るだけで、害は無い。
-        pass
     for name in ("TMPDIR", "TMP", "TEMP"):
         add(os.environ.get(name, ""))
     if os.name != "nt":
         add("/tmp")
 
-    return [os.path.join(root.rstrip("/\\"), plugin + "-mcp") for root in roots]
+    candidates = [os.path.join(root.rstrip("/\\"), plugin + "-mcp") for root in roots]
+    for path in darwin_spool_scan(plugin):
+        if path not in candidates:
+            candidates.append(path)
+    return candidates
 
 
 def call_timeout():
@@ -130,6 +214,9 @@ class Bridge:
     @staticmethod
     def _read_status(directory):
         """その場所の印を読む。生きていなければ None。"""
+        if not spool_is_safe(directory):
+            # 持ち主か権限が違う（＝誰かが置いた偽物かもしれない）。使わない。
+            return None
         try:
             with open(os.path.join(directory, STATUS_FILE), "r", encoding="utf-8") as handle:
                 status = json.load(handle)
@@ -263,6 +350,8 @@ class Bridge:
     def _load_cache(self):
         # まだ繋がっていないと self.dir は当てでしかないので、候補を順に見る。
         for directory in self.candidates:
+            if not spool_is_safe(directory):
+                continue  # 偽物かもしれない一覧を Claude に見せない（_read_status と同じ）。
             try:
                 with open(os.path.join(directory, TOOLS_CACHE_FILE), "r", encoding="utf-8") as h:
                     tools = json.load(h)
@@ -305,6 +394,9 @@ def bridge_status_result(bridge):
                 "Vectorworks のメニュー「MCP ブリッジを開始…」を実行してください。"
                 "実行中は Vectorworks が進捗ダイアログの中で待ち、"
                 "［キャンセル］か vw_stop_bridge で止まります。"
+                "実行しているのに見つからないときは、開発版のプラグイン名"
+                "（環境変数 VW_MCP_PLUGIN に min-nano_structureDev）か、"
+                "スプールの場所（環境変数 VW_MCP_SPOOL）を確かめてください。"
             ),
         }
     result = {"running": True, "spool": bridge.dir}

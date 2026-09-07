@@ -149,6 +149,61 @@ def drive(spool, messages, timeout="30", by_tmpdir=False):
     return out
 
 
+def load_server_module():
+    """サーバを module として読み込む（中の関数を直に試すため）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("vw_mcp_server", SERVER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_spool_search(module, root):
+    """**場所の探し方**を直に試す（本番で外したのはここ）。
+
+    実機では、Claude のデスクトップアプリが $TMPDIR の無い環境でサーバを起動するため
+    候補が /tmp だけになり、Vectorworks が /var/folders/…/T/ に置いた橋を見つけられなかった
+    （DEV-NOTES M24）。以降そうならないよう、**利用者ごとの一時ディレクトリが候補に
+    入ること**を押さえる。
+    """
+    if sys.platform == "darwin":
+        user_temp = module.darwin_user_temp_dir()
+        check(
+            user_temp.startswith("/var/folders/"),
+            "利用者ごとの一時ディレクトリを引ける (%r)" % user_temp,
+        )
+        env = dict(os.environ)
+        for name in ("VW_MCP_SPOOL", "TMPDIR", "TMP", "TEMP"):
+            env.pop(name, None)
+        saved = os.environ.copy()
+        os.environ.clear()
+        os.environ.update(env)
+        try:
+            candidates = module.spool_candidates()
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+        check(
+            any(c.startswith(user_temp.rstrip("/")) for c in candidates),
+            "$TMPDIR が無くても利用者ごとの場所を候補に入れる (%r)" % candidates,
+        )
+    else:
+        check_eq(module.darwin_user_temp_dir(), "", "macOS 以外では引かない")
+        check_eq(module.darwin_spool_scan("min-nano_structure"), [], "macOS 以外では走らない")
+
+    # **持ち主と権限を見る。** /tmp は誰でも書けるので、偽の印を置かれても使わない。
+    if os.name != "nt":
+        mine = os.path.join(root, "mine-mcp")
+        os.makedirs(mine, exist_ok=True)
+        os.chmod(mine, 0o700)
+        check(module.spool_is_safe(mine), "自分の 0700 のスプールは使う")
+        os.chmod(mine, 0o777)
+        check(not module.spool_is_safe(mine), "他から書けるスプールは使わない")
+        os.chmod(mine, 0o700)
+        check(not module.spool_is_safe(os.path.join(root, "no-such-mcp")), "無い場所は使わない")
+
+
 def call(name, arguments=None, request_id=1):
     return {
         "jsonrpc": "2.0",
@@ -170,6 +225,9 @@ def main():
     root = tempfile.mkdtemp(prefix="vw-mcp-test-")
     spool = os.path.join(root, "mcp")
     try:
+        # --- 場所の探し方（本番で外したところ）--------------------------
+        check_spool_search(load_server_module(), root)
+
         # --- ブリッジが動いていないとき ---------------------------------
         os.makedirs(spool)
         replies = drive(
