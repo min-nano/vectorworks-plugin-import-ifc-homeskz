@@ -189,9 +189,12 @@ namespace HomeskzIfcImport
 			return fStamp;
 		}
 
-		// 取り込みコマンドを走らせる（ファイル選択から結果ダイアログまで本体が行う）。
-		// 呼べなかったときだけ false。
-		bool runImport(std::string& error);
+		// 取り込みコマンドを**1 周ぶん**走らせる（ファイル選択から結果ダイアログまで
+		// 本体が行う）。呼べなかったときだけ false。
+		//
+		// autoUpdateOut に true が入って戻ったら、**次にこのコマンドが走るときは更新を
+		// 尋ねずに入れる**（実機フィードバックの往復。src/Extensions/ExtMenu.cpp）。
+		bool runImport(bool& autoUpdateOut, std::string& error);
 
 		// MCP ブリッジを走らせる（止められるまで戻らない。src/draw/McpBridge.h）。
 		// 呼べなかったときだけ false。

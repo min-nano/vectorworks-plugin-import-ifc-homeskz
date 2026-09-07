@@ -18,9 +18,12 @@
 // core::Document までしか参照せず、SDK / STEP を相互に引き込まない。
 #include "parse/BuildDocument.h"
 #include "parse/Summary.h"
+#include "core/Document.h"
+#include "core/FeedbackSession.h"
 #include "core/ImportOptions.h"
 #include "core/Trace.h"
 #include "draw/ExecuteDocument.h"
+#include "draw/Feedback.h"
 #include "draw/ProgressDialog.h"
 #include "draw/ResultDialog.h"
 #include "draw/SettingsDialog.h"
@@ -35,6 +38,7 @@
 #include <exception>
 #include <fstream>
 #include <string>
+#include <utility>
 
 using namespace VectorWorks::Filing;
 namespace HomeskzIfcImport::draw
@@ -172,12 +176,28 @@ namespace HomeskzIfcImport::draw
 									   core::trace::localTimestamp(), core::trace::path()));
 		}
 
-		// インポート本体（ファイル選択の後）。解析 → 描画を通し、完了ダイアログの本文を返す。
-		// 例外はここでは受けず、呼び出し元（DoInterface）が SDK コールバックの境界で 1 か所だけ
+		// 取り込み 1 周ぶんの結果。**完了ダイアログの本文だけでは足りない**——実機
+		// フィードバック（draw/Feedback）は命令セットと描画結果そのものを見て
+		// 内訳と差分を組み立てるので、それらをここから持ち帰る。
+		struct RoundResult
+		{
+			std::string body;			  // 完了ダイアログの短い本文
+			core::Document document;	  // 命令セット
+			core::DrawCounts counts;	  // 描画結果
+			unsigned long long bytes = 0; // 対象ファイルの大きさ
+			double seconds = 0.0;		  // 所要
+			std::string startedAt;		  // 壁時計（ログの見出しと同じもの）
+		};
+
+		// インポート本体（ファイル選択の後）。解析 → 描画を通し、結果一式を返す。
+		// 例外はここでは受けず、呼び出し元が SDK コールバックの境界で 1 か所だけ
 		// 受け止める。進捗ダイアログは RAII なので、途中で例外が出てもデストラクタが閉じる。
-		std::string RunImport(const std::string& ifcPath, const core::ImportOptions& options,
+		RoundResult RunImport(const std::string& ifcPath, const core::ImportOptions& options,
 							  bool settingsShown, const std::string& settingsNote)
 		{
+			RoundResult result;
+			result.startedAt = core::trace::localTimestamp();
+			result.bytes = FileSizeOf(ifcPath);
 			OpenImportTrace(ifcPath);
 			// **見出しの次に設定を書く。** 「シンボルが 1 つも置かれない」の切り分けは
 			// まず対応表を見るところから始まる（parse/Summary の formatImportOptions）。
@@ -204,7 +224,7 @@ namespace HomeskzIfcImport::draw
 			// フェーズの区切りは**ここだけ**が書く——各フェーズの行は進捗報告（core/Progress の
 			// beginPhase）が流し、要素側は `trace::log` を持たない（core/Trace.h「誰が書くか」）。
 			core::trace::note("=== 解析 ===");
-			const core::Document document = parse::buildDocument(ifcPath, progress, options);
+			core::Document document = parse::buildDocument(ifcPath, progress, options);
 			LogUndoState("afterParse");
 
 			// Phase 2（SDK 依存）: 命令セットを検証してから各要素を描く。検証を通らなければ
@@ -230,7 +250,11 @@ namespace HomeskzIfcImport::draw
 			core::trace::note(parse::formatLogResult(document, drawn, seconds));
 			core::trace::close();
 
-			return parse::formatImportResult(document, drawn, FileNameOf(ifcPath));
+			result.body = parse::formatImportResult(document, drawn, FileNameOf(ifcPath));
+			result.document = std::move(document);
+			result.counts = drawn;
+			result.seconds = seconds;
+			return result;
 		}
 
 		// 例外で中断したときの後始末と本文づくり。診断ログに例外を書き残してから閉じ、
@@ -247,7 +271,7 @@ namespace HomeskzIfcImport::draw
 
 	// -------------------------------------------------------------------
 	// メニューコマンドの本体（draw/ImportCommand.h）。
-	void runImportCommand()
+	bool runImportCommand()
 	{
 		// Note: the update check is NOT run here — it happens in the SHELL, before
 		// the payload is even acquired (src/Extensions/ExtMenu.cpp). That ordering is
@@ -260,53 +284,123 @@ namespace HomeskzIfcImport::draw
 		// 素の追加は Document と draw 側で行う。docs/DEV-NOTES.md）。ここが両フェーズの
 		// オーケストレーションを担う唯一の場所になる。
 
-		// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら静かに終える。
-		std::string ifcPath;
-		if (!ChooseIfcFile(ifcPath))
-			return;
+		const parse::BuildInfo build = CurrentBuildInfo();
 
-		// 2. 取り込みの設定（配置するシンボルの対応）を決める。キャンセルなら静かに終える
-		//    ——ファイルは選んだが取り込みたくない、という意思表示なので何も描かない。
-		//    ダイアログを組めなかったときは**既定の対応でそのまま進む**（設定を出せない
-		//    ことを理由に取り込み自体を落とさない。draw/SettingsDialog.h）。
-		core::ImportOptions options;
+		// 0. **実機フィードバックの往復の続きか。** 続きなら 1 周目の選択（ファイル・設定）を
+		//    そのまま使い、ファイル選択も設定ダイアログも出さない——ここで人の操作を挟むと、
+		//    往復を自動にした意味が無くなる（draw/Feedback.h）。
+		const core::FeedbackSession session = draw::loadFeedbackSession(build.branch);
+
+		// **続きの周は「新しいビルドが来たとき」だけ。** 記憶に残っているのは直近の周を
+		// 走らせたビルドの sha なので、それと同じ物が動いているなら新しい版はまだ来て
+		// いない——同じビルドで取り込み直しても、前の周と同じ数字が並ぶだけである。
+		// **これが往復の終わり方でもある**: Claude が push をやめれば新しい dev ビルドは
+		// 出ず、続きの周はそれ以上走らない（やめるためのボタンを持たなくて済む）。
+		const bool continuing = session.send && session.round > 0 && !session.ifcPath.empty() &&
+								session.lastCommit != build.commit;
+
+		std::string ifcPath = session.ifcPath;
+		core::ImportOptions options = session.options;
+		bool settingsShown = true;
 		std::string settingsNote;
-		const draw::SettingsOutcome settings = draw::showImportSettings(options, &settingsNote);
-		if (settings == draw::SettingsOutcome::Cancelled)
-			return;
+
+		if (continuing)
+		{
+			// **続きの周は何も出さない。** 図面を取り込み前へ戻すのは人の手仕事だが、
+			// それを頼む確認をここへ置くと、周が回るたびにボタンが 1 つ増える——しかも
+			// 押されたかどうかで戻したことにはならないので、確認は嘘をつく。頼むのは
+			// 1 周目のダイアログ（draw/Feedback.cpp）で 1 度だけにし、**実際に戻ったか
+			// どうかは押した／押さないではなく描画側の実測**（DrawCounts::undoPartial）で
+			// PR コメントへ載せる（parse/Feedback.cpp）。読む側はそれを見る。
+			settingsNote = "前の周の設定をそのまま使いました（実機フィードバックの往復）";
+		}
+		else
+		{
+			// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら静かに終える。
+			if (!ChooseIfcFile(ifcPath))
+				return false;
+
+			// 2. 取り込みの設定（配置するシンボルの対応）を決める。キャンセルなら静かに終える
+			//    ——ファイルは選んだが取り込みたくない、という意思表示なので何も描かない。
+			//    ダイアログを組めなかったときは**既定の対応でそのまま進む**（設定を出せない
+			//    ことを理由に取り込み自体を落とさない。draw/SettingsDialog.h）。
+			options = core::ImportOptions{};
+			const draw::SettingsOutcome settings = draw::showImportSettings(options, &settingsNote);
+			if (settings == draw::SettingsOutcome::Cancelled)
+				return false;
+			settingsShown = settings == draw::SettingsOutcome::Accepted;
+		}
+
+		// 2.5 **実機フィードバックを送るかどうかは、ここで決める**（dev ビルドのみ）。
+		//     取り込みは 1 分以上かかるので、終わったところに確認が待っていると席を
+		//     離れられない——訊くことは全部**取り込みが始まる前に**訊き切る
+		//     （draw/Feedback.h「取り込みのあとに人の操作を残さない」）。続きの周は
+		//     記憶から即座に決まるので、ここでも何も出ない。
+		draw::FeedbackPlan plan = draw::planFeedbackRound(session, build, continuing);
+		plan.session.ifcPath = ifcPath;
+		plan.session.options = options;
 
 		// 3. インポート本体。**例外を SDK コールバックの外へ漏らさない**（CLAUDE.md
 		// 「エラーハンドリング・所有権」）。ネイティブプラグインの未捕捉例外は **VectorWorks
 		// 本体を巻き込んで落とす**ので、フェーズ境界であるここで必ず受け止め、ユーザーへは
 		// 1 通のダイアログとして見せる。1 要素の欠損で全体を止めない寛容さ（parse / draw の中で
 		// continue する）は従来どおりで、ここへ来るのは「そこでも吸収できなかった異常」だけ。
-		std::string body;
+		RoundResult round;
+		bool failed = false;
 		try
 		{
-			body = RunImport(ifcPath, options, settings == draw::SettingsOutcome::Accepted,
-							 settingsNote);
+			round = RunImport(ifcPath, options, settingsShown, settingsNote);
 		}
 		catch (const std::exception& error)
 		{
-			body = ReportImportError(ifcPath, error.what());
+			round.body = ReportImportError(ifcPath, error.what());
+			failed = true;
 		}
 		catch (...)
 		{
 			// std::exception ですらないもの（サードパーティや処理系が投げるもの）。
 			// 何が起きたかは分からないが、**それでも VW を落とさない**ことが最優先。
-			body = ReportImportError(ifcPath, "");
+			round.body = ReportImportError(ifcPath, "");
+			failed = true;
 		}
 
-		// 4. 結果をダイアログ表示。本文は短く、**診断ログは折り畳んだテキスト欄**として同じ
+		// 4. 実機フィードバック（dev ビルドのみ）。**黙って投稿し、何も尋ねない。**
+		//    投稿できたなら内訳もログも PR にあるので、結果ダイアログも出さずに終わる
+		//    ——ここに 1 つでもボタンが残ると「実行して離れる」が成立しない。
+		//    エラーで中断した周は送らない（送るべき内訳がそもそも無い）。
+		if (!failed && plan.send)
+		{
+			draw::FeedbackInput input;
+			input.document = &round.document;
+			input.counts = &round.counts;
+			input.build = build;
+			input.ifcPath = ifcPath;
+			input.bytes = round.bytes;
+			input.seconds = round.seconds;
+			input.startedAt = round.startedAt;
+			input.log = core::trace::text();
+
+			std::string postError;
+			if (draw::postFeedbackRound(plan, input, postError))
+				return true; // 往復の最中 → 次の取り込みでは更新を尋ねずに入れる
+
+			// **投稿できなかったときだけ、結果ダイアログへ理由を添えて出す。** ここで
+			// アラートを重ねると、無操作で終わるはずの取り込みにボタンが増える。
+			if (!postError.empty())
+				round.body += "\n\nPR への投稿: " + postError;
+		}
+
+		// 5. 結果をダイアログ表示。本文は短く、**診断ログは折り畳んだテキスト欄**として同じ
 		//    ダイアログに載せる（draw/ResultDialog.h。ふだんは開かず、不具合の報告のときに
 		//    開いて丸ごとコピーする）。
-		if (!draw::showImportResult("ホームズ君 IFC 取り込み", body, core::trace::text()))
+		if (!draw::showImportResult("ホームズ君 IFC 取り込み", round.body, core::trace::text()))
 		{
 			// ダイアログを組めなかったときの逃げ道。結果を伝えられないまま黙って終わるのが
 			// 最悪なので、素のアラートへ落とす（advice 行にファイルパス。false = 最小アラート
 			// でなくモーダル）。TXString は UTF-8 の const char* から暗黙変換される。
-			gSDK->AlertInform(body.c_str(), ifcPath.c_str(),
+			gSDK->AlertInform(round.body.c_str(), ifcPath.c_str(),
 							  false /* not a minor alert: show a modal dialog */);
 		}
+		return false;
 	}
 } // namespace HomeskzIfcImport::draw

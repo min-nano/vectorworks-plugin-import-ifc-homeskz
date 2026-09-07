@@ -462,6 +462,78 @@ TEST(dev_switch_candidates_empty_when_no_builds)
 }
 
 // ---------------------------------------------------------------------------
+// DevBuildBranch / FindDevBuildForBranch — pick the SAME branch's next build.
+// 実機フィードバックの往復（docs/DEV-NOTES.md M23）が、修正版のビルドを待つときに使う。
+// ---------------------------------------------------------------------------
+
+TEST(dev_build_branch_reads_the_ci_title)
+{
+	// CI が付ける題は "Dev: <branch> (<short sha>)"（.github/workflows/build.yml）。
+	CHECK_EQ(DevBuildBranch("Dev: claude/feedback (a1b2c3d)"), "claude/feedback");
+	// ブランチ名に丸括弧やスペースが入っても、**最後の** " (" で切る。
+	CHECK_EQ(DevBuildBranch("Dev: feature/x (2) (a1b2c3d)"), "feature/x (2)");
+}
+
+TEST(dev_build_branch_is_empty_when_the_title_does_not_match)
+{
+	// 題の形が違う（古いリリース・題を変えた）ときは空。**これは 5 列目が無いときの
+	// 保険なので、当てずっぽうのブランチ名を作らない**——空なら「分からない」として
+	// 何も拾わない側へ倒れる（FindDevBuildForBranch）。
+	CHECK_EQ(DevBuildBranch("feature/x"), "");
+	CHECK_EQ(DevBuildBranch("Dev: "), "");
+	CHECK_EQ(DevBuildBranch(""), "");
+}
+
+TEST(parse_dev_builds_fills_the_branch_from_the_title_when_the_column_is_missing)
+{
+	// **古い同梱スクリプト（4 列）でも「同じブランチの新しいビルド」を拾える。**
+	// ここを空のまま通すと、古いスクリプトが入っている間だけ、取り込み時の確認も
+	// 実機フィードバックの往復も黙って死ぬ（UpdaterParse.h の ParseDevBuilds）。
+	const std::string out = "build\tfeed123\tDev: feature/x (feed123)\thttps://ex.com/c.zip\n";
+	const std::vector<DevBuild> builds = ParseDevBuilds(out);
+	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
+	if (!builds.empty())
+		CHECK_EQ(builds[0].branch, "feature/x");
+}
+
+TEST(parse_dev_builds_prefers_the_branch_column_over_the_title)
+{
+	// 5 列目があるならそちらが正。題は表示用でしかない。
+	const std::string out = "build\tfeed123\tDev: 題は当てにしない (feed123)\t"
+							"https://ex.com/c.zip\treal/branch\n";
+	const std::vector<DevBuild> builds = ParseDevBuilds(out);
+	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
+	if (!builds.empty())
+		CHECK_EQ(builds[0].branch, "real/branch");
+}
+
+TEST(find_dev_build_for_branch_picks_only_that_branch)
+{
+	const std::string out = "installed=c0ffee1\n"
+							"build\tdeadbee\tDev: feature/y (deadbee)\thttps://ex.com/b.zip\n"
+							"build\tfeed123\tDev: feature/x (feed123)\thttps://ex.com/c.zip\n";
+	const std::vector<DevBuild> builds = DevSwitchCandidates(out, "c0ffee1");
+	const int index = FindDevBuildForBranch(builds, "feature/x");
+	CHECK_EQ(index, 1);
+	if (index >= 0)
+		CHECK_EQ(builds[static_cast<std::size_t>(index)].commit, "feed123");
+
+	// **他のブランチのビルドへ乗り換えない**（絞らないとここが -1 にならない）。
+	CHECK_EQ(FindDevBuildForBranch(builds, "no-such-branch"), -1);
+	// ブランチが分からないとき（ローカルビルド）は何も選ばない。
+	CHECK_EQ(FindDevBuildForBranch(builds, ""), -1);
+}
+
+TEST(find_dev_build_for_branch_takes_the_first_match)
+{
+	// GitHub は新しい順に返すので、同じブランチが 2 つ並んだら先頭が新しい。
+	const std::string out = "build\tnewer11\tDev: feature/x (newer11)\thttps://ex.com/n.zip\n"
+							"build\tolder22\tDev: feature/x (older22)\thttps://ex.com/o.zip\n";
+	const std::vector<DevBuild> builds = DevSwitchCandidates(out, "running");
+	CHECK_EQ(FindDevBuildForBranch(builds, "feature/x"), 0);
+}
+
+// ---------------------------------------------------------------------------
 // ResolveDevSelection — map a picker index back to a candidate.
 // ---------------------------------------------------------------------------
 

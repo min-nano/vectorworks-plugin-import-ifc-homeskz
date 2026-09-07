@@ -56,8 +56,10 @@
 
 // 境界の版。**形を変えたら上げる。**
 //   1 … 取り込みコマンドと 2 つの PIO のリセットを載せた最初の形
-//   2 … MCP ブリッジ（vw_payload_run_mcp_bridge）を足した
-#define VW_PAYLOAD_ABI_VERSION 2u
+//   2 … 実機フィードバックの往復（M23）。同梱スクリプトの実行を殻から借り、取り込みは
+//       「次は更新を尋ねずに入れてよいか」を返すようになった
+//   3 … MCP ブリッジ（vw_payload_run_mcp_bridge）を足した
+#define VW_PAYLOAD_ABI_VERSION 3u
 
 // 本体側の export 指定。Windows は明示しないと DLL の外から見えない。
 #if defined(_WIN32)
@@ -82,6 +84,21 @@ extern "C"
 		// gSDK / gCBP / gVWMM を埋める（それらは静的ライブラリが持つ**モジュールごとの**
 		// グローバルなので、読み込んだだけでは空のまま）。
 		void* callbacks;
+
+		// **同梱スクリプトを 1 本走らせて標準出力を受け取る。** 本体は自分の在り処から
+		// 同梱物へたどり着けない——読み込まれるのは**一時ディレクトリへ写した複製**なので
+		// （PayloadHost.h「必ず複製してから読む」）、dladdr / GetModuleFileName が返すのは
+		// バンドルの外の道である。だから殻の道具を借りる。
+		//
+		//   scriptName … 拡張子を除いた名前（"vw-update" / "vw-feedback"）。**どちらの
+		//                拡張子を付けるかは殻が決める**（mac は .sh、Windows は .ps1）。
+		//   args/argc  … スクリプトへ渡す引数（UTF-8）。
+		//   out        … 標準出力（UTF-8）。**殻が所有し、次にこの関数を呼ぶまで有効**——
+		//                本体は受け取ったその場で写すこと（返る文字列の寿命は他と同じ）。
+		//
+		// 戻り値は 0（kVwPayloadOk）で成功、それ以外は起動できなかったということ。
+		int (*runBundledScript)(const char* scriptName, const char* const* args, unsigned int argc,
+								const char** out);
 	};
 
 	// -----------------------------------------------------------------------
@@ -118,7 +135,17 @@ extern "C"
 	using VwPayloadAbiVersionFn = unsigned int (*)();
 	using VwPayloadInitFn = int (*)(const VwPayloadHost*);
 	using VwPayloadInfoFn = int (*)(VwPayloadInfo*);
-	using VwPayloadRunImportFn = int (*)();
+	// 取り込みコマンド 1 周ぶん。**outAutoUpdate に 0 以外が入って戻ったら、次にこの
+	// コマンドが走るときは更新を尋ねずに入れる**（実機フィードバックの往復。
+	// src/Extensions/ExtMenu.cpp）。往復の最中にいる人へ周ごとに「インストールします
+	// か？」を出さないためのもので、判断できるのは本体（記憶を持っている側）だけ。
+	//
+	// **入れ替えを頼むのではない。** 本体を降ろせるのはそのコードがスタックに 1 つも
+	// 無いときだけなので、入れ替えはこの関数から戻ったあと、次の呼び出しの頭で起きる
+	// （src/PayloadSession.h）。
+	using VwPayloadRunImportFn = int (*)(int* outAutoUpdate);
+
+	// MCP ブリッジ 1 回。**止められるまで戻らない**（src/draw/McpBridge.h）。
 	using VwPayloadRunMcpBridgeFn = int (*)();
 	using VwPayloadRecalculateFn = int (*)(unsigned int, void*, int*);
 	using VwPayloadShutdownFn = void (*)();
