@@ -56,8 +56,13 @@ namespace HomeskzIfcImport
 		// JS へ関数を登録する（homeskz.tick / stop / checkNow / hide）。
 		void OnInit(VectorWorks::Extension::IWebJavaScriptProvider::IInitContext* context) override;
 
-		// SDK のディスパッチ表（objName / functionName で分岐する OnFunctionCall を宣言する）。
-		DEFINE_WebPalette_DISPATCH_MAP;
+		// objName / functionName で分岐する（基底の純粋仮想）。**SDK のディスパッチ表の
+		// マクロ（DEFINE_/BEGIN_/ADD_WebPalette_…）は使わない**——宣言に override が無く
+		// -Winconsistent-missing-override を出し、本体の側は行末の書き方に癖がある。手で
+		// 書けば 4 行の if で済む。
+		void OnFunctionCall(const TXString& objName, const TXString& functionName,
+							const std::vector<nlohmann::json>& args,
+							VectorWorks::UI::IJSFunctionCallbackContext* context) override;
 
 	protected:
 		// **登録した名前そのままで受ける。** VWFC の OnFunction が名前をどう objName /

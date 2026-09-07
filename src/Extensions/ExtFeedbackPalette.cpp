@@ -12,7 +12,8 @@
 //	  AddFunctionPromiseSync（Interfaces/VectorWorks/Extension/IExtensionWebPalette.h）、
 //	  IJSFunctionCallbackContext::Resolve（Interfaces/VectorWorks/UI/IWebBrowserDlg.h）、
 //	  DEFINE_VWPaletteExtension / IMPLEMENT_VWPaletteExtension（VWFC/PluginSupport/
-//	  VWExtensions.h）。
+//	  VWExtensions.h）。ディスパッチ表のマクロ（BEGIN_/ADD_WebPalette_…）は使わない
+//	（ExtFeedbackPalette.h の OnFunctionCall）。
 //
 
 #include "PluginPrefix.h"
@@ -104,14 +105,21 @@ void CFeedbackPaletteJS::OnFunction(const TXString& name, const std::vector<nloh
 	this->OnFunctionCall(objName, functionName, args, context);
 }
 
-// NOLINTBEGIN(misc-const-correctness): SDK のマクロが展開するコード。
-BEGIN_WebPalette_DISPATCH_MAP(CFeedbackPaletteJS);
-ADD_WebPalette_FUNCTION("tick", OnTick);
-ADD_WebPalette_FUNCTION("stop", OnStop);
-ADD_WebPalette_FUNCTION("checkNow", OnCheckNow);
-ADD_WebPalette_FUNCTION("hide", OnHide);
-END_WebPalette_DISPATCH_MAP2;
-// NOLINTEND(misc-const-correctness)
+void CFeedbackPaletteJS::OnFunctionCall(const TXString& objName, const TXString& functionName,
+										const std::vector<nlohmann::json>& args,
+										VectorWorks::UI::IJSFunctionCallbackContext* context)
+{
+	if (functionName == "tick")
+		this->OnTick(objName, functionName, args, context);
+	else if (functionName == "stop")
+		this->OnStop(objName, functionName, args, context);
+	else if (functionName == "checkNow")
+		this->OnCheckNow(objName, functionName, args, context);
+	else if (functionName == "hide")
+		this->OnHide(objName, functionName, args, context);
+	else if (context != nullptr)
+		context->Reject("unknown function"); // 知らない名前は黙って落とさず JS へ返す
+}
 
 void CFeedbackPaletteJS::OnTick(const TXString& /*objName*/, const TXString& /*functionName*/,
 								const std::vector<nlohmann::json>& /*args*/,
