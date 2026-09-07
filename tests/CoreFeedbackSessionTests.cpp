@@ -45,6 +45,8 @@ namespace
 		session.round = 3;
 		session.lastCommit = "a1b2c3d";
 		session.lastTally = "ストーリ:3/3,通り芯:44/44";
+		session.baselineRecorded = true;
+		session.baselineLayers = {"共通", "デザイン レイヤ-1"};
 		session.options.setSymbol(SymbolRole::FloorPost, "床束（特注）");
 		session.options.setEnabled(SymbolRole::FireBrace, false);
 		return session;
@@ -110,6 +112,25 @@ TEST(feedback_session_defaults_do_nothing)
 	CHECK(session.ifcPath.empty());
 }
 
+TEST(feedback_session_without_a_baseline_reads_as_not_recorded)
+{
+	// 古い版が書いた記憶（baseline の行が無い）。**空の基準と取り違えない**——
+	// 取り違えると、基準を採る前の周を「戻っています」と報告してしまう。
+	const FeedbackSession session = parseFeedbackSession("round=2\nbuild=a1b2c3d\n");
+	CHECK(!session.baselineRecorded);
+	CHECK(session.baselineLayers.empty());
+}
+
+TEST(feedback_session_keeps_an_empty_baseline_distinct_from_none)
+{
+	// まっさらな図面で始めた 1 周目は「基準は採ったが 0 枚」。真偽が無いと区別できない。
+	FeedbackSession empty;
+	empty.baselineRecorded = true;
+	const FeedbackSession after = parseFeedbackSession(formatFeedbackSession(empty));
+	CHECK(after.baselineRecorded);
+	CHECK(after.baselineLayers.empty());
+}
+
 TEST(feedback_session_round_trips_through_text)
 {
 	const FeedbackSession before = sample();
@@ -124,6 +145,12 @@ TEST(feedback_session_round_trips_through_text)
 	CHECK_EQ(after.round, before.round);
 	CHECK_EQ(after.lastCommit, before.lastCommit);
 	CHECK_EQ(after.lastTally, before.lastTally);
+	// 1 周目に採った基準（レイヤの顔ぶれ）。**ここが落ちると次の周で図面が戻っているかを
+	// 判定できなくなる**（テンプレートのレイヤと前の周の残りを区別できない）。
+	CHECK_EQ(after.baselineRecorded, before.baselineRecorded);
+	CHECK_EQ(after.baselineLayers.size(), before.baselineLayers.size());
+	for (std::size_t i = 0; i < before.baselineLayers.size(); ++i)
+		CHECK_EQ(after.baselineLayers[i], before.baselineLayers[i]);
 	// 取り込み設定も 1 周目のまま運ばれる（ここが落ちると 2 周目が別の条件で走る）。
 	for (std::size_t i = 0; i < kSymbolRoleCount; ++i)
 	{

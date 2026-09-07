@@ -471,12 +471,15 @@ namespace HomeskzIfcImport::draw
 		gSDK->AddAfterSwapObject(object);
 	}
 
-	void NoteExistingLayerUsed(MCObjectHandle layer)
+	void NoteExistingLayerUsed(MCObjectHandle layer, const std::string& name)
 	{
 		ImportUndoScope* scope = gActiveUndoScope;
 		if (scope == nullptr || layer == nil || scope->contains(layer))
 			return;
-		scope->fUsedExistingLayer = true;
+		// **登場順で重複なし。** 同じレイヤへは要素ごとに何度も描くので、素朴に押し込むと
+		// 同じ名前が並ぶ（PushUnique と同じ理由）。
+		if (std::ranges::find(scope->fExistingLayers, name) == scope->fExistingLayers.end())
+			scope->fExistingLayers.push_back(name);
 	}
 
 	MCObjectHandle PrepareLayer(const std::string& layerName)
@@ -490,7 +493,7 @@ namespace HomeskzIfcImport::draw
 		}
 		else
 		{
-			NoteExistingLayerUsed(layer); // 取り込み前から在った＝取り消しでは戻らない
+			NoteExistingLayerUsed(layer, layerName); // 取り込み前から在った＝取り消しでは戻らない
 		}
 		if (layer != nil)
 			gSDK->SetCurrentLayer(layer);
@@ -504,7 +507,7 @@ namespace HomeskzIfcImport::draw
 			return nil;
 		// ストーリ由来のレイヤは drawStories が作った（＝登録済み）なので何も起きない。
 		// 取り込み前から在ったものだけが「戻らない」印になる。
-		NoteExistingLayerUsed(layer);
+		NoteExistingLayerUsed(layer, layerName);
 		gSDK->SetCurrentLayer(layer);
 		return layer;
 	}
@@ -577,7 +580,7 @@ namespace HomeskzIfcImport::draw
 		}
 		else
 		{
-			NoteExistingLayerUsed(layer);
+			NoteExistingLayerUsed(layer, number);
 		}
 		if (layer == nil)
 			return nil;

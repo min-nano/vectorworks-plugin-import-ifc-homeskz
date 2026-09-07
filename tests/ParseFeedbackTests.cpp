@@ -272,22 +272,71 @@ TEST(feedback_comment_says_when_there_are_no_commands)
 	CHECK(contains(body, "対象なし"));
 }
 
-TEST(feedback_comment_reports_whether_the_drawing_was_restored)
+TEST(feedback_comment_takes_the_baseline_on_the_first_round)
 {
-	// **数字は戻したかどうかで変わらない**（内訳は命令の数）。読む側が「絵が壊れて
-	// いるのは実装のせいか、前の周を戻し忘れたのか」を切り分けられるよう、描画側の
-	// 実測（undoPartial）を必ず 1 行載せる。
-	DrawCounts fresh = sampleCounts();
-	fresh.undoPartial = false;
-	const std::string clean = formatFeedbackComment(sampleRound(), sampleDocument(), fresh);
-	CHECK(contains(clean, "図面の状態:"));
-	CHECK(contains(clean, "今回作ったレイヤだけに描きました"));
+	// **1 周目は判定しない。** 図面のテンプレートに「共通」等が最初から在るのは普通なので、
+	// ここで「戻っていません」と書くと毎回の誤報になる——採ったことだけ言う。
+	DrawCounts counts = sampleCounts();
+	counts.existingLayers = {"共通"};
+	FeedbackRound first = sampleRound();
+	first.baselineKnown = false;
+	const std::string body = formatFeedbackComment(first, sampleDocument(), counts);
+	CHECK(contains(body, "図面の状態:"));
+	CHECK(contains(body, "取り込み前から在ったレイヤ 1 枚"));
+	CHECK(contains(body, "基準にします"));
+	CHECK(!contains(body, "重ねて描きました"));
+	// **レイヤ名そのものは公開の場へ出さない**（伏せ字の方針と同じ）。
+	CHECK(!contains(body, "共通"));
+}
 
-	DrawCounts stacked = sampleCounts();
-	stacked.undoPartial = true;
-	const std::string over = formatFeedbackComment(sampleRound(), sampleDocument(), stacked);
-	CHECK(contains(over, "取り込み前から在ったレイヤへも描きました"));
-	CHECK(contains(over, "前の周を戻さずに重ねた可能性があります"));
+TEST(feedback_comment_says_the_drawing_was_restored_when_it_matches_the_baseline)
+{
+	// テンプレートのレイヤが基準どおりに在るだけ＝取り込み前へ戻してある。
+	DrawCounts counts = sampleCounts();
+	counts.existingLayers = {"共通"};
+	FeedbackRound later = sampleRound();
+	later.baselineKnown = true;
+	later.baselineLayers = {"共通"};
+	const std::string body = formatFeedbackComment(later, sampleDocument(), counts);
+	CHECK(contains(body, "取り込み前の状態へ戻してから実行されています"));
+	CHECK(contains(body, "1 周目と同じ 1 枚"));
+}
+
+TEST(feedback_comment_flags_a_drawing_that_was_not_restored)
+{
+	// 基準に無いレイヤ（前の周が作ったもの）へも描いている＝戻していない。
+	DrawCounts counts = sampleCounts();
+	counts.existingLayers = {"共通", "1-FL", "2-FL"};
+	FeedbackRound later = sampleRound();
+	later.baselineKnown = true;
+	later.baselineLayers = {"共通"};
+	const std::string body = formatFeedbackComment(later, sampleDocument(), counts);
+	CHECK(contains(body, "前の周の図が残ったまま重ねて描きました"));
+	CHECK(contains(body, "レイヤ 2 枚"));
+	CHECK(contains(body, "実装のせいにしないでください"));
+}
+
+TEST(feedback_comment_notices_a_different_drawing)
+{
+	// 基準にあったものが無い＝別の図面か、テンプレートが変わった。**戻し忘れとは言わない。**
+	DrawCounts counts = sampleCounts();
+	counts.existingLayers.clear();
+	FeedbackRound later = sampleRound();
+	later.baselineKnown = true;
+	later.baselineLayers = {"共通"};
+	const std::string body = formatFeedbackComment(later, sampleDocument(), counts);
+	CHECK(contains(body, "見当たりません"));
+	CHECK(!contains(body, "重ねて描きました"));
+}
+
+TEST(feedback_comment_handles_a_first_round_on_an_empty_drawing)
+{
+	DrawCounts counts = sampleCounts();
+	counts.existingLayers.clear();
+	FeedbackRound first = sampleRound();
+	first.baselineKnown = false;
+	const std::string body = formatFeedbackComment(first, sampleDocument(), counts);
+	CHECK(contains(body, "まっさらな図面から取り込みました"));
 }
 
 TEST(feedback_comment_folds_the_ordinary_notes)

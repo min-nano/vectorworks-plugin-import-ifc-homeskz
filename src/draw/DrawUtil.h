@@ -273,7 +273,18 @@ namespace HomeskzIfcImport::draw
 		// **取り込み前から在ったレイヤ**へも描いたか（＝取り消しはその分だけ戻らない）。
 		bool partial() const
 		{
-			return fUsedExistingLayer;
+			return !fExistingLayers.empty();
+		}
+
+		// 取り込み前から在ったレイヤの名前（登場順に重複なし）。
+		//
+		// **真偽 1 つでは足りない。** 図面のテンプレートに「共通」等が最初から在れば、
+		// 1 周目からこれは空にならない——「戻し忘れ」と「もともと在った」を真偽では
+		// 区別できない（実機の指摘。docs/DEV-NOTES.md M23「基準は 1 周目に採る」）。
+		// 名前で持っておけば、1 周目の顔ぶれを基準にして次の周と**引き比べられる**。
+		const std::vector<std::string>& existingLayers() const
+		{
+			return fExistingLayers;
 		}
 
 	private:
@@ -281,12 +292,12 @@ namespace HomeskzIfcImport::draw
 		// 通して書き込む（要素側の draw モジュールはスコープを持ち回らずに済む。
 		// インポートはメインスレッドから 1 本しか走らないので、開いているスコープは高々 1 つ）。
 		friend void RecordCreatedLayer(MCObjectHandle layer);
-		friend void NoteExistingLayerUsed(MCObjectHandle layer);
+		friend void NoteExistingLayerUsed(MCObjectHandle layer, const std::string& name);
 
 		bool contains(MCObjectHandle layer) const;
 
 		std::vector<MCObjectHandle> fCreatedLayers; // このインポートが作ったレイヤ
-		bool fUsedExistingLayer = false; // 取り込み前から在ったレイヤへも描いた
+		std::vector<std::string> fExistingLayers; // 取り込み前から在ったレイヤ（登場順）
 	};
 
 	// このインポートが新しく作ったレイヤを undo イベントへ登録する（デザイン／シートの
@@ -295,7 +306,9 @@ namespace HomeskzIfcImport::draw
 
 	// 取り込み前から在ったレイヤへ描いたことを控える（取り消しが部分的になる）。
 	// レイヤを用意するヘルパー（下記 3 つ）が自分で呼ぶので、要素側は意識しなくてよい。
-	void NoteExistingLayerUsed(MCObjectHandle layer);
+	// **名前も一緒に渡す**——1 周目の顔ぶれを基準に、次の周で図面が戻っているかを
+	// 引き比べるため（ImportUndoScope::existingLayers）。
+	void NoteExistingLayerUsed(MCObjectHandle layer, const std::string& name);
 
 	// **SDK に渡して消費させる下ごしらえのオブジェクト**（PIO のパス・プロファイル等）を
 	// 「このインポートが追加したもの」として undo イベントへ申告する。

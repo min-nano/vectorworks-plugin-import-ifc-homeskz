@@ -31,6 +31,7 @@
 #include "core/ImportOptions.h"
 
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::core
 {
@@ -66,6 +67,16 @@ namespace HomeskzIfcImport::core
 		// 直近の周で動いていたビルドの短縮 sha。**新しいビルドかどうかの判定に使う**
 		// （同じ sha のビルドを取り込み直しても意味が無い）。
 		std::string lastCommit;
+
+		// **1 周目の「取り込み前に在ったレイヤ」の顔ぶれ**（core::DrawCounts::existingLayers）。
+		// 次の周でこれと引き比べ、図面が取り込み前へ戻してあるかを見る——テンプレートに
+		// 「共通」等が最初から在ると真偽 1 つでは「戻し忘れ」と区別できないため、**基準は
+		// 1 周目に採る**（docs/DEV-NOTES.md M23「基準は 1 周目に採る」）。
+		//
+		// baselineRecorded は「採ってあるか」。**空の基準（＝まっさらな図面で始めた 1 周目）と
+		// 古い版が書いた記憶を区別する**ために要る——真偽が無いと、どちらも「空」に見える。
+		bool baselineRecorded = false;
+		std::vector<std::string> baselineLayers;
 
 		// 直近の周の要素内訳（parse::formatTally の 1 行表現）。次の周のコメントで
 		// **「前回からどう変わったか」**を出すために持つ——数字の羅列を 2 つ並べて

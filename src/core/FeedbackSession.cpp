@@ -94,6 +94,11 @@ namespace HomeskzIfcImport::core
 		out << "round=" << session.round << "\n";
 		out << "build=" << sanitize(session.lastCommit) << "\n";
 		out << "tally=" << sanitize(session.lastTally) << "\n";
+		// 1 周目に採った基準。**レイヤ 1 枚につき 1 行**にしてあるのは、名前へ入れて
+		// よい文字を区切り記号で縛らないため（"," も "\t" もレイヤ名に使える）。
+		out << "baseline=" << boolText(session.baselineRecorded) << "\n";
+		for (const std::string& layer : session.baselineLayers)
+			out << "baseline.layer=" << sanitize(layer) << "\n";
 		// 取り込み設定は役割の表の順に並べる（core/ImportOptions.h の symbolRoles）。
 		for (std::size_t i = 0; i < kSymbolRoleCount; ++i)
 		{
@@ -140,6 +145,14 @@ namespace HomeskzIfcImport::core
 				session.lastCommit = value;
 			else if (key == "tally")
 				session.lastTally = value;
+			else if (key == "baseline")
+				session.baselineRecorded = parseBool(value, session.baselineRecorded);
+			else if (key == "baseline.layer")
+			{
+				// **重ねて読む**（行の数だけレイヤがある）。空行は基準にならないので捨てる。
+				if (!value.empty())
+					session.baselineLayers.push_back(value);
+			}
 			else if (key.starts_with("role."))
 			{
 				// "role.<n>.symbol" / "role.<n>.on"。表に無い番号は黙って飛ばす

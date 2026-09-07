@@ -499,6 +499,9 @@ namespace HomeskzIfcImport::draw
 				plan.session.round = 0;
 				plan.session.lastCommit.clear();
 				plan.session.lastTally.clear();
+				// 基準も採り直す。前の往復の図面と引き比べても意味が無い。
+				plan.session.baselineRecorded = false;
+				plan.session.baselineLayers.clear();
 			}
 			plan.session.anonymize = dialog.Anonymize();
 			plan.session.pullRequest = ParsePullRequest(dialog.PullRequest());
@@ -549,6 +552,10 @@ namespace HomeskzIfcImport::draw
 		round.round = session.round + 1;
 		round.previousCommit = session.lastCommit;
 		round.previousTally = session.lastTally;
+		// 1 周目に採った基準（＝取り込み前に在ったレイヤの顔ぶれ）。次の周はここへ
+		// 戻っているかを引き比べる（parse/Feedback の restoredStateLine）。
+		round.baselineKnown = session.baselineRecorded;
+		round.baselineLayers = session.baselineLayers;
 		round.anonymize = session.anonymize;
 
 		const std::string commentBody =
@@ -561,6 +568,13 @@ namespace HomeskzIfcImport::draw
 		// **投稿できたところで記憶を進める。** 投稿できていない周を数えると、次の
 		// コメントが「前の周からの変化」を持たないまま round だけ進む。
 		session.round = round.round;
+		// **基準は 1 周目に採る。** 以後の周では触らない——基準そのものが周ごとに動くと、
+		// 「戻っているか」を引き比べる相手が消える。
+		if (!session.baselineRecorded)
+		{
+			session.baselineRecorded = true;
+			session.baselineLayers = input.counts->existingLayers;
+		}
 		session.lastCommit = input.build.commit;
 		session.lastTally = parse::formatTally(parse::elementRows(*input.document, *input.counts));
 		if (!core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session))

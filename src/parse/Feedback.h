@@ -55,6 +55,13 @@ namespace HomeskzIfcImport::parse
 		std::string previousCommit; // 前の周のビルド（空なら 1 周目）
 		std::string previousTally;	// 前の周の内訳（formatTally の 1 行表現）
 
+		// **1 周目に採った「取り込み前に在ったレイヤ」の顔ぶれ**（core::FeedbackSession）。
+		// 今回の DrawCounts::existingLayers と引き比べて、図面が取り込み前へ戻して
+		// あるかを言う（restoredStateLine）。baselineKnown が false なら基準が無い
+		// （1 周目、または古い版が書いた記憶）ので、判定せずその旨を書く。
+		bool baselineKnown = false;
+		std::vector<std::string> baselineLayers;
+
 		bool anonymize = true; // 案件が分かるものを伏せるか
 	};
 

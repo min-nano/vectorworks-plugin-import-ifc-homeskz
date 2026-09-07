@@ -9,6 +9,7 @@
 #include "core/Document.h"
 #include "parse/Summary.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <iomanip>
@@ -273,6 +274,67 @@ namespace HomeskzIfcImport::parse
 		return out;
 	}
 
+	namespace
+	{
+		// 図面が「取り込み前」へ戻してあるか（PR コメントの「図面の状態:」1 行）。
+		//
+		// 【なぜ真偽 1 つでは足りないのか】判断材料は描画側の実測
+		// （DrawCounts::existingLayers ＝取り込み前から在ったレイヤ）だが、**図面のテンプレートに
+		// 「共通」等が最初から在ると、1 周目からこれは空にならない**。つまり
+		// 「前の周を戻し忘れた」と「もともと在った」を真偽では区別できない（実機の指摘。
+		// docs/DEV-NOTES.md M23「基準は 1 周目に採る」）。そこで**1 周目の顔ぶれを基準として
+		// 記憶し**（core::FeedbackSession::baselineLayers）、次の周からはそこへ戻っているかを
+		// 引き比べる。
+		//
+		// 【なぜ人に訊かないのか】押したかどうかは戻したかどうかではない。確認ダイアログは
+		// 「押したが戻していない」を防げないので、**実測だけで言う**。
+		//
+		// 【名前を載せない】レイヤ名は図面の側の言葉なので、PR コメントには**枚数と判定だけ**を
+		// 出す（伏せ字の方針と同じ。案件が分かるものを公開の場へ置かない）。
+		std::string restoredStateLine(const FeedbackRound& round, const core::DrawCounts& counts)
+		{
+			const std::size_t now = counts.existingLayers.size();
+			if (!round.baselineKnown)
+			{
+				// 1 周目（または古い版が書いた記憶）。**基準を採ったことだけ言う。**
+				// ここで「戻っています」と書くと、次の周と読み比べたときに嘘になる。
+				if (now == 0)
+					return "まっさらな図面から取り込みました（次の周はここへ戻っているかを見ます）"
+						   "。";
+				return "取り込み前から在ったレイヤ " + std::to_string(now) +
+					   " 枚に描きました（図面のテンプレートにもとから在るもの）。"
+					   "**この顔ぶれを基準にします**——次の周はここへ戻っているかを見ます。";
+			}
+
+			// 基準にあるものが今回も「取り込み前から在った」なら、そこは戻っている。
+			// 基準に無いものが増えていたら、それは**前の周がこの図面へ残した**レイヤである。
+			std::size_t extra = 0;
+			for (const std::string& layer : counts.existingLayers)
+			{
+				if (std::ranges::find(round.baselineLayers, layer) == round.baselineLayers.end())
+					++extra;
+			}
+			std::size_t missing = 0;
+			for (const std::string& layer : round.baselineLayers)
+			{
+				if (std::ranges::find(counts.existingLayers, layer) == counts.existingLayers.end())
+					++missing;
+			}
+
+			if (extra > 0)
+				return "**前の周の図が残ったまま重ねて描きました**（1 周目の基準に無いレイヤ " +
+					   std::to_string(extra) +
+					   " 枚へも描いています）。**絵の破綻をそのまま実装の"
+					   "せいにしないでください。**";
+			if (missing > 0)
+				return "1 周目の基準にあったレイヤ " + std::to_string(missing) +
+					   " 枚が見当たりません（別の図面か、テンプレートが変わった可能性があります）"
+					   "。";
+			return "取り込み前の状態へ戻してから実行されています（1 周目と同じ " +
+				   std::to_string(now) + " 枚）。";
+		}
+	} // namespace
+
 	std::string formatFeedbackComment(const FeedbackRound& round, const core::Document& document,
 									  const core::DrawCounts& counts)
 	{
@@ -312,16 +374,8 @@ namespace HomeskzIfcImport::parse
 		// **取り込み前へ戻っていたか。** 2 周目以降は同じ文書へもう一度描くので、前の周を
 		// 「取り消し」で戻さずに実行すると図が二重になる——ところが**内訳の数字は命令の
 		// 数なので、戻したかどうかで 1 つも変わらない**。読む側（Claude）が「絵が壊れて
-		// いるのは実装のせいか、戻し忘れか」を切り分けられるよう、判断材料を描画側の実測
-		// （DrawCounts::undoPartial。取り込み前から在ったレイヤへ描いたか）から出す。
-		// **人が押したボタンではなく実測**であることが肝心で、確認ダイアログは「押したが
-		// 戻していない」を防げない（docs/DEV-NOTES.md M23「戻したかどうかを訊かない」）。
-		out << "\n図面の状態: "
-			<< (counts.undoPartial
-					? "**取り込み前から在ったレイヤへも描きました**"
-					  "（前の周を戻さずに重ねた可能性があります）。"
-					: "今回作ったレイヤだけに描きました（取り込み前の状態から始まっています）。")
-			<< "\n";
+		// いるのは実装のせいか、戻し忘れか」を切り分けられるよう、1 行を必ず載せる。
+		out << "\n図面の状態: " << restoredStateLine(round, counts) << "\n";
 
 		// 前の周からの差分。1 周目（previousTally が空）では節ごと出さない。
 		const std::string diff = formatTallyDiff(round.previousTally, tally);
