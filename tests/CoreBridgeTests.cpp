@@ -276,6 +276,27 @@ TEST(bridge_spool_prepare_reports_why_it_could_not)
 	error.clear();
 	CHECK(!blocked.prepare(error));
 	CHECK(!error.empty());
+
+	// 親が無い（＝一時ディレクトリの綴りがおかしい）。作れないことを理由ごと返す。
+	BridgeSpool orphan(temp.path() + "/missing/mcp");
+	error.clear();
+	CHECK(!orphan.prepare(error));
+	CHECK(!error.empty());
+
+#ifndef _WIN32
+	// **行き先の無いシンボリックリンク。** mkdir は「既にある」と言い、素性は確かめ
+	// られない——どちらの言い分も真に受けずに断る。
+	const std::string dangling = temp.path() + "/dangling";
+	std::error_code ec;
+	std::filesystem::create_symlink(temp.path() + "/nowhere", dangling, ec);
+	if (!ec)
+	{
+		BridgeSpool broken(dangling);
+		error.clear();
+		CHECK(!broken.prepare(error));
+		CHECK(!error.empty());
+	}
+#endif
 }
 
 TEST(bridge_spool_refuses_a_world_writable_directory)
