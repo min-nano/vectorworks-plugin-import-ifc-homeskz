@@ -451,6 +451,9 @@ Claude ──MCP──▶ vw-mcp-server.py ──ファイル──▶ Vectorwor
    アプリの **設定 ▸ 開発者 ▸ 構成を編集**（Settings ▸ Developer ▸ Edit Config）から
    このファイルのある場所を開けます。無ければ自分で作ってください。中身は次のとおりです
    （**既に他のサーバを登録している場合は `mcpServers` の中へ 1 項目足す**だけ）。
+   `<ユーザー名>` は実際のアカウント名に、パスは上記「置き場所」で確かめた実物に
+   置き換えてください（`Plug-Ins` の場所は Vectorworks ▸ 環境設定 ▸ *ユーザーフォルダ*
+   から辿れます）。
 
    ```jsonc
    // macOS
@@ -459,7 +462,7 @@ Claude ──MCP──▶ vw-mcp-server.py ──ファイル──▶ Vectorwor
        "vectorworks": {
          "type": "stdio",
          "command": "/usr/bin/python3",
-         "args": ["<プラグインのフォルダ>/vw-mcp-server.py"],
+         "args": ["/Users/<ユーザー名>/Library/Application Support/Vectorworks/2026/Plug-Ins/min-nano_structure/vw-mcp-server.py"],
          "env": {}
        }
      }
@@ -473,7 +476,7 @@ Claude ──MCP──▶ vw-mcp-server.py ──ファイル──▶ Vectorwor
        "vectorworks": {
          "type": "stdio",
          "command": "C:\\Users\\<ユーザー名>\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
-         "args": ["<プラグインのフォルダ>\\vw-mcp-server.py"],
+         "args": ["C:\\Users\\<ユーザー名>\\AppData\\Roaming\\Nemetschek\\Vectorworks\\2026\\Plug-Ins\\min-nano_structure\\vw-mcp-server.py"],
          "env": {}
        }
      }
@@ -484,6 +487,25 @@ Claude ──MCP──▶ vw-mcp-server.py ──ファイル──▶ Vectorwor
    `PATH` は端末とは別物なので、`python3` / `python` とだけ書くと見つからないことが
    あります。場所は、macOS のターミナルなら `which python3`、Windows の PowerShell なら
    `(Get-Command python).Source` で分かります。
+
+   **`args` のパスは「シェルの書き方」を持ち込まないでください。** ここはただの JSON で、
+   シェルを通りません。実際に躓いた例を挙げます。
+
+   | 書きがちなもの | 正しくは | なぜ |
+   | --- | --- | --- |
+   | `~/Library/…` | `/Users/<ユーザー名>/Library/…` | **`~` は展開されません**（そのままの文字として渡ります） |
+   | `Application\ Support` | `Application Support` | **空白をエスケープしない**（`\` が名前の一部になります） |
+   | `"…/vw-mcp-server.py"`（引用符を二重に） | 引用符は JSON のものだけ | シェルの引用は要りません |
+
+   **確実なのは Finder から取ることです。** `vw-mcp-server.py` を右クリックして、
+   そのまま **Option キーを押す**とメニューの「コピー」が
+   **「"vw-mcp-server.py" のパス名をコピー」**に変わるので、それを `args` の
+   引用符の中へ貼り付けてください。
+
+   失敗しているときは、ログ（macOS なら
+   `~/Library/Logs/Claude/mcp-server-vectorworks.log`）に
+   `can't open file '…': [Errno 2] No such file or directory` と、**Python が実際に
+   開こうとしたパス**が出ます。まずそれを見てください。
 
    **書き換えたら Claude のアプリを終了して開き直してください**（設定ファイルは起動時に
    読まれます）。うまく登録できていれば、Claude に「`vw_bridge_status` を実行して」と
@@ -504,12 +526,16 @@ Claude ──MCP──▶ vw-mcp-server.py ──ファイル──▶ Vectorwor
    #### 開発版（Dev）を使うとき
 
    フォルダを `min-nano_structureDev` に読み替えたうえで、環境変数
-   `VW_MCP_PLUGIN=min-nano_structureDev` を渡してください（スプールの場所が安定版と
-   別になります）。デスクトップアプリなら設定ファイルの `env` に書きます。
+   `VW_MCP_PLUGIN=min-nano_structureDev` を渡してください。デスクトップアプリなら
+   設定ファイルの `env` に書きます。
 
    ```jsonc
    "env": { "VW_MCP_PLUGIN": "min-nano_structureDev" }
    ```
+
+   **これを忘れると繋がりません。** スプールの場所は安定版と開発版で別なので、
+   渡さないと安定版のほうを探しに行きます（`vw_bridge_status` の「探した場所」に
+   `min-nano_structure-mcp` しか出てこなければ、これが原因です）。
 
 ### 使う
 
