@@ -36,7 +36,9 @@ namespace HomeskzIfcImport
 			bool& fFlag;
 		};
 
-		void CopyMemory(const FeedbackLoopMemory& memory, FeedbackLoopView& view)
+		// **CopyMemory とは名付けない**——Windows.h（PluginPrefix.h 経由）が同名のマクロを
+		// 定義していて、殻のビルドでここが memcpy に化ける（build-windows で実際に落ちた）。
+		void ApplyMemory(const FeedbackLoopMemory& memory, FeedbackLoopView& view)
 		{
 			view.repo = memory.repo;
 			view.pullRequest = memory.pullRequest;
@@ -120,7 +122,7 @@ namespace HomeskzIfcImport
 			fView.message = "本体を読めません: " + error;
 			return;
 		}
-		CopyMemory(memory, fView);
+		ApplyMemory(memory, fView);
 		if (!memory.active)
 		{
 			fView.phase = FeedbackLoopPhase::Idle;
@@ -216,7 +218,7 @@ namespace HomeskzIfcImport
 		// 投稿できた。記憶を読み直して見え方を更新する（round が進んでいる）。
 		FeedbackLoopMemory after;
 		if (host.QueryMemory(after, error))
-			CopyMemory(after, fView);
+			ApplyMemory(after, fView);
 		fView.phase = FeedbackLoopPhase::Waiting;
 		fView.message = "round " + std::to_string(fView.round) + "（" + fView.build +
 						"）を投稿しました。次のビルドを待っています。";
