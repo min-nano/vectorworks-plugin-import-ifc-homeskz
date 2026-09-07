@@ -307,13 +307,17 @@ namespace HomeskzIfcImport::draw
 			// 「送らない」を選んでも記憶は消えない（この周を報告しないだけで、やめる意思とは
 			// 限らないため。draw/Feedback.cpp）。やめたい人が押すのはこの「やめる」で、
 			// 押されたら記憶を捨てる——次の取り込みはいつもどおりファイル選択から始まる。
+			// **ボタンは結末そのものを名乗る。** 「やめる」だけでは「この取り込みをやめる」
+			// とも読めてしまい、往復が終わることが伝わらない（実機の指摘。
+			// docs/DEV-NOTES.md M23「ボタンが何を指しているのか分からなかった」）。
 			const std::string advice = "取り込み前の状態に戻してから（「取り消し」）"
 									   "「続ける」を押してください。\n\nファイル: " +
 									   FileNameOf(ifcPath) +
-									   "\n\n「やめる」を押すと往復を終わりにします"
+									   "\n\n「往復を終える」を押すと、この IFC と設定の記憶を"
+									   "捨てて往復を終わりにします\n"
 									   "（次の取り込みはファイル選択から始まります）。";
 			if (gSDK->AlertQuestion("新しいビルドで同じ IFC を取り込み直します。", advice.c_str(),
-									/*defaultButton*/ 1, "続ける", "やめる", "", "") != 1)
+									/*defaultButton*/ 1, "続ける", "往復を終える", "", "") != 1)
 			{
 				core::clearFeedbackSession(core::defaultFeedbackSessionPath());
 				return false;

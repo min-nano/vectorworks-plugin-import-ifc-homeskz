@@ -62,6 +62,8 @@ namespace HomeskzIfcImport::draw
 		constexpr TControlID kPrLabelID = 6;
 		constexpr TControlID kPrID = 7;
 		constexpr TControlID kAnonID = 9;
+		constexpr TControlID kHintNoteID = 10;
+		constexpr TControlID kHintLoopID = 11;
 		constexpr TControlID kFirstBodyID = 20;
 
 		// トークンの貼り付け欄の幅（標準文字数）と、PR 番号の欄の幅。
@@ -242,7 +244,8 @@ namespace HomeskzIfcImport::draw
 			CFeedbackDialog(const std::string& title, const std::vector<std::string>& body,
 							const core::FeedbackSession& session)
 				: fTitle(title.c_str()), fBody(body), fPrLabel(kPrLabelID), fPr(kPrID),
-				  fAnon(kAnonID), fPrText(std::to_string(session.pullRequest).c_str()),
+				  fAnon(kAnonID), fHintNote(kHintNoteID), fHintLoop(kHintLoopID),
+				  fPrText(std::to_string(session.pullRequest).c_str()),
 				  fAnonymize(session.anonymize)
 			{
 			}
@@ -264,7 +267,12 @@ namespace HomeskzIfcImport::draw
 		protected:
 			bool CreateDialogLayout() override
 			{
-				if (!this->CreateDialog(fTitle, "PR へ送る", "送らない", false))
+				// **ボタンは「何を」送るのかを名指しする。** 所見のダイアログにも「送る」が
+				// あるので、ただの「送る／送らない」では**どちらの送信の話か分からない**
+				// ——実際にそう読めなかった、という指摘を実機から受けている
+				// （docs/DEV-NOTES.md M23「ボタンが何を指しているのか分からなかった」）。
+				// **どちらを押しても往復は終わらない**ことも、下の案内で言い切る。
+				if (!this->CreateDialog(fTitle, "結果を送る", "結果を送らない", false))
 					return false;
 
 				// 結果の本文は 1 行 1 コントロール（draw/ResultDialog と同じ理由）。
@@ -305,6 +313,17 @@ namespace HomeskzIfcImport::draw
 				if (!fAnon.CreateControl(this, "ファイル名とユーザー名を伏せて投稿する"))
 					return false;
 				this->AddBelowControl(&fPrLabel, &fAnon, 0, 1);
+
+				// **押したあと何が起きるかを、押す前に書いておく。** ここを書かないと
+				// 「結果を送らない＝往復が終わる」と読まれる（実機の指摘）。
+				if (!fHintNote.CreateControl(
+						this, "※ どちらを押しても、このあと所見のダイアログが出ます。"))
+					return false;
+				this->AddBelowControl(&fAnon, &fHintNote, 0, 1);
+				if (!fHintLoop.CreateControl(this, "※ 往復が終わるのは、次の取り込みの確認で"
+												   "「往復を終える」を押したときだけです。"))
+					return false;
+				this->AddBelowControl(&fHintNote, &fHintLoop);
 				return true;
 			}
 
@@ -334,6 +353,8 @@ namespace HomeskzIfcImport::draw
 			VWStaticTextCtrl fPrLabel;
 			VWEditTextCtrl fPr;
 			VWCheckButtonCtrl fAnon;
+			VWStaticTextCtrl fHintNote;
+			VWStaticTextCtrl fHintLoop;
 			TXString fPrText;
 			bool fAnonymize = true;
 			bool fShown = false;

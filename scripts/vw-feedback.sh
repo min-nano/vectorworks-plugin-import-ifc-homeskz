@@ -283,7 +283,7 @@ mode_post() {
 ask_note() { # title, prompt
 	osascript - "$1" "$2" <<'APPLESCRIPT' 2>/dev/null || return 1
 on run argv
-	set r to display dialog (item 2 of argv) with title (item 1 of argv) default answer "" buttons {"送らない", "送る"} default button "送る" cancel button "送らない"
+	set r to display dialog (item 2 of argv) with title (item 1 of argv) default answer "" buttons {"所見を書かない", "所見を送る"} default button "所見を送る" cancel button "所見を書かない"
 	return text returned of r
 end run
 APPLESCRIPT
@@ -336,11 +336,13 @@ mode_ask_note_worker() {
 	if [ "$posted" = "no" ]; then
 		prompt="round ${round} の結果は投稿しませんでした。
 伝えたいことがあれば書いてください（これがこの周の唯一の記録になります）。
-空のまま送れば、何も投稿せずに終わります。"
+空のまま送れば、何も投稿せずに終わります。
+※ 往復は続きます（終わるのは次の取り込みの確認で「往復を終える」を押したときです）。"
 		suffix="・結果は未投稿"
 	else
 		prompt="round ${round} を投稿しました。
-図面を確かめて、気付いたことがあれば書いてください（空のまま送れば所見なしで終わります）。"
+図面を確かめて、気付いたことがあれば書いてください（空のまま送れば所見なしで終わります）。
+※ 往復は続きます（終わるのは次の取り込みの確認で「往復を終える」を押したときです）。"
 		suffix=""
 	fi
 
