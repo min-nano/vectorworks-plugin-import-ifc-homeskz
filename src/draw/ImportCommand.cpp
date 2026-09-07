@@ -341,6 +341,15 @@ namespace HomeskzIfcImport::draw
 			settingsShown = settings == draw::SettingsOutcome::Accepted;
 		}
 
+		// 2.5 **実機フィードバックを送るかどうかは、ここで決める**（dev ビルドのみ）。
+		//     取り込みは 1 分以上かかるので、終わったところに確認が待っていると席を
+		//     離れられない——訊くことは全部**取り込みが始まる前に**訊き切る
+		//     （draw/Feedback.h「取り込みのあとに人の操作を残さない」）。続きの周は
+		//     記憶から即座に決まるので、ここでも何も出ない。
+		draw::FeedbackPlan plan = draw::planFeedbackRound(session, build, continuing);
+		plan.session.ifcPath = ifcPath;
+		plan.session.options = options;
+
 		// 3. インポート本体。**例外を SDK コールバックの外へ漏らさない**（CLAUDE.md
 		// 「エラーハンドリング・所有権」）。ネイティブプラグインの未捕捉例外は **VectorWorks
 		// 本体を巻き込んで落とす**ので、フェーズ境界であるここで必ず受け止め、ユーザーへは
@@ -365,33 +374,36 @@ namespace HomeskzIfcImport::draw
 			failed = true;
 		}
 
-		// 4. 実機フィードバック（dev ビルドのみ）。結果の本文と宛先を 1 枚で見せて PR へ
-		//    投稿する。**そのダイアログが結果ダイアログを兼ねる**ので、出せたなら下の
-		//    結果ダイアログは出さない。エラーで中断した周は送らない（送るべき内訳が
-		//    そもそも無い）。
-		bool shownResult = false;
-		if (!failed && draw::feedbackAvailable())
+		// 4. 実機フィードバック（dev ビルドのみ）。**黙って投稿し、何も尋ねない。**
+		//    投稿できたなら内訳もログも PR にあるので、結果ダイアログも出さずに終わる
+		//    ——ここに 1 つでもボタンが残ると「実行して離れる」が成立しない。
+		//    エラーで中断した周は送らない（送るべき内訳がそもそも無い）。
+		if (!failed && plan.send)
 		{
 			draw::FeedbackInput input;
 			input.document = &round.document;
 			input.counts = &round.counts;
 			input.build = build;
-			input.options = options;
 			input.ifcPath = ifcPath;
 			input.bytes = round.bytes;
 			input.seconds = round.seconds;
 			input.startedAt = round.startedAt;
-			input.resultBody = round.body;
 			input.log = core::trace::text();
-			if (draw::runFeedbackRound(input, shownResult))
+
+			std::string postError;
+			if (draw::postFeedbackRound(plan, input, postError))
 				return true; // 往復の最中 → 次の取り込みでは更新を尋ねずに入れる
+
+			// **投稿できなかったときだけ、結果ダイアログへ理由を添えて出す。** ここで
+			// アラートを重ねると、無操作で終わるはずの取り込みにボタンが増える。
+			if (!postError.empty())
+				round.body += "\n\nPR への投稿: " + postError;
 		}
 
 		// 5. 結果をダイアログ表示。本文は短く、**診断ログは折り畳んだテキスト欄**として同じ
 		//    ダイアログに載せる（draw/ResultDialog.h。ふだんは開かず、不具合の報告のときに
 		//    開いて丸ごとコピーする）。
-		if (!shownResult &&
-			!draw::showImportResult("ホームズ君 IFC 取り込み", round.body, core::trace::text()))
+		if (!draw::showImportResult("ホームズ君 IFC 取り込み", round.body, core::trace::text()))
 		{
 			// ダイアログを組めなかったときの逃げ道。結果を伝えられないまま黙って終わるのが
 			// 最悪なので、素のアラートへ落とす（advice 行にファイルパス。false = 最小アラート

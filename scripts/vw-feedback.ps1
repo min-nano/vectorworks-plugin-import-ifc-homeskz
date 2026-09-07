@@ -14,15 +14,10 @@
       logout                        保存したトークンを消す
       find-pr <repo> <branch>       そのブランチの open な PR 番号を引く
       post <repo> <n> <body-file>   PR へコメントを 1 通投稿する
-      ask-note <repo> <n> <round> <build> [<url>] [yes|no]
-                                    **所見を尋ねて投稿する**。すぐ返り、ダイアログは
-                                    別プロセスに残る
 
-    **ask-note が「待たない」のが肝。** プラグインは同梱スクリプトの出力を読み終わるまで
-    Vectorworks のメインスレッドを止めるので、ここでダイアログを出して待つと図面が固まって
-    見られない——所見を書くために絵を見たい、という当の目的が果たせない。そこで ask-note は
-    **自分自身を別プロセスで起こし直して即座に `ok` を返す**（scripts/vw-feedback.sh の
-    同名モードと同じ作法）。
+    **ダイアログはここには無い。** 尋ねるのは全部プラグイン側で、しかも**取り込みが
+    始まる前**に済ませる（src/draw/Feedback.h）。ここでダイアログを出すと、プラグインは
+    出力を読み終わるまでメインスレッドを止めるので、そのあいだ図面が固まる。
 
     **トークンをコマンドラインに乗せない。** `login` が受け取るのは*ファイルのパス*で、
     中身は読んだ直後に消す（引数はプロセス一覧から見えるため）。保存は DPAPI
@@ -241,121 +236,6 @@ function Invoke-Post {
 }
 
 # ---------------------------------------------------------------------------
-# 所見を尋ねる（ask-note）。**別プロセスのダイアログ**なので、開いている間も
-# Vectorworks は動かせる（冒頭「ask-note が『待たない』のが肝」）。
-# ---------------------------------------------------------------------------
-
-# Get-Note: 所見を 1 つ尋ねる。取り消し／空欄はどちらも $null（Windows の InputBox は
-# その 2 つを区別しないが、どちらも「所見なし」なので困らない）。
-function Get-Note {
-    param([string] $Title, [string] $Prompt)
-    try {
-        Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction Stop
-        $text = [Microsoft.VisualBasic.Interaction]::InputBox($Prompt, $Title, '')
-        if ([string]::IsNullOrWhiteSpace($text)) { return $null }
-        return $text
-    } catch {
-        return $null
-    }
-}
-
-# Show-NoteAlert: 伝えないと黙って消えてしまうことだけを出す（投稿の失敗）。
-function Show-NoteAlert {
-    param([string] $Title, [string] $Message)
-    try {
-        Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction Stop
-        [Microsoft.VisualBasic.Interaction]::MsgBox($Message, 0, $Title) | Out-Null
-    } catch {
-        # 出せなくても続ける（付随の通知）。
-    }
-}
-
-function Open-Url {
-    param([string] $Url)
-    if (-not $Url) { return }
-    try { Start-Process $Url | Out-Null } catch {
-        # ブラウザを開けなくても投稿は済んでいる。
-    }
-}
-
-# Invoke-SelfDetached: 自分自身を別プロセスで起こす。**テストが差し替える唯一の口**で、
-# scripts/vw-feedback.sh の spawn_self と対になる。
-function Invoke-SelfDetached {
-    param([string[]] $ScriptArguments)
-    $self = $PSCommandPath
-    Start-Process -FilePath 'powershell' -WindowStyle Hidden -ArgumentList (@(
-            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $self) + $ScriptArguments) | Out-Null
-}
-
-# ask-note: **すぐ返る。** 自分自身を別プロセスで起こし直し、'ok' を出して終わる。
-function Invoke-AskNote {
-    param([string] $Repo, [string] $Number, [string] $Round, [string] $Build, [string] $Url,
-        [string] $Posted = 'yes')
-
-    if (-not $Number) {
-        Write-Output 'error=引数が不足しています。'
-        return
-    }
-    if (-not $Posted) { $Posted = 'yes' }
-    try {
-        Invoke-SelfDetached -ScriptArguments @(
-            'ask-note-worker', $Repo, $Number, $Round, $Build, $Url, $Posted)
-        Write-Output 'ok'
-    } catch {
-        Write-Output 'error=所見のダイアログを起動できませんでした。'
-    }
-}
-
-# ask-note-worker: 別プロセス側の本体。**プラグインはもう戻っている**ので、尋ねてから
-# 投稿するところまでここでやり切る。所見は独立した 1 通として投稿する（取り込み結果の
-# 本文へ差し込まない——差し込むと組み立てが C++ 側とここの 2 か所に割れる）。
-function Invoke-AskNoteWorker {
-    param([string] $Repo, [string] $Number, [string] $Round, [string] $Build, [string] $Url,
-        [string] $Posted = 'yes')
-
-    if (-not $Posted) { $Posted = 'yes' }
-
-    # **結果を投稿した周と、しなかった周で言うことが違う。** 投稿しなかった周は、この所見が
-    # その周について PR に載る**唯一のもの**になる——だからそう書いて、書く気になってもらう。
-    if ($Posted -eq 'no') {
-        $prompt = "round $Round の結果は投稿しませんでした。`n" +
-            "伝えたいことがあれば書いてください（これがこの周の唯一の記録になります）。`n" +
-            "空のままなら、何も投稿せずに終わります。`n" +
-            "（OK で所見を送り、キャンセルなら書かずに閉じます。）`n" +
-            '※ 往復は続きます（終わるのは次の取り込みの確認で「往復を終える」を押したときです）。'
-        $suffix = '・結果は未投稿'
-    } else {
-        $prompt = "round $Round を投稿しました。`n" +
-            "図面を確かめて、気付いたことがあれば書いてください（空のままなら所見なしで終わります）。`n" +
-            "（OK で所見を送り、キャンセルなら書かずに閉じます。）`n" +
-            '※ 往復は続きます（終わるのは次の取り込みの確認で「往復を終える」を押したときです）。'
-        $suffix = ''
-    }
-
-    $note = Get-Note -Title "実機フィードバック round $Round" -Prompt $prompt
-    if (-not $note) {
-        Open-Url $Url
-        return
-    }
-
-    $quoted = ($note -split "`r?`n" | ForEach-Object { "> $_" }) -join "`n"
-    $body = "<!-- homeskz-ifc-feedback-note v1 round=$Round build=$Build posted=$Posted -->`n" +
-        "### 実機を見ての所見（round $Round$suffix）`n`n" + $quoted + "`n"
-
-    $file = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
-    Set-Content -LiteralPath $file -Value $body -NoNewline
-    $out = (Invoke-Post -Repo $Repo -Number $Number -BodyFile $file) -join "`n"
-    Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
-
-    $reason = ($out -split "`n" | Where-Object { $_ -like 'error=*' } | Select-Object -First 1)
-    if ($reason) {
-        Show-NoteAlert '実機フィードバック' ("所見を投稿できませんでした（" + $reason.Substring(6) + "）")
-        return
-    }
-    Open-Url $Url
-}
-
-# ---------------------------------------------------------------------------
 # 引数を 1 つ取り出す（無ければ空文字）。範囲外の添字で落ちないようにするだけの道具。
 function Get-Argument {
     param([string[]] $Arguments, [int] $Index)
@@ -377,19 +257,7 @@ function Invoke-Main {
             Invoke-Post -Repo (Get-Argument $Arguments 1) -Number (Get-Argument $Arguments 2) `
                 -BodyFile (Get-Argument $Arguments 3)
         }
-        'ask-note'     {
-            Invoke-AskNote -Repo (Get-Argument $Arguments 1) -Number (Get-Argument $Arguments 2) `
-                -Round (Get-Argument $Arguments 3) -Build (Get-Argument $Arguments 4) `
-                -Url (Get-Argument $Arguments 5) -Posted (Get-Argument $Arguments 6)
-        }
-        # 内部用（ask-note が自分を起こし直すときの入口。人が直接呼ぶものではない）。
-        'ask-note-worker' {
-            Invoke-AskNoteWorker -Repo (Get-Argument $Arguments 1) `
-                -Number (Get-Argument $Arguments 2) -Round (Get-Argument $Arguments 3) `
-                -Build (Get-Argument $Arguments 4) -Url (Get-Argument $Arguments 5) `
-                -Posted (Get-Argument $Arguments 6)
-        }
-        default        { Write-Output "error=不明なモード: '$mode'（token-status / login / logout / find-pr / post / ask-note）。" }
+        default        { Write-Output "error=不明なモード: '$mode'（token-status / login / logout / find-pr / post）。" }
     }
 }
 

@@ -16,24 +16,10 @@
 #   logout                     キーチェーンから消す
 #   find-pr <repo> <branch>    そのブランチの open な PR 番号を引く
 #   post <repo> <n> <body-file>  PR（= issue）へコメントを 1 通投稿する
-#   ask-note <repo> <n> <round> <build> [<url>] [yes|no]
-#                              **所見を尋ねて投稿する**。すぐ返り、ダイアログは別プロセスに残る
-#                              末尾は「結果を投稿したか」（既定 yes）。no なら文言が変わり、
-#                              その所見がその周の唯一の記録になることを伝える
 #
-# **ask-note が「待たない」のが肝。** プラグインは同梱スクリプトの出力を読み終わるまで
-# Vectorworks のメインスレッドを止める（popen）ので、ここでダイアログを出して待つと
-# **図面が固まって見られない**——所見を書くために絵を見たい、という当の目的が果たせない。
-# そこで ask-note は**自分自身を detached で起こし直して即座に `ok` を返す**。プラグインは
-# すぐ戻り、Vectorworks は完全に操作できる状態になる。利用者は図面を拡大・レイヤ切り替え
-# しながら、別プロセスのダイアログに所見を書いて送れる（M23。VW のレイアウトダイアログは
-# モーダル前提で、モードレスにするには別の拡張種別が要る——[SDK リファレンス
-# 「モードレス（非モーダル）なパレット」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md)）。
-#
-# **戻り先が無いので、投稿までスクリプトがやり切る。** プラグインは既に戻っているから、
-# 所見を受け取って投稿するところまでこちらの仕事になる。所見は**独立した 1 通**として
-# 投稿する（本文へ差し込まない）——差し込む形にすると、コメントの組み立てが C++ 側
-# （parse/Feedback）とここの 2 か所に割れてしまう。
+# **ダイアログはここには無い。** 尋ねるのは全部プラグイン側で、しかも**取り込みが始まる
+# 前**に済ませる（src/draw/Feedback.h）。ここでダイアログを出すと、プラグインは popen の
+# 出力を読み終わるまでメインスレッドを止めるので、そのあいだ図面が固まる。
 #
 # **トークンをコマンドラインに乗せない。** `login` が受け取るのは*ファイルのパス*で、
 # 中身は読んだ直後に消す——引数はプロセス一覧（ps）から誰にでも見えるので、そこへ
@@ -270,114 +256,6 @@ mode_post() {
 }
 
 # ---------------------------------------------------------------------------
-# 所見を尋ねる（ask-note）。**別プロセスのダイアログ**なので、開いている間も
-# Vectorworks は動かせる（冒頭「ask-note が『待たない』のが肝」）。
-#
-# UI は macOS 同梱の osascript。値は argv で渡し、スクリプト本文へ埋め込まない
-# （scripts/vw-update.sh の同じヘルパーと同じ作法——題名や本文で AppleScript を
-# 壊せないようにするため）。
-# ---------------------------------------------------------------------------
-
-# ask_note: 所見を 1 つ尋ねる。「送る」なら入力（空のこともある）を echo して 0、
-# 「送らない」／キャンセルなら何も出さずに 1。
-ask_note() { # title, prompt
-	osascript - "$1" "$2" <<'APPLESCRIPT' 2>/dev/null || return 1
-on run argv
-	set r to display dialog (item 2 of argv) with title (item 1 of argv) default answer "" buttons {"所見を書かない", "所見を送る"} default button "所見を送る" cancel button "所見を書かない"
-	return text returned of r
-end run
-APPLESCRIPT
-}
-
-# note_alert: 伝えないと黙って消えてしまうことだけを出す（投稿の失敗）。
-note_alert() { # title, message
-	osascript - "$1" "$2" <<'APPLESCRIPT' >/dev/null 2>&1 || true
-on run argv
-	display dialog (item 2 of argv) with title (item 1 of argv) buttons {"OK"} default button "OK"
-end run
-APPLESCRIPT
-}
-
-# open_url: 投稿したコメントをブラウザで開く（失敗しても黙って続ける）。
-open_url() { # url
-	[ -n "$1" ] || return 0
-	open "$1" >/dev/null 2>&1 || true
-}
-
-# spawn_self: 自分自身を detached で起こす。**出力を捨てるのが肝**——繋いだままだと、
-# 呼び出し元（プラグインの popen）が子の終了まで EOF を見られず、結局待つことになる。
-# $0 は実行されたこのスクリプト。**テストが差し替える唯一の口**でもある。
-spawn_self() { # args...
-	nohup /bin/bash "$0" "$@" >/dev/null 2>&1 &
-}
-
-# ask-note: **すぐ返る。** 自分自身を detached で起こし直し、`ok` を出して終わる。
-# ダイアログと投稿はその子（ask-note-worker）が引き受ける。
-mode_ask_note() {
-	local repo="${1:-}" number="${2:-}" round="${3:-}" build="${4:-}" url="${5:-}" posted="${6:-yes}"
-	if [ -z "$number" ]; then
-		echo "error=引数が不足しています。"; return 0
-	fi
-	spawn_self ask-note-worker "$repo" "$number" "$round" "$build" "$url" "$posted"
-	echo "ok"
-}
-
-# ask-note-worker: 別プロセス側の本体。**プラグインはもう戻っている**ので、尋ねてから
-# 投稿するところまでここでやり切る。
-#
-# 所見は**独立した 1 通**として投稿する（取り込み結果の本文へ差し込まない）。差し込む形に
-# すると、コメントの組み立てが C++ 側（parse/Feedback）とここの 2 か所に割れる。
-mode_ask_note_worker() {
-	local repo="${1:-}" number="${2:-}" round="${3:-}" build="${4:-}" url="${5:-}" posted="${6:-yes}"
-
-	# **結果を投稿した周と、しなかった周で言うことが違う。** 投稿しなかった周は、この所見が
-	# その周について PR に載る**唯一のもの**になる——だからそう書いて、書く気になってもらう。
-	local prompt suffix
-	if [ "$posted" = "no" ]; then
-		prompt="round ${round} の結果は投稿しませんでした。
-伝えたいことがあれば書いてください（これがこの周の唯一の記録になります）。
-空のまま送れば、何も投稿せずに終わります。
-※ 往復は続きます（終わるのは次の取り込みの確認で「往復を終える」を押したときです）。"
-		suffix="・結果は未投稿"
-	else
-		prompt="round ${round} を投稿しました。
-図面を確かめて、気付いたことがあれば書いてください（空のまま送れば所見なしで終わります）。
-※ 往復は続きます（終わるのは次の取り込みの確認で「往復を終える」を押したときです）。"
-		suffix=""
-	fi
-
-	local note
-	if ! note="$(ask_note "実機フィードバック round ${round}" "$prompt")"; then
-		open_url "$url" # 「送らない」でも、投稿そのものは済んでいるので開いて見せる
-		return 0
-	fi
-	note="$(printf '%s' "$note" | tr -d '\r')"
-	if [ -z "$note" ]; then
-		open_url "$url"
-		return 0
-	fi
-
-	local body; body="$(mktemp)"
-	{
-		# 機械可読の目印。取り込み結果のコメント（parse/Feedback）とは別の種別にして、
-		# **人が書いた所見だと読む側が判別できる**ようにする。
-		printf '<!-- homeskz-ifc-feedback-note v1 round=%s build=%s posted=%s -->\n' \
-			"$round" "$build" "$posted"
-		printf '### 実機を見ての所見（round %s%s）\n\n' "$round" "$suffix"
-		printf '%s\n' "$note" | awk '{ print "> " $0 }'
-	} > "$body"
-
-	local out; out="$(mode_post "$repo" "$number" "$body")"
-	rm -f "$body"
-	local reason; reason="$(printf '%s\n' "$out" | sed -n 's/^error=//p' | head -n 1)"
-	if [ -n "$reason" ]; then
-		note_alert "実機フィードバック" "所見を投稿できませんでした（${reason}）"
-		return 0
-	fi
-	open_url "$url"
-}
-
-# ---------------------------------------------------------------------------
 main() {
 	command -v curl >/dev/null 2>&1 || { echo "error=curl が見つかりません。"; exit 0; }
 
@@ -389,11 +267,7 @@ main() {
 		logout)       mode_logout ;;
 		find-pr)      mode_find_pr "${1:-}" "${2:-}" ;;
 		post)         mode_post "${1:-}" "${2:-}" "${3:-}" ;;
-		ask-note)     mode_ask_note "${1:-}" "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" ;;
-		# 内部用（ask-note が自分を起こし直すときの入口。人が直接呼ぶものではない）。
-		ask-note-worker)
-			mode_ask_note_worker "${1:-}" "${2:-}" "${3:-}" "${4:-}" "${5:-}" "${6:-}" ;;
-		*)            echo "error=不明なモード: '${mode}'（token-status / login / logout / find-pr / post / ask-note）。" ;;
+		*)            echo "error=不明なモード: '${mode}'（token-status / login / logout / find-pr / post）。" ;;
 	esac
 }
 

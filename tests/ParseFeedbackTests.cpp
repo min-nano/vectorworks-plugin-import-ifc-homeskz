@@ -8,7 +8,7 @@
 //	検証項目（docs/DEV-NOTES.md M23）:
 //	  * 内訳の 1 行表現と、その差分（周回どうしの突き合わせ）
 //	  * 匿名化——同じ入力なら同じ仮名・**素のファイル名とユーザー名がどこにも残らない**
-//	  * 目印・所見・注意・ログが本文に載ること、上限で切り詰めること
+//	  * 目印・注意・ログが本文に載ること、所見は載らないこと、上限で切り詰めること
 //
 
 #include "TestFramework.h"
@@ -215,13 +215,12 @@ TEST(feedback_comment_can_show_the_real_name)
 
 TEST(feedback_comment_does_not_carry_the_human_note)
 {
-	// **所見はこの本文に載らない。** 絵を見てから書くには Vectorworks を操作できなければ
-	// ならず、プラグインは所見を待たずに戻る——尋ねて投稿するのは別プロセスのダイアログ
-	// （scripts/vw-feedback.* の ask-note）の仕事で、所見は独立した 1 通として届く。
+	// **所見はこの本文に載らない。** 絵を見て気付いたことは人が Claude とのチャットへ
+	// 直接書く——プラグインは所見を訊く仕組みを持たない（docs/DEV-NOTES.md M23）。
 	// 本文はそのことを読む側へ伝える。
 	const std::string body = formatFeedbackComment(sampleRound(), sampleDocument(), sampleCounts());
 	CHECK(!contains(body, "### 実機を見ての所見"));
-	CHECK(contains(body, "別のコメントとして届きます"));
+	CHECK(contains(body, "チャットへ直接書かれます"));
 }
 
 TEST(feedback_comment_shows_the_diff_from_the_previous_round)
