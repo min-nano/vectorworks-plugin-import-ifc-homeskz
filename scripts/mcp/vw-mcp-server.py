@@ -5,7 +5,7 @@
 #   Claude ──MCP(stdio/JSON-RPC)──▶ このスクリプト
 #                                     │ <id>.req.json を書く／<id>.res.json を待つ
 #                                     ▼
-#                                 スプール（既定 ~/.min-nano_structure/mcp）
+#                        スプール（一時ディレクトリの min-nano_structure-mcp）
 #                                     ▲
 #                                     │ 拾う／応える
 #                               Vectorworks（メニュー「MCP ブリッジを開始…」の実行中だけ）
@@ -22,6 +22,11 @@
 #
 #   claude mcp add vectorworks -- python3 <この scripts/mcp/vw-mcp-server.py のパス>
 #
+# 【スプールは探す】プラグイン側は自分の一時ディレクトリへ置くが、一時ディレクトリは
+# 環境変数で決まるので両側で食い違いうる（macOS の $TMPDIR は利用者ごとで、ssh や cron
+# から起動したプロセスには無い）。そこでこちらが候補を順に見て、**生きた印がある場所**を
+# 使う（spool_candidates / Bridge.status）。
+#
 # 環境変数:
 #   VW_MCP_SPOOL   スプールの場所を明示する（プラグイン側と同じ値にすること）
 #   VW_MCP_PLUGIN  プラグイン名（既定 min-nano_structure。開発版は min-nano_structureDev）
@@ -35,6 +40,7 @@ import json
 import os
 import secrets
 import sys
+import tempfile
 import time
 
 # --- 受け渡しの作法（src/core/Bridge.h と対）---------------------------------
@@ -61,14 +67,43 @@ def log(message):
     print("[vw-mcp] " + message, file=sys.stderr, flush=True)
 
 
-def spool_dir():
-    """使うスプール。**プラグイン側（core::bridgeSpoolDir）と同じ組み立て。**"""
+def spool_candidates():
+    """スプールの候補を、確からしい順に並べて返す。
+
+    **探すのはこちらの仕事である。** プラグイン側は自分の一時ディレクトリへ素直に置く
+    （`<temp>/<プラグイン名>-mcp`）が、一時ディレクトリは環境変数で決まるので**両側で
+    食い違いうる**——macOS の $TMPDIR は利用者ごとの `/var/folders/…` で、ssh や cron から
+    起動したプロセスにはそれが無く `/tmp` に落ちる。そこで候補を順に見て、**生きた印
+    （bridge.json）があるところ**を使う（Bridge.status）。
+
+    VW_MCP_SPOOL が指定されていれば、それだけを候補にする（両側で同じ値にすること）。
+    """
     override = os.environ.get("VW_MCP_SPOOL", "")
     if override:
-        return override
+        return [override]
+
     plugin = os.environ.get("VW_MCP_PLUGIN", "") or DEFAULT_PLUGIN
-    home = os.path.expanduser("~").rstrip("/\\")
-    return home + "/." + plugin + "/mcp"
+    roots = []
+
+    def add(root):
+        if root and root not in roots:
+            roots.append(root)
+
+    add(tempfile.gettempdir())
+    # macOS の利用者ごとの一時ディレクトリ。$TMPDIR が無い経路（ssh 等）から起動しても、
+    # GUI アプリ（＝Vectorworks）が使うこの場所を直に引ける。
+    try:
+        if "CS_DARWIN_USER_TEMP_DIR" in os.confstr_names:
+            add(os.confstr("CS_DARWIN_USER_TEMP_DIR"))
+    except (AttributeError, OSError, ValueError):
+        # この環境には無い（Linux / Windows）。候補が 1 つ減るだけで、害は無い。
+        pass
+    for name in ("TMPDIR", "TMP", "TEMP"):
+        add(os.environ.get(name, ""))
+    if os.name != "nt":
+        add("/tmp")
+
+    return [os.path.join(root.rstrip("/\\"), plugin + "-mcp") for root in roots]
 
 
 def call_timeout():
@@ -85,18 +120,21 @@ class BridgeDown(Exception):
 class Bridge:
     """スプール越しに Vectorworks を呼ぶ（1 往復＝ファイル 2 つ）。"""
 
-    def __init__(self, directory):
-        self.dir = directory
+    def __init__(self, candidates):
+        self.candidates = candidates
+        # いまの当て（生きた印が見つかるまでは先頭。案内の文言にも使う）。
+        self.dir = candidates[0] if candidates else ""
         self.seq = 0
 
     # --- 生存確認 ---------------------------------------------------------
-    def status(self):
-        """動いていれば status の dict、動いていなければ None。"""
-        path = os.path.join(self.dir, STATUS_FILE)
+    @staticmethod
+    def _read_status(directory):
+        """その場所の印を読む。生きていなければ None。"""
         try:
-            with open(path, "r", encoding="utf-8") as handle:
+            with open(os.path.join(directory, STATUS_FILE), "r", encoding="utf-8") as handle:
                 status = json.load(handle)
         except (OSError, ValueError):
+            # 無い（大半はこちら）か、書きかけを読んだ。どちらも「ここではない」。
             return None
         if not isinstance(status, dict):
             return None
@@ -108,6 +146,18 @@ class Bridge:
             return None
         return status
 
+    def status(self):
+        """動いていれば status の dict、動いていなければ None。
+
+        **見つけた場所を憶える。** 以降の要求はそこへ置く。
+        """
+        for directory in self.candidates:
+            status = self._read_status(directory)
+            if status is not None:
+                self.dir = directory
+                return status
+        return None
+
     def require_status(self):
         status = self.status()
         if status is None:
@@ -115,7 +165,7 @@ class Bridge:
                 "Vectorworks 側でブリッジが動いていません。\n"
                 "Vectorworks のメニュー「MCP ブリッジを開始…」を実行してから、"
                 "もう一度お試しください。\n"
-                "（接続先: %s）" % self.dir
+                "（探した場所: %s）" % ", ".join(self.candidates)
             )
         if status.get("protocol") != PROTOCOL_VERSION:
             raise BridgeDown(
@@ -211,6 +261,15 @@ class Bridge:
             pass
 
     def _load_cache(self):
+        # まだ繋がっていないと self.dir は当てでしかないので、候補を順に見る。
+        for directory in self.candidates:
+            try:
+                with open(os.path.join(directory, TOOLS_CACHE_FILE), "r", encoding="utf-8") as h:
+                    tools = json.load(h)
+                if isinstance(tools, list):
+                    return tools
+            except (OSError, ValueError):
+                continue
         try:
             with open(self._cache_path(), "r", encoding="utf-8") as handle:
                 tools = json.load(handle)
@@ -241,7 +300,7 @@ def bridge_status_result(bridge):
     if status is None:
         return {
             "running": False,
-            "spool": bridge.dir,
+            "searched": bridge.candidates,
             "hint": (
                 "Vectorworks のメニュー「MCP ブリッジを開始…」を実行してください。"
                 "実行中は Vectorworks が進捗ダイアログの中で待ち、"
@@ -324,8 +383,8 @@ def handle(bridge, message):
 
 
 def main():
-    bridge = Bridge(spool_dir())
-    log("接続先: %s" % bridge.dir)
+    bridge = Bridge(spool_candidates())
+    log("探す場所: %s" % ", ".join(bridge.candidates))
     if bridge.status() is None:
         log("いまブリッジは動いていません（Vectorworks でメニューを実行してください）。")
 

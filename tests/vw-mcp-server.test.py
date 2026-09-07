@@ -116,10 +116,21 @@ class FakeVectorworks(threading.Thread):
         os.replace(temp, os.path.join(self.spool, request["id"] + ".res.json"))
 
 
-def drive(spool, messages, timeout="30"):
-    """サーバへ一括で流し込み、返ってきた JSON 行を返す。"""
+def drive(spool, messages, timeout="30", by_tmpdir=False):
+    """サーバへ一括で流し込み、返ってきた JSON 行を返す。
+
+    by_tmpdir=True のときは VW_MCP_SPOOL を渡さず、**TMPDIR から自力で探させる**
+    （プラグイン側と Claude 側が別々に場所を決める、本番と同じ経路）。
+    """
     env = dict(os.environ)
-    env["VW_MCP_SPOOL"] = spool
+    if by_tmpdir:
+        env.pop("VW_MCP_SPOOL", None)
+        env["TMPDIR"] = os.path.dirname(spool.rstrip("/"))
+        env["TMP"] = env["TMPDIR"]
+        env["TEMP"] = env["TMPDIR"]
+        env["VW_MCP_PLUGIN"] = "min-nano_structure"
+    else:
+        env["VW_MCP_SPOOL"] = spool
     env["VW_MCP_TIMEOUT"] = timeout
     text = "".join(json.dumps(m) + "\n" for m in messages)
     done = subprocess.run(
@@ -244,8 +255,42 @@ def main():
         leftovers = [n for n in os.listdir(spool) if n.endswith(".req.json")]
         check_eq(leftovers, [], "諦めた要求はスプールに残さない")
 
+        # ここから先は代役を建て直すので、先に止める（走ったままディレクトリの名前を
+        # 変えると、代役が印を書けずに落ちる）。
         fake.stop_flag.set()
         fake.join(timeout=5)
+
+        # --- 場所を自力で探し当てる -------------------------------------
+        # **本番はこの経路。** プラグイン側は自分の一時ディレクトリへ置き、こちらは
+        # 候補を順に見て生きた印のある場所を使う（両側で $TMPDIR が食い違いうるため）。
+        # スプールは <一時ディレクトリ>/min-nano_structure-mcp でなければならない。
+        found = os.path.join(root, "min-nano_structure-mcp")
+        os.rename(spool, found)
+        found_fake = FakeVectorworks(found)
+        found_fake.start()
+        time.sleep(0.3)
+        replies = drive(found, [call("vw_ping", request_id=1)], by_tmpdir=True)
+        check(
+            replies[0]["result"]["isError"] is False,
+            "VW_MCP_SPOOL 無しでも一時ディレクトリから探し当てる",
+        )
+        found_fake.stop_flag.set()
+        found_fake.join(timeout=5)
+
+        # 名前が違えば見つからない（＝両側の綴りが対であることの確認）。
+        os.rename(found, os.path.join(root, "wrong-name-mcp"))
+        replies = drive(
+            os.path.join(root, "wrong-name-mcp"),
+            [call("vw_bridge_status", request_id=1)],
+            timeout="1",
+            by_tmpdir=True,
+        )
+        status = json.loads(content_text(replies[0]))
+        check(status["running"] is False, "綴りが違うスプールは見つけない")
+        check(
+            any(c.endswith("min-nano_structure-mcp") for c in status["searched"]),
+            "探した場所を返す（%r）" % status["searched"],
+        )
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

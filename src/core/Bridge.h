@@ -8,7 +8,7 @@
 //	    Claude ──MCP(stdio)──▶ scripts/mcp/vw-mcp-server.py
 //	                              │ <id>.req.json を書く／<id>.res.json を待つ
 //	                              ▼
-//	                          スプール（既定: ~/.min-nano_structure/mcp）
+//	                        スプール（一時ディレクトリの min-nano_structure-mcp）
 //	                              ▲
 //	                              │ 拾う／応える（メニュー「MCP ブリッジ」の実行中だけ）
 //	                        Vectorworks（draw::runMcpBridge）
@@ -56,11 +56,18 @@ namespace HomeskzIfcImport::core
 	inline constexpr std::size_t kBridgeMaxRequestBytes = 1U << 20U; // 1 MiB
 	inline constexpr std::size_t kBridgeMaxRequestsPerPoll = 16;
 
-	// スプールの既定の置き場所。**home の下に置く**——一時ディレクトリは環境変数で
-	// プロセスごとに違いうる（macOS の $TMPDIR は利用者ごとの乱数パス）ので、別々に
-	// 起動した 2 つのプロセスが同じ場所を指すとは限らない。home なら両側で必ず一致する。
+	// スプールの置き場所。**一時ディレクトリの下**（中身は正に一時データで、利用者の
+	// ものではない。本体の複製も診断ログも同じ場所へ置く決まり。CLAUDE.md）。
+	// 名前にプラグイン名を含めるので、stable と dev が同居しても取り違えない。
 	// 区切りは '/' で組む（Windows も受け付ける）。
-	std::string bridgeSpoolDir(const std::string& home, const std::string& pluginName);
+	//
+	// **両側が同じ場所を指すとは限らない。** 一時ディレクトリは環境変数で決まり、
+	// macOS の $TMPDIR は利用者ごとの `/var/folders/…` だが、ssh や cron から起動した
+	// プロセスにはそれが無く `/tmp` に落ちる。そこで**探すのは Python 側の仕事**にした
+	// ——候補を順に見て、生きた印（bridge.json）があるところを使う
+	// （scripts/mcp/vw-mcp-server.py の spool_candidates）。プラグイン側は自分の
+	// 一時ディレクトリへ素直に置くだけでよい。
+	std::string bridgeSpoolDir(const std::string& tempDir, const std::string& pluginName);
 
 	// id としてファイル名に使ってよい綴りか（英数字・'-'・'_' のみ、1〜64 文字）。
 	// **これがスプールの外へ書かせないための唯一の関門**である。
@@ -106,7 +113,12 @@ namespace HomeskzIfcImport::core
 			return fDir;
 		}
 
-		// ディレクトリを作る（既にあれば何もしない）。作れなければ false と理由。
+		// ディレクトリを用意する。作れない・**素性が怪しい**ときは false と理由。
+		//
+		// **持ち主と権限を確かめる。** 一時ディレクトリは `/tmp` に落ちることがあり、
+		// そこは同じ計算機の他の利用者からも書ける。要求を投げ込まれれば図面を読まれ、
+		// 応答を読まれれば中身が漏れるので、**自分のもので・自分にしか書けない**
+		// ディレクトリでなければ使わない（POSIX のみ。Windows の %TEMP% は利用者ごと）。
 		bool prepare(std::string& error);
 
 		// 前の回の残骸（要求・応答・書きかけ）を消す。**開始時に 1 回**呼ぶ——落ちた

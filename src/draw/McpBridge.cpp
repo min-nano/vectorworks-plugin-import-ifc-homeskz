@@ -40,6 +40,8 @@
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
+#include <system_error>
 #include <string>
 #include <thread>
 #include <utility>
@@ -473,24 +475,29 @@ namespace HomeskzIfcImport::draw
 
 		// --- スプールの場所 ---------------------------------------------------
 
-		// いまのホームディレクトリ（読めなければ空）。
-		std::string HomeDirectory()
+		// いまの一時ディレクトリ（読めなければ空）。本体の複製を置くのと同じ場所で
+		// （src/PayloadHost.cpp）、スプールの中身も正に一時データである。
+		std::string TempDirectory()
 		{
-#if defined(_WIN32)
-			const char* const home = std::getenv("USERPROFILE");
-#else
-			const char* const home = std::getenv("HOME");
-#endif
-			return home != nullptr ? std::string(home) : std::string();
+			std::error_code ec;
+			const std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
+			if (ec)
+				return {};
+			return dir.string();
 		}
 
 		// 使うスプール。VW_MCP_SPOOL があればそれを優先する（Python 側も同じ）。
+		//
+		// **こちらは探さない。** 一時ディレクトリが両側で食い違いうる（macOS の $TMPDIR は
+		// 利用者ごとで、ssh や cron から起動したプロセスには無い）ことへの手当ては
+		// Python 側が持つ——あちらが候補を順に見て、生きた印のあるところへ要求を置く
+		// （core/Bridge.h の bridgeSpoolDir）。
 		std::string SpoolDirectory()
 		{
 			const char* const chosen = std::getenv("VW_MCP_SPOOL");
 			if (chosen != nullptr && *chosen != '\0')
 				return {chosen};
-			return core::bridgeSpoolDir(HomeDirectory(), PLUGIN_VWR_ID);
+			return core::bridgeSpoolDir(TempDirectory(), PLUGIN_VWR_ID);
 		}
 
 		// いまの時刻（epoch 秒）。生存の印に載せる。

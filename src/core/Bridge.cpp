@@ -23,6 +23,14 @@
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#	include <cerrno>
+#else
+#	include <cerrno>
+#	include <sys/stat.h>
+#	include <unistd.h>
+#endif
+
 namespace HomeskzIfcImport::core
 {
 	namespace
@@ -90,12 +98,12 @@ namespace HomeskzIfcImport::core
 	} // namespace
 
 	// -----------------------------------------------------------------------
-	std::string bridgeSpoolDir(const std::string& home, const std::string& pluginName)
+	std::string bridgeSpoolDir(const std::string& tempDir, const std::string& pluginName)
 	{
-		std::string base = home;
+		std::string base = tempDir;
 		while (!base.empty() && (base.back() == '/' || base.back() == '\\'))
 			base.pop_back();
-		return base + "/." + pluginName + "/mcp";
+		return base + "/" + pluginName + "-mcp";
 	}
 
 	bool isValidBridgeId(const std::string& id)
@@ -174,9 +182,12 @@ namespace HomeskzIfcImport::core
 		error.clear();
 		if (fDir.empty())
 		{
-			error = "スプールの場所が決まりません（ホームディレクトリが読めない？）";
+			error = "スプールの場所が決まりません（一時ディレクトリが読めない？）";
 			return false;
 		}
+#if defined(_WIN32)
+		// Windows の %TEMP% は利用者ごと（AppData\Local\Temp）なので、持ち主の確認は
+		// 要らない。
 		std::error_code ec;
 		std::filesystem::create_directories(fDir, ec);
 		if (ec && !std::filesystem::is_directory(fDir))
@@ -185,6 +196,41 @@ namespace HomeskzIfcImport::core
 			return false;
 		}
 		return true;
+#else
+		// **自分にしか書けない形で作る**（0700）。umask はビットを落とすだけなので、
+		// これより緩くはならない。親（一時ディレクトリ）は既にあるので 1 段でよい。
+		if (::mkdir(fDir.c_str(), S_IRWXU) != 0 && errno != EEXIST)
+		{
+			error = "スプールを作れません: " + fDir;
+			return false;
+		}
+
+		// 既にあったものは**素性を確かめてから使う**（Bridge.h「持ち主と権限を確かめる」）。
+		// `stat` は関数名でもあるので型は別名で綴る（src/PayloadHost.cpp と同じ理由）。
+		using FileStat = struct stat;
+		FileStat info{};
+		if (::stat(fDir.c_str(), &info) != 0)
+		{
+			error = "スプールを確かめられません: " + fDir;
+			return false;
+		}
+		if (!S_ISDIR(info.st_mode))
+		{
+			error = "スプールの場所がディレクトリではありません: " + fDir;
+			return false;
+		}
+		if (info.st_uid != ::geteuid())
+		{
+			error = "スプールが他の利用者のものです: " + fDir;
+			return false;
+		}
+		if ((info.st_mode & (S_IWGRP | S_IWOTH)) != 0)
+		{
+			error = "スプールが他からも書き込める状態です: " + fDir;
+			return false;
+		}
+		return true;
+#endif
 	}
 
 	std::size_t BridgeSpool::sweep()

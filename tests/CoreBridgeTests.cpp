@@ -87,14 +87,16 @@ namespace
 
 TEST(bridge_spool_dir_is_the_same_rule_on_both_sides)
 {
-	// **Python 側（scripts/mcp/vw-mcp-server.py）と同じ組み立て。** 変えるときは両方。
-	CHECK_EQ(bridgeSpoolDir("/Users/me", "min-nano_structure"),
-			 std::string("/Users/me/.min-nano_structure/mcp"));
-	// 末尾の区切りは足さない（home の綴りが環境によって揺れる）。
-	CHECK_EQ(bridgeSpoolDir("/Users/me/", "min-nano_structure"),
-			 std::string("/Users/me/.min-nano_structure/mcp"));
-	CHECK_EQ(bridgeSpoolDir("C:\\Users\\me\\", "min-nano_structureDev"),
-			 std::string("C:\\Users\\me/.min-nano_structureDev/mcp"));
+	// **Python 側（scripts/mcp/vw-mcp-server.py の spool_candidates）と同じ組み立て。**
+	// 変えるときは両方。置き場所は一時ディレクトリの下で、名前にプラグイン名を含める
+	// （stable と dev が同居しても取り違えない）。
+	CHECK_EQ(bridgeSpoolDir("/var/folders/ab/cd/T", "min-nano_structure"),
+			 std::string("/var/folders/ab/cd/T/min-nano_structure-mcp"));
+	// 末尾の区切りは足さない（一時ディレクトリの綴りが環境によって揺れる）。
+	CHECK_EQ(bridgeSpoolDir("/tmp/", "min-nano_structure"),
+			 std::string("/tmp/min-nano_structure-mcp"));
+	CHECK_EQ(bridgeSpoolDir("C:\\Users\\me\\AppData\\Local\\Temp\\", "min-nano_structureDev"),
+			 std::string("C:\\Users\\me\\AppData\\Local\\Temp/min-nano_structureDev-mcp"));
 }
 
 TEST(bridge_id_charset_is_the_only_gate)
@@ -260,7 +262,7 @@ TEST(bridge_failure_response_carries_the_reason)
 
 TEST(bridge_spool_prepare_reports_why_it_could_not)
 {
-	// 場所が決まらない（ホームが読めない等）。
+	// 場所が決まらない（一時ディレクトリが読めない等）。
 	BridgeSpool nowhere("");
 	std::string error;
 	CHECK(!nowhere.prepare(error));
@@ -274,6 +276,34 @@ TEST(bridge_spool_prepare_reports_why_it_could_not)
 	error.clear();
 	CHECK(!blocked.prepare(error));
 	CHECK(!error.empty());
+}
+
+TEST(bridge_spool_refuses_a_world_writable_directory)
+{
+	// **スプールは一時ディレクトリの下にある**（`/tmp` に落ちることもある）。そこは同じ
+	// 計算機の他の利用者からも書けるので、**他から書ける状態のディレクトリは使わない**
+	// ——要求を投げ込まれれば図面を読まれ、応答を読まれれば中身が漏れる。
+	const TempDir temp("world-writable");
+	const std::string dir = temp.path() + "/mcp";
+
+	BridgeSpool spool(dir);
+	std::string error;
+	CHECK(spool.prepare(error));
+	CHECK(error.empty());
+
+	// 作られたものは自分にしか書けない（0700）。
+	CHECK(std::filesystem::is_directory(dir));
+#ifndef _WIN32
+	const std::filesystem::perms mode = std::filesystem::status(dir).permissions();
+	CHECK((mode & std::filesystem::perms::group_write) == std::filesystem::perms::none);
+	CHECK((mode & std::filesystem::perms::others_write) == std::filesystem::perms::none);
+
+	// 誰でも書ける状態にすると、次からは使わない。
+	std::filesystem::permissions(dir, std::filesystem::perms::all);
+	error.clear();
+	CHECK(!spool.prepare(error));
+	CHECK(!error.empty());
+#endif
 }
 
 TEST(bridge_spool_is_quiet_when_the_directory_is_missing)

@@ -10,7 +10,7 @@
 //	往復の少ない形で調べられる（CLAUDE.md「実機確認の作法」を補う道具）。
 //
 //	【何が起きるか】本体（ペイロード）の draw::runMcpBridge（src/draw/McpBridge.h）。
-//	スプール（既定 `~/.min-nano_structure/mcp`）に置かれた要求を拾って応え、
+//	スプール（一時ディレクトリの `min-nano_structure-mcp`）に置かれた要求を拾って応え、
 //	［キャンセル］か道具 `vw_stop_bridge` で止まる。**止めるまで戻らない**——
 //	Vectorworks のメインスレッド以外から SDK を呼べないので、メニューコマンドの実行
 //	そのものを橋の寿命にしている（src/draw/McpBridge.h「なぜループなのか」）。
