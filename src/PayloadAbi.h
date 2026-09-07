@@ -58,7 +58,9 @@
 //   1 … 取り込みコマンドと 2 つの PIO のリセットを載せた最初の形
 //   2 … 実機フィードバックの往復（M23）。同梱スクリプトの実行を殻から借り、取り込みは
 //       「次は更新を尋ねずに入れてよいか」を返すようになった
-#define VW_PAYLOAD_ABI_VERSION 2u
+//   3 … モードレスの往復（M24）。殻のパレットが本体へ「往復の記憶」を尋ね（loop_status）、
+//       止めたことを伝える（loop_end）口が増えた
+#define VW_PAYLOAD_ABI_VERSION 3u
 
 // 本体側の export 指定。Windows は明示しないと DLL の外から見えない。
 #if defined(_WIN32)
@@ -128,6 +130,8 @@ extern "C"
 #define VW_PAYLOAD_SYM_IMPORT "vw_payload_run_import"
 #define VW_PAYLOAD_SYM_RECALC "vw_payload_recalculate"
 #define VW_PAYLOAD_SYM_SHUTDOWN "vw_payload_shutdown"
+#define VW_PAYLOAD_SYM_LOOP_STATUS "vw_payload_loop_status"
+#define VW_PAYLOAD_SYM_LOOP_END "vw_payload_loop_end"
 
 	// その型。
 	using VwPayloadAbiVersionFn = unsigned int (*)();
@@ -144,6 +148,20 @@ extern "C"
 	using VwPayloadRunImportFn = int (*)(int* outAutoUpdate);
 	using VwPayloadRecalculateFn = int (*)(unsigned int, void*, int*);
 	using VwPayloadShutdownFn = void (*)();
+
+	// **往復の記憶を殻へ見せる**（M24。src/FeedbackLoop.h）。out には key=value の行が
+	// 並ぶ（active / repo / pr / branch / round / build / posted。UpdaterParse の ValueOf で
+	// 解ける）。文字列の寿命は他と同じ——**次に本体を呼ぶまで**。殻はその場で写す。
+	//
+	// 記憶を読むのが本体なのは、その形（core::FeedbackSession）を知っているのが本体だけ
+	// だから——殻は core/ をリンクしない（CLAUDE.md「殻と本体」7）。
+	using VwPayloadLoopStatusFn = int (*)(const char** out);
+
+	// **自動の往復を止めたと本体へ伝える。** 本体は記憶の loop を下ろす（記憶そのものは
+	// 消さない——人がメニューから実行すれば続きの周として走る）。notifyPr が 0 以外なら
+	// PR へ「終えました」を 1 通投稿する（読む側が待ち続けないように）。reason は
+	// 人に見せる 1 行（UTF-8）。
+	using VwPayloadLoopEndFn = int (*)(const char* reason, int notifyPr);
 
 	// -----------------------------------------------------------------------
 	// 戻り値。**0 が成功**で、それ以外は理由を表す（例外は越えさせないので、失敗は

@@ -349,6 +349,92 @@ printf '%s' "keychain-secret-value" > "$KEYCHAIN"
 check "post: a missing body file is refused" "$(mode_post "o/r" "123" "$WORK/none.md")" \
 	"error=引数が不足しています。"
 
+CURL_BODY='{"html_url":"https://github.com/o/r/pull/123#issuecomment-2","created_at":"2026-09-07T01:02:03Z"}'
+out="$(mode_post "o/r" "123" "$BODY_FILE")"
+check "post: reports when the comment was created (the next loop-control's since)" "$out" \
+	"url=https://github.com/o/r/pull/123#issuecomment-2
+created=2026-09-07T01:02:03Z
+ok"
+
+# ---------------------------------------------------------------------------
+# loop-control — 往復を続けてよいか（M24）。PR の状態と「止めろ」の合図。
+#
+# curl の応答を **URL で出し分ける**: /pulls/<n> には PR の JSON、/issues/<n>/comments には
+# コメントの配列。stub は 1 つの CURL_BODY しか返せないので、ここだけ URL を見る版に替える。
+# ---------------------------------------------------------------------------
+PULL_BODY='{"state":"open","merged":false}'
+COMMENTS_BODY='[]'
+COMMENTS_URL_FILE="$WORK/comments-url.txt"
+curl() {
+	local out="" arg url=""
+	while [ "$#" -gt 0 ]; do
+		arg="$1"
+		case "$arg" in
+			-o) out="${2:-}"; shift ;;
+			https://*) url="$arg" ;;
+		esac
+		shift
+	done
+	[ "$CURL_FAIL" -eq 1 ] && return 1
+	case "$url" in
+		*/issues/*/comments*)
+			printf '%s' "$url" > "$COMMENTS_URL_FILE"
+			[ -n "$out" ] && printf '%s' "$COMMENTS_BODY" > "$out"
+			;;
+		*/pulls/*)
+			[ -n "$out" ] && printf '%s' "$PULL_BODY" > "$out"
+			;;
+	esac
+	return 0
+}
+
+check "loop-control: open, no signal" "$(mode_loop_control "o/r" "123" "")" "state=open
+control=none
+ok"
+check_contains "loop-control: without since it reads the recent comments" \
+	"$(cat "$COMMENTS_URL_FILE")" "/repos/o/r/issues/123/comments?per_page=100&page=1"
+
+COMMENTS_BODY='[{"id":1,"body":"<!-- homeskz-ifc-feedback v1 round=3 build=abc1234 branch=x -->\n## round 3"},{"id":2,"body":"直しました。\n\n<!-- homeskz-ifc-feedback v1 control=stop -->\n往復はもう要りません。"}]'
+out="$(mode_loop_control "o/r" "123" "2026-09-07T01:02:03Z")"
+check "loop-control: Claude's stop signal is found" "$out" "state=open
+control=stop
+ok"
+check_contains "loop-control: since narrows the comments to those after our own post" \
+	"$(cat "$COMMENTS_URL_FILE")" "&since=2026-09-07T01:02:03Z"
+
+# **プラグイン自身の「終えました」（control=ended）を「止めろ」と読まない。** また、
+# 目印の無いコメントに control=stop と書いてあっても合図ではない。
+COMMENTS_BODY='[{"id":3,"body":"<!-- homeskz-ifc-feedback v1 control=ended reason=user -->\n往復を終えました。"},{"id":4,"body":"control=stop と書いただけ"}]'
+check "loop-control: ended / unmarked comments are not a signal" \
+	"$(mode_loop_control "o/r" "123" "")" "state=open
+control=none
+ok"
+
+PULL_BODY='{"state":"closed","merged":true}'
+COMMENTS_BODY='[]'
+check "loop-control: a merged PR reads as merged" "$(mode_loop_control "o/r" "123" "")" \
+	"state=merged
+control=none
+ok"
+PULL_BODY='{"state":"closed","merged":false}'
+check "loop-control: a closed PR reads as closed" "$(mode_loop_control "o/r" "123" "")" \
+	"state=closed
+control=none
+ok"
+
+check "loop-control: a missing PR number is refused" "$(mode_loop_control "o/r" "" "")" \
+	"error=PR 番号が指定されていません。"
+CURL_FAIL=1
+check "loop-control: a network failure is reported, not fatal" \
+	"$(mode_loop_control "o/r" "123" "")" \
+	"error=PR の状態を取得できませんでした（ネットワークか権限）。"
+CURL_FAIL=0
+
+check "control_of_comment: stop at the end of the marker" \
+	"$(control_of_comment "<!-- homeskz-ifc-feedback v1 control=stop -->")" "stop"
+check "control_of_comment: ended is not stop" \
+	"$(control_of_comment "<!-- homeskz-ifc-feedback v1 control=ended reason=user -->")" "none"
+
 # ---------------------------------------------------------------------------
 # bash 3.2（macOS の /bin/bash）で動くこと。
 #

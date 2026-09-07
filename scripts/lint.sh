@@ -91,7 +91,7 @@ fi
 # (CLAUDE.md「依存の向きは厳守する」), so every .cpp under them must be tidied.
 # A hardcoded list silently skipped a newly added module once, so glob instead.
 if have "$CLANG_TIDY" && have cmake; then
-	TIDY_FILES=(src/core/*.cpp src/parse/*.cpp src/UpdaterFlow.cpp)
+	TIDY_FILES=(src/core/*.cpp src/parse/*.cpp src/UpdaterFlow.cpp src/FeedbackLoop.cpp)
 	echo "==> clang-tidy (${#TIDY_FILES[@]} SDK-free translation units)"
 	if cmake -S . -B build-lint \
 		-DCMAKE_BUILD_TYPE=Debug \

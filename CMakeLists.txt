@@ -320,6 +320,10 @@ if(VW_BUILD_PLUGIN)
 		src/UpdaterFlow.cpp
 		src/UpdaterHost.h
 		src/UpdaterParse.h
+		src/FeedbackLoop.h
+		src/FeedbackLoop.cpp
+		src/FeedbackLoopHost.h
+		src/FeedbackLoopHost.cpp
 		src/Extensions/ExtMenu.h
 		src/Extensions/ExtMenu.cpp
 		src/Extensions/ExtUpdateMenu.h
@@ -327,7 +331,13 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtColumnMark.h
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.h
-		src/Extensions/ExtShearWall.cpp)
+		src/Extensions/ExtShearWall.cpp
+		src/Extensions/ExtFeedbackPalette.h
+		src/Extensions/ExtFeedbackPalette.cpp)
+	# **パレットの HTML（`resources/<vwr>/html/index.html`）はここに入れない。** `.vwr` の
+	# 文字列（メニュー名）と同じく殻へコンパイルされるものではなく、パレットを開くときに
+	# 読まれる。起動時に読み込まれた `.vwr` が入れ替えに追随するかは実機未確認だが、
+	# 追随しなくても古い見た目のまま動くだけで、入れると HTML を直すたびに再起動を強いる。
 	# **同梱スクリプト（`scripts/vw-*.sh` / `.ps1`）はここに入れない。** どれも殻へ
 	# コンパイルされるものではなく、**呼ぶたびにパスからディスクを読む**（更新は
 	# `src/Updater.cpp` が、フィードバックの投稿は `src/draw/Feedback.cpp` が、いずれも
@@ -370,6 +380,10 @@ if(VW_BUILD_PLUGIN)
 	#
 	# ここは SDK 非依存ライブラリ（MinNanoStructureCore）を**リンクしない**。殻は core/ も parse/
 	# も呼ばないので、リンクしてしまうと「殻に入ってよいもの」の境界が曖昧になる。
+	#
+	# M24 で足した往復の駆動（FeedbackLoop / FeedbackLoopHost）とパレットの登録も殻に
+	# 入る——入れ替えは殻でしか起きず（本体は自分を降ろせない）、パレットの登録は
+	# Vectorworks に番地を握られるため（src/FeedbackLoop.h / Extensions/ExtFeedbackPalette.h）。
 	set(VW_SHELL_SOURCES
 		src/ModuleMain.cpp
 		src/PayloadHost.cpp
@@ -378,8 +392,11 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtUpdateMenu.cpp
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.cpp
+		src/Extensions/ExtFeedbackPalette.cpp
 		src/Updater.cpp
-		src/UpdaterFlow.cpp)
+		src/UpdaterFlow.cpp
+		src/FeedbackLoop.cpp
+		src/FeedbackLoopHost.cpp)
 
 	# --- 本体（ペイロード）の sources ----------------------------------------------
 	# **殻が dlopen / LoadLibrary で読み込む側。** SDK 依存の draw/ フェーズがまるごと

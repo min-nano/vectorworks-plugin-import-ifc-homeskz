@@ -45,6 +45,8 @@ namespace
 		session.round = 3;
 		session.lastCommit = "a1b2c3d";
 		session.lastTally = "ストーリ:3/3,通り芯:44/44";
+		session.lastPostedAt = "2026-09-07T01:02:03Z";
+		session.loop = true;
 		session.baselineRecorded = true;
 		session.baselineLayers = {"共通", "デザイン レイヤ-1"};
 		session.options.setSymbol(SymbolRole::FloorPost, "床束（特注）");
@@ -145,6 +147,9 @@ TEST(feedback_session_round_trips_through_text)
 	CHECK_EQ(after.round, before.round);
 	CHECK_EQ(after.lastCommit, before.lastCommit);
 	CHECK_EQ(after.lastTally, before.lastTally);
+	// モードレスの往復（M24）が持ち越すもの: 直近の投稿の時刻と、回っているか。
+	CHECK_EQ(after.lastPostedAt, before.lastPostedAt);
+	CHECK_EQ(after.loop, before.loop);
 	// 1 周目に採った基準（レイヤの顔ぶれ）。**ここが落ちると次の周で図面が戻っているかを
 	// 判定できなくなる**（テンプレートのレイヤと前の周の残りを区別できない）。
 	CHECK_EQ(after.baselineRecorded, before.baselineRecorded);
@@ -158,6 +163,15 @@ TEST(feedback_session_round_trips_through_text)
 		CHECK_EQ(after.options.symbol(role), before.options.symbol(role));
 		CHECK_EQ(after.options.isEnabled(role), before.options.isEnabled(role));
 	}
+}
+
+TEST(feedback_session_without_loop_lines_reads_as_not_looping)
+{
+	// 古い版（M23）が書いた記憶には posted / loop の行が無い。**自動の往復は回って
+	// いない**と読むのが正しい——立てて読むと、古い記憶でパレットが勝手に回り出す。
+	const FeedbackSession session = parseFeedbackSession("send=1\nround=2\nbuild=a1b2c3d\n");
+	CHECK(!session.loop);
+	CHECK(session.lastPostedAt.empty());
 }
 
 TEST(feedback_session_parse_skips_broken_lines)

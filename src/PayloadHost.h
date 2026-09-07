@@ -199,6 +199,13 @@ namespace HomeskzIfcImport
 		// PIO のリセットを本体に描かせる。outEvent には EObjectEvent の値が入る。
 		bool recalculate(unsigned int kind, void* objectHandle, int& outEvent, std::string& error);
 
+		// **往復の記憶**（M24。src/PayloadAbi.h の VwPayloadLoopStatusFn）。out には
+		// key=value の行がそのまま入る（本体が返した文字列は**ここで写す**）。
+		bool loopStatus(std::string& out, std::string& error);
+
+		// 自動の往復を止めたと本体へ伝える（VwPayloadLoopEndFn）。
+		bool endLoop(const std::string& reason, bool notifyPr, std::string& error);
+
 	private:
 		// **本体へ渡した VwPayloadHost の実体。** load のローカルにしてはならない——
 		// 本体がこのポインタを持ち続けても壊れないよう、**降ろすまで生かす**
@@ -213,6 +220,8 @@ namespace HomeskzIfcImport
 		VwPayloadRunImportFn fImportFn = nullptr;
 		VwPayloadRecalculateFn fRecalcFn = nullptr;
 		VwPayloadShutdownFn fShutdownFn = nullptr;
+		VwPayloadLoopStatusFn fLoopStatusFn = nullptr;
+		VwPayloadLoopEndFn fLoopEndFn = nullptr;
 		bool fLoaded = false;
 	};
 

@@ -14,6 +14,8 @@
       logout                        保存したトークンを消す
       find-pr <repo> <branch>       そのブランチの open な PR 番号を引く
       post <repo> <n> <body-file>   PR へコメントを 1 通投稿する
+      loop-control <repo> <n> [since]  PR が open か・以後に「止めろ」の合図が付いたか
+                                       （モードレスの往復が周期的に呼ぶ。M24）
 
     **ダイアログはここには無い。** 尋ねるのは全部プラグイン側で、しかも**取り込みが
     始まる前**に済ませる（src/draw/Feedback.h）。ここでダイアログを出すと、プラグインは
@@ -232,6 +234,81 @@ function Invoke-Post {
         return
     }
     if ($result.html_url) { Write-Output "url=$($result.html_url)" }
+    # **投稿した時刻（ISO 8601, UTC）も返す。** 往復の駆動はこれを次の loop-control の
+    # since に使い、「自分の投稿より後に付いた合図」だけを読む。
+    if ($result.created_at) { Write-Output "created=$(Get-IsoTime $result.created_at)" }
+    Write-Output 'ok'
+}
+
+# created_at は Invoke-RestMethod が DateTime へ変換してしまうことがあるので、文字列でも
+# DateTime でも GitHub の since が受け取る形（UTC の ISO 8601）へそろえる。
+function Get-IsoTime {
+    param($Value)
+    if ($Value -is [DateTime]) { return $Value.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
+    return [string] $Value
+}
+
+# コメント本文から**往復への合図**を読む。目印は本文のどこかにある
+#   <!-- homeskz-ifc-feedback v1 control=stop -->
+# の 1 行で、`control=stop` の直後が空白か `-->` か行末のものだけを合図と読む
+# （プラグイン自身が投稿する `control=ended` を「止めろ」と読み違えないため）。
+function Get-CommentControl {
+    param([string] $Body)
+    if (-not $Body) { return 'none' }
+    if ($Body.Contains('homeskz-ifc-feedback') -and ($Body -match 'control=stop(\s|-->|$)')) { return 'stop' }
+    return 'none'
+}
+
+# loop-control <repo> <n> [since]: **往復を続けてよいか**（M24。モードレスの往復が周期的に
+# 呼ぶ）。答えは 2 つ:
+#   state=<open|closed|merged>   PR の状態（閉じたら続ける相手がいない）
+#   control=<stop|none>          since 以降のコメントに「止めろ」の合図があるか
+#   ok
+# since は ISO 8601（post が返した created=）。無ければ最近のコメント（上限 5 ページ）から読む。
+function Invoke-LoopControl {
+    param([string] $Repo, [string] $Number, [string] $Since)
+
+    if (-not $Repo) { $Repo = $VW_REPO }
+    if (-not $Number) {
+        Write-Output 'error=PR 番号が指定されていません。'
+        return
+    }
+    $headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'HomeskzIfcImport' }
+    $token = Resolve-Token
+    if ($token) { $headers['Authorization'] = "Bearer $token" }
+
+    try {
+        $pull = Invoke-RestMethod -Uri "$VW_API/repos/$Repo/pulls/$Number" -Headers $headers -TimeoutSec 20
+    } catch {
+        Write-Output 'error=PR の状態を取得できませんでした（ネットワークか権限）。'
+        return
+    }
+    if (-not $pull -or -not $pull.state) {
+        Write-Output 'error=PR の状態を読めませんでした。'
+        return
+    }
+    $state = [string] $pull.state
+    if ($pull.merged -eq $true) { $state = 'merged' }
+
+    $control = 'none'
+    $maxPage = if ($Since) { 2 } else { 5 }
+    for ($page = 1; $page -le $maxPage; $page++) {
+        $url = "$VW_API/repos/$Repo/issues/$Number/comments?per_page=100&page=$page"
+        if ($Since) { $url += "&since=$Since" }
+        try {
+            $comments = @(Invoke-RestMethod -Uri $url -Headers $headers -TimeoutSec 20)
+        } catch {
+            Write-Output 'error=PR のコメントを取得できませんでした（ネットワークか権限）。'
+            return
+        }
+        foreach ($comment in $comments) {
+            if ((Get-CommentControl -Body ([string] $comment.body)) -eq 'stop') { $control = 'stop' }
+        }
+        if ($comments.Count -lt 100) { break }
+    }
+
+    Write-Output "state=$state"
+    Write-Output "control=$control"
     Write-Output 'ok'
 }
 
@@ -257,7 +334,11 @@ function Invoke-Main {
             Invoke-Post -Repo (Get-Argument $Arguments 1) -Number (Get-Argument $Arguments 2) `
                 -BodyFile (Get-Argument $Arguments 3)
         }
-        default        { Write-Output "error=不明なモード: '$mode'（token-status / login / logout / find-pr / post）。" }
+        'loop-control' {
+            Invoke-LoopControl -Repo (Get-Argument $Arguments 1) -Number (Get-Argument $Arguments 2) `
+                -Since (Get-Argument $Arguments 3)
+        }
+        default        { Write-Output "error=不明なモード: '$mode'（token-status / login / logout / find-pr / post / loop-control）。" }
     }
 }
 

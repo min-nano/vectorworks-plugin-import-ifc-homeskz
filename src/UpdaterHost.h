@@ -121,4 +121,33 @@ namespace HomeskzIfcImport
 	bool RunDevUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
 							   const std::string& runningBranch, const std::string& runningCommit,
 							   const std::string& runningShellId);
+
+	// -----------------------------------------------------------------------
+	// **モードレスの往復（M24）が周期的に呼ぶ、尋ねも報せもしない開発版の確認。**
+	// Auto と同じく「いま動いているのと同じブランチの新しいビルド」だけを拾って入れ、
+	// 本体を降ろす——違うのは**ダイアログを 1 枚も出さず、結末を値で返す**こと。
+	// 呼び出し側（src/FeedbackLoop.cpp）はモードレスのパレットにその文言を出すので、
+	// ここでモーダルのダイアログを重ねると、図面を見ている人の前に立ちはだかる。
+	//
+	// **`installed=` を「いま入っている版」として使う。** 殻にコンパイルされた sha は
+	// 本体だけを入れ替えたあとでは古いままなので（殻は起動時にしか読み直されない）、
+	// それを基準にすると同じビルドを毎回入れ直す。q-dev が出す `installed=`（ディスク上の
+	// 版）があればそれを基準にし、無いときだけ runningCommit へ落ちる。
+	enum class DevBuildPoll
+	{
+		NoNewBuild, // 同じブランチに新しいビルドは無い（待ち続ける）
+		Installed,	// 入れて本体を降ろした。commit に新しい sha が入る
+		NeedsRestart, // 入れたが殻まで変わった（再起動するまで効かない＝往復は止める）
+		Failed, // 入れられなかった・降ろせなかった（message に理由）
+		CheckFailed, // 確認そのものができなかった（オフライン等。待ち続けてよい）
+	};
+	struct DevBuildPollResult
+	{
+		DevBuildPoll outcome = DevBuildPoll::NoNewBuild;
+		std::string commit;	 // Installed / NeedsRestart のとき、入れたビルドの sha
+		std::string message; // 人に見せる 1 行（Failed / CheckFailed / NeedsRestart）
+	};
+	DevBuildPollResult PollDevBuildWith(IUpdaterHost& host, const std::string& runningBranch,
+										const std::string& runningCommit,
+										const std::string& runningShellId);
 } // namespace HomeskzIfcImport

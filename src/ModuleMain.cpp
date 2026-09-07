@@ -9,6 +9,7 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtColumnMark.h"
+#include "Extensions/ExtFeedbackPalette.h"
 #include "Extensions/ExtShearWall.h"
 #include "Extensions/ExtMenu.h"
 #include "Extensions/ExtUpdateMenu.h"
@@ -85,6 +86,16 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// （Extensions/ExtUpdateMenu.h）。
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuCheckUpdate>(
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
+
+#ifdef VW_DEV_BUILD
+	// M24 実機フィードバックの往復を回すモードレスなパレット。**開発版だけ**——往復するのは
+	// PR のビルドであって main の配布物ではない（Extensions/ExtFeedbackPalette.h）。
+	// 登録の枠組みはメニュー・PIO と同じ（グループ ID が違うだけ。SDK リファレンス
+	// Findings「モードレス（非モーダル）なパレット」）。
+	REGISTER_Extension<HomeskzIfcImport::CExtFeedbackPalette>(
+		VectorWorks::Extension::GROUPID_ExtensionWebPalettes, action, moduleInfo, iid,
+		inOutInterface, cbp, reply);
+#endif
 
 	return reply;
 }

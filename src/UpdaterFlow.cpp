@@ -326,4 +326,69 @@ namespace HomeskzIfcImport
 		host.Inform("インストールに失敗しました。", err);
 		return false;
 	}
+
+	// -----------------------------------------------------------------------
+	// モードレスの往復（M24）向け。意図は UpdaterHost.h の DevBuildPoll 参照。
+	// **host の Inform / Ask / PickBuild / Restart は呼ばない**——結末はすべて値で返す。
+	DevBuildPollResult PollDevBuildWith(IUpdaterHost& host, const std::string& runningBranch,
+										const std::string& runningCommit,
+										const std::string& runningShellId)
+	{
+		DevBuildPollResult result;
+		std::string out;
+		if (!host.RunScript({"q-dev"}, out))
+		{
+			result.outcome = DevBuildPoll::CheckFailed;
+			result.message = "アップデータを起動できませんでした。";
+			return result;
+		}
+		const std::string scriptError = ValueOf(out, "error");
+		if (!scriptError.empty())
+		{
+			result.outcome = DevBuildPoll::CheckFailed;
+			result.message = scriptError;
+			return result;
+		}
+
+		// いま入っている版（ディスク上）。無ければ殻の sha（UpdaterHost.h 冒頭の注記）。
+		std::string installed = ValueOf(out, "installed");
+		if (installed.empty() || installed == "none")
+			installed = runningCommit;
+
+		std::vector<DevBuild> const others = DevSwitchCandidates(out, installed);
+		int const idx = FindDevBuildForBranch(others, runningBranch);
+		if (idx < 0)
+		{
+			result.outcome = DevBuildPoll::NoNewBuild;
+			return result;
+		}
+		const DevBuild& pick = others[static_cast<std::size_t>(idx)];
+		result.commit = pick.commit;
+
+		std::string err;
+		std::string installedShellId;
+		if (!Install(host, pick.url, kDevPluginName, installedShellId, err))
+		{
+			result.outcome = DevBuildPoll::Failed;
+			result.message = err;
+			return result;
+		}
+
+		if (NeedsRestartAfterInstall(runningShellId, installedShellId))
+		{
+			// 殻まで変わった。入ってはいるが、この実行では効かせられない。
+			result.outcome = DevBuildPoll::NeedsRestart;
+			result.message = "殻（プラグインのモジュール）まで変わったため、Vectorworks を"
+							 "再起動するまで新しいビルドは動きません。";
+			return result;
+		}
+		if (!host.DropLoadedPayload())
+		{
+			result.outcome = DevBuildPoll::Failed;
+			result.message = "本体を降ろせませんでした（いま動いている処理があります）。";
+			return result;
+		}
+		result.outcome = DevBuildPoll::Installed;
+		return result;
+	}
 } // namespace HomeskzIfcImport

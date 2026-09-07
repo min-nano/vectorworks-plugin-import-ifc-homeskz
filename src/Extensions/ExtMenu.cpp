@@ -13,6 +13,7 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtMenu.h"
+#include "FeedbackLoopHost.h"
 #include "PayloadAbi.h"
 #include "PayloadSession.h"
 #include "Updater.h"
@@ -189,4 +190,11 @@ void CImportIfcMenu_EventSink::DoInterface()
 		return;
 	}
 	sAutoUpdateNextImport = autoUpdateNext;
+
+	// **往復に入った（投稿できた）なら、モードレスのパレットで続きを回す**（M24。
+	// src/FeedbackLoopHost.h）。以後、新しいビルドが出るたびにパレットが入れて取り込んで
+	// 投稿し、Claude の合図か人の「往復を止める」で止まる。ここから先、人がメニューを
+	// 押す必要は無い——押しても従来どおり動く（上の Auto の経路）。
+	if (autoUpdateNext)
+		ArmFeedbackLoop();
 }

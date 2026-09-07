@@ -28,6 +28,7 @@
 #include "PayloadAbi.h"
 #include "PayloadHostHolder.h"
 #include "draw/ColumnMarkPio.h"
+#include "draw/Feedback.h"
 #include "draw/HostServices.h"
 #include "draw/ImportCommand.h"
 #include "draw/ShearWallPio.h"
@@ -44,6 +45,10 @@ namespace
 	// 戻った時点で腐ったポインタを持つことになる（理由と落ち方は PayloadHostHolder.h）。
 	payload::HostHolder gHost;
 	bool gPayloadReady = false;
+
+	// **殻へ返す文字列の置き場所。** 返した const char* は「次に本体を呼ぶまで」生きている
+	// 約束（src/PayloadAbi.h）なので、静的に 1 つ持って毎回書き換える。
+	std::string gLoopStatusText;
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -194,6 +199,43 @@ VW_PAYLOAD_EXPORT int vw_payload_recalculate(unsigned int kind, void* objectHand
 			// 消さない）。
 			return kVwPayloadErrUnknownId;
 		}
+	}
+	catch (...)
+	{
+		return kVwPayloadErrException;
+	}
+}
+
+VW_PAYLOAD_EXPORT int vw_payload_loop_status(const char** out)
+{
+	try
+	{
+		if (out == nullptr)
+			return kVwPayloadErrAbi;
+		*out = nullptr;
+		if (!gPayloadReady || gSDK == nil)
+			return kVwPayloadErrNotInit;
+		// 記憶の形を知っているのは本体だけ（core::FeedbackSession）。殻には key=value の
+		// 平たい行で渡す（draw/Feedback.h の feedbackLoopStatus）。
+		gLoopStatusText = draw::feedbackLoopStatus();
+		*out = gLoopStatusText.c_str();
+		return kVwPayloadOk;
+	}
+	catch (...)
+	{
+		return kVwPayloadErrException;
+	}
+}
+
+VW_PAYLOAD_EXPORT int vw_payload_loop_end(const char* reason, int notifyPr)
+{
+	try
+	{
+		if (!gPayloadReady || gSDK == nil)
+			return kVwPayloadErrNotInit;
+		draw::endFeedbackLoop(reason != nullptr ? std::string(reason) : std::string(),
+							  notifyPr != 0);
+		return kVwPayloadOk;
 	}
 	catch (...)
 	{

@@ -22,11 +22,13 @@
 #	define PLUGIN_VWR_ID "min-nano_structureDev"
 #	define PLUGIN_UNIVERSAL_NAME "CExtMenuImportIfc_HomeskzIfcImportDev"
 #	define PLUGIN_UPDATE_UNIVERSAL_NAME "CExtMenuCheckUpdate_MinNanoStructureDev"
+#	define PLUGIN_FEEDBACK_PALETTE_UNIVERSAL_NAME "CExtFeedbackPalette_MinNanoStructureDev"
 #else
 // Stable plug-in identity.
 #	define PLUGIN_VWR_ID "min-nano_structure"
 #	define PLUGIN_UNIVERSAL_NAME "CExtMenuImportIfc_HomeskzIfcImport"
 #	define PLUGIN_UPDATE_UNIVERSAL_NAME "CExtMenuCheckUpdate_MinNanoStructure"
+#	define PLUGIN_FEEDBACK_PALETTE_UNIVERSAL_NAME "CExtFeedbackPalette_MinNanoStructure"
 #endif
 
 // **ユニバーサル名（と UUID）は改名しても据え置く。** これはコマンドの同一性そのもので、

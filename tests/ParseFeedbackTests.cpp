@@ -386,4 +386,15 @@ TEST(feedback_comment_asks_for_one_more_run_after_the_fix)
 	CHECK(contains(body, "「取り消し」で取り込み前へ戻してから"));
 }
 
+TEST(feedback_comment_tells_how_the_automatic_loop_runs_and_stops)
+{
+	// **モードレスの往復（M24）。** パレットが開いていれば次の周は自動で走る。読む側は
+	// 「push すれば来る」と「合図で止められる」の 2 つを本文から拾えなければならない
+	// ——合図の綴りはここが唯一の案内（同梱スクリプトの loop-control が読む形と同じ）。
+	const FeedbackRound round = sampleRound();
+	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+	CHECK(contains(body, "次の周が自動で走ります"));
+	CHECK(contains(body, "<!-- homeskz-ifc-feedback v1 control=stop -->"));
+}
+
 TEST_MAIN();

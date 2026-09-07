@@ -294,8 +294,10 @@ namespace HomeskzIfcImport::draw
 		// **続きの周は「新しいビルドが来たとき」だけ。** 記憶に残っているのは直近の周を
 		// 走らせたビルドの sha なので、それと同じ物が動いているなら新しい版はまだ来て
 		// いない——同じビルドで取り込み直しても、前の周と同じ数字が並ぶだけである。
-		// **これが往復の終わり方でもある**: Claude が push をやめれば新しい dev ビルドは
-		// 出ず、続きの周はそれ以上走らない（やめるためのボタンを持たなくて済む）。
+		// 手動の周の終わり方でもある: Claude が push をやめれば新しい dev ビルドは出ず、
+		// 続きの周はそれ以上走らない。**自動の周（M24）はこの関数を殻のパレットが呼ぶ**
+		// ——新しいビルドを入れて本体を読み直したあとなので、ここは必ず continuing になる
+		// （src/FeedbackLoopHost.cpp の RunRound）。
 		const bool continuing = session.send && session.round > 0 && !session.ifcPath.empty() &&
 								session.lastCommit != build.commit;
 

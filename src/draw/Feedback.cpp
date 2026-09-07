@@ -378,11 +378,13 @@ namespace HomeskzIfcImport::draw
 			return ParsePullRequest(ValueOf(out, "pr"));
 		}
 
-		// 本文を投稿する。投稿できたら true で、url にコメントの在り処が入る。
+		// 本文を投稿する。投稿できたら true で、url にコメントの在り処、createdAt に
+		// GitHub が付けた時刻（ISO 8601）が入る（古いスクリプトは後者を出さないので空）。
 		bool PostComment(const std::string& repo, int pullRequest, const std::string& body,
-						 std::string& url, std::string& error)
+						 std::string& url, std::string& createdAt, std::string& error)
 		{
 			url.clear();
+			createdAt.clear();
 			error.clear();
 			const std::string file = WriteTempFile("body", body, /*ownerOnly*/ false);
 			if (file.empty())
@@ -406,7 +408,14 @@ namespace HomeskzIfcImport::draw
 				return false;
 			}
 			url = ValueOf(out, "url");
+			createdAt = ValueOf(out, "created");
 			return true;
+		}
+
+		// 動いているビルドのブランチ（記憶がこのブランチのものかを見るのに使う）。
+		std::string RunningBranch()
+		{
+			return VW_BUILD_BRANCH;
 		}
 
 	} // namespace
@@ -562,7 +571,8 @@ namespace HomeskzIfcImport::draw
 			parse::formatFeedbackComment(round, *input.document, *input.counts);
 
 		std::string url;
-		if (!PostComment(session.repo, session.pullRequest, commentBody, url, error))
+		std::string createdAt;
+		if (!PostComment(session.repo, session.pullRequest, commentBody, url, createdAt, error))
 			return false; // **ここでアラートを出さない**（呼び出し側が結果へ添える）
 
 		// **投稿できたところで記憶を進める。** 投稿できていない周を数えると、次の
@@ -577,6 +587,12 @@ namespace HomeskzIfcImport::draw
 		}
 		session.lastCommit = input.build.commit;
 		session.lastTally = parse::formatTally(parse::elementRows(*input.document, *input.counts));
+		// **自動の往復（M24）はここで回り出す。** 殻のパレットは記憶の loop を見て周期的に
+		// 新しいビルドを確かめ、Claude の合図（control=stop）で止まる（src/FeedbackLoop.h）。
+		// 投稿の時刻は「自分の投稿より後の合図だけ」を読むための since になる。
+		session.loop = true;
+		if (!createdAt.empty())
+			session.lastPostedAt = createdAt;
 		if (!core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session))
 		{
 			// 投稿はできている。次の周がファイル選択から始まるだけなので、**結果へ添えて
@@ -590,5 +606,56 @@ namespace HomeskzIfcImport::draw
 		// 次に取り込みを実行するときには「新しいビルドがあります。インストールします
 		// か？」を挟まない（src/Extensions/ExtMenu.cpp が UpdateCheckKind::Auto を選ぶ）。
 		return true;
+	}
+
+	// -----------------------------------------------------------------------
+	// モードレスの往復（M24）が殻から尋ねてくるもの。
+
+	std::string feedbackLoopStatus()
+	{
+		// 記憶（別ブランチのものは読まない。loadFeedbackSession）。
+		const core::FeedbackSession session = loadFeedbackSession(RunningBranch());
+		const bool active = feedbackAvailable() && session.send && session.round > 0 &&
+							session.loop && !session.ifcPath.empty();
+		std::string out;
+		out += std::string("active=") + (active ? "1" : "0") + "\n";
+		out += "repo=" + session.repo + "\n";
+		out += "pr=" + std::to_string(session.pullRequest) + "\n";
+		out += "branch=" + session.branch + "\n";
+		out += "round=" + std::to_string(session.round) + "\n";
+		out += "build=" + session.lastCommit + "\n";
+		out += "posted=" + session.lastPostedAt + "\n";
+		return out;
+	}
+
+	void endFeedbackLoop(const std::string& reason, bool notifyPr)
+	{
+		const std::string path = core::defaultFeedbackSessionPath();
+		core::FeedbackSession session;
+		if (!core::readFeedbackSession(path, session))
+			return; // 記憶が無い＝止めるものが無い
+		if (!session.loop)
+			return; // 既に下りている（二重に投稿しない）
+		session.loop = false;
+		(void)core::writeFeedbackSession(path, session);
+
+		if (!notifyPr || !feedbackAvailable() || session.pullRequest <= 0)
+			return;
+
+		// **読む側（Claude）へ「もう自動の周は来ない」と伝える。** 目印は control=ended
+		// ——同梱スクリプトの loop-control は `control=stop` の直後が空白か `-->` のものしか
+		// 合図と読まないので、これを「止めろ」と取り違えることは無い。
+		std::string body;
+		body += "<!-- homeskz-ifc-feedback v1 control=ended build=" + session.lastCommit +
+				" round=" + std::to_string(session.round) + " -->\n";
+		body += "## 実機フィードバック — 自動の往復を終えました\n\n";
+		body += reason + "。\n\n";
+		body += "以後、新しいビルドが出ても**自動では取り込みません**。続きが要るときは、"
+				"利用者が Vectorworks で取り込みをもう一度実行します（同じ条件で round " +
+				std::to_string(session.round + 1) + " として走り、往復もそこから回り直します）。\n";
+		std::string url;
+		std::string createdAt;
+		std::string error;
+		(void)PostComment(session.repo, session.pullRequest, body, url, createdAt, error);
 	}
 } // namespace HomeskzIfcImport::draw

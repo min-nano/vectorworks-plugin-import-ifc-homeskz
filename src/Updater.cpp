@@ -445,4 +445,14 @@ namespace HomeskzIfcImport
 		return RunStableUpdateCheckWith(host, kind, VW_SHELL_ID);
 #endif
 	}
+
+	DevBuildPollResult PollDevBuild()
+	{
+#ifdef VW_DEV_BUILD
+		CVectorworksUpdaterHost host;
+		return PollDevBuildWith(host, VW_BUILD_BRANCH, VW_BUILD_VERSION, VW_SHELL_ID);
+#else
+		return DevBuildPollResult{};
+#endif
+	}
 } // namespace HomeskzIfcImport

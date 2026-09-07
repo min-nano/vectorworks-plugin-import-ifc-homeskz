@@ -16,10 +16,17 @@
 //
 //	【続きの周は「新しいビルドが来たとき」だけ】記憶に残した sha と動いているビルドが同じ
 //	なら、それは往復の続きではない（同じビルドで取り込み直しても同じ数字が並ぶだけ）。
-//	**これが往復の終わり方でもある**——Claude が push をやめれば新しい dev ビルドは出ず、
-//	続きの周はそれ以上走らない。だから「やめる」ボタンを持たない（M23 で一度置いて外した。
-//	docs/DEV-NOTES.md「やめるボタンを置かずに済ませる」）。新しいビルドを待っているあいだに
-//	取り込みを実行したら 1 周目のダイアログが出るので、そこで「送らない」を選べば記憶は消える。
+//	手動の周（メニュー）の終わり方はこれである——Claude が push をやめれば新しい dev ビルドは
+//	出ず、続きの周はそれ以上走らない。だから取り込みのダイアログに「やめる」ボタンは無い
+//	（M23 で一度置いて外した。docs/DEV-NOTES.md「やめるボタンを置かずに済ませる」）。新しい
+//	ビルドを待っているあいだに取り込みを実行したら 1 周目のダイアログが出るので、そこで
+//	「送らない」を選べば記憶は消える。
+//
+//	【自動の周（M24）】投稿できた周の終わりに記憶の `loop` を立て（postFeedbackRound）、殻の
+//	モードレスなパレットがそれを見て、新しいビルドが出るたびに入れて取り込み直す
+//	（src/FeedbackLoop.h）。本体がそのために持つ口は 2 つだけ——記憶を見せる
+//	（feedbackLoopStatus）と「止めた」を受ける（endFeedbackLoop）。止める入口はパレットと
+//	Claude の合図（PR コメントの `control=stop`）で、どちらも記憶は消さない。
 //
 //	【取り込み前へ戻すのは人の手仕事】2 周目以降は同じ文書へもう一度描くので、前の周を
 //	「取り消し」で戻していないと図が二重になる。**プログラムから戻す手立ては確かめていない**
@@ -118,4 +125,19 @@ namespace HomeskzIfcImport::draw
 	// ボタンが 1 つ増えてしまう。
 	bool postFeedbackRound(const FeedbackPlan& plan, const FeedbackInput& input,
 						   std::string& error);
+
+	// -----------------------------------------------------------------------
+	// **モードレスの往復（M24）が殻から尋ねてくるもの**（src/PayloadAbi.h の
+	// vw_payload_loop_status / vw_payload_loop_end。駆動は src/FeedbackLoop.h）。
+	//
+	// 往復の記憶を key=value の行で返す（active / repo / pr / branch / round / build /
+	// posted）。active は「send かつ round>0 かつ loop」——投稿できた周の終わりに立ち、
+	// 止めたときに下りる（core::FeedbackSession::loop）。記憶が無い・使えないビルドなら
+	// active=0 だけを返す。
+	std::string feedbackLoopStatus();
+
+	// 自動の往復を止めた。記憶の loop を下ろす（**記憶は消さない**——人がメニューから
+	// 実行すれば続きの周として走る）。notifyPr なら PR へ「終えました」を 1 通投稿する
+	// （目印は `control=ended`。読む側が待ち続けないため）。
+	void endFeedbackLoop(const std::string& reason, bool notifyPr);
 } // namespace HomeskzIfcImport::draw
