@@ -571,7 +571,9 @@ namespace HomeskzIfcImport::draw
 		{
 			for (int i = 1; i <= 100; ++i)
 			{
-				const std::string path = TempPath(stem + "-" + std::to_string(i) + ".vwx");
+				// **const にしない**——返すときに move されなくなり、clang-tidy の
+				// performance-no-automatic-move がエラーになる（tidy-mac で実際に落ちた）。
+				std::string path = TempPath(stem + "-" + std::to_string(i) + ".vwx");
 				if (path.empty())
 					return "";
 				if (!PathExists(path))
