@@ -104,6 +104,7 @@ TEST(loop_is_idle_without_an_active_memory)
 {
 	FakeLoopHost h;
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	const FeedbackLoopView view = driver.Tick(h, 1000);
 	CHECK(view.phase == FeedbackLoopPhase::Idle);
 	CHECK_EQ(static_cast<std::size_t>(h.scriptCalls.size()), static_cast<std::size_t>(0));
@@ -116,9 +117,33 @@ TEST(loop_is_idle_and_says_why_when_the_payload_cannot_be_read)
 	FakeLoopHost h;
 	h.memoryReadable = false;
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	const FeedbackLoopView view = driver.Tick(h, 1000);
 	CHECK(view.phase == FeedbackLoopPhase::Idle);
 	CHECK(view.message.find("本体を読めません") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// **人が始めるまで回さない**（M25）。パレットの JS タイマーは Vectorworks が生きている
+// あいだ回り続け、「閉じる」で隠しても止まらない——記憶が active であることを理由に回すと、
+// **誰も押していないのに取り込みが走り出す**（実機で起きた）。
+
+TEST(loop_does_not_run_until_a_menu_round_arms_it)
+{
+	FakeLoopHost h = activeHost(); // 記憶は「続きがある」と言っている
+	FeedbackLoopDriver driver(60);
+	const FeedbackLoopView view = driver.Tick(h, 1000);
+	CHECK(view.phase == FeedbackLoopPhase::Idle);
+	CHECK(view.message.find("実機テストを実行") != std::string::npos);
+	// 本体にも GitHub にも触らない（記憶すら読みに行かない）。
+	CHECK_EQ(static_cast<std::size_t>(h.scriptCalls.size()), static_cast<std::size_t>(0));
+	CHECK_EQ(static_cast<std::size_t>(h.polledBranches.size()), static_cast<std::size_t>(0));
+	CHECK_EQ(h.roundCount, 0);
+
+	// メニューが押されたら（Arm / BeginRound）そこから回り出す。
+	driver.Arm();
+	(void)driver.Tick(h, 1001);
+	CHECK(h.scriptCalls.size() > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +154,7 @@ TEST(loop_checks_the_signal_before_the_build_and_waits_when_nothing_is_new)
 {
 	FakeLoopHost h = activeHost();
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	const FeedbackLoopView view = driver.Tick(h, 1000);
 
 	CHECK(view.phase == FeedbackLoopPhase::Waiting);
@@ -161,6 +187,7 @@ TEST(loop_does_not_hit_github_before_the_interval_has_passed)
 {
 	FakeLoopHost h = activeHost();
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	driver.Tick(h, 1000);
 	driver.Tick(h, 1010);
 	driver.Tick(h, 1059);
@@ -173,6 +200,7 @@ TEST(loop_arm_and_check_now_skip_the_interval)
 {
 	FakeLoopHost h = activeHost();
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	driver.Tick(h, 1000);
 	driver.CheckNow();
 	driver.Tick(h, 1001);
@@ -193,6 +221,7 @@ TEST(loop_installs_a_new_build_runs_the_round_and_keeps_going)
 	h.build.outcome = FeedbackLoopBuild::Installed;
 	h.build.commit = "bbb2222";
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	const FeedbackLoopView view = driver.Tick(h, 1000);
 
 	CHECK_EQ(h.roundCount, 1);
@@ -217,6 +246,7 @@ TEST(loop_stops_when_the_round_could_not_be_posted)
 	h.build.commit = "bbb2222";
 	h.roundPosted = false;
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	const FeedbackLoopView view = driver.Tick(h, 1000);
 	CHECK(view.phase == FeedbackLoopPhase::Stopped);
 	CHECK_EQ(static_cast<std::size_t>(h.endReasons.size()), static_cast<std::size_t>(1));
@@ -231,6 +261,7 @@ TEST(loop_stops_when_the_round_could_not_start)
 	h.build.commit = "bbb2222";
 	h.roundStarts = false;
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	const FeedbackLoopView view = driver.Tick(h, 1000);
 	CHECK(view.phase == FeedbackLoopPhase::Stopped);
 	CHECK(view.message.find("本体を読み込めませんでした") != std::string::npos);
@@ -246,6 +277,7 @@ TEST(loop_stops_on_claudes_signal_without_polling_a_build)
 	h.loopControlOut = "state=open\ncontrol=stop\nok\n";
 	h.build.outcome = FeedbackLoopBuild::Installed; // 合図が先。ビルドは見ない
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	const FeedbackLoopView view = driver.Tick(h, 1000);
 	CHECK(view.phase == FeedbackLoopPhase::Stopped);
 	CHECK(view.message.find("Claude") != std::string::npos);
@@ -261,12 +293,14 @@ TEST(loop_stops_when_the_pr_is_merged_or_closed)
 	FakeLoopHost merged = activeHost();
 	merged.loopControlOut = "state=merged\ncontrol=none\nok\n";
 	FeedbackLoopDriver d1(60);
+	d1.Arm();
 	CHECK(d1.Tick(merged, 1000).phase == FeedbackLoopPhase::Stopped);
 	CHECK(d1.View().message.find("マージ") != std::string::npos);
 
 	FakeLoopHost closed = activeHost();
 	closed.loopControlOut = "state=closed\ncontrol=none\nok\n";
 	FeedbackLoopDriver d2(60);
+	d2.Arm();
 	CHECK(d2.Tick(closed, 1000).phase == FeedbackLoopPhase::Stopped);
 	CHECK(d2.View().message.find("閉じ") != std::string::npos);
 }
@@ -277,6 +311,7 @@ TEST(loop_keeps_waiting_when_the_check_itself_failed)
 	FakeLoopHost h = activeHost();
 	h.loopControlOut = "error=PR の状態を取得できませんでした（ネットワークか権限）。\n";
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	const FeedbackLoopView view = driver.Tick(h, 1000);
 	CHECK(view.phase == FeedbackLoopPhase::Waiting);
 	CHECK_EQ(view.nextCheckAt, 1060LL);
@@ -287,12 +322,14 @@ TEST(loop_keeps_waiting_when_the_check_itself_failed)
 	h2.build.outcome = FeedbackLoopBuild::CheckFailed;
 	h2.build.message = "リリース一覧を取得できませんでした。";
 	FeedbackLoopDriver d2(60);
+	d2.Arm();
 	CHECK(d2.Tick(h2, 1000).phase == FeedbackLoopPhase::Waiting);
 	CHECK(d2.View().message.find("リリース一覧") != std::string::npos);
 
 	FakeLoopHost h3 = activeHost();
 	h3.scriptStarts = false;
 	FeedbackLoopDriver d3(60);
+	d3.Arm();
 	CHECK(d3.Tick(h3, 1000).phase == FeedbackLoopPhase::Waiting);
 }
 
@@ -303,6 +340,7 @@ TEST(loop_stops_when_the_shell_changed_or_the_install_failed)
 	h.build.commit = "bbb2222";
 	h.build.message = "殻まで変わりました。";
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	const FeedbackLoopView view = driver.Tick(h, 1000);
 	CHECK(view.phase == FeedbackLoopPhase::Stopped);
 	CHECK(view.message.find("bbb2222") != std::string::npos);
@@ -315,6 +353,7 @@ TEST(loop_stops_when_the_shell_changed_or_the_install_failed)
 	h2.build.outcome = FeedbackLoopBuild::Failed;
 	h2.build.message = "zip を展開できませんでした。";
 	FeedbackLoopDriver d2(60);
+	d2.Arm();
 	CHECK(d2.Tick(h2, 1000).phase == FeedbackLoopPhase::Stopped);
 	CHECK(d2.View().message.find("zip") != std::string::npos);
 }
@@ -323,15 +362,19 @@ TEST(loop_stop_button_ends_the_loop_and_tells_the_pr)
 {
 	FakeLoopHost h = activeHost();
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	driver.Tick(h, 1000);
-	const FeedbackLoopView view = driver.Stop(h);
+	const FeedbackLoopView view = driver.Stop(h, "利用者がパレットで止めました");
 	CHECK(view.phase == FeedbackLoopPhase::Stopped);
 	CHECK_EQ(static_cast<std::size_t>(h.endReasons.size()), static_cast<std::size_t>(1));
 	if (!h.endNotified.empty())
 		CHECK(h.endNotified[0]);
-	// 止めたあとの Tick は何もしない（記憶の loop が下りている）。
+	// **止めたあとの Tick は本体にも GitHub にも触らない**（武装が解けている。M25）。
+	// 見え方も Stopped のまま——止めた理由を、押した人が読めるうちは消さない。
+	const std::size_t before = h.scriptCalls.size();
 	driver.Tick(h, 2000);
-	CHECK(driver.View().phase == FeedbackLoopPhase::Idle);
+	CHECK(driver.View().phase == FeedbackLoopPhase::Stopped);
+	CHECK_EQ(h.scriptCalls.size(), before);
 }
 
 TEST(loop_stops_without_a_pull_request_number)
@@ -339,6 +382,7 @@ TEST(loop_stops_without_a_pull_request_number)
 	FakeLoopHost h = activeHost();
 	h.memory.pullRequest = 0;
 	FeedbackLoopDriver driver(60);
+	driver.Arm();
 	CHECK(driver.Tick(h, 1000).phase == FeedbackLoopPhase::Stopped);
 	CHECK_EQ(static_cast<std::size_t>(h.scriptCalls.size()), static_cast<std::size_t>(0));
 }
@@ -366,10 +410,28 @@ TEST(feedback_loop_does_nothing_while_a_menu_round_is_running)
 	CHECK_EQ(static_cast<std::size_t>(h.polledBranches.size()), static_cast<std::size_t>(0));
 	CHECK_EQ(h.roundCount, 0);
 
-	// 番人が外れたら、次の Tick からいつもどおり確認する。
+	// 番人が外れても、**投稿できるまでは回らない**（BeginRound は武装しない。M25）。
 	driver.SetExternalBusy(false);
 	(void)driver.Tick(h, 1001);
+	CHECK_EQ(static_cast<std::size_t>(h.scriptCalls.size()), static_cast<std::size_t>(0));
+	// 投稿できた周のあと（ExtTestMenu の ArmFeedbackLoop）から回り出す。
+	driver.Arm();
+	(void)driver.Tick(h, 1002);
 	CHECK(h.scriptCalls.size() > 0);
+}
+
+TEST(feedback_loop_does_not_stay_working_when_the_menu_round_was_cancelled)
+{
+	// キャンセル・「送らない」で周が止まると Arm へ来ない。**「実行しています…」で
+	// 固まらせない**——止まったのに動いているように見えるのが一番たちが悪い。
+	FakeLoopHost h = activeHost();
+	FeedbackLoopDriver driver(60);
+	driver.BeginRound();
+	driver.SetExternalBusy(true);
+	driver.SetExternalBusy(false);
+	const FeedbackLoopView view = driver.Tick(h, 1000);
+	CHECK(view.phase == FeedbackLoopPhase::Idle);
+	CHECK_EQ(h.roundCount, 0);
 }
 
 TEST(feedback_loop_begin_round_shows_that_it_is_running)

@@ -574,7 +574,9 @@ namespace HomeskzIfcImport::draw
 		};
 
 		// 作業ファイルを開き直す。note には診断ログと PR コメントへ出す 1 行が入る。
-		RoundDocument openRoundDocument(core::FeedbackSession& session, std::string& note)
+		// rebased は「基準を採り直した」ときにその理由（runTestRound が作る）。
+		RoundDocument openRoundDocument(core::FeedbackSession& session, const std::string& rebased,
+										std::string& note)
 		{
 			note.clear();
 			if (session.workPath.empty())
@@ -582,16 +584,17 @@ namespace HomeskzIfcImport::draw
 				// **1 周目: いま開いている図面を作業ファイルとして別名保存する。**
 				// 元のファイルには何も書き戻らない（別名保存なので、以後の変更は作業
 				// ファイルの側に付く）。
+				const std::string prefix = "準備: " + rebased;
 				const std::string work = TempPath("homeskz-work.vwx");
 				if (!SaveActiveDocumentAs(work))
 				{
-					note = "準備: 作業ファイルを用意できませんでした（" +
+					note = prefix + "作業ファイルを用意できませんでした（" +
 						   (work.empty() ? std::string("一時ディレクトリが引けません") : work) +
 						   "）。いま開いている図面へ描きます";
 					return RoundDocument::Fallback;
 				}
 				session.workPath = work;
-				note = "準備: いま開いている図面を作業ファイルとして保存しました（" + work +
+				note = prefix + "いま開いている図面を作業ファイルとして保存しました（" + work +
 					   "）。次の周からはここを開き直して、毎回この状態から始めます";
 				return RoundDocument::Ready;
 			}
@@ -875,6 +878,31 @@ namespace HomeskzIfcImport::draw
 
 		const parse::BuildInfo build = currentBuildInfo();
 		core::FeedbackSession session = loadFeedbackSession(build.branch);
+
+		// **手動で押したときは、いま開いている図面を基準として採り直す。** 人が別の図面
+		// （空のテンプレート等）を開いてからメニューを押したのは「この図面で試したい」
+		// という意思なのに、覚えた作業ファイルを開き直すとその意思が黙って消える——実機で
+		// 二度、空のテンプレートで試そうとして前の周の作業ファイルに上書きされた。**記憶
+		// ごと消さない**（往復の宛先・IFC・設定はそのまま）——捨てるのは「どの図面から
+		// 始めるか」だけである。自動の周（パレット）はここへ来ない: そちらは前の周の続き
+		// なので、開いている図面が何であっても作業ファイルへ戻すのが正しい。
+		std::string rebased;
+		if (allowDialogs && !session.workPath.empty())
+		{
+			const std::string openPath = ActiveDocumentPath();
+			if (!SamePath(openPath, session.workPath))
+			{
+				rebased = "いま開いている図面（" +
+						  (openPath.empty() ? std::string("(取得できず)") : openPath) +
+						  "）は前の周の作業ファイル（" + session.workPath +
+						  "）ではないので、こちらを新しい基準として採り直しました。";
+				session.workPath.clear();
+				// **すぐ書き戻す。** 同じビルドで押した周（RearmOnly）はここで戻るので、
+				// 書かないと次の自動の周がまた古い作業ファイルを開いてしまう。
+				(void)core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session);
+			}
+		}
+
 		// **どの周になるかは無 SDK 側が決める**（core/FeedbackSession.h。M25 の要点なので
 		// 場合分けを描画側に散らさず、1 か所でテストできる形にしてある）。
 		const core::FeedbackRoundKind kind =
@@ -933,7 +961,7 @@ namespace HomeskzIfcImport::draw
 		// クラスもシンボル定義も、その図面には前の周の痕跡が 1 つも無い）。用意できな
 		// かった周だけ、従来どおり「前の周が作ったレイヤ」を取り除く。
 		std::string preparation;
-		const RoundDocument document = openRoundDocument(plan.session, preparation);
+		const RoundDocument document = openRoundDocument(plan.session, rebased, preparation);
 		if (document == RoundDocument::Abort)
 		{
 			// **描く先が無いなら取り込まない。** 記憶（作業ファイルの場所）は残すので、

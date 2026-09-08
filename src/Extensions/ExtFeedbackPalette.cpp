@@ -173,8 +173,10 @@ void CFeedbackPaletteJS::OnHide(const TXString& /*objName*/, const TXString& /*f
 {
 	try
 	{
-		ShowFeedbackPalette(false);
-		ResolveView(context, TheFeedbackLoop().View());
+		// **閉じる＝往復を止めてから隠す**（src/FeedbackLoopHost.h）。隠しただけでは
+		// このページの JS タイマーが止まらないので、往復を残して隠すと**見えないところで
+		// 無人の取り込みが走り続け、止める口が無くなる**（実機の指摘）。
+		ResolveView(context, FeedbackLoopHide());
 	}
 	catch (...)
 	{

@@ -248,7 +248,16 @@ namespace HomeskzIfcImport
 	FeedbackLoopView FeedbackLoopStop()
 	{
 		CShellFeedbackLoopHost host;
-		return TheFeedbackLoop().Stop(host);
+		return TheFeedbackLoop().Stop(host, "利用者がパレットで止めました");
+	}
+
+	FeedbackLoopView FeedbackLoopHide()
+	{
+		CShellFeedbackLoopHost host;
+		// **止めてから隠す**（FeedbackLoopHost.h）。隠れたパレットの時計は止まらない。
+		const FeedbackLoopView view = TheFeedbackLoop().Stop(host, "利用者がパレットを閉じました");
+		ShowFeedbackPalette(false);
+		return view;
 	}
 
 	FeedbackLoopView FeedbackLoopCheckNow()

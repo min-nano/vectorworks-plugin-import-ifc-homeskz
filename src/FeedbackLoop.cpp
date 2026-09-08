@@ -36,6 +36,10 @@ namespace HomeskzIfcImport
 			bool& fFlag;
 		};
 
+		// 武装していないあいだパレットに出しておく 1 行。
+		const char* const kNotRunning =
+			"往復は回っていません。メニューの「実機テストを実行…」で始まります。";
+
 		// **CopyMemory とは名付けない**——Windows.h（PluginPrefix.h 経由）が同名のマクロを
 		// 定義していて、殻のビルドでここが memcpy に化ける（build-windows で実際に落ちた）。
 		void ApplyMemory(const FeedbackLoopMemory& memory, FeedbackLoopView& view)
@@ -51,10 +55,12 @@ namespace HomeskzIfcImport
 	FeedbackLoopDriver::FeedbackLoopDriver(long long checkIntervalSeconds)
 		: fInterval(checkIntervalSeconds < 1 ? 1 : checkIntervalSeconds)
 	{
+		fView.message = kNotRunning;
 	}
 
 	void FeedbackLoopDriver::Arm()
 	{
+		fArmed = true;
 		fForceCheck = true;
 		// 止まったあとにメニューからもう一度往復へ入った——見え方も Waiting へ戻す
 		// （Stopped の文言が残ったままだと、回り出したのに止まって見える）。
@@ -69,6 +75,9 @@ namespace HomeskzIfcImport
 
 	void FeedbackLoopDriver::BeginRound()
 	{
+		// **ここでは武装しない。** 押した周は途中で止まりうる（ファイル選択のキャンセル・
+		// 「送らない」）ので、武装するのは**投稿できて往復が成立したとき**＝ Arm だけに
+		// する。見え方だけ「走っています」にしておく。
 		fView.phase = FeedbackLoopPhase::Working;
 		fView.message = "実機テストを実行しています…（終わったら結果を PR へ投稿します）";
 		fView.nextCheckAt = -1;
@@ -84,6 +93,22 @@ namespace HomeskzIfcImport
 		if (fBusy || fExternalBusy)
 			return fView;
 
+		// **人が始めていない往復は回さない**（FeedbackLoop.h「回り出す条件」）。パレットの
+		// 時計は「閉じる」で隠しても止まらないので、ここを素通しすると**誰も押していない
+		// のに取り込みが走り出す**（実機で起きた）。記憶が active でも同じ——記憶は
+		// 「続きがある」であって「いま回っている」ではない。
+		if (!fArmed)
+		{
+			// 押した周が途中で止まったとき（BeginRound だけ済んで Arm へ来なかった）、
+			// 「実行しています…」で固まらせない。
+			if (fView.phase == FeedbackLoopPhase::Working)
+			{
+				fView.phase = FeedbackLoopPhase::Idle;
+				fView.message = kNotRunning;
+			}
+			return fView;
+		}
+
 		const bool due = fForceCheck || fLastCheck < 0 || now - fLastCheck >= fInterval;
 		if (!due)
 		{
@@ -97,19 +122,23 @@ namespace HomeskzIfcImport
 		return fView;
 	}
 
-	FeedbackLoopView FeedbackLoopDriver::Stop(IFeedbackLoopHost& host)
+	FeedbackLoopView FeedbackLoopDriver::Stop(IFeedbackLoopHost& host, const std::string& reason)
 	{
 		if (fBusy)
 			return fView; // 取り込みの最中。終わってから押し直してもらう
 		const BusyGuard busy(fBusy);
-		// 記憶が無いのに止めても意味は無いが、害も無い（本体は loop を下ろすだけ）。
-		Stopped(host, "利用者がパレットで止めました", /*notifyPr*/ true);
+		// 記憶が無いのに止めても意味は無いが、害も無い（本体は loop を下ろすだけで、
+		// 既に下りていれば PR にも投稿しない。draw/Feedback.cpp の endFeedbackLoop）。
+		Stopped(host, reason, /*notifyPr*/ true);
 		return fView;
 	}
 
 	void FeedbackLoopDriver::Stopped(IFeedbackLoopHost& host, const std::string& reason,
 									 bool notifyPr)
 	{
+		// **止まったら武装も解く。** ここを落とすと、隠れたパレットの時計が次の Tick で
+		// もう一度回し始める。
+		fArmed = false;
 		host.EndLoop(reason, notifyPr);
 		fView.phase = FeedbackLoopPhase::Stopped;
 		fView.message = "往復を終えました（" + reason +

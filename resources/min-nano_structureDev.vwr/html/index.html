@@ -35,11 +35,13 @@
 	<div class="buttons">
 		<button id="checkNow" type="button" disabled>今すぐ確認</button>
 		<button id="stop" type="button" disabled>往復を止める</button>
-		<button id="hide" type="button">閉じる</button>
+		<button id="hide" type="button">止めて閉じる</button>
 	</div>
 	<div class="note">Claude が PR に <code>control=stop</code> の合図を付けるか、ここで止めるまで、
 		新しいビルドが出るたびに同じ条件で取り込んで結果を PR へ投稿します。
-		次の周が始まる前に、前の周の図を「取り消し」で戻しておくと絵が二重になりません。</div>
+		周と周のあいだの後始末（作業ファイルを開き直す）はプラグインが自分でします。
+		<strong>このパレットを閉じると往復も止まります</strong>（隠れたままでは止める口が
+		無くなるため）。続きはメニューの「実機テストを実行…」から走ります。</div>
 
 <script>
 (function () {
@@ -121,7 +123,13 @@
 			call('stop');
 		}
 	});
-	hideBtn.addEventListener('click', function () { call('hide'); });
+	// **閉じる＝止めて閉じる。** 隠してもこのページのタイマーは止まらないので、往復を
+	// 残したまま隠すと見えないところで取り込みが走り続ける（C++ 側の OnHide も止める）。
+	hideBtn.addEventListener('click', function () {
+		if (window.confirm('自動の往復を止めて、このパレットを閉じます。記憶は残るので、メニューの「実機テストを実行…」をもう一度実行すれば続きから走ります。')) {
+			call('hide');
+		}
+	});
 
 	call('tick');
 	window.setInterval(function () { call('tick'); }, TICK_MS);

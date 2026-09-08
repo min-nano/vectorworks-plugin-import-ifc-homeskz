@@ -22,9 +22,18 @@
 //	テストできる（tests/FeedbackLoopTests.cpp）。実物の host は
 //	src/FeedbackLoopHost.cpp（SDK 依存）。
 //
+//	【回り出す条件】**人がメニューの「実機テストを実行…」を押したときだけ。**（M25）
+//	パレットの JS タイマーは Vectorworks が生きているあいだ回り続ける——**しかも「閉じる」で
+//	消えるのは見た目だけで、隠れたページの時計は止まらない**（実機で確認）。したがって
+//	「記憶（本体のファイル）が active だから回す」という作りにすると、**誰も押していないのに
+//	往復が走り出す**（実機で実際に起きた）。回すかどうかは**この駆動が持つ「武装したか」**
+//	だけで決め、Vectorworks を起動し直せば必ず下りている（記憶は消えないので、人がメニューを
+//	1 回押せば続きから回り出す）。
+//
 //	【止まる条件】次のどれか。**どれも記憶（core::FeedbackSession）は消さない**——人が
 //	メニューから取り込みを実行すれば続きの周として走り、そこでまた回り出す。
 //	  * 人がパレットで「往復を止める」を押した
+//	  * 人がパレットを「閉じる」で閉じた（**隠すだけでは止まらない**ので、閉じる側で止める）
 //	  * PR に Claude の合図（`<!-- homeskz-ifc-feedback v1 control=stop -->`）が付いた
 //	  * PR が閉じた／マージされた
 //	  * 入れられなかった・殻まで変わった・取り込めなかった・投稿できなかった
@@ -128,6 +137,8 @@ namespace HomeskzIfcImport
 		void Arm();
 
 		// **これから 1 周を走らせる**（メニューの実機テストが、取り込みを始める前に言う）。
+		// **武装はしない**——押した周は途中で止まりうる（キャンセル・「送らない」）ので、
+		// 回り出すのは投稿できて往復が成立したとき（Arm）だけ。
 		// パレットは**コマンドを押した直後に開く**ので、その時点ではまだ何も投稿できて
 		// いない——見え方だけ「走っています」にしておかないと、開いた瞬間に「往復は
 		// 回っていません」と出て、押した人が失敗したと読む。
@@ -146,8 +157,9 @@ namespace HomeskzIfcImport
 		// JS のタイマーから。now は単調な秒（起点は問わない）。
 		FeedbackLoopView Tick(IFeedbackLoopHost& host, long long now);
 
-		// パレットの「往復を止める」。PR へ終えたことを投稿する。
-		FeedbackLoopView Stop(IFeedbackLoopHost& host);
+		// パレットの「往復を止める」「閉じる」。PR へ終えたことを投稿する（reason は
+		// その本文へ入る）。**武装も解く**——以後の Tick は何もしない。
+		FeedbackLoopView Stop(IFeedbackLoopHost& host, const std::string& reason);
 
 		// 「今すぐ確認」（間隔を待たずに次の Tick で見る）。
 		void CheckNow();
@@ -164,6 +176,9 @@ namespace HomeskzIfcImport
 
 		long long fInterval;
 		long long fLastCheck = -1;
+		// **人がメニューから始めたか**（上記「回り出す条件」）。これが false のあいだ、
+		// Tick は本体にも GitHub にも触らない。
+		bool fArmed = false;
 		bool fForceCheck = false;
 		bool fBusy = false;
 		bool fExternalBusy = false;
