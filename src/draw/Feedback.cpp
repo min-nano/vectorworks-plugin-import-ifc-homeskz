@@ -819,7 +819,14 @@ namespace HomeskzIfcImport::draw
 				session.baselineRecorded = true;
 				session.baselineLayers = input.counts->existingLayers;
 			}
-			session.lastCommit = input.build.commit;
+			// **キャンセルされた周は、そのビルドを「試し終えた」ことにしない。** ここで
+			// lastCommit を進めると、同じビルドをもう一度実行しても
+			// `feedbackRoundKind` が RearmOnly を返して取り込みが走らず、**押し間違えた
+			// 一度きりで往復が再開できなくなる**（実機 round 10 で発生）。投稿はする
+			// （途中までの数字にも意味がある）が、記憶の上では走っていない扱いにして、
+			// 同じビルドでの取り直しを許す。
+			if (!input.counts->cancelled)
+				session.lastCommit = input.build.commit;
 			// **次の周の前に取り除く顔ぶれ。** この周が自分で作ったレイヤだけを名指しで
 			// 持つ（prepareDrawingForRound）。前の周の分は用済みなので置き換える。
 			session.lastCreatedLayers = input.counts->createdLayers;
