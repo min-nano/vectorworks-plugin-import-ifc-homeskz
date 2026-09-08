@@ -460,6 +460,25 @@ namespace HomeskzIfcImport::draw
 		// 図形（構造材・壁・スラブ・シンボル・ビューポート）もまとめて消える。
 		gSDK->AddAfterSwapObject(layer);
 		scope->fCreatedLayers.push_back(layer);
+		// **名前と種別もここで控える。** 呼び出し側（PrepareLayer / PrepareSheetLayer /
+		// draw/Story）は名前を持っているが、控えるのを 1 か所に集めておかないと、次に
+		// レイヤを作る場所が増えたときに控え漏れる。ハンドルから両方引けるので、ここで引く。
+		try
+		{
+			const VWLayerObj obj(layer);
+			const std::string name = static_cast<const char*>(obj.GetObjectName());
+			if (name.empty())
+				return;
+			std::vector<std::string>& names = obj.GetLayerType() == kLayerSheet
+												  ? scope->fCreatedSheetLayers
+												  : scope->fCreatedDesignLayers;
+			if (std::ranges::find(names, name) == names.end())
+				names.push_back(name);
+		}
+		catch (...)
+		{
+			// 名前を引けなくても取り込みは続く（次の周で消せないだけ）。
+		}
 	}
 
 	void RecordCreatedObject(MCObjectHandle object)
@@ -480,6 +499,133 @@ namespace HomeskzIfcImport::draw
 		// 同じ名前が並ぶ（PushUnique と同じ理由）。
 		if (std::ranges::find(scope->fExistingLayers, name) == scope->fExistingLayers.end())
 			scope->fExistingLayers.push_back(name);
+	}
+
+	namespace
+	{
+		// レイヤを消すあいだだけ開く undo イベント。**DeleteObject の useUndo に開始から
+		// 終了まで任せない**——任せると、イベントが開いていないときに自分で開いたきり
+		// 閉じずに残り、「半端な記録を取り消すと図面が壊れる」経路へ自分から踏み込む
+		// （SDK リファレンス Findings「Undo」の実測。#25）。
+		class RemoveUndoScope final
+		{
+		public:
+			RemoveUndoScope()
+			{
+				gSDK->SetUndoMethod(kUndoSwapObjects);
+				gSDK->NameUndoEvent(TXString("前の周の図を取り除く"));
+			}
+			~RemoveUndoScope()
+			{
+				// 1 枚も消せなかったら、空のイベントを残さず捨てる（ImportUndoScope と
+				// 同じ理由——空のイベントは取り消したときに図面を壊す）。
+				if (fRemoved == 0)
+					gSDK->EndAndRemoveUndoEvent();
+				else
+					gSDK->EndUndoEvent();
+			}
+			RemoveUndoScope(const RemoveUndoScope&) = delete;
+			RemoveUndoScope& operator=(const RemoveUndoScope&) = delete;
+			RemoveUndoScope(RemoveUndoScope&&) = delete;
+			RemoveUndoScope& operator=(RemoveUndoScope&&) = delete;
+
+			void counted()
+			{
+				++fRemoved;
+			}
+			std::size_t removed() const
+			{
+				return fRemoved;
+			}
+
+		private:
+			std::size_t fRemoved = 0;
+		};
+
+		// 図面にいまあるレイヤの枚数（デザイン・シートの両方）。**最後の 1 枚を消さない**
+		// ための数え上げで、1 枚も残らない図面は Findings でも未確認である。
+		std::size_t CountAllLayers()
+		{
+			std::size_t count = 0;
+			try
+			{
+				for (MCObjectHandle h = VWDocument::GetDrawingHeaderFristMember(); h != nil;
+					 h = gSDK->NextObject(h))
+				{
+					if (VWLayerObj::IsLayerObject(h))
+						++count;
+				}
+			}
+			catch (...)
+			{
+				return count;
+			}
+			return count;
+		}
+
+		// 名前と種別の両方が一致するレイヤだけを 1 枚消す（安全弁）。消せたら true。
+		//
+		// 種別は**シートかどうか**の真偽で受ける——SDK の列挙で綴りが確かなのは
+		// `kLayerSheet` だけ（AllLayers が既に使っている）なので、デザイン側の綴りを
+		// 当てものにしない。
+		bool RemoveOneLayer(const std::string& name, bool wantSheet, std::size_t& remaining)
+		{
+			if (name.empty() || remaining <= 1)
+				return false; // 最後の 1 枚は残す（未確認の領域へ踏み込まない）
+			MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
+			if (layer == nil || !VWLayerObj::IsLayerObject(layer))
+				return false;
+			if ((VWLayerObj(layer).GetLayerType() == kLayerSheet) != wantSheet)
+				return false; // 同じ名前の別種別は消さない
+			gSDK->DeleteObject(layer, true /* useUndo: 上で開いたイベントへ登録される */);
+			--remaining;
+			return true;
+		}
+	} // namespace
+
+	std::size_t RemoveCreatedLayers(const std::vector<std::string>& designLayers,
+									const std::vector<std::string>& sheetLayers, std::string& note)
+	{
+		note.clear();
+		if (designLayers.empty() && sheetLayers.empty())
+			return 0;
+
+		std::size_t remaining = CountAllLayers();
+		RemoveUndoScope scope;
+		std::size_t sheets = 0;
+		std::size_t designs = 0;
+		try
+		{
+			// **シートが先。** ビューポートが参照しているデザインレイヤを先に消したときの
+			// 影響は未確認なので、その場面自体を作らない（DrawUtil.h「シートを先に消す」）。
+			for (const std::string& name : sheetLayers)
+			{
+				if (RemoveOneLayer(name, /*wantSheet*/ true, remaining))
+				{
+					++sheets;
+					scope.counted();
+				}
+			}
+			for (const std::string& name : designLayers)
+			{
+				if (RemoveOneLayer(name, /*wantSheet*/ false, remaining))
+				{
+					++designs;
+					scope.counted();
+				}
+			}
+		}
+		catch (...)
+		{
+			// 途中で落ちても、そこまでの削除はイベントに入っている。閉じるのはスコープ。
+			note = "前の周の図を取り除く途中で異常が起きました（消せた分だけ消えています）";
+			return scope.removed();
+		}
+
+		note = "準備: 前の周が作ったレイヤを取り除きました（デザイン " + std::to_string(designs) +
+			   "/" + std::to_string(designLayers.size()) + " 枚・シート " + std::to_string(sheets) +
+			   "/" + std::to_string(sheetLayers.size()) + " 枚）";
+		return scope.removed();
 	}
 
 	MCObjectHandle PrepareLayer(const std::string& layerName)

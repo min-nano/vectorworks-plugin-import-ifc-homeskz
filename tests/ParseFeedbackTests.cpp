@@ -385,8 +385,11 @@ TEST(feedback_comment_asks_for_one_more_run_after_the_fix)
 	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
 	CHECK(contains(body, "「実機テストを実行…」をもう一度実行してください"));
 	CHECK(contains(body, "ファイル選択も設定ダイアログも確認も再起動も要りません"));
-	// **戻すのは人の手仕事**なので、そこだけは毎回頼む（ダイアログでは頼まない）。
-	CHECK(contains(body, "「取り消し」で取り込み前へ戻してから"));
+	// **図面を戻すのも頼まない**（M25）。前の周が作ったレイヤはプラグインが自分で
+	// 取り除いてから描き直すので、人にできることはコマンドを 1 回押すことだけである
+	// ——頼みごとが 1 つ増えるたびに「実行して放っておく」から遠ざかる。
+	CHECK(contains(body, "「取り消し」で戻す必要もありません"));
+	CHECK(!contains(body, "「取り消し」で取り込み前へ戻してから"));
 }
 
 TEST(feedback_comment_tells_how_the_automatic_loop_runs_and_stops)

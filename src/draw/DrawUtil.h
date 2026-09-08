@@ -276,6 +276,23 @@ namespace HomeskzIfcImport::draw
 			return !fExistingLayers.empty();
 		}
 
+		// **このインポートが新しく作ったレイヤの名前**（登場順に重複なし）。デザインと
+		// シートを分けて持つ——次の周の前に取り除くとき**シートを先に消す**必要があり
+		// （RemoveCreatedLayers の doc コメント）、順序を呼ぶ側に委ねないため。
+		//
+		// 実機フィードバックの往復が、次の周の取り込みの前に**この顔ぶれだけ**を図面から
+		// 取り除いて取り込み前へ戻す（draw/Feedback の prepareDrawingForRound）。
+		// **自分が作ったものだけを覚えておくのが安全弁**である——「基準に無いレイヤ」を
+		// 消す作りにすると、利用者が別の用途で足したレイヤまで巻き込む。
+		const std::vector<std::string>& createdDesignLayers() const
+		{
+			return fCreatedDesignLayers;
+		}
+		const std::vector<std::string>& createdSheetLayers() const
+		{
+			return fCreatedSheetLayers;
+		}
+
 		// 取り込み前から在ったレイヤの名前（登場順に重複なし）。
 		//
 		// **真偽 1 つでは足りない。** 図面のテンプレートに「共通」等が最初から在れば、
@@ -297,8 +314,32 @@ namespace HomeskzIfcImport::draw
 		bool contains(MCObjectHandle layer) const;
 
 		std::vector<MCObjectHandle> fCreatedLayers; // このインポートが作ったレイヤ
+		std::vector<std::string> fCreatedDesignLayers; // その名前（デザインレイヤ・登場順）
+		std::vector<std::string> fCreatedSheetLayers; // その名前（シートレイヤ・登場順）
 		std::vector<std::string> fExistingLayers; // 取り込み前から在ったレイヤ（登場順）
 	};
+
+	// **名前で指定したレイヤを図面から取り除く。** 実機フィードバックの往復が、次の周の
+	// 取り込みの前に前の周の図を消すのに使う——**このリポジトリで唯一「利用者の図面から
+	// ものを消す」コード**なので、安全弁は下記のとおり厳しくしてある。
+	//
+	// 【SDK の作法】ISDK に `DeleteLayer` 相当は無く、汎用 `DeleteObject` をレイヤの
+	// ハンドルへ呼ぶ 1 通りだけ（SDK リファレンス Findings「Undo」。実機確認済み:
+	// min-nano/vectorworks-developer-sdk-reference#25）。**`DeleteObject(h, useUndo=true)`
+	// はイベントが開いていなければ自分で開き、閉じないまま残す**ので、呼ぶ側が undo
+	// イベントを開始・終了する（同 Findings。ここでその作法を守っている）。
+	//
+	// 【シートを先に消す】ビューポートが参照しているデザインレイヤを先に消したときの
+	// 影響は Findings で未確認のまま残っている。シート（＝ビューポートが載っている側）を
+	// 先に消せばその場面自体が起きないので、順序をここで固定する。
+	//
+	// 【安全弁】名前が一致し、**種別が指定どおり**（デザインはデザイン、シートはシート）で、
+	// **消したあとにレイヤが 1 枚も無くならない**ときだけ消す。1 枚も残らない図面は
+	// Findings でも未確認である。
+	//
+	// 戻り値は実際に消せた枚数。note には人が読む 1 行が入る（診断ログへ出す）。
+	std::size_t RemoveCreatedLayers(const std::vector<std::string>& designLayers,
+									const std::vector<std::string>& sheetLayers, std::string& note);
 
 	// このインポートが新しく作ったレイヤを undo イベントへ登録する（デザイン／シートの
 	// どちらも）。イベントが開いていなければ何もしない。nil は無視。

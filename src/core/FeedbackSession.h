@@ -78,6 +78,15 @@ namespace HomeskzIfcImport::core
 		bool baselineRecorded = false;
 		std::vector<std::string> baselineLayers;
 
+		// **前の周が新しく作ったレイヤ**（デザイン／シートを分けて）。次の周の取り込みの
+		// 前に、この顔ぶれ**だけ**を図面から取り除いて取り込み前へ戻す（draw/Feedback の
+		// prepareDrawingForRound）。**自分が作ったものだけを覚えておくのが安全弁**である
+		// ——「基準に無いレイヤ」を消す作りにすると、利用者が別の用途で足したレイヤまで
+		// 巻き込む。ここはこのリポジトリで数少ない「利用者の図面からものを消す」経路なので、
+		// 消してよいものを名指しで持つ（docs/DEV-NOTES.md M25）。
+		std::vector<std::string> lastCreatedLayers;
+		std::vector<std::string> lastCreatedSheets;
+
 		// 直近の周の要素内訳（parse::formatTally の 1 行表現）。次の周のコメントで
 		// **「前回からどう変わったか」**を出すために持つ——数字の羅列を 2 つ並べて
 		// 読み比べさせるのでは、往復を減らした意味が薄い。

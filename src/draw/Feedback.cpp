@@ -459,13 +459,28 @@ namespace HomeskzIfcImport::draw
 
 		// **周と周のあいだに図面を取り込み前へ戻す。** 戻り値は診断ログへ書く 1 行。
 		//
-		// **いまは何もしない。** プログラムからメニューの「取り消し」を起動できるかは
-		// 調査中で（min-nano/vectorworks-developer-sdk-reference#27）、ISDK の undo API では
-		// できないことと、レイヤのハンドルを直接消す案が実機確認待ちであることは #23 で
-		// 分かっている。**答えが出たらここ 1 か所に書く**——往復の他の場所には書かない。
-		std::string prepareDrawingForRound()
+		// **前の周が作ったレイヤを、名指しで取り除く。** プログラムから「取り消し」を掛ける
+		// 手立ては無い——ISDK の undo 実行 API は閉じたイベントに効かず（SDK リファレンス
+		// issue #23）、メニューコマンドを名前で起動する API も存在しない（同 #27。どちらも
+		// 「できない」でヘッダ根拠つきに確定済み）。残る唯一の道が**レイヤのハンドルを直接
+		// 消す**もので、これは実機で確認されている（同 #25。Findings「Undo」）。SDK の作法
+		// （自分で undo イベントを開いて閉じる・シートを先に消す）と安全弁は
+		// draw/DrawUtil の RemoveCreatedLayers が 1 か所で持つ。
+		//
+		// **消してよいのは「前の周が自分で作ったレイヤ」だけ。** 記憶に名前で控えてある
+		// ものに限る——「基準に無いレイヤ」を消す作りにすると、利用者が別の用途で足した
+		// レイヤまで巻き込む（core/FeedbackSession の lastCreatedLayers）。
+		std::string prepareDrawingForRound(const core::FeedbackSession& session)
 		{
-			return "準備: 図面はそのままです（前の周の図が残っていれば、その上へ重ねて描きます）";
+			if (session.lastCreatedLayers.empty() && session.lastCreatedSheets.empty())
+				return "準備: 前の周が作ったレイヤの記録が無いので、図面はそのままにしました"
+					   "（残っていれば、その上へ重ねて描きます）";
+			std::string note;
+			const std::size_t removed =
+				RemoveCreatedLayers(session.lastCreatedLayers, session.lastCreatedSheets, note);
+			if (removed == 0 && note.empty())
+				return "準備: 前の周が作ったレイヤは 1 枚も残っていませんでした（図面はそのまま）";
+			return note;
 		}
 
 		core::FeedbackSession loadFeedbackSession(const std::string& branch)
@@ -600,6 +615,10 @@ namespace HomeskzIfcImport::draw
 				session.baselineLayers = input.counts->existingLayers;
 			}
 			session.lastCommit = input.build.commit;
+			// **次の周の前に取り除く顔ぶれ。** この周が自分で作ったレイヤだけを名指しで
+			// 持つ（prepareDrawingForRound）。前の周の分は用済みなので置き換える。
+			session.lastCreatedLayers = input.counts->createdLayers;
+			session.lastCreatedSheets = input.counts->createdSheets;
 			session.lastTally =
 				parse::formatTally(parse::elementRows(*input.document, *input.counts));
 			// **自動の往復（M24）はここで回り出す。** 殻のパレットは記憶の loop を見て周期的に
@@ -695,8 +714,8 @@ namespace HomeskzIfcImport::draw
 		plan.session.ifcPath = ifcPath;
 		plan.session.options = options;
 
-		const ImportRound round =
-			runImportRound(ifcPath, options, settingsShown, settingsNote, prepareDrawingForRound());
+		const ImportRound round = runImportRound(ifcPath, options, settingsShown, settingsNote,
+												 prepareDrawingForRound(plan.session));
 		if (round.failed)
 		{
 			// 送るべき内訳がそもそも無い。理由はいつもの結果ダイアログで見せる。

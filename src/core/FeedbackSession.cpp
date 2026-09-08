@@ -101,6 +101,11 @@ namespace HomeskzIfcImport::core
 		out << "baseline=" << boolText(session.baselineRecorded) << "\n";
 		for (const std::string& layer : session.baselineLayers)
 			out << "baseline.layer=" << sanitize(layer) << "\n";
+		// 前の周が作ったレイヤ（次の周の前に取り除く顔ぶれ）。基準と同じく**1 枚 1 行**。
+		for (const std::string& layer : session.lastCreatedLayers)
+			out << "created.layer=" << sanitize(layer) << "\n";
+		for (const std::string& layer : session.lastCreatedSheets)
+			out << "created.sheet=" << sanitize(layer) << "\n";
 		// 取り込み設定は役割の表の順に並べる（core/ImportOptions.h の symbolRoles）。
 		for (std::size_t i = 0; i < kSymbolRoleCount; ++i)
 		{
@@ -158,6 +163,17 @@ namespace HomeskzIfcImport::core
 				// **重ねて読む**（行の数だけレイヤがある）。空行は基準にならないので捨てる。
 				if (!value.empty())
 					session.baselineLayers.push_back(value);
+			}
+			else if (key == "created.layer")
+			{
+				// 空の名前は消す相手にならないので捨てる（GetNamedLayer も引けない）。
+				if (!value.empty())
+					session.lastCreatedLayers.push_back(value);
+			}
+			else if (key == "created.sheet")
+			{
+				if (!value.empty())
+					session.lastCreatedSheets.push_back(value);
 			}
 			else if (key.starts_with("role."))
 			{

@@ -1338,6 +1338,14 @@ namespace HomeskzIfcImport::core
 		// PR コメントには名前そのものを載せず、枚数と判定だけを出す。
 		std::vector<std::string> existingLayers;
 
+		// **この取り込みが新しく作ったレイヤの名前**（デザイン／シートを分けて登場順）。
+		// 実機フィードバックの往復が記憶し、次の周の取り込みの前に**この顔ぶれだけ**を
+		// 図面から取り除いて取り込み前へ戻す（draw/Feedback の prepareDrawingForRound）。
+		// **自分が作ったものだけを覚えておくのが安全弁**——「基準に無いレイヤ」を消す
+		// 作りにすると、利用者が別の用途で足したレイヤまで巻き込む。
+		std::vector<std::string> createdLayers;
+		std::vector<std::string> createdSheets;
+
 		// 描画側で起きた**異常**の説明（無ければ空）。要素ごとに 1 行を改行で連ねる。実描画は
 		// ローカルの VectorWorks でしか確認できないので、「命令はあるのに見えない」ときに
 		// 原因を解析側と描画側で切り分ける手掛かりを診断ログへ持ち帰る。

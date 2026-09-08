@@ -51,6 +51,8 @@ namespace
 		session.loop = true;
 		session.baselineRecorded = true;
 		session.baselineLayers = {"共通", "デザイン レイヤ-1"};
+		session.lastCreatedLayers = {"1-伏図", "2-伏図"};
+		session.lastCreatedSheets = {"A-1", "A-2"};
 		session.options.setSymbol(SymbolRole::FloorPost, "床束（特注）");
 		session.options.setEnabled(SymbolRole::FireBrace, false);
 		return session;
@@ -123,6 +125,10 @@ TEST(feedback_session_without_a_baseline_reads_as_not_recorded)
 	const FeedbackSession session = parseFeedbackSession("round=2\nbuild=a1b2c3d\n");
 	CHECK(!session.baselineRecorded);
 	CHECK(session.baselineLayers.empty());
+	// 古い版には「前の周が作ったレイヤ」の行も無い。**空＝消す相手が分からない**ので、
+	// そのときは図面に触らない（draw/Feedback の prepareDrawingForRound）。
+	CHECK(session.lastCreatedLayers.empty());
+	CHECK(session.lastCreatedSheets.empty());
 }
 
 TEST(feedback_session_keeps_an_empty_baseline_distinct_from_none)
@@ -158,6 +164,16 @@ TEST(feedback_session_round_trips_through_text)
 	CHECK_EQ(after.baselineLayers.size(), before.baselineLayers.size());
 	for (std::size_t i = 0; i < before.baselineLayers.size(); ++i)
 		CHECK_EQ(after.baselineLayers[i], before.baselineLayers[i]);
+	// **前の周が作ったレイヤ**（M25）。次の周の前にこれ**だけ**を図面から取り除くので、
+	// ここが落ちると「消してよいもの」を見失う——見失ったまま別の基準で消す作りに
+	// してはならない（利用者が足したレイヤを巻き込む）。デザインとシートは混ぜない
+	// （消す順序が違う: シートが先）。
+	CHECK_EQ(after.lastCreatedLayers.size(), before.lastCreatedLayers.size());
+	for (std::size_t i = 0; i < before.lastCreatedLayers.size(); ++i)
+		CHECK_EQ(after.lastCreatedLayers[i], before.lastCreatedLayers[i]);
+	CHECK_EQ(after.lastCreatedSheets.size(), before.lastCreatedSheets.size());
+	for (std::size_t i = 0; i < before.lastCreatedSheets.size(); ++i)
+		CHECK_EQ(after.lastCreatedSheets[i], before.lastCreatedSheets[i]);
 	// 取り込み設定も 1 周目のまま運ばれる（ここが落ちると 2 周目が別の条件で走る）。
 	for (std::size_t i = 0; i < kSymbolRoleCount; ++i)
 	{
