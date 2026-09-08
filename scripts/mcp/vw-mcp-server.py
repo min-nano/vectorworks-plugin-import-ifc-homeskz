@@ -171,6 +171,10 @@ def spool_candidates():
     roots = []
 
     def add(root):
+        # **末尾の区切りを落としてから見比べる。** `$TMPDIR` は `/var/…/T/` の形で来るが
+        # `getconf` や利用者の設定は `/T` のこともあり、揃えないと同じ場所が
+        # `searched` に 2 行並ぶ（繋がらないときに読むのは正にこの一覧なので、濁らせない）。
+        root = root.rstrip("/\\") or root
         if root and root not in roots:
             roots.append(root)
 
@@ -183,7 +187,7 @@ def spool_candidates():
     if os.name != "nt":
         add("/tmp")
 
-    candidates = [os.path.join(root.rstrip("/\\"), plugin + "-mcp") for root in roots]
+    candidates = [os.path.join(root, plugin + "-mcp") for root in roots]
     for path in darwin_spool_scan(plugin):
         if path not in candidates:
             candidates.append(path)
