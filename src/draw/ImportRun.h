@@ -54,6 +54,13 @@ namespace HomeskzIfcImport::draw
 	// 何も描かず静かに終える）。
 	bool chooseIfcFile(std::string& outPath);
 
+	// 同じ「開く」ダイアログを、拡張子と見出しだけ差し替えて開く（`chooseIfcFile` の実体）。
+	// **ダイアログの作法を 2 か所に書かないため**に公開してある——実機テストの周が「毎周
+	// 開き直す図面」を選ばせるのに使う（draw/Feedback）。extension は "ifc" のように点を
+	// 含めない綴りで、複数なら空白区切り。
+	bool chooseFile(const std::string& title, const std::string& extension,
+					const std::string& extensionLabel, std::string& outPath);
+
 	// 動かしているビルドの素性（診断ログの見出しと、往復の記憶の突き合わせに使う）。
 	// **ここで詰めるのは、BuildConfig.h のマクロを見られるのが SDK 側だけ**だから
 	// ——parse/Summary は受け取った文字列を並べるだけで、ビルド種別を知らない。

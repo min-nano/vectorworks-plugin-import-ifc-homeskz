@@ -43,6 +43,8 @@ namespace
 		session.pullRequest = 123;
 		session.branch = "claude/plugin-feedback-automation-01bi93";
 		session.ifcPath = "/Users/someone/Documents/物件A.ifc";
+		session.templatePath = "/Users/someone/Documents/テンプレート.vwx";
+		session.roundDocumentPath = "/tmp/homeskz-round-3.vwx";
 		session.anonymize = false;
 		session.round = 3;
 		session.lastCommit = "a1b2c3d";
@@ -129,6 +131,10 @@ TEST(feedback_session_without_a_baseline_reads_as_not_recorded)
 	// そのときは図面に触らない（draw/Feedback の prepareDrawingForRound）。
 	CHECK(session.lastCreatedLayers.empty());
 	CHECK(session.lastCreatedSheets.empty());
+	// 開き直しの行（M25）も無い。**空＝開き直さない**なので、古い記憶を読んでも従来
+	// どおり「いま開いている図面へ描く」に落ちる。
+	CHECK(session.templatePath.empty());
+	CHECK(session.roundDocumentPath.empty());
 }
 
 TEST(feedback_session_keeps_an_empty_baseline_distinct_from_none)
@@ -151,6 +157,11 @@ TEST(feedback_session_round_trips_through_text)
 	CHECK_EQ(after.pullRequest, before.pullRequest);
 	CHECK_EQ(after.branch, before.branch);
 	CHECK_EQ(after.ifcPath, before.ifcPath);
+	// **毎周開き直す図面**（M25）。テンプレートのパスが落ちると、次の周は開き直さずに
+	// 前の周の図へ重ねて描いてしまう。開いた複製のパスが落ちると、その図面を閉じられず
+	// 周の数だけ積み上がる。
+	CHECK_EQ(after.templatePath, before.templatePath);
+	CHECK_EQ(after.roundDocumentPath, before.roundDocumentPath);
 	CHECK_EQ(after.anonymize, before.anonymize);
 	CHECK_EQ(after.round, before.round);
 	CHECK_EQ(after.lastCommit, before.lastCommit);

@@ -44,6 +44,9 @@
 #include "parse/Feedback.h"
 #include "parse/Summary.h"
 
+// 周ごとに図面を開き直す（ISDK::OpenDocumentPath）。パスは IFileIdentifier で渡す。
+#include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
+
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -463,6 +466,145 @@ namespace HomeskzIfcImport::draw
 			std::string preparation; // 取り込みの前に図面へ何をしたか（1 行）
 		};
 
+		// **周ごとに図面をテンプレートから開き直す。**
+		//
+		// レイヤ削除（下の prepareDrawingForRound）は「前の周が自分で作ったレイヤ」しか
+		// 消せず、**取り込み前から在ったレイヤ**——実機のテンプレートにある通り芯の
+		// 「共通」——へ描いた分は残る。実機で絵が二重になり、伏図・軸組図の「収まらない」
+		// 枚数が増えた（docs/DEV-NOTES.md M25）。丸ごと戻す道は 3 つとも塞がっている以上
+		// （SDK リファレンス #23 / #27 / #31）、**同じ初期状態から始める**にはこれしかない。
+		//
+		// 使う口は `ISDK::OpenDocumentPath` / `SaveActiveDocumentPath` / `CloseDocument` /
+		// `SwitchToOpenFile`（SDK リファレンス Findings「Documents」）。SDK 自身の
+		// システムテスト補助（`VWFC/Tools/CatchSystemTest.cpp`）が「開く → 作業 → 閉じる」
+		// をこの 3 つで回しているので、プラグインから呼ぶ使い方そのものは SDK 公式である。
+		//
+		// **ここは実機テストの周だけ。** 本番の取り込みは開いている図面へ描くのが仕事で、
+		// この関数を呼ばない（draw/Feedback.h・CLAUDE.md M25）。
+
+		// 絶対パスから IFileIdentifier を作る（作れなければ空の VCOMPtr）。
+		VectorWorks::Filing::IFileIdentifierPtr FileIdFor(const std::string& path)
+		{
+			using namespace VectorWorks::Filing;
+			IFileIdentifierPtr fileID(IID_FileIdentifier);
+			if (!fileID)
+				return IFileIdentifierPtr{};
+			if (fileID->Set(TXString(path.c_str())) != kVCOMError_NoError)
+				return IFileIdentifierPtr{};
+			return fileID;
+		}
+
+		// そのパスの図面が開いていれば、その fFileRef を返す（無ければ 0）。
+		//
+		// **パスで探すのがこの関数の要点である。** fFileRef を記憶に持ち越すと、
+		// VectorWorks を再起動したあとに同じ番号が別の図面へ割り当たっていて、**利用者の
+		// 図面を「前の周のもの」と取り違える**恐れがある（core/FeedbackSession.h の
+		// roundDocumentPath）。
+		Sint32 OpenFileRefFor(const std::string& path)
+		{
+			if (path.empty())
+				return 0;
+			VectorWorks::TVWArray_OpenFileInformation files;
+			gSDK->GetOpenFilesList(files);
+			for (size_t i = 0; i < files.GetSize(); ++i)
+			{
+				const VectorWorks::Filing::IFileIdentifierPtr& fileID = files[i].fpFileID;
+				if (!fileID)
+					continue;
+				TXString fullPath;
+				if (fileID->GetFileFullPath(fullPath) != kVCOMError_NoError)
+					continue;
+				if (path == static_cast<const char*>(fullPath))
+					return files[i].fFileRef;
+			}
+			return 0;
+		}
+
+		// 前の周でこの仕組みが開いた図面を、**保存してから**閉じる。閉じられたら true。
+		//
+		// **保存してから閉じるのは、無人の周を止めないため。** `CloseDocument` には
+		// 「保存しない」を伝える引数が無く（`CloseAllFilesAndQuitVectorworks(false)` とは
+		// 違う）、変更のある図面では保存を尋ねるダイアログが出るおそれがある——出れば、
+		// 誰も見ていない周がそこで止まる。保存に失敗したら**閉じない**（開いたままにして
+		// 次の周へ伝える。ダイアログに賭けるより、図面が 1 枚増えるほうが軽い）。
+		bool CloseRoundDocument(const std::string& path, std::string& note)
+		{
+			const Sint32 fileRef = OpenFileRefFor(path);
+			if (fileRef == 0)
+				return false; // もう開いていない（あるいは一度も開いていない）
+			if (!gSDK->SwitchToOpenFile(fileRef))
+				return false;
+
+			const VectorWorks::Filing::IFileIdentifierPtr fileID = FileIdFor(path);
+			if (!fileID || gSDK->SaveActiveDocumentPath(fileID) != 0)
+			{
+				note = "前の周の図面を保存できないので開いたままにしました";
+				return false;
+			}
+			if (!gSDK->CloseDocument())
+			{
+				note = "前の周の図面を閉じられませんでした（" + path + " へ保存済み）";
+				return false;
+			}
+			note = "前の周の図面は " + path + " へ保存して閉じました";
+			return true;
+		}
+
+		// テンプレートの複製を作る（作れなければ空）。**テンプレートそのものを開かない**
+		// ——開いた図面はそのファイルに紐づくので、保存の拍子に利用者のテンプレートを
+		// 書き換えてしまう。複製なら、何が起きてもテンプレートは無傷である。
+		std::string CopyTemplateForRound(const std::string& templatePath, int round)
+		{
+			std::error_code ec;
+			const std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
+			if (ec)
+				return "";
+			const std::filesystem::path copy =
+				dir / ("homeskz-round-" + std::to_string(round) + ".vwx");
+			const VectorWorks::Filing::IFileIdentifierPtr source = FileIdFor(templatePath);
+			const VectorWorks::Filing::IFileIdentifierPtr dest = FileIdFor(copy.string());
+			if (!source || !dest)
+				return "";
+			if (source->DuplicateOnDisk(dest, /*bOverwrite*/ true) != kVCOMError_NoError)
+				return "";
+			return copy.string();
+		}
+
+		// テンプレートから開き直す。戻り値は診断ログと PR コメントへ出す 1 行
+		// （**空なら開き直していない**＝呼び出し側は従来のレイヤ削除へ回す）。
+		std::string openRoundDocument(core::FeedbackSession& session)
+		{
+			if (session.templatePath.empty())
+				return {};
+
+			std::string closed;
+			const bool didClose = CloseRoundDocument(session.roundDocumentPath, closed);
+			session.roundDocumentPath.clear();
+
+			const std::string copy = CopyTemplateForRound(session.templatePath, session.round + 1);
+			if (copy.empty())
+				return "準備: テンプレートを複製できませんでした（" + session.templatePath +
+					   "）。いま開いている図面へ描きます";
+
+			const VectorWorks::Filing::IFileIdentifierPtr fileID = FileIdFor(copy);
+			// bShowErrorMessages=false: 誰も見ていない周でダイアログを出さない。
+			if (!fileID || !gSDK->OpenDocumentPath(fileID, false))
+			{
+				// **開けなかったら黙って続けない。** 開いている図面へそのまま描くと、前の
+				// 周の上に重なる——数字は揃うのに絵が壊れる、いちばん読み違えやすい形になる。
+				return "準備: テンプレートの複製を開けませんでした（" + copy +
+					   "）。いま開いている図面へ描きます";
+			}
+			session.roundDocumentPath = copy;
+
+			std::string note = "準備: テンプレートの複製を開きました（" + copy + "）";
+			if (!closed.empty())
+				note += "。" + closed;
+			else if (!didClose)
+				note += "。前の周の図面は開いていませんでした";
+			return note;
+		}
+
 		// **周と周のあいだに図面を取り込み前へ戻す。** 戻り値は診断ログへ書く 1 行。
 		//
 		// **前の周が作ったレイヤを、名指しで取り除く。** プログラムから「取り消し」を掛ける
@@ -701,6 +843,7 @@ namespace HomeskzIfcImport::draw
 
 		const bool continuing = kind == core::FeedbackRoundKind::ContinueRound;
 		std::string ifcPath = session.ifcPath;
+		std::string templatePath = session.templatePath;
 		core::ImportOptions options = session.options;
 		bool settingsShown = true;
 		std::string settingsNote;
@@ -719,6 +862,18 @@ namespace HomeskzIfcImport::draw
 			if (settings == draw::SettingsOutcome::Cancelled)
 				return false;
 			settingsShown = settings == draw::SettingsOutcome::Accepted;
+
+			// **毎周ここから開き直す図面**（テンプレート）。1 周目にだけ訊く——2 周目
+			// 以降はこの選択をそのまま使う（往復から人の操作を消すため）。
+			//
+			// **キャンセルしてよい。** 選ばなければ従来どおり、いま開いている図面へ描いて
+			// 前の周が作ったレイヤだけを取り除く。ただしテンプレートに元から在るレイヤ
+			// （通り芯の「共通」など）へ描いた分は残り、絵が二重になる（実機で発生。
+			// docs/DEV-NOTES.md M25）。
+			templatePath.clear();
+			(void)chooseFile("毎周ここから開き直す図面を選択（キャンセル＝いまの図面に描く）",
+							 "vwx sta", "Vectorworks の図面・テンプレート (*.vwx, *.sta)",
+							 templatePath);
 		}
 
 		// **尋ねることは全部、取り込みが始まる前に尋ね切る**（draw/Feedback.h）。
@@ -727,11 +882,17 @@ namespace HomeskzIfcImport::draw
 			return false; // 送らないなら、この周は走らせる意味が無い
 		plan.session.ifcPath = ifcPath;
 		plan.session.options = options;
+		plan.session.templatePath = templatePath;
 
 		// **取り除きは 1 回だけ呼び、その説明を 2 か所へ配る**——診断ログ（prologue）と
 		// PR コメント（FeedbackInput::preparation）。ログは上限で切り詰められるので、
 		// コメント側にも置かないと読めない周が出る（実機 round 2 で実際に落ちた）。
-		const std::string preparation = prepareDrawingForRound(plan.session);
+		// **まずテンプレートから開き直す。** 開き直せたなら消すものは何も無い（レイヤも
+		// クラスもシンボル定義も、その図面には前の周の痕跡が 1 つも無い）。選んでいない
+		// ときだけ、従来どおり「前の周が作ったレイヤ」を取り除く。
+		std::string preparation = openRoundDocument(plan.session);
+		if (preparation.empty())
+			preparation = prepareDrawingForRound(plan.session);
 		const ImportRound round =
 			runImportRound(ifcPath, options, settingsShown, settingsNote, preparation);
 		if (round.failed)

@@ -199,6 +199,12 @@ namespace HomeskzIfcImport::draw
 	// operator const char*()（UTF-8）で std::string へ写す。
 	bool chooseIfcFile(std::string& outPath)
 	{
+		return chooseFile("ホームズ君IFCファイルを選択", "ifc", "IFC ファイル (*.ifc)", outPath);
+	}
+
+	bool chooseFile(const std::string& title, const std::string& extension,
+					const std::string& extensionLabel, std::string& outPath)
+	{
 		// IFileChooserDialogPtr は VCOMPtr<IFileChooserDialog> の SDK 標準 typedef。
 		// const で受ける: operator-> は const なので、const のまま各インターフェース
 		// メソッド（SetTitle 等）を呼べる。VCOMPtr 自体は再代入しないため
@@ -207,9 +213,9 @@ namespace HomeskzIfcImport::draw
 		if (!dialog)
 			return false;
 
-		dialog->SetTitle("ホームズ君IFCファイルを選択");
-		// 拡張子フィルタ（.ifc）と、念のため全ファイル。存在チェックも有効化する。
-		dialog->AddFilter("ifc", "IFC ファイル (*.ifc)");
+		dialog->SetTitle(TXString(title.c_str()));
+		// 拡張子フィルタと、念のため全ファイル。存在チェックも有効化する。
+		dialog->AddFilter(TXString(extension.c_str()), TXString(extensionLabel.c_str()));
 		dialog->AddFilterAllFiles();
 		dialog->SetCheckFileExist(true);
 
