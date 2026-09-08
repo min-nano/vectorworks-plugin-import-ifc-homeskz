@@ -602,6 +602,10 @@ namespace HomeskzIfcImport::draw
 			Abort,
 		};
 
+		// 前の周が作ったレイヤを取り除く（実体は下。作業ファイルを採るときにも使うので、
+		// ここで名前だけ先に出す）。
+		std::string prepareDrawingForRound(const core::FeedbackSession& session);
+
 		// 作業ファイルを開き直す。note には診断ログと PR コメントへ出す 1 行が入る。
 		// rebased は「基準を採り直した」ときにその理由（runTestRound が作る）。
 		RoundDocument openRoundDocument(core::FeedbackSession& session, const std::string& rebased,
@@ -613,7 +617,22 @@ namespace HomeskzIfcImport::draw
 				// **1 周目: いま開いている図面を作業ファイルとして別名保存する。**
 				// 元のファイルには何も書き戻らない（別名保存なので、以後の変更は作業
 				// ファイルの側に付く）。
-				const std::string prefix = "準備: " + rebased;
+				// **採る前に、前の周が作ったレイヤを落とす。** 前の周が作業ファイルを
+				// 用意できずに図面へ直接描いていると、**その絵が載ったまま基準になり、
+				// 以後の周がずっと汚れた状態から始まる**（実機 round 13。round 12 の
+				// 失敗がそのまま基準へ焼き付いた）。ここで落としておけば、採り直した
+				// ときに自分で直る。
+				std::string cleaned;
+				if (!session.lastCreatedLayers.empty() || !session.lastCreatedSheets.empty())
+					cleaned = prepareDrawingForRound(session) + "。";
+
+				// **レイヤの基準も採り直す。** 別の図面で採った顔ぶれと引き比べても意味が
+				// 無い（「基準に無いレイヤ」が出るだけで、読む側を惑わせる）。次の投稿が
+				// この図面の顔ぶれを基準として採り直す。
+				session.baselineRecorded = false;
+				session.baselineLayers.clear();
+
+				const std::string prefix = cleaned + "準備: " + rebased;
 				const std::string work = FreshTempPath("homeskz-work");
 				if (!SaveActiveDocumentAs(work))
 				{
@@ -674,6 +693,14 @@ namespace HomeskzIfcImport::draw
 			{
 				note = "準備: 作業ファイルを開き直しました（" + session.workPath + "）。";
 				note += closed;
+				// **作業ファイルそのものに前の周の絵が焼き付いていることがある**（実機
+				// round 13。作業ファイルを用意できなかった周の絵が載ったまま基準として
+				// 採られた）。作業ファイルは採ったときの中身のまま変わらないので、放って
+				// おくと以後の周がずっと汚れた状態から始まる。ここで名指しの取り除きを
+				// 通しておけば**自分で直る**——きれいな作業ファイルには 1 枚も無いので、
+				// そのときは素通りする。
+				if (!session.lastCreatedLayers.empty() || !session.lastCreatedSheets.empty())
+					note += "。" + prepareDrawingForRound(session);
 				return RoundDocument::Ready;
 			}
 
