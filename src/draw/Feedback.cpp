@@ -562,10 +562,21 @@ namespace HomeskzIfcImport::draw
 			return fileID && gSDK->SaveActiveDocumentPath(fileID) == 0;
 		}
 
-		// 作業ファイルを開き直す。戻り値は診断ログと PR コメントへ出す 1 行
-		// （**空なら開き直していない**＝呼び出し側は従来のレイヤ削除へ回す）。
-		std::string openRoundDocument(core::FeedbackSession& session)
+		// 作業ファイルを用意できたか。
+		enum class RoundDocument
 		{
+			// 作業ファイルが開いている（＝取り除くものは何も無い）。
+			Ready,
+			// 用意できなかったが、いまの図面へは描ける（レイヤ削除へ回す）。
+			Fallback,
+			// **描く先が無い。** 取り込みを始めてはいけない。
+			Abort,
+		};
+
+		// 作業ファイルを開き直す。note には診断ログと PR コメントへ出す 1 行が入る。
+		RoundDocument openRoundDocument(core::FeedbackSession& session, std::string& note)
+		{
+			note.clear();
 			if (session.workPath.empty())
 			{
 				// **1 周目: いま開いている図面を作業ファイルとして別名保存する。**
@@ -573,12 +584,16 @@ namespace HomeskzIfcImport::draw
 				// ファイルの側に付く）。
 				const std::string work = TempPath("homeskz-work.vwx");
 				if (!SaveActiveDocumentAs(work))
-					return "準備: 作業ファイルを用意できませんでした（" +
+				{
+					note = "準備: 作業ファイルを用意できませんでした（" +
 						   (work.empty() ? std::string("一時ディレクトリが引けません") : work) +
 						   "）。いま開いている図面へ描きます";
+					return RoundDocument::Fallback;
+				}
 				session.workPath = work;
-				return "準備: いま開いている図面を作業ファイルとして保存しました（" + work +
+				note = "準備: いま開いている図面を作業ファイルとして保存しました（" + work +
 					   "）。次の周からはここを開き直して、毎回この状態から始めます";
+				return RoundDocument::Ready;
 			}
 
 			// **2 周目以降: 前の周の絵が載った文書を捨て場所へ移してから閉じる。**
@@ -590,15 +605,21 @@ namespace HomeskzIfcImport::draw
 				const std::string parked =
 					TempPath("homeskz-round-" + std::to_string(session.round) + ".vwx");
 				if (!SaveActiveDocumentAs(parked))
-					// **保存できなければ閉じない。** 未保存のまま閉じようとしても
-					// `CloseDocument()` は false を返す（実機確認済み）ので、ここで
-					// 諦めて従来のレイヤ削除へ回すほうが確実である。
-					return "準備: 前の周の図面を退避できなかったので開き直しませんでした（" +
+				{
+					// 退避できないなら閉じない（未保存の文書は閉じられない。実機確認済み）。
+					// いまの図面はまだ生きているので、従来のレイヤ削除へ回せる。
+					note = "準備: 前の周の図面を退避できなかったので開き直しませんでした（" +
 						   parked + "）。いま開いている図面へ描きます";
-				if (!gSDK->CloseDocument())
-					return "準備: 前の周の図面を閉じられませんでした（" + parked +
-						   " へ保存済み）。いま開いている図面へ描きます";
-				closed = "前の周の図面は " + parked + " へ移して閉じました";
+					return RoundDocument::Fallback;
+				}
+				// **`CloseDocument` の戻り値で分岐しない。** false を返しても実際には
+				// 閉じていることがある——実機 round 9 で false を見て「閉じられなかった
+				// から今の図面へ描く」と決めた結果、**どこにも属さない状態で描いて全 18
+				// 要素が 0 件**になった。閉じられたかどうかは下の読み戻しで判る。
+				const bool closeReturned = gSDK->CloseDocument();
+				closed = "前の周の図面は " + parked + " へ移しました（閉じる=";
+				closed += closeReturned ? "true" : "false";
+				closed += "）";
 			}
 			else
 			{
@@ -611,19 +632,24 @@ namespace HomeskzIfcImport::draw
 			const bool returned = fileID && gSDK->OpenDocumentPath(fileID, false);
 			// **戻り値だけを信じない**——開いたかどうかはカレント文書を読み戻して確かめる。
 			const std::string opened = ActiveDocumentPath();
-			if (!SamePath(opened, session.workPath))
+			if (SamePath(opened, session.workPath))
 			{
-				// **開き直せなかったら黙って続けない。** 開いている図面へそのまま描くと
-				// 前の周に重なる——数字は揃うのに絵が壊れる、いちばん読み違えやすい形に
-				// なる。**何が起きたかを証拠つきで残す。**
-				std::string why = "準備: 作業ファイルを開き直せませんでした（";
-				why += session.workPath + " / OpenDocumentPath=";
-				why += returned ? "true" : "false";
-				why += " / いまは " + (opened.empty() ? std::string("(取得できず)") : opened);
-				why += "）。" + closed + "。いま開いている図面へ描きます";
-				return why;
+				note = "準備: 作業ファイルを開き直しました（" + session.workPath + "）。";
+				note += closed;
+				return RoundDocument::Ready;
 			}
-			return "準備: 作業ファイルを開き直しました（" + session.workPath + "）。" + closed;
+
+			// **ここから先へ進まない。** 閉じたつもりの文書が本当に閉じているなら、いま
+			// 描く先はどこにも無い——描けば全要素 0 件の報告が出るだけで、直すべき場所を
+			// 指さない数字が PR に残る（実機 round 9）。**何が起きたかを証拠つきで残して
+			// 周ごと中止する。**
+			std::string why = "準備: 作業ファイルを開き直せなかったので、この周は走らせません";
+			why += "でした（" + session.workPath + " / OpenDocumentPath=";
+			why += returned ? "true" : "false";
+			why += " / いまは " + (opened.empty() ? std::string("(取得できず)") : opened);
+			why += "）。" + closed;
+			note = why;
+			return RoundDocument::Abort;
 		}
 
 		// **周と周のあいだに図面を取り込み前へ戻す。** 戻り値は診断ログへ書く 1 行。
@@ -899,9 +925,22 @@ namespace HomeskzIfcImport::draw
 		// **まず作業ファイルを開き直す。** 開き直せたなら消すものは何も無い（レイヤも
 		// クラスもシンボル定義も、その図面には前の周の痕跡が 1 つも無い）。用意できな
 		// かった周だけ、従来どおり「前の周が作ったレイヤ」を取り除く。
-		std::string preparation = openRoundDocument(plan.session);
-		if (preparation.empty())
-			preparation = prepareDrawingForRound(plan.session);
+		std::string preparation;
+		const RoundDocument document = openRoundDocument(plan.session, preparation);
+		if (document == RoundDocument::Abort)
+		{
+			// **描く先が無いなら取り込まない。** 記憶（作業ファイルの場所）は残すので、
+			// 人がその図面を開いてからもう一度実行すれば続きの周として走る。
+			(void)core::writeFeedbackSession(core::defaultFeedbackSessionPath(), plan.session);
+			core::trace::note(preparation);
+			(void)draw::showImportResult(
+				kTestResultTitle,
+				parse::formatTestRoundResult(parse::TestRoundOutcome::DocumentFailed, preparation),
+				core::trace::text());
+			return false;
+		}
+		if (document == RoundDocument::Fallback)
+			preparation += "。" + prepareDrawingForRound(plan.session);
 		const ImportRound round =
 			runImportRound(ifcPath, options, settingsShown, settingsNote, preparation);
 		if (round.failed)

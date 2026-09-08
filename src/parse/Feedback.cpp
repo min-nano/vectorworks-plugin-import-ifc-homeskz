@@ -178,6 +178,17 @@ namespace HomeskzIfcImport::parse
 	std::string formatTestRoundResult(TestRoundOutcome outcome, const std::string& detail)
 	{
 		std::ostringstream out;
+		if (outcome == TestRoundOutcome::DocumentFailed)
+		{
+			out << "描く図面を用意できなかったので、この周は走らせませんでした。";
+			if (!detail.empty())
+				out << "\n\n" << detail;
+			// **描かなかったことを言い切る。** 「0 件」と紛らわしくしない
+			// （実機 round 9 でそれが起きた）。
+			out << "\n\n図面には何も描いていません。作業ファイルを開いてから、"
+				   "もう一度実行してください。";
+			return out.str();
+		}
 		if (outcome == TestRoundOutcome::ImportFailed)
 		{
 			out << "取り込みがエラーで中断したので、この周は PR へ送りませんでした。";
