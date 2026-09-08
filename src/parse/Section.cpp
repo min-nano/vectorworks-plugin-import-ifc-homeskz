@@ -366,7 +366,7 @@ namespace HomeskzIfcImport::parse
 		for (core::SectionCommand& command : commands)
 		{
 			std::string number = command.viewport.drawingNumber;
-			if (used.count(number) != 0)
+			if (used.contains(number))
 			{
 				// 2 つ目以降に "(2)" … を足す。**既にある綴りとぶつからなくなるまで**
 				// 進める（"い(2)" が通り名として実在することも有りうる）。
@@ -374,7 +374,7 @@ namespace HomeskzIfcImport::parse
 				for (int suffix = 2;; ++suffix)
 				{
 					candidate = number + "(" + std::to_string(suffix) + ")";
-					if (used.count(candidate) == 0)
+					if (!used.contains(candidate))
 						break;
 				}
 				number = candidate;
