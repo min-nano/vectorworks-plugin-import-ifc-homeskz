@@ -102,8 +102,8 @@ namespace HomeskzIfcImport
 		host.EndLoop(reason, notifyPr);
 		fView.phase = FeedbackLoopPhase::Stopped;
 		fView.message = "往復を終えました（" + reason +
-						"）。続きは、取り込みをもう一度実行"
-						"すると同じ条件で走ります。";
+						"）。続きは、メニューの「実機テストを実行…」を"
+						"もう一度実行すると同じ条件で走ります。";
 		fView.nextCheckAt = -1;
 	}
 
@@ -126,7 +126,7 @@ namespace HomeskzIfcImport
 		if (!memory.active)
 		{
 			fView.phase = FeedbackLoopPhase::Idle;
-			fView.message = "往復は回っていません。取り込みを実行して「取り込み結果を送る」を"
+			fView.message = "往復は回っていません。メニューの「実機テストを実行…」で"
 							"選ぶと始まります。";
 			return;
 		}
@@ -186,7 +186,7 @@ namespace HomeskzIfcImport
 		case FeedbackLoopBuild::NeedsRestart:
 			Stopped(host,
 					"新しいビルド " + build.commit + " を入れましたが、" + build.message +
-						" 再起動してから取り込みを実行すると続きから走ります",
+						" 再起動してから「実機テストを実行…」で続きから走ります",
 					/*notifyPr*/ true);
 			return;
 		case FeedbackLoopBuild::Failed:

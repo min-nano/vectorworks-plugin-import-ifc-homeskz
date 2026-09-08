@@ -14,7 +14,8 @@
 //	【なぜ殻にあるか】入れ替えは殻でしか起きない（本体のコードがスタックに載っている間は
 //	降ろせない。src/PayloadSession.h）。この駆動は「自動アップデートの、往復のための顔」
 //	であり、殻に残る唯一の実処理である自動アップデート（CLAUDE.md「殻と本体」）の一部と
-//	して置く。**取り込みそのものは相変わらず本体**（draw::runImportCommand）が行う。
+//	して置く。**取り込みそのものは相変わらず本体**（draw::runTestRound。M25 で本番の
+//	取り込みコマンドから分けた）が行う。
 //
 //	【SDK 非依存】UpdaterFlow.cpp と同じ作法で、副作用は IFeedbackLoopHost の後ろへ出す。
 //	このファイルと FeedbackLoop.cpp は SDK のヘッダを 1 つも include せず、無 SDK で

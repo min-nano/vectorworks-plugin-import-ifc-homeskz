@@ -38,6 +38,9 @@
 #include "core/Trace.h"
 #include "draw/DrawUtil.h"
 #include "draw/HostServices.h"
+#include "draw/ImportRun.h"
+#include "draw/ResultDialog.h"
+#include "draw/SettingsDialog.h"
 #include "parse/Feedback.h"
 #include "parse/Summary.h"
 
@@ -412,12 +415,6 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
-		// 動いているビルドのブランチ（記憶がこのブランチのものかを見るのに使う）。
-		std::string RunningBranch()
-		{
-			return VW_BUILD_BRANCH;
-		}
-
 	} // namespace
 
 	// -----------------------------------------------------------------------
@@ -434,178 +431,305 @@ namespace HomeskzIfcImport::draw
 #endif
 	}
 
-	core::FeedbackSession loadFeedbackSession(const std::string& branch)
+	// -----------------------------------------------------------------------
+	// **ここから下は往復の内側。** M25 で公開をやめた（呼ぶのは runTestRound だけ）
+	// ——本番の取り込みコマンドは往復を知らない（draw/Feedback.h）。
+
+	namespace
 	{
-		core::FeedbackSession session;
-		if (!feedbackAvailable())
+		// **取り込みの前に決めたこと。**
+		struct FeedbackPlan
+		{
+			bool send = false;			   // 取り込みが終わったら投稿するか
+			core::FeedbackSession session; // 送るときの宛先と記憶
+		};
+
+		// 1 周ぶんの材料（runTestRound が詰める）。
+		struct FeedbackInput
+		{
+			const core::Document* document = nullptr;
+			const core::DrawCounts* counts = nullptr;
+			parse::BuildInfo build; // 動いていたビルド
+			std::string ifcPath;
+			unsigned long long bytes = 0;
+			double seconds = 0.0;
+			std::string startedAt;
+			std::string log; // 診断ログ全文
+		};
+
+		// **周と周のあいだに図面を取り込み前へ戻す。** 戻り値は診断ログへ書く 1 行。
+		//
+		// **いまは何もしない。** プログラムからメニューの「取り消し」を起動できるかは
+		// 調査中で（min-nano/vectorworks-developer-sdk-reference#27）、ISDK の undo API では
+		// できないことと、レイヤのハンドルを直接消す案が実機確認待ちであることは #23 で
+		// 分かっている。**答えが出たらここ 1 か所に書く**——往復の他の場所には書かない。
+		std::string prepareDrawingForRound()
+		{
+			return "準備: 図面はそのままです（前の周の図が残っていれば、その上へ重ねて描きます）";
+		}
+
+		core::FeedbackSession loadFeedbackSession(const std::string& branch)
+		{
+			core::FeedbackSession session;
+			if (!feedbackAvailable())
+				return session;
+			if (!core::readFeedbackSession(core::defaultFeedbackSessionPath(), session))
+				return core::FeedbackSession{};
+
+			// **別のブランチの記憶なら使わない。** 別ブランチのビルドに入れ替わったのなら、
+			// それは前の往復の続きではなく、新しい往復の 1 周目である。
+			if (!session.branch.empty() && !branch.empty() && session.branch != branch)
+				return core::FeedbackSession{};
 			return session;
-		if (!core::readFeedbackSession(core::defaultFeedbackSessionPath(), session))
-			return core::FeedbackSession{};
+		}
 
-		// **別のブランチの記憶なら使わない。** 別ブランチのビルドに入れ替わったのなら、
-		// それは前の往復の続きではなく、新しい往復の 1 周目である。
-		if (!session.branch.empty() && !branch.empty() && session.branch != branch)
-			return core::FeedbackSession{};
-		return session;
-	}
+		FeedbackPlan planFeedbackRound(const core::FeedbackSession& remembered,
+									   const parse::BuildInfo& build, bool continuing)
+		{
+			FeedbackPlan plan;
+			if (!feedbackAvailable())
+				return plan;
 
-	FeedbackPlan planFeedbackRound(const core::FeedbackSession& remembered,
-								   const parse::BuildInfo& build, bool continuing)
-	{
-		FeedbackPlan plan;
-		if (!feedbackAvailable())
+			plan.session = remembered;
+			plan.session.branch = build.branch;
+
+			if (continuing)
+			{
+				// **続きの周は何も尋ねない。** 宛先も伏せ字も 1 周目の選択のままで、ここで
+				// 訊き直す理由が無い（訊けば、往復から人の操作を消した意味が無くなる）。
+				plan.send = true;
+			}
+			else
+			{
+				// 宛先の PR。記憶が無ければブランチから引く（人に番号を打たせないため）。
+				if (plan.session.pullRequest == 0)
+					plan.session.pullRequest =
+						ResolvePullRequest(plan.session.repo, plan.session.branch);
+
+				// **ここへ来るのは 1 周目だけ。** 記憶があって同じビルドが動いているときは
+				// 呼び出し側（runTestRound）が手前で折り返すので、「新しいビルドを待っている
+				// あいだにもう一度実行した」という筋はここには来ない（M24 まではここで新しい
+				// 1 周目として数え直していた。docs/DEV-NOTES.md M25）。
+				const std::string lead = "取り込みが終わったら、結果を PR へ自動で投稿します。";
+				const std::string title =
+					"実機フィードバック（round " + std::to_string(plan.session.round + 1) + "）";
+				CFeedbackDialog dialog(title, lead, plan.session);
+				const bool accepted = dialog.RunDialogLayout("") == VWFC::VWUI::kDialogButton_Ok;
+				if (!dialog.Shown())
+					return FeedbackPlan{}; // ダイアログを組めなかった → 従来どおり取り込むだけ
+				if (!accepted)
+				{
+					// **「送らない」が往復の終わり方である。** 前の往復の記憶がまだ残って
+					// いるなら捨てておく——残しておくと、次に新しいビルドが出た日に、忘れた
+					// ころの IFC が黙って取り込まれる。
+					core::clearFeedbackSession(core::defaultFeedbackSessionPath());
+					return FeedbackPlan{};
+				}
+				plan.session.anonymize = dialog.Anonymize();
+				plan.session.pullRequest = ParsePullRequest(dialog.PullRequest());
+				plan.send = true;
+			}
+
+			if (plan.session.pullRequest == 0)
+			{
+				// **ここで言えば、まだ取り込みは始まっていない。** 終わってから「宛先が
+				// 分かりません」と言われても、その 1 分は取り返せない。
+				gSDK->AlertInform("投稿先の PR が分かりません。",
+								  "PR 番号を入れて、もう一度お試しください。\n"
+								  "（今回は投稿せずに取り込みます）",
+								  false);
+				return FeedbackPlan{};
+			}
+
+			// **トークンもここで確保する。** 未登録なら 1 度だけ貼り付けを求める——これが
+			// 取り込みのあとに出ては、無操作で終わるはずの取り込みに操作が 1 つ増える。
+			std::string note;
+			if (!EnsureToken(note))
+			{
+				gSDK->AlertInform("フィードバックを投稿できません。",
+								  (note + "\n（今回は投稿せずに取り込みます）").c_str(), false);
+				return FeedbackPlan{};
+			}
+
+			plan.session.send = true;
 			return plan;
+		}
 
-		plan.session = remembered;
-		plan.session.branch = build.branch;
+		bool postFeedbackRound(const FeedbackPlan& plan, const FeedbackInput& input,
+							   std::string& error)
+		{
+			error.clear();
+			if (!plan.send || input.document == nullptr || input.counts == nullptr)
+				return false;
 
+			core::FeedbackSession session = plan.session;
+
+			// 本文を組む（無 SDK 側。parse/Feedback）。
+			parse::FeedbackRound round;
+			round.build = input.build;
+			round.ifcPath = input.ifcPath;
+			round.bytes = input.bytes;
+			round.seconds = input.seconds;
+			round.startedAt = input.startedAt;
+			round.log = input.log;
+			round.round = session.round + 1;
+			round.previousCommit = session.lastCommit;
+			round.previousTally = session.lastTally;
+			// 1 周目に採った基準（＝取り込み前に在ったレイヤの顔ぶれ）。次の周はここへ
+			// 戻っているかを引き比べる（parse/Feedback の restoredStateLine）。
+			round.baselineKnown = session.baselineRecorded;
+			round.baselineLayers = session.baselineLayers;
+			round.anonymize = session.anonymize;
+
+			const std::string commentBody =
+				parse::formatFeedbackComment(round, *input.document, *input.counts);
+
+			std::string url;
+			std::string createdAt;
+			if (!PostComment(session.repo, session.pullRequest, commentBody, url, createdAt, error))
+				return false; // **ここでアラートを出さない**（呼び出し側が結果へ添える）
+
+			// **投稿できたところで記憶を進める。** 投稿できていない周を数えると、次の
+			// コメントが「前の周からの変化」を持たないまま round だけ進む。
+			session.round = round.round;
+			// **基準は 1 周目に採る。** 以後の周では触らない——基準そのものが周ごとに動くと、
+			// 「戻っているか」を引き比べる相手が消える。
+			if (!session.baselineRecorded)
+			{
+				session.baselineRecorded = true;
+				session.baselineLayers = input.counts->existingLayers;
+			}
+			session.lastCommit = input.build.commit;
+			session.lastTally =
+				parse::formatTally(parse::elementRows(*input.document, *input.counts));
+			// **自動の往復（M24）はここで回り出す。** 殻のパレットは記憶の loop を見て周期的に
+			// 新しいビルドを確かめ、Claude の合図（control=stop）で止まる（src/FeedbackLoop.h）。
+			// 投稿の時刻は「自分の投稿より後の合図だけ」を読むための since になる。
+			session.loop = true;
+			if (!createdAt.empty())
+				session.lastPostedAt = createdAt;
+			if (!core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session))
+			{
+				// 投稿はできている。次の周がファイル選択から始まるだけなので、**結果へ添えて
+				// 伝える**（ここでアラートを出すと、無操作で終わるはずの最後に操作が増える）。
+				error = "投稿しましたが、次の周のための記憶を保存できませんでした"
+						"（次の取り込みはファイル選択から始まります）。";
+				return false;
+			}
+
+			// **次の取り込みでは尋ねずに入れてよい。** この人はいま往復の最中にいるので、
+			// 次に取り込みを実行するときには「新しいビルドがあります。インストールします
+			// か？」を挟まない（src/Extensions/ExtMenu.cpp が UpdateCheckKind::Auto を選ぶ）。
+			return true;
+		}
+
+	} // namespace
+
+	// -----------------------------------------------------------------------
+	// **実機テストの 1 周**（M25。draw/Feedback.h）。**往復を知っているのはここだけ。**
+	bool runTestRound(bool allowDialogs, bool& active)
+	{
+		active = false;
+		if (!feedbackAvailable())
+		{
+			// 安定版、または殻がスクリプトを貸してくれていない（古い殻）。押した人には
+			// 言う——黙って何も起きないと「壊れている」と読まれる。
+			if (allowDialogs)
+				gSDK->AlertInform("実機テストは開発版でのみ使えます。",
+								  "開発版（Dev）のビルドで、同梱スクリプトが揃っている"
+								  "ときだけ動きます。",
+								  false);
+			return false;
+		}
+
+		const parse::BuildInfo build = currentBuildInfo();
+		core::FeedbackSession session = loadFeedbackSession(build.branch);
+		// **どの周になるかは無 SDK 側が決める**（core/FeedbackSession.h。M25 の要点なので
+		// 場合分けを描画側に散らさず、1 か所でテストできる形にしてある）。
+		const core::FeedbackRoundKind kind =
+			core::feedbackRoundKind(session, build.commit, allowDialogs);
+		if (kind == core::FeedbackRoundKind::Refuse)
+			return false; // パレットがここへ来るのは新しいビルドを入れた直後だけ
+
+		// **同じビルドでは取り込まない。** 前の周と同じ数字が並ぶだけなので、1 分を
+		// かける意味が無い——往復を回す（止まっていたら回し直す）だけにする。パレットが
+		// 開いている最中に人がメニューを押しても、round が二重に投稿されない（実機で
+		// 起きた。docs/DEV-NOTES.md M25）。
+		if (kind == core::FeedbackRoundKind::RearmOnly)
+		{
+			if (!session.loop)
+			{
+				session.loop = true;
+				(void)core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session);
+			}
+			active = true;
+			return true;
+		}
+
+		const bool continuing = kind == core::FeedbackRoundKind::ContinueRound;
+		std::string ifcPath = session.ifcPath;
+		core::ImportOptions options = session.options;
+		bool settingsShown = true;
+		std::string settingsNote;
 		if (continuing)
 		{
-			// **続きの周は何も尋ねない。** 宛先も伏せ字も 1 周目の選択のままで、ここで
-			// 訊き直す理由が無い（訊けば、往復から人の操作を消した意味が無くなる）。
-			plan.send = true;
+			// **続きの周は何も出さない。** 1 周目の選択（ファイル・設定）をそのまま使う
+			// ——ここで人の操作を挟むと、往復を自動にした意味が無くなる。
+			settingsNote = "前の周の設定をそのまま使いました（実機フィードバックの往復）";
 		}
 		else
 		{
-			// 宛先の PR。記憶が無ければブランチから引く（人に番号を打たせないため）。
-			if (plan.session.pullRequest == 0)
-				plan.session.pullRequest =
-					ResolvePullRequest(plan.session.repo, plan.session.branch);
-
-			// **1 行目は「いまどこにいるか」を言う。** 記憶が残っているのにここへ来たと
-			// いうことは、追っているブランチに新しい dev ビルドがまだ出ていない、という
-			// ことである（続きの周なら planFeedbackRound はそもそも尋ねない。
-			// draw/ImportCommand.cpp）。黙ってファイル選択から始めると、人は「往復が
-			// 壊れた」と読む。
-			const bool waitingForNewBuild = remembered.send && remembered.round > 0;
-			const std::string lead =
-				waitingForNewBuild
-					? ("`" + build.branch + "` に新しいビルドはまだ出ていません（前の周は round " +
-					   std::to_string(remembered.round) + "）。新しく 1 周目として取り込みます。")
-					: std::string("取り込みが終わったら、結果を PR へ自動で投稿します。");
-
-			const int shownRound = waitingForNewBuild ? 1 : plan.session.round + 1;
-			const std::string title =
-				"実機フィードバック（round " + std::to_string(shownRound) + "）";
-			CFeedbackDialog dialog(title, lead, plan.session);
-			const bool accepted = dialog.RunDialogLayout("") == VWFC::VWUI::kDialogButton_Ok;
-			if (!dialog.Shown())
-				return FeedbackPlan{}; // ダイアログを組めなかった → 従来どおり取り込むだけ
-			if (!accepted)
-			{
-				// **「送らない」が往復の終わり方である。** このダイアログが出ているのは
-				// 「続きの周ではない」ときだけなので、ここで送らないと決めたのなら、
-				// この人はもう往復を回していない——記憶を捨てておかないと、次に新しい
-				// ビルドが出た日に、忘れたころの IFC が黙って取り込まれる。
-				if (waitingForNewBuild)
-					core::clearFeedbackSession(core::defaultFeedbackSessionPath());
-				return FeedbackPlan{};
-			}
-			// **新しい 1 周目として数え直す。** 前の往復の続きではないので、round を
-			// 引き継ぐと「前の周からの変化」が別の IFC との比較になりかねない。
-			if (waitingForNewBuild)
-			{
-				plan.session.round = 0;
-				plan.session.lastCommit.clear();
-				plan.session.lastTally.clear();
-				// 基準も採り直す。前の往復の図面と引き比べても意味が無い。
-				plan.session.baselineRecorded = false;
-				plan.session.baselineLayers.clear();
-			}
-			plan.session.anonymize = dialog.Anonymize();
-			plan.session.pullRequest = ParsePullRequest(dialog.PullRequest());
-			plan.send = true;
+			if (!chooseIfcFile(ifcPath))
+				return false;
+			options = core::ImportOptions{};
+			const draw::SettingsOutcome settings = draw::showImportSettings(options, &settingsNote);
+			if (settings == draw::SettingsOutcome::Cancelled)
+				return false;
+			settingsShown = settings == draw::SettingsOutcome::Accepted;
 		}
 
-		if (plan.session.pullRequest == 0)
+		// **尋ねることは全部、取り込みが始まる前に尋ね切る**（draw/Feedback.h）。
+		FeedbackPlan plan = planFeedbackRound(session, build, continuing);
+		if (!plan.send)
+			return false; // 送らないなら、この周は走らせる意味が無い
+		plan.session.ifcPath = ifcPath;
+		plan.session.options = options;
+
+		const ImportRound round =
+			runImportRound(ifcPath, options, settingsShown, settingsNote, prepareDrawingForRound());
+		if (round.failed)
 		{
-			// **ここで言えば、まだ取り込みは始まっていない。** 終わってから「宛先が
-			// 分かりません」と言われても、その 1 分は取り返せない。
-			gSDK->AlertInform("投稿先の PR が分かりません。",
-							  "PR 番号を入れて、もう一度お試しください。\n"
-							  "（今回は投稿せずに取り込みます）",
-							  false);
-			return FeedbackPlan{};
-		}
-
-		// **トークンもここで確保する。** 未登録なら 1 度だけ貼り付けを求める——これが
-		// 取り込みのあとに出ては、無操作で終わるはずの取り込みに操作が 1 つ増える。
-		std::string note;
-		if (!EnsureToken(note))
-		{
-			gSDK->AlertInform("フィードバックを投稿できません。",
-							  (note + "\n（今回は投稿せずに取り込みます）").c_str(), false);
-			return FeedbackPlan{};
-		}
-
-		plan.session.send = true;
-		return plan;
-	}
-
-	bool postFeedbackRound(const FeedbackPlan& plan, const FeedbackInput& input, std::string& error)
-	{
-		error.clear();
-		if (!plan.send || input.document == nullptr || input.counts == nullptr)
-			return false;
-
-		core::FeedbackSession session = plan.session;
-
-		// 本文を組む（無 SDK 側。parse/Feedback）。
-		parse::FeedbackRound round;
-		round.build = input.build;
-		round.ifcPath = input.ifcPath;
-		round.bytes = input.bytes;
-		round.seconds = input.seconds;
-		round.startedAt = input.startedAt;
-		round.log = input.log;
-		round.round = session.round + 1;
-		round.previousCommit = session.lastCommit;
-		round.previousTally = session.lastTally;
-		// 1 周目に採った基準（＝取り込み前に在ったレイヤの顔ぶれ）。次の周はここへ
-		// 戻っているかを引き比べる（parse/Feedback の restoredStateLine）。
-		round.baselineKnown = session.baselineRecorded;
-		round.baselineLayers = session.baselineLayers;
-		round.anonymize = session.anonymize;
-
-		const std::string commentBody =
-			parse::formatFeedbackComment(round, *input.document, *input.counts);
-
-		std::string url;
-		std::string createdAt;
-		if (!PostComment(session.repo, session.pullRequest, commentBody, url, createdAt, error))
-			return false; // **ここでアラートを出さない**（呼び出し側が結果へ添える）
-
-		// **投稿できたところで記憶を進める。** 投稿できていない周を数えると、次の
-		// コメントが「前の周からの変化」を持たないまま round だけ進む。
-		session.round = round.round;
-		// **基準は 1 周目に採る。** 以後の周では触らない——基準そのものが周ごとに動くと、
-		// 「戻っているか」を引き比べる相手が消える。
-		if (!session.baselineRecorded)
-		{
-			session.baselineRecorded = true;
-			session.baselineLayers = input.counts->existingLayers;
-		}
-		session.lastCommit = input.build.commit;
-		session.lastTally = parse::formatTally(parse::elementRows(*input.document, *input.counts));
-		// **自動の往復（M24）はここで回り出す。** 殻のパレットは記憶の loop を見て周期的に
-		// 新しいビルドを確かめ、Claude の合図（control=stop）で止まる（src/FeedbackLoop.h）。
-		// 投稿の時刻は「自分の投稿より後の合図だけ」を読むための since になる。
-		session.loop = true;
-		if (!createdAt.empty())
-			session.lastPostedAt = createdAt;
-		if (!core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session))
-		{
-			// 投稿はできている。次の周がファイル選択から始まるだけなので、**結果へ添えて
-			// 伝える**（ここでアラートを出すと、無操作で終わるはずの最後に操作が増える）。
-			error = "投稿しましたが、次の周のための記憶を保存できませんでした"
-					"（次の取り込みはファイル選択から始まります）。";
+			// 送るべき内訳がそもそも無い。理由はいつもの結果ダイアログで見せる。
+			(void)draw::showImportResult("ホームズ君 IFC 取り込み", round.body,
+										 core::trace::text());
 			return false;
 		}
 
-		// **次の取り込みでは尋ねずに入れてよい。** この人はいま往復の最中にいるので、
-		// 次に取り込みを実行するときには「新しいビルドがあります。インストールします
-		// か？」を挟まない（src/Extensions/ExtMenu.cpp が UpdateCheckKind::Auto を選ぶ）。
-		return true;
+		FeedbackInput input;
+		input.document = &round.document;
+		input.counts = &round.counts;
+		input.build = build;
+		input.ifcPath = ifcPath;
+		input.bytes = round.bytes;
+		input.seconds = round.seconds;
+		input.startedAt = round.startedAt;
+		input.log = core::trace::text();
+
+		std::string postError;
+		if (postFeedbackRound(plan, input, postError))
+		{
+			// **投稿できたら何も出さない。** 内訳もログも PR にあるので、ここにボタンが
+			// 1 つでも残ると「実行して離れる」が成立しない。
+			active = true;
+			return true;
+		}
+
+		// **投稿できなかったときだけ、結果ダイアログへ理由を添えて出す。**
+		std::string body = round.body;
+		if (!postError.empty())
+			body += "\n\nPR への投稿: " + postError;
+		(void)draw::showImportResult("ホームズ君 IFC 取り込み", body, core::trace::text());
+		return false;
 	}
 
 	// -----------------------------------------------------------------------
@@ -613,8 +737,9 @@ namespace HomeskzIfcImport::draw
 
 	std::string feedbackLoopStatus()
 	{
-		// 記憶（別ブランチのものは読まない。loadFeedbackSession）。
-		const core::FeedbackSession session = loadFeedbackSession(RunningBranch());
+		// 記憶（別ブランチのものは読まない。loadFeedbackSession）。動いているビルドの
+		// **素性を作るのは draw/ImportRun ただ 1 か所**——同じ定数をここでも綴らない。
+		const core::FeedbackSession session = loadFeedbackSession(currentBuildInfo().branch);
 		const bool active = feedbackAvailable() && session.send && session.round > 0 &&
 							session.loop && !session.ifcPath.empty();
 		std::string out;
@@ -650,9 +775,10 @@ namespace HomeskzIfcImport::draw
 				" round=" + std::to_string(session.round) + " -->\n";
 		body += "## 実機フィードバック — 自動の往復を終えました\n\n";
 		body += reason + "。\n\n";
-		body += "以後、新しいビルドが出ても**自動では取り込みません**。続きが要るときは、"
-				"利用者が Vectorworks で取り込みをもう一度実行します（同じ条件で round " +
-				std::to_string(session.round + 1) + " として走り、往復もそこから回り直します）。\n";
+		body +=
+			"以後、新しいビルドが出ても**自動では取り込みません**。続きが要るときは、"
+			"利用者が Vectorworks で「実機テストを実行…」をもう一度実行します（同じ条件で round " +
+			std::to_string(session.round + 1) + " として走り、往復もそこから回り直します）。\n";
 		std::string url;
 		std::string createdAt;
 		std::string error;

@@ -25,7 +25,8 @@ Vectorworks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb    … 起�
                           本体 <name>.vwpayload          … いつでも読み直せる
 ```
 
-**殻**に入るのは「Vectorworks に番地を握られるもの」だけ——メニュー 3 つと PIO 2 つの*登録*、
+**殻**に入るのは「Vectorworks に番地を握られるもの」だけ——メニュー 4 つ（うち 1 つは
+開発版だけ）と PIO 2 つ、パレット 1 つの*登録*、
 自動アップデート、そして本体を読み込む仕掛け（`src/PayloadHost.*` / `src/PayloadSession.*`）。
 **本体**に `core/` `parse/` `draw/` のすべてが入ります。境界は C の ABI
 （`src/PayloadAbi.h`）1 枚きりです。
@@ -62,7 +63,11 @@ src/
   Extensions/               **殻**に残る「登録」だけ（実処理は draw/ 側）
     ExtMenu.{h,cpp}           「IFC (ホームズ君) 取り込み…」メニューコマンドの登録と、
                               本体の draw::runImportCommand への取り次ぎ。実行の頭で
-                              静かなアップデート確認も行う
+                              静かなアップデート確認も行う。**往復のことは何も知らない**
+                              （M25。それは ExtTestMenu の仕事）
+    ExtTestMenu.{h,cpp}       「実機テストを実行…」メニューコマンドの登録と、本体の
+                              draw::runTestRound への取り次ぎ（**dev だけ登録**。M25）。
+                              往復の最中は尋ねずに更新する分岐もここに閉じている
     ExtUpdateMenu.{h,cpp}     「アップデータを確認 (みんなの構造設計支援)」メニュー
                               コマンドの登録と実行（**殻に残る唯一の実処理**である
                               自動アップデートを呼ぶ）
@@ -105,9 +110,15 @@ src/
     Footing / AnchorBolt / FloorPost / FireBrace / Joint / ColumnMark /
     Sheet / Tag / Section      要素ごとの解析
   draw/                     Phase 2: VW 描画（SDK 依存）。**まるごと本体に入る**
-    ImportCommand.{h,cpp}     取り込みコマンドの本体（ファイル選択 → 設定 → parse →
-                              draw → 完了ダイアログ）。診断ログの見出し・区切り・結果も
-                              ここが書く
+    ImportCommand.{h,cpp}     本番の取り込みコマンド（ファイル選択 → 設定 → 取り込み →
+                              完了ダイアログ）。**往復の分岐が 1 つも無い**（M25）
+    ImportRun.{h,cpp}         取り込み 1 周ぶんの部品——ファイル選択・ビルドの素性・
+                              解析 → 描画 → 集計。**本番の取り込みと実機テストが
+                              共有する唯一の実装**で、診断ログの見出し・区切り・結果も
+                              ここが書く（M25）
+    Feedback.{h,cpp}          実機テストの 1 周（runTestRound）と往復の運転——記憶・
+                              取り込み前のダイアログ・準備・投稿。**往復を知っているのは
+                              本体ではここだけ**
     ColumnMarkPio.{h,cpp}     柱・小屋束の記号 PIO のリセット本体（対象レイヤの構造材を
                               走査して断面記号 ×／／ と平面記号を描く）
     ShearWallPio.{h,cpp}      耐力壁 PIO のリセット本体（両端の柱から内法を求め、
@@ -221,7 +232,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | バンドル ID（macOS） | `io.github.min-nano.structure` / `io.github.min-nano.structure-dev` | `CMakeLists.txt` |
 | メニューカテゴリ | `みんなの構造設計支援` / `みんなの構造設計支援Dev`（コマンド名 `IFC (ホームズ君) 取り込み…` / `アップデータを確認 (みんなの構造設計支援)`）。**このプラグインのコマンドは全部このカテゴリに入れる**——`.vwr` の `"category"` ただ 1 つを両方のメニュー定義が引く | `resources/*/Strings/*.vwstrings` |
 | C++ 名前空間・クラス | `min-nano_structure` / `CExtMenuImportIfc` / `CExtMenuCheckUpdate` | `src/Extensions/Ext*.{h,cpp}`、`src/ModuleMain.cpp` |
-| VCOM ユニバーサル名 | 取り込み: `CExtMenuImportIfc_HomeskzIfcImport(Dev)`／更新: `CExtMenuCheckUpdate_MinNanoStructure(Dev)`／往復パレット: `CExtFeedbackPalette_MinNanoStructure(Dev)`（登録は dev だけ） | `src/BuildConfig.h` |
+| VCOM ユニバーサル名 | 取り込み: `CExtMenuImportIfc_HomeskzIfcImport(Dev)`／更新: `CExtMenuCheckUpdate_MinNanoStructure(Dev)`／MCP: `CExtMenuMcpBridge_MinNanoStructure(Dev)`／実機テスト: `CExtMenuTest_MinNanoStructure(Dev)`（登録は dev だけ）／往復パレット: `CExtFeedbackPalette_MinNanoStructure(Dev)`（登録は dev だけ） | `src/BuildConfig.h` |
 | 拡張機能 UUID | コマンド 2 つ × stable / dev の 4 個＋PIO 2 つ × 2＋往復パレット × 2 | `src/Extensions/Ext*.cpp`（一意である必要があるため `uuidgen` で再生成） |
 
 > **名前空間 `min-nano_structure` と取り込みコマンドのユニバーサル名・UUID は、改名後も
@@ -798,6 +809,13 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 
 ## 実機フィードバックの往復（`draw/Feedback`）
 
+> **本番の取り込みコマンドとは別の入口です（M25）。** 往復を回すのはメニューの
+> **「実機テストを実行…」**（開発版だけ）で、本番の「IFC (ホームズ君) 取り込み…」は往復を
+> 何も知りません。両者が共有するのは**絵を作るところ**（`draw/ImportRun` の
+> `runImportRound`）だけなので、**テストで走るのは本番と同じコード**です。M24 まではこれが
+> 1 つのコマンドに同居していて、`#ifdef VW_DEV_BUILD` の外にある分岐が安定版にも入って
+> いました（`docs/DEV-NOTES.md` M25）。
+
 **`draw/` の実描画は CI では検証できず、ローカルの Vectorworks でしか確かめられません**
 （[`CLAUDE.md`](../CLAUDE.md)「テスト方針」）。そのため 1 往復ごとに
 
@@ -811,7 +829,7 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 ### 1 周の流れ
 
 ```
-   ① メニューで取り込みを実行（人がするのはこれだけ）
+   ① メニューで **「実機テストを実行…」**（人がするのはこれだけ。開発版だけのコマンド）
         ↓
    ② 1 周目だけ: IFC を選ぶ → 取り込み設定 → **結果を PR へ送るか**（宛先・伏せ字）
       2 周目以降: **ダイアログは 1 枚も出ません**
@@ -831,6 +849,12 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 パレットが開いていない（止めた・閉じた・再起動した）ときは、⑥ の代わりに人が ① を
 1 回実行します（新しいビルドが尋ねずに入り、ファイル選択も設定も再起動も出ません）。
 
+**同じビルドが動いているなら取り込みません。** 前の周と同じ数字が並ぶだけで 1 分を使う
+意味が無いので、①を押しても**往復を回し直すだけ**です（止めた往復をその場で再開する入口を
+兼ねます）。M24 まではここで「新しい 1 周目」として取り込み直しており、パレットが開いて
+いる最中にメニューを押した人が同じ round を二重に投稿する事故が実機で起きました
+（`docs/DEV-NOTES.md` M25）。
+
 **尋ねることは全部、取り込みが始まる前に尋ね切ります。** 取り込みは 1 分以上かかるので、
 終わったところに確認が待っていると席を離れられません——それでは「実行して放っておく」が
 成立しません（実機の指摘）。宛先も伏せ字もトークンの登録も②で済ませ、④は投稿して黙ります。
@@ -841,7 +865,7 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 下記）へ載せ替え、完全な無操作と図面の操作を両立させました（`docs/DEV-NOTES.md` M24）。
 
 **入れるのは殻（更新の確認）の仕事です。** 本体（ペイロード）は投稿して戻るだけで、
-インストールと差し替えは取り込みコマンドの頭にある更新の確認が行います
+インストールと差し替えは実機テストのコマンドの頭にある更新の確認が行います
 （`UpdateCheckKind::Auto`。下記）。本体のコードがスタックに載っている間は本体を降ろせ
 ないので、差し替えはどのみち殻へ返ってからにしかできず、**インストールの経路はこの
 リポジトリに 1 本だけ**に保てます。
@@ -855,12 +879,12 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 | --- | --- |
 | 往復中（新しいビルドを待っています） | 1 分ごとに PR の合図と同じブランチの dev ビルドを見ています |
 | 入れ替え・取り込みの最中です | 新しいビルドを入れて、同じ条件で取り込んでいます（進捗ダイアログが出ます） |
-| 往復を終えました（理由） | 止まりました。続きは取り込みをもう一度実行すると同じ条件で走ります |
+| 往復を終えました（理由） | 止まりました。続きは「実機テストを実行…」をもう一度実行すると同じ条件で走ります |
 
 ボタンは 3 つ——**今すぐ確認**（1 分を待たずに見る）・**往復を止める**（PR へ「終えました」を
 1 通投稿して止める）・**閉じる**（パレットを隠す。往復は止まりません）。
 
-**止まる条件**は次のどれかで、**どれも記憶は消しません**（取り込みをもう一度実行すれば
+**止まる条件**は次のどれかで、**どれも記憶は消しません**（「実機テストを実行…」をもう一度実行すれば
 続きの周として走り、そこでまた回り出します）。
 
 - 人がパレットで「往復を止める」を押した。
@@ -951,7 +975,8 @@ Claude が「実機で確かめてほしい点」を PR かチャットへ返し
    リポジトリの **Pull requests: Read and write** だけです。
    （`gh` CLI で認証済みの機械なら、この手順は要りません——スクリプトが `gh auth token`
    を使います。）
-3. 取り込みを 1 回実行し、フィードバックのダイアログで **「PR へ送る」** を押します。
+3. メニューの **「実機テストを実行…」**（開発版だけ）を 1 回実行し、フィードバックの
+   ダイアログで **「PR へ送る」** を押します。
    トークンが未登録なら 1 度だけ貼り付けを求められ、**macOS はキーチェーン**、
    **Windows は DPAPI で暗号化したファイル**へ保存されます（図面にもログにも残りません）。
 4. 送信先の PR 番号は**ブランチから自動で引きます**（`find-pr`）。違っていればその場で
@@ -1001,7 +1026,9 @@ PR コメントは**公開**です。そこで**既定で案件が分かるも�
 | --- | --- |
 | `src/core/FeedbackSession.*` | 覚えておく値と、その読み書き（無 SDK・テストあり） |
 | `src/parse/Feedback.*` | **コメント本文**（Markdown）・前の周との差分・匿名化（無 SDK・テストあり） |
-| `src/draw/Feedback.*` | 取り込み前のダイアログと、取り込み後の投稿（SDK 依存）。**待たないし、入れもしない** |
+| `src/draw/Feedback.*` | 実機テストの 1 周（`runTestRound`）——記憶・取り込み前のダイアログ・準備・投稿（SDK 依存）。**待たないし、入れもしない** |
+| `src/draw/ImportRun.*` | 取り込み 1 周ぶんの部品。**本番の取り込みと実機テストが共有する唯一の実装**（M25） |
+| `src/Extensions/ExtTestMenu.*` | 実機テストの入口の登録と取り次ぎ（殻・**dev だけ登録**。M25） |
 | `src/draw/HostServices.*` | 殻から借りた道具（同梱スクリプトの実行）の置き場所 |
 | `src/FeedbackLoop.*` | **自動の往復の駆動**（殻・無 SDK・テストあり。M24）。合図と新しいビルドを見て、入れて、取り込みを本体に頼み、止まる条件を持つ |
 | `src/FeedbackLoopHost.*` / `src/Extensions/ExtFeedbackPalette.*` / `resources/<vwr>/html/` | 駆動の殻の実物と、モードレスなパレット（SDK 依存。**判断は持たない**） |
@@ -1041,8 +1068,9 @@ PR コメントは**公開**です。そこで**既定で案件が分かるも�
 **往復のやめ方**: パレットの「往復を止める」か、Claude の合図（`control=stop`）です（上記
 「モードレスの往復パレット」）。パレットが開いていないときは M23 のとおりで、続きの周が
 走るのは**追っているブランチに新しい dev ビルドが出たとき**だけなので、push が止まれば
-往復も止まります。新しいビルドを待っている間に取り込みを実行すると 1 周目のダイアログが
-出るので、そこで「送らない」を選べば記憶ごと消えます。
+往復も止まります。新しいビルドを待っている間に「実機テストを実行…」を押しても、同じビルド
+なら取り込まず往復を回し直すだけです（M25）。記憶ごと消したいときは、往復の記憶が無い状態
+から 1 周目のダイアログを出して「送らない」を選びます。
 
 ---
 

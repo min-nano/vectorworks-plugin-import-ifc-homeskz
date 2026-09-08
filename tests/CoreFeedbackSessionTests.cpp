@@ -22,6 +22,8 @@
 
 using HomeskzIfcImport::core::clearFeedbackSession;
 using HomeskzIfcImport::core::defaultFeedbackSessionPath;
+using HomeskzIfcImport::core::FeedbackRoundKind;
+using HomeskzIfcImport::core::feedbackRoundKind;
 using HomeskzIfcImport::core::FeedbackSession;
 using HomeskzIfcImport::core::formatFeedbackSession;
 using HomeskzIfcImport::core::kSymbolRoleCount;
@@ -306,6 +308,74 @@ TEST(feedback_session_empty_path_is_refused)
 	CHECK(!readFeedbackSession("", session));
 	CHECK(!writeFeedbackSession("", session));
 	clearFeedbackSession("");
+}
+
+// ---------------------------------------------------------------------------
+// **実機テストの周がどれになるか**（M25。core/FeedbackSession.h の feedbackRoundKind）。
+// この場合分けが M25 の要点なので、描画側に散らさず無 SDK でここに固定する。
+
+namespace
+{
+	// 「1 周投稿できた」記憶（この 3 つが揃って初めて続きの周を組み立てられる）。
+	FeedbackSession postedOnce()
+	{
+		FeedbackSession session;
+		session.send = true;
+		session.round = 1;
+		session.ifcPath = "/tmp/model.ifc";
+		session.lastCommit = "aaaaaaa";
+		return session;
+	}
+} // namespace
+
+TEST(feedback_round_kind_continues_when_a_new_build_is_running)
+{
+	// 記憶があり、動いているビルドがそれと違う——**これだけが続きの周**である。
+	CHECK(feedbackRoundKind(postedOnce(), "bbbbbbb", /*allowDialogs*/ true) ==
+		  FeedbackRoundKind::ContinueRound);
+	// パレットの周（ダイアログ禁止）でも同じ。ここへ来るのは新しいビルドを入れた直後だけ。
+	CHECK(feedbackRoundKind(postedOnce(), "bbbbbbb", /*allowDialogs*/ false) ==
+		  FeedbackRoundKind::ContinueRound);
+}
+
+TEST(feedback_round_kind_does_not_import_again_on_the_same_build)
+{
+	// **同じビルドでは取り込まない。** 取り込んでも前の周と同じ数字が並ぶだけで、その
+	// 1 分は最初から無駄である。M24 まではここを「新しい 1 周目」として取り込み直して
+	// おり、パレットが開いている最中にメニューを押した人が同じ round を二重に投稿した
+	// （実機で発生。docs/DEV-NOTES.md M25）。
+	CHECK(feedbackRoundKind(postedOnce(), "aaaaaaa", /*allowDialogs*/ true) ==
+		  FeedbackRoundKind::RearmOnly);
+}
+
+TEST(feedback_round_kind_starts_a_first_round_without_memory)
+{
+	CHECK(feedbackRoundKind(FeedbackSession{}, "aaaaaaa", /*allowDialogs*/ true) ==
+		  FeedbackRoundKind::FirstRound);
+
+	// **記憶として使えるのは 3 つ揃っているときだけ。** どれが欠けても 1 周目に戻る
+	// ——欠けたまま「続き」を組み立てると、宛先も IFC も無いまま走ることになる。
+	FeedbackSession notSending = postedOnce();
+	notSending.send = false;
+	CHECK(feedbackRoundKind(notSending, "bbbbbbb", true) == FeedbackRoundKind::FirstRound);
+
+	FeedbackSession neverPosted = postedOnce();
+	neverPosted.round = 0;
+	CHECK(feedbackRoundKind(neverPosted, "bbbbbbb", true) == FeedbackRoundKind::FirstRound);
+
+	FeedbackSession noFile = postedOnce();
+	noFile.ifcPath.clear();
+	CHECK(feedbackRoundKind(noFile, "bbbbbbb", true) == FeedbackRoundKind::FirstRound);
+}
+
+TEST(feedback_round_kind_refuses_when_it_would_have_to_ask)
+{
+	// パレットの周はダイアログを 1 枚も出せない。尋ねないと始められない場面では
+	// **何もしない**——黙ってファイル選択を出すことも、勝手に始めることもしない。
+	CHECK(feedbackRoundKind(FeedbackSession{}, "aaaaaaa", /*allowDialogs*/ false) ==
+		  FeedbackRoundKind::Refuse);
+	CHECK(feedbackRoundKind(postedOnce(), "aaaaaaa", /*allowDialogs*/ false) ==
+		  FeedbackRoundKind::Refuse);
 }
 
 TEST_MAIN();

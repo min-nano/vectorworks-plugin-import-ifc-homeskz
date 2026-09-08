@@ -97,6 +97,34 @@ namespace HomeskzIfcImport::core
 		bool loop = false;
 	};
 
+	// -----------------------------------------------------------------------
+	// **実機テストの周がどれになるか**（M25）。`draw/Feedback` の `runTestRound` が最初に
+	// 通す判断で、**SDK も IFC も知らない純粋な場合分け**なのでここに置き、無 SDK でテスト
+	// する（CLAUDE.md「テスト方針」——描画側から切り離せる計算は core/ へ寄せる）。
+	//
+	// **判断そのものが M25 の要点である。** M24 まではここが「記憶があって同じビルドなら、
+	// 新しい 1 周目として取り込み直す」で、パレットが開いている最中に人がメニューを押すと
+	// 同じ round が二重に投稿された（実機で発生。docs/DEV-NOTES.md M25）。
+	enum class FeedbackRoundKind
+	{
+		// 記憶が無い（別ブランチの記憶は呼び出し側が捨ててから渡す）。宛先と伏せ字を
+		// 尋ねてから 1 周目を走らせる。
+		FirstRound,
+		// 記憶があり、**動いているビルドがそれと違う**。何も尋ねずに続きの周を走らせる。
+		ContinueRound,
+		// 記憶があり、**同じビルドが動いている**。取り込んでも前の周と同じ数字が並ぶだけ
+		// なので**走らせず**、往復を回す（止まっていたら回し直す）だけにする。
+		RearmOnly,
+		// ダイアログを出せない場面（パレットの周）なのに、尋ねないと始められない。
+		// 何もしない。
+		Refuse,
+	};
+
+	// runningCommit は**いま動いている本体の短縮 sha**。allowDialogs はダイアログを出して
+	// よいか（メニューから実行したとき true、パレットの周は false）。
+	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session,
+										const std::string& runningCommit, bool allowDialogs);
+
 	// 記憶を key=value テキストへ（末尾は改行）。**行の順は固定**——差分を取ったときに
 	// 中身の変化だけが見えるようにするため。
 	std::string formatFeedbackSession(const FeedbackSession& session);

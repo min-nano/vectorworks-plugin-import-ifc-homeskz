@@ -332,6 +332,8 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtUpdateMenu.cpp
 		src/Extensions/ExtMcpMenu.h
 		src/Extensions/ExtMcpMenu.cpp
+		src/Extensions/ExtTestMenu.h
+		src/Extensions/ExtTestMenu.cpp
 		src/Extensions/ExtColumnMark.h
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.h
@@ -395,6 +397,7 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtMenu.cpp
 		src/Extensions/ExtUpdateMenu.cpp
 		src/Extensions/ExtMcpMenu.cpp
+		src/Extensions/ExtTestMenu.cpp
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.cpp
 		src/Extensions/ExtFeedbackPalette.cpp
@@ -410,6 +413,7 @@ if(VW_BUILD_PLUGIN)
 	set(VW_PAYLOAD_SOURCES
 		src/payload/PayloadMain.cpp
 		src/draw/ImportCommand.cpp
+		src/draw/ImportRun.cpp
 		src/draw/Feedback.cpp
 		src/draw/HostServices.cpp
 		src/draw/McpBridge.cpp

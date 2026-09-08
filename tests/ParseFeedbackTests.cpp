@@ -376,11 +376,14 @@ TEST(feedback_comment_trims_an_oversized_log)
 TEST(feedback_comment_asks_for_one_more_run_after_the_fix)
 {
 	// **「もう一度実行してください」と書く。** 待つのをやめた（＝待つあいだ図面が
-	// 見られないので）以上、次の周は人が取り込みを 1 回実行して始まる。ここを黙ると、
-	// 読む側（Claude）が「push すれば勝手に回る」と思い込んだままになる。
+	// 見られないので）以上、パレットが開いていない周は人がコマンドを 1 回実行して始まる。
+	// ここを黙ると、読む側（Claude）が「push すれば勝手に回る」と思い込んだままになる。
+	//
+	// **頼むのは「実機テストを実行…」であって本番の取り込みではない**（M25）。この 2 つを
+	// 分けた以上、本番の取り込みを頼んでも往復は動かない。
 	const FeedbackRound round = sampleRound();
 	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
-	CHECK(contains(body, "取り込みをもう一度実行してください"));
+	CHECK(contains(body, "「実機テストを実行…」をもう一度実行してください"));
 	CHECK(contains(body, "ファイル選択も設定ダイアログも確認も再起動も要りません"));
 	// **戻すのは人の手仕事**なので、そこだけは毎回頼む（ダイアログでは頼まない）。
 	CHECK(contains(body, "「取り消し」で取り込み前へ戻してから"));

@@ -418,7 +418,7 @@ namespace HomeskzIfcImport::parse
 		tail << "この投稿は VectorWorks 上の開発版プラグインが自動生成しました。**`"
 			 << round.build.branch
 			 << "` へ修正を push したら、図面を「取り消し」で取り込み前へ戻してから、"
-				"Vectorworks で取り込みをもう一度実行してください**"
+				"Vectorworks でメニューの「実機テストを実行…」をもう一度実行してください**"
 				"——新しい dev ビルドが尋ねずに入り、同じ条件（同じ IFC・同じ設定）で round "
 			 << (round.round + 1)
 			 << " を投稿します。ファイル選択も設定ダイアログも確認も再起動も要りません。\n";

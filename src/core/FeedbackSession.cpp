@@ -246,4 +246,22 @@ namespace HomeskzIfcImport::core
 		std::error_code ec;
 		std::filesystem::remove(std::filesystem::path(path), ec);
 	}
+
+	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session,
+										const std::string& runningCommit, bool allowDialogs)
+	{
+		// **記憶として使えるのは 3 つ揃っているときだけ。** 送ると決めてあり（send）、
+		// 1 周は投稿できていて（round>0）、その周の IFC が分かっている（ifcPath）——
+		// どれか欠けていれば続きの周は組み立てられないので、1 周目として扱う。
+		const bool remembered = session.send && session.round > 0 && !session.ifcPath.empty();
+		if (remembered && session.lastCommit != runningCommit)
+			return FeedbackRoundKind::ContinueRound;
+		// ここから先は必ず人に尋ねるか、記憶を書き換えるかのどちらかになる。パレットの
+		// 周（allowDialogs=false）がここへ来るのは筋が通らない——新しいビルドを入れた
+		// 直後にしか呼ばれないので、必ず上で ContinueRound になるはずである。
+		if (!allowDialogs)
+			return FeedbackRoundKind::Refuse;
+		return remembered ? FeedbackRoundKind::RearmOnly : FeedbackRoundKind::FirstRound;
+	}
+
 } // namespace HomeskzIfcImport::core

@@ -1,0 +1,66 @@
+//
+//	Extensions/ExtTestMenu.h
+//
+//	メニューコマンド「実機テストを実行… (Dev)」。**開発版だけ**（M25。docs/DEV-NOTES.md）。
+//
+//	【なぜ本番の取り込みと分けたか】M24 までは、実機フィードバックの往復が**本番の取り込み
+//	コマンドの中**に織り込まれていた——記憶を読んでファイル選択を飛ばす分岐、「次は更新を
+//	尋ねずに入れてよいか」を意味する戻り値、投稿できたら結果ダイアログを出さない分岐。
+//	`#ifdef VW_DEV_BUILD` の外にあるので**安定版にも同じ制御フローが入っており**、開発の
+//	都合で本番の経路にバグを混ぜる余地になっていた。
+//
+//	そこで**テストの入口を別のコマンドとして立てた**。往復（記憶・準備・投稿・パレット）は
+//	すべてこちらが持ち、本番の取り込みコマンドは往復を 1 つも知らない。**両者が共有するのは
+//	絵を作るところだけ**（本体の draw/ImportRun.h）なので、テストで走るのは本番と同じ
+//	コードである。
+//
+//	【押すと何が起きるか】本体の draw::runTestRound（src/draw/Feedback.h）:
+//	  * 1 周目 … IFC・取り込み設定・宛先の PR・伏せ字を尋ねてから取り込み、PR へ投稿する
+//	  * 続きの周 … 何も尋ねず、前の周と同じ条件で取り込んで投稿する
+//	  * 同じビルドが動いているなら … 取り込まない（同じ数字が並ぶだけ）。往復を回し直す
+//	投稿できた（＝往復が回っている）なら、モードレスのパレットを開いて以後を自動にする
+//	（src/FeedbackLoop.h）。
+//
+//	【更新の確認】1 周目は `Silent`（あるときだけ尋ねる）。**往復が回り出した次の回だけ
+//	`Auto`**（尋ねず・報せず入れる）——往復の最中にいる人へ「新しいビルドがあります。
+//	インストールしますか？」を出すのは、この往復が無くそうとしている手間そのものである。
+//	その覚えは殻の関数ローカル static で持つ（Vectorworks を閉じれば消えてよい類）。
+//	**この分岐は dev だけのこのファイルに閉じている**——本番の ExtMenu には無い。
+//
+//	【登録は殻に、処理は本体に】CLAUDE.md「殻と本体」の表どおり。ここにあるのは登録と
+//	取り次ぎだけで、実処理は 1 行も無い。
+//
+//	【Needs = DocIsActive】取り込みと同じ。描画先の文書が要る。
+//
+
+#pragma once
+
+#include "VectorworksSDK.h"
+
+namespace HomeskzIfcImport
+{
+	using namespace VWFC::PluginSupport;
+
+	// ------------------------------------------------------------------------
+	// メニュー項目を実行したときの本体。
+	class CTestMenu_EventSink : public VWMenu_EventSink
+	{
+	public:
+		CTestMenu_EventSink(IVWUnknown* parent);
+		~CTestMenu_EventSink() override;
+
+		// 実機テストを 1 周走らせ、往復が回っていればパレットを開く。
+		void DoInterface() override;
+	};
+
+	// ------------------------------------------------------------------------
+	// 拡張そのもの（ModuleMain が REGISTER_Extension で登録する。**dev だけ**）。
+	class CExtMenuTest : public VWExtensionMenu
+	{
+		DEFINE_VWMenuExtension;
+
+	public:
+		CExtMenuTest(CallBackPtr cbp);
+		~CExtMenuTest() override;
+	};
+} // namespace HomeskzIfcImport

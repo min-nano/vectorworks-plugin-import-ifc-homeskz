@@ -189,12 +189,15 @@ namespace HomeskzIfcImport
 			return fStamp;
 		}
 
-		// 取り込みコマンドを**1 周ぶん**走らせる（ファイル選択から結果ダイアログまで
-		// 本体が行う）。呼べなかったときだけ false。
-		//
-		// autoUpdateOut に true が入って戻ったら、**次にこのコマンドが走るときは更新を
-		// 尋ねずに入れる**（実機フィードバックの往復。src/Extensions/ExtMenu.cpp）。
-		bool runImport(bool& autoUpdateOut, std::string& error);
+		// **本番の取り込みコマンド**を 1 周ぶん走らせる（ファイル選択から結果ダイアログ
+		// まで本体が行う）。呼べなかったときだけ false。M25 で往復の都合が抜けたので、
+		// 持ち帰るものはもう無い（src/draw/ImportCommand.h）。
+		bool runImport(std::string& error);
+
+		// **実機テストを 1 周**（M25。dev だけ。src/draw/Feedback.h の runTestRound）。
+		// allowDialogs が false なら 1 枚もダイアログを出さない（パレットの周）。
+		// activeOut に true が入って戻ったら往復が回っている＝殻はパレットを開く。
+		bool runTest(bool allowDialogs, bool& activeOut, std::string& error);
 
 		// MCP ブリッジを走らせる（止められるまで戻らない。src/draw/McpBridge.h）。
 		// 呼べなかったときだけ false。
@@ -222,6 +225,7 @@ namespace HomeskzIfcImport
 		std::string fBranch;
 		PayloadStamp fStamp;
 		VwPayloadRunImportFn fImportFn = nullptr;
+		VwPayloadRunTestFn fTestFn = nullptr;
 		VwPayloadRunMcpBridgeFn fBridgeFn = nullptr;
 		VwPayloadRecalculateFn fRecalcFn = nullptr;
 		VwPayloadShutdownFn fShutdownFn = nullptr;

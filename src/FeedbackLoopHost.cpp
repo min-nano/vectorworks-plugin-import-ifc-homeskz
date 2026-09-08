@@ -7,7 +7,7 @@
 //	  QueryMemory       … 本体の vw_payload_loop_status（PayloadUse で確保して呼ぶ）
 //	  RunFeedbackScript … 同梱スクリプト vw-feedback（src/Updater.h の RunBundledScriptNamed）
 //	  PollBuild         … 尋ねない自動アップデート（src/Updater.h の PollDevBuild）
-//	  RunRound          … 本体の取り込み 1 周（Extensions/ExtMenu.cpp と同じ呼び方）
+//	  RunRound          … 本体の実機テスト 1 周（Extensions/ExtTestMenu.cpp と同じ呼び方）
 //	  EndLoop           … 本体の vw_payload_loop_end
 //
 //	**本体を使う区間（PayloadUse）は 1 操作ごとに閉じる。** PollBuild は入れたあとに本体を
@@ -194,7 +194,9 @@ namespace HomeskzIfcImport
 					error = use.error();
 					return false;
 				}
-				return use->runImport(posted, error);
+				// **往復を知っているのは本体のテストの周だけ**（M25。src/draw/Feedback.h）。
+				// ダイアログは 1 枚も出さない。
+				return use->runTest(/*allowDialogs*/ false, posted, error);
 			}
 
 			void EndLoop(const std::string& reason, bool notifyPr) override
