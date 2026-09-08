@@ -486,7 +486,9 @@ namespace HomeskzIfcImport::draw
 		VectorWorks::Filing::IFileIdentifierPtr FileIdFor(const std::string& path)
 		{
 			using namespace VectorWorks::Filing;
-			IFileIdentifierPtr fileID(IID_FileIdentifier);
+			// const で受ける（VCOMPtr の operator-> は const。draw/ImportRun.cpp と同じ
+			// 作法で、clang-tidy の misc-const-correctness もこれを求める）。
+			const IFileIdentifierPtr fileID(IID_FileIdentifier);
 			if (!fileID)
 				return IFileIdentifierPtr{};
 			if (fileID->Set(TXString(path.c_str())) != kVCOMError_NoError)
@@ -636,6 +638,15 @@ namespace HomeskzIfcImport::draw
 			// 「取り消し」を名前で起動する API も無い（#27）。ここを読む人が「戻り切った」と
 			// 思わないよう、1 行で言い切っておく。
 			return note + "。取り込み前から在ったレイヤへ描いた分は取り除けません";
+		}
+
+		// **毎周開き直す図面（テンプレート）を選ばせる。** 選ばなければ空のまま
+		// （＝従来どおり、いま開いている図面へ描いて前の周が作ったレイヤだけを取り除く）。
+		bool chooseRoundTemplate(std::string& outPath)
+		{
+			return chooseFile("毎周ここから開き直す図面を選択（キャンセル＝いまの図面に描く）",
+							  "vwx sta", "Vectorworks の図面・テンプレート (*.vwx, *.sta)",
+							  outPath);
 		}
 
 		core::FeedbackSession loadFeedbackSession(const std::string& branch)
@@ -844,6 +855,7 @@ namespace HomeskzIfcImport::draw
 		const bool continuing = kind == core::FeedbackRoundKind::ContinueRound;
 		std::string ifcPath = session.ifcPath;
 		std::string templatePath = session.templatePath;
+		bool templateAsked = session.templateAsked;
 		core::ImportOptions options = session.options;
 		bool settingsShown = true;
 		std::string settingsNote;
@@ -852,6 +864,17 @@ namespace HomeskzIfcImport::draw
 			// **続きの周は何も出さない。** 1 周目の選択（ファイル・設定）をそのまま使う
 			// ——ここで人の操作を挟むと、往復を自動にした意味が無くなる。
 			settingsNote = "前の周の設定をそのまま使いました（実機フィードバックの往復）";
+
+			// **一度だけの例外。** 続きの周にダイアログは出さない決まりだが（draw/Feedback.h）、
+			// M25 でテンプレートを訊くようになる前から続いている往復は 1 周目のダイアログを
+			// 通らないので、訊く機会が二度と来ない。**人がメニューを押した周に限り**
+			// （allowDialogs）一度だけ訊き、断られたら二度と訊かない。パレットが回す無人の
+			// 周（allowDialogs=false）はここへ来ないので、往復は止まらない。
+			if (allowDialogs && templatePath.empty() && !templateAsked)
+			{
+				(void)chooseRoundTemplate(templatePath);
+				templateAsked = true;
+			}
 		}
 		else
 		{
@@ -871,9 +894,8 @@ namespace HomeskzIfcImport::draw
 			// （通り芯の「共通」など）へ描いた分は残り、絵が二重になる（実機で発生。
 			// docs/DEV-NOTES.md M25）。
 			templatePath.clear();
-			(void)chooseFile("毎周ここから開き直す図面を選択（キャンセル＝いまの図面に描く）",
-							 "vwx sta", "Vectorworks の図面・テンプレート (*.vwx, *.sta)",
-							 templatePath);
+			(void)chooseRoundTemplate(templatePath);
+			templateAsked = true;
 		}
 
 		// **尋ねることは全部、取り込みが始まる前に尋ね切る**（draw/Feedback.h）。
@@ -883,6 +905,7 @@ namespace HomeskzIfcImport::draw
 		plan.session.ifcPath = ifcPath;
 		plan.session.options = options;
 		plan.session.templatePath = templatePath;
+		plan.session.templateAsked = templateAsked;
 
 		// **取り除きは 1 回だけ呼び、その説明を 2 か所へ配る**——診断ログ（prologue）と
 		// PR コメント（FeedbackInput::preparation）。ログは上限で切り詰められるので、
