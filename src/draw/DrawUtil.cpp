@@ -477,7 +477,11 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// 名前を引けなくても取り込みは続く（次の周で消せないだけ）。
+			// 名前を引けなくても取り込みは続く（次の周でこのレイヤを消せないだけ）。
+			// **catch の中で return する**のは AllLayers / AllClasses と同じ形で、
+			// clang-tidy の bugprone-empty-catch（コメントだけの catch を許さない）に
+			// 掛からないため。
+			return;
 		}
 	}
 
