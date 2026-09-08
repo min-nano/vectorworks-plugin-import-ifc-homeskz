@@ -434,6 +434,61 @@ check "control_of_comment: stop at the end of the marker" \
 	"$(control_of_comment "<!-- homeskz-ifc-feedback v1 control=stop -->")" "stop"
 check "control_of_comment: ended is not stop" \
 	"$(control_of_comment "<!-- homeskz-ifc-feedback v1 control=ended reason=user -->")" "none"
+check "control_of_comment: the signal may share the comment with human text" \
+	"$(control_of_comment "直りました。もう往復は要りません。
+
+<!-- homeskz-ifc-feedback v1 control=stop -->")" "stop"
+check "control_of_comment: leading whitespace on the signal line is allowed" \
+	"$(control_of_comment "  <!-- homeskz-ifc-feedback v1 control=stop -->  ")" "stop"
+
+# ---------------------------------------------------------------------------
+# **「書いてある」と「合図である」は違う**（実機 round 1 の回帰。docs/DEV-NOTES.md M24）。
+#
+# 本文のどこかで `control=stop` を拾う作りだったころ、**プラグイン自身の投稿**が末尾で
+# 「合図はこう書きます」と案内しているせいで、その 1 通目を読んだ時点で往復が止まった。
+# 説明のために引用された目印を合図と読まないこと——ここが崩れると、この仕組みは
+# 「始めた瞬間に自分で止まる」に戻る。
+# ---------------------------------------------------------------------------
+check "control_of_comment: quoted inside a sentence is not a signal" \
+	"$(control_of_comment "往復がもう要らなくなったら、\`<!-- homeskz-ifc-feedback v1 control=stop -->\` を含むコメントを投稿してください。")" \
+	"none"
+check "control_of_comment: quoted inside a fenced block is not a signal" \
+	"$(control_of_comment "合図の書き方:
+
+\`\`\`
+<!-- homeskz-ifc-feedback v1 control=stop -->
+\`\`\`
+
+以上です。")" "none"
+
+# プラグイン自身の周の投稿（1 行目が round= の目印で、末尾に上の案内文を含む）。
+PLUGIN_ROUND_BODY="<!-- homeskz-ifc-feedback v1 round=1 build=a618af6 branch=x -->
+## 実機フィードバック round 1
+
+往復のパレットが開いていれば、push のあとは何もしなくても次の周が自動で走ります。
+往復がもう要らなくなったら、\`<!-- homeskz-ifc-feedback v1 control=stop -->\` を含む
+コメントをこの PR へ投稿してください——次の確認でパレットが止まります。"
+check "control_of_comment: the plug-in's own round post never stops the loop" \
+	"$(control_of_comment "$PLUGIN_ROUND_BODY")" "none"
+
+# 同じ本文を loop-control の経路でも通す（since は自分の投稿を含んで返りうる）。
+PULL_BODY='{"state":"open","merged":false}'
+COMMENTS_BODY="$(python3 - <<'JSON'
+import json
+body = (
+    "<!-- homeskz-ifc-feedback v1 round=1 build=a618af6 branch=x -->\n"
+    "## 実機フィードバック round 1\n\n"
+    "往復がもう要らなくなったら、`<!-- homeskz-ifc-feedback v1 control=stop -->` を含む\n"
+    "コメントをこの PR へ投稿してください。"
+)
+print(json.dumps([{"id": 9, "body": body}], ensure_ascii=False))
+JSON
+)"
+check "loop-control: the round we just posted is not read as our own stop signal" \
+	"$(mode_loop_control "o/r" "123" "2026-09-08T00:42:20Z")" "state=open
+control=none
+ok"
+COMMENTS_BODY='[]'
 
 # ---------------------------------------------------------------------------
 # bash 3.2（macOS の /bin/bash）で動くこと。

@@ -394,7 +394,11 @@ TEST(feedback_comment_tells_how_the_automatic_loop_runs_and_stops)
 	const FeedbackRound round = sampleRound();
 	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
 	CHECK(contains(body, "次の周が自動で走ります"));
-	CHECK(contains(body, "<!-- homeskz-ifc-feedback v1 control=stop -->"));
+	CHECK(contains(body, "control=stop"));
+	// **生の目印は本文へ置かない。** この本文はプラグイン自身の投稿で、合図を探す側が
+	// これを読む——実機 round 1 で、この案内文が自分の合図として読まれ 1 通目で往復が
+	// 止まった（docs/DEV-NOTES.md M24）。読む側も直したが、書く側でも置かない。
+	CHECK(!contains(body, "<!-- homeskz-ifc-feedback v1 control=stop -->"));
 }
 
 TEST_MAIN();

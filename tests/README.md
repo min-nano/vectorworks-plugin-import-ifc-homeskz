@@ -151,9 +151,13 @@ SDK と実際の図面が要るためで、代わりに (a) SDK から切り離�
    **これらのスクリプトはダイアログを持ちません**——尋ねるのは全部プラグイン側で、しかも
    取り込みが始まる前です（`docs/DEV-NOTES.md` M23）。`loop-control`（M24）は PR の状態
    （open / closed / merged）と、`since` 以降のコメントに Claude の合図
-   `<!-- homeskz-ifc-feedback v1 control=stop -->` があるかを返します——プラグイン自身が
-   投稿する `control=ended` や、目印の無いコメントの `control=stop` を合図と読まないこと、
-   `post` が `created=`（次の since）を返すことも確かめます。
+   `homeskz-ifc-feedback v1 control=stop` の HTML コメントが**その行だけの 1 行**として
+   あるかを返します。**要の回帰はここです**——文中に引用したもの・``` で囲んだもの・
+   プラグイン自身の周の投稿を**合図と読まないこと**を検査します。実機 round 1 では、
+   本文のどこかで目印を拾う作りだったせいで、**プラグイン自身の案内文が自分の合図として
+   読まれ、1 通目で往復が止まりました**（`docs/DEV-NOTES.md` M24）。あわせて
+   `control=ended` を合図と読まないこと、`post` が `created=`（次の since）を返すことも
+   確かめます。
 
 以降の節（`IUpdaterHost` によるフロー全体のテスト・スクリプトのテスト・残る部分）は
 すべてこのアップデータ系統の話です。

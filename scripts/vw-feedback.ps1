@@ -248,14 +248,28 @@ function Get-IsoTime {
     return [string] $Value
 }
 
-# コメント本文から**往復への合図**を読む。目印は本文のどこかにある
+# コメント本文から**往復への合図**を読む。合図は
 #   <!-- homeskz-ifc-feedback v1 control=stop -->
-# の 1 行で、`control=stop` の直後が空白か `-->` か行末のものだけを合図と読む
-# （プラグイン自身が投稿する `control=ended` を「止めろ」と読み違えないため）。
+# **ただ 1 行**で、その行に他の文字があってはならない（scripts/vw-feedback.sh の
+# control_of_comment と同じ規則。理由もそちらに書いてある——「書いてある」と「合図である」は
+# 違い、本文のどこかで拾う作りでは**目印を説明した文章が合図になる**。実機 round 1 で
+# 実際に起きた。docs/DEV-NOTES.md M24「合図は行、文中の引用ではない」）。
 function Get-CommentControl {
     param([string] $Body)
     if (-not $Body) { return 'none' }
-    if ($Body.Contains('homeskz-ifc-feedback') -and ($Body -match 'control=stop(\s|-->|$)')) { return 'stop' }
+
+    $fence = $false
+    $self = $false
+    $stop = $false
+    foreach ($raw in ($Body -split "`r?`n")) {
+        if ($raw -match '^\s*```') { $fence = -not $fence; continue }
+        if ($fence) { continue }
+        $line = $raw.Trim()
+        if ($line -match '^<!--\s*homeskz-ifc-feedback\s+v1\s+round=') { $self = $true }
+        if ($line -match '^<!--\s*homeskz-ifc-feedback\s+v1\s+control=ended') { $self = $true }
+        if ($line -match '^<!--\s*homeskz-ifc-feedback\s+v1\s+control=stop\s*-->$') { $stop = $true }
+    }
+    if ($stop -and -not $self) { return 'stop' }
     return 'none'
 }
 

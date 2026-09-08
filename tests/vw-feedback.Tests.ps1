@@ -327,6 +327,39 @@ T 'Get-CommentControl reads only the marked stop signal'
 CheckEq (Get-CommentControl -Body '<!-- homeskz-ifc-feedback v1 control=stop -->') 'stop'
 CheckEq (Get-CommentControl -Body '<!-- homeskz-ifc-feedback v1 control=ended reason=user -->') 'none'
 CheckEq (Get-CommentControl -Body '') 'none'
+CheckEq (Get-CommentControl -Body "直りました。`n`n<!-- homeskz-ifc-feedback v1 control=stop -->") 'stop' `
+    'the signal may share the comment with human text'
+CheckEq (Get-CommentControl -Body '   <!-- homeskz-ifc-feedback v1 control=stop -->   ') 'stop' `
+    'leading and trailing whitespace on the signal line is allowed'
+
+# **「書いてある」と「合図である」は違う**（実機 round 1 の回帰。docs/DEV-NOTES.md M24）。
+# 本文のどこかで control=stop を拾う作りでは、**目印を説明した文章が合図になる**——
+# プラグイン自身の投稿が末尾でその案内を書いているので、1 通目で往復が止まった。
+T 'a quoted marker is documentation, not a signal'
+CheckEq (Get-CommentControl -Body '往復がもう要らなくなったら、`<!-- homeskz-ifc-feedback v1 control=stop -->` を含むコメントを投稿してください。') `
+    'none' 'quoted inside a sentence'
+$fencedQuote = @'
+合図の書き方:
+
+```
+<!-- homeskz-ifc-feedback v1 control=stop -->
+```
+
+以上です。
+'@
+CheckEq (Get-CommentControl -Body $fencedQuote) 'none' 'quoted inside a fenced block'
+
+T "the plug-in's own round post never stops the loop"
+$ownRound = "<!-- homeskz-ifc-feedback v1 round=1 build=a618af6 branch=x -->`n" +
+    "## 実機フィードバック round 1`n`n" +
+    "往復がもう要らなくなったら、``<!-- homeskz-ifc-feedback v1 control=stop -->`` を含む`n" +
+    "コメントをこの PR へ投稿してください。"
+CheckEq (Get-CommentControl -Body $ownRound) 'none'
+$script:FakePull = [pscustomobject]@{ state = 'open'; merged = $false }
+$script:FakeComments = @([pscustomobject]@{ id = 9; body = $ownRound })
+CheckEq (AsText (Invoke-LoopControl -Repo 'o/r' -Number '123' -Since '2026-09-08T00:42:20Z')) `
+    "state=open`ncontrol=none`nok" 'the round we just posted is not our own stop signal'
+$script:FakeComments = @()
 
 # ---------------------------------------------------------------------------
 T 'an unknown mode is reported, not silently ignored'

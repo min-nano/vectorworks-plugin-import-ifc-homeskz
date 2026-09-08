@@ -147,18 +147,35 @@ api_get() { # token, url, out-file
 	fi
 }
 
-# コメント本文から**往復への合図**を読む。目印は本文のどこかにある
+# コメント本文から**往復への合図**を読む。合図は
 #   <!-- homeskz-ifc-feedback v1 control=stop -->
-# の 1 行で、`control=stop` の直後が空白か `-->` か行末のものだけを合図と読む
-# （プラグイン自身が投稿する `control=ended` を「止めろ」と読み違えないため）。
-# 合図なら "stop"、そうでなければ "none"。
+# **ただ 1 行**で、その行に他の文字があってはならない。合図なら "stop"、無ければ "none"。
+#
+# **「書いてある」と「合図である」は違う。** 本文のどこかに現れる `control=stop` を拾う作り
+# では、**この目印を説明した文章が合図になってしまう**——実機 round 1 でまさにそれが起きた
+# （プラグイン自身の投稿が末尾で「合図はこう書きます」と案内しており、その 1 通目を読んだ
+# 時点で往復が止まった。docs/DEV-NOTES.md M24「合図は行、文中の引用ではない」）。
+# だから 3 つで縛る:
+#
+#   1. **行がまるごと目印であること**（前後は空白だけ）。文中に引用したものは合図でない。
+#   2. **``` で囲まれた中は読まない**（例として貼ったものを合図にしない）。
+#   3. **プラグイン自身の投稿は合図にしない**（`round=` / `control=ended` の目印を持つ本文）。
+#      1 と 2 で足りているが、ここは「自分の言葉で自分が止まる」を二度と起こさないための
+#      歯止めなので、判定を重ねておく。
 control_of_comment() { # body-text
-	if printf '%s\n' "$1" | grep -q 'homeskz-ifc-feedback' &&
-		printf '%s\n' "$1" | grep -Eq 'control=stop([[:space:]]|-->|$)'; then
-		echo "stop"
-	else
-		echo "none"
-	fi
+	printf '%s\n' "$1" | LC_ALL=C awk '
+		/^[[:space:]]*```/ { fence = !fence; next }
+		fence { next }
+		{
+			line = $0
+			sub(/^[[:space:]]+/, "", line)
+			sub(/[[:space:]]+$/, "", line)
+			if (line ~ /^<!--[[:space:]]*homeskz-ifc-feedback[[:space:]]+v1[[:space:]]+round=/) { self = 1 }
+			if (line ~ /^<!--[[:space:]]*homeskz-ifc-feedback[[:space:]]+v1[[:space:]]+control=ended/) { self = 1 }
+			if (line ~ /^<!--[[:space:]]*homeskz-ifc-feedback[[:space:]]+v1[[:space:]]+control=stop[[:space:]]*-->$/) { stop = 1 }
+		}
+		END { print (stop && !self) ? "stop" : "none" }
+	'
 }
 
 # ---------------------------------------------------------------------------
