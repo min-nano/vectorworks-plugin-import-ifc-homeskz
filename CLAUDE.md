@@ -17,6 +17,9 @@
   要素（ストーリ・通り芯・基礎・床・横架材・柱・屋根組・シンボル・記号・耐力壁・伏図・
   軸組図）は一通り実装済み。
 - **アップデータを確認 (みんなの構造設計支援)**（メニュー）… 新しいビルドの確認と入れ替え。
+- **MCP ブリッジを開始…**（メニュー）… **Claude と図面をつなぐ橋**を、実行している間だけ
+  架ける（開発・デバッグ用）。受け渡しはスプール越しのファイルで、MCP そのものは同梱の
+  Python サーバ（`scripts/mcp/vw-mcp-server.py`）が担う。**v1 の道具は読むだけ**。
 - **柱記号** / **耐力壁**（PIO）… 取り込みが置くプラグインオブジェクト。
 
 **ここから先は独自のプラグインとして改良していきます。**
@@ -422,6 +425,16 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 （`forEachFixture`）は `tests/Fixtures.h`、**合成 STEP テキストの組み立て**（`StepText` と
 `num` / `ref` / `point3` / `makeStorey` 等の断片ヘルパー）は `tests/StepText.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
+
+**MCP ブリッジ（`core/Bridge` ＋ `draw/McpBridge` ＋ `scripts/mcp/vw-mcp-server.py`）**:
+受け渡しの作法（要求／応答の形・スプールのファイル名・原子的な書き方・id の綴り検査）は
+**`core/Bridge.h` ただ 1 つ**で、Python サーバはその対になる綴りを持つ（どちらかを変えたら
+両方を直す。`tests/vw-mcp-server.test.py` が落ちる）。**道具の表（名前・説明・引数の形・
+実装）は `draw/McpBridge.cpp` の `kTools` ただ 1 つ**で、Python サーバは起動時に `vw_tools`
+でそれを取りに行く——**道具を足すときに触るのはその 1 行と実装 1 つだけ**で、Python 側は
+直さない。JSON は `core/Json`（ブリッジが使う唯一の器で、他所で使わない）。図面を**書く**
+道具を足すときは undo の作法（[SDK リファレンス「Undo」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Undo.md)）を
+必ず通すこと。
 
 **依存の向きは厳守する:** `parse/` と `core/` は VectorWorks SDK を include しない。
 `draw/` は STEP / IFC を include しない。両者をつなぐのは `core/Document.h` だけ。

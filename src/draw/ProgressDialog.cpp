@@ -47,6 +47,9 @@ namespace HomeskzIfcImport::draw
 		VWFC::Tools::CProgressDlg dialog;
 		bool open = false;	  // Open 済みで Close していない
 		bool segment = false; // Start 済みで End していない
+		// keepAlive がいまの区間で yield した回数（区間の宣言した回数を超えないように
+		// 数えて、超える前に区間を開き直す）。
+		Sint32 pumped = 0;
 
 		// 開いている区間を閉じる。Start と End は対で使う（対にしないと、次の Start の
 		// 配分が前の区間の残りに乗ってバーの進みが狂う）。
@@ -56,6 +59,7 @@ namespace HomeskzIfcImport::draw
 				return;
 			dialog.End();
 			segment = false;
+			pumped = 0;
 		}
 	};
 
@@ -115,6 +119,30 @@ namespace HomeskzIfcImport::draw
 		// **ここが「フリーズして見える」への効き所**: 1 件ごとに制御を VW へ返し、
 		// ダイアログの再描画とキャンセル操作を受け付けさせる。
 		fImpl->dialog.DoYield(1);
+	}
+
+	bool ProgressDialog::keepAlive(const std::string& meterText)
+	{
+		if (!fImpl->open)
+			return false;
+
+		// **区間を開き直しながら回す。** DoYield は Start で宣言した区間の中で使うもの
+		// なので、終わりの見えない待ちでは宣言した回数を使い切る前に開き直す。share=0 で
+		// 開くとバーは動かない（進み具合を騙らないためにそうしている）。
+		constexpr Sint32 kPumpSegment = 1000;
+		if (!fImpl->segment || fImpl->pumped >= kPumpSegment)
+		{
+			fImpl->endSegment();
+			fImpl->dialog.Start(0.0, kPumpSegment);
+			fImpl->segment = true;
+			fImpl->pumped = 0;
+		}
+		if (!meterText.empty())
+			fImpl->dialog.SetMeterText(TXString(meterText.c_str()));
+		// ここが「フリーズして見える」への効き所（onStep と同じ）。
+		fImpl->dialog.DoYield(1);
+		++fImpl->pumped;
+		return fImpl->dialog.HasCancel();
 	}
 
 	bool ProgressDialog::onCancelled()

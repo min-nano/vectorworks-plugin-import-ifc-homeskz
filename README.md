@@ -10,6 +10,7 @@
 | --- | --- |
 | **IFC (ホームズ君) 取り込み…** — ホームズ君構造EX の IFC を Vectorworks のネイティブオブジェクトへ変換して配置するコマンド | メニュー |
 | **アップデータを確認 (みんなの構造設計支援)** — 新しいビルドが出ていないか確かめ、あれば入れ替えるコマンド | メニュー |
+| **MCP ブリッジを開始…** — Claude と開いている図面をつなぎ、図面の中身を読ませるコマンド（**開発・デバッグ用**） | メニュー |
 | **柱記号** / **耐力壁** — 取り込みが置く 2 つのプラグインオブジェクト（PIO） | 図面上のオブジェクト |
 
 ## IFC (ホームズ君) 取り込み
@@ -325,6 +326,8 @@ powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
    入っています——**IFC (ホームズ君) 取り込み…** と
    **アップデータを確認 (みんなの構造設計支援)** を、好きなメニューへドラッグして
    ください（2 つとも足しておくと、更新を思い立ったときにすぐ確認できます）。
+   **MCP ブリッジを開始…** は開発・デバッグ用なので、使うときだけ足せば十分です
+   （上記「MCP ブリッジ」）。
 
 ### Windows
 
@@ -408,6 +411,184 @@ Vectorworks が起動時にしか読み込めないのは殻だけです。更�
 
 仕組みの詳細（同梱スクリプト・殻と本体の入れ替え・手動実行）は
 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)「自動アップデートの仕組み」にあります。
+
+---
+
+## MCP ブリッジ（Claude から図面を読む）
+
+> **開発・デバッグ用の機能です。** 図面を作るために要るものではありません。取り込みだけを
+> 使う方は読み飛ばして構いません。
+
+メニュー **「MCP ブリッジを開始…」** を実行している間だけ、**Claude が開いている図面の
+中身を自分で読める**ようになります。「レイヤは何枚あるか」「そのレイヤに何が入っているか」を
+人が画面を読んで伝える代わりに、Claude が直接数えられる——不具合の切り分けにかかる往復を
+減らすための道具です。
+
+```
+Claude ──MCP──▶ vw-mcp-server.py ──ファイル──▶ Vectorworks（ブリッジ実行中）
+```
+
+### 用意する
+
+1. **プラグインを入れる**（下記「インストール」）。インストール先のフォルダに
+   `vw-mcp-server.py` が一緒に置かれます。
+2. **Claude に登録する。** Python 3.8 以降が要ります（macOS には最初から入っています）。
+   `<プラグインのフォルダ>` は上記「置き場所」の `Plug-Ins/min-nano_structure/` です。
+   登録は 1 回だけで、以降は Vectorworks 側でメニューを実行するだけになります。
+
+   お使いの Claude によって手順が違います。
+
+   #### Claude のデスクトップアプリ（GUI）の場合
+
+   **設定ファイルに書きます。** アプリの中に「MCP サーバを追加」のような入力欄は無く、
+   `claude_desktop_config.json` を編集するのが正規の手順です。
+
+   | | 設定ファイルの場所 |
+   | --- | --- |
+   | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+   | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+
+   アプリの **設定 ▸ 開発者 ▸ 構成を編集**（Settings ▸ Developer ▸ Edit Config）から
+   このファイルのある場所を開けます。無ければ自分で作ってください。中身は次のとおりです
+   （**既に他のサーバを登録している場合は `mcpServers` の中へ 1 項目足す**だけ）。
+   `<ユーザー名>` は実際のアカウント名に、パスは上記「置き場所」で確かめた実物に
+   置き換えてください（`Plug-Ins` の場所は Vectorworks ▸ 環境設定 ▸ *ユーザーフォルダ*
+   から辿れます）。
+
+   ```jsonc
+   // macOS
+   {
+     "mcpServers": {
+       "vectorworks": {
+         "type": "stdio",
+         "command": "/usr/bin/python3",
+         "args": ["/Users/<ユーザー名>/Library/Application Support/Vectorworks/2026/Plug-Ins/min-nano_structure/vw-mcp-server.py"],
+         "env": {}
+       }
+     }
+   }
+   ```
+
+   ```jsonc
+   // Windows（\ は 2 つ重ねて書きます）
+   {
+     "mcpServers": {
+       "vectorworks": {
+         "type": "stdio",
+         "command": "C:\\Users\\<ユーザー名>\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+         "args": ["C:\\Users\\<ユーザー名>\\AppData\\Roaming\\Nemetschek\\Vectorworks\\2026\\Plug-Ins\\min-nano_structure\\vw-mcp-server.py"],
+         "env": {}
+       }
+     }
+   }
+   ```
+
+   **`command` は Python の絶対パスにしてください。** アプリがサーバを起動するときの
+   `PATH` は端末とは別物なので、`python3` / `python` とだけ書くと見つからないことが
+   あります。場所は、macOS のターミナルなら `which python3`、Windows の PowerShell なら
+   `(Get-Command python).Source` で分かります。
+
+   **`args` のパスは「シェルの書き方」を持ち込まないでください。** ここはただの JSON で、
+   シェルを通りません。実際に躓いた例を挙げます。
+
+   | 書きがちなもの | 正しくは | なぜ |
+   | --- | --- | --- |
+   | `~/Library/…` | `/Users/<ユーザー名>/Library/…` | **`~` は展開されません**（そのままの文字として渡ります） |
+   | `Application\ Support` | `Application Support` | **空白をエスケープしない**（`\` が名前の一部になります） |
+   | `"…/vw-mcp-server.py"`（引用符を二重に） | 引用符は JSON のものだけ | シェルの引用は要りません |
+
+   **確実なのは Finder から取ることです。** `vw-mcp-server.py` を右クリックして、
+   そのまま **Option キーを押す**とメニューの「コピー」が
+   **「"vw-mcp-server.py" のパス名をコピー」**に変わるので、それを `args` の
+   引用符の中へ貼り付けてください。
+
+   失敗しているときは、ログ（macOS なら
+   `~/Library/Logs/Claude/mcp-server-vectorworks.log`）に
+   `can't open file '…': [Errno 2] No such file or directory` と、**Python が実際に
+   開こうとしたパス**が出ます。まずそれを見てください。
+
+   **書き換えたら Claude のアプリを終了して開き直してください**（設定ファイルは起動時に
+   読まれます）。うまく登録できていれば、Claude に「`vw_bridge_status` を実行して」と
+   頼むと答えが返ります。
+
+   #### Claude Code（コマンドライン）の場合
+
+   ```bash
+   # macOS
+   claude mcp add vectorworks -- python3 "<プラグインのフォルダ>/vw-mcp-server.py"
+   ```
+
+   ```powershell
+   # Windows
+   claude mcp add vectorworks -- python "<プラグインのフォルダ>\vw-mcp-server.py"
+   ```
+
+   #### 開発版（Dev）を使うとき
+
+   フォルダを `min-nano_structureDev` に読み替えたうえで、環境変数
+   `VW_MCP_PLUGIN=min-nano_structureDev` を渡してください。デスクトップアプリなら
+   設定ファイルの `env` に書きます。
+
+   ```jsonc
+   "env": { "VW_MCP_PLUGIN": "min-nano_structureDev" }
+   ```
+
+   **これを忘れると繋がりません。** スプールの場所は安定版と開発版で別なので、
+   渡さないと安定版のほうを探しに行きます（`vw_bridge_status` の「探した場所」に
+   `min-nano_structure-mcp` しか出てこなければ、これが原因です）。
+
+### 使う
+
+1. Vectorworks で図面を開き、メニューの **「MCP ブリッジを開始…」** を実行します。
+   進捗ダイアログが出たら、その間だけ橋が架かっています。
+2. Claude に「図面のレイヤを見せて」などと頼みます。
+3. 終わったらダイアログの **［キャンセル］** を押します（Claude 側から
+   「ブリッジを止めて」と頼んでも止まります）。
+
+いま用意してある道具は次のとおりで、**どれも図面を読むだけ**です（作図も修正もしません）。
+
+| 道具 | 何を返すか |
+| --- | --- |
+| `vw_bridge_status` | ブリッジが動いているか（動いていなければ、どうすれば動くか） |
+| `vw_ping` | プラグインのビルドと、開いている図面のカレントレイヤ |
+| `vw_layers` | レイヤ一覧（名前・デザイン/シート・縮尺・中身の数） |
+| `vw_classes` | クラス名の一覧 |
+| `vw_layer_objects` | 指定したレイヤの中身（種別番号・名前・クラス・外接） |
+| `vw_object_counts` | 図面（または 1 レイヤ）の中身を種別番号ごとに数える |
+| `vw_stop_bridge` | ブリッジを止める |
+
+### 制限（承知のうえで使ってください）
+
+- **ブリッジを動かしている間、Vectorworks は操作できません。** 進捗ダイアログの中で待って
+  いる状態です（図面を人が編集することはできません。Claude からの読み取りは通ります）。
+  Vectorworks のプラグインは**メインスレッド以外から図面を触れない**ため、こういう形に
+  なっています。
+- **やり取りはこの PC の中だけで完結します。** 一時フォルダの
+  `min-nano_structure-mcp` に置いたファイルを介してつないでいるので、ネットワークは
+  使いません（ファイアウォールの許可も要りません）。置き場所は自動的に見つけるので、
+  設定は要りません。
+- **使えるのは、この PC で動いている Claude だけです。** ブラウザの Claude や
+  claude.ai/code のリモートセッション（クラウド上のコンテナで動くもの）は、
+  **別の計算機なのでこのファイルに触れません**。そちらへ図面の中身を伝えたいときは、
+  この PC の Claude に読ませた結果を貼ってください。
+- **何も来ないまま 30 分たつと自動的に止まります**（消し忘れて Vectorworks を握り続けない
+  ため）。
+- 種別番号（`vw_layer_objects` の `type`）は Vectorworks の内部の番号です。名前が分かって
+  いるものだけ `type_name` を添えていますが、多くは番号のままです。
+- **繋がらないときは、まず Claude に `vw_bridge_status` を実行させてください。**
+  ブリッジが動いていなければ、探した場所の一覧と対処が返ります。道具の一覧に
+  `vw_bridge_status` すら出てこない場合は、登録（上記 2）か Claude の再起動が
+  済んでいません。
+- **メニューを実行しているのに「動いていない」と返るとき**は、探した場所を見てください。
+  `/var/folders/…/T/…` が並んでいないなら、`vw-mcp-server.py` が古い版です（利用者ごとの
+  一時フォルダを探せない版で、Vectorworks が置いた橋を見つけられません）。プラグインを
+  入れ直すと直ります。急ぐときは、ターミナルで `getconf DARWIN_USER_TEMP_DIR` を実行して
+  出た場所を使い、設定ファイルの `env` へ
+  `"VW_MCP_SPOOL": "<その場所>min-nano_structure-mcp"` を足しても繋がります。
+- **場所を総当たりで探すことはしません。** 探すのは、Vectorworks 自身が一時フォルダを
+  決めるのに使うのと同じ場所だけです（利用者ごとの一時フォルダと、環境変数から来る場所）。
+  変わった置き方をしているときは `VW_MCP_SPOOL` で名指ししてください——曖昧に繋がるより、
+  はっきり繋がらないほうが原因を追えるためです。
 
 ---
 

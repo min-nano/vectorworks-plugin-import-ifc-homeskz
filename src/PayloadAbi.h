@@ -58,7 +58,8 @@
 //   1 … 取り込みコマンドと 2 つの PIO のリセットを載せた最初の形
 //   2 … 実機フィードバックの往復（M23）。同梱スクリプトの実行を殻から借り、取り込みは
 //       「次は更新を尋ねずに入れてよいか」を返すようになった
-#define VW_PAYLOAD_ABI_VERSION 2u
+//   3 … MCP ブリッジ（vw_payload_run_mcp_bridge）を足した
+#define VW_PAYLOAD_ABI_VERSION 3u
 
 // 本体側の export 指定。Windows は明示しないと DLL の外から見えない。
 #if defined(_WIN32)
@@ -126,6 +127,7 @@ extern "C"
 #define VW_PAYLOAD_SYM_INIT "vw_payload_init"
 #define VW_PAYLOAD_SYM_INFO "vw_payload_info"
 #define VW_PAYLOAD_SYM_IMPORT "vw_payload_run_import"
+#define VW_PAYLOAD_SYM_BRIDGE "vw_payload_run_mcp_bridge"
 #define VW_PAYLOAD_SYM_RECALC "vw_payload_recalculate"
 #define VW_PAYLOAD_SYM_SHUTDOWN "vw_payload_shutdown"
 
@@ -142,6 +144,9 @@ extern "C"
 	// 無いときだけなので、入れ替えはこの関数から戻ったあと、次の呼び出しの頭で起きる
 	// （src/PayloadSession.h）。
 	using VwPayloadRunImportFn = int (*)(int* outAutoUpdate);
+
+	// MCP ブリッジ 1 回。**止められるまで戻らない**（src/draw/McpBridge.h）。
+	using VwPayloadRunMcpBridgeFn = int (*)();
 	using VwPayloadRecalculateFn = int (*)(unsigned int, void*, int*);
 	using VwPayloadShutdownFn = void (*)();
 
