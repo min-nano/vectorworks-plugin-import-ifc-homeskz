@@ -13,6 +13,9 @@
 #include "draw/ObjectHandles.h"
 #include "draw/StructuralMember.h"
 
+// 取り消しを 1 段掛ける（VectorScript エンジン。DrawUtil.h の UndoOneStep）。
+#include "Interfaces/VectorWorks/Scripting/IVectorScriptEngine.h"
+
 #include "VWFC/VWObjects/VWClass.h"
 #include "VWFC/VWObjects/VWDocument.h"
 #include "VWFC/VWObjects/VWGroupObj.h"
@@ -572,15 +575,28 @@ namespace HomeskzIfcImport::draw
 		// 種別は**シートかどうか**の真偽で受ける——SDK の列挙で綴りが確かなのは
 		// `kLayerSheet` だけ（AllLayers が既に使っている）なので、デザイン側の綴りを
 		// 当てものにしない。
-		bool RemoveOneLayer(const std::string& name, bool wantSheet, std::size_t& remaining)
+		// 名前と**種別**が一致するレイヤ（デザイン／シート）。無ければ nil。
+		// **同じ名前の別種別を掴まない**ための関門で、消す側も残っているかを見る側も
+		// ここを通す（判定を 2 か所に書かない）。
+		MCObjectHandle LayerOfType(const std::string& name, bool wantSheet)
 		{
-			if (name.empty() || remaining <= 1)
-				return false; // 最後の 1 枚は残す（未確認の領域へ踏み込まない）
+			if (name.empty())
+				return nil;
 			MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
 			if (layer == nil || !VWLayerObj::IsLayerObject(layer))
-				return false;
+				return nil;
 			if ((VWLayerObj(layer).GetLayerType() == kLayerSheet) != wantSheet)
-				return false; // 同じ名前の別種別は消さない
+				return nil;
+			return layer;
+		}
+
+		bool RemoveOneLayer(const std::string& name, bool wantSheet, std::size_t& remaining)
+		{
+			if (remaining <= 1)
+				return false; // 最後の 1 枚は残す（未確認の領域へ踏み込まない）
+			MCObjectHandle layer = LayerOfType(name, wantSheet);
+			if (layer == nil)
+				return false;
 			gSDK->DeleteObject(layer, true /* useUndo: 上で開いたイベントへ登録される */);
 			--remaining;
 			return true;
@@ -630,6 +646,40 @@ namespace HomeskzIfcImport::draw
 			   "/" + std::to_string(designLayers.size()) + " 枚・シート " + std::to_string(sheets) +
 			   "/" + std::to_string(sheetLayers.size()) + " 枚）";
 		return scope.removed();
+	}
+
+	bool UndoOneStep()
+	{
+		// **VectorScript で走らせる**（DrawUtil.h「SDK の作法」）。文面は固定で、
+		// **人の入力も図面の値も混ぜない**——失敗するスクリプトはモーダルのエラー
+		// ダイアログを出し、無人で回る周をそこで止めてしまう（SDK リファレンス
+		// Findings「Undo」）。`CompileScript` は呼ばない（成功でもダイアログが出る）。
+		static const char* const kUndoScript = "PROCEDURE __MinNanoStructureUndo;\n"
+											   "BEGIN\n"
+											   "\tDoMenuTextByName('Undo', 0);\n"
+											   "END;\n"
+											   "Run(__MinNanoStructureUndo);\n";
+		const VCOMPtr<VectorWorks::Scripting::IVectorScriptEngine> engine(
+			VectorWorks::Scripting::IID_VectorScriptEngine);
+		if (!engine)
+			return false;
+		return engine->ExecuteScript(TXString(kUndoScript)) == kVCOMError_NoError;
+	}
+
+	bool AnyLayerRemains(const std::vector<std::string>& designLayers,
+						 const std::vector<std::string>& sheetLayers)
+	{
+		for (const std::string& name : sheetLayers)
+		{
+			if (LayerOfType(name, /*wantSheet*/ true) != nil)
+				return true;
+		}
+		for (const std::string& name : designLayers)
+		{
+			if (LayerOfType(name, /*wantSheet*/ false) != nil)
+				return true;
+		}
+		return false;
 	}
 
 	MCObjectHandle PrepareLayer(const std::string& layerName)

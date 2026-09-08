@@ -606,6 +606,58 @@ namespace HomeskzIfcImport::draw
 		// ここで名前だけ先に出す）。
 		std::string prepareDrawingForRound(const core::FeedbackSession& session);
 
+		// **開き直す前に「取り消し」を試す。** 取り込みは自分で undo イベントを開き、作った
+		// レイヤを登録している（draw/DrawUtil の ImportUndoScope）ので、**利用者に頼んで
+		// いた「取り消し」と同じもの**をここから起こせる（SDK リファレンス Findings「Undo」/
+		// issue #39。VectorScript 経由の `DoMenuTextByName('Undo', 0)` は実機で効くと確定
+		// した）。効けば開き直しが要らないだけでなく、**取り込み前から在ったレイヤ
+		// （テンプレートの「共通」等）へ描いた分まで戻る**——レイヤ削除では決して届かない
+		// 範囲で、実機で絵が二重になった原因そのものである。
+		//
+		// **押してよい場面を 2 つの条件で絞る**（どちらも満たすときだけ）:
+		//   * いま開いているのが**自分の作業ファイル**であること。利用者の図面では絶対に
+		//     押さない——取り消しスタックの上に載っているのは利用者自身の編集かもしれない。
+		//   * **前の周が作ったレイヤが実際に残っている**こと。＝上に載っているのは自分の
+		//     取り込みだ、という根拠になる。
+		//
+		// 効いたかは**読み戻して**確かめる（前の周のレイヤが 1 枚も無くなったか）。1 回の
+		// 取り込みが undo イベントを 1 つだけ積むとは限らないので、消えるまで数段掛け、
+		// それでも消えなければ諦めて開き直しへ回す（作業ファイルの取り消しスタックに
+		// 載っているのは自分の取り込みだけなので、数段戻しても利用者のものには届かない）。
+		bool undoPreviousRound(const core::FeedbackSession& session, std::string& note)
+		{
+			note.clear();
+			// 何段まで掛けるか。1 周ぶんを戻すのに要る段数は実機でしか分からないので、
+			// 「消えるまで」を上限つきで回す（上限に意味は無く、暴走を止めるためだけ）。
+			constexpr int kMaxUndoSteps = 8;
+
+			if (session.workPath.empty() || session.lastCreatedLayers.empty())
+				return false;
+			if (!SamePath(ActiveDocumentPath(), session.workPath))
+				return false; // 利用者が別の図面へ移っている。触らない
+			if (!draw::AnyLayerRemains(session.lastCreatedLayers, session.lastCreatedSheets))
+				return false; // 前の周の絵が無い＝取り消しスタックの上は自分のものではない
+
+			for (int step = 1; step <= kMaxUndoSteps; ++step)
+			{
+				if (!draw::UndoOneStep())
+				{
+					note =
+						"取り消しを掛けられませんでした（" + std::to_string(step - 1) + " 段まで）";
+					return false;
+				}
+				if (!draw::AnyLayerRemains(session.lastCreatedLayers, session.lastCreatedSheets))
+				{
+					note = "前の周の取り込みを取り消しました（" + std::to_string(step) +
+						   " 段）。取り込み前から在ったレイヤへ描いた分も戻っています";
+					return true;
+				}
+			}
+			note = "取り消しを " + std::to_string(kMaxUndoSteps) +
+				   " 段掛けても前の周のレイヤが残りました";
+			return false;
+		}
+
 		// 作業ファイルを開き直す。note には診断ログと PR コメントへ出す 1 行が入る。
 		// rebased は「基準を採り直した」ときにその理由（runTestRound が作る）。
 		RoundDocument openRoundDocument(core::FeedbackSession& session, const std::string& rebased,
@@ -653,8 +705,20 @@ namespace HomeskzIfcImport::draw
 				return RoundDocument::Ready;
 			}
 
+			// **まず取り消しを試す**（上の undoPreviousRound）。効けば図面はもう取り込み前へ
+			// 戻っているので、開き直しもレイヤ削除も要らない。
+			std::string undone;
+			if (undoPreviousRound(session, undone))
+			{
+				note = "準備: " + undone;
+				return RoundDocument::Ready;
+			}
+
 			// **2 周目以降: 前の周の絵が載った文書を捨て場所へ移してから閉じる。**
 			// 基準（作業ファイル）には前の周の絵が書き戻らない＝変更を破棄したのと同じ。
+			// 取り消しを試して駄目だったなら、その顛末も一緒に持っていく（次の周の読み手が
+			// 「なぜ開き直したのか」を追えるように）。
+			const std::string undoNote = undone.empty() ? std::string() : undone + "。";
 			std::string closed;
 			const std::string active = ActiveDocumentPath();
 			if (SamePath(active, session.workPath))
@@ -691,7 +755,8 @@ namespace HomeskzIfcImport::draw
 			const std::string opened = ActiveDocumentPath();
 			if (SamePath(opened, session.workPath))
 			{
-				note = "準備: 作業ファイルを開き直しました（" + session.workPath + "）。";
+				note = "準備: " + undoNote + "作業ファイルを開き直しました（" + session.workPath +
+					   "）。";
 				note += closed;
 				// **作業ファイルそのものに前の周の絵が焼き付いていることがある**（実機
 				// round 13。作業ファイルを用意できなかった周の絵が載ったまま基準として
@@ -708,7 +773,8 @@ namespace HomeskzIfcImport::draw
 			// 描く先はどこにも無い——描けば全要素 0 件の報告が出るだけで、直すべき場所を
 			// 指さない数字が PR に残る（実機 round 9）。**何が起きたかを証拠つきで残して
 			// 周ごと中止する。**
-			std::string why = "準備: 作業ファイルを開き直せなかったので、この周は走らせません";
+			std::string why = "準備: " + undoNote;
+			why += "作業ファイルを開き直せなかったので、この周は走らせません";
 			why += "でした（" + session.workPath + " / OpenDocumentPath=";
 			why += returned ? "true" : "false";
 			why += " / いまは " + (opened.empty() ? std::string("(取得できず)") : opened);

@@ -341,6 +341,29 @@ namespace HomeskzIfcImport::draw
 	std::size_t RemoveCreatedLayers(const std::vector<std::string>& designLayers,
 									const std::vector<std::string>& sheetLayers, std::string& note);
 
+	// **「取り消し」を 1 段掛ける。** 実機フィードバックの往復が、次の周の取り込みの前に
+	// 前の周の図を戻すのに使う。戻り値は「スクリプトを走らせられたか」だけで、**何が
+	// 取り消されたかは言わない**——効いたかどうかは呼ぶ側が図面を読み戻して確かめること
+	// （下記 AnyLayerRemains）。
+	//
+	// 【SDK の作法】ISDK に「メニューの取り消しを起こす」呼び出しは無い。**VectorScript
+	// エンジンに `DoMenuTextByName('Undo', 0)` を走らせる**のが唯一の道で、これは実機で
+	// 効くと確定している（SDK リファレンス Findings「Undo」/ issue #39）。守ること:
+	//   * **Python では走らせない**——`IPythonScriptEngine::ExecuteScript` から `vs.*` を
+	//     呼ぶと VectorWorks ごと落ちる（同 Findings）。
+	//   * **`CompileScript` を呼ばない**——`showDialogs=false` でも成功のダイアログが毎回
+	//     出て、無人の周が止まる（同 Findings）。成否は `ExecuteScript` の戻り値で足りる。
+	//   * **自分の undo イベントを開いたまま呼ばない**——取り消しの実行はそのイベントを
+	//     終わらせてしまう（同 Findings）。取り込みが始まる前に呼ぶこと。
+	//   * 取り消せるのは**取り消しスタックに載っているもの**だけ。このプラグインの取り込みは
+	//     自分でイベントを開いて作ったレイヤを登録しているので載る（ImportUndoScope）。
+	bool UndoOneStep();
+
+	// 指定した名前のレイヤが**1 枚でも**図面に残っているか（種別も見る。デザインはデザイン、
+	// シートはシート）。取り消しが効いたかを読み戻して確かめるために使う。
+	bool AnyLayerRemains(const std::vector<std::string>& designLayers,
+						 const std::vector<std::string>& sheetLayers);
+
 	// このインポートが新しく作ったレイヤを undo イベントへ登録する（デザイン／シートの
 	// どちらも）。イベントが開いていなければ何もしない。nil は無視。
 	void RecordCreatedLayer(MCObjectHandle layer);
