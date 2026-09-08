@@ -857,8 +857,12 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 **ただし取り込み前から在ったレイヤ（テンプレートのもの）へ描いた分は取り除けません。**
 そのレイヤは自分が作ったものではないので消せず、上に描いた分だけが残ります。PR コメントの
 末尾が**その周だけ**「取り消しで戻してください」と言うので、そこに従ってください。丸ごと
-戻す undo が使えるかは調査中です
-（[#31](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/31)）。プログラムから「取り消し」を掛ける道は
+戻す道は**3 つとも塞がっている**ことが確定しています——閉じた undo イベントへ Undo は掛け
+られず（[#23](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/23)）、
+閉じずに返しても VW がコマンド完了時に代わりに閉じてしまい
+（[#31](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/31)）、
+メニューの「取り消し」を名前で起動する API もありません
+（[#27](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/27)）。プログラムから「取り消し」を掛ける道は
 ISDK の undo 実行 API（[#23](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/23)）
 もメニューコマンドの起動（[#27](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/27)）
 も**存在しない**ことが確定しているので、レイヤを直接消す

@@ -633,8 +633,10 @@ dev ビルド（＝PR のビルド）は、**取り込みの結果を自分で P
    取り除いてから**描き直すので、この行は「取り込み前から在ったレイヤに描きました」に
    落ち着くのが正常である。**ただし取り除けるのは自分が作ったレイヤだけ**——テンプレートに
    もとから在るレイヤへ描いた分は残るので、そこが怪しいときは利用者に「取り消し」を
-   頼んでよい（丸ごと戻す undo が使えるかは調査中。SDK リファレンス
-   [issue #31](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/31)）。ここが「前の周の図が残ったまま重ねて描きました」なら
+   頼んでよい（**丸ごと戻す道は 3 つとも塞がっている**ことが確定している。SDK リファレンス
+   [issue #23](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/23) /
+   [#31](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/31) /
+   [#27](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/27)）。ここが「前の周の図が残ったまま重ねて描きました」なら
    **取り除きに失敗している**（診断ログの「準備:」の行に何枚消せたかが出る）——**絵は
    二重になっているので、絵の破綻をそのまま実装のせいにしない**。数字は重なっていても
    1 つも変わらないので、この 1 行が唯一の手掛かりである。判定は**1 周目に採った基準

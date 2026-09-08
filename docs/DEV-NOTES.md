@@ -777,13 +777,33 @@ Findings で未確認のまま残っている。シート（＝ビューポー�
 在ったレイヤへ描いた分は取り除けません」と言い、そうでない周だけ「取り消しは要りません」と
 言い切る。「たぶん大丈夫」を既定にしない。
 
-**丸ごと戻すには undo が要る。** `UndoAndRemove` は閉じたイベントに効かない（#23）が、
-**その「閉じている」を作っているのはこちらのコード**（`ImportUndoScope` の RAII）である。
-意図的に閉じずに返せば次の実行から戻せるかもしれない——この筋は #23 でも #27 でも調べて
-いないので
-[issue #31](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/31) を
-立てた。戻せるなら、周の形を「`IsCurrentlyBuildingAnUndoEvent()` で前の周のイベントの生存を
-確かめて `UndoAndRemove()`、駄目ならレイヤ削除へ落ちる」の二段構えへ作り替える。
+**丸ごと戻すには undo が要るが、その道は 3 つとも塞がっている。** 順に潰した:
+
+| 筋 | 結論 | 根拠 |
+| --- | --- | --- |
+| 閉じたイベントへ Undo を掛ける | できない | `UndoAndRemove` の対象は未クローズのイベントだけ（[#23](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/23)） |
+| メニューの「取り消し」を名前で起動する | できない | `DoMenuTextByName` 相当が SDK に無い（[#27](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/27)） |
+| **イベントを閉じずに返し、次の実行から戻す** | できない | VW がコマンド完了時に代わりに閉じる（[#31](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/31)） |
+
+3 つ目は「**その『閉じている』を作っているのはこちらのコード**（`ImportUndoScope` の RAII）
+なのだから、意図的に閉じずに返せばよいのでは」という筋で、#23 でも #27 でも調べていなかった
+ため #31 として起票した。答えは `GS_EndUndoEvent` 自身の説明文にあった:
+
+> The use of this procedure is not required; VectorWorks will automatically end the event
+> **when an external is completed.**
+
+`EndUndoEvent()` を呼ぶこと自体が必須ではなく、**呼ばなくても VW が「外部（＝そのコマンドの
+実行）が完了した時点」で自動的に閉じる**。だから「呼ばずに返す」を選んでもイベントは残らず、
+次の実行から見れば #23 と同じ「もう閉じたイベント」になる。
+
+**同じ 1 文を、このリポジトリは以前から引用していた**——冒頭の「`GS_EndUndoEvent` の説明に
+ある『外部の終了時に自動で閉じる』は『自動で開く』ではない」がそれである。当時は「VW が
+勝手にイベントを開くわけではない」という含意だけを読んでいて、「呼ばなくても勝手に閉じる」
+という**もう半分の含意**は読み落としていた。**根拠として引いた文は、引いた目的の外側まで
+読む**。
+
+したがって「前の周の図を丸ごと戻す」はプラグインには担えない。レイヤ削除（部分復元）で
+できるところまでやり、**残る分は利用者に伝える**という運用に落ち着く。
 
 #### 「打ち切った調査」は、書いてあることについての規則である
 
