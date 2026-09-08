@@ -669,17 +669,13 @@ namespace HomeskzIfcImport::draw
 	bool AnyLayerRemains(const std::vector<std::string>& designLayers,
 						 const std::vector<std::string>& sheetLayers)
 	{
-		for (const std::string& name : sheetLayers)
+		const auto anyRemains = [](const std::vector<std::string>& names, bool wantSheet)
 		{
-			if (LayerOfType(name, /*wantSheet*/ true) != nil)
-				return true;
-		}
-		for (const std::string& name : designLayers)
-		{
-			if (LayerOfType(name, /*wantSheet*/ false) != nil)
-				return true;
-		}
-		return false;
+			return std::ranges::any_of(names, [wantSheet](const std::string& name)
+									   { return LayerOfType(name, wantSheet) != nil; });
+		};
+		return anyRemains(sheetLayers, /*wantSheet*/ true) ||
+			   anyRemains(designLayers, /*wantSheet*/ false);
 	}
 
 	MCObjectHandle PrepareLayer(const std::string& layerName)
