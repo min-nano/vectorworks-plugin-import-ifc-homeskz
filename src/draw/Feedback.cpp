@@ -562,11 +562,18 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// ディスク上の大きさ（読めなければ 0）。複製が空でないことの証拠に使う。
+		//
+		// **`std::filesystem::file_size` は使わない。** Windows の clang-tidy が MSVC の
+		// `<filesystem>` の内部（`_BITMASK_OPS` の `__std_fs_stats_flags`）まで解析へ
+		// 引き込まれ、こちらのコードとは無関係な誤検知で落ちる（実機ではなく CI の
+		// tidy-windows で発生）。開いて末尾まで測るだけなら標準の入出力で足りる。
 		std::uintmax_t FileSizeOf(const std::string& path)
 		{
-			std::error_code ec;
-			const std::uintmax_t size = std::filesystem::file_size(path, ec);
-			return ec ? 0 : size;
+			std::ifstream in(path, std::ios::binary | std::ios::ate);
+			if (!in)
+				return 0;
+			const std::streampos size = in.tellg();
+			return size < 0 ? 0 : static_cast<std::uintmax_t>(size);
 		}
 
 		// 前の周でこの仕組みが開いた図面を、**保存してから**閉じる。閉じられたら true。
