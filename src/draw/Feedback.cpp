@@ -553,6 +553,33 @@ namespace HomeskzIfcImport::draw
 			return (dir / name).string();
 		}
 
+		// そのパスに何か在るか。**`std::filesystem` で見に行かない**——`file_size` の
+		// stat が MSVC の clang-analyzer に偽陽性を出した前例があるので、開けるかどうかで
+		// 判じる（在るのに開けないなら、どのみち上書きも当てにできない）。
+		bool PathExists(const std::string& path)
+		{
+			if (path.empty())
+				return false;
+			const std::ifstream in(path, std::ios::binary);
+			return in.good();
+		}
+
+		// **まだ無いパスを選ぶ。** 既にあるファイルへ別名保存できなかった実測がある
+		// （実機 round 12。round 8 は同じ呼び出しが新規のパスで通っている）ので、
+		// 上書きが効くことに賭けない。名前が尽きたら空を返す。
+		std::string FreshTempPath(const std::string& stem)
+		{
+			for (int i = 1; i <= 100; ++i)
+			{
+				const std::string path = TempPath(stem + "-" + std::to_string(i) + ".vwx");
+				if (path.empty())
+					return "";
+				if (!PathExists(path))
+					return path;
+			}
+			return "";
+		}
+
 		// アクティブな図面を指定のパスへ保存する（＝別名保存）。成功したら true。
 		bool SaveActiveDocumentAs(const std::string& path)
 		{
@@ -585,11 +612,17 @@ namespace HomeskzIfcImport::draw
 				// 元のファイルには何も書き戻らない（別名保存なので、以後の変更は作業
 				// ファイルの側に付く）。
 				const std::string prefix = "準備: " + rebased;
-				const std::string work = TempPath("homeskz-work.vwx");
+				const std::string work = FreshTempPath("homeskz-work");
 				if (!SaveActiveDocumentAs(work))
 				{
+					// **証拠を残す**——ここが空振りすると、以後の周はぜんぶレイヤ削除の
+					// 控えで走る（実機 round 12）。何を保存しようとして駄目だったのかが
+					// 分からないと、次の周も同じところで止まる。
+					const std::string openPath = ActiveDocumentPath();
 					note = prefix + "作業ファイルを用意できませんでした（" +
 						   (work.empty() ? std::string("一時ディレクトリが引けません") : work) +
+						   " / いまの図面は " +
+						   (openPath.empty() ? std::string("(取得できず)") : openPath) +
 						   "）。いま開いている図面へ描きます";
 					return RoundDocument::Fallback;
 				}
@@ -606,7 +639,7 @@ namespace HomeskzIfcImport::draw
 			if (SamePath(active, session.workPath))
 			{
 				const std::string parked =
-					TempPath("homeskz-round-" + std::to_string(session.round) + ".vwx");
+					FreshTempPath("homeskz-round-" + std::to_string(session.round));
 				if (!SaveActiveDocumentAs(parked))
 				{
 					// 退避できないなら閉じない（未保存の文書は閉じられない。実機確認済み）。
