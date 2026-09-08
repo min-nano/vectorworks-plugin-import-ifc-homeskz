@@ -96,9 +96,7 @@ namespace HomeskzIfcImport::core
 		out << "tally=" << sanitize(session.lastTally) << "\n";
 		out << "posted=" << sanitize(session.lastPostedAt) << "\n";
 		out << "loop=" << boolText(session.loop) << "\n";
-		out << "template=" << sanitize(session.templatePath) << "\n";
-		out << "rounddoc=" << sanitize(session.roundDocumentPath) << "\n";
-		out << "templateasked=" << boolText(session.templateAsked) << "\n";
+		out << "work=" << sanitize(session.workPath) << "\n";
 		// 1 周目に採った基準。**レイヤ 1 枚につき 1 行**にしてあるのは、名前へ入れて
 		// よい文字を区切り記号で縛らないため（"," も "\t" もレイヤ名に使える）。
 		out << "baseline=" << boolText(session.baselineRecorded) << "\n";
@@ -159,12 +157,8 @@ namespace HomeskzIfcImport::core
 				session.lastPostedAt = value;
 			else if (key == "loop")
 				session.loop = parseBool(value, session.loop);
-			else if (key == "template")
-				session.templatePath = value;
-			else if (key == "rounddoc")
-				session.roundDocumentPath = value;
-			else if (key == "templateasked")
-				session.templateAsked = parseBool(value, session.templateAsked);
+			else if (key == "work")
+				session.workPath = value;
 			else if (key == "baseline")
 				session.baselineRecorded = parseBool(value, session.baselineRecorded);
 			else if (key == "baseline.layer")
