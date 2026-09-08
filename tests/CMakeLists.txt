@@ -160,6 +160,22 @@ vw_add_test(CoreTraceTests CoreTraceTests.cpp CORE)
 target_compile_definitions(CoreTraceTests
 						   PRIVATE "HOMESKZ_TRACE_TEST_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\"")
 
+# 最小 JSON（src/core/Json）: 書き出し（整数の見え方・逃がし・挿入順）と読み取り
+# （往復・数・\u とサロゲート対）、そして**壊れた入力を受け付けない・深い入れ子で
+# 再帰しない**こと。MCP ブリッジが外から来たテキストを読む土台なので、後者が本題。
+# SDK 非依存・フィクスチャ不要。
+vw_add_test(CoreJsonTests CoreJsonTests.cpp CORE)
+
+# MCP ブリッジのスプール（src/core/Bridge）: 要求を「送った順（＝名前の昇順）に拾い、
+# 拾ったら消し、応答を原子的に書く」という受け渡しの作法と、外から来たものへの安全弁
+# （id の綴り検査＝スプールの外へ書かせない、壊れた要求を 1 度だけ報告する、残骸の掃除）。
+# 何を返す道具があるか（draw/McpBridge）は SDK 側なので、ここには入らない。
+vw_add_test(CoreBridgeTests CoreBridgeTests.cpp CORE)
+# 書き先はビルドツリー（CoreTraceTests と同じ理由: TMPDIR 由来のパスがファイル操作へ
+# 届くと CodeQL が cpp/path-injection として報告する）。
+target_compile_definitions(CoreBridgeTests
+						   PRIVATE "HOMESKZ_BRIDGE_TEST_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\"")
+
 # Minimal STEP reader (src/parse/Step): tokeniser + entity graph exercised on
 # small synthetic STEP snippets (references, numbers, strings, enums, nested
 # lists, typed values, referrers/resolve, determinism). SDK-free.
@@ -422,6 +438,19 @@ set_tests_properties(ParseFireBraceTests PROPERTIES COST 8)
 set_tests_properties(ParseAnchorBoltTests PROPERTIES COST 8)
 set_tests_properties(UpdaterRobustnessTests PROPERTIES COST 6)
 set_tests_properties(ParseFloorTests PROPERTIES COST 6)
+
+# MCP サーバ（scripts/mcp/vw-mcp-server.py）の回帰テスト。**受け渡しの Claude 側**を、
+# プラグインと同じ作法でスプールへ応える代役に対して動かす（Vectorworks 側は SDK が要る
+# ので CI では動かせない。tests/vw-mcp-server.test.py 冒頭）。python3 だけで走り、
+# ネットワークも SDK も要らない。
+find_program(PYTHON3_PROGRAM NAMES python3 python)
+if(PYTHON3_PROGRAM)
+	add_test(NAME McpServerTests COMMAND "${PYTHON3_PROGRAM}"
+										 "${CMAKE_CURRENT_SOURCE_DIR}/vw-mcp-server.test.py")
+elseif(VW_REQUIRE_SCRIPT_TESTS)
+	message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'python3' was not found: the MCP "
+						"server tests (vw-mcp-server.test.py) cannot run.")
+endif()
 
 # Back-end tests for the bundled updater scripts. Both SOURCE (dot-source) their
 # script and drive its q-stable / q-dev / do-install functions with the network

@@ -134,10 +134,12 @@ endif()
 if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 	add_library(
 		MinNanoStructureCore STATIC
+		src/core/Bridge.cpp
 		src/core/Document.cpp
 		src/core/FeedbackSession.cpp
 		src/core/Geometry.cpp
 		src/core/ImportOptions.cpp
+		src/core/Json.cpp
 		src/core/Layout.cpp
 		src/core/Progress.cpp
 		src/core/Region.cpp
@@ -328,6 +330,8 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtMenu.cpp
 		src/Extensions/ExtUpdateMenu.h
 		src/Extensions/ExtUpdateMenu.cpp
+		src/Extensions/ExtMcpMenu.h
+		src/Extensions/ExtMcpMenu.cpp
 		src/Extensions/ExtColumnMark.h
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.h
@@ -390,6 +394,7 @@ if(VW_BUILD_PLUGIN)
 		src/PayloadSession.cpp
 		src/Extensions/ExtMenu.cpp
 		src/Extensions/ExtUpdateMenu.cpp
+		src/Extensions/ExtMcpMenu.cpp
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.cpp
 		src/Extensions/ExtFeedbackPalette.cpp
@@ -407,6 +412,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/ImportCommand.cpp
 		src/draw/Feedback.cpp
 		src/draw/HostServices.cpp
+		src/draw/McpBridge.cpp
 		src/draw/ColumnMarkPio.cpp
 		src/draw/ShearWallPio.cpp
 		src/draw/DrawUtil.cpp

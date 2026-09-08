@@ -25,7 +25,7 @@ Vectorworks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb    … 起�
                           本体 <name>.vwpayload          … いつでも読み直せる
 ```
 
-**殻**に入るのは「Vectorworks に番地を握られるもの」だけ——メニュー 2 つと PIO 2 つの*登録*、
+**殻**に入るのは「Vectorworks に番地を握られるもの」だけ——メニュー 3 つと PIO 2 つの*登録*、
 自動アップデート、そして本体を読み込む仕掛け（`src/PayloadHost.*` / `src/PayloadSession.*`）。
 **本体**に `core/` `parse/` `draw/` のすべてが入ります。境界は C の ABI
 （`src/PayloadAbi.h`）1 枚きりです。
@@ -57,7 +57,8 @@ src/
                             スクリプト・尋ねないアップデート）を結び、パレットの表示を行う
   payload/
     PayloadMain.cpp           本体のエントリポイント。GS_InitializeVCOM を自分で呼び、
-                              取り込みと PIO のリセットを中の実装へ取り次ぐ
+                              取り込み・MCP ブリッジ・PIO のリセットを中の実装へ
+                              取り次ぐ
   Extensions/               **殻**に残る「登録」だけ（実処理は draw/ 側）
     ExtMenu.{h,cpp}           「IFC (ホームズ君) 取り込み…」メニューコマンドの登録と、
                               本体の draw::runImportCommand への取り次ぎ。実行の頭で
@@ -65,6 +66,9 @@ src/
     ExtUpdateMenu.{h,cpp}     「アップデータを確認 (みんなの構造設計支援)」メニュー
                               コマンドの登録と実行（**殻に残る唯一の実処理**である
                               自動アップデートを呼ぶ）
+    ExtMcpMenu.{h,cpp}        「MCP ブリッジを開始…」メニューコマンドの登録と、
+                              本体の draw::runMcpBridge への取り次ぎ（開発・デバッグ用。
+                              下記「MCP ブリッジ」）
     ExtColumnMark.{h,cpp}     柱・小屋束の記号 PIO の登録（パラメータ定義・UUID）と、
                               本体の draw::recalculateColumnMark への取り次ぎ
     ExtShearWall.{h,cpp}      耐力壁 PIO の同上（→ draw::recalculateShearWall）
@@ -83,6 +87,8 @@ src/
     UnionFind.h               ペア述語による連結成分（立上り・大引・地中梁の統合が共有）
     Progress.{h,cpp}          進捗の報告先・文言整形・バー配分（実測の重み）
     Trace.{h,cpp}             診断ログ（フェーズ単位・毎行フラッシュ・本文はメモリにも控える）
+    Json.{h,cpp}              最小 JSON（書き出し・読み取り。MCP ブリッジが使う唯一の器）
+    Bridge.{h,cpp}            MCP ブリッジの受け渡し（要求／応答の形とスプールの作法）
   parse/                    Phase 1: IFC 解析（SDK 非依存）
     Step.{h,cpp}              最小 STEP リーダ（トークナイザ＋エンティティグラフ）
     Loader.{h,cpp}            ファイル読み込み（テキスト → STEP グラフ）
@@ -112,7 +118,10 @@ src/
                               Undo スコープの共通ヘルパー
     StructuralMember.{h,cpp}  構造材ツール 1 本の生成・設定（横架材／柱で共有）
     ObjectHandles.h           「命令インデックス → 描いたオブジェクトのハンドル」の対応表
+    McpBridge.{h,cpp}         MCP ブリッジの本体（ループと道具の表。**道具を足すときに
+                              触るのはこの表 1 行**）
     ProgressDialog.{h,cpp}    core::ProgressReporter を VW の進捗ダイアログへ橋渡し
+                              （加えて、終わりの見えない待ちで息をする keepAlive）
     ResultDialog.{h,cpp}      完了・エラーのダイアログ（短い本文＋折り畳んだ診断ログ欄）
     SettingsDialog.{h,cpp}    取り込み設定ダイアログ（配置するシンボルを名前と絵で選ぶ）
     Feedback.{h,cpp}          実機フィードバックの往復（取り込みの前に送るか決め、
@@ -128,6 +137,9 @@ src/
   BuildConfig.h             stable / dev の識別切り替えスイッチ（VW_DEV_BUILD）
   PluginPrefix.h            共有プレフィックスヘッダ（SDK を取り込む）
   Module-Info.plist.in      バンドルの Info.plist テンプレート（macOS 専用）
+scripts/
+  mcp/vw-mcp-server.py      MCP ブリッジの Claude 側（依存の無い Python。配布 zip へ
+                            同梱され、インストール先へ一緒に置かれる）
 tests/                      無 SDK の単体テスト（詳細は tests/README.md）
   TestFramework.h           依存ゼロの極小テストハーネス
   Fixtures.h / RoofSample.h 共有するフィクスチャ読み込み・近似比較・試験用屋根面
