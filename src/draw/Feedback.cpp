@@ -480,7 +480,13 @@ namespace HomeskzIfcImport::draw
 				RemoveCreatedLayers(session.lastCreatedLayers, session.lastCreatedSheets, note);
 			if (removed == 0 && note.empty())
 				return "準備: 前の周が作ったレイヤは 1 枚も残っていませんでした（図面はそのまま）";
-			return note;
+			// **これは部分的な復元でしかない。** 取り込み前から在ったレイヤ（テンプレートの
+			// もの）へ描いた分は、そのレイヤが自分の作ったものではないので取り除けない
+			// ——上に描いた分だけが残る。丸ごと戻すには undo が要るが、`UndoAndRemove` は
+			// 閉じたイベントに効かない（SDK リファレンス #23）。閉じずに返せば次の実行から
+			// 戻せるかは調査中（同 #31）。ここを読む人が「戻り切った」と思わないよう、
+			// 1 行で言い切っておく。
+			return note + "。取り込み前から在ったレイヤへ描いた分は取り除けません";
 		}
 
 		core::FeedbackSession loadFeedbackSession(const std::string& branch)

@@ -385,11 +385,26 @@ TEST(feedback_comment_asks_for_one_more_run_after_the_fix)
 	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
 	CHECK(contains(body, "「実機テストを実行…」をもう一度実行してください"));
 	CHECK(contains(body, "ファイル選択も設定ダイアログも確認も再起動も要りません"));
-	// **図面を戻すのも頼まない**（M25）。前の周が作ったレイヤはプラグインが自分で
-	// 取り除いてから描き直すので、人にできることはコマンドを 1 回押すことだけである
-	// ——頼みごとが 1 つ増えるたびに「実行して放っておく」から遠ざかる。
+	// **取り消しを頼むかどうかは実測で決める**（M25）。前の周が作ったレイヤはプラグインが
+	// 自分で取り除くが、**取り込み前から在ったレイヤへ描いた分は取り除けない**（そのレイヤは
+	// 自分が作ったものではないので消せない）。sampleCounts は undoPartial=false なので、
+	// この周は「戻す必要もありません」と言い切ってよい。
 	CHECK(contains(body, "「取り消し」で戻す必要もありません"));
-	CHECK(!contains(body, "「取り消し」で取り込み前へ戻してから"));
+	CHECK(!contains(body, "取り除けません"));
+}
+
+TEST(feedback_comment_asks_for_undo_only_when_the_round_touched_existing_layers)
+{
+	// **取り込み前から在ったレイヤへ描いた周だけ**「取り消し」を頼む。プラグインが
+	// 取り除けるのは自分が作ったレイヤだけで、テンプレートのレイヤへ描いた分は残る
+	// ——ここを黙ると「戻す必要は無い」と読んだ人の図面に前の周が積み上がる。
+	const FeedbackRound round = sampleRound();
+	DrawCounts counts = sampleCounts();
+	counts.undoPartial = true;
+	counts.existingLayers = {"共通"};
+	const std::string body = formatFeedbackComment(round, sampleDocument(), counts);
+	CHECK(contains(body, "取り除けません"));
+	CHECK(!contains(body, "「取り消し」で戻す必要もありません"));
 }
 
 TEST(feedback_comment_tells_how_the_automatic_loop_runs_and_stops)
