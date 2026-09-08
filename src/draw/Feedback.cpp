@@ -48,6 +48,7 @@
 #include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
 
 #include <chrono>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -742,11 +743,34 @@ namespace HomeskzIfcImport::draw
 
 		// **毎周開き直す図面（テンプレート）を選ばせる。** 選ばなければ空のまま
 		// （＝従来どおり、いま開いている図面へ描いて前の周が作ったレイヤだけを取り除く）。
+		// **図面のファイルか。** ここを検査しないと、取り込む IFC のような別のファイルが
+		// テンプレートとして記憶され、毎周「開けませんでした」になる（実機 round 6 で
+		// 実際に IFC が選ばれた。docs/DEV-NOTES.md M25）。
+		bool IsDrawingPath(const std::string& path)
+		{
+			std::string extension = std::filesystem::path(path).extension().string();
+			for (char& ch : extension)
+				ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+			return extension == ".vwx" || extension == ".sta";
+		}
+
 		bool chooseRoundTemplate(std::string& outPath)
 		{
-			return chooseFile("毎周ここから開き直す図面を選択（キャンセル＝いまの図面に描く）",
-							  "vwx sta", "Vectorworks の図面・テンプレート (*.vwx, *.sta)",
-							  outPath);
+			if (!chooseFile("毎周ここから開き直す図面を選択（キャンセル＝いまの図面に描く）",
+							{"vwx", "sta"}, "Vectorworks の図面・テンプレート (*.vwx, *.sta)",
+							outPath))
+				return false;
+			if (IsDrawingPath(outPath))
+				return true;
+			// **選び違いはその場で言う。** 取り込みが始まる前なので、ここで言えば選び直せる
+			// （終わってから「開けませんでした」と言われても、その 1 分は取り返せない）。
+			gSDK->AlertInform("図面のファイルではありません。",
+							  "毎周開き直すのは Vectorworks の図面（.vwx）か"
+							  "テンプレート（.sta）です。\n"
+							  "（今回はいま開いている図面へ描きます）",
+							  false);
+			outPath.clear();
+			return false;
 		}
 
 		core::FeedbackSession loadFeedbackSession(const std::string& branch)
@@ -956,6 +980,13 @@ namespace HomeskzIfcImport::draw
 		std::string ifcPath = session.ifcPath;
 		std::string templatePath = session.templatePath;
 		bool templateAsked = session.templateAsked;
+		// **覚えていたものが図面でなければ忘れる。** 古い版が別のファイル（IFC など）を
+		// 記憶していても、次に人がメニューを押したときに選び直せる。
+		if (!templatePath.empty() && !IsDrawingPath(templatePath))
+		{
+			templatePath.clear();
+			templateAsked = false;
+		}
 		core::ImportOptions options = session.options;
 		bool settingsShown = true;
 		std::string settingsNote;

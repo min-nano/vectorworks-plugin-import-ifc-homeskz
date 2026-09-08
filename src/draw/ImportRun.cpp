@@ -199,10 +199,10 @@ namespace HomeskzIfcImport::draw
 	// operator const char*()（UTF-8）で std::string へ写す。
 	bool chooseIfcFile(std::string& outPath)
 	{
-		return chooseFile("ホームズ君IFCファイルを選択", "ifc", "IFC ファイル (*.ifc)", outPath);
+		return chooseFile("ホームズ君IFCファイルを選択", {"ifc"}, "IFC ファイル (*.ifc)", outPath);
 	}
 
-	bool chooseFile(const std::string& title, const std::string& extension,
+	bool chooseFile(const std::string& title, const std::vector<std::string>& extensions,
 					const std::string& extensionLabel, std::string& outPath)
 	{
 		// IFileChooserDialogPtr は VCOMPtr<IFileChooserDialog> の SDK 標準 typedef。
@@ -215,7 +215,9 @@ namespace HomeskzIfcImport::draw
 
 		dialog->SetTitle(TXString(title.c_str()));
 		// 拡張子フィルタと、念のため全ファイル。存在チェックも有効化する。
-		dialog->AddFilter(TXString(extension.c_str()), TXString(extensionLabel.c_str()));
+		// **1 拡張子につき 1 回呼ぶ**（まとめて渡すと効かない。draw/ImportRun.h）。
+		for (const std::string& extension : extensions)
+			dialog->AddFilter(TXString(extension.c_str()), TXString(extensionLabel.c_str()));
 		dialog->AddFilterAllFiles();
 		dialog->SetCheckFileExist(true);
 

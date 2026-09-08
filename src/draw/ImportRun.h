@@ -32,6 +32,7 @@
 #include "parse/Summary.h"
 
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
@@ -58,7 +59,10 @@ namespace HomeskzIfcImport::draw
 	// **ダイアログの作法を 2 か所に書かないため**に公開してある——実機テストの周が「毎周
 	// 開き直す図面」を選ばせるのに使う（draw/Feedback）。extension は "ifc" のように点を
 	// 含めない綴りで、複数なら空白区切り。
-	bool chooseFile(const std::string& title, const std::string& extension,
+	// extensions は拡張子の一覧（点は含めない）。**1 つの文字列に空白区切りで複数を
+	// 詰めない**——SDK の AddFilter は 1 回につき 1 拡張子で、まとめて渡すとフィルタが
+	// 効かず何でも選べてしまう（実機 round 6 で IFC がテンプレートとして選ばれた）。
+	bool chooseFile(const std::string& title, const std::vector<std::string>& extensions,
 					const std::string& extensionLabel, std::string& outPath);
 
 	// 動かしているビルドの素性（診断ログの見出しと、往復の記憶の突き合わせに使う）。
