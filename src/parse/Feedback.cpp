@@ -376,6 +376,11 @@ namespace HomeskzIfcImport::parse
 		// 数なので、戻したかどうかで 1 つも変わらない**。読む側（Claude）が「絵が壊れて
 		// いるのは実装のせいか、戻し忘れか」を切り分けられるよう、1 行を必ず載せる。
 		out << "\n図面の状態: " << restoredStateLine(round, counts) << "\n";
+		// **取り除きが効いたかを、図面の状態のすぐ隣に置く。** 診断ログにも同じ行があるが、
+		// ログは上限で切り詰められるので、そこだけを頼りにすると読めない周が出る
+		// （実機 round 2 で実際に落ちた）。
+		if (!round.preparation.empty())
+			out << clean(round.preparation) << "\n";
 
 		// 前の周からの差分。1 周目（previousTally が空）では節ごと出さない。
 		const std::string diff = formatTallyDiff(round.previousTally, tally);

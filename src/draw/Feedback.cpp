@@ -454,7 +454,8 @@ namespace HomeskzIfcImport::draw
 			unsigned long long bytes = 0;
 			double seconds = 0.0;
 			std::string startedAt;
-			std::string log; // 診断ログ全文
+			std::string log;		 // 診断ログ全文
+			std::string preparation; // 取り込みの前に図面へ何をしたか（1 行）
 		};
 
 		// **周と周のあいだに図面を取り込み前へ戻す。** 戻り値は診断ログへ書く 1 行。
@@ -601,6 +602,7 @@ namespace HomeskzIfcImport::draw
 			// 戻っているかを引き比べる（parse/Feedback の restoredStateLine）。
 			round.baselineKnown = session.baselineRecorded;
 			round.baselineLayers = session.baselineLayers;
+			round.preparation = input.preparation;
 			round.anonymize = session.anonymize;
 
 			const std::string commentBody =
@@ -721,8 +723,12 @@ namespace HomeskzIfcImport::draw
 		plan.session.ifcPath = ifcPath;
 		plan.session.options = options;
 
-		const ImportRound round = runImportRound(ifcPath, options, settingsShown, settingsNote,
-												 prepareDrawingForRound(plan.session));
+		// **取り除きは 1 回だけ呼び、その説明を 2 か所へ配る**——診断ログ（prologue）と
+		// PR コメント（FeedbackInput::preparation）。ログは上限で切り詰められるので、
+		// コメント側にも置かないと読めない周が出る（実機 round 2 で実際に落ちた）。
+		const std::string preparation = prepareDrawingForRound(plan.session);
+		const ImportRound round =
+			runImportRound(ifcPath, options, settingsShown, settingsNote, preparation);
 		if (round.failed)
 		{
 			// 送るべき内訳がそもそも無い。理由はいつもの結果ダイアログで見せる。
@@ -740,6 +746,7 @@ namespace HomeskzIfcImport::draw
 		input.seconds = round.seconds;
 		input.startedAt = round.startedAt;
 		input.log = core::trace::text();
+		input.preparation = preparation;
 
 		std::string postError;
 		if (postFeedbackRound(plan, input, postError))

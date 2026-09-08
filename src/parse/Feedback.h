@@ -62,6 +62,13 @@ namespace HomeskzIfcImport::parse
 		bool baselineKnown = false;
 		std::vector<std::string> baselineLayers;
 
+		// **取り込みの前に図面へ何をしたか**（draw/Feedback の prepareDrawingForRound が
+		// 返す 1 行。空なら出さない）。診断ログにも同じ行が入るが、**ログは上限で切り詰め
+		// られるので、そこだけを頼りにしない**——前の周の取り除きが効いたかは「図面の
+		// 状態」と並べて読みたい一等地の情報である（実機 round 2 で、この行がログの省略部分
+		// へ落ちて読めなかった）。
+		std::string preparation;
+
 		bool anonymize = true; // 案件が分かるものを伏せるか
 	};
 

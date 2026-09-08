@@ -393,6 +393,21 @@ TEST(feedback_comment_asks_for_one_more_run_after_the_fix)
 	CHECK(!contains(body, "取り除けません"));
 }
 
+TEST(feedback_comment_shows_what_the_round_did_to_the_drawing_before_importing)
+{
+	// **取り除きが効いたかは「図面の状態」の隣に置く。** 同じ 1 行は診断ログにも入るが、
+	// ログは上限で切り詰められるので、そこだけを頼りにすると読めない周が出る
+	// （実機 round 2 でこの行が省略部分へ落ちて読めなかった）。
+	FeedbackRound round = sampleRound();
+	round.preparation =
+		"準備: 前の周が作ったレイヤを取り除きました（デザイン 5/5 枚・シート 3/3 枚）";
+	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+	CHECK(contains(body, "準備: 前の周が作ったレイヤを取り除きました"));
+	// 空なら 1 行も増やさない（1 周目や古い版の記憶）。
+	round.preparation.clear();
+	CHECK(!contains(formatFeedbackComment(round, sampleDocument(), sampleCounts()), "準備:"));
+}
+
 TEST(feedback_comment_asks_for_undo_only_when_the_round_touched_existing_layers)
 {
 	// **取り込み前から在ったレイヤへ描いた周だけ**「取り消し」を頼む。プラグインが
