@@ -49,6 +49,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -522,6 +523,52 @@ namespace HomeskzIfcImport::draw
 			return 0;
 		}
 
+		// いまアクティブな図面のパス（無題・取得不能なら空）。**開けたかどうかは
+		// `OpenDocumentPath` の戻り値ではなくこれで判定する**（読み戻して確かめる）。
+		std::string ActiveDocumentPath()
+		{
+			VectorWorks::Filing::IFileIdentifierPtr fileID;
+			bool saved = false;
+			if (!gSDK->GetActiveDocument(&fileID, saved) || !fileID)
+				return "";
+			TXString path;
+			if (fileID->GetFileFullPath(path) != kVCOMError_NoError)
+				return "";
+			return static_cast<const char*>(path);
+		}
+
+		// 同じファイルを指しているか。**大文字小文字や区切りの差で外さない**よう
+		// std::filesystem に正規化させ、それが効かない場面（無題など）は素の比較に落とす。
+		bool SamePath(const std::string& left, const std::string& right)
+		{
+			if (left.empty() || right.empty())
+				return false;
+			if (left == right)
+				return true;
+			std::error_code ec;
+			return std::filesystem::equivalent(std::filesystem::path(left),
+											   std::filesystem::path(right), ec) &&
+				   !ec;
+		}
+
+		// 開いている図面の数。**無題の図面はパスで見分けられない**ので、開けたかどうかは
+		// 最後にこの数の増減でも見る（実機 round 5 で `OpenDocumentPath` が false を返した
+		// のに図面は開いていた、という形になった。docs/DEV-NOTES.md M25）。
+		std::size_t OpenFileCount()
+		{
+			VectorWorks::TVWArray_OpenFileInformation files;
+			gSDK->GetOpenFilesList(files);
+			return static_cast<std::size_t>(files.GetSize());
+		}
+
+		// ディスク上の大きさ（読めなければ 0）。複製が空でないことの証拠に使う。
+		std::uintmax_t FileSizeOf(const std::string& path)
+		{
+			std::error_code ec;
+			const std::uintmax_t size = std::filesystem::file_size(path, ec);
+			return ec ? 0 : size;
+		}
+
 		// 前の周でこの仕組みが開いた図面を、**保存してから**閉じる。閉じられたら true。
 		//
 		// **保存してから閉じるのは、無人の周を止めないため。** `CloseDocument` には
@@ -561,8 +608,14 @@ namespace HomeskzIfcImport::draw
 			const std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
 			if (ec)
 				return "";
+			// **拡張子は元のものを引き継ぐ。** テンプレート（.sta）の中身を .vwx という名前で
+			// 置くと、VectorWorks が種別で拒んで開けない（実機 round 5 で
+			// `OpenDocumentPath` が false を返した。docs/DEV-NOTES.md M25）。
+			std::string extension = std::filesystem::path(templatePath).extension().string();
+			if (extension.empty())
+				extension = ".vwx";
 			const std::filesystem::path copy =
-				dir / ("homeskz-round-" + std::to_string(round) + ".vwx");
+				dir / ("homeskz-round-" + std::to_string(round) + extension);
 			const VectorWorks::Filing::IFileIdentifierPtr source = FileIdFor(templatePath);
 			const VectorWorks::Filing::IFileIdentifierPtr dest = FileIdFor(copy.string());
 			if (!source || !dest)
@@ -589,17 +642,57 @@ namespace HomeskzIfcImport::draw
 					   "）。いま開いている図面へ描きます";
 
 			const VectorWorks::Filing::IFileIdentifierPtr fileID = FileIdFor(copy);
+			const std::size_t before = OpenFileCount();
 			// bShowErrorMessages=false: 誰も見ていない周でダイアログを出さない。
-			if (!fileID || !gSDK->OpenDocumentPath(fileID, false))
+			const bool returned = fileID && gSDK->OpenDocumentPath(fileID, false);
+			const std::size_t after = OpenFileCount();
+
+			// **戻り値だけを信じない。** 開いたかどうかは**カレント文書を読み戻して**
+			// 確かめる（SDK リファレンス Findings「Investigation Techniques」——setter の
+			// 戻り値を信じず、読み戻して確かめる）。false を返しても開いている、あるいは
+			// true を返しても切り替わっていない、のどちらもありうる。
+			// **テンプレートの複製は無題で開くことがある**（テンプレートから作った図面は
+			// ファイルに紐づかない）。その場合パスは空なので、**開いている図面が増えたか**
+			// でも見る——どちらかが言えれば「開いた」である。
+			const std::string active = ActiveDocumentPath();
+			const bool opened = SamePath(active, copy) || after > before;
+			if (!opened)
 			{
 				// **開けなかったら黙って続けない。** 開いている図面へそのまま描くと、前の
 				// 周の上に重なる——数字は揃うのに絵が壊れる、いちばん読み違えやすい形になる。
-				return "準備: テンプレートの複製を開けませんでした（" + copy +
-					   "）。いま開いている図面へ描きます";
+				//
+				// **何が起きたかを証拠つきで残す。** 「開けませんでした」だけでは、複製が
+				// 壊れているのか・種別で拒まれたのか・そもそも呼べない場面なのかが
+				// 分からない（実機 round 5 でまさにそれで詰まった）。
+				std::string why = "準備: テンプレートの複製を開けませんでした（複製 ";
+				why += copy + " / " + std::to_string(FileSizeOf(copy)) + " バイト";
+				why += " / OpenDocumentPath=";
+				why += returned ? "true" : "false";
+				why += " / 開いている図面 " + std::to_string(before) + "→";
+				why += std::to_string(after) + " 枚 / いまは ";
+				why += active.empty() ? "無題（パスなし）" : active;
+				why += "）。いま開いている図面へ描きます";
+				return why;
 			}
-			session.roundDocumentPath = copy;
+			// **無題で開いたら、その場で複製のパスへ保存して名前を与える。** パスが無いと
+			// 次の周に「前の周の図面」を見分けられず、閉じられないまま図面が積み上がる
+			// （見分けを fFileRef に頼ると、VectorWorks を再起動したあとに同じ番号が別の
+			// 図面へ割り当たっていて**利用者の図面を閉じかねない**。core/FeedbackSession.h）。
+			bool named = SamePath(active, copy);
+			if (!named)
+			{
+				const VectorWorks::Filing::IFileIdentifierPtr saveAs = FileIdFor(copy);
+				named = saveAs && gSDK->SaveActiveDocumentPath(saveAs) == 0;
+			}
+			// 名前を与えられなければ**覚えない**（次の周は閉じずに開き直すだけ。図面が
+			// 1 枚増えるほうが、別の図面を閉じるより軽い）。
+			session.roundDocumentPath = named ? copy : std::string();
 
-			std::string note = "準備: テンプレートの複製を開きました（" + copy + "）";
+			std::string note = "準備: テンプレートの複製を開きました（" + copy;
+			if (!SamePath(active, copy))
+				note += named ? " ＝無題で開いたので保存し直しました"
+							  : " ＝無題で開き、保存し直せませんでした";
+			note += "）";
 			if (!closed.empty())
 				note += "。" + closed;
 			else if (!didClose)
