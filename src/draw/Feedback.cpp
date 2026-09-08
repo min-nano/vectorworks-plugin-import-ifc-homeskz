@@ -61,6 +61,11 @@ namespace HomeskzIfcImport::draw
 		// 同梱スクリプトの名前（拡張子は殻が付ける。src/PayloadAbi.h）。
 		constexpr const char* kFeedbackScript = "vw-feedback";
 
+		// **実機テストの結果ダイアログのタイトル。** 本番の取り込み（「ホームズ君 IFC
+		// 取り込み」。draw/ImportCommand.cpp）と**必ず違う名前にする**——同じにすると、
+		// PR への投稿の顛末を本番の取り込みが言っているように見える（実機の指摘。M25）。
+		constexpr const char* kTestResultTitle = "実機テスト (みんなの構造設計支援Dev)";
+
 		// ダイアログのコントロール ID（1 = OK / 2 = キャンセルは SDK の予約）。
 		// kNoteLabelID / kNoteID はトークンの貼り付けダイアログが使う。
 		constexpr TControlID kNoteLabelID = 4;
@@ -731,9 +736,12 @@ namespace HomeskzIfcImport::draw
 			runImportRound(ifcPath, options, settingsShown, settingsNote, preparation);
 		if (round.failed)
 		{
-			// 送るべき内訳がそもそも無い。理由はいつもの結果ダイアログで見せる。
-			(void)draw::showImportResult("ホームズ君 IFC 取り込み", round.body,
-										 core::trace::text());
+			// 送るべき内訳がそもそも無い。**取り込みの完了文言（round.body）は使わない**
+			// ——このコマンド自身の言葉で言う（parse/Feedback.h「実機テストの周の結末」）。
+			(void)draw::showImportResult(
+				kTestResultTitle,
+				parse::formatTestRoundResult(parse::TestRoundOutcome::ImportFailed, {}),
+				core::trace::text());
 			return false;
 		}
 
@@ -757,11 +765,17 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
-		// **投稿できなかったときだけ、結果ダイアログへ理由を添えて出す。**
-		std::string body = round.body;
-		if (!postError.empty())
-			body += "\n\nPR への投稿: " + postError;
-		(void)draw::showImportResult("ホームズ君 IFC 取り込み", body, core::trace::text());
+		// **投稿できなかったときだけ出す。** 数字が PR に載らないので、その代わりを
+		// ここで見せる。
+		//
+		// **取り込みの完了文言（round.body）を借りて後ろへ PR の話を足さない。** 以前は
+		// そうしていたが、押した人には**本番の取り込みが PR へ投稿しているように見える**
+		// ——コマンドを分けた意味が見た目の上で崩れる（実機の指摘。M25）。文言はこの
+		// コマンド自身のもの（parse/Feedback.h「実機テストの周の結末」）を使う。
+		(void)draw::showImportResult(
+			kTestResultTitle,
+			parse::formatTestRoundResult(parse::TestRoundOutcome::PostFailed, postError),
+			core::trace::text());
 		return false;
 	}
 

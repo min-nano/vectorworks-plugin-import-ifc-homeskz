@@ -360,6 +360,14 @@ Claude が PR に `<!-- homeskz-ifc-feedback v1 control=stop -->` を投稿す�
 `lastCreatedSheets`）だけにする。ここはアンインストーラと並ぶ「利用者のものを消す」コード
 なので、**歯止めを緩める方向へ変えない**。
 
+**実機テストの結末は実機テスト自身の言葉で言う。** 取り込みコマンドの完了文言
+（`parse::formatImportResult` / `formatImportError`）を借りて、その後ろへ PR の話を足さない
+——押した人には**本番の取り込みが PR へ投稿しているように見え**、コマンドを分けた意味が
+見た目の上で崩れる（実機の指摘。M25）。文言は `parse::formatTestRoundResult` に置き、
+結果ダイアログのタイトルも本番と別にする（`draw/Feedback.cpp` の `kTestResultTitle`）。
+**ダイアログの器**（短い本文＋折り畳んだログ欄）は `draw/ResultDialog` を共有してよい
+——共有してはいけないのは**文言**である。
+
 **尋ねるのは取り込みが始まる前だけ。** `postFeedbackRound`（取り込みのあと）にダイアログを
 足さない——取り込みは 1 分以上かかるので、終わりに確認が待っていると席を離れられず、
 「実行して放っておく」が成立しない（実機の指摘。`docs/DEV-NOTES.md` M23）。投稿に失敗した

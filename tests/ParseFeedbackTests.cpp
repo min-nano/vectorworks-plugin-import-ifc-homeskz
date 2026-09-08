@@ -24,6 +24,8 @@
 using namespace HomeskzIfcImport::parse;
 using HomeskzIfcImport::core::Document;
 using HomeskzIfcImport::core::DrawCounts;
+using HomeskzIfcImport::parse::kMaxFeedbackCommentBytes;
+using HomeskzIfcImport::parse::TestRoundOutcome;
 
 namespace
 {
@@ -391,6 +393,88 @@ TEST(feedback_comment_asks_for_one_more_run_after_the_fix)
 	// この周は「戻す必要もありません」と言い切ってよい。
 	CHECK(contains(body, "「取り消し」で戻す必要もありません"));
 	CHECK(!contains(body, "取り除けません"));
+}
+
+// ---------------------------------------------------------------------------
+// **切り詰めは UTF-8 の文字境界で**（M25）。ここが崩れると壊れたバイト列が本文へ入り、
+// GitHub が 400「Problems parsing JSON」で弾いて**その周の投稿がまるごと落ちる**
+// （実機で発生。round 1・2 が通っていたのは、たまたま境界に落ちていただけ）。
+
+namespace
+{
+	// UTF-8 として妥当か（継続バイトの数が先頭バイトの宣言どおりか）。
+	bool validUtf8(const std::string& text)
+	{
+		std::size_t i = 0;
+		while (i < text.size())
+		{
+			const auto b = static_cast<unsigned char>(text[i]);
+			std::size_t len = 0;
+			if (b < 0x80U)
+				len = 1;
+			else if ((b & 0xE0U) == 0xC0U)
+				len = 2;
+			else if ((b & 0xF0U) == 0xE0U)
+				len = 3;
+			else if ((b & 0xF8U) == 0xF0U)
+				len = 4;
+			else
+				return false; // 継続バイトから始まっている＝途中で切れている
+			if (i + len > text.size())
+				return false;
+			for (std::size_t k = 1; k < len; ++k)
+			{
+				if ((static_cast<unsigned char>(text[i + k]) & 0xC0U) != 0x80U)
+					return false;
+			}
+			i += len;
+		}
+		return true;
+	}
+} // namespace
+
+// ---------------------------------------------------------------------------
+// **実機テストの結末は、実機テスト自身の言葉で言う**（M25）。取り込みコマンドの完了文言を
+// 借りて後ろへ PR の話を足すと、押した人には本番の取り込みが PR へ投稿しているように
+// 見える——コマンドを分けた意味が見た目の上で崩れる（実機の指摘）。
+
+TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
+{
+	const std::string posted =
+		formatTestRoundResult(TestRoundOutcome::PostFailed, "コメントを投稿できませんでした。");
+	CHECK(contains(posted, "PR へ投稿できませんでした"));
+	CHECK(contains(posted, "コメントを投稿できませんでした。"));
+	// **数字がどこにも残らない状態を作らない。** 投稿できていない以上、内訳を見られるのは
+	// このダイアログだけなので、そこにあることを言う。
+	CHECK(contains(posted, "ログを表示"));
+	CHECK(contains(posted, "PR には載っていません"));
+
+	const std::string failed = formatTestRoundResult(TestRoundOutcome::ImportFailed, {});
+	CHECK(contains(failed, "この周は PR へ送りませんでした"));
+	CHECK(contains(failed, "ログを表示"));
+	// 取り込みが中断したのだから「取り込みは終わりました」とは言わない。
+	CHECK(!contains(failed, "取り込みは終わりました"));
+}
+
+TEST(feedback_comment_truncates_the_log_on_a_character_boundary)
+{
+	// 日本語だけの長いログ（1 文字 3 バイト）。上限を必ず超える長さにして、切り詰めが
+	// 走る場面を作る。**開始位置を 1 バイトずつずらしても**壊れないことを見る——実機で
+	// 落ちたのは、本文へ 1 行足したせいで予算が数十バイトずれた回だった。
+	for (std::size_t pad = 0; pad < 6; ++pad)
+	{
+		FeedbackRound round = sampleRound();
+		round.preparation = std::string(pad, 'x'); // 予算を 1 バイトずつずらす
+		std::string log;
+		while (log.size() < kMaxFeedbackCommentBytes + 4096)
+			log += "あいうえお かきくけこ さしすせそ\n";
+		round.log = log;
+
+		const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+		CHECK(contains(body, "バイトを省略"));
+		CHECK(validUtf8(body));
+		CHECK(body.size() <= kMaxFeedbackCommentBytes);
+	}
 }
 
 TEST(feedback_comment_shows_what_the_round_did_to_the_drawing_before_importing)

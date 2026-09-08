@@ -175,6 +175,27 @@ namespace HomeskzIfcImport::parse
 		}
 	} // namespace
 
+	std::string formatTestRoundResult(TestRoundOutcome outcome, const std::string& detail)
+	{
+		std::ostringstream out;
+		if (outcome == TestRoundOutcome::ImportFailed)
+		{
+			out << "取り込みがエラーで中断したので、この周は PR へ送りませんでした。";
+			if (!detail.empty())
+				out << "\n\n" << detail;
+			out << "\n\nくわしい原因は下の「ログを表示」にあります。";
+			return out.str();
+		}
+		out << "取り込みは終わりましたが、PR へ投稿できませんでした。";
+		if (!detail.empty())
+			out << "\n\n" << detail;
+		// **数字がどこにも残らない、という状態を作らない。** 投稿できなかった以上、内訳を
+		// 見られるのはこのダイアログだけである。
+		out << "\n\nこの周の内訳と診断ログは下の「ログを表示」にあります（PR には載って"
+			   "いません）。";
+		return out.str();
+	}
+
 	std::string formatTally(const std::vector<ElementRow>& rows)
 	{
 		std::ostringstream out;
@@ -335,6 +356,30 @@ namespace HomeskzIfcImport::parse
 		}
 	} // namespace
 
+	namespace
+	{
+		// **切り詰めは UTF-8 の文字境界で。** 素朴に「末尾から N バイト」を切り出すと、
+		// 3 バイトの日本語の途中で切れて**壊れた UTF-8** ができる。GitHub はそれを
+		// 400「Problems parsing JSON」で弾き、**その周の投稿がまるごと落ちる**（実機で
+		// 発生。docs/DEV-NOTES.md M25）——診断ログはほぼ日本語なので、境界に当たるほうが
+		// 珍しい。ここが落ちるまで 2 周ぶん通っていたのは、たまたま境界に落ちていただけ
+		// である。
+		//
+		// 継続バイト（0b10xxxxxx）の間は前へ進め、そのうえで**次の行頭まで**進める
+		// ——行の途中から始まるログは読む側にも読みにくいので、どうせ削るなら行で削る。
+		// **進めるだけで戻らない**ので、切り詰めた結果が予算を超えることはない。
+		std::size_t utf8LineStart(const std::string& text, std::size_t offset)
+		{
+			if (offset >= text.size())
+				return text.size();
+			while (offset < text.size() &&
+				   (static_cast<unsigned char>(text[offset]) & 0xC0U) == 0x80U)
+				++offset;
+			const std::string::size_type nl = text.find('\n', offset);
+			return nl == std::string::npos ? text.size() : nl + 1;
+		}
+	} // namespace
+
 	std::string formatFeedbackComment(const FeedbackRound& round, const core::Document& document,
 									  const core::DrawCounts& counts)
 	{
@@ -478,11 +523,16 @@ namespace HomeskzIfcImport::parse
 				kMaxFeedbackCommentBytes > used ? kMaxFeedbackCommentBytes - used : 0;
 			if (log.size() > budget)
 			{
+				// 案内の 1 行ぶんも予算を食うので、その分だけ余計に削る。行数字を含めて
+				// 高々 64 バイト（`used` に積んだ 256 の余裕もある）。
+				constexpr std::size_t kOmittedNoticeBytes = 64;
+				std::size_t start = log.size() - budget + kOmittedNoticeBytes;
+				if (start > log.size())
+					start = log.size();
+				start = utf8LineStart(log, start); // **文字と行の境界まで進める**
 				const std::string omitted =
-					"…（前半 " + std::to_string(log.size() - budget) + " バイトを省略）…\n";
-				log = omitted + (budget > omitted.size()
-									 ? log.substr(log.size() - budget + omitted.size())
-									 : std::string());
+					"…（前半 " + std::to_string(start) + " バイトを省略）…\n";
+				log = omitted + log.substr(start);
 			}
 			out << "\n<details><summary>診断ログ（全文）</summary>\n\n"
 				<< codeBlock(log) << "\n</details>\n";
