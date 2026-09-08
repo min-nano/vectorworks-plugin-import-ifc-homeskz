@@ -432,6 +432,52 @@ TEST(BuildSectionCommandsIsDeterministic)
 	}
 }
 
+// **図番はシートの中で一意でなければならない**（実機で発覚）。重なっていると
+// Vectorworks が「その図番は、このシートレイヤの他の図面ですでに使用中です」という
+// モーダルのダイアログを出して止まり、無人で回している周がそこで死ぬ。
+TEST(SectionNumbersAreMadeUniqueAcrossDirections)
+{
+	std::vector<core::SectionCommand> commands(5);
+	// X通り・Y通りは別々に採番するので、名前付きの通り芯が拾えない図面では
+	// どちらも "1" から始まる——連結すると同じ綴りが並ぶ。
+	const char* const kNames[] = {"1", "2", "1", "2", "1"};
+	for (std::size_t i = 0; i < commands.size(); ++i)
+	{
+		commands[i].viewport.drawingNumber = kNames[i];
+		commands[i].viewport.drawingTitle = std::string(kNames[i]) + kSectionTitleSuffix;
+	}
+	parse::uniqueSectionNumbers(commands);
+
+	// 先頭はそのまま。2 つ目以降だけが分かれる。
+	CHECK_EQ(commands[0].viewport.drawingNumber, "1");
+	CHECK_EQ(commands[1].viewport.drawingNumber, "2");
+	CHECK_EQ(commands[2].viewport.drawingNumber, "1(2)");
+	CHECK_EQ(commands[3].viewport.drawingNumber, "2(2)");
+	CHECK_EQ(commands[4].viewport.drawingNumber, "1(3)");
+	// 図面タイトルも新しい図番から組み直す。
+	CHECK_EQ(commands[2].viewport.drawingTitle, std::string("1(2)") + kSectionTitleSuffix);
+	CHECK_EQ(commands[1].viewport.drawingTitle, std::string("2") + kSectionTitleSuffix);
+
+	// 全部が別の綴りになっている。
+	std::set<std::string> numbers;
+	for (const core::SectionCommand& command : commands)
+		numbers.insert(command.viewport.drawingNumber);
+	CHECK_EQ(numbers.size(), commands.size());
+}
+
+TEST(SectionNumbersSkipASuffixThatIsAlreadyTaken)
+{
+	// "い(2)" が通り名として実在することも有りうる。ぶつからない綴りまで進める。
+	std::vector<core::SectionCommand> commands(3);
+	const char* const kNames[] = {"い", "い(2)", "い"};
+	for (std::size_t i = 0; i < commands.size(); ++i)
+		commands[i].viewport.drawingNumber = kNames[i];
+	parse::uniqueSectionNumbers(commands);
+	CHECK_EQ(commands[0].viewport.drawingNumber, "い");
+	CHECK_EQ(commands[1].viewport.drawingNumber, "い(2)");
+	CHECK_EQ(commands[2].viewport.drawingNumber, "い(3)");
+}
+
 TEST(SectionSheetNumbersContinueAfterThePlanSheets)
 {
 	// 伏図が 1〜7 なら軸組図は 8 から（要件「シートレイヤ番号は伏図に続けて」）。

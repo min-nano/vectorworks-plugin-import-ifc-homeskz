@@ -360,6 +360,31 @@ namespace HomeskzIfcImport::parse
 		return names;
 	}
 
+	void uniqueSectionNumbers(std::vector<core::SectionCommand>& commands)
+	{
+		std::set<std::string> used;
+		for (core::SectionCommand& command : commands)
+		{
+			std::string number = command.viewport.drawingNumber;
+			if (used.count(number) != 0)
+			{
+				// 2 つ目以降に "(2)" … を足す。**既にある綴りとぶつからなくなるまで**
+				// 進める（"い(2)" が通り名として実在することも有りうる）。
+				std::string candidate;
+				for (int suffix = 2;; ++suffix)
+				{
+					candidate = number + "(" + std::to_string(suffix) + ")";
+					if (used.count(candidate) == 0)
+						break;
+				}
+				number = candidate;
+				command.viewport.drawingNumber = number;
+				command.viewport.drawingTitle = number + kSectionTitleSuffix;
+			}
+			used.insert(number);
+		}
+	}
+
 	int sectionSheetStartNumber(const std::vector<core::SheetCommand>& sheets)
 	{
 		// 伏図の番号は数字の文字列（"1" / "2" …）。**数字として読めたものだけ**を見て、その
@@ -437,6 +462,10 @@ namespace HomeskzIfcImport::parse
 		for (core::SectionCommand& command :
 			 commandsForDirection(SectionDirection::Y, yCuts, yAxes, bounds, layers))
 			commands.push_back(std::move(command));
+		// **方向をまたいで重なった図番をここで分ける**（parse/Section.h の
+		// uniqueSectionNumbers）。名前は方向ごとに採るので、連結したここが両方向の綴りを
+		// 突き合わせられる唯一の場所である。
+		uniqueSectionNumbers(commands);
 		return commands;
 	}
 
