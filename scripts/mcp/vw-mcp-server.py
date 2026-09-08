@@ -39,7 +39,6 @@
 # （.tmp へ書いてから rename）・生存の印の見方は src/core/Bridge.h に書いてある。
 # どちらかを変えるときは必ず両方を直す。
 
-import glob
 import json
 import os
 import secrets
@@ -115,21 +114,6 @@ def darwin_user_temp_dir():
     return done.stdout.decode("utf-8", "replace").strip()
 
 
-def darwin_spool_scan(plugin):
-    """最後の手段: `/var/folders` を走って、**自分のもの**のスプールを拾う。
-
-    上の 3 手がすべて外れても（別の bootstrap セッションから起動された等）、ここで
-    見つかる。他人のディレクトリは読めずに素通りし、読めたものも持ち主を確かめる。
-    """
-    if sys.platform != "darwin":
-        return []
-    found = []
-    for path in sorted(glob.glob("/var/folders/*/*/T/" + plugin + "-mcp")):
-        if spool_is_safe(path):
-            found.append(path)
-    return found
-
-
 def spool_is_safe(directory):
     """そのスプールを使ってよいか（持ち主と権限）。
 
@@ -161,6 +145,14 @@ def spool_candidates():
     デスクトップアプリから起動されたこちらにはそれが無く `/tmp` に落ちる。そこで候補を
     順に見て、**生きた印（bridge.json）があるところ**を使う（Bridge.status）。
 
+    **当てずっぽうは持たない。** 候補はどれも「プラグイン側が一時ディレクトリを決めるのに
+    使うのと同じ仕組み」から出したものだけにする——利用者ごとの一時ディレクトリ（confstr）と、
+    環境変数から来る場所（`gettempdir` / `TMPDIR` / `TMP` / `TEMP`）。**`/tmp` への
+    フォールバックや `/var/folders` の総当たりは置かない**: 前者は同じ計算機の誰でも書ける
+    場所で、後者は同じ利用者の**別のセッション**の橋を掴みうる。どちらも「たまたま繋がる」
+    ことがあり、そのとき何処へ繋がったのかが分かりにくい。**場所が知れているなら
+    `VW_MCP_SPOOL` で名指しするほうが確かで、分からないなら繋がらないほうが良い。**
+
     VW_MCP_SPOOL が指定されていれば、それだけを候補にする（両側で同じ値にすること）。
     """
     override = os.environ.get("VW_MCP_SPOOL", "")
@@ -180,18 +172,20 @@ def spool_candidates():
 
     # **利用者ごとの一時ディレクトリを最初に見る。** GUI アプリ（＝Vectorworks）が使うのは
     # ここで、$TMPDIR を渡されないこちらの gettempdir() は /tmp に落ちるため。
-    add(darwin_user_temp_dir())
+    user_temp = darwin_user_temp_dir()
+    add(user_temp)
     add(tempfile.gettempdir())
     for name in ("TMPDIR", "TMP", "TEMP"):
         add(os.environ.get(name, ""))
-    if os.name != "nt":
-        add("/tmp")
 
-    candidates = [os.path.join(root, plugin + "-mcp") for root in roots]
-    for path in darwin_spool_scan(plugin):
-        if path not in candidates:
-            candidates.append(path)
-    return candidates
+    if user_temp:
+        # **macOS で利用者ごとの場所が引けたなら、/tmp は見ない。** そこは Vectorworks の
+        # 一時ディレクトリになり得ない（GUI アプリは launchd から /var/folders/…/T/ を
+        # 受け取る）ので、残しても当たらないか、誰かが置いたものに当たるかのどちらかになる。
+        # 上の gettempdir() が $TMPDIR 不在で /tmp に落ちた結果もここで消える。
+        roots = [root for root in roots if root != "/tmp"]
+
+    return [os.path.join(root, plugin + "-mcp") for root in roots]
 
 
 def call_timeout():

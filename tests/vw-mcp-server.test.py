@@ -188,9 +188,14 @@ def check_spool_search(module, root):
             any(c.startswith(user_temp.rstrip("/")) for c in candidates),
             "$TMPDIR が無くても利用者ごとの場所を候補に入れる (%r)" % candidates,
         )
+        # **当てずっぽうを持たない。** /tmp は Vectorworks の一時ディレクトリになり得ず、
+        # 同じ計算機の誰でも書ける場所なので、利用者ごとの場所が引けたなら候補に残さない。
+        check(
+            not any(c.startswith("/tmp/") for c in candidates),
+            "/tmp は候補にしない (%r)" % candidates,
+        )
     else:
         check_eq(module.darwin_user_temp_dir(), "", "macOS 以外では引かない")
-        check_eq(module.darwin_spool_scan("min-nano_structure"), [], "macOS 以外では走らない")
 
     # **持ち主と権限を見る。** /tmp は誰でも書けるので、偽の印を置かれても使わない。
     if os.name != "nt":
