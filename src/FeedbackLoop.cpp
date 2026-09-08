@@ -67,10 +67,21 @@ namespace HomeskzIfcImport
 		fForceCheck = true;
 	}
 
+	void FeedbackLoopDriver::BeginRound()
+	{
+		fView.phase = FeedbackLoopPhase::Working;
+		fView.message = "実機テストを実行しています…（終わったら結果を PR へ投稿します）";
+		fView.nextCheckAt = -1;
+		// 周が終わったら間隔を待たずに見る（新しいビルドがもう出ているかもしれない）。
+		fForceCheck = true;
+	}
+
 	FeedbackLoopView FeedbackLoopDriver::Tick(IFeedbackLoopHost& host, long long now)
 	{
-		// **走っている間は何もしない**（FeedbackLoop.h「再入」）。
-		if (fBusy)
+		// **走っている間は何もしない**（FeedbackLoop.h「再入」）。fExternalBusy は
+		// メニューの実機テストが取り込みを回している間で、そこを素通しすると駆動が
+		// 2 周目を始めようとして本体を降ろしにいく（FeedbackLoop.h「外から走っている間」）。
+		if (fBusy || fExternalBusy)
 			return fView;
 
 		const bool due = fForceCheck || fLastCheck < 0 || now - fLastCheck >= fInterval;

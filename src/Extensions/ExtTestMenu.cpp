@@ -91,6 +91,20 @@ void CTestMenu_EventSink::DoInterface()
 	// ファイルには落とさない。
 	static bool sAutoUpdateNextTest = false;
 
+	// **押した直後にパレットを開く。** 1 周の終わりに開いていたら、このコマンドと本番の
+	// 取り込みが**見分けられなかった**——どちらもダイアログが出て 1 分以上黙るので、押した
+	// 人には同じに見える（実機の指摘。ExtTestMenu.h「押した直後に開く」）。**更新の確認
+	// より前**に置くのは、そこでも入れ替えのダイアログが出て時間がかかるからで、その間も
+	// 「これは実機テストだ」と分かっていてほしい。この時点ではまだ何も投稿できていない
+	// ので、見え方は「実行しています…」にしておく。
+	//
+	// **走っている間は駆動を止める**（同じ番人が下まで生きる）。取り込みの最中は進捗
+	// ダイアログの DoYield でパレットの JS タイマーが動きうる——素通しすると、駆動が
+	// 2 周目を始めようとして本体を降ろしにいき、降ろせずに往復を止めてしまう
+	// （src/FeedbackLoop.h）。
+	BeginFeedbackRound();
+	const FeedbackLoopBusyScope busy;
+
 	// **本体を確保する前に置くことに意味がある。** ここで新しい本体が入れば、下の
 	// PayloadUse がそれを読み直すので、**この回からもう新しいコードが動く**
 	// （src/PayloadSession.h）。
@@ -128,16 +142,25 @@ void CTestMenu_EventSink::DoInterface()
 	// 「そもそも呼べなかった」ときだけ。
 	std::string error;
 	bool active = false;
-	if (!use->runTest(/*allowDialogs*/ true, active, error))
+	const bool called = use->runTest(/*allowDialogs*/ true, active, error);
+	if (!called)
 	{
 		gSDK->AlertInform("実機テストを開始できませんでした。", error.c_str(), false);
 		return;
 	}
 	sAutoUpdateNextTest = active;
 
-	// **往復が回っているなら、モードレスのパレットで続きを回す**（M24。
-	// src/FeedbackLoopHost.h）。以後、新しいビルドが出るたびにパレットが入れて取り込んで
-	// 投稿し、Claude の合図か人の「往復を止める」で止まる。
+	// **往復が回っているなら、以後はパレットが続きを回す**（M24。src/FeedbackLoopHost.h）。
+	// 新しいビルドが出るたびにパレットが入れて取り込んで投稿し、Claude の合図か人の
+	// 「往復を止める」で止まる。
+	//
+	// 回っていない（人が「送らない」を選んだ・宛先が分からなかった・更新を入れられ
+	// なかった）ときも、開いたパレットはそのままにする——**閉じるのは人の意思**で、
+	// パレット自身に「閉じる」がある（Extensions/ExtFeedbackPalette.h）。
+	//
+	// **「実行しています…」を明示的に消しに行かない。** 上の番人が生きている間 Tick は
+	// 素通しされるので、ここで呼んでも書き換わらない。番人が外れれば JS のタイマーが
+	// 数秒で実態（「往復は回っていません」等）を出す——自分で直るものを二重に直さない。
 	if (active)
 		ArmFeedbackLoop();
 }

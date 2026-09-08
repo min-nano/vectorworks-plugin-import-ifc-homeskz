@@ -26,6 +26,27 @@ namespace HomeskzIfcImport
 	// （次の Tick で間隔を待たずに見る）、パレットを表示する。
 	void ArmFeedbackLoop();
 
+	// **コマンドを押した直後にパレットを開く**（M25。src/Extensions/ExtTestMenu.cpp）。
+	// 開くのを 1 周の終わりにしていたら、実機テストと本番の取り込みが**見分けられ
+	// なかった**——どちらもダイアログが出て 1 分以上黙るので、押した人には同じに見える
+	// （実機の指摘）。開いた時点ではまだ何も投稿できていないので、見え方は「取り込んで
+	// います…」にしておく。
+	void BeginFeedbackRound();
+
+	// 実機テストの周が走っている間だけ駆動を止める番人（RAII）。取り込みの最中は進捗
+	// ダイアログの DoYield でパレットの JS タイマーが動きうるので、素通しすると駆動が
+	// 2 周目を始めようとして本体を降ろしにいく（src/FeedbackLoop.h）。
+	class FeedbackLoopBusyScope final
+	{
+	public:
+		FeedbackLoopBusyScope();
+		~FeedbackLoopBusyScope();
+		FeedbackLoopBusyScope(const FeedbackLoopBusyScope&) = delete;
+		FeedbackLoopBusyScope& operator=(const FeedbackLoopBusyScope&) = delete;
+		FeedbackLoopBusyScope(FeedbackLoopBusyScope&&) = delete;
+		FeedbackLoopBusyScope& operator=(FeedbackLoopBusyScope&&) = delete;
+	};
+
 	// パレットの JS から（src/Extensions/ExtFeedbackPalette.cpp）。いずれも殻の中の
 	// 駆動へ取り次ぎ、いまの見え方を返す。
 	FeedbackLoopView FeedbackLoopTick();

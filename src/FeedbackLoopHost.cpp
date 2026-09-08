@@ -223,6 +223,22 @@ namespace HomeskzIfcImport
 		ShowFeedbackPalette(true);
 	}
 
+	void BeginFeedbackRound()
+	{
+		TheFeedbackLoop().BeginRound();
+		ShowFeedbackPalette(true);
+	}
+
+	FeedbackLoopBusyScope::FeedbackLoopBusyScope()
+	{
+		TheFeedbackLoop().SetExternalBusy(true);
+	}
+
+	FeedbackLoopBusyScope::~FeedbackLoopBusyScope()
+	{
+		TheFeedbackLoop().SetExternalBusy(false);
+	}
+
 	FeedbackLoopView FeedbackLoopTick()
 	{
 		CShellFeedbackLoopHost host;

@@ -127,6 +127,22 @@ namespace HomeskzIfcImport
 		// メニューから往復に入った（投稿できた）。**次の Tick で間隔を待たずに見る。**
 		void Arm();
 
+		// **これから 1 周を走らせる**（メニューの実機テストが、取り込みを始める前に言う）。
+		// パレットは**コマンドを押した直後に開く**ので、その時点ではまだ何も投稿できて
+		// いない——見え方だけ「走っています」にしておかないと、開いた瞬間に「往復は
+		// 回っていません」と出て、押した人が失敗したと読む。
+		void BeginRound();
+
+		// **外から走っている間は駆動を止める**（BeginRound と対で、実機テストの周が
+		// 使う）。取り込みは 1 分以上かかり、そのあいだ進捗ダイアログの DoYield で
+		// パレットの JS タイマーが動きうる——素通しすると、駆動が**2 周目を始めようと
+		// して**本体を降ろしにいき、降ろせずに「入れられませんでした」で往復を止める。
+		// true のあいだ Tick は何もせず現在の見え方を返す。
+		void SetExternalBusy(bool busy)
+		{
+			fExternalBusy = busy;
+		}
+
 		// JS のタイマーから。now は単調な秒（起点は問わない）。
 		FeedbackLoopView Tick(IFeedbackLoopHost& host, long long now);
 
@@ -150,6 +166,7 @@ namespace HomeskzIfcImport
 		long long fLastCheck = -1;
 		bool fForceCheck = false;
 		bool fBusy = false;
+		bool fExternalBusy = false;
 		FeedbackLoopView fView;
 	};
 } // namespace HomeskzIfcImport

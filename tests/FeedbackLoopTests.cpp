@@ -343,4 +343,43 @@ TEST(loop_stops_without_a_pull_request_number)
 	CHECK_EQ(static_cast<std::size_t>(h.scriptCalls.size()), static_cast<std::size_t>(0));
 }
 
+// ---------------------------------------------------------------------------
+// **メニューの周が走っている間は何もしない**（M25）。パレットはコマンドを押した直後に
+// 開くので、取り込みの最中も JS のタイマーが Tick を叩きうる——素通しすると駆動が
+// 2 周目を始めようとして本体を降ろしにいく。
+
+TEST(feedback_loop_does_nothing_while_a_menu_round_is_running)
+{
+	FakeLoopHost h;
+	h.memory.active = true;
+	h.memory.pullRequest = 110;
+	h.memory.branch = "b";
+	FeedbackLoopDriver driver(60);
+
+	driver.BeginRound();
+	driver.SetExternalBusy(true);
+	// **間隔を待たない指定（BeginRound の中で立つ）でも動かない。**
+	const FeedbackLoopView during = driver.Tick(h, 1000);
+	CHECK(during.phase == FeedbackLoopPhase::Working);
+	// 合図も見に行かない（スクリプトを 1 度も起動しない）＝本体を降ろしにも行かない。
+	CHECK_EQ(static_cast<std::size_t>(h.scriptCalls.size()), static_cast<std::size_t>(0));
+	CHECK_EQ(static_cast<std::size_t>(h.polledBranches.size()), static_cast<std::size_t>(0));
+	CHECK_EQ(h.roundCount, 0);
+
+	// 番人が外れたら、次の Tick からいつもどおり確認する。
+	driver.SetExternalBusy(false);
+	(void)driver.Tick(h, 1001);
+	CHECK(h.scriptCalls.size() > 0);
+}
+
+TEST(feedback_loop_begin_round_shows_that_it_is_running)
+{
+	// **開いた瞬間に「回っていません」と出さない。** コマンドを押した直後はまだ何も
+	// 投稿できていないが、そこで「往復は回っていません」と出ると押した人が失敗したと読む。
+	FeedbackLoopDriver driver(60);
+	driver.BeginRound();
+	CHECK(driver.View().phase == FeedbackLoopPhase::Working);
+	CHECK(driver.View().message.find("実機テスト") != std::string::npos);
+}
+
 TEST_MAIN();
