@@ -189,6 +189,18 @@ namespace HomeskzIfcImport::parse
 				   "もう一度実行してください。";
 			return out.str();
 		}
+		if (outcome == TestRoundOutcome::Rearmed)
+		{
+			// **何も起きなかったのではなく、起こさないのが正しい周である**ことを言う。
+			out << "動いているビルド";
+			if (!detail.empty())
+				out << "（" << detail << "）";
+			out << "は前の周と同じなので、取り込みは行いませんでした"
+				   "——同じ数字がもう一度並ぶだけだからです。";
+			out << "\n\n往復は回し直しました。新しいビルドが出たら、パレットが自動で"
+				   "入れて同じ条件で取り込み、結果を PR へ投稿します。";
+			return out.str();
+		}
 		if (outcome == TestRoundOutcome::ImportFailed)
 		{
 			out << "取り込みがエラーで中断したので、この周は PR へ送りませんでした。";

@@ -983,6 +983,15 @@ namespace HomeskzIfcImport::draw
 				session.loop = true;
 				(void)core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session);
 			}
+			// **押した人に結末を言う。** 走らせないのが正しい周だが、ダイアログも進捗も
+			// 出ないので**何も起きていないように見える**——実機で「再実行しても往復が
+			// 始まらない」と読まれた（実際には回り直していた）。手で押した周
+			// （allowDialogs）にだけ返す。自動の周はここへ来ない（Refuse になる）。
+			if (allowDialogs)
+				(void)draw::showImportResult(
+					kTestResultTitle,
+					parse::formatTestRoundResult(parse::TestRoundOutcome::Rearmed, build.commit),
+					core::trace::text());
 			active = true;
 			return true;
 		}

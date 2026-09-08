@@ -456,6 +456,21 @@ TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
 	CHECK(!contains(failed, "取り込みは終わりました"));
 }
 
+// **走らせないのが正しい周でも、押した人には結末を言う**（M25）。同じビルドでは取り込まない
+// ——数字が変わらないからだが、ダイアログも進捗も出ないと「何も起きていない」と読まれる
+// （実機で「再実行しても往復が始まらない」と読まれた。実際には回り直していた）。
+
+TEST(test_round_result_explains_that_the_same_build_was_not_imported_again)
+{
+	const std::string rearmed = formatTestRoundResult(TestRoundOutcome::Rearmed, "abc1234");
+	CHECK(contains(rearmed, "abc1234"));	  // どのビルドの話かを言う
+	CHECK(contains(rearmed, "前の周と同じ")); // なぜ走らせないのか
+	CHECK(contains(rearmed, "取り込みは行いませんでした"));
+	CHECK(contains(rearmed, "往復は回し直しました")); // 何が起きたのか
+	// **失敗と読ませない。** 走らせないのが正しい周である。
+	CHECK(!contains(rearmed, "できませんでした"));
+}
+
 TEST(feedback_comment_truncates_the_log_on_a_character_boundary)
 {
 	// 日本語だけの長いログ（1 文字 3 バイト）。上限を必ず超える長さにして、切り詰めが
