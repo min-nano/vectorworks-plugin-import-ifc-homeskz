@@ -53,11 +53,16 @@ namespace HomeskzIfcImport
 	FeedbackLoopView FeedbackLoopStop();
 	FeedbackLoopView FeedbackLoopCheckNow();
 
-	// パレットの「閉じる」。**隠す前に往復を止める**——隠したページの JS タイマーは
+	// パレットの「止めて閉じる」の**前半（止めるだけ）**。隠したページの JS タイマーは
 	// 止まらないので、往復を残したまま隠すと**見えないところで無人の取り込みが走り続け、
 	// 止める口が無くなる**（実機の指摘）。止めても記憶は残るので、続きはメニューの
 	// 「実機テストを実行…」から走る。
-	FeedbackLoopView FeedbackLoopHide();
+	//
+	// **隠すのは呼び出し側**（Extensions/ExtFeedbackPalette.cpp）。ここで隠してしまうと
+	// 「隠す → 返事」の順になり、**隠れたページが応答を受け取れずに JS の「返事待ち」が
+	// 解けない**——次からの tick がすべて捨てられ、メニューで往復を武装させても動かす時計
+	// が黙ったままになる（実機: 閉じたあと再実行しても往復が始まらなかった）。
+	FeedbackLoopView FeedbackLoopStopForClose();
 
 	// パレットの表示・非表示（gSDK->SetWebPaletteVisibility）。
 	void ShowFeedbackPalette(bool visible);

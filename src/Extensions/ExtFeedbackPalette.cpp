@@ -176,7 +176,13 @@ void CFeedbackPaletteJS::OnHide(const TXString& /*objName*/, const TXString& /*f
 		// **閉じる＝往復を止めてから隠す**（src/FeedbackLoopHost.h）。隠しただけでは
 		// このページの JS タイマーが止まらないので、往復を残して隠すと**見えないところで
 		// 無人の取り込みが走り続け、止める口が無くなる**（実機の指摘）。
-		ResolveView(context, FeedbackLoopHide());
+		//
+		// **順序は「止める → 返事 → 隠す」**。隠してから返事をすると、隠れたページが応答を
+		// 受け取れず JS の「返事待ち」が解けない——次からの tick がすべて捨てられ、メニュー
+		// で往復を武装させても動かす時計が黙ったままになる（実機: 閉じたあと再実行しても
+		// 往復が始まらなかった）。
+		ResolveView(context, FeedbackLoopStopForClose());
+		ShowFeedbackPalette(false);
 	}
 	catch (...)
 	{

@@ -52,7 +52,13 @@
 	var checkNowBtn = document.getElementById('checkNow');
 	var stopBtn = document.getElementById('stop');
 	var hideBtn = document.getElementById('hide');
+	// 呼び出し中は次を投げない。**ただし返事が来ないまま固まらせない**——隠れたページは
+	// 応答を受け取れないことがあり、そこで busy が立ちっぱなしになると以後の tick が
+	// すべて捨てられて、パレットが二度と動かなくなる（実機: 閉じたあと再実行しても往復が
+	// 始まらなかった）。時間で自動的に解く。
+	var BUSY_TIMEOUT_MS = 30000;
 	var busy = false;
+	var busySince = 0;
 
 	var PHASE_LABEL = {
 		idle: '往復は回っていません',
@@ -104,8 +110,9 @@
 			messageEl.textContent = 'プラグインの関数（homeskz.' + name + '）がまだ見えません。';
 			return;
 		}
-		if (busy) { return; }
+		if (busy && (Date.now() - busySince) < BUSY_TIMEOUT_MS) { return; }
 		busy = true;
+		busySince = Date.now();
 		var p;
 		try { p = b[name](); } catch (e) { busy = false; messageEl.textContent = '呼び出しに失敗: ' + e; return; }
 		Promise.resolve(p).then(function (view) {
@@ -125,10 +132,17 @@
 	});
 	// **閉じる＝止めて閉じる。** 隠してもこのページのタイマーは止まらないので、往復を
 	// 残したまま隠すと見えないところで取り込みが走り続ける（C++ 側の OnHide も止める）。
+	//
+	// **返事を待たない。** 隠れたページは応答を受け取れないことがあり、いつもの call() で
+	// 呼ぶと「返事待ち」が解けないまま残る＝以後の tick が全部捨てられる。どのみち隠れた
+	// あとの見え方には意味が無いので、投げるだけにする。
 	hideBtn.addEventListener('click', function () {
-		if (window.confirm('自動の往復を止めて、このパレットを閉じます。記憶は残るので、メニューの「実機テストを実行…」をもう一度実行すれば続きから走ります。')) {
-			call('hide');
+		if (!window.confirm('自動の往復を止めて、このパレットを閉じます。記憶は残るので、メニューの「実機テストを実行…」をもう一度実行すれば続きから走ります。')) {
+			return;
 		}
+		var b = bridge();
+		if (!b || typeof b.hide !== 'function') { return; }
+		try { b.hide(); } catch (e) { messageEl.textContent = '呼び出しに失敗: ' + e; }
 	});
 
 	call('tick');
