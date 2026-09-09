@@ -202,6 +202,10 @@ if [ -n "${TIDY_FAIL_ON:-}" ] && [ "$file" = "$TIDY_FAIL_ON" ]; then
 	echo "$file:1:1: error: stubbed diagnostic [stub-check]"
 	exit 1
 fi
+# **本物は成功時にも必ずこれを出す。** スタブが黙っていたせいで、「出力が空なら控える」
+# という誤った判定がテストを素通りし、実機で 1 件も控えられていなかった。
+echo "72231 warnings generated."
+echo "Suppressed 72277 warnings (72231 in non-user code, 46 NOLINT)."
 exit 0
 STUB
 chmod +x "$BIN/clang-tidy"
