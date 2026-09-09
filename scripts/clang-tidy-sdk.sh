@@ -141,14 +141,15 @@ esac
 #
 #   * src/payload/*.cpp    … 本体（ペイロード）の入口。殻との境界（src/PayloadAbi.h）。
 #
-# 残る 4 本は増えない glue なので名前で置く（PayloadHost / PayloadSession は SDK の型を
-# 使わないが、PluginPrefix.h を通しビルドの構成も殻と同じなので、ここで一緒に見る）。
+# 残る 5 本は増えない glue なので名前で置く（PayloadHost / PayloadSession は SDK の型を
+# 使わないが、PluginPrefix.h を通しビルドの構成も殻と同じなので、ここで一緒に見る。
+# FeedbackLoopHost は M24 の往復の駆動を殻の道具へ結ぶ側で、gSDK を触る）。
 #
-# src/UpdaterFlow.cpp は入れない。Vectorworks のヘッダを 1 つも include せず GS_MAC /
+# src/UpdaterFlow.cpp と src/FeedbackLoop.cpp は入れない。Vectorworks のヘッダを 1 つも include せず GS_MAC /
 # GS_WIN の分岐も無いので、SDK の要らない lint.yml が同じ規則で先に解析している。
 # （高価な SDK ジョブ 2 つで解析し直しても、Linux ジョブが見逃すものは何も出なかった。）
 FILES=(src/draw/*.cpp src/Extensions/*.cpp src/payload/*.cpp src/ModuleMain.cpp src/Updater.cpp
-	   src/PayloadHost.cpp src/PayloadSession.cpp)
+	   src/PayloadHost.cpp src/PayloadSession.cpp src/FeedbackLoopHost.cpp)
 
 TOTAL="${#FILES[@]}"
 SHARD_LABEL=""

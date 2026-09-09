@@ -175,6 +175,50 @@ namespace HomeskzIfcImport::parse
 		}
 	} // namespace
 
+	std::string formatTestRoundResult(TestRoundOutcome outcome, const std::string& detail)
+	{
+		std::ostringstream out;
+		if (outcome == TestRoundOutcome::DocumentFailed)
+		{
+			out << "描く図面を用意できなかったので、この周は走らせませんでした。";
+			if (!detail.empty())
+				out << "\n\n" << detail;
+			// **描かなかったことを言い切る。** 「0 件」と紛らわしくしない
+			// （実機 round 9 でそれが起きた）。
+			out << "\n\n図面には何も描いていません。作業ファイルを開いてから、"
+				   "もう一度実行してください。";
+			return out.str();
+		}
+		if (outcome == TestRoundOutcome::Rearmed)
+		{
+			// **何も起きなかったのではなく、起こさないのが正しい周である**ことを言う。
+			out << "動いているビルド";
+			if (!detail.empty())
+				out << "（" << detail << "）";
+			out << "は前の周と同じなので、取り込みは行いませんでした"
+				   "——同じ数字がもう一度並ぶだけだからです。";
+			out << "\n\n往復は回し直しました。新しいビルドが出たら、パレットが自動で"
+				   "入れて同じ条件で取り込み、結果を PR へ投稿します。";
+			return out.str();
+		}
+		if (outcome == TestRoundOutcome::ImportFailed)
+		{
+			out << "取り込みがエラーで中断したので、この周は PR へ送りませんでした。";
+			if (!detail.empty())
+				out << "\n\n" << detail;
+			out << "\n\nくわしい原因は下の「ログを表示」にあります。";
+			return out.str();
+		}
+		out << "取り込みは終わりましたが、PR へ投稿できませんでした。";
+		if (!detail.empty())
+			out << "\n\n" << detail;
+		// **数字がどこにも残らない、という状態を作らない。** 投稿できなかった以上、内訳を
+		// 見られるのはこのダイアログだけである。
+		out << "\n\nこの周の内訳と診断ログは下の「ログを表示」にあります（PR には載って"
+			   "いません）。";
+		return out.str();
+	}
+
 	std::string formatTally(const std::vector<ElementRow>& rows)
 	{
 		std::ostringstream out;
@@ -335,6 +379,30 @@ namespace HomeskzIfcImport::parse
 		}
 	} // namespace
 
+	namespace
+	{
+		// **切り詰めは UTF-8 の文字境界で。** 素朴に「末尾から N バイト」を切り出すと、
+		// 3 バイトの日本語の途中で切れて**壊れた UTF-8** ができる。GitHub はそれを
+		// 400「Problems parsing JSON」で弾き、**その周の投稿がまるごと落ちる**（実機で
+		// 発生。docs/DEV-NOTES.md M25）——診断ログはほぼ日本語なので、境界に当たるほうが
+		// 珍しい。ここが落ちるまで 2 周ぶん通っていたのは、たまたま境界に落ちていただけ
+		// である。
+		//
+		// 継続バイト（0b10xxxxxx）の間は前へ進め、そのうえで**次の行頭まで**進める
+		// ——行の途中から始まるログは読む側にも読みにくいので、どうせ削るなら行で削る。
+		// **進めるだけで戻らない**ので、切り詰めた結果が予算を超えることはない。
+		std::size_t utf8LineStart(const std::string& text, std::size_t offset)
+		{
+			if (offset >= text.size())
+				return text.size();
+			while (offset < text.size() &&
+				   (static_cast<unsigned char>(text[offset]) & 0xC0U) == 0x80U)
+				++offset;
+			const std::string::size_type nl = text.find('\n', offset);
+			return nl == std::string::npos ? text.size() : nl + 1;
+		}
+	} // namespace
+
 	std::string formatFeedbackComment(const FeedbackRound& round, const core::Document& document,
 									  const core::DrawCounts& counts)
 	{
@@ -376,6 +444,11 @@ namespace HomeskzIfcImport::parse
 		// 数なので、戻したかどうかで 1 つも変わらない**。読む側（Claude）が「絵が壊れて
 		// いるのは実装のせいか、戻し忘れか」を切り分けられるよう、1 行を必ず載せる。
 		out << "\n図面の状態: " << restoredStateLine(round, counts) << "\n";
+		// **取り除きが効いたかを、図面の状態のすぐ隣に置く。** 診断ログにも同じ行があるが、
+		// ログは上限で切り詰められるので、そこだけを頼りにすると読めない周が出る
+		// （実機 round 2 で実際に落ちた）。
+		if (!round.preparation.empty())
+			out << clean(round.preparation) << "\n";
 
 		// 前の周からの差分。1 周目（previousTally が空）では節ごと出さない。
 		const std::string diff = formatTallyDiff(round.previousTally, tally);
@@ -417,11 +490,41 @@ namespace HomeskzIfcImport::parse
 		tail << "\n---\n";
 		tail << "この投稿は VectorWorks 上の開発版プラグインが自動生成しました。**`"
 			 << round.build.branch
-			 << "` へ修正を push したら、図面を「取り消し」で取り込み前へ戻してから、"
-				"Vectorworks で取り込みをもう一度実行してください**"
+			 << "` へ修正を push したら、Vectorworks でメニューの「実機テストを実行…」を"
+				"もう一度実行してください**"
 				"——新しい dev ビルドが尋ねずに入り、同じ条件（同じ IFC・同じ設定）で round "
 			 << (round.round + 1)
 			 << " を投稿します。ファイル選択も設定ダイアログも確認も再起動も要りません。\n";
+		// **取り消しを頼むかどうかは、実測で決める。** 前の周が作ったレイヤはプラグインが
+		// 自分で取り除くが（M25）、**取り込み前から在ったレイヤへ描いた分は取り除けない**
+		// ——そのレイヤは自分が作ったものではないので消せず、上に描いた分だけが残る
+		// （SDK リファレンス Findings「Undo」の「処理前から在ったレイヤへ描いた分は戻らない」
+		// と同じ話）。だから**そこへ描いた周だけ**「取り消し」を頼む。**undo で丸ごと戻す道は
+		// 3 つとも塞がっている**ことが確定しているので（#23 / #31 / #27）、この頼みごとは
+		// 当面なくならない。
+		if (counts.undoPartial)
+			tail << "ただし**取り込み前から在ったレイヤ（テンプレートのもの）へ描いた分は"
+					"取り除けません**。そこも戻したいときは、実行する前に図面を「取り消し」で"
+					"取り込み前へ戻してください。\n";
+		else
+			tail << "**図面を「取り消し」で戻す必要もありません**——この周が描いたのは"
+					"プラグインが作ったレイヤだけなので、次の周はそれを取り除いてから"
+					"描き直します。\n";
+		// **自動の往復（M24）。** 殻のモードレスなパレットが開いていれば、新しいビルドが
+		// 出た時点で上の手順（入れる → 同じ条件で取り込む → 投稿）が自動で走る。読む側は
+		// 「push すれば次の周が来る」と「合図で止められる」の 2 つを知っていればよい。
+		//
+		// **ここに生の目印（`<!-- … control=stop -->`）を書かない。** この本文はプラグイン
+		// 自身の投稿であり、合図を探す側がそれを読む——実機 round 1 で、この案内文が自分の
+		// 合図として読まれ、1 通目で往復が止まった（docs/DEV-NOTES.md M24「合図は行であって、
+		// 文中の引用ではない」）。読む側の判定も直してあるが（scripts/vw-feedback.* は
+		// 「行がまるごと目印」だけを合図と読む）、**書く側でも生の目印を置かない**——
+		// 二重の歯止めにする。
+		tail << "往復のパレットが開いていれば、**push のあとは何もしなくても次の周が自動で"
+				"走ります**（新しい dev ビルドを見つけ次第、同じ条件で取り込んで投稿します）。"
+				"往復がもう要らなくなったら、`homeskz-ifc-feedback v1 control=stop` の HTML "
+				"コメントを**それだけの 1 行**にしてこの PR へ投稿してください（書き方は "
+				"CLAUDE.md）——次の確認でパレットが止まります。\n";
 		tail << "**絵を見ての所見はここには載りません。** 人が気付いたことは Claude との"
 				"チャットへ直接書かれます（スクリーンショットもそちらへ）。\n";
 		tail << "数字だけで判断が付かないときは、**実機で確かめてほしい点を返信で挙げて**"
@@ -443,11 +546,16 @@ namespace HomeskzIfcImport::parse
 				kMaxFeedbackCommentBytes > used ? kMaxFeedbackCommentBytes - used : 0;
 			if (log.size() > budget)
 			{
+				// 案内の 1 行ぶんも予算を食うので、その分だけ余計に削る。行数字を含めて
+				// 高々 64 バイト（`used` に積んだ 256 の余裕もある）。
+				constexpr std::size_t kOmittedNoticeBytes = 64;
+				std::size_t start = log.size() - budget + kOmittedNoticeBytes;
+				if (start > log.size())
+					start = log.size();
+				start = utf8LineStart(log, start); // **文字と行の境界まで進める**
 				const std::string omitted =
-					"…（前半 " + std::to_string(log.size() - budget) + " バイトを省略）…\n";
-				log = omitted + (budget > omitted.size()
-									 ? log.substr(log.size() - budget + omitted.size())
-									 : std::string());
+					"…（前半 " + std::to_string(start) + " バイトを省略）…\n";
+				log = omitted + log.substr(start);
 			}
 			out << "\n<details><summary>診断ログ（全文）</summary>\n\n"
 				<< codeBlock(log) << "\n</details>\n";

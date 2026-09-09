@@ -102,6 +102,10 @@ vw_add_test(UpdaterParseTests UpdaterParseTests.cpp)
 # header, so it links straight into the test binary.
 vw_add_test(UpdaterFlowTests UpdaterFlowTests.cpp "${CMAKE_SOURCE_DIR}/src/UpdaterFlow.cpp")
 
+# モードレスの往復の駆動（src/FeedbackLoop.cpp。M24）。UpdaterFlow と同じく SDK の
+# ヘッダを include しないので、偽の host を差してそのままリンクする。
+vw_add_test(FeedbackLoopTests FeedbackLoopTests.cpp "${CMAKE_SOURCE_DIR}/src/FeedbackLoop.cpp")
+
 # Robustness / adversarial-input tests: feed the parsers unexpected external
 # input (malformed script output, embedded NULs, huge/degenerate lines, random
 # byte soup) to prove they never read out of bounds or invoke undefined

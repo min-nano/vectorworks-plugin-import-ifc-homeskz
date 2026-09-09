@@ -125,47 +125,36 @@ CImportIfcMenu_EventSink::~CImportIfcMenu_EventSink() = default;
 // （Vectorworks の再起動は要らない。src/PayloadSession.h）。
 void CImportIfcMenu_EventSink::DoInterface()
 {
-	// **次の取り込みで更新を尋ねるかどうか。** 本体が「往復の最中だ」と教えてきたら、
-	// 次の 1 回だけ尋ねずに入れる（下記）。**殻に置くのは、本体が入れ替わっても残って
-	// ほしいから**——ここが消えると、入れ替えた次の周でまた尋ねることになる。
-	// Vectorworks を閉じれば消えてよい類の覚えなので、ファイルには落とさない。
-	static bool sAutoUpdateNextImport = false;
-
 	// **取り込みの前に更新を確認する。** 起動時の自動確認をやめた代わりがここで
 	// （src/Updater.h）、ふだんは更新があるときだけ尋ね、オフライン等は黙って取り込みへ
 	// 進む（UpdateCheckKind::Silent）。
-	//
-	// **実機フィードバックの往復の最中だけは尋ねない**（UpdateCheckKind::Auto）。その人は
-	// 「直したから、もう一度実行してほしい」と言われて実行しているので、そこへ「新しい
-	// ビルドがあります。インストールしますか？」を挟むのは、この往復が無くそうとしている
-	// 手間そのものになる。**一度きり**で、次の周は本体がまたそう言ってきたときだけ。
 	//
 	// **本体（ペイロード）を確保する前に置くことに意味がある。** ここで新しい本体が
 	// 入れば、下の PayloadUse がそれを読み直すので、**この取り込みからもう新しいコードが
 	// 動く**（src/PayloadSession.h）。確保したあとでは、本体のコードがスタックに載って
 	// いるぶん降ろせず、反映は次回に回る。
 	//
+	// **ここに実機フィードバックの往復は無い**（M25）。「尋ねずに入れる」も「投稿できたか」
+	// も dev だけのテストコマンドが持つ（src/Extensions/ExtTestMenu.cpp）——本番の入口を
+	// 開発の都合で分岐させない、というのがこの分け方の要点である。
+	//
 	// 例外はここで止める——更新は取り込みの付随でしかなく、失敗しても取り込みは
 	// 続けなければならない。
 	//
 	// NOLINTBEGIN(bugprone-empty-catch): 黙って諦めるのが**この場所では正しい**振る舞い
 	// （オフラインのときに無言なのと同じ扱い）。握り潰しを禁じる規則をここだけ外す。
-	const bool autoUpdate = sAutoUpdateNextImport;
-	sAutoUpdateNextImport = false;
 	bool proceed = true;
 	try
 	{
-		proceed = CheckForUpdates(autoUpdate ? UpdateCheckKind::Auto : UpdateCheckKind::Silent);
+		proceed = CheckForUpdates(UpdateCheckKind::Silent);
 	}
 	catch (...)
 	{
 	}
 	// NOLINTEND(bugprone-empty-catch)
 
-	// **尋ねずに入れたのに効かせられなかったときだけ、取り込みへ進まない。** 殻まで
-	// 変わった・入れられなかった、のどちらかで、更新の側が理由を出し終えている
-	// （src/UpdaterFlow.cpp）。古い本体のまま 1 分以上かけて取り込み、前の周と同じ結果を
-	// もう一度 PR へ投げても仕方がない。
+	// 入れられなかった・殻まで変わった、のどちらかで取り込みへ進まない。更新の側が
+	// 理由を出し終えている（src/UpdaterFlow.cpp）。
 	if (!proceed)
 		return;
 
@@ -182,11 +171,6 @@ void CImportIfcMenu_EventSink::DoInterface()
 	// 例外は本体側が境界の手前で受け止める（src/payload/PayloadMain.cpp）。ここへ返るのは
 	// 「そもそも呼べなかった」ときだけ。
 	std::string error;
-	bool autoUpdateNext = false;
-	if (!use->runImport(autoUpdateNext, error))
-	{
+	if (!use->runImport(error))
 		gSDK->AlertInform("取り込みを開始できませんでした。", error.c_str(), false);
-		return;
-	}
-	sAutoUpdateNextImport = autoUpdateNext;
 }

@@ -114,6 +114,14 @@ namespace HomeskzIfcImport::parse
 	core::SectionSheetCommand
 	buildSectionSheetCommand(const std::vector<core::SheetCommand>& sheets);
 
+	// **図番を図面の中で一意にする**（2 つ目以降に "(2)" … を足す。先頭はそのまま）。
+	// シートレイヤ 1 枚に軸組図が何枚も載るので、同じ図番が 2 つあると Vectorworks が
+	// 「その図番は、このシートレイヤの他の図面ですでに使用中です」という**モーダルの
+	// ダイアログ**を出して止まる（実機で発生）——無人で回している周はそこで止まる。
+	// 通り名は方向ごとに採るので、両方向が同じ綴りを出しうる（名前付きの通り芯が拾えない
+	// 図面では、どちらの方向も "1" から連番になる）。図面タイトルも新しい図番から組み直す。
+	void uniqueSectionNumbers(std::vector<core::SectionCommand>& commands);
+
 	// 軸組図の section 命令を組み立てる。X 通りの切断位置を昇順に並べ、続けて Y通りを並べる。
 	// 通り芯が 1 本も無い（平面の広がりが決まらない）・映すレイヤが無い・柱梁の芯が
 	// 1 つも無いときは空を返す。

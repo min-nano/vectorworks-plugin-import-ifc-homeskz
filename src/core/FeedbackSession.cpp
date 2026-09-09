@@ -94,11 +94,19 @@ namespace HomeskzIfcImport::core
 		out << "round=" << session.round << "\n";
 		out << "build=" << sanitize(session.lastCommit) << "\n";
 		out << "tally=" << sanitize(session.lastTally) << "\n";
+		out << "posted=" << sanitize(session.lastPostedAt) << "\n";
+		out << "loop=" << boolText(session.loop) << "\n";
+		out << "work=" << sanitize(session.workPath) << "\n";
 		// 1 周目に採った基準。**レイヤ 1 枚につき 1 行**にしてあるのは、名前へ入れて
 		// よい文字を区切り記号で縛らないため（"," も "\t" もレイヤ名に使える）。
 		out << "baseline=" << boolText(session.baselineRecorded) << "\n";
 		for (const std::string& layer : session.baselineLayers)
 			out << "baseline.layer=" << sanitize(layer) << "\n";
+		// 前の周が作ったレイヤ（次の周の前に取り除く顔ぶれ）。基準と同じく**1 枚 1 行**。
+		for (const std::string& layer : session.lastCreatedLayers)
+			out << "created.layer=" << sanitize(layer) << "\n";
+		for (const std::string& layer : session.lastCreatedSheets)
+			out << "created.sheet=" << sanitize(layer) << "\n";
 		// 取り込み設定は役割の表の順に並べる（core/ImportOptions.h の symbolRoles）。
 		for (std::size_t i = 0; i < kSymbolRoleCount; ++i)
 		{
@@ -145,6 +153,12 @@ namespace HomeskzIfcImport::core
 				session.lastCommit = value;
 			else if (key == "tally")
 				session.lastTally = value;
+			else if (key == "posted")
+				session.lastPostedAt = value;
+			else if (key == "loop")
+				session.loop = parseBool(value, session.loop);
+			else if (key == "work")
+				session.workPath = value;
 			else if (key == "baseline")
 				session.baselineRecorded = parseBool(value, session.baselineRecorded);
 			else if (key == "baseline.layer")
@@ -152,6 +166,17 @@ namespace HomeskzIfcImport::core
 				// **重ねて読む**（行の数だけレイヤがある）。空行は基準にならないので捨てる。
 				if (!value.empty())
 					session.baselineLayers.push_back(value);
+			}
+			else if (key == "created.layer")
+			{
+				// 空の名前は消す相手にならないので捨てる（GetNamedLayer も引けない）。
+				if (!value.empty())
+					session.lastCreatedLayers.push_back(value);
+			}
+			else if (key == "created.sheet")
+			{
+				if (!value.empty())
+					session.lastCreatedSheets.push_back(value);
 			}
 			else if (key.starts_with("role."))
 			{
@@ -240,4 +265,22 @@ namespace HomeskzIfcImport::core
 		std::error_code ec;
 		std::filesystem::remove(std::filesystem::path(path), ec);
 	}
+
+	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session,
+										const std::string& runningCommit, bool allowDialogs)
+	{
+		// **記憶として使えるのは 3 つ揃っているときだけ。** 送ると決めてあり（send）、
+		// 1 周は投稿できていて（round>0）、その周の IFC が分かっている（ifcPath）——
+		// どれか欠けていれば続きの周は組み立てられないので、1 周目として扱う。
+		const bool remembered = session.send && session.round > 0 && !session.ifcPath.empty();
+		if (remembered && session.lastCommit != runningCommit)
+			return FeedbackRoundKind::ContinueRound;
+		// ここから先は必ず人に尋ねるか、記憶を書き換えるかのどちらかになる。パレットの
+		// 周（allowDialogs=false）がここへ来るのは筋が通らない——新しいビルドを入れた
+		// 直後にしか呼ばれないので、必ず上で ContinueRound になるはずである。
+		if (!allowDialogs)
+			return FeedbackRoundKind::Refuse;
+		return remembered ? FeedbackRoundKind::RearmOnly : FeedbackRoundKind::FirstRound;
+	}
+
 } // namespace HomeskzIfcImport::core

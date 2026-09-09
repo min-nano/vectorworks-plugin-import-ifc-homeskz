@@ -910,5 +910,101 @@ TEST(install_without_a_shell_line_falls_back_to_restart)
 }
 
 // ---------------------------------------------------------------------------
+// モードレスの往復（M24）が周期的に呼ぶ確認（PollDevBuildWith）。
+//
+// **ダイアログを 1 枚も出さず、結末を値で返す。** パレットがその文言を出すので、ここで
+// Inform / Ask を呼ぶとモーダルのダイアログが図面の前に立ちはだかる。
+// ---------------------------------------------------------------------------
+
+TEST(poll_dev_build_installs_the_same_branchs_new_build_silently)
+{
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n"
+				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
+	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
+	const DevBuildPollResult r = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
+
+	CHECK(r.outcome == DevBuildPoll::Installed);
+	CHECK_EQ(r.commit, "aaa1111");
+	CHECK_EQ(h.askCount, 0);
+	CHECK_EQ(h.pickCount, 0);
+	CHECK_EQ(h.restartCount, 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+	CHECK_EQ(h.CountScript("do-install"), 1);
+	CHECK_EQ(h.dropCount, 1);
+	const std::vector<std::string> args = h.DoInstallArgs();
+	if (args.size() == 3)
+		CHECK_EQ(args[1], "https://ex.com/x.zip");
+}
+
+TEST(poll_dev_build_waits_when_nothing_new_matches)
+{
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
+	const DevBuildPollResult r = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
+	CHECK(r.outcome == DevBuildPoll::NoNewBuild);
+	CHECK_EQ(h.CountScript("do-install"), 0);
+}
+
+TEST(poll_dev_build_uses_the_installed_line_not_the_shells_sha)
+{
+	// **本体だけを入れ替えたあと。** 殻の sha（run1234）は古いままだが、ディスク上は
+	// もう aaa1111 になっている。殻の sha を基準にすると同じビルドを毎周入れ直す。
+	FakeHost h;
+	h.qDevOut = "installed=aaa1111\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
+	const DevBuildPollResult r = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
+	CHECK(r.outcome == DevBuildPoll::NoNewBuild);
+	CHECK_EQ(h.CountScript("do-install"), 0);
+}
+
+TEST(poll_dev_build_reports_a_failed_check_without_a_dialog)
+{
+	FakeHost h;
+	h.qDevOut = "error=リリース一覧を取得できませんでした。\n";
+	const DevBuildPollResult r = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
+	CHECK(r.outcome == DevBuildPoll::CheckFailed);
+	CHECK_EQ(r.message, "リリース一覧を取得できませんでした。");
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+
+	FakeHost h2;
+	h2.qDevStarts = false;
+	CHECK(PollDevBuildWith(h2, "feature/x", "run1234", kRunningShell).outcome ==
+		  DevBuildPoll::CheckFailed);
+}
+
+TEST(poll_dev_build_reports_install_failure_and_shell_change)
+{
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
+	h.doInstallOut = "error=zip を展開できませんでした。\n";
+	const DevBuildPollResult failed = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
+	CHECK(failed.outcome == DevBuildPoll::Failed);
+	CHECK_EQ(failed.message, "zip を展開できませんでした。");
+	CHECK_EQ(h.dropCount, 0);
+
+	// 殻まで変わった。入ってはいるが、この実行では効かせられない＝降ろさない。
+	FakeHost h2;
+	h2.qDevOut = h.qDevOut;
+	h2.doInstallOut = "installed-shell=other-shell\nok";
+	const DevBuildPollResult restart = PollDevBuildWith(h2, "feature/x", "run1234", kRunningShell);
+	CHECK(restart.outcome == DevBuildPoll::NeedsRestart);
+	CHECK_EQ(restart.commit, "aaa1111");
+	CHECK_EQ(h2.dropCount, 0);
+	CHECK_EQ(h2.restartCount, 0);
+
+	// 降ろせなかった（本体のコードがまだ走っている）。
+	FakeHost h3;
+	h3.qDevOut = h.qDevOut;
+	h3.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
+	h3.dropAnswer = false;
+	CHECK(PollDevBuildWith(h3, "feature/x", "run1234", kRunningShell).outcome ==
+		  DevBuildPoll::Failed);
+}
+
+// ---------------------------------------------------------------------------
 
 TEST_MAIN();

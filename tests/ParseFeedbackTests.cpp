@@ -24,6 +24,8 @@
 using namespace HomeskzIfcImport::parse;
 using HomeskzIfcImport::core::Document;
 using HomeskzIfcImport::core::DrawCounts;
+using HomeskzIfcImport::parse::kMaxFeedbackCommentBytes;
+using HomeskzIfcImport::parse::TestRoundOutcome;
 
 namespace
 {
@@ -376,14 +378,162 @@ TEST(feedback_comment_trims_an_oversized_log)
 TEST(feedback_comment_asks_for_one_more_run_after_the_fix)
 {
 	// **「もう一度実行してください」と書く。** 待つのをやめた（＝待つあいだ図面が
-	// 見られないので）以上、次の周は人が取り込みを 1 回実行して始まる。ここを黙ると、
-	// 読む側（Claude）が「push すれば勝手に回る」と思い込んだままになる。
+	// 見られないので）以上、パレットが開いていない周は人がコマンドを 1 回実行して始まる。
+	// ここを黙ると、読む側（Claude）が「push すれば勝手に回る」と思い込んだままになる。
+	//
+	// **頼むのは「実機テストを実行…」であって本番の取り込みではない**（M25）。この 2 つを
+	// 分けた以上、本番の取り込みを頼んでも往復は動かない。
 	const FeedbackRound round = sampleRound();
 	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
-	CHECK(contains(body, "取り込みをもう一度実行してください"));
+	CHECK(contains(body, "「実機テストを実行…」をもう一度実行してください"));
 	CHECK(contains(body, "ファイル選択も設定ダイアログも確認も再起動も要りません"));
-	// **戻すのは人の手仕事**なので、そこだけは毎回頼む（ダイアログでは頼まない）。
-	CHECK(contains(body, "「取り消し」で取り込み前へ戻してから"));
+	// **取り消しを頼むかどうかは実測で決める**（M25）。前の周が作ったレイヤはプラグインが
+	// 自分で取り除くが、**取り込み前から在ったレイヤへ描いた分は取り除けない**（そのレイヤは
+	// 自分が作ったものではないので消せない）。sampleCounts は undoPartial=false なので、
+	// この周は「戻す必要もありません」と言い切ってよい。
+	CHECK(contains(body, "「取り消し」で戻す必要もありません"));
+	CHECK(!contains(body, "取り除けません"));
+}
+
+// ---------------------------------------------------------------------------
+// **切り詰めは UTF-8 の文字境界で**（M25）。ここが崩れると壊れたバイト列が本文へ入り、
+// GitHub が 400「Problems parsing JSON」で弾いて**その周の投稿がまるごと落ちる**
+// （実機で発生。round 1・2 が通っていたのは、たまたま境界に落ちていただけ）。
+
+namespace
+{
+	// UTF-8 として妥当か（継続バイトの数が先頭バイトの宣言どおりか）。
+	bool validUtf8(const std::string& text)
+	{
+		std::size_t i = 0;
+		while (i < text.size())
+		{
+			const auto b = static_cast<unsigned char>(text[i]);
+			std::size_t len = 0;
+			if (b < 0x80U)
+				len = 1;
+			else if ((b & 0xE0U) == 0xC0U)
+				len = 2;
+			else if ((b & 0xF0U) == 0xE0U)
+				len = 3;
+			else if ((b & 0xF8U) == 0xF0U)
+				len = 4;
+			else
+				return false; // 継続バイトから始まっている＝途中で切れている
+			if (i + len > text.size())
+				return false;
+			for (std::size_t k = 1; k < len; ++k)
+			{
+				if ((static_cast<unsigned char>(text[i + k]) & 0xC0U) != 0x80U)
+					return false;
+			}
+			i += len;
+		}
+		return true;
+	}
+} // namespace
+
+// ---------------------------------------------------------------------------
+// **実機テストの結末は、実機テスト自身の言葉で言う**（M25）。取り込みコマンドの完了文言を
+// 借りて後ろへ PR の話を足すと、押した人には本番の取り込みが PR へ投稿しているように
+// 見える——コマンドを分けた意味が見た目の上で崩れる（実機の指摘）。
+
+TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
+{
+	const std::string posted =
+		formatTestRoundResult(TestRoundOutcome::PostFailed, "コメントを投稿できませんでした。");
+	CHECK(contains(posted, "PR へ投稿できませんでした"));
+	CHECK(contains(posted, "コメントを投稿できませんでした。"));
+	// **数字がどこにも残らない状態を作らない。** 投稿できていない以上、内訳を見られるのは
+	// このダイアログだけなので、そこにあることを言う。
+	CHECK(contains(posted, "ログを表示"));
+	CHECK(contains(posted, "PR には載っていません"));
+
+	const std::string failed = formatTestRoundResult(TestRoundOutcome::ImportFailed, {});
+	CHECK(contains(failed, "この周は PR へ送りませんでした"));
+	CHECK(contains(failed, "ログを表示"));
+	// 取り込みが中断したのだから「取り込みは終わりました」とは言わない。
+	CHECK(!contains(failed, "取り込みは終わりました"));
+}
+
+// **走らせないのが正しい周でも、押した人には結末を言う**（M25）。同じビルドでは取り込まない
+// ——数字が変わらないからだが、ダイアログも進捗も出ないと「何も起きていない」と読まれる
+// （実機で「再実行しても往復が始まらない」と読まれた。実際には回り直していた）。
+
+TEST(test_round_result_explains_that_the_same_build_was_not_imported_again)
+{
+	const std::string rearmed = formatTestRoundResult(TestRoundOutcome::Rearmed, "abc1234");
+	CHECK(contains(rearmed, "abc1234"));	  // どのビルドの話かを言う
+	CHECK(contains(rearmed, "前の周と同じ")); // なぜ走らせないのか
+	CHECK(contains(rearmed, "取り込みは行いませんでした"));
+	CHECK(contains(rearmed, "往復は回し直しました")); // 何が起きたのか
+	// **失敗と読ませない。** 走らせないのが正しい周である。
+	CHECK(!contains(rearmed, "できませんでした"));
+}
+
+TEST(feedback_comment_truncates_the_log_on_a_character_boundary)
+{
+	// 日本語だけの長いログ（1 文字 3 バイト）。上限を必ず超える長さにして、切り詰めが
+	// 走る場面を作る。**開始位置を 1 バイトずつずらしても**壊れないことを見る——実機で
+	// 落ちたのは、本文へ 1 行足したせいで予算が数十バイトずれた回だった。
+	for (std::size_t pad = 0; pad < 6; ++pad)
+	{
+		FeedbackRound round = sampleRound();
+		round.preparation = std::string(pad, 'x'); // 予算を 1 バイトずつずらす
+		std::string log;
+		while (log.size() < kMaxFeedbackCommentBytes + 4096)
+			log += "あいうえお かきくけこ さしすせそ\n";
+		round.log = log;
+
+		const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+		CHECK(contains(body, "バイトを省略"));
+		CHECK(validUtf8(body));
+		CHECK(body.size() <= kMaxFeedbackCommentBytes);
+	}
+}
+
+TEST(feedback_comment_shows_what_the_round_did_to_the_drawing_before_importing)
+{
+	// **取り除きが効いたかは「図面の状態」の隣に置く。** 同じ 1 行は診断ログにも入るが、
+	// ログは上限で切り詰められるので、そこだけを頼りにすると読めない周が出る
+	// （実機 round 2 でこの行が省略部分へ落ちて読めなかった）。
+	FeedbackRound round = sampleRound();
+	round.preparation =
+		"準備: 前の周が作ったレイヤを取り除きました（デザイン 5/5 枚・シート 3/3 枚）";
+	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+	CHECK(contains(body, "準備: 前の周が作ったレイヤを取り除きました"));
+	// 空なら 1 行も増やさない（1 周目や古い版の記憶）。
+	round.preparation.clear();
+	CHECK(!contains(formatFeedbackComment(round, sampleDocument(), sampleCounts()), "準備:"));
+}
+
+TEST(feedback_comment_asks_for_undo_only_when_the_round_touched_existing_layers)
+{
+	// **取り込み前から在ったレイヤへ描いた周だけ**「取り消し」を頼む。プラグインが
+	// 取り除けるのは自分が作ったレイヤだけで、テンプレートのレイヤへ描いた分は残る
+	// ——ここを黙ると「戻す必要は無い」と読んだ人の図面に前の周が積み上がる。
+	const FeedbackRound round = sampleRound();
+	DrawCounts counts = sampleCounts();
+	counts.undoPartial = true;
+	counts.existingLayers = {"共通"};
+	const std::string body = formatFeedbackComment(round, sampleDocument(), counts);
+	CHECK(contains(body, "取り除けません"));
+	CHECK(!contains(body, "「取り消し」で戻す必要もありません"));
+}
+
+TEST(feedback_comment_tells_how_the_automatic_loop_runs_and_stops)
+{
+	// **モードレスの往復（M24）。** パレットが開いていれば次の周は自動で走る。読む側は
+	// 「push すれば来る」と「合図で止められる」の 2 つを本文から拾えなければならない
+	// ——合図の綴りはここが唯一の案内（同梱スクリプトの loop-control が読む形と同じ）。
+	const FeedbackRound round = sampleRound();
+	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+	CHECK(contains(body, "次の周が自動で走ります"));
+	CHECK(contains(body, "control=stop"));
+	// **生の目印は本文へ置かない。** この本文はプラグイン自身の投稿で、合図を探す側が
+	// これを読む——実機 round 1 で、この案内文が自分の合図として読まれ 1 通目で往復が
+	// 止まった（docs/DEV-NOTES.md M24）。読む側も直したが、書く側でも置かない。
+	CHECK(!contains(body, "<!-- homeskz-ifc-feedback v1 control=stop -->"));
 }
 
 TEST_MAIN();

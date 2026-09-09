@@ -16,6 +16,8 @@
 #   logout                     キーチェーンから消す
 #   find-pr <repo> <branch>    そのブランチの open な PR 番号を引く
 #   post <repo> <n> <body-file>  PR（= issue）へコメントを 1 通投稿する
+#   loop-control <repo> <n> [since]  PR が open か・以後に「止めろ」の合図が付いたか
+#                                    （モードレスの往復が周期的に呼ぶ。M24）
 #
 # **ダイアログはここには無い。** 尋ねるのは全部プラグイン側で、しかも**取り込みが始まる
 # 前**に済ませる（src/draw/Feedback.h）。ここでダイアログを出すと、プラグインは popen の
@@ -128,6 +130,52 @@ json_string_from_file() { # file
 		}
 		END { printf "\"" }
 	' "$1"
+}
+
+# ---------------------------------------------------------------------------
+# GET 1 回（あればトークンを付ける）。**配列を使わない**ため、付ける／付けないで
+# curl の呼び出しを 2 つ書く（冒頭「配列を使わない」）。取れたら 0。
+# ---------------------------------------------------------------------------
+api_get() { # token, url, out-file
+	if [ -n "$1" ]; then
+		curl -fsSL --max-time 20 --retry 2 \
+			-H "Authorization: Bearer ${1}" \
+			-H "Accept: application/vnd.github+json" "$2" -o "$3"
+	else
+		curl -fsSL --max-time 20 --retry 2 \
+			-H "Accept: application/vnd.github+json" "$2" -o "$3"
+	fi
+}
+
+# コメント本文から**往復への合図**を読む。合図は
+#   <!-- homeskz-ifc-feedback v1 control=stop -->
+# **ただ 1 行**で、その行に他の文字があってはならない。合図なら "stop"、無ければ "none"。
+#
+# **「書いてある」と「合図である」は違う。** 本文のどこかに現れる `control=stop` を拾う作り
+# では、**この目印を説明した文章が合図になってしまう**——実機 round 1 でまさにそれが起きた
+# （プラグイン自身の投稿が末尾で「合図はこう書きます」と案内しており、その 1 通目を読んだ
+# 時点で往復が止まった。docs/DEV-NOTES.md M24「合図は行、文中の引用ではない」）。
+# だから 3 つで縛る:
+#
+#   1. **行がまるごと目印であること**（前後は空白だけ）。文中に引用したものは合図でない。
+#   2. **``` で囲まれた中は読まない**（例として貼ったものを合図にしない）。
+#   3. **プラグイン自身の投稿は合図にしない**（`round=` / `control=ended` の目印を持つ本文）。
+#      1 と 2 で足りているが、ここは「自分の言葉で自分が止まる」を二度と起こさないための
+#      歯止めなので、判定を重ねておく。
+control_of_comment() { # body-text
+	printf '%s\n' "$1" | LC_ALL=C awk '
+		/^[[:space:]]*```/ { fence = !fence; next }
+		fence { next }
+		{
+			line = $0
+			sub(/^[[:space:]]+/, "", line)
+			sub(/[[:space:]]+$/, "", line)
+			if (line ~ /^<!--[[:space:]]*homeskz-ifc-feedback[[:space:]]+v1[[:space:]]+round=/) { self = 1 }
+			if (line ~ /^<!--[[:space:]]*homeskz-ifc-feedback[[:space:]]+v1[[:space:]]+control=ended/) { self = 1 }
+			if (line ~ /^<!--[[:space:]]*homeskz-ifc-feedback[[:space:]]+v1[[:space:]]+control=stop[[:space:]]*-->$/) { stop = 1 }
+		}
+		END { print (stop && !self) ? "stop" : "none" }
+	'
 }
 
 # ---------------------------------------------------------------------------
@@ -250,8 +298,72 @@ mode_post() {
 		return 0
 	fi
 	local url; url="$(jval "$out" "html_url")"
+	# **投稿した時刻（ISO 8601, UTC）も返す。** 往復の駆動はこれを次の loop-control の
+	# since に使い、「自分の投稿より後に付いた合図」だけを読む（古い合図を何度も読まない）。
+	local created; created="$(jval "$out" "created_at")"
 	rm -f "$out"
 	[ -n "$url" ] && echo "url=${url}"
+	[ -n "$created" ] && echo "created=${created}"
+	echo "ok"
+}
+
+# loop-control <repo> <issue-number> [since]: **往復を続けてよいか**（M24。モードレスの
+# 往復が周期的に呼ぶ）。答えは 2 つ:
+#   state=<open|closed|merged>   PR の状態（閉じたら続ける相手がいない）
+#   control=<stop|none>          since 以降のコメントに「止めろ」の合図があるか
+#   ok
+# since は ISO 8601（post が返した created=）。**無ければ最近のコメントから読む**
+# （古い記憶で走っているとき用。上限 5 ページ＝500 通）。合図が複数あれば最後のものが
+# 勝つ——が、合図は stop しか無いので、1 つでもあれば stop。
+mode_loop_control() {
+	local repo="${1:-$VW_REPO}" number="${2:-}" since="${3:-}"
+	if [ -z "$number" ]; then
+		echo "error=PR 番号が指定されていません。"; return 0
+	fi
+	local token; token="$(resolve_token || true)"
+
+	local f; f="$(mktemp)"
+	if ! api_get "$token" "${VW_API}/repos/${repo}/pulls/${number}" "$f"; then
+		rm -f "$f"; echo "error=PR の状態を取得できませんでした（ネットワークか権限）。"; return 0
+	fi
+	local state; state="$(jval "$f" "state")"
+	local merged; merged="$(jval "$f" "merged")"
+	rm -f "$f"
+	if [ -z "$state" ]; then
+		echo "error=PR の状態を読めませんでした。"; return 0
+	fi
+	# 真偽の綴りは読み手（plutil / 試験の python 代替）で揺れるので寛容に読む。
+	case "$merged" in
+		true | True | TRUE | 1) state="merged" ;;
+	esac
+
+	local control="none" page=1 maxpage=5 url i body count
+	# since があれば「自分の投稿より後」だけなので 1〜2 ページで足りる。
+	[ -n "$since" ] && maxpage=2
+	while [ "$page" -le "$maxpage" ]; do
+		url="${VW_API}/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}"
+		[ -n "$since" ] && url="${url}&since=${since}"
+		f="$(mktemp)"
+		if ! api_get "$token" "$url" "$f"; then
+			rm -f "$f"; echo "error=PR のコメントを取得できませんでした（ネットワークか権限）。"; return 0
+		fi
+		count=0
+		i=0
+		while [ "$i" -lt 100 ]; do
+			# 項目の有無は id で見る（本文は空でもよい）。
+			[ -n "$(jval "$f" "${i}.id")" ] || break
+			count=$((count + 1))
+			body="$(jval "$f" "${i}.body")"
+			[ "$(control_of_comment "$body")" = "stop" ] && control="stop"
+			i=$((i + 1))
+		done
+		rm -f "$f"
+		[ "$count" -lt 100 ] && break
+		page=$((page + 1))
+	done
+
+	echo "state=${state}"
+	echo "control=${control}"
 	echo "ok"
 }
 
@@ -267,7 +379,8 @@ main() {
 		logout)       mode_logout ;;
 		find-pr)      mode_find_pr "${1:-}" "${2:-}" ;;
 		post)         mode_post "${1:-}" "${2:-}" "${3:-}" ;;
-		*)            echo "error=不明なモード: '${mode}'（token-status / login / logout / find-pr / post）。" ;;
+		loop-control) mode_loop_control "${1:-}" "${2:-}" "${3:-}" ;;
+		*)            echo "error=不明なモード: '${mode}'（token-status / login / logout / find-pr / post / loop-control）。" ;;
 	esac
 }
 

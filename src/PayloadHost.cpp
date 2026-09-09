@@ -416,13 +416,18 @@ namespace HomeskzIfcImport
 		auto initFn = reinterpret_cast<VwPayloadInitFn>(fModule.symbol(VW_PAYLOAD_SYM_INIT));
 		auto infoFn = reinterpret_cast<VwPayloadInfoFn>(fModule.symbol(VW_PAYLOAD_SYM_INFO));
 		fImportFn = reinterpret_cast<VwPayloadRunImportFn>(fModule.symbol(VW_PAYLOAD_SYM_IMPORT));
+		fTestFn = reinterpret_cast<VwPayloadRunTestFn>(fModule.symbol(VW_PAYLOAD_SYM_TEST));
 		fBridgeFn =
 			reinterpret_cast<VwPayloadRunMcpBridgeFn>(fModule.symbol(VW_PAYLOAD_SYM_BRIDGE));
 		fRecalcFn = reinterpret_cast<VwPayloadRecalculateFn>(fModule.symbol(VW_PAYLOAD_SYM_RECALC));
 		fShutdownFn =
 			reinterpret_cast<VwPayloadShutdownFn>(fModule.symbol(VW_PAYLOAD_SYM_SHUTDOWN));
+		fLoopStatusFn =
+			reinterpret_cast<VwPayloadLoopStatusFn>(fModule.symbol(VW_PAYLOAD_SYM_LOOP_STATUS));
+		fLoopEndFn = reinterpret_cast<VwPayloadLoopEndFn>(fModule.symbol(VW_PAYLOAD_SYM_LOOP_END));
 		if (abiFn == nullptr || initFn == nullptr || infoFn == nullptr || fImportFn == nullptr ||
-			fBridgeFn == nullptr || fRecalcFn == nullptr || fShutdownFn == nullptr)
+			fTestFn == nullptr || fBridgeFn == nullptr || fRecalcFn == nullptr ||
+			fShutdownFn == nullptr || fLoopStatusFn == nullptr || fLoopEndFn == nullptr)
 		{
 			error = "本体の形が違います（必要な関数が見つかりません）。\n"
 					"殻と本体の版が食い違っている可能性があります。";
@@ -479,23 +484,40 @@ namespace HomeskzIfcImport
 		return true;
 	}
 
-	bool Payload::runImport(bool& autoUpdateOut, std::string& error)
+	bool Payload::runImport(std::string& error)
 	{
 		error.clear();
-		autoUpdateOut = false;
 		if (!fLoaded || fImportFn == nullptr)
 		{
 			error = "本体が読み込まれていません。";
 			return false;
 		}
-		int autoUpdate = 0;
-		const int status = fImportFn(&autoUpdate);
+		const int status = fImportFn();
 		if (status != kVwPayloadOk)
 		{
 			error = "取り込みを開始できませんでした（コード " + std::to_string(status) + "）。";
 			return false;
 		}
-		autoUpdateOut = (autoUpdate != 0);
+		return true;
+	}
+
+	bool Payload::runTest(bool allowDialogs, bool& activeOut, std::string& error)
+	{
+		error.clear();
+		activeOut = false;
+		if (!fLoaded || fTestFn == nullptr)
+		{
+			error = "本体が読み込まれていません。";
+			return false;
+		}
+		int active = 0;
+		const int status = fTestFn(allowDialogs ? 1 : 0, &active);
+		if (status != kVwPayloadOk)
+		{
+			error = "実機テストを開始できませんでした（コード " + std::to_string(status) + "）。";
+			return false;
+		}
+		activeOut = (active != 0);
 		return true;
 	}
 
@@ -535,6 +557,44 @@ namespace HomeskzIfcImport
 		return true;
 	}
 
+	bool Payload::loopStatus(std::string& out, std::string& error)
+	{
+		error.clear();
+		out.clear();
+		if (!fLoaded || fLoopStatusFn == nullptr)
+		{
+			error = "本体が読み込まれていません。";
+			return false;
+		}
+		const char* text = nullptr;
+		const int status = fLoopStatusFn(&text);
+		if (status != kVwPayloadOk)
+		{
+			error = "往復の記憶を読めませんでした（コード " + std::to_string(status) + "）。";
+			return false;
+		}
+		if (text != nullptr)
+			out = text; // ← その場で写す（PayloadAbi.h「返る文字列の寿命」）
+		return true;
+	}
+
+	bool Payload::endLoop(const std::string& reason, bool notifyPr, std::string& error)
+	{
+		error.clear();
+		if (!fLoaded || fLoopEndFn == nullptr)
+		{
+			error = "本体が読み込まれていません。";
+			return false;
+		}
+		const int status = fLoopEndFn(reason.c_str(), notifyPr ? 1 : 0);
+		if (status != kVwPayloadOk)
+		{
+			error = "往復を止められませんでした（コード " + std::to_string(status) + "）。";
+			return false;
+		}
+		return true;
+	}
+
 	void Payload::unload()
 	{
 		// 順序が肝。① 本体に殻への参照を手放させる ② 降ろす ③ 複製を消す。
@@ -542,9 +602,12 @@ namespace HomeskzIfcImport
 			fShutdownFn();
 		fLoaded = false;
 		fImportFn = nullptr;
+		fTestFn = nullptr;
 		fBridgeFn = nullptr;
 		fRecalcFn = nullptr;
 		fShutdownFn = nullptr;
+		fLoopStatusFn = nullptr;
+		fLoopEndFn = nullptr;
 		fCommit.clear();
 		fBranch.clear();
 		fStamp = PayloadStamp{};

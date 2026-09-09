@@ -9,7 +9,9 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtColumnMark.h"
+#include "Extensions/ExtFeedbackPalette.h"
 #include "Extensions/ExtShearWall.h"
+#include "Extensions/ExtTestMenu.h"
 #include "Extensions/ExtMcpMenu.h"
 #include "Extensions/ExtMenu.h"
 #include "Extensions/ExtUpdateMenu.h"
@@ -91,6 +93,22 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// （Extensions/ExtMcpMenu.h）。登録だけがここにあり、実処理は本体側。
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuMcpBridge>(
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
+
+#ifdef VW_DEV_BUILD
+	// M25 「実機テストを実行」コマンド。**開発版だけ**——往復（記憶した条件で取り込み直して
+	// PR へ投稿する）はこのコマンドが丸ごと持ち、本番の取り込みコマンドは往復を知らない
+	// （Extensions/ExtTestMenu.h）。安定版はこのクラスを持つがどこにも登録しない。
+	REGISTER_Extension<HomeskzIfcImport::CExtMenuTest>(GROUPID_ExtensionMenu, action, moduleInfo,
+													   iid, inOutInterface, cbp, reply);
+
+	// M24 実機フィードバックの往復を回すモードレスなパレット。**開発版だけ**——往復するのは
+	// PR のビルドであって main の配布物ではない（Extensions/ExtFeedbackPalette.h）。
+	// 登録の枠組みはメニュー・PIO と同じ（グループ ID が違うだけ。SDK リファレンス
+	// Findings「モードレス（非モーダル）なパレット」）。
+	REGISTER_Extension<HomeskzIfcImport::CExtFeedbackPalette>(
+		VectorWorks::Extension::GROUPID_ExtensionWebPalettes, action, moduleInfo, iid,
+		inOutInterface, cbp, reply);
+#endif
 
 	return reply;
 }

@@ -22,6 +22,8 @@
 
 using HomeskzIfcImport::core::clearFeedbackSession;
 using HomeskzIfcImport::core::defaultFeedbackSessionPath;
+using HomeskzIfcImport::core::FeedbackRoundKind;
+using HomeskzIfcImport::core::feedbackRoundKind;
 using HomeskzIfcImport::core::FeedbackSession;
 using HomeskzIfcImport::core::formatFeedbackSession;
 using HomeskzIfcImport::core::kSymbolRoleCount;
@@ -41,12 +43,17 @@ namespace
 		session.pullRequest = 123;
 		session.branch = "claude/plugin-feedback-automation-01bi93";
 		session.ifcPath = "/Users/someone/Documents/物件A.ifc";
+		session.workPath = "/tmp/homeskz-work.vwx";
 		session.anonymize = false;
 		session.round = 3;
 		session.lastCommit = "a1b2c3d";
 		session.lastTally = "ストーリ:3/3,通り芯:44/44";
+		session.lastPostedAt = "2026-09-07T01:02:03Z";
+		session.loop = true;
 		session.baselineRecorded = true;
 		session.baselineLayers = {"共通", "デザイン レイヤ-1"};
+		session.lastCreatedLayers = {"1-伏図", "2-伏図"};
+		session.lastCreatedSheets = {"A-1", "A-2"};
 		session.options.setSymbol(SymbolRole::FloorPost, "床束（特注）");
 		session.options.setEnabled(SymbolRole::FireBrace, false);
 		return session;
@@ -119,6 +126,13 @@ TEST(feedback_session_without_a_baseline_reads_as_not_recorded)
 	const FeedbackSession session = parseFeedbackSession("round=2\nbuild=a1b2c3d\n");
 	CHECK(!session.baselineRecorded);
 	CHECK(session.baselineLayers.empty());
+	// 古い版には「前の周が作ったレイヤ」の行も無い。**空＝消す相手が分からない**ので、
+	// そのときは図面に触らない（draw/Feedback の prepareDrawingForRound）。
+	CHECK(session.lastCreatedLayers.empty());
+	CHECK(session.lastCreatedSheets.empty());
+	// 開き直しの行（M25）も無い。**空＝開き直さない**なので、古い記憶を読んでも従来
+	// どおり「いま開いている図面へ描く」に落ちる。
+	CHECK(session.workPath.empty());
 }
 
 TEST(feedback_session_keeps_an_empty_baseline_distinct_from_none)
@@ -141,16 +155,33 @@ TEST(feedback_session_round_trips_through_text)
 	CHECK_EQ(after.pullRequest, before.pullRequest);
 	CHECK_EQ(after.branch, before.branch);
 	CHECK_EQ(after.ifcPath, before.ifcPath);
+	// **毎周開き直す図面**（M25）。テンプレートのパスが落ちると、次の周は開き直さずに
+	// 前の周の図へ重ねて描いてしまう。開いた複製のパスが落ちると、その図面を閉じられず
+	// 周の数だけ積み上がる。
+	CHECK_EQ(after.workPath, before.workPath);
 	CHECK_EQ(after.anonymize, before.anonymize);
 	CHECK_EQ(after.round, before.round);
 	CHECK_EQ(after.lastCommit, before.lastCommit);
 	CHECK_EQ(after.lastTally, before.lastTally);
+	// モードレスの往復（M24）が持ち越すもの: 直近の投稿の時刻と、回っているか。
+	CHECK_EQ(after.lastPostedAt, before.lastPostedAt);
+	CHECK_EQ(after.loop, before.loop);
 	// 1 周目に採った基準（レイヤの顔ぶれ）。**ここが落ちると次の周で図面が戻っているかを
 	// 判定できなくなる**（テンプレートのレイヤと前の周の残りを区別できない）。
 	CHECK_EQ(after.baselineRecorded, before.baselineRecorded);
 	CHECK_EQ(after.baselineLayers.size(), before.baselineLayers.size());
 	for (std::size_t i = 0; i < before.baselineLayers.size(); ++i)
 		CHECK_EQ(after.baselineLayers[i], before.baselineLayers[i]);
+	// **前の周が作ったレイヤ**（M25）。次の周の前にこれ**だけ**を図面から取り除くので、
+	// ここが落ちると「消してよいもの」を見失う——見失ったまま別の基準で消す作りに
+	// してはならない（利用者が足したレイヤを巻き込む）。デザインとシートは混ぜない
+	// （消す順序が違う: シートが先）。
+	CHECK_EQ(after.lastCreatedLayers.size(), before.lastCreatedLayers.size());
+	for (std::size_t i = 0; i < before.lastCreatedLayers.size(); ++i)
+		CHECK_EQ(after.lastCreatedLayers[i], before.lastCreatedLayers[i]);
+	CHECK_EQ(after.lastCreatedSheets.size(), before.lastCreatedSheets.size());
+	for (std::size_t i = 0; i < before.lastCreatedSheets.size(); ++i)
+		CHECK_EQ(after.lastCreatedSheets[i], before.lastCreatedSheets[i]);
 	// 取り込み設定も 1 周目のまま運ばれる（ここが落ちると 2 周目が別の条件で走る）。
 	for (std::size_t i = 0; i < kSymbolRoleCount; ++i)
 	{
@@ -158,6 +189,15 @@ TEST(feedback_session_round_trips_through_text)
 		CHECK_EQ(after.options.symbol(role), before.options.symbol(role));
 		CHECK_EQ(after.options.isEnabled(role), before.options.isEnabled(role));
 	}
+}
+
+TEST(feedback_session_without_loop_lines_reads_as_not_looping)
+{
+	// 古い版（M23）が書いた記憶には posted / loop の行が無い。**自動の往復は回って
+	// いない**と読むのが正しい——立てて読むと、古い記憶でパレットが勝手に回り出す。
+	const FeedbackSession session = parseFeedbackSession("send=1\nround=2\nbuild=a1b2c3d\n");
+	CHECK(!session.loop);
+	CHECK(session.lastPostedAt.empty());
 }
 
 TEST(feedback_session_parse_skips_broken_lines)
@@ -292,6 +332,74 @@ TEST(feedback_session_empty_path_is_refused)
 	CHECK(!readFeedbackSession("", session));
 	CHECK(!writeFeedbackSession("", session));
 	clearFeedbackSession("");
+}
+
+// ---------------------------------------------------------------------------
+// **実機テストの周がどれになるか**（M25。core/FeedbackSession.h の feedbackRoundKind）。
+// この場合分けが M25 の要点なので、描画側に散らさず無 SDK でここに固定する。
+
+namespace
+{
+	// 「1 周投稿できた」記憶（この 3 つが揃って初めて続きの周を組み立てられる）。
+	FeedbackSession postedOnce()
+	{
+		FeedbackSession session;
+		session.send = true;
+		session.round = 1;
+		session.ifcPath = "/tmp/model.ifc";
+		session.lastCommit = "aaaaaaa";
+		return session;
+	}
+} // namespace
+
+TEST(feedback_round_kind_continues_when_a_new_build_is_running)
+{
+	// 記憶があり、動いているビルドがそれと違う——**これだけが続きの周**である。
+	CHECK(feedbackRoundKind(postedOnce(), "bbbbbbb", /*allowDialogs*/ true) ==
+		  FeedbackRoundKind::ContinueRound);
+	// パレットの周（ダイアログ禁止）でも同じ。ここへ来るのは新しいビルドを入れた直後だけ。
+	CHECK(feedbackRoundKind(postedOnce(), "bbbbbbb", /*allowDialogs*/ false) ==
+		  FeedbackRoundKind::ContinueRound);
+}
+
+TEST(feedback_round_kind_does_not_import_again_on_the_same_build)
+{
+	// **同じビルドでは取り込まない。** 取り込んでも前の周と同じ数字が並ぶだけで、その
+	// 1 分は最初から無駄である。M24 まではここを「新しい 1 周目」として取り込み直して
+	// おり、パレットが開いている最中にメニューを押した人が同じ round を二重に投稿した
+	// （実機で発生。docs/DEV-NOTES.md M25）。
+	CHECK(feedbackRoundKind(postedOnce(), "aaaaaaa", /*allowDialogs*/ true) ==
+		  FeedbackRoundKind::RearmOnly);
+}
+
+TEST(feedback_round_kind_starts_a_first_round_without_memory)
+{
+	CHECK(feedbackRoundKind(FeedbackSession{}, "aaaaaaa", /*allowDialogs*/ true) ==
+		  FeedbackRoundKind::FirstRound);
+
+	// **記憶として使えるのは 3 つ揃っているときだけ。** どれが欠けても 1 周目に戻る
+	// ——欠けたまま「続き」を組み立てると、宛先も IFC も無いまま走ることになる。
+	FeedbackSession notSending = postedOnce();
+	notSending.send = false;
+	CHECK(feedbackRoundKind(notSending, "bbbbbbb", true) == FeedbackRoundKind::FirstRound);
+
+	FeedbackSession neverPosted = postedOnce();
+	neverPosted.round = 0;
+	CHECK(feedbackRoundKind(neverPosted, "bbbbbbb", true) == FeedbackRoundKind::FirstRound);
+
+	FeedbackSession noFile = postedOnce();
+	noFile.ifcPath.clear();
+	CHECK(feedbackRoundKind(noFile, "bbbbbbb", true) == FeedbackRoundKind::FirstRound);
+}
+
+TEST(feedback_round_kind_refuses_when_it_would_have_to_ask)
+{
+	// パレットの周はダイアログを 1 枚も出せない。尋ねないと始められない場面では
+	// **何もしない**——黙ってファイル選択を出すことも、勝手に始めることもしない。
+	CHECK(feedbackRoundKind(FeedbackSession{}, "aaaaaaa", /*allowDialogs*/ false) ==
+		  FeedbackRoundKind::Refuse);
+	CHECK(feedbackRoundKind(postedOnce(), "aaaaaaa", /*allowDialogs*/ false) ==
+		  FeedbackRoundKind::Refuse);
 }
 
 TEST_MAIN();

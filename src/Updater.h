@@ -67,4 +67,9 @@ namespace HomeskzIfcImport
 	// 例外は投げない。呼び出し側（SDK のコールバック）へ漏らさないための最後の壁は
 	// それぞれの入口が持つ。
 	bool CheckForUpdates(UpdateCheckKind kind);
+
+	// **モードレスの往復（M24）が周期的に呼ぶ、尋ねも報せもしない開発版の確認**
+	// （UpdaterHost.h の PollDevBuildWith を実物の host と殻の素性で結ぶ）。安定版では
+	// 常に NoNewBuild——往復するのは PR のビルドであって main の配布物ではない。
+	DevBuildPollResult PollDevBuild();
 } // namespace HomeskzIfcImport

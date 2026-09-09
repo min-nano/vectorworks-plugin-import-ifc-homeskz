@@ -59,7 +59,11 @@
 //   2 … 実機フィードバックの往復（M23）。同梱スクリプトの実行を殻から借り、取り込みは
 //       「次は更新を尋ねずに入れてよいか」を返すようになった
 //   3 … MCP ブリッジ（vw_payload_run_mcp_bridge）を足した
-#define VW_PAYLOAD_ABI_VERSION 3u
+//   4 … モードレスの往復（M24）。殻のパレットが本体へ「往復の記憶」を尋ね（loop_status）、
+//       止めたことを伝える（loop_end）口が増えた
+//   5 … 実機テストを本番の取り込みから分けた（M25）。往復は run_test が持ち、run_import は
+//       「次は更新を尋ねずに入れてよいか」を返さなくなった（本番の経路から往復が消えた）
+#define VW_PAYLOAD_ABI_VERSION 5u
 
 // 本体側の export 指定。Windows は明示しないと DLL の外から見えない。
 #if defined(_WIN32)
@@ -127,28 +131,54 @@ extern "C"
 #define VW_PAYLOAD_SYM_INIT "vw_payload_init"
 #define VW_PAYLOAD_SYM_INFO "vw_payload_info"
 #define VW_PAYLOAD_SYM_IMPORT "vw_payload_run_import"
+#define VW_PAYLOAD_SYM_TEST "vw_payload_run_test"
 #define VW_PAYLOAD_SYM_BRIDGE "vw_payload_run_mcp_bridge"
 #define VW_PAYLOAD_SYM_RECALC "vw_payload_recalculate"
 #define VW_PAYLOAD_SYM_SHUTDOWN "vw_payload_shutdown"
+#define VW_PAYLOAD_SYM_LOOP_STATUS "vw_payload_loop_status"
+#define VW_PAYLOAD_SYM_LOOP_END "vw_payload_loop_end"
 
 	// その型。
 	using VwPayloadAbiVersionFn = unsigned int (*)();
 	using VwPayloadInitFn = int (*)(const VwPayloadHost*);
 	using VwPayloadInfoFn = int (*)(VwPayloadInfo*);
-	// 取り込みコマンド 1 周ぶん。**outAutoUpdate に 0 以外が入って戻ったら、次にこの
-	// コマンドが走るときは更新を尋ねずに入れる**（実機フィードバックの往復。
-	// src/Extensions/ExtMenu.cpp）。往復の最中にいる人へ周ごとに「インストールします
-	// か？」を出さないためのもので、判断できるのは本体（記憶を持っている側）だけ。
+	// **本番の取り込みコマンド 1 周ぶん**（ファイル選択 → 設定 → 取り込み → 結果
+	// ダイアログ）。M25 で往復の都合が抜けたので、返すものは「呼べたか」だけになった
+	// （src/draw/ImportCommand.h）。
+	using VwPayloadRunImportFn = int (*)();
+
+	// **実機テストの 1 周**（M25。dev だけ。src/draw/Feedback.h の runTestRound）。
+	// 往復（記憶した条件で取り込み直して PR へ投稿する）を知っているのはこちらだけで、
+	// 上の取り込みコマンドは往復を知らない。
+	//
+	//   allowDialogs … 0 以外ならダイアログを出してよい（メニューから実行したとき）。
+	//                  パレットの周は 0 で、そのとき 1 枚も出ない。
+	//   outActive    … 0 以外で戻ったら往復が回っている＝殻はパレットを開く
+	//                  （src/Extensions/ExtTestMenu.cpp）。
 	//
 	// **入れ替えを頼むのではない。** 本体を降ろせるのはそのコードがスタックに 1 つも
 	// 無いときだけなので、入れ替えはこの関数から戻ったあと、次の呼び出しの頭で起きる
 	// （src/PayloadSession.h）。
-	using VwPayloadRunImportFn = int (*)(int* outAutoUpdate);
+	using VwPayloadRunTestFn = int (*)(int allowDialogs, int* outActive);
 
 	// MCP ブリッジ 1 回。**止められるまで戻らない**（src/draw/McpBridge.h）。
 	using VwPayloadRunMcpBridgeFn = int (*)();
 	using VwPayloadRecalculateFn = int (*)(unsigned int, void*, int*);
 	using VwPayloadShutdownFn = void (*)();
+
+	// **往復の記憶を殻へ見せる**（M24。src/FeedbackLoop.h）。out には key=value の行が
+	// 並ぶ（active / repo / pr / branch / round / build / posted。UpdaterParse の ValueOf で
+	// 解ける）。文字列の寿命は他と同じ——**次に本体を呼ぶまで**。殻はその場で写す。
+	//
+	// 記憶を読むのが本体なのは、その形（core::FeedbackSession）を知っているのが本体だけ
+	// だから——殻は core/ をリンクしない（CLAUDE.md「殻と本体」7）。
+	using VwPayloadLoopStatusFn = int (*)(const char** out);
+
+	// **自動の往復を止めたと本体へ伝える。** 本体は記憶の loop を下ろす（記憶そのものは
+	// 消さない——人がメニューから実行すれば続きの周として走る）。notifyPr が 0 以外なら
+	// PR へ「終えました」を 1 通投稿する（読む側が待ち続けないように）。reason は
+	// 人に見せる 1 行（UTF-8）。
+	using VwPayloadLoopEndFn = int (*)(const char* reason, int notifyPr);
 
 	// -----------------------------------------------------------------------
 	// 戻り値。**0 が成功**で、それ以外は理由を表す（例外は越えさせないので、失敗は

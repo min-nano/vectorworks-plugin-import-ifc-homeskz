@@ -276,6 +276,23 @@ namespace HomeskzIfcImport::draw
 			return !fExistingLayers.empty();
 		}
 
+		// **このインポートが新しく作ったレイヤの名前**（登場順に重複なし）。デザインと
+		// シートを分けて持つ——次の周の前に取り除くとき**シートを先に消す**必要があり
+		// （RemoveCreatedLayers の doc コメント）、順序を呼ぶ側に委ねないため。
+		//
+		// 実機フィードバックの往復が、次の周の取り込みの前に**この顔ぶれだけ**を図面から
+		// 取り除いて取り込み前へ戻す（draw/Feedback の prepareDrawingForRound）。
+		// **自分が作ったものだけを覚えておくのが安全弁**である——「基準に無いレイヤ」を
+		// 消す作りにすると、利用者が別の用途で足したレイヤまで巻き込む。
+		const std::vector<std::string>& createdDesignLayers() const
+		{
+			return fCreatedDesignLayers;
+		}
+		const std::vector<std::string>& createdSheetLayers() const
+		{
+			return fCreatedSheetLayers;
+		}
+
 		// 取り込み前から在ったレイヤの名前（登場順に重複なし）。
 		//
 		// **真偽 1 つでは足りない。** 図面のテンプレートに「共通」等が最初から在れば、
@@ -297,8 +314,55 @@ namespace HomeskzIfcImport::draw
 		bool contains(MCObjectHandle layer) const;
 
 		std::vector<MCObjectHandle> fCreatedLayers; // このインポートが作ったレイヤ
+		std::vector<std::string> fCreatedDesignLayers; // その名前（デザインレイヤ・登場順）
+		std::vector<std::string> fCreatedSheetLayers; // その名前（シートレイヤ・登場順）
 		std::vector<std::string> fExistingLayers; // 取り込み前から在ったレイヤ（登場順）
 	};
+
+	// **名前で指定したレイヤを図面から取り除く。** 実機フィードバックの往復が、次の周の
+	// 取り込みの前に前の周の図を消すのに使う——**このリポジトリで唯一「利用者の図面から
+	// ものを消す」コード**なので、安全弁は下記のとおり厳しくしてある。
+	//
+	// 【SDK の作法】ISDK に `DeleteLayer` 相当は無く、汎用 `DeleteObject` をレイヤの
+	// ハンドルへ呼ぶ 1 通りだけ（SDK リファレンス Findings「Undo」。実機確認済み:
+	// min-nano/vectorworks-developer-sdk-reference#25）。**`DeleteObject(h, useUndo=true)`
+	// はイベントが開いていなければ自分で開き、閉じないまま残す**ので、呼ぶ側が undo
+	// イベントを開始・終了する（同 Findings。ここでその作法を守っている）。
+	//
+	// 【シートを先に消す】ビューポートが参照しているデザインレイヤを先に消したときの
+	// 影響は Findings で未確認のまま残っている。シート（＝ビューポートが載っている側）を
+	// 先に消せばその場面自体が起きないので、順序をここで固定する。
+	//
+	// 【安全弁】名前が一致し、**種別が指定どおり**（デザインはデザイン、シートはシート）で、
+	// **消したあとにレイヤが 1 枚も無くならない**ときだけ消す。1 枚も残らない図面は
+	// Findings でも未確認である。
+	//
+	// 戻り値は実際に消せた枚数。note には人が読む 1 行が入る（診断ログへ出す）。
+	std::size_t RemoveCreatedLayers(const std::vector<std::string>& designLayers,
+									const std::vector<std::string>& sheetLayers, std::string& note);
+
+	// **「取り消し」を 1 段掛ける。** 実機フィードバックの往復が、次の周の取り込みの前に
+	// 前の周の図を戻すのに使う。戻り値は「スクリプトを走らせられたか」だけで、**何が
+	// 取り消されたかは言わない**——効いたかどうかは呼ぶ側が図面を読み戻して確かめること
+	// （下記 AnyLayerRemains）。
+	//
+	// 【SDK の作法】ISDK に「メニューの取り消しを起こす」呼び出しは無い。**VectorScript
+	// エンジンに `DoMenuTextByName('Undo', 0)` を走らせる**のが唯一の道で、これは実機で
+	// 効くと確定している（SDK リファレンス Findings「Undo」/ issue #39）。守ること:
+	//   * **Python では走らせない**——`IPythonScriptEngine::ExecuteScript` から `vs.*` を
+	//     呼ぶと VectorWorks ごと落ちる（同 Findings）。
+	//   * **`CompileScript` を呼ばない**——`showDialogs=false` でも成功のダイアログが毎回
+	//     出て、無人の周が止まる（同 Findings）。成否は `ExecuteScript` の戻り値で足りる。
+	//   * **自分の undo イベントを開いたまま呼ばない**——取り消しの実行はそのイベントを
+	//     終わらせてしまう（同 Findings）。取り込みが始まる前に呼ぶこと。
+	//   * 取り消せるのは**取り消しスタックに載っているもの**だけ。このプラグインの取り込みは
+	//     自分でイベントを開いて作ったレイヤを登録しているので載る（ImportUndoScope）。
+	bool UndoOneStep();
+
+	// 指定した名前のレイヤが**1 枚でも**図面に残っているか（種別も見る。デザインはデザイン、
+	// シートはシート）。取り消しが効いたかを読み戻して確かめるために使う。
+	bool AnyLayerRemains(const std::vector<std::string>& designLayers,
+						 const std::vector<std::string>& sheetLayers);
 
 	// このインポートが新しく作ったレイヤを undo イベントへ登録する（デザイン／シートの
 	// どちらも）。イベントが開いていなければ何もしない。nil は無視。

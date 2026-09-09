@@ -252,6 +252,8 @@ namespace HomeskzIfcImport::draw
 		counts.undoArmed = undoScope.armed();
 		counts.undoPartial = undoScope.partial();
 		counts.existingLayers = undoScope.existingLayers();
+		counts.createdLayers = undoScope.createdDesignLayers();
+		counts.createdSheets = undoScope.createdSheetLayers();
 
 		return counts;
 	}

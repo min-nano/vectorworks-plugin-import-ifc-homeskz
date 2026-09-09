@@ -6,7 +6,8 @@
 //	置き換えて、読み直せる**＝プラグインのアップデートに Vectorworks の再起動が要らない。
 //
 //	ここが持っているのは「殻から呼ばれたものを、中の実装へ取り次ぐ」ところだけ。実処理は
-//	draw::runImportCommand（取り込み）と draw::recalculate*（PIO のリセット）にある。
+//	draw::runImportCommand（本番の取り込み）・draw::runTestRound（実機テスト。M25）と
+//	draw::recalculate*（PIO のリセット）にある。
 //	メニュー・PIO の登録と自動アップデートは殻の側（そちらは滅多に変わらない＝再起動も
 //	滅多に要らない）。
 //
@@ -28,6 +29,7 @@
 #include "PayloadAbi.h"
 #include "PayloadHostHolder.h"
 #include "draw/ColumnMarkPio.h"
+#include "draw/Feedback.h"
 #include "draw/HostServices.h"
 #include "draw/ImportCommand.h"
 #include "draw/McpBridge.h"
@@ -45,6 +47,10 @@ namespace
 	// 戻った時点で腐ったポインタを持つことになる（理由と落ち方は PayloadHostHolder.h）。
 	payload::HostHolder gHost;
 	bool gPayloadReady = false;
+
+	// **殻へ返す文字列の置き場所。** 返した const char* は「次に本体を呼ぶまで」生きている
+	// 約束（src/PayloadAbi.h）なので、静的に 1 つ持って毎回書き換える。
+	std::string gLoopStatusText;
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -142,23 +148,40 @@ VW_PAYLOAD_EXPORT int vw_payload_info(VwPayloadInfo* out)
 	}
 }
 
-VW_PAYLOAD_EXPORT int vw_payload_run_import(int* outAutoUpdate)
+VW_PAYLOAD_EXPORT int vw_payload_run_import()
 {
 	try
 	{
-		if (outAutoUpdate != nullptr)
-			*outAutoUpdate = 0;
 		if (!gPayloadReady || gSDK == nil)
 			return kVwPayloadErrNotInit;
 		// 取り込みは自分の中で例外を受け、ユーザーへはダイアログで見せる
-		// （draw/ImportCommand.cpp）。ここは**境界の最後の砦**として、そこで漏れたものを
-		// 受けるだけ。
-		//
-		// **戻り値の「次は尋ねずに入れてよい」を素通しする。** 実機フィードバックの往復で
-		// 投稿できたときだけ立つ（src/PayloadAbi.h / src/Extensions/ExtMenu.cpp）。
-		const bool autoUpdate = draw::runImportCommand();
-		if (outAutoUpdate != nullptr)
-			*outAutoUpdate = autoUpdate ? 1 : 0;
+		// （draw/ImportRun.cpp）。ここは**境界の最後の砦**として、そこで漏れたものを
+		// 受けるだけ。**往復のことは何も持ち帰らない**——それは vw_payload_run_test の
+		// 仕事である（M25。src/PayloadAbi.h）。
+		draw::runImportCommand();
+		return kVwPayloadOk;
+	}
+	catch (...)
+	{
+		return kVwPayloadErrException;
+	}
+}
+
+VW_PAYLOAD_EXPORT int vw_payload_run_test(int allowDialogs, int* outActive)
+{
+	try
+	{
+		if (outActive != nullptr)
+			*outActive = 0;
+		if (!gPayloadReady || gSDK == nil)
+			return kVwPayloadErrNotInit;
+		// **往復を知っているのは本体のここだけ**（src/draw/Feedback.h の runTestRound）。
+		// outActive が立って戻ったら、殻はパレットを開いて周を回し始める
+		// （src/Extensions/ExtTestMenu.cpp）。
+		bool active = false;
+		(void)draw::runTestRound(allowDialogs != 0, active);
+		if (outActive != nullptr)
+			*outActive = active ? 1 : 0;
 		return kVwPayloadOk;
 	}
 	catch (...)
@@ -212,6 +235,43 @@ VW_PAYLOAD_EXPORT int vw_payload_recalculate(unsigned int kind, void* objectHand
 			// 消さない）。
 			return kVwPayloadErrUnknownId;
 		}
+	}
+	catch (...)
+	{
+		return kVwPayloadErrException;
+	}
+}
+
+VW_PAYLOAD_EXPORT int vw_payload_loop_status(const char** out)
+{
+	try
+	{
+		if (out == nullptr)
+			return kVwPayloadErrAbi;
+		*out = nullptr;
+		if (!gPayloadReady || gSDK == nil)
+			return kVwPayloadErrNotInit;
+		// 記憶の形を知っているのは本体だけ（core::FeedbackSession）。殻には key=value の
+		// 平たい行で渡す（draw/Feedback.h の feedbackLoopStatus）。
+		gLoopStatusText = draw::feedbackLoopStatus();
+		*out = gLoopStatusText.c_str();
+		return kVwPayloadOk;
+	}
+	catch (...)
+	{
+		return kVwPayloadErrException;
+	}
+}
+
+VW_PAYLOAD_EXPORT int vw_payload_loop_end(const char* reason, int notifyPr)
+{
+	try
+	{
+		if (!gPayloadReady || gSDK == nil)
+			return kVwPayloadErrNotInit;
+		draw::endFeedbackLoop(reason != nullptr ? std::string(reason) : std::string(),
+							  notifyPr != 0);
+		return kVwPayloadOk;
 	}
 	catch (...)
 	{

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<!--
+	実機フィードバックの往復パレット（M24）。src/Extensions/ExtFeedbackPalette.h の中身。
+
+	C++ 側が `homeskz.tick` / `stop` / `checkNow` / `hide` を Promise で公開する。ここは
+	数秒ごとに tick を呼んで見え方（JSON）を描き直すだけで、往復の判断は 1 つも持たない
+	（駆動は src/FeedbackLoop.cpp）。GitHub を見に行く間隔は C++ 側が決めるので、ここの
+	タイマーは細かくてよい（間隔に満たない tick は何もせず現在の見え方が返る）。
+
+	外部のスクリプトもスタイルも読まない（埋め込みブラウザはオフラインで動く）。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>実機フィードバックの往復</title>
+<style>
+	body { font-family: -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif; font-size: 12px;
+		   margin: 10px 12px; color: #222; background: #f6f6f6; }
+	.phase { font-weight: bold; margin-bottom: 4px; }
+	.phase.waiting { color: #1a6f2b; }
+	.phase.working { color: #9a5b00; }
+	.phase.stopped { color: #8a1c1c; }
+	.phase.idle { color: #555; }
+	.message { line-height: 1.5; margin-bottom: 8px; white-space: pre-wrap; word-break: break-word; }
+	.facts { color: #555; margin-bottom: 8px; line-height: 1.5; }
+	.facts code { font-family: Menlo, Consolas, monospace; }
+	.buttons button { margin-right: 6px; font-size: 12px; padding: 3px 10px; }
+	.note { color: #777; margin-top: 8px; font-size: 11px; line-height: 1.4; }
+</style>
+</head>
+<body>
+	<div id="phase" class="phase idle">接続しています…</div>
+	<div id="message" class="message">プラグインからの応答を待っています。</div>
+	<div id="facts" class="facts"></div>
+	<div class="buttons">
+		<button id="checkNow" type="button" disabled>今すぐ確認</button>
+		<button id="stop" type="button" disabled>往復を止める</button>
+		<button id="hide" type="button">止めて閉じる</button>
+	</div>
+	<div class="note">Claude が PR に <code>control=stop</code> の合図を付けるか、ここで止めるまで、
+		新しいビルドが出るたびに同じ条件で取り込んで結果を PR へ投稿します。
+		周と周のあいだの後始末（作業ファイルを開き直す）はプラグインが自分でします。
+		<strong>このパレットを閉じると往復も止まります</strong>（隠れたままでは止める口が
+		無くなるため）。続きはメニューの「実機テストを実行…」から走ります。</div>
+
+<script>
+(function () {
+	var TICK_MS = 5000;
+	var phaseEl = document.getElementById('phase');
+	var messageEl = document.getElementById('message');
+	var factsEl = document.getElementById('facts');
+	var checkNowBtn = document.getElementById('checkNow');
+	var stopBtn = document.getElementById('stop');
+	var hideBtn = document.getElementById('hide');
+	// 呼び出し中は次を投げない。**ただし返事が来ないまま固まらせない**——隠れたページは
+	// 応答を受け取れないことがあり、そこで busy が立ちっぱなしになると以後の tick が
+	// すべて捨てられて、パレットが二度と動かなくなる（実機: 閉じたあと再実行しても往復が
+	// 始まらなかった）。時間で自動的に解く。
+	var BUSY_TIMEOUT_MS = 30000;
+	var busy = false;
+	var busySince = 0;
+
+	var PHASE_LABEL = {
+		idle: '往復は回っていません',
+		waiting: '往復中（新しいビルドを待っています）',
+		working: '入れ替え・取り込みの最中です',
+		stopped: '往復を終えました'
+	};
+
+	function bridge() {
+		return (typeof window.homeskz !== 'undefined' && typeof window.homeskz.tick === 'function')
+			? window.homeskz : null;
+	}
+
+	function seconds(n) {
+		if (n < 0) { return ''; }
+		if (n < 60) { return n + ' 秒'; }
+		return Math.floor(n / 60) + ' 分 ' + (n % 60) + ' 秒';
+	}
+
+	function render(view) {
+		if (typeof view === 'string') {
+			try { view = JSON.parse(view); } catch (e) { view = { phase: 'idle', message: String(view) }; }
+		}
+		var phase = view.phase || 'idle';
+		phaseEl.className = 'phase ' + phase;
+		phaseEl.textContent = PHASE_LABEL[phase] || phase;
+		messageEl.textContent = view.message || '';
+
+		var facts = [];
+		if (view.repo && view.pr) { facts.push('PR: ' + view.repo + '#' + view.pr); }
+		if (view.branch) { facts.push('ブランチ: ' + view.branch); }
+		if (view.round) { facts.push('round ' + view.round + (view.build ? '（' + view.build + '）' : '')); }
+		if (phase === 'waiting') {
+			if (view.secondsUntilNext >= 0) { facts.push('次の確認まで ' + seconds(view.secondsUntilNext)); }
+			else if (view.secondsSinceCheck >= 0) { facts.push('最後の確認: ' + seconds(view.secondsSinceCheck) + ' 前'); }
+		}
+		factsEl.textContent = facts.join(' ／ ');
+
+		var active = (phase === 'waiting' || phase === 'working');
+		stopBtn.disabled = !active || busy;
+		checkNowBtn.disabled = phase !== 'waiting' || busy;
+	}
+
+	function call(name) {
+		var b = bridge();
+		if (!b) {
+			phaseEl.className = 'phase idle';
+			phaseEl.textContent = '接続しています…';
+			messageEl.textContent = 'プラグインの関数（homeskz.' + name + '）がまだ見えません。';
+			return;
+		}
+		if (busy && (Date.now() - busySince) < BUSY_TIMEOUT_MS) { return; }
+		busy = true;
+		busySince = Date.now();
+		var p;
+		try { p = b[name](); } catch (e) { busy = false; messageEl.textContent = '呼び出しに失敗: ' + e; return; }
+		Promise.resolve(p).then(function (view) {
+			busy = false;
+			render(view);
+		}).catch(function (err) {
+			busy = false;
+			messageEl.textContent = '応答がありません: ' + err;
+		});
+	}
+
+	checkNowBtn.addEventListener('click', function () { call('checkNow'); });
+	stopBtn.addEventListener('click', function () {
+		if (window.confirm('自動の往復を止めます。記憶は残るので、メニューの「実機テストを実行…」をもう一度実行すれば続きから走ります。')) {
+			call('stop');
+		}
+	});
+	// **閉じる＝止めて閉じる。** 隠してもこのページのタイマーは止まらないので、往復を
+	// 残したまま隠すと見えないところで取り込みが走り続ける（C++ 側の OnHide も止める）。
+	//
+	// **返事を待たない。** 隠れたページは応答を受け取れないことがあり、いつもの call() で
+	// 呼ぶと「返事待ち」が解けないまま残る＝以後の tick が全部捨てられる。どのみち隠れた
+	// あとの見え方には意味が無いので、投げるだけにする。
+	hideBtn.addEventListener('click', function () {
+		if (!window.confirm('自動の往復を止めて、このパレットを閉じます。記憶は残るので、メニューの「実機テストを実行…」をもう一度実行すれば続きから走ります。')) {
+			return;
+		}
+		var b = bridge();
+		if (!b || typeof b.hide !== 'function') { return; }
+		try { b.hide(); } catch (e) { messageEl.textContent = '呼び出しに失敗: ' + e; }
+	});
+
+	call('tick');
+	window.setInterval(function () { call('tick'); }, TICK_MS);
+})();
+</script>
+</body>
+</html>

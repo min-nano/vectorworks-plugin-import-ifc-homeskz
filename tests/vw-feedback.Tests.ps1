@@ -247,6 +247,120 @@ Invoke-Login -TokenFile $handoff | Out-Null
 CheckEq (AsText (Invoke-Post -Repo 'o/r' -Number '123' -BodyFile (Join-Path $Work 'none.md'))) `
     'error=引数が不足しています。'
 
+T 'post reports when the comment was created (the next loop-control''s since)'
+$script:FakeApiResult = [pscustomobject]@{
+    html_url = 'https://github.com/o/r/pull/123#issuecomment-2'
+    created_at = [DateTime]::new(2026, 9, 7, 1, 2, 3, [DateTimeKind]::Utc)
+}
+CheckEq (AsText (Invoke-Post -Repo 'o/r' -Number '123' -BodyFile $bodyFile)) `
+    "url=https://github.com/o/r/pull/123#issuecomment-2`ncreated=2026-09-07T01:02:03Z`nok"
+$script:FakeApiResult = [pscustomobject]@{ html_url = 'u'; created_at = '2026-09-07T01:02:03Z' }
+CheckContains (AsText (Invoke-Post -Repo 'o/r' -Number '123' -BodyFile $bodyFile)) `
+    'created=2026-09-07T01:02:03Z' 'a string created_at passes through unchanged'
+
+# ---------------------------------------------------------------------------
+# loop-control — 往復を続けてよいか（M24）。PR の状態と「止めろ」の合図。
+# The REST stub answers by URL: /pulls/<n> with the PR, /issues/<n>/comments with
+# the comment array.
+# ---------------------------------------------------------------------------
+$script:FakePull = [pscustomobject]@{ state = 'open'; merged = $false }
+$script:FakeComments = @()
+$script:LastCommentsUri = ''
+function Invoke-RestMethod {
+    param(
+        [string] $Uri,
+        [string] $Method,
+        $Headers,
+        [string] $ContentType,
+        $Body,
+        $TimeoutSec,
+        [Parameter(ValueFromRemainingArguments = $true)] $Rest
+    )
+    $script:LastUri = $Uri
+    if ($script:FakeApiFail) { throw 'offline' }
+    if ($Uri -like '*/issues/*/comments*') {
+        $script:LastCommentsUri = $Uri
+        return $script:FakeComments
+    }
+    if ($Uri -like '*/pulls/*') { return $script:FakePull }
+    return $null
+}
+
+T 'loop-control: open PR, no signal'
+CheckEq (AsText (Invoke-LoopControl -Repo 'o/r' -Number '123' -Since '')) "state=open`ncontrol=none`nok"
+CheckContains $script:LastCommentsUri '/repos/o/r/issues/123/comments?per_page=100&page=1' `
+    'without since it reads the recent comments'
+
+T 'loop-control: Claude''s stop signal is found after our own post'
+$script:FakeComments = @(
+    [pscustomobject]@{ id = 1; body = "<!-- homeskz-ifc-feedback v1 round=3 build=abc1234 branch=x -->`n## round 3" },
+    [pscustomobject]@{ id = 2; body = "直しました。`n`n<!-- homeskz-ifc-feedback v1 control=stop -->`n往復はもう要りません。" }
+)
+CheckEq (AsText (Invoke-LoopControl -Repo 'o/r' -Number '123' -Since '2026-09-07T01:02:03Z')) `
+    "state=open`ncontrol=stop`nok"
+CheckContains $script:LastCommentsUri '&since=2026-09-07T01:02:03Z' 'since narrows the comments'
+
+T 'loop-control: ended / unmarked comments are not a signal'
+$script:FakeComments = @(
+    [pscustomobject]@{ id = 3; body = "<!-- homeskz-ifc-feedback v1 control=ended reason=user -->`n往復を終えました。" },
+    [pscustomobject]@{ id = 4; body = 'control=stop と書いただけ' }
+)
+CheckEq (AsText (Invoke-LoopControl -Repo 'o/r' -Number '123' -Since '')) "state=open`ncontrol=none`nok"
+
+T 'loop-control: merged / closed PRs'
+$script:FakeComments = @()
+$script:FakePull = [pscustomobject]@{ state = 'closed'; merged = $true }
+CheckEq (AsText (Invoke-LoopControl -Repo 'o/r' -Number '123' -Since '')) "state=merged`ncontrol=none`nok"
+$script:FakePull = [pscustomobject]@{ state = 'closed'; merged = $false }
+CheckEq (AsText (Invoke-LoopControl -Repo 'o/r' -Number '123' -Since '')) "state=closed`ncontrol=none`nok"
+
+T 'loop-control: a missing PR number is refused'
+CheckEq (AsText (Invoke-LoopControl -Repo 'o/r' -Number '' -Since '')) 'error=PR 番号が指定されていません。'
+
+T 'loop-control: a network failure is reported, not fatal'
+$script:FakeApiFail = $true
+CheckEq (AsText (Invoke-LoopControl -Repo 'o/r' -Number '123' -Since '')) `
+    'error=PR の状態を取得できませんでした（ネットワークか権限）。'
+$script:FakeApiFail = $false
+
+T 'Get-CommentControl reads only the marked stop signal'
+CheckEq (Get-CommentControl -Body '<!-- homeskz-ifc-feedback v1 control=stop -->') 'stop'
+CheckEq (Get-CommentControl -Body '<!-- homeskz-ifc-feedback v1 control=ended reason=user -->') 'none'
+CheckEq (Get-CommentControl -Body '') 'none'
+CheckEq (Get-CommentControl -Body "直りました。`n`n<!-- homeskz-ifc-feedback v1 control=stop -->") 'stop' `
+    'the signal may share the comment with human text'
+CheckEq (Get-CommentControl -Body '   <!-- homeskz-ifc-feedback v1 control=stop -->   ') 'stop' `
+    'leading and trailing whitespace on the signal line is allowed'
+
+# **「書いてある」と「合図である」は違う**（実機 round 1 の回帰。docs/DEV-NOTES.md M24）。
+# 本文のどこかで control=stop を拾う作りでは、**目印を説明した文章が合図になる**——
+# プラグイン自身の投稿が末尾でその案内を書いているので、1 通目で往復が止まった。
+T 'a quoted marker is documentation, not a signal'
+CheckEq (Get-CommentControl -Body '往復がもう要らなくなったら、`<!-- homeskz-ifc-feedback v1 control=stop -->` を含むコメントを投稿してください。') `
+    'none' 'quoted inside a sentence'
+$fencedQuote = @'
+合図の書き方:
+
+```
+<!-- homeskz-ifc-feedback v1 control=stop -->
+```
+
+以上です。
+'@
+CheckEq (Get-CommentControl -Body $fencedQuote) 'none' 'quoted inside a fenced block'
+
+T "the plug-in's own round post never stops the loop"
+$ownRound = "<!-- homeskz-ifc-feedback v1 round=1 build=a618af6 branch=x -->`n" +
+    "## 実機フィードバック round 1`n`n" +
+    "往復がもう要らなくなったら、``<!-- homeskz-ifc-feedback v1 control=stop -->`` を含む`n" +
+    "コメントをこの PR へ投稿してください。"
+CheckEq (Get-CommentControl -Body $ownRound) 'none'
+$script:FakePull = [pscustomobject]@{ state = 'open'; merged = $false }
+$script:FakeComments = @([pscustomobject]@{ id = 9; body = $ownRound })
+CheckEq (AsText (Invoke-LoopControl -Repo 'o/r' -Number '123' -Since '2026-09-08T00:42:20Z')) `
+    "state=open`ncontrol=none`nok" 'the round we just posted is not our own stop signal'
+$script:FakeComments = @()
+
 # ---------------------------------------------------------------------------
 T 'an unknown mode is reported, not silently ignored'
 CheckContains (AsText (Invoke-Main -Arguments @('nonsense'))) 'error=不明なモード' `
