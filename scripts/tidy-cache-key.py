@@ -56,17 +56,29 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import sys
 
 # キャッシュの作り方そのものの版。走査や鍵の組み立てを変えたら上げる（＝既存の
 # キャッシュを一斉に無効にする）。
 SCHEME = "tidy-cache-v1"
 
-# 行として書かれた #include の綴りを取り出す。"..." と <...> の両方。
-INCLUDE_RE = re.compile(rb'^[ \t]*#[ \t]*include[ \t]*(?:"([^"\n]*)"|<([^>\n]*)>)')
+# include の指令。**まずこれで「取り込む行かどうか」だけを見る。** import は
+# Objective-C++（mac 側の翻訳単位はこれでコンパイルされる）、include_next も指令である。
+DIRECTIVE_RE = re.compile(rb"^[ \t]*#[ \t]*(?:include_next|include|import)\b")
 
-# 綴りがマクロで決まる #include。中身を追えないので、その翻訳単位はキャッシュ不可にする。
-COMPUTED_RE = re.compile(rb"^[ \t]*#[ \t]*include[ \t]+[A-Za-z_]")
+# その行から綴りを取り出す。"..." と <...> の両方。
+INCLUDE_RE = re.compile(
+	rb'^[ \t]*#[ \t]*(?:include_next|include|import)[ \t]*(?:"([^"\n]*)"|<([^>\n]*)>)'
+)
+
+# 引数として渡された値を持つ include 検索フラグ。長いものから見る（-I は -isystem の
+# 接頭辞ではないが、/external:I と /I のように前後関係のあるものが混ざるため）。
+INCLUDE_DIR_FLAGS = sorted(
+	["-I", "/I", "-isystem", "-imsvc", "-iquote", "-idirafter", "/external:I"],
+	key=len,
+	reverse=True,
+)
 
 
 class Uncacheable(Exception):
@@ -95,6 +107,45 @@ def resolve_include(spec, includer_dir, search_dirs, quoted):
     return None
 
 
+def include_dirs_from(entries):
+    """コンパイル指令から include の検索ディレクトリを拾う（-I / /I / -imsvc …）。
+
+    **これがあると鍵の生成が自分で検算になる。** SDK のヘッダも実ファイルとして解決
+    できるようになるので、下の「解決できない \"...\" はキャッシュ不可」という規則を
+    安全に置ける——パスの扱いを外した環境（Windows など）では解決が総崩れになり、
+    控えを 1 件も書かない＝必ず解析する側へ倒れる。
+    """
+    resolved = []
+    for directory, command in entries:
+        try:
+            tokens = shlex.split(command, posix=False)
+        except ValueError:
+            continue
+
+        def keep(raw):
+            # 相対の -I はその指令の directory 基準（compile_commands.json の規約）。
+            path = raw if os.path.isabs(raw) else os.path.join(directory, raw)
+            path = os.path.realpath(path)
+            if os.path.isdir(path) and path not in resolved:
+                resolved.append(path)
+
+        pending = False
+        for token in tokens:
+            token = token.strip('"')
+            if pending:
+                keep(token)
+                pending = False
+                continue
+            for flag in INCLUDE_DIR_FLAGS:
+                if token == flag:  # -I <dir>
+                    pending = True
+                    break
+                if token.startswith(flag) and len(token) > len(flag):  # -I<dir>
+                    keep(token[len(flag):])
+                    break
+    return resolved
+
+
 def is_under(path, directory):
     try:
         return os.path.commonpath([path, directory]) == directory
@@ -118,21 +169,31 @@ def include_closure(source, follow_dirs, search_dirs):
         found.append(current)
         current_dir = os.path.dirname(current)
         for line in read_bytes(current).splitlines():
-            if b"#" not in line:
+            if not DIRECTIVE_RE.match(line):
                 continue
             match = INCLUDE_RE.match(line)
             if not match:
-                if COMPUTED_RE.match(line):
-                    raise Uncacheable(
-                        "綴りがマクロで決まる #include があります: "
-                        f"{current}: {line.decode('utf-8', 'replace').strip()}"
-                    )
-                continue
+                # 取り込む行なのに綴りを読み取れない（マクロ・行継続・途中のコメント）。
+                # **分からないときは必ず「解析する」へ倒す。**
+                raise Uncacheable(
+                    "読み取れない #include があります: "
+                    f"{current}: {line.decode('utf-8', 'replace').strip()}"
+                )
             quoted = match.group(1) is not None
             raw = match.group(1) if quoted else match.group(2)
             spec = raw.decode("utf-8", "surrogateescape")
             resolved = resolve_include(spec, current_dir, search_dirs, quoted)
-            if resolved and any(is_under(resolved, d) for d in follow_dirs):
+            if resolved is None:
+                # <...> は既定の検索パス（標準ライブラリ）にあるもの——上の 3・5 が
+                # 代表する。"..." は検索パスを全部渡してあるので、そこに無いなら
+                # **こちらの前提が外れている**。決めつけずにキャッシュ不可にする。
+                if quoted:
+                    raise Uncacheable(
+                        '解決できない "..." の #include があります: '
+                        f"{current}: {spec}"
+                    )
+                continue
+            if any(is_under(resolved, d) for d in follow_dirs):
                 pending.append(resolved)
     return sorted(found)
 
@@ -152,16 +213,17 @@ def load_entries(db_dir, source):
     entries = []
     for entry in database:
         entry_file = entry.get("file", "")
+        directory = entry.get("directory", "")
         if not os.path.isabs(entry_file):
-            entry_file = os.path.join(entry.get("directory", ""), entry_file)
+            entry_file = os.path.join(directory, entry_file)
         if os.path.realpath(entry_file) == wanted:
             command = entry.get("command")
             if command is None:
                 command = " ".join(entry.get("arguments", []))
-            entries.append(command)
+            entries.append((directory, command))
     if not entries:
         raise Uncacheable(f"compile_commands.json に載っていません: {source}")
-    return sorted(entries)
+    return sorted(entries, key=lambda pair: pair[1])
 
 
 def normalize_paths(text, root):
@@ -221,12 +283,15 @@ def main(argv):
         return 3
 
     follow = [os.path.realpath(os.path.join(root, d)) for d in (args.follow or ["src"])]
-    # include の検索パスは「src/」1 つでよい。CMakeLists.txt が渡す残りの -I は
-    # すべて SDK 側で、そちらは辿らないからである（冒頭「外にあるものは辿らない」）。
-    search_dirs = list(follow)
 
     try:
         entries = load_entries(args.db, source)
+        # 検索パスは follow 先（src/）＋**コンパイラに渡っている -I 一式**。後者を
+        # 入れると SDK のヘッダも実ファイルとして解決できるので、「解決できない
+        # "..." はキャッシュ不可」を安全に置ける（include_dirs_from の doc 参照）。
+        search_dirs = list(follow) + [
+            d for d in include_dirs_from(entries) if d not in follow
+        ]
         deps = include_closure(source, follow, search_dirs)
     except Uncacheable as reason:
         print(f"tidy-cache-key.py: キャッシュ不可: {reason}", file=sys.stderr)
@@ -247,7 +312,7 @@ def main(argv):
     for config in tidy_configs(source, root):
         feed("config:" + os.path.relpath(config, root).replace("\\", "/"),
              hashlib.sha256(read_bytes(config)).hexdigest())
-    for command in entries:
+    for _, command in entries:
         feed("command", normalize_paths(command, root))
     for dep in deps:
         feed("dep:" + os.path.relpath(dep, root).replace("\\", "/"),

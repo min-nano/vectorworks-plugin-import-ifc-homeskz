@@ -227,12 +227,12 @@ if [ "${#EXTRA[@]}" -gt 0 ]; then
 	CMD+=("${EXTRA[@]}")
 fi
 
-# 追加引数は鍵にも入れる（-x が変われば解析結果も変わりうる）。空配列の展開は bash 3.2 の
-# `set -u` で落ちるので、上の CMD と同じ作法で守る。
-EXTRA_JOINED=""
-if [ "${#EXTRA[@]}" -gt 0 ]; then
-	EXTRA_JOINED="${EXTRA[*]}"
-fi
+# **clang-tidy へ渡す引数はまるごと鍵に入れる。** -x で来たものだけでなく、この
+# スクリプトが常に付ける --warnings-as-errors='*' も、将来ここへ足す引数（--header-filter
+# など）も含める——実行ファイルと -p DB を除いた残り（CMD の 4 つ目から）がそれである。
+# こうしておくと**引数を足したときに鍵が自動で変わる**ので、SCHEME を上げ忘れて古い控えが
+# 生き残る、ということが起きない。CMD は必ず 4 要素以上あるので、空配列の心配は要らない。
+TIDY_ARGS="${CMD[*]:3}"
 
 # clang-tidy の版。表示には出力をそのまま使うが、**鍵には版の番号だけを入れる**。
 #
@@ -318,7 +318,15 @@ run_shard() {
 			key="$("$PYTHON" scripts/tidy-cache-key.py -p "$DB" \
 				"--tidy-version=$TIDY_VERSION" \
 				"--sdk-key=${VW_SDK_CACHE_KEY:-}" \
-				"--extra=$EXTRA_JOINED" "$f" 2>"$LOGDIR/$k.key")" || key=""
+				"--extra=$TIDY_ARGS" "$f" 2>"$LOGDIR/$k.key")" || key=""
+			# 形（64 桁の 16 進）を確かめてから使う。python が何かの拍子に別のものを
+			# 標準出力へ出しても、$CACHE_DIR/$key が妙なパスにならないようにする。
+			case "$key" in
+				*[!0-9a-f]*) key="" ;;
+			esac
+			if [ "${#key}" -ne 64 ]; then
+				key=""
+			fi
 		fi
 
 		if [ -n "$key" ] && [ -f "$CACHE_DIR/$key" ]; then

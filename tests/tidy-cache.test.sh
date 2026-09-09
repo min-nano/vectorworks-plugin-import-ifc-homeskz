@@ -294,15 +294,75 @@ check_eq "$RC" "0" "and it is cached once it comes back clean"
 
 # ---------------------------------------------------------------------------
 # When the inputs cannot be pinned down, the answer is "analyse", never "skip".
-t "a unit whose includes cannot be resolved is always analysed"
-printf '#define PICK "core/Deep.h"\n#include PICK\nint beta() { return 20; }\n' \
-	>"$REPO/src/draw/Beta.cpp"
+#
+# The trap here is that "cannot be read" is not one spelling. A scanner that only
+# recognises `#include MACRO` silently IGNORES every other unreadable form, and an
+# ignored include is a dependency missing from the key — the exact shape of "edited
+# it, still green". Each spelling below is analysed twice: an uncacheable unit is
+# handed to clang-tidy on BOTH runs, a cached one only on the first.
+t "include lines that cannot be read leave the unit uncacheable"
+
+uncacheable_case() { # body label
+	printf '%s\nint beta() { return 20; }\n' "$1" >"$REPO/src/draw/Beta.cpp"
+	rm -rf "$CACHE"
+	run_tidy -c "$CACHE"
+	run_tidy -c "$CACHE"
+	check_contains "$(cat "$CALLS")" "src/draw/Beta.cpp" "$2"
+	check_contains "$OUT" "(cache)" "$2 (and the reason is printed, not swallowed)"
+}
+
+uncacheable_case '#define PICK "core/Deep.h"
+#include PICK' "a macro-spelled include"
+uncacheable_case '#include /*here*/ "core/Deep.h"' "a comment between # and the path"
+uncacheable_case '#include \
+	"core/Deep.h"' "a line continuation"
+uncacheable_case '#include "nowhere/missing.h"' "a quoted include that resolves nowhere"
+
+# ...but the readable spellings are read, not blanket-rejected. #import is how the
+# macOS translation units are compiled (Objective-C++), so treating it as unreadable
+# would make every mac unit uncacheable — correct, and uselessly slow.
+t "the other real include spellings are followed"
+for spelling in '#import "core/Other.h"' '#include_next "core/Other.h"'; do
+	printf '%s\nint beta() { return 20; }\n' "$spelling" >"$REPO/src/draw/Beta.cpp"
+	rm -rf "$CACHE"
+	run_tidy -c "$CACHE"
+	run_tidy -c "$CACHE"
+	check_eq "$CALLED" "0" "$spelling is cacheable"
+	printf '#pragma once\nstatic const int kOther = %s;\n' "$RANDOM" >"$REPO/src/core/Other.h"
+	run_tidy -c "$CACHE"
+	check_contains "$(cat "$CALLS")" "src/draw/Beta.cpp" "$spelling reaches the header it names"
+done
+
+# An include that only resolves through the compiler's -I (this is how every SDK
+# header is found) must resolve — otherwise the rule above would call every unit
+# uncacheable — but must NOT be followed: the SDK is represented by --sdk-key, and
+# hashing it would mean walking thousands of headers per translation unit.
+t "an include found via -I resolves but is not followed"
+mkdir -p "$WORK/sdk/Fake"
+printf '#pragma once\nstatic const int kFake = 1;\n' >"$WORK/sdk/Fake/Header.h"
+write_db "-I$WORK/sdk"
+printf '#include "Fake/Header.h"\nint beta() { return 20; }\n' >"$REPO/src/draw/Beta.cpp"
+rm -rf "$CACHE"
 run_tidy -c "$CACHE"
-check_contains "$(cat "$CALLS")" "src/draw/Beta.cpp" "it is analysed"
-check_contains "$OUT" "(cache)" "and the reason is printed rather than swallowed"
 run_tidy -c "$CACHE"
-check_contains "$(cat "$CALLS")" "src/draw/Beta.cpp" "again on the next run — never cached"
+check_eq "$CALLED" "0" "it resolves, so the unit is cacheable"
+printf '#pragma once\nstatic const int kFake = 2;\n' >"$WORK/sdk/Fake/Header.h"
+run_tidy -c "$CACHE"
+check_eq "$CALLED" "0" "and editing it does not invalidate (--sdk-key represents it)"
+write_db
 printf 'int beta() { return 20; }\n' >"$REPO/src/draw/Beta.cpp"
+
+# ---------------------------------------------------------------------------
+# Every argument the runner hands clang-tidy belongs in the key, not just the ones
+# passed with -x: --warnings-as-errors is added unconditionally, and anything added
+# here later would otherwise need a manual SCHEME bump to avoid stale entries.
+t "the clang-tidy arguments the runner adds are part of the key"
+rm -rf "$CACHE"
+run_tidy -c "$CACHE"
+run_tidy -c "$CACHE"
+check_eq "$CALLED" "0" "(settled)"
+run_tidy -c "$CACHE" -x --extra-arg=-fsomething
+check_eq "$CALLED" "$UNITS" "adding an argument re-analyses every unit"
 
 # ---------------------------------------------------------------------------
 # 実機で最初に壊れたのがここ。キャッシュは actions/cache から復元できているのに
