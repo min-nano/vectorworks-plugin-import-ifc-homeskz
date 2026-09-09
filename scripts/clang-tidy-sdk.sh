@@ -417,7 +417,7 @@ if [ -n "$CACHE_DIR" ]; then
 	# 変えた実行なら当然だが、**そうでなければ鍵が実行機ごとに変わっている**——つまり
 	# この仕組みは黙って何もしていない。緑のまま気付けない壊れ方なので、必ず言う。
 	if [ "$CACHE_RESTORED" -gt 0 ] && [ "$cached" -eq 0 ]; then
-		echo "::warning::clang-tidy の結果キャッシュが $CACHE_RESTORED 件復元されたのに 1 件も再利用されませんでした。規則・SDK・共有ヘッダを変えていないなら、鍵に実行機ごとに変わるものが混ざっています（scripts/tidy-cache-key.py）。"
+		echo "::warning::clang-tidy の結果キャッシュが $CACHE_RESTORED 件復元されたのに 1 件も再利用されませんでした。規則（.clang-tidy）・SDK・共有ヘッダ・ランナーイメージ・clang-tidy の版や引数を変えていないなら、鍵に実行機ごとに変わるものが混ざっています（scripts/tidy-cache-key.py）。"
 	fi
 	# 古い控えを落とす。鍵は入力が変わるたびに変わるので、放っておくと溜まる一方に
 	# なる（毎コミットぶんが残る）。生きている鍵は引くたびに touch しているので、
