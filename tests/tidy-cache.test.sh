@@ -380,6 +380,28 @@ check_eq "$CALLED" "0" "a different host CPU must not invalidate a single entry"
 unset TIDY_HOST_CPU
 
 # ---------------------------------------------------------------------------
+# The toolchain's own standard headers (Xcode's SDK, the MSVC STL, the Windows SDK)
+# come from the compiler's DEFAULT search path, so the include scan never sees them
+# — and hashing tens of thousands of files per unit is not an option. The runner
+# image stands in for them, so a new image must invalidate everything: those headers
+# really did change. The cost is one cold run per image roll; the alternative is
+# reusing an analysis made against headers that no longer exist.
+t "the runner image is part of the key"
+rm -rf "$CACHE"
+export ImageOS="macos15"
+export ImageVersion="20260901.1"
+run_tidy -c "$CACHE"
+check_eq "$CALLED" "$UNITS" "(cold on the first image)"
+run_tidy -c "$CACHE"
+check_eq "$CALLED" "0" "(settled)"
+export ImageVersion="20260908.2"
+run_tidy -c "$CACHE"
+check_eq "$CALLED" "$UNITS" "a new runner image re-analyses every unit"
+unset ImageOS ImageVersion
+run_tidy -c "$CACHE"
+check_eq "$CALLED" "$UNITS" "and so does leaving the runners entirely"
+
+# ---------------------------------------------------------------------------
 # 上の壊れ方は CI を緑のまま通り抜ける（結果は正しく、ただ遅いだけ）ので、気付ける
 # 手立てを 1 つ持たせてある。規則を変えた実行のように**正当に全件外れる**場面でも
 # 出るが、黙って何もしないよりよい。

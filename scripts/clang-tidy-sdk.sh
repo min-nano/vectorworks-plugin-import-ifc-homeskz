@@ -234,6 +234,17 @@ fi
 # 生き残る、ということが起きない。CMD は必ず 4 要素以上あるので、空配列の心配は要らない。
 TIDY_ARGS="${CMD[*]:3}"
 
+# **ツールチェインの標準ヘッダの同一性。** Xcode の SDK・MSVC の STL・Windows SDK は
+# -I ではなくコンパイラの既定の検索パスから来るので、鍵の include 走査には映らない。
+# 数万ファイルをハッシュするわけにはいかないので、**どのランナーイメージで走っているか**
+# で代表させる（GitHub が ImageOS / ImageVersion を渡す）。イメージが更新された実行は
+# 全件が外れる——ヘッダが実際に入れ替わっているのだから、それが正しい。
+# 手元では両方とも未設定なので空のままで、値は安定する。
+IMAGE_KEY=""
+if [ -n "${ImageOS:-}${ImageVersion:-}" ]; then
+	IMAGE_KEY="${ImageOS:-}-${ImageVersion:-}"
+fi
+
 # clang-tidy の版。表示には出力をそのまま使うが、**鍵には版の番号だけを入れる**。
 #
 # `--version` の出力には `Host CPU: apple-m1` のような**実行機ごとに変わる行**があり、
@@ -318,6 +329,7 @@ run_shard() {
 			key="$("$PYTHON" scripts/tidy-cache-key.py -p "$DB" \
 				"--tidy-version=$TIDY_VERSION" \
 				"--sdk-key=${VW_SDK_CACHE_KEY:-}" \
+				"--image-key=$IMAGE_KEY" \
 				"--extra=$TIDY_ARGS" "$f" 2>"$LOGDIR/$k.key")" || key=""
 			# 形（64 桁の 16 進）を確かめてから使う。python が何かの拍子に別のものを
 			# 標準出力へ出しても、$CACHE_DIR/$key が妙なパスにならないようにする。

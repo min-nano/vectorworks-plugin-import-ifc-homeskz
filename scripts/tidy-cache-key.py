@@ -27,8 +27,16 @@
 #      1 つずつハッシュせず、「どの SDK を取ってきたか」を決めているこの鍵で代表させる。
 #      **SDK を差し替えるときは必ずこの鍵を上げる**という既存の約束（build.yml）が
 #      そのままキャッシュの正しさを担保する）
-#   6. 追加の clang-tidy 引数（--extra。Windows の -fdelayed-template-parsing 等）
-#   7. この仕組み自体の版（SCHEME。作りを変えたら上げる＝全部を捨てる）
+#   6. **ツールチェインの標準ヘッダ**（--image-key。ランナーイメージの同一性）。Xcode の
+#      SDK・MSVC の STL・Windows SDK は -I ではなくコンパイラの既定の検索パスから来る
+#      ので、上の走査には映らない。これらが変われば診断も変わりうるが、数万ファイルを
+#      ハッシュするわけにはいかないので、**どのイメージで走っているか**（GitHub が渡す
+#      ImageOS / ImageVersion）で代表させる。イメージが更新された実行は全件が外れる
+#      ——それが正しい（ヘッダが入れ替わっている）。手元では両方とも未設定なので空になり、
+#      値は安定する。
+#   7. clang-tidy へ渡す引数すべて（--extra。--warnings-as-errors='*' も、Windows の
+#      -fdelayed-template-parsing も含む）
+#   8. この仕組み自体の版（SCHEME。作りを変えたら上げる＝全部を捨てる）
 #
 # 【include の走査は「多めに拾う」側へ倒す】条件コンパイル（#if）は評価せず、**行として
 # 書かれている #include をすべて辿る**。実際には読まれない include まで依存に数えることは
@@ -47,7 +55,8 @@
 #
 # 使い方:
 #   tidy-cache-key.py -p <compile-db-dir> [--root DIR] [--follow DIR]
-#                     [--tidy-version STR] [--sdk-key STR] [--extra STR] <source>
+#                     [--tidy-version STR] [--sdk-key STR] [--image-key STR]
+#                     [--extra STR] <source>
 #
 # 終了コード: 0 = 鍵を標準出力へ / 2 = 使い方の誤り / 3 = キャッシュ不可（理由を stderr へ）
 
@@ -272,6 +281,11 @@ def main(argv):
     )
     parser.add_argument("--tidy-version", default="", help="clang-tidy --version の出力")
     parser.add_argument("--sdk-key", default="", help="SDK の同一性（VW_SDK_CACHE_KEY）")
+    parser.add_argument(
+        "--image-key",
+        default="",
+        help="ランナーイメージの同一性（ImageOS-ImageVersion）＝ツールチェインの標準ヘッダ",
+    )
     parser.add_argument("--extra", default="", help="clang-tidy への追加引数（そのまま）")
     parser.add_argument("source", help="解析する翻訳単位")
     args = parser.parse_args(argv)
@@ -308,6 +322,7 @@ def main(argv):
     feed("scheme", SCHEME)
     feed("tidy-version", args.tidy_version)
     feed("sdk-key", args.sdk_key)
+    feed("image-key", args.image_key)
     feed("extra", args.extra)
     for config in tidy_configs(source, root):
         feed("config:" + os.path.relpath(config, root).replace("\\", "/"),
