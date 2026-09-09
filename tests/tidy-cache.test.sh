@@ -187,7 +187,12 @@ cat >"$BIN/clang-tidy" <<'STUB'
 #!/usr/bin/env bash
 for a in "$@"; do
 	if [ "$a" = "--version" ]; then
-		echo "stub clang-tidy version 18.0.0"
+		# 本物の clang-tidy と同じ形。最後の行が**実行機ごとに変わる**ところで、
+		# GitHub のランナープールは機種が混在している。
+		echo "stub LLVM version 18.0.0"
+		echo "  Optimized build."
+		echo "  Default target: arm64-apple-darwin24.0.0"
+		echo "  Host CPU: ${TIDY_HOST_CPU:-apple-m1}"
 		exit 0
 	fi
 done
@@ -294,6 +299,34 @@ check_contains "$OUT" "(cache)" "and the reason is printed rather than swallowed
 run_tidy -c "$CACHE"
 check_contains "$(cat "$CALLS")" "src/draw/Beta.cpp" "again on the next run — never cached"
 printf 'int beta() { return 20; }\n' >"$REPO/src/draw/Beta.cpp"
+
+# ---------------------------------------------------------------------------
+# 実機で最初に壊れたのがここ。キャッシュは actions/cache から復元できているのに
+# 1 件も再利用されず（0 reused / 21 analysed）、速さのための仕組みが黙って何も
+# しなくなっていた。原因は鍵に入れていた `clang-tidy --version` の出力で、そこには
+# `Host CPU:` という**実行機ごとに変わる行**がある。ランナーが変われば鍵も変わる。
+t "the key does not depend on the machine clang-tidy runs on"
+rm -rf "$CACHE"
+export TIDY_HOST_CPU="apple-m1"
+run_tidy -c "$CACHE"
+check_eq "$CALLED" "$UNITS" "(cold on the first machine)"
+export TIDY_HOST_CPU="apple-m2"
+run_tidy -c "$CACHE"
+check_eq "$CALLED" "0" "a different host CPU must not invalidate a single entry"
+unset TIDY_HOST_CPU
+
+# ---------------------------------------------------------------------------
+# 上の壊れ方は CI を緑のまま通り抜ける（結果は正しく、ただ遅いだけ）ので、気付ける
+# 手立てを 1 つ持たせてある。規則を変えた実行のように**正当に全件外れる**場面でも
+# 出るが、黙って何もしないよりよい。
+t "a restored cache that reuses nothing is called out"
+run_tidy -c "$CACHE"
+check_eq "$CALLED" "0" "(settled)"
+check_not_contains "$OUT" "::warning::" "no warning while the cache is doing its job"
+printf 'Checks: -*,bugprone-*\n' >"$REPO/.clang-tidy"
+run_tidy -c "$CACHE"
+check_eq "$CALLED" "$UNITS" "changing the rules invalidates everything"
+check_contains "$OUT" "::warning::" "and that is said out loud, not swallowed"
 
 # ---------------------------------------------------------------------------
 t "a unit missing from the compile database is always analysed"

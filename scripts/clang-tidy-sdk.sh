@@ -234,8 +234,22 @@ if [ "${#EXTRA[@]}" -gt 0 ]; then
 	EXTRA_JOINED="${EXTRA[*]}"
 fi
 
-# clang-tidy の版は鍵の一部でもあるので、表示と兼ねて 1 度だけ取る。
-TIDY_VERSION="$("$TIDY" --version 2>&1)"
+# clang-tidy の版。表示には出力をそのまま使うが、**鍵には版の番号だけを入れる**。
+#
+# `--version` の出力には `Host CPU: apple-m1` のような**実行機ごとに変わる行**があり、
+# GitHub のランナープールは機種が混在している。出力を丸ごと鍵に入れると、**実行のたびに
+# 別の鍵になって 1 件も再利用されない**——実機で実際にそうなった（キャッシュ自体は
+# primary key で復元できているのに `0 reused / 21 analysed`）。速さのための仕組みが
+# 静かに何もしなくなる、といういちばん気付きにくい壊れ方なので、抜き出す側で潰す。
+#
+# 番号を取り出せない相手（見慣れない綴りを出すツール）のときだけ出力をそのまま使う。
+# 実行機ごとに鍵が変わるかもしれないが、**結果は変わらない**（使い回さないだけ）。
+TIDY_VERSION_FULL="$("$TIDY" --version 2>&1)"
+TIDY_VERSION="$(printf '%s\n' "$TIDY_VERSION_FULL" |
+	sed -n 's/.*LLVM version \([0-9][0-9.]*\).*/\1/p' | head -n 1)"
+if [ -z "$TIDY_VERSION" ]; then
+	TIDY_VERSION="$TIDY_VERSION_FULL"
+fi
 
 # --- 結果キャッシュ（-c）の下ごしらえ ----------------------------------------
 #
@@ -264,9 +278,19 @@ if [ -n "$CACHE_DIR" ]; then
 	fi
 fi
 
+# 走る前に、復元された控えが何件あるかを数えておく。**「控えは届いているのに 1 件も
+# 使い回さない」を見つけるため**で、これは実際に起きた壊れ方である（鍵に実行機ごとに
+# 変わるものが混ざっていた。上記 TIDY_VERSION）。結果は正しいままなので CI は緑になり、
+# 誰も気付かない——だから数えて、下で言わせる。
+CACHE_RESTORED=0
+if [ -n "$CACHE_DIR" ]; then
+	CACHE_RESTORED="$(find "$CACHE_DIR" -type f 2>/dev/null | awk 'END {print NR}')"
+	[ -n "$CACHE_RESTORED" ] || CACHE_RESTORED=0
+fi
+
 echo "Tidying ${#FILES[@]} SDK-dependent translation units with $JOBS parallel jobs$SHARD_LABEL:"
 printf '  %s\n' "${FILES[@]}"
-printf '%s\n' "$TIDY_VERSION" | sed 's/^/  /'
+printf '%s\n' "$TIDY_VERSION_FULL" | sed 's/^/  /'
 if [ -n "$CACHE_DIR" ]; then
 	echo "  result cache: $CACHE_DIR"
 fi
@@ -359,7 +383,14 @@ while [ "$k" -lt "${#FILES[@]}" ]; do
 done
 
 if [ -n "$CACHE_DIR" ]; then
-	echo "clang-tidy result cache: $cached reused / $analysed analysed"
+	echo "clang-tidy result cache: $cached reused / $analysed analysed" \
+		"($CACHE_RESTORED restored)"
+	# 控えが届いているのに 1 つも引けなかった。規則（.clang-tidy）・SDK・共有ヘッダを
+	# 変えた実行なら当然だが、**そうでなければ鍵が実行機ごとに変わっている**——つまり
+	# この仕組みは黙って何もしていない。緑のまま気付けない壊れ方なので、必ず言う。
+	if [ "$CACHE_RESTORED" -gt 0 ] && [ "$cached" -eq 0 ]; then
+		echo "::warning::clang-tidy の結果キャッシュが $CACHE_RESTORED 件復元されたのに 1 件も再利用されませんでした。規則・SDK・共有ヘッダを変えていないなら、鍵に実行機ごとに変わるものが混ざっています（scripts/tidy-cache-key.py）。"
+	fi
 	# 古い控えを落とす。鍵は入力が変わるたびに変わるので、放っておくと溜まる一方に
 	# なる（毎コミットぶんが残る）。生きている鍵は引くたびに touch しているので、
 	# しばらく触られていないものはもう誰も引かない。
