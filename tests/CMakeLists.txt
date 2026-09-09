@@ -610,3 +610,25 @@ if(NOT WIN32)
 							"script tests (ci-wait.test.sh) cannot run.")
 	endif()
 endif()
+
+# clang-tidy の結果キャッシュ（scripts/tidy-cache-key.py ＋ scripts/clang-tidy-sdk.sh -c）。
+# これも開発者向けの道具だが、**間違えたときの現れ方が最悪**なので回帰テストで押さえる
+# ——鍵に漏れがあると「直した翻訳単位を解析しないまま緑になる」という、誰にも見えない
+# 失敗になるからである。合成のリポジトリを作って、翻訳単位・**推移的に include された
+# ヘッダ**・.clang-tidy・コンパイル指令・SDK の同一性のどれが変わってもキャッシュが
+# 外れること、診断の出た翻訳単位が「きれい」として控えられないこと、入力を突き止め
+# られない翻訳単位は必ず解析されることを確かめる。bash と python3 だけで走り、
+# clang-tidy の実体は要らない（スタブに差し替える）。
+if(NOT WIN32)
+	find_program(BASH_PROGRAM bash)
+	if(BASH_PROGRAM AND PYTHON3_PROGRAM)
+		add_test(NAME TidyCacheScriptTests COMMAND "${BASH_PROGRAM}"
+												   "${CMAKE_CURRENT_SOURCE_DIR}/tidy-cache.test.sh")
+		set_tests_properties(
+			TidyCacheScriptTests PROPERTIES ENVIRONMENT
+											"VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
+	elseif(VW_REQUIRE_SCRIPT_TESTS)
+		message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'bash' or 'python3' was not found: "
+							"the clang-tidy cache tests (tidy-cache.test.sh) cannot run.")
+	endif()
+endif()

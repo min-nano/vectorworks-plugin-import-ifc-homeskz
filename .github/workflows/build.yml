@@ -414,6 +414,10 @@ jobs:
       VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-mac-v3
       # PR は dev、それ以外（main への push / 再ディスパッチ）は stable。
       VW_BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
+      # clang-tidy の結果キャッシュ（scripts/clang-tidy-sdk.sh -c）。翻訳単位の入力が
+      # 前と同じなら解析ごと飛ばす——このジョブは PR の待ち時間そのものなので、
+      # 「数ファイルしか触っていない push」で効くかどうかが体感を決める。
+      TIDY_CACHE_DIR: ${{ github.workspace }}/.tidy-cache
 
     steps:
       - name: Checkout
@@ -435,6 +439,21 @@ jobs:
         with:
           path: ${{ env.VW_SDK_DIR }}
           key: ${{ env.VW_SDK_CACHE_KEY }}
+
+      # clang-tidy result cache, carried across runs. Unlike the SDK cache above
+      # this one is NOT restore-only: each run saves what it learned, so the next
+      # push on the same branch only analyses the translation units that actually
+      # changed. The key is per shard (a shard only ever analyses its own subset)
+      # and per channel — every unit is compiled with VW_DEV_BUILD on a pull
+      # request and without it on main, so a dev run could never reuse a stable
+      # entry anyway; naming the channel keeps it from downloading one to find out.
+      - name: Restore clang-tidy result cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.TIDY_CACHE_DIR }}
+          key: tidy-mac-${{ env.VW_BUILD_CHANNEL }}-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            tidy-mac-${{ env.VW_BUILD_CHANNEL }}-${{ matrix.shard }}-
 
       - name: Set up Vectorworks SDK
         run: scripts/fetch-vw-sdk.sh
@@ -460,7 +479,8 @@ jobs:
           scripts/clang-tidy-sdk.sh \
             -p build-tidy \
             -t "$(brew --prefix llvm@18)/bin/clang-tidy" \
-            -s "${{ matrix.shard }}/${{ strategy.job-total }}"
+            -s "${{ matrix.shard }}/${{ strategy.job-total }}" \
+            -c "$TIDY_CACHE_DIR"
 
   tidy-windows:
     runs-on: windows-latest
@@ -477,6 +497,9 @@ jobs:
       VW_SDK_DIR: ${{ github.workspace }}/vw-sdk-win
       VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-win-v1
       VW_BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
+      # clang-tidy の結果キャッシュ（tidy-mac と同じ。理由はそちらのコメント参照）。
+      # **このジョブがワークフローの最長経路**なので、効き目がいちばん大きいのはここ。
+      TIDY_CACHE_DIR: ${{ github.workspace }}/.tidy-cache
       # The LLVM preinstalled on the runner image, named once. Every clang tool
       # this job runs (clang-cl for the compile database, clang-tidy for the
       # analysis) comes from here, so the version checked below is the version
@@ -494,6 +517,15 @@ jobs:
         with:
           path: ${{ env.VW_SDK_DIR }}
           key: ${{ env.VW_SDK_CACHE_KEY }}
+
+      # See tidy-mac for what this is and why the key is shaped this way.
+      - name: Restore clang-tidy result cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.TIDY_CACHE_DIR }}
+          key: tidy-windows-${{ env.VW_BUILD_CHANNEL }}-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            tidy-windows-${{ env.VW_BUILD_CHANNEL }}-${{ matrix.shard }}-
 
       - name: Set up Vectorworks SDK
         shell: bash
@@ -594,6 +626,7 @@ jobs:
             -p build-tidy \
             -t "$LLVM_BIN/clang-tidy" \
             -s "${{ matrix.shard }}/${{ strategy.job-total }}" \
+            -c "$TIDY_CACHE_DIR" \
             -x --extra-arg=-fdelayed-template-parsing \
             -x --extra-arg=-Wno-delayed-template-parsing-in-cxx20
 

@@ -24,6 +24,19 @@
 # 並びが変わって差分が読めなくなるため、いったんファイルごとのログへ落としてから
 # 順に流す（CLAUDE.md「決定性を守る」）。
 #
+#   3. **同じ入力を何度も解析し直していた。** PR は同じブランチへ何度も push されるが、
+#      1 コミットが触るのはたいてい数ファイルである。それでも毎回 41 本すべてを解析して
+#      いた。コンパイルの側は ccache が「入力が同じなら結果を使い回す」で解いているのに、
+#      clang-tidy にはそれが無い——**出力がオブジェクトではなく診断だから**である。
+#      そこで同じ原理を自前で持つ（-c）。翻訳単位の入力すべてを 1 つの鍵にまとめ
+#      （scripts/tidy-cache-key.py）、「この入力では診断が 1 つも出なかった」という事実
+#      だけを控える。次に同じ鍵が出た翻訳単位は解析ごと省ける。
+#
+#      **鍵に漏れがあると「直したのに緑」になる**ので、何を鍵に入れているか・なぜ多めに
+#      拾う側へ倒すのかは tidy-cache-key.py の冒頭に書いてある。控えるのは
+#      **きれいに通ったときだけ**（診断が 1 行でも出たら控えない）で、鍵を出せない
+#      翻訳単位は必ず解析する。
+#
 # 並列には**2 段**ある。ランナー 1 台の中でコア数ぶん同時に回す（-j）のに加えて、
 # 対象そのものを複数のジョブへ分けられる（-s）。前者はコア数で頭打ちになる
 # （実測で 4 コアのランナーは 4 並列でも 2.5 倍程度しか出ない）ので、そこから先を
@@ -31,7 +44,8 @@
 #
 # 使い方:
 #   scripts/clang-tidy-sdk.sh -p <compile-db-dir> [-t <clang-tidy>] [-j <jobs>]
-#                             [-s <index>/<total>] [-x <extra clang-tidy arg>]...
+#                             [-s <index>/<total>] [-c <cache-dir>]
+#                             [-x <extra clang-tidy arg>]...
 #
 #     -p DIR   compile_commands.json のあるディレクトリ（必須）。PCH 無しで
 #              configure したものを渡すこと（VW_ENABLE_PCH=OFF）。
@@ -40,6 +54,10 @@
 #     -s I/N   翻訳単位を N 分割したうちの I 番目だけを解析する（1 始まり）。
 #              build.yml が matrix から渡す。分け方はラウンドロビンなので、
 #              全シャードを合わせるとちょうど全体になり、重複も漏れも無い。
+#     -c DIR   結果キャッシュの置き場所。指定すると、前に同じ入力できれいに通った
+#              翻訳単位を解析せずに飛ばす（上記 3）。python3 が要る——無ければ
+#              キャッシュを使わずに全部解析する（黙って遅くなるだけで、結果は同じ）。
+#              build.yml が actions/cache で実行をまたいで持ち回る。
 #     -x ARG   clang-tidy へそのまま渡す追加引数。複数回指定できる。
 #              Windows は SDK のテンプレートヘッダを通すために
 #              -x --extra-arg=-fdelayed-template-parsing が要る（build.yml 参照）。
@@ -54,6 +72,7 @@ TIDY="clang-tidy"
 DB=""
 JOBS=""
 SHARD=""
+CACHE_DIR=""
 EXTRA=()
 
 usage() {
@@ -76,6 +95,10 @@ while [ "$#" -gt 0 ]; do
 			;;
 		-s)
 			SHARD="${2:-}"
+			shift 2
+			;;
+		-c)
+			CACHE_DIR="${2:-}"
 			shift 2
 			;;
 		-x)
@@ -204,9 +227,49 @@ if [ "${#EXTRA[@]}" -gt 0 ]; then
 	CMD+=("${EXTRA[@]}")
 fi
 
+# 追加引数は鍵にも入れる（-x が変われば解析結果も変わりうる）。空配列の展開は bash 3.2 の
+# `set -u` で落ちるので、上の CMD と同じ作法で守る。
+EXTRA_JOINED=""
+if [ "${#EXTRA[@]}" -gt 0 ]; then
+	EXTRA_JOINED="${EXTRA[*]}"
+fi
+
+# clang-tidy の版は鍵の一部でもあるので、表示と兼ねて 1 度だけ取る。
+TIDY_VERSION="$("$TIDY" --version 2>&1)"
+
+# --- 結果キャッシュ（-c）の下ごしらえ ----------------------------------------
+#
+# **使えないと分かったら黙って諦める。** キャッシュはあくまで速さのための飾りで、
+# 無くても結果は 1 ビットも変わらない——python3 が無い・ディレクトリを作れない、
+# といった場面でジョブを落とす理由が無い。
+PYTHON=""
+if [ -n "$CACHE_DIR" ]; then
+	# **見つかるだけでは足りない。** Windows の PATH には Microsoft Store を開くだけの
+	# python3.exe（0 バイトのスタブ）が載っていることがあり、command -v はそれを見つけて
+	# しまう。実際に走らせて確かめる——さもないと**いちばん効かせたい Windows のジョブで
+	# だけ静かにキャッシュが死ぬ**。
+	for candidate in python3 python; do
+		if command -v "$candidate" >/dev/null 2>&1 &&
+			"$candidate" -c 'import hashlib, json' >/dev/null 2>&1; then
+			PYTHON="$candidate"
+			break
+		fi
+	done
+	if [ -z "$PYTHON" ]; then
+		echo "clang-tidy-sdk.sh: python3 が無いので結果キャッシュを使いません（全部解析します）" >&2
+		CACHE_DIR=""
+	elif ! mkdir -p "$CACHE_DIR" 2>/dev/null; then
+		echo "clang-tidy-sdk.sh: $CACHE_DIR を作れないので結果キャッシュを使いません" >&2
+		CACHE_DIR=""
+	fi
+fi
+
 echo "Tidying ${#FILES[@]} SDK-dependent translation units with $JOBS parallel jobs$SHARD_LABEL:"
 printf '  %s\n' "${FILES[@]}"
-"$TIDY" --version | sed 's/^/  /'
+printf '%s\n' "$TIDY_VERSION" | sed 's/^/  /'
+if [ -n "$CACHE_DIR" ]; then
+	echo "  result cache: $CACHE_DIR"
+fi
 
 LOGDIR="$(mktemp -d)"
 trap 'rm -rf "$LOGDIR"' EXIT
@@ -215,15 +278,44 @@ trap 'rm -rf "$LOGDIR"' EXIT
 # 解析に支配されていてどれもほぼ同じなので、静的に配るだけで実質最適に詰まる。
 # （bash 3.2 の macOS では `wait -n` が使えず、動的なワークキューは書けない。）
 run_shard() {
-	local shard="$1" k f start rc
+	local shard="$1" k f start rc key
 	k="$shard"
 	while [ "$k" -lt "${#FILES[@]}" ]; do
 		f="${FILES[$k]}"
-		start="$(date +%s)"
-		"${CMD[@]}" "$f" >"$LOGDIR/$k.log" 2>&1
-		rc="$?"
-		echo "$rc" >"$LOGDIR/$k.rc"
-		echo "$(($(date +%s) - start))" >"$LOGDIR/$k.sec"
+
+		# この翻訳単位の入力すべてを表す鍵。出せなければ（キャッシュ不可・python3 の
+		# 失敗）空になり、以降はキャッシュが無いのと同じ扱いになる＝必ず解析する。
+		key=""
+		if [ -n "$CACHE_DIR" ]; then
+			# 値は必ず --opt=value の形で渡す。**"-" で始まる値**（-x で渡される
+			# --extra-arg=… がまさにそれ）を空白区切りで渡すと、argparse がそれを
+			# 次のオプションと読んで落ちる＝Windows のジョブだけ永久にキャッシュが
+			# 効かない、という静かな事故になる。
+			key="$("$PYTHON" scripts/tidy-cache-key.py -p "$DB" \
+				"--tidy-version=$TIDY_VERSION" \
+				"--sdk-key=${VW_SDK_CACHE_KEY:-}" \
+				"--extra=$EXTRA_JOINED" "$f" 2>"$LOGDIR/$k.key")" || key=""
+		fi
+
+		if [ -n "$key" ] && [ -f "$CACHE_DIR/$key" ]; then
+			# 前に同じ入力で解析して、診断が 1 つも出なかった翻訳単位。触って寿命を
+			# 延ばす（下の掃除が「しばらく引かれていない控え」を落とすため）。
+			: >"$LOGDIR/$k.log"
+			echo 0 >"$LOGDIR/$k.rc"
+			echo cached >"$LOGDIR/$k.sec"
+			touch "$CACHE_DIR/$key" 2>/dev/null
+		else
+			start="$(date +%s)"
+			"${CMD[@]}" "$f" >"$LOGDIR/$k.log" 2>&1
+			rc="$?"
+			echo "$rc" >"$LOGDIR/$k.rc"
+			echo "$(($(date +%s) - start))" >"$LOGDIR/$k.sec"
+			# **きれいに通ったときだけ控える。** 何か言っている翻訳単位（rc は 0 でも
+			# 出力が空でないもの）を控えると、その言い分が次の実行から消えてしまう。
+			if [ "$rc" -eq 0 ] && [ -n "$key" ] && [ ! -s "$LOGDIR/$k.log" ]; then
+				printf '' 2>/dev/null >"$CACHE_DIR/$key" || true
+			fi
+		fi
 		k=$((k + JOBS))
 	done
 }
@@ -238,11 +330,24 @@ wait
 # --- 結果をファイル一覧の順に出す -------------------------------------------
 status=0
 failed=""
+cached=0
+analysed=0
 k=0
 while [ "$k" -lt "${#FILES[@]}" ]; do
 	rc="$(cat "$LOGDIR/$k.rc" 2>/dev/null || echo 1)"
 	sec="$(cat "$LOGDIR/$k.sec" 2>/dev/null || echo '?')"
-	echo "----- ${FILES[$k]} (${sec}s, exit=$rc) -----"
+	if [ "$sec" = cached ]; then
+		echo "----- ${FILES[$k]} (cached) -----"
+		cached=$((cached + 1))
+	else
+		echo "----- ${FILES[$k]} (${sec}s, exit=$rc) -----"
+		analysed=$((analysed + 1))
+	fi
+	# 鍵を出せなかった理由は黙って飲み込まない——**永久にキャッシュが効かない状態**は
+	# 「速いはずが遅いまま」として現れるだけで、それ自体はジョブを落とさないからである。
+	if [ -s "$LOGDIR/$k.key" ]; then
+		sed 's/^/  (cache) /' "$LOGDIR/$k.key"
+	fi
 	if [ -s "$LOGDIR/$k.log" ]; then
 		cat "$LOGDIR/$k.log"
 	fi
@@ -252,6 +357,14 @@ while [ "$k" -lt "${#FILES[@]}" ]; do
 	fi
 	k=$((k + 1))
 done
+
+if [ -n "$CACHE_DIR" ]; then
+	echo "clang-tidy result cache: $cached reused / $analysed analysed"
+	# 古い控えを落とす。鍵は入力が変わるたびに変わるので、放っておくと溜まる一方に
+	# なる（毎コミットぶんが残る）。生きている鍵は引くたびに touch しているので、
+	# しばらく触られていないものはもう誰も引かない。
+	find "$CACHE_DIR" -type f -mtime +7 -delete 2>/dev/null || true
+fi
 
 if [ "$status" -ne 0 ]; then
 	echo "::error::clang-tidy failed on:$failed"
