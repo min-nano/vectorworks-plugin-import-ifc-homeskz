@@ -135,6 +135,15 @@ jobs:
               # 権限を引けた。これだけで判断する。association は見ない。
               # 読み取り専用の collaborator は association が COLLABORATOR に
               # なるので、ここで association に落とすと通してしまう。
+              #
+              # maintain はおそらく届かない。この API の permission は
+              # admin / write / read / none に丸められると documented されて
+              # おり、Maintain や Triage といった役割はそちら側では write /
+              # read に畳まれて role_name のほうに出る (実地では未確認)。
+              # それでも並べておくのは、届いたときに通すのが正しく、
+              # 外しても admin / write の判定が変わらないから——「無い値を
+              # 書いている」のではなく「役割が増えても安全側に倒れる」ため
+              # の 1 語である。
               case "$perm" in
                 admin|write|maintain) ;;
                 *) skip "書き込み権限のない人の投稿なのでレビューを行いません (permission=$perm)。" ;;
