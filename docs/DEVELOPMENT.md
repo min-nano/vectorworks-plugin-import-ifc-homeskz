@@ -584,8 +584,15 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 - **実機フィードバックの自動コメント**（`<!-- homeskz-ifc-feedback … -->`）でも走りません。
   あれは件数と診断ログで、人は 1 文字も書いていません（下記「実機フィードバックの往復」）。
   拾うと dev ビルドが出るたびにレビューが二重に走ります。
-- コメント・レビューが起点のときは、**書き込み権限のある人の投稿だけ**を引き金にします
-  （権限を実際に API で引き、引けなかったときだけ `author_association` に頼ります）。
+- コメント・レビューが起点のときは、**書き込み権限のある人の投稿だけ**を引き金にします。
+  権限は実際に API で引き（`repos/{owner}/{repo}/collaborators/{user}/permission`）、
+  引けなかったときだけ `author_association` に落とします。その受け皿が通すのは
+  **`OWNER` と `MEMBER` だけ**です — **`COLLABORATOR` は通しません**。読み取り専用の
+  collaborator も association は `COLLABORATOR` になるので、通せば「書き込める人だけ」
+  という前提が受け皿の側から崩れます。API が引けなかった理由は `::warning::` に出るので、
+  この受け皿が例外なのか毎回通る道なのかは実行ログで分かります（GitHub のドキュメントは
+  このエンドポイントに admin 権限を求めており、ジョブの `GITHUB_TOKEN` では常に失敗する
+  可能性があります）。
 - コメント起点はシークレットの渡る特権的な文脈なので、**PR の head を checkout しません**
   （既定ブランチのまま、PR の中身は `gh pr diff` で読ませます）。fork の PR と下書きの
   PR は走りません。

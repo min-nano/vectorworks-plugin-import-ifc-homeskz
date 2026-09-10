@@ -131,7 +131,7 @@ jobs:
           # それだけを見ると正当な人を黙って弾いてしまう。実際の権限を引く。
           if [ -n "$ACTOR_LOGIN" ]; then
             if perm=$(gh api "repos/$GH_REPO/collaborators/$ACTOR_LOGIN/permission" \
-                        --jq .permission 2>/dev/null); then
+                        --jq .permission 2>"$RUNNER_TEMP/perm-err"); then
               # 権限を引けた。これだけで判断する。association は見ない。
               # 読み取り専用の collaborator は association が COLLABORATOR に
               # なるので、ここで association に落とすと通してしまう。
@@ -140,11 +140,22 @@ jobs:
                 *) skip "書き込み権限のない人の投稿なのでレビューを行いません (permission=$perm)。" ;;
               esac
             else
-              # 権限を引けなかったときだけ association に頼る。黙って落とすと
-              # 機能が働かない理由が分からなくなるので、警告を出す。
-              echo "::warning::書き込み権限を確認できなかったため author_association で判断します (association=$ACTOR_ASSOCIATION)。"
+              # 引けなかったときの受け皿。ここで COLLABORATOR を通してはいけない
+              # ——それは上のコメントが「だから association を見ない」と言っている
+              # 当のケース (読み取り専用の collaborator) そのもので、通せば
+              # 「書き込める人だけ」という前提が受け皿の側から崩れる。
+              # OWNER (このリポジトリの持ち主) と MEMBER (組織のメンバー) だけを
+              # 通す。association に頼ること自体が次善なので、範囲は最小にする。
+              #
+              # 黙って落とすと機能が働かない理由が分からなくなるので、警告に
+              # API の失敗理由も載せる。この受け皿が「例外」なのか「毎回通る道」
+              # なのかは、それを読めば分かる——GitHub のドキュメントはこの
+              # エンドポイントに admin 権限を求めており、ジョブの GITHUB_TOKEN
+              # (contents: read / pull-requests: write) では常に失敗する可能性が
+              # ある。実行ログで確かめること。
+              echo "::warning::書き込み権限を API で確認できなかったため author_association で判断します (association=$ACTOR_ASSOCIATION): $(tr '\n' ' ' <"$RUNNER_TEMP/perm-err")"
               case "$ACTOR_ASSOCIATION" in
-                OWNER|MEMBER|COLLABORATOR) ;;
+                OWNER|MEMBER) ;;
                 *) skip "書き込み権限を確認できませんでした (association=$ACTOR_ASSOCIATION)。" ;;
               esac
             fi
