@@ -209,6 +209,8 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 .github/workflows/test.yml  CI: 無 SDK の単体テスト（ASan+UBSan）とカバレッジ
 .github/workflows/lint.yml  CI: ソース／非ソースを問わずコーディング規則を強制
 .github/workflows/codeql.yml            CI: CodeQL による静的解析（週次＋PR）
+.github/workflows/pr-review.yml CI: PR を Claude にレビューさせる（設計規約に
+                            照らした指摘とインラインコメント。書式は lint.yml が見る）
 .github/workflows/cleanup-dev-release.yml  PR のクローズ時に dev プレリリースを片付ける
 .github/workflows/stable-release-healthcheck.yml
                             stable リリースの取りこぼしを検知して再ビルドする
@@ -543,6 +545,47 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 して再ビルド・再公開します。スケジュール起動のワークフローはデフォルトブランチから
 実行されるため、`main` にマージされて初めて有効になります。
 
+### 自動レビュー（`pr-review.yml`）
+
+`.github/workflows/pr-review.yml` は、PR を **Claude にレビューさせて**指摘を
+インラインコメントとレビューとして投稿します。公式の
+[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) を
+自動レビュー向けの形（agent モード）で使い、認証はサブスクリプションの OAuth トークン
+（リポジトリシークレット `CLAUDE_CODE_OAUTH_TOKEN`。`claude setup-token` で発行）で行い
+ます。**シークレットが未設定なら警告を出して素通りする**ので、設定しないままでも CI は
+赤くなりません。
+
+**役割は他のチェックと重なりません。** 書式と機械的な静的解析は `lint.yml` /
+`build.yml` の clang-tidy / `codeql.yml` が済ませているので、こちらが見るのは
+**機械が見られないもの** — [`CLAUDE.md`](../CLAUDE.md) の設計規約（2 フェーズ分離・
+殻と本体の分割・依存の向き・図面リソースを作らないこと・決定性・置き場所の重複・
+利用者のものを消すコードの歯止め・書き残しの行き先）と、変更の意図に照らした正しさです。
+プロンプトにはその一覧が入っていて、レビューは日本語・重大度つきで返ります。
+
+起動と安全のための取り決め:
+
+- **PR に紐づくイベントだけ**で走ります（`pull_request` に加え、コメント・レビューでも
+  走ります。指摘への対応がコードではなく説明で行われることがあり、その場合
+  `synchronize` が起きないためです）。
+- **bot の投稿では走りません。** 自分のレビューが次の実行を呼んで際限なく回るのを
+  防ぐためで、`test.yml` のカバレッジ表や `ci-debug.yml` の結果コメントもここで落ちます。
+- **実機フィードバックの自動コメント**（`<!-- homeskz-ifc-feedback … -->`）でも走りません。
+  あれは件数と診断ログで、人は 1 文字も書いていません（下記「実機フィードバックの往復」）。
+  拾うと dev ビルドが出るたびにレビューが二重に走ります。
+- コメント・レビューが起点のときは、**書き込み権限のある人の投稿だけ**を引き金にします
+  （権限を実際に API で引き、引けなかったときだけ `author_association` に頼ります）。
+- コメント起点はシークレットの渡る特権的な文脈なので、**PR の head を checkout しません**
+  （既定ブランチのまま、PR の中身は `gh pr diff` で読ませます）。fork の PR と下書きの
+  PR は走りません。
+- **レビューの失敗で PR を赤くしません**（`continue-on-error`）。失敗は実行のログと
+  `::warning::` に残ります。
+- ツールは差分の取得とレビューの提出に要るものだけを許可し、`Edit` / `Write` /
+  `NotebookEdit` を明示的に外してあります（レビューがコードを書き換えることはありません）。
+
+**承認は実機確認の代わりではありません。** `draw/` を含む PR は、レビューが承認しても
+人が Vectorworks 実機で見て「確認できた」と言うまでマージしません
+（[`CLAUDE.md`](../CLAUDE.md)「開発プロセス: PR とマージ」）。
+
 #### 手動ディスパッチ（`workflow_dispatch`）を持つワークフロー
 
 「Run workflow」ボタンは**必要なものにだけ**付けています。PR とマージで自動的に走る
@@ -556,6 +599,7 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 | `ci-debug.yml` | あり（専用） | 手動ディスパッチ**のみ**で起動する調査用ワークフロー |
 | `lint.yml` / `test.yml` / `codeql.yml` | なし | push / PR（+ CodeQL は週次スケジュール）で自動的に走る |
 | `cleanup-dev-release.yml` | なし | PR のクローズ（`pull_request` の `closed`）専用 |
+| `pr-review.yml` | なし | PR のイベント（変更・コメント・レビュー）で自動的に走る |
 
 ### CI デバッグ（`ci-debug.yml`）
 
