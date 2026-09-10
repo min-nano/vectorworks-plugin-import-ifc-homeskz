@@ -372,6 +372,10 @@ jobs:
             gh pr review ${{ steps.prep.outputs.pr_number }} --request-changes --body "…"
             ```
 
+            **PR 番号は `gh pr review` の直後に、この形のまま置いてください。**
+            許可されているのはこの並びだけです (`--repo` などを先に挟むと
+            拒否され、判定を出せずに終わります)。
+
             判断の基準:
             - `[重大]` か `[中]` を 1 件でも出したなら `--request-changes`
             - 指摘が無い、または `[軽微]` だけなら `--approve`
@@ -443,6 +447,19 @@ jobs:
           # gh pr comment は使わない。行に紐づかない指摘は gh pr review の
           # --body に入れるので、別途コメントを積む必要がない。
           #
+          # gh pr review だけは PR 番号まで含めて許可する。判定を出すのは
+          # ここだけで、番号を縛らないと「この PR のレビュー」という許可が
+          # 「どの PR でも承認・非承認できる」許可になる。レビューは PR の
+          # 説明文やコメントという外から来た文章を読むので、そこに紛れた
+          # 指示で別の PR を承認させられる余地を、指示の書き方ではなく
+          # ツールの許可で塞ぐ。番号は prep ステップが event から取った
+          # 整数なので、ここへ入れても外の文字列は混ざらない。
+          #
+          # 読むだけの gh pr diff / gh pr view は縛らない。番号を間違えても
+          # 他所のものを読んでしまうだけで、書き換えは起きない。逆に縛ると
+          # 引数の並びが少し変わっただけで拒否され、レビューが黙って
+          # 痩せる——防いでいるものと釣り合わない。
+          #
           # claude_args のうち、アクションが自前で扱うもの (model / max-turns /
           # allowedTools / disallowedTools など) は SDK の設定に取り出され、
           # 残りは extraArgs としてそのまま CLI に渡る。--effort と
@@ -454,5 +471,5 @@ jobs:
             --effort xhigh
             --max-turns 40
             --max-budget-usd 2.0
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr review:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr review ${{ steps.prep.outputs.pr_number }}:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
             --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch
