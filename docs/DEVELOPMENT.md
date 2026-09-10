@@ -567,18 +567,23 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 - **PR に紐づくイベントだけ**で走ります（`pull_request` に加え、コメント・レビューでも
   走ります。指摘への対応がコードではなく説明で行われることがあり、その場合
   `synchronize` が起きないためです）。
-- **コメント・レビューからの起動は、このワークフローが `main` にマージされて初めて
-  効きます。** `issue_comment` / `pull_request_review*` は `pull_request` と違って
-  **デフォルトブランチにある版のワークフローが実行される**ためで、`cleanup-dev-release.yml`
-  と同じ制約です（下記）。作業ブランチに置いただけの段階では、PR にコメントしても
-  何も起動しません（`pull_request` 起動のほうは PR の head の版が走るので、その PR
-  自身で試せます）。
-- **同じ PR の実行は 1 つずつ**走らせ、**打ち切るのは push（`synchronize`）のときだけ**
-  にしています。打ち切られた実行のチェックは `cancelled` になり、`scripts/ci-wait.sh` は
-  それを**失敗として扱う**ので（上記「CI の完了待ち」）、同じ head sha に `pull_request`
-  のイベントが 2 つ続いたときに打ち切ると、レビューを止めただけで PR が赤く見えます。
-  `synchronize` で打ち切った分は「古い sha」の側に付くため、head を追う
-  `ci-wait --pr` の判定には入りません。
+- **PR 本体へのコメント（`issue_comment`）からの起動だけは、このワークフローが `main` に
+  マージされて初めて効きます。** このイベントは**デフォルトブランチにある版のワークフローが
+  実行される**ためで、`cleanup-dev-release.yml` と同じ制約です（下記）。**インラインコメント
+  への返信（`pull_request_review_comment`）と、レビューの提出（`pull_request_review`）は
+  PR の head の版が走る**ので、こちらは作業ブランチの段階から効きます（PR #112 で実測。
+  `pull_request` 起動と合わせて、3 種類のうち 2 種類はマージ前に試せます）。
+- **同じ PR の実行は 1 つずつ**走らせ、**`cancel-in-progress` は push（`synchronize`）の
+  ときだけ**にしています。走っている実行を打ち切るとそのチェックは `cancelled` になり、
+  `scripts/ci-wait.sh` はそれを**失敗として扱う**ので（上記「CI の完了待ち」）、同じ head sha
+  のイベントで打ち切ると、レビューを止めただけで PR が赤く見えます。`synchronize` で
+  打ち切った分は「古い sha」の側に付くため、head を追う `ci-wait --pr` の判定には入りません。
+
+  なお `cancel-in-progress` が false でも、**順番待ち（pending）の実行は、次の実行が来た
+  時点で GitHub 自身が打ち切ります**（1 グループに待てるのは 1 つだけ）。ただしその場合は
+  **ジョブが始まっていないのでチェックランが作られず**、`ci-wait` の判定には現れません
+  （PR #112 で実測。`pull_request_review` 起点の実行が pending のまま打ち切られたが、
+  `ci-wait` は `success` を返し `review` は 2 件とも成功だった）。
 - **bot の投稿では走りません。** 自分のレビューが次の実行を呼んで際限なく回るのを
   防ぐためで、`test.yml` のカバレッジ表や `ci-debug.yml` の結果コメントもここで落ちます。
 - **実機フィードバックの自動コメント**（`<!-- homeskz-ifc-feedback … -->`）でも走りません。
