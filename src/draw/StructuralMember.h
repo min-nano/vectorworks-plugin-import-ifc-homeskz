@@ -109,6 +109,13 @@ namespace HomeskzIfcImport::draw
 		// 0 なら端点がそのまま材の端（垂木・自由端の横架材）。
 		double startOffset = 0.0;
 		double endOffset = 0.0;
+		// 描き上がった部材の**あるべき長さ**（mm。0 なら検査しない）。生成後に PIO の
+		// 「長さ」を読み戻し、0 で潰れていないかを確かめるために使う（下記
+		// StructuralMemberResult::collapsed）。**実描画はローカルの VectorWorks でしか
+		// 確認できない**ので、「オブジェクトは在るのに実体が無い」を件数で持ち帰るのが唯一の
+		// 手掛かりになる（柱の上端バインドで実際に起きた。parse/Column.h「上端も当階の
+		// レベルへバインドする」）。
+		double expectedLength = 0.0;
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
@@ -126,6 +133,28 @@ namespace HomeskzIfcImport::draw
 		// 含むパラメータ名の一覧（DescribeParamsContaining）。実機でしか読めない情報を
 		// 1 周で持ち帰るための手掛かりで、解決できていれば空。
 		std::string offsetParamHint;
+		// **長さ 0 で描かれたか**（spec.expectedLength が 0 なら常に false＝検査していない）。
+		// PIO は生成できてもパスやバウンドの解決に失敗すると実体を持たず、OIP の高さ・基準・
+		// オフセットは命令どおりのまま画面に何も出ない（Findings「Parametric Objects」の
+		// 3 行表）。呼び出し側は件数を診断へ載せる。
+		bool collapsed = false;
+		// 「長さ」のパラメータ名を解決できなかったときだけ、PIO が持つ「長さ」を含む
+		// パラメータ名の一覧（DescribeParamsContaining）。解決できていれば空。
+		std::string lengthParamHint;
+		// 潰れていたときだけ、**その場で読み戻した値**（OIP の「高さ」と「長さ」）。バウンドが
+		// 解けているのに実体が無いのか、高さそのものが 0 なのかを**実機を見ずに**分けるための
+		// 証拠で、潰れていなければ空。
+		std::string collapsedProbe;
+	};
+
+	// パスの読み戻し（診断用）。**「2 点になったか」の真偽だけでは足りない**——ピース索引の
+	// 起点が 0 / 1 のどちらの規約かが分からないまま OR で見ているので、片方が別のものを
+	// 数えていれば「2 点になった」と誤報しうる。実機で「長さ 0 で描かれた」を切り分けるには
+	// **観測した数そのもの**が要る（読めなければ −1）。
+	struct PathProbe
+	{
+		Sint32 piece0 = -1;
+		Sint32 piece1 = -1;
 	};
 
 	// パス＝部材の芯線（始端 → 終端）を通る 2 点の NURBS 曲線。gSDK->CreateNurbsCurve で
@@ -135,9 +164,44 @@ namespace HomeskzIfcImport::draw
 	//
 	// 頂点が本当に 2 つになったかを outAppended に返す（診断用。ここが崩れると PIO は
 	// パスを挿入点としてしか読まず、長さ 0 で何も描かれない）。作れなければ nil。
-	MCObjectHandle CreatePath(const core::Vec3& start, const core::Vec3& end, bool& outAppended);
+	// outProbe が非 nullptr なら、読み戻した頂点数をそのまま入れる（診断用。上記 PathProbe）。
+	MCObjectHandle CreatePath(const core::Vec3& start, const core::Vec3& end, bool& outAppended,
+							  PathProbe* outProbe = nullptr);
 
 	// 構造材ツールの PIO を 1 つ生成して仕様どおりに設定する。style が 0 ならスタイルを
 	// 関連付けずに描く（スタイルの欠落で部材を失わない）。
 	StructuralMemberResult DrawStructuralMember(const StructuralMemberSpec& spec, RefNumber style);
+
+	// 描き上がった部材を**読み戻して測る**。生成直後だけでなく、**取り込みが終わったあと**
+	// にも同じ口で測れるようにしてある——「描いた直後は入っていたのに、あとの要素を描く
+	// あいだに潰れた」という順序の問題を、実機を見ずに切り分けるため（実機 round 1 で、
+	// 生成直後の測定では 197 本とも潰れていなかった。docs/DEV-NOTES.md M27）。
+	//
+	// found が false なら「長さ」のパラメータ名を引けなかった（値は意味を持たない）。
+	struct DrawnMemberSize
+	{
+		bool found = false;
+		double length = 0.0;
+		bool zero = false; // found かつ長さが 0（＝実体が無い）
+	};
+	DrawnMemberSize MeasureDrawnMember(MCObjectHandle object);
+
+	// その部材が持つ「長さ」「高さ」を含むパラメータを**名前と値で**並べた 1 行。どの
+	// パラメータが OIP のどの欄なのかを実機で確かめる唯一の手段なので、**1 本ぶんだけ**
+	// 診断ログへ出す（全数だと読めない）。
+	std::string DescribeSizeParams(MCObjectHandle object);
+
+	// 長さ 0 で描かれた部材（StructuralMemberResult::collapsed）を、**同じ指定のまま**もう
+	// 一度解かせる。
+	//
+	// 【なぜ「同じ指定で」やり直すのか】実機で、描かれなかった柱を人が OIP の値を 1 つ更新
+	// （＝同じ内容で計算し直させる）だけで正しい高さに描き直せることが分かっている——**値が
+	// 同じまま直るのだから、記録している指定は正しく、生成直後の解決だけが失敗している**
+	// （docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。そこで高さ基準を入れ直して
+	// リセットし、**読み戻して直ったかを返す**（呼び出し側は直った本数を診断へ載せる）。
+	//
+	// 触るのは潰れていた部材だけで、正しく描けている部材には掛けない（余計なリセットで
+	// 時間を使わない）。
+	bool RetryCollapsedMember(MCObjectHandle object, const core::StoryBoundCommand& startBound,
+							  const core::StoryBoundCommand& endBound);
 } // namespace HomeskzIfcImport::draw
