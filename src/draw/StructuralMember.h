@@ -113,8 +113,8 @@ namespace HomeskzIfcImport::draw
 		// 「長さ」を読み戻し、0 で潰れていないかを確かめるために使う（下記
 		// StructuralMemberResult::collapsed）。**実描画はローカルの VectorWorks でしか
 		// 確認できない**ので、「オブジェクトは在るのに実体が無い」を件数で持ち帰るのが唯一の
-		// 手掛かりになる（柱の上端バインドで実際に起きた。parse/Column.h「上端も当階の
-		// レベルへバインドする」）。
+		// 手掛かりになる（実機で実際に起きた。docs/DEV-NOTES.md「柱が長さ 0 で描かれる
+		// （M27）」）。
 		double expectedLength = 0.0;
 	};
 

@@ -133,29 +133,41 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
+		// パラメータ 1 件を人が読める形で読み出す（実数と、文字列で保持されていればその値）。
+		// **読めないパラメータを覗くと例外が出る**ので、ここで 1 件ずつ畳んで "?" を返す
+		// ——呼び出し側が 1 件の読み損ないで全体を失わないようにするための粒度である
+		// （DrawUtil の PioParamString と同じ扱い）。
+		std::string ReadParamText(const VWParametricObj& pio, const TXString& param)
+		{
+			if (param.IsEmpty())
+				return "?";
+			try
+			{
+				std::array<char, 32> buffer{};
+				std::snprintf(buffer.data(), buffer.size(), "%g", pio.GetParamReal(param));
+				std::string text(buffer.data());
+				const std::string raw = PioParamString(pio, param.GetStdString().c_str());
+				if (!raw.empty())
+				{
+					text += "/\"";
+					text += raw;
+					text += "\"";
+				}
+				return text;
+			}
+			catch (...)
+			{
+				return "?";
+			}
+		}
+
 		// 潰れていた部材の「高さ」「長さ」を人が読める 1 行にする（診断の証拠）。読めない
 		// パラメータは "?" で埋める（読み損ないで描画を止めない）。
 		std::string DescribeDrawnSize(VWParametricObj& pio, const TXString& lengthName)
 		{
-			const auto read = [&pio](const TXString& param) -> std::string
-			{
-				if (param.IsEmpty())
-					return "?";
-				try
-				{
-					std::array<char, 32> buffer{};
-					std::snprintf(buffer.data(), buffer.size(), "%g", pio.GetParamReal(param));
-					const std::string text = PioParamString(pio, param.GetStdString().c_str());
-					return text.empty() ? std::string(buffer.data())
-										: std::string(buffer.data()) + "/\"" + text + "\"";
-				}
-				catch (...)
-				{
-					return "?";
-				}
-			};
 			const TXString heightName = ResolveParamNameAmong(pio, kHeightNames, kLocalizedHeight);
-			return "高さ=" + read(heightName) + " 長さ=" + read(lengthName);
+			return "高さ=" + ReadParamText(pio, heightName) +
+				   " 長さ=" + ReadParamText(pio, lengthName);
 		}
 
 		// 断面基準点 → 構造材ツールのポップアップのキー。
@@ -329,20 +341,16 @@ namespace HomeskzIfcImport::draw
 					continue;
 				if (!found.empty())
 					found += ", ";
-				std::array<char, 32> buffer{};
-				std::snprintf(buffer.data(), buffer.size(), "%g", pio.GetParamReal(name));
 				found += universal;
 				found += "(";
 				found += localized;
 				found += ")=";
-				found += buffer.data();
-				const std::string text = PioParamString(pio, universal.c_str());
-				if (!text.empty())
-				{
-					found += "/\"";
-					found += text;
-					found += "\"";
-				}
+				// **読み出しは 1 件ずつ守る。** 名前に「長さ」「高さ」を含むパラメータが
+				// 実数とは限らず（ポップアップや文字列のこともある）、1 件の読み損ないで
+				// 例外が出ると、それまでに積んだ他のパラメータごと捨てることになる——
+				// **実機の未知の挙動を壊さず観測する**ための行なので、1 件は "?" にして
+				// 残りを持ち帰る（DescribeDrawnSize の read と同じ粒度）。
+				found += ReadParamText(pio, name);
 			}
 			return found;
 		}
