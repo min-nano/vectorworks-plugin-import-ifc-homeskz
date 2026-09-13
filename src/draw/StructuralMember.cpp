@@ -199,23 +199,36 @@ namespace HomeskzIfcImport::draw
 		// 諦めると、索引の規約違いというだけで部材が 1 本も描かれなくなる）。
 		const Sint32 piece0 = gSDK->NurbsGetNumPts(path, 0);
 		const Sint32 piece1 = gSDK->NurbsGetNumPts(path, 1);
-		if (outProbe != nullptr)
+		PathProbe probe;
+		probe.piece0 = piece0;
+		probe.piece1 = piece1;
+		// **2 点の Z を読み戻す。** 数が 2 でも同じ位置なら部材は実体を持たない
+		// （実機で 46 本。draw/StructuralMember.h の PathProbe）。
+		WorldPt3 first(0.0, 0.0, 0.0);
+		WorldPt3 second(0.0, 0.0, 0.0);
+		if (gSDK->NurbsGetPt3D(path, 0, 0, first) && gSDK->NurbsGetPt3D(path, 0, 1, second))
 		{
-			PathProbe probe;
-			probe.piece0 = piece0;
-			probe.piece1 = piece1;
-			// **2 点の Z も読み戻す。** 数が 2 でも同じ位置なら部材は実体を持たない
-			// （実機で 46 本。draw/StructuralMember.h の PathProbe）。
-			WorldPt3 first(0.0, 0.0, 0.0);
-			WorldPt3 second(0.0, 0.0, 0.0);
-			if (gSDK->NurbsGetPt3D(path, 0, 0, first) && gSDK->NurbsGetPt3D(path, 0, 1, second))
-			{
-				probe.pointsRead = true;
-				probe.z0 = first.z;
-				probe.z1 = second.z;
-			}
-			*outProbe = probe;
+			probe.pointsRead = true;
+			probe.z0 = first.z;
+			probe.z1 = second.z;
 		}
+		// **座標を明示的に入れ直す。** `Add3DVertex` が足した点が渡した位置にならないことが
+		// ある（ヘッダ参照）。うまく足せていたときは同じ値を書くだけで何も変わらない。
+		if (piece0 >= kPathPointCount)
+		{
+			const Boolean startSet =
+				gSDK->NurbsSetPt3D(path, 0, 0, WorldPt3(start.x, start.y, start.z));
+			const Boolean endSet = gSDK->NurbsSetPt3D(path, 0, 1, WorldPt3(end.x, end.y, end.z));
+			probe.setOk = startSet && endSet;
+			WorldPt3 fixed(0.0, 0.0, 0.0);
+			if (gSDK->NurbsGetPt3D(path, 0, 1, fixed))
+			{
+				probe.fixedRead = true;
+				probe.fixedZ1 = fixed.z;
+			}
+		}
+		if (outProbe != nullptr)
+			*outProbe = probe;
 		outAppended = piece0 >= kPathPointCount || piece1 >= kPathPointCount;
 		return path;
 	}
@@ -310,6 +323,32 @@ namespace HomeskzIfcImport::draw
 										DescribeStoryBound(object, kStartBoundID) + "]・終端基準[" +
 										DescribeStoryBound(object, kEndBoundID) + "]・図面のパス[" +
 										DescribePioPath(object) + "]";
+			// **潰れていたらパスを作り直して差し替える。** 渡した曲線が正しくても PIO の中の
+			// パスが潰れていることがある（実機 round 7）。直ったかは読み戻して見る。
+			if (result.collapsed && spec.retryWithFreshPath)
+			{
+				bool appended = false;
+				const MCObjectHandle fresh =
+					CreatePath(spec.pathStart, spec.pathEnd, appended, nullptr);
+				if (fresh != nil && gSDK->SetCustomObjectPath(object, fresh))
+				{
+					gSDK->ResetObject(object);
+					const DrawnMemberSize retried = MeasureDrawnMember(object);
+					std::array<char, 160> buffer{};
+					std::snprintf(buffer.data(), buffer.size(),
+								  "・パスを作り直した結果 実測 %g（Z %g→%g）・作り直したパス[",
+								  retried.extent, retried.start, retried.end);
+					result.collapsedProbe +=
+						std::string(buffer.data()) + DescribePioPath(object) + "]";
+					if (retried.found && !retried.zero)
+					{
+						result.repairedByPath = true;
+						result.collapsed = false;
+					}
+				}
+				else
+					result.collapsedProbe += "・パスを作り直して差し替えられなかった";
+			}
 		}
 
 		result.object = object;

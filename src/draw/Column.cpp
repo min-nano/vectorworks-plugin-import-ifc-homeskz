@@ -102,6 +102,9 @@ namespace HomeskzIfcImport::draw
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
 			std::size_t bound = 0; // 高さ基準を VW が受け取らなかった
 			std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
+			// パスを作り直して差し替えたら直った本数（draw/StructuralMember.h の
+			// retryWithFreshPath）。0 でなければ「渡した曲線は正しく、PIO 化で潰れていた」。
+			std::size_t repaired = 0;
 			std::string lengthHint; // 「長さ」のパラメータ名の手掛かり（最初の 1 件）
 			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長・図面が
 			// 持っている高さ基準・図面のパスの頂点）。**原因をパス側と高さ基準側に分けるのは
@@ -156,6 +159,11 @@ namespace HomeskzIfcImport::draw
 			// 描き上がりの長さ＝パス長（端部オフセットはこの長さから戻す量なので、潰れて
 			// いないかを見るこの検査には要らない）。0 で潰れていたら診断へ持ち帰る。
 			spec.expectedLength = column.height;
+			// 潰れていたらパスを作り直して差し替える（同じ 2 点で作り直すだけ）。
+			spec.retryWithFreshPath = true;
+			spec.pathStart = core::Vec3{column.position.x, column.position.y, column.elevation};
+			spec.pathEnd =
+				core::Vec3{column.position.x, column.position.y, column.elevation + column.height};
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
 			{
@@ -197,20 +205,24 @@ namespace HomeskzIfcImport::draw
 			}
 			// 長さ 0 で描かれた本数（オブジェクトは在るのに実体が無い）。**これが 0 でない
 			// 限り、件数が揃っていても絵は欠けている**ので、必ず診断へ載せる。
-			if (result.collapsed)
+			if (result.repairedByPath)
+				++failures.repaired;
+			if (result.collapsed || result.repairedByPath)
 			{
-				++failures.collapsed;
-				outCollapsed = true;
+				if (result.collapsed)
+					++failures.collapsed;
+				outCollapsed = result.collapsed;
 				// 1 本目だけ実測を控える（全数ぶん並べても読めない）。
 				if (failures.collapsedProbe.empty())
 				{
 					std::array<char, 192> buffer{};
 					std::snprintf(buffer.data(), buffer.size(),
 								  "パスの頂点 piece0=%d piece1=%d・作った曲線の Z %s(%g→%g)・"
-								  "命令のパス長 %g（Z %g→%g）・OIP ",
+								  "入れ直し %s(→%g)・命令のパス長 %g（Z %g→%g）・OIP ",
 								  static_cast<int>(probe.piece0), static_cast<int>(probe.piece1),
 								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1,
-								  column.height, column.elevation,
+								  probe.setOk ? (probe.fixedRead ? "" : "読めない") : "できない",
+								  probe.fixedZ1, column.height, column.elevation,
 								  column.elevation + column.height);
 					failures.collapsedProbe = std::string(buffer.data()) + result.collapsedProbe;
 				}
@@ -267,8 +279,8 @@ namespace HomeskzIfcImport::draw
 		// （柱が見えないときの切り分け材料）。
 		if (outDiagnostics != nullptr &&
 			(failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
-			 failures.bound > 0 || failures.collapsed > 0 || !failures.lengthHint.empty() ||
-			 style == 0))
+			 failures.bound > 0 || failures.collapsed > 0 || failures.repaired > 0 ||
+			 !failures.lengthHint.empty() || style == 0))
 		{
 			std::string note = "柱の診断: ";
 			if (failures.path > 0)
@@ -279,13 +291,15 @@ namespace HomeskzIfcImport::draw
 			if (failures.bound > 0)
 				note +=
 					"高さ基準を図面へ書けなかった柱 " + std::to_string(failures.bound) + " 本。";
+			if (failures.repaired > 0)
+				note += "パスを作り直して差し替えたら直った柱 " +
+						std::to_string(failures.repaired) + " 本。";
 			if (failures.collapsed > 0)
-			{
-				note += "長さ 0 で描かれた（実体が無い）柱 " + std::to_string(failures.collapsed) +
-						" 本。";
-				if (!failures.collapsedProbe.empty())
-					note += "（1 本目: " + failures.collapsedProbe + "）";
-			}
+				note += "作り直しても長さ 0 のままだった（実体が無い）柱 " +
+						std::to_string(failures.collapsed) + " 本。";
+			if ((failures.collapsed > 0 || failures.repaired > 0) &&
+				!failures.collapsedProbe.empty())
+				note += "（1 本目: " + failures.collapsedProbe + "）";
 			if (!failures.lengthHint.empty())
 				note +=
 					"「長さ」パラメータを引けませんでした（候補: " + failures.lengthHint + "）。";

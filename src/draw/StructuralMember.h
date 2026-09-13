@@ -116,6 +116,13 @@ namespace HomeskzIfcImport::draw
 		// 手掛かりになる（実機で実際に起きた。docs/DEV-NOTES.md「柱が長さ 0 で描かれる
 		// （M27）」）。
 		double expectedLength = 0.0;
+		// **潰れていたときにパスを作り直して差し替えるための 2 点**（`SetCustomObjectPath`）。
+		// `retryWithFreshPath` が true のときだけ使う。**渡した曲線は正しいのに PIO の中の
+		// パスが潰れている**という筋（実機 round 7 でそう見えた）を、その場で直せるかどうかで
+		// 確かめる。直れば絵も出る。
+		bool retryWithFreshPath = false;
+		core::Vec3 pathStart;
+		core::Vec3 pathEnd;
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
@@ -143,6 +150,9 @@ namespace HomeskzIfcImport::draw
 		// オフセットは命令どおりのまま画面に何も出ない（Findings「Parametric Objects」の
 		// 3 行表）。呼び出し側は件数を診断へ載せる。
 		bool collapsed = false;
+		// 潰れていた材の**パスを作り直して差し替えたら直ったか**（`SetCustomObjectPath`）。
+		// true なら「渡した曲線は正しかったのに PIO 化で潰れた」の裏が取れる。
+		bool repairedByPath = false;
 		// 「長さ」のパラメータ名を解決できなかったときだけ、PIO が持つ「長さ」を含む
 		// パラメータ名の一覧（DescribeParamsContaining）。解決できていれば空。
 		std::string lengthParamHint;
@@ -166,15 +176,23 @@ namespace HomeskzIfcImport::draw
 	{
 		Sint32 piece0 = -1;
 		Sint32 piece1 = -1;
-		bool pointsRead = false; // 2 点の座標を読めたか
+		bool pointsRead = false; // Add3DVertex の直後に 2 点の座標を読めたか
 		double z0 = 0.0;		 // 始端の Z（読めたときだけ）
 		double z1 = 0.0;		 // 終端の Z（読めたときだけ）
+		bool setOk = false;		 // 座標を明示的に入れ直せたか（NurbsSetPt3D）
+		bool fixedRead = false;	 // 入れ直したあとに読み直せたか
+		double fixedZ1 = 0.0;	 // 入れ直したあとの終端の Z
 	};
 
 	// パス＝部材の芯線（始端 → 終端）を通る 2 点の NURBS 曲線。gSDK->CreateNurbsCurve で
 	// 始端 1 点の曲線を作り、gSDK->Add3DVertex（**VS の AddVertex3D にあたる**）で終端を
 	// 足す。**水平材・鉛直材ともこれ 1 つ**で、違いは呼び出し側が渡す 2 点の Z だけ
 	// （冒頭「Z の置き方」。Z に 0 を渡してはならない）。
+	//
+	// **足したあと、2 点の座標を明示的に入れ直す**（`NurbsSetPt3D`）。`Add3DVertex` が足した
+	// 点が**渡した位置にならないことがある**——実機で 2 点とも同じ位置になり、実体が無い材に
+	// なった柱が 46 本あった（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。うまく
+	// 足せていたときは同じ値を書くだけなので何も変わらない。
 	//
 	// 頂点が本当に 2 つになったかを outAppended に返す（診断用。ここが崩れると PIO は
 	// パスを挿入点としてしか読まず、長さ 0 で何も描かれない）。作れなければ nil。
