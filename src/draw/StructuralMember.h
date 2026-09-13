@@ -117,9 +117,13 @@ namespace HomeskzIfcImport::draw
 		// （M27）」）。
 		double expectedLength = 0.0;
 		// **潰れていたときにパスを作り直して差し替えるための 2 点**（`SetCustomObjectPath`）。
-		// `retryWithFreshPath` が true のときだけ使う。**渡した曲線は正しいのに PIO の中の
-		// パスが潰れている**という筋（実機 round 7 でそう見えた）を、その場で直せるかどうかで
-		// 確かめる。直れば絵も出る。
+		// `retryWithFreshPath` が true のときだけ使う。
+		//
+		// **この 2 点は「オブジェクトの挿入点からの相対」で渡す**（＝始端は原点、終端は
+		// `(0, 0, 材の長さ)`）。生成の `CreateCustomObjectPath` は**世界座標**のパスを取るのに、
+		// あとから差し替える `SetCustomObjectPath` は**相対**で取る——実機で世界座標のまま
+		// 渡したら、長さは正しいのに材が挿入点の Z（572mm）ぶん高い位置に出た
+		// （`Z 1144→4103`。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 		bool retryWithFreshPath = false;
 		core::Vec3 pathStart;
 		core::Vec3 pathEnd;

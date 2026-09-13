@@ -159,11 +159,12 @@ namespace HomeskzIfcImport::draw
 			// 描き上がりの長さ＝パス長（端部オフセットはこの長さから戻す量なので、潰れて
 			// いないかを見るこの検査には要らない）。0 で潰れていたら診断へ持ち帰る。
 			spec.expectedLength = column.height;
-			// 潰れていたらパスを作り直して差し替える（同じ 2 点で作り直すだけ）。
+			// 潰れていたらパスを作り直して差し替える。**差し替えるパスは挿入点からの相対**で
+			// 渡す（世界座標で渡すと材が挿入点の Z ぶん高く出る。実機 round 10 で
+			// `Z 1144→4103`。draw/StructuralMember.h の retryWithFreshPath）。
 			spec.retryWithFreshPath = true;
-			spec.pathStart = core::Vec3{column.position.x, column.position.y, column.elevation};
-			spec.pathEnd =
-				core::Vec3{column.position.x, column.position.y, column.elevation + column.height};
+			spec.pathStart = core::Vec3{0.0, 0.0, 0.0};
+			spec.pathEnd = core::Vec3{0.0, 0.0, column.height};
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
 			{
