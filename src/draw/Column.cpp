@@ -308,6 +308,12 @@ namespace HomeskzIfcImport::draw
 		std::size_t differs = 0;   // 実体はあるが命令と食い違う本数
 		std::string probe; // 1 本目の実測（どのパラメータが何を返しているか）
 		std::string oddProbe; // 食い違った／潰れた 1 本目の実測
+		// **同じレイヤの無事な柱**の実測。実体が無い柱と引き比べる相手は、**同じ span
+		// レイヤ（＝同じストーリ・同じレベル）の柱**でなければ意味が無い——1 本目の柱は
+		// 別のレイヤの通し柱だったりするので、それと比べても差が多すぎて何も言えない。
+		std::string peerLayer; // 最初に潰れていた柱のレイヤ
+		std::size_t peerIndex = 0; // その相棒（同じレイヤで無事だった柱）の命令インデックス
+		bool peerFound = false;
 
 		for (const auto& [index, object] : handles.table().handles)
 		{
@@ -335,8 +341,16 @@ namespace HomeskzIfcImport::draw
 			else if (!matches)
 				++differs;
 
+			// 同じレイヤで**無事だった**柱を 1 本覚える（潰れた柱の相棒。下で実測を採る）。
+			if (!size.zero && matches && !peerLayer.empty() && !peerFound &&
+				column.layer == peerLayer)
+			{
+				peerIndex = index;
+				peerFound = true;
+			}
 			if ((size.zero || !matches) && oddProbe.empty())
 			{
+				peerLayer = column.layer;
 				std::array<char, 192> buffer{};
 				std::snprintf(buffer.data(), buffer.size(),
 							  "命令 %g（端部オフセットを戻して %g）に対し実測 %g（Z %g→%g）・",
@@ -359,6 +373,46 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
+		// 相棒は潰れた柱より前に並んでいることもあるので、見つからなければもう一度探す
+		// （命令の順に回るので、1 周目では「潰れた柱より後ろ」しか拾えない）。
+		if (!peerLayer.empty() && !peerFound)
+		{
+			for (const auto& [index, object] : handles.table().handles)
+			{
+				if (index >= document.columns.size() || object == nil)
+					continue;
+				if (document.columns[index].layer != peerLayer)
+					continue;
+				const DrawnMemberSize size = MeasureDrawnMember(object);
+				if (!size.found || size.zero)
+					continue;
+				peerIndex = index;
+				peerFound = true;
+				break;
+			}
+		}
+		// 相棒の実測（命令の値・図面の高さ基準・図面のパス）。**潰れた柱との違いはここに出る。**
+		std::string peerProbe;
+		if (peerFound)
+		{
+			const auto entry = handles.table().handles.find(peerIndex);
+			if (entry != handles.table().handles.end() && entry->second != nil)
+			{
+				const core::ColumnCommand& peer = document.columns[peerIndex];
+				const DrawnMemberSize size = MeasureDrawnMember(entry->second);
+				std::array<char, 256> buffer{};
+				std::snprintf(buffer.data(), buffer.size(),
+							  "同じレイヤ（%s）で無事だった柱: 命令のパス長 %g・端部オフセット "
+							  "%g・実測 %g（Z %g→%g）・命令の終端[階=%+d レベル=\"%s\" "
+							  "offset=%g]",
+							  peer.layer.c_str(), peer.height, peer.endOffset, size.extent,
+							  size.start, size.end, peer.topBound.storyOffset,
+							  peer.topBound.level.c_str(), peer.topBound.offset);
+				peerProbe = std::string(buffer.data()) + "・図面のパス[" +
+							DescribePioPath(entry->second) + "]";
+			}
+		}
+
 		if (outDiagnostics != nullptr && (collapsed > 0 || differs > 0))
 		{
 			std::string note = "柱の診断（取り込み後）: ";
@@ -368,6 +422,8 @@ namespace HomeskzIfcImport::draw
 				note += "実体が命令と食い違う柱 " + std::to_string(differs) + " 本。";
 			if (!oddProbe.empty())
 				note += "（1 本目: " + oddProbe + "）";
+			if (!peerProbe.empty())
+				note += "（" + peerProbe + "）";
 			*outDiagnostics = std::move(note);
 		}
 		if (outNotes != nullptr)
