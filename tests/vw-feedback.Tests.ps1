@@ -370,6 +370,24 @@ T 'a mode with missing arguments does not crash'
 CheckContains (AsText (Invoke-Main -Arguments @('find-pr'))) 'error=' `
     'missing arguments must be reported'
 
+# ---------------------------------------------------------------------------
+# 同梱の vw-token.ps1 が隣に無いとき。**黙って死なない**——このファイルは
+# $ErrorActionPreference = 'Stop' の下で走るので、無条件に dot-source すると終端エラーで
+# 即死し、標準出力には 1 行も出ない（プラグインからは「何も言わずに終わった」に見える）。
+# トークンが無ければ何もできないスクリプトなので、落ちるのではなく読める 1 行で言う。
+#
+# 実物をコピーだけ持って行って（token ライブラリは持って行かない）子プロセスで走らせる
+# ——dot-source した今のセッションでは、この分岐を踏ませられない。
+# ---------------------------------------------------------------------------
+T 'a missing vw-token.ps1 is reported, not fatal'
+$lonely = Join-Path $Work 'lonely'
+New-Item -ItemType Directory -Force -Path $lonely | Out-Null
+Copy-Item -LiteralPath $Script -Destination (Join-Path $lonely 'vw-feedback.ps1') -Force
+$pwshPath = (Get-Process -Id $PID).Path
+$out = & $pwshPath -NoProfile -File (Join-Path $lonely 'vw-feedback.ps1') token-status 2>$null
+CheckContains (AsText $out) 'error=同梱の vw-token.ps1 が見つかりません' `
+    'the missing token library is named, on stdout'
+
 # ===========================================================================
 Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
 Write-Output '---------------------------------------------------------------'

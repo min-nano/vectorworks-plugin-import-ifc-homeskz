@@ -52,7 +52,19 @@ $VW_API = 'https://api.github.com'
 # **トークンの在り処は同梱の vw-token.ps1 ただ 1 つ**（vw-update.ps1 と共有する。
 # CLAUDE.md「重複を作らない置き場所」）。保存先・探索順・DPAPI の出入り口はそちら。
 # **隣に置かれる前提**——同じ zip で一緒に配られ、モジュールの隣に並ぶ。
-. (Join-Path $PSScriptRoot 'vw-token.ps1')
+#
+# **無いときは、黙って壊れずに理由を言って終わる。** このファイルは
+# $ErrorActionPreference = 'Stop' の下で走るので、無条件に dot-source すると
+# **どのモードを呼んでも終端エラーで即死し、標準出力には 1 行も出ない**——プラグインから
+# 見ると「スクリプトが何も言わずに終わった」になる。vw-update と違って「認証なしで
+# 続ける」逃げ道はここには無い（トークンが無ければ投稿も PR の確認もできない）ので、
+# 落ちるのではなくプラグインが読める 1 行で言う。mac 側の vw-feedback.sh と同じ作り。
+$tokenLib = Join-Path $PSScriptRoot 'vw-token.ps1'
+if (-not (Test-Path -LiteralPath $tokenLib)) {
+    Write-Output 'error=同梱の vw-token.ps1 が見つかりません（配布物が欠けています）。'
+    exit 0
+}
+. $tokenLib
 
 # ---------------------------------------------------------------------------
 # Modes.

@@ -59,9 +59,20 @@ VW_API="https://api.github.com"
 # CLAUDE.md「重複を作らない置き場所」）。キーチェーンの service 名・探索順・gh の
 # 探し場所はそちらにある。**隣に置かれる前提**——同じ zip で一緒に配られ、同じ
 # フォルダ（mac は Contents/Resources、Windows はモジュールの隣）に並ぶ。
+#
+# **無いときは、黙って壊れずに理由を言って終わる。** vw-update と違って「認証なしで
+# 続ける」逃げ道がここには無い（トークンが無ければ投稿も PR の確認もできない）ので、
+# 落ちるのではなく**プラグインが読める 1 行**で言う——`loop-control` は 1 分ごとに
+# 無人で呼ばれるモードで、そこで黙って死ぬと「理由も分からず往復が進まない」という
+# M27 で直したのと同じ形になる。
+VW_TOKEN_LIB="$(dirname "${BASH_SOURCE[0]}")/vw-token.sh"
+if [ ! -r "$VW_TOKEN_LIB" ]; then
+	echo "error=同梱の vw-token.sh が見つかりません（配布物が欠けています）。"
+	exit 0
+fi
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=vw-token.sh
-. "$(dirname "${BASH_SOURCE[0]}")/vw-token.sh"
+. "$VW_TOKEN_LIB"
 
 # ---------------------------------------------------------------------------
 # JSON。読むのは plutil（macOS 同梱で JSON をそのまま読める。vw-update.sh と同じ）、
