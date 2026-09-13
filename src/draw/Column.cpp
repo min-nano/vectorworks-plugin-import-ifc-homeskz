@@ -29,6 +29,13 @@
 //	実体を作るために要る。したがって**どの柱でも「バウンドの差＝柱高さ」**にする——上端
 //	offset を下端と同値（差 0）にすると高さ 0 になる（parse/Column.h 参照）。
 //
+//	【描けたかを読み戻す】バウンドもパスも命令どおりなのに**実体が無い**ことがある（M27。
+//	実機で 46 本発生）。OIP の値は正しいままなので、**画面を見ない限り気付けない**——そこで
+//	**両端の解決済み絶対 Z の差**を読み戻し（spec.expectedLength ＝ 命令のパス長）、実体が
+//	無い柱を件数で診断へ載せる。この測定で原因が分かった: 上下端のバウンドが「階だけ違う
+//	同じ記録」になった柱だけ、終端が始端と同じ Z に解決されていた（解析側で潰してある。
+//	parse/Column.h ／ docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+//
 //	【柱のパスは鉛直な 2 点の NURBS 曲線】M7 の横架材が使っていた 2D ポリラインでは鉛直材を
 //	表せない（平面へ落とすと 1 点に潰れる）。
 //	    gSDK->CreateNurbsCurve(下端, byCtrlPts=false, degree=1)   ← VS CreateNurbsCurve
@@ -65,8 +72,13 @@
 
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
+#include <array>
 #include <cstddef>
+#include <cmath>
+#include <cstdio>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
@@ -88,7 +100,20 @@ namespace HomeskzIfcImport::draw
 			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
 			std::size_t offset = 0;	 // 端部オフセットを書けなかった
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
+			std::size_t bound = 0; // 高さ基準を VW が受け取らなかった
+			std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
+			// パスを作り直して差し替えたら直った本数（draw/StructuralMember.h の
+			// retryWithFreshPath）。0 でなければ「渡した曲線は正しく、PIO 化で潰れていた」。
+			std::size_t repaired = 0;
+			std::string lengthHint; // 「長さ」のパラメータ名の手掛かり（最初の 1 件）
+			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長・図面が
+			// 持っている高さ基準・図面のパスの頂点）。**原因をパス側と高さ基準側に分けるのは
+			// この 1 行だけ**なので、必ず持ち帰る。
+			std::string collapsedProbe;
 		};
+
+		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
+		constexpr double kExtentTol = 1.0;
 
 		bool DrawOne(const core::ColumnCommand& column, RefNumber style, ColumnFailures& failures,
 					 MCObjectHandle& outObject)
@@ -102,13 +127,14 @@ namespace HomeskzIfcImport::draw
 			// パス＝断面中心を通る鉛直線（下端 → 上端）。横架材と同じ CreatePath で作り、
 			// **柱では 2 点の Z が異なる**（＝この差が柱の高さになる）。
 			bool pathAppended = false;
+			PathProbe probe;
 			const MCObjectHandle path =
 				profile == nil
 					? nil
 					: CreatePath(core::Vec3{column.position.x, column.position.y, column.elevation},
 								 core::Vec3{column.position.x, column.position.y,
 											column.elevation + column.height},
-								 pathAppended);
+								 pathAppended, &probe);
 			if (path != nil && !pathAppended)
 				++failures.path;
 
@@ -129,7 +155,15 @@ namespace HomeskzIfcImport::draw
 			// 梁せいぶんをここで戻す（core/Document.h「端部オフセット」）。
 			spec.startOffset = column.startOffset;
 			spec.endOffset = column.endOffset;
-
+			// 描き上がりの長さ＝パス長（端部オフセットはこの長さから戻す量なので、潰れて
+			// いないかを見るこの検査には要らない）。0 で潰れていたら診断へ持ち帰る。
+			spec.expectedLength = column.height;
+			// 潰れていたらパスを作り直して差し替える。**差し替えるパスは挿入点からの相対**で
+			// 渡す（世界座標で渡すと材が挿入点の Z ぶん高く出る。実機 round 10 で
+			// `Z 1144→4103`。draw/StructuralMember.h の retryWithFreshPath）。
+			spec.retryWithFreshPath = true;
+			spec.pathStart = core::Vec3{0.0, 0.0, 0.0};
+			spec.pathEnd = core::Vec3{0.0, 0.0, column.height};
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
 			{
@@ -155,6 +189,12 @@ namespace HomeskzIfcImport::draw
 			// 数え方をすると全数を誤報する（冒頭「診断を必ず持ち帰る」）。
 			if (!result.sectionOk)
 				++failures.section;
+			// 高さ基準を図面へ書けなかった本数（`SetObjectStoryBound` の戻り値）。
+			// **書けたことは実機で確かめた**——それでも実体が 0 の柱があったので、高さ基準は
+			// 犯人ではない（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。見張りとして
+			// 数え続ける。
+			if (!result.boundOk)
+				++failures.bound;
 			// 端部オフセットを書けなかった本数。書けないと柱が受ける梁の天端まで伸びたまま
 			// 描かれる（＝梁せいぶん高い）ので、切り分けの手掛かりを 1 件だけ残す。
 			if (!result.endOffsetOk)
@@ -163,6 +203,35 @@ namespace HomeskzIfcImport::draw
 				if (failures.offsetHint.empty())
 					failures.offsetHint = result.offsetParamHint;
 			}
+			// 長さ 0 で描かれた本数（オブジェクトは在るのに実体が無い）。**これが 0 でない
+			// 限り、件数が揃っていても絵は欠けている**ので、必ず診断へ載せる。
+			if (result.repairedByPath)
+				++failures.repaired;
+			if (result.collapsed || result.repairedByPath)
+			{
+				if (result.collapsed)
+					++failures.collapsed;
+				// 1 本目だけ実測を控える（全数ぶん並べても読めない）。
+				if (failures.collapsedProbe.empty())
+				{
+					// 入れ直しの結末（**入れ子の三項演算子にしない**——clang-tidy の
+					// readability-avoid-nested-conditional-operator）。
+					const char* fixedNote = "できない";
+					if (probe.setOk)
+						fixedNote = probe.fixedRead ? "" : "読めない";
+					std::array<char, 192> buffer{};
+					std::snprintf(buffer.data(), buffer.size(),
+								  "パスの頂点 piece0=%d piece1=%d・作った曲線の Z %s(%g→%g)・"
+								  "入れ直し %s(→%g)・命令のパス長 %g（Z %g→%g）・OIP ",
+								  static_cast<int>(probe.piece0), static_cast<int>(probe.piece1),
+								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1, fixedNote,
+								  probe.fixedZ1, column.height, column.elevation,
+								  column.elevation + column.height);
+					failures.collapsedProbe = std::string(buffer.data()) + result.collapsedProbe;
+				}
+			}
+			if (failures.lengthHint.empty())
+				failures.lengthHint = result.lengthParamHint;
 			outObject = result.object;
 			return true;
 		}
@@ -211,7 +280,9 @@ namespace HomeskzIfcImport::draw
 		// ならなかった」「断面が入らなかった」「スタイルが見つからなかった」を件数で持ち帰る
 		// （柱が見えないときの切り分け材料）。
 		if (outDiagnostics != nullptr &&
-			(failures.path > 0 || failures.section > 0 || failures.offset > 0 || style == 0))
+			(failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
+			 failures.bound > 0 || failures.collapsed > 0 || failures.repaired > 0 ||
+			 !failures.lengthHint.empty() || style == 0))
 		{
 			std::string note = "柱の診断: ";
 			if (failures.path > 0)
@@ -219,6 +290,21 @@ namespace HomeskzIfcImport::draw
 					"鉛直パスが 2 点にならなかった柱 " + std::to_string(failures.path) + " 本。";
 			if (failures.section > 0)
 				note += "断面を設定できなかった柱 " + std::to_string(failures.section) + " 本。";
+			if (failures.bound > 0)
+				note +=
+					"高さ基準を図面へ書けなかった柱 " + std::to_string(failures.bound) + " 本。";
+			if (failures.repaired > 0)
+				note += "パスを作り直して差し替えたら直った柱 " +
+						std::to_string(failures.repaired) + " 本。";
+			if (failures.collapsed > 0)
+				note += "作り直しても長さ 0 のままだった（実体が無い）柱 " +
+						std::to_string(failures.collapsed) + " 本。";
+			if ((failures.collapsed > 0 || failures.repaired > 0) &&
+				!failures.collapsedProbe.empty())
+				note += "（1 本目: " + failures.collapsedProbe + "）";
+			if (!failures.lengthHint.empty())
+				note +=
+					"「長さ」パラメータを引けませんでした（候補: " + failures.lengthHint + "）。";
 			if (failures.offset > 0)
 			{
 				note += "端部オフセットを設定できなかった柱 " + std::to_string(failures.offset) +
@@ -232,5 +318,146 @@ namespace HomeskzIfcImport::draw
 		}
 
 		return drawn;
+	}
+
+	void recheckColumns(const core::Document& document, const ObjectHandles& handles,
+						std::string* outDiagnostics, std::string* outNotes)
+	{
+		if (document.columns.empty())
+			return;
+
+		std::size_t measured = 0;  // 測れた本数（両端の絶対 Z を引けた本数）
+		std::size_t collapsed = 0; // そのうち実体が 0 だった本数
+		std::size_t differs = 0;   // 実体はあるが命令と食い違う本数
+		std::string probe; // 1 本目の実測（どのパラメータが何を返しているか）
+		std::string oddProbe; // 食い違った／潰れた 1 本目の実測
+		// **同じレイヤの無事な柱**の実測。実体が無い柱と引き比べる相手は、**同じ span
+		// レイヤ（＝同じストーリ・同じレベル）の柱**でなければ意味が無い——1 本目の柱は
+		// 別のレイヤの通し柱だったりするので、それと比べても差が多すぎて何も言えない。
+		std::string peerLayer; // 最初に潰れていた柱のレイヤ
+		std::size_t peerIndex = 0; // その相棒（同じレイヤで無事だった柱）の命令インデックス
+		bool peerFound = false;
+
+		for (const auto& [index, object] : handles.table().handles)
+		{
+			if (index >= document.columns.size() || object == nil)
+				continue;
+			// 1 本目だけ、長さ・高さを含むパラメータを名前と値で控える（全数だと読めない）。
+			if (probe.empty())
+				probe =
+					DescribeSizeParams(object) + "・図面のパス[" + DescribePioPath(object) + "]";
+
+			const DrawnMemberSize size = MeasureDrawnMember(object, StructuralExtentKind::Vertical);
+			if (!size.found)
+				continue;
+			++measured;
+
+			const core::ColumnCommand& column = document.columns[index];
+			// 実体がどれだけあれば命令どおりか。パス長そのものか、端部オフセットを戻した
+			// 「材の端」までか——**どちらを指すかは実機でしか分からない**ので、どちらかに
+			// 合っていれば食い違いとは言わない（core/Document.h「端部オフセット」）。
+			const double drawn = column.height + column.startOffset + column.endOffset;
+			const bool matches = std::abs(size.extent - column.height) < kExtentTol ||
+								 std::abs(size.extent - drawn) < kExtentTol;
+			if (size.zero)
+				++collapsed;
+			else if (!matches)
+				++differs;
+
+			// 同じレイヤで**無事だった**柱を 1 本覚える（潰れた柱の相棒。下で実測を採る）。
+			if (!size.zero && matches && !peerLayer.empty() && !peerFound &&
+				column.layer == peerLayer)
+			{
+				peerIndex = index;
+				peerFound = true;
+			}
+			if ((size.zero || !matches) && oddProbe.empty())
+			{
+				peerLayer = column.layer;
+				std::array<char, 192> buffer{};
+				std::snprintf(buffer.data(), buffer.size(),
+							  "命令 %g（端部オフセットを戻して %g）に対し実測 %g（Z %g→%g）・",
+							  column.height, drawn, size.extent, size.start, size.end);
+				// **命令の高さ基準と、VW が実際に持っている高さ基準を並べる。** 実体が
+				// 無い柱で分かれ道になるのはここだけである——同じなら record は入って
+				// いて解決の側が違い、違えば書けていない（DrawUtil の DescribeStoryBound）。
+				std::array<char, 192> wanted{};
+				std::snprintf(wanted.data(), wanted.size(),
+							  "・命令の始端[階=%+d レベル=\"%s\" offset=%g]・終端[階=%+d "
+							  "レベル=\"%s\" offset=%g]",
+							  column.bottomBound.storyOffset, column.bottomBound.level.c_str(),
+							  column.bottomBound.offset, column.topBound.storyOffset,
+							  column.topBound.level.c_str(), column.topBound.offset);
+				oddProbe = std::string(buffer.data()) + DescribeSizeParams(object) +
+						   std::string(wanted.data()) + "・図面の始端[" +
+						   DescribeStoryBound(object, kStartBoundID) + "]・終端[" +
+						   DescribeStoryBound(object, kEndBoundID) + "]・図面のパス[" +
+						   DescribePioPath(object) + "]";
+			}
+		}
+
+		// 相棒は潰れた柱より前に並んでいることもあるので、見つからなければもう一度探す
+		// （命令の順に回るので、1 周目では「潰れた柱より後ろ」しか拾えない）。
+		if (!peerLayer.empty() && !peerFound)
+		{
+			for (const auto& [index, object] : handles.table().handles)
+			{
+				if (index >= document.columns.size() || object == nil)
+					continue;
+				if (document.columns[index].layer != peerLayer)
+					continue;
+				const DrawnMemberSize size =
+					MeasureDrawnMember(object, StructuralExtentKind::Vertical);
+				if (!size.found || size.zero)
+					continue;
+				peerIndex = index;
+				peerFound = true;
+				break;
+			}
+		}
+		// 相棒の実測（命令の値・図面の高さ基準・図面のパス）。**潰れた柱との違いはここに出る。**
+		std::string peerProbe;
+		if (peerFound)
+		{
+			const auto entry = handles.table().handles.find(peerIndex);
+			if (entry != handles.table().handles.end() && entry->second != nil)
+			{
+				const core::ColumnCommand& peer = document.columns[peerIndex];
+				const DrawnMemberSize size =
+					MeasureDrawnMember(entry->second, StructuralExtentKind::Vertical);
+				std::array<char, 256> buffer{};
+				std::snprintf(buffer.data(), buffer.size(),
+							  "同じレイヤ（%s）で無事だった柱: 命令のパス長 %g・端部オフセット "
+							  "%g・実測 %g（Z %g→%g）・命令の終端[階=%+d レベル=\"%s\" "
+							  "offset=%g]",
+							  peer.layer.c_str(), peer.height, peer.endOffset, size.extent,
+							  size.start, size.end, peer.topBound.storyOffset,
+							  peer.topBound.level.c_str(), peer.topBound.offset);
+				peerProbe = std::string(buffer.data()) + "・図面のパス[" +
+							DescribePioPath(entry->second) + "]";
+			}
+		}
+
+		if (outDiagnostics != nullptr && (collapsed > 0 || differs > 0))
+		{
+			std::string note = "柱の診断（取り込み後）: ";
+			if (collapsed > 0)
+				note += "実体が無い柱 " + std::to_string(collapsed) + " 本。";
+			if (differs > 0)
+				note += "実体が命令と食い違う柱 " + std::to_string(differs) + " 本。";
+			if (!oddProbe.empty())
+				note += "（1 本目: " + oddProbe + "）";
+			if (!peerProbe.empty())
+				note += "（" + peerProbe + "）";
+			*outDiagnostics = std::move(note);
+		}
+		if (outNotes != nullptr)
+		{
+			std::string note = "柱の実測（取り込み後）: 測れた " + std::to_string(measured) +
+							   " / " + std::to_string(document.columns.size()) + " 本。";
+			note += probe.empty() ? "長さ・高さのパラメータを 1 つも引けませんでした。"
+								  : "1 本目 " + probe;
+			*outNotes = std::move(note);
+		}
 	}
 } // namespace HomeskzIfcImport::draw

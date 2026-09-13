@@ -243,6 +243,19 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 		}
 
+		// **最後に柱を測り直す。** 生成直後は入っていたのに、あとの要素を描くあいだに長さ 0 へ
+		// 潰れる事故を追っている（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。ここが
+		// 全要素・伏図・軸組図まで済んだ唯一の地点なので、**いつ潰れたか**はここでしか分け
+		// られない。**測って診断へ載せるだけ**で、直しはしない（解かせ直しは実機で 46 本中
+		// 0 本しか直らず、打ち切ってある）。
+		{
+			std::string note;
+			std::string info;
+			recheckColumns(document, columnHandles, &note, &info);
+			addDiagnostics(note);
+			addNotes(info);
+		}
+
 		// 途中で中止されたか（件数が命令数に届かないのが正常になる）。
 		counts.cancelled = progress.cancelled();
 

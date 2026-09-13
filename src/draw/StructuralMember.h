@@ -88,6 +88,20 @@ namespace HomeskzIfcImport::draw
 		BottomCentre, // 中下（垂木。パスは下面中央線＝屋根面が通る線）
 	};
 
+	// **描き上がった部材の実体をどの読みで測るか。** 構造材 PIO には「部材長」に当たる
+	// パラメータが無く（名前で引ける `CenterPointLength(長さ)` は部材長ではない——実長 5333 の
+	// 柱で 100 を返した）、実体があるかを言える値は**部材の向きで違う**。鉛直材（柱）は
+	// **両端の解決済み絶対 Z の差**、水平材（横架材）は**パスから取れた「スパン」**である。
+	//
+	// **取り違えると診断が嘘をつく。** 水平材は両端の Z が等しいのが正常なので、鉛直材の
+	// 測り方をそのまま当てると**全数を「実体が無い」と誤報**し、そのうえ正常な材のパスまで
+	// 作り直してしまう（下記 retryWithFreshPath）。
+	enum class StructuralExtentKind
+	{
+		Vertical, // 両端の絶対 Z の差（鉛直材＝柱・小屋束）
+		Span,	  // OIP の「スパン」（水平材＝横架材）
+	};
+
 	// 構造材 1 本ぶんの描画仕様。path / profile は呼び出し側が用意する（下記の CreatePath と
 	// DrawUtil の CreateRectangleProfileGroup）。
 	struct StructuralMemberSpec
@@ -109,6 +123,27 @@ namespace HomeskzIfcImport::draw
 		// 0 なら端点がそのまま材の端（垂木・自由端の横架材）。
 		double startOffset = 0.0;
 		double endOffset = 0.0;
+		// 描き上がった部材の**あるべき長さ**（mm。0 なら検査しない）。生成後に PIO の
+		// 「長さ」を読み戻し、0 で潰れていないかを確かめるために使う（下記
+		// StructuralMemberResult::collapsed）。**実描画はローカルの VectorWorks でしか
+		// 確認できない**ので、「オブジェクトは在るのに実体が無い」を件数で持ち帰るのが唯一の
+		// 手掛かりになる（実機で実際に起きた。docs/DEV-NOTES.md「柱が長さ 0 で描かれる
+		// （M27）」）。
+		double expectedLength = 0.0;
+		// expectedLength を**どの読みで検査するか**（上記 StructuralExtentKind）。部材の向きで
+		// 測れる値が違うので、expectedLength を入れるなら必ず部材に合わせて選ぶ。
+		StructuralExtentKind extentKind = StructuralExtentKind::Vertical;
+		// **潰れていたときにパスを作り直して差し替えるための 2 点**（`SetCustomObjectPath`）。
+		// `retryWithFreshPath` が true のときだけ使う。
+		//
+		// **この 2 点は「オブジェクトの挿入点からの相対」で渡す**（＝始端は原点、終端は
+		// `(0, 0, 材の長さ)`）。生成の `CreateCustomObjectPath` は**世界座標**のパスを取るのに、
+		// あとから差し替える `SetCustomObjectPath` は**相対**で取る——実機で世界座標のまま
+		// 渡したら、長さは正しいのに材が挿入点の Z（572mm）ぶん高い位置に出た
+		// （`Z 1144→4103`。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+		bool retryWithFreshPath = false;
+		core::Vec3 pathStart;
+		core::Vec3 pathEnd;
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
@@ -122,10 +157,52 @@ namespace HomeskzIfcImport::draw
 		// 相手の芯線まで伸びたまま描かれる（＝梁せい／半幅ぶん長い）ので、呼び出し側は
 		// 件数を診断へ載せる。
 		bool endOffsetOk = true;
+		// **高さ基準を VW が受け取ったか**（`ISDK::SetObjectStoryBound` の戻り値。始端・終端の
+		// どちらかでも false ならここも false）。柱の高さは上下端の高さ基準の差が支配するので、
+		// 受け取られていなければ実体の無い材になる——**戻り値を捨てると、それが起きたことに
+		// 気付けない**（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+		bool boundOk = true;
 		// 端部オフセットのパラメータ名を解決できなかったときだけ、PIO が持つ「オフセット」を
 		// 含むパラメータ名の一覧（DescribeParamsContaining）。実機でしか読めない情報を
 		// 1 周で持ち帰るための手掛かりで、解決できていれば空。
 		std::string offsetParamHint;
+		// **長さ 0 で描かれたか**（spec.expectedLength が 0 なら常に false＝検査していない）。
+		// PIO は生成できてもパスやバウンドの解決に失敗すると実体を持たず、OIP の高さ・基準・
+		// オフセットは命令どおりのまま画面に何も出ない（Findings「Parametric Objects」の
+		// 3 行表）。呼び出し側は件数を診断へ載せる。
+		bool collapsed = false;
+		// 潰れていた材の**パスを作り直して差し替えたら直ったか**（`SetCustomObjectPath`）。
+		// true なら「渡した曲線は正しかったのに PIO 化で潰れた」の裏が取れる。
+		bool repairedByPath = false;
+		// 「長さ」のパラメータ名を解決できなかったときだけ、PIO が持つ「長さ」を含む
+		// パラメータ名の一覧（DescribeParamsContaining）。解決できていれば空。
+		std::string lengthParamHint;
+		// 潰れていたときだけ、**その場で読み戻した値**（OIP の「高さ」と「長さ」、および
+		// **VW が実際に持っている上下端の高さ基準**）。バウンドが解けているのに実体が無いのか、
+		// そもそも高さ基準が図面に入っていないのかを**実機を見ずに**分けるための証拠で、
+		// 潰れていなければ空。
+		std::string collapsedProbe;
+	};
+
+	// パスの読み戻し（診断用）。**「2 点になったか」の真偽だけでは足りない**——ピース索引の
+	// 起点が 0 / 1 のどちらの規約かが分からないまま OR で見ているので、片方が別のものを
+	// 数えていれば「2 点になった」と誤報しうる。実機で「長さ 0 で描かれた」を切り分けるには
+	// **観測した数そのもの**が要る（読めなければ −1）。
+	//
+	// **座標も読む。** 実機（M27）で、PIO の中のパスが `(0,0,0) (0,0,4.5e-13)` ——2 点ある
+	// のに**同じ位置**——になっていた柱が 46 本あった。点の数だけ見ていたので、渡した曲線が
+	// もう潰れていたのか、PIO にした時点で潰れたのかが分けられなかった。そこで**作った直後の
+	// 曲線の 2 点の Z** を読み戻して控える（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+	struct PathProbe
+	{
+		Sint32 piece0 = -1;
+		Sint32 piece1 = -1;
+		bool pointsRead = false; // Add3DVertex の直後に 2 点の座標を読めたか
+		double z0 = 0.0;		 // 始端の Z（読めたときだけ）
+		double z1 = 0.0;		 // 終端の Z（読めたときだけ）
+		bool setOk = false;		 // 座標を明示的に入れ直せたか（NurbsSetPt3D）
+		bool fixedRead = false;	 // 入れ直したあとに読み直せたか
+		double fixedZ1 = 0.0;	 // 入れ直したあとの終端の Z
 	};
 
 	// パス＝部材の芯線（始端 → 終端）を通る 2 点の NURBS 曲線。gSDK->CreateNurbsCurve で
@@ -133,11 +210,51 @@ namespace HomeskzIfcImport::draw
 	// 足す。**水平材・鉛直材ともこれ 1 つ**で、違いは呼び出し側が渡す 2 点の Z だけ
 	// （冒頭「Z の置き方」。Z に 0 を渡してはならない）。
 	//
+	// **足したあと、2 点の座標を明示的に入れ直す**（`NurbsSetPt3D`）。`Add3DVertex` が足した
+	// 点が**渡した位置にならないことがある**——実機で 2 点とも同じ位置になり、実体が無い材に
+	// なった柱が 46 本あった（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。うまく
+	// 足せていたときは同じ値を書くだけなので何も変わらない。
+	//
 	// 頂点が本当に 2 つになったかを outAppended に返す（診断用。ここが崩れると PIO は
 	// パスを挿入点としてしか読まず、長さ 0 で何も描かれない）。作れなければ nil。
-	MCObjectHandle CreatePath(const core::Vec3& start, const core::Vec3& end, bool& outAppended);
+	// outProbe が非 nullptr なら、読み戻した頂点数をそのまま入れる（診断用。上記 PathProbe）。
+	MCObjectHandle CreatePath(const core::Vec3& start, const core::Vec3& end, bool& outAppended,
+							  PathProbe* outProbe = nullptr);
 
 	// 構造材ツールの PIO を 1 つ生成して仕様どおりに設定する。style が 0 ならスタイルを
 	// 関連付けずに描く（スタイルの欠落で部材を失わない）。
 	StructuralMemberResult DrawStructuralMember(const StructuralMemberSpec& spec, RefNumber style);
+
+	// 描き上がった部材を**読み戻して測る**。生成直後だけでなく、**取り込みが終わったあと**
+	// にも同じ口で測れるようにしてある——「描いた直後は入っていたのに、あとの要素を描く
+	// あいだに潰れた」という順序の問題を、実機を見ずに切り分けるため（実機 round 1 で、
+	// 生成直後の測定では 197 本とも潰れていなかった。docs/DEV-NOTES.md M27）。
+	//
+	// 【測るのは両端の絶対 Z の差】実機 round 2 で、構造材 PIO は**解決済みの絶対 Z**を
+	// `StartElevation` / `EndElevation` に持つと分かった（1 本目で 572 / 5905 ＝ 命令の
+	// 下端 572・パス長 5333 と一致）。OIP の「長さ」に当たるパラメータは無く、名前で引ける
+	// `CenterPointLength(長さ)` は部材長ではない（実長 5333 の柱で 100 を返した）——
+	// **この 2 つの差だけが、実体がどれだけあるかを言える値**である
+	// （docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+	//
+	// 【水平材は「スパン」で測る】上の差は鉛直材にしか使えない——水平材は両端の Z が等しい
+	// のが正常なので、差で測れば全数が 0 になる。水平材は PIO がパスから入れる「スパン」を
+	// 読む（kind＝StructuralExtentKind::Span。start / end は意味を持たず 0 のまま）。
+	//
+	// found が false なら測る値を引けなかった（ほかの値は意味を持たない）。
+	struct DrawnMemberSize
+	{
+		bool found = false;
+		double start = 0.0;	 // 始端の絶対 Z（kind＝Vertical のときだけ）
+		double end = 0.0;	 // 終端の絶対 Z（kind＝Vertical のときだけ）
+		double extent = 0.0; // |end - start| もしくはスパン（＝実体の高さ／長さ）
+		bool zero = false;	 // found かつ extent が 0（＝実体が無い）
+	};
+	DrawnMemberSize MeasureDrawnMember(MCObjectHandle object, StructuralExtentKind kind);
+
+	// その部材が持つ「長さ」「高さ」を含むパラメータを**名前と値で**並べた 1 行。どの
+	// パラメータが OIP のどの欄なのかを実機で確かめる唯一の手段なので、**1 本ぶんだけ**
+	// 診断ログへ出す（全数だと読めない）。
+	std::string DescribeSizeParams(MCObjectHandle object);
+
 } // namespace HomeskzIfcImport::draw

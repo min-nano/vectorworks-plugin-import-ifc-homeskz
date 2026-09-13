@@ -29,6 +29,11 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
+#include <array>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -75,6 +80,32 @@ namespace HomeskzIfcImport::draw
 		// 名前を解決できなかったときに診断へ載せる候補の絞り込み（OIP の表示名に含まれる語）。
 		constexpr const char* kOffsetParamNeedle = "オフセット";
 
+		// 描き上がった部材の長さ（OIP の「長さ」）。**端部オフセットと同じく universal 名が
+		// SDK ヘッダに無い**ので候補を並べて引き、引けなければ手掛かりを診断へ持ち帰る。
+		// 読むだけで、書きはしない（PIO がリセットのたびに入れる値）。
+		// **両端の解決済み絶対 Z**（実機 round 2 で判明。ヘッダ DrawnMemberSize 参照）。
+		// **ローカライズ名で引かない**——「始端高さオフセット」は設定ダイアログ側の
+		// `DialogStartElevation`（別物。レイヤの高さ基準で 0 を返す）とぶつかる。
+		const std::vector<const char*> kStartElevationNames = {"StartElevation"};
+		const std::vector<const char*> kEndElevationNames = {"EndElevation"};
+		// 水平材の実体（OIP「スパン」）。**書くためではなく読み戻して確かめるため**の名前で、
+		// 0 のままなら PIO がパスの長さを取れていない＝画面に何も描かれない。水平材は両端の
+		// Z が等しいので上の差では測れない（ヘッダ StructuralExtentKind）。以前は
+		// draw/Member.cpp が同じ名前を別に持っていたが、測る口はここ 1 つに寄せた
+		// （CLAUDE.md「重複を作らない置き場所」）。
+		const std::vector<const char*> kSpanNames = {"Span"};
+		const std::vector<const char*> kLocalizedSpan = {"スパン"};
+		const std::vector<const char*> kNoLocalized = {};
+		constexpr const char* kLengthParamNeedle = "長さ";
+		// 潰れていたときは、名前に「長さ」「高さ」を含むパラメータを**名前と値で**並べて
+		// 証拠にする（DescribeSizeParams）。どのパラメータが OIP のどの欄なのかを実機で
+		// 確かめる手段がほかに無い——実際、round 2 のこの一覧で「長さ」で引ける
+		// `CenterPointLength` が部材長ではないと分かった。
+		constexpr const char* kHeightParamNeedle = "高さ";
+		// 「長さ 0」とみなす閾値（mm）。潰れた部材はちょうど 0 を返すので、実部材の長さ
+		// （最短でも数十 mm）と取り違える余地は無い。
+		constexpr double kCollapsedLength = 0.01;
+
 		// フィールドに渡す値（ポップアップはキーで保持されるため数値文字列）。
 		constexpr const char* kProfileShapeRectangle = "Rectangle";
 		// 部材種別は横架材（梁）・柱とも "2"（種別の違いは構造用途＝StructuralUse の方に出る）。
@@ -87,6 +118,60 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kAxisAlignBottomCentre = "7"; // 中下（同 下段中央）
 		constexpr const char* kEndConditionSquare = "3";	// 直切り
 		constexpr const char* kProfileSeriesDefault = "AISC (Inch)";
+
+		// 実数パラメータを読む。**実数で 0 を読んだだけでは 0 と決めない**——数値パラメータが
+		// 文字列で保持されている PIO があり（SetParamRealChecked が実際にその経路を持つ）、
+		// そのときは実数読みが常に 0 を返して**全数を誤報する**。文字列でも読み直し、数として
+		// 読めたらそちらを採る。読めないパラメータを覗くと例外が出るので畳む（1 つの読み損
+		// ないで描画を止めない。DrawUtil の PioParamString と同じ扱い）。ok には読めたかを返す。
+		double ReadParamNumber(const VWParametricObj& pio, const TXString& param, bool& ok)
+		{
+			ok = false;
+			if (param.IsEmpty())
+				return 0.0;
+			try
+			{
+				const double value = pio.GetParamReal(param);
+				ok = true;
+				if (std::abs(value) >= kCollapsedLength)
+					return value;
+				const std::string text = PioParamString(pio, param.GetStdString().c_str());
+				return text.empty() ? value : std::strtod(text.c_str(), nullptr);
+			}
+			catch (...)
+			{
+				ok = false;
+				return 0.0;
+			}
+		}
+
+		// パラメータ 1 件を人が読める形で読み出す（実数と、文字列で保持されていればその値）。
+		// **読めないパラメータを覗くと例外が出る**ので、ここで 1 件ずつ畳んで "?" を返す
+		// ——呼び出し側が 1 件の読み損ないで全体を失わないようにするための粒度である
+		// （DrawUtil の PioParamString と同じ扱い）。
+		std::string ReadParamText(const VWParametricObj& pio, const TXString& param)
+		{
+			if (param.IsEmpty())
+				return "?";
+			try
+			{
+				std::array<char, 32> buffer{};
+				std::snprintf(buffer.data(), buffer.size(), "%g", pio.GetParamReal(param));
+				std::string text(buffer.data());
+				const std::string raw = PioParamString(pio, param.GetStdString().c_str());
+				if (!raw.empty())
+				{
+					text += "/\"";
+					text += raw;
+					text += "\"";
+				}
+				return text;
+			}
+			catch (...)
+			{
+				return "?";
+			}
+		}
 
 		// 断面基準点 → 構造材ツールのポップアップのキー。
 		const char* AxisAlignKey(StructuralAxisAlign align)
@@ -104,7 +189,8 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	MCObjectHandle CreatePath(const core::Vec3& start, const core::Vec3& end, bool& outAppended)
+	MCObjectHandle CreatePath(const core::Vec3& start, const core::Vec3& end, bool& outAppended,
+							  PathProbe* outProbe)
 	{
 		outAppended = false;
 		MCObjectHandle path =
@@ -118,8 +204,39 @@ namespace HomeskzIfcImport::draw
 		// 頂点が本当に 2 つになったかを読み戻す。ピース索引の起点は 0 / 1 のどちらの
 		// 規約もあり得るので両方を見る（**判定に失敗しても曲線はそのまま使う**——ここで
 		// 諦めると、索引の規約違いというだけで部材が 1 本も描かれなくなる）。
-		outAppended = gSDK->NurbsGetNumPts(path, 0) >= kPathPointCount ||
-					  gSDK->NurbsGetNumPts(path, 1) >= kPathPointCount;
+		const Sint32 piece0 = gSDK->NurbsGetNumPts(path, 0);
+		const Sint32 piece1 = gSDK->NurbsGetNumPts(path, 1);
+		PathProbe probe;
+		probe.piece0 = piece0;
+		probe.piece1 = piece1;
+		// **2 点の Z を読み戻す。** 数が 2 でも同じ位置なら部材は実体を持たない
+		// （実機で 46 本。draw/StructuralMember.h の PathProbe）。
+		WorldPt3 first(0.0, 0.0, 0.0);
+		WorldPt3 second(0.0, 0.0, 0.0);
+		if (gSDK->NurbsGetPt3D(path, 0, 0, first) && gSDK->NurbsGetPt3D(path, 0, 1, second))
+		{
+			probe.pointsRead = true;
+			probe.z0 = first.z;
+			probe.z1 = second.z;
+		}
+		// **座標を明示的に入れ直す。** `Add3DVertex` が足した点が渡した位置にならないことが
+		// ある（ヘッダ参照）。うまく足せていたときは同じ値を書くだけで何も変わらない。
+		if (piece0 >= kPathPointCount)
+		{
+			const Boolean startSet =
+				gSDK->NurbsSetPt3D(path, 0, 0, WorldPt3(start.x, start.y, start.z));
+			const Boolean endSet = gSDK->NurbsSetPt3D(path, 0, 1, WorldPt3(end.x, end.y, end.z));
+			probe.setOk = startSet && endSet;
+			WorldPt3 fixed(0.0, 0.0, 0.0);
+			if (gSDK->NurbsGetPt3D(path, 0, 1, fixed))
+			{
+				probe.fixedRead = true;
+				probe.fixedZ1 = fixed.z;
+			}
+		}
+		if (outProbe != nullptr)
+			*outProbe = probe;
+		outAppended = piece0 >= kPathPointCount || piece1 >= kPathPointCount;
 		return path;
 	}
 
@@ -148,8 +265,10 @@ namespace HomeskzIfcImport::draw
 		// 構造材ツールの高さ基準が「レイヤの高さ」・offset 0 のまま実ジオメトリと矛盾する
 		// ことがなくなり、編集時に高さがリセットされない。水平材の傾斜はこの offset 差で
 		// 表れ、鉛直材ではこの差が柱高さを支配する。
-		gSDK->SetObjectStoryBound(object, kStartBoundID, StoryBoundData(spec.startBound));
-		gSDK->SetObjectStoryBound(object, kEndBoundID, StoryBoundData(spec.endBound));
+		// **戻り値を見る。** 受け取られなければ材は高さを持てない（＝実体が無い材になる）。
+		const bool startBoundOk = ApplyStoryBound(object, kStartBoundID, spec.startBound);
+		const bool endBoundOk = ApplyStoryBound(object, kEndBoundID, spec.endBound);
+		result.boundOk = startBoundOk && endBoundOk;
 
 		VWParametricObj pio(object);
 		const TXString breadth = ResolveParamName(pio, kFieldMajorBreadth, kLocalizedBreadth);
@@ -192,8 +311,152 @@ namespace HomeskzIfcImport::draw
 		}
 		gSDK->ResetObject(object);
 
+		// 【描けたかを読み戻す】PIO は生成できても実体を持たないことがある（パスが 1 点の
+		// まま・バウンドの解決に失敗、など。Findings「Parametric Objects」）。そのとき OIP の
+		// 高さ・基準・オフセットは命令どおりのままなので、**画面を見ない限り気付けない**。
+		// リセット後の「長さ」を読み戻し、0 で潰れていたら呼び出し側の診断へ流す。
+		if (spec.expectedLength > kCollapsedLength)
+		{
+			const DrawnMemberSize size = MeasureDrawnMember(object, spec.extentKind);
+			if (!size.found)
+				result.lengthParamHint = DescribeParamsContaining(pio, kLengthParamNeedle);
+			result.collapsed = size.zero;
+			// **潰れていたら証拠を全部採る。** 高さ基準は**どう書いても両端の Z を動かせ
+			// なかった**（ストーリ相対・レイヤ基準・VW が記録しているとおり、のいずれでも
+			// 実測 0。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）ので、残る入力は
+			// パスである。**PIO が実際に持っているパスの頂点**まで読み戻して添える。
+			if (result.collapsed)
+				result.collapsedProbe = DescribeSizeParams(object) + "・図面の始端基準[" +
+										DescribeStoryBound(object, kStartBoundID) + "]・終端基準[" +
+										DescribeStoryBound(object, kEndBoundID) + "]・図面のパス[" +
+										DescribePioPath(object) + "]";
+			// **潰れていたらパスを作り直して差し替える。** 渡した曲線が正しくても PIO の中の
+			// パスが潰れていることがある（実機 round 7）。直ったかは読み戻して見る。
+			if (result.collapsed && spec.retryWithFreshPath)
+			{
+				bool appended = false;
+				const MCObjectHandle fresh =
+					CreatePath(spec.pathStart, spec.pathEnd, appended, nullptr);
+				if (fresh != nil && gSDK->SetCustomObjectPath(object, fresh))
+				{
+					gSDK->ResetObject(object);
+					const DrawnMemberSize retried = MeasureDrawnMember(object, spec.extentKind);
+					std::array<char, 160> buffer{};
+					// **測り方によって添える値を変える**（水平材の Z は両端が等しいのが
+					// 正常なので、並べても読む側を惑わせるだけ。ヘッダ
+					// StructuralExtentKind）。
+					if (spec.extentKind == StructuralExtentKind::Span)
+						std::snprintf(buffer.data(), buffer.size(),
+									  "・パスを作り直した結果 実測 %g（スパン）・作り直したパス[",
+									  retried.extent);
+					else
+						std::snprintf(buffer.data(), buffer.size(),
+									  "・パスを作り直した結果 実測 %g（Z %g→%g）・作り直したパス[",
+									  retried.extent, retried.start, retried.end);
+					result.collapsedProbe +=
+						std::string(buffer.data()) + DescribePioPath(object) + "]";
+					if (retried.found && !retried.zero)
+					{
+						result.repairedByPath = true;
+						result.collapsed = false;
+					}
+				}
+				else
+					result.collapsedProbe += "・パスを作り直して差し替えられなかった";
+			}
+		}
+
 		result.object = object;
 		result.sectionOk = breadthOk && depthOk;
 		return result;
 	}
+
+	DrawnMemberSize MeasureDrawnMember(MCObjectHandle object, StructuralExtentKind kind)
+	{
+		DrawnMemberSize size;
+		if (object == nil)
+			return size;
+		try
+		{
+			const VWParametricObj pio(object);
+			if (kind == StructuralExtentKind::Span)
+			{
+				// 水平材。**パラメータが実在するときだけ測る**——ResolveParamNameAmong は
+				// 見つからなくても候補の先頭を返し、GetParamReal は存在しない名前に 0 を返す
+				// ので、存在確認を落とすと「スパン」という名前が違うだけで**パスは正常なのに
+				// 全数を長さ 0 と誤報**する（診断が嘘をつくと切り分けが逆に遠のく）。
+				const TXString spanName = ResolveParamNameAmong(pio, kSpanNames, kLocalizedSpan);
+				if (spanName.IsEmpty() || pio.GetParamIndex(spanName) == static_cast<size_t>(-1))
+					return size;
+				bool spanOk = false;
+				const double span = ReadParamNumber(pio, spanName, spanOk);
+				if (!spanOk)
+					return size;
+				size.found = true;
+				size.extent = std::abs(span);
+				size.zero = size.extent < kCollapsedLength;
+				return size;
+			}
+			const TXString startName =
+				ResolveParamNameAmong(pio, kStartElevationNames, kNoLocalized);
+			const TXString endName = ResolveParamNameAmong(pio, kEndElevationNames, kNoLocalized);
+			bool startOk = false;
+			bool endOk = false;
+			const double start = ReadParamNumber(pio, startName, startOk);
+			const double end = ReadParamNumber(pio, endName, endOk);
+			if (!startOk || !endOk)
+				return size;
+			size.found = true;
+			size.start = start;
+			size.end = end;
+			size.extent = std::abs(end - start);
+			size.zero = size.extent < kCollapsedLength;
+		}
+		catch (...)
+		{
+			return DrawnMemberSize{}; // 読めなかった＝測れていない
+		}
+		return size;
+	}
+
+	std::string DescribeSizeParams(MCObjectHandle object)
+	{
+		if (object == nil)
+			return {};
+		try
+		{
+			const VWParametricObj pio(object);
+			std::string found;
+			const size_t count = pio.GetParamsCount();
+			for (size_t i = 0; i < count; ++i)
+			{
+				const TXString name = pio.GetParamName(i);
+				const std::string universal = name.GetStdString();
+				const std::string localized = pio.GetParamLocalizedName(i).GetStdString();
+				if (universal.find(kLengthParamNeedle) == std::string::npos &&
+					localized.find(kLengthParamNeedle) == std::string::npos &&
+					universal.find(kHeightParamNeedle) == std::string::npos &&
+					localized.find(kHeightParamNeedle) == std::string::npos)
+					continue;
+				if (!found.empty())
+					found += ", ";
+				found += universal;
+				found += "(";
+				found += localized;
+				found += ")=";
+				// **読み出しは 1 件ずつ守る。** 名前に「長さ」「高さ」を含むパラメータが
+				// 実数とは限らず（ポップアップや文字列のこともある）、1 件の読み損ないで
+				// 例外が出ると、それまでに積んだ他のパラメータごと捨てることになる——
+				// **実機の未知の挙動を壊さず観測する**ための行なので、1 件は "?" にして
+				// 残りを持ち帰る。
+				found += ReadParamText(pio, name);
+			}
+			return found;
+		}
+		catch (...)
+		{
+			return {};
+		}
+	}
+
 } // namespace HomeskzIfcImport::draw
