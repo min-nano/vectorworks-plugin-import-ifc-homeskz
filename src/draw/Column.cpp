@@ -102,13 +102,6 @@ namespace HomeskzIfcImport::draw
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
 			std::size_t bound = 0; // 高さ基準を VW が受け取らなかった
 			std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
-			// 潰れていたのを**レイヤの高さ基準で言い直したら直った**本数。0 でなければ
-			// 「ストーリ相対の高さ基準が効いていない」ことの裏が取れる
-			// （draw/StructuralMember.h の retryWithLayerBound）。
-			std::size_t repaired = 0;
-			std::string lengthHint; // 「長さ」のパラメータ名の手掛かり（最初の 1 件）
-			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長）。**原因を
-			// パス側と高さ基準側に分けるのはこの 1 行だけ**なので、必ず持ち帰る。
 			std::string collapsedProbe;
 		};
 
@@ -159,13 +152,6 @@ namespace HomeskzIfcImport::draw
 			// 描き上がりの長さ＝パス長（端部オフセットはこの長さから戻す量なので、潰れて
 			// いないかを見るこの検査には要らない）。0 で潰れていたら診断へ持ち帰る。
 			spec.expectedLength = column.height;
-			// 潰れていたら**レイヤの高さ基準で言い直して**もう一度解かせる。柱の span レイヤは
-			// その階の横架材天端（最上階は軒高）と同じ高さに作られるので、下端バウンドの
-			// offset がそのままレイヤ基準の offset になる（parse/Story の span レベル）。
-			spec.retryWithLayerBound = true;
-			spec.layerStartOffset = column.bottomBound.offset;
-			spec.layerEndOffset = column.bottomBound.offset + column.height;
-
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
 			{
@@ -191,12 +177,14 @@ namespace HomeskzIfcImport::draw
 			// 数え方をすると全数を誤報する（冒頭「診断を必ず持ち帰る」）。
 			if (!result.sectionOk)
 				++failures.section;
-			// 端部オフセットを書けなかった本数。書けないと柱が受ける梁の天端まで伸びたまま
-			// 描かれる（＝梁せいぶん高い）ので、切り分けの手掛かりを 1 件だけ残す。
-			// 高さ基準を書けなかった本数。**柱の高さは上下端の高さ基準の差が支配する**ので、
-			// 書けていなければ実体の無い柱になる（draw/StructuralMember.h の boundOk）。
+			// 高さ基準を図面へ書けなかった本数（`SetObjectStoryBound` の戻り値）。
+			// **書けたことは実機で確かめた**——それでも実体が 0 の柱があったので、高さ基準は
+			// 犯人ではない（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。見張りとして
+			// 数え続ける。
 			if (!result.boundOk)
 				++failures.bound;
+			// 端部オフセットを書けなかった本数。書けないと柱が受ける梁の天端まで伸びたまま
+			// 描かれる（＝梁せいぶん高い）ので、切り分けの手掛かりを 1 件だけ残す。
 			if (!result.endOffsetOk)
 			{
 				++failures.offset;
@@ -205,13 +193,10 @@ namespace HomeskzIfcImport::draw
 			}
 			// 長さ 0 で描かれた本数（オブジェクトは在るのに実体が無い）。**これが 0 でない
 			// 限り、件数が揃っていても絵は欠けている**ので、必ず診断へ載せる。
-			if (result.repairedByLayerBound)
-				++failures.repaired;
-			if (result.collapsed || result.repairedByLayerBound)
+			if (result.collapsed)
 			{
-				if (result.collapsed)
-					++failures.collapsed;
-				outCollapsed = result.collapsed;
+				++failures.collapsed;
+				outCollapsed = true;
 				// 1 本目だけ実測を控える（全数ぶん並べても読めない）。
 				if (failures.collapsedProbe.empty())
 				{
@@ -275,8 +260,8 @@ namespace HomeskzIfcImport::draw
 		// （柱が見えないときの切り分け材料）。
 		if (outDiagnostics != nullptr &&
 			(failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
-			 failures.bound > 0 || failures.collapsed > 0 || failures.repaired > 0 ||
-			 !failures.lengthHint.empty() || style == 0))
+			 failures.bound > 0 || failures.collapsed > 0 || !failures.lengthHint.empty() ||
+			 style == 0))
 		{
 			std::string note = "柱の診断: ";
 			if (failures.path > 0)
@@ -287,16 +272,13 @@ namespace HomeskzIfcImport::draw
 			if (failures.bound > 0)
 				note +=
 					"高さ基準を図面へ書けなかった柱 " + std::to_string(failures.bound) + " 本。";
-			if (failures.repaired > 0)
-				note += "ストーリ相対の高さ基準では実体を作れず、レイヤの高さ基準で言い直して"
-						"直った柱 " +
-						std::to_string(failures.repaired) + " 本。";
 			if (failures.collapsed > 0)
-				note += "言い直しても長さ 0 のままだった（実体が無い）柱 " +
-						std::to_string(failures.collapsed) + " 本。";
-			if ((failures.collapsed > 0 || failures.repaired > 0) &&
-				!failures.collapsedProbe.empty())
-				note += "（1 本目: " + failures.collapsedProbe + "）";
+			{
+				note += "長さ 0 で描かれた（実体が無い）柱 " + std::to_string(failures.collapsed) +
+						" 本。";
+				if (!failures.collapsedProbe.empty())
+					note += "（1 本目: " + failures.collapsedProbe + "）";
+			}
 			if (!failures.lengthHint.empty())
 				note +=
 					"「長さ」パラメータを引けませんでした（候補: " + failures.lengthHint + "）。";
@@ -333,7 +315,8 @@ namespace HomeskzIfcImport::draw
 				continue;
 			// 1 本目だけ、長さ・高さを含むパラメータを名前と値で控える（全数だと読めない）。
 			if (probe.empty())
-				probe = DescribeSizeParams(object);
+				probe =
+					DescribeSizeParams(object) + "・図面のパス[" + DescribePioPath(object) + "]";
 
 			const DrawnMemberSize size = MeasureDrawnMember(object);
 			if (!size.found)
@@ -371,7 +354,8 @@ namespace HomeskzIfcImport::draw
 				oddProbe = std::string(buffer.data()) + DescribeSizeParams(object) +
 						   std::string(wanted.data()) + "・図面の始端[" +
 						   DescribeStoryBound(object, kStartBoundID) + "]・終端[" +
-						   DescribeStoryBound(object, kEndBoundID) + "]";
+						   DescribeStoryBound(object, kEndBoundID) + "]・図面のパス[" +
+						   DescribePioPath(object) + "]";
 			}
 		}
 

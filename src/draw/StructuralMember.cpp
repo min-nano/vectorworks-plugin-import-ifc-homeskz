@@ -286,38 +286,15 @@ namespace HomeskzIfcImport::draw
 			if (!size.found)
 				result.lengthParamHint = DescribeParamsContaining(pio, kLengthParamNeedle);
 			result.collapsed = size.zero;
-			// **証拠は言い直す前に採る。** 言い直したあとに読むと、命令どおりに書いた
-			// ストーリ相対の高さ基準が図面に入っていたかどうかが分からなくなる。
+			// **潰れていたら証拠を全部採る。** 高さ基準は**どう書いても両端の Z を動かせ
+			// なかった**（ストーリ相対・レイヤ基準・VW が記録しているとおり、のいずれでも
+			// 実測 0。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）ので、残る入力は
+			// パスである。**PIO が実際に持っているパスの頂点**まで読み戻して添える。
 			if (result.collapsed)
 				result.collapsedProbe = DescribeSizeParams(object) + "・図面の始端基準[" +
 										DescribeStoryBound(object, kStartBoundID) + "]・終端基準[" +
-										DescribeStoryBound(object, kEndBoundID) + "]";
-			// **潰れていたらレイヤの高さ基準で言い直して、もう一度解かせる。** 同じ指定の
-			// まま解かせ直しても直らないことは実機で分かっている（46 本中 0 本）ので、
-			// 言い直すのは**基準の種類そのもの**である。直ったかは読み戻して見る
-			// （draw/StructuralMember.h の retryWithLayerBound）。
-			if (result.collapsed && spec.retryWithLayerBound)
-			{
-				const bool startOk = ApplyLayerBound(object, kStartBoundID, spec.layerStartOffset);
-				const bool endOk = ApplyLayerBound(object, kEndBoundID, spec.layerEndOffset);
-				if (startOk && endOk)
-				{
-					gSDK->ResetObject(object);
-					const DrawnMemberSize retried = MeasureDrawnMember(object);
-					std::array<char, 128> buffer{};
-					std::snprintf(buffer.data(), buffer.size(),
-								  "・レイヤ基準で言い直した結果 実測 %g（Z %g→%g）", retried.extent,
-								  retried.start, retried.end);
-					result.collapsedProbe += std::string(buffer.data());
-					if (retried.found && !retried.zero)
-					{
-						result.repairedByLayerBound = true;
-						result.collapsed = false;
-					}
-				}
-				else
-					result.collapsedProbe += "・レイヤ基準の高さ基準も書けなかった";
-			}
+										DescribeStoryBound(object, kEndBoundID) + "]・図面のパス[" +
+										DescribePioPath(object) + "]";
 		}
 
 		result.object = object;

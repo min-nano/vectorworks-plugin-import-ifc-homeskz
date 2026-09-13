@@ -116,19 +116,6 @@ namespace HomeskzIfcImport::draw
 		// 手掛かりになる（実機で実際に起きた。docs/DEV-NOTES.md「柱が長さ 0 で描かれる
 		// （M27）」）。
 		double expectedLength = 0.0;
-		// **ストーリ相対の高さ基準で実体が作れなかったときに言い直す**、レイヤの高さ基準での
-		// 上下端オフセット（mm）。`retryWithLayerBound` が true のときだけ使う。
-		//
-		// 【なぜ要るのか】実機で、ストーリ相対（`{上階, レベル, offset}`）を渡しても**終端が
-		// 始端と同じ Z に解決される**柱が 46 本出た。高さ基準の書き方（レベル種別・offset）を
-		// 変えても同じで、**ストーリ相対そのものが効いていない**疑いが残る。そこで潰れていた
-		// 材だけレイヤの高さ基準で言い直して解かせ直し、**直るかどうかを数えて持ち帰る**
-		// ——これが「ストーリ相対が犯人か」を分ける唯一の測り方である。柱の span レイヤは
-		// その階の横架材天端（最上階は軒高）と同じ高さに作られるので、命令の下端 offset は
-		// そのままレイヤ基準の offset として使える（parse/Story の span レベル）。
-		bool retryWithLayerBound = false;
-		double layerStartOffset = 0.0;
-		double layerEndOffset = 0.0;
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
@@ -156,9 +143,6 @@ namespace HomeskzIfcImport::draw
 		// オフセットは命令どおりのまま画面に何も出ない（Findings「Parametric Objects」の
 		// 3 行表）。呼び出し側は件数を診断へ載せる。
 		bool collapsed = false;
-		// 潰れていた材を**レイヤの高さ基準で言い直したら直ったか**（言い直していなければ
-		// false）。true なら「ストーリ相対の高さ基準が効いていない」ことの裏が取れる。
-		bool repairedByLayerBound = false;
 		// 「長さ」のパラメータ名を解決できなかったときだけ、PIO が持つ「長さ」を含む
 		// パラメータ名の一覧（DescribeParamsContaining）。解決できていれば空。
 		std::string lengthParamHint;
