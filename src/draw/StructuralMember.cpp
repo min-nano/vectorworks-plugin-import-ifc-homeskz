@@ -200,7 +200,22 @@ namespace HomeskzIfcImport::draw
 		const Sint32 piece0 = gSDK->NurbsGetNumPts(path, 0);
 		const Sint32 piece1 = gSDK->NurbsGetNumPts(path, 1);
 		if (outProbe != nullptr)
-			*outProbe = PathProbe{piece0, piece1};
+		{
+			PathProbe probe;
+			probe.piece0 = piece0;
+			probe.piece1 = piece1;
+			// **2 点の Z も読み戻す。** 数が 2 でも同じ位置なら部材は実体を持たない
+			// （実機で 46 本。draw/StructuralMember.h の PathProbe）。
+			WorldPt3 first(0.0, 0.0, 0.0);
+			WorldPt3 second(0.0, 0.0, 0.0);
+			if (gSDK->NurbsGetPt3D(path, 0, 0, first) && gSDK->NurbsGetPt3D(path, 0, 1, second))
+			{
+				probe.pointsRead = true;
+				probe.z0 = first.z;
+				probe.z1 = second.z;
+			}
+			*outProbe = probe;
+		}
 		outAppended = piece0 >= kPathPointCount || piece1 >= kPathPointCount;
 		return path;
 	}
