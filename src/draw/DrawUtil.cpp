@@ -1007,6 +1007,19 @@ namespace HomeskzIfcImport::draw
 		return gSDK->SetObjectStoryBound(object, boundID, data);
 	}
 
+	bool ApplyLayerBound(MCObjectHandle object, Sint32 boundID, double offset)
+	{
+		if (object == nil)
+			return false;
+		VectorWorks::SStoryObjectData data;
+		data.fBound = VectorWorks::eStoryObjectBound_LayerElevation;
+		// fBoundStory・fLayerLevelType は eStoryObjectBound_Story のときだけ使われる
+		// （SDK のコメント）。レベル種別は既定の空のまま。
+		data.fBoundStory = 0;
+		data.fOffset = offset;
+		return gSDK->SetObjectStoryBound(object, boundID, data);
+	}
+
 	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID)
 	{
 		if (object == nil)
@@ -1022,7 +1035,7 @@ namespace HomeskzIfcImport::draw
 		std::snprintf(buffer.data(), buffer.size(), "種別=%d 階=%+d レベル=\"%s\" offset=%g",
 					  static_cast<int>(data.fBound), static_cast<int>(data.fBoundStory),
 					  data.fLayerLevelType.GetStdString().c_str(), data.fOffset);
-		return std::string(buffer.data());
+		return {buffer.data()};
 	}
 
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size)

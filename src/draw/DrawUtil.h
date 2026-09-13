@@ -180,6 +180,13 @@ namespace HomeskzIfcImport::draw
 	bool ApplyStoryBound(MCObjectHandle object, Sint32 boundID,
 						 const core::StoryBoundCommand& bound);
 
+	// 高さ基準を**レイヤの高さ基準**（`eStoryObjectBound_LayerElevation`）で 1 つ書く。
+	// offset はレイヤの高さからの距離（mm）。**ストーリに紐付かない**ので階高の変更に追随
+	// しなくなる——だから通常の経路では使わず、**ストーリ相対のバウンドで実体が作れなかった
+	// 材を言い直す**ためだけに使う（切り分けを兼ねる。docs/DEV-NOTES.md「柱が長さ 0 で
+	// 描かれる（M27）」）。
+	bool ApplyLayerBound(MCObjectHandle object, Sint32 boundID, double offset);
+
 	// **VW が実際に持っている**高さ基準を読み戻して 1 行にする（`HasObjectStoryBound` ＋
 	// `GetObjectStoryBound`）。診断専用で、命令の値ではなく**図面の値**を出すことに意味が
 	// ある——同じ命令から作った柱の一部だけが実体を持たないとき、record が書けていない
