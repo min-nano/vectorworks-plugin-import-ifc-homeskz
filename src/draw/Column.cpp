@@ -102,6 +102,10 @@ namespace HomeskzIfcImport::draw
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
 			std::size_t bound = 0; // 高さ基準を VW が受け取らなかった
 			std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
+			std::string lengthHint; // 「長さ」のパラメータ名の手掛かり（最初の 1 件）
+			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長・図面が
+			// 持っている高さ基準・図面のパスの頂点）。**原因をパス側と高さ基準側に分けるのは
+			// この 1 行だけ**なので、必ず持ち帰る。
 			std::string collapsedProbe;
 		};
 
