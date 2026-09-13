@@ -105,9 +105,11 @@ MCP ブリッジ（`docs/DEV-NOTES.md` M24）も同じ切り分けです。**受
    ブランチのビルドだけ拾って尋ねる、実機フィードバックの往復（`Auto`）は**尋ねも報せも
    再起動もせず**、輪が止まるとき（殻まで変わった・入れられなかった・本体を降ろせな
    かった）だけ口を開いて `false` を返す。往復パレットの周期確認（`PollDevBuildWith`。
-   M24）は**ダイアログを 1 枚も出さず結末を値で返す**こと、そして基準に殻の sha ではなく
-   `q-dev` の `installed=`（ディスク上の版）を使うこと——本体だけを入れ替えたあと殻の sha を
-   基準にすると同じビルドを毎周入れ直す——もここで押さえます。
+   M24）は**ダイアログを 1 枚も出さず結末を値で返す**ことも押さえます。加えて **3 つの入口
+   すべてが「いま」をディスクに入っているビルドで決める**こと（`q-dev` の `installed=` /
+   `installed-branch=`。M26）——殻にコンパイルされた sha を基準にすると本体だけを入れ替えた
+   あと同じビルドを毎周入れ直し、**殻のブランチを基準にすると、手で別のブランチのビルドへ
+   乗り換えても前のブランチへ戻してしまう**（`docs/DEV-NOTES.md` M26）。
 2.5 **`FeedbackLoopTests`** … **モードレスの往復の駆動**（`src/FeedbackLoop.cpp`。M24）を、
    フェイクの `IFeedbackLoopHost` 越しに動かします。1 回の確認で**合図 → 新しいビルド →
    入れる → 取り込み → 投稿**の順に呼ぶこと、間隔に満たない Tick は GitHub を叩かないこと、
@@ -131,8 +133,9 @@ MCP ブリッジ（`docs/DEV-NOTES.md` M24）も同じ切り分けです。**受
    仕様変更で崩れた入力への耐性を守ります（`tests/UpdaterRobustnessTests.cpp`）。
 4. **`UpdaterScriptTests`** … 同梱スクリプト `scripts/vw-update.sh`（macOS）の
    **機械可読バックエンド**（`q-stable` / `q-dev` / `do-install` と、その土台の
-   `asset_url` / `installed_commit`）を、`curl` / `plutil` を差し替えて検証します
-   （`tests/vw-update.test.sh`、後述）。
+   `asset_url` / `installed_commit` / `installed_branch`）を、`curl` / `plutil` を差し替えて
+   検証します（`tests/vw-update.test.sh`、後述）。`q-dev` が `installed=` に加えて
+   **`installed-branch=`**（入っているビルドのブランチ。M26）を出すこともここで押さえます。
 5. **`UpdaterScriptTestsPs`** … その Windows 版 `scripts/vw-update.ps1` を、同じ発想で
    `Invoke-GH` / `Invoke-WebRequest` を差し替えて検証します（`tests/vw-update.Tests.ps1`、
    後述）。PowerShell 7（`pwsh`）は Linux でも動くので、**同じ Linux ランナー**で回せます。
@@ -217,7 +220,7 @@ MCP ブリッジ（`docs/DEV-NOTES.md` M24）も同じ切り分けです。**受
 | スクリプト出力の解析 | `Trim` / `ValueOf` / `ParseDevBuilds` | `key=value` 行・`build\t…` 行の解析 |
 | コマンドライン生成 | `ShellQuote` / `CmdQuote` | `/bin/sh`・cmd.exe 用の安全なクオート |
 | 自パスからの導出 | `Mac*FromBinary` / `Win*FromPath/Dir` | 同梱スクリプト・Plug-Ins フォルダのパス導出 |
-| **更新フローの判断** | `EvaluateStable` / `DevSwitchCandidates` / `ResolveDevSelection` / `InstallReportedOk` / `InstallErrorText` / `InstalledShellId` / `NeedsRestartAfterInstall` | 「更新があるか」「切替候補はどれか」「選択→ビルド」「インストール成否」「**再起動が要るか、本体の読み直しで済むか**」 |
+| **更新フローの判断** | `EvaluateStable` / `ResolveCurrentDevBuild` / `DevSwitchCandidates` / `FindDevBuildForBranch` / `ResolveDevSelection` / `InstallReportedOk` / `InstallErrorText` / `InstalledShellId` / `NeedsRestartAfterInstall` | 「更新があるか」「**いま入っているのはどのブランチのどのビルドか**」「切替候補はどれか」「同じブランチの新しいビルドはどれか」「選択→ビルド」「インストール成否」「**再起動が要るか、本体の読み直しで済むか**」 |
 
 最後の「更新フローの判断」層は、もともと `Updater.cpp` の `gSDK` 呼び出しの合間に
 インラインで書かれていた分岐です。純粋関数として切り出したことで単体テストの対象になり、

@@ -17,7 +17,8 @@
 #                          local fixture .zip to -OutFile (or throws to simulate a
 #                          failed download).
 #
-#   Get-InstalledCommit (reads a plain "<name>.commit" sidecar — no OS tool),
+#   Get-InstalledCommit / Get-InstalledBranch (plain "<name>.commit" / "<name>.branch"
+#   sidecars — no OS tool),
 #   Expand-Archive, Copy-Item and the atomic-swap logic all run REAL against
 #   temp files, so this covers more of the script than a pure-parse test would.
 #
@@ -195,6 +196,7 @@ function New-BuildZip([string] $zipPath, [string] $vlbName) {
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.vlb") -Value 'dll' -NoNewline
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.commit") -Value 'newcommit' -NoNewline
+    Set-Content -LiteralPath (Join-Path $stage "$vlbName.branch") -Value 'feature/new' -NoNewline
     # 本体と殻の ID も、実際のリリース zip と同じように入れる。**殻だけ入れて本体を
     # 取りこぼす退行**を捕まえるため（src/PayloadAbi.h）。
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.vwpayload") -Value 'payload' -NoNewline
@@ -234,6 +236,19 @@ T 'Get-InstalledCommit is none when the sidecar is absent'
 CheckEq (Get-InstalledCommit 'min-nano_structureDev') 'none' 'absent sidecar -> none'
 
 # ===========================================================================
+# Get-InstalledBranch — reads the "<name>.branch" sidecar. **別のブランチのビルドへ
+# 乗り換えたことを覚えている唯一の場所**で、殻にコンパイルされた VW_BUILD_BRANCH は
+# 本体だけを入れ替えたあと前のブランチを名乗ったままになる（src/UpdaterParse.h の
+# ResolveCurrentDevBuild）。
+# ===========================================================================
+T 'Get-InstalledBranch reads the sidecar branch from the plug-in folder'
+Set-Content -LiteralPath (Join-Path $ownStable 'min-nano_structure.branch') -Value "main`n"
+CheckEq (Get-InstalledBranch 'min-nano_structure') 'main' 'trimmed sidecar value'
+
+T 'Get-InstalledBranch is empty when the sidecar is absent'
+CheckEq (Get-InstalledBranch 'min-nano_structureDev') '' 'absent sidecar -> empty'
+
+# ===========================================================================
 # q-stable — installed / latest / url, and the offline / incomplete paths.
 # ===========================================================================
 T 'Invoke-QStable reports installed, 7-char latest and the asset url'
@@ -251,11 +266,16 @@ CheckNotContains $out 'latest=' 'no latest when offline'
 $script:FakeApiFail = $false
 
 # ===========================================================================
-# q-dev — installed line + one TSV row per dev-* build that has a downloadable
-# asset (the stable release and the asset-less dev build are both skipped).
+# q-dev — installed / installed-branch lines + one TSV row per dev-* build that
+# has a downloadable asset (the stable release and the asset-less dev build are
+# both skipped).
 # ===========================================================================
 T 'Invoke-QDev lists only dev-* builds that have a downloadable asset'
 $out = AsText (Invoke-QDev)
+# **入っているビルドの commit とブランチを先に出す。** ここが無いと、別のブランチへ
+# 乗り換えたあとプラグインは前のブランチを追い続ける（src/UpdaterParse.h）。
+CheckContains $out 'installed=none' 'installed line (no dev build installed here)'
+CheckContains $out 'installed-branch=' 'installed-branch line'
 # **5 列目はリリース本文（notes）の branch=。** 取り込みのついでの確認が「いま動いて
 # いるのと同じブランチのビルド」だけを拾うために要る（src/UpdaterFlow.cpp）。
 CheckContains $out ("build`taaa1111`tfeature/x`thttps://example.test/dl/x.zip`tfeature/x") `
@@ -287,6 +307,7 @@ CheckContains $out 'ok' 'prints ok'
 $own = Join-Path $VW_PLUGINS_DIR 'min-nano_structureDev'
 CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.vlb')) $true 'the .vlb landed'
 CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.commit')) $true 'the .commit sidecar landed'
+CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.branch')) $true 'the .branch sidecar landed'
 # **本体も入っていること。** 殻だけ入れて本体を取りこぼすと、次の起動でプラグインは
 # 何もできなくなる（src/PayloadHost.cpp が「本体が見つかりません」と言うだけ）。
 CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.vwpayload')) $true 'the .vwpayload landed'

@@ -303,11 +303,12 @@ Visual Studio 2022（v143 ツールセット、x64）と **win SDK** が必要�
 
    成果物は `build/Release/min-nano_structure.vlb`（DLL）と、その隣の
    `build/Release/min-nano_structure.vwr`（リソース）です。ビルドスタンプの
-   `min-nano_structure.commit` と更新スクリプト `vw-update.ps1` も同じ場所に出力されます。
+   `min-nano_structure.commit` / `min-nano_structure.branch`（どのコミット・どのブランチの
+   ビルドか）と更新スクリプト `vw-update.ps1` も同じ場所に出力されます。
 
 macOS の `.vwlibrary` バンドルと違い、Windows のプラグインは `<name>.vlb` 本体と
-同名の `<name>.vwr` を**同じフォルダに一緒に**置く必要があります（`.commit` と
-`vw-update.ps1` も同梱すると自動アップデートが機能します）。
+同名の `<name>.vwr` を**同じフォルダに一緒に**置く必要があります（`.commit` / `.branch` /
+`.shell-id` と `vw-update.ps1` も同梱すると自動アップデートが機能します）。
 
 > **アーキテクチャは x64 のみ（ARM も x64 でカバー）**
 > Vectorworks の Windows 版は x64 アプリで、SDK も **x64 ライブラリのみ**を同梱して
@@ -1402,7 +1403,7 @@ Vectorworks は読み込まず、次のインストールが掃きます。
 | メニューコマンド「アップデータを確認」（`src/Extensions/ExtUpdateMenu.cpp`） | `Manual` | 尋ねて入れる。**結末を必ず伝える**（最新です／確認できませんでした） |
 | 取り込みコマンドの頭・1 周目（`src/Extensions/ExtMenu.cpp`） | `Silent` | 更新があるときだけ尋ねる。**無ければ黙って取り込みへ進む** |
 | 取り込みコマンドの頭・2 周目以降（実機フィードバックの往復） | `Auto` | **尋ねずに入れて黙って続ける**。口を開くのは輪が止まるときだけ |
-| 往復パレットの周期確認（M24。`PollDevBuildWith`） | — | **ダイアログを 1 枚も出さず、結末を値で返す**（パレットがその文言を出す）。基準は `q-dev` の `installed=` |
+| 往復パレットの周期確認（M24。`PollDevBuildWith`） | — | **ダイアログを 1 枚も出さず、結末を値で返す**（パレットがその文言を出す）。基準は `q-dev` の `installed=` / `installed-branch=`（ディスク上の版） |
 
 `Manual` が黙らないのは、押したのに何も起きないと「最新だった」のか「そもそも動いて
 いない」のかが利用者に区別できないためです。逆に `Silent` は取り込みたいだけの人の前に
@@ -1446,7 +1447,10 @@ Vectorworks を止めるので、絵を見ている人の前に立ちはだか�
     `CBuildPickerDialog`）で問い合わせます。1 つのドロップダウンに候補を一覧表示します:
     - 先頭は**現在ロードされているビルド**（branch / commit、「インストール済み」と明示）。
     - 続いて**他のブランチのプレリリース**（現在のビルドと同じコミットは除外）。
-    - **インストール済み（先頭）を選ぶ／キャンセル** → 何もしません。
+    - **インストール済み（先頭）を選ぶ** → 何も入れず、「開発版ビルドはそのままです。」と
+      現在のビルドを伝えます（**押した操作には必ず結末を返す**——黙って閉じると、別の
+      ブランチを選んだつもりの人には「選んだのに切り替わらない」と映ります）。
+    - **キャンセル** → 何もしません（取り消し自体が意思表示なので、ここは黙ります）。
     - **別のブランチを選ぶ** → それをインストールし、続けて再起動を尋ねます（下記）。
     - 選べるビルドが他に無ければ、その旨を伝えます（黙って終わりません）。
   - `Silent` … **ダイアログを出さず**、**いま動いているのと同じブランチ**の新しいビルドが
@@ -1454,9 +1458,15 @@ Vectorworks を止めるので、絵を見ている人の前に立ちはだか�
     出ては邪魔なので、拾うのは「自分のビルドが新しくなった」に当たるものだけです。
   - `Auto` … `Silent` と同じものを拾い、**尋ねずに入れます**（上記）。
 
-  現在の実行ビルドの判定にはコンパイル時に埋め込まれた commit（`VW_BUILD_VERSION`）と
-  ブランチ（`VW_BUILD_BRANCH`）を使うため、ディスク上に別ビルドが未反映で置かれていても
-  取り違えません。
+  **「いま」の判定はディスクに入っているビルドで行います**（`q-dev` の `installed=` と
+  `installed-branch=`。`src/UpdaterParse.h` の `ResolveCurrentDevBuild`）。コンパイル時に
+  埋め込まれた commit（`VW_BUILD_VERSION`）とブランチ（`VW_BUILD_BRANCH`）は**殻の**値で
+  しかなく、**本体（`.vwpayload`）だけの更新は再起動せずに効く**ので、別のブランチの
+  ビルドへ乗り換えたあともその 2 つは前のブランチを名乗り続けます。そちらを基準にすると、
+  選択ダイアログが「現在: 前のブランチ」と出して**いま入れたビルドをもう一度候補に並べ**、
+  `Silent` / 往復の確認は**前のブランチ**の新しいビルドで上書きして乗り換えを巻き戻します
+  （実機で起きました。`docs/DEV-NOTES.md` M26）。ディスクから分からないとき（刻印を出さない
+  古い同梱スクリプト等）だけ、ビルド一覧の sha 照合 → 殻の値、と落ちます。
 
   ブランチの照合には `q-dev` の出力の**5 列目**（`build<TAB>commit<TAB>name<TAB>url<TAB>branch`）
   を使います。素のブランチ名はリリース本文（CI が書く `branch=` の行）から読みます。
@@ -1481,7 +1491,10 @@ Vectorworks が起動時にしか読み込めないのは殻だけです（上�
 
 判断の材料は**殻の ID**（`VW_SHELL_ID`）です。CMake が「殻に入るものだけ」のハッシュを
 計算してビルドへ焼き（`CMakeLists.txt` の `VW_SHELL_INPUTS`）、同じ値をインストール物にも
-控えます（mac: `Info.plist` の `VWShellId`、win: `<name>.shell-id`）。`do-install` は入れ終えた
+控えます（mac: `Info.plist` の `VWShellId`、win: `<name>.shell-id`）。**どのビルドが入って
+いるか**も同じやり方で控えます（mac: `VWBuildCommit` / `VWBuildBranch`、win: `<name>.commit` /
+`<name>.branch`）——`q-dev` がそれを `installed=` / `installed-branch=` として出し、開発版の
+流れは「いま」をそこから決めます（上記）。`do-install` は入れ終えた
 ビルドの ID を `installed-shell=<id>` として出し、プラグインは自分に焼かれた値と突き合わせ
 ます（`src/UpdaterParse.h` の `NeedsRestartAfterInstall`。純粋関数なので単体テスト済み）。
 

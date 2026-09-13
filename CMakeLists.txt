@@ -707,6 +707,13 @@ if(VW_BUILD_PLUGIN)
 			# plist instead). Written at configure time from the parent-scope stamp.
 			set(commit_file "${CMAKE_CURRENT_BINARY_DIR}/${output_name}.commit")
 			file(WRITE "${commit_file}" "${VW_BUILD_VERSION}\n")
+			# ブランチも同じやり方で控える（mac 側は Info.plist の VWBuildBranch）。
+			# **別のブランチのビルドへ乗り換えたことを覚えている唯一の場所**で、殻に
+			# コンパイルされた VW_BUILD_BRANCH は本体だけを入れ替えたあと前のブランチを
+			# 名乗ったままになる（src/UpdaterParse.h の ResolveCurrentDevBuild と、
+			# scripts/vw-update.ps1 の Get-InstalledBranch）。
+			set(branch_file "${CMAKE_CURRENT_BINARY_DIR}/${output_name}.branch")
+			file(WRITE "${branch_file}" "${VW_BUILD_BRANCH}\n")
 			# 殻の ID も同じやり方で控える。**「本体だけ入れ替えれば済むか」をアップデータが
 			# 判断する材料**で、mac 側は Info.plist の VWShellId から読む
 			# （scripts/vw-update.ps1 の Get-InstalledShellId と対）。
@@ -723,6 +730,8 @@ if(VW_BUILD_PLUGIN)
 					"$<TARGET_FILE_DIR:${target}>/vw-feedback.ps1"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${commit_file}"
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.commit"
+				COMMAND "${CMAKE_COMMAND}" -E copy "${branch_file}"
+						"$<TARGET_FILE_DIR:${target}>/${output_name}.branch"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${shell_id_file}"
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.shell-id"
 				VERBATIM

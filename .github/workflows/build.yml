@@ -306,10 +306,11 @@ jobs:
           test -f "$d/$name.vlb" || { echo "::error::$name.vlb was not produced"; exit 1; }
           test -f "$d/$name.vwr" || { echo "::error::$name.vwr was not packaged"; exit 1; }
           test -f "$d/$name.commit" || { echo "::error::$name.commit build stamp missing"; exit 1; }
+          test -f "$d/$name.branch" || { echo "::error::$name.branch build stamp missing"; exit 1; }
           test -f "$d/$name.vwpayload" \
             || { echo "::error::$name.vwpayload (the payload module) was not produced"; exit 1; }
           test -f "$d/$name.shell-id" || { echo "::error::$name.shell-id stamp missing"; exit 1; }
-          echo "Build stamp: $(cat "$d/$name.commit")"
+          echo "Build stamp: $(cat "$d/$name.commit") ($(cat "$d/$name.branch"))"
           echo "Shell id: $(cat "$d/$name.shell-id")"
 
       # Zip each plug-in's flat files (module + resource + build stamp + scripts)
@@ -323,7 +324,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
           # $name.vwpayload が**本体**（殻が自分で読み込むモジュール）。片方だけでは
           # 動かないので必ず一緒に配る（src/PayloadAbi.h）。$name.shell-id は
-          # 「殻まで変わったか」をアップデータが判断するための控え。
+          # 「殻まで変わったか」をアップデータが判断するための控え。$name.branch は
+          # 「どのブランチのビルドが入っているか」の控え（mac は Info.plist に持つ）。
           # vw-feedback.ps1 は**実機フィードバックの投稿**（docs/DEV-NOTES.md M23）。
           # scripts/vw-install.ps1 が**インストーラ**。zip の直下に同梱しておくと、
           # インストール済みの（＝古い）vw-update.ps1 が配置をこちらへ委ねるので、
@@ -336,6 +338,7 @@ jobs:
             "build/Release/$name.vwpayload",
             "build/Release/$name.vwr",
             "build/Release/$name.commit",
+            "build/Release/$name.branch",
             "build/Release/$name.shell-id",
             "build/Release/vw-update.ps1",
             "build/Release/vw-feedback.ps1",

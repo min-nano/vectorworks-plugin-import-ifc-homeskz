@@ -242,7 +242,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 | 取り込みコマンドの頭（`src/Extensions/ExtMenu.cpp`） | `Silent` | あるときだけ尋ねる。**無ければ黙って取り込みへ進む**。**ここに往復の分岐は無い**（M25） |
 | 実機テストの頭・1 周目（`src/Extensions/ExtTestMenu.cpp`。**dev だけ**） | `Silent` | 同上 |
 | 実機テストの頭・2 周目以降（往復の最中） | `Auto` | **尋ねず・報せず入れる**。入らなかったら走らせない（`false`） |
-| 往復パレットの周期確認（`src/FeedbackLoop.cpp`。M24） | （`PollDevBuildWith`） | **ダイアログを 1 枚も出さず、結末を値で返す**。パレットがその文言を出す。基準は `q-dev` の `installed=`（ディスク上の版。殻の sha は本体だけ入れ替えたあと古いまま） |
+| 往復パレットの周期確認（`src/FeedbackLoop.cpp`。M24） | （`PollDevBuildWith`） | **ダイアログを 1 枚も出さず、結末を値で返す**。パレットがその文言を出す。基準は `q-dev` の `installed=` / `installed-branch=`（ディスク上の版。**殻にコンパイルされた sha とブランチは本体だけ入れ替えたあと古いまま**なので、3 つの入口すべてがディスクを見る。`UpdaterParse` の `ResolveCurrentDevBuild`。M26） |
 
 守ること:
 

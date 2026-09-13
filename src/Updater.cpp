@@ -437,9 +437,11 @@ namespace HomeskzIfcImport
 	{
 		CVectorworksUpdaterHost host;
 #ifdef VW_DEV_BUILD
-		// The build that is actually loaded and running right now is compiled in
-		// (VW_BUILD_BRANCH/VERSION), so it is unambiguous even if a different
-		// build is staged on disk.
+		// 殻にコンパイルされたブランチと sha を渡す。**これは「いま動いているビルド」の
+		// 控えではなく、ディスクから何も分からなかったときの落としどころである**
+		// ——本体（.vwpayload）だけの更新は再起動せずに効くので、別のブランチへ乗り換えた
+		// あともこの 2 つは前のブランチを名乗り続ける（src/UpdaterParse.h の
+		// ResolveCurrentDevBuild）。
 		return RunDevUpdateCheckWith(host, kind, VW_BUILD_BRANCH, VW_BUILD_VERSION, VW_SHELL_ID);
 #else
 		return RunStableUpdateCheckWith(host, kind, VW_SHELL_ID);

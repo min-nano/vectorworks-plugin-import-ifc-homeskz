@@ -462,6 +462,62 @@ TEST(dev_switch_candidates_empty_when_no_builds)
 }
 
 // ---------------------------------------------------------------------------
+// ResolveCurrentDevBuild — **いま入っているのはどのビルドか**（ブランチと sha）。
+//
+// 殻にコンパイルされた値は「本体だけを入れ替えた」あと古いままなので、開発版の流れは
+// ディスク上のビルドを基準にする（docs/DEV-NOTES.md M26）。
+// ---------------------------------------------------------------------------
+
+TEST(resolve_current_dev_build_prefers_the_installed_stamps)
+{
+	// 殻は feature/a (aaa1111) だが、ディスクには feature/b (bbb2222) が入っている
+	// ——手で別のブランチのビルドへ乗り換えた直後の姿。**基準はディスクの側**。
+	const std::string out =
+		"installed=bbb2222\n"
+		"installed-branch=feature/b\n"
+		"build\tbbb2222\tDev: feature/b (bbb2222)\thttps://ex.com/b.zip\tfeature/b\n";
+	const CurrentDevBuild current = ResolveCurrentDevBuild(out, "feature/a", "aaa1111");
+	CHECK_EQ(current.branch, "feature/b");
+	CHECK_EQ(current.commit, "bbb2222");
+}
+
+TEST(resolve_current_dev_build_reads_the_branch_from_the_build_rows)
+{
+	// **古い同梱スクリプトは installed-branch= を出さない**（走るのはインストール済みの
+	// ＝古いスクリプト）。その sha が並んでいるビルドの中にあれば、その行のブランチが
+	// 答えである——ここが無いと、古いスクリプトが入っている間だけ前のブランチへ戻る。
+	const std::string out = "installed=bbb2222\n"
+							"build\tbbb2222\tDev: feature/b (bbb2222)\thttps://ex.com/b.zip\n";
+	const CurrentDevBuild current = ResolveCurrentDevBuild(out, "feature/a", "aaa1111");
+	CHECK_EQ(current.branch, "feature/b");
+	CHECK_EQ(current.commit, "bbb2222");
+}
+
+TEST(resolve_current_dev_build_falls_back_to_the_shell_values)
+{
+	// ディスクについて何も分からない（刻印が読めず、一覧にも sha が無い）ときは殻の値。
+	const std::string out = "installed=none\n"
+							"build\tccc3333\tDev: other (ccc3333)\thttps://ex.com/c.zip\tother\n";
+	const CurrentDevBuild current = ResolveCurrentDevBuild(out, "feature/a", "aaa1111");
+	CHECK_EQ(current.branch, "feature/a");
+	CHECK_EQ(current.commit, "aaa1111");
+
+	// 行が 1 つも無い出力（オフライン直後など）でも同じ。
+	const CurrentDevBuild none = ResolveCurrentDevBuild("", "feature/a", "aaa1111");
+	CHECK_EQ(none.branch, "feature/a");
+	CHECK_EQ(none.commit, "aaa1111");
+}
+
+TEST(resolve_current_dev_build_ignores_a_none_branch)
+{
+	// 刻印が "none" と書いてあるのは「無い」のと同じ扱い（空欄と揃える）。
+	const std::string out = "installed=bbb2222\ninstalled-branch=none\n";
+	const CurrentDevBuild current = ResolveCurrentDevBuild(out, "feature/a", "aaa1111");
+	CHECK_EQ(current.branch, "feature/a");
+	CHECK_EQ(current.commit, "bbb2222");
+}
+
+// ---------------------------------------------------------------------------
 // DevBuildBranch / FindDevBuildForBranch — pick the SAME branch's next build.
 // 実機フィードバックの往復（docs/DEV-NOTES.md M23）が、修正版のビルドを待つときに使う。
 // ---------------------------------------------------------------------------
