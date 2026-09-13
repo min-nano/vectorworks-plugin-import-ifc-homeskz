@@ -116,9 +116,8 @@ namespace HomeskzIfcImport::draw
 		constexpr double kExtentTol = 1.0;
 
 		bool DrawOne(const core::ColumnCommand& column, RefNumber style, ColumnFailures& failures,
-					 MCObjectHandle& outObject, bool& outCollapsed)
+					 MCObjectHandle& outObject)
 		{
-			outCollapsed = false;
 			// 断面の矩形（幅 × せい）は**原点中心**に置く（AxisAlign＝中央と一致させる。
 			// パスが断面中心を通る）。作れなければ PIO を作らない——断面の無い構造材は
 			// 生成できても実体が描かれない（draw/DrawUtil 参照）。
@@ -212,7 +211,6 @@ namespace HomeskzIfcImport::draw
 			{
 				if (result.collapsed)
 					++failures.collapsed;
-				outCollapsed = result.collapsed;
 				// 1 本目だけ実測を控える（全数ぶん並べても読めない）。
 				if (failures.collapsedProbe.empty())
 				{
@@ -265,8 +263,7 @@ namespace HomeskzIfcImport::draw
 				continue;
 
 			MCObjectHandle object = nil;
-			bool collapsed = false;
-			if (DrawOne(column, style, failures, object, collapsed))
+			if (DrawOne(column, style, failures, object))
 				++drawn;
 			// 伏図記号のデータタグが引けるよう、**構造材ツールで描けた柱だけ**を記録する
 			// （立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
@@ -350,7 +347,7 @@ namespace HomeskzIfcImport::draw
 				probe =
 					DescribeSizeParams(object) + "・図面のパス[" + DescribePioPath(object) + "]";
 
-			const DrawnMemberSize size = MeasureDrawnMember(object);
+			const DrawnMemberSize size = MeasureDrawnMember(object, StructuralExtentKind::Vertical);
 			if (!size.found)
 				continue;
 			++measured;
@@ -409,7 +406,8 @@ namespace HomeskzIfcImport::draw
 					continue;
 				if (document.columns[index].layer != peerLayer)
 					continue;
-				const DrawnMemberSize size = MeasureDrawnMember(object);
+				const DrawnMemberSize size =
+					MeasureDrawnMember(object, StructuralExtentKind::Vertical);
 				if (!size.found || size.zero)
 					continue;
 				peerIndex = index;
@@ -425,7 +423,8 @@ namespace HomeskzIfcImport::draw
 			if (entry != handles.table().handles.end() && entry->second != nil)
 			{
 				const core::ColumnCommand& peer = document.columns[peerIndex];
-				const DrawnMemberSize size = MeasureDrawnMember(entry->second);
+				const DrawnMemberSize size =
+					MeasureDrawnMember(entry->second, StructuralExtentKind::Vertical);
 				std::array<char, 256> buffer{};
 				std::snprintf(buffer.data(), buffer.size(),
 							  "同じレイヤ（%s）で無事だった柱: 命令のパス長 %g・端部オフセット "

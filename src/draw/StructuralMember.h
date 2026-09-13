@@ -88,6 +88,20 @@ namespace HomeskzIfcImport::draw
 		BottomCentre, // 中下（垂木。パスは下面中央線＝屋根面が通る線）
 	};
 
+	// **描き上がった部材の実体をどの読みで測るか。** 構造材 PIO には「部材長」に当たる
+	// パラメータが無く（名前で引ける `CenterPointLength(長さ)` は部材長ではない——実長 5333 の
+	// 柱で 100 を返した）、実体があるかを言える値は**部材の向きで違う**。鉛直材（柱）は
+	// **両端の解決済み絶対 Z の差**、水平材（横架材）は**パスから取れた「スパン」**である。
+	//
+	// **取り違えると診断が嘘をつく。** 水平材は両端の Z が等しいのが正常なので、鉛直材の
+	// 測り方をそのまま当てると**全数を「実体が無い」と誤報**し、そのうえ正常な材のパスまで
+	// 作り直してしまう（下記 retryWithFreshPath）。
+	enum class StructuralExtentKind
+	{
+		Vertical, // 両端の絶対 Z の差（鉛直材＝柱・小屋束）
+		Span,	  // OIP の「スパン」（水平材＝横架材）
+	};
+
 	// 構造材 1 本ぶんの描画仕様。path / profile は呼び出し側が用意する（下記の CreatePath と
 	// DrawUtil の CreateRectangleProfileGroup）。
 	struct StructuralMemberSpec
@@ -116,6 +130,9 @@ namespace HomeskzIfcImport::draw
 		// 手掛かりになる（実機で実際に起きた。docs/DEV-NOTES.md「柱が長さ 0 で描かれる
 		// （M27）」）。
 		double expectedLength = 0.0;
+		// expectedLength を**どの読みで検査するか**（上記 StructuralExtentKind）。部材の向きで
+		// 測れる値が違うので、expectedLength を入れるなら必ず部材に合わせて選ぶ。
+		StructuralExtentKind extentKind = StructuralExtentKind::Vertical;
 		// **潰れていたときにパスを作り直して差し替えるための 2 点**（`SetCustomObjectPath`）。
 		// `retryWithFreshPath` が true のときだけ使う。
 		//
@@ -220,16 +237,20 @@ namespace HomeskzIfcImport::draw
 	// **この 2 つの差だけが、実体がどれだけあるかを言える値**である
 	// （docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 	//
-	// found が false なら両端の Z を引けなかった（値は意味を持たない）。
+	// 【水平材は「スパン」で測る】上の差は鉛直材にしか使えない——水平材は両端の Z が等しい
+	// のが正常なので、差で測れば全数が 0 になる。水平材は PIO がパスから入れる「スパン」を
+	// 読む（kind＝StructuralExtentKind::Span。start / end は意味を持たず 0 のまま）。
+	//
+	// found が false なら測る値を引けなかった（ほかの値は意味を持たない）。
 	struct DrawnMemberSize
 	{
 		bool found = false;
-		double start = 0.0;	 // 始端の絶対 Z
-		double end = 0.0;	 // 終端の絶対 Z
-		double extent = 0.0; // |end - start|（＝実体の高さ／長さ）
+		double start = 0.0;	 // 始端の絶対 Z（kind＝Vertical のときだけ）
+		double end = 0.0;	 // 終端の絶対 Z（kind＝Vertical のときだけ）
+		double extent = 0.0; // |end - start| もしくはスパン（＝実体の高さ／長さ）
 		bool zero = false;	 // found かつ extent が 0（＝実体が無い）
 	};
-	DrawnMemberSize MeasureDrawnMember(MCObjectHandle object);
+	DrawnMemberSize MeasureDrawnMember(MCObjectHandle object, StructuralExtentKind kind);
 
 	// その部材が持つ「長さ」「高さ」を含むパラメータを**名前と値で**並べた 1 行。どの
 	// パラメータが OIP のどの欄なのかを実機で確かめる唯一の手段なので、**1 本ぶんだけ**
