@@ -100,6 +100,7 @@ namespace HomeskzIfcImport::draw
 			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
 			std::size_t offset = 0;	 // 端部オフセットを書けなかった
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
+			std::size_t bound = 0; // 高さ基準を VW が受け取らなかった
 			std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
 			std::string lengthHint; // 「長さ」のパラメータ名の手掛かり（最初の 1 件）
 			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長）。**原因を
@@ -182,6 +183,10 @@ namespace HomeskzIfcImport::draw
 				++failures.section;
 			// 端部オフセットを書けなかった本数。書けないと柱が受ける梁の天端まで伸びたまま
 			// 描かれる（＝梁せいぶん高い）ので、切り分けの手掛かりを 1 件だけ残す。
+			// 高さ基準を書けなかった本数。**柱の高さは上下端の高さ基準の差が支配する**ので、
+			// 書けていなければ実体の無い柱になる（draw/StructuralMember.h の boundOk）。
+			if (!result.boundOk)
+				++failures.bound;
 			if (!result.endOffsetOk)
 			{
 				++failures.offset;
@@ -257,7 +262,8 @@ namespace HomeskzIfcImport::draw
 		// （柱が見えないときの切り分け材料）。
 		if (outDiagnostics != nullptr &&
 			(failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
-			 failures.collapsed > 0 || !failures.lengthHint.empty() || style == 0))
+			 failures.bound > 0 || failures.collapsed > 0 || !failures.lengthHint.empty() ||
+			 style == 0))
 		{
 			std::string note = "柱の診断: ";
 			if (failures.path > 0)
@@ -265,6 +271,9 @@ namespace HomeskzIfcImport::draw
 					"鉛直パスが 2 点にならなかった柱 " + std::to_string(failures.path) + " 本。";
 			if (failures.section > 0)
 				note += "断面を設定できなかった柱 " + std::to_string(failures.section) + " 本。";
+			if (failures.bound > 0)
+				note +=
+					"高さ基準を図面へ書けなかった柱 " + std::to_string(failures.bound) + " 本。";
 			if (failures.collapsed > 0)
 			{
 				note += "長さ 0 で描かれた（実体が無い）柱 " + std::to_string(failures.collapsed) +
@@ -333,7 +342,20 @@ namespace HomeskzIfcImport::draw
 				std::snprintf(buffer.data(), buffer.size(),
 							  "命令 %g（端部オフセットを戻して %g）に対し実測 %g（Z %g→%g）・",
 							  column.height, drawn, size.extent, size.start, size.end);
-				oddProbe = std::string(buffer.data()) + DescribeSizeParams(object);
+				// **命令の高さ基準と、VW が実際に持っている高さ基準を並べる。** 実体が
+				// 無い柱で分かれ道になるのはここだけである——同じなら record は入って
+				// いて解決の側が違い、違えば書けていない（DrawUtil の DescribeStoryBound）。
+				std::array<char, 192> wanted{};
+				std::snprintf(wanted.data(), wanted.size(),
+							  "・命令の始端[階=%+d レベル=\"%s\" offset=%g]・終端[階=%+d "
+							  "レベル=\"%s\" offset=%g]",
+							  column.bottomBound.storyOffset, column.bottomBound.level.c_str(),
+							  column.bottomBound.offset, column.topBound.storyOffset,
+							  column.topBound.level.c_str(), column.topBound.offset);
+				oddProbe = std::string(buffer.data()) + DescribeSizeParams(object) +
+						   std::string(wanted.data()) + "・図面の始端[" +
+						   DescribeStoryBound(object, kStartBoundID) + "]・終端[" +
+						   DescribeStoryBound(object, kEndBoundID) + "]";
 			}
 		}
 

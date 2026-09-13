@@ -230,8 +230,10 @@ namespace HomeskzIfcImport::draw
 		// 構造材ツールの高さ基準が「レイヤの高さ」・offset 0 のまま実ジオメトリと矛盾する
 		// ことがなくなり、編集時に高さがリセットされない。水平材の傾斜はこの offset 差で
 		// 表れ、鉛直材ではこの差が柱高さを支配する。
-		gSDK->SetObjectStoryBound(object, kStartBoundID, StoryBoundData(spec.startBound));
-		gSDK->SetObjectStoryBound(object, kEndBoundID, StoryBoundData(spec.endBound));
+		// **戻り値を見る。** 受け取られなければ材は高さを持てない（＝実体が無い材になる）。
+		const bool startBoundOk = ApplyStoryBound(object, kStartBoundID, spec.startBound);
+		const bool endBoundOk = ApplyStoryBound(object, kEndBoundID, spec.endBound);
+		result.boundOk = startBoundOk && endBoundOk;
 
 		VWParametricObj pio(object);
 		const TXString breadth = ResolveParamName(pio, kFieldMajorBreadth, kLocalizedBreadth);
@@ -285,7 +287,15 @@ namespace HomeskzIfcImport::draw
 				result.lengthParamHint = DescribeParamsContaining(pio, kLengthParamNeedle);
 			result.collapsed = size.zero;
 			if (result.collapsed)
-				result.collapsedProbe = DescribeSizeParams(object);
+			{
+				// **VW が実際に持っている高さ基準**を、リセットのあとに読み戻して添える
+				// （命令の値ではなく図面の値。DrawUtil の DescribeStoryBound）。ここが
+				// 命令どおりなら record は入っていて解決の側が違う、違っていれば書けて
+				// いない——この 1 行でしか分かれない。
+				result.collapsedProbe = DescribeSizeParams(object) + "・始端基準[" +
+										DescribeStoryBound(object, kStartBoundID) + "]・終端基準[" +
+										DescribeStoryBound(object, kEndBoundID) + "]";
+			}
 		}
 
 		result.object = object;

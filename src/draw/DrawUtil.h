@@ -172,6 +172,21 @@ namespace HomeskzIfcImport::draw
 	// 直す形になっていた。
 	VectorWorks::SStoryObjectData StoryBoundData(const core::StoryBoundCommand& bound);
 
+	// 高さ基準を 1 つ書いて、**書けたかを返す**（`ISDK::SetObjectStoryBound` は bool を
+	// 返す）。**戻り値を捨てない**——捨てていたせいで「命令どおりに書いたつもりの高さ基準」
+	// と「VW が実際に持っている高さ基準」を切り分けられず、実体が無い柱の原因を
+	// 解析側とも描画側とも決められない周が 4 つ続いた（docs/DEV-NOTES.md
+	// 「柱が長さ 0 で描かれる（M27）」）。
+	bool ApplyStoryBound(MCObjectHandle object, Sint32 boundID,
+						 const core::StoryBoundCommand& bound);
+
+	// **VW が実際に持っている**高さ基準を読み戻して 1 行にする（`HasObjectStoryBound` ＋
+	// `GetObjectStoryBound`）。診断専用で、命令の値ではなく**図面の値**を出すことに意味が
+	// ある——同じ命令から作った柱の一部だけが実体を持たないとき、record が書けていない
+	// のか・書けているのに解決が違うのかは、ここでしか分かれない。
+	// 高さ基準が無ければ "なし"、読めなければ "読めない" を返す。
+	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID);
+
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
 	//
 	// 床（draw/Floor）と底盤（draw/Footing）は**同じ手順**でスラブを描く（外形ポリゴン →

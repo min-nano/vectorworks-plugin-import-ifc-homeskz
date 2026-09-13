@@ -995,6 +995,36 @@ namespace HomeskzIfcImport::draw
 		return data;
 	}
 
+	bool ApplyStoryBound(MCObjectHandle object, Sint32 boundID,
+						 const core::StoryBoundCommand& bound)
+	{
+		if (object == nil)
+			return false;
+		// **名前付きの lvalue に置いてから渡す。** 受け取り側は const 参照で、いつ読むかは
+		// VW の都合である（この直後とは限らない）。一時オブジェクトを渡すと、その寿命は
+		// この式の終わりまでしか無い（CLAUDE.md「境界を越えて来た構造体は…」と同じ用心）。
+		const VectorWorks::SStoryObjectData data = StoryBoundData(bound);
+		return gSDK->SetObjectStoryBound(object, boundID, data);
+	}
+
+	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID)
+	{
+		if (object == nil)
+			return "なし";
+		if (!gSDK->HasObjectStoryBound(object, boundID))
+			return "なし";
+		VectorWorks::SStoryObjectData data;
+		if (!gSDK->GetObjectStoryBound(object, boundID, data))
+			return "読めない";
+		// fBound は SDK の EStoryObjectBound（0=レイヤの高さ / 1=レイヤの壁高 / 2=ストーリ）。
+		// **数のまま出す**——名前を付け替えると、SDK 側で値が増えたときに嘘になる。
+		std::array<char, 192> buffer{};
+		std::snprintf(buffer.data(), buffer.size(), "種別=%d 階=%+d レベル=\"%s\" offset=%g",
+					  static_cast<int>(data.fBound), static_cast<int>(data.fBoundStory),
+					  data.fLayerLevelType.GetStdString().c_str(), data.fOffset);
+		return std::string(buffer.data());
+	}
+
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size)
 	{
 		WorldRect bounds;

@@ -738,13 +738,12 @@ TEST(build_column_binds_top_to_upper_floor_level_when_offset_would_be_zero)
 	CHECK(near(command.elevation + command.height, 3350.0));
 }
 
-TEST(build_column_binds_top_to_current_story_when_upper_floor_has_no_beam_offset)
+TEST(build_column_keeps_upper_story_when_upper_floor_has_no_beam_offset)
 {
-	// **最後の手段**: 上階の横架材天端が FL と同じ高さ（横架材天端オフセット 0）だと、
-	// 上階のどちらの種別を指しても offset が 0 になり、**上階を指す言い方が残らない**。
-	// この IFC には柱以外に負の配置 Z を持つ要素が無いので、まさにその形になる。
-	// そこだけは上端も当階のレベルへバインドする（描かれない柱よりは描かれる柱を採る。
-	// parse/Column.h）。
+	// 上階の横架材天端が FL と同じ高さ（横架材天端オフセット 0）だと、上階のどちらの種別を
+	// 指しても offset が 0 になり、**上階を指す言い方が残らない**。この IFC には柱以外に
+	// 負の配置 Z を持つ要素が無いので、まさにその形になる。**それでも当階へバインドし直さない**
+	// ——階高の変更に追随しなくなる後退なので、上階を指したままにする（parse/Column.h）。
 	StepText step;
 	const int storey = makeStorey(step, "1FL", 600.0);
 	makeStorey(step, "2FL", 3500.0);
@@ -771,10 +770,10 @@ TEST(build_column_binds_top_to_current_story_when_upper_floor_has_no_beam_offset
 	CHECK_EQ(command.bottomBound.storyOffset, 0);
 	CHECK_EQ(command.bottomBound.level, std::string("横架材天端"));
 	CHECK(near(command.bottomBound.offset, 0.0));
-	// 上端も当階の横架材天端。offset はパス長ぶん（＝下端 offset ＋ 2900）。
-	CHECK_EQ(command.topBound.storyOffset, 0);
+	// 上端は上階（storyOffset=1）の横架材天端のまま。offset は 0。
+	CHECK_EQ(command.topBound.storyOffset, 1);
 	CHECK_EQ(command.topBound.level, std::string("横架材天端"));
-	CHECK(near(command.topBound.offset, 2900.0));
+	CHECK(near(command.topBound.offset, 0.0));
 	// 絶対 Z（上階の横架材天端 3500）は変わらない。
 	CHECK(near(command.elevation + command.height, 3500.0));
 }
@@ -1294,14 +1293,15 @@ TEST(all_fixtures_bounds_span_the_column_height)
 						   command.elevation));
 				CHECK(near(boundZ(command.topBound, top) + command.topBound.offset,
 						   command.elevation + command.height));
-				// **上端が「上階の、自階にもある種別」を offset 0 で指していない**こと。
-				// この形にすると VW が終端を自階のレベル（＝始端と同じ Z）へ解決し、
-				// 実体が無い柱になる（実機で 46 本発生。parse/Column.h）。offset 0 で
-				// 上階を指してよい種別は**軒高だけ**である——軒高は最上階にしか無く、
-				// 上階を指す柱の自階は最上階ではありえないので、必ず「自階に無い種別」に
-				// なる。FL と横架材天端はどの一般階にもあるので、offset 0 では指せない。
+				// **上端が「上階の、自階にもある種別」を offset 0 で指していない**こと
+				// （実機で実体が無かった 46 本がこの形。parse/Column.h）。offset 0 で上階を
+				// 指してよいのは次の 2 つだけ:
+				//   * 種別が軒高（最上階にしか無い＝自階に必ず無い）。
+				//   * 上階の横架材天端が FL と同じ高さ（どちらの種別を指しても offset が
+				//     0 になり、**上階を指す言い方が残っていない**）。
 				if (command.topBound.storyOffset > 0 && near(command.topBound.offset, 0.0))
-					CHECK_EQ(command.topBound.level, std::string("軒高"));
+					CHECK(command.topBound.level == std::string("軒高") ||
+						  near(levelZ[top], floorZ[top]));
 			}
 		});
 }

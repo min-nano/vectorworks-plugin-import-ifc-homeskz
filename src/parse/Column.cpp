@@ -476,20 +476,18 @@ namespace HomeskzIfcImport::parse
 					// 経緯は docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」。
 					const double floorOffset = seatTop - stories[i + 1].elevation;
 					if (nextIsTop || std::abs(nextOffset) >= kBoundIdentityTol)
-						// 上階が最上階なら種別は軒高＝**自階に無い**ので offset 0 でも安全
-						// （実機で 32 本が無事）。それ以外も offset が 0 でなければ安全。
+						// 上階が最上階なら種別は軒高＝**自階に無い**ので offset 0 でも無事だった
+						// （実機で 32 本）。それ以外も offset が 0 でなければ無事だった。
 						cmd.topBound = StoryBoundCommand{1, nextLevel, nextOffset};
 					else if (std::abs(floorOffset) >= kBoundIdentityTol)
 						cmd.topBound = StoryBoundCommand{1, kLevelFL, floorOffset};
 					else
-						// **最後の手段**: 上階の横架材天端が FL と同じ高さ（＝その階に負の配置 Z を
-						// 持つ要素が 1 つも無く、横架材天端オフセットが 0）の階では、どちらの種別を
-						// 指しても offset が 0 になり、**上階を指す言い方が残っていない**。そこ
-						// だけは上端も当階のレベルへバインドする（小屋束と同じ形。同じ階の中で
-						// 上下の offset が違うので誤解決は起きない）。階高の変更に追随しなく
-						// なるが、**描かれない柱よりは描かれる柱を採る**（フィクスチャでは
-						// 「グレー本モデルプラン2」の 70 本だけが該当する）。
-						cmd.topBound = StoryBoundCommand{0, currentLevel, seatTop - beamTopAbs[i]};
+						// 上階の横架材天端が FL と同じ高さ（＝その階に負の配置 Z を持つ要素が
+						// 1 つも無く、横架材天端オフセットが 0）の階では、上階のどちらの種別を
+						// 指しても offset が 0 になる。**当階へバインドし直さない**——階高の
+						// 変更に追随しなくなる後退で、しかもそれが直すことになるかは（上の
+						// 見立てが確かめられるまで）分からない。そのまま上階を指す。
+						cmd.topBound = StoryBoundCommand{1, nextLevel, nextOffset};
 				}
 
 				commands.push_back(std::move(cmd));
