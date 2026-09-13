@@ -177,12 +177,21 @@ namespace HomeskzIfcImport::draw
 	// あいだに潰れた」という順序の問題を、実機を見ずに切り分けるため（実機 round 1 で、
 	// 生成直後の測定では 197 本とも潰れていなかった。docs/DEV-NOTES.md M27）。
 	//
-	// found が false なら「長さ」のパラメータ名を引けなかった（値は意味を持たない）。
+	// 【測るのは両端の絶対 Z の差】実機 round 2 で、構造材 PIO は**解決済みの絶対 Z**を
+	// `StartElevation` / `EndElevation` に持つと分かった（1 本目で 572 / 5905 ＝ 命令の
+	// 下端 572・パス長 5333 と一致）。OIP の「長さ」に当たるパラメータは無く、名前で引ける
+	// `CenterPointLength(長さ)` は部材長ではない（実長 5333 の柱で 100 を返した）——
+	// **この 2 つの差だけが、実体がどれだけあるかを言える値**である
+	// （docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+	//
+	// found が false なら両端の Z を引けなかった（値は意味を持たない）。
 	struct DrawnMemberSize
 	{
 		bool found = false;
-		double length = 0.0;
-		bool zero = false; // found かつ長さが 0（＝実体が無い）
+		double start = 0.0;	 // 始端の絶対 Z
+		double end = 0.0;	 // 終端の絶対 Z
+		double extent = 0.0; // |end - start|（＝実体の高さ／長さ）
+		bool zero = false;	 // found かつ extent が 0（＝実体が無い）
 	};
 	DrawnMemberSize MeasureDrawnMember(MCObjectHandle object);
 

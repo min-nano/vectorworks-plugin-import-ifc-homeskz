@@ -75,6 +75,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <utility>
@@ -107,6 +108,9 @@ namespace HomeskzIfcImport::draw
 			std::string collapsedProbe;
 			std::size_t repaired = 0; // そのうち解かせ直して直った本数
 		};
+
+		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
+		constexpr double kExtentTol = 1.0;
 
 		bool DrawOne(const core::ColumnCommand& column, RefNumber style, ColumnFailures& failures,
 					 MCObjectHandle& outObject, bool& outCollapsed)
@@ -314,10 +318,12 @@ namespace HomeskzIfcImport::draw
 		if (document.columns.empty())
 			return;
 
-		std::size_t measured = 0;  // 測れた本数（「長さ」を引けた本数）
-		std::size_t collapsed = 0; // そのうち長さ 0 だった本数
+		std::size_t measured = 0;  // 測れた本数（両端の絶対 Z を引けた本数）
+		std::size_t collapsed = 0; // そのうち実体が 0 だった本数
 		std::size_t repaired = 0;  // 解かせ直して直った本数
+		std::size_t differs = 0;   // 実体はあるが命令と食い違う本数
 		std::string probe; // 1 本目の実測（どのパラメータが何を返しているか）
+		std::string oddProbe; // 食い違った／潰れた 1 本目の実測
 
 		for (const auto& [index, object] : handles.table().handles)
 		{
@@ -331,19 +337,45 @@ namespace HomeskzIfcImport::draw
 			if (!size.found)
 				continue;
 			++measured;
-			if (!size.zero)
-				continue;
-			++collapsed;
+
 			const core::ColumnCommand& column = document.columns[index];
-			if (RetryCollapsedMember(object, column.bottomBound, column.topBound))
-				++repaired;
+			// 実体がどれだけあれば命令どおりか。パス長そのものか、端部オフセットを戻した
+			// 「材の端」までか——**どちらを指すかは実機でしか分からない**ので、どちらかに
+			// 合っていれば食い違いとは言わない（core/Document.h「端部オフセット」）。
+			const double drawn = column.height + column.startOffset + column.endOffset;
+			const bool matches = std::abs(size.extent - column.height) < kExtentTol ||
+								 std::abs(size.extent - drawn) < kExtentTol;
+			if (size.zero)
+			{
+				++collapsed;
+				if (RetryCollapsedMember(object, column.bottomBound, column.topBound))
+					++repaired;
+			}
+			else if (!matches)
+				++differs;
+
+			if ((size.zero || !matches) && oddProbe.empty())
+			{
+				std::array<char, 192> buffer{};
+				std::snprintf(buffer.data(), buffer.size(),
+							  "命令 %g（端部オフセットを戻して %g）に対し実測 %g（Z %g→%g）・",
+							  column.height, drawn, size.extent, size.start, size.end);
+				oddProbe = std::string(buffer.data()) + DescribeSizeParams(object);
+			}
 		}
 
-		if (outDiagnostics != nullptr && collapsed > 0)
-			*outDiagnostics = "柱の診断（取り込み後）: 長さ 0 で描かれた柱 " +
-							  std::to_string(collapsed) + " 本（" + std::to_string(measured) +
-							  " 本を測定・うち " + std::to_string(repaired) +
-							  " 本は解かせ直して直った）。";
+		if (outDiagnostics != nullptr && (collapsed > 0 || differs > 0))
+		{
+			std::string note = "柱の診断（取り込み後）: ";
+			if (collapsed > 0)
+				note += "実体が無い柱 " + std::to_string(collapsed) + " 本（うち " +
+						std::to_string(repaired) + " 本は解かせ直して直った）。";
+			if (differs > 0)
+				note += "実体が命令と食い違う柱 " + std::to_string(differs) + " 本。";
+			if (!oddProbe.empty())
+				note += "（1 本目: " + oddProbe + "）";
+			*outDiagnostics = std::move(note);
+		}
 		if (outNotes != nullptr)
 		{
 			std::string note = "柱の実測（取り込み後）: 測れた " + std::to_string(measured) +

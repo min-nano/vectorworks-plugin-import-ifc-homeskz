@@ -83,14 +83,17 @@ namespace HomeskzIfcImport::draw
 		// 描き上がった部材の長さ（OIP の「長さ」）。**端部オフセットと同じく universal 名が
 		// SDK ヘッダに無い**ので候補を並べて引き、引けなければ手掛かりを診断へ持ち帰る。
 		// 読むだけで、書きはしない（PIO がリセットのたびに入れる値）。
-		const std::vector<const char*> kLengthNames = {"Length", "MemberLength", "TotalLength"};
-		const std::vector<const char*> kLocalizedLength = {"長さ"};
+		// **両端の解決済み絶対 Z**（実機 round 2 で判明。ヘッダ DrawnMemberSize 参照）。
+		// **ローカライズ名で引かない**——「始端高さオフセット」は設定ダイアログ側の
+		// `DialogStartElevation`（別物。レイヤの高さ基準で 0 を返す）とぶつかる。
+		const std::vector<const char*> kStartElevationNames = {"StartElevation"};
+		const std::vector<const char*> kEndElevationNames = {"EndElevation"};
+		const std::vector<const char*> kNoLocalized = {};
 		constexpr const char* kLengthParamNeedle = "長さ";
-		// 潰れていたときに一緒に読む「高さ」（OIP の高さ＝バウンドの差）。**これが命令どおりの
-		// 値なら、バウンドは解けていて実体だけが無い**ことになる——原因をパス側と高さ基準側に
-		// 分ける唯一の手掛かりなので、証拠として診断へ載せる。
-		const std::vector<const char*> kHeightNames = {"Height", "MemberHeight"};
-		const std::vector<const char*> kLocalizedHeight = {"高さ"};
+		// 潰れていたときは、名前に「長さ」「高さ」を含むパラメータを**名前と値で**並べて
+		// 証拠にする（DescribeSizeParams）。どのパラメータが OIP のどの欄なのかを実機で
+		// 確かめる手段がほかに無い——実際、round 2 のこの一覧で「長さ」で引ける
+		// `CenterPointLength` が部材長ではないと分かった。
 		constexpr const char* kHeightParamNeedle = "高さ";
 		// 「長さ 0」とみなす閾値（mm）。潰れた部材はちょうど 0 を返すので、実部材の長さ
 		// （最短でも数十 mm）と取り違える余地は無い。
@@ -109,27 +112,29 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kEndConditionSquare = "3";	// 直切り
 		constexpr const char* kProfileSeriesDefault = "AISC (Inch)";
 
-		// 描き上がった「長さ」が 0 か。**実数で 0 を読んだだけでは潰れたと言わない**——数値
-		// パラメータが文字列で保持されている PIO があり（SetParamRealChecked が実際にその
-		// 経路を持つ）、そのときは実数読みが常に 0 を返して**全数を誤報する**。文字列でも
-		// 読み直し、数として 0 でないなら潰れていないと見る。読めないパラメータを覗くと
-		// 例外が出るので畳む（1 つの読み損ないで描画を止めない。DrawUtil の PioParamString と
-		// 同じ扱い）。
-		bool DrawnLengthIsZero(VWParametricObj& pio, const TXString& param)
+		// 実数パラメータを読む。**実数で 0 を読んだだけでは 0 と決めない**——数値パラメータが
+		// 文字列で保持されている PIO があり（SetParamRealChecked が実際にその経路を持つ）、
+		// そのときは実数読みが常に 0 を返して**全数を誤報する**。文字列でも読み直し、数として
+		// 読めたらそちらを採る。読めないパラメータを覗くと例外が出るので畳む（1 つの読み損
+		// ないで描画を止めない。DrawUtil の PioParamString と同じ扱い）。ok には読めたかを返す。
+		double ReadParamNumber(const VWParametricObj& pio, const TXString& param, bool& ok)
 		{
+			ok = false;
+			if (param.IsEmpty())
+				return 0.0;
 			try
 			{
-				if (std::abs(pio.GetParamReal(param)) >= kCollapsedLength)
-					return false;
+				const double value = pio.GetParamReal(param);
+				ok = true;
+				if (std::abs(value) >= kCollapsedLength)
+					return value;
 				const std::string text = PioParamString(pio, param.GetStdString().c_str());
-				if (text.empty())
-					return true;
-				const double value = std::strtod(text.c_str(), nullptr);
-				return std::abs(value) < kCollapsedLength;
+				return text.empty() ? value : std::strtod(text.c_str(), nullptr);
 			}
 			catch (...)
 			{
-				return false; // 読めなかった＝潰れたとは言えない
+				ok = false;
+				return 0.0;
 			}
 		}
 
@@ -159,15 +164,6 @@ namespace HomeskzIfcImport::draw
 			{
 				return "?";
 			}
-		}
-
-		// 潰れていた部材の「高さ」「長さ」を人が読める 1 行にする（診断の証拠）。読めない
-		// パラメータは "?" で埋める（読み損ないで描画を止めない）。
-		std::string DescribeDrawnSize(VWParametricObj& pio, const TXString& lengthName)
-		{
-			const TXString heightName = ResolveParamNameAmong(pio, kHeightNames, kLocalizedHeight);
-			return "高さ=" + ReadParamText(pio, heightName) +
-				   " 長さ=" + ReadParamText(pio, lengthName);
 		}
 
 		// 断面基準点 → 構造材ツールのポップアップのキー。
@@ -284,13 +280,12 @@ namespace HomeskzIfcImport::draw
 		// リセット後の「長さ」を読み戻し、0 で潰れていたら呼び出し側の診断へ流す。
 		if (spec.expectedLength > kCollapsedLength)
 		{
-			const TXString lengthName = ResolveParamNameAmong(pio, kLengthNames, kLocalizedLength);
-			if (lengthName.IsEmpty())
+			const DrawnMemberSize size = MeasureDrawnMember(object);
+			if (!size.found)
 				result.lengthParamHint = DescribeParamsContaining(pio, kLengthParamNeedle);
-			else
-				result.collapsed = DrawnLengthIsZero(pio, lengthName);
+			result.collapsed = size.zero;
 			if (result.collapsed)
-				result.collapsedProbe = DescribeDrawnSize(pio, lengthName);
+				result.collapsedProbe = DescribeSizeParams(object);
 		}
 
 		result.object = object;
@@ -305,13 +300,21 @@ namespace HomeskzIfcImport::draw
 			return size;
 		try
 		{
-			VWParametricObj pio(object);
-			const TXString lengthName = ResolveParamNameAmong(pio, kLengthNames, kLocalizedLength);
-			if (lengthName.IsEmpty())
+			const VWParametricObj pio(object);
+			const TXString startName =
+				ResolveParamNameAmong(pio, kStartElevationNames, kNoLocalized);
+			const TXString endName = ResolveParamNameAmong(pio, kEndElevationNames, kNoLocalized);
+			bool startOk = false;
+			bool endOk = false;
+			const double start = ReadParamNumber(pio, startName, startOk);
+			const double end = ReadParamNumber(pio, endName, endOk);
+			if (!startOk || !endOk)
 				return size;
 			size.found = true;
-			size.length = pio.GetParamReal(lengthName);
-			size.zero = DrawnLengthIsZero(pio, lengthName);
+			size.start = start;
+			size.end = end;
+			size.extent = std::abs(end - start);
+			size.zero = size.extent < kCollapsedLength;
 		}
 		catch (...)
 		{
@@ -349,7 +352,7 @@ namespace HomeskzIfcImport::draw
 				// 実数とは限らず（ポップアップや文字列のこともある）、1 件の読み損ないで
 				// 例外が出ると、それまでに積んだ他のパラメータごと捨てることになる——
 				// **実機の未知の挙動を壊さず観測する**ための行なので、1 件は "?" にして
-				// 残りを持ち帰る（DescribeDrawnSize の read と同じ粒度）。
+				// 残りを持ち帰る。
 				found += ReadParamText(pio, name);
 			}
 			return found;
@@ -372,10 +375,7 @@ namespace HomeskzIfcImport::draw
 		gSDK->SetObjectStoryBound(object, kEndBoundID, StoryBoundData(endBound));
 		gSDK->ResetObject(object);
 
-		VWParametricObj pio(object);
-		const TXString lengthName = ResolveParamNameAmong(pio, kLengthNames, kLocalizedLength);
-		if (lengthName.IsEmpty())
-			return false; // 直ったか確かめられない＝直ったと言わない
-		return !DrawnLengthIsZero(pio, lengthName);
+		const DrawnMemberSize size = MeasureDrawnMember(object);
+		return size.found && !size.zero; // 測れないなら直ったと言わない
 	}
 } // namespace HomeskzIfcImport::draw
