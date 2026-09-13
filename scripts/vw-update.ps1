@@ -21,8 +21,9 @@
       q-stable            Print the stable channel status as key=value lines:
                           installed=<commit|none> / latest=<commit> / url=<zip url>
                           (or error=<message>).
-      q-dev               Print installed=<commit|none> then one TSV line per dev
-                          build: "build<TAB>commit<TAB>name<TAB>url"
+      q-dev               Print installed=<commit|none> and installed-branch=<branch>,
+                          then one TSV line per dev build:
+                          "build<TAB>commit<TAB>name<TAB>url<TAB>branch"
                           (or error=<message>).
       do-install <url> <name>   Download+install "<name>.vlb"; print "ok" or
                                 error=<message>. No dialogs.
@@ -147,6 +148,20 @@ function Get-InstalledCommit([string] $name) {
     return 'none'
 }
 
+# インストール済みのビルドが出たブランチ。ビルドが .vlb の隣へ置く "<name>.branch" から
+# 読む（mac 側は Info.plist の VWBuildBranch）。**乗り換え先のブランチを覚えている唯一の
+# 場所**で、殻にコンパイルされた VW_BUILD_BRANCH は本体だけを入れ替えたあと前のブランチを
+# 名乗ったままになる（src/UpdaterParse.h の ResolveCurrentDevBuild）。読めなければ空文字
+# （プラグイン側はビルド一覧の sha 照合か、最後に殻の値へ落ちる）。
+function Get-InstalledBranch([string] $name) {
+    $f = Join-Path (Get-PluginDir $VW_PLUGINS_DIR $name) "$name.branch"
+    if (Test-Path -LiteralPath $f) {
+        $c = Get-Content -LiteralPath $f -Raw -ErrorAction SilentlyContinue
+        if ($c) { return $c.Trim() }
+    }
+    return ''
+}
+
 # 殻（.vlb）の ID。ビルドが .vlb の隣へ置く "<name>.shell-id" から読む。**「アップデートに
 # Vectorworks の再起動が要るか」を決める鍵**で、プラグイン側は自分にコンパイルされた
 # VW_SHELL_ID と突き合わせる——一致するなら本体（.vwpayload）を読み直すだけで反映される
@@ -256,7 +271,7 @@ function Install-Build([string] $url, [string] $name) {
         # Vectorworks を再起動しなくても次の操作から新しいコードが動く（src/PayloadAbi.h）。
         # "$name.shell-id" は「殻まで変わったか」を次回の判断に使う控え。
         foreach ($f in @("$name.vlb", "$name.vwpayload", "$name.vwr", "$name.commit",
-                         "$name.shell-id", 'vw-update.ps1')) {
+                         "$name.branch", "$name.shell-id", 'vw-update.ps1')) {
             $s = Join-Path $work $f
             if (Test-Path -LiteralPath $s) {
                 try { Install-File $s (Join-Path $dest $f) }
@@ -317,6 +332,7 @@ function Invoke-QDev {
     catch { Write-Output 'error=リリース一覧を取得できませんでした。'; return }
 
     Write-Output ("installed=" + (Get-InstalledCommit 'min-nano_structureDev'))
+    Write-Output ("installed-branch=" + (Get-InstalledBranch 'min-nano_structureDev'))
 
     foreach ($rel in $rels) {
         if ($rel.tag_name -like 'dev-*') {

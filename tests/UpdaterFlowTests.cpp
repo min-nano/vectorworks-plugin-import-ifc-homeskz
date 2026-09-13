@@ -370,8 +370,60 @@ TEST(dev_picker_lists_current_first_then_other_builds)
 		CHECK_EQ(h.lastPickItems[1], "feature/x  (aaa1111)");
 		CHECK_EQ(h.lastPickItems[2], "feature/y  (bbb2222)");
 	}
-	// Kept current -> nothing installed.
+	// Kept current -> nothing installed, but the outcome is still reported (the
+	// menu command never closes without saying what it concluded).
 	CHECK_EQ(h.CountScript("do-install"), 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+	{
+		CHECK_EQ(h.informs[0][0], "開発版ビルドはそのままです。");
+		CHECK_EQ(h.informs[0][1], "現在: main (run1234)");
+	}
+}
+
+// 殻にコンパイルされたブランチ／sha と、ディスクに入っているビルドが**食い違っている**
+// ときの姿。本体（.vwpayload）だけの更新は再起動せずに効くので、別のブランチのビルドへ
+// 乗り換えたあとの殻はずっと前のブランチを名乗る（docs/DEV-NOTES.md M26）。
+TEST(dev_picker_treats_the_installed_build_as_the_current_one)
+{
+	FakeHost h;
+	// 殻は feature/a (aaa1111)。ディスクには feature/b (bbb2222) が入っている。
+	h.qDevOut = "installed=bbb2222\n"
+				"installed-branch=feature/b\n"
+				"build\tbbb2222\tDev: feature/b (bbb2222)\thttps://ex.com/b.zip\tfeature/b\n"
+				"build\taaa1111\tDev: feature/a (aaa1111)\thttps://ex.com/a.zip\tfeature/a\n";
+	h.pickAnswer = 0; // keep current
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "feature/a", "aaa1111", kRunningShell);
+
+	CHECK_EQ(h.pickCount, 1);
+	// **いま入れたビルドを候補に並べない**（並べると、選び直しても何も変わらないので
+	// 「切り替わらない」と読める）。戻る先（feature/a）は候補に残る。
+	CHECK_EQ(static_cast<std::size_t>(h.lastPickItems.size()), static_cast<std::size_t>(2));
+	if (h.lastPickItems.size() == 2)
+	{
+		CHECK_EQ(h.lastPickItems[0], "現在: feature/b (bbb2222) ― インストール済み");
+		CHECK_EQ(h.lastPickItems[1], "feature/a  (aaa1111)");
+	}
+	// 「現在のまま」の結末も、殻の値ではなくディスクのビルドで言う。
+	if (!h.informs.empty())
+		CHECK_EQ(h.informs[0][1], "現在: feature/b (bbb2222)");
+}
+
+TEST(dev_manual_check_says_so_when_the_installed_build_is_the_only_one)
+{
+	// 乗り換えたビルドがそのブランチの唯一のプレリリースなら、選べるものはもう無い
+	// ——殻の sha を基準にすると、ここで自分自身を候補に出してしまう。
+	FakeHost h;
+	h.qDevOut = "installed=bbb2222\n"
+				"installed-branch=feature/b\n"
+				"build\tbbb2222\tDev: feature/b (bbb2222)\thttps://ex.com/b.zip\tfeature/b\n";
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "feature/a", "aaa1111", kRunningShell);
+
+	CHECK_EQ(h.pickCount, 0);
+	CHECK_EQ(h.CountScript("do-install"), 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+		CHECK_EQ(h.informs[0][1], "現在: feature/b (bbb2222)");
 }
 
 TEST(dev_cancelled_does_not_install)
@@ -381,6 +433,8 @@ TEST(dev_cancelled_does_not_install)
 	h.pickAnswer = -1; // cancelled the dialog
 	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.CountScript("do-install"), 0);
+	// **取り消したときだけは黙る**（それ自体が「何もしない」という意思表示なので、
+	// 結末を返すと押していないボタンの返事が返ってくることになる）。
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
 }
 
@@ -439,6 +493,11 @@ TEST(dev_out_of_range_selection_keeps_current)
 	h.pickAnswer = 5; // past the last candidate
 	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.CountScript("do-install"), 0); // safeguard -> no install
+	// **黙って閉じない。** 範囲外は起こらないはずの値なので、起きたときに何も出ないと
+	// 「選んだのに切り替わらない」としか見えない。
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
+	if (!h.informs.empty())
+		CHECK_EQ(h.informs[0][0], "開発版ビルドはそのままです。");
 }
 
 TEST(dev_install_failure_is_reported)
@@ -583,6 +642,29 @@ TEST(dev_silent_check_offers_the_same_branchs_newer_build)
 	if (h.asks.size() == 2)
 		CHECK_EQ(h.asks[1][1].find("branch: feature/x\ncommit: aaa1111"),
 				 static_cast<std::size_t>(0));
+}
+
+TEST(dev_silent_check_follows_the_installed_branch_not_the_shells)
+{
+	// **乗り換えたブランチを追い続ける。** 殻は feature/a を名乗ったままなので、殻を
+	// 基準にすると feature/a の新しいビルドで上書きし、利用者が選んだブランチから
+	// 勝手に戻ってしまう（実機で起きた食い違い。docs/DEV-NOTES.md M26）。
+	FakeHost h;
+	h.qDevOut = "installed=bbb2222\n"
+				"installed-branch=feature/b\n"
+				"build\tbbb9999\tDev: feature/b (bbb9999)\thttps://ex.com/b9.zip\tfeature/b\n"
+				"build\taaa9999\tDev: feature/a (aaa9999)\thttps://ex.com/a9.zip\tfeature/a\n";
+	h.askAnswers = {true, false}; // インストール: はい、再起動: 後で
+	h.doInstallOut = "ok";
+	RunDevUpdateCheckWith(h, UpdateCheckKind::Silent, "feature/a", "aaa1111", kRunningShell);
+
+	CHECK_EQ(h.CountScript("do-install"), 1);
+	const std::vector<std::string> args = h.DoInstallArgs();
+	if (args.size() == 3)
+		CHECK_EQ(args[1], "https://ex.com/b9.zip"); // feature/b の新しいほう
+	if (!h.asks.empty())
+		CHECK_EQ(h.asks[0][1], "branch: feature/b\nインストール済み: bbb2222\n"
+							   "新しいビルド: bbb9999");
 }
 
 TEST(dev_silent_check_says_nothing_when_no_build_matches_the_branch)
@@ -958,6 +1040,25 @@ TEST(poll_dev_build_uses_the_installed_line_not_the_shells_sha)
 	const DevBuildPollResult r = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
 	CHECK(r.outcome == DevBuildPoll::NoNewBuild);
 	CHECK_EQ(h.CountScript("do-install"), 0);
+}
+
+TEST(poll_dev_build_follows_the_installed_branch_not_the_shells)
+{
+	// 往復の周期確認も同じ。殻のブランチを基準にすると、手で別のブランチへ乗り換えた
+	// 利用者の図面で、前のブランチのビルドを黙って入れ直してしまう。
+	FakeHost h;
+	h.qDevOut = "installed=bbb2222\n"
+				"installed-branch=feature/b\n"
+				"build\tbbb9999\tDev: feature/b (bbb9999)\thttps://ex.com/b9.zip\tfeature/b\n"
+				"build\taaa9999\tDev: feature/a (aaa9999)\thttps://ex.com/a9.zip\tfeature/a\n";
+	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
+	const DevBuildPollResult r = PollDevBuildWith(h, "feature/a", "aaa1111", kRunningShell);
+
+	CHECK(r.outcome == DevBuildPoll::Installed);
+	CHECK_EQ(r.commit, "bbb9999");
+	const std::vector<std::string> args = h.DoInstallArgs();
+	if (args.size() == 3)
+		CHECK_EQ(args[1], "https://ex.com/b9.zip");
 }
 
 TEST(poll_dev_build_reports_a_failed_check_without_a_dialog)

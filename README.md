@@ -340,7 +340,8 @@ powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
    一緒に**、Vectorworks 2026 のユーザフォルダ内の `Plug-Ins/min-nano_structure/` へ
    置きます（`min-nano_structure` フォルダは自分で作ります）。3 つは同名・同フォルダで
    ある必要があります。自動アップデートも使うなら
-   `min-nano_structure.commit`・`min-nano_structure.shell-id`・`vw-update.ps1`・
+   `min-nano_structure.commit`・`min-nano_structure.branch`・
+   `min-nano_structure.shell-id`・`vw-update.ps1`・
    `vw-uninstall.ps1` も一緒に置きます（配布 zip にはこれらがすべて入っています）。
 
 2. **Vectorworks を起動します**（未署名の警告は macOS と同じ）。

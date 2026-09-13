@@ -180,6 +180,12 @@ download() { # url, out-file
 # "no bundle -> none" branch is unstubbed and tested separately below.
 installed_commit() { printf '%s\n' "${VW_TEST_INSTALLED:-none}"; }
 
+# installed_branch: 同上（実物はインストール済みバンドルの Info.plist から VWBuildBranch を
+# 読む）。既定は空＝「どのブランチのビルドが入っているか分からない」で、プラグイン側は
+# ビルド一覧の sha 照合か、最後に殻の値へ落ちる（src/UpdaterParse.h の
+# ResolveCurrentDevBuild）。
+installed_branch() { printf '%s\n' "${VW_TEST_INSTALLED_BRANCH:-}"; }
+
 # installed_shell_id: 同上（実物はインストール済みバンドルの Info.plist から VWShellId を
 # PlistBuddy で読む）。既定は空＝「殻の新旧を判断できない」で、do_install はその行を
 # 出さない（src/UpdaterParse.h の NeedsRestartAfterInstall は安全側＝再起動へ倒れる）。
@@ -293,13 +299,17 @@ check_contains "$out" "error=" "offline -> error= line"
 check_not_contains "$out" "latest=" "no latest when offline"
 
 # ===========================================================================
-# q-dev — installed line + one TSV row per dev-* build that has a downloadable
+# q-dev — installed / installed-branch lines + one TSV row per dev-* build that has a downloadable
 # min-nano_structureDev asset (the stable release and the asset-less dev build are
 # both skipped). Each row ends with the branch read from the release body.
 # ===========================================================================
 t "q_dev lists only dev-* builds that have a downloadable asset"
-out="$(VW_TEST_INSTALLED=run1234 RUN q_dev)"
+out="$(VW_TEST_INSTALLED=run1234 VW_TEST_INSTALLED_BRANCH=feature/x RUN q_dev)"
 check_contains "$out" "installed=run1234" "installed line first"
+# **入っているビルドのブランチも出す。** 別のブランチのビルドへ乗り換えたことを覚えて
+# いるのはディスク上の刻印だけで、殻にコンパイルされた値は前のブランチを名乗ったままに
+# なる（src/UpdaterParse.h の ResolveCurrentDevBuild）。
+check_contains "$out" "installed-branch=feature/x" "installed-branch line"
 # **5 列目はリリース本文（notes）の branch=。** 取り込みのついでの確認が「いま動いて
 # いるのと同じブランチのビルド」だけを拾うために要る（src/UpdaterFlow.cpp）。
 check_contains "$out" $'build\taaa1111\tfeature/x\thttps://example.test/dl/x.zip\tfeature/x' \
@@ -309,6 +319,20 @@ check_contains "$out" $'build\tbbb2222\tfeature/y\thttps://example.test/dl/y.zip
 	"feature/y row (no body) leaves the branch empty"
 check_not_contains "$out" "feature/z" "asset-less dev build is skipped"
 check_not_contains "$out" $'build\tzzz9999' "the stable (non dev-*) release is skipped"
+
+t "q_dev leaves installed-branch empty when the stamp cannot be read"
+out="$(VW_TEST_INSTALLED=run1234 RUN q_dev)"
+check_contains "$out" "installed-branch=" "installed-branch line is still present"
+check_not_contains "$out" "installed-branch=feature" "…but carries no branch"
+
+t "installed_branch is empty when the bundle is absent"
+# installed_commit と同じ理屈で、実物の「バンドルが無い」枝だけを呼ぶ（PlistBuddy の枝は
+# macOS 専用）。親のフェイクはそのまま。
+out="$( set -euo pipefail
+	# shellcheck source=/dev/null
+	source "$SCRIPT"
+	installed_branch "$WORK/nope.vwlibrary" )"
+check_eq "$out" "" "absent bundle -> empty branch"
 
 t "q_dev emits an error line when the API is unreachable"
 out="$(VW_TEST_API_FAIL=1 RUN q_dev)"

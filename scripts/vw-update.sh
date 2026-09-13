@@ -22,8 +22,9 @@
 #   q-stable            Print the stable channel status as key=value lines:
 #                       installed=<commit|none> / latest=<commit> / url=<zip url>
 #                       (or error=<message>).
-#   q-dev               Print installed=<commit|none> then one TSV line per dev
-#                       build: "build<TAB>commit<TAB>name<TAB>url<TAB>branch"
+#   q-dev               Print installed=<commit|none> and installed-branch=<branch>,
+#                       then one TSV line per dev build:
+#                       "build<TAB>commit<TAB>name<TAB>url<TAB>branch"
 #                       (or error=<message>).
 #   do-install <url> <name>   Download+install <name>.vwlibrary; print "ok" or
 #                             error=<message>. No dialogs.
@@ -234,6 +235,20 @@ installed_commit() { # bundle-path -> stamped VWBuildCommit or "none"
 		/usr/libexec/PlistBuddy -c "Print :VWBuildCommit" "$plist" 2>/dev/null || echo "none"
 	else
 		echo "none"
+	fi
+}
+
+# installed_branch: インストール済みのビルドが出たブランチ（Info.plist の VWBuildBranch）。
+# **乗り換え先のブランチを覚えている唯一の場所**で、殻にコンパイルされた VW_BUILD_BRANCH は
+# 本体だけを入れ替えたあと前のブランチを名乗ったままになる（src/UpdaterParse.h の
+# ResolveCurrentDevBuild）。読めなければ空文字（プラグイン側はビルド一覧の sha 照合か、
+# 最後に殻の値へ落ちる）。
+installed_branch() { # bundle-path -> stamped VWBuildBranch or ""
+	local plist="$1/Contents/Info.plist"
+	if [ -f "$plist" ]; then
+		/usr/libexec/PlistBuddy -c "Print :VWBuildBranch" "$plist" 2>/dev/null || echo ""
+	else
+		echo ""
 	fi
 }
 
@@ -475,16 +490,19 @@ q_stable() {
 	echo "url=${url}"
 }
 
-# q-dev: installed dev commit, then one line per downloadable dev build.
+# q-dev: installed dev build (commit + branch), then one line per downloadable
+# dev build.
 #   installed=<commit|none>
+#   installed-branch=<branch>   （刻印が読めなければ空。プラグイン側は落としどころを持つ）
 #   build<TAB>commit<TAB>name<TAB>url<TAB>branch
 # branch は空のことがある（リリース本文に branch= が無い古いリリース）。プラグイン側の
 # パーサはこの列が無い出力も読める（src/UpdaterParse.h の ParseDevBuilds）。
 q_dev() {
 	local f; f="$(api_get "releases?per_page=100")" \
 		|| { echo "error=リリース一覧を取得できませんでした。"; return 0; }
-	local installed; installed="$(installed_commit "$(installed_bundle min-nano_structureDev)")"
-	echo "installed=${installed}"
+	local bundle; bundle="$(installed_bundle min-nano_structureDev)"
+	echo "installed=$(installed_commit "$bundle")"
+	echo "installed-branch=$(installed_branch "$bundle")"
 
 	local i=0 tag name commit url branch
 	while [ "$i" -lt 100 ]; do

@@ -98,9 +98,12 @@ namespace HomeskzIfcImport
 	};
 
 	// The SDK-independent update flows, parameterized by the host above. These
-	// hold NO state, so tests can drive them repeatedly. runningBranch/runningCommit
-	// identify the build currently loaded (compiled-in at run time; injected in
-	// tests).
+	// hold NO state, so tests can drive them repeatedly. shellBranch/shellCommit は
+	// **殻にコンパイルされた**ブランチと sha（実行時は VW_BUILD_BRANCH /
+	// VW_BUILD_VERSION、テストでは注入する）。**「いま動いているビルド」そのものでは
+	// ない**——本体だけを入れ替えたあとは前のブランチを名乗ったままなので、開発版の流れは
+	// ディスク上のビルドを基準にし、分からないときだけこの 2 つへ落ちる
+	// （src/UpdaterParse.h の ResolveCurrentDevBuild）。
 	// runningShellId は**いま動いている殻の ID**（コンパイル時に焼かれた VW_SHELL_ID。
 	// テストでは注入する）。入れたビルドの殻が同じなら、本体を読み直すだけで反映される
 	// ＝**再起動を尋ねない**（src/UpdaterParse.h の NeedsRestartAfterInstall）。
@@ -119,7 +122,7 @@ namespace HomeskzIfcImport
 	//            だけを拾って尋ねる。取り込みのたびにブランチ選択が出ては邪魔になる。
 	//   Auto … Silent と同じものを拾い、**尋ねずに入れて黙って戻る**。
 	bool RunDevUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
-							   const std::string& runningBranch, const std::string& runningCommit,
+							   const std::string& shellBranch, const std::string& shellCommit,
 							   const std::string& runningShellId);
 
 	// -----------------------------------------------------------------------
@@ -129,10 +132,12 @@ namespace HomeskzIfcImport
 	// 呼び出し側（src/FeedbackLoop.cpp）はモードレスのパレットにその文言を出すので、
 	// ここでモーダルのダイアログを重ねると、図面を見ている人の前に立ちはだかる。
 	//
-	// **`installed=` を「いま入っている版」として使う。** 殻にコンパイルされた sha は
-	// 本体だけを入れ替えたあとでは古いままなので（殻は起動時にしか読み直されない）、
-	// それを基準にすると同じビルドを毎回入れ直す。q-dev が出す `installed=`（ディスク上の
-	// 版）があればそれを基準にし、無いときだけ runningCommit へ落ちる。
+	// **基準はディスク上に入っているビルド**（`q-dev` の `installed=` /
+	// `installed-branch=`）。殻にコンパイルされた値は本体だけを入れ替えたあと古いまま
+	// なので（殻は起動時にしか読み直されない）、sha を取り違えれば同じビルドを毎周入れ
+	// 直し、**ブランチを取り違えれば乗り換えたはずのブランチへ戻してしまう**。分からない
+	// ときだけ shellBranch / shellCommit へ落ちる（src/UpdaterParse.h の
+	// ResolveCurrentDevBuild）。
 	enum class DevBuildPoll
 	{
 		NoNewBuild, // 同じブランチに新しいビルドは無い（待ち続ける）
@@ -147,7 +152,7 @@ namespace HomeskzIfcImport
 		std::string commit;	 // Installed / NeedsRestart のとき、入れたビルドの sha
 		std::string message; // 人に見せる 1 行（Failed / CheckFailed / NeedsRestart）
 	};
-	DevBuildPollResult PollDevBuildWith(IUpdaterHost& host, const std::string& runningBranch,
-										const std::string& runningCommit,
+	DevBuildPollResult PollDevBuildWith(IUpdaterHost& host, const std::string& shellBranch,
+										const std::string& shellCommit,
 										const std::string& runningShellId);
 } // namespace HomeskzIfcImport

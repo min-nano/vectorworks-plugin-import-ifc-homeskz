@@ -235,7 +235,7 @@ namespace HomeskzIfcImport
 	}
 
 	bool RunDevUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
-							   const std::string& runningBranch, const std::string& runningCommit,
+							   const std::string& shellBranch, const std::string& shellCommit,
 							   const std::string& runningShellId)
 	{
 		std::string out;
@@ -252,8 +252,14 @@ namespace HomeskzIfcImport
 			return true;
 		}
 
-		// Candidates to switch TO: every prerelease except the running build.
-		std::vector<DevBuild> const others = DevSwitchCandidates(out, runningCommit);
+		// **「いま」はディスク上に入っているビルドである**（UpdaterParse.h の
+		// ResolveCurrentDevBuild）。殻にコンパイルされたブランチと sha は、本体だけを
+		// 入れ替えたあとでは前のブランチを名乗ったままなので、それを基準にすると
+		// 乗り換えたはずのブランチへ切り替わらない（docs/DEV-NOTES.md M26）。
+		CurrentDevBuild const current = ResolveCurrentDevBuild(out, shellBranch, shellCommit);
+
+		// Candidates to switch TO: every prerelease except the installed build.
+		std::vector<DevBuild> const others = DevSwitchCandidates(out, current.commit);
 
 		// どのビルドを入れるか。Manual は選ばせ、Silent は同じブランチのものだけを拾う。
 		DevBuild pick;
@@ -263,7 +269,7 @@ namespace HomeskzIfcImport
 			// いるのと同じブランチの、別のコミット」だけ——それだけが「自分のビルドが
 			// 新しくなった」に当たる（UpdaterParse.h の FindDevBuildForBranch）。
 			// ブランチが分からないときは何も拾わない＝黙って取り込みへ進む。
-			int const idx = FindDevBuildForBranch(others, runningBranch);
+			int const idx = FindDevBuildForBranch(others, current.branch);
 			if (idx < 0)
 				return true;
 			pick = others[static_cast<std::size_t>(idx)];
@@ -274,7 +280,7 @@ namespace HomeskzIfcImport
 			if (kind == UpdateCheckKind::Silent &&
 				!host.Ask("同じブランチの新しい開発版ビルドがあります。"
 						  "今すぐインストールしますか？",
-						  "branch: " + runningBranch + "\nインストール済み: " + runningCommit +
+						  "branch: " + current.branch + "\nインストール済み: " + current.commit +
 							  "\n新しいビルド: " + pick.commit,
 						  "インストール", "後で"))
 				return true;
@@ -287,14 +293,14 @@ namespace HomeskzIfcImport
 			if (others.empty())
 			{
 				host.Inform("ほかに選べる開発版ビルドはありません。",
-							"現在: " + runningBranch + " (" + runningCommit + ")");
+							"現在: " + current.branch + " (" + current.commit + ")");
 				return true;
 			}
 
 			// One drop-down listing everything: entry 0 is the installed build,
 			// entries 1.. are the other branches' prereleases.
 			std::vector<std::string> items;
-			items.push_back("現在: " + runningBranch + " (" + runningCommit +
+			items.push_back("現在: " + current.branch + " (" + current.commit +
 							") ― インストール済み");
 			for (const DevBuild& b : others)
 				items.push_back(DevBuildLabel(b) + "  (" + b.commit + ")");
@@ -307,7 +313,15 @@ namespace HomeskzIfcImport
 			// value both mean "keep the installed build"). See ResolveDevSelection.
 			int const idx = ResolveDevSelection(static_cast<short>(sel), others.size());
 			if (idx < 0)
+			{
+				// **選んだ結末は必ず返す。** 「現在のまま」を選んだときに黙って閉じると、
+				// 別のものを選んだつもりの人には「選んだのに切り替わらない」と映り、
+				// 取り違えたのか何も起きなかったのかを区別できない（取り消したときだけは
+				// 黙っていてよい——それは「何もしない」という意思表示だから）。
+				host.Inform("開発版ビルドはそのままです。",
+							"現在: " + current.branch + " (" + current.commit + ")");
 				return true;
+			}
 			pick = others[static_cast<std::size_t>(idx)];
 		}
 
@@ -330,8 +344,8 @@ namespace HomeskzIfcImport
 	// -----------------------------------------------------------------------
 	// モードレスの往復（M24）向け。意図は UpdaterHost.h の DevBuildPoll 参照。
 	// **host の Inform / Ask / PickBuild / Restart は呼ばない**——結末はすべて値で返す。
-	DevBuildPollResult PollDevBuildWith(IUpdaterHost& host, const std::string& runningBranch,
-										const std::string& runningCommit,
+	DevBuildPollResult PollDevBuildWith(IUpdaterHost& host, const std::string& shellBranch,
+										const std::string& shellCommit,
 										const std::string& runningShellId)
 	{
 		DevBuildPollResult result;
@@ -350,13 +364,14 @@ namespace HomeskzIfcImport
 			return result;
 		}
 
-		// いま入っている版（ディスク上）。無ければ殻の sha（UpdaterHost.h 冒頭の注記）。
-		std::string installed = ValueOf(out, "installed");
-		if (installed.empty() || installed == "none")
-			installed = runningCommit;
+		// いま入っている版（ディスク上）。**ブランチも sha もディスクを見る**——殻の
+		// 値は本体だけを入れ替えたあと古いままで、sha を取り違えれば同じビルドを毎周
+		// 入れ直し、ブランチを取り違えれば前のブランチのビルドで上書きしてしまう
+		// （UpdaterParse.h の ResolveCurrentDevBuild）。
+		CurrentDevBuild const current = ResolveCurrentDevBuild(out, shellBranch, shellCommit);
 
-		std::vector<DevBuild> const others = DevSwitchCandidates(out, installed);
-		int const idx = FindDevBuildForBranch(others, runningBranch);
+		std::vector<DevBuild> const others = DevSwitchCandidates(out, current.commit);
+		int const idx = FindDevBuildForBranch(others, current.branch);
 		if (idx < 0)
 		{
 			result.outcome = DevBuildPoll::NoNewBuild;

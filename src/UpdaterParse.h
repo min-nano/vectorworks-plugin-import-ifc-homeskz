@@ -12,8 +12,8 @@
 //	    (Trim / ValueOf / ParseDevBuilds).
 //	  * Building safe command lines and deriving install paths from the plug-in's
 //	    own binary location (ShellQuote / CmdQuote / the *FromBinary path helpers).
-//	  * The update flows' branch-y decisions (EvaluateStable / DevSwitchCandidates /
-//	    InstallReportedOk / NeedsRestartAfterInstall).
+//	  * The update flows' branch-y decisions (EvaluateStable / ResolveCurrentDevBuild /
+//	    DevSwitchCandidates / InstallReportedOk / NeedsRestartAfterInstall).
 //
 //	**再起動のコマンドを組み立てる関数はここには無い。** 以前は終了と起動し直しを
 //	切り離したヘルパープロセスへ任せていて、その 1 行をここで組み立てていたが、
@@ -301,6 +301,71 @@ namespace HomeskzIfcImport::UpdaterParse
 			return s; // already current -> no dialog
 		s.offerUpdate = true;
 		return s;
+	}
+
+	// -----------------------------------------------------------------------
+	// **いま効いている開発版ビルドの素性**（ブランチと短縮 sha）。
+	//
+	// 殻にコンパイルされた VW_BUILD_BRANCH / VW_BUILD_VERSION を「いま動いているビルド」
+	// と呼べるのは、**殻ごと入れ替わったときだけ**である。本体（.vwpayload）だけの更新は
+	// 再起動せずにその場で効くので（src/PayloadAbi.h）、別のブランチのビルドへ乗り換えた
+	// あとも殻のその 2 つの定数は前のブランチを名乗り続ける——そのまま基準にすると、
+	//
+	//   * 選択ダイアログが「現在: 前のブランチ」と出し、**いま入れたビルドをもう一度
+	//     候補に並べる**（選び直しても切り替わっていないように見える）。
+	//   * 取り込みのついでの確認と往復の確認が**前のブランチ**の新しいビルドを拾い、
+	//     選んだブランチのビルドを黙って上書きして元のブランチへ戻す。
+	//
+	// という食い違いが起きる（実機で発生。docs/DEV-NOTES.md M26）。
+	//
+	// 基準にするのは**ディスク上に入っているビルド**——次に読み込まれるのはそれだから
+	// で、安定版が最初から `q-stable` の `installed=` を基準にしているのと同じ考え方で
+	// ある（EvaluateStable）。
+	struct CurrentDevBuild
+	{
+		std::string branch; // ディスク上のビルドが出たブランチ
+		std::string commit; // その短縮 sha
+	};
+
+	// q-dev の出力から「いま入っている開発版ビルド」を決める。shellBranch / shellCommit は
+	// 殻にコンパイルされた値で、**ディスクから分からなかったときだけ**使う。
+	//
+	// ブランチの出どころは 3 段構え。**どれも「新しい殻＋古い同梱スクリプト」という組み
+	// 合わせが必ず起こる**（走るのはインストール済みの＝古いスクリプト）ことへの備えで、
+	// 1 つ上の段が無いときに下へ落ちる。
+	//
+	//   1. `installed-branch=`（ディスク上のビルドの刻印。mac は Info.plist の
+	//      VWBuildBranch、Windows は `<name>.branch`）。
+	//   2. 並んでいるビルドの中で **sha が一致する行のブランチ**。古いスクリプトは 1 を
+	//      出さないので、手で乗り換えた直後（そのビルドがまだそのブランチの頭）はこれで
+	//      足りる。
+	//   3. 殻の値。ディスクについて何も分からないときはこれしかない。
+	inline CurrentDevBuild ResolveCurrentDevBuild(const std::string& out,
+												  const std::string& shellBranch,
+												  const std::string& shellCommit)
+	{
+		CurrentDevBuild current;
+		current.commit = ValueOf(out, "installed");
+		if (current.commit.empty() || current.commit == "none")
+			current.commit = shellCommit;
+
+		current.branch = ValueOf(out, "installed-branch");
+		if (current.branch == "none")
+			current.branch.clear();
+		if (current.branch.empty())
+		{
+			for (const DevBuild& b : ParseDevBuilds(out))
+			{
+				if (b.commit == current.commit && !b.branch.empty())
+				{
+					current.branch = b.branch;
+					break;
+				}
+			}
+		}
+		if (current.branch.empty())
+			current.branch = shellBranch;
+		return current;
 	}
 
 	// The builds the dev picker offers to switch TO: every parsed build except

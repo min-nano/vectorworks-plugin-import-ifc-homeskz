@@ -155,9 +155,11 @@ namespace HomeskzIfcImport
 
 			FeedbackLoopBuildResult PollBuild(const std::string& /*branch*/) override
 			{
-				// ブランチは殻にコンパイルされたもの（VW_BUILD_BRANCH）を使う——記憶の
-				// ブランチは本体がそれと同じときにしか active にしない（draw/Feedback.cpp
-				// の loadFeedbackSession）ので、ここで引数を使う理由が無い。
+				// ブランチは PollDevBuild が自分で決める——**いま入っているビルドの刻印**
+				// で、読めないときだけ殻の VW_BUILD_BRANCH へ落ちる（src/UpdaterParse.h の
+				// ResolveCurrentDevBuild）。記憶のブランチは本体がそれと同じときにしか
+				// active にしない（draw/Feedback.cpp の loadFeedbackSession）ので、ここで
+				// 引数を使う理由が無い。
 				const DevBuildPollResult r = PollDevBuild();
 				FeedbackLoopBuildResult result;
 				result.commit = r.commit;
