@@ -498,14 +498,33 @@ COMMENTS_BODY='[]'
 # 起きない——だから「振る舞いを試す」では守れず、**書かないことを検査する**しかない
 # （round 1 の実機で、トークン未登録のときだけ find-pr が黙って落ちた原因がこれ）。
 # ---------------------------------------------------------------------------
+# **source している vw-token.sh も同じ**（同じシェルで走るので、あちらに配列が 1 つ
+# あればここで死ぬ）。
 CHECKS=$((CHECKS + 1))
-if grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}' "$SCRIPT" >/dev/null 2>&1; then
+if grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}' "$SCRIPT" "${HERE}/../scripts/vw-token.sh" \
+	>/dev/null 2>&1; then
 	echo "[ FAIL ] the script must not expand arrays (macOS bash 3.2 dies on an empty one)"
-	grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}' "$SCRIPT" | sed 's/^/         /'
+	grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}' "$SCRIPT" "${HERE}/../scripts/vw-token.sh" |
+		sed 's/^/         /'
 	FAILURES=$((FAILURES + 1))
 else
 	echo "[ PASS ] the script expands no arrays (safe on macOS bash 3.2)"
 fi
+
+# ---------------------------------------------------------------------------
+# 同梱の vw-token.sh が隣に無いとき。**黙って死なない**——このスクリプトはトークンが
+# 無ければ何もできないので、落ちるのではなくプラグインが読める 1 行で言う。
+# `loop-control` は 1 分ごとに無人で呼ばれるモードで、そこで出力が 1 行も無いと
+# 「理由も分からず往復が進まない」になる（M27 で直したのと同じ形）。
+#
+# 実物をコピーだけ持って行って（token ライブラリは持って行かない）走らせる。
+# ---------------------------------------------------------------------------
+LONELY="$WORK/lonely"
+mkdir -p "$LONELY"
+cp "$SCRIPT" "$LONELY/vw-feedback.sh"
+check "a missing vw-token.sh is reported, not fatal" \
+	"$(bash "$LONELY/vw-feedback.sh" token-status 2>/dev/null)" \
+	"error=同梱の vw-token.sh が見つかりません（配布物が欠けています）。"
 
 # ---------------------------------------------------------------------------
 # JSON escaping in isolation (the one piece of hand-written encoding).

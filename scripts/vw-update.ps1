@@ -86,15 +86,111 @@ $script:InstallerOutput = ''
 
 # ---------------------------------------------------------------------------
 # GitHub REST + plug-in helpers.
+#
+# **公開リポジトリなのでトークンは要らない——が、あるなら必ず付ける。** 認証なしの
+# GitHub API は **IP ごとに 1 時間 60 回**で、往復のパレット（M24）は 1 分ごとに
+# q-dev を呼ぶ＝ちょうど上限。取り込みコマンドのついでの確認・「今すぐ確認」が
+# 1 回でも挟まれば超え、以後その時間内はずっと 403 になる（実機 M27。macOS 側の
+# scripts/vw-update.sh と同じ理由・同じ作り）。トークンを付ければ 1 時間 5000 回。
+#
+# トークンの在り処は同梱の vw-token.ps1 ただ 1 つ（vw-feedback.ps1 と共有する）。
+# **無くても止まらない**——読めなければ従来どおり認証なしで続ける。
 # ---------------------------------------------------------------------------
 
-# GET a GitHub API sub-path and return the parsed JSON. Throws on failure; the
-# --max-time equivalent (-TimeoutSec) bounds it so the plug-in's start-up check
-# can never hang Vectorworks on a slow/unreachable network.
+$script:HaveTokenLib = $false
+$tokenLib = Join-Path $PSScriptRoot 'vw-token.ps1'
+if (Test-Path -LiteralPath $tokenLib) {
+    . $tokenLib
+    $script:HaveTokenLib = $true
+}
+
+# 直前の Invoke-GH が失敗した理由（1 行。日本語）。分からなければ空。
+$script:ApiError = ''
+
+# Get-ApiToken: トークン（無ければ空文字）。**探索そのものは vw-token.ps1 が持つ。**
+function Get-ApiToken {
+    if (-not $script:HaveTokenLib) { return '' }
+    try {
+        $t = Resolve-Token
+        if ($t) { return [string]$t }
+    } catch { }
+    return ''
+}
+
+# Get-ResponseHeader: 応答ヘッダの値（無ければ空文字）。**読み方が 2 つある**——Windows
+# PowerShell 5.1 の HttpWebResponse は添字で引けるが、PowerShell 7 の HttpResponseMessage は
+# GetValues で引く。プラグインが起動するのは 5.1 だが、端末から 7 で走らせる人もいる。
+function Get-ResponseHeader($response, [string] $name) {
+    try {
+        $value = $response.Headers[$name]
+        if ($value) { return ([string]$value).Trim() }
+    } catch { }
+    try {
+        $values = $response.Headers.GetValues($name)
+        if ($values) { return ([string]@($values)[0]).Trim() }
+    } catch { }
+    return ''
+}
+
+# Get-ApiFailureReason: 例外を 1 行の日本語にする。**API 制限だけは別扱い**——いつ戻るかと
+# 「認証の有無で上限が違う」ことまで言えば、待てばよいのか設定が要るのかが分かる。
+# 「取得できませんでした」だけで終わらせないのは、往復が無人で回るから（実機 M27）。
+function Get-ApiFailureReason($err, [string] $token) {
+    $response = $null
+    try { $response = $err.Exception.Response } catch { }
+    if (-not $response) {
+        $message = ''
+        try { $message = [string]$err.Exception.Message } catch { }
+        if ($message) { return "GitHub へ届きませんでした（$message）。" }
+        return 'GitHub へ届きませんでした。'
+    }
+
+    $code = 0
+    try { $code = [int]$response.StatusCode } catch { }
+    $remaining = Get-ResponseHeader $response 'X-RateLimit-Remaining'
+    $reset = Get-ResponseHeader $response 'X-RateLimit-Reset'
+
+    if (($code -eq 403 -or $code -eq 429) -and $remaining -eq '0') {
+        $limit = if ($token) { '1 時間 5000 回' } else { '認証なしは 1 時間 60 回' }
+        $mins = $null
+        if ($reset -match '^[0-9]+$') {
+            # **UFormat %s を使わない**——文化圏によっては小数点が変わり、解釈が揺れる。
+            $now = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            $mins = [Math]::Ceiling(([int]$reset - $now) / 60.0)
+            if ($mins -lt 0) { $mins = 0 }
+        }
+        if ($null -ne $mins) {
+            return "GitHub の API 制限に達しました（$limit）。あと $mins 分で戻ります。"
+        }
+        return "GitHub の API 制限に達しました（$limit）。"
+    }
+    return "GitHub が HTTP $code を返しました。"
+}
+
+# Get-ApiError: error= の 1 行に添える本文。理由が分かっていれば足す。**改行を入れない**
+# ——プラグインは key=value の 1 行として読む（src/UpdaterParse.h の ValueOf）。
+function Get-ApiError([string] $base) {
+    if ($script:ApiError) { return ($base + '理由: ' + $script:ApiError) }
+    return $base
+}
+
+# GET a GitHub API sub-path and return the parsed JSON. Throws on failure (the
+# caller catches and reports $script:ApiError); the --max-time equivalent
+# (-TimeoutSec) bounds it so the plug-in's periodic check can never hang
+# Vectorworks on a slow/unreachable network.
 function Invoke-GH([string] $subpath) {
-    return Invoke-RestMethod -Uri "$VW_API/$subpath" `
-        -Headers @{ 'Accept' = 'application/vnd.github+json' } `
-        -UserAgent 'vw-update' -TimeoutSec 20 -Method Get
+    $script:ApiError = ''
+    $token = Get-ApiToken
+    $headers = @{ 'Accept' = 'application/vnd.github+json' }
+    if ($token) { $headers['Authorization'] = "Bearer $token" }
+    try {
+        return Invoke-RestMethod -Uri "$VW_API/$subpath" -Headers $headers `
+            -UserAgent 'vw-update' -TimeoutSec 20 -Method Get
+    }
+    catch {
+        $script:ApiError = Get-ApiFailureReason $_ $token
+        throw
+    }
 }
 
 # browser_download_url of an asset by name, or $null.
@@ -316,7 +412,7 @@ function Get-ReleaseBranch($rel) {
 
 function Invoke-QStable {
     try { $rel = Invoke-GH 'releases/tags/stable' }
-    catch { Write-Output 'error=stable リリースを取得できませんでした。'; return }
+    catch { Write-Output ('error=' + (Get-ApiError 'stable リリースを取得できませんでした。')); return }
 
     $latestFull = $rel.target_commitish
     $url = Get-PluginZipUrl $rel 'min-nano_structure'
@@ -329,7 +425,7 @@ function Invoke-QStable {
 
 function Invoke-QDev {
     try { $rels = Invoke-GH 'releases?per_page=100' }
-    catch { Write-Output 'error=リリース一覧を取得できませんでした。'; return }
+    catch { Write-Output ('error=' + (Get-ApiError 'リリース一覧を取得できませんでした。')); return }
 
     Write-Output ("installed=" + (Get-InstalledCommit 'min-nano_structureDev'))
     Write-Output ("installed-branch=" + (Get-InstalledBranch 'min-nano_structureDev'))
@@ -374,7 +470,7 @@ function Invoke-DoInstall([string] $url, [string] $name) {
 
 function Invoke-Stable {
     try { $rel = Invoke-GH 'releases/tags/stable' }
-    catch { Write-Host 'エラー: 安定版リリース (stable) が見つかりません。' -ForegroundColor Red; return }
+    catch { Write-Host ('エラー: ' + (Get-ApiError '安定版リリース (stable) を取得できませんでした。')) -ForegroundColor Red; return }
 
     $url = Get-PluginZipUrl $rel 'min-nano_structure'
     $latest = Get-Short $rel.target_commitish
@@ -396,7 +492,7 @@ function Invoke-Stable {
 
 function Invoke-Dev {
     try { $rels = Invoke-GH 'releases?per_page=100' }
-    catch { Write-Host 'エラー: リリース一覧を取得できませんでした。' -ForegroundColor Red; return }
+    catch { Write-Host ('エラー: ' + (Get-ApiError 'リリース一覧を取得できませんでした。')) -ForegroundColor Red; return }
 
     $builds = @()
     foreach ($rel in $rels) {

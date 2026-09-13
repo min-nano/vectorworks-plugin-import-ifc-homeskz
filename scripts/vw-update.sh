@@ -126,18 +126,127 @@ APPLESCRIPT
 }
 
 # ---------------------------------------------------------------------------
-# GitHub REST helpers (public repo -> unauthenticated). JSON is parsed with
-# plutil, which ships with macOS and reads JSON natively.
+# GitHub REST helpers. JSON is parsed with plutil, which ships with macOS and
+# reads JSON natively.
+#
+# **公開リポジトリなのでトークンは要らない——が、あるなら必ず付ける。** 認証なしの
+# GitHub API は **IP ごとに 1 時間 60 回**で、往復のパレット（M24）は 1 分ごとに
+# `q-dev` を呼ぶ＝ちょうど上限。取り込みコマンドのついでの確認・「今すぐ確認」・
+# 同じ回線のもう 1 台が 1 回でも挟まれば超え、以後その時間内はずっと 403 になる
+# （実機 M27。パレットには「リリース一覧を取得できませんでした」とだけ出ていて、
+# ネットワークが切れたようにしか見えなかった）。トークンを付ければ 1 時間 5000 回に
+# なるので、この経路では事実上当たらない。
+#
+# トークンの在り処は同梱の vw-token.sh ただ 1 つ（vw-feedback.sh と共有する。
+# CLAUDE.md「重複を作らない置き場所」）。**無くても止まらない**——読めなければ従来
+# どおり認証なしで続け、上限に当たったときだけその旨を理由に載せる。
 # ---------------------------------------------------------------------------
-api_get() { # api-subpath -> path to a temp file holding the JSON, or fail
-	# --max-time bounds the request so the plug-in's start-up check can never
-	# hang Vectorworks on a slow/unreachable network.
-	local f; f="$(mktemp)"
-	if curl -fsSL --max-time 20 --retry 2 -H "Accept: application/vnd.github+json" "${VW_API}/$1" -o "$f"; then
-		printf '%s' "$f"
-	else
-		rm -f "$f"; return 1
+
+if [ -r "$(dirname "${BASH_SOURCE[0]}")/vw-token.sh" ]; then
+	# shellcheck source-path=SCRIPTDIR
+	# shellcheck source=vw-token.sh
+	. "$(dirname "${BASH_SOURCE[0]}")/vw-token.sh"
+fi
+
+# api_get の結果を持ち帰る 2 つ。**戻り値は標準出力ではなくこの変数**にする——理由
+# （VW_API_ERROR）を呼び出し元へ渡すには同じシェルで動く必要があり、`$(api_get …)` の
+# 形にすると副シェルの中で立てた変数が捨てられる。
+VW_API_FILE=""   # 取れた JSON の一時ファイル（呼び出し元が rm する）
+VW_API_ERROR=""  # 取れなかった理由（1 行。日本語）
+
+# curl_reason: curl の終了コードを 1 行の日本語にする。**「取得できませんでした」だけで
+# 終わらせない**——往復は無人で回るので、パレットに出る 1 行が唯一の手掛かりになる。
+curl_reason() { # curl exit code
+	case "$1" in
+		6)     printf 'GitHub の名前を解決できません（curl 6: DNS）。' ;;
+		7)     printf 'GitHub へ接続できません（curl 7）。' ;;
+		28)    printf '20 秒以内に応答がありませんでした（curl 28: タイムアウト）。' ;;
+		35|60) printf 'TLS の接続に失敗しました（curl %s）。' "$1" ;;
+		*)     printf 'ネットワークに届きませんでした（curl 終了コード %s）。' "$1" ;;
+	esac
+}
+
+# header_value: 応答ヘッダの値（名前は小文字で渡す。無ければ空）。**最後の 1 つ**を採る
+# ——リダイレクトを追うとヘッダの塊が複数並ぶので、効いているのは最後のもの。
+header_value() { # header-file, lowercase-name
+	tr -d '\r' < "$1" |
+		awk -F': ' -v want="$2" 'tolower($1) == want { v = $2 } END { if (v != "") print v }'
+}
+
+# http_reason: HTTP の失敗を 1 行の日本語にする。**API 制限だけは別扱い**——いつ戻るかと
+# 「認証の有無で上限が違う」ことまで言えば、待てばよいのか設定が要るのかが分かる。
+http_reason() { # code, header-file, token(空なら認証なし)
+	local code="$1" hdr="$2" token="$3" remaining reset now mins limit
+	remaining="$(header_value "$hdr" x-ratelimit-remaining)"
+	if { [ "$code" = "403" ] || [ "$code" = "429" ]; } && [ "$remaining" = "0" ]; then
+		if [ -n "$token" ]; then limit="1 時間 5000 回"; else limit="認証なしは 1 時間 60 回"; fi
+		reset="$(header_value "$hdr" x-ratelimit-reset)"
+		now="$(date +%s)"
+		mins=""
+		# **`&&` で終わらせない。** 偽のとき節そのものが失敗扱いになり、`set -e` の下では
+		# 呼び出し元（api_get）ごと落ちる。
+		case "$reset" in
+			'' | *[!0-9]*) ;;
+			*)
+				mins="$(( (reset - now + 59) / 60 ))"
+				if [ "$mins" -lt 0 ]; then mins=0; fi
+				;;
+		esac
+		if [ -n "$mins" ]; then
+			printf 'GitHub の API 制限に達しました（%s）。あと %s 分で戻ります。' "$limit" "$mins"
+		else
+			printf 'GitHub の API 制限に達しました（%s）。' "$limit"
+		fi
+		return 0
 	fi
+	printf 'GitHub が HTTP %s を返しました。' "$code"
+}
+
+# api_error: error= の 1 行に添える本文。理由が分かっていれば足す。**改行を入れない**
+# ——プラグインは key=value の 1 行として読む（src/UpdaterParse.h の ValueOf）。
+api_error() { # base message
+	if [ -n "${VW_API_ERROR:-}" ]; then
+		printf '%s理由: %s' "$1" "$VW_API_ERROR"
+	else
+		printf '%s' "$1"
+	fi
+}
+
+# api_get: GitHub REST を 1 回叩く。取れたら 0 を返して JSON を VW_API_FILE へ、
+# 取れなかったら 1 を返して理由を VW_API_ERROR へ置く。
+api_get() { # api-subpath
+	# --max-time bounds the request so the plug-in's periodic check can never
+	# hang Vectorworks on a slow/unreachable network.
+	VW_API_FILE=""
+	VW_API_ERROR=""
+	local f hdr token code rc
+	f="$(mktemp)"; hdr="$(mktemp)"
+	token=""
+	if command -v resolve_token >/dev/null 2>&1; then
+		token="$(resolve_token || true)"
+	fi
+	# **配列を使わない**（vw-token.sh 冒頭の理由）ので、付ける／付けないで curl の
+	# 呼び出しを 2 つ書く。`-f` は使わない——HTTP の番号を自分で見たいから（`-f` だと
+	# 本文もヘッダも捨てられ、403 が「なぜか失敗した」に潰れる）。
+	rc=0
+	if [ -n "$token" ]; then
+		code="$(curl -sSL --max-time 20 --retry 2 -o "$f" -D "$hdr" -w '%{http_code}' \
+			-H "Accept: application/vnd.github+json" \
+			-H "Authorization: Bearer ${token}" "${VW_API}/$1" 2>/dev/null)" || rc=$?
+	else
+		code="$(curl -sSL --max-time 20 --retry 2 -o "$f" -D "$hdr" -w '%{http_code}' \
+			-H "Accept: application/vnd.github+json" "${VW_API}/$1" 2>/dev/null)" || rc=$?
+	fi
+
+	if [ "$rc" -ne 0 ] || [ -z "${code:-}" ]; then
+		VW_API_ERROR="$(curl_reason "$rc")"
+		rm -f "$f" "$hdr"; return 1
+	fi
+	case "$code" in
+		2*) rm -f "$hdr"; VW_API_FILE="$f"; return 0 ;;
+	esac
+	VW_API_ERROR="$(http_reason "$code" "$hdr" "$token")"
+	rm -f "$f" "$hdr"; return 1
 }
 
 jval() { # json-file, keypath -> raw scalar value (empty if missing)
@@ -378,8 +487,9 @@ apply_choice() { # choice, zip, name
 # Channel flows.
 # ---------------------------------------------------------------------------
 update_stable() {
-	local f; f="$(api_get "releases/tags/stable")" \
-		|| die "安定版リリース (stable) が見つかりません。main のビルドが完了しているか確認してください。"
+	api_get "releases/tags/stable" \
+		|| die "$(api_error "安定版リリース (stable) を取得できませんでした。")"
+	local f="$VW_API_FILE"
 	local latest_full; latest_full="$(jval "$f" target_commitish)"
 	local url; url="$(plugin_zip_url "$f" "assets" "min-nano_structure" || true)"
 	rm -f "$f"
@@ -408,8 +518,9 @@ update_stable() {
 }
 
 update_dev() {
-	local f; f="$(api_get "releases?per_page=100")" \
-		|| die "リリース一覧を取得できませんでした。"
+	api_get "releases?per_page=100" \
+		|| die "$(api_error "リリース一覧を取得できませんでした。")"
+	local f="$VW_API_FILE"
 
 	# Collect the per-branch dev prereleases.
 	local names=() tags=() commits=() urls=()
@@ -476,8 +587,9 @@ ${same_note}インストール済み: ${installed}
 #   latest=<commit>
 #   url=<zip download url>
 q_stable() {
-	local f; f="$(api_get "releases/tags/stable")" \
-		|| { echo "error=stable リリースを取得できませんでした。"; return 0; }
+	api_get "releases/tags/stable" \
+		|| { echo "error=$(api_error "stable リリースを取得できませんでした。")"; return 0; }
+	local f="$VW_API_FILE"
 	local latest_full; latest_full="$(jval "$f" target_commitish)"
 	local url; url="$(plugin_zip_url "$f" "assets" "min-nano_structure" || true)"
 	rm -f "$f"
@@ -498,8 +610,9 @@ q_stable() {
 # branch は空のことがある（リリース本文に branch= が無い古いリリース）。プラグイン側の
 # パーサはこの列が無い出力も読める（src/UpdaterParse.h の ParseDevBuilds）。
 q_dev() {
-	local f; f="$(api_get "releases?per_page=100")" \
-		|| { echo "error=リリース一覧を取得できませんでした。"; return 0; }
+	api_get "releases?per_page=100" \
+		|| { echo "error=$(api_error "リリース一覧を取得できませんでした。")"; return 0; }
+	local f="$VW_API_FILE"
 	local bundle; bundle="$(installed_bundle min-nano_structureDev)"
 	echo "installed=$(installed_commit "$bundle")"
 	echo "installed-branch=$(installed_branch "$bundle")"

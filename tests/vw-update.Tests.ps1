@@ -131,13 +131,16 @@ function AsText($lines) { return (@($lines) -join "`n") }
 # real Invoke-WebRequest cmdlet within this shared (dot-sourced) scope.
 # ---------------------------------------------------------------------------
 $script:FakeApiFail = $false
+# 失敗したときに実物が $script:ApiError へ入れる「理由」を真似る（M27）。
+$script:FakeApiReason = ''
 $script:FakeStableJson = $null
 $script:FakeReleasesJson = $null
 $script:FakeDownloadZip = $null
 $script:FakeDownloadFail = $false
 
 function Invoke-GH([string] $subpath) {
-    if ($script:FakeApiFail) { throw 'offline' }
+    if ($script:FakeApiFail) { $script:ApiError = $script:FakeApiReason; throw 'offline' }
+    $script:ApiError = ''
     if ($subpath -eq 'releases/tags/stable') { return ($script:FakeStableJson | ConvertFrom-Json) }
     if ($subpath -like 'releases*') { return ($script:FakeReleasesJson | ConvertFrom-Json) }
     throw "unexpected subpath: $subpath"
@@ -291,6 +294,50 @@ $script:FakeApiFail = $true
 $out = AsText (Invoke-QDev)
 CheckContains $out 'error=' 'offline -> error= line'
 $script:FakeApiFail = $false
+
+# **理由を必ず添える**（M27）。往復は無人で回るので、パレットに出るこの 1 行だけが
+# 手掛かりになる——「取得できませんでした。」だけでは、回線が切れたようにしか見えない。
+T 'the error line carries the reason Invoke-GH left behind'
+$script:FakeApiFail = $true
+$script:FakeApiReason = 'GitHub の API 制限に達しました（認証なしは 1 時間 60 回）。あと 37 分で戻ります。'
+$out = AsText (Invoke-QDev)
+CheckContains $out 'リリース一覧を取得できませんでした。理由: GitHub の API 制限' `
+    'q-dev names the rate limit'
+$out = AsText (Invoke-QStable)
+CheckContains $out 'stable リリースを取得できませんでした。理由: GitHub の API 制限' `
+    'q-stable names it too'
+$script:FakeApiReason = ''
+$script:FakeApiFail = $false
+
+# ===========================================================================
+# 理由づくり（Get-ApiFailureReason）。**ネットワークも Windows も要らない純粋な文字列**
+# なので、Linux の pwsh でもそのまま走る。応答は形だけ揃えたもので作る（実物の
+# HttpWebResponse は添字でヘッダを引ける）。
+# ===========================================================================
+function FakeResponse([int] $code, [hashtable] $headers) {
+    return [pscustomobject]@{ StatusCode = $code; Headers = $headers }
+}
+
+function FakeError($response, [string] $message) {
+    return [pscustomobject]@{ Exception = [pscustomobject]@{ Response = $response; Message = $message } }
+}
+
+T 'Get-ApiFailureReason tells the rate limit apart from everything else'
+$reset = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 600
+$limited = FakeError (FakeResponse 403 @{ 'X-RateLimit-Remaining' = '0'; 'X-RateLimit-Reset' = "$reset" }) 'forbidden'
+$out = Get-ApiFailureReason $limited ''
+CheckContains $out '認証なしは 1 時間 60 回' 'unauthenticated -> the 60/hour ceiling'
+CheckContains $out 'あと 10 分で戻ります。' '...and the reset time'
+CheckContains (Get-ApiFailureReason $limited 'sometoken') '1 時間 5000 回' `
+    'with a token -> the 5000/hour ceiling'
+# 403 でも残りがあるなら制限ではない（二次制限など）。制限だと言い切らない。
+$other = FakeError (FakeResponse 403 @{ 'X-RateLimit-Remaining' = '30' }) 'forbidden'
+CheckContains (Get-ApiFailureReason $other '') 'HTTP 403' '403 with quota left is not the rate limit'
+$server = FakeError (FakeResponse 500 @{}) 'boom'
+CheckContains (Get-ApiFailureReason $server '') 'HTTP 500' 'anything else -> the status'
+# 応答そのものが無い（DNS・接続不能・タイムアウト）ときは例外の文言をそのまま添える。
+$offline = FakeError $null 'The remote name could not be resolved'
+CheckContains (Get-ApiFailureReason $offline '') 'could not be resolved' 'no response -> the exception message'
 
 # ===========================================================================
 # do-install — download + Expand-Archive + atomic swap into VW_PLUGINS_DIR, and

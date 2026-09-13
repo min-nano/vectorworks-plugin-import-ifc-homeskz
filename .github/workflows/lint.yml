@@ -43,7 +43,7 @@ name: Lint
 #     clang-tidy-18 -p build src/core/*.cpp src/parse/*.cpp src/UpdaterFlow.cpp
 #     cmake-format --check CMakeLists.txt tests/CMakeLists.txt && cmake-lint ...
 #     actionlint
-#     shellcheck scripts/*.sh
+#     shellcheck -x scripts/*.sh
 #     pwsh -c 'Invoke-ScriptAnalyzer -Path scripts -Settings ./PSScriptAnalyzerSettings.psd1'
 #     yamllint .
 #     editorconfig-checker
@@ -210,7 +210,9 @@ jobs:
         run: |
           set -euo pipefail
           shellcheck --version
-          shellcheck scripts/*.sh
+          # -x: source した先（vw-token.sh）まで読ませる。付けないと「その先は見て
+          # いない」の一言（SC1091）で落ちる。
+          shellcheck -x scripts/*.sh
 
   # PSScriptAnalyzer over the stand-alone PowerShell script (the Windows updater,
   # scripts/vw-update.ps1). This is PowerShell's counterpart to clang-tidy and
