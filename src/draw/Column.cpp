@@ -215,13 +215,17 @@ namespace HomeskzIfcImport::draw
 				// 1 本目だけ実測を控える（全数ぶん並べても読めない）。
 				if (failures.collapsedProbe.empty())
 				{
+					// 入れ直しの結末（**入れ子の三項演算子にしない**——clang-tidy の
+					// readability-avoid-nested-conditional-operator）。
+					const char* fixedNote = "できない";
+					if (probe.setOk)
+						fixedNote = probe.fixedRead ? "" : "読めない";
 					std::array<char, 192> buffer{};
 					std::snprintf(buffer.data(), buffer.size(),
 								  "パスの頂点 piece0=%d piece1=%d・作った曲線の Z %s(%g→%g)・"
 								  "入れ直し %s(→%g)・命令のパス長 %g（Z %g→%g）・OIP ",
 								  static_cast<int>(probe.piece0), static_cast<int>(probe.piece1),
-								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1,
-								  probe.setOk ? (probe.fixedRead ? "" : "読めない") : "できない",
+								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1, fixedNote,
 								  probe.fixedZ1, column.height, column.elevation,
 								  column.elevation + column.height);
 					failures.collapsedProbe = std::string(buffer.data()) + result.collapsedProbe;
