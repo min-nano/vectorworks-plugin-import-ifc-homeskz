@@ -715,10 +715,16 @@ TEST(build_column_binds_bottom_current_top_upper_floor)
 	CHECK(near(command.height, 2900.0));
 	CHECK(near(command.startOffset, 0.0));
 	CHECK(near(command.endOffset, -182.0));
-	// 下端は当階（storyOffset=0）の横架材天端、offset = 600 − 600 = 0。
+	// 下端は当階（storyOffset=0）。上端と**レベル種別も offset も同じ**になってしまう場合
+	// （ここがまさにそれ）、VW が終端を始端と同じ Z へ解決して実体が無い柱になるので、
+	// 下端だけ FL 基準へ振り替える（絶対 Z は 600 のまま。parse/Column.h「上下端が『階だけ
+	// 違う同じ記録』にならないようにする」）。
 	CHECK_EQ(command.bottomBound.storyOffset, 0);
-	CHECK_EQ(command.bottomBound.level, std::string("横架材天端"));
+	CHECK_EQ(command.bottomBound.level, std::string("FL"));
 	CHECK(near(command.bottomBound.offset, 0.0));
+	// **上下端が同じ記録になっていない**こと（これが直しの眼目）。
+	CHECK(command.bottomBound.level != command.topBound.level ||
+		  !near(command.bottomBound.offset, command.topBound.offset));
 	// 上端は上階（storyOffset=1）の横架材天端そのものなので offset は 0。
 	CHECK_EQ(command.topBound.storyOffset, 1);
 	CHECK_EQ(command.topBound.level, std::string("横架材天端"));
@@ -1202,36 +1208,52 @@ TEST(all_fixtures_bounds_span_the_column_height)
 	//   * 上端バウンドの絶対 Z ＝ elevation + height（柱上端）
 	// 小屋束の上端 offset を下端と同値にしていた頃はここが崩れ、実機で高さ 0 の小屋束に
 	// なっていた（M8 のローカル確認 3 周目）。
-	forEachFixture(failures,
-				   [&](const std::string&, const Model& model)
-				   {
-					   // 各階の横架材天端（最上階は軒高）の絶対 Z ＝ バウンド先レベルの高さ。
-					   const std::vector<HomeskzIfcImport::parse::StoryInfo> stories =
-						   HomeskzIfcImport::parse::collectStories(model);
-					   std::vector<double> levelZ;
-					   levelZ.reserve(stories.size());
-					   for (const HomeskzIfcImport::parse::StoryInfo& story : stories)
-						   levelZ.push_back(story.isTop ? story.elevation
-														: story.elevation + story.beamOffset);
+	forEachFixture(
+		failures,
+		[&](const std::string&, const Model& model)
+		{
+			// 各階の横架材天端（最上階は軒高）の絶対 Z ＝ バウンド先レベルの高さ。
+			const std::vector<HomeskzIfcImport::parse::StoryInfo> stories =
+				HomeskzIfcImport::parse::collectStories(model);
+			std::vector<double> levelZ; // 横架材天端（最上階は軒高）の絶対 Z
+			std::vector<double> floorZ; // FL の絶対 Z（下端の振り替え先）
+			levelZ.reserve(stories.size());
+			floorZ.reserve(stories.size());
+			for (const HomeskzIfcImport::parse::StoryInfo& story : stories)
+			{
+				levelZ.push_back(story.isTop ? story.elevation
+											 : story.elevation + story.beamOffset);
+				floorZ.push_back(story.elevation);
+			}
+			// バウンドが指すレベルの絶対 Z。**FL へ振り替えた下端も同じ Z を
+			// 指していなければならない**（振り替えで絶対 Z は動かない）。
+			const auto boundZ = [&](const core::StoryBoundCommand& bound, std::size_t storyIndex)
+			{ return bound.level == std::string("FL") ? floorZ[storyIndex] : levelZ[storyIndex]; };
 
-					   for (const ColumnCommand& command : buildColumnCommands(model))
-					   {
-						   double from = 0.0;
-						   double to = 0.0;
-						   CHECK(HomeskzIfcImport::parse::parseSpanLayer(command.layer, from, to));
-						   const auto base = static_cast<std::size_t>(from) - 1;
-						   const std::size_t top =
-							   base + static_cast<std::size_t>(command.topBound.storyOffset);
-						   CHECK(base < levelZ.size() && top < levelZ.size());
-						   if (base >= levelZ.size() || top >= levelZ.size())
-							   continue;
+			for (const ColumnCommand& command : buildColumnCommands(model))
+			{
+				double from = 0.0;
+				double to = 0.0;
+				CHECK(HomeskzIfcImport::parse::parseSpanLayer(command.layer, from, to));
+				const auto base = static_cast<std::size_t>(from) - 1;
+				const std::size_t top =
+					base + static_cast<std::size_t>(command.topBound.storyOffset);
+				CHECK(base < levelZ.size() && top < levelZ.size());
+				if (base >= levelZ.size() || top >= levelZ.size())
+					continue;
 
-						   CHECK(
-							   near(levelZ[base] + command.bottomBound.offset, command.elevation));
-						   CHECK(near(levelZ[top] + command.topBound.offset,
-									  command.elevation + command.height));
-					   }
-				   });
+				CHECK(near(boundZ(command.bottomBound, base) + command.bottomBound.offset,
+						   command.elevation));
+				CHECK(near(boundZ(command.topBound, top) + command.topBound.offset,
+						   command.elevation + command.height));
+				// **上下端が「階だけ違う同じ記録」になっていない**こと。
+				// この形にすると VW が終端を始端と同じ Z へ解決し、実体が無い柱に
+				// なる（実機で 46 本発生。parse/Column.h）。
+				CHECK(command.bottomBound.storyOffset == command.topBound.storyOffset ||
+					  command.bottomBound.level != command.topBound.level ||
+					  !near(command.bottomBound.offset, command.topBound.offset));
+			}
+		});
 }
 
 TEST(all_fixtures_top_offset_returns_the_ifc_extrusion_height)

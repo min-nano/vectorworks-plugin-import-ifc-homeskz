@@ -363,19 +363,4 @@ namespace HomeskzIfcImport::draw
 		}
 	}
 
-	bool RetryCollapsedMember(MCObjectHandle object, const core::StoryBoundCommand& startBound,
-							  const core::StoryBoundCommand& endBound)
-	{
-		if (object == nil)
-			return false;
-
-		// 高さ基準を**同じ値で**入れ直してから解かせ直す（ヘッダ参照）。指定は正しいので、
-		// 値を変える必要は無い——変えれば OIP に残る値まで変わってしまう。
-		gSDK->SetObjectStoryBound(object, kStartBoundID, StoryBoundData(startBound));
-		gSDK->SetObjectStoryBound(object, kEndBoundID, StoryBoundData(endBound));
-		gSDK->ResetObject(object);
-
-		const DrawnMemberSize size = MeasureDrawnMember(object);
-		return size.found && !size.zero; // 測れないなら直ったと言わない
-	}
 } // namespace HomeskzIfcImport::draw

@@ -200,17 +200,4 @@ namespace HomeskzIfcImport::draw
 	// 診断ログへ出す（全数だと読めない）。
 	std::string DescribeSizeParams(MCObjectHandle object);
 
-	// 長さ 0 で描かれた部材（StructuralMemberResult::collapsed）を、**同じ指定のまま**もう
-	// 一度解かせる。
-	//
-	// 【なぜ「同じ指定で」やり直すのか】実機で、描かれなかった柱を人が OIP の値を 1 つ更新
-	// （＝同じ内容で計算し直させる）だけで正しい高さに描き直せることが分かっている——**値が
-	// 同じまま直るのだから、記録している指定は正しく、生成直後の解決だけが失敗している**
-	// （docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。そこで高さ基準を入れ直して
-	// リセットし、**読み戻して直ったかを返す**（呼び出し側は直った本数を診断へ載せる）。
-	//
-	// 触るのは潰れていた部材だけで、正しく描けている部材には掛けない（余計なリセットで
-	// 時間を使わない）。
-	bool RetryCollapsedMember(MCObjectHandle object, const core::StoryBoundCommand& startBound,
-							  const core::StoryBoundCommand& endBound);
 } // namespace HomeskzIfcImport::draw

@@ -462,6 +462,24 @@ namespace HomeskzIfcImport::parse
 					const char* nextLevel = beamTopLevelType(nextIsTop);
 					cmd.topBound = StoryBoundCommand{1, nextLevel, seatTop - beamTopAbs[i + 1]};
 				}
+
+				// **上下端が「階だけ違う、まったく同じ記録」になったら、下端を FL 基準へ
+				// 振り替える。** VW はこの形の柱の終端を**始端と同じ Z へ解決してしまい**、
+				// 実体が無い柱になる（実機で実測: 命令のパス長 2959 に対し
+				// StartElevation=572 / EndElevation=572。パスは 2 点ある）。上階参照その
+				// ものは効いている——同じ「上階の横架材天端」でも offset が 0 でない通し柱は
+				// 正しく 5905 に解けた。壊れるのは**レベル種別も offset も同じ**ときだけで、
+				// 2 階の柱（上端＝軒高）が無事なのもこれで説明が付く。
+				//
+				// **直すのは下端**にする。上端を上階のレベルへ紐付けたままにしておけば、
+				// 階高を変えたとき柱がそれに追随する——そちらがこのバインドの本来の値打ち
+				// なので、動かすのは当階の中で意味が変わらない下端の方である。
+				// **絶対 Z は 1mm も動かない**（レベルを FL へ移し、offset をその差で取り直す
+				// だけ）。経緯は docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」。
+				if (cmd.topBound.storyOffset != cmd.bottomBound.storyOffset &&
+					cmd.topBound.level == cmd.bottomBound.level &&
+					std::abs(cmd.topBound.offset - cmd.bottomBound.offset) < kBoundIdentityTol)
+					cmd.bottomBound = StoryBoundCommand{0, kLevelFL, bottomAbs - story.elevation};
 				commands.push_back(std::move(cmd));
 			}
 		}

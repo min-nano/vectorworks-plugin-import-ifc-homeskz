@@ -29,13 +29,12 @@
 //	実体を作るために要る。したがって**どの柱でも「バウンドの差＝柱高さ」**にする——上端
 //	offset を下端と同値（差 0）にすると高さ 0 になる（parse/Column.h 参照）。
 //
-//	【描けたかを読み戻し、潰れていたら解かせ直す】バウンドもパスも命令どおりなのに**長さ 0 で
-//	描かれる**ことがある（M27。実機発生）。OIP の値は正しいままなので、**画面を見ない限り
-//	気付けない**——そこで生成直後に「長さ」を読み戻し（spec.expectedLength ＝ パス長）、
-//	0 で潰れていた柱は**全部置いたあとに同じ指定のまま解かせ直す**（RetryCollapsedMember）。
-//	人が OIP の値を 1 つ更新するだけで正しく描き直せる＝**指定は正しく、生成直後の解決だけが
-//	失敗している**ため。潰れた本数と直った本数、それに 1 本目の実測（パスの頂点数・OIP の
-//	高さと長さ）を診断へ載せる（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+//	【描けたかを読み戻す】バウンドもパスも命令どおりなのに**実体が無い**ことがある（M27。
+//	実機で 46 本発生）。OIP の値は正しいままなので、**画面を見ない限り気付けない**——そこで
+//	**両端の解決済み絶対 Z の差**を読み戻し（spec.expectedLength ＝ 命令のパス長）、実体が
+//	無い柱を件数で診断へ載せる。この測定で原因が分かった: 上下端のバウンドが「階だけ違う
+//	同じ記録」になった柱だけ、終端が始端と同じ Z に解決されていた（解析側で潰してある。
+//	parse/Column.h ／ docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 //
 //	【柱のパスは鉛直な 2 点の NURBS 曲線】M7 の横架材が使っていた 2D ポリラインでは鉛直材を
 //	表せない（平面へ落とすと 1 点に潰れる）。
@@ -106,7 +105,6 @@ namespace HomeskzIfcImport::draw
 			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長）。**原因を
 			// パス側と高さ基準側に分けるのはこの 1 行だけ**なので、必ず持ち帰る。
 			std::string collapsedProbe;
-			std::size_t repaired = 0; // そのうち解かせ直して直った本数
 		};
 
 		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
@@ -224,8 +222,6 @@ namespace HomeskzIfcImport::draw
 
 		std::size_t drawn = 0;
 		ColumnFailures failures;
-		// 長さ 0 で描かれた柱（命令インデックスとハンドル）。全部置いたあとに解かせ直す。
-		std::vector<std::pair<std::size_t, MCObjectHandle>> collapsedColumns;
 		for (std::size_t index = 0; index < document.columns.size(); ++index)
 		{
 			const core::ColumnCommand& column = document.columns[index];
@@ -245,11 +241,6 @@ namespace HomeskzIfcImport::draw
 			bool collapsed = false;
 			if (DrawOne(column, style, failures, object, collapsed))
 				++drawn;
-			// 長さ 0 で描かれた柱は、全部置いたあとに**同じ指定のまま**解かせ直す（下記）。
-			// ここでは控えるだけ——描いている途中に混ぜると、直った本数と描いた本数の
-			// どちらを数えているのかが分からなくなる。
-			if (collapsed && object != nil)
-				collapsedColumns.emplace_back(index, object);
 			// 伏図記号のデータタグが引けるよう、**構造材ツールで描けた柱だけ**を記録する
 			// （立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
 			if (handles != nullptr && object != nil)
@@ -260,18 +251,6 @@ namespace HomeskzIfcImport::draw
 		// （SetPluginObjectStyle は関連付けまでで描画属性をプッシュしない）。
 		if (drawn > 0 && style != 0)
 			gSDK->UpdateStyledObjects(style);
-
-		// 長さ 0 で描かれた柱を、**同じ指定のまま**もう一度解かせる（draw/StructuralMember の
-		// RetryCollapsedMember）。実機で、描かれなかった柱を人が OIP の値を 1 つ更新する
-		// ——つまり**同じ内容で計算し直させる**——だけで正しい高さに描き直せることが
-		// 分かっている。全部置いたあとに掛けるのは、生成の途中では解決に失敗する何かが
-		// 効いているとしか読めないため（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
-		for (const auto& [index, object] : collapsedColumns)
-		{
-			const core::ColumnCommand& column = document.columns[index];
-			if (RetryCollapsedMember(object, column.bottomBound, column.topBound))
-				++failures.repaired;
-		}
 
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「鉛直パスが 2 点に
 		// ならなかった」「断面が入らなかった」「スタイルが見つからなかった」を件数で持ち帰る
@@ -289,8 +268,7 @@ namespace HomeskzIfcImport::draw
 			if (failures.collapsed > 0)
 			{
 				note += "長さ 0 で描かれた（実体が無い）柱 " + std::to_string(failures.collapsed) +
-						" 本（うち " + std::to_string(failures.repaired) +
-						" 本は解かせ直して直った）。";
+						" 本。";
 				if (!failures.collapsedProbe.empty())
 					note += "（1 本目: " + failures.collapsedProbe + "）";
 			}
@@ -320,7 +298,6 @@ namespace HomeskzIfcImport::draw
 
 		std::size_t measured = 0;  // 測れた本数（両端の絶対 Z を引けた本数）
 		std::size_t collapsed = 0; // そのうち実体が 0 だった本数
-		std::size_t repaired = 0;  // 解かせ直して直った本数
 		std::size_t differs = 0;   // 実体はあるが命令と食い違う本数
 		std::string probe; // 1 本目の実測（どのパラメータが何を返しているか）
 		std::string oddProbe; // 食い違った／潰れた 1 本目の実測
@@ -346,11 +323,7 @@ namespace HomeskzIfcImport::draw
 			const bool matches = std::abs(size.extent - column.height) < kExtentTol ||
 								 std::abs(size.extent - drawn) < kExtentTol;
 			if (size.zero)
-			{
 				++collapsed;
-				if (RetryCollapsedMember(object, column.bottomBound, column.topBound))
-					++repaired;
-			}
 			else if (!matches)
 				++differs;
 
@@ -368,8 +341,7 @@ namespace HomeskzIfcImport::draw
 		{
 			std::string note = "柱の診断（取り込み後）: ";
 			if (collapsed > 0)
-				note += "実体が無い柱 " + std::to_string(collapsed) + " 本（うち " +
-						std::to_string(repaired) + " 本は解かせ直して直った）。";
+				note += "実体が無い柱 " + std::to_string(collapsed) + " 本。";
 			if (differs > 0)
 				note += "実体が命令と食い違う柱 " + std::to_string(differs) + " 本。";
 			if (!oddProbe.empty())
