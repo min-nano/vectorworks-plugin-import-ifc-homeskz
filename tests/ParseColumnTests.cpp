@@ -689,10 +689,62 @@ TEST(build_top_story_column_uses_half_level_span)
 	CHECK(near(commands[0].elevation, 6200.0));
 }
 
-TEST(build_column_binds_bottom_current_top_upper_floor)
+TEST(build_column_binds_top_to_upper_floor_level_when_offset_would_be_zero)
 {
-	// 柱（管柱・通し柱）は下端を当階、上端を上階の横架材天端へバインドする。この IFC には
-	// 柱以外に負の配置 Z を持つ要素が無いので横架材天端オフセットは 0（＝ FL 高さ）。
+	// 柱（管柱・通し柱）は下端を当階、上端を上階へバインドする。上端がちょうど上階の
+	// 横架材天端に乗る管柱は offset が 0 になるが、**「上階の、自階にもある種別」を
+	// offset 0 で指すと VW が自階のレベルへ解決してしまう**ので、そのときは上階の FL を
+	// 基準に取り直す（parse/Column.h）。上階に横架材天端オフセット（−150）がある
+	// ＝ FL 基準なら offset が 0 でなくなるので、この形が選ばれる。
+	StepText step;
+	const int storey = makeStorey(step, "1FL", 600.0);
+	const int upper = makeStorey(step, "2FL", 3500.0);
+	makeStorey(step, "RFL", 6300.0);
+	{
+		ColumnSpec spec;
+		spec.height = 2718.0;
+		makeColumn(step, storey, spec);
+	}
+	{
+		// 上階の横架材天端オフセットを −150 にするための柱（負のローカル Z を持つ要素）。
+		ColumnSpec spec;
+		spec.ox = 2000.0;
+		spec.oz = -150.0;
+		makeColumn(step, upper, spec);
+	}
+
+	const std::vector<ColumnCommand> commands = buildColumnCommands(step.build());
+	CHECK_EQ(commands.size(), std::size_t(2));
+	if (commands.size() != 2)
+		return;
+	const ColumnCommand& command = commands[0];
+	CHECK(command.layer.starts_with("1to"));
+	CHECK(near(command.elevation, 600.0));
+	// 上端は**受ける横架材の天端**（上階の横架材天端 3500 − 150 = 3350）に取るので
+	// パス長は 2750。IFC の押し出し Depth 2718 との差 −32 が端部オフセットに入る。
+	CHECK(near(command.height, 2750.0));
+	CHECK(near(command.startOffset, 0.0));
+	CHECK(near(command.endOffset, -32.0));
+	// 下端は当階（storyOffset=0）の横架材天端、offset = 600 − 600 = 0。
+	CHECK_EQ(command.bottomBound.storyOffset, 0);
+	CHECK_EQ(command.bottomBound.level, std::string("横架材天端"));
+	CHECK(near(command.bottomBound.offset, 0.0));
+	// 上端は上階（storyOffset=1）。横架材天端なら offset 0 になってしまうので FL 基準へ
+	// 取り直し、offset には上階の横架材天端オフセット（−150）が入る。
+	CHECK_EQ(command.topBound.storyOffset, 1);
+	CHECK_EQ(command.topBound.level, std::string("FL"));
+	CHECK(near(command.topBound.offset, -150.0));
+	// **絶対 Z は動かない**（上階の横架材天端 3350）。
+	CHECK(near(command.elevation + command.height, 3350.0));
+}
+
+TEST(build_column_binds_top_to_current_story_when_upper_floor_has_no_beam_offset)
+{
+	// **最後の手段**: 上階の横架材天端が FL と同じ高さ（横架材天端オフセット 0）だと、
+	// 上階のどちらの種別を指しても offset が 0 になり、**上階を指す言い方が残らない**。
+	// この IFC には柱以外に負の配置 Z を持つ要素が無いので、まさにその形になる。
+	// そこだけは上端も当階のレベルへバインドする（描かれない柱よりは描かれる柱を採る。
+	// parse/Column.h）。
 	StepText step;
 	const int storey = makeStorey(step, "1FL", 600.0);
 	makeStorey(step, "2FL", 3500.0);
@@ -715,20 +767,16 @@ TEST(build_column_binds_bottom_current_top_upper_floor)
 	CHECK(near(command.height, 2900.0));
 	CHECK(near(command.startOffset, 0.0));
 	CHECK(near(command.endOffset, -182.0));
-	// 下端は当階（storyOffset=0）。上端と**レベル種別も offset も同じ**になってしまう場合
-	// （ここがまさにそれ）、VW が終端を始端と同じ Z へ解決して実体が無い柱になるので、
-	// 下端だけ FL 基準へ振り替える（絶対 Z は 600 のまま。parse/Column.h「上下端が『階だけ
-	// 違う同じ記録』にならないようにする」）。
+	// 下端は当階（storyOffset=0）の横架材天端、offset = 600 − 600 = 0。
 	CHECK_EQ(command.bottomBound.storyOffset, 0);
-	CHECK_EQ(command.bottomBound.level, std::string("FL"));
+	CHECK_EQ(command.bottomBound.level, std::string("横架材天端"));
 	CHECK(near(command.bottomBound.offset, 0.0));
-	// **上下端が同じ記録になっていない**こと（これが直しの眼目）。
-	CHECK(command.bottomBound.level != command.topBound.level ||
-		  !near(command.bottomBound.offset, command.topBound.offset));
-	// 上端は上階（storyOffset=1）の横架材天端そのものなので offset は 0。
-	CHECK_EQ(command.topBound.storyOffset, 1);
+	// 上端も当階の横架材天端。offset はパス長ぶん（＝下端 offset ＋ 2900）。
+	CHECK_EQ(command.topBound.storyOffset, 0);
 	CHECK_EQ(command.topBound.level, std::string("横架材天端"));
-	CHECK(near(command.topBound.offset, 0.0));
+	CHECK(near(command.topBound.offset, 2900.0));
+	// 絶対 Z（上階の横架材天端 3500）は変わらない。
+	CHECK(near(command.elevation + command.height, 3500.0));
 }
 
 TEST(build_koyazuka_binds_both_ends_to_current_eaves)
@@ -1246,12 +1294,14 @@ TEST(all_fixtures_bounds_span_the_column_height)
 						   command.elevation));
 				CHECK(near(boundZ(command.topBound, top) + command.topBound.offset,
 						   command.elevation + command.height));
-				// **上下端が「階だけ違う同じ記録」になっていない**こと。
-				// この形にすると VW が終端を始端と同じ Z へ解決し、実体が無い柱に
-				// なる（実機で 46 本発生。parse/Column.h）。
-				CHECK(command.bottomBound.storyOffset == command.topBound.storyOffset ||
-					  command.bottomBound.level != command.topBound.level ||
-					  !near(command.bottomBound.offset, command.topBound.offset));
+				// **上端が「上階の、自階にもある種別」を offset 0 で指していない**こと。
+				// この形にすると VW が終端を自階のレベル（＝始端と同じ Z）へ解決し、
+				// 実体が無い柱になる（実機で 46 本発生。parse/Column.h）。offset 0 で
+				// 上階を指してよい種別は**軒高だけ**である——軒高は最上階にしか無く、
+				// 上階を指す柱の自階は最上階ではありえないので、必ず「自階に無い種別」に
+				// なる。FL と横架材天端はどの一般階にもあるので、offset 0 では指せない。
+				if (command.topBound.storyOffset > 0 && near(command.topBound.offset, 0.0))
+					CHECK_EQ(command.topBound.level, std::string("軒高"));
 			}
 		});
 }

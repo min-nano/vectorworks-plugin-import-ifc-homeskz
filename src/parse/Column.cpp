@@ -460,26 +460,38 @@ namespace HomeskzIfcImport::parse
 					// 横架材天端まで届くぶんだけ正になる。
 					const bool nextIsTop = (i + 1 == static_cast<std::size_t>(topIndex));
 					const char* nextLevel = beamTopLevelType(nextIsTop);
-					cmd.topBound = StoryBoundCommand{1, nextLevel, seatTop - beamTopAbs[i + 1]};
+					const double nextOffset = seatTop - beamTopAbs[i + 1];
+
+					// **「上階の、自階にもある種別」を offset 0 で指してはならない。** VW はその
+					// 形の終端を**自階のレベル**（＝始端と同じ Z）へ解決し、実体が無い柱になる
+					// （実機で 46 本。命令のパス長 2959 に対し StartElevation=572 /
+					// EndElevation=572。パスは 2 点ある）。実機で切り分けた分かれ目は次のとおり:
+					//   * `{上階, 横架材天端, 0}`    … 壊れる（横架材天端は**自階にもある**）
+					//   * `{上階, 軒高, 0}`          … 無事（軒高は 2 階に無い＝自階に無い）
+					//   * `{上階, 横架材天端, 2374}` … 無事（offset が 0 でない）
+					// そこで **offset が 0 になるときだけ上階の FL を基準に取り直す**——FL は上階に
+					// 必ずあり、横架材天端との差（＝上階の横架材天端オフセット）が入るので
+					// offset が 0 でなくなる。**上端は上階のレベルに紐付いたまま**なので階高の
+					// 変更に追随する性質は保たれ、**絶対 Z も動かない**。
+					// 経緯は docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」。
+					const double floorOffset = seatTop - stories[i + 1].elevation;
+					if (nextIsTop || std::abs(nextOffset) >= kBoundIdentityTol)
+						// 上階が最上階なら種別は軒高＝**自階に無い**ので offset 0 でも安全
+						// （実機で 32 本が無事）。それ以外も offset が 0 でなければ安全。
+						cmd.topBound = StoryBoundCommand{1, nextLevel, nextOffset};
+					else if (std::abs(floorOffset) >= kBoundIdentityTol)
+						cmd.topBound = StoryBoundCommand{1, kLevelFL, floorOffset};
+					else
+						// **最後の手段**: 上階の横架材天端が FL と同じ高さ（＝その階に負の配置 Z を
+						// 持つ要素が 1 つも無く、横架材天端オフセットが 0）の階では、どちらの種別を
+						// 指しても offset が 0 になり、**上階を指す言い方が残っていない**。そこ
+						// だけは上端も当階のレベルへバインドする（小屋束と同じ形。同じ階の中で
+						// 上下の offset が違うので誤解決は起きない）。階高の変更に追随しなく
+						// なるが、**描かれない柱よりは描かれる柱を採る**（フィクスチャでは
+						// 「グレー本モデルプラン2」の 70 本だけが該当する）。
+						cmd.topBound = StoryBoundCommand{0, currentLevel, seatTop - beamTopAbs[i]};
 				}
 
-				// **上下端が「階だけ違う、まったく同じ記録」になったら、下端を FL 基準へ
-				// 振り替える。** VW はこの形の柱の終端を**始端と同じ Z へ解決してしまい**、
-				// 実体が無い柱になる（実機で実測: 命令のパス長 2959 に対し
-				// StartElevation=572 / EndElevation=572。パスは 2 点ある）。上階参照その
-				// ものは効いている——同じ「上階の横架材天端」でも offset が 0 でない通し柱は
-				// 正しく 5905 に解けた。壊れるのは**レベル種別も offset も同じ**ときだけで、
-				// 2 階の柱（上端＝軒高）が無事なのもこれで説明が付く。
-				//
-				// **直すのは下端**にする。上端を上階のレベルへ紐付けたままにしておけば、
-				// 階高を変えたとき柱がそれに追随する——そちらがこのバインドの本来の値打ち
-				// なので、動かすのは当階の中で意味が変わらない下端の方である。
-				// **絶対 Z は 1mm も動かない**（レベルを FL へ移し、offset をその差で取り直す
-				// だけ）。経緯は docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」。
-				if (cmd.topBound.storyOffset != cmd.bottomBound.storyOffset &&
-					cmd.topBound.level == cmd.bottomBound.level &&
-					std::abs(cmd.topBound.offset - cmd.bottomBound.offset) < kBoundIdentityTol)
-					cmd.bottomBound = StoryBoundCommand{0, kLevelFL, bottomAbs - story.elevation};
 				commands.push_back(std::move(cmd));
 			}
 		}
