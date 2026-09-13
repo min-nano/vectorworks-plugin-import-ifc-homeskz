@@ -182,6 +182,12 @@ jobs:
           lipo -info "$bundle/Contents/MacOS/$name"
           test -e "$bundle/Contents/Resources/$name.vwr" \
             || { echo "::error::$name.vwr was not packaged into the bundle"; exit 1; }
+          # 同梱スクリプトは**3 つで 1 組**。vw-update / vw-feedback は vw-token を
+          # source するので、1 つ欠けたまま配ると投稿も認証も静かに落ちる（M27）。
+          for s in vw-update.sh vw-feedback.sh vw-token.sh; do
+            test -e "$bundle/Contents/Resources/$s" \
+              || { echo "::error::$s was not packaged into the bundle"; exit 1; }
+          done
           echo "Build stamp:"
           /usr/libexec/PlistBuddy -c "Print :VWBuildChannel" "$bundle/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :VWBuildBranch"  "$bundle/Contents/Info.plist"
@@ -310,6 +316,11 @@ jobs:
           test -f "$d/$name.vwpayload" \
             || { echo "::error::$name.vwpayload (the payload module) was not produced"; exit 1; }
           test -f "$d/$name.shell-id" || { echo "::error::$name.shell-id stamp missing"; exit 1; }
+          # 同梱スクリプトは**3 つで 1 組**。vw-update / vw-feedback は vw-token を
+          # dot-source するので、1 つ欠けたまま配ると投稿も認証も静かに落ちる（M27）。
+          for s in vw-update.ps1 vw-feedback.ps1 vw-token.ps1; do
+            test -f "$d/$s" || { echo "::error::$s was not staged next to the module"; exit 1; }
+          done
           echo "Build stamp: $(cat "$d/$name.commit") ($(cat "$d/$name.branch"))"
           echo "Shell id: $(cat "$d/$name.shell-id")"
 
@@ -342,6 +353,9 @@ jobs:
             "build/Release/$name.shell-id",
             "build/Release/vw-update.ps1",
             "build/Release/vw-feedback.ps1",
+            # vw-token.ps1 は**上の 2 つが dot-source する**トークンの在り処
+            # （scripts/vw-token.ps1）。片方だけ配ると認証が外れる。
+            "build/Release/vw-token.ps1",
             "scripts/vw-install.ps1",
             "scripts/vw-uninstall.ps1",
             # **MCP サーバ**（メニュー「MCP ブリッジを開始…」の相手側）。依存の無い
