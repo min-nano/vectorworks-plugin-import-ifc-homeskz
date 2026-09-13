@@ -498,10 +498,14 @@ COMMENTS_BODY='[]'
 # 起きない——だから「振る舞いを試す」では守れず、**書かないことを検査する**しかない
 # （round 1 の実機で、トークン未登録のときだけ find-pr が黙って落ちた原因がこれ）。
 # ---------------------------------------------------------------------------
+# **source している vw-token.sh も同じ**（同じシェルで走るので、あちらに配列が 1 つ
+# あればここで死ぬ）。
 CHECKS=$((CHECKS + 1))
-if grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}' "$SCRIPT" >/dev/null 2>&1; then
+if grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}' "$SCRIPT" "${HERE}/../scripts/vw-token.sh" \
+	>/dev/null 2>&1; then
 	echo "[ FAIL ] the script must not expand arrays (macOS bash 3.2 dies on an empty one)"
-	grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}' "$SCRIPT" | sed 's/^/         /'
+	grep -nE '\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}' "$SCRIPT" "${HERE}/../scripts/vw-token.sh" |
+		sed 's/^/         /'
 	FAILURES=$((FAILURES + 1))
 else
 	echo "[ PASS ] the script expands no arrays (safe on macOS bash 3.2)"

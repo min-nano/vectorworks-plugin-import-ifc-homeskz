@@ -177,6 +177,10 @@ scripts/
                             コメントの投稿・**往復を続けてよいかの確認**（`loop-control`。
                             M24）（下記「実機フィードバックの往復」）
   vw-feedback.ps1           同上の Windows 版（.vlb の隣に同梱される）
+  vw-token.sh / .ps1        **GitHub のトークンの在り処**（保存先・探索順・gh の探し場所）。
+                            実行はせず、vw-feedback と vw-update の両方が source する
+                            ——読むほうにも必ず付ける（認証なしの GitHub API は IP ごとに
+                            1 時間 60 回で、1 分ごとの往復の確認はちょうどそこに当たる。M27）
   lint.sh                   ローカルで全 lint（clang / cmake / yaml / shell …）
                             を実行する（CI と同じチェック。--fix で自動修正）
   clang-tidy-sdk.sh         SDK 依存の翻訳単位（src/draw/ ほか）に clang-tidy を
@@ -1235,7 +1239,8 @@ PR コメントは**公開**です。そこで**既定で案件が分かるも�
 | `src/draw/HostServices.*` | 殻から借りた道具（同梱スクリプトの実行）の置き場所 |
 | `src/FeedbackLoop.*` | **自動の往復の駆動**（殻・無 SDK・テストあり。M24）。合図と新しいビルドを見て、入れて、取り込みを本体に頼み、止まる条件を持つ |
 | `src/FeedbackLoopHost.*` / `src/Extensions/ExtFeedbackPalette.*` / `resources/<vwr>/html/` | 駆動の殻の実物と、モードレスなパレット（SDK 依存。**判断は持たない**） |
-| `scripts/vw-feedback.sh` / `.ps1` | **ネットワークとトークン**。`token-status` / `login` / `logout` / `find-pr` / `post` / `loop-control`（ダイアログは持ちません） |
+| `scripts/vw-feedback.sh` / `.ps1` | **ネットワーク**。`token-status` / `login` / `logout` / `find-pr` / `post` / `loop-control`（ダイアログは持ちません） |
+| `scripts/vw-token.sh` / `.ps1` | **トークンの在り処**（保存先・探索順）。`vw-feedback` と `vw-update` が source します（M27） |
 
 **安定版（stable）では動きません。** 往復するのは PR のビルドであって main の配布物では
 なく、開発用でないビルドに「図面の情報が外へ出る経路」を持たせないためです
@@ -1295,6 +1300,13 @@ PR コメントは**公開**です。そこで**既定で案件が分かるも�
 - **macOS** — `scripts/vw-update.sh`（bash）。バンドル内の
   `Contents/Resources/vw-update.sh` に入ります。
 - **Windows** — `scripts/vw-update.ps1`（PowerShell）。`.vlb` の隣に入ります。
+
+**GitHub を読むときは、トークンがあれば必ず付けます**（`scripts/vw-token.{sh,ps1}` を
+source して探します。無ければ従来どおり認証なしで続きます）。公開リポジトリなので認証は
+要りませんが、**認証なしの GitHub REST は IP ごとに 1 時間 60 回**で、往復のパレットは
+1 分ごとに `q-dev` を呼ぶ＝ちょうど上限に張り付きます（実機で「リリース一覧を取得でき
+ませんでした」として出ました。`docs/DEV-NOTES.md` M27）。失敗したときは HTTP の番号・
+curl の終了コード・API 制限なら**いつ戻るか**まで `error=` の行に載せます。
 
 ### 探すのは同梱スクリプト、置くのはリリース側のインストーラ
 
