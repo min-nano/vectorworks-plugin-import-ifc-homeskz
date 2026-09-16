@@ -126,6 +126,9 @@ namespace HomeskzIfcImport::draw
 			std::string controlProbe; // 無事だった対照 1 本の 3 地点（レベル種別違い）
 		};
 
+		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
+		constexpr double kExtentTol = 1.0;
+
 		// 実体が無い（長さ 0）か。**あるべき長さを持つ命令にだけ問う**。
 		bool StageCollapsed(double span, double expected)
 		{
@@ -153,9 +156,6 @@ namespace HomeskzIfcImport::draw
 			return std::string(head.data()) +
 				   "\n  バウンドID一覧: " + DescribeObjectBoundIds(result.object);
 		}
-
-		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
-		constexpr double kExtentTol = 1.0;
 
 		bool DrawOne(const core::ColumnCommand& column, MCObjectHandle layer, RefNumber style,
 					 ColumnFailures& failures, MCObjectHandle& outObject)
