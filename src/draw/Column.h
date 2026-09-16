@@ -45,4 +45,21 @@ namespace HomeskzIfcImport::draw
 	std::size_t drawColumns(const core::Document& document, core::ProgressReporter& progress,
 							std::string* outDiagnostics = nullptr,
 							ObjectHandles* handles = nullptr);
+
+	// **取り込みが終わったあとに**柱を測り直す（draw/ExecuteDocument が最後に 1 回呼ぶ）。
+	//
+	// 【なぜ最後にもう一度測るのか】「柱オブジェクトは在り、OIP の値も命令どおりなのに実体が
+	// 無い」という事故を追うのに、**描いた直後か・描いたあとか**を分ける地点がここしか無い
+	// （全要素・伏図・軸組図まで済んだ唯一の場所）。M27 の原因はここで挟み撃ちにして突き
+	// 止めた——**生成直後から潰れており**、上端のバウンドが「上階の、自階にもある種別」を
+	// offset 0 で指している柱だけ終端が始端と同じ Z に解決されていた（docs/DEV-NOTES.md
+	// 「柱が長さ 0 で描かれる（M27）」）。原因は解析側で潰してあるので、ここは**同じ事故がもう一度起きていないか**を
+	// 数える見張りとして残す。
+	//
+	// 実体が無い柱・命令と食い違う柱の件数を outDiagnostics へ返す。outNotes には 1 本目の
+	// 実測（どのパラメータが何を返しているか）を入れる——平常でも出る記録なので診断ログに
+	// だけ出す。
+	void recheckColumns(const core::Document& document, const ObjectHandles& handles,
+						std::string* outDiagnostics, std::string* outNotes);
+
 } // namespace HomeskzIfcImport::draw

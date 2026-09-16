@@ -1000,8 +1000,29 @@ namespace HomeskzIfcImport::draw
 	{
 		if (object == nil)
 			return false;
+		// **名前付きの lvalue に置いてから渡す。** 受け取り側は const 参照で、いつ読むかは
+		// VW の都合である（この直後とは限らない）。一時オブジェクトを渡すと、その寿命は
+		// この式の終わりまでしか無い（CLAUDE.md「境界を越えて来た構造体は…」と同じ用心）。
 		const VectorWorks::SStoryObjectData data = StoryBoundData(bound);
 		return gSDK->SetObjectStoryBound(object, boundID, data);
+	}
+
+	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID)
+	{
+		if (object == nil)
+			return "なし";
+		if (!gSDK->HasObjectStoryBound(object, boundID))
+			return "なし";
+		VectorWorks::SStoryObjectData data;
+		if (!gSDK->GetObjectStoryBound(object, boundID, data))
+			return "読めない";
+		// fBound は SDK の EStoryObjectBound（0=レイヤの高さ / 1=レイヤの壁高 / 2=ストーリ）。
+		// **数のまま出す**——名前を付け替えると、SDK 側で値が増えたときに嘘になる。
+		std::array<char, 192> buffer{};
+		std::snprintf(buffer.data(), buffer.size(), "種別=%d 階=%+d レベル=\"%s\" offset=%g",
+					  static_cast<int>(data.fBound), static_cast<int>(data.fBoundStory),
+					  data.fLayerLevelType.GetStdString().c_str(), data.fOffset);
+		return {buffer.data()};
 	}
 
 	bool ReadPioPathZ(MCObjectHandle object, double& outZ0, double& outZ1, Sint32& outPoints)
@@ -1044,26 +1065,30 @@ namespace HomeskzIfcImport::draw
 	{
 		if (container == nil)
 			return 0.0;
+		// **名前付きの lvalue に置いてから渡す**（ApplyStoryBound と同じ用心）。
 		const VectorWorks::SStoryObjectData data = StoryBoundData(bound);
 		return gSDK->GetStoryObjectDataBoundHeight(data, container);
 	}
 
-	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID)
+	std::string DescribeObjectBoundIds(MCObjectHandle object)
 	{
 		if (object == nil)
-			return "なし";
-		if (!gSDK->HasObjectStoryBound(object, boundID))
-			return "なし";
-		VectorWorks::SStoryObjectData data;
-		if (!gSDK->GetObjectStoryBound(object, boundID, data))
-			return "読めない";
-		// fBound は SDK の EStoryObjectBound（0=レイヤの高さ / 1=レイヤの壁高 / 2=ストーリ）。
-		// **数のまま出す**——名前を付け替えると、SDK 側で値が増えたときに嘘になる。
-		std::array<char, 192> buffer{};
-		std::snprintf(buffer.data(), buffer.size(), "種別=%d 階=%+d レベル=\"%s\" offset=%g",
-					  static_cast<int>(data.fBound), static_cast<int>(data.fBoundStory),
-					  data.fLayerLevelType.GetStdString().c_str(), data.fOffset);
-		return {buffer.data()};
+			return "オブジェクトが無い";
+		const std::size_t count = gSDK->GetObjectStoryBoundsCount(object);
+		std::array<char, 48> head{};
+		std::snprintf(head.data(), head.size(), "%d 個", static_cast<int>(count));
+		std::string text(head.data());
+		// **並ぶ数が多くても全部は出さない。** 知りたいのは「0 と 1 なのか、-3 なのか」
+		// なので先頭 4 つで足りる。
+		for (std::size_t index = 0; index < count && index < 4; ++index)
+		{
+			const Sint32 id = gSDK->GetObjectStoryBoundsAt(object, index);
+			std::array<char, 80> buffer{};
+			std::snprintf(buffer.data(), buffer.size(), " [id=%d 解決Z=%g]", static_cast<int>(id),
+						  gSDK->GetObjectBoundElevation(object, id));
+			text += buffer.data();
+		}
+		return text;
 	}
 
 	std::string DescribePioPath(MCObjectHandle object)
@@ -1074,8 +1099,8 @@ namespace HomeskzIfcImport::draw
 		if (path == nil)
 			return "パスを引けない";
 		std::string text;
-		// ピース索引の起点は 0 / 1 のどちらの規約もありうるので両方見る。点は先頭 3 つまで
-		// （潰れているかは 2 点あれば分かる）。
+		// ピース索引の起点は 0 / 1 のどちらの規約もありうる（PathProbe と同じ用心）ので
+		// 両方見る。点は先頭 3 つまで（潰れているかは 2 点あれば分かる）。
 		for (Sint32 piece = 0; piece <= 1; ++piece)
 		{
 			const Sint32 count = gSDK->NurbsGetNumPts(path, piece);
@@ -1098,27 +1123,6 @@ namespace HomeskzIfcImport::draw
 							  point.z);
 				text += buffer.data();
 			}
-		}
-		return text;
-	}
-
-	std::string DescribeObjectBoundIds(MCObjectHandle object)
-	{
-		if (object == nil)
-			return "オブジェクトが無い";
-		const std::size_t count = gSDK->GetObjectStoryBoundsCount(object);
-		std::array<char, 48> head{};
-		std::snprintf(head.data(), head.size(), "%d 個", static_cast<int>(count));
-		std::string text(head.data());
-		// **並ぶ数が多くても全部は出さない。** 知りたいのは「0 と 1 なのか、-3 なのか」
-		// なので、先頭 4 つで足りる。
-		for (std::size_t index = 0; index < count && index < 4; ++index)
-		{
-			const Sint32 id = gSDK->GetObjectStoryBoundsAt(object, index);
-			std::array<char, 80> buffer{};
-			std::snprintf(buffer.data(), buffer.size(), " [id=%d 解決Z=%g]", static_cast<int>(id),
-						  gSDK->GetObjectBoundElevation(object, id));
-			text += buffer.data();
 		}
 		return text;
 	}
