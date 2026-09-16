@@ -265,44 +265,10 @@ namespace HomeskzIfcImport::draw
 		// 構造材ツールの高さ基準が「レイヤの高さ」・offset 0 のまま実ジオメトリと矛盾する
 		// ことがなくなり、編集時に高さがリセットされない。水平材の傾斜はこの offset 差で
 		// 表れ、鉛直材ではこの差が柱高さを支配する。
-		// **① 高さ基準を書く前のパスを読む**（M27 の残り。spec.probe のときだけ）。ここで既に
-		// 潰れていれば犯人は `CreateCustomObjectPath` で、高さ基準は無関係だと確定する。
-		if (spec.probe)
-		{
-			result.probe.measured = true;
-			result.probe.expected = spec.expectedLength;
-			double z0 = 0.0;
-			double z1 = 0.0;
-			result.probe.createRead = ReadPioPathZ(object, z0, z1, result.probe.createPoints);
-			result.probe.createSpan = z1 - z0;
-			result.probe.createZ0 = z0;
-			result.probe.createZ1 = z1;
-			// **オブジェクトに依らない検算**は書く前でも後でも同じ答えになるはずのもの。
-			// ここで採っておけば、③ の GetObjectBoundElevation と食い違ったときに
-			// 「レコードの解き方」と「そのオブジェクトの解決結果」を分けて読める。
-			if (spec.container != nil)
-			{
-				result.probe.resolvedRead = true;
-				result.probe.startResolved = ResolveBoundElevation(spec.startBound, spec.container);
-				result.probe.endResolved = ResolveBoundElevation(spec.endBound, spec.container);
-			}
-		}
-
 		// **戻り値を見る。** 受け取られなければ材は高さを持てない（＝実体が無い材になる）。
 		const bool startBoundOk = ApplyStoryBound(object, kStartBoundID, spec.startBound);
 		const bool endBoundOk = ApplyStoryBound(object, kEndBoundID, spec.endBound);
 		result.boundOk = startBoundOk && endBoundOk;
-
-		// **② 高さ基準を書いた直後・ResetObject の前**（M27 の残り）。① が正しくここで潰れて
-		// いれば、SetObjectStoryBound がその場でジオメトリを触っていることになる。
-		if (spec.probe)
-		{
-			double z0 = 0.0;
-			double z1 = 0.0;
-			Sint32 points = 0;
-			result.probe.boundRead = ReadPioPathZ(object, z0, z1, points);
-			result.probe.boundSpan = z1 - z0;
-		}
 
 		VWParametricObj pio(object);
 		const TXString breadth = ResolveParamName(pio, kFieldMajorBreadth, kLocalizedBreadth);
@@ -344,23 +310,6 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 		gSDK->ResetObject(object);
-
-		// **③ ResetObject の後**（M27 の残り）。**パスの差し替えより前**に読むこと——
-		// 差し替えたあとでは「もともと潰れていたか」が消える。ここで初めて潰れるなら犯人は
-		// 「解決済みの高さ基準からパスを作り直す」再構築（SDK リファレンス Findings
-		// 「Parametric Objects」）で、解決済み絶対 Z がその理由をそのまま名指しする。
-		if (spec.probe)
-		{
-			double z0 = 0.0;
-			double z1 = 0.0;
-			Sint32 points = 0;
-			result.probe.resetRead = ReadPioPathZ(object, z0, z1, points);
-			result.probe.resetSpan = z1 - z0;
-			result.probe.resetZ0 = z0;
-			result.probe.resetZ1 = z1;
-			result.probe.startElevation = ReadBoundElevation(object, kStartBoundID);
-			result.probe.endElevation = ReadBoundElevation(object, kEndBoundID);
-		}
 
 		// 【描けたかを読み戻す】PIO は生成できても実体を持たないことがある（パスが 1 点の
 		// まま・バウンドの解決に失敗、など。Findings「Parametric Objects」）。そのとき OIP の

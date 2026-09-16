@@ -197,44 +197,6 @@ namespace HomeskzIfcImport::draw
 	// これ（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 	std::string DescribePioPath(MCObjectHandle object);
 
-	// --- M27 の残り: 「どの 1 手で潰れたか」を測るための読み取り ---------------------------
-	//
-	// M27 は「潰れていたらパスを作り直して差し替える」対症療法で絵は出るようになったが、
-	// **なぜ潰れるのかは分かっていない**。分けられていないのは次の 3 手で、これまで読んで
-	// いたのは「渡す直前の曲線」（`PathProbe`）と「全部終わったあと」（`MeasureDrawnMember`）
-	// だけだった:
-	//   ① `CreateCustomObjectPath` の直後（高さ基準を書く前）
-	//   ② `SetObjectStoryBound` ×2 の直後（`ResetObject` の前）
-	//   ③ `ResetObject` の後
-	// 以下はその 3 地点を読むための最小の口で、**図面を 1 ミリも変えない**。
-
-	// PIO が**実際に持っているパス**の両端 Z（`GetCustomObjectPath` ＋ `NurbsGetPt3D`）。
-	// 2 点を読めたら true。パスは**挿入点からの相対**で保持されるので返る値は絶対 Z では
-	// ない——**知りたいのは 2 点の差**（＝材の実体があるか）である。ピース索引の起点は
-	// 0 / 1 のどちらの規約もありうるので両方見る（`DescribePioPath` と同じ用心）。
-	bool ReadPioPathZ(MCObjectHandle object, double& outZ0, double& outZ1, Sint32& outPoints);
-
-	// その ID のストーリバウンドが**解決された絶対 Z**（`GetObjectBoundElevation`）。
-	//
-	// この "bound" は**バウンディングボックスではなくストーリバウンド**である（`vs.py` の
-	// 引数説明が "The identifier of the story bound."。ISDK.h でも `Has/Get/Set/Del`
-	// `ObjectStoryBound` と同じブロックに並ぶ）。したがって水平材・傾斜材でも「その ID の
-	// バウンドが解決された絶対 Z」を返し、材の外接とは無関係である。
-	// 失敗を表す戻り値が無いので値をそのまま返す。
-	double ReadBoundElevation(MCObjectHandle object, Sint32 boundID);
-
-	// 命令の高さ基準が container のレイヤに対して解決される絶対 Z
-	// （`GetStoryObjectDataBoundHeight`）。**オブジェクトを作らずに検算できる**のが要点で、
-	// `ReadBoundElevation` と食い違えば「レコードの解き方」と「そのオブジェクトの解決結果」
-	// を分けて読める。
-	double ResolveBoundElevation(const core::StoryBoundCommand& bound, MCObjectHandle container);
-
-	// そのオブジェクトが**実際に持っているバウンド ID の一覧**と、それぞれの解決済み絶対 Z。
-	// `kStartBoundID` / `kEndBoundID`（0 / 1）が本当に使われているのかを確かめるためにある
-	// ——ISDK.h には `kPIOGenericStoryLevelBoundID = -3`（2017 年のストーリレベル対応 PIO 用）
-	// という別の ID があり、**構造材 PIO がどちらを見ているかは未確認**である。
-	std::string DescribeObjectBoundIds(MCObjectHandle object);
-
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
 	//
 	// 床（draw/Floor）と底盤（draw/Footing）は**同じ手順**でスラブを描く（外形ポリゴン →

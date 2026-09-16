@@ -81,7 +81,6 @@
 #include <cstddef>
 #include <cmath>
 #include <cstdio>
-#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -108,90 +107,12 @@ namespace HomeskzIfcImport::draw
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
 			std::size_t bound = 0; // 高さ基準を VW が受け取らなかった
 			std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
-			// パスを作り直して差し替えたら直った本数（draw/StructuralMember.h の
-			// retryWithFreshPath）。0 でなければ「渡した曲線は正しく、PIO 化で潰れていた」。
-			std::size_t repaired = 0;
 			std::string lengthHint; // 「長さ」のパラメータ名の手掛かり（最初の 1 件）
 			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長・図面が
 			// 持っている高さ基準・図面のパスの頂点）。**原因をパス側と高さ基準側に分けるのは
 			// この 1 行だけ**なので、必ず持ち帰る。
 			std::string collapsedProbe;
-
-			// --- M27 の残り: どの 1 手で潰れたか（対症療法で絵は出るが、原因は未特定）-------
-			std::size_t collapsedCreate = 0; // ① CreateCustomObjectPath の直後から潰れていた
-			std::size_t collapsedBound = 0; // ② 高さ基準を書いた直後に潰れていた
-			std::size_t collapsedReset = 0; // ③ ResetObject の後（**差し替えの前**）に潰れていた
-			// **仮説の検証**: 上下端のレコードが階以外同一の柱だけが潰れているのか
-			// （core::boundsDifferOnlyByStory。命令セットの全数検算では、潰れた 46 本だけが
-			// この形だった。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
-			std::size_t onlyStoryTotal = 0;
-			std::size_t onlyStoryCollapsed = 0;
-			std::size_t otherTotal = 0;
-			std::size_t otherCollapsed = 0;
-			std::string stageProbe; // 潰れた 1 本目の 3 地点
-			std::string controlProbe; // 無事だった対照 1 本の 3 地点（レベル種別違い）
-
-			// **①②で潰れていた柱を「全数」で数える**（③ で実体を持ったものも含む）。round 1
-			// で分かったのは「潰れた柱だけでなく**無事な柱も ① と ② では 0 長**で、③ の
-			// `ResetObject` が解決済みバウンドから作り直して初めて実体を持つ」ことだった。
-			// つまり `CreateCustomObjectPath` がパスを潰すのは**普遍**で、分かれ目は
-			// 「③ で作り直してもらえるかどうか」にある。それを件数で押さえる。
-			std::size_t probed = 0;				// 3 地点を測れた柱（全数）
-			std::size_t createCollapsedAll = 0; // ① で潰れていた（③ で直ったものも含む）
-			std::size_t boundCollapsedAll = 0; // ② で潰れていた（同上）
-			// 潰れた 1 本目のレイヤと、**レイヤごとの無事だった 1 本目**。潰れた柱と
-			// **同じレイヤ**の無事な柱を並べると、レイヤ・階・下端が同じで上端だけが違う
-			// 対になるので、差が 1 つに絞れる（round 1 の対照は別レイヤだった）。
-			std::string brokenLayer;
-			std::map<std::string, std::string> layerControls;
-
-			// **仮説 B の検算**: 分かれ目は「① のパスが**ちょうど** 0 長か、丸め誤差ぶんだけ
-			// 0 でないか」ではないか。round 1 では潰れた柱の ① が 4.54747e-13（2048〜4096 付近
-			// の 1 ULP）で、無事な柱の ① はちょうど 0 だった。`ResetObject` が
-			// 「**ちょうど潰れているパスだけ**を解決済みバウンドから作り直す」のなら、
-			// 1 ULP でも 0 でないパスは「呼び出し側が与えた正しいパス」と見なされて残る——
-			// それがそのまま「長さ 0 の柱」になる。
-			//
-			// 真なら次の 2 つがぴたりと一致する（ずれれば仮説は捨てる）:
-			//   createExactZero  ＋ createNearZero ＝ probed
-			//   createNearZero   ＝ 潰れた本数（collapsedReset）
-			std::size_t createExactZero = 0; // ① がちょうど 0 長（z0 と z1 がビット一致）
-			std::size_t createNearZero = 0; // ① が 0 でないが許容以下（＝丸め誤差ぶん）
-			std::size_t nearZeroCollapsed = 0; // そのうち実際に潰れた本数
 		};
-
-		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
-		constexpr double kExtentTol = 1.0;
-
-		// 実体が無い（長さ 0）か。**あるべき長さを持つ命令にだけ問う**。
-		bool StageCollapsed(double span, double expected)
-		{
-			return expected > kExtentTol && std::abs(span) < kExtentTol;
-		}
-
-		// 3 地点の証拠を人が読める 1 塊にする。**この塊で犯人が決まる**ので、命令の値・
-		// ①②③ のパス長・解決済み Z・検算・実際に並ぶバウンド ID を並べる。
-		std::string FormatStages(const char* label, const core::ColumnCommand& column,
-								 const StructuralMemberResult& result)
-		{
-			const StructuralMemberProbe& probe = result.probe;
-			std::array<char, 1024> head{};
-			std::snprintf(head.data(), head.size(),
-						  "\n%s[%s 下端{階%+d \"%s\" off=%g} 上端{階%+d \"%s\" off=%g} "
-						  "あるべき長さ=%g]\n  ①生成直後 %g(%d点) ②基準書込後 %g ③リセット後 "
-						  "%g\n  ①端点Z %.17g → %.17g／③端点Z %.17g → %.17g"
-						  "\n  解決済みZ 始端=%g 終端=%g／検算 始端=%g 終端=%g",
-						  label, column.layer.c_str(), column.bottomBound.storyOffset,
-						  column.bottomBound.level.c_str(), column.bottomBound.offset,
-						  column.topBound.storyOffset, column.topBound.level.c_str(),
-						  column.topBound.offset, probe.expected, probe.createSpan,
-						  static_cast<int>(probe.createPoints), probe.boundSpan, probe.resetSpan,
-						  probe.createZ0, probe.createZ1, probe.resetZ0, probe.resetZ1,
-						  probe.startElevation, probe.endElevation, probe.startResolved,
-						  probe.endResolved);
-			return std::string(head.data()) +
-				   "\n  バウンドID一覧: " + DescribeObjectBoundIds(result.object);
-		}
 
 		bool DrawOne(const core::ColumnCommand& column, MCObjectHandle layer, RefNumber style,
 					 ColumnFailures& failures, MCObjectHandle& outObject)
@@ -256,16 +177,12 @@ namespace HomeskzIfcImport::draw
 			// 描き上がりの長さ＝パス長（端部オフセットはこの長さから戻す量なので、潰れて
 			// いないかを見るこの検査には要らない）。0 で潰れていたら診断へ持ち帰る。
 			spec.expectedLength = column.height;
-			// 潰れていたらパスを作り直して差し替える。**差し替えるパスは挿入点からの相対**で
-			// 渡す（世界座標で渡すと材が挿入点の Z ぶん高く出る。実機 round 10 で
-			// `Z 1144→4103`。draw/StructuralMember.h の retryWithFreshPath）。
-			spec.retryWithFreshPath = true;
-			spec.pathStart = core::Vec3{0.0, 0.0, 0.0};
-			spec.pathEnd = core::Vec3{0.0, 0.0, column.height};
-			// **M27 の残り**: 柱だけ 3 地点の読み戻しを採る（横架材・垂木は採らない。事故が
-			// 出ているのは柱で、数百本ぶん余計な読み戻しを走らせる理由が無い）。
-			spec.container = layer;
-			spec.probe = true;
+			// **パスを作り直して差し替える対症療法（`retryWithFreshPath`）は要らなくなった。**
+			// 潰れていたのは「渡した 2 点の Z が違うせいで、潰れ方に 1 ULP の丸めが残り、
+			// `ResetObject` の再構築から外れていた」ためで、両端に同じ Z を渡すようにした
+			// いま原理的に起きない（上記 CreatePath・docs/DEV-NOTES.md M27）。実機 round 3 で
+			// 作り直しが 1 本も走らないことを確認してから外してある。**潰れの検出は残す**
+			// ——直ったから見張りを外す、ではなく、再発したら黙って繕わずに報せるため。
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
 			{
@@ -307,98 +224,27 @@ namespace HomeskzIfcImport::draw
 			}
 			// 長さ 0 で描かれた本数（オブジェクトは在るのに実体が無い）。**これが 0 でない
 			// 限り、件数が揃っていても絵は欠けている**ので、必ず診断へ載せる。
-			if (result.repairedByPath)
-				++failures.repaired;
-			if (result.collapsed || result.repairedByPath)
+			if (result.collapsed)
 			{
-				if (result.collapsed)
-					++failures.collapsed;
+				++failures.collapsed;
 				// 1 本目だけ実測を控える（全数ぶん並べても読めない）。
 				if (failures.collapsedProbe.empty())
 				{
 					// 入れ直しの結末（**入れ子の三項演算子にしない**——clang-tidy の
 					// readability-avoid-nested-conditional-operator）。
-					const char* fixedNote = "できない";
-					if (probe.setOk)
-						fixedNote = probe.fixedRead ? "" : "読めない";
 					std::array<char, 192> buffer{};
 					std::snprintf(buffer.data(), buffer.size(),
 								  "パスの頂点 piece0=%d piece1=%d・作った曲線の Z %s(%g→%g)・"
-								  "入れ直し %s(→%g)・命令のパス長 %g（Z %g→%g）・OIP ",
+								  "命令のパス長 %g（Z %g→%g）・OIP ",
 								  static_cast<int>(probe.piece0), static_cast<int>(probe.piece1),
-								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1, fixedNote,
-								  probe.fixedZ1, column.height, column.elevation,
+								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1,
+								  column.height, column.elevation,
 								  column.elevation + column.height);
 					failures.collapsedProbe = std::string(buffer.data()) + result.collapsedProbe;
 				}
 			}
 			if (failures.lengthHint.empty())
 				failures.lengthHint = result.lengthParamHint;
-
-			// --- M27 の残り: どの 1 手で潰れたかを数え、証拠を 2 本だけ採る ----------------
-			if (result.probe.measured)
-			{
-				const StructuralMemberProbe& stages = result.probe;
-				const bool onlyStory =
-					core::boundsDifferOnlyByStory(column.bottomBound, column.topBound);
-				// **③（差し替えの前）で潰れていたか**を「潰れた」とみなす——差し替えで直った
-				// 柱も、潰れた事実そのものは変わらない。
-				const bool collapsed = StageCollapsed(stages.resetSpan, stages.expected);
-				if (onlyStory)
-				{
-					++failures.onlyStoryTotal;
-					failures.onlyStoryCollapsed += collapsed ? 1 : 0;
-				}
-				else
-				{
-					++failures.otherTotal;
-					failures.otherCollapsed += collapsed ? 1 : 0;
-				}
-				// **全数の集計**（③ で実体を持ったかに関わらず、①② で潰れていたかを数える）。
-				++failures.probed;
-				failures.createCollapsedAll +=
-					StageCollapsed(stages.createSpan, stages.expected) ? 1 : 0;
-				failures.boundCollapsedAll +=
-					StageCollapsed(stages.boundSpan, stages.expected) ? 1 : 0;
-				// 仮説 B: ① が「ちょうど 0」か「丸め誤差ぶんだけ 0 でない」か。**等値比較で
-				// よい**——ここで知りたいのはビットが一致するかそのものである。
-				if (StageCollapsed(stages.createSpan, stages.expected))
-				{
-					if (stages.createZ0 == stages.createZ1)
-						++failures.createExactZero;
-					else
-					{
-						++failures.createNearZero;
-						failures.nearZeroCollapsed += collapsed ? 1 : 0;
-					}
-				}
-				if (collapsed)
-				{
-					failures.collapsedCreate +=
-						StageCollapsed(stages.createSpan, stages.expected) ? 1 : 0;
-					failures.collapsedBound +=
-						StageCollapsed(stages.boundSpan, stages.expected) ? 1 : 0;
-					++failures.collapsedReset;
-					if (failures.stageProbe.empty())
-					{
-						failures.stageProbe = FormatStages("潰れた 1 本目", column, result);
-						failures.brokenLayer = column.layer;
-					}
-				}
-				else
-				{
-					// **レイヤごとに無事な 1 本目を控える。** 潰れた柱と同じレイヤのものを
-					// あとで選べるようにする（どちらが先に現れるかに依らないため、列挙順に
-					// 拾って map へ入れる。map は名前順に並ぶので決定的）。
-					if (!failures.layerControls.contains(column.layer))
-						failures.layerControls.emplace(
-							column.layer, FormatStages("対照 同じレイヤ", column, result));
-					// レベル種別が違って無事な柱（上階のレベルにちょうど乗る形）。
-					if (failures.controlProbe.empty() &&
-						column.topBound.level != column.bottomBound.level)
-						failures.controlProbe = FormatStages("対照 レベル種別違い", column, result);
-				}
-			}
 
 			outObject = result.object;
 			return true;
@@ -450,8 +296,8 @@ namespace HomeskzIfcImport::draw
 		// （柱が見えないときの切り分け材料）。
 		if (outDiagnostics != nullptr &&
 			(failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
-			 failures.bound > 0 || failures.collapsed > 0 || failures.repaired > 0 ||
-			 failures.collapsedReset > 0 || !failures.lengthHint.empty() || style == 0))
+			 failures.bound > 0 || failures.collapsed > 0 || !failures.lengthHint.empty() ||
+			 style == 0))
 		{
 			std::string note = "柱の診断: ";
 			if (failures.path > 0)
@@ -462,14 +308,10 @@ namespace HomeskzIfcImport::draw
 			if (failures.bound > 0)
 				note +=
 					"高さ基準を図面へ書けなかった柱 " + std::to_string(failures.bound) + " 本。";
-			if (failures.repaired > 0)
-				note += "パスを作り直して差し替えたら直った柱 " +
-						std::to_string(failures.repaired) + " 本。";
 			if (failures.collapsed > 0)
-				note += "作り直しても長さ 0 のままだった（実体が無い）柱 " +
-						std::to_string(failures.collapsed) + " 本。";
-			if ((failures.collapsed > 0 || failures.repaired > 0) &&
-				!failures.collapsedProbe.empty())
+				note += "長さ 0 で描かれた（実体が無い）柱 " + std::to_string(failures.collapsed) +
+						" 本。";
+			if (failures.collapsed > 0 && !failures.collapsedProbe.empty())
 				note += "（1 本目: " + failures.collapsedProbe + "）";
 			if (!failures.lengthHint.empty())
 				note +=
@@ -484,48 +326,6 @@ namespace HomeskzIfcImport::draw
 			if (style == 0)
 				note += "プラグインスタイル『木質構造材_柱・束』が見つかりません。";
 
-			// --- M27 の残り: どの 1 手で潰れたか ----------------------------------------
-			// **対症療法で絵は出るようになったが、原因は未特定**なので、潰れた地点を数え
-			// 続ける（`failures.collapsedReset` は差し替えで直った柱も含む＝潰れた事実の数）。
-			if (failures.collapsedReset > 0)
-			{
-				std::array<char, 512> buffer{};
-				std::snprintf(buffer.data(), buffer.size(),
-							  "潰れた地点: ①生成直後 %d / ②基準書込後 %d / ③リセット後 %d 本。"
-							  "レコードが階以外同一の柱 %d 本中 %d 本が潰れ、それ以外は %d 本中 "
-							  "%d 本。",
-							  static_cast<int>(failures.collapsedCreate),
-							  static_cast<int>(failures.collapsedBound),
-							  static_cast<int>(failures.collapsedReset),
-							  static_cast<int>(failures.onlyStoryTotal),
-							  static_cast<int>(failures.onlyStoryCollapsed),
-							  static_cast<int>(failures.otherTotal),
-							  static_cast<int>(failures.otherCollapsed));
-				note += buffer.data();
-				std::array<char, 256> all{};
-				std::snprintf(all.data(), all.size(),
-							  "測れた %d 本のうち ①で潰れていた %d 本 / ②で %d 本"
-							  "（③ で実体を持ったものも含む）。",
-							  static_cast<int>(failures.probed),
-							  static_cast<int>(failures.createCollapsedAll),
-							  static_cast<int>(failures.boundCollapsedAll));
-				note += all.data();
-				// **仮説 B の答え**（① がちょうど 0 か、丸め誤差ぶんだけ 0 でないか）。
-				std::array<char, 256> exact{};
-				std::snprintf(exact.data(), exact.size(),
-							  "①で潰れていた内訳: ちょうど0長 %d 本 / 0でない微小長 %d 本"
-							  "（うち最後まで潰れていた %d 本）。",
-							  static_cast<int>(failures.createExactZero),
-							  static_cast<int>(failures.createNearZero),
-							  static_cast<int>(failures.nearZeroCollapsed));
-				note += exact.data();
-				note += failures.stageProbe;
-				// **同じレイヤの対照を先に出す**（レイヤ・階・下端が同じで上端だけが違う対）。
-				if (const auto same = failures.layerControls.find(failures.brokenLayer);
-					same != failures.layerControls.end())
-					note += same->second;
-				note += failures.controlProbe;
-			}
 			*outDiagnostics = std::move(note);
 		}
 

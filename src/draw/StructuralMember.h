@@ -150,67 +150,6 @@ namespace HomeskzIfcImport::draw
 		bool retryWithFreshPath = false;
 		core::Vec3 pathStart;
 		core::Vec3 pathEnd;
-
-		// --- M27 の残り: どの 1 手で潰れたかを測る（**読み戻しだけ**。図面は変わらない）----
-		// 配置先レイヤ。**オブジェクトを作らずに高さ基準を検算する**（ResolveBoundElevation）
-		// ために要る。nil なら検算を飛ばす。
-		MCObjectHandle container = nil;
-		// 3 地点の読み戻しを採るか。**既定は false**——潰れる事故が出ているのは柱だけなので、
-		// 数百本の横架材・垂木で余計な読み戻しを走らせない（draw/Column だけが true にする）。
-		bool probe = false;
-	};
-
-	// 構造材 1 本が**どの 1 手で潰れたか**を測った記録（M27 の残り）。
-	//
-	// 【なぜ要るか】M27 は「潰れていたらパスを作り直して差し替える」で絵は出るようになったが、
-	// **なぜ潰れるのかは分かっていない**。これまで読んでいたのは `CreatePath` の `PathProbe`
-	// （＝渡す直前の曲線。正しかった）と `MeasureDrawnMember`（＝全部終わったあと。潰れて
-	// いた）だけで、**その間の 3 手を一度も分けていない**。分ければ犯人が一意に決まる:
-	//   * ① で既に潰れている   → `CreateCustomObjectPath` が犯人。**高さ基準は無関係**
-	//   * ① は正しく ② で潰れる → `SetObjectStoryBound` がその場でジオメトリを触っている
-	//   * ①② 正しく ③ で潰れる  → `ResetObject` の再構築（＝高さ基準の解決）。そのとき
-	//                              startElevation / endElevation が理由を名指しする
-	//
-	// **並びは「実数 → 整数 → 真偽」に揃える。** 意味のまとまり（①②③）で並べると double と
-	// bool が交互になって詰め物が 37 バイト出て、clang-tidy の
-	// `clang-analyzer-optin.performance.Padding` が CI で落とす（実際に落ちた）。
-	//
-	// **数だけを持つ**——数百本ぶんの文字列を組み立てないため、人が読む形にするのは呼び出し側
-	// （draw/Column）の仕事である。
-	struct StructuralMemberProbe
-	{
-		// 測ったパスの長さ（2 点の Z の差）。**どこで 0 になったか**がこの調査の答えである。
-		double expected = 0.0;	 // あるべき長さ（spec.expectedLength）
-		double createSpan = 0.0; // ① CreateCustomObjectPath の直後（高さ基準を書く前）
-		double boundSpan = 0.0; // ② SetObjectStoryBound ×2 の直後（ResetObject の前）
-		double resetSpan = 0.0; // ③ ResetObject の後（**パスの差し替えより前**）
-
-		// ①③ のパスの**両端の生の Z**（差ではなく値そのもの）。**差だけでは足りない**——
-		// 実機 round 1 で、潰れた柱も無事な柱も ① では「ほぼ 0 長」だったが、無事なほうは
-		// **ちょうど 0**、潰れたほうは **4.54747e-13**（＝2048〜4096 付近の 1 ULP）だった。
-		// つまり分かれ目は「0 か、丸め誤差ぶんだけ 0 でないか」かもしれず、それを見るには
-		// 端点の値そのものが要る（`ResetObject` が「ちょうど潰れているパスだけ作り直す」なら
-		// これで説明が付く。docs/DEV-NOTES.md M27）。
-		double createZ0 = 0.0;
-		double createZ1 = 0.0;
-		double resetZ0 = 0.0;
-		double resetZ1 = 0.0;
-
-		// ③ の時点で VW が解決している絶対 Z（GetObjectBoundElevation）。
-		double startElevation = 0.0;
-		double endElevation = 0.0;
-		// オブジェクトに依らない検算（GetStoryObjectDataBoundHeight）。上と食い違えば
-		// 「レコードの解き方」ではなく「そのオブジェクトの解決結果」の話になる。
-		double startResolved = 0.0;
-		double endResolved = 0.0;
-
-		Sint32 createPoints = 0; // ① の時点でパスが持っていた頂点数
-
-		bool measured = false;	 // 採ったか（spec.probe が false なら false のまま）
-		bool createRead = false; // ①②③ のパスを読めたか
-		bool boundRead = false;
-		bool resetRead = false;
-		bool resolvedRead = false; // 検算を採れたか（spec.container が nil なら false）
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
@@ -249,8 +188,6 @@ namespace HomeskzIfcImport::draw
 		// そもそも高さ基準が図面に入っていないのかを**実機を見ずに**分けるための証拠で、
 		// 潰れていなければ空。
 		std::string collapsedProbe;
-		// どの 1 手で潰れたか（spec.probe が true のときだけ中身が入る。M27 の残り）。
-		StructuralMemberProbe probe;
 	};
 
 	// パスの読み戻し（診断用）。**「2 点になったか」の真偽だけでは足りない**——ピース索引の
