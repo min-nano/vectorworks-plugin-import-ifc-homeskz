@@ -114,8 +114,12 @@ namespace HomeskzIfcImport::draw
 			std::string collapsedProbe;
 		};
 
-		bool DrawOne(const core::ColumnCommand& column, MCObjectHandle layer, RefNumber style,
-					 ColumnFailures& failures, MCObjectHandle& outObject)
+		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
+		// **取り込み後の再検査**（recheckColumns）が使う。
+		constexpr double kExtentTol = 1.0;
+
+		bool DrawOne(const core::ColumnCommand& column, RefNumber style, ColumnFailures& failures,
+					 MCObjectHandle& outObject)
 		{
 			// 断面の矩形（幅 × せい）は**原点中心**に置く（AxisAlign＝中央と一致させる。
 			// パスが断面中心を通る）。作れなければ PIO を作らない——断面の無い構造材は
@@ -273,12 +277,11 @@ namespace HomeskzIfcImport::draw
 
 			// 配置先の span レイヤ（"1to2-柱" 等）が無い命令はスキップする
 			// （規約は ActivateExistingLayer）。
-			const MCObjectHandle layer = ActivateExistingLayer(column.layer);
-			if (layer == nil)
+			if (ActivateExistingLayer(column.layer) == nil)
 				continue;
 
 			MCObjectHandle object = nil;
-			if (DrawOne(column, layer, style, failures, object))
+			if (DrawOne(column, style, failures, object))
 				++drawn;
 			// 伏図記号のデータタグが引けるよう、**構造材ツールで描けた柱だけ**を記録する
 			// （立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
