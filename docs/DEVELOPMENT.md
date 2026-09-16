@@ -569,20 +569,48 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 
 起動と安全のための取り決め:
 
-- **PR に紐づくイベントだけ**で走ります（`pull_request` に加え、コメント・レビューでも
-  走ります。指摘への対応がコードではなく説明で行われることがあり、その場合
-  `synchronize` が起きないためです）。
-- **PR 本体へのコメント（`issue_comment`）からの起動だけは、このワークフローが `main` に
-  マージされて初めて効きます。** このイベントは**デフォルトブランチにある版のワークフローが
-  実行される**ためで、`cleanup-dev-release.yml` と同じ制約です（下記）。**インラインコメント
-  への返信（`pull_request_review_comment`）と、レビューの提出（`pull_request_review`）は
-  PR の head の版が走る**ので、こちらは作業ブランチの段階から効きます（PR #112 で実測。
-  `pull_request` 起動と合わせて、3 種類のうち 2 種類はマージ前に試せます）。
-- **同じ PR の実行は 1 つずつ**走らせ、**`cancel-in-progress` は push（`synchronize`）の
-  ときだけ**にしています。走っている実行を打ち切るとそのチェックは `cancelled` になり、
-  `scripts/ci-wait.sh` はそれを**失敗として扱う**ので（上記「CI の完了待ち」）、同じ head sha
-  のイベントで打ち切ると、レビューを止めただけで PR が赤く見えます。`synchronize` で
-  打ち切った分は「古い sha」の側に付くため、head を追う `ci-wait --pr` の判定には入りません。
+- **入口は「CI が緑になったとき」と「コメントが付いたとき」の 2 つです。** コードの変更は
+  `pull_request` ではなく **`workflow_run`**（`Lint` / `Build plug-in` / `Tests` の完了）で
+  受けます。`pull_request` で受けるとこの 3 つと**同時に**始まってしまい、結末を見に行っても
+  まだ走っている最中なので、下の門が素通りするためです。`pull_request` に残しているのは
+  **CI が動かないのにレビューが要る**遷移だけ（`reopened` / `ready_for_review`）で、
+  `opened` / `synchronize` は CI が動く＝`workflow_run` が来るので要らず、`edited`（題と
+  本文）は CI とも差分とも関係がないので落としました。コメントとレビューでも走らせるのは、
+  指摘への対応がコードではなく説明で行われることがあるためです。
+- **`lint` / `build` / `test` が 3 つとも `success` でなければ走りません。** 失敗だけでなく
+  「まだ終わっていない」でも、Actions の API を引けなかったときも止めます（分からないときは
+  走らせない側へ倒します）。`workflow_run` は 3 つそれぞれの完了で呼ばれるので、実際に走るのは
+  **最後の 1 つが終わった 1 回だけ**になります。機械が見つけるものを直せば差分は動くので、
+  その前に規約のレビューを出しても出し直すだけになる、というのが理由です。
+
+  見るのは**その PR の現在の head に対する最新の実行の結末**で、チェック名は見ません
+  （ジョブを足しても改名してもここは直さなくて済みます）。種別は `event=pull_request` に
+  絞ります — `build.yml` には `workflow_dispatch` も残っているので、絞らないと同じ sha の
+  別起点の実行を拾いえます。この照会のために `permissions` に **`actions: read`** を
+  足してあります。
+- **`workflow_run` と PR 本体へのコメント（`issue_comment`）からの起動は、このワークフローが
+  `main` にマージされて初めて効きます。** どちらも**デフォルトブランチにある版のワークフローが
+  実行される**ためで、`cleanup-dev-release.yml` と同じ制約です（下記）。つまり**コードの変更を
+  拾う主経路は、作業ブランチの段階では試せません**。インラインコメントへの返信
+  （`pull_request_review_comment`）、レビューの提出（`pull_request_review`）、そして
+  `pull_request`（`reopened` / `ready_for_review`）は **PR の head の版が走る**ので、
+  こちらは作業ブランチから効きます（PR #112 で実測）。
+
+  副作用として、**`workflow_run` 起点の実行は既定ブランチ側に紐づくため、`review` のチェックは
+  PR の一覧に出ません**。ジョブは `continue-on-error` なので、もともと門ではありません。
+- **打ち切りは `workflow_run` の側だけ**にしています。3 つのうち 2 つがほぼ同時に終わると、
+  どちらの実行も「3 つとも success」を見て走り出しうるので、後から来たほうで前を打ち切って
+  レビューが二重に出るのを防ぎます。**`pull_request` やコメントが起点のときは打ち切りません**
+  — 走っている実行を打ち切るとそのチェックは `cancelled` になり、`scripts/ci-wait.sh` は
+  それを**失敗として扱う**ので（上記「CI の完了待ち」）、レビューを止めただけで PR が赤く
+  見えます。`workflow_run` の実行は既定ブランチ側に紐づく＝PR の head にチェックが付かない
+  ので、そちらでは打ち切ってよいわけです。
+
+  **同時実行の鍵はイベントで変えてあり**（コメント起点は PR 番号、`workflow_run` はその sha。
+  `workflow_run` のイベントには PR 番号が載らず、fork では `pull_requests` が空になるため）、
+  互いを打ち切らないので、**同じ PR で 2 つ走ることはありえます**。打ち切ると溜めた
+  インラインコメントごと消えるため（投稿はセッション終了時のバッファ投稿）、そちらを選んで
+  います。
 
   なお `cancel-in-progress` が false でも、**順番待ち（pending）の実行は、次の実行が来た
   時点で GitHub 自身が打ち切ります**（1 グループに待てるのは 1 つだけ）。ただしその場合は
@@ -603,9 +631,10 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
   この受け皿が例外なのか毎回通る道なのかは実行ログで分かります（GitHub のドキュメントは
   このエンドポイントに admin 権限を求めており、ジョブの `GITHUB_TOKEN` では常に失敗する
   可能性があります）。
-- コメント起点はシークレットの渡る特権的な文脈なので、**PR の head を checkout しません**
-  （既定ブランチのまま、PR の中身は `gh pr diff` で読ませます）。fork の PR と下書きの
-  PR は走りません。
+- コメント・レビュー・`workflow_run` が起点のときはシークレットの渡る特権的な文脈なので、
+  **PR の head を checkout しません**（既定ブランチのまま、PR の中身は `gh pr diff` で
+  読ませます）。入口を `workflow_run` に寄せたので、いまはこちらが**ふだんの経路**です。
+  fork の PR と下書きの PR は走りません。
 - **レビューの失敗で PR を赤くしません**（`continue-on-error`）。失敗は実行のログと
   `::warning::` に残ります。
 - ツールは差分の取得とレビューの提出に要るものだけを許可し、`Edit` / `Write` /
@@ -634,7 +663,7 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 | `ci-debug.yml` | あり（専用） | 手動ディスパッチ**のみ**で起動する調査用ワークフロー |
 | `lint.yml` / `test.yml` / `codeql.yml` | なし | push / PR（+ CodeQL は週次スケジュール）で自動的に走る |
 | `cleanup-dev-release.yml` | なし | PR のクローズ（`pull_request` の `closed`）専用 |
-| `pr-review.yml` | なし | PR のイベント（変更・コメント・レビュー）で自動的に走る |
+| `pr-review.yml` | なし | CI の完了（`workflow_run`）とコメント・レビューで自動的に走る |
 
 ### CI デバッグ（`ci-debug.yml`）
 
