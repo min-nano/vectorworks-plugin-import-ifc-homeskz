@@ -988,11 +988,39 @@ SDK ヘッダに当たった）。`vs.py` の引数説明が "The identifier of 
 でも `Has/Get/Set/DelObjectStoryBound` と同じブロックに並ぶ（2221〜2229 行）。**水平材・
 傾斜材でも「そのバウンドが解決された絶対 Z」**を返し、材の外接とは無関係である。
 
-SDK 側の問いは
-[リファレンス issue #59](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/59)
-へ切り出してある（**階だけが違う 2 つの `_Story` バウンドを 1 つのオブジェクトの ID 0 / 1 へ
-書いたら独立に解決されるか**・**構造材 PIO が使うバウンド ID はどれか**）。どちらが先に
-答えに着いてもよい。
+#### SDK 側の答え: **バウンドは白**（リファレンス issue #59）
+
+切り出した問いには実機で答えが出た（[issue #59](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/59)
+→ [Findings「同じオブジェクトに 2 本のバウンドを書く」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)）。
+**こちらの書き方に落ち度は無い**と確定したので、疑う先は残り 1 つに絞れた。
+
+* **階だけが違う 2 本の `_Story` バウンドは、両方そのまま保持され独立に解決される。**
+  `{Story, 0, 耐力壁, 0}` ＋ `{Story, 1, 耐力壁, 0}` は **572 / 3531** に解け、
+  `ResetObject` 後のパスは **2959（正常）**。件数は 2、ID も 0 と 1 で並び、書く順も効かない。
+  **「2 本目が消える」「1 本に畳まれる」は起きない。**
+* **バウンド ID は 0 と 1 で正しい。** `kPIOGenericStoryLevelBoundID`（−3）へ
+  `SetObjectStoryBound` すると **`false` を返して 1 件も入らない**（`ISDK.h` のコメントに
+  釣られてこの ID を使わないこと）。
+* **規則は「上端/下端」ではなく「ID 0 → パスの始点 / ID 1 → 終点」。** 下から上へ描く
+  パスなら ID 0 が下端になる——本プラグインの `kStartBoundID`(0)＝下端・`kEndBoundID`(1)＝上端は
+  この規則どおりである。
+* **新規の構造材 PIO はバウンドを 1 つも持たない**（`CreateCustomObjectPath` 直後は件数 0 で、
+  `ResetObject` を挟んでも増えない。VW が既定のバウンドを勝手に作ることはない）。
+
+**併せて、0 長になる条件が 2 通りあると確定した。**
+
+1. 上下端の**解決済み絶対 Z が一致**したとき。
+2. **バウンドが 1 本も無いまま `ResetObject` を呼んだとき**——`SetObjectStoryBound` が
+   効いていないだけでも実体は 0 長になる。
+
+どちらも**書いたあとに数えて読めば `ResetObject` の前に弾ける**（`GetObjectStoryBoundsCount` /
+`GetObjectStoryBoundsAt` で件数と ID、`GetObjectBoundElevation` で解決結果）。上の 3 地点の
+読み戻しはこれをそのまま出すので、**次の 1 周で 1 と 2 のどちらでもないことまで確かめられる**
+——どちらでもなければ、残る容疑者は `CreateCustomObjectPath` だけになる。
+
+**#56 の「原因は `LayerElevation`」という帰属も訂正された**（本プラグインはその経路を
+持たないため）。あちらの機構の記述自体は実測として正しいので、「`LayerElevation` で書くと
+こうなる」として残っている。
 
 ### 実機テストを本番の取り込みから分ける（M25）
 
