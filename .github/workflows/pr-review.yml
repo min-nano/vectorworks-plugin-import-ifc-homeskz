@@ -210,12 +210,20 @@ jobs:
           # 増えるだけである (ci-wait が cancelled を失敗扱いするのは、
           # 「緑と取り違えない」という別の目的のため。CLAUDE.md)。
           #
+          # 種別は pull_request に絞る。build.yml には workflow_dispatch も
+          # 残っている (stable の取りこぼしを healthcheck が再ディスパッチする
+          # 入口) ので、同じ sha に別の起点の実行が並びうる。per_page=1 は
+          # 「いちばん新しい実行」を返すだけなので、絞らないと**この PR を
+          # 実際にゲートしている実行とは別のもの**の結末で判定しうる
+          # (レビューの指摘)。どちらも PR では pull_request でしか走らない
+          # (push は main だけ) ので、これで指すものが 1 つに定まる。
+          #
           # 引けなかったとき (actions: read が外れている、API エラー) は止めない。
           # ここは無駄を減らすための門であって、安全のための門ではない。ただし
           # 黙ると門が効いていないことに気付けないので、理由を警告に残す。
           for wf in build.yml test.yml; do
             if conc=$(gh api \
-                        "repos/$GH_REPO/actions/workflows/$wf/runs?head_sha=$head_sha&per_page=1" \
+                        "repos/$GH_REPO/actions/workflows/$wf/runs?head_sha=$head_sha&event=pull_request&per_page=1" \
                         --jq '.workflow_runs[0].conclusion // ""' 2>"$RUNNER_TEMP/runs-err"); then
               case "$conc" in
                 failure|timed_out)
