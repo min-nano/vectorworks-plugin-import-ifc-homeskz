@@ -63,6 +63,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write   # インラインコメントとレビューの提出に要る
+  actions: read          # build / test がその head で失敗していないかを見るのに要る
   # ドキュメントの例には id-token: write もあるが、あれは Bedrock / Vertex /
   # WIF を OIDC で使う場合のもの。ここは OAuth トークンなので要らない。
 
@@ -173,17 +174,57 @@ jobs:
           # 失敗を吸収する。既定のシェルは -e なので、一時的な API エラー
           # (レート制限や 5xx) でここが落ちるとステップごと failure になり、
           # 「レビューの失敗でプルリクエストを赤くしない」方針に反する。
-          pr=$(gh pr view "$PR_NUMBER" --json state,isCrossRepository,isDraft) \
+          pr=$(gh pr view "$PR_NUMBER" --json state,isCrossRepository,isDraft,headRefOid) \
             || skip "プルリクエストの情報を取得できませんでした。"
           state=$(echo "$pr" | jq -r .state)
           cross=$(echo "$pr" | jq -r .isCrossRepository)
           draft=$(echo "$pr" | jq -r .isDraft)
+          head_sha=$(echo "$pr" | jq -r .headRefOid)
 
           [ "$state" = "OPEN" ] || skip "プルリクエストが $state なのでレビューを行いません。"
           # fork にはシークレットを渡せない。コメント起点だと base 側の文脈で
           # 走ってしまうので、ここで明示的に落とす。
           [ "$cross" = "false" ] || skip "fork からのプルリクエストなのでレビューを行いません。"
           [ "$draft" = "false" ] || skip "下書きのプルリクエストなのでレビューを行いません。"
+
+          # build / test がその head で失敗しているなら、レビューは行わない。
+          # 直す前のコードへ指摘を出しても、直したときにもう一度走るだけで、
+          # 1 周ぶん (数分・$1.8 相当) をまるごと捨てることになる。
+          #
+          # 見るのは**その sha に対する最新の実行の結末**だけで、チェック名は
+          # 見ない (ジョブを足したり改名したりしても、ここを直さなくてよい)。
+          # まだ始まっていない・走っている最中は conclusion が空になるので、
+          # そのときは止めない——**push の直後はこの 3 つが同時に始まる**ので、
+          # 「まだ緑ではない」を理由に止めると push 起点のレビューが一度も
+          # 走らなくなる。したがってここが実際に止めるのは、CI が出揃った
+          # あとに来るコメントやレビューが起点の実行である (レビューが何度も
+          # 走って落ちていたのは、まさにそちらが多いため)。
+          #
+          # 止めた周を拾い直す仕掛けは置かない。失敗を直せば push が起き、
+          # synchronize でレビューがもう一度走るからで、そちらが本来見たい
+          # 「直った後の差分」である。
+          #
+          # cancelled は落とさない。新しい push で消えた古い実行がそう出る
+          # ——その sha はもう head ではないので、ここへ来るのは人が手で
+          # 止めたときくらいで、それを「失敗」と読むと黙って止まる時間が
+          # 増えるだけである (ci-wait が cancelled を失敗扱いするのは、
+          # 「緑と取り違えない」という別の目的のため。CLAUDE.md)。
+          #
+          # 引けなかったとき (actions: read が外れている、API エラー) は止めない。
+          # ここは無駄を減らすための門であって、安全のための門ではない。ただし
+          # 黙ると門が効いていないことに気付けないので、理由を警告に残す。
+          for wf in build.yml test.yml; do
+            if conc=$(gh api \
+                        "repos/$GH_REPO/actions/workflows/$wf/runs?head_sha=$head_sha&per_page=1" \
+                        --jq '.workflow_runs[0].conclusion // ""' 2>"$RUNNER_TEMP/runs-err"); then
+              case "$conc" in
+                failure|timed_out)
+                  skip "$wf が失敗しているのでレビューを行いません (conclusion=$conc)。直して push すれば走ります。" ;;
+              esac
+            else
+              echo "::warning::$wf の結末を確認できませんでした: $(tr '\n' ' ' <"$RUNNER_TEMP/runs-err")"
+            fi
+          done
 
           echo "run=true" >> "$GITHUB_OUTPUT"
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
@@ -227,27 +268,6 @@ jobs:
           # 説明では "Whether to display the Claude Code Report in GitHub
           # Step Summary"。PR のコメントを増やすものではない。
           display_report: true
-          # **調査のための一時的な設定。用が済んだら外すこと。**
-          #
-          # レビューが error_max_turns で落ちる実行が続いており、そのどれもが
-          # permission_denials_count を 5〜14 件抱えている (実測: 成功した
-          # 34 ターンの実行が 5 件、落ちた 41 ターンの実行が 12 件と 14 件)。
-          # 拒否 1 件はターンを 1 つ捨てるので、上限 40 のうち 1〜3 割が
-          # そこへ消えている計算になる。
-          #
-          # ところが**何が拒否されたのかはログに出ない**。既定ではセッションの
-          # 出力が伏せられていて ("Running Claude Code via SDK (full output
-          # hidden for security)")、結果 JSON は件数しか言わないためである。
-          # 下の allowedTools は 4 つしか許していないのに、プロンプトは
-          # 「CLAUDE.md を読め」「docs を grep で引け」と言っている——その
-          # 読み取りが拒否されているのか、それとも gh の引数の並びが
-          # 許可の形から外れているだけなのかで、打つ手が正反対になる
-          # (前者なら Read / Grep を許す、後者ならプロンプトを直す)。
-          #
-          # 推測で許可を広げるより、1 回出させて確かめる。出るのはこの
-          # レビューセッションの出力で、レビュー対象は公開されている差分、
-          # シークレットは Actions がマスクする。
-          show_full_output: true
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ steps.prep.outputs.pr_number }}
@@ -280,6 +300,27 @@ jobs:
             ただし**削除されたファイルは作業ディレクトリに無いので読めません**
             (履歴を辿る手段も渡していません)。削除部分が差分から欠けていると
             判断したときは、その旨をレビュー結果に明記してください。
+
+            **使える道具はこれだけです。**
+
+            - `gh pr diff <番号>` / `gh pr view <番号>` / `gh pr review <番号>`
+            - 作業ディレクトリのファイルを読むこと・`grep` で引くこと
+            - インラインコメントの投稿
+
+            **それ以外の `gh` は拒否されます** (`gh api` / `gh pr checks` /
+            `gh pr comment` など)。**拒否されたら、形を変えて試し直さないで
+            ください。** 許可はコマンドの形で決まっているので、書き方を変えても
+            通りません——実測では、同じ 1 つの `gh api` を 6 通り書き直して
+            6 ターン捨てた実行があります。ターンには上限があり、使い切ると
+            インラインコメントは投稿されず判定も出ないまま終わります。
+
+            したがって、次の 2 つは**はじめから見ないでください**。
+
+            - **CI の状態** (`gh pr checks` など)。別のワークフローの仕事で、
+              しかも `build` / `test` が失敗している間はこのレビュー自体が
+              走りません。
+            - **外部リポジトリの中身** (action の実装や `action.yml` など)。
+              確かめられないことは「未確認」と書けばよく、それで十分です。
 
             **まず `CLAUDE.md` を読んでください。** このリポジトリは
             Vectorworks 2026 用の C++ SDK 製ネイティブプラグインで、設計の規約が
