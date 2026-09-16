@@ -924,11 +924,21 @@ offset 0 で指しているのが悪い」と見て、offset が 0 にならな�
 `draw/Column` の `recheckColumns` に**見張りとして残してある**（同じ事故がもう一度起きたら
 件数で分かる）。
 
-**VW 側の挙動そのもの**——「上階のレベルを、自階にもある種別＋ offset 0 で指すと、終端が
-自階のレベル（＝始端と同じ Z）へ解決される」
-——は、実機で直ったことを確かめたうえで
-[SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)の
-`Findings/` へ書き残す。
+**SDK リファレンスの `Findings/` へ書き残すのは、実機で確かめが取れた次の 2 つだけである**
+（[SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)）:
+
+* **渡した 2 点の NURBS 曲線が PIO 化（`CreateCustomObjectPath`）で潰れることがある**
+  （作った直後の曲線は正しいのに、PIO の中のパスが `(0,0,0) (0,0,4.5e-13)` になる）。
+  直し方は `SetCustomObjectPath` で作り直したパスへ差し替えること。
+* **`CreateCustomObjectPath` は世界座標のパスを取るのに、`SetCustomObjectPath` は挿入点から
+  の相対で取る**（世界座標のまま渡すと材が挿入点の Z ぶん高く出る）。差し替えた曲線は
+  **PIO が引き取る**（実機 round 13・14 で読み戻して確認）。
+
+**「上階のレベルを、自階にもある種別＋ offset 0 で指すと自階へ解決される」は書き残さない。**
+いったんそう見立てたが、round 5（offset を非 0 の `{上階, FL, −40}` にしても 46 本中 0 本）・
+round 6（レイヤの高さ基準で言い直しても実測は動かない）で**反証済み**である——高さ基準は
+そもそも両端の Z を決めていなかった。**反証済みの見立てを `Findings/` に固定すると、
+「打ち切った調査は再調査しない」という運用のせいで将来の正しい調査まで止めてしまう。**
 
 ### 実機テストを本番の取り込みから分ける（M25）
 
