@@ -29,6 +29,7 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
+#include <cmath>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -148,8 +149,41 @@ namespace HomeskzIfcImport::draw
 		// 構造材ツールの高さ基準が「レイヤの高さ」・offset 0 のまま実ジオメトリと矛盾する
 		// ことがなくなり、編集時に高さがリセットされない。水平材の傾斜はこの offset 差で
 		// 表れ、鉛直材ではこの差が柱高さを支配する。
-		gSDK->SetObjectStoryBound(object, kStartBoundID, StoryBoundData(spec.startBound));
-		gSDK->SetObjectStoryBound(object, kEndBoundID, StoryBoundData(spec.endBound));
+		// **① 高さ基準を書く前のパスを読む**（M27。spec.probe のときだけ）。ここで既に潰れて
+		// いれば犯人は CreateCustomObjectPath で、高さ基準は無関係だと確定する。
+		if (spec.probe)
+		{
+			result.probe.measured = true;
+			result.probe.expected = std::abs(spec.pathEnd.z - spec.pathStart.z);
+			double z0 = 0.0;
+			double z1 = 0.0;
+			result.probe.createRead = ReadPioPathZ(object, z0, z1, result.probe.createPoints);
+			result.probe.createSpan = z1 - z0;
+			// **オブジェクトに依らない検算**は、書く前でも後でも同じ答えになるはずのもの。
+			// ここで採っておけば、③ の GetObjectBoundElevation と食い違ったときに
+			// 「レコードの解き方」と「そのオブジェクトの解決結果」を分けて読める。
+			if (spec.container != nil)
+			{
+				result.probe.resolvedRead = true;
+				result.probe.startResolved = ResolveBoundElevation(spec.startBound, spec.container);
+				result.probe.endResolved = ResolveBoundElevation(spec.endBound, spec.container);
+			}
+		}
+
+		// **戻り値を見る。** 受け取られなければ材は高さを持てない（M27 まで捨てていた）。
+		result.probe.startBoundOk = ApplyStoryBound(object, kStartBoundID, spec.startBound);
+		result.probe.endBoundOk = ApplyStoryBound(object, kEndBoundID, spec.endBound);
+
+		// **② 高さ基準を書いた直後・ResetObject の前のパスを読む**（M27）。①が正しくここで
+		// 潰れていれば、SetObjectStoryBound がその場でジオメトリを触っていることになる。
+		if (spec.probe)
+		{
+			double z0 = 0.0;
+			double z1 = 0.0;
+			Sint32 points = 0;
+			result.probe.boundRead = ReadPioPathZ(object, z0, z1, points);
+			result.probe.boundSpan = z1 - z0;
+		}
 
 		VWParametricObj pio(object);
 		const TXString breadth = ResolveParamName(pio, kFieldMajorBreadth, kLocalizedBreadth);
@@ -191,6 +225,20 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 		gSDK->ResetObject(object);
+
+		// **③ ResetObject の後**（M27）。ここで初めて潰れるなら、犯人は「解決済みの高さ基準
+		// からパスを作り直す」再構築（SDK リファレンス Findings「Parametric Objects」）で、
+		// 解決済み絶対 Z がその理由をそのまま名指しする。
+		if (spec.probe)
+		{
+			double z0 = 0.0;
+			double z1 = 0.0;
+			Sint32 points = 0;
+			result.probe.resetRead = ReadPioPathZ(object, z0, z1, points);
+			result.probe.resetSpan = z1 - z0;
+			result.probe.startElevation = ReadBoundElevation(object, kStartBoundID);
+			result.probe.endElevation = ReadBoundElevation(object, kEndBoundID);
+		}
 
 		result.object = object;
 		result.sectionOk = breadthOk && depthOk;

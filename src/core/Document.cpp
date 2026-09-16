@@ -705,6 +705,15 @@ namespace HomeskzIfcImport::core
 		return clipPolygonToRect(band, clipMin, clipMax);
 	}
 
+	bool boundsDifferOnlyByStory(const StoryBoundCommand& a, const StoryBoundCommand& b)
+	{
+		// **offset は完全一致で見る。** 近さ（許容値）で見ると「ほぼ同じレコード」まで
+		// 拾ってしまい、切り分けの軸が鈍る——知りたいのは「VW へ渡した 2 つのレコードが
+		// 階を除いて同一か」という、渡す側の事実そのものである。
+		// 階が同じなら 2 つは完全に同一で、「階だけが違う」には当たらない。
+		return a.storyOffset != b.storyOffset && a.level == b.level && a.offset == b.offset;
+	}
+
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
 													const std::vector<std::string>& topLayers)
 	{

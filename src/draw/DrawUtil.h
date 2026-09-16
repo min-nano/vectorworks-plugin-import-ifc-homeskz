@@ -172,6 +172,57 @@ namespace HomeskzIfcImport::draw
 	// 直す形になっていた。
 	VectorWorks::SStoryObjectData StoryBoundData(const core::StoryBoundCommand& bound);
 
+	// --- M27 の切り分け: 「書いたレコード」ではなく「解決された高さ」と「実際のパス」を読む ---
+	//
+	// 【なぜ要るか】構造材 PIO には「オブジェクトは在るのに実体が無い（長さ 0）」という壊れ方
+	// があり、スキップフロアのモデルで柱 46 本がそうなった（docs/DEV-NOTES.md「柱が長さ 0 で
+	// 描かれる（M27）」）。厄介なのは**書いた側からは一切見えない**ことで、
+	// `SetObjectStoryBound` は true を返し、`GetObjectStoryBound` は書いたとおりに読み戻せる。
+	// 実機 10 周かけても切り分けられなかったのはこのためで、**見るべきは「VW がその
+	// レコードを何 mm に解決したか」と「PIO が実際に持っているパス」**だった。
+	//
+	// `GetObjectBoundElevation` の "bound" は**バウンディングボックスではなくストーリ
+	// バウンド**である（`vs.py` の引数説明が "The identifier of the story bound."。ISDK.h でも
+	// `Has/Get/Set/DelObjectStoryBound` と同じブロックに並ぶ）。したがって水平材・傾斜材でも
+	// 「その ID のバウンドが解決された絶対 Z」を返し、材の外接とは無関係である。
+	//
+	// **これらは診断のための読み取りだけで、図面を 1 ミリも変えない。**
+
+	// 命令の高さ基準を書き、**受け取られたかを返す**。`SetObjectStoryBound` は bool を返すのに
+	// M27 まで捨てていた（＝書けなかったことに気付けなかった）。
+	//
+	// 渡す構造体は**名前付きの lvalue に置いてから**渡す——受け取り側は const 参照で、いつ
+	// 読むかは VW の都合である（CLAUDE.md「境界を越えて来た構造体は…」と同じ用心）。
+	bool ApplyStoryBound(MCObjectHandle object, Sint32 boundID,
+						 const core::StoryBoundCommand& bound);
+
+	// PIO が**実際に持っているパス**の両端 Z（`GetCustomObjectPath` ＋ `NurbsGetPt3D`）。
+	// 2 点を読めたら true。パスは**挿入点からの相対**で保持されるので、返る値は絶対 Z では
+	// ない——**知りたいのは 2 点の差**（＝材の実体があるか）である。
+	// ピース索引の起点は 0 / 1 のどちらの規約もありうるので両方見る。
+	bool ReadPioPathZ(MCObjectHandle object, double& outZ0, double& outZ1, Sint32& outPoints);
+
+	// その ID のストーリバウンドが**解決された絶対 Z**（`GetObjectBoundElevation`）。
+	// 失敗を表す戻り値が無いので、値をそのまま返す（読めたかは呼び出し側が文脈で判断する）。
+	double ReadBoundElevation(MCObjectHandle object, Sint32 boundID);
+
+	// 命令の高さ基準が container のレイヤに対して解決される絶対 Z
+	// （`GetStoryObjectDataBoundHeight`）。**オブジェクトを作らずに検算できる**のが要点で、
+	// 「書く前に意図どおり解けるか」を確かめられる唯一の口である。
+	double ResolveBoundElevation(const core::StoryBoundCommand& bound, MCObjectHandle container);
+
+	// 図面が持っているその ID のバウンドを人が読める 1 行に（命令の値と並べて診断へ出す）。
+	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID);
+
+	// PIO が持っているパスの頂点を人が読める 1 行に。
+	std::string DescribePioPath(MCObjectHandle object);
+
+	// そのオブジェクトが**実際に持っているバウンド ID の一覧**と、それぞれの解決済み絶対 Z。
+	// `kStartBoundID` / `kEndBoundID`（0 / 1）が本当に使われているのかを確かめるためにある
+	// ——ISDK.h には `kPIOGenericStoryLevelBoundID = -3`（2017 年のストーリレベル対応 PIO 用）
+	// という別の ID があり、**構造材 PIO がどちらを見ているかは未確認**である。
+	std::string DescribeObjectBoundIds(MCObjectHandle object);
+
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
 	//
 	// 床（draw/Floor）と底盤（draw/Footing）は**同じ手順**でスラブを描く（外形ポリゴン →

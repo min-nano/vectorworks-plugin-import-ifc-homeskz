@@ -1975,4 +1975,26 @@ TEST(shear_wall_brace_polygon_rejects_a_degenerate_frame)
 	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, true).empty());
 }
 
+TEST(bounds_differ_only_by_story_singles_out_the_m27_shape)
+{
+	// M27 で潰れた 46 本の形——上下端が **階だけ** 違い、レベル種別も offset も同じ。
+	const core::StoryBoundCommand bottom{0, "横架材天端", 0.0};
+	const core::StoryBoundCommand top{1, "横架材天端", 0.0};
+	CHECK(core::boundsDifferOnlyByStory(bottom, top));
+	CHECK(core::boundsDifferOnlyByStory(top, bottom)); // 順序に依らない
+}
+
+TEST(bounds_differ_only_by_story_rejects_every_other_shape)
+{
+	const core::StoryBoundCommand bottom{0, "横架材天端", 0.0};
+	// offset が違う（同じレイヤで無事だった柱の形）。
+	CHECK(!core::boundsDifferOnlyByStory(bottom, {1, "横架材天端", -1102.0}));
+	// レベル種別が違う（上階のレベルにちょうど乗るのに無事だった 29 本の形）。
+	CHECK(!core::boundsDifferOnlyByStory(bottom, {1, "軒高", 0.0}));
+	// 階も同じ＝2 つは完全に同一で、「階だけが違う」には当たらない（小屋束の形）。
+	CHECK(!core::boundsDifferOnlyByStory(bottom, {0, "横架材天端", 0.0}));
+	// 階以外が 2 つとも違う。
+	CHECK(!core::boundsDifferOnlyByStory(bottom, {1, "軒高", 364.0}));
+}
+
 TEST_MAIN();

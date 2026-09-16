@@ -65,7 +65,10 @@
 
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
+#include <array>
+#include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -88,10 +91,61 @@ namespace HomeskzIfcImport::draw
 			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
 			std::size_t offset = 0;	 // 端部オフセットを書けなかった
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
+
+			// --- M27 の切り分け（実体が無い柱はどの 1 手で潰れるか）------------------------
+			std::size_t collapsed = 0;		 // ③ リセット後に実体が無かった
+			std::size_t collapsedCreate = 0; // ① 生成直後から潰れていた
+			std::size_t collapsedBound = 0;	 // ② 高さ基準を書いた直後に潰れていた
+			// **仮説の検証**: 上下端のレコードが階以外同一の柱だけが潰れているのか
+			// （core::boundsDifferOnlyByStory。命令セットの全数検算で、潰れた 46 本だけが
+			// この形だった。docs/DEV-NOTES.md M27）。
+			std::size_t onlyStoryTotal = 0;
+			std::size_t onlyStoryCollapsed = 0;
+			std::size_t otherTotal = 0;
+			std::size_t otherCollapsed = 0;
+			// 証拠として本文へ載せる 3 本（潰れた 1 本＋対照 2 本）。
+			std::string sampleBroken;
+			std::string sameLayerControl;
+			std::string otherLevelControl;
 		};
 
-		bool DrawOne(const core::ColumnCommand& column, RefNumber style, ColumnFailures& failures,
-					 MCObjectHandle& outObject)
+		// 実体が無い（長さ 0）か。**あるべき長さを持つ命令にだけ問う**（0 と比べても意味が
+		// 無いので、expected が無い＝probe を採っていないものは常に false）。
+		bool Collapsed(double span, double expected)
+		{
+			return expected > kCollapsedSpan && std::abs(span) < kCollapsedSpan;
+		}
+
+		// 1 本ぶんの証拠を人が読める塊にする。**この 1 塊で犯人が決まる**ので、命令の値・
+		// 3 地点のパス・基準の受理・解決済み Z・検算・図面が持っているレコードを全部並べる。
+		std::string FormatProbe(const char* label, const core::ColumnCommand& column,
+								const StructuralMemberResult& result)
+		{
+			const StructuralMemberProbe& probe = result.probe;
+			std::array<char, 1024> head{};
+			std::snprintf(
+				head.data(), head.size(),
+				"\n%s[%s 命令 下端{階%+d \"%s\" off=%g} 上端{階%+d \"%s\" off=%g} "
+				"あるべき長さ=%g]\n  ①生成直後 span=%g(%d点) ②基準書込後 span=%g ③リセット後 "
+				"span=%g\n  基準の受理 始端=%d 終端=%d／解決済みZ 始端=%g 終端=%g"
+				"／検算(オブジェクト非依存) 始端=%g 終端=%g\n",
+				label, column.layer.c_str(), column.bottomBound.storyOffset,
+				column.bottomBound.level.c_str(), column.bottomBound.offset,
+				column.topBound.storyOffset, column.topBound.level.c_str(), column.topBound.offset,
+				probe.expected, probe.createSpan, static_cast<int>(probe.createPoints),
+				probe.boundSpan, probe.resetSpan, static_cast<int>(probe.startBoundOk),
+				static_cast<int>(probe.endBoundOk), probe.startElevation, probe.endElevation,
+				probe.startResolved, probe.endResolved);
+			std::string text(head.data());
+			text += "  図面の始端基準[" + DescribeStoryBound(result.object, kStartBoundID) +
+					"] 終端基準[" + DescribeStoryBound(result.object, kEndBoundID) + "]\n";
+			text += "  バウンドID一覧: " + DescribeObjectBoundIds(result.object) + "\n";
+			text += "  図面のパス[" + DescribePioPath(result.object) + "]";
+			return text;
+		}
+
+		bool DrawOne(const core::ColumnCommand& column, MCObjectHandle layer, RefNumber style,
+					 ColumnFailures& failures, MCObjectHandle& outObject)
 		{
 			// 断面の矩形（幅 × せい）は**原点中心**に置く（AxisAlign＝中央と一致させる。
 			// パスが断面中心を通る）。作れなければ PIO を作らない——断面の無い構造材は
@@ -102,13 +156,11 @@ namespace HomeskzIfcImport::draw
 			// パス＝断面中心を通る鉛直線（下端 → 上端）。横架材と同じ CreatePath で作り、
 			// **柱では 2 点の Z が異なる**（＝この差が柱の高さになる）。
 			bool pathAppended = false;
+			const core::Vec3 pathStart{column.position.x, column.position.y, column.elevation};
+			const core::Vec3 pathEnd{column.position.x, column.position.y,
+									 column.elevation + column.height};
 			const MCObjectHandle path =
-				profile == nil
-					? nil
-					: CreatePath(core::Vec3{column.position.x, column.position.y, column.elevation},
-								 core::Vec3{column.position.x, column.position.y,
-											column.elevation + column.height},
-								 pathAppended);
+				profile == nil ? nil : CreatePath(pathStart, pathEnd, pathAppended);
 			if (path != nil && !pathAppended)
 				++failures.path;
 
@@ -129,6 +181,12 @@ namespace HomeskzIfcImport::draw
 			// 梁せいぶんをここで戻す（core/Document.h「端部オフセット」）。
 			spec.startOffset = column.startOffset;
 			spec.endOffset = column.endOffset;
+			// **M27 の切り分け**: 柱だけ 3 地点の読み戻しを採る（横架材・垂木は採らない。
+			// 事故が出ているのは柱で、数百本ぶん余計な読み戻しを走らせる理由が無い）。
+			spec.pathStart = pathStart;
+			spec.pathEnd = pathEnd;
+			spec.container = layer;
+			spec.probe = true;
 
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
@@ -163,6 +221,45 @@ namespace HomeskzIfcImport::draw
 				if (failures.offsetHint.empty())
 					failures.offsetHint = result.offsetParamHint;
 			}
+
+			// --- M27: どの 1 手で潰れたかを数え、証拠を 3 本だけ採る --------------------
+			const StructuralMemberProbe& probe = result.probe;
+			if (probe.measured)
+			{
+				const bool onlyStory =
+					core::boundsDifferOnlyByStory(column.bottomBound, column.topBound);
+				const bool collapsed = Collapsed(probe.resetSpan, probe.expected);
+				if (onlyStory)
+				{
+					++failures.onlyStoryTotal;
+					failures.onlyStoryCollapsed += collapsed ? 1 : 0;
+				}
+				else
+				{
+					++failures.otherTotal;
+					failures.otherCollapsed += collapsed ? 1 : 0;
+				}
+				if (collapsed)
+				{
+					++failures.collapsed;
+					failures.collapsedCreate += Collapsed(probe.createSpan, probe.expected) ? 1 : 0;
+					failures.collapsedBound += Collapsed(probe.boundSpan, probe.expected) ? 1 : 0;
+					if (failures.sampleBroken.empty())
+						failures.sampleBroken = FormatProbe("潰れた 1 本目", column, result);
+				}
+				// 対照 1: **同じ形（上下端とも同じレベル種別）なのに上端 offset が非 0 で無事**な柱。
+				else if (failures.sameLayerControl.empty() &&
+						 column.topBound.level == column.bottomBound.level &&
+						 column.topBound.offset != column.bottomBound.offset)
+					failures.sameLayerControl =
+						FormatProbe("対照A 同じレベル種別・offset 違い", column, result);
+				// 対照 2: **上端のレベル種別が違って無事**な柱（上階のレベルにちょうど乗る 29 本）。
+				else if (failures.otherLevelControl.empty() &&
+						 column.topBound.level != column.bottomBound.level)
+					failures.otherLevelControl =
+						FormatProbe("対照B レベル種別違い", column, result);
+			}
+
 			outObject = result.object;
 			return true;
 		}
@@ -190,11 +287,12 @@ namespace HomeskzIfcImport::draw
 
 			// 配置先の span レイヤ（"1to2-柱" 等）が無い命令はスキップする
 			// （規約は ActivateExistingLayer）。
-			if (ActivateExistingLayer(column.layer) == nil)
+			const MCObjectHandle layer = ActivateExistingLayer(column.layer);
+			if (layer == nil)
 				continue;
 
 			MCObjectHandle object = nil;
-			if (DrawOne(column, style, failures, object))
+			if (DrawOne(column, layer, style, failures, object))
 				++drawn;
 			// 伏図記号のデータタグが引けるよう、**構造材ツールで描けた柱だけ**を記録する
 			// （立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
@@ -211,7 +309,8 @@ namespace HomeskzIfcImport::draw
 		// ならなかった」「断面が入らなかった」「スタイルが見つからなかった」を件数で持ち帰る
 		// （柱が見えないときの切り分け材料）。
 		if (outDiagnostics != nullptr &&
-			(failures.path > 0 || failures.section > 0 || failures.offset > 0 || style == 0))
+			(failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
+			 failures.collapsed > 0 || style == 0))
 		{
 			std::string note = "柱の診断: ";
 			if (failures.path > 0)
@@ -228,6 +327,28 @@ namespace HomeskzIfcImport::draw
 			}
 			if (style == 0)
 				note += "プラグインスタイル『木質構造材_柱・束』が見つかりません。";
+
+			// --- M27: 実体が無い柱の切り分け ------------------------------------------
+			if (failures.collapsed > 0)
+			{
+				std::array<char, 512> buffer{};
+				std::snprintf(buffer.data(), buffer.size(),
+							  "実体が無い柱 %d 本（潰れた地点: ①生成直後 %d / ②基準書込後 %d / "
+							  "③リセット後 %d）。レコードが階以外同一の柱 %d 本中 %d 本が潰れ、"
+							  "それ以外は %d 本中 %d 本。",
+							  static_cast<int>(failures.collapsed),
+							  static_cast<int>(failures.collapsedCreate),
+							  static_cast<int>(failures.collapsedBound),
+							  static_cast<int>(failures.collapsed),
+							  static_cast<int>(failures.onlyStoryTotal),
+							  static_cast<int>(failures.onlyStoryCollapsed),
+							  static_cast<int>(failures.otherTotal),
+							  static_cast<int>(failures.otherCollapsed));
+				note += buffer.data();
+				note += failures.sampleBroken;
+				note += failures.sameLayerControl;
+				note += failures.otherLevelControl;
+			}
 			*outDiagnostics = std::move(note);
 		}
 

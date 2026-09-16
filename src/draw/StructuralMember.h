@@ -109,6 +109,64 @@ namespace HomeskzIfcImport::draw
 		// 0 なら端点がそのまま材の端（垂木・自由端の横架材）。
 		double startOffset = 0.0;
 		double endOffset = 0.0;
+
+		// --- M27 の切り分け用（**読み戻しの診断だけ**で、図面は 1 ミリも変わらない）------
+		// パスの 2 点（絶対 Z）。呼び出し側が CreatePath へ渡したものと同じ値を入れる。
+		// **あるべき長さ**（2 点の Z の差）を知るためだけに持つ。
+		core::Vec3 pathStart;
+		core::Vec3 pathEnd;
+		// 配置先レイヤ。**オブジェクトを作らずに高さ基準を検算する**（ResolveBoundElevation）
+		// ために要る。nil なら検算を飛ばす。
+		MCObjectHandle container = nil;
+		// 3 地点の読み戻しを採るか。**既定は false**——潰れる事故が出ているのは柱だけなので、
+		// 数百本の横架材・垂木で余計な読み戻しを走らせない（draw/Column だけが true にする）。
+		bool probe = false;
+	};
+
+	// 「実体が無い（長さ 0）」とみなす閾値（mm）。潰れた部材はちょうど 0 になるので、実部材の
+	// 長さ（最短でも数十 mm）と取り違える余地は無い。
+	inline constexpr double kCollapsedSpan = 0.01;
+
+	// 構造材 1 本が**どの 1 手で潰れたか**を測った記録（M27）。
+	//
+	// 【なぜ 3 地点なのか】M27 の実機 10 周は「`CreateCustomObjectPath` へ渡す直前の曲線」
+	// （正しかった）と「全部終わったあとの PIO のパス」（潰れていた）しか見ておらず、**その間の
+	// 3 手を一度も分けていない**。分ければ犯人が一意に決まる:
+	//   * ① で既に潰れている            → `CreateCustomObjectPath` が犯人。高さ基準は無関係
+	//   * ① は正しく ② で潰れる         → `SetObjectStoryBound` がその場でジオメトリを触っている
+	//   * ①② 正しく ③ で潰れる          → `ResetObject` の再構築（＝高さ基準の解決）が犯人。
+	//                                      そのとき startElevation / endElevation が理由を名指しする
+	//
+	// **数だけを持つ**——197 本ぶんの文字列を組み立てないため、人が読む形にするのは
+	// 呼び出し側（draw/Column）の仕事である。
+	struct StructuralMemberProbe
+	{
+		bool measured = false; // 採ったか（spec.probe が false なら false のまま）
+		double expected = 0.0; // あるべき長さ（|pathEnd.z − pathStart.z|）
+
+		bool createRead = false; // ① CreateCustomObjectPath の直後（高さ基準を書く前）
+		double createSpan = 0.0;
+		Sint32 createPoints = 0;
+
+		bool boundRead = false; // ② SetObjectStoryBound ×2 の直後（ResetObject の前）
+		double boundSpan = 0.0;
+
+		bool resetRead = false; // ③ ResetObject の後
+		double resetSpan = 0.0;
+
+		// SetObjectStoryBound の戻り値。**M27 まで捨てていた**（＝書けなかったことに
+		// 気付けなかった）。
+		bool startBoundOk = false;
+		bool endBoundOk = false;
+
+		// ③ の時点で VW が解決している絶対 Z（GetObjectBoundElevation）。
+		double startElevation = 0.0;
+		double endElevation = 0.0;
+		// オブジェクトに依らない検算（GetStoryObjectDataBoundHeight）。**同じレコードが
+		// 同じレイヤに対して何 mm へ解けるか**で、上と食い違えばオブジェクト側の話になる。
+		bool resolvedRead = false;
+		double startResolved = 0.0;
+		double endResolved = 0.0;
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
@@ -126,6 +184,8 @@ namespace HomeskzIfcImport::draw
 		// 含むパラメータ名の一覧（DescribeParamsContaining）。実機でしか読めない情報を
 		// 1 周で持ち帰るための手掛かりで、解決できていれば空。
 		std::string offsetParamHint;
+		// どの 1 手で潰れたか（spec.probe が true のときだけ中身が入る。M27）。
+		StructuralMemberProbe probe;
 	};
 
 	// パス＝部材の芯線（始端 → 終端）を通る 2 点の NURBS 曲線。gSDK->CreateNurbsCurve で

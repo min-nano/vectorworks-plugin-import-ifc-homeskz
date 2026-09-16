@@ -995,6 +995,134 @@ namespace HomeskzIfcImport::draw
 		return data;
 	}
 
+	bool ApplyStoryBound(MCObjectHandle object, Sint32 boundID,
+						 const core::StoryBoundCommand& bound)
+	{
+		if (object == nil)
+			return false;
+		const VectorWorks::SStoryObjectData data = StoryBoundData(bound);
+		return gSDK->SetObjectStoryBound(object, boundID, data);
+	}
+
+	bool ReadPioPathZ(MCObjectHandle object, double& outZ0, double& outZ1, Sint32& outPoints)
+	{
+		outZ0 = 0.0;
+		outZ1 = 0.0;
+		outPoints = 0;
+		if (object == nil)
+			return false;
+		const MCObjectHandle path = gSDK->GetCustomObjectPath(object);
+		if (path == nil)
+			return false;
+		for (Sint32 piece = 0; piece <= 1; ++piece)
+		{
+			const Sint32 count = gSDK->NurbsGetNumPts(path, piece);
+			if (count > outPoints)
+				outPoints = count;
+			if (count < 2)
+				continue;
+			WorldPt3 first(0.0, 0.0, 0.0);
+			WorldPt3 second(0.0, 0.0, 0.0);
+			if (!gSDK->NurbsGetPt3D(path, piece, 0, first) ||
+				!gSDK->NurbsGetPt3D(path, piece, 1, second))
+				continue;
+			outZ0 = first.z;
+			outZ1 = second.z;
+			return true;
+		}
+		return false;
+	}
+
+	double ReadBoundElevation(MCObjectHandle object, Sint32 boundID)
+	{
+		if (object == nil)
+			return 0.0;
+		return gSDK->GetObjectBoundElevation(object, boundID);
+	}
+
+	double ResolveBoundElevation(const core::StoryBoundCommand& bound, MCObjectHandle container)
+	{
+		if (container == nil)
+			return 0.0;
+		const VectorWorks::SStoryObjectData data = StoryBoundData(bound);
+		return gSDK->GetStoryObjectDataBoundHeight(data, container);
+	}
+
+	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID)
+	{
+		if (object == nil)
+			return "なし";
+		if (!gSDK->HasObjectStoryBound(object, boundID))
+			return "なし";
+		VectorWorks::SStoryObjectData data;
+		if (!gSDK->GetObjectStoryBound(object, boundID, data))
+			return "読めない";
+		// fBound は SDK の EStoryObjectBound（0=レイヤの高さ / 1=レイヤの壁高 / 2=ストーリ）。
+		// **数のまま出す**——名前を付け替えると、SDK 側で値が増えたときに嘘になる。
+		std::array<char, 192> buffer{};
+		std::snprintf(buffer.data(), buffer.size(), "種別=%d 階=%+d レベル=\"%s\" offset=%g",
+					  static_cast<int>(data.fBound), static_cast<int>(data.fBoundStory),
+					  data.fLayerLevelType.GetStdString().c_str(), data.fOffset);
+		return {buffer.data()};
+	}
+
+	std::string DescribePioPath(MCObjectHandle object)
+	{
+		if (object == nil)
+			return "オブジェクトが無い";
+		const MCObjectHandle path = gSDK->GetCustomObjectPath(object);
+		if (path == nil)
+			return "パスを引けない";
+		std::string text;
+		// ピース索引の起点は 0 / 1 のどちらの規約もありうるので両方見る。点は先頭 3 つまで
+		// （潰れているかは 2 点あれば分かる）。
+		for (Sint32 piece = 0; piece <= 1; ++piece)
+		{
+			const Sint32 count = gSDK->NurbsGetNumPts(path, piece);
+			std::array<char, 48> head{};
+			std::snprintf(head.data(), head.size(), "piece%d:%d点", static_cast<int>(piece),
+						  static_cast<int>(count));
+			if (!text.empty())
+				text += " / ";
+			text += head.data();
+			for (Sint32 index = 0; index < count && index < 3; ++index)
+			{
+				WorldPt3 point(0.0, 0.0, 0.0);
+				if (!gSDK->NurbsGetPt3D(path, piece, index, point))
+				{
+					text += " (読めない)";
+					continue;
+				}
+				std::array<char, 80> buffer{};
+				std::snprintf(buffer.data(), buffer.size(), " (%g, %g, %g)", point.x, point.y,
+							  point.z);
+				text += buffer.data();
+			}
+		}
+		return text;
+	}
+
+	std::string DescribeObjectBoundIds(MCObjectHandle object)
+	{
+		if (object == nil)
+			return "オブジェクトが無い";
+		const std::size_t count = gSDK->GetObjectStoryBoundsCount(object);
+		std::array<char, 48> head{};
+		std::snprintf(head.data(), head.size(), "%d 個", static_cast<int>(count));
+		std::string text(head.data());
+		// **並ぶ数が多くても全部は出さない。** 知りたいのは「0 と 1 なのか、-3 なのか」
+		// なので、先頭 4 つで足りる。
+		for (std::size_t index = 0; index < count && index < 4; ++index)
+		{
+			const Sint32 id = gSDK->GetObjectStoryBoundsAt(object, index);
+			std::array<char, 80> buffer{};
+			std::snprintf(buffer.data(), buffer.size(), " [id=%d 解決Z=%g]", static_cast<int>(id),
+						  gSDK->GetObjectBoundElevation(object, id));
+			text += buffer.data();
+		}
+		return text;
+	}
+
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size)
 	{
 		WorldRect bounds;

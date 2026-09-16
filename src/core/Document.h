@@ -156,6 +156,21 @@ namespace HomeskzIfcImport::core
 		double offset = 0.0;
 	};
 
+	// 2 つの高さ基準が「階（storyOffset）以外まったく同じ」か。**M27 の切り分け専用の
+	// 述語**である（描画の判断には使わない）。
+	//
+	// 【なぜ要るか】スキップフロアのモデルで実体を持たなかった柱 46 本は、命令セットを
+	// 全数検算した結果、**上下端のレコードが `storyOffset` 以外まったく同一**（どちらも
+	// `{横架材天端, offset 0}` で階だけ 0 と +1）という 1 点だけで他の 151 本と分かれた
+	// ——同じレイヤの無事な柱は上端 offset が非 0、上階のレベルにちょうど乗るのに無事な
+	// 29 本は上端のレベル種別が違う（`軒高`）。したがって「潰れた本数」をこの述語で 2 つに
+	// 割って数えれば、仮説が当たっているかが 1 周で分かる（docs/DEV-NOTES.md
+	// 「柱が長さ 0 で描かれる（M27）」）。
+	//
+	// **SDK を触らない純計算なので core に置く**（draw から切り離せるものは core で無 SDK
+	// テストする。desiredStoryLayerOrder と同じ立ち位置。CLAUDE.md「テスト方針」）。
+	bool boundsDifferOnlyByStory(const StoryBoundCommand& a, const StoryBoundCommand& b);
+
 	// スラブの高さ基準（elevation と bound が指すスラブ上の面）。VW のスラブは高さの
 	// 基準面（データム）を持ち、命令の高さはこの面の絶対 Z を表す。
 	//   Top    … スラブ天端（床仕上げ上端）。一般階の床はこちら（＝ FL）。
