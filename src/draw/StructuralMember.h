@@ -141,32 +141,36 @@ namespace HomeskzIfcImport::draw
 	// 呼び出し側（draw/Column）の仕事である。
 	struct StructuralMemberProbe
 	{
-		bool measured = false; // 採ったか（spec.probe が false なら false のまま）
-		double expected = 0.0; // あるべき長さ（|pathEnd.z − pathStart.z|）
+		// **並びは「実数 → 整数 → 真偽」に揃える。** 意味のまとまり（①②③）で並べると
+		// `double` と `bool` が交互になって詰め物が 37 バイト出る——clang-tidy の
+		// `clang-analyzer-optin.performance.Padding` が CI で落とす（実際に落ちた）。
+		// どの値がどの地点のものかは名前と下のコメントが持つ。
 
-		bool createRead = false; // ① CreateCustomObjectPath の直後（高さ基準を書く前）
-		double createSpan = 0.0;
-		Sint32 createPoints = 0;
-
-		bool boundRead = false; // ② SetObjectStoryBound ×2 の直後（ResetObject の前）
-		double boundSpan = 0.0;
-
-		bool resetRead = false; // ③ ResetObject の後
-		double resetSpan = 0.0;
-
-		// SetObjectStoryBound の戻り値。**M27 まで捨てていた**（＝書けなかったことに
-		// 気付けなかった）。
-		bool startBoundOk = false;
-		bool endBoundOk = false;
+		// 測った長さ（パスの 2 点の Z の差）。**どこで 0 になったか**がこの調査の答えである。
+		double expected = 0.0;	 // あるべき長さ（|pathEnd.z − pathStart.z|）
+		double createSpan = 0.0; // ① CreateCustomObjectPath の直後（高さ基準を書く前）
+		double boundSpan = 0.0; // ② SetObjectStoryBound ×2 の直後（ResetObject の前）
+		double resetSpan = 0.0; // ③ ResetObject の後
 
 		// ③ の時点で VW が解決している絶対 Z（GetObjectBoundElevation）。
 		double startElevation = 0.0;
 		double endElevation = 0.0;
 		// オブジェクトに依らない検算（GetStoryObjectDataBoundHeight）。**同じレコードが
 		// 同じレイヤに対して何 mm へ解けるか**で、上と食い違えばオブジェクト側の話になる。
-		bool resolvedRead = false;
 		double startResolved = 0.0;
 		double endResolved = 0.0;
+
+		Sint32 createPoints = 0; // ① の時点でパスが持っていた頂点数
+
+		bool measured = false;	 // 採ったか（spec.probe が false なら false のまま）
+		bool createRead = false; // ①②③ のパスを読めたか
+		bool boundRead = false;
+		bool resetRead = false;
+		// SetObjectStoryBound の戻り値。**M27 まで捨てていた**（＝書けなかったことに
+		// 気付けなかった）。
+		bool startBoundOk = false;
+		bool endBoundOk = false;
+		bool resolvedRead = false; // 検算を採れたか（spec.container が nil なら false）
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
