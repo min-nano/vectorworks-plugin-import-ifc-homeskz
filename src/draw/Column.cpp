@@ -76,6 +76,7 @@
 #include <cstddef>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -124,6 +125,20 @@ namespace HomeskzIfcImport::draw
 			std::size_t otherCollapsed = 0;
 			std::string stageProbe; // 潰れた 1 本目の 3 地点
 			std::string controlProbe; // 無事だった対照 1 本の 3 地点（レベル種別違い）
+
+			// **①②で潰れていた柱を「全数」で数える**（③ で実体を持ったものも含む）。round 1
+			// で分かったのは「潰れた柱だけでなく**無事な柱も ① と ② では 0 長**で、③ の
+			// `ResetObject` が解決済みバウンドから作り直して初めて実体を持つ」ことだった。
+			// つまり `CreateCustomObjectPath` がパスを潰すのは**普遍**で、分かれ目は
+			// 「③ で作り直してもらえるかどうか」にある。それを件数で押さえる。
+			std::size_t probed = 0;				// 3 地点を測れた柱（全数）
+			std::size_t createCollapsedAll = 0; // ① で潰れていた（③ で直ったものも含む）
+			std::size_t boundCollapsedAll = 0; // ② で潰れていた（同上）
+			// 潰れた 1 本目のレイヤと、**レイヤごとの無事だった 1 本目**。潰れた柱と
+			// **同じレイヤ**の無事な柱を並べると、レイヤ・階・下端が同じで上端だけが違う
+			// 対になるので、差が 1 つに絞れる（round 1 の対照は別レイヤだった）。
+			std::string brokenLayer;
+			std::map<std::string, std::string> layerControls;
 		};
 
 		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
@@ -298,6 +313,12 @@ namespace HomeskzIfcImport::draw
 					++failures.otherTotal;
 					failures.otherCollapsed += collapsed ? 1 : 0;
 				}
+				// **全数の集計**（③ で実体を持ったかに関わらず、①② で潰れていたかを数える）。
+				++failures.probed;
+				failures.createCollapsedAll +=
+					StageCollapsed(stages.createSpan, stages.expected) ? 1 : 0;
+				failures.boundCollapsedAll +=
+					StageCollapsed(stages.boundSpan, stages.expected) ? 1 : 0;
 				if (collapsed)
 				{
 					failures.collapsedCreate +=
@@ -306,13 +327,24 @@ namespace HomeskzIfcImport::draw
 						StageCollapsed(stages.boundSpan, stages.expected) ? 1 : 0;
 					++failures.collapsedReset;
 					if (failures.stageProbe.empty())
+					{
 						failures.stageProbe = FormatStages("潰れた 1 本目", column, result);
+						failures.brokenLayer = column.layer;
+					}
 				}
-				// 対照は**レベル種別が違って無事**な柱（上階のレベルにちょうど乗るのに無事な
-				// 29 本がこの形）。潰れた柱と並べると、差が 1 つに絞れているかを確かめられる。
-				else if (failures.controlProbe.empty() &&
-						 column.topBound.level != column.bottomBound.level)
-					failures.controlProbe = FormatStages("対照 レベル種別違い", column, result);
+				else
+				{
+					// **レイヤごとに無事な 1 本目を控える。** 潰れた柱と同じレイヤのものを
+					// あとで選べるようにする（どちらが先に現れるかに依らないため、列挙順に
+					// 拾って map へ入れる。map は名前順に並ぶので決定的）。
+					if (!failures.layerControls.contains(column.layer))
+						failures.layerControls.emplace(
+							column.layer, FormatStages("対照 同じレイヤ", column, result));
+					// レベル種別が違って無事な柱（上階のレベルにちょうど乗る形）。
+					if (failures.controlProbe.empty() &&
+						column.topBound.level != column.bottomBound.level)
+						failures.controlProbe = FormatStages("対照 レベル種別違い", column, result);
+				}
 			}
 
 			outObject = result.object;
@@ -417,7 +449,19 @@ namespace HomeskzIfcImport::draw
 							  static_cast<int>(failures.otherTotal),
 							  static_cast<int>(failures.otherCollapsed));
 				note += buffer.data();
+				std::array<char, 256> all{};
+				std::snprintf(all.data(), all.size(),
+							  "測れた %d 本のうち ①で潰れていた %d 本 / ②で %d 本"
+							  "（③ で実体を持ったものも含む）。",
+							  static_cast<int>(failures.probed),
+							  static_cast<int>(failures.createCollapsedAll),
+							  static_cast<int>(failures.boundCollapsedAll));
+				note += all.data();
 				note += failures.stageProbe;
+				// **同じレイヤの対照を先に出す**（レイヤ・階・下端が同じで上端だけが違う対）。
+				if (const auto same = failures.layerControls.find(failures.brokenLayer);
+					same != failures.layerControls.end())
+					note += same->second;
 				note += failures.controlProbe;
 			}
 			*outDiagnostics = std::move(note);
