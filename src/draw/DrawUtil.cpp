@@ -1038,8 +1038,7 @@ namespace HomeskzIfcImport::draw
 		for (Sint32 piece = 0; piece <= 1; ++piece)
 		{
 			const Sint32 count = gSDK->NurbsGetNumPts(path, piece);
-			if (count > outPoints)
-				outPoints = count;
+			outPoints = std::max(count, outPoints);
 			if (count < 2)
 				continue;
 			WorldPt3 first(0.0, 0.0, 0.0);
