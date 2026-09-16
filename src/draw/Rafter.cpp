@@ -63,10 +63,24 @@ namespace HomeskzIfcImport::draw
 		// 冒頭「スタイルは当てない」）。
 		constexpr RefNumber kNoStyle = 0;
 
+		// 診断の集計（完了ダイアログ・診断ログへ持ち帰る件数）。1 本ごとに増やすだけなので
+		// 出力引数をまとめて 1 つにする（横架材と同じ形。draw/Member.cpp）。
+		struct RafterFailures
+		{
+			std::size_t path = 0;	 // パスが 2 点にならなかった
+			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
+			std::size_t length = 0; // パスから部材長を取れなかった（実体が無い）
+			// パスを作り直して差し替えたら直った本数（draw/StructuralMember.h の
+			// retryWithFreshPath）。0 でなければ「渡した曲線は正しく、PIO 化で潰れていた」。
+			std::size_t repaired = 0;
+			// 潰れた（または作り直した）1 本目の実測。原因をパス側と高さ基準側に分けられる
+			// のはこの 1 行だけなので、必ず持ち帰る。
+			std::string collapsedProbe;
+		};
+
 		// 垂木 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。
-		bool DrawOne(const core::RafterCommand& rafter, std::size_t& outPathFailures,
-					 std::size_t& outSectionFailures)
+		bool DrawOne(const core::RafterCommand& rafter, RafterFailures& failures)
 		{
 			// 実際の材端は支持点ではなく軒先（冒頭「軸組ツールから構造材ツールへ移した」）。
 			const core::RafterEaveEnd eave = core::rafterEaveEnd(rafter);
@@ -90,7 +104,7 @@ namespace HomeskzIfcImport::draw
 					: CreatePath(core::Vec3{eave.point.x, eave.point.y, eave.z},
 								 core::Vec3{rafter.end.x, rafter.end.y, eave.z}, pathAppended);
 			if (path != nil && !pathAppended)
-				++outPathFailures;
+				++failures.path;
 
 			StructuralMemberSpec spec;
 			spec.path = path;
@@ -107,6 +121,20 @@ namespace HomeskzIfcImport::draw
 			spec.startBound = rafter.startBound;
 			spec.startBound.offset = eave.offset;
 			spec.endBound = rafter.endBound;
+			// 【潰れ検出】描き上がりの長さ＝パスの水平長。**垂木も両端の Z が等しい**（勾配は
+			// ストーリバウンドの offset 差が表す。冒頭「パスに傾斜を持たせない」）ので、
+			// 横架材と同じく OIP の「スパン」で測る（draw/StructuralMember.h の
+			// StructuralExtentKind）。
+			spec.expectedLength = core::distance(eave.point, rafter.end);
+			spec.extentKind = StructuralExtentKind::Span;
+			// 【自己修復】潰れていたらパスを作り直して差し替える。**パスを作る口も PIO 化の口も
+			// 柱・横架材と同じもの**なので、同じ事故は垂木でも起きうる（実機で出たのは柱だけ
+			// だが、出ていないことの保証にはならない。docs/DEV-NOTES.md M27）。差し替える
+			// パスは**挿入点からの相対**で渡す。
+			spec.retryWithFreshPath = true;
+			spec.pathStart = core::Vec3{0.0, 0.0, 0.0};
+			spec.pathEnd =
+				core::Vec3{rafter.end.x - eave.point.x, rafter.end.y - eave.point.y, 0.0};
 
 			// スタイルは当てない（冒頭「スタイルは当てない」）。
 			const StructuralMemberResult result = DrawStructuralMember(spec, kNoStyle);
@@ -125,7 +153,17 @@ namespace HomeskzIfcImport::draw
 
 			// 断面が入らなかった本数を数える（診断。drawRafters が完了ダイアログへ載せる）。
 			if (!result.sectionOk)
-				++outSectionFailures;
+				++failures.section;
+			// パスから部材長を取れたかは DrawStructuralMember が読み戻している（上の
+			// expectedLength / extentKind）。0 のままなら実体が無く画面に描かれない。潰れて
+			// いたパスを作り直して直った本数は別に数える——**直っていても「そこで潰れた」と
+			// いう事実は残す**（柱・横架材と同じ扱い）。
+			if (result.collapsed)
+				++failures.length;
+			if (result.repairedByPath)
+				++failures.repaired;
+			if ((result.collapsed || result.repairedByPath) && failures.collapsedProbe.empty())
+				failures.collapsedProbe = result.collapsedProbe;
 			return true;
 		}
 	} // namespace
@@ -137,8 +175,7 @@ namespace HomeskzIfcImport::draw
 			return 0;
 
 		std::size_t drawn = 0;
-		std::size_t pathFailures = 0;
-		std::size_t sectionFailures = 0;
+		RafterFailures failures;
 		for (const core::RafterCommand& rafter : document.rafters)
 		{
 			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
@@ -151,20 +188,27 @@ namespace HomeskzIfcImport::draw
 			if (ActivateExistingLayer(rafter.layer) == nil)
 				continue;
 
-			if (DrawOne(rafter, pathFailures, sectionFailures))
+			if (DrawOne(rafter, failures))
 				++drawn;
 		}
 
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「作れたが断面が
 		// 入らなかった」を件数で持ち帰る（横架材・柱と同じ扱い）。垂木が 1 本も見えないときに、
 		// 原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
-		if (outDiagnostics != nullptr && (pathFailures > 0 || sectionFailures > 0))
+		if (outDiagnostics != nullptr && (failures.path > 0 || failures.section > 0 ||
+										  failures.length > 0 || failures.repaired > 0))
 		{
 			std::string note = "垂木の診断: ";
-			if (pathFailures > 0)
-				note += "パスが 2 点にならなかった材 " + std::to_string(pathFailures) + " 本。";
-			if (sectionFailures > 0)
-				note += "断面を設定できなかった材 " + std::to_string(sectionFailures) + " 本。";
+			if (failures.path > 0)
+				note += "パスが 2 点にならなかった材 " + std::to_string(failures.path) + " 本。";
+			if (failures.section > 0)
+				note += "断面を設定できなかった材 " + std::to_string(failures.section) + " 本。";
+			if (failures.length > 0)
+				note += "パスから長さを取れなかった材 " + std::to_string(failures.length) + " 本。";
+			if (failures.repaired > 0)
+				note += "パスを作り直して直った材 " + std::to_string(failures.repaired) + " 本。";
+			if ((failures.length > 0 || failures.repaired > 0) && !failures.collapsedProbe.empty())
+				note += "（1 本目: " + failures.collapsedProbe + "）";
 			*outDiagnostics = std::move(note);
 		}
 
