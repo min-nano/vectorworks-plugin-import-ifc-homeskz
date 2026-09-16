@@ -59,10 +59,8 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 
-#include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
-#include <cmath>
 #include <cstddef>
 #include <string>
 
@@ -73,22 +71,22 @@ namespace HomeskzIfcImport::draw
 		// プラグインスタイル名（VW 実機の登録名に一致させる）。
 		const TXString kMemberStyle("木質構造材_横架材");
 
-		// パスから取れた部材長（OIP「スパン」）。**書くためではなく読み戻して確かめるため**の
-		// 名前で、0 のままなら PIO がパスの長さを取れていない＝画面に何も描かれない。
-		constexpr const char* kFieldSpan = "Span";
-		constexpr const char* kLocalizedSpan = "スパン";
-		// 部材長を「取れていない」とみなす閾値（mm）。読み戻した スパン がこれ以下なら 0 扱い。
-		constexpr double kZeroLengthTol = 1e-6;
-
 		// 診断の集計（完了ダイアログ・診断ログへ持ち帰る件数）。1 本ごとに増やすだけなので
 		// 出力引数をまとめて 1 つにする。
 		struct MemberFailures
 		{
 			std::size_t path = 0;	 // パスが 2 点にならなかった
 			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
-			std::size_t length = 0;	 // パスから部材長を取れなかった
-			std::size_t offset = 0;	 // 端部オフセットを書けなかった
+			std::size_t length = 0; // パスから部材長を取れなかった（実体が無い）
+			std::size_t offset = 0; // 端部オフセットを書けなかった
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
+			// パスを作り直して差し替えたら直った本数（draw/StructuralMember.h の
+			// retryWithFreshPath）。0 でなければ「渡した曲線は正しく、PIO 化で潰れていた」
+			// ——柱で実際に起きた症状（docs/DEV-NOTES.md M27）が横架材でも起きたということ。
+			std::size_t repaired = 0;
+			// 潰れた（または作り直した）1 本目の実測。原因をパス側と高さ基準側に分けられる
+			// のはこの 1 行だけなので、必ず持ち帰る。
+			std::string collapsedProbe;
 		};
 
 		// 横架材 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
@@ -138,6 +136,22 @@ namespace HomeskzIfcImport::draw
 			// 止まる位置はここで戻す（core/Document.h「端部オフセット」）。
 			spec.startOffset = member.startOffset;
 			spec.endOffset = member.endOffset;
+			// 【潰れ検出】描き上がりの長さ＝パスの水平長（端部オフセットはこの長さから戻す量
+			// なので、潰れていないかを見るこの検査には要らない）。**水平材は両端の Z が等しい
+			// ので「両端の絶対 Z の差」では測れない**——測るのは OIP の「スパン」である
+			// （draw/StructuralMember.h の StructuralExtentKind）。
+			spec.expectedLength = core::distance(member.start, member.end);
+			spec.extentKind = StructuralExtentKind::Span;
+			// 【自己修復】潰れていたらパスを作り直して差し替える。柱で 46 本が実際にこれで
+			// 直った（渡した 2 点の曲線は正しいのに PIO 化で潰れる。docs/DEV-NOTES.md M27）。
+			// **同じ CreatePath を共有しているので、横架材でも起きうる。**
+			// **差し替えるパスは挿入点からの相対**で渡す（世界座標で渡すと材が挿入点の
+			// ぶん動く。draw/StructuralMember.h の retryWithFreshPath）ので、始端を原点に
+			// 置いた差を渡す。
+			spec.retryWithFreshPath = true;
+			spec.pathStart = core::Vec3{0.0, 0.0, 0.0};
+			spec.pathEnd =
+				core::Vec3{member.end.x - member.start.x, member.end.y - member.start.y, 0.0};
 
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
@@ -172,20 +186,17 @@ namespace HomeskzIfcImport::draw
 					failures.offsetHint = result.offsetParamHint;
 			}
 
-			// パスから部材長を取れたかを読み戻す。0 のままなら実体が無く画面に描かれない
-			// （冒頭「パスの遍歴」の 3D ポリラインで起きた症状そのもの）。**鉛直材（柱）では
-			// スパン 0 が正常**なので、この数え方は水平材だけのもの（draw/Column.cpp 参照）。
-			//
-			// **パラメータが実在するときだけ数える。** ResolveParamName は見つからなくても
-			// universal 名をそのまま返し、GetParamReal は存在しない名前に対して 0 を返すので、
-			// 存在確認をしないと「スパン」という名前が違うだけで**パスは正常なのに全数を
-			// 長さ 0 と誤報**してしまう（診断が嘘をつくと切り分けが逆に遠のく）。
-			// 読み戻すだけ（設定は draw/StructuralMember が済ませている）なので const。
-			const VWParametricObj pio(result.object);
-			const TXString span = ResolveParamName(pio, kFieldSpan, kLocalizedSpan);
-			if (pio.GetParamIndex(span) != static_cast<size_t>(-1) &&
-				std::abs(pio.GetParamReal(span)) <= kZeroLengthTol)
+			// パスから部材長を取れたかは DrawStructuralMember が読み戻している（上の
+			// expectedLength / extentKind）。0 のままなら実体が無く画面に描かれない
+			// （冒頭「パスの遍歴」の 3D ポリラインで起きた症状そのもの）。潰れていたパスを
+			// 作り直して直った本数は別に数える——**直っていても「そこで潰れた」という事実は
+			// 残す**（柱と同じ扱い。draw/Column.cpp）。
+			if (result.collapsed)
 				++failures.length;
+			if (result.repairedByPath)
+				++failures.repaired;
+			if ((result.collapsed || result.repairedByPath) && failures.collapsedProbe.empty())
+				failures.collapsedProbe = result.collapsedProbe;
 			return true;
 		}
 	} // namespace
@@ -234,8 +245,9 @@ namespace HomeskzIfcImport::draw
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「作れたが断面が
 		// 入らなかった」「スタイルが見つからなかった」を件数で持ち帰る。横架材が 1 本も
 		// 見えないときに、原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
-		if (outDiagnostics != nullptr && (failures.path > 0 || failures.section > 0 ||
-										  failures.length > 0 || failures.offset > 0 || style == 0))
+		if (outDiagnostics != nullptr &&
+			(failures.path > 0 || failures.section > 0 || failures.length > 0 ||
+			 failures.repaired > 0 || failures.offset > 0 || style == 0))
 		{
 			std::string note = "横架材の診断: ";
 			if (failures.path > 0)
@@ -244,6 +256,10 @@ namespace HomeskzIfcImport::draw
 				note += "断面を設定できなかった材 " + std::to_string(failures.section) + " 本。";
 			if (failures.length > 0)
 				note += "パスから長さを取れなかった材 " + std::to_string(failures.length) + " 本。";
+			if (failures.repaired > 0)
+				note += "パスを作り直して直った材 " + std::to_string(failures.repaired) + " 本。";
+			if ((failures.length > 0 || failures.repaired > 0) && !failures.collapsedProbe.empty())
+				note += "（1 本目: " + failures.collapsedProbe + "）";
 			if (failures.offset > 0)
 			{
 				note += "端部オフセットを設定できなかった材 " + std::to_string(failures.offset) +
