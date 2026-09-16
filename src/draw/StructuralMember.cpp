@@ -340,6 +340,18 @@ namespace HomeskzIfcImport::draw
 				if (fresh != nil && gSDK->SetCustomObjectPath(object, fresh))
 				{
 					gSDK->ResetObject(object);
+					// **作り直した曲線の後始末。** `CreateNurbsCurve` は曲線を**図面へ**作るので、
+					// PIO がそれを引き取らなかったなら、消さない限り図面に残り続ける——潰れる柱は
+					// 実機で 46 本あるので、放っておけば取り込みのたびにその数だけ原点に立った
+					// 線が積み上がる。**引き取ったかどうかは推測しない**——PIO がいま持っている
+					// パス（`GetCustomObjectPath`）が渡した曲線そのものなら引き取られており、
+					// 消せば材のパスを消すことになる。違う実体なら VW が複製したということで、
+					// 渡した曲線はこちらの後始末である。どちらだったかは診断にも残す（実機で
+					// しか分からない挙動なので、次の周が答えを持ち帰る）。
+					const MCObjectHandle adopted = gSDK->GetCustomObjectPath(object);
+					const bool taken = adopted == fresh;
+					if (!taken)
+						gSDK->DeleteObject(fresh, true /* useUndo: 取り込みのイベントへ登録 */);
 					const DrawnMemberSize retried = MeasureDrawnMember(object, spec.extentKind);
 					std::array<char, 160> buffer{};
 					// **測り方によって添える値を変える**（水平材の Z は両端が等しいのが
@@ -353,8 +365,9 @@ namespace HomeskzIfcImport::draw
 						std::snprintf(buffer.data(), buffer.size(),
 									  "・パスを作り直した結果 実測 %g（Z %g→%g）・作り直したパス[",
 									  retried.extent, retried.start, retried.end);
-					result.collapsedProbe +=
-						std::string(buffer.data()) + DescribePioPath(object) + "]";
+					result.collapsedProbe += std::string(buffer.data()) + DescribePioPath(object) +
+											 (taken ? "]・作り直した曲線は PIO が引き取った"
+													: "]・作り直した曲線は複製されたので消した");
 					if (retried.found && !retried.zero)
 					{
 						result.repairedByPath = true;
@@ -362,7 +375,13 @@ namespace HomeskzIfcImport::draw
 					}
 				}
 				else
+				{
+					// 差し替えられなかったときは、作った曲線が確実に**こちらのもの**として
+					// 図面に残る（PIO は受け取っていない）ので必ず消す。
+					if (fresh != nil)
+						gSDK->DeleteObject(fresh, true);
 					result.collapsedProbe += "・パスを作り直して差し替えられなかった";
+				}
 			}
 		}
 
