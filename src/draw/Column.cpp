@@ -47,14 +47,19 @@
 //	**M7 で長さ 0 になった VWPolygon3DObj のパスは使わない。**
 //
 //	この経路は**横架材と共通**（draw/StructuralMember の CreatePath）。水平材も鉛直材も
-//	3 次元空間の直線 1 本なので、パスの作り方は分けず、**2 点の Z の置き方**だけが要素の
-//	仕様になる（柱＝下端 Z → 上端 Z、横架材＝両端とも天端 Z）。根拠は
+//	3 次元空間の直線 1 本なので、パスの作り方は分けない。**2 点の Z の置き方も M27 で
+//	共通になった**——柱も横架材も垂木も**両端に同じ Z** を渡す。根拠は
 //	draw/StructuralMember.h 冒頭。
 //
-//	【高さの与え方】パスの頂点は**最終位置の絶対 Z**（下端 → 下端＋柱高さ）で作る（ISDK に
-//	VectorScript の Move3D が無いため。M6 / M7 と同じ作法）。上下端のストーリバウンドは命令の
-//	offset をそのまま渡す——解析側が**どの柱でもバウンドの差＝柱高さ**になるように offset を
-//	決めている（parse/Column.h）。
+//	【高さの与え方】パスの頂点は**最終位置の絶対 Z**（柱なら下端 Z を 2 点とも）で作る（ISDK に
+//	VectorScript の Move3D が無いため。M6 / M7 と同じ作法）。**柱の高さを作るのはパスではなく
+//	上下端のストーリバウンド**で、命令の offset をそのまま渡す——解析側が**どの柱でもバウンドの
+//	差＝柱高さ**になるように offset を決めている（parse/Column.h）。
+//
+//	**かつては「パスの 2 点の Z の差が柱の高さになる」と書いていたが、それは誤りだった**
+//	（M27）。`CreateCustomObjectPath` は渡したパスを生成直後に平らに潰してしまい、実体を
+//	与えているのは `ResetObject` による解決済みバウンドからの再構築のほうである。詳細は
+//	下記 CreatePath の呼び出しと docs/DEV-NOTES.md M27。
 //
 //	【診断を必ず持ち帰る】実描画はローカルの VectorWorks でしか確認できない。そこで
 //	draw/Member と同じく、断面が入ったか・パスの頂点が 2 つになったかを**読み戻して確かめ**、
@@ -139,6 +144,20 @@ namespace HomeskzIfcImport::draw
 			// 対になるので、差が 1 つに絞れる（round 1 の対照は別レイヤだった）。
 			std::string brokenLayer;
 			std::map<std::string, std::string> layerControls;
+
+			// **仮説 B の検算**: 分かれ目は「① のパスが**ちょうど** 0 長か、丸め誤差ぶんだけ
+			// 0 でないか」ではないか。round 1 では潰れた柱の ① が 4.54747e-13（2048〜4096 付近
+			// の 1 ULP）で、無事な柱の ① はちょうど 0 だった。`ResetObject` が
+			// 「**ちょうど潰れているパスだけ**を解決済みバウンドから作り直す」のなら、
+			// 1 ULP でも 0 でないパスは「呼び出し側が与えた正しいパス」と見なされて残る——
+			// それがそのまま「長さ 0 の柱」になる。
+			//
+			// 真なら次の 2 つがぴたりと一致する（ずれれば仮説は捨てる）:
+			//   createExactZero  ＋ createNearZero ＝ probed
+			//   createNearZero   ＝ 潰れた本数（collapsedReset）
+			std::size_t createExactZero = 0; // ① がちょうど 0 長（z0 と z1 がビット一致）
+			std::size_t createNearZero = 0; // ① が 0 でないが許容以下（＝丸め誤差ぶん）
+			std::size_t nearZeroCollapsed = 0; // そのうち実際に潰れた本数
 		};
 
 		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
@@ -160,12 +179,14 @@ namespace HomeskzIfcImport::draw
 			std::snprintf(head.data(), head.size(),
 						  "\n%s[%s 下端{階%+d \"%s\" off=%g} 上端{階%+d \"%s\" off=%g} "
 						  "あるべき長さ=%g]\n  ①生成直後 %g(%d点) ②基準書込後 %g ③リセット後 "
-						  "%g\n  解決済みZ 始端=%g 終端=%g／検算 始端=%g 終端=%g",
+						  "%g\n  ①端点Z %.17g → %.17g／③端点Z %.17g → %.17g"
+						  "\n  解決済みZ 始端=%g 終端=%g／検算 始端=%g 終端=%g",
 						  label, column.layer.c_str(), column.bottomBound.storyOffset,
 						  column.bottomBound.level.c_str(), column.bottomBound.offset,
 						  column.topBound.storyOffset, column.topBound.level.c_str(),
 						  column.topBound.offset, probe.expected, probe.createSpan,
 						  static_cast<int>(probe.createPoints), probe.boundSpan, probe.resetSpan,
+						  probe.createZ0, probe.createZ1, probe.resetZ0, probe.resetZ1,
 						  probe.startElevation, probe.endElevation, probe.startResolved,
 						  probe.endResolved);
 			return std::string(head.data()) +
@@ -181,16 +202,36 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle profile = CreateRectangleProfileGroup(
 				-column.width / 2.0, -column.depth / 2.0, column.width / 2.0, column.depth / 2.0);
 
-			// パス＝断面中心を通る鉛直線（下端 → 上端）。横架材と同じ CreatePath で作り、
-			// **柱では 2 点の Z が異なる**（＝この差が柱の高さになる）。
+			// パス＝断面中心を通る鉛直線。**2 点とも下端の Z を渡す**（横架材と同じ形）。
+			//
+			// 【なぜ高さを持たせないか（M27 の答え）】以前はここで下端 Z → 上端 Z を渡し、
+			// 「この差が柱の高さになる」と書いていた。**それは事実ではなかった。**実機で
+			// 生成直後のパスを読み戻すと、**197 本すべてが 0 長**——`CreateCustomObjectPath`
+			// は世界座標で受け取ったパスをその場で平らに潰し、柱に実体を与えているのは
+			// あとで `ResetObject` が**解決済みのストーリバウンドから作り直す**ほうだった
+			// （docs/DEV-NOTES.md M27「実機 round 1 / round 2 の測定」）。
+			//
+			// そして `ResetObject` が作り直すのは**ちょうど退化しているパスだけ**らしい。
+			// 潰れ方に丸め誤差が残って **1 ULP だけ 0 でない**パスは「呼び出し側が与えた
+			// 有効なパス」と見なされて温存され、そのまま**長さ 0 の柱**になる——実機で
+			// 潰れていた 46 本はこれで、残差は `4.54747e-13`（2048〜4096 付近の 1 ULP）
+			// だった。残差が出るかどうかは端点の Z の値しだいで、上端が 3531mm の柱だけが
+			// 当たっていた（同 M27）。
+			//
+			// **2 点に同じ値を渡せば、この残差は原理的に出ない**——どんな内部単位を経由
+			// しようと `f(z) - f(z)` は厳密に 0 だからで、VW が何をしているかに依らずに
+			// 「ちょうど退化したパス」を渡せる。高さはストーリバウンドが支配する
+			// （上下端の解決済み Z は実機で命令どおりだと確認済み。バウンドの側に落ち度は
+			// 無い。SDK リファレンス issue #59）。**これは横架材が前からしている形と同じ**で、
+			// 「パスにも高さを持たせると二重に適用されうる」という本ファイル冒頭の注意とも
+			// 揃う。
 			bool pathAppended = false;
 			PathProbe probe;
 			const MCObjectHandle path =
 				profile == nil
 					? nil
 					: CreatePath(core::Vec3{column.position.x, column.position.y, column.elevation},
-								 core::Vec3{column.position.x, column.position.y,
-											column.elevation + column.height},
+								 core::Vec3{column.position.x, column.position.y, column.elevation},
 								 pathAppended, &probe);
 			if (path != nil && !pathAppended)
 				++failures.path;
@@ -319,6 +360,18 @@ namespace HomeskzIfcImport::draw
 					StageCollapsed(stages.createSpan, stages.expected) ? 1 : 0;
 				failures.boundCollapsedAll +=
 					StageCollapsed(stages.boundSpan, stages.expected) ? 1 : 0;
+				// 仮説 B: ① が「ちょうど 0」か「丸め誤差ぶんだけ 0 でない」か。**等値比較で
+				// よい**——ここで知りたいのはビットが一致するかそのものである。
+				if (StageCollapsed(stages.createSpan, stages.expected))
+				{
+					if (stages.createZ0 == stages.createZ1)
+						++failures.createExactZero;
+					else
+					{
+						++failures.createNearZero;
+						failures.nearZeroCollapsed += collapsed ? 1 : 0;
+					}
+				}
 				if (collapsed)
 				{
 					failures.collapsedCreate +=
@@ -457,6 +510,15 @@ namespace HomeskzIfcImport::draw
 							  static_cast<int>(failures.createCollapsedAll),
 							  static_cast<int>(failures.boundCollapsedAll));
 				note += all.data();
+				// **仮説 B の答え**（① がちょうど 0 か、丸め誤差ぶんだけ 0 でないか）。
+				std::array<char, 256> exact{};
+				std::snprintf(exact.data(), exact.size(),
+							  "①で潰れていた内訳: ちょうど0長 %d 本 / 0でない微小長 %d 本"
+							  "（うち最後まで潰れていた %d 本）。",
+							  static_cast<int>(failures.createExactZero),
+							  static_cast<int>(failures.createNearZero),
+							  static_cast<int>(failures.nearZeroCollapsed));
+				note += exact.data();
 				note += failures.stageProbe;
 				// **同じレイヤの対照を先に出す**（レイヤ・階・下端が同じで上端だけが違う対）。
 				if (const auto same = failures.layerControls.find(failures.brokenLayer);

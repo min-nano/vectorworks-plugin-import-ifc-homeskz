@@ -275,6 +275,8 @@ namespace HomeskzIfcImport::draw
 			double z1 = 0.0;
 			result.probe.createRead = ReadPioPathZ(object, z0, z1, result.probe.createPoints);
 			result.probe.createSpan = z1 - z0;
+			result.probe.createZ0 = z0;
+			result.probe.createZ1 = z1;
 			// **オブジェクトに依らない検算**は書く前でも後でも同じ答えになるはずのもの。
 			// ここで採っておけば、③ の GetObjectBoundElevation と食い違ったときに
 			// 「レコードの解き方」と「そのオブジェクトの解決結果」を分けて読める。
@@ -354,6 +356,8 @@ namespace HomeskzIfcImport::draw
 			Sint32 points = 0;
 			result.probe.resetRead = ReadPioPathZ(object, z0, z1, points);
 			result.probe.resetSpan = z1 - z0;
+			result.probe.resetZ0 = z0;
+			result.probe.resetZ1 = z1;
 			result.probe.startElevation = ReadBoundElevation(object, kStartBoundID);
 			result.probe.endElevation = ReadBoundElevation(object, kEndBoundID);
 		}
