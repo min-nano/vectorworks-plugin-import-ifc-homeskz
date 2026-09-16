@@ -21,6 +21,11 @@ name: PR Review
 #                   **本リポジトリの設計規約** (2 フェーズ分離・殻と本体の
 #                   分割・依存の向き・決定性・置き場所) と、変更の意図に
 #                   照らした正しさ。CLAUDE.md がその規約の出どころ。
+#
+# 順序もこの分担のとおりで、**lint / build / test が失敗している間はこの
+# ワークフローは走らない** (下の「レビューするか決める」)。機械が見つける
+# ものを直せば差分は動くので、その前に規約のレビューを出しても、直したときに
+# もう一度出し直すだけになる。
 
 # プルリクエストの変化全般に反応する。トリガーはすべてプルリクエストに
 # 紐づいたイベントで、push トリガーは使っていない (レビュー対象は
@@ -63,7 +68,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write   # インラインコメントとレビューの提出に要る
-  actions: read          # build / test がその head で失敗していないかを見るのに要る
+  actions: read          # lint / build / test がその head で失敗していないかを見るのに要る
   # ドキュメントの例には id-token: write もあるが、あれは Bedrock / Vertex /
   # WIF を OIDC で使う場合のもの。ここは OAuth トークンなので要らない。
 
@@ -187,7 +192,7 @@ jobs:
           [ "$cross" = "false" ] || skip "fork からのプルリクエストなのでレビューを行いません。"
           [ "$draft" = "false" ] || skip "下書きのプルリクエストなのでレビューを行いません。"
 
-          # build / test がその head で失敗しているなら、レビューは行わない。
+          # lint / build / test がその head で失敗しているなら、レビューは行わない。
           # 直す前のコードへ指摘を出しても、直したときにもう一度走るだけで、
           # 1 周ぶん (数分・$1.8 相当) をまるごと捨てることになる。
           #
@@ -215,13 +220,13 @@ jobs:
           # 入口) ので、同じ sha に別の起点の実行が並びうる。per_page=1 は
           # 「いちばん新しい実行」を返すだけなので、絞らないと**この PR を
           # 実際にゲートしている実行とは別のもの**の結末で判定しうる
-          # (レビューの指摘)。どちらも PR では pull_request でしか走らない
+          # (レビューの指摘)。3 つとも PR では pull_request でしか走らない
           # (push は main だけ) ので、これで指すものが 1 つに定まる。
           #
           # 引けなかったとき (actions: read が外れている、API エラー) は止めない。
           # ここは無駄を減らすための門であって、安全のための門ではない。ただし
           # 黙ると門が効いていないことに気付けないので、理由を警告に残す。
-          for wf in build.yml test.yml; do
+          for wf in lint.yml build.yml test.yml; do
             if conc=$(gh api \
                         "repos/$GH_REPO/actions/workflows/$wf/runs?head_sha=$head_sha&event=pull_request&per_page=1" \
                         --jq '.workflow_runs[0].conclusion // ""' 2>"$RUNNER_TEMP/runs-err"); then
@@ -325,8 +330,8 @@ jobs:
             したがって、次の 2 つは**はじめから見ないでください**。
 
             - **CI の状態** (`gh pr checks` など)。別のワークフローの仕事で、
-              しかも `build` / `test` が失敗している間はこのレビュー自体が
-              走りません。
+              しかも `lint` / `build` / `test` が失敗している間はこのレビュー
+              自体が走りません。
             - **外部リポジトリの中身** (action の実装や `action.yml` など)。
               確かめられないことは「未確認」と書けばよく、それで十分です。
 
