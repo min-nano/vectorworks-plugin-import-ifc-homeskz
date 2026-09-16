@@ -234,12 +234,16 @@ namespace HomeskzIfcImport::draw
 				// 1 本目だけ実測を控える（全数ぶん並べても読めない）。
 				if (failures.collapsedProbe.empty())
 				{
-					// 入れ直しの結末（**入れ子の三項演算子にしない**——clang-tidy の
-					// readability-avoid-nested-conditional-operator）。
-					std::array<char, 192> buffer{};
+					// **「あるべき高さ」は渡したパスの値ではない。** M27 以降パスは両端とも
+					// 下端 Z の退化点なので、ここに出す Z 範囲は「命令が意図している高さ」
+					// であって入力そのものではない（実測は直前の「作った曲線の Z」）。
+					// 読む人が入力と取り違えないよう、文言で断っておく。
+					std::array<char, 288> buffer{};
 					std::snprintf(buffer.data(), buffer.size(),
 								  "パスの頂点 piece0=%d piece1=%d・作った曲線の Z %s(%g→%g)・"
-								  "命令のパス長 %g（Z %g→%g）・OIP ",
+								  "あるべき高さ %g（命令が意図する Z 範囲 %g→%g。渡したパスは"
+								  "両端とも下端 Z の退化点なので、これは入力そのものではない）"
+								  "・OIP ",
 								  static_cast<int>(probe.piece0), static_cast<int>(probe.piece1),
 								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1,
 								  column.height, column.elevation,
