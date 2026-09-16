@@ -308,8 +308,11 @@ IFC も知らない純粋な判断で、M25 の要点そのものなので描画
 本文**（内訳・前の周との差分・匿名化）は
 `parse/Feedback`、**往復の運転**（取り込み前のダイアログ・準備・取り込み後の投稿）は
 `draw/Feedback` の `runTestRound`。
-ネットワークとトークンは同梱スクリプト `scripts/vw-feedback.*` が持ち、C++ 側は書かない
-（自動アップデートと同じ分担）。殻から借りた道具（同梱スクリプトの実行）の置き場所は
+ネットワークは同梱スクリプト `scripts/vw-feedback.*` が持ち、C++ 側は書かない
+（自動アップデートと同じ分担）。**トークンの在り処は `scripts/vw-token.{sh,ps1}` ただ 1 つ**で、
+`vw-feedback` と `vw-update` の両方が source する——**読むほうにも必ず付ける**（認証なしの
+GitHub API は IP ごとに 1 時間 60 回で、1 分ごとの往復の確認はちょうどそこに当たる。M27）。
+殻から借りた道具（同梱スクリプトの実行）の置き場所は
 `draw/HostServices` ただ 1 つ。
 
 **本番の取り込みコマンドに往復を書かない（M25）。** 往復（記憶を読む・尋ねずに入れる・
@@ -589,6 +592,13 @@ Vectorworks 自身がモーダルのダイアログを出すことがある—�
 （`forEachFixture`）は `tests/Fixtures.h`、**合成 STEP テキストの組み立て**（`StepText` と
 `num` / `ref` / `point3` / `makeStorey` 等の断片ヘルパー）は `tests/StepText.h`、
 共有する試験用屋根面と最小 IFC は `tests/RoofSample.h` が唯一の定義。
+
+**同梱スクリプトの中で重複を作らない置き場所**: GitHub のトークン（キーチェーン／DPAPI の
+保存先・探索順・`gh` の探し場所）は `scripts/vw-token.{sh,ps1}` ただ 1 つで、`vw-feedback` と
+`vw-update` がそれを source する。GitHub を叩いて失敗したときの**理由の文面**（HTTP の番号・
+curl の終了コード・API 制限といつ戻るか）は `vw-update` の `http_reason` / `curl_reason`
+（Windows は `Get-ApiFailureReason`）1 か所に置き、呼び出し側は `api_error` で 1 行に添えるだけ
+にする——無人で回る往復では、パレットに出るその 1 行だけが手掛かりになる（M27）。
 
 **MCP ブリッジ（`core/Bridge` ＋ `draw/McpBridge` ＋ `scripts/mcp/vw-mcp-server.py`）**:
 受け渡しの作法（要求／応答の形・スプールのファイル名・原子的な書き方・id の綴り検査）は

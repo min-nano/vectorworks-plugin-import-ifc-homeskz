@@ -27,7 +27,8 @@
 # 中身は読んだ直後に消す——引数はプロセス一覧（ps）から誰にでも見えるので、そこへ
 # 秘密を置いてはならない。表示・ログにもトークンは一切出さない。
 #
-# トークンの探索順（最初に見つかったものを使う）:
+# トークンの探索順（最初に見つかったものを使う）。**実装は同梱の vw-token.sh**で、
+# リリース一覧を読む vw-update.sh と共有する:
 #   1. 環境変数 HOMESKZ_IFC_FEEDBACK_TOKEN（Vectorworks を端末から起動したとき用）
 #   2. キーチェーン（login で入れたもの。GUI から使う常用の経路）
 #   3. gh CLI の認証（開発機に gh が入っていれば設定は要らない）
@@ -53,55 +54,25 @@ set -uo pipefail
 
 VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-import-ifc-homeskz}"
 VW_API="https://api.github.com"
-# キーチェーンの service 名は**識別子なので据え置く**。プラグインの表示名やファイル名が
-# 変わっても付け替えない——付け替えた瞬間、既に入っているトークンが行方不明になり、
-# 利用者にもう一度貼り付けさせることになる（コマンドの UUID を据え置くのと同じ理由）。
-VW_FEEDBACK_KEYCHAIN_SERVICE="${VW_FEEDBACK_KEYCHAIN_SERVICE:-HomeskzIfcFeedback}"
 
-# ---------------------------------------------------------------------------
-# トークンの取り出し。**標準出力に出すのは呼び出し元の内部だけ**で、機械可読出力へは
-# 決して流さない。
-# ---------------------------------------------------------------------------
-
-# gh CLI は GUI アプリの PATH には入っていないのが普通（Vectorworks は LaunchServices
-# から起動され、PATH は /usr/bin:/bin:/usr/sbin:/sbin だけ）。だから探す場所を並べておく
-# ——ここを省くと「端末では動くのに Vectorworks からは動かない」という一番分かりにくい
-# 失敗になる。**配列にしない**（冒頭「配列を使わない」）。
-gh_path() {
-	local candidate
-	for candidate in /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do
-		[ -x "$candidate" ] && { printf '%s' "$candidate"; return 0; }
-	done
-	command -v gh 2>/dev/null || return 1
-}
-
-token_from_keychain() {
-	security find-generic-password -s "$VW_FEEDBACK_KEYCHAIN_SERVICE" -w 2>/dev/null || return 1
-}
-
-token_from_gh() {
-	local gh; gh="$(gh_path)" || return 1
-	"$gh" auth token 2>/dev/null || return 1
-}
-
-# token_source: どこから取れるか（取れなければ "none"）。トークン自体は出さない。
-token_source() {
-	[ -n "${HOMESKZ_IFC_FEEDBACK_TOKEN:-}" ] && { echo "env"; return 0; }
-	[ -n "$(token_from_keychain)" ] && { echo "keychain"; return 0; }
-	[ -n "$(token_from_gh)" ] && { echo "gh"; return 0; }
-	echo "none"
-}
-
-# resolve_token: 実際のトークン（無ければ空文字で 1 を返す）。
-resolve_token() {
-	local t
-	if [ -n "${HOMESKZ_IFC_FEEDBACK_TOKEN:-}" ]; then
-		printf '%s' "$HOMESKZ_IFC_FEEDBACK_TOKEN"; return 0
-	fi
-	t="$(token_from_keychain)" && [ -n "$t" ] && { printf '%s' "$t"; return 0; }
-	t="$(token_from_gh)" && [ -n "$t" ] && { printf '%s' "$t"; return 0; }
-	return 1
-}
+# **トークンの在り処は同梱の vw-token.sh ただ 1 つ**（vw-update.sh と共有する。
+# CLAUDE.md「重複を作らない置き場所」）。キーチェーンの service 名・探索順・gh の
+# 探し場所はそちらにある。**隣に置かれる前提**——同じ zip で一緒に配られ、同じ
+# フォルダ（mac は Contents/Resources、Windows はモジュールの隣）に並ぶ。
+#
+# **無いときは、黙って壊れずに理由を言って終わる。** vw-update と違って「認証なしで
+# 続ける」逃げ道がここには無い（トークンが無ければ投稿も PR の確認もできない）ので、
+# 落ちるのではなく**プラグインが読める 1 行**で言う——`loop-control` は 1 分ごとに
+# 無人で呼ばれるモードで、そこで黙って死ぬと「理由も分からず往復が進まない」という
+# M27 で直したのと同じ形になる。
+VW_TOKEN_LIB="$(dirname "${BASH_SOURCE[0]}")/vw-token.sh"
+if [ ! -r "$VW_TOKEN_LIB" ]; then
+	echo "error=同梱の vw-token.sh が見つかりません（配布物が欠けています）。"
+	exit 0
+fi
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=vw-token.sh
+. "$VW_TOKEN_LIB"
 
 # ---------------------------------------------------------------------------
 # JSON。読むのは plutil（macOS 同梱で JSON をそのまま読める。vw-update.sh と同じ）、

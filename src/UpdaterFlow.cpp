@@ -72,6 +72,15 @@ namespace HomeskzIfcImport
 			return b.branch.empty() ? b.name : b.branch;
 		}
 
+		// **いま入っているビルドの言い方は 1 か所**（開発版の流れは 3 か所でこれを出す
+		// ——「ほかに選べるビルドはありません」「そのままです」、そして選択ダイアログの
+		// 先頭）。どれも同じ 1 つのビルドを指しているので、綴りが割れると同じ状態が
+		// 別物に見える。
+		std::string CurrentDevLabel(const CurrentDevBuild& current)
+		{
+			return "現在: " + current.branch + " (" + current.commit + ")";
+		}
+
 		// **確認そのものができなかった。** オフライン・GitHub の一時的な不調・同梱
 		// スクリプトを起動できない、のいずれか。
 		//
@@ -292,16 +301,14 @@ namespace HomeskzIfcImport
 			// 起動時に自動で走っていた頃と違って黙ってはいられない。
 			if (others.empty())
 			{
-				host.Inform("ほかに選べる開発版ビルドはありません。",
-							"現在: " + current.branch + " (" + current.commit + ")");
+				host.Inform("ほかに選べる開発版ビルドはありません。", CurrentDevLabel(current));
 				return true;
 			}
 
 			// One drop-down listing everything: entry 0 is the installed build,
 			// entries 1.. are the other branches' prereleases.
 			std::vector<std::string> items;
-			items.push_back("現在: " + current.branch + " (" + current.commit +
-							") ― インストール済み");
+			items.push_back(CurrentDevLabel(current) + " ― インストール済み");
 			for (const DevBuild& b : others)
 				items.push_back(DevBuildLabel(b) + "  (" + b.commit + ")");
 
@@ -318,8 +325,7 @@ namespace HomeskzIfcImport
 				// 別のものを選んだつもりの人には「選んだのに切り替わらない」と映り、
 				// 取り違えたのか何も起きなかったのかを区別できない（取り消したときだけは
 				// 黙っていてよい——それは「何もしない」という意思表示だから）。
-				host.Inform("開発版ビルドはそのままです。",
-							"現在: " + current.branch + " (" + current.commit + ")");
+				host.Inform("開発版ビルドはそのままです。", CurrentDevLabel(current));
 				return true;
 			}
 			pick = others[static_cast<std::size_t>(idx)];

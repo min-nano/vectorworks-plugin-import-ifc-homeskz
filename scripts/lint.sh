@@ -151,7 +151,9 @@ fi
 # with the word "shellcheck" or the tool reads it as a directive.)
 if have shellcheck; then
 	echo "==> shellcheck (scripts/*.sh)"
-	shellcheck scripts/*.sh
+	# -x: source した先（vw-token.sh）まで読ませる。付けないと「その先は見ていない」の
+	# 一言（SC1091）で落ちる。
+	shellcheck -x scripts/*.sh
 	report "shellcheck"
 else
 	skip "shellcheck" "apt-get install shellcheck"

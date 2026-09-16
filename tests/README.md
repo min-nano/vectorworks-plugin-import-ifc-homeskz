@@ -136,9 +136,16 @@ MCP ブリッジ（`docs/DEV-NOTES.md` M24）も同じ切り分けです。**受
    `asset_url` / `installed_commit` / `installed_branch`）を、`curl` / `plutil` を差し替えて
    検証します（`tests/vw-update.test.sh`、後述）。`q-dev` が `installed=` に加えて
    **`installed-branch=`**（入っているビルドのブランチ。M26）を出すこともここで押さえます。
+   あわせて**失敗したときに理由を言えること**（`curl_reason` / `header_value` /
+   `http_reason` と、それを `error=` の 1 行へ添える経路。M27）——GitHub の API 制限を
+   ほかの HTTP エラーと区別し、いつ戻るかまで言うこと・403 でも残り回数があれば制限と
+   言い切らないこと・応答ヘッダを大文字小文字を問わず（リダイレクトで塊が複数並んでも）
+   読めることを押さえます。
 5. **`UpdaterScriptTestsPs`** … その Windows 版 `scripts/vw-update.ps1` を、同じ発想で
    `Invoke-GH` / `Invoke-WebRequest` を差し替えて検証します（`tests/vw-update.Tests.ps1`、
-   後述）。PowerShell 7（`pwsh`）は Linux でも動くので、**同じ Linux ランナー**で回せます。
+   後述）。理由づくり（`Get-ApiFailureReason`。M27）も mac 側と同じ観点で押さえます
+   ——応答は形だけ揃えたもので作るので、ネットワークも Windows も要りません。
+   PowerShell 7（`pwsh`）は Linux でも動くので、**同じ Linux ランナー**で回せます。
 6. **`InstallerScriptTests` / `InstallerScriptTestsPs`** … **配置を担うインストーラ**
    `scripts/vw-install.sh` / `scripts/vw-install.ps1`（配布 zip の直下とリリースのアセット
    として配られ、アップデータが配置を委ねる先）を検証します。中心の検査はひとつ——

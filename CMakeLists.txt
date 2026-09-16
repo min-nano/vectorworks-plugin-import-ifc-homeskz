@@ -684,8 +684,11 @@ if(VW_BUILD_PLUGIN)
 		# See src/Updater.cpp. macOS reads Contents/Resources/<name>.sh from inside
 		# the bundle; Windows reads <name>.ps1 from next to the .vlb.
 		#
-		#   vw-update    自動アップデート（殻が起動時に走らせる）
+		#   vw-update    自動アップデート（殻が 3 つの入口から走らせる）
 		#   vw-feedback  実機フィードバックの投稿（本体が殻越しに走らせる。M23）
+		#   vw-token     トークンの在り処。**上の 2 つが source する**ので、片方だけ配ると
+		#                認証が外れる（vw-update は認証なしのまま続くが、1 時間 60 回の
+		#                制限に当たる。scripts/vw-token.sh の冒頭。M27）
 		if(APPLE)
 			add_custom_command(
 				TARGET ${target}
@@ -698,8 +701,10 @@ if(VW_BUILD_PLUGIN)
 				COMMAND
 					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-feedback.sh"
 					"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-feedback.sh"
+				COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-token.sh"
+						"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-token.sh"
 				VERBATIM
-				COMMENT "Bundling vw-update.sh / vw-feedback.sh into ${output_name}")
+				COMMENT "Bundling vw-update.sh / vw-feedback.sh / vw-token.sh into ${output_name}")
 		else()
 			# Windows has no Info.plist, so stamp the build commit into a sidecar
 			# "<name>.commit" file next to the module. The updater reads it to tell
@@ -728,6 +733,9 @@ if(VW_BUILD_PLUGIN)
 				COMMAND
 					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-feedback.ps1"
 					"$<TARGET_FILE_DIR:${target}>/vw-feedback.ps1"
+				COMMAND
+					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-token.ps1"
+					"$<TARGET_FILE_DIR:${target}>/vw-token.ps1"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${commit_file}"
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.commit"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${branch_file}"
@@ -736,7 +744,7 @@ if(VW_BUILD_PLUGIN)
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.shell-id"
 				VERBATIM
 				COMMENT
-					"Bundling vw-update.ps1 / vw-feedback.ps1 and build stamps next to ${output_name}"
+					"Bundling vw-update.ps1 / vw-feedback.ps1 / vw-token.ps1 and build stamps next to ${output_name}"
 			)
 		endif()
 	endfunction()

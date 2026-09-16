@@ -151,9 +151,15 @@ PY
 }
 
 # api_get: copy the fixture selected for this endpoint into a fresh temp file and
-# echo its path — the real api_get returns a temp file the caller then `rm`s, so
-# we must NOT hand back the fixture itself. VW_TEST_API_FAIL simulates offline.
+# hand it back in VW_API_FILE — the real api_get leaves a temp file the caller
+# then `rm`s, so we must NOT hand back the fixture itself.
+#
+# 失敗の作り分けは 2 つ。VW_TEST_API_FAIL が「取れなかった」（オフライン等）で、
+# VW_TEST_API_REASON を添えると**実物が VW_API_ERROR へ入れる理由**を真似できる
+# （API 制限のときの文面がそのまま error= の行に載ることを確かめる）。
 api_get() { # api-subpath
+	VW_API_FILE=""
+	VW_API_ERROR="${VW_TEST_API_REASON:-}"
 	[ -n "${VW_TEST_API_FAIL:-}" ] && return 1
 	local fixture=""
 	case "$1" in
@@ -164,7 +170,7 @@ api_get() { # api-subpath
 	local f
 	f="$(mktemp)"
 	cp "$fixture" "$f"
-	printf '%s' "$f"
+	VW_API_FILE="$f"
 }
 
 # download: copy a local fixture zip to the requested output path. VW_TEST_DL_FAIL
@@ -337,6 +343,51 @@ check_eq "$out" "" "absent bundle -> empty branch"
 t "q_dev emits an error line when the API is unreachable"
 out="$(VW_TEST_API_FAIL=1 RUN q_dev)"
 check_contains "$out" "error=" "offline -> error= line"
+
+# **理由を必ず添える。** 往復は無人で回るので、パレットに出るこの 1 行だけが手掛かりに
+# なる（実機 M27: 1 分ごとの確認が GitHub の API 制限に当たっていたのに、「リリース一覧を
+# 取得できませんでした。」としか出ず、ネットワークが切れたようにしか見えなかった）。
+t "q_dev carries the reason api_get left behind"
+out="$(VW_TEST_API_FAIL=1 VW_TEST_API_REASON="GitHub の API 制限に達しました（認証なしは 1 時間 60 回）。あと 37 分で戻ります。" \
+	RUN q_dev)"
+check_contains "$out" "リリース一覧を取得できませんでした。理由: GitHub の API 制限" \
+	"the q-dev error line names the rate limit"
+check_contains "$out" "あと 37 分で戻ります。" "…and when it comes back"
+check_eq "$(printf '%s' "$out" | wc -l | tr -d ' ')" "0" "still a single line (no newline inside)"
+
+t "q_stable carries the reason too"
+out="$(VW_TEST_API_FAIL=1 VW_TEST_API_REASON="GitHub が HTTP 500 を返しました。" RUN q_stable)"
+check_contains "$out" "error=stable リリースを取得できませんでした。理由: GitHub が HTTP 500" \
+	"the q-stable error line names the HTTP status"
+
+# ===========================================================================
+# api_get の理由づくり（curl_reason / header_value / http_reason）。**ここは SDK も
+# ネットワークも要らない純粋な文字列**なので、Linux のランナーでそのまま走る。
+# ===========================================================================
+t "curl_reason names the common network failures"
+check_contains "$(RUN curl_reason 6)" "DNS" "curl 6 -> DNS"
+check_contains "$(RUN curl_reason 28)" "タイムアウト" "curl 28 -> timeout"
+check_contains "$(RUN curl_reason 99)" "curl 終了コード 99" "unknown code -> the number"
+
+t "header_value reads the last occurrence, case-insensitively"
+HDR="$WORK/headers.txt"
+printf 'HTTP/2 301\r\nX-RateLimit-Remaining: 42\r\n\r\nHTTP/2 403\r\nX-RateLimit-Remaining: 0\r\nx-ratelimit-reset: 1700000000\r\n\r\n' > "$HDR"
+check_eq "$(RUN header_value "$HDR" x-ratelimit-remaining)" "0" "the last header block wins"
+check_eq "$(RUN header_value "$HDR" x-ratelimit-reset)" "1700000000" "reset is read"
+check_eq "$(RUN header_value "$HDR" x-nothing)" "" "a missing header is empty"
+
+t "http_reason tells the rate limit apart from everything else"
+printf 'HTTP/2 403\r\nx-ratelimit-remaining: 0\r\nx-ratelimit-reset: %s\r\n\r\n' "$(( $(date +%s) + 600 ))" > "$HDR"
+out="$(RUN http_reason 403 "$HDR" "")"
+check_contains "$out" "認証なしは 1 時間 60 回" "unauthenticated -> the 60/hour ceiling"
+check_contains "$out" "あと 10 分で戻ります。" "…and the reset time"
+out="$(RUN http_reason 403 "$HDR" "sometoken")"
+check_contains "$out" "1 時間 5000 回" "with a token -> the 5000/hour ceiling"
+printf 'HTTP/2 500\r\n\r\n' > "$HDR"
+check_contains "$(RUN http_reason 500 "$HDR" "")" "HTTP 500" "anything else -> the status"
+# 403 でも残りがあるなら制限ではない（二次制限など）。制限だと言い切らない。
+printf 'HTTP/2 403\r\nx-ratelimit-remaining: 30\r\n\r\n' > "$HDR"
+check_contains "$(RUN http_reason 403 "$HDR" "")" "HTTP 403" "403 with quota left is not the rate limit"
 
 # ===========================================================================
 # do-install — download + unzip + atomic swap into VW_PLUGINS_DIR, and its
