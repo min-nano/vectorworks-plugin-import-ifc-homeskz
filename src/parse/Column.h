@@ -111,8 +111,8 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kSpanLevelTol = 1.0;
 
 	// 上端 offset を「0 とみなす」許容値（mm）。上端が上階のレベルにちょうど届く柱を見分ける
-	// のに使う（ヘッダ冒頭「【未解決】上端が上階のレベルにちょうど届く柱が…」）。丸めのぶん
-	// だけ見る。
+	// のに使う（ヘッダ冒頭「上端が上階のレベルにちょうど届く柱が実体を持たなかった事故
+	// （M27）は、高さ基準とは無関係だった」）。丸めのぶんだけ見る。
 	inline constexpr double kBoundIdentityTol = 1.0;
 
 	// 柱の上端を「受けている横架材の天端」へ合わせるときの上限（mm）。柱上端から上の横架材
