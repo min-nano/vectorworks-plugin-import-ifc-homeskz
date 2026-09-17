@@ -7,17 +7,19 @@
 //	ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	描画手順:
-//	  1. **パス**＝柱下端 (x, y, 下端 Z) から上端 (x, y, 下端 Z + 高さ) へ立つ鉛直曲線。
+//	  1. **パス**＝柱の建つ平面座標 (x, y)。**高さは持たない**（2 点とも同じ平面座標＝
+//	     平面では 1 点に潰れた 2 点の曲線。draw/StructuralMember.h 冒頭「パスは 2D で渡す」）。
 //	  2. **プロファイル**＝断面の矩形（幅 × せい）を**原点中心**に置いたグループ
 //	     （断面基準点は AxisAlign＝中央。draw/DrawUtil の CreateRectangleProfileGroup）。
 //	  3. **PIO の生成から各フィールドの設定までは横架材と共通**（draw/StructuralMember）。
-//	     ここが受け持つのは柱固有の値——鉛直パス・断面中心基準の断面矩形・構造用途
+//	     ここが受け持つのは柱固有の値——パスの平面座標・断面中心基準の断面矩形・構造用途
 //	     （柱／小屋束）・スタイル（木質構造材_柱・束）・配置先レイヤ——だけ。
 //	  4. 全配置後に UpdateStyledObjects を 1 回（横架材と同じ。draw/Member.cpp 冒頭）。
 //	PIO を生成できない場合は断面の矩形にフォールバックする（1 本の失敗で全体を止めない）。
 //
-//	【高さは「鉛直パス」と「上下端バウンドの差」の両方が要る】M8 のローカル確認 3 周で
-//	切り分けた（どれか一方だけでは描かれない）:
+//	【高さを決めるのは上下端バウンドだけ】M8 のローカル確認 3 周では「鉛直パスとバウンドの
+//	差の両方が要る」と読んだが、**パスの側は Z を受け取られていなかった**（M27）。当時の
+//	観察を、いまの理解で読み直したものが次の 3 周である:
 //	  1 周目 … パス 1 点 ＋ バウンド差 0 → OIP は「スパン 0 / 長さ 0 / 高さ 0」で何も
 //	           描かれず、オブジェクトはレイヤ原点に置かれ、バウンドの offset まで VW が
 //	           「レベル Z − オブジェクト Z」で再計算した値に上書きされた。
@@ -25,9 +27,10 @@
 //	           どおりになったが、**やはり長さ 0 で描かれなかった**。
 //	  3 周目 … パス 2 点（Add3DVertex。下記）＋ 管柱はバウンド差＝柱高さ／小屋束は差 0
 //	           → **管柱は正しく描かれ、小屋束だけが高さ 0** のままだった。
-//	つまり VW 2026 の構造材 PIO では**バウンドの差が高さを支配し**、鉛直パスはその高さで
-//	実体を作るために要る。したがって**どの柱でも「バウンドの差＝柱高さ」**にする——上端
-//	offset を下端と同値（差 0）にすると高さ 0 になる（parse/Column.h 参照）。
+//	つまり VW 2026 の構造材 PIO では**バウンドの差が高さを支配し**、パスは**2 点あること**
+//	（＝挿入点としてではなくパスとして読まれること）だけが要る。したがって**どの柱でも
+//	「バウンドの差＝柱高さ」**にする——上端 offset を下端と同値（差 0）にすると高さ 0 になる
+//	（parse/Column.h 参照）。
 //
 //	【描けたかを読み戻す】バウンドもパスも命令どおりなのに**実体が無い**ことがある（M27。
 //	実機で 46 本発生）。OIP の値は正しいままなので、**画面を見ない限り気付けない**——そこで
@@ -36,30 +39,28 @@
 //	同じ記録」になった柱だけ、終端が始端と同じ Z に解決されていた（解析側で潰してある。
 //	parse/Column.h ／ docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 //
-//	【柱のパスは鉛直な 2 点の NURBS 曲線】M7 の横架材が使っていた 2D ポリラインでは鉛直材を
-//	表せない（平面へ落とすと 1 点に潰れる）。
-//	    gSDK->CreateNurbsCurve(下端, byCtrlPts=false, degree=1)   ← VS CreateNurbsCurve
-//	  ＋ gSDK->Add3DVertex(曲線, 上端)                            ← VS AddVertex3D
+//	【柱のパスも 2 点の曲線】横架材・垂木と同じ口で作る（draw/StructuralMember の CreatePath）。
+//	    gSDK->CreateNurbsCurve(平面座標, byCtrlPts=false, degree=1)  ← VS CreateNurbsCurve
+//	  ＋ gSDK->Add3DVertex(曲線, 同じ平面座標)                       ← VS AddVertex3D
 //	で作る。**`Add3DVertex` が VS の `AddVertex3D` にあたる**（当初 `Insert3DVertex` を
-//	使っていたが別物で、頂点が増えず 1 点のままだった＝上記 1 周目・2 周目の原因）。M7 の
-//	コメントにあった「頂点を足す呼び出しが無い」も同じ取りこぼしで、`VWNURBSCurve` が
-//	評価専用（制御点から構築できない）のは事実だが、ISDK 側に頂点を足す呼び出しがある。
+//	使っていたが別物で、頂点が増えず 1 点のままだった＝上記 1 周目・2 周目の原因）。
 //	**M7 で長さ 0 になった VWPolygon3DObj のパスは使わない。**
 //
-//	この経路は**横架材と共通**（draw/StructuralMember の CreatePath）。水平材も鉛直材も
-//	3 次元空間の直線 1 本なので、パスの作り方は分けない。**2 点の Z の置き方も M27 で
-//	共通になった**——柱も横架材も垂木も**両端に同じ Z** を渡す。根拠は
-//	draw/StructuralMember.h 冒頭。
+//	**柱は平面では 1 点に潰れるので、始端と終端に同じ座標を渡す。** それでよい——高さも
+//	向きもバウンドが決めるので、パスが担うのは「材がどこに立つか」だけである。**2 点で
+//	あること**だけは崩さない（1 点のパスは挿入点としてしか読まれず、何も描かれない。上記
+//	M8 の 1 周目・2 周目）。
 //
-//	【高さの与え方】パスの頂点は**最終位置の絶対 Z**（柱なら下端 Z を 2 点とも）で作る（ISDK に
-//	VectorScript の Move3D が無いため。M6 / M7 と同じ作法）。**柱の高さを作るのはパスではなく
-//	上下端のストーリバウンド**で、命令の offset をそのまま渡す——解析側が**どの柱でもバウンドの
-//	差＝柱高さ**になるように offset を決めている（parse/Column.h）。
+//	【高さの与え方】**柱の高さを作るのはパスではなく上下端のストーリバウンド**で、命令の
+//	offset をそのまま渡す——解析側が**どの柱でもバウンドの差＝柱高さ**になるように offset を
+//	決めている（parse/Column.h）。
 //
 //	**かつては「パスの 2 点の Z の差が柱の高さになる」と書いていたが、それは誤りだった**
-//	（M27）。`CreateCustomObjectPath` は渡したパスを生成直後に平らに潰してしまい、実体を
-//	与えているのは `ResetObject` による解決済みバウンドからの再構築のほうである。詳細は
-//	下記 CreatePath の呼び出しと docs/DEV-NOTES.md M27。
+//	（M27）。`CreateCustomObjectPath` は渡したパスの Z を受け取らず、実体を与えているのは
+//	`ResetObject` による解決済みバウンドからの再構築のほうである。**その再構築が働く条件が
+//	「両端の Z の差がちょうど 0」だった**ので、Z はもう渡さない（渡せば 1 ULP の丸めで
+//	再構築から外れる余地を残すだけ）。詳細は draw/StructuralMember.h 冒頭と
+//	docs/DEV-NOTES.md M27。
 //
 //	【診断を必ず持ち帰る】実描画はローカルの VectorWorks でしか確認できない。そこで
 //	draw/Member と同じく、断面が入ったか・パスの頂点が 2 つになったかを**読み戻して確かめ**、
@@ -107,6 +108,11 @@ namespace HomeskzIfcImport::draw
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
 			std::size_t bound = 0; // 高さ基準を VW が受け取らなかった
 			std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
+			// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。
+			// パスから Z を外したぶんの見張りで、0 でなければ柱は在るのに違う高さに立って
+			// いる——本数には出ないので、これが唯一の手掛かりになる。
+			std::size_t elevation = 0;
+			std::string elevationProbe; // ずれた 1 本目の実測（命令の Z と図面の Z）
 			std::string lengthHint; // 「長さ」のパラメータ名の手掛かり（最初の 1 件）
 			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長・図面が
 			// 持っている高さ基準・図面のパスの頂点）。**原因をパス側と高さ基準側に分けるのは
@@ -127,37 +133,31 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle profile = CreateRectangleProfileGroup(
 				-column.width / 2.0, -column.depth / 2.0, column.width / 2.0, column.depth / 2.0);
 
-			// パス＝断面中心を通る鉛直線。**2 点とも下端の Z を渡す**（横架材と同じ形）。
+			// パス＝柱が建つ平面座標。**Z は渡さない**（2 点とも同じ平面座標）。
 			//
 			// 【なぜ高さを持たせないか（M27 の答え）】以前はここで下端 Z → 上端 Z を渡し、
 			// 「この差が柱の高さになる」と書いていた。**それは事実ではなかった。**実機で
 			// 生成直後のパスを読み戻すと、**197 本すべてが 0 長**——`CreateCustomObjectPath`
-			// は世界座標で受け取ったパスをその場で平らに潰し、柱に実体を与えているのは
-			// あとで `ResetObject` が**解決済みのストーリバウンドから作り直す**ほうだった
+			// は渡したパスの Z を受け取らず、柱に実体を与えているのはあとで `ResetObject` が
+			// **解決済みのストーリバウンドから 3D のパスを作り直す**ほうだった
 			// （docs/DEV-NOTES.md M27「実機 round 1 / round 2 の測定」）。
 			//
-			// そして `ResetObject` が作り直すのは**ちょうど退化しているパスだけ**らしい。
-			// 潰れ方に丸め誤差が残って **1 ULP だけ 0 でない**パスは「呼び出し側が与えた
-			// 有効なパス」と見なされて温存され、そのまま**長さ 0 の柱**になる——実機で
+			// そして `ResetObject` が作り直すのは**両端の Z の差がちょうど 0 のパスだけ**
+			// らしい。潰れ方に丸め誤差が残って **1 ULP だけ 0 でない**パスは「呼び出し側が
+			// 与えた有効なパス」と見なされて温存され、そのまま**長さ 0 の柱**になる——実機で
 			// 潰れていた 46 本はこれで、残差は `4.54747e-13`（2048〜4096 付近の 1 ULP）
-			// だった。残差が出るかどうかは端点の Z の値しだいで、上端が 3531mm の柱だけが
-			// 当たっていた（同 M27）。
+			// だった。
 			//
-			// **2 点に同じ値を渡せば、この残差は原理的に出ない**——どんな内部単位を経由
-			// しようと `f(z) - f(z)` は厳密に 0 だからで、VW が何をしているかに依らずに
-			// 「ちょうど退化したパス」を渡せる。高さはストーリバウンドが支配する
-			// （上下端の解決済み Z は実機で命令どおりだと確認済み。バウンドの側に落ち度は
-			// 無い。SDK リファレンス issue #59）。**これは横架材が前からしている形と同じ**で、
-			// 「パスにも高さを持たせると二重に適用されうる」という本ファイル冒頭の注意とも
-			// 揃う。
+			// つまり構造材ツールは**2D のパスを渡されることを前提に**していて、3D 化は自分で
+			// 行う。だから Z は渡す口ごと無くした（draw/StructuralMember.h 冒頭「パスは 2D で
+			// 渡す」）——残差が出る余地が原理的に消え、同じ高さをバウンドとパスの 2 か所へ
+			// 書くこともなくなる。高さはストーリバウンドが支配し、その解決は実機で命令どおり
+			// だと確認済みである（バウンドの側に落ち度は無い。SDK リファレンス issue #59）。
 			bool pathAppended = false;
 			PathProbe probe;
 			const MCObjectHandle path =
-				profile == nil
-					? nil
-					: CreatePath(core::Vec3{column.position.x, column.position.y, column.elevation},
-								 core::Vec3{column.position.x, column.position.y, column.elevation},
-								 pathAppended, &probe);
+				profile == nil ? nil
+							   : CreatePath(column.position, column.position, pathAppended, &probe);
 			if (path != nil && !pathAppended)
 				++failures.path;
 
@@ -181,6 +181,14 @@ namespace HomeskzIfcImport::draw
 			// 描き上がりの長さ＝パス長（端部オフセットはこの長さから戻す量なので、潰れて
 			// いないかを見るこの検査には要らない）。0 で潰れていたら診断へ持ち帰る。
 			spec.expectedLength = column.height;
+			// 【高さの検算】パスから Z を外した以上、柱がどの高さに立つかはバウンドだけが
+			// 決める。その解決が意図とずれても**本数には出ない**ので、**描き上がった両端の
+			// 絶対 Z を読み戻して命令と引き比べる**（draw/StructuralMember.h の
+			// checkElevation）。上端は命令の下端 Z ＋ パス長（core/Document.h の
+			// ColumnCommand「高さの持ち方」）。
+			spec.checkElevation = true;
+			spec.expectedStartZ = column.elevation;
+			spec.expectedEndZ = column.elevation + column.height;
 			// **パスを作り直して差し替える対症療法（`retryWithFreshPath`）は要らなくなった。**
 			// 潰れていたのは「渡した 2 点の Z が違うせいで、潰れ方に 1 ULP の丸めが残り、
 			// `ResetObject` の再構築から外れていた」ためで、両端に同じ Z を渡すようにした
@@ -234,16 +242,16 @@ namespace HomeskzIfcImport::draw
 				// 1 本目だけ実測を控える（全数ぶん並べても読めない）。
 				if (failures.collapsedProbe.empty())
 				{
-					// **「あるべき高さ」は渡したパスの値ではない。** M27 以降パスは両端とも
-					// 下端 Z の退化点なので、ここに出す Z 範囲は「命令が意図している高さ」
-					// であって入力そのものではない（実測は直前の「作った曲線の Z」）。
-					// 読む人が入力と取り違えないよう、文言で断っておく。
+					// **「あるべき高さ」は渡したパスの値ではない。** M27 以降パスは平面
+					// （Z=0）の 2 点なので、ここに出す Z 範囲は「命令が意図している高さ」
+					// ——すなわちバウンドへ渡した値——であって、パスの入力ではない。読む人が
+					// 取り違えないよう、文言で断っておく。作った曲線の Z は**0 が正常**で、
+					// 0 でなければパスの作り方が冒頭の約束から外れている。
 					std::array<char, 288> buffer{};
 					std::snprintf(buffer.data(), buffer.size(),
-								  "パスの頂点 piece0=%d piece1=%d・作った曲線の Z %s(%g→%g)・"
-								  "あるべき高さ %g（命令が意図する Z 範囲 %g→%g。渡したパスは"
-								  "両端とも下端 Z の退化点なので、これは入力そのものではない）"
-								  "・OIP ",
+								  "パスの頂点 piece0=%d piece1=%d・作った曲線の Z %s(%g→%g。"
+								  "0 が正常)・あるべき高さ %g（バウンドへ渡した Z 範囲 %g→%g。"
+								  "パスは平面なので、これは入力そのものではない）・OIP ",
 								  static_cast<int>(probe.piece0), static_cast<int>(probe.piece1),
 								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1,
 								  column.height, column.elevation,
@@ -253,6 +261,14 @@ namespace HomeskzIfcImport::draw
 			}
 			if (failures.lengthHint.empty())
 				failures.lengthHint = result.lengthParamHint;
+			// 高さが命令と違った本数（上の checkElevation）。**実体はあるので潰れの数には
+			// 出ない**——柱が揃って違う高さに立つ形なので、別に数えて持ち帰る。
+			if (!result.elevationOk)
+			{
+				++failures.elevation;
+				if (failures.elevationProbe.empty())
+					failures.elevationProbe = result.elevationProbe;
+			}
 
 			outObject = result.object;
 			return true;
@@ -303,8 +319,8 @@ namespace HomeskzIfcImport::draw
 		// （柱が見えないときの切り分け材料）。
 		if (outDiagnostics != nullptr &&
 			(failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
-			 failures.bound > 0 || failures.collapsed > 0 || !failures.lengthHint.empty() ||
-			 style == 0))
+			 failures.bound > 0 || failures.collapsed > 0 || failures.elevation > 0 ||
+			 !failures.lengthHint.empty() || style == 0))
 		{
 			std::string note = "柱の診断: ";
 			if (failures.path > 0)
@@ -320,6 +336,13 @@ namespace HomeskzIfcImport::draw
 						" 本。";
 			if (failures.collapsed > 0 && !failures.collapsedProbe.empty())
 				note += "（1 本目: " + failures.collapsedProbe + "）";
+			if (failures.elevation > 0)
+			{
+				note +=
+					"命令と違う高さに描かれた柱 " + std::to_string(failures.elevation) + " 本。";
+				if (!failures.elevationProbe.empty())
+					note += "（1 本目: " + failures.elevationProbe + "）";
+			}
 			if (!failures.lengthHint.empty())
 				note +=
 					"「長さ」パラメータを引けませんでした（候補: " + failures.lengthHint + "）。";
