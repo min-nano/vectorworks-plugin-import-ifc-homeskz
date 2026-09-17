@@ -462,32 +462,18 @@ namespace HomeskzIfcImport::parse
 					const char* nextLevel = beamTopLevelType(nextIsTop);
 					const double nextOffset = seatTop - beamTopAbs[i + 1];
 
-					// **「上階の、自階にもある種別」を offset 0 で指してはならない。** VW はその
-					// 形の終端を**自階のレベル**（＝始端と同じ Z）へ解決し、実体が無い柱になる
-					// （実機で 46 本。命令のパス長 2959 に対し StartElevation=572 /
-					// EndElevation=572。パスは 2 点ある）。実機で切り分けた分かれ目は次のとおり:
-					//   * `{上階, 横架材天端, 0}`    … 壊れる（横架材天端は**自階にもある**）
-					//   * `{上階, 軒高, 0}`          … 無事（軒高は 2 階に無い＝自階に無い）
-					//   * `{上階, 横架材天端, 2374}` … 無事（offset が 0 でない）
-					// そこで **offset が 0 になるときだけ上階の FL を基準に取り直す**——FL は上階に
-					// 必ずあり、横架材天端との差（＝上階の横架材天端オフセット）が入るので
-					// offset が 0 でなくなる。**上端は上階のレベルに紐付いたまま**なので階高の
-					// 変更に追随する性質は保たれ、**絶対 Z も動かない**。
-					// 経緯は docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」。
-					const double floorOffset = seatTop - stories[i + 1].elevation;
-					if (nextIsTop || std::abs(nextOffset) >= kBoundIdentityTol)
-						// 上階が最上階なら種別は軒高＝**自階に無い**ので offset 0 でも無事だった
-						// （実機で 32 本）。それ以外も offset が 0 でなければ無事だった。
-						cmd.topBound = StoryBoundCommand{1, nextLevel, nextOffset};
-					else if (std::abs(floorOffset) >= kBoundIdentityTol)
-						cmd.topBound = StoryBoundCommand{1, kLevelFL, floorOffset};
-					else
-						// 上階の横架材天端が FL と同じ高さ（＝その階に負の配置 Z を持つ要素が
-						// 1 つも無く、横架材天端オフセットが 0）の階では、上階のどちらの種別を
-						// 指しても offset が 0 になる。**当階へバインドし直さない**——階高の
-						// 変更に追随しなくなる後退で、しかもそれが直すことになるかは（上の
-						// 見立てが確かめられるまで）分からない。そのまま上階を指す。
-						cmd.topBound = StoryBoundCommand{1, nextLevel, nextOffset};
+					// **上端は常に上階の横架材天端（最上階なら軒高）へバインドする。**
+					// M27 の一時期ここに「offset が 0 になるときだけ上階の FL を基準に取り直す」
+					// という分岐があった。`{上階, 横架材天端, 0}` という形が柱を潰している、と
+					// いう見立てによるものだったが、**その見立ては外れだった**——真犯人は
+					// `CreateCustomObjectPath` が潰したパスに 1 ULP の丸めが残り `ResetObject`
+					// の再構築から外れることで、バウンドの側に落ち度は無い（実機 round 1〜4 と
+					// SDK リファレンス issue #59。docs/DEV-NOTES.md M27）。
+					//
+					// 回避策は絶対 Z を変えなかったので絵の高さは合っていたが、**基準が FL に
+					// なる**ため OIP には「FL −40」と出て、階の横架材天端オフセットを変えても
+					// 追随しない柱になっていた（実機で指摘）。見立てが消えたいま残す理由が無い。
+					cmd.topBound = StoryBoundCommand{1, nextLevel, nextOffset};
 				}
 
 				commands.push_back(std::move(cmd));

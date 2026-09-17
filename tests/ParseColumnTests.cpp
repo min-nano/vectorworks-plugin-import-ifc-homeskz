@@ -689,13 +689,16 @@ TEST(build_top_story_column_uses_half_level_span)
 	CHECK(near(commands[0].elevation, 6200.0));
 }
 
-TEST(build_column_binds_top_to_upper_floor_level_when_offset_would_be_zero)
+TEST(build_column_binds_top_to_upper_story_beam_top_even_with_beam_offset)
 {
-	// 柱（管柱・通し柱）は下端を当階、上端を上階へバインドする。上端がちょうど上階の
-	// 横架材天端に乗る管柱は offset が 0 になるが、**「上階の、自階にもある種別」を
-	// offset 0 で指すと VW が自階のレベルへ解決してしまう**ので、そのときは上階の FL を
-	// 基準に取り直す（parse/Column.h）。上階に横架材天端オフセット（−150）がある
-	// ＝ FL 基準なら offset が 0 でなくなるので、この形が選ばれる。
+	// 柱（管柱・通し柱）は下端を当階、上端を**上階の横架材天端**へバインドする。
+	// 上階に横架材天端オフセット（−150）があっても**基準は横架材天端のまま**で、
+	// offset にその差が入る。
+	//
+	// M27 の一時期ここは「offset が 0 になるときだけ上階の FL を基準に取り直す」形だった
+	// （`{上階, 横架材天端, 0}` が柱を潰す、という**外れた見立て**による回避策）。絶対 Z は
+	// 同じでも OIP の基準が FL になり、階の横架材天端オフセットに追随しなくなるので外した
+	// （parse/Column.h・docs/DEV-NOTES.md M27）。
 	StepText step;
 	const int storey = makeStorey(step, "1FL", 600.0);
 	const int upper = makeStorey(step, "2FL", 3500.0);
@@ -729,21 +732,22 @@ TEST(build_column_binds_top_to_upper_floor_level_when_offset_would_be_zero)
 	CHECK_EQ(command.bottomBound.storyOffset, 0);
 	CHECK_EQ(command.bottomBound.level, std::string("横架材天端"));
 	CHECK(near(command.bottomBound.offset, 0.0));
-	// 上端は上階（storyOffset=1）。横架材天端なら offset 0 になってしまうので FL 基準へ
-	// 取り直し、offset には上階の横架材天端オフセット（−150）が入る。
+	// 上端は上階（storyOffset=1）の**横架材天端**。受ける横架材の天端はそのレベルそのもの
+	// なので offset は 0 になる（FL 基準へ取り直さない）。
 	CHECK_EQ(command.topBound.storyOffset, 1);
-	CHECK_EQ(command.topBound.level, std::string("FL"));
-	CHECK(near(command.topBound.offset, -150.0));
+	CHECK_EQ(command.topBound.level, std::string("横架材天端"));
+	CHECK(near(command.topBound.offset, 0.0));
 	// **絶対 Z は動かない**（上階の横架材天端 3350）。
 	CHECK(near(command.elevation + command.height, 3350.0));
 }
 
 TEST(build_column_keeps_upper_story_when_upper_floor_has_no_beam_offset)
 {
-	// 上階の横架材天端が FL と同じ高さ（横架材天端オフセット 0）だと、上階のどちらの種別を
-	// 指しても offset が 0 になり、**上階を指す言い方が残らない**。この IFC には柱以外に
-	// 負の配置 Z を持つ要素が無いので、まさにその形になる。**それでも当階へバインドし直さない**
-	// ——階高の変更に追随しなくなる後退なので、上階を指したままにする（parse/Column.h）。
+	// 上階の横架材天端が FL と同じ高さ（横架材天端オフセット 0）の階でも、上端は**上階の
+	// 横架材天端**を指したままにする（当階へバインドし直さない——階高の変更に追随しなく
+	// なる後退になる。parse/Column.h）。この IFC には柱以外に負の配置 Z を持つ要素が無いので、
+	// まさにその形になる。上の試験との違いは**上階に横架材天端オフセットがあるかどうか**で、
+	// どちらでも基準は横架材天端・offset 0 になる（違うのは解決される絶対 Z）。
 	StepText step;
 	const int storey = makeStorey(step, "1FL", 600.0);
 	makeStorey(step, "2FL", 3500.0);
@@ -1293,15 +1297,13 @@ TEST(all_fixtures_bounds_span_the_column_height)
 						   command.elevation));
 				CHECK(near(boundZ(command.topBound, top) + command.topBound.offset,
 						   command.elevation + command.height));
-				// **上端が「上階の、自階にもある種別」を offset 0 で指していない**こと
-				// （実機で実体が無かった 46 本がこの形。parse/Column.h）。offset 0 で上階を
-				// 指してよいのは次の 2 つだけ:
-				//   * 種別が軒高（最上階にしか無い＝自階に必ず無い）。
-				//   * 上階の横架材天端が FL と同じ高さ（どちらの種別を指しても offset が
-				//     0 になり、**上階を指す言い方が残っていない**）。
-				if (command.topBound.storyOffset > 0 && near(command.topBound.offset, 0.0))
-					CHECK(command.topBound.level == std::string("軒高") ||
-						  near(levelZ[top], floorZ[top]));
+				// **上階を指す上端は、必ず横架材天端か軒高である**（FL を基準にしない）。
+				// M27 の一時期「offset が 0 になるときだけ上階の FL へ取り直す」回避策が
+				// 入っていたが、外れた見立てに基づくもので、絶対 Z が同じでも階の横架材天端
+				// オフセットに追随しない柱になっていた（parse/Column.h）。
+				if (command.topBound.storyOffset > 0)
+					CHECK(command.topBound.level == std::string("横架材天端") ||
+						  command.topBound.level == std::string("軒高"));
 			}
 		});
 }
