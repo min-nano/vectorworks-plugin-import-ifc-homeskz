@@ -47,14 +47,19 @@
 //	**M7 で長さ 0 になった VWPolygon3DObj のパスは使わない。**
 //
 //	この経路は**横架材と共通**（draw/StructuralMember の CreatePath）。水平材も鉛直材も
-//	3 次元空間の直線 1 本なので、パスの作り方は分けず、**2 点の Z の置き方**だけが要素の
-//	仕様になる（柱＝下端 Z → 上端 Z、横架材＝両端とも天端 Z）。根拠は
+//	3 次元空間の直線 1 本なので、パスの作り方は分けない。**2 点の Z の置き方も M27 で
+//	共通になった**——柱も横架材も垂木も**両端に同じ Z** を渡す。根拠は
 //	draw/StructuralMember.h 冒頭。
 //
-//	【高さの与え方】パスの頂点は**最終位置の絶対 Z**（下端 → 下端＋柱高さ）で作る（ISDK に
-//	VectorScript の Move3D が無いため。M6 / M7 と同じ作法）。上下端のストーリバウンドは命令の
-//	offset をそのまま渡す——解析側が**どの柱でもバウンドの差＝柱高さ**になるように offset を
-//	決めている（parse/Column.h）。
+//	【高さの与え方】パスの頂点は**最終位置の絶対 Z**（柱なら下端 Z を 2 点とも）で作る（ISDK に
+//	VectorScript の Move3D が無いため。M6 / M7 と同じ作法）。**柱の高さを作るのはパスではなく
+//	上下端のストーリバウンド**で、命令の offset をそのまま渡す——解析側が**どの柱でもバウンドの
+//	差＝柱高さ**になるように offset を決めている（parse/Column.h）。
+//
+//	**かつては「パスの 2 点の Z の差が柱の高さになる」と書いていたが、それは誤りだった**
+//	（M27）。`CreateCustomObjectPath` は渡したパスを生成直後に平らに潰してしまい、実体を
+//	与えているのは `ResetObject` による解決済みバウンドからの再構築のほうである。詳細は
+//	下記 CreatePath の呼び出しと docs/DEV-NOTES.md M27。
 //
 //	【診断を必ず持ち帰る】実描画はローカルの VectorWorks でしか確認できない。そこで
 //	draw/Member と同じく、断面が入ったか・パスの頂点が 2 つになったかを**読み戻して確かめ**、
@@ -102,9 +107,6 @@ namespace HomeskzIfcImport::draw
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
 			std::size_t bound = 0; // 高さ基準を VW が受け取らなかった
 			std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
-			// パスを作り直して差し替えたら直った本数（draw/StructuralMember.h の
-			// retryWithFreshPath）。0 でなければ「渡した曲線は正しく、PIO 化で潰れていた」。
-			std::size_t repaired = 0;
 			std::string lengthHint; // 「長さ」のパラメータ名の手掛かり（最初の 1 件）
 			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長・図面が
 			// 持っている高さ基準・図面のパスの頂点）。**原因をパス側と高さ基準側に分けるのは
@@ -113,6 +115,7 @@ namespace HomeskzIfcImport::draw
 		};
 
 		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
+		// **取り込み後の再検査**（recheckColumns）が使う。
 		constexpr double kExtentTol = 1.0;
 
 		bool DrawOne(const core::ColumnCommand& column, RefNumber style, ColumnFailures& failures,
@@ -124,16 +127,36 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle profile = CreateRectangleProfileGroup(
 				-column.width / 2.0, -column.depth / 2.0, column.width / 2.0, column.depth / 2.0);
 
-			// パス＝断面中心を通る鉛直線（下端 → 上端）。横架材と同じ CreatePath で作り、
-			// **柱では 2 点の Z が異なる**（＝この差が柱の高さになる）。
+			// パス＝断面中心を通る鉛直線。**2 点とも下端の Z を渡す**（横架材と同じ形）。
+			//
+			// 【なぜ高さを持たせないか（M27 の答え）】以前はここで下端 Z → 上端 Z を渡し、
+			// 「この差が柱の高さになる」と書いていた。**それは事実ではなかった。**実機で
+			// 生成直後のパスを読み戻すと、**197 本すべてが 0 長**——`CreateCustomObjectPath`
+			// は世界座標で受け取ったパスをその場で平らに潰し、柱に実体を与えているのは
+			// あとで `ResetObject` が**解決済みのストーリバウンドから作り直す**ほうだった
+			// （docs/DEV-NOTES.md M27「実機 round 1 / round 2 の測定」）。
+			//
+			// そして `ResetObject` が作り直すのは**ちょうど退化しているパスだけ**らしい。
+			// 潰れ方に丸め誤差が残って **1 ULP だけ 0 でない**パスは「呼び出し側が与えた
+			// 有効なパス」と見なされて温存され、そのまま**長さ 0 の柱**になる——実機で
+			// 潰れていた 46 本はこれで、残差は `4.54747e-13`（2048〜4096 付近の 1 ULP）
+			// だった。残差が出るかどうかは端点の Z の値しだいで、上端が 3531mm の柱だけが
+			// 当たっていた（同 M27）。
+			//
+			// **2 点に同じ値を渡せば、この残差は原理的に出ない**——どんな内部単位を経由
+			// しようと `f(z) - f(z)` は厳密に 0 だからで、VW が何をしているかに依らずに
+			// 「ちょうど退化したパス」を渡せる。高さはストーリバウンドが支配する
+			// （上下端の解決済み Z は実機で命令どおりだと確認済み。バウンドの側に落ち度は
+			// 無い。SDK リファレンス issue #59）。**これは横架材が前からしている形と同じ**で、
+			// 「パスにも高さを持たせると二重に適用されうる」という本ファイル冒頭の注意とも
+			// 揃う。
 			bool pathAppended = false;
 			PathProbe probe;
 			const MCObjectHandle path =
 				profile == nil
 					? nil
 					: CreatePath(core::Vec3{column.position.x, column.position.y, column.elevation},
-								 core::Vec3{column.position.x, column.position.y,
-											column.elevation + column.height},
+								 core::Vec3{column.position.x, column.position.y, column.elevation},
 								 pathAppended, &probe);
 			if (path != nil && !pathAppended)
 				++failures.path;
@@ -158,12 +181,12 @@ namespace HomeskzIfcImport::draw
 			// 描き上がりの長さ＝パス長（端部オフセットはこの長さから戻す量なので、潰れて
 			// いないかを見るこの検査には要らない）。0 で潰れていたら診断へ持ち帰る。
 			spec.expectedLength = column.height;
-			// 潰れていたらパスを作り直して差し替える。**差し替えるパスは挿入点からの相対**で
-			// 渡す（世界座標で渡すと材が挿入点の Z ぶん高く出る。実機 round 10 で
-			// `Z 1144→4103`。draw/StructuralMember.h の retryWithFreshPath）。
-			spec.retryWithFreshPath = true;
-			spec.pathStart = core::Vec3{0.0, 0.0, 0.0};
-			spec.pathEnd = core::Vec3{0.0, 0.0, column.height};
+			// **パスを作り直して差し替える対症療法（`retryWithFreshPath`）は要らなくなった。**
+			// 潰れていたのは「渡した 2 点の Z が違うせいで、潰れ方に 1 ULP の丸めが残り、
+			// `ResetObject` の再構築から外れていた」ためで、両端に同じ Z を渡すようにした
+			// いま原理的に起きない（上記 CreatePath・docs/DEV-NOTES.md M27）。実機 round 3 で
+			// 作り直しが 1 本も走らないことを確認してから外してある。**潰れの検出は残す**
+			// ——直ったから見張りを外す、ではなく、再発したら黙って繕わずに報せるため。
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
 			{
@@ -205,33 +228,32 @@ namespace HomeskzIfcImport::draw
 			}
 			// 長さ 0 で描かれた本数（オブジェクトは在るのに実体が無い）。**これが 0 でない
 			// 限り、件数が揃っていても絵は欠けている**ので、必ず診断へ載せる。
-			if (result.repairedByPath)
-				++failures.repaired;
-			if (result.collapsed || result.repairedByPath)
+			if (result.collapsed)
 			{
-				if (result.collapsed)
-					++failures.collapsed;
+				++failures.collapsed;
 				// 1 本目だけ実測を控える（全数ぶん並べても読めない）。
 				if (failures.collapsedProbe.empty())
 				{
-					// 入れ直しの結末（**入れ子の三項演算子にしない**——clang-tidy の
-					// readability-avoid-nested-conditional-operator）。
-					const char* fixedNote = "できない";
-					if (probe.setOk)
-						fixedNote = probe.fixedRead ? "" : "読めない";
-					std::array<char, 192> buffer{};
+					// **「あるべき高さ」は渡したパスの値ではない。** M27 以降パスは両端とも
+					// 下端 Z の退化点なので、ここに出す Z 範囲は「命令が意図している高さ」
+					// であって入力そのものではない（実測は直前の「作った曲線の Z」）。
+					// 読む人が入力と取り違えないよう、文言で断っておく。
+					std::array<char, 288> buffer{};
 					std::snprintf(buffer.data(), buffer.size(),
 								  "パスの頂点 piece0=%d piece1=%d・作った曲線の Z %s(%g→%g)・"
-								  "入れ直し %s(→%g)・命令のパス長 %g（Z %g→%g）・OIP ",
+								  "あるべき高さ %g（命令が意図する Z 範囲 %g→%g。渡したパスは"
+								  "両端とも下端 Z の退化点なので、これは入力そのものではない）"
+								  "・OIP ",
 								  static_cast<int>(probe.piece0), static_cast<int>(probe.piece1),
-								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1, fixedNote,
-								  probe.fixedZ1, column.height, column.elevation,
+								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1,
+								  column.height, column.elevation,
 								  column.elevation + column.height);
 					failures.collapsedProbe = std::string(buffer.data()) + result.collapsedProbe;
 				}
 			}
 			if (failures.lengthHint.empty())
 				failures.lengthHint = result.lengthParamHint;
+
 			outObject = result.object;
 			return true;
 		}
@@ -281,8 +303,8 @@ namespace HomeskzIfcImport::draw
 		// （柱が見えないときの切り分け材料）。
 		if (outDiagnostics != nullptr &&
 			(failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
-			 failures.bound > 0 || failures.collapsed > 0 || failures.repaired > 0 ||
-			 !failures.lengthHint.empty() || style == 0))
+			 failures.bound > 0 || failures.collapsed > 0 || !failures.lengthHint.empty() ||
+			 style == 0))
 		{
 			std::string note = "柱の診断: ";
 			if (failures.path > 0)
@@ -293,14 +315,10 @@ namespace HomeskzIfcImport::draw
 			if (failures.bound > 0)
 				note +=
 					"高さ基準を図面へ書けなかった柱 " + std::to_string(failures.bound) + " 本。";
-			if (failures.repaired > 0)
-				note += "パスを作り直して差し替えたら直った柱 " +
-						std::to_string(failures.repaired) + " 本。";
 			if (failures.collapsed > 0)
-				note += "作り直しても長さ 0 のままだった（実体が無い）柱 " +
-						std::to_string(failures.collapsed) + " 本。";
-			if ((failures.collapsed > 0 || failures.repaired > 0) &&
-				!failures.collapsedProbe.empty())
+				note += "長さ 0 で描かれた（実体が無い）柱 " + std::to_string(failures.collapsed) +
+						" 本。";
+			if (failures.collapsed > 0 && !failures.collapsedProbe.empty())
 				note += "（1 本目: " + failures.collapsedProbe + "）";
 			if (!failures.lengthHint.empty())
 				note +=
@@ -314,6 +332,7 @@ namespace HomeskzIfcImport::draw
 			}
 			if (style == 0)
 				note += "プラグインスタイル『木質構造材_柱・束』が見つかりません。";
+
 			*outDiagnostics = std::move(note);
 		}
 
