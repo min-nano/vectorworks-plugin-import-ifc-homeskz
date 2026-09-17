@@ -7,20 +7,24 @@
 //	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	描画手順:
-//	  1. **パス**＝天端中央線の始端→終端を通る 2 点の NURBS 曲線（柱と共通。
-//	     draw/StructuralMember の CreatePath）。頂点は命令のセンタリング済み絶対座標で、
-//	     **両端とも同じ Z（始端の天端 Z）**を持つ（傾斜は下記のストーリバウンドが与える）。
+//	  1. **パス**＝天端中央線の始端→終端を通る 2 点の曲線（柱と共通。draw/StructuralMember
+//	     の CreatePath）。頂点は命令のセンタリング済み**平面座標だけ**で、**Z は持たない**
+//	     （高さも勾配も下記のストーリバウンドが与える。draw/StructuralMember.h 冒頭
+//	     「パスは 2D で渡す」）。
 //	  2. **プロファイル**＝断面の矩形（幅 × せい）をグループに入れたもの。
 //	  3. **PIO の生成から各フィールドの設定までは柱と共通**（draw/StructuralMember）。
-//	     ここが受け持つのは横架材固有の値——パスの Z（両端とも天端 Z）・天端中央基準の
-//	     断面矩形・構造用途（横架材）・スタイル（木質構造材_横架材）・配置先レイヤ——だけ。
+//	     ここが受け持つのは横架材固有の値——パスの平面座標・天端中央基準の断面矩形・
+//	     構造用途（横架材）・スタイル（木質構造材_横架材）・配置先レイヤ——だけ。
 //	  4. 全配置後に UpdateStyledObjects を 1 回（下記「スタイルは関連付けだけでは効かない」）。
 //	PIO を生成できない場合は平面投影の直線にフォールバックする（1 本の失敗で全体を止めない）。
 //
-//	【パスに傾斜を持たせない】始端／終端の高さ（傾斜梁の勾配）は **SetObjectStoryBound の
-//	offset 差だけ**で表し、パスの 2 頂点は同じ Z にする。構造材ツールの高さバインドは指定した
-//	高さ差をパス由来の部材長に**加算**するため、パスにも傾斜を持たせると傾斜が二重に適用され、
-//	終端が実際の 2 倍の高さに描かれる（実機で確認済み。水平梁は差が 0 なので顕在化しない）。
+//	【パスに高さを持たせない】始端／終端の高さ（傾斜梁の勾配を含む）は **SetObjectStoryBound の
+//	offset だけ**で表し、パスは平面（Z=0）に置く。構造材ツールの高さバインドは指定した高さ差を
+//	パス由来の部材長に**加算**するため、パスにも傾斜を持たせると傾斜が二重に適用され、終端が
+//	実際の 2 倍の高さに描かれる（実機で確認済み）。M27 でその先も分かった——**パスの Z は
+//	そもそも PIO に受け取られておらず**、3D のパスは PIO がバウンドの解決結果から自分で作る。
+//	だから絶対 Z を入れる意味も無く、入れれば「高さを 2 か所で指定する」ことにしかならない
+//	（draw/StructuralMember.h 冒頭「パスは 2D で渡す」）。
 //
 //	【パスの遍歴（2 頂点の 3D ポリライン → 2D ポリライン → 2 点の NURBS 曲線）】最初は 2 頂点の
 //	**3D ポリライン**（VWPolygon3DObj）に絶対 Z を持たせていたが、実機で**構造材が長さ 0 に
@@ -38,12 +42,10 @@
 //	二重加算も起きず、登り梁の屋根面スナップも乗った）。
 //
 //	M8 の柱で `Add3DVertex`（VS の AddVertex3D）が見つかり、2D ポリラインを選んだ前提が消えた。
-//	水平材も鉛直材も本質は 3 次元空間の直線 1 本なので、**パスは柱と同じ 2 点の NURBS
-//	曲線に統一した**。要素ごとに違うのは 2 点の Z だけで、水平材は**両端とも同じ Z**を渡すため、
-//	傾斜が二重に適用される心配は無い。**Z を 0 にはしない**（3D 座標は絶対 Z として渡るので上
-//	階の梁が地面に落ちる。理由は draw/StructuralMember.h 冒頭）。**この統一は M7 の確認項目——
-//	スパン・長さが実寸か、段差梁・傾斜梁が二重加算にならないか、登り梁が屋根面に乗るか——の再確
-//	認が要る。**
+//	水平材も鉛直材も本質は直線 1 本なので、**パスは柱と同じ 2 点の曲線に統一した**。
+//	**そして M27 で Z も外した**——渡した Z は PIO に受け取られておらず、高さはバウンドだけが
+//	決めていたので、パスは**平面（Z=0）の 2 点**になった。これは M7 の 2D ポリライン
+//	（高さがバウンドだけで正しく決まっていた）と同じ形へ戻ったということでもある。
 //
 //	【スタイルは関連付けだけでは効かない】ISDK の SetPluginObjectStyle はスタイルの関連付け
 //	（パラメータ）までで、スタイルが決める描画属性（コンポーネントのクラス／マテリアル＝
@@ -80,6 +82,11 @@ namespace HomeskzIfcImport::draw
 			std::size_t length = 0; // パスから部材長を取れなかった（実体が無い）
 			std::size_t offset = 0; // 端部オフセットを書けなかった
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
+			// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。
+			// パスから Z を外した（下記）ぶんの見張りで、0 でなければ材は在るのに違う高さに
+			// 並んでいる——本数にもスパンにも出ないので、これが唯一の手掛かりになる。
+			std::size_t elevation = 0;
+			std::string elevationProbe; // ずれた 1 本目の実測（命令の Z と図面の Z）
 			// パスを作り直して差し替えたら直った本数（draw/StructuralMember.h の
 			// retryWithFreshPath）。0 でなければ「渡した曲線は正しく、PIO 化で潰れていた」
 			// ——柱で実際に起きた症状（docs/DEV-NOTES.md M27）が横架材でも起きたということ。
@@ -104,18 +111,16 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle profile =
 				CreateRectangleProfileGroup(0.0, 0.0, member.width, member.height);
 
-			// パス＝天端中央線の始端→終端を通る 2 点の NURBS 曲線（柱と共通。
-			// draw/StructuralMember の CreatePath）。**両端とも同じ Z（始端の天端 Z）**を
-			// 渡し、傾斜梁の勾配はストーリバウンドの offset 差だけで表す（冒頭「パスに
-			// 傾斜を持たせない」）。Z を 0 にはしない——3D 座標は絶対 Z として渡るので、
-			// 0 を渡すと上階の梁が地面に置かれる（draw/StructuralMember.h 冒頭）。
+			// パス＝天端中央線の始端→終端を通る 2 点の曲線（柱・垂木と共通。
+			// draw/StructuralMember の CreatePath）。**平面座標だけを渡す**——高さも勾配も
+			// 上下端のストーリバウンドが決め、構造材 PIO はその解決結果から 3D のパスを
+			// 自分で作る（冒頭「パスに傾斜を持たせない」／draw/StructuralMember.h 冒頭
+			// 「パスは 2D で渡す」）。以前は両端とも天端 Z を入れていたが、**その Z は
+			// PIO に受け取られていなかった**（M27）ので、同じ高さをバウンドとパスの
+			// 2 か所へ書く形をやめた。
 			bool pathAppended = false;
 			const MCObjectHandle path =
-				profile == nil
-					? nil
-					: CreatePath(core::Vec3{member.start.x, member.start.y, member.elevation},
-								 core::Vec3{member.end.x, member.end.y, member.elevation},
-								 pathAppended);
+				profile == nil ? nil : CreatePath(member.start, member.end, pathAppended);
 			if (path != nil && !pathAppended)
 				++failures.path;
 
@@ -149,9 +154,15 @@ namespace HomeskzIfcImport::draw
 			// ぶん動く。draw/StructuralMember.h の retryWithFreshPath）ので、始端を原点に
 			// 置いた差を渡す。
 			spec.retryWithFreshPath = true;
-			spec.pathStart = core::Vec3{0.0, 0.0, 0.0};
-			spec.pathEnd =
-				core::Vec3{member.end.x - member.start.x, member.end.y - member.start.y, 0.0};
+			spec.pathStart = core::Vec2{0.0, 0.0};
+			spec.pathEnd = core::Vec2{member.end.x - member.start.x, member.end.y - member.start.y};
+			// 【高さの検算】パスから Z を外した以上、高さを決めるのはバウンドだけになった。
+			// その解決が意図とずれても本数にもスパンにも出ないので、**描き上がった両端の
+			// 絶対 Z を読み戻して命令と引き比べる**（draw/StructuralMember.h の
+			// checkElevation）。天端 Z は傾斜梁で両端が違う（elevation / endElevation）。
+			spec.checkElevation = true;
+			spec.expectedStartZ = member.elevation;
+			spec.expectedEndZ = member.endElevation;
 
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
@@ -197,6 +208,14 @@ namespace HomeskzIfcImport::draw
 				++failures.repaired;
 			if ((result.collapsed || result.repairedByPath) && failures.collapsedProbe.empty())
 				failures.collapsedProbe = result.collapsedProbe;
+			// 高さが命令と違った本数（上の checkElevation）。**実体はあるので潰れの数には
+			// 出ない**——材が揃って違う高さに並ぶ形なので、別に数えて持ち帰る。
+			if (!result.elevationOk)
+			{
+				++failures.elevation;
+				if (failures.elevationProbe.empty())
+					failures.elevationProbe = result.elevationProbe;
+			}
 			return true;
 		}
 	} // namespace
@@ -247,7 +266,7 @@ namespace HomeskzIfcImport::draw
 		// 見えないときに、原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
 		if (outDiagnostics != nullptr &&
 			(failures.path > 0 || failures.section > 0 || failures.length > 0 ||
-			 failures.repaired > 0 || failures.offset > 0 || style == 0))
+			 failures.repaired > 0 || failures.offset > 0 || failures.elevation > 0 || style == 0))
 		{
 			std::string note = "横架材の診断: ";
 			if (failures.path > 0)
@@ -260,6 +279,13 @@ namespace HomeskzIfcImport::draw
 				note += "パスを作り直して直った材 " + std::to_string(failures.repaired) + " 本。";
 			if ((failures.length > 0 || failures.repaired > 0) && !failures.collapsedProbe.empty())
 				note += "（1 本目: " + failures.collapsedProbe + "）";
+			if (failures.elevation > 0)
+			{
+				note +=
+					"命令と違う高さに描かれた材 " + std::to_string(failures.elevation) + " 本。";
+				if (!failures.elevationProbe.empty())
+					note += "（1 本目: " + failures.elevationProbe + "）";
+			}
 			if (failures.offset > 0)
 			{
 				note += "端部オフセットを設定できなかった材 " + std::to_string(failures.offset) +

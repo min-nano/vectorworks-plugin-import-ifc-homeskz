@@ -9,33 +9,31 @@
 //	ポップアップのキーを直すといった変更が、直した側でしか効かない形になっていた
 //	（CLAUDE.md「重複を作らない置き場所」）。ここが唯一の定義。
 //
-//	【パスも共通】水平材も鉛直材も本質は**3 次元空間の直線 1 本**なので、パスの作り方も分けな
-//	い。どちらも 2 点の NURBS 曲線（`CreateNurbsCurve` ＋ `Add3DVertex`＝VS の`AddVertex3D`）
-//	で作る（CreatePath）。M7 の横架材が 2D ポリラインだったのは「ISDK には NURBS
-//	曲線へ頂点を足す呼び出しが無い」と誤認していたためで、M8 の柱で `Add3DVertex`
-//	が見つかりその前提は消えた。要素ごとに違うのは**2 点の Z をどう置くか**だけで、
-//	それは下記のとおり部材の仕様そのものである。
+//	【パスも共通】水平材も鉛直材も本質は**平面上の直線 1 本**なので、パスの作り方も分けない。
+//	どちらも 2 点の曲線（`CreateNurbsCurve` ＋ `Add3DVertex`＝VS の `AddVertex3D`）で作る
+//	（CreatePath）。M7 の横架材が 2D ポリラインだったのは「ISDK には NURBS 曲線へ頂点を足す
+//	呼び出しが無い」と誤認していたためで、M8 の柱で `Add3DVertex` が見つかりその前提は消えた。
 //
-//	【Z の置き方（＝呼び出し側が決める唯一の差）】
-//	  * 水平材（横架材）… 両端とも**同じ Z**（天端 Z）を渡す。傾斜梁の勾配は始端／終端の
-//	    ストーリバウンドの offset 差だけで表し、**パスには持たせない**——構造材ツールはバウンド
-//	    の高さ差をパス由来の部材長へ加算しうるので、パスにも傾斜を持たせると二重に適用される
-//	    （実機で確認済み。draw/Member.cpp 冒頭）。
-//	  * 鉛直材（柱）… **両端とも下端の Z**（M27 で訂正）。かつては「下端 Z → 上端 Z を渡し、
-//	    その差が柱の高さになる」としていたが、実機で測ると**そうなっていなかった**——
-//	    `CreateCustomObjectPath` は渡したパスを生成直後に平らに潰し（実機で柱 197 本すべて）、
-//	    実体を与えているのは `ResetObject` が**解決済みバウンドから作り直す**ほうである。
-//	    しかも作り直すのは**ちょうど退化しているパスだけ**らしく、潰れ方に 1 ULP の丸めが
-//	    残ったパスは温存されて**長さ 0 の柱**になっていた。2 点に同じ値を渡せばその残差は
-//	    原理的に出ない（`f(z) - f(z)` は厳密に 0）ので、**水平材と同じ形で渡す**
-//	    （draw/Column.cpp・docs/DEV-NOTES.md M27）。
+//	【パスは 2D で渡す（＝呼び出し側は Z を決めない）】パスは**2 点とも Z=0 の平面**に置き、
+//	高さは**上下端のストーリバウンドだけ**が決める。CreatePath が `core::Vec2` しか取らないのは
+//	そのためで、**Z を渡す口をそもそも設けない**（渡せる形にしておくと、同じ高さをバウンドと
+//	パスの 2 か所で指定することになり、食い違いは実機でしか見つからない）。
 //
-//	**Z に 0 を渡してはならない。** 「パスに高さを持たせない＝Z=0」ではない。3D 座標は
-//	**絶対 Z** として渡る（M6 の垂木で確定。読み戻しだけがレイヤ相対になる）ので、2 階の梁に
-//	Z=0 のパスを渡せばジオメトリは地面に置かれる。しかも VW はバウンドの offset を
-//	「レベル Z − オブジェクト Z」で**再計算して上書きする**（M8 の 1 周目で観測）ため、
-//	命令どおりの offset も失われる。**パスとバウンドが同じ絶対 Z を指す**ようにするのが
-//	正しく、これは柱（M8）で実証済みの形でもある。水平材ではその Z が両端で等しいだけ。
+//	根拠は M27 で分かった構造材 PIO の作りである。`CreateCustomObjectPath` は渡したパスの
+//	**Z を受け取らない**（実機で柱 197 本すべてが生成直後に 0 長だった）。実体を与えているのは
+//	`ResetObject` が**解決済みのバウンドから 3D のパスを作り直す**ほうで、作り直しの条件は
+//	**両端の Z の差がちょうど 0**（＝渡されたパスが平面に乗っている）ことだった——つまり
+//	構造材ツールは**2D のパスを渡されることを前提に**していて、3D 化は自分で行う。
+//	だから Z は渡すだけ無駄なうえ、**渡した Z が丸めで 1 ULP だけ残ると作り直しから外れて
+//	長さ 0 の材になる**（実機で柱 46 本。docs/DEV-NOTES.md M27）。**高さの指定は 1 か所＝
+//	バウンドだけにする**のが、その事故が原理的に起きない唯一の形である。
+//
+//	**Z=0 のパスでも材は地面に落ちない**（M7 で実証済み）——横架材は M7 の時点で**2D ポリ
+//	ライン**のパスで描かれており、高さはバウンド（横架材天端・オフセット 0）だけで正しく
+//	決まっていた。「3D 座標は絶対 Z として渡るので Z=0 のパスは材を地面へ置く」という以前の
+//	注意は、**パスの Z がそもそも受け取られていない**と分かったいま当たらない。ただし
+//	**実描画は実機でしか確かめられない**ので、描き上がった両端の絶対 Z を読み戻して命令と
+//	引き比べる見張りを置いてある（下記 checkElevation）。
 //
 //	【端部オフセット】パスの端点は**接合相手の芯線上**にあり（横架材の芯線は天端中央を通る
 //	ので、柱の上端なら受ける梁の天端、負け梁の端なら勝ち梁の天端中央線）、材が実際に止まる
@@ -112,7 +110,7 @@ namespace HomeskzIfcImport::draw
 	// DrawUtil の CreateRectangleProfileGroup）。
 	struct StructuralMemberSpec
 	{
-		MCObjectHandle path = nil;	  // パス（部材の芯線。2 点の NURBS 曲線）
+		MCObjectHandle path = nil; // パス（部材の芯線を平面へ落とした 2 点の曲線）
 		MCObjectHandle profile = nil; // 断面プロファイルのグループ（空は不可）
 		std::string memberId;		  // 構造材 ID（OIP の「構造材 ID」）
 		std::string drawClass;		  // クラス名（空ならクラスを割り当てない）
@@ -139,17 +137,28 @@ namespace HomeskzIfcImport::draw
 		// expectedLength を**どの読みで検査するか**（上記 StructuralExtentKind）。部材の向きで
 		// 測れる値が違うので、expectedLength を入れるなら必ず部材に合わせて選ぶ。
 		StructuralExtentKind extentKind = StructuralExtentKind::Vertical;
+		// **描き上がった両端の絶対 Z を読み戻して命令と引き比べるか**（下記 expectedStartZ /
+		// expectedEndZ）。**パスから Z を外したぶんの見張り**である——高さを決めるのが
+		// バウンドだけになった以上、バウンドの解決が意図とずれても件数には一切出ない
+		// （スパンも本数も揃ったまま、材だけが違う高さに並ぶ）。実描画は実機でしか見られない
+		// ので、「読み戻した絶対 Z が命令と合っているか」を数えて持ち帰る。
+		bool checkElevation = false;
+		// 描き上がるべき両端の**絶対 Z**（mm）。checkElevation が true のときだけ使う。
+		// 始端＝材の始め（柱は下端）、終端＝材の終わり（柱は上端）で、傾斜材では値が違う。
+		double expectedStartZ = 0.0;
+		double expectedEndZ = 0.0;
 		// **潰れていたときにパスを作り直して差し替えるための 2 点**（`SetCustomObjectPath`）。
 		// `retryWithFreshPath` が true のときだけ使う。
 		//
 		// **この 2 点は「オブジェクトの挿入点からの相対」で渡す**（＝始端は原点、終端は
-		// `(0, 0, 材の長さ)`）。生成の `CreateCustomObjectPath` は**世界座標**のパスを取るのに、
+		// `(材の平面長, 0)`）。生成の `CreateCustomObjectPath` は**世界座標**のパスを取るのに、
 		// あとから差し替える `SetCustomObjectPath` は**相対**で取る——実機で世界座標のまま
 		// 渡したら、長さは正しいのに材が挿入点の Z（572mm）ぶん高い位置に出た
 		// （`Z 1144→4103`。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+		// **Z は持たない**（冒頭「パスは 2D で渡す」）。
 		bool retryWithFreshPath = false;
-		core::Vec3 pathStart;
-		core::Vec3 pathEnd;
+		core::Vec2 pathStart;
+		core::Vec2 pathEnd;
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
@@ -188,6 +197,13 @@ namespace HomeskzIfcImport::draw
 		// そもそも高さ基準が図面に入っていないのかを**実機を見ずに**分けるための証拠で、
 		// 潰れていなければ空。
 		std::string collapsedProbe;
+		// **読み戻した両端の絶対 Z が命令と合っていたか**（spec.checkElevation が false なら
+		// 常に true＝検査していない。読めなかったときも true——「測れなかった」を「ずれた」
+		// として数えると診断が嘘をつく）。false なら材は在るのに**違う高さに描かれている**。
+		bool elevationOk = true;
+		// ずれていたときだけ、命令の Z と図面の Z を並べた 1 行（呼び出し側が 1 件だけ
+		// 診断へ載せる）。合っていれば空。
+		std::string elevationProbe;
 	};
 
 	// パスの読み戻し（診断用）。**「2 点になったか」の真偽だけでは足りない**——ピース索引の
@@ -211,10 +227,12 @@ namespace HomeskzIfcImport::draw
 		double fixedZ1 = 0.0;	 // 入れ直したあとの終端の Z
 	};
 
-	// パス＝部材の芯線（始端 → 終端）を通る 2 点の NURBS 曲線。gSDK->CreateNurbsCurve で
-	// 始端 1 点の曲線を作り、gSDK->Add3DVertex（**VS の AddVertex3D にあたる**）で終端を
-	// 足す。**水平材・鉛直材ともこれ 1 つ**で、違いは呼び出し側が渡す 2 点の Z だけ
-	// （冒頭「Z の置き方」。Z に 0 を渡してはならない）。
+	// パス＝部材の芯線を**平面に投影した**始端 → 終端を通る 2 点の曲線。gSDK->CreateNurbsCurve
+	// で始端 1 点の曲線を作り、gSDK->Add3DVertex（**VS の AddVertex3D にあたる**）で終端を
+	// 足す。**水平材・鉛直材ともこれ 1 つ**で、**高さは一切渡さない**——2 点とも Z=0 に置き、
+	// 3D 化は構造材 PIO がストーリバウンドから行う（冒頭「パスは 2D で渡す」）。鉛直材（柱）は
+	// 平面では 1 点に潰れるので、始端と終端に**同じ座標**を渡すことになる（それでよい——
+	// 高さも向きもバウンドが決めるので、パスが担うのは「材がどこに立つか」だけである）。
 	//
 	// **足したあと、2 点の座標を明示的に入れ直す**（`NurbsSetPt3D`）。`Add3DVertex` が足した
 	// 点が**渡した位置にならないことがある**——実機で 2 点とも同じ位置になり、実体が無い材に
@@ -224,7 +242,7 @@ namespace HomeskzIfcImport::draw
 	// 頂点が本当に 2 つになったかを outAppended に返す（診断用。ここが崩れると PIO は
 	// パスを挿入点としてしか読まず、長さ 0 で何も描かれない）。作れなければ nil。
 	// outProbe が非 nullptr なら、読み戻した頂点数をそのまま入れる（診断用。上記 PathProbe）。
-	MCObjectHandle CreatePath(const core::Vec3& start, const core::Vec3& end, bool& outAppended,
+	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended,
 							  PathProbe* outProbe = nullptr);
 
 	// 構造材ツールの PIO を 1 つ生成して仕様どおりに設定する。style が 0 ならスタイルを
@@ -245,14 +263,20 @@ namespace HomeskzIfcImport::draw
 	//
 	// 【水平材は「スパン」で測る】上の差は鉛直材にしか使えない——水平材は両端の Z が等しい
 	// のが正常なので、差で測れば全数が 0 になる。水平材は PIO がパスから入れる「スパン」を
-	// 読む（kind＝StructuralExtentKind::Span。start / end は意味を持たず 0 のまま）。
+	// 読む（kind＝StructuralExtentKind::Span）。**両端の絶対 Z はどちらの kind でも読む**
+	// ——水平材でも「描かれた高さが命令どおりか」の検算に要るからで、実体の測り方だけが
+	// kind で分かれる（上記 DrawnMemberSize::elevationRead）。
 	//
 	// found が false なら測る値を引けなかった（ほかの値は意味を持たない）。
 	struct DrawnMemberSize
 	{
 		bool found = false;
-		double start = 0.0;	 // 始端の絶対 Z（kind＝Vertical のときだけ）
-		double end = 0.0;	 // 終端の絶対 Z（kind＝Vertical のときだけ）
+		// **両端の解決済み絶対 Z は kind に依らず読む。** kind＝Vertical はこの差で実体を測り、
+		// kind＝Span でも**描かれた高さが命令どおりか**の検算に要る（パスから Z を外したので、
+		// 高さを言える値はこの 2 つしか残っていない）。読めたかは elevationRead が言う。
+		bool elevationRead = false;
+		double start = 0.0;	 // 始端の絶対 Z（elevationRead のときだけ）
+		double end = 0.0;	 // 終端の絶対 Z（同上）
 		double extent = 0.0; // |end - start| もしくはスパン（＝実体の高さ／長さ）
 		bool zero = false;	 // found かつ extent が 0（＝実体が無い）
 	};

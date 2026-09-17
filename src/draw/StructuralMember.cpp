@@ -45,11 +45,14 @@ namespace HomeskzIfcImport::draw
 		// 柱も標準の構造材ツールで描く。parse/Column.h）。
 		const TXString kStructuralMember(kStructuralMemberPlugin);
 
-		// 鉛直パス（NURBS 曲線）の次数。直線 1 本なので 1。byCtrlPts=false ＝ 通過点で定義す
-		// る。
+		// パス（NURBS 曲線）の次数。直線 1 本なので 1。byCtrlPts=false ＝ 通過点で定義する。
 		constexpr short kPathDegree = 1;
-		// 鉛直パスに必要な頂点数（下端・上端）。読み戻して診断に使う。
+		// パスに必要な頂点数（始端・終端）。読み戻して診断に使う。
 		constexpr Sint32 kPathPointCount = 2;
+		// **パスを置く平面の Z。** パスは 2D で渡し、高さはストーリバウンドだけが決める
+		// （draw/StructuralMember.h 冒頭「パスは 2D で渡す」）。ここが 0 以外になることは
+		// 無い——なるなら「高さを 2 か所で指定する」形へ戻っている。
+		constexpr double kPathPlaneZ = 0.0;
 
 		// 構造材ツールのフィールド名。**名前が 1 つ違うだけで setter は黙って無視される**（M6
 		// の垂木で実証済み。draw/Rafter.cpp 冒頭）ので、寸法は読み戻して確かめる。記号 PIO
@@ -105,6 +108,9 @@ namespace HomeskzIfcImport::draw
 		// 「長さ 0」とみなす閾値（mm）。潰れた部材はちょうど 0 を返すので、実部材の長さ
 		// （最短でも数十 mm）と取り違える余地は無い。
 		constexpr double kCollapsedLength = 0.01;
+		// 描かれた絶対 Z が命令と「合っている」とみなす許容（mm）。丸めのぶんだけで、
+		// 意味のあるずれ（レイヤ原点へ落ちる・階ぶん動く）とは桁が違う。
+		constexpr double kElevationTol = 1.0;
 
 		// フィールドに渡す値（ポップアップはキーで保持されるため数値文字列）。
 		constexpr const char* kProfileShapeRectangle = "Rectangle";
@@ -189,18 +195,18 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	MCObjectHandle CreatePath(const core::Vec3& start, const core::Vec3& end, bool& outAppended,
+	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended,
 							  PathProbe* outProbe)
 	{
 		outAppended = false;
 		MCObjectHandle path =
-			gSDK->CreateNurbsCurve(WorldPt3(start.x, start.y, start.z), false, kPathDegree);
+			gSDK->CreateNurbsCurve(WorldPt3(start.x, start.y, kPathPlaneZ), false, kPathDegree);
 		if (path == nil)
 			return nil;
 
 		// **Add3DVertex が VS の AddVertex3D にあたる**（ヘッダ参照）。末尾へ 1 点足して
 		// 始端 → 終端の 2 点にする。
-		gSDK->Add3DVertex(path, WorldPt3(end.x, end.y, end.z));
+		gSDK->Add3DVertex(path, WorldPt3(end.x, end.y, kPathPlaneZ));
 		// 頂点が本当に 2 つになったかを読み戻す。ピース索引の起点は 0 / 1 のどちらの
 		// 規約もあり得るので両方を見る（**判定に失敗しても曲線はそのまま使う**——ここで
 		// 諦めると、索引の規約違いというだけで部材が 1 本も描かれなくなる）。
@@ -224,8 +230,9 @@ namespace HomeskzIfcImport::draw
 		if (piece0 >= kPathPointCount)
 		{
 			const Boolean startSet =
-				gSDK->NurbsSetPt3D(path, 0, 0, WorldPt3(start.x, start.y, start.z));
-			const Boolean endSet = gSDK->NurbsSetPt3D(path, 0, 1, WorldPt3(end.x, end.y, end.z));
+				gSDK->NurbsSetPt3D(path, 0, 0, WorldPt3(start.x, start.y, kPathPlaneZ));
+			const Boolean endSet =
+				gSDK->NurbsSetPt3D(path, 0, 1, WorldPt3(end.x, end.y, kPathPlaneZ));
 			probe.setOk = startSet && endSet;
 			WorldPt3 fixed(0.0, 0.0, 0.0);
 			if (gSDK->NurbsGetPt3D(path, 0, 1, fixed))
@@ -315,72 +322,106 @@ namespace HomeskzIfcImport::draw
 		// まま・バウンドの解決に失敗、など。Findings「Parametric Objects」）。そのとき OIP の
 		// 高さ・基準・オフセットは命令どおりのままなので、**画面を見ない限り気付けない**。
 		// リセット後の「長さ」を読み戻し、0 で潰れていたら呼び出し側の診断へ流す。
-		if (spec.expectedLength > kCollapsedLength)
+		if (spec.expectedLength > kCollapsedLength || spec.checkElevation)
 		{
-			const DrawnMemberSize size = MeasureDrawnMember(object, spec.extentKind);
-			if (!size.found)
-				result.lengthParamHint = DescribeParamsContaining(pio, kLengthParamNeedle);
-			result.collapsed = size.zero;
-			// **潰れていたら証拠を全部採る。** 高さ基準は**どう書いても両端の Z を動かせ
-			// なかった**（ストーリ相対・レイヤ基準・VW が記録しているとおり、のいずれでも
-			// 実測 0。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）ので、残る入力は
-			// パスである。**PIO が実際に持っているパスの頂点**まで読み戻して添える。
-			if (result.collapsed)
-				result.collapsedProbe = DescribeSizeParams(object) + "・図面の始端基準[" +
-										DescribeStoryBound(object, kStartBoundID) + "]・終端基準[" +
-										DescribeStoryBound(object, kEndBoundID) + "]・図面のパス[" +
-										DescribePioPath(object) + "]";
-			// **潰れていたらパスを作り直して差し替える。** 渡した曲線が正しくても PIO の中の
-			// パスが潰れていることがある（実機 round 7）。直ったかは読み戻して見る。
-			if (result.collapsed && spec.retryWithFreshPath)
+			DrawnMemberSize size = MeasureDrawnMember(object, spec.extentKind);
+			if (spec.expectedLength > kCollapsedLength)
 			{
-				bool appended = false;
-				const MCObjectHandle fresh =
-					CreatePath(spec.pathStart, spec.pathEnd, appended, nullptr);
-				if (fresh != nil && gSDK->SetCustomObjectPath(object, fresh))
+				if (!size.found)
+					result.lengthParamHint = DescribeParamsContaining(pio, kLengthParamNeedle);
+				result.collapsed = size.zero;
+				// **潰れていたら証拠を全部採る。** 高さ基準は**どう書いても両端の Z を動かせ
+				// なかった**（ストーリ相対・レイヤ基準・VW が記録しているとおり、のいずれでも
+				// 実測 0。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）ので、残る入力は
+				// パスである。**PIO が実際に持っているパスの頂点**まで読み戻して添える。
+				if (result.collapsed)
+					result.collapsedProbe = DescribeSizeParams(object) + "・図面の始端基準[" +
+											DescribeStoryBound(object, kStartBoundID) +
+											"]・終端基準[" +
+											DescribeStoryBound(object, kEndBoundID) +
+											"]・図面のパス[" + DescribePioPath(object) + "]";
+				// **潰れていたらパスを作り直して差し替える。** 渡した曲線が正しくても PIO の中の
+				// パスが潰れていることがある（実機 round 7）。直ったかは読み戻して見る。
+				if (result.collapsed && spec.retryWithFreshPath)
 				{
-					gSDK->ResetObject(object);
-					// **作り直した曲線の後始末。** `CreateNurbsCurve` は曲線を**図面へ**作るので、
-					// PIO がそれを引き取らなかったなら、消さない限り図面に残り続ける——潰れる柱は
-					// 実機で 46 本あるので、放っておけば取り込みのたびにその数だけ原点に立った
-					// 線が積み上がる。**引き取ったかどうかは推測しない**——PIO がいま持っている
-					// パス（`GetCustomObjectPath`）が渡した曲線そのものなら引き取られており、
-					// 消せば材のパスを消すことになる。違う実体なら VW が複製したということで、
-					// 渡した曲線はこちらの後始末である。どちらだったかは診断にも残す（実機で
-					// しか分からない挙動なので、次の周が答えを持ち帰る）。
-					const MCObjectHandle adopted = gSDK->GetCustomObjectPath(object);
-					const bool taken = adopted == fresh;
-					if (!taken)
-						gSDK->DeleteObject(fresh, true /* useUndo: 取り込みのイベントへ登録 */);
-					const DrawnMemberSize retried = MeasureDrawnMember(object, spec.extentKind);
-					std::array<char, 160> buffer{};
-					// **測り方によって添える値を変える**（水平材の Z は両端が等しいのが
-					// 正常なので、並べても読む側を惑わせるだけ。ヘッダ
-					// StructuralExtentKind）。
-					if (spec.extentKind == StructuralExtentKind::Span)
-						std::snprintf(buffer.data(), buffer.size(),
-									  "・パスを作り直した結果 実測 %g（スパン）・作り直したパス[",
-									  retried.extent);
-					else
-						std::snprintf(buffer.data(), buffer.size(),
-									  "・パスを作り直した結果 実測 %g（Z %g→%g）・作り直したパス[",
-									  retried.extent, retried.start, retried.end);
-					result.collapsedProbe += std::string(buffer.data()) + DescribePioPath(object) +
-											 (taken ? "]・作り直した曲線は PIO が引き取った"
-													: "]・作り直した曲線は複製されたので消した");
-					if (retried.found && !retried.zero)
+					bool appended = false;
+					const MCObjectHandle fresh =
+						CreatePath(spec.pathStart, spec.pathEnd, appended, nullptr);
+					if (fresh != nil && gSDK->SetCustomObjectPath(object, fresh))
 					{
-						result.repairedByPath = true;
-						result.collapsed = false;
+						gSDK->ResetObject(object);
+						// **作り直した曲線の後始末。** `CreateNurbsCurve` は曲線を**図面へ**作るので、
+						// PIO がそれを引き取らなかったなら、消さない限り図面に残り続ける——潰れる柱は
+						// 実機で 46 本あるので、放っておけば取り込みのたびにその数だけ原点に立った
+						// 線が積み上がる。**引き取ったかどうかは推測しない**——PIO がいま持っている
+						// パス（`GetCustomObjectPath`）が渡した曲線そのものなら引き取られており、
+						// 消せば材のパスを消すことになる。違う実体なら VW が複製したということで、
+						// 渡した曲線はこちらの後始末である。どちらだったかは診断にも残す（実機で
+						// しか分からない挙動なので、次の周が答えを持ち帰る）。
+						const MCObjectHandle adopted = gSDK->GetCustomObjectPath(object);
+						const bool taken = adopted == fresh;
+						if (!taken)
+							gSDK->DeleteObject(fresh, true /* useUndo: 取り込みのイベントへ登録 */);
+						const DrawnMemberSize retried = MeasureDrawnMember(object, spec.extentKind);
+						std::array<char, 160> buffer{};
+						// **測り方によって添える値を変える**（水平材の Z は両端が等しいのが
+						// 正常なので、並べても読む側を惑わせるだけ。ヘッダ
+						// StructuralExtentKind）。
+						if (spec.extentKind == StructuralExtentKind::Span)
+							std::snprintf(
+								buffer.data(), buffer.size(),
+								"・パスを作り直した結果 実測 %g（スパン）・作り直したパス[",
+								retried.extent);
+						else
+							std::snprintf(
+								buffer.data(), buffer.size(),
+								"・パスを作り直した結果 実測 %g（Z %g→%g）・作り直したパス[",
+								retried.extent, retried.start, retried.end);
+						result.collapsedProbe +=
+							std::string(buffer.data()) + DescribePioPath(object) +
+							(taken ? "]・作り直した曲線は PIO が引き取った"
+								   : "]・作り直した曲線は複製されたので消した");
+						if (retried.found && !retried.zero)
+						{
+							result.repairedByPath = true;
+							result.collapsed = false;
+						}
+						// 下の高さの検算は**差し替えたあとの図面**を見る（差し替えで Z も
+						// 変わりうるので、古い実測で判定すると診断が嘘をつく）。
+						if (retried.found || retried.elevationRead)
+							size = retried;
+					}
+					else
+					{
+						// 差し替えられなかったときは、作った曲線が確実に**こちらのもの**として
+						// 図面に残る（PIO は受け取っていない）ので必ず消す。
+						if (fresh != nil)
+							gSDK->DeleteObject(fresh, true);
+						result.collapsedProbe += "・パスを作り直して差し替えられなかった";
 					}
 				}
-				else
+			}
+
+			// 【描かれた高さが命令どおりか】**パスから Z を外したぶんの見張り**である
+			// （ヘッダ冒頭「パスは 2D で渡す」）。高さを決めるのがストーリバウンドだけに
+			// なった以上、その解決が意図とずれても**本数にもスパンにも一切出ない**——材が
+			// 揃って違う高さに並ぶだけなので、実機の絵を見るまで気付けない。そこで読み戻した
+			// 両端の絶対 Z を命令と引き比べ、ずれた本数と 1 件目の実測を持ち帰る。
+			// **読めなかったときは「ずれた」に数えない**（測れていないことを不具合として
+			// 報せると、切り分けが逆に遠のく）。
+			if (spec.checkElevation && size.elevationRead)
+			{
+				const double startGap = size.start - spec.expectedStartZ;
+				const double endGap = size.end - spec.expectedEndZ;
+				if (std::abs(startGap) > kElevationTol || std::abs(endGap) > kElevationTol)
 				{
-					// 差し替えられなかったときは、作った曲線が確実に**こちらのもの**として
-					// 図面に残る（PIO は受け取っていない）ので必ず消す。
-					if (fresh != nil)
-						gSDK->DeleteObject(fresh, true);
-					result.collapsedProbe += "・パスを作り直して差し替えられなかった";
+					result.elevationOk = false;
+					std::array<char, 192> buffer{};
+					std::snprintf(buffer.data(), buffer.size(),
+								  "命令の Z %g→%g に対し図面の Z %g→%g（ずれ %g / %g）",
+								  spec.expectedStartZ, spec.expectedEndZ, size.start, size.end,
+								  startGap, endGap);
+					result.elevationProbe = buffer.data();
 				}
 			}
 		}
@@ -398,6 +439,23 @@ namespace HomeskzIfcImport::draw
 		try
 		{
 			const VWParametricObj pio(object);
+			// **両端の解決済み絶対 Z は kind に依らず読む。** 鉛直材はこの差が実体そのもの
+			// だが、水平材でも**描かれた高さが命令どおりか**の検算に要る——パスから Z を
+			// 外した（ヘッダ冒頭「パスは 2D で渡す」）いま、高さを言える値はこの 2 つしか
+			// 残っていない。
+			const TXString startName =
+				ResolveParamNameAmong(pio, kStartElevationNames, kNoLocalized);
+			const TXString endName = ResolveParamNameAmong(pio, kEndElevationNames, kNoLocalized);
+			bool startOk = false;
+			bool endOk = false;
+			const double start = ReadParamNumber(pio, startName, startOk);
+			const double end = ReadParamNumber(pio, endName, endOk);
+			if (startOk && endOk)
+			{
+				size.elevationRead = true;
+				size.start = start;
+				size.end = end;
+			}
 			if (kind == StructuralExtentKind::Span)
 			{
 				// 水平材。**パラメータが実在するときだけ測る**——ResolveParamNameAmong は
@@ -416,18 +474,9 @@ namespace HomeskzIfcImport::draw
 				size.zero = size.extent < kCollapsedLength;
 				return size;
 			}
-			const TXString startName =
-				ResolveParamNameAmong(pio, kStartElevationNames, kNoLocalized);
-			const TXString endName = ResolveParamNameAmong(pio, kEndElevationNames, kNoLocalized);
-			bool startOk = false;
-			bool endOk = false;
-			const double start = ReadParamNumber(pio, startName, startOk);
-			const double end = ReadParamNumber(pio, endName, endOk);
-			if (!startOk || !endOk)
+			if (!size.elevationRead)
 				return size;
 			size.found = true;
-			size.start = start;
-			size.end = end;
 			size.extent = std::abs(end - start);
 			size.zero = size.extent < kCollapsedLength;
 		}

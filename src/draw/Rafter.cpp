@@ -7,9 +7,9 @@
 //	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	描画手順（横架材・柱と同じ道具立て。draw/StructuralMember が唯一の実装）:
-//	  1. **パス**＝下面中央線の軒先→棟を通る 2 点の NURBS 曲線。頂点は命令のセンタリング済み
-//	     絶対座標で、**両端とも同じ Z（軒先の下面 Z）**を持つ（勾配は下記のストーリバウンドが
-//	     与える）。
+//	  1. **パス**＝下面中央線の軒先→棟を通る 2 点の曲線。頂点は命令のセンタリング済み
+//	     **平面座標だけ**で、**Z は持たない**（高さも勾配も下記のストーリバウンドが与える。
+//	     draw/StructuralMember.h 冒頭「パスは 2D で渡す」）。
 //	  2. **プロファイル**＝断面の矩形（幅 × せい）を**下辺中央が原点**になるように置いたもの
 //	     （断面基準点＝中下と一致させる。draw/StructuralMember.h「断面基準点」）。
 //	  3. **PIO の生成から各フィールドの設定までは横架材・柱と共通**（draw/StructuralMember）。
@@ -31,10 +31,12 @@
 //	    ある（draw/StructuralMember.h 冒頭）。軸組ツール時代の「配置行列の絶対 Z」は使えない
 //	    ので、垂木レベル（"n-垂木" レイヤのレベル）からの offset を parse が命令に載せる。
 //
-//	【パスに傾斜を持たせない】勾配は **SetObjectStoryBound の offset 差だけ**で表し、パスの
-//	2 頂点は同じ Z（軒先の下面 Z）にする。構造材ツールの高さバインドは指定した高さ差をパス由来の
-//	部材長へ**加算**するため、パスにも傾斜を持たせると二重に適用される（登り梁で実機確認済み。
-//	draw/Member.cpp 冒頭）。垂木は登り梁と同じ「傾いた線材」なので作法も同じ。
+//	【パスに高さを持たせない】勾配も高さも **SetObjectStoryBound の offset だけ**で表し、パスは
+//	平面（Z=0）に置く。構造材ツールの高さバインドは指定した高さ差をパス由来の部材長へ**加算**
+//	するため、パスにも傾斜を持たせると二重に適用される（登り梁で実機確認済み。draw/Member.cpp
+//	冒頭）。加えて M27 で、**パスの Z はそもそも PIO に受け取られていない**と分かった——3D の
+//	パスは PIO がバウンドの解決結果から自分で作るので、絶対 Z を入れる意味も無い
+//	（draw/StructuralMember.h 冒頭）。垂木は登り梁と同じ「傾いた線材」なので作法も同じ。
 //
 //	【スタイルは当てない】横架材（木質構造材_横架材）・柱（木質構造材_柱・束）と違い、垂木は
 //	プラグインスタイルを関連付けない。描画属性はクラス（小屋組-垂木）に従わせる——「クラスや
@@ -73,6 +75,11 @@ namespace HomeskzIfcImport::draw
 			// パスを作り直して差し替えたら直った本数（draw/StructuralMember.h の
 			// retryWithFreshPath）。0 でなければ「渡した曲線は正しく、PIO 化で潰れていた」。
 			std::size_t repaired = 0;
+			// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。
+			// パスから Z を外したぶんの見張りで、0 でなければ材は在るのに違う高さ・違う
+			// 勾配で並んでいる——本数にもスパンにも出ないので、これが唯一の手掛かりになる。
+			std::size_t elevation = 0;
+			std::string elevationProbe; // ずれた 1 本目の実測（命令の Z と図面の Z）
 			// 潰れた（または作り直した）1 本目の実測。原因をパス側と高さ基準側に分けられる
 			// のはこの 1 行だけなので、必ず持ち帰る。
 			std::string collapsedProbe;
@@ -92,17 +99,15 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle profile = CreateRectangleProfileGroup(
 				-rafter.width / 2.0, 0.0, rafter.width / 2.0, rafter.height);
 
-			// パス＝下面中央線の軒先→棟を通る 2 点の NURBS 曲線（横架材・柱と共通。
-			// draw/StructuralMember の CreatePath）。**両端とも同じ Z（軒先の下面 Z）**を
-			// 渡し、勾配はストーリバウンドの offset 差だけで表す（冒頭「パスに傾斜を
-			// 持たせない」）。Z を 0 にはしない——3D 座標は絶対 Z として渡るので、0 を渡すと
-			// 垂木が地面に置かれる（draw/StructuralMember.h 冒頭）。
+			// パス＝下面中央線の軒先→棟を通る 2 点の曲線（横架材・柱と共通。
+			// draw/StructuralMember の CreatePath）。**平面座標だけを渡す**——高さも勾配も
+			// ストーリバウンドの offset が決め、構造材 PIO はその解決結果から 3D のパスを
+			// 自分で作る（冒頭「パスに傾斜を持たせない」／draw/StructuralMember.h 冒頭
+			// 「パスは 2D で渡す」）。以前は両端とも軒先の下面 Z を入れていたが、**その Z は
+			// PIO に受け取られていなかった**（M27）。
 			bool pathAppended = false;
 			const MCObjectHandle path =
-				profile == nil
-					? nil
-					: CreatePath(core::Vec3{eave.point.x, eave.point.y, eave.z},
-								 core::Vec3{rafter.end.x, rafter.end.y, eave.z}, pathAppended);
+				profile == nil ? nil : CreatePath(eave.point, rafter.end, pathAppended);
 			if (path != nil && !pathAppended)
 				++failures.path;
 
@@ -132,9 +137,16 @@ namespace HomeskzIfcImport::draw
 			// だが、出ていないことの保証にはならない。docs/DEV-NOTES.md M27）。差し替える
 			// パスは**挿入点からの相対**で渡す。
 			spec.retryWithFreshPath = true;
-			spec.pathStart = core::Vec3{0.0, 0.0, 0.0};
-			spec.pathEnd =
-				core::Vec3{rafter.end.x - eave.point.x, rafter.end.y - eave.point.y, 0.0};
+			spec.pathStart = core::Vec2{0.0, 0.0};
+			spec.pathEnd = core::Vec2{rafter.end.x - eave.point.x, rafter.end.y - eave.point.y};
+			// 【高さの検算】パスから Z を外した以上、垂木の高さと勾配を決めるのはバウンドの
+			// offset 差だけになった。ずれても本数にもスパンにも出ないので、**描き上がった
+			// 両端の絶対 Z を読み戻して命令と引き比べる**（draw/StructuralMember.h の
+			// checkElevation）。始端は軒先の下面 Z（支持点より勾配ぶん下がる）、終端は棟側の
+			// 下面 Z（core/Document.h の RafterCommand）。
+			spec.checkElevation = true;
+			spec.expectedStartZ = eave.z;
+			spec.expectedEndZ = rafter.endElevation;
 
 			// スタイルは当てない（冒頭「スタイルは当てない」）。
 			const StructuralMemberResult result = DrawStructuralMember(spec, kNoStyle);
@@ -164,6 +176,14 @@ namespace HomeskzIfcImport::draw
 				++failures.repaired;
 			if ((result.collapsed || result.repairedByPath) && failures.collapsedProbe.empty())
 				failures.collapsedProbe = result.collapsedProbe;
+			// 高さが命令と違った本数（上の checkElevation）。**実体はあるので潰れの数には
+			// 出ない**——材が揃って違う高さに並ぶ形なので、別に数えて持ち帰る。
+			if (!result.elevationOk)
+			{
+				++failures.elevation;
+				if (failures.elevationProbe.empty())
+					failures.elevationProbe = result.elevationProbe;
+			}
 			return true;
 		}
 	} // namespace
@@ -195,8 +215,9 @@ namespace HomeskzIfcImport::draw
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「作れたが断面が
 		// 入らなかった」を件数で持ち帰る（横架材・柱と同じ扱い）。垂木が 1 本も見えないときに、
 		// 原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
-		if (outDiagnostics != nullptr && (failures.path > 0 || failures.section > 0 ||
-										  failures.length > 0 || failures.repaired > 0))
+		if (outDiagnostics != nullptr &&
+			(failures.path > 0 || failures.section > 0 || failures.length > 0 ||
+			 failures.repaired > 0 || failures.elevation > 0))
 		{
 			std::string note = "垂木の診断: ";
 			if (failures.path > 0)
@@ -209,6 +230,13 @@ namespace HomeskzIfcImport::draw
 				note += "パスを作り直して直った材 " + std::to_string(failures.repaired) + " 本。";
 			if ((failures.length > 0 || failures.repaired > 0) && !failures.collapsedProbe.empty())
 				note += "（1 本目: " + failures.collapsedProbe + "）";
+			if (failures.elevation > 0)
+			{
+				note +=
+					"命令と違う高さに描かれた材 " + std::to_string(failures.elevation) + " 本。";
+				if (!failures.elevationProbe.empty())
+					note += "（1 本目: " + failures.elevationProbe + "）";
+			}
 			*outDiagnostics = std::move(note);
 		}
 
