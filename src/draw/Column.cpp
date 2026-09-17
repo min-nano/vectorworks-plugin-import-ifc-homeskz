@@ -191,10 +191,12 @@ namespace HomeskzIfcImport::draw
 			spec.expectedEndZ = column.elevation + column.height;
 			// **パスを作り直して差し替える対症療法（`retryWithFreshPath`）は要らなくなった。**
 			// 潰れていたのは「渡した 2 点の Z が違うせいで、潰れ方に 1 ULP の丸めが残り、
-			// `ResetObject` の再構築から外れていた」ためで、両端に同じ Z を渡すようにした
-			// いま原理的に起きない（上記 CreatePath・docs/DEV-NOTES.md M27）。実機 round 3 で
-			// 作り直しが 1 本も走らないことを確認してから外してある。**潰れの検出は残す**
-			// ——直ったから見張りを外す、ではなく、再発したら黙って繕わずに報せるため。
+			// `ResetObject` の再構築から外れていた」ためで、**Z を渡さなくなった**いま原理的に
+			// 起きない（上記 CreatePath・docs/DEV-NOTES.md M27）。M27 の「両端に同じ Z を渡す」
+			// でも残差は消えていて、実機 round 3 で作り直しが 1 本も走らないことを確認してから
+			// 外してある——Z を外したのはその先で、渡す値そのものを無くした形である。
+			// **潰れの検出は残す**——直ったから見張りを外す、ではなく、再発したら黙って
+			// 繕わずに報せるため。
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
 			{
