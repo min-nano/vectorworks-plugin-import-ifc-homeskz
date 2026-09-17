@@ -58,6 +58,7 @@
 #include "draw/Member.h"
 #include "draw/DrawUtil.h"
 #include "draw/StructuralMember.h"
+#include "draw/Verify.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -79,8 +80,12 @@ namespace HomeskzIfcImport::draw
 		{
 			std::size_t path = 0;	 // パスが 2 点にならなかった
 			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
+			std::size_t offset = 0;	 // 端部オフセットを書けなかった
+			// ここから下は**読み戻して検算した結果**なので開発ビルドだけ（draw/Verify.h）。
+			// **自己修復（潰れたパスの作り直し）は本番でも走る**——外れるのはその結果を
+			// 数えて診断へ載せるところだけである。
+#if VW_DRAW_VERIFY
 			std::size_t length = 0; // パスから部材長を取れなかった（実体が無い）
-			std::size_t offset = 0; // 端部オフセットを書けなかった
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
 			// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。
 			// パスから Z を外した（下記）ぶんの見張りで、0 でなければ材は在るのに違う高さに
@@ -94,6 +99,7 @@ namespace HomeskzIfcImport::draw
 			// 潰れた（または作り直した）1 本目の実測。原因をパス側と高さ基準側に分けられる
 			// のはこの 1 行だけなので、必ず持ち帰る。
 			std::string collapsedProbe;
+#endif
 		};
 
 		// 横架材 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
@@ -160,9 +166,12 @@ namespace HomeskzIfcImport::draw
 			// その解決が意図とずれても本数にもスパンにも出ないので、**描き上がった両端の
 			// 絶対 Z を読み戻して命令と引き比べる**（draw/StructuralMember.h の
 			// checkElevation）。天端 Z は傾斜梁で両端が違う（elevation / endElevation）。
+			// **開発ビルドだけ**（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 			spec.checkElevation = true;
 			spec.expectedStartZ = member.elevation;
 			spec.expectedEndZ = member.endElevation;
+#endif
 
 			const StructuralMemberResult result = DrawStructuralMember(spec, style);
 			if (result.object == nil)
@@ -193,8 +202,10 @@ namespace HomeskzIfcImport::draw
 			if (!result.endOffsetOk)
 			{
 				++failures.offset;
+#if VW_DRAW_VERIFY
 				if (failures.offsetHint.empty())
 					failures.offsetHint = result.offsetParamHint;
+#endif
 			}
 
 			// パスから部材長を取れたかは DrawStructuralMember が読み戻している（上の
@@ -202,6 +213,7 @@ namespace HomeskzIfcImport::draw
 			// （冒頭「パスの遍歴」の 3D ポリラインで起きた症状そのもの）。潰れていたパスを
 			// 作り直して直った本数は別に数える——**直っていても「そこで潰れた」という事実は
 			// 残す**（柱と同じ扱い。draw/Column.cpp）。
+#if VW_DRAW_VERIFY
 			if (result.collapsed)
 				++failures.length;
 			if (result.repairedByPath)
@@ -216,6 +228,7 @@ namespace HomeskzIfcImport::draw
 				if (failures.elevationProbe.empty())
 					failures.elevationProbe = result.elevationProbe;
 			}
+#endif
 			return true;
 		}
 	} // namespace
@@ -261,18 +274,27 @@ namespace HomeskzIfcImport::draw
 		if (drawn > 0 && style != 0)
 			gSDK->UpdateStyledObjects(style);
 
+#if VW_DRAW_VERIFY
+		const bool report = failures.path > 0 || failures.section > 0 || failures.length > 0 ||
+							failures.repaired > 0 || failures.offset > 0 ||
+							failures.elevation > 0 || style == 0;
+#else
+		const bool report =
+			failures.path > 0 || failures.section > 0 || failures.offset > 0 || style == 0;
+#endif
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「作れたが断面が
 		// 入らなかった」「スタイルが見つからなかった」を件数で持ち帰る。横架材が 1 本も
 		// 見えないときに、原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
-		if (outDiagnostics != nullptr &&
-			(failures.path > 0 || failures.section > 0 || failures.length > 0 ||
-			 failures.repaired > 0 || failures.offset > 0 || failures.elevation > 0 || style == 0))
+		// **読み戻して検算した件数**（長さ・作り直し・高さ）は開発ビルドにしか無い
+		// （上の report と draw/Verify.h）。
+		if (outDiagnostics != nullptr && report)
 		{
 			std::string note = "横架材の診断: ";
 			if (failures.path > 0)
 				note += "パスが 2 点にならなかった材 " + std::to_string(failures.path) + " 本。";
 			if (failures.section > 0)
 				note += "断面を設定できなかった材 " + std::to_string(failures.section) + " 本。";
+#if VW_DRAW_VERIFY
 			if (failures.length > 0)
 				note += "パスから長さを取れなかった材 " + std::to_string(failures.length) + " 本。";
 			if (failures.repaired > 0)
@@ -286,12 +308,15 @@ namespace HomeskzIfcImport::draw
 				if (!failures.elevationProbe.empty())
 					note += "（1 本目: " + failures.elevationProbe + "）";
 			}
+#endif
 			if (failures.offset > 0)
 			{
 				note += "端部オフセットを設定できなかった材 " + std::to_string(failures.offset) +
 						" 本。";
+#if VW_DRAW_VERIFY
 				if (!failures.offsetHint.empty())
 					note += "（候補: " + failures.offsetHint + "）";
+#endif
 			}
 			if (style == 0)
 				note += "プラグインスタイル『木質構造材_横架材』が見つかりません。";

@@ -344,6 +344,7 @@ namespace HomeskzIfcImport::draw
 		return {};
 	}
 
+#if VW_DRAW_VERIFY
 	std::string DescribeParamsContaining(const VWParametricObj& pio, const char* needle)
 	{
 		const std::string probe(needle);
@@ -368,6 +369,7 @@ namespace HomeskzIfcImport::draw
 		}
 		return found;
 	}
+#endif // VW_DRAW_VERIFY
 
 	bool SetParamRealChecked(VWParametricObj& pio, const TXString& param, double value,
 							 double tolerance)
@@ -1007,6 +1009,7 @@ namespace HomeskzIfcImport::draw
 		return gSDK->SetObjectStoryBound(object, boundID, data);
 	}
 
+#if VW_DRAW_VERIFY
 	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID)
 	{
 		if (object == nil)
@@ -1060,6 +1063,7 @@ namespace HomeskzIfcImport::draw
 		}
 		return text;
 	}
+#endif // VW_DRAW_VERIFY
 
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size)
 	{

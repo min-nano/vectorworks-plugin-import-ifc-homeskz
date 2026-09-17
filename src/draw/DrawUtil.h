@@ -23,6 +23,7 @@
 
 #include "core/Document.h"
 #include "core/Layout.h"
+#include "draw/Verify.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
@@ -67,7 +68,12 @@ namespace HomeskzIfcImport::draw
 	// PIO のパラメータ名（universal とローカライズ）のうち、needle を含むものを
 	// "universal(ローカライズ)" 形式で連ねて返す。**名前を突き止められなかったときだけ**
 	// 診断へ載せる（ローカルの VectorWorks でしか読めない情報を 1 周で持ち帰るため）。
+	//
+	// **開発ビルドだけ**（draw/Verify.h）。出力は診断の文言にしかならず、外しても利用者の
+	// 絵は 1 つも変わらない。
+#if VW_DRAW_VERIFY
 	std::string DescribeParamsContaining(const VWParametricObj& pio, const char* needle);
+#endif
 
 	// PIO の文字列パラメータを読む（無ければ・例外なら空）。**PIO 本体（Extensions/）が
 	// 自分や他のオブジェクトのパラメータを覗くときの唯一の入口**——柱記号（ExtColumnMark）と
@@ -185,7 +191,12 @@ namespace HomeskzIfcImport::draw
 	// ある——同じ命令から作った柱の一部だけが実体を持たないとき、record が書けていない
 	// のか・書けているのに解決が違うのかは、ここでしか分かれない。
 	// 高さ基準が無ければ "なし"、読めなければ "読めない" を返す。
+	//
+	// **開発ビルドだけ**（draw/Verify.h）。**書くほう（`ApplyStoryBound`）は本番にも要る**
+	// ——外してよいのは「書いた record を読み戻して並べる」こちらだけである。
+#if VW_DRAW_VERIFY
 	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID);
+#endif
 
 	// **プラグインオブジェクト（PIO）が実際に持っているパス**を読み戻して 1 行にする
 	// （`GetCustomObjectPath` ＋ `NurbsGetNumPts` ＋ `NurbsGetPt3D`）。診断専用。
@@ -195,7 +206,11 @@ namespace HomeskzIfcImport::draw
 	// 両端の Z を決めていない**ということなので、残る入力はパスだけである。渡した曲線は
 	// 2 点だった（`PathProbe`）が、**PIO の中のパスがそうとは限らない**——そこを見るのが
 	// これ（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+	//
+	// **開発ビルドだけ**（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 	std::string DescribePioPath(MCObjectHandle object);
+#endif
 
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
 	//
