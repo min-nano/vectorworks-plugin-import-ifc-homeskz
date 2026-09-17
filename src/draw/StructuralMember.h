@@ -54,6 +54,7 @@
 #include "PluginPrefix.h"
 
 #include "core/Document.h"
+#include "draw/Verify.h"
 
 #include <string>
 
@@ -142,11 +143,16 @@ namespace HomeskzIfcImport::draw
 		// バウンドだけになった以上、バウンドの解決が意図とずれても件数には一切出ない
 		// （スパンも本数も揃ったまま、材だけが違う高さに並ぶ）。実描画は実機でしか見られない
 		// ので、「読み戻した絶対 Z が命令と合っているか」を数えて持ち帰る。
+		//
+		// **開発ビルドだけ**（draw/Verify.h）。結果は診断の文言と件数にしかならず、外しても
+		// 描かれるものは 1 つも変わらない。
+#if VW_DRAW_VERIFY
 		bool checkElevation = false;
 		// 描き上がるべき両端の**絶対 Z**（mm）。checkElevation が true のときだけ使う。
 		// 始端＝材の始め（柱は下端）、終端＝材の終わり（柱は上端）で、傾斜材では値が違う。
 		double expectedStartZ = 0.0;
 		double expectedEndZ = 0.0;
+#endif
 		// **潰れていたときにパスを作り直して差し替えるための 2 点**（`SetCustomObjectPath`）。
 		// `retryWithFreshPath` が true のときだけ使う。
 		//
@@ -179,8 +185,11 @@ namespace HomeskzIfcImport::draw
 		bool boundOk = true;
 		// 端部オフセットのパラメータ名を解決できなかったときだけ、PIO が持つ「オフセット」を
 		// 含むパラメータ名の一覧（DescribeParamsContaining）。実機でしか読めない情報を
-		// 1 周で持ち帰るための手掛かりで、解決できていれば空。
+		// 1 周で持ち帰るための手掛かりで、解決できていれば空。**開発ビルドだけ**
+		// （draw/Verify.h。`endOffsetOk` の真偽は本番でも返す——手掛かりの文言だけが開発用）。
+#if VW_DRAW_VERIFY
 		std::string offsetParamHint;
+#endif
 		// **長さ 0 で描かれたか**（spec.expectedLength が 0 なら常に false＝検査していない）。
 		// PIO は生成できてもパスやバウンドの解決に失敗すると実体を持たず、OIP の高さ・基準・
 		// オフセットは命令どおりのまま画面に何も出ない（Findings「Parametric Objects」の
@@ -189,6 +198,9 @@ namespace HomeskzIfcImport::draw
 		// 潰れていた材の**パスを作り直して差し替えたら直ったか**（`SetCustomObjectPath`）。
 		// true なら「渡した曲線は正しかったのに PIO 化で潰れた」の裏が取れる。
 		bool repairedByPath = false;
+		// ここから下は**開発ビルドだけ**（draw/Verify.h）。どれも読み戻した結果を診断へ
+		// 載せるためのもので、外しても描かれるものは 1 つも変わらない。
+#if VW_DRAW_VERIFY
 		// 「長さ」のパラメータ名を解決できなかったときだけ、PIO が持つ「長さ」を含む
 		// パラメータ名の一覧（DescribeParamsContaining）。解決できていれば空。
 		std::string lengthParamHint;
@@ -204,6 +216,7 @@ namespace HomeskzIfcImport::draw
 		// ずれていたときだけ、命令の Z と図面の Z を並べた 1 行（呼び出し側が 1 件だけ
 		// 診断へ載せる）。合っていれば空。
 		std::string elevationProbe;
+#endif
 	};
 
 	// パスの読み戻し（診断用）。**「2 点になったか」の真偽だけでは足りない**——ピース索引の
@@ -215,6 +228,11 @@ namespace HomeskzIfcImport::draw
 	// のに**同じ位置**——になっていた柱が 46 本あった。点の数だけ見ていたので、渡した曲線が
 	// もう潰れていたのか、PIO にした時点で潰れたのかが分けられなかった。そこで**作った直後の
 	// 曲線の 2 点の Z** を読み戻して控える（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+	//
+	// **開発ビルドだけ**（draw/Verify.h）。観測するだけで曲線には触らないので、外しても
+	// 描かれるものは 1 つも変わらない（**点を入れ直す `NurbsSetPt3D` は観測ではなく描画の
+	// 一部**なので、そちらは本番でも走る。下記 CreatePath）。
+#if VW_DRAW_VERIFY
 	struct PathProbe
 	{
 		Sint32 piece0 = -1;
@@ -226,6 +244,7 @@ namespace HomeskzIfcImport::draw
 		bool fixedRead = false;	 // 入れ直したあとに読み直せたか
 		double fixedZ1 = 0.0;	 // 入れ直したあとの終端の Z
 	};
+#endif
 
 	// パス＝部材の芯線を**平面に投影した**始端 → 終端を通る 2 点の曲線。gSDK->CreateNurbsCurve
 	// で始端 1 点の曲線を作り、gSDK->Add3DVertex（**VS の AddVertex3D にあたる**）で終端を
@@ -241,9 +260,16 @@ namespace HomeskzIfcImport::draw
 	//
 	// 頂点が本当に 2 つになったかを outAppended に返す（診断用。ここが崩れると PIO は
 	// パスを挿入点としてしか読まず、長さ 0 で何も描かれない）。作れなければ nil。
-	// outProbe が非 nullptr なら、読み戻した頂点数をそのまま入れる（診断用。上記 PathProbe）。
+	//
+	// **開発ビルドでは観測も持ち帰る**: outProbe が非 nullptr なら、読み戻した頂点数と
+	// 2 点の Z をそのまま入れる（上記 PathProbe）。本番ビルドにはその引数が無い——観測を
+	// 落としても曲線の作り方は 1 行も変わらない。
+#if VW_DRAW_VERIFY
 	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended,
 							  PathProbe* outProbe = nullptr);
+#else
+	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended);
+#endif
 
 	// 構造材ツールの PIO を 1 つ生成して仕様どおりに設定する。style が 0 ならスタイルを
 	// 関連付けずに描く（スタイルの欠落で部材を失わない）。
@@ -284,7 +310,9 @@ namespace HomeskzIfcImport::draw
 
 	// その部材が持つ「長さ」「高さ」を含むパラメータを**名前と値で**並べた 1 行。どの
 	// パラメータが OIP のどの欄なのかを実機で確かめる唯一の手段なので、**1 本ぶんだけ**
-	// 診断ログへ出す（全数だと読めない）。
+	// 診断ログへ出す（全数だと読めない）。**開発ビルドだけ**（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 	std::string DescribeSizeParams(MCObjectHandle object);
+#endif
 
 } // namespace HomeskzIfcImport::draw

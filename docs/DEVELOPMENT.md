@@ -129,6 +129,8 @@ src/
                               Undo スコープの共通ヘルパー
     StructuralMember.{h,cpp}  構造材ツール 1 本の生成・設定（横架材／柱で共有）
     ObjectHandles.h           「命令インデックス → 描いたオブジェクトのハンドル」の対応表
+    Verify.h                  **書いたものを読み戻して検算するところを開発ビルドだけに
+                              する唯一のスイッチ**（VW_DRAW_VERIFY）と、囲むかどうかの基準
     McpBridge.{h,cpp}         MCP ブリッジの本体（ループと道具の表。**道具を足すときに
                               触るのはこの表 1 行**）
     ProgressDialog.{h,cpp}    core::ProgressReporter を VW の進捗ダイアログへ橋渡し

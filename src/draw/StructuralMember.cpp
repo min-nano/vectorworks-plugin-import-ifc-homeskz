@@ -81,7 +81,10 @@ namespace HomeskzIfcImport::draw
 		const std::vector<const char*> kLocalizedStartOffset = {"始端オフセット"};
 		const std::vector<const char*> kLocalizedEndOffset = {"終端オフセット"};
 		// 名前を解決できなかったときに診断へ載せる候補の絞り込み（OIP の表示名に含まれる語）。
+		// **診断にしか使わない**ので開発ビルドだけ（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 		constexpr const char* kOffsetParamNeedle = "オフセット";
+#endif
 
 		// 描き上がった部材の長さ（OIP の「長さ」）。**端部オフセットと同じく universal 名が
 		// SDK ヘッダに無い**ので候補を並べて引き、引けなければ手掛かりを診断へ持ち帰る。
@@ -99,18 +102,24 @@ namespace HomeskzIfcImport::draw
 		const std::vector<const char*> kSpanNames = {"Span"};
 		const std::vector<const char*> kLocalizedSpan = {"スパン"};
 		const std::vector<const char*> kNoLocalized = {};
+		// 名前に「長さ」「高さ」を含むパラメータを**名前と値で**並べて証拠にするときの手掛かり
+		// （DescribeSizeParams / DescribeParamsContaining）。どのパラメータが OIP のどの欄
+		// なのかを実機で確かめる手段がほかに無い——実際、round 2 のこの一覧で「長さ」で引ける
+		// `CenterPointLength` が部材長ではないと分かった。**どちらも診断にしか使わない**ので
+		// 開発ビルドだけ（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 		constexpr const char* kLengthParamNeedle = "長さ";
-		// 潰れていたときは、名前に「長さ」「高さ」を含むパラメータを**名前と値で**並べて
-		// 証拠にする（DescribeSizeParams）。どのパラメータが OIP のどの欄なのかを実機で
-		// 確かめる手段がほかに無い——実際、round 2 のこの一覧で「長さ」で引ける
-		// `CenterPointLength` が部材長ではないと分かった。
 		constexpr const char* kHeightParamNeedle = "高さ";
+#endif
 		// 「長さ 0」とみなす閾値（mm）。潰れた部材はちょうど 0 を返すので、実部材の長さ
 		// （最短でも数十 mm）と取り違える余地は無い。
 		constexpr double kCollapsedLength = 0.01;
 		// 描かれた絶対 Z が命令と「合っている」とみなす許容（mm）。丸めのぶんだけで、
-		// 意味のあるずれ（レイヤ原点へ落ちる・階ぶん動く）とは桁が違う。
+		// 意味のあるずれ（レイヤ原点へ落ちる・階ぶん動く）とは桁が違う。**高さの検算は
+		// 開発ビルドだけ**（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 		constexpr double kElevationTol = 1.0;
+#endif
 
 		// フィールドに渡す値（ポップアップはキーで保持されるため数値文字列）。
 		constexpr const char* kProfileShapeRectangle = "Rectangle";
@@ -154,7 +163,9 @@ namespace HomeskzIfcImport::draw
 		// パラメータ 1 件を人が読める形で読み出す（実数と、文字列で保持されていればその値）。
 		// **読めないパラメータを覗くと例外が出る**ので、ここで 1 件ずつ畳んで "?" を返す
 		// ——呼び出し側が 1 件の読み損ないで全体を失わないようにするための粒度である
-		// （DrawUtil の PioParamString と同じ扱い）。
+		// （DrawUtil の PioParamString と同じ扱い）。**DescribeSizeParams だけが使う**ので
+		// 開発ビルドだけ（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 		std::string ReadParamText(const VWParametricObj& pio, const TXString& param)
 		{
 			if (param.IsEmpty())
@@ -178,6 +189,7 @@ namespace HomeskzIfcImport::draw
 				return "?";
 			}
 		}
+#endif // VW_DRAW_VERIFY
 
 		// 断面基準点 → 構造材ツールのポップアップのキー。
 		const char* AxisAlignKey(StructuralAxisAlign align)
@@ -195,8 +207,12 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
+#if VW_DRAW_VERIFY
 	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended,
 							  PathProbe* outProbe)
+#else
+	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended)
+#endif
 	{
 		outAppended = false;
 		MCObjectHandle path =
@@ -212,11 +228,13 @@ namespace HomeskzIfcImport::draw
 		// 諦めると、索引の規約違いというだけで部材が 1 本も描かれなくなる）。
 		const Sint32 piece0 = gSDK->NurbsGetNumPts(path, 0);
 		const Sint32 piece1 = gSDK->NurbsGetNumPts(path, 1);
+#if VW_DRAW_VERIFY
 		PathProbe probe;
 		probe.piece0 = piece0;
 		probe.piece1 = piece1;
 		// **2 点の Z を読み戻す。** 数が 2 でも同じ位置なら部材は実体を持たない
-		// （実機で 46 本。draw/StructuralMember.h の PathProbe）。
+		// （実機で 46 本。draw/StructuralMember.h の PathProbe）。**観測だけ**なので
+		// 開発ビルドにしか無い。
 		WorldPt3 first(0.0, 0.0, 0.0);
 		WorldPt3 second(0.0, 0.0, 0.0);
 		if (gSDK->NurbsGetPt3D(path, 0, 0, first) && gSDK->NurbsGetPt3D(path, 0, 1, second))
@@ -225,14 +243,18 @@ namespace HomeskzIfcImport::draw
 			probe.z0 = first.z;
 			probe.z1 = second.z;
 		}
+#endif
 		// **座標を明示的に入れ直す。** `Add3DVertex` が足した点が渡した位置にならないことが
 		// ある（ヘッダ参照）。うまく足せていたときは同じ値を書くだけで何も変わらない。
+		// **これは観測ではなく描画の一部**（外すと実機で潰れた材が戻る）なので、本番でも走る
+		// ——開発ビルドだけなのは、その戻り値を控える下の 2 行である。
 		if (piece0 >= kPathPointCount)
 		{
-			const Boolean startSet =
+			[[maybe_unused]] const Boolean startSet =
 				gSDK->NurbsSetPt3D(path, 0, 0, WorldPt3(start.x, start.y, kPathPlaneZ));
-			const Boolean endSet =
+			[[maybe_unused]] const Boolean endSet =
 				gSDK->NurbsSetPt3D(path, 0, 1, WorldPt3(end.x, end.y, kPathPlaneZ));
+#if VW_DRAW_VERIFY
 			probe.setOk = startSet && endSet;
 			WorldPt3 fixed(0.0, 0.0, 0.0);
 			if (gSDK->NurbsGetPt3D(path, 0, 1, fixed))
@@ -240,9 +262,12 @@ namespace HomeskzIfcImport::draw
 				probe.fixedRead = true;
 				probe.fixedZ1 = fixed.z;
 			}
+#endif
 		}
+#if VW_DRAW_VERIFY
 		if (outProbe != nullptr)
 			*outProbe = probe;
+#endif
 		outAppended = piece0 >= kPathPointCount || piece1 >= kPathPointCount;
 		return path;
 	}
@@ -307,7 +332,9 @@ namespace HomeskzIfcImport::draw
 			if (startOffset.IsEmpty() || endOffset.IsEmpty())
 			{
 				result.endOffsetOk = false;
+#if VW_DRAW_VERIFY
 				result.offsetParamHint = DescribeParamsContaining(pio, kOffsetParamNeedle);
+#endif
 			}
 			else
 			{
@@ -322,31 +349,50 @@ namespace HomeskzIfcImport::draw
 		// まま・バウンドの解決に失敗、など。Findings「Parametric Objects」）。そのとき OIP の
 		// 高さ・基準・オフセットは命令どおりのままなので、**画面を見ない限り気付けない**。
 		// リセット後の「長さ」を読み戻し、0 で潰れていたら呼び出し側の診断へ流す。
-		if (spec.expectedLength > kCollapsedLength || spec.checkElevation)
+		//
+		// **測る理由が 2 つある**ので、本番ビルドに残すのは片方だけである（draw/Verify.h）。
+		//   * 検算（潰れ・高さのずれを件数と実測で持ち帰る）… 開発ビルドだけ。
+		//   * **自己修復の引き金**（潰れていたらパスを作り直して差し替える）… 本番でも要る
+		//     ——外すと実機で潰れた材がそのまま残る＝利用者の絵が変わる。
+		// したがって本番は `retryWithFreshPath` の材だけを測り、結果は診断へ出さない。
+#if VW_DRAW_VERIFY
+		const bool measureDrawn = spec.expectedLength > kCollapsedLength || spec.checkElevation;
+#else
+		const bool measureDrawn = spec.retryWithFreshPath && spec.expectedLength > kCollapsedLength;
+#endif
+		if (measureDrawn)
 		{
+			// 本番ビルドでは差し替え後の測り直しを控えないので、そのまま const になる。
+#if VW_DRAW_VERIFY
 			DrawnMemberSize size = MeasureDrawnMember(object, spec.extentKind);
+#else
+			const DrawnMemberSize size = MeasureDrawnMember(object, spec.extentKind);
+#endif
 			if (spec.expectedLength > kCollapsedLength)
 			{
+#if VW_DRAW_VERIFY
 				if (!size.found)
 					result.lengthParamHint = DescribeParamsContaining(pio, kLengthParamNeedle);
+#endif
 				result.collapsed = size.zero;
 				// **潰れていたら証拠を全部採る。** 高さ基準は**どう書いても両端の Z を動かせ
 				// なかった**（ストーリ相対・レイヤ基準・VW が記録しているとおり、のいずれでも
 				// 実測 0。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）ので、残る入力は
 				// パスである。**PIO が実際に持っているパスの頂点**まで読み戻して添える。
+#if VW_DRAW_VERIFY
 				if (result.collapsed)
 					result.collapsedProbe = DescribeSizeParams(object) + "・図面の始端基準[" +
 											DescribeStoryBound(object, kStartBoundID) +
 											"]・終端基準[" +
 											DescribeStoryBound(object, kEndBoundID) +
 											"]・図面のパス[" + DescribePioPath(object) + "]";
+#endif
 				// **潰れていたらパスを作り直して差し替える。** 渡した曲線が正しくても PIO の中の
 				// パスが潰れていることがある（実機 round 7）。直ったかは読み戻して見る。
 				if (result.collapsed && spec.retryWithFreshPath)
 				{
 					bool appended = false;
-					const MCObjectHandle fresh =
-						CreatePath(spec.pathStart, spec.pathEnd, appended, nullptr);
+					const MCObjectHandle fresh = CreatePath(spec.pathStart, spec.pathEnd, appended);
 					if (fresh != nil && gSDK->SetCustomObjectPath(object, fresh))
 					{
 						gSDK->ResetObject(object);
@@ -363,6 +409,7 @@ namespace HomeskzIfcImport::draw
 						if (!taken)
 							gSDK->DeleteObject(fresh, true /* useUndo: 取り込みのイベントへ登録 */);
 						const DrawnMemberSize retried = MeasureDrawnMember(object, spec.extentKind);
+#if VW_DRAW_VERIFY
 						std::array<char, 160> buffer{};
 						// **測り方によって添える値を変える**（水平材の Z は両端が等しいのが
 						// 正常なので、並べても読む側を惑わせるだけ。ヘッダ
@@ -381,15 +428,18 @@ namespace HomeskzIfcImport::draw
 							std::string(buffer.data()) + DescribePioPath(object) +
 							(taken ? "]・作り直した曲線は PIO が引き取った"
 								   : "]・作り直した曲線は複製されたので消した");
+#endif
 						if (retried.found && !retried.zero)
 						{
 							result.repairedByPath = true;
 							result.collapsed = false;
 						}
+#if VW_DRAW_VERIFY
 						// 下の高さの検算は**差し替えたあとの図面**を見る（差し替えで Z も
 						// 変わりうるので、古い実測で判定すると診断が嘘をつく）。
 						if (retried.found || retried.elevationRead)
 							size = retried;
+#endif
 					}
 					else
 					{
@@ -397,7 +447,9 @@ namespace HomeskzIfcImport::draw
 						// 図面に残る（PIO は受け取っていない）ので必ず消す。
 						if (fresh != nil)
 							gSDK->DeleteObject(fresh, true);
+#if VW_DRAW_VERIFY
 						result.collapsedProbe += "・パスを作り直して差し替えられなかった";
+#endif
 					}
 				}
 			}
@@ -408,7 +460,9 @@ namespace HomeskzIfcImport::draw
 			// 揃って違う高さに並ぶだけなので、実機の絵を見るまで気付けない。そこで読み戻した
 			// 両端の絶対 Z を命令と引き比べ、ずれた本数と 1 件目の実測を持ち帰る。
 			// **読めなかったときは「ずれた」に数えない**（測れていないことを不具合として
-			// 報せると、切り分けが逆に遠のく）。
+			// 報せると、切り分けが逆に遠のく）。**検算そのものなので開発ビルドだけ**
+			// （draw/Verify.h）。
+#if VW_DRAW_VERIFY
 			if (spec.checkElevation && size.elevationRead)
 			{
 				const double startGap = size.start - spec.expectedStartZ;
@@ -424,6 +478,7 @@ namespace HomeskzIfcImport::draw
 					result.elevationProbe = buffer.data();
 				}
 			}
+#endif
 		}
 
 		result.object = object;
@@ -487,6 +542,7 @@ namespace HomeskzIfcImport::draw
 		return size;
 	}
 
+#if VW_DRAW_VERIFY
 	std::string DescribeSizeParams(MCObjectHandle object)
 	{
 		if (object == nil)
@@ -526,5 +582,6 @@ namespace HomeskzIfcImport::draw
 			return {};
 		}
 	}
+#endif // VW_DRAW_VERIFY
 
 } // namespace HomeskzIfcImport::draw

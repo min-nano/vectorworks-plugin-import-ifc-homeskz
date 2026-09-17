@@ -73,6 +73,7 @@
 #include "draw/Column.h"
 #include "draw/DrawUtil.h"
 #include "draw/StructuralMember.h"
+#include "draw/Verify.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -105,8 +106,10 @@ namespace HomeskzIfcImport::draw
 			std::size_t path = 0;	 // 鉛直パスが 2 点にならなかった
 			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
 			std::size_t offset = 0;	 // 端部オフセットを書けなかった
+			std::size_t bound = 0;	 // 高さ基準を VW が受け取らなかった
+			// ここから下は**読み戻して検算した結果**なので開発ビルドだけ（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
-			std::size_t bound = 0; // 高さ基準を VW が受け取らなかった
 			std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
 			// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。
 			// パスから Z を外したぶんの見張りで、0 でなければ柱は在るのに違う高さに立って
@@ -118,11 +121,14 @@ namespace HomeskzIfcImport::draw
 			// 持っている高さ基準・図面のパスの頂点）。**原因をパス側と高さ基準側に分けるのは
 			// この 1 行だけ**なので、必ず持ち帰る。
 			std::string collapsedProbe;
+#endif
 		};
 
+#if VW_DRAW_VERIFY
 		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
-		// **取り込み後の再検査**（recheckColumns）が使う。
+		// **取り込み後の再検査**（recheckColumns）が使う——検算そのものなので開発ビルドだけ。
 		constexpr double kExtentTol = 1.0;
+#endif
 
 		bool DrawOne(const core::ColumnCommand& column, RefNumber style, ColumnFailures& failures,
 					 MCObjectHandle& outObject)
@@ -154,10 +160,16 @@ namespace HomeskzIfcImport::draw
 			// 書くこともなくなる。高さはストーリバウンドが支配し、その解決は実機で命令どおり
 			// だと確認済みである（バウンドの側に落ち度は無い。SDK リファレンス issue #59）。
 			bool pathAppended = false;
+#if VW_DRAW_VERIFY
+			// 作った曲線の観測（潰れた 1 本目の証拠に添える。開発ビルドだけ。draw/Verify.h）。
 			PathProbe probe;
 			const MCObjectHandle path =
 				profile == nil ? nil
 							   : CreatePath(column.position, column.position, pathAppended, &probe);
+#else
+			const MCObjectHandle path =
+				profile == nil ? nil : CreatePath(column.position, column.position, pathAppended);
+#endif
 			if (path != nil && !pathAppended)
 				++failures.path;
 
@@ -185,10 +197,12 @@ namespace HomeskzIfcImport::draw
 			// 決める。その解決が意図とずれても**本数には出ない**ので、**描き上がった両端の
 			// 絶対 Z を読み戻して命令と引き比べる**（draw/StructuralMember.h の
 			// checkElevation）。上端は命令の下端 Z ＋ パス長（core/Document.h の
-			// ColumnCommand「高さの持ち方」）。
+			// ColumnCommand「高さの持ち方」）。**開発ビルドだけ**（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 			spec.checkElevation = true;
 			spec.expectedStartZ = column.elevation;
 			spec.expectedEndZ = column.elevation + column.height;
+#endif
 			// **パスを作り直して差し替える対症療法（`retryWithFreshPath`）は要らなくなった。**
 			// 潰れていたのは「渡した 2 点の Z が違うせいで、潰れ方に 1 ULP の丸めが残り、
 			// `ResetObject` の再構築から外れていた」ためで、**Z を渡さなくなった**いま原理的に
@@ -233,11 +247,15 @@ namespace HomeskzIfcImport::draw
 			if (!result.endOffsetOk)
 			{
 				++failures.offset;
+#if VW_DRAW_VERIFY
 				if (failures.offsetHint.empty())
 					failures.offsetHint = result.offsetParamHint;
+#endif
 			}
 			// 長さ 0 で描かれた本数（オブジェクトは在るのに実体が無い）。**これが 0 でない
 			// 限り、件数が揃っていても絵は欠けている**ので、必ず診断へ載せる。
+			// **ここから下は読み戻して検算した結果**なので開発ビルドだけ（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 			if (result.collapsed)
 			{
 				++failures.collapsed;
@@ -271,6 +289,7 @@ namespace HomeskzIfcImport::draw
 				if (failures.elevationProbe.empty())
 					failures.elevationProbe = result.elevationProbe;
 			}
+#endif
 
 			outObject = result.object;
 			return true;
@@ -316,13 +335,19 @@ namespace HomeskzIfcImport::draw
 		if (drawn > 0 && style != 0)
 			gSDK->UpdateStyledObjects(style);
 
+#if VW_DRAW_VERIFY
+		const bool report = failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
+							failures.bound > 0 || failures.collapsed > 0 ||
+							failures.elevation > 0 || !failures.lengthHint.empty() || style == 0;
+#else
+		const bool report = failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
+							failures.bound > 0 || style == 0;
+#endif
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「鉛直パスが 2 点に
 		// ならなかった」「断面が入らなかった」「スタイルが見つからなかった」を件数で持ち帰る
-		// （柱が見えないときの切り分け材料）。
-		if (outDiagnostics != nullptr &&
-			(failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
-			 failures.bound > 0 || failures.collapsed > 0 || failures.elevation > 0 ||
-			 !failures.lengthHint.empty() || style == 0))
+		// （柱が見えないときの切り分け材料）。**読み戻して検算した件数**（潰れ・高さ・
+		// パラメータ名の手掛かり）は開発ビルドにしか無い（上の report と draw/Verify.h）。
+		if (outDiagnostics != nullptr && report)
 		{
 			std::string note = "柱の診断: ";
 			if (failures.path > 0)
@@ -333,6 +358,7 @@ namespace HomeskzIfcImport::draw
 			if (failures.bound > 0)
 				note +=
 					"高さ基準を図面へ書けなかった柱 " + std::to_string(failures.bound) + " 本。";
+#if VW_DRAW_VERIFY
 			if (failures.collapsed > 0)
 				note += "長さ 0 で描かれた（実体が無い）柱 " + std::to_string(failures.collapsed) +
 						" 本。";
@@ -348,12 +374,15 @@ namespace HomeskzIfcImport::draw
 			if (!failures.lengthHint.empty())
 				note +=
 					"「長さ」パラメータを引けませんでした（候補: " + failures.lengthHint + "）。";
+#endif
 			if (failures.offset > 0)
 			{
 				note += "端部オフセットを設定できなかった柱 " + std::to_string(failures.offset) +
 						" 本。";
+#if VW_DRAW_VERIFY
 				if (!failures.offsetHint.empty())
 					note += "（候補: " + failures.offsetHint + "）";
+#endif
 			}
 			if (style == 0)
 				note += "プラグインスタイル『木質構造材_柱・束』が見つかりません。";
@@ -364,6 +393,7 @@ namespace HomeskzIfcImport::draw
 		return drawn;
 	}
 
+#if VW_DRAW_VERIFY
 	void recheckColumns(const core::Document& document, const ObjectHandles& handles,
 						std::string* outDiagnostics, std::string* outNotes)
 	{
@@ -504,4 +534,5 @@ namespace HomeskzIfcImport::draw
 			*outNotes = std::move(note);
 		}
 	}
+#endif // VW_DRAW_VERIFY
 } // namespace HomeskzIfcImport::draw

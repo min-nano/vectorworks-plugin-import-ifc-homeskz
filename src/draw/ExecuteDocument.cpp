@@ -30,6 +30,7 @@
 #include "draw/Sheet.h"
 #include "draw/Story.h"
 #include "draw/Symbol.h"
+#include "draw/Verify.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -248,6 +249,10 @@ namespace HomeskzIfcImport::draw
 		// 全要素・伏図・軸組図まで済んだ唯一の地点なので、**いつ潰れたか**はここでしか分け
 		// られない。**測って診断へ載せるだけ**で、直しはしない（解かせ直しは実機で 46 本中
 		// 0 本しか直らず、打ち切ってある）。
+		//
+		// **開発ビルドだけ**（draw/Verify.h）——図面には一切触らない検算なので、本番では
+		// 全柱のパラメータを走査するぶんの時間しか生まない。
+#if VW_DRAW_VERIFY
 		{
 			std::string note;
 			std::string info;
@@ -255,6 +260,7 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 			addNotes(info);
 		}
+#endif
 
 		// 途中で中止されたか（件数が命令数に届かないのが正常になる）。
 		counts.cancelled = progress.cancelled();

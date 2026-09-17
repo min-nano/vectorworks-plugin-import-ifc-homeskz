@@ -17,6 +17,7 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 #include "draw/ObjectHandles.h"
+#include "draw/Verify.h"
 
 #include <cstddef>
 #include <string>
@@ -59,7 +60,13 @@ namespace HomeskzIfcImport::draw
 	// 実体が無い柱・命令と食い違う柱の件数を outDiagnostics へ返す。outNotes には 1 本目の
 	// 実測（どのパラメータが何を返しているか）を入れる——平常でも出る記録なので診断ログに
 	// だけ出す。
+	//
+	// **開発ビルドだけ**（draw/Verify.h）。測って診断へ載せるだけで図面には一切触らないので、
+	// 外しても利用者の絵は 1 つも変わらない——逆に、**入れておくと取り込みのたびに全柱の
+	// パラメータを走査する**。
+#if VW_DRAW_VERIFY
 	void recheckColumns(const core::Document& document, const ObjectHandles& handles,
 						std::string* outDiagnostics, std::string* outNotes);
+#endif
 
 } // namespace HomeskzIfcImport::draw
