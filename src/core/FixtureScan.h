@@ -81,9 +81,10 @@ namespace HomeskzIfcImport::core
 
 	// **選ばれたファイルの親フォルダ**（UTF-8。取れなければ空）。回帰テストは
 	// 「対象フォルダの中の IFC を 1 つ選んでもらい、その親を対象にする」——SDK にフォルダ
-	// 選択ダイアログがあるかは未確認で、それを調べるには SDK リファレンス側の issue と
-	// その反映を待つことになる（CLAUDE.md「SDK の調査はリファレンス側で行う」）。既存の
-	// 「開く」ダイアログだけで済むなら、待つ理由が無い。
+	// 選択ダイアログがあるかは**調査中**（SDK リファレンス
+	// [issue #85](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/85)。
+	// CLAUDE.md「SDK の調査はリファレンス側で行う」）。既存の「開く」ダイアログだけで
+	// 済ませられるので、調査を待たずに進められる。
 	std::string parentFolderOf(const std::string& path);
 
 	// フォルダの中のファイルのパスを組む（**区切りを手で書かない**——Windows と POSIX で
