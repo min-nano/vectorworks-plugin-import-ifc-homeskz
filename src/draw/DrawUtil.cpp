@@ -1037,7 +1037,7 @@ namespace HomeskzIfcImport::draw
 #if VW_DRAW_VERIFY
 	std::string DescribeStoryBound(MCObjectHandle object, StoryBoundSlot slot)
 	{
-		const Sint32 boundID = static_cast<Sint32>(slot);
+		const auto boundID = static_cast<Sint32>(slot);
 		if (object == nil)
 			return "なし";
 		if (!gSDK->HasObjectStoryBound(object, boundID))
