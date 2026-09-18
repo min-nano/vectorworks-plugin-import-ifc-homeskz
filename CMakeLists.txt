@@ -569,8 +569,13 @@ if(VW_BUILD_PLUGIN)
 			# MSVC の既定のライブラリにも入っているが、**明示して依存を見えるようにする**
 			# ——既定が変わったときに「なぜか Windows だけリンクできない」で止まらないため。
 			target_link_libraries(
-				${target} PRIVATE "${VW_SDK_LIB}/VWSDK.lib" "${VW_SDK_LIB}/VWMM.lib" USP10.lib
-								  Rpcrt4.lib Ole32.lib Uuid.lib)
+				${target}
+				PRIVATE "${VW_SDK_LIB}/VWSDK.lib"
+						"${VW_SDK_LIB}/VWMM.lib"
+						USP10.lib
+						Rpcrt4.lib
+						Ole32.lib
+						Uuid.lib)
 		endif()
 	endfunction()
 
