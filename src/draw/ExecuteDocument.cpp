@@ -32,6 +32,7 @@
 #include "draw/Symbol.h"
 #include "draw/Verify.h"
 #include "core/Document.h"
+#include "core/DrawTiming.h"
 #include "core/Progress.h"
 
 #include <cstddef>
@@ -50,6 +51,12 @@ namespace HomeskzIfcImport::draw
 	DrawCounts executeDocument(const core::Document& document, core::ProgressReporter& progress)
 	{
 		DrawCounts counts;
+
+		// **区間計測を空にしてから始める**（開発ビルドだけ。draw/Verify.h）。積みっぱなしに
+		// すると、実機フィードバックの 2 周目以降が 1 周目ぶんを抱えた数字になる。
+#if VW_DRAW_TIMING
+		core::drawTiming().clear();
+#endif
 
 		// 検証を通らない Document は描画しない。
 		if (!core::validateDocument(document))
@@ -260,6 +267,19 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 			addNotes(info);
 		}
+#endif
+
+		// **描画のどこで時間を使ったかを診断ログへ載せる**（開発ビルドだけ。draw/Verify.h）。
+		// フェーズごとの所要は core/Trace が行頭に付ける経過ミリ秒で読めるが、**その 1 件の
+		// 中の何が重いのか**——生成か・パラメータ名の解決か・`ResetObject` そのものか——は
+		// ここでしか分からない。実描画はローカルの VectorWorks でしか走らないので、
+		// **実機フィードバックの往復 1 周で内訳が数字として返る**ことに意味がある
+		// （core/DrawTiming.h「なぜ要るのか」）。
+		//
+		// 行き先は notes（平常でも出る記録）である——異常ではないので diagnostics へ入れると
+		// 完了ダイアログが毎回「問題あり」になる（core::DrawCounts）。
+#if VW_DRAW_TIMING
+		addNotes(core::drawTiming().format("描画の内訳（開発ビルドの計測）"));
 #endif
 
 		// 途中で中止されたか（件数が命令数に届かないのが正常になる）。

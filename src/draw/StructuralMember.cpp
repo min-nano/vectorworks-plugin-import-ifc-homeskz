@@ -214,6 +214,8 @@ namespace HomeskzIfcImport::draw
 	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended)
 #endif
 	{
+		VW_DRAW_TIME("構造材:パス生成");
+
 		outAppended = false;
 		MCObjectHandle path =
 			gSDK->CreateNurbsCurve(WorldPt3(start.x, start.y, kPathPlaneZ), false, kPathDegree);
@@ -281,54 +283,108 @@ namespace HomeskzIfcImport::draw
 		if (spec.path == nil || spec.profile == nil)
 			return result;
 
-		MCObjectHandle object =
-			gSDK->CreateCustomObjectPath(kStructuralMember, spec.path, spec.profile, true);
+		MCObjectHandle object = nil;
+		{
+			VW_DRAW_TIME("構造材:オブジェクト生成");
+			object = gSDK->CreateCustomObjectPath(kStructuralMember, spec.path, spec.profile, true);
+		}
 		if (object == nil)
 			return result;
 
-		SetClassByName(object, spec.drawClass);
-		SetAllAttributesByClass(object);
+		{
+			VW_DRAW_TIME("構造材:クラスと属性");
+			SetClassByName(object, spec.drawClass);
+			SetAllAttributesByClass(object);
+		}
 		// スタイルは個別フィールドより**先に**関連付ける（後に設定する実測値で
 		// スタイル既定のパラメータを上書きするため）。
 		if (style != 0)
+		{
+			VW_DRAW_TIME("構造材:スタイル関連付け");
 			gSDK->SetPluginObjectStyle(object, style);
+		}
 
 		// 高さ基準を始端（0）・終端（1）それぞれのストーリレベルへバインドする。これで
 		// 構造材ツールの高さ基準が「レイヤの高さ」・offset 0 のまま実ジオメトリと矛盾する
 		// ことがなくなり、編集時に高さがリセットされない。水平材の傾斜はこの offset 差で
 		// 表れ、鉛直材ではこの差が柱高さを支配する。
 		// **戻り値を見る。** 受け取られなければ材は高さを持てない（＝実体が無い材になる）。
-		const bool startBoundOk = ApplyStoryBound(object, kStartBoundID, spec.startBound);
-		const bool endBoundOk = ApplyStoryBound(object, kEndBoundID, spec.endBound);
-		result.boundOk = startBoundOk && endBoundOk;
+		{
+			VW_DRAW_TIME("構造材:高さ基準");
+			const bool startBoundOk = ApplyStoryBound(object, kStartBoundID, spec.startBound);
+			const bool endBoundOk = ApplyStoryBound(object, kEndBoundID, spec.endBound);
+			result.boundOk = startBoundOk && endBoundOk;
+		}
 
 		VWParametricObj pio(object);
-		const TXString breadth = ResolveParamName(pio, kFieldMajorBreadth, kLocalizedBreadth);
-		const TXString depth = ResolveParamName(pio, kFieldMajorDepth, kLocalizedDepth);
 
-		pio.SetParamAsString(ResolveParamName(pio, kFieldProfileShape, kLocalizedProfileShape),
-							 kProfileShapeRectangle);
-		pio.SetParamAsString(kFieldProfileSeries, kProfileSeriesDefault);
-		const bool breadthOk = SetParamRealChecked(pio, breadth, spec.width);
-		const bool depthOk = SetParamRealChecked(pio, depth, spec.depth);
+		// 【計測のために区間へ割ってある】ここから下は「名前の解決」と「パラメータ書き」が
+		// 交互に来る。どちらが重いのかがフェーズの時刻差からは分からないので、**別々の
+		// 区間として測れるように**代入を 1 段はさんである（draw/Verify.h の VW_DRAW_TIME。
+		// 本番ビルドでは丸ごと畳まれて、残るのは代入 1 つだけになる）。
+		//
+		// ★**解決を書き込みより前へ動かさない。** パラメータ表が断面形状（矩形/H 形…）で
+		// 変わりうるかは分かっていない——**分かるまでは、いまの順序（断面形状を書いた後に
+		// B / D を引く）を守る**。SDK リファレンス側で調査中
+		// （min-nano/vectorworks-developer-sdk-reference#82）。
+		TXString breadth;
+		TXString depth;
+		TXString profileShape;
+		{
+			VW_DRAW_TIME("構造材:名前解決");
+			breadth = ResolveParamName(pio, kFieldMajorBreadth, kLocalizedBreadth);
+			depth = ResolveParamName(pio, kFieldMajorDepth, kLocalizedDepth);
+			profileShape = ResolveParamName(pio, kFieldProfileShape, kLocalizedProfileShape);
+		}
+
+		bool breadthOk = false;
+		bool depthOk = false;
+		{
+			VW_DRAW_TIME("構造材:パラメータ書き");
+			pio.SetParamAsString(profileShape, kProfileShapeRectangle);
+			pio.SetParamAsString(kFieldProfileSeries, kProfileSeriesDefault);
+			breadthOk = SetParamRealChecked(pio, breadth, spec.width);
+			depthOk = SetParamRealChecked(pio, depth, spec.depth);
+		}
+
 		// B / D は矩形断面のときの別名。上と同じ値を入れる（存在しなければ無視される）。
-		SetParamRealChecked(pio, ResolveParamName(pio, kFieldB, kLocalizedBreadth), spec.width);
-		SetParamRealChecked(pio, ResolveParamName(pio, kFieldD, kLocalizedDepth), spec.depth);
-		pio.SetParamAsString(kFieldMemberID, TXString(spec.memberId.c_str()));
-		pio.SetParamAsString(kFieldMemberType, kMemberTypeStructural);
-		pio.SetParamAsString(kFieldStructuralUse, TXString(spec.structuralUse.c_str()));
-		pio.SetParamAsString(kFieldAxisAlign, AxisAlignKey(spec.axisAlign));
-		pio.SetParamAsString(kFieldStartCondition, kEndConditionSquare);
-		pio.SetParamAsString(kFieldEndCondition, kEndConditionSquare);
+		// 2 つの解決をまとめたので `D` を引くのが `B` を書く前になったが、**寸法の値は
+		// パラメータ表の顔ぶれを変えない**ので順序の意味は変わらない（変わりうるのは
+		// 上の ★ の断面形状の方で、そちらは動かしていない）。
+		TXString bAlias;
+		TXString dAlias;
+		{
+			VW_DRAW_TIME("構造材:名前解決");
+			bAlias = ResolveParamName(pio, kFieldB, kLocalizedBreadth);
+			dAlias = ResolveParamName(pio, kFieldD, kLocalizedDepth);
+		}
+		{
+			VW_DRAW_TIME("構造材:パラメータ書き");
+			SetParamRealChecked(pio, bAlias, spec.width);
+			SetParamRealChecked(pio, dAlias, spec.depth);
+			pio.SetParamAsString(kFieldMemberID, TXString(spec.memberId.c_str()));
+			pio.SetParamAsString(kFieldMemberType, kMemberTypeStructural);
+			pio.SetParamAsString(kFieldStructuralUse, TXString(spec.structuralUse.c_str()));
+			pio.SetParamAsString(kFieldAxisAlign, AxisAlignKey(spec.axisAlign));
+			pio.SetParamAsString(kFieldStartCondition, kEndConditionSquare);
+			pio.SetParamAsString(kFieldEndCondition, kEndConditionSquare);
+		}
 
 		// 端部オフセット。**要らない（両端 0）なら触らない**——スタイル既定が 0 なので書く
 		// 必要が無く、名前を解決できない構成でも余計な診断を出さずに済む。
 		if (spec.startOffset != 0.0 || spec.endOffset != 0.0)
 		{
-			const TXString startOffset =
-				ResolveParamNameAmong(pio, kStartOffsetNames, kLocalizedStartOffset);
-			const TXString endOffset =
-				ResolveParamNameAmong(pio, kEndOffsetNames, kLocalizedEndOffset);
+			TXString startOffset;
+			TXString endOffset;
+			{
+				// **端部オフセットの universal 名は候補を順に空振りしてから、ローカライズ名で
+				// パラメータ表を端から舐める**（draw/DrawUtil の ResolveParamNameAmong）。
+				// 実データでは横架材の 7 割・柱のほぼ全数がここを通る（docs/DEV-NOTES.md
+				// M20）ので、名前解決の区間が重く出るならまずここを疑う。
+				VW_DRAW_TIME("構造材:名前解決");
+				startOffset = ResolveParamNameAmong(pio, kStartOffsetNames, kLocalizedStartOffset);
+				endOffset = ResolveParamNameAmong(pio, kEndOffsetNames, kLocalizedEndOffset);
+			}
 			if (startOffset.IsEmpty() || endOffset.IsEmpty())
 			{
 				result.endOffsetOk = false;
@@ -338,12 +394,16 @@ namespace HomeskzIfcImport::draw
 			}
 			else
 			{
+				VW_DRAW_TIME("構造材:パラメータ書き");
 				const bool startOk = SetParamRealChecked(pio, startOffset, spec.startOffset);
 				const bool endOk = SetParamRealChecked(pio, endOffset, spec.endOffset);
 				result.endOffsetOk = startOk && endOk;
 			}
 		}
-		gSDK->ResetObject(object);
+		{
+			VW_DRAW_TIME("構造材:リセット");
+			gSDK->ResetObject(object);
+		}
 
 		// 【描けたかを読み戻す】PIO は生成できても実体を持たないことがある（パスが 1 点の
 		// まま・バウンドの解決に失敗、など。Findings「Parametric Objects」）。そのとき OIP の
@@ -362,6 +422,11 @@ namespace HomeskzIfcImport::draw
 #endif
 		if (measureDrawn)
 		{
+			// **読み戻しと自己修復はひとまとめの区間**にする（区間は入れ子にしない。
+			// draw/Verify.h）。潰れた材のパスを作り直す `ResetObject` もここに入るので、
+			// 「構造材:リセット」には**1 本につき 1 回ぶんだけ**が積まれる。
+			VW_DRAW_TIME("構造材:読み戻しと修復");
+
 			// 本番ビルドでは差し替え後の測り直しを控えないので、そのまま const になる。
 #if VW_DRAW_VERIFY
 			DrawnMemberSize size = MeasureDrawnMember(object, spec.extentKind);

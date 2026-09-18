@@ -370,7 +370,11 @@ namespace HomeskzIfcImport::draw
 			if (profile == nil)
 				return false;
 
-			MCObjectHandle object = gSDK->CreateSlab(profile);
+			MCObjectHandle object = nil;
+			{
+				VW_DRAW_TIME("スラブ:生成");
+				object = gSDK->CreateSlab(profile);
+			}
 			if (object == nil)
 			{
 				// フォールバック: 外形ポリゴンをクラス付きで残す。**スラブを作れなくても
@@ -382,8 +386,11 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			SetClassByName(object, slab.drawClass);
-			SetAllAttributesByClass(object);
+			{
+				VW_DRAW_TIME("スラブ:クラスと属性");
+				SetClassByName(object, slab.drawClass);
+				SetAllAttributesByClass(object);
+			}
 
 			// 地中梁（台形プリズム）を持つ底盤は、プリズム群を**削り取りモディファイア**として
 			// 渡して底盤を clip する（底盤の構成層が地中梁の位置から消える）。可視の
@@ -398,18 +405,30 @@ namespace HomeskzIfcImport::draw
 			// 構成（コンクリート／砕石）と基準面は**このスラブへ直接**与える。
 			// スラブスタイルは作らない・当てない（draw/Floor と同じ。draw/DrawUtil.h
 			// 「複合オブジェクトの構成」）。
-			gSDK->ConvertToUnstyledSlab(object);
+			{
+				VW_DRAW_TIME("スラブ:スタイル解除");
+				gSDK->ConvertToUnstyledSlab(object);
+			}
+			// 構成層そのものの時間は draw/DrawUtil の SetComponents が「共通:構成層」へ積む
+			// （床板・底盤・立上りの合算。どれがどれかはフェーズの時刻差が持つ）。
 			SetComponents(object, slab.components);
-			SetSlabDatum(object, slab.datum, static_cast<short>(slab.components.size()));
+			{
+				VW_DRAW_TIME("スラブ:基準面と高さ");
+				SetSlabDatum(object, slab.datum, static_cast<short>(slab.components.size()));
 
-			// SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する。命令の
-			// elevation はコンクリート天端の絶対 Z なのでそのまま渡す。
-			gSDK->SetSlabHeight(object, slab.elevation);
+				// SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する。命令の
+				// elevation はコンクリート天端の絶対 Z なのでそのまま渡す。
+				gSDK->SetSlabHeight(object, slab.elevation);
 
-			// 天端を底盤天端レベルへバインドする（offset はそのレベルからの差。主たる底盤は 0）。
-			gSDK->SetObjectStoryBound(object, kSlabBoundID, StoryBoundData(slab.bound));
+				// 天端を底盤天端レベルへバインドする（offset はそのレベルからの差。
+				// 主たる底盤は 0）。
+				gSDK->SetObjectStoryBound(object, kSlabBoundID, StoryBoundData(slab.bound));
+			}
 
-			gSDK->ResetObject(object);
+			{
+				VW_DRAW_TIME("スラブ:リセット");
+				gSDK->ResetObject(object);
+			}
 
 			// 削り取った位置を埋める可視の 3D ソリッド（2 つ目の実体）。**スラブの確定後**に
 			// 置く（ResetObject がスラブを作り直す前に置くと、同じレイヤの図形として巻き込まれ

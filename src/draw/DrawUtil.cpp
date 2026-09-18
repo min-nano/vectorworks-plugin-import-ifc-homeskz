@@ -223,6 +223,8 @@ namespace HomeskzIfcImport::draw
 		if (boundary.empty())
 			return nil;
 
+		VW_DRAW_TIME("共通:外形ポリゴン");
+
 		std::vector<VWPoint2D> vertices;
 		vertices.reserve(boundary.size());
 		for (const core::Vec2& point : boundary)
@@ -247,6 +249,10 @@ namespace HomeskzIfcImport::draw
 
 	void SetComponents(MCObjectHandle object, const std::vector<core::ComponentCommand>& components)
 	{
+		// **層を 1 枚ずつ挿し、余った元の層を 1 枚ずつ消す**（下記）。スラブ 1 枚が
+		// 実測 670ms かかる中で、ここが何割なのかを切り分けるための区間。
+		VW_DRAW_TIME("共通:構成層");
+
 		const short original = CountComponents(object);
 		const auto wanted = static_cast<short>(components.size());
 
@@ -390,6 +396,8 @@ namespace HomeskzIfcImport::draw
 	{
 		if (maxX - minX <= 0.0 || maxY - minY <= 0.0)
 			return nil;
+
+		VW_DRAW_TIME("構造材:断面グループ");
 
 		VWPolygon2DObj profile({VWPoint2D(minX, minY), VWPoint2D(minX, maxY), VWPoint2D(maxX, maxY),
 								VWPoint2D(maxX, minY)});
@@ -682,6 +690,11 @@ namespace HomeskzIfcImport::draw
 
 	MCObjectHandle PrepareLayer(const std::string& layerName)
 	{
+		// **命令 1 件ごとに通る**（横架材 266 本なら 266 回）。名前引きとカレントレイヤの
+		// 切り替えが積み上がっていないかを見るための区間。ActivateExistingLayer と同じ
+		// 名前へ積む——どちらも「描く前にレイヤを決める」1 つの仕事である。
+		VW_DRAW_TIME("共通:レイヤ切替");
+
 		const TXString name(layerName.c_str());
 		MCObjectHandle layer = gSDK->GetNamedLayer(name);
 		if (layer == nil)
@@ -700,6 +713,8 @@ namespace HomeskzIfcImport::draw
 
 	MCObjectHandle ActivateExistingLayer(const std::string& layerName)
 	{
+		VW_DRAW_TIME("共通:レイヤ切替");
+
 		MCObjectHandle layer = gSDK->GetNamedLayer(TXString(layerName.c_str()));
 		if (layer == nil)
 			return nil;
@@ -806,6 +821,10 @@ namespace HomeskzIfcImport::draw
 									 const core::ViewportCommand& command,
 									 ViewportProjection projection, double scale)
 	{
+		// **ここで vp.Update() が走る**（伏図は ForcePlanView の中でもう 1 回）。伏図 1 枚
+		// 480ms・軸組図 1 枚 520ms の実測のうち、何割がこの仕上げなのかを見る区間。
+		VW_DRAW_TIME("図:ビューポート仕上げ");
+
 		ViewportFinish finish;
 		// 表示レイヤ: まず全部隠し、命令に挙げたものだけ表示へ戻す。**存在しないレイヤ名は
 		// 黙って読み飛ばす**（要素の描画がスキップされてレイヤが無い場合など。図自体は残す）。

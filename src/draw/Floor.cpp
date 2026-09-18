@@ -53,7 +53,11 @@ namespace HomeskzIfcImport::draw
 			if (profile == nil)
 				return false;
 
-			MCObjectHandle slab = gSDK->CreateSlab(profile);
+			MCObjectHandle slab = nil;
+			{
+				VW_DRAW_TIME("スラブ:生成");
+				slab = gSDK->CreateSlab(profile);
+			}
 			if (slab == nil)
 			{
 				// フォールバック: 外形ポリゴンをクラス付きで残す。
@@ -62,28 +66,43 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			SetClassByName(slab, floor.drawClass);
-			SetAllAttributesByClass(slab);
+			{
+				VW_DRAW_TIME("スラブ:クラスと属性");
+				SetClassByName(slab, floor.drawClass);
+				SetAllAttributesByClass(slab);
+			}
 
 			// 構成（床仕上げ／床下地）と基準面は**このスラブへ直接**与える。スラブスタイルは
 			// 作らない・当てない（draw/DrawUtil.h「複合オブジェクトの構成」）。CreateSlab は
 			// 文書の既定スタイルを引き継ぐことがあるので、明示的にスタイル無しへ落としてから
 			// 構成を組む。
-			gSDK->ConvertToUnstyledSlab(slab);
+			{
+				VW_DRAW_TIME("スラブ:スタイル解除");
+				gSDK->ConvertToUnstyledSlab(slab);
+			}
+			// 構成層そのものの時間は draw/DrawUtil の SetComponents が「共通:構成層」へ
+			// 積む（床板・底盤・立上りの合算。どれがどれかはフェーズの時刻差が持つ）。
 			SetComponents(slab, floor.components);
-			SetSlabDatum(slab, floor.datum, static_cast<short>(floor.components.size()));
+			{
+				VW_DRAW_TIME("スラブ:基準面と高さ");
+				SetSlabDatum(slab, floor.datum, static_cast<short>(floor.components.size()));
 
-			// SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する。命令の
-			// elevation は基準面の絶対 Z なのでそのまま渡す。
-			gSDK->SetSlabHeight(slab, floor.elevation);
+				// SetSlabHeight は厚みではなく**基準面の高さ**（絶対 Z）を設定する。命令の
+				// elevation は基準面の絶対 Z なのでそのまま渡す。
+				gSDK->SetSlabHeight(slab, floor.elevation);
 
-			// 基準面（一般階＝床仕上げ上端／ロフト＝床下地下端）を、命令が指すストーリレベル
-			// （一般階＝"FL"／ロフト＝"軒高"）へバインドする。offset はそのレベルからの高低差
-			// （一般部 0・床レベル指定時は ±差分）。これをしないと編集時に高さがレイヤ基準へ
-			// リセットされて実形状と矛盾する（変換とバウンド ID は draw/DrawUtil）。
-			gSDK->SetObjectStoryBound(slab, kSlabBoundID, StoryBoundData(floor.bound));
+				// 基準面（一般階＝床仕上げ上端／ロフト＝床下地下端）を、命令が指すストーリ
+				// レベル（一般階＝"FL"／ロフト＝"軒高"）へバインドする。offset はそのレベル
+				// からの高低差（一般部 0・床レベル指定時は ±差分）。これをしないと編集時に
+				// 高さがレイヤ基準へリセットされて実形状と矛盾する（変換とバウンド ID は
+				// draw/DrawUtil）。
+				gSDK->SetObjectStoryBound(slab, kSlabBoundID, StoryBoundData(floor.bound));
+			}
 
-			gSDK->ResetObject(slab);
+			{
+				VW_DRAW_TIME("スラブ:リセット");
+				gSDK->ResetObject(slab);
+			}
 			return true;
 		}
 	} // namespace

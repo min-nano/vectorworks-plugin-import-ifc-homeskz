@@ -336,8 +336,13 @@ namespace HomeskzIfcImport::draw
 		{
 			// 第 4 引数 bInsert=true でカレントレイヤへ入る。この後 AddViewportAnnotationObject で
 			// 注釈へ移すので、レイヤ上に残るのは失敗したときだけ（下記で消す）。
-			const MCObjectHandle object = gSDK->CreateCustomObject(
-				TXString(kDataTagPlugin), WorldPt(tag.position.x, tag.position.y), tag.angle, true);
+			MCObjectHandle object = nil;
+			{
+				VW_DRAW_TIME("タグ:生成");
+				object = gSDK->CreateCustomObject(TXString(kDataTagPlugin),
+												  WorldPt(tag.position.x, tag.position.y),
+												  tag.angle, true);
+			}
 			if (object == nil)
 			{
 				++counts.failed;
@@ -348,15 +353,21 @@ namespace HomeskzIfcImport::draw
 			// （中のテキストは CreateTagField が同じクラスに置く）。注釈へ移した後にビュー
 			// ポートのクラス表示を戻す後処理（ShowAllViewportClasses）が下にあるので、ここで
 			// 新しいクラスを持ち込んでもタグが映らなくなることはない。
-			SetClassByName(object, kTagClass);
-			SetAllAttributesByClass(object);
+			{
+				VW_DRAW_TIME("タグ:クラスと属性");
+				SetClassByName(object, kTagClass);
+				SetAllAttributesByClass(object);
+			}
 
 			// **関連付けを先に行う**（中身を組むより前）。タグの本文は関連付け先のレコードから
 			// 取るので、相手を決めてからレイアウトを組み、最後に UpdateDataTag で流し込む。
 			// フォールバックの直線になった横架材はハンドルが無いので関連付けを省く（タグ自体
 			// は置く）。
 			if (member != nil && support)
+			{
+				VW_DRAW_TIME("タグ:関連付け");
 				support->AssociateWithObject(object, member);
+			}
 			else
 				++counts.unassociated;
 
@@ -364,29 +375,47 @@ namespace HomeskzIfcImport::draw
 			// 当てない（draw/Tag.h の ★。スラブ・壁が構成層を各オブジェクトへ直接与えるのと
 			// 同じ）。組めなくても**タグは置く**——タグを失うより、位置だけでも正しいタグを
 			// 残した方が原因を追いやすい（寸法が空になるので件数を数えて診断へ回す）。
-			if (ResolveTagLayout(object, counts) == nil)
+			// **レイアウトはタグ 1 本ごとに組み直している**（スタイルを作らない方針の裏返し。
+			// 文字スタイル資源の引き当て・式の組み立て・リンク支援の取得が 1 本ごとに走る）。
+			// 400〜530 本ぶんが伏図・軸組図の時間に溶け込んでいるので、ここを 1 区間にする。
 			{
-				++counts.layoutFailed;
-			}
-			else if (support)
-			{
-				// **レイアウトへ入れたテキストをタグフィールドとして認識させる。** これを
-				// しないとタグが式を拾わず、寸法が空のまま出る（スタイルを作っていた頃に
-				// スタイルに対して行っていたのと同じ呼び出し。SDK のコメントにも
-				// 「データタグ**または**データタグスタイルの」とある）。
-				support->UpdateUserDefinedTextsUIDs(object);
+				VW_DRAW_TIME("タグ:レイアウト");
+				if (ResolveTagLayout(object, counts) == nil)
+				{
+					++counts.layoutFailed;
+				}
+				else if (support)
+				{
+					// **レイアウトへ入れたテキストをタグフィールドとして認識させる。** これを
+					// しないとタグが式を拾わず、寸法が空のまま出る（スタイルを作っていた頃に
+					// スタイルに対して行っていたのと同じ呼び出し。SDK のコメントにも
+					// 「データタグ**または**データタグスタイルの」とある）。
+					support->UpdateUserDefinedTextsUIDs(object);
+				}
 			}
 
 			// 引出線を OFF にする（**タグを部材の面ちょうどに置く**ので、既定 ON のままだと
-			// 引出線が描かれる。draw/Tag.h）。
-			if (!TurnOffLeader(object))
-				++counts.leaderLeft;
+			// 引出線が描かれる。draw/Tag.h）。**パラメータ名の解決がここで 1 本ごとに走る**
+			// （TurnOffLeader → ResolveParamName）ので、区間として分けておく。
+			{
+				VW_DRAW_TIME("タグ:引出線");
+				if (!TurnOffLeader(object))
+					++counts.leaderLeft;
+			}
 
-			gSDK->ResetObject(object);
+			{
+				VW_DRAW_TIME("タグ:リセット");
+				gSDK->ResetObject(object);
+			}
 
 			// ビューポートの注釈へ移す。入らなければタグを消す（冒頭「注釈に入らなかった
 			// タグは消す」）。
-			if (!gSDK->AddViewportAnnotationObject(viewport, object))
+			bool annotated = false;
+			{
+				VW_DRAW_TIME("タグ:注釈へ移す");
+				annotated = gSDK->AddViewportAnnotationObject(viewport, object);
+			}
+			if (!annotated)
 			{
 				gSDK->DeleteObject(object, true);
 				++counts.failed;
@@ -396,13 +425,21 @@ namespace HomeskzIfcImport::draw
 			// 関連付け後の再計算。これをしないと、関連付けた横架材の断面寸法が本文へ流し込ま
 			// れない。
 			if (support)
+			{
+				VW_DRAW_TIME("タグ:本文の流し込み");
 				support->UpdateDataTag(object);
+			}
 
 			// **ここで実位置と実寸を測る**。ここまででタグが本文を流し込み、実寸が
 			// 確定している。動かすのは全部置いてから（診断へ出す実測を先頭から数件そろえる
 			// ため。MovePendingTags）。
 			WorldRect bounds;
-			if (!gSDK->GetObjectBounds(object, bounds))
+			bool measured = false;
+			{
+				VW_DRAW_TIME("タグ:実測");
+				measured = gSDK->GetObjectBounds(object, bounds);
+			}
+			if (!measured)
 			{
 				// 測れないものは動かしようがないので、そのまま残す（生成した位置のまま）。
 				++counts.unmeasured;
