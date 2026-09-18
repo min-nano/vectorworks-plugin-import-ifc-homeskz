@@ -2608,7 +2608,7 @@ universal 名で外すと**パラメータ表を端から `GetParamLocalizedName
 ほぼ全数**がこの経路を通る（M20）。
 
 同じ PIO 種別ならパラメータ表は全インスタンスで同一のはずなので、解決は取り込み 1 回につき
-1 度でよい。**ただし「はず">」で実装に入らない**——`Findings`「パラメータ名は実機の PIO 登録から
+1 度でよい。**ただし「はず」で実装に入らない**——`Findings`「パラメータ名は実機の PIO 登録から
 採る」は、名前が 1 つ違うだけで setter が黙って無視された事故の記録である。
 **SDK リファレンス側の調査待ち**（[#82](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/82)）。
 
