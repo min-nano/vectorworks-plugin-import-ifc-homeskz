@@ -12,6 +12,7 @@
 #include "PluginPrefix.h"
 #include "draw/Shortcut.h"
 
+#include <cstddef>
 #include <string>
 
 #if defined(_WINDOWS)
@@ -69,12 +70,13 @@ namespace HomeskzIfcImport::draw
 
 		// **COM を使っている間だけ初期化する。** Vectorworks 自身が初期化済みの
 		// スレッドから呼ばれることもあるので、戻り値で「後始末が要るか」を分ける
-		// （RPC_E_CHANGED_MODE は「別のモードで既に初期化済み」＝それでも使えるが、
-		// こちらが CoUninitialize してはならない）。
+		// （`RPC_E_CHANGED_MODE` は負＝「別のモードで既に初期化済み」で、それでも使えるが
+		// こちらが `CoUninitialize` してはならない。`S_FALSE` は 0 以上＝こちらが数えた
+		// 1 回ぶんなので、釣り合いを取って解放する）。
 		class ComScope
 		{
 		public:
-			ComScope() : fOwned(SUCCEEDED(::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {}
+			ComScope() : fOwned(::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED) >= 0) {}
 			~ComScope()
 			{
 				if (fOwned)
@@ -87,36 +89,59 @@ namespace HomeskzIfcImport::draw
 			bool fOwned;
 		};
 
-		// `.lnk` の指す先を読む。**UI を出させない**（SLR_NO_UI）——無人で何十件も回る
-		// 途中で「リンク先が見つかりません」が出ると、そこで止まる。探し回らせない
-		// （SLR_NOSEARCH / SLR_NOTRACK）のも同じ理由で、これが無いと 1 件あたり数秒待つ
-		// ことがある。
+		// **COM の成否は `HRESULT` を直に見る**（`SUCCEEDED` / `FAILED` を使わない）。
+		// あのマクロは C キャストを挟んで展開されるので、静的解析の報告がマクロの中を
+		// 指してしまい、こちらのコードのどこが悪いのか読めなくなる（src/PayloadHost.cpp の
+		// 「標準ライブラリの中の話を黙らせるより、OS の API を直に叩くほうが素直」と同じ
+		// 考え方）。負なら失敗、というのが `HRESULT` の約束である。
+		bool Failed(HRESULT hr)
+		{
+			return hr < 0;
+		}
+
+		// `Resolve` へ渡す旗。**`SLR_FLAGS` の `|` を使わない**——Windows SDK の
+		// `DEFINE_ENUM_FLAG_OPERATORS` が定義する `operator|` は、組み合わせた値を
+		// もとの enum へ戻すので、静的解析が「その enum の値域に無い」と報告する
+		// （tidy-windows で実測。`std::filesystem` の `file_size` と同じ筋の偽陽性）。
+		// `Resolve` の引数は `DWORD` なので、**こちらで数として組み立てれば済む**。
+		//
+		// **UI を出させない**（`SLR_NO_UI`）——無人で何十件も回る途中で「リンク先が
+		// 見つかりません」が出ると、そこで止まる。探し回らせない（`SLR_NOSEARCH` /
+		// `SLR_NOTRACK`）のも同じ理由で、これが無いと 1 件あたり数秒待つことがある。
+		constexpr DWORD kResolveFlags =
+			static_cast<DWORD>(SLR_NO_UI) | static_cast<DWORD>(SLR_NOUPDATE) |
+			static_cast<DWORD>(SLR_NOSEARCH) | static_cast<DWORD>(SLR_NOTRACK);
+
+		// `GetPath` へ渡す受け皿の大きさ（文字数）。**`MAX_PATH` の掛け算で書かない**
+		// ——`int` で掛けた結果を `size_type` へ広げる形になり、静的解析がそれを咎める
+		// （tidy-windows で実測）。`MAX_PATH` は 260 なので、その数倍を定数で置く。
+		constexpr std::size_t kPathBufferChars = 1024;
+
+		// `.lnk` の指す先を読む。
 		bool ResolveWindowsShortcut(const std::string& path, std::string& target)
 		{
 			const ComScope com;
 			IShellLinkW* link = nullptr;
 			HRESULT hr = ::CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
 											IID_IShellLinkW, reinterpret_cast<void**>(&link));
-			if (FAILED(hr) || link == nullptr)
+			if (Failed(hr) || link == nullptr)
 				return false;
 
 			bool resolved = false;
 			IPersistFile* file = nullptr;
 			hr = link->QueryInterface(IID_IPersistFile, reinterpret_cast<void**>(&file));
-			if (SUCCEEDED(hr) && file != nullptr)
+			if (!Failed(hr) && file != nullptr)
 			{
-				if (SUCCEEDED(file->Load(Widen(path).c_str(), STGM_READ)))
+				const std::wstring wide = Widen(path);
+				if (!Failed(file->Load(wide.c_str(), STGM_READ)))
 				{
 					// 戻り値は見ない——**解決できなくても、保存されているパスは読める**。
 					// 読めた先が実在するかは、呼び出し側（core/FixtureScan）が確かめる。
-					(void)link->Resolve(nullptr,
-										SLR_NO_UI | SLR_NOUPDATE | SLR_NOSEARCH | SLR_NOTRACK);
-					// GetPath は MAX_PATH ぶんを前提にした API だが、長いパスのために
-					// 余裕を持たせて渡す。
-					std::wstring buffer(4 * MAX_PATH, L'\0');
+					(void)link->Resolve(nullptr, kResolveFlags);
+					std::wstring buffer(kPathBufferChars, L'\0');
 					WIN32_FIND_DATAW found{};
-					if (SUCCEEDED(link->GetPath(buffer.data(), static_cast<int>(buffer.size()),
-												&found, SLGP_UNCPRIORITY)))
+					if (!Failed(link->GetPath(buffer.data(), static_cast<int>(buffer.size()),
+											  &found, SLGP_UNCPRIORITY)))
 					{
 						target = Narrow(buffer.c_str());
 						resolved = !target.empty();
@@ -178,7 +203,11 @@ namespace HomeskzIfcImport::draw
 
 			bool resolved = false;
 			CFBooleanRef isAlias = nullptr;
-			if (CFURLCopyResourcePropertyForKey(url, kCFURLIsAliasFileKey, &isAlias, nullptr) &&
+			// **`void*` への多段ポインタ変換は明示する**（`CFBooleanRef*` は
+			// `const __CFBoolean**`。暗黙に落とすと clang-tidy の
+			// bugprone-multi-level-implicit-pointer-conversion が咎める。tidy-mac で実測）。
+			if (CFURLCopyResourcePropertyForKey(url, kCFURLIsAliasFileKey,
+												static_cast<void*>(&isAlias), nullptr) &&
 				isAlias != nullptr)
 			{
 				if (CFBooleanGetValue(isAlias))
