@@ -203,12 +203,23 @@ namespace HomeskzIfcImport::draw
 
 			bool resolved = false;
 			CFBooleanRef isAlias = nullptr;
-			// **`void*` への多段ポインタ変換は明示する**（`CFBooleanRef*` は
-			// `const __CFBoolean**`。暗黙に落とすと clang-tidy の
-			// bugprone-multi-level-implicit-pointer-conversion が咎める。tidy-mac で実測）。
+			// **多段ポインタを `void*` へ渡すのは、この API の形そのものである。**
+			// `&isAlias` は `CFBooleanRef*`（＝`const __CFBoolean**`）で、
+			// `CFURLCopyResourcePropertyForKey` は結果の置き場所を `void*` で受け取る
+			// ——CoreFoundation の「値を写して返す」API は一様にこの形なので、呼ぶ側に
+			// 避ける書き方が無い（受け皿を `CFTypeRef` にしても `const void**` で
+			// 多段のままである）。
+			//
+			// clang-tidy の bugprone-multi-level-implicit-pointer-conversion は「明示
+			// キャストを使え」と言うが、**その明示キャストも同じように咎める**（tidy-mac で
+			// 実測。`static_cast<void*>` にしても消えなかった）ので、コードの側では満たし
+			// ようがない。**だから 1 か所だけ黙らせる**——`.clang-tidy` で全体から外すと、
+			// 本当に危ない多段変換まで見逃すことになる。意図は `static_cast` が示す。
+			// NOLINTBEGIN(bugprone-multi-level-implicit-pointer-conversion)
 			if (CFURLCopyResourcePropertyForKey(url, kCFURLIsAliasFileKey,
 												static_cast<void*>(&isAlias), nullptr) &&
 				isAlias != nullptr)
+			// NOLINTEND(bugprone-multi-level-implicit-pointer-conversion)
 			{
 				if (CFBooleanGetValue(isAlias))
 				{

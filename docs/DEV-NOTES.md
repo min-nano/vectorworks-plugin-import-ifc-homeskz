@@ -774,6 +774,32 @@ IFC を 2 つ持つ**ことになり、しかも元が更新されたときに�
 ——無人で何十件も回すものを汚れた図面から始めても、読める数字にならない。おかげで
 **利用者のものを消すコードがこちらには 1 行も無い**。
 
+#### OS の SDK が相手だと、静的解析は「こちらのコード」を指さない
+
+`draw/Shortcut.cpp` は CI の clang-tidy（`tidy-mac` / `tidy-windows`）で 5 件落ちた。
+**どれもこちらの書き方の問題ではなく、OS の SDK が持つマクロ・enum・API の形から出て
+いる**。`src/PayloadHost.cpp` が `std::filesystem::file_size` で採ったのと同じ判断
+——**黙らせるより、そこを通らない書き方にする**——で 4 件は消えた:
+
+| 出たもの | 消し方 |
+| --- | --- |
+| `clang-analyzer-optin.core.EnumCastOutOfRange`（Windows） | `Resolve` の旗を `SLR_FLAGS` の `\|` で組んでいた。`DEFINE_ENUM_FLAG_OPERATORS` の `operator\|` は組み合わせた値を**もとの enum へ戻す**ので「値域に無い」と報告される。引数は `DWORD` なので、こちらで数として組み立てる |
+| `bugprone-implicit-widening-of-multiplication-result`（Windows） | `GetPath` の受け皿を `4 * MAX_PATH` で書いていた。`int` で掛けた結果を `size_type` へ広げる形になる。文字数の定数を直に置く |
+| （報告がマクロの中を指す） | `SUCCEEDED` / `FAILED` をやめ、`HRESULT` を直に見る述語にした。マクロ越しだと診断がマクロの展開先を指し、**こちらのどこが悪いのか読めない** |
+
+**1 件だけは消せなかった。** `CFURLCopyResourcePropertyForKey` は結果の置き場所を
+`void*` で受け取るので、`CFBooleanRef*`（＝`const __CFBoolean**`）を渡すことになり、
+`bugprone-multi-level-implicit-pointer-conversion` が咎める。**このチェックは「明示
+キャストを使え」と言うが、その明示キャストも同じように咎める**（`static_cast<void*>` に
+しても消えなかった。実測）。CoreFoundation の「値を写して返す」API は一様にこの形で、
+受け皿を `CFTypeRef` にしても `const void**` で多段のままなので、**呼ぶ側に避ける書き方が
+無い**。
+
+そこで**その 1 行だけを `NOLINTBEGIN` / `NOLINTEND` で黙らせた**。`.clang-tidy` から
+チェックごと外さないのは、**本当に危ない多段変換まで見逃すことになる**からである
+——SDK と衝突するチェックを全体から外すのは、`.clang-tidy` の冒頭に並べてある
+「編集では満たしようがないもの」に限る。
+
 #### 検討して採らなかったもの
 
 - **無 SDK のテストへ「追加フィクスチャフォルダ」を渡す**（環境変数で `tests/` から
