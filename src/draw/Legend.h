@@ -114,10 +114,8 @@ namespace HomeskzIfcImport::draw
 	};
 
 	// グラフィック凡例 PIO の定義を**設定ダイアログを出さない**で用意する。凡例を 1 つでも
-	// 置くフェーズ（伏図）の先頭で 1 回呼ぶ。理由は draw/Tag の prepareDataTagPlugin と同じ
-	// （CreateCustomObject が最初の 1 個で定義を作るとき、既定ではダイアログが出て
-	// インポートが止まる）。**静的フラグで 1 回だけにはしない**——定義は文書ごとなので、
-	// 次の文書へのインポートで抜けてしまう。
+	// 置くフェーズ（伏図）の先頭で 1 回呼ぶ（理由は DrawUtil の
+	// PrepareCustomObjectDefinition）。
 	void prepareGraphicLegendPlugin();
 
 	// 凡例 1 つをシートレイヤの上に置く。置けたら true を返し、内訳を counts へ積む

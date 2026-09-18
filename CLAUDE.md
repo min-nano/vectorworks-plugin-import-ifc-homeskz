@@ -538,10 +538,14 @@ Vectorworks 自身がモーダルのダイアログを出すことがある—�
 判定が共有する）は `parse/IfcGeometry.h`、基礎のレイヤ名・許容値（統合・自由端・**人通口・
 壁結合・地中梁・床付け**）は `parse/Footing.h`、`draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・
 プラグインスタイル解決・**構成層／基準面を各オブジェクトへ直接与える手順**——床板・底盤・
-立上りが共有する。スラブ・壁は**スタイルを作らない・当てない**。加えて**高さ基準の変換と
-バウンド ID**（`StoryBoundData` / `kSlabBoundID` / `kStartBoundID` / `kEndBoundID`。床板・底盤・
-構造材が共有）・**オブジェクト変数の書き込み**（`SetBooleanVariable` / `SetRealVariable` /
-`SetPointVariable`）・**診断行の連結**（`AppendLine`）・**登場順の dedupe**（`PushUnique`）・
+立上りが共有する。スラブ・壁は**スタイルを作らない・当てない**。加えて**SDK へ渡す数値の列挙**
+（`LayerKind` / `LayerVisibility` / `ClassVisibility` / `ObjectNodeType` / `ObjectVariable` /
+`StoryBoundSlot`。素の short を意味のある名前で持つ唯一の場所）・**高さ基準の変換**
+（`StoryBoundData`。床板・底盤・構造材が共有）・**オブジェクト変数の書き込み**
+（`SetBooleanVariable` / `SetRealVariable` / `SetPointVariable`）・**クラス分けと属性の by-class 化**
+（`SetClassWithAttributes`）・**PIO 定義の先出し**（`PrepareCustomObjectDefinition`。記号・耐力壁・
+データタグ・凡例が共有）・**描画ループの中止判定と歩進**（`AdvanceProgress`）・**診断の 1 文**
+（`AppendCount`）・**診断行の連結**（`AppendLine`）・**登場順の dedupe**（`PushUnique`）・
 **収まり判定の遊び**（`kFitTol`。伏図と軸組図が共有）もここ）は
 `draw/DrawUtil`、**シートレイヤの用意とビューポートの仕上げ**（表示レイヤの絞り込み・クラス表示・
 縮尺・図番／図面タイトル・更新に加え、**用紙と印刷可能領域の読み取り**（`SheetPaperArea`。用紙は 167/168・余白は `GetPageMargins`・インチ→mm と
@@ -560,7 +564,9 @@ Vectorworks 自身がモーダルのダイアログを出すことがある—�
 （`'GrLe'`）で、縮率は用紙の割り付けが決めた伏図の縮尺（`core::planLayout` の `scale`）に
 合わせる。**用紙をどれだけ空けるかは定数ではなく実測**——`measureLegendWidth` で測った幅を
 `core::planLayout` へ渡し、置き場所はその `legendTopRight`）、
-構造材ツール（StructuralMember PIO）のフィールド名・値・生成手順は
+構造材ツール（StructuralMember PIO）のフィールド名・値（ポップアップのキーは
+`MemberTypeKey` / `AxisAlignKey` / `EndConditionKey` の列挙）・生成手順と、**描いたときの失敗の
+内訳と診断の文言**（`StructuralFailures` / `DescribeStructuralFailures`。柱・横架材・垂木が共有）は
 `draw/StructuralMember`、ハイブリッドシンボルの配置は `draw/Symbol`（4 要素で共有する唯一の
 実装）、伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名は
 `parse/ColumnMark`、記号 PIO の登録名・パラメータ名は `Extensions/ExtColumnMark.h`、**耐力壁**の要素判別

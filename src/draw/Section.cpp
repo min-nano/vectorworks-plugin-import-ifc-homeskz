@@ -12,7 +12,7 @@
 //	                                        呼び出し後に設定し、そのあとで更新すること」と
 //	                                        あるので、後段は伏図と同じ手順（draw/DrawUtil の
 //	                                        ConfigureViewport）で仕上げる。
-//	  * gSDK->SetObjectVariable(h, 1064/1035/1059, …) … 断面の見え方（下記）
+//	  * gSDK->SetObjectVariable(h, ObjectVariable::Viewport…, …) … 断面の見え方（下記）
 //	  * VWViewportObj::SetRenderType(renderFinalHiddenLine) … レンダリング（下記）
 //	  * draw/DrawUtil の PlaceViewport   … できたビューポートを測って用紙のマスへ置く
 //	                                        （GetObjectBounds ＋ MoveObject。M18）
@@ -108,19 +108,14 @@ namespace HomeskzIfcImport::draw
 		// bbox より十分外まで延ばす**ことで実質無制限にしている（parse/Section の
 		// kSectionLineMargin）。
 
-		// 断面ビューポートのオブジェクト変数（Kernel/API/ObjectVariables.h。ci-debug で確認）。
-		//   1064 … 切断面より**奥**の図形を表示するか（要件: 表示しない）
-		//   1035 … プレイナー（レイヤ平面）／2D 図形を表示するか（要件: 表示しない）
-		//   1059 … ハイブリッドシンボル等の 2D コンポーネントを表示するか（要件: 表示する。
-		//          **CreateSectionViewport の直後は非表示**で、しかも**レンダリングが
-		//          シェイドのままでは書いても入らない**——先に隠線消去へ揃えること
-		//          （ファイル冒頭「レンダリングは〈隠線消去〉にする」）。入ったかどうかは
-		//          読み戻して診断へ残す）
+		// 断面ビューポートの見え方（セレクタは draw/DrawUtil の ObjectVariable）。
+		//   奥の図形          … 表示しない
+		//   プレイナー図形    … 表示しない
+		//   2D コンポーネント … 表示する。**CreateSectionViewport の直後は非表示**で、しかも
+		//                       **レンダリングがシェイドのままでは書いても入らない**——先に
+		//                       隠線消去へ揃えること（冒頭「レンダリングは〈隠線消去〉にする」）
 		// **どれもビューポートの更新より前に設定する**（更新時の描画へ効かせるため。
 		// CreateSectionViewport のヘッダコメントも「表示設定は呼び出し後、更新はその後」）。
-		constexpr short kOVDisplayObjectsBeyondCutPlane = 1064;
-		constexpr short kOVDisplayPlanarObjects = 1035;
-		constexpr short kOVDisplay2DComponents = 1059;
 		constexpr Boolean kShowObjectsBeyondCutPlane = false;
 		constexpr Boolean kShowPlanarObjects = false;
 		constexpr Boolean kShow2DComponents = true;
@@ -171,10 +166,10 @@ namespace HomeskzIfcImport::draw
 		bool ApplySectionDisplayOptions(MCObjectHandle viewport)
 		{
 			const bool rendered = ApplySectionRenderMode(viewport);
-			SetBooleanVariable(viewport, kOVDisplayObjectsBeyondCutPlane,
+			SetBooleanVariable(viewport, ObjectVariable::ViewportBeyondCutPlane,
 							   kShowObjectsBeyondCutPlane);
-			SetBooleanVariable(viewport, kOVDisplayPlanarObjects, kShowPlanarObjects);
-			SetBooleanVariable(viewport, kOVDisplay2DComponents, kShow2DComponents);
+			SetBooleanVariable(viewport, ObjectVariable::ViewportPlanarObjects, kShowPlanarObjects);
+			SetBooleanVariable(viewport, ObjectVariable::Viewport2DComponents, kShow2DComponents);
 			// 【読み戻して確かめない】以前は 2D コンポーネント（1059）を読み戻して
 			// 「入らなかった」を診断へ出していたが、**実機ではハイブリッドシンボルの 2D
 			// 表現がちゃんと出ているのに読み戻しは false を返す**（ローカル確認）。
@@ -269,10 +264,8 @@ namespace HomeskzIfcImport::draw
 		for (std::size_t index = 0; index < commands.size(); ++index)
 		{
 			const core::SectionCommand& command = commands[index];
-			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// 何枚目の用紙のどのマスか。割り付けが決まらなかった文書（建物の広がりが
 			// 求まらない）では 1 枚目へ全部載せ、縮尺も位置も触らない。
@@ -345,27 +338,21 @@ namespace HomeskzIfcImport::draw
 			 missingRenderMode > 0 || missingPlacement > 0 || oversized > 0 || !arrange))
 		{
 			std::string text = "軸組図の診断: ";
-			if (missingSheetLayers > 0)
-				text += "シートレイヤを作れなかった命令 " + std::to_string(missingSheetLayers) +
-						" 件。";
-			if (missingViewports > 0)
-				text += "断面ビューポートを作れなかった命令 " + std::to_string(missingViewports) +
-						" 件。";
+			AppendCount(text, "シートレイヤを作れなかった命令", missingSheetLayers, "件");
+			AppendCount(text, "断面ビューポートを作れなかった命令", missingViewports, "件");
 			if (classesBroken)
 				text += "クラスを表示に戻せませんでした（対象 " +
 						std::to_string(setup.classes.size()) + " クラス）。図形が映りません。";
-			if (missingRenderMode > 0)
-				text += "レンダリングを〈隠線消去〉にできなかった軸組図 " +
-						std::to_string(missingRenderMode) + " 枚。";
+			AppendCount(text, "レンダリングを〈隠線消去〉にできなかった軸組図", missingRenderMode,
+						"枚");
 			if (!arrange)
 				text += "用紙の割り付けを決められなかったため、縮尺と位置を調整せずに"
 						"1 枚のシートレイヤへ載せました。";
 			if (missingPlacement > 0)
 				text += "用紙の上で位置を合わせられなかった軸組図 " +
 						std::to_string(missingPlacement) + " 枚（外形を測れませんでした）。";
-			if (oversized > 0)
-				text += "割り当てたマスに収まらなかった軸組図 " + std::to_string(oversized) +
-						" 枚（縮尺の見積もりより図が大きくなりました）。";
+			AppendCount(text, "割り当てたマスに収まらなかった軸組図", oversized, "枚",
+						"縮尺の見積もりより図が大きくなりました");
 			AppendLine(note, text);
 		}
 

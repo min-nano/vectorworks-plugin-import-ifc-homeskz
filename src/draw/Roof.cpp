@@ -102,8 +102,7 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle handle = polygon.GetThisObject();
 			if (handle == nil)
 				return;
-			SetClassByName(handle, roof.drawClass);
-			SetAllAttributesByClass(handle);
+			SetClassWithAttributes(handle, roof.drawClass);
 		}
 
 		// 野地板 1 枚を屋根面オブジェクトとして描く。**屋根面として作れたときだけ true** を返し、
@@ -155,12 +154,13 @@ namespace HomeskzIfcImport::draw
 			//   * 棟側の点 … 命令の upslope（**方向ではなく点**）。
 			//   * 勾配 … 比を保ったまま run＝25.4 基準へ正規化する（kSlopeRunUnit 参照）。
 			//   * 軸の Z … 命令の elevation（冒頭「高さは絶対 Z で与える」）。
-			SetPointVariable(handle, ovSlabRoofPt1, roof.axisStart);
-			SetPointVariable(handle, ovSlabRoofPt2, roof.axisEnd);
-			SetPointVariable(handle, ovSlabRoofUpslopePt, roof.upslope);
-			SetRealVariable(handle, ovSlabRoofRise, roof.rise * kSlopeRunUnit / roof.run);
-			SetRealVariable(handle, ovSlabRoofRun, kSlopeRunUnit);
-			SetRealVariable(handle, ovSlabHeight, roof.elevation);
+			SetPointVariable(handle, ObjectVariable::SlabRoofPt1, roof.axisStart);
+			SetPointVariable(handle, ObjectVariable::SlabRoofPt2, roof.axisEnd);
+			SetPointVariable(handle, ObjectVariable::SlabRoofUpslopePt, roof.upslope);
+			SetRealVariable(handle, ObjectVariable::SlabRoofRise,
+							roof.rise * kSlopeRunUnit / roof.run);
+			SetRealVariable(handle, ObjectVariable::SlabRoofRun, kSlopeRunUnit);
+			SetRealVariable(handle, ObjectVariable::SlabHeight, roof.elevation);
 
 			// 上書きした変数から形状を作り直す。ハンドル版コンストラクタが InitGeometry を
 			// 呼ぶので、これが「変数 → 屋根面の 3D 形状」の再構築にあたる。
@@ -168,8 +168,7 @@ namespace HomeskzIfcImport::draw
 			// 厚み（野地板 12mm 固定）。屋根面は厚みを自分で持つ（スラブのような構成層ではない）。
 			placed.SetThickness(roof.thickness);
 
-			SetClassByName(handle, roof.drawClass);
-			SetAllAttributesByClass(handle);
+			SetClassWithAttributes(handle, roof.drawClass);
 			gSDK->ResetObject(handle);
 			return true;
 		}
@@ -180,11 +179,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		for (const core::RoofCommand& roof : document.roofs)
 		{
-			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は枚数で報告し、
-			// 描画の前に 1 件進める（＝「いま何枚目を描いているか」が見える）。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// 配置先レイヤ（"n-野地板"）が無い命令はスキップする（規約は ActivateExistingLayer）。
 			const MCObjectHandle layer = ActivateExistingLayer(roof.layer);
