@@ -423,6 +423,10 @@ target_compile_definitions(CoreFixtureScanTests
 # 「動いた」と見るか、そして**基準に依らない異常を別に数える**こと（基準がその異常ごと
 # 記録されていても見逃さないため）。フォルダを 1 件ずつ取り込む運転は SDK 側なので入らない。
 vw_add_test(ParseRegressionTests ParseRegressionTests.cpp CORE)
+# 基準ファイルの読み書きを本物のファイルで確かめるので、書き先が要る（CoreTraceTests /
+# CoreBridgeTests と同じ理由でビルドツリーへ書く）。
+target_compile_definitions(ParseRegressionTests
+						   PRIVATE "HOMESKZ_REGRESSION_TEST_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\"")
 
 # --- 並列実行（ctest -j）の詰め方 ---------------------------------------------
 # ctest は COST の降順にテストを開始する。COST が無いと前回の実行の実測

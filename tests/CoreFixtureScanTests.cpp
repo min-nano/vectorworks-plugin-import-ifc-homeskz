@@ -24,8 +24,10 @@
 
 using HomeskzIfcImport::core::FixtureEntry;
 using HomeskzIfcImport::core::FixtureScan;
+using HomeskzIfcImport::core::folderFilePath;
 using HomeskzIfcImport::core::kMaxFixtureCount;
 using HomeskzIfcImport::core::kMaxFixtureDepth;
+using HomeskzIfcImport::core::parentFolderOf;
 using HomeskzIfcImport::core::scanFixtureFolder;
 using HomeskzIfcImport::core::ShortcutResolver;
 
@@ -307,6 +309,69 @@ TEST(scan_caps_the_depth)
 	CHECK_EQ(names.size(), std::size_t{1});
 	if (!names.empty())
 		CHECK_EQ(names[0], "届く.ifc");
+}
+
+// 辿れないものは黙って落とさない（切れたリンク・IFC でもフォルダでもない先を指す
+// ショートカット）。**「あるはずの物件が回っていない」に気付ける唯一の手掛かり**である。
+TEST(scan_reports_what_it_could_not_follow)
+{
+	const TempDir temp("dangling");
+	temp.file("生きている.ifc");
+	temp.file("ただのメモ.txt");
+	temp.file("メモへ.lnk");
+	const bool linked =
+		TryLink(temp.path() / "どこにも無い.ifc", temp.path() / "切れ.ifc", /*directory*/ false);
+
+	// ショートカットの先が IFC でもフォルダでもなければ、回帰の対象ではないので黙って飛ばす。
+	const std::map<std::string, std::string> table = {
+		{Utf8Of(temp.path() / "メモへ.lnk"), Utf8Of(temp.path() / "ただのメモ.txt")},
+	};
+	const FixtureScan scan = scanFixtureFolder(temp.utf8(), FakeResolver(table));
+
+	const std::vector<std::string> names = NamesOf(scan);
+	CHECK_EQ(names.size(), std::size_t{1});
+	if (!names.empty())
+		CHECK_EQ(names[0], "生きている.ifc");
+
+	if (linked)
+	{
+		// 拡張子は .ifc なのに実体へ辿り着けない＝リンク切れ。断りを残す。
+		bool complained = false;
+		for (const std::string& note : scan.notes)
+			complained = complained || note.find("切れ.ifc") != std::string::npos;
+		CHECK(complained);
+	}
+}
+
+// 同じ名前の物件が別のフォルダに在っても、順序が決まる（見出しが同じなら実体のパスで並ぶ）。
+TEST(scan_orders_same_names_by_path)
+{
+	const TempDir temp("samename");
+	temp.file("b/同じ名前.ifc");
+	temp.file("a/同じ名前.ifc");
+
+	const FixtureScan scan = scanFixtureFolder(temp.utf8(), {});
+	CHECK_EQ(scan.entries.size(), std::size_t{2});
+	if (scan.entries.size() == 2)
+	{
+		CHECK_EQ(scan.entries[0].name, scan.entries[1].name);
+		CHECK(scan.entries[0].path < scan.entries[1].path);
+	}
+}
+
+// パスの小物（対象フォルダの決め方と、その中のファイルのパスの組み立て）。
+TEST(path_helpers_join_and_split)
+{
+	const TempDir temp("paths");
+	const std::filesystem::path file = temp.file("案件/物件.ifc");
+
+	// **選んだファイルの親フォルダが対象になる**（回帰テストはこの形でフォルダを決める）。
+	CHECK_EQ(parentFolderOf(Utf8Of(file)), Utf8Of(temp.path() / "案件"));
+	// 区切りを手で書かないための口。**空は空**（呼び出し側が「決められなかった」と読む）。
+	CHECK_EQ(folderFilePath(Utf8Of(temp.path()), "基準.txt"), Utf8Of(temp.path() / "基準.txt"));
+	CHECK(parentFolderOf("").empty());
+	CHECK(folderFilePath("", "基準.txt").empty());
+	CHECK(folderFilePath(Utf8Of(temp.path()), "").empty());
 }
 
 // 無いフォルダ・空の指定は、例外ではなく断りで返る。

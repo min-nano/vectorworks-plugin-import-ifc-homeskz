@@ -13,7 +13,9 @@
 #include "parse/Regression.h"
 #include "parse/Summary.h"
 
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 using HomeskzIfcImport::core::Document;
@@ -26,7 +28,9 @@ using HomeskzIfcImport::parse::formatRegressionLog;
 using HomeskzIfcImport::parse::formatRegressionPrompt;
 using HomeskzIfcImport::parse::formatRegressionResult;
 using HomeskzIfcImport::parse::parseRegressionBaseline;
+using HomeskzIfcImport::parse::readRegressionBaseline;
 using HomeskzIfcImport::parse::regressionBaselineOrigin;
+using HomeskzIfcImport::parse::regressionBaselinePath;
 using HomeskzIfcImport::parse::RegressionCompare;
 using HomeskzIfcImport::parse::RegressionEntry;
 using HomeskzIfcImport::parse::regressionEntry;
@@ -34,6 +38,7 @@ using HomeskzIfcImport::parse::regressionErrorEntry;
 using HomeskzIfcImport::parse::RegressionSummary;
 using HomeskzIfcImport::parse::RegressionVerdict;
 using HomeskzIfcImport::parse::summarizeRegression;
+using HomeskzIfcImport::parse::writeRegressionBaseline;
 
 namespace
 {
@@ -69,6 +74,37 @@ namespace
 	{
 		return text.find(needle) != std::string::npos;
 	}
+
+	// テスト 1 件ぶんの作業ディレクトリ（作って、抜けるときに消す）。書き先はビルドツリー
+	// ——TMPDIR 由来のパスがファイル操作へ届くと CodeQL が cpp/path-injection として報告する
+	// ので、CoreTraceTests / CoreBridgeTests と同じ作法にする。
+	class TempDir
+	{
+	public:
+		explicit TempDir(const std::string& tag)
+		{
+			fPath = std::filesystem::path(HOMESKZ_REGRESSION_TEST_DIR) / ("vw-reg-" + tag);
+			std::error_code ec;
+			std::filesystem::remove_all(fPath, ec);
+			std::filesystem::create_directories(fPath, ec);
+		}
+		~TempDir()
+		{
+			std::error_code ec;
+			std::filesystem::remove_all(fPath, ec);
+		}
+		TempDir(const TempDir&) = delete;
+		TempDir& operator=(const TempDir&) = delete;
+
+		std::string utf8() const
+		{
+			const std::u8string text = fPath.u8string();
+			return {text.begin(), text.end()};
+		}
+
+	private:
+		std::filesystem::path fPath;
+	};
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -87,8 +123,10 @@ TEST(entry_uses_the_import_wording)
 	CHECK_EQ(warned.tally, "通り芯:2/3");
 
 	// **描画側が持ち帰った異常は 1 行に畳んで残す**（行数で切る——UTF-8 の途中で切らない）。
+	// **CR も空行も持ち込ませない**（診断は描画側が改行で連ねたもの。CRLF で来ることも
+	// あれば、空行が挟まることもある）。
 	DrawCounts noisy = DrewGrids(3);
-	noisy.diagnostics = "一行目\n二行目\n三行目\n四行目\n";
+	noisy.diagnostics = "一行目\r\n\r\n二行目\n三行目\n四行目\n";
 	const RegressionEntry withNotes = regressionEntry("物件.ifc", GridsOnly(3), noisy, 1.0);
 	CHECK_EQ(withNotes.status, "問題あり"); // diagnostics があれば命令を描き切っても異常
 	CHECK_EQ(withNotes.detail, "一行目 / 二行目 / 三行目 …");
@@ -136,6 +174,33 @@ TEST(baseline_round_trips)
 	CHECK(Contains(origin, "feature/x"));
 }
 
+// 基準ファイルの置き場所と、その読み書き。**無くても異常ではない**（初めて走らせたとき）。
+TEST(baseline_file_round_trips_on_disk)
+{
+	const TempDir temp("io");
+	const std::string path = regressionBaselinePath(temp.utf8());
+	CHECK(Contains(path, "min-nano_structure-regression.txt"));
+	CHECK(regressionBaselinePath("").empty());
+
+	// まだ無いので読めない（呼び出し側は「基準が無い」として 1 回目のように続ける）。
+	std::string text = "残っていてはいけない";
+	CHECK(!readRegressionBaseline(path, text));
+	CHECK(text.empty());
+	CHECK(!readRegressionBaseline("", text));
+
+	std::vector<RegressionEntry> entries;
+	entries.push_back(regressionEntry("a.ifc", GridsOnly(2), DrewGrids(2), 1.0));
+	const std::string written =
+		formatRegressionBaseline(entries, SampleBuild(), "2026-09-18 00:00:00");
+	CHECK(writeRegressionBaseline(path, written));
+	CHECK(readRegressionBaseline(path, text));
+	CHECK_EQ(text, written);
+	CHECK(!writeRegressionBaseline("", written));
+
+	// 書けない場所は false（呼び出し側は「基準を書けませんでした」と伝える）。
+	CHECK(!writeRegressionBaseline(temp.utf8() + "/無いフォルダ/基準.txt", written));
+}
+
 // 壊れた行・知らない鍵は飛ばして読み続ける（古い版が書いたものも読める）。
 TEST(baseline_skips_broken_lines)
 {
@@ -158,6 +223,35 @@ TEST(baseline_skips_broken_lines)
 		CHECK_EQ(read[0].tally, "通り芯:1/1");
 		CHECK_EQ(read[1].name, "b.ifc");
 	}
+}
+
+// 改行が CRLF でも、秒が数として読めなくても、読むのをやめない（基準ファイルは利用者の
+// 機械で作られるので、Windows で書いて mac で読む——その逆も——が普通に起きる）。
+TEST(baseline_survives_crlf_and_bad_numbers)
+{
+	const std::string text = "version=1\r\n"
+							 "file=a.ifc\r\n"
+							 "status=成功\r\n"
+							 "seconds=これは数ではない\r\n"
+							 "tally=通り芯:1/1\r\n";
+	const std::vector<RegressionEntry> read = parseRegressionBaseline(text);
+	CHECK_EQ(read.size(), std::size_t{1});
+	if (!read.empty())
+	{
+		CHECK_EQ(read[0].status, "成功");	   // CR が値に残っていない
+		CHECK_EQ(read[0].tally, "通り芯:1/1"); //
+		CHECK(read[0].seconds == 0.0);		   // 読めなければ 0。読むのはやめない
+	}
+}
+
+// 基準の素性が読めないときは空（見出しの無いファイル・壊れた行だけのファイル）。
+TEST(baseline_origin_is_empty_without_a_header)
+{
+	CHECK(regressionBaselineOrigin("").empty());
+	CHECK(regressionBaselineOrigin("これは鍵でも値でもない\nfile=a.ifc\nstatus=成功\n").empty());
+	// 見出しはあるが記録した日時しか無い、という古い形でも読める。**改行が CRLF でも**
+	// （基準ファイルは利用者の機械で作られるので、Windows で書いて mac で読むが起きる）。
+	CHECK_EQ(regressionBaselineOrigin("recorded=2026-09-18\r\nfile=a.ifc\r\n"), "2026-09-18");
 }
 
 // 突き合わせ: 同じ・動いた・基準に無し・今回は走らず。
@@ -305,6 +399,52 @@ TEST(log_carries_the_details)
 	CHECK(Contains(log, "通り芯: 3/3 → 4/4"));
 	CHECK(Contains(log, "1 分 5 秒")); // 所要の言い方は parse/Summary と同じもの
 	CHECK(Contains(log, "切れ.lnk"));
+}
+
+// 中止した回・基準を書いた回の言い方（走らせた人が最初に読む 1 枚）。
+TEST(result_body_names_the_unusual_runs)
+{
+	RegressionSummary stopped;
+	stopped.total = 2;
+	stopped.same = 2;
+	stopped.baselineKnown = true;
+	stopped.cancelled = true;
+	const std::string body = formatRegressionResult(stopped, /*baselineWritten*/ false);
+	CHECK(Contains(body, "途中で中止した"));
+
+	RegressionSummary updated;
+	updated.total = 3;
+	updated.same = 3;
+	updated.baselineKnown = true;
+	const std::string refreshed = formatRegressionResult(updated, /*baselineWritten*/ true);
+	CHECK(Contains(refreshed, "基準を今回の結果で更新しました"));
+}
+
+// ログは 4 つの分類すべてに言葉を持ち、結末が変わった件は基準の結末も並べる。
+TEST(log_names_every_verdict)
+{
+	std::vector<RegressionEntry> baseline;
+	baseline.push_back(regressionEntry("same.ifc", GridsOnly(2), DrewGrids(2), 1.0));
+	baseline.push_back(regressionEntry("gone.ifc", GridsOnly(2), DrewGrids(2), 1.0));
+	baseline.push_back(regressionEntry("worse.ifc", GridsOnly(2), DrewGrids(2), 1.0));
+
+	std::vector<RegressionEntry> current;
+	current.push_back(regressionEntry("same.ifc", GridsOnly(2), DrewGrids(2), 1.0));
+	current.push_back(regressionEntry("new.ifc", GridsOnly(1), DrewGrids(1), 1.0));
+	current.push_back(regressionErrorEntry("worse.ifc", "落ちた", 0.2));
+
+	const std::vector<RegressionCompare> compares = compareRegression(baseline, current);
+	const RegressionSummary summary =
+		summarizeRegression(compares, /*baselineKnown*/ true, /*cancelled*/ true);
+	const std::string log = formatRegressionLog(compares, summary, {});
+
+	CHECK(Contains(log, "基準どおり"));
+	CHECK(Contains(log, "基準に無し"));
+	CHECK(Contains(log, "今回は走らず"));
+	CHECK(Contains(log, "途中で中止"));
+	// **結末が変わった件は、基準の結末も並べる**（「問題あり → 成功」も動きである）。
+	CHECK(Contains(log, "（基準は 成功）"));
+	CHECK(Contains(log, "詳細: 落ちた"));
 }
 
 TEST_MAIN();
