@@ -205,74 +205,97 @@ namespace HomeskzIfcImport::draw
 				return kAxisAlignTopCentre;
 			}
 		}
+
+		// **計測の区間を開かないパス生成の本体。** 区間を開くのは下の公開版（CreatePath）
+		// だけで、こちらは**既に別の区間の中にいる**呼び出し——潰れた材の自己修復
+		// （DrawStructuralMember の「構造材:読み戻しと修復」の中）——が使う。
+		// **区間は入れ子にしない**（core/DrawTiming.h「使う側の作法」／draw/Verify.h）
+		// ——入れ子にすると自己修復に掛かった時間が「構造材:パス生成」と
+		// 「構造材:読み戻しと修復」へ二重に積まれ、合計を読んだ人が必ず取り違える。
+		// 実機では潰れた柱が 46 本あった（docs/DEV-NOTES.md M27）ので、この経路は稀ではない。
+#if VW_DRAW_VERIFY
+		MCObjectHandle CreatePathUntimed(const core::Vec2& start, const core::Vec2& end,
+										 bool& outAppended, PathProbe* outProbe = nullptr)
+#else
+		MCObjectHandle CreatePathUntimed(const core::Vec2& start, const core::Vec2& end,
+										 bool& outAppended)
+#endif
+		{
+			outAppended = false;
+			MCObjectHandle path =
+				gSDK->CreateNurbsCurve(WorldPt3(start.x, start.y, kPathPlaneZ), false, kPathDegree);
+			if (path == nil)
+				return nil;
+
+			// **Add3DVertex が VS の AddVertex3D にあたる**（ヘッダ参照）。末尾へ 1 点足して
+			// 始端 → 終端の 2 点にする。
+			gSDK->Add3DVertex(path, WorldPt3(end.x, end.y, kPathPlaneZ));
+			// 頂点が本当に 2 つになったかを読み戻す。ピース索引の起点は 0 / 1 のどちらの
+			// 規約もあり得るので両方を見る（**判定に失敗しても曲線はそのまま使う**——ここで
+			// 諦めると、索引の規約違いというだけで部材が 1 本も描かれなくなる）。
+			const Sint32 piece0 = gSDK->NurbsGetNumPts(path, 0);
+			const Sint32 piece1 = gSDK->NurbsGetNumPts(path, 1);
+#if VW_DRAW_VERIFY
+			PathProbe probe;
+			probe.piece0 = piece0;
+			probe.piece1 = piece1;
+			// **2 点の Z を読み戻す。** 数が 2 でも同じ位置なら部材は実体を持たない
+			// （実機で 46 本。draw/StructuralMember.h の PathProbe）。**観測だけ**なので
+			// 開発ビルドにしか無い。
+			WorldPt3 first(0.0, 0.0, 0.0);
+			WorldPt3 second(0.0, 0.0, 0.0);
+			if (gSDK->NurbsGetPt3D(path, 0, 0, first) && gSDK->NurbsGetPt3D(path, 0, 1, second))
+			{
+				probe.pointsRead = true;
+				probe.z0 = first.z;
+				probe.z1 = second.z;
+			}
+#endif
+			// **座標を明示的に入れ直す。** `Add3DVertex` が足した点が渡した位置にならないことが
+			// ある（ヘッダ参照）。うまく足せていたときは同じ値を書くだけで何も変わらない。
+			// **これは観測ではなく描画の一部**（外すと実機で潰れた材が戻る）なので、本番でも走る
+			// ——開発ビルドだけなのは、その戻り値を控える下の 2 行である。
+			if (piece0 >= kPathPointCount)
+			{
+				[[maybe_unused]] const Boolean startSet =
+					gSDK->NurbsSetPt3D(path, 0, 0, WorldPt3(start.x, start.y, kPathPlaneZ));
+				[[maybe_unused]] const Boolean endSet =
+					gSDK->NurbsSetPt3D(path, 0, 1, WorldPt3(end.x, end.y, kPathPlaneZ));
+#if VW_DRAW_VERIFY
+				probe.setOk = startSet && endSet;
+				WorldPt3 fixed(0.0, 0.0, 0.0);
+				if (gSDK->NurbsGetPt3D(path, 0, 1, fixed))
+				{
+					probe.fixedRead = true;
+					probe.fixedZ1 = fixed.z;
+				}
+#endif
+			}
+#if VW_DRAW_VERIFY
+			if (outProbe != nullptr)
+				*outProbe = probe;
+#endif
+			outAppended = piece0 >= kPathPointCount || piece1 >= kPathPointCount;
+			return path;
+		}
 	} // namespace
 
+	// 公開版。**区間を開くのはここだけ**（上記 CreatePathUntimed）——呼ぶのは要素ごとの
+	// 描画（draw/Member・draw/Column・draw/Rafter）で、どれも他の区間の外から呼ぶ。
 #if VW_DRAW_VERIFY
 	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended,
 							  PathProbe* outProbe)
-#else
-	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended)
-#endif
 	{
 		VW_DRAW_TIME("構造材:パス生成");
-
-		outAppended = false;
-		MCObjectHandle path =
-			gSDK->CreateNurbsCurve(WorldPt3(start.x, start.y, kPathPlaneZ), false, kPathDegree);
-		if (path == nil)
-			return nil;
-
-		// **Add3DVertex が VS の AddVertex3D にあたる**（ヘッダ参照）。末尾へ 1 点足して
-		// 始端 → 終端の 2 点にする。
-		gSDK->Add3DVertex(path, WorldPt3(end.x, end.y, kPathPlaneZ));
-		// 頂点が本当に 2 つになったかを読み戻す。ピース索引の起点は 0 / 1 のどちらの
-		// 規約もあり得るので両方を見る（**判定に失敗しても曲線はそのまま使う**——ここで
-		// 諦めると、索引の規約違いというだけで部材が 1 本も描かれなくなる）。
-		const Sint32 piece0 = gSDK->NurbsGetNumPts(path, 0);
-		const Sint32 piece1 = gSDK->NurbsGetNumPts(path, 1);
-#if VW_DRAW_VERIFY
-		PathProbe probe;
-		probe.piece0 = piece0;
-		probe.piece1 = piece1;
-		// **2 点の Z を読み戻す。** 数が 2 でも同じ位置なら部材は実体を持たない
-		// （実機で 46 本。draw/StructuralMember.h の PathProbe）。**観測だけ**なので
-		// 開発ビルドにしか無い。
-		WorldPt3 first(0.0, 0.0, 0.0);
-		WorldPt3 second(0.0, 0.0, 0.0);
-		if (gSDK->NurbsGetPt3D(path, 0, 0, first) && gSDK->NurbsGetPt3D(path, 0, 1, second))
-		{
-			probe.pointsRead = true;
-			probe.z0 = first.z;
-			probe.z1 = second.z;
-		}
-#endif
-		// **座標を明示的に入れ直す。** `Add3DVertex` が足した点が渡した位置にならないことが
-		// ある（ヘッダ参照）。うまく足せていたときは同じ値を書くだけで何も変わらない。
-		// **これは観測ではなく描画の一部**（外すと実機で潰れた材が戻る）なので、本番でも走る
-		// ——開発ビルドだけなのは、その戻り値を控える下の 2 行である。
-		if (piece0 >= kPathPointCount)
-		{
-			[[maybe_unused]] const Boolean startSet =
-				gSDK->NurbsSetPt3D(path, 0, 0, WorldPt3(start.x, start.y, kPathPlaneZ));
-			[[maybe_unused]] const Boolean endSet =
-				gSDK->NurbsSetPt3D(path, 0, 1, WorldPt3(end.x, end.y, kPathPlaneZ));
-#if VW_DRAW_VERIFY
-			probe.setOk = startSet && endSet;
-			WorldPt3 fixed(0.0, 0.0, 0.0);
-			if (gSDK->NurbsGetPt3D(path, 0, 1, fixed))
-			{
-				probe.fixedRead = true;
-				probe.fixedZ1 = fixed.z;
-			}
-#endif
-		}
-#if VW_DRAW_VERIFY
-		if (outProbe != nullptr)
-			*outProbe = probe;
-#endif
-		outAppended = piece0 >= kPathPointCount || piece1 >= kPathPointCount;
-		return path;
+		return CreatePathUntimed(start, end, outAppended, outProbe);
 	}
+#else
+	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended)
+	{
+		VW_DRAW_TIME("構造材:パス生成");
+		return CreatePathUntimed(start, end, outAppended);
+	}
+#endif
 
 	StructuralMemberResult DrawStructuralMember(const StructuralMemberSpec& spec, RefNumber style)
 	{
@@ -457,7 +480,11 @@ namespace HomeskzIfcImport::draw
 				if (result.collapsed && spec.retryWithFreshPath)
 				{
 					bool appended = false;
-					const MCObjectHandle fresh = CreatePath(spec.pathStart, spec.pathEnd, appended);
+					// **公開版（CreatePath）ではなく計測を開かない方を呼ぶ。** ここは既に
+					// 「構造材:読み戻しと修復」の区間の中なので、公開版を呼ぶと区間が
+					// 入れ子になる（上記 CreatePathUntimed）。
+					const MCObjectHandle fresh =
+						CreatePathUntimed(spec.pathStart, spec.pathEnd, appended);
 					if (fresh != nil && gSDK->SetCustomObjectPath(object, fresh))
 					{
 						gSDK->ResetObject(object);

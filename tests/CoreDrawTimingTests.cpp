@@ -122,6 +122,79 @@ TEST(clear_empties_the_table)
 	CHECK(table.total() == 0.0);
 }
 
+// --- 入れ子の見張り --------------------------------------------------------
+
+TEST(nested_scopes_are_reported_by_name)
+{
+	// 入れ子は禁じ手（core/DrawTiming.h「使う側の作法」）だが、**防がずに数える**——
+	// 計測点は draw/ のあちこちに散るので、共有の関数が自分でも区間を開いていた、
+	// という取りこぼしは必ず起きる。二重計上は消せないので、**気付けるようにする**。
+	drawTiming().clear();
+	{
+		const TimingScope outer("外側");
+		{
+			const TimingScope inner("内側");
+		}
+	}
+	CHECK_EQ(drawTiming().nested().size(), static_cast<std::size_t>(1));
+	CHECK_EQ(drawTiming().nested()[0], "内側");
+	// 報告の末尾に警告が出る（名前で分かる）。
+	const std::string text = drawTiming().format("描画の内訳");
+	CHECK(text.find("⚠ 入れ子になった区間") != std::string::npos);
+	CHECK(text.find("内側") != std::string::npos);
+	drawTiming().clear();
+}
+
+TEST(sibling_scopes_are_not_nested)
+{
+	// 同じ深さで順に開くのは入れ子ではない（構造材の「名前解決」「パラメータ書き」が
+	// 交互に来る形がこれ）。
+	drawTiming().clear();
+	{
+		const TimingScope first("先");
+	}
+	{
+		const TimingScope second("後");
+	}
+	CHECK(drawTiming().nested().empty());
+	CHECK(drawTiming().format("描画の内訳").find("⚠") == std::string::npos);
+	drawTiming().clear();
+}
+
+TEST(the_same_nested_section_is_named_once)
+{
+	TimingTable table;
+	table.noteNested("A");
+	table.noteNested("A");
+	table.noteNested("B");
+	CHECK_EQ(table.nested().size(), static_cast<std::size_t>(2));
+	CHECK_EQ(table.nested()[0], "A");
+	CHECK_EQ(table.nested()[1], "B");
+}
+
+TEST(leaving_a_scope_that_was_never_entered_does_not_go_negative)
+{
+	// 0 を下回らせると、以後に本当に起きた入れ子を見逃す。
+	TimingTable table;
+	table.leaveScope();
+	CHECK(!table.enterScope()); // 深さは 0 のまま＝最初の区間は入れ子ではない
+	CHECK(table.enterScope());	// その中は入れ子
+	table.leaveScope();
+	table.leaveScope();
+}
+
+TEST(clear_also_forgets_the_nesting_watch)
+{
+	// 周ごとに測り直すので、前の周の入れ子の記録を持ち越さない。
+	TimingTable table;
+	table.noteNested("A");
+	CHECK(table.enterScope() == false);
+	table.clear();
+	CHECK(table.nested().empty());
+	CHECK(!table.enterScope()); // 深さも戻っている
+	table.leaveScope();
+}
+
 TEST(scope_adds_one_entry_to_the_shared_table)
 {
 	// 計測点は draw/ のあちこちに散るが、集計先は drawTiming() ただ 1 つ

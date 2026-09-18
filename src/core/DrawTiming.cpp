@@ -48,6 +48,30 @@ namespace HomeskzIfcImport::core
 	void TimingTable::clear()
 	{
 		fEntries.clear();
+		fNested.clear();
+		fDepth = 0;
+	}
+
+	bool TimingTable::enterScope()
+	{
+		const bool nested = fDepth > 0;
+		++fDepth;
+		return nested;
+	}
+
+	void TimingTable::leaveScope()
+	{
+		// 入っていないのに出ようとするのは呼び出し側の取り違えだが、ここで 0 を下回らせると
+		// 以後の入れ子を見逃す。0 で止める。
+		if (fDepth > 0)
+			--fDepth;
+	}
+
+	void TimingTable::noteNested(std::string_view name)
+	{
+		if (std::ranges::find(fNested, name) != fNested.end())
+			return;
+		fNested.emplace_back(name);
 	}
 
 	std::vector<TimingTable::Entry> TimingTable::sorted() const
@@ -91,6 +115,19 @@ namespace HomeskzIfcImport::core
 			const auto calls = static_cast<double>(entry.count);
 			text += formatNumber("%.2f", entry.milliseconds / calls);
 			text += "ms/回）";
+		}
+
+		// **入れ子になった区間は必ず言う。** 二重計上はもう直せないので、せめて
+		// 「この数字は信じてよいか」を読む側へ渡す（core/DrawTiming.h「入れ子の見張り」）。
+		if (!fNested.empty())
+		{
+			text += "\n  ⚠ 入れ子になった区間（時間が外側にも積まれています）: ";
+			for (std::size_t i = 0; i < fNested.size(); ++i)
+			{
+				if (i > 0)
+					text += ", ";
+				text += fNested[i];
+			}
 		}
 		return text;
 	}
