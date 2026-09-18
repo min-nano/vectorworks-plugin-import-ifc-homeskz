@@ -137,6 +137,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/core/Bridge.cpp
 		src/core/Document.cpp
 		src/core/FeedbackSession.cpp
+		src/core/FixtureScan.cpp
 		src/core/Geometry.cpp
 		src/core/ImportOptions.cpp
 		src/core/Json.cpp
@@ -147,6 +148,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/BuildDocument.cpp
 		src/parse/Context.cpp
 		src/parse/Feedback.cpp
+		src/parse/Regression.cpp
 		src/parse/Step.cpp
 		src/parse/Loader.cpp
 		src/parse/Summary.cpp
@@ -334,6 +336,8 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtMcpMenu.cpp
 		src/Extensions/ExtTestMenu.h
 		src/Extensions/ExtTestMenu.cpp
+		src/Extensions/ExtRegressionMenu.h
+		src/Extensions/ExtRegressionMenu.cpp
 		src/Extensions/ExtColumnMark.h
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.h
@@ -398,6 +402,7 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtUpdateMenu.cpp
 		src/Extensions/ExtMcpMenu.cpp
 		src/Extensions/ExtTestMenu.cpp
+		src/Extensions/ExtRegressionMenu.cpp
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.cpp
 		src/Extensions/ExtFeedbackPalette.cpp
@@ -415,6 +420,9 @@ if(VW_BUILD_PLUGIN)
 		src/draw/ImportCommand.cpp
 		src/draw/ImportRun.cpp
 		src/draw/Feedback.cpp
+		src/draw/Regression.cpp
+		src/draw/DocumentFile.cpp
+		src/draw/Shortcut.cpp
 		src/draw/HostServices.cpp
 		src/draw/McpBridge.cpp
 		src/draw/ColumnMarkPio.cpp
@@ -555,8 +563,14 @@ if(VW_BUILD_PLUGIN)
 			# callback pointer (GS_InitializeVCOM), so we link only the SDK's static
 			# library, the VWMM import library, and the two Windows system libs the
 			# SDK references.
-			target_link_libraries(${target} PRIVATE "${VW_SDK_LIB}/VWSDK.lib"
-													"${VW_SDK_LIB}/VWMM.lib" USP10.lib Rpcrt4.lib)
+			#
+			# Ole32 / Uuid は**ショートカット（.lnk）の解決**が使う COM のため
+			# （src/draw/Shortcut.cpp の IShellLink / IPersistFile と、その CLSID / IID）。
+			# MSVC の既定のライブラリにも入っているが、**明示して依存を見えるようにする**
+			# ——既定が変わったときに「なぜか Windows だけリンクできない」で止まらないため。
+			target_link_libraries(
+				${target} PRIVATE "${VW_SDK_LIB}/VWSDK.lib" "${VW_SDK_LIB}/VWMM.lib" USP10.lib
+								  Rpcrt4.lib Ole32.lib Uuid.lib)
 		endif()
 	endfunction()
 

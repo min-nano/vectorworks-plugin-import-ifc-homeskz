@@ -33,6 +33,7 @@
 #include "draw/HostServices.h"
 #include "draw/ImportCommand.h"
 #include "draw/McpBridge.h"
+#include "draw/Regression.h"
 #include "draw/ShearWallPio.h"
 
 #include <exception>
@@ -182,6 +183,23 @@ VW_PAYLOAD_EXPORT int vw_payload_run_test(int allowDialogs, int* outActive)
 		(void)draw::runTestRound(allowDialogs != 0, active);
 		if (outActive != nullptr)
 			*outActive = active ? 1 : 0;
+		return kVwPayloadOk;
+	}
+	catch (...)
+	{
+		return kVwPayloadErrException;
+	}
+}
+
+VW_PAYLOAD_EXPORT int vw_payload_run_regression()
+{
+	try
+	{
+		if (!gPayloadReady || gSDK == nil)
+			return kVwPayloadErrNotInit;
+		// **回帰テストを知っているのは本体のここだけ**（src/draw/Regression.h）。結末は
+		// 本体がダイアログとログで見せ切るので、殻へ持ち帰るものは無い。
+		draw::runRegressionCommand();
 		return kVwPayloadOk;
 	}
 	catch (...)

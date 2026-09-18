@@ -54,10 +54,13 @@ namespace HomeskzIfcImport::draw
 	// 何も描かず静かに終える）。
 	bool chooseIfcFile(std::string& outPath);
 
-	// 同じ「開く」ダイアログを、拡張子と見出しだけ差し替えて開く（`chooseIfcFile` の実体）。
-	// **ダイアログの作法を 2 か所に書かないため**に公開してある——実機テストの周が「毎周
-	// 開き直す図面」を選ばせるのに使う（draw/Feedback）。extension は "ifc" のように点を
-	// 含めない綴りで、複数なら空白区切り。
+	// 同じ「開く」ダイアログを、**見出しと拡張子だけ差し替えて**開く（`chooseIfcFile` の
+	// 実体）。**ダイアログの作法を 2 か所に書かないため**に公開してある——回帰テストが
+	// 「対象フォルダの中の IFC を 1 つ」選ばせるのに使う（draw/Regression。M28）。
+	// extension は "ifc" のように点を含めない綴り、filterLabel はその説明。
+	bool chooseFile(const std::string& title, const std::string& extension,
+					const std::string& filterLabel, std::string& outPath);
+
 	// 動かしているビルドの素性（診断ログの見出しと、往復の記憶の突き合わせに使う）。
 	// **ここで詰めるのは、BuildConfig.h のマクロを見られるのが SDK 側だけ**だから
 	// ——parse/Summary は受け取った文字列を並べるだけで、ビルド種別を知らない。
@@ -70,7 +73,13 @@ namespace HomeskzIfcImport::draw
 	// prologue は**取り込みの前に何をしたか**を診断ログの見出しの次へ 1 行だけ書き添える
 	// もの（空なら何も書かない）。実機テストの周が「図面をどう用意したか」を残すための口
 	// で、本番のコマンドは空を渡す（draw/Feedback.cpp の prepareDrawingForRound）。
+	//
+	// progressTitle は進捗ダイアログの見出し（空なら本番の見出し）。**回帰テストが「何件
+	// 目か」を出すためだけにある**——1 件あたり 1 分前後を何十件も続けるので、いま何番目
+	// を走っているかが見えないと、止まっているのか進んでいるのかが分からない
+	// （draw/Regression.h。M28）。**見出し以外は何も変わらない**——ここに要素や往復の
+	// 都合を持ち込まない。
 	ImportRound runImportRound(const std::string& ifcPath, const core::ImportOptions& options,
 							   bool settingsShown, const std::string& settingsNote,
-							   const std::string& prologue);
+							   const std::string& prologue, const std::string& progressTitle = {});
 } // namespace HomeskzIfcImport::draw

@@ -118,7 +118,8 @@ namespace HomeskzIfcImport::draw
 		ImportRound runImportRoundUnguarded(const std::string& ifcPath,
 											const core::ImportOptions& options, bool settingsShown,
 											const std::string& settingsNote,
-											const std::string& prologue)
+											const std::string& prologue,
+											const std::string& progressTitle)
 		{
 			ImportRound result;
 			result.startedAt = core::trace::localTimestamp();
@@ -146,7 +147,9 @@ namespace HomeskzIfcImport::draw
 			// 見出しとバーを進める。描画は横架材・垂木を 1 本ずつ SDK で作るため数百回の
 			// 呼び出しになり、これが無いと VectorWorks が固まったように見える
 			// （draw/ProgressDialog.h「なぜ要るか」）。
-			draw::ProgressDialog progress("ホームズ君 IFC インポート", FileNameOf(ifcPath));
+			draw::ProgressDialog progress(
+				progressTitle.empty() ? std::string("ホームズ君 IFC インポート") : progressTitle,
+				FileNameOf(ifcPath));
 
 			// Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
 			// 読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
@@ -189,15 +192,23 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	// -------------------------------------------------------------------
-	// ネイティブの「開く」ダイアログで IFC ファイルを 1 つ選ばせる。選ばれたら
-	// その絶対パス（UTF-8）を outPath に入れて true を返す。キャンセルや取得失敗は
-	// false（呼び出し側は何も描かず静かに終える）。
+	// ネイティブの「開く」ダイアログで IFC ファイルを 1 つ選ばせる。
+	bool chooseIfcFile(std::string& outPath)
+	{
+		// **ダイアログの作法は下の 1 か所きり**（見出しと拡張子を渡すだけ）。
+		return chooseFile("ホームズ君IFCファイルを選択", "ifc", "IFC ファイル (*.ifc)", outPath);
+	}
+
+	// 「開く」ダイアログでファイルを 1 つ選ばせる。選ばれたらその絶対パス（UTF-8）を
+	// outPath に入れて true を返す。キャンセルや取得失敗は false（呼び出し側は何もせず
+	// 静かに終える）。
 	//
 	// VCOM の作法（Info「VCOM」）: VCOMPtr に IID を渡して生成し、ポインタが有効かを
 	// if で確かめ、各呼び出しの VCOMError を kVCOMError_NoError と比較する。選択結果は
 	// IFileIdentifier（0 番目）から GetFileFullPath で受け取り、TXString の
 	// operator const char*()（UTF-8）で std::string へ写す。
-	bool chooseIfcFile(std::string& outPath)
+	bool chooseFile(const std::string& title, const std::string& extension,
+					const std::string& filterLabel, std::string& outPath)
 	{
 		// IFileChooserDialogPtr は VCOMPtr<IFileChooserDialog> の SDK 標準 typedef。
 		// const で受ける: operator-> は const なので、const のまま各インターフェース
@@ -207,9 +218,9 @@ namespace HomeskzIfcImport::draw
 		if (!dialog)
 			return false;
 
-		dialog->SetTitle("ホームズ君IFCファイルを選択");
-		// 拡張子フィルタ（.ifc）と、念のため全ファイル。存在チェックも有効化する。
-		dialog->AddFilter("ifc", "IFC ファイル (*.ifc)");
+		dialog->SetTitle(title.c_str());
+		// 拡張子フィルタと、念のため全ファイル。存在チェックも有効化する。
+		dialog->AddFilter(extension.c_str(), filterLabel.c_str());
 		dialog->AddFilterAllFiles();
 		dialog->SetCheckFileExist(true);
 
@@ -268,11 +279,12 @@ namespace HomeskzIfcImport::draw
 	// 周は「この周は送らない」の判断へ使う——どちらも try/catch を書かずに済む。
 	ImportRound runImportRound(const std::string& ifcPath, const core::ImportOptions& options,
 							   bool settingsShown, const std::string& settingsNote,
-							   const std::string& prologue)
+							   const std::string& prologue, const std::string& progressTitle)
 	{
 		try
 		{
-			return runImportRoundUnguarded(ifcPath, options, settingsShown, settingsNote, prologue);
+			return runImportRoundUnguarded(ifcPath, options, settingsShown, settingsNote, prologue,
+										   progressTitle);
 		}
 		catch (const std::exception& error)
 		{

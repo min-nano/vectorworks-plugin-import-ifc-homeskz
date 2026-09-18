@@ -410,6 +410,20 @@ vw_add_test(ParseFeedbackTests ParseFeedbackTests.cpp CORE)
 # the slower tests (see the COST list below).
 vw_add_test(ParseImportOptionsTests ParseImportOptionsTests.cpp CORE FIXTURES)
 
+# 回帰テストの対象フォルダの走査（src/core/FixtureScan）: どれを拾い・どれを飛ばし・
+# リンクをどう辿り・同じ実体をどう畳むか。ショートカット／エイリアスの解決は OS の API
+# （src/draw/Shortcut）でしか動かないので、ここでは偽の解決関数を差し込む。
+vw_add_test(CoreFixtureScanTests CoreFixtureScanTests.cpp CORE)
+# 書き先はビルドツリー（CoreTraceTests / CoreBridgeTests と同じ理由: TMPDIR 由来のパスが
+# ファイル操作へ届くと CodeQL が cpp/path-injection として報告する）。
+target_compile_definitions(CoreFixtureScanTests
+						   PRIVATE "HOMESKZ_FIXTURESCAN_TEST_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\"")
+
+# 回帰テストの結果と基準（src/parse/Regression）: 基準を書いて読み戻せること、何を
+# 「動いた」と見るか、そして**基準に依らない異常を別に数える**こと（基準がその異常ごと
+# 記録されていても見逃さないため）。フォルダを 1 件ずつ取り込む運転は SDK 側なので入らない。
+vw_add_test(ParseRegressionTests ParseRegressionTests.cpp CORE)
+
 # --- 並列実行（ctest -j）の詰め方 ---------------------------------------------
 # ctest は COST の降順にテストを開始する。COST が無いと前回の実行の実測
 # （build/Testing/Temporary/CTestCostData.txt）を使うが、CI は毎回まっさらな

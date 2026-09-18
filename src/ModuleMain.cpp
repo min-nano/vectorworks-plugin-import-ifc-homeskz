@@ -14,6 +14,7 @@
 #include "Extensions/ExtTestMenu.h"
 #include "Extensions/ExtMcpMenu.h"
 #include "Extensions/ExtMenu.h"
+#include "Extensions/ExtRegressionMenu.h"
 #include "Extensions/ExtUpdateMenu.h"
 #include "PayloadSession.h"
 
@@ -100,6 +101,12 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	// （Extensions/ExtTestMenu.h）。安定版はこのクラスを持つがどこにも登録しない。
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuTest>(GROUPID_ExtensionMenu, action, moduleInfo,
 													   iid, inOutInterface, cbp, reply);
+
+	// M28 「回帰テストを実行」コマンド。**開発版だけ**——指定したフォルダにある過去の物件を
+	// 1 件ずつ取り込み、前回の結果（基準）と引き比べる（Extensions/ExtRegressionMenu.h）。
+	// 物件は公開リポジトリに置けないので、**利用者の手元にあるものをその場で回す**。
+	REGISTER_Extension<HomeskzIfcImport::CExtMenuRegression>(
+		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
 	// M24 実機フィードバックの往復を回すモードレスなパレット。**開発版だけ**——往復するのは
 	// PR のビルドであって main の配布物ではない（Extensions/ExtFeedbackPalette.h）。

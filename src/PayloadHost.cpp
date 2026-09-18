@@ -417,6 +417,8 @@ namespace HomeskzIfcImport
 		auto infoFn = reinterpret_cast<VwPayloadInfoFn>(fModule.symbol(VW_PAYLOAD_SYM_INFO));
 		fImportFn = reinterpret_cast<VwPayloadRunImportFn>(fModule.symbol(VW_PAYLOAD_SYM_IMPORT));
 		fTestFn = reinterpret_cast<VwPayloadRunTestFn>(fModule.symbol(VW_PAYLOAD_SYM_TEST));
+		fRegressionFn =
+			reinterpret_cast<VwPayloadRunRegressionFn>(fModule.symbol(VW_PAYLOAD_SYM_REGRESSION));
 		fBridgeFn =
 			reinterpret_cast<VwPayloadRunMcpBridgeFn>(fModule.symbol(VW_PAYLOAD_SYM_BRIDGE));
 		fRecalcFn = reinterpret_cast<VwPayloadRecalculateFn>(fModule.symbol(VW_PAYLOAD_SYM_RECALC));
@@ -426,8 +428,9 @@ namespace HomeskzIfcImport
 			reinterpret_cast<VwPayloadLoopStatusFn>(fModule.symbol(VW_PAYLOAD_SYM_LOOP_STATUS));
 		fLoopEndFn = reinterpret_cast<VwPayloadLoopEndFn>(fModule.symbol(VW_PAYLOAD_SYM_LOOP_END));
 		if (abiFn == nullptr || initFn == nullptr || infoFn == nullptr || fImportFn == nullptr ||
-			fTestFn == nullptr || fBridgeFn == nullptr || fRecalcFn == nullptr ||
-			fShutdownFn == nullptr || fLoopStatusFn == nullptr || fLoopEndFn == nullptr)
+			fTestFn == nullptr || fRegressionFn == nullptr || fBridgeFn == nullptr ||
+			fRecalcFn == nullptr || fShutdownFn == nullptr || fLoopStatusFn == nullptr ||
+			fLoopEndFn == nullptr)
 		{
 			error = "本体の形が違います（必要な関数が見つかりません）。\n"
 					"殻と本体の版が食い違っている可能性があります。";
@@ -518,6 +521,23 @@ namespace HomeskzIfcImport
 			return false;
 		}
 		activeOut = (active != 0);
+		return true;
+	}
+
+	bool Payload::runRegression(std::string& error)
+	{
+		error.clear();
+		if (!fLoaded || fRegressionFn == nullptr)
+		{
+			error = "本体が読み込まれていません。";
+			return false;
+		}
+		const int status = fRegressionFn();
+		if (status != kVwPayloadOk)
+		{
+			error = "回帰テストを開始できませんでした（コード " + std::to_string(status) + "）。";
+			return false;
+		}
 		return true;
 	}
 

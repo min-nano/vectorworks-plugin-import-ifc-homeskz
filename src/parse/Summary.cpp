@@ -180,26 +180,25 @@ namespace HomeskzIfcImport::parse
 		return outcome;
 	}
 
+	// 所要時間の言い方は**ここ 1 か所**（宣言は parse/Summary.h。回帰テストの記録も
+	// これを使う——時間の書き方が場所によって割れないように）。
+	std::string formatDuration(double seconds)
+	{
+		std::ostringstream out;
+		if (seconds >= 60.0)
+		{
+			const long long total = std::llround(seconds);
+			out << (total / 60) << " 分 " << (total % 60) << " 秒";
+		}
+		else
+		{
+			out << std::fixed << std::setprecision(1) << seconds << " 秒";
+		}
+		return out.str();
+	}
+
 	namespace
 	{
-		// 所要時間を人の言葉にする（"1 分 11 秒" / "12.3 秒" / "0.4 秒"）。ミリ秒まで
-		// 出さないのは、ここで見たいのが「待たされたかどうか」の桁だけだから——
-		// フェーズごとの内訳は診断ログの行頭にある経過ミリ秒が持つ。
-		std::string formatDuration(double seconds)
-		{
-			std::ostringstream out;
-			if (seconds >= 60.0)
-			{
-				const long long total = std::llround(seconds);
-				out << (total / 60) << " 分 " << (total % 60) << " 秒";
-			}
-			else
-			{
-				out << std::fixed << std::setprecision(1) << seconds << " 秒";
-			}
-			return out.str();
-		}
-
 		// ファイルの大きさを人の言葉にする（0 は「分からない」なので空）。
 		std::string formatBytes(unsigned long long bytes)
 		{

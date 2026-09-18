@@ -199,6 +199,11 @@ namespace HomeskzIfcImport
 		// activeOut に true が入って戻ったら往復が回っている＝殻はパレットを開く。
 		bool runTest(bool allowDialogs, bool& activeOut, std::string& error);
 
+		// **回帰テストを 1 回**（M28。dev だけ。src/draw/Regression.h）。指定フォルダの
+		// 物件を 1 件ずつ取り込み、基準と引き比べる。持ち帰るものは無い——結末は本体が
+		// ダイアログとログで見せ切る。呼べなかったときだけ false。
+		bool runRegression(std::string& error);
+
 		// MCP ブリッジを走らせる（止められるまで戻らない。src/draw/McpBridge.h）。
 		// 呼べなかったときだけ false。
 		bool runMcpBridge(std::string& error);
@@ -226,6 +231,7 @@ namespace HomeskzIfcImport
 		PayloadStamp fStamp;
 		VwPayloadRunImportFn fImportFn = nullptr;
 		VwPayloadRunTestFn fTestFn = nullptr;
+		VwPayloadRunRegressionFn fRegressionFn = nullptr;
 		VwPayloadRunMcpBridgeFn fBridgeFn = nullptr;
 		VwPayloadRecalculateFn fRecalcFn = nullptr;
 		VwPayloadShutdownFn fShutdownFn = nullptr;
