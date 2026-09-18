@@ -172,6 +172,21 @@ TEST(the_same_nested_section_is_named_once)
 	CHECK_EQ(table.nested()[1], "B");
 }
 
+TEST(format_lists_every_nested_section_separated_by_commas)
+{
+	// 入れ子は 1 か所とは限らない。**全部の名前を出す**——1 つしか出さないと、直した
+	// つもりで残っているもう 1 か所に気付けない。
+	TimingTable table;
+	table.add("外側", 10.0);
+	table.noteNested("構造材:パス生成");
+	table.noteNested("共通:構成層");
+
+	CHECK_EQ(table.format("描画の内訳"), "描画の内訳（合計 10ms）:\n"
+										 "  外側 10ms（1 回・10.00ms/回）\n"
+										 "  ⚠ 入れ子になった区間（時間が外側にも積まれています）: "
+										 "構造材:パス生成, 共通:構成層");
+}
+
 TEST(leaving_a_scope_that_was_never_entered_does_not_go_negative)
 {
 	// 0 を下回らせると、以後に本当に起きた入れ子を見逃す。
