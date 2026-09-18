@@ -27,6 +27,10 @@
 //	2 つの経路が指していたら 1 つに畳む——リンクを並べる使い方では、実体とリンクの両方が
 //	同じフォルダに入ることが普通に起きる。
 //
+//	【フォルダはどう決まるか】対象フォルダは `IFolderChooserDialog` で選ばせる
+//	（`draw/ImportRun` の `chooseFolder`）。**ここはその結果のパスを受け取るだけ**で、
+//	選ばせ方は知らない。
+//
 //	【SDK 非依存】core/ は VectorWorks SDK を include しない（CLAUDE.md「Phase 1」）。
 //	ここはファイルシステムを読むだけなので、無 SDK で単体テストできる
 //	（tests/CoreFixtureScanTests.cpp）。
@@ -79,19 +83,19 @@ namespace HomeskzIfcImport::core
 	// 深さでも歯止めを持つ。
 	inline constexpr int kMaxFixtureDepth = 8;
 
-	// **選ばれたファイルの親フォルダ**（UTF-8。取れなければ空）。回帰テストは
-	// 「対象フォルダの中の IFC を 1 つ選んでもらい、その親を対象にする」——SDK にフォルダ
-	// 選択ダイアログがあるかは**調査中**（SDK リファレンス
-	// [issue #85](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/85)。
-	// CLAUDE.md「SDK の調査はリファレンス側で行う」）。既存の「開く」ダイアログだけで
-	// 済ませられるので、調査を待たずに進められる。
-	std::string parentFolderOf(const std::string& path);
-
 	// フォルダの中のファイルのパスを組む（**区切りを手で書かない**——Windows と POSIX で
-	// 綴りが違ううえ、UTF-8 との往復もここ 1 か所に閉じる）。
+	// 綴りが違ううえ、UTF-8 との往復もここ 1 か所に閉じる）。**フォルダ側の末尾に区切りが
+	// 付いていても `//` にならない**（`std::filesystem` が畳む）——フォルダ選択ダイアログが
+	// 返すパスは末尾に区切りが付く（下記 `scanFixtureFolder`）ので、これが要る。
 	std::string folderFilePath(const std::string& directory, const std::string& fileName);
 
 	// フォルダを走査して IFC を集める。**例外を投げない**（読めないところは notes に
 	// 断って飛ばす。CLAUDE.md「1 要素の欠損で全体を止めない」）。
+	//
+	// **末尾に区切りが付いていてもよい。** フォルダ選択ダイアログが返すパスは
+	// `…/物件/` の形で末尾に区切りが付く（[SDK リファレンス「ファイル・フォルダを選ばせる
+	// ダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/File%20and%20Folder%20Dialogs.md)）。
+	// そのまま渡すと `path.filename()` が空になり、断りの文言から名前が消えるので、
+	// **ここで落としてから使う**（呼び出し側に整形を求めない）。
 	FixtureScan scanFixtureFolder(const std::string& directory, const ShortcutResolver& resolve);
 } // namespace HomeskzIfcImport::core

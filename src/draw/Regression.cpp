@@ -116,17 +116,14 @@ namespace HomeskzIfcImport::draw
 	// -----------------------------------------------------------------------
 	void runRegressionCommand()
 	{
-		// 1. 対象フォルダ。**そのフォルダの中の IFC を 1 つ選んでもらう**（draw/Regression.h）。
-		std::string picked;
-		if (!chooseFile("回帰テストのフォルダの中にある IFC を 1 つ選択", "ifc",
-						"IFC ファイル (*.ifc)", picked))
+		// 1. 対象フォルダを選ばせる。**キャンセルも「出せなかった」もここで false** になる
+		//    ——どちらも何もせず静かに終えるのが正しい（draw/ImportRun.h）。
+		std::string folder;
+		if (!chooseFolder("回帰テストの対象フォルダを選択",
+						  "過去の物件（IFC）を並べたフォルダを選んでください。"
+						  "シンボリックリンクやショートカットでも構いません。",
+						  folder))
 			return;
-		const std::string folder = core::parentFolderOf(picked);
-		if (folder.empty())
-		{
-			bailOut("フォルダが分かりませんでした。", picked);
-			return;
-		}
 
 		// 2. 走査。ショートカット・エイリアスの解決は OS の API が持つ（draw/Shortcut.h）。
 		const core::FixtureScan scan = core::scanFixtureFolder(folder, &resolveShortcut);

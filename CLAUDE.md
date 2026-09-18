@@ -566,8 +566,11 @@ Vectorworks 自身がモーダルのダイアログを出すことがある—�
 唯一の実装。**閉じるのは包まない**——`CloseDocument` の戻り値で分岐してはならないので、
 包むと「閉じられたか」を返す関数に見えてしまう）、
 **所要時間の言い方**（`1 分 11 秒` / `12.3 秒`）は `parse/Summary` の `formatDuration`、
-**ファイル選択ダイアログの作法**は `draw/ImportRun` の `chooseFile`（`chooseIfcFile` も
-回帰テストのフォルダ選びもここを通る）、
+**ファイル・フォルダを選ばせるダイアログの作法**は `draw/ImportRun` の `chooseFile` /
+`chooseFolder`（`chooseIfcFile` も回帰テストの対象フォルダもここを通る。**キャンセルは
+`RunDialog` の失敗として返り、`GetSelectedPath` はキャンセルでも非 nullptr を返す**ので、
+「パスが空でないこと」を条件にする。[SDK リファレンス「ファイル・フォルダを選ばせる
+ダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/File%20and%20Folder%20Dialogs.md)）、
 `draw/` の SDK 呼び出しの定型（クラス分け・レイヤ用意・
 プラグインスタイル解決・**構成層／基準面を各オブジェクトへ直接与える手順**——床板・底盤・
 立上りが共有する。スラブ・壁は**スタイルを作らない・当てない**。加えて**高さ基準の変換と

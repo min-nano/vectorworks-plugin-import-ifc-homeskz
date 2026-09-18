@@ -27,7 +27,6 @@ using HomeskzIfcImport::core::FixtureScan;
 using HomeskzIfcImport::core::folderFilePath;
 using HomeskzIfcImport::core::kMaxFixtureCount;
 using HomeskzIfcImport::core::kMaxFixtureDepth;
-using HomeskzIfcImport::core::parentFolderOf;
 using HomeskzIfcImport::core::scanFixtureFolder;
 using HomeskzIfcImport::core::ShortcutResolver;
 
@@ -359,19 +358,39 @@ TEST(scan_orders_same_names_by_path)
 	}
 }
 
-// パスの小物（対象フォルダの決め方と、その中のファイルのパスの組み立て）。
-TEST(path_helpers_join_and_split)
+// フォルダの中のパスの組み立て。**フォルダ選択ダイアログが返すパスは末尾に区切りが付く**
+// ので、そのまま渡しても `//` にならないことを押さえる。
+TEST(folder_file_path_joins_without_doubling)
 {
 	const TempDir temp("paths");
-	const std::filesystem::path file = temp.file("案件/物件.ifc");
+	const std::string dir = Utf8Of(temp.path());
+	const std::string expected = Utf8Of(temp.path() / "基準.txt");
 
-	// **選んだファイルの親フォルダが対象になる**（回帰テストはこの形でフォルダを決める）。
-	CHECK_EQ(parentFolderOf(Utf8Of(file)), Utf8Of(temp.path() / "案件"));
-	// 区切りを手で書かないための口。**空は空**（呼び出し側が「決められなかった」と読む）。
-	CHECK_EQ(folderFilePath(Utf8Of(temp.path()), "基準.txt"), Utf8Of(temp.path() / "基準.txt"));
-	CHECK(parentFolderOf("").empty());
+	CHECK_EQ(folderFilePath(dir, "基準.txt"), expected);
+	// **末尾に区切りが付いていても同じ結果**（`//` にならない）。
+	CHECK_EQ(folderFilePath(dir + "/", "基準.txt"), expected);
+	// 空は空（呼び出し側が「決められなかった」と読む）。
 	CHECK(folderFilePath("", "基準.txt").empty());
-	CHECK(folderFilePath(Utf8Of(temp.path()), "").empty());
+	CHECK(folderFilePath(dir, "").empty());
+}
+
+// 走査するフォルダも、末尾に区切りが付いたまま渡せる（呼び出し側に整形を求めない）。
+TEST(scan_accepts_a_trailing_separator)
+{
+	const TempDir temp("trailing");
+	temp.file("物件.ifc");
+
+	const FixtureScan scan = scanFixtureFolder(temp.utf8() + "/", {});
+	CHECK_EQ(scan.entries.size(), std::size_t{1});
+	if (!scan.entries.empty())
+		CHECK_EQ(scan.entries[0].name, "物件.ifc");
+
+	// 読めないフォルダの断りには、末尾の区切りを落とした名前が出る（空にならない）。
+	const FixtureScan gone = scanFixtureFolder(Utf8Of(temp.path() / "無い") + "/", {});
+	CHECK(gone.entries.empty());
+	CHECK_EQ(gone.notes.size(), std::size_t{1});
+	if (!gone.notes.empty())
+		CHECK(gone.notes[0].find("無い") != std::string::npos);
 }
 
 // 無いフォルダ・空の指定は、例外ではなく断りで返る。

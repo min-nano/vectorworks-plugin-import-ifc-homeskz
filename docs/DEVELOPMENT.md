@@ -1047,10 +1047,8 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
    物件をコピーする必要はありません——**シンボリックリンクやショートカットを並べれば
    足ります**（下記「リンクの辿り方」）。
 2. メニュー **「回帰テストを実行… (みんなの構造設計支援Dev)」** を実行します。
-3. **そのフォルダの中にある IFC を 1 つ**選びます。**選んだファイルの親フォルダが対象**に
-   なります（フォルダ選択ダイアログが SDK にあるかは**調査中**です——SDK リファレンス
-   [issue #85](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/85)。
-   反映されたらそちらへ差し替えます）。
+3. **対象フォルダを選びます**（フォルダ選択ダイアログが出ます。中に IFC が 1 つも無い
+   フォルダでも選べます）。
 4. 取り込み設定を決めます（**1 回だけ**。全件に同じ設定を使います）。
 5. 「何件を・どれくらいの時間で・基準をどうするか」を確認する 1 枚が出ます。
    **尋ねるのはここまで**——あとは終わるまで何も出ません（1 件 1 分前後 × 件数なので、
@@ -1108,9 +1106,15 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 | `src/Extensions/ExtRegressionMenu.{h,cpp}` | 登録と取り次ぎ（殻。dev だけ登録） |
 | `src/draw/Regression.{h,cpp}` | 運転（フォルダを決める・1 件ずつ戻して取り込む・結果を出す） |
 | `src/core/FixtureScan.{h,cpp}` | 走査（無 SDK。`tests/CoreFixtureScanTests.cpp`） |
+| `src/draw/ImportRun.{h,cpp}` の `chooseFolder` | 対象フォルダを選ばせる（`IFolderChooserDialog`） |
 | `src/draw/Shortcut.{h,cpp}` | OS のショートカット／エイリアスの解決（mac / Windows） |
 | `src/parse/Regression.{h,cpp}` | 結果・基準・突き合わせ・文面（無 SDK。`tests/ParseRegressionTests.cpp`） |
 | `src/draw/DocumentFile.{h,cpp}` | 図面ファイルの小道具（**実機フィードバックの周と共有**） |
+
+対象フォルダの選択は `IFolderChooserDialog` です——本体（ペイロード）側から開けること・
+キャンセルの返り方・返るパスの実物（絶対パス・**末尾に区切りが付く**・UTF-8）は
+[SDK リファレンス「ファイル・フォルダを選ばせるダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/File%20and%20Folder%20Dialogs.md)
+に実測があります。
 
 **ここでは更新を確認しません**（他の入口と違うところ）。測りたいのは**いま入っている
 ビルド**で、走らせる直前に別の版へ入れ替わっては「どの版の数字か」が変わります——

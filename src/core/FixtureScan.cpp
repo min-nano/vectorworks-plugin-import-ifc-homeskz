@@ -191,13 +191,6 @@ namespace HomeskzIfcImport::core
 	} // namespace
 
 	// -----------------------------------------------------------------------
-	std::string parentFolderOf(const std::string& path)
-	{
-		if (path.empty())
-			return {};
-		return Utf8Of(PathFromUtf8(path).parent_path());
-	}
-
 	std::string folderFilePath(const std::string& directory, const std::string& fileName)
 	{
 		if (directory.empty() || fileName.empty())
@@ -215,11 +208,18 @@ namespace HomeskzIfcImport::core
 			return std::move(walk.result);
 		}
 
-		const fs::path root = PathFromUtf8(directory);
+		// **末尾の区切りを落としてから使う**（core/FixtureScan.h「末尾に区切りが付いて
+		// いてもよい」）。付いたままだと `filename()` が空になり、読めなかったときの
+		// 断りからフォルダ名が消える。
+		std::string trimmed = directory;
+		while (trimmed.size() > 1 && (trimmed.back() == '/' || trimmed.back() == '\\'))
+			trimmed.pop_back();
+
+		const fs::path root = PathFromUtf8(trimmed);
 		std::error_code ec;
 		if (!fs::is_directory(root, ec) || ec)
 		{
-			walk.result.notes.push_back("フォルダを開けませんでした: " + directory);
+			walk.result.notes.push_back("フォルダを開けませんでした: " + trimmed);
 			return std::move(walk.result);
 		}
 		PushDirectory(walk, root, 0);

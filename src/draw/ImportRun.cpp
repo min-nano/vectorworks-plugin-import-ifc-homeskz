@@ -25,6 +25,8 @@
 // ファイルの絶対パスを IFileIdentifier 経由で受け取る。
 #include "Interfaces/VectorWorks/Filing/IFileChooserDialog.h"
 #include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
+#include "Interfaces/VectorWorks/Filing/IFolderChooserDialog.h"
+#include "Interfaces/VectorWorks/Filing/IFolderIdentifier.h"
 
 #include <chrono>
 #include <cstddef>
@@ -238,6 +240,45 @@ namespace HomeskzIfcImport::draw
 
 		TXString fullPath;
 		if (fileID->GetFileFullPath(fullPath) != kVCOMError_NoError)
+			return false;
+
+		// TXString → UTF-8 std::string（operator const char*() は UTF-8 を返す）。
+		outPath = static_cast<const char*>(fullPath);
+		return !outPath.empty();
+	}
+
+	// -------------------------------------------------------------------
+	// **フォルダを 1 つ選ばせる**（意図は draw/ImportRun.h）。
+	//
+	// 実測に基づく作法が 2 つある（[SDK リファレンス「ファイル・フォルダを選ばせる
+	// ダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/File%20and%20Folder%20Dialogs.md)）:
+	//
+	//   * **キャンセルは `RunDialog()` の失敗として返る**（`kVCOMError_Failed`）。
+	//     `kVCOMError_Canceled` では返ってこないので、「やめた」と「出せなかった」を
+	//     戻り値で見分ける手段は無い——どちらも「何もせず静かに終える」で正しい。
+	//   * **「ポインタが取れたか」で分岐してはいけない。** キャンセルされても
+	//     `GetSelectedPath` は**非 nullptr**を返す（中身が空で、`GetFullPath` が空文字列を
+	//     返すだけ）。だから**最後に読み戻したパスが空でないこと**を条件にする。
+	bool chooseFolder(const std::string& title, const std::string& description,
+					  std::string& outPath)
+	{
+		outPath.clear();
+		const IFolderChooserDialogPtr dialog(IID_FolderChooserDialog);
+		if (!dialog)
+			return false;
+
+		dialog->SetTitle(title.c_str());
+		dialog->SetDescription(description.c_str());
+		// キャンセルもここで false になる（上記）。
+		if (dialog->RunDialog() != kVCOMError_NoError)
+			return false;
+
+		IFolderIdentifierPtr folderID;
+		if (dialog->GetSelectedPath(&folderID) != kVCOMError_NoError || !folderID)
+			return false;
+
+		TXString fullPath;
+		if (folderID->GetFullPath(fullPath) != kVCOMError_NoError)
 			return false;
 
 		// TXString → UTF-8 std::string（operator const char*() は UTF-8 を返す）。

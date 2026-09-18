@@ -55,11 +55,24 @@ namespace HomeskzIfcImport::draw
 	bool chooseIfcFile(std::string& outPath);
 
 	// 同じ「開く」ダイアログを、**見出しと拡張子だけ差し替えて**開く（`chooseIfcFile` の
-	// 実体）。**ダイアログの作法を 2 か所に書かないため**に公開してある——回帰テストが
-	// 「対象フォルダの中の IFC を 1 つ」選ばせるのに使う（draw/Regression。M28）。
+	// 実体）。**ダイアログの作法を 2 か所に書かないため**に公開してある。
 	// extension は "ifc" のように点を含めない綴り、filterLabel はその説明。
 	bool chooseFile(const std::string& title, const std::string& extension,
 					const std::string& filterLabel, std::string& outPath);
+
+	// **フォルダを 1 つ選ばせる**（回帰テストの対象フォルダ。draw/Regression。M28）。
+	// 選ばれたらその絶対パス（UTF-8）を outPath に入れて true。キャンセルや取得失敗は
+	// false（呼び出し側は何もせず静かに終える）。
+	//
+	// ファイル選択とは**別のインターフェース**（`IFolderChooserDialog`）で、フィルタも
+	// 複数選択も初期フォルダも持たない——渡せるのは見出しと説明文の 2 つだけである
+	// （[SDK リファレンス「ファイル・フォルダを選ばせるダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/File%20and%20Folder%20Dialogs.md)）。
+	//
+	// **返るパスの末尾には区切りが付く**（`…/物件/`）。ファイル名を継ぎ足すときに区切りを
+	// 足すと `//` になるので、連結は `core::folderFilePath`（`std::filesystem` が正しく
+	// 畳む）に任せること。
+	bool chooseFolder(const std::string& title, const std::string& description,
+					  std::string& outPath);
 
 	// 動かしているビルドの素性（診断ログの見出しと、往復の記憶の突き合わせに使う）。
 	// **ここで詰めるのは、BuildConfig.h のマクロを見られるのが SDK 側だけ**だから

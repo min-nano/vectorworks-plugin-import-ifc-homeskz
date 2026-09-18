@@ -16,10 +16,9 @@
 //	——結果は手元のダイアログとログに出る。
 //
 //	【1 回の流れ】
-//	  1. 対象フォルダを決める……**そのフォルダの中の IFC を 1 つ選んでもらい、その親を
-//	     対象にする**（SDK にフォルダ選択があるかは**調査中**——SDK リファレンス
-//	     [issue #85](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/85)。
-//	     反映されたらそちらへ差し替える。それまで既存の「開く」ダイアログで進める）
+//	  1. 対象フォルダを選ばせる……`IFolderChooserDialog`（draw/ImportRun の `chooseFolder`）。
+//	     **本体側から開けること・キャンセルの返り方・返るパスの実物は実測済み**
+//	     （[SDK リファレンス「ファイル・フォルダを選ばせるダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/File%20and%20Folder%20Dialogs.md)）
 //	  2. 走査……シンボリックリンク・ジャンクション・`.lnk`・Finder エイリアスを辿る
 //	     （core/FixtureScan.h ＋ draw/Shortcut.h）
 //	  3. 取り込み設定を **1 回だけ**尋ね、全件に同じ設定を使う
