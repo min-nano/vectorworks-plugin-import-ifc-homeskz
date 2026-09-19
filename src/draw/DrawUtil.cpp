@@ -907,7 +907,14 @@ namespace HomeskzIfcImport::draw
 		// 置いてある（単位の決め方・**四辺 0 を余白なしとして受け取る**理由は core/Layout.h）。
 		// ここは「SDK から読む」ことと「読めなかったこと」だけを持つ。
 		// **どの解釈を採ったかは生の値ごと診断へ出す**（draw/Sheet）ので、実機で確かめられる。
-		core::PageMargins raw;
+		// ★**ISDK::GetPageMargins は戻り値を持たない**（void）ので、「書いてくれたのか」を
+		// 呼び出しの結果からは知れない。そこで**有り得ない値（負）を種に置いてから呼ぶ**
+		// ——戻ってきて種のままなら、SDK は 4 辺のどれにも触れていない。
+		// **これをしないと「縁なし印刷の 0」と「読み出せずに 0 のまま」が見分けられない**
+		// （実機は用紙も印刷可能領域も 420×297 ＝ A3 いっぱいで、どちらの説明も付いた。
+		// docs/DEV-NOTES.md M28）。種は 1 つの値にまとめて置き、判定もここでだけ行う。
+		constexpr double kMarginProbe = -1.0;
+		core::PageMargins raw{kMarginProbe, kMarginProbe, kMarginProbe, kMarginProbe};
 		bool marginsQueried = true;
 		try
 		{
@@ -921,7 +928,20 @@ namespace HomeskzIfcImport::draw
 			raw = core::PageMargins{};
 			marginsQueried = false;
 		}
+		// **4 辺とも種のまま（負）＝ SDK は 1 つも書かなかった。** 例外が飛ばなくても
+		// 「読めなかった」と同じ扱いにし、生の値は 0 に均してから診断へ出す——種の値を
+		// 「SDK が返した値」として見せると、読む側が実在の余白だと取り違える。
+		// **一部だけ書かれたときは均さない**（残った負の値がそのまま診断に出て、部分的に
+		// しか書かれなかったことが読み取れる。負がある時点で resolvePageMargins は
+		// 解釈できなかった側へ倒す）。
+		if (marginsQueried && raw.left < 0.0 && raw.right < 0.0 && raw.bottom < 0.0 &&
+			raw.top < 0.0)
+		{
+			marginsQueried = false;
+			raw = core::PageMargins{};
+		}
 		paper.rawMargins = raw;
+		paper.marginsQueried = marginsQueried;
 
 		if (marginsQueried)
 		{
@@ -1120,6 +1140,51 @@ namespace HomeskzIfcImport::draw
 			return false;
 		}
 		return true;
+	}
+
+	bool RefreshViewport(MCObjectHandle viewport)
+	{
+		try
+		{
+			VWViewportObj(viewport).Update();
+		}
+		catch (...)
+		{
+			// 描き直せなくても図は残る（前の中身のまま）。**測った外形は当てにならない**
+			// ので、呼び出し側はこれを「はみ出した」とは別に数える（DrawUtil.h）。
+			return false;
+		}
+		return true;
+	}
+
+	std::string DescribePaperSize(const core::Vec2& size)
+	{
+		std::array<char, 48> buffer{};
+		std::snprintf(buffer.data(), buffer.size(), "%.1f×%.1f", size.x, size.y);
+		return std::string(buffer.data());
+	}
+
+	std::string DescribeFitOverflow(const std::string& number, const core::Vec2& drawn,
+									const core::Vec2& frame)
+	{
+		std::string text =
+			number + ": 測った " + DescribePaperSize(drawn) + " / 枠 " + DescribePaperSize(frame);
+		// はみ出した軸と量。**両軸とも収まっているのに呼ばれた**ときは何も足さない
+		// （呼び出し側の判定と食い違ったことが読み取れるように、黙って辻褄を合わせない）。
+		const auto over = [](const char* axis, double drawnLen, double frameLen)
+		{
+			std::string part;
+			if (drawnLen <= frameLen + kFitTol)
+				return part;
+			std::array<char, 64> buffer{};
+			std::snprintf(buffer.data(), buffer.size(), " / %sに %.1f はみ出し", axis,
+						  drawnLen - frameLen);
+			part = buffer.data();
+			return part;
+		};
+		text += over("横", drawn.x, frame.x);
+		text += over("縦", drawn.y, frame.y);
+		return text;
 	}
 
 	void MoveViewportBy(MCObjectHandle viewport, const core::Vec2& delta)

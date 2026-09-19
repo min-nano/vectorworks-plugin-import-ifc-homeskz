@@ -113,10 +113,19 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingPlacement = 0;
 		// 確定した縮尺を当て直せなかった枚数（仮の縮尺のまま残る）。
 		std::size_t missingScale = 0;
-		// 見積もった縮尺では用紙に収まらなかった枚数（測った外形が図の領域より大きい）。
+		// 見積もった縮尺では用紙に収まらなかった枚数（測った外形が図の領域より大きい）と、
+		// その**1 枚目の実測**（図番・測った外形・割り当てた枠・はみ出し量）。件数だけでは
+		// 「見積もりが少し足りない」と「図そのものが壊れている」を分けられない
+		// （M28。組み立ては draw/DrawUtil の DescribeFitOverflow）。
 		std::size_t oversized = 0;
-		// 凡例と重なった枚数（図が広くて右上の空きへ避けきれなかった）。
+		std::string oversizedProbe;
+		// 凡例と重なった枚数（図が広くて右上の空きへ避けきれなかった）と 1 枚目の実測。
 		std::size_t legendOverlap = 0;
+		std::string legendProbe;
+		// 測る前に描き直せなかった枚数。**「はみ出した」とは別に数える**——描き直せて
+		// いないビューポートの外形は「前に何が在ったか」でしかなく、収まったかの判定に
+		// 使える値ではない（draw/DrawUtil の RefreshViewport）。
+		std::size_t staleViewports = 0;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
 		// （渡されなければ空の表＝関連付け無しで置く。draw/Tag.h）。
 		const ObjectHandles emptyHandles;
@@ -223,7 +232,10 @@ namespace HomeskzIfcImport::draw
 		// **ここでしかできない。** 伏図の縮尺は用紙を読まないと決まらない（core::planLayout）
 		// ので、耐力壁を描く時点では分からない。ビューポートを仕上げる 2 巡目より**前**に
 		// 済ませて、更新が新しい縮尺を見るようにする。
-		applyShearWallLayerScale(document, layout.scale);
+		// **揃えたかを控える**（2 巡目で描き直すかの判断に要る）——耐力壁レイヤの縮尺を
+		// 動かすと伏図に映る記号の大きさが変わるので、縮尺が同じでビューポートを描き直さ
+		// ないままだと、**中身が変わった後の図を描き直す前に測る**ことになる（M28）。
+		const bool shearRescaled = applyShearWallLayerScale(document, layout.scale) > 0;
 
 		// --- 2 巡目: 確定した縮尺を当て、タグを置き、用紙の上へ動かす ----------------
 		//
@@ -234,8 +246,22 @@ namespace HomeskzIfcImport::draw
 		for (const PlacedSheet& sheet : placed)
 		{
 			const core::SheetCommand& command = *sheet.command;
-			if (rescale && !ApplyViewportScale(sheet.viewport, layout.scale))
-				++missingScale;
+			if (rescale)
+			{
+				// 縮尺を当て直す＝描き直しも兼ねる（ApplyViewportScale が Update する）。
+				if (!ApplyViewportScale(sheet.viewport, layout.scale))
+					++missingScale;
+			}
+			// ★**測る前に描き直す。** 縮尺を当て直したなら ApplyViewportScale が済ませて
+			// いるが、縮尺が同じでも**耐力壁レイヤの縮尺を動かしていれば図の中身は変わって
+			// いる**（用紙基準の伏図記号の大きさがレイヤ縮尺で決まるため）。ここを飛ばすと
+			// `GetObjectBounds` は**変える前に描いた外形**を返すので、同じ命令・同じ割り付け
+			// でも「収まったか」の答えが図面の直前の状態で動く（M28 で実際にそうなった:
+			// 絵を変えない 2 つのビルドで件数が 1 枚 → 2 枚 ＋ 凡例と重なり 1 枚）。
+			// **どちらも起きていないなら描き直さない**（1 巡目の更新のまま中身は変わって
+			// いない）。更新は重いので、要らない周回を足さない。
+			else if (shearRescaled && !RefreshViewport(sheet.viewport))
+				++staleViewports;
 
 			// M18 用紙の上での位置。**この伏図に映る範囲**（命令の表示レイヤで絞った平面の
 			// 広がり）の中心が、用紙のどこへ来るべきかを計算して合わせる——伏図ごとに映す
@@ -265,28 +291,65 @@ namespace HomeskzIfcImport::draw
 				if (!measured)
 					++missingPlacement;
 				else
-				{
 					delta = target - drawnCenter;
-					// **見積もりどおりに収まったかを測って確かめる**（core/Layout.h の
-					// PlanLayout::plan）。命令の座標には現れないもの（通り芯の丸など）が
-					// 図に出るぶん、実際の図は見積もりより大きくなりうる。
-					if (drawnSize.x > layout.plan.width() + kFitTol ||
-						drawnSize.y > layout.plan.height() + kFitTol)
-						++oversized;
-					// 凡例の帯へ食い込んだか。縮尺は凡例のぶんを引いてから決めている
-					// （core/Layout.h の planLayout）ので通常は重ならないが、命令の座標に
-					// 現れないもの（通り芯の丸など）のぶん実際の図は見積もりより大きく
-					// なりうる——黙って重ねずに数えて診断へ残す。
-					if (legendWidth > 0.0 && target.x + (drawnSize.x / 2.0) >
-												 layout.legendTopRight.x - legendWidth - kFitTol)
-						++legendOverlap;
-				}
 			}
 
 			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport
 			// の最後が更新で、注釈はその後に足しても図に出る）。**ビューポートを動かす前**
 			// でなければならない（上記 ★）。
 			drawViewportTags(sheet.viewport, command.viewport, members, tags);
+
+			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
+			//
+			// 用紙に載るのは「ビューポート＋その注釈」なので、タグを置く前の外形で判定すると
+			// **実際に用紙を占める大きさとは別のもの**を測っていることになる（タグも用紙
+			// 基準の大きさを持つ。M28）。位置合わせ（delta）だけは上記 ★ のとおりタグを
+			// 置く前の中心から決めなければならないので、測るのは 2 回になる。
+			if (measured && haveContent && paper.has_value())
+			{
+				core::Vec2 finalCenter;
+				core::Vec2 finalSize;
+				const bool remeasured = MeasureViewport(sheet.viewport, finalCenter, finalSize);
+				// 測り直せなければタグを置く前の実測で見る（判定を捨てるよりはよい）。
+				const core::Vec2 footprint = remeasured ? finalSize : drawnSize;
+				// **見積もりどおりに収まったかを測って確かめる**（core/Layout.h の
+				// PlanLayout::plan）。命令の座標には現れないもの（通り芯の丸など）が
+				// 図に出るぶん、実際の図は見積もりより大きくなりうる。
+				if (footprint.x > layout.plan.width() + kFitTol ||
+					footprint.y > layout.plan.height() + kFitTol)
+				{
+					++oversized;
+					if (oversizedProbe.empty())
+						oversizedProbe = DescribeFitOverflow(command.viewport.drawingNumber,
+															 footprint, layout.plan.size());
+				}
+				// 凡例の帯へ食い込んだか。縮尺は凡例のぶんを引いてから決めている
+				// （core/Layout.h の planLayout）ので通常は重ならないが、命令の座標に
+				// 現れないもの（通り芯の丸など）のぶん実際の図は見積もりより大きく
+				// なりうる——黙って重ねずに数えて診断へ残す。
+				//
+				// **動かした後の右端**で見る。delta はタグを置く前の中心から決めてあるので、
+				// 測り直した中心へそのまま足せば、用紙の上での位置になる。
+				//
+				// ★**遊び（kFitTol）は緩める向きに足す**（M28）。かつてここだけ引いており
+				// （`… - legendWidth - kFitTol` と比べていた）、ぴったり接した図を
+				// 「重なった」と数えていた——遊びは「ぴったりの図をはみ出したと数えない」
+				// ためのものなので、はみ出しの判定（上）と同じく足す側でなければならない。
+				const double legendLeft = layout.legendTopRight.x - legendWidth;
+				const double right =
+					(remeasured ? finalCenter.x : drawnCenter.x) + delta.x + (footprint.x / 2.0);
+				if (legendWidth > 0.0 && right > legendLeft + kFitTol)
+				{
+					++legendOverlap;
+					if (legendProbe.empty())
+					{
+						std::array<char, 96> buffer{};
+						std::snprintf(buffer.data(), buffer.size(),
+									  ": 図の右端 %.1f / 凡例の左端 %.1f", right, legendLeft);
+						legendProbe = command.viewport.drawingNumber + buffer.data();
+					}
+				}
+			}
 
 			// 用紙の上へ動かす（注釈も一緒に動く）。
 			if (measured)
@@ -332,6 +395,23 @@ namespace HomeskzIfcImport::draw
 				text += " / 建物 " + mm(contentSize.x) + "×" + mm(contentSize.y) + " → 用紙上 " +
 						mm(contentSize.x / layout.scale) + "×" + mm(contentSize.y / layout.scale) +
 						" / 縮尺 1/" + mm(layout.scale);
+			// ★**余白が四辺 0 のときだけ、その根拠を添える**（M28）。「印刷可能 ＝ 用紙」に
+			// なる道は 2 つあり——本当に縁なしの用紙設定なのか、`ISDK::GetPageMargins` が
+			// 何も書かなかったのか——**出てくる数字は同じ**なので、見分けるには
+			// 「SDK が値を書いたか」と「シートレイヤの大きさ」が要る。
+			// **平常でも出る記録なので outInfo（＝ログだけ）へ出す**（core::DrawCounts）。
+			// 0 でない余白が読めているときは何も足さない（役目を終えた計装は残さない）。
+			if (paper->marginsRead && paper->margins.left <= 0.0 && paper->margins.right <= 0.0 &&
+				paper->margins.bottom <= 0.0 && paper->margins.top <= 0.0)
+			{
+				text += " / 余白 四辺 0（";
+				text += paper->marginsQueried ? "SDK は値を書いた" : "SDK は 1 つも書かなかった";
+				text += " / シートレイヤ ";
+				text += paper->sheet.x > 0.0 && paper->sheet.y > 0.0
+							? mm(paper->sheet.x) + "×" + mm(paper->sheet.y)
+							: std::string("読めない");
+				text += "）";
+			}
 			addInfo(text);
 		}
 
@@ -346,7 +426,7 @@ namespace HomeskzIfcImport::draw
 		if (note != nullptr &&
 			(missingSheetLayers > 0 || missingViewports > 0 || classesBroken ||
 			 missingPlanView > 0 || missingPlacement > 0 || missingScale > 0 || oversized > 0 ||
-			 legendOverlap > 0 || !haveContent || marginsUnread))
+			 legendOverlap > 0 || staleViewports > 0 || !haveContent || marginsUnread))
 		{
 			std::string text = "伏図の診断: ";
 			AppendCount(text, "シートレイヤを作れなかった命令", missingSheetLayers, "件");
@@ -362,10 +442,18 @@ namespace HomeskzIfcImport::draw
 						"外形を測れませんでした");
 			AppendCount(text, "縮尺を当て直せなかった伏図", missingScale, "枚",
 						"凡例の幅から決めた縮尺が入らず、仮の縮尺のままです");
-			AppendCount(text, "用紙に収まらなかった伏図", oversized, "枚",
-						"縮尺の見積もりより図が大きくなりました");
-			AppendCount(text, "凡例と重なった伏図", legendOverlap, "枚",
-						"図が広く、右上の空きへ避けきれませんでした");
+			AppendCount(text, "測る前に描き直せなかった伏図", staleViewports, "枚",
+						"収まったかの判定が当てになりません");
+			// **1 枚目の実測を添える**（用紙 mm）。はみ出しが数 mm なら見積もりの不足、
+			// 桁違いなら図そのものの異常——件数だけでは分かれない（M28）。
+			std::string oversizedDetail = "縮尺の見積もりより図が大きくなりました";
+			if (!oversizedProbe.empty())
+				oversizedDetail += "。1 枚目: " + oversizedProbe;
+			AppendCount(text, "用紙に収まらなかった伏図", oversized, "枚", oversizedDetail.c_str());
+			std::string legendDetail = "図が広く、右上の空きへ避けきれませんでした";
+			if (!legendProbe.empty())
+				legendDetail += "。1 枚目: " + legendProbe;
+			AppendCount(text, "凡例と重なった伏図", legendOverlap, "枚", legendDetail.c_str());
 			if (marginsUnread)
 			{
 				const auto raw = [](double value)
@@ -386,8 +474,10 @@ namespace HomeskzIfcImport::draw
 					((paper->paper.x - paper->sheet.x) > core::kPageMarginMatchTol ||
 					 (paper->paper.y - paper->sheet.y) > core::kPageMarginMatchTol);
 				text += "用紙の余白を解釈できなかったので、用紙いっぱいで割り付けました";
-				if (zero && !sheetSmaller)
+				if (zero && !paper->marginsQueried)
 					text += "（SDK から余白を読み出せませんでした）。";
+				else if (zero && !sheetSmaller)
+					text += "（SDK は四辺 0 を返しましたが、解釈できませんでした）。";
 				else
 				{
 					text += "（SDK が返した値: 左" + raw(margins.left) + " 右" +

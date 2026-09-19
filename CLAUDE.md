@@ -546,10 +546,16 @@ Vectorworks 自身がモーダルのダイアログを出すことがある—�
 （`SetClassWithAttributes`）・**PIO 定義の先出し**（`PrepareCustomObjectDefinition`。記号・耐力壁・
 データタグ・凡例が共有）・**描画ループの中止判定と歩進**（`AdvanceProgress`）・**診断の 1 文**
 （`AppendCount`）・**診断行の連結**（`AppendLine`）・**登場順の dedupe**（`PushUnique`）・
-**収まり判定の遊び**（`kFitTol`。伏図と軸組図が共有）もここ）は
+**収まり判定の遊び**（`kFitTol`。伏図と軸組図が共有。**遊びは緩める向きに足す**——引くと
+ぴったりの図を「はみ出した」と数える）・**収まらなかった 1 枚目の実測の文言**
+（`DescribeFitOverflow` / `DescribePaperSize`。伏図と軸組図が共有）もここ）は
 `draw/DrawUtil`、**シートレイヤの用意とビューポートの仕上げ**（表示レイヤの絞り込み・クラス表示・
 縮尺・図番／図面タイトル・更新に加え、**用紙と印刷可能領域の読み取り**（`SheetPaperArea`。用紙は 167/168・余白は `GetPageMargins`・インチ→mm と
-「用紙は原点中心」の規約）と**測って動かす位置合わせ**（`PlaceViewport`）——伏図と軸組図が
+「用紙は原点中心」の規約。**`GetPageMargins` は戻り値を持たない**ので、負を種に置いてから
+呼んで「SDK が書いたか」を見る——これが無いと縁なし印刷の 0 と読めなかった 0 が分かれない）と
+**測って動かす位置合わせ**（`MeasureViewport` / `RefreshViewport` / `MoveViewportBy`。
+★**外形を測る前に、中身を変えたなら必ず描き直す**——`GetObjectBounds` が返すのは
+「最後に描いたときの外形」なので、飛ばすと判定が図面の直前の状態で動く。M28）——伏図と軸組図が
 共有する唯一の実装）も `draw/DrawUtil`、**用紙の割り付けの決め方**（縮尺の階梯と選び方・伏図の
 縮尺と位置（**縮尺は凡例の幅を引いてから**決める。引く幅は**実測した凡例の幅**）・軸組図の上下 2 段とシートの分割・
 タイトルの連番）は `core/Layout`、
@@ -582,7 +588,11 @@ Vectorworks 自身がモーダルのダイアログを出すことがある—�
 （span 柱レイヤと伏図記号レイヤが共有）、「命令インデックス → ハンドル」の対応表は
 `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（SDK 型を持つ実体）、**描画側から切り離せる純計算**（レイヤの希望スタック順
 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの
-広がり `planContentBounds` / `sectionContentSize`）は `core/Document`、
+広がり `planContentBounds` / `sectionContentSize`。**伏図のデータタグも見る**——タグは注釈
+なのでレイヤに載らないが図には映る。絞り込みは関連付け先の横架材のレイヤで行い、**軸組図の
+タグは見ない**＝あちらの注釈空間は平面座標ではない。なお**縮尺に追随しないもの**（通り芯の
+丸・柱記号・耐力壁の伏図記号・タグ）の見込みは `kPlanContentMargin` の**モデル mm** の定数
+1 つで、用紙 mm として持ち直すには実測が要る。M28）は `core/Document`、
 進捗の見出し・バー配分は `draw/ExecuteDocument`（要素ごとのフェーズ）と `core/Progress`
 （整形と配分の計算）に**それぞれ 1 つだけ**置く。**要素の一覧**
 （表示名・助数詞・命令数の取り出し・描けた数）は `parse/Summary` の `kElements` ただ 1 つの表で、

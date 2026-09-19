@@ -1682,6 +1682,80 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	CHECK(near(max.y, 1800.0 + core::kPlanContentMargin));
 }
 
+TEST(plan_content_bounds_sees_sheet_data_tags)
+{
+	// **データタグは注釈なのでデザインレイヤに載らないが、図には映る**（M28）。どの伏図に
+	// 出るかは関連付け先の横架材のレイヤが決めるので、広がりも絞り込みもその材で引く。
+	core::Document document;
+
+	core::MemberCommand member;
+	member.layer = "1-横架材天端";
+	member.start = core::Vec2{-1000.0, 0.0};
+	member.end = core::Vec2{1000.0, 0.0};
+	document.members.push_back(member);
+
+	// 材より外（＋3000）へ逃がしたタグ。**これを見ないと図の広がりを取りこぼす**。
+	core::TagCommand tag;
+	tag.memberIndex = 0;
+	tag.position = core::Vec2{0.0, 3000.0};
+	tag.offset = core::Vec2{0.0, 1.0};
+
+	core::SheetCommand sheet;
+	sheet.number = "1";
+	sheet.title = "1階床伏図";
+	sheet.viewport.drawingTitle = "1階床伏図";
+	sheet.viewport.drawingNumber = "1";
+	sheet.viewport.layers = {"1-横架材天端"};
+	sheet.viewport.tags.push_back(tag);
+	document.sheets.push_back(sheet);
+
+	core::Vec2 min;
+	core::Vec2 max;
+	CHECK(core::planContentBounds(document, {}, min, max));
+	CHECK(near(max.y, 3000.0 + core::kPlanContentMargin));
+
+	// 関連付け先の材のレイヤで絞ったときも出る（その材が映る伏図に出るタグなので）。
+	CHECK(core::planContentBounds(document, {"1-横架材天端"}, min, max));
+	CHECK(near(max.y, 3000.0 + core::kPlanContentMargin));
+
+	// 別のレイヤで絞れば出ない（その伏図には材もタグも映らない）。
+	core::ColumnCommand column;
+	column.layer = "1to2-柱";
+	column.position = core::Vec2{0.0, 0.0};
+	document.columns.push_back(column);
+	CHECK(core::planContentBounds(document, {"1to2-柱"}, min, max));
+	CHECK(near(max.y, 0.0 + core::kPlanContentMargin));
+}
+
+TEST(plan_content_bounds_ignores_section_data_tags)
+{
+	// **軸組図のタグは平面の広がりに入れない**（M28）。あちらの注釈空間は平面座標ではなく
+	// (切断線に沿った距離, 高さ Z) なので、混ぜると縮尺の見積もりが壊れる——高さ 8000 の
+	// 建物のタグが平面の Y 8000 として効いてしまう。
+	core::Document document;
+
+	core::MemberCommand member;
+	member.layer = "1-横架材天端";
+	member.start = core::Vec2{-1000.0, 0.0};
+	member.end = core::Vec2{1000.0, 0.0};
+	document.members.push_back(member);
+
+	core::TagCommand tag;
+	tag.memberIndex = 0;
+	tag.position = core::Vec2{0.0, 8000.0}; // 高さ Z（平面の Y ではない）
+
+	core::SectionCommand section;
+	section.viewport.drawingTitle = "X1通り軸組図";
+	section.viewport.drawingNumber = "20";
+	section.viewport.tags.push_back(tag);
+	document.sections.push_back(section);
+
+	core::Vec2 min;
+	core::Vec2 max;
+	CHECK(core::planContentBounds(document, {}, min, max));
+	CHECK(near(max.y, 0.0 + core::kPlanContentMargin));
+}
+
 TEST(plan_content_bounds_fails_without_coordinates)
 {
 	// 座標を持つ命令が 1 つも無ければ広がりは求まらない（out は触らない）。
