@@ -38,22 +38,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// デザインレイヤの種別コード（CreateLayer の layerType 引数）。1 = デザインレイヤ、
-		// 2 = シート（プレゼンテーション）レイヤ。SDK の ELayerType（Kernel/API/
-		// MiniCadCallBacks.h）がこの値を定める。
-		constexpr short kDesignLayerType = 1;
-		constexpr short kSheetLayerType = 2;
-
-		// SetViewportLayerVisibility の表示種別。**2（グレー）は使わない**——対象外のレイヤを
-		// グレーにすると図に薄く残る。
-		constexpr short kLayerVisible = 0;
-		constexpr short kLayerHidden = 1;
-
-		// SetViewportClassVisibility の表示種別。SDK の EClassVisibility（VWFC/VWObjects/
-		// VWClass.h）が Normal=0 / Invisible=-1 / Grayed=2 と定めており、**VS の 0/1/2 とは
-		// 値が違う**（1 は「非表示」ではない）。表示に戻すのが目的なので Normal だけを使う。
-		constexpr short kClassVisible = 0;
-
 		// 図面の**デザインレイヤ**を先頭から順に辿る。VWDocument::GetDrawingHeaderFristMember
 		// （SDK の綴りママ）が図面のオブジェクト列の先頭＝最初のレイヤで、以降は NextObject で
 		// たどれる。レイヤ以外が混ざっても IsLayerObject で弾く（ISDK に「レイヤだけを列挙する」
@@ -133,7 +117,8 @@ namespace HomeskzIfcImport::draw
 			std::size_t applied = 0;
 			for (const InternalIndex index : classes)
 			{
-				if (gSDK->SetViewportClassVisibility(viewport, index, kClassVisible))
+				if (gSDK->SetViewportClassVisibility(viewport, index,
+													 static_cast<short>(ClassVisibility::Normal)))
 					++applied;
 			}
 			return applied;
@@ -216,6 +201,22 @@ namespace HomeskzIfcImport::draw
 		gSDK->SetFPatByClass(object);
 		gSDK->SetArrowByClass(object);
 		gSDK->SetOpacityByClass(object);
+	}
+
+	void SetClassWithAttributes(MCObjectHandle object, const std::string& className)
+	{
+		SetClassByName(object, className);
+		SetAllAttributesByClass(object);
+	}
+
+	void PrepareCustomObjectDefinition(const char* universalName)
+	{
+		gSDK->DefineCustomObject(TXString(universalName), kCustomObjectPrefNever);
+	}
+
+	bool IsObjectType(MCObjectHandle object, ObjectNodeType type)
+	{
+		return object != nil && gSDK->GetObjectTypeN(object) == static_cast<short>(type);
 	}
 
 	MCObjectHandle CreateClosedPolygon(const std::vector<core::Vec2>& boundary)
@@ -686,7 +687,7 @@ namespace HomeskzIfcImport::draw
 		MCObjectHandle layer = gSDK->GetNamedLayer(name);
 		if (layer == nil)
 		{
-			layer = gSDK->CreateLayer(name, kDesignLayerType);
+			layer = gSDK->CreateLayer(name, static_cast<short>(LayerKind::Design));
 			RecordCreatedLayer(layer); // 取り消しで消してよい（このインポートが作った）
 		}
 		else
@@ -773,7 +774,7 @@ namespace HomeskzIfcImport::draw
 		MCObjectHandle layer = gSDK->GetNamedLayer(name);
 		if (layer == nil)
 		{
-			layer = gSDK->CreateLayer(name, kSheetLayerType);
+			layer = gSDK->CreateLayer(name, static_cast<short>(LayerKind::Sheet));
 			RecordCreatedLayer(layer); // 取り消しで消してよい（ビューポートごと消える）
 		}
 		else
@@ -813,13 +814,15 @@ namespace HomeskzIfcImport::draw
 		{
 			if (layer == sheetLayer)
 				continue;
-			gSDK->SetViewportLayerVisibility(viewport, layer, kLayerHidden);
+			gSDK->SetViewportLayerVisibility(viewport, layer,
+											 static_cast<short>(LayerVisibility::Hidden));
 		}
 		for (const std::string& name : command.layers)
 		{
 			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
 			if (layer != nil)
-				gSDK->SetViewportLayerVisibility(viewport, layer, kLayerVisible);
+				gSDK->SetViewportLayerVisibility(viewport, layer,
+												 static_cast<short>(LayerVisibility::Visible));
 		}
 
 		// クラス: 全クラスを 1 つずつ表示へ戻す（ヘッダ「クラスを表示へ戻す理由」）。
@@ -857,11 +860,12 @@ namespace HomeskzIfcImport::draw
 		// （ObjectVariables.h: 165/166 が sheet layer、167/168 が layer page/paper。
 		// ci-debug で確認）。用紙の大きさは 167/168 を第一に採り、読めなければ
 		// VWLayerObj（＝165/166）で代用する。
-		const auto inches = [sheetLayer](short selector, double& out)
+		const auto inches = [sheetLayer](ObjectVariable selector, double& out)
 		{
 			TVariableBlock value;
 			double raw = 0.0;
-			if (gSDK->GetObjectVariable(sheetLayer, selector, value) == 0 || !value.GetReal64(raw))
+			if (gSDK->GetObjectVariable(sheetLayer, static_cast<short>(selector), value) == 0 ||
+				!value.GetReal64(raw))
 				return false;
 			if (raw <= 0.0)
 				return false;
@@ -884,7 +888,8 @@ namespace HomeskzIfcImport::draw
 		}
 
 		core::Vec2 size;
-		if (!inches(ovLayerSheetPaperWidth, size.x) || !inches(ovLayerSheetPaperHeight, size.y))
+		if (!inches(ObjectVariable::SheetPaperWidth, size.x) ||
+			!inches(ObjectVariable::SheetPaperHeight, size.y))
 			size = paper.sheet;
 		if (size.x <= 0.0 || size.y <= 0.0)
 			// 用紙が読めなかった。既定（A3 横）で割り付ける——用紙が読めないことで図を捨てる
@@ -937,25 +942,45 @@ namespace HomeskzIfcImport::draw
 		return paper;
 	}
 
-	void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value)
+	void SetBooleanVariable(MCObjectHandle object, ObjectVariable variable, Boolean value)
 	{
-		gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
+		gSDK->SetObjectVariable(object, static_cast<short>(variable), TVariableBlock(value));
 	}
 
-	void SetRealVariable(MCObjectHandle object, short variable, double value)
+	void SetRealVariable(MCObjectHandle object, ObjectVariable variable, double value)
 	{
-		gSDK->SetObjectVariable(object, variable, TVariableBlock(value));
+		gSDK->SetObjectVariable(object, static_cast<short>(variable), TVariableBlock(value));
 	}
 
-	void SetPointVariable(MCObjectHandle object, short variable, const core::Vec2& point)
+	void SetPointVariable(MCObjectHandle object, ObjectVariable variable, const core::Vec2& point)
 	{
-		gSDK->SetObjectVariable(object, variable, TVariableBlock(WorldPt(point.x, point.y)));
+		gSDK->SetObjectVariable(object, static_cast<short>(variable),
+								TVariableBlock(WorldPt(point.x, point.y)));
 	}
 
 	void PushUnique(std::vector<std::string>& values, const std::string& value)
 	{
 		if (std::ranges::find(values, value) == values.end())
 			values.push_back(value);
+	}
+
+	void AppendCount(std::string& text, const char* what, std::size_t count, const char* counter,
+					 const char* detail)
+	{
+		if (count == 0)
+			return;
+		text += what;
+		text += " ";
+		text += std::to_string(count);
+		text += " ";
+		text += counter;
+		if (detail != nullptr)
+		{
+			text += "（";
+			text += detail;
+			text += "）";
+		}
+		text += "。";
 	}
 
 	void AppendLine(std::string* sink, const std::string& text)
@@ -997,7 +1022,7 @@ namespace HomeskzIfcImport::draw
 		return data;
 	}
 
-	bool ApplyStoryBound(MCObjectHandle object, Sint32 boundID,
+	bool ApplyStoryBound(MCObjectHandle object, StoryBoundSlot slot,
 						 const core::StoryBoundCommand& bound)
 	{
 		if (object == nil)
@@ -1006,12 +1031,13 @@ namespace HomeskzIfcImport::draw
 		// VW の都合である（この直後とは限らない）。一時オブジェクトを渡すと、その寿命は
 		// この式の終わりまでしか無い（CLAUDE.md「境界を越えて来た構造体は…」と同じ用心）。
 		const VectorWorks::SStoryObjectData data = StoryBoundData(bound);
-		return gSDK->SetObjectStoryBound(object, boundID, data);
+		return gSDK->SetObjectStoryBound(object, static_cast<Sint32>(slot), data);
 	}
 
 #if VW_DRAW_VERIFY
-	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID)
+	std::string DescribeStoryBound(MCObjectHandle object, StoryBoundSlot slot)
 	{
+		const auto boundID = static_cast<Sint32>(slot);
 		if (object == nil)
 			return "なし";
 		if (!gSDK->HasObjectStoryBound(object, boundID))
