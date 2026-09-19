@@ -599,12 +599,12 @@ namespace HomeskzIfcImport::draw
 				const std::string universal = name.GetStdString();
 				const std::string localized = pio.GetParamLocalizedName(i).GetStdString();
 				const bool matches =
-					std::any_of(kSizeParamNeedles.begin(), kSizeParamNeedles.end(),
-								[&universal, &localized](const char* needle)
-								{
-									return universal.find(needle) != std::string::npos ||
-										   localized.find(needle) != std::string::npos;
-								});
+					std::ranges::any_of(kSizeParamNeedles,
+										[&universal, &localized](const char* needle)
+										{
+											return universal.find(needle) != std::string::npos ||
+												   localized.find(needle) != std::string::npos;
+										});
 				if (!matches)
 					continue;
 				if (!found.empty())
