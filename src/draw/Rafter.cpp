@@ -109,13 +109,15 @@ namespace HomeskzIfcImport::draw
 			spec.endBound = rafter.endBound;
 			// 【潰れ検出】描き上がりの長さ＝パスの水平長。**垂木も両端の Z が等しい**（勾配は
 			// ストーリバウンドの offset 差が表す。冒頭「パスに傾斜を持たせない」）ので、
-			// 横架材と同じく OIP の「スパン」で測る（draw/StructuralMember.h の
-			// StructuralExtentKind）。
+			// 横架材と同じく**PIO が実際に持っているパスの両端の距離**で測る
+			// （draw/StructuralMember.h の StructuralExtentKind）。以前はここが OIP の
+			// 「スパン」で、**そのパラメータは実機に無い**ため潰れ検出も下の自己修復も
+			// 一度も動いていなかった（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 			spec.expectedLength = core::distance(eave.point, rafter.end);
-			spec.extentKind = StructuralExtentKind::Span;
-			// 【自己修復】潰れていたらパスを作り直して差し替える。**パスを作る口も PIO 化の口も
-			// 柱・横架材と同じもの**なので、同じ事故は垂木でも起きうる（実機で出たのは柱だけ
-			// だが、出ていないことの保証にはならない。docs/DEV-NOTES.md M27）。差し替える
+			spec.extentKind = StructuralExtentKind::Horizontal;
+			// 【自己修復】潰れていたらパスを作り直して差し替える。**残す理由と、健全な材で
+			// 誤って引かれない理由は横架材と同じ**（draw/Member。M27 の死角は鉛直材に固有
+			// だが、高さ基準を 1 本も持てなかったときの 0 長は向きを問わない）。差し替える
 			// パスは**挿入点からの相対**で渡す。
 			spec.retryWithFreshPath = true;
 			spec.pathStart = core::Vec2{0.0, 0.0};
