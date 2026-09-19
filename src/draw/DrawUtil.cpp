@@ -1161,7 +1161,10 @@ namespace HomeskzIfcImport::draw
 	{
 		std::array<char, 48> buffer{};
 		std::snprintf(buffer.data(), buffer.size(), "%.1f×%.1f", size.x, size.y);
-		return std::string(buffer.data());
+		// **戻り型を繰り返さない**（`return std::string(...)` は clang-tidy の
+		// modernize-return-braced-init-list に引っかかる。CI の tidy-mac / tidy-windows）。
+		// 無名名前空間のラムダが同じ形を書けているのは、あちらが戻り型を宣言していないため。
+		return {buffer.data()};
 	}
 
 	std::string DescribeFitOverflow(const std::string& number, const core::Vec2& drawn,
