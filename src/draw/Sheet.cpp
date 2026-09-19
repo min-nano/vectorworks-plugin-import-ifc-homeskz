@@ -154,11 +154,8 @@ namespace HomeskzIfcImport::draw
 
 		for (const core::SheetCommand& command : commands)
 		{
-			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は枚数で報告し、
-			// 描画の前に 1 件進める（＝「いま何枚目を作っているか」が見える）。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			const MCObjectHandle sheetLayer = PrepareSheetLayer(command.number, command.title);
 			if (sheetLayer == nil)
@@ -352,32 +349,23 @@ namespace HomeskzIfcImport::draw
 			 legendOverlap > 0 || !haveContent || marginsUnread))
 		{
 			std::string text = "伏図の診断: ";
-			if (missingSheetLayers > 0)
-				text += "シートレイヤを作れなかった命令 " + std::to_string(missingSheetLayers) +
-						" 件。";
-			if (missingViewports > 0)
-				text +=
-					"ビューポートを作れなかった命令 " + std::to_string(missingViewports) + " 件。";
+			AppendCount(text, "シートレイヤを作れなかった命令", missingSheetLayers, "件");
+			AppendCount(text, "ビューポートを作れなかった命令", missingViewports, "件");
 			if (classesBroken)
 				text += "クラスを表示に戻せませんでした（対象 " +
 						std::to_string(setup.classes.size()) + " クラス）。図形が映りません。";
-			if (missingPlanView > 0)
-				text += "2D/平面（Top/Plan）にできなかった伏図 " + std::to_string(missingPlanView) +
-						" 枚（3D の「上」ビューのように描かれます）。";
+			AppendCount(text, "2D/平面（Top/Plan）にできなかった伏図", missingPlanView, "枚",
+						"3D の「上」ビューのように描かれます");
 			if (!haveContent)
 				text += "建物の平面の広がりが求まらないため、縮尺と位置を調整していません。";
-			if (missingPlacement > 0)
-				text += "用紙の上で位置を合わせられなかった伏図 " +
-						std::to_string(missingPlacement) + " 枚（外形を測れませんでした）。";
-			if (missingScale > 0)
-				text += "縮尺を当て直せなかった伏図 " + std::to_string(missingScale) +
-						" 枚（凡例の幅から決めた縮尺が入らず、仮の縮尺のままです）。";
-			if (oversized > 0)
-				text += "用紙に収まらなかった伏図 " + std::to_string(oversized) +
-						" 枚（縮尺の見積もりより図が大きくなりました）。";
-			if (legendOverlap > 0)
-				text += "凡例と重なった伏図 " + std::to_string(legendOverlap) +
-						" 枚（図が広く、右上の空きへ避けきれませんでした）。";
+			AppendCount(text, "用紙の上で位置を合わせられなかった伏図", missingPlacement, "枚",
+						"外形を測れませんでした");
+			AppendCount(text, "縮尺を当て直せなかった伏図", missingScale, "枚",
+						"凡例の幅から決めた縮尺が入らず、仮の縮尺のままです");
+			AppendCount(text, "用紙に収まらなかった伏図", oversized, "枚",
+						"縮尺の見積もりより図が大きくなりました");
+			AppendCount(text, "凡例と重なった伏図", legendOverlap, "枚",
+						"図が広く、右上の空きへ避けきれませんでした");
 			if (marginsUnread)
 			{
 				const auto raw = [](double value)

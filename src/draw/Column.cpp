@@ -96,44 +96,18 @@ namespace HomeskzIfcImport::draw
 		// 不安定なので、柱も標準の構造材ツールで描く）。
 		const TXString kColumnStyle("木質構造材_柱・束");
 
-		// 柱 1 本を構造材ツールで描く。PIO を作れなければ断面の矩形でフォールバックする。
-		// 何か 1 つでも配置できたら true。outObject には**構造材ツールで作れたときだけ**その
-		// ハンドルを入れる（伏図記号のデータタグはこれに関連付ける。フォールバックの矩形は
-		// タグを付ける相手にしない）。
-		// 診断の集計（drawColumns が完了ダイアログ・診断ログへ載せる件数）。
-		struct ColumnFailures
-		{
-			std::size_t path = 0;	 // 鉛直パスが 2 点にならなかった
-			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
-			std::size_t offset = 0;	 // 端部オフセットを書けなかった
-			std::size_t bound = 0;	 // 高さ基準を VW が受け取らなかった
-			// ここから下は**読み戻して検算した結果**なので開発ビルドだけ（draw/Verify.h）。
-#if VW_DRAW_VERIFY
-			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
-			std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
-			// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。
-			// パスから Z を外したぶんの見張りで、0 でなければ柱は在るのに違う高さに立って
-			// いる——本数には出ないので、これが唯一の手掛かりになる。
-			std::size_t elevation = 0;
-			std::string elevationProbe; // ずれた 1 本目の実測（命令の Z と図面の Z）
-			// 実体を測れなかったときの手掛かり（最初の 1 件）。測れていれば空——柱では
-			// 実機で 197/197 測れているので、ここが埋まるのは異常のときだけである。
-			std::string extentHint;
-			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長・図面が
-			// 持っている高さ基準・図面のパスの頂点）。**原因をパス側と高さ基準側に分けるのは
-			// この 1 行だけ**なので、必ず持ち帰る。
-			std::string collapsedProbe;
-#endif
-		};
-
 #if VW_DRAW_VERIFY
 		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
 		// **取り込み後の再検査**（recheckColumns）が使う——検算そのものなので開発ビルドだけ。
 		constexpr double kExtentTol = 1.0;
 #endif
 
-		bool DrawOne(const core::ColumnCommand& column, RefNumber style, ColumnFailures& failures,
-					 MCObjectHandle& outObject)
+		// 柱 1 本を構造材ツールで描く。PIO を作れなければ断面の矩形でフォールバックする。
+		// 何か 1 つでも配置できたら true。outObject には**構造材ツールで作れたときだけ**その
+		// ハンドルを入れる（伏図記号のデータタグはこれに関連付ける。フォールバックの矩形は
+		// タグを付ける相手にしない）。失敗の内訳は failures へ数え込む（draw/StructuralMember）。
+		bool DrawOne(const core::ColumnCommand& column, RefNumber style,
+					 StructuralFailures& failures, MCObjectHandle& outObject)
 		{
 			// 断面の矩形（幅 × せい）は**原点中心**に置く（AxisAlign＝中央と一致させる。
 			// パスが断面中心を通る）。作れなければ PIO を作らない——断面の無い構造材は
@@ -233,63 +207,34 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			// 断面が入らなかった本数を数える（診断。drawColumns が完了ダイアログへ載せる）。
+			// 失敗の内訳を数え込む（診断。drawColumns が完了ダイアログへ載せる）。
 			// **スパン（平面投影長）は数えない**——鉛直材では 0 が正常なので、横架材と同じ
 			// 数え方をすると全数を誤報する（冒頭「診断を必ず持ち帰る」）。
-			if (!result.sectionOk)
-				++failures.section;
-			// 高さ基準を図面へ書けなかった本数（`SetObjectStoryBound` の戻り値）。
-			// **書けたことは実機で確かめた**——それでも実体が 0 の柱があったので、高さ基準は
-			// 犯人ではない（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。見張りとして
-			// 数え続ける。
-			if (!result.boundOk)
-				++failures.bound;
-			// 端部オフセットを書けなかった本数。書けないと柱が受ける梁の天端まで伸びたまま
-			// 描かれる（＝梁せいぶん高い）ので、切り分けの手掛かりを 1 件だけ残す。
-			if (!result.endOffsetOk)
-			{
-				++failures.offset;
+			// 高さ基準（bound）は**書けたことを実機で確かめた**うえで実体 0 の柱があったので
+			// 犯人ではないが、見張りとして数え続ける（docs/DEV-NOTES.md M27）。
 #if VW_DRAW_VERIFY
-				if (failures.offsetHint.empty())
-					failures.offsetHint = result.offsetParamHint;
+			const bool firstProbe = failures.collapsedProbe.empty();
 #endif
-			}
-			// 長さ 0 で描かれた本数（オブジェクトは在るのに実体が無い）。**これが 0 でない
-			// 限り、件数が揃っていても絵は欠けている**ので、必ず診断へ載せる。
-			// **ここから下は読み戻して検算した結果**なので開発ビルドだけ（draw/Verify.h）。
+			failures.record(result);
 #if VW_DRAW_VERIFY
-			if (result.collapsed)
+			// 潰れた 1 本目には、**渡した曲線の観測**を頭へ足す。
+			//
+			// **「あるべき高さ」は渡したパスの値ではない。** M27 以降パスは平面（Z=0）の
+			// 2 点なので、ここに出す Z 範囲は「命令が意図している高さ」——すなわちバウンドへ
+			// 渡した値——であって、パスの入力ではない。読む人が取り違えないよう文言で断って
+			// おく。作った曲線の Z は**0 が正常**で、0 でなければパスの作り方が冒頭の約束から
+			// 外れている。
+			if (result.collapsed && firstProbe)
 			{
-				++failures.collapsed;
-				// 1 本目だけ実測を控える（全数ぶん並べても読めない）。
-				if (failures.collapsedProbe.empty())
-				{
-					// **「あるべき高さ」は渡したパスの値ではない。** M27 以降パスは平面
-					// （Z=0）の 2 点なので、ここに出す Z 範囲は「命令が意図している高さ」
-					// ——すなわちバウンドへ渡した値——であって、パスの入力ではない。読む人が
-					// 取り違えないよう、文言で断っておく。作った曲線の Z は**0 が正常**で、
-					// 0 でなければパスの作り方が冒頭の約束から外れている。
-					std::array<char, 288> buffer{};
-					std::snprintf(buffer.data(), buffer.size(),
-								  "パスの頂点 piece0=%d piece1=%d・作った曲線の Z %s(%g→%g。"
-								  "0 が正常)・あるべき高さ %g（バウンドへ渡した Z 範囲 %g→%g。"
-								  "パスは平面なので、これは入力そのものではない）・OIP ",
-								  static_cast<int>(probe.piece0), static_cast<int>(probe.piece1),
-								  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1,
-								  column.height, column.elevation,
-								  column.elevation + column.height);
-					failures.collapsedProbe = std::string(buffer.data()) + result.collapsedProbe;
-				}
-			}
-			if (failures.extentHint.empty())
-				failures.extentHint = result.extentHint;
-			// 高さが命令と違った本数（上の checkElevation）。**実体はあるので潰れの数には
-			// 出ない**——柱が揃って違う高さに立つ形なので、別に数えて持ち帰る。
-			if (!result.elevationOk)
-			{
-				++failures.elevation;
-				if (failures.elevationProbe.empty())
-					failures.elevationProbe = result.elevationProbe;
+				std::array<char, 288> buffer{};
+				std::snprintf(buffer.data(), buffer.size(),
+							  "パスの頂点 piece0=%d piece1=%d・作った曲線の Z %s(%g→%g。"
+							  "0 が正常)・あるべき高さ %g（バウンドへ渡した Z 範囲 %g→%g。"
+							  "パスは平面なので、これは入力そのものではない）・OIP ",
+							  static_cast<int>(probe.piece0), static_cast<int>(probe.piece1),
+							  probe.pointsRead ? "" : "読めない", probe.z0, probe.z1, column.height,
+							  column.elevation, column.elevation + column.height);
+				failures.collapsedProbe = std::string(buffer.data()) + failures.collapsedProbe;
 			}
 #endif
 
@@ -307,16 +252,13 @@ namespace HomeskzIfcImport::draw
 		const RefNumber style = ResolvePluginStyle(kColumnStyle);
 
 		std::size_t drawn = 0;
-		ColumnFailures failures;
+		StructuralFailures failures;
 		for (std::size_t index = 0; index < document.columns.size(); ++index)
 		{
 			const core::ColumnCommand& column = document.columns[index];
 
-			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
-			// 描画の前に 1 件進める（＝「いま何本目を描いているか」が見える）。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// 配置先の span レイヤ（"1to2-柱" 等）が無い命令はスキップする
 			// （規約は ActivateExistingLayer）。
@@ -337,59 +279,13 @@ namespace HomeskzIfcImport::draw
 		if (drawn > 0 && style != 0)
 			gSDK->UpdateStyledObjects(style);
 
-#if VW_DRAW_VERIFY
-		const bool report = failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
-							failures.bound > 0 || failures.collapsed > 0 ||
-							failures.elevation > 0 || !failures.extentHint.empty() || style == 0;
-#else
-		const bool report = failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
-							failures.bound > 0 || style == 0;
-#endif
-		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「鉛直パスが 2 点に
-		// ならなかった」「断面が入らなかった」「スタイルが見つからなかった」を件数で持ち帰る
-		// （柱が見えないときの切り分け材料）。**読み戻して検算した件数**（潰れ・高さ・
-		// パラメータ名の手掛かり）は開発ビルドにしか無い（上の report と draw/Verify.h）。
-		if (outDiagnostics != nullptr && report)
-		{
-			std::string note = "柱の診断: ";
-			if (failures.path > 0)
-				note +=
-					"鉛直パスが 2 点にならなかった柱 " + std::to_string(failures.path) + " 本。";
-			if (failures.section > 0)
-				note += "断面を設定できなかった柱 " + std::to_string(failures.section) + " 本。";
-			if (failures.bound > 0)
-				note +=
-					"高さ基準を図面へ書けなかった柱 " + std::to_string(failures.bound) + " 本。";
-#if VW_DRAW_VERIFY
-			if (failures.collapsed > 0)
-				note += "長さ 0 で描かれた（実体が無い）柱 " + std::to_string(failures.collapsed) +
-						" 本。";
-			if (failures.collapsed > 0 && !failures.collapsedProbe.empty())
-				note += "（1 本目: " + failures.collapsedProbe + "）";
-			if (failures.elevation > 0)
-			{
-				note +=
-					"命令と違う高さに描かれた柱 " + std::to_string(failures.elevation) + " 本。";
-				if (!failures.elevationProbe.empty())
-					note += "（1 本目: " + failures.elevationProbe + "）";
-			}
-			if (!failures.extentHint.empty())
-				note += "描き上がった実体を測れませんでした（" + failures.extentHint + "）。";
-#endif
-			if (failures.offset > 0)
-			{
-				note += "端部オフセットを設定できなかった柱 " + std::to_string(failures.offset) +
-						" 本。";
-#if VW_DRAW_VERIFY
-				if (!failures.offsetHint.empty())
-					note += "（候補: " + failures.offsetHint + "）";
-#endif
-			}
-			if (style == 0)
-				note += "プラグインスタイル『木質構造材_柱・束』が見つかりません。";
-
-			*outDiagnostics = std::move(note);
-		}
+		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、失敗の内訳を件数で
+		// 持ち帰る（文言は draw/StructuralMember。柱が見えないときの切り分け材料になる）。
+		std::string note = DescribeStructuralFailures(failures, "柱");
+		if (style == 0)
+			note += "プラグインスタイル『木質構造材_柱・束』が見つかりません。";
+		if (outDiagnostics != nullptr && !note.empty())
+			*outDiagnostics = "柱の診断: " + note;
 
 		return drawn;
 	}
@@ -465,8 +361,8 @@ namespace HomeskzIfcImport::draw
 							  column.topBound.level.c_str(), column.topBound.offset);
 				oddProbe = std::string(buffer.data()) + DescribeSizeParams(object) +
 						   std::string(wanted.data()) + "・図面の始端[" +
-						   DescribeStoryBound(object, kStartBoundID) + "]・終端[" +
-						   DescribeStoryBound(object, kEndBoundID) + "]・図面のパス[" +
+						   DescribeStoryBound(object, StoryBoundSlot::Start) + "]・終端[" +
+						   DescribeStoryBound(object, StoryBoundSlot::End) + "]・図面のパス[" +
 						   DescribePioPath(object) + "]";
 			}
 		}
@@ -516,10 +412,8 @@ namespace HomeskzIfcImport::draw
 		if (outDiagnostics != nullptr && (collapsed > 0 || differs > 0))
 		{
 			std::string note = "柱の診断（取り込み後）: ";
-			if (collapsed > 0)
-				note += "実体が無い柱 " + std::to_string(collapsed) + " 本。";
-			if (differs > 0)
-				note += "実体が命令と食い違う柱 " + std::to_string(differs) + " 本。";
+			AppendCount(note, "実体が無い柱", collapsed, "本");
+			AppendCount(note, "実体が命令と食い違う柱", differs, "本");
 			if (!oddProbe.empty())
 				note += "（1 本目: " + oddProbe + "）";
 			if (!peerProbe.empty())

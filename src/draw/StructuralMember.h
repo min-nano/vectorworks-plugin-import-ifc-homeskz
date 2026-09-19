@@ -56,6 +56,7 @@
 #include "core/Document.h"
 #include "draw/Verify.h"
 
+#include <cstddef>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -185,6 +186,10 @@ namespace HomeskzIfcImport::draw
 		// 高さ基準が書けないことは実際にありうる（`boundOk`）ので、水平材でも引き金は
 		// 残す。**健全な材で引かれる恐れは無い**——水平材の実体は平面長そのものなので、
 		// 潰れていない限り必ず 0 から離れている。
+		//
+		// **柱はもう武装していない**（draw/Column）——あちらは M27 の症状そのものが
+		// 「パスに Z を渡さない」で原理的に消えたためで、その理屈は水平材には無い
+		// （落ちない死角のために外すのではなく、**別の経路のために残す**）。
 		bool retryWithFreshPath = false;
 		core::Vec2 pathStart;
 		core::Vec2 pathEnd;
@@ -244,6 +249,49 @@ namespace HomeskzIfcImport::draw
 		std::string elevationProbe;
 #endif
 	};
+
+	// 構造材ツールで描いたときの**失敗の内訳**。柱（draw/Column）・横架材（draw/Member）・
+	// 垂木（draw/Rafter）は同じ PIO を同じ手順で描くので、数える口も診断の文言も 1 か所に
+	// 置く——かつては 3 つの .cpp が同型の構造体と同型の文字列組み立てを各々持っており、
+	// 項目を 1 つ足すと 3 か所を直す形になっていた（CLAUDE.md「重複を作らない置き場所」）。
+	//
+	// **実描画はローカルの VectorWorks でしか確認できない**ので、「オブジェクトは在るのに
+	// 実体が無い／違う高さに並んでいる」を件数で持ち帰るのが唯一の手掛かりになる。
+	struct StructuralFailures
+	{
+		std::size_t path = 0; // パスが 2 点にならなかった（呼び出し側が数える）
+		std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
+		std::size_t offset = 0; // 端部オフセットを書けなかった（材が相手の芯線まで伸びる）
+		std::size_t bound = 0; // 高さ基準を VW が受け取らなかった（実体が無い材になる）
+		// ここから下は**読み戻して検算した結果**なので開発ビルドだけ（draw/Verify.h）。
+		// **自己修復（潰れたパスの作り直し）は本番でも走る**——外れるのはその結果を数えて
+		// 診断へ載せるところだけである。
+#if VW_DRAW_VERIFY
+		std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
+		std::size_t repaired = 0; // 潰れたパスを作り直して直った
+		// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。パスから
+		// Z を外したぶんの見張りで、0 でなければ材は在るのに違う高さに並んでいる——本数にも
+		// スパンにも出ないので、これが唯一の手掛かりになる。
+		std::size_t elevation = 0;
+		std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり
+		// **実体を測れなかったとき**の手掛かり（`StructuralMemberResult::extentHint`）。
+		// **これが埋まっていること自体が異常**なので、無条件に診断へ出す——鉛直材は両端の
+		// 絶対 Z、水平材は PIO のパスで測れるはずで、どちらも引けないなら検査が空振りして
+		// いるということである。以前は「潰れ・作り直しがあったときだけ」出していたが、
+		// それは**水平材で引けないのが常態だったから**で、その常態のほうを直した
+		// （docs/DEV-NOTES.md「水平材の実体は「スパン」では測れない」）。
+		std::string extentHint;
+		std::string collapsedProbe; // 潰れた（作り直した）1 本目の実測
+		std::string elevationProbe; // 高さがずれた 1 本目の実測（命令の Z と図面の Z）
+#endif
+
+		// 1 本ぶんの結果を数え込む。**手掛かりは 1 件目だけ控える**（全数を並べても読めない）。
+		void record(const StructuralMemberResult& result);
+	};
+
+	// 失敗の内訳を診断の 1 行に組む。subject は数える対象の呼び名（"柱" / "材"）。出すものが
+	// 1 つも無ければ空文字なので、呼び出し側は「見出しを付けるかどうか」をこれで決められる。
+	std::string DescribeStructuralFailures(const StructuralFailures& failures, const char* subject);
 
 	// パスの読み戻し（診断用）。**「2 点になったか」の真偽だけでは足りない**——ピース索引の
 	// 起点が 0 / 1 のどちらの規約かが分からないまま OR で見ているので、片方が別のものを

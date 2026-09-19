@@ -74,40 +74,12 @@ namespace HomeskzIfcImport::draw
 		// プラグインスタイル名（VW 実機の登録名に一致させる）。
 		const TXString kMemberStyle("木質構造材_横架材");
 
-		// 診断の集計（完了ダイアログ・診断ログへ持ち帰る件数）。1 本ごとに増やすだけなので
-		// 出力引数をまとめて 1 つにする。
-		struct MemberFailures
-		{
-			std::size_t path = 0;	 // パスが 2 点にならなかった
-			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
-			std::size_t offset = 0;	 // 端部オフセットを書けなかった
-			// ここから下は**読み戻して検算した結果**なので開発ビルドだけ（draw/Verify.h）。
-			// **自己修復（潰れたパスの作り直し）は本番でも走る**——外れるのはその結果を
-			// 数えて診断へ載せるところだけである。
-#if VW_DRAW_VERIFY
-			std::size_t length = 0; // パスから部材長を取れなかった（実体が無い）
-			std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり（最初の 1 件）
-			// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。
-			// パスから Z を外した（下記）ぶんの見張りで、0 でなければ材は在るのに違う高さに
-			// 並んでいる——本数にもスパンにも出ないので、これが唯一の手掛かりになる。
-			std::size_t elevation = 0;
-			std::string elevationProbe; // ずれた 1 本目の実測（命令の Z と図面の Z）
-			// パスを作り直して差し替えたら直った本数（draw/StructuralMember.h の
-			// retryWithFreshPath）。0 でなければ「渡した曲線は正しく、PIO 化で潰れていた」
-			// ——柱で実際に起きた症状（docs/DEV-NOTES.md M27）が横架材でも起きたということ。
-			std::size_t repaired = 0;
-			// 潰れた（または作り直した）1 本目の実測。原因をパス側と高さ基準側に分けられる
-			// のはこの 1 行だけなので、必ず持ち帰る。
-			std::string collapsedProbe;
-#endif
-		};
-
 		// 横架材 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。**構造材ツールで描けたときだけ** outObject に
 		// そのハンドルを入れる（断面寸法データタグの関連付け先。フォールバックの直線は
 		// 断面寸法を持たないのでタグを付ける相手にしない。draw/Column の柱ハンドルと同じ扱い）。
-		bool DrawOne(const core::MemberCommand& member, RefNumber style, MemberFailures& failures,
-					 MCObjectHandle& outObject)
+		bool DrawOne(const core::MemberCommand& member, RefNumber style,
+					 StructuralFailures& failures, MCObjectHandle& outObject)
 		{
 			// 断面（プロファイルグループ）を**先に**用意する。作れなければ PIO を作らない
 			// ——断面の無い構造材は生成できても実体が描かれず、「オブジェクトはあるのに
@@ -156,11 +128,15 @@ namespace HomeskzIfcImport::draw
 			// 「柱が長さ 0 で描かれる（M27）」）。
 			spec.expectedLength = core::distance(member.start, member.end);
 			spec.extentKind = StructuralExtentKind::Horizontal;
-			// 【自己修復】潰れていたらパスを作り直して差し替える。柱で 46 本が実際にこれで
-			// 直った（渡した 2 点の曲線は正しいのに PIO 化で潰れる。docs/DEV-NOTES.md M27）。
-			// **柱のあの症状そのものは水平材では起きない**（作り直しの死角は鉛直材に固有。
-			// draw/StructuralMember.h の retryWithFreshPath）が、**高さ基準を 1 本も持てな
-			// かったときの 0 長は向きを問わない**ので、横架材でも引き金は残す。
+			// 【自己修復】潰れていたらパスを作り直して差し替える。**柱は M27 の症状（渡した
+			// 2 点の Z の差に 1 ULP の丸めが残り、`ResetObject` の再構築から外れる）が
+			// Z を渡さなくなって原理的に消えたので、引き金を外してある**（draw/Column）。
+			// **水平材はそもそもその死角に落ちない**（水平成分が 1e-7 以上ある材は必ず
+			// 作り直される。draw/StructuralMember.h の retryWithFreshPath）——それでも
+			// **残す**のは、**高さ基準を 1 本も持てなかったときの 0 長は向きを問わない**
+			// からで、こちらは今も起こりうる（`boundOk` が false になる経路）。
+			// **健全な材で誤って引かれる恐れは無い**——水平材の実体は平面長そのものなので、
+			// 潰れていない限り必ず 0 から離れている。
 			// **差し替えるパスは挿入点からの相対**で渡す（世界座標で渡すと材が挿入点の
 			// ぶん動く。draw/StructuralMember.h の retryWithFreshPath）ので、始端を原点に
 			// 置いた差を渡す。
@@ -199,41 +175,8 @@ namespace HomeskzIfcImport::draw
 			// 断面寸法データタグの関連付け先として記録する（draw/Tag が引く）。
 			outObject = result.object;
 
-			// 断面が入らなかった本数を数える（診断。drawMembers が完了ダイアログへ載せる）。
-			if (!result.sectionOk)
-				++failures.section;
-			// 端部オフセットを書けなかった本数。書けないと材が相手の芯線まで伸びたまま
-			// 描かれる（＝勝ち側の半幅ぶん長い）ので、切り分けの手掛かりを 1 件だけ残す。
-			if (!result.endOffsetOk)
-			{
-				++failures.offset;
-#if VW_DRAW_VERIFY
-				if (failures.offsetHint.empty())
-					failures.offsetHint = result.offsetParamHint;
-#endif
-			}
-
-			// パスから部材長を取れたかは DrawStructuralMember が読み戻している（上の
-			// expectedLength / extentKind）。0 のままなら実体が無く画面に描かれない
-			// （冒頭「パスの遍歴」の 3D ポリラインで起きた症状そのもの）。潰れていたパスを
-			// 作り直して直った本数は別に数える——**直っていても「そこで潰れた」という事実は
-			// 残す**（柱と同じ扱い。draw/Column.cpp）。
-#if VW_DRAW_VERIFY
-			if (result.collapsed)
-				++failures.length;
-			if (result.repairedByPath)
-				++failures.repaired;
-			if ((result.collapsed || result.repairedByPath) && failures.collapsedProbe.empty())
-				failures.collapsedProbe = result.collapsedProbe;
-			// 高さが命令と違った本数（上の checkElevation）。**実体はあるので潰れの数には
-			// 出ない**——材が揃って違う高さに並ぶ形なので、別に数えて持ち帰る。
-			if (!result.elevationOk)
-			{
-				++failures.elevation;
-				if (failures.elevationProbe.empty())
-					failures.elevationProbe = result.elevationProbe;
-			}
-#endif
+			// 失敗の内訳を数え込む（診断。drawMembers が完了ダイアログへ載せる）。
+			failures.record(result);
 			return true;
 		}
 	} // namespace
@@ -247,16 +190,13 @@ namespace HomeskzIfcImport::draw
 		const RefNumber style = ResolvePluginStyle(kMemberStyle);
 
 		std::size_t drawn = 0;
-		MemberFailures failures;
+		StructuralFailures failures;
 		for (std::size_t index = 0; index < document.members.size(); ++index)
 		{
 			const core::MemberCommand& member = document.members[index];
 
-			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
-			// 描画の前に 1 件進める（＝「いま何本目を描いているか」が見える）。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// 配置先レイヤ（"n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁"）が無い命令は
 			// スキップする（規約は ActivateExistingLayer）。
@@ -279,54 +219,14 @@ namespace HomeskzIfcImport::draw
 		if (drawn > 0 && style != 0)
 			gSDK->UpdateStyledObjects(style);
 
-#if VW_DRAW_VERIFY
-		const bool report = failures.path > 0 || failures.section > 0 || failures.length > 0 ||
-							failures.repaired > 0 || failures.offset > 0 ||
-							failures.elevation > 0 || style == 0;
-#else
-		const bool report =
-			failures.path > 0 || failures.section > 0 || failures.offset > 0 || style == 0;
-#endif
-		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「作れたが断面が
-		// 入らなかった」「スタイルが見つからなかった」を件数で持ち帰る。横架材が 1 本も
-		// 見えないときに、原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
-		// **読み戻して検算した件数**（長さ・作り直し・高さ）は開発ビルドにしか無い
-		// （上の report と draw/Verify.h）。
-		if (outDiagnostics != nullptr && report)
-		{
-			std::string note = "横架材の診断: ";
-			if (failures.path > 0)
-				note += "パスが 2 点にならなかった材 " + std::to_string(failures.path) + " 本。";
-			if (failures.section > 0)
-				note += "断面を設定できなかった材 " + std::to_string(failures.section) + " 本。";
-#if VW_DRAW_VERIFY
-			if (failures.length > 0)
-				note += "パスから長さを取れなかった材 " + std::to_string(failures.length) + " 本。";
-			if (failures.repaired > 0)
-				note += "パスを作り直して直った材 " + std::to_string(failures.repaired) + " 本。";
-			if ((failures.length > 0 || failures.repaired > 0) && !failures.collapsedProbe.empty())
-				note += "（1 本目: " + failures.collapsedProbe + "）";
-			if (failures.elevation > 0)
-			{
-				note +=
-					"命令と違う高さに描かれた材 " + std::to_string(failures.elevation) + " 本。";
-				if (!failures.elevationProbe.empty())
-					note += "（1 本目: " + failures.elevationProbe + "）";
-			}
-#endif
-			if (failures.offset > 0)
-			{
-				note += "端部オフセットを設定できなかった材 " + std::to_string(failures.offset) +
-						" 本。";
-#if VW_DRAW_VERIFY
-				if (!failures.offsetHint.empty())
-					note += "（候補: " + failures.offsetHint + "）";
-#endif
-			}
-			if (style == 0)
-				note += "プラグインスタイル『木質構造材_横架材』が見つかりません。";
-			*outDiagnostics = std::move(note);
-		}
+		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、失敗の内訳を件数で
+		// 持ち帰る（文言は draw/StructuralMember。横架材が 1 本も見えないときに、原因が命令側
+		// （解析）か PIO のパラメータ側かを切り分けられる）。
+		std::string note = DescribeStructuralFailures(failures, "材");
+		if (style == 0)
+			note += "プラグインスタイル『木質構造材_横架材』が見つかりません。";
+		if (outDiagnostics != nullptr && !note.empty())
+			*outDiagnostics = "横架材の診断: " + note;
 
 		return drawn;
 	}

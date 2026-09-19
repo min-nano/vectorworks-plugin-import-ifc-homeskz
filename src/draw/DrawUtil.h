@@ -23,6 +23,7 @@
 
 #include "core/Document.h"
 #include "core/Layout.h"
+#include "core/Progress.h"
 #include "draw/Verify.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
@@ -35,6 +36,75 @@
 
 namespace HomeskzIfcImport::draw
 {
+	// --- SDK へ渡す数値を意味のある名前で持つ ---------------------------------------------
+	//
+	// ISDK は種別・表示状態・変数セレクタを**素の short** で受け取る。呼び出し側に 0 / 1 /
+	// 1064 が並ぶと何を選んだのか読めないので、使うものだけを列挙して名前を付ける。
+
+	// CreateLayer の layerType（SDK の ELayerType。Kernel/API/MiniCadCallBacks.h）。
+	enum class LayerKind : short
+	{
+		Design = 1, // デザインレイヤ
+		Sheet = 2,	// シート（プレゼンテーション）レイヤ
+	};
+
+	// SetViewportLayerVisibility の表示種別。**グレー（2）は使わない**——対象外のレイヤを
+	// グレーにすると図に薄く残る。
+	enum class LayerVisibility : short
+	{
+		Visible = 0,
+		Hidden = 1,
+	};
+
+	// SetViewportClassVisibility の表示種別（SDK の EClassVisibility。VWFC/VWObjects/
+	// VWClass.h）。**VS の 0/1/2 とは値が違う**（1 は「非表示」ではない）ので、表示へ戻す
+	// Normal だけを使う。
+	enum class ClassVisibility : short
+	{
+		Normal = 0,
+		Invisible = -1,
+		Grayed = 2,
+	};
+
+	// GetObjectTypeN が返すノード種別（Objs.TDType.h）。走査で拾い分けるものだけ。
+	enum class ObjectNodeType : short
+	{
+		InternalRecord = 0,	   // 空のシンボル定義が 1 つだけ持つレコード
+		SymbolDefinition = 16, // kSymDefNode
+	};
+
+	// SetObjectVariable / GetObjectVariable のセレクタ（Kernel/API/ObjectVariables.h）。
+	// SDK が名前を持つものはその定数を、持たないものは ci-debug で確かめた番号を入れる。
+	enum class ObjectVariable : short
+	{
+		PlanarObjectIsScreen =
+			ovPlanarObjIsSrceen, // 平面図形をスクリーン平面に置くか（綴りは SDK ママ）
+		IsStructural = ovIsStructural,				// 構造オブジェクトとして扱うか
+		SlabHeight = ovSlabHeight,					// スラブの高さ
+		SlabRoofPt1 = ovSlabRoofPt1,				// 屋根面の基準線（始点）
+		SlabRoofPt2 = ovSlabRoofPt2,				// 同（終点）
+		SlabRoofUpslopePt = ovSlabRoofUpslopePt,	// 登り方向の側の点
+		SlabRoofRise = ovSlabRoofRise,				// 勾配の高さ
+		SlabRoofRun = ovSlabRoofRun,				// 勾配の底辺
+		SheetPaperWidth = ovLayerSheetPaperWidth,	// 用紙の幅（インチ）
+		SheetPaperHeight = ovLayerSheetPaperHeight, // 用紙の高さ（インチ）
+		// 断面ビューポートの見え方。**SDK に名前が無い**ので番号で持つ（ci-debug で確認）。
+		ViewportPlanarObjects = 1035, // プレイナー（レイヤ平面）／2D 図形を表示するか
+		Viewport2DComponents = 1059, // ハイブリッドシンボル等の 2D コンポーネントを表示するか
+		ViewportBeyondCutPlane = 1064, // 切断面より奥の図形を表示するか
+	};
+
+	// SetObjectStoryBound / GetObjectStoryBound のバウンド ID（SDK の TObjectBoundID
+	// ＝ Sint32。別名が SDK の名前空間の中にあるので実体で持つ）。
+	//   * スラブ（床板・底盤）は高さ基準を 1 つだけ持つので常に Slab。
+	//   * 構造材（横架材・垂木・柱）は始端・終端の 2 つ（柱では下端＝始端・上端＝終端）。
+	enum class StoryBoundSlot : Sint32
+	{
+		Slab = 0,
+		Start = 0,
+		End = 1,
+	};
+
 	// オブジェクトのクラスを名前で設定する。AddClass は既存なら索引を返し、無ければクラスを作
 	// る。クラス名が空なら何もしない（無クラス＝既定クラスのまま）。
 	void SetClassByName(MCObjectHandle object, const std::string& className);
@@ -44,6 +114,34 @@ namespace HomeskzIfcImport::draw
 	// 属性ごとに by-class を指定する（ISDK の関数名は VS と異なる: PColors=ペン色 /
 	// FColors=面色 / PPat=線種 / FPat=面パターン / Arrow=マーカー）。
 	void SetAllAttributesByClass(MCObjectHandle object);
+
+	// クラスを割り当てて、描画属性をそのクラスに従わせる（上の 2 つをこの順で呼ぶ）。
+	// 描いたものは**ほぼ必ず**この組で仕上げるので、2 行の繰り返しを 1 か所にまとめる。
+	void SetClassWithAttributes(MCObjectHandle object, const std::string& className);
+
+	// PIO の定義を**設定ダイアログを出さずに**用意する。その PIO を 1 つでも置くフェーズの
+	// 先頭で 1 回呼ぶ。
+	//
+	// CreateCustomObject は、その名前の PIO が**その文書に**まだ定義されていなければ
+	// DefineCustomObject で定義を作る。既定が kCustomObjectPrefAlways なので、**最初の
+	// 1 個を作るときだけ「オブジェクトの設定」ダイアログが出て取り込みが止まる**
+	// （M12 の記号 PIO で実機確認）。**静的フラグで 1 回だけにしない**——定義は文書ごとなので、
+	// 次の文書への取り込みで抜けてしまう。
+	void PrepareCustomObjectDefinition(const char* universalName);
+
+	// オブジェクトがそのノード種別か（GetObjectTypeN）。
+	bool IsObjectType(MCObjectHandle object, ObjectNodeType type);
+
+	// 命令 1 件ぶん進めてよいか。中止（進捗ダイアログのキャンセル）なら false で、呼び出し側は
+	// break して残りを描かない。進捗は**描画の前に** 1 件進める（＝「いま何件目を描いて
+	// いるか」が見える）。要素ごとの描画ループが同じ 4 行を各々書いていた。
+	inline bool AdvanceProgress(core::ProgressReporter& progress)
+	{
+		if (progress.cancelled())
+			return false;
+		progress.step();
+		return true;
+	}
 
 	// PIO のパラメータ名を解決する。universal 名で見つかればそれを使い、見つからなければ
 	// ローカライズ名（OIP に出る日本語）で引き直す。**名前が 1 つ違うだけで setter は黙って
@@ -129,20 +227,24 @@ namespace HomeskzIfcImport::draw
 	// docs/DEV-NOTES.md「シンボル定義を SDK から組み立てるのは断念した」）。
 	bool HasSymbolDefinition(const std::string& name);
 
-	// オブジェクト変数への書き込みの定型（TVariableBlock の組み立てを 1 か所に）。
-	// かつて野地板（2D 点・実数）と基礎・軸組図（真偽値。コメントで互いに「同じ流儀」と
-	// 参照し合っていた）が同じラッパーを各々持っていた。型ごとに名前を分けるのは、
-	// オーバーロードにすると Boolean（unsigned char）と double の変換順位が並んで
-	// 呼び分けが曖昧になるため。
-	void SetBooleanVariable(MCObjectHandle object, short variable, Boolean value);
-	void SetRealVariable(MCObjectHandle object, short variable, double value);
-	void SetPointVariable(MCObjectHandle object, short variable, const core::Vec2& point);
+	// オブジェクト変数への書き込みの定型（TVariableBlock の組み立てを 1 か所に）。型ごとに
+	// 名前を分けるのは、オーバーロードにすると Boolean（unsigned char）と double の変換順位が
+	// 並んで呼び分けが曖昧になるため。
+	void SetBooleanVariable(MCObjectHandle object, ObjectVariable variable, Boolean value);
+	void SetRealVariable(MCObjectHandle object, ObjectVariable variable, double value);
+	void SetPointVariable(MCObjectHandle object, ObjectVariable variable, const core::Vec2& point);
 
 	// 一覧に無ければ追加する（登場順の dedupe。診断へ残すシンボル名・伏図記号レイヤ名・
 	// レベル種別の事前登録が同じ形を各々書いていた）。**参照を三項演算子で束ねてから
 	// push_back する形にしない**——clang-tidy の misc-const-correctness がその形の変更を
 	// 見落とし、束ねた先の vector に const を要求してくる（CI の tidy-mac / tidy-windows）。
 	void PushUnique(std::vector<std::string>& values, const std::string& value);
+
+	// 診断の 1 文を積む（count が 0 なら何もしない）。"<説明> <件数> <助数詞>（<補足>）。"
+	// の形で、detail が nullptr なら補足を省く。要素ごとの診断が同じ 2 行を 20 か所以上で
+	// 各々書いていた。
+	void AppendCount(std::string& text, const char* what, std::size_t count,
+					 const char* counter = "件", const char* detail = nullptr);
 
 	// 診断・記録の行を改行区切りで積む（text が空なら無視・sink が nullptr なら何もしない）。
 	// 要素ごとの診断の連結（draw/ExecuteDocument）と伏図・軸組図の診断組み立て
@@ -163,14 +265,7 @@ namespace HomeskzIfcImport::draw
 
 	// --- 高さ基準（ストーリバウンド）の定型 ----------------------------------------------
 	//
-	// SetObjectStoryBound に渡すバウンド ID。型は SDK の TObjectBoundID（= Sint32）だが、
-	// その別名は SDK の名前空間の中にあるため実体の Sint32 で持つ（暗黙変換で同じ）。
-	//   * スラブ（床板・底盤）は高さ基準を 1 つだけ持つので常に kSlabBoundID。
-	//   * 構造材（横架材・垂木・柱）は始端＝kStartBoundID・終端＝kEndBoundID の 2 つ
-	//     （柱では下端＝始端・上端＝終端に対応する）。
-	inline constexpr Sint32 kSlabBoundID = 0;
-	inline constexpr Sint32 kStartBoundID = 0;
-	inline constexpr Sint32 kEndBoundID = 1;
+	// バウンド ID は上の StoryBoundSlot。
 
 	// 命令の高さ基準（StoryBoundCommand）を SDK の SStoryObjectData へ写す。**この変換は
 	// ここに 1 つだけ置く**——かつて床板（インライン展開）・基礎（StoryBound）・構造材
@@ -183,7 +278,7 @@ namespace HomeskzIfcImport::draw
 	// と「VW が実際に持っている高さ基準」を切り分けられず、実体が無い柱の原因を
 	// 解析側とも描画側とも決められない周が 4 つ続いた（docs/DEV-NOTES.md
 	// 「柱が長さ 0 で描かれる（M27）」）。
-	bool ApplyStoryBound(MCObjectHandle object, Sint32 boundID,
+	bool ApplyStoryBound(MCObjectHandle object, StoryBoundSlot slot,
 						 const core::StoryBoundCommand& bound);
 
 	// **VW が実際に持っている**高さ基準を読み戻して 1 行にする（`HasObjectStoryBound` ＋
@@ -195,7 +290,7 @@ namespace HomeskzIfcImport::draw
 	// **開発ビルドだけ**（draw/Verify.h）。**書くほう（`ApplyStoryBound`）は本番にも要る**
 	// ——外してよいのは「書いた record を読み戻して並べる」こちらだけである。
 #if VW_DRAW_VERIFY
-	std::string DescribeStoryBound(MCObjectHandle object, Sint32 boundID);
+	std::string DescribeStoryBound(MCObjectHandle object, StoryBoundSlot slot);
 #endif
 
 	// **プラグインオブジェクト（PIO）が実際に持っているパス**を読み戻して 1 行にする

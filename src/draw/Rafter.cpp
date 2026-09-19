@@ -66,34 +66,9 @@ namespace HomeskzIfcImport::draw
 		// 冒頭「スタイルは当てない」）。
 		constexpr RefNumber kNoStyle = 0;
 
-		// 診断の集計（完了ダイアログ・診断ログへ持ち帰る件数）。1 本ごとに増やすだけなので
-		// 出力引数をまとめて 1 つにする（横架材と同じ形。draw/Member.cpp）。
-		struct RafterFailures
-		{
-			std::size_t path = 0;	 // パスが 2 点にならなかった
-			std::size_t section = 0; // 断面（主幅・主せい）が入らなかった
-			// ここから下は**読み戻して検算した結果**なので開発ビルドだけ（draw/Verify.h）。
-			// **自己修復（潰れたパスの作り直し）は本番でも走る**——外れるのはその結果を
-			// 数えて診断へ載せるところだけである。
-#if VW_DRAW_VERIFY
-			std::size_t length = 0; // パスから部材長を取れなかった（実体が無い）
-			// パスを作り直して差し替えたら直った本数（draw/StructuralMember.h の
-			// retryWithFreshPath）。0 でなければ「渡した曲線は正しく、PIO 化で潰れていた」。
-			std::size_t repaired = 0;
-			// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。
-			// パスから Z を外したぶんの見張りで、0 でなければ材は在るのに違う高さ・違う
-			// 勾配で並んでいる——本数にもスパンにも出ないので、これが唯一の手掛かりになる。
-			std::size_t elevation = 0;
-			std::string elevationProbe; // ずれた 1 本目の実測（命令の Z と図面の Z）
-			// 潰れた（または作り直した）1 本目の実測。原因をパス側と高さ基準側に分けられる
-			// のはこの 1 行だけなので、必ず持ち帰る。
-			std::string collapsedProbe;
-#endif
-		};
-
 		// 垂木 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。
-		bool DrawOne(const core::RafterCommand& rafter, RafterFailures& failures)
+		bool DrawOne(const core::RafterCommand& rafter, StructuralFailures& failures)
 		{
 			// 実際の材端は支持点ではなく軒先（冒頭「軸組ツールから構造材ツールへ移した」）。
 			const core::RafterEaveEnd eave = core::rafterEaveEnd(rafter);
@@ -140,9 +115,9 @@ namespace HomeskzIfcImport::draw
 			// 一度も動いていなかった（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 			spec.expectedLength = core::distance(eave.point, rafter.end);
 			spec.extentKind = StructuralExtentKind::Horizontal;
-			// 【自己修復】潰れていたらパスを作り直して差し替える。**パスを作る口も PIO 化の口も
-			// 柱・横架材と同じもの**なので、同じ事故は垂木でも起きうる（実機で出たのは柱だけ
-			// だが、出ていないことの保証にはならない。docs/DEV-NOTES.md M27）。差し替える
+			// 【自己修復】潰れていたらパスを作り直して差し替える。**残す理由と、健全な材で
+			// 誤って引かれない理由は横架材と同じ**（draw/Member。M27 の死角は鉛直材に固有
+			// だが、高さ基準を 1 本も持てなかったときの 0 長は向きを問わない）。差し替える
 			// パスは**挿入点からの相対**で渡す。
 			spec.retryWithFreshPath = true;
 			spec.pathStart = core::Vec2{0.0, 0.0};
@@ -173,30 +148,8 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			// 断面が入らなかった本数を数える（診断。drawRafters が完了ダイアログへ載せる）。
-			if (!result.sectionOk)
-				++failures.section;
-
-#if VW_DRAW_VERIFY
-			// パスから部材長を取れたかは DrawStructuralMember が読み戻している（上の
-			// expectedLength / extentKind）。0 のままなら実体が無く画面に描かれない。潰れて
-			// いたパスを作り直して直った本数は別に数える——**直っていても「そこで潰れた」と
-			// いう事実は残す**（柱・横架材と同じ扱い）。
-			if (result.collapsed)
-				++failures.length;
-			if (result.repairedByPath)
-				++failures.repaired;
-			if ((result.collapsed || result.repairedByPath) && failures.collapsedProbe.empty())
-				failures.collapsedProbe = result.collapsedProbe;
-			// 高さが命令と違った本数（上の checkElevation）。**実体はあるので潰れの数には
-			// 出ない**——材が揃って違う高さに並ぶ形なので、別に数えて持ち帰る。
-			if (!result.elevationOk)
-			{
-				++failures.elevation;
-				if (failures.elevationProbe.empty())
-					failures.elevationProbe = result.elevationProbe;
-			}
-#endif
+			// 失敗の内訳を数え込む（診断。drawRafters が完了ダイアログへ載せる）。
+			failures.record(result);
 			return true;
 		}
 	} // namespace
@@ -208,14 +161,11 @@ namespace HomeskzIfcImport::draw
 			return 0;
 
 		std::size_t drawn = 0;
-		RafterFailures failures;
+		StructuralFailures failures;
 		for (const core::RafterCommand& rafter : document.rafters)
 		{
-			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
-			// 描画の前に 1 件進める（＝「いま何本目を描いているか」が見える）。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// 配置先レイヤ（"n-垂木"）が無い命令はスキップする（規約は ActivateExistingLayer）。
 			if (ActivateExistingLayer(rafter.layer) == nil)
@@ -225,41 +175,12 @@ namespace HomeskzIfcImport::draw
 				++drawn;
 		}
 
-		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、「作れたが断面が
-		// 入らなかった」を件数で持ち帰る（横架材・柱と同じ扱い）。垂木が 1 本も見えないときに、
-		// 原因が命令側（解析）か PIO のパラメータ側かを切り分けられる。
-		// 読み戻して検算した件数（長さ・作り直し・高さ）は開発ビルドにしか無い（draw/Verify.h）。
-
-#if VW_DRAW_VERIFY
-		const bool report = failures.path > 0 || failures.section > 0 || failures.length > 0 ||
-							failures.repaired > 0 || failures.elevation > 0;
-#else
-		const bool report = failures.path > 0 || failures.section > 0;
-#endif
-		if (outDiagnostics != nullptr && report)
-		{
-			std::string note = "垂木の診断: ";
-			if (failures.path > 0)
-				note += "パスが 2 点にならなかった材 " + std::to_string(failures.path) + " 本。";
-			if (failures.section > 0)
-				note += "断面を設定できなかった材 " + std::to_string(failures.section) + " 本。";
-#if VW_DRAW_VERIFY
-			if (failures.length > 0)
-				note += "パスから長さを取れなかった材 " + std::to_string(failures.length) + " 本。";
-			if (failures.repaired > 0)
-				note += "パスを作り直して直った材 " + std::to_string(failures.repaired) + " 本。";
-			if ((failures.length > 0 || failures.repaired > 0) && !failures.collapsedProbe.empty())
-				note += "（1 本目: " + failures.collapsedProbe + "）";
-			if (failures.elevation > 0)
-			{
-				note +=
-					"命令と違う高さに描かれた材 " + std::to_string(failures.elevation) + " 本。";
-				if (!failures.elevationProbe.empty())
-					note += "（1 本目: " + failures.elevationProbe + "）";
-			}
-#endif
-			*outDiagnostics = std::move(note);
-		}
+		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、失敗の内訳を件数で
+		// 持ち帰る（文言は draw/StructuralMember。垂木が 1 本も見えないときに、原因が命令側
+		// （解析）か PIO のパラメータ側かを切り分けられる）。
+		const std::string note = DescribeStructuralFailures(failures, "材");
+		if (outDiagnostics != nullptr && !note.empty())
+			*outDiagnostics = "垂木の診断: " + note;
 
 		return drawn;
 	}
