@@ -66,11 +66,9 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			{
-				VW_DRAW_TIME("スラブ:クラスと属性");
-				SetClassByName(slab, floor.drawClass);
-				SetAllAttributesByClass(slab);
-			}
+			// ひとまとめの区間にしない（入れ子になる。draw/DrawUtil の【計測】）。
+			SetClassByName(slab, floor.drawClass);
+			SetAllAttributesByClass(slab);
 
 			// 構成（床仕上げ／床下地）と基準面は**このスラブへ直接**与える。スラブスタイルは
 			// 作らない・当てない（draw/DrawUtil.h「複合オブジェクトの構成」）。CreateSlab は

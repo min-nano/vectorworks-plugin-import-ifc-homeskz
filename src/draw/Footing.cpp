@@ -386,11 +386,9 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			{
-				VW_DRAW_TIME("スラブ:クラスと属性");
-				SetClassByName(object, slab.drawClass);
-				SetAllAttributesByClass(object);
-			}
+			// ひとまとめの区間にしない（入れ子になる。draw/DrawUtil の【計測】）。
+			SetClassByName(object, slab.drawClass);
+			SetAllAttributesByClass(object);
 
 			// 地中梁（台形プリズム）を持つ底盤は、プリズム群を**削り取りモディファイア**として
 			// 渡して底盤を clip する（底盤の構成層が地中梁の位置から消える）。可視の

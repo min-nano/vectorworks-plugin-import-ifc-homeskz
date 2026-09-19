@@ -314,11 +314,11 @@ namespace HomeskzIfcImport::draw
 		if (object == nil)
 			return result;
 
-		{
-			VW_DRAW_TIME("構造材:クラスと属性");
-			SetClassByName(object, spec.drawClass);
-			SetAllAttributesByClass(object);
-		}
+		// **ここをひとまとめの区間にしない。** この 2 つは自分で呼び出しごとに区間を開く
+		// ようになった（draw/DrawUtil の【計測】）ので、包むと入れ子になる
+		// （core/DrawTiming.h「使う側の作法」）。
+		SetClassByName(object, spec.drawClass);
+		SetAllAttributesByClass(object);
 		// スタイルは個別フィールドより**先に**関連付ける（後に設定する実測値で
 		// スタイル既定のパラメータを上書きするため）。
 		if (style != 0)

@@ -353,11 +353,9 @@ namespace HomeskzIfcImport::draw
 			// （中のテキストは CreateTagField が同じクラスに置く）。注釈へ移した後にビュー
 			// ポートのクラス表示を戻す後処理（ShowAllViewportClasses）が下にあるので、ここで
 			// 新しいクラスを持ち込んでもタグが映らなくなることはない。
-			{
-				VW_DRAW_TIME("タグ:クラスと属性");
-				SetClassByName(object, kTagClass);
-				SetAllAttributesByClass(object);
-			}
+			// ひとまとめの区間にしない（入れ子になる。draw/DrawUtil の【計測】）。
+			SetClassByName(object, kTagClass);
+			SetAllAttributesByClass(object);
 
 			// **関連付けを先に行う**（中身を組むより前）。タグの本文は関連付け先のレコードから
 			// 取るので、相手を決めてからレイアウトを組み、最後に UpdateDataTag で流し込む。
@@ -378,20 +376,20 @@ namespace HomeskzIfcImport::draw
 			// **レイアウトはタグ 1 本ごとに組み直している**（スタイルを作らない方針の裏返し。
 			// 文字スタイル資源の引き当て・式の組み立て・リンク支援の取得が 1 本ごとに走る）。
 			// 400〜530 本ぶんが伏図・軸組図の時間に溶け込んでいるので、ここを 1 区間にする。
+			// **ここも区間にしない。** 中の CreateTagField がタグ内のテキストへ
+			// SetClassByName / SetAllAttributesByClass を呼ぶので、包むと入れ子になる
+			// （draw/DrawUtil の【計測】）。round 1 の実測は 531 回で 221ms と軽い。
+			if (ResolveTagLayout(object, counts) == nil)
 			{
-				VW_DRAW_TIME("タグ:レイアウト");
-				if (ResolveTagLayout(object, counts) == nil)
-				{
-					++counts.layoutFailed;
-				}
-				else if (support)
-				{
-					// **レイアウトへ入れたテキストをタグフィールドとして認識させる。** これを
-					// しないとタグが式を拾わず、寸法が空のまま出る（スタイルを作っていた頃に
-					// スタイルに対して行っていたのと同じ呼び出し。SDK のコメントにも
-					// 「データタグ**または**データタグスタイルの」とある）。
-					support->UpdateUserDefinedTextsUIDs(object);
-				}
+				++counts.layoutFailed;
+			}
+			else if (support)
+			{
+				// **レイアウトへ入れたテキストをタグフィールドとして認識させる。** これを
+				// しないとタグが式を拾わず、寸法が空のまま出る（スタイルを作っていた頃に
+				// スタイルに対して行っていたのと同じ呼び出し。SDK のコメントにも
+				// 「データタグ**または**データタグスタイルの」とある）。
+				support->UpdateUserDefinedTextsUIDs(object);
 			}
 
 			// 引出線を OFF にする（**タグを部材の面ちょうどに置く**ので、既定 ON のままだと
