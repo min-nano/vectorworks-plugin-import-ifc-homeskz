@@ -1065,6 +1065,36 @@ namespace HomeskzIfcImport::draw
 	}
 #endif // VW_DRAW_VERIFY
 
+	bool PioPathChord(MCObjectHandle object, double& outLength)
+	{
+		outLength = 0.0;
+		if (object == nil)
+			return false;
+		const MCObjectHandle path = gSDK->GetCustomObjectPath(object);
+		if (path == nil)
+			return false;
+		// ピース索引の起点は 0 / 1 のどちらの規約もありうる（DescribePioPath と同じ用心）ので
+		// 両方見て、**2 点以上あった最初のピース**を測る。測るのは先頭と末尾の距離
+		// ——構造材のパスは直線 1 本なので、途中の点は通過点にすぎない。
+		for (Sint32 piece = 0; piece <= 1; ++piece)
+		{
+			const Sint32 count = gSDK->NurbsGetNumPts(path, piece);
+			if (count < 2)
+				continue;
+			WorldPt3 first(0.0, 0.0, 0.0);
+			WorldPt3 last(0.0, 0.0, 0.0);
+			if (!gSDK->NurbsGetPt3D(path, piece, 0, first) ||
+				!gSDK->NurbsGetPt3D(path, piece, count - 1, last))
+				continue;
+			const double dx = last.x - first.x;
+			const double dy = last.y - first.y;
+			const double dz = last.z - first.z;
+			outLength = std::sqrt(dx * dx + dy * dy + dz * dz);
+			return true;
+		}
+		return false;
+	}
+
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size)
 	{
 		WorldRect bounds;

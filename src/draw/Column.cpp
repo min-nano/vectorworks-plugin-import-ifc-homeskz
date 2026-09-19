@@ -116,7 +116,9 @@ namespace HomeskzIfcImport::draw
 			// いる——本数には出ないので、これが唯一の手掛かりになる。
 			std::size_t elevation = 0;
 			std::string elevationProbe; // ずれた 1 本目の実測（命令の Z と図面の Z）
-			std::string lengthHint; // 「長さ」のパラメータ名の手掛かり（最初の 1 件）
+			// 実体を測れなかったときの手掛かり（最初の 1 件）。測れていれば空——柱では
+			// 実機で 197/197 測れているので、ここが埋まるのは異常のときだけである。
+			std::string extentHint;
 			// 潰れた 1 本目の実測（パスの頂点数・OIP の高さと長さ・命令のパス長・図面が
 			// 持っている高さ基準・図面のパスの頂点）。**原因をパス側と高さ基準側に分けるのは
 			// この 1 行だけ**なので、必ず持ち帰る。
@@ -279,8 +281,8 @@ namespace HomeskzIfcImport::draw
 					failures.collapsedProbe = std::string(buffer.data()) + result.collapsedProbe;
 				}
 			}
-			if (failures.lengthHint.empty())
-				failures.lengthHint = result.lengthParamHint;
+			if (failures.extentHint.empty())
+				failures.extentHint = result.extentHint;
 			// 高さが命令と違った本数（上の checkElevation）。**実体はあるので潰れの数には
 			// 出ない**——柱が揃って違う高さに立つ形なので、別に数えて持ち帰る。
 			if (!result.elevationOk)
@@ -338,7 +340,7 @@ namespace HomeskzIfcImport::draw
 #if VW_DRAW_VERIFY
 		const bool report = failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
 							failures.bound > 0 || failures.collapsed > 0 ||
-							failures.elevation > 0 || !failures.lengthHint.empty() || style == 0;
+							failures.elevation > 0 || !failures.extentHint.empty() || style == 0;
 #else
 		const bool report = failures.path > 0 || failures.section > 0 || failures.offset > 0 ||
 							failures.bound > 0 || style == 0;
@@ -371,9 +373,8 @@ namespace HomeskzIfcImport::draw
 				if (!failures.elevationProbe.empty())
 					note += "（1 本目: " + failures.elevationProbe + "）";
 			}
-			if (!failures.lengthHint.empty())
-				note +=
-					"「長さ」パラメータを引けませんでした（候補: " + failures.lengthHint + "）。";
+			if (!failures.extentHint.empty())
+				note += "描き上がった実体を測れませんでした（" + failures.extentHint + "）。";
 #endif
 			if (failures.offset > 0)
 			{

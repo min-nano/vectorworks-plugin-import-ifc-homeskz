@@ -29,6 +29,7 @@
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -94,22 +95,22 @@ namespace HomeskzIfcImport::draw
 		// `DialogStartElevation`（別物。レイヤの高さ基準で 0 を返す）とぶつかる。
 		const std::vector<const char*> kStartElevationNames = {"StartElevation"};
 		const std::vector<const char*> kEndElevationNames = {"EndElevation"};
-		// 水平材の実体（OIP「スパン」）。**書くためではなく読み戻して確かめるため**の名前で、
-		// 0 のままなら PIO がパスの長さを取れていない＝画面に何も描かれない。水平材は両端の
-		// Z が等しいので上の差では測れない（ヘッダ StructuralExtentKind）。以前は
-		// draw/Member.cpp が同じ名前を別に持っていたが、測る口はここ 1 つに寄せた
-		// （CLAUDE.md「重複を作らない置き場所」）。
-		const std::vector<const char*> kSpanNames = {"Span"};
-		const std::vector<const char*> kLocalizedSpan = {"スパン"};
 		const std::vector<const char*> kNoLocalized = {};
-		// 名前に「長さ」「高さ」を含むパラメータを**名前と値で**並べて証拠にするときの手掛かり
-		// （DescribeSizeParams / DescribeParamsContaining）。どのパラメータが OIP のどの欄
-		// なのかを実機で確かめる手段がほかに無い——実際、round 2 のこの一覧で「長さ」で引ける
-		// `CenterPointLength` が部材長ではないと分かった。**どちらも診断にしか使わない**ので
-		// 開発ビルドだけ（draw/Verify.h）。
+		// **水平材の実体はパラメータでは測らない。** OIP に「スパン」は無く（universal
+		// `Span` もローカライズ名「スパン」も実機で引けなかった。round 1）、名前で
+		// 引ける `CenterPointLength(長さ)` は部材長ではない（実長 5333 の柱で 100）。
+		// 代わりに**PIO が実際に持っているパスの両端の距離**（DrawUtil の `PioPathChord`）で
+		// 測る——`ResetObject` が解決済みバウンドから作り直したパスが、そのまま「描かれた
+		// 実体」だからである（ヘッダ StructuralExtentKind ／ Findings「Parametric Objects」）。
+		//
+		// 名前に「長さ」「高さ」「スパン」を含むパラメータを**名前と値で**並べて証拠にする
+		// ときの手掛かり（DescribeSizeParams）。どのパラメータが OIP のどの欄なのかを実機で
+		// 確かめる手段がほかに無い——実際、round 2 のこの一覧で「長さ」で引ける
+		// `CenterPointLength` が部材長ではないと分かり、round 1 のこの一覧に「スパン」が
+		// 1 件も出なかったことで、測る相手をパラメータからパスへ変える根拠になった。
+		// **診断にしか使わない**ので開発ビルドだけ（draw/Verify.h）。
 #if VW_DRAW_VERIFY
-		constexpr const char* kLengthParamNeedle = "長さ";
-		constexpr const char* kHeightParamNeedle = "高さ";
+		const std::vector<const char*> kSizeParamNeedles = {"長さ", "高さ", "スパン", "Span"};
 #endif
 		// 「長さ 0」とみなす閾値（mm）。潰れた部材はちょうど 0 を返すので、実部材の長さ
 		// （最短でも数十 mm）と取り違える余地は無い。
@@ -371,8 +372,13 @@ namespace HomeskzIfcImport::draw
 			if (spec.expectedLength > kCollapsedLength)
 			{
 #if VW_DRAW_VERIFY
+				// **測れなかったときだけ手掛かりを採る。** 鉛直材なら両端の絶対 Z を、
+				// 水平材なら PIO のパスを引けなかったということなので、パラメータの顔ぶれと
+				// 図面のパスを両方並べる——原因をどちら側に分けるかは、実機でしか読めない
+				// この 1 行にしか手掛かりが無い（ヘッダ extentHint）。
 				if (!size.found)
-					result.lengthParamHint = DescribeParamsContaining(pio, kLengthParamNeedle);
+					result.extentHint = DescribeSizeParams(object) + "・図面のパス[" +
+										DescribePioPath(object) + "]";
 #endif
 				result.collapsed = size.zero;
 				// **潰れていたら証拠を全部採る。** 高さ基準は**どう書いても両端の Z を動かせ
@@ -414,10 +420,10 @@ namespace HomeskzIfcImport::draw
 						// **測り方によって添える値を変える**（水平材の Z は両端が等しいのが
 						// 正常なので、並べても読む側を惑わせるだけ。ヘッダ
 						// StructuralExtentKind）。
-						if (spec.extentKind == StructuralExtentKind::Span)
+						if (spec.extentKind == StructuralExtentKind::Horizontal)
 							std::snprintf(
 								buffer.data(), buffer.size(),
-								"・パスを作り直した結果 実測 %g（スパン）・作り直したパス[",
+								"・パスを作り直した結果 実測 %g（パス長）・作り直したパス[",
 								retried.extent);
 						else
 							std::snprintf(
@@ -494,45 +500,55 @@ namespace HomeskzIfcImport::draw
 		try
 		{
 			const VWParametricObj pio(object);
-			// **両端の解決済み絶対 Z は kind に依らず読む。** 鉛直材はこの差が実体そのもの
-			// だが、水平材でも**描かれた高さが命令どおりか**の検算に要る——パスから Z を
+			// **両端の解決済み絶対 Z。** 鉛直材はこの差が実体そのもの。水平材では実体を
+			// 測れないが、**描かれた高さが命令どおりか**の検算に要る——パスから Z を
 			// 外した（ヘッダ冒頭「パスは 2D で渡す」）いま、高さを言える値はこの 2 つしか
 			// 残っていない。
-			const TXString startName =
-				ResolveParamNameAmong(pio, kStartElevationNames, kNoLocalized);
-			const TXString endName = ResolveParamNameAmong(pio, kEndElevationNames, kNoLocalized);
-			bool startOk = false;
-			bool endOk = false;
-			const double start = ReadParamNumber(pio, startName, startOk);
-			const double end = ReadParamNumber(pio, endName, endOk);
-			if (startOk && endOk)
+			//
+			// **本番ビルドの水平材では読まない。** そこでは高さの検算が畳まれていて使い道が
+			// 無いのに、名前の解決はパラメータ表を 1 本につき 2 回舐める（材は数百本ある）。
+#if VW_DRAW_VERIFY
+			constexpr bool kElevationAlways = true; // 開発ビルドは kind に関わらず読む
+#else
+			constexpr bool kElevationAlways = false;
+#endif
+			if (kElevationAlways || kind == StructuralExtentKind::Vertical)
 			{
-				size.elevationRead = true;
-				size.start = start;
-				size.end = end;
+				const TXString startName =
+					ResolveParamNameAmong(pio, kStartElevationNames, kNoLocalized);
+				const TXString endName =
+					ResolveParamNameAmong(pio, kEndElevationNames, kNoLocalized);
+				bool startOk = false;
+				bool endOk = false;
+				const double start = ReadParamNumber(pio, startName, startOk);
+				const double end = ReadParamNumber(pio, endName, endOk);
+				if (startOk && endOk)
+				{
+					size.elevationRead = true;
+					size.start = start;
+					size.end = end;
+				}
 			}
-			if (kind == StructuralExtentKind::Span)
+			if (kind == StructuralExtentKind::Horizontal)
 			{
-				// 水平材。**パラメータが実在するときだけ測る**——ResolveParamNameAmong は
-				// 見つからなくても候補の先頭を返し、GetParamReal は存在しない名前に 0 を返す
-				// ので、存在確認を落とすと「スパン」という名前が違うだけで**パスは正常なのに
-				// 全数を長さ 0 と誤報**する（診断が嘘をつくと切り分けが逆に遠のく）。
-				const TXString spanName = ResolveParamNameAmong(pio, kSpanNames, kLocalizedSpan);
-				if (spanName.IsEmpty() || pio.GetParamIndex(spanName) == static_cast<size_t>(-1))
-					return size;
-				bool spanOk = false;
-				const double span = ReadParamNumber(pio, spanName, spanOk);
-				if (!spanOk)
+				// 水平材。**PIO が実際に持っているパスの両端の距離**で測る（ヘッダ
+				// StructuralExtentKind）。`ResetObject` は解決済みバウンドからパスを作り直し、
+				// 水平成分は渡したパスのまま残すので、**リセット後のこのパスが描かれた実体
+				// そのもの**である（Findings「Parametric Objects」）。OIP の「スパン」は
+				// 実機に無いので引かない——**引けない名前を測りに行くと、パスは正常なのに
+				// 全数を「測れなかった」と報せ続けることになる**（以前はそうなっていた）。
+				double chord = 0.0;
+				if (!PioPathChord(object, chord))
 					return size;
 				size.found = true;
-				size.extent = std::abs(span);
+				size.extent = chord;
 				size.zero = size.extent < kCollapsedLength;
 				return size;
 			}
 			if (!size.elevationRead)
 				return size;
 			size.found = true;
-			size.extent = std::abs(end - start);
+			size.extent = std::abs(size.end - size.start);
 			size.zero = size.extent < kCollapsedLength;
 		}
 		catch (...)
@@ -557,10 +573,14 @@ namespace HomeskzIfcImport::draw
 				const TXString name = pio.GetParamName(i);
 				const std::string universal = name.GetStdString();
 				const std::string localized = pio.GetParamLocalizedName(i).GetStdString();
-				if (universal.find(kLengthParamNeedle) == std::string::npos &&
-					localized.find(kLengthParamNeedle) == std::string::npos &&
-					universal.find(kHeightParamNeedle) == std::string::npos &&
-					localized.find(kHeightParamNeedle) == std::string::npos)
+				const bool matches =
+					std::any_of(kSizeParamNeedles.begin(), kSizeParamNeedles.end(),
+								[&universal, &localized](const char* needle)
+								{
+									return universal.find(needle) != std::string::npos ||
+										   localized.find(needle) != std::string::npos;
+								});
+				if (!matches)
 					continue;
 				if (!found.empty())
 					found += ", ";

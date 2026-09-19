@@ -149,13 +149,18 @@ namespace HomeskzIfcImport::draw
 			spec.endOffset = member.endOffset;
 			// 【潰れ検出】描き上がりの長さ＝パスの水平長（端部オフセットはこの長さから戻す量
 			// なので、潰れていないかを見るこの検査には要らない）。**水平材は両端の Z が等しい
-			// ので「両端の絶対 Z の差」では測れない**——測るのは OIP の「スパン」である
-			// （draw/StructuralMember.h の StructuralExtentKind）。
+			// ので「両端の絶対 Z の差」では測れない**——測るのは**PIO が実際に持っている
+			// パスの両端の距離**である（draw/StructuralMember.h の StructuralExtentKind）。
+			// 以前はここが OIP の「スパン」で、**そのパラメータは実機に無い**ため
+			// 潰れ検出も下の自己修復も一度も動いていなかった（docs/DEV-NOTES.md
+			// 「柱が長さ 0 で描かれる（M27）」）。
 			spec.expectedLength = core::distance(member.start, member.end);
-			spec.extentKind = StructuralExtentKind::Span;
+			spec.extentKind = StructuralExtentKind::Horizontal;
 			// 【自己修復】潰れていたらパスを作り直して差し替える。柱で 46 本が実際にこれで
 			// 直った（渡した 2 点の曲線は正しいのに PIO 化で潰れる。docs/DEV-NOTES.md M27）。
-			// **同じ CreatePath を共有しているので、横架材でも起きうる。**
+			// **柱のあの症状そのものは水平材では起きない**（作り直しの死角は鉛直材に固有。
+			// draw/StructuralMember.h の retryWithFreshPath）が、**高さ基準を 1 本も持てな
+			// かったときの 0 長は向きを問わない**ので、横架材でも引き金は残す。
 			// **差し替えるパスは挿入点からの相対**で渡す（世界座標で渡すと材が挿入点の
 			// ぶん動く。draw/StructuralMember.h の retryWithFreshPath）ので、始端を原点に
 			// 置いた差を渡す。
