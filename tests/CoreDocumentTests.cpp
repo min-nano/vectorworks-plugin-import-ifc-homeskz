@@ -1727,6 +1727,45 @@ TEST(plan_content_bounds_sees_sheet_data_tags)
 	CHECK(near(max.y, 0.0 + core::kPlanContentMargin));
 }
 
+TEST(plan_content_bounds_takes_unlinked_sheet_tags_into_the_whole_document)
+{
+	// **関連付け先を引けないタグも図には出る。** draw/Tag は対応表に無い添字のタグを
+	// 「関連付け無し」で置くので（draw/Tag.cpp の drawViewportTags）、そのぶん図は広がる。
+	// validateDocument はこういう Document を弾くが、planContentBounds は**任意の
+	// Document を取れる公開関数**なので、暗黙の不変条件に寄りかからず広がりへ入れる。
+	//
+	// ただし**レイヤで絞るときは入れない**——どのレイヤに出るかを決める材が引けないので、
+	// 「この伏図に映るか」を答えられない。文書全体の広がり（layers が空）にだけ効かせる。
+	core::Document document;
+
+	core::ColumnCommand column;
+	column.layer = "1to2-柱";
+	column.position = core::Vec2{0.0, 0.0};
+	document.columns.push_back(column);
+
+	core::TagCommand tag;
+	tag.memberIndex = 7; // members は空＝引けない
+	tag.position = core::Vec2{0.0, 4000.0};
+
+	core::SheetCommand sheet;
+	sheet.number = "1";
+	sheet.title = "1階床伏図";
+	sheet.viewport.drawingTitle = "1階床伏図";
+	sheet.viewport.drawingNumber = "1";
+	sheet.viewport.layers = {"1to2-柱"};
+	sheet.viewport.tags.push_back(tag);
+	document.sheets.push_back(sheet);
+
+	core::Vec2 min;
+	core::Vec2 max;
+	CHECK(core::planContentBounds(document, {}, min, max));
+	CHECK(near(max.y, 4000.0 + core::kPlanContentMargin));
+
+	// レイヤで絞れば効かない（柱だけが残る）。
+	CHECK(core::planContentBounds(document, {"1to2-柱"}, min, max));
+	CHECK(near(max.y, 0.0 + core::kPlanContentMargin));
+}
+
 TEST(plan_content_bounds_ignores_section_data_tags)
 {
 	// **軸組図のタグは平面の広がりに入れない**（M28）。あちらの注釈空間は平面座標ではなく
