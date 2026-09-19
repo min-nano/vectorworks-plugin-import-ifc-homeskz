@@ -204,8 +204,7 @@ namespace HomeskzIfcImport::draw
 			// **文字スタイルを当てた後に**クラスと by-class を与える（描画属性はクラスの
 			// ものが最終的に効く）。文字スタイルは書体・大きさを、クラスは色・線の太さを
 			// 受け持つ。
-			SetClassByName(text, kTagClass);
-			SetAllAttributesByClass(text);
+			SetClassWithAttributes(text, kTagClass);
 
 			// **フィールドラベルはテキストの名前ではない。** 実機の構造ダンプで、手で作った
 			// （寸法が出ている）タグのレイアウトのテキストには**名前が付いていない**ことを
@@ -353,9 +352,10 @@ namespace HomeskzIfcImport::draw
 			// （中のテキストは CreateTagField が同じクラスに置く）。注釈へ移した後にビュー
 			// ポートのクラス表示を戻す後処理（ShowAllViewportClasses）が下にあるので、ここで
 			// 新しいクラスを持ち込んでもタグが映らなくなることはない。
-			// ひとまとめの区間にしない（入れ子になる。draw/DrawUtil の【計測】）。
-			SetClassByName(object, kTagClass);
-			SetAllAttributesByClass(object);
+			// **ここを区間で包まない。** 中の SetClassByName / SetAllAttributesByClass が
+			// 自分で呼び出しごとに区間を開く（draw/DrawUtil の【計測】）ので、包むと
+			// 入れ子になる（core/DrawTiming.h「使う側の作法」）。
+			SetClassWithAttributes(object, kTagClass);
 
 			// **関連付けを先に行う**（中身を組むより前）。タグの本文は関連付け先のレコードから
 			// 取るので、相手を決めてからレイアウトを組み、最後に UpdateDataTag で流し込む。
@@ -467,7 +467,7 @@ namespace HomeskzIfcImport::draw
 
 	void prepareDataTagPlugin()
 	{
-		gSDK->DefineCustomObject(TXString(kDataTagPlugin), kCustomObjectPrefNever);
+		PrepareCustomObjectDefinition(kDataTagPlugin);
 	}
 
 	std::size_t drawViewportTags(MCObjectHandle viewport, const core::ViewportCommand& command,
@@ -554,29 +554,22 @@ namespace HomeskzIfcImport::draw
 		std::string text = label + "の断面寸法タグの診断: ";
 		if (!counts.firstTag.empty())
 			text += "置いたタグの実際: " + counts.firstTag + "。";
-		if (counts.layoutFailed > 0)
-			text += "タグレイアウトを組めなかったタグ " + std::to_string(counts.layoutFailed) +
-					" 件（断面寸法が空になります）。";
+		AppendCount(text, "タグレイアウトを組めなかったタグ", counts.layoutFailed, "件",
+					"断面寸法が空になります");
 		if (counts.textStyleMissing)
 			text += std::string("文字スタイル「") + kTextStyleName +
 					"」が文書に無いので大きさだけを与えました。";
 		if (counts.linkMissing)
 			text += "タグフィールドの式を入れられませんでした（寸法が空になります）。";
-		if (counts.failed > 0)
-			text += "タグを置けなかった命令 " + std::to_string(counts.failed) + " 件。";
-		if (counts.leaderLeft > 0)
-			text += "引出線を消せなかったタグ " + std::to_string(counts.leaderLeft) + " 件。";
-		if (counts.unassociated > 0)
-			text += "関連付け先の横架材が無いタグ " + std::to_string(counts.unassociated) +
-					" 件（断面寸法が空になります）。";
+		AppendCount(text, "タグを置けなかった命令", counts.failed, "件");
+		AppendCount(text, "引出線を消せなかったタグ", counts.leaderLeft, "件");
+		AppendCount(text, "関連付け先の横架材が無いタグ", counts.unassociated, "件",
+					"断面寸法が空になります");
 		if (classesBroken)
 			text += "タグのクラスを表示に戻せませんでした（タグが図に出ません）。";
-		if (counts.updateFailed > 0)
-			text += "クラスを戻した後に更新できなかったビューポート " +
-					std::to_string(counts.updateFailed) + " 枚。";
-		if (counts.unmeasured > 0)
-			text +=
-				"実位置を測れず動かせなかったタグ " + std::to_string(counts.unmeasured) + " 件。";
+		AppendCount(text, "クラスを戻した後に更新できなかったビューポート", counts.updateFailed,
+					"枚");
+		AppendCount(text, "実位置を測れず動かせなかったタグ", counts.unmeasured, "件");
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw

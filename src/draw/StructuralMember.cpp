@@ -121,18 +121,44 @@ namespace HomeskzIfcImport::draw
 		constexpr double kElevationTol = 1.0;
 #endif
 
-		// フィールドに渡す値（ポップアップはキーで保持されるため数値文字列）。
+		// フィールドに渡す値。
 		constexpr const char* kProfileShapeRectangle = "Rectangle";
-		// 部材種別は横架材（梁）・柱とも "2"（種別の違いは構造用途＝StructuralUse の方に出る）。
-		constexpr const char* kMemberTypeStructural = "2";
-		// 断面基準点は 3×3 グリッドを 0 始まり・行優先（上段 0,1,2 / 中段 3,4,5 / 下段
-		// 6,7,8）で並べたキー。天端中央＝1・中央＝4 は実機確認済みで、中下＝7 はその並びから
-		// 採った（ローカル確認の項目。docs/DEV-NOTES.md M16）。
-		constexpr const char* kAxisAlignTopCentre = "1"; // 天端中央（3×3 グリッドの上段中央）
-		constexpr const char* kAxisAlignCentre = "4";		// 中央（同 0 始まり中央）
-		constexpr const char* kAxisAlignBottomCentre = "7"; // 中下（同 下段中央）
-		constexpr const char* kEndConditionSquare = "3";	// 直切り
 		constexpr const char* kProfileSeriesDefault = "AISC (Inch)";
+
+		// --- ポップアップのキー ---------------------------------------------------------
+		//
+		// 構造材ツールのポップアップは**選択肢をキー（数値の文字列）で保持する**ので、素で
+		// 書くと "2" / "3" / "7" が何を選んだのか読めない。使う選択肢だけを列挙して名前を
+		// 付け、文字列への変換は PopupKey 1 か所に置く。
+
+		// 部材種別。横架材（梁）・柱とも Structural で、種別の違いは構造用途
+		// （StructuralUse）の方に出る。
+		enum class MemberTypeKey : int
+		{
+			Structural = 2,
+		};
+
+		// 断面基準点。3×3 グリッドを 0 始まり・行優先（上段 0,1,2 / 中段 3,4,5 / 下段 6,7,8）
+		// で並べたキー。天端中央＝1・中央＝4 は実機確認済みで、中下＝7 はその並びから採った
+		// （ローカル確認の項目。docs/DEV-NOTES.md M16）。
+		enum class AxisAlignKey : int
+		{
+			TopCentre = 1,	  // 上段中央
+			Centre = 4,		  // 中央
+			BottomCentre = 7, // 下段中央
+		};
+
+		// 端部条件。
+		enum class EndConditionKey : int
+		{
+			Square = 3, // 直切り
+		};
+
+		// ポップアップのキーを PIO へ渡す文字列にする。
+		template <typename Key> TXString PopupKey(Key key)
+		{
+			return TXString(std::to_string(static_cast<int>(key)).c_str());
+		}
 
 		// 実数パラメータを読む。**実数で 0 を読んだだけでは 0 と決めない**——数値パラメータが
 		// 文字列で保持されている PIO があり（SetParamRealChecked が実際にその経路を持つ）、
@@ -191,18 +217,18 @@ namespace HomeskzIfcImport::draw
 		}
 #endif // VW_DRAW_VERIFY
 
-		// 断面基準点 → 構造材ツールのポップアップのキー。
-		const char* AxisAlignKey(StructuralAxisAlign align)
+		// 断面基準点 → ポップアップのキー。
+		AxisAlignKey AxisAlignOf(StructuralAxisAlign align)
 		{
 			switch (align)
 			{
 			case StructuralAxisAlign::Centre:
-				return kAxisAlignCentre;
+				return AxisAlignKey::Centre;
 			case StructuralAxisAlign::BottomCentre:
-				return kAxisAlignBottomCentre;
+				return AxisAlignKey::BottomCentre;
 			case StructuralAxisAlign::TopCentre:
 			default:
-				return kAxisAlignTopCentre;
+				return AxisAlignKey::TopCentre;
 			}
 		}
 
@@ -314,11 +340,10 @@ namespace HomeskzIfcImport::draw
 		if (object == nil)
 			return result;
 
-		// **ここをひとまとめの区間にしない。** この 2 つは自分で呼び出しごとに区間を開く
-		// ようになった（draw/DrawUtil の【計測】）ので、包むと入れ子になる
+		// **ここを区間で包まない。** 中の SetClassByName / SetAllAttributesByClass が自分で
+		// 呼び出しごとに区間を開く（draw/DrawUtil の【計測】）ので、包むと入れ子になる
 		// （core/DrawTiming.h「使う側の作法」）。
-		SetClassByName(object, spec.drawClass);
-		SetAllAttributesByClass(object);
+		SetClassWithAttributes(object, spec.drawClass);
 		// スタイルは個別フィールドより**先に**関連付ける（後に設定する実測値で
 		// スタイル既定のパラメータを上書きするため）。
 		if (style != 0)
@@ -334,8 +359,9 @@ namespace HomeskzIfcImport::draw
 		// **戻り値を見る。** 受け取られなければ材は高さを持てない（＝実体が無い材になる）。
 		{
 			VW_DRAW_TIME("構造材:高さ基準");
-			const bool startBoundOk = ApplyStoryBound(object, kStartBoundID, spec.startBound);
-			const bool endBoundOk = ApplyStoryBound(object, kEndBoundID, spec.endBound);
+			const bool startBoundOk =
+				ApplyStoryBound(object, StoryBoundSlot::Start, spec.startBound);
+			const bool endBoundOk = ApplyStoryBound(object, StoryBoundSlot::End, spec.endBound);
 			result.boundOk = startBoundOk && endBoundOk;
 		}
 
@@ -386,11 +412,11 @@ namespace HomeskzIfcImport::draw
 			SetParamRealChecked(pio, bAlias, spec.width);
 			SetParamRealChecked(pio, dAlias, spec.depth);
 			pio.SetParamAsString(kFieldMemberID, TXString(spec.memberId.c_str()));
-			pio.SetParamAsString(kFieldMemberType, kMemberTypeStructural);
+			pio.SetParamAsString(kFieldMemberType, PopupKey(MemberTypeKey::Structural));
 			pio.SetParamAsString(kFieldStructuralUse, TXString(spec.structuralUse.c_str()));
-			pio.SetParamAsString(kFieldAxisAlign, AxisAlignKey(spec.axisAlign));
-			pio.SetParamAsString(kFieldStartCondition, kEndConditionSquare);
-			pio.SetParamAsString(kFieldEndCondition, kEndConditionSquare);
+			pio.SetParamAsString(kFieldAxisAlign, PopupKey(AxisAlignOf(spec.axisAlign)));
+			pio.SetParamAsString(kFieldStartCondition, PopupKey(EndConditionKey::Square));
+			pio.SetParamAsString(kFieldEndCondition, PopupKey(EndConditionKey::Square));
 		}
 
 		// 端部オフセット。**要らない（両端 0）なら触らない**——スタイル既定が 0 なので書く
@@ -470,9 +496,9 @@ namespace HomeskzIfcImport::draw
 #if VW_DRAW_VERIFY
 				if (result.collapsed)
 					result.collapsedProbe = DescribeSizeParams(object) + "・図面の始端基準[" +
-											DescribeStoryBound(object, kStartBoundID) +
+											DescribeStoryBound(object, StoryBoundSlot::Start) +
 											"]・終端基準[" +
-											DescribeStoryBound(object, kEndBoundID) +
+											DescribeStoryBound(object, StoryBoundSlot::End) +
 											"]・図面のパス[" + DescribePioPath(object) + "]";
 #endif
 				// **潰れていたらパスを作り直して差し替える。** 渡した曲線が正しくても PIO の中の
@@ -675,5 +701,71 @@ namespace HomeskzIfcImport::draw
 		}
 	}
 #endif // VW_DRAW_VERIFY
+
+	void StructuralFailures::record(const StructuralMemberResult& result)
+	{
+		if (!result.sectionOk)
+			++section;
+		if (!result.boundOk)
+			++bound;
+		if (!result.endOffsetOk)
+		{
+			++offset;
+#if VW_DRAW_VERIFY
+			if (offsetHint.empty())
+				offsetHint = result.offsetParamHint;
+#endif
+		}
+#if VW_DRAW_VERIFY
+		if (result.collapsed)
+			++collapsed;
+		if (result.repairedByPath)
+			++repaired;
+		if ((result.collapsed || result.repairedByPath) && collapsedProbe.empty())
+			collapsedProbe = result.collapsedProbe;
+		if (lengthHint.empty())
+			lengthHint = result.lengthParamHint;
+		if (!result.elevationOk)
+		{
+			++elevation;
+			if (elevationProbe.empty())
+				elevationProbe = result.elevationProbe;
+		}
+#endif
+	}
+
+	std::string DescribeStructuralFailures(const StructuralFailures& failures, const char* subject)
+	{
+		std::string note;
+		// 「<説明><呼び名> N 本。」を積む（0 件は出さない。draw/DrawUtil の AppendCount）。
+		const auto count = [&note, subject](const char* what, std::size_t howMany)
+		{ AppendCount(note, (std::string(what) + subject).c_str(), howMany, "本"); };
+
+		count("パスが 2 点にならなかった", failures.path);
+		count("断面を設定できなかった", failures.section);
+		count("高さ基準を図面へ書けなかった", failures.bound);
+#if VW_DRAW_VERIFY
+		count("長さ 0 で描かれた（実体が無い）", failures.collapsed);
+		count("パスを作り直して直った", failures.repaired);
+		if (!failures.collapsedProbe.empty())
+			note += "（1 本目: " + failures.collapsedProbe + "）";
+		count("命令と違う高さに描かれた", failures.elevation);
+		if (failures.elevation > 0 && !failures.elevationProbe.empty())
+			note += "（1 本目: " + failures.elevationProbe + "）";
+		// **手掛かりは、説明すべき失敗があるときだけ出す。** 実体を測るパラメータ名は水平材
+		// （OIP の「スパン」）では実機に無く、引けないのが常態である——無条件に出すと健全な
+		// 周が毎回「問題あり」になる（実機 round 1。CLAUDE.md「異常は diagnostics・平常でも
+		// 出る記録は notes」）。潰れ・作り直しと同じ条件で添えれば、M27 のように名前を突き
+		// 止めたい場面では従来どおり出る。
+		if ((failures.collapsed > 0 || failures.repaired > 0) && !failures.lengthHint.empty())
+			note += "「長さ」パラメータを引けませんでした（候補: " + failures.lengthHint + "）。";
+#endif
+		count("端部オフセットを設定できなかった", failures.offset);
+#if VW_DRAW_VERIFY
+		if (failures.offset > 0 && !failures.offsetHint.empty())
+			note += "（候補: " + failures.offsetHint + "）";
+#endif
+		return note;
+	}
 
 } // namespace HomeskzIfcImport::draw

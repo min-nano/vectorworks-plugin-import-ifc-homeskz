@@ -154,11 +154,8 @@ namespace HomeskzIfcImport::draw
 
 		for (const core::SymbolCommand& command : commands)
 		{
-			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は件数で報告し、
-			// 描画の前に 1 件進める（＝「いま何件目を置いているか」が見える）。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// 配置先レイヤが無い命令はスキップする（規約は ActivateExistingLayer）。
 			const MCObjectHandle layer = ActivateExistingLayer(command.layer);
@@ -189,11 +186,10 @@ namespace HomeskzIfcImport::draw
 		if (note != nullptr && (missingLayers > 0 || failed > 0))
 		{
 			std::string text = std::string(elementLabel) + "の診断: ";
-			if (missingLayers > 0)
-				text += "配置先レイヤが無い命令 " + std::to_string(missingLayers) + " 件。";
+			AppendCount(text, "配置先レイヤが無い命令", missingLayers, "件");
 			if (failed > 0)
 			{
-				text += "配置できなかった命令 " + std::to_string(failed) + " 件。";
+				AppendCount(text, "配置できなかった命令", failed, "件");
 				if (!undefinedSymbols.empty())
 				{
 					text += "図面にシンボル定義がありません: ";

@@ -61,14 +61,14 @@ namespace HomeskzIfcImport::draw
 			if (slab == nil)
 			{
 				// フォールバック: 外形ポリゴンをクラス付きで残す。
-				SetClassByName(profile, floor.drawClass);
-				SetAllAttributesByClass(profile);
+				SetClassWithAttributes(profile, floor.drawClass);
 				return true;
 			}
 
-			// ひとまとめの区間にしない（入れ子になる。draw/DrawUtil の【計測】）。
-			SetClassByName(slab, floor.drawClass);
-			SetAllAttributesByClass(slab);
+			// **ここを区間で包まない。** 中の SetClassByName / SetAllAttributesByClass が
+			// 自分で呼び出しごとに区間を開く（draw/DrawUtil の【計測】）ので、包むと
+			// 入れ子になる（core/DrawTiming.h「使う側の作法」）。
+			SetClassWithAttributes(slab, floor.drawClass);
 
 			// 構成（床仕上げ／床下地）と基準面は**このスラブへ直接**与える。スラブスタイルは
 			// 作らない・当てない（draw/DrawUtil.h「複合オブジェクトの構成」）。CreateSlab は
@@ -94,7 +94,8 @@ namespace HomeskzIfcImport::draw
 				// からの高低差（一般部 0・床レベル指定時は ±差分）。これをしないと編集時に
 				// 高さがレイヤ基準へリセットされて実形状と矛盾する（変換とバウンド ID は
 				// draw/DrawUtil）。
-				gSDK->SetObjectStoryBound(slab, kSlabBoundID, StoryBoundData(floor.bound));
+				gSDK->SetObjectStoryBound(slab, static_cast<Sint32>(StoryBoundSlot::Slab),
+										  StoryBoundData(floor.bound));
 			}
 
 			{
@@ -110,11 +111,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		for (const core::FloorCommand& floor : document.floors)
 		{
-			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は枚数で報告し、
-			// 描画の前に 1 件進める（＝「いま何枚目を描いているか」が見える）。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// 配置先レイヤ（"n-FL"）が無い命令はスキップする（規約は ActivateExistingLayer）。
 			if (ActivateExistingLayer(floor.layer) == nil)

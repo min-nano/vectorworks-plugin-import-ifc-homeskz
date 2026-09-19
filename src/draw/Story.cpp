@@ -141,11 +141,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t count = 0;
 		for (const core::StoryCommand& command : commands)
 		{
-			// 中止（進捗ダイアログのキャンセル）は残りを作らずに抜ける。進捗は階数で報告し、
-			// 生成の前に 1 件進める（＝「いま何階目を作っているか」が見える）。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// CreateStory は名前・接尾辞を非 const TXString& で取るため名前付き lvalue を渡す。
 			TXString storyName(command.name.c_str());

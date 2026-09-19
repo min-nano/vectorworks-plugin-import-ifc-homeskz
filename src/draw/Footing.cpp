@@ -203,7 +203,7 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle handle = prism.GetThisObject();
 			if (handle == nil)
 				return nil;
-			SetBooleanVariable(handle, ovPlanarObjIsSrceen, false);
+			SetBooleanVariable(handle, ObjectVariable::PlanarObjectIsScreen, false);
 
 			// **VW が置いた位置を実測して命令どおりへ寄せ直す。** VWExtrudeObj は押し出しを内部で
 			// 「2D 基面 ＋ 基準高さ（baseElevation）＋ 厚み」に持ち替えるため、3D ポリゴンから
@@ -280,9 +280,8 @@ namespace HomeskzIfcImport::draw
 					CreateModifierPrism(core::raiseModifierTop(modifier, kGroundBeamSlabBite));
 				if (solid != nil)
 				{
-					SetClassByName(solid, className);
-					SetAllAttributesByClass(solid);
-					SetBooleanVariable(solid, ovIsStructural, true);
+					SetClassWithAttributes(solid, className);
+					SetBooleanVariable(solid, ObjectVariable::IsStructural, true);
 				}
 
 				// 床付けは地中梁と押し出しの向き（azimuth）と断面の座標系を共有し、断面と
@@ -301,9 +300,8 @@ namespace HomeskzIfcImport::draw
 					const MCObjectHandle bed = CreateModifierPrism(prism);
 					if (bed == nil)
 						continue;
-					SetClassByName(bed, bedding.drawClass);
-					SetAllAttributesByClass(bed);
-					SetBooleanVariable(bed, ovIsStructural, true);
+					SetClassWithAttributes(bed, bedding.drawClass);
+					SetBooleanVariable(bed, ObjectVariable::IsStructural, true);
 				}
 			}
 		}
@@ -329,14 +327,12 @@ namespace HomeskzIfcImport::draw
 				const MCObjectHandle lineHandle = line.GetThisObject();
 				if (lineHandle == nil)
 					return nil;
-				SetClassByName(lineHandle, wall.drawClass);
-				SetAllAttributesByClass(lineHandle);
+				SetClassWithAttributes(lineHandle, wall.drawClass);
 				outPlaced = true;
 				return nil;
 			}
 
-			SetClassByName(object, wall.drawClass);
-			SetAllAttributesByClass(object);
+			SetClassWithAttributes(object, wall.drawClass);
 
 			// 構成（コンクリート 1 層）は**この壁へ直接**与える。壁スタイルは作らない・
 			// 当てない（draw/DrawUtil.h「複合オブジェクトの構成」）。CreateWall は文書の
@@ -380,15 +376,15 @@ namespace HomeskzIfcImport::draw
 				// フォールバック: 外形ポリゴンをクラス付きで残す。**スラブを作れなくても
 				// 地中梁自体は描く**（削り取る相手が無いだけで、可視ソリッドと床付けは
 				// 意味を持つ）。
-				SetClassByName(profile, slab.drawClass);
-				SetAllAttributesByClass(profile);
+				SetClassWithAttributes(profile, slab.drawClass);
 				DrawBeamSolids(slab.modifiers, slab.drawClass);
 				return true;
 			}
 
-			// ひとまとめの区間にしない（入れ子になる。draw/DrawUtil の【計測】）。
-			SetClassByName(object, slab.drawClass);
-			SetAllAttributesByClass(object);
+			// **ここを区間で包まない。** 中の SetClassByName / SetAllAttributesByClass が
+			// 自分で呼び出しごとに区間を開く（draw/DrawUtil の【計測】）ので、包むと
+			// 入れ子になる（core/DrawTiming.h「使う側の作法」）。
+			SetClassWithAttributes(object, slab.drawClass);
 
 			// 地中梁（台形プリズム）を持つ底盤は、プリズム群を**削り取りモディファイア**として
 			// 渡して底盤を clip する（底盤の構成層が地中梁の位置から消える）。可視の
@@ -420,7 +416,8 @@ namespace HomeskzIfcImport::draw
 
 				// 天端を底盤天端レベルへバインドする（offset はそのレベルからの差。
 				// 主たる底盤は 0）。
-				gSDK->SetObjectStoryBound(object, kSlabBoundID, StoryBoundData(slab.bound));
+				gSDK->SetObjectStoryBound(object, static_cast<Sint32>(StoryBoundSlot::Slab),
+										  StoryBoundData(slab.bound));
 			}
 
 			{
@@ -479,11 +476,8 @@ namespace HomeskzIfcImport::draw
 		{
 			const core::WallCommand& wall = document.walls[index];
 
-			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
-			// 描画の前に 1 件進める（＝「いま何本目を描いているか」が見える）。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// 配置先レイヤ（"F-立上り"）が無い命令はスキップする（規約は ActivateExistingLayer）。
 			if (ActivateExistingLayer(wall.layer) == nil)
@@ -512,9 +506,8 @@ namespace HomeskzIfcImport::draw
 		std::map<core::WallJoinType, std::size_t> refusedByType;
 		for (const core::WallJoinCommand& join : document.wallJoins)
 		{
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			const auto first = table.find(join.a);
 			const auto second = table.find(join.b);
@@ -581,9 +574,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		for (const core::SlabCommand& slab : document.slabs)
 		{
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// 配置先レイヤ（"F-底盤"）が無い命令はスキップする。
 			if (ActivateExistingLayer(slab.layer) == nil)
