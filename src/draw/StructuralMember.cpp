@@ -659,7 +659,12 @@ namespace HomeskzIfcImport::draw
 		count("命令と違う高さに描かれた", failures.elevation);
 		if (failures.elevation > 0 && !failures.elevationProbe.empty())
 			note += "（1 本目: " + failures.elevationProbe + "）";
-		if (!failures.lengthHint.empty())
+		// **手掛かりは、説明すべき失敗があるときだけ出す。** 実体を測るパラメータ名は水平材
+		// （OIP の「スパン」）では実機に無く、引けないのが常態である——無条件に出すと健全な
+		// 周が毎回「問題あり」になる（実機 round 1。CLAUDE.md「異常は diagnostics・平常でも
+		// 出る記録は notes」）。潰れ・作り直しと同じ条件で添えれば、M27 のように名前を突き
+		// 止めたい場面では従来どおり出る。
+		if ((failures.collapsed > 0 || failures.repaired > 0) && !failures.lengthHint.empty())
 			note += "「長さ」パラメータを引けませんでした（候補: " + failures.lengthHint + "）。";
 #endif
 		count("端部オフセットを設定できなかった", failures.offset);

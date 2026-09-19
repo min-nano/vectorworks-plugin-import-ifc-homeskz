@@ -243,8 +243,11 @@ namespace HomeskzIfcImport::draw
 		// Z を外したぶんの見張りで、0 でなければ材は在るのに違う高さに並んでいる——本数にも
 		// スパンにも出ないので、これが唯一の手掛かりになる。
 		std::size_t elevation = 0;
-		std::string offsetHint;		// 端部オフセットのパラメータ名の手掛かり
-		std::string lengthHint;		// 「長さ」のパラメータ名の手掛かり
+		std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり
+		// 実体を測るパラメータ名を引けなかったときの手掛かり。**潰れ・作り直しがあったとき
+		// だけ診断に出す**（水平材では引けないのが常態なので、無条件に出すと毎回「問題あり」
+		// になる。実機 round 1）。
+		std::string lengthHint;
 		std::string collapsedProbe; // 潰れた（作り直した）1 本目の実測
 		std::string elevationProbe; // 高さがずれた 1 本目の実測（命令の Z と図面の Z）
 #endif
