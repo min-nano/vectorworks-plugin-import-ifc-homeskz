@@ -1112,10 +1112,10 @@ namespace HomeskzIfcImport::draw
 			if (!gSDK->NurbsGetPt3D(path, piece, 0, first) ||
 				!gSDK->NurbsGetPt3D(path, piece, count - 1, last))
 				continue;
-			const double dx = last.x - first.x;
-			const double dy = last.y - first.y;
-			const double dz = last.z - first.z;
-			outLength = std::sqrt(dx * dx + dy * dy + dz * dz);
+			// 長さの計算は core の Vec3 に任せる（CLAUDE.md「重複を作らない置き場所」——
+			// 幾何の数式は core/Geometry に 1 つだけ置く）。
+			outLength =
+				core::length(core::Vec3{last.x - first.x, last.y - first.y, last.z - first.z});
 			return true;
 		}
 		return false;
