@@ -54,10 +54,26 @@ namespace HomeskzIfcImport::draw
 	// 何も描かず静かに終える）。
 	bool chooseIfcFile(std::string& outPath);
 
-	// 同じ「開く」ダイアログを、拡張子と見出しだけ差し替えて開く（`chooseIfcFile` の実体）。
-	// **ダイアログの作法を 2 か所に書かないため**に公開してある——実機テストの周が「毎周
-	// 開き直す図面」を選ばせるのに使う（draw/Feedback）。extension は "ifc" のように点を
-	// 含めない綴りで、複数なら空白区切り。
+	// 同じ「開く」ダイアログを、**見出しと拡張子だけ差し替えて**開く（`chooseIfcFile` の
+	// 実体）。**ダイアログの作法を 2 か所に書かないため**に公開してある。
+	// extension は "ifc" のように点を含めない綴り、filterLabel はその説明。
+	bool chooseFile(const std::string& title, const std::string& extension,
+					const std::string& filterLabel, std::string& outPath);
+
+	// **フォルダを 1 つ選ばせる**（回帰テストの対象フォルダ。draw/Regression。M28）。
+	// 選ばれたらその絶対パス（UTF-8）を outPath に入れて true。キャンセルや取得失敗は
+	// false（呼び出し側は何もせず静かに終える）。
+	//
+	// ファイル選択とは**別のインターフェース**（`IFolderChooserDialog`）で、フィルタも
+	// 複数選択も初期フォルダも持たない——渡せるのは見出しと説明文の 2 つだけである
+	// （[SDK リファレンス「ファイル・フォルダを選ばせるダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/File%20and%20Folder%20Dialogs.md)）。
+	//
+	// **返るパスの末尾には区切りが付く**（`…/物件/`）。ファイル名を継ぎ足すときに区切りを
+	// 足すと `//` になるので、連結は `core::folderFilePath`（`std::filesystem` が正しく
+	// 畳む）に任せること。
+	bool chooseFolder(const std::string& title, const std::string& description,
+					  std::string& outPath);
+
 	// 動かしているビルドの素性（診断ログの見出しと、往復の記憶の突き合わせに使う）。
 	// **ここで詰めるのは、BuildConfig.h のマクロを見られるのが SDK 側だけ**だから
 	// ——parse/Summary は受け取った文字列を並べるだけで、ビルド種別を知らない。
@@ -70,7 +86,13 @@ namespace HomeskzIfcImport::draw
 	// prologue は**取り込みの前に何をしたか**を診断ログの見出しの次へ 1 行だけ書き添える
 	// もの（空なら何も書かない）。実機テストの周が「図面をどう用意したか」を残すための口
 	// で、本番のコマンドは空を渡す（draw/Feedback.cpp の prepareDrawingForRound）。
+	//
+	// progressTitle は進捗ダイアログの見出し（空なら本番の見出し）。**回帰テストが「何件
+	// 目か」を出すためだけにある**——1 件あたり 1 分前後を何十件も続けるので、いま何番目
+	// を走っているかが見えないと、止まっているのか進んでいるのかが分からない
+	// （draw/Regression.h。M28）。**見出し以外は何も変わらない**——ここに要素や往復の
+	// 都合を持ち込まない。
 	ImportRound runImportRound(const std::string& ifcPath, const core::ImportOptions& options,
 							   bool settingsShown, const std::string& settingsNote,
-							   const std::string& prologue);
+							   const std::string& prologue, const std::string& progressTitle = {});
 } // namespace HomeskzIfcImport::draw

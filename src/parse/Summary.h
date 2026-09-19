@@ -119,6 +119,12 @@ namespace HomeskzIfcImport::parse
 	std::vector<ElementRow> elementRows(const core::Document& document,
 										const core::DrawCounts& counts);
 
+	// **所要時間を人の言葉にする**（"1 分 11 秒" / "12.3 秒"）。ミリ秒まで出さないのは、
+	// ここで見たいのが「待たされたかどうか」の桁だけだから——フェーズごとの内訳は診断ログの
+	// 行頭にある経過ミリ秒が持つ。**この 1 つが唯一の綴り**で、回帰テストの記録
+	// （parse/Regression）も同じ言い方を使う（時間の書き方が場所によって割れないように）。
+	std::string formatDuration(double seconds);
+
 	// 結末を表す短い日本語（"成功" / "問題あり" …）。**診断ログの結果行と実機
 	// フィードバックの見出しが同じ語を使う**ための 1 か所（言い方が 2 つに割れると、
 	// 同じ取り込みの報告が場所によって違う結末を名乗る）。

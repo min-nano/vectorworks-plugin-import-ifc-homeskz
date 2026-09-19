@@ -36,6 +36,7 @@
 #include "core/FeedbackSession.h"
 #include "core/ImportOptions.h"
 #include "core/Trace.h"
+#include "draw/DocumentFile.h"
 #include "draw/DrawUtil.h"
 #include "draw/HostServices.h"
 #include "draw/ImportRun.h"
@@ -43,9 +44,6 @@
 #include "draw/SettingsDialog.h"
 #include "parse/Feedback.h"
 #include "parse/Summary.h"
-
-// 周ごとに図面を開き直す（ISDK::OpenDocumentPath）。パスは IFileIdentifier で渡す。
-#include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
 
 #include <chrono>
 #include <cctype>
@@ -495,102 +493,6 @@ namespace HomeskzIfcImport::draw
 		// **ここは実機テストの周だけ。** 本番の取り込みは開いている図面へ描くのが仕事で、
 		// この関数を呼ばない（draw/Feedback.h・CLAUDE.md M25）。
 
-		// 絶対パスから IFileIdentifier を作る（作れなければ空の VCOMPtr）。
-		VectorWorks::Filing::IFileIdentifierPtr FileIdFor(const std::string& path)
-		{
-			using namespace VectorWorks::Filing;
-			// const で受ける（VCOMPtr の operator-> は const。draw/ImportRun.cpp と同じ
-			// 作法で、clang-tidy の misc-const-correctness もこれを求める）。
-			const IFileIdentifierPtr fileID(IID_FileIdentifier);
-			if (!fileID)
-				return IFileIdentifierPtr{};
-			if (fileID->Set(TXString(path.c_str())) != kVCOMError_NoError)
-				return IFileIdentifierPtr{};
-			return fileID;
-		}
-
-		// いまアクティブな図面のパス（取得できなければ空）。**開けたかどうかは
-		// `OpenDocumentPath` の戻り値ではなくこれで判定する**（読み戻して確かめる。
-		// SDK リファレンス「Investigation Techniques」）。
-		//
-		// **無題の図面でもパスは返る**——「アプリケーションのあるディレクトリ＋名称未設定 N」
-		// が入る（実機確認済み。SDK リファレンス「Documents」）。保存済みかどうかを見たい
-		// ときはパスの有無ではなく `outSaved` を使うこと。
-		std::string ActiveDocumentPath()
-		{
-			VectorWorks::Filing::IFileIdentifierPtr fileID;
-			bool saved = false;
-			if (!gSDK->GetActiveDocument(&fileID, saved) || !fileID)
-				return "";
-			TXString path;
-			if (fileID->GetFileFullPath(path) != kVCOMError_NoError)
-				return "";
-			return static_cast<const char*>(path);
-		}
-
-		// 同じファイルを指しているか。**大文字小文字や区切りの差で外さない**よう
-		// std::filesystem に正規化させ、それが効かない場面（まだ無いファイルなど）は
-		// 素の比較に落とす。
-		bool SamePath(const std::string& left, const std::string& right)
-		{
-			if (left.empty() || right.empty())
-				return false;
-			if (left == right)
-				return true;
-			std::error_code ec;
-			return std::filesystem::equivalent(std::filesystem::path(left),
-											   std::filesystem::path(right), ec) &&
-				   !ec;
-		}
-
-		// 一時ディレクトリの中のパスを組む（temp が引けなければ空）。
-		std::string TempPath(const std::string& name)
-		{
-			std::error_code ec;
-			const std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
-			if (ec)
-				return "";
-			return (dir / name).string();
-		}
-
-		// そのパスに何か在るか。**`std::filesystem` で見に行かない**——`file_size` の
-		// stat が MSVC の clang-analyzer に偽陽性を出した前例があるので、開けるかどうかで
-		// 判じる（在るのに開けないなら、どのみち上書きも当てにできない）。
-		bool PathExists(const std::string& path)
-		{
-			if (path.empty())
-				return false;
-			const std::ifstream in(path, std::ios::binary);
-			return in.good();
-		}
-
-		// **まだ無いパスを選ぶ。** 既にあるファイルへ別名保存できなかった実測がある
-		// （実機 round 12。round 8 は同じ呼び出しが新規のパスで通っている）ので、
-		// 上書きが効くことに賭けない。名前が尽きたら空を返す。
-		std::string FreshTempPath(const std::string& stem)
-		{
-			for (int i = 1; i <= 100; ++i)
-			{
-				// **const にしない**——返すときに move されなくなり、clang-tidy の
-				// performance-no-automatic-move がエラーになる（tidy-mac で実際に落ちた）。
-				std::string path = TempPath(stem + "-" + std::to_string(i) + ".vwx");
-				if (path.empty())
-					return "";
-				if (!PathExists(path))
-					return path;
-			}
-			return "";
-		}
-
-		// アクティブな図面を指定のパスへ保存する（＝別名保存）。成功したら true。
-		bool SaveActiveDocumentAs(const std::string& path)
-		{
-			if (path.empty())
-				return false;
-			const VectorWorks::Filing::IFileIdentifierPtr fileID = FileIdFor(path);
-			return fileID && gSDK->SaveActiveDocumentPath(fileID) == 0;
-		}
-
 		// 作業ファイルを用意できたか。
 		enum class RoundDocument
 		{
@@ -748,9 +650,9 @@ namespace HomeskzIfcImport::draw
 				closed = "前の周の図面はアクティブではありませんでした（開いたまま残します）";
 			}
 
-			const VectorWorks::Filing::IFileIdentifierPtr fileID = FileIdFor(session.workPath);
-			// bShowErrorMessages=false: 誰も見ていない周でダイアログを出さない。
-			const bool returned = fileID && gSDK->OpenDocumentPath(fileID, false);
+			// **開き直しもダイアログも共有の小道具が持つ**（draw/DocumentFile.h）。
+			// 戻り値は信じない——開けたかどうかは下で読み戻して確かめる。
+			const bool returned = OpenDocumentAt(session.workPath);
 			// **戻り値だけを信じない**——開いたかどうかはカレント文書を読み戻して確かめる。
 			const std::string opened = ActiveDocumentPath();
 			if (SamePath(opened, session.workPath))

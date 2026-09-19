@@ -63,7 +63,9 @@
 //       止めたことを伝える（loop_end）口が増えた
 //   5 … 実機テストを本番の取り込みから分けた（M25）。往復は run_test が持ち、run_import は
 //       「次は更新を尋ねずに入れてよいか」を返さなくなった（本番の経路から往復が消えた）
-#define VW_PAYLOAD_ABI_VERSION 5u
+//   6 … 回帰テスト（M28）。指定フォルダの物件を 1 件ずつ取り込んで基準と引き比べる
+//       vw_payload_run_regression を足した（dev だけが登録する入口。src/draw/Regression.h）
+#define VW_PAYLOAD_ABI_VERSION 6u
 
 // 本体側の export 指定。Windows は明示しないと DLL の外から見えない。
 #if defined(_WIN32)
@@ -132,6 +134,7 @@ extern "C"
 #define VW_PAYLOAD_SYM_INFO "vw_payload_info"
 #define VW_PAYLOAD_SYM_IMPORT "vw_payload_run_import"
 #define VW_PAYLOAD_SYM_TEST "vw_payload_run_test"
+#define VW_PAYLOAD_SYM_REGRESSION "vw_payload_run_regression"
 #define VW_PAYLOAD_SYM_BRIDGE "vw_payload_run_mcp_bridge"
 #define VW_PAYLOAD_SYM_RECALC "vw_payload_recalculate"
 #define VW_PAYLOAD_SYM_SHUTDOWN "vw_payload_shutdown"
@@ -160,6 +163,12 @@ extern "C"
 	// 無いときだけなので、入れ替えはこの関数から戻ったあと、次の呼び出しの頭で起きる
 	// （src/PayloadSession.h）。
 	using VwPayloadRunTestFn = int (*)(int allowDialogs, int* outActive);
+
+	// **回帰テスト 1 回**（M28。dev だけ。src/draw/Regression.h の runRegressionCommand）。
+	// 指定フォルダの物件を 1 件ずつ取り込み、前回の結果（基準）と引き比べる。**持ち帰る
+	// ものは無い**——結末は本体がダイアログとログで見せ切る（往復のように殻が続きを
+	// 回すこともない）。
+	using VwPayloadRunRegressionFn = int (*)();
 
 	// MCP ブリッジ 1 回。**止められるまで戻らない**（src/draw/McpBridge.h）。
 	using VwPayloadRunMcpBridgeFn = int (*)();

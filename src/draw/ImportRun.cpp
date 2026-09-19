@@ -25,6 +25,8 @@
 // ファイルの絶対パスを IFileIdentifier 経由で受け取る。
 #include "Interfaces/VectorWorks/Filing/IFileChooserDialog.h"
 #include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
+#include "Interfaces/VectorWorks/Filing/IFolderChooserDialog.h"
+#include "Interfaces/VectorWorks/Filing/IFolderIdentifier.h"
 
 #include <chrono>
 #include <cstddef>
@@ -118,7 +120,8 @@ namespace HomeskzIfcImport::draw
 		ImportRound runImportRoundUnguarded(const std::string& ifcPath,
 											const core::ImportOptions& options, bool settingsShown,
 											const std::string& settingsNote,
-											const std::string& prologue)
+											const std::string& prologue,
+											const std::string& progressTitle)
 		{
 			ImportRound result;
 			result.startedAt = core::trace::localTimestamp();
@@ -146,7 +149,9 @@ namespace HomeskzIfcImport::draw
 			// 見出しとバーを進める。描画は横架材・垂木を 1 本ずつ SDK で作るため数百回の
 			// 呼び出しになり、これが無いと VectorWorks が固まったように見える
 			// （draw/ProgressDialog.h「なぜ要るか」）。
-			draw::ProgressDialog progress("ホームズ君 IFC インポート", FileNameOf(ifcPath));
+			draw::ProgressDialog progress(
+				progressTitle.empty() ? std::string("ホームズ君 IFC インポート") : progressTitle,
+				FileNameOf(ifcPath));
 
 			// Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
 			// 読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
@@ -189,15 +194,23 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	// -------------------------------------------------------------------
-	// ネイティブの「開く」ダイアログで IFC ファイルを 1 つ選ばせる。選ばれたら
-	// その絶対パス（UTF-8）を outPath に入れて true を返す。キャンセルや取得失敗は
-	// false（呼び出し側は何も描かず静かに終える）。
+	// ネイティブの「開く」ダイアログで IFC ファイルを 1 つ選ばせる。
+	bool chooseIfcFile(std::string& outPath)
+	{
+		// **ダイアログの作法は下の 1 か所きり**（見出しと拡張子を渡すだけ）。
+		return chooseFile("ホームズ君IFCファイルを選択", "ifc", "IFC ファイル (*.ifc)", outPath);
+	}
+
+	// 「開く」ダイアログでファイルを 1 つ選ばせる。選ばれたらその絶対パス（UTF-8）を
+	// outPath に入れて true を返す。キャンセルや取得失敗は false（呼び出し側は何もせず
+	// 静かに終える）。
 	//
 	// VCOM の作法（Info「VCOM」）: VCOMPtr に IID を渡して生成し、ポインタが有効かを
 	// if で確かめ、各呼び出しの VCOMError を kVCOMError_NoError と比較する。選択結果は
 	// IFileIdentifier（0 番目）から GetFileFullPath で受け取り、TXString の
 	// operator const char*()（UTF-8）で std::string へ写す。
-	bool chooseIfcFile(std::string& outPath)
+	bool chooseFile(const std::string& title, const std::string& extension,
+					const std::string& filterLabel, std::string& outPath)
 	{
 		// IFileChooserDialogPtr は VCOMPtr<IFileChooserDialog> の SDK 標準 typedef。
 		// const で受ける: operator-> は const なので、const のまま各インターフェース
@@ -207,9 +220,9 @@ namespace HomeskzIfcImport::draw
 		if (!dialog)
 			return false;
 
-		dialog->SetTitle("ホームズ君IFCファイルを選択");
-		// 拡張子フィルタ（.ifc）と、念のため全ファイル。存在チェックも有効化する。
-		dialog->AddFilter("ifc", "IFC ファイル (*.ifc)");
+		dialog->SetTitle(title.c_str());
+		// 拡張子フィルタと、念のため全ファイル。存在チェックも有効化する。
+		dialog->AddFilter(extension.c_str(), filterLabel.c_str());
 		dialog->AddFilterAllFiles();
 		dialog->SetCheckFileExist(true);
 
@@ -227,6 +240,45 @@ namespace HomeskzIfcImport::draw
 
 		TXString fullPath;
 		if (fileID->GetFileFullPath(fullPath) != kVCOMError_NoError)
+			return false;
+
+		// TXString → UTF-8 std::string（operator const char*() は UTF-8 を返す）。
+		outPath = static_cast<const char*>(fullPath);
+		return !outPath.empty();
+	}
+
+	// -------------------------------------------------------------------
+	// **フォルダを 1 つ選ばせる**（意図は draw/ImportRun.h）。
+	//
+	// 実測に基づく作法が 2 つある（[SDK リファレンス「ファイル・フォルダを選ばせる
+	// ダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/File%20and%20Folder%20Dialogs.md)）:
+	//
+	//   * **キャンセルは `RunDialog()` の失敗として返る**（`kVCOMError_Failed`）。
+	//     `kVCOMError_Canceled` では返ってこないので、「やめた」と「出せなかった」を
+	//     戻り値で見分ける手段は無い——どちらも「何もせず静かに終える」で正しい。
+	//   * **「ポインタが取れたか」で分岐してはいけない。** キャンセルされても
+	//     `GetSelectedPath` は**非 nullptr**を返す（中身が空で、`GetFullPath` が空文字列を
+	//     返すだけ）。だから**最後に読み戻したパスが空でないこと**を条件にする。
+	bool chooseFolder(const std::string& title, const std::string& description,
+					  std::string& outPath)
+	{
+		outPath.clear();
+		const IFolderChooserDialogPtr dialog(IID_FolderChooserDialog);
+		if (!dialog)
+			return false;
+
+		dialog->SetTitle(title.c_str());
+		dialog->SetDescription(description.c_str());
+		// キャンセルもここで false になる（上記）。
+		if (dialog->RunDialog() != kVCOMError_NoError)
+			return false;
+
+		IFolderIdentifierPtr folderID;
+		if (dialog->GetSelectedPath(&folderID) != kVCOMError_NoError || !folderID)
+			return false;
+
+		TXString fullPath;
+		if (folderID->GetFullPath(fullPath) != kVCOMError_NoError)
 			return false;
 
 		// TXString → UTF-8 std::string（operator const char*() は UTF-8 を返す）。
@@ -268,11 +320,12 @@ namespace HomeskzIfcImport::draw
 	// 周は「この周は送らない」の判断へ使う——どちらも try/catch を書かずに済む。
 	ImportRound runImportRound(const std::string& ifcPath, const core::ImportOptions& options,
 							   bool settingsShown, const std::string& settingsNote,
-							   const std::string& prologue)
+							   const std::string& prologue, const std::string& progressTitle)
 	{
 		try
 		{
-			return runImportRoundUnguarded(ifcPath, options, settingsShown, settingsNote, prologue);
+			return runImportRoundUnguarded(ifcPath, options, settingsShown, settingsNote, prologue,
+										   progressTitle);
 		}
 		catch (const std::exception& error)
 		{
