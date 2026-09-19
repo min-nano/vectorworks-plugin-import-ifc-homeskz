@@ -989,6 +989,21 @@ Objects」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob
 引き続けるより、在る値（パス）を読むほうが確かで、しかも名前の解決（パラメータ表の走査）が
 1 本につき 2 回減る。**
 
+**その後 SDK リファレンス側で「無い」が確定した**——
+[issue #95](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/95) →
+[PR #96](https://github.com/min-nano/vectorworks-developer-sdk-reference/pull/96)。
+パラメータ表 **181 件の全数列挙**・SDK の全数検索・実運用の全数確認が独立に同じ答えを出して
+いて、[Findings の「打ち切った調査: 構造材 PIO から『スパン』『部材長』をパラメータで読む」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)
+に畳んである（**再調査しない**）。こちらが残していた疑問にも答えが付いた:
+
+* **`CenterPointLength(長さ)` の正体はセンターマーク（作図記号）の線の長さ**【推定】。
+  パラメータ表の索引 153〜160 が `CenterPointMarker*` の並びで、その直後に「長さ」と
+  「間隔」が来る。既定値 100 が実長 5333 の柱でそのまま出ていたのは、部材と連動して
+  いないからである。**ローカライズ名だけで当てない**——引き当てたら値を実測と突き合わせる。
+* **OIP に見えている「スパン」の欄はパラメータに紐づかない計算値**【推定】で、読み書き
+  できる値としては存在しない。**欄の正体を確かめに行く必要も無い**——読む道が無いことは
+  確定していて、正体が何であっても実装は変わらない。
+
 **自己修復は水平材にも残す。** **柱はもう武装していない**——あちらは M27 の症状そのものが
 「パスに Z を渡さない」で原理的に消えたからで（上記）、その理屈は水平材には無い。
 M27 の 46 本（作り直しの 1 ULP 残差で死角に落ちる）は**鉛直材に固有**で、水平成分が

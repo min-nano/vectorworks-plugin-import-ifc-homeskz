@@ -96,9 +96,10 @@ namespace HomeskzIfcImport::draw
 		const std::vector<const char*> kStartElevationNames = {"StartElevation"};
 		const std::vector<const char*> kEndElevationNames = {"EndElevation"};
 		const std::vector<const char*> kNoLocalized = {};
-		// **水平材の実体はパラメータでは測らない。** OIP に「スパン」は無く（universal
-		// `Span` もローカライズ名「スパン」も実機で引けなかった。round 1）、名前で
-		// 引ける `CenterPointLength(長さ)` は部材長ではない（実長 5333 の柱で 100）。
+		// **水平材の実体はパラメータでは測らない。** OIP に「スパン」に当たるパラメータは
+		// 無く（確定済み。**再調査しない**——ヘッダ StructuralExtentKind が指す Findings の
+		// 「打ち切った調査」）、名前で引ける `CenterPointLength(長さ)` は部材長ではない
+		// （実長 5333 の柱で 100。センターマークの線の長さである）。
 		// 代わりに**PIO が実際に持っているパスの両端の距離**（DrawUtil の `PioPathChord`）で
 		// 測る——`ResetObject` が解決済みバウンドから作り直したパスが、そのまま「描かれた
 		// 実体」だからである（ヘッダ StructuralExtentKind ／ Findings「Parametric Objects」）。
@@ -107,7 +108,8 @@ namespace HomeskzIfcImport::draw
 		// ときの手掛かり（DescribeSizeParams）。どのパラメータが OIP のどの欄なのかを実機で
 		// 確かめる手段がほかに無い——実際、round 2 のこの一覧で「長さ」で引ける
 		// `CenterPointLength` が部材長ではないと分かり、round 1 のこの一覧に「スパン」が
-		// 1 件も出なかったことで、測る相手をパラメータからパスへ変える根拠になった。
+		// 1 件も出なかったことが、測る相手をパラメータからパスへ変える最初の手掛かりになった
+		// （その後 SDK リファレンス側で全数から確定した。上記）。
 		// **診断にしか使わない**ので開発ビルドだけ（draw/Verify.h）。
 #if VW_DRAW_VERIFY
 		const std::vector<const char*> kSizeParamNeedles = {"長さ", "高さ", "スパン", "Span"};

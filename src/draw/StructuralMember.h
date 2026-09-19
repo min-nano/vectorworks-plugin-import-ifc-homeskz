@@ -96,8 +96,12 @@ namespace HomeskzIfcImport::draw
 
 	// **描き上がった部材の実体をどの読みで測るか。** 構造材 PIO には「部材長」に当たる
 	// パラメータが無い——名前で引ける `CenterPointLength(長さ)` は部材長ではなく（実長 5333 の
-	// 柱で 100 を返した）、**「スパン」に当たるパラメータは実機に存在しない**（universal
-	// `Span` もローカライズ名「スパン」も引けなかった。実機 round 1）。したがって
+	// 柱で 100 を返した。**センターマークの線の長さ**である）、**「スパン」に当たるパラメータは
+	// 実機に存在しない**（パラメータ表 181 件の全数列挙・SDK の全数検索・実運用の全数確認が
+	// 独立に「無い」と答えている。[Findings「打ち切った調査: 構造材 PIO から『スパン』
+	// 『部材長』をパラメータで読む」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)。
+	// OIP に見えている「スパン」の欄は**パラメータに紐づかない計算値**で、読み書きできる値
+	// としては存在しない）。したがって
 	// 実体を言える値は**部材の向きで違う**。
 	//
 	//   * 鉛直材（柱・小屋束）… **両端の解決済み絶対 Z の差**（`StartElevation` /
@@ -391,9 +395,12 @@ namespace HomeskzIfcImport::draw
 
 	// その部材が持つ「長さ」「高さ」「スパン」を含むパラメータを**名前と値で**並べた 1 行。
 	// どのパラメータが OIP のどの欄なのかを実機で確かめる唯一の手段なので、**1 本ぶんだけ**
-	// 診断ログへ出す（全数だと読めない）。**「スパン」を拾うのは、無いことを毎周確かめ直す
-	// ためではなく、将来その名前が生えたときに気付けるようにするため**——実機 round 1 では
-	// 1 件も出なかった。**開発ビルドだけ**（draw/Verify.h）。
+	// 診断ログへ出す（全数だと読めない）。**「スパン」も拾うのは、無いことを毎周確かめ直す
+	// ためではなく、この 1 行を読む人が「探し忘れでは」と疑わずに済むようにするため**
+	// ——無いことは既に確定していて、**再調査しない**（[Findings「打ち切った調査: 構造材 PIO
+	// から『スパン』『部材長』をパラメータで読む」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)。
+	// パラメータ表 181 件の全数列挙・SDK の全数検索・実運用の全数確認が独立に「無い」と
+	// 答えている）。**開発ビルドだけ**（draw/Verify.h）。
 #if VW_DRAW_VERIFY
 	std::string DescribeSizeParams(MCObjectHandle object);
 #endif
