@@ -91,9 +91,16 @@ namespace HomeskzIfcImport::draw
 		// 実機のダンプではデータオブジェクトの中身の +86 にこの並びで入っていた。
 		constexpr OSType kFilterContainer = 0x47724C67; // 'GrLg'（Graphic Legend）
 
-		// オブジェクト参照の配列（Kernel/API/MiniCadCallBacks.h の
-		// kTaggedDataObjectRefArrayTypeID）と、その中でフィルタが使うタグ。
-		constexpr Sint32 kFilterDataType = 15;
+		// タグ付きデータの型 ID（Kernel/API/MiniCadCallBacks.h の kTaggedData*TypeID）。
+		// 使う 2 つだけを名前付きで持つ。
+		enum class TaggedDataType : Sint32
+		{
+			ByteArray = 1,		 // kTaggedDataByteArrayTypeID
+			ObjectRefArray = 15, // kTaggedDataObjectRefArrayTypeID
+		};
+
+		// フィルタが使うタグと要素数（型は上の ObjectRefArray）。
+		constexpr Sint32 kFilterDataType = static_cast<Sint32>(TaggedDataType::ObjectRefArray);
 		constexpr Sint32 kFilterDataTag = 5;
 		constexpr Sint32 kFilterElementCount = 1;
 
@@ -127,11 +134,11 @@ namespace HomeskzIfcImport::draw
 		// **「凡例ソースの定義...」を手で設定した凡例にだけ**ぶら下がっていた。
 		constexpr OSType kSourceContainer = 0x47724C65; // 'GrLe'（Graphic Legend の別の容れ物）
 
-		// byte 配列（kTaggedDataByteArrayTypeID = 1）のタグ 0。**16 ビット幅の値も byte 配列に
-		// 載る**——タグ付きデータの型は 6 種類しか無く（byte / uint32 / double / matrix /
-		// colorref / objectref）、VWFC の `CTaggedDataContainer::CreateTagUint16` も byte 配列を
-		// 使う。したがってこの 22 バイトは 11 個の 16 ビット値と読める。
-		constexpr Sint32 kSourceDataType = 1;
+		// ソース定義は byte 配列のタグ 0。**16 ビット幅の値も byte 配列に載る**——タグ付き
+		// データの型は 6 種類しか無く（byte / uint32 / double / matrix / colorref / objectref）、
+		// VWFC の `CTaggedDataContainer::CreateTagUint16` も byte 配列を使う。したがって
+		// この 22 バイトは 11 個の 16 ビット値と読める。
+		constexpr Sint32 kSourceDataType = static_cast<Sint32>(TaggedDataType::ByteArray);
 		constexpr Sint32 kSourceDataTag = 0;
 
 		// **手で設定した凡例からそのまま写した 22 バイト**（実機のダンプ）。検索条件は文字列
@@ -151,12 +158,19 @@ namespace HomeskzIfcImport::draw
 			0x9a, 0x02, 0x96, 0x02, 0x1e, 0x03, 0x96, 0x02, 0x09, 0x03, 0x00,
 			0x00, 0x47, 0x06, 0x65, 0x06, 0x4f, 0x06, 0xa5, 0x02, 0x90, 0x06};
 
-		// 条件が指すオブジェクトの型（`T=…`）と、それが入る位置（6 番目の 16 ビット値＝
-		// 先頭から 10 バイト目）。**15 はシンボル**で、凡例を載せる基礎伏図に並べたいアンカー
-		// ボルトがこれ。構造材ツールの部材を並べたくなったら **86（プラグインオブジェクト）**
-		// にする——実機のダンプでその 1 枚が 86 で、ダンプ上の凡例自身も `type=86` だった。
+		// 条件が指すオブジェクトの型（`T=…`）。実機のダンプで確かめられた 2 つだけを持つ。
+		// **いま使うのは Symbol**——凡例を載せる基礎伏図に並べたいアンカーボルトがこれ。
+		// 構造材ツールの部材を並べたくなったら PluginObject にする（ダンプ上の凡例自身も
+		// `type=86` だった）。
+		enum class CriteriaObjectType : Uint16
+		{
+			Symbol = 15,
+			PluginObject = 86,
+		};
+		constexpr CriteriaObjectType kCriteriaObjectType = CriteriaObjectType::Symbol;
+
+		// その型が入る位置（6 番目の 16 ビット値＝先頭から 10 バイト目）。
 		constexpr std::size_t kCriteriaTypeOffset = 10;
-		constexpr Uint16 kCriteriaObjectType = 15;
 
 		// ソース定義を書き込む（書けたら true）。フィルタと同じく**`ResetObject` より前**に
 		// 済ませる（凡例の作り直しでセルが決まるため）。
@@ -171,11 +185,12 @@ namespace HomeskzIfcImport::draw
 			for (std::size_t i = 0; i < kSourceDefinition.size(); ++i)
 			{
 				// 6 番目の 16 ビット値だけは、条件が指す型（リトルエンディアン）で埋める。
+				constexpr auto kType = static_cast<Uint16>(kCriteriaObjectType);
 				Uint8 value = kSourceDefinition[i];
 				if (i == kCriteriaTypeOffset)
-					value = static_cast<Uint8>(kCriteriaObjectType & 0xFFU);
+					value = static_cast<Uint8>(kType & 0xFFU);
 				else if (i == kCriteriaTypeOffset + 1)
-					value = static_cast<Uint8>((kCriteriaObjectType >> 8U) & 0xFFU);
+					value = static_cast<Uint8>((kType >> 8U) & 0xFFU);
 				if (gSDK->TaggedDataSet(legend, kSourceContainer, kSourceDataType, kSourceDataTag,
 										static_cast<Sint32>(i), &value) == 0)
 					return false;
@@ -186,7 +201,7 @@ namespace HomeskzIfcImport::draw
 
 	void prepareGraphicLegendPlugin()
 	{
-		gSDK->DefineCustomObject(TXString(kGraphicLegendPlugin), kCustomObjectPrefNever);
+		PrepareCustomObjectDefinition(kGraphicLegendPlugin);
 	}
 
 	bool drawSheetLegend(MCObjectHandle sheetLayer, const core::Vec2& where,
@@ -282,20 +297,14 @@ namespace HomeskzIfcImport::draw
 			return {};
 
 		std::string text = "伏図のグラフィック凡例の診断: ";
-		if (counts.failed > 0)
-			text += "凡例を置けなかった命令 " + std::to_string(counts.failed) + " 件。";
-		if (counts.paramsFailed > 0)
-			text += "パラメータを書けなかった凡例 " + std::to_string(counts.paramsFailed) +
-					" 件（幅 0 に潰れます）。";
-		if (counts.widthLeft > 0)
-			text += "箱幅を設定できなかった凡例 " + std::to_string(counts.widthLeft) +
-					" 件（幅 0 に潰れます）。";
-		if (counts.sourceLeft > 0)
-			text += "ソース定義を書けなかった凡例 " + std::to_string(counts.sourceLeft) +
-					" 件（何も並びません）。";
-		if (counts.filterLeft > 0)
-			text += "ビューポートで絞れなかった凡例 " + std::to_string(counts.filterLeft) +
-					" 件（その図に無いシンボルも並びます）。";
+		AppendCount(text, "凡例を置けなかった命令", counts.failed, "件");
+		AppendCount(text, "パラメータを書けなかった凡例", counts.paramsFailed, "件",
+					"幅 0 に潰れます");
+		AppendCount(text, "箱幅を設定できなかった凡例", counts.widthLeft, "件", "幅 0 に潰れます");
+		AppendCount(text, "ソース定義を書けなかった凡例", counts.sourceLeft, "件",
+					"何も並びません");
+		AppendCount(text, "ビューポートで絞れなかった凡例", counts.filterLeft, "件",
+					"その図に無いシンボルも並びます");
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw

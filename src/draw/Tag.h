@@ -131,13 +131,8 @@ namespace HomeskzIfcImport::draw
 	};
 
 	// データタグ PIO の定義を**設定ダイアログを出さない**で用意する。タグを 1 つでも置く
-	// フェーズ（伏図・軸組図）の先頭で 1 回呼ぶ。
-	//
-	// CreateCustomObject は、その名前の PIO が**その文書に**まだ定義されていなければ
-	// DefineCustomObject で定義を作る。既定は kCustomObjectPrefAlways なので、最初の 1 個を
-	// 作るときだけ「オブジェクトの設定」ダイアログが出てインポートが止まる（M12 の記号 PIO で
-	// 実機確認済みの落とし穴。draw/ColumnMark.cpp）。**静的フラグで 1 回だけにはしない**
-	// ——定義は文書ごとなので、次の文書へのインポートで抜けてしまう。
+	// フェーズ（伏図・軸組図）の先頭で 1 回呼ぶ（理由は DrawUtil の
+	// PrepareCustomObjectDefinition）。
 	void prepareDataTagPlugin();
 
 	// ビューポート 1 枚ぶんのタグを注釈として置く。置けた数を返し、内訳を counts へ積む

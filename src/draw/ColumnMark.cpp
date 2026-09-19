@@ -77,22 +77,16 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingLayers = 0;
 		std::size_t failed = 0;
 
-		// **記号を 1 つも作る前に、PIO の定義を「設定ダイアログを出さない」で作っておく。**
-		//
-		// CreateCustomObject は、その名前の PIO が文書にまだ定義されていなければ
-		// DefineCustomObject で定義を作る。その既定が `kCustomObjectPrefAlways` なので、
-		// **最初の 1 個を作るときだけ「オブジェクトの設定」ダイアログが出て、インポートが
-		// そこで止まる**（実機で確認。2 個目以降は定義済みなので出ない）。PIO 側の
-		// OnInitXProperties は定義が作られる過程で走るため、この 1 回目には間に合わない。
-		// ここで先に定義してしまえば、CreateCustomObject は既存の定義を使うので出ない。
+		// 記号を 1 つも作る前に PIO の定義を用意する（理由は DrawUtil の
+		// PrepareCustomObjectDefinition。PIO 側の OnInitXProperties は定義が作られる過程で
+		// 走るので、この 1 回目には間に合わない）。
 		if (!document.columnMarks.empty())
-			gSDK->DefineCustomObject(TXString(kColumnMarkUniversalName), kCustomObjectPrefNever);
+			PrepareCustomObjectDefinition(kColumnMarkUniversalName);
 
 		for (const core::ColumnMarkCommand& mark : document.columnMarks)
 		{
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// 伏図記号のレイヤ（"{to}-柱伏図記号"）はストーリが作らない独立レイヤなので
 			// 無ければ作る。断面記号の配置先（span レイヤ）はストーリが作るので、無ければ
@@ -113,10 +107,8 @@ namespace HomeskzIfcImport::draw
 		if (outNote != nullptr && (missingLayers > 0 || failed > 0))
 		{
 			std::string text = "柱記号の診断: ";
-			if (missingLayers > 0)
-				text += "配置先レイヤを用意できない命令 " + std::to_string(missingLayers) + " 件。";
-			if (failed > 0)
-				text += "記号オブジェクトを作れなかった命令 " + std::to_string(failed) + " 件。";
+			AppendCount(text, "配置先レイヤを用意できない命令", missingLayers, "件");
+			AppendCount(text, "記号オブジェクトを作れなかった命令", failed, "件");
 			*outNote = std::move(text);
 		}
 

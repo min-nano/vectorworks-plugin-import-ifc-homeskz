@@ -63,15 +63,12 @@ namespace HomeskzIfcImport::draw
 		// 消してからでないと直せない。「中身があるか」は**型番号が 0 でないメンバが
 		// あるか**で見る——`FirstMemberObj` は空の定義でも非 nil（type 0 のレコード 1 つ）
 		// を返すので、非 nil を中身の有無に使ってはいけない。
-		constexpr short kSymbolDefinitionNodeType = 16; // kSymDefNode（Objs.TDType.h）
-		constexpr short kInternalRecordNodeType = 0; // 空の定義が 1 つだけ持つレコード
-
 		// 定義が絵を持っているか（レコード以外のメンバが 1 つでもあるか）。
 		bool DefinitionHasContent(MCObjectHandle definition)
 		{
 			for (MCObjectHandle h = gSDK->FirstMemberObj(definition); h != nil;
 				 h = gSDK->NextObject(h))
-				if (gSDK->GetObjectTypeN(h) != kInternalRecordNodeType)
+				if (!IsObjectType(h, ObjectNodeType::InternalRecord))
 					return true;
 			return false;
 		}
@@ -83,7 +80,7 @@ namespace HomeskzIfcImport::draw
 			for (MCObjectHandle h = gSDK->FirstMemberObj(gSDK->GetSymbolLibraryHeader()); h != nil;
 				 h = gSDK->NextObject(h))
 			{
-				if (gSDK->GetObjectTypeN(h) != kSymbolDefinitionNodeType)
+				if (!IsObjectType(h, ObjectNodeType::SymbolDefinition))
 					continue; // フォルダ等は飛ばす
 				try
 				{
@@ -175,8 +172,7 @@ namespace HomeskzIfcImport::draw
 			// ★**スクリーン平面の 2D 図形にする。** レイヤ平面のまま入れると定義が 3D
 			// 扱い（GetSymbolDefinitionType が k3DSym）になり、伏図に出ない恐れがある。
 			gSDK->SetPlanarRefID(shape, kPlanarRefID_ScreenPlane);
-			SetClassByName(shape, kShearMarkClass);
-			SetAllAttributesByClass(shape);
+			SetClassWithAttributes(shape, kShearMarkClass);
 			if (!gSDK->AddObjectToContainer(shape, definition))
 				return false;
 
@@ -336,23 +332,18 @@ namespace HomeskzIfcImport::draw
 		std::size_t failed = 0;
 		std::size_t unwritten = 0;
 
-		// **1 枚も作る前に、PIO の定義を「設定ダイアログを出さない」で作っておく。**
-		// CreateCustomObject は定義が無ければ既定（kCustomObjectPrefAlways）で作るので、
-		// 最初の 1 個だけダイアログが出てインポートが止まる（柱記号で実機確認済み。
-		// draw/ColumnMark.cpp）。
+		// 1 枚目を作る前に PIO の定義（理由は DrawUtil の PrepareCustomObjectDefinition）と
+		// 伏図記号のシンボル定義（上記 EnsureMarkSymbols。PIO は名前で置く）を用意する。
 		if (!document.shearWalls.empty())
-			gSDK->DefineCustomObject(TXString(kShearWallUniversalName), kCustomObjectPrefNever);
-
-		// 伏図記号のシンボル定義を用意する（上記 EnsureMarkSymbols）。PIO は名前で置くので、
-		// 1 枚目を作る前に揃っていなければならない。
-		if (!document.shearWalls.empty())
+		{
+			PrepareCustomObjectDefinition(kShearWallUniversalName);
 			EnsureMarkSymbols();
+		}
 
 		for (const core::ShearWallCommand& wall : document.shearWalls)
 		{
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			// "n-耐力壁" はストーリが作るレイヤ。無い＝その階の生成がスキップされたと
 			// いうことなので、耐力壁も置かない（要素のために勝手にレイヤを作らない）。
@@ -371,14 +362,11 @@ namespace HomeskzIfcImport::draw
 		if (outNote != nullptr && (missingLayers > 0 || failed > 0 || unwritten > 0))
 		{
 			std::string text = "耐力壁の診断: ";
-			if (missingLayers > 0)
-				text += "配置先レイヤを用意できない命令 " + std::to_string(missingLayers) + " 件。";
-			if (failed > 0)
-				text += "オブジェクトを作れなかった命令 " + std::to_string(failed) + " 件。";
+			AppendCount(text, "配置先レイヤを用意できない命令", missingLayers, "件");
+			AppendCount(text, "オブジェクトを作れなかった命令", failed, "件");
 			// **書けなかったパラメータは黙って捨てない。** PIO は図面に在るのに絵が痩せる
 			// （最悪は何も描かれない）という、いちばん切り分けにくい症状の唯一の手掛かり。
-			if (unwritten > 0)
-				text += "PIO に書けなかったパラメータ " + std::to_string(unwritten) + " 個。";
+			AppendCount(text, "PIO に書けなかったパラメータ", unwritten, "個");
 			*outNote = std::move(text);
 		}
 

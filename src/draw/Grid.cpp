@@ -115,11 +115,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;
 		for (const core::GridCommand& grid : document.grids)
 		{
-			// 中止（進捗ダイアログのキャンセル）は残りを描かずに抜ける。進捗は本数で報告し、
-			// 描画の前に 1 件進める（＝「いま何本目を描いているか」が見える）。
-			if (progress.cancelled())
+			if (!AdvanceProgress(progress))
 				break;
-			progress.step();
 
 			if (DrawOne(grid))
 				++drawn;

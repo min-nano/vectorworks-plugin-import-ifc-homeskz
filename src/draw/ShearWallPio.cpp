@@ -229,8 +229,7 @@ namespace HomeskzIfcImport::draw
 			gSDK->AddObjectToContainer(handle, host);
 			if (className != nullptr && className[0] != '\0')
 			{
-				draw::SetClassByName(handle, className);
-				draw::SetAllAttributesByClass(handle);
+				draw::SetClassWithAttributes(handle, className);
 			}
 		}
 
@@ -288,8 +287,7 @@ namespace HomeskzIfcImport::draw
 				gSDK->CreateLine(WorldPt(clearStart, offset), WorldPt(clearEnd, offset));
 			if (line != nil)
 			{
-				draw::SetClassByName(line, kShearMarkClass);
-				draw::SetAllAttributesByClass(line);
+				draw::SetClassWithAttributes(line, kShearMarkClass);
 			}
 
 			AddPanelCircle(host, (clearStart + clearEnd) / 2.0, offset);
