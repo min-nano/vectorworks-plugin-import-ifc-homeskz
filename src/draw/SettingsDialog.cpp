@@ -96,7 +96,9 @@ namespace HomeskzIfcImport::draw
 
 		// 図面枠スタイルのシンボル定義サブタイプ。**0 以外はプラグインオブジェクトの
 		// スタイル**で、値はその PIO の型（552 = 図面枠）。上記 Findings「シンボル」の実測表。
-		constexpr short kTitleBlockStyleSubType = 552;
+		// **型は Sint32**——`GetSymbolDefSubType` の戻り値がそれで、short で受けると
+		// 縮小変換になる（clang-tidy の bugprone-narrowing-conversions。CI の tidy-mac）。
+		constexpr Sint32 kTitleBlockStyleSubType = 552;
 
 		// コントロール ID。1 = OK / 2 = キャンセルは SDK の予約。行 i は
 		// [チェック, 説明, 選択, 絵] の 4 つを kFirstRowID から 4 つ刻みで使う
@@ -193,7 +195,7 @@ namespace HomeskzIfcImport::draw
 		// の別も無関係
 		// （[SDK リファレンス「シンボル」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Symbols.md)
 		// の実測表）。読めなければ「どちらでもない」側へ倒す（-1）。
-		short SymbolSubType(MCObjectHandle definition)
+		Sint32 SymbolSubType(MCObjectHandle definition)
 		{
 			if (definition == nil)
 				return -1;
@@ -212,7 +214,7 @@ namespace HomeskzIfcImport::draw
 				{
 					// **拾うのは 2 通りだけ。** ほかの PIO スタイル（データタグ・図面
 					// ラベル・グラフィック凡例…）はどちらの行にも出さない。
-					const short subType = SymbolSubType(resources.list.GetResource(i));
+					const Sint32 subType = SymbolSubType(resources.list.GetResource(i));
 					CandidateList* into = nullptr;
 					if (subType == 0)
 						into = &resources.symbols;
