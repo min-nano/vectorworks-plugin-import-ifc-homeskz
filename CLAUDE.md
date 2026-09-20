@@ -495,8 +495,9 @@ Vectorworks 自身がモーダルのダイアログを出すことがある—�
 周はそこで止まるので、**渡す値の側で潰す**（軸組図の図番は `parse::uniqueSectionNumbers` が
 連結直後に一意にする）。同種の値を足すときも「SDK が訊いてくる余地を残さない」で判断する。
 
-**取り込み設定（`core/ImportOptions`）**: 「どの要素を図面のどのシンボルで置くか」は
-取り込みのたびに設定ダイアログ（`draw/SettingsDialog`）で決まる。**役割の表（表示名・
+**取り込み設定（`core/ImportOptions`）**: 「どの要素を図面のどのシンボルで置くか」と
+「各シートレイヤへ置く**図面枠のスタイル**」は取り込みのたびに設定ダイアログ
+（`draw/SettingsDialog`）で決まる。**役割の表（表示名・
 既定名）は `core::symbolRoles()` ただ 1 つ**で、解析側はシンボル名の固定値を持たない
 （`parse/Context` の `options()`、または `build*Commands` の `options` 引数から引く）。
 設定は SDK も STEP も知らない値なので `core/` に置く——Document と同じ「フェーズ間で
@@ -564,6 +565,13 @@ Vectorworks 自身がモーダルのダイアログを出すことがある—�
 （`'GrLe'`）で、縮率は用紙の割り付けが決めた伏図の縮尺（`core::planLayout` の `scale`）に
 合わせる。**用紙をどれだけ空けるかは定数ではなく実測**——`measureLegendWidth` で測った幅を
 `core::planLayout` へ渡し、置き場所はその `legendTopRight`）、
+**図面枠（タイトルブロック）**（図面枠 PIO の登録名の候補・スタイルの当て方・用紙の中心への
+寄せ方は `draw/TitleBlock`。伏図と軸組図が共有する唯一の実装で、**スタイルは当てるが作らない**
+——利用者の図面にある図面枠スタイルを名前で指すだけなので、**その名前のスタイルが無ければ
+1 つも置かない**。選択肢の集め方＝シンボル定義のサブタイプ 552 は `draw/SettingsDialog`、
+選ばれた名前の運び方は `core::ImportOptions::titleBlock` →
+`core::Document::titleBlockStyle`。**登録名は候補から実地に決めて診断へ出す**——SDK
+リファレンスに載っておらず、確定したらあちらへ送って候補を畳む）、
 構造材ツール（StructuralMember PIO）のフィールド名・値（ポップアップのキーは
 `MemberTypeKey` / `AxisAlignKey` / `EndConditionKey` の列挙）・生成手順と、**描いたときの失敗の
 内訳と診断の文言**（`StructuralFailures` / `DescribeStructuralFailures`。柱・横架材・垂木が共有）は

@@ -77,6 +77,7 @@
 #include "draw/Section.h"
 #include "draw/DrawUtil.h"
 #include "draw/Tag.h"
+#include "draw/TitleBlock.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -261,6 +262,11 @@ namespace HomeskzIfcImport::draw
 								{ return !section.viewport.tags.empty(); }))
 			prepareDataTagPlugin();
 
+		// M28 図面枠。伏図と同じ設定・同じ実装（draw/TitleBlock）。**軸組図は 1 枚の用紙へ
+		// 複数の命令が載る**ので、同じシートレイヤへ 2 つ目を置かないのは draw/TitleBlock の
+		// 側が見る。
+		TitleBlockCounts titleBlocks = prepareTitleBlocks(document);
+
 		for (std::size_t index = 0; index < commands.size(); ++index)
 		{
 			const core::SectionCommand& command = commands[index];
@@ -278,6 +284,10 @@ namespace HomeskzIfcImport::draw
 				++missingSheetLayers;
 				continue;
 			}
+
+			// M28 図面枠は**ビューポートより先**に置く（後から作ったものが手前に来る。
+			// draw/TitleBlock.h）。2 枚目以降の命令が同じ用紙に載ったときは何もしない。
+			drawSheetTitleBlock(sheetLayer, titleBlocks);
 
 			const MCObjectHandle viewport =
 				CreateSectionViewport(command, sheetLayer, startHeight, endHeight);
@@ -329,6 +339,9 @@ namespace HomeskzIfcImport::draw
 			++drawn;
 		}
 
+		// M28 図面枠へスタイルを流し込み、用紙の中心へ寄せる（伏図と同じ順序）。
+		finishTitleBlocks(titleBlocks);
+
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
@@ -359,6 +372,10 @@ namespace HomeskzIfcImport::draw
 		// タグの診断は軸組図の診断とは別行にする（原因が別物なので混ぜない。連結は
 		// draw/DrawUtil の AppendLine）。
 		AppendLine(note, tagDiagnostics("軸組図", tags));
+		// M28 図面枠の異常だけを足す。**平常の内訳（当てたスタイル名・通った登録名）は
+		// 伏図の側が診断ログへ出している**（draw/Sheet の titleBlockInfo）ので、同じ行を
+		// 2 度並べない——設定も実装も伏図と同じ 1 つだからである。
+		AppendLine(note, titleBlockDiagnostics(titleBlocks));
 		return drawn;
 	}
 } // namespace HomeskzIfcImport::draw

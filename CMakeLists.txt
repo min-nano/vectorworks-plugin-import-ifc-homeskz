@@ -439,7 +439,8 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Section.cpp
 		src/draw/Sheet.cpp
 		src/draw/Tag.cpp
-		src/draw/Legend.cpp)
+		src/draw/Legend.cpp
+		src/draw/TitleBlock.cpp)
 
 	# 殻と本体は**同じ SDK 設定でビルドする**（本体も libVWSDK.a を自分でリンクし、
 	# GS_InitializeVCOM を自分で呼ぶ。src/payload/PayloadMain.cpp）。設定を 2 か所へ

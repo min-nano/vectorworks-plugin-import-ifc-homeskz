@@ -599,9 +599,23 @@ TEST(format_import_options_lists_every_role_and_marks_the_defaults)
 	CHECK(text.find("床束: 床束_大") != std::string::npos);
 	CHECK(text.find("床束: 床束_大（既定）") == std::string::npos);
 	CHECK(text.find("仕口: 仕口（既定）") != std::string::npos);
-	// 役割の数だけ行がある（見出しの 1 行を足した数）。
+	// M28 図面枠は役割の表に載らないので、末尾に 1 行だけ足される。既定は「置かない」。
+	CHECK(text.find("図面枠スタイル: 置かない") != std::string::npos);
+	// 役割の数 ＋ 図面枠の 1 行だけ行がある（見出しの 1 行を足した数）。
 	CHECK_EQ(std::ranges::count(text, '\n'),
-			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount));
+			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount) + 1);
+}
+
+TEST(format_import_options_names_the_chosen_title_block_style)
+{
+	// 図面枠を置く設定なら、当てるスタイル名がそのまま出る（「枠が出ない」の切り分けは
+	// まずこの行と、描画側の「図面枠:」の行を突き合わせるところから始まる）。
+	ImportOptions options;
+	options.setTitleBlockStyle("遠山信夫アトリエ一級建築士事務所");
+	std::string const text = formatImportOptions(options);
+
+	CHECK(text.find("図面枠スタイル: 遠山信夫アトリエ一級建築士事務所") != std::string::npos);
+	CHECK(text.find("図面枠スタイル: 置かない") == std::string::npos);
 }
 
 TEST(format_import_options_says_which_roles_are_skipped)
