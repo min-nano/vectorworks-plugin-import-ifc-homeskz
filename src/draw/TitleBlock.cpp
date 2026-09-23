@@ -155,9 +155,11 @@ namespace HomeskzIfcImport::draw
 			text += "図面枠スタイル「" + counts.style +
 					"」がこの図面に無いので、図面枠を置いていません。";
 		// **登録名を文面へ入れる**——ここが効かないときの原因はほぼそれなので、次の周で
-		// 名前を疑えるようにしておく（上記 kTitleBlockPlugin と同じ綴り）。
-		AppendCount(text, "図面枠を作れなかったシートレイヤ", counts.failed, "枚",
-					"図面枠のプラグイン \"Title Block Border\" を呼び出せませんでした");
+		// 名前を疑えるようにしておく。**綴りは kTitleBlockPlugin から引く**（書き下すと
+		// 登録名を変えたときにこの診断だけ古いまま残る。CLAUDE.md「重複を作らない置き場所」）。
+		const std::string missing =
+			"図面枠のプラグイン \"" + std::string(kTitleBlockPlugin) + "\" を呼び出せませんでした";
+		AppendCount(text, "図面枠を作れなかったシートレイヤ", counts.failed, "枚", missing.c_str());
 		AppendCount(text, "用紙の中心へ寄せられなかった図面枠", counts.placeLeft, "枚",
 					"外形を測れませんでした");
 		return text;
