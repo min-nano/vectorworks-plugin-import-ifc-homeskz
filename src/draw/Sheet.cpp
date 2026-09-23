@@ -427,7 +427,7 @@ namespace HomeskzIfcImport::draw
 		// M28 図面枠。異常は note、平常でも出る内訳（当てたスタイル名・通った登録名）は
 		// outInfo——行き先を分ける理由は上の割り付けの行と同じ。
 		addNote(titleBlockDiagnostics(titleBlocks));
-		addInfo(titleBlockInfo(titleBlocks));
+		addInfo(titleBlockInfo("伏図", titleBlocks));
 		return drawn;
 	}
 } // namespace HomeskzIfcImport::draw

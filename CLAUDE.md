@@ -570,8 +570,9 @@ Vectorworks 自身がモーダルのダイアログを出すことがある—�
 ——利用者の図面にある図面枠スタイルを名前で指すだけなので、**その名前のスタイルが無ければ
 1 つも置かない**。選択肢の集め方＝シンボル定義のサブタイプ 552 は `draw/SettingsDialog`、
 選ばれた名前の運び方は `core::ImportOptions::titleBlock` →
-`core::Document::titleBlockStyle`。**登録名は候補から実地に決めて診断へ出す**——SDK
-リファレンスに載っておらず、確定したらあちらへ送って候補を畳む）、
+`core::Document::titleBlockStyle`。**登録名は `"Title Block Border"`**——SDK リファレンス
+には無く、実機フィードバックの 1 周で確定させたもの（知見はあちらへ送る）。**置けた枚数は
+伏図と軸組図で別々に出す**——枚数が違うので、片方だけでは全シートレイヤに置けたか分からない）、
 構造材ツール（StructuralMember PIO）のフィールド名・値（ポップアップのキーは
 `MemberTypeKey` / `AxisAlignKey` / `EndConditionKey` の列挙）・生成手順と、**描いたときの失敗の
 内訳と診断の文言**（`StructuralFailures` / `DescribeStructuralFailures`。柱・横架材・垂木が共有）は

@@ -182,7 +182,8 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
-							 std::string* note, const ObjectHandles* memberHandles)
+							 std::string* note, const ObjectHandles* memberHandles,
+							 std::string* outInfo)
 	{
 		const std::vector<core::SectionCommand>& commands = document.sections;
 		if (commands.empty())
@@ -372,10 +373,11 @@ namespace HomeskzIfcImport::draw
 		// タグの診断は軸組図の診断とは別行にする（原因が別物なので混ぜない。連結は
 		// draw/DrawUtil の AppendLine）。
 		AppendLine(note, tagDiagnostics("軸組図", tags));
-		// M28 図面枠の異常だけを足す。**平常の内訳（当てたスタイル名・通った登録名）は
-		// 伏図の側が診断ログへ出している**（draw/Sheet の titleBlockInfo）ので、同じ行を
-		// 2 度並べない——設定も実装も伏図と同じ 1 つだからである。
+		// M28 図面枠。**伏図とは別に 1 行出す**——枚数が違う（伏図は命令の数、軸組図は
+		// 用紙の数）ので、伏図の行だけでは「全シートレイヤへ置けたか」を確かめられない
+		// （draw/TitleBlock.h の titleBlockInfo）。異常は note、平常の内訳は outInfo。
 		AppendLine(note, titleBlockDiagnostics(titleBlocks));
+		AppendLine(outInfo, titleBlockInfo("軸組図", titleBlocks));
 		return drawn;
 	}
 } // namespace HomeskzIfcImport::draw

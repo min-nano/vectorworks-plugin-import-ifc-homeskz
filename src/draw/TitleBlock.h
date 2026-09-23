@@ -20,16 +20,16 @@
 //	    [SDK リファレンス「Parametric Objects」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)
 //	    の「プラグインスタイル」）。
 //
-//	【★PIO の登録名は候補から実地に決める（実験）】図面枠の**登録名（universal 名）は
-//	SDK リファレンスの `Findings/` に載っていない**。載っているのは「図面枠スタイルは
-//	シンボル定義の `GetSymbolDefSubType` が 552 になる」ことだけで
+//	【★PIO の登録名は `"Title Block Border"`（実機で確定）】SDK リファレンスの `Findings/`
+//	に載っているのは「図面枠スタイルはシンボル定義の `GetSymbolDefSubType` が 552 になる」
+//	ことだけで
 //	（[Findings「Symbols」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Symbols.md)）、
-//	その型番号から登録名を引く呼び出しは知られていない。そこで**候補を順に試し、実際に
-//	オブジェクトが作れた名前を採る**——PIO のパラメータ名を universal 名 → ローカライズ名の
-//	順で引き直すのと同じ作法（draw/DrawUtil.h の ResolveParamName）で、「名前を決め打って
-//	黙って効かない」を避けるための形である。**通った名前は診断ログへ必ず出す**ので、実機
-//	（または実機フィードバックの往復）の 1 周で答えが確定する。
-//	**確定したら SDK リファレンス側へ知見として送り、候補を 1 つに畳むこと。**
+//	**その型番号から登録名を引く呼び出しは知られていない**。そこで当初は候補を順に試して
+//	通った名前を採る形にし（PIO のパラメータ名を universal 名 → ローカライズ名の順で引き
+//	直すのと同じ作法。draw/DrawUtil.h の ResolveParamName）、**実機フィードバックの
+//	round 1 で `"Title Block Border"` に確定した**（VW 2026 / macOS。PR #129）ので候補は
+//	畳んである。**この知見は SDK リファレンス側へ送ること**（CLAUDE.md「ドキュメントの分担」）。
+//	置けなかった件数と登録名は診断へ出すので、別の環境で違っていれば次の周で分かる。
 //
 //	【置き場所は測って決める】図面枠の挿入点が枠のどこを指すかは分からないので、
 //	**置いた後に外形を測って用紙の中心へ寄せる**（データタグ・グラフィック凡例と同じ
@@ -109,11 +109,14 @@ namespace HomeskzIfcImport::draw
 	// 用紙の中心＝**原点**へ寄せる。**すべて置き終えてから**呼ぶ。
 	void finishTitleBlocks(TitleBlockCounts& counts);
 
-	// 集計を人が読める 1 行の診断にする。**通った登録名は異常が無くても出す**——
-	// ヘッダ冒頭の ★ を確定させるための唯一の手掛かりだから（outInfo 行き。異常は別に返す）。
+	// 集計を人が読める 1 行の診断にする（異常が無ければ空）。
 	std::string titleBlockDiagnostics(const TitleBlockCounts& counts);
 
-	// 平常でも出る内訳（当てたスタイル名・通った登録名・置いた枚数）。診断ログにだけ出す
-	// （draw/Sheet の outInfo と同じ行き先）。
-	std::string titleBlockInfo(const TitleBlockCounts& counts);
+	// 平常でも出る内訳（当てたスタイル名・使った登録名・置いた枚数）。診断ログにだけ出す
+	// （draw/Sheet・draw/Section の outInfo と同じ行き先）。
+	//
+	// **伏図と軸組図で別々に出す。** 枚数が違う（伏図は命令の数、軸組図は用紙の数）ので、
+	// 片方を出して済ませると「全シートレイヤへ置けたか」が確かめられない——利用者の求めが
+	// まさにそこなので、`what`（"伏図" / "軸組図"）を添えて 2 行並べる。
+	std::string titleBlockInfo(const char* what, const TitleBlockCounts& counts);
 } // namespace HomeskzIfcImport::draw

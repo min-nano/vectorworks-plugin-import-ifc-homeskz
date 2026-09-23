@@ -23,7 +23,6 @@
 #include "core/Document.h"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -32,24 +31,19 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 【★図面枠 PIO の登録名の候補】先頭から順に試し、**実際にオブジェクトを作れた
-		// 名前**を採る（draw/TitleBlock.h の ★「登録名は候補から実地に決める」）。
+		// 【図面枠 PIO の登録名】**実機で確定した**（VW 2026 / macOS。PR #129 の実機
+		// フィードバック round 1 の診断ログ）。SDK リファレンスの `Findings/` にはまだ
+		// 無いので、**知見としてあちらへ送ること**（CLAUDE.md「ドキュメントの分担」）。
 		//
-		// **決め打ちにしない理由**は 2 つ。(1) 登録名が SDK リファレンスの `Findings/` に
-		// 無く、型番号（`GetSymbolDefSubType` が返す 552）から名前を引く呼び出しも知られて
-		// いない。(2) 名前が 1 文字違うだけで生成は黙って nil を返すので、決め打つと
-		// 「枠が出ない」という症状だけが残り、原因が名前だと気付けない。
+		// 当初は候補を 3 つ並べて順に試していた（登録名が `Findings/` に無く、型番号
+		// ＝`GetSymbolDefSubType` が返す 552 から名前を引く呼び出しも知られていないため）。
+		// 1 周で `"Title Block Border"` が通ったので、**候補は畳んだ**——通らない名前を
+		// 抱えたままにすると、いつ何が効いているのか分からなくなる。
 		//
-		// **通った名前は診断ログへ出す**ので、実機（または実機フィードバックの往復）の
-		// 1 周で答えが確定する。確定したらここを 1 つに畳み、知見は SDK リファレンス側へ
-		// 送ること（CLAUDE.md「ドキュメントの分担」）。
-		//
-		// 並びは「VW 2018 以降の図面枠ツール」→「綴りの揺れ」→「旧・図面枠」の順。
-		constexpr std::array<const char*, 3> kPluginCandidates{
-			"Title Block Border",
-			"TitleBlockBorder",
-			"Title Block",
-		};
+		// **universal 名はローカライズもプラットフォーム依存もしない**ので Windows でも
+		// 同じはずだが、確かめたのは macOS の 1 周だけである。**置けなかった件数は必ず
+		// 診断へ出す**ので、違っていれば次の周で分かる（titleBlockDiagnostics）。
+		constexpr const char* kTitleBlockPlugin = "Title Block Border";
 
 		// 用紙の中心。**原点である**（draw/TitleBlock.h「置き場所は測って決める」。
 		// draw/DrawUtil.h の SheetPaperArea が同じ前提で印刷可能領域を組み立てている）。
@@ -62,35 +56,17 @@ namespace HomeskzIfcImport::draw
 			return std::ranges::find(counts.sheets, sheetLayer) != counts.sheets.end();
 		}
 
-		// 候補名を 1 つ試して図面枠 PIO を作る（作れなければ nil）。**定義の用意
-		// （PrepareCustomObjectDefinition）は名前ごとに直前で行う**——最初の 1 個で
+		// 図面枠 PIO を 1 つ作る（作れなければ nil）。**定義の用意
+		// （PrepareCustomObjectDefinition）は生成の直前に行う**——最初の 1 個で
 		// 「オブジェクトの設定」ダイアログが出ると、無人で回る往復の周がそこで止まる
 		// （draw/DrawUtil.h の PrepareCustomObjectDefinition）。
-		MCObjectHandle CreateWith(const char* plugin)
+		MCObjectHandle CreateTitleBlock()
 		{
-			PrepareCustomObjectDefinition(plugin);
+			PrepareCustomObjectDefinition(kTitleBlockPlugin);
 			// 生成位置は仮（用紙の中心へ寄せるのは、スタイルを流し込んで大きさが定まって
 			// から＝finishTitleBlocks）。
-			return gSDK->CreateCustomObject(TXString(plugin),
+			return gSDK->CreateCustomObject(TXString(kTitleBlockPlugin),
 											WorldPt(kPaperCenter.x, kPaperCenter.y), 0.0, true);
-		}
-
-		// 図面枠 PIO を 1 つ作る。**登録名がまだ決まっていなければ候補を順に試し、通った
-		// 名前を counts.plugin に覚える**（2 枚目以降はその名前だけで作る）。
-		MCObjectHandle CreateTitleBlock(TitleBlockCounts& counts)
-		{
-			if (!counts.plugin.empty())
-				return CreateWith(counts.plugin.c_str());
-
-			for (const char* candidate : kPluginCandidates)
-			{
-				const MCObjectHandle object = CreateWith(candidate);
-				if (object == nil)
-					continue;
-				counts.plugin = candidate;
-				return object;
-			}
-			return nil;
 		}
 	} // namespace
 
@@ -118,7 +94,7 @@ namespace HomeskzIfcImport::draw
 		// カレントレイヤへ入るので、先にそのシートレイヤをアクティブにする。
 		gSDK->SetCurrentLayer(sheetLayer);
 
-		const MCObjectHandle object = CreateTitleBlock(counts);
+		const MCObjectHandle object = CreateTitleBlock();
 		// **置いたことは作れても作れなくても控える**——作れなかったシートレイヤへ次の命令で
 		// もう一度挑んでも同じ結果にしかならず、候補名を何度も試し直すだけ無駄になる。
 		counts.sheets.push_back(sheetLayer);
@@ -127,6 +103,7 @@ namespace HomeskzIfcImport::draw
 			++counts.failed;
 			return false;
 		}
+		counts.plugin = kTitleBlockPlugin;
 
 		// スタイルは関連付けるだけでは中身が流れない（[Findings「Parametric Objects」]
 		// (https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)
@@ -177,20 +154,23 @@ namespace HomeskzIfcImport::draw
 		if (styleMissing)
 			text += "図面枠スタイル「" + counts.style +
 					"」がこの図面に無いので、図面枠を置いていません。";
+		// **登録名を文面へ入れる**——ここが効かないときの原因はほぼそれなので、次の周で
+		// 名前を疑えるようにしておく（上記 kTitleBlockPlugin と同じ綴り）。
 		AppendCount(text, "図面枠を作れなかったシートレイヤ", counts.failed, "枚",
-					counts.plugin.empty() ? "図面枠のプラグインをどの登録名でも呼び出せませんでした"
-										  : "生成に失敗しました");
+					"図面枠のプラグイン \"Title Block Border\" を呼び出せませんでした");
 		AppendCount(text, "用紙の中心へ寄せられなかった図面枠", counts.placeLeft, "枚",
 					"外形を測れませんでした");
 		return text;
 	}
 
-	std::string titleBlockInfo(const TitleBlockCounts& counts)
+	std::string titleBlockInfo(const char* what, const TitleBlockCounts& counts)
 	{
 		if (counts.style.empty() || counts.drawn == 0)
 			return {};
-		// **通った登録名を必ず出す**（draw/TitleBlock.h の ★ を確定させる唯一の手掛かり）。
-		return "図面枠: スタイル「" + counts.style + "」を " + std::to_string(counts.drawn) +
-			   " 枚に置きました（登録名 \"" + counts.plugin + "\"）。";
+		// **使った登録名を必ず出す**（別の環境で違っていたときに、ここが唯一の手掛かりに
+		// なる。draw/TitleBlock.h の ★）。
+		return std::string("図面枠（") + what + "）: スタイル「" + counts.style + "」を " +
+			   std::to_string(counts.drawn) + " 枚に置きました（登録名 \"" + counts.plugin +
+			   "\"）。";
 	}
 } // namespace HomeskzIfcImport::draw
