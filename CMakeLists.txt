@@ -136,6 +136,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		MinNanoStructureCore STATIC
 		src/core/Bridge.cpp
 		src/core/Document.cpp
+		src/core/DrawTiming.cpp
 		src/core/FeedbackSession.cpp
 		src/core/Geometry.cpp
 		src/core/ImportOptions.cpp

@@ -161,8 +161,26 @@ namespace HomeskzIfcImport::draw
 	{
 		if (className.empty())
 			return;
-		const InternalIndex classID = gSDK->AddClass(TXString(className.c_str()));
-		gSDK->SetObjectClass(object, classID);
+
+		// 【計測】実機 round 1 で `SetClassByName` ＋ `SetAllAttributesByClass` が構造材 1 本
+		// につき 82.8ms（全体の 45%）だった（docs/DEV-NOTES.md「描画の高速化」）。**2 つの
+		// どちらが重いのか・その中のどの呼び出しかを分けないと直しようが無い**ので、
+		// 呼び出し 1 つずつを区間にする。
+		//
+		// **区間は要素で分けず、呼び出しで分ける。** ここは構造材・タグ・スラブ・線が共通で
+		// 通る場所なので、要素ごとに分けるには呼び出し側で包むしかなく、そうすると内側の
+		// この区間と入れ子になる（core/DrawTiming.h「使う側の作法」）。要素の内訳は round 1
+		// で採れている——**タグ・スラブは合わせても 1.3 秒**なので、大きく出た区間は構造材の
+		// ものと読んでよい。
+		InternalIndex classID = 0;
+		{
+			VW_DRAW_TIME("クラス:索引引き(AddClass)");
+			classID = gSDK->AddClass(TXString(className.c_str()));
+		}
+		{
+			VW_DRAW_TIME("クラス:割り当て(SetObjectClass)");
+			gSDK->SetObjectClass(object, classID);
+		}
 	}
 
 	std::string PioParamString(const VWParametricObj& pio, const char* name)
@@ -194,13 +212,39 @@ namespace HomeskzIfcImport::draw
 
 	void SetAllAttributesByClass(MCObjectHandle object)
 	{
-		gSDK->SetPColorsByClass(object);
-		gSDK->SetFColorsByClass(object);
-		gSDK->SetLWByClass(object);
-		gSDK->SetPPatByClass(object);
-		gSDK->SetFPatByClass(object);
-		gSDK->SetArrowByClass(object);
-		gSDK->SetOpacityByClass(object);
+		// 【計測】7 つを 1 つずつ区間にする（上記 SetClassByName の【計測】と同じ理由）。
+		// **分け方に意味がある**——7 つが均等に重ければ「属性を 1 つ書くたびに PIO が
+		// 作り直されている」という仮説の裏づけになり、直し方は「クラスと属性を
+		// `ResetObject` の直前へ寄せて再生成を 1 回にまとめる」になる。1 つだけ突出して
+		// いれば、その呼び出し固有の話なので直し方は別になる。
+		{
+			VW_DRAW_TIME("属性:ペン色");
+			gSDK->SetPColorsByClass(object);
+		}
+		{
+			VW_DRAW_TIME("属性:面色");
+			gSDK->SetFColorsByClass(object);
+		}
+		{
+			VW_DRAW_TIME("属性:線の太さ");
+			gSDK->SetLWByClass(object);
+		}
+		{
+			VW_DRAW_TIME("属性:線種");
+			gSDK->SetPPatByClass(object);
+		}
+		{
+			VW_DRAW_TIME("属性:面パターン");
+			gSDK->SetFPatByClass(object);
+		}
+		{
+			VW_DRAW_TIME("属性:マーカー");
+			gSDK->SetArrowByClass(object);
+		}
+		{
+			VW_DRAW_TIME("属性:不透明度");
+			gSDK->SetOpacityByClass(object);
+		}
 	}
 
 	void SetClassWithAttributes(MCObjectHandle object, const std::string& className)
@@ -223,6 +267,8 @@ namespace HomeskzIfcImport::draw
 	{
 		if (boundary.empty())
 			return nil;
+
+		VW_DRAW_TIME("共通:外形ポリゴン");
 
 		std::vector<VWPoint2D> vertices;
 		vertices.reserve(boundary.size());
@@ -248,6 +294,14 @@ namespace HomeskzIfcImport::draw
 
 	void SetComponents(MCObjectHandle object, const std::vector<core::ComponentCommand>& components)
 	{
+		// 【計測】実機 round 1 でここが 51 回・1 回 539.7ms（全体の 29%）だった
+		// （docs/DEV-NOTES.md「描画の高速化」）。**層 1 枚につき 6 回以上の書き込み**が、
+		// そのたびに壁／スラブを作り直しているのではないか、という仮説を確かめるため
+		// 呼び出し 1 つずつを区間にする（外側のひとまとめの区間は入れ子になるので外した）。
+		//
+		// **立上りとスラブは区間では分けない**——分けるには呼び出し側で包むしかなく、
+		// それでは内側のこの区間と入れ子になる。どちらがどれだけかは、診断ログのフェーズの
+		// 時刻差（「基礎の立上りを描画しています…」と「床を描画しています…」）が持つ。
 		const short original = CountComponents(object);
 		const auto wanted = static_cast<short>(components.size());
 
@@ -258,17 +312,36 @@ namespace HomeskzIfcImport::draw
 		for (short index = 0; index < wanted; ++index)
 		{
 			const core::ComponentCommand& component = components[static_cast<std::size_t>(index)];
-			gSDK->InsertNewComponentN(object, index, component.thickness, 0, 0, 0, 0, 0);
-			gSDK->SetComponentWidth(object, index, component.thickness);
-			gSDK->SetComponentName(object, index, TXString(component.name.c_str()));
-			SetComponentClassByName(object, index, component.drawClass);
-			SetComponentAttributesByClass(object, index);
+			{
+				VW_DRAW_TIME("構成層:挿入");
+				gSDK->InsertNewComponentN(object, index, component.thickness, 0, 0, 0, 0, 0);
+			}
+			{
+				// **厚みは挿入のときにも渡している**（上の第 3 引数）。ここが重いなら、
+				// この 1 行は二重に書いているだけの可能性がある——外してよいかは
+				// 実機で確かめる（外すと層の厚みが既定になる恐れがあるので、数字を見てから）。
+				VW_DRAW_TIME("構成層:幅");
+				gSDK->SetComponentWidth(object, index, component.thickness);
+			}
+			{
+				VW_DRAW_TIME("構成層:名前");
+				gSDK->SetComponentName(object, index, TXString(component.name.c_str()));
+			}
+			{
+				VW_DRAW_TIME("構成層:クラス");
+				SetComponentClassByName(object, index, component.drawClass);
+			}
+			{
+				VW_DRAW_TIME("構成層:属性");
+				SetComponentAttributesByClass(object, index);
+			}
 		}
 
 		// 2. 挿入した層の直後に並んでいる元の層を、前から順に削除する（索引 wanted は常に
 		//    「元の層の先頭」を指すので、同じ索引を元の層数だけ削除すればよい）。
 		for (short removed = 0; removed < original; ++removed)
 		{
+			VW_DRAW_TIME("構成層:削除");
 			if (!gSDK->DeleteComponent(object, wanted))
 				break;
 		}
@@ -391,6 +464,8 @@ namespace HomeskzIfcImport::draw
 	{
 		if (maxX - minX <= 0.0 || maxY - minY <= 0.0)
 			return nil;
+
+		VW_DRAW_TIME("構造材:断面グループ");
 
 		VWPolygon2DObj profile({VWPoint2D(minX, minY), VWPoint2D(minX, maxY), VWPoint2D(maxX, maxY),
 								VWPoint2D(maxX, minY)});
@@ -683,6 +758,11 @@ namespace HomeskzIfcImport::draw
 
 	MCObjectHandle PrepareLayer(const std::string& layerName)
 	{
+		// **命令 1 件ごとに通る**（横架材 266 本なら 266 回）。名前引きとカレントレイヤの
+		// 切り替えが積み上がっていないかを見るための区間。ActivateExistingLayer と同じ
+		// 名前へ積む——どちらも「描く前にレイヤを決める」1 つの仕事である。
+		VW_DRAW_TIME("共通:レイヤ切替");
+
 		const TXString name(layerName.c_str());
 		MCObjectHandle layer = gSDK->GetNamedLayer(name);
 		if (layer == nil)
@@ -701,6 +781,8 @@ namespace HomeskzIfcImport::draw
 
 	MCObjectHandle ActivateExistingLayer(const std::string& layerName)
 	{
+		VW_DRAW_TIME("共通:レイヤ切替");
+
 		MCObjectHandle layer = gSDK->GetNamedLayer(TXString(layerName.c_str()));
 		if (layer == nil)
 			return nil;
@@ -807,26 +889,36 @@ namespace HomeskzIfcImport::draw
 									 const core::ViewportCommand& command,
 									 ViewportProjection projection, double scale)
 	{
+		// 【計測】実機 round 1 で 35 枚・1 枚 178.6ms（全体の 6.5%）だった
+		// （docs/DEV-NOTES.md「描画の高速化」）。**`vp.Update()` が何回走るかが効く**はず
+		// （伏図は ForcePlanView の中でもう 1 回走る）ので、ひとまとめではなく仕上げの
+		// 手順ごとに区間へ割る。
 		ViewportFinish finish;
 		// 表示レイヤ: まず全部隠し、命令に挙げたものだけ表示へ戻す。**存在しないレイヤ名は
 		// 黙って読み飛ばす**（要素の描画がスキップされてレイヤが無い場合など。図自体は残す）。
-		for (const MCObjectHandle layer : setup.layers)
 		{
-			if (layer == sheetLayer)
-				continue;
-			gSDK->SetViewportLayerVisibility(viewport, layer,
-											 static_cast<short>(LayerVisibility::Hidden));
-		}
-		for (const std::string& name : command.layers)
-		{
-			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
-			if (layer != nil)
+			VW_DRAW_TIME("図:表示レイヤ");
+			for (const MCObjectHandle layer : setup.layers)
+			{
+				if (layer == sheetLayer)
+					continue;
 				gSDK->SetViewportLayerVisibility(viewport, layer,
-												 static_cast<short>(LayerVisibility::Visible));
+												 static_cast<short>(LayerVisibility::Hidden));
+			}
+			for (const std::string& name : command.layers)
+			{
+				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
+				if (layer != nil)
+					gSDK->SetViewportLayerVisibility(viewport, layer,
+													 static_cast<short>(LayerVisibility::Visible));
+			}
 		}
 
 		// クラス: 全クラスを 1 つずつ表示へ戻す（ヘッダ「クラスを表示へ戻す理由」）。
-		finish.classesApplied = ShowClasses(viewport, setup.classes);
+		{
+			VW_DRAW_TIME("図:クラス表示");
+			finish.classesApplied = ShowClasses(viewport, setup.classes);
+		}
 		finish.planViewApplied = projection == ViewportProjection::Keep;
 
 		// 縮尺・［投影の作り直し］・ラベル・更新。**縮尺は呼び出し側が用紙と建物の大きさから
@@ -835,12 +927,25 @@ namespace HomeskzIfcImport::draw
 		{
 			VWViewportObj vp(viewport);
 			if (scale > 0.0)
+			{
+				VW_DRAW_TIME("図:縮尺");
 				vp.SetScale(scale);
+			}
 			if (projection == ViewportProjection::Plan)
+			{
+				// **この中で 1 回 Update が走る**（ForcePlanView の「OFF → 更新 → ON」）。
+				VW_DRAW_TIME("図:2D平面の作り直し");
 				finish.planViewApplied = ForcePlanView(vp);
-			vp.SetDescription(TXString(command.drawingTitle.c_str()));
-			vp.SetLocator(TXString(command.drawingNumber.c_str()));
-			vp.Update();
+			}
+			{
+				VW_DRAW_TIME("図:ラベル");
+				vp.SetDescription(TXString(command.drawingTitle.c_str()));
+				vp.SetLocator(TXString(command.drawingNumber.c_str()));
+			}
+			{
+				VW_DRAW_TIME("図:更新");
+				vp.Update();
+			}
 		}
 		catch (...)
 		{

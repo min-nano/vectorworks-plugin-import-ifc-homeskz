@@ -92,6 +92,9 @@ src/
     UnionFind.h               ペア述語による連結成分（立上り・大引・地中梁の統合が共有）
     Progress.{h,cpp}          進捗の報告先・文言整形・バー配分（実測の重み）
     Trace.{h,cpp}             診断ログ（フェーズ単位・毎行フラッシュ・本文はメモリにも控える）
+    DrawTiming.{h,cpp}        描画の区間計測（名前ごとの累計・時間の長い順の整形。集計先は
+                              drawTiming() ただ 1 つ。**開発ビルドでしか積まれない**
+                              ——刻む側が draw/Verify.h の VW_DRAW_TIMING で消える）
     Json.{h,cpp}              最小 JSON（書き出し・読み取り。MCP ブリッジが使う唯一の器）
     Bridge.{h,cpp}            MCP ブリッジの受け渡し（要求／応答の形とスプールの作法）
   parse/                    Phase 1: IFC 解析（SDK 非依存）
@@ -129,8 +132,9 @@ src/
                               Undo スコープの共通ヘルパー
     StructuralMember.{h,cpp}  構造材ツール 1 本の生成・設定（横架材／柱で共有）
     ObjectHandles.h           「命令インデックス → 描いたオブジェクトのハンドル」の対応表
-    Verify.h                  **書いたものを読み戻して検算するところを開発ビルドだけに
-                              する唯一のスイッチ**（VW_DRAW_VERIFY）と、囲むかどうかの基準
+    Verify.h                  **開発ビルドにしかコンパイルしないもののスイッチを置く唯一の
+                              場所**——検算（VW_DRAW_VERIFY）と区間計測（VW_DRAW_TIMING ＋
+                              VW_DRAW_TIME）。囲むかどうかの基準も同じ 1 つ
     McpBridge.{h,cpp}         MCP ブリッジの本体（ループと道具の表。**道具を足すときに
                               触るのはこの表 1 行**）
     ProgressDialog.{h,cpp}    core::ProgressReporter を VW の進捗ダイアログへ橋渡し
