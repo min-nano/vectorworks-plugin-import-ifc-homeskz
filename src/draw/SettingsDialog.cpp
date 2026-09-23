@@ -41,12 +41,20 @@
 //	既定構築子）。**3D の標準ビュー（standardViewTop = 7）ではない**——伏図記号のような
 //	2D 部品だけのシンボルは 3D ビューでは何も映らない。
 //
+//	【いちばん下の行だけシンボルではない ── 図面枠スタイル（M28）】最後の 1 行は
+//	**図面枠（タイトルブロック）のスタイル**を選ぶ行で、選択肢の集め方だけが他と違う:
+//	`BuildList(kSymDefNode)` が返すシンボル定義のうち、**`GetSymbolDefSubType` が
+//	552（図面枠のスタイル）のもの**を並べる——他の行が「0＝普通のシンボル定義」を並べるのと
+//	表裏である（値は下記 Findings「シンボル」の実測表。**同じ一覧から 2 通りに拾うだけ**
+//	なので、リソース一覧は 1 つで足りる）。チェックを外せば図面枠を置かない（＝この設定を
+//	入れる前と同じ）。
+//
 //	【項目は図面のシンボル定義そのもの】どちらの形でも候補は図面に実在するシンボルだけ。
 //	行ごとの「取り込む」チェックがあるのでそれで足りる——置くものが図面に無いなら、その要素は
 //	チェックを外せばよい（core/ImportOptions.h、docs/DEV-NOTES.md「取り込み設定の決め事」）。
 //	ただし**一覧をそのまま出さない**——`BuildList(kSymDefNode)` は VectorWorks 自身が
 //	プラグインオブジェクトのスタイルとして持っている定義まで返すので、`GetSymbolDefSubType`
-//	で外す（下記 IsPlaceableSymbol）。
+//	で拾い分ける（下記 SymbolSubType）。
 //
 //	【リソース一覧はダイアログが持ち続ける】サムネイルの項目はリソース一覧を **ID で**
 //	指しているので、一覧を先に捨てると絵が引けなくなる（VWResourceList は参照カウント式で、
@@ -81,6 +89,17 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
+		// 【行の数】役割の数 ＋ 図面枠スタイルの 1 行（冒頭「いちばん下の行だけ…」）。
+		// 図面枠の行は**いちばん下**に置く（役割の 2 列の下）。
+		constexpr std::size_t kTitleBlockRow = core::kSymbolRoleCount;
+		constexpr std::size_t kRowCount = core::kSymbolRoleCount + 1;
+
+		// 図面枠スタイルのシンボル定義サブタイプ。**0 以外はプラグインオブジェクトの
+		// スタイル**で、値はその PIO の型（552 = 図面枠）。上記 Findings「シンボル」の実測表。
+		// **型は Sint32**——`GetSymbolDefSubType` の戻り値がそれで、short で受けると
+		// 縮小変換になる（clang-tidy の bugprone-narrowing-conversions。CI の tidy-mac）。
+		constexpr Sint32 kTitleBlockStyleSubType = 552;
+
 		// コントロール ID。1 = OK / 2 = キャンセルは SDK の予約。行 i は
 		// [チェック, 説明, 選択, 絵] の 4 つを kFirstRowID から 4 つ刻みで使う
 		// （絵は退避の形でだけ作る。ID は形に依らず固定にしておく）。
@@ -140,53 +159,77 @@ namespace HomeskzIfcImport::draw
 		// 名前で、listIndices[i] がその一覧側の添字（サムネイルの項目はこの添字で足す）。
 		// **候補の並びと項目の並びは 1 対 1**なので、選択された項目の添字がそのまま候補の
 		// 添字になる。
+		struct CandidateList
+		{
+			std::vector<std::string> names;
+			std::vector<std::size_t> listIndices;
+
+			void clear()
+			{
+				names.clear();
+				listIndices.clear();
+			}
+		};
+
+		// 候補は 2 組ある（冒頭「いちばん下の行だけシンボルではない」）——普通のシンボル
+		// 定義（シンボルを置く行）と、図面枠スタイル（いちばん下の行）。**元の一覧は同じ
+		// 1 つ**で、subType で拾い分けるだけ。
 		struct SymbolResources
 		{
 			VWFC::Tools::VWResourceList list;
-			std::vector<std::string> names;
-			std::vector<std::size_t> listIndices;
+			CandidateList symbols;	   // 普通のシンボル定義（subType 0）
+			CandidateList titleBlocks; // 図面枠スタイル（subType 552）
 		};
 
-		// そのシンボル定義が**ユーザが図面へ置く部品**か。
+		// そのシンボル定義のサブタイプ。
 		//
 		// 【なぜ要るか】`BuildList(kSymDefNode)` は図面のシンボル定義を**全部**返すので、
 		// VectorWorks 自身がプラグインオブジェクトのスタイルとして持っている定義
 		// （図面枠・データタグ・図面ラベル・立断面指示線・グラフィック凡例・木質構造材…）
-		// まで並ぶ。選択肢に出しても置けるものではないので外す。
+		// まで並ぶ。シンボルを置く行の選択肢に出しても置けるものではないので外し、
+		// **図面枠のスタイルだけは図面枠の行の選択肢に使う**（冒頭「いちばん下の行だけ…」）。
 		//
 		// 切り分けは `GetSymbolDefSubType`——**0 なら普通のシンボル定義、0 以外はその
-		// プラグインオブジェクトのスタイル**（値は PIO の型）。フォルダ名では切り分けられない
-		// （"…スタイル" フォルダに入らないものがある）し、2D/3D/ハイブリッドの別も無関係
+		// プラグインオブジェクトのスタイル**（値は PIO の型。図面枠は 552）。フォルダ名では
+		// 切り分けられない（"…スタイル" フォルダに入らないものがある）し、2D/3D/ハイブリッド
+		// の別も無関係
 		// （[SDK リファレンス「シンボル」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Symbols.md)
-		// の実測表）。
-		bool IsPlaceableSymbol(MCObjectHandle definition)
+		// の実測表）。読めなければ「どちらでもない」側へ倒す（-1）。
+		Sint32 SymbolSubType(MCObjectHandle definition)
 		{
 			if (definition == nil)
-				return false;
-			return gSDK->GetSymbolDefSubType(definition) == 0;
+				return -1;
+			return gSDK->GetSymbolDefSubType(definition);
 		}
 
-		// いま開いている図面の**置けるシンボル定義**（名前順）。読めなければ空（＝どの要素も
-		// 取り込めない。ダイアログ自体は出せる）。
+		// いま開いている図面の**置けるシンボル定義**と**図面枠スタイル**（どちらも名前順）。
+		// 読めなければ空（＝どの要素も取り込めない。ダイアログ自体は出せる）。
 		SymbolResources CollectSymbolResources()
 		{
 			SymbolResources resources;
 			try
 			{
 				const std::size_t count = resources.list.BuildList(kSymDefNode, true);
-				resources.names.reserve(count);
-				resources.listIndices.reserve(count);
 				for (std::size_t i = 0; i < count; ++i)
 				{
-					if (!IsPlaceableSymbol(resources.list.GetResource(i)))
+					// **拾うのは 2 通りだけ。** ほかの PIO スタイル（データタグ・図面
+					// ラベル・グラフィック凡例…）はどちらの行にも出さない。
+					const Sint32 subType = SymbolSubType(resources.list.GetResource(i));
+					CandidateList* into = nullptr;
+					if (subType == 0)
+						into = &resources.symbols;
+					else if (subType == kTitleBlockStyleSubType)
+						into = &resources.titleBlocks;
+					if (into == nullptr)
 						continue;
+
 					TXString name;
 					resources.list.GetResourceName(i, name);
 					std::string text = static_cast<const char*>(name);
 					if (text.empty())
 						continue; // 名前で選ばせる以上、名前の無い定義は候補にしない
-					resources.names.push_back(std::move(text));
-					resources.listIndices.push_back(i);
+					into->names.push_back(std::move(text));
+					into->listIndices.push_back(i);
 				}
 			}
 			catch (...)
@@ -194,21 +237,33 @@ namespace HomeskzIfcImport::draw
 				// リソース一覧を作れない図面でも設定ダイアログ自体は出す（候補が空になり、
 				// どの要素にもチェックが入らない）。1 つの失敗で取り込みの入口を塞がない。
 				// **途中まで採れていた候補は捨てる**——半端な一覧は項目と対応しない。
-				resources.names.clear();
-				resources.listIndices.clear();
+				resources.symbols.clear();
+				resources.titleBlocks.clear();
 			}
 			return resources;
 		}
 
-		// 役割の並びは表の順（core::symbolRoles()）。行番号 → 役割。
+		// 役割の並びは表の順（core::symbolRoles()）。行番号 → 役割。**図面枠の行
+		// （kTitleBlockRow）には役割が無い**ので、呼ぶ前に行を確かめること。
 		core::SymbolRole roleAt(std::size_t row)
 		{
 			return core::symbolRoles()[row].role;
 		}
 
-		// 取り込み設定ダイアログ 1 枚。行は役割の数だけで、増減は core/ImportOptions.h の
-		// 表に従う（**イベントマップだけはコンパイル時の ID が要る**ので、下の
-		// static_assert が「表を増やしたらここも増やせ」と教える）。
+		// 行の説明（いちばん下の行だけ役割の表に載らない）。
+		const char* rowLabel(std::size_t row)
+		{
+			if (row == kTitleBlockRow)
+				return "図面枠スタイル";
+			return core::symbolRoleLabel(roleAt(row));
+		}
+
+		// 取り込み設定ダイアログ 1 枚。行は**役割の数 ＋ 図面枠スタイルの 1 行**で、
+		// 役割の増減は core/ImportOptions.h の表に従う（**イベントマップだけはコンパイル時の
+		// ID が要る**ので、下の static_assert が「表を増やしたらここも増やせ」と教える）。
+		//
+		// **行の違いは「候補がどの組か」だけ**に閉じてある（Candidates / ListIndices）——
+		// 作り方・埋め方・選択の読み取りは全行で同じコードが通る。
 		class CImportSettingsDialog : public VWDialog
 		{
 		public:
@@ -218,7 +273,7 @@ namespace HomeskzIfcImport::draw
 								  Form form)
 				: fIntro(kIntroID), fResources(std::move(resources)), fForm(form)
 			{
-				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
+				for (std::size_t row = 0; row < kRowCount; ++row)
 				{
 					fChecks.emplace_back(checkID(row));
 					fLabels.emplace_back(labelID(row));
@@ -230,11 +285,17 @@ namespace HomeskzIfcImport::draw
 						fPreviews.emplace_back(previewID(row));
 					}
 
-					// **いまの対応先が図面にある役割だけを「取り込む」で開く。** 無い名前は
+					// **いまの対応先が図面にある行だけを「取り込む」で開く。** 無い名前は
 					// 項目にできない（＝置きようがない）ので、チェックを外した状態にする。
-					const std::size_t index = IndexOf(seed.symbol(roleAt(row)));
-					fSelection[row] = index < fResources.names.size() ? index : 0;
-					fEnabled[row] = seed.isEnabled(roleAt(row)) && index < fResources.names.size();
+					// 図面枠は**前回選ばれていなければ名前も空**なので、そのまま外れる。
+					const bool wanted =
+						row == kTitleBlockRow ? seed.hasTitleBlock() : seed.isEnabled(roleAt(row));
+					const std::string& current =
+						row == kTitleBlockRow ? seed.titleBlockStyle() : seed.symbol(roleAt(row));
+					const std::size_t index = IndexOf(row, current);
+					const bool valid = index < Candidates(row).names.size();
+					fSelection[row] = valid ? index : 0;
+					fEnabled[row] = wanted && valid;
 				}
 			}
 			~CImportSettingsDialog() override = default;
@@ -263,13 +324,22 @@ namespace HomeskzIfcImport::draw
 			core::ImportOptions Result() const
 			{
 				core::ImportOptions options;
-				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
+				for (std::size_t row = 0; row < kRowCount; ++row)
 				{
+					const std::vector<std::string>& names = Candidates(row).names;
 					const std::size_t index = fSelection[row];
-					const bool valid = index < fResources.names.size();
+					const bool valid = index < names.size();
+					if (row == kTitleBlockRow)
+					{
+						// 図面枠は**空文字が「置かない」**（core/ImportOptions.h）。
+						// チェックが無い・選べるものが無いときは空のまま返す。
+						options.setTitleBlockStyle(fEnabled[row] && valid ? names[index]
+																		  : std::string());
+						continue;
+					}
 					options.setEnabled(roleAt(row), fEnabled[row] && valid);
 					if (valid)
-						options.setSymbol(roleAt(row), fResources.names[index]);
+						options.setSymbol(roleAt(row), names[index]);
 				}
 				return options;
 			}
@@ -286,10 +356,11 @@ namespace HomeskzIfcImport::draw
 				}
 				// 図面にシンボルが 1 つも無いなら、選ばせる前にそう言う。
 				const TXString intro =
-					fResources.names.empty()
+					fResources.symbols.names.empty()
 						? "この図面にはシンボルが登録されていないため、シンボルで置く要素は"
 						  "取り込めません。"
-						: "取り込む要素にチェックを入れ、置くシンボルを選んでください。";
+						: "取り込む要素にチェックを入れ、置くシンボル（いちばん下は各シート"
+						  "レイヤへ置く図面枠のスタイル）を選んでください。";
 				if (!fIntro.CreateControl(this, intro))
 				{
 					fNote = "説明文を作れませんでした";
@@ -297,17 +368,16 @@ namespace HomeskzIfcImport::draw
 				}
 				this->AddFirstGroupControl(&fIntro);
 
-				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
+				for (std::size_t row = 0; row < kRowCount; ++row)
 				{
-					// チェックは文字を持たない（役割の名前は隣の説明が出す）——文字を
+					// チェックは文字を持たない（行の名前は隣の説明が出す）——文字を
 					// 持たせると幅が行ごとに変わり、右の列が揃わない。
 					if (!fChecks[row].CreateControl(this, ""))
 					{
 						fNote = "チェックを作れませんでした";
 						return false;
 					}
-					if (!fLabels[row].CreateControl(this, core::symbolRoleLabel(roleAt(row)),
-													kLabelWidthChars))
+					if (!fLabels[row].CreateControl(this, rowLabel(row), kLabelWidthChars))
 					{
 						fNote = "説明を作れませんでした";
 						return false;
@@ -315,12 +385,18 @@ namespace HomeskzIfcImport::draw
 					if (!CreateSelector(row))
 						return false;
 
-					// 行の頭（チェック）の置き場所は 3 通り。**列の先頭**は、1 列目なら
-					// 説明文の下（ここだけ 1 行ぶん空ける）、2 列目以降なら**前の列の
-					// 先頭行の右端の右**——列の頭どうしを揃えると、行の高さが全列で同じ
-					// なので以降の行も自然に揃う。**列の途中**は 1 つ上の行の頭の下で、
-					// 行間は空けない（絵が文字より背が高いぶん、詰めても窮屈にならない）。
-					if (row % kRowsPerColumn != 0)
+					// 行の頭（チェック）の置き場所は 4 通り。**図面枠の行**は 2 列の下へ
+					// 1 行ぶん空けて置く（役割の列に混ぜると、列の折り返しがずれるうえに
+					// 「シンボルではないもの」がシンボルの列に紛れる）。置き先は**左の列の
+					// いちばん下**——列は左から埋まるので、そこが必ず最後まで埋まっている。
+					// **列の先頭**は、1 列目なら説明文の下（ここだけ 1 行ぶん空ける）、
+					// 2 列目以降なら**前の列の先頭行の右端の右**——列の頭どうしを揃えると、
+					// 行の高さが全列で同じなので以降の行も自然に揃う。**列の途中**は
+					// 1 つ上の行の頭の下で、行間は空けない（絵が文字より背が高いぶん、
+					// 詰めても窮屈にならない）。
+					if (row == kTitleBlockRow)
+						this->AddBelowControl(&fChecks[kRowsPerColumn - 1], &fChecks[row], 0, 1);
+					else if (row % kRowsPerColumn != 0)
 						this->AddBelowControl(&fChecks[row - 1], &fChecks[row]);
 					else if (row == 0)
 						this->AddBelowControl(&fIntro, &fChecks[row], 0, 1);
@@ -349,7 +425,7 @@ namespace HomeskzIfcImport::draw
 				fShown = true;
 				try
 				{
-					for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
+					for (std::size_t row = 0; row < kRowCount; ++row)
 					{
 						FillSelector(row);
 						fChecks[row].SetState(fEnabled[row]);
@@ -370,7 +446,7 @@ namespace HomeskzIfcImport::draw
 			// 選択だけは OnDefaultButtonEvent で読む。冒頭「選択を読む時機」）。
 			void OnDDXInitialize() override
 			{
-				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
+				for (std::size_t row = 0; row < kRowCount; ++row)
 				{
 					this->AddDDX_CheckButton(checkID(row), &fEnabled[row]);
 					if (fForm == Form::NameList)
@@ -386,7 +462,7 @@ namespace HomeskzIfcImport::draw
 				{
 					try
 					{
-						for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
+						for (std::size_t row = 0; row < kRowCount; ++row)
 							fSelection[row] = SelectedIndexOf(row);
 					}
 					catch (...)
@@ -404,7 +480,7 @@ namespace HomeskzIfcImport::draw
 			{
 				if (fForm != Form::NameList)
 					return; // サムネイルの形では、この ID のコントロールは別物
-				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
+				for (std::size_t row = 0; row < kRowCount; ++row)
 				{
 					if (popupID(row) != controlID)
 						continue;
@@ -418,7 +494,7 @@ namespace HomeskzIfcImport::draw
 			// 見て分かるように）。
 			void OnEnabledChanged(TControlID controlID, VWDialogEventArgs& /*eventArgs*/)
 			{
-				for (std::size_t row = 0; row < core::kSymbolRoleCount; ++row)
+				for (std::size_t row = 0; row < kRowCount; ++row)
 				{
 					if (checkID(row) != controlID)
 						continue;
@@ -431,6 +507,13 @@ namespace HomeskzIfcImport::draw
 			DEFINE_EVENT_DISPATH_MAP;
 
 		private:
+			// **その行の候補**（冒頭「いちばん下の行だけシンボルではない」）。ここだけが
+			// 行による違いで、以降の作り方・埋め方・読み取りは全行で同じ。
+			const CandidateList& Candidates(std::size_t row) const
+			{
+				return row == kTitleBlockRow ? fResources.titleBlocks : fResources.symbols;
+			}
+
 			// その行の**右端**のコントロール（次の列を右へ置くときの相手）。何が右端かは
 			// 形で変わる——サムネイルの形は選択そのもの、名前の形は隣に出す絵。
 			VWControl* RowTail(std::size_t row)
@@ -468,21 +551,22 @@ namespace HomeskzIfcImport::draw
 			// 添字と名前の添字を一致させておくと、選択をそのまま名前へ引き直せる）。
 			void FillSelector(std::size_t row)
 			{
-				const bool valid = fSelection[row] < fResources.names.size();
+				const CandidateList& candidates = Candidates(row);
+				const bool valid = fSelection[row] < candidates.names.size();
 				if (fForm == Form::Thumbnail)
 				{
 					VWThumbnailPopupCtrl& popup = fThumbs[row];
 					// 項目はリソース一覧の **ID と（一覧側の）添字**で足す（絵は VW が引く）。
 					// **候補だけを候補の順に足す**ので、項目 i ＝ 候補 i になる。
 					const Sint32 listID = fResources.list.GetListID();
-					for (const std::size_t listIndex : fResources.listIndices)
+					for (const std::size_t listIndex : candidates.listIndices)
 						popup.AddImageFromResource(listID, listIndex);
 					if (valid)
 						popup.SelectItem(fSelection[row]);
 					return;
 				}
 				VWPullDownMenuCtrl& popup = fPopups[row];
-				for (const std::string& name : fResources.names)
+				for (const std::string& name : candidates.names)
 					popup.AddItem(TXString(name.c_str()));
 				if (valid)
 					popup.SelectIndex(fSelection[row]);
@@ -493,43 +577,47 @@ namespace HomeskzIfcImport::draw
 			// それも範囲外なら開いたときの選択のまま返す。
 			std::size_t SelectedIndexOf(std::size_t row) const
 			{
+				const std::vector<std::string>& names = Candidates(row).names;
 				const VWThumbnailPopupCtrl& popup = fThumbs[row];
 				TXString name;
 				gSDK->InternalIndexToNameN(popup.GetSelectedItem(), name);
 				const std::string text = static_cast<const char*>(name);
 				if (!text.empty())
 				{
-					const std::size_t byName = IndexOf(text);
-					if (byName < fResources.names.size())
+					const std::size_t byName = IndexOf(row, text);
+					if (byName < names.size())
 						return byName;
 				}
 				const std::size_t byIndex = popup.GetSelectedItemIndex();
-				return byIndex < fResources.names.size() ? byIndex : fSelection[row];
+				return byIndex < names.size() ? byIndex : fSelection[row];
 			}
 
-			// 名前 → 項目の添字。無ければ項目の数（＝範囲外）を返す。
-			std::size_t IndexOf(const std::string& value) const
+			// 名前 → その行の項目の添字。無ければ項目の数（＝範囲外）を返す。
+			std::size_t IndexOf(std::size_t row, const std::string& value) const
 			{
-				for (std::size_t i = 0; i < fResources.names.size(); ++i)
-					if (fResources.names[i] == value)
+				const std::vector<std::string>& names = Candidates(row).names;
+				for (std::size_t i = 0; i < names.size(); ++i)
+					if (names[i] == value)
 						return i;
-				return fResources.names.size();
+				return names.size();
 			}
 
 			// その行の見た目を今の状態に合わせる。**選ぶものが無い行は常に無効**——選べる
 			// ものが無いのにチェックできると、「取り込むと言ったのに何も置かれない」ことになる。
 			void UpdateRow(std::size_t row)
 			{
-				const bool hasItems = !fResources.names.empty();
+				const std::vector<std::string>& names = Candidates(row).names;
+				// **候補は行ごとに数える**——図面枠スタイルが 1 つも無い図面でも
+				// シンボルの行は選べるし、その逆もある。
+				const bool hasItems = !names.empty();
 				this->EnableControl(checkID(row), hasItems);
 				this->EnableControl(popupID(row), hasItems && fEnabled[row]);
 				if (fForm != Form::NameList)
 					return;
 				// 退避の形だけは絵が別のコントロールなので、選択に追随させる。
 				const std::size_t index = fSelection[row];
-				const TXString name = index < fResources.names.size()
-										  ? TXString(fResources.names[index].c_str())
-										  : TXString("");
+				const TXString name =
+					index < names.size() ? TXString(names[index].c_str()) : TXString("");
 				fPreviews[row].Update(name, kPreviewRenderMode, kPreviewView);
 				this->EnableControl(previewID(row), hasItems && fEnabled[row]);
 			}
@@ -546,17 +634,19 @@ namespace HomeskzIfcImport::draw
 			std::deque<VWSymbolDisplayCtrl> fPreviews; // 同上
 			SymbolResources fResources; // 項目の元（ダイアログより長生きさせない）
 			Form fForm = Form::Thumbnail;
-			std::array<std::size_t, core::kSymbolRoleCount> fSelection = {};
-			std::array<bool, core::kSymbolRoleCount> fEnabled = {};
+			std::array<std::size_t, kRowCount> fSelection = {};
+			std::array<bool, kRowCount> fEnabled = {};
 			bool fShown = false;
 			bool fAborted = false;
 			std::string fNote;
 		};
 
-		// 役割を 1 つ足したら、下のイベントマップにも 2 行足すこと（コントロールの ID は
+		// 行を 1 つ足したら、下のイベントマップにも 2 行足すこと（コントロールの ID は
 		// コンパイル時の定数でなければならないので、ここだけは表から回せない）。
-		static_assert(core::kSymbolRoleCount == 7,
-					  "役割を増減したら CImportSettingsDialog のイベントマップも直すこと");
+		// **図面枠の行（kTitleBlockRow）もイベントマップに要る**ので、数えるのは
+		// 役割の数ではなく行の数。
+		static_assert(kRowCount == 8,
+					  "行を増減したら CImportSettingsDialog のイベントマップも直すこと");
 
 		// EVENT_DISPATCH_MAP_BEGIN は SDK のマクロで、その展開が misc-const-correctness に
 		// 引っかかる（マクロ側のコードでこちらの落ち度ではない。draw/ResultDialog.cpp と同じ）。
@@ -569,6 +659,7 @@ namespace HomeskzIfcImport::draw
 		ADD_DISPATCH_EVENT(checkID(4), OnEnabledChanged);
 		ADD_DISPATCH_EVENT(checkID(5), OnEnabledChanged);
 		ADD_DISPATCH_EVENT(checkID(6), OnEnabledChanged);
+		ADD_DISPATCH_EVENT(checkID(7), OnEnabledChanged); // 図面枠スタイル
 		ADD_DISPATCH_EVENT(popupID(0), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(1), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(2), OnSymbolChanged);
@@ -576,6 +667,7 @@ namespace HomeskzIfcImport::draw
 		ADD_DISPATCH_EVENT(popupID(4), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(5), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(6), OnSymbolChanged);
+		ADD_DISPATCH_EVENT(popupID(7), OnSymbolChanged); // 図面枠スタイル
 		EVENT_DISPATCH_MAP_END;
 
 		// 前回の選択（この VectorWorks を起動している間だけ覚えている）。初回は役割の表の

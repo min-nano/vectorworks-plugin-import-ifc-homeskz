@@ -144,6 +144,8 @@ src/
     Tag.{h,cpp}               断面寸法データタグ（伏図・軸組図で共有。スタイルは当てず、
                               タグの中身はタグ 1 本ずつへ直接組む）
     Grid / Story / Floor / Member / Column / Rafter / Roof / Footing /
+    TitleBlock.{h,cpp}        図面枠（伏図・軸組図で共有。図面にあるスタイルを当てる
+                              だけで、スタイルは作らない）
     ColumnMark / Sheet / Legend / Section   要素ごとの描画
   Updater*.{h,cpp}          同梱した更新スクリプトを起動してアップデートを駆動する
                             （同梱スクリプトの実行は本体へも貸し出す）
