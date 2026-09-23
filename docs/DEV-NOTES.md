@@ -2674,18 +2674,55 @@ by-class にしてから作れば 7 つとも要らなくなるか／一括の�
 **同じ条件で複数周まわして再現するかを見る**こと。逆に、クラスと属性の数字は 2 周とも同じ形で
 出ているので、そちらは信じてよい。
 
+### #94 の答えと、それを受けた直し（構造材のクラスと属性は「作る前に既定で」）
+
+[#94](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/94) の答えが
+出た（[Findings「Attributes and Classes」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Attributes%20and%20Classes.md)）。
+
+- **費用は書き込みではなく、それが起こす PIO の作り直し**。構造材 PIO では
+  `SetObjectClass` と 6 つの `Set*ByClass` が 1 回ごとに作り直しを起こす（非 PIO では無料。
+  マーカーだけは作り直しを起こさない）。上の表の 45 秒はほぼ全部が構造材 517 本 × 7 回である
+  （データタグも PIO だが作り直しが軽い）。
+- **一括の呼び出しは無い。** 減らす道は「**文書の既定を作る前に立てる**」だけで、そうすれば
+  生まれた PIO は最初からそのクラスに属し、6 属性も by-class になる。
+
+そこで構造材（横架材・柱・垂木。3 つとも `draw/StructuralMember` の `DrawStructuralMember`
+を通る）を次の形にした。
+
+1. `CreateCustomObjectPath` の 1 行だけを `ScopedCreationClass`（`draw/DrawUtil`）で囲む。
+   作る前に既定のクラスと既定の by-class を立て、抜けるときに**既定のクラスと不透明度を
+   元へ戻す**。
+2. 作った後は `FinishCreatedWithClass` が**既定を継いだかを読み戻し**（読むのは作り直しを
+   起こさない）、継いでいればマーカーだけを by-class にする（無料）。**継いでいなければ従来の
+   `SetClassWithAttributes` で与え直す**——絵は変わらず、遅くなるだけ。その本数は開発ビルドの
+   診断に「既定のクラスを継がず作った後に与え直した材」として出る。
+
+**見込み**: 構造材 1 本あたり 7 回ぶんの作り直しが消える。実測の表から 40 秒前後。**時計で
+確かめること**（区間「クラス:割り当て」と「属性:*」がほぼ 0 になり、代わりに「クラス:既定を
+立てる」「クラス:既定を継いだかの読み戻し」が小さく出るはず）。
+
+**残る副作用（戻せない既定）**: ペン色・面色・線の太さ・線種・面パターンの**文書の既定の
+by-class** は、SDK に「立てる」口（引数なし）しか無く下ろす口が無い（ヘッダで確認:
+`SetDefaultPColorsByClass()` ほか。戻せるのは `SetDefaultClass` と
+`SetDefaultOpacityByClassN` だけ）。したがって取り込みの前にそれらが by-instance だった図面では、
+**取り込みの後に利用者が描くものが「クラスの属性を使用」で生まれる**。既定のクラスは戻して
+あるので、クラスそのものは持ち越さない。下ろす口が要るなら SDK リファレンス側で調べる。
+
+**データタグ・スラブ・線などは従来のまま**（per-object で呼ぶ）。非 PIO は無料で、データタグは
+531 回で合わせても小さいので、既定を立てる仕組みを広げる理由が無い。
+
 ### 次の一手
 
-1. **[#94](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/94) の答えを待つ。**
-   * 「文書の既定を by-class にできる」なら → 7 つの呼び出しを**まるごと消せる**可能性。45 秒。
-   * 「一括の呼び出しがある」なら → 7 回を 1 回に。
-   * 「どれも無い」なら → **この 45 秒は削れないものとして受け入れ**、下の 2 へ移る。
-   * [#81](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/81) の問い 1
-     （再生成を抑止する口）が「ある」なら、その口でこの 45 秒を囲えるかもしれない。
-2. **削れる余地が残っているところ**（#94 が空振りだったときの行き先）。
+1. **上の直しを実機で測る**（2 周以上。「1 周の数字で語ってはいけないものがある」）。
+   [#81](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/81) の答え
+   （`CreateCustomObjectPath(..., doRegen=false)` ＋ 0 長のパスで作り直しを 2 回から 1 回へ）は
+   **まだ入れていない**。Findings の検証は鉛直のパス（Z の差）だけで、横架材のように
+   平面上の長さを持つパスでどうなるかは分からない。潰れた材の自己修復（`retryWithFreshPath`）
+   とも絡むので、入れるなら別の PR で、Findings を確かめてから。
+2. **削れる余地が残っているところ**。
    | 対象 | 実測 | 見込み |
    | --- | ---: | --- |
-   | 構造材の `ResetObject` | 6.5s | まとめられるかは [#81](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/81) 次第。上限はタグ・スラブ込みで 7.1s |
+   | 構造材の `ResetObject` | 6.5s | まとめても速くならない（[#81](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/81)）。回数を減らす道は上の 1 |
    | 構造材の `CreateCustomObjectPath` | 6.3s | 1 本 1 回の生成そのもの。減らしようが無い |
    | ビューポートの `Update` | 4.9s | 伏図は `ForcePlanView` の中でもう 1 回走る。回数を減らせるか（実機確認必須） |
    | データタグの `UpdateDataTag` | 2.6s | 本文を作る本体。減らしようが無い |

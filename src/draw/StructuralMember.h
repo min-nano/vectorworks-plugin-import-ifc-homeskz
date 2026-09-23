@@ -199,6 +199,10 @@ namespace HomeskzIfcImport::draw
 		// 潰れていた材の**パスを作り直して差し替えたら直ったか**（`SetCustomObjectPath`）。
 		// true なら「渡した曲線は正しかったのに PIO 化で潰れた」の裏が取れる。
 		bool repairedByPath = false;
+		// **作る前に立てた既定のクラス・描画属性を継いで生まれたか**（draw/DrawUtil の
+		// FinishCreatedWithClass）。false なら作った後に与え直した＝従来どおりの（遅い）
+		// 作り方に戻った。絵は同じ。
+		bool classInherited = true;
 		// ここから下は**開発ビルドだけ**（draw/Verify.h）。どれも読み戻した結果を診断へ
 		// 載せるためのもので、外しても描かれるものは 1 つも変わらない。
 #if VW_DRAW_VERIFY
@@ -238,7 +242,8 @@ namespace HomeskzIfcImport::draw
 		// 診断へ載せるところだけである。
 #if VW_DRAW_VERIFY
 		std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
-		std::size_t repaired = 0; // 潰れたパスを作り直して直った
+		std::size_t repaired = 0;	   // 潰れたパスを作り直して直った
+		std::size_t classFallback = 0; // 既定のクラスを継がず、作った後に与え直した
 		// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。パスから
 		// Z を外したぶんの見張りで、0 でなければ材は在るのに違う高さに並んでいる——本数にも
 		// スパンにも出ないので、これが唯一の手掛かりになる。

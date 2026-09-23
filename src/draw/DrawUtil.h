@@ -119,6 +119,55 @@ namespace HomeskzIfcImport::draw
 	// 描いたものは**ほぼ必ず**この組で仕上げるので、2 行の繰り返しを 1 か所にまとめる。
 	void SetClassWithAttributes(MCObjectHandle object, const std::string& className);
 
+	// 【PIO を作る前にクラスを「文書の既定」として立てる】構造材 PIO のように作り直しの重い
+	// PIO では、作った**後**の SetObjectClass と 6 つの Set*ByClass が**1 回ごとに PIO を
+	// 作り直させる**（構造材で 1 回 9〜12ms。取り込み全体の 54% を占めていた。
+	// docs/DEV-NOTES.md「描画の高速化」）。**文書の既定を作る前に立てておけば、生まれた PIO は
+	// 最初からそのクラスに属し 6 属性も by-class になる**ので、その 7 回が丸ごと要らなくなる
+	// （SDK リファレンス Findings「Attributes and Classes」）。
+	//
+	// **このオブジェクトが生きている間に作ったものだけ**が既定を継ぐので、スコープは
+	// 「作る 1 行」だけを囲む。壊すときに**既定のクラスと不透明度を元へ戻す**（利用者が
+	// 取り込みの後に描くものへ、取り込みのクラスを持ち越さない）。
+	//
+	// **戻せないものがある。** ペン色・面色・線の太さ・線種・面パターンの既定の by-class は
+	// SDK に「立てる」口（引数なし）しか無く、下ろす口が無い。したがって取り込みの前に
+	// それらが by-instance だった図面では、取り込みの後も by-class のまま残る。
+	//
+	// クラス名が空なら何もしない（SetClassByName と同じく無クラス＝既定のまま）。
+	class ScopedCreationClass
+	{
+	public:
+		explicit ScopedCreationClass(const std::string& className);
+		~ScopedCreationClass();
+		ScopedCreationClass(const ScopedCreationClass&) = delete;
+		ScopedCreationClass& operator=(const ScopedCreationClass&) = delete;
+		ScopedCreationClass(ScopedCreationClass&&) = delete;
+		ScopedCreationClass& operator=(ScopedCreationClass&&) = delete;
+
+		// 立てたクラスの索引（クラス名が空なら 0）。
+		[[nodiscard]] InternalIndex classID() const
+		{
+			return fClassID;
+		}
+
+	private:
+		bool fActive = false;
+		InternalIndex fClassID = 0;
+		InternalIndex fPreviousClass = 0;
+		Boolean fPreviousPenOpacity = false;
+		Boolean fPreviousFillOpacity = false;
+	};
+
+	// ScopedCreationClass の中で作ったオブジェクトを仕上げる。**生まれたものが本当に既定を
+	// 継いだかを読み戻し**（クラスと 6 属性。読むのは作り直しを起こさない）、継いでいれば
+	// マーカーだけを by-class にする（マーカーは既定を継がないが、by-class 化は作り直しを
+	// 起こさないので無料）。継いでいなければ従来どおり SetClassWithAttributes で与え直す
+	// ——**読み戻しが絵を決める**ので、検算と違って本番でも走る（draw/Verify.h の基準）。
+	// 戻り値は既定を継いでいたか（false なら与え直した）。
+	bool FinishCreatedWithClass(MCObjectHandle object, const ScopedCreationClass& scope,
+								const std::string& className);
+
 	// PIO の定義を**設定ダイアログを出さずに**用意する。その PIO を 1 つでも置くフェーズの
 	// 先頭で 1 回呼ぶ。
 	//

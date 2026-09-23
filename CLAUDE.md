@@ -544,7 +544,8 @@ Vectorworks 自身がモーダルのダイアログを出すことがある—�
 `StoryBoundSlot`。素の short を意味のある名前で持つ唯一の場所）・**高さ基準の変換**
 （`StoryBoundData`。床板・底盤・構造材が共有）・**オブジェクト変数の書き込み**
 （`SetBooleanVariable` / `SetRealVariable` / `SetPointVariable`）・**クラス分けと属性の by-class 化**
-（`SetClassWithAttributes`）・**PIO 定義の先出し**（`PrepareCustomObjectDefinition`。記号・耐力壁・
+（`SetClassWithAttributes`。構造材 PIO は作った後に呼ぶと 1 回ごとに作り直されるので、
+**作る前に文書の既定として立てる** `ScopedCreationClass` ＋ `FinishCreatedWithClass`）・**PIO 定義の先出し**（`PrepareCustomObjectDefinition`。記号・耐力壁・
 データタグ・凡例が共有）・**描画ループの中止判定と歩進**（`AdvanceProgress`）・**診断の 1 文**
 （`AppendCount`）・**診断行の連結**（`AppendLine`）・**登場順の dedupe**（`PushUnique`）・
 **収まり判定の遊び**（`kFitTol`。伏図と軸組図が共有）もここ）は

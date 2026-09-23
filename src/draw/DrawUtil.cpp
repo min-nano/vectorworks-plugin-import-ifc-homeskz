@@ -253,6 +253,60 @@ namespace HomeskzIfcImport::draw
 		SetAllAttributesByClass(object);
 	}
 
+	ScopedCreationClass::ScopedCreationClass(const std::string& className)
+	{
+		if (className.empty())
+			return;
+		VW_DRAW_TIME("クラス:既定を立てる");
+		fClassID = gSDK->AddClass(TXString(className.c_str()));
+		fPreviousClass = gSDK->GetDefaultClass();
+		// 不透明度は 2 旗版で読む（1 旗版 GetDefaultOpacityByClass は書いた後も false を返す。
+		// Findings「Attributes and Classes」）。
+		gSDK->GetDefaultOpacityByClassN(fPreviousPenOpacity, fPreviousFillOpacity);
+		// 戻せない 5 つ（下ろす口が SDK に無い）。書き込み自体は無料で、既に立っていれば何も
+		// 変わらない。
+		gSDK->SetDefaultPColorsByClass();
+		gSDK->SetDefaultFColorsByClass();
+		gSDK->SetDefaultLWByClass();
+		gSDK->SetDefaultPPatByClass();
+		gSDK->SetDefaultFPatByClass();
+		gSDK->SetDefaultOpacityByClassN(true, true);
+		gSDK->SetDefaultClass(fClassID);
+		fActive = true;
+	}
+
+	ScopedCreationClass::~ScopedCreationClass()
+	{
+		if (!fActive)
+			return;
+		gSDK->SetDefaultClass(fPreviousClass);
+		gSDK->SetDefaultOpacityByClassN(fPreviousPenOpacity, fPreviousFillOpacity);
+	}
+
+	bool FinishCreatedWithClass(MCObjectHandle object, const ScopedCreationClass& scope,
+								const std::string& className)
+	{
+		if (object == nil || className.empty())
+			return true;
+		bool inherited = false;
+		{
+			VW_DRAW_TIME("クラス:既定を継いだかの読み戻し");
+			inherited = gSDK->GetObjectClass(object) == scope.classID() &&
+						gSDK->GetPColorsByClass(object) && gSDK->GetFColorsByClass(object) &&
+						gSDK->GetLWByClass(object) && gSDK->GetPPatByClass(object) &&
+						gSDK->GetFPatByClass(object) && gSDK->GetOpacityByClass(object);
+		}
+		if (!inherited)
+		{
+			// 継いでいなければ従来の作り方へ戻す（中で区間を開くので、ここは包まない）。
+			SetClassWithAttributes(object, className);
+			return false;
+		}
+		VW_DRAW_TIME("属性:マーカー");
+		gSDK->SetArrowByClass(object);
+		return true;
+	}
+
 	void PrepareCustomObjectDefinition(const char* universalName)
 	{
 		gSDK->DefineCustomObject(TXString(universalName), kCustomObjectPrefNever);
