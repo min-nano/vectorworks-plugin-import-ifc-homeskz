@@ -5,6 +5,11 @@
 //	この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse
 //	ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
+//	【図面枠（M28）】取り込み設定で図面枠スタイルが選ばれていれば、シートレイヤを用意した
+//	**直後**（ビューポート・凡例より前）に図面枠を 1 つ置く——後から作ったオブジェクトが
+//	手前に来るので、先に置かないと図面枠が図を覆う。置き方・スタイルの当て方・位置合わせは
+//	draw/TitleBlock が持ち、ここは「用意した各シートレイヤへ 1 つずつ」呼ぶだけ。
+//
 //	【シートレイヤに載るのはビューポートだけではない】伏図には**グラフィック凡例**
 //	（VW 標準の "GraphicLegend" PIO）も 1 つ載る（M13）。凡例はビューポート注釈では
 //	なくシートレイヤ（＝用紙）へ直接置くので、置き方は draw/Legend が持つ。ここは
@@ -49,6 +54,7 @@
 #include "draw/Legend.h"
 #include "draw/ShearWall.h"
 #include "draw/Tag.h"
+#include "draw/TitleBlock.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -136,6 +142,10 @@ namespace HomeskzIfcImport::draw
 								{ return sheet.legend.has_value(); }))
 			prepareGraphicLegendPlugin();
 
+		// M28 図面枠。スタイル名が空（＝置かない）か、その名前のスタイルが図面に無ければ
+		// 以降の drawSheetTitleBlock は何もしない（draw/TitleBlock.h）。
+		TitleBlockCounts titleBlocks = prepareTitleBlocks(document);
+
 		// --- 1 巡目: シートレイヤ・ビューポート・凡例を作る -------------------------
 		//
 		// **縮尺はまだ確定できない。** 用紙をどれだけ凡例のために空けるかは
@@ -163,6 +173,10 @@ namespace HomeskzIfcImport::draw
 				++missingSheetLayers;
 				continue;
 			}
+
+			// M28 図面枠は**ビューポートより先**に置く（後から作ったものが手前に来るので、
+			// 後で置くと図を覆う。draw/TitleBlock.h）。
+			drawSheetTitleBlock(sheetLayer, titleBlocks);
 
 			// 用紙の大きさは**最初に用意できたシートレイヤ**から読む（どのシートも同じ用紙
 			// という前提。M18）。仮の割り付けもここで 1 回だけ作る。
@@ -300,6 +314,10 @@ namespace HomeskzIfcImport::draw
 
 		placeLegends(legends, layout.legendTopRight);
 
+		// M28 図面枠へスタイルを流し込み、用紙の中心へ寄せる（大きさはスタイルの中身が
+		// 決めるので、置き終えてからでなければ測れない。draw/TitleBlock.h）。
+		finishTitleBlocks(titleBlocks);
+
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
@@ -406,6 +424,10 @@ namespace HomeskzIfcImport::draw
 
 		addNote(tagDiagnostics("伏図", tags));
 		addNote(legendDiagnostics(legends));
+		// M28 図面枠。異常は note、平常でも出る内訳（当てたスタイル名・通った登録名）は
+		// outInfo——行き先を分ける理由は上の割り付けの行と同じ。
+		addNote(titleBlockDiagnostics(titleBlocks));
+		addInfo(titleBlockInfo("伏図", titleBlocks));
 		return drawn;
 	}
 } // namespace HomeskzIfcImport::draw

@@ -40,7 +40,12 @@ namespace HomeskzIfcImport::draw
 	//
 	// memberHandles には drawMembers が記録した「命令インデックス → 横架材ハンドル」の
 	// 対応表を渡す（断面寸法データタグの関連付け先。伏図と同じ。draw/Tag.h）。
+	//
+	// outInfo には**異常ではない内訳**（いまは図面枠を何枚に置けたか）を入れる。平常でも
+	// 必ず出るので note とは行き先を分ける——完了ダイアログは note が空かどうかで
+	// 「問題あり」を判断し、outInfo は診断ログにだけ出る（伏図と同じ。draw/Sheet.h）。
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
 							 std::string* note = nullptr,
-							 const ObjectHandles* memberHandles = nullptr);
+							 const ObjectHandles* memberHandles = nullptr,
+							 std::string* outInfo = nullptr);
 } // namespace HomeskzIfcImport::draw

@@ -247,8 +247,10 @@ namespace HomeskzIfcImport::draw
 					   core::DrawPhase::Sections))
 		{
 			std::string note;
-			counts.sections = drawSections(document, progress, &note, &memberHandles);
+			std::string info;
+			counts.sections = drawSections(document, progress, &note, &memberHandles, &info);
 			addDiagnostics(note);
+			addNotes(info);
 		}
 
 		// **最後に柱を測り直す。** 生成直後は入っていたのに、あとの要素を描くあいだに長さ 0 へ
