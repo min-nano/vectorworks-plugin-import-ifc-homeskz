@@ -639,6 +639,15 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
   **PR の head を checkout しません**（既定ブランチのまま、PR の中身は `gh pr diff` で
   読ませます）。入口を `workflow_run` に寄せたので、いまはこちらが**ふだんの経路**です。
   fork の PR と下書きの PR は走りません。
+- **下書き（draft）の PR ではレビューしません。** 実機確認や設計判断が要る変更は下書きで
+  作り、マージしたい状態になってから ready for review に昇格させます（[`CLAUDE.md`](../CLAUDE.md)
+  「開発プロセス: PR とマージ」）。差分がまだ動く段階でレビューを回しても出し直すだけで、
+  エージェントの使用量を無駄にするためです。昇格（`ready_for_review`）がそのままレビューの
+  入口になります。イベントに PR が載っているもの（`pull_request` / インラインコメント・
+  レビューの提出）はジョブの `if` でランナーを起こす前に落とし、載っていないもの
+  （`workflow_run` / PR 本体へのコメント）は「レビューするか決める」の `isDraft` で落とします。
+  **CI（lint / build / test）と dev ビルドは下書きでも走る**ので、実機フィードバックの往復は
+  下書きのまま回せます。
 - **レビューの失敗で PR を赤くしません**（`continue-on-error`）。失敗は実行のログと
   `::warning::` に残ります。
 - ツールは差分の取得とレビューの提出に要るものだけを許可し、`Edit` / `Write` /
