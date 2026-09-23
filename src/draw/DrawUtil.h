@@ -323,8 +323,18 @@ namespace HomeskzIfcImport::draw
 	// 引ける `CenterPointLength`（OIP の「長さ」）は部材長ではない（実長 5333 の柱で 100 を
 	// 返した。docs/DEV-NOTES.md M27）。
 	//
-	// **本番ビルドにも残す**（draw/Verify.h の「囲まない」側）——潰れた材のパスを作り直す
-	// 自己修復の引き金になるので、外すと利用者の絵が変わる。
+	// **いまは開発ビルドからしか呼ばれない。** 唯一の呼び出し口は `MeasureDrawnMember` の
+	// `Horizontal` 分岐で、そこへ本番ビルドから届く経路（`DrawStructuralMember` の
+	// `measureDrawn`）は `retryWithFreshPath` を武装した材だけを通す——その武装が 0 本に
+	// なったため（draw/Member ／ draw/Rafter ／ draw/Column）、本番では 1 度も走らない。
+	//
+	// **それでもまだ `#if VW_DRAW_VERIFY` で囲っていないのは、囲むと罠になるから。**
+	// 囲むには呼び出し側の `Horizontal` 分岐も囲うことになり、本番の
+	// `MeasureDrawnMember` は「測れなかった」を黙って返す関数に化ける——**この PR が
+	// 消したばかりの「静かに素通りする検査」を、形を変えて戻すことになる**。
+	// 置き場所は**自己修復の仕組みごと撤去する別 PR で決める**（そこでは本番側の
+	// `measureDrawn` ごと畳むので、罠の生まれようが無い）。draw/Verify.h の基準
+	// （「外したら利用者の絵が変わるか」）で言えば、この関数は既に囲む側である。
 	bool PioPathChord(MCObjectHandle object, double& outLength);
 
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
