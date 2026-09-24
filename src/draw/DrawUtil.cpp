@@ -259,12 +259,20 @@ namespace HomeskzIfcImport::draw
 			return;
 		VW_DRAW_TIME("クラス:既定を立てる");
 		fClassID = gSDK->AddClass(TXString(className.c_str()));
+		// 退避する（戻し方はヘッダ）。不透明度は 2 旗版で読む（1 旗版
+		// GetDefaultOpacityByClass は書いた後も false を返す。Findings「Attributes and Classes」）。
 		fPreviousClass = gSDK->GetDefaultClass();
-		// 不透明度は 2 旗版で読む（1 旗版 GetDefaultOpacityByClass は書いた後も false を返す。
-		// Findings「Attributes and Classes」）。
 		gSDK->GetDefaultOpacityByClassN(fPreviousPenOpacity, fPreviousFillOpacity);
-		// 戻せない 5 つ（下ろす口が SDK に無い）。書き込み自体は無料で、既に立っていれば何も
-		// 変わらない。
+		gSDK->GetDefaultColors(fPreviousColors);
+		fPreviousLineWeight = gSDK->GetDefaultLineWeight();
+		fPreviousPenPat = gSDK->GetDefaultPenPatN();
+		fPreviousFillPat = gSDK->GetDefaultFillPat();
+		fPreviousPColorsByClass = gSDK->GetDefaultPColorsByClass();
+		fPreviousFColorsByClass = gSDK->GetDefaultFColorsByClass();
+		fPreviousLWByClass = gSDK->GetDefaultLWByClass();
+		fPreviousPPatByClass = gSDK->GetDefaultPPatByClass();
+		fPreviousFPatByClass = gSDK->GetDefaultFPatByClass();
+
 		gSDK->SetDefaultPColorsByClass();
 		gSDK->SetDefaultFColorsByClass();
 		gSDK->SetDefaultLWByClass();
@@ -279,8 +287,25 @@ namespace HomeskzIfcImport::draw
 	{
 		if (!fActive)
 			return;
-		gSDK->SetDefaultClass(fPreviousClass);
+		VW_DRAW_TIME("クラス:既定を戻す");
+		// **値を書くことが旗を下ろすことである**（1 対 1。色だけ 1 本で 2 つ）。
+		gSDK->SetDefaultColors(fPreviousColors);
+		gSDK->SetDefaultLineWeight(fPreviousLineWeight);
+		gSDK->SetDefaultPenPatN(fPreviousPenPat);
+		gSDK->SetDefaultFillPat(fPreviousFillPat);
 		gSDK->SetDefaultOpacityByClassN(fPreviousPenOpacity, fPreviousFillOpacity);
+		gSDK->SetDefaultClass(fPreviousClass);
+		// 値を書いた時点で 5 つとも下りているので、元から立っていた旗だけを立て直す。
+		if (fPreviousPColorsByClass)
+			gSDK->SetDefaultPColorsByClass();
+		if (fPreviousFColorsByClass)
+			gSDK->SetDefaultFColorsByClass();
+		if (fPreviousLWByClass)
+			gSDK->SetDefaultLWByClass();
+		if (fPreviousPPatByClass)
+			gSDK->SetDefaultPPatByClass();
+		if (fPreviousFPatByClass)
+			gSDK->SetDefaultFPatByClass();
 	}
 
 	bool FinishCreatedWithClass(MCObjectHandle object, const ScopedCreationClass& scope,
