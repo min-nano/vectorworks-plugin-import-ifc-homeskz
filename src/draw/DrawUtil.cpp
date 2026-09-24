@@ -253,6 +253,85 @@ namespace HomeskzIfcImport::draw
 		SetAllAttributesByClass(object);
 	}
 
+	ScopedCreationClass::ScopedCreationClass(const std::string& className)
+	{
+		if (className.empty())
+			return;
+		VW_DRAW_TIME("クラス:既定を立てる");
+		fClassID = gSDK->AddClass(TXString(className.c_str()));
+		// 退避する（戻し方はヘッダ）。不透明度は 2 旗版で読む（1 旗版
+		// GetDefaultOpacityByClass は書いた後も false を返す。Findings「Attributes and Classes」）。
+		fPreviousClass = gSDK->GetDefaultClass();
+		gSDK->GetDefaultOpacityByClassN(fPreviousPenOpacity, fPreviousFillOpacity);
+		gSDK->GetDefaultColors(fPreviousColors);
+		fPreviousLineWeight = gSDK->GetDefaultLineWeight();
+		fPreviousPenPat = gSDK->GetDefaultPenPatN();
+		fPreviousFillPat = gSDK->GetDefaultFillPat();
+		fPreviousPColorsByClass = gSDK->GetDefaultPColorsByClass();
+		fPreviousFColorsByClass = gSDK->GetDefaultFColorsByClass();
+		fPreviousLWByClass = gSDK->GetDefaultLWByClass();
+		fPreviousPPatByClass = gSDK->GetDefaultPPatByClass();
+		fPreviousFPatByClass = gSDK->GetDefaultFPatByClass();
+
+		gSDK->SetDefaultPColorsByClass();
+		gSDK->SetDefaultFColorsByClass();
+		gSDK->SetDefaultLWByClass();
+		gSDK->SetDefaultPPatByClass();
+		gSDK->SetDefaultFPatByClass();
+		gSDK->SetDefaultOpacityByClassN(true, true);
+		gSDK->SetDefaultClass(fClassID);
+		fActive = true;
+	}
+
+	ScopedCreationClass::~ScopedCreationClass()
+	{
+		if (!fActive)
+			return;
+		VW_DRAW_TIME("クラス:既定を戻す");
+		// **値を書くことが旗を下ろすことである**（1 対 1。色だけ 1 本で 2 つ）。
+		gSDK->SetDefaultColors(fPreviousColors);
+		gSDK->SetDefaultLineWeight(fPreviousLineWeight);
+		gSDK->SetDefaultPenPatN(fPreviousPenPat);
+		gSDK->SetDefaultFillPat(fPreviousFillPat);
+		gSDK->SetDefaultOpacityByClassN(fPreviousPenOpacity, fPreviousFillOpacity);
+		gSDK->SetDefaultClass(fPreviousClass);
+		// 値を書いた時点で 5 つとも下りているので、元から立っていた旗だけを立て直す。
+		if (fPreviousPColorsByClass)
+			gSDK->SetDefaultPColorsByClass();
+		if (fPreviousFColorsByClass)
+			gSDK->SetDefaultFColorsByClass();
+		if (fPreviousLWByClass)
+			gSDK->SetDefaultLWByClass();
+		if (fPreviousPPatByClass)
+			gSDK->SetDefaultPPatByClass();
+		if (fPreviousFPatByClass)
+			gSDK->SetDefaultFPatByClass();
+	}
+
+	bool FinishCreatedWithClass(MCObjectHandle object, const ScopedCreationClass& scope,
+								const std::string& className)
+	{
+		if (object == nil || className.empty())
+			return true;
+		bool inherited = false;
+		{
+			VW_DRAW_TIME("クラス:既定を継いだかの読み戻し");
+			inherited = gSDK->GetObjectClass(object) == scope.classID() &&
+						gSDK->GetPColorsByClass(object) && gSDK->GetFColorsByClass(object) &&
+						gSDK->GetLWByClass(object) && gSDK->GetPPatByClass(object) &&
+						gSDK->GetFPatByClass(object) && gSDK->GetOpacityByClass(object);
+		}
+		if (!inherited)
+		{
+			// 継いでいなければ従来の作り方へ戻す（中で区間を開くので、ここは包まない）。
+			SetClassWithAttributes(object, className);
+			return false;
+		}
+		VW_DRAW_TIME("属性:マーカー");
+		gSDK->SetArrowByClass(object);
+		return true;
+	}
+
 	void PrepareCustomObjectDefinition(const char* universalName)
 	{
 		gSDK->DefineCustomObject(TXString(universalName), kCustomObjectPrefNever);

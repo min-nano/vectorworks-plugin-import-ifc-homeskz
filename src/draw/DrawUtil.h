@@ -119,6 +119,71 @@ namespace HomeskzIfcImport::draw
 	// 描いたものは**ほぼ必ず**この組で仕上げるので、2 行の繰り返しを 1 か所にまとめる。
 	void SetClassWithAttributes(MCObjectHandle object, const std::string& className);
 
+	// 【PIO を作る前にクラスを「文書の既定」として立てる】構造材 PIO のように作り直しの重い
+	// PIO では、作った**後**の SetObjectClass と 6 つの Set*ByClass が**1 回ごとに PIO を
+	// 作り直させる**（構造材で 1 回 9〜12ms。取り込み全体の 54% を占めていた。
+	// docs/DEV-NOTES.md「描画の高速化」）。**文書の既定を作る前に立てておけば、生まれた PIO は
+	// 最初からそのクラスに属し 6 属性も by-class になる**ので、その 7 回が丸ごと要らなくなる
+	// （SDK リファレンス Findings「Attributes and Classes」）。
+	//
+	// **このオブジェクトが生きている間に作ったものだけ**が既定を継ぐので、スコープは
+	// 「作る 1 行」だけを囲む。壊すときに**立てた既定をすべて元へ戻す**——文書の既定は
+	// 利用者の図面の設定なので、取り込みの後に描くものへ持ち越さない（実機で、戻さない
+	// 版では取り込みの後もクラススタイルのままだった。PR #133）。
+	//
+	// **戻し方に癖がある。** ペン色・面色・線の太さ・線種・面パターンの既定の by-class には
+	// 「下ろす」口が無く、**既定の値を書くとその属性の旗が下りる**（同じ値でも下りる。
+	// 色は 1 本でペンと面の両方）。そこで作る前に**値と旗の両方**を退避し、戻すときは
+	// 値を書き戻してから、**元から立っていた旗だけ**を立て直す（元から by-class の図面を
+	// by-instance へ変えてしまわないため。SDK リファレンス Findings「Attributes and
+	// Classes」の「既定の by-class は既定の値を書き戻すと下りる」。#102）。
+	//
+	// マーカーの既定は立てない（どのみち継承されない。per-object で無料で与える）。
+	//
+	// クラス名が空なら何もしない（SetClassByName と同じく無クラス＝既定のまま）。
+	class ScopedCreationClass
+	{
+	public:
+		explicit ScopedCreationClass(const std::string& className);
+		~ScopedCreationClass();
+		ScopedCreationClass(const ScopedCreationClass&) = delete;
+		ScopedCreationClass& operator=(const ScopedCreationClass&) = delete;
+		ScopedCreationClass(ScopedCreationClass&&) = delete;
+		ScopedCreationClass& operator=(ScopedCreationClass&&) = delete;
+
+		// 立てたクラスの索引（クラス名が空なら 0）。
+		[[nodiscard]] InternalIndex classID() const
+		{
+			return fClassID;
+		}
+
+	private:
+		bool fActive = false;
+		InternalIndex fClassID = 0;
+		// 作る前の文書の既定（壊すときに書き戻す）。値と旗は別に持たれている。
+		InternalIndex fPreviousClass = 0;
+		Boolean fPreviousPenOpacity = false;
+		Boolean fPreviousFillOpacity = false;
+		ObjectColorType fPreviousColors{};
+		short fPreviousLineWeight = 0;
+		InternalIndex fPreviousPenPat = 0;
+		InternalIndex fPreviousFillPat = 0;
+		Boolean fPreviousPColorsByClass = false;
+		Boolean fPreviousFColorsByClass = false;
+		Boolean fPreviousLWByClass = false;
+		Boolean fPreviousPPatByClass = false;
+		Boolean fPreviousFPatByClass = false;
+	};
+
+	// ScopedCreationClass の中で作ったオブジェクトを仕上げる。**生まれたものが本当に既定を
+	// 継いだかを読み戻し**（クラスと 6 属性。読むのは作り直しを起こさない）、継いでいれば
+	// マーカーだけを by-class にする（マーカーは既定を継がないが、by-class 化は作り直しを
+	// 起こさないので無料）。継いでいなければ従来どおり SetClassWithAttributes で与え直す
+	// ——**読み戻しが絵を決める**ので、検算と違って本番でも走る（draw/Verify.h の基準）。
+	// 戻り値は既定を継いでいたか（false なら与え直した）。
+	bool FinishCreatedWithClass(MCObjectHandle object, const ScopedCreationClass& scope,
+								const std::string& className);
+
 	// PIO の定義を**設定ダイアログを出さずに**用意する。その PIO を 1 つでも置くフェーズの
 	// 先頭で 1 回呼ぶ。
 	//

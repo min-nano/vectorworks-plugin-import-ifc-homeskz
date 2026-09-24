@@ -332,18 +332,26 @@ namespace HomeskzIfcImport::draw
 		if (spec.path == nil || spec.profile == nil)
 			return result;
 
+		// **クラスと描画属性は「作る前に文書の既定として立てる」。** 作った後に
+		// SetObjectClass と 6 つの Set*ByClass を呼ぶと、構造材 PIO はその 1 回ごとに作り
+		// 直され（1 回 9〜12ms）、取り込み全体の半分をここで使っていた（docs/DEV-NOTES.md
+		// 「描画の高速化」。SDK リファレンス Findings「Attributes and Classes」）。既定は
+		// 生まれる瞬間に読まれるので、スコープは作る 1 行だけを囲む——抜けた時点で既定の
+		// クラスは利用者のものへ戻り、この後の ResetObject も従来と同じ既定の下で走る。
 		MCObjectHandle object = nil;
 		{
-			VW_DRAW_TIME("構造材:オブジェクト生成");
-			object = gSDK->CreateCustomObjectPath(kStructuralMember, spec.path, spec.profile, true);
+			const ScopedCreationClass creationClass(spec.drawClass);
+			{
+				VW_DRAW_TIME("構造材:オブジェクト生成");
+				object =
+					gSDK->CreateCustomObjectPath(kStructuralMember, spec.path, spec.profile, true);
+			}
+			if (object == nil)
+				return result;
+			// 既定を継いだかを読み戻し、継いでいなければ従来どおり与え直す（中で区間を開く
+			// ので、ここは包まない）。
+			result.classInherited = FinishCreatedWithClass(object, creationClass, spec.drawClass);
 		}
-		if (object == nil)
-			return result;
-
-		// **ここを区間で包まない。** 中の SetClassByName / SetAllAttributesByClass が自分で
-		// 呼び出しごとに区間を開く（draw/DrawUtil の【計測】）ので、包むと入れ子になる
-		// （core/DrawTiming.h「使う側の作法」）。
-		SetClassWithAttributes(object, spec.drawClass);
 		// スタイルは個別フィールドより**先に**関連付ける（後に設定する実測値で
 		// スタイル既定のパラメータを上書きするため）。
 		if (style != 0)
@@ -717,6 +725,8 @@ namespace HomeskzIfcImport::draw
 #endif
 		}
 #if VW_DRAW_VERIFY
+		if (!result.classInherited)
+			++classFallback;
 		if (result.collapsed)
 			++collapsed;
 		if (result.repairedByPath)
@@ -747,6 +757,9 @@ namespace HomeskzIfcImport::draw
 #if VW_DRAW_VERIFY
 		count("長さ 0 で描かれた（実体が無い）", failures.collapsed);
 		count("パスを作り直して直った", failures.repaired);
+		// 作る前に立てた既定（クラス・描画属性）を継がずに生まれ、作った後に与え直した本数。
+		// 0 でなければその本数ぶん高速化が効いていない（絵は従来どおり）。
+		count("既定のクラスを継がず作った後に与え直した", failures.classFallback);
 		if (!failures.collapsedProbe.empty())
 			note += "（1 本目: " + failures.collapsedProbe + "）";
 		count("命令と違う高さに描かれた", failures.elevation);
