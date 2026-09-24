@@ -2737,9 +2737,10 @@ by-class にしてから作れば 7 つとも要らなくなるか／一括の�
   （`SetCustomObjectPath` → もう一度 `ResetObject`）も `doRegen=false` の材で効く。
 - 実測（新規の空図面・30 本）は水平材で 1 本 27.1ms → 14.6ms。
 
-そこで **横架材だけ**を `doRegen=false` にした（`StructuralMemberSpec::regenOnCreate`。
-`draw/Member` だけが false にする）。1 変更＝1 要素で、柱・垂木は横架材を実機で確かめてから
-同じ 1 行を足す。
+そこでまず **横架材だけ**を `doRegen=false` にし（PR #136）、実機で確かめてから**構造材すべて
+（横架材・柱・垂木）**へ広げた。3 つとも `draw/StructuralMember` の `DrawStructuralMember` を
+通り、パスも同じ `CreatePath` で作るので、切り替えの旗は持たず `CreateCustomObjectPath` の
+呼び出し 1 か所で常に `false` を渡す。
 
 **見込み**: 横架材は構造材 517 本のうち大半なので、「構造材:オブジェクト生成」がほぼ横架材の
 本数ぶん消える（6.3 秒の大部分）。「構造材:リセット」の合計は変わらないはず——作り直しの
@@ -2762,13 +2763,14 @@ by-class にしてから作れば 7 つとも要らなくなるか／一括の�
 
 ### 次の一手
 
-1. **柱・垂木にも `regenOnCreate = false` を足す**（横架材は実機で確かめられた。パスの条件は
-   同じく満たしている）。見込みは柱 197 本・垂木 54 本ぶんの作り直し 1 回（約 3 秒）。
+1. **柱・垂木へ広げた分を実機で測る**。見込みは柱 197 本・垂木 54 本ぶんの作り直し 1 回
+   （約 3 秒。「構造材:オブジェクト生成」がほぼ 0 になるはず）。柱は鉛直のパス（2 点とも同じ
+   位置）で、Findings の #81 がまさにその形を確かめている。
 2. **削れる余地が残っているところ**。
    | 対象 | 実測 | 見込み |
    | --- | ---: | --- |
    | 構造材の `ResetObject` | 6.5s | まとめても速くならない（[#81](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/81)）。1 本 1 回が下限 |
-   | 構造材の `CreateCustomObjectPath` | 6.3s | 中身は作った時点の作り直し。横架材は `doRegen=false` で省いた（上記）。柱・垂木が残り |
+   | 構造材の `CreateCustomObjectPath` | 6.3s | 中身は作った時点の作り直し。`doRegen=false` で省いた（上記） |
    | ビューポートの `Update` | 4.9s | 伏図は `ForcePlanView` の中でもう 1 回走る。回数を減らせるか（実機確認必須） |
    | データタグの `UpdateDataTag` | 2.6s | 本文を作る本体。減らしようが無い |
    | ビューポートのラベル | 1.5s | 35 回で 44ms/回は不相応に高い。`SetDescription` と `SetLocator` のどちらが重いかは未分割 |
