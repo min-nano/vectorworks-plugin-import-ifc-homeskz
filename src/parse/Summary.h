@@ -191,4 +191,9 @@ namespace HomeskzIfcImport::parse
 	// なっていないかが、ログだけで切り分けられる。既定のままの行には「（既定）」を添え、
 	// 取り込まない行は名前の代わりに「取り込まない」と出す。
 	std::string formatImportOptions(const core::ImportOptions& options);
+
+	// formatImportOptions が図面枠スタイルの行に付ける見出し。**綴りはここ 1 か所**——
+	// 実機フィードバックの伏せ字（parse/Feedback の redactText）が、この見出しの直後を
+	// スタイル名の在り処として探すので、書き下すと片方だけ変わって名前が漏れる。
+	inline constexpr const char* kTitleBlockOptionLabel = "図面枠スタイル: ";
 } // namespace HomeskzIfcImport::parse
