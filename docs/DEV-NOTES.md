@@ -2717,19 +2717,58 @@ by-class にしてから作れば 7 つとも要らなくなるか／一括の�
 **データタグ・スラブ・線などは従来のまま**（per-object で呼ぶ）。非 PIO は無料で、データタグは
 531 回で合わせても小さいので、既定を立てる仕組みを広げる理由が無い。
 
+### 横架材の作り直しを 2 回から 1 回へ（`doRegen=false`）
+
+構造材の `ResetObject`（6.5 秒）と `CreateCustomObjectPath`（6.3 秒）がほぼ同額なのは、
+**作った時点で 1 回・`ResetObject` で 1 回の計 2 回作り直している**から
+（[#81](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/81)）。
+`CreateCustomObjectPath(..., doRegen=false)` で作れば作った時点の 1 回が消える。
+
+以前はここを「Findings の検証が鉛直のパスだけ」として見送っていたが、
+[#109](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/109) の答えで
+**部材の向きを問わない**と確定した（[Findings「Parametric Objects」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)
+の「`doRegen=false` は速い…」）:
+
+- 規則は「0 長のパス」ではなく**「両端の Z の差が 0 のパス」**。Z の差があると 1 回目の
+  `ResetObject` が「バウンドの span ＋ 渡した Z の差」を返す。平面上の長さは関わらない。
+- 本プラグインの `CreatePath` は M27 から**両端とも同じ Z（`kPathPlaneZ`）**で作っているので、
+  横架材・柱・垂木のどれもそのまま条件を満たす。
+- 端部オフセットとプラグインスタイルを当てても結論は変わらない。潰れた材の自己修復
+  （`SetCustomObjectPath` → もう一度 `ResetObject`）も `doRegen=false` の材で効く。
+- 実測（新規の空図面・30 本）は水平材で 1 本 27.1ms → 14.6ms。
+
+そこで **横架材だけ**を `doRegen=false` にした（`StructuralMemberSpec::regenOnCreate`。
+`draw/Member` だけが false にする）。1 変更＝1 要素で、柱・垂木は横架材を実機で確かめてから
+同じ 1 行を足す。
+
+**見込み**: 横架材は構造材 517 本のうち大半なので、「構造材:オブジェクト生成」がほぼ横架材の
+本数ぶん消える（6.3 秒の大部分）。「構造材:リセット」の合計は変わらないはず——作り直しの
+**回数**が減るのは作成のほうで、`ResetObject` 自体は 1 本 1 回のままである。
+
+**実機で確かめること**（速さは時計、絵は目）:
+
+- 横架材の高さ（天端）と傾斜梁の勾配が従来どおりか。開発ビルドの検算「両端の絶対 Z」が
+  食い違いを数えていないか。
+- 横架材の色・線がクラスに従っているか。作り直しが既定のクラスを立てている間に走らなく
+  なった（`ScopedCreationClass` を抜けた後の `ResetObject` 1 回だけになった）ので、
+  オブジェクトが継いだ by-class が作り直しで保たれるかをここで見る（Findings の実測では
+  per-object の 6 旗は作り直しで下りていない）。
+- 自己修復（パスの作り直し）が走った本数が増えていないか。
+
+**実機の数字（round 1・PR #136）**: 「構造材:オブジェクト生成」6,337ms → 2,873ms（横架材 266 本 ×
+約 13ms＝作り直し 1 回ぶんとほぼ一致）、「構造材:リセット」は 6,648ms で不変、所要 41.3〜44.3 秒 →
+37.7 秒。検算（潰れ・両端の絶対 Z）の食い違いは 0 で、絵（高さ・勾配・クラスの色）も従来どおりと
+目視で確認できた。
+
 ### 次の一手
 
-1. **上の直しを実機で測る**（2 周以上。「1 周の数字で語ってはいけないものがある」）。
-   [#81](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/81) の答え
-   （`CreateCustomObjectPath(..., doRegen=false)` ＋ 0 長のパスで作り直しを 2 回から 1 回へ）は
-   **まだ入れていない**。Findings の検証は鉛直のパス（Z の差）だけで、横架材のように
-   平面上の長さを持つパスでどうなるかは分からない。潰れた材の自己修復（`retryWithFreshPath`）
-   とも絡むので、入れるなら別の PR で、Findings を確かめてから。
+1. **柱・垂木にも `regenOnCreate = false` を足す**（横架材は実機で確かめられた。パスの条件は
+   同じく満たしている）。見込みは柱 197 本・垂木 54 本ぶんの作り直し 1 回（約 3 秒）。
 2. **削れる余地が残っているところ**。
    | 対象 | 実測 | 見込み |
    | --- | ---: | --- |
-   | 構造材の `ResetObject` | 6.5s | まとめても速くならない（[#81](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/81)）。回数を減らす道は上の 1 |
-   | 構造材の `CreateCustomObjectPath` | 6.3s | 1 本 1 回の生成そのもの。減らしようが無い |
+   | 構造材の `ResetObject` | 6.5s | まとめても速くならない（[#81](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/81)）。1 本 1 回が下限 |
+   | 構造材の `CreateCustomObjectPath` | 6.3s | 中身は作った時点の作り直し。横架材は `doRegen=false` で省いた（上記）。柱・垂木が残り |
    | ビューポートの `Update` | 4.9s | 伏図は `ForcePlanView` の中でもう 1 回走る。回数を減らせるか（実機確認必須） |
    | データタグの `UpdateDataTag` | 2.6s | 本文を作る本体。減らしようが無い |
    | ビューポートのラベル | 1.5s | 35 回で 44ms/回は不相応に高い。`SetDescription` と `SetLocator` のどちらが重いかは未分割 |
