@@ -218,6 +218,29 @@ TEST(feedback_style_name_alias_is_stable_and_opaque)
 	CHECK_EQ(redactText("図面枠: 置かない", "", ""), std::string("図面枠: 置かない"));
 }
 
+TEST(feedback_short_style_name_is_hidden_only_where_it_is_known_to_appear)
+{
+	// 「A3」のような短い名前は、名前が出ると分かっている形でだけ替える。本文まるごとで
+	// 替えると、別の意味の「A3」（用紙の大きさ等）まで仮名に化けて読み違えのもとになる。
+	const std::string alias = anonymizedStyleName("A3");
+	const std::string text = "図面枠（伏図）: スタイル「A3」を 6 枚に置きました。\n"
+							 "用紙: A3 横\n"
+							 "  図面枠スタイル: A3\n"
+							 "  図面枠スタイル: A3 以外";
+	const std::string clean = redactText(text, "", "A3");
+	CHECK(contains(clean, "スタイル「" + alias + "」を 6 枚"));
+	CHECK(contains(clean, "  図面枠スタイル: " + alias + "\n"));
+	// 行末まで名前でない（名前が続きの一部にすぎない）ところは替えない。
+	CHECK(contains(clean, "図面枠スタイル: A3 以外"));
+	CHECK(contains(clean, "用紙: A3 横"));
+
+	// 設定の行が本文の終わりにあっても替える。
+	CHECK_EQ(redactText("図面枠スタイル: 共通", "", "共通"),
+			 "図面枠スタイル: " + anonymizedStyleName("共通"));
+	// 4 字以上の名前は、形に依らずどこでも替える（形の分からない出どころからの漏れを塞ぐ）。
+	CHECK(!contains(redactText("どこかに 山田設計 と出た", "", "山田設計"), "山田設計"));
+}
+
 TEST(feedback_comment_hides_the_title_block_style_name)
 {
 	// 図面枠のスタイル名は利用者の図面のもので、事務所名を含むのが普通（PR #133 round 1 で
