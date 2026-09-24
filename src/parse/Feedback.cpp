@@ -296,7 +296,13 @@ namespace HomeskzIfcImport::parse
 		return "model-" + hex6(fnv1a(stem)) + ext;
 	}
 
-	std::string redactText(const std::string& text, const std::string& ifcPath)
+	std::string anonymizedStyleName(const std::string& name)
+	{
+		return "style-" + hex6(fnv1a(name));
+	}
+
+	std::string redactText(const std::string& text, const std::string& ifcPath,
+						   const std::string& titleBlockStyle)
 	{
 		std::string out = text;
 		if (!ifcPath.empty())
@@ -311,6 +317,10 @@ namespace HomeskzIfcImport::parse
 			if (dot != std::string::npos && dot > 0)
 				out = replaceAll(out, name.substr(0, dot), alias.substr(0, alias.rfind('.')));
 		}
+		// 図面枠のスタイル名（記録の「図面枠（伏図）: スタイル「…」」と、ログの設定の行に出る）。
+		// **IFC のパスの後に**置き換える——スタイル名がパスの一部と重なっていても、パスを
+		// 丸ごと仮名にし損ねないように。
+		out = replaceAll(out, titleBlockStyle, anonymizedStyleName(titleBlockStyle));
 		// ホームディレクトリのユーザー名（ログのパスに必ず出る）。
 		out = maskUserSegment(out, "/Users/", '/');
 		out = maskUserSegment(out, "/home/", '/');
@@ -414,8 +424,10 @@ namespace HomeskzIfcImport::parse
 		// （あちこちで if を書くと、必ずどこかで素の値が漏れる）。
 		const std::string shownFile =
 			round.anonymize ? anonymizedFileName(round.ifcPath) : fileNameOf(round.ifcPath);
-		auto clean = [&round](const std::string& text)
-		{ return round.anonymize ? redactText(text, round.ifcPath) : text; };
+		auto clean = [&round, &document](const std::string& text) {
+			return round.anonymize ? redactText(text, round.ifcPath, document.titleBlockStyle)
+								   : text;
+		};
 
 		std::ostringstream out;
 		// 機械可読の目印。**本文の見た目を変えてもここは変えない**——読む側（Claude）が
@@ -530,8 +542,8 @@ namespace HomeskzIfcImport::parse
 		tail << "数字だけで判断が付かないときは、**実機で確かめてほしい点を返信で挙げて**"
 				"ください（絵を見られるのは人だけです）。\n";
 		if (round.anonymize)
-			tail << "<sub>対象ファイル名とユーザー名は伏せてあります（同じ入力なら同じ仮名に"
-					"なります）。</sub>\n";
+			tail << "<sub>対象ファイル名・ユーザー名・図面枠のスタイル名は伏せてあります"
+					"（同じ入力なら同じ仮名になります）。</sub>\n";
 		const std::string footer = tail.str();
 
 		// 診断ログの全文。**折り畳む**——ふだんは読まないが、要るときは全部要る。

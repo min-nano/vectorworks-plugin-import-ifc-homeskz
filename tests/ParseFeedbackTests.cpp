@@ -7,7 +7,8 @@
 //
 //	検証項目（docs/DEV-NOTES.md M23）:
 //	  * 内訳の 1 行表現と、その差分（周回どうしの突き合わせ）
-//	  * 匿名化——同じ入力なら同じ仮名・**素のファイル名とユーザー名がどこにも残らない**
+//	  * 匿名化——同じ入力なら同じ仮名・**素のファイル名・ユーザー名・図面枠のスタイル名が
+//	    どこにも残らない**
 //	  * 目印・注意・ログが本文に載ること、所見は載らないこと、上限で切り詰めること
 //
 
@@ -203,6 +204,46 @@ TEST(feedback_comment_hides_the_file_name_by_default)
 	CHECK(!contains(body, "hanako"));
 	CHECK(contains(body, "model-"));
 	CHECK(contains(body, "伏せてあります"));
+}
+
+TEST(feedback_style_name_alias_is_stable_and_opaque)
+{
+	const std::string a = anonymizedStyleName("山田設計事務所 A3");
+	// 同じ名前なら毎回同じ仮名（周回どうしで同じスタイルを当てていると読める）。
+	CHECK_EQ(a, anonymizedStyleName("山田設計事務所 A3"));
+	CHECK(a != anonymizedStyleName("山田設計事務所 A2"));
+	CHECK(!contains(a, "山田"));
+	CHECK(contains(a, "style-"));
+	// 空のスタイル（図面枠を置かない）では何も置き換えない。
+	CHECK_EQ(redactText("図面枠: 置かない", "", ""), std::string("図面枠: 置かない"));
+}
+
+TEST(feedback_comment_hides_the_title_block_style_name)
+{
+	// 図面枠のスタイル名は利用者の図面のもので、事務所名を含むのが普通（PR #133 round 1 で
+	// 利用者が手で伏せ字へ書き換えていた）。記録・注意・ログの**どこにも**素のまま出さない。
+	const std::string style = "山田設計事務所 A3";
+	Document document = sampleDocument();
+	document.titleBlockStyle = style;
+	DrawCounts counts = sampleCounts();
+	counts.notes = "図面枠（伏図）: スタイル「" + style +
+				   "」を 6 枚に置きました（登録名 \"Title Block Border\"）。\n"
+				   "図面枠（軸組図）: スタイル「" +
+				   style + "」を 8 枚に置きました。";
+	counts.diagnostics = "図面枠スタイル「" + style + "」が見つかりません。";
+	FeedbackRound round = sampleRound();
+	round.log = "設定: 図面枠 = " + style + "\n";
+	const std::string body = formatFeedbackComment(round, document, counts);
+	CHECK(!contains(body, "山田"));
+	// 同じ名前は同じ仮名になる（伏図と軸組図の行で揃う）。
+	const std::string alias = anonymizedStyleName(style);
+	CHECK(contains(body, "スタイル「" + alias + "」を 6 枚"));
+	CHECK(contains(body, "スタイル「" + alias + "」を 8 枚"));
+	CHECK(contains(body, "図面枠のスタイル名"));
+
+	// 伏せない選択なら素の名前のまま（私有リポジトリ向け）。
+	round.anonymize = false;
+	CHECK(contains(formatFeedbackComment(round, document, counts), style));
 }
 
 TEST(feedback_comment_can_show_the_real_name)

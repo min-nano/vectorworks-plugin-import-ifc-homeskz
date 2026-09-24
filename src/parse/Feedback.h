@@ -22,7 +22,10 @@
 //
 //	【伏せるもの】PR コメントは公開される。だから既定で**案件が分かるものを伏せる**:
 //	IFC のファイル名は同じ入力なら毎回同じになる仮名（`model-8f3a12.ifc`）へ、パスの
-//	ユーザー名は伏せ字へ。数字・要素名・VW の診断は案件ではなくプラグインの話なので残す。
+//	ユーザー名は伏せ字へ、図面枠のスタイル名も同じく仮名（`style-4c1d09`）へ——スタイル名は
+//	利用者の図面にあるもので、事務所名のような組織・個人を特定できる文字列を含むのが普通
+//	だからである（PR #133 の round 1 で、利用者が投稿後に手で伏せ字へ書き換えていた）。
+//	数字・要素名・VW の診断は案件ではなくプラグインの話なので残す。
 //	伏せない選択（私有リポジトリへ投げるとき）は core::FeedbackSession::anonymize が持つ。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を include しない。ここは Document と
@@ -115,10 +118,19 @@ namespace HomeskzIfcImport::parse
 	// 拡張子を除いた部分のハッシュ）。
 	std::string anonymizedFileName(const std::string& path);
 
+	// 図面枠のスタイル名の仮名（`style-4c1d09`）。ファイル名と同じく**同じ名前なら毎回
+	// 同じ仮名**にする——周回どうしで「同じスタイルを当てている」ことは読めるように。
+	std::string anonymizedStyleName(const std::string& name);
+
 	// 本文から案件・個人が分かるものを伏せる。伏せるのは (1) 与えられた IFC のパスと
-	// ファイル名、(2) ホームディレクトリのユーザー名（`/Users/<名前>` `C:\Users\<名前>`）。
+	// ファイル名、(2) 図面枠のスタイル名（titleBlockStyle。空なら何もしない）、
+	// (3) ホームディレクトリのユーザー名（`/Users/<名前>` `C:\Users\<名前>`）。
 	// **それ以外は触らない**——診断の中身まで削ると、伝えるべきものが伝わらない。
-	std::string redactText(const std::string& text, const std::string& ifcPath);
+	//
+	// スタイル名は**描画側の文言を変えずに**ここで置き換える。本番の取り込みのログは
+	// 利用者自身が読むものなので伏せる理由が無く、伏せるのは公開の場へ出すときだけでよい。
+	std::string redactText(const std::string& text, const std::string& ifcPath,
+						   const std::string& titleBlockStyle = std::string());
 
 	// **PR コメント本文**（Markdown）。先頭に機械可読の目印を置く——このコメントが
 	// プラグインの自動投稿であること、何周目か、どのビルドかを、読む側（Claude）が
