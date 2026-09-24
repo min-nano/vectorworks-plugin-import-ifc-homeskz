@@ -343,8 +343,10 @@ namespace HomeskzIfcImport::draw
 			const ScopedCreationClass creationClass(spec.drawClass);
 			{
 				VW_DRAW_TIME("構造材:オブジェクト生成");
-				object =
-					gSDK->CreateCustomObjectPath(kStructuralMember, spec.path, spec.profile, true);
+				// `doRegen` はヘッダ StructuralMemberSpec::regenOnCreate（false なら作り直しは
+				// この後の ResetObject の 1 回だけになる）。
+				object = gSDK->CreateCustomObjectPath(kStructuralMember, spec.path, spec.profile,
+													  spec.regenOnCreate);
 			}
 			if (object == nil)
 				return result;

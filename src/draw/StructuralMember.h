@@ -166,6 +166,20 @@ namespace HomeskzIfcImport::draw
 		bool retryWithFreshPath = false;
 		core::Vec2 pathStart;
 		core::Vec2 pathEnd;
+		// **作った時点で PIO を作り直させるか**（`CreateCustomObjectPath` の `doRegen`）。
+		// 既定の true では「作った時点で 1 回」＋「最後の `ResetObject` で 1 回」の計 2 回
+		// 作り直しが走り、1 本あたりの所要の約半分が作った時点の 1 回である。false にすると
+		// 作り直しは `ResetObject` の 1 回だけになる（SDK リファレンス Findings「Parametric
+		// Objects」の「`doRegen=false` は速い…」。水平材で 1 本 27.1ms → 14.6ms）。
+		//
+		// **false にしてよいのは、パスの両端の Z が等しいときだけ**——Z の差があると
+		// 1 回目の `ResetObject` が「バウンドの span ＋ 渡した Z の差」を返し、材の高さが
+		// 狂う（同 Findings）。`CreatePath` は両端とも同じ Z（kPathPlaneZ）で作るので、
+		// この関数を通る材はどれも条件を満たす。平面上の長さはいくらあってもよい。
+		//
+		// いまは**横架材だけ**が false にしている（1 変更＝1 要素。柱・垂木は実機で横架材を
+		// 確かめてから。docs/DEV-NOTES.md「描画の高速化」）。
+		bool regenOnCreate = true;
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
