@@ -2706,7 +2706,10 @@ by-class** は、SDK に「立てる」口（引数なし）しか無く下ろ�
 `SetDefaultPColorsByClass()` ほか。戻せるのは `SetDefaultClass` と
 `SetDefaultOpacityByClassN` だけ）。したがって取り込みの前にそれらが by-instance だった図面では、
 **取り込みの後に利用者が描くものが「クラスの属性を使用」で生まれる**。既定のクラスは戻して
-あるので、クラスそのものは持ち越さない。下ろす口が要るなら SDK リファレンス側で調べる。
+あるので、クラスそのものは持ち越さない。**戻す口は SDK リファレンスへ調査を依頼した**
+（[#102](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/102)。既定の値を
+書き戻すと by-class が下りるか、など）。**答えが出るまでこの PR（#133）はマージしない**——
+戻せるなら `ScopedCreationClass` の後始末に足し、戻せないなら入れるかどうかを決め直す。
 
 **データタグ・スラブ・線などは従来のまま**（per-object で呼ぶ）。非 PIO は無料で、データタグは
 531 回で合わせても小さいので、既定を立てる仕組みを広げる理由が無い。
