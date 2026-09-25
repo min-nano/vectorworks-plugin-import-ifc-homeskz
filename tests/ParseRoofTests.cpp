@@ -113,6 +113,43 @@ TEST(axis_lies_on_eaves_low_edge)
 	CHECK(near(std::abs(roof.axisEnd.x - roof.axisStart.x), 4000.0));
 }
 
+TEST(axis_stays_inside_the_footprint_whatever_the_winding)
+{
+	// ★**軸を footprint の外へ出さない**（M28）。かつては「最も軒側の頂点を 1 つ選び、
+	// そこから軒方向へ広がりぶん伸ばす」作りで、**選ばれた頂点が軒方向の終わり側に在ると
+	// 終点が footprint 1 つぶん外へ飛び出して**いた。屋根面オブジェクトはこの軸を勾配の
+	// 基準線として図に描くので、飛び出した軸がビューポートの外形を広げ、伏図が用紙に
+	// 収まらなくなる（実機の母屋伏図が縦に 5,680mm 大きく測られた）。
+	//
+	// shedPlane（頂点が (0,0) から始まる）ではたまたま正しい端が選ばれるので、**周り方向を
+	// 逆にした同じ矩形**で押さえる——軒（y=0）の頂点が先に (4000,0) の側で見つかる並び。
+	using HomeskzIfcImport::parse::RoofPlane;
+	const double s = std::sqrt(10.0);
+	RoofPlane plane;
+	plane.vertices = {Vec3{4000.0, 0.0, 1000.0}, Vec3{0.0, 0.0, 1000.0}, Vec3{0.0, 3000.0, 2000.0},
+					  Vec3{4000.0, 3000.0, 2000.0}};
+	plane.normal = Vec3{0.0, -1.0 / s, 3.0 / s};
+
+	std::optional<RoofCommand> const command =
+		roofCommandForPlane(plane, "R-野地板", 0.0, Vec2{0.0, 0.0});
+	CHECK(command.has_value());
+	if (!command.has_value())
+		return;
+	const RoofCommand& roof = *command;
+
+	// 軸は軒（y=0）の辺を端から端まで：x は 0〜4000 に収まり、長さは軒の広がりちょうど。
+	CHECK(near(roof.axisStart.y, 0.0));
+	CHECK(near(roof.axisEnd.y, 0.0));
+	CHECK(near(std::abs(roof.axisEnd.x - roof.axisStart.x), 4000.0));
+	for (const Vec2& point : {roof.axisStart, roof.axisEnd})
+	{
+		CHECK(point.x >= -1e-6 && point.x <= 4000.0 + 1e-6);
+	}
+	// upslope 定義点も footprint の内側（棟側の中央）。
+	CHECK(near(roof.upslope.y, 3000.0));
+	CHECK(roof.upslope.x >= -1e-6 && roof.upslope.x <= 4000.0 + 1e-6);
+}
+
 TEST(upslope_points_toward_ridge)
 {
 	bool ok = false;
@@ -255,6 +292,27 @@ TEST(fixture_roofs_are_valid)
 		// 軸は退化しない（BeginRoof が軒の向きを取れる長さを持つ）。
 		CHECK(std::hypot(roof.axisEnd.x - roof.axisStart.x, roof.axisEnd.y - roof.axisStart.y) >
 			  0.0);
+
+		// ★**軸と upslope 定義点は平面外形の外接矩形の内側**（M28）。屋根面オブジェクトは
+		// 軸を勾配の基準線として図に描くので、外へ出るとそのぶん図が広がり、伏図が用紙に
+		// 収まらなくなる。実データでも守られていることを全屋根面で確かめる。
+		double minX = roof.boundary.front().x;
+		double maxX = minX;
+		double minY = roof.boundary.front().y;
+		double maxY = minY;
+		for (const Vec2& point : roof.boundary)
+		{
+			minX = std::min(minX, point.x);
+			maxX = std::max(maxX, point.x);
+			minY = std::min(minY, point.y);
+			maxY = std::max(maxY, point.y);
+		}
+		constexpr double kTol = 1e-6;
+		for (const Vec2& point : {roof.axisStart, roof.axisEnd, roof.upslope})
+		{
+			CHECK(point.x >= minX - kTol && point.x <= maxX + kTol);
+			CHECK(point.y >= minY - kTol && point.y <= maxY + kTol);
+		}
 	}
 }
 

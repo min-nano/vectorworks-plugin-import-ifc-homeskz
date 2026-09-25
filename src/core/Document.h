@@ -332,6 +332,13 @@ namespace HomeskzIfcImport::core
 	//   axisStart                 … 軒（最も低い辺）に沿う屋根軸の始点
 	//   axisEnd                   … 同 終点（軸の向きが軒の向き）
 	//   upslope                   … 棟（高い）側を指す upslope 定義点
+	//
+	// ★**軸と upslope 定義点は boundary の外接矩形からはみ出さない**（M28）。屋根面
+	// オブジェクトは**軸を勾配の基準線として図に描く**ので、外へ出たぶんがそのまま図の
+	// 広がりになり、伏図が用紙に収まらなくなる（実機で母屋伏図が縦に建物 1 つぶん
+	// ＝5,680mm 大きく測られた。docs/DEV-NOTES.md M28）。組み立ては parse/Roof が
+	// 勾配座標系の射影範囲から行い、不変条件は tests/ParseRoofTests が実フィクスチャごと
+	// 押さえている。
 	//   rise                      … 勾配の rise（屋根面の単位法線の水平成分 dh）
 	//   run                       … 勾配の run（同 鉛直成分 nz。slope = rise/run = tanθ）
 	//   thickness                 … 野地板厚（12mm 固定）
