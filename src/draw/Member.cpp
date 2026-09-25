@@ -134,10 +134,6 @@ namespace HomeskzIfcImport::draw
 			spec.retryWithFreshPath = true;
 			spec.pathStart = core::Vec2{0.0, 0.0};
 			spec.pathEnd = core::Vec2{member.end.x - member.start.x, member.end.y - member.start.y};
-			// 【作り直しを 1 回に】作った時点の作り直しを省き、下の ResetObject の 1 回で
-			// 形を決める（draw/StructuralMember.h の regenOnCreate）。パスは両端とも同じ Z で
-			// 作っている（上記 CreatePath）ので、1 回目の ResetObject から正しい高さになる。
-			spec.regenOnCreate = false;
 			// 【高さの検算】パスから Z を外した以上、高さを決めるのはバウンドだけになった。
 			// その解決が意図とずれても本数にもスパンにも出ないので、**描き上がった両端の
 			// 絶対 Z を読み戻して命令と引き比べる**（draw/StructuralMember.h の

@@ -343,10 +343,19 @@ namespace HomeskzIfcImport::draw
 			const ScopedCreationClass creationClass(spec.drawClass);
 			{
 				VW_DRAW_TIME("構造材:オブジェクト生成");
-				// `doRegen` はヘッダ StructuralMemberSpec::regenOnCreate（false なら作り直しは
-				// この後の ResetObject の 1 回だけになる）。
+				// **作った時点では作り直させない（doRegen=false）。** 既定の true では「作った
+				// 時点で 1 回」＋「この後の ResetObject で 1 回」の計 2 回作り直しが走り、
+				// 1 本あたりの所要の約半分が前者だった。false なら ResetObject の 1 回だけになる
+				// （SDK リファレンス Findings「Parametric Objects」の「`doRegen=false` は
+				// 速い…」。docs/DEV-NOTES.md「描画の高速化」）。
+				//
+				// **成り立つのはパスの両端の Z が等しいときだけ**——Z の差があると 1 回目の
+				// ResetObject が「バウンドの span ＋ 渡した Z の差」を返し、材の高さが狂う
+				// （同 Findings。平面上の長さは関わらない）。構造材のパスは必ず CreatePath で
+				// 両端とも kPathPlaneZ に作るので、横架材・柱・垂木のどれも条件を満たす。
+				// **パスに Z を持たせる作りへ戻すなら、ここも true へ戻すこと。**
 				object = gSDK->CreateCustomObjectPath(kStructuralMember, spec.path, spec.profile,
-													  spec.regenOnCreate);
+													  false /* doRegen */);
 			}
 			if (object == nil)
 				return result;
