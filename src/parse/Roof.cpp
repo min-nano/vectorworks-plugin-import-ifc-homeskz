@@ -66,6 +66,13 @@ namespace HomeskzIfcImport::parse
 		//
 		// **屋根面の平面そのものは変わらない**——軸は変更前と同じ d = dMax の直線上にあり、
 		// 動かすのは直線上での端点だけなので、勾配も軒の高さ（elevation）も同じである。
+		//
+		// ★**これで xy の外接矩形に収まるわけではない。** footprint が矩形でなければ
+		// (e, d) の角を xy へ戻した点は外接矩形の外に出うる——**三角形の屋根面では軒が
+		// 1 頂点に退化する**ので、軒の直線上に長さを持つ線分を取る限り原理的に避けられない
+		// （実フィクスチャにも三角形の面がある）。保証できるのは「射影範囲 [eMin, eMax] を
+		// 超えない」までで、**旧実装のように 1 つぶん余計に伸びることが無い**のが要点である
+		// （core/Document.h の RoofCommand に不変条件として書いてある）。
 		const auto atSlopeCoord = [&slope](double e, double d)
 		{
 			return Vec2{(slope.along.x * e) + (slope.down.x * d),

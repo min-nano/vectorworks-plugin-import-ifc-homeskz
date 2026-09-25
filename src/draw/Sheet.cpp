@@ -422,9 +422,13 @@ namespace HomeskzIfcImport::draw
 			if (paper->marginsRead && paper->margins.left <= 0.0 && paper->margins.right <= 0.0 &&
 				paper->margins.bottom <= 0.0 && paper->margins.top <= 0.0)
 			{
-				text += " / 余白 四辺 0（";
-				text += paper->marginsQueried ? "SDK は値を書いた" : "SDK は 1 つも書かなかった";
-				text += " / シートレイヤ ";
+				// ★**ここへ来るのは「SDK が値を書いて、それが 0 だった」ときだけ**である。
+				// `marginsRead` は `SheetPaperArea` が `marginsQueried` のときにしか代入
+				// しない（既定 false）ので、`marginsRead` は `marginsQueried` を含意する。
+				// **読み出せなかった側はこの行では表せない**——そちらは下の
+				// 「用紙の余白を解釈できなかったので…」が受け持つ。条件分岐にすると
+				// 到達しない枝が残り、両方生きていると読み違える（自動レビューの指摘）。
+				text += " / 余白 四辺 0（SDK は値を書いた / シートレイヤ ";
 				text += paper->sheet.x > 0.0 && paper->sheet.y > 0.0
 							? mm(paper->sheet.x) + "×" + mm(paper->sheet.y)
 							: std::string("読めない");

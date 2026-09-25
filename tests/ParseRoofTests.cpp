@@ -62,6 +62,76 @@ namespace
 		ok = command.has_value();
 		return ok ? *command : RoofCommand{};
 	}
+	// 点列を dir へ射影した [最小, 最大]。
+	void projectRange(const std::vector<Vec2>& points, const Vec2& dir, double& outMin,
+					  double& outMax)
+	{
+		outMin = 0.0;
+		outMax = 0.0;
+		for (std::size_t i = 0; i < points.size(); ++i)
+		{
+			const double v = (points[i].x * dir.x) + (points[i].y * dir.y);
+			if (i == 0 || v < outMin)
+				outMin = v;
+			if (i == 0 || v > outMax)
+				outMax = v;
+		}
+	}
+
+	// 軒軸の不変条件（core/Document.h の RoofCommand）を、**軸の向きから勾配座標系を
+	// 復元して**確かめる。
+	//   * 軸は軒方向 e で footprint の射影範囲ちょうどを端から端まで張る
+	//   * 軸の 2 点は勾配方向 d の片方の端（軒側）に乗る
+	//   * upslope 定義点は逆の端に乗り、e は範囲の内側
+	//
+	// ★**xy の外接矩形では見ない。** 非矩形の footprint では外接矩形の外に出うる
+	// （三角形の屋根面では軒が 1 頂点に退化するため。理由は core/Document.h）。ここで
+	// 押さえたいのは「射影範囲 1 つぶん余計に伸びていないこと」である。
+	//
+	// CHECK マクロは囲みスコープの failures 変数を使う設計（TestFramework.h）なので、
+	// 呼び出し側の failures を明示的に受け取る（tests/Fixtures.h の forEachFixture と同じ）。
+	void checkAxisSpansFootprint(int& failures, const RoofCommand& roof)
+	{
+		const Vec2 delta{roof.axisEnd.x - roof.axisStart.x, roof.axisEnd.y - roof.axisStart.y};
+		const double length = std::hypot(delta.x, delta.y);
+		CHECK(length > 0.0);
+		if (!(length > 0.0))
+			return;
+		const Vec2 along{delta.x / length, delta.y / length};
+		const Vec2 down{-along.y, along.x}; // 軸に直交（向きの符号は問わない）
+		constexpr double kTol = 1e-4; // mm。射影を数回通すだけなので十分厳しい
+
+		double eMin = 0.0;
+		double eMax = 0.0;
+		double dMin = 0.0;
+		double dMax = 0.0;
+		projectRange(roof.boundary, along, eMin, eMax);
+		projectRange(roof.boundary, down, dMin, dMax);
+
+		double axisEMin = 0.0;
+		double axisEMax = 0.0;
+		double axisDMin = 0.0;
+		double axisDMax = 0.0;
+		const std::vector<Vec2> axis{roof.axisStart, roof.axisEnd};
+		projectRange(axis, along, axisEMin, axisEMax);
+		projectRange(axis, down, axisDMin, axisDMax);
+
+		// 軒方向は footprint の広がりちょうど。**旧実装はここで落ちる**（選んだ頂点から
+		// 広がりぶん伸ばしていたので、軸の範囲が footprint の範囲とずれる）。
+		CHECK(std::abs(axisEMin - eMin) <= kTol);
+		CHECK(std::abs(axisEMax - eMax) <= kTol);
+		// 軸は勾配方向のどちらか片方の端に乗る（2 点とも同じ d）。
+		CHECK(std::abs(axisDMax - axisDMin) <= kTol);
+		const bool axisAtLowEnd = std::abs(axisDMin - dMin) <= kTol;
+		const bool axisAtHighEnd = std::abs(axisDMax - dMax) <= kTol;
+		CHECK(axisAtLowEnd || axisAtHighEnd);
+
+		// upslope 定義点は逆の端、e は範囲の内側。
+		const double upslopeD = (roof.upslope.x * down.x) + (roof.upslope.y * down.y);
+		const double upslopeE = (roof.upslope.x * along.x) + (roof.upslope.y * along.y);
+		CHECK(std::abs(upslopeD - (axisAtHighEnd ? dMin : dMax)) <= kTol);
+		CHECK(upslopeE >= eMin - kTol && upslopeE <= eMax + kTol);
+	}
 } // namespace
 
 // --------------------------------------------------------------------------
@@ -148,6 +218,31 @@ TEST(axis_stays_inside_the_footprint_whatever_the_winding)
 	// upslope 定義点も footprint の内側（棟側の中央）。
 	CHECK(near(roof.upslope.y, 3000.0));
 	CHECK(roof.upslope.x >= -1e-6 && roof.upslope.x <= 4000.0 + 1e-6);
+	checkAxisSpansFootprint(failures, roof);
+}
+
+TEST(axis_spans_the_projection_range_on_a_non_rectangular_face)
+{
+	// **非矩形の footprint でも射影範囲ちょうど**であることを、勾配の向きを 45°振った
+	// 直角三角形で押さえる（実フィクスチャには三角形の屋根面が 4 面ある）。
+	//
+	// ★**この面では「xy の外接矩形に収まる」は成り立たない**——軒（勾配方向 d の最大）が
+	// 1 頂点に退化するので、その点を通る軒の直線上に長さを持つ線分を取れば、必ず外接矩形の
+	// 外へ出る。原理的に避けられないので、**不変条件は射影範囲で言う**（core/Document.h の
+	// RoofCommand）。ここで守りたいのは「射影範囲 1 つぶん余計に伸びない」ことである。
+	using HomeskzIfcImport::parse::RoofPlane;
+	// z = (x + y)/2 ⇒ 上向き法線 ∝ (−1, −1, 2)。勾配方向は xy 平面で 45°を向く。
+	const double s = std::sqrt(6.0);
+	RoofPlane plane;
+	plane.vertices = {Vec3{0.0, 0.0, 0.0}, Vec3{10000.0, 0.0, 5000.0}, Vec3{0.0, 10000.0, 5000.0}};
+	plane.normal = Vec3{-1.0 / s, -1.0 / s, 2.0 / s};
+
+	std::optional<RoofCommand> const command =
+		roofCommandForPlane(plane, "R-野地板", 0.0, Vec2{0.0, 0.0});
+	CHECK(command.has_value());
+	if (!command.has_value())
+		return;
+	checkAxisSpansFootprint(failures, *command);
 }
 
 TEST(upslope_points_toward_ridge)
@@ -293,26 +388,11 @@ TEST(fixture_roofs_are_valid)
 		CHECK(std::hypot(roof.axisEnd.x - roof.axisStart.x, roof.axisEnd.y - roof.axisStart.y) >
 			  0.0);
 
-		// ★**軸と upslope 定義点は平面外形の外接矩形の内側**（M29）。屋根面オブジェクトは
-		// 軸を勾配の基準線として図に描くので、外へ出るとそのぶん図が広がり、伏図が用紙に
-		// 収まらなくなる。実データでも守られていることを全屋根面で確かめる。
-		double minX = roof.boundary.front().x;
-		double maxX = minX;
-		double minY = roof.boundary.front().y;
-		double maxY = minY;
-		for (const Vec2& point : roof.boundary)
-		{
-			minX = std::min(minX, point.x);
-			maxX = std::max(maxX, point.x);
-			minY = std::min(minY, point.y);
-			maxY = std::max(maxY, point.y);
-		}
-		constexpr double kTol = 1e-6;
-		for (const Vec2& point : {roof.axisStart, roof.axisEnd, roof.upslope})
-		{
-			CHECK(point.x >= minX - kTol && point.x <= maxX + kTol);
-			CHECK(point.y >= minY - kTol && point.y <= maxY + kTol);
-		}
+		// ★**軒軸は footprint の射影範囲をはみ出さない**（M29）。屋根面オブジェクトは軸を
+		// 勾配の基準線として図に描くので、余計に伸びるとそのぶん図が広がり、伏図が用紙に
+		// 収まらなくなる。**実データには三角形の屋根面（4 面）も非矩形の面（7 面）もある**
+		// ので、xy の外接矩形ではなく射影範囲で見る（理由は checkAxisSpansFootprint）。
+		checkAxisSpansFootprint(failures, roof);
 	}
 }
 
