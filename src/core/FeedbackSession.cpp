@@ -292,4 +292,18 @@ namespace HomeskzIfcImport::core
 		return remembered ? FeedbackRoundKind::RearmOnly : FeedbackRoundKind::FirstRound;
 	}
 
+	bool feedbackPullRequestEnded(const std::string& state)
+	{
+		return state == "merged" || state == "closed";
+	}
+
+	FeedbackSession restartedFeedbackSession(const FeedbackSession& ended)
+	{
+		FeedbackSession fresh;
+		fresh.repo = ended.repo;
+		fresh.anonymize = ended.anonymize;
+		fresh.branch = ended.branch;
+		return fresh;
+	}
+
 } // namespace HomeskzIfcImport::core
