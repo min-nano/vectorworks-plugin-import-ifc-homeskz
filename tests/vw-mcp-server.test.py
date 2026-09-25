@@ -118,8 +118,11 @@ class FakeVectorworks(threading.Thread):
         os.replace(temp, os.path.join(self.spool, request["id"] + ".res.json"))
 
 
-def drive(spool, messages, timeout="30", by_tmpdir=False, extra_env=None):
-    """サーバへ一括で流し込み、返ってきた JSON 行を返す。
+def drive(spool, messages, timeout="30", by_tmpdir=False, extra_env=None, with_notes=False):
+    """サーバへ一括で流し込み、返ってきた応答（id のある行）を返す。
+
+    with_notes=True のときは (応答, 通知のメソッド名の列) を返す。通知は応答の間に挟まるので、
+    既定では落として、応答だけを添字で見られるようにする。
 
     by_tmpdir=True のときは VW_MCP_SPOOL を渡さず、**TMPDIR から自力で探させる**
     （プラグイン側と Claude 側が別々に場所を決める、本番と同じ経路）。
@@ -149,7 +152,8 @@ def drive(spool, messages, timeout="30", by_tmpdir=False, extra_env=None):
         line = line.strip()
         if line:
             out.append(json.loads(line))
-    return out
+    replies, notes = split_notifications(out)
+    return (replies, notes) if with_notes else replies
 
 
 def split_notifications(lines):
@@ -216,15 +220,15 @@ def check_launch(root):
 
     # 起こすと橋が架かる。一覧の取り直しを促す通知が出る。
     write_fake_app(app, spool)
-    lines = drive(
+    replies, notes = drive(
         spool,
         [
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
             call("vw_launch", {"timeout": 20}, request_id=2),
         ],
         extra_env={"VW_MCP_APP": app},
+        with_notes=True,
     )
-    replies, notes = split_notifications(lines)
     check(
         replies[0]["result"]["capabilities"]["tools"]["listChanged"] is True,
         "一覧が変わりうると宣言する",
@@ -356,7 +360,7 @@ def main():
         )
         names = [t["name"] for t in replies[1]["result"]["tools"]]
         check(
-            names == ["vw_bridge_status", "vw_launch"],
+            names == ["vw_bridge_status", "vw_launch", "vw_call"],
             "ブリッジが無いときの一覧は自前の道具だけ (%r)" % names,
         )
         status = json.loads(content_text(replies[2]))
@@ -389,7 +393,7 @@ def main():
         names = [t["name"] for t in replies[1]["result"]["tools"]]
         check_eq(
             names,
-            ["vw_bridge_status", "vw_launch", "vw_ping", "vw_layers"],
+            ["vw_bridge_status", "vw_launch", "vw_call", "vw_ping", "vw_layers"],
             "**一覧の真実はプラグイン側**（代役が返した 2 つが並ぶ）",
         )
         ping = json.loads(content_text(replies[2]))
@@ -409,6 +413,44 @@ def main():
             ["vw_tools", "vw_ping", "vw_layers", "vw_nope"],
             "送った順に処理される",
         )
+
+        # --- 一覧が古いまま（アプリを Vectorworks より先に起動した）------------
+        # **実機で起きたのはここ。** アプリは tools/list を起動時に 1 回しか呼ばず、その
+        # ときブリッジが居なければ、図面を読む道具が最後まで見えない（M30）。そのサーバが
+        # 橋の架かったあとに初めて触れる場面を再現する: tools/list を挟まずに
+        # vw_bridge_status を呼ぶ（＝まだプラグインの道具を 1 つも見せていない）。
+        # 取り直しは 1 度だけ促し、一覧に頼らない vw_call でも道具に届くこと。
+        replies, notes = drive(
+            spool,
+            [
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                call("vw_bridge_status", request_id=2),
+                call("vw_bridge_status", request_id=3),
+                call("vw_call", {"tool": "vw_layers"}, request_id=4),
+                call("vw_call", {"tool": "vw_bridge_status"}, request_id=5),
+                call("vw_call", {}, request_id=6),
+            ],
+            with_notes=True,
+        )
+        status = json.loads(content_text(replies[1]))
+        check(status["running"] is True, "橋が架かれば vw_bridge_status が動いていると答える")
+        check_eq(
+            [t["name"] for t in status.get("tools", [])],
+            ["vw_ping", "vw_layers"],
+            "vw_bridge_status がプラグインの道具を並べる",
+        )
+        check_eq(
+            notes,
+            ["notifications/tools/list_changed"],
+            "一覧が古ければ取り直しを 1 度だけ促す",
+        )
+        layers = json.loads(content_text(replies[3]))
+        check_eq(layers.get("count"), 1, "vw_call でプラグインの道具に届く")
+        check(
+            json.loads(content_text(replies[4]))["running"] is True,
+            "vw_call で自前の道具も呼べる",
+        )
+        check(replies[5]["result"]["isError"] is True, "tool の無い vw_call はエラー")
 
         # --- 応答が返らないとき -----------------------------------------
         fake.seen = []

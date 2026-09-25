@@ -226,6 +226,12 @@ class Bridge:
         # いまの当て（生きた印が見つかるまでは先頭。案内の文言にも使う）。
         self.dir = candidates[0] if candidates else ""
         self.seq = 0
+        # 最後の tools/list で Claude に見せたプラグイン側の道具の名前。**これと食い違う一覧が
+        # 取れたら list_changed を送る**（announce_if_changed）。
+        self.listed = []
+        # 最後に取り直しを促した一覧（同じ一覧で何度も促さない——アプリが通知に応じない
+        # 場合に、道具を呼ぶたびに通知が積み上がるのを防ぐ）。
+        self.announced = []
 
     # --- 生存確認 ---------------------------------------------------------
     @staticmethod
@@ -350,6 +356,33 @@ class Bridge:
             log("道具の一覧を取りに行けませんでした: %s" % error)
         return self._load_cache()
 
+    def live_tools(self):
+        """いま動いているプラグインから一覧を取る。取れなければ None（キャッシュは使わない）。"""
+        try:
+            response = self.call("vw_tools", {}, timeout=5.0)
+        except (BridgeDown, TimeoutError, OSError):
+            return None
+        if not response.get("ok"):
+            return None
+        tools = response.get("result", {}).get("tools", [])
+        if not isinstance(tools, list):
+            return None
+        self._save_cache(tools)
+        return tools
+
+    def announce_if_changed(self, tools, notify):
+        """取れた一覧が最後に見せたものと違えば、Claude に取り直しを促す。
+
+        **Claude のアプリは tools/list を起動したときに 1 回しか呼ばないことが多い**（実機で、
+        Vectorworks より先にアプリを起動すると図面を読む道具が最後まで見えなかった。M30）。
+        vw_launch 以外の経路で橋が架かったとき（人が Vectorworks を起動した・パレットが
+        自動で開き直された）にも気付けるよう、橋に触れた道具のたびにここを通す。
+        """
+        names = [tool.get("name") for tool in tools if isinstance(tool, dict)]
+        if names and names != self.listed and names != self.announced:
+            self.announced = names
+            notify()
+
     def _cache_path(self):
         return os.path.join(self.dir, TOOLS_CACHE_FILE)
 
@@ -418,13 +451,42 @@ STATUS_TOOL = {
     "name": "vw_bridge_status",
     "description": (
         "Vectorworks 側のブリッジが動いているかを確かめる。"
+        "動いていれば、図面を読む道具（プラグイン側）の一覧も返す——道具の一覧に"
+        "見えていない道具は vw_call で呼べる。"
         "動いていないときは、どうすれば動くかを返す。"
     ),
     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 
+# **汎用の呼び出し口。** プラグイン側の道具（vw_layers など）を名前で呼ぶ。
+#
+# 道具の一覧はプラグインから取る（一覧の真実はプラグイン側）が、Claude のアプリは多くの
+# 場合 tools/list を起動時に 1 回しか呼ばず、list_changed の通知にも応じないことがある。
+# すると Vectorworks より先にアプリを起動しただけで、図面を読む道具が**最後まで見えない**
+# （実機で起きた。M30）。この口は常に一覧に並ぶので、一覧が古くても道具に届く。
+# 何を呼べるかは vw_bridge_status が返す（ここに道具の名前を書き写さない）。
+CALL_TOOL = {
+    "name": "vw_call",
+    "description": (
+        "Vectorworks のプラグイン側の道具を名前で呼ぶ（道具の一覧に見えていないときに使う）。"
+        "呼べる道具の名前と引数は vw_bridge_status の tools に並ぶ。"
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "tool": {"type": "string", "description": "道具の名前（例: vw_layers）"},
+            "arguments": {"type": "object", "description": "その道具への引数（省略可）"},
+        },
+        "required": ["tool"],
+        "additionalProperties": False,
+    },
+}
 
-def bridge_status_result(bridge):
+# このサーバ自身が答える道具（ブリッジが動いていなくても一覧に並ぶ）。
+LOCAL_TOOLS = [STATUS_TOOL, LAUNCH_TOOL, CALL_TOOL]
+
+
+def bridge_status_result(bridge, notify=None):
     status = bridge.status()
     if status is None:
         return {
@@ -442,6 +504,12 @@ def bridge_status_result(bridge):
         }
     result = {"running": True, "spool": bridge.dir}
     result.update(status)
+    tools = bridge.live_tools()
+    if tools is not None:
+        # 名前・説明・引数の形をそのまま見せる（vw_call に渡す手掛かり）。
+        result["tools"] = tools
+        if notify is not None:
+            bridge.announce_if_changed(tools, notify)
     return result
 
 
@@ -628,11 +696,21 @@ def handle_tools_call(bridge, params):
 
     if name == STATUS_TOOL["name"]:
         return text_content(
-            json.dumps(bridge_status_result(bridge), ensure_ascii=False, indent=2)
+            json.dumps(
+                bridge_status_result(bridge, notify_tools_changed), ensure_ascii=False, indent=2
+            )
         )
     if name == LAUNCH_TOOL["name"]:
         result, is_error = launch_vectorworks(bridge, args, notify_tools_changed)
         return text_content(json.dumps(result, ensure_ascii=False, indent=2), is_error=is_error)
+    if name == CALL_TOOL["name"]:
+        name = args.get("tool", "")
+        args = args.get("arguments") or {}
+        if not isinstance(name, str) or not name:
+            return text_content("vw_call には tool（道具の名前）が要ります。", is_error=True)
+        if any(name == tool["name"] for tool in LOCAL_TOOLS):
+            # 自前の道具はそのまま自分で答える（vw_call の入れ子も防ぐ）。
+            return handle_tools_call(bridge, {"name": name, "arguments": args})
 
     try:
         response = bridge.call(name, args)
@@ -646,6 +724,12 @@ def handle_tools_call(bridge, params):
             "Vectorworks 側でエラーになりました: %s" % response.get("error", "(理由不明)"),
             is_error=True,
         )
+    if not bridge.listed:
+        # 橋に届いたのに、Claude にはプラグインの道具を 1 つも見せていない（先に起動した
+        # アプリの一覧が古い）。取り直しを促す。
+        tools = bridge.live_tools()
+        if tools:
+            bridge.announce_if_changed(tools, notify_tools_changed)
     return text_content(
         json.dumps(response.get("result", {}), ensure_ascii=False, indent=2)
     )
@@ -673,7 +757,9 @@ def handle(bridge, message):
     if method == "ping":
         return rpc_result(request_id, {})
     if method == "tools/list":
-        return rpc_result(request_id, {"tools": [STATUS_TOOL, LAUNCH_TOOL] + bridge.tools()})
+        tools = bridge.tools()
+        bridge.listed = [tool.get("name") for tool in tools if isinstance(tool, dict)]
+        return rpc_result(request_id, {"tools": LOCAL_TOOLS + tools})
     if method == "tools/call":
         return rpc_result(request_id, handle_tools_call(bridge, params))
     if request_id is None:
