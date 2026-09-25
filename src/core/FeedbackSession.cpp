@@ -14,6 +14,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace HomeskzIfcImport::core
 {
@@ -297,12 +298,14 @@ namespace HomeskzIfcImport::core
 		return state == "merged" || state == "closed";
 	}
 
-	FeedbackSession restartedFeedbackSession(const FeedbackSession& ended)
+	FeedbackSession restartedFeedbackSession(FeedbackSession ended)
 	{
+		// 値で受けて持ち越すものだけを**移す**（移動は例外を投げないので、組み立ての途中で
+		// 投げて片付ける経路が生まれない）。
 		FeedbackSession fresh;
-		fresh.repo = ended.repo;
+		fresh.repo = std::move(ended.repo);
 		fresh.anonymize = ended.anonymize;
-		fresh.branch = ended.branch;
+		fresh.branch = std::move(ended.branch);
 		return fresh;
 	}
 

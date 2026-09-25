@@ -176,7 +176,7 @@ namespace HomeskzIfcImport::core
 	// 持ち越すのは**人の好み**（投稿先のリポジトリと伏せ字の選択）だけで、PR 番号・周回・
 	// 基準・作業ファイル・前の周の内訳は捨てる（前の PR の周と引き比べても意味が無い）。
 	// 返す記憶は send=false なので、feedbackRoundKind は FirstRound を返す。
-	FeedbackSession restartedFeedbackSession(const FeedbackSession& ended);
+	FeedbackSession restartedFeedbackSession(FeedbackSession ended);
 
 	// 記憶を key=value テキストへ（末尾は改行）。**行の順は固定**——差分を取ったときに
 	// 中身の変化だけが見えるようにするため。
