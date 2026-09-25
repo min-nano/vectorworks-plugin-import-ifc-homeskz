@@ -1,7 +1,7 @@
 //
 //	Extensions/ExtMcpPalette.h
 //
-//	**MCP ブリッジを常駐させるモードレスなパレット**（M29。docs/DEV-NOTES.md）。中身の
+//	**MCP ブリッジを常駐させるモードレスなパレット**（M30。docs/DEV-NOTES.md）。中身の
 //	HTML（`resources/common.vwr/html/mcp.html`）の JS タイマーが数百 ms ごとに
 //	`vwmcp.serve` を呼び、そのたびに本体の draw::serveMcpBridge（src/draw/McpBridge.h）が
 //	スプールに置かれた要求を捌いて**すぐ戻る**。戻っている間は Vectorworks が自由に動くので、

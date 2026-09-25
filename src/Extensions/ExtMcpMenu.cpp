@@ -79,7 +79,7 @@ void CMcpBridgeMenu_EventSink::DoInterface()
 {
 	// **パレットを出すだけ。** 出たページの時計が受け付けを始める（ExtMcpPalette.h）。
 	// M24 まではここで進捗ダイアログを開いてループしていたので、架けている間は図面を
-	// 触れなかった（docs/DEV-NOTES.md M29）。
+	// 触れなかった（docs/DEV-NOTES.md M30）。
 	//
 	// **本体はここでは読み込まない。** 時計の最初の 1 刻みが PayloadUse で読み込む——
 	// ここで読んでも、戻った時点で使う区間が閉じるだけで、得るものが無い。

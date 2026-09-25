@@ -74,7 +74,7 @@ src/
     ExtMcpMenu.{h,cpp}        「MCP ブリッジを表示…」メニューコマンドの登録（パレットを
                               出すだけ。開発・デバッグ用。README「MCP ブリッジ」）
     ExtMcpPalette.{h,cpp}     MCP ブリッジを常駐させる**モードレスなパレット**の登録と、
-                              JS の時計から本体の draw::serveMcpBridge への取り次ぎ（M29。
+                              JS の時計から本体の draw::serveMcpBridge への取り次ぎ（M30。
                               安定版にも登録。中身は resources/common.vwr/html/mcp.html）
     ExtColumnMark.{h,cpp}     柱・小屋束の記号 PIO の登録（パラメータ定義・UUID）と、
                               本体の draw::recalculateColumnMark への取り次ぎ
@@ -169,7 +169,7 @@ resources/
   min-nano_structureDev.vwr/…        dev プラグインのメニュー文字列と、往復パレットの
                                      HTML/JS（html/index.html。M24）
   common.vwr/…                       両方に共通の中身（MCP ブリッジのパレットの
-                                     html/mcp.html。M29）。包む直前に各 .vwr の写しへ
+                                     html/mcp.html。M30）。包む直前に各 .vwr の写しへ
                                      重ねる（CMakeLists.txt）
 scripts/
   vw-update.sh              CI ビルドを探して落としてくる（macOS 用。バンドルに同梱

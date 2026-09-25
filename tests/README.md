@@ -23,7 +23,7 @@
 | `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配・凸多角形の矩形クリップ（手計算値との突き合わせ） |
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
 | `CoreUnionFindTests` | `src/core/UnionFind` | ペア述語による連結成分（決定性の規約: 代表＝最小インデックス・代表昇順・成分内昇順） |
-| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付け・耐力壁を含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`）・端部オフセットを戻した材の端（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop`）・耐力壁の筋かいの形（`shearWallBracePolygon`） |
+| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付け・耐力壁を含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`。**伏図のデータタグは含み、軸組図のタグは含まない**）・端部オフセットを戻した材の端（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop`）・耐力壁の筋かいの形（`shearWallBracePolygon`） |
 | `CoreLayoutTests` | `src/core/Layout` | 用紙の割り付け（縮尺は階梯の値だけ・**渡された印刷可能領域をそのまま使う**（余白を仮定しない）・凡例の幅を引いてから収まる中で最大の図・伏図は全図同じ縮尺と位置・軸組図は上下 2 段でマスが重ならないこと・シート枚数とタイトルの連番） |
 | `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
 | `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |
@@ -284,7 +284,7 @@ python3 だけで走ります。
 見ているのは MCP の握手（`initialize` / `tools/list` / `tools/call`）、**道具の一覧が
 代役から取れること**（＝一覧の真実がプラグイン側にあること）、送った順に処理されること、
 そして**ブリッジが動いていない／応答が返らないときに待ち切らずに理由を返す**ことです。
-**`vw_launch`**（M29）は、起こすもの（`VW_MCP_APP`）を「起こされたら生存の印を書き続ける」
+**`vw_launch`**（M30）は、起こすもの（`VW_MCP_APP`）を「起こされたら生存の印を書き続ける」
 代役に差し替えて、起こして橋が架かるまで待つこと・一覧の取り直しを促す通知
 （`notifications/tools/list_changed`）を出すこと・既に受け付けていれば起こさないこと・
 起こすものが無い／橋が架からないときに理由を返すことを確かめます（Windows の枝＝既定の

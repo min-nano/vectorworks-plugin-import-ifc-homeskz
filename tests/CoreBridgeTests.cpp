@@ -253,7 +253,7 @@ TEST(bridge_spool_status_appears_and_disappears)
 
 TEST(bridge_spool_tells_a_live_status_from_a_stale_one)
 {
-	// 常駐（M29）では本体の入れ替えのたびに「開始」が来る。**生きた橋の後を継ぐときは
+	// 常駐（M30）では本体の入れ替えのたびに「開始」が来る。**生きた橋の後を継ぐときは
 	// 掃除しない**ので、その見分けがここに懸かっている。
 	const TempDir temp("live");
 	BridgeSpool spool(temp.path() + "/mcp");

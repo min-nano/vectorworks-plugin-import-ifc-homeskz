@@ -199,7 +199,7 @@ namespace HomeskzIfcImport
 		// activeOut に true が入って戻ったら往復が回っている＝殻はパレットを開く。
 		bool runTest(bool allowDialogs, bool& activeOut, std::string& error);
 
-		// **MCP ブリッジの受け付けを 1 回**（M29。src/draw/McpBridge.h）。待たずに戻る。
+		// **MCP ブリッジの受け付けを 1 回**（M30。src/draw/McpBridge.h）。待たずに戻る。
 		// out にはパレットに見せる見え方の JSON が入る（本体が返した文字列は**ここで写す**）。
 		// 呼べなかったときだけ false。
 		bool mcpServe(std::string& out, std::string& error);

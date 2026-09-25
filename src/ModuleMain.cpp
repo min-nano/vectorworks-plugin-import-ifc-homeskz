@@ -95,7 +95,7 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuMcpBridge>(
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
-	// M29 MCP ブリッジを常駐させるモードレスなパレット。**安定版にも登録する**（メニューが
+	// M30 MCP ブリッジを常駐させるモードレスなパレット。**安定版にも登録する**（メニューが
 	// 安定版にもあるため。Extensions/ExtMcpPalette.h）。
 	REGISTER_Extension<HomeskzIfcImport::CExtMcpPalette>(
 		VectorWorks::Extension::GROUPID_ExtensionWebPalettes, action, moduleInfo, iid,

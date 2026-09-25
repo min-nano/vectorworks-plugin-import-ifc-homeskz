@@ -63,7 +63,7 @@
 //       止めたことを伝える（loop_end）口が増えた
 //   5 … 実機テストを本番の取り込みから分けた（M25）。往復は run_test が持ち、run_import は
 //       「次は更新を尋ねずに入れてよいか」を返さなくなった（本番の経路から往復が消えた）
-//   6 … MCP ブリッジを常駐にした（M29）。「止められるまで戻らない」run_mcp_bridge を外し、
+//   6 … MCP ブリッジを常駐にした（M30）。「止められるまで戻らない」run_mcp_bridge を外し、
 //       殻のパレットの時計が 1 回ずつ呼ぶ mcp_serve に替えた
 #define VW_PAYLOAD_ABI_VERSION 6u
 
@@ -163,7 +163,7 @@ extern "C"
 	// （src/PayloadSession.h）。
 	using VwPayloadRunTestFn = int (*)(int allowDialogs, int* outActive);
 
-	// **MCP ブリッジの受け付け 1 回**（M29。src/draw/McpBridge.h）。置かれている要求を
+	// **MCP ブリッジの受け付け 1 回**（M30。src/draw/McpBridge.h）。置かれている要求を
 	// 捌いて**すぐ戻る**——殻のパレット（src/Extensions/ExtMcpPalette.h）の時計が数百 ms
 	// ごとに呼ぶ。out にはパレットに見せる見え方の JSON が入る（寿命は他の文字列と同じ
 	// ——**次に本体を呼ぶまで**。殻はその場で写す）。
