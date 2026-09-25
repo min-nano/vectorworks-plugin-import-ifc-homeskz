@@ -115,7 +115,7 @@ TEST(axis_lies_on_eaves_low_edge)
 
 TEST(axis_stays_inside_the_footprint_whatever_the_winding)
 {
-	// ★**軸を footprint の外へ出さない**（M28）。かつては「最も軒側の頂点を 1 つ選び、
+	// ★**軸を footprint の外へ出さない**（M29）。かつては「最も軒側の頂点を 1 つ選び、
 	// そこから軒方向へ広がりぶん伸ばす」作りで、**選ばれた頂点が軒方向の終わり側に在ると
 	// 終点が footprint 1 つぶん外へ飛び出して**いた。屋根面オブジェクトはこの軸を勾配の
 	// 基準線として図に描くので、飛び出した軸がビューポートの外形を広げ、伏図が用紙に
@@ -293,7 +293,7 @@ TEST(fixture_roofs_are_valid)
 		CHECK(std::hypot(roof.axisEnd.x - roof.axisStart.x, roof.axisEnd.y - roof.axisStart.y) >
 			  0.0);
 
-		// ★**軸と upslope 定義点は平面外形の外接矩形の内側**（M28）。屋根面オブジェクトは
+		// ★**軸と upslope 定義点は平面外形の外接矩形の内側**（M29）。屋根面オブジェクトは
 		// 軸を勾配の基準線として図に描くので、外へ出るとそのぶん図が広がり、伏図が用紙に
 		// 収まらなくなる。実データでも守られていることを全屋根面で確かめる。
 		double minX = roof.boundary.front().x;

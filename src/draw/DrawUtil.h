@@ -275,7 +275,7 @@ namespace HomeskzIfcImport::draw
 	// 言っていない**——見積もり（core::planContentBounds）が用紙 2〜3mm ぶん足りないのか、
 	// 前の周の絵が残っていて図そのものが 2 倍になっているのかで、直す先がまるで違う。
 	// どちらかは**はみ出した量**が一目で分ける（柱・横架材が潰れた 1 本目の実測を添えるのと
-	// 同じ流儀。draw/StructuralMember の collapsedProbe）。M28。
+	// 同じ流儀。draw/StructuralMember の collapsedProbe）。M29。
 	std::string DescribeFitOverflow(const std::string& number, const core::Vec2& drawn,
 									const core::Vec2& frame);
 
@@ -665,7 +665,7 @@ namespace HomeskzIfcImport::draw
 	//                     戻り値を持たないので、有り得ない値（負）を種に置いてから呼び、
 	//                     種のまま戻ったら「書かなかった」と見る（SheetPaperArea の実装）。
 	//                     **これが無いと「縁なし印刷の 0」と「読み出せずに 0」を見分け
-	//                     られない**（M28）
+	//                     られない**（M29）
 	//   marginsRead     … 余白を意味のある値として解釈できたか（**四辺 0 も「できた」**
 	//                     ——縁なし印刷ができる機種では余白 0 の用紙設定が実際に選べる。
 	//                     判定は core::resolvePageMargins）
@@ -721,7 +721,7 @@ namespace HomeskzIfcImport::draw
 	// ★**外形を測る前に、中身を変えた覚えがあるなら必ず通す。** `GetObjectBounds` が返すのは
 	// **最後に描いたときの外形**なので、描き直していないビューポートを測ると「いま図面に
 	// 何が在るか」ではなく「前に何が在ったか」を測ることになる——同じ命令・同じ割り付けなのに
-	// 「用紙に収まらなかった」の件数が周ごとに動いた原因がここだった（M28。伏図は
+	// 「用紙に収まらなかった」の件数が周ごとに動いた原因がここだった（M29。伏図は
 	// **耐力壁レイヤの縮尺を動かした後**＝図の中身が変わった後に、縮尺が同じなら描き直さずに
 	// 測っていた）。更新は重いので**中身を変えたときだけ**呼ぶこと。
 	bool RefreshViewport(MCObjectHandle viewport);

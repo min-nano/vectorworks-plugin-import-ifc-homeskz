@@ -250,7 +250,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingPlacement = 0;
 		// 見積もった縮尺ではマスに収まらなかった枚数（隣の図と重なる）と、その**1 枚目の
 		// 実測**（図番・測った外形・割り当てたマス・はみ出し量）。件数だけでは「見積もりが
-		// 少し足りない」と「図そのものが壊れている」を分けられない（M28。伏図と同じ流儀で、
+		// 少し足りない」と「図そのものが壊れている」を分けられない（M29。伏図と同じ流儀で、
 		// 組み立ては draw/DrawUtil の DescribeFitOverflow が持つ唯一の実装）。
 		std::size_t oversized = 0;
 		std::string oversizedProbe;
@@ -322,7 +322,7 @@ namespace HomeskzIfcImport::draw
 			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
 			//
 			// 用紙に載るのは「ビューポート＋その注釈」なので、タグを置く前の外形で判定すると
-			// 実際にマスを占める大きさとは別のものを測っていることになる（M28。伏図と同じ）。
+			// 実際にマスを占める大きさとは別のものを測っていることになる（M29。伏図と同じ）。
 			// 位置合わせ（delta）だけは上記 ★ のとおりタグを置く前の中心から決める。
 			if (arrange && measured)
 			{
@@ -369,7 +369,7 @@ namespace HomeskzIfcImport::draw
 				text += "用紙の上で位置を合わせられなかった軸組図 " +
 						std::to_string(missingPlacement) + " 枚（外形を測れませんでした）。";
 			// **1 枚目の実測を添える**（用紙 mm）。はみ出しが数 mm なら見積もりの不足、
-			// 桁違いなら図そのものの異常——件数だけでは分かれない（M28）。
+			// 桁違いなら図そのものの異常——件数だけでは分かれない（M29）。
 			std::string oversizedDetail = "縮尺の見積もりより図が大きくなりました";
 			if (!oversizedProbe.empty())
 				oversizedDetail += "。1 枚目: " + oversizedProbe;

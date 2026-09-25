@@ -1684,7 +1684,7 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 
 TEST(plan_content_bounds_sees_sheet_data_tags)
 {
-	// **データタグは注釈なのでデザインレイヤに載らないが、図には映る**（M28）。どの伏図に
+	// **データタグは注釈なのでデザインレイヤに載らないが、図には映る**（M29）。どの伏図に
 	// 出るかは関連付け先の横架材のレイヤが決めるので、広がりも絞り込みもその材で引く。
 	core::Document document;
 
@@ -1768,7 +1768,7 @@ TEST(plan_content_bounds_takes_unlinked_sheet_tags_into_the_whole_document)
 
 TEST(plan_content_bounds_ignores_section_data_tags)
 {
-	// **軸組図のタグは平面の広がりに入れない**（M28）。あちらの注釈空間は平面座標ではなく
+	// **軸組図のタグは平面の広がりに入れない**（M29）。あちらの注釈空間は平面座標ではなく
 	// (切断線に沿った距離, 高さ Z) なので、混ぜると縮尺の見積もりが壊れる——高さ 8000 の
 	// 建物のタグが平面の Y 8000 として効いてしまう。
 	core::Document document;

@@ -912,7 +912,7 @@ namespace HomeskzIfcImport::draw
 		// ——戻ってきて種のままなら、SDK は 4 辺のどれにも触れていない。
 		// **これをしないと「縁なし印刷の 0」と「読み出せずに 0 のまま」が見分けられない**
 		// （実機は用紙も印刷可能領域も 420×297 ＝ A3 いっぱいで、どちらの説明も付いた。
-		// docs/DEV-NOTES.md M28）。種は 1 つの値にまとめて置き、判定もここでだけ行う。
+		// docs/DEV-NOTES.md M29）。種は 1 つの値にまとめて置き、判定もここでだけ行う。
 		constexpr double kMarginProbe = -1.0;
 		core::PageMargins raw{kMarginProbe, kMarginProbe, kMarginProbe, kMarginProbe};
 		bool marginsQueried = true;
