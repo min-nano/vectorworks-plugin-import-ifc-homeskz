@@ -53,29 +53,37 @@ namespace HomeskzIfcImport::parse
 		if (eSpan < kMinSpan || dSpan < kMinSpan)
 			return std::nullopt; // 退化した屋根版（線状・点状）
 
-		// 軒（屋根軸）の基準点 = 最も低い（最も +d 側＝軒側）の頂点。ここを通り e
-		// 方向に伸ばした軸なら footprint 全体が軸の棟側（upslope 側）に来る。最大値が複数ある
-		// ときは最初の頂点を採る。
-		std::size_t eaveIndex = 0;
-		double eaveD = 0.0;
-		for (std::size_t i = 0; i < plan.size(); ++i)
+		// 軒（屋根軸）は**勾配座標系で見た footprint の外接矩形の、軒側の辺そのもの**。
+		// {along, down} は正規直交（parse/IfcGeometry の roofSlope が down を単位化し
+		// along をその直交にする）ので、射影値の組 (e, d) から平面座標へそのまま戻せる。
+		//
+		// ★**軸は footprint の外へ出してはならない**（M29）。かつては「最も軒側の頂点を 1 つ
+		// 選び、そこから along 方向へ eSpan だけ伸ばす」作りだったが、選んだ頂点が軒方向の
+		// **終わり側**（e = eMax）に在ると、終点が eMax + eSpan ＝ footprint 1 つぶん外へ
+		// 飛び出す。屋根面オブジェクトは**この軸を勾配の基準線として図に描く**ので、飛び出した
+		// 軸がそのままビューポートの外形を広げ、伏図が用紙に収まらなくなっていた（実機で
+		// 母屋伏図が縦に建物 1 つぶん＝5,680mm 大きく測られた。docs/DEV-NOTES.md M29）。
+		//
+		// **屋根面の平面そのものは変わらない**——軸は変更前と同じ d = dMax の直線上にあり、
+		// 動かすのは直線上での端点だけなので、勾配も軒の高さ（elevation）も同じである。
+		//
+		// ★**これで xy の外接矩形に収まるわけではない。** footprint が矩形でなければ
+		// (e, d) の角を xy へ戻した点は外接矩形の外に出うる——**三角形の屋根面では軒が
+		// 1 頂点に退化する**ので、軒の直線上に長さを持つ線分を取る限り原理的に避けられない
+		// （実フィクスチャにも三角形の面がある）。保証できるのは「射影範囲 [eMin, eMax] を
+		// 超えない」までで、**旧実装のように 1 つぶん余計に伸びることが無い**のが要点である
+		// （core/Document.h の RoofCommand に不変条件として書いてある）。
+		const auto atSlopeCoord = [&slope](double e, double d)
 		{
-			const double d = (plan[i].x * slope.down.x) + (plan[i].y * slope.down.y);
-			if (i == 0 || d > eaveD)
-			{
-				eaveD = d;
-				eaveIndex = i;
-			}
-		}
-		const double ax = plan[eaveIndex].x;
-		const double ay = plan[eaveIndex].y;
-
-		// 軸は軒に沿って footprint の広がりぶん伸ばす（方向が主で、長さは表現用）。
-		// upslope 定義点は軸から棟側へ勾配方向の広がりぶん進んだ点（同じく方向が主）。
-		// 棟（高い）側を指す upslope 単位方向は勾配方向の逆。
-		const Vec2 axisStart{ax, ay};
-		const Vec2 axisEnd{ax + (slope.along.x * eSpan), ay + (slope.along.y * eSpan)};
-		const Vec2 upslope{ax - (slope.down.x * dSpan), ay - (slope.down.y * dSpan)};
+			return Vec2{(slope.along.x * e) + (slope.down.x * d),
+						(slope.along.y * e) + (slope.down.y * d)};
+		};
+		// 軸は軒（最も +d 側）の辺を端から端まで。upslope 定義点は棟（最も -d 側）の中央
+		// ——**方向ではなく「棟側にある点」**なので、footprint の内側に採れば足りる
+		// （core/Document.h の RoofCommand）。
+		const Vec2 axisStart = atSlopeCoord(eMin, dMax);
+		const Vec2 axisEnd = atSlopeCoord(eMax, dMax);
+		const Vec2 upslope = atSlopeCoord((eMin + eMax) / 2.0, dMin);
 
 		// 野地板は垂木の上に載る（野地板下端＝垂木上端）。垂木下端は屋根版の平面に一致する
 		// （実機で確認済み）ので、屋根版の平面（zAt）から垂木せい（屋根面に直交する寸法）
@@ -99,7 +107,9 @@ namespace HomeskzIfcImport::parse
 		cmd.rise = slope.rise;
 		cmd.run = slope.run;
 		cmd.thickness = kNojiitaThickness;
-		cmd.elevation = slope.zAt(ax, ay, storeyElevation) + lift;
+		// 軒の Z は**軸の上ならどこで測っても同じ**（平面の Z は勾配方向 d だけで決まり、
+		// 軸は d = dMax の直線に乗っている）ので、軸の始点で代表する。
+		cmd.elevation = slope.zAt(axisStart.x, axisStart.y, storeyElevation) + lift;
 		return cmd;
 	}
 

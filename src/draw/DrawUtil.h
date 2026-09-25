@@ -328,6 +328,22 @@ namespace HomeskzIfcImport::draw
 	// 診断される）。
 	inline constexpr double kFitTol = 1.0;
 
+	// 用紙 mm の寸法を診断の 1 行にする（"325.4×198.0"）。
+	std::string DescribePaperSize(const core::Vec2& size);
+
+	// **収まらなかった 1 枚目の実測**を 1 行にする（"3: 測った 402.1×205.6 / 枠 383.0×297.0
+	// / 横に 19.1 はみ出し"）。number は図番、drawn は測った外形、frame は割り当てた枠
+	// （どちらも用紙 mm）。伏図（draw/Sheet）と軸組図（draw/Section）が共有する唯一の実装で、
+	// できた文字列は AppendCount の detail へ添える。
+	//
+	// 【なぜ件数だけでは足りないか】「用紙に収まらなかった伏図 N 枚」は**原因を 1 つも
+	// 言っていない**——見積もり（core::planContentBounds）が用紙 2〜3mm ぶん足りないのか、
+	// 前の周の絵が残っていて図そのものが 2 倍になっているのかで、直す先がまるで違う。
+	// どちらかは**はみ出した量**が一目で分ける（柱・横架材が潰れた 1 本目の実測を添えるのと
+	// 同じ流儀。draw/StructuralMember の collapsedProbe）。M29。
+	std::string DescribeFitOverflow(const std::string& number, const core::Vec2& drawn,
+									const core::Vec2& frame);
+
 	// --- 高さ基準（ストーリバウンド）の定型 ----------------------------------------------
 	//
 	// バウンド ID は上の StoryBoundSlot。
@@ -710,6 +726,11 @@ namespace HomeskzIfcImport::draw
 	//   sheet           … シートレイヤの大きさ（VWLayerObj::GetSheetWidht＝165/166）
 	//   margins         … 解釈後の 4 辺の余白（mm）。解釈できなければすべて 0
 	//   rawMargins      … ISDK::GetPageMargins が返した**生の値**（単位不明のまま）
+	//   marginsQueried  … ISDK::GetPageMargins が**実際に値を書いたか**。★この API は
+	//                     戻り値を持たないので、有り得ない値（負）を種に置いてから呼び、
+	//                     種のまま戻ったら「書かなかった」と見る（SheetPaperArea の実装）。
+	//                     **これが無いと「縁なし印刷の 0」と「読み出せずに 0」を見分け
+	//                     られない**（M29）
 	//   marginsRead     … 余白を意味のある値として解釈できたか（**四辺 0 も「できた」**
 	//                     ——縁なし印刷ができる機種では余白 0 の用紙設定が実際に選べる。
 	//                     判定は core::resolvePageMargins）
@@ -721,6 +742,7 @@ namespace HomeskzIfcImport::draw
 		core::Vec2 sheet;
 		core::PageMargins margins;
 		core::PageMargins rawMargins;
+		bool marginsQueried = false;
 		bool marginsRead = false;
 		bool marginsInInches = false;
 	};
@@ -758,6 +780,16 @@ namespace HomeskzIfcImport::draw
 	// 置いた後に測って直すのと同じ考え方。draw/Tag）。大きさは**見積もった縮尺で本当に
 	// 収まったか**を確かめて診断へ残すのにも使う（core/Layout.h の PlanLayout::plan）。
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size);
+
+	// ビューポートを描き直す（`VWViewportObj::Update`）。できたら true。
+	//
+	// ★**外形を測る前に、中身を変えた覚えがあるなら必ず通す。** `GetObjectBounds` が返すのは
+	// **最後に描いたときの外形**なので、描き直していないビューポートを測ると「いま図面に
+	// 何が在るか」ではなく「前に何が在ったか」を測ることになる——同じ命令・同じ割り付けなのに
+	// 「用紙に収まらなかった」の件数が周ごとに動いた原因がここだった（M29。伏図は
+	// **耐力壁レイヤの縮尺を動かした後**＝図の中身が変わった後に、縮尺が同じなら描き直さずに
+	// 測っていた）。更新は重いので**中身を変えたときだけ**呼ぶこと。
+	bool RefreshViewport(MCObjectHandle viewport);
 
 	// 生成済みのビューポートの**縮尺だけ**を差し替えて描き直す。書けたら true。
 	//
