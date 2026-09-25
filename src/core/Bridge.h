@@ -10,13 +10,13 @@
 //	                              ▼
 //	                        スプール（一時ディレクトリの min-nano_structure-mcp）
 //	                              ▲
-//	                              │ 拾う／応える（メニュー「MCP ブリッジ」の実行中だけ）
-//	                        Vectorworks（draw::runMcpBridge）
+//	                              │ 拾う／応える（Vectorworks が動いている間ずっと）
+//	                        Vectorworks（draw::serveMcpBridge。パレットの時計が数百 ms ごとに呼ぶ）
 //
 //	【なぜファイルなのか】ソケットを開くと (1) macOS のファイアウォールが利用者に問い、
 //	(2) Winsock と BSD ソケットで分岐が増え、(3) 受け口をメインスレッド以外に置くと
 //	SDK 呼び出しの前提（Vectorworks はメインスレッドから呼ぶ）を壊す。**ファイルなら
-//	どれも起きない**——ブリッジは Vectorworks のメインスレッドで回る 1 本のループのまま、
+//	どれも起きない**——ブリッジは Vectorworks のメインスレッドで時計に呼ばれるたびに、
 //	置かれたファイルを拾って応えるだけでよい。速さは要らない（人が待つ対話の速度）。
 //
 //	【なぜ 2 プロセスなのか】MCP そのもの（JSON-RPC・stdio・initialize の握手）は
@@ -55,6 +55,10 @@ namespace HomeskzIfcImport::core
 	// 要求 1 件の大きさの上限（バイト）と、1 周で捌く件数の上限。
 	inline constexpr std::size_t kBridgeMaxRequestBytes = 1U << 20U; // 1 MiB
 	inline constexpr std::size_t kBridgeMaxRequestsPerPoll = 16;
+
+	// 生存の印（`beat`）がこれより古ければ「動いていない」と見る（秒）。**Python 側の
+	// STATUS_STALE_SECONDS と対。** プラグイン側は数秒ごとに書き直す。
+	inline constexpr long long kBridgeStatusStaleSeconds = 15;
 
 	// スプールの置き場所。**一時ディレクトリの下**（中身は正に一時データで、利用者の
 	// ものではない。本体の複製も診断ログも同じ場所へ置く決まり。CLAUDE.md）。
@@ -123,7 +127,16 @@ namespace HomeskzIfcImport::core
 
 		// 前の回の残骸（要求・応答・書きかけ）を消す。**開始時に 1 回**呼ぶ——落ちた
 		// セッションの応答を新しいセッションのものと取り違えないため。消した数を返す。
+		//
+		// **生きた橋がいる間は呼ばない**（statusIsLive で確かめてから）。常駐になって
+		// （M29）、本体の入れ替えのたびに「開始」が来るようになった——そこで消すと、
+		// 入れ替えの直前に書いた応答や、Python が置いたばかりの要求まで消してしまう。
 		std::size_t sweep();
+
+		// 生存の印が在り、`beat` が now から staleSeconds 以内か。**前の回の橋がまだ
+		// 生きている（＝本体を入れ替えただけ）のか、Vectorworks ごと落ちたあとの残骸か**を
+		// 見分けるのに使う（sweep してよいかの判断）。now は epoch 秒。
+		bool statusIsLive(long long now, long long staleSeconds) const;
 
 		// 置かれている要求を**名前の昇順で**取り出し、そのファイルを消す。名前の昇順は
 		// Python が付ける連番の順（＝送った順）である（CLAUDE.md「決定性を守る」）。

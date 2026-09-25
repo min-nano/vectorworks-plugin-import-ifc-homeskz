@@ -340,10 +340,12 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtShearWall.h
 		src/Extensions/ExtShearWall.cpp
 		src/Extensions/ExtFeedbackPalette.h
-		src/Extensions/ExtFeedbackPalette.cpp)
-	# **パレットの HTML（`resources/<vwr>/html/index.html`）はここに入れない。** `.vwr` の
-	# 文字列（メニュー名）と同じく殻へコンパイルされるものではなく、パレットを開くときに
-	# 読まれる。起動時に読み込まれた `.vwr` が入れ替えに追随するかは実機未確認だが、
+		src/Extensions/ExtFeedbackPalette.cpp
+		src/Extensions/ExtMcpPalette.h
+		src/Extensions/ExtMcpPalette.cpp)
+	# **パレットの HTML（`resources/<vwr>/html/index.html` / `resources/common.vwr/html/`）は
+	# ここに入れない。** `.vwr` の文字列（メニュー名）と同じく殻へコンパイルされるものでは
+	# なく、パレットを開くときに読まれる。起動時に読み込まれた `.vwr` が入れ替えに追随するかは実機未確認だが、
 	# 追随しなくても古い見た目のまま動くだけで、入れると HTML を直すたびに再起動を強いる。
 	# **同梱スクリプト（`scripts/vw-*.sh` / `.ps1`）はここに入れない。** どれも殻へ
 	# コンパイルされるものではなく、**呼ぶたびにパスからディスクを読む**（更新は
@@ -402,6 +404,7 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.cpp
 		src/Extensions/ExtFeedbackPalette.cpp
+		src/Extensions/ExtMcpPalette.cpp
 		src/Updater.cpp
 		src/UpdaterFlow.cpp
 		src/FeedbackLoop.cpp
@@ -656,6 +659,11 @@ if(VW_BUILD_PLUGIN)
 		# mode, writes a no-compression zip. On macOS it goes inside the bundle at
 		# Contents/Resources; on Windows it sits next to the .vlb module.
 		set(vwr_src "${CMAKE_CURRENT_SOURCE_DIR}/resources/${output_name}.vwr")
+		# **安定版と開発版に共通の中身は `resources/common.vwr` に 1 つだけ置き**、包む前に
+		# 作業用の写しへ重ねる（MCP ブリッジのパレットの HTML。Extensions/ExtMcpPalette.h）。
+		# 同じ HTML を 2 つの `.vwr` へ書き写すと、片方だけ直す事故が必ず起きる。
+		set(vwr_common "${CMAKE_CURRENT_SOURCE_DIR}/resources/common.vwr")
+		set(vwr_stage "${CMAKE_CURRENT_BINARY_DIR}/vwr-stage/${output_name}.vwr")
 		if(EXISTS "${VW_BUILDVWR}")
 			if(APPLE)
 				add_custom_command(
@@ -663,8 +671,11 @@ if(VW_BUILD_PLUGIN)
 					POST_BUILD
 					COMMAND "${CMAKE_COMMAND}" -E make_directory
 							"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources"
+					COMMAND "${CMAKE_COMMAND}" -E remove_directory "${vwr_stage}"
+					COMMAND "${CMAKE_COMMAND}" -E copy_directory "${vwr_src}" "${vwr_stage}"
+					COMMAND "${CMAKE_COMMAND}" -E copy_directory "${vwr_common}" "${vwr_stage}"
 					COMMAND
-						"${CMAKE_COMMAND}" -E env "VWR_INPUT=${vwr_src}"
+						"${CMAKE_COMMAND}" -E env "VWR_INPUT=${vwr_stage}"
 						"VWR_OUTPUT=$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/${output_name}.vwr"
 						"VWR_MODE=Release" "${VW_BUILDVWR}"
 					VERBATIM
@@ -673,8 +684,11 @@ if(VW_BUILD_PLUGIN)
 				add_custom_command(
 					TARGET ${target}
 					POST_BUILD
+					COMMAND "${CMAKE_COMMAND}" -E remove_directory "${vwr_stage}"
+					COMMAND "${CMAKE_COMMAND}" -E copy_directory "${vwr_src}" "${vwr_stage}"
+					COMMAND "${CMAKE_COMMAND}" -E copy_directory "${vwr_common}" "${vwr_stage}"
 					COMMAND
-						"${CMAKE_COMMAND}" -E env "VWR_INPUT=${vwr_src}"
+						"${CMAKE_COMMAND}" -E env "VWR_INPUT=${vwr_stage}"
 						"VWR_OUTPUT=$<TARGET_FILE_DIR:${target}>/${output_name}.vwr"
 						"VWR_MODE=Release" "VWR_7ZCMD=${VW_BUILDVWR_7Z}" "${VW_BUILDVWR}"
 					VERBATIM

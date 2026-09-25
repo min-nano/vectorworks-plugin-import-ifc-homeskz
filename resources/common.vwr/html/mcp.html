@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<!--
+	MCP ブリッジのパレット（M29）。src/Extensions/ExtMcpPalette.h の中身。
+
+	C++ 側が `vwmcp.serve` を Promise で公開する。ここは数百 ms ごとにそれを呼び、返った
+	見え方（JSON）を並べるだけで、受け付けの判断は 1 つも持たない（受け付けは
+	src/draw/McpBridge.cpp）。**このページが生きている間じゅう受け付ける**——パレットを
+	閉じても（隠れても）ページとタイマーは生きている（docs/DEV-NOTES.md M24「隠れた
+	パレットは止まらない」）。
+
+	安定版と開発版で同じものを使う（resources/common.vwr。包むときに各 .vwr へ重ねる。
+	CMakeLists.txt）。外部のスクリプトもスタイルも読まない（埋め込みブラウザはオフラインで動く）。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>MCP ブリッジ</title>
+<style>
+	body { font-family: -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif; font-size: 12px;
+		   margin: 10px 12px; color: #222; background: #f6f6f6; }
+	.phase { font-weight: bold; margin-bottom: 4px; }
+	.phase.serving { color: #1a6f2b; }
+	.phase.paused { color: #9a5b00; }
+	.phase.error { color: #8a1c1c; }
+	.phase.idle { color: #555; }
+	.message { line-height: 1.5; margin-bottom: 6px; white-space: pre-wrap; word-break: break-word; }
+	.facts { color: #555; line-height: 1.5; word-break: break-all; }
+	.note { color: #777; margin-top: 8px; font-size: 11px; line-height: 1.4; }
+</style>
+</head>
+<body>
+	<div id="phase" class="phase idle">起動しています…</div>
+	<div id="message" class="message"></div>
+	<div id="facts" class="facts"></div>
+	<div class="note">Vectorworks が動いている間、同じ PC の Claude から図面を読めます（読むだけで、
+		図面は変えません）。このパレットは閉じても受け付けを続けます。</div>
+
+<script>
+(function () {
+	// 刻み。短いほど Claude への応答が速い。1 刻みはスプールを覗くだけなので軽い。
+	var TICK_MS = 250;
+	// **最初の 1 刻みは遅らせる。** Vectorworks の起動直後にパレットが開き直されたとき、
+	// 起動の最中に本体を読み込みに行かないため。
+	var FIRST_TICK_MS = 3000;
+	// 呼び出し中は次を投げない。**ただし返事が来ないまま固まらせない**——隠れたページは
+	// 応答を受け取れないことがある（往復のパレットで実機に起きた。index.html）。時間で解く。
+	var BUSY_TIMEOUT_MS = 2000;
+	var busy = false;
+	var busySince = 0;
+
+	var phaseEl = document.getElementById('phase');
+	var messageEl = document.getElementById('message');
+	var factsEl = document.getElementById('facts');
+
+	var PHASE_LABEL = {
+		idle: '起動しています…',
+		serving: '受け付けています',
+		paused: '一時的に見送っています',
+		error: '受け付けられません'
+	};
+
+	function bridge() {
+		return (typeof window.vwmcp !== 'undefined' && typeof window.vwmcp.serve === 'function')
+			? window.vwmcp : null;
+	}
+
+	function seconds(n) {
+		if (n < 60) { return n + ' 秒'; }
+		if (n < 3600) { return Math.floor(n / 60) + ' 分'; }
+		return Math.floor(n / 3600) + ' 時間';
+	}
+
+	function render(view) {
+		if (typeof view === 'string') {
+			try { view = JSON.parse(view); } catch (e) { view = { phase: 'error', message: String(view) }; }
+		}
+		var phase = view.phase || 'idle';
+		phaseEl.className = 'phase ' + phase;
+		phaseEl.textContent = PHASE_LABEL[phase] || phase;
+		messageEl.textContent = view.message || '';
+
+		var facts = [];
+		if (typeof view.served === 'number') {
+			facts.push('応えた要求 ' + view.served + ' 件' +
+				(view.failed ? '（失敗 ' + view.failed + ' 件）' : ''));
+		}
+		if (view.lastTool) {
+			facts.push('最後: ' + view.lastTool +
+				(view.secondsSinceRequest >= 0 ? '（' + seconds(view.secondsSinceRequest) + '前）' : ''));
+		}
+		if (view.spool) { facts.push('接続先: ' + view.spool); }
+		factsEl.textContent = facts.join('\n');
+		factsEl.style.whiteSpace = 'pre-wrap';
+	}
+
+	function tick() {
+		var b = bridge();
+		if (!b) {
+			phaseEl.className = 'phase idle';
+			phaseEl.textContent = PHASE_LABEL.idle;
+			messageEl.textContent = 'プラグインの関数（vwmcp.serve）がまだ見えません。';
+			return;
+		}
+		if (busy && (Date.now() - busySince) < BUSY_TIMEOUT_MS) { return; }
+		busy = true;
+		busySince = Date.now();
+		var p;
+		try { p = b.serve(); } catch (e) { busy = false; messageEl.textContent = '呼び出しに失敗: ' + e; return; }
+		Promise.resolve(p).then(function (view) {
+			busy = false;
+			render(view);
+		}).catch(function (err) {
+			busy = false;
+			messageEl.textContent = '応答がありません: ' + err;
+		});
+	}
+
+	window.setTimeout(function () {
+		tick();
+		window.setInterval(tick, TICK_MS);
+	}, FIRST_TICK_MS);
+})();
+</script>
+</body>
+</html>

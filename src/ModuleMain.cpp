@@ -13,6 +13,7 @@
 #include "Extensions/ExtShearWall.h"
 #include "Extensions/ExtTestMenu.h"
 #include "Extensions/ExtMcpMenu.h"
+#include "Extensions/ExtMcpPalette.h"
 #include "Extensions/ExtMenu.h"
 #include "Extensions/ExtUpdateMenu.h"
 #include "PayloadSession.h"
@@ -89,10 +90,16 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuCheckUpdate>(
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
-	// 「MCP ブリッジを開始」コマンド。Claude から図面を読める橋を架ける
+	// 「MCP ブリッジを表示」コマンド。Claude から図面を読める橋のパレットを出す
 	// （Extensions/ExtMcpMenu.h）。登録だけがここにあり、実処理は本体側。
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuMcpBridge>(
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
+
+	// M29 MCP ブリッジを常駐させるモードレスなパレット。**安定版にも登録する**（メニューが
+	// 安定版にもあるため。Extensions/ExtMcpPalette.h）。
+	REGISTER_Extension<HomeskzIfcImport::CExtMcpPalette>(
+		VectorWorks::Extension::GROUPID_ExtensionWebPalettes, action, moduleInfo, iid,
+		inOutInterface, cbp, reply);
 
 #ifdef VW_DEV_BUILD
 	// M25 「実機テストを実行」コマンド。**開発版だけ**——往復（記憶した条件で取り込み直して

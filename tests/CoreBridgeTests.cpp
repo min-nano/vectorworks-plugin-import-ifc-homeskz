@@ -26,6 +26,7 @@ using HomeskzIfcImport::core::Json;
 using HomeskzIfcImport::core::kBridgeRequestSuffix;
 using HomeskzIfcImport::core::kBridgeResponseSuffix;
 using HomeskzIfcImport::core::kBridgeStatusFile;
+using HomeskzIfcImport::core::kBridgeStatusStaleSeconds;
 using HomeskzIfcImport::core::parseBridgeRequest;
 
 namespace
@@ -248,6 +249,34 @@ TEST(bridge_spool_status_appears_and_disappears)
 	CHECK(!std::filesystem::exists(spool.dir() + "/" + kBridgeStatusFile));
 	// 2 回目は何もしない（止め損ねても落ちない）。
 	spool.removeStatus();
+}
+
+TEST(bridge_spool_tells_a_live_status_from_a_stale_one)
+{
+	// 常駐（M29）では本体の入れ替えのたびに「開始」が来る。**生きた橋の後を継ぐときは
+	// 掃除しない**ので、その見分けがここに懸かっている。
+	const TempDir temp("live");
+	BridgeSpool spool(temp.path() + "/mcp");
+	std::string error;
+	CHECK(spool.prepare(error));
+
+	// 印が無い＝前の回は無い（掃除してよい）。
+	CHECK(!spool.statusIsLive(1000, kBridgeStatusStaleSeconds));
+
+	Json status = Json::object();
+	status.set("beat", Json::integer(1000));
+	CHECK(spool.writeStatus(status, error));
+	CHECK(spool.statusIsLive(1000, kBridgeStatusStaleSeconds));
+	CHECK(spool.statusIsLive(1000 + kBridgeStatusStaleSeconds, kBridgeStatusStaleSeconds));
+	CHECK(!spool.statusIsLive(1001 + kBridgeStatusStaleSeconds, kBridgeStatusStaleSeconds));
+	// 時計が戻っても消す側へは倒さない。
+	CHECK(spool.statusIsLive(900, kBridgeStatusStaleSeconds));
+
+	// 壊れた印・beat の無い印は「生きていない」。
+	WriteFile(spool.dir() + "/" + kBridgeStatusFile, "{");
+	CHECK(!spool.statusIsLive(1000, kBridgeStatusStaleSeconds));
+	WriteFile(spool.dir() + "/" + kBridgeStatusFile, R"({"protocol":1})");
+	CHECK(!spool.statusIsLive(1000, kBridgeStatusStaleSeconds));
 }
 
 TEST(bridge_failure_response_carries_the_reason)

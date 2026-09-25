@@ -63,7 +63,9 @@
 //       止めたことを伝える（loop_end）口が増えた
 //   5 … 実機テストを本番の取り込みから分けた（M25）。往復は run_test が持ち、run_import は
 //       「次は更新を尋ねずに入れてよいか」を返さなくなった（本番の経路から往復が消えた）
-#define VW_PAYLOAD_ABI_VERSION 5u
+//   6 … MCP ブリッジを常駐にした（M29）。「止められるまで戻らない」run_mcp_bridge を外し、
+//       殻のパレットの時計が 1 回ずつ呼ぶ mcp_serve に替えた
+#define VW_PAYLOAD_ABI_VERSION 6u
 
 // 本体側の export 指定。Windows は明示しないと DLL の外から見えない。
 #if defined(_WIN32)
@@ -132,7 +134,7 @@ extern "C"
 #define VW_PAYLOAD_SYM_INFO "vw_payload_info"
 #define VW_PAYLOAD_SYM_IMPORT "vw_payload_run_import"
 #define VW_PAYLOAD_SYM_TEST "vw_payload_run_test"
-#define VW_PAYLOAD_SYM_BRIDGE "vw_payload_run_mcp_bridge"
+#define VW_PAYLOAD_SYM_MCP_SERVE "vw_payload_mcp_serve"
 #define VW_PAYLOAD_SYM_RECALC "vw_payload_recalculate"
 #define VW_PAYLOAD_SYM_SHUTDOWN "vw_payload_shutdown"
 #define VW_PAYLOAD_SYM_LOOP_STATUS "vw_payload_loop_status"
@@ -161,8 +163,11 @@ extern "C"
 	// （src/PayloadSession.h）。
 	using VwPayloadRunTestFn = int (*)(int allowDialogs, int* outActive);
 
-	// MCP ブリッジ 1 回。**止められるまで戻らない**（src/draw/McpBridge.h）。
-	using VwPayloadRunMcpBridgeFn = int (*)();
+	// **MCP ブリッジの受け付け 1 回**（M29。src/draw/McpBridge.h）。置かれている要求を
+	// 捌いて**すぐ戻る**——殻のパレット（src/Extensions/ExtMcpPalette.h）の時計が数百 ms
+	// ごとに呼ぶ。out にはパレットに見せる見え方の JSON が入る（寿命は他の文字列と同じ
+	// ——**次に本体を呼ぶまで**。殻はその場で写す）。
+	using VwPayloadMcpServeFn = int (*)(const char** out);
 	using VwPayloadRecalculateFn = int (*)(unsigned int, void*, int*);
 	using VwPayloadShutdownFn = void (*)();
 

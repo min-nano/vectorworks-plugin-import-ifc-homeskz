@@ -1,16 +1,15 @@
 //
 //	Extensions/ExtMcpMenu.cpp
 //
-//	「MCP ブリッジを開始」コマンドの登録と取り次ぎ。中身は本体側の draw::runMcpBridge
-//	（src/draw/McpBridge.h）。**ここに実処理は 1 行も置かない**（CLAUDE.md「殻と本体」）。
+//	「MCP ブリッジを表示」コマンドの登録と取り次ぎ。受け付けはパレット
+//	（Extensions/ExtMcpPalette.h）の時計と本体の draw::serveMcpBridge（src/draw/McpBridge.h）が
+//	持つので、ここはパレットを出すだけ。**ここに実処理は 1 行も置かない**（CLAUDE.md「殻と本体」）。
 //
 
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtMcpMenu.h"
-#include "PayloadSession.h"
-
-#include <string>
+#include "Extensions/ExtMcpPalette.h"
 
 using namespace HomeskzIfcImport;
 
@@ -78,21 +77,11 @@ CMcpBridgeMenu_EventSink::~CMcpBridgeMenu_EventSink() = default;
 // ---------------------------------------------------------------------------
 void CMcpBridgeMenu_EventSink::DoInterface()
 {
-	// **ここでは更新を確認しない。** 橋を架けている最中に本体が入れ替わると、走っている
-	// ループの足元を外すことになる（PayloadUse を握っている間は降ろせないので実際には
-	// 入れ替わらないが、「入れたのに効かない」という分かりにくい状態になる）。更新は
-	// 取り込みコマンドの頭と、専用のコマンドから確認する（src/Updater.h）。
-	const PayloadUse use;
-	if (!use.ok())
-	{
-		gSDK->AlertInform("プラグインの本体を読み込めませんでした。", use.error().c_str(),
-						  false /* not a minor alert: show a modal dialog */);
-		return;
-	}
-
-	// 例外は本体側が境界の手前で受け止める（src/payload/PayloadMain.cpp）。ここへ返るのは
-	// 「そもそも呼べなかった」ときだけ。
-	std::string error;
-	if (!use->runMcpBridge(error))
-		gSDK->AlertInform("MCP ブリッジを開始できませんでした。", error.c_str(), false);
+	// **パレットを出すだけ。** 出たページの時計が受け付けを始める（ExtMcpPalette.h）。
+	// M24 まではここで進捗ダイアログを開いてループしていたので、架けている間は図面を
+	// 触れなかった（docs/DEV-NOTES.md M29）。
+	//
+	// **本体はここでは読み込まない。** 時計の最初の 1 刻みが PayloadUse で読み込む——
+	// ここで読んでも、戻った時点で使う区間が閉じるだけで、得るものが無い。
+	ShowMcpPalette();
 }

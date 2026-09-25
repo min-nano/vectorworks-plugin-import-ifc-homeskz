@@ -336,6 +336,21 @@ namespace HomeskzIfcImport::core
 		return WriteAtomically(path, status.dump(), error);
 	}
 
+	bool BridgeSpool::statusIsLive(long long now, long long staleSeconds) const
+	{
+		std::string text;
+		if (!ReadCapped(std::filesystem::path(pathFor(kBridgeStatusFile)), kBridgeMaxRequestBytes,
+						text))
+			return false;
+		Json status;
+		std::string error;
+		if (!Json::parse(text, status, error) || !status.has("beat"))
+			return false;
+		const auto beat = static_cast<long long>(status.at("beat").asNumber(0.0));
+		// 未来の印（時計が戻った）も「生きている」側へ倒す——消さずに済むほうが安全。
+		return now - beat <= staleSeconds;
+	}
+
 	void BridgeSpool::removeStatus()
 	{
 		std::error_code ec;

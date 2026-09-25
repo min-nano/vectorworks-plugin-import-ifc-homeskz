@@ -71,9 +71,11 @@ src/
     ExtUpdateMenu.{h,cpp}     「アップデータを確認 (みんなの構造設計支援)」メニュー
                               コマンドの登録と実行（**殻に残る唯一の実処理**である
                               自動アップデートを呼ぶ）
-    ExtMcpMenu.{h,cpp}        「MCP ブリッジを開始…」メニューコマンドの登録と、
-                              本体の draw::runMcpBridge への取り次ぎ（開発・デバッグ用。
-                              下記「MCP ブリッジ」）
+    ExtMcpMenu.{h,cpp}        「MCP ブリッジを表示…」メニューコマンドの登録（パレットを
+                              出すだけ。開発・デバッグ用。README「MCP ブリッジ」）
+    ExtMcpPalette.{h,cpp}     MCP ブリッジを常駐させる**モードレスなパレット**の登録と、
+                              JS の時計から本体の draw::serveMcpBridge への取り次ぎ（M29。
+                              安定版にも登録。中身は resources/common.vwr/html/mcp.html）
     ExtColumnMark.{h,cpp}     柱・小屋束の記号 PIO の登録（パラメータ定義・UUID）と、
                               本体の draw::recalculateColumnMark への取り次ぎ
     ExtShearWall.{h,cpp}      耐力壁 PIO の同上（→ draw::recalculateShearWall）
@@ -135,10 +137,9 @@ src/
     Verify.h                  **開発ビルドにしかコンパイルしないもののスイッチを置く唯一の
                               場所**——検算（VW_DRAW_VERIFY）と区間計測（VW_DRAW_TIMING ＋
                               VW_DRAW_TIME）。囲むかどうかの基準も同じ 1 つ
-    McpBridge.{h,cpp}         MCP ブリッジの本体（ループと道具の表。**道具を足すときに
+    McpBridge.{h,cpp}         MCP ブリッジの本体（1 回ぶんの受け付けと道具の表。**道具を足すときに
                               触るのはこの表 1 行**）
     ProgressDialog.{h,cpp}    core::ProgressReporter を VW の進捗ダイアログへ橋渡し
-                              （加えて、終わりの見えない待ちで息をする keepAlive）
     ResultDialog.{h,cpp}      完了・エラーのダイアログ（短い本文＋折り畳んだ診断ログ欄）
     SettingsDialog.{h,cpp}    取り込み設定ダイアログ（配置するシンボルを名前と絵で選ぶ）
     Feedback.{h,cpp}          実機フィードバックの往復（取り込みの前に送るか決め、
@@ -167,6 +168,9 @@ resources/
   min-nano_structure.vwr/…           stable プラグインのメニュー文字列
   min-nano_structureDev.vwr/…        dev プラグインのメニュー文字列と、往復パレットの
                                      HTML/JS（html/index.html。M24）
+  common.vwr/…                       両方に共通の中身（MCP ブリッジのパレットの
+                                     html/mcp.html。M29）。包む直前に各 .vwr の写しへ
+                                     重ねる（CMakeLists.txt）
 scripts/
   vw-update.sh              CI ビルドを探して落としてくる（macOS 用。バンドルに同梱
                             され、プラグインから起動される）。**配置はしない**
@@ -250,8 +254,8 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | バンドル ID（macOS） | `io.github.min-nano.structure` / `io.github.min-nano.structure-dev` | `CMakeLists.txt` |
 | メニューカテゴリ | `みんなの構造設計支援` / `みんなの構造設計支援Dev`（コマンド名 `IFC (ホームズ君) 取り込み…` / `アップデータを確認 (みんなの構造設計支援)`）。**このプラグインのコマンドは全部このカテゴリに入れる**——`.vwr` の `"category"` ただ 1 つを両方のメニュー定義が引く | `resources/*/Strings/*.vwstrings` |
 | C++ 名前空間・クラス | `min-nano_structure` / `CExtMenuImportIfc` / `CExtMenuCheckUpdate` | `src/Extensions/Ext*.{h,cpp}`、`src/ModuleMain.cpp` |
-| VCOM ユニバーサル名 | 取り込み: `CExtMenuImportIfc_HomeskzIfcImport(Dev)`／更新: `CExtMenuCheckUpdate_MinNanoStructure(Dev)`／MCP: `CExtMenuMcpBridge_MinNanoStructure(Dev)`／実機テスト: `CExtMenuTest_MinNanoStructure(Dev)`（登録は dev だけ）／往復パレット: `CExtFeedbackPalette_MinNanoStructure(Dev)`（登録は dev だけ） | `src/BuildConfig.h` |
-| 拡張機能 UUID | コマンド 2 つ × stable / dev の 4 個＋PIO 2 つ × 2＋往復パレット × 2 | `src/Extensions/Ext*.cpp`（一意である必要があるため `uuidgen` で再生成） |
+| VCOM ユニバーサル名 | 取り込み: `CExtMenuImportIfc_HomeskzIfcImport(Dev)`／更新: `CExtMenuCheckUpdate_MinNanoStructure(Dev)`／MCP: `CExtMenuMcpBridge_MinNanoStructure(Dev)`／実機テスト: `CExtMenuTest_MinNanoStructure(Dev)`（登録は dev だけ）／往復パレット: `CExtFeedbackPalette_MinNanoStructure(Dev)`（登録は dev だけ）／MCP パレット: `CExtMcpPalette_MinNanoStructure(Dev)` | `src/BuildConfig.h` |
+| 拡張機能 UUID | コマンド 2 つ × stable / dev の 4 個＋PIO 2 つ × 2＋往復パレット × 2＋MCP パレット × 2 | `src/Extensions/Ext*.cpp`（一意である必要があるため `uuidgen` で再生成） |
 
 > **名前空間 `min-nano_structure` と取り込みコマンドのユニバーサル名・UUID は、改名後も
 > 据え置いています。** ユニバーサル名と UUID は**コマンドの同一性そのもの**で、付け替えると
