@@ -231,72 +231,97 @@ namespace HomeskzIfcImport::draw
 				return AxisAlignKey::TopCentre;
 			}
 		}
+
+		// **計測の区間を開かないパス生成の本体。** 区間を開くのは下の公開版（CreatePath）
+		// だけで、こちらは**既に別の区間の中にいる**呼び出し——潰れた材の自己修復
+		// （DrawStructuralMember の「構造材:読み戻しと修復」の中）——が使う。
+		// **区間は入れ子にしない**（core/DrawTiming.h「使う側の作法」／draw/Verify.h）
+		// ——入れ子にすると自己修復に掛かった時間が「構造材:パス生成」と
+		// 「構造材:読み戻しと修復」へ二重に積まれ、合計を読んだ人が必ず取り違える。
+		// 実機では潰れた柱が 46 本あった（docs/DEV-NOTES.md M27）ので、この経路は稀ではない。
+#if VW_DRAW_VERIFY
+		MCObjectHandle CreatePathUntimed(const core::Vec2& start, const core::Vec2& end,
+										 bool& outAppended, PathProbe* outProbe = nullptr)
+#else
+		MCObjectHandle CreatePathUntimed(const core::Vec2& start, const core::Vec2& end,
+										 bool& outAppended)
+#endif
+		{
+			outAppended = false;
+			MCObjectHandle path =
+				gSDK->CreateNurbsCurve(WorldPt3(start.x, start.y, kPathPlaneZ), false, kPathDegree);
+			if (path == nil)
+				return nil;
+
+			// **Add3DVertex が VS の AddVertex3D にあたる**（ヘッダ参照）。末尾へ 1 点足して
+			// 始端 → 終端の 2 点にする。
+			gSDK->Add3DVertex(path, WorldPt3(end.x, end.y, kPathPlaneZ));
+			// 頂点が本当に 2 つになったかを読み戻す。ピース索引の起点は 0 / 1 のどちらの
+			// 規約もあり得るので両方を見る（**判定に失敗しても曲線はそのまま使う**——ここで
+			// 諦めると、索引の規約違いというだけで部材が 1 本も描かれなくなる）。
+			const Sint32 piece0 = gSDK->NurbsGetNumPts(path, 0);
+			const Sint32 piece1 = gSDK->NurbsGetNumPts(path, 1);
+#if VW_DRAW_VERIFY
+			PathProbe probe;
+			probe.piece0 = piece0;
+			probe.piece1 = piece1;
+			// **2 点の Z を読み戻す。** 数が 2 でも同じ位置なら部材は実体を持たない
+			// （実機で 46 本。draw/StructuralMember.h の PathProbe）。**観測だけ**なので
+			// 開発ビルドにしか無い。
+			WorldPt3 first(0.0, 0.0, 0.0);
+			WorldPt3 second(0.0, 0.0, 0.0);
+			if (gSDK->NurbsGetPt3D(path, 0, 0, first) && gSDK->NurbsGetPt3D(path, 0, 1, second))
+			{
+				probe.pointsRead = true;
+				probe.z0 = first.z;
+				probe.z1 = second.z;
+			}
+#endif
+			// **座標を明示的に入れ直す。** `Add3DVertex` が足した点が渡した位置にならないことが
+			// ある（ヘッダ参照）。うまく足せていたときは同じ値を書くだけで何も変わらない。
+			// **これは観測ではなく描画の一部**（外すと実機で潰れた材が戻る）なので、本番でも走る
+			// ——開発ビルドだけなのは、その戻り値を控える下の 2 行である。
+			if (piece0 >= kPathPointCount)
+			{
+				[[maybe_unused]] const Boolean startSet =
+					gSDK->NurbsSetPt3D(path, 0, 0, WorldPt3(start.x, start.y, kPathPlaneZ));
+				[[maybe_unused]] const Boolean endSet =
+					gSDK->NurbsSetPt3D(path, 0, 1, WorldPt3(end.x, end.y, kPathPlaneZ));
+#if VW_DRAW_VERIFY
+				probe.setOk = startSet && endSet;
+				WorldPt3 fixed(0.0, 0.0, 0.0);
+				if (gSDK->NurbsGetPt3D(path, 0, 1, fixed))
+				{
+					probe.fixedRead = true;
+					probe.fixedZ1 = fixed.z;
+				}
+#endif
+			}
+#if VW_DRAW_VERIFY
+			if (outProbe != nullptr)
+				*outProbe = probe;
+#endif
+			outAppended = piece0 >= kPathPointCount || piece1 >= kPathPointCount;
+			return path;
+		}
 	} // namespace
 
+	// 公開版。**区間を開くのはここだけ**（上記 CreatePathUntimed）——呼ぶのは要素ごとの
+	// 描画（draw/Member・draw/Column・draw/Rafter）で、どれも他の区間の外から呼ぶ。
 #if VW_DRAW_VERIFY
 	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended,
 							  PathProbe* outProbe)
+	{
+		VW_DRAW_TIME("構造材:パス生成");
+		return CreatePathUntimed(start, end, outAppended, outProbe);
+	}
 #else
 	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended)
-#endif
 	{
-		outAppended = false;
-		MCObjectHandle path =
-			gSDK->CreateNurbsCurve(WorldPt3(start.x, start.y, kPathPlaneZ), false, kPathDegree);
-		if (path == nil)
-			return nil;
-
-		// **Add3DVertex が VS の AddVertex3D にあたる**（ヘッダ参照）。末尾へ 1 点足して
-		// 始端 → 終端の 2 点にする。
-		gSDK->Add3DVertex(path, WorldPt3(end.x, end.y, kPathPlaneZ));
-		// 頂点が本当に 2 つになったかを読み戻す。ピース索引の起点は 0 / 1 のどちらの
-		// 規約もあり得るので両方を見る（**判定に失敗しても曲線はそのまま使う**——ここで
-		// 諦めると、索引の規約違いというだけで部材が 1 本も描かれなくなる）。
-		const Sint32 piece0 = gSDK->NurbsGetNumPts(path, 0);
-		const Sint32 piece1 = gSDK->NurbsGetNumPts(path, 1);
-#if VW_DRAW_VERIFY
-		PathProbe probe;
-		probe.piece0 = piece0;
-		probe.piece1 = piece1;
-		// **2 点の Z を読み戻す。** 数が 2 でも同じ位置なら部材は実体を持たない
-		// （実機で 46 本。draw/StructuralMember.h の PathProbe）。**観測だけ**なので
-		// 開発ビルドにしか無い。
-		WorldPt3 first(0.0, 0.0, 0.0);
-		WorldPt3 second(0.0, 0.0, 0.0);
-		if (gSDK->NurbsGetPt3D(path, 0, 0, first) && gSDK->NurbsGetPt3D(path, 0, 1, second))
-		{
-			probe.pointsRead = true;
-			probe.z0 = first.z;
-			probe.z1 = second.z;
-		}
-#endif
-		// **座標を明示的に入れ直す。** `Add3DVertex` が足した点が渡した位置にならないことが
-		// ある（ヘッダ参照）。うまく足せていたときは同じ値を書くだけで何も変わらない。
-		// **これは観測ではなく描画の一部**（外すと実機で潰れた材が戻る）なので、本番でも走る
-		// ——開発ビルドだけなのは、その戻り値を控える下の 2 行である。
-		if (piece0 >= kPathPointCount)
-		{
-			[[maybe_unused]] const Boolean startSet =
-				gSDK->NurbsSetPt3D(path, 0, 0, WorldPt3(start.x, start.y, kPathPlaneZ));
-			[[maybe_unused]] const Boolean endSet =
-				gSDK->NurbsSetPt3D(path, 0, 1, WorldPt3(end.x, end.y, kPathPlaneZ));
-#if VW_DRAW_VERIFY
-			probe.setOk = startSet && endSet;
-			WorldPt3 fixed(0.0, 0.0, 0.0);
-			if (gSDK->NurbsGetPt3D(path, 0, 1, fixed))
-			{
-				probe.fixedRead = true;
-				probe.fixedZ1 = fixed.z;
-			}
-#endif
-		}
-#if VW_DRAW_VERIFY
-		if (outProbe != nullptr)
-			*outProbe = probe;
-#endif
-		outAppended = piece0 >= kPathPointCount || piece1 >= kPathPointCount;
-		return path;
+		VW_DRAW_TIME("構造材:パス生成");
+		return CreatePathUntimed(start, end, outAppended);
 	}
+#endif
 
 	StructuralMemberResult DrawStructuralMember(const StructuralMemberSpec& spec, RefNumber style)
 	{
@@ -307,53 +332,127 @@ namespace HomeskzIfcImport::draw
 		if (spec.path == nil || spec.profile == nil)
 			return result;
 
-		MCObjectHandle object =
-			gSDK->CreateCustomObjectPath(kStructuralMember, spec.path, spec.profile, true);
-		if (object == nil)
-			return result;
-
-		SetClassWithAttributes(object, spec.drawClass);
+		// **クラスと描画属性は「作る前に文書の既定として立てる」。** 作った後に
+		// SetObjectClass と 6 つの Set*ByClass を呼ぶと、構造材 PIO はその 1 回ごとに作り
+		// 直され（1 回 9〜12ms）、取り込み全体の半分をここで使っていた（docs/DEV-NOTES.md
+		// 「描画の高速化」。SDK リファレンス Findings「Attributes and Classes」）。既定は
+		// 生まれる瞬間に読まれるので、スコープは作る 1 行だけを囲む——抜けた時点で既定の
+		// クラスは利用者のものへ戻り、この後の ResetObject も従来と同じ既定の下で走る。
+		MCObjectHandle object = nil;
+		{
+			const ScopedCreationClass creationClass(spec.drawClass);
+			{
+				VW_DRAW_TIME("構造材:オブジェクト生成");
+				// **作った時点では作り直させない（doRegen=false）。** 既定の true では「作った
+				// 時点で 1 回」＋「この後の ResetObject で 1 回」の計 2 回作り直しが走り、
+				// 1 本あたりの所要の約半分が前者だった。false なら ResetObject の 1 回だけになる
+				// （SDK リファレンス Findings「Parametric Objects」の「`doRegen=false` は
+				// 速い…」。docs/DEV-NOTES.md「描画の高速化」）。
+				//
+				// **成り立つのはパスの両端の Z が等しいときだけ**——Z の差があると 1 回目の
+				// ResetObject が「バウンドの span ＋ 渡した Z の差」を返し、材の高さが狂う
+				// （同 Findings。平面上の長さは関わらない）。構造材のパスは必ず CreatePath で
+				// 両端とも kPathPlaneZ に作るので、横架材・柱・垂木のどれも条件を満たす。
+				// **パスに Z を持たせる作りへ戻すなら、ここも true へ戻すこと。**
+				object = gSDK->CreateCustomObjectPath(kStructuralMember, spec.path, spec.profile,
+													  false /* doRegen */);
+			}
+			if (object == nil)
+				return result;
+			// 既定を継いだかを読み戻し、継いでいなければ従来どおり与え直す（中で区間を開く
+			// ので、ここは包まない）。
+			result.classInherited = FinishCreatedWithClass(object, creationClass, spec.drawClass);
+		}
 		// スタイルは個別フィールドより**先に**関連付ける（後に設定する実測値で
 		// スタイル既定のパラメータを上書きするため）。
 		if (style != 0)
+		{
+			VW_DRAW_TIME("構造材:スタイル関連付け");
 			gSDK->SetPluginObjectStyle(object, style);
+		}
 
 		// 高さ基準を始端（0）・終端（1）それぞれのストーリレベルへバインドする。これで
 		// 構造材ツールの高さ基準が「レイヤの高さ」・offset 0 のまま実ジオメトリと矛盾する
 		// ことがなくなり、編集時に高さがリセットされない。水平材の傾斜はこの offset 差で
 		// 表れ、鉛直材ではこの差が柱高さを支配する。
 		// **戻り値を見る。** 受け取られなければ材は高さを持てない（＝実体が無い材になる）。
-		const bool startBoundOk = ApplyStoryBound(object, StoryBoundSlot::Start, spec.startBound);
-		const bool endBoundOk = ApplyStoryBound(object, StoryBoundSlot::End, spec.endBound);
-		result.boundOk = startBoundOk && endBoundOk;
+		{
+			VW_DRAW_TIME("構造材:高さ基準");
+			const bool startBoundOk =
+				ApplyStoryBound(object, StoryBoundSlot::Start, spec.startBound);
+			const bool endBoundOk = ApplyStoryBound(object, StoryBoundSlot::End, spec.endBound);
+			result.boundOk = startBoundOk && endBoundOk;
+		}
 
 		VWParametricObj pio(object);
-		const TXString breadth = ResolveParamName(pio, kFieldMajorBreadth, kLocalizedBreadth);
-		const TXString depth = ResolveParamName(pio, kFieldMajorDepth, kLocalizedDepth);
 
-		pio.SetParamAsString(ResolveParamName(pio, kFieldProfileShape, kLocalizedProfileShape),
-							 kProfileShapeRectangle);
-		pio.SetParamAsString(kFieldProfileSeries, kProfileSeriesDefault);
-		const bool breadthOk = SetParamRealChecked(pio, breadth, spec.width);
-		const bool depthOk = SetParamRealChecked(pio, depth, spec.depth);
+		// 【計測のために区間へ割ってある】ここから下は「名前の解決」と「パラメータ書き」が
+		// 交互に来る。どちらが重いのかがフェーズの時刻差からは分からないので、**別々の
+		// 区間として測れるように**代入を 1 段はさんである（draw/Verify.h の VW_DRAW_TIME。
+		// 本番ビルドでは丸ごと畳まれて、残るのは代入 1 つだけになる）。
+		//
+		// ★**解決を書き込みより前へ動かさない。** パラメータ表が断面形状（矩形/H 形…）で
+		// 変わりうるかは分かっていない——**分かるまでは、いまの順序（断面形状を書いた後に
+		// B / D を引く）を守る**。SDK リファレンス側で調査中
+		// （min-nano/vectorworks-developer-sdk-reference#82）。
+		TXString breadth;
+		TXString depth;
+		TXString profileShape;
+		{
+			VW_DRAW_TIME("構造材:名前解決");
+			breadth = ResolveParamName(pio, kFieldMajorBreadth, kLocalizedBreadth);
+			depth = ResolveParamName(pio, kFieldMajorDepth, kLocalizedDepth);
+			profileShape = ResolveParamName(pio, kFieldProfileShape, kLocalizedProfileShape);
+		}
+
+		bool breadthOk = false;
+		bool depthOk = false;
+		{
+			VW_DRAW_TIME("構造材:パラメータ書き");
+			pio.SetParamAsString(profileShape, kProfileShapeRectangle);
+			pio.SetParamAsString(kFieldProfileSeries, kProfileSeriesDefault);
+			breadthOk = SetParamRealChecked(pio, breadth, spec.width);
+			depthOk = SetParamRealChecked(pio, depth, spec.depth);
+		}
+
 		// B / D は矩形断面のときの別名。上と同じ値を入れる（存在しなければ無視される）。
-		SetParamRealChecked(pio, ResolveParamName(pio, kFieldB, kLocalizedBreadth), spec.width);
-		SetParamRealChecked(pio, ResolveParamName(pio, kFieldD, kLocalizedDepth), spec.depth);
-		pio.SetParamAsString(kFieldMemberID, TXString(spec.memberId.c_str()));
-		pio.SetParamAsString(kFieldMemberType, PopupKey(MemberTypeKey::Structural));
-		pio.SetParamAsString(kFieldStructuralUse, TXString(spec.structuralUse.c_str()));
-		pio.SetParamAsString(kFieldAxisAlign, PopupKey(AxisAlignOf(spec.axisAlign)));
-		pio.SetParamAsString(kFieldStartCondition, PopupKey(EndConditionKey::Square));
-		pio.SetParamAsString(kFieldEndCondition, PopupKey(EndConditionKey::Square));
+		// 2 つの解決をまとめたので `D` を引くのが `B` を書く前になったが、**寸法の値は
+		// パラメータ表の顔ぶれを変えない**ので順序の意味は変わらない（変わりうるのは
+		// 上の ★ の断面形状の方で、そちらは動かしていない）。
+		TXString bAlias;
+		TXString dAlias;
+		{
+			VW_DRAW_TIME("構造材:名前解決");
+			bAlias = ResolveParamName(pio, kFieldB, kLocalizedBreadth);
+			dAlias = ResolveParamName(pio, kFieldD, kLocalizedDepth);
+		}
+		{
+			VW_DRAW_TIME("構造材:パラメータ書き");
+			SetParamRealChecked(pio, bAlias, spec.width);
+			SetParamRealChecked(pio, dAlias, spec.depth);
+			pio.SetParamAsString(kFieldMemberID, TXString(spec.memberId.c_str()));
+			pio.SetParamAsString(kFieldMemberType, PopupKey(MemberTypeKey::Structural));
+			pio.SetParamAsString(kFieldStructuralUse, TXString(spec.structuralUse.c_str()));
+			pio.SetParamAsString(kFieldAxisAlign, PopupKey(AxisAlignOf(spec.axisAlign)));
+			pio.SetParamAsString(kFieldStartCondition, PopupKey(EndConditionKey::Square));
+			pio.SetParamAsString(kFieldEndCondition, PopupKey(EndConditionKey::Square));
+		}
 
 		// 端部オフセット。**要らない（両端 0）なら触らない**——スタイル既定が 0 なので書く
 		// 必要が無く、名前を解決できない構成でも余計な診断を出さずに済む。
 		if (spec.startOffset != 0.0 || spec.endOffset != 0.0)
 		{
-			const TXString startOffset =
-				ResolveParamNameAmong(pio, kStartOffsetNames, kLocalizedStartOffset);
-			const TXString endOffset =
-				ResolveParamNameAmong(pio, kEndOffsetNames, kLocalizedEndOffset);
+			TXString startOffset;
+			TXString endOffset;
+			{
+				// **端部オフセットの universal 名は候補を順に空振りしてから、ローカライズ名で
+				// パラメータ表を端から舐める**（draw/DrawUtil の ResolveParamNameAmong）。
+				// 実データでは横架材の 7 割・柱のほぼ全数がここを通る（docs/DEV-NOTES.md
+				// M20）ので、名前解決の区間が重く出るならまずここを疑う。
+				VW_DRAW_TIME("構造材:名前解決");
+				startOffset = ResolveParamNameAmong(pio, kStartOffsetNames, kLocalizedStartOffset);
+				endOffset = ResolveParamNameAmong(pio, kEndOffsetNames, kLocalizedEndOffset);
+			}
 			if (startOffset.IsEmpty() || endOffset.IsEmpty())
 			{
 				result.endOffsetOk = false;
@@ -363,12 +462,16 @@ namespace HomeskzIfcImport::draw
 			}
 			else
 			{
+				VW_DRAW_TIME("構造材:パラメータ書き");
 				const bool startOk = SetParamRealChecked(pio, startOffset, spec.startOffset);
 				const bool endOk = SetParamRealChecked(pio, endOffset, spec.endOffset);
 				result.endOffsetOk = startOk && endOk;
 			}
 		}
-		gSDK->ResetObject(object);
+		{
+			VW_DRAW_TIME("構造材:リセット");
+			gSDK->ResetObject(object);
+		}
 
 		// 【描けたかを読み戻す】PIO は生成できても実体を持たないことがある（パスが 1 点の
 		// まま・バウンドの解決に失敗、など。Findings「Parametric Objects」）。そのとき OIP の
@@ -387,6 +490,11 @@ namespace HomeskzIfcImport::draw
 #endif
 		if (measureDrawn)
 		{
+			// **読み戻しと自己修復はひとまとめの区間**にする（区間は入れ子にしない。
+			// draw/Verify.h）。潰れた材のパスを作り直す `ResetObject` もここに入るので、
+			// 「構造材:リセット」には**1 本につき 1 回ぶんだけ**が積まれる。
+			VW_DRAW_TIME("構造材:読み戻しと修復");
+
 			// 本番ビルドでは差し替え後の測り直しを控えないので、そのまま const になる。
 #if VW_DRAW_VERIFY
 			DrawnMemberSize size = MeasureDrawnMember(object, spec.extentKind);
@@ -417,7 +525,11 @@ namespace HomeskzIfcImport::draw
 				if (result.collapsed && spec.retryWithFreshPath)
 				{
 					bool appended = false;
-					const MCObjectHandle fresh = CreatePath(spec.pathStart, spec.pathEnd, appended);
+					// **公開版（CreatePath）ではなく計測を開かない方を呼ぶ。** ここは既に
+					// 「構造材:読み戻しと修復」の区間の中なので、公開版を呼ぶと区間が
+					// 入れ子になる（上記 CreatePathUntimed）。
+					const MCObjectHandle fresh =
+						CreatePathUntimed(spec.pathStart, spec.pathEnd, appended);
 					if (fresh != nil && gSDK->SetCustomObjectPath(object, fresh))
 					{
 						gSDK->ResetObject(object);
@@ -624,6 +736,8 @@ namespace HomeskzIfcImport::draw
 #endif
 		}
 #if VW_DRAW_VERIFY
+		if (!result.classInherited)
+			++classFallback;
 		if (result.collapsed)
 			++collapsed;
 		if (result.repairedByPath)
@@ -654,6 +768,9 @@ namespace HomeskzIfcImport::draw
 #if VW_DRAW_VERIFY
 		count("長さ 0 で描かれた（実体が無い）", failures.collapsed);
 		count("パスを作り直して直った", failures.repaired);
+		// 作る前に立てた既定（クラス・描画属性）を継がずに生まれ、作った後に与え直した本数。
+		// 0 でなければその本数ぶん高速化が効いていない（絵は従来どおり）。
+		count("既定のクラスを継がず作った後に与え直した", failures.classFallback);
 		if (!failures.collapsedProbe.empty())
 			note += "（1 本目: " + failures.collapsedProbe + "）";
 		count("命令と違う高さに描かれた", failures.elevation);

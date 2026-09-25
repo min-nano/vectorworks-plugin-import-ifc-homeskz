@@ -2,6 +2,7 @@
 //	core/ImportOptions.cpp
 //
 //	取り込み設定の実装（意図と規約は core/ImportOptions.h を参照）。役割の表はここ 1 つ。
+//	図面枠のスタイルは表を持たない（既定名が無く、選択肢は図面から集める。M28）。
 //
 
 #include "core/ImportOptions.h"
@@ -77,5 +78,22 @@ namespace HomeskzIfcImport::core
 	void ImportOptions::setEnabled(SymbolRole role, bool enable)
 	{
 		enabled[indexOf(role)] = enable;
+	}
+
+	const std::string& ImportOptions::titleBlockStyle() const
+	{
+		return titleBlock;
+	}
+
+	bool ImportOptions::hasTitleBlock() const
+	{
+		return !titleBlock.empty();
+	}
+
+	void ImportOptions::setTitleBlockStyle(const std::string& name)
+	{
+		// **空はそのまま入れる**（＝置かない）。既定名が無いので、空を何かへ読み替える
+		// 余地が無い（core/ImportOptions.h の titleBlock）。
+		titleBlock = name;
 	}
 } // namespace HomeskzIfcImport::core

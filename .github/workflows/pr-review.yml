@@ -118,8 +118,15 @@ jobs:
     # success でないもの**——後者は下の門でも落ちるが、ここで落とせばランナーを
     # 起こさずに済む。3 つのうち 1 つが落ちれば残りは走るだけ無駄なので、
     # 赤い CI が 1 つあるだけでこの入口は全部閉じる。
+    #
+    # 下書きの PR はここでも落とす (イベントに PR が載っているときだけ判定
+    # できる。issue_comment / workflow_run には載らないので、下の門の
+    # isDraft で落ちる)。下書きは実機確認・設計判断の途中で差分がまだ動く
+    # 段階なので、レビューは ready_for_review に昇格してから 1 周だけ回す
+    # (CLAUDE.md「開発プロセス: PR とマージ」)。
     if: >-
       github.event.sender.type != 'Bot'
+      && github.event.pull_request.draft != true
       && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
       && (github.event_name != 'workflow_run'
           || (github.event.workflow_run.event == 'pull_request'
@@ -320,7 +327,7 @@ jobs:
         # 付け替えられるため、v1 のままだと中身が黙って変わりうる。更新は
         # Dependabot が # の後ろの版を見て上げてくれる (他のワークフローが
         # actions/checkout などを固定しているのと同じ作法)。
-        uses: anthropics/claude-code-action@7b0b255830a1fab6e602658672acad11c12d841d # v1
+        uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de # v1
         env:
           # 何かの経路で環境に残っていても拾われないよう、空で上書きする。
           # 拾われると API のクレジットを別枠で消費しかねない。

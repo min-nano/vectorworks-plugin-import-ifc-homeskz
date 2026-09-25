@@ -22,6 +22,7 @@
 
 using HomeskzIfcImport::core::clearFeedbackSession;
 using HomeskzIfcImport::core::defaultFeedbackSessionPath;
+using HomeskzIfcImport::core::feedbackPullRequestEnded;
 using HomeskzIfcImport::core::FeedbackRoundKind;
 using HomeskzIfcImport::core::feedbackRoundKind;
 using HomeskzIfcImport::core::FeedbackSession;
@@ -29,6 +30,7 @@ using HomeskzIfcImport::core::formatFeedbackSession;
 using HomeskzIfcImport::core::kSymbolRoleCount;
 using HomeskzIfcImport::core::parseFeedbackSession;
 using HomeskzIfcImport::core::readFeedbackSession;
+using HomeskzIfcImport::core::restartedFeedbackSession;
 using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::core::writeFeedbackSession;
 
@@ -56,6 +58,7 @@ namespace
 		session.lastCreatedSheets = {"A-1", "A-2"};
 		session.options.setSymbol(SymbolRole::FloorPost, "床束（特注）");
 		session.options.setEnabled(SymbolRole::FireBrace, false);
+		session.options.setTitleBlockStyle("図面枠 A3（構造）");
 		return session;
 	}
 
@@ -189,6 +192,18 @@ TEST(feedback_session_round_trips_through_text)
 		CHECK_EQ(after.options.symbol(role), before.options.symbol(role));
 		CHECK_EQ(after.options.isEnabled(role), before.options.isEnabled(role));
 	}
+	// 役割の表の外にある設定（M28 図面枠のスタイル）も運ばれる。ここが落ちると 2 周目
+	// 以降は図面枠が 1 枚も置かれない（PR #133 の round 2 で実際に起きた）。
+	CHECK_EQ(after.options.titleBlockStyle(), before.options.titleBlockStyle());
+	CHECK(after.options.hasTitleBlock());
+}
+
+TEST(feedback_session_without_a_title_block_line_places_none)
+{
+	// M28 より前の記憶には titleblock の行が無い。**置かない**（従来どおり）と読む。
+	const FeedbackSession session = parseFeedbackSession("send=1\nround=2\nbuild=a1b2c3d\n");
+	CHECK(!session.options.hasTitleBlock());
+	CHECK(session.options.titleBlockStyle().empty());
 }
 
 TEST(feedback_session_without_loop_lines_reads_as_not_looping)
@@ -400,6 +415,56 @@ TEST(feedback_round_kind_refuses_when_it_would_have_to_ask)
 		  FeedbackRoundKind::Refuse);
 	CHECK(feedbackRoundKind(postedOnce(), "aaaaaaa", /*allowDialogs*/ false) ==
 		  FeedbackRoundKind::Refuse);
+}
+
+// ---------------------------------------------------------------------------
+// **同じブランチ名が別の PR で使い回されたとき**（#137 → #138 で実際に起きた）。
+// 記憶の PR が閉じていたら、それは終わった往復で、新しい PR の 1 周目から始める。
+
+TEST(feedback_pull_request_ended_only_on_closed_states)
+{
+	CHECK(feedbackPullRequestEnded("merged"));
+	CHECK(feedbackPullRequestEnded("closed"));
+	CHECK(!feedbackPullRequestEnded("open"));
+	// **確かめられなかった（空）ときは終わったことにしない。** オフラインで記憶を捨てると、
+	// 戻ったときに往復が最初からになる。
+	CHECK(!feedbackPullRequestEnded(""));
+}
+
+TEST(restarted_feedback_session_starts_a_first_round_for_the_new_pull_request)
+{
+	FeedbackSession ended = postedOnce();
+	ended.repo = "owner/private-feedback";
+	ended.anonymize = false;
+	ended.pullRequest = 137;
+	ended.branch = "claude/some-branch";
+	ended.workPath = "/tmp/work.vwx";
+	ended.baselineRecorded = true;
+	ended.baselineLayers = {"共通"};
+	ended.lastCreatedLayers = {"1FL"};
+	ended.lastTally = "柱 10";
+	ended.lastPostedAt = "2026-09-25T00:00:00Z";
+	ended.loop = true;
+
+	const FeedbackSession fresh = restartedFeedbackSession(ended);
+	// 人の好み（宛先のリポジトリと伏せ字）とブランチだけを持ち越す。
+	CHECK(fresh.repo == "owner/private-feedback");
+	CHECK(!fresh.anonymize);
+	CHECK(fresh.branch == "claude/some-branch");
+	// **前の PR を指すものは 1 つも残さない。** PR 番号が残ると、閉じた PR へ投稿し直す。
+	CHECK(fresh.pullRequest == 0);
+	CHECK(fresh.round == 0);
+	CHECK(fresh.lastCommit.empty());
+	CHECK(fresh.workPath.empty());
+	CHECK(!fresh.baselineRecorded);
+	CHECK(fresh.baselineLayers.empty());
+	CHECK(fresh.lastCreatedLayers.empty());
+	CHECK(fresh.lastTally.empty());
+	CHECK(fresh.lastPostedAt.empty());
+	CHECK(!fresh.loop);
+	// 同じビルドが動いていても「回し直すだけ」にならず、1 周目として尋ねる。
+	CHECK(feedbackRoundKind(fresh, "aaaaaaa", /*allowDialogs*/ true) ==
+		  FeedbackRoundKind::FirstRound);
 }
 
 TEST_MAIN();

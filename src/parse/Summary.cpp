@@ -481,6 +481,10 @@ namespace HomeskzIfcImport::parse
 			if (name == info.defaultSymbol)
 				out << "（既定）";
 		}
+		// M28 図面枠は役割の表に載らない（既定名が無く、選択肢の集め方も違う。
+		// core/ImportOptions.h）。1 行だけ末尾に足す。
+		out << "\n  " << kTitleBlockOptionLabel
+			<< (options.hasTitleBlock() ? options.titleBlockStyle() : std::string("置かない"));
 		return out.str();
 	}
 } // namespace HomeskzIfcImport::parse
