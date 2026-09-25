@@ -14,6 +14,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace HomeskzIfcImport::core
 {
@@ -290,6 +291,22 @@ namespace HomeskzIfcImport::core
 		if (!allowDialogs)
 			return FeedbackRoundKind::Refuse;
 		return remembered ? FeedbackRoundKind::RearmOnly : FeedbackRoundKind::FirstRound;
+	}
+
+	bool feedbackPullRequestEnded(const std::string& state)
+	{
+		return state == "merged" || state == "closed";
+	}
+
+	FeedbackSession restartedFeedbackSession(FeedbackSession ended)
+	{
+		// 値で受けて持ち越すものだけを**移す**（移動は例外を投げないので、組み立ての途中で
+		// 投げて片付ける経路が生まれない）。
+		FeedbackSession fresh;
+		fresh.repo = std::move(ended.repo);
+		fresh.anonymize = ended.anonymize;
+		fresh.branch = std::move(ended.branch);
+		return fresh;
 	}
 
 } // namespace HomeskzIfcImport::core
