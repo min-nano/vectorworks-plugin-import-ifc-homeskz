@@ -719,9 +719,11 @@ record・PIO のパラメータ・PIO が持つパス）を**書いた直後に�
   `DescribeStoryBound` / `DescribePioPath` / `DescribeParamsContaining`）・取り込み後の
   測り直し（`recheckColumns`）・パスの観測（`PathProbe`）。
 - 囲まない … **読み戻した結果が絵を変えるもの**。`SetParamRealChecked`（実数で入らなければ
-  文字列で入れ直す）・`CreatePath` の `NurbsSetPt3D`（足した点を入れ直す）・潰れた材のパスを
-  作り直す自己修復（`retryWithFreshPath`）・データタグのレイアウトの取り直し（`draw/Tag`）・
-  シンボルが置けたことを確かめてから数える（`draw/Symbol`）。
+  文字列で入れ直す）・`CreatePath` の `NurbsSetPt3D`（足した点を入れ直す）・データタグの
+  レイアウトの取り直し（`draw/Tag`）・シンボルが置けたことを確かめてから数える
+  （`draw/Symbol`）。**「絵を変える」は「絵を良くする」ではない**——潰れた材のパスを作り直す
+  自己修復はここに並んでいたが、繕った結果のほうが悪いと分かって撤去した（`src/draw/Verify.h`
+  ／`docs/DEV-NOTES.md`「柱が長さ 0 で描かれる（M27）」）。
 
 **新しい検算を足すときも同じ基準で分ける。** なお `#if` の中だけにあるコードは**dev の CI
 でしか型検査されない**（PR のビルドは dev チャンネルだけを作る）ので、**両方の分岐が

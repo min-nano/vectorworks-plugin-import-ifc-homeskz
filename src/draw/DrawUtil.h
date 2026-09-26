@@ -323,19 +323,13 @@ namespace HomeskzIfcImport::draw
 	// 引ける `CenterPointLength`（OIP の「長さ」）は部材長ではない（実長 5333 の柱で 100 を
 	// 返した。docs/DEV-NOTES.md M27）。
 	//
-	// **いまは開発ビルドからしか呼ばれない。** 唯一の呼び出し口は `MeasureDrawnMember` の
-	// `Horizontal` 分岐で、そこへ本番ビルドから届く経路（`DrawStructuralMember` の
-	// `measureDrawn`）は `retryWithFreshPath` を武装した材だけを通す——その武装が 0 本に
-	// なったため（draw/Member ／ draw/Rafter ／ draw/Column）、本番では 1 度も走らない。
-	//
-	// **それでもまだ `#if VW_DRAW_VERIFY` で囲っていないのは、囲むと罠になるから。**
-	// 囲むには呼び出し側の `Horizontal` 分岐も囲うことになり、本番の
-	// `MeasureDrawnMember` は「測れなかった」を黙って返す関数に化ける——**この PR が
-	// 消したばかりの「静かに素通りする検査」を、形を変えて戻すことになる**。
-	// 置き場所は**自己修復の仕組みごと撤去する別 PR で決める**（そこでは本番側の
-	// `measureDrawn` ごと畳むので、罠の生まれようが無い）。draw/Verify.h の基準
-	// （「外したら利用者の絵が変わるか」）で言えば、この関数は既に囲む側である。
+	// **開発ビルドだけ**（draw/Verify.h）。唯一の呼び出し口は `MeasureDrawnMember` の
+	// `Horizontal` 分岐で、そちらも開発ビルドだけになった——読み戻す理由が検算だけに
+	// なったためである（自己修復の撤去。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+	// 観測するだけでパスには触らないので、外しても描かれるものは 1 つも変わらない。
+#if VW_DRAW_VERIFY
 	bool PioPathChord(MCObjectHandle object, double& outLength);
+#endif
 
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
 	//
