@@ -317,6 +317,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: レビューする
+        id: review
         if: steps.prep.outputs.run == 'true'
         # レビューの失敗でプルリクエストを赤くしない。アクションはセッションが
         # 失敗すると非ゼロ終了するので、ここで受け止める。main は保護されて
@@ -395,12 +396,20 @@ jobs:
             - **外部リポジトリの中身** (action の実装や `action.yml` など)。
               確かめられないことは「未確認」と書けばよく、それで十分です。
 
-            **まず `CLAUDE.md` を読んでください。** このリポジトリは
-            Vectorworks 2026 用の C++ SDK 製ネイティブプラグインで、設計の規約が
-            そこに全部書いてあります。**このレビューの主な仕事は、その規約に
-            照らして差分を見ることです** — 書式と機械的な静的解析は別の
-            ワークフローが済ませているので、あなたが見るべきなのは機械が
-            見られないものです。
+            **`CLAUDE.md` はもう読み込まれています** (プロジェクトの指示として
+            システムプロンプトに入っています)。**Read で読み直さないで
+            ください** — 10 万字あるので、読み直すとその全文が会話にもう一度
+            載り、以後の毎ターンでそれを抱えたまま進むことになります (実測で
+            予算を使い切った原因の 1 つです)。ただし **この PR が `CLAUDE.md`
+            自体を変えているときは**、読み込まれているのは作業ディレクトリの
+            版 (上記のとおり既定ブランチのことが多い) なので、変更点は
+            `gh pr diff` で確かめてください。
+
+            このリポジトリは Vectorworks 2026 用の C++ SDK 製ネイティブ
+            プラグインで、設計の規約がその `CLAUDE.md` に全部書いてあります。
+            **このレビューの主な仕事は、その規約に照らして差分を見ることです**
+            — 書式と機械的な静的解析は別のワークフローが済ませているので、
+            あなたが見るべきなのは機械が見られないものです。
 
             `docs/DEVELOPMENT.md` (ソースの構成・ビルド・リリース) と
             `docs/DEV-NOTES.md` (設計の経緯・打ち切った調査) にも根拠が
@@ -580,6 +589,16 @@ jobs:
             全部を見きれていないと分かっているなら、その旨を `--body` に
             書いたうえで提出するほうが、黙って終わるよりずっと役に立ちます。
 
+            **予算の残りはあなたからは見えません**が、上限はおおむね
+            **ツール呼び出し 30 回前後**で来ます (実測: 37 ターンで予算を
+            使い切り、何も提出されずに終わった実行があります)。したがって
+            **ツールを 25 回呼んだら、見終わっていなくてもそこで
+            `gh pr review` を提出してください。** `--body` に「どこまで見て、
+            どこを見ていないか」を書けば十分です。判定は、そこまでに `[重大]`
+            か `[中]` を出していれば `--request-changes`、出していなければ
+            見ていない部分がある以上 `--comment` にしてください
+            (見ていないものを承認しないため)。
+
             結果は必ず GitHub に提出してください。応答メッセージに書くだけでは
             誰にも見えません。
 
@@ -625,10 +644,75 @@ jobs:
           # --max-budget-usd は後者なので効く。ジョブログの "SDK options" に
           # これらが出ないのは、extraArgs をログから除外しているためで、
           # 無視されているわけではない (base-action/src/run-claude-sdk.ts)。
+          #
+          # --effort は high。xhigh では 1,650 行ほどの PR で 37 ターン・$2 に
+          # 達し、何も提出されずに終わった (PR #140)。規約との突き合わせが
+          # 主な仕事なので、思考の深さより「最後まで見て提出する」ほうが効く。
           claude_args: >-
             --model claude-sonnet-5
-            --effort xhigh
+            --effort high
             --max-turns 40
             --max-budget-usd 2.0
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr review ${{ steps.prep.outputs.pr_number }}:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
             --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch
+
+      # 実行の結末 (ターン数・費用・終わり方) と、拒否されたツール呼び出しを
+      # ステップサマリーへ出す。アクションは会話の全文を「セキュリティのため」
+      # 隠すので、ログには `permission_denials_count` の件数しか残らず、
+      # **何が拒否されたのか**が分からない (PR #140 の実行では 9 件あったが
+      # 中身を追えなかった)。許可の足し引きを判断する材料をここで残す。
+      #
+      # 出すのは拒否された呼び出しの道具名と引数の頭 (200 字) だけで、会話の
+      # 本文は出さない。行き先はステップサマリーだけにし、標準出力へは数字
+      # しか流さない——引数はモデルが組んだ文字列で、`::` で始まる行を
+      # 標準出力へ出すとワークフローコマンドとして解釈されるため。
+      - name: 実行の結末を残す
+        if: always() && steps.prep.outputs.run == 'true'
+        env:
+          EXEC_FILE: ${{ steps.review.outputs.execution_file }}
+        run: |
+          f="${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}"
+          if [ ! -s "$f" ]; then
+            echo "実行ログ ($f) が見つからないので結末を残しません。"
+            exit 0
+          fi
+
+          # 実行ログは JSON の配列 (版によっては 1 行 1 メッセージ) なので、
+          # どちらでも読めるよう -s で畳んでから result を拾う。
+          result=$(jq -c -s '
+            (if length == 1 and (.[0] | type) == "array" then .[0] else . end)
+            | map(select(type == "object" and .type == "result")) | last // empty
+          ' "$f" 2>/dev/null) || result=""
+          if [ -z "$result" ]; then
+            echo "実行ログに result が無いので結末を残しません。"
+            exit 0
+          fi
+
+          subtype=$(jq -r '.subtype // "?"' <<<"$result" | tr -cd 'a-z_?')
+          turns=$(jq -r '.num_turns // "?"' <<<"$result" | tr -cd '0-9?')
+          cost=$(jq -r '.total_cost_usd // "?"' <<<"$result" | tr -cd '0-9.?')
+          denied=$(jq -r '(.permission_denials // []) | length' <<<"$result" | tr -cd '0-9')
+          echo "::notice::レビューの結末: ${subtype} / ${turns} ターン / \$${cost} / 拒否 ${denied:-0} 件"
+
+          {
+            echo "### レビューの結末"
+            echo
+            echo "| 終わり方 | ターン | 費用 (USD) | 拒否 |"
+            echo "| --- | --- | --- | --- |"
+            echo "| ${subtype} | ${turns} | ${cost} | ${denied:-0} |"
+            if [ "${denied:-0}" -gt 0 ]; then
+              echo
+              echo "#### 拒否されたツール呼び出し"
+              echo
+              echo '```'
+              jq -r '
+                .permission_denials[]
+                | .tool_name + "  "
+                  + ((.tool_input.command // .tool_input.file_path
+                      // .tool_input.pattern // (.tool_input | tostring))
+                     | tostring | gsub("[\r\n]+"; " ") | gsub("`"; "'"'"'")
+                     | .[0:200])
+              ' <<<"$result"
+              echo '```'
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
