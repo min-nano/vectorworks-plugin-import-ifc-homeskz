@@ -10,6 +10,8 @@
 #   * 道具の一覧が**代役から取れる**こと（＝一覧の真実がプラグイン側にあること）、
 #   * 応答が返らない・ブリッジが動いていないときに**待ち切らずに理由を返す**こと、
 #   * 送った順に処理されること（要求ファイル名の連番）、
+#   * vw_launch が Vectorworks を起こし、橋が架かるまで待って一覧の取り直しを促すこと
+#     （起こすものは VW_MCP_APP で代役に差し替える）、
 #
 # を確かめる。**代役が真似ているのは src/core/Bridge.h の綴りと手順だけ**なので、
 # どちらかを変えたらこのテストが落ちる——それがこのテストの主眼である。
@@ -116,8 +118,11 @@ class FakeVectorworks(threading.Thread):
         os.replace(temp, os.path.join(self.spool, request["id"] + ".res.json"))
 
 
-def drive(spool, messages, timeout="30", by_tmpdir=False):
-    """サーバへ一括で流し込み、返ってきた JSON 行を返す。
+def drive(spool, messages, timeout="30", by_tmpdir=False, extra_env=None, with_notes=False):
+    """サーバへ一括で流し込み、返ってきた応答（id のある行）を返す。
+
+    with_notes=True のときは (応答, 通知のメソッド名の列) を返す。通知は応答の間に挟まるので、
+    既定では落として、応答だけを添字で見られるようにする。
 
     by_tmpdir=True のときは VW_MCP_SPOOL を渡さず、**TMPDIR から自力で探させる**
     （プラグイン側と Claude 側が別々に場所を決める、本番と同じ経路）。
@@ -132,6 +137,7 @@ def drive(spool, messages, timeout="30", by_tmpdir=False):
     else:
         env["VW_MCP_SPOOL"] = spool
     env["VW_MCP_TIMEOUT"] = timeout
+    env.update(extra_env or {})
     text = "".join(json.dumps(m) + "\n" for m in messages)
     done = subprocess.run(
         [sys.executable, SERVER],
@@ -146,7 +152,105 @@ def drive(spool, messages, timeout="30", by_tmpdir=False):
         line = line.strip()
         if line:
             out.append(json.loads(line))
-    return out
+    replies, notes = split_notifications(out)
+    return (replies, notes) if with_notes else replies
+
+
+def split_notifications(lines):
+    """応答（id あり）と通知（id なし）に分ける。"""
+    replies = [m for m in lines if "id" in m]
+    notes = [m.get("method") for m in lines if "id" not in m]
+    return replies, notes
+
+
+# vw_launch の代役（Vectorworks の代わりに起こされる実行ファイル）。**起こされたら印を
+# 書き続ける**——本物の Vectorworks がパレットの時計で印を書き直すのと同じに見せる。
+# 止める印（stop ファイル）が置かれるか、上限の時間が来たら終わる。
+FAKE_APP = '''#!%(python)s
+import json, os, sys, time
+spool = %(spool)r
+stop = os.path.join(os.path.dirname(spool), "stop-fake-app")
+os.makedirs(spool, exist_ok=True)
+os.chmod(spool, 0o700)
+deadline = time.time() + 30
+while time.time() < deadline and not os.path.exists(stop):
+    temp = os.path.join(spool, "bridge.json.tmp")
+    with open(temp, "w") as handle:
+        json.dump({"plugin": "min-nano_structure", "protocol": 1, "beat": int(time.time())}, handle)
+    os.replace(temp, os.path.join(spool, "bridge.json"))
+    time.sleep(0.2)
+'''
+
+
+def write_fake_app(path, spool, body=None):
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(body if body is not None else FAKE_APP % {"python": sys.executable, "spool": spool})
+    os.chmod(path, 0o755)
+
+
+def check_launch(root):
+    """**vw_launch**（Vectorworks を起こして、橋が架かるまで待つ）。"""
+    if os.name == "nt":
+        # 代役をスクリプトのまま直に起こせない（.exe でなければならない）。CI は Linux。
+        return
+    spool = os.path.join(root, "launch-mcp")
+    app = os.path.join(root, "fake-vectorworks")
+
+    # 起こすものが無ければ、起こしに行かずに理由を返す。
+    replies = drive(
+        spool,
+        [call("vw_launch", {"timeout": 1}, request_id=1)],
+        extra_env={"VW_MCP_APP": os.path.join(root, "no-such-app")},
+    )
+    check(replies[0]["result"]["isError"] is True, "起こすものが無ければエラー")
+    check("VW_MCP_APP" in content_text(replies[0]), "何が無いのかを言う")
+
+    # 起こしても橋が架からなければ、待つのを諦めて理由を返す。
+    silent = os.path.join(root, "silent-vectorworks")
+    write_fake_app(silent, spool, body="#!/bin/sh\nexit 0\n")
+    started = time.time()
+    replies = drive(
+        spool, [call("vw_launch", {"timeout": 1}, request_id=1)], extra_env={"VW_MCP_APP": silent}
+    )
+    result = json.loads(content_text(replies[0]))
+    check(replies[0]["result"]["isError"] is True, "橋が架からなければエラー")
+    check(result["launched"] is True, "起こしたことは言う")
+    check("MCP ブリッジを表示" in result["hint"], "パレットを出すよう案内する")
+    check(time.time() - started < 30, "待つ上限で諦める")
+
+    # 起こすと橋が架かる。一覧の取り直しを促す通知が出る。
+    write_fake_app(app, spool)
+    replies, notes = drive(
+        spool,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            call("vw_launch", {"timeout": 20}, request_id=2),
+        ],
+        extra_env={"VW_MCP_APP": app},
+        with_notes=True,
+    )
+    check(
+        replies[0]["result"]["capabilities"]["tools"]["listChanged"] is True,
+        "一覧が変わりうると宣言する",
+    )
+    result = json.loads(content_text(replies[1]))
+    check(replies[1]["result"]["isError"] is False, "起こして橋が架かれば成功")
+    check(result["launched"] is True and result["running"] is True, "起こして、受け付けている")
+    check_eq(notes, ["notifications/tools/list_changed"], "一覧の取り直しを促す")
+
+    # 既に受け付けていれば、2 つ目を起こさない。
+    replies = drive(
+        spool,
+        [call("vw_launch", request_id=1)],
+        extra_env={"VW_MCP_APP": os.path.join(root, "no-such-app")},
+    )
+    result = json.loads(content_text(replies[0]))
+    check(replies[0]["result"]["isError"] is False, "受け付けていれば成功")
+    check(result["launched"] is False, "受け付けていれば起こさない")
+
+    with open(os.path.join(root, "stop-fake-app"), "w", encoding="utf-8"):
+        pass
+    time.sleep(0.5)
 
 
 def load_server_module():
@@ -233,6 +337,9 @@ def main():
         # --- 場所の探し方（本番で外したところ）--------------------------
         check_spool_search(load_server_module(), root)
 
+        # --- Vectorworks を起こす ----------------------------------------
+        check_launch(root)
+
         # --- ブリッジが動いていないとき ---------------------------------
         os.makedirs(spool)
         replies = drive(
@@ -253,12 +360,13 @@ def main():
         )
         names = [t["name"] for t in replies[1]["result"]["tools"]]
         check(
-            names == ["vw_bridge_status"],
+            names == ["vw_bridge_status", "vw_launch", "vw_call"],
             "ブリッジが無いときの一覧は自前の道具だけ (%r)" % names,
         )
         status = json.loads(content_text(replies[2]))
         check(status["running"] is False, "vw_bridge_status が「動いていない」と答える")
-        check("MCP ブリッジを開始" in status["hint"], "どうすれば動くかを案内する")
+        check("vw_launch" in status["hint"], "起動の道具を案内する")
+        check("MCP ブリッジを表示" in status["hint"], "どうすれば動くかを案内する")
         check(replies[3]["result"]["isError"] is True, "道具の呼び出しはエラーになる")
         check(
             "ブリッジが動いていません" in content_text(replies[3]),
@@ -285,7 +393,7 @@ def main():
         names = [t["name"] for t in replies[1]["result"]["tools"]]
         check_eq(
             names,
-            ["vw_bridge_status", "vw_ping", "vw_layers"],
+            ["vw_bridge_status", "vw_launch", "vw_call", "vw_ping", "vw_layers"],
             "**一覧の真実はプラグイン側**（代役が返した 2 つが並ぶ）",
         )
         ping = json.loads(content_text(replies[2]))
@@ -305,6 +413,44 @@ def main():
             ["vw_tools", "vw_ping", "vw_layers", "vw_nope"],
             "送った順に処理される",
         )
+
+        # --- 一覧が古いまま（アプリを Vectorworks より先に起動した）------------
+        # **実機で起きたのはここ。** アプリは tools/list を起動時に 1 回しか呼ばず、その
+        # ときブリッジが居なければ、図面を読む道具が最後まで見えない（M30）。そのサーバが
+        # 橋の架かったあとに初めて触れる場面を再現する: tools/list を挟まずに
+        # vw_bridge_status を呼ぶ（＝まだプラグインの道具を 1 つも見せていない）。
+        # 取り直しは 1 度だけ促し、一覧に頼らない vw_call でも道具に届くこと。
+        replies, notes = drive(
+            spool,
+            [
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                call("vw_bridge_status", request_id=2),
+                call("vw_bridge_status", request_id=3),
+                call("vw_call", {"tool": "vw_layers"}, request_id=4),
+                call("vw_call", {"tool": "vw_bridge_status"}, request_id=5),
+                call("vw_call", {}, request_id=6),
+            ],
+            with_notes=True,
+        )
+        status = json.loads(content_text(replies[1]))
+        check(status["running"] is True, "橋が架かれば vw_bridge_status が動いていると答える")
+        check_eq(
+            [t["name"] for t in status.get("tools", [])],
+            ["vw_ping", "vw_layers"],
+            "vw_bridge_status がプラグインの道具を並べる",
+        )
+        check_eq(
+            notes,
+            ["notifications/tools/list_changed"],
+            "一覧が古ければ取り直しを 1 度だけ促す",
+        )
+        layers = json.loads(content_text(replies[3]))
+        check_eq(layers.get("count"), 1, "vw_call でプラグインの道具に届く")
+        check(
+            json.loads(content_text(replies[4]))["running"] is True,
+            "vw_call で自前の道具も呼べる",
+        )
+        check(replies[5]["result"]["isError"] is True, "tool の無い vw_call はエラー")
 
         # --- 応答が返らないとき -----------------------------------------
         fake.seen = []

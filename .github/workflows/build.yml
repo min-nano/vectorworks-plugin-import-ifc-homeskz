@@ -218,7 +218,7 @@ jobs:
           # 「前の版を、その版自身の知識で取り除く」ために使う（scripts/vw-uninstall.sh）。
           cp scripts/vw-install.sh scripts/vw-uninstall.sh "stage/$name/"
           chmod +x "stage/$name/vw-install.sh" "stage/$name/vw-uninstall.sh"
-          # **MCP サーバも一緒に配る。** メニュー「MCP ブリッジを開始…」の相手側で、
+          # **MCP サーバも一緒に配る。** MCP ブリッジ（パレット）の相手側で、
           # 利用者はインストール先のこれを Claude Code へ登録する（README「MCP ブリッジ」）。
           # 依存の無い 1 ファイルなので、インストーラは他のものと同じく素通しで置く。
           cp scripts/mcp/vw-mcp-server.py "stage/$name/"
@@ -358,7 +358,7 @@ jobs:
             "build/Release/vw-token.ps1",
             "scripts/vw-install.ps1",
             "scripts/vw-uninstall.ps1",
-            # **MCP サーバ**（メニュー「MCP ブリッジを開始…」の相手側）。依存の無い
+            # **MCP サーバ**（MCP ブリッジ（パレット）の相手側）。依存の無い
             # 1 ファイルなので、インストーラが他のものと同じく素通しで置く。
             "scripts/mcp/vw-mcp-server.py"
           ) | Where-Object { Test-Path $_ }

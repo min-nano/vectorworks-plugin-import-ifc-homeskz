@@ -199,9 +199,10 @@ namespace HomeskzIfcImport
 		// activeOut に true が入って戻ったら往復が回っている＝殻はパレットを開く。
 		bool runTest(bool allowDialogs, bool& activeOut, std::string& error);
 
-		// MCP ブリッジを走らせる（止められるまで戻らない。src/draw/McpBridge.h）。
+		// **MCP ブリッジの受け付けを 1 回**（M30。src/draw/McpBridge.h）。待たずに戻る。
+		// out にはパレットに見せる見え方の JSON が入る（本体が返した文字列は**ここで写す**）。
 		// 呼べなかったときだけ false。
-		bool runMcpBridge(std::string& error);
+		bool mcpServe(std::string& out, std::string& error);
 
 		// PIO のリセットを本体に描かせる。outEvent には EObjectEvent の値が入る。
 		bool recalculate(unsigned int kind, void* objectHandle, int& outEvent, std::string& error);
@@ -226,7 +227,7 @@ namespace HomeskzIfcImport
 		PayloadStamp fStamp;
 		VwPayloadRunImportFn fImportFn = nullptr;
 		VwPayloadRunTestFn fTestFn = nullptr;
-		VwPayloadRunMcpBridgeFn fBridgeFn = nullptr;
+		VwPayloadMcpServeFn fMcpServeFn = nullptr;
 		VwPayloadRecalculateFn fRecalcFn = nullptr;
 		VwPayloadShutdownFn fShutdownFn = nullptr;
 		VwPayloadLoopStatusFn fLoopStatusFn = nullptr;
