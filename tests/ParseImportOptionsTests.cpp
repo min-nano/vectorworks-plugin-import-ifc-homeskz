@@ -156,4 +156,28 @@ TEST(disabling_one_anchor_bolt_role_keeps_the_other)
 		CHECK(bolt.symbol != m16);
 }
 
+TEST(title_block_style_reaches_the_document)
+{
+	// M28 図面枠のスタイル名は**解析側が判断を挟まず**命令セットへ写るだけ。ここが
+	// 欠けると「ダイアログで選んだのに枠が出ない」になり、絵を見ても原因が分からない
+	// （どこにも件数が出ないので、往復の PR コメントからも追えない）。
+	ImportOptions options;
+	options.setTitleBlockStyle("遠山信夫アトリエ一級建築士事務所");
+
+	NullProgressReporter progress;
+	const Document document = HomeskzIfcImport::parse::buildDocument(
+		fixturePath("伏図次郎【2階】.ifc"), progress, options);
+	CHECK_EQ(document.titleBlockStyle, std::string("遠山信夫アトリエ一級建築士事務所"));
+	CHECK(HomeskzIfcImport::core::validateDocument(document));
+}
+
+TEST(no_title_block_style_leaves_the_document_empty)
+{
+	// 既定（選んでいない）なら空のまま＝描画側は 1 つも置かない。
+	NullProgressReporter progress;
+	const Document document = HomeskzIfcImport::parse::buildDocument(
+		fixturePath("伏図次郎【2階】.ifc"), progress, ImportOptions{});
+	CHECK(document.titleBlockStyle.empty());
+}
+
 TEST_MAIN();

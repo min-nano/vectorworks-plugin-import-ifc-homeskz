@@ -80,4 +80,11 @@ namespace HomeskzIfcImport
 	// 途中では降ろさない）。降ろせたら true。自動アップデートが「入れ替えたので次から
 	// 新しいほうを使う」と言い切るために使う。
 	bool ReleaseLoadedPayload();
+
+	// **いま本体のコードがスタックに載っているか**（入れ子の深さが 0 でないか）。
+	// 取り込みの進捗ダイアログは DoYield で Vectorworks へ制御を返すので、その間にも
+	// パレットの時計は届く。そこで本体へ入り直すと**描きかけの図面を読む**ことになるので、
+	// 時計で本体を呼ぶ側（MCP ブリッジのパレット。Extensions/ExtMcpPalette.cpp）はこれを
+	// 見て、載っている間は見送る。
+	bool PayloadInUse();
 } // namespace HomeskzIfcImport

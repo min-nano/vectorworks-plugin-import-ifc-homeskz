@@ -119,6 +119,71 @@ namespace HomeskzIfcImport::draw
 	// 描いたものは**ほぼ必ず**この組で仕上げるので、2 行の繰り返しを 1 か所にまとめる。
 	void SetClassWithAttributes(MCObjectHandle object, const std::string& className);
 
+	// 【PIO を作る前にクラスを「文書の既定」として立てる】構造材 PIO のように作り直しの重い
+	// PIO では、作った**後**の SetObjectClass と 6 つの Set*ByClass が**1 回ごとに PIO を
+	// 作り直させる**（構造材で 1 回 9〜12ms。取り込み全体の 54% を占めていた。
+	// docs/DEV-NOTES.md「描画の高速化」）。**文書の既定を作る前に立てておけば、生まれた PIO は
+	// 最初からそのクラスに属し 6 属性も by-class になる**ので、その 7 回が丸ごと要らなくなる
+	// （SDK リファレンス Findings「Attributes and Classes」）。
+	//
+	// **このオブジェクトが生きている間に作ったものだけ**が既定を継ぐので、スコープは
+	// 「作る 1 行」だけを囲む。壊すときに**立てた既定をすべて元へ戻す**——文書の既定は
+	// 利用者の図面の設定なので、取り込みの後に描くものへ持ち越さない（実機で、戻さない
+	// 版では取り込みの後もクラススタイルのままだった。PR #133）。
+	//
+	// **戻し方に癖がある。** ペン色・面色・線の太さ・線種・面パターンの既定の by-class には
+	// 「下ろす」口が無く、**既定の値を書くとその属性の旗が下りる**（同じ値でも下りる。
+	// 色は 1 本でペンと面の両方）。そこで作る前に**値と旗の両方**を退避し、戻すときは
+	// 値を書き戻してから、**元から立っていた旗だけ**を立て直す（元から by-class の図面を
+	// by-instance へ変えてしまわないため。SDK リファレンス Findings「Attributes and
+	// Classes」の「既定の by-class は既定の値を書き戻すと下りる」。#102）。
+	//
+	// マーカーの既定は立てない（どのみち継承されない。per-object で無料で与える）。
+	//
+	// クラス名が空なら何もしない（SetClassByName と同じく無クラス＝既定のまま）。
+	class ScopedCreationClass
+	{
+	public:
+		explicit ScopedCreationClass(const std::string& className);
+		~ScopedCreationClass();
+		ScopedCreationClass(const ScopedCreationClass&) = delete;
+		ScopedCreationClass& operator=(const ScopedCreationClass&) = delete;
+		ScopedCreationClass(ScopedCreationClass&&) = delete;
+		ScopedCreationClass& operator=(ScopedCreationClass&&) = delete;
+
+		// 立てたクラスの索引（クラス名が空なら 0）。
+		[[nodiscard]] InternalIndex classID() const
+		{
+			return fClassID;
+		}
+
+	private:
+		bool fActive = false;
+		InternalIndex fClassID = 0;
+		// 作る前の文書の既定（壊すときに書き戻す）。値と旗は別に持たれている。
+		InternalIndex fPreviousClass = 0;
+		Boolean fPreviousPenOpacity = false;
+		Boolean fPreviousFillOpacity = false;
+		ObjectColorType fPreviousColors{};
+		short fPreviousLineWeight = 0;
+		InternalIndex fPreviousPenPat = 0;
+		InternalIndex fPreviousFillPat = 0;
+		Boolean fPreviousPColorsByClass = false;
+		Boolean fPreviousFColorsByClass = false;
+		Boolean fPreviousLWByClass = false;
+		Boolean fPreviousPPatByClass = false;
+		Boolean fPreviousFPatByClass = false;
+	};
+
+	// ScopedCreationClass の中で作ったオブジェクトを仕上げる。**生まれたものが本当に既定を
+	// 継いだかを読み戻し**（クラスと 6 属性。読むのは作り直しを起こさない）、継いでいれば
+	// マーカーだけを by-class にする（マーカーは既定を継がないが、by-class 化は作り直しを
+	// 起こさないので無料）。継いでいなければ従来どおり SetClassWithAttributes で与え直す
+	// ——**読み戻しが絵を決める**ので、検算と違って本番でも走る（draw/Verify.h の基準）。
+	// 戻り値は既定を継いでいたか（false なら与え直した）。
+	bool FinishCreatedWithClass(MCObjectHandle object, const ScopedCreationClass& scope,
+								const std::string& className);
+
 	// PIO の定義を**設定ダイアログを出さずに**用意する。その PIO を 1 つでも置くフェーズの
 	// 先頭で 1 回呼ぶ。
 	//
@@ -262,6 +327,22 @@ namespace HomeskzIfcImport::draw
 	// 軸組図（draw/Section）が同じ値で判定する（値がズレると片方だけ「収まらなかった」と
 	// 診断される）。
 	inline constexpr double kFitTol = 1.0;
+
+	// 用紙 mm の寸法を診断の 1 行にする（"325.4×198.0"）。
+	std::string DescribePaperSize(const core::Vec2& size);
+
+	// **収まらなかった 1 枚目の実測**を 1 行にする（"3: 測った 402.1×205.6 / 枠 383.0×297.0
+	// / 横に 19.1 はみ出し"）。number は図番、drawn は測った外形、frame は割り当てた枠
+	// （どちらも用紙 mm）。伏図（draw/Sheet）と軸組図（draw/Section）が共有する唯一の実装で、
+	// できた文字列は AppendCount の detail へ添える。
+	//
+	// 【なぜ件数だけでは足りないか】「用紙に収まらなかった伏図 N 枚」は**原因を 1 つも
+	// 言っていない**——見積もり（core::planContentBounds）が用紙 2〜3mm ぶん足りないのか、
+	// 前の周の絵が残っていて図そのものが 2 倍になっているのかで、直す先がまるで違う。
+	// どちらかは**はみ出した量**が一目で分ける（柱・横架材が潰れた 1 本目の実測を添えるのと
+	// 同じ流儀。draw/StructuralMember の collapsedProbe）。M29。
+	std::string DescribeFitOverflow(const std::string& number, const core::Vec2& drawn,
+									const core::Vec2& frame);
 
 	// --- 高さ基準（ストーリバウンド）の定型 ----------------------------------------------
 	//
@@ -675,6 +756,11 @@ namespace HomeskzIfcImport::draw
 	//   sheet           … シートレイヤの大きさ（VWLayerObj::GetSheetWidht＝165/166）
 	//   margins         … 解釈後の 4 辺の余白（mm）。解釈できなければすべて 0
 	//   rawMargins      … ISDK::GetPageMargins が返した**生の値**（単位不明のまま）
+	//   marginsQueried  … ISDK::GetPageMargins が**実際に値を書いたか**。★この API は
+	//                     戻り値を持たないので、有り得ない値（負）を種に置いてから呼び、
+	//                     種のまま戻ったら「書かなかった」と見る（SheetPaperArea の実装）。
+	//                     **これが無いと「縁なし印刷の 0」と「読み出せずに 0」を見分け
+	//                     られない**（M29）
 	//   marginsRead     … 余白を意味のある値として解釈できたか（**四辺 0 も「できた」**
 	//                     ——縁なし印刷ができる機種では余白 0 の用紙設定が実際に選べる。
 	//                     判定は core::resolvePageMargins）
@@ -686,6 +772,7 @@ namespace HomeskzIfcImport::draw
 		core::Vec2 sheet;
 		core::PageMargins margins;
 		core::PageMargins rawMargins;
+		bool marginsQueried = false;
 		bool marginsRead = false;
 		bool marginsInInches = false;
 	};
@@ -723,6 +810,16 @@ namespace HomeskzIfcImport::draw
 	// 置いた後に測って直すのと同じ考え方。draw/Tag）。大きさは**見積もった縮尺で本当に
 	// 収まったか**を確かめて診断へ残すのにも使う（core/Layout.h の PlanLayout::plan）。
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size);
+
+	// ビューポートを描き直す（`VWViewportObj::Update`）。できたら true。
+	//
+	// ★**外形を測る前に、中身を変えた覚えがあるなら必ず通す。** `GetObjectBounds` が返すのは
+	// **最後に描いたときの外形**なので、描き直していないビューポートを測ると「いま図面に
+	// 何が在るか」ではなく「前に何が在ったか」を測ることになる——同じ命令・同じ割り付けなのに
+	// 「用紙に収まらなかった」の件数が周ごとに動いた原因がここだった（M29。伏図は
+	// **耐力壁レイヤの縮尺を動かした後**＝図の中身が変わった後に、縮尺が同じなら描き直さずに
+	// 測っていた）。更新は重いので**中身を変えたときだけ**呼ぶこと。
+	bool RefreshViewport(MCObjectHandle viewport);
 
 	// 生成済みのビューポートの**縮尺だけ**を差し替えて描き直す。書けたら true。
 	//

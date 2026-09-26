@@ -8,7 +8,7 @@
 #                        スプール（一時ディレクトリの min-nano_structure-mcp）
 #                                     ▲
 #                                     │ 拾う／応える
-#                               Vectorworks（メニュー「MCP ブリッジを開始…」の実行中だけ）
+#                               Vectorworks（起動している間ずっと。パレットの時計が拾う）
 #
 # 【このスクリプトが持たないもの】**道具の一覧を持たない。** 何ができるか（名前・説明・
 # 引数の形）はプラグイン側の表（src/draw/McpBridge.cpp の kTools）ただ 1 つが真実で、
@@ -22,6 +22,10 @@
 #
 #   claude mcp add vectorworks -- python3 <この scripts/mcp/vw-mcp-server.py のパス>
 #
+# 【Vectorworks を起こすのもこちら】道具 `vw_launch` が Vectorworks を起動し、橋が架かる
+# まで待つ（launch_vectorworks）。起動の口は OS の作法にだけ頼る——macOS は `open -a`、
+# Windows は既定のインストール先の実行ファイル。プラグインは起動していないので何も訊けない。
+#
 # 【スプールは探す】プラグイン側は自分の一時ディレクトリへ置くが、一時ディレクトリは
 # 環境変数で決まるので両側で食い違いうる。**実機ではこれが実際に起きた**——Claude の
 # デスクトップアプリはこのサーバを $TMPDIR の無い環境で起動するので gettempdir() は
@@ -34,11 +38,14 @@
 #   VW_MCP_SPOOL   スプールの場所を明示する（プラグイン側と同じ値にすること）
 #   VW_MCP_PLUGIN  プラグイン名（既定 min-nano_structure。開発版は min-nano_structureDev）
 #   VW_MCP_TIMEOUT 1 件あたりの待ち時間（秒。既定 30）
+#   VW_MCP_APP     vw_launch が起動するもの（macOS は .app のパスかアプリ名、Windows は
+#                  .exe のパス。既定は Vectorworks 2026 の標準のインストール先）
 #
 # 【受け渡しの作法はプラグイン側と対になっている】ファイル名の綴り・原子的な書き方
 # （.tmp へ書いてから rename）・生存の印の見方は src/core/Bridge.h に書いてある。
 # どちらかを変えるときは必ず両方を直す。
 
+import glob
 import json
 import os
 import secrets
@@ -65,6 +72,18 @@ SERVER_VERSION = "0.1.0"
 
 DEFAULT_PLUGIN = "min-nano_structure"
 DEFAULT_TIMEOUT = 30.0
+
+# vw_launch の既定。**プラグインは Vectorworks 2026 用**なので、その版だけを探す
+# （別の版を起こしても、このプラグインは読み込まれない）。
+DEFAULT_MAC_APP = "Vectorworks 2026"
+DEFAULT_WIN_EXE_GLOBS = (
+    r"%ProgramFiles%\Vectorworks 2026\Vectorworks2026.exe",
+    r"%ProgramFiles%\Vectorworks 2026*\Vectorworks*.exe",
+)
+# 橋が架かるまで待つ既定（秒）。起動そのものに数十秒かかり、パレットの最初の刻みは
+# さらに数秒遅らせてある（resources/common.vwr/html/mcp.html の FIRST_TICK_MS）。
+DEFAULT_LAUNCH_WAIT = 120.0
+LAUNCH_POLL_SECONDS = 1.0
 
 
 def log(message):
@@ -207,6 +226,12 @@ class Bridge:
         # いまの当て（生きた印が見つかるまでは先頭。案内の文言にも使う）。
         self.dir = candidates[0] if candidates else ""
         self.seq = 0
+        # 最後の tools/list で Claude に見せたプラグイン側の道具の名前。**これと食い違う一覧が
+        # 取れたら list_changed を送る**（announce_if_changed）。
+        self.listed = []
+        # 最後に取り直しを促した一覧（同じ一覧で何度も促さない——アプリが通知に応じない
+        # 場合に、道具を呼ぶたびに通知が積み上がるのを防ぐ）。
+        self.announced = []
 
     # --- 生存確認 ---------------------------------------------------------
     @staticmethod
@@ -248,8 +273,9 @@ class Bridge:
         if status is None:
             raise BridgeDown(
                 "Vectorworks 側でブリッジが動いていません。\n"
-                "Vectorworks のメニュー「MCP ブリッジを開始…」を実行してから、"
-                "もう一度お試しください。\n"
+                "Vectorworks が起動していなければ vw_launch で起動してください。"
+                "起動しているのに繋がらないときは、Vectorworks のメニュー"
+                "「MCP ブリッジを表示…」を 1 回実行してください。\n"
                 "（探した場所: %s）" % ", ".join(self.candidates)
             )
         if status.get("protocol") != PROTOCOL_VERSION:
@@ -330,6 +356,33 @@ class Bridge:
             log("道具の一覧を取りに行けませんでした: %s" % error)
         return self._load_cache()
 
+    def live_tools(self):
+        """いま動いているプラグインから一覧を取る。取れなければ None（キャッシュは使わない）。"""
+        try:
+            response = self.call("vw_tools", {}, timeout=5.0)
+        except (BridgeDown, TimeoutError, OSError):
+            return None
+        if not response.get("ok"):
+            return None
+        tools = response.get("result", {}).get("tools", [])
+        if not isinstance(tools, list):
+            return None
+        self._save_cache(tools)
+        return tools
+
+    def announce_if_changed(self, tools, notify):
+        """取れた一覧が最後に見せたものと違えば、Claude に取り直しを促す。
+
+        **Claude のアプリは tools/list を起動したときに 1 回しか呼ばないことが多い**（実機で、
+        Vectorworks より先にアプリを起動すると図面を読む道具が最後まで見えなかった。M30）。
+        vw_launch 以外の経路で橋が架かったとき（人が Vectorworks を起動した・パレットが
+        自動で開き直された）にも気付けるよう、橋に触れた道具のたびにここを通す。
+        """
+        names = [tool.get("name") for tool in tools if isinstance(tool, dict)]
+        if names and names != self.listed and names != self.announced:
+            self.announced = names
+            notify()
+
     def _cache_path(self):
         return os.path.join(self.dir, TOOLS_CACHE_FILE)
 
@@ -372,34 +425,242 @@ class Bridge:
 # --- このサーバ自身が答える道具 ----------------------------------------------
 # **ブリッジが動いていなくても答えられる**ことが要件（「なぜ繋がらないのか」を
 # Claude 自身が調べられるように）。
+LAUNCH_TOOL = {
+    "name": "vw_launch",
+    "description": (
+        "Vectorworks を起動し、ブリッジが受け付けるまで待つ。"
+        "既に受け付けていれば何もしない。"
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "wait": {
+                "type": "boolean",
+                "description": "ブリッジが受け付けるまで待つか（既定 true）",
+            },
+            "timeout": {
+                "type": "number",
+                "description": "待つ上限（秒。既定 %d）" % int(DEFAULT_LAUNCH_WAIT),
+            },
+        },
+        "additionalProperties": False,
+    },
+}
+
 STATUS_TOOL = {
     "name": "vw_bridge_status",
     "description": (
         "Vectorworks 側のブリッジが動いているかを確かめる。"
+        "動いていれば、図面を読む道具（プラグイン側）の一覧も返す——道具の一覧に"
+        "見えていない道具は vw_call で呼べる。"
         "動いていないときは、どうすれば動くかを返す。"
     ),
     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 
+# **汎用の呼び出し口。** プラグイン側の道具（vw_layers など）を名前で呼ぶ。
+#
+# 道具の一覧はプラグインから取る（一覧の真実はプラグイン側）が、Claude のアプリは多くの
+# 場合 tools/list を起動時に 1 回しか呼ばず、list_changed の通知にも応じないことがある。
+# すると Vectorworks より先にアプリを起動しただけで、図面を読む道具が**最後まで見えない**
+# （実機で起きた。M30）。この口は常に一覧に並ぶので、一覧が古くても道具に届く。
+# 何を呼べるかは vw_bridge_status が返す（ここに道具の名前を書き写さない）。
+CALL_TOOL = {
+    "name": "vw_call",
+    "description": (
+        "Vectorworks のプラグイン側の道具を名前で呼ぶ（道具の一覧に見えていないときに使う）。"
+        "呼べる道具の名前と引数は vw_bridge_status の tools に並ぶ。"
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "tool": {"type": "string", "description": "道具の名前（例: vw_layers）"},
+            "arguments": {"type": "object", "description": "その道具への引数（省略可）"},
+        },
+        "required": ["tool"],
+        "additionalProperties": False,
+    },
+}
 
-def bridge_status_result(bridge):
+# このサーバ自身が答える道具（ブリッジが動いていなくても一覧に並ぶ）。
+LOCAL_TOOLS = [STATUS_TOOL, LAUNCH_TOOL, CALL_TOOL]
+
+
+def bridge_status_result(bridge, notify=None):
     status = bridge.status()
     if status is None:
         return {
             "running": False,
             "searched": bridge.candidates,
             "hint": (
-                "Vectorworks のメニュー「MCP ブリッジを開始…」を実行してください。"
-                "実行中は Vectorworks が進捗ダイアログの中で待ち、"
-                "［キャンセル］か vw_stop_bridge で止まります。"
-                "実行しているのに見つからないときは、開発版のプラグイン名"
+                "Vectorworks が起動していなければ vw_launch で起動してください。"
+                "起動していれば、Vectorworks のメニュー「MCP ブリッジを表示…」を 1 回"
+                "実行してください（パレットが出て、以後は Vectorworks が終わるまで"
+                "受け付けます）。"
+                "それでも見つからないときは、開発版のプラグイン名"
                 "（環境変数 VW_MCP_PLUGIN に min-nano_structureDev）か、"
                 "スプールの場所（環境変数 VW_MCP_SPOOL）を確かめてください。"
             ),
         }
     result = {"running": True, "spool": bridge.dir}
     result.update(status)
+    tools = bridge.live_tools()
+    if tools is not None:
+        # 名前・説明・引数の形をそのまま見せる（vw_call に渡す手掛かり）。
+        result["tools"] = tools
+        if notify is not None:
+            bridge.announce_if_changed(tools, notify)
     return result
+
+
+# --- Vectorworks を起こす（vw_launch）-----------------------------------------
+# **ブリッジが動いていなくても答えられる**道具のもう 1 つ。橋の向こう（プラグイン）は
+# Vectorworks が起動するまで居ないので、起こすのはこちらの仕事になる。
+
+
+def launch_command():
+    """Vectorworks を起動するコマンド（argv）と、人に見せる名前を返す。見つからなければ
+    (None, 理由)。
+
+    **起動の口は OS の作法にだけ頼る。** macOS は `open -a`（アプリ名でも .app のパスでも
+    LaunchServices が引く。既に動いていれば手前に出すだけで、2 つ目は起きない）。Windows は
+    既定のインストール先の実行ファイルを探す。VW_MCP_APP で名指しできる——そのときは
+    macOS でも .app で終わらなければ実行ファイルとしてそのまま起こす（テストの代役もこの経路）。
+    """
+    override = os.environ.get("VW_MCP_APP", "")
+    if sys.platform == "darwin":
+        app = override or DEFAULT_MAC_APP
+        if override and not override.rstrip("/").endswith(".app"):
+            if not os.path.isfile(override):
+                return None, "VW_MCP_APP が指すファイルがありません: %s" % override
+            return [override], override
+        return ["/usr/bin/open", "-a", app], app
+    if override:
+        if not os.path.isfile(override):
+            return None, "VW_MCP_APP が指すファイルがありません: %s" % override
+        return [override], override
+    if os.name == "nt":
+        for pattern in DEFAULT_WIN_EXE_GLOBS:
+            found = sorted(glob.glob(os.path.expandvars(pattern)))
+            if found:
+                return [found[0]], found[0]
+        return None, (
+            "Vectorworks 2026 が既定の場所（%s）に見つかりません。"
+            "環境変数 VW_MCP_APP に Vectorworks2026.exe のパスを書いてください。"
+            % os.path.expandvars(r"%ProgramFiles%\Vectorworks 2026")
+        )
+    return None, "この OS では Vectorworks を起動できません（VW_MCP_APP で名指ししてください）。"
+
+
+def windows_process_running(exe_path):
+    """Windows で同じ実行ファイルが既に動いているか（分からなければ False）。
+
+    **Windows では 2 つ目を起こさない。** macOS の `open -a` と違い、実行ファイルを直に
+    起こすと 2 つ目の Vectorworks が立ち上がりうる。橋が見えないのに動いているなら、
+    足りないのはパレット（メニュー「MCP ブリッジを表示…」）のほうである。
+    """
+    if os.name != "nt":
+        return False
+    name = os.path.basename(exe_path)
+    try:
+        done = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq %s" % name, "/NH", "/FO", "CSV"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return ('"%s"' % name.lower()) in done.stdout.decode("utf-8", "replace").lower()
+
+
+def spawn_detached(argv):
+    """起こして手を放す（このサーバが終わっても Vectorworks は残る）。"""
+    kwargs = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED | NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    subprocess.Popen(argv, **kwargs)
+
+
+def launch_timeout(args):
+    try:
+        value = float(args.get("timeout", DEFAULT_LAUNCH_WAIT))
+    except (TypeError, ValueError):
+        value = DEFAULT_LAUNCH_WAIT
+    return max(0.0, min(value, 600.0))
+
+
+def launch_vectorworks(bridge, args, notify):
+    """vw_launch の中身。結果（dict）と、エラーかどうかを返す。
+
+    notify は橋が架かったときに呼ぶ（MCP の tools/list_changed を送る——起動前の一覧は
+    自前の道具だけなので、Claude に取り直させる）。
+    """
+    status = bridge.status()
+    if status is not None:
+        return {"launched": False, "running": True, "spool": bridge.dir,
+                "note": "既にブリッジが受け付けています。"}, False
+
+    argv, label = launch_command()
+    if argv is None:
+        return {"launched": False, "running": False, "error": label}, True
+
+    if windows_process_running(argv[0]):
+        return {
+            "launched": False,
+            "running": False,
+            "error": (
+                "Vectorworks は起動していますが、ブリッジが受け付けていません。"
+                "Vectorworks のメニュー「MCP ブリッジを表示…」を 1 回実行してください。"
+            ),
+            "searched": bridge.candidates,
+        }, True
+
+    try:
+        spawn_detached(argv)
+    except OSError as error:
+        return {"launched": False, "running": False,
+                "error": "起動できませんでした（%s）: %s" % (label, error)}, True
+    log("Vectorworks を起動しました: %s" % " ".join(argv))
+
+    wait = args.get("wait", True)
+    if wait is False:
+        return {"launched": True, "running": False, "app": label,
+                "note": "起動だけしました。受け付けたかは vw_bridge_status で確かめてください。"}, False
+
+    deadline = time.time() + launch_timeout(args)
+    while True:
+        status = bridge.status()
+        if status is not None:
+            notify()
+            result = {"launched": True, "running": True, "app": label, "spool": bridge.dir}
+            result.update(status)
+            return result, False
+        if time.time() >= deadline:
+            break
+        time.sleep(LAUNCH_POLL_SECONDS)
+
+    return {
+        "launched": True,
+        "running": False,
+        "app": label,
+        "searched": bridge.candidates,
+        "hint": (
+            "Vectorworks は起動しましたが、待っている間にブリッジが受け付けませんでした。"
+            "起動に時間がかかっているなら、少し待って vw_bridge_status で確かめてください。"
+            "Vectorworks が開いているのに受け付けないときは、メニュー"
+            "「MCP ブリッジを表示…」を 1 回実行してください（パレットが開いていないと"
+            "受け付けません）。"
+        ),
+    }, True
 
 
 # --- MCP（JSON-RPC over stdio）------------------------------------------------
@@ -418,14 +679,38 @@ def text_content(text, is_error=False):
     return {"content": [{"type": "text", "text": text}], "isError": is_error}
 
 
+def send(message):
+    """stdout へ JSON-RPC を 1 行（応答も通知も同じ口を通す）。"""
+    sys.stdout.write(json.dumps(message, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def notify_tools_changed():
+    """道具の一覧が変わったと Claude へ知らせる（橋が架かって本物の一覧が取れるようになった）。"""
+    send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+
+
 def handle_tools_call(bridge, params):
     name = params.get("name", "")
     args = params.get("arguments") or {}
 
     if name == STATUS_TOOL["name"]:
         return text_content(
-            json.dumps(bridge_status_result(bridge), ensure_ascii=False, indent=2)
+            json.dumps(
+                bridge_status_result(bridge, notify_tools_changed), ensure_ascii=False, indent=2
+            )
         )
+    if name == LAUNCH_TOOL["name"]:
+        result, is_error = launch_vectorworks(bridge, args, notify_tools_changed)
+        return text_content(json.dumps(result, ensure_ascii=False, indent=2), is_error=is_error)
+    if name == CALL_TOOL["name"]:
+        name = args.get("tool", "")
+        args = args.get("arguments") or {}
+        if not isinstance(name, str) or not name:
+            return text_content("vw_call には tool（道具の名前）が要ります。", is_error=True)
+        if any(name == tool["name"] for tool in LOCAL_TOOLS):
+            # 自前の道具はそのまま自分で答える（vw_call の入れ子も防ぐ）。
+            return handle_tools_call(bridge, {"name": name, "arguments": args})
 
     try:
         response = bridge.call(name, args)
@@ -439,6 +724,12 @@ def handle_tools_call(bridge, params):
             "Vectorworks 側でエラーになりました: %s" % response.get("error", "(理由不明)"),
             is_error=True,
         )
+    if not bridge.listed:
+        # 橋に届いたのに、Claude にはプラグインの道具を 1 つも見せていない（先に起動した
+        # アプリの一覧が古い）。取り直しを促す。
+        tools = bridge.live_tools()
+        if tools:
+            bridge.announce_if_changed(tools, notify_tools_changed)
     return text_content(
         json.dumps(response.get("result", {}), ensure_ascii=False, indent=2)
     )
@@ -455,7 +746,9 @@ def handle(bridge, message):
             request_id,
             {
                 "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {"tools": {"listChanged": False}},
+                # **一覧は変わる。** Vectorworks が起動していない間は自前の道具しか
+                # 返せないので、vw_launch で橋が架かったら取り直してもらう。
+                "capabilities": {"tools": {"listChanged": True}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
             },
         )
@@ -464,7 +757,9 @@ def handle(bridge, message):
     if method == "ping":
         return rpc_result(request_id, {})
     if method == "tools/list":
-        return rpc_result(request_id, {"tools": [STATUS_TOOL] + bridge.tools()})
+        tools = bridge.tools()
+        bridge.listed = [tool.get("name") for tool in tools if isinstance(tool, dict)]
+        return rpc_result(request_id, {"tools": LOCAL_TOOLS + tools})
     if method == "tools/call":
         return rpc_result(request_id, handle_tools_call(bridge, params))
     if request_id is None:
@@ -476,7 +771,7 @@ def main():
     bridge = Bridge(spool_candidates())
     log("探す場所: %s" % ", ".join(bridge.candidates))
     if bridge.status() is None:
-        log("いまブリッジは動いていません（Vectorworks でメニューを実行してください）。")
+        log("いまブリッジは動いていません（vw_launch で Vectorworks を起動できます）。")
 
     for line in sys.stdin:
         line = line.strip()
@@ -492,8 +787,7 @@ def main():
             log("処理中の例外: %r" % error)
             reply = rpc_error(message.get("id"), -32603, "内部エラー: %s" % error)
         if reply is not None:
-            sys.stdout.write(json.dumps(reply, ensure_ascii=False) + "\n")
-            sys.stdout.flush()
+            send(reply)
 
 
 if __name__ == "__main__":

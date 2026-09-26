@@ -84,4 +84,9 @@ namespace HomeskzIfcImport
 		ThePayload().unload();
 		return true;
 	}
+
+	bool PayloadInUse()
+	{
+		return Depth() != 0;
+	}
 } // namespace HomeskzIfcImport

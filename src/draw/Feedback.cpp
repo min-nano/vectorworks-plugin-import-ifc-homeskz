@@ -391,6 +391,22 @@ namespace HomeskzIfcImport::draw
 			return ParsePullRequest(ValueOf(out, "pr"));
 		}
 
+		// 記憶の PR の状態（open / closed / merged）。**確かめられなければ空**——呼び出し側
+		// （core::feedbackPullRequestEnded）はそれを「終わっていない」と読む。聞き方は
+		// パレットの駆動と同じ loop-control（src/FeedbackLoop.cpp）で、合図の行は読まない。
+		std::string PullRequestState(const core::FeedbackSession& session)
+		{
+			std::string out;
+			if (!RunScript(kFeedbackScript,
+						   {"loop-control", session.repo, std::to_string(session.pullRequest),
+							session.lastPostedAt},
+						   out))
+				return {};
+			if (!ValueOf(out, "error").empty())
+				return {};
+			return ValueOf(out, "state");
+		}
+
 		// 本文を投稿する。投稿できたら true で、url にコメントの在り処、createdAt に
 		// GitHub が付けた時刻（ISO 8601）が入る（古いスクリプトは後者を出さないので空）。
 		bool PostComment(const std::string& repo, int pullRequest, const std::string& body,
@@ -1006,6 +1022,25 @@ namespace HomeskzIfcImport::draw
 
 		const parse::BuildInfo build = currentBuildInfo();
 		core::FeedbackSession session = loadFeedbackSession(build.branch);
+
+		// **記憶の PR が閉じていたら、新しい往復の 1 周目から始める**
+		// （core/FeedbackSession.h の restartedFeedbackSession）。記憶はブランチでしか
+		// 見分けていないので、マージされた PR と同じブランチ名で新しい PR を立てると、
+		// 閉じた前の PR へ続きの周を投稿し、パレットも「マージされました」で止まって
+		// **新しい PR のビルドを取りに行かなくなる**（#137 → #138 で実際に起きた）。
+		// 1 周目のダイアログはブランチから open な PR を引き直すので、宛先は新しい PR に
+		// なる。確かめるのは手で押した周だけ——パレットの周は駆動が直前に PR を確かめて
+		// いる（閉じていればそこで止まり、ここへは来ない）。
+		if (allowDialogs && session.pullRequest > 0 &&
+			core::feedbackPullRequestEnded(PullRequestState(session)))
+		{
+			core::trace::note("実機テスト: 記憶の PR #" + std::to_string(session.pullRequest) +
+							  " は閉じているので、新しい往復の 1 周目として始めます");
+			session = core::restartedFeedbackSession(session);
+			// **すぐ書き戻す。** 1 周目のダイアログで取りやめても、パレットが閉じた PR を
+			// 指し続けないように。
+			(void)core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session);
+		}
 
 		// **手動で押したときは、いま開いている図面を基準として採り直す。** 人が別の図面
 		// （空のテンプレート等）を開いてからメニューを押したのは「この図面で試したい」

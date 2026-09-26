@@ -539,6 +539,31 @@ namespace HomeskzIfcImport::core
 				takePoint(symbol.layer, symbol.position);
 		}
 
+		// 断面寸法データタグ（M13）は**注釈**なのでデザインレイヤには載らないが、ビューポート
+		// の中には映るので図の広がりに効く。どの伏図に出るかは**関連付け先の横架材が載る
+		// レイヤ**が決める（その材が映る図に出る）ので、レイヤの絞り込みもその材のレイヤで
+		// 行う——タグ自身は 'layer' を持たない（core/Document.h の TagCommand）。
+		//
+		// ★**軸組図（sections）のタグは見ない。** あちらの注釈空間は平面座標ではなく
+		// **(切断線に沿った距離, 高さ Z)** なので、平面の広がりへ混ぜると意味を成さない
+		// （TagCommand の「position は注釈空間の座標」）。
+		//
+		// ★**拾えるのはタグが接する点（position）まで**である。タグ自身の差し渡しは
+		// タグレイアウトの中身が決める**用紙 mm** で、モデル座標へ落とすと縮尺に比例する
+		// ——その見込みは kPlanContentMargin が持つ（そちらの doc コメント）。
+		for (const SheetCommand& sheet : document.sheets)
+		{
+			for (const TagCommand& tag : sheet.viewport.tags)
+			{
+				// 関連付け先が引ければその材のレイヤで絞る。添字が範囲外の命令
+				// （validateDocument を通っていない Document）は文書全体の広がりにだけ入れる。
+				if (tag.memberIndex < document.members.size())
+					takePoint(document.members[tag.memberIndex].layer, tag.position);
+				else if (layers.empty())
+					take(tag.position);
+			}
+		}
+
 		if (!any)
 			return false;
 		min = Vec2{minX - kPlanContentMargin, minY - kPlanContentMargin};

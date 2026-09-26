@@ -199,6 +199,13 @@ namespace HomeskzIfcImport::parse
 		attachTagCommands(document);
 		progress.step();
 
+		// M28 図面枠（タイトルブロック）: 設定で選ばれたスタイル名をそのまま命令セットへ
+		// 写す（空なら置かない）。**ここには判断が要らない**——図面枠は IFC の中身とは
+		// 無関係に「作ったシートレイヤすべてへ 1 つずつ」置くもので、解析が数えるものも
+		// 選ぶものも無い。設定を描画側へ運ぶ経路が Document だけ（CLAUDE.md「依存の向き」）
+		// なので、ここを通す。
+		document.titleBlockStyle = options.titleBlockStyle();
+
 		return document;
 	}
 } // namespace HomeskzIfcImport::parse

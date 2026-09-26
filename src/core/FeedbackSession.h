@@ -153,6 +153,31 @@ namespace HomeskzIfcImport::core
 	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session,
 										const std::string& runningCommit, bool allowDialogs);
 
+	// -----------------------------------------------------------------------
+	// **往復の相手は PR であって、ブランチではない。** 記憶はブランチで見分けている
+	// （別ブランチの記憶は使わない）が、**同じブランチ名が別の PR で使い回される**ことが
+	// ある——マージされた PR のブランチを main から作り直し、同じ名前のまま新しい PR を
+	// 立てる運用で、実際に起きた（#137 → #138）。そのとき記憶は閉じた前の PR を指した
+	// ままなので、
+	//
+	//   * パレットは PR の状態を先に見て「PR がマージされました」で止まり、**新しい PR の
+	//     ビルドを一度も取りに行かない**。
+	//   * メニューから押すと続きの周として走り、**閉じた前の PR へ投稿**して、また止まる。
+	//
+	// という形で、新しい PR の往復が始められなくなる。記憶の PR が閉じていたら（state が
+	// merged / closed）、それは**終わった往復**なので、1 周目からやり直す。
+
+	// loop-control の state= が「その PR はもう続ける相手ではない」を表すか。**確かめられ
+	// なかった（空）ときは false**——オフラインで記憶を捨てると、戻ったときに往復が
+	// 最初からになる（止まる入口と同じく、不確かなときは記憶を消す側へ倒さない）。
+	bool feedbackPullRequestEnded(const std::string& state);
+
+	// 終わった往復の記憶から、新しい往復の 1 周目に持ち越すものだけを残した記憶を作る。
+	// 持ち越すのは**人の好み**（投稿先のリポジトリと伏せ字の選択）だけで、PR 番号・周回・
+	// 基準・作業ファイル・前の周の内訳は捨てる（前の PR の周と引き比べても意味が無い）。
+	// 返す記憶は send=false なので、feedbackRoundKind は FirstRound を返す。
+	FeedbackSession restartedFeedbackSession(FeedbackSession ended);
+
 	// 記憶を key=value テキストへ（末尾は改行）。**行の順は固定**——差分を取ったときに
 	// 中身の変化だけが見えるようにするため。
 	std::string formatFeedbackSession(const FeedbackSession& session);

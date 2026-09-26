@@ -14,6 +14,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace HomeskzIfcImport::core
 {
@@ -114,6 +115,10 @@ namespace HomeskzIfcImport::core
 			out << roleKey(i, "symbol") << "=" << sanitize(session.options.symbol(role)) << "\n";
 			out << roleKey(i, "on") << "=" << boolText(session.options.isEnabled(role)) << "\n";
 		}
+		// M28 図面枠のスタイル（空＝置かない）。**役割の表の外にある設定も漏らさず書く**——
+		// 2 周目以降は設定ダイアログを出さずにここから復元するので、書き落とすと 1 周目と
+		// 違う条件（図面枠なし）で黙って走る（PR #133 の round 2 で実際に起きた）。
+		out << "titleblock=" << sanitize(session.options.titleBlockStyle()) << "\n";
 		return out.str();
 	}
 
@@ -177,6 +182,11 @@ namespace HomeskzIfcImport::core
 			{
 				if (!value.empty())
 					session.lastCreatedSheets.push_back(value);
+			}
+			else if (key == "titleblock")
+			{
+				// 古い記憶（M28 より前）には行が無い——既定の空（置かない）のまま読む。
+				session.options.setTitleBlockStyle(value);
 			}
 			else if (key.starts_with("role."))
 			{
@@ -281,6 +291,22 @@ namespace HomeskzIfcImport::core
 		if (!allowDialogs)
 			return FeedbackRoundKind::Refuse;
 		return remembered ? FeedbackRoundKind::RearmOnly : FeedbackRoundKind::FirstRound;
+	}
+
+	bool feedbackPullRequestEnded(const std::string& state)
+	{
+		return state == "merged" || state == "closed";
+	}
+
+	FeedbackSession restartedFeedbackSession(FeedbackSession ended)
+	{
+		// 値で受けて持ち越すものだけを**移す**（移動は例外を投げないので、組み立ての途中で
+		// 投げて片付ける経路が生まれない）。
+		FeedbackSession fresh;
+		fresh.repo = std::move(ended.repo);
+		fresh.anonymize = ended.anonymize;
+		fresh.branch = std::move(ended.branch);
+		return fresh;
 	}
 
 } // namespace HomeskzIfcImport::core

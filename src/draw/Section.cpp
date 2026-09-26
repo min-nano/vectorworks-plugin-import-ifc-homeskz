@@ -77,6 +77,7 @@
 #include "draw/Section.h"
 #include "draw/DrawUtil.h"
 #include "draw/Tag.h"
+#include "draw/TitleBlock.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -181,7 +182,8 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
-							 std::string* note, const ObjectHandles* memberHandles)
+							 std::string* note, const ObjectHandles* memberHandles,
+							 std::string* outInfo)
 	{
 		const std::vector<core::SectionCommand>& commands = document.sections;
 		if (commands.empty())
@@ -248,8 +250,12 @@ namespace HomeskzIfcImport::draw
 		std::size_t classesApplied = 0;
 		// 用紙の上で位置を合わせられなかった枚数（外形を測れなかった＝置いた場所のまま）。
 		std::size_t missingPlacement = 0;
-		// 見積もった縮尺ではマスに収まらなかった枚数（隣の図と重なる）。
+		// 見積もった縮尺ではマスに収まらなかった枚数（隣の図と重なる）と、その**1 枚目の
+		// 実測**（図番・測った外形・割り当てたマス・はみ出し量）。件数だけでは「見積もりが
+		// 少し足りない」と「図そのものが壊れている」を分けられない（M29。伏図と同じ流儀で、
+		// 組み立ては draw/DrawUtil の DescribeFitOverflow が持つ唯一の実装）。
 		std::size_t oversized = 0;
+		std::string oversizedProbe;
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
 		const ObjectHandles emptyHandles;
 		const ObjectHandleTable& members =
@@ -260,6 +266,11 @@ namespace HomeskzIfcImport::draw
 		if (std::ranges::any_of(commands, [](const core::SectionCommand& section)
 								{ return !section.viewport.tags.empty(); }))
 			prepareDataTagPlugin();
+
+		// M28 図面枠。伏図と同じ設定・同じ実装（draw/TitleBlock）。**軸組図は 1 枚の用紙へ
+		// 複数の命令が載る**ので、同じシートレイヤへ 2 つ目を置かないのは draw/TitleBlock の
+		// 側が見る。
+		TitleBlockCounts titleBlocks = prepareTitleBlocks(document);
 
 		for (std::size_t index = 0; index < commands.size(); ++index)
 		{
@@ -278,6 +289,10 @@ namespace HomeskzIfcImport::draw
 				++missingSheetLayers;
 				continue;
 			}
+
+			// M28 図面枠は**ビューポートより先**に置く（後から作ったものが手前に来る。
+			// draw/TitleBlock.h）。2 枚目以降の命令が同じ用紙に載ったときは何もしない。
+			drawSheetTitleBlock(sheetLayer, titleBlocks);
 
 			const MCObjectHandle viewport =
 				CreateSectionViewport(command, sheetLayer, startHeight, endHeight);
@@ -309,25 +324,41 @@ namespace HomeskzIfcImport::draw
 			core::Vec2 drawnSize;
 			const bool measured = MeasureViewport(viewport, drawnCenter, drawnSize);
 			core::Vec2 delta;
-			if (arrange)
+			if (arrange && !measured)
+				++missingPlacement;
+			else if (arrange)
+				delta = core::sectionSlotCenter(layout, slot) - drawnCenter;
+			drawViewportTags(viewport, command.viewport, members, tags);
+
+			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
+			//
+			// 用紙に載るのは「ビューポート＋その注釈」なので、タグを置く前の外形で判定すると
+			// 実際にマスを占める大きさとは別のものを測っていることになる（M29。伏図と同じ）。
+			// 位置合わせ（delta）だけは上記 ★ のとおりタグを置く前の中心から決める。
+			if (arrange && measured)
 			{
-				if (!measured)
-					++missingPlacement;
-				else
+				core::Vec2 finalCenter;
+				core::Vec2 finalSize;
+				// 測り直せなければタグを置く前の実測で見る（判定を捨てるよりはよい）。
+				const core::Vec2 footprint =
+					MeasureViewport(viewport, finalCenter, finalSize) ? finalSize : drawnSize;
+				// マス（layout.cell）に収まったかを測って確かめる。はみ出していれば隣の
+				// 図と重なるので、黙って重ねずに診断へ残す（伏図と同じ考え方。M18）。
+				if (footprint.x > layout.cell.x + kFitTol || footprint.y > layout.cell.y + kFitTol)
 				{
-					delta = core::sectionSlotCenter(layout, slot) - drawnCenter;
-					// マス（layout.cell）に収まったかを測って確かめる。はみ出していれば隣の
-					// 図と重なるので、黙って重ねずに診断へ残す（伏図と同じ考え方。M18）。
-					if (drawnSize.x > layout.cell.x + kFitTol ||
-						drawnSize.y > layout.cell.y + kFitTol)
-						++oversized;
+					++oversized;
+					if (oversizedProbe.empty())
+						oversizedProbe = DescribeFitOverflow(command.viewport.drawingNumber,
+															 footprint, layout.cell);
 				}
 			}
-			drawViewportTags(viewport, command.viewport, members, tags);
 			if (arrange && measured)
 				MoveViewportBy(viewport, delta);
 			++drawn;
 		}
+
+		// M28 図面枠へスタイルを流し込み、用紙の中心へ寄せる（伏図と同じ順序）。
+		finishTitleBlocks(titleBlocks);
 
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
@@ -351,14 +382,24 @@ namespace HomeskzIfcImport::draw
 			if (missingPlacement > 0)
 				text += "用紙の上で位置を合わせられなかった軸組図 " +
 						std::to_string(missingPlacement) + " 枚（外形を測れませんでした）。";
+			// **1 枚目の実測を添える**（用紙 mm）。はみ出しが数 mm なら見積もりの不足、
+			// 桁違いなら図そのものの異常——件数だけでは分かれない（M29）。
+			std::string oversizedDetail = "縮尺の見積もりより図が大きくなりました";
+			if (!oversizedProbe.empty())
+				oversizedDetail += "。1 枚目: " + oversizedProbe;
 			AppendCount(text, "割り当てたマスに収まらなかった軸組図", oversized, "枚",
-						"縮尺の見積もりより図が大きくなりました");
+						oversizedDetail.c_str());
 			AppendLine(note, text);
 		}
 
 		// タグの診断は軸組図の診断とは別行にする（原因が別物なので混ぜない。連結は
 		// draw/DrawUtil の AppendLine）。
 		AppendLine(note, tagDiagnostics("軸組図", tags));
+		// M28 図面枠。**伏図とは別に 1 行出す**——枚数が違う（伏図は命令の数、軸組図は
+		// 用紙の数）ので、伏図の行だけでは「全シートレイヤへ置けたか」を確かめられない
+		// （draw/TitleBlock.h の titleBlockInfo）。異常は note、平常の内訳は outInfo。
+		AppendLine(note, titleBlockDiagnostics(titleBlocks));
+		AppendLine(outInfo, titleBlockInfo("軸組図", titleBlocks));
 		return drawn;
 	}
 } // namespace HomeskzIfcImport::draw

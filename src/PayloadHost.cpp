@@ -417,8 +417,8 @@ namespace HomeskzIfcImport
 		auto infoFn = reinterpret_cast<VwPayloadInfoFn>(fModule.symbol(VW_PAYLOAD_SYM_INFO));
 		fImportFn = reinterpret_cast<VwPayloadRunImportFn>(fModule.symbol(VW_PAYLOAD_SYM_IMPORT));
 		fTestFn = reinterpret_cast<VwPayloadRunTestFn>(fModule.symbol(VW_PAYLOAD_SYM_TEST));
-		fBridgeFn =
-			reinterpret_cast<VwPayloadRunMcpBridgeFn>(fModule.symbol(VW_PAYLOAD_SYM_BRIDGE));
+		fMcpServeFn =
+			reinterpret_cast<VwPayloadMcpServeFn>(fModule.symbol(VW_PAYLOAD_SYM_MCP_SERVE));
 		fRecalcFn = reinterpret_cast<VwPayloadRecalculateFn>(fModule.symbol(VW_PAYLOAD_SYM_RECALC));
 		fShutdownFn =
 			reinterpret_cast<VwPayloadShutdownFn>(fModule.symbol(VW_PAYLOAD_SYM_SHUTDOWN));
@@ -426,7 +426,7 @@ namespace HomeskzIfcImport
 			reinterpret_cast<VwPayloadLoopStatusFn>(fModule.symbol(VW_PAYLOAD_SYM_LOOP_STATUS));
 		fLoopEndFn = reinterpret_cast<VwPayloadLoopEndFn>(fModule.symbol(VW_PAYLOAD_SYM_LOOP_END));
 		if (abiFn == nullptr || initFn == nullptr || infoFn == nullptr || fImportFn == nullptr ||
-			fTestFn == nullptr || fBridgeFn == nullptr || fRecalcFn == nullptr ||
+			fTestFn == nullptr || fMcpServeFn == nullptr || fRecalcFn == nullptr ||
 			fShutdownFn == nullptr || fLoopStatusFn == nullptr || fLoopEndFn == nullptr)
 		{
 			error = "本体の形が違います（必要な関数が見つかりません）。\n"
@@ -521,20 +521,24 @@ namespace HomeskzIfcImport
 		return true;
 	}
 
-	bool Payload::runMcpBridge(std::string& error)
+	bool Payload::mcpServe(std::string& out, std::string& error)
 	{
 		error.clear();
-		if (!fLoaded || fBridgeFn == nullptr)
+		out.clear();
+		if (!fLoaded || fMcpServeFn == nullptr)
 		{
 			error = "本体が読み込まれていません。";
 			return false;
 		}
-		const int status = fBridgeFn();
+		const char* text = nullptr;
+		const int status = fMcpServeFn(&text);
 		if (status != kVwPayloadOk)
 		{
-			error = "MCP ブリッジを開始できませんでした（コード " + std::to_string(status) + "）。";
+			error = "MCP ブリッジを動かせませんでした（コード " + std::to_string(status) + "）。";
 			return false;
 		}
+		if (text != nullptr)
+			out = text; // ← その場で写す（PayloadAbi.h「返る文字列の寿命」）
 		return true;
 	}
 
@@ -603,7 +607,7 @@ namespace HomeskzIfcImport
 		fLoaded = false;
 		fImportFn = nullptr;
 		fTestFn = nullptr;
-		fBridgeFn = nullptr;
+		fMcpServeFn = nullptr;
 		fRecalcFn = nullptr;
 		fShutdownFn = nullptr;
 		fLoopStatusFn = nullptr;

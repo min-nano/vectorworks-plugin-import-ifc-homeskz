@@ -51,6 +51,7 @@ namespace
 	// **殻へ返す文字列の置き場所。** 返した const char* は「次に本体を呼ぶまで」生きている
 	// 約束（src/PayloadAbi.h）なので、静的に 1 つ持って毎回書き換える。
 	std::string gLoopStatusText;
+	std::string gMcpViewText;
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -190,15 +191,18 @@ VW_PAYLOAD_EXPORT int vw_payload_run_test(int allowDialogs, int* outActive)
 	}
 }
 
-VW_PAYLOAD_EXPORT int vw_payload_run_mcp_bridge()
+VW_PAYLOAD_EXPORT int vw_payload_mcp_serve(const char** out)
 {
 	try
 	{
+		if (out == nullptr)
+			return kVwPayloadErrAbi;
+		*out = nullptr;
 		if (!gPayloadReady || gSDK == nil)
 			return kVwPayloadErrNotInit;
-		// ブリッジは**止められるまで戻らない**（draw/McpBridge.h）。中で例外を受け、
-		// 利用者にはダイアログで見せる。ここは境界の最後の砦。
-		draw::runMcpBridge();
+		// 1 回ぶん捌いて**すぐ戻る**（draw/McpBridge.h）。中で例外を受けて見え方に載せる。
+		gMcpViewText = draw::serveMcpBridge();
+		*out = gMcpViewText.c_str();
 		return kVwPayloadOk;
 	}
 	catch (...)

@@ -296,7 +296,73 @@ namespace HomeskzIfcImport::parse
 		return "model-" + hex6(fnv1a(stem)) + ext;
 	}
 
-	std::string redactText(const std::string& text, const std::string& ifcPath)
+	std::string anonymizedStyleName(const std::string& name)
+	{
+		return "style-" + hex6(fnv1a(name));
+	}
+
+	namespace
+	{
+		// UTF-8 の文字数（先頭バイトだけを数える）。「短い名前か」を**バイトではなく字数で**
+		// 決めるため——バイトで数えると漢字 2 字（6 バイト）が長い名前に数えられてしまう。
+		std::size_t utf8Length(const std::string& text)
+		{
+			std::size_t count = 0;
+			for (const char c : text)
+				if ((static_cast<unsigned char>(c) & 0xC0U) != 0x80U)
+					++count;
+			return count;
+		}
+
+		// これより短いスタイル名は、**名前が出ると分かっている形**でしか置き換えない
+		// （redactStyleName）。「A3」「共通」のような短い名前を本文まるごとで置き換えると、
+		// 診断や記録の**別の意味の同じ綴り**まで仮名に化けて、読む側が読み違える
+		// （PR #135 のレビュー）。
+		constexpr std::size_t kMinBareStyleNameChars = 4;
+
+		// line の中の「marker ＋ name ＋ 行末（改行か本文の終わり）」の name を alias へ替える。
+		std::string replaceAtLineEnd(std::string text, const std::string& marker,
+									 const std::string& name, const std::string& alias)
+		{
+			const std::string needle = marker + name;
+			std::string::size_type pos = 0;
+			while ((pos = text.find(needle, pos)) != std::string::npos)
+			{
+				const std::string::size_type end = pos + needle.size();
+				if (end == text.size() || text[end] == '\n' || text[end] == '\r')
+				{
+					text.replace(pos + marker.size(), name.size(), alias);
+					pos += marker.size() + alias.size();
+				}
+				else
+					pos = end;
+			}
+			return text;
+		}
+
+		// 図面枠のスタイル名を仮名へ替える。2 段構え:
+		//   1. **名前が出ると分かっている形**は、長さに依らず必ず替える——描画側の記録と診断の
+		//      「…」（draw/TitleBlock）と、ログの設定の行「図面枠スタイル: <名前>」
+		//      （kTitleBlockOptionLabel。行末まで）。短い名前でも事務所名の略であり得るので、
+		//      ここは緩めない。
+		//   2. そのうえで**十分に長い名前**（kMinBareStyleNameChars 字以上）は、本文のどこに
+		//      出ても替える——形の分からない出どころ（将来足される文言）からの漏れを塞ぐ。
+		//      長い名前が別の意味で偶然現れることはまず無いので、読み違えの恐れは小さい。
+		std::string redactStyleName(std::string text, const std::string& name)
+		{
+			if (name.empty())
+				return text;
+			const std::string alias = anonymizedStyleName(name);
+			text = replaceAll(text, "「" + name + "」", "「" + alias + "」");
+			text = replaceAtLineEnd(text, kTitleBlockOptionLabel, name, alias);
+			if (utf8Length(name) >= kMinBareStyleNameChars)
+				text = replaceAll(text, name, alias);
+			return text;
+		}
+	} // namespace
+
+	std::string redactText(const std::string& text, const std::string& ifcPath,
+						   const std::string& titleBlockStyle)
 	{
 		std::string out = text;
 		if (!ifcPath.empty())
@@ -311,6 +377,9 @@ namespace HomeskzIfcImport::parse
 			if (dot != std::string::npos && dot > 0)
 				out = replaceAll(out, name.substr(0, dot), alias.substr(0, alias.rfind('.')));
 		}
+		// 図面枠のスタイル名。**IFC のパスの後に**置き換える——スタイル名がパスの一部と
+		// 重なっていても、パスを丸ごと仮名にし損ねないように。
+		out = redactStyleName(out, titleBlockStyle);
 		// ホームディレクトリのユーザー名（ログのパスに必ず出る）。
 		out = maskUserSegment(out, "/Users/", '/');
 		out = maskUserSegment(out, "/home/", '/');
@@ -414,8 +483,10 @@ namespace HomeskzIfcImport::parse
 		// （あちこちで if を書くと、必ずどこかで素の値が漏れる）。
 		const std::string shownFile =
 			round.anonymize ? anonymizedFileName(round.ifcPath) : fileNameOf(round.ifcPath);
-		auto clean = [&round](const std::string& text)
-		{ return round.anonymize ? redactText(text, round.ifcPath) : text; };
+		auto clean = [&round, &document](const std::string& text) {
+			return round.anonymize ? redactText(text, round.ifcPath, document.titleBlockStyle)
+								   : text;
+		};
 
 		std::ostringstream out;
 		// 機械可読の目印。**本文の見た目を変えてもここは変えない**——読む側（Claude）が
@@ -530,8 +601,8 @@ namespace HomeskzIfcImport::parse
 		tail << "数字だけで判断が付かないときは、**実機で確かめてほしい点を返信で挙げて**"
 				"ください（絵を見られるのは人だけです）。\n";
 		if (round.anonymize)
-			tail << "<sub>対象ファイル名とユーザー名は伏せてあります（同じ入力なら同じ仮名に"
-					"なります）。</sub>\n";
+			tail << "<sub>対象ファイル名・ユーザー名・図面枠のスタイル名は伏せてあります"
+					"（同じ入力なら同じ仮名になります）。</sub>\n";
 		const std::string footer = tail.str();
 
 		// 診断ログの全文。**折り畳む**——ふだんは読まないが、要るときは全部要る。

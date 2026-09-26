@@ -4,8 +4,9 @@
 //	取り込み設定（src/core/ImportOptions）の単体テスト。VectorWorks SDK を一切 include
 //	せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
 //
-//	検証項目（docs/DEV-NOTES.md M20）: 役割の表が全役割ぶん・添字と enum がずれていない・
-//	既定は従来の固定名・差し替えと空文字の扱い。**既定名は「この設定を入れる前に解析側が
+//	検証項目（docs/DEV-NOTES.md M20 / M28）: 役割の表が全役割ぶん・添字と enum がずれて
+//	いない・既定は従来の固定名・差し替えと空文字の扱い・図面枠スタイルは既定で空
+//	（＝置かない）で、空文字は既定名へ戻らない。**既定名は「この設定を入れる前に解析側が
 //	書いていた名前」そのもの**なので、ここだけは名前を手書きで持つ（表が書き換わったら
 //	気付けるようにするための固定値）。
 //
@@ -102,6 +103,40 @@ TEST(import_options_empty_name_falls_back_to_default)
 	options.setSymbol(SymbolRole::Joint, "仕口_特");
 	options.setSymbol(SymbolRole::Joint, "");
 	CHECK_EQ(options.symbol(SymbolRole::Joint), std::string("仕口"));
+}
+
+TEST(import_options_title_block_is_off_by_default)
+{
+	// M28 既定は「図面枠を置かない」（設定ダイアログを出さなければ従来と同じ振る舞い）。
+	const ImportOptions options;
+	CHECK(!options.hasTitleBlock());
+	CHECK(options.titleBlockStyle().empty());
+}
+
+TEST(import_options_title_block_keeps_an_empty_name_as_off)
+{
+	// **図面枠には既定名が無い**ので、空文字は「置かない」という意味をそのまま持つ
+	// （シンボルの setSymbol が空を既定名へ戻すのとは逆。core/ImportOptions.h）。
+	ImportOptions options;
+	options.setTitleBlockStyle("遠山信夫アトリエ一級建築士事務所");
+	CHECK(options.hasTitleBlock());
+	CHECK_EQ(options.titleBlockStyle(), std::string("遠山信夫アトリエ一級建築士事務所"));
+
+	options.setTitleBlockStyle("");
+	CHECK(!options.hasTitleBlock());
+	CHECK(options.titleBlockStyle().empty());
+}
+
+TEST(import_options_title_block_does_not_touch_the_symbol_roles)
+{
+	// 図面枠は役割の表に載らない別物——触っても既定のシンボル対応は変わらない。
+	ImportOptions options;
+	options.setTitleBlockStyle("図面枠A");
+	for (const auto& info : symbolRoles())
+	{
+		CHECK(options.isEnabled(info.role));
+		CHECK_EQ(options.symbol(info.role), std::string(info.defaultSymbol));
+	}
 }
 
 TEST_MAIN();

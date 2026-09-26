@@ -160,6 +160,13 @@ vw_add_test(CoreTraceTests CoreTraceTests.cpp CORE)
 target_compile_definitions(CoreTraceTests
 						   PRIVATE "HOMESKZ_TRACE_TEST_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\"")
 
+# 描画の区間計測（src/core/DrawTiming）: 名前ごとの累計と回数、時間の長い順の並び
+# （同着は積んだ順＝決定性）、診断ログへ載せる本文の整形、そして計測点が共有する
+# 唯一の集計先（drawTiming）。**実際の所要時間は測らない**——実描画はローカルの
+# VectorWorks でしか走らず、時間に依るテストは CI で必ず揺れる。SDK 非依存・
+# フィクスチャ不要。
+vw_add_test(CoreDrawTimingTests CoreDrawTimingTests.cpp CORE)
+
 # 最小 JSON（src/core/Json）: 書き出し（整数の見え方・逃がし・挿入順）と読み取り
 # （往復・数・\u とサロゲート対）、そして**壊れた入力を受け付けない・深い入れ子で
 # 再帰しない**こと。MCP ブリッジが外から来たテキストを読む土台なので、後者が本題。

@@ -19,13 +19,14 @@
 //
 //	【読むだけにしてある】v1 の道具はすべて図面を**読む**だけで、何も作らず・変えない。
 //	書く道具（作図・修正）を足すときは undo の作法（[SDK リファレンス「Undo」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Undo.md)）を
-//	必ず通すこと——半端な記録を取り消すと図面が壊れる。
+//	必ず通すこと——半端な記録を取り消すと図面が壊れる。**常駐になった（M30）ので、書く
+//	道具は人が図面を触っている最中にも届きうる**——人の操作と undo の記録が混ざらないかを
+//	先に確かめること。
 //
 
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "draw/McpBridge.h"
-#include "draw/ProgressDialog.h"
 
 #include "core/Bridge.h"
 #include "core/Json.h"
@@ -43,7 +44,6 @@
 #include <filesystem>
 #include <system_error>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -53,19 +53,14 @@ namespace HomeskzIfcImport::draw
 	{
 		using core::Json;
 
-		// --- ループの目安 ---------------------------------------------------
-		// 1 周の待ち。短いほど応答が速く、短すぎるだけ Vectorworks を無駄に回す。
-		// 人が対話する速さなので、この程度で体感の遅れにはならない。
-		constexpr int kPollMilliseconds = 40;
-		// 何も来ないまま止まるまで。**押しっぱなしを忘れても Vectorworks を永久に
-		// 握らない**ための歯止め（要求が 1 つでも来れば数え直す）。
-		constexpr int kIdleTimeoutSeconds = 30 * 60;
-		// 生存の印を書き直す間隔。Python 側はこれが古びていたら「動いていない」と見る。
-		constexpr int kStatusBeatSeconds = 2;
-
-		// 止めてほしいと道具（vw_stop_bridge）から言われたか。**メインスレッドしか
-		// 触らない**ので排他は要らない（CLAUDE.md / PayloadSession.h「スレッド」）。
-		bool gStopRequested = false;
+		// --- 受け付けの目安 -------------------------------------------------
+		// 生存の印を書き直す間隔。Python 側はこれが古びていたら「動いていない」と見る
+		// （core::kBridgeStatusStaleSeconds）。**毎回は書かない**——パレットの時計は数百 ms
+		// ごとに来るので、そのたびにファイルを書き換えるのは無駄が大きい。
+		constexpr long long kStatusBeatSeconds = 2;
+		// スプールを用意できなかったとき、次に試すまで。一時ディレクトリが読めない・
+		// 素性が怪しい、はすぐには直らないので、毎回 mkdir / stat を叩かない。
+		constexpr long long kPrepareRetrySeconds = 10;
 
 		// --- 小さな共通ヘルパー ---------------------------------------------
 
@@ -165,14 +160,6 @@ namespace HomeskzIfcImport::draw
 			value.set("document_open", Json::boolean(current != nil));
 			value.set("current_layer",
 					  current != nil ? Json::string(NameOf(current)) : Json::null());
-			return value;
-		}
-
-		Json StopTool(const Json& /*args*/, std::string& /*error*/)
-		{
-			gStopRequested = true;
-			Json value = Json::object();
-			value.set("stopping", Json::boolean(true));
 			return value;
 		}
 
@@ -401,8 +388,6 @@ namespace HomeskzIfcImport::draw
 			 R"("layer":{"type":"string","description":"このレイヤだけを数える（省略＝図面全体）"}},)"
 			 R"("additionalProperties":false})",
 			 &ObjectCountsTool},
-			{"vw_stop_bridge", "ブリッジを止める（Vectorworks 側の進捗ダイアログが閉じる）。",
-			 R"({"type":"object","properties":{},"additionalProperties":false})", &StopTool},
 		});
 
 		// 表を MCP の tools/list が求める形（name / description / inputSchema）で返す。
@@ -525,94 +510,130 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	// -----------------------------------------------------------------------
-	void runMcpBridge()
+	namespace
 	{
-		gStopRequested = false;
-
-		core::BridgeSpool spool(SpoolDirectory());
-		std::string error;
-		if (!spool.prepare(error))
+		// 受け付けの状態。**本体の静的データなので、本体を入れ替えると初めからになる**
+		// （件数が 0 に戻るだけで、橋は途切れない——印は前の本体が書いたものが残っていて、
+		// 次の 1 回で書き直される）。メインスレッドしか触らないので排他は要らない。
+		struct ServeState
 		{
-			gSDK->AlertInform("MCP ブリッジを開始できませんでした。", TXString(error.c_str()),
-							  false);
-			return;
+			bool prepared = false;
+			std::string dir;
+			std::string error;
+			long long lastPrepareAt = -1;
+			long long lastBeat = 0;
+			long long served = 0;
+			long long failed = 0;
+			long long lastRequestAt = -1;
+			std::string lastTool;
+		};
+
+		ServeState& State()
+		{
+			static ServeState sState;
+			return sState;
 		}
-		// 前の回の残骸を消す（落ちたセッションの応答を新しいものと取り違えない）。
-		spool.sweep();
 
-		long long served = 0;
-		long long failed = 0;
-		long long lastBeat = 0;
-		const long long startedAt = NowSeconds();
-		long long lastRequestAt = startedAt;
-		std::string stopReason = "［キャンセル］で止めました。";
-
+		// パレットに見せる見え方。**判断は JS に持たせない**ので、見せる文言もここで作る。
+		std::string ViewJson(const ServeState& state, long long now)
 		{
-			// 進捗ダイアログが**橋の寿命そのもの**。開いている間だけ橋が架かり、
-			// ［キャンセル］で降りる（draw/McpBridge.h「なぜループなのか」）。
-			ProgressDialog dialog("MCP ブリッジ", "接続先: " + spool.dir(), true /* canCancel */);
+			Json view = Json::object();
+			view.set("phase", Json::string(state.prepared ? "serving" : "error"));
+			view.set("spool", Json::string(state.dir));
+			view.set("served", Json::integer(state.served));
+			view.set("failed", Json::integer(state.failed));
+			view.set("lastTool", Json::string(state.lastTool));
+			view.set("secondsSinceRequest",
+					 Json::integer(state.lastRequestAt >= 0 ? now - state.lastRequestAt : -1));
+			view.set("message", Json::string(state.prepared ? std::string() : state.error));
+			view.set("commit", Json::string(VW_BUILD_VERSION));
+			return view.dump();
+		}
 
-			for (;;)
+		// スプールを用意する（済んでいれば何もしない）。**前の回の残骸は、生きた橋の後を
+		// 継ぐのでなければ消す**——本体の入れ替えのたびにここへ来るので、生きた橋がいるうちに
+		// 消すと、入れ替えの直前に書いた応答や、Python が置いたばかりの要求まで消える
+		// （core/Bridge.h の sweep）。
+		bool Prepare(ServeState& state, long long now)
+		{
+			if (state.prepared)
+				return true;
+			if (state.lastPrepareAt >= 0 && now - state.lastPrepareAt < kPrepareRetrySeconds)
+				return false;
+			state.lastPrepareAt = now;
+			state.dir = SpoolDirectory();
+			core::BridgeSpool spool(state.dir);
+			if (!spool.prepare(state.error))
+				return false;
+			if (!spool.statusIsLive(now, core::kBridgeStatusStaleSeconds))
+				spool.sweep();
+			state.error.clear();
+			state.prepared = true;
+			return true;
+		}
+	} // namespace
+
+	std::string serveMcpBridge()
+	{
+		ServeState& state = State();
+		const long long now = NowSeconds();
+		try
+		{
+			if (!Prepare(state, now))
+				return ViewJson(state, now);
+
+			core::BridgeSpool spool(state.dir);
+			std::vector<std::string> broken;
+			const std::vector<core::BridgeRequest> requests = spool.poll(broken);
+
+			// 壊れていた要求にも必ず応える（Python 側を待たせ切らない）。
+			for (const std::string& id : broken)
 			{
-				std::vector<std::string> broken;
-				const std::vector<core::BridgeRequest> requests = spool.poll(broken);
-
-				// 壊れていた要求にも必ず応える（Python 側を待たせ切らない）。
-				for (const std::string& id : broken)
-				{
-					std::string replyError;
-					spool.reply(core::bridgeFailure(id, "要求を読めませんでした。"), replyError);
-					++failed;
-				}
-				for (const core::BridgeRequest& request : requests)
-				{
-					const core::BridgeResponse response = Handle(request);
-					std::string replyError;
-					spool.reply(response, replyError);
-					if (response.ok)
-						++served;
-					else
-						++failed;
-				}
-				if (!requests.empty() || !broken.empty())
-					lastRequestAt = NowSeconds();
-
-				// 生存の印を書き直す（毎周は書かない——数秒に 1 回で足りる）。
-				const long long now = NowSeconds();
-				if (now - lastBeat >= kStatusBeatSeconds)
-				{
-					std::string statusError;
-					spool.writeStatus(StatusJson(served, failed), statusError);
-					lastBeat = now;
-				}
-
-				// **ここで Vectorworks へ制御を返す**（再描画とキャンセル操作）。
-				const std::string meter = "受けた要求 " + std::to_string(served + failed) +
-										  " 件（うち失敗 " + std::to_string(failed) + " 件）";
-				if (dialog.keepAlive(meter))
-					break;
-				if (gStopRequested)
-				{
-					stopReason = "Claude 側から止めました（vw_stop_bridge）。";
-					break;
-				}
-				if (now - lastRequestAt >= kIdleTimeoutSeconds)
-				{
-					stopReason = "しばらく要求が無かったので止めました。";
-					break;
-				}
-
-				std::this_thread::sleep_for(std::chrono::milliseconds(kPollMilliseconds));
+				std::string replyError;
+				spool.reply(core::bridgeFailure(id, "要求を読めませんでした。"), replyError);
+				++state.failed;
 			}
-		} // ここでダイアログが閉じる（完了の知らせを重ねて出さないため）
+			for (const core::BridgeRequest& request : requests)
+			{
+				const core::BridgeResponse response = Handle(request);
+				std::string replyError;
+				spool.reply(response, replyError);
+				if (response.ok)
+					++state.served;
+				else
+					++state.failed;
+				// vw_tools は Python が起動のたびに引くだけなので、「最後の道具」には数えない。
+				if (request.tool != "vw_tools")
+					state.lastTool = request.tool;
+			}
+			if (!requests.empty() || !broken.empty())
+				state.lastRequestAt = now;
 
-		spool.removeStatus();
-
-		gSDK->AlertInform(
-			"MCP ブリッジを終了しました。",
-			TXString((stopReason + "\n\n応えた要求: " + std::to_string(served) +
-					  " 件\n失敗: " + std::to_string(failed) + " 件\n接続先: " + spool.dir())
-						 .c_str()),
-			false);
+			// 生存の印を書き直す（数秒に 1 回で足りる）。
+			if (now - state.lastBeat >= kStatusBeatSeconds)
+			{
+				std::string statusError;
+				if (spool.writeStatus(StatusJson(state.served, state.failed), statusError))
+					state.lastBeat = now;
+				else
+				{
+					// **書けなくなったら用意し直す**（一時ディレクトリが掃除された等）。
+					// 印が古びれば Python 側は「動いていない」と言うので、黙って続けない。
+					state.prepared = false;
+					state.error = "生存の印を書けません: " + statusError;
+				}
+			}
+		}
+		catch (const std::exception& e)
+		{
+			state.prepared = false;
+			state.error = std::string("例外: ") + e.what();
+		}
+		catch (...)
+		{
+			state.prepared = false;
+			state.error = "不明な例外";
+		}
+		return ViewJson(state, now);
 	}
 } // namespace HomeskzIfcImport::draw
