@@ -93,9 +93,13 @@ namespace HomeskzIfcImport::draw
 		// **両端の解決済み絶対 Z**（実機 round 2 で判明。ヘッダ DrawnMemberSize 参照）。
 		// **ローカライズ名で引かない**——「始端高さオフセット」は設定ダイアログ側の
 		// `DialogStartElevation`（別物。レイヤの高さ基準で 0 を返す）とぶつかる。
+		// **読むのは `MeasureDrawnMember` だけ**で、そこは検算専用になったので開発ビルドだけ
+		// （draw/Verify.h。自己修復の撤去。docs/DEV-NOTES.md M27）。
+#if VW_DRAW_VERIFY
 		const std::vector<const char*> kStartElevationNames = {"StartElevation"};
 		const std::vector<const char*> kEndElevationNames = {"EndElevation"};
 		const std::vector<const char*> kNoLocalized = {};
+#endif
 		// **水平材の実体はパラメータでは測らない。** OIP に「スパン」に当たるパラメータは
 		// 無く（確定済み。**再調査しない**——ヘッダ StructuralExtentKind が指す Findings の
 		// 「打ち切った調査」）、名前で引ける `CenterPointLength(長さ)` は部材長ではない
@@ -115,8 +119,11 @@ namespace HomeskzIfcImport::draw
 		const std::vector<const char*> kSizeParamNeedles = {"長さ", "高さ", "スパン", "Span"};
 #endif
 		// 「長さ 0」とみなす閾値（mm）。潰れた部材はちょうど 0 を返すので、実部材の長さ
-		// （最短でも数十 mm）と取り違える余地は無い。
+		// （最短でも数十 mm）と取り違える余地は無い。**検算でしか使わない**ので開発ビルド
+		// だけ（上記と同じ理由）。
+#if VW_DRAW_VERIFY
 		constexpr double kCollapsedLength = 0.01;
+#endif
 		// 描かれた絶対 Z が命令と「合っている」とみなす許容（mm）。丸めのぶんだけで、
 		// 意味のあるずれ（レイヤ原点へ落ちる・階ぶん動く）とは桁が違う。**高さの検算は
 		// 開発ビルドだけ**（draw/Verify.h）。
@@ -168,6 +175,9 @@ namespace HomeskzIfcImport::draw
 		// そのときは実数読みが常に 0 を返して**全数を誤報する**。文字列でも読み直し、数として
 		// 読めたらそちらを採る。読めないパラメータを覗くと例外が出るので畳む（1 つの読み損
 		// ないで描画を止めない。DrawUtil の PioParamString と同じ扱い）。ok には読めたかを返す。
+		//
+		// **呼ぶのは `MeasureDrawnMember` だけ**なので開発ビルドだけ（draw/Verify.h）。
+#if VW_DRAW_VERIFY
 		double ReadParamNumber(const VWParametricObj& pio, const TXString& param, bool& ok)
 		{
 			ok = false;
@@ -188,6 +198,7 @@ namespace HomeskzIfcImport::draw
 				return 0.0;
 			}
 		}
+#endif // VW_DRAW_VERIFY
 
 		// パラメータ 1 件を人が読める形で読み出す（実数と、文字列で保持されていればその値）。
 		// **読めないパラメータを覗くと例外が出る**ので、ここで 1 件ずつ畳んで "?" を返す
@@ -373,32 +384,22 @@ namespace HomeskzIfcImport::draw
 		}
 		gSDK->ResetObject(object);
 
-		// 【描けたかを読み戻す】PIO は生成できても実体を持たないことがある（パスが 1 点の
-		// まま・バウンドの解決に失敗、など。Findings「Parametric Objects」）。そのとき OIP の
+		// 【描けたかを読み戻して検算する】PIO は生成できても実体を持たないことがある（パスが
+		// 1 点のまま・バウンドの解決に失敗、など。Findings「Parametric Objects」）。そのとき OIP の
 		// 高さ・基準・オフセットは命令どおりのままなので、**画面を見ない限り気付けない**。
-		// リセット後の「長さ」を読み戻し、0 で潰れていたら呼び出し側の診断へ流す。
+		// リセット後の実体を読み戻し、0 で潰れていたら呼び出し側の診断へ流す。
 		//
-		// **測る理由が 2 つある**ので、本番ビルドに残すのは片方だけである（draw/Verify.h）。
-		//   * 検算（潰れ・高さのずれを件数と実測で持ち帰る）… 開発ビルドだけ。
-		//   * **自己修復の引き金**（潰れていたらパスを作り直して差し替える）… 本番でも要る
-		//     ——外すと実機で潰れた材がそのまま残る＝利用者の絵が変わる。
-		// したがって本番は `retryWithFreshPath` の材だけを測り、結果は診断へ出さない。
+		// **まるごと開発ビルドだけ**（draw/Verify.h）。以前は「自己修復の引き金」という本番でも
+		// 要る用途があったので本番にも半分残していたが、その自己修復を撤去したので**測る理由は
+		// 検算だけ**になった——外しても描かれるものは 1 つも変わらない（docs/DEV-NOTES.md
+		// 「柱が長さ 0 で描かれる（M27）」）。本番では材 1 本あたりのパラメータ走査とパス読みが
+		// まるごと無くなる。
 #if VW_DRAW_VERIFY
-		const bool measureDrawn = spec.expectedLength > kCollapsedLength || spec.checkElevation;
-#else
-		const bool measureDrawn = spec.retryWithFreshPath && spec.expectedLength > kCollapsedLength;
-#endif
-		if (measureDrawn)
+		if (spec.expectedLength > kCollapsedLength || spec.checkElevation)
 		{
-			// 本番ビルドでは差し替え後の測り直しを控えないので、そのまま const になる。
-#if VW_DRAW_VERIFY
-			DrawnMemberSize size = MeasureDrawnMember(object, spec.extentKind);
-#else
 			const DrawnMemberSize size = MeasureDrawnMember(object, spec.extentKind);
-#endif
 			if (spec.expectedLength > kCollapsedLength)
 			{
-#if VW_DRAW_VERIFY
 				// **測れなかったときだけ手掛かりを採る。** 鉛直材なら両端の絶対 Z を、
 				// 水平材なら PIO のパスを引けなかったということなので、パラメータの顔ぶれと
 				// 図面のパスを両方並べる——原因をどちら側に分けるかは、実機でしか読めない
@@ -406,96 +407,30 @@ namespace HomeskzIfcImport::draw
 				if (!size.found)
 					result.extentHint = DescribeSizeParams(object) + "・図面のパス[" +
 										DescribePioPath(object) + "]";
-#endif
 				result.collapsed = size.zero;
 				// **潰れていたら証拠を全部採る。** 高さ基準は**どう書いても両端の Z を動かせ
 				// なかった**（ストーリ相対・レイヤ基準・VW が記録しているとおり、のいずれでも
 				// 実測 0。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）ので、残る入力は
 				// パスである。**PIO が実際に持っているパスの頂点**まで読み戻して添える。
-#if VW_DRAW_VERIFY
+				//
+				// **直しには行かない。** 潰れていたら差し替えて繕う道は撤去した（同メモ）——
+				// 差し替えはバウンドの `fOffset` を書き換えてしまい、利用者が階高を編集した
+				// 瞬間に長さとして表に出る。ここは**報せるだけ**にする。
 				if (result.collapsed)
 					result.collapsedProbe = DescribeSizeParams(object) + "・図面の始端基準[" +
 											DescribeStoryBound(object, StoryBoundSlot::Start) +
 											"]・終端基準[" +
 											DescribeStoryBound(object, StoryBoundSlot::End) +
 											"]・図面のパス[" + DescribePioPath(object) + "]";
-#endif
-				// **潰れていたらパスを作り直して差し替える。** 渡した曲線が正しくても PIO の中の
-				// パスが潰れていることがある（実機 round 7）。直ったかは読み戻して見る。
-				if (result.collapsed && spec.retryWithFreshPath)
-				{
-					bool appended = false;
-					const MCObjectHandle fresh = CreatePath(spec.pathStart, spec.pathEnd, appended);
-					if (fresh != nil && gSDK->SetCustomObjectPath(object, fresh))
-					{
-						gSDK->ResetObject(object);
-						// **作り直した曲線の後始末。** `CreateNurbsCurve` は曲線を**図面へ**作るので、
-						// PIO がそれを引き取らなかったなら、消さない限り図面に残り続ける——潰れる柱は
-						// 実機で 46 本あるので、放っておけば取り込みのたびにその数だけ原点に立った
-						// 線が積み上がる。**引き取ったかどうかは推測しない**——PIO がいま持っている
-						// パス（`GetCustomObjectPath`）が渡した曲線そのものなら引き取られており、
-						// 消せば材のパスを消すことになる。違う実体なら VW が複製したということで、
-						// 渡した曲線はこちらの後始末である。どちらだったかは診断にも残す（実機で
-						// しか分からない挙動なので、次の周が答えを持ち帰る）。
-						const MCObjectHandle adopted = gSDK->GetCustomObjectPath(object);
-						const bool taken = adopted == fresh;
-						if (!taken)
-							gSDK->DeleteObject(fresh, true /* useUndo: 取り込みのイベントへ登録 */);
-						const DrawnMemberSize retried = MeasureDrawnMember(object, spec.extentKind);
-#if VW_DRAW_VERIFY
-						std::array<char, 160> buffer{};
-						// **測り方によって添える値を変える**（水平材の Z は両端が等しいのが
-						// 正常なので、並べても読む側を惑わせるだけ。ヘッダ
-						// StructuralExtentKind）。
-						if (spec.extentKind == StructuralExtentKind::Horizontal)
-							std::snprintf(
-								buffer.data(), buffer.size(),
-								"・パスを作り直した結果 実測 %g（パス長）・作り直したパス[",
-								retried.extent);
-						else
-							std::snprintf(
-								buffer.data(), buffer.size(),
-								"・パスを作り直した結果 実測 %g（Z %g→%g）・作り直したパス[",
-								retried.extent, retried.start, retried.end);
-						result.collapsedProbe +=
-							std::string(buffer.data()) + DescribePioPath(object) +
-							(taken ? "]・作り直した曲線は PIO が引き取った"
-								   : "]・作り直した曲線は複製されたので消した");
-#endif
-						if (retried.found && !retried.zero)
-						{
-							result.repairedByPath = true;
-							result.collapsed = false;
-						}
-#if VW_DRAW_VERIFY
-						// 下の高さの検算は**差し替えたあとの図面**を見る（差し替えで Z も
-						// 変わりうるので、古い実測で判定すると診断が嘘をつく）。
-						if (retried.found || retried.elevationRead)
-							size = retried;
-#endif
-					}
-					else
-					{
-						// 差し替えられなかったときは、作った曲線が確実に**こちらのもの**として
-						// 図面に残る（PIO は受け取っていない）ので必ず消す。
-						if (fresh != nil)
-							gSDK->DeleteObject(fresh, true);
-#if VW_DRAW_VERIFY
-						result.collapsedProbe += "・パスを作り直して差し替えられなかった";
-#endif
-					}
-				}
 			}
 
 			// 【描かれた高さが命令どおりか】**パスから Z を外したぶんの見張り**である
 			// （ヘッダ冒頭「パスは 2D で渡す」）。高さを決めるのがストーリバウンドだけに
-			// なった以上、その解決が意図とずれても**本数にもスパンにも一切出ない**——材が
+			// なった以上、その解決が意図とずれても**本数にも長さにも一切出ない**——材が
 			// 揃って違う高さに並ぶだけなので、実機の絵を見るまで気付けない。そこで読み戻した
 			// 両端の絶対 Z を命令と引き比べ、ずれた本数と 1 件目の実測を持ち帰る。
 			// **読めなかったときは「ずれた」に数えない**（測れていないことを不具合として
-			// 報せると、切り分けが逆に遠のく）。**検算そのものなので開発ビルドだけ**
-			// （draw/Verify.h）。
-#if VW_DRAW_VERIFY
+			// 報せると、切り分けが逆に遠のく）。
 			if (spec.checkElevation && size.elevationRead)
 			{
 				const double startGap = size.start - spec.expectedStartZ;
@@ -511,14 +446,15 @@ namespace HomeskzIfcImport::draw
 					result.elevationProbe = buffer.data();
 				}
 			}
-#endif
 		}
+#endif
 
 		result.object = object;
 		result.sectionOk = breadthOk && depthOk;
 		return result;
 	}
 
+#if VW_DRAW_VERIFY
 	DrawnMemberSize MeasureDrawnMember(MCObjectHandle object, StructuralExtentKind kind)
 	{
 		DrawnMemberSize size;
@@ -531,15 +467,6 @@ namespace HomeskzIfcImport::draw
 			// 測れないが、**描かれた高さが命令どおりか**の検算に要る——パスから Z を
 			// 外した（ヘッダ冒頭「パスは 2D で渡す」）いま、高さを言える値はこの 2 つしか
 			// 残っていない。
-			//
-			// **本番ビルドの水平材では読まない。** そこでは高さの検算が畳まれていて使い道が
-			// 無いのに、名前の解決はパラメータ表を 1 本につき 2 回舐める（材は数百本ある）。
-#if VW_DRAW_VERIFY
-			constexpr bool kElevationAlways = true; // 開発ビルドは kind に関わらず読む
-#else
-			constexpr bool kElevationAlways = false;
-#endif
-			if (kElevationAlways || kind == StructuralExtentKind::Vertical)
 			{
 				const TXString startName =
 					ResolveParamNameAmong(pio, kStartElevationNames, kNoLocalized);
@@ -584,6 +511,7 @@ namespace HomeskzIfcImport::draw
 		}
 		return size;
 	}
+#endif // VW_DRAW_VERIFY
 
 #if VW_DRAW_VERIFY
 	std::string DescribeSizeParams(MCObjectHandle object)
@@ -648,9 +576,7 @@ namespace HomeskzIfcImport::draw
 #if VW_DRAW_VERIFY
 		if (result.collapsed)
 			++collapsed;
-		if (result.repairedByPath)
-			++repaired;
-		if ((result.collapsed || result.repairedByPath) && collapsedProbe.empty())
+		if (result.collapsed && collapsedProbe.empty())
 			collapsedProbe = result.collapsedProbe;
 		if (extentHint.empty())
 			extentHint = result.extentHint;
@@ -675,7 +601,6 @@ namespace HomeskzIfcImport::draw
 		count("高さ基準を図面へ書けなかった", failures.bound);
 #if VW_DRAW_VERIFY
 		count("長さ 0 で描かれた（実体が無い）", failures.collapsed);
-		count("パスを作り直して直った", failures.repaired);
 		if (!failures.collapsedProbe.empty())
 			note += "（1 本目: " + failures.collapsedProbe + "）";
 		count("命令と違う高さに描かれた", failures.elevation);

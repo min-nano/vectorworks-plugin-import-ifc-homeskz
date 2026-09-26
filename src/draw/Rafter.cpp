@@ -115,9 +115,9 @@ namespace HomeskzIfcImport::draw
 			// 一度も動いていなかった（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 			spec.expectedLength = core::distance(eave.point, rafter.end);
 			spec.extentKind = StructuralExtentKind::Horizontal;
-			// 【自己修復は武装しない】理由は横架材と同じ（draw/Member。水平材は M27 の死角に
-			// 落ちない／差し替えはバウンドの `fOffset` を書き換えるので階を動かすと壊れる）。
-			// `spec.retryWithFreshPath` は既定の false のまま。
+			// 【潰れていても繕わない】自己修復は撤去した。理由は横架材と同じ（draw/Member。
+			// 水平材は M27 の死角に落ちない／差し替えはバウンドの `fOffset` を書き換えるので
+			// 階を動かすと壊れる）。
 			// 【高さの検算】パスから Z を外した以上、垂木の高さと勾配を決めるのはバウンドの
 			// offset 差だけになった。ずれても本数にもスパンにも出ないので、**描き上がった
 			// 両端の絶対 Z を読み戻して命令と引き比べる**（draw/StructuralMember.h の
