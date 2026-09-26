@@ -18,7 +18,7 @@ name: CI debug
 #   scripts/ci-debug.sh run --mode sdk-grep --args 'GetLayerByName'
 #
 # ディスパッチ → 完了待ち → ペイロード抽出までを 1 コマンドで行う。詳細は
-# CLAUDE.md「CI デバッグ」節と scripts/ci-debug.sh のヘッダを参照。
+# docs/DEVELOPMENT.md「CI デバッグ」節と scripts/ci-debug.sh のヘッダを参照。
 #
 # NOTE: workflow_dispatch はデフォルトブランチに存在するワークフローしか起動でき
 # ない。このファイルが main にマージされて初めて、作業ブランチを ref に指定して
