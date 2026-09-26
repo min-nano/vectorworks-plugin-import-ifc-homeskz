@@ -128,9 +128,8 @@ namespace HomeskzIfcImport::draw
 			// 「柱が長さ 0 で描かれる（M27）」）。
 			spec.expectedLength = core::distance(member.start, member.end);
 			spec.extentKind = StructuralExtentKind::Horizontal;
-			// 【自己修復は武装しない】潰れていたパスを `SetCustomObjectPath` で作り直す道は
-			// 使わない（`spec.retryWithFreshPath` は既定の false のまま）。柱と同じ扱いで、
-			// 理由は 2 つある。
+			// 【潰れていても繕わない】潰れていたパスを `SetCustomObjectPath` で作り直す
+			// 自己修復は**撤去した**（柱・垂木も同じ）。理由は 2 つある。
 			//
 			// 1. **水平材は M27 の死角に落ちない。** `ResetObject` が作り直すかどうかは
 			//    パスの 3 次元長で決まり、`(0, 1e-7)` の帯だけが作り直されない。水平材は
@@ -147,6 +146,9 @@ namespace HomeskzIfcImport::draw
 			//    部材は、階を動かすと長さが変わる」。実測で、階を +100 動かすと本来 3059 に
 			//    なるべき部材が 100 になった）。同 Findings も「差し替えを対症療法に
 			//    使わない」と明記している。
+			//
+			// **報せるところは残っている**——潰れは開発ビルドで数え、高さ基準を書けなかった
+			// 本数は本番でも出る（`StructuralFailures` の `collapsed` / `bound`）。
 			//
 			// **残る唯一の 0 長の経路**——高さ基準を 1 本も書けないまま `ResetObject` を
 			// 呼ぶ——は向きを問わず起こりうるが、**本番ビルドでも件数が出る**
