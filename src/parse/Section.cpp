@@ -470,7 +470,7 @@ namespace HomeskzIfcImport::parse
 	}
 
 	// --- const Model& を直接取るオーバーロード（単体テスト用。内部でコンテキストを作って
-	// 捨てる＝従来どおりの挙動。CLAUDE.md「共有コンテキスト」）-----------------------
+	// 捨てる＝従来どおりの挙動。docs/DEVELOPMENT.md「置き場所の一覧」の共有コンテキスト）--
 	std::vector<core::SectionCommand> buildSectionCommands(const Model& model,
 														   const core::Document& document)
 	{

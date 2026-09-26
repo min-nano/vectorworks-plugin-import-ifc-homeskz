@@ -6,8 +6,10 @@
 - 設計判断・ホームズ君 IFC の癖は [`DEV-NOTES.md`](DEV-NOTES.md)。**Vectorworks SDK の
   実測知見は [SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)の
   `Findings/`**（下記「SDK ドキュメント」）。
-- 作業時の規約（ディレクトリ・命名・依存の向き・PR とマージの規則・CI の待ち方）は
-  [`CLAUDE.md`](../CLAUDE.md)。
+- 全変更に共通する規約（アーキテクチャ・依存の向き・コード規約・テスト方針・PR とマージの
+  規則）は [`CLAUDE.md`](../CLAUDE.md)。このファイルには、そこから外した**領域ごとの細則**
+  （置き場所の一覧・MCP ブリッジ・実機フィードバックの往復・自動アップデート・CI の待ち方と
+  デバッグ）も置いています。
 
 ## ソースの構成
 
@@ -232,12 +234,128 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
                             stable リリースの取りこぼしを検知して再ビルドする
 .github/workflows/ci-debug.yml  CI: 手動ディスパッチ専用のデバッグ実行（SDK 依存の
                             ビルド再現）。push / PR では起動しない。SDK そのものの
-                            調査は SDK リファレンス側で行う（CLAUDE.md）
+                            調査は SDK リファレンス側で行う（下記「CI デバッグ」）
 ```
 
 **依存の向きは厳守します。** `parse/` と `core/` は Vectorworks SDK を include せず、
 `draw/` は STEP / IFC を include しません。両者をつなぐのは `core/Document.h` だけで、
 この規律は CI（`core/` `parse/` を無 SDK でコンパイル・テストするジョブ）が担保します。
+
+### 置き場所の一覧（重複を作らない）
+
+同じ定数・述語・ヘルパーを 2 か所に書かないための、**既存の唯一の置き場所**の一覧です
+（原則は [`CLAUDE.md`](../CLAUDE.md)「重複を作らない置き場所」）。新しく共有するものを
+作ったら、ここに 1 行足してください。
+
+**要素を 1 つ足すときの型**: `parse/<要素>.{h,cpp}`（解析）＋ `core/Document.h` の命令構造体と
+`validateDocument` の検証＋ `draw/<要素>.{h,cpp}`（描画）＋ `tests/Parse<要素>Tests.cpp`
+（無 SDK テスト）＋ `parse/Summary.cpp` の `kElements` に 1 行。PIO を足すときは
+`Extensions/Ext<要素>.{h,cpp}`（殻: 登録と取り次ぎ）＋ `draw/<要素>Pio.{h,cpp}`（本体: 作図）に
+割ります。
+
+**`core/`**
+
+| もの | 置き場所 |
+| --- | --- |
+| 平面座標の同一判定と許容（`samePoint` / `kPointEps`）・Vec2 の基本演算（`dot` / `cross` / `length` / `distance`）・同一直線上の線分成分の芯線射影（`collinearSpan`）・凸多角形の矩形クリップ（`clipPolygonToRect`。唯一の利用者は耐力壁の筋かいの形 `core::shearWallBracePolygon`） | `core/Geometry.h` |
+| ペア述語による連結成分（Union-Find。立上り・大引・地中梁の統合と壁結合の交点クラスタ） | `core/UnionFind.h` |
+| 構成層の総厚（`totalThickness`）・横架材の Z 範囲と重なり（`memberTopZ` / `memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側）・端部オフセットの意味と値・オフセットを戻した「材の端」（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`） | `core/Document.h` |
+| 描画側から切り離せる純計算（レイヤの希望スタック順 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの広がり `planContentBounds` / `sectionContentSize`） | `core/Document` |
+| 用紙の割り付け（`core::planLayout` ほか。縮尺の階梯と選び方・伏図の縮尺と位置——**縮尺は実測した凡例の幅を引いてから決め**、凡例の置き場所は `legendTopRight`——・軸組図の上下 2 段とシートの分割・タイトルの連番） | `core/Layout` |
+| 取り込み設定（役割の表 `core::symbolRoles()`・図面枠のスタイル `core::ImportOptions::titleBlock` → `core::Document::titleBlockStyle`） | `core/ImportOptions` |
+| 進捗の整形と配分の計算・診断ログのフェーズの行（`beginPhase`） | `core/Progress` |
+| 往復の記憶と、どの周になるかの場合分け（`feedbackRoundKind`） | `core/FeedbackSession` |
+| MCP ブリッジの受け渡しの作法（要求／応答の形・スプールのファイル名・原子的な書き方・id の綴り検査） | `core/Bridge.h` |
+| 最小 JSON（MCP ブリッジ専用） | `core/Json` |
+
+**`parse/`**
+
+| もの | 置き場所 |
+| --- | --- |
+| IFC の属性インデックス | `parse/IfcAttr.h` |
+| レベル種別名・`storyLayerName`・横架材レベルの定型（`beamTopLevelType` / `beamTopElevation` / `beamTopLayerName`）・階の要素の有無（`storyHasElement`）・span レベルの表記（`formatSpanLevel`） | `parse/Story.h` |
+| 屋根組の名前 | `parse/Rafter.h` / `parse/Roof.h` |
+| 基礎ストーリの名前・接尾辞・レベル・レイヤ名、基礎の許容値（統合・自由端・人通口・壁結合・地中梁・床付け） | `parse/Footing.h` |
+| 要素の判別述語（`isFloorSlab` / `isRoofSlab` / `isFireBrace` / `isBaseSlab` / `isShearBrace` / `isShearPanel` 等） | その要素のヘッダ |
+| 金物（`IfcMechanicalFastener`）の型名取得（`fastenerTypeName`） | `parse/Column` |
+| 横架材の端部と相手の取り合いの幾何（`memberEndJoint`）・柱に取り付く端を柱芯へ送る関門（`resolveMemberColumnJoints`。`parse/BuildDocument` が一度だけ通す） | `parse/Member` |
+| ローカル配置原点の取り出し（`resolveLocalPlacementOrigin`）・屋根面の勾配座標系と退化の閾値・押し出しを鉛直とみなす閾値（`kVerticalExtrudeTol`） | `parse/IfcGeometry` |
+| 共有コンテキスト（下記）・階の屋根面の走査（`storyRoofPlanes`）・取り込み設定の参照（`options()`） | `parse/Context` |
+| 伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名 | `parse/ColumnMark` |
+| 耐力壁のレイヤレベル名・柱を探す許容 | `parse/ShearWall.h` |
+| 断面の注釈空間への投影（`sectionAnnotationPoint`） | `parse/Tag` |
+| 軸組図の図番の一意化（`uniqueSectionNumbers`） | `parse/Section` |
+| 要素の一覧（表示名・助数詞・命令数・描けた数。`kElements`）・完了／エラーの文言（`importOutcome` 等） | `parse/Summary` |
+| 実機テストの結末の文言（`formatTestRoundResult`）・PR コメントの本文（内訳・差分・匿名化） | `parse/Feedback` |
+
+**`draw/`**
+
+| もの | 置き場所 |
+| --- | --- |
+| SDK 呼び出しの定型（クラス分け・レイヤ用意・プラグインスタイル解決・構成層／基準面を各オブジェクトへ直接与える手順） | `draw/DrawUtil` |
+| SDK へ渡す数値の列挙（`LayerKind` / `LayerVisibility` / `ClassVisibility` / `ObjectNodeType` / `ObjectVariable` / `StoryBoundSlot`。素の short に名前を付ける唯一の場所）・高さ基準の変換（`StoryBoundData`） | `draw/DrawUtil` |
+| オブジェクト変数の書き込み（`SetBooleanVariable` / `SetRealVariable` / `SetPointVariable`）・クラス分けと属性の by-class 化（`SetClassWithAttributes`。構造材 PIO は作る前に既定として立てる `ScopedCreationClass` ＋ `FinishCreatedWithClass`） | `draw/DrawUtil` |
+| PIO 定義の先出し（`PrepareCustomObjectDefinition`）・PIO のパラメータを読む口（`PioParamString`）・構造用途の述語（`StructuralUseOf`）・シンボル定義の有無（`HasSymbolDefinition`） | `draw/DrawUtil` |
+| 描画ループの中止判定と歩進（`AdvanceProgress`）・診断の 1 文（`AppendCount`）・診断行の連結（`AppendLine`）・登場順の dedupe（`PushUnique`） | `draw/DrawUtil` |
+| 収まり判定の遊び（`kFitTol`。**遊びは緩める向きに足す**）・収まらなかった 1 枚目の実測の文言（`DescribeFitOverflow` / `DescribePaperSize`） | `draw/DrawUtil` |
+| シートレイヤの用意とビューポートの仕上げ・用紙と印刷可能領域の読み取り（`SheetPaperArea`）・測って動かす位置合わせ（`MeasureViewport` / `RefreshViewport` / `MoveViewportBy`） | `draw/DrawUtil` |
+| 図面から自分が作ったレイヤを消す（`RemoveCreatedLayers`）・取り消しを 1 段掛ける（`UndoOneStep`） | `draw/DrawUtil` |
+| 「命令インデックス → ハンドル」の対応表 | `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（実体） |
+| 断面寸法データタグ（`Data Tag` PIO の登録名・引出線・配置手順・タグレイアウトの組み方・クラス名 "寸法"） | `draw/Tag` |
+| グラフィック凡例（`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗り・配置・ソース定義（タグ付きデータ `'GrLe'`）・縮率（伏図の縮尺に合わせる）・幅の実測 `measureLegendWidth`） | `draw/Legend` |
+| 図面枠（登録名の候補 `"Title Block Border"`・スタイルの当て方・用紙の中心への寄せ方） | `draw/TitleBlock` |
+| 図面枠スタイルの選択肢の集め方（シンボル定義のサブタイプ 552） | `draw/SettingsDialog` |
+| 構造材ツール（StructuralMember PIO）のフィールド名・値（`MemberTypeKey` / `AxisAlignKey` / `EndConditionKey`）・生成手順・失敗の内訳と文言（`StructuralFailures` / `DescribeStructuralFailures`） | `draw/StructuralMember` |
+| ハイブリッドシンボルの配置（4 要素で共有） | `draw/Symbol` |
+| 進捗の見出し・バー配分（要素ごとのフェーズ） | `draw/ExecuteDocument` |
+| 結果ダイアログの器（短い本文＋折り畳んだログ欄） | `draw/ResultDialog` |
+| 検算を dev ビルドだけにするスイッチ（`VW_DRAW_VERIFY`） | `draw/Verify.h` |
+| 殻から借りた道具（同梱スクリプトの実行） | `draw/HostServices` |
+| MCP ブリッジの道具の表（`kTools`） | `draw/McpBridge.cpp` |
+
+**殻・`Extensions/`**
+
+| もの | 置き場所 |
+| --- | --- |
+| 柱記号 PIO の登録名・パラメータ名 | `Extensions/ExtColumnMark.h` |
+| 耐力壁 PIO の登録名・パラメータ名・PIO が自分の絵へ与えるクラス（伏図記号／面材の表・裏） | `Extensions/ExtShearWall.h`（伏図記号の寸法 `kMark*` は `ExtShearWall.cpp`） |
+| 診断ログの見出し・区切り・結果・例外（`trace::note`） | `Extensions/ExtMenu`（ログへの書き出し口はここと `core/Progress` の 2 か所だけ。各要素へ `trace::log` を撒かない） |
+
+**`tests/`・`scripts/`**
+
+| もの | 置き場所 |
+| --- | --- |
+| フィクスチャ一覧・近似比較・実 IFC の読み込みと命令セットの組み立てのキャッシュ（`fixture` / `fixtureDocument`）・全フィクスチャ走査（`forEachFixture`） | `tests/Fixtures.h` |
+| 合成 STEP テキストの組み立て（`StepText` と `num` / `ref` / `point3` / `makeStorey` 等） | `tests/StepText.h` |
+| 試験用屋根面と最小 IFC | `tests/RoofSample.h` |
+| GitHub のトークン（キーチェーン／DPAPI の保存先・探索順・`gh` の探し場所）。`vw-feedback` と `vw-update` が source する | `scripts/vw-token.{sh,ps1}` |
+| GitHub を叩いて失敗したときの理由の文面（HTTP の番号・curl の終了コード・API 制限といつ戻るか） | `vw-update` の `http_reason` / `curl_reason`（Windows は `Get-ApiFailureReason`）。呼び出し側は `api_error` で 1 行に添えるだけ |
+
+補足:
+
+- **共有コンテキスト（`parse/Context`）**: 各要素の解析が共通して要る前処理（ストーリ一覧・
+  通り芯のセンタリング中心・階に属する要素・屋根面、および複数の要素が参照する横架材・柱・
+  立上りの命令）をキャッシュします。`buildDocument` は `Context` を **1 つだけ**作って全要素へ
+  渡します。単体テスト用に `const Model&` を直接取るオーバーロードも各 `build*Commands` に
+  残してあり、そちらは内部でコンテキストを作って捨てます。
+- **取り込み設定（`core/ImportOptions`）**: 「どの要素を図面のどのシンボルで置くか」と
+  「各シートレイヤへ置く図面枠のスタイル」は取り込みのたびに設定ダイアログ
+  （`draw/SettingsDialog`）で決まります。**解析側はシンボル名の固定値を持たず**、
+  `parse/Context` の `options()` か `build*Commands` の `options` 引数から引きます。決めるのは
+  描画側・使うのは解析側なので、Document と同じく `core/` に置きます。
+- **スタイルの扱い**: データタグ・凡例・スラブ・壁は**スタイルを作らないし当てない**（各
+  オブジェクトへ直接設定）。図面枠は**スタイルを当てるが作らない**——利用者の図面にある
+  スタイルを名前で指すだけなので、その名前が無ければ 1 つも置きません。置けた枚数は伏図と
+  軸組図で別々に出します。
+- **外形を測る前に、中身を変えたなら必ず描き直す**（`GetObjectBounds` は「最後に描いたときの
+  外形」を返す。M29）。**`GetPageMargins` は戻り値を持たない**ので、負を種に置いてから呼んで
+  「SDK が書いたか」を見ます。
+- **伏図の広がりはデータタグも見ます**（注釈なのでレイヤに載らないが図には映る。絞り込みは
+  関連付け先の横架材のレイヤで行う）。軸組図のタグは見ません（注釈空間が平面座標ではない）。
+  縮尺に追随しないもの（通り芯の丸・柱記号・耐力壁の伏図記号・タグ）の見込みは
+  `kPlanContentMargin`（モデル mm の定数 1 つ）です。
+- **描画側が持ち帰る説明は行き先を分けます**——異常は `DrawCounts::diagnostics`（完了
+  ダイアログの「問題あり」の根拠）、平常でも出る記録は `DrawCounts::notes`（ログにだけ出る）。
 
 ## プラグイン識別子
 
@@ -614,7 +732,7 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
   どちらの実行も「3 つとも success」を見て走り出しうるので、後から来たほうで前を打ち切って
   レビューが二重に出るのを防ぎます。**`pull_request` やコメントが起点のときは打ち切りません**
   — 走っている実行を打ち切るとそのチェックは `cancelled` になり、`scripts/ci-wait.sh` は
-  それを**失敗として扱う**ので（上記「CI の完了待ち」）、レビューを止めただけで PR が赤く
+  それを**失敗として扱う**ので（下記「CI の完了待ち」）、レビューを止めただけで PR が赤く
   見えます。`workflow_run` の実行は既定ブランチ側に紐づく＝PR の head にチェックが付かない
   ので、そちらでは打ち切ってよいわけです。
 
@@ -700,55 +818,158 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
 | `cleanup-dev-release.yml` | なし | PR のクローズ（`pull_request` の `closed`）専用 |
 | `pr-review.yml` | なし | CI の完了（`workflow_run`）とコメント・レビューで自動的に走る |
 
+### CI の完了待ち（`scripts/ci-wait.sh`）
+
+PR やブランチの CI（`build.yml` / `lint.yml` / `test.yml` …）が終わるのを待つ道具です。
+対象のチェックが全部終わった**瞬間に exit** し、最終行に結果を出します。リモートセッション
+から「CI が終わった」ことを知る手段は、**完了した瞬間に exit するプロセスをバックグラウンドで
+走らせる**ことだけです（PR 購読で配信されるのは CI の**失敗**とコメントだけで、**成功は配信
+されない**）。バックグラウンドコマンドの終了はハーネスが通知するので、exit がそのまま完了
+通知になります。
+
+```
+Bash(run_in_background: true):
+  scripts/ci-wait.sh --pr 34        # PR の head（新しい push が入ったら追随する）
+  scripts/ci-wait.sh --ref main     # ブランチ / タグ
+  scripts/ci-wait.sh                # いま checkout しているブランチ
+  scripts/ci-wait.sh --sha <sha>    # 固定のコミット（追随しない）
+```
+
+投げたら別作業を続け、終了通知が来たら出力ファイルを読むだけです。`git push` の直後に
+投げてよい（チェックの登録待ちは `--grace` が吸収します）。**`sleep` で待つことと、待機
+ループをその場で手書きすること（`while : ; do gh/curl …; sleep 30; done`）は禁止**です——
+前者は完了時刻の予測が要り、後者は締切もウォッチドッグも HTTP の時間上限も無いので API が
+固まればぶら下がります。どちらも「CI は終わっているのにセッションが気付かない」事故を実際に
+2 度起こしています。
+
+出力の最終行は必ず `ci-wait: done (conclusion=<結果> exit=<終了コード>)` で、この行が
+無ければ「まだ動いている」か「外から殺された」かのどちらかです。`success` 以外は exit 1:
+
+| conclusion | 意味 |
+| --- | --- |
+| `success` | 全チェックが成功（skipped / neutral を含む） |
+| `failure` | 1 つ以上が失敗・キャンセル・timed_out。**cancelled も失敗扱い**（新しい push で古い run が消えたものを green と取り違えないため） |
+| `no-checks` | 猶予（既定 180 秒）を過ぎてもチェックが 1 件も登録されなかった。**「CI が始まってすらいない」を成功と読まない**ための結果 |
+| `head-moved` | `--no-follow` 指定時に、待っている間に head が動いた（古い結果は返さない） |
+| `timed-out-waiting` / `api-error` | **CI の失敗ではなく待機側が見届けられなかった**。CI 自体はまだ動いているかもしれない（同じ行に合流用のコマンドが出る） |
+
+状態が変わらなくても 5 分ごとに生存行が stderr に出るので、固まっているのか単に長いのかは
+出力で分かります。
+
+**`success` を鵜呑みにしない。** `--pr` は「その sha に登録されているチェック」を見るので、
+`ci-debug`（`workflow_dispatch`）の `debug` チェックしか無い状態でも `success` を返します。
+並んだチェック名を読み、`build-mac` / `build-windows` / `clang-tidy` / `test` … があることを
+確かめてください（**`debug` だけなら本来の CI は走っていない**）。
+
+**CI が始まらない（`no-checks`・PR の Checks が 0 のまま）ときに疑う順序**（どれも「必ず
+そうなる」規則ではないので、断定して報告しないこと）:
+
+1. **PR にコンフリクトがある。** コンフリクトを抱えた PR ではチェックが 1 件も登録されない
+   ことがある（main を取り込んで解消したら何も操作せずに CI が起動した実測がある）。ただし
+   毎回そうなるわけでもない。
+2. **PR がまだ無い／その head に PR が向いていない。** 作業ブランチへの push は
+   `push: branches: [main]` に当たらないので、PR を作る前のコミットにチェックが付かないのは
+   正常。
+3. どれでもなければ、GitHub MCP で run（`actions_list` の `list_workflow_runs`）と
+   check-run（`pull_request_read` の `get_check_runs`）を直接数えて、登録の有無を確かめる。
+
+待機の土台は `scripts/ci-common.sh` で、`ci-debug.sh` と共有です。**どんな異常でも必ず
+有限時間で exit する**ことが唯一にして最大の要件で、HTTP の時間上限・締切判定・ウォッチ
+ドッグの三重の歯止めを持ちます（詳細は同ファイルのヘッダ）。この性質は
+`tests/ci-wait.test.sh`（ctest の `CiWaitScriptTests`）で回帰テストしています。
+**新しく「何かの完了を待つ」道具が要るときは、`poll_until` の上に probe を 1 つ書き**、
+待機ループを増やさないでください。
+
 ### CI デバッグ（`ci-debug.yml`）
 
 `.github/workflows/ci-debug.yml` は、**手動ディスパッチ専用**の「CI 上で 1 コマンドだけ
-動かす」ワークフローです。SDK が手元に無い環境（クラウド上の開発セッションや、SDK を
-インストールしていないマシン）から、**SDK 依存のビルドエラーの再現**を行うためのものです。
-**「この API は SDK にあるか」「どう振る舞うか」という SDK そのものの調査は本リポジトリでは
-行わず**、[SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)で
-issue を立てて `Findings/` への反映を待ちます（[`CLAUDE.md`](../CLAUDE.md)「SDK の調査は
-リファレンス側で行う」）。
+動かす」ワークフローです。SDK が手元に無い環境（クラウド上の開発セッションなど）から、
+**本プラグインのコードが SDK でコンパイルできるか**を確かめるために使います。`push` /
+`pull_request` では**決して起動せず**、リリースも公開しません（`contents: write` を持たない）。
+SDK キャッシュは `build.yml` と同じキーで**読み取り専用**に復元するので、本番ビルドの
+キャッシュを汚しません。
 
-`push` / `pull_request` では**決して起動せず**、リリースも公開しません（`contents: write`
-を持たない）。SDK キャッシュは `build.yml` と同じキーで **読み取り専用**に復元するので、
-デバッグ実行が本番ビルドのキャッシュを汚すこともありません。
+**SDK そのものの調査（「この API は SDK にあるか」「どう振る舞うか」）はここでは行いません。**
+[SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)で
+issue を立て（テンプレート `調査`。どの機能で・何が分かれば実装に入れるかを書く）、あちらの
+調査が `Findings/` に反映されるまでその部分の実装に入りません（その間は他の要素や `parse/`
+`core/` の作業を進める）。本リポジトリで `sdk-grep` / `sdk-ls` を使うのは、**既に
+`Findings/` に載っている宣言を写し取る**（引数の型や名前を確かめる）ときだけです。
 
-起動から結果取得までは `scripts/ci-debug.sh` が一手に引き受けます。ディスパッチ →
-実行中の run の特定 → **完了まで待機** → 結果ブロックだけを抽出、までを 1 コマンドで
-行い、完了と同時に終了します（`GITHUB_TOKEN` / `GH_TOKEN` が必要）。
+**`build.yml` に一時的な調査ステップを挿してはいけません**——戻し忘れる・その commit が
+dev プレリリースとして公開される・ccache / SDK キャッシュを汚す、と副作用が大きいためです。
 
-```bash
-# SDK ヘッダを検索する（この API は SDK にあるか？）
-scripts/ci-debug.sh run --mode sdk-grep --args 'GetLayerByName'
+**使い方。** リモートセッションの `GITHUB_TOKEN` は読み取り専用で `actions: write` を
+持たない（REST でのディスパッチは 403）ので、**起動は GitHub MCP、待機はスクリプト**の
+2 手順です。
 
-# ビルドエラーを再現する（--platform で mac / windows / linux を選ぶ）
-scripts/ci-debug.sh run --mode build --platform windows
+```
+1. mcp__github__actions_run_trigger
+     method: run_workflow, workflow_id: "ci-debug.yml", ref: <ブランチ>,
+     inputs: {mode, platform, label, args, script, notify_pr}
+     ※ label は一意な文字列にする（これで run を特定する）
+
+2. Bash(run_in_background: true):
+     scripts/ci-debug.sh wait --label <label>
 ```
 
-**モードの一覧・結果ブロックの読み方（`BEGIN/END PAYLOAD` マーカーと `truncated`）・
-読み取り専用トークンしか無い環境での 2 手順・モードの増やし方は、`CLAUDE.md` の
-「CI デバッグ」節が単一の真実です。** そちらを参照してください（この README では
-重ねて説明しません）。
+手順 2 は「run の特定 → 完了待ち → ペイロード抽出」を行い、完了した瞬間に exit します
+（`ci-wait` と同じく `sleep` で待たない）。最終行は必ず
+`ci-debug: done (conclusion=<結果> exit=<終了コード>)` で、既定の上限は 45 分（ジョブの
+`timeout-minutes` と同じ。`--timeout` / `--poll` で変更可）。`timed-out-waiting` /
+`api-error` の意味は `ci-wait` と同じです。待機プロセスを失ったら
+`scripts/ci-debug.sh wait --label <label>` で合流でき、確実に追いつきたいときは
+`--notify-pr <番号>` で完了時に結果を PR コメントとして投稿させられます。
 
-### CI の完了待ち（`scripts/ci-wait.sh`）
+書き込み権限のあるトークン（PAT など）がある環境では、起動と待機をまとめた
+`scripts/ci-debug.sh run --mode build --platform windows` が使えます。
 
-PR やブランチの CI（`build.yml` / `lint.yml` / `test.yml` …）が終わるのを待つ側にも
-同じ道具立てを用意しています。`scripts/ci-wait.sh` は対象のチェックが全部終わった
-**瞬間に exit** し、最終行に結果を出します。
+| mode | 用途 | `--args` |
+| --- | --- | --- |
+| `sdk-grep` | SDK ヘッダを拡張正規表現で検索（`Findings/` に載っている宣言の写し取り用） | 検索パターン |
+| `sdk-ls` | ヘッダの全文表示 / パス部分一致の一覧 | ヘッダのパスまたは部分文字列 |
+| `build` | configure してビルド（リリース公開はしない） | 単一ターゲット名（省略可） |
+| `compile-one` | 1 翻訳単位だけコンパイル（数十秒。Windows 不可） | ソースのパス |
+| `shell` | 任意の bash（`--script`）。逃げ道 | — |
 
-```bash
-scripts/ci-wait.sh --pr 34        # PR の head（待機中に push が入ったら追随する）
-scripts/ci-wait.sh --ref main     # ブランチ / タグ
-scripts/ci-wait.sh                # いま checkout しているブランチ
+`--platform` は `mac`（既定）/ `windows` / `linux`。**`linux` は SDK を用意しない**ので
+SDK 非依存コード専用（速い）。`--ref` は既定で現在のブランチ。
+
+**`build` / `compile-one` は本番 CI の代わりになりません。** どちらも clang-tidy を通さずに
+コンパイルするだけなので、`build-mac` / `build-windows` が落とす lint（例:
+`readability-uppercase-literal-suffix`）は素通りします。「ci-debug の build が通ったから CI も
+通る」と報告しないこと。SDK 依存コードの最終確認は PR の CI が緑になったことで行います。
+
+**結果の読み方。** 出力は必ず次のマーカーで挟まれます。`truncated=yes` なら全部は見えて
+いないので、`--args` を絞るか `mode=shell` で件数を数えてください。
+
+```
+===== BEGIN PAYLOAD (mode=... platform=...) =====
+...
+===== END PAYLOAD (exit=N lines_total=N truncated=yes|no) =====
 ```
 
-待機の土台（`scripts/ci-common.sh`）は `ci-debug.sh` と共有で、**どんな異常でも必ず
-有限時間で exit する**ことを最優先に作ってあります（HTTP の時間上限・締切判定・
-ウォッチドッグの三重）。加えて「チェックがまだ 1 件も登録されていない」「新しい push で
-古い run がキャンセルされた」を green と取り違えません。この性質は
-`tests/ci-wait.test.sh`（ctest の `CiWaitScriptTests`）で回帰テストしています。
-結果の読み方（`conclusion=` の一覧）は `CLAUDE.md`「CI の完了を待つ」節が単一の真実です。
+`... (annotation truncated by GitHub's 4096-char limit …)` が END の直前に出ていたら、
+注釈経路の上限で切られています（END の `lines_total` が本当の行数）。マーカーが無ければ
+調査コマンドに到達せずに失敗しており、代わりに理由が出ます。全文はジョブログと
+アーティファクト（`ci-debug-<label>`）にありますが、**AI はアーティファクトを取得できない**ので、
+モードを足すときは必要な情報を必ずログ側に出してください。
+
+ペイロードの取得経路は 2 つで、`ci-debug.sh` はこの順に試します。
+
+1. **チェックラン注釈**（`GET /repos/{owner}/{repo}/check-runs/{id}/annotations`）。
+   `ci-debug-job.sh` がペイロードを `::notice::` としても出しているので、通常はここで取れます
+   （`api.github.com` だけで完結し、ログのノイズも混ざらない）。
+2. **ジョブログ**。ログ API は署名付きの Azure Blob Storage へ 302 で飛びますが、そのホストは
+   組織の egress ポリシーで拒否されている（`curl: (56) CONNECT tunnel failed, response 403`）
+   ので、コンテナからは取れません。**迂回してはならない制約**なので、必要なときは GitHub MCP の
+   `get_job_logs`（`job_id` 指定・`return_content: true`）を使います（全ログが文脈に入るので、
+   注釈で足りるならそちらで済ませる）。
+
+**制約。** `workflow_dispatch` は**デフォルトブランチに存在するワークフロー**しか起動できません。
+**モードの追加・修正は `scripts/ci-debug-job.sh`（ランナー側）で行います**——ワークフロー本体は
+薄く保ってあるので、作業ブランチに push するだけで新しいモードを試せます（`--ref` がその
+ブランチのため）。ワークフロー本体を変えると main へのマージが要ります。
 
 ## コーディング規則の強制（Lint）
 
@@ -1045,6 +1266,27 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 - バージョン別の情報は [`Versions/`](https://github.com/Vectorworks/developer-sdk/tree/main/Versions)（2026 / 2025 / … ）にあります。
 
 
+## MCP ブリッジ（`core/Bridge` ＋ `draw/McpBridge` ＋ `scripts/mcp/vw-mcp-server.py`）
+
+利用者から見た使い方は [`README.md`](../README.md)「MCP ブリッジ」、経緯は
+`docs/DEV-NOTES.md` M24 / M30。ここは変えるときの決めごとです。
+
+- **受け渡しの作法**（要求／応答の形・スプールのファイル名・原子的な書き方・id の綴り検査）は
+  **`core/Bridge.h` ただ 1 つ**で、Python サーバはその対になる綴りを持ちます。どちらかを
+  変えたら両方を直してください（`tests/vw-mcp-server.test.py` が落ちます）。
+- **道具の表**（名前・説明・引数の形・実装）は **`draw/McpBridge.cpp` の `kTools` ただ 1 つ**
+  で、Python サーバは起動時に `vw_tools` でそれを取りに行きます。**道具を足すときに触るのは
+  その 1 行と実装 1 つだけ**で、Python 側は直しません。JSON は `core/Json`（ブリッジ専用）。
+- **受け付けは常駐のパレットの時計が 1 回ずつ呼びます**（M30。`draw::serveMcpBridge` は待たずに
+  戻る）。**本体の中にループを書かない**——書けば図面がまた塞がります。本体のコードが
+  スタックに載っている間（`PayloadInUse`）は見送ります。
+- **v1 の道具は読むだけ**です。パレットが隠れていても受け付けるのは読むだけだから許して
+  いるので、**図面を書く道具を足すなら、その判断をやり直し**、undo の作法
+  （[SDK リファレンス「Undo」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Undo.md)）を
+  必ず通してください。
+- **Vectorworks を起こすのは Python サーバの道具**（`vw_launch`）で、プラグイン側には書きません
+  （起こす前にはプラグインが居ない）。
+
 ## 実機フィードバックの往復（`draw/Feedback`）
 
 > **本番の取り込みコマンドとは別の入口です（M25）。** 往復を回すのはメニューの
@@ -1069,11 +1311,9 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 ```
    ① メニューで **「実機テストを実行…」**（人がするのはこれだけ。開発版だけのコマンド）
         ↓
-   ② 1 周目だけ: IFC を選ぶ → 取り込み設定 → **毎周開き直す図面（テンプレート）**を選ぶ
-      → **結果を PR へ送るか**（宛先・伏せ字）
-      2 周目以降: **ダイアログは 1 枚も出ません**。テンプレートを選んであれば、**その複製を
-      毎周開いて**まっさらな状態から描きます（選ばなければ、前の周が作ったレイヤを
-      取り除いてから描き直します。M25。下記）
+   ② 1 周目だけ: IFC を選ぶ → 取り込み設定 → **結果を PR へ送るか**（宛先・伏せ字）。
+      **いま開いている図面を作業ファイルへ別名保存し**、以後の周の基準にします
+      2 周目以降: **ダイアログは 1 枚も出ません**。図面を取り込み前へ戻してから描きます（下記）
         ↓
    ③ 取り込みが走る（1 分以上）——**ここから先、人の操作は 1 つも要りません**
         ↓
@@ -1090,30 +1330,16 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 パレットが開いていない（止めた・閉じた・再起動した）ときは、⑥ の代わりに人が ① を
 1 回実行します（新しいビルドが尋ねずに入り、ファイル選択も設定も再起動も出ません）。
 
-**たいていの場合、図面を「取り消し」で戻す必要はありません（M25）。** 前の周が作ったレイヤ
-（デザイン・シートとも）をプラグインが名指しで取り除いてから描き直します。**消すのは自分が
-作ったものだけ**で、利用者が別の用途で足したレイヤには触れません。
-
-**ただし取り込み前から在ったレイヤ（テンプレートのもの）へ描いた分は取り除けません。**
-そのレイヤは自分が作ったものではないので消せず、上に描いた分だけが残ります。PR コメントの
-末尾が**その周だけ**「取り消しで戻してください」と言うので、そこに従ってください。丸ごと
-戻す道は**3 つとも塞がっている**ことが確定しています——閉じた undo イベントへ Undo は掛け
-られず（[#23](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/23)）、
-閉じずに返しても VW がコマンド完了時に代わりに閉じてしまい
-（[#31](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/31)）、
-メニューの「取り消し」を名前で起動する API もありません
-（[#27](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/27)）。プログラムから「取り消し」を掛ける道は
-ISDK の undo 実行 API（[#23](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/23)）
-もメニューコマンドの起動（[#27](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/27)）
-も**存在しない**ことが確定しているので、レイヤを直接消す
-（[#25](https://github.com/min-nano/vectorworks-developer-sdk-reference/pull/25) で実機確認済み）
-のが唯一の手立てです。何枚消せたかは診断ログの「準備:」の行に出ます。
+**図面を「取り消し」で戻す必要は、たいていありません（M25）。** 周と周のあいだは
+プラグインが自分で図面を取り込み前へ戻します（下記「図面の戻し方」）。どう戻したかは毎回の
+PR コメントの「準備:」と「図面の状態:」の 2 行に出ます。
 
 **同じビルドが動いているなら取り込みません。** 前の周と同じ数字が並ぶだけで 1 分を使う
 意味が無いので、①を押しても**往復を回し直すだけ**です（止めた往復をその場で再開する入口を
-兼ねます）。M24 まではここで「新しい 1 周目」として取り込み直しており、パレットが開いて
-いる最中にメニューを押した人が同じ round を二重に投稿する事故が実機で起きました
-（`docs/DEV-NOTES.md` M25）。
+兼ねます）。ただし手で押した周には「回り直しました」という結末を返します
+（`TestRoundOutcome::Rearmed`）。M24 まではここで「新しい 1 周目」として取り込み直しており、
+パレットが開いている最中にメニューを押した人が同じ round を二重に投稿する事故が実機で
+起きました（`docs/DEV-NOTES.md` M25）。
 
 **尋ねることは全部、取り込みが始まる前に尋ね切ります。** 取り込みは 1 分以上かかるので、
 終わったところに確認が待っていると席を離れられません——それでは「実行して放っておく」が
@@ -1128,7 +1354,35 @@ ISDK の undo 実行 API（[#23](https://github.com/min-nano/vectorworks-develop
 インストールと差し替えは実機テストのコマンドの頭にある更新の確認が行います
 （`UpdateCheckKind::Auto`。下記）。本体のコードがスタックに載っている間は本体を降ろせ
 ないので、差し替えはどのみち殻へ返ってからにしかできず、**インストールの経路はこの
-リポジトリに 1 本だけ**に保てます。
+リポジトリに 1 本だけ**（`src/UpdaterFlow.cpp`）に保てます。
+
+### 図面の戻し方（3 段構え・M25）
+
+戻し方は**「取り消し」→「作業ファイルを開き直す」→「レイヤ削除」の順**で、前が効けば後ろは
+要りません。順序は入れ替えないでください。
+
+1. **取り消し**（`undoPreviousRound` → `draw/DrawUtil` の `UndoOneStep`）。取り込みは自分で
+   undo イベントを開き、作ったレイヤを登録している（`ImportUndoScope`）ので、利用者に頼んで
+   いた「取り消し」と同じものをプラグインから起こせます（VectorScript 経由の
+   `DoMenuTextByName('Undo', 0)` が実機で効くと確定。
+   [Findings「Undo」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Undo.md)）。
+   **取り込み前から在ったレイヤ（テンプレートの「共通」等）へ描いた分まで戻る**のはこれだけです。
+2. **作業ファイルを開き直す**（`openRoundDocument`。
+   [Findings「Documents」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Documents.md)）。
+   1 周目に別名保存した作業ファイルを毎周開き直し、まったく同じ初期状態から始めます
+   （使う口は `ISDK::SaveActiveDocumentPath` / `CloseDocument` / `OpenDocumentPath` /
+   `GetActiveDocument`）。
+3. **前の周が作ったレイヤだけを消す**（`prepareDrawingForRound` → `draw/DrawUtil` の
+   `RemoveCreatedLayers`）。作業ファイルを用意できなかった周の控えです。取り込み前から
+   在ったレイヤへ描いた分は取り除けないので、そこだけ絵が二重になります（PR コメントがその周
+   だけ「取り消しで戻してください」と言います）。
+
+ISDK の API から丸ごと戻す道は 4 本とも塞がったままです（SDK リファレンス
+[#23](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/23) /
+[#27](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/27) /
+[#31](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/31) /
+[#39](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/39)）。上の 1 は
+VectorScript を経由する道です。
 
 ### モードレスの往復パレット（M24）
 
@@ -1169,9 +1423,9 @@ ISDK の undo 実行 API（[#23](https://github.com/min-nano/vectorworks-develop
 **どこに何があるか**: 駆動（状態機械と止まる条件）は `src/FeedbackLoop.*`（殻・SDK 非依存・
 `tests/FeedbackLoopTests.cpp`）、殻の実物は `src/FeedbackLoopHost.*`、パレットの登録と JS の
 取り次ぎは `src/Extensions/ExtFeedbackPalette.*` と `resources/<vwr>/html/index.html`。
-本体が殻へ見せるのは往復の記憶（`vw_payload_loop_status`）と「止めた」の受け口
-（`vw_payload_loop_end`）だけで（`src/PayloadAbi.h` v3）、取り込みそのものは従来どおり本体が
-行います。合図は同梱スクリプトの `loop-control <repo> <n> [since]` が読みます
+本体が殻へ見せるのは往復の記憶（`vw_payload_loop_status`）・「止めた」の受け口
+（`vw_payload_loop_end`）・周そのもの（`vw_payload_run_test`。M25）だけです
+（`src/PayloadAbi.h`）。合図は同梱スクリプトの `loop-control <repo> <n> [since]` が読みます
 （`state=open|closed|merged` / `control=stop|none`。since は `post` が返す `created=`）。
 
 **実機未確認のところ**: この拡張種別（`IExtensionWebPalette`）は SDK リファレンス側で
@@ -1179,60 +1433,47 @@ ISDK の undo 実行 API（[#23](https://github.com/min-nano/vectorworks-develop
 （[Findings「モードレス（非モーダル）なパレット」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md)）。
 確かめること: パレットが開き図面を操作しながら見えるか・JS のタイマーからの呼び出しが
 届き続けるか・表示／非表示が切り替わるか・取り込みの最中に届く呼び出しが無視されるか。
-**効かなくても手動の周は壊れません**（メニューからの取り込みは M23 のまま動きます）。
+**効かなくても手動の周は壊れません**（メニューからの実機テストは動きます）。
 分かったことは SDK リファレンスの `Findings/` へ足してください。
-
-**前の周の図は自動では戻りません。** プログラムから「取り消し」を掛ける手立ては無い
-（Findings「Undo」）ので、自動の周は前の周の図の上へ重ねて描きます。PR コメントの
-「図面の状態:」がそれを毎回言うので、読む側はそれを前提に数字を読みます。席にいるなら、
-新しいビルドが入る前に「取り消し」で戻しておくと絵が二重になりません。
 
 ### 往復の最中は尋ねずに更新する（`UpdateCheckKind::Auto`）
 
-取り込みコマンドは頭で更新を確認します（[上記](#いつ確認するか--3-つの入口起動時ではない)）。
-往復の中では、その確認の性格が変わります。
+実機テストのコマンドは頭で更新を確認します（下記「いつ確認するか」）。往復の中では、その
+確認の性格が変わります。
 
 | いつ | 種別 | ふるまい |
 | --- | --- | --- |
-| ふだん | `Silent` | 更新があるときだけ「インストールしますか？」と尋ねる。オフラインなら黙って取り込みへ進む |
-| 往復の最中 | `Auto` | 同じブランチの新しいビルドを**尋ねずに入れ、黙って取り込みへ進む** |
+| 1 周目 | `Silent` | 更新があるときだけ「インストールしますか？」と尋ねる。オフラインなら黙って取り込みへ進む |
+| 2 周目以降（往復の最中） | `Auto` | 同じブランチの新しいビルドを**尋ねずに入れ、黙って取り込みへ進む** |
 
 尋ねないのは、その人が**「直したから、もう一度実行してほしい」と言われて実行している**
 からです。そこへ確認を挟むのは、この往復が無くそうとしている手間そのものになります。
 
 `Auto` に切り替わる仕掛けは覚え 1 つだけです。本体が投稿できた周の終わりに「**次は尋ねず
 に入れてよい**」を戻り値で返し、殻がそれを `static bool` で 1 回ぶん覚えます
-（`src/Extensions/ExtMenu.cpp`）。**殻に置くのは本体が入れ替わっても残ってほしいから**で、
+（`src/Extensions/ExtTestMenu.cpp`）。**殻に置くのは本体が入れ替わっても残ってほしいから**で、
 Vectorworks を閉じれば消えてよい類の覚えなのでファイルには落としません。
 
-`Auto` が口を開くのは、**入れたのに効かせられなかったとき**だけです——殻まで変わった
-（再起動が要るので、勝手に落とさず伝えます）・インストールに失敗した・本体を降ろせな
-かった。そのときは `false` が返り、殻は**その実行の取り込みを見送ります**（古い本体で
-1 分以上かけて前の周と同じ結果を出し、それをまた PR へ投げても仕方がありません）。
+`Auto` が `false` を返したら（入れられなかった・殻まで変わった・本体を降ろせなかった等。
+下記「いつ確認するか」）、殻は**その実行の取り込みを見送ります**（古い本体で 1 分以上
+かけて前の周と同じ結果を出し、それをまた PR へ投げても仕方がありません）。
 
 ### 所見はプラグインが訊きません
 
 **絵を見て気付いたことは、人が Claude とのチャットへ直接書きます。** 所見を書くには結局
 その人が実機を見ている必要があり、見ているならチャットのほうが速く、スクリーンショットも
 貼れます。M23 では一度「所見を別プロセスのダイアログで訊く」仕組みを作りましたが、
-**プラグインが持つ理由が無かった**ので外しました（`docs/DEV-NOTES.md` M23）。
+**プラグインが持つ理由が無かった**ので外しました（`docs/DEV-NOTES.md` M23）。**足し直さない
+でください。**
 
 プラグインが PR へ載せるのは**数字と診断ログ**だけです。数字だけで判断が付かないときは、
 Claude が「実機で確かめてほしい点」を PR かチャットへ返します。
 
 ### ボタンは「何を」するのかを名乗ります
 
-動詞だけのボタンは、対象が 1 つしかない画面でしか成立しません。
-
-| ダイアログ | ボタン |
-| --- | --- |
-| 送るかどうか（取り込みの前） | 「取り込み結果を送る」／「送らない」 |
-| 続きの確認 | 「続ける」／**「往復を終える」** |
-
-**結末そのものをボタンに書く**のも同じ理由です——「やめる」では「この取り込みをやめる」
-とも読めますが、「往復を終える」なら読み違えようがありません。送るかどうかのダイアログには、
-**送るもの**（要素ごとの内訳・描画側の注意・診断ログ）と、**投稿したあとは何も尋ねない**
-ことも書いてあります。
+動詞だけのボタンは、対象が 1 つしかない画面でしか成立しません。1 周目の送るかどうかの
+ダイアログのボタンは「取り込み結果を送る」／「送らない」で、**送るもの**（要素ごとの内訳・
+描画側の注意・診断ログ）と、**投稿したあとは何も尋ねない**ことも書いてあります。
 
 ### 使いはじめ（初回だけ）
 
@@ -1241,9 +1482,9 @@ Claude が「実機で確かめてほしい点」を PR かチャットへ返し
    リポジトリの **Pull requests: Read and write** だけです。
    （`gh` CLI で認証済みの機械なら、この手順は要りません——スクリプトが `gh auth token`
    を使います。）
-3. メニューの **「実機テストを実行…」**（開発版だけ）を 1 回実行し、フィードバックの
-   ダイアログで **「PR へ送る」** を押します。
-   トークンが未登録なら 1 度だけ貼り付けを求められ、**macOS はキーチェーン**、
+3. 試したい図面（空のテンプレート等）を開き、メニューの **「実機テストを実行…」**
+   （開発版だけ）を 1 回実行して、フィードバックのダイアログで **「取り込み結果を送る」**
+   を押します。トークンが未登録なら 1 度だけ貼り付けを求められ、**macOS はキーチェーン**、
    **Windows は DPAPI で暗号化したファイル**へ保存されます（図面にもログにも残りません）。
 4. 送信先の PR 番号は**ブランチから自動で引きます**（`find-pr`）。違っていればその場で
    直せます。
@@ -1257,13 +1498,15 @@ Claude が「実機で確かめてほしい点」を PR かチャットへ返し
 **別の図面で試したいときは、その図面を開いてから「実機テストを実行…」を実行します。**
 手で実行した周は、開いている図面が前の周の作業ファイルでなければ**そちらを新しい基準として
 採り直します**（宛先・IFC・設定はそのままで、変わるのは「どの図面から始めるか」だけです）。
-自動の周は前の周の続きなので、常に作業ファイルへ戻ります。記憶ごと消したいときは、新しいビルドが無いときに取り込みを
-実行して 1 周目のダイアログで「送らない」を選びます（または記憶のファイルを消します）。
+自動の周は前の周の続きなので、常に作業ファイルへ戻ります。記憶ごと消したいときは、往復の
+記憶が無い状態から 1 周目のダイアログを出して「送らない」を選びます（または記憶のファイルを
+消します）。
 
 ### 覚えているもの（`core/FeedbackSession`）
 
-1 周目の選択（IFC のパス・取り込み設定・宛先 PR）は `key=value` のテキストで残ります。
-**ここが 2 周目以降からファイル選択と設定ダイアログを消している唯一の仕掛け**です。
+1 周目の選択（IFC のパス・取り込み設定・宛先 PR）と作業ファイルのパスは `key=value` の
+テキストで残ります。**ここが 2 周目以降からファイル選択と設定ダイアログを消している唯一の
+仕掛け**です。
 
 - macOS … `~/Library/Application Support/HomeskzIfcImport/feedback.txt`
 - Windows … `%LOCALAPPDATA%\HomeskzIfcImport\feedback.txt`
@@ -1271,7 +1514,7 @@ Claude が「実機で確かめてほしい点」を PR かチャットへ返し
 （フォルダ名はプラグインの改名に追随させていません。**識別子なので付け替えると進行中の
 往復の記憶が行方不明になる**ためで、同梱スクリプトが置くトークンも同じフォルダです。）
 
-手で消せば往復は終わります（次の取り込みはいつもどおり選択から始まります）。
+手で消せば往復は終わります（次の実機テストはいつもどおり選択から始まります）。
 `HOMESKZ_IFC_FEEDBACK_STATE` に別のパスを指定して差し替えられます。
 
 ### 公開されることと、伏せるもの
@@ -1296,16 +1539,16 @@ PR コメントは**公開**です。そこで**既定で案件が分かるも�
 
 | | 役割 |
 | --- | --- |
-| `src/core/FeedbackSession.*` | 覚えておく値と、その読み書き（無 SDK・テストあり） |
-| `src/parse/Feedback.*` | **コメント本文**（Markdown）・前の周との差分・匿名化（無 SDK・テストあり） |
-| `src/draw/Feedback.*` | 実機テストの 1 周（`runTestRound`）——記憶・取り込み前のダイアログ・準備・投稿（SDK 依存）。**待たないし、入れもしない** |
+| `src/core/FeedbackSession.*` | 覚えておく値と、その読み書き。**どの周になるかの場合分け**（`feedbackRoundKind`）もここ（無 SDK・テストあり） |
+| `src/parse/Feedback.*` | **コメント本文**（Markdown）・前の周との差分・匿名化・実機テストの結末の文言（無 SDK・テストあり） |
+| `src/draw/Feedback.*` | 実機テストの 1 周（`runTestRound`）——記憶・取り込み前のダイアログ・図面の準備・投稿（SDK 依存）。**待たないし、入れもしない** |
 | `src/draw/ImportRun.*` | 取り込み 1 周ぶんの部品。**本番の取り込みと実機テストが共有する唯一の実装**（M25） |
 | `src/Extensions/ExtTestMenu.*` | 実機テストの入口の登録と取り次ぎ（殻・**dev だけ登録**。M25） |
 | `src/draw/HostServices.*` | 殻から借りた道具（同梱スクリプトの実行）の置き場所 |
 | `src/FeedbackLoop.*` | **自動の往復の駆動**（殻・無 SDK・テストあり。M24）。合図と新しいビルドを見て、入れて、取り込みを本体に頼み、止まる条件を持つ |
 | `src/FeedbackLoopHost.*` / `src/Extensions/ExtFeedbackPalette.*` / `resources/<vwr>/html/` | 駆動の殻の実物と、モードレスなパレット（SDK 依存。**判断は持たない**） |
-| `scripts/vw-feedback.sh` / `.ps1` | **ネットワーク**。`token-status` / `login` / `logout` / `find-pr` / `post` / `loop-control`（ダイアログは持ちません） |
-| `scripts/vw-token.sh` / `.ps1` | **トークンの在り処**（保存先・探索順）。`vw-feedback` と `vw-update` が source します（M27） |
+| `scripts/vw-feedback.sh` / `.ps1` | **ネットワーク**。`token-status` / `login` / `logout` / `find-pr` / `post` / `loop-control`（ダイアログは持ちません。C++ 側はネットワークを書かない） |
+| `scripts/vw-token.sh` / `.ps1` | **トークンの在り処**（保存先・探索順）。`vw-feedback` と `vw-update` の両方が source します（読むほうにも必ず付ける。M27） |
 
 **安定版（stable）では動きません。** 往復するのは PR のビルドであって main の配布物では
 なく、開発用でないビルドに「図面の情報が外へ出る経路」を持たせないためです
@@ -1314,40 +1557,159 @@ PR コメントは**公開**です。そこで**既定で案件が分かるも�
 **なぜ入れ替えが殻の側で起きるのか**: 新しい本体をその実行のまま効かせるには載っている
 本体を降ろす必要があり、それができるのは**本体のコードがスタックに 1 つも無いとき**だけ
 です（[`src/PayloadSession.h`](../src/PayloadSession.h)）。したがって入れ替えは必ず
-「本体から戻ったあと」＝取り込みコマンドの頭になります。殻に足したのは「次は尋ねずに
+「本体から戻ったあと」＝実機テストのコマンドの頭になります。殻に足したのは「次は尋ねずに
 入れてよい」を 1 回ぶん覚える `static bool` だけで、往復の中身はすべて本体側にあります
 （＝往復のふるまいを直しても再起動は要りません）。
 
-### 残っている手作業（1 つ、ダイアログ無し）
+### 設計の決めごと（往復を変えるときに守ること）
 
-パレットが回っていれば、次の周を始めるためにメニューを押す必要はありません（M24）。
-残るのは次の 1 つです。
+往復まわり（`draw/Feedback`・`src/FeedbackLoop*`・パレット・`scripts/vw-feedback.*`）を
+変えるときの決めごとです。**どれも実機で一度壊れて決まったもの**なので、緩める前に
+`docs/DEV-NOTES.md` の M23〜M25 を読んでください。
 
-1. **1 周目に「毎周開き直す図面」を選ぶ。** 同じ文書へ何度も描くと前の周の図形が二重に
-   残るためです。プログラムから「取り消し」を掛ける道は 3 つとも塞がっていることが確定
-   しています（[#23](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/23) /
-   [#27](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/27) /
-   [#31](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/31)）。
-   代わりに、**選んだテンプレートを一時ディレクトリへ複製して毎周開き直します**
-   （[Findings「Documents」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Documents.md)）。
-   **テンプレートそのものは開かない**ので、保存の拍子に書き換わることはありません。前の周
-   の図面は保存してから閉じます（保存先は「準備:」の行に出るので、あとから開いて見られます）。
+**入口と分担**
 
-   **選ばなくても動きます。** その場合は従来どおり、**前の周が作ったレイヤだけ**を取り除いて
-   から描き直します。ただし**取り込み前から在ったレイヤ**（テンプレートにある通り芯の
-   「共通」など）へ描いた分は取り除けず、そこだけ絵が二重になります（実機で発生。
-   `docs/DEV-NOTES.md` M25）。
+- **本番の取り込みコマンドに往復を書かない（M25）。** 往復（記憶を読む・尋ねずに入れる・
+  準備する・投稿する・パレットを開く）を書いてよいのは `Extensions/ExtTestMenu` ＋
+  `draw/Feedback` の `runTestRound` だけで、`draw/ImportCommand` と `Extensions/ExtMenu` には
+  1 行も書きません。**`#ifdef VW_DEV_BUILD` で囲っても制御フローは本番の入口に残る**ので、
+  囲えばよいとも考えません。共有してよいのは `draw/ImportRun` の `runImportRound` だけです。
+- **本体は待たない・入れない。** `draw/Feedback` にビルドを待つコードを書かない（モーダルの
+  ダイアログが図面を塞ぐ。実機 round 3）。インストールも書かない（経路は
+  `src/UpdaterFlow.cpp` の 1 本。本体が殻へ返すのは「次は尋ねずに入れてよい」の 1 ビット
+  だけ）。待つのは殻のモードレスなパレットです。
+- **パレットに判断を持たせない。** JS は数秒ごとに `homeskz.tick()` を呼んで返った文言を
+  並べるだけで、GitHub を見に行く間隔も止まる条件も駆動（`src/FeedbackLoop`）が持ちます。
 
-   どちらの周だったかは、毎回の PR コメントの「準備:」と「図面の状態:」の 2 行に出ます。
-   読む側（Claude）はこの 2 行で、絵の破綻が実装のせいか図面の残りかを切り分けます
-   （レイヤ名そのものは PR へ出さず、枚数と判定だけを載せます）。
+**回り出す・止まる**
 
-**往復のやめ方**: パレットの「往復を止める」か、Claude の合図（`control=stop`）です（上記
-「モードレスの往復パレット」）。パレットが開いていないときは M23 のとおりで、続きの周が
-走るのは**追っているブランチに新しい dev ビルドが出たとき**だけなので、push が止まれば
-往復も止まります。新しいビルドを待っている間に「実機テストを実行…」を押しても、同じビルド
-なら取り込まず往復を回し直すだけです（M25）。記憶ごと消したいときは、往復の記憶が無い状態
-から 1 周目のダイアログを出して「送らない」を選びます。
+- **回り出す入口は「人がメニューを押したとき」だけ。** 駆動は自分が武装したか
+  （`FeedbackLoopDriver` の `fArmed`。`Arm` / `BeginRound` で立ち、止まると下りる）だけを見て
+  回し、**記憶が `active` であることを理由に回さない**——パレットの JS タイマーは Vectorworks が
+  生きているあいだ回り続けるので、記憶を根拠にすると誰も押していないのに往復が走り出します
+  （実機で発生）。
+- **止まっても記憶は消さない。** `loop` を下ろすだけにし、人がメニューから実機テストを実行
+  すれば続きの周として走るようにします。**新しい停止の入口を足すときも、記憶を消す側へ
+  倒さない。** 確認そのものができなかった（オフライン等）ときは止めません。
+- **キャンセルされた周は「試し終えた」ことにしない**——記憶の `lastCommit` を進めません。
+  進めると、進捗ダイアログのキャンセルを一度押しただけでそのビルドでは往復を再開できなく
+  なります（実機 round 10）。
+- **やめる入口はパレットだけに置く**（取り込みのダイアログには足さない）。記憶ごと消す意思は
+  1 周目のダイアログの「送らない」が受け取ります。
+- **パレットを隠すだけの口を作らない。** 「閉じる」は往復を止めてから隠します
+  （`FeedbackLoopStopForClose` → `ShowFeedbackPalette(false)`）。
+- **隠れたページは返事を受け取れない、と考えて設計する。** 順序は必ず**止める → 返事 →
+  隠す**。JS 側も閉じる呼び出しの返事を待たず（待つと「返事待ち」が解けずパレットが二度と
+  動かなくなる。実機で発生）、「呼び出し中」の印は時間で自動的に解きます。
+
+**尋ねる・伝える**
+
+- **尋ねるのは取り込みが始まる前だけ。** `postFeedbackRound`（取り込みのあと）にダイアログを
+  足しません。投稿に失敗した理由も、アラートではなくいつもの結果ダイアログへ添えます。
+- **続きの周にダイアログを 1 枚も出さない。** 確認は情報を生まずクリックだけ増やす（押した
+  かどうかは起きたかどうかではない）。頼みごとは 1 周目のダイアログで言い切り、実際にどう
+  だったかは描画側の実測を PR コメントへ載せます。図面が戻っていたかは 1 周目に採った基準と
+  `DrawCounts::existingLayers` の引き比べで判定します（真偽 1 つでは、テンプレートにもとから
+  在るレイヤと前の周の残りを区別できない）。
+- **正しく何もしないことは、黙っていてよい理由にならない。** 自動の周は黙ってよいが、人が
+  押した操作には必ず結末を返します（同じビルドで回り直しただけでも `Rearmed` を返す）。
+- **実機テストの結末は実機テスト自身の言葉で言う。** 取り込みコマンドの完了文言
+  （`parse::formatImportResult` / `formatImportError`）を借りず、`parse::formatTestRoundResult`
+  を使い、結果ダイアログのタイトルも本番と別にします（`kTestResultTitle`）。共有してよいのは
+  ダイアログの器（`draw/ResultDialog`）だけです。
+- **取り込みの最中に SDK に訊かせない。** Vectorworks 自身がモーダルを出す余地は渡す値の側で
+  潰します（例: 図番が重なると「新しい図番を割り当てますか？」が出るので、軸組図の図番は
+  `parse::uniqueSectionNumbers` が一意にする）。
+- **手動で押した周は、いま開いている図面を基準として採り直す**（`allowDialogs` のときだけ）。
+  捨てるのは「どの図面から始めるか」だけで、宛先・IFC・設定はそのままです。自動の周は常に
+  作業ファイルへ戻します。
+
+**図面を戻す（利用者のものを消すコード）**
+
+ここはアンインストーラと並ぶ「利用者のものを消す」コードなので、**歯止めを緩める方向へ
+変えません**。
+
+- **図面から消してよいのは「前の周が自分で作ったレイヤ」だけ。** 入口は `draw/Feedback` の
+  `prepareDrawingForRound` ただ 1 つで、SDK の作法（自分で undo イベントを開いて閉じる・
+  **シートを先に消す**）と安全弁（名前と種別が一致し、消したあとに 1 枚も残らなくならない
+  こと）は `draw/DrawUtil` の `RemoveCreatedLayers` が 1 か所で持ちます。消す相手は
+  `ImportUndoScope` が控えた作ったレイヤの名前（`DrawCounts::createdLayers` /
+  `createdSheets` → `core::FeedbackSession::lastCreatedLayers` / `lastCreatedSheets`）だけで、
+  **「基準に無いレイヤ」を消す作りにしない**（利用者が別の用途で足したレイヤを巻き込む）。
+- **取り消しを押してよいのは、いま開いているのが自分の作業ファイルで、かつ前の周が作った
+  レイヤが実際に残っているときだけ。** 利用者の図面では絶対に押さない（取り消しスタックの
+  上にあるのは利用者自身の編集かもしれない）。効いたかは読み戻して確かめ（前の周のレイヤが
+  1 枚も無くなったか）、1 周が undo イベント 1 つとは限らないので上限つきで数段掛けます。
+  **Python では走らせない**（`ExecuteScript` から `vs.*` を呼ぶと VW ごと落ちる）・**`CompileScript` を呼ばない**
+  （成功でもモーダルが出る）・**自分の undo イベントを開いたまま呼ばない**。スクリプトの文面は
+  固定にし、図面の値や人の入力を混ぜません（失敗するとモーダルのエラーで無人の周が止まる）。
+- **作業ファイルはテンプレートを複製して作らない。** 基準は**いま開いている図面**で、1 周目に
+  それを別名保存します（複製する作りは実機で 3 周続けて失敗した）。
+- **周の終わりは「別の捨て場所へ保存し直してから閉じる」。** 未保存の変更がある文書は
+  `CloseDocument()` が閉じられない（実機確認済み）ので、この順序でなければ閉じられません。
+  保存先はいつも**まだ無いパス**（`FreshTempPath`。既存のファイルへの別名保存が失敗した実測が
+  ある）。**保存できなければ閉じない**（図面が 1 枚増えるほうが軽い）。
+- **前の周の図面はパスで見分ける**（`core::FeedbackSession::workPath` と引き比べる）。
+  アクティブな文書が作業ファイルでなければ触りません。`fFileRef` を記憶に持ち越すのは禁止
+  （再起動後に同じ番号が別の図面に割り当たり、利用者の図面を閉じる恐れがある）。
+- **開き直せたかは戻り値ではなく読み戻しで見る**（`GetActiveDocument` のパス）。開き直せ
+  なかったら黙って続けず、何が起きたかを「準備:」の 1 行に**証拠つきで**載せます（いま開いて
+  いる図面へ描くと前の周に重なり、数字は揃うのに絵が壊れる）。
+- **作業ファイルを採る周は採る前に、開き直したあとにも、前の周が作ったレイヤを落とす。**
+  汚れたまま採られた作業ファイルが以後の周をずっと汚すのを防ぎ（実機 round 13）、きれいな
+  ファイルでは素通りするので自分で直ります。基準を採り直す周はレイヤの基準
+  （`baselineLayers`）も採り直します。
+
+### 届いたコメントの読み方（Claude 向け）
+
+dev ビルドが投稿するコメントは必ず次の行で始まります。
+
+```
+<!-- homeskz-ifc-feedback v1 round=<N> build=<commit> branch=<branch> -->
+```
+
+この目印があるコメントは**利用者の Vectorworks が自動生成したもの**で、人は 1 文字も
+書いていません。**数字と診断ログしか無く**、絵がどう見えたか（所見）は利用者がチャットへ
+直接書きます。読む順序は:
+
+1. **「図面の状態:」を見る。** 正常なら「取り込み前から在ったレイヤに描きました」に落ち着き
+   ます。「前の周の図が残ったまま重ねて描きました」なら**戻しに失敗している**（「準備:」の行に
+   何をしたかが出る）ので、**絵は二重になっている——絵の破綻をそのまま実装のせいにしない**
+   でください。数字は重なっていても変わらないので、この行が唯一の手掛かりです。1 周目は
+   「基準にします」としか言いません（テンプレートにもとから在るレイヤを「戻し忘れ」と読み
+   違えないため。M23 で一度そう読み違えた）。
+2. **「前の周からの変化」を見る。** 数字が動いていないなら、直したつもりのところに届いて
+   いません。
+3. 要素の内訳・注意・診断ログで裏を取る。
+4. **命令の数が合っていても絵が破綻していることは普通にある**と常に疑う。怪しければ、
+   「3 階の梁の天端が基準面と合っているか」のように**絵で見て答えられる形**で確かめてほしい
+   点を返します（答えはチャットで来ます）。
+
+**直したら push します。次の周は自動で来ます。** push したら、その周で**何が変わるはずか**を
+PR に 1〜2 行で返しておきます（次のコメントと突き合わせられる）。
+
+**頼んでよいのは「メニューの『実機テストを実行…』をもう一度実行してください」だけ**です
+（パレットが回っている間はそれすら要りません。本番の「IFC 取り込み」では往復は動きません）。
+図面を「取り消し」で戻すことは、PR コメントがそう言っている周だけ頼んでよい。ファイルを
+選び直す・設定を選び直す・再起動する・ログを貼る——このどれかを頼みたくなったら、それは
+仕組みが壊れている合図なので、頼む前に直してください。
+
+**往復がもう要らなくなったら合図を投稿します。** 黙って push をやめるだけでは、利用者側の
+パレットは待ち続けます。PR へ次の 1 行を含むコメントを投稿すると、次の確認（1 分以内）で
+パレットが止まります。
+
+```
+<!-- homeskz-ifc-feedback v1 control=stop -->
+```
+
+**その行だけの行にします**（前後は空白のみ。人が読む文は別の行に添えてよい）。文中へ引用
+したものも ``` で囲んだものも合図になりません（`docs/DEV-NOTES.md` M24「合図は行であって、
+文中の引用ではない」）。逆にプラグインが `control=ended` のコメントを投稿してきたら、利用者側で
+往復が止まった（パレットで止めた・入れ替えに失敗した・殻まで変わって再起動が要る）という
+ことで、以後は push しても自動の周は来ません。続きが要るなら実機テストの再実行を頼みます。
+
+**自動の周は実機確認の代わりになりません。** 描画に触れる PR をマージしてよいのは人が
+「確認できた」と言ったときだけです（[`CLAUDE.md`](../CLAUDE.md)「開発プロセス: PR とマージ」）。
 
 ---
 
@@ -1465,22 +1827,34 @@ Vectorworks は読み込まず、次のインストールが掃きます。
 方法（macOS は `dladdr`、Windows は `GetModuleFileName`）」と「起動するスクリプト」
 だけです。
 
-### いつ確認するか — 3 つの入口（起動時ではない）
+### いつ確認するか — コマンドの入口で（起動時ではない）
 
-**Vectorworks の起動時には確認しません。** 以前は `plugin_module_main` の中で 1 度だけ
+**Vectorworks の起動時（`plugin_module_main`）には確認しません。** 以前は起動時に 1 度だけ
 走らせていましたが、殻と本体に割れて以降（上記「殻と本体」）、機能追加以外の更新は
 **再起動なしでその場から効く**ようになったので、起動のたびに問う理由が無くなりました。
 起動を待たせずに済むうえ、後述のとおり**再起動を Vectorworks 自身に頼めるようになる**
-という副産物もあります。
+という副産物もあります。**起動時の確認を復活させるなら、再起動の作りも一緒に戻してください**
+（下記「以前は SDK に頼めなかった」）。
 
-入口は次の 3 つで、`src/UpdaterHost.h` の `UpdateCheckKind` がこの違いを表します。
+入口は次のとおりで、`src/UpdaterHost.h` の `UpdateCheckKind` がこの違いを表します。
 
 | 入口 | kind | ふるまい |
 | --- | --- | --- |
 | メニューコマンド「アップデータを確認」（`src/Extensions/ExtUpdateMenu.cpp`） | `Manual` | 尋ねて入れる。**結末を必ず伝える**（最新です／確認できませんでした） |
-| 取り込みコマンドの頭・1 周目（`src/Extensions/ExtMenu.cpp`） | `Silent` | 更新があるときだけ尋ねる。**無ければ黙って取り込みへ進む** |
-| 取り込みコマンドの頭・2 周目以降（実機フィードバックの往復） | `Auto` | **尋ねずに入れて黙って続ける**。口を開くのは輪が止まるときだけ |
-| 往復パレットの周期確認（M24。`PollDevBuildWith`） | — | **ダイアログを 1 枚も出さず、結末を値で返す**（パレットがその文言を出す）。基準は `q-dev` の `installed=` / `installed-branch=`（ディスク上の版） |
+| 取り込みコマンドの頭（`src/Extensions/ExtMenu.cpp`） | `Silent` | 更新があるときだけ尋ねる。**無ければ黙って取り込みへ進む**。往復の分岐は持たない（M25） |
+| 実機テストの頭・1 周目（`src/Extensions/ExtTestMenu.cpp`。**dev だけ**） | `Silent` | 同上 |
+| 実機テストの頭・2 周目以降（往復の最中） | `Auto` | **尋ねず・報せずに入れる**。入らなかったら走らせない（`false`） |
+| 往復パレットの周期確認（`src/FeedbackLoop.cpp` の `PollDevBuildWith`。M24） | — | **ダイアログを 1 枚も出さず、結末を値で返す**（パレットがその文言を出す） |
+
+**「いま入っているビルド」はどの入口もディスクで判定します**（`q-dev` の `installed=` /
+`installed-branch=`。`src/UpdaterParse.h` の `ResolveCurrentDevBuild`。M26）。殻に
+コンパイルされた sha とブランチは、本体だけ入れ替えたあと古いままだからです（下記
+「チャンネルごとの挙動」）。
+
+**インストールの経路は `src/UpdaterFlow.cpp` の 1 本だけです。** 往復のような別の都合で
+本体側へ 2 本目を書かないでください——本体のコードがスタックに載っている間は本体を降ろせ
+ないので、どのみち殻へ返ってからにしかできません。本体がしてよいのは「出るまで待つ」まで
+（それもいまは殻のパレットが担う）です。
 
 `Manual` が黙らないのは、押したのに何も起きないと「最新だった」のか「そもそも動いて
 いない」のかが利用者に区別できないためです。逆に `Silent` は取り込みたいだけの人の前に
