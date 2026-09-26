@@ -388,6 +388,36 @@ namespace HomeskzIfcImport::draw
 	std::string DescribePioPath(MCObjectHandle object);
 #endif
 
+	// **PIO が実際に持っているパスの、両端の距離**（3 次元）。読めたら true を返し、
+	// outLength に長さを入れる。読む口は `DescribePioPath` と同じ（`GetCustomObjectPath` ＋
+	// `NurbsGetNumPts` ＋ `NurbsGetPt3D`）で、違うのは**人へ見せる文字列ではなく数として
+	// 返す**ことだけ。ピース索引の起点が 0 / 1 のどちらの規約かは分からないままなので、
+	// **2 点以上あった最初のピース**を測る。
+	//
+	// 【これが「描き上がった実体」そのものである】構造材 PIO は `ResetObject` のときに、
+	// **解決済みストーリバウンドから自分のパスを作り直す**——始点が ID 0 の解決 Z、終点が
+	// ID 1 の解決 Z になり、水平成分は渡したパスのまま残る（[Findings「Parametric Objects」
+	// の「高さ・実体を最終的に決めるのは…」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)）。
+	// したがって**リセット後のこのパスが、材がどれだけの実体を持って描かれたかを言う
+	// 唯一の値**である（同 Findings が検算の手立てとして挙げているのもこの読み方）。
+	// **パラメータでは代わりにならない**——構造材 PIO に部材長のパラメータは無く、名前で
+	// 引ける `CenterPointLength`（OIP の「長さ」）は部材長ではない（実長 5333 の柱で 100 を
+	// 返した。docs/DEV-NOTES.md M27）。
+	//
+	// **いまは開発ビルドからしか呼ばれない。** 唯一の呼び出し口は `MeasureDrawnMember` の
+	// `Horizontal` 分岐で、そこへ本番ビルドから届く経路（`DrawStructuralMember` の
+	// `measureDrawn`）は `retryWithFreshPath` を武装した材だけを通す——その武装が 0 本に
+	// なったため（draw/Member ／ draw/Rafter ／ draw/Column）、本番では 1 度も走らない。
+	//
+	// **それでもまだ `#if VW_DRAW_VERIFY` で囲っていないのは、囲むと罠になるから。**
+	// 囲むには呼び出し側の `Horizontal` 分岐も囲うことになり、本番の
+	// `MeasureDrawnMember` は「測れなかった」を黙って返す関数に化ける——**この PR が
+	// 消したばかりの「静かに素通りする検査」を、形を変えて戻すことになる**。
+	// 置き場所は**自己修復の仕組みごと撤去する別 PR で決める**（そこでは本番側の
+	// `measureDrawn` ごと畳むので、罠の生まれようが無い）。draw/Verify.h の基準
+	// （「外したら利用者の絵が変わるか」）で言えば、この関数は既に囲む側である。
+	bool PioPathChord(MCObjectHandle object, double& outLength);
+
 	// --- 複合オブジェクトの構成（スラブ＝床板 M5・底盤 M9／壁＝立上り M9 が共有する作法）---
 	//
 	// 床（draw/Floor）と底盤（draw/Footing）は**同じ手順**でスラブを描く（外形ポリゴン →
