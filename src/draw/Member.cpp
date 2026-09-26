@@ -121,19 +121,39 @@ namespace HomeskzIfcImport::draw
 			spec.endOffset = member.endOffset;
 			// 【潰れ検出】描き上がりの長さ＝パスの水平長（端部オフセットはこの長さから戻す量
 			// なので、潰れていないかを見るこの検査には要らない）。**水平材は両端の Z が等しい
-			// ので「両端の絶対 Z の差」では測れない**——測るのは OIP の「スパン」である
-			// （draw/StructuralMember.h の StructuralExtentKind）。
+			// ので「両端の絶対 Z の差」では測れない**——測るのは**PIO が実際に持っている
+			// パスの両端の距離**である（draw/StructuralMember.h の StructuralExtentKind）。
+			// 以前はここが OIP の「スパン」で、**そのパラメータは実機に無い**ため
+			// 潰れ検出も下の自己修復も一度も動いていなかった（docs/DEV-NOTES.md
+			// 「柱が長さ 0 で描かれる（M27）」）。
 			spec.expectedLength = core::distance(member.start, member.end);
-			spec.extentKind = StructuralExtentKind::Span;
-			// 【自己修復】潰れていたらパスを作り直して差し替える。柱で 46 本が実際にこれで
-			// 直った（渡した 2 点の曲線は正しいのに PIO 化で潰れる。docs/DEV-NOTES.md M27）。
-			// **同じ CreatePath を共有しているので、横架材でも起きうる。**
-			// **差し替えるパスは挿入点からの相対**で渡す（世界座標で渡すと材が挿入点の
-			// ぶん動く。draw/StructuralMember.h の retryWithFreshPath）ので、始端を原点に
-			// 置いた差を渡す。
-			spec.retryWithFreshPath = true;
-			spec.pathStart = core::Vec2{0.0, 0.0};
-			spec.pathEnd = core::Vec2{member.end.x - member.start.x, member.end.y - member.start.y};
+			spec.extentKind = StructuralExtentKind::Horizontal;
+			// 【自己修復は武装しない】潰れていたパスを `SetCustomObjectPath` で作り直す道は
+			// 使わない（`spec.retryWithFreshPath` は既定の false のまま）。柱と同じ扱いで、
+			// 理由は 2 つある。
+			//
+			// 1. **水平材は M27 の死角に落ちない。** `ResetObject` が作り直すかどうかは
+			//    パスの 3 次元長で決まり、`(0, 1e-7)` の帯だけが作り直されない。水平材は
+			//    実寸の水平成分を持ち、しかも作り直しは**水平成分をビット一致で残す**ので、
+			//    その帯に入ることが原理的に無い（[Findings「水平成分が 1e-7 以上ある部材は
+			//    …」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)。
+			//    72 ケースで確認済み）。柱のほうは、パスに Z を渡すのをやめたことで帯へ入る
+			//    経路そのものが消えている（draw/Column）。
+			// 2. **差し替えは対症療法にしかならず、あとで壊れる。** 差し替えたパスに合わせて
+			//    `ResetObject` が**バウンドの `fOffset` を書き換える**ので、上端が「上階の
+			//    レベルちょうど」から「上階のレベル −2959」のような値に化ける。部材は階に
+			//    追従し続けるが**何に揃えていたか**が壊れ、**利用者が階高を編集した瞬間に
+			//    長さとして表に出る**（同 Findings「差し替えで `fOffset` を書き換えられた
+			//    部材は、階を動かすと長さが変わる」。実測で、階を +100 動かすと本来 3059 に
+			//    なるべき部材が 100 になった）。同 Findings も「差し替えを対症療法に
+			//    使わない」と明記している。
+			//
+			// **残る唯一の 0 長の経路**——高さ基準を 1 本も書けないまま `ResetObject` を
+			// 呼ぶ——は向きを問わず起こりうるが、**本番ビルドでも件数が出る**
+			// （`StructuralFailures::bound` ＝「高さ基準を図面へ書けなかった材 N 本」。
+			// draw/Verify.h の外）ので、黙って見逃すことにはならない。**潰れの検出そのものは
+			// 開発ビルドでは引き金に依らず走る**（draw/StructuralMember の measureDrawn）ので、
+			// 武装を外しても診断は 1 つも失われない。
 			// 【高さの検算】パスから Z を外した以上、高さを決めるのはバウンドだけになった。
 			// その解決が意図とずれても本数にもスパンにも出ないので、**描き上がった両端の
 			// 絶対 Z を読み戻して命令と引き比べる**（draw/StructuralMember.h の
