@@ -2196,4 +2196,20 @@ TEST(validate_rejects_level_mark_without_name)
 	CHECK(!core::validateDocument(document));
 }
 
+TEST(outermost_dimension_tier_is_the_largest_tier_or_minus_one)
+{
+	std::vector<core::SheetCommand> sheets{validSheet(), validSheet()};
+	CHECK(core::outermostDimensionTier(sheets) == -1);
+	core::DimensionChainCommand outer = validChain();
+	outer.tier = 2;
+	sheets[0].viewport.dimensions.push_back(validChain());
+	sheets[1].viewport.dimensions.push_back(outer);
+	CHECK(core::outermostDimensionTier(sheets) == 2);
+
+	std::vector<core::SectionCommand> sections{validSection()};
+	CHECK(core::outermostDimensionTier(sections) == -1);
+	sections[0].viewport.dimensions.push_back(validChain());
+	CHECK(core::outermostDimensionTier(sections) == 0);
+}
+
 TEST_MAIN();

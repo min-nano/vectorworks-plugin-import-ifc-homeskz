@@ -367,4 +367,38 @@ TEST(DimensionLineMovesOutwardByPaperMillimetres)
 	CHECK(near(core::dimensionLineCoord(0.0, 1, -3, 50.0), 400.0));
 }
 
+TEST(DimensionBandCoversTheOutermostTierAndItsText)
+{
+	// 寸法が無ければ帯も無い。段 0 は 8 + 4＝12mm、段 2 は 8 + 2×7 + 4＝26mm。
+	CHECK(near(core::dimensionBand(-1), 0.0));
+	CHECK(near(core::dimensionBand(0), 12.0));
+	CHECK(near(core::dimensionBand(2), 26.0));
+}
+
+TEST(PlanLayoutLeavesRoomForTheDimensionBand)
+{
+	// 38m × 26m は A3（420 × 297）へ 1/100 で 380 × 260 と収まるが、四辺に 26mm の帯を
+	// 取ると残りは 368 × 245 なので 1 段階小さい 1/125（304 × 208）になる。
+	const core::Vec2 content{38000.0, 26000.0};
+	CHECK(near(core::planLayout(content, a3(), 0.0).scale, 100.0));
+	CHECK(near(core::planLayout(content, a3(), 0.0, 26.0).scale, 125.0));
+	// 帯は縮尺の選び方にだけ効き、図の中心は変わらない。
+	CHECK(near(core::planLayout(content, a3(), 0.0, 26.0).viewportCenter.x, 0.0));
+}
+
+TEST(SectionLayoutCellsIncludeTheDimensionBand)
+{
+	// A3 の 1 段の高さは (297 − 15) ÷ 2＝141。20m × 12m は 1/100 で 200 × 120 と収まるが、
+	// 帯 12mm を四辺に取ると残り 396 × 117 に 120 が入らず 1/125（160 × 96）。マスは帯を
+	// 含めて 184 × 120。
+	const core::Vec2 content{20000.0, 12000.0};
+	const core::SectionLayout plain = core::sectionLayout(content, a3());
+	CHECK(near(plain.scale, 100.0));
+	CHECK(near(plain.cell.x, 200.0));
+	const core::SectionLayout banded = core::sectionLayout(content, a3(), 12.0);
+	CHECK(near(banded.scale, 125.0));
+	CHECK(near(banded.cell.x, 184.0));
+	CHECK(near(banded.cell.y, 120.0));
+}
+
 TEST_MAIN();

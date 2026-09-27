@@ -1503,6 +1503,14 @@ namespace HomeskzIfcImport::core
 	// て検証規則を足していく。
 	bool validateDocument(const Document& document);
 
+	// 図の外周に出る寸法の段のうち最も外のもの（M31）。sheets（伏図）か sections（軸組図）の
+	// どちらかを見る（両者は別の用紙に載り、縮尺も別に決まる）。寸法が 1 つも無ければ −1。
+	// **補助線の根元が図の外形にある列だけを数える**のが本来だが、命令は「どこが外形か」を
+	// 持たないので全ての列の段を見る（内側の列は段 0 なので、外周の段数を超えない）。
+	// 用紙へ寸法の帯を空ける量（core::dimensionBand）を決めるのに使う。
+	int outermostDimensionTier(const std::vector<SheetCommand>& sheets);
+	int outermostDimensionTier(const std::vector<SectionCommand>& sections);
+
 	// 断面（軸組図）の高さ範囲に足す上下の余白（mm）。基礎の底や屋根の頂部を切り落とさない
 	// ための遊びで、sectionHeightRange とその期待値を書くテストが共有する。
 	inline constexpr double kSectionHeightMargin = 1000.0;

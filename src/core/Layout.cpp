@@ -105,7 +105,8 @@ namespace HomeskzIfcImport::core
 		return smallest;
 	}
 
-	PlanLayout planLayout(const Vec2& content, const PaperArea& area, double legendWidth)
+	PlanLayout planLayout(const Vec2& content, const PaperArea& area, double legendWidth,
+						  double band)
 	{
 		// ★**縮尺は凡例のぶんを差し引いてから決める**（要件）。用紙いっぱいで縮尺を決めて
 		// しまうと、建物がギリギリの大きさのときに凡例を置く場所が残らない——凡例は図面の
@@ -121,7 +122,12 @@ namespace HomeskzIfcImport::core
 		}
 
 		PlanLayout layout;
-		layout.scale = fitScale(content, plan.size());
+		// 寸法の帯（M31）を四辺から引いた残りで縮尺を選ぶ。引くと潰れるときは引かない
+		// （凡例と同じ理由）。
+		Vec2 available = plan.size();
+		if (band > 0.0 && available.x > 2.0 * band && available.y > 2.0 * band)
+			available = Vec2{available.x - (2.0 * band), available.y - (2.0 * band)};
+		layout.scale = fitScale(content, available);
 		layout.plan = plan;
 		// 図は**凡例のぶんを除いた領域の中央**へ置く（左端に寄せると右が間延びする）。
 		layout.viewportCenter = plan.center();
@@ -130,7 +136,7 @@ namespace HomeskzIfcImport::core
 		return layout;
 	}
 
-	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area)
+	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area, double band)
 	{
 		SectionLayout layout;
 		layout.area = area;
@@ -139,8 +145,15 @@ namespace HomeskzIfcImport::core
 		// 入るので、1 段に使える高さは (印刷可能領域の高さ − 間隔) ÷ 2。
 		const auto rows = static_cast<double>(kSectionRows);
 		const double perRow = (layout.area.height() - ((rows - 1.0) * kViewportGap)) / rows;
-		layout.scale = fitScale(content, Vec2{layout.area.width(), perRow});
-		layout.cell = Vec2{content.x / layout.scale, content.y / layout.scale};
+		// 寸法の帯（M31）は 1 枚ごとに四辺へ付くので、図そのものに使えるのは帯を引いた
+		// 残り。マスは帯を含めた大きさにする（寸法ごと隣と重ならないように並べる）。
+		const double margin = band > 0.0 ? 2.0 * band : 0.0;
+		Vec2 available{layout.area.width(), perRow};
+		if (margin > 0.0 && available.x > margin && available.y > margin)
+			available = Vec2{available.x - margin, available.y - margin};
+		layout.scale = fitScale(content, available);
+		layout.cell =
+			Vec2{(content.x / layout.scale) + margin, (content.y / layout.scale) + margin};
 
 		// 1 段に並ぶ枚数。間隔は「枚数 − 1」個ぶんなので、幅に間隔 1 つを足してから
 		// 「1 枚＋間隔」で割ると枚数になる。**必ず 1 枚は置く**（1 枚も入らない大きさでも
@@ -199,5 +212,13 @@ namespace HomeskzIfcImport::core
 		const double direction = side < 0 ? -1.0 : 1.0;
 		const double steps = static_cast<double>(std::max(tier, 0));
 		return base + direction * (kDimensionFirstGap + steps * kDimensionTierPitch) * scale;
+	}
+
+	double dimensionBand(int outermostTier)
+	{
+		if (outermostTier < 0)
+			return 0.0;
+		return kDimensionFirstGap + (static_cast<double>(outermostTier) * kDimensionTierPitch) +
+			   kDimensionTextAllowance;
 	}
 } // namespace HomeskzIfcImport::core

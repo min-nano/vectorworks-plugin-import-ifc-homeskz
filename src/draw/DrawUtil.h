@@ -92,6 +92,10 @@ namespace HomeskzIfcImport::draw
 		ViewportPlanarObjects = 1035, // プレイナー（レイヤ平面）／2D 図形を表示するか
 		Viewport2DComponents = 1059, // ハイブリッドシンボル等の 2D コンポーネントを表示するか
 		ViewportBeyondCutPlane = 1064, // 切断面より奥の図形を表示するか
+		// 寸法の寸法規格を名前で（M31）。index（ovDimStandard）より名前で書く——index の
+		// 意味は図面ごとに変わり、ヘッダの「0 は無効」も実機と合わない
+		// （SDK リファレンス Findings「Dimensions」）。
+		DimStandardName = ovDimStandardName,
 	};
 
 	// SetObjectStoryBound / GetObjectStoryBound のバウンド ID（SDK の TObjectBoundID
@@ -104,6 +108,11 @@ namespace HomeskzIfcImport::draw
 		Start = 0,
 		End = 1,
 	};
+
+	// 寸法・断面寸法データタグ・レベル基準線を置くクラス（M13 / M31）。**注釈はすべてこの
+	// クラス**に置き、見え方（色・線の太さ）を図面側のクラスで一括して決められるようにする。
+	// 存在しなければ SetClassByName（AddClass）が作る。
+	inline constexpr const char* kDimensionClass = "寸法";
 
 	// オブジェクトのクラスを名前で設定する。AddClass は既存なら索引を返し、無ければクラスを作
 	// る。クラス名が空なら何もしない（無クラス＝既定クラスのまま）。
@@ -193,6 +202,12 @@ namespace HomeskzIfcImport::draw
 	// （M12 の記号 PIO で実機確認）。**静的フラグで 1 回だけにしない**——定義は文書ごとなので、
 	// 次の文書への取り込みで抜けてしまう。
 	void PrepareCustomObjectDefinition(const char* universalName);
+
+	// PIO がいま持っているプロファイルグループ（データタグのタグレイアウト・レベル基準線の
+	// マーカーレイアウト）。**2 つの入り口を両方見る**——VW2020 で「プロファイルグループは
+	// aux コンテナに持つ」経路が足されており（ISDK::GetCustomObjectProfileGroupInAux）、
+	// どちらに出るかはオブジェクトによって変わる。無ければ nil。
+	MCObjectHandle HeldProfileGroup(MCObjectHandle pio);
 
 	// オブジェクトがそのノード種別か（GetObjectTypeN）。
 	bool IsObjectType(MCObjectHandle object, ObjectNodeType type);
@@ -298,6 +313,9 @@ namespace HomeskzIfcImport::draw
 	void SetBooleanVariable(MCObjectHandle object, ObjectVariable variable, Boolean value);
 	void SetRealVariable(MCObjectHandle object, ObjectVariable variable, double value);
 	void SetPointVariable(MCObjectHandle object, ObjectVariable variable, const core::Vec2& point);
+	// 文字列のオブジェクト変数を書く。**書けたか**を返す（寸法規格の名前は、図面に無い
+	// 名前だと SetObjectVariable が false を返して値が変わらない。Findings「Dimensions」）。
+	bool SetTextVariable(MCObjectHandle object, ObjectVariable variable, const std::string& text);
 
 	// 一覧に無ければ追加する（登場順の dedupe。診断へ残すシンボル名・伏図記号レイヤ名・
 	// レベル種別の事前登録が同じ形を各々書いていた）。**参照を三項演算子で束ねてから

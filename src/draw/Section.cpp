@@ -77,6 +77,7 @@
 #include "draw/Section.h"
 #include "draw/DrawUtil.h"
 #include "draw/Tag.h"
+#include "draw/Dimension.h"
 #include "draw/TitleBlock.h"
 #include "core/Document.h"
 #include "core/Progress.h"
@@ -183,7 +184,7 @@ namespace HomeskzIfcImport::draw
 
 	std::size_t drawSections(const core::Document& document, core::ProgressReporter& progress,
 							 std::string* note, const ObjectHandles* memberHandles,
-							 std::string* outInfo)
+							 std::string* outInfo, core::DrawCounts* outCounts)
 	{
 		const std::vector<core::SectionCommand>& commands = document.sections;
 		if (commands.empty())
@@ -229,13 +230,16 @@ namespace HomeskzIfcImport::draw
 		// **用紙の大きさを読むために 1 枚目のシートレイヤを先に用意する**（用紙は
 		// シートレイヤからしか読めず、一方で「何枚に分かれるか＝タイトルの連番」は用紙が
 		// 分からないと決まらない）。タイトルはこの後の本番のループで付け直す。
+		// M31 寸法の帯（用紙 mm）。1 枚ごとに四辺へ付くので、マスはそのぶん大きく取る
+		// （core/Layout.h の sectionLayout）。寸法を入れない文書では 0。
+		const double band = core::dimensionBand(core::outermostDimensionTier(commands));
 		core::SectionLayout layout;
 		std::size_t pages = 1;
 		bool arrange = false;
 		if (const MCObjectHandle first = PrepareSheetLayer(sheetNumber(0), baseTitle);
 			first != nil && haveContent)
 		{
-			layout = core::sectionLayout(content, SheetPaperArea(first).printable);
+			layout = core::sectionLayout(content, SheetPaperArea(first).printable, band);
 			pages = core::sectionSheetCount(layout, commands.size());
 			arrange = true;
 		}
@@ -266,6 +270,13 @@ namespace HomeskzIfcImport::draw
 		if (std::ranges::any_of(commands, [](const core::SectionCommand& section)
 								{ return !section.viewport.tags.empty(); }))
 			prepareDataTagPlugin();
+
+		// M31 寸法・レベル記号。レベル基準線 PIO の定義を先に用意する（タグと同じ理由。
+		// レベル記号が 1 つも無い文書では定義そのものを作らない）。
+		DimensionCounts dimensions;
+		if (std::ranges::any_of(commands, [](const core::SectionCommand& section)
+								{ return !section.levels.empty(); }))
+			prepareLevelMarkPlugin();
 
 		// M28 図面枠。伏図と同じ設定・同じ実装（draw/TitleBlock）。**軸組図は 1 枚の用紙へ
 		// 複数の命令が載る**ので、同じシートレイヤへ 2 つ目を置かないのは draw/TitleBlock の
@@ -329,6 +340,11 @@ namespace HomeskzIfcImport::draw
 			else if (arrange)
 				delta = core::sectionSlotCenter(layout, slot) - drawnCenter;
 			drawViewportTags(viewport, command.viewport, members, tags);
+			// M31 寸法とレベル記号も注釈。収まったかの判定に含めるため、測り直す前に置く
+			// （伏図と同じ。draw/Dimension.h）。
+			drawViewportDimensions(viewport, command.viewport, command.levels,
+								   document.dimensionStandard, arrange ? layout.scale : 0.0,
+								   dimensions);
 
 			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
 			//
@@ -395,6 +411,12 @@ namespace HomeskzIfcImport::draw
 		// タグの診断は軸組図の診断とは別行にする（原因が別物なので混ぜない。連結は
 		// draw/DrawUtil の AppendLine）。
 		AppendLine(note, tagDiagnostics("軸組図", tags));
+		AppendLine(note, dimensionDiagnostics("軸組図", dimensions));
+		if (outCounts != nullptr)
+		{
+			outCounts->dimensions += dimensions.chains;
+			outCounts->levelMarks += dimensions.levels;
+		}
 		// M28 図面枠。**伏図とは別に 1 行出す**——枚数が違う（伏図は命令の数、軸組図は
 		// 用紙の数）ので、伏図の行だけでは「全シートレイヤへ置けたか」を確かめられない
 		// （draw/TitleBlock.h の titleBlockInfo）。異常は note、平常の内訳は outInfo。

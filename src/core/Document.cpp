@@ -444,6 +444,33 @@ namespace HomeskzIfcImport::core
 		return std::ranges::all_of(document.grids, isValidGrid);
 	}
 
+	namespace
+	{
+		int outermostTierOf(const ViewportCommand& viewport)
+		{
+			int tier = -1;
+			for (const DimensionChainCommand& chain : viewport.dimensions)
+				tier = std::max(tier, chain.tier);
+			return tier;
+		}
+	} // namespace
+
+	int outermostDimensionTier(const std::vector<SheetCommand>& sheets)
+	{
+		int tier = -1;
+		for (const SheetCommand& sheet : sheets)
+			tier = std::max(tier, outermostTierOf(sheet.viewport));
+		return tier;
+	}
+
+	int outermostDimensionTier(const std::vector<SectionCommand>& sections)
+	{
+		int tier = -1;
+		for (const SectionCommand& section : sections)
+			tier = std::max(tier, outermostTierOf(section.viewport));
+		return tier;
+	}
+
 	bool sectionHeightRange(const Document& document, double& start, double& end)
 	{
 		double low = std::numeric_limits<double>::max();

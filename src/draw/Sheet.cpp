@@ -53,6 +53,7 @@
 #include "draw/DrawUtil.h"
 #include "draw/Legend.h"
 #include "draw/Tag.h"
+#include "draw/Dimension.h"
 #include "draw/TitleBlock.h"
 #include "core/Document.h"
 #include "core/Progress.h"
@@ -140,7 +141,7 @@ namespace HomeskzIfcImport::draw
 
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
 						   std::string* note, const ObjectHandles* memberHandles,
-						   std::string* outInfo)
+						   std::string* outInfo, core::DrawCounts* outCounts)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
@@ -161,6 +162,11 @@ namespace HomeskzIfcImport::draw
 		// めくっても図が動かない）。
 		const core::Vec2 anchor{(contentMin.x + contentMax.x) / 2.0,
 								(contentMin.y + contentMax.y) / 2.0};
+		// M31 寸法の帯（用紙 mm）。寸法は図の外へ張り出すので、縮尺はそのぶんを用紙から
+		// 引いてから選ぶ（core/Layout.h の planLayout）。寸法を入れない文書では 0。
+		const double band = core::dimensionBand(core::outermostDimensionTier(commands));
+		// M31 寸法の集計。
+		DimensionCounts dimensions;
 		// 描画の前後でカレントレイヤが変わると以降のフェーズ（軸組図＝M14）に響くので、
 		// 元のレイヤへ戻せるよう控えておく。
 		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();
@@ -250,7 +256,7 @@ namespace HomeskzIfcImport::draw
 			{
 				paper = SheetPaperArea(sheetLayer);
 				provisional = core::planLayout(haveContent ? contentSize : core::Vec2{},
-											   paper->printable, 0.0);
+											   paper->printable, 0.0, band);
 			}
 
 			const MCObjectHandle viewport = gSDK->CreateViewport(sheetLayer);
@@ -290,7 +296,7 @@ namespace HomeskzIfcImport::draw
 		const double legendWidth = measureLegendWidth(legends);
 		const core::PlanLayout layout =
 			paper.has_value() ? core::planLayout(haveContent ? contentSize : core::Vec2{},
-												 paper->printable, legendWidth)
+												 paper->printable, legendWidth, band)
 							  : core::PlanLayout{};
 
 		// --- 伏図記号の大きさを紙の上で一定にする ------------------------------------
@@ -369,6 +375,12 @@ namespace HomeskzIfcImport::draw
 			// の最後が更新で、注釈はその後に足しても図に出る）。**ビューポートを動かす前**
 			// でなければならない（上記 ★）。
 			drawViewportTags(sheet.viewport, command.viewport, members, tags);
+			// M31 寸法も注釈なので同じ時機に置く（**確定した縮尺**で寸法線までの距離を
+			// 決める。draw/Dimension.h）。寸法は注釈の座標へそのまま置かれ、測って動かす
+			// ことはしないので、ビューポートを動かす前後どちらでもよいが、収まったかの判定に
+			// 含めるためここで置く。
+			drawViewportDimensions(sheet.viewport, command.viewport, {}, document.dimensionStandard,
+								   haveContent ? layout.scale : 0.0, dimensions);
 
 			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
 			//
@@ -574,6 +586,9 @@ namespace HomeskzIfcImport::draw
 		}
 
 		addNote(tagDiagnostics("伏図", tags));
+		addNote(dimensionDiagnostics("伏図", dimensions));
+		if (outCounts != nullptr)
+			outCounts->dimensions += dimensions.chains;
 		addNote(legendDiagnostics(legends));
 		// M28 図面枠。異常は note、平常でも出る内訳（当てたスタイル名・通った登録名）は
 		// outInfo——行き先を分ける理由は上の割り付けの行と同じ。

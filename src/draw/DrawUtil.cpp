@@ -356,6 +356,16 @@ namespace HomeskzIfcImport::draw
 		gSDK->DefineCustomObject(TXString(universalName), kCustomObjectPrefNever);
 	}
 
+	MCObjectHandle HeldProfileGroup(MCObjectHandle pio)
+	{
+		if (pio == nil)
+			return nil;
+		const MCObjectHandle direct = gSDK->GetCustomObjectProfileGroup(pio);
+		if (direct != nil)
+			return direct;
+		return gSDK->GetCustomObjectProfileGroupInAux(pio);
+	}
+
 	bool IsObjectType(MCObjectHandle object, ObjectNodeType type)
 	{
 		return object != nil && gSDK->GetObjectTypeN(object) == static_cast<short>(type);
@@ -1182,6 +1192,12 @@ namespace HomeskzIfcImport::draw
 	{
 		gSDK->SetObjectVariable(object, static_cast<short>(variable),
 								TVariableBlock(WorldPt(point.x, point.y)));
+	}
+
+	bool SetTextVariable(MCObjectHandle object, ObjectVariable variable, const std::string& text)
+	{
+		return gSDK->SetObjectVariable(object, static_cast<short>(variable),
+									   TVariableBlock(TXString(text.c_str()))) != 0;
 	}
 
 	void PushUnique(std::vector<std::string>& values, const std::string& value)

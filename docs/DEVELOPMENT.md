@@ -262,7 +262,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 構成層の総厚（`totalThickness`）・横架材の Z 範囲と重なり（`memberTopZ` / `memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側）・端部オフセットの意味と値・オフセットを戻した「材の端」（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`） | `core/Document.h` |
 | 描画側から切り離せる純計算（レイヤの希望スタック順 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの広がり `planContentBounds` / `sectionContentSize`） | `core/Document` |
 | 用紙の割り付け（`core::planLayout` ほか。縮尺の階梯と選び方・伏図の縮尺と位置——**縮尺は実測した凡例の幅を引いてから決め**、凡例の置き場所は `legendTopRight`——・軸組図の上下 2 段とシートの分割・タイトルの連番） | `core/Layout` |
-| 寸法線の位置（用紙 mm の段の間隔 `kDimensionFirstGap` / `kDimensionTierPitch` と縮尺を掛けた位置 `dimensionLineCoord`） | `core/Layout` |
+| 寸法線の位置（用紙 mm の段の間隔 `kDimensionFirstGap` / `kDimensionTierPitch` と縮尺を掛けた位置 `dimensionLineCoord`）・寸法の帯（`dimensionBand`。最も外の段は `core::outermostDimensionTier`） | `core/Layout` |
 | 取り込み設定（役割の表 `core::symbolRoles()`・図面枠のスタイル `core::ImportOptions::titleBlock` → `core::Document::titleBlockStyle`・寸法規格 `core::ImportOptions::dimension` → `core::Document::dimensionStandard`） | `core/ImportOptions` |
 | 進捗の整形と配分の計算・診断ログのフェーズの行（`beginPhase`） | `core/Progress` |
 | 往復の記憶と、どの周になるかの場合分け（`feedbackRoundKind`） | `core/FeedbackSession` |
@@ -295,6 +295,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | もの | 置き場所 |
 | --- | --- |
 | SDK 呼び出しの定型（クラス分け・レイヤ用意・プラグインスタイル解決・構成層／基準面を各オブジェクトへ直接与える手順） | `draw/DrawUtil` |
+| 注釈（寸法・データタグ・レベル基準線）のクラス名 `kDimensionClass`・PIO のプロファイルグループの取り出し（`HeldProfileGroup`。直接と aux の両方を見る）・文字列のオブジェクト変数（`SetTextVariable`） | `draw/DrawUtil` |
 | SDK へ渡す数値の列挙（`LayerKind` / `LayerVisibility` / `ClassVisibility` / `ObjectNodeType` / `ObjectVariable` / `StoryBoundSlot`。素の short に名前を付ける唯一の場所）・高さ基準の変換（`StoryBoundData`） | `draw/DrawUtil` |
 | オブジェクト変数の書き込み（`SetBooleanVariable` / `SetRealVariable` / `SetPointVariable`）・クラス分けと属性の by-class 化（`SetClassWithAttributes`。構造材 PIO は作る前に既定として立てる `ScopedCreationClass` ＋ `FinishCreatedWithClass`） | `draw/DrawUtil` |
 | PIO 定義の先出し（`PrepareCustomObjectDefinition`）・PIO のパラメータを読む口（`PioParamString`）・構造用途の述語（`StructuralUseOf`）・シンボル定義の有無（`HasSymbolDefinition`） | `draw/DrawUtil` |
