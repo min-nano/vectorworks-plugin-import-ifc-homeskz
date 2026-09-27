@@ -38,12 +38,14 @@ namespace HomeskzIfcImport::parse
 		// 伏図 1 枚の sheet 命令を組み立てる。番号・タイトルは図面タイトル／図番と同じ値を使
 		// う。withLegend なら、グラフィック凡例をシートレイヤに載せる（空の凡例を作らないため
 		// の出し分けは呼び出し側が持つ。ヘッダ冒頭）。
-		core::SheetCommand makeSheet(std::string number, std::string title,
+		core::SheetCommand makeSheet(core::PlanKind kind, std::string number, std::string title,
 									 std::vector<std::string> layers, bool withLegend = false)
 		{
 			core::SheetCommand sheet;
 			sheet.number = std::move(number);
 			sheet.title = std::move(title);
+			// 伏図の種類（M31）。寸法で何を押さえるかは種類で決まる（parse/Dimension）。
+			sheet.kind = kind;
 			sheet.viewport.drawingNumber = sheet.number;
 			sheet.viewport.drawingTitle = sheet.title;
 			sheet.viewport.layers = std::move(layers);
@@ -114,8 +116,8 @@ namespace HomeskzIfcImport::parse
 		const bool withLegend = !context.anchorBolts().empty();
 
 		std::vector<core::SheetCommand> commands;
-		commands.push_back(makeSheet(kFoundationSheetNumber, kFoundationSheetTitle,
-									 std::move(layers), withLegend));
+		commands.push_back(makeSheet(core::PlanKind::Foundation, kFoundationSheetNumber,
+									 kFoundationSheetTitle, std::move(layers), withLegend));
 		return commands;
 	}
 
@@ -177,8 +179,8 @@ namespace HomeskzIfcImport::parse
 			std::string number = std::to_string(kFloorPlanStartNumber + static_cast<int>(i));
 			// グラフィック凡例は常に載せる（何が並ぶかは凡例オブジェクトのソース定義が決める
 			// ので、ここでは中身の有無を判断できない）。
-			commands.push_back(
-				makeSheet(std::move(number), std::move(title), std::move(layers), true));
+			commands.push_back(makeSheet(core::PlanKind::Framing, std::move(number),
+										 std::move(title), std::move(layers), true));
 		}
 		return commands;
 	}
@@ -238,8 +240,8 @@ namespace HomeskzIfcImport::parse
 			std::string number = std::to_string(baseNumber + seq);
 			++seq;
 			// 柱梁伏図と同じく凡例を載せる（母屋伏図に映るシンボルも同じ形で集まる）。
-			commands.push_back(
-				makeSheet(std::move(number), std::move(title), std::move(layers), true));
+			commands.push_back(makeSheet(core::PlanKind::Moya, std::move(number), std::move(title),
+										 std::move(layers), true));
 		}
 		return commands;
 	}

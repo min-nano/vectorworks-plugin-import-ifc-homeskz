@@ -119,6 +119,8 @@ namespace HomeskzIfcImport::core
 		// 2 周目以降は設定ダイアログを出さずにここから復元するので、書き落とすと 1 周目と
 		// 違う条件（図面枠なし）で黙って走る（PR #133 の round 2 で実際に起きた）。
 		out << "titleblock=" << sanitize(session.options.titleBlockStyle()) << "\n";
+		// M31 寸法のスタイル（空＝入れない）。図面枠と同じ理由で漏らさず書く。
+		out << "dimension=" << sanitize(session.options.dimensionStyle()) << "\n";
 		return out.str();
 	}
 
@@ -187,6 +189,11 @@ namespace HomeskzIfcImport::core
 			{
 				// 古い記憶（M28 より前）には行が無い——既定の空（置かない）のまま読む。
 				session.options.setTitleBlockStyle(value);
+			}
+			else if (key == "dimension")
+			{
+				// 古い記憶（M31 より前）には行が無い——既定の空（入れない）のまま読む。
+				session.options.setDimensionStyle(value);
 			}
 			else if (key.starts_with("role."))
 			{

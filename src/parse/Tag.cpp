@@ -34,28 +34,6 @@ namespace HomeskzIfcImport::parse
 		{
 			return direction == core::SectionDirection::X ? point.x : point.y;
 		}
-
-		// 横架材がその切断面に乗るか（＝断面に立面として写るか。parse/Tag.h「軸組図のタグ」）。
-		// 通りに沿って走り、かつ芯が切断位置にある材だけを対象にする。判定の許容は
-		// **切断位置を作ったときと同じ** kClusterTol を使う（同じ通りに乗る材の散らばりを
-		// 吸収する値なので、別の定数を増やさない）。
-		bool MemberOnCutPlane(const core::MemberCommand& member,
-							  const core::SectionCommand& section)
-		{
-			const double dx = member.end.x - member.start.x;
-			const double dy = member.end.y - member.start.y;
-			const bool alongCut = section.direction == core::SectionDirection::X
-									  ? std::abs(dx) < std::abs(dy)
-									  : std::abs(dy) < std::abs(dx);
-			if (!alongCut)
-				return false;
-
-			const double cut = CutCoord(section.lineStart, section.direction);
-			const double centre = (CutCoord(member.start, section.direction) +
-								   CutCoord(member.end, section.direction)) /
-								  2.0;
-			return std::abs(centre - cut) <= kClusterTol;
-		}
 	} // namespace
 
 	double tagAngle(double dx, double dy)
@@ -95,6 +73,34 @@ namespace HomeskzIfcImport::parse
 		if (down > up || (!(up > down) && px > 0.0))
 			return core::Vec2{-px, -py};
 		return core::Vec2{px, py};
+	}
+
+	// 通りに沿って走り、かつ芯が切断位置にある材だけを対象にする。判定の許容は
+	// **切断位置を作ったときと同じ** kClusterTol を使う（同じ通りに乗る材の散らばりを
+	// 吸収する値なので、別の定数を増やさない）。
+	bool memberOnCutPlane(const core::MemberCommand& member, const core::SectionCommand& section)
+	{
+		const double dx = member.end.x - member.start.x;
+		const double dy = member.end.y - member.start.y;
+		const bool alongCut = section.direction == core::SectionDirection::X
+								  ? std::abs(dx) < std::abs(dy)
+								  : std::abs(dy) < std::abs(dx);
+		if (!alongCut)
+			return false;
+
+		const double cut = CutCoord(section.lineStart, section.direction);
+		const double centre =
+			(CutCoord(member.start, section.direction) + CutCoord(member.end, section.direction)) /
+			2.0;
+		return std::abs(centre - cut) <= kClusterTol;
+	}
+
+	bool columnOnCutPlane(const core::ColumnCommand& column, const core::SectionCommand& section)
+	{
+		// 横架材と同じ許容（kClusterTol）。切断位置は柱の座標を束ねて作ったものなので、
+		// その通りに乗る柱は必ずこの幅に入る。
+		const double cut = CutCoord(section.lineStart, section.direction);
+		return std::abs(CutCoord(column.position, section.direction) - cut) <= kClusterTol;
 	}
 
 	double sectionAlongOrigin(const core::SectionCommand& section)
@@ -156,7 +162,7 @@ namespace HomeskzIfcImport::parse
 		for (std::size_t i = 0; i < members.size(); ++i)
 		{
 			const core::MemberCommand& member = members[i];
-			if (!MemberOnCutPlane(member, section))
+			if (!memberOnCutPlane(member, section))
 				continue;
 
 			// 断面に写る天端線（命令の start/end を注釈空間へ投影したもの）。その中点に

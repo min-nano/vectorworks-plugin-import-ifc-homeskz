@@ -169,6 +169,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/ShearWall.cpp
 		src/parse/Sheet.cpp
 		src/parse/Tag.cpp
+		src/parse/Dimension.cpp
 		src/parse/StructuralClass.cpp
 		src/parse/IfcGeometry.cpp)
 	target_compile_features(MinNanoStructureCore PUBLIC cxx_std_20)

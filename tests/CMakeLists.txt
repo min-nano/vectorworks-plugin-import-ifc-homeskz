@@ -259,6 +259,16 @@ vw_add_test(ParseSectionTests ParseSectionTests.cpp CORE FIXTURES)
 # fixtures; SDK-free. HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
 vw_add_test(ParseTagTests ParseTagTests.cpp CORE FIXTURES)
 
+# Dimensions (src/parse/Dimension, M31): the chains of linear dimensions each plan and section
+# viewport gets — merging nearby stops (grid values win over member values), the perimeter
+# tiers of a plan (members+grid, grid spacing, overall on top/left; grid spacing on
+# bottom/right), the foundation's per-wall chains (anchor bolts, wall ends, crossing grids),
+# which members each plan kind dimensions (framing: columns + beams; moya: 母屋 only), and the
+# section chains/level marks (GL/FL/軒高, standard beam tops, off-standard beams). Hand-written
+# expectations on synthetic documents plus an end-to-end run over every fixture (validates,
+# deterministic). SDK-free.
+vw_add_test(ParseDimensionTests ParseDimensionTests.cpp CORE FIXTURES)
+
 # Structural-class assignment (src/parse/StructuralClass): the pure member-type ->
 # VW class logic (04構造-02木造-… leaf classes). Trusts the homeskz IFC Name token when
 # it identifies a type, else infers from story/height (member: dodai/yukabari/koyabari/

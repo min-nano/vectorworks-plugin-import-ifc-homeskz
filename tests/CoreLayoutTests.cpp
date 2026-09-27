@@ -356,4 +356,15 @@ TEST(PageMarginsRejectValuesThatCannotBeMeant)
 	CHECK(huge.margins.left == 0.0);
 }
 
+TEST(DimensionLineMovesOutwardByPaperMillimetres)
+{
+	// 1/50: 1 段目は根元から用紙 8mm＝モデル 400mm、2 段目はさらに用紙 7mm＝350mm 外。
+	CHECK(near(core::dimensionLineCoord(1000.0, 1, 0, 50.0), 1400.0));
+	CHECK(near(core::dimensionLineCoord(1000.0, 1, 1, 50.0), 1750.0));
+	// 負の側へ・1/100。
+	CHECK(near(core::dimensionLineCoord(-2000.0, -1, 2, 100.0), -2000.0 - 2200.0));
+	// 負の段は 0 段目とみなす。
+	CHECK(near(core::dimensionLineCoord(0.0, 1, -3, 50.0), 400.0));
+}
+
 TEST_MAIN();

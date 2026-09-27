@@ -59,6 +59,7 @@ namespace
 		session.options.setSymbol(SymbolRole::FloorPost, "床束（特注）");
 		session.options.setEnabled(SymbolRole::FireBrace, false);
 		session.options.setTitleBlockStyle("図面枠 A3（構造）");
+		session.options.setDimensionStyle("構造図 寸法");
 		return session;
 	}
 
@@ -196,6 +197,9 @@ TEST(feedback_session_round_trips_through_text)
 	// 以降は図面枠が 1 枚も置かれない（PR #133 の round 2 で実際に起きた）。
 	CHECK_EQ(after.options.titleBlockStyle(), before.options.titleBlockStyle());
 	CHECK(after.options.hasTitleBlock());
+	// M31 寸法のスタイルも運ばれる（落ちると 2 周目以降は寸法が 1 つも入らない）。
+	CHECK_EQ(after.options.dimensionStyle(), before.options.dimensionStyle());
+	CHECK(after.options.hasDimensions());
 }
 
 TEST(feedback_session_without_a_title_block_line_places_none)
@@ -204,6 +208,8 @@ TEST(feedback_session_without_a_title_block_line_places_none)
 	const FeedbackSession session = parseFeedbackSession("send=1\nround=2\nbuild=a1b2c3d\n");
 	CHECK(!session.options.hasTitleBlock());
 	CHECK(session.options.titleBlockStyle().empty());
+	// M31 より前の記憶には dimension の行も無い。**入れない**と読む。
+	CHECK(!session.options.hasDimensions());
 }
 
 TEST(feedback_session_without_loop_lines_reads_as_not_looping)

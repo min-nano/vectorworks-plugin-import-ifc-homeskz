@@ -106,7 +106,26 @@ namespace HomeskzIfcImport::parse
 			std::size_t (*placed)(const core::DrawCounts&); // 描けた数
 		};
 
-		constexpr std::array<ElementDef, 18> kElements = {{
+		// 寸法の列・レベル記号はビューポート命令の中に住むので、数えるには歩く必要がある。
+		std::size_t dimensionChainCount(const core::Document& document)
+		{
+			std::size_t total = 0;
+			for (const core::SheetCommand& sheet : document.sheets)
+				total += sheet.viewport.dimensions.size();
+			for (const core::SectionCommand& section : document.sections)
+				total += section.viewport.dimensions.size();
+			return total;
+		}
+
+		std::size_t levelMarkCount(const core::Document& document)
+		{
+			std::size_t total = 0;
+			for (const core::SectionCommand& section : document.sections)
+				total += section.levels.size();
+			return total;
+		}
+
+		constexpr std::array<ElementDef, 20> kElements = {{
 			{"ストーリ", "層", [](const core::Document& d) { return d.stories.size(); },
 			 [](const core::DrawCounts& c) { return c.stories; }},
 			{"通り芯", "本", [](const core::Document& d) { return d.grids.size(); },
@@ -143,6 +162,12 @@ namespace HomeskzIfcImport::parse
 			 [](const core::DrawCounts& c) { return c.sheets; }},
 			{"軸組図", "枚", [](const core::Document& d) { return d.sections.size(); },
 			 [](const core::DrawCounts& c) { return c.sections; }},
+			// M31 寸法は**列**（連続寸法 1 本）で数える。命令がその単位なので、描画側も
+			// 1 列を描き切ったら 1 と数える。
+			{"寸法", "列", [](const core::Document& d) { return dimensionChainCount(d); },
+			 [](const core::DrawCounts& c) { return c.dimensions; }},
+			{"レベル記号", "個", [](const core::Document& d) { return levelMarkCount(d); },
+			 [](const core::DrawCounts& c) { return c.levelMarks; }},
 		}};
 	} // namespace
 
@@ -485,6 +510,9 @@ namespace HomeskzIfcImport::parse
 		// core/ImportOptions.h）。1 行だけ末尾に足す。
 		out << "\n  " << kTitleBlockOptionLabel
 			<< (options.hasTitleBlock() ? options.titleBlockStyle() : std::string("置かない"));
+		// M31 寸法も同じく表の外（既定名が無い）。
+		out << "\n  " << kDimensionOptionLabel
+			<< (options.hasDimensions() ? options.dimensionStyle() : std::string("入れない"));
 		return out.str();
 	}
 } // namespace HomeskzIfcImport::parse

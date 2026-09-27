@@ -193,4 +193,11 @@ namespace HomeskzIfcImport::core
 			return base;
 		return base + "(" + std::to_string(page + 1) + ")";
 	}
+
+	double dimensionLineCoord(double base, int side, int tier, double scale)
+	{
+		const double direction = side < 0 ? -1.0 : 1.0;
+		const double steps = static_cast<double>(std::max(tier, 0));
+		return base + direction * (kDimensionFirstGap + steps * kDimensionTierPitch) * scale;
+	}
 } // namespace HomeskzIfcImport::core

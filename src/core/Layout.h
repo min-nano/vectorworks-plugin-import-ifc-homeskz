@@ -225,4 +225,21 @@ namespace HomeskzIfcImport::core
 	// 軸組図のシートタイトル。1 枚に収まるなら base のまま（"軸組図"）、複数枚に分かれる
 	// なら 1 起点の連番を付ける（"軸組図(1)" / "軸組図(2)" …）。
 	std::string sectionSheetTitle(const std::string& base, std::size_t page, std::size_t pages);
+	// ------------------------------------------------------------------------
+	// 寸法線の位置（M31）
+	// ------------------------------------------------------------------------
+
+	// 寸法線を補助線の根元（base）から離す長さ（**用紙 mm**）。1 段目までの距離と、
+	// 段と段の間隔。用紙の上の長さで持つのは、どの縮尺でも段の間隔が同じに見えるように
+	// するため（命令は段の番号だけを持つ。core/Document.h の DimensionChainCommand）。
+	// 値は寸法の文字（おおむね 2.5mm 前後）が 1 段に収まり、隣の段と重ならない大きさの
+	// 見込みで、実機で見て詰める。
+	inline constexpr double kDimensionFirstGap = 8.0;
+	inline constexpr double kDimensionTierPitch = 7.0;
+
+	// 寸法線の直交座標（注釈空間・モデル mm）。base から side の向きへ
+	// （kDimensionFirstGap + tier × kDimensionTierPitch）× 縮尺の分母 だけ離す。
+	// side は ±1（それ以外は符号だけを見る）、tier は 0 以上（負は 0 とみなす）。
+	double dimensionLineCoord(double base, int side, int tier, double scale);
+
 } // namespace HomeskzIfcImport::core
