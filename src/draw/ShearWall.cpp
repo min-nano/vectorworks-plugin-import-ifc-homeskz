@@ -129,7 +129,7 @@ namespace HomeskzIfcImport::draw
 			// **用紙基準（縮尺無視）にする。** 記号は表記なので、伏図の縮尺が変わっても
 			// 紙の上の大きさは変えない（ご要望）。大きさは「定義の図形（用紙 mm）×
 			// レイヤの縮尺」で決まるので、耐力壁レイヤの縮尺を伏図の縮尺へ揃える
-			// （applyShearWallLayerScale）ところまでが 1 組。
+			// （draw/Sheet の applyPlanLayerScale）ところまでが 1 組。
 			try
 			{
 				VWSymbolDefObj(definition).SetPageBased(true);
@@ -371,38 +371,5 @@ namespace HomeskzIfcImport::draw
 		}
 
 		return drawn;
-	}
-
-	std::size_t applyShearWallLayerScale(const core::Document& document, double scale)
-	{
-		if (document.shearWalls.empty() || !(scale > 0.0))
-			return 0;
-
-		// 命令に出てくるレイヤ名を**重複なく・決まった順で**集める（同じレイヤへ何度も
-		// 縮尺を書かない。順序に依らない結果にする＝CLAUDE.md「決定性を守る」）。
-		std::vector<std::string> layers;
-		layers.reserve(document.shearWalls.size());
-		for (const core::ShearWallCommand& wall : document.shearWalls)
-			layers.push_back(wall.layer);
-		std::ranges::sort(layers);
-		const auto duplicates = std::ranges::unique(layers);
-		layers.erase(duplicates.begin(), duplicates.end());
-
-		std::size_t applied = 0;
-		for (const std::string& name : layers)
-		{
-			// 無いレイヤは黙って飛ばす（その階の生成がスキップされただけ。描画と同じ規約）。
-			const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
-			if (layer == nil)
-				continue;
-			gSDK->SetLayerScaleN(layer, scale);
-			++applied;
-		}
-
-		if (applied > 0 && core::trace::isOpen())
-			core::trace::log("  shearwall: 耐力壁レイヤ " + std::to_string(applied) +
-							 " 枚の縮尺を伏図に合わせた（1/" +
-							 std::to_string(static_cast<int>(scale)) + "）");
-		return applied;
 	}
 } // namespace HomeskzIfcImport::draw
