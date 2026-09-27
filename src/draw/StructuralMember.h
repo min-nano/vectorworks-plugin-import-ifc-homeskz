@@ -95,17 +95,33 @@ namespace HomeskzIfcImport::draw
 	};
 
 	// **描き上がった部材の実体をどの読みで測るか。** 構造材 PIO には「部材長」に当たる
-	// パラメータが無く（名前で引ける `CenterPointLength(長さ)` は部材長ではない——実長 5333 の
-	// 柱で 100 を返した）、実体があるかを言える値は**部材の向きで違う**。鉛直材（柱）は
-	// **両端の解決済み絶対 Z の差**、水平材（横架材）は**パスから取れた「スパン」**である。
+	// パラメータが無い——名前で引ける `CenterPointLength(長さ)` は部材長ではなく（実長 5333 の
+	// 柱で 100 を返した。**センターマークの線の長さ**である）、**「スパン」に当たるパラメータは
+	// 実機に存在しない**（パラメータ表 181 件の全数列挙・SDK の全数検索・実運用の全数確認が
+	// 独立に「無い」と答えている。[Findings「打ち切った調査: 構造材 PIO から『スパン』
+	// 『部材長』をパラメータで読む」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)。
+	// OIP に見えている「スパン」の欄は**パラメータに紐づかない計算値**で、読み書きできる値
+	// としては存在しない）。したがって
+	// 実体を言える値は**部材の向きで違う**。
+	//
+	//   * 鉛直材（柱・小屋束）… **両端の解決済み絶対 Z の差**（`StartElevation` /
+	//     `EndElevation`。実機で読めている）。
+	//   * 水平材（横架材・垂木）… **PIO が実際に持っているパスの両端の距離**
+	//     （DrawUtil の `PioPathChord`）。`ResetObject` はバウンドの解決結果からパスを
+	//     作り直すので、**リセット後のパスがそのまま「描かれた実体」**である
+	//     （[Findings「Parametric Objects」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)
+	//     の「高さ・実体を最終的に決めるのは…」。同 Findings が検算の手立てとして挙げて
+	//     いるのもこの読み方である）。
 	//
 	// **取り違えると診断が嘘をつく。** 水平材は両端の Z が等しいのが正常なので、鉛直材の
-	// 測り方をそのまま当てると**全数を「実体が無い」と誤報**し、そのうえ正常な材のパスまで
-	// 作り直してしまう（下記 retryWithFreshPath）。
+	// 測り方をそのまま当てると**全数を「実体が無い」と誤報**する。**逆に、無いパラメータを探して「測れ
+	// ませんでした」を毎回返すのも同じ害**である——以前の水平材はそれで、潰れ検出も
+	// 自己修復も**一度も動いていなかった**（docs/DEV-NOTES.md「柱が長さ 0 で描かれる
+	// （M27）」）。
 	enum class StructuralExtentKind
 	{
-		Vertical, // 両端の絶対 Z の差（鉛直材＝柱・小屋束）
-		Span,	  // OIP の「スパン」（水平材＝横架材）
+		Vertical,	// 両端の絶対 Z の差（鉛直材＝柱・小屋束）
+		Horizontal, // PIO が持つパスの両端の距離（水平材＝横架材・垂木）
 	};
 
 	// 構造材 1 本ぶんの描画仕様。path / profile は呼び出し側が用意する（下記の CreatePath と
@@ -154,18 +170,6 @@ namespace HomeskzIfcImport::draw
 		double expectedStartZ = 0.0;
 		double expectedEndZ = 0.0;
 #endif
-		// **潰れていたときにパスを作り直して差し替えるための 2 点**（`SetCustomObjectPath`）。
-		// `retryWithFreshPath` が true のときだけ使う。
-		//
-		// **この 2 点は「オブジェクトの挿入点からの相対」で渡す**（＝始端は原点、終端は
-		// `(材の平面長, 0)`）。生成の `CreateCustomObjectPath` は**世界座標**のパスを取るのに、
-		// あとから差し替える `SetCustomObjectPath` は**相対**で取る——実機で世界座標のまま
-		// 渡したら、長さは正しいのに材が挿入点の Z（572mm）ぶん高い位置に出た
-		// （`Z 1144→4103`。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
-		// **Z は持たない**（冒頭「パスは 2D で渡す」）。
-		bool retryWithFreshPath = false;
-		core::Vec2 pathStart;
-		core::Vec2 pathEnd;
 	};
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
@@ -191,24 +195,27 @@ namespace HomeskzIfcImport::draw
 #if VW_DRAW_VERIFY
 		std::string offsetParamHint;
 #endif
-		// **長さ 0 で描かれたか**（spec.expectedLength が 0 なら常に false＝検査していない）。
-		// PIO は生成できてもパスやバウンドの解決に失敗すると実体を持たず、OIP の高さ・基準・
-		// オフセットは命令どおりのまま画面に何も出ない（Findings「Parametric Objects」の
-		// 3 行表）。呼び出し側は件数を診断へ載せる。
-		bool collapsed = false;
-		// 潰れていた材の**パスを作り直して差し替えたら直ったか**（`SetCustomObjectPath`）。
-		// true なら「渡した曲線は正しかったのに PIO 化で潰れた」の裏が取れる。
-		bool repairedByPath = false;
 		// **作る前に立てた既定のクラス・描画属性を継いで生まれたか**（draw/DrawUtil の
 		// FinishCreatedWithClass）。false なら作った後に与え直した＝従来どおりの（遅い）
 		// 作り方に戻った。絵は同じ。
 		bool classInherited = true;
 		// ここから下は**開発ビルドだけ**（draw/Verify.h）。どれも読み戻した結果を診断へ
-		// 載せるためのもので、外しても描かれるものは 1 つも変わらない。
+		// 載せるためのもので、外しても描かれるものは 1 つも変わらない——**潰れていたら
+		// 繕う**という本番でも要る用途があったのは自己修復を持っていた頃の話で、それを
+		// 撤去したいま、読み戻す理由は検算だけである（docs/DEV-NOTES.md「柱が長さ 0 で
+		// 描かれる（M27）」）。
 #if VW_DRAW_VERIFY
-		// 「長さ」のパラメータ名を解決できなかったときだけ、PIO が持つ「長さ」を含む
-		// パラメータ名の一覧（DescribeParamsContaining）。解決できていれば空。
-		std::string lengthParamHint;
+		// **長さ 0 で描かれたか**（spec.expectedLength が 0 なら常に false＝検査していない）。
+		// PIO は生成できてもパスやバウンドの解決に失敗すると実体を持たず、OIP の高さ・基準・
+		// オフセットは命令どおりのまま画面に何も出ない（Findings「Parametric Objects」の
+		// 3 行表）。呼び出し側は件数を診断へ載せる——**繕いはしない**（同メモ）。
+		bool collapsed = false;
+		// **実体を測れなかったときだけ**の手掛かり（測れていれば空）。鉛直材なら両端の
+		// 絶対 Z を、水平材なら PIO のパスを引けなかったということなので、PIO が持つ
+		// 「長さ」「高さ」「スパン」を含むパラメータ（`DescribeSizeParams`）と図面のパス
+		// （`DescribePioPath`）を並べる。**実機でしか読めない情報を 1 周で持ち帰る**ための
+		// ものなので、原因をパラメータ側とパス側に分けられる形で採る。
+		std::string extentHint;
 		// 潰れていたときだけ、**その場で読み戻した値**（OIP の「高さ」と「長さ」、および
 		// **VW が実際に持っている上下端の高さ基準**）。バウンドが解けているのに実体が無いのか、
 		// そもそも高さ基準が図面に入っていないのかを**実機を見ずに**分けるための証拠で、
@@ -238,22 +245,23 @@ namespace HomeskzIfcImport::draw
 		std::size_t offset = 0; // 端部オフセットを書けなかった（材が相手の芯線まで伸びる）
 		std::size_t bound = 0; // 高さ基準を VW が受け取らなかった（実体が無い材になる）
 		// ここから下は**読み戻して検算した結果**なので開発ビルドだけ（draw/Verify.h）。
-		// **自己修復（潰れたパスの作り直し）は本番でも走る**——外れるのはその結果を数えて
-		// 診断へ載せるところだけである。
+		// **上の 4 つは本番でも数える**——そちらは書けたかどうかの記録で、読み戻しを伴わない。
 #if VW_DRAW_VERIFY
 		std::size_t collapsed = 0; // 生成できたのに長さ 0 で描かれた（実体が無い）
-		std::size_t repaired = 0;	   // 潰れたパスを作り直して直った
 		std::size_t classFallback = 0; // 既定のクラスを継がず、作った後に与え直した
 		// **描かれた高さが命令と違った本数**（読み戻した両端の絶対 Z との引き比べ）。パスから
 		// Z を外したぶんの見張りで、0 でなければ材は在るのに違う高さに並んでいる——本数にも
 		// スパンにも出ないので、これが唯一の手掛かりになる。
 		std::size_t elevation = 0;
 		std::string offsetHint; // 端部オフセットのパラメータ名の手掛かり
-		// 実体を測るパラメータ名を引けなかったときの手掛かり。**潰れ・作り直しがあったとき
-		// だけ診断に出す**（水平材では引けないのが常態なので、無条件に出すと毎回「問題あり」
-		// になる。実機 round 1）。
-		std::string lengthHint;
-		std::string collapsedProbe; // 潰れた（作り直した）1 本目の実測
+		// **実体を測れなかったとき**の手掛かり（`StructuralMemberResult::extentHint`）。
+		// **これが埋まっていること自体が異常**なので、無条件に診断へ出す——鉛直材は両端の
+		// 絶対 Z、水平材は PIO のパスで測れるはずで、どちらも引けないなら検査が空振りして
+		// いるということである。以前は「潰れ・作り直しがあったときだけ」出していたが、
+		// それは**水平材で引けないのが常態だったから**で、その常態のほうを直した
+		// （docs/DEV-NOTES.md「水平材の実体は「スパン」では測れない」）。
+		std::string extentHint;
+		std::string collapsedProbe; // 潰れた 1 本目の実測
 		std::string elevationProbe; // 高さがずれた 1 本目の実測（命令の Z と図面の Z）
 #endif
 
@@ -333,30 +341,45 @@ namespace HomeskzIfcImport::draw
 	// **この 2 つの差だけが、実体がどれだけあるかを言える値**である
 	// （docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 	//
-	// 【水平材は「スパン」で測る】上の差は鉛直材にしか使えない——水平材は両端の Z が等しい
-	// のが正常なので、差で測れば全数が 0 になる。水平材は PIO がパスから入れる「スパン」を
-	// 読む（kind＝StructuralExtentKind::Span）。**両端の絶対 Z はどちらの kind でも読む**
+	// 【水平材はパスで測る】上の差は鉛直材にしか使えない——水平材は両端の Z が等しい
+	// のが正常なので、差で測れば全数が 0 になる。水平材は**PIO が実際に持っているパスの
+	// 両端の距離**を読む（kind＝StructuralExtentKind::Horizontal。DrawUtil の
+	// `PioPathChord`）。OIP の「スパン」を引く作りにはしない——**そのパラメータは実機に
+	// 無い**（上記 StructuralExtentKind）。**両端の絶対 Z はどちらの kind でも読む**
 	// ——水平材でも「描かれた高さが命令どおりか」の検算に要るからで、実体の測り方だけが
 	// kind で分かれる（上記 DrawnMemberSize::elevationRead）。
 	//
+	// **まるごと開発ビルドだけ**（draw/Verify.h）。以前は「潰れていたら繕う」という本番でも
+	// 要る用途があったので本番にも半分残していたが、その自己修復を撤去したので**測る理由は
+	// 検算だけ**になった。本番では材 1 本あたりのパラメータ走査とパス読みがまるごと無くなる。
+
 	// found が false なら測る値を引けなかった（ほかの値は意味を持たない）。
+#if VW_DRAW_VERIFY
 	struct DrawnMemberSize
 	{
 		bool found = false;
-		// **両端の解決済み絶対 Z は kind に依らず読む。** kind＝Vertical はこの差で実体を測り、
-		// kind＝Span でも**描かれた高さが命令どおりか**の検算に要る（パスから Z を外したので、
-		// 高さを言える値はこの 2 つしか残っていない）。読めたかは elevationRead が言う。
+		// **両端の解決済み絶対 Z。** kind＝Vertical はこの差で実体を測り、kind＝Horizontal でも
+		// **描かれた高さが命令どおりか**の検算に要る（パスから Z を外したので、高さを言える
+		// 値はこの 2 つしか残っていない）。読めたかは elevationRead が言う。
 		bool elevationRead = false;
-		double start = 0.0;	 // 始端の絶対 Z（elevationRead のときだけ）
-		double end = 0.0;	 // 終端の絶対 Z（同上）
-		double extent = 0.0; // |end - start| もしくはスパン（＝実体の高さ／長さ）
-		bool zero = false;	 // found かつ extent が 0（＝実体が無い）
+		double start = 0.0; // 始端の絶対 Z（elevationRead のときだけ）
+		double end = 0.0;	// 終端の絶対 Z（同上）
+		// 実体の高さ／長さ。kind＝Vertical なら |end − start|、kind＝Horizontal なら
+		// PIO が持つパスの両端の距離。
+		double extent = 0.0;
+		bool zero = false; // found かつ extent が 0（＝実体が無い）
 	};
 	DrawnMemberSize MeasureDrawnMember(MCObjectHandle object, StructuralExtentKind kind);
+#endif
 
-	// その部材が持つ「長さ」「高さ」を含むパラメータを**名前と値で**並べた 1 行。どの
-	// パラメータが OIP のどの欄なのかを実機で確かめる唯一の手段なので、**1 本ぶんだけ**
-	// 診断ログへ出す（全数だと読めない）。**開発ビルドだけ**（draw/Verify.h）。
+	// その部材が持つ「長さ」「高さ」「スパン」を含むパラメータを**名前と値で**並べた 1 行。
+	// どのパラメータが OIP のどの欄なのかを実機で確かめる唯一の手段なので、**1 本ぶんだけ**
+	// 診断ログへ出す（全数だと読めない）。**「スパン」も拾うのは、無いことを毎周確かめ直す
+	// ためではなく、この 1 行を読む人が「探し忘れでは」と疑わずに済むようにするため**
+	// ——無いことは既に確定していて、**再調査しない**（[Findings「打ち切った調査: 構造材 PIO
+	// から『スパン』『部材長』をパラメータで読む」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)。
+	// パラメータ表 181 件の全数列挙・SDK の全数検索・実運用の全数確認が独立に「無い」と
+	// 答えている）。**開発ビルドだけ**（draw/Verify.h）。
 #if VW_DRAW_VERIFY
 	std::string DescribeSizeParams(MCObjectHandle object);
 #endif
