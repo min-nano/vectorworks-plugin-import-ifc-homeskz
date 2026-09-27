@@ -1295,6 +1295,7 @@ namespace HomeskzIfcImport::draw
 	}
 #endif // VW_DRAW_VERIFY
 
+#if VW_DRAW_VERIFY
 	bool PioPathChord(MCObjectHandle object, double& outLength)
 	{
 		outLength = 0.0;
@@ -1324,6 +1325,7 @@ namespace HomeskzIfcImport::draw
 		}
 		return false;
 	}
+#endif // VW_DRAW_VERIFY
 
 	bool MeasureViewport(MCObjectHandle viewport, core::Vec2& center, core::Vec2& size)
 	{
