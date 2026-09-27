@@ -1231,6 +1231,19 @@ TEST(validate_rejects_sheet_with_empty_layer_name)
 	CHECK(!core::validateDocument(document));
 }
 
+TEST(validate_rejects_sheet_with_empty_hidden_class_name)
+{
+	// 名前の無いクラスは隠せない（描画側が黙って読み飛ばすだけになる）ので検証で弾く。
+	// 0 個（全クラス表示）は妥当。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	sheet.viewport.hiddenClasses = {"z構成要素-砕石"};
+	document.sheets.push_back(sheet);
+	CHECK(core::validateDocument(document));
+	document.sheets.front().viewport.hiddenClasses.emplace_back();
+	CHECK(!core::validateDocument(document));
+}
+
 TEST(validate_accepts_sheet_without_drawing_label)
 {
 	// 図面タイトル・図番は空でも描ける（ラベルが空になるだけ）。

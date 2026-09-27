@@ -1081,6 +1081,8 @@ namespace HomeskzIfcImport::core
 	//   drawingTitle                     … 図面タイトル（"1階床伏図" 等）
 	//   drawingNumber                    … 図番（シートレイヤ番号と同じ文字列）
 	//   layers                           … 表示するデザインレイヤ名（**それ以外は非表示**）
+	//   hiddenClasses                    … 非表示にするクラス名（**それ以外は表示**）。
+	//                                      図面に無いクラス名は描画側が読み飛ばす（作らない）
 	//
 	// 【並びは重ね順ではない】layers の並び順は描画側の走査順にすぎず、伏図での重なりは
 	// **ドキュメントのデザインレイヤ重ね順**が決める。床・野地板が柱・梁を覆い隠さないように
@@ -1088,14 +1090,18 @@ namespace HomeskzIfcImport::core
 	// （draw/Story の reorderStoryLayers。命令にレイヤ順を持たせないのは、全ビューポートで
 	// 同じ 1 本の希望順を使うため——命令ごとに複製すると希望順の定義が命令の数だけ増える）。
 	//
-	// 【クラス単位の非表示は持たない】どの伏図もクラスで絞らないので、命令には持たせず、
-	// 描画側は全クラスを表示にする（使われない枠を先に作らない方針。空レイヤを作らないのと同
-	// じ）。クラスで絞る伏図が実際に要るときにフィールドごと足す。
+	// 【クラスは「隠すもの」だけを挙げる】描画側は既定で全クラスを表示にし、hiddenClasses に
+	// 挙げたものだけを非表示にする（draw/DrawUtil の ConfigureViewport）。表示するクラスを
+	// 挙げる形にしないのは、ビューポートを仕上げた後にデータタグが持ち込むクラスまで解析側が
+	// 推し量る羽目になるため（DrawUtil.h「クラスを表示へ戻す理由」）。いま挙げるのは
+	// 基礎伏図の床付け（捨てコンクリート・砕石）だけ（ご要望。parse/Sheet の
+	// buildFoundationSheetCommands）。
 	struct ViewportCommand
 	{
 		std::string drawingTitle;
 		std::string drawingNumber;
 		std::vector<std::string> layers;
+		std::vector<std::string> hiddenClasses;
 
 		// M13 断面寸法データタグ。この図に載せる注釈（TagCommand の doc コメント参照）。
 		// 伏図・軸組図とも同じ形で持ち、描画側は種類を区別せずに置く。

@@ -66,13 +66,14 @@ namespace HomeskzIfcImport::core
 		}
 
 		// ビューポートが表示レイヤを 1 つ以上持ち、そのレイヤ名がどれも非空であること。
-		// 表示レイヤ 0 枚は「何も映らないビューポート」なので作らせない。伏図（isValidSheet）
-		// と軸組図（isValidSection）が同じ規則で見る。
+		// 表示レイヤ 0 枚は「何も映らないビューポート」なので作らせない。非表示にするクラス名
+		// も非空であること（0 個は可＝全クラス表示）。伏図（isValidSheet）と軸組図
+		// （isValidSection）が同じ規則で見る。
 		bool hasDrawableLayers(const ViewportCommand& viewport)
 		{
-			return !viewport.layers.empty() &&
-				   std::ranges::none_of(viewport.layers,
-										[](const std::string& layer) { return layer.empty(); });
+			const auto isEmpty = [](const std::string& name) { return name.empty(); };
+			return !viewport.layers.empty() && std::ranges::none_of(viewport.layers, isEmpty) &&
+				   std::ranges::none_of(viewport.hiddenClasses, isEmpty);
 		}
 
 		// 床板 1 枚が妥当か。配置先レイヤ名・クラス名が非空で、平面外形が 3 点以上（面になる）

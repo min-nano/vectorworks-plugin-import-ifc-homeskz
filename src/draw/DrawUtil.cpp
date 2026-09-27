@@ -110,15 +110,34 @@ namespace HomeskzIfcImport::draw
 			return {classes.begin(), classes.end()};
 		}
 
-		// ビューポートで指定のクラスを表示へ戻す（戻せた数を返す）。**表示種別の値を
-		// ここ 1 か所に閉じ込める**ためのもの。
-		std::size_t ShowClasses(MCObjectHandle viewport, const std::vector<InternalIndex>& classes)
+		// 名前が hiddenNames のどれかに当たるクラスか。**図面に無い名前は当たらないだけ**で、
+		// クラスを作らない（AddClass は無ければ作るので使わない。CLAUDE.md 開発の基本方針 5）。
+		bool IsHiddenClass(InternalIndex index, const std::vector<std::string>& hiddenNames)
+		{
+			if (hiddenNames.empty())
+				return false;
+			TXString name;
+			gSDK->InternalIndexToNameN(index, name);
+			return std::ranges::any_of(hiddenNames, [&name](const std::string& hidden)
+									   { return name == TXString(hidden.c_str()); });
+		}
+
+		// ビューポートで指定のクラスを表示へ戻し、hiddenNames に挙がったものだけ非表示にする
+		// （表示へ戻せた数を返す）。**表示種別の値をここ 1 か所に閉じ込める**ためのもの。
+		// 隠すクラスも**明示的に非表示を書く**——ビューポートの既定が非表示なのは M13 の実機で
+		// 見ただけで、既存のビューポートや SDK の版で違っても隠れるようにする。
+		std::size_t ShowClasses(MCObjectHandle viewport, const std::vector<InternalIndex>& classes,
+								const std::vector<std::string>& hiddenNames)
 		{
 			std::size_t applied = 0;
 			for (const InternalIndex index : classes)
 			{
+				const bool hidden = IsHiddenClass(index, hiddenNames);
+				const ClassVisibility visibility =
+					hidden ? ClassVisibility::Invisible : ClassVisibility::Normal;
 				if (gSDK->SetViewportClassVisibility(viewport, index,
-													 static_cast<short>(ClassVisibility::Normal)))
+													 static_cast<short>(visibility)) &&
+					!hidden)
 					++applied;
 			}
 			return applied;
@@ -914,6 +933,7 @@ namespace HomeskzIfcImport::draw
 	//   * VWClass::ForEachClass(true, cb)                 … 図面の全クラスの列挙
 	//                                                       （ISDK::ForEachClass の VWFC 版）
 	//   * gSDK->SetViewportClassVisibility(vp, idx, 0)    … クラス表示（既定は非表示）
+	//   * gSDK->InternalIndexToNameN(idx, name)           … 隠すクラスを名前で見分ける
 	//   * VWViewportObj(vp).SetScale / SetDescription / SetLocator / Update
 	//                                                     … 縮尺（1003）・図面タイトル（1032）・
 	//                                                       図番（1033）・描画更新
@@ -958,9 +978,10 @@ namespace HomeskzIfcImport::draw
 		return layer;
 	}
 
-	std::size_t ShowAllViewportClasses(MCObjectHandle viewport)
+	std::size_t ShowAllViewportClasses(MCObjectHandle viewport,
+									   const std::vector<std::string>& hiddenClasses)
 	{
-		return ShowClasses(viewport, AllClasses());
+		return ShowClasses(viewport, AllClasses(), hiddenClasses);
 	}
 
 	ViewportFinish ConfigureViewport(MCObjectHandle viewport, MCObjectHandle sheetLayer,
@@ -993,10 +1014,11 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// クラス: 全クラスを 1 つずつ表示へ戻す（ヘッダ「クラスを表示へ戻す理由」）。
+		// クラス: 全クラスを 1 つずつ表示へ戻し、命令が挙げたものだけ隠す（ヘッダ
+		// 「クラスを表示へ戻す理由」・core::ViewportCommand の hiddenClasses）。
 		{
 			VW_DRAW_TIME("図:クラス表示");
-			finish.classesApplied = ShowClasses(viewport, setup.classes);
+			finish.classesApplied = ShowClasses(viewport, setup.classes, command.hiddenClasses);
 		}
 		finish.planViewApplied = projection == ViewportProjection::Keep;
 
