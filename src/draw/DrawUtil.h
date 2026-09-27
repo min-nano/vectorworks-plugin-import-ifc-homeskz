@@ -57,8 +57,8 @@ namespace HomeskzIfcImport::draw
 	};
 
 	// SetViewportClassVisibility の表示種別（SDK の EClassVisibility。VWFC/VWObjects/
-	// VWClass.h）。**VS の 0/1/2 とは値が違う**（1 は「非表示」ではない）ので、表示へ戻す
-	// Normal だけを使う。
+	// VWClass.h）。**VS の 0/1/2 とは値が違う**（1 は「非表示」ではない）。表示へ戻す
+	// Normal と、命令が隠すクラスへ当てる Invisible を使う（Grayed は薄く残るので使わない）。
 	enum class ClassVisibility : short
 	{
 		Normal = 0,
@@ -690,7 +690,10 @@ namespace HomeskzIfcImport::draw
 	// ConfigureViewport が使うのと同じ列挙・同じ表示種別で、**ビューポートを仕上げた後に
 	// 増えたクラス**を拾い直すためのもの——注釈へ後から置いたデータタグは、スタイルが
 	// 決める中身と一緒に新しいクラスを文書へ持ち込むことがある（draw/Tag）。
-	std::size_t ShowAllViewportClasses(MCObjectHandle viewport);
+	// hiddenClasses（core::ViewportCommand の同名フィールド）に挙がったクラスは非表示のまま
+	// 保つ——**ConfigureViewport と同じものを渡す**こと（渡し忘れると隠したクラスが戻る）。
+	std::size_t ShowAllViewportClasses(MCObjectHandle viewport,
+									   const std::vector<std::string>& hiddenClasses);
 
 	// ビューポートの投影をどう扱うか（ConfigureViewport の引数）。
 	//
@@ -724,6 +727,8 @@ namespace HomeskzIfcImport::draw
 
 	// 生成済みのビューポートを命令どおりに仕上げる（表示レイヤの絞り込み → クラス表示 →
 	// 縮尺 → ［伏図なら 2D/平面の作り直し］→ 図面タイトル・図番 → 更新）。
+	//
+	// クラスは全クラスを表示へ戻し、命令の hiddenClasses に挙がったものだけ非表示にする。
 	//
 	// 表示レイヤは「まず全部隠してから、命令に挙げたものだけ表示へ戻す」——ビューポートは
 	// 既定でドキュメントの表示状態を引き継ぐため、挙げていないレイヤが映り込む。グレー表示

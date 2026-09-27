@@ -25,6 +25,7 @@
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
 #include "parse/Story.h"
+#include "parse/StructuralClass.h"
 
 #include <algorithm>
 #include <string>
@@ -113,9 +114,16 @@ namespace HomeskzIfcImport::parse
 		// に残るだけになる（あちらは「載せるシンボルが 1 つも無ければ空リスト」と書いていた）。
 		const bool withLegend = !context.anchorBolts().empty();
 
+		core::SheetCommand sheet =
+			makeSheet(kFoundationSheetNumber, kFoundationSheetTitle, std::move(layers), withLegend);
+		// 床付け（捨てコンクリート・砕石）は**クラスで隠す**（ご要望）。伏図は基礎の形を
+		// 読む図で、床付けは要らない。レイヤでは切り分けられない（底盤の構成層・地中梁の
+		// 下の床付けソリッドは底盤と同じレイヤに載る）ので、素材クラス（parse/StructuralClass）
+		// で絞る。軸組図では床付けを見せたいので基礎伏図だけに挙げる。
+		sheet.viewport.hiddenClasses = {CLASS_COMPONENT_LEAN_CONCRETE, CLASS_COMPONENT_GRAVEL};
+
 		std::vector<core::SheetCommand> commands;
-		commands.push_back(makeSheet(kFoundationSheetNumber, kFoundationSheetTitle,
-									 std::move(layers), withLegend));
+		commands.push_back(std::move(sheet));
 		return commands;
 	}
 
