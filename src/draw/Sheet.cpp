@@ -52,11 +52,11 @@
 #include "draw/Sheet.h"
 #include "draw/DrawUtil.h"
 #include "draw/Legend.h"
-#include "draw/ShearWall.h"
 #include "draw/Tag.h"
 #include "draw/TitleBlock.h"
 #include "core/Document.h"
 #include "core/Progress.h"
+#include "core/Trace.h"
 
 #include <algorithm>
 #include <array>
@@ -79,6 +79,63 @@ namespace HomeskzIfcImport::draw
 			const core::SheetCommand* command = nullptr;
 			MCObjectHandle viewport = nil;
 		};
+
+		// 伏図に映るデザインレイヤ（命令の表示レイヤ）の縮尺を、すべて伏図の縮尺へ揃える。
+		// 揃えたレイヤ数を返す。
+		//
+		// 【なぜ要るか】用紙基準（縮尺無視）のシンボル——耐力壁の伏図記号・柱記号・通り芯の
+		// 丸——の大きさは「定義の図形（用紙 mm）× **置いたレイヤの縮尺**」で決まる（実機で
+		// 確認: 図形 300mm・用紙基準のシンボルを縮尺 1/100 のレイヤへ置くと外接 30000mm）。
+		// 伏図はビューポート越しに見るので、**レイヤの縮尺を伏図の縮尺に揃えて初めて**紙の
+		// 上の大きさが一定になる。プラグインはレイヤを作るときに縮尺を書かないので、放って
+		// おくと図面の既定（1/100 等）のまま残る。
+		//
+		// 【耐力壁レイヤだけにしない】かつては耐力壁レイヤ（"n-耐力壁"）だけを揃えていたが、
+		// そうすると伏図が 1/50 に決まった図面で**耐力壁だけ 1/50・他は 1/100** と
+		// レイヤの縮尺が食い違い、同じ用紙基準の記号でも柱記号・通り芯の丸だけ紙の上で
+		// 倍の大きさに出た（スキップフロアのフィクスチャで指摘）。伏図が映すレイヤは
+		// すべて同じ縮尺で見るのだから、揃える範囲も伏図が映すレイヤ全部にする。
+		//
+		// **伏図の縮尺は用紙を読まないと決まらない**（core::planLayout）ので、レイヤを作る
+		// ときには分からない。割り付けが確定したあと、ビューポートを仕上げる前に呼ぶ。
+		// 耐力壁 PIO はレイヤ縮尺の変化で描き直す印（kObjXPropHasLayerScaleDeps）を
+		// 立ててあるので、呼べば記号が付いて回る。
+		std::size_t applyPlanLayerScale(const core::Document& document, double scale)
+		{
+			if (!(scale > 0.0))
+				return 0;
+
+			// 伏図の表示レイヤを**重複なく・決まった順で**集める（同じレイヤへ何度も縮尺を
+			// 書かない。順序に依らない結果にする＝CLAUDE.md「決定性を守る」）。耐力壁の
+			// レイヤも足しておく——どの伏図にも映らない耐力壁があっても記号の大きさは
+			// これまでどおり伏図の縮尺で出す。
+			std::vector<std::string> layers;
+			for (const core::SheetCommand& sheet : document.sheets)
+				layers.insert(layers.end(), sheet.viewport.layers.begin(),
+							  sheet.viewport.layers.end());
+			for (const core::ShearWallCommand& wall : document.shearWalls)
+				layers.push_back(wall.layer);
+			std::ranges::sort(layers);
+			const auto duplicates = std::ranges::unique(layers);
+			layers.erase(duplicates.begin(), duplicates.end());
+
+			std::size_t applied = 0;
+			for (const std::string& name : layers)
+			{
+				// 無いレイヤは黙って飛ばす（その階の生成がスキップされただけ。描画と同じ規約）。
+				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
+				if (layer == nil)
+					continue;
+				gSDK->SetLayerScaleN(layer, scale);
+				++applied;
+			}
+
+			if (applied > 0 && core::trace::isOpen())
+				core::trace::log("  sheet: 伏図のデザインレイヤ " + std::to_string(applied) +
+								 " 枚の縮尺を伏図に合わせた（1/" +
+								 std::to_string(static_cast<int>(scale)) + "）");
+			return applied;
+		}
 	} // namespace
 
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
@@ -238,18 +295,18 @@ namespace HomeskzIfcImport::draw
 
 		// --- 伏図記号の大きさを紙の上で一定にする ------------------------------------
 		//
-		// 耐力壁の伏図記号は**用紙基準（縮尺無視）のシンボル**で、その大きさは
-		// 「定義の図形（用紙 mm）× そのレイヤの縮尺」で決まる。伏図はビューポート越しに
-		// 見るので、**耐力壁レイヤの縮尺を伏図の縮尺へ揃えて初めて**紙の上で一定になる
-		// （draw/ShearWall.h の applyShearWallLayerScale）。
+		// 耐力壁の伏図記号・柱記号・通り芯の丸は**用紙基準（縮尺無視）のシンボル**で、
+		// その大きさは「定義の図形（用紙 mm）× そのレイヤの縮尺」で決まる。伏図は
+		// ビューポート越しに見るので、**伏図に映るレイヤの縮尺を伏図の縮尺へ揃えて初めて**
+		// 紙の上で一定になる（applyPlanLayerScale）。
 		//
 		// **ここでしかできない。** 伏図の縮尺は用紙を読まないと決まらない（core::planLayout）
 		// ので、耐力壁を描く時点では分からない。ビューポートを仕上げる 2 巡目より**前**に
 		// 済ませて、更新が新しい縮尺を見るようにする。
-		// **揃えたかを控える**（2 巡目で描き直すかの判断に要る）——耐力壁レイヤの縮尺を
+		// **揃えたかを控える**（2 巡目で描き直すかの判断に要る）——レイヤの縮尺を
 		// 動かすと伏図に映る記号の大きさが変わるので、縮尺が同じでビューポートを描き直さ
 		// ないままだと、**中身が変わった後の図を描き直す前に測る**ことになる（M29）。
-		const bool shearRescaled = applyShearWallLayerScale(document, layout.scale) > 0;
+		const bool layersRescaled = applyPlanLayerScale(document, layout.scale) > 0;
 
 		// --- 2 巡目: 確定した縮尺を当て、タグを置き、用紙の上へ動かす ----------------
 		//
@@ -267,14 +324,14 @@ namespace HomeskzIfcImport::draw
 					++missingScale;
 			}
 			// ★**測る前に描き直す。** 縮尺を当て直したなら ApplyViewportScale が済ませて
-			// いるが、縮尺が同じでも**耐力壁レイヤの縮尺を動かしていれば図の中身は変わって
+			// いるが、縮尺が同じでも**伏図のレイヤの縮尺を動かしていれば図の中身は変わって
 			// いる**（用紙基準の伏図記号の大きさがレイヤ縮尺で決まるため）。ここを飛ばすと
 			// `GetObjectBounds` は**変える前に描いた外形**を返すので、同じ命令・同じ割り付け
 			// でも「収まったか」の答えが図面の直前の状態で動く（M29 で実際にそうなった:
 			// 絵を変えない 2 つのビルドで件数が 1 枚 → 2 枚 ＋ 凡例と重なり 1 枚）。
 			// **どちらも起きていないなら描き直さない**（1 巡目の更新のまま中身は変わって
 			// いない）。更新は重いので、要らない周回を足さない。
-			else if (shearRescaled && !RefreshViewport(sheet.viewport))
+			else if (layersRescaled && !RefreshViewport(sheet.viewport))
 				++staleViewports;
 
 			// M18 用紙の上での位置。**この伏図に映る範囲**（命令の表示レイヤで絞った平面の
