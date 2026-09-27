@@ -1,4 +1,10 @@
 name: PR Review
+# 実行の名前に PR 番号と入口の種類 (auto / explicit) を入れる。自動の実行が
+# 同じ PR の `@claude review` を見つけて身を引くのに使う (下の門)。
+# explicit は「`@claude review` で始まる PR へのコメント」だけにする——ジョブの
+# if で落ちるただのコメントまで explicit と名乗ると、自動の実行がありもしない
+# レビューに身を引いてしまう。
+run-name: "PR Review #${{ github.event.pull_request.number || github.event.issue.number }} (${{ (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '@claude review')) && 'explicit' || 'auto' }})"
 
 # プルリクエストを Claude にレビューさせる。
 #
@@ -58,7 +64,8 @@ on:
   issue_comment:            # PR 本体へのコメント (`@claude review` の合図だけ拾う)
     types: [created]
 
-# 同じ PR のレビューは 1 つずつ走らせ、**打ち切らない**。
+# 同じ PR のレビューは、入口の種類 (自動 / `@claude review`) ごとに 1 つずつ
+# 走らせ、**打ち切らない**。
 #
 # 走っている実行を打ち切るとそのチェックが cancelled になり、
 # scripts/ci-wait.sh はそれを失敗として扱う (docs/DEVELOPMENT.md「CI の
@@ -66,8 +73,13 @@ on:
 # そちらはジョブが始まっていないのでチェックランが作られない (PR #112 で実測)。
 # 返信が続けて来ても、走るのは待っている 1 つと、最後に来た 1 つだけになる。
 # 後者は「その head はもうレビューした」で素通りする (下の門)。
+#
+# 種類でグループを分けるのは、自動の実行が門で最大 30 分待っている最中に
+# `@claude review` が来たとき、その後ろに並ばせないため。2 重のレビューは
+# 打ち切りではなく、**自動の実行のほうが身を引く** (下の門) ことで防ぐ。
+# 種類の判定は上の run-name と同じ式にする。
 concurrency:
-  group: pr-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: "pr-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{ (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '@claude review')) && 'explicit' || 'auto' }}"
   cancel-in-progress: false
 
 permissions:
@@ -203,8 +215,28 @@ jobs:
           #
           # 一時的な API エラー (レート制限や 5xx) でステップごと failure に
           # しないよう、失敗は skip で吸収する (既定のシェルは -e)。
+          # 自動の実行は、同じ PR の `@claude review` の実行が並んでいるか
+          # 走っていれば、**身を引く** (成功として素通りする)。見るのは実行の
+          # 名前 (上の run-name) で、終わったものは数えない——終わった
+          # `@claude review` がその head をレビューしていれば、下の
+          # 「もうレビューした」で素通りする。
+          #
+          # 自動の実行が門を抜けた直後に `@claude review` が来ると 2 つとも
+          # レビューしうるが、窓は数秒で、人が頼んだものなので止めない。
+          # 引けなかったときは身を引かない (レビューが出ないほうが高くつく)。
+          yield_to_explicit() {
+            [ "$EXPLICIT" != "true" ] || return 0
+            local n
+            n=$(gh api "repos/$GH_REPO/actions/workflows/pr-review.yml/runs?per_page=50" \
+                  --jq "[.workflow_runs[] | select(.display_title == \"PR Review #$PR_NUMBER (explicit)\" and .status != \"completed\")] | length" \
+                  2>/dev/null) || n=0
+            [ "${n:-0}" -eq 0 ] \
+              || skip "同じ PR の \`@claude review\` が走っているので、そちらに任せます。"
+          }
+
           deadline=$(( $(date +%s) + 30 * 60 ))
           while :; do
+            yield_to_explicit
             pr=$(gh pr view "$PR_NUMBER" --json state,isCrossRepository,isDraft,headRefOid) \
               || skip "プルリクエストの情報を取得できませんでした。"
             state=$(echo "$pr" | jq -r .state)
@@ -257,6 +289,7 @@ jobs:
             echo "待っています (head=${head_sha:0:7} / CI 待ち:${waiting:- なし} / 未解決のスレッド: $unresolved 件)"
             sleep 30
           done
+          yield_to_explicit
 
           # 自動の入口では、**その head をもうレビューしていれば素通りする**。
           # 返信が続けて来たとき、待っていた実行のあとに順番待ちの 1 つが
