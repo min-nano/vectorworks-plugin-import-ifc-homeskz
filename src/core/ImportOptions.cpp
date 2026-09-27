@@ -97,7 +97,7 @@ namespace HomeskzIfcImport::core
 		titleBlock = name;
 	}
 
-	const std::string& ImportOptions::dimensionStyle() const
+	const std::string& ImportOptions::dimensionStandard() const
 	{
 		return dimension;
 	}
@@ -107,7 +107,7 @@ namespace HomeskzIfcImport::core
 		return !dimension.empty();
 	}
 
-	void ImportOptions::setDimensionStyle(const std::string& name)
+	void ImportOptions::setDimensionStandard(const std::string& name)
 	{
 		// 図面枠と同じく**空はそのまま入れる**（＝寸法を入れない）。
 		dimension = name;

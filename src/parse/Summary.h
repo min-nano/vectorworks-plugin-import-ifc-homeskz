@@ -197,6 +197,6 @@ namespace HomeskzIfcImport::parse
 	// スタイル名の在り処として探すので、書き下すと片方だけ変わって名前が漏れる。
 	inline constexpr const char* kTitleBlockOptionLabel = "図面枠スタイル: ";
 
-	// formatImportOptions が寸法スタイルの行に付ける見出し（M31）。
-	inline constexpr const char* kDimensionOptionLabel = "寸法スタイル: ";
+	// formatImportOptions が寸法規格の行に付ける見出し（M31）。
+	inline constexpr const char* kDimensionOptionLabel = "寸法規格: ";
 } // namespace HomeskzIfcImport::parse

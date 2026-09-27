@@ -418,7 +418,7 @@ namespace HomeskzIfcImport::core
 
 		// 寸法（M31）: 伏図・軸組図どちらの列も測点が狭義の昇順で 2 つ以上あること
 		// （isValidDimensionChain 参照）。軸組図のレベル記号は表示名が非空であること。
-		// **寸法のスタイル名が空なのに寸法がある**文書は、描画側が何のスタイルで描くか
+		// **寸法規格の名前が空なのに寸法がある**文書は、描画側が何のスタイルで描くか
 		// 決められないので弾く（解析側は空なら 1 つも作らない＝core/Document.h）。
 		const bool anyDimension =
 			std::ranges::any_of(document.sheets, [](const SheetCommand& sheet)
@@ -426,7 +426,7 @@ namespace HomeskzIfcImport::core
 			std::ranges::any_of(
 				document.sections, [](const SectionCommand& section)
 				{ return !section.viewport.dimensions.empty() || !section.levels.empty(); });
-		if (anyDimension && document.dimensionStyle.empty())
+		if (anyDimension && document.dimensionStandard.empty())
 			return false;
 		if (!std::ranges::all_of(document.sheets, [](const SheetCommand& sheet)
 								 { return areValidDimensions(sheet.viewport); }))

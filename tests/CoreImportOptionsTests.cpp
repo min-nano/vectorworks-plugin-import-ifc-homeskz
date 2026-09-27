@@ -145,17 +145,17 @@ TEST(import_options_dimensions_are_off_by_default_and_keep_an_empty_name_as_off)
 	// という意味をそのまま持つ。
 	ImportOptions options;
 	CHECK(!options.hasDimensions());
-	CHECK(options.dimensionStyle().empty());
+	CHECK(options.dimensionStandard().empty());
 
-	options.setDimensionStyle("構造図 寸法");
+	options.setDimensionStandard("構造図 寸法");
 	CHECK(options.hasDimensions());
-	CHECK_EQ(options.dimensionStyle(), std::string("構造図 寸法"));
+	CHECK_EQ(options.dimensionStandard(), std::string("構造図 寸法"));
 	// 図面枠とは別の設定。
 	CHECK(!options.hasTitleBlock());
 
-	options.setDimensionStyle("");
+	options.setDimensionStandard("");
 	CHECK(!options.hasDimensions());
-	CHECK(options.dimensionStyle().empty());
+	CHECK(options.dimensionStandard().empty());
 }
 
 TEST_MAIN();

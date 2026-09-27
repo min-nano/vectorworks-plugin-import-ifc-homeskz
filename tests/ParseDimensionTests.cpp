@@ -7,13 +7,13 @@
 //
 //	検証項目:
 //	  * 測点のまとめ方——昇順・許容以内は 1 点・部材と通り芯が重なれば通り芯の値が残る。
-//	  * 伏図の外周の列——上と左に「部材＋通り芯 → 通り芯 → 全長」、下と右に通り芯の間隔。
-//	    部材が通り芯とすべて重なるなら 1 段目を出さない。通り芯が無ければ部材の位置で代える。
+//	  * 伏図の外周の列——上と左に部材の位置（通り芯を合わせる）、全長は上（1 つ外の段）と右。
+//	    通り芯の間隔だけの列は置かない。通り芯が無くても部材の位置と全長は出る。
 //	  * 基礎伏図の立上りに沿う列——アンカーボルト・立上りの端・横切る通り芯が測点になり、
 //	    通り芯とすべて重なる通りには作らない。列は図の外側へ出す。
 //	  * 伏図の種類ごとに押さえるもの——床伏図は柱と梁（表示レイヤに載るものだけ）、
 //	    母屋伏図は母屋だけ。
-//	  * 軸組図——柱の位置と通り芯（図の下）、GL・FL・軒高と標準の横架材天端（図の左）、
+//	  * 軸組図——柱の位置（通り芯を合わせる。図の下）、GL・FL・軒高と標準の横架材天端（図の左）、
 //	    標準と違う高さの横架材の高さ、レベル記号。
 //	  * 実フィクスチャ——寸法を入れた文書が検証を通り、何度組み立てても同じになること。
 //	    寸法を入れない設定では 1 つも作らないこと。
@@ -199,39 +199,48 @@ TEST(GridStopsSplitByDirection)
 	CHECK(sameValues(parse::gridStops(grids, DimensionAxis::Vertical), {0.0, 1820.0}));
 }
 
-TEST(PerimeterChainsStackOutward)
+TEST(PerimeterChainsPutMembersTopLeftAndOverallTopRight)
 {
 	const Vec2 min{-300.0, -300.0};
 	const Vec2 max{2120.0, 2120.0};
 	const std::vector<DimensionChainCommand> chains = parse::perimeterDimensionChains(
 		{0.0, 455.0, 910.0}, {}, {0.0, 910.0, 1820.0}, {0.0, 1820.0}, min, max, 0);
 
-	CHECK(chains.size() == 6);
-	if (chains.size() != 6)
+	CHECK(chains.size() == 4);
+	if (chains.size() != 4)
 		return;
-	// 上: 部材＋通り芯 → 通り芯 → 全長。下: 通り芯の間隔。
+	// 上: 部材の位置（通り芯を合わせる）→ 全長。通り芯の間隔だけの列は無く、下にも置かない。
 	CHECK(isChain(chains[0], DimensionAxis::Horizontal, {0.0, 455.0, 910.0, 1820.0}, 2120.0, 1, 0));
-	CHECK(isChain(chains[1], DimensionAxis::Horizontal, {0.0, 910.0, 1820.0}, 2120.0, 1, 1));
-	CHECK(isChain(chains[2], DimensionAxis::Horizontal, {0.0, 1820.0}, 2120.0, 1, 2));
-	CHECK(isChain(chains[3], DimensionAxis::Horizontal, {0.0, 910.0, 1820.0}, -300.0, -1, 0));
-	// 左: 部材が無い（＝通り芯と同じ）ので 1 段目は出さず、通り芯が 2 本なので全長も出さない。
-	// 右: 通り芯の間隔。
-	CHECK(isChain(chains[4], DimensionAxis::Vertical, {0.0, 1820.0}, -300.0, -1, 0));
-	CHECK(isChain(chains[5], DimensionAxis::Vertical, {0.0, 1820.0}, 2120.0, 1, 0));
+	CHECK(isChain(chains[1], DimensionAxis::Horizontal, {0.0, 1820.0}, 2120.0, 1, 1));
+	// 左: 部材の位置（ここでは通り芯だけ）。右: 全長（最も内側の段）。
+	CHECK(isChain(chains[2], DimensionAxis::Vertical, {0.0, 1820.0}, -300.0, -1, 0));
+	CHECK(isChain(chains[3], DimensionAxis::Vertical, {0.0, 1820.0}, 2120.0, 1, 0));
 }
 
-TEST(PerimeterChainsFallBackToMembersWithoutGrids)
+TEST(PerimeterChainsWorkWithoutGrids)
 {
 	const std::vector<DimensionChainCommand> chains = parse::perimeterDimensionChains(
 		{0.0, 1000.0, 3000.0}, {}, {}, {}, Vec2{-300.0, -300.0}, Vec2{3300.0, 300.0}, 1);
 
-	// 通り芯が無ければ部材の位置が「間隔」を担う（同じ列を 2 段に重ねない）。
-	CHECK(chains.size() == 3);
-	if (chains.size() != 3)
+	// 通り芯が無くても部材の位置と全長は出る。Y を測る部材が無ければ左右には何も無い。
+	CHECK(chains.size() == 2);
+	if (chains.size() != 2)
 		return;
 	CHECK(isChain(chains[0], DimensionAxis::Horizontal, {0.0, 1000.0, 3000.0}, 300.0, 1, 1));
 	CHECK(isChain(chains[1], DimensionAxis::Horizontal, {0.0, 3000.0}, 300.0, 1, 2));
-	CHECK(isChain(chains[2], DimensionAxis::Horizontal, {0.0, 1000.0, 3000.0}, -300.0, -1, 1));
+}
+
+TEST(PerimeterChainsSkipTheTopOverallWhenItRepeatsTheMembers)
+{
+	// 測点が 2 つなら部材の位置の列がそのまま全長なので、上に 2 段重ねない（右には置く）。
+	const std::vector<DimensionChainCommand> chains = parse::perimeterDimensionChains(
+		{0.0}, {0.0}, {1820.0}, {1820.0}, Vec2{-300.0, -300.0}, Vec2{2120.0, 2120.0}, 0);
+	CHECK(chains.size() == 3);
+	if (chains.size() != 3)
+		return;
+	CHECK(isChain(chains[0], DimensionAxis::Horizontal, {0.0, 1820.0}, 2120.0, 1, 0));
+	CHECK(isChain(chains[1], DimensionAxis::Vertical, {0.0, 1820.0}, -300.0, -1, 0));
+	CHECK(isChain(chains[2], DimensionAxis::Vertical, {0.0, 1820.0}, 2120.0, 1, 0));
 }
 
 TEST(FoundationWallChainsFollowEachWallLine)
@@ -386,16 +395,13 @@ TEST(SectionDimensionsCoverColumnsLevelsAndOffStandardBeams)
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildSectionDimensionCommands(document, section);
 
-	// 注釈の横＝y − 5000。柱 0 / 910 / 1820 → −5000 / −4090 / −3180、通り芯 Y1・Y2 →
-	// −5000 / −3180。
+	// 注釈の横＝y − 5000。柱 0 / 910 / 1820 → −5000 / −4090 / −3180（通り芯 Y1・Y2 の
+	// −5000 / −3180 と重なる）。通り芯の間隔だけの列は置かない。
 	const DimensionChainCommand* columns = findChain(chains, DimensionAxis::Horizontal, -1, 0);
-	const DimensionChainCommand* grid = findChain(chains, DimensionAxis::Horizontal, -1, 1);
 	CHECK(columns != nullptr);
-	CHECK(grid != nullptr);
 	if (columns != nullptr)
 		CHECK(sameValues(columns->stops, {-5000.0, -4090.0, -3180.0}));
-	if (grid != nullptr)
-		CHECK(sameValues(grid->stops, {-5000.0, -3180.0}));
+	CHECK(findChain(chains, DimensionAxis::Horizontal, -1, 1) == nullptr);
 	// 下に出す列の根元は建物の下端（どの要素よりも下）。
 	if (columns != nullptr)
 		CHECK(columns->base <= 0.0);
@@ -417,7 +423,7 @@ TEST(SectionDimensionsCoverColumnsLevelsAndOffStandardBeams)
 	CHECK(offStandard != nullptr);
 	if (offStandard != nullptr)
 		CHECK(isChain(*offStandard, DimensionAxis::Vertical, {3164.0, 3264.0}, -4545.0, 1, 0));
-	CHECK(chains.size() == 5);
+	CHECK(chains.size() == 4);
 }
 
 TEST(SectionLevelMarksNameGlFloorsAndEaves)
@@ -466,13 +472,13 @@ TEST(AttachedDimensionsAreValidAndDeterministicOnRealFixtures)
 			}
 
 			Document first = original;
-			first.dimensionStyle = "寸法";
+			first.dimensionStandard = "寸法";
 			parse::attachDimensionCommands(first);
 			CHECK(core::validateDocument(first));
 
 			// もう一度組み立てても同じ（決定性）。
 			Document second = original;
-			second.dimensionStyle = "寸法";
+			second.dimensionStandard = "寸法";
 			parse::attachDimensionCommands(second);
 			CHECK(first.sheets.size() == second.sheets.size());
 			for (std::size_t i = 0; i < first.sheets.size() && i < second.sheets.size(); ++i)
@@ -514,9 +520,9 @@ TEST(BuildDocumentAddsDimensionsOnlyWhenAStyleIsChosen)
 	core::NullProgressReporter progress;
 
 	core::ImportOptions options;
-	options.setDimensionStyle("JIS");
+	options.setDimensionStandard("JIS");
 	const Document withStyle = parse::buildDocument(path, progress, options);
-	CHECK(withStyle.dimensionStyle == "JIS");
+	CHECK(withStyle.dimensionStandard == "JIS");
 	CHECK(core::validateDocument(withStyle));
 	std::size_t chains = 0;
 	for (const SheetCommand& sheet : withStyle.sheets)
@@ -524,7 +530,7 @@ TEST(BuildDocumentAddsDimensionsOnlyWhenAStyleIsChosen)
 	CHECK(chains > 0);
 
 	const Document without = parse::buildDocument(path, progress, core::ImportOptions{});
-	CHECK(without.dimensionStyle.empty());
+	CHECK(without.dimensionStandard.empty());
 	for (const SheetCommand& sheet : without.sheets)
 		CHECK(sheet.viewport.dimensions.empty());
 }

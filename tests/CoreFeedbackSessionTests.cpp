@@ -59,7 +59,7 @@ namespace
 		session.options.setSymbol(SymbolRole::FloorPost, "床束（特注）");
 		session.options.setEnabled(SymbolRole::FireBrace, false);
 		session.options.setTitleBlockStyle("図面枠 A3（構造）");
-		session.options.setDimensionStyle("構造図 寸法");
+		session.options.setDimensionStandard("構造図 寸法");
 		return session;
 	}
 
@@ -197,8 +197,8 @@ TEST(feedback_session_round_trips_through_text)
 	// 以降は図面枠が 1 枚も置かれない（PR #133 の round 2 で実際に起きた）。
 	CHECK_EQ(after.options.titleBlockStyle(), before.options.titleBlockStyle());
 	CHECK(after.options.hasTitleBlock());
-	// M31 寸法のスタイルも運ばれる（落ちると 2 周目以降は寸法が 1 つも入らない）。
-	CHECK_EQ(after.options.dimensionStyle(), before.options.dimensionStyle());
+	// M31 寸法規格も運ばれる（落ちると 2 周目以降は寸法が 1 つも入らない）。
+	CHECK_EQ(after.options.dimensionStandard(), before.options.dimensionStandard());
 	CHECK(after.options.hasDimensions());
 }
 

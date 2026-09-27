@@ -77,29 +77,24 @@ namespace HomeskzIfcImport::parse
 									   { return std::abs(v - value) <= kDimensionMergeTol; });
 		}
 
-		// 列を段ごとに外へ積む（ヘッダ冒頭「伏図の外周の列」）。detail 側（上・左）には
-		// 部材＋通り芯 → 通り芯 → 全長、grid 側（下・右）には通り芯の間隔だけを置く。
+		// 1 つの向き（X を測る列か Y を測る列）の外周の列を積む（ヘッダ冒頭「伏図の外周の
+		// 列」）。detail 側に部材の位置の列を置き、全長は overallOnDetailSide なら同じ側の
+		// 1 つ外の段、そうでなければ反対側（overallBase / overallSide）の最も内側の段へ置く。
 		void addPerimeterAxis(std::vector<DimensionChainCommand>& out, DimensionAxis axis,
 							  const std::vector<double>& elements, const std::vector<double>& grids,
-							  double detailBase, int detailSide, double gridBase, int gridSide,
-							  int firstTier)
+							  double detailBase, int detailSide, bool overallOnDetailSide,
+							  double overallBase, int overallSide, int firstTier)
 		{
-			const std::vector<double> grid = mergeStops(grids);
-			const std::vector<double> detail = unionStops(grid, elements);
-
-			int tier = firstTier;
-			if (detail.size() >= 2 && !sameStops(detail, grid))
-				out.push_back(makeChain(axis, detail, detailBase, detailSide, tier++));
-			// 通り芯が 2 本以上あれば通り芯の間隔、無ければ部材の位置の列が「間隔」を担う。
-			const std::vector<double>& spacing = grid.size() >= 2 ? grid : detail;
-			if (spacing.size() >= 2 && (grid.size() >= 2 || tier == firstTier))
-				out.push_back(makeChain(axis, spacing, detailBase, detailSide, tier++));
-			if (spacing.size() >= 3)
-				out.push_back(makeChain(axis, {spacing.front(), spacing.back()}, detailBase,
-										detailSide, tier++));
-
-			if (spacing.size() >= 2)
-				out.push_back(makeChain(axis, spacing, gridBase, gridSide, firstTier));
+			const std::vector<double> detail = unionStops(mergeStops(grids), elements);
+			if (detail.size() < 2)
+				return;
+			out.push_back(makeChain(axis, detail, detailBase, detailSide, firstTier));
+			const std::vector<double> overall{detail.front(), detail.back()};
+			if (!overallOnDetailSide)
+				out.push_back(makeChain(axis, overall, overallBase, overallSide, firstTier));
+			else if (detail.size() >= 3)
+				// 測点が 2 つなら部材の位置の列がそのまま全長になる（同じ列を 2 段重ねない）。
+				out.push_back(makeChain(axis, overall, detailBase, detailSide, firstTier + 1));
 		}
 
 		// 直線に乗る立上りの群（基礎伏図の「通り」1 本）。
@@ -326,11 +321,11 @@ namespace HomeskzIfcImport::parse
 							 const core::Vec2& max, int firstTier)
 	{
 		std::vector<DimensionChainCommand> out;
-		// X を測る列: 部材の位置は上（+Y）、通り芯の間隔は下（−Y）。
-		addPerimeterAxis(out, DimensionAxis::Horizontal, elementX, gridX, max.y, 1, min.y, -1,
+		// X を測る列: 部材の位置も全長も上（+Y）。下には置かない。
+		addPerimeterAxis(out, DimensionAxis::Horizontal, elementX, gridX, max.y, 1, true, max.y, 1,
 						 firstTier);
-		// Y を測る列: 部材の位置は左（−X）、通り芯の間隔は右（+X）。
-		addPerimeterAxis(out, DimensionAxis::Vertical, elementY, gridY, min.x, -1, max.x, 1,
+		// Y を測る列: 部材の位置は左（−X）、全長は右（+X）。
+		addPerimeterAxis(out, DimensionAxis::Vertical, elementY, gridY, min.x, -1, false, max.x, 1,
 						 firstTier);
 		return out;
 	}
@@ -501,7 +496,8 @@ namespace HomeskzIfcImport::parse
 
 		std::vector<DimensionChainCommand> out;
 
-		// 横: 柱・束の位置（＋通り芯）→ 通り芯の間隔。図の下に出す。
+		// 横: 柱・束の位置（＋通り芯）。図の下に出す。通り芯の間隔だけの列は置かない
+		// （部材の位置が分かれば足りる。伏図と同じ）。
 		std::vector<double> columns;
 		for (const core::ColumnCommand& column : document.columns)
 		{
@@ -521,11 +517,8 @@ namespace HomeskzIfcImport::parse
 		}
 		grid = mergeStops(std::move(grid));
 		const std::vector<double> detail = unionStops(grid, columns);
-		int tier = 0;
-		if (detail.size() >= 2 && !sameStops(detail, grid))
-			out.push_back(makeChain(DimensionAxis::Horizontal, detail, bottom, -1, tier++));
-		if (grid.size() >= 2)
-			out.push_back(makeChain(DimensionAxis::Horizontal, grid, bottom, -1, tier++));
+		if (detail.size() >= 2)
+			out.push_back(makeChain(DimensionAxis::Horizontal, detail, bottom, -1, 0));
 
 		// 縦: GL・FL・軒高と、そこからの標準の横架材天端 → GL・FL・軒高の間隔。図の左に出す。
 		const SectionHeights heights = sectionHeights(document.stories);
@@ -535,7 +528,7 @@ namespace HomeskzIfcImport::parse
 			levelZ.push_back(mark.elevation);
 		levelZ = mergeStops(std::move(levelZ));
 		const std::vector<double> withBeams = unionStops(levelZ, heights.beamTops);
-		tier = 0;
+		int tier = 0;
 		if (withBeams.size() >= 2 && !sameStops(withBeams, levelZ))
 			out.push_back(makeChain(DimensionAxis::Vertical, withBeams, low, -1, tier++));
 		if (levelZ.size() >= 2)

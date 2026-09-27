@@ -2121,7 +2121,7 @@ namespace
 	core::Document documentWithChain(const core::DimensionChainCommand& chain)
 	{
 		core::Document document;
-		document.dimensionStyle = "寸法";
+		document.dimensionStandard = "寸法";
 		document.sheets.push_back(validSheet());
 		document.sheets.back().viewport.dimensions.push_back(chain);
 		return document;
@@ -2133,7 +2133,7 @@ TEST(validate_accepts_dimension_chains_with_a_style)
 	CHECK(core::validateDocument(documentWithChain(validChain())));
 
 	core::Document document;
-	document.dimensionStyle = "寸法";
+	document.dimensionStandard = "寸法";
 	core::SectionCommand section = validSection();
 	section.viewport.dimensions.push_back(validChain());
 	section.levels.push_back(core::LevelMarkCommand{"GL", 0.0, -5000.0});
@@ -2147,7 +2147,7 @@ TEST(validate_rejects_dimensions_without_a_style)
 {
 	// 何のスタイルで描くか決められない（解析側は空なら 1 つも作らない）。
 	core::Document document = documentWithChain(validChain());
-	document.dimensionStyle.clear();
+	document.dimensionStandard.clear();
 	CHECK(!core::validateDocument(document));
 
 	// レベル記号だけでも同じ。
@@ -2158,7 +2158,7 @@ TEST(validate_rejects_dimensions_without_a_style)
 	levelsOnly.sectionSheet.startNumber = 8;
 	levelsOnly.sectionSheet.title = "軸組図";
 	CHECK(!core::validateDocument(levelsOnly));
-	levelsOnly.dimensionStyle = "寸法";
+	levelsOnly.dimensionStandard = "寸法";
 	CHECK(core::validateDocument(levelsOnly));
 }
 
@@ -2187,7 +2187,7 @@ TEST(validate_rejects_malformed_dimension_chains)
 TEST(validate_rejects_level_mark_without_name)
 {
 	core::Document document;
-	document.dimensionStyle = "寸法";
+	document.dimensionStandard = "寸法";
 	core::SectionCommand section = validSection();
 	section.levels.push_back(core::LevelMarkCommand{"", 0.0, 0.0});
 	document.sections.push_back(section);

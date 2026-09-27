@@ -512,7 +512,7 @@ namespace HomeskzIfcImport::parse
 			<< (options.hasTitleBlock() ? options.titleBlockStyle() : std::string("置かない"));
 		// M31 寸法も同じく表の外（既定名が無い）。
 		out << "\n  " << kDimensionOptionLabel
-			<< (options.hasDimensions() ? options.dimensionStyle() : std::string("入れない"));
+			<< (options.hasDimensions() ? options.dimensionStandard() : std::string("入れない"));
 		return out.str();
 	}
 } // namespace HomeskzIfcImport::parse

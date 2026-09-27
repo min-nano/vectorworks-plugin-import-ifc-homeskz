@@ -261,8 +261,8 @@ vw_add_test(ParseTagTests ParseTagTests.cpp CORE FIXTURES)
 
 # Dimensions (src/parse/Dimension, M31): the chains of linear dimensions each plan and section
 # viewport gets — merging nearby stops (grid values win over member values), the perimeter
-# tiers of a plan (members+grid, grid spacing, overall on top/left; grid spacing on
-# bottom/right), the foundation's per-wall chains (anchor bolts, wall ends, crossing grids),
+# chains of a plan (member positions on top/left, overall length on top/right; no grid-spacing
+# chain), the foundation's per-wall chains (anchor bolts, wall ends, crossing grids),
 # which members each plan kind dimensions (framing: columns + beams; moya: 母屋 only), and the
 # section chains/level marks (GL/FL/軒高, standard beam tops, off-standard beams). Hand-written
 # expectations on synthetic documents plus an end-to-end run over every fixture (validates,

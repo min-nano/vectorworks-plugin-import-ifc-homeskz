@@ -211,7 +211,7 @@ namespace HomeskzIfcImport::parse
 		// 軒高）。タグと同じく**ビューポート命令の中**に入るので sheets / sections が確定した
 		// 後に置く（parse/Dimension）。**寸法を入れない設定（スタイル名が空）なら 1 つも
 		// 作らない**——描画側で捨てるのではなく、そもそも指示を出さない（M20 と同じ考え方）。
-		document.dimensionStyle = options.dimensionStyle();
+		document.dimensionStandard = options.dimensionStandard();
 		if (options.hasDimensions())
 			attachDimensionCommands(document);
 

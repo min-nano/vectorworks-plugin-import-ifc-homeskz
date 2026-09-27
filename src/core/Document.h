@@ -1038,7 +1038,7 @@ namespace HomeskzIfcImport::core
 	// ものは命令に持たせない」）。
 	//
 	// 【スタイルは持たない】寸法の見え方（文字・矢印・補助線）は文書に 1 つの
-	// Document::dimensionStyle が決める。
+	// Document::dimensionStandard が決める。
 	//
 	// フィールド:
 	//   axis                         … 測る向き
@@ -1059,7 +1059,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 軸組図（断面ビューポート）に置くレベル記号 1 つ（GL・1FL・2FL・軒高。M31）。
-	// レベルオブジェクトとしてその断面ビューポートの**注釈**に置く。
+	// レベル基準線としてその断面ビューポートの**注釈**に置く（最上階の表記は「軒高」）。
 	//
 	// フィールド:
 	//   name                         … 表示名（"GL" / "1FL" / "軒高"）
@@ -1109,7 +1109,7 @@ namespace HomeskzIfcImport::core
 
 		// M31 寸法。この図に載せる連続寸法の列（DimensionChainCommand の doc コメント参照）。
 		// タグと同じく**入れ子**で持ち、伏図・軸組図とも描画側は種類を区別せずに置く。
-		// 寸法を入れない設定（Document::dimensionStyle が空）なら空。
+		// 寸法を入れない設定（Document::dimensionStandard が空）なら空。
 		std::vector<DimensionChainCommand> dimensions;
 	};
 
@@ -1386,12 +1386,12 @@ namespace HomeskzIfcImport::core
 		// スタイルを名前で指すだけである（CLAUDE.md 開発の基本方針 4）。
 		std::string titleBlockStyle;
 
-		// M31 寸法のスタイル名（取り込み設定 core::ImportOptions::dimensionStyle をそのまま
+		// M31 寸法規格の名前（取り込み設定 core::ImportOptions::dimensionStandard をそのまま
 		// 写したもの）。**空なら寸法もレベル記号も入れない**（既定）——そのとき解析側は
 		// 寸法の命令（ViewportCommand::dimensions / SectionCommand::levels）を 1 つも作らない。
 		// 図面枠と同じく**スタイルは作らない**（利用者の図面にあるものを名前で指すだけ。
 		// CLAUDE.md 開発の基本方針 4）。
-		std::string dimensionStyle;
+		std::string dimensionStandard;
 	};
 
 	// ------------------------------------------------------------------------
