@@ -164,29 +164,34 @@ TEST(SpanLayersAtCutHandlesEmptySpans)
 
 TEST(FoundationSheetOnlyWhenFoundationExists)
 {
-	forEachFixture(failures,
-				   [&](const std::string&, const Model& model)
-				   {
-					   const std::vector<SheetCommand> sheets = buildFoundationSheetCommands(model);
-					   if (!hasFoundation(model))
-					   {
-						   CHECK(sheets.empty());
-						   return;
-					   }
-					   CHECK(sheets.size() == 1);
-					   CHECK(sheets[0].number == kFoundationSheetNumber);
-					   CHECK(sheets[0].title == kFoundationSheetTitle);
-					   // 図番・図面タイトルはシートレイヤ番号・タイトルと同じ値。
-					   CHECK(sheets[0].viewport.drawingNumber == sheets[0].number);
-					   CHECK(sheets[0].viewport.drawingTitle == sheets[0].title);
-					   // 底盤・立上り・床束・アンカーボルト・通り芯の 5 枚。
-					   CHECK(sheets[0].viewport.layers.size() == 5);
-					   CHECK(contains(sheets[0].viewport.layers, "F-底盤"));
-					   CHECK(contains(sheets[0].viewport.layers, "F-立上り"));
-					   CHECK(contains(sheets[0].viewport.layers, "F-床束"));
-					   CHECK(contains(sheets[0].viewport.layers, kLayerFoundationAnchor));
-					   CHECK(contains(sheets[0].viewport.layers, core::kGridLayer));
-				   });
+	forEachFixture(
+		failures,
+		[&](const std::string&, const Model& model)
+		{
+			const std::vector<SheetCommand> sheets = buildFoundationSheetCommands(model);
+			if (!hasFoundation(model))
+			{
+				CHECK(sheets.empty());
+				return;
+			}
+			CHECK(sheets.size() == 1);
+			CHECK(sheets[0].number == kFoundationSheetNumber);
+			CHECK(sheets[0].title == kFoundationSheetTitle);
+			// 図番・図面タイトルはシートレイヤ番号・タイトルと同じ値。
+			CHECK(sheets[0].viewport.drawingNumber == sheets[0].number);
+			CHECK(sheets[0].viewport.drawingTitle == sheets[0].title);
+			// 底盤・立上り・床束・アンカーボルト・通り芯の 5 枚。
+			CHECK(sheets[0].viewport.layers.size() == 5);
+			CHECK(contains(sheets[0].viewport.layers, "F-底盤"));
+			CHECK(contains(sheets[0].viewport.layers, "F-立上り"));
+			CHECK(contains(sheets[0].viewport.layers, "F-床束"));
+			CHECK(contains(sheets[0].viewport.layers, kLayerFoundationAnchor));
+			CHECK(contains(sheets[0].viewport.layers, core::kGridLayer));
+			// 床付け（捨てコンクリート・砕石）はクラスで隠す（その 2 つだけ）。
+			CHECK(sheets[0].viewport.hiddenClasses.size() == 2);
+			CHECK(contains(sheets[0].viewport.hiddenClasses, "z構成要素-捨てコンクリート"));
+			CHECK(contains(sheets[0].viewport.hiddenClasses, "z構成要素-砕石"));
+		});
 }
 
 TEST(FloorFramingSheetPerStoryWithBeamAndGridLayers)
@@ -217,6 +222,8 @@ TEST(FloorFramingSheetPerStoryWithBeamAndGridLayers)
 					  !isTop);
 				const bool expectAnchor = (i == 0) && !isTop && hasFoundation(model);
 				CHECK(contains(sheets[i].viewport.layers, kLayerFoundationAnchor) == expectAnchor);
+				// クラスで隠すのは基礎伏図だけ（柱梁伏図は全クラス表示）。
+				CHECK(sheets[i].viewport.hiddenClasses.empty());
 			}
 		});
 }

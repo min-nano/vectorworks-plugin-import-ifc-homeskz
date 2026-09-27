@@ -522,10 +522,11 @@ namespace HomeskzIfcImport::draw
 		// 置く前**に走っているので、**タグの中身がその時点で文書に無かったクラスを持ち込んだ
 		// 場合**、ここで戻さないと注釈だけが空白のまま残る。
 		// 戻すのはビューポートと同じく**全クラス**（draw/DrawUtil の ShowAllViewportClasses）
-		// ——タグが身に付けているクラスを数え上げる必要はない。
+		// ——タグが身に付けているクラスを数え上げる必要はない。命令が隠すクラスは
+		// ConfigureViewport と同じく非表示のまま保つ。
 		if (!placed.empty())
 		{
-			counts.classesShown += ShowAllViewportClasses(viewport);
+			counts.classesShown += ShowAllViewportClasses(viewport, command.hiddenClasses);
 			try
 			{
 				VWViewportObj(viewport).Update();
