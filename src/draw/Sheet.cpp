@@ -587,6 +587,7 @@ namespace HomeskzIfcImport::draw
 
 		addNote(tagDiagnostics("伏図", tags));
 		addNote(dimensionDiagnostics("伏図", dimensions));
+		addInfo(dimensionInfo("伏図", dimensions));
 		if (outCounts != nullptr)
 			outCounts->dimensions += dimensions.chains;
 		addNote(legendDiagnostics(legends));

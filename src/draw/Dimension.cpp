@@ -26,7 +26,11 @@
 #include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -50,6 +54,14 @@ namespace HomeskzIfcImport::draw
 		// 高さを注釈の Y（＝Z）から読ませる設定（既定の ZAxis3DMode では注釈で高さが 0）。
 		constexpr const char* kParamAxis = "Axis";
 		constexpr const char* kAxisFromAnnotationY = "YAxis2DMode";
+
+		// 描いた高さ（読み取り用の静的文字）と、そこから引く基準高さ（Findings「Level
+		// Objects」のパラメータ表）。
+		constexpr const char* kParamShownElevation = "Elevation";
+		constexpr const char* kParamReferenceElevation = "RefElev";
+
+		// 描いた高さが命令の高さからこれ以上ずれていたら、基準高さで補正する（mm）。
+		constexpr double kLevelHeightTol = 0.5;
 
 		// マーカーレイアウトの中で「名前」を出しているテキストの目印（ストーリレベル名の
 		// 動的テキスト 〈#STLT#-#STPS#〉。Findings「Level Objects」の実測）。このテキストを
@@ -78,6 +90,44 @@ namespace HomeskzIfcImport::draw
 			gSDK->DeleteObject(object, true);
 			return false;
 		}
+
+#if VW_DRAW_VERIFY
+		// 検算（dev だけ）: 寸法 1 本の見え方に効くオブジェクト変数を読んで 1 行にする
+		// （round 1: 軸組図だけ寸法値が出なかった。伏図と並べて違いを探す）。
+		std::string DescribeDimension(MCObjectHandle dimension)
+		{
+			const auto real = [dimension](short selector) -> std::string
+			{
+				TVariableBlock value;
+				Real64 number = 0.0;
+				if (gSDK->GetObjectVariable(dimension, selector, value) == 0 ||
+					!value.GetReal64(number))
+					return "?";
+				std::array<char, 32> buffer{};
+				std::snprintf(buffer.data(), buffer.size(), "%g", number);
+				return buffer.data();
+			};
+			const auto flag = [dimension](short selector) -> std::string
+			{
+				TVariableBlock value;
+				bool on = false;
+				if (gSDK->GetObjectVariable(dimension, selector, value) == 0 ||
+					!value.GetBoolean(on))
+					return "?";
+				return on ? "on" : "off";
+			};
+			std::string name = "?";
+			if (TVariableBlock value;
+				gSDK->GetObjectVariable(dimension, ovDimStandardName, value) != 0)
+			{
+				TXString text;
+				if (value.GetTXString(text))
+					name = static_cast<const char*>(text);
+			}
+			return "値表示 " + flag(ovDimShowValue) + " / 文字 " + real(ovDimTextSizeInPoints) +
+				   "pt・" + real(ovDimFontSize) + "mm / 規格 " + name;
+		}
+#endif
 
 		// 列 1 本を置く。1 本でも注釈へ置けたら true。
 		bool PlaceChain(MCObjectHandle viewport, const core::DimensionChainCommand& chain,
@@ -117,6 +167,12 @@ namespace HomeskzIfcImport::draw
 				// 名前は false で弾かれ、文書の既定の規格のまま残る（数えて診断へ）。
 				if (!SetTextVariable(dimension, ObjectVariable::DimStandardName, standard))
 					++counts.standardRejected;
+				// 寸法値は**明示して出す**（round 1: 軸組図の注釈で値が出なかった。伏図では出た）。
+				SetBooleanVariable(dimension, ObjectVariable::DimShowValue, true);
+#if VW_DRAW_VERIFY
+				if (counts.dimensionProbe.empty())
+					counts.dimensionProbe = DescribeDimension(dimension);
+#endif
 				SetClassByName(dimension, kDimensionClass);
 
 				if (current == nil)
@@ -275,6 +331,61 @@ namespace HomeskzIfcImport::draw
 		}
 #endif
 
+		// 描いた高さ（"10953.18" のような文字）を数に読む。読めなければ false。
+		bool ParseShownHeight(const std::string& shown, double& value)
+		{
+			std::string digits;
+			for (const char c : shown)
+			{
+				if (c != ',' && c != ' ')
+					digits.push_back(c);
+			}
+			if (digits.empty())
+				return false;
+			char* end = nullptr;
+			value = std::strtod(digits.c_str(), &end);
+			return end != digits.c_str();
+		}
+
+		// **描いた高さを命令の高さへ合わせる**（round 1: 注釈の Y を読ませると、GL が
+		// 4379.18 と出た——4 本とも同じ量だけずれ、位置は合っていた。注釈の Y と描く高さの
+		// 間に一定のずれがある）。描いた高さを読み、ずれを基準高さ（RefElev）へ足して描き
+		// 直す。ずれの量を決め打ちせず 1 本ずつ測るので、ずれの出どころに依らない。
+		void AlignLevelHeight(MCObjectHandle mark, double elevation, DimensionCounts& counts)
+		{
+			try
+			{
+				VWParametricObj pio(mark);
+				const std::string shown =
+					static_cast<const char*>(pio.GetParamString(kParamShownElevation));
+				double value = 0.0;
+				if (!ParseShownHeight(shown, value))
+				{
+					++counts.levelHeightUnread;
+					return;
+				}
+				const double drift = value - elevation;
+				if (std::abs(drift) <= kLevelHeightTol)
+					return;
+				const double reference = pio.GetParamReal(kParamReferenceElevation);
+				pio.SetParamReal(kParamReferenceElevation, reference + drift);
+				gSDK->ResetObject(mark);
+				++counts.levelHeightCorrected;
+				if (counts.levelHeightProbe.empty())
+				{
+					std::array<char, 96> buffer{};
+					std::snprintf(buffer.data(), buffer.size(),
+								  "描いた高さ %s → 基準高さ %g で補正", shown.c_str(),
+								  reference + drift);
+					counts.levelHeightProbe = buffer.data();
+				}
+			}
+			catch (...)
+			{
+				++counts.levelHeightUnread;
+			}
+		}
+
 		// レベル記号 1 つを置く。注釈へ置けたら true。
 		bool PlaceLevel(MCObjectHandle viewport, const core::LevelMarkCommand& level,
 						DimensionCounts& counts)
@@ -304,6 +415,7 @@ namespace HomeskzIfcImport::draw
 			if (!ReplaceLevelName(mark, level.name))
 				++counts.levelNameFailed;
 			gSDK->ResetObject(mark);
+			AlignLevelHeight(mark, level.elevation, counts);
 #if VW_DRAW_VERIFY
 			if (!DrawsText(mark, level.name, counts.levelNameProbe))
 				++counts.levelNameUnseen;
@@ -378,8 +490,8 @@ namespace HomeskzIfcImport::draw
 #endif
 		if (counts.failed == 0 && counts.standardRejected == 0 && counts.unjoined == 0 &&
 			counts.levelsFailed == 0 && counts.levelNameFailed == 0 &&
-			counts.levelHeightFailed == 0 && counts.updateFailed == 0 && !classesBroken &&
-			!verifyIssue)
+			counts.levelHeightFailed == 0 && counts.levelHeightUnread == 0 &&
+			counts.updateFailed == 0 && !classesBroken && !verifyIssue)
 			return {};
 
 		std::string text = label + "の寸法の診断: ";
@@ -391,6 +503,8 @@ namespace HomeskzIfcImport::draw
 		AppendCount(text, "名前を書けなかったレベル記号", counts.levelNameFailed, "個");
 		AppendCount(text, "高さを注釈から読ませられなかったレベル記号", counts.levelHeightFailed,
 					"個", "高さが 0 と出ます");
+		AppendCount(text, "描いた高さを読めなかったレベル記号", counts.levelHeightUnread, "個",
+					"高さの数値がずれたままの可能性があります");
 #if VW_DRAW_VERIFY
 		AppendCount(text, "描いた文字に名前が見つからないレベル記号（検算）",
 					counts.levelNameUnseen, "個", counts.levelNameProbe.c_str());
@@ -399,5 +513,18 @@ namespace HomeskzIfcImport::draw
 			text += "寸法を置いた後にクラスを表示へ戻せませんでした（寸法が映りません）。";
 		AppendCount(text, "描き直せなかったビューポート", counts.updateFailed, "枚");
 		return text;
+	}
+
+	std::string dimensionInfo(const std::string& label, const DimensionCounts& counts)
+	{
+		std::string text;
+		if (counts.levelHeightCorrected > 0)
+			text += "レベル記号の高さを補正 " + std::to_string(counts.levelHeightCorrected) +
+					" 個（1 個目: " + counts.levelHeightProbe + "）。";
+#if VW_DRAW_VERIFY
+		if (!counts.dimensionProbe.empty())
+			text += "寸法 1 本目（検算）: " + counts.dimensionProbe + "。";
+#endif
+		return text.empty() ? text : label + "の寸法の記録: " + text;
 	}
 } // namespace HomeskzIfcImport::draw

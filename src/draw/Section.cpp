@@ -412,6 +412,7 @@ namespace HomeskzIfcImport::draw
 		// draw/DrawUtil の AppendLine）。
 		AppendLine(note, tagDiagnostics("軸組図", tags));
 		AppendLine(note, dimensionDiagnostics("軸組図", dimensions));
+		AppendLine(outInfo, dimensionInfo("軸組図", dimensions));
 		if (outCounts != nullptr)
 		{
 			outCounts->dimensions += dimensions.chains;

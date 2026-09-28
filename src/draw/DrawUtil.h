@@ -96,6 +96,7 @@ namespace HomeskzIfcImport::draw
 		// 意味は図面ごとに変わり、ヘッダの「0 は無効」も実機と合わない
 		// （SDK リファレンス Findings「Dimensions」）。
 		DimStandardName = ovDimStandardName,
+		DimShowValue = ovDimShowValue, // 寸法値を表示するか
 	};
 
 	// SetObjectStoryBound / GetObjectStoryBound のバウンド ID（SDK の TObjectBoundID

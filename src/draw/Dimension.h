@@ -72,6 +72,10 @@ namespace HomeskzIfcImport::draw
 		std::size_t levelsFailed = 0; // 作れなかった・注釈へ入らなかったレベル記号
 		std::size_t levelNameFailed = 0; // 名前のテキストを差し替えられなかったレベル記号
 		std::size_t levelHeightFailed = 0; // 高さを注釈の Y から読む設定を書けなかったレベル記号
+		std::size_t levelHeightUnread = 0; // 描いた高さを読めず、補正できなかったレベル記号
+		// 描いた高さのずれを基準高さで補正したレベル記号と、その 1 個目の実際（記録用）。
+		std::size_t levelHeightCorrected = 0;
+		std::string levelHeightProbe;
 		std::size_t classesShown = 0; // 置いた後に表示へ戻せたクラス数（0 なら映らない）
 		std::size_t updateFailed = 0; // クラスを戻した後の再更新に失敗したビューポート
 #if VW_DRAW_VERIFY
@@ -79,6 +83,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t levelNameUnseen = 0;
 		// その 1 個目の実際（描いた文字とレイアウトの中身）。
 		std::string levelNameProbe;
+		// 寸法 1 本目の見え方（値表示・文字の大きさ・規格）。伏図と軸組図を並べて比べる。
+		std::string dimensionProbe;
 #endif
 	};
 
@@ -99,4 +105,8 @@ namespace HomeskzIfcImport::draw
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空文字）。label は図の種別
 	// （"伏図" / "軸組図"）。
 	std::string dimensionDiagnostics(const std::string& label, const DimensionCounts& counts);
+
+	// 平常の内訳（レベル記号の高さの補正・dev の検算）を 1 行にする（無ければ空文字）。
+	// 診断（dimensionDiagnostics）と違って「問題あり」にはしない——描画側の outInfo へ出す。
+	std::string dimensionInfo(const std::string& label, const DimensionCounts& counts);
 } // namespace HomeskzIfcImport::draw
