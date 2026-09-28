@@ -97,6 +97,11 @@ namespace HomeskzIfcImport::draw
 		// （SDK リファレンス Findings「Dimensions」）。
 		DimStandardName = ovDimStandardName,
 		DimShowValue = ovDimShowValue, // 寸法値を表示するか
+		// 寸法の文字の大きさ。FontSize は図面上の mm で、**作るときのアクティブレイヤの縮尺で
+		// 焼き付く**。TextSizeInPoints は「FontSize ÷ 読む時点のアクティブレイヤの縮尺」を
+		// pt に直した値（寸法が持つ値ではない。Findings「Dimensions」#143）。
+		DimFontSize = ovDimFontSize,
+		DimTextSizeInPoints = ovDimTextSizeInPoints,
 	};
 
 	// SetObjectStoryBound / GetObjectStoryBound のバウンド ID（SDK の TObjectBoundID
@@ -314,6 +319,8 @@ namespace HomeskzIfcImport::draw
 	void SetBooleanVariable(MCObjectHandle object, ObjectVariable variable, Boolean value);
 	void SetRealVariable(MCObjectHandle object, ObjectVariable variable, double value);
 	void SetPointVariable(MCObjectHandle object, ObjectVariable variable, const core::Vec2& point);
+	// 実数のオブジェクト変数を読む。読めなければ false（out は変えない）。
+	bool GetRealVariable(MCObjectHandle object, ObjectVariable variable, double& out);
 	// 文字列のオブジェクト変数を書く。**書けたか**を返す（寸法規格の名前は、図面に無い
 	// 名前だと SetObjectVariable が false を返して値が変わらない。Findings「Dimensions」）。
 	bool SetTextVariable(MCObjectHandle object, ObjectVariable variable, const std::string& text);

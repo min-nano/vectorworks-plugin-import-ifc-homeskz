@@ -47,6 +47,9 @@ namespace HomeskzIfcImport::draw
 		// 取り込みの既定の縮尺（1/100）と同じ。
 		constexpr double kFallbackScale = 100.0;
 
+		// 1 インチの pt 数（寸法の文字の大きさを紙の pt から図面上の mm へ直す）。
+		constexpr double kPointsPerInch = 72.0;
+
 		// レベル基準線の universal 名（ローカライズ名「レベル基準線」。Findings
 		// 「Level Objects」の実測表）。
 		constexpr const char* kLevelMarkPlugin = "Elevation Benchmark2";
@@ -129,9 +132,30 @@ namespace HomeskzIfcImport::draw
 		}
 #endif
 
-		// 列 1 本を置く。1 本でも注釈へ置けたら true。
+		// **文字の大きさをビューポートの縮尺で書き直す**（Findings「Dimensions」#143）。
+		// 寸法の文字の図面上の大きさ（ovDimFontSize）は**作るときのアクティブレイヤの縮尺で
+		// 焼き付き**、注釈へ移しても変わらない。一方、注釈はビューポートの縮尺で描かれる
+		// ——軸組図はシートレイヤ（1:1）がアクティブなまま作るので、1/50 の図の上で文字が
+		// 用紙 0.04mm になり値が見えなかった（round 1〜3）。規格が決めた紙の pt を読み、
+		// 「pt × 25.4/72 × ビューポートの縮尺」を書く。作るときのアクティブレイヤに依らない。
+		// pt（ovDimTextSizeInPoints）は「読む時点のアクティブレイヤの縮尺」で解釈される値
+		// なので、**作った直後（同じアクティブレイヤのうち）に読む**。読めなければ false。
+		bool FitTextToViewport(MCObjectHandle dimension, double viewportScale)
+		{
+			double points = 0.0;
+			if (!GetRealVariable(dimension, ObjectVariable::DimTextSizeInPoints, points) ||
+				points <= 0.0)
+				return false;
+			SetRealVariable(dimension, ObjectVariable::DimFontSize,
+							points * core::kMillimetersPerInch / kPointsPerInch * viewportScale);
+			return true;
+		}
+
+		// 列 1 本を置く。1 本でも注釈へ置けたら true。scale は寸法線までの距離に使う縮尺の
+		// 分母、viewportScale は文字の大きさに使うビューポートの実際の縮尺の分母。
 		bool PlaceChain(MCObjectHandle viewport, const core::DimensionChainCommand& chain,
-						const std::string& standard, double scale, DimensionCounts& counts)
+						const std::string& standard, double scale, double viewportScale,
+						DimensionCounts& counts)
 		{
 			const double line = core::dimensionLineCoord(chain.base, chain.side, chain.tier, scale);
 			const double offset = line - chain.base;
@@ -169,6 +193,10 @@ namespace HomeskzIfcImport::draw
 					++counts.standardRejected;
 				// 寸法値は**明示して出す**（round 1: 軸組図の注釈で値が出なかった。伏図では出た）。
 				SetBooleanVariable(dimension, ObjectVariable::DimShowValue, true);
+				// 規格を当てた後に（規格が文字の大きさを決める）、繋ぐ前に（連続寸法には寸法の
+				// ov* が効かない）書く。
+				if (!FitTextToViewport(dimension, viewportScale))
+					++counts.textSizeUnread;
 #if VW_DRAW_VERIFY
 				if (counts.dimensionProbe.empty())
 					counts.dimensionProbe = DescribeDimension(dimension);
@@ -447,12 +475,24 @@ namespace HomeskzIfcImport::draw
 		if (viewport == nil || (command.dimensions.empty() && levels.empty()))
 			return 0;
 		const double denominator = scale > 0.0 ? scale : kFallbackScale;
+		// 文字の大きさはビューポートの**実際の**縮尺で決める（注釈はそれで描かれる）。
+		// 読めなければ寸法線の距離と同じ縮尺で代える。
+		double viewportScale = denominator;
+		try
+		{
+			if (const double actual = VWViewportObj(viewport).GetScale(); actual > 0.0)
+				viewportScale = actual;
+		}
+		catch (...)
+		{
+			++counts.viewportScaleUnread;
+		}
 
 		std::size_t drawn = 0;
 		bool anyPlaced = false;
 		for (const core::DimensionChainCommand& chain : command.dimensions)
 		{
-			if (PlaceChain(viewport, chain, standard, denominator, counts))
+			if (PlaceChain(viewport, chain, standard, denominator, viewportScale, counts))
 			{
 				++drawn;
 				anyPlaced = true;
@@ -510,6 +550,7 @@ namespace HomeskzIfcImport::draw
 		constexpr bool verifyIssue = false;
 #endif
 		if (counts.failed == 0 && counts.standardRejected == 0 && counts.unjoined == 0 &&
+			counts.textSizeUnread == 0 && counts.viewportScaleUnread == 0 &&
 			counts.levelsFailed == 0 && counts.levelNameFailed == 0 &&
 			counts.levelHeightFailed == 0 && counts.levelHeightUnread == 0 &&
 			counts.updateFailed == 0 && !classesBroken && !verifyIssue)
@@ -520,6 +561,10 @@ namespace HomeskzIfcImport::draw
 		AppendCount(text, "寸法規格を当てられなかった寸法", counts.standardRejected, "本",
 					"図面にその寸法規格がありません。文書の既定の規格で描きました");
 		AppendCount(text, "連続寸法へ繋げなかった継ぎ目", counts.unjoined, "箇所");
+		AppendCount(text, "文字の大きさを縮尺に合わせられなかった寸法", counts.textSizeUnread, "本",
+					"寸法値が小さすぎて見えない可能性があります");
+		AppendCount(text, "縮尺を読めなかったビューポート", counts.viewportScaleUnread, "枚",
+					"寸法の文字は割り付けの縮尺で合わせました");
 		AppendCount(text, "置けなかったレベル記号", counts.levelsFailed, "個");
 		AppendCount(text, "名前を書けなかったレベル記号", counts.levelNameFailed, "個");
 		AppendCount(text, "高さを注釈から読ませられなかったレベル記号", counts.levelHeightFailed,

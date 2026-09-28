@@ -1194,6 +1194,17 @@ namespace HomeskzIfcImport::draw
 								TVariableBlock(WorldPt(point.x, point.y)));
 	}
 
+	bool GetRealVariable(MCObjectHandle object, ObjectVariable variable, double& out)
+	{
+		TVariableBlock value;
+		Real64 raw = 0.0;
+		if (gSDK->GetObjectVariable(object, static_cast<short>(variable), value) == 0 ||
+			!value.GetReal64(raw))
+			return false;
+		out = raw;
+		return true;
+	}
+
 	bool SetTextVariable(MCObjectHandle object, ObjectVariable variable, const std::string& text)
 	{
 		return gSDK->SetObjectVariable(object, static_cast<short>(variable),
