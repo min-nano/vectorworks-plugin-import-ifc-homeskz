@@ -323,9 +323,13 @@ namespace HomeskzIfcImport::draw
 				const MCObjectHandle held = direct != nil ? direct : aux;
 				if (held != nil)
 					CollectTexts(held, layout);
-				probe = name + ": 描いた文字 " + JoinTexts(drawn) + " / レイアウト（" +
-						(direct != nil ? "直接" : (aux != nil ? "aux" : "無し")) + "）" +
-						JoinTexts(layout);
+				const char* source = "無し";
+				if (direct != nil)
+					source = "直接";
+				else if (aux != nil)
+					source = "aux";
+				probe = name + ": 描いた文字 " + JoinTexts(drawn) + " / レイアウト（" + source +
+						"）" + JoinTexts(layout);
 			}
 			return false;
 		}
