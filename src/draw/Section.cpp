@@ -342,9 +342,10 @@ namespace HomeskzIfcImport::draw
 			drawViewportTags(viewport, command.viewport, members, tags);
 			// M31 寸法とレベル記号も注釈。収まったかの判定に含めるため、測り直す前に置く
 			// （伏図と同じ。draw/Dimension.h）。
+			std::vector<PlacedLevelMark> placedLevels;
 			drawViewportDimensions(viewport, command.viewport, command.levels,
 								   document.dimensionStandard, arrange ? layout.scale : 0.0,
-								   dimensions);
+								   dimensions, &placedLevels);
 
 			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
 			//
@@ -369,7 +370,12 @@ namespace HomeskzIfcImport::draw
 				}
 			}
 			if (arrange && measured)
+			{
 				MoveViewportBy(viewport, delta);
+				// レベル記号の描く高さは動かすと変わる（round 2 の実測）ので、動かした後に
+				// 測り直して合わせる（draw/Dimension.h）。
+				realignLevelMarks(placedLevels, dimensions);
+			}
 			++drawn;
 		}
 

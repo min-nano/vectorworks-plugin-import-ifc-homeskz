@@ -355,7 +355,11 @@ namespace HomeskzIfcImport::draw
 		// 4379.18 と出た——4 本とも同じ量だけずれ、位置は合っていた。注釈の Y と描く高さの
 		// 間に一定のずれがある）。描いた高さを読み、ずれを基準高さ（RefElev）へ足して描き
 		// 直す。ずれの量を決め打ちせず 1 本ずつ測るので、ずれの出どころに依らない。
-		void AlignLevelHeight(MCObjectHandle mark, double elevation, DimensionCounts& counts)
+		// round 2: 置いた直後はずれが無く（補正 0 個）、絵では GL が 5103.18 と出た——ずれは
+		// **ビューポートを用紙のマスへ動かした後**に生じると見て、動かした後にも測り直す
+		// （realignLevelMarks）。stage は記録に添える時機の名前。
+		void AlignLevelHeight(MCObjectHandle mark, double elevation, const char* stage,
+							  DimensionCounts& counts)
 		{
 			try
 			{
@@ -377,10 +381,10 @@ namespace HomeskzIfcImport::draw
 				++counts.levelHeightCorrected;
 				if (counts.levelHeightProbe.empty())
 				{
-					std::array<char, 96> buffer{};
+					std::array<char, 160> buffer{};
 					std::snprintf(buffer.data(), buffer.size(),
-								  "描いた高さ %s → 基準高さ %g で補正", shown.c_str(),
-								  reference + drift);
+								  "%s: 命令 %g に対し描いた高さ %s → 基準高さ %g で補正", stage,
+								  elevation, shown.c_str(), reference + drift);
 					counts.levelHeightProbe = buffer.data();
 				}
 			}
@@ -390,16 +394,16 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// レベル記号 1 つを置く。注釈へ置けたら true。
-		bool PlaceLevel(MCObjectHandle viewport, const core::LevelMarkCommand& level,
-						DimensionCounts& counts)
+		// レベル記号 1 つを置く。注釈へ置けたらそのハンドル、置けなければ nil。
+		MCObjectHandle PlaceLevel(MCObjectHandle viewport, const core::LevelMarkCommand& level,
+								  DimensionCounts& counts)
 		{
 			const MCObjectHandle mark = gSDK->CreateCustomObject(
 				TXString(kLevelMarkPlugin), WorldPt(level.x, level.elevation), 0.0, true);
 			if (mark == nil)
-				return false;
+				return nil;
 			if (!Annotate(viewport, mark))
-				return false;
+				return nil;
 			SetClassByName(mark, kDimensionClass);
 
 			try
@@ -419,12 +423,12 @@ namespace HomeskzIfcImport::draw
 			if (!ReplaceLevelName(mark, level.name))
 				++counts.levelNameFailed;
 			gSDK->ResetObject(mark);
-			AlignLevelHeight(mark, level.elevation, counts);
+			AlignLevelHeight(mark, level.elevation, "置いた直後", counts);
 #if VW_DRAW_VERIFY
 			if (!DrawsText(mark, level.name, counts.levelNameProbe))
 				++counts.levelNameUnseen;
 #endif
-			return true;
+			return mark;
 		}
 	} // namespace
 
@@ -437,7 +441,8 @@ namespace HomeskzIfcImport::draw
 									   const core::ViewportCommand& command,
 									   const std::vector<core::LevelMarkCommand>& levels,
 									   const std::string& standard, double scale,
-									   DimensionCounts& counts)
+									   DimensionCounts& counts,
+									   std::vector<PlacedLevelMark>* placedLevels)
 	{
 		if (viewport == nil || (command.dimensions.empty() && levels.empty()))
 			return 0;
@@ -457,10 +462,12 @@ namespace HomeskzIfcImport::draw
 
 		for (const core::LevelMarkCommand& level : levels)
 		{
-			if (PlaceLevel(viewport, level, counts))
+			if (const MCObjectHandle mark = PlaceLevel(viewport, level, counts); mark != nil)
 			{
 				++counts.levels;
 				anyPlaced = true;
+				if (placedLevels != nullptr)
+					placedLevels->push_back({mark, level.elevation});
 			}
 			else
 				++counts.levelsFailed;
@@ -481,6 +488,16 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 		return drawn;
+	}
+
+	void realignLevelMarks(const std::vector<PlacedLevelMark>& marks, DimensionCounts& counts)
+	{
+		for (const PlacedLevelMark& placed : marks)
+		{
+			// 描いた高さは描き直すまで古いまま（置いた直後の値）なので、先に描き直す。
+			gSDK->ResetObject(placed.mark);
+			AlignLevelHeight(placed.mark, placed.elevation, "用紙へ動かした後", counts);
+		}
 	}
 
 	std::string dimensionDiagnostics(const std::string& label, const DimensionCounts& counts)

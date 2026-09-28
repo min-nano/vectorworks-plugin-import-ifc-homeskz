@@ -88,6 +88,14 @@ namespace HomeskzIfcImport::draw
 #endif
 	};
 
+	// 注釈へ置けたレベル記号と、その命令の高さ（用紙へ動かした後の測り直しに使う。
+	// realignLevelMarks）。ハンドルは描画の間だけ使い、命令には載せない。
+	struct PlacedLevelMark
+	{
+		MCObjectHandle mark = nil;
+		double elevation = 0.0;
+	};
+
 	// レベル基準線 PIO の定義を**設定ダイアログを出さない**で用意する。レベル記号を 1 つでも
 	// 置くフェーズ（軸組図）の先頭で 1 回呼ぶ（DrawUtil の PrepareCustomObjectDefinition）。
 	void prepareLevelMarkPlugin();
@@ -95,12 +103,19 @@ namespace HomeskzIfcImport::draw
 	// ビューポート 1 枚ぶんの寸法（command.dimensions）とレベル記号（levels。伏図は空）を
 	// 注釈として置く。standard は寸法規格の名前（core::Document::dimensionStandard）、scale は
 	// そのビューポートの縮尺の分母（寸法線までの距離を用紙 mm からモデル mm へ直す）。
-	// 置けた列の数を返し、内訳を counts へ積む。
+	// 置けた列の数を返し、内訳を counts へ積む。placedLevels を渡せば、置けたレベル記号を
+	// そこへ積む（ビューポートを動かした後に realignLevelMarks へ渡す）。
 	std::size_t drawViewportDimensions(MCObjectHandle viewport,
 									   const core::ViewportCommand& command,
 									   const std::vector<core::LevelMarkCommand>& levels,
 									   const std::string& standard, double scale,
-									   DimensionCounts& counts);
+									   DimensionCounts& counts,
+									   std::vector<PlacedLevelMark>* placedLevels = nullptr);
+
+	// **ビューポートを用紙のマスへ動かした後**に、置いたレベル記号の描いた高さを測り直し、
+	// ずれていれば基準高さで補正する（round 2: 置いた直後は合っていたのに、絵ではずれて
+	// いた。docs/DEV-NOTES.md M31）。
+	void realignLevelMarks(const std::vector<PlacedLevelMark>& marks, DimensionCounts& counts);
 
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空文字）。label は図の種別
 	// （"伏図" / "軸組図"）。
