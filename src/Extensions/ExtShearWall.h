@@ -46,7 +46,8 @@
 //	1 行残しておけば、そのどちらかがすぐ分かる。
 //
 //	【登録名はこのプラグイン固有にする】同種の PIO を提供する別のプラグインと同じ名前で
-//	登録すると、両方を入れた環境で衝突する。ユニバーサル名は "HomeskzShearWall"。
+//	登録すると、両方を入れた環境で衝突する。ユニバーサル名は "HomeskzShearWall"
+//	（開発版は "HomeskzShearWallDev"。下記 kShearWallUniversalName）。
 //
 
 #pragma once
@@ -61,7 +62,16 @@ namespace HomeskzIfcImport
 
 	// PIO のユニバーサル名。**解析側が命令に載せる名前ではなく、描画側が
 	// CreateCustomObject へ渡す名前**なので、draw/ShearWall と共有する。
+	//
+	// **安定版と開発版で名前を分ける。** 両方は同時に読み込まれうる（src/BuildConfig.h）。
+	// 同じ名前だと片方の登録しか生きず、安定版の取り込みが置いた PIO まで開発版の定義
+	// （表示名「耐力壁 (Dev)」・開発版の本体の作図）で扱われていた。安定版の名前は
+	// 図面に保存された既存オブジェクトの同一性なので据え置き、開発版の側だけ付け替える。
+#ifdef VW_DEV_BUILD
+	constexpr const char* kShearWallUniversalName = "HomeskzShearWallDev";
+#else
 	constexpr const char* kShearWallUniversalName = "HomeskzShearWall";
+#endif
 
 	// パラメータのユニバーサル名。**draw/ShearWall が書く名前とここが食い違うと setter は
 	// 黙って無視される**ので、定義はここ 1 か所（柱記号 PIO と同じ作法）。

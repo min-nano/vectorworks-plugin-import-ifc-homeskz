@@ -17,7 +17,8 @@
 //	プラグインを入れていない環境でも図面はそのまま表示できる（更新だけができない）。
 //
 //	【登録名はこのプラグイン固有にする】同種の記号 PIO を提供する別のプラグインと同じ名前で登
-//	録すると、両方を入れた環境で衝突する。ユニバーサル名は "HomeskzColumnMark" にしてある。
+//	録すると、両方を入れた環境で衝突する。ユニバーサル名は "HomeskzColumnMark" にしてある
+//	（開発版は "HomeskzColumnMarkDev"。下記 kColumnMarkUniversalName）。
 //
 
 #pragma once
@@ -32,7 +33,14 @@ namespace HomeskzIfcImport
 
 	// PIO のユニバーサル名。**解析側が命令に載せる名前ではなく、描画側が
 	// CreateCustomObject へ渡す名前**なので、draw/ColumnMark と共有する。
+	//
+	// **安定版と開発版で名前を分ける**（理由は Extensions/ExtShearWall.h の
+	// kShearWallUniversalName と同じ。同じ名前だと安定版の取り込みが開発版の PIO を置く）。
+#ifdef VW_DEV_BUILD
+	constexpr const char* kColumnMarkUniversalName = "HomeskzColumnMarkDev";
+#else
 	constexpr const char* kColumnMarkUniversalName = "HomeskzColumnMark";
+#endif
 
 	// パラメータのユニバーサル名。**draw/ColumnMark が書く名前とここが食い違うと setter
 	// は黙って無視される**ので、定義はここ 1 か所。
