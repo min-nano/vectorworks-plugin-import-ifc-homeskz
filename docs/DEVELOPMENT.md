@@ -376,6 +376,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | メニューカテゴリ | `みんなの構造設計支援` / `みんなの構造設計支援Dev`（コマンド名 `IFC (ホームズ君) 取り込み…` / `アップデータを確認 (みんなの構造設計支援)`）。**このプラグインのコマンドは全部このカテゴリに入れる**——`.vwr` の `"category"` ただ 1 つを両方のメニュー定義が引く | `resources/*/Strings/*.vwstrings` |
 | C++ 名前空間・クラス | `min-nano_structure` / `CExtMenuImportIfc` / `CExtMenuCheckUpdate` | `src/Extensions/Ext*.{h,cpp}`、`src/ModuleMain.cpp` |
 | VCOM ユニバーサル名 | 取り込み: `CExtMenuImportIfc_HomeskzIfcImport(Dev)`／更新: `CExtMenuCheckUpdate_MinNanoStructure(Dev)`／MCP: `CExtMenuMcpBridge_MinNanoStructure(Dev)`／実機テスト: `CExtMenuTest_MinNanoStructure(Dev)`（登録は dev だけ）／往復パレット: `CExtFeedbackPalette_MinNanoStructure(Dev)`（登録は dev だけ）／MCP パレット: `CExtMcpPalette_MinNanoStructure(Dev)` | `src/BuildConfig.h` |
+| PIO のユニバーサル名 | 柱記号: `HomeskzColumnMark(Dev)`／耐力壁: `HomeskzShearWall(Dev)`。**安定版と開発版で必ず分ける**（同じだと両方を入れた環境で片方の登録しか生きず、安定版の取り込みが開発版の PIO を置く） | `src/Extensions/ExtColumnMark.h` / `src/Extensions/ExtShearWall.h` |
 | 拡張機能 UUID | コマンド 2 つ × stable / dev の 4 個＋PIO 2 つ × 2＋往復パレット × 2＋MCP パレット × 2 | `src/Extensions/Ext*.cpp`（一意である必要があるため `uuidgen` で再生成） |
 
 > **名前空間 `min-nano_structure` と取り込みコマンドのユニバーサル名・UUID は、改名後も

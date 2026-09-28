@@ -47,7 +47,8 @@
 //	552（図面枠のスタイル）のもの**を並べる——他の行が「0＝普通のシンボル定義」を並べるのと
 //	表裏である（値は下記 Findings「シンボル」の実測表。**同じ一覧から 2 通りに拾うだけ**
 //	なので、リソース一覧は 1 つで足りる）。チェックを外せば図面枠を置かない（＝この設定を
-//	入れる前と同じ）。
+//	入れる前と同じ）。**図面枠スタイルが図面にあれば、初期値は「一覧の最初のもので置く」**
+//	（この起動中に一度 OK で閉じたあとは、その選択に従う）。
 //
 //	【その下の 1 行は寸法規格（M31）】図面枠の下にもう 1 行、伏図・軸組図へ入れる寸法の
 //	**寸法規格**を選ぶ行がある。寸法規格は資源（シンボル定義）ではなく**文書が配列で持つ
@@ -321,8 +322,10 @@ namespace HomeskzIfcImport::draw
 		public:
 			// resources は値で受ける（形を変えて開き直すことがあるので、呼び出し側は同じ
 			// 一覧を持ったまま。VWResourceList は参照カウント付きでコピーできる）。
+			// titleBlockDecided … 図面枠の行を利用者がこの起動中に一度でも決めたか
+			// （OK で閉じたか）。まだなら図面枠は「置く」で開く（下記）。
 			CImportSettingsDialog(const core::ImportOptions& seed, SymbolResources resources,
-								  Form form)
+								  Form form, bool titleBlockDecided)
 				: fIntro(kIntroID), fResources(std::move(resources)), fForm(form)
 			{
 				for (std::size_t row = 0; row < kRowCount; ++row)
@@ -338,11 +341,23 @@ namespace HomeskzIfcImport::draw
 
 					// **いまの対応先が図面にある行だけを「取り込む」で開く。** 無い名前は
 					// 項目にできない（＝置きようがない）ので、チェックを外した状態にする。
-					// 図面枠は**前回選ばれていなければ名前も空**なので、そのまま外れる。
-					const bool wanted = SeedEnabled(seed, row);
+					//
+					// 【図面枠だけは初期値が「置く」】図面に図面枠スタイルがあるなら、
+					// **まだ決めていないうちは一覧の最初のスタイルで置く**を初期値にする
+					// （ご要望）。前回選んだスタイルがいまの図面に無いときも最初のものへ
+					// 寄せる——スタイル名は図面ごとに違うので、名前が合わないことを
+					// 「置かない」理由にしない。前回チェックを外して閉じたならそれに従う。
+					// 設定ダイアログを出さずに取り込むとき（core::ImportOptions の既定）は
+					// 従来どおり置かない。**寸法規格は前回の設定どおり**（既定は入れない）。
+					const bool isTitleBlock = row == kTitleBlockRow;
+					const bool wanted = isTitleBlock ? (!titleBlockDecided || seed.hasTitleBlock())
+													 : SeedEnabled(seed, row);
 					const std::string& current = SeedName(seed, row);
-					const std::size_t index = IndexOf(row, current);
-					const bool valid = index < Candidates(row).names.size();
+					const std::size_t count = Candidates(row).names.size();
+					std::size_t index = IndexOf(row, current);
+					if (isTitleBlock && wanted && index >= count && count > 0)
+						index = 0;
+					const bool valid = index < count;
 					fSelection[row] = valid ? index : 0;
 					fEnabled[row] = wanted && valid;
 				}
@@ -783,6 +798,15 @@ namespace HomeskzIfcImport::draw
 			return options;
 		}
 
+		// 図面枠の行を利用者がこの起動中に一度でも決めたか（OK で閉じたか）。
+		// **図面枠は空文字が「置かない」も「まだ決めていない」も兼ねる**
+		// （core/ImportOptions.h）ので、初期値を「置く」にするにはこの区別を別に持つ。
+		bool& TitleBlockDecided()
+		{
+			static bool decided = false;
+			return decided;
+		}
+
 		// note へ 1 行足す（複数の形を試したときは、試した順に並ぶ）。
 		void AddNote(std::string* note, const std::string& line)
 		{
@@ -806,7 +830,7 @@ namespace HomeskzIfcImport::draw
 			// ときだけ後者へ落ちる（冒頭「2 つの形を持ち、出せた方を使う」）。
 			for (const Form form : {Form::Thumbnail, Form::NameList})
 			{
-				CImportSettingsDialog dialog(remembered, resources, form);
+				CImportSettingsDialog dialog(remembered, resources, form, TitleBlockDecided());
 				const auto button = dialog.RunDialogLayout("");
 				if (dialog.Failed())
 				{
@@ -821,6 +845,7 @@ namespace HomeskzIfcImport::draw
 				if (button != VWFC::VWUI::kDialogButton_Ok)
 					return SettingsOutcome::Cancelled;
 				remembered = dialog.Result();
+				TitleBlockDecided() = true;
 				options = remembered;
 				return SettingsOutcome::Accepted;
 			}
