@@ -25,6 +25,7 @@
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -223,16 +224,52 @@ namespace HomeskzIfcImport::draw
 		}
 
 #if VW_DRAW_VERIFY
-		// 検算（dev だけ）: レベル基準線が描いた文字に name があるか（PIO が吐いた図形の
-		// テキストを読む。Findings「Level Objects」の「描いた文字を機械で読む」）。
-		bool DrawsText(MCObjectHandle mark, const std::string& name)
+		// 検算（dev だけ）: container の中のテキストを**入れ子のグループまで**辿って集める
+		// （PIO が吐いた図形は、レイアウトを写したグループの中にテキストを持つことがある）。
+		// 深さは有限に留める（グループの入れ子は数段しか無い）。
+		void CollectTexts(MCObjectHandle container, std::vector<std::string>& out, int depth = 0)
 		{
-			for (MCObjectHandle h = gSDK->FirstMemberObj(mark); h != nil; h = gSDK->NextObject(h))
+			constexpr int kMaxDepth = 4;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil;
+				 h = gSDK->NextObject(h))
 			{
-				if (gSDK->GetObjectTypeN(h) != kTextNode)
-					continue;
-				if (static_cast<const char*>(gSDK->GetTextChars(h)) == name)
-					return true;
+				const short type = gSDK->GetObjectTypeN(h);
+				if (type == kTextNode)
+					out.emplace_back(static_cast<const char*>(gSDK->GetTextChars(h)));
+				else if (type == kGroupNode && depth < kMaxDepth)
+					CollectTexts(h, out, depth + 1);
+			}
+		}
+
+		std::string JoinTexts(const std::vector<std::string>& texts)
+		{
+			std::string joined;
+			for (const std::string& text : texts)
+				joined += "〈" + text + "〉";
+			return joined.empty() ? std::string("（なし）") : joined;
+		}
+
+		// 検算（dev だけ）: レベル基準線が描いた文字に name があるか（Findings「Level
+		// Objects」の「描いた文字を機械で読む」）。見つからなければ 1 個目について
+		// 「描いた文字」と「レイアウトの中身」を probe へ控える（実機で何が起きたかを
+		// 持ち帰る。差し替えが絵に届いていないのか、読み方が違うのかを分ける）。
+		bool DrawsText(MCObjectHandle mark, const std::string& name, std::string& probe)
+		{
+			std::vector<std::string> drawn;
+			CollectTexts(mark, drawn);
+			if (std::ranges::find(drawn, name) != drawn.end())
+				return true;
+			if (probe.empty())
+			{
+				std::vector<std::string> layout;
+				const MCObjectHandle direct = gSDK->GetCustomObjectProfileGroup(mark);
+				const MCObjectHandle aux = gSDK->GetCustomObjectProfileGroupInAux(mark);
+				const MCObjectHandle held = direct != nil ? direct : aux;
+				if (held != nil)
+					CollectTexts(held, layout);
+				probe = name + ": 描いた文字 " + JoinTexts(drawn) + " / レイアウト（" +
+						(direct != nil ? "直接" : (aux != nil ? "aux" : "無し")) + "）" +
+						JoinTexts(layout);
 			}
 			return false;
 		}
@@ -268,7 +305,7 @@ namespace HomeskzIfcImport::draw
 				++counts.levelNameFailed;
 			gSDK->ResetObject(mark);
 #if VW_DRAW_VERIFY
-			if (!DrawsText(mark, level.name))
+			if (!DrawsText(mark, level.name, counts.levelNameProbe))
 				++counts.levelNameUnseen;
 #endif
 			return true;
@@ -356,7 +393,7 @@ namespace HomeskzIfcImport::draw
 					"個", "高さが 0 と出ます");
 #if VW_DRAW_VERIFY
 		AppendCount(text, "描いた文字に名前が見つからないレベル記号（検算）",
-					counts.levelNameUnseen, "個");
+					counts.levelNameUnseen, "個", counts.levelNameProbe.c_str());
 #endif
 		if (classesBroken)
 			text += "寸法を置いた後にクラスを表示へ戻せませんでした（寸法が映りません）。";

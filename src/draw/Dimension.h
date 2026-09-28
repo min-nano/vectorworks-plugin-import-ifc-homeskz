@@ -77,6 +77,8 @@ namespace HomeskzIfcImport::draw
 #if VW_DRAW_VERIFY
 		// 検算（dev だけ）: 置いたレベル記号のうち、描いた文字に名前が見つからなかった数。
 		std::size_t levelNameUnseen = 0;
+		// その 1 個目の実際（描いた文字とレイアウトの中身）。
+		std::string levelNameProbe;
 #endif
 	};
 
