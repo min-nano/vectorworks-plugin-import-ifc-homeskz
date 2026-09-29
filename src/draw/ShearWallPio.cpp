@@ -507,7 +507,9 @@ namespace HomeskzIfcImport::draw
 				AddBraceTriangle(object, markCentre, markOffset, !risesToEnd);
 
 			// 軸組図: 形状どおりの帯。見付け幅が取れないと帯にならないので、そのときは
-			// 伏図の記号だけで済ませる。
+			// 伏図の記号だけで済ませる。たすき掛けは risesToEnd の側を手前として帯のまま
+			// 描き、逆向きの奥の 1 本は手前の帯の縁で切った 2 片で描く（2 本とも帯のままだと
+			// 交差部で輪郭が突き抜けて格子に見える。core::shearWallBehindBracePieces）。
 			if (hasHeight && width > 0.0)
 			{
 				AddPolygon3D(object,
@@ -515,11 +517,12 @@ namespace HomeskzIfcImport::draw
 														 topAtEnd, width, risesToEnd),
 							 0.0, "");
 				if (doubleBrace)
-					AddPolygon3D(object,
-								 core::shearWallBracePolygon(clearStart, clearEnd, bottom,
-															 topAtStart, topAtEnd, width,
-															 !risesToEnd),
-								 0.0, "");
+				{
+					for (const std::vector<core::Vec2>& piece :
+						 core::shearWallBehindBracePieces(clearStart, clearEnd, bottom, topAtStart,
+														  topAtEnd, width, !risesToEnd))
+						AddPolygon3D(object, piece, 0.0, "");
+				}
 			}
 		}
 		catch (...)
