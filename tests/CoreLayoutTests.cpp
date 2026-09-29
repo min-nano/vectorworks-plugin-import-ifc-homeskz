@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -381,7 +382,7 @@ TEST(LevelMarkIsAnEquilateralTriangleSmallerThanTheTextThenTheName)
 	// 文字 2.5mm（用紙）→ 三角の高さ 2.0mm、正三角形なので底辺の半分は 2/√3。
 	const core::LevelMarkShape shape = core::levelMarkShape(2.5, 6.0);
 	CHECK(near(shape.triangleHeight, 2.0));
-	CHECK(near(shape.triangleHalfWidth, 2.0 / std::sqrt(3.0)));
+	CHECK(near(shape.triangleHalfWidth, 2.0 / std::numbers::sqrt3));
 	// 辺の長さ（底辺）＝高さ×2/√3 で、斜辺も同じ長さ（正三角形）。
 	const double side = 2.0 * shape.triangleHalfWidth;
 	CHECK(near(std::hypot(shape.triangleHalfWidth, shape.triangleHeight), side));

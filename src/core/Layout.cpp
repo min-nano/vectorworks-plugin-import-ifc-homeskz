@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <cstddef>
 #include <string>
 
@@ -227,7 +228,7 @@ namespace HomeskzIfcImport::core
 		LevelMarkShape shape;
 		shape.triangleHeight = std::max(textSize, 0.0) * kLevelMarkTriangleRatio;
 		// 正三角形の高さ h と辺 a は h = a·√3/2。底辺の半分は a/2 = h/√3。
-		shape.triangleHalfWidth = shape.triangleHeight / std::sqrt(3.0);
+		shape.triangleHalfWidth = shape.triangleHeight / std::numbers::sqrt3;
 		shape.textLeft = (2.0 * shape.triangleHalfWidth) + kLevelMarkTextGap;
 		shape.textBottom = kLevelMarkTextGap;
 		shape.width = shape.textLeft + std::max(textWidth, 0.0);
