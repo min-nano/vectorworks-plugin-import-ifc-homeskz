@@ -38,10 +38,8 @@
 //	パスは PIO がバウンドの解決結果から自分で作るので、絶対 Z を入れる意味も無い
 //	（draw/StructuralMember.h 冒頭）。垂木は登り梁と同じ「傾いた線材」なので作法も同じ。
 //
-//	【スタイルは当てない】横架材（木質構造材_横架材）・柱（木質構造材_柱・束）と違い、垂木は
-//	プラグインスタイルを関連付けない。描画属性はクラス（小屋組-垂木）に従わせる——「クラスや
-//	レイヤは現状のまま」という要件をそのまま満たし、既存 2 スタイルの意味も汚さないため。
-//	スタイルが無いので UpdateStyledObjects も呼ばない。
+//	【スタイルは当てない】横架材・柱と同じく、プラグインスタイルを関連付けない。描画属性は
+//	クラス（小屋組-垂木）に従わせる（draw/StructuralMember.cpp 冒頭「スタイルを使わない」）。
 //
 
 #include "PluginPrefix.h"
@@ -62,10 +60,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// プラグインスタイルを当てないことを表す RefNumber（DrawStructuralMember の約束。
-		// 冒頭「スタイルは当てない」）。
-		constexpr RefNumber kNoStyle = 0;
-
 		// 垂木 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。
 		bool DrawOne(const core::RafterCommand& rafter, StructuralFailures& failures)
@@ -130,7 +124,7 @@ namespace HomeskzIfcImport::draw
 #endif
 
 			// スタイルは当てない（冒頭「スタイルは当てない」）。
-			const StructuralMemberResult result = DrawStructuralMember(spec, kNoStyle);
+			const StructuralMemberResult result = DrawStructuralMember(spec);
 			if (result.object == nil)
 			{
 				// フォールバック: 平面投影の直線（クラス付き）を残す。

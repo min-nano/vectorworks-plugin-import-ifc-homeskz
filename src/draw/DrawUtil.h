@@ -271,7 +271,7 @@ namespace HomeskzIfcImport::draw
 	// 幅・せいが 0 以下なら nil。
 	MCObjectHandle CreateRectangleProfileGroup(double minX, double minY, double maxX, double maxY);
 
-	// 名前付きプラグインスタイル（"木質構造材_横架材" 等）の RefNumber を引く。文書に無ければ
+	// 名前付きプラグインスタイル（図面枠スタイル等）の RefNumber を引く。文書に無ければ
 	// 0 を返す（＝スタイル無しで描く。スタイルの欠落で部材を失わない）。
 	//
 	// ISDK はスタイル名から RefNumber を引く呼び出しを持たないので、名前付きオブジェクト
