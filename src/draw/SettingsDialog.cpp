@@ -56,7 +56,8 @@
 //	選ばせる（絵も出さない）。候補は `GetDimensionStandardVariable(index,
 //	dimStdstandardName)` を組み込み（1〜9）→ カスタム（0〜−8）の順に総当たりして、名前が
 //	引けた index だけを並べる（SDK リファレンス Findings「Dimensions」）。チェックを外せば
-//	寸法を入れない（＝既定。この設定を入れる前と同じ）。
+//	寸法を入れない。**初期値は図面枠と同じく「入れる」**（ご要望）——まだ決めていない
+//	うちは「JIS」があればそれ、無ければ一覧の最初の規格を選んだ状態で開く。
 //
 //	【項目は図面のシンボル定義そのもの】どちらの形でも候補は図面に実在するシンボルだけ。
 //	行ごとの「取り込む」チェックがあるのでそれで足りる——置くものが図面に無いなら、その要素は
@@ -303,10 +304,10 @@ namespace HomeskzIfcImport::draw
 		public:
 			// resources は値で受ける（形を変えて開き直すことがあるので、呼び出し側は同じ
 			// 一覧を持ったまま。VWResourceList は参照カウント付きでコピーできる）。
-			// titleBlockDecided … 図面枠の行を利用者がこの起動中に一度でも決めたか
-			// （OK で閉じたか）。まだなら図面枠は「置く」で開く（下記）。
+			// decided … 設定を利用者がこの起動中に一度でも決めたか（OK で閉じたか）。
+			// まだなら図面枠と寸法規格は「置く／入れる」で開く（下記）。
 			CImportSettingsDialog(const core::ImportOptions& seed, SymbolResources resources,
-								  Form form, bool titleBlockDecided)
+								  Form form, bool decided)
 				: fIntro(kIntroID), fResources(std::move(resources)), fForm(form)
 			{
 				for (std::size_t row = 0; row < kRowCount; ++row)
@@ -323,21 +324,22 @@ namespace HomeskzIfcImport::draw
 					// **いまの対応先が図面にある行だけを「取り込む」で開く。** 無い名前は
 					// 項目にできない（＝置きようがない）ので、チェックを外した状態にする。
 					//
-					// 【図面枠だけは初期値が「置く」】図面に図面枠スタイルがあるなら、
-					// **まだ決めていないうちは一覧の最初のスタイルで置く**を初期値にする
-					// （ご要望）。前回選んだスタイルがいまの図面に無いときも最初のものへ
-					// 寄せる——スタイル名は図面ごとに違うので、名前が合わないことを
+					// 【図面枠と寸法規格は初期値が「置く／入れる」】図面に候補があるなら、
+					// **まだ決めていないうちは候補の 1 つで置く**を初期値にする（ご要望）。
+					// 図面枠は一覧の最初のスタイル、寸法規格は「JIS」があればそれ・無ければ
+					// 一覧の最初（DefaultIndex）。前回選んだものがいまの図面に無いときも
+					// そこへ寄せる——名前は図面ごとに違うので、名前が合わないことを
 					// 「置かない」理由にしない。前回チェックを外して閉じたならそれに従う。
 					// 設定ダイアログを出さずに取り込むとき（core::ImportOptions の既定）は
-					// 従来どおり置かない。**寸法規格は前回の設定どおり**（既定は入れない）。
-					const bool isTitleBlock = row == kTitleBlockRow;
-					const bool wanted = isTitleBlock ? (!titleBlockDecided || seed.hasTitleBlock())
-													 : SeedEnabled(seed, row);
+					// 従来どおりどちらも置かない。
+					const bool defaultsOn = row == kTitleBlockRow || row == kDimensionRow;
+					const bool wanted =
+						defaultsOn ? (!decided || SeedEnabled(seed, row)) : SeedEnabled(seed, row);
 					const std::string& current = SeedName(seed, row);
 					const std::size_t count = Candidates(row).names.size();
 					std::size_t index = IndexOf(row, current);
-					if (isTitleBlock && wanted && index >= count && count > 0)
-						index = 0;
+					if (defaultsOn && wanted && index >= count && count > 0)
+						index = DefaultIndex(row);
 					const bool valid = index < count;
 					fSelection[row] = valid ? index : 0;
 					fEnabled[row] = wanted && valid;
@@ -598,6 +600,20 @@ namespace HomeskzIfcImport::draw
 				return seed.isEnabled(roleAt(row));
 			}
 
+			// 初期値が「置く」の行（図面枠・寸法規格）で、前回の名前が使えないときに選ぶ
+			// 候補。寸法規格は「JIS」を優先する——日本の構造図の既定として自然で、一覧の
+			// 最初（組み込み index 1）は JIS とは限らない。図面枠には決め手が無いので最初。
+			std::size_t DefaultIndex(std::size_t row) const
+			{
+				if (row == kDimensionRow)
+				{
+					const std::size_t jis = IndexOf(row, "JIS");
+					if (jis < Candidates(row).names.size())
+						return jis;
+				}
+				return 0;
+			}
+
 			static const std::string& SeedName(const core::ImportOptions& seed, std::size_t row)
 			{
 				if (row == kTitleBlockRow)
@@ -779,10 +795,10 @@ namespace HomeskzIfcImport::draw
 			return options;
 		}
 
-		// 図面枠の行を利用者がこの起動中に一度でも決めたか（OK で閉じたか）。
-		// **図面枠は空文字が「置かない」も「まだ決めていない」も兼ねる**
+		// 設定を利用者がこの起動中に一度でも決めたか（OK で閉じたか）。
+		// **図面枠・寸法規格は空文字が「置かない」も「まだ決めていない」も兼ねる**
 		// （core/ImportOptions.h）ので、初期値を「置く」にするにはこの区別を別に持つ。
-		bool& TitleBlockDecided()
+		bool& SettingsDecided()
 		{
 			static bool decided = false;
 			return decided;
@@ -811,7 +827,7 @@ namespace HomeskzIfcImport::draw
 			// ときだけ後者へ落ちる（冒頭「2 つの形を持ち、出せた方を使う」）。
 			for (const Form form : {Form::Thumbnail, Form::NameList})
 			{
-				CImportSettingsDialog dialog(remembered, resources, form, TitleBlockDecided());
+				CImportSettingsDialog dialog(remembered, resources, form, SettingsDecided());
 				const auto button = dialog.RunDialogLayout("");
 				if (dialog.Failed())
 				{
@@ -826,7 +842,7 @@ namespace HomeskzIfcImport::draw
 				if (button != VWFC::VWUI::kDialogButton_Ok)
 					return SettingsOutcome::Cancelled;
 				remembered = dialog.Result();
-				TitleBlockDecided() = true;
+				SettingsDecided() = true;
 				options = remembered;
 				return SettingsOutcome::Accepted;
 			}
