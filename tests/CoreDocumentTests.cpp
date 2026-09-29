@@ -2123,48 +2123,65 @@ namespace
 	}
 } // namespace
 
-TEST(shear_wall_hidden_brace_is_split_on_both_sides_of_the_crossing)
+TEST(shear_wall_behind_brace_is_split_on_both_sides_of_the_crossing)
 {
-	// たすき掛け。奥の筋かいの輪郭は手前の帯の両側で 2 本の開いた折れ線に分かれ、
-	// どちらも「長辺→端の切り口→長辺」をたどる（頂点 4 つ以上）。どの線分も手前の帯の
-	// 中を通らない（中点で確かめる）。
+	// たすき掛け。奥の筋かいは手前の帯の縁で切られて、交差部の両側の 2 片になる。
+	// どの片も手前の帯の内側へ入り込まず（頂点・辺の中点で確かめる）、切り口の頂点は
+	// 手前の帯の縁に載る（突き抜けも隙間も無い）。2 片の面積の和は、奥の帯から
+	// 手前の帯と重なる平行四辺形を引いたものになる。
 	const std::vector<core::Vec2> front =
 		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, false);
-	const std::vector<std::vector<core::Vec2>> hidden =
-		core::shearWallHiddenBraceOutline(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
-	CHECK_EQ(hidden.size(), std::size_t{2});
-	for (const std::vector<core::Vec2>& line : hidden)
-	{
-		CHECK(line.size() >= std::size_t{4});
-		// 開いている（始点と終点が離れている）。
-		CHECK(!core::samePoint(line.front(), line.back()));
-		for (std::size_t i = 0; i + 1 < line.size(); ++i)
-		{
-			const core::Vec2 middle = (line[i] + line[i + 1]) * 0.5;
-			CHECK(!strictlyInsideConvex(middle, front, 1e-6));
-			CHECK(!strictlyInsideConvex(line[i], front, 1e-6));
-		}
-		// 切れ目は手前の帯の縁に載る（突き抜けも、手前に届かない隙間も無い）。
-		CHECK(!strictlyInsideConvex(line.front(), front, 1e-6));
-		CHECK(!strictlyInsideConvex(line.back(), front, 1e-6));
-		CHECK(strictlyInsideConvex(line.front(), front, -1e-6));
-		CHECK(strictlyInsideConvex(line.back(), front, -1e-6));
-	}
-	// 片方は内法の下半分、もう片方は上半分（交差部の両側）。
-	const auto isLow = [](const std::vector<core::Vec2>& line)
+	const std::vector<core::Vec2> behind =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+	const std::vector<std::vector<core::Vec2>> pieces =
+		core::shearWallBehindBracePieces(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+	CHECK_EQ(pieces.size(), std::size_t{2});
+
+	const auto area = [](const std::vector<core::Vec2>& polygon)
 	{
 		double sum = 0.0;
-		for (const core::Vec2& point : line)
-			sum += point.y;
-		return sum / static_cast<double>(line.size()) < 1200.0;
+		for (std::size_t i = 0; i < polygon.size(); ++i)
+			sum += core::cross(polygon[i], polygon[(i + 1) % polygon.size()]);
+		return std::abs(sum) / 2.0;
 	};
-	CHECK(isLow(hidden[0]) != isLow(hidden[1]));
+	std::size_t onFrontEdge = 0;
+	for (const std::vector<core::Vec2>& piece : pieces)
+	{
+		CHECK(piece.size() >= std::size_t{4});
+		for (std::size_t i = 0; i < piece.size(); ++i)
+		{
+			const core::Vec2& point = piece[i];
+			const core::Vec2 middle = (point + piece[(i + 1) % piece.size()]) * 0.5;
+			CHECK(!strictlyInsideConvex(point, front, 1e-6));
+			CHECK(!strictlyInsideConvex(middle, front, 1e-6));
+			if (strictlyInsideConvex(point, front, -1e-6))
+				++onFrontEdge;
+		}
+	}
+	// 片ごとに切り口の 2 頂点。
+	CHECK_EQ(onFrontEdge, std::size_t{4});
+
+	// 帯どうしの重なりは、辺の長さが width / sin(θ) の菱形（θ は 2 本の交角）。
+	const double theta = 2.0 * std::atan2(2400.0, 3000.0);
+	const double side = 100.0 / std::sin(theta);
+	const double overlap = side * side * std::sin(theta);
+	CHECK(std::abs(area(pieces[0]) + area(pieces[1]) - (area(behind) - overlap)) < 1e-6);
+
+	// 片方は内法の下半分、もう片方は上半分（交差部の両側）。
+	const auto isLow = [](const std::vector<core::Vec2>& piece)
+	{
+		double sum = 0.0;
+		for (const core::Vec2& point : piece)
+			sum += point.y;
+		return sum / static_cast<double>(piece.size()) < 1200.0;
+	};
+	CHECK(isLow(pieces[0]) != isLow(pieces[1]));
 }
 
-TEST(shear_wall_hidden_brace_rejects_a_degenerate_frame)
+TEST(shear_wall_behind_brace_rejects_a_degenerate_frame)
 {
-	CHECK(core::shearWallHiddenBraceOutline(0.0, 0.0, 0.0, 2400.0, 100.0, true).empty());
-	CHECK(core::shearWallHiddenBraceOutline(0.0, 3000.0, 0.0, 2400.0, 0.0, true).empty());
+	CHECK(core::shearWallBehindBracePieces(0.0, 0.0, 0.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBehindBracePieces(0.0, 3000.0, 0.0, 2400.0, 0.0, true).empty());
 }
 
 // ---------------------------------------------------------------------------

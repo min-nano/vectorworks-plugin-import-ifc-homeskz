@@ -815,115 +815,61 @@ namespace HomeskzIfcImport::core
 
 	namespace
 	{
-		// 線分 from→to のうち、凸多角形 convex（周り方向は問わない）の**内側（境界を含む）**
-		// にある区間を、線分上の媒介変数 [enter, exit]（0〜1）で返す（Cyrus–Beck）。
-		// 内側を通らなければ偽。境界に重なる部分も「内側」に数えるので、手前の筋かいの
-		// 縁に重なる奥の輪郭は丸ごと隠れる（手前の輪郭が同じ線を描く）。
-		bool segmentInsideConvex(const Vec2& from, const Vec2& to, const std::vector<Vec2>& convex,
-								 double& enter, double& exit)
+		// 凸多角形を直線 origin + t·direction で切り、**右側**（direction を向いて右。
+		// 境界を含む）だけを残す。右側に何も残らなければ空を返す。
+		std::vector<Vec2> clipPolygonRightOf(const std::vector<Vec2>& polygon, const Vec2& origin,
+											 const Vec2& direction)
 		{
-			const std::size_t count = convex.size();
-			if (count < 3)
-				return false;
-			double area = 0.0;
-			for (std::size_t i = 0; i < count; ++i)
-				area += cross(convex[i], convex[(i + 1) % count]);
-			const double orientation = area >= 0.0 ? 1.0 : -1.0;
-
-			enter = 0.0;
-			exit = 1.0;
-			const Vec2 direction = to - from;
+			const auto side = [&](const Vec2& point) { return -cross(direction, point - origin); };
+			std::vector<Vec2> kept;
+			const std::size_t count = polygon.size();
 			for (std::size_t i = 0; i < count; ++i)
 			{
-				const Vec2& a = convex[i];
-				const Vec2 edge = convex[(i + 1) % count] - a;
-				// 内側で正になる量 f(t) = start + t·slope。
-				const double start = orientation * cross(edge, from - a);
-				const double slope = orientation * cross(edge, direction);
-				if (std::abs(slope) < 1e-12)
+				const Vec2& from = polygon[(i + count - 1) % count];
+				const Vec2& to = polygon[i];
+				const double fromSide = side(from);
+				const double toSide = side(to);
+				if ((fromSide >= 0.0) != (toSide >= 0.0))
 				{
-					if (start < -kPointEps)
-						return false;
-					continue;
+					const double t = fromSide / (fromSide - toSide);
+					kept.push_back(from + (to - from) * t);
 				}
-				const double t = -start / slope;
-				if (slope > 0.0)
-					enter = std::max(enter, t);
-				else
-					exit = std::min(exit, t);
-				if (enter > exit)
-					return false;
+				if (toSide >= 0.0)
+					kept.push_back(to);
 			}
-			return true;
+			// 直線に触れただけの切れ端（面積の無いもの）は捨てる。
+			double area = 0.0;
+			for (std::size_t i = 0; i < kept.size(); ++i)
+				area += cross(kept[i], kept[(i + 1) % kept.size()]);
+			return std::abs(area) / 2.0 >= kPointEps ? kept : std::vector<Vec2>{};
 		}
 	} // namespace
 
-	std::vector<std::vector<Vec2>> shearWallHiddenBraceOutline(double clearStart, double clearEnd,
-															   double bottom, double top,
-															   double width, bool risesToEnd)
+	std::vector<std::vector<Vec2>> shearWallBehindBracePieces(double clearStart, double clearEnd,
+															  double bottom, double top,
+															  double width, bool risesToEnd)
 	{
-		const std::vector<Vec2> hidden =
+		const std::vector<Vec2> behind =
 			shearWallBracePolygon(clearStart, clearEnd, bottom, top, width, risesToEnd);
-		if (hidden.empty())
+		if (behind.empty())
 			return {};
-		const std::vector<Vec2> front =
-			shearWallBracePolygon(clearStart, clearEnd, bottom, top, width, !risesToEnd);
 
-		// 輪郭を辺ごとに歩き、手前の帯に隠れない区間を順に拾う。前の区間の終点から
-		// そのまま続く区間は同じ折れ線へつなぐ。
+		// 手前の筋かい（逆向き）の帯の 2 本の縁。帯は内法の対角線を中心に幅 width
+		// （shearWallBracePolygon と同じ作り）。奥の筋かいのうち帯の外にある部分は、
+		// 縁のどちらか一方の外側にある。
+		const Vec2 low{risesToEnd ? clearEnd : clearStart, bottom};
+		const Vec2 high{risesToEnd ? clearStart : clearEnd, top};
+		const Vec2 along = high - low;
+		const Vec2 offset = Vec2{-along.y, along.x} * (width / 2.0 / length(along));
+
+		// offset は along の左手なので、low − offset の縁は帯が左、low + offset の縁は
+		// 帯が右にある。それぞれ帯と反対の側を残す。
 		std::vector<std::vector<Vec2>> pieces;
-		bool connected = false;
-		const std::size_t count = hidden.size();
-		for (std::size_t i = 0; i < count; ++i)
+		for (std::vector<Vec2> piece : {clipPolygonRightOf(behind, low - offset, along),
+										clipPolygonRightOf(behind, low + offset, Vec2{} - along)})
 		{
-			const Vec2& from = hidden[i];
-			const Vec2& to = hidden[(i + 1) % count];
-			const Vec2 direction = to - from;
-			const double edgeLength = length(direction);
-			if (edgeLength < kPointEps)
-				continue;
-
-			std::vector<std::pair<double, double>> visible;
-			double enter = 0.0;
-			double exit = 0.0;
-			if (segmentInsideConvex(from, to, front, enter, exit) &&
-				(exit - enter) * edgeLength >= kPointEps)
-			{
-				if (enter * edgeLength >= kPointEps)
-					visible.emplace_back(0.0, enter);
-				if ((1.0 - exit) * edgeLength >= kPointEps)
-					visible.emplace_back(exit, 1.0);
-			}
-			else
-			{
-				visible.emplace_back(0.0, 1.0);
-			}
-
-			for (const auto& [t0, t1] : visible)
-			{
-				const Vec2 a = from + direction * t0;
-				const Vec2 b = from + direction * t1;
-				if (connected && !pieces.empty() && samePoint(pieces.back().back(), a))
-				{
-					pieces.back().push_back(b);
-				}
-				else
-				{
-					pieces.push_back({a, b});
-				}
-				connected = t1 >= 1.0;
-			}
-			if (visible.empty())
-				connected = false;
-		}
-
-		// 1 周目の頭が最後の折れ線の続きなら、1 本へつなぐ（歩き始めの頂点で切れているだけ）。
-		if (pieces.size() >= 2 && samePoint(pieces.back().back(), pieces.front().front()))
-		{
-			std::vector<Vec2> merged = std::move(pieces.back());
-			merged.insert(merged.end(), pieces.front().begin() + 1, pieces.front().end());
-			pieces.pop_back();
-			pieces.front() = std::move(merged);
+			if (!piece.empty())
+				pieces.push_back(std::move(piece));
 		}
 		return pieces;
 	}
