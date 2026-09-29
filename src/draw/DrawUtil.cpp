@@ -1407,6 +1407,16 @@ namespace HomeskzIfcImport::draw
 		return true;
 	}
 
+	bool CopySectionViewMatrix(MCObjectHandle viewport)
+	{
+		TVariableBlock matrix;
+		if (gSDK->GetObjectVariable(viewport, static_cast<short>(ObjectVariable::SectionViewMatrix),
+									matrix) == 0)
+			return false;
+		return gSDK->SetObjectVariable(
+				   viewport, static_cast<short>(ObjectVariable::ViewportViewMatrix), matrix) != 0;
+	}
+
 	bool RefreshViewport(MCObjectHandle viewport)
 	{
 		try

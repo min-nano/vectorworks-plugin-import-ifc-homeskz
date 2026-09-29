@@ -435,10 +435,16 @@ TEST(SectionLevelMarksNameGlFloorsAndEaves)
 		return;
 	const std::vector<std::string> names{"GL", "1FL", "2FL", "軒高"};
 	const std::vector<double> heights{0.0, 500.0, 3300.0, 6000.0};
+	// 結ぶストーリレベル（高さの基準をそこへ拘束する）。
+	const std::vector<std::string> stories{"F", "1", "2", "R"};
+	const std::vector<std::string> levelTypes{core::kLevelGL, core::kLevelFL, core::kLevelFL,
+											  core::kLevelEaves};
 	for (std::size_t i = 0; i < marks.size(); ++i)
 	{
 		CHECK(marks[i].name == names[i]);
 		CHECK(near(marks[i].elevation, heights[i]));
+		CHECK(marks[i].story == stories[i]);
+		CHECK(marks[i].levelType == levelTypes[i]);
 		// 図の左端（高さの寸法列の根元と同じ）。
 		CHECK(near(marks[i].x, -5000.0));
 	}

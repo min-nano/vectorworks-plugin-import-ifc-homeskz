@@ -237,10 +237,12 @@ namespace HomeskzIfcImport::core
 			return std::ranges::all_of(viewport.dimensions, isValidDimensionChain);
 		}
 
-		// レベル記号 1 つが妥当か（M31）。表示名が非空で、高さ・位置が有限であること。
+		// レベル記号 1 つが妥当か（M31）。表示名・結ぶストーリ・レベル種別が非空で、高さ・
+		// 位置が有限であること。
 		bool isValidLevelMark(const LevelMarkCommand& level)
 		{
-			return !level.name.empty() && std::isfinite(level.elevation) && std::isfinite(level.x);
+			return !level.name.empty() && !level.story.empty() && !level.levelType.empty() &&
+				   std::isfinite(level.elevation) && std::isfinite(level.x);
 		}
 
 		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを持つ

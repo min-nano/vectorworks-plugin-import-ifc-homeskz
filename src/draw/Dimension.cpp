@@ -54,16 +54,19 @@ namespace HomeskzIfcImport::draw
 		// 「Level Objects」の実測表）。
 		constexpr const char* kLevelMarkPlugin = "Elevation Benchmark2";
 
-		// 高さを注釈の Y（＝Z）から読ませる設定（既定の ZAxis3DMode では注釈で高さが 0）。
-		constexpr const char* kParamAxis = "Axis";
-		constexpr const char* kAxisFromAnnotationY = "YAxis2DMode";
+		// ストーリレベルへ結ぶ 3 つ組（Findings「Level Objects」）。**3 つ揃って初めて効く**
+		// （Datum 単独では GroundPlane へ倒される）。Axis は既定の ZAxis3DMode のまま触らない
+		// ——YAxis2DMode にすると関連付けが外れる。結べば高さはストーリレベルから来るので、
+		// 記号をドラッグしても数値は動かない（round 3 のご指摘）。
+		constexpr const char* kParamStoryName = "__StoryName";
+		constexpr const char* kParamLevelTypeName = "__LevelTypeName";
+		constexpr const char* kParamDatum = "Datum";
+		constexpr const char* kDatumStoryLevel = "StoryLevel";
 
-		// 描いた高さ（読み取り用の静的文字）と、そこから引く基準高さ（Findings「Level
-		// Objects」のパラメータ表）。
+		// 描いた高さ（読み取り用の静的文字。Findings「Level Objects」のパラメータ表）。
 		constexpr const char* kParamShownElevation = "Elevation";
-		constexpr const char* kParamReferenceElevation = "RefElev";
 
-		// 描いた高さが命令の高さからこれ以上ずれていたら、基準高さで補正する（mm）。
+		// 描いた高さが命令の高さからこれ以上ずれていたら「合わない」と数える（mm）。
 		constexpr double kLevelHeightTol = 0.5;
 
 		// マーカーレイアウトの中で「名前」を出しているテキストの目印（ストーリレベル名の
@@ -379,19 +382,14 @@ namespace HomeskzIfcImport::draw
 			return end != digits.c_str();
 		}
 
-		// **描いた高さを命令の高さへ合わせる**（round 1: 注釈の Y を読ませると、GL が
-		// 4379.18 と出た——4 本とも同じ量だけずれ、位置は合っていた。注釈の Y と描く高さの
-		// 間に一定のずれがある）。描いた高さを読み、ずれを基準高さ（RefElev）へ足して描き
-		// 直す。ずれの量を決め打ちせず 1 本ずつ測るので、ずれの出どころに依らない。
-		// round 2: 置いた直後はずれが無く（補正 0 個）、絵では GL が 5103.18 と出た——ずれは
-		// **ビューポートを用紙のマスへ動かした後**に生じると見て、動かした後にも測り直す
-		// （realignLevelMarks）。stage は記録に添える時機の名前。
-		void AlignLevelHeight(MCObjectHandle mark, double elevation, const char* stage,
-							  DimensionCounts& counts)
+		// **描いた高さを読み戻して命令の高さと引き比べる**（直さない）。ストーリレベルへ
+		// 結んだ個体の高さは書けない出力（Elev）なので、食い違いは数えて診断へ出す——
+		// 0 なら結べていないか、断面の向きがビュー行列へ写っていない（CopySectionViewMatrix）。
+		void CheckLevelHeight(MCObjectHandle mark, double elevation, DimensionCounts& counts)
 		{
 			try
 			{
-				VWParametricObj pio(mark);
+				const VWParametricObj pio(mark);
 				const std::string shown =
 					static_cast<const char*>(pio.GetParamString(kParamShownElevation));
 				double value = 0.0;
@@ -400,19 +398,14 @@ namespace HomeskzIfcImport::draw
 					++counts.levelHeightUnread;
 					return;
 				}
-				const double drift = value - elevation;
-				if (std::abs(drift) <= kLevelHeightTol)
+				if (std::abs(value - elevation) <= kLevelHeightTol)
 					return;
-				const double reference = pio.GetParamReal(kParamReferenceElevation);
-				pio.SetParamReal(kParamReferenceElevation, reference + drift);
-				gSDK->ResetObject(mark);
-				++counts.levelHeightCorrected;
+				++counts.levelHeightMismatch;
 				if (counts.levelHeightProbe.empty())
 				{
-					std::array<char, 160> buffer{};
-					std::snprintf(buffer.data(), buffer.size(),
-								  "%s: 命令 %g に対し描いた高さ %s → 基準高さ %g で補正", stage,
-								  elevation, shown.c_str(), reference + drift);
+					std::array<char, 128> buffer{};
+					std::snprintf(buffer.data(), buffer.size(), "命令 %g に対し描いた高さ %s",
+								  elevation, shown.c_str());
 					counts.levelHeightProbe = buffer.data();
 				}
 			}
@@ -437,21 +430,36 @@ namespace HomeskzIfcImport::draw
 			try
 			{
 				VWParametricObj pio(mark);
-				// 注釈へ移すと VW が決めた位置へ落ちるので、座標を明示し直す。
+				// 注釈へ移すと VW が決めた位置へ落ちるので、座標を明示し直す（縦の位置は
+				// 絵の置き場所だけで、描く数値には効かない）。
 				pio.SetPointObjectPos(VWPoint2D(level.x, level.elevation));
-				pio.SetParamString(kParamAxis, kAxisFromAnnotationY);
+				pio.SetParamString(kParamStoryName, TXString(level.story.c_str()));
+				pio.SetParamString(kParamLevelTypeName, TXString(level.levelType.c_str()));
+				pio.SetParamString(kParamDatum, kDatumStoryLevel);
 			}
 			catch (...)
 			{
-				// 書けなければ高さが 0 のまま出る。名前の差し替えは続ける。
-				++counts.levelHeightFailed;
+				// 結べなければ高さを拘束できない。名前の差し替えは続ける。
+				++counts.levelBindFailed;
 			}
 			gSDK->ResetObject(mark);
 
 			if (!ReplaceLevelName(mark, level.name))
 				++counts.levelNameFailed;
 			gSDK->ResetObject(mark);
-			AlignLevelHeight(mark, level.elevation, "置いた直後", counts);
+			// **名前を差し替えた後も結び付きが残っているか**を読み戻す（書いても入らない値が
+			// ある。Findings「Level Objects」の作法）。
+			try
+			{
+				const VWParametricObj pio(mark);
+				if (std::string(static_cast<const char*>(pio.GetParamString(kParamDatum))) !=
+					kDatumStoryLevel)
+					++counts.levelBindFailed;
+			}
+			catch (...)
+			{
+				++counts.levelBindFailed;
+			}
 #if VW_DRAW_VERIFY
 			if (!DrawsText(mark, level.name, counts.levelNameProbe))
 				++counts.levelNameUnseen;
@@ -530,13 +538,18 @@ namespace HomeskzIfcImport::draw
 		return drawn;
 	}
 
-	void realignLevelMarks(const std::vector<PlacedLevelMark>& marks, DimensionCounts& counts)
+	void finishLevelMarks(MCObjectHandle viewport, const std::vector<PlacedLevelMark>& marks,
+						  DimensionCounts& counts)
 	{
+		if (marks.empty())
+			return;
+		if (!CopySectionViewMatrix(viewport))
+			++counts.viewMatrixFailed;
 		for (const PlacedLevelMark& placed : marks)
 		{
-			// 描いた高さは描き直すまで古いまま（置いた直後の値）なので、先に描き直す。
+			// 写しただけでは描き直されない。作り直したときに初めてストーリレベルの高さが入る。
 			gSDK->ResetObject(placed.mark);
-			AlignLevelHeight(placed.mark, placed.elevation, "用紙へ動かした後", counts);
+			CheckLevelHeight(placed.mark, placed.elevation, counts);
 		}
 	}
 
@@ -552,7 +565,8 @@ namespace HomeskzIfcImport::draw
 		if (counts.failed == 0 && counts.standardRejected == 0 && counts.unjoined == 0 &&
 			counts.textSizeUnread == 0 && counts.viewportScaleUnread == 0 &&
 			counts.levelsFailed == 0 && counts.levelNameFailed == 0 &&
-			counts.levelHeightFailed == 0 && counts.levelHeightUnread == 0 &&
+			counts.levelBindFailed == 0 && counts.viewMatrixFailed == 0 &&
+			counts.levelHeightUnread == 0 && counts.levelHeightMismatch == 0 &&
 			counts.updateFailed == 0 && !classesBroken && !verifyIssue)
 			return {};
 
@@ -567,10 +581,13 @@ namespace HomeskzIfcImport::draw
 					"寸法の文字は割り付けの縮尺で合わせました");
 		AppendCount(text, "置けなかったレベル記号", counts.levelsFailed, "個");
 		AppendCount(text, "名前を書けなかったレベル記号", counts.levelNameFailed, "個");
-		AppendCount(text, "高さを注釈から読ませられなかったレベル記号", counts.levelHeightFailed,
-					"個", "高さが 0 と出ます");
-		AppendCount(text, "描いた高さを読めなかったレベル記号", counts.levelHeightUnread, "個",
-					"高さの数値がずれたままの可能性があります");
+		AppendCount(text, "ストーリレベルへ結べなかったレベル記号", counts.levelBindFailed, "個",
+					"高さが拘束されず、数値が 0 と出ることがあります");
+		AppendCount(text, "断面の向きをビュー行列へ写せなかった軸組図", counts.viewMatrixFailed,
+					"枚", "レベル記号の高さが 0 と出ます");
+		AppendCount(text, "描いた高さを読めなかったレベル記号", counts.levelHeightUnread, "個");
+		AppendCount(text, "描いた高さが命令と合わないレベル記号", counts.levelHeightMismatch, "個",
+					counts.levelHeightProbe.c_str());
 #if VW_DRAW_VERIFY
 		AppendCount(text, "描いた文字に名前が見つからないレベル記号（検算）",
 					counts.levelNameUnseen, "個", counts.levelNameProbe.c_str());
@@ -584,9 +601,6 @@ namespace HomeskzIfcImport::draw
 	std::string dimensionInfo(const std::string& label, const DimensionCounts& counts)
 	{
 		std::string text;
-		if (counts.levelHeightCorrected > 0)
-			text += "レベル記号の高さを補正 " + std::to_string(counts.levelHeightCorrected) +
-					" 個（1 個目: " + counts.levelHeightProbe + "）。";
 #if VW_DRAW_VERIFY
 		if (!counts.dimensionProbe.empty())
 			text += "寸法 1 本目（検算）: " + counts.dimensionProbe + "。";

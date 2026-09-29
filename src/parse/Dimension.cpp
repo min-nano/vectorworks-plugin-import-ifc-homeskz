@@ -218,22 +218,23 @@ namespace HomeskzIfcImport::parse
 				if (hasLevel(story, core::kLevelGL))
 				{
 					// 基礎ストーリ。GL は基礎ストーリの原点（常に 0。core/Document.h）。
-					heights.marks.push_back(
-						core::LevelMarkCommand{kLevelMarkGL, story.elevation, 0.0});
+					heights.marks.push_back(core::LevelMarkCommand{
+						kLevelMarkGL, story.elevation, 0.0, story.name, core::kLevelGL});
 					continue;
 				}
 				if (hasLevel(story, core::kLevelEaves))
 				{
 					// 最上階＝屋根。ストーリ原点が軒高で、横架材（軒桁）の天端もそこ
 					// （parse/Story の beamTopElevation）。
-					heights.marks.push_back(
-						core::LevelMarkCommand{kLevelMarkEaves, story.elevation, 0.0});
+					heights.marks.push_back(core::LevelMarkCommand{
+						kLevelMarkEaves, story.elevation, 0.0, story.name, core::kLevelEaves});
 					heights.beamTops.push_back(story.elevation);
 					continue;
 				}
 				++floor;
-				heights.marks.push_back(core::LevelMarkCommand{
-					std::to_string(floor) + kLevelMarkFLSuffix, story.elevation, 0.0});
+				heights.marks.push_back(
+					core::LevelMarkCommand{std::to_string(floor) + kLevelMarkFLSuffix,
+										   story.elevation, 0.0, story.name, core::kLevelFL});
 				for (const core::LevelCommand& level : story.levels)
 				{
 					if (level.type == core::kLevelBeamTop)

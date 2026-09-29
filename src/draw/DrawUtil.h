@@ -102,6 +102,9 @@ namespace HomeskzIfcImport::draw
 		// pt に直した値（寸法が持つ値ではない。Findings「Dimensions」#143）。
 		DimFontSize = ovDimFontSize,
 		DimTextSizeInPoints = ovDimTextSizeInPoints,
+		// ビューポートのビュー行列と、断面ビューポートの断面の向き（CopySectionViewMatrix）。
+		ViewportViewMatrix = ovViewportViewMatrix,
+		SectionViewMatrix = ovSheetLayerSectionViewportViewMatrix,
 	};
 
 	// SetObjectStoryBound / GetObjectStoryBound のバウンド ID（SDK の TObjectBoundID
@@ -854,6 +857,14 @@ namespace HomeskzIfcImport::draw
 	// 図を作らざるを得ない（draw/Sheet の 2 巡）。更新を 1 回余分に走らせるので、
 	// **縮尺が実際に変わったときだけ**呼ぶこと。
 	bool ApplyViewportScale(MCObjectHandle viewport, double scale);
+
+	// 断面ビューポートの**断面の向き（1055）をビュー行列（1050）へ写す**。書けたら true。
+	// CreateSectionViewport が作るビューポートはビュー行列が単位行列のまま残り、注釈に
+	// 縦の基準が無い——ストーリレベルへ結んだレベル基準線が高さ 0 を描く（UI 製の断面
+	// ビューポートは 2 つが同じ値）。**UpdateViewport は 1050 を単位行列へ戻す**ので、
+	// 更新を済ませた後に呼び、注釈の個体を ResetObject する（SDK リファレンス Findings
+	// 「Viewports」「Level Objects」#141 / #147）。
+	bool CopySectionViewMatrix(MCObjectHandle viewport);
 
 	// ビューポートを用紙の上で delta（用紙 mm）だけ動かす。注釈（データタグ）は
 	// ビューポートと一緒に動く。

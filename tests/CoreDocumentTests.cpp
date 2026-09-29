@@ -2136,7 +2136,7 @@ TEST(validate_accepts_dimension_chains_with_a_style)
 	document.dimensionStandard = "寸法";
 	core::SectionCommand section = validSection();
 	section.viewport.dimensions.push_back(validChain());
-	section.levels.push_back(core::LevelMarkCommand{"GL", 0.0, -5000.0});
+	section.levels.push_back(core::LevelMarkCommand{"GL", 0.0, -5000.0, "基礎", "GL"});
 	document.sections.push_back(section);
 	document.sectionSheet.startNumber = 8;
 	document.sectionSheet.title = "軸組図";
@@ -2153,7 +2153,7 @@ TEST(validate_rejects_dimensions_without_a_style)
 	// レベル記号だけでも同じ。
 	core::Document levelsOnly;
 	core::SectionCommand section = validSection();
-	section.levels.push_back(core::LevelMarkCommand{"GL", 0.0, -5000.0});
+	section.levels.push_back(core::LevelMarkCommand{"GL", 0.0, -5000.0, "基礎", "GL"});
 	levelsOnly.sections.push_back(section);
 	levelsOnly.sectionSheet.startNumber = 8;
 	levelsOnly.sectionSheet.title = "軸組図";
@@ -2189,11 +2189,33 @@ TEST(validate_rejects_level_mark_without_name)
 	core::Document document;
 	document.dimensionStandard = "寸法";
 	core::SectionCommand section = validSection();
-	section.levels.push_back(core::LevelMarkCommand{"", 0.0, 0.0});
+	section.levels.push_back(core::LevelMarkCommand{"", 0.0, 0.0, "基礎", "GL"});
 	document.sections.push_back(section);
 	document.sectionSheet.startNumber = 8;
 	document.sectionSheet.title = "軸組図";
 	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_level_mark_without_story_level)
+{
+	// 結ぶストーリレベルが決まらないと高さを拘束できない（描画側は Z 軸でストーリレベルから
+	// 高さを読む）。
+	const auto documentWith = [](const core::LevelMarkCommand& level)
+	{
+		core::Document document;
+		document.dimensionStandard = "寸法";
+		core::SectionCommand section = validSection();
+		section.levels.push_back(level);
+		document.sections.push_back(section);
+		document.sectionSheet.startNumber = 8;
+		document.sectionSheet.title = "軸組図";
+		return document;
+	};
+	CHECK(
+		core::validateDocument(documentWith(core::LevelMarkCommand{"GL", 0.0, 0.0, "基礎", "GL"})));
+	CHECK(!core::validateDocument(documentWith(core::LevelMarkCommand{"GL", 0.0, 0.0, "", "GL"})));
+	CHECK(
+		!core::validateDocument(documentWith(core::LevelMarkCommand{"GL", 0.0, 0.0, "基礎", ""})));
 }
 
 TEST(outermost_dimension_tier_is_the_largest_tier_or_minus_one)

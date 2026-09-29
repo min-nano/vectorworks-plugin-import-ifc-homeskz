@@ -370,12 +370,10 @@ namespace HomeskzIfcImport::draw
 				}
 			}
 			if (arrange && measured)
-			{
 				MoveViewportBy(viewport, delta);
-				// レベル記号の描く高さは動かすと変わる（round 2 の実測）ので、動かした後に
-				// 測り直して合わせる（draw/Dimension.h）。
-				realignLevelMarks(placedLevels, dimensions);
-			}
+			// レベル記号の仕上げは**このビューポートの更新をすべて済ませた後**（更新が断面の
+			// 向きを写したビュー行列を戻すため。draw/Dimension.h）。
+			finishLevelMarks(viewport, placedLevels, dimensions);
 			++drawn;
 		}
 

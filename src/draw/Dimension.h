@@ -30,17 +30,21 @@
 //	    （Findings「Dimensions」#143。書かないと 1:1 のシートレイヤで作った軸組図の寸法は
 //	    値が見えない）。
 //
-//	【レベル基準線の作法】（Findings「Level Objects」）
+//	【レベル基準線の作法】（Findings「Level Objects」「Viewports」#141 / #147）
 //	  CreateCustomObject("Elevation Benchmark2") → 注釈へ移す → SetPointObjectPos で注釈の
-//	  座標を明示 → Axis＝YAxis2DMode（高さを注釈の Y＝Z から読む）→ ResetObject →
-//	  **マーカーレイアウトの名前のテキストを作り直して渡し直す**（"GL" / "1FL" / "軒高"）→
-//	  ResetObject
-//	  * 既定では注釈の Y を読まない（高さが 0 のまま）ので Axis の 1 行は必須。
+//	  座標を明示 → **ストーリレベルへ結ぶ 3 つ組**（__StoryName ＋ __LevelTypeName ＋
+//	  Datum＝StoryLevel。Axis は既定の Z のまま）→ ResetObject → **マーカーレイアウトの
+//	  名前のテキストを作り直して渡し直す**（"GL" / "1FL" / "軒高"）→ ResetObject →
+//	  （ビューポートの更新を全部済ませた後で）**断面の向き（1055）をビュー行列（1050）へ
+//	  写して**個体を ResetObject（finishLevelMarks）
+//	  * 高さはストーリレベルの絶対 Z から来る——記号をドラッグしても数値は動かない
+//	    （round 3 のご指摘。Axis＝YAxis2DMode で注釈の Y を読ませていた版は動いた）。
+//	  * SDK の CreateSectionViewport が作るビューポートはビュー行列が単位行列のままで、
+//	    写さないと高さが 0 と描かれる。UpdateViewport が写したものを戻すので、写すのは最後。
 //	  * 名前はパラメータでは出ない。レイアウトのテキスト（ストーリレベル名のトークン
 //	    "#STLT#…"）を消し、CreateTextBlock で作った新しいテキストを入れて
 //	    SetCustomObjectProfileGroup で渡し直す（中身を入れ替えるだけでは絵に出ない。実測）。
-//	  * ストーリレベルへの関連付けは使わない——注釈では Axis＝YAxis2DMode と両立しない
-//	    （関連付けると高さが 0 になる）。
+//	    差し替えても結び付き（Datum）が残っているかは読み戻して確かめる。
 //
 //	【注釈へ足した後はクラスを戻して描き直す】注釈へ後から足した図形のクラスはビューポートで
 //	非表示のまま（Findings「Viewports」）なので、置き終えたら全クラスを表示へ戻して更新する
@@ -77,10 +81,11 @@ namespace HomeskzIfcImport::draw
 		std::size_t levels = 0;				 // 注釈へ置けたレベル記号
 		std::size_t levelsFailed = 0; // 作れなかった・注釈へ入らなかったレベル記号
 		std::size_t levelNameFailed = 0; // 名前のテキストを差し替えられなかったレベル記号
-		std::size_t levelHeightFailed = 0; // 高さを注釈の Y から読む設定を書けなかったレベル記号
-		std::size_t levelHeightUnread = 0; // 描いた高さを読めず、補正できなかったレベル記号
-		// 描いた高さのずれを基準高さで補正したレベル記号と、その 1 個目の実際（記録用）。
-		std::size_t levelHeightCorrected = 0;
+		std::size_t levelBindFailed = 0; // ストーリレベルへ結べなかったレベル記号
+		std::size_t viewMatrixFailed = 0; // 断面の向きをビュー行列へ写せなかったビューポート
+		std::size_t levelHeightUnread = 0; // 描いた高さを読めなかったレベル記号
+		// 描いた高さが命令の高さと合わなかったレベル記号と、その 1 個目の実際。
+		std::size_t levelHeightMismatch = 0;
 		std::string levelHeightProbe;
 		std::size_t classesShown = 0; // 置いた後に表示へ戻せたクラス数（0 なら映らない）
 		std::size_t updateFailed = 0; // クラスを戻した後の再更新に失敗したビューポート
@@ -94,8 +99,8 @@ namespace HomeskzIfcImport::draw
 #endif
 	};
 
-	// 注釈へ置けたレベル記号と、その命令の高さ（用紙へ動かした後の測り直しに使う。
-	// realignLevelMarks）。ハンドルは描画の間だけ使い、命令には載せない。
+	// 注釈へ置けたレベル記号と、その命令の高さ（仕上げの作り直しと検算に使う。
+	// finishLevelMarks）。ハンドルは描画の間だけ使い、命令には載せない。
 	struct PlacedLevelMark
 	{
 		MCObjectHandle mark = nil;
@@ -110,7 +115,7 @@ namespace HomeskzIfcImport::draw
 	// 注釈として置く。standard は寸法規格の名前（core::Document::dimensionStandard）、scale は
 	// そのビューポートの縮尺の分母（寸法線までの距離を用紙 mm からモデル mm へ直す）。
 	// 置けた列の数を返し、内訳を counts へ積む。placedLevels を渡せば、置けたレベル記号を
-	// そこへ積む（ビューポートを動かした後に realignLevelMarks へ渡す）。
+	// そこへ積む（ビューポートの更新を済ませた後に finishLevelMarks へ渡す）。
 	std::size_t drawViewportDimensions(MCObjectHandle viewport,
 									   const core::ViewportCommand& command,
 									   const std::vector<core::LevelMarkCommand>& levels,
@@ -118,10 +123,12 @@ namespace HomeskzIfcImport::draw
 									   DimensionCounts& counts,
 									   std::vector<PlacedLevelMark>* placedLevels = nullptr);
 
-	// **ビューポートを用紙のマスへ動かした後**に、置いたレベル記号の描いた高さを測り直し、
-	// ずれていれば基準高さで補正する（round 2: 置いた直後は合っていたのに、絵ではずれて
-	// いた。docs/DEV-NOTES.md M31）。
-	void realignLevelMarks(const std::vector<PlacedLevelMark>& marks, DimensionCounts& counts);
+	// 断面ビューポートのレベル記号を仕上げる。**そのビューポートの更新をすべて済ませた後**に
+	// 呼ぶ——断面の向きをビュー行列へ写し（DrawUtil の CopySectionViewMatrix）、置いた
+	// レベル記号を作り直して、描いた高さを命令と引き比べる（合わなければ数えるだけで直さない。
+	// 高さはストーリレベルから来る出力で、書けない）。marks が空なら何もしない。
+	void finishLevelMarks(MCObjectHandle viewport, const std::vector<PlacedLevelMark>& marks,
+						  DimensionCounts& counts);
 
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空文字）。label は図の種別
 	// （"伏図" / "軸組図"）。
