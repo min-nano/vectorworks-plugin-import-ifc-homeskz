@@ -259,7 +259,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 
 | もの | 置き場所 |
 | --- | --- |
-| 平面座標の同一判定と許容（`samePoint` / `kPointEps`）・Vec2 の基本演算（`dot` / `cross` / `length` / `distance`）・同一直線上の線分成分の芯線射影（`collinearSpan`）・凸多角形の矩形クリップ（`clipPolygonToRect`。唯一の利用者は耐力壁の筋かいの形 `core::shearWallBracePolygon`） | `core/Geometry.h` |
+| 平面座標の同一判定と許容（`samePoint` / `kPointEps`）・Vec2 の基本演算（`dot` / `cross` / `length` / `distance`）・同一直線上の線分成分の芯線射影（`collinearSpan`）・凸多角形の凸多角形クリップ（`clipPolygonToConvex`。唯一の利用者は耐力壁の筋かいの形 `core::shearWallBracePolygon`） | `core/Geometry.h` |
 | ペア述語による連結成分（Union-Find。立上り・大引・地中梁の統合と壁結合の交点クラスタ） | `core/UnionFind.h` |
 | 構成層の総厚（`totalThickness`）・横架材の Z 範囲と重なり（`memberTopZ` / `memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側）・端部オフセットの意味と値・オフセットを戻した「材の端」（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`） | `core/Document.h` |
 | 描画側から切り離せる純計算（レイヤの希望スタック順 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの広がり `planContentBounds` / `sectionContentSize`） | `core/Document` |

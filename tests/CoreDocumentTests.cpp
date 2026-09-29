@@ -19,6 +19,7 @@
 #include "core/Layout.h"
 #include "parse/BuildDocument.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -2158,7 +2159,7 @@ TEST(shear_wall_brace_polygon_is_clipped_to_the_frame)
 	// どの角も 2 頂点に切り分けられて八角形（端が斜めに落ちた形）になる。頂点はすべて
 	// 内法の中に収まる。
 	const std::vector<core::Vec2> brace =
-		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, true);
 	CHECK_EQ(brace.size(), std::size_t{8});
 	for (const core::Vec2& point : brace)
 	{
@@ -2186,9 +2187,9 @@ TEST(shear_wall_brace_polygon_follows_the_rise_direction)
 		return best;
 	};
 	const std::vector<core::Vec2> up =
-		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, true);
 	const std::vector<core::Vec2> down =
-		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, false);
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, false);
 	CHECK(lowestX(up) < 1500.0);
 	CHECK(lowestX(down) > 1500.0);
 }
@@ -2196,9 +2197,28 @@ TEST(shear_wall_brace_polygon_follows_the_rise_direction)
 TEST(shear_wall_brace_polygon_rejects_a_degenerate_frame)
 {
 	// 内法が潰れている・幅が無いときは描けない（空を返す）。
-	CHECK(core::shearWallBracePolygon(0.0, 0.0, 0.0, 2400.0, 100.0, true).empty());
-	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 2400.0, 2400.0, 100.0, true).empty());
-	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 0.0, 0.0, 2400.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 2400.0, 2400.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 0.0, true).empty());
+	// 片端だけ上端が下端以下（登り梁が土台まで下りてきた等）でも描けない。
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, 100.0, true).empty());
+}
+
+TEST(shear_wall_brace_polygon_fits_under_a_sloped_top)
+{
+	// 内法 3000 で上端が 2400 → 3000 へ上がる台形。帯は上辺の傾きに沿って切られ、
+	// 頂点はすべて台形の中に収まる。高い側（終点）の上隅まで届く。
+	const std::vector<core::Vec2> brace =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 3000.0, 100.0, true);
+	CHECK(brace.size() >= std::size_t{6});
+	double highest = 0.0;
+	for (const core::Vec2& point : brace)
+	{
+		CHECK(point.x >= -1e-9 && point.x <= 3000.0 + 1e-9);
+		CHECK(point.y >= -1e-9 && point.y <= 2400.0 + (0.2 * point.x) + 1e-9);
+		highest = std::max(highest, point.y);
+	}
+	CHECK(highest > 2900.0);
 }
 
 // ---------------------------------------------------------------------------

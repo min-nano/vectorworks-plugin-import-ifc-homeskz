@@ -1622,20 +1622,23 @@ namespace HomeskzIfcImport::core
 	bool sectionContentSize(const Document& document, Vec2& size);
 
 	// 耐力壁の筋かい 1 本を、軸組内法に納まる多角形として返す（座標は **(軸方向, 高さ)**
-	// ＝壁面内の 2D で、PIO のローカル XZ にそのまま載る）。内法の矩形は
-	// [clearStart, clearEnd] × [bottom, top]。
+	// ＝壁面内の 2D で、PIO のローカル XZ にそのまま載る）。内法は
+	// 下辺 [clearStart, clearEnd] × bottom、上辺は clearStart で topAtStart・clearEnd で
+	// topAtEnd を結ぶ直線（水平なら矩形、登り梁の下に取り付く耐力壁なら台形）。
 	//
-	// 【形】筋かいは内法の対角線に沿った幅 width の帯で、帯の角は内法の外へはみ出す。
-	// 実物も柱・横架材へ突き当たる形で納まるので、**内法の矩形で切って**返す
-	// （帯の 4 つの角がそれぞれ別の辺で落ちるので、切り口は端が斜めの八角形になる）。
-	// risesToEnd が真なら clearStart 側が下・clearEnd 側が上、偽ならその逆。
+	// 【形】筋かいは内法の対角線（低い側の下隅→高い側の上隅）に沿った幅 width の帯で、
+	// 帯の角は内法の外へはみ出す。実物も柱・横架材へ突き当たる形で納まるので、**内法で
+	// 切って**返す（帯の 4 つの角がそれぞれ別の辺で落ちるので、切り口は端が斜めの八角形に
+	// なる）。risesToEnd が真なら clearStart 側が下・clearEnd 側が上、偽ならその逆。
 	//
-	// 内法が潰れている（幅または高さが 0 以下）・幅が 0 以下のときは空を返す。
+	// 内法が潰れている（幅が 0 以下・どちらかの端で上端が下端以下）・幅が 0 以下のときは
+	// 空を返す。
 	//
 	// **描画側から切り離せる純計算**なので core に置いて無 SDK でテストする
 	// （raiseModifierTop・rafterEaveEnd と同じ立ち位置。CLAUDE.md「テスト方針」）。
 	std::vector<Vec2> shearWallBracePolygon(double clearStart, double clearEnd, double bottom,
-											double top, double width, bool risesToEnd);
+											double topAtStart, double topAtEnd, double width,
+											bool risesToEnd);
 
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す。draw/Story がこの順を適
 	// 用する（レベルの高さには依存しない）。SDK を触らない純計算なので core に置いて無 SDK
