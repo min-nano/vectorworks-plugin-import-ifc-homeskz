@@ -76,7 +76,7 @@ namespace HomeskzIfcImport
 			// SDK は「番兵で終わる配列の先頭ポインタ」を受け取る（SParametricParamDef*）。
 			// 器を std::array にしても .data() で同じポインタを渡せるので、C 配列にする
 			// 理由は無い（番兵は最後の要素としてそのまま残す）。
-			static const std::array<SParametricParamDef, 11> defs = {
+			static const std::array<SParametricParamDef, 12> defs = {
 				{// **並びは「絵にとってどれだけ要るか」の順**。OIP の上から重要な順に読める
 				 // うえに、万一 VW 側が一覧を途中までしか登録しなくても、落ちるのは
 				 // 既定値で代用が利くもの（記号の大きさ・面材の離れ・見付け幅）から順になる。
@@ -87,6 +87,12 @@ namespace HomeskzIfcImport
 				  kFieldCoordDisp,
 				  0},
 				 {kParamShearTop, {PLUGIN_VWR_ID, "shearWallTop"}, "0", "0", kFieldCoordDisp, 0},
+				 {kParamShearTopEnd,
+				  {PLUGIN_VWR_ID, "shearWallTopEnd"},
+				  "0",
+				  "0",
+				  kFieldCoordDisp,
+				  0},
 				 {kParamShearClearSpan,
 				  {PLUGIN_VWR_ID, "shearWallClearSpan"},
 				  "0",

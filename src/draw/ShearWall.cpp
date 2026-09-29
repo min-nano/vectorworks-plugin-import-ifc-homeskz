@@ -302,6 +302,9 @@ namespace HomeskzIfcImport::draw
 				putReal(kParamShearClearSpan, wall.clearSpan);
 				putReal(kParamShearBottom, wall.bottomHeight);
 				putReal(kParamShearTop, wall.topHeight);
+				// 取り込みは水平の耐力壁として置く（両端とも同じ上端）。登り梁の下で左右の
+				// 高さを変えるのは、置いた後に OIP で内法上端（始点）／（終点）を書き換えて行う。
+				putReal(kParamShearTopEnd, wall.topHeight);
 				// ★**見た目の既定値も毎回書く。** PIO のパラメータ既定値は**図面に記録
 				// される**ので、コード側で既定を変えても**その PIO を一度使った図面では
 				// 古い値のまま**になる（実機で MarkOffset が 4mm のままになり、記号が
