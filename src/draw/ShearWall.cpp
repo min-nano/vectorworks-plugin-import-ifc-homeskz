@@ -5,9 +5,9 @@
 //	【SDK 依存】PluginPrefix.h を include するため、この翻訳単位はプラグインビルド
 //	（SDK あり）でのみコンパイルされる（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	手順: 配置先レイヤを用意 → CreateCustomObject で PIO を作る → **両端を柱芯へ置く**
-//	（VWParametricObj::SetLinearObjectPos）→ 本体のクラスを設定 → パラメータを書く →
-//	ResetObject。リセットで PIO 本体（Extensions/ExtShearWall）が柱を探して絵を描く。
+//	手順: 配置先レイヤを用意 → CreateCustomObject で PIO を作る（挿入点＝始端の柱芯・
+//	角度＝始端→終端の向き）→ 本体のクラスを設定 → パラメータを書く（**線分の長さ
+//	LineLength＝柱芯間の距離**を含む）→ ResetObject。リセットで PIO 本体（Extensions/ExtShearWall）が柱を探して絵を描く。
 //
 //	**パラメータは PIO 本体と同じ名前**でなければ黙って無視される（M6 の垂木で実証済み。
 //	draw/DrawUtil の ResolveParamName の doc コメント）。名前の定義は 1 か所に集めたいので、
@@ -17,6 +17,7 @@
 #include "PluginPrefix.h"
 #include "draw/ShearWall.h"
 #include "draw/DrawUtil.h"
+#include "draw/ShearWallPio.h"
 #include "Extensions/ExtShearWall.h"
 #include "core/Document.h"
 #include "core/Progress.h"
@@ -241,12 +242,9 @@ namespace HomeskzIfcImport::draw
 		bool PlaceOne(const core::ShearWallCommand& wall, std::size_t& outUnwritten)
 		{
 			// 挿入点は始端（柱芯）。第 4 引数 bInsert=true でアクティブレイヤへ入れる。
-			// 線分 PIO なので、この後 SetLinearObjectPos で両端を与え直す。
-			//
-			// ★**角度もここで与える**（始端→終端の向き）。線分 PIO として置けていれば
-			// 両端がそのまま向きを決めるので角度は要らないが、**万一 1 点のオブジェクトと
-			// して置かれても、ローカル +X が壁の向きに揃う**——PIO 側は絵をローカル座標で
-			// 描くので、この 1 つで「向きだけ違う」という直しにくい壊れ方を塞げる。
+			// ★**角度もここで与える**（始端→終端の向き）。線分 PIO の向きは行列の
+			// ローカル +X そのもので、終端はこの軸の上、長さ LineLength の位置になる
+			// （下で書く）。PIO 側は絵をローカル座標で描く。
 			const double angle = std::atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) *
 								 180.0 / std::numbers::pi;
 			const MCObjectHandle object =
@@ -259,7 +257,6 @@ namespace HomeskzIfcImport::draw
 			// 描かれる（面材の表裏と伏図の記号だけは PIO 側でクラスを分ける）。
 			SetClassByName(object, wall.drawClass);
 
-			bool placed = false;
 			std::size_t unwritten = 0;
 			try
 			{
@@ -278,19 +275,22 @@ namespace HomeskzIfcImport::draw
 					}
 				};
 
-				// **両端＝柱芯**。ここが耐力壁の「どの柱とどの柱の間か」を表す。
-				write(
-					[&]
-					{
-						pio.SetLinearObjectPos(VWPoint2D(wall.start.x, wall.start.y),
-											   VWPoint2D(wall.end.x, wall.end.y));
-						placed = true;
-					});
-
 				const auto putString = [&](const char* name, const TXString& value)
 				{ write([&] { pio.SetParamString(name, value); }); };
 				const auto putReal = [&](const char* name, double value)
 				{ write([&] { SetParamRealChecked(pio, TXString(name), value); }); };
+
+				// **両端＝柱芯**。ここが耐力壁の「どの柱とどの柱の間か」を表す。線分 PIO の
+				// 形は「行列＋長さ（LineLength）」なので、始端と向きは CreateCustomObject の
+				// 挿入点と角度で与えてあり、残る**長さ＝柱芯間の距離**をここで書く
+				// （draw/ShearWallPio.h の kParamShearLineLength）。
+				//
+				// ★**SetLinearObjectPos（GS_SetEndPoints）は使わない。** PIO には効かず
+				// （GetLinearObjectPos は (0,0), (0,0) を返す）、長さが既定値のまま残る。
+				// **取り込み後の最初の 1 回の編集だけ耐力壁が水平にずれた**のは、この
+				// 置き方の食い違いが出どころと見ている（docs/DEV-NOTES.md M19）。
+				putReal(kParamShearLineLength,
+						std::hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y));
 
 				putString(kParamShearTargetLayers, TXString(wall.targetLayers.c_str()));
 				putString(kParamShearKind, TXString(KindValue(wall.kind)));
@@ -320,7 +320,7 @@ namespace HomeskzIfcImport::draw
 			// **リセットは必ず呼ぶ。** ここが本体の Recalculate を呼び、耐力壁が描かれる。
 			// パラメータを取りこぼしていても、描けるところまでは描かせる。
 			gSDK->ResetObject(object);
-			return placed;
+			return true;
 		}
 	} // namespace
 

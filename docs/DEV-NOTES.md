@@ -924,18 +924,25 @@ M9 の当初は底盤スラブの構成層を「コンクリート / 捨てコ�
 
 実機（ローカルの VW）でしか出なかったこと:
 
-- **`SetLinearObjectPos` が効かない。** `CreateCustomObject` で置いた直後に
-  `VWParametricObj::SetLinearObjectPos` で両端を与えても例外は出ないのに、
-  `Recalculate` の中で `GetLinearObjectPos` を読むと **(0,0), (0,0) が返る**（＝線分として
-  置けていない）。同じ症状は 53 枚すべてで再現した。中身は `GS_SetEndPoints` /
-  `GS_GetEndPoints` そのもの（`SDKLib/Source/VWSDK/VWFC/VWObjects/VWParametricObj.cpp`）で
-  戻り値が無いので、失敗しても呼び出し側からは分からない。原因は追えていないが、
-  **「両端が取れない」前提で描けるようにしてある**ので実害は出ていない:
-  `CreateCustomObject` に**始端→終端の角度**を与えてあるのでローカル +X は壁の向きに
-  揃っており、控えの内法（`ClearSpan`）から軸を組み直して柱を探せば、内法は実物の柱から
-  引き直せる。**PIO の絵は正しく、柱の移動にも（±300mm の探索窓の中なら）追随する**が、
-  両端のハンドルで伸ばす操作はできない。診断ログの
-  `shearwall: 線分の両端を読めない` / `軸を控えの内法から組み直す` がこの経路の目印。
+- **`SetLinearObjectPos` が効かない——線分 PIO の終端は `LineLength` で与える。**
+  `CreateCustomObject` で置いた直後に `VWParametricObj::SetLinearObjectPos` で両端を与えても
+  例外は出ないのに、`Recalculate` の中で `GetLinearObjectPos` を読むと **(0,0), (0,0) が
+  返る**（53 枚すべて。中身は `GS_SetEndPoints` / `GS_GetEndPoints` で戻り値が無い）。
+  線分 PIO の形はそもそも「**行列（原点＝始点・ローカル +X＝向き）＋隠しパラメータ
+  `LineLength`**」で（SDK リファレンス `Info/Parametric Object Types.md`）、終点は
+  ローカル (LineLength, 0) にある。当初はこれを知らず、長さを書かないまま「控えの内法から
+  軸を組み直す」逃げ道で描いていた。
+
+  その結果、**取り込み後に OIP でパラメータを 1 度編集すると耐力壁が水平にずれ、2 度目
+  以降はずれない**という不具合が出た（ご報告）。取り込み時のリセットと利用者の最初の
+  編集とで軸の取り方が食い違う（長さが既定値のまま残った線分 PIO を、VW が最初の編集で
+  整える）のが出どころと見ている。直し方は、書き手（`draw/ShearWall`）が挿入点＝始端の
+  柱芯・角度＝向きに加えて **`LineLength` に柱芯間の距離を書き**、読み手
+  （`draw/ShearWallPio`）は `GetLinearObjectPos` をやめて **`LineLength` から軸
+  [0, LineLength] を取る**。長さはパラメータなので取り込み直後も編集後も同じ値が読め、
+  両端のハンドルで伸ばす操作も効くようになる。長さを書いていなかった版で取り込んだ図面の
+  ために、`LineLength` の軸で両端の柱が見つからなければ、以前と同じ控えの内法の軸
+  [0, ClearSpan] でも探す。診断ログの `shearwall: 線分の長さ …` がこの経路の目印。
 - **伏図の記号は壁芯に置くと必ず横架材の下へ潜る。** 壁芯には土台・胴差が幅 105 前後で
   載っているので、面材の実物の離れ（半柱幅＋板厚の半分＝58.5 程度）では足りない。
   記号は `MarkOffset`（既定 200mm）だけ壁芯から離し、**面材ならその面材のある側**へ寄せる。
