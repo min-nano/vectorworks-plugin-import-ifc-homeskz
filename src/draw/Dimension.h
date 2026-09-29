@@ -45,7 +45,8 @@
 //	    写さないと高さが 0 と描かれる。UpdateViewport が写したものを戻すので、写すのは最後。
 //	  * 名前はパラメータでは出ない。レイアウトの既定の中身（高さ "#Elev#"・ストーリレベル名
 //	    "#STLT#…" の 2 つのテキストと記号のポリライン）を消し、CreateTextBlock /
-//	    CreateLine で作った**名前と▽**を入れて SetCustomObjectProfileGroup で
+//	    VWPolygon2DObj（閉じたポリライン。塗りが効く）で作った**名前と▽**を入れて
+//	    SetCustomObjectProfileGroup で
 //	    渡し直す（中身を入れ替えるだけでは絵に出ない。実測）。**高さの数値は描かない**
 //	    （ご要望）。差し替えても結び付き（Datum）が残っているかは読み戻して確かめる。
 //	  * レイアウトの長さは**用紙 mm**（Findings「Drawing Labels」の「レイアウトの文字の

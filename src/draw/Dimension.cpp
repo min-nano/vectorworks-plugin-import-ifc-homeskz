@@ -23,6 +23,7 @@
 #include "core/Layout.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
+#include "VWFC/VWObjects/VWPolygon2DObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
@@ -66,6 +67,12 @@ namespace HomeskzIfcImport::draw
 		// PIO 自身が挿入点から左へ引く水平引出線（既定 True）。切って、基準線は
 		// レイアウトに自分で引く（DrawLevelLine）。
 		constexpr const char* kParamHorizontalLeader = "UseHorizontalLeader";
+
+		// レベル記号のレイアウトの中身のクラス（ご要望）。どれも**全属性をクラスに従わせる**
+		// （矢印マーカーだけは除く。DrawUtil の SetClassWithAttributes の withMarker）。
+		// 名前の文字は寸法と同じ kDimensionClass。
+		constexpr const char* kLevelTriangleClass = "01作図-04記号-01一般";
+		constexpr const char* kLevelLineClass = "01作図-01線-01基準線-02一般";
 
 		// 描いた高さが命令の高さからこれ以上ずれていたら「合わない」と数える（mm）。
 		constexpr double kLevelHeightTol = 0.5;
@@ -261,16 +268,19 @@ namespace HomeskzIfcImport::draw
 			double markScale = kFallbackScale;
 		};
 
-		// 線を 1 本作って container へ入れる。入らなければ消す。
-		bool AddLine(MCObjectHandle container, double x1, double y1, double x2, double y2)
+		// レイアウトへ入れる図形を仕上げる: container へ入れ、クラスを当てて全属性を
+		// クラスに従わせる（矢印マーカーは除く）。入らなければ消して false。
+		bool AddToLayout(MCObjectHandle container, MCObjectHandle object, const char* className)
 		{
-			const MCObjectHandle line = gSDK->CreateLine(WorldPt(x1, y1), WorldPt(x2, y2));
-			if (line == nil)
+			if (object == nil)
 				return false;
-			if (gSDK->AddObjectToContainer(line, container))
-				return true;
-			gSDK->DeleteObject(line, true);
-			return false;
+			if (!gSDK->AddObjectToContainer(object, container))
+			{
+				gSDK->DeleteObject(object, true);
+				return false;
+			}
+			SetClassWithAttributes(object, className, false);
+			return true;
 		}
 
 #if VW_DRAW_VERIFY
@@ -369,15 +379,22 @@ namespace HomeskzIfcImport::draw
 								 shape.textBottom - std::min(bounds.top, bounds.bottom));
 			markWidth = shape.width;
 
-			// ▽（頂点で基準線に触れる正三角形）。
+			// 名前の文字は寸法のクラスへ（文字の大きさを当てた後にクラスを与える。
+			// Findings「Data Tags」: 書体・大きさは文字、色はクラスが受け持つ）。
+			SetClassWithAttributes(text, kDimensionClass, false);
+
+			// ▽（頂点で基準線に触れる正三角形）。**閉じたポリライン**で描く（塗りが効く。
+			// ご要望）。VWPolygon2DObj は既定で開いた折れ線なので閉じる（Findings
+			// 「Parametric Objects」）。
 			const double h = shape.triangleHeight;
 			const double w = shape.triangleHalfWidth;
 			bool drawn = true;
 			if (h > 0.0)
 			{
-				drawn = AddLine(layout, 0.0, h, 2.0 * w, h) && drawn;
-				drawn = AddLine(layout, 0.0, h, w, 0.0) && drawn;
-				drawn = AddLine(layout, 2.0 * w, h, w, 0.0) && drawn;
+				VWPolygon2DObj triangle(
+					{VWPoint2D(0.0, h), VWPoint2D(2.0 * w, h), VWPoint2D(w, 0.0)});
+				triangle.SetClosed(true);
+				drawn = AddToLayout(layout, triangle.GetThisObject(), kLevelTriangleClass);
 			}
 
 			for (const MCObjectHandle object : old)
@@ -410,7 +427,9 @@ namespace HomeskzIfcImport::draw
 			const MCObjectHandle layout = HeldProfileGroup(mark);
 			if (layout == nil)
 				return false;
-			const bool drawn = AddLine(layout, 0.0, 0.0, lengthOnPaper, 0.0);
+			const bool drawn = AddToLayout(
+				layout, gSDK->CreateLine(WorldPt(0.0, 0.0), WorldPt(lengthOnPaper, 0.0)),
+				kLevelLineClass);
 			return gSDK->SetCustomObjectProfileGroup(mark, layout) != 0 && drawn && leaderOff;
 		}
 

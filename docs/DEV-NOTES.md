@@ -811,6 +811,10 @@ GL・FL・軒高は**断面ビューポートの注釈にレベル基準線**と
   （`core::levelMarkStartX`）を決めて全部をそこへ置き直す。線の長さは
   `core::levelLineLength`。命令が持つのは図の左右の端と左の寸法の段だけ
   （`LevelMarkCommand::right` / `dimensionTier`）。
+- **クラスと属性**（ご要望）: ▽ は閉じたポリライン（塗りが効く）で「01作図-04記号-01一般」、
+  名前の文字は「寸法」、基準線は「01作図-01線-01基準線-02一般」。どれも**全属性をクラスに
+  従わせる**が、**矢印マーカーだけは除く**（`draw/DrawUtil` の `SetClassWithAttributes` の
+  `withMarker=false`）。
 - 記号は寸法の列より外へ張り出すので、軸組図の寸法の帯に 10mm を見込みで足した
   （`core::kLevelMarkBandAllowance`）。
 
