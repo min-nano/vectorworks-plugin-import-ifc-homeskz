@@ -193,7 +193,9 @@ namespace HomeskzIfcImport::draw
 		// パーツ・欄・面から universal 名を組み立てる。
 		TXString AttributeParam(const char* field, const char* face)
 		{
-			return TXString((std::string(field) + face).c_str());
+			TXString name(field);
+			name += face;
+			return name;
 		}
 
 		// 2D 属性を 3 面とも書く（構造材・端部はクラス属性、被覆・中心線は非表示）。
