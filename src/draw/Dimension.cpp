@@ -280,6 +280,10 @@ namespace HomeskzIfcImport::draw
 		}
 
 #if VW_DRAW_VERIFY
+		// 検算（dev だけ）: container の中身を「型＋外形」で並べる（入れ子のグループも辿る。
+		// 深さは有限に留める）。
+		std::string DescribeMembers(MCObjectHandle container, int depth = 0);
+
 		// 検算（dev だけ）: 外形を "[左,右]x[下,上]" の 1 語にする。
 		std::string DescribeBounds(MCObjectHandle object)
 		{
@@ -291,6 +295,21 @@ namespace HomeskzIfcImport::draw
 						  bounds.right, std::min(bounds.top, bounds.bottom),
 						  std::max(bounds.top, bounds.bottom));
 			return buffer.data();
+		}
+
+		std::string DescribeMembers(MCObjectHandle container, int depth)
+		{
+			constexpr int kMaxDepth = 2;
+			std::string out;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil;
+				 h = gSDK->NextObject(h))
+			{
+				const short type = gSDK->GetObjectTypeN(h);
+				out += " 型" + std::to_string(type) + DescribeBounds(h);
+				if (type == kGroupNode && depth < kMaxDepth)
+					out += "{" + DescribeMembers(h, depth + 1) + " }";
+			}
+			return out.empty() ? std::string(" （なし）") : out;
 		}
 #endif
 
@@ -655,15 +674,18 @@ namespace HomeskzIfcImport::draw
 			gSDK->ResetObject(placed.mark);
 			CheckLevelHeight(placed.mark, placed.elevation, counts);
 #if VW_DRAW_VERIFY
-			// 描いた範囲と狙い（起点〜基準線の終点）を 1 個目だけ控える。レイアウトの長さが
-			// 用紙 mm で効いていれば横の範囲がほぼ一致する。
-			if (&placed == &marks.front())
+			// 描いた範囲と狙い（起点〜基準線の終点）を**文書で 1 個目だけ**控え、描いた中身を
+			// 1 つずつ並べる。round 1: 描いた範囲が狙いより用紙 36mm 広かった（既定の
+			// レイアウトに線は無かったので、PIO 自身が別の線を描いていると見ている）。
+			if (!counts.levelShapeDrawn)
 			{
+				counts.levelShapeDrawn = true;
 				std::array<char, 96> aim{};
 				std::snprintf(aim.data(), aim.size(), " / 狙い x=[%.1f,%.1f]", placed.startX,
 							  placed.endX);
-				counts.levelShapeProbe +=
-					" / 描いた範囲 " + DescribeBounds(placed.mark) + aim.data();
+				counts.levelShapeProbe += " / 描いた範囲 " + DescribeBounds(placed.mark) +
+										  aim.data() + " / 描いた中身" +
+										  DescribeMembers(placed.mark);
 			}
 #endif
 		}

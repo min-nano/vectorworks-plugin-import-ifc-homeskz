@@ -108,6 +108,7 @@ namespace HomeskzIfcImport::draw
 		// レベル記号 1 個目の形: 組み直す前のレイアウトの中身（型と外形）と、描いた範囲と
 		// 狙い（起点〜基準線の終点）。レイアウトの長さが用紙 mm で効いているかを確かめる。
 		std::string levelShapeProbe;
+		bool levelShapeDrawn = false; // 描いた範囲を控え終えたか（文書で 1 個目だけ）
 #endif
 	};
 
