@@ -63,6 +63,10 @@ namespace HomeskzIfcImport::draw
 		// 描いた高さ（読み取り用の静的文字。Findings「Level Objects」のパラメータ表）。
 		constexpr const char* kParamShownElevation = "Elevation";
 
+		// PIO 自身が挿入点から左へ引く水平引出線（既定 True）。切って、基準線は
+		// レイアウトに自分で引く（DrawLevelLine）。
+		constexpr const char* kParamHorizontalLeader = "UseHorizontalLeader";
+
 		// 描いた高さが命令の高さからこれ以上ずれていたら「合わない」と数える（mm）。
 		constexpr double kLevelHeightTol = 0.5;
 
@@ -306,7 +310,7 @@ namespace HomeskzIfcImport::draw
 		// **マーカーレイアウトを組み直して渡し直す**（draw/Dimension.h「レベル基準線の作法」）。
 		// 既定の中身（高さとストーリレベル名のテキスト・記号のポリライン）を消し、挿入点＝(0, 0)
 		// から右へ「▽＋名前」を置く（core/Layout.h「軸組図のレベル記号の形と位置」）。**基準線は
-		// 置かない**——線は PIO が制御点まで自分で引く（MoveLevelControlPoint）。起点を決めるのに
+		// 置かない**——線は起点が決まってから DrawLevelLine が足す。起点を決めるのに
 		// 要る記号の幅（用紙 mm）を markWidth へ返す。
 		// **中身を入れ替えるだけでは絵に出ない**ので、新しい図形を作って入れ、古いものを
 		// 消してから SetCustomObjectProfileGroup で渡す（Findings「Level Objects」の実測手順）。
@@ -381,48 +385,33 @@ namespace HomeskzIfcImport::draw
 			return gSDK->SetCustomObjectProfileGroup(mark, layout) != 0 && drawn;
 		}
 
-		// **基準線は PIO が「制御点 → 挿入点」へ引く線である**（実機で分かった。既定の
-		// レイアウトに線は無く、描いた中身は挿入点から左へ 5400＝用紙 36mm（1/150）の
-		// ポリゴン 1 つ。選ぶと左端にハンドルが出る。パス（GetCustomObjectPath）は無い）。
-		// 制御点を挿入点の**右** length（注釈空間の長さ・挿入点からの相対）へ動かして、線を
-		// 右へ伸ばす。制御点の持ち方は Findings に無いので 2 通り試す:
-		//   1. VWFC のカスタム制御点（CustomControlPointsGet / Set）
-		//   2. 名前に "ControlPoint" を含む X / Y のパラメータ（レガシーの `Elevation
-		//      Benchmark` は `ControlPoint01X` を持つ。Findings「Level Objects」）
-		// どちらで動いたかは dev の検算が記録へ出す。
-		bool MoveLevelControlPoint(MCObjectHandle mark, double length)
+		// **PIO 自身が引く水平引出線を消し、基準線はレイアウトに自分で引く。**
+		// 実機で分かったこと（docs/DEV-NOTES.md「レベル基準線の描き方の調整」）:
+		//   * 既定のレイアウトに線は無く、PIO が挿入点から左へ 5400（1/150 で用紙 36mm）の
+		//     ポリゴンを 1 つ描く。パス（GetCustomObjectPath）は持たない。
+		//   * カスタム制御点（既定 (0, 3000)）を動かしても、そのポリゴンは変わらない。
+		//   * 全パラメータのどれにも -5400 は無い。線に関わりそうなのは
+		//     `UseHorizontalLeader`（水平引出線を使用。既定 True）だけ。
+		// そこで引出線を切り（kParamHorizontalLeader）、線は起点から右へレイアウトの中に
+		// 引く（最初の版で、レイアウトの線は右へ図の右端まで出た）。
+		bool DrawLevelLine(MCObjectHandle mark, double lengthOnPaper)
 		{
+			bool leaderOff = false;
 			try
 			{
 				VWParametricObj pio(mark);
-				VWPoint3D point;
-				bool onlyIn2D = true;
-				bool visible = true;
-				Sint32 pointID = 0;
-				if (pio.CustomControlPointsGet(0, point, &onlyIn2D, &visible, &pointID))
-					return pio.CustomControlPointsSet(VWPoint3D(length, 0.0, 0.0), onlyIn2D,
-													  visible, static_cast<size_t>(pointID), 0);
-
-				bool movedX = false;
-				bool movedY = false;
-				const size_t count = pio.GetParamsCount();
-				for (size_t i = 0; i < count; ++i)
-				{
-					const std::string name = pio.GetParamName(i).GetStdString();
-					if (name.find("ControlPoint") == std::string::npos)
-						continue;
-					const TXString param(name.c_str());
-					if (name.back() == 'X' && !movedX)
-						movedX = SetParamRealChecked(pio, param, length, kLevelHeightTol);
-					else if (name.back() == 'Y' && !movedY)
-						movedY = SetParamRealChecked(pio, param, 0.0, kLevelHeightTol);
-				}
-				return movedX;
+				pio.SetParamBool(kParamHorizontalLeader, false);
+				leaderOff = !pio.GetParamBool(kParamHorizontalLeader);
 			}
 			catch (...)
 			{
-				return false;
+				leaderOff = false;
 			}
+			const MCObjectHandle layout = HeldProfileGroup(mark);
+			if (layout == nil)
+				return false;
+			const bool drawn = AddLine(layout, 0.0, 0.0, lengthOnPaper, 0.0);
+			return gSDK->SetCustomObjectProfileGroup(mark, layout) != 0 && drawn && leaderOff;
 		}
 
 #if VW_DRAW_VERIFY
@@ -614,8 +603,9 @@ namespace HomeskzIfcImport::draw
 		double PositionLevel(MCObjectHandle mark, const core::LevelMarkCommand& level,
 							 double startX, const LevelMarkStyle& style, DimensionCounts& counts)
 		{
-			const double length =
-				core::levelLineLength(startX, level.right, style.markScale) * style.markScale;
+			const double lengthOnPaper =
+				core::levelLineLength(startX, level.right, style.markScale);
+			const double length = lengthOnPaper * style.markScale;
 #if VW_DRAW_VERIFY
 			const bool probePath = !counts.levelPathProbed;
 			std::string pathBefore;
@@ -631,7 +621,7 @@ namespace HomeskzIfcImport::draw
 			{
 				++counts.levelLayoutFailed;
 			}
-			if (!MoveLevelControlPoint(mark, length))
+			if (!DrawLevelLine(mark, lengthOnPaper))
 				++counts.levelPathFailed;
 			gSDK->ResetObject(mark);
 #if VW_DRAW_VERIFY
@@ -639,7 +629,7 @@ namespace HomeskzIfcImport::draw
 			{
 				counts.levelPathProbed = true;
 				counts.levelShapeProbe +=
-					" / 制御点 動かす前 " + pathBefore + " → 後 " + DescribeControlPoints(mark);
+					" / 引出線を切る前 " + pathBefore + " → 後 " + DescribeControlPoints(mark);
 			}
 #endif
 			// **レイアウトとパスを差し替えた後も結び付きが残っているか**を読み戻す（書いても
