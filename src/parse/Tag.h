@@ -47,7 +47,7 @@
 //	横だけ一定量ずれた**（しかもタグ同士の間隔は材の間隔に比例していた＝回転も反転も拡大も
 //	していない、純粋な平行移動）。つまり断面の水平座標は世界座標そのものではなく、
 //	**断面線の終点（画面右の端）からの距離**で測られている。したがって
-//	  * 横 = 切断線に沿った座標 − 断面線の終点の座標（sectionAlongOrigin）
+//	  * 横 = 切断線に沿った座標 − 断面線の終点の座標（core::sectionAlongOrigin）
 //	  * 縦 = 天端 Z そのまま（原点は Z=0。実機で高さが合っていた）
 //	とする。
 //
@@ -83,15 +83,9 @@ namespace HomeskzIfcImport::parse
 	// 上辺から逃がす向きに使う。長さが 0 の線には既定（真上＝(0, 1)）を返す。
 	core::Vec2 upwardNormal(double du, double dv);
 
-	// 断面の注釈空間の**横方向の原点**（切断線に沿った座標で表したもの）。断面線の終点
-	// ＝画面右の端（ヘッダ冒頭「断面の注釈空間」）。
-	double sectionAlongOrigin(const core::SectionCommand& section);
-
-	// 横架材の平面座標＋天端 Z を、断面ビューポートの注釈空間へ投影する
-	// （ヘッダ冒頭「断面の注釈空間」）。**投影の定義はここ 1 か所**で、実機確認でずれが
-	// 判明したときもここだけを直せばよい。alongOrigin は sectionAlongOrigin の値。
-	core::Vec2 sectionAnnotationPoint(const core::Vec2& plan, double elevation,
-									  core::SectionDirection direction, double alongOrigin);
+	// 断面の注釈空間への投影（横方向の原点・投影の定義）は描画側（図面ラベル。draw/DrawingLabel）
+	// も使うので **core に置いてある**（core::sectionAlongOrigin / core::sectionAnnotationPoint）。
+	// 空間の意味はこのヘッダ冒頭「断面の注釈空間」が正。
 
 	// 伏図（平面ビューポート）1 枚ぶんのタグ命令。viewport の表示レイヤに配置先レイヤが含まれ
 	// る横架材 1 本につき 1 つを、members の並び順で返す。

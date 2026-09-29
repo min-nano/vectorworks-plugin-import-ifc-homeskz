@@ -150,6 +150,8 @@ src/
     Symbol.{h,cpp}            ハイブリッドシンボルの配置（4 要素で共有する唯一の実装）
     Tag.{h,cpp}               断面寸法データタグ（伏図・軸組図で共有。スタイルは当てず、
                               タグの中身はタグ 1 本ずつへ直接組む）
+    DrawingLabel.{h,cpp}      軸組図の図面ラベル（真下の中央へ図面タイトルだけを出す。
+                              スタイルは当てず、既定のレイアウトを複製して組み直す）
     Grid / Story / Floor / Member / Column / Rafter / Roof / Footing /
     TitleBlock.{h,cpp}        図面枠（伏図・軸組図で共有。図面にあるスタイルを当てる
                               だけで、スタイルは作らない）
@@ -261,6 +263,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | ペア述語による連結成分（Union-Find。立上り・大引・地中梁の統合と壁結合の交点クラスタ） | `core/UnionFind.h` |
 | 構成層の総厚（`totalThickness`）・横架材の Z 範囲と重なり（`memberTopZ` / `memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側）・端部オフセットの意味と値・オフセットを戻した「材の端」（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`） | `core/Document.h` |
 | 描画側から切り離せる純計算（レイヤの希望スタック順 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの広がり `planContentBounds` / `sectionContentSize`） | `core/Document` |
+| 断面の注釈空間への投影（`sectionAlongOrigin` / `sectionAnnotationPoint`。断面寸法タグ＝`parse/Tag` と図面ラベル＝`draw/DrawingLabel` が共有）・軸組図の図面ラベルを寄せる点（`sectionLabelAnchor`） | `core/Document` |
 | 用紙の割り付け（`core::planLayout` ほか。縮尺の階梯と選び方・伏図の縮尺と位置——**縮尺は実測した凡例の幅を引いてから決め**、凡例の置き場所は `legendTopRight`——・軸組図の上下 2 段とシートの分割・タイトルの連番） | `core/Layout` |
 | 取り込み設定（役割の表 `core::symbolRoles()`・図面枠のスタイル `core::ImportOptions::titleBlock` → `core::Document::titleBlockStyle`） | `core/ImportOptions` |
 | 進捗の整形と配分の計算・診断ログのフェーズの行（`beginPhase`） | `core/Progress` |
@@ -283,7 +286,6 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 共有コンテキスト（下記）・階の屋根面の走査（`storyRoofPlanes`）・取り込み設定の参照（`options()`） | `parse/Context` |
 | 伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名 | `parse/ColumnMark` |
 | 耐力壁のレイヤレベル名・柱を探す許容 | `parse/ShearWall.h` |
-| 断面の注釈空間への投影（`sectionAnnotationPoint`） | `parse/Tag` |
 | 軸組図の図番の一意化（`uniqueSectionNumbers`） | `parse/Section` |
 | 要素の一覧（表示名・助数詞・命令数・描けた数。`kElements`）・完了／エラーの文言（`importOutcome` 等） | `parse/Summary` |
 | 実機テストの結末の文言（`formatTestRoundResult`）・PR コメントの本文（内訳・差分・匿名化） | `parse/Feedback` |
@@ -302,6 +304,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 図面から自分が作ったレイヤを消す（`RemoveCreatedLayers`）・取り消しを 1 段掛ける（`UndoOneStep`） | `draw/DrawUtil` |
 | 「命令インデックス → ハンドル」の対応表 | `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（実体） |
 | 断面寸法データタグ（`Data Tag` PIO の登録名・引出線・配置手順・タグレイアウトの組み方・クラス名 "寸法"） | `draw/Tag` |
+| 軸組図の図面ラベル（`Drawing Label2` PIO の登録名・ラベルレイアウトの組み直し・文字スタイル名 "図面ラベル(10pt)"・図との間隔） | `draw/DrawingLabel` |
 | グラフィック凡例（`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗り・配置・ソース定義（タグ付きデータ `'GrLe'`）・縮率（伏図の縮尺に合わせる）・幅の実測 `measureLegendWidth`） | `draw/Legend` |
 | 図面枠（登録名の候補 `"Title Block Border"`・スタイルの当て方・用紙の中心への寄せ方） | `draw/TitleBlock` |
 | 図面枠スタイルの選択肢の集め方（シンボル定義のサブタイプ 552） | `draw/SettingsDialog` |

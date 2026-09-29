@@ -16,6 +16,8 @@
 //	  * VWViewportObj::SetRenderType(renderFinalHiddenLine) … レンダリング（下記）
 //	  * draw/DrawUtil の PlaceViewport   … できたビューポートを測って用紙のマスへ置く
 //	                                        （GetObjectBounds ＋ MoveObject。M18）
+//	  * draw/DrawingLabel の drawSectionLabel … 1 枚ごとに真下の中央へ図面ラベル（図面
+//	                                        タイトル）を注釈として置く
 //
 //	【切断面の与え方（ローカル確認で実証済み）】ISDK の引数名は 3 点とも "sectionLinePt" だが、
 //	VW の UI は「切断線の点を 2 つ以上クリック → **切断の向き**をクリック → 奥行きを指定」
@@ -76,6 +78,7 @@
 #include "PluginPrefix.h"
 #include "draw/Section.h"
 #include "draw/DrawUtil.h"
+#include "draw/DrawingLabel.h"
 #include "draw/Tag.h"
 #include "draw/TitleBlock.h"
 #include "core/Document.h"
@@ -267,6 +270,11 @@ namespace HomeskzIfcImport::draw
 								{ return !section.viewport.tags.empty(); }))
 			prepareDataTagPlugin();
 
+		// 図面ラベル（軸組図 1 枚ごとに真下の中央へ図面タイトル。draw/DrawingLabel）。
+		// 定義は先に 1 回だけ用意する（生成のたびに設定ダイアログが出ないように）。
+		DrawingLabelCounts labels;
+		prepareDrawingLabelPlugin();
+
 		// M28 図面枠。伏図と同じ設定・同じ実装（draw/TitleBlock）。**軸組図は 1 枚の用紙へ
 		// 複数の命令が載る**ので、同じシートレイヤへ 2 つ目を置かないのは draw/TitleBlock の
 		// 側が見る。
@@ -328,12 +336,17 @@ namespace HomeskzIfcImport::draw
 				++missingPlacement;
 			else if (arrange)
 				delta = core::sectionSlotCenter(layout, slot) - drawnCenter;
+			// 図面ラベルもタグと同じく**動かす前に**注釈へ置く（上記 ★）。寄せる点は建物の
+			// 最下点の左右の中央（注釈空間。core::sectionLabelAnchor）。
+			drawSectionLabel(viewport, command.viewport.drawingTitle,
+							 core::sectionLabelAnchor(command, startHeight), labels);
 			drawViewportTags(viewport, command.viewport, members, tags);
 
 			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
 			//
-			// 用紙に載るのは「ビューポート＋その注釈」なので、タグを置く前の外形で判定すると
-			// 実際にマスを占める大きさとは別のものを測っていることになる（M29。伏図と同じ）。
+			// 用紙に載るのは「ビューポート＋その注釈（タグ・図面ラベル）」なので、タグを置く前の
+			// 外形で判定すると実際にマスを占める大きさとは別のものを測っていることになる
+			// （M29。伏図と同じ）。
 			// 位置合わせ（delta）だけは上記 ★ のとおりタグを置く前の中心から決める。
 			if (arrange && measured)
 			{
@@ -392,9 +405,10 @@ namespace HomeskzIfcImport::draw
 			AppendLine(note, text);
 		}
 
-		// タグの診断は軸組図の診断とは別行にする（原因が別物なので混ぜない。連結は
-		// draw/DrawUtil の AppendLine）。
+		// タグ・図面ラベルの診断は軸組図の診断とは別行にする（原因が別物なので混ぜない。
+		// 連結は draw/DrawUtil の AppendLine）。
 		AppendLine(note, tagDiagnostics("軸組図", tags));
+		AppendLine(note, drawingLabelDiagnostics("軸組図", labels));
 		// M28 図面枠。**伏図とは別に 1 行出す**——枚数が違う（伏図は命令の数、軸組図は
 		// 用紙の数）ので、伏図の行だけでは「全シートレイヤへ置けたか」を確かめられない
 		// （draw/TitleBlock.h の titleBlockInfo）。異常は note、平常の内訳は outInfo。

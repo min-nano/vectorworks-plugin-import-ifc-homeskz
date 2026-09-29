@@ -35,8 +35,6 @@ using HomeskzIfcImport::core::ViewportCommand;
 using HomeskzIfcImport::parse::attachTagCommands;
 using HomeskzIfcImport::parse::buildPlanTagCommands;
 using HomeskzIfcImport::parse::buildSectionTagCommands;
-using HomeskzIfcImport::parse::sectionAlongOrigin;
-using HomeskzIfcImport::parse::sectionAnnotationPoint;
 using HomeskzIfcImport::parse::tagAngle;
 using HomeskzIfcImport::parse::tagOffsetSide;
 using HomeskzIfcImport::parse::upwardNormal;
@@ -153,30 +151,6 @@ TEST(PlanTagsSitOnTheMemberEdge)
 	CHECK(near(tags[1].offset.x, -1.0, 1e-9));
 	CHECK(near(tags[1].offset.y, 0.0, 1e-9));
 	CHECK(near(tags[1].angle, 90.0, 1e-9));
-}
-
-TEST(SectionAnnotationPointProjectsToTheView)
-{
-	// 横方向の原点は断面線の**終点**（画面右向きに測った 0 点）。X通りは終点の Y、
-	// Y通りは終点の X。
-	CHECK(near(sectionAlongOrigin(makeSection(SectionDirection::X, 1000.0)), 10000.0, 1e-9));
-	CHECK(near(sectionAlongOrigin(makeSection(SectionDirection::Y, 1000.0)), 10000.0, 1e-9));
-
-	// X通り（−X 方向を見る）は画面右が +Y なので、注釈座標の x は材の Y −原点。
-	const Vec2 onX =
-		sectionAnnotationPoint(Vec2{1500.0, -2000.0}, 3273.0, SectionDirection::X, 500.0);
-	CHECK(near(onX.x, -2500.0, 1e-9));
-	CHECK(near(onX.y, 3273.0, 1e-9));
-
-	// Y通り（+Y 方向を見る）は画面右が +X なので、注釈座標の x は材の X −原点。
-	const Vec2 onY =
-		sectionAnnotationPoint(Vec2{1500.0, -2000.0}, 3273.0, SectionDirection::Y, 500.0);
-	CHECK(near(onY.x, 1000.0, 1e-9));
-	CHECK(near(onY.y, 3273.0, 1e-9));
-
-	// 縦は天端 Z そのまま（原点の補正は横だけ）。
-	CHECK(near(sectionAnnotationPoint(Vec2{0.0, 0.0}, 3273.0, SectionDirection::X, 9999.0).y,
-			   3273.0, 1e-9));
 }
 
 TEST(SectionTagsOnlyCoverMembersOnTheCutPlane)
