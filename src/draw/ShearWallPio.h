@@ -14,6 +14,9 @@
 #pragma once
 
 #include "PluginPrefix.h"
+#include "draw/Verify.h"
+
+#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -24,18 +27,22 @@ namespace HomeskzIfcImport::draw
 	// 「unknown type name 'EObjectEvent'」になる。
 	using namespace VWFC::PluginSupport;
 
-	// **線分 PIO の長さ**を持つ隠しパラメータの名前。線分 PIO は「行列（原点＝始点・
-	// ローカル +X＝向き）＋この長さ」で形が決まり、終点はローカル (LineLength, 0) にある
-	// （SDK リファレンス Info/Parametric Object Types.md「Linear Parametric Object」）。
-	// パラメータ定義に並べなくても、線分 PIO として登録すれば VW が自分で足す。
-	//
-	// 書き手（draw/ShearWall）と読み手（recalculateShearWall）がどちらも本体側なので、
-	// 殻のヘッダ（Extensions/ExtShearWall.h）ではなくここに置く——殻へ置くと、名前 1 つの
-	// ために利用者へ Vectorworks の再起動を強いる（CLAUDE.md「殻と本体」）。
-	constexpr const char* kParamShearLineLength = "LineLength";
-
 	// 耐力壁 PIO 1 枚ぶんのリセット。object は PIO 自身のハンドル（殻の
 	// VWParametric_EventSink::fhObject が渡ってくる）。1 枚の異常で全体を落とさない
 	// ので、返るのは実質 kObjectEventNoErr だけ。
 	EObjectEvent recalculateShearWall(MCObjectHandle object);
+
+#if VW_DRAW_VERIFY
+	// **描かずに**、リセットと同じ決め方で軸組内法を求め直して 1 行にする（開発ビルドの
+	// 測り直し。draw/ShearWall の recheckShearWalls が取り込みの最後に呼ぶ）。
+	//
+	// 【なぜ要るか】「取り込み後に OIP で 1 度編集すると、耐力壁が柱幅の半分ほど始端側へ
+	// ずれ、2 度目以降はずれない」不具合を追っている（docs/DEV-NOTES.md M19）。ずれ幅は
+	// 「柱から引いた内法」と「控えの内法」の差にちょうど一致するので、**取り込みの後の
+	// どこかで柱が見つからなくなっている**疑いが強い。ところが利用者の編集で走るリセットは
+	// 診断ログが閉じた後なので、何が起きたかが残らない。取り込みの最後（伏図・軸組図・
+	// レイヤ縮尺の変更まで済んだ後）に同じ決め方を走らせれば、「その時点で既に柱が
+	// 見つからないのか」「編集のときに限るのか」を分けられる。
+	std::string probeShearWall(MCObjectHandle object);
+#endif
 } // namespace HomeskzIfcImport::draw

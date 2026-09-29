@@ -5,9 +5,9 @@
 //	【SDK 依存】PluginPrefix.h を include するため、この翻訳単位はプラグインビルド
 //	（SDK あり）でのみコンパイルされる（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	手順: 配置先レイヤを用意 → CreateCustomObject で PIO を作る（挿入点＝始端の柱芯・
-//	角度＝始端→終端の向き）→ 本体のクラスを設定 → パラメータを書く（**線分の長さ
-//	LineLength＝柱芯間の距離**を含む）→ ResetObject。リセットで PIO 本体（Extensions/ExtShearWall）が柱を探して絵を描く。
+//	手順: 配置先レイヤを用意 → CreateCustomObject で PIO を作る → **両端を柱芯へ置く**
+//	（VWParametricObj::SetLinearObjectPos）→ 本体のクラスを設定 → パラメータを書く →
+//	ResetObject。リセットで PIO 本体（Extensions/ExtShearWall）が柱を探して絵を描く。
 //
 //	**パラメータは PIO 本体と同じ名前**でなければ黙って無視される（M6 の垂木で実証済み。
 //	draw/DrawUtil の ResolveParamName の doc コメント）。名前の定義は 1 か所に集めたいので、
@@ -239,12 +239,16 @@ namespace HomeskzIfcImport::draw
 		// **最初の 1 つで残り全部と ResetObject までが飛ぶ**——PIO は図面に残るのに絵が
 		// 1 つも描かれない、という「命令はあるのに見えない」最悪の形になる（M19 のローカル
 		// 確認で実際にこうなった。docs/DEV-NOTES.md M19「パラメータが 1 つ通らないと…」）。
-		bool PlaceOne(const core::ShearWallCommand& wall, std::size_t& outUnwritten)
+		bool PlaceOne(const core::ShearWallCommand& wall, std::size_t& outUnwritten,
+					  MCObjectHandle& outObject)
 		{
 			// 挿入点は始端（柱芯）。第 4 引数 bInsert=true でアクティブレイヤへ入れる。
-			// ★**角度もここで与える**（始端→終端の向き）。線分 PIO の向きは行列の
-			// ローカル +X そのもので、終端はこの軸の上、長さ LineLength の位置になる
-			// （下で書く）。PIO 側は絵をローカル座標で描く。
+			// 線分 PIO なので、この後 SetLinearObjectPos で両端を与え直す。
+			//
+			// ★**角度もここで与える**（始端→終端の向き）。線分 PIO として置けていれば
+			// 両端がそのまま向きを決めるので角度は要らないが、**万一 1 点のオブジェクトと
+			// して置かれても、ローカル +X が壁の向きに揃う**——PIO 側は絵をローカル座標で
+			// 描くので、この 1 つで「向きだけ違う」という直しにくい壊れ方を塞げる。
 			const double angle = std::atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) *
 								 180.0 / std::numbers::pi;
 			const MCObjectHandle object =
@@ -252,11 +256,13 @@ namespace HomeskzIfcImport::draw
 										 WorldPt(wall.start.x, wall.start.y), angle, true);
 			if (object == nil)
 				return false;
+			outObject = object;
 
 			// PIO 本体のクラス（筋かい／耐力面材）。PIO が描く帯・面はこのクラスの属性で
 			// 描かれる（面材の表裏と伏図の記号だけは PIO 側でクラスを分ける）。
 			SetClassByName(object, wall.drawClass);
 
+			bool placed = false;
 			std::size_t unwritten = 0;
 			try
 			{
@@ -275,22 +281,19 @@ namespace HomeskzIfcImport::draw
 					}
 				};
 
+				// **両端＝柱芯**。ここが耐力壁の「どの柱とどの柱の間か」を表す。
+				write(
+					[&]
+					{
+						pio.SetLinearObjectPos(VWPoint2D(wall.start.x, wall.start.y),
+											   VWPoint2D(wall.end.x, wall.end.y));
+						placed = true;
+					});
+
 				const auto putString = [&](const char* name, const TXString& value)
 				{ write([&] { pio.SetParamString(name, value); }); };
 				const auto putReal = [&](const char* name, double value)
 				{ write([&] { SetParamRealChecked(pio, TXString(name), value); }); };
-
-				// **両端＝柱芯**。ここが耐力壁の「どの柱とどの柱の間か」を表す。線分 PIO の
-				// 形は「行列＋長さ（LineLength）」なので、始端と向きは CreateCustomObject の
-				// 挿入点と角度で与えてあり、残る**長さ＝柱芯間の距離**をここで書く
-				// （draw/ShearWallPio.h の kParamShearLineLength）。
-				//
-				// ★**SetLinearObjectPos（GS_SetEndPoints）は使わない。** PIO には効かず
-				// （GetLinearObjectPos は (0,0), (0,0) を返す）、長さが既定値のまま残る。
-				// **取り込み後の最初の 1 回の編集だけ耐力壁が水平にずれた**のは、この
-				// 置き方の食い違いが出どころと見ている（docs/DEV-NOTES.md M19）。
-				putReal(kParamShearLineLength,
-						std::hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y));
 
 				putString(kParamShearTargetLayers, TXString(wall.targetLayers.c_str()));
 				putString(kParamShearKind, TXString(KindValue(wall.kind)));
@@ -320,12 +323,12 @@ namespace HomeskzIfcImport::draw
 			// **リセットは必ず呼ぶ。** ここが本体の Recalculate を呼び、耐力壁が描かれる。
 			// パラメータを取りこぼしていても、描けるところまでは描かせる。
 			gSDK->ResetObject(object);
-			return true;
+			return placed;
 		}
 	} // namespace
 
 	std::size_t drawShearWalls(const core::Document& document, core::ProgressReporter& progress,
-							   std::string* outNote)
+							   std::string* outNote, ObjectHandles* outHandles)
 	{
 		std::size_t drawn = 0;
 		std::size_t missingLayers = 0;
@@ -340,8 +343,9 @@ namespace HomeskzIfcImport::draw
 			EnsureMarkSymbols();
 		}
 
-		for (const core::ShearWallCommand& wall : document.shearWalls)
+		for (std::size_t index = 0; index < document.shearWalls.size(); ++index)
 		{
+			const core::ShearWallCommand& wall = document.shearWalls[index];
 			if (!AdvanceProgress(progress))
 				break;
 
@@ -353,10 +357,13 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			if (PlaceOne(wall, unwritten))
+			MCObjectHandle object = nil;
+			if (PlaceOne(wall, unwritten, object))
 				++drawn;
 			else
 				++failed;
+			if (outHandles != nullptr && object != nil)
+				outHandles->table().handles[index] = object;
 		}
 
 		if (outNote != nullptr && (missingLayers > 0 || failed > 0 || unwritten > 0))
@@ -372,4 +379,40 @@ namespace HomeskzIfcImport::draw
 
 		return drawn;
 	}
+
+#if VW_DRAW_VERIFY
+	void recheckShearWalls(const ObjectHandles& handles, std::string* outNotes)
+	{
+		if (handles.table().handles.empty())
+			return;
+
+		// 控えになった壁の経過は先頭の数枚だけ載せる（全数だと読めない）。
+		constexpr std::size_t kShownFallbacks = 3;
+		std::size_t fromColumns = 0;
+		std::size_t fallbacks = 0;
+		std::string shown;
+		for (const auto& [index, object] : handles.table().handles)
+		{
+			const std::string probe = probeShearWall(object);
+			if (probe.starts_with("柱から"))
+			{
+				++fromColumns;
+				continue;
+			}
+			++fallbacks;
+			if (fallbacks <= kShownFallbacks)
+				shown += "\n    #" + std::to_string(index) + ": " + probe;
+		}
+
+		// 取り込み中のリセットの行（`shearwall: 内法 柱から／控え`）と枚数を引き比べる。
+		// ここで控えが増えていれば「取り込みの後段で柱が見つからなくなった」、増えて
+		// いなければ「利用者の編集のときに限る」と読める。
+		const std::string text = "耐力壁の測り直し（取り込み後・描かない）: 柱から " +
+								 std::to_string(fromColumns) + " 枚 / 控え " +
+								 std::to_string(fallbacks) + " 枚" + shown;
+		core::trace::log(text);
+		if (outNotes != nullptr)
+			*outNotes = text;
+	}
+#endif
 } // namespace HomeskzIfcImport::draw
