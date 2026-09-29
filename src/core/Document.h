@@ -973,8 +973,8 @@ namespace HomeskzIfcImport::core
 	//
 	// 【position は必ず注釈空間の絶対座標】どちらの図でも命令の position をそのまま注釈空間の
 	// 座標として使う。伏図は注釈空間がモデルの平面座標そのもので、軸組図は横方向の原点だけが
-	// 世界座標と違う——**その原点合わせは解析側（parse/Tag の sectionAlongOrigin）が済ませて
-	// ある**ので、描画側は「命令の位置へ置く」だけでよい。
+	// 世界座標と違う——**その原点合わせは解析側（parse/Tag が core::sectionAlongOrigin で）
+	// 済ませてある**ので、描画側は「命令の位置へ置く」だけでよい。
 	//
 	// **VW にタグの位置を決めさせようとしてはならない。** データタグを関連付けると VW が
 	// 関連付け先へ吸着させる、という前提で「VW が置いた位置からの相対」で決める作りを一度
@@ -1536,6 +1536,40 @@ namespace HomeskzIfcImport::core
 	// SDK を触らない純計算なので core に置いて無 SDK でテストする（desiredStoryLayerOrder と
 	// 同じ立ち位置。CLAUDE.md「テスト方針」）。
 	bool sectionHeightRange(const Document& document, double& start, double& end);
+
+	// 断面の注釈空間の**横方向の原点**（切断線に沿った座標で表したもの）。断面線の終点
+	// ＝画面右の端（parse/Tag.h「断面の注釈空間」）。
+	//
+	// 投影（下の sectionAnnotationPoint と合わせて 2 つ）は**解析側（parse/Tag の断面寸法
+	// タグ）と描画側（draw/DrawingLabel の図面ラベル）の両方が使う**ので core に置く
+	// （CLAUDE.md「重複を作らない置き場所」）。
+	double sectionAlongOrigin(const SectionCommand& section);
+
+	// 平面座標＋高さ Z を、断面ビューポートの注釈空間へ投影する（parse/Tag.h「断面の
+	// 注釈空間」）。**投影の定義はここ 1 か所**で、実機確認でずれが判明したときもここだけを
+	// 直せばよい。alongOrigin は sectionAlongOrigin の値。
+	Vec2 sectionAnnotationPoint(const Vec2& plan, double elevation, SectionDirection direction,
+								double alongOrigin);
+
+	// 軸組図の図面ラベルを寄せる点（注釈空間）。**建物の最下点の、図の左右の中央**を返す
+	// ——ラベルはここから用紙で少し下げた位置に上端中央を合わせる（draw/DrawingLabel）。
+	//
+	//   * 左右の中央 … 断面線の中点。断面線は通り芯の外接の両端から同じ kSectionLineMargin
+	//                  だけ延ばしてある（parse/Section）ので、中点＝建物の左右の中央になる。
+	//   * 最下点     … rangeStart（sectionHeightRange の start）に kSectionHeightMargin を
+	//                  戻した高さ。ラベルはこの余白の中に収まる（余白は図のマスに含まれて
+	//                  いるので、ラベルのために割り付けを変えなくてよい。core/Layout）。
+	Vec2 sectionLabelAnchor(const SectionCommand& section, double rangeStart);
+
+	// 軸組図の図面ラベルの上端と建物の最下点との間隔（用紙 mm）の、寸法が無いときの値。
+	inline constexpr double kSectionLabelGap = 2.0;
+
+	// 建物の最下点（sectionLabelAnchor）から図面ラベルの上端までを、用紙 mm で返す。
+	// **図の下に寸法の列があれば、その帯（core::dimensionBand）の外へ出す**——軸組図は柱の
+	// 位置の列を建物の真下に持つ（parse/Dimension）ので、そのまま最下点の直下へ置くと
+	// 寸法と重なる。下に出る列＝**水平な列で side が負のもの**（図の下へ出す列）の最も外の
+	// 段で帯を測り、kSectionLabelGap を足す。描画側はこれに縮尺の分母を掛けてモデル mm にする。
+	double sectionLabelDrop(const ViewportCommand& viewport);
 
 	// 平面（伏図）の広がりに足す四方の余白（mm）。通り芯の丸（通り名の吹き出し）や部材の
 	// 太さは命令の座標には現れないので、その分の遊びを持たせる。planContentBounds とその

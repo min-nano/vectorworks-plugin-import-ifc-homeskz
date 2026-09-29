@@ -17,6 +17,7 @@
 //
 
 #include "core/Document.h"
+#include "core/Layout.h"
 
 #include <algorithm>
 #include <cmath>
@@ -651,6 +652,43 @@ namespace HomeskzIfcImport::core
 		min = Vec2{minX - kPlanContentMargin, minY - kPlanContentMargin};
 		max = Vec2{maxX + kPlanContentMargin, maxY + kPlanContentMargin};
 		return true;
+	}
+
+	double sectionAlongOrigin(const SectionCommand& section)
+	{
+		// 断面線の**終点**（画面右の端）の、切断線に沿った座標。ここが注釈空間の横方向の
+		// 原点（parse/Tag.h「断面の注釈空間」）。
+		return section.direction == SectionDirection::X ? section.lineEnd.y : section.lineEnd.x;
+	}
+
+	Vec2 sectionAnnotationPoint(const Vec2& plan, double elevation, SectionDirection direction,
+								double alongOrigin)
+	{
+		// 画面右方向は視線の向きが決める（parse/Tag.h「断面の注釈空間」）。X通りは −X 方向を
+		// 見るので右が +Y、Y通りは +Y 方向を見るので右が +X。**横は断面線の終点からの距離**、
+		// 高さはそのまま Z。
+		const double right = direction == SectionDirection::X ? plan.y : plan.x;
+		return Vec2{right - alongOrigin, elevation};
+	}
+
+	Vec2 sectionLabelAnchor(const SectionCommand& section, double rangeStart)
+	{
+		const Vec2 middle{(section.lineStart.x + section.lineEnd.x) / 2.0,
+						  (section.lineStart.y + section.lineEnd.y) / 2.0};
+		return sectionAnnotationPoint(middle, rangeStart + kSectionHeightMargin, section.direction,
+									  sectionAlongOrigin(section));
+	}
+
+	double sectionLabelDrop(const ViewportCommand& viewport)
+	{
+		int below = -1;
+		for (const DimensionChainCommand& chain : viewport.dimensions)
+		{
+			if (chain.axis == DimensionAxis::Horizontal && chain.side < 0)
+				below = std::max(below, chain.tier);
+		}
+		// 帯は寸法線までの距離＋文字の見込みで、寸法が無ければ 0（core::dimensionBand）。
+		return dimensionBand(below) + kSectionLabelGap;
 	}
 
 	bool sectionContentSize(const Document& document, Vec2& size)

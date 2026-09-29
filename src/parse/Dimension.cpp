@@ -249,11 +249,12 @@ namespace HomeskzIfcImport::parse
 		bool sectionAlongRange(const core::Document& document, const core::SectionCommand& section,
 							   double& low, double& high)
 		{
-			const double origin = sectionAlongOrigin(section);
+			const double origin = core::sectionAlongOrigin(section);
 			bool any = false;
 			const auto take = [&](const core::Vec2& plan)
 			{
-				const double along = sectionAnnotationPoint(plan, 0.0, section.direction, origin).x;
+				const double along =
+					core::sectionAnnotationPoint(plan, 0.0, section.direction, origin).x;
 				low = any ? std::min(low, along) : along;
 				high = any ? std::max(high, along) : along;
 				any = true;
@@ -491,9 +492,9 @@ namespace HomeskzIfcImport::parse
 		// 高さ範囲は上下に余白を足してあるので、建物の下端へ戻す。
 		bottom += core::kSectionHeightMargin;
 
-		const double origin = sectionAlongOrigin(section);
+		const double origin = core::sectionAlongOrigin(section);
 		const auto along = [&](const core::Vec2& plan)
-		{ return sectionAnnotationPoint(plan, 0.0, section.direction, origin).x; };
+		{ return core::sectionAnnotationPoint(plan, 0.0, section.direction, origin).x; };
 
 		std::vector<DimensionChainCommand> out;
 

@@ -16,6 +16,7 @@
 
 #include "core/Document.h"
 #include "core/Geometry.h"
+#include "core/Layout.h"
 #include "parse/BuildDocument.h"
 
 #include <algorithm>
@@ -1551,6 +1552,105 @@ TEST(section_height_range_fails_without_elements)
 	CHECK(!core::sectionHeightRange(core::Document{}, start, end));
 	CHECK(near(start, -1.0, 1e-6));
 	CHECK(near(end, -2.0, 1e-6));
+}
+
+// ---------------------------------------------------------------------------
+// 断面の注釈空間（断面寸法タグ＝parse/Tag と図面ラベル＝draw/DrawingLabel が共有する投影。
+// parse/Tag.h「断面の注釈空間」）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 通り芯の外接が ±7000・余白 3000 の断面線（parse/Section と同じ形）。
+	core::SectionCommand makeCutSection(core::SectionDirection direction, double cut)
+	{
+		core::SectionCommand section;
+		section.direction = direction;
+		section.lineStart = direction == core::SectionDirection::X ? core::Vec2{cut, -10000.0}
+																   : core::Vec2{-10000.0, cut};
+		section.lineEnd = direction == core::SectionDirection::X ? core::Vec2{cut, 10000.0}
+																 : core::Vec2{10000.0, cut};
+		return section;
+	}
+} // namespace
+
+TEST(section_annotation_point_projects_to_the_view)
+{
+	using core::SectionDirection;
+	// 横方向の原点は断面線の**終点**（画面右向きに測った 0 点）。X通りは終点の Y、
+	// Y通りは終点の X。
+	CHECK(
+		near(core::sectionAlongOrigin(makeCutSection(SectionDirection::X, 1000.0)), 10000.0, 1e-9));
+	CHECK(
+		near(core::sectionAlongOrigin(makeCutSection(SectionDirection::Y, 1000.0)), 10000.0, 1e-9));
+
+	// X通り（−X 方向を見る）は画面右が +Y なので、注釈座標の x は材の Y −原点。
+	const core::Vec2 onX = core::sectionAnnotationPoint(core::Vec2{1500.0, -2000.0}, 3273.0,
+														SectionDirection::X, 500.0);
+	CHECK(near(onX.x, -2500.0, 1e-9));
+	CHECK(near(onX.y, 3273.0, 1e-9));
+
+	// Y通り（+Y 方向を見る）は画面右が +X なので、注釈座標の x は材の X −原点。
+	const core::Vec2 onY = core::sectionAnnotationPoint(core::Vec2{1500.0, -2000.0}, 3273.0,
+														SectionDirection::Y, 500.0);
+	CHECK(near(onY.x, 1000.0, 1e-9));
+	CHECK(near(onY.y, 3273.0, 1e-9));
+
+	// 縦は Z そのまま（原点の補正は横だけ）。
+	CHECK(near(
+		core::sectionAnnotationPoint(core::Vec2{0.0, 0.0}, 3273.0, SectionDirection::X, 9999.0).y,
+		3273.0, 1e-9));
+}
+
+TEST(section_label_anchor_is_below_the_middle_of_the_building)
+{
+	using core::SectionDirection;
+	// 断面線 −10000〜10000 の中点（0）は、終点（10000）から測ると −10000。高さは範囲の
+	// 下端に余白を戻した＝建物の最下点。
+	const double rangeStart = -600.0 - core::kSectionHeightMargin;
+	for (const SectionDirection direction : {SectionDirection::X, SectionDirection::Y})
+	{
+		const core::Vec2 anchor =
+			core::sectionLabelAnchor(makeCutSection(direction, 1000.0), rangeStart);
+		CHECK(near(anchor.x, -10000.0, 1e-9));
+		CHECK(near(anchor.y, -600.0, 1e-9));
+	}
+
+	// 断面線が原点に対して片寄っていても、中点は断面線の中点（通り芯の外接の中央）。
+	core::SectionCommand shifted = makeCutSection(SectionDirection::Y, 0.0);
+	shifted.lineStart = core::Vec2{2000.0, 0.0};
+	shifted.lineEnd = core::Vec2{18000.0, 0.0};
+	CHECK(near(core::sectionLabelAnchor(shifted, rangeStart).x, 10000.0 - 18000.0, 1e-9));
+}
+
+TEST(section_label_drop_clears_the_dimensions_below)
+{
+	// 寸法が無ければ間隔だけ。
+	core::ViewportCommand viewport;
+	CHECK(near(core::sectionLabelDrop(viewport), core::kSectionLabelGap, 1e-9));
+
+	// 図の左（垂直・side 負）や上（水平・side 正）の列はラベルに関係しない。
+	core::DimensionChainCommand left;
+	left.axis = core::DimensionAxis::Vertical;
+	left.side = -1;
+	left.tier = 3;
+	core::DimensionChainCommand above;
+	above.axis = core::DimensionAxis::Horizontal;
+	above.side = 1;
+	above.tier = 2;
+	viewport.dimensions = {left, above};
+	CHECK(near(core::sectionLabelDrop(viewport), core::kSectionLabelGap, 1e-9));
+
+	// 図の下（水平・side 負）の列があれば、その最も外の段の帯の外まで下げる。
+	core::DimensionChainCommand below;
+	below.axis = core::DimensionAxis::Horizontal;
+	below.side = -1;
+	below.tier = 0;
+	viewport.dimensions.push_back(below);
+	below.tier = 1;
+	viewport.dimensions.push_back(below);
+	CHECK(near(core::sectionLabelDrop(viewport), core::dimensionBand(1) + core::kSectionLabelGap,
+			   1e-9));
 }
 
 // ---------------------------------------------------------------------------
