@@ -22,6 +22,10 @@
 //	図面にスタイルがあるかどうかで絵が変わらず、垂木と同じ作法に揃う
 //	（docs/DEV-NOTES.md「構造材のスタイルをやめた」）。
 //
+//	【パーツの描画属性もクラスへ向ける】スタイルを外しただけでは、PIO がパーツごとに持つ
+//	2D 属性（構造材・被覆・中心線・端部）の既定が残り、クラスに関係なく描かれる。構造材と
+//	端部はクラス属性に、被覆と中心線は非表示にする（ApplyClassStyleAttributes）。
+//
 
 #include "PluginPrefix.h"
 #include "draw/StructuralMember.h"
@@ -164,6 +168,60 @@ namespace HomeskzIfcImport::draw
 		{
 			Square = 3, // 直切り
 		};
+
+		// --- 2D 属性（「構造材設定」の「属性」タブ） ----------------------------------------
+		//
+		// 【描画属性はクラススタイルで描く】構造材 PIO は 2D の描画属性を**パーツ（構造材・
+		// 被覆・中心線・端部）ごとに自前で**持っており、既定のままだと PIO 自身のクラスに
+		// 関係なく per-part の線種・太さ・色で描かれる（切断面より上は構造材がラインタイプの
+		// 破線・0.18 など）。そこで構造材と端部を**クラス属性**にし、指定のクラス（＝PIO と
+		// 同じ drawClass）で描かせる。被覆と中心線は描かない（ご要望）。
+		//
+		// universal 名は `<パーツ><欄>_<面>`。**面は 3 面とも同じ値を書く**——どの面が描かれる
+		// かは切断面と材の高さの関係で決まる（平面図の Z=0 の材は `_Below`）ので、面を選ぶと
+		// 切断面の高さ次第で絵が変わる。名前・値・書き方はすべて SDK リファレンス
+		// Findings「Parametric Objects」の「取り込みで使う形（構造材＝クラススタイル・
+		// 被覆と中心線は非表示・端部は両端）」で実機確認済み:
+		//   * クラス欄（欄型 18 `kFieldClassesPopup`）は**名前**で書く（`SetParamClass` は効かない）。
+		//   * 「クラス属性」は線（`…PenStyle`）が 4、面（`…FillStyle`）が 6。
+		//   * 端部の「両端」はポップアップではなく、始端・終端の表示（真偽）2 つが両方 true。
+		//   * `AttributesMode` は描画に効かないので触らない。
+		constexpr std::array<const char*, 3> kAttributeFaces = {"_Above", "_At", "_Below"};
+		constexpr const char* kPenStyleClass = "4";	 // 線の属性＝クラス属性
+		constexpr const char* kFillStyleClass = "6"; // 面の属性＝クラス属性
+
+		// パーツ・欄・面から universal 名を組み立てる。
+		TXString AttributeParam(const char* field, const char* face)
+		{
+			return TXString((std::string(field) + face).c_str());
+		}
+
+		// 2D 属性を 3 面とも書く（構造材・端部はクラス属性、被覆・中心線は非表示）。
+		// **ResetObject より前に呼ぶ**（書いた値は次の ResetObject でそのまま描画に効く。
+		// 同 Findings）。クラス名が空ならクラス欄は書かず、属性の出どころだけをクラスにする。
+		void ApplyClassStyleAttributes(VWParametricObj& pio, const std::string& className)
+		{
+			const TXString drawClass(className.c_str());
+			for (const char* face : kAttributeFaces)
+			{
+				// 構造材: 表示・線と面はクラス属性。
+				pio.SetParamBool(AttributeParam("MemberDisplay", face), true);
+				if (!className.empty())
+					pio.SetParamValue(AttributeParam("MemberClass", face), drawClass);
+				pio.SetParamValue(AttributeParam("MemberPenStyle", face), kPenStyleClass);
+				pio.SetParamValue(AttributeParam("MemberFillStyle", face), kFillStyleClass);
+				// 被覆・中心線: 表示しない。
+				pio.SetParamBool(AttributeParam("CoverDisplay", face), false);
+				pio.SetParamBool(AttributeParam("CenterlineDisplay", face), false);
+				// 端部: 両端を表示し、属性は構造材と同じ（同じクラスのクラス属性）。端部は
+				// 線だけのパーツで面の欄を持たない。
+				pio.SetParamBool(AttributeParam("StartCapDisplay", face), true);
+				pio.SetParamBool(AttributeParam("EndCapDisplay", face), true);
+				if (!className.empty())
+					pio.SetParamValue(AttributeParam("CapsClass", face), drawClass);
+				pio.SetParamValue(AttributeParam("CapsPenStyle", face), kPenStyleClass);
+			}
+		}
 
 		// ポップアップのキーを PIO へ渡す文字列にする。
 		template <typename Key> TXString PopupKey(Key key)
@@ -425,6 +483,7 @@ namespace HomeskzIfcImport::draw
 			pio.SetParamAsString(kFieldAxisAlign, PopupKey(AxisAlignOf(spec.axisAlign)));
 			pio.SetParamAsString(kFieldStartCondition, PopupKey(EndConditionKey::Square));
 			pio.SetParamAsString(kFieldEndCondition, PopupKey(EndConditionKey::Square));
+			ApplyClassStyleAttributes(pio, spec.drawClass);
 		}
 
 		// 端部オフセット。**要らない（両端 0）なら触らない**——スタイル既定が 0 なので書く
