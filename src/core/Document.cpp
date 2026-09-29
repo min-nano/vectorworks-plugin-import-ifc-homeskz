@@ -855,33 +855,13 @@ namespace HomeskzIfcImport::core
 
 	namespace
 	{
-		// 凸多角形を直線 origin + t·direction で切り、**右側**（direction を向いて右。
-		// 境界を含む）だけを残す。右側に何も残らなければ空を返す。
-		std::vector<Vec2> clipPolygonRightOf(const std::vector<Vec2>& polygon, const Vec2& origin,
-											 const Vec2& direction)
+		// 直線に触れただけの切れ端（面積の無いもの）を捨てる。
+		bool hasArea(const std::vector<Vec2>& polygon)
 		{
-			const auto side = [&](const Vec2& point) { return -cross(direction, point - origin); };
-			std::vector<Vec2> kept;
-			const std::size_t count = polygon.size();
-			for (std::size_t i = 0; i < count; ++i)
-			{
-				const Vec2& from = polygon[(i + count - 1) % count];
-				const Vec2& to = polygon[i];
-				const double fromSide = side(from);
-				const double toSide = side(to);
-				if ((fromSide >= 0.0) != (toSide >= 0.0))
-				{
-					const double t = fromSide / (fromSide - toSide);
-					kept.push_back(from + (to - from) * t);
-				}
-				if (toSide >= 0.0)
-					kept.push_back(to);
-			}
-			// 直線に触れただけの切れ端（面積の無いもの）は捨てる。
 			double area = 0.0;
-			for (std::size_t i = 0; i < kept.size(); ++i)
-				area += cross(kept[i], kept[(i + 1) % kept.size()]);
-			return std::abs(area) / 2.0 >= kPointEps ? kept : std::vector<Vec2>{};
+			for (std::size_t i = 0; i < polygon.size(); ++i)
+				area += cross(polygon[i], polygon[(i + 1) % polygon.size()]);
+			return std::abs(area) / 2.0 >= kPointEps;
 		}
 	} // namespace
 
@@ -904,12 +884,13 @@ namespace HomeskzIfcImport::core
 		const Vec2 offset = Vec2{-along.y, along.x} * (width / 2.0 / length(along));
 
 		// offset は along の左手なので、low − offset の縁は帯が左、low + offset の縁は
-		// 帯が右にある。それぞれ帯と反対の側を残す。
+		// 帯が右にある。それぞれ帯と反対の側（前者は右＝逆向きの左、後者は左）を残す。
 		std::vector<std::vector<Vec2>> pieces;
-		for (std::vector<Vec2> piece : {clipPolygonRightOf(behind, low - offset, along),
-										clipPolygonRightOf(behind, low + offset, Vec2{} - along)})
+		for (std::vector<Vec2> piece :
+			 {clipPolygonToHalfPlane(behind, low - offset, Vec2{} - along),
+			  clipPolygonToHalfPlane(behind, low + offset, along)})
 		{
-			if (!piece.empty())
+			if (hasArea(piece))
 				pieces.push_back(std::move(piece));
 		}
 		return pieces;

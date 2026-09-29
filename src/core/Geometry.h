@@ -48,6 +48,14 @@ namespace HomeskzIfcImport::core
 		return std::abs(a.x - b.x) < tol && std::abs(a.y - b.y) < tol;
 	}
 
+	// 凸多角形を直線 origin + t·direction で切り、**左手側**（direction を向いて左。境界を
+	// 含む）だけを残す（Sutherland–Hodgman の 1 段）。周り方向は入力のまま。残りが 3 点に
+	// 満たなければ空を返す。clipPolygonToConvex はこれを切る側の辺ごとに当てたもの。
+	// ほかの利用者はたすき掛けの奥の筋かいを手前の帯の縁で切る
+	// core::shearWallBehindBracePieces。
+	std::vector<Vec2> clipPolygonToHalfPlane(const std::vector<Vec2>& polygon, const Vec2& origin,
+											 const Vec2& direction);
+
 	// 凸多角形を**凸多角形 clip**（反時計回り）で切り取る（Sutherland–Hodgman）。頂点列は
 	// 閉じたポリゴン（末尾に始点を重複させない）で、周り方向は入力のまま保たれる。clip の
 	// 外へ完全に出ている多角形は空を返す。clip が 3 点未満でも空。

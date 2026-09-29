@@ -83,59 +83,64 @@ namespace HomeskzIfcImport::core
 		return result;
 	}
 
+	std::vector<Vec2> clipPolygonToHalfPlane(const std::vector<Vec2>& polygon, const Vec2& origin,
+											 const Vec2& direction)
+	{
+		// Sutherland–Hodgman の 1 段。直線 origin + t·direction の**左手側**
+		// （cross(direction, p − origin) ≥ 0）を残す。
+		const auto side = [&](const Vec2& point) { return cross(direction, point - origin); };
+
+		std::vector<Vec2> next;
+		next.reserve(polygon.size() + 1);
+		const std::size_t count = polygon.size();
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			const Vec2& from = polygon[(i + count - 1) % count];
+			const Vec2& to = polygon[i];
+			const double fromSide = side(from);
+			const double toSide = side(to);
+			const bool fromIn = fromSide >= 0.0;
+			const bool toIn = toSide >= 0.0;
+			// 交点。「一方が内側・他方が外側」のときだけ求めるので分母は 0 にならない
+			// （それでも念のため 0 除算だけは避ける）。
+			const auto crossing = [&]
+			{
+				const double denominator = fromSide - toSide;
+				if (std::abs(denominator) < kGeomEps)
+					return to;
+				return from + ((to - from) * (fromSide / denominator));
+			};
+			if (toIn)
+			{
+				if (!fromIn)
+					next.push_back(crossing());
+				next.push_back(to);
+			}
+			else if (fromIn)
+			{
+				next.push_back(crossing());
+			}
+		}
+		return next.size() >= 3 ? next : std::vector<Vec2>{};
+	}
+
 	std::vector<Vec2> clipPolygonToConvex(const std::vector<Vec2>& polygon,
 										  const std::vector<Vec2>& clip)
 	{
 		if (clip.size() < 3)
 			return {};
 
-		// Sutherland–Hodgman。切る側の辺を 1 本ずつ半平面として当てていく。clip は
-		// 反時計回りなので、辺 a→b の**左手側**（cross(b−a, p−a) ≥ 0）が残す側。
+		// 切る側の辺を 1 本ずつ半平面として当てていく。clip は反時計回りなので、
+		// 辺 a→b の**左手側**が残す側（clipPolygonToHalfPlane の向きそのまま）。
 		std::vector<Vec2> current = polygon;
 		const std::size_t edges = clip.size();
 		for (std::size_t e = 0; e < edges; ++e)
 		{
 			if (current.size() < 3)
 				return {};
-
 			const Vec2& a = clip[e];
-			const Vec2& b = clip[(e + 1) % edges];
-			const Vec2 direction = b - a;
-			const auto side = [&](const Vec2& point) { return cross(direction, point - a); };
-
-			std::vector<Vec2> next;
-			next.reserve(current.size() + 1);
-			const std::size_t count = current.size();
-			for (std::size_t i = 0; i < count; ++i)
-			{
-				const Vec2& from = current[(i + count - 1) % count];
-				const Vec2& to = current[i];
-				const double fromSide = side(from);
-				const double toSide = side(to);
-				const bool fromIn = fromSide >= 0.0;
-				const bool toIn = toSide >= 0.0;
-				// 交点。「一方が内側・他方が外側」のときだけ求めるので分母は 0 にならない
-				// （それでも念のため 0 除算だけは避ける）。
-				const auto crossing = [&]
-				{
-					const double denominator = fromSide - toSide;
-					if (std::abs(denominator) < kGeomEps)
-						return to;
-					return from + ((to - from) * (fromSide / denominator));
-				};
-				if (toIn)
-				{
-					if (!fromIn)
-						next.push_back(crossing());
-					next.push_back(to);
-				}
-				else if (fromIn)
-				{
-					next.push_back(crossing());
-				}
-			}
-			current = std::move(next);
+			current = clipPolygonToHalfPlane(current, a, clip[(e + 1) % edges] - a);
 		}
-		return current.size() >= 3 ? current : std::vector<Vec2>{};
+		return current;
 	}
 } // namespace HomeskzIfcImport::core
