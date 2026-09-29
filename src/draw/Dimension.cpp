@@ -47,9 +47,6 @@ namespace HomeskzIfcImport::draw
 		// 取り込みの既定の縮尺（1/100）と同じ。
 		constexpr double kFallbackScale = 100.0;
 
-		// 1 インチの pt 数（文字スタイルの紙の pt を図面上の mm へ直す）。
-		constexpr double kPointsPerInch = 72.0;
-
 		// レベル基準線の universal 名（ローカライズ名「レベル基準線」。Findings
 		// 「Level Objects」の実測表）。
 		constexpr const char* kLevelMarkPlugin = "Elevation Benchmark2";
@@ -514,7 +511,7 @@ namespace HomeskzIfcImport::draw
 			if (const double actual = VWViewportObj(viewport).GetScale(); actual > 0.0)
 				viewportScale = actual;
 			if (const double points = TextStylePoints(text.style); points > 0.0)
-				text.fontSize = points * core::kMillimetersPerInch / kPointsPerInch * viewportScale;
+				text.fontSize = core::pointsToMillimeters(points) * viewportScale;
 		}
 		catch (...)
 		{

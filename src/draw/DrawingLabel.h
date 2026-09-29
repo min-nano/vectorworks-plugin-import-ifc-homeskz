@@ -21,9 +21,16 @@
 //	    入れた後に**命令の図面タイトルを Title へ自分で書く**。
 //
 //	★**スタイルは作らない・当てない**（CLAUDE.md 開発の基本方針 4。データタグと同じ扱い。
-//	draw/Tag.h の ★）。レイアウトは 1 枚ずつへ直接組む。文字スタイル「図面ラベル(10pt)」は
-//	**図面にあれば当て、無ければ大きさだけを与える**（作らない。データタグの「寸法(6pt)」と
-//	同じ流儀）。
+//	draw/Tag.h の ★）。ただし**ツールのスタイルは作った直後に勝手に当たる**うえ、**既定の
+//	レイアウトはそのスタイルが配る**（Findings #175）ので、「スタイル付きで作る → レイアウトを
+//	組み直す → SetPluginObjectStyle(h, 0) で外す」の順で置く（外してもレイアウトは残る）。
+//	文字スタイル「図面ラベル(10pt)」は**図面にあれば当て、無ければ紙の 10pt を直接与える**
+//	（作らない。データタグの「寸法(6pt)」と同じ流儀）。
+//
+//	【文字の大きさは紙の上の mm】レイアウトのテキストへ与える大きさは**紙の上の mm**で、
+//	容れ物（注釈）の縮尺は VW が掛ける——寸法の ovDimFontSize（縮尺を自分で掛ける）とは
+//	逆。文字スタイルは当てたときのアクティブレイヤの縮尺が焼き付くので、当てる間だけ 1:1 の
+//	シートレイヤをアクティブにする（Findings「レイアウトの文字の大きさ」）。
 //
 //	【位置は測って合わせる】ラベルの実寸はレイアウトの中身（タイトルの長さ・文字の大きさ）が
 //	決めるので、置いてから GetObjectBounds で測り、**上端中央**が目標へ来るように動かす
@@ -62,6 +69,9 @@ namespace HomeskzIfcImport::draw
 		std::size_t failed = 0; // PIO を作れなかった／注釈に入れられなかった
 		// レイアウトを組めなかった（既定のレイアウトのまま＝図番と縮尺が出る）
 		std::size_t layoutFailed = 0;
+		// 既定のレイアウトが空で置かなかった（ツールにスタイルが無く、複製する元が無い）
+		std::size_t noDefaultLayout = 0;
+		std::size_t styleLeft = 0; // スタイルを外せなかった（スタイルの編集と見た目が食い違う）
 		std::size_t unmeasured = 0; // 実位置を測れず動かせなかったラベル
 		bool textStyleMissing = false; // 文字スタイル（"図面ラベル(10pt)"）が図面に無かった
 	};
@@ -73,6 +83,8 @@ namespace HomeskzIfcImport::draw
 	// ビューポート 1 枚の真下の中央へ図面ラベルを置く。置けたら true で、内訳を counts へ積む
 	// （複数のビューポートぶんを 1 つの counts へ積んでよい）。
 	//
+	//   sheetLayer … ビューポートが載っているシートレイヤ（1:1）。文字スタイルを当てる間だけ
+	//                アクティブにする（当てたときのアクティブレイヤの縮尺が焼き付くため）
 	//   title  … 表示する図面タイトル（ビューポートに与えたものと同じ文字列）
 	//   anchor … 注釈空間の、建物の最下点の左右の中央（core::sectionLabelAnchor）
 	//   drop   … anchor からラベルの上端までの距離（用紙 mm。下に出る寸法の帯を含む。
@@ -81,8 +93,9 @@ namespace HomeskzIfcImport::draw
 	// ★**ビューポートを用紙の上で動かす前に呼ぶ**（データタグと同じ。draw/DrawUtil の
 	// MoveViewportBy）——注釈へ置いた実位置の実測は、ビューポートが用紙のどこに在るかに
 	// 影響される。
-	bool drawSectionLabel(MCObjectHandle viewport, const std::string& title,
-						  const core::Vec2& anchor, double drop, DrawingLabelCounts& counts);
+	bool drawSectionLabel(MCObjectHandle viewport, MCObjectHandle sheetLayer,
+						  const std::string& title, const core::Vec2& anchor, double drop,
+						  DrawingLabelCounts& counts);
 
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空文字）。label は図の種別
 	// （"軸組図"）。

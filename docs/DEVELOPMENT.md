@@ -266,6 +266,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 断面の注釈空間への投影（`sectionAlongOrigin` / `sectionAnnotationPoint`。断面寸法タグ＝`parse/Tag`・寸法＝`parse/Dimension`・図面ラベル＝`draw/DrawingLabel` が共有）・軸組図の図面ラベルを寄せる点と下げる量（`sectionLabelAnchor` / `sectionLabelDrop`。寸法が無いときの間隔 `kSectionLabelGap`） | `core/Document` |
 | 用紙の割り付け（`core::planLayout` ほか。縮尺の階梯と選び方・伏図の縮尺と位置——**縮尺は実測した凡例の幅を引いてから決め**、凡例の置き場所は `legendTopRight`——・軸組図の上下 2 段とシートの分割・タイトルの連番） | `core/Layout` |
 | 寸法線の位置（用紙 mm の段の間隔 `kDimensionFirstGap` / `kDimensionTierPitch` と縮尺を掛けた位置 `dimensionLineCoord`）・寸法の帯（`dimensionBand`。最も外の段は `core::outermostDimensionTier`） | `core/Layout` |
+| 長さ・文字の単位の換算（インチ → mm `kMillimetersPerInch`・1 インチの pt 数 `kPointsPerInch`・紙の pt → mm `pointsToMillimeters`） | `core/Layout` |
 | 取り込み設定（役割の表 `core::symbolRoles()`・図面枠のスタイル `core::ImportOptions::titleBlock` → `core::Document::titleBlockStyle`・寸法規格 `core::ImportOptions::dimension` → `core::Document::dimensionStandard`） | `core/ImportOptions` |
 | 進捗の整形と配分の計算・診断ログのフェーズの行（`beginPhase`） | `core/Progress` |
 | 往復の記憶と、どの周になるかの場合分け（`feedbackRoundKind`） | `core/FeedbackSession` |

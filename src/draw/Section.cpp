@@ -350,7 +350,7 @@ namespace HomeskzIfcImport::draw
 			// 図面ラベルもタグと同じく**動かす前に**注釈へ置く（上記 ★）。寄せる点は建物の
 			// 最下点の左右の中央（注釈空間。core::sectionLabelAnchor）で、そこから図の下の
 			// 寸法の帯の外まで下げる（core::sectionLabelDrop）。
-			drawSectionLabel(viewport, command.viewport.drawingTitle,
+			drawSectionLabel(viewport, sheetLayer, command.viewport.drawingTitle,
 							 core::sectionLabelAnchor(command, startHeight),
 							 core::sectionLabelDrop(command.viewport), labels);
 			drawViewportTags(viewport, command.viewport, members, tags);

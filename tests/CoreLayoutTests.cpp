@@ -401,4 +401,12 @@ TEST(SectionLayoutCellsIncludeTheDimensionBand)
 	CHECK(near(banded.cell.y, 120.0));
 }
 
+TEST(PointsConvertToPaperMillimeters)
+{
+	// 72pt = 1 インチ = 25.4mm。図面ラベルのタイトル（紙の 10pt）に与える値は 3.5278mm。
+	CHECK(near(core::pointsToMillimeters(72.0), 25.4));
+	CHECK(near(core::pointsToMillimeters(10.0), 10.0 * 25.4 / 72.0));
+	CHECK(near(core::pointsToMillimeters(0.0), 0.0));
+}
+
 TEST_MAIN();
