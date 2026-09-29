@@ -3,7 +3,7 @@
 //
 //	**構造材ツール（StructuralMember PIO）を 1 本描く**ための共通ヘルパー。横架材
 //	（draw/Member）と柱（draw/Column）は同じ PIO を同じ手順——パス＋断面プロファイルから
-//	CreateCustomObjectPath → クラス分け → スタイル関連付け → 両端のストーリバウンド →
+//	CreateCustomObjectPath → クラス分け → 両端のストーリバウンド →
 //	個別フィールド（構造材 ID・断面・種別・端部条件）→ ResetObject——で作る。以前は
 //	この手順が両 .cpp に**逐語的な複製**として置かれており、フィールド名を 1 つ足す・
 //	ポップアップのキーを直すといった変更が、直した側でしか効かない形になっていた
@@ -325,9 +325,10 @@ namespace HomeskzIfcImport::draw
 	MCObjectHandle CreatePath(const core::Vec2& start, const core::Vec2& end, bool& outAppended);
 #endif
 
-	// 構造材ツールの PIO を 1 つ生成して仕様どおりに設定する。style が 0 ならスタイルを
-	// 関連付けずに描く（スタイルの欠落で部材を失わない）。
-	StructuralMemberResult DrawStructuralMember(const StructuralMemberSpec& spec, RefNumber style);
+	// 構造材ツールの PIO を 1 つ生成して仕様どおりに設定する。**プラグインスタイルは
+	// 関連付けない**——描画属性はクラスに従わせる（draw/StructuralMember.cpp 冒頭
+	// 「スタイルを使わない」）。
+	StructuralMemberResult DrawStructuralMember(const StructuralMemberSpec& spec);
 
 	// 描き上がった部材を**読み戻して測る**。生成直後だけでなく、**取り込みが終わったあと**
 	// にも同じ口で測れるようにしてある——「描いた直後は入っていたのに、あとの要素を描く

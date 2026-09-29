@@ -13,8 +13,8 @@
 //	     （断面基準点は AxisAlign＝中央。draw/DrawUtil の CreateRectangleProfileGroup）。
 //	  3. **PIO の生成から各フィールドの設定までは横架材と共通**（draw/StructuralMember）。
 //	     ここが受け持つのは柱固有の値——パスの平面座標・断面中心基準の断面矩形・構造用途
-//	     （柱／小屋束）・スタイル（木質構造材_柱・束）・配置先レイヤ——だけ。
-//	  4. 全配置後に UpdateStyledObjects を 1 回（横架材と同じ。draw/Member.cpp 冒頭）。
+//	     （柱／小屋束）・配置先レイヤ——だけ。**プラグインスタイルは当てない**
+//	     （描画属性はクラスに従う。draw/StructuralMember.cpp 冒頭「スタイルを使わない」）。
 //	PIO を生成できない場合は断面の矩形にフォールバックする（1 本の失敗で全体を止めない）。
 //
 //	【高さを決めるのは上下端バウンドだけ】M8 のローカル確認 3 周では「鉛直パスとバウンドの
@@ -91,11 +91,6 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// プラグインスタイル名（VW 実機の登録名に一致させる）。PIO は横架材と同じ構造材ツール
-		// で、スタイルだけが柱・束用に分かれる（柱・間柱ツールはスクリプトからの操作に対して
-		// 不安定なので、柱も標準の構造材ツールで描く）。
-		const TXString kColumnStyle("木質構造材_柱・束");
-
 #if VW_DRAW_VERIFY
 		// 実測（両端の絶対 Z の差）と命令の食い違いをどこまで許すか（mm）。丸めのぶんだけ。
 		// **取り込み後の再検査**（recheckColumns）が使う——検算そのものなので開発ビルドだけ。
@@ -106,8 +101,8 @@ namespace HomeskzIfcImport::draw
 		// 何か 1 つでも配置できたら true。outObject には**構造材ツールで作れたときだけ**その
 		// ハンドルを入れる（伏図記号のデータタグはこれに関連付ける。フォールバックの矩形は
 		// タグを付ける相手にしない）。失敗の内訳は failures へ数え込む（draw/StructuralMember）。
-		bool DrawOne(const core::ColumnCommand& column, RefNumber style,
-					 StructuralFailures& failures, MCObjectHandle& outObject)
+		bool DrawOne(const core::ColumnCommand& column, StructuralFailures& failures,
+					 MCObjectHandle& outObject)
 		{
 			// 断面の矩形（幅 × せい）は**原点中心**に置く（AxisAlign＝中央と一致させる。
 			// パスが断面中心を通る）。作れなければ PIO を作らない——断面の無い構造材は
@@ -190,7 +185,7 @@ namespace HomeskzIfcImport::draw
 			// 長さとして表に出る（draw/Member ／ docs/DEV-NOTES.md M27）。
 			// **潰れの検出は残す**——直ったから見張りを外す、ではなく、再発したら黙って
 			// 繕わずに報せるため（開発ビルドだけ。draw/Verify.h）。
-			const StructuralMemberResult result = DrawStructuralMember(spec, style);
+			const StructuralMemberResult result = DrawStructuralMember(spec);
 			if (result.object == nil)
 			{
 				// フォールバック: 断面の矩形（クラス付き）を平面に残す。
@@ -252,8 +247,6 @@ namespace HomeskzIfcImport::draw
 		if (document.columns.empty())
 			return 0;
 
-		const RefNumber style = ResolvePluginStyle(kColumnStyle);
-
 		std::size_t drawn = 0;
 		StructuralFailures failures;
 		for (std::size_t index = 0; index < document.columns.size(); ++index)
@@ -269,7 +262,7 @@ namespace HomeskzIfcImport::draw
 				continue;
 
 			MCObjectHandle object = nil;
-			if (DrawOne(column, style, failures, object))
+			if (DrawOne(column, failures, object))
 				++drawn;
 			// 伏図記号のデータタグが引けるよう、**構造材ツールで描けた柱だけ**を記録する
 			// （立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
@@ -277,16 +270,9 @@ namespace HomeskzIfcImport::draw
 				handles->table().handles.emplace(index, object);
 		}
 
-		// 全配置後に 1 回だけスタイル更新を掛けて、by-style の描画属性を反映する
-		// （SetPluginObjectStyle は関連付けまでで描画属性をプッシュしない）。
-		if (drawn > 0 && style != 0)
-			gSDK->UpdateStyledObjects(style);
-
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、失敗の内訳を件数で
 		// 持ち帰る（文言は draw/StructuralMember。柱が見えないときの切り分け材料になる）。
-		std::string note = DescribeStructuralFailures(failures, "柱");
-		if (style == 0)
-			note += "プラグインスタイル『木質構造材_柱・束』が見つかりません。";
+		const std::string note = DescribeStructuralFailures(failures, "柱");
 		if (outDiagnostics != nullptr && !note.empty())
 			*outDiagnostics = "柱の診断: " + note;
 
