@@ -47,6 +47,9 @@ namespace HomeskzIfcImport::draw
 		// 取り込みの既定の縮尺（1/100）と同じ。
 		constexpr double kFallbackScale = 100.0;
 
+		// 1 インチの pt 数（文字スタイルの紙の pt を図面上の mm へ直す）。
+		constexpr double kPointsPerInch = 72.0;
+
 		// レベル基準線の universal 名（ローカライズ名「レベル基準線」。Findings
 		// 「Level Objects」の実測表）。
 		constexpr const char* kLevelMarkPlugin = "Elevation Benchmark2";
@@ -139,10 +142,20 @@ namespace HomeskzIfcImport::draw
 		}
 #endif
 
+		// 寸法の文字の当て方（ビューポート 1 枚ぶん。drawViewportDimensions が決める）。
+		//   style    … 寸法規格の文字スタイル（ref number。0 なら当てない）
+		//   fontSize … 文字の図面上の大きさ（mm）＝ 文字スタイルの紙の pt × 25.4/72 ×
+		//              ビューポートの縮尺（0 なら書かない）
+		struct DimensionText
+		{
+			InternalIndex style = 0;
+			double fontSize = 0.0;
+		};
+
 		// 列 1 本を置く。1 本でも注釈へ置けたら true。scale は寸法線までの距離に使う縮尺の
-		// 分母、textStyle は寸法規格の文字スタイル（0 なら当てない）。
+		// 分母。
 		bool PlaceChain(MCObjectHandle viewport, const core::DimensionChainCommand& chain,
-						const std::string& standard, double scale, InternalIndex textStyle,
+						const std::string& standard, double scale, const DimensionText& text,
 						DimensionCounts& counts)
 		{
 			const double line = core::dimensionLineCoord(chain.base, chain.side, chain.tier, scale);
@@ -181,16 +194,29 @@ namespace HomeskzIfcImport::draw
 					++counts.standardRejected;
 				// 寸法値は**明示して出す**（round 1: 軸組図の注釈で値が出なかった。伏図では出た）。
 				SetBooleanVariable(dimension, ObjectVariable::DimShowValue, true);
-				// **文字スタイルを明示する**（Findings「Dimensions」#157）。注釈に置いた寸法は
-				// 〈クラスの文字スタイル〉のままだと値が描かれない（軸組図で値が出なかった
-				// 原因）。規格が持つ文字スタイルを SetTextStyleRef で当てる——オブジェクト変数
-				// （ovDimTextStyle）へ番号を書く道は読み戻しが同じなのに絵に効かない。**繋ぐ前に**
-				// 当てれば連続寸法の中にも残る。文字の大きさ（ovDimFontSize）は触らない（触ると
-				// 直線寸法と連続寸法で大きさが食い違う）。大きさは文字スタイルが決め、
-				// ビューポートの縮尺で割られて紙に出る（ご判断で、縮尺ごとの文字スタイルは
-				// 作らない。docs/DEV-NOTES.md M31）。
-				if (textStyle != 0)
-					gSDK->SetTextStyleRef(dimension, textStyle);
+				// **文字スタイルを明示し、文字の大きさをビューポートの縮尺で書いて引き直す**
+				// （Findings「Dimensions」#157 / #161）。
+				//   * 注釈に置く寸法の文字の大きさは、作るとき（SetTextStyleRef を呼ぶとき）の
+				//     アクティブレイヤの縮尺で焼き付く。軸組図はシートレイヤ（1:1）がアクティブ
+				//     なので、そのままでは 1/125 の図の上で紙 0.02mm になり値が見えなかった
+				//     （round 1〜3。OIP で文字スタイルを選び直すと出たのは、注釈の縮尺で焼き直す
+				//     ため）。
+				//   * 大きさ（ovDimFontSize）は**書いただけでは絵に出ない**——ResetObject で
+				//     引き直す。読み戻しは書いた値を返すので、呼び忘れても気付けない。
+				//   * **繋ぐ前に**済ませる。文字スタイルが明示してあれば、繋いで作り直された
+				//     中の直線寸法も書いた大きさを保つ（〈クラスの文字スタイル〉のままだと、
+				//     繋ぐときのアクティブレイヤの縮尺で焼き直される。#155）。
+				//   * 文字スタイルは寸法規格のもの（「寸法(6pt)」）をそのまま使い、縮尺ごとの
+				//     文字スタイルは作らない（名前付きリソースを増やさない。docs/DEV-NOTES.md M31）。
+				if (text.style != 0)
+				{
+					gSDK->SetTextStyleRef(dimension, text.style);
+					if (text.fontSize > 0.0)
+						SetRealVariable(dimension, ObjectVariable::DimFontSize, text.fontSize);
+					else
+						++counts.textSizeUnread;
+					gSDK->ResetObject(dimension);
+				}
 				else
 					++counts.textStyleMissing;
 #if VW_DRAW_VERIFY
@@ -476,23 +502,30 @@ namespace HomeskzIfcImport::draw
 		if (viewport == nil || (command.dimensions.empty() && levels.empty()))
 			return 0;
 		const double denominator = scale > 0.0 ? scale : kFallbackScale;
-		// 寸法規格の文字スタイル（ビューポートごとに引き直す——軽い総当たりで、規格は
-		// 文書に 1 つなので結果は変わらない）。
-		InternalIndex textStyle = 0;
+		// 寸法規格の文字スタイルと、紙でその pt に見せる図面上の大きさ（ビューポートごとに
+		// 決める——規格は文書に 1 つだが、縮尺はビューポートごとに違う）。縮尺は
+		// ビューポートの**実際の**値を読む（注釈はそれで描かれる）。読めなければ寸法線の
+		// 距離と同じ縮尺で代える。
+		DimensionText text;
 		try
 		{
-			textStyle = DimensionStandardTextStyle(standard);
+			text.style = DimensionStandardTextStyle(standard);
+			double viewportScale = denominator;
+			if (const double actual = VWViewportObj(viewport).GetScale(); actual > 0.0)
+				viewportScale = actual;
+			if (const double points = TextStylePoints(text.style); points > 0.0)
+				text.fontSize = points * core::kMillimetersPerInch / kPointsPerInch * viewportScale;
 		}
 		catch (...)
 		{
-			textStyle = 0;
+			text = DimensionText{};
 		}
 
 		std::size_t drawn = 0;
 		bool anyPlaced = false;
 		for (const core::DimensionChainCommand& chain : command.dimensions)
 		{
-			if (PlaceChain(viewport, chain, standard, denominator, textStyle, counts))
+			if (PlaceChain(viewport, chain, standard, denominator, text, counts))
 			{
 				++drawn;
 				anyPlaced = true;
@@ -555,11 +588,11 @@ namespace HomeskzIfcImport::draw
 		constexpr bool verifyIssue = false;
 #endif
 		if (counts.failed == 0 && counts.standardRejected == 0 && counts.unjoined == 0 &&
-			counts.textStyleMissing == 0 && counts.levelsFailed == 0 &&
-			counts.levelNameFailed == 0 && counts.levelBindFailed == 0 &&
-			counts.viewMatrixFailed == 0 && counts.levelHeightUnread == 0 &&
-			counts.levelHeightMismatch == 0 && counts.updateFailed == 0 && !classesBroken &&
-			!verifyIssue)
+			counts.textStyleMissing == 0 && counts.textSizeUnread == 0 &&
+			counts.levelsFailed == 0 && counts.levelNameFailed == 0 &&
+			counts.levelBindFailed == 0 && counts.viewMatrixFailed == 0 &&
+			counts.levelHeightUnread == 0 && counts.levelHeightMismatch == 0 &&
+			counts.updateFailed == 0 && !classesBroken && !verifyIssue)
 			return {};
 
 		std::string text = label + "の寸法の診断: ";
@@ -569,6 +602,9 @@ namespace HomeskzIfcImport::draw
 		AppendCount(text, "連続寸法へ繋げなかった継ぎ目", counts.unjoined, "箇所");
 		AppendCount(text, "文字スタイルを当てられなかった寸法", counts.textStyleMissing, "本",
 					"寸法規格が文字スタイルを持っていません。注釈では寸法値が描かれません");
+		AppendCount(
+			text, "文字の大きさを縮尺に合わせられなかった寸法", counts.textSizeUnread, "本",
+			"文字スタイルの大きさを読めませんでした。寸法値が小さすぎて見えない可能性があります");
 		AppendCount(text, "置けなかったレベル記号", counts.levelsFailed, "個");
 		AppendCount(text, "名前を書けなかったレベル記号", counts.levelNameFailed, "個");
 		AppendCount(text, "ストーリレベルへ結べなかったレベル記号", counts.levelBindFailed, "個",

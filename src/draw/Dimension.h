@@ -26,8 +26,10 @@
 //	  * 寸法線までの距離は**用紙 mm × 縮尺**（core::dimensionLineCoord）。注釈空間の座標は
 //	    モデルの mm なので縮尺を掛ける。
 //	  * **文字スタイルを SetTextStyleRef で明示する**（寸法規格が持つ文字スタイル。
-//	    Findings「Dimensions」#157）。注釈の寸法は〈クラスの文字スタイル〉のままだと値が
-//	    描かれない。文字の大きさ（ovDimFontSize）は触らない。
+//	    Findings「Dimensions」#157）→ 文字の大きさ（ovDimFontSize）を「紙の pt × 25.4/72 ×
+//	    ビューポートの縮尺」で書く → **ResetObject で引き直す**（#161。書いただけでは絵に
+//	    出ない）→ 繋ぐ。文字の大きさは作るときのアクティブレイヤの縮尺で焼き付くので、
+//	    1:1 のシートレイヤがアクティブなうちに作る軸組図で要る。
 //
 //	【レベル基準線の作法】（Findings「Level Objects」「Viewports」#141 / #147）
 //	  CreateCustomObject("Elevation Benchmark2") → 注釈へ移す → SetPointObjectPos で注釈の
@@ -76,7 +78,8 @@ namespace HomeskzIfcImport::draw
 		std::size_t standardRejected = 0; // 寸法規格を当てられなかった直線寸法（図面に無い名前）
 		std::size_t unjoined = 0;		  // 連続寸法へ繋げなかった継ぎ目
 		std::size_t textStyleMissing = 0; // 文字スタイルを当てられなかった直線寸法
-		std::size_t levels = 0;			  // 注釈へ置けたレベル記号
+		std::size_t textSizeUnread = 0; // 文字の大きさを縮尺に合わせられなかった直線寸法
+		std::size_t levels = 0;		  // 注釈へ置けたレベル記号
 		std::size_t levelsFailed = 0; // 作れなかった・注釈へ入らなかったレベル記号
 		std::size_t levelNameFailed = 0; // 名前のテキストを差し替えられなかったレベル記号
 		std::size_t levelBindFailed = 0; // ストーリレベルへ結べなかったレベル記号

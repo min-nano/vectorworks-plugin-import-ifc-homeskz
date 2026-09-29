@@ -98,6 +98,10 @@ namespace HomeskzIfcImport::draw
 		// （SDK リファレンス Findings「Dimensions」）。
 		DimStandardName = ovDimStandardName,
 		DimShowValue = ovDimShowValue, // 寸法値を表示するか
+		// 寸法の文字の図面上の大きさ（mm）と、文字スタイルの大きさ（**インチ**）。
+		// Findings「Dimensions」#143 / #157 / #161。
+		DimFontSize = ovDimFontSize,
+		TextStyleSize = ovTextStyleSize,
 		// ビューポートのビュー行列と、断面ビューポートの断面の向き（CopySectionViewMatrix）。
 		ViewportViewMatrix = ovViewportViewMatrix,
 		SectionViewMatrix = ovSheetLayerSectionViewportViewMatrix,
@@ -328,6 +332,10 @@ namespace HomeskzIfcImport::draw
 	// 置いた寸法は〈クラスの文字スタイル〉のままだと値が描かれない（Findings「Dimensions」
 	// #157）。
 	InternalIndex DimensionStandardTextStyle(const std::string& name);
+
+	// 文字スタイル（ref number）の大きさを**紙の pt** で返す（ovTextStyleSize はインチ）。
+	// 読めなければ 0。
+	double TextStylePoints(InternalIndex style);
 	// 文字列のオブジェクト変数を書く。**書けたか**を返す（寸法規格の名前は、図面に無い
 	// 名前だと SetObjectVariable が false を返して値が変わらない。Findings「Dimensions」）。
 	bool SetTextVariable(MCObjectHandle object, ObjectVariable variable, const std::string& text);
