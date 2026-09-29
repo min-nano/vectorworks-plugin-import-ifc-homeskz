@@ -445,8 +445,11 @@ TEST(SectionLevelMarksNameGlFloorsAndEaves)
 		CHECK(near(marks[i].elevation, heights[i]));
 		CHECK(marks[i].story == stories[i]);
 		CHECK(marks[i].levelType == levelTypes[i]);
-		// 図の左端（高さの寸法列の根元と同じ）。
+		// 図の左端（高さの寸法列の根元と同じ）と右端（柱 1820 → −3180）。
 		CHECK(near(marks[i].x, -5000.0));
+		CHECK(near(marks[i].right, -3180.0));
+		// 左の高さの列は 2 段（横架材天端を含む列・GL/FL/軒高の間隔）なので最も外は段 1。
+		CHECK(marks[i].dimensionTier == 1);
 	}
 }
 

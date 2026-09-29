@@ -221,4 +221,34 @@ namespace HomeskzIfcImport::core
 		return kDimensionFirstGap + (static_cast<double>(outermostTier) * kDimensionTierPitch) +
 			   kDimensionTextAllowance;
 	}
+
+	LevelMarkShape levelMarkShape(double textSize, double textWidth)
+	{
+		LevelMarkShape shape;
+		shape.triangleHeight = std::max(textSize, 0.0) * kLevelMarkTriangleRatio;
+		// 正三角形の高さ h と辺 a は h = a·√3/2。底辺の半分は a/2 = h/√3。
+		shape.triangleHalfWidth = shape.triangleHeight / std::sqrt(3.0);
+		shape.textLeft = (2.0 * shape.triangleHalfWidth) + kLevelMarkTextGap;
+		shape.textBottom = kLevelMarkTextGap;
+		shape.width = shape.textLeft + std::max(textWidth, 0.0);
+		return shape;
+	}
+
+	double levelMarkStartX(double left, int dimensionTier, double markWidth, double dimensionScale,
+						   double markScale)
+	{
+		// 左の寸法が占める左端（最も外の寸法線の、さらに外の文字まで）。寸法が無ければ図の左端。
+		const double occupied = dimensionTier < 0
+									? left
+									: dimensionLineCoord(left, -1, dimensionTier, dimensionScale) -
+										  (kDimensionTextAllowance * dimensionScale);
+		return occupied - ((kLevelMarkClearance + std::max(markWidth, 0.0)) * markScale);
+	}
+
+	double levelLineLength(double startX, double right, double scale)
+	{
+		if (scale <= 0.0)
+			return kLevelLineOvershoot;
+		return std::max((right - startX) / scale, 0.0) + kLevelLineOvershoot;
+	}
 } // namespace HomeskzIfcImport::core

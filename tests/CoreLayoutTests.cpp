@@ -25,6 +25,7 @@
 #include "core/Layout.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -373,6 +374,43 @@ TEST(DimensionBandCoversTheOutermostTierAndItsText)
 	CHECK(near(core::dimensionBand(-1), 0.0));
 	CHECK(near(core::dimensionBand(0), 12.0));
 	CHECK(near(core::dimensionBand(2), 26.0));
+}
+
+TEST(LevelMarkIsAnEquilateralTriangleSmallerThanTheTextThenTheName)
+{
+	// 文字 2.5mm（用紙）→ 三角の高さ 2.0mm、正三角形なので底辺の半分は 2/√3。
+	const core::LevelMarkShape shape = core::levelMarkShape(2.5, 6.0);
+	CHECK(near(shape.triangleHeight, 2.0));
+	CHECK(near(shape.triangleHalfWidth, 2.0 / std::sqrt(3.0)));
+	// 辺の長さ（底辺）＝高さ×2/√3 で、斜辺も同じ長さ（正三角形）。
+	const double side = 2.0 * shape.triangleHalfWidth;
+	CHECK(near(std::hypot(shape.triangleHalfWidth, shape.triangleHeight), side));
+	// 名前は三角の右（隙間 0.5mm）・線の 0.5mm 上。幅は起点から名前の右端まで。
+	CHECK(near(shape.textLeft, side + 0.5));
+	CHECK(near(shape.textBottom, 0.5));
+	CHECK(near(shape.width, side + 0.5 + 6.0));
+	// 負は 0 とみなす。
+	CHECK(near(core::levelMarkShape(-1.0, -1.0).width, 0.5));
+}
+
+TEST(LevelMarkStartsOutsideTheDimensionText)
+{
+	// 1/100・段 1: 寸法線は −5000 − (8 + 7)×100 ＝ −6500、文字はさらに 4mm＝400 外。
+	// 名前の右端をその 1mm＝100 外へ置くので、幅 10mm（1000）の記号の起点は −8000。
+	CHECK(near(core::levelMarkStartX(-5000.0, 1, 10.0, 100.0, 100.0), -8000.0));
+	// 寸法の縮尺と記号の縮尺が違えば、それぞれで測る（寸法 1/100・記号 1/50）。
+	CHECK(near(core::levelMarkStartX(-5000.0, 1, 10.0, 100.0, 50.0), -6900.0 - 550.0));
+	// 寸法の列が無ければ図の左端から離す。
+	CHECK(near(core::levelMarkStartX(-5000.0, -1, 10.0, 100.0, 100.0), -6100.0));
+}
+
+TEST(LevelLineRunsRightPastTheBuilding)
+{
+	// 起点 −8000 → 右端 −3180 を 1/100 で用紙 48.2mm、さらに 3mm 越える。
+	CHECK(near(core::levelLineLength(-8000.0, -3180.0, 100.0), 51.2));
+	// 右端が起点より左（あり得ないが）でも越えるぶんだけは引く。縮尺が読めなくても同じ。
+	CHECK(near(core::levelLineLength(0.0, -100.0, 100.0), 3.0));
+	CHECK(near(core::levelLineLength(0.0, 100.0, 0.0), 3.0));
 }
 
 TEST(PlanLayoutLeavesRoomForTheDimensionBand)

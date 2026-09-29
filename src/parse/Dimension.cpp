@@ -245,6 +245,27 @@ namespace HomeskzIfcImport::parse
 			return heights;
 		}
 
+		// 軸組図の左に出す高さの列（GL・FL・軒高と、そこからの標準の横架材天端 → GL・FL・
+		// 軒高の間隔）。left は図の左端（補助線の根元）。内側の段から順に並ぶ。レベル記号の
+		// 起点をこの列より外へ出すので、寸法の命令とレベル記号の両方がここから段を知る。
+		std::vector<DimensionChainCommand> sectionHeightChains(const SectionHeights& heights,
+															   double left)
+		{
+			std::vector<double> levelZ;
+			levelZ.reserve(heights.marks.size());
+			for (const core::LevelMarkCommand& mark : heights.marks)
+				levelZ.push_back(mark.elevation);
+			levelZ = mergeStops(std::move(levelZ));
+			const std::vector<double> withBeams = unionStops(levelZ, heights.beamTops);
+			std::vector<DimensionChainCommand> out;
+			int tier = 0;
+			if (withBeams.size() >= 2 && !sameStops(withBeams, levelZ))
+				out.push_back(makeChain(DimensionAxis::Vertical, withBeams, left, -1, tier++));
+			if (levelZ.size() >= 2)
+				out.push_back(makeChain(DimensionAxis::Vertical, levelZ, left, -1, tier++));
+			return out;
+		}
+
 		// 切断面に乗る柱・横架材の、注釈空間の横の範囲。どちらも無ければ false。
 		bool sectionAlongRange(const core::Document& document, const core::SectionCommand& section,
 							   double& low, double& high)
@@ -522,18 +543,9 @@ namespace HomeskzIfcImport::parse
 			out.push_back(makeChain(DimensionAxis::Horizontal, detail, bottom, -1, 0));
 
 		// 縦: GL・FL・軒高と、そこからの標準の横架材天端 → GL・FL・軒高の間隔。図の左に出す。
-		const SectionHeights heights = sectionHeights(document.stories);
-		std::vector<double> levelZ;
-		levelZ.reserve(heights.marks.size());
-		for (const core::LevelMarkCommand& mark : heights.marks)
-			levelZ.push_back(mark.elevation);
-		levelZ = mergeStops(std::move(levelZ));
-		const std::vector<double> withBeams = unionStops(levelZ, heights.beamTops);
-		int tier = 0;
-		if (withBeams.size() >= 2 && !sameStops(withBeams, levelZ))
-			out.push_back(makeChain(DimensionAxis::Vertical, withBeams, low, -1, tier++));
-		if (levelZ.size() >= 2)
-			out.push_back(makeChain(DimensionAxis::Vertical, levelZ, low, -1, tier++));
+		for (DimensionChainCommand& chain :
+			 sectionHeightChains(sectionHeights(document.stories), low))
+			out.push_back(std::move(chain));
 
 		// 標準の横架材天端と違う高さの横架材: 標準の天端からその材の天端までを、材の中央で
 		// 押さえる。対象は横架材レベル（横架材天端・軒高）に置かれた水平な材だけ——母屋・
@@ -568,9 +580,16 @@ namespace HomeskzIfcImport::parse
 		double high = 0.0;
 		if (!sectionAlongRange(document, section, low, high))
 			return {};
-		std::vector<core::LevelMarkCommand> marks = sectionHeights(document.stories).marks;
+		const SectionHeights heights = sectionHeights(document.stories);
+		// 左の高さの列の最も外の段（列が無ければ -1）。記号の名前をこれより外へ出す。
+		const int outerTier = static_cast<int>(sectionHeightChains(heights, low).size()) - 1;
+		std::vector<core::LevelMarkCommand> marks = heights.marks;
 		for (core::LevelMarkCommand& mark : marks)
+		{
 			mark.x = low;
+			mark.right = high;
+			mark.dimensionTier = outerTier;
+		}
 		return marks;
 	}
 

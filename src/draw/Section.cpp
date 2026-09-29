@@ -232,7 +232,12 @@ namespace HomeskzIfcImport::draw
 		// 分からないと決まらない）。タイトルはこの後の本番のループで付け直す。
 		// M31 寸法の帯（用紙 mm）。1 枚ごとに四辺へ付くので、マスはそのぶん大きく取る
 		// （core/Layout.h の sectionLayout）。寸法を入れない文書では 0。
-		const double band = core::dimensionBand(core::outermostDimensionTier(commands));
+		// レベル記号は起点が寸法の列より外へ出るので、記号があればそのぶんを帯へ足す
+		// （core/Layout.h の kLevelMarkBandAllowance）。
+		const bool anyLevelMarks = std::ranges::any_of(
+			commands, [](const core::SectionCommand& section) { return !section.levels.empty(); });
+		const double band = core::dimensionBand(core::outermostDimensionTier(commands)) +
+							(anyLevelMarks ? core::kLevelMarkBandAllowance : 0.0);
 		core::SectionLayout layout;
 		std::size_t pages = 1;
 		bool arrange = false;
