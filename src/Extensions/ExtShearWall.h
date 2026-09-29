@@ -83,7 +83,17 @@ namespace HomeskzIfcImport
 	constexpr const char* kParamShearWidth = "BraceWidth";	  // 筋かいの見付け幅（mm）
 	constexpr const char* kParamShearClearSpan = "ClearSpan"; // 控えの内法（mm）
 	constexpr const char* kParamShearBottom = "BottomHeight"; // 内法の下端（mm・レイヤ基準）
-	constexpr const char* kParamShearTop = "TopHeight";		  // 内法の上端（mm・同上）
+	constexpr const char* kParamShearTop = "TopHeight"; // 内法の上端・始点側（mm・同上）
+	// 内法の上端・終点側（mm・同上）。登り梁の下に取り付く耐力壁は左右で上端が違うので、
+	// 内法の両端（柱の内側面）で別々に持ち、間は直線で結ぶ。**下端以下なら TopHeight と
+	// 同じとみなす**——このパラメータを足す前に置いた PIO は既定値 0 のまま読まれるので、
+	// それを水平の耐力壁として描き続けるための約束。
+	//
+	// 柱芯ではなく内法の端で持つのは、PIO の両端（柱芯）が実機で読めないことがあるから
+	// （docs/DEV-NOTES.md M19「SetLinearObjectPos が効かない」。そのときの軸は控えの内法から
+	// 組み直した仮のもので、柱芯の位置としては使えない）。内法の端は毎回実物の柱から引くので、
+	// 入れた高さがそのまま絵の角になる。
+	constexpr const char* kParamShearTopEnd = "TopHeightEnd";
 	constexpr const char* kParamShearMarkOffset = "MarkOffset"; // 伏図記号の壁芯からの離れ（mm）
 
 	// 値。ユニバーサル名なので言語に依存しない綴りにする。

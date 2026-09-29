@@ -789,27 +789,29 @@ namespace HomeskzIfcImport::core
 	} // namespace
 
 	std::vector<Vec2> shearWallBracePolygon(double clearStart, double clearEnd, double bottom,
-											double top, double width, bool risesToEnd)
+											double topAtStart, double topAtEnd, double width,
+											bool risesToEnd)
 	{
 		const double span = clearEnd - clearStart;
-		const double height = top - bottom;
-		if (span <= 0.0 || height <= 0.0 || width <= 0.0)
+		if (span <= 0.0 || topAtStart <= bottom || topAtEnd <= bottom || width <= 0.0)
 			return {};
 
-		// 帯の中心線（内法の対角線）。
+		// 帯の中心線（内法の対角線＝低い側の下隅から高い側の上隅へ）。上辺が傾いていれば
+		// 対角線の傾きもそれに従う。
 		const Vec2 low{risesToEnd ? clearStart : clearEnd, bottom};
-		const Vec2 high{risesToEnd ? clearEnd : clearStart, top};
-		// 上で内法の幅と高さが正だと確かめてあるので、対角線の長さも必ず正になる
-		// （length ≥ height > 0）。ゼロ除算の番人は要らない。
+		const Vec2 high{risesToEnd ? clearEnd : clearStart, risesToEnd ? topAtEnd : topAtStart};
+		// 上で内法の幅と高さが正だと確かめてあるので、対角線の長さも必ず正になる。
+		// ゼロ除算の番人は要らない。
 		const Vec2 along{high.x - low.x, high.y - low.y};
 		const double length = std::hypot(along.x, along.y);
 
 		// 中心線に直交する半幅ぶんのオフセット。
 		const Vec2 offset{-along.y / length * width / 2.0, along.x / length * width / 2.0};
 		const std::vector<Vec2> band = {low - offset, high - offset, high + offset, low + offset};
-		const Vec2 clipMin{std::min(clearStart, clearEnd), bottom};
-		const Vec2 clipMax{std::max(clearStart, clearEnd), top};
-		return clipPolygonToRect(band, clipMin, clipMax);
+		// 内法（反時計回り）。上辺が水平なら矩形、傾いていれば台形。
+		const std::vector<Vec2> frame = {Vec2{clearStart, bottom}, Vec2{clearEnd, bottom},
+										 Vec2{clearEnd, topAtEnd}, Vec2{clearStart, topAtStart}};
+		return clipPolygonToConvex(band, frame);
 	}
 
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
