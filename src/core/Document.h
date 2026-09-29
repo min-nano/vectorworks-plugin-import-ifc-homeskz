@@ -973,8 +973,8 @@ namespace HomeskzIfcImport::core
 	//
 	// 【position は必ず注釈空間の絶対座標】どちらの図でも命令の position をそのまま注釈空間の
 	// 座標として使う。伏図は注釈空間がモデルの平面座標そのもので、軸組図は横方向の原点だけが
-	// 世界座標と違う——**その原点合わせは解析側（parse/Tag の sectionAlongOrigin）が済ませて
-	// ある**ので、描画側は「命令の位置へ置く」だけでよい。
+	// 世界座標と違う——**その原点合わせは解析側（parse/Tag が core::sectionAlongOrigin で）
+	// 済ませてある**ので、描画側は「命令の位置へ置く」だけでよい。
 	//
 	// **VW にタグの位置を決めさせようとしてはならない。** データタグを関連付けると VW が
 	// 関連付け先へ吸着させる、という前提で「VW が置いた位置からの相対」で決める作りを一度
@@ -1537,6 +1537,40 @@ namespace HomeskzIfcImport::core
 	// 同じ立ち位置。CLAUDE.md「テスト方針」）。
 	bool sectionHeightRange(const Document& document, double& start, double& end);
 
+	// 断面の注釈空間の**横方向の原点**（切断線に沿った座標で表したもの）。断面線の終点
+	// ＝画面右の端（parse/Tag.h「断面の注釈空間」）。
+	//
+	// 投影（下の sectionAnnotationPoint と合わせて 2 つ）は**解析側（parse/Tag の断面寸法
+	// タグ）と描画側（draw/DrawingLabel の図面ラベル）の両方が使う**ので core に置く
+	// （CLAUDE.md「重複を作らない置き場所」）。
+	double sectionAlongOrigin(const SectionCommand& section);
+
+	// 平面座標＋高さ Z を、断面ビューポートの注釈空間へ投影する（parse/Tag.h「断面の
+	// 注釈空間」）。**投影の定義はここ 1 か所**で、実機確認でずれが判明したときもここだけを
+	// 直せばよい。alongOrigin は sectionAlongOrigin の値。
+	Vec2 sectionAnnotationPoint(const Vec2& plan, double elevation, SectionDirection direction,
+								double alongOrigin);
+
+	// 軸組図の図面ラベルを寄せる点（注釈空間）。**建物の最下点の、図の左右の中央**を返す
+	// ——ラベルはここから用紙で少し下げた位置に上端中央を合わせる（draw/DrawingLabel）。
+	//
+	//   * 左右の中央 … 断面線の中点。断面線は通り芯の外接の両端から同じ kSectionLineMargin
+	//                  だけ延ばしてある（parse/Section）ので、中点＝建物の左右の中央になる。
+	//   * 最下点     … rangeStart（sectionHeightRange の start）に kSectionHeightMargin を
+	//                  戻した高さ。ラベルはこの余白の中に収まる（余白は図のマスに含まれて
+	//                  いるので、ラベルのために割り付けを変えなくてよい。core/Layout）。
+	Vec2 sectionLabelAnchor(const SectionCommand& section, double rangeStart);
+
+	// 軸組図の図面ラベルの上端と建物の最下点との間隔（用紙 mm）の、寸法が無いときの値。
+	inline constexpr double kSectionLabelGap = 2.0;
+
+	// 建物の最下点（sectionLabelAnchor）から図面ラベルの上端までを、用紙 mm で返す。
+	// **図の下に寸法の列があれば、その帯（core::dimensionBand）の外へ出す**——軸組図は柱の
+	// 位置の列を建物の真下に持つ（parse/Dimension）ので、そのまま最下点の直下へ置くと
+	// 寸法と重なる。下に出る列＝**水平な列で side が負のもの**（図の下へ出す列）の最も外の
+	// 段で帯を測り、kSectionLabelGap を足す。描画側はこれに縮尺の分母を掛けてモデル mm にする。
+	double sectionLabelDrop(const ViewportCommand& viewport);
+
 	// 平面（伏図）の広がりに足す四方の余白（mm）。通り芯の丸（通り名の吹き出し）や部材の
 	// 太さは命令の座標には現れないので、その分の遊びを持たせる。planContentBounds とその
 	// 期待値を書くテストが共有する。
@@ -1588,20 +1622,23 @@ namespace HomeskzIfcImport::core
 	bool sectionContentSize(const Document& document, Vec2& size);
 
 	// 耐力壁の筋かい 1 本を、軸組内法に納まる多角形として返す（座標は **(軸方向, 高さ)**
-	// ＝壁面内の 2D で、PIO のローカル XZ にそのまま載る）。内法の矩形は
-	// [clearStart, clearEnd] × [bottom, top]。
+	// ＝壁面内の 2D で、PIO のローカル XZ にそのまま載る）。内法は
+	// 下辺 [clearStart, clearEnd] × bottom、上辺は clearStart で topAtStart・clearEnd で
+	// topAtEnd を結ぶ直線（水平なら矩形、登り梁の下に取り付く耐力壁なら台形）。
 	//
-	// 【形】筋かいは内法の対角線に沿った幅 width の帯で、帯の角は内法の外へはみ出す。
-	// 実物も柱・横架材へ突き当たる形で納まるので、**内法の矩形で切って**返す
-	// （帯の 4 つの角がそれぞれ別の辺で落ちるので、切り口は端が斜めの八角形になる）。
-	// risesToEnd が真なら clearStart 側が下・clearEnd 側が上、偽ならその逆。
+	// 【形】筋かいは内法の対角線（低い側の下隅→高い側の上隅）に沿った幅 width の帯で、
+	// 帯の角は内法の外へはみ出す。実物も柱・横架材へ突き当たる形で納まるので、**内法で
+	// 切って**返す（帯の 4 つの角がそれぞれ別の辺で落ちるので、切り口は端が斜めの八角形に
+	// なる）。risesToEnd が真なら clearStart 側が下・clearEnd 側が上、偽ならその逆。
 	//
-	// 内法が潰れている（幅または高さが 0 以下）・幅が 0 以下のときは空を返す。
+	// 内法が潰れている（幅が 0 以下・どちらかの端で上端が下端以下）・幅が 0 以下のときは
+	// 空を返す。
 	//
 	// **描画側から切り離せる純計算**なので core に置いて無 SDK でテストする
 	// （raiseModifierTop・rafterEaveEnd と同じ立ち位置。CLAUDE.md「テスト方針」）。
 	std::vector<Vec2> shearWallBracePolygon(double clearStart, double clearEnd, double bottom,
-											double top, double width, bool risesToEnd);
+											double topAtStart, double topAtEnd, double width,
+											bool risesToEnd);
 
 	// たすき掛けの**奥の**筋かい 1 本を、手前の筋かい（逆向き）に隠れる部分を切り取った
 	// **閉じた多角形**の並びとして返す（座標は shearWallBracePolygon と同じ壁面内の 2D）。
@@ -1618,8 +1655,9 @@ namespace HomeskzIfcImport::core
 	// 通常は 2 片。手前の帯と重ならなければ奥の帯そのもの 1 片を返す。
 	// 引数が shearWallBracePolygon で空になる組み合わせなら空を返す。
 	std::vector<std::vector<Vec2>> shearWallBehindBracePieces(double clearStart, double clearEnd,
-															  double bottom, double top,
-															  double width, bool risesToEnd);
+															  double bottom, double topAtStart,
+															  double topAtEnd, double width,
+															  bool risesToEnd);
 
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す。draw/Story がこの順を適
 	// 用する（レベルの高さには依存しない）。SDK を触らない純計算なので core に置いて無 SDK

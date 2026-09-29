@@ -1227,7 +1227,6 @@ namespace HomeskzIfcImport::draw
 
 	double TextStylePoints(InternalIndex style)
 	{
-		constexpr double kPointsPerInch = 72.0;
 		const MCObjectHandle resource = style != 0 ? gSDK->InternalIndexToHandle(style) : nil;
 		if (resource == nil)
 			return 0.0;
@@ -1237,7 +1236,7 @@ namespace HomeskzIfcImport::draw
 									value) == 0 ||
 			!value.GetReal64(inches) || inches <= 0.0)
 			return 0.0;
-		return inches * kPointsPerInch;
+		return inches * core::kPointsPerInch;
 	}
 
 	InternalIndex DimensionStandardTextStyle(const std::string& name)
