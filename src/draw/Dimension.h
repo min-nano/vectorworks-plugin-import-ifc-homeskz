@@ -25,10 +25,9 @@
 //	    （シートレイヤに寸法だけが浮かないように）。
 //	  * 寸法線までの距離は**用紙 mm × 縮尺**（core::dimensionLineCoord）。注釈空間の座標は
 //	    モデルの mm なので縮尺を掛ける。
-//	  * **文字の大きさは作るときのアクティブレイヤの縮尺で焼き付く**ので、規格が決めた紙の
-//	    pt を読み、ビューポートの縮尺で割り戻した図面上の大きさ（ovDimFontSize）を書き直す
-//	    （Findings「Dimensions」#143。書かないと 1:1 のシートレイヤで作った軸組図の寸法は
-//	    値が見えない）。
+//	  * **文字スタイルを SetTextStyleRef で明示する**（寸法規格が持つ文字スタイル。
+//	    Findings「Dimensions」#157）。注釈の寸法は〈クラスの文字スタイル〉のままだと値が
+//	    描かれない。文字の大きさ（ovDimFontSize）は触らない。
 //
 //	【レベル基準線の作法】（Findings「Level Objects」「Viewports」#141 / #147）
 //	  CreateCustomObject("Elevation Benchmark2") → 注釈へ移す → SetPointObjectPos で注釈の
@@ -75,15 +74,9 @@ namespace HomeskzIfcImport::draw
 		std::size_t dimensions = 0; // 注釈へ置けた直線寸法
 		std::size_t failed = 0;		// 作れなかった・注釈へ入らなかった直線寸法
 		std::size_t standardRejected = 0; // 寸法規格を当てられなかった直線寸法（図面に無い名前）
-		std::size_t unjoined = 0; // 連続寸法へ繋げなかった継ぎ目
-		std::size_t textSizeUnread = 0; // 文字の大きさを縮尺に合わせられなかった直線寸法
-		std::size_t viewportScaleUnread = 0; // 実際の縮尺を読めなかったビューポート
-		// 連続寸法の中で文字の大きさを書き直した直線寸法と、書いても入らなかった本数、
-		// 1 本目の書き直す前の値（round 5 の見立ての確かめ。draw/Dimension.cpp）。
-		std::size_t chainTextRewritten = 0;
-		std::size_t chainTextStuck = 0;
-		std::string chainTextProbe;
-		std::size_t levels = 0;		  // 注釈へ置けたレベル記号
+		std::size_t unjoined = 0;		  // 連続寸法へ繋げなかった継ぎ目
+		std::size_t textStyleMissing = 0; // 文字スタイルを当てられなかった直線寸法
+		std::size_t levels = 0;			  // 注釈へ置けたレベル記号
 		std::size_t levelsFailed = 0; // 作れなかった・注釈へ入らなかったレベル記号
 		std::size_t levelNameFailed = 0; // 名前のテキストを差し替えられなかったレベル記号
 		std::size_t levelBindFailed = 0; // ストーリレベルへ結べなかったレベル記号

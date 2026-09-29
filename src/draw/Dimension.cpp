@@ -47,9 +47,6 @@ namespace HomeskzIfcImport::draw
 		// 取り込みの既定の縮尺（1/100）と同じ。
 		constexpr double kFallbackScale = 100.0;
 
-		// 1 インチの pt 数（寸法の文字の大きさを紙の pt から図面上の mm へ直す）。
-		constexpr double kPointsPerInch = 72.0;
-
 		// レベル基準線の universal 名（ローカライズ名「レベル基準線」。Findings
 		// 「Level Objects」の実測表）。
 		constexpr const char* kLevelMarkPlugin = "Elevation Benchmark2";
@@ -130,74 +127,22 @@ namespace HomeskzIfcImport::draw
 				if (value.GetTXString(text))
 					name = static_cast<const char*>(text);
 			}
+			std::string style = "クラス";
+			if (!gSDK->GetTextStyleByClass(dimension))
+			{
+				TXString styleName;
+				gSDK->InternalIndexToNameN(gSDK->GetTextStyleRef(dimension), styleName);
+				style = static_cast<const char*>(styleName);
+			}
 			return "値表示 " + flag(ovDimShowValue) + " / 文字 " + real(ovDimTextSizeInPoints) +
-				   "pt・" + real(ovDimFontSize) + "mm / 規格 " + name;
+				   "pt・" + real(ovDimFontSize) + "mm / 文字スタイル " + style + " / 規格 " + name;
 		}
 #endif
 
-		// **文字の大きさをビューポートの縮尺で書き直す**（Findings「Dimensions」#143）。
-		// 寸法の文字の図面上の大きさ（ovDimFontSize）は**作るときのアクティブレイヤの縮尺で
-		// 焼き付き**、注釈へ移しても変わらない。一方、注釈はビューポートの縮尺で描かれる
-		// ——軸組図はシートレイヤ（1:1）がアクティブなまま作るので、1/50 の図の上で文字が
-		// 用紙 0.04mm になり値が見えなかった（round 1〜3）。規格が決めた紙の pt を読み、
-		// 「pt × 25.4/72 × ビューポートの縮尺」を書く。作るときのアクティブレイヤに依らない。
-		// pt（ovDimTextSizeInPoints）は「読む時点のアクティブレイヤの縮尺」で解釈される値
-		// なので、**作った直後（同じアクティブレイヤのうち）に読む**。読めなければ false。
-		double FitTextToViewport(MCObjectHandle dimension, double viewportScale)
-		{
-			double points = 0.0;
-			if (!GetRealVariable(dimension, ObjectVariable::DimTextSizeInPoints, points) ||
-				points <= 0.0)
-				return 0.0;
-			const double size = points * core::kMillimetersPerInch / kPointsPerInch * viewportScale;
-			SetRealVariable(dimension, ObjectVariable::DimFontSize, size);
-			return size;
-		}
-
-		// 書いた文字の大きさ（mm）と読み戻した値を同じとみなす差。
-		constexpr double kFontSizeTol = 1e-3;
-
-		// **連続寸法の中の直線寸法へ、文字の大きさを書き直す**（round 5）。繋ぐ前に書いた
-		// 大きさは、軸組図（アクティブが 1:1 のシートレイヤ）では値が出ないまま残った——
-		// 伏図は 1/50 のデザインレイヤがアクティブなうちに作るので、繋いだときに大きさが
-		// 作り直されても同じ値に落ち着いて気付かない、という見立て。中身は
-		// 〈2D 表現のグループ・直線寸法…〉の並び（Findings「Dimensions」の連続寸法）なので、
-		// 直下の直線寸法（dimHeaderNode）を歩いて、違っていれば書く。書き直した本数を返し、
-		// 書いても入らなかった本数を counts へ積む。probe には 1 本目の書き直す前の値を残す。
-		std::size_t RefitChainMembers(MCObjectHandle chain, double size, DimensionCounts& counts,
-									  std::string& probe)
-		{
-			std::size_t rewritten = 0;
-			for (MCObjectHandle h = gSDK->FirstMemberObj(chain); h != nil; h = gSDK->NextObject(h))
-			{
-				if (gSDK->GetObjectTypeN(h) != dimHeaderNode)
-					continue;
-				double current = 0.0;
-				const bool read = GetRealVariable(h, ObjectVariable::DimFontSize, current);
-				if (probe.empty())
-				{
-					std::array<char, 64> buffer{};
-					std::snprintf(buffer.data(), buffer.size(), "%gmm", current);
-					probe = std::string("繋いだ後の中の寸法の文字 ") +
-							(read ? buffer.data() : "読めず") + "（書いたのは " +
-							std::to_string(size) + "mm）";
-				}
-				if (read && std::abs(current - size) <= kFontSizeTol)
-					continue;
-				SetRealVariable(h, ObjectVariable::DimFontSize, size);
-				++rewritten;
-				double after = 0.0;
-				if (!GetRealVariable(h, ObjectVariable::DimFontSize, after) ||
-					std::abs(after - size) > kFontSizeTol)
-					++counts.chainTextStuck;
-			}
-			return rewritten;
-		}
-
 		// 列 1 本を置く。1 本でも注釈へ置けたら true。scale は寸法線までの距離に使う縮尺の
-		// 分母、viewportScale は文字の大きさに使うビューポートの実際の縮尺の分母。
+		// 分母、textStyle は寸法規格の文字スタイル（0 なら当てない）。
 		bool PlaceChain(MCObjectHandle viewport, const core::DimensionChainCommand& chain,
-						const std::string& standard, double scale, double viewportScale,
+						const std::string& standard, double scale, InternalIndex textStyle,
 						DimensionCounts& counts)
 		{
 			const double line = core::dimensionLineCoord(chain.base, chain.side, chain.tier, scale);
@@ -207,15 +152,10 @@ namespace HomeskzIfcImport::draw
 			MCObjectHandle current = nil;
 			std::size_t inCurrent = 0;
 			std::size_t placed = 0;
-			// 書いた文字の大きさ（mm。0 なら書けていない）。
-			double fontSize = 0.0;
 			const auto flush = [&]()
 			{
 				if (current == nil)
 					return;
-				if (inCurrent > 1 && fontSize > 0.0)
-					counts.chainTextRewritten +=
-						RefitChainMembers(current, fontSize, counts, counts.chainTextProbe);
 				if (Annotate(viewport, current))
 					placed += inCurrent;
 				else
@@ -241,12 +181,18 @@ namespace HomeskzIfcImport::draw
 					++counts.standardRejected;
 				// 寸法値は**明示して出す**（round 1: 軸組図の注釈で値が出なかった。伏図では出た）。
 				SetBooleanVariable(dimension, ObjectVariable::DimShowValue, true);
-				// 規格を当てた後に（規格が文字の大きさを決める）、繋ぐ前に（連続寸法には寸法の
-				// ov* が効かない）書く。
-				if (const double size = FitTextToViewport(dimension, viewportScale); size > 0.0)
-					fontSize = size;
+				// **文字スタイルを明示する**（Findings「Dimensions」#157）。注釈に置いた寸法は
+				// 〈クラスの文字スタイル〉のままだと値が描かれない（軸組図で値が出なかった
+				// 原因）。規格が持つ文字スタイルを SetTextStyleRef で当てる——オブジェクト変数
+				// （ovDimTextStyle）へ番号を書く道は読み戻しが同じなのに絵に効かない。**繋ぐ前に**
+				// 当てれば連続寸法の中にも残る。文字の大きさ（ovDimFontSize）は触らない（触ると
+				// 直線寸法と連続寸法で大きさが食い違う）。大きさは文字スタイルが決め、
+				// ビューポートの縮尺で割られて紙に出る（ご判断で、縮尺ごとの文字スタイルは
+				// 作らない。docs/DEV-NOTES.md M31）。
+				if (textStyle != 0)
+					gSDK->SetTextStyleRef(dimension, textStyle);
 				else
-					++counts.textSizeUnread;
+					++counts.textStyleMissing;
 #if VW_DRAW_VERIFY
 				if (counts.dimensionProbe.empty())
 					counts.dimensionProbe = DescribeDimension(dimension);
@@ -530,24 +476,23 @@ namespace HomeskzIfcImport::draw
 		if (viewport == nil || (command.dimensions.empty() && levels.empty()))
 			return 0;
 		const double denominator = scale > 0.0 ? scale : kFallbackScale;
-		// 文字の大きさはビューポートの**実際の**縮尺で決める（注釈はそれで描かれる）。
-		// 読めなければ寸法線の距離と同じ縮尺で代える。
-		double viewportScale = denominator;
+		// 寸法規格の文字スタイル（ビューポートごとに引き直す——軽い総当たりで、規格は
+		// 文書に 1 つなので結果は変わらない）。
+		InternalIndex textStyle = 0;
 		try
 		{
-			if (const double actual = VWViewportObj(viewport).GetScale(); actual > 0.0)
-				viewportScale = actual;
+			textStyle = DimensionStandardTextStyle(standard);
 		}
 		catch (...)
 		{
-			++counts.viewportScaleUnread;
+			textStyle = 0;
 		}
 
 		std::size_t drawn = 0;
 		bool anyPlaced = false;
 		for (const core::DimensionChainCommand& chain : command.dimensions)
 		{
-			if (PlaceChain(viewport, chain, standard, denominator, viewportScale, counts))
+			if (PlaceChain(viewport, chain, standard, denominator, textStyle, counts))
 			{
 				++drawn;
 				anyPlaced = true;
@@ -610,11 +555,11 @@ namespace HomeskzIfcImport::draw
 		constexpr bool verifyIssue = false;
 #endif
 		if (counts.failed == 0 && counts.standardRejected == 0 && counts.unjoined == 0 &&
-			counts.textSizeUnread == 0 && counts.viewportScaleUnread == 0 &&
-			counts.chainTextStuck == 0 && counts.levelsFailed == 0 && counts.levelNameFailed == 0 &&
-			counts.levelBindFailed == 0 && counts.viewMatrixFailed == 0 &&
-			counts.levelHeightUnread == 0 && counts.levelHeightMismatch == 0 &&
-			counts.updateFailed == 0 && !classesBroken && !verifyIssue)
+			counts.textStyleMissing == 0 && counts.levelsFailed == 0 &&
+			counts.levelNameFailed == 0 && counts.levelBindFailed == 0 &&
+			counts.viewMatrixFailed == 0 && counts.levelHeightUnread == 0 &&
+			counts.levelHeightMismatch == 0 && counts.updateFailed == 0 && !classesBroken &&
+			!verifyIssue)
 			return {};
 
 		std::string text = label + "の寸法の診断: ";
@@ -622,12 +567,8 @@ namespace HomeskzIfcImport::draw
 		AppendCount(text, "寸法規格を当てられなかった寸法", counts.standardRejected, "本",
 					"図面にその寸法規格がありません。文書の既定の規格で描きました");
 		AppendCount(text, "連続寸法へ繋げなかった継ぎ目", counts.unjoined, "箇所");
-		AppendCount(text, "文字の大きさを縮尺に合わせられなかった寸法", counts.textSizeUnread, "本",
-					"寸法値が小さすぎて見えない可能性があります");
-		AppendCount(text, "連続寸法の中で文字の大きさを書き直せなかった寸法", counts.chainTextStuck,
-					"本", "寸法値が小さすぎて見えない可能性があります");
-		AppendCount(text, "縮尺を読めなかったビューポート", counts.viewportScaleUnread, "枚",
-					"寸法の文字は割り付けの縮尺で合わせました");
+		AppendCount(text, "文字スタイルを当てられなかった寸法", counts.textStyleMissing, "本",
+					"寸法規格が文字スタイルを持っていません。注釈では寸法値が描かれません");
 		AppendCount(text, "置けなかったレベル記号", counts.levelsFailed, "個");
 		AppendCount(text, "名前を書けなかったレベル記号", counts.levelNameFailed, "個");
 		AppendCount(text, "ストーリレベルへ結べなかったレベル記号", counts.levelBindFailed, "個",
@@ -650,12 +591,6 @@ namespace HomeskzIfcImport::draw
 	std::string dimensionInfo(const std::string& label, const DimensionCounts& counts)
 	{
 		std::string text;
-		if (counts.chainTextRewritten > 0)
-			text += "連続寸法の中で文字の大きさを書き直した寸法 " +
-					std::to_string(counts.chainTextRewritten) +
-					" 本（1 本目: " + counts.chainTextProbe + "）。";
-		else if (!counts.chainTextProbe.empty())
-			text += "連続寸法の中の文字の大きさはそのまま（" + counts.chainTextProbe + "）。";
 #if VW_DRAW_VERIFY
 		if (!counts.dimensionProbe.empty())
 			text += "寸法 1 本目（検算）: " + counts.dimensionProbe + "。";

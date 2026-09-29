@@ -32,6 +32,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -97,11 +98,6 @@ namespace HomeskzIfcImport::draw
 		// （SDK リファレンス Findings「Dimensions」）。
 		DimStandardName = ovDimStandardName,
 		DimShowValue = ovDimShowValue, // 寸法値を表示するか
-		// 寸法の文字の大きさ。FontSize は図面上の mm で、**作るときのアクティブレイヤの縮尺で
-		// 焼き付く**。TextSizeInPoints は「FontSize ÷ 読む時点のアクティブレイヤの縮尺」を
-		// pt に直した値（寸法が持つ値ではない。Findings「Dimensions」#143）。
-		DimFontSize = ovDimFontSize,
-		DimTextSizeInPoints = ovDimTextSizeInPoints,
 		// ビューポートのビュー行列と、断面ビューポートの断面の向き（CopySectionViewMatrix）。
 		ViewportViewMatrix = ovViewportViewMatrix,
 		SectionViewMatrix = ovSheetLayerSectionViewportViewMatrix,
@@ -322,8 +318,16 @@ namespace HomeskzIfcImport::draw
 	void SetBooleanVariable(MCObjectHandle object, ObjectVariable variable, Boolean value);
 	void SetRealVariable(MCObjectHandle object, ObjectVariable variable, double value);
 	void SetPointVariable(MCObjectHandle object, ObjectVariable variable, const core::Vec2& point);
-	// 実数のオブジェクト変数を読む。読めなければ false（out は変えない）。
-	bool GetRealVariable(MCObjectHandle object, ObjectVariable variable, double& out);
+	// 図面の寸法規格の名前を、組み込み（index 1〜9）→ カスタム（0〜−8）の順に並べる
+	// （Findings「Dimensions」の index の体系）。読めない index は飛ばす。設定ダイアログの
+	// 候補と、規格の文字スタイルの引き当て（DimensionStandardTextStyle）が共有する。
+	std::vector<std::pair<short, std::string>> DimensionStandards();
+
+	// その名前の寸法規格が持つ文字スタイル（ref number）。規格が無い・文字スタイルを持たない
+	// （組み込み規格はどれも持たない）なら 0。寸法へは SetTextStyleRef で当てる——注釈に
+	// 置いた寸法は〈クラスの文字スタイル〉のままだと値が描かれない（Findings「Dimensions」
+	// #157）。
+	InternalIndex DimensionStandardTextStyle(const std::string& name);
 	// 文字列のオブジェクト変数を書く。**書けたか**を返す（寸法規格の名前は、図面に無い
 	// 名前だと SetObjectVariable が false を返して値が変わらない。Findings「Dimensions」）。
 	bool SetTextVariable(MCObjectHandle object, ObjectVariable variable, const std::string& text);

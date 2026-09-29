@@ -83,6 +83,7 @@
 
 #include "PluginPrefix.h"
 #include "draw/SettingsDialog.h"
+#include "draw/DrawUtil.h"
 #include "core/ImportOptions.h"
 
 #include "VWFC/Tools/VWResourceList.h"
@@ -103,12 +104,6 @@ namespace HomeskzIfcImport::draw
 		constexpr std::size_t kTitleBlockRow = core::kSymbolRoleCount;
 		constexpr std::size_t kDimensionRow = core::kSymbolRoleCount + 1;
 		constexpr std::size_t kRowCount = core::kSymbolRoleCount + 2;
-
-		// 寸法規格の index の範囲（組み込み 1〜9・カスタム 0〜−8。Findings「Dimensions」）。
-		constexpr short kFirstBuiltinStandard = 1;
-		constexpr short kLastBuiltinStandard = 9;
-		constexpr short kFirstCustomStandard = 0;
-		constexpr short kLastCustomStandard = -8;
 
 		// 図面枠スタイルのシンボル定義サブタイプ。**0 以外はプラグインオブジェクトの
 		// スタイル**で、値はその PIO の型（552 = 図面枠）。上記 Findings「シンボル」の実測表。
@@ -267,24 +262,10 @@ namespace HomeskzIfcImport::draw
 		CandidateList CollectDimensionStandards()
 		{
 			CandidateList standards;
-			const auto take = [&standards](short index)
-			{
-				TVariableBlock value;
-				if (!gSDK->GetDimensionStandardVariable(index, dimStdstandardName, value))
-					return;
-				TXString name;
-				if (!value.GetTXString(name))
-					return;
-				std::string text = static_cast<const char*>(name);
-				if (!text.empty())
-					standards.names.push_back(std::move(text));
-			};
 			try
 			{
-				for (short index = kFirstBuiltinStandard; index <= kLastBuiltinStandard; ++index)
-					take(index);
-				for (short index = kFirstCustomStandard; index >= kLastCustomStandard; --index)
-					take(index);
+				for (auto& standard : DimensionStandards())
+					standards.names.push_back(std::move(standard.second));
 			}
 			catch (...)
 			{

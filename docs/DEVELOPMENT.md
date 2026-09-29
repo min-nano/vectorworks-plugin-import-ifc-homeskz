@@ -295,9 +295,9 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | もの | 置き場所 |
 | --- | --- |
 | SDK 呼び出しの定型（クラス分け・レイヤ用意・プラグインスタイル解決・構成層／基準面を各オブジェクトへ直接与える手順） | `draw/DrawUtil` |
-| 注釈（寸法・データタグ・レベル基準線）のクラス名 `kDimensionClass`・PIO のプロファイルグループの取り出し（`HeldProfileGroup`。直接と aux の両方を見る）・文字列のオブジェクト変数（`SetTextVariable`） | `draw/DrawUtil` |
+| 注釈（寸法・データタグ・レベル基準線）のクラス名 `kDimensionClass`・PIO のプロファイルグループの取り出し（`HeldProfileGroup`。直接と aux の両方を見る）・文字列のオブジェクト変数（`SetTextVariable`）・寸法規格の一覧と文字スタイル（`DimensionStandards` / `DimensionStandardTextStyle`） | `draw/DrawUtil` |
 | SDK へ渡す数値の列挙（`LayerKind` / `LayerVisibility` / `ClassVisibility` / `ObjectNodeType` / `ObjectVariable` / `StoryBoundSlot`。素の short に名前を付ける唯一の場所）・高さ基準の変換（`StoryBoundData`） | `draw/DrawUtil` |
-| オブジェクト変数の読み書き（`SetBooleanVariable` / `SetRealVariable` / `SetPointVariable` / `GetRealVariable`）・クラス分けと属性の by-class 化（`SetClassWithAttributes`。構造材 PIO は作る前に既定として立てる `ScopedCreationClass` ＋ `FinishCreatedWithClass`） | `draw/DrawUtil` |
+| オブジェクト変数の書き込み（`SetBooleanVariable` / `SetRealVariable` / `SetPointVariable`）・クラス分けと属性の by-class 化（`SetClassWithAttributes`。構造材 PIO は作る前に既定として立てる `ScopedCreationClass` ＋ `FinishCreatedWithClass`） | `draw/DrawUtil` |
 | PIO 定義の先出し（`PrepareCustomObjectDefinition`）・PIO のパラメータを読む口（`PioParamString`）・構造用途の述語（`StructuralUseOf`）・シンボル定義の有無（`HasSymbolDefinition`） | `draw/DrawUtil` |
 | 描画ループの中止判定と歩進（`AdvanceProgress`）・診断の 1 文（`AppendCount`）・診断行の連結（`AppendLine`）・登場順の dedupe（`PushUnique`） | `draw/DrawUtil` |
 | 収まり判定の遊び（`kFitTol`。**遊びは緩める向きに足す**）・収まらなかった 1 枚目の実測の文言（`DescribeFitOverflow` / `DescribePaperSize`） | `draw/DrawUtil` |

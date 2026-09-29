@@ -1194,15 +1194,51 @@ namespace HomeskzIfcImport::draw
 								TVariableBlock(WorldPt(point.x, point.y)));
 	}
 
-	bool GetRealVariable(MCObjectHandle object, ObjectVariable variable, double& out)
+	namespace
 	{
-		TVariableBlock value;
-		Real64 raw = 0.0;
-		if (gSDK->GetObjectVariable(object, static_cast<short>(variable), value) == 0 ||
-			!value.GetReal64(raw))
-			return false;
-		out = raw;
-		return true;
+		// 寸法規格の index の範囲（組み込み 1〜9・カスタム 0〜−8。Findings「Dimensions」）。
+		constexpr short kFirstBuiltinStandard = 1;
+		constexpr short kLastBuiltinStandard = 9;
+		constexpr short kFirstCustomStandard = 0;
+		constexpr short kLastCustomStandard = -8;
+	} // namespace
+
+	std::vector<std::pair<short, std::string>> DimensionStandards()
+	{
+		std::vector<std::pair<short, std::string>> standards;
+		const auto take = [&standards](short index)
+		{
+			TVariableBlock value;
+			if (!gSDK->GetDimensionStandardVariable(index, dimStdstandardName, value))
+				return;
+			TXString name;
+			if (!value.GetTXString(name))
+				return;
+			std::string text = static_cast<const char*>(name);
+			if (!text.empty())
+				standards.emplace_back(index, std::move(text));
+		};
+		for (short index = kFirstBuiltinStandard; index <= kLastBuiltinStandard; ++index)
+			take(index);
+		for (short index = kFirstCustomStandard; index >= kLastCustomStandard; --index)
+			take(index);
+		return standards;
+	}
+
+	InternalIndex DimensionStandardTextStyle(const std::string& name)
+	{
+		for (const auto& [index, standard] : DimensionStandards())
+		{
+			if (standard != name)
+				continue;
+			TVariableBlock value;
+			Sint32 style = 0;
+			if (!gSDK->GetDimensionStandardVariable(index, dimStdTextStyle, value) ||
+				!value.GetSint32(style) || style <= 0)
+				return 0;
+			return static_cast<InternalIndex>(style);
+		}
+		return 0;
 	}
 
 	bool SetTextVariable(MCObjectHandle object, ObjectVariable variable, const std::string& text)
