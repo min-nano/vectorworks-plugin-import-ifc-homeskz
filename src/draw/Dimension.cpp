@@ -18,7 +18,6 @@
 #include "PluginPrefix.h"
 #include "draw/Dimension.h"
 #include "draw/DrawUtil.h"
-#include "draw/StructuralMember.h"
 #include "draw/Verify.h"
 #include "core/Document.h"
 #include "core/Layout.h"
@@ -310,7 +309,7 @@ namespace HomeskzIfcImport::draw
 		// **マーカーレイアウトを組み直して渡し直す**（draw/Dimension.h「レベル基準線の作法」）。
 		// 既定の中身（高さとストーリレベル名のテキスト・記号のポリライン）を消し、挿入点＝(0, 0)
 		// から右へ「▽＋名前」を置く（core/Layout.h「軸組図のレベル記号の形と位置」）。**基準線は
-		// 置かない**——線は PIO がパスに沿って自分で描く（SetLevelLinePath）。起点を決めるのに
+		// 置かない**——線は PIO が制御点まで自分で引く（MoveLevelControlPoint）。起点を決めるのに
 		// 要る記号の幅（用紙 mm）を markWidth へ返す。
 		// **中身を入れ替えるだけでは絵に出ない**ので、新しい図形を作って入れ、古いものを
 		// 消してから SetCustomObjectProfileGroup で渡す（Findings「Level Objects」の実測手順）。
@@ -385,48 +384,85 @@ namespace HomeskzIfcImport::draw
 			return gSDK->SetCustomObjectProfileGroup(mark, layout) != 0 && drawn;
 		}
 
-		// **基準線はレベル基準線のパスである**（round 2 の実機で分かった。既定のレイアウトに
-		// 線は無く、PIO がパスの 2 点の間へ線を引く——既定では挿入点から左へ用紙 36mm）。
-		// パスを「挿入点 → 右へ length（注釈空間の長さ）」の 2 点に差し替える。
-		// 既定のパスの頂点のうち**挿入点にある方の番号を保つ**（どちらの端が記号の側かを
-		// PIO が番号で見ていても崩れないように）。座標は**挿入点からの相対**で渡す
-		// （SetCustomObjectPath は変換をしない。Findings「Parametric Objects」）。
-		bool SetLevelLinePath(MCObjectHandle mark, double length)
+		// **基準線は PIO が「制御点 → 挿入点」へ引く線である**（実機で分かった。既定の
+		// レイアウトに線は無く、描いた中身は挿入点から左へ 5400＝用紙 36mm（1/150）の
+		// ポリゴン 1 つ。選ぶと左端にハンドルが出る。パス（GetCustomObjectPath）は無い）。
+		// 制御点を挿入点の**右** length（注釈空間の長さ・挿入点からの相対）へ動かして、線を
+		// 右へ伸ばす。制御点の持ち方は Findings に無いので 2 通り試す:
+		//   1. VWFC のカスタム制御点（CustomControlPointsGet / Set）
+		//   2. 名前に "ControlPoint" を含む X / Y のパラメータ（レガシーの `Elevation
+		//      Benchmark` は `ControlPoint01X` を持つ。Findings「Level Objects」）
+		// どちらで動いたかは dev の検算が記録へ出す。
+		bool MoveLevelControlPoint(MCObjectHandle mark, double length)
 		{
-			bool originFirst = true;
-			if (const MCObjectHandle held = gSDK->GetCustomObjectPath(mark); held != nil)
+			try
 			{
-				// ピース索引の起点は 0 / 1 のどちらの規約もありうる（DrawUtil の
-				// DescribePioPath と同じ用心）ので、2 点以上ある最初のピースを見る。
-				for (Sint32 piece = 0; piece <= 1; ++piece)
+				VWParametricObj pio(mark);
+				VWPoint3D point;
+				bool onlyIn2D = true;
+				bool visible = true;
+				Sint32 pointID = 0;
+				if (pio.CustomControlPointsGet(0, point, &onlyIn2D, &visible, &pointID))
+					return pio.CustomControlPointsSet(VWPoint3D(length, 0.0, 0.0), onlyIn2D,
+													  visible, static_cast<size_t>(pointID), 0);
+
+				bool movedX = false;
+				bool movedY = false;
+				const size_t count = pio.GetParamsCount();
+				for (size_t i = 0; i < count; ++i)
 				{
-					const Sint32 count = gSDK->NurbsGetNumPts(held, piece);
-					if (count < 2)
+					const std::string name = pio.GetParamName(i).GetStdString();
+					if (name.find("ControlPoint") == std::string::npos)
 						continue;
-					WorldPt3 first(0.0, 0.0, 0.0);
-					WorldPt3 last(0.0, 0.0, 0.0);
-					if (gSDK->NurbsGetPt3D(held, piece, 0, first) &&
-						gSDK->NurbsGetPt3D(held, piece, count - 1, last))
-						originFirst = std::hypot(first.x, first.y) <= std::hypot(last.x, last.y);
-					break;
+					const TXString param(name.c_str());
+					if (name.back() == 'X' && !movedX)
+						movedX = SetParamRealChecked(pio, param, length, kLevelHeightTol);
+					else if (name.back() == 'Y' && !movedY)
+						movedY = SetParamRealChecked(pio, param, 0.0, kLevelHeightTol);
 				}
+				return movedX;
 			}
-			// 挿入点側の頂点の番号を保つ（始端か終端か）。
-			const core::Vec2 atMark{0.0, 0.0};
-			const core::Vec2 farEnd{length, 0.0};
-			const core::Vec2& start = originFirst ? atMark : farEnd;
-			const core::Vec2& end = originFirst ? farEnd : atMark;
-			bool appended = false;
-			const MCObjectHandle path = CreatePath(start, end, appended);
-			if (path == nil)
+			catch (...)
+			{
 				return false;
-			const bool set = gSDK->SetCustomObjectPath(mark, path);
-			// PIO が渡した曲線を引き取らなかった（複製した・受け付けなかった）なら、図面へ
-			// 作った曲線はこちらの後始末（構造材で同じ扱いをしていた。M27）。
-			if (gSDK->GetCustomObjectPath(mark) != path)
-				gSDK->DeleteObject(path, true);
-			return set && appended;
+			}
 		}
+
+#if VW_DRAW_VERIFY
+		// 検算（dev だけ）: 制御点の持ち方を探る——カスタム制御点の 1 つ目と、全パラメータの
+		// 「名前=値」を 1 行にする（どこに -5400 があるかを見る）。
+		std::string DescribeControlPoints(MCObjectHandle mark)
+		{
+			try
+			{
+				const VWParametricObj pio(mark);
+				std::string out = "カスタム制御点 ";
+				VWPoint3D point;
+				if (pio.CustomControlPointsGet(0, point))
+				{
+					std::array<char, 64> buffer{};
+					std::snprintf(buffer.data(), buffer.size(), "(%g, %g)", point.x, point.y);
+					out += buffer.data();
+				}
+				else
+					out += "なし";
+				out += " / 欄";
+				const size_t count = pio.GetParamsCount();
+				for (size_t i = 0; i < count; ++i)
+				{
+					out += " ";
+					out += pio.GetParamName(i).GetStdString();
+					out += "=";
+					out += pio.GetParamAsString(i).GetStdString();
+				}
+				return out;
+			}
+			catch (...)
+			{
+				return "読めない";
+			}
+		}
+#endif
 
 #if VW_DRAW_VERIFY
 		// 検算（dev だけ）: container の中のテキストを**入れ子のグループまで**辿って集める
@@ -587,7 +623,7 @@ namespace HomeskzIfcImport::draw
 			const bool probePath = !counts.levelPathProbed;
 			std::string pathBefore;
 			if (probePath)
-				pathBefore = DescribePioPath(mark);
+				pathBefore = DescribeControlPoints(mark);
 #endif
 			// 縦の位置は絵の置き場所だけで、描く数値には効かない。
 			try
@@ -598,7 +634,7 @@ namespace HomeskzIfcImport::draw
 			{
 				++counts.levelLayoutFailed;
 			}
-			if (!SetLevelLinePath(mark, length))
+			if (!MoveLevelControlPoint(mark, length))
 				++counts.levelPathFailed;
 			gSDK->ResetObject(mark);
 #if VW_DRAW_VERIFY
@@ -606,7 +642,7 @@ namespace HomeskzIfcImport::draw
 			{
 				counts.levelPathProbed = true;
 				counts.levelShapeProbe +=
-					" / パス 差し替え前 " + pathBefore + " → 後 " + DescribePioPath(mark);
+					" / 制御点 動かす前 " + pathBefore + " → 後 " + DescribeControlPoints(mark);
 			}
 #endif
 			// **レイアウトとパスを差し替えた後も結び付きが残っているか**を読み戻す（書いても
