@@ -14,8 +14,8 @@
 //	  2. **プロファイル**＝断面の矩形（幅 × せい）をグループに入れたもの。
 //	  3. **PIO の生成から各フィールドの設定までは柱と共通**（draw/StructuralMember）。
 //	     ここが受け持つのは横架材固有の値——パスの平面座標・天端中央基準の断面矩形・
-//	     構造用途（横架材）・スタイル（木質構造材_横架材）・配置先レイヤ——だけ。
-//	  4. 全配置後に UpdateStyledObjects を 1 回（下記「スタイルは関連付けだけでは効かない」）。
+//	     構造用途（横架材）・配置先レイヤ——だけ。**プラグインスタイルは当てない**
+//	     （描画属性はクラスに従う。draw/StructuralMember.cpp 冒頭「スタイルを使わない」）。
 //	PIO を生成できない場合は平面投影の直線にフォールバックする（1 本の失敗で全体を止めない）。
 //
 //	【パスに高さを持たせない】始端／終端の高さ（傾斜梁の勾配を含む）は **SetObjectStoryBound の
@@ -47,12 +47,6 @@
 //	決めていたので、パスは**平面（Z=0）の 2 点**になった。これは M7 の 2D ポリライン
 //	（高さがバウンドだけで正しく決まっていた）と同じ形へ戻ったということでもある。
 //
-//	【スタイルは関連付けだけでは効かない】ISDK の SetPluginObjectStyle はスタイルの関連付け
-//	（パラメータ）までで、スタイルが決める描画属性（コンポーネントのクラス／マテリアル＝
-//	テクスチャ等）はオブジェクトへプッシュされない。そこで全配置後に UpdateStyledObjects を
-//	1 回呼び、当該スタイルの全オブジェクトをスタイルから更新する（by-instance の個別フィールド
-//	＝寸法・構造材 ID 等は保持したまま by-style の描画属性だけが更新される）。
-//
 
 #include "PluginPrefix.h"
 #include "draw/Member.h"
@@ -71,15 +65,12 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// プラグインスタイル名（VW 実機の登録名に一致させる）。
-		const TXString kMemberStyle("木質構造材_横架材");
-
 		// 横架材 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。**構造材ツールで描けたときだけ** outObject に
 		// そのハンドルを入れる（断面寸法データタグの関連付け先。フォールバックの直線は
 		// 断面寸法を持たないのでタグを付ける相手にしない。draw/Column の柱ハンドルと同じ扱い）。
-		bool DrawOne(const core::MemberCommand& member, RefNumber style,
-					 StructuralFailures& failures, MCObjectHandle& outObject)
+		bool DrawOne(const core::MemberCommand& member, StructuralFailures& failures,
+					 MCObjectHandle& outObject)
 		{
 			// 断面（プロファイルグループ）を**先に**用意する。作れなければ PIO を作らない
 			// ——断面の無い構造材は生成できても実体が描かれず、「オブジェクトはあるのに
@@ -167,7 +158,7 @@ namespace HomeskzIfcImport::draw
 			spec.expectedEndZ = member.endElevation;
 #endif
 
-			const StructuralMemberResult result = DrawStructuralMember(spec, style);
+			const StructuralMemberResult result = DrawStructuralMember(spec);
 			if (result.object == nil)
 			{
 				// フォールバック: 平面投影の直線（クラス付き）を残す。**端部オフセットを戻した
@@ -200,8 +191,6 @@ namespace HomeskzIfcImport::draw
 		if (document.members.empty())
 			return 0;
 
-		const RefNumber style = ResolvePluginStyle(kMemberStyle);
-
 		std::size_t drawn = 0;
 		StructuralFailures failures;
 		for (std::size_t index = 0; index < document.members.size(); ++index)
@@ -217,7 +206,7 @@ namespace HomeskzIfcImport::draw
 				continue;
 
 			MCObjectHandle object = nil;
-			if (DrawOne(member, style, failures, object))
+			if (DrawOne(member, failures, object))
 				++drawn;
 
 			// **命令インデックス → ハンドル**の対応表へ記録する（断面寸法データタグが
@@ -227,17 +216,10 @@ namespace HomeskzIfcImport::draw
 				handles->table().handles.emplace(index, object);
 		}
 
-		// 全配置後に 1 回だけスタイル更新を掛けて、by-style の描画属性を反映する
-		// （冒頭「スタイルは関連付けだけでは効かない」）。
-		if (drawn > 0 && style != 0)
-			gSDK->UpdateStyledObjects(style);
-
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、失敗の内訳を件数で
 		// 持ち帰る（文言は draw/StructuralMember。横架材が 1 本も見えないときに、原因が命令側
 		// （解析）か PIO のパラメータ側かを切り分けられる）。
-		std::string note = DescribeStructuralFailures(failures, "材");
-		if (style == 0)
-			note += "プラグインスタイル『木質構造材_横架材』が見つかりません。";
+		const std::string note = DescribeStructuralFailures(failures, "材");
 		if (outDiagnostics != nullptr && !note.empty())
 			*outDiagnostics = "横架材の診断: " + note;
 

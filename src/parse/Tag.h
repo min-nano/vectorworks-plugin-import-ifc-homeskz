@@ -83,9 +83,19 @@ namespace HomeskzIfcImport::parse
 	// 上辺から逃がす向きに使う。長さが 0 の線には既定（真上＝(0, 1)）を返す。
 	core::Vec2 upwardNormal(double du, double dv);
 
-	// 断面の注釈空間への投影（横方向の原点・投影の定義）は描画側（図面ラベル。draw/DrawingLabel）
-	// も使うので **core に置いてある**（core::sectionAlongOrigin / core::sectionAnnotationPoint）。
-	// 空間の意味はこのヘッダ冒頭「断面の注釈空間」が正。
+	// 横架材がその切断面に乗るか（＝断面に立面として写るか。ヘッダ冒頭「軸組図のタグ」）。
+	// 通りに沿って走り、かつ芯が切断位置にある材だけ。許容は切断位置を作ったときと同じ
+	// kClusterTol（parse/Section.h）。**判定はここ 1 か所**で、タグと寸法（parse/Dimension）が
+	// 共有する（別々に持つと、タグは付くのに寸法が付かない材ができる）。
+	bool memberOnCutPlane(const core::MemberCommand& member, const core::SectionCommand& section);
+
+	// 柱（小屋束を含む）がその切断面に乗るか。芯が切断位置から kClusterTol 以内にあること。
+	bool columnOnCutPlane(const core::ColumnCommand& column, const core::SectionCommand& section);
+
+	// 断面の注釈空間への投影（横方向の原点・投影の定義）は寸法（parse/Dimension）と描画側の
+	// 図面ラベル（draw/DrawingLabel）も使うので **core に置いてある**
+	// （core::sectionAlongOrigin / core::sectionAnnotationPoint）。空間の意味はこのヘッダ冒頭
+	// 「断面の注釈空間」が正。
 
 	// 伏図（平面ビューポート）1 枚ぶんのタグ命令。viewport の表示レイヤに配置先レイヤが含まれ
 	// る横架材 1 本につき 1 つを、members の並び順で返す。

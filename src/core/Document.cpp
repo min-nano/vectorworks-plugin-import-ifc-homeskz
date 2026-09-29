@@ -17,10 +17,12 @@
 //
 
 #include "core/Document.h"
+#include "core/Layout.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <ranges>
 #include <string>
@@ -214,6 +216,36 @@ namespace HomeskzIfcImport::core
 									   { return isValidTag(tag, memberCount); });
 		}
 
+		// 寸法の列 1 つが妥当か（M31）。測点が 2 つ以上・有限で**狭義の昇順**（同じ点が
+		// 並ぶと長さ 0 の寸法ができ、逆順だと向きの反転した寸法ができる）、base が有限、
+		// side が ±1、tier が 0 以上であること。
+		bool isValidDimensionChain(const DimensionChainCommand& chain)
+		{
+			if (chain.stops.size() < 2 || !std::isfinite(chain.base))
+				return false;
+			if (chain.side != 1 && chain.side != -1)
+				return false;
+			if (chain.tier < 0)
+				return false;
+			if (!std::ranges::all_of(chain.stops, [](double v) { return std::isfinite(v); }))
+				return false;
+			return std::ranges::adjacent_find(chain.stops, std::greater_equal<>()) ==
+				   chain.stops.end();
+		}
+
+		bool areValidDimensions(const ViewportCommand& viewport)
+		{
+			return std::ranges::all_of(viewport.dimensions, isValidDimensionChain);
+		}
+
+		// レベル記号 1 つが妥当か（M31）。表示名・結ぶストーリ・レベル種別が非空で、高さ・
+		// 位置が有限であること。
+		bool isValidLevelMark(const LevelMarkCommand& level)
+		{
+			return !level.name.empty() && !level.story.empty() && !level.levelType.empty() &&
+				   std::isfinite(level.elevation) && std::isfinite(level.x);
+		}
+
 		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを持つ
 		// こと（hasDrawableLayers）。図面タイトル・図番は空でも描ける（ラベルが空になる
 		// だけ）ので弾かない。
@@ -387,9 +419,59 @@ namespace HomeskzIfcImport::core
 								 { return areValidTags(section.viewport, memberCount); }))
 			return false;
 
+		// 寸法（M31）: 伏図・軸組図どちらの列も測点が狭義の昇順で 2 つ以上あること
+		// （isValidDimensionChain 参照）。軸組図のレベル記号は表示名が非空であること。
+		// **寸法規格の名前が空なのに寸法がある**文書は、描画側が何のスタイルで描くか
+		// 決められないので弾く（解析側は空なら 1 つも作らない＝core/Document.h）。
+		const bool anyDimension =
+			std::ranges::any_of(document.sheets, [](const SheetCommand& sheet)
+								{ return !sheet.viewport.dimensions.empty(); }) ||
+			std::ranges::any_of(
+				document.sections, [](const SectionCommand& section)
+				{ return !section.viewport.dimensions.empty() || !section.levels.empty(); });
+		if (anyDimension && document.dimensionStandard.empty())
+			return false;
+		if (!std::ranges::all_of(document.sheets, [](const SheetCommand& sheet)
+								 { return areValidDimensions(sheet.viewport); }))
+			return false;
+		if (!std::ranges::all_of(document.sections,
+								 [](const SectionCommand& section)
+								 {
+									 return areValidDimensions(section.viewport) &&
+											std::ranges::all_of(section.levels, isValidLevelMark);
+								 }))
+			return false;
+
 		// 通り芯: 配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）こと
 		// （isValidGrid 参照）。1 本でも不正なら描画しない（docs/DEV-NOTES.md M1）。
 		return std::ranges::all_of(document.grids, isValidGrid);
+	}
+
+	namespace
+	{
+		int outermostTierOf(const ViewportCommand& viewport)
+		{
+			int tier = -1;
+			for (const DimensionChainCommand& chain : viewport.dimensions)
+				tier = std::max(tier, chain.tier);
+			return tier;
+		}
+	} // namespace
+
+	int outermostDimensionTier(const std::vector<SheetCommand>& sheets)
+	{
+		int tier = -1;
+		for (const SheetCommand& sheet : sheets)
+			tier = std::max(tier, outermostTierOf(sheet.viewport));
+		return tier;
+	}
+
+	int outermostDimensionTier(const std::vector<SectionCommand>& sections)
+	{
+		int tier = -1;
+		for (const SectionCommand& section : sections)
+			tier = std::max(tier, outermostTierOf(section.viewport));
+		return tier;
 	}
 
 	bool sectionHeightRange(const Document& document, double& start, double& end)
@@ -595,6 +677,18 @@ namespace HomeskzIfcImport::core
 						  (section.lineStart.y + section.lineEnd.y) / 2.0};
 		return sectionAnnotationPoint(middle, rangeStart + kSectionHeightMargin, section.direction,
 									  sectionAlongOrigin(section));
+	}
+
+	double sectionLabelDrop(const ViewportCommand& viewport)
+	{
+		int below = -1;
+		for (const DimensionChainCommand& chain : viewport.dimensions)
+		{
+			if (chain.axis == DimensionAxis::Horizontal && chain.side < 0)
+				below = std::max(below, chain.tier);
+		}
+		// 帯は寸法線までの距離＋文字の見込みで、寸法が無ければ 0（core::dimensionBand）。
+		return dimensionBand(below) + kSectionLabelGap;
 	}
 
 	bool sectionContentSize(const Document& document, Vec2& size)

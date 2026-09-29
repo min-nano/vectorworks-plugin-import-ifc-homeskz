@@ -46,16 +46,6 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kTextStyleName = "図面ラベル(10pt)";
 		constexpr double kTextSizePoints = 10.0;
 
-		// ビューポートの図（建物の最下点）とラベルの上端との間隔（用紙 mm）。
-		//
-		// ラベルは断面の高さ範囲の下の余白（core::kSectionHeightMargin＝1000mm）の中に
-		// 収める。その余白は用紙のマスに含まれている（core::sectionContentSize）ので、
-		// 割り付けを変えずに済む。1/100 なら余白は用紙 10mm で、間隔 2mm ＋ 10pt の
-		// 文字（約 3.5mm）＋ 下線が収まる。縮尺がそれより小さい（分母が大きい）ときは
-		// マスからはみ出しうるが、そのときは軸組図の「マスに収まらなかった」診断に出る
-		// （draw/Section）。
-		constexpr double kLabelGap = 2.0;
-
 		// タイトルの文字を整える。図面に文字スタイル（"図面ラベル(10pt)"）があればそれを当て、
 		// 無ければ大きさだけを直接与える（データタグの ApplyFieldTextStyle と同じ流儀）。
 		// **複製したテキストへ当てても式は外れない**（Findings: 文字を SetText で潰しても
@@ -176,7 +166,7 @@ namespace HomeskzIfcImport::draw
 	}
 
 	bool drawSectionLabel(MCObjectHandle viewport, const std::string& title,
-						  const core::Vec2& anchor, DrawingLabelCounts& counts)
+						  const core::Vec2& anchor, double drop, DrawingLabelCounts& counts)
 	{
 		if (viewport == nil)
 			return false;
@@ -227,8 +217,9 @@ namespace HomeskzIfcImport::draw
 			gSDK->ResetObject(label);
 		}
 
-		// **測って動かす**——上端中央を「建物の最下点の中央から用紙で kLabelGap 下」へ
-		// 合わせる。注釈空間の長さはモデル mm なので、用紙 mm に縮尺を掛ける。
+		// **測って動かす**——上端中央を「建物の最下点の中央から用紙で drop 下」へ合わせる
+		// （drop は下に出る寸法の帯を含む。core::sectionLabelDrop）。注釈空間の長さは
+		// モデル mm なので、用紙 mm に縮尺を掛ける。
 		WorldRect bounds;
 		if (!gSDK->GetObjectBounds(label, bounds))
 		{
@@ -237,7 +228,7 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 		const double targetX = anchor.x;
-		const double targetTop = anchor.y - (kLabelGap * ViewportScale(viewport));
+		const double targetTop = anchor.y - (drop * ViewportScale(viewport));
 		// WorldRect は top > bottom（Y 上向き）。
 		const double centreX = (bounds.left + bounds.right) / 2.0;
 		gSDK->MoveObject(label, targetX - centreX, targetTop - bounds.top);

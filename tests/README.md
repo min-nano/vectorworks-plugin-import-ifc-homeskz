@@ -23,7 +23,7 @@
 | `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配・凸多角形の矩形クリップ（手計算値との突き合わせ） |
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
 | `CoreUnionFindTests` | `src/core/UnionFind` | ペア述語による連結成分（決定性の規約: 代表＝最小インデックス・代表昇順・成分内昇順） |
-| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付け・耐力壁を含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・断面の注釈空間への投影と図面ラベルを寄せる点（`sectionAnnotationPoint` / `sectionLabelAnchor`）・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`。**伏図のデータタグは含み、軸組図のタグは含まない**）・端部オフセットを戻した材の端（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop`）・耐力壁の筋かいの形（`shearWallBracePolygon`） |
+| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付け・耐力壁を含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・断面の注釈空間への投影と図面ラベルを寄せる点（`sectionAnnotationPoint` / `sectionLabelAnchor` / `sectionLabelDrop`）・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`。**伏図のデータタグは含み、軸組図のタグは含まない**）・端部オフセットを戻した材の端（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop`）・耐力壁の筋かいの形（`shearWallBracePolygon`） |
 | `CoreLayoutTests` | `src/core/Layout` | 用紙の割り付け（縮尺は階梯の値だけ・**渡された印刷可能領域をそのまま使う**（余白を仮定しない）・凡例の幅を引いてから収まる中で最大の図・伏図は全図同じ縮尺と位置・軸組図は上下 2 段でマスが重ならないこと・シート枚数とタイトルの連番） |
 | `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
 | `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |
@@ -39,6 +39,7 @@
 | `ParseFootingTests` | `src/parse/Footing` | 基礎（立上り・底盤・基礎ストーリ／人通口の分割・切り下げ／壁結合の L・T・X 判定／地中梁の統合と底盤への振り分け／床付け＝捨てコン・砕石の断面） |
 | `ParseSheetTests` | `src/parse/Sheet` | シート（伏図。タイトル・切断レベルによる span 柱レイヤの絞り込み・番号の連番・基礎の有無による出し分け・表示レイヤがストーリの作るレイヤに実在すること） |
 | `ParseSectionTests` | `src/parse/Section` | 軸組図（切断位置＝柱と梁の両方が通る芯・通り名の付け方（一致すれば通り芯名、外れれば `又` / `'` で連番）・指示線と視線の向き・シートレイヤ番号が伏図の続きから始まること・決定性）と、**図番がシートの中で一意になること**（重なると Vectorworks が「他の図面に新しい図番を割り当てますか？」とモーダルで訊いてきて、無人で回している周がそこで止まる。実機で発生） |
+| `ParseDimensionTests` | `src/parse/Dimension` | 寸法（M31）: 測点のまとめ方（通り芯の値が残る）・伏図の外周（上・左に部材の位置、上・右に全長。通り芯の間隔だけの列は置かない）・基礎伏図の立上りに沿う列（アンカーボルト・切れ目・横切る通り芯。通り芯としか重ならない通りには作らない）・伏図の種類ごとに押さえるもの（床伏図＝柱と梁、母屋伏図＝母屋だけ）・軸組図（柱の位置（通り芯を合わせる）・GL/FL/軒高と横架材天端・標準と違う高さの横架材・レベル記号）・実フィクスチャで検証を通り決定的なこと・寸法規格が空なら 1 つも作らないこと |
 | `ParseSummaryTests` | `src/parse/Summary` | 型別件数の集計、**完了／エラーダイアログ文言**（短い本文・結末の判断・「856/858 件」表記・中止・取り消しの案内）、**診断ログの見出しと結果**（ビルド／日時／対象・要素ごとの内訳・注意と記録の書き分け・要素表の網羅性）、**取り込み設定の記録**（全役割が並び、既定のままの行にだけ「（既定）」が付く） |
 | `CoreImportOptionsTests` | `src/core/ImportOptions` | 取り込み設定（役割の表と enum の添字が一致すること・既定名が従来の固定名のままであること・表示名が空でないこと・差し替えと空文字の扱い・**図面枠スタイルは既定で空＝置かないこと**と、そこでは空文字が既定名へ戻らないこと） |
 | `CoreFeedbackSessionTests` | `src/core/FeedbackSession` | 実機フィードバックの記憶（既定は「何もしない」・書いて読んで元に戻る・壊れた行や知らない鍵を飛ばして読み続ける・ファイルの読み書き）。**2 周目からファイル選択と設定ダイアログが消えるのは、この記憶だけによる**。加えて**1 周目に採る基準**（取り込み前に在ったレイヤの顔ぶれ。空の基準と「基準が無い」を取り違えないこと）と、自動の往復（M24）が持ち越す**直近の投稿の時刻と「回っているか」**（古い記憶には無い＝回っていないと読む）。加えて**実機テストの周がどれになるか**（M25 の `feedbackRoundKind`。同じビルドでは取り込まず往復を回し直すだけにすること——ここを「新しい 1 周目」にしていたせいで、パレットが開いている最中にメニューを押した人が同じ round を二重に投稿した／記憶として使えるのは send・round>0・ifcPath の 3 つが揃ったときだけ／ダイアログを出せない場面で尋ねる必要が出たら何もしない）と、**前の周が作ったレイヤの持ち越し**（`lastCreatedLayers` / `lastCreatedSheets`。デザインとシートを混ぜないこと——消す順序が違う／古い記憶には行が無く、そのときは図面に触らない） |

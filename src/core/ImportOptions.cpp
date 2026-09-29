@@ -96,4 +96,20 @@ namespace HomeskzIfcImport::core
 		// 余地が無い（core/ImportOptions.h の titleBlock）。
 		titleBlock = name;
 	}
+
+	const std::string& ImportOptions::dimensionStandard() const
+	{
+		return dimension;
+	}
+
+	bool ImportOptions::hasDimensions() const
+	{
+		return !dimension.empty();
+	}
+
+	void ImportOptions::setDimensionStandard(const std::string& name)
+	{
+		// 図面枠と同じく**空はそのまま入れる**（＝寸法を入れない）。
+		dimension = name;
+	}
 } // namespace HomeskzIfcImport::core

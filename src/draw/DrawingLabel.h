@@ -28,16 +28,18 @@
 //	【位置は測って合わせる】ラベルの実寸はレイアウトの中身（タイトルの長さ・文字の大きさ）が
 //	決めるので、置いてから GetObjectBounds で測り、**上端中央**が目標へ来るように動かす
 //	（データタグと同じ「置いた後に測って動かす」。Findings「Data Tags」）。目標は注釈空間の
-//	**建物の最下点の、図の左右の中央**（core::sectionLabelAnchor）から用紙で kLabelGap だけ
-//	下げた点。注釈空間の座標は断面寸法タグと同じ投影（parse/Tag.h「断面の注釈空間」）で、
-//	注釈空間の長さは**モデル mm**（用紙 mm × 縮尺）で測られる。
+//	**建物の最下点の、図の左右の中央**（core::sectionLabelAnchor）から、図の下に出る寸法の
+//	帯のさらに外まで下げた点（core::sectionLabelDrop。軸組図は柱の位置の寸法を建物の真下に
+//	持つので、直下に置くと寸法と重なる）。注釈空間の座標は断面寸法タグ・寸法と同じ投影
+//	（parse/Tag.h「断面の注釈空間」）で、注釈空間の長さは**モデル mm**（用紙 mm × 縮尺）で
+//	測られる。
 //
 //	【SDK 型を公開するヘッダ】ビューポートのハンドルを引数に取るため、draw/Tag.h と同じく
 //	**SDK 型を公開する共通ヘッダ**で、要素ごとの draw/*.h から include してはならない
 //	（draw/DrawUtil.h 冒頭の約束）。呼び出し元は draw/Section.cpp だけ。
 //
 //	実描画（ラベルの見え方・位置・ビューポートへのリンク）はローカルの VectorWorks で目視
-//	確認する（docs/DEV-NOTES.md「軸組図の図面ラベル（M31）」）。
+//	確認する（docs/DEV-NOTES.md「軸組図の図面ラベル（M32）」）。
 //
 
 #pragma once
@@ -73,12 +75,14 @@ namespace HomeskzIfcImport::draw
 	//
 	//   title  … 表示する図面タイトル（ビューポートに与えたものと同じ文字列）
 	//   anchor … 注釈空間の、建物の最下点の左右の中央（core::sectionLabelAnchor）
+	//   drop   … anchor からラベルの上端までの距離（用紙 mm。下に出る寸法の帯を含む。
+	//            core::sectionLabelDrop）
 	//
 	// ★**ビューポートを用紙の上で動かす前に呼ぶ**（データタグと同じ。draw/DrawUtil の
 	// MoveViewportBy）——注釈へ置いた実位置の実測は、ビューポートが用紙のどこに在るかに
 	// 影響される。
 	bool drawSectionLabel(MCObjectHandle viewport, const std::string& title,
-						  const core::Vec2& anchor, DrawingLabelCounts& counts);
+						  const core::Vec2& anchor, double drop, DrawingLabelCounts& counts);
 
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空文字）。label は図の種別
 	// （"軸組図"）。

@@ -188,7 +188,12 @@ namespace HomeskzIfcImport::core
 	//
 	// **幅を実測で受け取る理由**は上記（凡例は図面の内容で伸び縮みするので、定数で
 	// 決め打ちにすると余らせたぶんだけ縮尺が落ちる）。
-	PlanLayout planLayout(const Vec2& content, const PaperArea& area, double legendWidth);
+	//
+	// **band は寸法の帯**（M31。用紙 mm・四辺それぞれ）。寸法は図の外へ張り出すので、縮尺は
+	// 図の領域から四辺の帯を引いた残りで選ぶ（凡例の幅を引くのと同じ考え方）。寸法を
+	// 入れなければ 0（＝従来と同じ割り付け）。値は dimensionBand が決める。
+	PlanLayout planLayout(const Vec2& content, const PaperArea& area, double legendWidth,
+						  double band = 0.0);
 
 	// 軸組図の割り付け（**上下 2 段**・シートレイヤ 1 枚＝用紙 1 枚）。
 	//
@@ -213,7 +218,10 @@ namespace HomeskzIfcImport::core
 	// 軸組図の割り付けを決める。content は**軸組図 1 枚ぶん**の広がり（実寸 mm。幅は建物の
 	// 平面の広がり、高さは断面の高さ範囲）、area は**印刷可能領域**（用紙 mm）。**2 段が縦に収まること**を条件に縮尺を選ぶので、
 	// 1 段しか置かないときも余白は 2 段ぶんのままになる（用紙をまたいで段の位置が揃う）。
-	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area);
+	//
+	// band は伏図と同じく寸法の帯（用紙 mm・四辺それぞれ。M31）。1 枚のマス（cell）は
+	// **帯を含めた大きさ**になる（寸法も隣の図と重ならないように並べる）。
+	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area, double band = 0.0);
 
 	// シート内 index 番目（0 起点。左上から右へ、埋まったら下段へ）のマスの中心（用紙 mm）。
 	// 段組み全体は印刷可能領域の中央に置く。範囲外の index は最後のマスへ丸める。
@@ -225,4 +233,30 @@ namespace HomeskzIfcImport::core
 	// 軸組図のシートタイトル。1 枚に収まるなら base のまま（"軸組図"）、複数枚に分かれる
 	// なら 1 起点の連番を付ける（"軸組図(1)" / "軸組図(2)" …）。
 	std::string sectionSheetTitle(const std::string& base, std::size_t page, std::size_t pages);
+	// ------------------------------------------------------------------------
+	// 寸法線の位置（M31）
+	// ------------------------------------------------------------------------
+
+	// 寸法線を補助線の根元（base）から離す長さ（**用紙 mm**）。1 段目までの距離と、
+	// 段と段の間隔。用紙の上の長さで持つのは、どの縮尺でも段の間隔が同じに見えるように
+	// するため（命令は段の番号だけを持つ。core/Document.h の DimensionChainCommand）。
+	// 値は寸法の文字（おおむね 2.5mm 前後）が 1 段に収まり、隣の段と重ならない大きさの
+	// 見込みで、実機で見て詰める。
+	inline constexpr double kDimensionFirstGap = 8.0;
+	inline constexpr double kDimensionTierPitch = 7.0;
+
+	// 寸法線の直交座標（注釈空間・モデル mm）。base から side の向きへ
+	// （kDimensionFirstGap + tier × kDimensionTierPitch）× 縮尺の分母 だけ離す。
+	// side は ±1（それ以外は符号だけを見る）、tier は 0 以上（負は 0 とみなす）。
+	double dimensionLineCoord(double base, int side, int tier, double scale);
+
+	// 寸法の文字が寸法線から外へはみ出す見込み（用紙 mm）。寸法の文字（おおむね 2〜3mm）と
+	// 寸法線との隙間のぶん。
+	inline constexpr double kDimensionTextAllowance = 4.0;
+
+	// 寸法の帯（用紙 mm）＝最も外の段の寸法線までの距離＋文字の見込み。outermostTier は
+	// 図の外周に出る段のうち最も外のもの（core::outermostDimensionTier）。負なら（寸法が
+	// 無ければ）0。
+	double dimensionBand(int outermostTier);
+
 } // namespace HomeskzIfcImport::core

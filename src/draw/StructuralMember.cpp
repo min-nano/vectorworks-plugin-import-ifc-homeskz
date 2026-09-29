@@ -15,11 +15,12 @@
 //	解決し、SetParamRealChecked で書いた値を読み戻して確認する。入らなかった本数は
 //	StructuralMemberResult::sectionOk 経由で呼び出し側の診断へ流す。
 //
-//	【スタイルは関連付けだけでは効かない】ISDK の SetPluginObjectStyle はスタイルの関連付け
-//	（パラメータ）までで、スタイルが決める描画属性（コンポーネントのクラス／マテリアル）
-//	はオブジェクトへプッシュされない。全配置後に UpdateStyledObjects を 1 回呼ぶのは呼び出し側
-//	の責務（横架材・柱でスタイルが別なので、ここでは行わない）。個別フィールドはスタイル関連付
-//	けの**後**に設定するので、スタイル既定のパラメータは本命令の実測値で上書きされる。
+//	【スタイルを使わない】横架材・柱・垂木のどれにもプラグインスタイルを関連付けない
+//	（`SetPluginObjectStyle` も `UpdateStyledObjects` も呼ばない）。描画属性はクラスに、
+//	寸法・構造材 ID 等は個別フィールドに持たせる。以前は横架材（木質構造材_横架材）と柱
+//	（木質構造材_柱・束）にだけ図面側のスタイルを当てていたが、ご要望によりやめた——
+//	図面にスタイルがあるかどうかで絵が変わらず、垂木と同じ作法に揃う
+//	（docs/DEV-NOTES.md「構造材のスタイルをやめた」）。
 //
 
 #include "PluginPrefix.h"
@@ -319,7 +320,7 @@ namespace HomeskzIfcImport::draw
 		return path;
 	}
 
-	StructuralMemberResult DrawStructuralMember(const StructuralMemberSpec& spec, RefNumber style)
+	StructuralMemberResult DrawStructuralMember(const StructuralMemberSpec& spec)
 	{
 		StructuralMemberResult result;
 		// **空のプロファイルを渡してはならない**（断面が無いのと同じで、PIO は生成できても
@@ -359,14 +360,6 @@ namespace HomeskzIfcImport::draw
 			// ので、ここは包まない）。
 			result.classInherited = FinishCreatedWithClass(object, creationClass, spec.drawClass);
 		}
-		// スタイルは個別フィールドより**先に**関連付ける（後に設定する実測値で
-		// スタイル既定のパラメータを上書きするため）。
-		if (style != 0)
-		{
-			VW_DRAW_TIME("構造材:スタイル関連付け");
-			gSDK->SetPluginObjectStyle(object, style);
-		}
-
 		// 高さ基準を始端（0）・終端（1）それぞれのストーリレベルへバインドする。これで
 		// 構造材ツールの高さ基準が「レイヤの高さ」・offset 0 のまま実ジオメトリと矛盾する
 		// ことがなくなり、編集時に高さがリセットされない。水平材の傾斜はこの offset 差で

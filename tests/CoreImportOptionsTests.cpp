@@ -139,4 +139,23 @@ TEST(import_options_title_block_does_not_touch_the_symbol_roles)
 	}
 }
 
+TEST(import_options_dimensions_are_off_by_default_and_keep_an_empty_name_as_off)
+{
+	// M31 既定は「寸法を入れない」。図面枠と同じく既定名が無いので、空文字は「入れない」
+	// という意味をそのまま持つ。
+	ImportOptions options;
+	CHECK(!options.hasDimensions());
+	CHECK(options.dimensionStandard().empty());
+
+	options.setDimensionStandard("構造図 寸法");
+	CHECK(options.hasDimensions());
+	CHECK_EQ(options.dimensionStandard(), std::string("構造図 寸法"));
+	// 図面枠とは別の設定。
+	CHECK(!options.hasTitleBlock());
+
+	options.setDimensionStandard("");
+	CHECK(!options.hasDimensions());
+	CHECK(options.dimensionStandard().empty());
+}
+
 TEST_MAIN();

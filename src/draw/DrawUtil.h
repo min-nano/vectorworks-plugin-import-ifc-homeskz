@@ -32,6 +32,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -92,6 +93,18 @@ namespace HomeskzIfcImport::draw
 		ViewportPlanarObjects = 1035, // プレイナー（レイヤ平面）／2D 図形を表示するか
 		Viewport2DComponents = 1059, // ハイブリッドシンボル等の 2D コンポーネントを表示するか
 		ViewportBeyondCutPlane = 1064, // 切断面より奥の図形を表示するか
+		// 寸法の寸法規格を名前で（M31）。index（ovDimStandard）より名前で書く——index の
+		// 意味は図面ごとに変わり、ヘッダの「0 は無効」も実機と合わない
+		// （SDK リファレンス Findings「Dimensions」）。
+		DimStandardName = ovDimStandardName,
+		DimShowValue = ovDimShowValue, // 寸法値を表示するか
+		// 寸法の文字の図面上の大きさ（mm）と、文字スタイルの大きさ（**インチ**）。
+		// Findings「Dimensions」#143 / #157 / #161。
+		DimFontSize = ovDimFontSize,
+		TextStyleSize = ovTextStyleSize,
+		// ビューポートのビュー行列と、断面ビューポートの断面の向き（CopySectionViewMatrix）。
+		ViewportViewMatrix = ovViewportViewMatrix,
+		SectionViewMatrix = ovSheetLayerSectionViewportViewMatrix,
 	};
 
 	// SetObjectStoryBound / GetObjectStoryBound のバウンド ID（SDK の TObjectBoundID
@@ -104,6 +117,11 @@ namespace HomeskzIfcImport::draw
 		Start = 0,
 		End = 1,
 	};
+
+	// 寸法・断面寸法データタグ・レベル基準線を置くクラス（M13 / M31）。**注釈はすべてこの
+	// クラス**に置き、見え方（色・線の太さ）を図面側のクラスで一括して決められるようにする。
+	// 存在しなければ SetClassByName（AddClass）が作る。
+	inline constexpr const char* kDimensionClass = "寸法";
 
 	// オブジェクトのクラスを名前で設定する。AddClass は既存なら索引を返し、無ければクラスを作
 	// る。クラス名が空なら何もしない（無クラス＝既定クラスのまま）。
@@ -194,6 +212,12 @@ namespace HomeskzIfcImport::draw
 	// 次の文書への取り込みで抜けてしまう。
 	void PrepareCustomObjectDefinition(const char* universalName);
 
+	// PIO がいま持っているプロファイルグループ（データタグのタグレイアウト・レベル基準線の
+	// マーカーレイアウト）。**2 つの入り口を両方見る**——VW2020 で「プロファイルグループは
+	// aux コンテナに持つ」経路が足されており（ISDK::GetCustomObjectProfileGroupInAux）、
+	// どちらに出るかはオブジェクトによって変わる。無ければ nil。
+	MCObjectHandle HeldProfileGroup(MCObjectHandle pio);
+
 	// オブジェクトがそのノード種別か（GetObjectTypeN）。
 	bool IsObjectType(MCObjectHandle object, ObjectNodeType type);
 
@@ -271,7 +295,7 @@ namespace HomeskzIfcImport::draw
 	// 幅・せいが 0 以下なら nil。
 	MCObjectHandle CreateRectangleProfileGroup(double minX, double minY, double maxX, double maxY);
 
-	// 名前付きプラグインスタイル（"木質構造材_横架材" 等）の RefNumber を引く。文書に無ければ
+	// 名前付きプラグインスタイル（図面枠スタイル等）の RefNumber を引く。文書に無ければ
 	// 0 を返す（＝スタイル無しで描く。スタイルの欠落で部材を失わない）。
 	//
 	// ISDK はスタイル名から RefNumber を引く呼び出しを持たないので、名前付きオブジェクト
@@ -298,6 +322,23 @@ namespace HomeskzIfcImport::draw
 	void SetBooleanVariable(MCObjectHandle object, ObjectVariable variable, Boolean value);
 	void SetRealVariable(MCObjectHandle object, ObjectVariable variable, double value);
 	void SetPointVariable(MCObjectHandle object, ObjectVariable variable, const core::Vec2& point);
+	// 図面の寸法規格の名前を、組み込み（index 1〜9）→ カスタム（0〜−8）の順に並べる
+	// （Findings「Dimensions」の index の体系）。読めない index は飛ばす。設定ダイアログの
+	// 候補と、規格の文字スタイルの引き当て（DimensionStandardTextStyle）が共有する。
+	std::vector<std::pair<short, std::string>> DimensionStandards();
+
+	// その名前の寸法規格が持つ文字スタイル（ref number）。規格が無い・文字スタイルを持たない
+	// （組み込み規格はどれも持たない）なら 0。寸法へは SetTextStyleRef で当てる——注釈に
+	// 置いた寸法は〈クラスの文字スタイル〉のままだと値が描かれない（Findings「Dimensions」
+	// #157）。
+	InternalIndex DimensionStandardTextStyle(const std::string& name);
+
+	// 文字スタイル（ref number）の大きさを**紙の pt** で返す（ovTextStyleSize はインチ）。
+	// 読めなければ 0。
+	double TextStylePoints(InternalIndex style);
+	// 文字列のオブジェクト変数を書く。**書けたか**を返す（寸法規格の名前は、図面に無い
+	// 名前だと SetObjectVariable が false を返して値が変わらない。Findings「Dimensions」）。
+	bool SetTextVariable(MCObjectHandle object, ObjectVariable variable, const std::string& text);
 
 	// 一覧に無ければ追加する（登場順の dedupe。診断へ残すシンボル名・伏図記号レイヤ名・
 	// レベル種別の事前登録が同じ形を各々書いていた）。**参照を三項演算子で束ねてから
@@ -828,6 +869,14 @@ namespace HomeskzIfcImport::draw
 	// 図を作らざるを得ない（draw/Sheet の 2 巡）。更新を 1 回余分に走らせるので、
 	// **縮尺が実際に変わったときだけ**呼ぶこと。
 	bool ApplyViewportScale(MCObjectHandle viewport, double scale);
+
+	// 断面ビューポートの**断面の向き（1055）をビュー行列（1050）へ写す**。書けたら true。
+	// CreateSectionViewport が作るビューポートはビュー行列が単位行列のまま残り、注釈に
+	// 縦の基準が無い——ストーリレベルへ結んだレベル基準線が高さ 0 を描く（UI 製の断面
+	// ビューポートは 2 つが同じ値）。**UpdateViewport は 1050 を単位行列へ戻す**ので、
+	// 更新を済ませた後に呼び、注釈の個体を ResetObject する（SDK リファレンス Findings
+	// 「Viewports」「Level Objects」#141 / #147）。
+	bool CopySectionViewMatrix(MCObjectHandle viewport);
 
 	// ビューポートを用紙の上で delta（用紙 mm）だけ動かす。注釈（データタグ）は
 	// ビューポートと一緒に動く。

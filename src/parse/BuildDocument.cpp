@@ -21,6 +21,7 @@
 #include "parse/Column.h"
 #include "parse/ColumnMark.h"
 #include "parse/Context.h"
+#include "parse/Dimension.h"
 #include "parse/FireBrace.h"
 #include "parse/Floor.h"
 #include "parse/FloorPost.h"
@@ -205,6 +206,14 @@ namespace HomeskzIfcImport::parse
 		// 選ぶものも無い。設定を描画側へ運ぶ経路が Document だけ（CLAUDE.md「依存の向き」）
 		// なので、ここを通す。
 		document.titleBlockStyle = options.titleBlockStyle();
+
+		// M31 寸法: 伏図・軸組図の注釈へ入れる連続寸法と、軸組図のレベル記号（GL・FL・
+		// 軒高）。タグと同じく**ビューポート命令の中**に入るので sheets / sections が確定した
+		// 後に置く（parse/Dimension）。**寸法を入れない設定（スタイル名が空）なら 1 つも
+		// 作らない**——描画側で捨てるのではなく、そもそも指示を出さない（M20 と同じ考え方）。
+		document.dimensionStandard = options.dimensionStandard();
+		if (options.hasDimensions())
+			attachDimensionCommands(document);
 
 		return document;
 	}
