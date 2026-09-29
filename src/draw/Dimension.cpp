@@ -626,11 +626,16 @@ namespace HomeskzIfcImport::draw
 
 	std::string dimensionInfo(const std::string& label, const DimensionCounts& counts)
 	{
-		std::string text;
+		// 中身は今のところ dev の検算だけ。本番では引数を使わないので、tidy の
+		// misc-unused-parameters / misc-const-correctness に掛からない形にしておく
+		// （PR の CI は dev の分岐しか tidy しない）。
 #if VW_DRAW_VERIFY
 		if (!counts.dimensionProbe.empty())
-			text += "寸法 1 本目（検算）: " + counts.dimensionProbe + "。";
+			return label + "の寸法の記録: 寸法 1 本目（検算）: " + counts.dimensionProbe + "。";
+#else
+		(void)label;
+		(void)counts;
 #endif
-		return text.empty() ? text : label + "の寸法の記録: " + text;
+		return {};
 	}
 } // namespace HomeskzIfcImport::draw
