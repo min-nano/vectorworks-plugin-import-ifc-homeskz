@@ -78,7 +78,12 @@ namespace HomeskzIfcImport::draw
 		std::size_t unjoined = 0; // 連続寸法へ繋げなかった継ぎ目
 		std::size_t textSizeUnread = 0; // 文字の大きさを縮尺に合わせられなかった直線寸法
 		std::size_t viewportScaleUnread = 0; // 実際の縮尺を読めなかったビューポート
-		std::size_t levels = 0;				 // 注釈へ置けたレベル記号
+		// 連続寸法の中で文字の大きさを書き直した直線寸法と、書いても入らなかった本数、
+		// 1 本目の書き直す前の値（round 5 の見立ての確かめ。draw/Dimension.cpp）。
+		std::size_t chainTextRewritten = 0;
+		std::size_t chainTextStuck = 0;
+		std::string chainTextProbe;
+		std::size_t levels = 0;		  // 注釈へ置けたレベル記号
 		std::size_t levelsFailed = 0; // 作れなかった・注釈へ入らなかったレベル記号
 		std::size_t levelNameFailed = 0; // 名前のテキストを差し替えられなかったレベル記号
 		std::size_t levelBindFailed = 0; // ストーリレベルへ結べなかったレベル記号

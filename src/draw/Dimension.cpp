@@ -143,15 +143,55 @@ namespace HomeskzIfcImport::draw
 		// 「pt × 25.4/72 × ビューポートの縮尺」を書く。作るときのアクティブレイヤに依らない。
 		// pt（ovDimTextSizeInPoints）は「読む時点のアクティブレイヤの縮尺」で解釈される値
 		// なので、**作った直後（同じアクティブレイヤのうち）に読む**。読めなければ false。
-		bool FitTextToViewport(MCObjectHandle dimension, double viewportScale)
+		double FitTextToViewport(MCObjectHandle dimension, double viewportScale)
 		{
 			double points = 0.0;
 			if (!GetRealVariable(dimension, ObjectVariable::DimTextSizeInPoints, points) ||
 				points <= 0.0)
-				return false;
-			SetRealVariable(dimension, ObjectVariable::DimFontSize,
-							points * core::kMillimetersPerInch / kPointsPerInch * viewportScale);
-			return true;
+				return 0.0;
+			const double size = points * core::kMillimetersPerInch / kPointsPerInch * viewportScale;
+			SetRealVariable(dimension, ObjectVariable::DimFontSize, size);
+			return size;
+		}
+
+		// 書いた文字の大きさ（mm）と読み戻した値を同じとみなす差。
+		constexpr double kFontSizeTol = 1e-3;
+
+		// **連続寸法の中の直線寸法へ、文字の大きさを書き直す**（round 5）。繋ぐ前に書いた
+		// 大きさは、軸組図（アクティブが 1:1 のシートレイヤ）では値が出ないまま残った——
+		// 伏図は 1/50 のデザインレイヤがアクティブなうちに作るので、繋いだときに大きさが
+		// 作り直されても同じ値に落ち着いて気付かない、という見立て。中身は
+		// 〈2D 表現のグループ・直線寸法…〉の並び（Findings「Dimensions」の連続寸法）なので、
+		// 直下の直線寸法（dimHeaderNode）を歩いて、違っていれば書く。書き直した本数を返し、
+		// 書いても入らなかった本数を counts へ積む。probe には 1 本目の書き直す前の値を残す。
+		std::size_t RefitChainMembers(MCObjectHandle chain, double size, DimensionCounts& counts,
+									  std::string& probe)
+		{
+			std::size_t rewritten = 0;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(chain); h != nil; h = gSDK->NextObject(h))
+			{
+				if (gSDK->GetObjectTypeN(h) != dimHeaderNode)
+					continue;
+				double current = 0.0;
+				const bool read = GetRealVariable(h, ObjectVariable::DimFontSize, current);
+				if (probe.empty())
+				{
+					std::array<char, 64> buffer{};
+					std::snprintf(buffer.data(), buffer.size(), "%gmm", current);
+					probe = std::string("繋いだ後の中の寸法の文字 ") +
+							(read ? buffer.data() : "読めず") + "（書いたのは " +
+							std::to_string(size) + "mm）";
+				}
+				if (read && std::abs(current - size) <= kFontSizeTol)
+					continue;
+				SetRealVariable(h, ObjectVariable::DimFontSize, size);
+				++rewritten;
+				double after = 0.0;
+				if (!GetRealVariable(h, ObjectVariable::DimFontSize, after) ||
+					std::abs(after - size) > kFontSizeTol)
+					++counts.chainTextStuck;
+			}
+			return rewritten;
 		}
 
 		// 列 1 本を置く。1 本でも注釈へ置けたら true。scale は寸法線までの距離に使う縮尺の
@@ -167,10 +207,15 @@ namespace HomeskzIfcImport::draw
 			MCObjectHandle current = nil;
 			std::size_t inCurrent = 0;
 			std::size_t placed = 0;
+			// 書いた文字の大きさ（mm。0 なら書けていない）。
+			double fontSize = 0.0;
 			const auto flush = [&]()
 			{
 				if (current == nil)
 					return;
+				if (inCurrent > 1 && fontSize > 0.0)
+					counts.chainTextRewritten +=
+						RefitChainMembers(current, fontSize, counts, counts.chainTextProbe);
 				if (Annotate(viewport, current))
 					placed += inCurrent;
 				else
@@ -198,7 +243,9 @@ namespace HomeskzIfcImport::draw
 				SetBooleanVariable(dimension, ObjectVariable::DimShowValue, true);
 				// 規格を当てた後に（規格が文字の大きさを決める）、繋ぐ前に（連続寸法には寸法の
 				// ov* が効かない）書く。
-				if (!FitTextToViewport(dimension, viewportScale))
+				if (const double size = FitTextToViewport(dimension, viewportScale); size > 0.0)
+					fontSize = size;
+				else
 					++counts.textSizeUnread;
 #if VW_DRAW_VERIFY
 				if (counts.dimensionProbe.empty())
@@ -564,7 +611,7 @@ namespace HomeskzIfcImport::draw
 #endif
 		if (counts.failed == 0 && counts.standardRejected == 0 && counts.unjoined == 0 &&
 			counts.textSizeUnread == 0 && counts.viewportScaleUnread == 0 &&
-			counts.levelsFailed == 0 && counts.levelNameFailed == 0 &&
+			counts.chainTextStuck == 0 && counts.levelsFailed == 0 && counts.levelNameFailed == 0 &&
 			counts.levelBindFailed == 0 && counts.viewMatrixFailed == 0 &&
 			counts.levelHeightUnread == 0 && counts.levelHeightMismatch == 0 &&
 			counts.updateFailed == 0 && !classesBroken && !verifyIssue)
@@ -577,6 +624,8 @@ namespace HomeskzIfcImport::draw
 		AppendCount(text, "連続寸法へ繋げなかった継ぎ目", counts.unjoined, "箇所");
 		AppendCount(text, "文字の大きさを縮尺に合わせられなかった寸法", counts.textSizeUnread, "本",
 					"寸法値が小さすぎて見えない可能性があります");
+		AppendCount(text, "連続寸法の中で文字の大きさを書き直せなかった寸法", counts.chainTextStuck,
+					"本", "寸法値が小さすぎて見えない可能性があります");
 		AppendCount(text, "縮尺を読めなかったビューポート", counts.viewportScaleUnread, "枚",
 					"寸法の文字は割り付けの縮尺で合わせました");
 		AppendCount(text, "置けなかったレベル記号", counts.levelsFailed, "個");
@@ -601,6 +650,12 @@ namespace HomeskzIfcImport::draw
 	std::string dimensionInfo(const std::string& label, const DimensionCounts& counts)
 	{
 		std::string text;
+		if (counts.chainTextRewritten > 0)
+			text += "連続寸法の中で文字の大きさを書き直した寸法 " +
+					std::to_string(counts.chainTextRewritten) +
+					" 本（1 本目: " + counts.chainTextProbe + "）。";
+		else if (!counts.chainTextProbe.empty())
+			text += "連続寸法の中の文字の大きさはそのまま（" + counts.chainTextProbe + "）。";
 #if VW_DRAW_VERIFY
 		if (!counts.dimensionProbe.empty())
 			text += "寸法 1 本目（検算）: " + counts.dimensionProbe + "。";
