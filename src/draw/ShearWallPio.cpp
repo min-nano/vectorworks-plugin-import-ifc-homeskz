@@ -233,6 +233,24 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
+		// 壁面内の開いた折れ線 1 本を 3D 多角形（閉じない）として host へ入れる。
+		// 座標の載せ方は AddPolygon3D と同じ。たすき掛けの奥の筋かいを、手前に隠れる
+		// ところで切って描くのに使う（core::shearWallHiddenBraceOutline）。
+		void AddPolyline3D(MCObjectHandle host, const std::vector<core::Vec2>& points)
+		{
+			if (points.size() < 2)
+				return;
+			VWPolygon3D shape;
+			for (const core::Vec2& point : points)
+				shape.AddVertex(point.x, 0.0, point.y);
+			VWPolygon3DObj poly(shape);
+			const MCObjectHandle handle = poly.GetThisObject();
+			if (handle == nil)
+				return;
+			poly.SetClosed(false);
+			gSDK->AddObjectToContainer(handle, host);
+		}
+
 		// 伏図記号 1 つ（シンボルの配置）。定義は draw/ShearWall の EnsureMarkSymbols が
 		// 用意しておく（Extensions/ExtShearWall.h の kShearMark*Symbol）。
 		//
@@ -499,7 +517,10 @@ namespace HomeskzIfcImport::draw
 				AddBraceTriangle(object, markCentre, markOffset, !risesToEnd);
 
 			// 軸組図: 形状どおりの帯。見付け幅が取れないと帯にならないので、そのときは
-			// 伏図の記号だけで済ませる。
+			// 伏図の記号だけで済ませる。たすき掛けは risesToEnd の側を手前として閉じた
+			// 多角形で描き、逆向きの奥の 1 本は手前の帯に隠れるところで切った開いた
+			// 折れ線で描く（2 本とも閉じると交差部で輪郭が突き抜けて格子に見える。
+			// core::shearWallHiddenBraceOutline）。
 			if (hasHeight && width > 0.0)
 			{
 				AddPolygon3D(object,
@@ -507,10 +528,11 @@ namespace HomeskzIfcImport::draw
 														 risesToEnd),
 							 0.0, "");
 				if (doubleBrace)
-					AddPolygon3D(object,
-								 core::shearWallBracePolygon(clearStart, clearEnd, bottom, top,
-															 width, !risesToEnd),
-								 0.0, "");
+				{
+					for (const std::vector<core::Vec2>& line : core::shearWallHiddenBraceOutline(
+							 clearStart, clearEnd, bottom, top, width, !risesToEnd))
+						AddPolyline3D(object, line);
+				}
 			}
 		}
 		catch (...)

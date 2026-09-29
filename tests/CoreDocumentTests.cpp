@@ -2101,6 +2101,72 @@ TEST(shear_wall_brace_polygon_rejects_a_degenerate_frame)
 	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, true).empty());
 }
 
+namespace
+{
+	// 点が凸多角形の**内側（境界から tol 以上離れた所）**にあるか。
+	bool strictlyInsideConvex(const core::Vec2& point, const std::vector<core::Vec2>& convex,
+							  double tol)
+	{
+		double area = 0.0;
+		for (std::size_t i = 0; i < convex.size(); ++i)
+			area += core::cross(convex[i], convex[(i + 1) % convex.size()]);
+		const double sign = area >= 0.0 ? 1.0 : -1.0;
+		for (std::size_t i = 0; i < convex.size(); ++i)
+		{
+			const core::Vec2 edge = convex[(i + 1) % convex.size()] - convex[i];
+			const double distance =
+				sign * core::cross(edge, point - convex[i]) / core::length(edge);
+			if (distance <= tol)
+				return false;
+		}
+		return true;
+	}
+} // namespace
+
+TEST(shear_wall_hidden_brace_is_split_on_both_sides_of_the_crossing)
+{
+	// たすき掛け。奥の筋かいの輪郭は手前の帯の両側で 2 本の開いた折れ線に分かれ、
+	// どちらも「長辺→端の切り口→長辺」をたどる（頂点 4 つ以上）。どの線分も手前の帯の
+	// 中を通らない（中点で確かめる）。
+	const std::vector<core::Vec2> front =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, false);
+	const std::vector<std::vector<core::Vec2>> hidden =
+		core::shearWallHiddenBraceOutline(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+	CHECK_EQ(hidden.size(), std::size_t{2});
+	for (const std::vector<core::Vec2>& line : hidden)
+	{
+		CHECK(line.size() >= std::size_t{4});
+		// 開いている（始点と終点が離れている）。
+		CHECK(!core::samePoint(line.front(), line.back()));
+		for (std::size_t i = 0; i + 1 < line.size(); ++i)
+		{
+			const core::Vec2 middle = (line[i] + line[i + 1]) * 0.5;
+			CHECK(!strictlyInsideConvex(middle, front, 1e-6));
+			CHECK(!strictlyInsideConvex(line[i], front, 1e-6));
+		}
+		// 切れ目は手前の帯の縁に載る（突き抜けも、手前に届かない隙間も無い）。
+		CHECK(!strictlyInsideConvex(line.front(), front, 1e-6));
+		CHECK(!strictlyInsideConvex(line.back(), front, 1e-6));
+		CHECK(strictlyInsideConvex(line.front(), front, -1e-6));
+		CHECK(strictlyInsideConvex(line.back(), front, -1e-6));
+	}
+	// 片方は内法の下半分、もう片方は上半分（交差部の両側）。
+	const auto isLow = [](const std::vector<core::Vec2>& line)
+	{
+		double sum = 0.0;
+		for (const core::Vec2& point : line)
+			sum += point.y;
+		return sum / static_cast<double>(line.size()) < 1200.0;
+	};
+	CHECK(isLow(hidden[0]) != isLow(hidden[1]));
+}
+
+TEST(shear_wall_hidden_brace_rejects_a_degenerate_frame)
+{
+	CHECK(core::shearWallHiddenBraceOutline(0.0, 0.0, 0.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallHiddenBraceOutline(0.0, 3000.0, 0.0, 2400.0, 0.0, true).empty());
+}
+
 // ---------------------------------------------------------------------------
 // M31 寸法・レベル記号
 // ---------------------------------------------------------------------------
