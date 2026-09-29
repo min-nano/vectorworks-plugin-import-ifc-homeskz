@@ -1026,4 +1026,23 @@ TEST(clip_polygon_follows_a_sloped_top_edge)
 	}
 }
 
+TEST(clip_polygon_to_half_plane_keeps_the_left_side)
+{
+	// 正方形 [0,4]² を x=1 の縦線で切る。上向き（+y）の左手＝x ≤ 1 側が残り、
+	// 向きを逆にすると x ≥ 1 側が残る。線に触れただけで外にある多角形は空。
+	const std::vector<core::Vec2> square = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {0.0, 4.0}};
+	const std::vector<core::Vec2> left =
+		core::clipPolygonToHalfPlane(square, core::Vec2{1.0, 0.0}, core::Vec2{0.0, 1.0});
+	CHECK_EQ(left.size(), std::size_t{4});
+	for (const core::Vec2& point : left)
+		CHECK(point.x <= 1.0 + 1e-9);
+	const std::vector<core::Vec2> right =
+		core::clipPolygonToHalfPlane(square, core::Vec2{1.0, 0.0}, core::Vec2{0.0, -1.0});
+	CHECK_EQ(right.size(), std::size_t{4});
+	for (const core::Vec2& point : right)
+		CHECK(point.x >= 1.0 - 1e-9);
+	CHECK(
+		core::clipPolygonToHalfPlane(square, core::Vec2{-1.0, 0.0}, core::Vec2{0.0, 1.0}).empty());
+}
+
 TEST_MAIN();

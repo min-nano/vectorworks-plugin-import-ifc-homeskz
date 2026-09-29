@@ -26,6 +26,7 @@
 #include <limits>
 #include <ranges>
 #include <string>
+#include <utility>
 
 namespace HomeskzIfcImport::core
 {
@@ -852,6 +853,49 @@ namespace HomeskzIfcImport::core
 		const std::vector<Vec2> frame = {Vec2{clearStart, bottom}, Vec2{clearEnd, bottom},
 										 Vec2{clearEnd, topAtEnd}, Vec2{clearStart, topAtStart}};
 		return clipPolygonToConvex(band, frame);
+	}
+
+	namespace
+	{
+		// 直線に触れただけの切れ端（面積の無いもの）を捨てる。
+		bool hasArea(const std::vector<Vec2>& polygon)
+		{
+			double area = 0.0;
+			for (std::size_t i = 0; i < polygon.size(); ++i)
+				area += cross(polygon[i], polygon[(i + 1) % polygon.size()]);
+			return std::abs(area) / 2.0 >= kPointEps;
+		}
+	} // namespace
+
+	std::vector<std::vector<Vec2>> shearWallBehindBracePieces(double clearStart, double clearEnd,
+															  double bottom, double topAtStart,
+															  double topAtEnd, double width,
+															  bool risesToEnd)
+	{
+		const std::vector<Vec2> behind = shearWallBracePolygon(
+			clearStart, clearEnd, bottom, topAtStart, topAtEnd, width, risesToEnd);
+		if (behind.empty())
+			return {};
+
+		// 手前の筋かい（逆向き）の帯の 2 本の縁。帯は内法の対角線を中心に幅 width
+		// （shearWallBracePolygon と同じ作り）。奥の筋かいのうち帯の外にある部分は、
+		// 縁のどちらか一方の外側にある。
+		const Vec2 low{risesToEnd ? clearEnd : clearStart, bottom};
+		const Vec2 high{risesToEnd ? clearStart : clearEnd, risesToEnd ? topAtStart : topAtEnd};
+		const Vec2 along = high - low;
+		const Vec2 offset = Vec2{-along.y, along.x} * (width / 2.0 / length(along));
+
+		// offset は along の左手なので、low − offset の縁は帯が左、low + offset の縁は
+		// 帯が右にある。それぞれ帯と反対の側（前者は右＝逆向きの左、後者は左）を残す。
+		std::vector<std::vector<Vec2>> pieces;
+		for (std::vector<Vec2> piece :
+			 {clipPolygonToHalfPlane(behind, low - offset, Vec2{} - along),
+			  clipPolygonToHalfPlane(behind, low + offset, along)})
+		{
+			if (hasArea(piece))
+				pieces.push_back(std::move(piece));
+		}
+		return pieces;
 	}
 
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,

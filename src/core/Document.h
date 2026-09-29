@@ -1648,6 +1648,25 @@ namespace HomeskzIfcImport::core
 											double topAtStart, double topAtEnd, double width,
 											bool risesToEnd);
 
+	// たすき掛けの**奥の**筋かい 1 本を、手前の筋かい（逆向き）に隠れる部分を切り取った
+	// **閉じた多角形**の並びとして返す（座標は shearWallBracePolygon と同じ壁面内の 2D）。
+	// 手前は shearWallBracePolygon(…, !risesToEnd) をそのまま描く想定。
+	//
+	// 【なぜ】2 本とも帯のまま描くと、交差部で互いの輪郭線が突き抜けて 4 本の線が格子に
+	// 交わり、どちらが手前か読めない（実機の軸組図で確認）。奥の帯を手前の帯の 2 本の縁で
+	// 切れば、交差部の両側の 2 片になり、切り口は手前の帯の縁にぴったり重なるので、
+	// 手前が奥を遮って見える。
+	// 【閉じた多角形にする理由】切り口を描かない**開いた折れ線**でも絵は同じになるが、
+	// 軸組図（断面ビューポート）には開いた 3D 多角形が映らなかった（デザインレイヤでは
+	// 見えていた）。docs/DEV-NOTES.md M19。
+	//
+	// 通常は 2 片。手前の帯と重ならなければ奥の帯そのもの 1 片を返す。
+	// 引数が shearWallBracePolygon で空になる組み合わせなら空を返す。
+	std::vector<std::vector<Vec2>> shearWallBehindBracePieces(double clearStart, double clearEnd,
+															  double bottom, double topAtStart,
+															  double topAtEnd, double width,
+															  bool risesToEnd);
+
 	// 希望するデザインレイヤのスタック順（ナビゲーション上→下）を返す。draw/Story がこの順を適
 	// 用する（レベルの高さには依存しない）。SDK を触らない純計算なので core に置いて無 SDK
 	// で単体テストする（CLAUDE.md「テスト方針」: レイヤ順の並べ替え計算のような SDK
