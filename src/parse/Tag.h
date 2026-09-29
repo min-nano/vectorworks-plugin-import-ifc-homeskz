@@ -83,6 +83,15 @@ namespace HomeskzIfcImport::parse
 	// 上辺から逃がす向きに使う。長さが 0 の線には既定（真上＝(0, 1)）を返す。
 	core::Vec2 upwardNormal(double du, double dv);
 
+	// 横架材がその切断面に乗るか（＝断面に立面として写るか。ヘッダ冒頭「軸組図のタグ」）。
+	// 通りに沿って走り、かつ芯が切断位置にある材だけ。許容は切断位置を作ったときと同じ
+	// kClusterTol（parse/Section.h）。**判定はここ 1 か所**で、タグと寸法（parse/Dimension）が
+	// 共有する（別々に持つと、タグは付くのに寸法が付かない材ができる）。
+	bool memberOnCutPlane(const core::MemberCommand& member, const core::SectionCommand& section);
+
+	// 柱（小屋束を含む）がその切断面に乗るか。芯が切断位置から kClusterTol 以内にあること。
+	bool columnOnCutPlane(const core::ColumnCommand& column, const core::SectionCommand& section);
+
 	// 断面の注釈空間の**横方向の原点**（切断線に沿った座標で表したもの）。断面線の終点
 	// ＝画面右の端（ヘッダ冒頭「断面の注釈空間」）。
 	double sectionAlongOrigin(const core::SectionCommand& section);

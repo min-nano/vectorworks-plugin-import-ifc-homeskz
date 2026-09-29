@@ -235,7 +235,7 @@ namespace HomeskzIfcImport::draw
 		{
 			std::string note;
 			std::string info;
-			counts.sheets = drawSheets(document, progress, &note, &memberHandles, &info);
+			counts.sheets = drawSheets(document, progress, &note, &memberHandles, &info, &counts);
 			addDiagnostics(note);
 			addNotes(info);
 		}
@@ -248,7 +248,8 @@ namespace HomeskzIfcImport::draw
 		{
 			std::string note;
 			std::string info;
-			counts.sections = drawSections(document, progress, &note, &memberHandles, &info);
+			counts.sections =
+				drawSections(document, progress, &note, &memberHandles, &info, &counts);
 			addDiagnostics(note);
 			addNotes(info);
 		}

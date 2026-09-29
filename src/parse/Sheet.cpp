@@ -39,12 +39,14 @@ namespace HomeskzIfcImport::parse
 		// 伏図 1 枚の sheet 命令を組み立てる。番号・タイトルは図面タイトル／図番と同じ値を使
 		// う。withLegend なら、グラフィック凡例をシートレイヤに載せる（空の凡例を作らないため
 		// の出し分けは呼び出し側が持つ。ヘッダ冒頭）。
-		core::SheetCommand makeSheet(std::string number, std::string title,
+		core::SheetCommand makeSheet(core::PlanKind kind, std::string number, std::string title,
 									 std::vector<std::string> layers, bool withLegend = false)
 		{
 			core::SheetCommand sheet;
 			sheet.number = std::move(number);
 			sheet.title = std::move(title);
+			// 伏図の種類（M31）。寸法で何を押さえるかは種類で決まる（parse/Dimension）。
+			sheet.kind = kind;
 			sheet.viewport.drawingNumber = sheet.number;
 			sheet.viewport.drawingTitle = sheet.title;
 			sheet.viewport.layers = std::move(layers);
@@ -114,8 +116,8 @@ namespace HomeskzIfcImport::parse
 		// に残るだけになる（あちらは「載せるシンボルが 1 つも無ければ空リスト」と書いていた）。
 		const bool withLegend = !context.anchorBolts().empty();
 
-		core::SheetCommand sheet =
-			makeSheet(kFoundationSheetNumber, kFoundationSheetTitle, std::move(layers), withLegend);
+		core::SheetCommand sheet = makeSheet(core::PlanKind::Foundation, kFoundationSheetNumber,
+											 kFoundationSheetTitle, std::move(layers), withLegend);
 		// 床付け（捨てコンクリート・砕石）は**クラスで隠す**（ご要望）。伏図は基礎の形を
 		// 読む図で、床付けは要らない。レイヤでは切り分けられない（底盤の構成層・地中梁の
 		// 下の床付けソリッドは底盤と同じレイヤに載る）ので、素材クラス（parse/StructuralClass）
@@ -185,8 +187,8 @@ namespace HomeskzIfcImport::parse
 			std::string number = std::to_string(kFloorPlanStartNumber + static_cast<int>(i));
 			// グラフィック凡例は常に載せる（何が並ぶかは凡例オブジェクトのソース定義が決める
 			// ので、ここでは中身の有無を判断できない）。
-			commands.push_back(
-				makeSheet(std::move(number), std::move(title), std::move(layers), true));
+			commands.push_back(makeSheet(core::PlanKind::Framing, std::move(number),
+										 std::move(title), std::move(layers), true));
 		}
 		return commands;
 	}
@@ -246,8 +248,8 @@ namespace HomeskzIfcImport::parse
 			std::string number = std::to_string(baseNumber + seq);
 			++seq;
 			// 柱梁伏図と同じく凡例を載せる（母屋伏図に映るシンボルも同じ形で集まる）。
-			commands.push_back(
-				makeSheet(std::move(number), std::move(title), std::move(layers), true));
+			commands.push_back(makeSheet(core::PlanKind::Moya, std::move(number), std::move(title),
+										 std::move(layers), true));
 		}
 		return commands;
 	}

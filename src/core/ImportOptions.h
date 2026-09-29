@@ -1,12 +1,14 @@
 //
 //	core/ImportOptions.h
 //
-//	取り込みの設定（インポート時の設定ダイアログで決める値）。中身は 2 つ:
+//	取り込みの設定（インポート時の設定ダイアログで決める値）。中身は 3 つ:
 //	  * **置換するシンボルの対応**——「どの要素を図面のどのシンボルで置くか」。要素ごとの
 //	    既定名（"アンカーボルト_M12" / "床束" / "鋼製火打" / "仕口" / 伏図記号）を図面に
 //	    ある別のシンボルへ差し替えられるようにする（docs/DEV-NOTES.md M20）。
 //	  * **図面枠（タイトルブロック）のスタイル**——シートレイヤ（伏図・軸組図）へ置く
 //	    図面枠をどのスタイルで置くか。空なら置かない（docs/DEV-NOTES.md M28）。
+//	  * **寸法規格**——伏図・軸組図へ自動で入れる寸法をどのスタイルで描くか。
+//	    空なら寸法を入れない（docs/DEV-NOTES.md M31）。
 //
 //	【なぜ core/ に置くか】設定は**両フェーズにまたがる**唯一の入力である:
 //	  * 決めるのは描画側（draw/SettingsDialog）——図面にどんなシンボルがあるかは
@@ -106,6 +108,12 @@ namespace HomeskzIfcImport::core
 		// 既定名がそうであるのと同じ考え方）。
 		std::string titleBlock;
 
+		// M31 寸法規格の名前。**空＝寸法（とレベル記号）を入れない**。空ただ 1 つで
+		// 「入れない」を表す理由も、既定が「入れない」である理由も図面枠（titleBlock）と
+		// 同じ——寸法の見え方は利用者の図面ごとに違い、既定と呼べる名前が無い。設定
+		// ダイアログを出さずに既定のまま使えば従来と同じ（寸法の無い）図になる。
+		std::string dimension;
+
 		ImportOptions();
 
 		// 役割に対応するシンボル名。**取り込まない役割の名前は意味を持たない**
@@ -132,5 +140,14 @@ namespace HomeskzIfcImport::core
 		// 図面枠のスタイル名を決める。**空文字はそのまま受け付ける**——シンボルの
 		// setSymbol と違って既定名が無く、空は「置かない」という意味を持つ（上記）。
 		void setTitleBlockStyle(const std::string& name);
+
+		// M31 寸法規格の名前（空なら寸法を入れない）。
+		const std::string& dimensionStandard() const;
+
+		// 寸法を入れるか（＝スタイル名が空でないか）。
+		bool hasDimensions() const;
+
+		// 寸法規格の名前を決める。空は「入れない」としてそのまま受け付ける（図面枠と同じ）。
+		void setDimensionStandard(const std::string& name);
 	};
 } // namespace HomeskzIfcImport::core

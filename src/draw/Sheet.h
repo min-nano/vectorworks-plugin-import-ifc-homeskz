@@ -53,8 +53,11 @@ namespace HomeskzIfcImport::draw
 	// 建物の広がり・選んだ縮尺）を入れる。平常でも必ず出るので note とは行き先を分ける:
 	// 完了ダイアログは note が空かどうかで「問題あり」を判断し、outInfo は診断ログにだけ
 	// 出る（core::DrawCounts の diagnostics / notes）。
+	//
+	// outCounts には**寸法の列とレベル記号の描けた数**を足し込む（M31。core::DrawCounts の
+	// dimensions / levelMarks。件数は完了文言の表 parse/Summary の kElements が読む）。
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
 						   std::string* note = nullptr,
 						   const ObjectHandles* memberHandles = nullptr,
-						   std::string* outInfo = nullptr);
+						   std::string* outInfo = nullptr, core::DrawCounts* outCounts = nullptr);
 } // namespace HomeskzIfcImport::draw

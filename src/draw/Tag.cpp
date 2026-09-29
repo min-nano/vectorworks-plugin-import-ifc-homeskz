@@ -64,16 +64,12 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kTextStyleName = "寸法(6pt)";
 		constexpr double kTextSizePoints = 6.0;
 
-		// 断面寸法タグのクラス。**タグ本体（PIO）とタグレイアウトの中のテキストの両方**を
-		// このクラスに置き、描画属性（ペン・塗り・線の太さ・不透明度…）はすべてクラス属性に
-		// 従わせる（SetAllAttributesByClass）。他の要素が「その部材が何か」でクラス分けする
-		// のと同じ流儀で、寸法の見え方（色・線の太さ）を図面側のクラスで一括して決められる
-		// ようにするため——タグ 1 本ずつへ属性を焼き込むと、後から図面で色を変えられない。
-		// 存在しないクラスは SetClassByName（AddClass）が作る。
-		//
-		// **タグの中のテキストにも要る**——タグレイアウトの中身はタグ本体のクラスを継ぐわけ
-		// ではないので、本体だけに与えても文字は既定クラスのままになる。
-		constexpr const char* kTagClass = "寸法";
+		// 断面寸法タグのクラスは**寸法と同じ "寸法"**（draw/DrawUtil の kDimensionClass）。
+		// **タグ本体（PIO）とタグレイアウトの中のテキストの両方**をこのクラスに置き、描画
+		// 属性はすべてクラス属性に従わせる（SetAllAttributesByClass）——寸法の見え方
+		// （色・線の太さ）を図面側のクラスで一括して決められるようにするため。**タグの中の
+		// テキストにも要る**——タグレイアウトの中身はタグ本体のクラスを継がない。
+		constexpr const char* kTagClass = kDimensionClass;
 
 		// タグフィールドの式（VW のタグフィールド定義式）。構造材の断面幅×せいを mm 整数で
 		// 並べ、勾配（IPZL）が 0 でないときだけ括弧付きで添える。**レコード名・フィールド名は
@@ -252,18 +248,6 @@ namespace HomeskzIfcImport::draw
 				gSDK->DeleteObject(h, true);
 		}
 
-		// タグがいま持っているタグレイアウト。**2 つの入り口を両方見る**——VW2020 で
-		// 「プロファイルグループは aux コンテナに持つ」経路が足されており
-		// （ISDK::GetCustomObjectProfileGroupInAux）、どちらに出るかはオブジェクトによって
-		// 変わる。
-		MCObjectHandle HeldTagLayout(MCObjectHandle pio)
-		{
-			const MCObjectHandle direct = gSDK->GetCustomObjectProfileGroup(pio);
-			if (direct != nil)
-				return direct;
-			return gSDK->GetCustomObjectProfileGroupInAux(pio);
-		}
-
 		// タグレイアウト（＝タグの中身を描くグループ）を**そのタグ自身**へ持たせる。組めたら
 		// そのレイアウトを、組めなければ nil を返す（呼び出し側は寸法が空のタグとして数える）。
 		//
@@ -280,7 +264,7 @@ namespace HomeskzIfcImport::draw
 		{
 			// 既に持っていればそれを使う（生成したばかりのデータタグは既定のレイアウトを
 			// 持っているので、通常はこちら）。
-			MCObjectHandle held = HeldTagLayout(pio);
+			MCObjectHandle held = HeldProfileGroup(pio);
 			if (held != nil)
 			{
 				RemoveDefaultLoci(held);
@@ -304,7 +288,7 @@ namespace HomeskzIfcImport::draw
 				return nil;
 			}
 
-			held = HeldTagLayout(pio);
+			held = HeldProfileGroup(pio);
 			if (held == nil)
 			{
 				// タグが持ってくれなかった（＝データタグのレイアウトはプロファイルグループ
@@ -511,7 +495,7 @@ namespace HomeskzIfcImport::draw
 		// この行は読み手にとって雑音でしかない（タグを見れば分かる）。
 		if (counts.firstTag.empty() && !placed.empty())
 		{
-			const MCObjectHandle layout = HeldTagLayout(placed.front());
+			const MCObjectHandle layout = HeldProfileGroup(placed.front());
 			const std::size_t items = layout == nil ? 0 : ContainerCount(layout);
 			if (items == 0)
 				counts.firstTag = layout == nil ? std::string("レイアウト無し")

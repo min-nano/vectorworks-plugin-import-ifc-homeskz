@@ -1013,6 +1013,73 @@ namespace HomeskzIfcImport::core
 		double angle = 0.0;
 	};
 
+	// 寸法の測る向き（注釈空間の軸）。Horizontal＝注釈空間の x に沿って測る（伏図の東西・
+	// 軸組図の通りに沿った向き）、Vertical＝y に沿って測る（伏図の南北・軸組図の高さ）。
+	// 斜めの寸法は持たない——押さえる対象（通り芯・柱・横架材・立上り）が直交格子に乗る
+	// ことが前提の図面で、斜めの材は押さえない（parse/Dimension.h）。
+	enum class DimensionAxis
+	{
+		Horizontal,
+		Vertical,
+	};
+
+	// 連続寸法 1 列（1 本の寸法線に並ぶ寸法の列。docs/DEV-NOTES.md M31）。描画側は
+	// 隣り合う測点の間ごとに直線寸法を 1 つずつ作り、ビューポートの**注釈**へ入れる。
+	//
+	// 【座標は注釈空間】伏図は平面座標そのまま、軸組図は (切断線に沿った距離, 高さ Z)
+	// （TagCommand と同じ。原点合わせは解析側が済ませてある＝parse/Tag の
+	// sectionAnnotationPoint）。
+	//
+	// 【寸法線の位置は「何段目か」で持つ】寸法線を測点からどれだけ離すかは**用紙の上の
+	// 長さ**で決めたい（どの縮尺でも段の間隔が同じに見える）が、縮尺は用紙への収まりから
+	// 描くときに決まる（core::planLayout）ので解析側では分からない。そこで命令は
+	// **補助線の根元（base）・出す向き（side）・段（tier）**だけを持ち、実際の位置は描画側が
+	// core::dimensionLineCoord で縮尺を掛けて決める（CLAUDE.md「描くときにしか決まらない
+	// ものは命令に持たせない」）。
+	//
+	// 【スタイルは持たない】寸法の見え方（文字・矢印・補助線）は文書に 1 つの
+	// Document::dimensionStandard が決める。
+	//
+	// フィールド:
+	//   axis                         … 測る向き
+	//   stops                        … 測点の座標（測る軸の上。**狭義の昇順・2 つ以上**）
+	//   base                         … 測点の直交座標＝補助線の根元（伏図の外周の列は図の
+	//                                   外形の辺、立上りに沿う列はその立上りの芯、軸組図の
+	//                                   高さの列は図の左端）
+	//   side                         … 寸法線を base のどちら側へ出すか（+1＝直交軸の正の
+	//                                   向き・−1＝負の向き）
+	//   tier                         … base から数えて何段目か（0＝最も内側）
+	struct DimensionChainCommand
+	{
+		DimensionAxis axis = DimensionAxis::Horizontal;
+		std::vector<double> stops;
+		double base = 0.0;
+		int side = 1;
+		int tier = 0;
+	};
+
+	// 軸組図（断面ビューポート）に置くレベル記号 1 つ（GL・1FL・2FL・軒高。M31）。
+	// レベル基準線としてその断面ビューポートの**注釈**に置く（最上階の表記は「軒高」）。
+	//
+	// フィールド:
+	//   name                         … 表示名（"GL" / "1FL" / "軒高"）
+	//   elevation                    … 高さ（注釈空間の y＝絶対 Z。mm）。描かれる数値は
+	//                                   ストーリレベルから来るので、描画側はこれを
+	//                                   置く位置と読み戻しの検算にだけ使う
+	//   x                            … 記号を置く注釈空間の x（図の左端＝高さの寸法列の
+	//                                   base と同じ）
+	//   story                        … 結ぶストーリの名前（StoryCommand::name）
+	//   levelType                    … 結ぶレベル種別（"GL" / "FL" / "軒高"）。高さの基準を
+	//                                   このストーリレベルへ拘束する（ドラッグしても動かない）
+	struct LevelMarkCommand
+	{
+		std::string name;
+		double elevation = 0.0;
+		double x = 0.0;
+		std::string story;
+		std::string levelType;
+	};
+
 	// シートレイヤに載せるビューポート 1 枚。伏図は「特定のデザインレイヤ群だけを見下げた図」
 	// なので、命令が持つのは**どのレイヤを見せるか**と図面タイトル・図番だけになる
 	// （docs/DEV-NOTES.md M13）。
@@ -1046,6 +1113,11 @@ namespace HomeskzIfcImport::core
 		// M13 断面寸法データタグ。この図に載せる注釈（TagCommand の doc コメント参照）。
 		// 伏図・軸組図とも同じ形で持ち、描画側は種類を区別せずに置く。
 		std::vector<TagCommand> tags;
+
+		// M31 寸法。この図に載せる連続寸法の列（DimensionChainCommand の doc コメント参照）。
+		// タグと同じく**入れ子**で持ち、伏図・軸組図とも描画側は種類を区別せずに置く。
+		// 寸法を入れない設定（Document::dimensionStandard が空）なら空。
+		std::vector<DimensionChainCommand> dimensions;
 	};
 
 	// 伏図のグラフィック凡例 1 つ（VW 標準の "GraphicLegend" PIO。docs/DEV-NOTES.md M13）。
@@ -1097,13 +1169,26 @@ namespace HomeskzIfcImport::core
 	// フィールド:
 	//   number                … シートレイヤ番号（**レイヤ名がこれを担う**。"1" / "2" …）
 	//   title                 … シートレイヤのタイトル（"基礎伏図" 等）
+	//   kind                  … 伏図の種類（M31。寸法で何を押さえるかを決める）
 	//   viewport              … そのシートに載せるビューポート 1 枚
 	//   legend                … そのシートレイヤに載せるグラフィック凡例（無い伏図もある。
 	//                           番号で突き合わせず入れ子で持つ理由は上記）
+	// 伏図の種類（M31）。**何を寸法で押さえるかは図の種類で決まる**（基礎伏図＝アンカー
+	// ボルト・立上り、床伏図＝柱・束・梁、母屋伏図＝母屋。parse/Dimension）ので、組み立てた
+	// 側（parse/Sheet）が種類を書き残す。表示レイヤの綴りから推し量ると、レイヤ名の規約を
+	// 2 か所で持つことになる。
+	enum class PlanKind
+	{
+		Foundation, // 基礎伏図
+		Framing,	// 柱梁伏図（床伏図・小屋伏図）
+		Moya,		// 母屋伏図
+	};
+
 	struct SheetCommand
 	{
 		std::string number;
 		std::string title;
+		PlanKind kind = PlanKind::Framing;
 		ViewportCommand viewport;
 
 		// M13 グラフィック凡例。**シートレイヤの上**に 1 つ（LegendCommand の doc コメント
@@ -1160,6 +1245,10 @@ namespace HomeskzIfcImport::core
 		Vec2 lineEnd;
 		Vec2 viewPoint;
 		ViewportCommand viewport;
+
+		// M31 レベル記号（GL・FL・軒高）。この断面ビューポートの注釈に置く
+		// （LevelMarkCommand の doc コメント参照）。寸法を入れない設定なら空。
+		std::vector<LevelMarkCommand> levels;
 	};
 
 	// 軸組図を載せるシートレイヤの**通し方**（docs/DEV-NOTES.md M18）。軸組図は 1 枚の用紙に
@@ -1303,6 +1392,13 @@ namespace HomeskzIfcImport::core
 		// ある。プラグインはスタイル**を作らない**——利用者が自分の図面に用意した図面枠
 		// スタイルを名前で指すだけである（CLAUDE.md 開発の基本方針 4）。
 		std::string titleBlockStyle;
+
+		// M31 寸法規格の名前（取り込み設定 core::ImportOptions::dimensionStandard をそのまま
+		// 写したもの）。**空なら寸法もレベル記号も入れない**（既定）——そのとき解析側は
+		// 寸法の命令（ViewportCommand::dimensions / SectionCommand::levels）を 1 つも作らない。
+		// 図面枠と同じく**スタイルは作らない**（利用者の図面にあるものを名前で指すだけ。
+		// CLAUDE.md 開発の基本方針 4）。
+		std::string dimensionStandard;
 	};
 
 	// ------------------------------------------------------------------------
@@ -1356,6 +1452,9 @@ namespace HomeskzIfcImport::core
 		// M14 軸組図。**作れた断面ビューポートの枚数**（＝柱梁の芯を通る通りの数）。
 		// 命令はあるのに 0 なら、原因は診断行に出る（draw/Section）。
 		std::size_t sections = 0;
+		// M31 寸法（連続寸法の列の数＝命令の数）・レベル記号。
+		std::size_t dimensions = 0;
+		std::size_t levelMarks = 0;
 
 		// 進捗ダイアログの「キャンセル」で途中打ち切りになったか。true のときは各要素の
 		// 件数が命令数に届かないのが正常で、描けたところまでは図面に残る（要らなければ
@@ -1410,6 +1509,14 @@ namespace HomeskzIfcImport::core
 	// 則は Document.cpp の各 isValid* 参照。空の Document は妥当）。各命令リストの追加に合わせ
 	// て検証規則を足していく。
 	bool validateDocument(const Document& document);
+
+	// 図の外周に出る寸法の段のうち最も外のもの（M31）。sheets（伏図）か sections（軸組図）の
+	// どちらかを見る（両者は別の用紙に載り、縮尺も別に決まる）。寸法が 1 つも無ければ −1。
+	// **補助線の根元が図の外形にある列だけを数える**のが本来だが、命令は「どこが外形か」を
+	// 持たないので全ての列の段を見る（内側の列は段 0 なので、外周の段数を超えない）。
+	// 用紙へ寸法の帯を空ける量（core::dimensionBand）を決めるのに使う。
+	int outermostDimensionTier(const std::vector<SheetCommand>& sheets);
+	int outermostDimensionTier(const std::vector<SectionCommand>& sections);
 
 	// 断面（軸組図）の高さ範囲に足す上下の余白（mm）。基礎の底や屋根の頂部を切り落とさない
 	// ための遊びで、sectionHeightRange とその期待値を書くテストが共有する。
