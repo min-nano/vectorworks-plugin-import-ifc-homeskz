@@ -16,8 +16,10 @@
 
 #include "core/Document.h"
 #include "core/Geometry.h"
+#include "core/Layout.h"
 #include "parse/BuildDocument.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <string>
@@ -1554,6 +1556,105 @@ TEST(section_height_range_fails_without_elements)
 }
 
 // ---------------------------------------------------------------------------
+// 断面の注釈空間（断面寸法タグ＝parse/Tag と図面ラベル＝draw/DrawingLabel が共有する投影。
+// parse/Tag.h「断面の注釈空間」）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 通り芯の外接が ±7000・余白 3000 の断面線（parse/Section と同じ形）。
+	core::SectionCommand makeCutSection(core::SectionDirection direction, double cut)
+	{
+		core::SectionCommand section;
+		section.direction = direction;
+		section.lineStart = direction == core::SectionDirection::X ? core::Vec2{cut, -10000.0}
+																   : core::Vec2{-10000.0, cut};
+		section.lineEnd = direction == core::SectionDirection::X ? core::Vec2{cut, 10000.0}
+																 : core::Vec2{10000.0, cut};
+		return section;
+	}
+} // namespace
+
+TEST(section_annotation_point_projects_to_the_view)
+{
+	using core::SectionDirection;
+	// 横方向の原点は断面線の**終点**（画面右向きに測った 0 点）。X通りは終点の Y、
+	// Y通りは終点の X。
+	CHECK(
+		near(core::sectionAlongOrigin(makeCutSection(SectionDirection::X, 1000.0)), 10000.0, 1e-9));
+	CHECK(
+		near(core::sectionAlongOrigin(makeCutSection(SectionDirection::Y, 1000.0)), 10000.0, 1e-9));
+
+	// X通り（−X 方向を見る）は画面右が +Y なので、注釈座標の x は材の Y −原点。
+	const core::Vec2 onX = core::sectionAnnotationPoint(core::Vec2{1500.0, -2000.0}, 3273.0,
+														SectionDirection::X, 500.0);
+	CHECK(near(onX.x, -2500.0, 1e-9));
+	CHECK(near(onX.y, 3273.0, 1e-9));
+
+	// Y通り（+Y 方向を見る）は画面右が +X なので、注釈座標の x は材の X −原点。
+	const core::Vec2 onY = core::sectionAnnotationPoint(core::Vec2{1500.0, -2000.0}, 3273.0,
+														SectionDirection::Y, 500.0);
+	CHECK(near(onY.x, 1000.0, 1e-9));
+	CHECK(near(onY.y, 3273.0, 1e-9));
+
+	// 縦は Z そのまま（原点の補正は横だけ）。
+	CHECK(near(
+		core::sectionAnnotationPoint(core::Vec2{0.0, 0.0}, 3273.0, SectionDirection::X, 9999.0).y,
+		3273.0, 1e-9));
+}
+
+TEST(section_label_anchor_is_below_the_middle_of_the_building)
+{
+	using core::SectionDirection;
+	// 断面線 −10000〜10000 の中点（0）は、終点（10000）から測ると −10000。高さは範囲の
+	// 下端に余白を戻した＝建物の最下点。
+	const double rangeStart = -600.0 - core::kSectionHeightMargin;
+	for (const SectionDirection direction : {SectionDirection::X, SectionDirection::Y})
+	{
+		const core::Vec2 anchor =
+			core::sectionLabelAnchor(makeCutSection(direction, 1000.0), rangeStart);
+		CHECK(near(anchor.x, -10000.0, 1e-9));
+		CHECK(near(anchor.y, -600.0, 1e-9));
+	}
+
+	// 断面線が原点に対して片寄っていても、中点は断面線の中点（通り芯の外接の中央）。
+	core::SectionCommand shifted = makeCutSection(SectionDirection::Y, 0.0);
+	shifted.lineStart = core::Vec2{2000.0, 0.0};
+	shifted.lineEnd = core::Vec2{18000.0, 0.0};
+	CHECK(near(core::sectionLabelAnchor(shifted, rangeStart).x, 10000.0 - 18000.0, 1e-9));
+}
+
+TEST(section_label_drop_clears_the_dimensions_below)
+{
+	// 寸法が無ければ間隔だけ。
+	core::ViewportCommand viewport;
+	CHECK(near(core::sectionLabelDrop(viewport), core::kSectionLabelGap, 1e-9));
+
+	// 図の左（垂直・side 負）や上（水平・side 正）の列はラベルに関係しない。
+	core::DimensionChainCommand left;
+	left.axis = core::DimensionAxis::Vertical;
+	left.side = -1;
+	left.tier = 3;
+	core::DimensionChainCommand above;
+	above.axis = core::DimensionAxis::Horizontal;
+	above.side = 1;
+	above.tier = 2;
+	viewport.dimensions = {left, above};
+	CHECK(near(core::sectionLabelDrop(viewport), core::kSectionLabelGap, 1e-9));
+
+	// 図の下（水平・side 負）の列があれば、その最も外の段の帯の外まで下げる。
+	core::DimensionChainCommand below;
+	below.axis = core::DimensionAxis::Horizontal;
+	below.side = -1;
+	below.tier = 0;
+	viewport.dimensions.push_back(below);
+	below.tier = 1;
+	viewport.dimensions.push_back(below);
+	CHECK(near(core::sectionLabelDrop(viewport), core::dimensionBand(1) + core::kSectionLabelGap,
+			   1e-9));
+}
+
+// ---------------------------------------------------------------------------
 // 平面の広がり（伏図の縮尺と位置を決めるのに使う。docs/DEV-NOTES.md M18）
 //
 // planContentBounds は「図に映るもの」を包む矩形を返す。layers を渡すとそのレイヤに載る
@@ -2059,7 +2160,7 @@ TEST(shear_wall_brace_polygon_is_clipped_to_the_frame)
 	// どの角も 2 頂点に切り分けられて八角形（端が斜めに落ちた形）になる。頂点はすべて
 	// 内法の中に収まる。
 	const std::vector<core::Vec2> brace =
-		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, true);
 	CHECK_EQ(brace.size(), std::size_t{8});
 	for (const core::Vec2& point : brace)
 	{
@@ -2087,9 +2188,9 @@ TEST(shear_wall_brace_polygon_follows_the_rise_direction)
 		return best;
 	};
 	const std::vector<core::Vec2> up =
-		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, true);
 	const std::vector<core::Vec2> down =
-		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, false);
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, false);
 	CHECK(lowestX(up) < 1500.0);
 	CHECK(lowestX(down) > 1500.0);
 }
@@ -2097,9 +2198,28 @@ TEST(shear_wall_brace_polygon_follows_the_rise_direction)
 TEST(shear_wall_brace_polygon_rejects_a_degenerate_frame)
 {
 	// 内法が潰れている・幅が無いときは描けない（空を返す）。
-	CHECK(core::shearWallBracePolygon(0.0, 0.0, 0.0, 2400.0, 100.0, true).empty());
-	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 2400.0, 2400.0, 100.0, true).empty());
-	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 0.0, 0.0, 2400.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 2400.0, 2400.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 0.0, true).empty());
+	// 片端だけ上端が下端以下（登り梁が土台まで下りてきた等）でも描けない。
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, 100.0, true).empty());
+}
+
+TEST(shear_wall_brace_polygon_fits_under_a_sloped_top)
+{
+	// 内法 3000 で上端が 2400 → 3000 へ上がる台形。帯は上辺の傾きに沿って切られ、
+	// 頂点はすべて台形の中に収まる。高い側（終点）の上隅まで届く。
+	const std::vector<core::Vec2> brace =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 3000.0, 100.0, true);
+	CHECK(brace.size() >= std::size_t{6});
+	double highest = 0.0;
+	for (const core::Vec2& point : brace)
+	{
+		CHECK(point.x >= -1e-9 && point.x <= 3000.0 + 1e-9);
+		CHECK(point.y >= -1e-9 && point.y <= 2400.0 + (0.2 * point.x) + 1e-9);
+		highest = std::max(highest, point.y);
+	}
+	CHECK(highest > 2900.0);
 }
 
 // ---------------------------------------------------------------------------

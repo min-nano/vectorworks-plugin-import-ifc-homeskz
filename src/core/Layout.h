@@ -69,6 +69,17 @@ namespace HomeskzIfcImport::core
 	// （draw/DrawUtil の SheetPaperArea）と、下の resolvePageMargins が共有する唯一の定義。
 	inline constexpr double kMillimetersPerInch = 25.4;
 
+	// 1 インチの pt 数。文字の大きさ（紙の pt）を mm へ直すのに使う唯一の定義
+	// （文字スタイルの大きさを読む draw/DrawUtil・寸法の文字を焼く draw/Dimension・
+	// 図面ラベルのタイトル draw/DrawingLabel が共有する）。
+	inline constexpr double kPointsPerInch = 72.0;
+
+	// 紙の pt → 紙の mm（10pt → 3.5278mm）。
+	constexpr double pointsToMillimeters(double points)
+	{
+		return points * kMillimetersPerInch / kPointsPerInch;
+	}
+
 	// 「用紙 − 余白」とシートレイヤの大きさを突き合わせるときの遊び（用紙 mm）。
 	inline constexpr double kPageMarginMatchTol = 0.5;
 

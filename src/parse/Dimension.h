@@ -36,7 +36,7 @@
 //	（tier 0）を占めるので、基礎伏図の外周の列は 2 段目から始める。
 //
 //	【軸組図の注釈空間】横＝切断線に沿った距離（断面線の終点からの距離）・縦＝高さ Z。原点
-//	合わせは parse/Tag の sectionAnnotationPoint ただ 1 か所に任せる（タグと寸法が同じ投影を
+//	合わせは core::sectionAnnotationPoint ただ 1 か所に任せる（タグと寸法が同じ投影を
 //	通る。どちらかだけがずれることが無い）。切断面に乗る材の判定も parse/Tag の
 //	memberOnCutPlane / columnOnCutPlane を通す。
 //
