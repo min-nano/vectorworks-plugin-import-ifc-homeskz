@@ -35,7 +35,8 @@
 //	  CreateCustomObject("Elevation Benchmark2") → 注釈へ移す → SetPointObjectPos で注釈の
 //	  座標を明示 → **ストーリレベルへ結ぶ 3 つ組**（__StoryName ＋ __LevelTypeName ＋
 //	  Datum＝StoryLevel。Axis は既定の Z のまま）→ ResetObject → **マーカーレイアウトを
-//	  組み直して渡し直す**（▽＋名前＋基準線。下記）→ 起点へ置き直す → ResetObject →
+//	  組み直して渡し直す**（▽＋名前。下記）→ 図の全記号の幅が揃ったら起点へ置き直し、
+//	  **パス（＝基準線）を右へ伸ばす** → ResetObject →
 //	  （ビューポートの更新を全部済ませた後で）**断面の向き（1055）をビュー行列（1050）へ
 //	  写して**個体を ResetObject（finishLevelMarks）
 //	  * 高さはストーリレベルの絶対 Z から来る——記号をドラッグしても数値は動かない
@@ -44,16 +45,20 @@
 //	    写さないと高さが 0 と描かれる。UpdateViewport が写したものを戻すので、写すのは最後。
 //	  * 名前はパラメータでは出ない。レイアウトの既定の中身（高さ "#Elev#"・ストーリレベル名
 //	    "#STLT#…" の 2 つのテキストと記号のポリライン）を消し、CreateTextBlock /
-//	    CreateLine で作った**名前・▽・基準線**を入れて SetCustomObjectProfileGroup で
+//	    CreateLine で作った**名前と▽**を入れて SetCustomObjectProfileGroup で
 //	    渡し直す（中身を入れ替えるだけでは絵に出ない。実測）。**高さの数値は描かない**
 //	    （ご要望）。差し替えても結び付き（Datum）が残っているかは読み戻して確かめる。
 //	  * レイアウトの長さは**用紙 mm**（Findings「Drawing Labels」の「レイアウトの文字の
-//	    大きさ」を同じ作りのマーカーレイアウトにも当てはめた。レベル基準線では未実測なので、
-//	    dev の検算が描いた範囲と狙いを記録へ出す）。名前の大きさは寸法の文字と同じ紙の pt、
-//	    ▽ はその 0.8 倍の高さの正三角形、線は起点から右へ図の右端を少し越えるまで
+//	    大きさ」を同じ作りのマーカーレイアウトにも当てはめた。round 1 の実機で縦の大きさが
+//	    合った）。名前の大きさは寸法の文字と同じ紙の pt、▽ はその 0.8 倍の高さの正三角形
 //	    （core/Layout.h「軸組図のレベル記号の形と位置」）。
-//	  * **起点は左の寸法列より外**。名前の幅は描くまで分からないので、レイアウトを組んで
-//	    名前を測ってから起点を決め（core::levelMarkStartX）、記号をそこへ置き直す。
+//	  * **基準線はレイアウトではなく PIO のパス**が描く（既定では挿入点から左へ用紙 36mm。
+//	    round 2 の実機で分かった）。パスを「挿入点 → 右へ図の右端を少し越えるまで」の
+//	    2 点に SetCustomObjectPath で差し替える（座標は挿入点からの相対。Findings
+//	    「Parametric Objects」）。
+//	  * **起点は左の寸法列より外**で、**同じ図の記号は ▽ の左端を揃える**（ご要望）。名前の
+//	    幅は描くまで分からないので、図の全記号のレイアウトを組んで名前を測り、いちばん広い
+//	    記号で起点を決め（core::levelMarkStartX）、全部をそこへ置き直す。
 //
 //	【注釈へ足した後はクラスを戻して描き直す】注釈へ後から足した図形のクラスはビューポートで
 //	非表示のまま（Findings「Viewports」）なので、置き終えたら全クラスを表示へ戻して更新する
@@ -90,6 +95,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t levels = 0;		  // 注釈へ置けたレベル記号
 		std::size_t levelsFailed = 0; // 作れなかった・注釈へ入らなかったレベル記号
 		std::size_t levelLayoutFailed = 0; // マーカーレイアウトを組み直せなかったレベル記号
+		std::size_t levelPathFailed = 0; // 基準線（パス）を差し替えられなかったレベル記号
 		std::size_t levelBindFailed = 0; // ストーリレベルへ結べなかったレベル記号
 		std::size_t viewMatrixFailed = 0; // 断面の向きをビュー行列へ写せなかったビューポート
 		std::size_t levelHeightUnread = 0; // 描いた高さを読めなかったレベル記号
@@ -109,6 +115,7 @@ namespace HomeskzIfcImport::draw
 		// 狙い（起点〜基準線の終点）。レイアウトの長さが用紙 mm で効いているかを確かめる。
 		std::string levelShapeProbe;
 		bool levelShapeDrawn = false; // 描いた範囲を控え終えたか（文書で 1 個目だけ）
+		bool levelPathProbed = false; // パスの差し替え前後を控え終えたか（文書で 1 個目だけ）
 #endif
 	};
 

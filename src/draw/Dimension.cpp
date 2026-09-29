@@ -18,6 +18,7 @@
 #include "PluginPrefix.h"
 #include "draw/Dimension.h"
 #include "draw/DrawUtil.h"
+#include "draw/StructuralMember.h"
 #include "draw/Verify.h"
 #include "core/Document.h"
 #include "core/Layout.h"
@@ -260,13 +261,6 @@ namespace HomeskzIfcImport::draw
 			double markScale = kFallbackScale;
 		};
 
-		// 組み直したレイアウトの置き場所（注釈空間の x）。
-		struct LevelMarkPlacement
-		{
-			double startX = 0.0;
-			double endX = 0.0;
-		};
-
 		// 線を 1 本作って container へ入れる。入らなければ消す。
 		bool AddLine(MCObjectHandle container, double x1, double y1, double x2, double y2)
 		{
@@ -314,15 +308,17 @@ namespace HomeskzIfcImport::draw
 #endif
 
 		// **マーカーレイアウトを組み直して渡し直す**（draw/Dimension.h「レベル基準線の作法」）。
-		// 既定の中身（高さとストーリレベル名のテキスト・記号のポリライン）を消し、起点＝(0, 0)
-		// から右へ「▽＋名前」と基準線を置く（core/Layout.h「軸組図のレベル記号の形と位置」）。
-		// 名前を測ってから起点と線の長さを決めるので、置き場所をここで返す。
+		// 既定の中身（高さとストーリレベル名のテキスト・記号のポリライン）を消し、挿入点＝(0, 0)
+		// から右へ「▽＋名前」を置く（core/Layout.h「軸組図のレベル記号の形と位置」）。**基準線は
+		// 置かない**——線は PIO がパスに沿って自分で描く（SetLevelLinePath）。起点を決めるのに
+		// 要る記号の幅（用紙 mm）を markWidth へ返す。
 		// **中身を入れ替えるだけでは絵に出ない**ので、新しい図形を作って入れ、古いものを
 		// 消してから SetCustomObjectProfileGroup で渡す（Findings「Level Objects」の実測手順）。
 		bool RebuildLevelLayout(MCObjectHandle mark, const core::LevelMarkCommand& level,
-								const LevelMarkStyle& style, LevelMarkPlacement& placement,
+								const LevelMarkStyle& style, double& markWidth,
 								[[maybe_unused]] std::string& probe)
 		{
+			markWidth = 0.0;
 			const MCObjectHandle layout = HeldProfileGroup(mark);
 			if (layout == nil)
 				return false;
@@ -371,14 +367,9 @@ namespace HomeskzIfcImport::draw
 			if (textWidth > 0.0)
 				gSDK->MoveObject(text, shape.textLeft - bounds.left,
 								 shape.textBottom - std::min(bounds.top, bounds.bottom));
+			markWidth = shape.width;
 
-			placement.startX = core::levelMarkStartX(level.x, level.dimensionTier, shape.width,
-													 style.dimensionScale, style.markScale);
-			const double length =
-				core::levelLineLength(placement.startX, level.right, style.markScale);
-			placement.endX = placement.startX + (length * style.markScale);
-
-			// ▽（頂点で基準線に触れる正三角形）と基準線（起点から右へ）。
+			// ▽（頂点で基準線に触れる正三角形）。
 			const double h = shape.triangleHeight;
 			const double w = shape.triangleHalfWidth;
 			bool drawn = true;
@@ -388,11 +379,51 @@ namespace HomeskzIfcImport::draw
 				drawn = AddLine(layout, 0.0, h, w, 0.0) && drawn;
 				drawn = AddLine(layout, 2.0 * w, h, w, 0.0) && drawn;
 			}
-			drawn = AddLine(layout, 0.0, 0.0, length, 0.0) && drawn;
 
 			for (const MCObjectHandle object : old)
 				gSDK->DeleteObject(object, true);
 			return gSDK->SetCustomObjectProfileGroup(mark, layout) != 0 && drawn;
+		}
+
+		// **基準線はレベル基準線のパスである**（round 2 の実機で分かった。既定のレイアウトに
+		// 線は無く、PIO がパスの 2 点の間へ線を引く——既定では挿入点から左へ用紙 36mm）。
+		// パスを「挿入点 → 右へ length（注釈空間の長さ）」の 2 点に差し替える。
+		// 既定のパスの頂点のうち**挿入点にある方の番号を保つ**（どちらの端が記号の側かを
+		// PIO が番号で見ていても崩れないように）。座標は**挿入点からの相対**で渡す
+		// （SetCustomObjectPath は変換をしない。Findings「Parametric Objects」）。
+		bool SetLevelLinePath(MCObjectHandle mark, double length)
+		{
+			bool originFirst = true;
+			if (const MCObjectHandle held = gSDK->GetCustomObjectPath(mark); held != nil)
+			{
+				// ピース索引の起点は 0 / 1 のどちらの規約もありうる（DrawUtil の
+				// DescribePioPath と同じ用心）ので、2 点以上ある最初のピースを見る。
+				for (Sint32 piece = 0; piece <= 1; ++piece)
+				{
+					const Sint32 count = gSDK->NurbsGetNumPts(held, piece);
+					if (count < 2)
+						continue;
+					WorldPt3 first(0.0, 0.0, 0.0);
+					WorldPt3 last(0.0, 0.0, 0.0);
+					if (gSDK->NurbsGetPt3D(held, piece, 0, first) &&
+						gSDK->NurbsGetPt3D(held, piece, count - 1, last))
+						originFirst = std::hypot(first.x, first.y) <= std::hypot(last.x, last.y);
+					break;
+				}
+			}
+			const core::Vec2 origin{0.0, 0.0};
+			const core::Vec2 end{length, 0.0};
+			bool appended = false;
+			const MCObjectHandle path =
+				originFirst ? CreatePath(origin, end, appended) : CreatePath(end, origin, appended);
+			if (path == nil)
+				return false;
+			const bool set = gSDK->SetCustomObjectPath(mark, path);
+			// PIO が渡した曲線を引き取らなかった（複製した・受け付けなかった）なら、図面へ
+			// 作った曲線はこちらの後始末（構造材で同じ扱いをしていた。M27）。
+			if (gSDK->GetCustomObjectPath(mark) != path)
+				gSDK->DeleteObject(path, true);
+			return set && appended;
 		}
 
 #if VW_DRAW_VERIFY
@@ -500,12 +531,14 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// レベル記号 1 つを置く。注釈へ置けたらそのハンドル、置けなければ nil。置き場所
-		// （起点と基準線の終点）を placement へ返す。
+		// レベル記号 1 つを注釈へ置き、ストーリレベルへ結んでレイアウトを組み直す。注釈へ
+		// 置けたらそのハンドル、置けなければ nil。記号の幅（用紙 mm）を markWidth へ返す——
+		// 起点は同じ図の全記号の幅が揃ってから決める（PositionLevel）。
 		MCObjectHandle PlaceLevel(MCObjectHandle viewport, const core::LevelMarkCommand& level,
-								  const LevelMarkStyle& style, LevelMarkPlacement& placement,
+								  const LevelMarkStyle& style, double& markWidth,
 								  DimensionCounts& counts)
 		{
+			markWidth = 0.0;
 			const MCObjectHandle mark = gSDK->CreateCustomObject(
 				TXString(kLevelMarkPlugin), WorldPt(level.x, level.elevation), 0.0, true);
 			if (mark == nil)
@@ -532,27 +565,50 @@ namespace HomeskzIfcImport::draw
 			gSDK->ResetObject(mark);
 
 			std::string shapeProbe;
-			placement = LevelMarkPlacement{level.x, level.right};
-			if (!RebuildLevelLayout(mark, level, style, placement, shapeProbe))
+			if (!RebuildLevelLayout(mark, level, style, markWidth, shapeProbe))
 				++counts.levelLayoutFailed;
 #if VW_DRAW_VERIFY
 			if (counts.levelShapeProbe.empty())
 				counts.levelShapeProbe = shapeProbe;
 #endif
-			// 名前を測って決めた起点へ置き直す（縦の位置は絵の置き場所だけで、描く数値には
-			// 効かない）。
+			return mark;
+		}
+
+		// 置いた記号を起点 startX へ動かし、基準線（パス）を図の右端を少し越えるまで伸ばして
+		// 描き直す。基準線の終点（注釈空間の x）を返す。
+		double PositionLevel(MCObjectHandle mark, const core::LevelMarkCommand& level,
+							 double startX, const LevelMarkStyle& style, DimensionCounts& counts)
+		{
+			const double length =
+				core::levelLineLength(startX, level.right, style.markScale) * style.markScale;
+#if VW_DRAW_VERIFY
+			const bool probePath = !counts.levelPathProbed;
+			std::string pathBefore;
+			if (probePath)
+				pathBefore = DescribePioPath(mark);
+#endif
+			// 縦の位置は絵の置き場所だけで、描く数値には効かない。
 			try
 			{
-				VWParametricObj(mark).SetPointObjectPos(
-					VWPoint2D(placement.startX, level.elevation));
+				VWParametricObj(mark).SetPointObjectPos(VWPoint2D(startX, level.elevation));
 			}
 			catch (...)
 			{
 				++counts.levelLayoutFailed;
 			}
+			if (!SetLevelLinePath(mark, length))
+				++counts.levelPathFailed;
 			gSDK->ResetObject(mark);
-			// **名前を差し替えた後も結び付きが残っているか**を読み戻す（書いても入らない値が
-			// ある。Findings「Level Objects」の作法）。
+#if VW_DRAW_VERIFY
+			if (probePath)
+			{
+				counts.levelPathProbed = true;
+				counts.levelShapeProbe +=
+					" / パス 差し替え前 " + pathBefore + " → 後 " + DescribePioPath(mark);
+			}
+#endif
+			// **レイアウトとパスを差し替えた後も結び付きが残っているか**を読み戻す（書いても
+			// 入らない値がある。Findings「Level Objects」の作法）。
 			try
 			{
 				const VWParametricObj pio(mark);
@@ -568,7 +624,7 @@ namespace HomeskzIfcImport::draw
 			if (!DrawsText(mark, level.name, counts.levelNameProbe))
 				++counts.levelNameUnseen;
 #endif
-			return mark;
+			return startX + length;
 		}
 	} // namespace
 
@@ -627,21 +683,38 @@ namespace HomeskzIfcImport::draw
 		}
 		counts.chains += drawn;
 
+		// レベル記号はまず全部置いて幅を測り、**いちばん広い記号に合わせた 1 つの起点**へ
+		// 揃える（▽ の左端が縦に揃う。ご要望）。
+		struct PendingLevel
+		{
+			MCObjectHandle mark = nil;
+			const core::LevelMarkCommand* level = nullptr;
+		};
+		std::vector<PendingLevel> pending;
+		double widest = 0.0;
 		for (const core::LevelMarkCommand& level : levels)
 		{
-			LevelMarkPlacement placement;
-			if (const MCObjectHandle mark =
-					PlaceLevel(viewport, level, markStyle, placement, counts);
+			double width = 0.0;
+			if (const MCObjectHandle mark = PlaceLevel(viewport, level, markStyle, width, counts);
 				mark != nil)
 			{
-				++counts.levels;
-				anyPlaced = true;
-				if (placedLevels != nullptr)
-					placedLevels->push_back(
-						{mark, level.elevation, placement.startX, placement.endX});
+				pending.push_back({mark, &level});
+				widest = std::max(widest, width);
 			}
 			else
 				++counts.levelsFailed;
+		}
+		for (const PendingLevel& placed : pending)
+		{
+			const core::LevelMarkCommand& level = *placed.level;
+			const double startX =
+				core::levelMarkStartX(level.x, level.dimensionTier, widest,
+									  markStyle.dimensionScale, markStyle.markScale);
+			const double endX = PositionLevel(placed.mark, level, startX, markStyle, counts);
+			++counts.levels;
+			anyPlaced = true;
+			if (placedLevels != nullptr)
+				placedLevels->push_back({placed.mark, level.elevation, startX, endX});
 		}
 
 		// 注釈へ後から足した図形のクラスは非表示のままなので、全クラスを表示へ戻して描き直す
@@ -703,9 +776,10 @@ namespace HomeskzIfcImport::draw
 		if (counts.failed == 0 && counts.standardRejected == 0 && counts.unjoined == 0 &&
 			counts.textStyleMissing == 0 && counts.textSizeUnread == 0 &&
 			counts.levelsFailed == 0 && counts.levelLayoutFailed == 0 &&
-			counts.levelBindFailed == 0 && counts.viewMatrixFailed == 0 &&
-			counts.levelHeightUnread == 0 && counts.levelHeightMismatch == 0 &&
-			counts.updateFailed == 0 && !classesBroken && !verifyIssue)
+			counts.levelPathFailed == 0 && counts.levelBindFailed == 0 &&
+			counts.viewMatrixFailed == 0 && counts.levelHeightUnread == 0 &&
+			counts.levelHeightMismatch == 0 && counts.updateFailed == 0 && !classesBroken &&
+			!verifyIssue)
 			return {};
 
 		std::string text = label + "の寸法の診断: ";
@@ -720,6 +794,8 @@ namespace HomeskzIfcImport::draw
 			"文字スタイルの大きさを読めませんでした。寸法値が小さすぎて見えない可能性があります");
 		AppendCount(text, "置けなかったレベル記号", counts.levelsFailed, "個");
 		AppendCount(text, "記号を組み直せなかったレベル記号", counts.levelLayoutFailed, "個");
+		AppendCount(text, "基準線を伸ばせなかったレベル記号", counts.levelPathFailed, "個",
+					"基準線が既定の長さのまま左へ出ます");
 		AppendCount(text, "ストーリレベルへ結べなかったレベル記号", counts.levelBindFailed, "個",
 					"高さが拘束されず、数値が 0 と出ることがあります");
 		AppendCount(text, "断面の向きをビュー行列へ写せなかった軸組図", counts.viewMatrixFailed,
