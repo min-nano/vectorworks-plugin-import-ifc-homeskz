@@ -411,11 +411,13 @@ namespace HomeskzIfcImport::draw
 					break;
 				}
 			}
-			const core::Vec2 origin{0.0, 0.0};
-			const core::Vec2 end{length, 0.0};
+			// 挿入点側の頂点の番号を保つ（始端か終端か）。
+			const core::Vec2 atMark{0.0, 0.0};
+			const core::Vec2 farEnd{length, 0.0};
+			const core::Vec2& start = originFirst ? atMark : farEnd;
+			const core::Vec2& end = originFirst ? farEnd : atMark;
 			bool appended = false;
-			const MCObjectHandle path =
-				originFirst ? CreatePath(origin, end, appended) : CreatePath(end, origin, appended);
+			const MCObjectHandle path = CreatePath(start, end, appended);
 			if (path == nil)
 				return false;
 			const bool set = gSDK->SetCustomObjectPath(mark, path);
