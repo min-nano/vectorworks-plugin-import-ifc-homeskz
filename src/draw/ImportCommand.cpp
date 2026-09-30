@@ -19,8 +19,10 @@
 #include "draw/ImportRun.h"
 #include "draw/ResultDialog.h"
 #include "draw/SettingsDialog.h"
+#include "parse/BuildDocument.h"
 
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
@@ -43,9 +45,16 @@ namespace HomeskzIfcImport::draw
 		//    ——ファイルは選んだが取り込みたくない、という意思表示なので何も描かない。
 		//    ダイアログを組めなかったときは**既定の対応でそのまま進む**（設定を出せない
 		//    ことを理由に取り込み自体を落とさない。draw/SettingsDialog.h）。
+		//
+		//    伏図のまとめ方を問うために、**ダイアログより先に IFC を 1 度読んで横架材の高さを
+		//    集める**（伏図は高さごとに 1 枚。どの高さをまとめるかは設計者が決める）。
+		//    解析は大きな IFC でも 1 秒に満たない（parse/BuildDocument の buildDocument の
+		//    但し書き）ので、取り込みの本番でもう 1 度読んでも待たせない。
 		core::ImportOptions options;
 		std::string settingsNote;
-		const draw::SettingsOutcome settings = draw::showImportSettings(options, &settingsNote);
+		const std::vector<core::PlanLevelChoice> planLevels = parse::scanPlanLevelChoices(ifcPath);
+		const draw::SettingsOutcome settings =
+			draw::showImportSettings(options, planLevels, &settingsNote);
 		if (settings == draw::SettingsOutcome::Cancelled)
 			return;
 

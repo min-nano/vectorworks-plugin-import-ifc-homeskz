@@ -199,4 +199,7 @@ namespace HomeskzIfcImport::parse
 
 	// formatImportOptions が寸法規格の行に付ける見出し（M31）。
 	inline constexpr const char* kDimensionOptionLabel = "寸法規格: ";
+
+	// formatImportOptions が伏図のまとめ方の行に付ける見出し（横架材の高さごとの伏図）。
+	inline constexpr const char* kPlanMergeOptionLabel = "伏図のまとめ方: ";
 } // namespace HomeskzIfcImport::parse

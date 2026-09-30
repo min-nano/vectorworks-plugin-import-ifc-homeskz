@@ -70,6 +70,28 @@ namespace HomeskzIfcImport::core
 	// topHeight）がそのまま内法になる（ShearWallCommand 参照）。
 	inline constexpr const char* kLevelShearWall = "耐力壁";
 
+	// 伏図レベルの印（横架材の高さごとの伏図。docs/DEV-NOTES.md「横架材の高さごとに伏図を
+	// 作る」）。1 つの階に横架材の天端が複数あると（スキップフロア）、標準の天端（その階の
+	// 横架材天端・最上階は軒高）以外の高さの横架材・床・耐力壁は**別のレイヤ**へ置き、
+	// 伏図はレイヤでそれを切り分ける（ビューポートが映すものを絞れるのはレイヤとクラス
+	// だけ）。そのレイヤのレベル種別とレイヤ名には、元の種別の後ろにこの印を付ける
+	// （"横架材天端(GL+2699)" / "2-横架材天端(GL+2699)"）。
+	//
+	// **印の書式はここが唯一**——付けるのは parse/PlanLevel、外して元の種別へ戻すのは
+	// 重ね順（desiredStoryLayerOrder）・仕口（parse/Joint）・寸法（parse/Dimension）で、
+	// core/ は parse/ を include できないのでここに置く（kLevelFL を core が持つのと同じ理由）。
+	// heightMm は GL からの高さ（mm）。
+	inline constexpr const char* kPlanLevelTagOpen = "(GL";
+	std::string planLevelTag(long long heightMm);
+
+	// 高さの表記（"GL+2699" / "GL-100"）。印（planLevelTag）の中身で、伏図のタイトルと
+	// 設定ダイアログの行もこれで高さを書く。
+	std::string planLevelHeightText(long long heightMm);
+
+	// 末尾の伏図レベルの印を外した名前（レベル種別・レイヤ名のどちらにも使える）。印が
+	// 無ければそのまま返す。
+	std::string stripPlanLevelTag(const std::string& name);
+
 	// 構造用途（構造材ツールのポップアップのキー）。**命令セットの語彙なのでここが唯一の
 	// 定義**で、ColumnCommand::structuralUse に入る値と、要素ごとに固定の用途——横架材
 	// （draw/Member）・垂木（draw/Rafter）——がこれになる。parse/Column.h は読みやすい名前で

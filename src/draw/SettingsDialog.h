@@ -33,6 +33,13 @@
 //	解析側は命令を 1 つも作らない。おかげで**候補は図面に実在するシンボルだけ**でよくなる
 //	——「図面に無い名前」を選択肢に混ぜる必要が無い（core/ImportOptions.h の doc も参照）。
 //
+//	【伏図のまとめ方】いちばん下に、**横架材の高さごとに作る伏図**のうち「前のレベルと同じ
+//	伏図にまとめる」高さを選ぶチェックを並べる（docs/DEV-NOTES.md「横架材の高さごとに伏図を
+//	作る」）。どんな高さがあるかは IFC を読まないと分からないので、呼び出し側が取り込みの前に
+//	1 度だけ IFC を読んで候補を渡す（parse/BuildDocument の scanPlanLevelChoices）。まとめる
+//	相手の居ない高さ（各階の最も低い高さ）は並べない——同じ階に高さが 1 つしかない建物では
+//	この欄ごと出ない。
+//
 //	【SDK 依存】実装は PluginPrefix.h（VectorWorks SDK）を include する。このヘッダは
 //	core/ImportOptions.h までしか参照しないので、SDK を持たない翻訳単位からも安全に
 //	include できる。
@@ -43,6 +50,7 @@
 #include "core/ImportOptions.h"
 
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::draw
 {
@@ -73,5 +81,10 @@ namespace HomeskzIfcImport::draw
 	// note に nullptr でない値を渡すと、**どの形で出したか・出せなかったなら何が駄目だったか**
 	// を 1 行に入れる（何も無ければ空のまま）。呼び出し側はこれを取り込みログへ出す
 	// ——「設定ダイアログが出ない」という報告の切り分けは、ここを読むところから始まる。
-	SettingsOutcome showImportSettings(core::ImportOptions& options, std::string* note = nullptr);
+	//
+	// planLevels は伏図レベルの候補（まとめる前の横架材の高さ 1 つずつ。
+	// parse/BuildDocument の scanPlanLevelChoices）。空ならまとめ方の欄を出さない。
+	SettingsOutcome showImportSettings(core::ImportOptions& options,
+									   const std::vector<core::PlanLevelChoice>& planLevels,
+									   std::string* note = nullptr);
 } // namespace HomeskzIfcImport::draw

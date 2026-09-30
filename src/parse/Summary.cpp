@@ -513,6 +513,17 @@ namespace HomeskzIfcImport::parse
 		// M31 寸法も同じく表の外（既定名が無い）。
 		out << "\n  " << kDimensionOptionLabel
 			<< (options.hasDimensions() ? options.dimensionStandard() : std::string("入れない"));
+		// 伏図のまとめ方（横架材の高さごとの伏図。parse/PlanLevel）。既定は高さごとに 1 枚。
+		out << "\n  " << kPlanMergeOptionLabel;
+		if (options.mergedPlanLevels.empty())
+			out << "まとめない（高さごとに 1 枚）";
+		for (const core::PlanLevelKey& key : options.mergedPlanLevels)
+		{
+			// 印の書式（"(GL+3531)"）は core::planLevelTag が唯一。
+			// 階は Elevation 昇順の何番目か（最上階＝屋根も数に入る）。
+			out << (&key == &*options.mergedPlanLevels.begin() ? "" : " / ") << (key.story + 1)
+				<< "番目の階の" << core::planLevelTag(key.height) << "を前のレベルとまとめる";
+		}
 		return out.str();
 	}
 } // namespace HomeskzIfcImport::parse

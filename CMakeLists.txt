@@ -159,6 +159,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/Column.cpp
 		src/parse/ColumnMark.cpp
 		src/parse/Noboribari.cpp
+		src/parse/PlanLevel.cpp
 		src/parse/AnchorBolt.cpp
 		src/parse/FloorPost.cpp
 		src/parse/FireBrace.cpp

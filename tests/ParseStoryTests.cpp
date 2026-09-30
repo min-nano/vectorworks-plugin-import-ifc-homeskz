@@ -653,7 +653,9 @@ TEST(roof_story_gets_fl_level_from_synthesised_loft_floor)
 	CHECK(roof != nullptr);
 	if (roof != nullptr)
 	{
-		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"FL", "軒高"}));
+		// 床梁は向きの違う 2 組で天端が GL+3050 と GL+3550 に分かれるので、軒高に近い
+		// 3050 が標準・3550 は伏図レベルの軒高（parse/PlanLevel）になり、軒高の直下へ積む。
+		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"FL", "軒高", "軒高(GL+3550)"}));
 		CHECK_EQ(roof->levels.front().layer, std::string("R-FL"));
 	}
 }

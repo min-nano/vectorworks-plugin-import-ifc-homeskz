@@ -82,14 +82,16 @@ namespace
 		return total;
 	}
 
-	// 指定レイヤの命令だけを取り出す。
+	// 指定レイヤの命令だけを取り出す。**伏図レベルの印（"2-FL(GL+2699)"）は外して比べる**
+	// ——横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた床も、その階の FL の床
+	// （parse/PlanLevel）。
 	std::vector<FloorCommand> onLayer(const std::vector<FloorCommand>& floors,
 									  const std::string& layer)
 	{
 		std::vector<FloorCommand> result;
 		for (const FloorCommand& floor : floors)
 		{
-			if (floor.layer == layer)
+			if (core::stripPlanLevelTag(floor.layer) == layer)
 				result.push_back(floor);
 		}
 		return result;
@@ -339,7 +341,7 @@ TEST(elevation_equals_fl_plus_offset_in_all_fixtures)
 		for (const FloorCommand& floor : buildFloorCommands(model))
 		{
 			CHECK_EQ(floor.bound.level, std::string("FL"));
-			const auto found = fl.find(floor.layer);
+			const auto found = fl.find(core::stripPlanLevelTag(floor.layer));
 			CHECK(found != fl.end());
 			if (found == fl.end())
 				continue;
@@ -363,7 +365,7 @@ TEST(floors_only_on_fl_layers)
 		CHECK(ok);
 		const std::map<std::string, double> valid = flByLayer(model);
 		for (const FloorCommand& floor : buildFloorCommands(model))
-			CHECK(valid.find(floor.layer) != valid.end());
+			CHECK(valid.find(core::stripPlanLevelTag(floor.layer)) != valid.end());
 	}
 }
 
@@ -397,6 +399,16 @@ TEST(skip_floor_steps_are_represented)
 	CHECK(hasZero);
 	CHECK(hasStep);
 	CHECK(elevations.size() >= 2);
+
+	// 段差のある床は、その高さの横架材（GL+2699）の伏図レベルのレイヤへ、標準の床は
+	// "2-FL" のままへ振り分けられる（横架材の高さごとの伏図。parse/PlanLevel）。
+	for (const FloorCommand& floor : twoFL)
+	{
+		if (near(floor.bound.offset, -832.0))
+			CHECK_EQ(floor.layer, std::string("2-FL(GL+2699)"));
+		if (near(floor.bound.offset, 0.0))
+			CHECK_EQ(floor.layer, std::string("2-FL"));
+	}
 }
 
 TEST(floor_above_beam_top_respects_ifc_position)

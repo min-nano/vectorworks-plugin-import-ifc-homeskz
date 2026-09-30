@@ -10,6 +10,7 @@
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
+#include "parse/PlanLevel.h"
 #include "parse/StructuralClass.h"
 #include "parse/Story.h"
 
@@ -138,9 +139,11 @@ namespace HomeskzIfcImport::parse
 			return extent;
 		}
 
-		// span 柱レイヤの base ストーリ（0 起点）が index の柱だけを集める。
+		// span 柱レイヤの base ストーリ（0 起点。from の伏図レベルが属する階）が index の柱
+		// だけを集める。
 		std::vector<const core::ColumnCommand*>
-		columnsOfStory(const std::vector<core::ColumnCommand>& columns, std::size_t index)
+		columnsOfStory(const std::vector<core::ColumnCommand>& columns,
+					   const std::vector<PlanLevel>& levels, std::size_t index)
 		{
 			std::vector<const core::ColumnCommand*> found;
 			for (const core::ColumnCommand& column : columns)
@@ -149,7 +152,7 @@ namespace HomeskzIfcImport::parse
 				double to = 0.0;
 				if (!parseSpanLayer(column.layer, from, to))
 					continue;
-				if (std::llround(from) == static_cast<long long>(index) + 1)
+				if (storyOfOrdinal(levels, from) == index)
 					found.push_back(&column);
 			}
 			return found;
@@ -408,25 +411,38 @@ namespace HomeskzIfcImport::parse
 
 		// 通り芯と同じセンタリングオフセット（通り芯が無ければ (0,0)＝生の IFC 座標）。
 		const Vec2 center = context.gridCenter();
+		// 伏図レベル（parse/PlanLevel）。耐力壁は立つ天端の伏図レベルのレイヤへ置く。
+		const std::vector<PlanLevel>& levels = context.planLevels();
 		const std::map<int, std::vector<std::string>> columnLayers =
-			collectColumnLayersByStory(columns);
+			collectColumnLayersByStory(columns, levels);
 
 		std::vector<ShearWallCommand> commands;
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
 			const StoryInfo& story = stories[i];
-			const std::string layer = storyLayerName(i, story.isTop, kLevelShearWall);
-			// レイヤ平面（ストーリ相対）＝その階の横架材天端。最上階は軒高＝0。
-			const double layerZ = story.isTop ? 0.0 : story.beamOffset;
+			// レイヤ平面（ストーリ相対）＝その階の横架材天端。最上階は軒高＝0。伏図レベルの
+			// レイヤはそこから伏図レベルの高さのぶんずれる（下のループ）。
+			const double storyLayerZ = story.isTop ? 0.0 : story.beamOffset;
 			const auto layerList = columnLayers.find(static_cast<int>(i));
 			const std::string targets =
 				layerList == columnLayers.end() ? std::string() : joinLayers(layerList->second);
-			const std::vector<const core::ColumnCommand*> storyColumns = columnsOfStory(columns, i);
+			const std::vector<const core::ColumnCommand*> storyColumns =
+				columnsOfStory(columns, levels, i);
 
 			for (const Group& group : collectGroups(model, context.storyElements(story.id)))
 			{
 				const GroupExtent extent = groupExtent(group);
 				const ShearWallPiece& first = group.pieces.front();
+
+				// 耐力壁は下の横架材の天端に立つので、下端にいちばん近い伏図レベルの
+				// "n-耐力壁" レイヤへ置く（伏図はその階自身の耐力壁を映す。M19）。
+				const PlanLevel* planLevel =
+					nearestPlanLevel(levels, i, story.elevation + extent.zBottom);
+				const std::string layer = planLevel != nullptr
+											  ? planLevelLayer(*planLevel, story, kLevelShearWall)
+											  : storyLayerName(i, story.isTop, kLevelShearWall);
+				const double layerZ =
+					storyLayerZ + (planLevel != nullptr ? planLevelShift(*planLevel, story) : 0.0);
 
 				// 要素自身の端（センタリング済み）で柱を探す。面材は壁芯から板厚ぶん
 				// 外れているが、探す許容（kShearWallColumnTol）に対しては誤差の範囲。

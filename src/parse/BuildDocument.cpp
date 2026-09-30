@@ -31,6 +31,7 @@
 #include "parse/Loader.h"
 #include "parse/Member.h"
 #include "parse/Noboribari.h"
+#include "parse/PlanLevel.h"
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
 #include "parse/Section.h"
@@ -216,5 +217,26 @@ namespace HomeskzIfcImport::parse
 			attachDimensionCommands(document);
 
 		return document;
+	}
+
+	std::vector<core::PlanLevelChoice> scanPlanLevelChoices(const std::string& ifcPath)
+	{
+		try
+		{
+			bool ok = false;
+			const Model model = loadIfc(ifcPath, &ok);
+			if (!ok)
+				return {};
+			// 設定は要らない（候補はまとめる前の高さ）。横架材の解析は取り込み本番と同じ
+			// 関数を通すので、候補の高さと本番の伏図レベルの高さは必ず一致する。
+			Context context(model);
+			return collectPlanLevelChoices(context);
+		}
+		catch (...)
+		{
+			// 候補を出せないだけで取り込みは止めない（CLAUDE.md「1 要素の欠損で全体を
+			// 止めない」）。
+			return {};
+		}
 	}
 } // namespace HomeskzIfcImport::parse

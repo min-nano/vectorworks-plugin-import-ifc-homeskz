@@ -112,4 +112,17 @@ namespace HomeskzIfcImport::core
 		// 図面枠と同じく**空はそのまま入れる**（＝寸法を入れない）。
 		dimension = name;
 	}
+
+	bool ImportOptions::mergesWithPrevious(const PlanLevelKey& key) const
+	{
+		return mergedPlanLevels.contains(key);
+	}
+
+	void ImportOptions::setMergeWithPrevious(const PlanLevelKey& key, bool merge)
+	{
+		if (merge)
+			mergedPlanLevels.insert(key);
+		else
+			mergedPlanLevels.erase(key);
+	}
 } // namespace HomeskzIfcImport::core

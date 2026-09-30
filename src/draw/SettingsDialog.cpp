@@ -59,6 +59,12 @@
 //	寸法を入れない。**初期値は図面枠と同じく「入れる」**（ご要望）——まだ決めていない
 //	うちは「JIS」があればそれ、無ければ一覧の最初の規格を選んだ状態で開く。
 //
+//	【いちばん下は伏図のまとめ方】寸法規格の下に、**横架材の高さごとに作る伏図**のうち
+//	「前のレベルと同じ伏図にまとめる」高さのチェックを 1 つずつ並べる（draw/SettingsDialog.h）。
+//	数は IFC によって変わるので、**イベントマップには載せず DDX だけで受ける**——チェックを
+//	切り替えても他のコントロールを動かす必要が無い（シンボルの行のチェックは選択肢を灰色に
+//	するためにイベントを要る）。ID は kFirstMergeID から 1 つずつ。
+//
 //	【項目は図面のシンボル定義そのもの】どちらの形でも候補は図面に実在するシンボルだけ。
 //	行ごとの「取り込む」チェックがあるのでそれで足りる——置くものが図面に無いなら、その要素は
 //	チェックを外せばよい（core/ImportOptions.h、docs/DEV-NOTES.md「取り込み設定の決め事」）。
@@ -85,6 +91,7 @@
 #include "PluginPrefix.h"
 #include "draw/SettingsDialog.h"
 #include "draw/DrawUtil.h"
+#include "core/Document.h"
 #include "core/ImportOptions.h"
 
 #include "VWFC/Tools/VWResourceList.h"
@@ -116,6 +123,15 @@ namespace HomeskzIfcImport::draw
 		// [チェック, 説明, 選択, 絵] の 4 つを kFirstRowID から 4 つ刻みで使う
 		// （絵は退避の形でだけ作る。ID は形に依らず固定にしておく）。
 		constexpr TControlID kIntroID = 3;
+		// 伏図のまとめ方の見出しと、その下のチェック（冒頭「いちばん下は伏図のまとめ方」）。
+		// シンボルの行（kFirstRowID から kRowStride 刻み）と重ならない所から振る。
+		constexpr TControlID kMergeIntroID = 4;
+		constexpr TControlID kFirstMergeID = 200;
+
+		constexpr TControlID mergeID(std::size_t index)
+		{
+			return static_cast<TControlID>(kFirstMergeID + index);
+		}
 		constexpr TControlID kFirstRowID = 10;
 		constexpr TControlID kRowStride = 4;
 
@@ -276,6 +292,34 @@ namespace HomeskzIfcImport::draw
 			return standards;
 		}
 
+		// 伏図のまとめ方のチェック 1 つ。key を「前のレベルとまとめる」かを問う。
+		struct MergeRow
+		{
+			core::PlanLevelKey key;
+			std::string label;
+		};
+
+		// 候補からチェックの行を作る。**まとめる相手の居ない高さ（階の最も低い高さ）は
+		// 並べない**——問う意味が無い（parse/PlanLevel はそれを無視する）。
+		std::vector<MergeRow> MergeRows(const std::vector<core::PlanLevelChoice>& choices)
+		{
+			std::vector<MergeRow> rows;
+			for (std::size_t k = 1; k < choices.size(); ++k)
+			{
+				const core::PlanLevelChoice& choice = choices[k];
+				if (!choice.canMerge)
+					continue;
+				// 前のレベル＝同じ階で 1 つ低い高さ（候補は階・高さの昇順）。
+				const core::PlanLevelChoice& previous = choices[k - 1];
+				rows.push_back(
+					MergeRow{choice.key, choice.planTitle + ": " +
+											 core::planLevelHeightText(choice.key.height) + " を " +
+											 core::planLevelHeightText(previous.key.height) +
+											 " と同じ伏図にまとめる"});
+			}
+			return rows;
+		}
+
 		// 役割の並びは表の順（core::symbolRoles()）。行番号 → 役割。**図面枠の行
 		// （kTitleBlockRow）には役割が無い**ので、呼ぶ前に行を確かめること。
 		core::SymbolRole roleAt(std::size_t row)
@@ -307,9 +351,17 @@ namespace HomeskzIfcImport::draw
 			// decided … 設定を利用者がこの起動中に一度でも決めたか（OK で閉じたか）。
 			// まだなら図面枠と寸法規格は「置く／入れる」で開く（下記）。
 			CImportSettingsDialog(const core::ImportOptions& seed, SymbolResources resources,
-								  Form form, bool decided)
-				: fIntro(kIntroID), fResources(std::move(resources)), fForm(form)
+								  std::vector<MergeRow> mergeRows, Form form, bool decided)
+				: fIntro(kIntroID), fMergeIntro(kMergeIntroID), fResources(std::move(resources)),
+				  fMergeRows(std::move(mergeRows)), fForm(form)
 			{
+				// 伏図のまとめ方は前回の選択（同じ階・同じ高さ）を初期値にする。既定は
+				// まとめない（高さごとに 1 枚。ご要望）。
+				for (std::size_t k = 0; k < fMergeRows.size(); ++k)
+				{
+					fMergeChecks.emplace_back(mergeID(k));
+					fMergeStates.push_back(seed.mergesWithPrevious(fMergeRows[k].key));
+				}
 				for (std::size_t row = 0; row < kRowCount; ++row)
 				{
 					fChecks.emplace_back(checkID(row));
@@ -395,6 +447,8 @@ namespace HomeskzIfcImport::draw
 					if (valid)
 						options.setSymbol(roleAt(row), names[index]);
 				}
+				for (std::size_t k = 0; k < fMergeRows.size(); ++k)
+					options.setMergeWithPrevious(fMergeRows[k].key, fMergeStates[k]);
 				return options;
 			}
 
@@ -472,7 +526,7 @@ namespace HomeskzIfcImport::draw
 							this->AddRightControl(&fPopups[row], &fPreviews[row]);
 					}
 				}
-				return true;
+				return CreateMergeRows();
 			}
 
 			void OnInitializeContent() override
@@ -489,6 +543,8 @@ namespace HomeskzIfcImport::draw
 						fChecks[row].SetState(fEnabled[row]);
 						UpdateRow(row);
 					}
+					for (std::size_t k = 0; k < fMergeRows.size(); ++k)
+						fMergeChecks[k].SetState(fMergeStates[k]);
 				}
 				catch (...)
 				{
@@ -510,6 +566,9 @@ namespace HomeskzIfcImport::draw
 					if (HasPulldown(row))
 						this->AddDDX_PulldownMenu(popupID(row), &fSelection[row]);
 				}
+				// 伏図のまとめ方は DDX だけで受ける（冒頭「いちばん下は伏図のまとめ方」）。
+				for (std::size_t k = 0; k < fMergeRows.size(); ++k)
+					this->AddDDX_CheckButton(mergeID(k), &fMergeStates[k]);
 			}
 
 			// OK が押された。**閉じる前に**サムネイルの選択を控える（閉じた後のコントロール
@@ -715,6 +774,36 @@ namespace HomeskzIfcImport::draw
 				return names.size();
 			}
 
+			// 伏図のまとめ方の欄を作る（候補が無ければ何も作らない）。寸法規格の行の下へ
+			// 1 行ぶん空けて見出し、その下にチェックを 1 つずつ縦に並べる——行の数は IFC
+			// 次第なので、2 列に折る役割の行とは混ぜない。
+			bool CreateMergeRows()
+			{
+				if (fMergeRows.empty())
+					return true;
+				if (!fMergeIntro.CreateControl(
+						this, "伏図のまとめ方（伏図は横架材の高さごとに 1 枚作ります。"
+							  "チェックした高さは前の高さと同じ伏図にまとめます）"))
+				{
+					fNote = "伏図のまとめ方の見出しを作れませんでした";
+					return false;
+				}
+				this->AddBelowControl(&fChecks[kDimensionRow], &fMergeIntro, 0, 1);
+				for (std::size_t k = 0; k < fMergeRows.size(); ++k)
+				{
+					if (!fMergeChecks[k].CreateControl(this, TXString(fMergeRows[k].label.c_str())))
+					{
+						fNote = "伏図のまとめ方のチェックを作れませんでした";
+						return false;
+					}
+					if (k == 0)
+						this->AddBelowControl(&fMergeIntro, &fMergeChecks[k]);
+					else
+						this->AddBelowControl(&fMergeChecks[k - 1], &fMergeChecks[k]);
+				}
+				return true;
+			}
+
 			// その行の見た目を今の状態に合わせる。**選ぶものが無い行は常に無効**——選べる
 			// ものが無いのにチェックできると、「取り込むと言ったのに何も置かれない」ことになる。
 			void UpdateRow(std::size_t row)
@@ -745,7 +834,14 @@ namespace HomeskzIfcImport::draw
 			std::deque<VWThumbnailPopupCtrl> fThumbs; // サムネイルの行だけ作る
 			std::deque<VWPullDownMenuCtrl> fPopups; // 名前で選ぶ行だけ作る（HasPulldown）
 			std::deque<VWSymbolDisplayCtrl> fPreviews; // 絵を出す行だけ作る（HasPreview）
+			// 伏図のまとめ方（冒頭「いちばん下は伏図のまとめ方」）。コントロールも状態も
+			// **deque**——DDX とダイアログがアドレスを持ち続けるので、動かしてはいけない
+			// （deque<bool> は vector<bool> と違って本物の bool を並べる）。
+			VWStaticTextCtrl fMergeIntro;
+			std::deque<VWCheckButtonCtrl> fMergeChecks;
+			std::deque<bool> fMergeStates;
 			SymbolResources fResources; // 項目の元（ダイアログより長生きさせない）
+			std::vector<MergeRow> fMergeRows;
 			Form fForm = Form::Thumbnail;
 			std::array<std::size_t, kRowCount> fSelection = {};
 			std::array<bool, kRowCount> fEnabled = {};
@@ -815,7 +911,9 @@ namespace HomeskzIfcImport::draw
 		}
 	} // namespace
 
-	SettingsOutcome showImportSettings(core::ImportOptions& options, std::string* note)
+	SettingsOutcome showImportSettings(core::ImportOptions& options,
+									   const std::vector<core::PlanLevelChoice>& planLevels,
+									   std::string* note)
 	{
 		try
 		{
@@ -827,7 +925,8 @@ namespace HomeskzIfcImport::draw
 			// ときだけ後者へ落ちる（冒頭「2 つの形を持ち、出せた方を使う」）。
 			for (const Form form : {Form::Thumbnail, Form::NameList})
 			{
-				CImportSettingsDialog dialog(remembered, resources, form, SettingsDecided());
+				CImportSettingsDialog dialog(remembered, resources, MergeRows(planLevels), form,
+											 SettingsDecided());
 				const auto button = dialog.RunDialogLayout("");
 				if (dialog.Failed())
 				{

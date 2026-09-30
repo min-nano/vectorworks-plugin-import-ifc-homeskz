@@ -22,6 +22,7 @@
 #include "parse/Context.h"
 #include "parse/Footing.h"
 #include "parse/Member.h"
+#include "parse/PlanLevel.h"
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
 #include "parse/Story.h"
@@ -132,30 +133,43 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(Context& context)
 	{
 		const std::vector<StoryInfo>& stories = context.stories();
+		// 伏図は**横架材の高さ（伏図レベル）ごとに 1 枚**（parse/PlanLevel）。どの階も高さが
+		// 1 つなら階ごとに 1 枚＝従来と同じ。
+		const std::vector<PlanLevel>& planLevels = context.planLevels();
 		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns());
 		const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
 		const bool foundation = hasFoundation(context.model());
 		// 耐力壁レイヤは**命令があるときだけ**作られるので、載せる前に有無を確かめる
 		// （空のレイヤ名をビューポートへ渡さない）。
 		const std::vector<core::ShearWallCommand>& shearWalls = context.shearWalls();
+		const std::vector<core::FloorCommand>& floors = context.floors();
+		const std::vector<core::MemberCommand>& members = context.members();
 
 		std::vector<core::SheetCommand> commands;
-		commands.reserve(stories.size());
-		for (std::size_t i = 0; i < stories.size(); ++i)
+		commands.reserve(planLevels.size());
+		for (const PlanLevel& level : planLevels)
 		{
-			const bool isTop = stories[i].isTop;
-			// その階の横架材レイヤ（一般階＝横架材天端・最上階＝軒高。beamTopLayerName が
-			// 分岐を持つ）。
-			std::vector<std::string> layers{beamTopLayerName(i, stories[i])};
+			const std::size_t i = level.story;
+			if (i >= stories.size())
+				continue;
+			const StoryInfo& story = stories[i];
+			const bool isTop = story.isTop;
+			// その伏図レベルの横架材レイヤ（一般階＝横架材天端・最上階＝軒高。標準でない
+			// 高さは "(GL+…)" の付いたレイヤ）。
+			std::vector<std::string> layers{planLevelBeamLayer(level, story)};
 
-			// 切断レベル（その階の床レベル + 0.25）を span が含む柱レイヤ。
-			const double cut = static_cast<double>(i) + kFloorPlanCutOffset;
+			// 切断レベル（その伏図レベルの通し番号 + 0.25）を span が含む柱レイヤ。span の
+			// 番号も伏図レベルの通し番号なので（parse/Column）、この伏図の横架材の上に立つ柱
+			// と、下から貫いてこの高さを通り過ぎる柱の断面が出る。
+			const double cut = static_cast<double>(level.ordinal) + kFloorPlanCutOffset - 1.0;
 			const std::vector<std::string> spanLayers = spanLayersAtCut(spans, cut);
 			layers.insert(layers.end(), spanLayers.begin(), spanLayers.end());
 
 			// 切断位置の**直下**の伏図記号レイヤ（M12）。その伏図が対象とする横架材の下に
 			// ある柱・小屋束を平面記号で示す（例 2 階床伏図＝切断 2.25 → "2-柱伏図記号"＝
 			// 1 階管柱 "1to2-柱" の平面記号）。断面記号（span レイヤ）とは排他になる。
+			// 伏図レベルごとの伏図では、この高さの横架材を受ける柱だけが出る（上端が届く
+			// 伏図レベルで to を決めているため。parse/Column の spanToOrdinal）。
 			if (const std::string markLayer = planMarkLayerBelowCut(markLayers, cut);
 				!markLayer.empty())
 				layers.push_back(markLayer);
@@ -164,27 +178,43 @@ namespace HomeskzIfcImport::parse
 			// "1-耐力壁"、2 階床伏図 → "2-耐力壁"）。伏図記号（"{to}-柱伏図記号"）が
 			// 切断の**直下**を映すのとは規約が違う——耐力壁は「どの階の壁か」で呼ばれる
 			// ものなので、1 階の耐力壁は 1 階の伏図（土台伏図）に、2 階の耐力壁は 2 階床
-			// 伏図に出るのが図面としての読み方に合う（実機確認で決めた。M19）。
+			// 伏図に出るのが図面としての読み方に合う（実機確認で決めた。M19）。耐力壁は
+			// 立つ天端の伏図レベルのレイヤへ置かれている（parse/ShearWall）。
 			//
 			// **重ね順もこの規約に乗っている**: 同じ階のレイヤどうしなら 耐力壁レベルは
 			// 横架材天端の 1 段上（前面）に積まれるので、記号が横架材の後ろへ回らない
 			// （下の階のレイヤを載せていたときは、上の階の横架材に必ず隠れていた）。
 			// 加えて core::desiredStoryLayerOrder が耐力壁レイヤを最前面群へ回す。
-			if (const std::string shearLayer = storyLayerName(i, isTop, kLevelShearWall);
+			if (const std::string shearLayer = planLevelLayer(level, story, kLevelShearWall);
 				anyShearWallOnLayer(shearWalls, shearLayer))
 				layers.push_back(shearLayer);
+
+			// 登り梁は**水下側**の伏図レベルの伏図にも映す（ご要望。parse/PlanLevel が水下側の
+			// 伏図レベルのレイヤへ分けてある）。母屋伏図にも従来どおり映る（下）。
+			if (const std::string noboribariLayer = planLevelLayer(level, story, kLevelNoboribari);
+				anyMemberOnLayer(members, noboribariLayer))
+				layers.push_back(noboribariLayer);
 
 			if (!isTop)
 			{
 				// 最下階は基礎があるときだけアンカーボルトを重ねる（土台と一緒に見たい）。
 				if (i == 0 && foundation)
 					layers.emplace_back(kLayerFoundationAnchor);
-				layers.push_back(storyLayerName(i, isTop, kLevelFL));
+				// 床はその伏図レベルの "n-FL"。標準のレイヤは床が無くてもストーリが作るので
+				// 従来どおり常に載せ、標準でない高さのレイヤは床があるときだけ（parse/Story）。
+				const std::string floorLayer = planLevelLayer(level, story, kLevelFL);
+				if (level.standard ||
+					std::ranges::any_of(floors, [&floorLayer](const core::FloorCommand& floor)
+										{ return floor.layer == floorLayer; }))
+					layers.push_back(floorLayer);
 			}
 			layers.emplace_back(core::kGridLayer);
 
-			std::string title = floorPlanTitle(i, isTop, stories.size());
-			std::string number = std::to_string(kFloorPlanStartNumber + static_cast<int>(i));
+			// 階に伏図レベルが 2 つ以上あれば、タイトルに高さを添えて見分ける
+			// （"2階床伏図（GL+2699）"）。
+			std::string title =
+				floorPlanTitle(i, isTop, stories.size()) + planLevelTitleSuffix(planLevels, level);
+			std::string number = std::to_string(kFloorPlanStartNumber + level.ordinal - 1);
 			// グラフィック凡例は常に載せる（何が並ぶかは凡例オブジェクトのソース定義が決める
 			// ので、ここでは中身の有無を判断できない）。
 			commands.push_back(makeSheet(core::PlanKind::Framing, std::move(number),
@@ -199,13 +229,14 @@ namespace HomeskzIfcImport::parse
 		if (stories.empty())
 			return {};
 
+		const std::vector<PlanLevel>& planLevels = context.planLevels();
 		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns());
 		const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
 		const std::vector<core::MemberCommand>& members = context.members();
 
-		// 番号は 基礎伏図（1）＋各階の柱梁伏図（ストーリ数）の次から。**柱梁伏図は基礎の
+		// 番号は 基礎伏図（1）＋柱梁伏図（伏図レベルの数）の次から。**柱梁伏図は基礎の
 		// 有無に関わらず 2 から振る**ので、ここも基礎の有無に依存しない。
-		const int baseNumber = kFloorPlanStartNumber + static_cast<int>(stories.size());
+		const int baseNumber = kFloorPlanStartNumber + static_cast<int>(planLevels.size());
 
 		std::vector<core::SheetCommand> commands;
 		int seq = 0;
@@ -219,19 +250,31 @@ namespace HomeskzIfcImport::parse
 			const bool isTop = stories[i].isTop;
 			std::vector<std::string> layers;
 			// 母屋・登り梁はその階に命令があるときだけ（下屋根は母屋を持たないこともあり、
-			// 登り梁はさらに稀）。parse/Story がレベルを作る条件と同じ判定。
-			for (const char* levelType : {kLevelMoya, kLevelNoboribari})
+			// 登り梁はさらに稀）。parse/Story がレベルを作る条件と同じ判定。登り梁は水下側の
+			// 伏図レベルのレイヤへ分かれている（parse/PlanLevel）ので、その階の分を全部映す。
+			const std::vector<const PlanLevel*> storyLevels = storyPlanLevels(planLevels, i);
+			std::vector<std::string> candidates{storyLayerName(i, isTop, kLevelMoya),
+												storyLayerName(i, isTop, kLevelNoboribari)};
+			for (const PlanLevel* level : storyLevels)
 			{
-				const std::string layer = storyLayerName(i, isTop, levelType);
+				if (!level->standard)
+					candidates.push_back(planLevelLayer(*level, stories[i], kLevelNoboribari));
+			}
+			for (const std::string& layer : candidates)
+			{
 				if (anyMemberOnLayer(members, layer))
 					layers.push_back(layer);
 			}
 			layers.push_back(storyLayerName(i, isTop, kLevelTaruki));
 			layers.push_back(storyLayerName(i, isTop, kLevelNojiita));
 
-			// 切断レベル（その階の床レベル + 0.75）を span が含む柱レイヤ＝屋根を貫いて
-			// 立ち上がる主屋の柱（母屋を支える小屋束はこの切断より低いので載らない）。
-			const double cut = static_cast<double>(i) + kMoyaPlanCutOffset;
+			// 切断レベル（その階の最も高い伏図レベルの通し番号 + 0.75）を span が含む柱
+			// レイヤ＝屋根を貫いて立ち上がる主屋の柱（母屋を支える小屋束はこの切断より低い
+			// ので載らない）。伏図レベルの無い階（あり得ないが）は階の番号で数える。
+			const double top = storyLevels.empty()
+								   ? static_cast<double>(i + 1)
+								   : static_cast<double>(storyLevels.back()->ordinal);
+			const double cut = top + kMoyaPlanCutOffset - 1.0;
 			const std::vector<std::string> spanLayers = spanLayersAtCut(spans, cut);
 			layers.insert(layers.end(), spanLayers.begin(), spanLayers.end());
 

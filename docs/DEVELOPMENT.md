@@ -113,7 +113,7 @@ src/
     StructuralClass.{h,cpp}   部材種別 → VW クラスの純ロジック
     Feedback.{h,cpp}          実機フィードバックの PR コメント本文（内訳・前の周との差分・
                               匿名化）
-    Grid / Story / Floor / Member / Noboribari / Column / Rafter / Roof /
+    Grid / Story / Floor / Member / Noboribari / PlanLevel / Column / Rafter / Roof /
     Footing / AnchorBolt / FloorPost / FireBrace / Joint / ColumnMark /
     Sheet / Tag / Section      要素ごとの解析
   draw/                     Phase 2: VW 描画（SDK 依存）。**まるごと本体に入る**
@@ -270,6 +270,8 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 長さ・文字の単位の換算（インチ → mm `kMillimetersPerInch`・1 インチの pt 数 `kPointsPerInch`・紙の pt → mm `pointsToMillimeters`） | `core/Layout` |
 | 回転して置いた注釈の自身の高さを外接矩形から戻す（`rotatedRectHeight`。45 度近くで解けない境 `kRotatedRectMinConditioning`。傾斜材のデータタグの逃がし量＝`draw/Tag`） | `core/Layout` |
 | 取り込み設定（役割の表 `core::symbolRoles()`・図面枠のスタイル `core::ImportOptions::titleBlock` → `core::Document::titleBlockStyle`・寸法規格 `core::ImportOptions::dimension` → `core::Document::dimensionStandard`） | `core/ImportOptions` |
+| 伏図レベルの印（`planLevelTag` / `stripPlanLevelTag` / `planLevelHeightText`。"2-横架材天端(GL+2699)" の "(GL+2699)" を付ける・外す・高さの表記） | `core/Document.h` |
+| 伏図のまとめ方（`core::PlanLevelKey`・`ImportOptions::mergedPlanLevels`）・設定ダイアログへ運ぶ候補（`core::PlanLevelChoice`） | `core/ImportOptions.h` |
 | 進捗の整形と配分の計算・診断ログのフェーズの行（`beginPhase`） | `core/Progress` |
 | 往復の記憶と、どの周になるかの場合分け（`feedbackRoundKind`） | `core/FeedbackSession` |
 | MCP ブリッジの受け渡しの作法（要求／応答の形・スプールのファイル名・原子的な書き方・id の綴り検査） | `core/Bridge.h` |
@@ -289,6 +291,8 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | ローカル配置原点の取り出し（`resolveLocalPlacementOrigin`）・屋根面の勾配座標系と退化の閾値・押し出しを鉛直とみなす閾値（`kVerticalExtrudeTol`） | `parse/IfcGeometry` |
 | 共有コンテキスト（下記）・階の屋根面の走査（`storyRoofPlanes`）・取り込み設定の参照（`options()`） | `parse/Context` |
 | 伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名 | `parse/ColumnMark` |
+| 伏図レベル（横架材の高さごとの伏図 1 枚ぶん。高さの集め方・まとめ方・標準の決め方・近い／届く伏図レベルの引き方・伏図レベルのレイヤ名とずらし量・横架材の振り分け・設定ダイアログの候補）。共有は `Context::planLevels()` を通す | `parse/PlanLevel` |
+| 柱の span の番号（伏図レベルの通し番号。`spanFromOrdinal` / `spanToOrdinal`） | `parse/Column` |
 | 耐力壁のレイヤレベル名・柱を探す許容 | `parse/ShearWall.h` |
 | 切断面に乗る材の判定（`memberOnCutPlane` / `columnOnCutPlane`。タグと寸法が共有） | `parse/Tag` |
 | 寸法の測点のまとめ方（`mergeStops` / `unionStops`。許容 `kDimensionMergeTol`）・通り芯の位置（`gridStops`）・レベル記号の表示名 | `parse/Dimension` |

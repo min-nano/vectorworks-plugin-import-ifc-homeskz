@@ -814,8 +814,10 @@ namespace HomeskzIfcImport::core
 		// ビューポートで柱・梁を覆い隠さないよう全ストーリ分をまとめて背面へ集める（野地板
 		// レベルは M6 で追加済み。この並びの適用先は M13 の per-viewport 上書き。
 		// desiredStoryLayerOrder の doc コメント参照）。
-		bool isBackgroundLevel(const std::string& type)
+		bool isBackgroundLevel(const std::string& rawType)
 		{
+			// 伏図レベルの印（"FL(GL+2699)"）は外して元の種別で見る（planLevelTag）。
+			const std::string type = stripPlanLevelTag(rawType);
 			return type == kLevelFL || type == kLevelNojiita;
 		}
 
@@ -825,7 +827,7 @@ namespace HomeskzIfcImport::core
 		// （desiredStoryLayerOrder の doc コメント）。
 		bool isForegroundLevel(const std::string& type)
 		{
-			return type == kLevelShearWall;
+			return stripPlanLevelTag(type) == kLevelShearWall;
 		}
 	} // namespace
 
@@ -896,6 +898,30 @@ namespace HomeskzIfcImport::core
 				pieces.push_back(std::move(piece));
 		}
 		return pieces;
+	}
+
+	std::string planLevelHeightText(long long heightMm)
+	{
+		// 符号は必ず付ける（GL より下の横架材は無いはずだが、"GL2699" と "GL-100" が
+		// 混ざると読み違える）。
+		return std::string("GL") + (heightMm < 0 ? "-" : "+") +
+			   std::to_string(heightMm < 0 ? -heightMm : heightMm);
+	}
+
+	std::string planLevelTag(long long heightMm)
+	{
+		// kPlanLevelTagOpen（"(GL"）と planLevelHeightText の頭は同じ綴り。
+		return "(" + planLevelHeightText(heightMm) + ")";
+	}
+
+	std::string stripPlanLevelTag(const std::string& name)
+	{
+		if (name.empty() || name.back() != ')')
+			return name;
+		const std::size_t open = name.rfind(kPlanLevelTagOpen);
+		if (open == std::string::npos)
+			return name;
+		return name.substr(0, open);
 	}
 
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,

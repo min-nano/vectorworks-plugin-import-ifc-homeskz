@@ -60,6 +60,8 @@ namespace
 		session.options.setEnabled(SymbolRole::FireBrace, false);
 		session.options.setTitleBlockStyle("図面枠 A3（構造）");
 		session.options.setDimensionStandard("構造図 寸法");
+		session.options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}, true);
+		session.options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
 		return session;
 	}
 
@@ -200,6 +202,9 @@ TEST(feedback_session_round_trips_through_text)
 	// M31 寸法規格も運ばれる（落ちると 2 周目以降は寸法が 1 つも入らない）。
 	CHECK_EQ(after.options.dimensionStandard(), before.options.dimensionStandard());
 	CHECK(after.options.hasDimensions());
+	// 伏図のまとめ方も運ばれる（落ちると 2 周目以降は伏図の枚数が 1 周目と変わる）。
+	CHECK(after.options.mergedPlanLevels == before.options.mergedPlanLevels);
+	CHECK_EQ(after.options.mergedPlanLevels.size(), std::size_t(2));
 }
 
 TEST(feedback_session_without_a_title_block_line_places_none)
@@ -210,6 +215,17 @@ TEST(feedback_session_without_a_title_block_line_places_none)
 	CHECK(session.options.titleBlockStyle().empty());
 	// M31 より前の記憶には dimension の行も無い。**入れない**と読む。
 	CHECK(!session.options.hasDimensions());
+	// 伏図のまとめ方の行が無い記憶は**まとめない**と読む。
+	CHECK(session.options.mergedPlanLevels.empty());
+}
+
+TEST(feedback_session_skips_unreadable_merge_lines)
+{
+	const FeedbackSession session =
+		parseFeedbackSession("merge.level=1:3531\nmerge.level=x:1\nmerge.level=2\n"
+							 "merge.level=1:-5\n");
+	CHECK_EQ(session.options.mergedPlanLevels.size(), std::size_t(1));
+	CHECK(session.options.mergesWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}));
 }
 
 TEST(feedback_session_without_loop_lines_reads_as_not_looping)

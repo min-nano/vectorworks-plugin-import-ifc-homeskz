@@ -603,9 +603,25 @@ TEST(format_import_options_lists_every_role_and_marks_the_defaults)
 	CHECK(text.find("図面枠スタイル: 置かない") != std::string::npos);
 	// M31 寸法も同じく末尾に 1 行。既定は「入れない」。
 	CHECK(text.find("寸法規格: 入れない") != std::string::npos);
-	// 役割の数 ＋ 図面枠・寸法の 2 行だけ行がある（見出しの 1 行を足した数）。
+	// 伏図のまとめ方も末尾に 1 行。既定は「まとめない」。
+	CHECK(text.find("伏図のまとめ方: まとめない") != std::string::npos);
+	// 役割の数 ＋ 図面枠・寸法・伏図のまとめ方の 3 行だけ行がある（見出しの 1 行を足した数）。
 	CHECK_EQ(std::ranges::count(text, '\n'),
-			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount) + 2);
+			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount) + 3);
+}
+
+TEST(format_import_options_lists_the_merged_plan_levels)
+{
+	// 前のレベルとまとめる高さは、階と高さで 1 行に並ぶ（「伏図の枚数が思ったのと違う」の
+	// 切り分けは、この行を読むところから始まる）。
+	ImportOptions options;
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}, true);
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
+	std::string const text = formatImportOptions(options);
+
+	CHECK(text.find("伏図のまとめ方: 2番目の階の(GL+3531)を前のレベルとまとめる / "
+					"3番目の階の(GL+6374)を前のレベルとまとめる") != std::string::npos);
+	CHECK(text.find("まとめない") == std::string::npos);
 }
 
 TEST(format_import_options_names_the_chosen_title_block_style)
