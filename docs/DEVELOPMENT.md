@@ -268,6 +268,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 寸法線の位置（用紙 mm の段の間隔 `kDimensionFirstGap` / `kDimensionTierPitch` と縮尺を掛けた位置 `dimensionLineCoord`）・寸法の帯（`dimensionBand`。最も外の段は `core::outermostDimensionTier`） | `core/Layout` |
 | 軸組図のレベル記号の形と位置（▽ と名前の配置 `levelMarkShape`・起点 `levelMarkStartX`・基準線の長さ `levelLineLength`・帯の見込み `kLevelMarkBandAllowance`） | `core/Layout` |
 | 長さ・文字の単位の換算（インチ → mm `kMillimetersPerInch`・1 インチの pt 数 `kPointsPerInch`・紙の pt → mm `pointsToMillimeters`） | `core/Layout` |
+| 回転して置いた注釈の自身の高さを外接矩形から戻す（`rotatedRectHeight`。45 度近くで解けない境 `kRotatedRectMinConditioning`。傾斜材のデータタグの逃がし量＝`draw/Tag`） | `core/Layout` |
 | 取り込み設定（役割の表 `core::symbolRoles()`・図面枠のスタイル `core::ImportOptions::titleBlock` → `core::Document::titleBlockStyle`・寸法規格 `core::ImportOptions::dimension` → `core::Document::dimensionStandard`） | `core/ImportOptions` |
 | 進捗の整形と配分の計算・診断ログのフェーズの行（`beginPhase`） | `core/Progress` |
 | 往復の記憶と、どの周になるかの場合分け（`feedbackRoundKind`） | `core/FeedbackSession` |

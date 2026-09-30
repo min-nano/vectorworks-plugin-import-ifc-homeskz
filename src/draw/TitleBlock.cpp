@@ -14,6 +14,7 @@
 //	  * gSDK->CreateCustomObject(name, 位置, 0, true) … 図面枠 PIO の生成
 //	  * gSDK->SetPluginObjectStyle(object, style)     … スタイルの関連付け
 //	  * gSDK->UpdateStyledObjects(style)              … スタイルの中身を流し込む（1 回）
+//	  * gSDK->FirstMemberObj / InsertObjectBefore     … 最背面へ回す
 //	  * gSDK->GetObjectBounds / MoveObject            … 置いた後に測って動かす
 //
 
@@ -25,6 +26,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -49,8 +51,8 @@ namespace HomeskzIfcImport::draw
 		// draw/DrawUtil.h の SheetPaperArea が同じ前提で印刷可能領域を組み立てている）。
 		constexpr core::Vec2 kPaperCenter{0.0, 0.0};
 
-		// そのシートレイヤにはもう図面枠を置いたか。軸組図は同じシートレイヤへ複数の
-		// 命令が載るので、これが無いと 1 枚の用紙に枠が何重にも積まれる（draw/Section）。
+		// そのシートレイヤはもう控えたか。軸組図は同じシートレイヤへ複数の命令が載るので、
+		// これが無いと 1 枚の用紙に枠が何重にも積まれる（draw/Section）。
 		bool AlreadyPlaced(const TitleBlockCounts& counts, MCObjectHandle sheetLayer)
 		{
 			return std::ranges::find(counts.sheets, sheetLayer) != counts.sheets.end();
@@ -83,41 +85,48 @@ namespace HomeskzIfcImport::draw
 		return counts;
 	}
 
-	bool drawSheetTitleBlock(MCObjectHandle sheetLayer, TitleBlockCounts& counts)
+	void addTitleBlockSheet(MCObjectHandle sheetLayer, TitleBlockCounts& counts)
 	{
 		if (sheetLayer == nil || counts.styleRef == 0)
-			return false;
+			return;
 		if (AlreadyPlaced(counts, sheetLayer))
-			return false;
-
-		// 図面枠は**シートレイヤの上**に置く（用紙に載る）。PIO は bInsert=true で
-		// カレントレイヤへ入るので、先にそのシートレイヤをアクティブにする。
-		gSDK->SetCurrentLayer(sheetLayer);
-
-		const MCObjectHandle object = CreateTitleBlock();
-		// **置いたことは作れても作れなくても控える**——作れなかったシートレイヤへ次の命令で
-		// もう一度挑んでも同じ結果にしかならず、候補名を何度も試し直すだけ無駄になる。
+			return;
 		counts.sheets.push_back(sheetLayer);
-		if (object == nil)
-		{
-			++counts.failed;
-			return false;
-		}
-		counts.plugin = kTitleBlockPlugin;
-
-		// スタイルは関連付けるだけでは中身が流れない（[Findings「Parametric Objects」]
-		// (https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)
-		// の「プラグインスタイル」）。流し込みは全部置き終えてから 1 回＝finishTitleBlocks。
-		gSDK->SetPluginObjectStyle(object, counts.styleRef);
-
-		counts.objects.push_back(object);
-		++counts.drawn;
-		return true;
 	}
 
 	void finishTitleBlocks(TitleBlockCounts& counts)
 	{
-		if (counts.objects.empty())
+		if (counts.sheets.empty())
+			return;
+
+		// --- 置く ------------------------------------------------------------------
+		//
+		// ★**ここはビューポートの縮尺を確定させた後**（draw/TitleBlock.h）。図面枠の縮尺欄は
+		// 作ったときに用紙に載っているビューポートの縮尺を拾い、その後は勝手に取り直さない
+		// ので、先に作ると 1:1 のまま残る（`UpdateStyledObjects` も `ResetObject` も効かな
+		// かった。docs/DEV-NOTES.md M28）。
+		std::vector<std::pair<MCObjectHandle, MCObjectHandle>> placed; // (シートレイヤ, 図面枠)
+		placed.reserve(counts.sheets.size());
+		for (const MCObjectHandle sheetLayer : counts.sheets)
+		{
+			// 図面枠は**シートレイヤの上**に置く（用紙に載る）。PIO は bInsert=true で
+			// カレントレイヤへ入るので、先にそのシートレイヤをアクティブにする。
+			gSDK->SetCurrentLayer(sheetLayer);
+			const MCObjectHandle object = CreateTitleBlock();
+			if (object == nil)
+			{
+				++counts.failed;
+				continue;
+			}
+			counts.plugin = kTitleBlockPlugin;
+			// スタイルは関連付けるだけでは中身が流れない（[Findings「Parametric Objects」]
+			// (https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)
+			// の「プラグインスタイル」）。流し込みは全部置き終えてから 1 回（下）。
+			gSDK->SetPluginObjectStyle(object, counts.styleRef);
+			placed.emplace_back(sheetLayer, object);
+			++counts.drawn;
+		}
+		if (placed.empty())
 			return;
 
 		// スタイルの中身を流し込む（**ジオメトリの作り直しまで行う**ので、1 つずつの
@@ -125,9 +134,18 @@ namespace HomeskzIfcImport::draw
 		// 下の位置合わせが測るものを持たない。
 		gSDK->UpdateStyledObjects(counts.styleRef);
 
-		// 置いた後に測って用紙の中心へ寄せる（draw/TitleBlock.h「置き場所は測って決める」）。
-		for (const MCObjectHandle object : counts.objects)
+		for (const auto& [sheetLayer, object] : placed)
 		{
+			// --- 最背面へ回す ------------------------------------------------------
+			//
+			// 後から作ったので、このままでは**ビューポート・凡例の手前**にあって図を覆う。
+			// オブジェクト列は背面→前面の順なので、シートレイヤの先頭の前へ差し込めば
+			// 最背面になる（draw/TitleBlock.h の ★）。
+			const MCObjectHandle first = gSDK->FirstMemberObj(sheetLayer);
+			if (first != object && (first == nil || !gSDK->InsertObjectBefore(object, first)))
+				++counts.frontLeft;
+
+			// --- 測って用紙の中心へ寄せる（draw/TitleBlock.h「置き場所は測って決める」）---
 			WorldRect bounds;
 			if (!gSDK->GetObjectBounds(object, bounds))
 			{
@@ -147,7 +165,7 @@ namespace HomeskzIfcImport::draw
 			return {};
 
 		const bool styleMissing = counts.styleRef == 0;
-		if (!styleMissing && counts.failed == 0 && counts.placeLeft == 0)
+		if (!styleMissing && counts.failed == 0 && counts.placeLeft == 0 && counts.frontLeft == 0)
 			return {};
 
 		std::string text = "図面枠の診断: ";
@@ -162,6 +180,8 @@ namespace HomeskzIfcImport::draw
 		AppendCount(text, "図面枠を作れなかったシートレイヤ", counts.failed, "枚", missing.c_str());
 		AppendCount(text, "用紙の中心へ寄せられなかった図面枠", counts.placeLeft, "枚",
 					"外形を測れませんでした");
+		AppendCount(text, "最背面へ回せなかった図面枠", counts.frontLeft, "枚",
+					"図を覆っているかもしれません");
 		return text;
 	}
 

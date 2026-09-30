@@ -13,6 +13,7 @@
 #include <cmath>
 #include <numbers>
 #include <cstddef>
+#include <optional>
 #include <string>
 
 namespace HomeskzIfcImport::core
@@ -251,5 +252,25 @@ namespace HomeskzIfcImport::core
 		if (scale <= 0.0)
 			return kLevelLineOvershoot;
 		return std::max((right - startX) / scale, 0.0) + kLevelLineOvershoot;
+	}
+
+	std::optional<double> rotatedRectHeight(double angleDegrees, double boundsWidth,
+											double boundsHeight)
+	{
+		const double radians = angleDegrees * std::numbers::pi / 180.0;
+		const double c = std::abs(std::cos(radians));
+		const double s = std::abs(std::sin(radians));
+		const double conditioning = (c * c) - (s * s);
+		if (std::abs(conditioning) < kRotatedRectMinConditioning)
+			return std::nullopt;
+		const double width = std::max(boundsWidth, 0.0);
+		const double height = std::max(boundsHeight, 0.0);
+		const double solved = ((height * c) - (width * s)) / conditioning;
+		// 実測の丸めで外接矩形より大きく解けることがあるので、外接矩形の短辺で頭を押さえる
+		// （自身の高さは幅・高さのどちらも超えない）。
+		const double clamped = std::min(solved, std::min(width, height));
+		if (!(clamped > 0.0))
+			return std::nullopt;
+		return clamped;
 	}
 } // namespace HomeskzIfcImport::core
