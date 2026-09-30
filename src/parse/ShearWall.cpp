@@ -487,18 +487,18 @@ namespace HomeskzIfcImport::parse
 				topAtEnd = *highestUpper;
 			}
 
-			// 下端。PIO は下端を 1 つしか持たないので、取れた点のうち最も高い天端
-			// （軸組の外へ出さない側）。
+			// 下端。PIO は下端を 1 つしか持たないので、取れた点のうち**最も低い**天端
+			// （上端と同じく、段差のある梁との間に隙間を空けない。実機確認でのご指示）。
 			double bottom = ifcBottom;
-			std::optional<double> highestLower;
+			std::optional<double> lowestLower;
 			for (const BeamBounds& sample : samples)
 			{
 				if (sample.lower.has_value() &&
-					(!highestLower.has_value() || *sample.lower > *highestLower))
-					highestLower = sample.lower;
+					(!lowestLower.has_value() || *sample.lower < *lowestLower))
+					lowestLower = sample.lower;
 			}
-			if (highestLower.has_value())
-				bottom = *highestLower;
+			if (lowestLower.has_value())
+				bottom = *lowestLower;
 
 			// 測り直した内法が潰れるなら（上下の材の取り違え）、IFC の高さのまま残す。
 			if (topAtStart <= bottom || topAtEnd <= bottom)

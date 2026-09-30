@@ -679,6 +679,21 @@ TEST(shear_wall_fit_levels_the_top_under_a_beam_raised_mid_span)
 	CHECK(near(walls[0].topHeightEnd, 3315.0 - 426.0, 1e-6));
 }
 
+TEST(shear_wall_fit_takes_the_lower_top_of_a_stepped_beam_below)
+{
+	// 下の梁が内法の途中で天端を変える（426 → 326。床の段差）。下端は 1 つしか持てない
+	// ので、低い方の天端（326 → レイヤ平面から −100）にそろえる（梁との間に隙間を空けない）。
+	std::vector<ShearWallCommand> walls{fitWall()};
+	const std::vector<core::MemberCommand> members{
+		fitBeam({-500.0, 0.0}, {900.0, 0.0}, 426.0, 426.0, 105.0),
+		fitBeam({900.0, 0.0}, {2500.0, 0.0}, 326.0, 326.0, 105.0),
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 240.0)};
+	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	CHECK(near(walls[0].bottomHeight, -100.0, 1e-6));
+	CHECK(near(walls[0].topHeight, 2754.0, 1e-6));
+	CHECK(near(walls[0].topHeightEnd, 2754.0, 1e-6));
+}
+
 TEST(shear_wall_fit_ignores_beams_off_the_axis_or_far_away)
 {
 	// 軸から外れた梁・直交する梁・はるか上の梁（母屋）は上下の材とみなさない。何も
