@@ -8,6 +8,7 @@
 #include "core/ImportOptions.h"
 #include "parse/Joint.h"
 #include "parse/StructuralClass.h"
+#include "parse/Story.h"
 
 #include <algorithm>
 #include <array>
@@ -233,7 +234,8 @@ namespace HomeskzIfcImport::parse
 			for (std::size_t j = i + 1; j < members.size(); ++j)
 			{
 				const MemberGeom& b = geoms[j];
-				if (!b.valid || members[j].layer != members[i].layer)
+				if (!b.valid ||
+					beamGroupLayer(members[j].layer) != beamGroupLayer(members[i].layer))
 					continue;
 				if (std::abs(core::cross(a.axis, b.axis)) >= kSpliceParallelTol)
 					continue;
@@ -255,7 +257,8 @@ namespace HomeskzIfcImport::parse
 						const SplicePiece pieceB{&members[j], &b, &endB};
 
 						SpliceCandidate candidate;
-						candidate.command.layer = members[i].layer;
+						// 軒桁の継手も横架材レイヤへ（仕口と同じ。parse/Joint）。
+						candidate.command.layer = beamGroupLayer(members[i].layer);
 						candidate.command.symbol = symbol;
 						candidate.command.position = Vec2{(endA.point.x + endB.point.x) / 2.0,
 														  (endA.point.y + endB.point.y) / 2.0};

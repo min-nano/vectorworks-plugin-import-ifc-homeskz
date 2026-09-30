@@ -22,6 +22,7 @@
 #include "parse/Joint.h"
 #include "parse/Loader.h"
 #include "parse/Member.h"
+#include "parse/Story.h"
 #include "parse/StructuralClass.h"
 #include "core/ImportOptions.h"
 
@@ -40,6 +41,7 @@ using HomeskzIfcImport::core::MemberCommand;
 using HomeskzIfcImport::core::SymbolCommand;
 using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::core::Vec2;
+using HomeskzIfcImport::parse::beamGroupLayer;
 using HomeskzIfcImport::parse::buildColumnCommands;
 using HomeskzIfcImport::parse::buildJointCommands;
 using HomeskzIfcImport::parse::buildMemberCommands;
@@ -598,7 +600,8 @@ TEST(joint_fixture_height_matches_member_ends)
 							   members,
 							   [&joint](const MemberCommand& m)
 							   {
-								   if (m.layer != joint.layer)
+								   // 軒桁の仕口は横架材レイヤ（beamGroupLayer）。
+								   if (beamGroupLayer(m.layer) != joint.layer)
 									   return false;
 								   const Vec2 start = HomeskzIfcImport::core::memberDrawnStart(m);
 								   const Vec2 end = HomeskzIfcImport::core::memberDrawnEnd(m);

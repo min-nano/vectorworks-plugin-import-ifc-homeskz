@@ -326,7 +326,7 @@ namespace HomeskzIfcImport::parse
 			double lowest = 0.0;
 			for (const MemberCommand& member : members)
 			{
-				if (member.layer != beamLayer)
+				if (beamGroupLayer(member.layer) != beamLayer)
 					continue;
 				const double bottom = core::memberBottomZ(member);
 				if (!found || bottom < lowest)

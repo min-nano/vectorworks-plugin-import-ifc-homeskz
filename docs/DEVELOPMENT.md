@@ -282,7 +282,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | もの | 置き場所 |
 | --- | --- |
 | IFC の属性インデックス | `parse/IfcAttr.h` |
-| レベル種別名・`storyLayerName`・横架材レベルの定型（`beamTopLevelType` / `beamTopElevation` / `beamTopLayerName`）・階の要素の有無（`storyHasElement`）・span レベルの表記（`formatSpanLevel`） | `parse/Story.h` |
+| レベル種別名・`storyLayerName`・横架材レベルの定型（`beamTopLevelType` / `beamTopElevation` / `beamTopLayerName`）・横架材の取り合いを見るときのレイヤの読み替え（`beamGroupLayer`。軒桁の専用レイヤ→横架材レイヤ）・階の要素の有無（`storyHasElement`）・span レベルの表記（`formatSpanLevel`） | `parse/Story.h` |
 | 屋根組の名前 | `parse/Rafter.h` / `parse/Roof.h` |
 | 基礎ストーリの名前・接尾辞・レベル・レイヤ名、基礎の許容値（統合・自由端・人通口・壁結合・地中梁・床付け） | `parse/Footing.h` |
 | 要素の判別述語（`isFloorSlab` / `isRoofSlab` / `isFireBrace` / `isBaseSlab` / `isShearBrace` / `isShearPanel` 等） | その要素のヘッダ |

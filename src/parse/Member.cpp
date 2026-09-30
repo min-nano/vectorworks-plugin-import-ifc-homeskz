@@ -526,7 +526,7 @@ namespace HomeskzIfcImport::parse
 				if (j == i || !geoms[j].valid)
 					continue;
 				const MemberCommand& other = commands[j];
-				if (command.layer != other.layer)
+				if (beamGroupLayer(command.layer) != beamGroupLayer(other.layer))
 					continue;
 				if (!zOverlaps(command.elevation, command.height, other.elevation, other.height))
 					continue;
@@ -741,6 +741,14 @@ namespace HomeskzIfcImport::parse
 				{
 					elementLayer = storyLayerName(i, story.isTop, kLevelNoboribari);
 					boundLevel = kLevelNoboribari;
+				}
+				else if (memberClass == CLASS_NOKIGETA)
+				{
+					// 軒桁は母屋伏図に薄く重ねるため専用レイヤへ（core::kLevelNokigeta）。
+					// 取り合い・継手・柱の上端は同じ階の横架材と同じ群として見る
+					// （beamGroupLayer）。
+					elementLayer = storyLayerName(i, story.isTop, kLevelNokigeta);
+					boundLevel = kLevelNokigeta;
 				}
 
 				MemberCommand cmd;

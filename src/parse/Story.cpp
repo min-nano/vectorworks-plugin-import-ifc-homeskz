@@ -157,6 +157,15 @@ namespace HomeskzIfcImport::parse
 		return storyLayerPrefix(index, isTop) + "-" + levelType;
 	}
 
+	std::string beamGroupLayer(const std::string& layer)
+	{
+		const std::string suffix = std::string("-") + kLevelNokigeta;
+		if (!layer.ends_with(suffix))
+			return layer;
+		const std::string prefix = layer.substr(0, layer.size() - suffix.size());
+		return prefix + "-" + (prefix == kRoofSuffix ? kLevelEaves : kLevelBeamTop);
+	}
+
 	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ)
 	{
 		// ローカル配置原点の Z（鎖の解決は parse/IfcGeometry の resolveLocalPlacementOrigin。
@@ -363,6 +372,12 @@ namespace HomeskzIfcImport::parse
 			//     空レイヤが残る（空レイヤを作らない方針。ロフト FL・垂木/野地板と同じ）。
 			// 命令の配置先で判定すれば、**レイヤは命令があるときだけ・命令があれば必ず**でき、
 			// 両方の齟齬が構造的に起きない。
+			// 軒桁: 母屋伏図に軒桁だけを薄く重ねるため、横架材天端（最上階は軒高）から分けた
+			// "n-軒桁" レイヤ（parse/Member）。高さは横架材天端と同じなので、そのすぐ上へ
+			// **最初に**挿す（耐力壁・小屋組より下）。条件は母屋・登り梁と同じく命令の配置先。
+			if (anyMemberOnLayer(members, layerFor(kLevelNokigeta)))
+				insertAboveBeamTop(kLevelNokigeta);
+
 			// M19 耐力壁: 筋かい・面材の PIO を載せる "n-耐力壁" レイヤ。**横架材天端の
 			// すぐ上**（小屋組より下）へ置く。挿入は「後から挿したものが 1 段上」なので、
 			// 小屋組（登り梁・母屋・垂木・野地板）より**先に**挿す。

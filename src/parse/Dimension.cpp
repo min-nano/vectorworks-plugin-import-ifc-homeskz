@@ -11,7 +11,6 @@
 #include "parse/Dimension.h"
 #include "core/Document.h"
 #include "parse/Section.h"
-#include "parse/StructuralClass.h"
 #include "parse/Tag.h"
 
 #include <algorithm>
@@ -1370,44 +1369,6 @@ namespace HomeskzIfcImport::parse
 		return framingLineChains(segments, points, crossings, grids, min, max, true);
 	}
 
-	namespace
-	{
-		// 母屋伏図 layers に映る母屋・登り梁と同じ階の軒桁（その階の軒高・横架材天端の
-		// レイヤに置かれた、クラスが軒桁の材）。母屋伏図には映らないが、登り梁は軒桁に
-		// 取り付くので、その交点を押さえるのに要る（ご要望: 5 通り側も 1 通りと同様に）。
-		// 同じレイヤの小屋梁・床梁などは入れない。
-		std::vector<core::MemberCommand> eavesGirders(const core::Document& document,
-													  const std::vector<std::string>& layers)
-		{
-			std::vector<std::string> eavesLayers;
-			for (const core::StoryCommand& story : document.stories)
-			{
-				const bool roofOfThisSheet =
-					std::ranges::any_of(story.levels,
-										[&layers](const core::LevelCommand& level)
-										{
-											return (level.type == core::kLevelMoya ||
-													level.type == core::kLevelNoboribari) &&
-												   onLayers(layers, level.layer);
-										});
-				if (!roofOfThisSheet)
-					continue;
-				for (const core::LevelCommand& level : story.levels)
-				{
-					if (level.type == core::kLevelEaves || level.type == core::kLevelBeamTop)
-						eavesLayers.push_back(level.layer);
-				}
-			}
-			std::vector<core::MemberCommand> out;
-			std::ranges::copy_if(document.members, std::back_inserter(out),
-								 [&eavesLayers](const core::MemberCommand& member) {
-									 return member.drawClass == CLASS_NOKIGETA &&
-											onLayers(eavesLayers, member.layer);
-								 });
-			return out;
-		}
-	} // namespace
-
 	std::vector<core::DimensionChainCommand>
 	buildPlanDimensionCommands(const core::Document& document, const core::SheetCommand& sheet)
 	{
@@ -1455,10 +1416,19 @@ namespace HomeskzIfcImport::parse
 			// 内部の横架材に沿う列が押さえる。
 			return framingDimensionChains(members, columns, document.grids, min, max);
 		case core::PlanKind::Moya:
+		{
 			// 母屋・登り梁を床伏図・小屋伏図と同じく通りに沿って押さえ、斜めの登り梁は交点を
-			// 押さえる（垂木は横架材の命令ではないので入らない）。その屋根の軒桁も加える。
-			return moyaDimensionChains(members, eavesGirders(document, layers), document.members,
-									   columns, document.grids, min, max);
+			// 押さえる（垂木は横架材の命令ではないので入らない）。薄く重ねる同じ階の軒桁
+			// （viewport.grayedLayers。parse/Sheet）も加える——図の外形・タグの対象では
+			// ないが、登り梁は軒桁に取り付くので、その交点を押さえる（ご要望: 5 通り側も
+			// 1 通りと同様に）。
+			std::vector<core::MemberCommand> eaves;
+			std::ranges::copy_if(document.members, std::back_inserter(eaves),
+								 [&sheet](const core::MemberCommand& member)
+								 { return onLayers(sheet.viewport.grayedLayers, member.layer); });
+			return moyaDimensionChains(members, eaves, document.members, columns, document.grids,
+									   min, max);
+		}
 		}
 		return {};
 	}
@@ -1572,8 +1542,10 @@ namespace HomeskzIfcImport::parse
 			if (!memberOnCutPlane(member, section))
 				continue;
 			const auto level = levels.find(member.layer);
+			// 軒桁（専用レイヤ）も横架材天端・軒高と同じ高さのレベルに載る。
 			if (level == levels.end() || (level->second.type != core::kLevelBeamTop &&
-										  level->second.type != core::kLevelEaves))
+										  level->second.type != core::kLevelEaves &&
+										  level->second.type != core::kLevelNokigeta))
 				continue;
 			if (std::abs(member.elevation - member.endElevation) > kDimensionMergeTol)
 				continue;
