@@ -453,7 +453,7 @@ TEST(SectionLevelMarksNameGlFloorsAndEaves)
 	}
 }
 
-TEST(SectionLevelMarksAndHeightChainsClearCrossingMembers)
+TEST(SectionDimensionsAndLevelMarksReachCrossingMembers)
 {
 	// 切断面を横切る横架材（東西に走る＝X通りの断面に切り口が写る）が、柱・沿う材より
 	// 外（y=−500 → 注釈の横 −5500）にある。レベル記号と高さの列はその切り口（材幅 105 の
@@ -467,6 +467,11 @@ TEST(SectionLevelMarksAndHeightChainsClearCrossingMembers)
 	// 切断面へ届かない材は数えない。
 	document.members.push_back(
 		makeMember("2-横架材天端", Vec2{500.0, -2000.0}, Vec2{1500.0, -2000.0}, 3264.0));
+	// 柱の範囲の内側の切り口は、下の列へ足さない（押さえるのは最外周だけ）。
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{-910.0, 455.0}, Vec2{910.0, 455.0}, 3264.0));
+	// 外側の切り口の近く（20mm）に通り芯がある。下の列はその通り芯の値を採る。
+	document.grids.push_back(makeGrid("Y0", Vec2{-1000.0, -480.0}, Vec2{2820.0, -480.0}));
 	const SectionCommand section = xSection();
 
 	const std::vector<LevelMarkCommand> marks = parse::buildSectionLevelMarks(document, section);
@@ -483,11 +488,12 @@ TEST(SectionLevelMarksAndHeightChainsClearCrossingMembers)
 	CHECK(levels != nullptr);
 	if (levels != nullptr)
 		CHECK(near(levels->base, -5552.5));
-	// 柱の位置の列は切り口に引きずられない（押さえるのは柱・束の位置）。
+	// 下の列は柱・束の位置に、その面の最外周の切り口（左は通り芯 Y0 の −5480、右は材の芯の
+	// −2500）を足す。内側の切り口（−4545）は足さない。
 	const DimensionChainCommand* columns = findChain(chains, DimensionAxis::Horizontal, -1, 0);
 	CHECK(columns != nullptr);
 	if (columns != nullptr)
-		CHECK(sameValues(columns->stops, {-5000.0, -4090.0, -3180.0}));
+		CHECK(sameValues(columns->stops, {-5480.0, -5000.0, -4090.0, -3180.0, -2500.0}));
 }
 
 TEST(SectionWithOnlyCrossingMembersHasNoDimensions)

@@ -10,6 +10,7 @@
 
 #include "parse/Dimension.h"
 #include "core/Document.h"
+#include "parse/Section.h"
 #include "parse/Tag.h"
 
 #include <algorithm>
@@ -561,6 +562,40 @@ namespace HomeskzIfcImport::parse
 				grid.push_back(a);
 		}
 		grid = mergeStops(std::move(grid));
+		// その面の**最外周**も押さえる（利用者の指定）。柱・沿う材より外に横架材の切り口が
+		// あれば、左右それぞれ最も外の切り口の芯を測点に足す（又は通りなら 1通り〜5通り）。
+		// 間に並ぶ切り口・通り芯は足さない（押さえるのは最外周だけ）。切り口の近く
+		// （kClusterTol 以内）に通り芯があれば、寸法の数字が通り芯の間隔になるよう通り芯の
+		// 値を採る。
+		std::vector<double> gridAll;
+		for (const double value : gridStops(document.grids, crossing))
+			gridAll.push_back(value - origin);
+		const auto snapToGrid = [&gridAll](double value)
+		{
+			for (const double g : gridAll)
+			{
+				if (std::abs(g - value) <= kClusterTol)
+					return g;
+			}
+			return value;
+		};
+		bool anyCrossing = false;
+		double outerLow = 0.0;
+		double outerHigh = 0.0;
+		for (const core::MemberCommand& member : document.members)
+		{
+			core::Vec2 point;
+			if (!memberCrossesCutPlane(member, section, point))
+				continue;
+			const double a = along(point);
+			outerLow = anyCrossing ? std::min(outerLow, a) : a;
+			outerHigh = anyCrossing ? std::max(outerHigh, a) : a;
+			anyCrossing = true;
+		}
+		if (anyCrossing && outerLow < low - kDimensionMergeTol)
+			columns.push_back(snapToGrid(outerLow));
+		if (anyCrossing && outerHigh > high + kDimensionMergeTol)
+			columns.push_back(snapToGrid(outerHigh));
 		const std::vector<double> detail = unionStops(grid, columns);
 		if (detail.size() >= 2)
 			out.push_back(makeChain(DimensionAxis::Horizontal, detail, bottom, -1, 0));
