@@ -665,6 +665,64 @@ namespace HomeskzIfcImport::draw
 	}
 
 #if VW_DRAW_VERIFY
+	namespace
+	{
+		// **柱の「どこにあるか」を 3 つの口で並べる**（開発ビルドの測り直し用）。
+		//
+		// 柱探しは柱の外接（GetObjectBounds）で位置を測っているが、前の周を取り消して
+		// から取り込み直した周（#161 round 2）では、耐力壁の原点は格子どおりなのに柱の
+		// 中心が格子から半端にずれて測れ、60 枚中 59 枚で柱を見失った。外接が状況（ビュー
+		// 等）で変わるのかを見るため、始端に最も近い柱（柱自身の行列の原点で選ぶ）について
+		// 外接・3D の外接（GetObjectCube）・行列の原点をワールド座標で並べる。
+		std::string DescribeNearestColumn(const VWParametricObj& self,
+										  const VWTransformMatrix& toWorld)
+		{
+			const std::vector<std::string> layers =
+				SplitLayers(draw::PioParamString(self, kParamShearTargetLayers));
+			const VWPoint2D origin = toWorld.PointTransform(VWPoint2D(0.0, 0.0));
+			MCObjectHandle nearest = nil;
+			double best = std::numeric_limits<double>::max();
+			VWPoint3D nearestOffset;
+			for (const std::string& name : layers)
+			{
+				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
+				if (layer == nil)
+					continue;
+				for (MCObjectHandle h = gSDK->FirstMemberObj(layer); h != nil;
+					 h = gSDK->NextObject(h))
+				{
+					if (draw::StructuralUseOf(h) != core::kStructuralUseColumn)
+						continue;
+					VWTransformMatrix matrix;
+					VWObject(h).GetObjectMatrix(matrix);
+					const VWPoint3D offset = matrix.GetOffset();
+					const double distance = std::hypot(offset.x - origin.x, offset.y - origin.y);
+					if (distance < best)
+					{
+						best = distance;
+						nearest = h;
+						nearestOffset = offset;
+					}
+				}
+			}
+			if (nearest == nil)
+				return "柱が 1 本も無い";
+
+			WorldRect bounds;
+			gSDK->GetObjectBounds(nearest, bounds);
+			WorldCube cube;
+			gSDK->GetObjectCube(nearest, cube);
+			return "始端に最も近い柱（行列の原点で選んだ。離れ " + Number(best) +
+				   "）: 行列の原点 (" + Number(nearestOffset.x) + ", " + Number(nearestOffset.y) +
+				   ")・外接の中心 (" + Number((bounds.left + bounds.right) / 2.0) + ", " +
+				   Number((bounds.bottom + bounds.top) / 2.0) + ") 幅 " +
+				   Number(bounds.right - bounds.left) + "×" + Number(bounds.top - bounds.bottom) +
+				   "・3D 外接の中心 (" + Number((cube.MinX() + cube.MaxX()) / 2.0) + ", " +
+				   Number((cube.MinY() + cube.MaxY()) / 2.0) + ") 幅 " +
+				   Number(cube.MaxX() - cube.MinX()) + "×" + Number(cube.MaxY() - cube.MinY());
+		}
+	} // namespace
+
 	std::string probeShearWall(MCObjectHandle object)
 	{
 		if (object == nil)
@@ -678,6 +736,8 @@ namespace HomeskzIfcImport::draw
 			std::string text = resolved.ok ? DescribeClearSpan(resolved) : "内法が決まらない";
 			if (!resolved.ok && !resolved.search.empty())
 				text += "（" + resolved.search + "）";
+			if (!resolved.fromColumns)
+				text += "・" + DescribeNearestColumn(self, toWorld);
 			const VWPoint2D origin = toWorld.PointTransform(VWPoint2D(0.0, 0.0));
 			const VWPoint2D along = toWorld.PointTransform(VWPoint2D(1.0, 0.0));
 			return text + "・原点 world=(" + Number(origin.x) + ", " + Number(origin.y) +
