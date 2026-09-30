@@ -603,7 +603,7 @@ namespace HomeskzIfcImport::draw
 		return static_cast<RefNumber>(gSDK->GetObjectInternalIndex(style));
 	}
 
-	void DeselectEverything()
+	bool DeselectEverything()
 	{
 		try
 		{
@@ -623,8 +623,10 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// 選択が残るだけで図は壊れない（ヘッダ参照）。
+			// 選択が残るだけで図は壊れない（ヘッダ参照）。そこで打ち切る。
+			return false;
 		}
+		return true;
 	}
 
 	// --- 取り込み全体の Undo（DrawUtil.h「なぜレイヤを記録するのか」）--------------------
