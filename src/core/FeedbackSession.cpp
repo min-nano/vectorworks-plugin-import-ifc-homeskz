@@ -15,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace HomeskzIfcImport::core
 {
@@ -121,6 +122,10 @@ namespace HomeskzIfcImport::core
 		out << "titleblock=" << sanitize(session.options.titleBlockStyle()) << "\n";
 		// M31 寸法規格（空＝入れない）。図面枠と同じ理由で漏らさず書く。
 		out << "dimension=" << sanitize(session.options.dimensionStandard()) << "\n";
+		// M34 軸組図から外す通り（図番）。図面枠と同じ理由で漏らさず書く——書き落とすと
+		// 続きの周が外したはずの通りまで描く。レイヤと同じく**1 本 1 行**。
+		for (const std::string& number : session.options.skippedSections)
+			out << "section.skip=" << sanitize(number) << "\n";
 		return out.str();
 	}
 
@@ -194,6 +199,17 @@ namespace HomeskzIfcImport::core
 			{
 				// 古い記憶（M31 より前）には行が無い——既定の空（入れない）のまま読む。
 				session.options.setDimensionStandard(value);
+			}
+			else if (key == "section.skip")
+			{
+				// **重ねて読む**（行の数だけ通りがある）。古い記憶（M34 より前）には行が
+				// 無い——既定の空（全部描く）のまま読む。
+				if (!value.empty())
+				{
+					std::vector<std::string> skipped = session.options.skippedSections;
+					skipped.push_back(value);
+					session.options.setSkippedSections(skipped);
+				}
 			}
 			else if (key.starts_with("role."))
 			{

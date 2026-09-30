@@ -429,6 +429,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/StructuralMember.cpp
 		src/draw/ProgressDialog.cpp
 		src/draw/ResultDialog.cpp
+		src/draw/SectionPickDialog.cpp
 		src/draw/SettingsDialog.cpp
 		src/draw/ExecuteDocument.cpp
 		src/draw/Grid.cpp

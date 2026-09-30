@@ -40,7 +40,9 @@
 #include "parse/Story.h"
 #include "parse/Tag.h"
 
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace HomeskzIfcImport::parse
 {
@@ -238,5 +240,18 @@ namespace HomeskzIfcImport::parse
 			attachDimensionCommands(document);
 
 		return document;
+	}
+
+	std::vector<core::SectionCommand> buildSectionCandidates(const std::string& ifcPath,
+															 const core::ImportOptions& options)
+	{
+		// **外す通りを空にして**解析し、軸組図の命令をそのまま候補にする。取り込みと
+		// 同じ buildDocument を通すので、候補と実際に描く通りが食い違わない（切断位置は
+		// 柱・横架材の命令から、映すレイヤはストーリの命令から決まり、どちらも全体の
+		// 解析を要する。大きなホームズ君 IFC でも 0.1 秒程度）。進捗は出さない。
+		core::ImportOptions all = options;
+		all.setSkippedSections({});
+		core::NullProgressReporter noProgress;
+		return buildDocument(ifcPath, noProgress, all).sections;
 	}
 } // namespace HomeskzIfcImport::parse

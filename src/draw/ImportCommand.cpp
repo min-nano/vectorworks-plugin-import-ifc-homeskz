@@ -2,7 +2,7 @@
 //	draw/ImportCommand.cpp
 //
 //	本番の取り込みコマンドの実装（意図は draw/ImportCommand.h 参照）。縦切りの通し処理:
-//	ファイルを選ぶ → 設定を決める → 取り込む（draw/ImportRun）→ 結果をダイアログに出す。
+//	ファイルを選ぶ → 設定を決める → 軸組図にする通りを選ぶ → 取り込む（draw/ImportRun）→ 結果をダイアログに出す。
 //	要素が増えても入口はこの形のまま（各要素の追加は Document と draw 側で行う）。
 //
 //	**ここには往復（実機フィードバック）の分岐が 1 つも無い**——M25 でそれを dev だけの
@@ -16,8 +16,10 @@
 
 #include "core/ImportOptions.h"
 #include "core/Trace.h"
+#include "parse/BuildDocument.h"
 #include "draw/ImportRun.h"
 #include "draw/ResultDialog.h"
+#include "draw/SectionPickDialog.h"
 #include "draw/SettingsDialog.h"
 
 #include <string>
@@ -49,13 +51,25 @@ namespace HomeskzIfcImport::draw
 		if (settings == draw::SettingsOutcome::Cancelled)
 			return;
 
-		// 3. 取り込み本体。例外は中で受け止められ、failed=true と説明つきの body で返る
+		// 3. 軸組図にする通りを選ぶ（M34。draw/SectionPickDialog.h）。候補は**取り込みと同じ
+		//    解析**で出す——解析は大きなホームズ君 IFC でも 0.1 秒程度なので、選ぶために
+		//    1 度余分に回しても待たせない。キャンセルなら静かに終える（設定と同じ扱い）。
+		//    候補が無い・ダイアログを組めなかったときは全部描くで続ける。
+		std::string pickNote;
+		const draw::SettingsOutcome pick = draw::showSectionPicker(
+			parse::buildSectionCandidates(ifcPath, options), options, &pickNote);
+		if (pick == draw::SettingsOutcome::Cancelled)
+			return;
+		if (!pickNote.empty())
+			settingsNote += (settingsNote.empty() ? "" : " / ") + pickNote;
+
+		// 4. 取り込み本体。例外は中で受け止められ、failed=true と説明つきの body で返る
 		//    （draw/ImportRun.h）。
 		const ImportRound round =
 			runImportRound(ifcPath, options, settings == draw::SettingsOutcome::Accepted,
 						   settingsNote, /*prologue*/ std::string());
 
-		// 4. 結果をダイアログ表示。本文は短く、**診断ログは折り畳んだテキスト欄**として同じ
+		// 5. 結果をダイアログ表示。本文は短く、**診断ログは折り畳んだテキスト欄**として同じ
 		//    ダイアログに載せる（draw/ResultDialog.h。ふだんは開かず、不具合の報告のときに
 		//    開いて丸ごとコピーする）。
 		if (!draw::showImportResult("ホームズ君 IFC 取り込み", round.body, core::trace::text()))
