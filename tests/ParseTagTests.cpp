@@ -39,6 +39,7 @@ using HomeskzIfcImport::parse::attachTagCommands;
 using HomeskzIfcImport::parse::buildPlanTagCommands;
 using HomeskzIfcImport::parse::buildSectionTagCommands;
 using HomeskzIfcImport::parse::memberLevelNote;
+using HomeskzIfcImport::parse::memberLevelNoteParts;
 using HomeskzIfcImport::parse::StoryInfo;
 using HomeskzIfcImport::parse::tagAngle;
 using HomeskzIfcImport::parse::tagOffsetSide;
@@ -396,6 +397,35 @@ TEST(LevelNoteMeasuresFromTheStoreyFl)
 			 std::string("(2FL -872)"));
 }
 
+TEST(LevelNoteLinksOnlyHorizontalMembers)
+{
+	// 水平な材の注記は描画側で部材の高さに連動させるので、基準の名前（最上階は軒高）を
+	// 持つ。傾斜材は低い端〜高い端を連動して読めないので文字のまま（基準なし）。
+	const std::vector<StoryInfo> stories = noteStories();
+	const std::vector<long long> standard = {572, 3531, 6374};
+	const auto flat =
+		memberLevelNoteParts(noteMember("2-横架材天端(FL-872)", 2699.0, 2699.0), stories, standard);
+	CHECK_EQ(flat.text, std::string("(2FL -872)"));
+	CHECK_EQ(flat.datum, std::string("2FL"));
+	CHECK_EQ(memberLevelNoteParts(noteMember("R-母屋", 6738.0, 6738.0), stories, standard).datum,
+			 std::string("軒高"));
+	const auto sloped =
+		memberLevelNoteParts(noteMember("2-登り梁", 3531.0, 2699.0), stories, standard);
+	CHECK_EQ(sloped.text, std::string("(2FL -872~-40)"));
+	CHECK(sloped.datum.empty());
+	// 注記を添えない材は基準も持たない。
+	const auto none =
+		memberLevelNoteParts(noteMember("2-横架材天端", 3531.0, 3531.0), stories, standard);
+	CHECK(none.text.empty());
+	CHECK(none.datum.empty());
+	// 引用符を含む階名は番号で呼ぶ（基準名も同じ）。
+	std::vector<StoryInfo> quoted = stories;
+	quoted[1].name = "2\"FL";
+	CHECK_EQ(
+		memberLevelNoteParts(noteMember("2-横架材天端", 2699.0, 2699.0), quoted, standard).datum,
+		std::string("2FL"));
+}
+
 TEST(FixtureTagsCarryLevelNotes)
 {
 	// スキップフロア: GL+2699 の横架材（2FL−872）には注記があり、標準（2FL−40）には無い。
@@ -414,6 +444,7 @@ TEST(FixtureTagsCarryLevelNotes)
 				if (member.layer == "2-横架材天端(FL-872)")
 				{
 					CHECK_EQ(tag.note, std::string("(2FL -872)"));
+					CHECK_EQ(tag.noteDatum, std::string("2FL"));
 					skipNote = true;
 				}
 				if (member.layer == "2-横架材天端" && member.elevation == member.endElevation &&
