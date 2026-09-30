@@ -75,7 +75,7 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kTagClass = kDimensionClass;
 
 		// タグフィールドの式（VW のタグフィールド定義式）。構造材の断面幅×せいを mm 整数で
-		// 並べ、**高さの注記**（note。"(2FL -872)"）があれば後ろへそのまま添える。
+		// 並べ、**高さの注記**（note。"(2FL -872)"）があれば後ろへ文字列として添える。
 		// **レコード名・フィールド名は draw/StructuralMember の定義から組む**——構造材を書いて
 		// いるのはこちらなので、名前を 2 か所に書かない（CLAUDE.md「重複を作らない置き場所」）。
 		//
@@ -96,10 +96,15 @@ namespace HomeskzIfcImport::draw
 			formula += "#.#";
 			formula += kFieldMajorDepth;
 			formula += "##mm_0_0#";
+			// 注記は**二重引用符で囲んだ文字列**として置く。裸のまま続けると "(" や "-" が式の
+			// 演算子として読まれ、式全体が評価されずに本文のまま表示された（実機・round 後の
+			// ご指摘）。"×" のように演算子でない文字は裸でも通る。注記は解析側が数字・符号・
+			// 括弧・"~"・","・階名だけで書くので、引用符が中に入ることはない。
 			if (!note.empty())
 			{
-				formula += " ";
+				formula += "\" ";
 				formula += TXString(note.c_str());
+				formula += "\"";
 			}
 			return formula;
 		}
