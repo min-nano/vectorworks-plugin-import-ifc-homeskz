@@ -67,6 +67,7 @@
 #include "core/Document.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -94,6 +95,9 @@ namespace HomeskzIfcImport::draw
 		std::size_t failed = 0; // どの候補名でも PIO を作れなかったシートレイヤ
 		std::size_t placeLeft = 0; // 外形を測れず、用紙の中心へ寄せられなかった
 		std::size_t frontLeft = 0; // 最背面へ回せず、図を覆っているかもしれない
+		// 本置きした 1 つ目の外形（用紙 mm。測れなければ 0）。割り付けの前に仮に測った
+		// 大きさ（measureTitleBlockFrame）と突き合わせるために診断ログへ出す。
+		core::Vec2 placedSize;
 
 		// 図面枠を置くシートレイヤ（控えた順）。**軸組図は同じシートレイヤへ複数の命令が
 		// 載る**ので、重ねて控えない（1 枚の用紙に図面枠が何重にも積まれないように）。
@@ -105,6 +109,23 @@ namespace HomeskzIfcImport::draw
 	// addTitleBlockSheet / finishTitleBlocks は何もしない。**図面枠を置くフェーズの先頭で
 	// 1 回**呼ぶ。
 	TitleBlockCounts prepareTitleBlocks(const core::Document& document);
+
+	// 図面枠を置くなら、**置いたときの外形**（用紙 mm。用紙の中心＝原点へ寄せた矩形）を
+	// 返す。置かない（スタイルが無い）・作れない・測れないときは nullopt。
+	//
+	// 【なぜ要るか】軸組図は印刷可能領域いっぱいに 2 段で並べるので、印刷可能領域が用紙
+	// いっぱい（余白 0）の用紙では**図の下端が図面枠と重なった**（ご要望）。枠の内側へ
+	// 並べるには枠の大きさが要るが、図面枠はビューポートを仕上げた後にしか作れない
+	// （ヘッダ冒頭の ★ 縮尺欄）。そこで**割り付けの前に 1 つ仮に置いて測り、すぐ消す**
+	// ——外形はスタイルと用紙で決まり、ビューポートには依らない。本物は従来どおり
+	// finishTitleBlocks が置く。
+	//
+	// 返るのは外形だけで、それが「用紙を囲む枠」なのか「枠線の無い表題欄の帯」なのかは
+	// 呼び出し側が大きさで分ける（core::frameCoversPaper。実機のスタイルは後者で、
+	// 235 × 19mm が返った。PR #176 round 1）。
+	// カレントレイヤは呼ぶ前の状態へ戻す。
+	std::optional<core::PaperArea> measureTitleBlockFrame(const TitleBlockCounts& counts,
+														  MCObjectHandle sheetLayer);
 
 	// 図面枠を置くシートレイヤとして控える（まだ置かない。ヘッダ冒頭の ★）。同じシート
 	// レイヤは重ねて控えない（TitleBlockCounts::sheets）。
