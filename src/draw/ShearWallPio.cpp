@@ -162,6 +162,15 @@ namespace HomeskzIfcImport::draw
 				const VWParametricObj pio(column);
 				breadth = ParamReal(pio, draw::kFieldMajorBreadth);
 				depth = ParamReal(pio, draw::kFieldMajorDepth);
+				// 柱の行列は **GetObjectMatrix（柱自身の行列）** で読む。壁側の toWorld
+				// （GetObjectToWorldTransform）と同じ座標系でよいのは、ここへ来る柱が
+				// **対象レイヤの直下の図形だけ**だから（下の ClearSpanFromColumns は
+				// FirstMemberObj(layer) → NextObject でレイヤ直下しか辿らない。グループや
+				// シンボルの中の柱は最初から対象外）——入れ物が無ければ 2 つの口は同じ行列を
+				// 返す。実測でも、耐力壁自身の 2 つの口は取り込み時・OIP 編集時とも一致し
+				// （#161: T5005,-2730/0 == M5005,-2730/0）、柱の行列の原点は外接・3D 外接の
+				// 中心と一致した（#161 round 3）。柱をレイヤ直下以外からも拾うように変える
+				// なら、ここも入れ物の行列を掛けた値へ直すこと。
 				pio.GetObjectMatrix(matrix);
 			}
 			catch (...)
@@ -651,29 +660,41 @@ namespace HomeskzIfcImport::draw
 	}
 
 #if VW_DRAW_VERIFY
-	std::string probeShearWall(MCObjectHandle object)
+	ShearWallProbe probeShearWall(MCObjectHandle object)
 	{
+		ShearWallProbe probe;
 		if (object == nil)
-			return "ハンドルが無い";
+		{
+			probe.text = "ハンドルが無い";
+			return probe;
+		}
 		try
 		{
 			const VWParametricObj self(object);
 			VWTransformMatrix toWorld;
 			self.GetObjectToWorldTransform(toWorld);
 			const ClearSpan resolved = ResolveClearSpan(self, toWorld);
+			if (!resolved.ok)
+				probe.kind = ShearWallProbe::Kind::Undecided;
+			else if (resolved.fromColumns)
+				probe.kind = ShearWallProbe::Kind::FromColumns;
+			else
+				probe.kind = ShearWallProbe::Kind::Fallback;
+
 			std::string text = resolved.ok ? DescribeClearSpan(resolved) : "内法が決まらない";
 			if (!resolved.ok && !resolved.search.empty())
 				text += "（" + resolved.search + "）";
 			const VWPoint2D origin = toWorld.PointTransform(VWPoint2D(0.0, 0.0));
 			const VWPoint2D along = toWorld.PointTransform(VWPoint2D(1.0, 0.0));
-			return text + "・原点 world=(" + Number(origin.x) + ", " + Number(origin.y) +
-				   ")・向き (" + Number(along.x - origin.x) + ", " + Number(along.y - origin.y) +
-				   ")・" + resolved.axis;
+			probe.text = text + "・原点 world=(" + Number(origin.x) + ", " + Number(origin.y) +
+						 ")・向き (" + Number(along.x - origin.x) + ", " +
+						 Number(along.y - origin.y) + ")・" + resolved.axis;
 		}
 		catch (...)
 		{
-			return "読めない（パラメトリックでない）";
+			probe.text = "読めない（パラメトリックでない）";
 		}
+		return probe;
 	}
 #endif
 } // namespace HomeskzIfcImport::draw

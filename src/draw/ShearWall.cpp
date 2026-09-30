@@ -389,30 +389,39 @@ namespace HomeskzIfcImport::draw
 		if (handles.table().handles.empty())
 			return;
 
-		// 控えになった壁の経過は先頭の数枚だけ載せる（全数だと読めない）。
+		// 柱から引けなかった壁の経過は先頭の数枚だけ載せる（全数だと読めない）。
 		constexpr std::size_t kShownFallbacks = 3;
 		std::size_t fromColumns = 0;
 		std::size_t fallbacks = 0;
+		std::size_t undecided = 0;
 		std::string shown;
 		for (const auto& [index, object] : handles.table().handles)
 		{
-			const std::string probe = probeShearWall(object);
-			if (probe.starts_with("柱から"))
+			const ShearWallProbe probe = probeShearWall(object);
+			switch (probe.kind)
 			{
+			case ShearWallProbe::Kind::FromColumns:
 				++fromColumns;
 				continue;
+			case ShearWallProbe::Kind::Fallback:
+				++fallbacks;
+				break;
+			case ShearWallProbe::Kind::Undecided:
+				++undecided;
+				break;
 			}
-			++fallbacks;
-			if (fallbacks <= kShownFallbacks)
-				shown += "\n    #" + std::to_string(index) + ": " + probe;
+			if (fallbacks + undecided <= kShownFallbacks)
+				shown += "\n    #" + std::to_string(index) + ": " + probe.text;
 		}
 
 		// 取り込み中のリセットの行（`shearwall: 内法 柱から／控え`）と枚数を引き比べる。
-		// ここで控えが増えていれば「取り込みの後段で柱が見つからなくなった」、増えて
-		// いなければ「利用者の編集のときに限る」と読める。
-		const std::string text = "耐力壁の測り直し（取り込み後・描かない）: 柱から " +
-								 std::to_string(fromColumns) + " 枚 / 控え " +
-								 std::to_string(fallbacks) + " 枚" + shown;
+		// ここで控えが増えていれば「取り込みの後段で柱が見つからなくなった」と読める。
+		std::string text = "耐力壁の測り直し（取り込み後・描かない）: 柱から " +
+						   std::to_string(fromColumns) + " 枚 / 控え " + std::to_string(fallbacks) +
+						   " 枚";
+		if (undecided > 0)
+			text += " / 内法が決まらない " + std::to_string(undecided) + " 枚";
+		text += shown;
 		core::trace::log(text);
 		if (outNotes != nullptr)
 			*outNotes = text;
