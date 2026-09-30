@@ -618,6 +618,21 @@ TEST(FramingChainsMeasureBeamsApartFromColumnsAndJoinThePerimeterRow)
 		CHECK(!(chain.axis == DimensionAxis::Horizontal && near(chain.base, 650.0)));
 }
 
+TEST(FramingChainsKeepTheOverallOnASideWithoutAnExteriorLine)
+{
+	// 上が開いた U 字の架構。東西の梁は下（y=0）だけなので下に面し、上に面する通りは
+	// 無いが、上の全長（0〜1820）は出す。
+	const std::vector<MemberCommand> members{
+		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 3264.0),
+		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
+		makeMember("2-横架材天端", Vec2{1820.0, 0.0}, Vec2{1820.0, 1820.0}, 3264.0)};
+	const std::vector<DimensionChainCommand> chains =
+		parse::framingDimensionChains(members, {}, {}, Vec2{-60.0, -60.0}, Vec2{1880.0, 1880.0});
+
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 1820.0}, -60.0, -1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 1820.0}, 1880.0, 1, 0));
+}
+
 TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)
 {
 	Document document;

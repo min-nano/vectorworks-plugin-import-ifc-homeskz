@@ -1023,11 +1023,13 @@ namespace HomeskzIfcImport::parse
 					rows.cores.insert(rows.cores.end(), run.stops.cores.begin(),
 									  run.stops.cores.end());
 				}
-				if (rows.row.empty())
-					continue;
+				// 外側に面する通りが無い辺でも、全長を持つ上と右は全長を出す（基礎伏図と同じ。
+				// 通りが全部下／左に面する U 字の架構など）。そのときの列は全長そのもの。
 				if (edge.withOverall)
 					rows.row.insert(rows.row.end(), rows.overall.begin(), rows.overall.end());
 				rows.row = mergeStops(std::move(rows.row));
+				if (rows.row.size() < 2)
+					continue;
 				rows.cores = mergeStops(std::move(rows.cores));
 				// 柱の列は四辺とも先に覚える。横架材の列は、どの辺の柱の列にある寸法も重ねない
 				// （ご要望: い通りの 5〜8 の 2685 が、右の柱の列を全長の端まで延ばした 5〜7' と
