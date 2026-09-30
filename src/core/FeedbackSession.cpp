@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -130,6 +131,10 @@ namespace HomeskzIfcImport::core
 		// 続きの周が外したはずの通りまで描く。レイヤと同じく**1 本 1 行**。
 		for (const std::string& number : session.options.skippedSections)
 			out << "section.skip=" << sanitize(number) << "\n";
+		// 垂木の断面（mm）。図面枠と同じ理由で漏らさず書く——書き落とすと続きの周が
+		// 既定の 45×45 で描く。読み戻せる表記（core::formatRafterSize）で書く。
+		out << "rafter.width=" << formatRafterSize(session.options.rafterWidth) << "\n";
+		out << "rafter.height=" << formatRafterSize(session.options.rafterHeight) << "\n";
 		return out.str();
 	}
 
@@ -203,6 +208,18 @@ namespace HomeskzIfcImport::core
 			{
 				// 古い記憶（M31 より前）には行が無い——既定の空（入れない）のまま読む。
 				session.options.setDimensionStandard(value);
+			}
+			else if (key == "rafter.width" || key == "rafter.height")
+			{
+				// 古い記憶には行が無い——既定（45×45）のまま読む。読めない値も既定のまま。
+				const std::optional<double> size = parseRafterSize(value);
+				if (size.has_value())
+				{
+					if (key == "rafter.width")
+						session.options.setRafterSize(*size, session.options.rafterHeight);
+					else
+						session.options.setRafterSize(session.options.rafterWidth, *size);
+				}
 			}
 			else if (key == "merge.level")
 			{

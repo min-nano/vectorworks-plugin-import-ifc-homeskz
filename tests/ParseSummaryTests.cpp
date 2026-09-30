@@ -610,10 +610,12 @@ TEST(format_import_options_lists_every_role_and_marks_the_defaults)
 	CHECK(text.find("軸組図から外す通り: なし") != std::string::npos);
 	// 伏図のまとめ方も末尾に 1 行。既定は「まとめない」。
 	CHECK(text.find("伏図のまとめ方: まとめない") != std::string::npos);
-	// 役割の数 ＋ 図面枠・寸法・伏図のまとめ方・外す通りの 4 行だけ行がある（見出しの 1 行を
-	// 足した数）。
+	// 垂木の断面も末尾に 1 行。既定は 45×45。
+	CHECK(text.find("垂木の断面: 45×45 mm（既定）") != std::string::npos);
+	// 役割の数 ＋ 図面枠・寸法・伏図のまとめ方・外す通り・垂木の断面の 5 行だけ行がある
+	// （見出しの 1 行を足した数）。
 	CHECK_EQ(std::ranges::count(text, '\n'),
-			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount) + 4);
+			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount) + 5);
 }
 
 TEST(format_import_options_lists_the_merged_plan_levels)
@@ -661,6 +663,19 @@ TEST(format_import_options_lists_the_skipped_sections_in_name_order)
 
 	CHECK(text.find("軸組図から外す通り: X1, Y2") != std::string::npos);
 	CHECK(text.find("軸組図から外す通り: なし") == std::string::npos);
+}
+
+TEST(format_import_options_names_the_rafter_size)
+{
+	// 既定のままなら「（既定）」を添える。
+	std::string const defaults = formatImportOptions(ImportOptions{});
+	CHECK(defaults.find("垂木の断面: 45×45 mm（既定）") != std::string::npos);
+
+	ImportOptions options;
+	options.setRafterSize(60.5, 90.0);
+	std::string const text = formatImportOptions(options);
+	CHECK(text.find("垂木の断面: 60.5×90 mm") != std::string::npos);
+	CHECK(text.find("（既定）", text.find("垂木の断面")) == std::string::npos);
 }
 
 TEST(format_import_options_says_which_roles_are_skipped)

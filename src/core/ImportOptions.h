@@ -15,6 +15,9 @@
 
 //	  * **軸組図から外す通り**——解析が軸組図にする通りのうち、描かないもの
 //	    （docs/DEV-NOTES.md M34）。空なら従来どおり全部描く。
+//	  * **垂木の断面寸法**——IFC に垂木の寸法が無いので決め打ちしていた 45×45 を、取り込み
+//	    ごとに一律で指定できるようにしたもの（docs/DEV-NOTES.md「垂木の断面を指定する」）。
+//	    既定は 45×45 で従来どおり。
 //
 //	【なぜ core/ に置くか】設定は**両フェーズにまたがる**唯一の入力である:
 //	  * 決めるのは描画側（draw/SettingsDialog）——図面にどんなシンボルがあるかは
@@ -44,6 +47,7 @@
 #include <array>
 #include <compare>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -112,6 +116,35 @@ namespace HomeskzIfcImport::core
 		bool canMerge = false; // 前のレベル（同じ階で 1 つ低い高さ）があるか
 	};
 
+	// 垂木の既定断面（mm。幅×せい）。IFC に垂木の寸法情報が無いため決め打ちしていた値で、
+	// 設定ダイアログで一律に差し替えられる（ImportOptions::rafterWidth / rafterHeight）。
+	// **設定を触らなければこの値**なので、既定の取り込み結果は従来と変わらない。
+	inline constexpr double kDefaultRafterWidth = 45.0;
+	inline constexpr double kDefaultRafterHeight = 45.0;
+
+	// 受け付ける垂木寸法の上限（mm）。これを超える値・0 以下・非有限は打ち間違いとみなして
+	// 受け付けない（1 桁多い「450」は通るが、「4500」のような桁違いで屋根を埋め尽くさない
+	// ための歯止め）。垂木として意味のある寸法はこれより十分小さい。
+	inline constexpr double kMaxRafterSize = 1000.0;
+
+	// 垂木の寸法（mm）として受け付けるか（0 < mm <= kMaxRafterSize、有限）。
+	bool isValidRafterSize(double mm);
+
+	// 垂木の寸法の文字列（設定ダイアログの入力欄・往復の記憶）を mm の数へ読む。
+	// 受け付けるのは「数字列（小数点 1 つまで）」だけで、前後の空白と全角の数字・小数点
+	// （日本語入力のまま打たれたもの）は読み替える。単位・符号・指数表記は受け付けない。
+	// 読めない・isValidRafterSize を満たさないなら std::nullopt。
+	//
+	// 【なぜ strtod / from_chars を使わないか】strtod は小数点がロケールに従うので、
+	// VectorWorks の中（利用者の環境のロケール）とテストとで読み方が変わりうる。浮動小数の
+	// from_chars は mac の標準ライブラリが対応していない版がある。受け付ける形がごく狭いので
+	// 自前で読む。
+	std::optional<double> parseRafterSize(const std::string& text);
+
+	// 垂木の寸法（mm）を表示用の文字列にする。小数点以下 1 桁までに丸め、末尾の 0 と
+	// 小数点は落とす（45 → "45"、45.5 → "45.5"）。parseRafterSize で読み戻せる形。
+	std::string formatRafterSize(double mm);
+
 	// 取り込み 1 回ぶんの設定。既定では役割の表の defaultSymbol がそのまま入り、どの役割も
 	// 「取り込む」なので、**設定ダイアログを出さずに既定のまま使えば従来と同じ振る舞い**になる。
 	//
@@ -176,6 +209,12 @@ namespace HomeskzIfcImport::core
 		// ——選ぶための解析と取り込むための解析とで、同じ通りを指せる。
 		std::vector<std::string> skippedSections;
 
+		// 垂木の断面（mm）。幅＝軒方向の寸法、せい＝屋根面に直交する寸法。**全垂木に一律**
+		// （ご要望。屋根面ごと・階ごとには分けない）。既定は従来の決め打ち 45×45。
+		// setRafterSize を通すこと（受け付けない値を入れない）。
+		double rafterWidth = kDefaultRafterWidth;
+		double rafterHeight = kDefaultRafterHeight;
+
 		ImportOptions();
 
 		// 役割に対応するシンボル名。**取り込まない役割の名前は意味を持たない**
@@ -224,5 +263,10 @@ namespace HomeskzIfcImport::core
 		// M34 外す通りの図番を差し替える（重複・空文字は落とし、名前順に並べ直す
 		// ——ログに出す並びを入力順に依らせないため。CLAUDE.md「決定性を守る」）。
 		void setSkippedSections(const std::vector<std::string>& drawingNumbers);
+
+		// 垂木の断面を決める。**受け付けない値（isValidRafterSize を満たさない）はその寸法
+		// だけ既定へ戻す**——シンボル名の空文字を既定名へ戻すのと同じ考え方で、描けない
+		// 寸法の命令を作らない。
+		void setRafterSize(double width, double height);
 	};
 } // namespace HomeskzIfcImport::core

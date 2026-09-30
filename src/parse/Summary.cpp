@@ -534,6 +534,12 @@ namespace HomeskzIfcImport::parse
 			out << "なし";
 		for (std::size_t i = 0; i < options.skippedSections.size(); ++i)
 			out << (i == 0 ? "" : ", ") << options.skippedSections[i];
+		// 垂木の断面（全垂木に一律）。「垂木が太い／細い」の切り分けはまずここを見る。
+		out << "\n  " << kRafterSizeOptionLabel << core::formatRafterSize(options.rafterWidth)
+			<< "×" << core::formatRafterSize(options.rafterHeight) << " mm";
+		if (options.rafterWidth == core::kDefaultRafterWidth &&
+			options.rafterHeight == core::kDefaultRafterHeight)
+			out << "（既定）";
 		return out.str();
 	}
 } // namespace HomeskzIfcImport::parse
