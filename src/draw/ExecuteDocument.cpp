@@ -168,10 +168,10 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("野地板を描画しています…", document.roofs.size(), core::DrawPhase::Roofs))
 			counts.roofs = drawRoofs(document, progress);
 
-		// M11 シンボル置換系。4 種とも同じ描画（draw/Symbol）で、違いは配置先レイヤと
-		// シンボル名だけ。配置先（アンカーボルト・床束＝基礎ストーリの "F-…"、火打・仕口＝
-		// 横架材と同じレイヤ）はいずれも drawStories が作るので、必ずその後に置く
-		// （レイヤが無い命令はスキップされ、その件数が診断行に出る）。
+		// M11 シンボル置換系（＋ M33 継手）。5 種とも同じ描画（draw/Symbol）で、違いは配置先
+		// レイヤとシンボル名だけ。配置先（アンカーボルト・床束＝基礎ストーリの "F-…"、
+		// 火打・仕口・継手＝横架材と同じレイヤ）はいずれも drawStories が作るので、必ずその後に
+		// 置く（レイヤが無い命令はスキップされ、その件数が診断行に出る）。
 		const auto drawSymbolPhase = [&](const char* label, const char* elementLabel,
 										 const std::vector<core::SymbolCommand>& commands,
 										 core::DrawPhase phase, std::size_t& out)
@@ -190,6 +190,8 @@ namespace HomeskzIfcImport::draw
 						core::DrawPhase::FireBraces, counts.fireBraces);
 		drawSymbolPhase("仕口を配置しています…", "仕口", document.joints, core::DrawPhase::Joints,
 						counts.joints);
+		drawSymbolPhase("継手を配置しています…", "継手", document.splices, core::DrawPhase::Splices,
+						counts.splices);
 
 		// M12 断面記号・伏図記号。**柱の後**に置く: 記号 PIO はリセット時に対象レイヤの
 		// 構造材を検索するので、柱が置かれていないと記号 0 個で確定してしまう。かつ

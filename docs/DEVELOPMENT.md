@@ -114,7 +114,7 @@ src/
     Feedback.{h,cpp}          実機フィードバックの PR コメント本文（内訳・前の周との差分・
                               匿名化）
     Grid / Story / Floor / Member / Noboribari / Column / Rafter / Roof /
-    Footing / AnchorBolt / FloorPost / FireBrace / Joint / ColumnMark /
+    Footing / AnchorBolt / FloorPost / FireBrace / Joint / Splice / ColumnMark /
     Sheet / Tag / Section      要素ごとの解析
   draw/                     Phase 2: VW 描画（SDK 依存）。**まるごと本体に入る**
     ImportCommand.{h,cpp}     本番の取り込みコマンド（ファイル選択 → 設定 → 取り込み →

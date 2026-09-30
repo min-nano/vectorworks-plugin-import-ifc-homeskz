@@ -125,7 +125,7 @@ namespace HomeskzIfcImport::parse
 			return total;
 		}
 
-		constexpr std::array<ElementDef, 20> kElements = {{
+		constexpr std::array<ElementDef, 21> kElements = {{
 			{"ストーリ", "層", [](const core::Document& d) { return d.stories.size(); },
 			 [](const core::DrawCounts& c) { return c.stories; }},
 			{"通り芯", "本", [](const core::Document& d) { return d.grids.size(); },
@@ -154,6 +154,8 @@ namespace HomeskzIfcImport::parse
 			 [](const core::DrawCounts& c) { return c.fireBraces; }},
 			{"仕口", "箇所", [](const core::Document& d) { return d.joints.size(); },
 			 [](const core::DrawCounts& c) { return c.joints; }},
+			{"継手", "箇所", [](const core::Document& d) { return d.splices.size(); },
+			 [](const core::DrawCounts& c) { return c.splices; }},
 			{"柱記号", "個", [](const core::Document& d) { return d.columnMarks.size(); },
 			 [](const core::DrawCounts& c) { return c.columnMarks; }},
 			{"耐力壁", "枚", [](const core::Document& d) { return d.shearWalls.size(); },

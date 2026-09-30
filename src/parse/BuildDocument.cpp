@@ -36,6 +36,7 @@
 #include "parse/Section.h"
 #include "parse/ShearWall.h"
 #include "parse/Sheet.h"
+#include "parse/Splice.h"
 #include "parse/Story.h"
 #include "parse/Tag.h"
 
@@ -167,6 +168,10 @@ namespace HomeskzIfcImport::parse
 		document.fireBraces = buildFireBraceCommands(context);
 		progress.step();
 		document.joints = buildJointCommands(document.members, document.columns, options);
+		progress.step();
+		// M33 継手。仕口と同じく横架材の命令（登り梁の屋根スナップ・柱芯への送り込みの後）
+		// から導出する。
+		document.splices = buildSpliceCommands(document.members, options);
 		progress.step();
 
 		// M12 断面記号・伏図記号。柱の命令だけから決まる（IFC は見ない）ので columns の

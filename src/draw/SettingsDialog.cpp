@@ -146,7 +146,7 @@ namespace HomeskzIfcImport::draw
 		// 【行を 2 列に折る】1 行の高さはサムネイルの高さで決まり、**その大きさは選べない**
 		// （`ThumbnailSizeType` は kStandardSize / kLineTypeSize の 2 つだけで、後者は
 		// 線種用の細長い枠。[SDK リファレンス「レイアウトダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md)）。
-		// 役割の数（7）をそのまま縦に積むと画面の高さに対して細長くなりすぎるので、
+		// 役割の数（8）をそのまま縦に積むと画面の高さに対して細長くなりすぎるので、
 		// **列に折って高さを半分にする**。列の数を増やすときはこの定数だけを変える
 		// （割り切れない分は最後の列が短くなる）。
 		constexpr std::size_t kColumnCount = 2;
