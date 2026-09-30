@@ -758,7 +758,7 @@ namespace HomeskzIfcImport::draw
 		// コンパイル時の定数でなければならないので、ここだけは表から回せない）。
 		// **図面枠の行（kTitleBlockRow）もイベントマップに要る**ので、数えるのは
 		// 役割の数ではなく行の数。
-		static_assert(kRowCount == 9,
+		static_assert(kRowCount == 10,
 					  "行を増減したら CImportSettingsDialog のイベントマップも直すこと");
 
 		// EVENT_DISPATCH_MAP_BEGIN は SDK のマクロで、その展開が misc-const-correctness に
@@ -772,8 +772,9 @@ namespace HomeskzIfcImport::draw
 		ADD_DISPATCH_EVENT(checkID(4), OnEnabledChanged);
 		ADD_DISPATCH_EVENT(checkID(5), OnEnabledChanged);
 		ADD_DISPATCH_EVENT(checkID(6), OnEnabledChanged);
-		ADD_DISPATCH_EVENT(checkID(7), OnEnabledChanged); // 図面枠スタイル
-		ADD_DISPATCH_EVENT(checkID(8), OnEnabledChanged); // 寸法規格
+		ADD_DISPATCH_EVENT(checkID(7), OnEnabledChanged); // 継手（M33）
+		ADD_DISPATCH_EVENT(checkID(8), OnEnabledChanged); // 図面枠スタイル
+		ADD_DISPATCH_EVENT(checkID(9), OnEnabledChanged); // 寸法規格
 		ADD_DISPATCH_EVENT(popupID(0), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(1), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(2), OnSymbolChanged);
@@ -781,8 +782,9 @@ namespace HomeskzIfcImport::draw
 		ADD_DISPATCH_EVENT(popupID(4), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(5), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(6), OnSymbolChanged);
-		ADD_DISPATCH_EVENT(popupID(7), OnSymbolChanged); // 図面枠スタイル
-		ADD_DISPATCH_EVENT(popupID(8), OnSymbolChanged); // 寸法規格
+		ADD_DISPATCH_EVENT(popupID(7), OnSymbolChanged); // 継手（M33）
+		ADD_DISPATCH_EVENT(popupID(8), OnSymbolChanged); // 図面枠スタイル
+		ADD_DISPATCH_EVENT(popupID(9), OnSymbolChanged); // 寸法規格
 		EVENT_DISPATCH_MAP_END;
 
 		// 前回の選択（この VectorWorks を起動している間だけ覚えている）。初回は役割の表の
