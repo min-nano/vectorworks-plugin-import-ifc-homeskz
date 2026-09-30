@@ -1610,18 +1610,9 @@ namespace HomeskzIfcImport::core
 	//        その符号の見込み kSectionGridBubbleAllowance を**足したもの**。軸組図には
 	//        切断面を横切る通り芯が映り、符号の円（用紙基準で縮尺に追随しない）が建物の上へ
 	//        出る（PR #176 round 1 の実機）。上の寸法はその符号の下に並ぶので重ねて数える
-	//        （高さ範囲の上端も同じだけ上げる。sectionTopExtent）
 	// 帯の量は core::dimensionBand（段が無ければ 0）。
 	SectionBands sectionBands(const std::vector<SectionCommand>& sections,
 							  bool gridBubbles = false);
-
-	// 断面ビューポートの高さ範囲の上端を、建物の上端からどれだけ上に取るか（モデル mm）。
-	// 既定は kSectionHeightMargin（sectionHeightRange が足す余白）。**図の上へ出す寸法の列が
-	// あり、その帯（＋通り芯の符号）が余白に収まらない縮尺では、そのぶん上端を上げる**——
-	// 通り芯の符号は範囲の上端に描かれるので、上げないと上の寸法と符号が重なる。
-	// scale は縮尺の分母（0 以下なら余白のまま）。数え方は sectionBands の「上」と同じ。
-	double sectionTopExtent(const std::vector<SectionCommand>& sections, bool gridBubbles,
-							double scale);
 
 	// 平面（伏図）の広がりに足す四方の余白（mm）。通り芯の丸（通り名の吹き出し）や部材の
 	// 太さは命令の座標には現れないので、その分の遊びを持たせる。planContentBounds とその
