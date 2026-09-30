@@ -17,7 +17,8 @@
 //	    span が含む柱レイヤ＋（最上階以外は）床＋（最下階かつ基礎ありなら）アンカーボルト＋通り芯。
 //	  * **母屋伏図**（buildMoyaSheetCommands）… 屋根版を持つ階ごとに 1 枚。表示レイヤは
 //	    その階の小屋組（母屋・垂木・野地板）＋切断レベルを span が含む柱レイヤ＋通り芯。
-//	    **登り梁は柱梁伏図に映したものを再掲しない**（高さの関係が直感に反するため。ご要望）。
+//	    **登り梁は映さない**——水下側の柱梁伏図に映してあり、重ねると高さの関係が直感に
+//	    反するため（ご要望）。
 //
 //	【切断レベルという考え方】柱・小屋束は span レイヤ（"{from}to{to}-柱"）に分かれている
 //	（parse/Column）。番号は伏図レベルの通し番号（parse/PlanLevel。高さが 1 つの階ばかり
@@ -59,7 +60,6 @@
 
 #include "core/Document.h"
 #include "parse/Column.h"
-#include "parse/PlanLevel.h"
 #include "parse/Step.h"
 
 #include <cstddef>
@@ -111,14 +111,6 @@ namespace HomeskzIfcImport::parse
 	// span 柱レイヤのうち切断レベル cut を含む（from ≤ cut ≤ to）ものを (from, to) 昇順で返す。
 	// spans は parse/Column の collectColumnSpans。
 	std::vector<std::string> spanLayersAtCut(const std::vector<ColumnSpan>& spans, double cut);
-
-	// 母屋伏図に映す登り梁のレイヤ（映さないなら空）。登り梁は水下側の伏図レベルのレイヤへ
-	// 分けて（parse/PlanLevel）その高さの柱梁伏図（小屋伏図等）に映すので、**そこに映る
-	// ものは母屋伏図に再掲しない**（母屋より低い材が母屋と同じ図に並び、高さの関係が直感に
-	// 反するため。ご要望）。返すのは伏図レベルを持たない階に残った "n-登り梁" だけ。
-	// index は階の添字（0 起点）、story はその階。
-	std::string moyaNoboribariLayer(const std::vector<PlanLevel>& levels, std::size_t index,
-									const StoryInfo& story);
 
 	// **凡例の配置点も中身もここでは決めない**（M18・スタイル無し化）。用紙の大きさは
 	// 描くときにシートレイヤから読むもので解析側には分からないため、置き場所は描画側が
