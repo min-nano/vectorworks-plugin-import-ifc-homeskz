@@ -35,6 +35,7 @@
 #include "draw/ShearWallPio.h"
 #include "Extensions/ExtShearWall.h"
 #include "draw/DrawUtil.h"
+#include "draw/StructuralMember.h"
 #include "draw/Verify.h"
 
 #include "core/Document.h"
@@ -138,13 +139,58 @@ namespace HomeskzIfcImport::draw
 			double offAxis = 0.0; // 軸からの法線方向の離れ（中心）
 		};
 
-		// 柱のワールド外接矩形を PIO ローカルへ落として広がりを返す。
+		// 柱の広がりを PIO ローカルで返す。
+		//
+		// ★**柱の位置は柱自身の行列（原点＝柱芯）から取り、外接（GetObjectBounds）は
+		// 使わない。** 取り込み直後に耐力壁を OIP で 1 度編集すると、そのリセットの中でだけ
+		// **柱の外接が本当の位置と違う値を返し**、両端の柱を見失って控えの内法で描かれる
+		// ——絵が柱幅の半分ずれて見えた不具合の正体（#161。編集の前後で耐力壁自身の行列は
+		// 同じなのに、「別の通り」と判定された柱が 61 → 65 本に増え、始端に最も近い柱芯が
+		// 0 → 901mm になった。docs/DEV-NOTES.md M19）。構造材の柱はパスが柱自身のローカル Z
+		// 軸に沿って原点に立つ（パス (0,0,0)→(0,0,H)）ので、行列の原点がそのまま柱芯になる。
+		//
+		// 幅は断面寸法（MajorBreadth＝柱のローカル X 方向・MajorDepth＝同 Y 方向）を
+		// 壁の軸へ射影して求める。柱が回転していても軸方向の広がりを取り違えない（正方形の
+		// 柱なら向きに依らず同じ値）。断面寸法が読めない柱だけ、従来どおり外接で測る。
 		ColumnRange LocalRangeOf(MCObjectHandle column, const VWTransformMatrix& toWorld)
 		{
+			ColumnRange range;
+			double breadth = 0.0;
+			double depth = 0.0;
+			VWTransformMatrix matrix;
+			try
+			{
+				const VWParametricObj pio(column);
+				breadth = ParamReal(pio, draw::kFieldMajorBreadth);
+				depth = ParamReal(pio, draw::kFieldMajorDepth);
+				pio.GetObjectMatrix(matrix);
+			}
+			catch (...)
+			{
+				breadth = 0.0; // 構造材として読めない。下の外接へ回す
+			}
+
+			if (breadth > 0.0 && depth > 0.0)
+			{
+				const VWPoint3D offset = matrix.GetOffset();
+				const VWPoint2D centre =
+					toWorld.InversePointTransform(VWPoint2D(offset.x, offset.y));
+				// 柱の断面軸（ワールド）を壁の軸（ローカル X）へ射影して、軸方向の半幅を出す。
+				const VWPoint2D u0 = toWorld.InversePointTransform(VWPoint2D(0.0, 0.0));
+				const VWPoint3D cu = matrix.GetUVector();
+				const VWPoint3D cv = matrix.GetVVector();
+				const VWPoint2D lu = toWorld.InversePointTransform(VWPoint2D(cu.x, cu.y));
+				const VWPoint2D lv = toWorld.InversePointTransform(VWPoint2D(cv.x, cv.y));
+				const double half =
+					(std::abs(lu.x - u0.x) * breadth / 2.0) + (std::abs(lv.x - u0.x) * depth / 2.0);
+				range.loX = centre.x - half;
+				range.hiX = centre.x + half;
+				range.offAxis = centre.y;
+				return range;
+			}
+
 			WorldRect bounds;
 			gSDK->GetObjectBounds(column, bounds);
-
-			ColumnRange range;
 			range.loX = std::numeric_limits<double>::max();
 			range.hiX = std::numeric_limits<double>::lowest();
 			double loY = std::numeric_limits<double>::max();
