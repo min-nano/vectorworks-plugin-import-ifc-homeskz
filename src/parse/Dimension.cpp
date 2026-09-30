@@ -1286,8 +1286,9 @@ namespace HomeskzIfcImport::parse
 		//   * 上階の柱の列は、その階に**直下の階の柱と合わない柱が 1 本でもあるとき**だけ、その
 		//     階の柱すべて（＋上記のぶつかる位置）で作る（下の列と重なる寸法が出ても構わない。
 		//     利用者の指定）。合うかどうかは柱だけで見る。
-		//   * 小屋束の列は上階の柱の列の 1 つ外の段（どの階の小屋束もまとめて 1 列）。小屋束が
-		//     立つ階の**外壁芯**（その階の柱の両端）も測点に入れる（利用者の指定）。
+		//   * 小屋束の列は上階の柱の列の 1 つ外の段（どの階の小屋束もまとめて 1 列。屋根の階に
+		//     立つ柱も含める）。**建物の外周芯**（屋根の階より下の柱の両端）も測点に入れる
+		//     （利用者の指定）。
 		//   * **部材の無い通り芯は測点にしない**（通り芯しか無い位置を測っても意味が無い）。
 		//     通り芯は測点と重なるときに値を貸すだけ（寸法の数字が通り芯の間隔ちょうどになる）。
 		std::vector<double> gridAll;
@@ -1312,9 +1313,17 @@ namespace HomeskzIfcImport::parse
 			return mergeStops(std::move(values));
 		};
 
+		// 屋根の階（軒高ストーリ。FL の階の数 + 1）。ここに立つ柱（軒高の梁の上の束。
+		// ホームズ君は柱として出すことがある）は小屋束と同じ列で押さえる（1通りの実機）。
+		const int roofFloor =
+			static_cast<int>(std::ranges::count_if(document.stories,
+												   [](const core::StoryCommand& story) {
+													   return !hasLevel(story, core::kLevelGL) &&
+															  !hasLevel(story, core::kLevelEaves);
+												   })) +
+			1;
 		std::map<int, std::vector<double>> floorColumns;
-		// 小屋束の位置と、それが立つ階（span レイヤの from。読めなければ 1 階）。
-		std::vector<std::pair<double, int>> koyazukaAt;
+		std::vector<double> koyazuka;
 		for (const core::ColumnCommand& column : document.columns)
 		{
 			if (!columnOnCutPlane(column, section))
@@ -1323,9 +1332,10 @@ namespace HomeskzIfcImport::parse
 			double from = 0.0;
 			double to = 0.0;
 			const bool span = parseSpanLayer(column.layer, from, to) && to > from;
-			if (column.structuralUse == core::kStructuralUseKoyazuka)
+			if (column.structuralUse == core::kStructuralUseKoyazuka ||
+				(span && std::lround(from) >= roofFloor))
 			{
-				koyazukaAt.emplace_back(a, span ? static_cast<int>(std::lround(from)) : 1);
+				koyazuka.push_back(a);
 				continue;
 			}
 			if (!span)
@@ -1341,8 +1351,10 @@ namespace HomeskzIfcImport::parse
 			entry.second = lendGrid(std::move(entry.second));
 		const int lowestFloor = floorColumns.empty() ? 1 : std::min(1, floorColumns.begin()->first);
 
-		// 紙面と平行な横架材が直交する横架材にぶつかる位置（階ごと）。切り口の芯は通り芯の
-		// 近く（kClusterTol 以内）なら通り芯の値を採る。
+		// 紙面と平行な横架材が直交する横架材にぶつかる位置（階ごと）。測点は沿う材の端
+		// そのもので、通り芯はちょうど重なるときだけ値を貸す——外壁芯が通り芯より少し内側に
+		// ある建物で、端を近くの通り芯へ寄せると外壁芯と通り芯の間に 45 のような寸法が出た
+		// （い通りの 8通り。実機）。
 		const std::map<std::string, int> floorsOfLayer = layerFloors(document.stories);
 		const auto floorOf = [&floorsOfLayer](const std::string& layer)
 		{
@@ -1371,7 +1383,7 @@ namespace HomeskzIfcImport::parse
 					cuts, [a, floor](const std::pair<double, int>& cut)
 					{ return cut.second == floor && std::abs(cut.first - a) <= kClusterTol; });
 				if (meets)
-					floorJunctions[floor].push_back(snapWithin(a, kClusterTol));
+					floorJunctions[floor].push_back(snapWithin(a, kDimensionMergeTol));
 			}
 		}
 		// 階 floor の列の測点（柱＋ぶつかる位置）。
@@ -1387,18 +1399,19 @@ namespace HomeskzIfcImport::parse
 
 		std::vector<double> columns = floorStops(lowestFloor);
 
-		// その面の**最外周**も押さえる（利用者の指定）。柱・沿う材より外に横架材の切り口が
-		// あれば、左右それぞれ最も外の切り口の芯を下の列の測点に足す（又は通りなら 1通り〜
-		// 5通り）。間に並ぶ切り口は足さない（押さえるのは最外周だけ）。切り口の近く
-		// （kClusterTol 以内）に通り芯があれば、寸法の数字が通り芯の間隔になるよう通り芯の
-		// 値を採る。
+		// その面の**最外周**も押さえる（利用者の指定）。柱・沿う材より**kClusterTol を超えて**
+		// 外に横架材の切り口があれば、左右それぞれ最も外の切り口の芯を下の列の測点に足す
+		// （又は通りなら 1通り〜5通り）。間に並ぶ切り口は足さない（押さえるのは最外周だけ）。
+		// 外壁芯のすぐ外（通り芯の上など）の切り口は足さない——押さえるのは建物の外周
+		// （外壁芯）まで（い通りの 8通り。実機）。切り口の近く（kClusterTol 以内）に通り芯が
+		// あれば、寸法の数字が通り芯の間隔になるよう通り芯の値を採る。
 		if (!cuts.empty())
 		{
 			const auto [lowest, highest] =
 				std::ranges::minmax_element(cuts, {}, &std::pair<double, int>::first);
-			if (lowest->first < low - kDimensionMergeTol)
+			if (lowest->first < low - kClusterTol)
 				columns.push_back(snapWithin(lowest->first, kClusterTol));
-			if (highest->first > high + kDimensionMergeTol)
+			if (highest->first > high + kClusterTol)
 				columns.push_back(snapWithin(highest->first, kClusterTol));
 		}
 		const std::vector<double> detail = mergeStops(std::move(columns));
@@ -1419,21 +1432,21 @@ namespace HomeskzIfcImport::parse
 			if (mismatched && upper.size() >= 2)
 				out.push_back(makeChain(DimensionAxis::Horizontal, upper, top, 1, topTier++));
 		}
-		if (!koyazukaAt.empty())
+		if (!koyazuka.empty())
 		{
-			std::vector<double> posts;
-			for (const auto& [a, floor] : koyazukaAt)
+			// 建物の外周芯（屋根の階より下の柱の両端。柱が無ければ下の列の両端）から押さえる
+			// （利用者の指定。小屋束が立つ階の外壁ではなく、あくまで建物の外周）。
+			std::vector<double> walls;
+			for (const auto& entry : floorColumns)
+				walls.insert(walls.end(), entry.second.begin(), entry.second.end());
+			walls = mergeStops(std::move(walls));
+			if (walls.empty())
+				walls = detail;
+			std::vector<double> posts = koyazuka;
+			if (!walls.empty())
 			{
-				posts.push_back(a);
-				// 外壁芯＝小屋束が立つ階の柱の両端（その階に柱が無ければ下の列の両端）。
-				const auto found = floorColumns.find(floor);
-				const std::vector<double>& walls =
-					found != floorColumns.end() && !found->second.empty() ? found->second : detail;
-				if (!walls.empty())
-				{
-					posts.push_back(walls.front());
-					posts.push_back(walls.back());
-				}
+				posts.push_back(walls.front());
+				posts.push_back(walls.back());
 			}
 			posts = lendGrid(std::move(posts));
 			if (posts.size() >= 2)
