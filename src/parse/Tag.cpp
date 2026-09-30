@@ -206,10 +206,16 @@ namespace HomeskzIfcImport::parse
 			const long long fl = std::llround(story.elevation);
 			const long long low = std::llround(std::min(member.elevation, member.endElevation));
 			const long long high = std::llround(std::max(member.elevation, member.endElevation));
-			// 名前が取れない階は番号で呼ぶ（IFC の階名は "…FL" で終わるものしか採らない。
-			// parse/Story の collectStories）。
-			const std::string name =
-				story.name.empty() ? storyLayerPrefix(i, story.isTop) + "FL" : story.name;
+			// 最上階は "RFL" ではなく軒高と呼ぶ（RFL は図面で使わない。ご要望）。それ以外の
+			// 階は階名、名前が取れない階は番号で呼ぶ（IFC の階名は "…FL" で終わるものしか
+			// 採らない。parse/Story の collectStories）。
+			std::string name;
+			if (story.isTop)
+				name = core::kLevelEaves;
+			else if (story.name.empty())
+				name = storyLayerPrefix(i, story.isTop) + "FL";
+			else
+				name = story.name;
 			if (low == high)
 			{
 				// 水平な材は標準の横架材の高さと違うときだけ（高さが分からない階は推した値）。

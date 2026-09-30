@@ -371,10 +371,11 @@ TEST(LevelNoteMeasuresFromTheStoreyFl)
 			 std::string("(1FL -40)"));
 	// 標準を渡さない階は推した値で比べる。
 	CHECK(memberLevelNote(noteMember("2-横架材天端", 3531.0, 3531.0), stories, {}).empty());
-	// 最上階の標準は軒高（RFL そのもの）。母屋は軒高より上なので必ず添える。
+	// 最上階の標準は軒高（RFL そのもの）。母屋は軒高より上なので必ず添える。最上階は
+	// "RFL" ではなく "軒高" と書く（RFL は図面で使わない）。
 	CHECK(memberLevelNote(noteMember("R-軒高", 6374.0, 6374.0), stories, standard).empty());
 	CHECK_EQ(memberLevelNote(noteMember("R-母屋", 6738.0, 6738.0), stories, standard),
-			 std::string("(RFL +364)"));
+			 std::string("(軒高 +364)"));
 	// 傾斜材は低い端〜高い端（向きに依らない）。
 	CHECK_EQ(memberLevelNote(noteMember("2-登り梁", 3531.0, 2699.0), stories, standard),
 			 std::string("(2FL -872~-40)"));

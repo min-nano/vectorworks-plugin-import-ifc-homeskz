@@ -122,7 +122,7 @@ namespace HomeskzIfcImport::parse
 							const core::SectionCommand& section);
 
 	// 横架材のデータタグに添える高さの注記（ご要望）。**その階の FL から測った天端**を、
-	// 階の IFC 名（"2FL" / "RFL"）とともに "(2FL -872)" と書く。傾斜材は低い端〜高い端を
+	// 階の IFC 名（"2FL"。最上階は "RFL" ではなく "軒高"）とともに "(2FL -872)" と書く。傾斜材は低い端〜高い端を
 	// "(2FL -872~-40)"。数値は 3 桁ごとにコンマ（core::signedMillimetreText）。
 	// 添えない（空を返す）のは:
 	//   * 階の標準の横架材の高さ（standardHeights。parse/PlanLevel の standardBeamHeights）と
