@@ -264,7 +264,8 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 構成層の総厚（`totalThickness`）・横架材の Z 範囲と重なり（`memberTopZ` / `memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側）・端部オフセットの意味と値・オフセットを戻した「材の端」（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`） | `core/Document.h` |
 | 描画側から切り離せる純計算（レイヤの希望スタック順 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・図に映るものの広がり `planContentBounds` / `sectionContentSize`） | `core/Document` |
 | 断面の注釈空間への投影（`sectionAlongOrigin` / `sectionAnnotationPoint`。断面寸法タグ＝`parse/Tag`・寸法＝`parse/Dimension`・図面ラベル＝`draw/DrawingLabel` が共有）・軸組図の図面ラベルを寄せる点と下げる量（`sectionLabelAnchor` / `sectionLabelDrop`。寸法が無いときの間隔 `kSectionLabelGap`） | `core/Document` |
-| 用紙の割り付け（`core::planLayout` ほか。縮尺の階梯と選び方・伏図の縮尺と位置——**縮尺は実測した凡例の幅を引いてから決め**、凡例の置き場所は `legendTopRight`——・軸組図の上下 2 段とシートの分割・タイトルの連番） | `core/Layout` |
+| 用紙の割り付け（`core::planLayout` ほか。縮尺の階梯と選び方・伏図の縮尺と位置——**縮尺は実測した凡例の幅を引いてから決め**、凡例の置き場所は `legendTopRight`——・軸組図の上下 2 段とシートの分割・タイトルの連番・軸組図の辺ごとの帯 `SectionBands` と図を合わせる点 `sectionViewportCenter`・図面枠の内側へ絞る `insetFrameArea` / `kTitleBlockInset`・図面ラベルの帯の見込み `kSectionLabelAllowance`） | `core/Layout` |
+| 軸組図の辺ごとの注釈の帯を命令から数える（`sectionBands`） | `core/Document` |
 | 寸法線の位置（用紙 mm の段の間隔 `kDimensionFirstGap` / `kDimensionTierPitch` と縮尺を掛けた位置 `dimensionLineCoord`）・寸法の帯（`dimensionBand`。最も外の段は `core::outermostDimensionTier`） | `core/Layout` |
 | 軸組図のレベル記号の形と位置（▽ と名前の配置 `levelMarkShape`・起点 `levelMarkStartX`・基準線の長さ `levelLineLength`・帯の見込み `kLevelMarkBandAllowance`） | `core/Layout` |
 | 長さ・文字の単位の換算（インチ → mm `kMillimetersPerInch`・1 インチの pt 数 `kPointsPerInch`・紙の pt → mm `pointsToMillimeters`） | `core/Layout` |

@@ -16,6 +16,7 @@
 //	  * gSDK->UpdateStyledObjects(style)              … スタイルの中身を流し込む（1 回）
 //	  * gSDK->FirstMemberObj / InsertObjectBefore     … 最背面へ回す
 //	  * gSDK->GetObjectBounds / MoveObject            … 置いた後に測って動かす
+//	  * gSDK->DeleteObject                            … 割り付けのために仮に置いた枠を消す
 //
 
 #include "PluginPrefix.h"
@@ -24,7 +25,9 @@
 #include "core/Document.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -83,6 +86,39 @@ namespace HomeskzIfcImport::draw
 		// スタイル無しの図面枠は空の枠にしかならず、図面を汚すだけになる。
 		counts.styleRef = ResolvePluginStyle(TXString(counts.style.c_str()));
 		return counts;
+	}
+
+	std::optional<core::PaperArea> measureTitleBlockFrame(const TitleBlockCounts& counts,
+														  MCObjectHandle sheetLayer)
+	{
+		if (sheetLayer == nil || counts.styleRef == 0)
+			return std::nullopt;
+
+		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();
+		gSDK->SetCurrentLayer(sheetLayer);
+		std::optional<core::PaperArea> frame;
+		if (const MCObjectHandle probe = CreateTitleBlock(); probe != nil)
+		{
+			// 外形はスタイルの中身が流れてから定まる（finishTitleBlocks と同じ手順）。
+			gSDK->SetPluginObjectStyle(probe, counts.styleRef);
+			gSDK->UpdateStyledObjects(counts.styleRef);
+			WorldRect bounds;
+			if (gSDK->GetObjectBounds(probe, bounds))
+			{
+				// 本物は用紙の中心＝原点へ寄せて置く（finishTitleBlocks）ので、大きさだけを
+				// 採って原点の周りの矩形にする。
+				const double halfWidth = std::abs(bounds.right - bounds.left) / 2.0;
+				const double halfHeight = std::abs(bounds.top - bounds.bottom) / 2.0;
+				if (halfWidth > 0.0 && halfHeight > 0.0)
+					frame = core::PaperArea{
+						core::Vec2{kPaperCenter.x - halfWidth, kPaperCenter.y - halfHeight},
+						core::Vec2{kPaperCenter.x + halfWidth, kPaperCenter.y + halfHeight}};
+			}
+			gSDK->DeleteObject(probe, true);
+		}
+		if (previousLayer != nil)
+			gSDK->SetCurrentLayer(previousLayer);
+		return frame;
 	}
 
 	void addTitleBlockSheet(MCObjectHandle sheetLayer, TitleBlockCounts& counts)

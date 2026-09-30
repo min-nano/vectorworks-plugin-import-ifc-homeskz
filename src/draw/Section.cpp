@@ -89,7 +89,9 @@
 #include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -230,26 +232,53 @@ namespace HomeskzIfcImport::draw
 		const auto sheetNumber = [startNumber](std::size_t page)
 		{ return std::to_string(startNumber + static_cast<int>(page)); };
 
+		// M28 図面枠。伏図と同じ設定・同じ実装（draw/TitleBlock）。**軸組図は 1 枚の用紙へ
+		// 複数の命令が載る**ので、同じシートレイヤへ 2 つ目を置かないのは draw/TitleBlock の
+		// 側が見る。割り付けに枠の大きさを使うので、割り付けより先に用意する。
+		TitleBlockCounts titleBlocks = prepareTitleBlocks(document);
+
 		// **用紙の大きさを読むために 1 枚目のシートレイヤを先に用意する**（用紙は
 		// シートレイヤからしか読めず、一方で「何枚に分かれるか＝タイトルの連番」は用紙が
 		// 分からないと決まらない）。タイトルはこの後の本番のループで付け直す。
-		// M31 寸法の帯（用紙 mm）。1 枚ごとに四辺へ付くので、マスはそのぶん大きく取る
-		// （core/Layout.h の sectionLayout）。寸法を入れない文書では 0。
-		// レベル記号は起点が寸法の列より外へ出るので、記号があればそのぶんを帯へ足す
-		// （core/Layout.h の kLevelMarkBandAllowance）。
-		const bool anyLevelMarks = std::ranges::any_of(
-			commands, [](const core::SectionCommand& section) { return !section.levels.empty(); });
-		const double band = core::dimensionBand(core::outermostDimensionTier(commands)) +
-							(anyLevelMarks ? core::kLevelMarkBandAllowance : 0.0);
+		//
+		// 注釈の帯（寸法・レベル記号・図面ラベル）は**出る辺にだけ**取る（core::sectionBands。
+		// 四辺に取っていた頃は上と右が空いて縮尺を落としていた）。上下の帯は断面の高さ範囲の
+		// 余白（core::kSectionHeightMargin）の中にまず収める（core/Layout.h の sectionLayout）。
+		//
+		// 図面枠を置くなら、**枠の内側**へ並べる（印刷可能領域が用紙いっぱいだと図の下端が
+		// 枠と重なった。draw/TitleBlock.h の measureTitleBlockFrame）。表題欄の位置は測れない
+		// ので、段組みを上へ寄せて余りを下へ回す。
+		const core::SectionBands bands = core::sectionBands(commands);
 		core::SectionLayout layout;
 		std::size_t pages = 1;
 		bool arrange = false;
+		std::string layoutRecord;
 		if (const MCObjectHandle first = PrepareSheetLayer(sheetNumber(0), baseTitle);
 			first != nil && haveContent)
 		{
-			layout = core::sectionLayout(content, SheetPaperArea(first).printable, band);
+			const core::PaperArea printable = SheetPaperArea(first).printable;
+			core::PaperArea area = printable;
+			const std::optional<core::PaperArea> frame = measureTitleBlockFrame(titleBlocks, first);
+			if (frame.has_value())
+				area = core::insetFrameArea(printable, *frame);
+			layout = core::sectionLayout(content, area, bands, core::kSectionHeightMargin,
+										 frame.has_value());
 			pages = core::sectionSheetCount(layout, commands.size());
 			arrange = true;
+			// 割り付けの記録（診断ログだけ。伏図の「伏図の割り付け（mm）」と同じ流儀）。
+			// 縮尺は「並べる領域・帯・建物の広がり」だけで決まるので、その 3 つと結果を残す
+			// ——余白が多すぎる／枠と重なるときに、どれが効いたかを実機の周で確かめられる。
+			const auto mm = [](double value) { return std::to_string(std::lround(value)); };
+			layoutRecord = "軸組図の割り付け（mm）: 印刷可能 " + mm(printable.width()) + "×" +
+						   mm(printable.height());
+			if (frame.has_value())
+				layoutRecord += " / 図面枠 " + mm(frame->width()) + "×" + mm(frame->height());
+			layoutRecord += " / 並べる領域 " + mm(area.width()) + "×" + mm(area.height()) +
+							" / 帯 左" + mm(bands.left) + " 右" + mm(bands.right) + " 下" +
+							mm(bands.bottom) + " 上" + mm(bands.top) + " / 建物 " + mm(content.x) +
+							"×" + mm(content.y) + " / 縮尺 1/" + mm(layout.scale) + " / マス " +
+							mm(layout.cell.x) + "×" + mm(layout.cell.y) + " × " +
+							std::to_string(layout.columns) + " 列 2 段";
 		}
 
 		// 描画の前後でカレントレイヤが変わらないようにする（伏図と同じ作法）。
@@ -268,6 +297,9 @@ namespace HomeskzIfcImport::draw
 		// 組み立ては draw/DrawUtil の DescribeFitOverflow が持つ唯一の実装）。
 		std::size_t oversized = 0;
 		std::string oversizedProbe;
+		// 測った外形（注釈込み）のいちばん大きいもの（用紙 mm）。マスとの差が詰めしろになる
+		// ので、割り付けの記録に添える（core::describeSectionLayout の行の後ろ）。
+		core::Vec2 largest;
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
 		const ObjectHandles emptyHandles;
 		const ObjectHandleTable& members =
@@ -290,11 +322,6 @@ namespace HomeskzIfcImport::draw
 		if (std::ranges::any_of(commands, [](const core::SectionCommand& section)
 								{ return !section.levels.empty(); }))
 			prepareLevelMarkPlugin();
-
-		// M28 図面枠。伏図と同じ設定・同じ実装（draw/TitleBlock）。**軸組図は 1 枚の用紙へ
-		// 複数の命令が載る**ので、同じシートレイヤへ 2 つ目を置かないのは draw/TitleBlock の
-		// 側が見る。
-		TitleBlockCounts titleBlocks = prepareTitleBlocks(document);
 
 		for (std::size_t index = 0; index < commands.size(); ++index)
 		{
@@ -352,7 +379,7 @@ namespace HomeskzIfcImport::draw
 			if (arrange && !measured)
 				++missingPlacement;
 			else if (arrange)
-				delta = core::sectionSlotCenter(layout, slot) - drawnCenter;
+				delta = core::sectionViewportCenter(layout, slot) - drawnCenter;
 			// 図面ラベルもタグと同じく**動かす前に**注釈へ置く（上記 ★）。寄せる点は建物の
 			// 最下点の左右の中央（注釈空間。core::sectionLabelAnchor）で、そこから図の下の
 			// 寸法の帯の外まで下げる（core::sectionLabelDrop）。
@@ -381,6 +408,8 @@ namespace HomeskzIfcImport::draw
 				// 測り直せなければタグを置く前の実測で見る（判定を捨てるよりはよい）。
 				const core::Vec2 footprint =
 					MeasureViewport(viewport, finalCenter, finalSize) ? finalSize : drawnSize;
+				largest =
+					core::Vec2{std::max(largest.x, footprint.x), std::max(largest.y, footprint.y)};
 				// マス（layout.cell）に収まったかを測って確かめる。はみ出していれば隣の
 				// 図と重なるので、黙って重ねずに診断へ残す（伏図と同じ考え方。M18）。
 				if (footprint.x > layout.cell.x + kFitTol || footprint.y > layout.cell.y + kFitTol)
@@ -449,6 +478,10 @@ namespace HomeskzIfcImport::draw
 		// M28 図面枠。**伏図とは別に 1 行出す**——枚数が違う（伏図は命令の数、軸組図は
 		// 用紙の数）ので、伏図の行だけでは「全シートレイヤへ置けたか」を確かめられない
 		// （draw/TitleBlock.h の titleBlockInfo）。異常は note、平常の内訳は outInfo。
+		if (!layoutRecord.empty())
+			AppendLine(outInfo, layoutRecord + " / 実測の最大 " +
+									std::to_string(std::lround(largest.x)) + "×" +
+									std::to_string(std::lround(largest.y)));
 		AppendLine(note, titleBlockDiagnostics(titleBlocks));
 		AppendLine(outInfo, titleBlockInfo("軸組図", titleBlocks));
 		return drawn;

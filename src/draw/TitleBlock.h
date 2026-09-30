@@ -67,6 +67,7 @@
 #include "core/Document.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -105,6 +106,23 @@ namespace HomeskzIfcImport::draw
 	// addTitleBlockSheet / finishTitleBlocks は何もしない。**図面枠を置くフェーズの先頭で
 	// 1 回**呼ぶ。
 	TitleBlockCounts prepareTitleBlocks(const core::Document& document);
+
+	// 図面枠を置くなら、**置いたときの外形**（用紙 mm。用紙の中心＝原点へ寄せた矩形）を
+	// 返す。置かない（スタイルが無い）・作れない・測れないときは nullopt。
+	//
+	// 【なぜ要るか】軸組図は印刷可能領域いっぱいに 2 段で並べるので、印刷可能領域が用紙
+	// いっぱい（余白 0）の用紙では**図の下端が図面枠と重なった**（ご要望）。枠の内側へ
+	// 並べるには枠の大きさが要るが、図面枠はビューポートを仕上げた後にしか作れない
+	// （ヘッダ冒頭の ★ 縮尺欄）。そこで**割り付けの前に 1 つ仮に置いて測り、すぐ消す**
+	// ——外形はスタイルと用紙で決まり、ビューポートには依らない。本物は従来どおり
+	// finishTitleBlocks が置く。
+	//
+	// 測れるのは**外形（枠線）だけ**で、表題欄が枠のどこを占めるかは分からない
+	// （docs/DEV-NOTES.md M28「図面枠のぶんを用紙から差し引く」）。そこは呼び出し側が
+	// 余りを下へ回して逃がす（core::SectionLayout::alignTop）。
+	// カレントレイヤは呼ぶ前の状態へ戻す。
+	std::optional<core::PaperArea> measureTitleBlockFrame(const TitleBlockCounts& counts,
+														  MCObjectHandle sheetLayer);
 
 	// 図面枠を置くシートレイヤとして控える（まだ置かない。ヘッダ冒頭の ★）。同じシート
 	// レイヤは重ねて控えない（TitleBlockCounts::sheets）。

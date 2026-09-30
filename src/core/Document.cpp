@@ -696,6 +696,49 @@ namespace HomeskzIfcImport::core
 		return dimensionBand(below) + kSectionLabelGap;
 	}
 
+	SectionBands sectionBands(const std::vector<SectionCommand>& sections)
+	{
+		// 図の右端に根元がある、とみなす遊び（注釈空間・モデル mm）。
+		constexpr double kEdgeTol = 1.0;
+
+		SectionBands bands;
+		for (const SectionCommand& section : sections)
+		{
+			const bool haveLevels = !section.levels.empty();
+			double rightEdge = std::numeric_limits<double>::lowest();
+			for (const LevelMarkCommand& level : section.levels)
+				rightEdge = std::max(rightEdge, level.right);
+
+			int left = -1;
+			int right = -1;
+			int bottom = -1;
+			int top = -1;
+			for (const DimensionChainCommand& chain : section.viewport.dimensions)
+			{
+				if (chain.axis == DimensionAxis::Horizontal)
+				{
+					int& tier = chain.side < 0 ? bottom : top;
+					tier = std::max(tier, chain.tier);
+				}
+				else if (chain.side < 0)
+					left = std::max(left, chain.tier);
+				else if (!haveLevels || chain.base >= rightEdge - kEdgeTol)
+					right = std::max(right, chain.tier);
+			}
+
+			const double label = section.viewport.drawingTitle.empty()
+									 ? 0.0
+									 : kSectionLabelGap + kSectionLabelAllowance;
+			bands.left = std::max(bands.left, dimensionBand(left) +
+												  (haveLevels ? kLevelMarkBandAllowance : 0.0));
+			bands.right = std::max(bands.right, std::max(dimensionBand(right),
+														 haveLevels ? kLevelLineOvershoot : 0.0));
+			bands.bottom = std::max(bands.bottom, dimensionBand(bottom) + label);
+			bands.top = std::max(bands.top, dimensionBand(top));
+		}
+		return bands;
+	}
+
 	bool sectionContentSize(const Document& document, Vec2& size)
 	{
 		Vec2 min;

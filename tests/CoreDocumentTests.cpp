@@ -1654,6 +1654,69 @@ TEST(section_label_drop_clears_the_dimensions_below)
 			   1e-9));
 }
 
+TEST(section_bands_count_only_the_sides_with_annotations)
+{
+	// 注釈が何も無い図（タイトルも無い）は帯なし。
+	core::SectionCommand bare;
+	core::SectionBands none = core::sectionBands({bare});
+	CHECK(near(none.left, 0.0, 1e-9));
+	CHECK(near(none.right, 0.0, 1e-9));
+	CHECK(near(none.bottom, 0.0, 1e-9));
+	CHECK(near(none.top, 0.0, 1e-9));
+
+	// 実際の軸組図の形: 左に高さの列 2 段・下に柱の位置の列 1 段・図の内側（材の中央）から
+	// 右へ出す標準と違う高さの列・レベル記号・図面タイトル。
+	core::SectionCommand section;
+	section.viewport.drawingTitle = "X1通り軸組図";
+	core::DimensionChainCommand chain;
+	chain.axis = core::DimensionAxis::Vertical;
+	chain.side = -1;
+	chain.tier = 0;
+	section.viewport.dimensions.push_back(chain);
+	chain.tier = 1;
+	section.viewport.dimensions.push_back(chain);
+	chain.axis = core::DimensionAxis::Horizontal;
+	chain.tier = 0;
+	section.viewport.dimensions.push_back(chain);
+	core::DimensionChainCommand inner;
+	inner.axis = core::DimensionAxis::Vertical;
+	inner.side = 1;
+	inner.tier = 0;
+	inner.base = 4000.0;
+	section.viewport.dimensions.push_back(inner);
+	core::LevelMarkCommand level;
+	level.right = 9000.0;
+	section.levels.push_back(level);
+
+	const core::SectionBands bands = core::sectionBands({section});
+	CHECK(near(bands.left, core::dimensionBand(1) + core::kLevelMarkBandAllowance, 1e-9));
+	// 内側の列は数えず、右は基準線の越えだけ。
+	CHECK(near(bands.right, core::kLevelLineOvershoot, 1e-9));
+	CHECK(near(bands.bottom,
+			   core::dimensionBand(0) + core::kSectionLabelGap + core::kSectionLabelAllowance,
+			   1e-9));
+	CHECK(near(bands.top, 0.0, 1e-9));
+
+	// 右端に根元がある右の列は数える。記号の無い図では右端が分からないので全部数える。
+	core::SectionCommand edge = section;
+	edge.viewport.dimensions.back().base = 9000.0;
+	CHECK(near(core::sectionBands({edge}).right, core::dimensionBand(0), 1e-9));
+	core::SectionCommand noLevels = section;
+	noLevels.levels.clear();
+	CHECK(near(core::sectionBands({noLevels}).right, core::dimensionBand(0), 1e-9));
+
+	// 複数の図では辺ごとに最も広いもの。
+	core::SectionCommand tall = bare;
+	core::DimensionChainCommand topChain;
+	topChain.axis = core::DimensionAxis::Horizontal;
+	topChain.side = 1;
+	topChain.tier = 2;
+	tall.viewport.dimensions.push_back(topChain);
+	const core::SectionBands merged = core::sectionBands({section, tall});
+	CHECK(near(merged.top, core::dimensionBand(2), 1e-9));
+	CHECK(near(merged.left, bands.left, 1e-9));
+}
+
 // ---------------------------------------------------------------------------
 // 平面の広がり（伏図の縮尺と位置を決めるのに使う。docs/DEV-NOTES.md M18）
 //

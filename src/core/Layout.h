@@ -207,18 +207,47 @@ namespace HomeskzIfcImport::core
 	PlanLayout planLayout(const Vec2& content, const PaperArea& area, double legendWidth,
 						  double band = 0.0);
 
+	// 図面枠の枠線と、その内側へ並べる図との間隔（用紙 mm）。
+	inline constexpr double kTitleBlockInset = 5.0;
+
+	// 図を並べてよい領域を、図面枠の外形（frame）の内側へ絞る。印刷可能領域（printable）と
+	// 「枠を kTitleBlockInset だけ内へ寄せた矩形」の重なりを返す。重なりが潰れる（枠が
+	// 測り違いで極端に小さい等）ときは printable をそのまま返す——図を並べる場所を失う
+	// くらいなら枠と重なる方がよい（重なりは実機で見れば分かる）。
+	PaperArea insetFrameArea(const PaperArea& printable, const PaperArea& frame);
+
+	// 軸組図 1 枚の外周に張り出す注釈の帯（用紙 mm・**辺ごと**）。寸法・レベル記号・図面
+	// ラベルは図の決まった辺にしか出ない（左に高さの寸法とレベル記号、下に柱の位置の寸法と
+	// 図面ラベル。parse/Dimension・draw/DrawingLabel）ので、**出ない辺には帯を取らない**。
+	// かつては最も外の段の帯を四辺すべてに取っており、上と右に図 1 枚あたり数十 mm の
+	// 空きが出ていた（それが 2 段 × 列の数だけ効いて縮尺を 1〜2 段落としていた）。
+	// 値は core::sectionBands が命令から求める。
+	struct SectionBands
+	{
+		double left = 0.0;
+		double right = 0.0;
+		double bottom = 0.0;
+		double top = 0.0;
+	};
+
 	// 軸組図の割り付け（**上下 2 段**・シートレイヤ 1 枚＝用紙 1 枚）。
 	//
-	//   scale   … 縮尺の分母（全軸組図で共通）
-	//   columns … 1 段に並ぶ枚数（1 以上）
-	//   cell    … 1 枚ぶんの大きさ（用紙 mm。間隔は含まない）
-	//   area    … 印刷可能領域（用紙 mm。渡されたものをそのまま持つ）
+	//   scale          … 縮尺の分母（全軸組図で共通）
+	//   columns        … 1 段に並ぶ枚数（1 以上）
+	//   cell           … 1 枚ぶんの大きさ（用紙 mm。間隔は含まない。帯を含む）
+	//   area           … 図を並べてよい領域（用紙 mm。渡されたものをそのまま持つ）
+	//   viewportOffset … マスの中心から**図（ビューポート）の中心**までのずれ（用紙 mm）。
+	//                    帯が辺ごとに違うので、図はマスの中央ではなく帯の広い側の反対へ寄る
+	//   alignTop       … 段組みを領域の**上端**へ寄せるか（false なら上下の中央）。図面枠を
+	//                    置くときは余りを下へ回す（表題欄は下に在ることが多い。draw/Section）
 	struct SectionLayout
 	{
 		double scale = 1.0;
 		std::size_t columns = 1;
 		Vec2 cell;
 		PaperArea area;
+		Vec2 viewportOffset;
+		bool alignTop = false;
 
 		// シートレイヤ 1 枚に並ぶ枚数。
 		std::size_t perSheet() const
@@ -228,16 +257,32 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 軸組図の割り付けを決める。content は**軸組図 1 枚ぶん**の広がり（実寸 mm。幅は建物の
-	// 平面の広がり、高さは断面の高さ範囲）、area は**印刷可能領域**（用紙 mm）。**2 段が縦に収まること**を条件に縮尺を選ぶので、
+	// 平面の広がり、高さは断面の高さ範囲）、area は図を並べてよい領域（用紙 mm。印刷可能
+	// 領域、図面枠を置くならその内側）。**2 段が縦に収まること**を条件に縮尺を選ぶので、
 	// 1 段しか置かないときも余白は 2 段ぶんのままになる（用紙をまたいで段の位置が揃う）。
 	//
-	// band は伏図と同じく寸法の帯（用紙 mm・四辺それぞれ。M31）。1 枚のマス（cell）は
-	// **帯を含めた大きさ**になる（寸法も隣の図と重ならないように並べる）。
-	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area, double band = 0.0);
+	// bands は辺ごとの注釈の帯（用紙 mm。SectionBands）。1 枚のマス（cell）は**帯を含めた
+	// 大きさ**になる（寸法も隣の図と重ならないように並べる）。
+	//
+	// heightMargin は content の高さに**上下それぞれ**含まれている空き（実寸 mm。断面の
+	// 高さ範囲の余白 core::kSectionHeightMargin）。上下の帯はまずこの空きに収め、はみ出す
+	// ぶんだけをマスに足す——図の下の寸法と図面ラベルは実際にこの余白の中に描かれる
+	// （docs/DEV-NOTES.md M32）ので、帯と余白を両方取ると同じ場所を 2 度数えることになる。
+	// 空きは縮尺で用紙の上の長さが変わるので、**縮尺ごとに**マスを組み直して収まりを見る。
+	//
+	// alignTop は SectionLayout::alignTop へそのまま写す。
+	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area,
+								const SectionBands& bands = {}, double heightMargin = 0.0,
+								bool alignTop = false);
 
 	// シート内 index 番目（0 起点。左上から右へ、埋まったら下段へ）のマスの中心（用紙 mm）。
-	// 段組み全体は印刷可能領域の中央に置く。範囲外の index は最後のマスへ丸める。
+	// 段組み全体は領域の左右の中央、上下は中央（alignTop なら上端）に置く。範囲外の index は
+	// 最後のマスへ丸める。
 	Vec2 sectionSlotCenter(const SectionLayout& layout, std::size_t indexInSheet);
+
+	// そのマスで**図（ビューポート）の中心**を合わせる点（用紙 mm）。マスの中心から
+	// viewportOffset だけずらした点で、帯が辺ごとに違っても図と帯がマスにちょうど収まる。
+	Vec2 sectionViewportCenter(const SectionLayout& layout, std::size_t indexInSheet);
 
 	// viewports 枚の軸組図に要るシートレイヤの枚数（0 枚なら 0）。
 	std::size_t sectionSheetCount(const SectionLayout& layout, std::size_t viewports);
@@ -296,6 +341,10 @@ namespace HomeskzIfcImport::core
 	// 軸組図の寸法の帯に足す、レベル記号が寸法より外へ張り出す見込み（用紙 mm）。名前の幅は
 	// 描くまで分からないので、三角と 3 文字ほどの名前（"1FL"・"軒高"）が収まる量で見込む。
 	inline constexpr double kLevelMarkBandAllowance = 10.0;
+
+	// 軸組図の下の帯に足す、図面ラベル（紙の 10pt のタイトル＋下線）の高さの見込み（用紙 mm。
+	// docs/DEV-NOTES.md M32 で「用紙 5mm 前後」）。ラベルの上の間隔は core::kSectionLabelGap。
+	inline constexpr double kSectionLabelAllowance = 6.0;
 
 	// 記号のレイアウトの中の配置（用紙 mm・起点＝(0, 0)・y は上が +）。
 	//   triangleHeight / triangleHalfWidth … ▽ の高さと底辺（上辺）の半分。頂点は
