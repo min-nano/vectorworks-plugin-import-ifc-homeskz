@@ -569,10 +569,10 @@ TEST(FramingChainsPutOnlyWhatFacesThePerimeterOutside)
 	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 910.0, 1820.0}, -60.0, -1, 0));
 	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0}, 1880.0, 1, 0));
 	CHECK(!hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0}, 1880.0, 1, 1));
-	// 下は柱（455）が取り合いから外れ、取り合い（910）が柱から外れるので、柱の列を
-	// 1 段外に、横架材の列を 1 段目に分ける。
-	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 455.0, 1820.0}, -60.0, -1, 1));
-	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 910.0, 1820.0}, -60.0, -1, 0));
+	// 下は柱（455）が取り合いから外れ、取り合い（910）が柱から外れるが、横架材の列
+	// （0 / 910 / 1820）は上の柱の列と同じ寸法なので重ねず、柱の列だけが 1 段目に残る。
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 455.0, 1820.0}, -60.0, -1, 0));
+	CHECK(!hasChain(chains, DimensionAxis::Horizontal, {0.0, 910.0, 1820.0}, -60.0, -1, 0));
 
 	// 外周に載らない柱は、乗っている内部の梁に沿って押さえる（梁の芯から外側へ）。
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 455.0, 910.0}, 910.0, 1, 0));
@@ -587,29 +587,32 @@ TEST(FramingChainsPutOnlyWhatFacesThePerimeterOutside)
 TEST(FramingChainsMeasureBeamsApartFromColumnsAndJoinThePerimeterRow)
 {
 	// 外周 0〜1820 の矩形で、東の外周の梁は下半分（0〜910。先は自由端）だけ。y=650 の
-	// 大引が東西に渡る。西の柱は 0 / 910 / 1820（910 には梁が取り合わない）、東の柱は
-	// 0 / 455。
+	// 大引が東西に渡り、y=910 の短い梁が西の外周に取り合う。西の柱は 0 / 1200 / 1820
+	// （1200 には梁が取り合わない）、東の柱は 0 / 455。
 	const std::vector<MemberCommand> members{
 		makeMember("1-横架材天端", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 464.0),
 		makeMember("1-横架材天端", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}, 464.0),
 		makeMember("1-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 464.0),
 		makeMember("1-横架材天端", Vec2{1820.0, 0.0}, Vec2{1820.0, 910.0}, 464.0),
-		makeMember("1-横架材天端", Vec2{0.0, 650.0}, Vec2{1820.0, 650.0}, 464.0)};
+		makeMember("1-横架材天端", Vec2{0.0, 650.0}, Vec2{1820.0, 650.0}, 464.0),
+		makeMember("1-横架材天端", Vec2{0.0, 910.0}, Vec2{300.0, 910.0}, 464.0)};
 	const std::vector<ColumnCommand> columns{
 		makeColumn("1to2-柱", Vec2{0.0, 0.0}),	  makeColumn("1to2-柱", Vec2{1820.0, 0.0}),
-		makeColumn("1to2-柱", Vec2{0.0, 910.0}),  makeColumn("1to2-柱", Vec2{1820.0, 455.0}),
+		makeColumn("1to2-柱", Vec2{0.0, 1200.0}), makeColumn("1to2-柱", Vec2{1820.0, 455.0}),
 		makeColumn("1to2-柱", Vec2{0.0, 1820.0}), makeColumn("1to2-柱", Vec2{1820.0, 1820.0})};
 	const std::vector<DimensionChainCommand> chains = parse::framingDimensionChains(
 		members, columns, {}, Vec2{-60.0, -60.0}, Vec2{1880.0, 1880.0});
 
-	// 西: 柱の間隔（910 / 910）と、柱とは別に横架材の取り合い（650 の次は上まで 1170）。
-	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 910.0, 1820.0}, -60.0, -1, 1));
-	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 650.0, 1820.0}, -60.0, -1, 0));
-	// 東: 柱の列は外周の梁の無い 910〜1820 も全長の端まで延ばして 1 本につなぐ。横架材は
-	// 0 / 650 / 910（梁の端）。
-	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 455.0, 910.0, 1820.0}, 1880.0, 1, 1));
-	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 650.0, 910.0}, 1880.0, 1, 0));
-	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0}, 1880.0, 1, 2));
+	// 西: 柱の間隔（1200 / 620）と、柱とは別に横架材の取り合い（650 / 260）。910〜1820 は
+	// 東の柱の列（全長の端まで延ばした区間）と同じ寸法なので重ねない。
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 1200.0, 1820.0}, -60.0, -1, 1));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 650.0, 910.0}, -60.0, -1, 0));
+	CHECK(!hasChain(chains, DimensionAxis::Vertical, {0.0, 650.0, 910.0, 1820.0}, -60.0, -1, 0));
+	// 東: 柱の列は外周の梁の無い 910〜1820 も全長の端まで延ばして 1 本につなぐ。横架材の
+	// 取り合い（0 / 650 / 910）は西の列と同じ寸法なので重ねず、柱の列が 1 段目。
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 455.0, 910.0, 1820.0}, 1880.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0}, 1880.0, 1, 1));
+	CHECK(!hasChain(chains, DimensionAxis::Vertical, {0.0, 650.0, 910.0}, 1880.0, 1, 0));
 	// y=650 の大引（0〜1820）は上の外周の列と同じ寸法なので内部には書かない。
 	for (const DimensionChainCommand& chain : chains)
 		CHECK(!(chain.axis == DimensionAxis::Horizontal && near(chain.base, 650.0)));

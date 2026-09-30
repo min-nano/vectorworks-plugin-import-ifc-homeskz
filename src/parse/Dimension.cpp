@@ -995,40 +995,64 @@ namespace HomeskzIfcImport::parse
 				double base;
 				bool withOverall;
 			};
+			// 辺ごとの柱の列・横架材（取り合い）の測点・全長。
+			struct SideRows
+			{
+				Side edge;
+				DimensionAxis axis;
+				std::vector<double> row;
+				std::vector<double> cores;
+				std::vector<double> overall;
+			};
+			std::vector<SideRows> sides;
 			for (const Side& edge : {Side{true, 1, max.y, true}, Side{false, -1, min.x, false},
 									 Side{true, -1, min.y, false}, Side{false, 1, max.x, true}})
 			{
-				const DimensionAxis axis =
-					edge.eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
-				std::vector<double> row;
-				std::vector<double> cores;
+				SideRows rows{edge,
+							  edge.eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical,
+							  {},
+							  {},
+							  overallOf(runs, edge.eastWest)};
 				for (const PlacedRun& run : runs)
 				{
 					if (run.eastWest != edge.eastWest || run.exteriorSide != edge.side ||
 						run.stops.all.size() < 2)
 						continue;
 					const std::vector<double> columns = columnStops(run.stops);
-					row.insert(row.end(), columns.begin(), columns.end());
-					cores.insert(cores.end(), run.stops.cores.begin(), run.stops.cores.end());
+					rows.row.insert(rows.row.end(), columns.begin(), columns.end());
+					rows.cores.insert(rows.cores.end(), run.stops.cores.begin(),
+									  run.stops.cores.end());
 				}
-				if (row.empty())
+				if (rows.row.empty())
 					continue;
-				const std::vector<double> overall = overallOf(runs, edge.eastWest);
 				if (edge.withOverall)
-					row.insert(row.end(), overall.begin(), overall.end());
-				row = mergeStops(std::move(row));
-				cores = mergeStops(std::move(cores));
+					rows.row.insert(rows.row.end(), rows.overall.begin(), rows.overall.end());
+				rows.row = mergeStops(std::move(rows.row));
+				rows.cores = mergeStops(std::move(rows.cores));
+				// 柱の列は四辺とも先に覚える。横架材の列は、どの辺の柱の列にある寸法も重ねない
+				// （ご要望: い通りの 5〜8 の 2685 が、右の柱の列を全長の端まで延ばした 5〜7' と
+				// 重なっていた）。
+				written.remember(rows.axis, rows.row, rows.row);
+				sides.push_back(std::move(rows));
+			}
+			for (const SideRows& rows : sides)
+			{
+				const Side& edge = rows.edge;
 				std::vector<std::vector<double>> beams =
-					beamPieces(cores, row, [](double, double) { return false; });
+					beamPieces(rows.cores, rows.row, [&written, &rows](double a, double b)
+							   { return written.contains(rows.axis, a, b); });
 				const int rowTier = beams.empty() ? 0 : 1;
-				if (row.size() >= 2)
-					out.push_back(makeChain(axis, row, edge.base, edge.side, rowTier));
+				if (rows.row.size() >= 2)
+					out.push_back(makeChain(rows.axis, rows.row, edge.base, edge.side, rowTier));
 				for (std::vector<double>& chain : beams)
-					out.push_back(makeChain(axis, std::move(chain), edge.base, edge.side, 0));
-				if (edge.withOverall && overall.size() == 2 && !sameStops(overall, row))
-					out.push_back(makeChain(axis, overall, edge.base, edge.side, rowTier + 1));
-				written.remember(axis, row, cores);
-				written.remember(axis, cores, cores);
+				{
+					written.remember(rows.axis, chain, chain);
+					out.push_back(makeChain(rows.axis, std::move(chain), edge.base, edge.side, 0));
+				}
+				if (edge.withOverall && rows.overall.size() == 2 &&
+					!sameStops(rows.overall, rows.row))
+					out.push_back(
+						makeChain(rows.axis, rows.overall, edge.base, edge.side, rowTier + 1));
 			}
 
 			// 内部の通り: 柱の列と横架材の列。どちらも外側の列（先に書いた列）にある芯・端
