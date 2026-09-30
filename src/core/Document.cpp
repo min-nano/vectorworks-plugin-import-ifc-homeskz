@@ -12,8 +12,8 @@
 //	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 //	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
-//	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み、rafterEaveEnd＝垂木の軒先
-//	側の材端）。SDK を触らないので無 SDK テストで検証できる（CLAUDE.md「テスト方針」）。
+//	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み、modifierBasePolygon＝
+//	地中梁の押し出しの基面、rafterEaveEnd＝垂木の軒先側の材端）。SDK を触らないので無 SDK テストで検証できる（CLAUDE.md「テスト方針」）。
 //
 
 #include "core/Document.h"
@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <functional>
 #include <limits>
+#include <numbers>
 #include <ranges>
 #include <string>
 #include <utility>
@@ -853,6 +854,65 @@ namespace HomeskzIfcImport::core
 			raised.profile[i] = Vec2{top.x + du, top.y + bite};
 		}
 		return raised;
+	}
+
+	std::vector<Vec3> modifierBasePolygon(const ModifierCommand& modifier)
+	{
+		const std::size_t count = modifier.profile.size();
+		if (count < 3)
+			return {};
+
+		// 断面 (u, v) をワールドへ写す。u 軸は走る向きを +90 度回した水平単位ベクトル
+		// （解析側 parse/Footing の groundBeamModifier の取り方と対）、v 軸はワールド Z。
+		const double phi = modifier.azimuth * std::numbers::pi / 180.0;
+		const Vec2 axis{std::cos(phi), std::sin(phi)};
+		const Vec2 width{-axis.y, axis.x};
+
+		std::vector<Vec3> vertices;
+		vertices.reserve(count);
+		for (const Vec2& p : modifier.profile)
+		{
+			vertices.push_back(Vec3{modifier.origin.x + (width.x * p.x),
+									modifier.origin.y + (width.y * p.x), modifier.origin.z + p.y});
+		}
+
+		// 1. 巻き: 面法線（Newell 法）が軸と逆を向いていたら反転する。
+		Vec3 normal{0.0, 0.0, 0.0};
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			const Vec3& a = vertices[i];
+			const Vec3& b = vertices[(i + 1) % count];
+			normal.x += (a.y - b.y) * (a.z + b.z);
+			normal.y += (a.z - b.z) * (a.x + b.x);
+			normal.z += (a.x - b.x) * (a.y + b.y);
+		}
+		if ((normal.x * axis.x) + (normal.y * axis.y) < 0.0)
+			std::ranges::reverse(vertices);
+
+		// 2. 始まり: +u へ最も向く辺（同じ向きなら低いほう）の始点を先頭へ回す。法線を軸へ
+		// 揃えた後の巻きでは、+u へ向かう辺は断面の下端側にある。
+		std::size_t start = 0;
+		double bestAlong = -std::numeric_limits<double>::infinity();
+		double bestZ = std::numeric_limits<double>::infinity();
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			const Vec3& a = vertices[i];
+			const Vec3& b = vertices[(i + 1) % count];
+			const double edgeLength = length(b - a);
+			if (edgeLength <= 0.0)
+				continue;
+			const double along = (((b.x - a.x) * width.x) + ((b.y - a.y) * width.y)) / edgeLength;
+			const double z = (a.z + b.z) / 2.0;
+			if (along > bestAlong + kModifierBaseEdgeTol ||
+				(along >= bestAlong - kModifierBaseEdgeTol && z < bestZ))
+			{
+				start = i;
+				bestAlong = along;
+				bestZ = z;
+			}
+		}
+		std::ranges::rotate(vertices, vertices.begin() + static_cast<std::ptrdiff_t>(start));
+		return vertices;
 	}
 
 	namespace

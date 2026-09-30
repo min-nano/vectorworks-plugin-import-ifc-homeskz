@@ -153,46 +153,20 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// 地中梁（台形プリズム）1 本を押し出しソリッドとして作る。作れなければ nil。
+		// **位置はまだ合わせない**——合わせるのは AlignModifierPrism で、そのソリッドへの
+		// 設定（クラス・構造用図形）を**すべて済ませた後**に呼ぶ（AlignModifierPrism の doc）。
 		//
-		// 断面（profile の u, v）を**ワールド 3D の底面ポリゴン**へ写し、押し出し方向
-		// （方位角）へ depth だけ押し出す。u 軸は「走る向きを +90 度回した水平単位ベクトル」で、
-		// これは解析側（parse/Footing の groundBeamModifier）が断面を取り直すときの規約と対。
-		// v 軸はワールド Z、断面原点（u=v=0）は命令の origin（XY センタリング済み・Z 絶対値）。
-		//
-		// **押し出しは基面ポリゴンの法線方向へ伸びる**ので、頂点の並びを「法線が軸方向を
-		// 向く」向きに揃えてから渡す（法線は Newell 法。逆巻きだと梁が軸の反対側へ伸びる）。
+		// 基面（ワールド 3D の頂点列）は core::modifierBasePolygon が作る。**頂点の巻きと
+		// 始まりに決めごとがある**——VWExtrudeObj は基面の法線方向へ押し出し、局所座標系を
+		// 先頭の頂点から決めるので、並びを変えると押し出しの向きや局所座標系が変わる
+		// （実機で可視ソリッドが幅方向へ 24.59mm ずれた。詳細は同関数の doc）。
 		MCObjectHandle CreateModifierPrism(const core::ModifierCommand& modifier)
 		{
-			if (modifier.profile.size() < 3 || modifier.depth <= 0.0)
+			if (modifier.depth <= 0.0)
 				return nil;
-
-			const double phi = modifier.azimuth * std::numbers::pi / 180.0;
-			const core::Vec2 axis{std::cos(phi), std::sin(phi)};
-			const core::Vec2 width{-axis.y, axis.x}; // 幅軸 u（解析側の w と同じ取り方）
-
-			std::vector<core::Vec3> vertices;
-			vertices.reserve(modifier.profile.size());
-			for (const core::Vec2& p : modifier.profile)
-			{
-				vertices.push_back(core::Vec3{modifier.origin.x + (width.x * p.x),
-											  modifier.origin.y + (width.y * p.x),
-											  modifier.origin.z + p.y});
-			}
-
-			// 面法線（Newell 法）。軸と逆を向いていたら頂点の並びを反転して、押し出しが
-			// 梁の走る向きへ伸びるようにする。
-			core::Vec3 normal{0.0, 0.0, 0.0};
-			const std::size_t count = vertices.size();
-			for (std::size_t i = 0; i < count; ++i)
-			{
-				const core::Vec3& a = vertices[i];
-				const core::Vec3& b = vertices[(i + 1) % count];
-				normal.x += (a.y - b.y) * (a.z + b.z);
-				normal.y += (a.z - b.z) * (a.x + b.x);
-				normal.z += (a.x - b.x) * (a.y + b.y);
-			}
-			if ((normal.x * axis.x) + (normal.y * axis.y) < 0.0)
-				std::ranges::reverse(vertices);
+			const std::vector<core::Vec3> vertices = core::modifierBasePolygon(modifier);
+			if (vertices.size() < 3)
+				return nil;
 
 			VWPolygon3D base;
 			for (const core::Vec3& v : vertices)
@@ -204,19 +178,36 @@ namespace HomeskzIfcImport::draw
 			if (handle == nil)
 				return nil;
 			SetBooleanVariable(handle, ObjectVariable::PlanarObjectIsScreen, false);
+			return handle;
+		}
 
-			// **VW が置いた位置を実測して命令どおりへ寄せ直す。** VWExtrudeObj は押し出しを内部で
-			// 「2D 基面 ＋ 基準高さ（baseElevation）＋ 厚み」に持ち替えるため、3D ポリゴンから
-			// 作ると基面の平面を導出したうえで**配置先レイヤの高さ（ストーリレベル）を法線方向へ
-			// 足す**。普通の押し出しは鉛直なのでこれは「レイヤぶん持ち上げる」正しい動作だが、
-			// 地中梁の押し出しは**水平**なので、そのまま**軸方向の横ずれ**として出る——実機で
-			// 全ての地中梁が軸方向へ 50mm（＝ F-底盤 レイヤの高さ＝底盤天端 Z）ずれていた
-			// （長さ・断面・向きは命令どおりで、位置だけが平行移動していた。docs/DEV-NOTES.md M10）。
-			//
-			// 原因の値（レイヤ高さ）を当てにいくのではなく、**平面外形の中心が命令どおりの位置に
-			// 来るよう実測して動かす**。プリズムの平面外形は矩形なので、軸に平行でも斜めでも
-			// 「バウンディング矩形の中心＝外形の中心」が成り立つ（対称性）。ずれが無ければ
-			// 何もしないので、VW 側の挙動が変わってもこのままで正しい。
+		// **VW が置いた位置を実測して命令どおりへ寄せ直す。** VWExtrudeObj は押し出しを内部で
+		// 「2D 基面 ＋ 基準高さ（baseElevation）＋ 厚み」に持ち替えるため、3D ポリゴンから
+		// 作ると基面の平面を導出したうえで**配置先レイヤの高さ（ストーリレベル）を法線方向へ
+		// 足す**。普通の押し出しは鉛直なのでこれは「レイヤぶん持ち上げる」正しい動作だが、
+		// 地中梁の押し出しは**水平**なので、そのまま**軸方向の横ずれ**として出る——実機で
+		// 全ての地中梁が軸方向へ 50mm（＝ F-底盤 レイヤの高さ＝底盤天端 Z）ずれていた
+		// （長さ・断面・向きは命令どおりで、位置だけが平行移動していた。docs/DEV-NOTES.md M10）。
+		//
+		// 原因の値（レイヤ高さ）を当てにいくのではなく、**平面外形の中心が命令どおりの位置に
+		// 来るよう実測して動かす**。プリズムの平面外形は矩形なので、軸に平行でも斜めでも
+		// 「バウンディング矩形の中心＝外形の中心」が成り立つ（対称性）。ずれが無ければ
+		// 何もしないので、VW 側の挙動が変わってもこのままで正しい。
+		//
+		// **ソリッドへの設定をすべて済ませてから最後に呼ぶ。** 可視ソリッドと床付けは作った後に
+		// クラスと「構造用図形」（ovIsStructural）を立てる。以前は作った直後に合わせてから
+		// それらを立てていて、実機では**それらを立てる可視ソリッドだけ**がずれ、同じ手順で
+		// 作る削り取りモディファイア（どちらも立てない）は正しい位置にあった。設定が形を
+		// 作り直してもよいよう、測るのは最後にする。
+		void AlignModifierPrism(MCObjectHandle handle, const core::ModifierCommand& modifier)
+		{
+			if (handle == nil || modifier.profile.empty())
+				return;
+
+			const double phi = modifier.azimuth * std::numbers::pi / 180.0;
+			const core::Vec2 axis{std::cos(phi), std::sin(phi)};
+			const core::Vec2 width{-axis.y, axis.x};
+
 			double uLo = modifier.profile.front().x;
 			double uHi = uLo;
 			for (const core::Vec2& p : modifier.profile)
@@ -237,7 +228,6 @@ namespace HomeskzIfcImport::draw
 				if (std::abs(dx) > kPlacementTol || std::abs(dy) > kPlacementTol)
 					gSDK->MoveObject3D(handle, dx, dy, 0.0);
 			}
-			return handle;
 		}
 
 		// 削り取りモディファイア群を 1 つのグループにまとめて返す（SetCustomObjectProfileGroup
@@ -249,8 +239,10 @@ namespace HomeskzIfcImport::draw
 			for (const core::ModifierCommand& modifier : modifiers)
 			{
 				const MCObjectHandle prism = CreateModifierPrism(modifier);
-				if (prism != nil)
-					group.AddObject(prism);
+				if (prism == nil)
+					continue;
+				AlignModifierPrism(prism, modifier); // 削り取りはクラス等を立てない
+				group.AddObject(prism);
 			}
 			const MCObjectHandle groupHandle = group.GetThisObject();
 			if (groupHandle == nil)
@@ -276,12 +268,14 @@ namespace HomeskzIfcImport::draw
 		{
 			for (const core::ModifierCommand& modifier : modifiers)
 			{
-				const MCObjectHandle solid =
-					CreateModifierPrism(core::raiseModifierTop(modifier, kGroundBeamSlabBite));
+				const core::ModifierCommand raised =
+					core::raiseModifierTop(modifier, kGroundBeamSlabBite);
+				const MCObjectHandle solid = CreateModifierPrism(raised);
 				if (solid != nil)
 				{
 					SetClassWithAttributes(solid, className);
 					SetBooleanVariable(solid, ObjectVariable::IsStructural, true);
+					AlignModifierPrism(solid, raised); // 設定をすべて済ませてから（doc）
 				}
 
 				// 床付けは地中梁と押し出しの向き（azimuth）と断面の座標系を共有し、断面と
@@ -302,6 +296,7 @@ namespace HomeskzIfcImport::draw
 						continue;
 					SetClassWithAttributes(bed, bedding.drawClass);
 					SetBooleanVariable(bed, ObjectVariable::IsStructural, true);
+					AlignModifierPrism(bed, prism);
 				}
 			}
 		}
