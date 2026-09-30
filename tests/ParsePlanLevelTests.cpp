@@ -40,6 +40,7 @@ using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::nearestPlanLevel;
 using HomeskzIfcImport::parse::PlanLevel;
 using HomeskzIfcImport::parse::planLevelAbove;
+using HomeskzIfcImport::parse::planLevelLayer;
 using HomeskzIfcImport::parse::planLevelShift;
 using HomeskzIfcImport::parse::planLevelTitleSuffix;
 using HomeskzIfcImport::parse::StoryInfo;
@@ -175,6 +176,40 @@ TEST(plan_levels_number_every_height_and_mark_the_standard)
 	// レベルのずらし量は代表の高さ − 標準の天端。
 	CHECK(near(planLevelShift(levels[1], stories[1]), 2700.0 - 3490.0));
 	CHECK(near(planLevelShift(levels[2], stories[1]), 0.0));
+}
+
+// 水平な横架材が 1 本も無い階にも標準の伏図レベルが必ず 1 つでき、登り梁はどの階でも
+// いずれかの伏図レベルのレイヤ（＝柱梁伏図に映るレイヤ）へ入る。母屋伏図が登り梁を
+// 映さない（parse/Sheet）のは、これで登り梁がどの伏図からも消えないと言えるから。
+TEST(every_story_has_one_standard_level_so_noboribari_always_reach_a_framing_plan)
+{
+	const std::vector<StoryInfo> stories = twoStories();
+	const std::vector<PlanLevel> levels =
+		buildPlanLevels(stories, collectBeamHeights(stories, {}), ImportOptions{});
+	for (std::size_t i = 0; i < stories.size(); ++i)
+	{
+		std::size_t standards = 0;
+		for (const PlanLevel& level : levels)
+		{
+			if (level.story == i && level.standard)
+				++standards;
+		}
+		CHECK_EQ(standards, std::size_t(1));
+	}
+
+	std::vector<MemberCommand> members = {beam("2-登り梁", 3900.0, 2710.0),
+										  beam("R-登り梁", 6300.0, 7500.0)};
+	assignMemberPlanLevels(members, stories, levels);
+	for (const MemberCommand& member : members)
+	{
+		bool onPlan = false;
+		for (const PlanLevel& level : levels)
+		{
+			if (member.layer == planLevelLayer(level, stories[level.story], "登り梁"))
+				onPlan = true;
+		}
+		CHECK(onPlan);
+	}
 }
 
 TEST(merged_heights_join_the_previous_level_of_the_same_story_only)
