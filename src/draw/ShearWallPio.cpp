@@ -35,6 +35,8 @@
 #include "draw/ShearWallPio.h"
 #include "Extensions/ExtShearWall.h"
 #include "draw/DrawUtil.h"
+#include "draw/StructuralMember.h"
+#include "draw/Verify.h"
 
 #include "core/Document.h"
 #include "core/Geometry.h"
@@ -72,13 +74,16 @@ namespace HomeskzIfcImport::draw
 		// **「読めて 0 だった」と「そもそも読めなかった」を区別する。** 前者は正しい 0
 		// （耐力壁の下端は土台天端＝0 が普通）なので 0 を返し、後者だけ fallback へ落とす。
 		// 混同すると、値が 0 の正常なパラメータに既定値が化けて入る。
-		double ParamReal(const VWParametricObj& pio, const char* name, double fallback = 0.0)
+		//
+		// 名前は TXString で受ける。構造材の寸法のように ResolveParamName で解決した名前
+		// （ローカライズ名から引いた内部名）を、std::string へ往復させずにそのまま渡すため。
+		double ParamReal(const VWParametricObj& pio, const TXString& name, double fallback = 0.0)
 		{
 			bool read = false;
 			double value = 0.0;
 			try
 			{
-				value = pio.GetParamReal(TXString(name));
+				value = pio.GetParamReal(name);
 				read = true;
 			}
 			catch (...)
@@ -89,7 +94,15 @@ namespace HomeskzIfcImport::draw
 				return value;
 
 			// 文字列としてなら読めることがある（単位付きの表記など）。読めた数だけ採る。
-			const std::string text = draw::PioParamString(pio, name);
+			std::string text;
+			try
+			{
+				text = pio.GetParamString(name).GetStdString();
+			}
+			catch (...)
+			{
+				text.clear(); // 文字列としても読めない。下の判断へ落とす。
+			}
 			if (!text.empty())
 			{
 				bool parsed = false;
@@ -136,13 +149,72 @@ namespace HomeskzIfcImport::draw
 			double offAxis = 0.0; // 軸からの法線方向の離れ（中心）
 		};
 
-		// 柱のワールド外接矩形を PIO ローカルへ落として広がりを返す。
+		// 柱の広がりを PIO ローカルで返す。
+		//
+		// ★**柱の位置は柱自身の行列（原点＝柱芯）から取り、外接（GetObjectBounds）は
+		// 使わない。** 取り込み直後に耐力壁を OIP で 1 度編集すると、そのリセットの中でだけ
+		// **柱の外接が本当の位置と違う値を返し**、両端の柱を見失って控えの内法で描かれる
+		// ——絵が柱幅の半分ずれて見えた不具合の正体（#161。編集の前後で耐力壁自身の行列は
+		// 同じなのに、「別の通り」と判定された柱が 61 → 65 本に増え、始端に最も近い柱芯が
+		// 0 → 901mm になった。docs/DEV-NOTES.md M19）。構造材の柱はパスが柱自身のローカル Z
+		// 軸に沿って原点に立つ（パス (0,0,0)→(0,0,H)）ので、行列の原点がそのまま柱芯になる。
+		//
+		// 幅は断面寸法（MajorBreadth＝柱のローカル X 方向・MajorDepth＝同 Y 方向）を
+		// 壁の軸へ射影して求める。柱が回転していても軸方向の広がりを取り違えない（正方形の
+		// 柱なら向きに依らず同じ値）。断面寸法が読めない柱だけ、従来どおり外接で測る。
 		ColumnRange LocalRangeOf(MCObjectHandle column, const VWTransformMatrix& toWorld)
 		{
+			ColumnRange range;
+			double breadth = 0.0;
+			double depth = 0.0;
+			VWTransformMatrix matrix;
+			try
+			{
+				const VWParametricObj pio(column);
+				// 寸法は ResolveParamName を通して読む（draw/ColumnMarkPio の ColumnSection と
+				// 同じ理由）。日本語環境では universal 名で引くと 0 が返ることがあり、そうなると
+				// 下の外接へ静かに戻って、柱幅の半分ずれる不具合（#161）がぶり返す。
+				breadth = ParamReal(pio, draw::ResolveParamName(pio, draw::kFieldMajorBreadth,
+																draw::kLocalizedBreadth));
+				depth = ParamReal(pio, draw::ResolveParamName(pio, draw::kFieldMajorDepth,
+															  draw::kLocalizedDepth));
+				// 柱の行列は **GetObjectMatrix（柱自身の行列）** で読む。壁側の toWorld
+				// （GetObjectToWorldTransform）と同じ座標系でよいのは、ここへ来る柱が
+				// **対象レイヤの直下の図形だけ**だから（下の ClearSpanFromColumns は
+				// FirstMemberObj(layer) → NextObject でレイヤ直下しか辿らない。グループや
+				// シンボルの中の柱は最初から対象外）——入れ物が無ければ 2 つの口は同じ行列を
+				// 返す。実測でも、耐力壁自身の 2 つの口は取り込み時・OIP 編集時とも一致し
+				// （#161: T5005,-2730/0 == M5005,-2730/0）、柱の行列の原点は外接・3D 外接の
+				// 中心と一致した（#161 round 3）。柱をレイヤ直下以外からも拾うように変える
+				// なら、ここも入れ物の行列を掛けた値へ直すこと。
+				pio.GetObjectMatrix(matrix);
+			}
+			catch (...)
+			{
+				breadth = 0.0; // 構造材として読めない。下の外接へ回す
+			}
+
+			if (breadth > 0.0 && depth > 0.0)
+			{
+				const VWPoint3D offset = matrix.GetOffset();
+				const VWPoint2D centre =
+					toWorld.InversePointTransform(VWPoint2D(offset.x, offset.y));
+				// 柱の断面軸（ワールド）を壁の軸（ローカル X）へ射影して、軸方向の半幅を出す。
+				const VWPoint2D u0 = toWorld.InversePointTransform(VWPoint2D(0.0, 0.0));
+				const VWPoint3D cu = matrix.GetUVector();
+				const VWPoint3D cv = matrix.GetVVector();
+				const VWPoint2D lu = toWorld.InversePointTransform(VWPoint2D(cu.x, cu.y));
+				const VWPoint2D lv = toWorld.InversePointTransform(VWPoint2D(cv.x, cv.y));
+				const double half =
+					(std::abs(lu.x - u0.x) * breadth / 2.0) + (std::abs(lv.x - u0.x) * depth / 2.0);
+				range.loX = centre.x - half;
+				range.hiX = centre.x + half;
+				range.offAxis = centre.y;
+				return range;
+			}
+
 			WorldRect bounds;
 			gSDK->GetObjectBounds(column, bounds);
-
-			ColumnRange range;
 			range.loX = std::numeric_limits<double>::max();
 			range.hiX = std::numeric_limits<double>::lowest();
 			double loY = std::numeric_limits<double>::max();
@@ -165,11 +237,23 @@ namespace HomeskzIfcImport::draw
 			return range;
 		}
 
+		// 柱を探した経過（見つからなかったときに、**なぜ**見つからなかったかを診断ログへ
+		// 出すための数え上げ）。見つかったときは使わない。
+		struct ColumnSearch
+		{
+			std::size_t layers = 0;	 // 名前で引けた対象レイヤの数
+			std::size_t columns = 0; // 見た柱（構造用途 4）の数
+			std::size_t offAxis = 0; // そのうち別の通りとして除いた数
+			double minOffAxis = std::numeric_limits<double>::max(); // 柱の法線方向の離れの最小
+			double nearStart = std::numeric_limits<double>::max(); // 始端に最も近い柱芯までの距離
+			double nearEnd = std::numeric_limits<double>::max(); // 終端に最も近い柱芯までの距離
+		};
+
 		// 対象レイヤを走査して、軸の両端に最も近い柱の**内側面**を求める。両端とも
 		// 見つかれば true（outStart < outEnd）。
 		bool ClearSpanFromColumns(const std::vector<std::string>& layers,
 								  const VWTransformMatrix& toWorld, double startX, double endX,
-								  double& outStart, double& outEnd)
+								  double& outStart, double& outEnd, ColumnSearch& search)
 		{
 			bool haveStart = false;
 			bool haveEnd = false;
@@ -181,18 +265,26 @@ namespace HomeskzIfcImport::draw
 				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
 				if (layer == nil)
 					continue; // その階の柱レイヤが生成されていない
+				++search.layers;
 
 				for (MCObjectHandle h = gSDK->FirstMemberObj(layer); h != nil;
 					 h = gSDK->NextObject(h))
 				{
 					if (draw::StructuralUseOf(h) != core::kStructuralUseColumn)
 						continue; // 柱（構造用途 4）だけを見る（小屋束・梁は取らない）
+					++search.columns;
 
 					const ColumnRange range = LocalRangeOf(h, toWorld);
+					search.minOffAxis = std::min(search.minOffAxis, std::abs(range.offAxis));
 					if (std::abs(range.offAxis) > kColumnOffAxisTol)
+					{
+						++search.offAxis;
 						continue; // 別の通りの柱
+					}
 
 					const double centre = (range.loX + range.hiX) / 2.0;
+					search.nearStart = std::min(search.nearStart, std::abs(centre - startX));
+					search.nearEnd = std::min(search.nearEnd, std::abs(centre - endX));
 					if (const double toStart = std::abs(centre - startX); toStart < bestStart)
 					{
 						bestStart = toStart;
@@ -352,24 +444,37 @@ namespace HomeskzIfcImport::draw
 				core::trace::log("shearwall: PIO のパラメータ一覧を読めない");
 			}
 		}
-	} // namespace
 
-	// -------------------------------------------------------------------
-	EObjectEvent recalculateShearWall(MCObjectHandle object)
-	{
-		// リセット以外の経路で空のまま呼ばれても落とさないよう nil を見ておく。
-		if (object == nil)
-			return kObjectEventNoErr;
-
-		try
+		// 柱を探した経過を 1 行にする（診断ログ用。見つからなかったときだけ出す）。
+		std::string DescribeSearch(const ColumnSearch& search, std::size_t layerCount)
 		{
-			const VWParametricObj self(object);
-			TraceParameters(self);
+			const auto distance = [](double value) {
+				return value == std::numeric_limits<double>::max() ? std::string("—")
+																   : Number(value);
+			};
+			return "対象レイヤ " + std::to_string(search.layers) + "/" +
+				   std::to_string(layerCount) + " 枚・柱 " + std::to_string(search.columns) +
+				   " 本（別の通り " + std::to_string(search.offAxis) + " 本・離れの最小 " +
+				   distance(search.minOffAxis) + "）・始端に最も近い柱芯 " +
+				   distance(search.nearStart) + "・終端 " + distance(search.nearEnd);
+		}
 
-			// 両端（柱芯）をローカルへ落とす。線分 PIO のローカル X が壁の向き、
-			// +Y が表側になる（ヘッダ「座標系」）。
-			VWTransformMatrix toWorld;
-			self.GetObjectToWorldTransform(toWorld);
+		// 軸組内法をどう決めたか。recalculateShearWall（描く）と probeShearWall（dev の
+		// 測り直し。描かない）が**同じ決め方**を通るよう 1 つにまとめる——別々に書くと、
+		// 測り直しが描いたものと違う経路を見て「再現しない」と読み違える。
+		struct ClearSpan
+		{
+			bool ok = false;		  // 内法が決まった（false なら描かない）
+			bool fromColumns = false; // 柱から引けた（false なら控え）
+			double start = 0.0;		  // 内法の始まり（ローカル x）
+			double end = 0.0;		  // 内法の終わり（ローカル x）
+			std::string axis;		  // 軸の取り方（診断ログ用）
+			std::string search; // 柱が見つからなかった経過（診断ログ用。見つかれば空）
+		};
+
+		ClearSpan ResolveClearSpan(const VWParametricObj& self, const VWTransformMatrix& toWorld)
+		{
+			ClearSpan result;
 
 			// ★**両端が取れないことを想定する。** 線分として置けていれば
 			// GetLinearObjectPos が 2 点を返すが、1 点のオブジェクトとして置かれていれば
@@ -390,14 +495,13 @@ namespace HomeskzIfcImport::draw
 				startX = localStart.x;
 				endX = localEnd.x;
 				haveAxis = (endX - startX) >= core::kPointEps;
-				core::trace::log("  shearwall: 線分 world=[(" + Number(worldStart.x) + ", " +
-								 Number(worldStart.y) + "), (" + Number(worldEnd.x) + ", " +
-								 Number(worldEnd.y) + ")] local x=[" + Number(startX) + ", " +
-								 Number(endX) + "]");
+				result.axis = "線分 world=[(" + Number(worldStart.x) + ", " + Number(worldStart.y) +
+							  "), (" + Number(worldEnd.x) + ", " + Number(worldEnd.y) +
+							  ")] local x=[" + Number(startX) + ", " + Number(endX) + "]";
 			}
 			catch (...)
 			{
-				core::trace::log("  shearwall: 線分の両端を読めない（1 点として置かれている）");
+				result.axis = "線分の両端を読めない（1 点として置かれている）";
 			}
 
 			const double fallbackSpan = ParamReal(self, kParamShearClearSpan);
@@ -405,38 +509,73 @@ namespace HomeskzIfcImport::draw
 			{
 				if (fallbackSpan <= 0.0)
 				{
-					core::trace::log("  shearwall: 軸も控えの内法も無いので描かない");
-					return kObjectEventNoErr;
+					result.axis += "・軸も控えの内法も無い";
+					return result;
 				}
 				startX = 0.0;
 				endX = fallbackSpan;
-				core::trace::log("  shearwall: 軸を控えの内法から組み直す x=[0, " + Number(endX) +
-								 "]");
+				result.axis += "・軸を控えの内法から組み直す x=[0, " + Number(endX) + "]";
 			}
 
 			// 軸組内法。**実物の柱から引くのが本筋**で、見つからないときだけ控えを使う。
-			double clearStart = 0.0;
-			double clearEnd = 0.0;
-			const std::string targets = draw::PioParamString(self, kParamShearTargetLayers);
-			const bool fromColumns = ClearSpanFromColumns(SplitLayers(targets), toWorld, startX,
-														  endX, clearStart, clearEnd);
-			if (!fromColumns)
+			const std::vector<std::string> layers =
+				SplitLayers(draw::PioParamString(self, kParamShearTargetLayers));
+			ColumnSearch search;
+			result.fromColumns = ClearSpanFromColumns(layers, toWorld, startX, endX, result.start,
+													  result.end, search);
+			if (!result.fromColumns)
 			{
+				result.search = DescribeSearch(search, layers.size());
 				if (fallbackSpan <= 0.0)
-				{
-					core::trace::log("  shearwall: 柱も控えの内法も無いので描かない");
-					return kObjectEventNoErr;
-				}
+					return result;
 				const double centre = (startX + endX) / 2.0;
-				clearStart = centre - (fallbackSpan / 2.0);
-				clearEnd = centre + (fallbackSpan / 2.0);
+				result.start = centre - (fallbackSpan / 2.0);
+				result.end = centre + (fallbackSpan / 2.0);
 			}
+			result.ok = result.end > result.start;
+			return result;
+		}
 
-			const double span = clearEnd - clearStart;
-			if (span <= 0.0)
+		// 内法の決まり方を 1 行にする（診断ログ用）。
+		std::string DescribeClearSpan(const ClearSpan& span)
+		{
+			std::string text = std::string(span.fromColumns ? "柱から" : "控え") + " x=[" +
+							   Number(span.start) + ", " + Number(span.end) + "]";
+			if (!span.search.empty())
+				text += "（柱が見つからない: " + span.search + "）";
+			return text;
+		}
+	} // namespace
+
+	// -------------------------------------------------------------------
+	EObjectEvent recalculateShearWall(MCObjectHandle object)
+	{
+		// リセット以外の経路で空のまま呼ばれても落とさないよう nil を見ておく。
+		if (object == nil)
+			return kObjectEventNoErr;
+
+		try
+		{
+			const VWParametricObj self(object);
+			TraceParameters(self);
+
+			// 両端（柱芯）をローカルへ落とす。線分 PIO のローカル X が壁の向き、
+			// +Y が表側になる（ヘッダ「座標系」）。
+			VWTransformMatrix toWorld;
+			self.GetObjectToWorldTransform(toWorld);
+
+			const ClearSpan resolved = ResolveClearSpan(self, toWorld);
+			core::trace::log("  shearwall: " + resolved.axis);
+			if (!resolved.ok)
+			{
+				core::trace::log(
+					"  shearwall: 内法が決まらないので描かない" +
+					(resolved.search.empty() ? std::string() : "（" + resolved.search + "）"));
 				return kObjectEventNoErr;
-			core::trace::log(std::string("  shearwall: 内法 ") + (fromColumns ? "柱から" : "控え") +
-							 " x=[" + Number(clearStart) + ", " + Number(clearEnd) + "]");
+			}
+			const double clearStart = resolved.start;
+			const double clearEnd = resolved.end;
+			core::trace::log("  shearwall: 内法 " + DescribeClearSpan(resolved));
 
 			// 記号を壁芯からどれだけ離すか（**図面 mm**）。記号そのものの大きさは
 			// シンボル定義が持つので、ここで扱うのは置き場所だけ。
@@ -535,4 +674,43 @@ namespace HomeskzIfcImport::draw
 		}
 		return kObjectEventNoErr;
 	}
+
+#if VW_DRAW_VERIFY
+	ShearWallProbe probeShearWall(MCObjectHandle object)
+	{
+		ShearWallProbe probe;
+		if (object == nil)
+		{
+			probe.text = "ハンドルが無い";
+			return probe;
+		}
+		try
+		{
+			const VWParametricObj self(object);
+			VWTransformMatrix toWorld;
+			self.GetObjectToWorldTransform(toWorld);
+			const ClearSpan resolved = ResolveClearSpan(self, toWorld);
+			if (!resolved.ok)
+				probe.kind = ShearWallProbe::Kind::Undecided;
+			else if (resolved.fromColumns)
+				probe.kind = ShearWallProbe::Kind::FromColumns;
+			else
+				probe.kind = ShearWallProbe::Kind::Fallback;
+
+			std::string text = resolved.ok ? DescribeClearSpan(resolved) : "内法が決まらない";
+			if (!resolved.ok && !resolved.search.empty())
+				text += "（" + resolved.search + "）";
+			const VWPoint2D origin = toWorld.PointTransform(VWPoint2D(0.0, 0.0));
+			const VWPoint2D along = toWorld.PointTransform(VWPoint2D(1.0, 0.0));
+			probe.text = text + "・原点 world=(" + Number(origin.x) + ", " + Number(origin.y) +
+						 ")・向き (" + Number(along.x - origin.x) + ", " +
+						 Number(along.y - origin.y) + ")・" + resolved.axis;
+		}
+		catch (...)
+		{
+			probe.text = "読めない（パラメトリックでない）";
+		}
+		return probe;
+	}
+#endif
 } // namespace HomeskzIfcImport::draw

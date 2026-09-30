@@ -10,6 +10,7 @@
 
 #include "parse/Dimension.h"
 #include "core/Document.h"
+#include "parse/Section.h"
 #include "parse/Tag.h"
 
 #include <algorithm>
@@ -558,19 +559,28 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 切断面に乗る柱・横架材の、注釈空間の横の範囲。どちらも無ければ false。
+		//
+		// withCrossings なら**切断面を横切る横架材の切り口**も範囲へ入れる（材幅の半分ずつ
+		// 広げる）。直交する横架材は断面に切り口として描かれ、通りに沿う材より外に出ることが
+		// ある（片側だけ跳ね出した架構など）。レベル記号と高さの列はこの範囲の左端から外へ
+		// 出すので、数えないと記号と寸法が切り口へ食い込む。**範囲を決めるのは切り口の有無
+		// だけ**で、切り口しか無い断面（柱も沿う材も無い）には寸法を作らない——そこは従来
+		// どおり（記号を置く根拠になる架構が無い）。柱の位置の列（下の横の列）が拾う通り芯の
+		// 範囲は変えない（押さえるのは柱・束の位置で、切り口ではない）。
 		bool sectionAlongRange(const core::Document& document, const core::SectionCommand& section,
-							   double& low, double& high)
+							   double& low, double& high, bool withCrossings)
 		{
 			const double origin = core::sectionAlongOrigin(section);
 			bool any = false;
-			const auto take = [&](const core::Vec2& plan)
+			const auto takeRange = [&](const core::Vec2& plan, double halfWidth)
 			{
 				const double along =
 					core::sectionAnnotationPoint(plan, 0.0, section.direction, origin).x;
-				low = any ? std::min(low, along) : along;
-				high = any ? std::max(high, along) : along;
+				low = any ? std::min(low, along - halfWidth) : along - halfWidth;
+				high = any ? std::max(high, along + halfWidth) : along + halfWidth;
 				any = true;
 			};
+			const auto take = [&](const core::Vec2& plan) { takeRange(plan, 0.0); };
 			for (const core::ColumnCommand& column : document.columns)
 			{
 				if (columnOnCutPlane(column, section))
@@ -583,7 +593,15 @@ namespace HomeskzIfcImport::parse
 				take(member.start);
 				take(member.end);
 			}
-			return any;
+			if (!any || !withCrossings)
+				return any;
+			for (const core::MemberCommand& member : document.members)
+			{
+				core::Vec2 crossing;
+				if (memberCrossesCutPlane(member, section, crossing))
+					takeRange(crossing, member.width / 2.0);
+			}
+			return true;
 		}
 	} // namespace
 
@@ -907,10 +925,15 @@ namespace HomeskzIfcImport::parse
 	buildSectionDimensionCommands(const core::Document& document,
 								  const core::SectionCommand& section)
 	{
+		// low / high は柱・沿う材の範囲（柱の位置の列が拾う通り芯を絞る）、left は切り口も
+		// 含めた左端（高さの列の根元。レベル記号の x と揃える）。
 		double low = 0.0;
 		double high = 0.0;
-		if (!sectionAlongRange(document, section, low, high))
+		if (!sectionAlongRange(document, section, low, high, false))
 			return {};
+		double left = low;
+		double right = high;
+		sectionAlongRange(document, section, left, right, true);
 		double bottom = 0.0;
 		double top = 0.0;
 		if (!core::sectionHeightRange(document, bottom, top))
@@ -944,18 +967,63 @@ namespace HomeskzIfcImport::parse
 				grid.push_back(a);
 		}
 		grid = mergeStops(std::move(grid));
+		// その面の**最外周**も押さえる（利用者の指定）。柱・沿う材より外に横架材の切り口が
+		// あれば、左右それぞれ最も外の切り口の芯を測点に足す（又は通りなら 1通り〜5通り）。
+		// 間に並ぶ切り口・通り芯は足さない（押さえるのは最外周だけ）。切り口の近く
+		// （kClusterTol 以内）に通り芯があれば、寸法の数字が通り芯の間隔になるよう通り芯の
+		// 値を採る。
+		std::vector<double> gridAll;
+		for (const double value : gridStops(document.grids, crossing))
+			gridAll.push_back(value - origin);
+		const auto snapToGrid = [&gridAll](double value)
+		{
+			for (const double g : gridAll)
+			{
+				if (std::abs(g - value) <= kClusterTol)
+					return g;
+			}
+			return value;
+		};
+		bool anyCrossing = false;
+		double outerLow = 0.0;
+		double outerHigh = 0.0;
+		for (const core::MemberCommand& member : document.members)
+		{
+			core::Vec2 point;
+			if (!memberCrossesCutPlane(member, section, point))
+				continue;
+			const double a = along(point);
+			outerLow = anyCrossing ? std::min(outerLow, a) : a;
+			outerHigh = anyCrossing ? std::max(outerHigh, a) : a;
+			anyCrossing = true;
+		}
+		if (anyCrossing && outerLow < low - kDimensionMergeTol)
+			columns.push_back(snapToGrid(outerLow));
+		if (anyCrossing && outerHigh > high + kDimensionMergeTol)
+			columns.push_back(snapToGrid(outerHigh));
 		const std::vector<double> detail = unionStops(grid, columns);
 		if (detail.size() >= 2)
 			out.push_back(makeChain(DimensionAxis::Horizontal, detail, bottom, -1, 0));
 
 		// 縦: GL・FL・軒高と、そこからの標準の横架材天端 → GL・FL・軒高の間隔。図の左に出す。
 		for (DimensionChainCommand& chain :
-			 sectionHeightChains(sectionHeights(document.stories), low))
+			 sectionHeightChains(sectionHeights(document.stories), left))
 			out.push_back(std::move(chain));
 
 		// 標準の横架材天端と違う高さの横架材: 標準の天端からその材の天端までを、材の中央で
 		// 押さえる。対象は横架材レベル（横架材天端・軒高）に置かれた水平な材だけ——母屋・
 		// 登り梁は高さがもともと材ごとに違う（標準の天端という考えが無い）。
+		// 同じ高さの材が並ぶと材の数だけ同じ寸法が並ぶので、測る区間（標準の天端〜材の天端）
+		// が同じ材は 1 本にまとめ、そのうち最も長い材の中央に置く（まとめた材どうしが離れて
+		// いても、置いた位置の下には必ずその高さの材がある）。
+		struct OffStandard
+		{
+			double low = 0.0;
+			double high = 0.0;
+			double length = 0.0;
+			double middle = 0.0;
+		};
+		std::vector<OffStandard> offStandards;
 		const std::map<std::string, LayerLevel> levels = layerLevels(document.stories);
 		for (const core::MemberCommand& member : document.members)
 		{
@@ -971,10 +1039,40 @@ namespace HomeskzIfcImport::parse
 			const double standard = level->second.z;
 			if (std::abs(memberTop - standard) <= kDimensionMergeTol)
 				continue;
-			const double middle = (along(member.start) + along(member.end)) / 2.0;
-			out.push_back(makeChain(DimensionAxis::Vertical,
-									{std::min(memberTop, standard), std::max(memberTop, standard)},
-									middle, 1, 0));
+			const double a = along(member.start);
+			const double b = along(member.end);
+			offStandards.push_back(OffStandard{std::min(memberTop, standard),
+											   std::max(memberTop, standard), std::abs(b - a),
+											   (a + b) / 2.0});
+		}
+		// 区間 → 長い順 → 位置の順に並べ、区間ごとの先頭（最も長い材）だけを残す
+		// （入力の並びに依らない）。
+		std::ranges::sort(offStandards,
+						  [](const OffStandard& p, const OffStandard& q)
+						  {
+							  if (p.low != q.low)
+								  return p.low < q.low;
+							  if (p.high != q.high)
+								  return p.high < q.high;
+							  if (p.length != q.length)
+								  return p.length > q.length;
+							  return p.middle < q.middle;
+						  });
+		std::vector<OffStandard> kept;
+		for (const OffStandard& candidate : offStandards)
+		{
+			const bool duplicate = std::ranges::any_of(
+				kept,
+				[&candidate](const OffStandard& k)
+				{
+					return std::abs(k.low - candidate.low) <= kDimensionMergeTol &&
+						   std::abs(k.high - candidate.high) <= kDimensionMergeTol;
+				});
+			if (duplicate)
+				continue;
+			kept.push_back(candidate);
+			out.push_back(makeChain(DimensionAxis::Vertical, {candidate.low, candidate.high},
+									candidate.middle, 1, 0));
 		}
 		return out;
 	}
@@ -982,9 +1080,10 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::LevelMarkCommand> buildSectionLevelMarks(const core::Document& document,
 															   const core::SectionCommand& section)
 	{
+		// 切り口も含めた範囲（高さの列の根元と同じ。buildSectionDimensionCommands）。
 		double low = 0.0;
 		double high = 0.0;
-		if (!sectionAlongRange(document, section, low, high))
+		if (!sectionAlongRange(document, section, low, high, true))
 			return {};
 		const SectionHeights heights = sectionHeights(document.stories);
 		// 左の高さの列の最も外の段（列が無ければ -1）。記号の名前をこれより外へ出す。
