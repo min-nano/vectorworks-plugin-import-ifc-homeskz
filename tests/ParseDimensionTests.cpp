@@ -329,19 +329,21 @@ TEST(FoundationChainsMeasureTeeJunctionsAtTheCore)
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 910.0, 1820.0}, -75.0, -1, 0));
 }
 
-TEST(FoundationChainsSplitAtGapsBetweenAnchoredRuns)
+TEST(FoundationChainsSplitWhereAWallCrossesTheGap)
 {
-	// 外周 0〜1820 の矩形の中に、y=910 の立上りが 2 本（西の立上りに取り合う 0〜500 と、
-	// 東の立上りに取り合う 1320〜1820）。間の 820 は測らない。y=1365 の 700〜1000 は
-	// 何とも取り合わないので、西の一続き（0〜400）とつないで間の 300 で位置を押さえる。
+	// 外周 0〜1820 の矩形の中に、南北の立上り x=910 が通り、y=910 の立上りが 2 本（西の
+	// 立上りに取り合う 0〜500 と、東の立上りに取り合う 1320〜1820）。間を x=910 が横切るので
+	// 割る（間の 820 は測らない）。y=1365 の 1100〜1300 は何とも取り合わないので、途切れを
+	// 横切る立上りがあっても西の一続き（0〜400）とつないで間の 700 で位置を押さえる。
 	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{1895.0, 0.0}),
 										 makeWall(Vec2{-75.0, 1820.0}, Vec2{1895.0, 1820.0}),
 										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 1895.0}),
 										 makeWall(Vec2{1820.0, -75.0}, Vec2{1820.0, 1895.0}),
+										 makeWall(Vec2{910.0, 75.0}, Vec2{910.0, 1745.0}),
 										 makeWall(Vec2{75.0, 910.0}, Vec2{500.0, 910.0}),
 										 makeWall(Vec2{1320.0, 910.0}, Vec2{1745.0, 910.0}),
 										 makeWall(Vec2{75.0, 1365.0}, Vec2{400.0, 1365.0}),
-										 makeWall(Vec2{700.0, 1365.0}, Vec2{1000.0, 1365.0})};
+										 makeWall(Vec2{1100.0, 1365.0}, Vec2{1300.0, 1365.0})};
 	const std::vector<DimensionChainCommand> chains = parse::foundationDimensionChains(
 		walls, {}, smallGrid(), Vec2{-75.0, -75.0}, Vec2{1895.0, 1895.0});
 
@@ -349,7 +351,22 @@ TEST(FoundationChainsSplitAtGapsBetweenAnchoredRuns)
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 500.0}, 910.0, 1, 0));
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {1320.0, 1820.0}, 910.0, 1, 0));
 	CHECK(!hasChain(chains, DimensionAxis::Horizontal, {0.0, 500.0, 1320.0, 1820.0}, 910.0, 1, 0));
-	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 400.0, 700.0, 1000.0}, 1365.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 400.0, 1100.0, 1300.0}, 1365.0, 1, 0));
+}
+
+TEST(FoundationChainsKeepOpeningsInTheChain)
+{
+	// 上と同じ矩形で x=910 の立上りが無い。y=910 の途切れ（500〜1320）を横切る立上りが
+	// 無いので開口とみなし、開口の幅（820）も押さえる。
+	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{1895.0, 0.0}),
+										 makeWall(Vec2{-75.0, 1820.0}, Vec2{1895.0, 1820.0}),
+										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 1895.0}),
+										 makeWall(Vec2{1820.0, -75.0}, Vec2{1820.0, 1895.0}),
+										 makeWall(Vec2{75.0, 910.0}, Vec2{500.0, 910.0}),
+										 makeWall(Vec2{1320.0, 910.0}, Vec2{1745.0, 910.0})};
+	const std::vector<DimensionChainCommand> chains = parse::foundationDimensionChains(
+		walls, {}, smallGrid(), Vec2{-75.0, -75.0}, Vec2{1895.0, 1895.0});
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 500.0, 1320.0, 1820.0}, 910.0, 1, 0));
 }
 
 TEST(FoundationChainsPutSteppedExteriorWallsOutside)
@@ -394,15 +411,42 @@ TEST(FoundationPerimeterCarriesOnlyWhatMeetsThePerimeter)
 	const std::vector<DimensionChainCommand> chains = parse::foundationDimensionChains(
 		walls, bolts, smallGrid(), Vec2{-75.0, -75.0}, Vec2{1895.0, 1895.0});
 
-	CHECK(chains.size() >= 4);
-	if (chains.size() < 4)
+	CHECK(chains.size() >= 3);
+	if (chains.size() < 3)
 		return;
 	// 上: 芯の列（アンカーボルトを除く）→ 全長。
 	CHECK(isChain(chains[0], DimensionAxis::Horizontal, {0.0, 910.0, 1820.0}, 1895.0, 1, 1));
 	CHECK(isChain(chains[1], DimensionAxis::Horizontal, {0.0, 1820.0}, 1895.0, 1, 2));
-	// 左: 芯の列（y=600 は入らない）。右: 全長。
+	// 左: 芯の列（y=600 は入らない）。
 	CHECK(isChain(chains[2], DimensionAxis::Vertical, {0.0, 1820.0}, -75.0, -1, 1));
-	CHECK(isChain(chains[3], DimensionAxis::Vertical, {0.0, 1820.0}, 1895.0, 1, 1));
+	// 下・右は 1 段目（隅から隅）と同じなので芯の列も全長も重ねない。
+	CHECK(!hasChain(chains, DimensionAxis::Horizontal, {0.0, 1820.0}, -75.0, -1, 1));
+	CHECK(!hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0}, 1895.0, 1, 1));
+}
+
+TEST(FoundationPerimeterHasCoresOnEverySide)
+{
+	// 下が段違いの外周（西は y=0、東は y=910）で、y=0 に内部の立上り x=455 が、東の外周
+	// x=1820 に内部の立上り y=1365 が取り合う。下の 2 段目は 0 / 455 / 910 / 1820、
+	// 右の 2 段目は 910 / 1365 / 1820 で、右の全長（0〜1820）はその外。
+	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{985.0, 0.0}),
+										 makeWall(Vec2{835.0, 910.0}, Vec2{1895.0, 910.0}),
+										 makeWall(Vec2{-75.0, 1820.0}, Vec2{1895.0, 1820.0}),
+										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 1895.0}),
+										 makeWall(Vec2{910.0, -75.0}, Vec2{910.0, 985.0}),
+										 makeWall(Vec2{1820.0, 835.0}, Vec2{1820.0, 1895.0}),
+										 makeWall(Vec2{455.0, 75.0}, Vec2{455.0, 600.0}),
+										 makeWall(Vec2{1200.0, 1365.0}, Vec2{1745.0, 1365.0})};
+	const std::vector<SymbolCommand> bolts{makeBolt(Vec2{200.0, 0.0}),
+										   makeBolt(Vec2{1820.0, 1100.0})};
+	const std::vector<DimensionChainCommand> chains = parse::foundationDimensionChains(
+		walls, bolts, smallGrid(), Vec2{-75.0, -75.0}, Vec2{1895.0, 1895.0});
+
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 455.0, 910.0, 1820.0}, -75.0, -1, 1));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 910.0, 1365.0, 1820.0}, 1895.0, 1, 1));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0}, 1895.0, 1, 2));
+	// 下に全長は置かない。
+	CHECK(!hasChain(chains, DimensionAxis::Horizontal, {0.0, 1820.0}, -75.0, -1, 2));
 }
 
 TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)

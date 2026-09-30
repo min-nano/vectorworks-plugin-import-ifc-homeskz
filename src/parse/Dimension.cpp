@@ -275,10 +275,35 @@ namespace HomeskzIfcImport::parse
 			return out;
 		}
 
+		// line の low〜high（途切れた区間）の中を、直交する立上りが横切っているか。横切って
+		// いれば、途切れの両側は別の部屋の立上りで、間は開口ではない。
+		bool crossedBetween(const WallLine& line, const std::vector<WallLine>& others, double low,
+							double high)
+		{
+			return std::ranges::any_of(
+				others,
+				[&](const WallLine& other)
+				{
+					if (other.coord <= low + other.halfThickness + kDimensionMergeTol ||
+						other.coord >= high - other.halfThickness - kDimensionMergeTol)
+						return false;
+					return std::ranges::any_of(other.spans,
+											   [&line](const std::pair<double, double>& span)
+											   {
+												   return span.first - kDimensionMergeTol <=
+															  line.coord + line.halfThickness &&
+														  span.second + kDimensionMergeTol >=
+															  line.coord - line.halfThickness;
+											   });
+				});
+		}
+
 		// 通り 1 本を、区間が途切れるところで「一続きの立上り」ごとに割る（ご要望: 離れた
-		// 立上りの間を寸法でまたがない。y3 通りの 7220 のように、何も無い区間を測っても意味が
-		// 無い）。ただし直交する立上りと 1 つも取り合わない一続き（位置がどこからも決まらない）
-		// は、近いほうの隣と 1 本にまとめたまま（間の寸法がその位置を押さえる）。
+		// 立上りの間を寸法でまたがない。y3 通りの 7220 のように、別の立上りを横切って何も
+		// 無い区間を測っても意味が無い）。割るのは**途切れの中を直交する立上りが横切るとき
+		// だけ**——横切らない途切れは開口（玄関・人通口など）で、その幅は押さえる（ご要望）。
+		// また直交する立上りと 1 つも取り合わない一続き（位置がどこからも決まらない）は、
+		// 近いほうの隣と 1 本にまとめたまま（間の寸法がその位置を押さえる）。
 		std::vector<WallLine> splitIntoRuns(const std::vector<WallLine>& lines,
 											const std::vector<WallLine>& others)
 		{
@@ -289,7 +314,8 @@ namespace HomeskzIfcImport::parse
 				double reach = 0.0;
 				for (const std::pair<double, double>& span : line.spans)
 				{
-					if (runs.empty() || span.first > reach + kDimensionMergeTol)
+					if (runs.empty() || (span.first > reach + kDimensionMergeTol &&
+										 crossedBetween(line, others, reach, span.first)))
 					{
 						runs.push_back(WallLine{line.coord, {}, line.halfThickness});
 						reach = span.second;
@@ -585,8 +611,8 @@ namespace HomeskzIfcImport::parse
 		const std::vector<PlacedRun> runs =
 			placeFoundationRuns(eastWestRuns, northSouthRuns, anchorBolts, grids, center);
 
-		// 外周の 2 段目より外: 上・左は外側に面する立上りの「芯の列」（取り合う立上りの芯と
-		// 端。1 段目と同じなら重ねない）、上はその外に全長、右は Y の全長。下には置かない。
+		// 外周の 2 段目より外: 四辺とも外側に面する立上りの「芯の列」（取り合う立上りの芯と
+		// 端。1 段目と同じなら重ねない）、上と右はその外に全長。
 		std::vector<DimensionChainCommand> out;
 		const auto sideStops = [&runs](bool eastWest, int side, bool cores)
 		{
@@ -634,9 +660,8 @@ namespace HomeskzIfcImport::parse
 		};
 		addSide(DimensionAxis::Horizontal, true, 1, max.y, true);
 		addSide(DimensionAxis::Vertical, false, -1, min.x, false);
-		const std::vector<double> overallY = overallOf(false);
-		if (overallY.size() == 2)
-			out.push_back(makeChain(DimensionAxis::Vertical, overallY, max.x, 1, 1));
+		addSide(DimensionAxis::Horizontal, true, -1, min.y, false);
+		addSide(DimensionAxis::Vertical, false, 1, max.x, true);
 
 		// 1 段目: 立上りに沿う列。外側に面するものは図の外形を根元にして外周に並べ、
 		// それ以外はその立上りの芯から図の外側（中心から遠い側）へ出す。
