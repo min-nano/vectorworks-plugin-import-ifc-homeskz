@@ -199,4 +199,7 @@ namespace HomeskzIfcImport::parse
 
 	// formatImportOptions が寸法規格の行に付ける見出し（M31）。
 	inline constexpr const char* kDimensionOptionLabel = "寸法規格: ";
+
+	// formatImportOptions が軸組図から外す通りの行に付ける見出し（M33）。
+	inline constexpr const char* kSkippedSectionsOptionLabel = "軸組図から外す通り: ";
 } // namespace HomeskzIfcImport::parse

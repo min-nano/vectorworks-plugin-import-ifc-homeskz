@@ -144,6 +144,7 @@ src/
     ProgressDialog.{h,cpp}    core::ProgressReporter を VW の進捗ダイアログへ橋渡し
     ResultDialog.{h,cpp}      完了・エラーのダイアログ（短い本文＋折り畳んだ診断ログ欄）
     SettingsDialog.{h,cpp}    取り込み設定ダイアログ（配置するシンボルを名前と絵で選ぶ）
+    SectionPickDialog.{h,cpp} 軸組図にする通りの選択（外した通りは軸組図を描かない。M33）
     Feedback.{h,cpp}          実機フィードバックの往復（取り込みの前に送るか決め、
                               終わったら黙って PR へ投稿。待たないし入れもしない）
     HostServices.{h,cpp}      殻から借りた道具（同梱スクリプトの実行）の置き場所

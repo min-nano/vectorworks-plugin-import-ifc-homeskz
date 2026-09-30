@@ -19,6 +19,8 @@
 #include "TestFramework.h"
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
+#include "core/Progress.h"
 #include "parse/BuildDocument.h"
 #include "parse/Grid.h"
 #include "parse/Loader.h"
@@ -478,6 +480,28 @@ TEST(SectionNumbersSkipASuffixThatIsAlreadyTaken)
 	CHECK_EQ(commands[2].viewport.drawingNumber, "い(3)");
 }
 
+TEST(SkippedSectionsAreDroppedWithoutRenumberingTheRest)
+{
+	// M33 外した通りだけが消え、残る通りの図番・並びは変わらない（外すのは図番を一意に
+	// した後。parse/Section.h 冒頭「外す通り」）。
+	std::vector<core::SectionCommand> commands(4);
+	const char* const kNames[] = {"1", "2", "1", "2"};
+	for (std::size_t i = 0; i < commands.size(); ++i)
+		commands[i].viewport.drawingNumber = kNames[i];
+	parse::uniqueSectionNumbers(commands);
+
+	core::ImportOptions options;
+	options.setSkippedSections({"1", "2(2)"});
+	parse::dropSkippedSections(commands, options);
+	CHECK_EQ(commands.size(), std::size_t(2));
+	CHECK_EQ(commands[0].viewport.drawingNumber, "2");
+	CHECK_EQ(commands[1].viewport.drawingNumber, "1(2)");
+
+	// 外す通りが無ければ何も変えない。
+	parse::dropSkippedSections(commands, core::ImportOptions{});
+	CHECK_EQ(commands.size(), std::size_t(2));
+}
+
 TEST(SectionSheetNumbersContinueAfterThePlanSheets)
 {
 	// 伏図が 1〜7 なら軸組図は 8 から（要件「シートレイヤ番号は伏図に続けて」）。
@@ -572,6 +596,48 @@ TEST(FixtureSectionsCutRealGridLinesAndShowExistingLayers)
 
 	// 命令セット全体が検証を通る（描画フェーズへ渡せる）。
 	CHECK(core::validateDocument(document));
+}
+
+TEST(FixtureSectionCandidatesMatchTheImportAndSkippingDropsOnlyThose)
+{
+	// M33 候補は「外す通りなし」で取り込んだときの軸組図そのもの。外す通りを入れた設定を
+	// 渡しても候補は変わらない（外す通りを無視して解析する）。
+	const std::string path = HomeskzIfcTests::fixturePath("サンプル1 (住木邸新築工事).ifc");
+	const core::Document all = parse::buildDocument(path);
+	CHECK(all.sections.size() >= 3);
+
+	core::ImportOptions options;
+	const std::string first = all.sections.front().viewport.drawingNumber;
+	const std::string last = all.sections.back().viewport.drawingNumber;
+	options.setSkippedSections({first, last});
+
+	const std::vector<SectionCommand> candidates = parse::buildSectionCandidates(path, options);
+	CHECK_EQ(candidates.size(), all.sections.size());
+	for (std::size_t i = 0; i < std::min(candidates.size(), all.sections.size()); ++i)
+		CHECK_EQ(candidates[i].viewport.drawingNumber, all.sections[i].viewport.drawingNumber);
+
+	// 外した 2 本だけが消え、残りは同じ図番・同じ並び。
+	core::NullProgressReporter noProgress;
+	const core::Document skipped = parse::buildDocument(path, noProgress, options);
+	CHECK_EQ(skipped.sections.size() + 2, all.sections.size());
+	// 残りは先頭と末尾を除いた all と同じ図番・同じ並び。
+	std::vector<std::string> expected;
+	for (std::size_t i = 1; i + 1 < all.sections.size(); ++i)
+		expected.push_back(all.sections[i].viewport.drawingNumber);
+	std::vector<std::string> actual;
+	for (const SectionCommand& section : skipped.sections)
+		actual.push_back(section.viewport.drawingNumber);
+	CHECK(actual == expected);
+	CHECK(core::validateDocument(skipped));
+
+	// 全部外せば軸組図は 1 枚も無く、それでも命令セットは検証を通る。
+	std::vector<std::string> everything;
+	for (const SectionCommand& section : all.sections)
+		everything.push_back(section.viewport.drawingNumber);
+	options.setSkippedSections(everything);
+	const core::Document none = parse::buildDocument(path, noProgress, options);
+	CHECK(none.sections.empty());
+	CHECK(core::validateDocument(none));
 }
 
 #endif // HOMESKZ_FIXTURES_DIR

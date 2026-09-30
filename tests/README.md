@@ -86,8 +86,9 @@ SDK と実際の図面が要るためで、代わりに (a) SDK から切り離�
 無 SDK でテストし（`desiredStoryLayerOrder`・耐力壁の筋かいの形 `shearWallBracePolygon` など）、
 (b) 実描画は VectorWorks 実機で目視確認します
 （確認の作法は `docs/DEV-NOTES.md`「実機確認の作法」）。取り込み設定ダイアログ
-（`draw/SettingsDialog`）も同じで、**ダイアログの見え方と操作は実機確認**、そこで決まる値
-（`core::ImportOptions`）と解析への効き方は上の 2 つのテストが無 SDK で押さえます。
+（`draw/SettingsDialog`）と通りの選択（`draw/SectionPickDialog`）も同じで、**ダイアログの
+見え方と操作は実機確認**、そこで決まる値（`core::ImportOptions`）と解析への効き方は上の
+2 つのテストが無 SDK で押さえます（外した通りの扱いは `ParseSectionTests`）。
 
 MCP ブリッジ（`docs/DEV-NOTES.md` M24）も同じ切り分けです。**受け渡しの作法は無 SDK
 （`core/Bridge`）で、道具の中身（図面から何を読むか）は `draw/McpBridge` なのでテストは
