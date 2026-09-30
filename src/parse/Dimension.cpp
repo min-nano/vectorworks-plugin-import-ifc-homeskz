@@ -154,25 +154,124 @@ namespace HomeskzIfcImport::parse
 			return lines;
 		}
 
-		// 通り芯の間の位置を、その値を挟む通り芯へ広げる。立上りに沿う列の両端を
-		// 通り芯で閉じる（端の測点が「どこから測ったか」を読めるようにする）。
-		std::vector<double> gridsAround(const std::vector<double>& grid, double low, double high)
+		// 立上りの通り 1 本の測点（ヘッダ冒頭「基礎伏図は立上りに沿う列も持つ」）。
+		struct WallLineStops
 		{
-			std::vector<double> out;
-			for (const double value : grid)
+			const WallLine* line = nullptr;
+			std::vector<double> cores; // 端（芯で押さえ直したもの）と直交する立上りの芯
+			std::vector<double> all; // cores ＋ その通りに乗るアンカーボルト
+		};
+
+		// 直交する立上りが通りと取り合う位置（その立上りの芯）と、その立上りの厚みの半分。
+		struct Junction
+		{
+			double coord = 0.0;
+			double halfThickness = 0.0;
+		};
+
+		bool inSpans(const std::vector<std::pair<double, double>>& spans, double value,
+					 double margin)
+		{
+			return std::ranges::any_of(
+				spans, [value, margin](const std::pair<double, double>& span)
+				{ return value >= span.first - margin && value <= span.second + margin; });
+		}
+
+		// line に取り合う（突き当たる・交わる・隅で出会う）直交する立上りの芯。直交する立上りの
+		// 区間が line の厚みの中まで届き、かつ line の区間がその立上りの芯まで届くもの。
+		std::vector<Junction> junctionsOf(const WallLine& line, const std::vector<WallLine>& others)
+		{
+			std::vector<Junction> out;
+			for (const WallLine& other : others)
 			{
-				if (value >= low - kDimensionMergeTol && value <= high + kDimensionMergeTol)
-					out.push_back(value);
+				const bool reaches = std::ranges::any_of(
+					other.spans,
+					[&line](const std::pair<double, double>& span)
+					{
+						return span.first - kDimensionMergeTol <= line.coord + line.halfThickness &&
+							   span.second + kDimensionMergeTol >= line.coord - line.halfThickness;
+					});
+				if (reaches && inSpans(line.spans, other.coord, other.halfThickness))
+					out.push_back(Junction{other.coord, other.halfThickness});
 			}
-			// 区間の外側で最も近い通り芯（あれば）も足す。
-			const auto below = std::ranges::find_if(grid.rbegin(), grid.rend(), [low](double v)
-													{ return v < low - kDimensionMergeTol; });
-			if (below != grid.rend())
-				out.push_back(*below);
-			const auto above = std::ranges::find_if(grid, [high](double v)
-													{ return v > high + kDimensionMergeTol; });
-			if (above != grid.end())
-				out.push_back(*above);
+			return out;
+		}
+
+		// 通り 1 本の測点を決める。
+		//   * 直交する立上りと取り合うところは**その立上りの芯**で押さえる（ご要望:
+		//     外周の隅を立上りの外面から測らない）。取り合う立上りの厚みの中で終わる端は
+		//     その芯へ押さえ直す（端そのものは測点にしない）。
+		//   * 何とも取り合わない端（自由端）は端そのもの（立上りの面）で押さえる。
+		//   * 同じ通りの別の立上りへ続く端は切れ目ではないので押さえない。
+		//   * 通り芯は、取り合う立上りの芯などの測点と重なるときだけ値を借りる（重なれば
+		//     寸法の数字が通り芯の間隔ちょうどになる）。**立上りの無い通り芯は測点にしない**
+		//     ——現場に通り芯の墨は無く、そこは距離でしか分からない（ご要望）。
+		WallLineStops lineStops(const WallLine& line, const std::vector<WallLine>& others,
+								const std::vector<core::SymbolCommand>& anchorBolts,
+								const std::vector<double>& grid, bool eastWest)
+		{
+			const std::vector<Junction> junctions = junctionsOf(line, others);
+			std::vector<double> cores;
+			cores.reserve(junctions.size() + (line.spans.size() * 2));
+			for (const Junction& junction : junctions)
+				cores.push_back(junction.coord);
+			for (std::size_t i = 0; i < line.spans.size(); ++i)
+			{
+				for (const double end : {line.spans[i].first, line.spans[i].second})
+				{
+					bool continued = false;
+					for (std::size_t k = 0; k < line.spans.size() && !continued; ++k)
+					{
+						continued = k != i && end >= line.spans[k].first - kDimensionMergeTol &&
+									end <= line.spans[k].second + kDimensionMergeTol;
+					}
+					const bool atJunction =
+						std::ranges::any_of(junctions,
+											[end](const Junction& junction) {
+												return std::abs(end - junction.coord) <=
+													   junction.halfThickness + kDimensionMergeTol;
+											});
+					if (!continued && !atJunction)
+						cores.push_back(end);
+				}
+			}
+
+			// その通りの立上りの上に乗るアンカーボルト（芯からのずれが立上りの厚みの半分以内で、
+			// どれかの区間の中にあるもの）。
+			std::vector<double> points = cores;
+			for (const core::SymbolCommand& bolt : anchorBolts)
+			{
+				const double across = eastWest ? bolt.position.y : bolt.position.x;
+				const double along = eastWest ? bolt.position.x : bolt.position.y;
+				if (std::abs(across - line.coord) > line.halfThickness + kDimensionMergeTol)
+					continue;
+				if (inSpans(line.spans, along, kDimensionMergeTol))
+					points.push_back(along);
+			}
+
+			const auto snapToGrid = [&grid](const std::vector<double>& values)
+			{
+				std::vector<double> onGrid;
+				std::ranges::copy_if(grid, std::back_inserter(onGrid),
+									 [&values](double g) { return nearAny(values, g); });
+				return unionStops(onGrid, values);
+			};
+			return WallLineStops{&line, snapToGrid(cores), snapToGrid(points)};
+		}
+
+		// 東西の通り（eastWest=true）または南北の通りの測点。座標の昇順。
+		std::vector<WallLineStops> wallLineStops(const std::vector<WallLine>& lines,
+												 const std::vector<WallLine>& others,
+												 const std::vector<core::SymbolCommand>& bolts,
+												 const std::vector<core::GridCommand>& grids,
+												 bool eastWest)
+		{
+			const std::vector<double> grid =
+				gridStops(grids, eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical);
+			std::vector<WallLineStops> out;
+			out.reserve(lines.size());
+			for (const WallLine& line : lines)
+				out.push_back(lineStops(line, others, bolts, grid, eastWest));
 			return out;
 		}
 
@@ -359,57 +458,86 @@ namespace HomeskzIfcImport::parse
 								  const std::vector<core::GridCommand>& grids,
 								  const core::Vec2& center)
 	{
+		const std::vector<WallLine> eastWestLines = collectWallLines(walls, true);
+		const std::vector<WallLine> northSouthLines = collectWallLines(walls, false);
 		std::vector<DimensionChainCommand> out;
 		for (const bool eastWest : {true, false})
 		{
-			// 東西の通りは X を測り、南北に走る通り芯と交わる。
+			// 東西の通りは X を測り、南北に走る立上りと取り合う。
 			const DimensionAxis axis =
 				eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
-			const std::vector<double> grid = gridStops(grids, axis);
-			for (const WallLine& line : collectWallLines(walls, eastWest))
+			for (const WallLineStops& stops : wallLineStops(
+					 eastWest ? eastWestLines : northSouthLines,
+					 eastWest ? northSouthLines : eastWestLines, anchorBolts, grids, eastWest))
 			{
-				std::vector<double> points;
-				for (const auto& [a, b] : line.spans)
-				{
-					points.push_back(a);
-					points.push_back(b);
-				}
-				// その通りの立上りの上に乗るアンカーボルト（芯からのずれが立上りの厚みの
-				// 半分以内で、どれかの区間の中にあるもの）。
-				for (const core::SymbolCommand& bolt : anchorBolts)
-				{
-					const double across = eastWest ? bolt.position.y : bolt.position.x;
-					const double along = eastWest ? bolt.position.x : bolt.position.y;
-					if (std::abs(across - line.coord) > line.halfThickness + kDimensionMergeTol)
-						continue;
-					const bool inside =
-						std::ranges::any_of(line.spans,
-											[along](const std::pair<double, double>& span) {
-												return along >= span.first - kDimensionMergeTol &&
-													   along <= span.second + kDimensionMergeTol;
-											});
-					if (inside)
-						points.push_back(along);
-				}
-
-				// 通り芯と重ならない測点が無ければ作らない（通り芯の間隔を繰り返すだけ）。
-				const bool anyOffGrid = std::ranges::any_of(points, [&grid](double value)
-															{ return !nearAny(grid, value); });
-				if (!anyOffGrid)
-					continue;
-
-				const double low = line.spans.front().first;
-				const double high =
-					std::ranges::max(line.spans, {}, &std::pair<double, double>::second).second;
-				std::vector<double> stops = unionStops(gridsAround(grid, low, high), points);
-				if (stops.size() < 2)
+				if (stops.all.size() < 2)
 					continue;
 				// 図の中心から遠い側（＝外側）へ出す。
 				const double middle = eastWest ? center.y : center.x;
-				const int side = line.coord >= middle ? 1 : -1;
-				out.push_back(makeChain(axis, std::move(stops), line.coord, side, 0));
+				const int side = stops.line->coord >= middle ? 1 : -1;
+				out.push_back(makeChain(axis, stops.all, stops.line->coord, side, 0));
 			}
 		}
+		return out;
+	}
+
+	std::vector<core::DimensionChainCommand>
+	foundationPerimeterChains(const std::vector<core::WallCommand>& walls,
+							  const std::vector<core::SymbolCommand>& anchorBolts,
+							  const std::vector<core::GridCommand>& grids, const core::Vec2& min,
+							  const core::Vec2& max)
+	{
+		const std::vector<WallLine> eastWestLines = collectWallLines(walls, true);
+		const std::vector<WallLine> northSouthLines = collectWallLines(walls, false);
+		std::vector<DimensionChainCommand> out;
+		if (eastWestLines.empty() || northSouthLines.empty())
+			return out;
+		// 上＝最も北の東西の通り、左＝最も西の南北の通り（座標の昇順に並んでいる）。
+		const std::vector<WallLineStops> eastWest =
+			wallLineStops(eastWestLines, northSouthLines, anchorBolts, grids, true);
+		const std::vector<WallLineStops> northSouth =
+			wallLineStops(northSouthLines, eastWestLines, anchorBolts, grids, false);
+
+		// 全長は立上りの芯の端から端（L 字などで最も外の通りが建物の全体に渡らなくても
+		// 全体を測る）。
+		const auto overallOf = [](const std::vector<WallLineStops>& lines)
+		{
+			std::vector<double> ends;
+			for (const WallLineStops& stops : lines)
+			{
+				if (!stops.cores.empty())
+				{
+					ends.push_back(stops.cores.front());
+					ends.push_back(stops.cores.back());
+				}
+			}
+			return ends.empty()
+					   ? ends
+					   : std::vector<double>{std::ranges::min(ends), std::ranges::max(ends)};
+		};
+
+		// 芯の列（取り合う立上りの芯と端）。1 段目（立上りに沿う列）と同じなら重ねない。
+		// 全長はその外（内側の列と同じなら出さない）。
+		const auto addSide = [&out](DimensionAxis axis, const WallLineStops& stops,
+									const std::vector<double>& overall, double base, int side,
+									bool withOverall)
+		{
+			int tier = 1;
+			const std::vector<double>* inner = &stops.all;
+			if (stops.cores.size() >= 2 && !sameStops(stops.cores, stops.all))
+			{
+				out.push_back(makeChain(axis, stops.cores, base, side, tier++));
+				inner = &stops.cores;
+			}
+			if (withOverall && overall.size() == 2 && !sameStops(overall, *inner))
+				out.push_back(makeChain(axis, overall, base, side, tier));
+		};
+		addSide(DimensionAxis::Horizontal, eastWest.back(), overallOf(eastWest), max.y, 1, true);
+		addSide(DimensionAxis::Vertical, northSouth.front(), {}, min.x, -1, false);
+		// 右: Y の全長。右の立上りに沿う列（1 段目）の外。
+		const std::vector<double> overallY = overallOf(northSouth);
+		if (overallY.size() == 2)
+			out.push_back(makeChain(DimensionAxis::Vertical, overallY, max.x, 1, 1));
 		return out;
 	}
 
@@ -438,13 +566,14 @@ namespace HomeskzIfcImport::parse
 				elementY.push_back((start.y + end.y) / 2.0);
 		};
 
-		int firstTier = 0;
-		std::vector<DimensionChainCommand> local;
 		switch (sheet.kind)
 		{
 		case core::PlanKind::Foundation:
 		{
-			// 立上りの通り（外周の列）と、立上りに沿う列（アンカーボルト・切れ目）。
+			// 立上りの通りに沿う列（アンカーボルト・切れ目・取り合う立上りの芯）と、外周の
+			// 芯の列・全長。外周の列には外周の立上りに取り合うものしか載せない（内部の
+			// 立上りの位置はその立上りに沿う列が押さえる）ので、外周の部材の位置の列
+			// （perimeterDimensionChains）は使わない。
 			std::vector<core::WallCommand> walls;
 			std::ranges::copy_if(document.walls, std::back_inserter(walls),
 								 [&layers](const core::WallCommand& wall)
@@ -453,13 +582,14 @@ namespace HomeskzIfcImport::parse
 			std::ranges::copy_if(document.anchorBolts, std::back_inserter(bolts),
 								 [&layers](const core::SymbolCommand& bolt)
 								 { return onLayers(layers, bolt.layer); });
-			for (const core::WallCommand& wall : walls)
-				takeMember(wall.start, wall.end);
 			const core::Vec2 center{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
-			local = foundationWallDimensionChains(walls, bolts, document.grids, center);
-			// 外周の立上りに沿う列が 1 段目を占めるので、外周の列は 2 段目から。
-			firstTier = 1;
-			break;
+			std::vector<DimensionChainCommand> out =
+				foundationPerimeterChains(walls, bolts, document.grids, min, max);
+			std::vector<DimensionChainCommand> local =
+				foundationWallDimensionChains(walls, bolts, document.grids, center);
+			out.insert(out.end(), std::make_move_iterator(local.begin()),
+					   std::make_move_iterator(local.end()));
+			return out;
 		}
 		case core::PlanKind::Framing:
 			// 柱（小屋束を含む）と梁。
@@ -492,9 +622,7 @@ namespace HomeskzIfcImport::parse
 
 		std::vector<DimensionChainCommand> out = perimeterDimensionChains(
 			elementX, elementY, gridStops(document.grids, DimensionAxis::Horizontal),
-			gridStops(document.grids, DimensionAxis::Vertical), min, max, firstTier);
-		out.insert(out.end(), std::make_move_iterator(local.begin()),
-				   std::make_move_iterator(local.end()));
+			gridStops(document.grids, DimensionAxis::Vertical), min, max, 0);
 		return out;
 	}
 

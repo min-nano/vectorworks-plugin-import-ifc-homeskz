@@ -9,8 +9,9 @@
 //	  * 測点のまとめ方——昇順・許容以内は 1 点・部材と通り芯が重なれば通り芯の値が残る。
 //	  * 伏図の外周の列——上と左に部材の位置（通り芯を合わせる）、全長は上（1 つ外の段）と右。
 //	    通り芯の間隔だけの列は置かない。通り芯が無くても部材の位置と全長は出る。
-//	  * 基礎伏図の立上りに沿う列——アンカーボルト・立上りの端・横切る通り芯が測点になり、
-//	    通り芯とすべて重なる通りには作らない。列は図の外側へ出す。
+//	  * 基礎伏図の立上りに沿う列——アンカーボルト・自由端・取り合う立上りの芯が測点になる。
+//	    隅・T 字は立上りの芯で押さえ、取り合う立上りの無い通り芯は測点にしない。列は図の外側へ
+//	    出す。外周の列には外周の立上りに取り合う芯だけが載る。
 //	  * 伏図の種類ごとに押さえるもの——床伏図は柱と梁（表示レイヤに載るものだけ）、
 //	    母屋伏図は母屋だけ。
 //	  * 軸組図——柱の位置（通り芯を合わせる。図の下）、GL・FL・軒高と標準の横架材天端（図の左）、
@@ -243,11 +244,9 @@ TEST(PerimeterChainsSkipTheTopOverallWhenItRepeatsTheMembers)
 	CHECK(isChain(chains[2], DimensionAxis::Vertical, {0.0, 1820.0}, 2120.0, 1, 0));
 }
 
-TEST(FoundationWallChainsFollowEachWallLine)
+namespace
 {
-	// Y1 の立上りが X2 と X3 の間で切れている（−100〜1820 と 2500〜3640）。X1 の立上りは
-	// 通り芯の上で始まり通り芯の上で終わる。
-	auto wall = [](Vec2 start, Vec2 end)
+	WallCommand makeWall(Vec2 start, Vec2 end)
 	{
 		WallCommand w;
 		w.layer = "F-立上り";
@@ -256,39 +255,95 @@ TEST(FoundationWallChainsFollowEachWallLine)
 		w.end = end;
 		w.thickness = 150.0;
 		return w;
-	};
-	const std::vector<WallCommand> walls{wall(Vec2{-100.0, 0.0}, Vec2{1820.0, 0.0}),
-										 wall(Vec2{2500.0, 0.0}, Vec2{3640.0, 0.0}),
-										 wall(Vec2{0.0, 0.0}, Vec2{0.0, 2000.0})};
-	auto bolt = [](Vec2 position)
+	}
+
+	SymbolCommand makeBolt(Vec2 position)
 	{
 		SymbolCommand s;
 		s.layer = "F-アンカーボルト";
 		s.symbol = "アンカーボルト_M12";
 		s.position = position;
 		return s;
-	};
+	}
+} // namespace
+
+TEST(FoundationWallChainsFollowEachWallLine)
+{
+	// Y1 の立上りが X2 と X3 の間で切れている（−75〜1820 と 2500〜3640）。X1 の立上りは
+	// Y1 の立上りと隅で取り合い、Y2 の通り芯の上で終わる（取り合う立上りは無い）。
+	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{1820.0, 0.0}),
+										 makeWall(Vec2{2500.0, 0.0}, Vec2{3640.0, 0.0}),
+										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 2000.0})};
 	// 3 本目は芯から 10mm ずれても立上りの上（厚みの半分以内）。4 本目は立上りの外。
-	const std::vector<SymbolCommand> bolts{bolt(Vec2{200.0, 0.0}), bolt(Vec2{1620.0, 0.0}),
-										   bolt(Vec2{3000.0, 10.0}), bolt(Vec2{1000.0, 500.0})};
+	const std::vector<SymbolCommand> bolts{makeBolt(Vec2{200.0, 0.0}), makeBolt(Vec2{1620.0, 0.0}),
+										   makeBolt(Vec2{3000.0, 10.0}),
+										   makeBolt(Vec2{1000.0, 500.0})};
 	const std::vector<GridCommand> grids{
 		makeGrid("X1", Vec2{0.0, -1000.0}, Vec2{0.0, 3000.0}),
 		makeGrid("X2", Vec2{1820.0, -1000.0}, Vec2{1820.0, 3000.0}),
 		makeGrid("X3", Vec2{3640.0, -1000.0}, Vec2{3640.0, 3000.0}),
 		makeGrid("Y1", Vec2{-1000.0, 0.0}, Vec2{4640.0, 0.0}),
-		makeGrid("Y2", Vec2{-1000.0, 2000.0}, Vec2{4640.0, 2000.0}),
+		makeGrid("Y2", Vec2{-1000.0, 1000.0}, Vec2{4640.0, 1000.0}),
 	};
 
 	const std::vector<DimensionChainCommand> chains =
 		parse::foundationWallDimensionChains(walls, bolts, grids, Vec2{1820.0, 1000.0});
 
-	// X1 の立上り（端が通り芯 Y1・Y2 の上）は通り芯の間隔の繰り返しになるので作らない。
-	CHECK(chains.size() == 1);
-	if (chains.size() != 1)
+	CHECK(chains.size() == 2);
+	if (chains.size() != 2)
 		return;
-	// Y1 は図の中心より下なので下（−Y）へ出す。
+	// Y1 は図の中心より下なので下（−Y）へ出す。隅は外面（−75）ではなく X1 の立上りの芯（0）
+	// から測る。切れ目（1820・2500）と自由端（3640）は端そのもの。
 	CHECK(isChain(chains[0], DimensionAxis::Horizontal,
-				  {-100.0, 0.0, 200.0, 1620.0, 1820.0, 2500.0, 3000.0, 3640.0}, 0.0, -1, 0));
+				  {0.0, 200.0, 1620.0, 1820.0, 2500.0, 3000.0, 3640.0}, 0.0, -1, 0));
+	// X1 は Y1 の立上りの芯から自由端（2000）まで。取り合う立上りの無い Y2（1000）は測点に
+	// しない。
+	CHECK(isChain(chains[1], DimensionAxis::Vertical, {0.0, 2000.0}, 0.0, -1, 0));
+}
+
+TEST(FoundationWallChainsMeasureTeeJunctionsAtTheCore)
+{
+	// 外周の立上り（Y1）に内部の立上り（x=910）が T 字で突き当たり（面で終わる）、
+	// 別の立上り（x=1820 で 2 本に割れている）は同じ通りへ続くので切れ目にしない。
+	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{1000.0, 0.0}),
+										 makeWall(Vec2{1000.0, 0.0}, Vec2{1895.0, 0.0}),
+										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 1820.0}),
+										 makeWall(Vec2{910.0, 75.0}, Vec2{910.0, 910.0}),
+										 makeWall(Vec2{1820.0, -75.0}, Vec2{1820.0, 1820.0})};
+	const std::vector<DimensionChainCommand> chains =
+		parse::foundationWallDimensionChains(walls, {}, smallGrid(), Vec2{910.0, 910.0});
+
+	const DimensionChainCommand* y1 = findChain(chains, DimensionAxis::Horizontal, -1, 0);
+	CHECK(y1 != nullptr);
+	if (y1 != nullptr)
+		CHECK(sameValues(y1->stops, {0.0, 910.0, 1820.0}));
+}
+
+TEST(FoundationPerimeterChainsCarryOnlyWhatMeetsThePerimeter)
+{
+	// 外周 0〜1820 の矩形。北の立上りには内部の立上り（x=910）が取り合い、アンカーボルトが
+	// 1 本（x=300）乗る。内部の東西の立上り（y=600）は西の立上りと取り合わない
+	// （x=910 の立上りにだけ取り合う）ので、左の芯の列に載らない。
+	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{1895.0, 0.0}),
+										 makeWall(Vec2{-75.0, 1820.0}, Vec2{1895.0, 1820.0}),
+										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 1895.0}),
+										 makeWall(Vec2{1820.0, -75.0}, Vec2{1820.0, 1895.0}),
+										 makeWall(Vec2{910.0, 600.0}, Vec2{910.0, 1745.0}),
+										 makeWall(Vec2{910.0, 600.0}, Vec2{1400.0, 600.0})};
+	const std::vector<SymbolCommand> bolts{makeBolt(Vec2{300.0, 1820.0}),
+										   makeBolt(Vec2{0.0, 400.0})};
+	const std::vector<DimensionChainCommand> chains = parse::foundationPerimeterChains(
+		walls, bolts, smallGrid(), Vec2{-75.0, -75.0}, Vec2{1895.0, 1895.0});
+
+	CHECK(chains.size() == 4);
+	if (chains.size() != 4)
+		return;
+	// 上: 芯の列（アンカーボルトを除く）→ 全長。
+	CHECK(isChain(chains[0], DimensionAxis::Horizontal, {0.0, 910.0, 1820.0}, 1895.0, 1, 1));
+	CHECK(isChain(chains[1], DimensionAxis::Horizontal, {0.0, 1820.0}, 1895.0, 1, 2));
+	// 左: 芯の列（y=600 は入らない）。右: 全長。
+	CHECK(isChain(chains[2], DimensionAxis::Vertical, {0.0, 1820.0}, -75.0, -1, 1));
+	CHECK(isChain(chains[3], DimensionAxis::Vertical, {0.0, 1820.0}, 1895.0, 1, 1));
 }
 
 TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)
