@@ -11,6 +11,7 @@
 #include "parse/Dimension.h"
 #include "core/Document.h"
 #include "parse/Section.h"
+#include "parse/StructuralClass.h"
 #include "parse/Tag.h"
 
 #include <algorithm>
@@ -997,13 +998,13 @@ namespace HomeskzIfcImport::parse
 
 		// 床伏図・小屋伏図・母屋伏図 1 枚ぶんの寸法の列。segments は直交格子に沿う横架材、
 		// points は柱。crossings（母屋伏図の登り梁の交点）は通りの上にあれば取り合う梁の芯と
-		// 同じく押さえる。pinFloating なら、直交する材と取り合わない通りの芯を外周の列
-		// （南北の通りの X は上、東西の通りの Y は左）へ足し、全長もそこまで延ばす（母屋伏図の
-		// い通り・又ち通りのように、ほかの材とつながらない材の位置を押さえる）。
+		// 同じく押さえる。moya（母屋伏図）なら、直交する材と取り合わない通りの芯を外周の列
+		// （南北の通りの X は上、東西の通りの Y は左）へ足して全長もそこまで延ばし（ほかの材と
+		// つながらない材の位置を押さえる）、下と左の列も全長の端まで延ばす。
 		std::vector<DimensionChainCommand> framingLineChains(
 			const std::vector<LineSegment>& segments, const std::vector<core::Vec2>& points,
 			const std::vector<Crossing>& crossings, const std::vector<core::GridCommand>& grids,
-			const core::Vec2& min, const core::Vec2& max, bool pinFloating)
+			const core::Vec2& min, const core::Vec2& max, bool moya)
 		{
 			const core::Vec2 center{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
 			const RunLayout layout = placeRuns(segments, points, crossings, grids, center);
@@ -1012,9 +1013,9 @@ namespace HomeskzIfcImport::parse
 			WrittenSegments written;
 			// 南北の通りの X（上の列へ）・東西の通りの Y（左の列へ）。
 			const std::vector<double> floatingX =
-				pinFloating ? floatingCoords(runs, false, grids) : std::vector<double>{};
+				moya ? floatingCoords(runs, false, grids) : std::vector<double>{};
 			const std::vector<double> floatingY =
-				pinFloating ? floatingCoords(runs, true, grids) : std::vector<double>{};
+				moya ? floatingCoords(runs, true, grids) : std::vector<double>{};
 
 			// 外周: 辺ごとに、外側に面する通りの柱の列を**1 本につなげて**図の外形から出す
 			// （ご要望: 段違いの外周で列が途切れるのは不自然）。全長を持つ上と右は全長の端まで
@@ -1071,7 +1072,9 @@ namespace HomeskzIfcImport::parse
 				}
 				// 外側に面する通りが無い辺でも、全長を持つ上と右は全長を出す（基礎伏図と同じ。
 				// 通りが全部下／左に面する U 字の架構など）。そのときの列は全長そのもの。
-				if (edge.withOverall)
+				// 母屋伏図（moya）は下と左も、列があれば全長の端まで延ばす（ご要望:
+				// 1 通りの棟木の列に、い通り〜棟木の端・棟木の端〜り通りを出す）。
+				if (edge.withOverall || (moya && rows.row.size() >= 2))
 					rows.row.insert(rows.row.end(), rows.overall.begin(), rows.overall.end());
 				rows.row = mergeStops(std::move(rows.row));
 				if (rows.row.size() < 2)
@@ -1189,13 +1192,17 @@ namespace HomeskzIfcImport::parse
 			if (std::abs(to - from) <= kDimensionAxisTol)
 				return false;
 			const double t = (coord - from) / (to - from);
-			const double reach =
-				(straight.thickness / 2.0 + diagonal.width / 2.0 + kDimensionMergeTol) /
-				std::abs(to - from);
-			if (t < -reach || t > 1.0 + reach)
-				return false;
 			const double alongFrom = eastWest ? diagonal.start.x : diagonal.start.y;
 			const double alongTo = eastWest ? diagonal.end.x : diagonal.end.y;
+			// 芯を延ばしてよいのは、材の端から相手の芯までの、相手の幅の半分を斜めに横切る
+			// 長さ（＋自分の幅の半分）まで。端が相手の側面で止まっていれば届き、浅い角度で
+			// 遠くを通るだけの材（い通りの材の 420 のずれ。round 1 のご指摘）は拾わない。
+			const double length = std::hypot(alongTo - alongFrom, to - from);
+			const double sine = std::abs(to - from) / length;
+			const double beyond = (t < 0.0 ? -t : std::max(0.0, t - 1.0)) * length;
+			if (beyond >
+				(straight.thickness / 2.0 / sine) + (diagonal.width / 2.0) + kDimensionMergeTol)
+				return false;
 			const double along = alongFrom + (t * (alongTo - alongFrom));
 			const double low = std::min(eastWest ? straight.start.x : straight.start.y,
 										eastWest ? straight.end.x : straight.end.y);
@@ -1205,10 +1212,8 @@ namespace HomeskzIfcImport::parse
 			if (along < low - margin || along > high + margin)
 				return false;
 			crossing.point = eastWest ? core::Vec2{along, coord} : core::Vec2{coord, along};
-			// 通りに沿って測った幅: 材の軸が通りとなす角の sin で割る（横切る向きの伸びが
-			// |to − from|、材の長さが length）。
-			const double length = std::hypot(alongTo - alongFrom, to - from);
-			crossing.halfAlong = (diagonal.width / 2.0) * length / std::abs(to - from);
+			// 通りに沿って測った幅: 材の軸が通りとなす角の sin で割る。
+			crossing.halfAlong = (diagonal.width / 2.0) / sine;
 			return true;
 		}
 	} // namespace
@@ -1247,6 +1252,44 @@ namespace HomeskzIfcImport::parse
 			points.push_back(column.position);
 		return framingLineChains(segments, points, crossings, grids, min, max, true);
 	}
+
+	namespace
+	{
+		// 母屋伏図 layers に映る母屋・登り梁と同じ階の軒桁（その階の軒高・横架材天端の
+		// レイヤに置かれた、クラスが軒桁の材）。母屋伏図には映らないが、登り梁は軒桁に
+		// 取り付くので、その交点を押さえるのに要る（ご要望: 5 通り側も 1 通りと同様に）。
+		// 同じレイヤの小屋梁・床梁などは入れない。
+		std::vector<core::MemberCommand> eavesGirders(const core::Document& document,
+													  const std::vector<std::string>& layers)
+		{
+			std::vector<std::string> eavesLayers;
+			for (const core::StoryCommand& story : document.stories)
+			{
+				const bool roofOfThisSheet =
+					std::ranges::any_of(story.levels,
+										[&layers](const core::LevelCommand& level)
+										{
+											return (level.type == core::kLevelMoya ||
+													level.type == core::kLevelNoboribari) &&
+												   onLayers(layers, level.layer);
+										});
+				if (!roofOfThisSheet)
+					continue;
+				for (const core::LevelCommand& level : story.levels)
+				{
+					if (level.type == core::kLevelEaves || level.type == core::kLevelBeamTop)
+						eavesLayers.push_back(level.layer);
+				}
+			}
+			std::vector<core::MemberCommand> out;
+			std::ranges::copy_if(document.members, std::back_inserter(out),
+								 [&eavesLayers](const core::MemberCommand& member) {
+									 return member.drawClass == CLASS_NOKIGETA &&
+											onLayers(eavesLayers, member.layer);
+								 });
+			return out;
+		}
+	} // namespace
 
 	std::vector<core::DimensionChainCommand>
 	buildPlanDimensionCommands(const core::Document& document, const core::SheetCommand& sheet)
@@ -1296,7 +1339,9 @@ namespace HomeskzIfcImport::parse
 			return framingDimensionChains(members, columns, document.grids, min, max);
 		case core::PlanKind::Moya:
 			// 母屋・登り梁を床伏図・小屋伏図と同じく通りに沿って押さえ、斜めの登り梁は交点を
-			// 押さえる（垂木は横架材の命令ではないので入らない）。
+			// 押さえる（垂木は横架材の命令ではないので入らない）。その屋根の軒桁も加える。
+			for (const core::MemberCommand& member : eavesGirders(document, layers))
+				members.push_back(member);
 			return moyaDimensionChains(members, columns, document.grids, min, max);
 		}
 		return {};
