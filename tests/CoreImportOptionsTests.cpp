@@ -178,4 +178,22 @@ TEST(import_options_merge_is_keyed_by_story_and_height)
 	CHECK(options.mergedPlanLevels.empty());
 }
 
+TEST(import_options_merge_list_stays_sorted_without_duplicates)
+{
+	// 二分探索で引くので、どの順に足しても昇順・重複なしに保つ。
+	ImportOptions options;
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}, true);
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6010}, true);
+	CHECK_EQ(options.mergedPlanLevels.size(), std::size_t(3));
+	CHECK((options.mergedPlanLevels[0] == HomeskzIfcImport::core::PlanLevelKey{1, 3531}));
+	CHECK((options.mergedPlanLevels[1] == HomeskzIfcImport::core::PlanLevelKey{2, 6010}));
+	CHECK((options.mergedPlanLevels[2] == HomeskzIfcImport::core::PlanLevelKey{2, 6374}));
+	CHECK(options.mergesWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6010}));
+	// 無いものを外しても何も起きない。
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{3, 1}, false);
+	CHECK_EQ(options.mergedPlanLevels.size(), std::size_t(3));
+}
+
 TEST_MAIN();

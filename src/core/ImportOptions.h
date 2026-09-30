@@ -41,7 +41,7 @@
 #include <array>
 #include <compare>
 #include <cstddef>
-#include <set>
+#include <vector>
 #include <string>
 
 namespace HomeskzIfcImport::core
@@ -146,7 +146,12 @@ namespace HomeskzIfcImport::core
 		// 決めること（ご要望）なので、解析側は高さが 1mm でも違えば別のレベルとし、
 		// ここに挙がったものだけを寄せる（parse/PlanLevel）。階をまたいではまとめない
 		// ——レイヤは階に属するので、別の階の横架材を 1 つのレイヤへは置けない。
-		std::set<PlanLevelKey> mergedPlanLevels;
+		//
+		// **昇順・重複なしの vector で持つ**（setMergeWithPrevious が保つ）。std::set にすると
+		// MSVC ではムーブ構築が例外を投げうる（番兵ノードを確保する）ので、この構造体と
+		// それを持つ構造体（core::FeedbackSession ほか）の暗黙のムーブが clang-tidy の
+		// bugprone-exception-escape に掛かる（tidy-windows で実際に落ちた）。
+		std::vector<PlanLevelKey> mergedPlanLevels;
 
 		ImportOptions();
 

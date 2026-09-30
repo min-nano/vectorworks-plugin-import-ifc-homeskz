@@ -7,6 +7,7 @@
 
 #include "core/ImportOptions.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <string>
@@ -115,14 +116,17 @@ namespace HomeskzIfcImport::core
 
 	bool ImportOptions::mergesWithPrevious(const PlanLevelKey& key) const
 	{
-		return mergedPlanLevels.contains(key);
+		return std::ranges::binary_search(mergedPlanLevels, key);
 	}
 
 	void ImportOptions::setMergeWithPrevious(const PlanLevelKey& key, bool merge)
 	{
-		if (merge)
-			mergedPlanLevels.insert(key);
-		else
-			mergedPlanLevels.erase(key);
+		// 昇順・重複なしを保つ（mergesWithPrevious が二分探索する）。
+		const auto at = std::ranges::lower_bound(mergedPlanLevels, key);
+		const bool present = at != mergedPlanLevels.end() && *at == key;
+		if (merge && !present)
+			mergedPlanLevels.insert(at, key);
+		else if (!merge && present)
+			mergedPlanLevels.erase(at);
 	}
 } // namespace HomeskzIfcImport::core
