@@ -74,13 +74,16 @@ namespace HomeskzIfcImport::draw
 		// **「読めて 0 だった」と「そもそも読めなかった」を区別する。** 前者は正しい 0
 		// （耐力壁の下端は土台天端＝0 が普通）なので 0 を返し、後者だけ fallback へ落とす。
 		// 混同すると、値が 0 の正常なパラメータに既定値が化けて入る。
-		double ParamReal(const VWParametricObj& pio, const char* name, double fallback = 0.0)
+		//
+		// 名前は TXString で受ける。構造材の寸法のように ResolveParamName で解決した名前
+		// （ローカライズ名から引いた内部名）を、std::string へ往復させずにそのまま渡すため。
+		double ParamReal(const VWParametricObj& pio, const TXString& name, double fallback = 0.0)
 		{
 			bool read = false;
 			double value = 0.0;
 			try
 			{
-				value = pio.GetParamReal(TXString(name));
+				value = pio.GetParamReal(name);
 				read = true;
 			}
 			catch (...)
@@ -91,7 +94,15 @@ namespace HomeskzIfcImport::draw
 				return value;
 
 			// 文字列としてなら読めることがある（単位付きの表記など）。読めた数だけ採る。
-			const std::string text = draw::PioParamString(pio, name);
+			std::string text;
+			try
+			{
+				text = pio.GetParamString(name).GetStdString();
+			}
+			catch (...)
+			{
+				text.clear(); // 文字列としても読めない。下の判断へ落とす。
+			}
 			if (!text.empty())
 			{
 				bool parsed = false;
@@ -160,8 +171,13 @@ namespace HomeskzIfcImport::draw
 			try
 			{
 				const VWParametricObj pio(column);
-				breadth = ParamReal(pio, draw::kFieldMajorBreadth);
-				depth = ParamReal(pio, draw::kFieldMajorDepth);
+				// 寸法は ResolveParamName を通して読む（draw/ColumnMarkPio の ColumnSection と
+				// 同じ理由）。日本語環境では universal 名で引くと 0 が返ることがあり、そうなると
+				// 下の外接へ静かに戻って、柱幅の半分ずれる不具合（#161）がぶり返す。
+				breadth = ParamReal(pio, draw::ResolveParamName(pio, draw::kFieldMajorBreadth,
+																draw::kLocalizedBreadth));
+				depth = ParamReal(pio, draw::ResolveParamName(pio, draw::kFieldMajorDepth,
+															  draw::kLocalizedDepth));
 				// 柱の行列は **GetObjectMatrix（柱自身の行列）** で読む。壁側の toWorld
 				// （GetObjectToWorldTransform）と同じ座標系でよいのは、ここへ来る柱が
 				// **対象レイヤの直下の図形だけ**だから（下の ClearSpanFromColumns は
