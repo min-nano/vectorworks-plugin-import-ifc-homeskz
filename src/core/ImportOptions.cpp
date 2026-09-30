@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,7 +26,103 @@ namespace HomeskzIfcImport::core
 		{
 			return static_cast<std::size_t>(role);
 		}
+
+		// 全角の数字・小数点（UTF-8 で EF BC 90〜99 / EF BC 8E）を半角へ読み替える。
+		// それ以外の文字はそのまま残す（後段が数字列でないとして弾く）。
+		std::string toHalfWidthDigits(const std::string& text)
+		{
+			std::string out;
+			out.reserve(text.size());
+			for (std::size_t i = 0; i < text.size(); ++i)
+			{
+				const auto lead = static_cast<unsigned char>(text[i]);
+				if (lead == 0xEF && i + 2 < text.size() &&
+					static_cast<unsigned char>(text[i + 1]) == 0xBC)
+				{
+					const auto tail = static_cast<unsigned char>(text[i + 2]);
+					if (tail >= 0x90 && tail <= 0x99)
+					{
+						out.push_back(static_cast<char>('0' + (tail - 0x90)));
+						i += 2;
+						continue;
+					}
+					if (tail == 0x8E)
+					{
+						out.push_back('.');
+						i += 2;
+						continue;
+					}
+				}
+				out.push_back(text[i]);
+			}
+			return out;
+		}
 	} // namespace
+
+	bool isValidRafterSize(double mm)
+	{
+		return std::isfinite(mm) && mm > 0.0 && mm <= kMaxRafterSize;
+	}
+
+	std::optional<double> parseRafterSize(const std::string& text)
+	{
+		const std::string half = toHalfWidthDigits(text);
+		std::size_t begin = 0;
+		std::size_t end = half.size();
+		while (begin < end && (half[begin] == ' ' || half[begin] == '\t'))
+			++begin;
+		while (end > begin && (half[end - 1] == ' ' || half[end - 1] == '\t'))
+			--end;
+		if (begin == end)
+			return std::nullopt;
+
+		double whole = 0.0;
+		double fraction = 0.0;
+		double scale = 1.0;
+		bool seenDot = false;
+		bool seenDigit = false;
+		for (std::size_t i = begin; i < end; ++i)
+		{
+			const char c = half[i];
+			if (c == '.')
+			{
+				if (seenDot)
+					return std::nullopt; // 小数点は 1 つまで
+				seenDot = true;
+				continue;
+			}
+			if (c < '0' || c > '9')
+				return std::nullopt;
+			seenDigit = true;
+			const auto digit = static_cast<double>(c - '0');
+			if (seenDot)
+			{
+				scale /= 10.0;
+				fraction += digit * scale;
+			}
+			else
+			{
+				whole = (whole * 10.0) + digit;
+			}
+		}
+		if (!seenDigit)
+			return std::nullopt;
+		const double value = whole + fraction;
+		if (!isValidRafterSize(value))
+			return std::nullopt;
+		return value;
+	}
+
+	std::string formatRafterSize(double mm)
+	{
+		// 0.1mm 単位に丸めた整数で組み立てる（浮動小数の既定の書式に頼らない）。
+		const long long tenths = std::llround(mm * 10.0);
+		std::string text = std::to_string(tenths / 10);
+		const long long rest = tenths % 10;
+		if (rest != 0)
+			text += "." + std::to_string(rest < 0 ? -rest : rest);
+		return text;
+	}
 
 	const std::array<SymbolRoleInfo, kSymbolRoleCount>& symbolRoles()
 	{
@@ -152,5 +250,11 @@ namespace HomeskzIfcImport::core
 		std::sort(names.begin(), names.end());
 		names.erase(std::unique(names.begin(), names.end()), names.end());
 		skippedSections = std::move(names);
+	}
+
+	void ImportOptions::setRafterSize(double width, double height)
+	{
+		rafterWidth = isValidRafterSize(width) ? width : kDefaultRafterWidth;
+		rafterHeight = isValidRafterSize(height) ? height : kDefaultRafterHeight;
 	}
 } // namespace HomeskzIfcImport::core

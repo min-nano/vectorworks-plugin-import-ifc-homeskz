@@ -59,7 +59,15 @@
 //	寸法を入れない。**初期値は図面枠と同じく「入れる」**（ご要望）——まだ決めていない
 //	うちは「JIS」があればそれ、無ければ一覧の最初の規格を選んだ状態で開く。
 //
-//	【いちばん下は伏図のまとめ方】寸法規格の下に、**横架材の高さごとに作る伏図**のうち
+//	【その下は垂木の断面】寸法規格の下に、全垂木に一律で使う**垂木の断面（幅×せい、mm）**
+//	を打ち込む欄を 2 つ置く（IFC に垂木の寸法が無いので決め打ちしていた 45×45 を差し替える。
+//	core/ImportOptions.h の rafterWidth / rafterHeight）。選ぶものではなく数を打つので、
+//	シンボルの行の仕組み（チェック・候補・サムネイル）には乗せず、**文字の入力欄
+//	（VWEditTextCtrl。draw/Feedback の PR 番号の欄と同じ作法）を DDX で受ける**。読むのは
+//	core::parseRafterSize（全角の数字も読む）で、読めない・範囲外の値は**前回の値のまま**
+//	取り込み、そのことをログへ残す（Note）。初期値は前回の値（初回は 45×45）。
+//
+//	【いちばん下は伏図のまとめ方】垂木の断面の下に、**横架材の高さごとに作る伏図**のうち
 //	「前のレベルと同じ伏図にまとめる」高さのチェックを 1 つずつ並べる（draw/SettingsDialog.h）。
 //	数は IFC によって変わるので、**イベントマップには載せず DDX だけで受ける**——チェックを
 //	切り替えても他のコントロールを動かす必要が無い（シンボルの行のチェックは選択肢を灰色に
@@ -126,6 +134,13 @@ namespace HomeskzIfcImport::draw
 		// 伏図のまとめ方の見出しと、その下のチェック（冒頭「いちばん下は伏図のまとめ方」）。
 		// シンボルの行（kFirstRowID から kRowStride 刻み）と重ならない所から振る。
 		constexpr TControlID kMergeIntroID = 4;
+		// 垂木の断面の欄（冒頭「その下は垂木の断面」）。見出し・幅・「×」・せいの 4 つ。
+		// シンボルの行（kFirstRowID = 10 から）より手前の空いた番号を使う。
+		constexpr TControlID kRafterLabelID = 5;
+		constexpr TControlID kRafterWidthID = 6;
+		constexpr TControlID kRafterTimesID = 7;
+		constexpr TControlID kRafterHeightID = 8;
+		static_assert(kRafterHeightID < 10, "シンボルの行の ID（kFirstRowID）と重ねないこと");
 		constexpr TControlID kFirstMergeID = 200;
 
 		constexpr TControlID mergeID(std::size_t index)
@@ -158,6 +173,8 @@ namespace HomeskzIfcImport::draw
 		constexpr short kPopupWidthChars = 30;
 		constexpr short kPreviewSizePixels = 56;
 		constexpr short kPreviewMarginPixels = 2;
+		// 垂木の断面の入力欄の幅（標準文字幅）。"1000.5" が収まれば足りる。
+		constexpr short kRafterSizeWidthChars = 8;
 
 		// 【行を 2 列に折る】1 行の高さはサムネイルの高さで決まり、**その大きさは選べない**
 		// （`ThumbnailSizeType` は kStandardSize / kLineTypeSize の 2 つだけで、後者は
@@ -350,8 +367,13 @@ namespace HomeskzIfcImport::draw
 			// まだなら図面枠と寸法規格は「置く／入れる」で開く（下記）。
 			CImportSettingsDialog(const core::ImportOptions& seed, SymbolResources resources,
 								  std::vector<MergeRow> mergeRows, Form form, bool decided)
-				: fIntro(kIntroID), fMergeIntro(kMergeIntroID), fResources(std::move(resources)),
-				  fMergeRows(std::move(mergeRows)), fForm(form)
+				: fIntro(kIntroID), fRafterLabel(kRafterLabelID), fRafterWidth(kRafterWidthID),
+				  fRafterTimes(kRafterTimesID), fRafterHeight(kRafterHeightID),
+				  fMergeIntro(kMergeIntroID), fResources(std::move(resources)),
+				  fMergeRows(std::move(mergeRows)), fForm(form), fSeedRafterWidth(seed.rafterWidth),
+				  fSeedRafterHeight(seed.rafterHeight),
+				  fRafterWidthText(core::formatRafterSize(seed.rafterWidth).c_str()),
+				  fRafterHeightText(core::formatRafterSize(seed.rafterHeight).c_str())
 			{
 				// 伏図のまとめ方は前回の選択（同じ階・同じ高さ）を初期値にする。既定は
 				// まとめない（高さごとに 1 枚。ご要望）。
@@ -447,7 +469,31 @@ namespace HomeskzIfcImport::draw
 				}
 				for (std::size_t k = 0; k < fMergeRows.size(); ++k)
 					options.setMergeWithPrevious(fMergeRows[k].key, fMergeStates[k]);
+				// 垂木の断面。読めない欄は前回の値のまま（冒頭「その下は垂木の断面」）。
+				options.setRafterSize(
+					core::parseRafterSize(Text(fRafterWidthText)).value_or(fSeedRafterWidth),
+					core::parseRafterSize(Text(fRafterHeightText)).value_or(fSeedRafterHeight));
 				return options;
+			}
+
+			// 垂木の断面の欄に読めない値があったか（ログへ出す 1 行ぶん。無ければ空）。
+			// Result と同じく OK で閉じた後に呼ぶ（DDX が欄の文字を写した後）。
+			std::string RafterNote() const
+			{
+				std::string note;
+				const auto check = [&note](const char* what, const TXString& text, double kept)
+				{
+					if (core::parseRafterSize(Text(text)).has_value())
+						return;
+					if (!note.empty())
+						note += " / ";
+					note += std::string("垂木の") + what + "「" + Text(text) +
+							"」を読めませんでした（" + core::formatRafterSize(kept) +
+							" mm のまま取り込みます）";
+				};
+				check("幅", fRafterWidthText, fSeedRafterWidth);
+				check("せい", fRafterHeightText, fSeedRafterHeight);
+				return note;
 			}
 
 		protected:
@@ -467,7 +513,7 @@ namespace HomeskzIfcImport::draw
 						  "取り込めません。"
 						: "取り込む要素にチェックを入れ、置くシンボル（下の 2 行は各シート"
 						  "レイヤへ置く図面枠のスタイルと、伏図・軸組図へ入れる寸法の寸法規格）"
-						  "を選んでください。";
+						  "を選んでください。垂木の断面は全垂木に一律で使います。";
 				if (!fIntro.CreateControl(this, intro))
 				{
 					fNote = "説明文を作れませんでした";
@@ -524,6 +570,8 @@ namespace HomeskzIfcImport::draw
 							this->AddRightControl(&fPopups[row], &fPreviews[row]);
 					}
 				}
+				if (!CreateRafterSize())
+					return false;
 				return CreateMergeRows();
 			}
 
@@ -543,6 +591,10 @@ namespace HomeskzIfcImport::draw
 					}
 					for (std::size_t k = 0; k < fMergeRows.size(); ++k)
 						fMergeChecks[k].SetState(fMergeStates[k]);
+					// 初期値は自分でも入れる（DDX が流し込む前提に寄りかからない。
+					// draw/Feedback の PR 番号の欄と同じ）。
+					fRafterWidth.SetText(fRafterWidthText);
+					fRafterHeight.SetText(fRafterHeightText);
 				}
 				catch (...)
 				{
@@ -567,6 +619,9 @@ namespace HomeskzIfcImport::draw
 				// 伏図のまとめ方は DDX だけで受ける（冒頭「いちばん下は伏図のまとめ方」）。
 				for (std::size_t k = 0; k < fMergeRows.size(); ++k)
 					this->AddDDX_CheckButton(mergeID(k), &fMergeStates[k]);
+				// 垂木の断面も DDX だけで受ける（打ち込んでも他のコントロールは動かさない）。
+				this->AddDDX_EditText(kRafterWidthID, &fRafterWidthText);
+				this->AddDDX_EditText(kRafterHeightID, &fRafterHeightText);
 			}
 
 			// OK が押された。**閉じる前に**サムネイルの選択を控える（閉じた後のコントロール
@@ -772,7 +827,36 @@ namespace HomeskzIfcImport::draw
 				return names.size();
 			}
 
-			// 伏図のまとめ方の欄を作る（候補が無ければ何も作らない）。寸法規格の行の下へ
+			// TXString（UTF-8）→ std::string。
+			static std::string Text(const TXString& text)
+			{
+				return static_cast<const char*>(text);
+			}
+
+			// 垂木の断面の欄を作る。寸法規格の行の下へ 1 行ぶん空けて、見出し・幅・「×」・
+			// せいを横に並べる（冒頭「その下は垂木の断面」）。
+			bool CreateRafterSize()
+			{
+				if (!fRafterLabel.CreateControl(this, "垂木の断面（幅×せい mm）"))
+				{
+					fNote = "垂木の断面の見出しを作れませんでした";
+					return false;
+				}
+				this->AddBelowControl(&fChecks[kDimensionRow], &fRafterLabel, 0, 1);
+				if (!fRafterWidth.CreateControl(this, "", kRafterSizeWidthChars, 1) ||
+					!fRafterTimes.CreateControl(this, "×") ||
+					!fRafterHeight.CreateControl(this, "", kRafterSizeWidthChars, 1))
+				{
+					fNote = "垂木の断面の欄を作れませんでした";
+					return false;
+				}
+				this->AddRightControl(&fRafterLabel, &fRafterWidth);
+				this->AddRightControl(&fRafterWidth, &fRafterTimes);
+				this->AddRightControl(&fRafterTimes, &fRafterHeight);
+				return true;
+			}
+
+			// 伏図のまとめ方の欄を作る（候補が無ければ何も作らない）。垂木の断面の欄の下へ
 			// 1 行ぶん空けて見出し、その下にチェックを 1 つずつ縦に並べる——行の数は IFC
 			// 次第なので、2 列に折る役割の行とは混ぜない。
 			bool CreateMergeRows()
@@ -786,7 +870,7 @@ namespace HomeskzIfcImport::draw
 					fNote = "伏図のまとめ方の見出しを作れませんでした";
 					return false;
 				}
-				this->AddBelowControl(&fChecks[kDimensionRow], &fMergeIntro, 0, 1);
+				this->AddBelowControl(&fRafterLabel, &fMergeIntro, 0, 1);
 				for (std::size_t k = 0; k < fMergeRows.size(); ++k)
 				{
 					if (!fMergeChecks[k].CreateControl(this, TXString(fMergeRows[k].label.c_str())))
@@ -823,6 +907,11 @@ namespace HomeskzIfcImport::draw
 			}
 
 			VWStaticTextCtrl fIntro;
+			// 垂木の断面（冒頭「その下は垂木の断面」）。
+			VWStaticTextCtrl fRafterLabel;
+			VWEditTextCtrl fRafterWidth;
+			VWStaticTextCtrl fRafterTimes;
+			VWEditTextCtrl fRafterHeight;
 			// **deque に直接作る。** 行数ぶんのコントロールを溜めるが、vector だと追加の
 			// たびに既存の要素が動いてしまう（ダイアログは生存中ずっとコントロールの
 			// アドレスを持つ）。deque は追加しても既存の要素を動かさない
@@ -843,6 +932,11 @@ namespace HomeskzIfcImport::draw
 			Form fForm = Form::Thumbnail;
 			std::array<std::size_t, kRowCount> fSelection = {};
 			std::array<bool, kRowCount> fEnabled = {};
+			// 垂木の断面: 開いたときの値（読めない欄はこれに戻す）と、欄の文字（DDX の受け口）。
+			double fSeedRafterWidth = core::kDefaultRafterWidth;
+			double fSeedRafterHeight = core::kDefaultRafterHeight;
+			TXString fRafterWidthText;
+			TXString fRafterHeightText;
 			bool fShown = false;
 			bool fAborted = false;
 			std::string fNote;
@@ -941,6 +1035,7 @@ namespace HomeskzIfcImport::draw
 				if (button != VWFC::VWUI::kDialogButton_Ok)
 					return SettingsOutcome::Cancelled;
 				remembered = dialog.Result();
+				AddNote(note, dialog.RafterNote());
 				SettingsDecided() = true;
 				options = remembered;
 				return SettingsOutcome::Accepted;

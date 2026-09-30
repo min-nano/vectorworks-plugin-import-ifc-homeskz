@@ -267,7 +267,7 @@ namespace HomeskzIfcImport::parse
 					continue;
 				}
 				// 登り梁の専用レイヤの材も水下側の伏図レベルへ（その伏図に映すため）。
-				// 母屋伏図は階の登り梁レイヤを全部映す（parse/Sheet）。
+				// 母屋伏図には再掲しない（parse/Sheet）。
 				if (eaves)
 					member.layer = planLevelLayer(*level, story, kLevelNokigeta);
 				else

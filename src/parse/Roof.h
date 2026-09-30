@@ -32,6 +32,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Step.h"
 
@@ -57,12 +58,13 @@ namespace HomeskzIfcImport::parse
 	//   layer           … 配置先デザインレイヤ名（"n-野地板"）
 	//   storeyElevation … ストーリ高さ（mm）。軒の天端 Z をこれで絶対値にする
 	//   center          … グリッド中心オフセット（通り芯・垂木と同じセンタリング）
+	//   rafterHeight    … 垂木せい（mm。取り込み設定の一律の寸法）。野地板は垂木の上に
+	//                     載るので、屋根版の平面からこの分だけ持ち上げる
 	// ほぼ水平な面（勾配方向が定まらない）・法線が水平な鉛直面（勾配・天端 Z が定まらない）・
 	// 広がりが極小の面は std::nullopt（屋根オブジェクトを作らない。垂木と同じ扱い）。
-	std::optional<core::RoofCommand> roofCommandForPlane(const RoofPlane& plane,
-														 const std::string& layer,
-														 double storeyElevation,
-														 const core::Vec2& center);
+	std::optional<core::RoofCommand>
+	roofCommandForPlane(const RoofPlane& plane, const std::string& layer, double storeyElevation,
+						const core::Vec2& center, double rafterHeight = core::kDefaultRafterHeight);
 
 	// STEP Model から野地板の描画命令を組み立てる。
 	//

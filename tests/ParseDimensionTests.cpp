@@ -782,7 +782,8 @@ TEST(MoyaPlanDimensionsMembersOnItsLayersAndTheEavesGirders)
 						makeMember("2-横架材天端", Vec2{910.0, 0.0}, Vec2{910.0, 1820.0}, 3264.0),
 						// 別の階の軒桁も押さえない。
 						makeEavesGirder("R-軒桁", Vec2{0.0, 1200.0}, Vec2{1820.0, 1200.0})};
-	SheetCommand sheet = makeSheet(PlanKind::Moya, {"2-母屋", "2-登り梁"});
+	// 母屋伏図は登り梁を映さない（parse/Sheet）が、同じ階の登り梁も寸法には数える。
+	SheetCommand sheet = makeSheet(PlanKind::Moya, {"2-母屋"});
 	sheet.viewport.grayedLayers = {"2-軒桁"};
 
 	const std::vector<DimensionChainCommand> chains =

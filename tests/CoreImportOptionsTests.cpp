@@ -15,13 +15,22 @@
 
 #include "core/ImportOptions.h"
 
+#include <cmath>
 #include <cstddef>
+#include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
 using HomeskzIfcImport::core::defaultSymbolName;
+using HomeskzIfcImport::core::formatRafterSize;
 using HomeskzIfcImport::core::ImportOptions;
+using HomeskzIfcImport::core::isValidRafterSize;
+using HomeskzIfcImport::core::kDefaultRafterHeight;
+using HomeskzIfcImport::core::kDefaultRafterWidth;
+using HomeskzIfcImport::core::kMaxRafterSize;
 using HomeskzIfcImport::core::kSymbolRoleCount;
+using HomeskzIfcImport::core::parseRafterSize;
 using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::core::symbolRoleLabel;
 using HomeskzIfcImport::core::symbolRoles;
@@ -225,6 +234,104 @@ TEST(import_options_skipped_sections_are_sorted_unique_and_non_empty)
 	options.setSkippedSections(std::vector<std::string>{});
 	CHECK(options.skippedSections.empty());
 	CHECK(!options.isSectionSkipped("X1"));
+}
+
+TEST(import_options_rafter_size_defaults_to_45_by_45)
+{
+	// 設定を触らなければ従来の決め打ち 45×45 のまま（既定の取り込み結果を変えない）。
+	const ImportOptions options;
+	CHECK(std::abs(options.rafterWidth - 45.0) < 1e-9);
+	CHECK(std::abs(options.rafterHeight - 45.0) < 1e-9);
+	CHECK(std::abs(kDefaultRafterWidth - 45.0) < 1e-9);
+	CHECK(std::abs(kDefaultRafterHeight - 45.0) < 1e-9);
+}
+
+TEST(import_options_set_rafter_size_rejects_unusable_values_per_dimension)
+{
+	ImportOptions options;
+	options.setRafterSize(60.0, 90.0);
+	CHECK(std::abs(options.rafterWidth - 60.0) < 1e-9);
+	CHECK(std::abs(options.rafterHeight - 90.0) < 1e-9);
+
+	// 受け付けない値は**その寸法だけ**既定へ戻す（もう一方は残す）。
+	options.setRafterSize(0.0, 105.0);
+	CHECK(std::abs(options.rafterWidth - kDefaultRafterWidth) < 1e-9);
+	CHECK(std::abs(options.rafterHeight - 105.0) < 1e-9);
+	options.setRafterSize(75.0, -1.0);
+	CHECK(std::abs(options.rafterWidth - 75.0) < 1e-9);
+	CHECK(std::abs(options.rafterHeight - kDefaultRafterHeight) < 1e-9);
+	options.setRafterSize(std::numeric_limits<double>::quiet_NaN(), kMaxRafterSize + 1.0);
+	CHECK(std::abs(options.rafterWidth - kDefaultRafterWidth) < 1e-9);
+	CHECK(std::abs(options.rafterHeight - kDefaultRafterHeight) < 1e-9);
+}
+
+TEST(rafter_size_validity_range)
+{
+	CHECK(isValidRafterSize(0.1));
+	CHECK(isValidRafterSize(45.0));
+	CHECK(isValidRafterSize(kMaxRafterSize));
+	CHECK(!isValidRafterSize(0.0));
+	CHECK(!isValidRafterSize(-45.0));
+	CHECK(!isValidRafterSize(kMaxRafterSize + 0.1));
+	CHECK(!isValidRafterSize(std::numeric_limits<double>::infinity()));
+	CHECK(!isValidRafterSize(std::numeric_limits<double>::quiet_NaN()));
+}
+
+TEST(parse_rafter_size_reads_plain_numbers)
+{
+	const std::optional<double> integer = parseRafterSize("60");
+	CHECK(integer.has_value() && std::abs(*integer - 60.0) < 1e-9);
+	const std::optional<double> decimal = parseRafterSize("45.5");
+	CHECK(decimal.has_value() && std::abs(*decimal - 45.5) < 1e-9);
+	const std::optional<double> leadingDot = parseRafterSize(".5");
+	CHECK(leadingDot.has_value() && std::abs(*leadingDot - 0.5) < 1e-9);
+	const std::optional<double> trailingDot = parseRafterSize("90.");
+	CHECK(trailingDot.has_value() && std::abs(*trailingDot - 90.0) < 1e-9);
+	// 前後の空白は読み飛ばす。
+	const std::optional<double> spaced = parseRafterSize("  105\t");
+	CHECK(spaced.has_value() && std::abs(*spaced - 105.0) < 1e-9);
+}
+
+TEST(parse_rafter_size_reads_full_width_digits)
+{
+	// 日本語入力のまま打たれた全角の数字・小数点も読む。
+	const std::optional<double> fullWidth = parseRafterSize("４５");
+	CHECK(fullWidth.has_value() && std::abs(*fullWidth - 45.0) < 1e-9);
+	const std::optional<double> fullWidthDecimal = parseRafterSize("６０．５");
+	CHECK(fullWidthDecimal.has_value() && std::abs(*fullWidthDecimal - 60.5) < 1e-9);
+}
+
+TEST(parse_rafter_size_rejects_anything_else)
+{
+	CHECK(!parseRafterSize("").has_value());
+	CHECK(!parseRafterSize("   ").has_value());
+	CHECK(!parseRafterSize(".").has_value());
+	CHECK(!parseRafterSize("0").has_value());
+	CHECK(!parseRafterSize("-45").has_value());
+	CHECK(!parseRafterSize("+45").has_value());
+	CHECK(!parseRafterSize("45mm").has_value());
+	CHECK(!parseRafterSize("4 5").has_value());
+	CHECK(!parseRafterSize("4.5.1").has_value());
+	CHECK(!parseRafterSize("1e2").has_value());
+	CHECK(!parseRafterSize("45,5").has_value());
+	CHECK(!parseRafterSize("1000.1").has_value()); // 上限（kMaxRafterSize）超え
+	CHECK(parseRafterSize("1000").has_value());
+}
+
+TEST(format_rafter_size_drops_trailing_zeros_and_round_trips)
+{
+	CHECK_EQ(formatRafterSize(45.0), std::string("45"));
+	CHECK_EQ(formatRafterSize(45.5), std::string("45.5"));
+	CHECK_EQ(formatRafterSize(105.0), std::string("105"));
+	CHECK_EQ(formatRafterSize(0.5), std::string("0.5"));
+	// 0.1mm 単位に丸める。
+	CHECK_EQ(formatRafterSize(45.04), std::string("45"));
+	CHECK_EQ(formatRafterSize(45.06), std::string("45.1"));
+	for (const double mm : {45.0, 60.5, 105.0, 0.5, 999.9})
+	{
+		const std::optional<double> back = parseRafterSize(formatRafterSize(mm));
+		CHECK(back.has_value() && std::abs(*back - mm) < 1e-9);
+	}
 }
 
 TEST_MAIN();

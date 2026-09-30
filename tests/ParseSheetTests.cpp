@@ -366,6 +366,10 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 				CHECK(!contains(sheet.viewport.layers, eaves));
 				CHECK(contains(sheet.viewport.grayedLayers, eaves) ==
 					  (storyLayerNames(model).count(eaves) == 1));
+				// 登り梁も載せない（水下側の柱梁伏図に映してあり、重ねると高さの関係が
+				// 直感に反する。ご要望）。
+				for (const std::string& layer : sheet.viewport.layers)
+					CHECK(layer.find("登り梁") == std::string::npos);
 				++seq;
 			}
 		});

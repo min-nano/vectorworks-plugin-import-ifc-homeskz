@@ -6,6 +6,7 @@
 //
 
 #include "parse/Rafter.h"
+#include "core/ImportOptions.h"
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
@@ -65,14 +66,13 @@ namespace HomeskzIfcImport::parse
 		return storyHasRoofSlab(context, storeyId);
 	}
 
-	std::string rafterLabel()
+	std::string rafterLabel(double width, double height)
 	{
-		// 断面・間隔が決め打ちなので全垂木で共通のラベル（"45×45@455"）。整数へ丸めて組み立て
-		// る（表示用のラベルなので端数は要らない）。
-		const long long w = std::llround(kDefaultRafterWidth);
-		const long long h = std::llround(kDefaultRafterHeight);
+		// 全垂木で共通のラベル（"45×45@455"）。断面は利用者が端数付きで指定しうるので
+		// 丸めて消さない（"45.5×90@455"。core::formatRafterSize）。間隔は決め打ちの整数。
 		const long long interval = std::llround(kRafterInterval);
-		return std::to_string(w) + "×" + std::to_string(h) + "@" + std::to_string(interval);
+		return core::formatRafterSize(width) + "×" + core::formatRafterSize(height) + "@" +
+			   std::to_string(interval);
 	}
 
 	std::vector<double> sweepPositions(double eMin, double eMax, double interval, double inset)
@@ -146,7 +146,8 @@ namespace HomeskzIfcImport::parse
 	std::vector<RafterCommand> raftersForPlane(const RoofPlane& plane, const std::string& layer,
 											   double storeyElevation, const Vec2& center,
 											   std::optional<double> beamTopZ,
-											   const std::vector<core::MemberCommand>& storyMembers)
+											   const std::vector<core::MemberCommand>& storyMembers,
+											   double width, double height)
 	{
 		// 勾配の座標系（勾配方向 down・掃引方向 along・平面上の天端 Z）は野地板と共有する
 		// （parse/IfcGeometry の RoofSlope）。
@@ -175,7 +176,7 @@ namespace HomeskzIfcImport::parse
 		const double dx = slope.down.x;
 		const double dy = slope.down.y;
 
-		const std::string label = rafterLabel();
+		const std::string label = rafterLabel(width, height);
 		// 高さ基準（StoryBoundCommand）の基準になる垂木レベルの絶対 Z。垂木レベルは横架材
 		// 天端（最上階は軒高）に揃えてあるので（parse/Story.cpp の insertAboveBeamTop）、
 		// buildRafterCommands が渡す beamTopZ がそのままレベルの Z になる。beamTopZ を
@@ -183,8 +184,7 @@ namespace HomeskzIfcImport::parse
 		const double levelZ = beamTopZ.value_or(storeyElevation);
 		const std::size_t vertexCount = plan.size();
 		std::vector<RafterCommand> commands;
-		for (const double t :
-			 sweepPositions(eMin, eMax, kRafterInterval, kDefaultRafterWidth / 2.0))
+		for (const double t : sweepPositions(eMin, eMax, kRafterInterval, width / 2.0))
 		{
 			// 掃引線 { p : p·e = t } と外形の交点を集め、勾配方向 d の座標を添える。
 			std::vector<Hit> hits;
@@ -270,8 +270,8 @@ namespace HomeskzIfcImport::parse
 				RafterCommand cmd;
 				cmd.layer = layer;
 				cmd.drawClass = CLASS_TARUKI;
-				cmd.width = kDefaultRafterWidth;
-				cmd.height = kDefaultRafterHeight;
+				cmd.width = width;
+				cmd.height = height;
 				// start=軒側（支持点。軒桁に乗らない垂木は軒先そのもの）、end=棟側（高い端）。
 				// 座標はセンタリング済み。
 				cmd.start = Vec2{supportX - center.x, supportY - center.y};
@@ -318,6 +318,8 @@ namespace HomeskzIfcImport::parse
 
 		// 通り芯と同じセンタリングオフセット（通り芯が無ければ (0,0)＝生の IFC 座標）。
 		const Vec2 center = context.gridCenter();
+		// 断面は取り込み設定の一律の寸法（core/ImportOptions.h）。
+		const core::ImportOptions& options = context.options();
 
 		std::vector<RafterCommand> commands;
 		for (std::size_t i = 0; i < stories.size(); ++i)
@@ -340,7 +342,8 @@ namespace HomeskzIfcImport::parse
 			for (const RoofPlane* plane : context.storyRoofPlanes(story.id))
 			{
 				std::vector<RafterCommand> rafters =
-					raftersForPlane(*plane, layer, story.elevation, center, beamTopZ, storyMembers);
+					raftersForPlane(*plane, layer, story.elevation, center, beamTopZ, storyMembers,
+									options.rafterWidth, options.rafterHeight);
 				for (RafterCommand& rafter : rafters)
 					commands.push_back(std::move(rafter));
 			}

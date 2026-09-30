@@ -1369,6 +1369,32 @@ namespace HomeskzIfcImport::parse
 		return framingLineChains(segments, points, crossings, grids, min, max, true);
 	}
 
+	namespace
+	{
+		// 母屋伏図 layers が映す階（そのレベルのレイヤを 1 枚でも映す階）の、登り梁の
+		// レイヤ（伏図レベルごとの "n-登り梁" / "n-登り梁(FL-872)"）。
+		std::vector<std::string> noboribariLayersOfSheet(const core::Document& document,
+														 const std::vector<std::string>& layers)
+		{
+			std::vector<std::string> out;
+			for (const core::StoryCommand& story : document.stories)
+			{
+				const bool shown =
+					std::ranges::any_of(story.levels, [&layers](const core::LevelCommand& level)
+										{ return onLayers(layers, level.layer); });
+				if (!shown)
+					continue;
+				for (const core::LevelCommand& level : story.levels)
+				{
+					if (core::stripPlanLevelTag(level.type) == core::kLevelNoboribari &&
+						!onLayers(layers, level.layer))
+						out.push_back(level.layer);
+				}
+			}
+			return out;
+		}
+	} // namespace
+
 	std::vector<core::DimensionChainCommand>
 	buildPlanDimensionCommands(const core::Document& document, const core::SheetCommand& sheet)
 	{
@@ -1426,6 +1452,15 @@ namespace HomeskzIfcImport::parse
 			std::ranges::copy_if(document.members, std::back_inserter(eaves),
 								 [&sheet](const core::MemberCommand& member)
 								 { return onLayers(sheet.viewport.grayedLayers, member.layer); });
+			// 同じ階の登り梁も加える。登り梁は母屋伏図には映さない（水下側の柱梁伏図に映す。
+			// parse/Sheet）が、母屋・棟木・軒桁に取り付く位置は母屋伏図で押さえてきた
+			// （実機確認済みの押さえ方を保つ）。
+			for (const std::string& layer : noboribariLayersOfSheet(document, layers))
+			{
+				std::ranges::copy_if(document.members, std::back_inserter(members),
+									 [&layer](const core::MemberCommand& member)
+									 { return member.layer == layer; });
+			}
 			return moyaDimensionChains(members, eaves, document.members, columns, document.grids,
 									   min, max);
 		}
