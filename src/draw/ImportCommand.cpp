@@ -21,7 +21,6 @@
 #include "draw/ResultDialog.h"
 #include "draw/SectionPickDialog.h"
 #include "draw/SettingsDialog.h"
-#include "parse/BuildDocument.h"
 
 #include <string>
 #include <vector>
