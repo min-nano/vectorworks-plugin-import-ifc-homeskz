@@ -385,6 +385,15 @@ TEST(LevelNoteMeasuresFromTheStoreyFl)
 	CHECK(memberLevelNote(hip, stories, standard).empty());
 	CHECK(memberLevelNote(noteMember("共通", 0.0, 0.0), stories, standard).empty());
 	CHECK(memberLevelNote(noteMember("3-横架材天端", 100.0, 100.0), stories, standard).empty());
+	// 二重引用符を含む階名は番号で呼ぶ（注記はタグの式に "…" で囲んで埋め込むので、
+	// 引用符が混ざると式全体が評価されなくなる）。名前が無い階も番号で呼ぶ。
+	std::vector<StoryInfo> quoted = stories;
+	quoted[1].name = "2\"FL";
+	CHECK_EQ(memberLevelNote(noteMember("2-横架材天端", 2699.0, 2699.0), quoted, standard),
+			 std::string("(2FL -872)"));
+	quoted[1].name.clear();
+	CHECK_EQ(memberLevelNote(noteMember("2-横架材天端", 2699.0, 2699.0), quoted, standard),
+			 std::string("(2FL -872)"));
 }
 
 TEST(FixtureTagsCarryLevelNotes)

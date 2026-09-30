@@ -208,11 +208,13 @@ namespace HomeskzIfcImport::parse
 			const long long high = std::llround(std::max(member.elevation, member.endElevation));
 			// 最上階は "RFL" ではなく軒高と呼ぶ（RFL は図面で使わない。ご要望）。それ以外の
 			// 階は階名、名前が取れない階は番号で呼ぶ（IFC の階名は "…FL" で終わるものしか
-			// 採らない。parse/Story の collectStories）。
+			// 採らない。parse/Story の collectStories）。**二重引用符を含む階名も番号で呼ぶ**
+			// ——注記はタグの式に "…" で囲んで埋め込むので（draw/Tag の TagFieldFormula）、
+			// 引用符が混ざると式の対応が崩れて式全体が評価されなくなる。
 			std::string name;
 			if (story.isTop)
 				name = core::kLevelEaves;
-			else if (story.name.empty())
+			else if (story.name.empty() || story.name.find('"') != std::string::npos)
 				name = storyLayerPrefix(i, story.isTop) + "FL";
 			else
 				name = story.name;
