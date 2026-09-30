@@ -78,9 +78,10 @@ namespace HomeskzIfcImport::parse
 	std::vector<NoboribariRoofPlane> collectRoofPlanes(Context& context);
 
 	// 登り梁の真上にある屋根面を返す。勾配方向（始端→終端の水平単位ベクトル）と屋根面の勾配方
-	// 向が平行（kNoboribariSlopeDirDot 以上）で、外形が登り梁の中点（取れなければ端点）
-	// を内包する最初の面。命令座標はセンタリング済みなので center を足してワールドへ戻して判定
-	// する。見つからなければ nullptr。
+	// 向が平行（kNoboribariSlopeDirDot 以上）で、外形が登り梁の中点を内包する最初の面。中点を
+	// 内包する面が 1 つも無いときだけ、端点（始端→終端）を内包する最初の面へ下がる（端点は隣の
+	// 屋根版の外形にもかかりやすいので、中点の面より先に選ばない）。命令座標はセンタリング済み
+	// なので center を足してワールドへ戻して判定する。見つからなければ nullptr。
 	const NoboribariRoofPlane* roofPlaneFor(const core::MemberCommand& command,
 											const std::vector<NoboribariRoofPlane>& planes,
 											const core::Vec2& center);
