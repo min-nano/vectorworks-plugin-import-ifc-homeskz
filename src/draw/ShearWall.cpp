@@ -17,6 +17,7 @@
 #include "PluginPrefix.h"
 #include "draw/ShearWall.h"
 #include "draw/DrawUtil.h"
+#include "draw/ShearWallPio.h"
 #include "Extensions/ExtShearWall.h"
 #include "core/Document.h"
 #include "core/Progress.h"
@@ -238,7 +239,8 @@ namespace HomeskzIfcImport::draw
 		// **最初の 1 つで残り全部と ResetObject までが飛ぶ**——PIO は図面に残るのに絵が
 		// 1 つも描かれない、という「命令はあるのに見えない」最悪の形になる（M19 のローカル
 		// 確認で実際にこうなった。docs/DEV-NOTES.md M19「パラメータが 1 つ通らないと…」）。
-		bool PlaceOne(const core::ShearWallCommand& wall, std::size_t& outUnwritten)
+		bool PlaceOne(const core::ShearWallCommand& wall, std::size_t& outUnwritten,
+					  MCObjectHandle& outObject)
 		{
 			// 挿入点は始端（柱芯）。第 4 引数 bInsert=true でアクティブレイヤへ入れる。
 			// 線分 PIO なので、この後 SetLinearObjectPos で両端を与え直す。
@@ -254,6 +256,7 @@ namespace HomeskzIfcImport::draw
 										 WorldPt(wall.start.x, wall.start.y), angle, true);
 			if (object == nil)
 				return false;
+			outObject = object;
 
 			// PIO 本体のクラス（筋かい／耐力面材）。PIO が描く帯・面はこのクラスの属性で
 			// 描かれる（面材の表裏と伏図の記号だけは PIO 側でクラスを分ける）。
@@ -302,9 +305,9 @@ namespace HomeskzIfcImport::draw
 				putReal(kParamShearClearSpan, wall.clearSpan);
 				putReal(kParamShearBottom, wall.bottomHeight);
 				putReal(kParamShearTop, wall.topHeight);
-				// 取り込みは水平の耐力壁として置く（両端とも同じ上端）。登り梁の下で左右の
-				// 高さを変えるのは、置いた後に OIP で内法上端（始点）／（終点）を書き換えて行う。
-				putReal(kParamShearTopEnd, wall.topHeight);
+				// 上端は内法の両端で別々に書く。解析が上の横架材に合わせてあるので、登り梁の
+				// 下では左右で違う（parse/ShearWall の fitShearWallsToMembers）。
+				putReal(kParamShearTopEnd, wall.topHeightEnd);
 				// ★**見た目の既定値も毎回書く。** PIO のパラメータ既定値は**図面に記録
 				// される**ので、コード側で既定を変えても**その PIO を一度使った図面では
 				// 古い値のまま**になる（実機で MarkOffset が 4mm のままになり、記号が
@@ -328,7 +331,7 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawShearWalls(const core::Document& document, core::ProgressReporter& progress,
-							   std::string* outNote)
+							   std::string* outNote, ObjectHandles* outHandles)
 	{
 		std::size_t drawn = 0;
 		std::size_t missingLayers = 0;
@@ -343,8 +346,9 @@ namespace HomeskzIfcImport::draw
 			EnsureMarkSymbols();
 		}
 
-		for (const core::ShearWallCommand& wall : document.shearWalls)
+		for (std::size_t index = 0; index < document.shearWalls.size(); ++index)
 		{
+			const core::ShearWallCommand& wall = document.shearWalls[index];
 			if (!AdvanceProgress(progress))
 				break;
 
@@ -356,10 +360,13 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			if (PlaceOne(wall, unwritten))
+			MCObjectHandle object = nil;
+			if (PlaceOne(wall, unwritten, object))
 				++drawn;
 			else
 				++failed;
+			if (outHandles != nullptr && object != nil)
+				outHandles->table().handles[index] = object;
 		}
 
 		if (outNote != nullptr && (missingLayers > 0 || failed > 0 || unwritten > 0))
@@ -375,4 +382,49 @@ namespace HomeskzIfcImport::draw
 
 		return drawn;
 	}
+
+#if VW_DRAW_VERIFY
+	void recheckShearWalls(const ObjectHandles& handles, std::string* outNotes)
+	{
+		if (handles.table().handles.empty())
+			return;
+
+		// 柱から引けなかった壁の経過は先頭の数枚だけ載せる（全数だと読めない）。
+		constexpr std::size_t kShownFallbacks = 3;
+		std::size_t fromColumns = 0;
+		std::size_t fallbacks = 0;
+		std::size_t undecided = 0;
+		std::string shown;
+		for (const auto& [index, object] : handles.table().handles)
+		{
+			const ShearWallProbe probe = probeShearWall(object);
+			switch (probe.kind)
+			{
+			case ShearWallProbe::Kind::FromColumns:
+				++fromColumns;
+				continue;
+			case ShearWallProbe::Kind::Fallback:
+				++fallbacks;
+				break;
+			case ShearWallProbe::Kind::Undecided:
+				++undecided;
+				break;
+			}
+			if (fallbacks + undecided <= kShownFallbacks)
+				shown += "\n    #" + std::to_string(index) + ": " + probe.text;
+		}
+
+		// 取り込み中のリセットの行（`shearwall: 内法 柱から／控え`）と枚数を引き比べる。
+		// ここで控えが増えていれば「取り込みの後段で柱が見つからなくなった」と読める。
+		std::string text = "耐力壁の測り直し（取り込み後・描かない）: 柱から " +
+						   std::to_string(fromColumns) + " 枚 / 控え " + std::to_string(fallbacks) +
+						   " 枚";
+		if (undecided > 0)
+			text += " / 内法が決まらない " + std::to_string(undecided) + " 枚";
+		text += shown;
+		core::trace::log(text);
+		if (outNotes != nullptr)
+			*outNotes = text;
+	}
+#endif
 } // namespace HomeskzIfcImport::draw

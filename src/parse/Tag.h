@@ -92,6 +92,14 @@ namespace HomeskzIfcImport::parse
 	// 柱（小屋束を含む）がその切断面に乗るか。芯が切断位置から kClusterTol 以内にあること。
 	bool columnOnCutPlane(const core::ColumnCommand& column, const core::SectionCommand& section);
 
+	// 横架材がその切断面を**横切る**か（＝断面に切り口として写るか）。通りに沿わない材
+	// （memberOnCutPlane が偽のもの）のうち、両端が切断位置を挟む（kClusterTol の余裕を
+	// 持たせ、切断面で止まる材も含める）ものだけ。真なら芯が切断面と交わる平面上の点を
+	// crossing へ返す。軸組図の寸法・レベル記号の横の範囲に使う（parse/Dimension）——直交
+	// する材の切り口は通りに沿う材より外へ出ることがあり、数えないと記号が建物へ食い込む。
+	bool memberCrossesCutPlane(const core::MemberCommand& member,
+							   const core::SectionCommand& section, core::Vec2& crossing);
+
 	// 断面の注釈空間への投影（横方向の原点・投影の定義）は寸法（parse/Dimension）と描画側の
 	// 図面ラベル（draw/DrawingLabel）も使うので **core に置いてある**
 	// （core::sectionAlongOrigin / core::sectionAnnotationPoint）。空間の意味はこのヘッダ冒頭
