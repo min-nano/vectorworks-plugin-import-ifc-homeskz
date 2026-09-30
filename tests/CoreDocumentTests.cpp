@@ -2089,6 +2089,7 @@ namespace
 		wall.clearSpan = 805.0;
 		wall.bottomHeight = 0.0;
 		wall.topHeight = 2800.0;
+		wall.topHeightEnd = 2800.0;
 		return wall;
 	}
 
@@ -2116,6 +2117,11 @@ TEST(validate_accepts_a_valid_shear_wall)
 	panel.kind = core::ShearWallKind::Panel;
 	panel.width = 0.0;
 	CHECK(acceptsShearWall(panel));
+
+	// 登り梁の下は上端が両端で違う（上辺の傾いた台形）。
+	core::ShearWallCommand sloped = validShearWall();
+	sloped.topHeightEnd = 3200.0;
+	CHECK(acceptsShearWall(sloped));
 }
 
 TEST(validate_rejects_a_broken_shear_wall)
@@ -2140,6 +2146,10 @@ TEST(validate_rejects_a_broken_shear_wall)
 	core::ShearWallCommand flat = validShearWall();
 	flat.topHeight = flat.bottomHeight; // 軸組内法の高さが無い
 	CHECK(!acceptsShearWall(flat));
+
+	core::ShearWallCommand flatEnd = validShearWall();
+	flatEnd.topHeightEnd = flatEnd.bottomHeight; // 終点側だけ潰れた内法も描けない
+	CHECK(!acceptsShearWall(flatEnd));
 
 	core::ShearWallCommand noSpan = validShearWall();
 	noSpan.clearSpan = 0.0; // 控えの内法が無い

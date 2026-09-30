@@ -30,6 +30,10 @@
 //	    柱が見つからない端は要素自身の端をそのまま使う。
 //	  * 配置先は階ごとの専用レイヤ "n-耐力壁"（レイヤ平面＝その階の横架材天端。最上階は軒高）。
 //	    高さは**レイヤ平面からの相対**で持つ（core::ShearWallCommand「高さの持ち方」）。
+//	  * **高さは上下の横架材に合わせる**（後処理 fitShearWallsToMembers）。IFC の要素自身の
+//	    高さは控えに留め、下端＝下の横架材の天端・上端＝上の横架材の下端を内法の両端で
+//	    測り直す。面材は IFC では横架材に掛かる実物の板の広がりで出るので、そのままでは
+//	    軸組の外へはみ出す。登り梁の下は上端が両端で違う台形になる。
 //
 //	【表と裏】面材をどちらの面に張っているかは、**軸（start→end）を見て左手側が表**という
 //	幾何の約束で決める。IFC には内外の区別が無いので実世界の意味は持たせられないが、
@@ -43,6 +47,7 @@
 #include "core/Document.h"
 #include "core/Geometry.h"
 #include "parse/Step.h"
+#include "parse/Story.h"
 
 #include <cstddef>
 #include <string>
@@ -129,6 +134,56 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::ShearWallCommand> buildShearWallCommands(Context& context);
 	std::vector<core::ShearWallCommand>
 	buildShearWallCommands(Context& context, const std::vector<core::ColumnCommand>& columns);
+
+	// 上下の横架材を探す許容（mm）。
+	//   kShearWallBeamParallelTol… 軸と横架材の芯線のなす角の正弦の上限（これ以下を平行とみなす）
+	//   kShearWallBeamLateralTol … 軸（柱芯を結ぶ線）から横架材の芯線までの平面距離に、
+	//                              材の半幅へ上乗せする余裕
+	//   kShearWallBeamCoverTol   … 横架材の実際の端（端部オフセット込み）を越えて届くとみなす余裕
+	//   kShearWallBeamSearch     … IFC の要素自身の上端／下端から横架材を探す鉛直の範囲。これより
+	//                              離れた材は「その耐力壁の上下の材」とみなさない（上の材が欠けた
+	//                              ときに、はるか上の母屋まで壁を伸ばさないため）
+	//   kShearWallStepTol        … 両端を結ぶ直線と横架材の下端の食い違いの許容。これを超えたら
+	//                              上辺は 1 本の直線で表せない（段差梁）とみなす
+	inline constexpr double kShearWallBeamParallelTol = 0.01;
+	inline constexpr double kShearWallBeamLateralTol = 1.0;
+	inline constexpr double kShearWallBeamCoverTol = 1.0;
+	inline constexpr double kShearWallBeamSearch = 1500.0;
+	inline constexpr double kShearWallStepTol = 1.0;
+
+	// 横架材の端の両側に測る点を置くときの、端からの離れ（mm）。端の上では手前と向こうの
+	// 材のどちらが載っているか決まらないので、両側に 1 点ずつ置いて段差を取りこぼさない。
+	inline constexpr double kShearWallBeamBreakGap = 3.0;
+
+	// 耐力壁の上下の高さを、上下の横架材に合わせて測り直す（後処理。buildDocument が
+	// 横架材の補正を終えた後に呼ぶ）。
+	//
+	// 【なぜ後処理か】横架材の最終形（登り梁の屋根面へのスナップ・柱芯への端の送り）は
+	// Document を組み立てる途中で決まり、耐力壁の解析結果は Context が先にキャッシュして
+	// ストーリ（耐力壁レイヤを作るか）と共有している。高さはレイヤの有無に関わらないので、
+	// 登り梁の補正（parse/Noboribari）と同じく「組み上がった命令を後から整える」形にする。
+	//
+	// 測り方（内法の両端・内法に入る横架材の端の両側・それらの中点で）:
+	//   * 候補は**軸と平行で、軸がその材の芯線上にあり、その点を材の実際の範囲が覆う**横架材。
+	//   * 上の材 … IFC の要素の高さの中央より上にある材のうち、**下端が最も低い**もの。
+	//     傾斜梁（登り梁）の下端はその点での天端 − せい/cosθ（断面は材軸に直交するため）。
+	//   * 下の材 … 同じく中央より下にある材のうち、**天端が最も高い**もの。
+	// 決め方:
+	//   * 上端 … 両端とも上の材が取れ、両端を結ぶ直線がどの点でも上の材の下端に載るなら
+	//     両端の値（登り梁の下は台形・水平の梁の下は矩形）。載らない（段差梁が内法の途中で
+	//     段を持つ。PIO の上辺は 1 本の直線なので段は描けない）か、片端しか取れないなら、
+	//     取れた点のうち**最も高い**値で水平にそろえる（梁下に隙間を空けない。低い側の梁
+	//     とは重なるが、梁の絵が上に来るので隙間より読みやすい——実機確認でのご指示）。
+	//   * 下端 … PIO は下端を 1 つしか持たないので、取れた点のうち**最も低い**天端（段差の
+	//     ある下の梁でも隙間を空けない。上端と同じ考え方）。
+	//   * どの点でも材が取れなければ、その辺は IFC の要素自身の高さのまま。測り直した結果が
+	//     内法として潰れる（上端 ≦ 下端）なら、その耐力壁は丸ごと IFC の高さのまま残す。
+	// 内法の端は、軸の端（柱芯）に柱があればその半幅だけ内側（柱の内側面）で、柱の無い端は
+	// 軸の端そのもの（buildShearWallCommands の clearSpan と同じ約束）。
+	void fitShearWallsToMembers(std::vector<core::ShearWallCommand>& walls,
+								const std::vector<StoryInfo>& stories,
+								const std::vector<core::MemberCommand>& members,
+								const std::vector<core::ColumnCommand>& columns);
 
 	// 耐力壁の命令が layer に 1 枚でもあるか。parse/Story が「その階に耐力壁レベルを作るか」を
 	// 決めるのに使う（母屋・登り梁と同じく、**命令があるときだけ・命令があれば必ず**レイヤが
