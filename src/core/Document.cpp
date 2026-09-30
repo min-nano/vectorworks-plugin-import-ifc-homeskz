@@ -920,8 +920,11 @@ namespace HomeskzIfcImport::core
 	{
 		// 符号は必ず付ける（"FL872" と "FL-872" を読み違えない）。
 		const long long delta = heightMm - datumMm;
-		const char* sign =
-			delta > 0 ? kPlanLevelPlus : (delta < 0 ? kPlanLevelMinus : kPlanLevelZero);
+		const char* sign = kPlanLevelZero;
+		if (delta > 0)
+			sign = kPlanLevelPlus;
+		else if (delta < 0)
+			sign = kPlanLevelMinus;
 		return std::string(planLevelDatumName(top)) + sign +
 			   std::to_string(delta < 0 ? -delta : delta);
 	}
