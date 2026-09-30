@@ -17,6 +17,9 @@
 #include "TestFramework.h"
 
 #include "core/Document.h"
+#include "parse/Context.h"
+#include "parse/Loader.h"
+#include "parse/Story.h"
 #include "parse/Tag.h"
 
 #include <cmath>
@@ -35,9 +38,12 @@ using HomeskzIfcImport::core::ViewportCommand;
 using HomeskzIfcImport::parse::attachTagCommands;
 using HomeskzIfcImport::parse::buildPlanTagCommands;
 using HomeskzIfcImport::parse::buildSectionTagCommands;
+using HomeskzIfcImport::parse::memberLevelNote;
+using HomeskzIfcImport::parse::StoryInfo;
 using HomeskzIfcImport::parse::tagAngle;
 using HomeskzIfcImport::parse::tagOffsetSide;
 using HomeskzIfcImport::parse::upwardNormal;
+using HomeskzIfcTests::fixture;
 using HomeskzIfcTests::forEachFixtureDocument;
 using HomeskzIfcTests::near;
 
@@ -310,6 +316,136 @@ TEST(TagCommandsAreDeterministic)
 				}
 			}
 		});
+}
+
+// ---------------------------------------------------------------------------
+// 高さの注記（memberLevelNote）
+// ---------------------------------------------------------------------------
+
+TEST(SignedMillimetresGroupThousands)
+{
+	// 符号は必ず付け（0 は ±）、1,000 以上は 3 桁ごとにコンマ（ご要望）。
+	CHECK_EQ(core::signedMillimetreText(-872), std::string("-872"));
+	CHECK_EQ(core::signedMillimetreText(40), std::string("+40"));
+	CHECK_EQ(core::signedMillimetreText(0), std::string("±0"));
+	CHECK_EQ(core::signedMillimetreText(1000), std::string("+1,000"));
+	CHECK_EQ(core::signedMillimetreText(-1234567), std::string("-1,234,567"));
+	CHECK_EQ(core::planLevelHeightText(2000, 3571, false), std::string("FL-1,571"));
+}
+
+namespace
+{
+	// 2 階建て相当（2FL=3571・横架材天端 3531 / RFL=6374）。
+	std::vector<StoryInfo> noteStories()
+	{
+		return {StoryInfo{1, 612.0, -40.0, false, "1FL"}, StoryInfo{2, 3571.0, -40.0, false, "2FL"},
+				StoryInfo{3, 6374.0, 0.0, true, "RFL"}};
+	}
+
+	MemberCommand noteMember(const std::string& layer, double start, double end)
+	{
+		MemberCommand member;
+		member.layer = layer;
+		member.elevation = start;
+		member.endElevation = end;
+		return member;
+	}
+} // namespace
+
+TEST(LevelNoteMeasuresFromTheStoreyFl)
+{
+	const std::vector<StoryInfo> stories = noteStories();
+	// 各階の標準の横架材の高さ（parse/PlanLevel の standardBeamHeights）。
+	const std::vector<long long> standard = {572, 3531, 6374};
+	// 標準の横架材の高さ（2FL−40）と違う水平な材だけ、階名付きで FL から。
+	CHECK_EQ(memberLevelNote(noteMember("2-横架材天端(FL-872)", 2699.0, 2699.0), stories, standard),
+			 std::string("(2FL -872)"));
+	CHECK(memberLevelNote(noteMember("2-横架材天端", 3531.0, 3531.0), stories, standard).empty());
+	CHECK_EQ(memberLevelNote(noteMember("2-横架材天端", 3571.0, 3571.0), stories, standard),
+			 std::string("(2FL ±0)"));
+	CHECK_EQ(memberLevelNote(noteMember("1-横架材天端", 1612.4, 1612.4), stories, standard),
+			 std::string("(1FL +1,000)"));
+	// 標準は推した値（横架材天端）ではなく実在する高さ。推した値ちょうどの材でも、標準の
+	// 高さと違えば添える。
+	CHECK_EQ(memberLevelNote(noteMember("1-横架材天端", 572.0, 572.0), stories, {612, 3531, 6374}),
+			 std::string("(1FL -40)"));
+	// 標準を渡さない階は推した値で比べる。
+	CHECK(memberLevelNote(noteMember("2-横架材天端", 3531.0, 3531.0), stories, {}).empty());
+	// 最上階の標準は軒高（RFL そのもの）。母屋は軒高より上なので必ず添える。最上階は
+	// "RFL" ではなく "軒高" と書く（RFL は図面で使わない）。
+	CHECK(memberLevelNote(noteMember("R-軒高", 6374.0, 6374.0), stories, standard).empty());
+	CHECK_EQ(memberLevelNote(noteMember("R-母屋", 6738.0, 6738.0), stories, standard),
+			 std::string("(軒高 +364)"));
+	// 傾斜材は低い端〜高い端（向きに依らない）。
+	CHECK_EQ(memberLevelNote(noteMember("2-登り梁", 3531.0, 2699.0), stories, standard),
+			 std::string("(2FL -872~-40)"));
+	// 隅木・谷木は添えない。階を特定できない材も添えない。
+	MemberCommand hip = noteMember("2-横架材天端", 3283.0, 4524.0);
+	hip.hipOrValley = true;
+	CHECK(memberLevelNote(hip, stories, standard).empty());
+	CHECK(memberLevelNote(noteMember("共通", 0.0, 0.0), stories, standard).empty());
+	CHECK(memberLevelNote(noteMember("3-横架材天端", 100.0, 100.0), stories, standard).empty());
+	// 二重引用符を含む階名は番号で呼ぶ（注記はタグの式に "…" で囲んで埋め込むので、
+	// 引用符が混ざると式全体が評価されなくなる）。名前が無い階も番号で呼ぶ。
+	std::vector<StoryInfo> quoted = stories;
+	quoted[1].name = "2\"FL";
+	CHECK_EQ(memberLevelNote(noteMember("2-横架材天端", 2699.0, 2699.0), quoted, standard),
+			 std::string("(2FL -872)"));
+	quoted[1].name.clear();
+	CHECK_EQ(memberLevelNote(noteMember("2-横架材天端", 2699.0, 2699.0), quoted, standard),
+			 std::string("(2FL -872)"));
+}
+
+TEST(FixtureTagsCarryLevelNotes)
+{
+	// スキップフロア: GL+2699 の横架材（2FL−872）には注記があり、標準（2FL−40）には無い。
+	// 実フィクスチャの隅木・谷木（傾いた材はすべてそれ）には添えない。
+	for (const char* name : {"スキップフロア_サンプル.ifc", "サンプル1 (住木邸新築工事).ifc"})
+	{
+		const Document& document = HomeskzIfcTests::fixtureDocument(name);
+		bool skipNote = false;
+		for (const core::SheetCommand& sheet : document.sheets)
+		{
+			for (const TagCommand& tag : sheet.viewport.tags)
+			{
+				const MemberCommand& member = document.members[tag.memberIndex];
+				if (member.hipOrValley)
+					CHECK(tag.note.empty());
+				if (member.layer == "2-横架材天端(FL-872)")
+				{
+					CHECK_EQ(tag.note, std::string("(2FL -872)"));
+					skipNote = true;
+				}
+				if (member.layer == "2-横架材天端" && member.elevation == member.endElevation &&
+					std::llround(member.elevation) == 3531)
+					CHECK(tag.note.empty());
+			}
+		}
+		if (std::string(name) == "スキップフロア_サンプル.ifc")
+			CHECK(skipNote);
+	}
+	// グレー本モデルプラン1 は横架材が FL ちょうどで、推した横架材天端（FL−100 など）と
+	// ずれる。標準は実在する高さなので、床伏図の梁には注記が付かない（付くのは母屋だけ）。
+	const Document& grey = HomeskzIfcTests::fixtureDocument("グレー本モデルプラン1【3階】.ifc");
+	for (const core::SheetCommand& sheet : grey.sheets)
+	{
+		if (sheet.kind != core::PlanKind::Framing)
+			continue;
+		for (const TagCommand& tag : sheet.viewport.tags)
+			CHECK(tag.note.empty());
+	}
+	// サンプル1 の傾いた材はすべて IFC 名で隅木・谷木と分かる（クラスは床梁・母屋に推定される）。
+	const Document& sample = HomeskzIfcTests::fixtureDocument("サンプル1 (住木邸新築工事).ifc");
+	std::size_t hips = 0;
+	for (const MemberCommand& member : sample.members)
+	{
+		if (std::abs(member.elevation - member.endElevation) > 1.0)
+		{
+			CHECK(member.hipOrValley);
+			++hips;
+		}
+	}
+	CHECK(hips > 0);
 }
 
 TEST_MAIN();

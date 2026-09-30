@@ -343,6 +343,12 @@ vw_add_test(ParseFootingTests ParseFootingTests.cpp CORE FIXTURES)
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
 vw_add_test(ParseNoboribariTests ParseNoboribariTests.cpp CORE FIXTURES)
 
+# Plan levels (src/parse/PlanLevel): one framing plan per beam height (skip floors put
+# several heights in one IFC storey). Collects the heights, merges the ones the designer
+# chose, re-layers the beams and numbers the column spans by plan level; synthetic
+# stories plus the checked-in fixtures; SDK-free.
+vw_add_test(ParsePlanLevelTests ParsePlanLevelTests.cpp CORE FIXTURES)
+
 # Anchor-bolt (アンカーボルト) parsing (src/parse/AnchorBolt): IfcMechanicalFastener bolt
 # BODIES (never the washers, which share the axis and would double-count) -> symbol commands
 # on the foundation's F-アンカーボルト layer, with the M12 / M16 split driven by whether the

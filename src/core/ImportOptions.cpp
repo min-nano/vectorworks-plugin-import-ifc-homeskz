@@ -117,6 +117,22 @@ namespace HomeskzIfcImport::core
 		dimension = name;
 	}
 
+	bool ImportOptions::mergesWithPrevious(const PlanLevelKey& key) const
+	{
+		return std::ranges::binary_search(mergedPlanLevels, key);
+	}
+
+	void ImportOptions::setMergeWithPrevious(const PlanLevelKey& key, bool merge)
+	{
+		// 昇順・重複なしを保つ（mergesWithPrevious が二分探索する）。
+		const auto at = std::ranges::lower_bound(mergedPlanLevels, key);
+		const bool present = at != mergedPlanLevels.end() && *at == key;
+		if (merge && !present)
+			mergedPlanLevels.insert(at, key);
+		else if (!merge && present)
+			mergedPlanLevels.erase(at);
+	}
+
 	bool ImportOptions::isSectionSkipped(const std::string& drawingNumber) const
 	{
 		// 並びに頼らず線形に探す（フィールドは公開なので、setSkippedSections を通さずに

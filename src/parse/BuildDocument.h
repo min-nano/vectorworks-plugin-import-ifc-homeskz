@@ -49,6 +49,12 @@ namespace HomeskzIfcImport::parse
 	core::Document buildDocument(const std::string& ifcPath, core::ProgressReporter& progress,
 								 const core::ImportOptions& options);
 
+	// IFC を読み、設定ダイアログに出す伏図レベルの候補（横架材の高さ 1 つずつ）を返す
+	// （parse/PlanLevel）。取り込みの前に 1 度だけ呼ぶ——まとめるかどうかは設計者が決める
+	// ので、どんな高さがあるかを先に見せる。読めなければ空（ダイアログはまとめる行なしで
+	// 出る。取り込みは止めない）。
+	std::vector<core::PlanLevelChoice> scanPlanLevelChoices(const std::string& ifcPath);
+
 	// M34 軸組図にする通りの**候補**（取り込みの前に、描く通りを選ばせるため）。
 	// options の外す通り（skippedSections）を**無視して**解析し、軸組図の命令を返す
 	// ——並び・図番は、同じ options で取り込んだときに描かれる軸組図と一致する

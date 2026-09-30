@@ -10,14 +10,17 @@
 //	作る伏図は 3 種（番号もこの順に "1" から振る）:
 //	  * **基礎伏図**（buildFoundationSheetCommands）… 基礎要素があるときだけ 1 枚。
 //	    表示レイヤは 底盤・立上り・床束・アンカーボルト・通り芯。
-//	  * **柱梁伏図**（buildFloorFramingSheetCommands）… FL ストーリ 1 つにつき 1 枚。
-//	    表示レイヤは その階の横架材（一般階 "n-横架材天端" / 最上階 "R-軒高"）＋切断レベルを
+//	  * **柱梁伏図**（buildFloorFramingSheetCommands）… **横架材の高さ（伏図レベル）1 つに
+//	    つき 1 枚**（parse/PlanLevel。どの階も高さが 1 つなら FL ストーリ 1 つにつき 1 枚）。
+//	    表示レイヤは その伏図レベルの横架材（一般階 "n-横架材天端" / 最上階 "R-軒高"。標準で
+//	    ない高さは "(FL-…)" 付き）・登り梁（水下側がその高さのもの）・耐力壁＋切断レベルを
 //	    span が含む柱レイヤ＋（最上階以外は）床＋（最下階かつ基礎ありなら）アンカーボルト＋通り芯。
 //	  * **母屋伏図**（buildMoyaSheetCommands）… 屋根版を持つ階ごとに 1 枚。表示レイヤは
 //	    その階の小屋組（母屋・登り梁・垂木・野地板）＋切断レベルを span が含む柱レイヤ＋通り芯。
 //
 //	【切断レベルという考え方】柱・小屋束は span レイヤ（"{from}to{to}-柱"）に分かれている
-//	（parse/Column）。伏図はその図が切る高さ（切断レベル）を span が含む [from ≤ cut ≤ to]
+//	（parse/Column）。番号は伏図レベルの通し番号（parse/PlanLevel。高さが 1 つの階ばかり
+//	なら階の番号）。伏図はその図が切る高さ（切断レベル）を span が含む [from ≤ cut ≤ to]
 //	レイヤだけを映す。これで
 //	  * その階を base とする柱の断面と、下から貫いてこの高さに達する通し柱が出る、
 //	  * 下屋の小屋束（"2to2.5-柱"、to=2.5）が上階の小屋伏図（切断 3.25）へ写り込まない、
@@ -70,17 +73,20 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kFoundationSheetNumber = "1";
 	inline constexpr const char* kFoundationSheetTitle = "基礎伏図";
 
-	// 柱梁伏図のシートレイヤ番号の開始値。基礎伏図（番号 1）に続けて 2 から振る。
+	// 柱梁伏図のシートレイヤ番号の開始値。基礎伏図（番号 1）に続けて 2 から振る（伏図
+	// レベルの順に連番）。
 	// **基礎が無い文書でも 2 から始める**（番号が階に対して一定になり、基礎の有無で図番が動か
 	// ない）。
 	inline constexpr int kFloorPlanStartNumber = 2;
 
 	// 柱梁伏図（床伏図・小屋伏図）の切断レベル＝その階の床レベル（1 始まり＝index+1）+
 	// 0.25（index からの相対なので 1.25）。1 階床伏図＝1.25 / 2 階床伏図＝2.25 /
-	// 2 階小屋伏図＝3.25。
+	// 2 階小屋伏図＝3.25。伏図レベルごとの伏図では「index」を伏図レベルの通し番号 − 1 に
+	// 読み替える（通し番号 + 0.25）。
 	inline constexpr double kFloorPlanCutOffset = 1.25;
 
-	// 母屋伏図の切断レベル＝その階の床レベル + 0.75。
+	// 母屋伏図の切断レベル＝その階の床レベル + 0.75（伏図レベルごとの伏図では、その階の
+	// 最も高い伏図レベルの通し番号 + 0.75）。
 	// **その階の小屋束（span [i+1, i+1.5]）を超え、上階の床（i+2）には届かない高さ**を
 	// サンプルするので、屋根を貫く主屋の柱だけが載る。1 階母屋伏図＝2.75 / 2 階母屋伏図＝3.75。
 	inline constexpr double kMoyaPlanCutOffset = 1.75;
@@ -118,8 +124,9 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(const Model& model);
 
-	// 各階の柱梁伏図の sheet 命令（ストーリが無ければ空）。グラフィック凡例を各シートに
-	// 1 つ載せる。
+	// 伏図レベル（横架材の高さ）ごとの柱梁伏図の sheet 命令（ストーリが無ければ空）。
+	// 階に伏図が 2 枚以上あればタイトルに高さを添える（"2階床伏図（FL-872）"）。
+	// グラフィック凡例を各シートに 1 つ載せる。
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(const Model& model);
 

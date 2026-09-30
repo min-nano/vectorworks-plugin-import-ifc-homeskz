@@ -10,6 +10,7 @@
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Member.h"
+#include "parse/PlanLevel.h"
 #include "parse/Story.h"
 #include "parse/StructuralClass.h"
 
@@ -266,6 +267,34 @@ namespace HomeskzIfcImport::parse
 		return static_cast<double>(reached + 1);
 	}
 
+	double spanFromOrdinal(const std::vector<PlanLevel>& levels, std::size_t baseIndex,
+						   double bottomAbs)
+	{
+		// 柱の下端は受け材（土台・梁）の天端に乗るので、その階でいちばん近い天端の
+		// 伏図レベル。
+		const PlanLevel* level = nearestPlanLevel(levels, baseIndex, bottomAbs);
+		return level != nullptr ? static_cast<double>(level->ordinal)
+								: static_cast<double>(baseIndex + 1);
+	}
+
+	double spanToOrdinal(const std::vector<PlanLevel>& levels, double storyToLevel, double topAbs)
+	{
+		// storyToLevel は階の単位（resolveColumnToLevel。到達階 + 1、屋根束は + 0.5）。
+		const double whole = std::floor(storyToLevel);
+		const auto reached = static_cast<std::size_t>(std::max(whole - 1.0, 0.0));
+		const std::vector<const PlanLevel*> reachedLevels = storyPlanLevels(levels, reached);
+		if (reachedLevels.empty())
+			return storyToLevel; // 伏図レベルが無い（階が無い）ときは従来の番号のまま
+		if (storyToLevel != whole)
+		{
+			// 屋根束（小屋束・棟束）は到達階の最も高い伏図レベルの上の屋根面で止まる。
+			return static_cast<double>(reachedLevels.back()->ordinal) + 0.5;
+		}
+		// 管柱・通し柱は上端（受ける横架材の天端）が届く伏図レベル。
+		const PlanLevel* level = planLevelAbove(levels, reached, topAbs);
+		return static_cast<double>(level->ordinal);
+	}
+
 	std::vector<ColumnSpan> collectColumnSpans(const std::vector<ColumnCommand>& columns)
 	{
 		// レイヤ名で重複を除いてから (from, to) 昇順に並べる。map なのでレイヤ名順に
@@ -289,11 +318,12 @@ namespace HomeskzIfcImport::parse
 	}
 
 	std::map<int, std::vector<std::string>>
-	collectColumnLayersByStory(const std::vector<ColumnCommand>& columns)
+	collectColumnLayersByStory(const std::vector<ColumnCommand>& columns,
+							   const std::vector<PlanLevel>& levels)
 	{
 		std::map<int, std::vector<std::string>> result;
 		for (const ColumnSpan& span : collectColumnSpans(columns))
-			result[static_cast<int>(span.from) - 1].push_back(span.layer);
+			result[static_cast<int>(storyOfOrdinal(levels, span.from))].push_back(span.layer);
 		return result;
 	}
 
@@ -307,6 +337,8 @@ namespace HomeskzIfcImport::parse
 
 		// 通り芯と同じセンタリングオフセット（通り芯が無ければ (0,0)＝生の IFC 座標）。
 		const Vec2 center = context.gridCenter();
+		// span の番号は伏図レベルの通し番号（parse/PlanLevel.h「レベルの決め方」）。
+		const std::vector<PlanLevel>& levels = context.planLevels();
 		const auto topIndex = static_cast<int>(stories.size()) - 1;
 
 		// 各階の横架材天端（最上階は軒高）の絶対 Z。柱の上下端をこの高さへバインドする。
@@ -326,7 +358,9 @@ namespace HomeskzIfcImport::parse
 			double lowest = 0.0;
 			for (const MemberCommand& member : members)
 			{
-				if (member.layer != beamLayer)
+				// 伏図レベルへ振り分けた横架材（"2-横架材天端(FL-872)"）もその階の床梁
+				// （parse/PlanLevel）。印を外して階の横架材レイヤと比べる。
+				if (core::stripPlanLevelTag(member.layer) != beamLayer)
 					continue;
 				const double bottom = core::memberBottomZ(member);
 				if (!found || bottom < lowest)
@@ -375,7 +409,8 @@ namespace HomeskzIfcImport::parse
 				const double px = position.x - center.x;
 				const double py = position.y - center.y;
 
-				// span（またぐレベル区間）ごとの専用レイヤに配置する。
+				// span（またぐレベル区間）ごとの専用レイヤに配置する。まず階の単位で上端の
+				// 届く先を決め、伏図レベルの通し番号へ引き直す（下の cmd.layer）。
 				const double toLevel =
 					resolveColumnToLevel(static_cast<int>(i), topAbs, beamBottoms, beamTopAbs);
 
@@ -426,7 +461,8 @@ namespace HomeskzIfcImport::parse
 				const double topEndOffset = topAbs - seatTop;
 
 				ColumnCommand cmd;
-				cmd.layer = spanLayerName(static_cast<double>(i + 1), toLevel);
+				cmd.layer = spanLayerName(spanFromOrdinal(levels, i, bottomAbs),
+										  spanToOrdinal(levels, toLevel, seatTop));
 				cmd.memberId = makeColumnMemberId(width, depth, resolveColumnType(objectType),
 												  topHardware, bottomHardware);
 				cmd.drawClass = columnClass;

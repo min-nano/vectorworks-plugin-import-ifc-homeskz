@@ -1314,7 +1314,9 @@ namespace HomeskzIfcImport::parse
 		{
 			if (!memberOnCutPlane(member, section))
 				continue;
-			const auto level = levels.find(member.layer);
+			// 伏図レベルのレイヤ（"2-横架材天端(FL-872)"）の材も、その階の標準の天端
+			// からの差を押さえる（印を外した元のレイヤのレベル。parse/PlanLevel）。
+			const auto level = levels.find(core::stripPlanLevelTag(member.layer));
 			if (level == levels.end() || (level->second.type != core::kLevelBeamTop &&
 										  level->second.type != core::kLevelEaves))
 				continue;

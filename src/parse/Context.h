@@ -33,6 +33,7 @@
 #include "parse/Grid.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Member.h"
+#include "parse/PlanLevel.h"
 #include "parse/ShearWall.h"
 #include "parse/Step.h"
 #include "parse/Story.h"
@@ -108,7 +109,24 @@ namespace HomeskzIfcImport::parse
 		// ストーリは配置先レイヤ名しか見ず、補正はレイヤを変えない。登り梁の補正自体はこれを
 		// 入力に取る。垂木だけは補正後を渡したいので、parse/BuildDocument が補正結果を明示的に
 		// 渡す（buildRafterCommands のオーバーロード）。
+		//
+		// **配置先は伏図レベルへ振り分け済み**（parse/PlanLevel の assignMemberPlanLevels）
+		// ——横架材の高さごとに作る伏図は、レイヤで材を切り分けるため。
 		const std::vector<core::MemberCommand>& members();
+
+		// 振り分ける前の横架材の命令（配置先は階の横架材レイヤのまま）。伏図レベルを決める
+		// 材の高さ（parse/PlanLevel の collectBeamHeights）はここから引く——振り分けは
+		// 伏図レベルを要るので、振り分け後の命令から伏図レベルを決めると循環する。
+		const std::vector<core::MemberCommand>& rawMembers();
+
+		// 伏図レベル（横架材の高さごとの伏図 1 枚ぶん。parse/PlanLevel）。横架材・柱・床・
+		// 耐力壁・火打の配置先と、伏図・ストーリレベルの組み立てが同じ 1 つを共有する
+		// （別々に求めると、置いたレイヤと伏図が映すレイヤが食い違う）。
+		const std::vector<PlanLevel>& planLevels();
+
+		// 床の命令（parse/Floor の buildFloorCommands）。Document の floors と、ストーリ・
+		// 伏図（伏図レベルの床レイヤがあるか）が共有する。
+		const std::vector<core::FloorCommand>& floors();
 
 		// 柱の命令（parse/Column の buildColumnCommands）。3 者がこの 1 回の解析結果を
 		// 共有する: ストーリ（span 柱レイヤのレベルを作る）・Document の columns・登り梁の
@@ -147,6 +165,9 @@ namespace HomeskzIfcImport::parse
 		std::map<int, std::vector<LoftFloorRegion>> fLoftFloorRegions;
 		std::map<int, std::optional<RoofPlane>> fRoofPlanes;
 		std::optional<std::vector<core::MemberCommand>> fMembers;
+		std::optional<std::vector<core::MemberCommand>> fRawMembers;
+		std::optional<std::vector<PlanLevel>> fPlanLevels;
+		std::optional<std::vector<core::FloorCommand>> fFloors;
 		std::optional<std::vector<core::ColumnCommand>> fColumns;
 		std::optional<std::vector<core::WallCommand>> fWalls;
 		std::optional<std::vector<core::SymbolCommand>> fAnchorBolts;
