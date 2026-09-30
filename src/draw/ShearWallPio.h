@@ -43,6 +43,20 @@ namespace HomeskzIfcImport::draw
 	// 診断ログが閉じた後なので、何が起きたかが残らない。取り込みの最後（伏図・軸組図・
 	// レイヤ縮尺の変更まで済んだ後）に同じ決め方を走らせれば、「その時点で既に柱が
 	// 見つからないのか」「編集のときに限るのか」を分けられる。
-	std::string probeShearWall(MCObjectHandle object);
+	//
+	// 数えるのは状態（kind）で、文言（text）は診断ログに載せるだけ——文言の先頭で
+	// 分類すると、言い回しを直しただけで数え方が変わる。
+	struct ShearWallProbe
+	{
+		enum class Kind
+		{
+			FromColumns, // 両端の柱から内法を引けた
+			Fallback,	 // 柱を見失い、控えの内法で描く
+			Undecided,	 // 内法が決まらない（描かない）
+		};
+		Kind kind = Kind::Undecided;
+		std::string text; // 内法の決まり方の 1 行（診断ログ用）
+	};
+	ShearWallProbe probeShearWall(MCObjectHandle object);
 #endif
 } // namespace HomeskzIfcImport::draw
