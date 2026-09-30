@@ -18,6 +18,7 @@
 #pragma once
 
 #include "core/Geometry.h"
+#include "core/Layout.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -1620,8 +1621,8 @@ namespace HomeskzIfcImport::core
 	//   * 左右の中央 … 断面線の中点。断面線は通り芯の外接の両端から同じ kSectionLineMargin
 	//                  だけ延ばしてある（parse/Section）ので、中点＝建物の左右の中央になる。
 	//   * 最下点     … rangeStart（sectionHeightRange の start）に kSectionHeightMargin を
-	//                  戻した高さ。ラベルはこの余白の中に収まる（余白は図のマスに含まれて
-	//                  いるので、ラベルのために割り付けを変えなくてよい。core/Layout）。
+	//                  戻した高さ。ラベルはまずこの余白の中に置かれ、収まらないぶんは
+	//                  割り付けが下の帯としてマスへ足す（core::sectionBands・core::sectionLayout）。
 	Vec2 sectionLabelAnchor(const SectionCommand& section, double rangeStart);
 
 	// 軸組図の図面ラベルの上端と建物の最下点との間隔（用紙 mm）の、寸法が無いときの値。
@@ -1633,6 +1634,23 @@ namespace HomeskzIfcImport::core
 	// 寸法と重なる。下に出る列＝**水平な列で side が負のもの**（図の下へ出す列）の最も外の
 	// 段で帯を測り、kSectionLabelGap を足す。描画側はこれに縮尺の分母を掛けてモデル mm にする。
 	double sectionLabelDrop(const ViewportCommand& viewport);
+
+	// 軸組図の外周に張り出す注釈の帯（用紙 mm・辺ごと。core::SectionBands）を、全命令の
+	// **最も広いもの**で返す（全軸組図は同じマスに並ぶ）。数えるのは次のとおり。
+	//   左 … 左へ出す縦の列（高さの寸法）の帯＋レベル記号があれば kLevelMarkBandAllowance
+	//   右 … 右へ出す縦の列のうち**図の右端に根元があるもの**の帯と、レベル記号があれば
+	//        基準線が右端を越える kLevelLineOvershoot の大きい方。標準と違う高さの横架材の
+	//        列（材の中央から右へ出す）は図の内側に収まるので数えない。右端はレベル記号の
+	//        right で知る——記号が無い図では右端が分からないので、縦の列を全部数える（広く
+	//        取る側へ倒す）
+	//   下 … 下へ出す横の列（柱の位置）の帯＋図面ラベル（kSectionLabelGap＋
+	//        kSectionLabelAllowance。図面タイトルがあるときだけ）
+	//   上 … 上へ出す横の列の帯と、通り芯があれば（gridBubbles）その符号の見込み
+	//        kSectionGridBubbleAllowance の大きい方。軸組図には切断面を横切る通り芯が映り、
+	//        符号の円（用紙基準で縮尺に追随しない）が建物の上へ出る（PR #176 round 1 の実機）
+	// 帯の量は core::dimensionBand（段が無ければ 0）。
+	SectionBands sectionBands(const std::vector<SectionCommand>& sections,
+							  bool gridBubbles = false);
 
 	// 平面（伏図）の広がりに足す四方の余白（mm）。通り芯の丸（通り名の吹き出し）や部材の
 	// 太さは命令の座標には現れないので、その分の遊びを持たせる。planContentBounds とその

@@ -545,6 +545,13 @@ TEST(loft_floor_is_synthesised_from_floor_beams)
 	CHECK(near(maxAbs, 550.0));
 }
 
+TEST(loft_floor_is_synthesised_from_kouotsubari)
+{
+	// 甲乙梁はクラスを床梁と分けても、床を受ける梁としてロフト床の合成に加わる。
+	Model const model = loadIfcFromText(loftFrameText("木梁:甲乙梁:1"));
+	CHECK_EQ(buildFloorCommands(model).size(), static_cast<std::size_t>(1));
+}
+
 TEST(loft_synthesis_ignores_non_floor_beams)
 {
 	// 小屋梁・軒桁など床梁でない横架材は床を作らない（種別は IFC Name の記録で判定）。
