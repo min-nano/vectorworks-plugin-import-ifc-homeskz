@@ -15,6 +15,8 @@
 //	    （段違いの外周を含む）は図の外に並べる。外周の列には外周の立上りに取り合う芯だけが載る。
 //	    外側の列にある寸法は内部の列に重ねない。半島状の立上りは長さも押さえる。内部の
 //	    立上りは芯・端の列とアンカーボルトの列を分ける。
+//	  * 床伏図・小屋伏図の横架材に沿う列——外周には外周の梁に乗る柱と取り合う梁の芯だけを
+//	    出し、それ以外の柱は内部の梁に沿って押さえる（柱と芯を同じ列に並べる）。
 //	  * 伏図の種類ごとに押さえるもの——床伏図は柱と梁（表示レイヤに載るものだけ）、
 //	    母屋伏図は母屋だけ。
 //	  * 軸組図——柱の位置（通り芯を合わせる。図の下）、GL・FL・軒高と標準の横架材天端（図の左）、
@@ -538,6 +540,46 @@ TEST(FoundationPerimeterHasCoresOnEverySide)
 	CHECK(!hasChain(chains, DimensionAxis::Horizontal, {0.0, 1820.0}, -75.0, -1, 2));
 }
 
+TEST(FramingChainsPutOnlyWhatFacesThePerimeterOutside)
+{
+	// 外周 0〜1820 の矩形の梁（端点は取り付く相手の芯）。内部に南北の梁 x=910（上下の外周に
+	// 取り合う）と、東西の梁 y=910（西の外周と x=910 に取り合う）。柱は四隅・南の外周の
+	// x=455・内部の梁の上の (455, 910) と (910, 1365)。
+	const std::vector<MemberCommand> members{
+		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 3264.0),
+		makeMember("2-横架材天端", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}, 3264.0),
+		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
+		makeMember("2-横架材天端", Vec2{1820.0, 0.0}, Vec2{1820.0, 1820.0}, 3264.0),
+		makeMember("2-横架材天端", Vec2{910.0, 0.0}, Vec2{910.0, 1820.0}, 3264.0),
+		makeMember("2-横架材天端", Vec2{0.0, 910.0}, Vec2{910.0, 910.0}, 3264.0)};
+	const std::vector<ColumnCommand> columns{
+		makeColumn("1to2-柱", Vec2{0.0, 0.0}),	   makeColumn("1to2-柱", Vec2{1820.0, 0.0}),
+		makeColumn("1to2-柱", Vec2{0.0, 1820.0}),  makeColumn("1to2-柱", Vec2{1820.0, 1820.0}),
+		makeColumn("1to2-柱", Vec2{455.0, 0.0}),   makeColumn("1to2-柱", Vec2{455.0, 910.0}),
+		makeColumn("1to2-柱", Vec2{910.0, 1365.0})};
+	const std::vector<DimensionChainCommand> chains = parse::framingDimensionChains(
+		members, columns, smallGrid(), Vec2{-60.0, -60.0}, Vec2{1880.0, 1880.0});
+
+	// 外周の 1 段目: 外周の梁に乗る柱と、外周の梁に取り合う直交する梁（の芯）だけ。
+	// 内部の柱（455, 910）の x=455 は上には載らない。
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 910.0, 1820.0}, 1880.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 455.0, 910.0, 1820.0}, -60.0, -1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 910.0, 1820.0}, -60.0, -1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0}, 1880.0, 1, 0));
+	// 2 段目は全長だけ（上。右は 1 段目と同じなので出さない）。柱を除いた芯の列は作らない。
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 1820.0}, 1880.0, 1, 1));
+	CHECK(!hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0}, 1880.0, 1, 1));
+	CHECK(!hasChain(chains, DimensionAxis::Horizontal, {0.0, 910.0, 1820.0}, -60.0, -1, 1));
+
+	// 外周に載らない柱は、乗っている内部の梁に沿って押さえる（梁の芯から外側へ）。
+	// 柱と梁の芯を同じ列に並べる（アンカーボルトのように段を分けない）。
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 455.0, 910.0}, 910.0, 1, 0));
+	// x=910 の 0〜910 は左の外周の列にあるので重ねない。
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {910.0, 1365.0, 1820.0}, 910.0, 1, 0));
+	for (const DimensionChainCommand& chain : chains)
+		CHECK(!(near(chain.base, 910.0) && chain.tier != 0));
+}
+
 TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)
 {
 	Document document;
@@ -546,9 +588,11 @@ TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)
 	document.columns = {makeColumn("1to2-柱", Vec2{0.0, 0.0}),
 						makeColumn("1to2-柱", Vec2{455.0, 1820.0}),
 						// 別の階の柱は映らないので押さえない。
-						makeColumn("2to3-柱", Vec2{1365.0, 0.0})};
-	document.members = {// 東西に走る梁 → Y=910 を押さえる。
-						makeMember("2-横架材天端", Vec2{0.0, 910.0}, Vec2{1820.0, 910.0}, 3264.0),
+						makeColumn("2to3-柱", Vec2{1365.0, 1820.0})};
+	document.members = {makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 3264.0),
+						makeMember("2-横架材天端", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}, 3264.0),
+						makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
+						makeMember("2-横架材天端", Vec2{1820.0, 0.0}, Vec2{1820.0, 1820.0}, 3264.0),
 						// 斜めの材は押さえない。
 						makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{910.0, 700.0}, 3264.0),
 						// 表示レイヤに無い材は押さえない。
@@ -558,16 +602,16 @@ TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildPlanDimensionCommands(document, sheet);
 
-	// 上の 1 段目: 通り芯 0 / 910 / 1820 に柱の 455 が加わる（1365・1500 は入らない）。
+	// 上の 1 段目: 外周の梁の両端に柱の 455（1365・1500・通り芯だけの 910 は入らない）。
 	const DimensionChainCommand* top = findChain(chains, DimensionAxis::Horizontal, 1, 0);
 	CHECK(top != nullptr);
 	if (top != nullptr)
-		CHECK(sameValues(top->stops, {0.0, 455.0, 910.0, 1820.0}));
-	// 左の 1 段目: 通り芯 0 / 1820 に梁の 910 が加わる。
+		CHECK(sameValues(top->stops, {0.0, 455.0, 1820.0}));
+	// 左の 1 段目: 外周の梁の両端だけ。
 	const DimensionChainCommand* left = findChain(chains, DimensionAxis::Vertical, -1, 0);
 	CHECK(left != nullptr);
 	if (left != nullptr)
-		CHECK(sameValues(left->stops, {0.0, 910.0, 1820.0}));
+		CHECK(sameValues(left->stops, {0.0, 1820.0}));
 }
 
 TEST(MoyaPlanDimensionsOnlyMoya)
