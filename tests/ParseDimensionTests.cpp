@@ -7,8 +7,6 @@
 //
 //	検証項目:
 //	  * 測点のまとめ方——昇順・許容以内は 1 点・部材と通り芯が重なれば通り芯の値が残る。
-//	  * 伏図の外周の列——上と左に部材の位置（通り芯を合わせる）、全長は上（1 つ外の段）と右。
-//	    通り芯の間隔だけの列は置かない。通り芯が無くても部材の位置と全長は出る。
 //	  * 基礎伏図の立上りに沿う列——アンカーボルト・自由端・取り合う立上りの芯が測点になる。
 //	    隅・T 字は立上りの芯で押さえ、取り合う立上りの無い通り芯は測点にしない。離れた
 //	    立上りの間はまたがない（取り合いの無い一続きだけはつなぐ）。外側に面する立上り
@@ -19,8 +17,10 @@
 //	    出し、それ以外の柱は内部の梁に沿って押さえる。柱と梁の芯が一致しない通りは、
 //	    柱の列と横架材の列を別に押さえる。外周の柱の列は辺ごとに 1 本につなぎ、上と右は
 //	    全長の端まで延ばす。外側の列にある寸法は内部の列に重ねない。
-//	  * 伏図の種類ごとに押さえるもの——床伏図は柱と梁（表示レイヤに載るものだけ）、
-//	    母屋伏図は母屋だけ。
+//	  * 母屋伏図の材に沿う列——母屋・登り梁の芯と、斜めの登り梁との交点を押さえ、材も交点も
+//	    無い通り芯は押さえない。ほかの材と取り合わない材の芯は外周（上・左）へ出す。
+//	  * 伏図の種類ごとに押さえるもの——床伏図は柱と梁、母屋伏図は母屋・登り梁（表示レイヤに
+//	    載るものだけ）。
 //	  * 軸組図——柱の位置（通り芯を合わせる。図の下）、GL・FL・軒高と標準の横架材天端（図の左）、
 //	    標準と違う高さの横架材の高さ、レベル記号。
 //	  * 実フィクスチャ——寸法を入れた文書が検証を通り、何度組み立てても同じになること。
@@ -206,50 +206,6 @@ TEST(GridStopsSplitByDirection)
 	grids.push_back(makeGrid("X2", Vec2{910.3, 3000.0}, Vec2{910.3, 4000.0}));
 	CHECK(sameValues(parse::gridStops(grids, DimensionAxis::Horizontal), {0.0, 910.0, 1820.0}));
 	CHECK(sameValues(parse::gridStops(grids, DimensionAxis::Vertical), {0.0, 1820.0}));
-}
-
-TEST(PerimeterChainsPutMembersTopLeftAndOverallTopRight)
-{
-	const Vec2 min{-300.0, -300.0};
-	const Vec2 max{2120.0, 2120.0};
-	const std::vector<DimensionChainCommand> chains = parse::perimeterDimensionChains(
-		{0.0, 455.0, 910.0}, {}, {0.0, 910.0, 1820.0}, {0.0, 1820.0}, min, max, 0);
-
-	CHECK(chains.size() == 4);
-	if (chains.size() != 4)
-		return;
-	// 上: 部材の位置（通り芯を合わせる）→ 全長。通り芯の間隔だけの列は無く、下にも置かない。
-	CHECK(isChain(chains[0], DimensionAxis::Horizontal, {0.0, 455.0, 910.0, 1820.0}, 2120.0, 1, 0));
-	CHECK(isChain(chains[1], DimensionAxis::Horizontal, {0.0, 1820.0}, 2120.0, 1, 1));
-	// 左: 部材の位置（ここでは通り芯だけ）。右: 全長（最も内側の段）。
-	CHECK(isChain(chains[2], DimensionAxis::Vertical, {0.0, 1820.0}, -300.0, -1, 0));
-	CHECK(isChain(chains[3], DimensionAxis::Vertical, {0.0, 1820.0}, 2120.0, 1, 0));
-}
-
-TEST(PerimeterChainsWorkWithoutGrids)
-{
-	const std::vector<DimensionChainCommand> chains = parse::perimeterDimensionChains(
-		{0.0, 1000.0, 3000.0}, {}, {}, {}, Vec2{-300.0, -300.0}, Vec2{3300.0, 300.0}, 1);
-
-	// 通り芯が無くても部材の位置と全長は出る。Y を測る部材が無ければ左右には何も無い。
-	CHECK(chains.size() == 2);
-	if (chains.size() != 2)
-		return;
-	CHECK(isChain(chains[0], DimensionAxis::Horizontal, {0.0, 1000.0, 3000.0}, 300.0, 1, 1));
-	CHECK(isChain(chains[1], DimensionAxis::Horizontal, {0.0, 3000.0}, 300.0, 1, 2));
-}
-
-TEST(PerimeterChainsSkipTheTopOverallWhenItRepeatsTheMembers)
-{
-	// 測点が 2 つなら部材の位置の列がそのまま全長なので、上に 2 段重ねない（右には置く）。
-	const std::vector<DimensionChainCommand> chains = parse::perimeterDimensionChains(
-		{0.0}, {0.0}, {1820.0}, {1820.0}, Vec2{-300.0, -300.0}, Vec2{2120.0, 2120.0}, 0);
-	CHECK(chains.size() == 3);
-	if (chains.size() != 3)
-		return;
-	CHECK(isChain(chains[0], DimensionAxis::Horizontal, {0.0, 1820.0}, 2120.0, 1, 0));
-	CHECK(isChain(chains[1], DimensionAxis::Vertical, {0.0, 1820.0}, -300.0, -1, 0));
-	CHECK(isChain(chains[2], DimensionAxis::Vertical, {0.0, 1820.0}, 2120.0, 1, 0));
 }
 
 namespace
@@ -667,15 +623,72 @@ TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)
 		CHECK(sameValues(left->stops, {0.0, 1820.0}));
 }
 
-TEST(MoyaPlanDimensionsOnlyMoya)
+TEST(MoyaChainsFollowMembersAndPressDiagonalCrossings)
+{
+	// 添付の母屋伏図（い〜り × 1〜8、910 の格子）に倣った架構。1 通りの棟木（1092〜5460）に
+	// に・へ通りの登り梁（0〜3640）が取り付き、3 通りの母屋（932.5〜5652.5）がそれを横切る。
+	// 斜めの登り梁 4 本は棟木から出て、内側の 2 本が 3 通りの母屋の端を受ける。い通りと
+	// 又ち通りの材（3640〜6370）はどの材とも取り合わない。
+	const std::vector<MemberCommand> members{
+		makeMember("2-母屋", Vec2{1092.0, 0.0}, Vec2{5460.0, 0.0}, 5000.0),
+		makeMember("2-母屋", Vec2{932.5, 1820.0}, Vec2{2730.0, 1820.0}, 4500.0),
+		makeMember("2-母屋", Vec2{2730.0, 1820.0}, Vec2{4550.0, 1820.0}, 4500.0),
+		makeMember("2-母屋", Vec2{4550.0, 1820.0}, Vec2{5652.5, 1820.0}, 4500.0),
+		makeMember("2-登り梁", Vec2{2730.0, 0.0}, Vec2{2730.0, 3640.0}, 4000.0),
+		makeMember("2-登り梁", Vec2{4550.0, 0.0}, Vec2{4550.0, 3640.0}, 4000.0),
+		makeMember("2-登り梁", Vec2{1092.0, 0.0}, Vec2{100.0, 3850.0}, 4000.0),
+		makeMember("2-登り梁", Vec2{1365.0, 0.0}, Vec2{500.0, 3640.0}, 4000.0),
+		makeMember("2-登り梁", Vec2{5005.0, 0.0}, Vec2{6300.0, 3640.0}, 4000.0),
+		makeMember("2-登り梁", Vec2{5460.0, 0.0}, Vec2{7400.0, 3850.0}, 4000.0),
+		makeMember("2-登り梁", Vec2{0.0, 3640.0}, Vec2{0.0, 6370.0}, 3500.0),
+		makeMember("2-登り梁", Vec2{6825.0, 3640.0}, Vec2{6825.0, 6370.0}, 3500.0)};
+	std::vector<GridCommand> grids;
+	for (int i = 0; i <= 8; ++i)
+		grids.push_back(
+			makeGrid("X" + std::to_string(i), Vec2{910.0 * i, -1000.0}, Vec2{910.0 * i, 7370.0}));
+	for (int i = 0; i <= 7; ++i)
+		grids.push_back(
+			makeGrid("Y" + std::to_string(i), Vec2{-1000.0, 910.0 * i}, Vec2{8280.0, 910.0 * i}));
+	const Vec2 min{-100.0, -100.0};
+	const Vec2 max{7500.0, 6500.0};
+	const std::vector<DimensionChainCommand> chains =
+		parse::moyaDimensionChains(members, {}, grids, min, max);
+
+	// 下: 1 通りの棟木に取り付く登り梁の交点（又又ろ・又ろ・又へ・と）と、に・へ通りの芯。
+	CHECK(hasChain(chains, DimensionAxis::Horizontal,
+				   {1092.0, 1365.0, 2730.0, 4550.0, 5005.0, 5460.0}, -100.0, -1, 0));
+	// 上: 3 通りの母屋（端は登り梁との交点）と、取り合わない い・又ち通りの材の芯。全長は
+	// い〜又ち。
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 932.5, 2730.0, 4550.0, 5652.5, 6825.0},
+				   6500.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 6825.0}, 6500.0, 1, 1));
+	// 左右: 1・3・5・8 通りだけ（材の無い 2・4・6・7 通りは押さえない）。全長は右。
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0, 3640.0, 6370.0}, -100.0, -1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0, 3640.0, 6370.0}, 7500.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 6370.0}, 7500.0, 1, 1));
+	// 材も交点も無い通り芯（ろ・は・ほ・ち、2・4・6・7）はどの列にも入らない。
+	for (const DimensionChainCommand& chain : chains)
+	{
+		const std::vector<double> unwanted =
+			chain.axis == DimensionAxis::Horizontal
+				? std::vector<double>{910.0, 1820.0, 3640.0, 6370.0, 7280.0}
+				: std::vector<double>{910.0, 2730.0, 4550.0, 5460.0};
+		for (const double value : unwanted)
+			CHECK(std::ranges::none_of(chain.stops,
+									   [value](double stop) { return near(stop, value); }));
+	}
+}
+
+TEST(MoyaPlanDimensionsMembersOnItsLayers)
 {
 	Document document;
 	document.stories = twoStoreyStories();
 	document.grids = smallGrid();
-	document.members = {// 母屋（南北に走る）→ X=455 を押さえる。
+	document.members = {// 母屋・登り梁（南北に走り、ほかの材と取り合わない）→ X を上で押さえる。
 						makeMember("2-母屋", Vec2{455.0, 0.0}, Vec2{455.0, 1820.0}, 4000.0),
-						// 登り梁は押さえない。
-						makeMember("2-登り梁", Vec2{1365.0, 0.0}, Vec2{1365.0, 1820.0}, 4000.0)};
+						makeMember("2-登り梁", Vec2{1365.0, 0.0}, Vec2{1365.0, 1820.0}, 4000.0),
+						// 母屋伏図に映らないレイヤの材は押さえない。
+						makeMember("2-横架材天端", Vec2{910.0, 0.0}, Vec2{910.0, 1820.0}, 3264.0)};
 	const SheetCommand sheet = makeSheet(PlanKind::Moya, {"2-母屋", "2-登り梁"});
 
 	const std::vector<DimensionChainCommand> chains =
@@ -683,7 +696,11 @@ TEST(MoyaPlanDimensionsOnlyMoya)
 	const DimensionChainCommand* top = findChain(chains, DimensionAxis::Horizontal, 1, 0);
 	CHECK(top != nullptr);
 	if (top != nullptr)
-		CHECK(sameValues(top->stops, {0.0, 455.0, 910.0, 1820.0}));
+		CHECK(sameValues(top->stops, {455.0, 1365.0}));
+	const DimensionChainCommand* left = findChain(chains, DimensionAxis::Vertical, -1, 0);
+	CHECK(left != nullptr);
+	if (left != nullptr)
+		CHECK(sameValues(left->stops, {0.0, 1820.0}));
 }
 
 TEST(PlanWithoutContentHasNoDimensions)
