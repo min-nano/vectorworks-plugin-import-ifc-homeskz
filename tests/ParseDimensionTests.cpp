@@ -333,8 +333,9 @@ TEST(FoundationChainsSplitWhereAWallCrossesTheGap)
 {
 	// 外周 0〜1820 の矩形の中に、南北の立上り x=910 が通り、y=910 の立上りが 2 本（西の
 	// 立上りに取り合う 0〜500 と、東の立上りに取り合う 1320〜1820）。間を x=910 が横切るので
-	// 割る（間の 820 は測らない）。y=1365 の 1100〜1300 は何とも取り合わないので、途切れを
-	// 横切る立上りがあっても西の一続き（0〜400）とつないで間の 700 で位置を押さえる。
+	// 割る（間の 820 は測らない）。y=1365 は 3 本（0〜300・600〜700・1200〜1820）で、途切れを
+	// それぞれ x=450・x=910 が横切る。600〜700 は何とも取り合わないので、近いほうの隣
+	// （西の 0〜300。間 300 ＜ 500）とつないで間の 300 で位置を押さえる。
 	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{1895.0, 0.0}),
 										 makeWall(Vec2{-75.0, 1820.0}, Vec2{1895.0, 1820.0}),
 										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 1895.0}),
@@ -342,8 +343,10 @@ TEST(FoundationChainsSplitWhereAWallCrossesTheGap)
 										 makeWall(Vec2{910.0, 75.0}, Vec2{910.0, 1745.0}),
 										 makeWall(Vec2{75.0, 910.0}, Vec2{500.0, 910.0}),
 										 makeWall(Vec2{1320.0, 910.0}, Vec2{1745.0, 910.0}),
-										 makeWall(Vec2{75.0, 1365.0}, Vec2{400.0, 1365.0}),
-										 makeWall(Vec2{1100.0, 1365.0}, Vec2{1300.0, 1365.0})};
+										 makeWall(Vec2{450.0, 1200.0}, Vec2{450.0, 1500.0}),
+										 makeWall(Vec2{75.0, 1365.0}, Vec2{300.0, 1365.0}),
+										 makeWall(Vec2{600.0, 1365.0}, Vec2{700.0, 1365.0}),
+										 makeWall(Vec2{1200.0, 1365.0}, Vec2{1745.0, 1365.0})};
 	const std::vector<DimensionChainCommand> chains = parse::foundationDimensionChains(
 		walls, {}, smallGrid(), Vec2{-75.0, -75.0}, Vec2{1895.0, 1895.0});
 
@@ -351,7 +354,8 @@ TEST(FoundationChainsSplitWhereAWallCrossesTheGap)
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 500.0}, 910.0, 1, 0));
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {1320.0, 1820.0}, 910.0, 1, 0));
 	CHECK(!hasChain(chains, DimensionAxis::Horizontal, {0.0, 500.0, 1320.0, 1820.0}, 910.0, 1, 0));
-	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 400.0, 1100.0, 1300.0}, 1365.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 300.0, 600.0, 700.0}, 1365.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {1200.0, 1820.0}, 1365.0, 1, 0));
 }
 
 TEST(FoundationChainsKeepOpeningsInTheChain)
