@@ -164,6 +164,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/parse/FloorPost.cpp
 		src/parse/FireBrace.cpp
 		src/parse/Joint.cpp
+		src/parse/Splice.cpp
 		src/parse/Rafter.cpp
 		src/parse/Roof.cpp
 		src/parse/Section.cpp

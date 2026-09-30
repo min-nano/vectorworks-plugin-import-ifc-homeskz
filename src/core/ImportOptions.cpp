@@ -38,6 +38,7 @@ namespace HomeskzIfcImport::core
 			{SymbolRole::Joint, "仕口", "仕口"},
 			{SymbolRole::PlanMarkColumn, "伏図記号（柱）", "柱伏図記号"},
 			{SymbolRole::PlanMarkKoyazuka, "伏図記号（小屋束）", "束伏図記号"},
+			{SymbolRole::Splice, "継手", "継手"},
 		}};
 		return kRoles;
 	}

@@ -5,7 +5,7 @@
 //
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
 //	walls / slabs（M9）・wallJoins / 底盤の modifiers＝地中梁（M10）・rafters / roofs（M6）・
-//	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints）・
+//	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints、M33: splices）・
 //	sheets（M13。シートレイヤ上のグラフィック凡例を含む）・sections（M14）・
 //	ビューポート注釈の断面寸法データタグ（M13）の
 //	各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
@@ -377,13 +377,14 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.roofs, isValidRoof))
 			return false;
 
-		// シンボル置換系（アンカーボルト・床束・火打・仕口）: 配置先レイヤ名とシンボル名が非
-		// 空であること（isValidSymbol 参照。docs/DEV-NOTES.md M11）。4 種は同じ命令型なので同
-		// じ規則で見る。
+		// シンボル置換系（アンカーボルト・床束・火打・仕口・継手）: 配置先レイヤ名とシンボル名
+		// が非空であること（isValidSymbol 参照。docs/DEV-NOTES.md M11 / M33）。5 種は同じ命令型
+		// なので同じ規則で見る。
 		if (!std::ranges::all_of(document.anchorBolts, isValidSymbol) ||
 			!std::ranges::all_of(document.floorPosts, isValidSymbol) ||
 			!std::ranges::all_of(document.fireBraces, isValidSymbol) ||
-			!std::ranges::all_of(document.joints, isValidSymbol))
+			!std::ranges::all_of(document.joints, isValidSymbol) ||
+			!std::ranges::all_of(document.splices, isValidSymbol))
 			return false;
 
 		// 断面記号・伏図記号（M12）: PIO のレイヤ名・作図クラス名・検索対象レイヤ名が非空で、
@@ -617,9 +618,10 @@ namespace HomeskzIfcImport::core
 		// 耐力壁（M19）は柱芯どうしを結ぶ線分。伏図に映る範囲へ含める。
 		for (const ShearWallCommand& wall : document.shearWalls)
 			takeSegment(wall.layer, wall.start, wall.end);
-		// シンボル置換系 4 種は同じ命令型（SymbolCommand）なので同じ扱いで畳む。
+		// シンボル置換系 5 種は同じ命令型（SymbolCommand）なので同じ扱いで畳む。
 		for (const std::vector<SymbolCommand>* list :
-			 {&document.anchorBolts, &document.floorPosts, &document.fireBraces, &document.joints})
+			 {&document.anchorBolts, &document.floorPosts, &document.fireBraces, &document.joints,
+			  &document.splices})
 		{
 			for (const SymbolCommand& symbol : *list)
 				takePoint(symbol.layer, symbol.position);

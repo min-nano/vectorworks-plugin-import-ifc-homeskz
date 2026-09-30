@@ -42,6 +42,7 @@ TEST(import_options_defaults_are_the_previous_fixed_names)
 	CHECK_EQ(options.symbol(SymbolRole::FloorPost), std::string("床束"));
 	CHECK_EQ(options.symbol(SymbolRole::FireBrace), std::string("鋼製火打"));
 	CHECK_EQ(options.symbol(SymbolRole::Joint), std::string("仕口"));
+	CHECK_EQ(options.symbol(SymbolRole::Splice), std::string("継手"));
 	CHECK_EQ(options.symbol(SymbolRole::PlanMarkColumn), std::string("柱伏図記号"));
 	CHECK_EQ(options.symbol(SymbolRole::PlanMarkKoyazuka), std::string("束伏図記号"));
 }
