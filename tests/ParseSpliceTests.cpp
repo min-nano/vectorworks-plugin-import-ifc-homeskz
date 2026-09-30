@@ -7,9 +7,10 @@
 //
 //	検証項目（docs/DEV-NOTES.md M33）: 同一直線上で材の端が突き付く箇所に 1 つだけ置くこと・
 //	**直交材を挟んで材の端が離れている箇所には置かない**こと（端部オフセットを戻した材の端で
-//	見る）・重なる材／直交する材／レイヤ違い／Z 分離の除外・基準点（材の端の一致点）と
-//	回転角（(−90°, 90°] に正規化）・高さ（2 本の端の offset の大きい方）・設定（シンボル名・
-//	取り込まない）・並び順に依存しない決定性・実フィクスチャの通し。
+//	見る）・重なる材／直交する材／レイヤ違い／Z 分離の除外・基準点（材の端の一致点）・
+//	**向き（+X が女木。土台は M12 アンカーボルトの反対側、それ以外は支点＝下階の柱・小屋束・
+//	床束の側。決まらなければ (−90°, 90°] に正規化した材軸）**・高さ（2 本の端の offset の
+//	大きい方）・設定（シンボル名・取り込まない）・並び順に依存しない決定性・実フィクスチャの通し。
 //
 
 #include "Fixtures.h"
@@ -27,6 +28,7 @@
 #include <string>
 #include <vector>
 
+using HomeskzIfcImport::core::ColumnCommand;
 using HomeskzIfcImport::core::defaultSymbolName;
 using HomeskzIfcImport::core::Document;
 using HomeskzIfcImport::core::ImportOptions;
@@ -38,6 +40,8 @@ using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::core::Vec2;
 using HomeskzIfcImport::parse::buildSpliceCommands;
 using HomeskzIfcImport::parse::CLASS_DODAI;
+using HomeskzIfcImport::parse::CLASS_OOBIKI;
+using HomeskzIfcImport::parse::SpliceCues;
 using HomeskzIfcTests::forEachFixtureDocument;
 using HomeskzIfcTests::near;
 
@@ -64,6 +68,37 @@ namespace
 		command.startBound.level = "横架材天端";
 		command.endBound.level = "横架材天端";
 		return command;
+	}
+
+	// 梁（土台以外）の命令。天端 3000 / せい 180 ＝下端 2820。
+	constexpr double kBeamTop = 3000.0;
+	constexpr double kBeamBottom = 2820.0;
+	MemberCommand beam(Vec2 start, Vec2 end, const char* drawClass = "04構造-02木造-04梁桁-03床梁")
+	{
+		MemberCommand command = member("2-横架材天端", start, end, kBeamTop);
+		command.drawClass = drawClass;
+		return command;
+	}
+
+	// 柱命令（105 角）。材が実際に占める範囲は [bottom, top]。
+	ColumnCommand column(Vec2 position, double bottom, double top)
+	{
+		ColumnCommand command;
+		command.layer = "1to2-柱";
+		command.memberId = "x";
+		command.position = position;
+		command.width = 105.0;
+		command.depth = 105.0;
+		command.elevation = bottom;
+		command.height = top - bottom;
+		return command;
+	}
+
+	// x 軸上の 2 本（0〜2000 と 2000〜4000）の継手 1 つの角度。
+	double spliceAngle(const std::vector<MemberCommand>& members, const SpliceCues& cues)
+	{
+		const std::vector<SymbolCommand> splices = buildSpliceCommands(members, cues);
+		return splices.size() == 1 ? splices[0].angle : 999.0;
 	}
 } // namespace
 
@@ -183,13 +218,13 @@ TEST(splice_follows_import_options)
 	};
 	ImportOptions options;
 	options.setSymbol(SymbolRole::Splice, "継手_腰掛け鎌");
-	const std::vector<SymbolCommand> renamed = buildSpliceCommands(members, options);
+	const std::vector<SymbolCommand> renamed = buildSpliceCommands(members, SpliceCues{}, options);
 	CHECK_EQ(renamed.size(), std::size_t{1});
 	if (!renamed.empty())
 		CHECK_EQ(renamed[0].symbol, std::string("継手_腰掛け鎌"));
 
 	options.setEnabled(SymbolRole::Splice, false);
-	CHECK(buildSpliceCommands(members, options).empty());
+	CHECK(buildSpliceCommands(members, SpliceCues{}, options).empty());
 }
 
 TEST(splice_result_does_not_depend_on_member_order)
@@ -236,9 +271,116 @@ TEST(splice_fixtures_sit_where_two_member_ends_meet)
 							++endsHere;
 				}
 				CHECK(endsHere >= 2);
-				CHECK(splice.angle > -90.0 - 1e-9 && splice.angle <= 90.0 + 1e-9);
 			}
 		});
+}
+
+TEST(splice_dodai_female_is_opposite_the_m12_anchor)
+{
+	// 土台: M12 アンカーボルトが付く側が男木。女木はその反対で、シンボルの +X が女木を向く。
+	const std::vector<MemberCommand> members = {
+		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
+		member("1-横架材天端", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}),
+	};
+	SpliceCues left;
+	left.anchorsM12 = {Vec2{1850.0, 0.0}, Vec2{3000.0, 0.0}}; // 左の 150mm が近い → 左が男木
+	CHECK(near(spliceAngle(members, left), 0.0));			  // 女木は右（+X）
+
+	SpliceCues right;
+	right.anchorsM12 = {Vec2{2150.0, 0.0}, Vec2{500.0, 0.0}};  // 右が男木
+	CHECK(near(std::abs(spliceAngle(members, right)), 180.0)); // 女木は左（−X）
+
+	// 材の幅の外・継手の真上のアンカーボルトは手掛かりにしない → 正規化した材軸。
+	SpliceCues off;
+	off.anchorsM12 = {Vec2{1850.0, 300.0}, Vec2{2000.0, 0.0}};
+	CHECK(near(spliceAngle(members, off), 0.0));
+	SpliceCues offRight;
+	offRight.anchorsM12 = {Vec2{2150.0, 300.0}};
+	CHECK(near(spliceAngle(members, offRight), 0.0));
+
+	// 土台は柱では決めない（柱を渡しても向きは M12 だけで決まる）。
+	SpliceCues columnsOnly;
+	columnsOnly.columns = {column(Vec2{2150.0, 0.0}, 0.0, 245.0)};
+	CHECK(near(spliceAngle(members, columnsOnly), 0.0));
+}
+
+TEST(splice_beam_female_is_on_the_supported_side)
+{
+	// 梁: 下階の柱（上端が梁の下端）がある側が女木。
+	const std::vector<MemberCommand> members = {beam(Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
+												beam(Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0})};
+	SpliceCues supportLeft;
+	supportLeft.columns = {column(Vec2{1850.0, 0.0}, 0.0, kBeamBottom),
+						   column(Vec2{4000.0, 0.0}, 0.0, kBeamBottom)};
+	CHECK(near(std::abs(spliceAngle(members, supportLeft)), 180.0)); // 女木は左
+
+	SpliceCues supportRight;
+	supportRight.columns = {column(Vec2{2150.0, 0.0}, 0.0, kBeamBottom),
+							column(Vec2{0.0, 0.0}, 0.0, kBeamBottom)};
+	CHECK(near(spliceAngle(members, supportRight), 0.0)); // 女木は右
+
+	// 梁を越えて伸びる通し柱・梁の上に立つ上階の柱は支点ではない（向きは正規化した材軸）。
+	// 左側にだけ置いて、支点と誤認すれば 180 度になることを確かめる形にする。
+	SpliceCues notSupports;
+	notSupports.columns = {column(Vec2{1850.0, 0.0}, 0.0, 5000.0),
+						   column(Vec2{1700.0, 0.0}, kBeamTop, 5700.0)};
+	CHECK(near(spliceAngle(members, notSupports), 0.0));
+
+	// 両側が同じ距離なら決めない。
+	SpliceCues tie;
+	tie.columns = {column(Vec2{1850.0, 0.0}, 0.0, kBeamBottom),
+				   column(Vec2{2150.0, 0.0}, 0.0, kBeamBottom)};
+	CHECK(near(spliceAngle(members, tie), 0.0));
+}
+
+TEST(splice_ohbiki_uses_floor_posts_and_beams_do_not)
+{
+	// 大引: 床束も支点。梁は床束を見ない（平面で重なっても 2 階の梁は床束に載らない）。
+	const std::vector<MemberCommand> ohbiki = {
+		beam(Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}, CLASS_OOBIKI),
+		beam(Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}, CLASS_OOBIKI)};
+	SpliceCues posts;
+	posts.floorPosts = {Vec2{1800.0, 0.0}, Vec2{2700.0, 0.0}};
+	CHECK(near(std::abs(spliceAngle(ohbiki, posts)), 180.0)); // 女木は床束の近い左
+
+	const std::vector<MemberCommand> beams = {beam(Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
+											  beam(Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0})};
+	CHECK(near(spliceAngle(beams, posts), 0.0)); // 手掛かり無し → 正規化した材軸
+}
+
+TEST(splice_orientation_follows_the_y_axis_too)
+{
+	// Y 方向の梁: 支点が上（+Y）側なら +X は +Y（90 度）を向く。
+	const std::vector<MemberCommand> members = {beam(Vec2{0.0, 0.0}, Vec2{0.0, 2000.0}),
+												beam(Vec2{0.0, 2000.0}, Vec2{0.0, 4000.0})};
+	SpliceCues up;
+	up.columns = {column(Vec2{0.0, 2150.0}, 0.0, kBeamBottom)};
+	const std::vector<SymbolCommand> splices = buildSpliceCommands(members, up);
+	CHECK_EQ(splices.size(), std::size_t{1});
+	if (!splices.empty())
+		CHECK(near(splices[0].angle, 90.0));
+}
+
+TEST(splice_fixtures_orient_most_splices_from_the_cues)
+{
+	// 実データ: 継手の向きはおおむね手掛かりから決まる（0 件なら向きの規則が何も効いて
+	// いない）。どの継手も材軸に沿う（角度は材軸と平行）。
+	std::size_t total = 0;
+	std::size_t oriented = 0;
+	forEachFixtureDocument(
+		[&](const std::string&, const Document& document)
+		{
+			for (const SymbolCommand& splice : document.splices)
+			{
+				++total;
+				// 正規化の範囲 (−90, 90] の外を向いていれば、手掛かりで決まったもの。
+				// 範囲の中でも手掛かりで決まったものはあるので、これは下限の数え方。
+				if (splice.angle > 90.0 + 1e-9 || splice.angle <= -90.0 + 1e-9)
+					++oriented;
+			}
+		});
+	CHECK(total > 0);
+	CHECK(oriented > 0);
 }
 
 TEST_MAIN();
