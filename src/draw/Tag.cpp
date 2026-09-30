@@ -74,18 +74,30 @@ namespace HomeskzIfcImport::draw
 		// テキストにも要る**——タグレイアウトの中身はタグ本体のクラスを継がない。
 		constexpr const char* kTagClass = kDimensionClass;
 
+		// 高さの注記を部材の高さに連動させる綴り＝**挿入点の高さ (Z)_ストーリの高さ**
+		// （部材の絶対Z − 部材の居るレイヤが属する階の高さ）。構造材の挿入点は始端の天端
+		// なので、水平な材では天端をその階の FL（最上階は軒高＝その階の高さ）から測った値に
+		// なる。SDK リファレンス Findings「Data Tags」の「連動する注記の作り方」で実機確認
+		// 済みの形（" (2FL "#IPZS#")"）をそのまま使う。
+		constexpr const char* kStoryHeightToken = "#IPZS#";
+
 		// タグフィールドの式（VW のタグフィールド定義式）。構造材の断面幅×せいを mm 整数で
-		// 並べ、**高さの注記**（note。"(2FL -872)"）があれば後ろへ文字列として添える。
+		// 並べ、**高さの注記**があれば後ろへ添える。
 		// **レコード名・フィールド名は draw/StructuralMember の定義から組む**——構造材を書いて
 		// いるのはこちらなので、名前を 2 か所に書かない（CLAUDE.md「重複を作らない置き場所」）。
 		//
-		// 【高さは解析側が書いた文字】以前は構造材の IPZL（挿入点のレイヤからの高さ）を
-		// 0 でないときだけ括弧付きで添えていたが、横架材の高さごとの伏図で材の載るレイヤが
-		// 高さごとに分かれると、その値はレイヤによって基準が変わる。**常にその階の FL から
-		// 測った値**にするため（ご要望）、解析側が階名付きで書いた文字（core::TagCommand::
-		// note）を式の後ろへ置く。取り込んだ時点の高さなので、材を動かしても追随しない。
-		TXString TagFieldFormula(const std::string& note)
+		// 【高さは部材から読む（水平な材）】linkHeight なら注記の数値を式で部材から読む
+		// （" (2FL "#IPZS#")"）——**材を動かしても注記が追随する**（ご要望）。階の高さを
+		// 基準にした綴りなので、横架材の高さごとに伏図のレイヤが分かれても、同じ階に属して
+		// いれば基準は FL のまま変わらない（以前の IPZL＝レイヤ基準はここで壊れた。
+		// docs/DEV-NOTES.md M36）。**演算を混ぜない**——連結と演算を混ぜると式が空になるか
+		// 括弧が印字される（Findings「連結と演算は素直には混ざらない」）。IPZS は既に階の
+		// 高さを引いてあるので演算が要らない。
+		// 傾斜材（"(2FL -872~-40)"）と連動できない材は、解析側が書いた文字（note）を
+		// そのまま置く（取り込んだ時点の値で、材を動かしても追随しない）。
+		TXString TagFieldFormula(const core::TagCommand& tag, bool linkHeight)
 		{
+			const std::string& note = tag.note;
 			TXString formula;
 			formula += "#";
 			formula += kStructuralMemberPlugin;
@@ -101,7 +113,16 @@ namespace HomeskzIfcImport::draw
 			// ご指摘）。"×" のように演算子でない文字は裸でも通る。注記は解析側が数字・符号・
 			// 括弧・"~"・","・階名だけで書き、引用符を含む階名は番号で呼ぶ（parse/Tag の
 			// memberLevelNote）ので、引用符が中に入ることはない。
-			if (!note.empty())
+			if (linkHeight)
+			{
+				// 基準名は解析側が引用符を含まないものにしてある（validateDocument）。
+				formula += "\" (";
+				formula += TXString(tag.noteDatum.c_str());
+				formula += " \"";
+				formula += kStoryHeightToken;
+				formula += "\")\"";
+			}
+			else if (!note.empty())
 			{
 				formula += "\" ";
 				formula += TXString(note.c_str());
@@ -227,10 +248,8 @@ namespace HomeskzIfcImport::draw
 
 		// レイアウトへ置く断面寸法フィールドを 1 つ作って container へ入れる。フィールドの
 		// 実体は**式を持たせたテキスト**（リンクされたテキスト）。
-		bool CreateTagField(MCObjectHandle container, const std::string& note, TagCounts& counts)
+		bool CreateTagField(MCObjectHandle container, const TXString& formula, TagCounts& counts)
 		{
-			const TXString formula = TagFieldFormula(note);
-
 			// 式そのものを本文にしておく（タグが評価するまでの見た目であり、評価後は
 			// 断面寸法に置き換わる）。fixedSize=false で幅は中身なり。
 			const MCObjectHandle text = gSDK->CreateTextBlock(formula, WorldPt(0.0, 0.0), false, 0);
@@ -308,7 +327,7 @@ namespace HomeskzIfcImport::draw
 		// 渡した後は**実際にタグが持っているレイアウトを取り直して**数を確かめ、複製された
 		// ときはこちらのグループを消す（図面に空のグループを残さない）。取り直したものが
 		// 空だったときだけ、そちらへフィールドを作り直す。
-		MCObjectHandle ResolveTagLayout(MCObjectHandle pio, const std::string& note,
+		MCObjectHandle ResolveTagLayout(MCObjectHandle pio, const TXString& formula,
 										TagCounts& counts)
 		{
 			// 既に持っていればそれを使う（生成したばかりのデータタグは既定のレイアウトを
@@ -317,7 +336,7 @@ namespace HomeskzIfcImport::draw
 			if (held != nil)
 			{
 				RemoveDefaultLoci(held);
-				if (!CreateTagField(held, note, counts))
+				if (!CreateTagField(held, formula, counts))
 					return nil;
 				return ContainerCount(held) == 0 ? nil : held;
 			}
@@ -325,7 +344,7 @@ namespace HomeskzIfcImport::draw
 			MCObjectHandle group = gSDK->CreateGroup();
 			if (group == nil)
 				return nil;
-			if (!CreateTagField(group, note, counts))
+			if (!CreateTagField(group, formula, counts))
 			{
 				gSDK->DeleteObject(group, true);
 				return nil;
@@ -350,13 +369,30 @@ namespace HomeskzIfcImport::draw
 			{
 				// VW が複製して持った。中身まで複製されていなければフィールドを作り直し、
 				// こちらのグループは消す。
-				const bool filled = ContainerCount(held) != 0 || CreateTagField(held, note, counts);
+				const bool filled =
+					ContainerCount(held) != 0 || CreateTagField(held, formula, counts);
 				gSDK->DeleteObject(group, true);
 				if (!filled)
 					return nil;
 			}
 
 			return ContainerCount(held) == 0 ? nil : held;
+		}
+
+		// 高さの注記を部材の高さに連動させられるか。解析側が基準名を付けた（水平な）材で、
+		// 関連付け先の横架材があり、**その横架材が居るレイヤが階に属している**こと。
+		// **階に属さないレイヤでは IPZS は黙って絶対Z を返す**（エラーにも空にもならず、
+		// 注記が違う数を出し続ける。Findings「Data Tags」の落とし穴）ので、確かめられない
+		// ときは解析側の文字へ倒し、件数を診断へ回す。
+		bool LinksHeight(const core::TagCommand& tag, MCObjectHandle member, TagCounts& counts)
+		{
+			if (tag.noteDatum.empty() || member == nil)
+				return false;
+			const MCObjectHandle layer = VWObject(member).GetParentLayer();
+			if (layer != nil && gSDK->GetStoryOfLayer(layer) != nil)
+				return true;
+			++counts.heightUnlinked;
+			return false;
 		}
 
 		// タグ 1 つを注釈として置く。置けたら true。support は呼び出し側が 1 回だけ作った
@@ -412,7 +448,8 @@ namespace HomeskzIfcImport::draw
 			// **ここも区間にしない。** 中の CreateTagField がタグ内のテキストへ
 			// SetClassByName / SetAllAttributesByClass を呼ぶので、包むと入れ子になる
 			// （draw/DrawUtil の【計測】）。round 1 の実測は 531 回で 221ms と軽い。
-			if (ResolveTagLayout(object, tag.note, counts) == nil)
+			const TXString formula = TagFieldFormula(tag, LinksHeight(tag, member, counts));
+			if (ResolveTagLayout(object, formula, counts) == nil)
 			{
 				++counts.layoutFailed;
 			}
@@ -579,8 +616,8 @@ namespace HomeskzIfcImport::draw
 		// 異常が無ければ 1 行も出さない（うまくいった取り込みでは雑音でしかない）。
 		if (counts.failed == 0 && counts.unassociated == 0 && counts.layoutFailed == 0 &&
 			counts.leaderLeft == 0 && counts.updateFailed == 0 && counts.unmeasured == 0 &&
-			!classesBroken && !counts.textStyleMissing && !counts.linkMissing &&
-			counts.firstTag.empty())
+			counts.heightUnlinked == 0 && !classesBroken && !counts.textStyleMissing &&
+			!counts.linkMissing && counts.firstTag.empty())
 			return {};
 
 		std::string text = label + "の断面寸法タグの診断: ";
@@ -602,6 +639,8 @@ namespace HomeskzIfcImport::draw
 		AppendCount(text, "クラスを戻した後に更新できなかったビューポート", counts.updateFailed,
 					"枚");
 		AppendCount(text, "実位置を測れず動かせなかったタグ", counts.unmeasured, "件");
+		AppendCount(text, "階に属さないレイヤの横架材で、高さの注記を連動させられなかったタグ",
+					counts.heightUnlinked, "件");
 		return text;
 	}
 } // namespace HomeskzIfcImport::draw

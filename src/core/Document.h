@@ -1082,6 +1082,13 @@ namespace HomeskzIfcImport::core
 		// 材・隅木谷木には添えない（空）。解析側が決めた文字をそのまま載せる（parse/Tag の
 		// memberLevelNote）。
 		std::string note;
+		// 高さの注記を**部材の高さに連動させる**ときの基準の名前（"2FL" / 最上階は "軒高"）。
+		// 空でなければ描画側は note の数値を文字で置かず、タグの式で部材から読む
+		// （" (2FL "#IPZS#")"。draw/Tag の TagFieldFormula）——材を動かしても注記が追随する
+		// （ご要望）。**水平な材だけ**に入る: 式から連動して読める高さは挿入点（始端の天端）
+		// 1 つだけで、傾斜材の「低い端〜高い端」は作れないため、傾斜材は note の文字のまま。
+		// 式に "…" で囲んで埋め込むので二重引用符を含まない（validateDocument）。
+		std::string noteDatum;
 	};
 
 	// 寸法の測る向き（注釈空間の軸）。Horizontal＝注釈空間の x に沿って測る（伏図の東西・

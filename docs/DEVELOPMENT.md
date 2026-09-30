@@ -298,7 +298,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 柱の span の番号（伏図レベルの通し番号。`spanFromOrdinal` / `spanToOrdinal`） | `parse/Column` |
 | 耐力壁のレイヤレベル名・柱を探す許容 | `parse/ShearWall.h` |
 | 切断面に乗る材・横切る材の判定（`memberOnCutPlane` / `columnOnCutPlane` / `memberCrossesCutPlane`。タグと寸法が共有） | `parse/Tag` |
-| データタグに添える横架材の高さの注記（`memberLevelNote`。その階の FL から）・各階の標準の横架材の高さ（`standardBeamHeights`。`parse/PlanLevel`） | `parse/Tag` |
+| データタグに添える横架材の高さの注記（`memberLevelNote` / 連動させる基準名も返す `memberLevelNoteParts`。その階の FL から）・各階の標準の横架材の高さ（`standardBeamHeights`。`parse/PlanLevel`） | `parse/Tag` |
 | 寸法の測点のまとめ方（`mergeStops` / `unionStops`。許容 `kDimensionMergeTol`）・通り芯の位置（`gridStops`）・レベル記号の表示名 | `parse/Dimension` |
 | 軸組図の図番の一意化（`uniqueSectionNumbers`） | `parse/Section` |
 | 要素の一覧（表示名・助数詞・命令数・描けた数。`kElements`）・完了／エラーの文言（`importOutcome` 等） | `parse/Summary` |

@@ -135,6 +135,19 @@ namespace HomeskzIfcImport::parse
 								const std::vector<StoryInfo>& stories,
 								const std::vector<long long>& standardHeights);
 
+	// 高さの注記と、それを部材の高さに連動させるときの基準の名前（core::TagCommand::note /
+	// noteDatum）。datum は**水平な材の注記にだけ**入る（"2FL" / "軒高"）——描画側はタグの
+	// 式で部材の挿入点の高さ（階の高さ基準）を読むが、連動して読めるのはその 1 点だけで、
+	// 傾斜材の「低い端〜高い端」は作れないため（draw/Tag の TagFieldFormula）。
+	struct LevelNote
+	{
+		std::string text;
+		std::string datum;
+	};
+	LevelNote memberLevelNoteParts(const core::MemberCommand& member,
+								   const std::vector<StoryInfo>& stories,
+								   const std::vector<long long>& standardHeights);
+
 	// 文書中の全ビューポート（伏図・軸組図）へタグ命令を割り当てる。**sheets / sections が
 	// 確定した後**に呼ぶ（parse/BuildDocument の最後）。stories・standardHeights を渡すと各タグに
 	// 高さの注記（memberLevelNote）を添える。渡さなければ注記なし。

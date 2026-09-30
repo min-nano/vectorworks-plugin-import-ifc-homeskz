@@ -1550,6 +1550,32 @@ TEST(validate_rejects_tag_pointing_past_the_members)
 	CHECK(!core::validateDocument(bySection));
 }
 
+TEST(validate_checks_linked_level_note_datum)
+{
+	// 連動する高さの注記は、添える注記があるときだけ・引用符を含まない基準名で持つ
+	// （基準名はタグの式に "…" で囲んで埋め込む。draw/Tag の TagFieldFormula）。
+	const auto withTag = [](const core::TagCommand& tag)
+	{
+		core::Document document = documentWithOneMember();
+		core::SheetCommand sheet = validSheet();
+		sheet.viewport.tags.push_back(tag);
+		document.sheets.push_back(sheet);
+		return document;
+	};
+	core::TagCommand linked = validTag();
+	linked.note = "(2FL -872)";
+	linked.noteDatum = "2FL";
+	CHECK(core::validateDocument(withTag(linked)));
+
+	core::TagCommand quoted = linked;
+	quoted.noteDatum = "2\"FL";
+	CHECK(!core::validateDocument(withTag(quoted)));
+
+	core::TagCommand bare = validTag();
+	bare.noteDatum = "2FL"; // 注記が無いのに基準だけある
+	CHECK(!core::validateDocument(withTag(bare)));
+}
+
 // --------------------------------------------------------------------------
 // - sectionHeightRange（軸組図の高さ範囲。docs/DEV-NOTES.md M14）
 //

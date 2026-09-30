@@ -205,9 +205,14 @@ namespace HomeskzIfcImport::core
 		// 関連付け先の横架材が members の範囲内であること（範囲外の添字は「どの部材にも
 		// 付かないタグ」＝図面に寸法の出ない空のタグが残る）。position / angle は数値
 		// （double なので常に成立）で値域の制限は無い。**スタイル名は見ない**——タグは
-		// スタイルを持たないため（core/Document.h の TagCommand）。
+		// スタイルを持たないため（core/Document.h の TagCommand）。連動する高さの注記の基準名
+		// （noteDatum）は、添える注記（note）があるときだけ持ち、二重引用符を含まないこと
+		// （式に "…" で囲んで埋め込むので、引用符が混ざると式全体が評価されなくなる）。
 		bool isValidTag(const TagCommand& tag, std::size_t memberCount)
 		{
+			if (!tag.noteDatum.empty() &&
+				(tag.note.empty() || tag.noteDatum.find('"') != std::string::npos))
+				return false;
 			return tag.memberIndex < memberCount;
 		}
 
