@@ -629,16 +629,27 @@ TEST(MoyaChainsFollowMembersAndPressDiagonalCrossings)
 	// に・へ通りの登り梁（0〜3640）が取り付き、3 通りの母屋（932.5〜5652.5）がそれを横切る。
 	// 斜めの登り梁 4 本は棟木から出て、内側の 2 本が 3 通りの母屋の端を受ける。い通りと
 	// 又ち通りの材（3640〜6370）はどの材とも取り合わない。
+	//
+	// 材の端（挿入点）は芯の交点からずらしてある: 棟木の端は外側の登り梁の幅の中、3 通りの
+	// 母屋の端は内側の登り梁の幅の中で止まり、内側の登り梁は棟木の側面（芯から 60）で
+	// 止まる。押さえるのはどれも芯の交点（ご要望）。
+	const auto onDiagonal = [](Vec2 base, Vec2 top, double y)
+	{
+		const double t = y / top.y;
+		return Vec2{base.x + ((top.x - base.x) * t), y};
+	};
 	const std::vector<MemberCommand> members{
-		makeMember("2-母屋", Vec2{1092.0, 0.0}, Vec2{5460.0, 0.0}, 5000.0),
-		makeMember("2-母屋", Vec2{932.5, 1820.0}, Vec2{2730.0, 1820.0}, 4500.0),
+		makeMember("2-母屋", Vec2{1080.0, 0.0}, Vec2{5470.0, 0.0}, 5000.0),
+		makeMember("2-母屋", Vec2{925.0, 1820.0}, Vec2{2730.0, 1820.0}, 4500.0),
 		makeMember("2-母屋", Vec2{2730.0, 1820.0}, Vec2{4550.0, 1820.0}, 4500.0),
-		makeMember("2-母屋", Vec2{4550.0, 1820.0}, Vec2{5652.5, 1820.0}, 4500.0),
+		makeMember("2-母屋", Vec2{4550.0, 1820.0}, Vec2{5660.0, 1820.0}, 4500.0),
 		makeMember("2-登り梁", Vec2{2730.0, 0.0}, Vec2{2730.0, 3640.0}, 4000.0),
 		makeMember("2-登り梁", Vec2{4550.0, 0.0}, Vec2{4550.0, 3640.0}, 4000.0),
-		makeMember("2-登り梁", Vec2{1092.0, 0.0}, Vec2{100.0, 3850.0}, 4000.0),
-		makeMember("2-登り梁", Vec2{1365.0, 0.0}, Vec2{500.0, 3640.0}, 4000.0),
-		makeMember("2-登り梁", Vec2{5005.0, 0.0}, Vec2{6300.0, 3640.0}, 4000.0),
+		makeMember("2-登り梁", Vec2{1092.0, 0.0}, Vec2{160.0, 3850.0}, 4000.0),
+		makeMember("2-登り梁", onDiagonal(Vec2{1365.0, 0.0}, Vec2{500.0, 3640.0}, 60.0),
+				   Vec2{500.0, 3640.0}, 4000.0),
+		makeMember("2-登り梁", onDiagonal(Vec2{5005.0, 0.0}, Vec2{6300.0, 3640.0}, 60.0),
+				   Vec2{6300.0, 3640.0}, 4000.0),
 		makeMember("2-登り梁", Vec2{5460.0, 0.0}, Vec2{7400.0, 3850.0}, 4000.0),
 		makeMember("2-登り梁", Vec2{0.0, 3640.0}, Vec2{0.0, 6370.0}, 3500.0),
 		makeMember("2-登り梁", Vec2{6825.0, 3640.0}, Vec2{6825.0, 6370.0}, 3500.0)};
@@ -654,7 +665,8 @@ TEST(MoyaChainsFollowMembersAndPressDiagonalCrossings)
 	const std::vector<DimensionChainCommand> chains =
 		parse::moyaDimensionChains(members, {}, grids, min, max);
 
-	// 下: 1 通りの棟木に取り付く登り梁の交点（又又ろ・又ろ・又へ・と）と、に・へ通りの芯。
+	// 下: 1 通りの棟木に取り付く登り梁の芯の交点（又又ろ・又ろ・又へ・と）と、に・へ通りの
+	// 芯。材の端（1080・1350.7・5019.6・5470）は押さえない。
 	CHECK(hasChain(chains, DimensionAxis::Horizontal,
 				   {1092.0, 1365.0, 2730.0, 4550.0, 5005.0, 5460.0}, -100.0, -1, 0));
 	// 上: 3 通りの母屋（端は登り梁との交点）と、取り合わない い・又ち通りの材の芯。全長は
