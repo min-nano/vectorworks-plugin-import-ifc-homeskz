@@ -1606,9 +1606,12 @@ namespace HomeskzIfcImport::core
 	//        取る側へ倒す）
 	//   下 … 下へ出す横の列（柱の位置）の帯＋図面ラベル（kSectionLabelGap＋
 	//        kSectionLabelAllowance。図面タイトルがあるときだけ）
-	//   上 … 上へ出す横の列の帯
+	//   上 … 上へ出す横の列の帯と、通り芯があれば（gridBubbles）その符号の見込み
+	//        kSectionGridBubbleAllowance の大きい方。軸組図には切断面を横切る通り芯が映り、
+	//        符号の円（用紙基準で縮尺に追随しない）が建物の上へ出る（PR #176 round 1 の実機）
 	// 帯の量は core::dimensionBand（段が無ければ 0）。
-	SectionBands sectionBands(const std::vector<SectionCommand>& sections);
+	SectionBands sectionBands(const std::vector<SectionCommand>& sections,
+							  bool gridBubbles = false);
 
 	// 平面（伏図）の広がりに足す四方の余白（mm）。通り芯の丸（通り名の吹き出し）や部材の
 	// 太さは命令の座標には現れないので、その分の遊びを持たせる。planContentBounds とその

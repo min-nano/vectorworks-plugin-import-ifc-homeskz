@@ -696,7 +696,7 @@ namespace HomeskzIfcImport::core
 		return dimensionBand(below) + kSectionLabelGap;
 	}
 
-	SectionBands sectionBands(const std::vector<SectionCommand>& sections)
+	SectionBands sectionBands(const std::vector<SectionCommand>& sections, bool gridBubbles)
 	{
 		// 図の右端に根元がある、とみなす遊び（注釈空間・モデル mm）。
 		constexpr double kEdgeTol = 1.0;
@@ -734,7 +734,9 @@ namespace HomeskzIfcImport::core
 			bands.right = std::max(bands.right, std::max(dimensionBand(right),
 														 haveLevels ? kLevelLineOvershoot : 0.0));
 			bands.bottom = std::max(bands.bottom, dimensionBand(bottom) + label);
-			bands.top = std::max(bands.top, dimensionBand(top));
+			bands.top =
+				std::max(bands.top, std::max(dimensionBand(top),
+											 gridBubbles ? kSectionGridBubbleAllowance : 0.0));
 		}
 		return bands;
 	}

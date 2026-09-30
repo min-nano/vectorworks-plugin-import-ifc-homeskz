@@ -241,14 +241,13 @@ namespace HomeskzIfcImport::draw
 		// シートレイヤからしか読めず、一方で「何枚に分かれるか＝タイトルの連番」は用紙が
 		// 分からないと決まらない）。タイトルはこの後の本番のループで付け直す。
 		//
-		// 注釈の帯（寸法・レベル記号・図面ラベル）は**出る辺にだけ**取る（core::sectionBands。
+		// 注釈の帯（寸法・レベル記号・図面ラベル・通り芯の符号）は**出る辺にだけ**取る（core::sectionBands。
 		// 四辺に取っていた頃は上と右が空いて縮尺を落としていた）。上下の帯は断面の高さ範囲の
 		// 余白（core::kSectionHeightMargin）の中にまず収める（core/Layout.h の sectionLayout）。
 		//
-		// 図面枠を置くなら、**枠の内側**へ並べる（印刷可能領域が用紙いっぱいだと図の下端が
-		// 枠と重なった。draw/TitleBlock.h の measureTitleBlockFrame）。表題欄の位置は測れない
-		// ので、段組みを上へ寄せて余りを下へ回す。
-		const core::SectionBands bands = core::sectionBands(commands);
+		// 図面枠を置くなら、その大きさを測って図と重ならないように並べる（印刷可能領域が
+		// 用紙いっぱいだと下段が表題欄と重なった。draw/TitleBlock.h の measureTitleBlockFrame）。
+		const core::SectionBands bands = core::sectionBands(commands, !document.grids.empty());
 		core::SectionLayout layout;
 		std::size_t pages = 1;
 		bool arrange = false;
@@ -258,11 +257,18 @@ namespace HomeskzIfcImport::draw
 		{
 			const core::PaperArea printable = SheetPaperArea(first).printable;
 			core::PaperArea area = printable;
-			const std::optional<core::PaperArea> frame = measureTitleBlockFrame(titleBlocks, first);
-			if (frame.has_value())
-				area = core::insetFrameArea(printable, *frame);
-			layout = core::sectionLayout(content, area, bands, core::kSectionHeightMargin,
-										 frame.has_value());
+			const std::optional<core::PaperArea> probed =
+				measureTitleBlockFrame(titleBlocks, first);
+			// 用紙を囲む枠ならその内側へ上寄せで、枠線の無い表題欄の帯なら下にその高さを
+			// 空けて並べる（core::frameCoversPaper。実機のスタイルは右下の帯だけで、それを
+			// 枠として扱った PR #176 round 1 は並べる領域が潰れた）。
+			const bool enclosing = probed.has_value() && core::frameCoversPaper(*probed, printable);
+			if (enclosing)
+				area = core::insetFrameArea(printable, *probed);
+			else if (probed.has_value())
+				area = core::reserveTitleStrip(printable, *probed);
+			layout =
+				core::sectionLayout(content, area, bands, core::kSectionHeightMargin, enclosing);
 			pages = core::sectionSheetCount(layout, commands.size());
 			arrange = true;
 			// 割り付けの記録（診断ログだけ。伏図の「伏図の割り付け（mm）」と同じ流儀）。
@@ -271,8 +277,9 @@ namespace HomeskzIfcImport::draw
 			const auto mm = [](double value) { return std::to_string(std::lround(value)); };
 			layoutRecord = "軸組図の割り付け（mm）: 印刷可能 " + mm(printable.width()) + "×" +
 						   mm(printable.height());
-			if (frame.has_value())
-				layoutRecord += " / 図面枠 " + mm(frame->width()) + "×" + mm(frame->height());
+			if (probed.has_value())
+				layoutRecord += " / 図面枠 " + mm(probed->width()) + "×" + mm(probed->height()) +
+								(enclosing ? "（枠の内側へ）" : "（表題欄の帯として下を空ける）");
 			layoutRecord += " / 並べる領域 " + mm(area.width()) + "×" + mm(area.height()) +
 							" / 帯 左" + mm(bands.left) + " 右" + mm(bands.right) + " 下" +
 							mm(bands.bottom) + " 上" + mm(bands.top) + " / 建物 " + mm(content.x) +

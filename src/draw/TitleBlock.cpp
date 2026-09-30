@@ -190,6 +190,10 @@ namespace HomeskzIfcImport::draw
 			}
 			const double centerX = (bounds.left + bounds.right) / 2.0;
 			const double centerY = (bounds.bottom + bounds.top) / 2.0;
+			// 本置きの外形を控える（診断ログ。割り付けの前に仮に測った大きさと突き合わせる）。
+			if (counts.placedSize.x <= 0.0)
+				counts.placedSize = core::Vec2{std::abs(bounds.right - bounds.left),
+											   std::abs(bounds.top - bounds.bottom)};
 			gSDK->MoveObject(object, kPaperCenter.x - centerX, kPaperCenter.y - centerY);
 		}
 	}
@@ -227,8 +231,12 @@ namespace HomeskzIfcImport::draw
 			return {};
 		// **使った登録名を必ず出す**（別の環境で違っていたときに、ここが唯一の手掛かりに
 		// なる。draw/TitleBlock.h の ★）。
-		return std::string("図面枠（") + what + "）: スタイル「" + counts.style + "」を " +
-			   std::to_string(counts.drawn) + " 枚に置きました（登録名 \"" + counts.plugin +
-			   "\"）。";
+		std::string text = std::string("図面枠（") + what + "）: スタイル「" + counts.style +
+						   "」を " + std::to_string(counts.drawn) + " 枚に置きました（登録名 \"" +
+						   counts.plugin + "\"）。";
+		if (counts.placedSize.x > 0.0)
+			text += "外形 " + std::to_string(std::lround(counts.placedSize.x)) + "×" +
+					std::to_string(std::lround(counts.placedSize.y)) + "mm。";
+		return text;
 	}
 } // namespace HomeskzIfcImport::draw

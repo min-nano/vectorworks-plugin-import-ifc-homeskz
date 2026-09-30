@@ -1715,6 +1715,11 @@ TEST(section_bands_count_only_the_sides_with_annotations)
 	const core::SectionBands merged = core::sectionBands({section, tall});
 	CHECK(near(merged.top, core::dimensionBand(2), 1e-9));
 	CHECK(near(merged.left, bands.left, 1e-9));
+
+	// 通り芯があれば、上に符号のぶんを取る（上の列の帯の方が広ければそちら）。
+	CHECK(near(core::sectionBands({section}, true).top, core::kSectionGridBubbleAllowance, 1e-9));
+	CHECK(near(core::sectionBands({section, tall}, true).top,
+			   std::max(core::dimensionBand(2), core::kSectionGridBubbleAllowance), 1e-9));
 }
 
 // ---------------------------------------------------------------------------

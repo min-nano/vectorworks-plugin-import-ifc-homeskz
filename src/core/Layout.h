@@ -216,6 +216,23 @@ namespace HomeskzIfcImport::core
 	// くらいなら枠と重なる方がよい（重なりは実機で見れば分かる）。
 	PaperArea insetFrameArea(const PaperArea& printable, const PaperArea& frame);
 
+	// 測った図面枠の外形が「用紙を囲む枠」か。幅・高さとも印刷可能領域の
+	// kTitleBlockMinCoverage 以上あるときだけ true。そうでなければ**枠線を持たない
+	// 表題欄だけの図面枠**とみなす（reserveTitleStrip）。
+	//
+	// 【なぜ分けるか】実機（PR #176 round 1）の図面枠スタイルは**用紙の右下に表題欄の帯が
+	// あるだけ**で枠線を持たず、仮に置いて測ると 235 × 19mm が返った。これを「用紙を囲む
+	// 枠」として内側へ絞ると並べる領域が 225 × 9mm に潰れ、軸組図が 1/200 まで落ちた。
+	bool frameCoversPaper(const PaperArea& frame, const PaperArea& printable);
+	inline constexpr double kTitleBlockMinCoverage = 0.5;
+
+	// 枠線の無い表題欄（strip。大きさだけを使う）のぶんを、印刷可能領域の**下**から空ける。
+	// 空けるのは「表題欄の高さ＋用紙端からの離れと図との間隔（kTitleBlockInset の 2 倍）」
+	// で、幅いっぱいに取る（表題欄が左右のどこにあっても下段の図と重ならない）。
+	// **表題欄は下にある**前提（実機のスタイルは右下。一般の図面枠も下か右下に置く）。
+	// 空けると潰れるときは printable をそのまま返す。
+	PaperArea reserveTitleStrip(const PaperArea& printable, const PaperArea& strip);
+
 	// 軸組図 1 枚の外周に張り出す注釈の帯（用紙 mm・**辺ごと**）。寸法・レベル記号・図面
 	// ラベルは図の決まった辺にしか出ない（左に高さの寸法とレベル記号、下に柱の位置の寸法と
 	// 図面ラベル。parse/Dimension・draw/DrawingLabel）ので、**出ない辺には帯を取らない**。
@@ -344,7 +361,15 @@ namespace HomeskzIfcImport::core
 
 	// 軸組図の下の帯に足す、図面ラベル（紙の 10pt のタイトル＋下線）の高さの見込み（用紙 mm。
 	// docs/DEV-NOTES.md M32 で「用紙 5mm 前後」）。ラベルの上の間隔は core::kSectionLabelGap。
-	inline constexpr double kSectionLabelAllowance = 6.0;
+	// 当初 6mm としたが、実機（PR #176 round 1・1/200）で下の注釈が見込みより 2.4mm 深く、
+	// 19 枚がマスから縦にはみ出したので 9mm にした。
+	inline constexpr double kSectionLabelAllowance = 9.0;
+
+	// 軸組図の上の帯に取る、通り芯の符号（円）が建物の上へ出る見込み（用紙 mm）。符号は
+	// 用紙基準で、実機（PR #176 round 1）の画面で直径 8mm ほど。円と少しの隙間のぶん。
+	// 上の帯は高さ範囲の余白（1/100 で用紙 10mm）に先に収めるので、1/100 以上の大きい図では
+	// マスを広げない。
+	inline constexpr double kSectionGridBubbleAllowance = 10.0;
 
 	// 記号のレイアウトの中の配置（用紙 mm・起点＝(0, 0)・y は上が +）。
 	//   triangleHeight / triangleHalfWidth … ▽ の高さと底辺（上辺）の半分。頂点は

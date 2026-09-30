@@ -149,6 +149,21 @@ namespace HomeskzIfcImport::core
 		return inside;
 	}
 
+	bool frameCoversPaper(const PaperArea& frame, const PaperArea& printable)
+	{
+		return frame.width() >= kTitleBlockMinCoverage * printable.width() &&
+			   frame.height() >= kTitleBlockMinCoverage * printable.height();
+	}
+
+	PaperArea reserveTitleStrip(const PaperArea& printable, const PaperArea& strip)
+	{
+		PaperArea area = printable;
+		area.min.y = printable.min.y + strip.height() + (2.0 * kTitleBlockInset);
+		if (area.height() <= 0.0)
+			return printable;
+		return area;
+	}
+
 	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area,
 								const SectionBands& bands, double heightMargin, bool alignTop)
 	{

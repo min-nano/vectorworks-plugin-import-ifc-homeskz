@@ -536,6 +536,34 @@ TEST(InsetFrameAreaKeepsTheDrawingsInsideTheTitleBlock)
 	CHECK(near(kept.height(), a3().height()));
 }
 
+TEST(TitleStripWithoutABorderReservesItsHeightAtTheBottom)
+{
+	// 実機（PR #176 round 1）の図面枠は右下の表題欄の帯だけで、仮に置いて測ると
+	// 235 × 19mm。用紙を囲む枠ではない。
+	const PaperArea strip{Vec2{-117.5, -9.5}, Vec2{117.5, 9.5}};
+	CHECK(!core::frameCoversPaper(strip, a3()));
+	// 下から「帯の高さ＋間隔 2 つ」を空け、上と左右は印刷可能領域のまま。
+	const PaperArea area = core::reserveTitleStrip(a3(), strip);
+	CHECK(near(area.min.y, a3().min.y + 19.0 + (2.0 * core::kTitleBlockInset)));
+	CHECK(near(area.max.y, a3().max.y));
+	CHECK(near(area.width(), a3().width()));
+
+	// round 1 の建物（16250 × 高さ範囲 10754）は、下を空けても 1/100・2 列に収まる。
+	const core::SectionLayout layout =
+		core::sectionLayout(Vec2{16250.0, 10754.0}, area, core::SectionBands{29.0, 3.0, 23.0, 10.0},
+							core::kSectionHeightMargin);
+	CHECK(near(layout.scale, 100.0));
+	CHECK(layout.columns == 2);
+
+	// 用紙を囲む枠（四辺 10mm 内側）は枠として扱う。
+	const PaperArea frame{Vec2{-200.0, -138.5}, Vec2{200.0, 138.5}};
+	CHECK(core::frameCoversPaper(frame, a3()));
+
+	// 空けると潰れるほど高い帯なら印刷可能領域のまま。
+	const PaperArea tall{Vec2{-10.0, -150.0}, Vec2{10.0, 150.0}};
+	CHECK(near(core::reserveTitleStrip(a3(), tall).height(), a3().height()));
+}
+
 TEST(PointsConvertToPaperMillimeters)
 {
 	// 72pt = 1 インチ = 25.4mm。図面ラベルのタイトル（紙の 10pt）に与える値は 3.5278mm。
