@@ -51,7 +51,6 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
-#include <numbers>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -446,12 +445,6 @@ namespace HomeskzIfcImport::draw
 			double end = 0.0;		  // 内法の終わり（ローカル x）
 			std::string axis;		  // 軸の取り方（診断ログ用）
 			std::string search; // 柱が見つからなかった経過（診断ログ用。見つかれば空）
-			// 以下は dev の名前欄の要約（DescribeForName）用の生の値。
-			double axisStart = 0.0;	   // 柱を探した軸の始端（ローカル x）
-			double axisEnd = 0.0;	   // 同 終端
-			double fallbackSpan = 0.0; // 読めた控えの内法（ClearSpan）
-			std::size_t layerCount = 0; // 対象レイヤの数（パラメータに並んでいた数）
-			ColumnSearch columns; // 柱を探した経過（見つかったときも数える）
 		};
 
 		ClearSpan ResolveClearSpan(const VWParametricObj& self, const VWTransformMatrix& toWorld)
@@ -487,7 +480,6 @@ namespace HomeskzIfcImport::draw
 			}
 
 			const double fallbackSpan = ParamReal(self, kParamShearClearSpan);
-			result.fallbackSpan = fallbackSpan;
 			if (!haveAxis)
 			{
 				if (fallbackSpan <= 0.0)
@@ -503,14 +495,12 @@ namespace HomeskzIfcImport::draw
 			// 軸組内法。**実物の柱から引くのが本筋**で、見つからないときだけ控えを使う。
 			const std::vector<std::string> layers =
 				SplitLayers(draw::PioParamString(self, kParamShearTargetLayers));
-			result.axisStart = startX;
-			result.axisEnd = endX;
-			result.layerCount = layers.size();
+			ColumnSearch search;
 			result.fromColumns = ClearSpanFromColumns(layers, toWorld, startX, endX, result.start,
-													  result.end, result.columns);
+													  result.end, search);
 			if (!result.fromColumns)
 			{
-				result.search = DescribeSearch(result.columns, layers.size());
+				result.search = DescribeSearch(search, layers.size());
 				if (fallbackSpan <= 0.0)
 					return result;
 				const double centre = (startX + endX) / 2.0;
@@ -520,65 +510,6 @@ namespace HomeskzIfcImport::draw
 			result.ok = result.end > result.start;
 			return result;
 		}
-
-#if VW_DRAW_VERIFY
-		// **リセットのたびに、内法の決まり方の要約を PIO の「名前」欄へ書く**（開発ビルド
-		// だけ。絵には触らない）。
-		//
-		// 【なぜ名前欄か】「取り込み後に OIP で 1 度編集すると柱幅の半分ずれる」不具合は
-		// **利用者の編集で走るリセット**でしか起きず、そのとき診断ログは閉じている
-		// （docs/DEV-NOTES.md M19）。名前欄なら編集した直後に OIP でそのまま読めるので、
-		// 図面へ文字を足さずに「そのリセットで何が起きたか」を持ち帰れる。SDK リファレンスの
-		// #183 では、取り込み時と OIP 編集時で Recalculate から見える環境は同じだったので、
-		// 違うとすれば**パラメータの値**——読めた控えの内法と、そこから組んだ軸を必ず載せる。
-		//
-		// ★**名前は 63 文字で黙って切られる**（SDK リファレンス Findings/Investigation
-		// Techniques.md）ので要約は短くする。**名前は図面の中で一意でなければ付かない**ので、
-		// 走行ごとに増える番号を先頭に付ける。
-		std::string Whole(double value)
-		{
-			return value == std::numeric_limits<double>::max() ? std::string("-")
-															   : std::to_string(std::lround(value));
-		}
-
-		// 変換の原点と向き（度）を「x,y/角」に縮める。
-		std::string DescribeMatrix(const VWTransformMatrix& matrix)
-		{
-			const VWPoint3D offset = matrix.GetOffset();
-			const VWPoint3D u = matrix.GetUVector();
-			const double degrees = std::atan2(u.y, u.x) * 180.0 / std::numbers::pi;
-			return Whole(offset.x) + "," + Whole(offset.y) + "/" + Whole(degrees);
-		}
-
-		// 要約の中身（63 文字に収める）:
-		//   柱|控 内法 … 柱から引けたか控えか、その内法（ローカル x）
-		//   n外した数/見た数 s始端 … 別の通りとして除いた柱の数と、始端に最も近い柱芯の距離
-		//   T… … 柱探しに使った GetObjectToWorldTransform の原点と向き
-		//   M… … VWObject::GetObjectMatrix の原点と向き（別の口で同じものを読む）
-		// 取り込み後の最初の編集では「別の通り」が急に増えた（71 本中 58 本）ので、
-		// **柱をローカルへ落とす変換そのもの**を 2 つの口で並べる。SDK リファレンスの #183 は
-		// 原点・無回転に置いた PIO で測ったので、変換が原点・無回転へ化けても区別できない。
-		std::string DescribeForName(const ClearSpan& span, const VWTransformMatrix& toWorld,
-									const VWTransformMatrix& objectMatrix)
-		{
-			return std::string(span.fromColumns ? "柱" : "控") + Whole(span.start) + "~" +
-				   Whole(span.end) + " n" + std::to_string(span.columns.offAxis) + "/" +
-				   std::to_string(span.columns.columns) + " s" + Whole(span.columns.nearStart) +
-				   " T" + DescribeMatrix(toWorld) + " M" + DescribeMatrix(objectMatrix);
-		}
-
-		void WriteDiagnosticName(const VWParametricObj& self, MCObjectHandle object,
-								 const ClearSpan& span, const VWTransformMatrix& toWorld)
-		{
-			static unsigned long long serial = 0;
-			++serial;
-			VWTransformMatrix objectMatrix;
-			self.GetObjectMatrix(objectMatrix);
-			const std::string name =
-				"SW" + std::to_string(serial) + " " + DescribeForName(span, toWorld, objectMatrix);
-			gSDK->SetObjectName(object, TXString(name.c_str()));
-		}
-#endif
 
 		// 内法の決まり方を 1 行にする（診断ログ用）。
 		std::string DescribeClearSpan(const ClearSpan& span)
@@ -610,9 +541,6 @@ namespace HomeskzIfcImport::draw
 
 			const ClearSpan resolved = ResolveClearSpan(self, toWorld);
 			core::trace::log("  shearwall: " + resolved.axis);
-#if VW_DRAW_VERIFY
-			WriteDiagnosticName(self, object, resolved, toWorld);
-#endif
 			if (!resolved.ok)
 			{
 				core::trace::log(
@@ -711,64 +639,6 @@ namespace HomeskzIfcImport::draw
 	}
 
 #if VW_DRAW_VERIFY
-	namespace
-	{
-		// **柱の「どこにあるか」を 3 つの口で並べる**（開発ビルドの測り直し用）。
-		//
-		// 柱探しは柱の外接（GetObjectBounds）で位置を測っているが、前の周を取り消して
-		// から取り込み直した周（#161 round 2）では、耐力壁の原点は格子どおりなのに柱の
-		// 中心が格子から半端にずれて測れ、60 枚中 59 枚で柱を見失った。外接が状況（ビュー
-		// 等）で変わるのかを見るため、始端に最も近い柱（柱自身の行列の原点で選ぶ）について
-		// 外接・3D の外接（GetObjectCube）・行列の原点をワールド座標で並べる。
-		std::string DescribeNearestColumn(const VWParametricObj& self,
-										  const VWTransformMatrix& toWorld)
-		{
-			const std::vector<std::string> layers =
-				SplitLayers(draw::PioParamString(self, kParamShearTargetLayers));
-			const VWPoint2D origin = toWorld.PointTransform(VWPoint2D(0.0, 0.0));
-			MCObjectHandle nearest = nil;
-			double best = std::numeric_limits<double>::max();
-			VWPoint3D nearestOffset;
-			for (const std::string& name : layers)
-			{
-				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
-				if (layer == nil)
-					continue;
-				for (MCObjectHandle h = gSDK->FirstMemberObj(layer); h != nil;
-					 h = gSDK->NextObject(h))
-				{
-					if (draw::StructuralUseOf(h) != core::kStructuralUseColumn)
-						continue;
-					VWTransformMatrix matrix;
-					VWObject(h).GetObjectMatrix(matrix);
-					const VWPoint3D offset = matrix.GetOffset();
-					const double distance = std::hypot(offset.x - origin.x, offset.y - origin.y);
-					if (distance < best)
-					{
-						best = distance;
-						nearest = h;
-						nearestOffset = offset;
-					}
-				}
-			}
-			if (nearest == nil)
-				return "柱が 1 本も無い";
-
-			WorldRect bounds;
-			gSDK->GetObjectBounds(nearest, bounds);
-			WorldCube cube;
-			gSDK->GetObjectCube(nearest, cube);
-			return "始端に最も近い柱（行列の原点で選んだ。離れ " + Number(best) +
-				   "）: 行列の原点 (" + Number(nearestOffset.x) + ", " + Number(nearestOffset.y) +
-				   ")・外接の中心 (" + Number((bounds.left + bounds.right) / 2.0) + ", " +
-				   Number((bounds.bottom + bounds.top) / 2.0) + ") 幅 " +
-				   Number(bounds.right - bounds.left) + "×" + Number(bounds.top - bounds.bottom) +
-				   "・3D 外接の中心 (" + Number((cube.MinX() + cube.MaxX()) / 2.0) + ", " +
-				   Number((cube.MinY() + cube.MaxY()) / 2.0) + ") 幅 " +
-				   Number(cube.MaxX() - cube.MinX()) + "×" + Number(cube.MaxY() - cube.MinY());
-		}
-	} // namespace
-
 	std::string probeShearWall(MCObjectHandle object)
 	{
 		if (object == nil)
@@ -782,8 +652,6 @@ namespace HomeskzIfcImport::draw
 			std::string text = resolved.ok ? DescribeClearSpan(resolved) : "内法が決まらない";
 			if (!resolved.ok && !resolved.search.empty())
 				text += "（" + resolved.search + "）";
-			if (!resolved.fromColumns)
-				text += "・" + DescribeNearestColumn(self, toWorld);
 			const VWPoint2D origin = toWorld.PointTransform(VWPoint2D(0.0, 0.0));
 			const VWPoint2D along = toWorld.PointTransform(VWPoint2D(1.0, 0.0));
 			return text + "・原点 world=(" + Number(origin.x) + ", " + Number(origin.y) +
