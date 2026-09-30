@@ -1377,6 +1377,16 @@ TEST(validate_rejects_sheet_with_empty_grayed_layer_name)
 	CHECK(!core::validateDocument(document));
 }
 
+TEST(validate_rejects_sheet_grayed_layer_also_shown)
+{
+	// 同じレイヤを表示とグレーの両方に挙げない（どちらのつもりかが命令から読めない）。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	sheet.viewport.grayedLayers = {sheet.viewport.layers.front()};
+	document.sheets.push_back(sheet);
+	CHECK(!core::validateDocument(document));
+}
+
 TEST(validate_accepts_sheet_without_drawing_label)
 {
 	// 図面タイトル・図番は空でも描ける（ラベルが空になるだけ）。
