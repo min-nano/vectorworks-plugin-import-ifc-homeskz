@@ -920,6 +920,44 @@ TEST(SectionDimensionsIncludeWhereAlongBeamsMeetCrossingBeams)
 		CHECK(sameValues(bottom->stops, {-5000.0, -4090.0, -3635.0, -3180.0}));
 }
 
+TEST(SectionDimensionsMeasureRoofPostsFromTheBuildingPerimeter)
+{
+	// 屋根の階（軒高ストーリ＝3 階）に立つ柱は小屋束と同じ列。建物の外周芯（屋根の階より
+	// 下の柱の両端 0・1820）から押さえる。
+	Document document = sectionDocument();
+	document.columns.push_back(makeColumn("3to3.5-柱", Vec2{0.0, 1000.0}));
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+	const DimensionChainCommand* posts = findChain(chains, DimensionAxis::Horizontal, 1, 0);
+	CHECK(posts != nullptr);
+	if (posts != nullptr)
+		CHECK(sameValues(posts->stops, {-5000.0, -4000.0, -3180.0}));
+	CHECK(findChain(chains, DimensionAxis::Horizontal, 1, 1) == nullptr);
+}
+
+TEST(SectionDimensionsStopAtTheOuterWallNotTheNearbyGrid)
+{
+	// 外壁芯（柱 1775）の 45mm 外に通り芯 Y2（1820）がある（い通りの 8通りの形）。外壁の
+	// 土台の端（1775）は通り芯へ寄せず、通り芯の上の切り口（1820）も最外周に足さない
+	// （45 を出さない）。
+	Document document;
+	document.stories = twoStoreyStories();
+	document.grids = smallGrid();
+	document.columns = {makeColumn("1to2-柱", Vec2{0.0, 0.0}),
+						makeColumn("1to2-柱", Vec2{0.0, 910.0}),
+						makeColumn("1to2-柱", Vec2{0.0, 1775.0})};
+	document.members = {
+		makeMember("1-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1775.0}, 464.0),
+		makeMember("1-横架材天端", Vec2{-910.0, 1775.0}, Vec2{910.0, 1775.0}, 464.0),
+		makeMember("1-横架材天端", Vec2{-910.0, 1820.0}, Vec2{910.0, 1820.0}, 464.0)};
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+	const DimensionChainCommand* bottom = findChain(chains, DimensionAxis::Horizontal, -1, 0);
+	CHECK(bottom != nullptr);
+	if (bottom != nullptr)
+		CHECK(sameValues(bottom->stops, {-5000.0, -4090.0, -3225.0}));
+}
+
 TEST(SectionLevelMarksNameGlFloorsAndEaves)
 {
 	const std::vector<LevelMarkCommand> marks =
