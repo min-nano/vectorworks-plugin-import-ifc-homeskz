@@ -32,6 +32,7 @@
 #include "parse/BuildDocument.h"
 #include "parse/Dimension.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -672,6 +673,60 @@ TEST(SectionDimensionsCoverColumnsLevelsAndOffStandardBeams)
 	CHECK(chains.size() == 4);
 }
 
+TEST(SectionDimensionsMergeOffStandardBeamsOfTheSameHeight)
+{
+	// 標準より 100 低い梁が 2 本（0〜910 と 910〜1820）。寸法は 3164〜3264 の 1 本だけに
+	// まとまる。並びを変えても同じ結果になる。
+	Document document = sectionDocument();
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{0.0, 910.0}, Vec2{0.0, 1820.0}, 3164.0));
+	// 別の高さ（標準より 200 低い）は別の寸法になる。
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{0.0, 910.0}, Vec2{0.0, 1820.0}, 3064.0));
+	const SectionCommand section = xSection();
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, section);
+
+	std::vector<const DimensionChainCommand*> offStandard;
+	for (const DimensionChainCommand& chain : chains)
+	{
+		if (chain.axis == DimensionAxis::Vertical && chain.side == 1)
+			offStandard.push_back(&chain);
+	}
+	CHECK(offStandard.size() == 2);
+	if (offStandard.size() == 2)
+	{
+		CHECK(isChain(*offStandard[0], DimensionAxis::Vertical, {3064.0, 3264.0}, -3635.0, 1, 0));
+		// 同じ長さの材が 2 本なら位置の小さい方（0〜910 の中央 −4545）。
+		CHECK(isChain(*offStandard[1], DimensionAxis::Vertical, {3164.0, 3264.0}, -4545.0, 1, 0));
+	}
+
+	// 並びを逆にしても同じ。
+	Document reversed = document;
+	std::ranges::reverse(reversed.members);
+	const std::vector<DimensionChainCommand> again =
+		parse::buildSectionDimensionCommands(reversed, section);
+	CHECK(again.size() == chains.size());
+	for (std::size_t i = 0; i < again.size() && i < chains.size(); ++i)
+		CHECK(isChain(again[i], chains[i].axis, chains[i].stops, chains[i].base, chains[i].side,
+					  chains[i].tier));
+}
+
+TEST(SectionDimensionsPlaceMergedBeamHeightOnTheLongestMember)
+{
+	// 同じ高さの材（0〜910 と 0〜1820）のうち、最も長い材の中央に置く。
+	Document document = sectionDocument();
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3164.0));
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+	const DimensionChainCommand* offStandard = findChain(chains, DimensionAxis::Vertical, 1, 0);
+	CHECK(offStandard != nullptr);
+	if (offStandard != nullptr)
+		CHECK(isChain(*offStandard, DimensionAxis::Vertical, {3164.0, 3264.0}, -4090.0, 1, 0));
+	CHECK(chains.size() == 4);
+}
+
 TEST(SectionLevelMarksNameGlFloorsAndEaves)
 {
 	const std::vector<LevelMarkCommand> marks =
@@ -697,6 +752,59 @@ TEST(SectionLevelMarksNameGlFloorsAndEaves)
 		// 左の高さの列は 2 段（横架材天端を含む列・GL/FL/軒高の間隔）なので最も外は段 1。
 		CHECK(marks[i].dimensionTier == 1);
 	}
+}
+
+TEST(SectionDimensionsAndLevelMarksReachCrossingMembers)
+{
+	// 切断面を横切る横架材（東西に走る＝X通りの断面に切り口が写る）が、柱・沿う材より
+	// 外（y=−500 → 注釈の横 −5500）にある。レベル記号と高さの列はその切り口（材幅 105 の
+	// 半分だけ外）より外から出す。
+	Document document = sectionDocument();
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{-910.0, -500.0}, Vec2{910.0, -500.0}, 3264.0));
+	// 切断面で止まる材（x=0 で終わる）も切り口を持つ。右端（y=2500 → −2500）を広げる。
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{-910.0, 2500.0}, Vec2{0.0, 2500.0}, 3264.0));
+	// 切断面へ届かない材は数えない。
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{500.0, -2000.0}, Vec2{1500.0, -2000.0}, 3264.0));
+	// 柱の範囲の内側の切り口は、下の列へ足さない（押さえるのは最外周だけ）。
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{-910.0, 455.0}, Vec2{910.0, 455.0}, 3264.0));
+	// 外側の切り口の近く（20mm）に通り芯がある。下の列はその通り芯の値を採る。
+	document.grids.push_back(makeGrid("Y0", Vec2{-1000.0, -480.0}, Vec2{2820.0, -480.0}));
+	const SectionCommand section = xSection();
+
+	const std::vector<LevelMarkCommand> marks = parse::buildSectionLevelMarks(document, section);
+	CHECK(marks.size() == 4);
+	for (const LevelMarkCommand& mark : marks)
+	{
+		CHECK(near(mark.x, -5552.5));
+		CHECK(near(mark.right, -2447.5));
+	}
+
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, section);
+	const DimensionChainCommand* levels = findChain(chains, DimensionAxis::Vertical, -1, 1);
+	CHECK(levels != nullptr);
+	if (levels != nullptr)
+		CHECK(near(levels->base, -5552.5));
+	// 下の列は柱・束の位置に、その面の最外周の切り口（左は通り芯 Y0 の −5480、右は材の芯の
+	// −2500）を足す。内側の切り口（−4545）は足さない。
+	const DimensionChainCommand* columns = findChain(chains, DimensionAxis::Horizontal, -1, 0);
+	CHECK(columns != nullptr);
+	if (columns != nullptr)
+		CHECK(sameValues(columns->stops, {-5480.0, -5000.0, -4090.0, -3180.0, -2500.0}));
+}
+
+TEST(SectionWithOnlyCrossingMembersHasNoDimensions)
+{
+	// 切り口だけでは記号を置く根拠にしない（柱も沿う材も無い断面は従来どおり空）。
+	Document document;
+	document.stories = twoStoreyStories();
+	document.members = {makeMember("2-横架材天端", Vec2{-910.0, 0.0}, Vec2{910.0, 0.0}, 3264.0)};
+	CHECK(parse::buildSectionDimensionCommands(document, xSection()).empty());
+	CHECK(parse::buildSectionLevelMarks(document, xSection()).empty());
 }
 
 TEST(SectionWithNothingOnTheCutHasNoDimensions)

@@ -146,7 +146,7 @@ namespace HomeskzIfcImport::draw
 		// 【行を 2 列に折る】1 行の高さはサムネイルの高さで決まり、**その大きさは選べない**
 		// （`ThumbnailSizeType` は kStandardSize / kLineTypeSize の 2 つだけで、後者は
 		// 線種用の細長い枠。[SDK リファレンス「レイアウトダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md)）。
-		// 役割の数（7）をそのまま縦に積むと画面の高さに対して細長くなりすぎるので、
+		// 役割の数（8）をそのまま縦に積むと画面の高さに対して細長くなりすぎるので、
 		// **列に折って高さを半分にする**。列の数を増やすときはこの定数だけを変える
 		// （割り切れない分は最後の列が短くなる）。
 		constexpr std::size_t kColumnCount = 2;
@@ -758,7 +758,7 @@ namespace HomeskzIfcImport::draw
 		// コンパイル時の定数でなければならないので、ここだけは表から回せない）。
 		// **図面枠の行（kTitleBlockRow）もイベントマップに要る**ので、数えるのは
 		// 役割の数ではなく行の数。
-		static_assert(kRowCount == 9,
+		static_assert(kRowCount == 10,
 					  "行を増減したら CImportSettingsDialog のイベントマップも直すこと");
 
 		// EVENT_DISPATCH_MAP_BEGIN は SDK のマクロで、その展開が misc-const-correctness に
@@ -772,8 +772,9 @@ namespace HomeskzIfcImport::draw
 		ADD_DISPATCH_EVENT(checkID(4), OnEnabledChanged);
 		ADD_DISPATCH_EVENT(checkID(5), OnEnabledChanged);
 		ADD_DISPATCH_EVENT(checkID(6), OnEnabledChanged);
-		ADD_DISPATCH_EVENT(checkID(7), OnEnabledChanged); // 図面枠スタイル
-		ADD_DISPATCH_EVENT(checkID(8), OnEnabledChanged); // 寸法規格
+		ADD_DISPATCH_EVENT(checkID(7), OnEnabledChanged); // 継手（M33）
+		ADD_DISPATCH_EVENT(checkID(8), OnEnabledChanged); // 図面枠スタイル
+		ADD_DISPATCH_EVENT(checkID(9), OnEnabledChanged); // 寸法規格
 		ADD_DISPATCH_EVENT(popupID(0), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(1), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(2), OnSymbolChanged);
@@ -781,8 +782,9 @@ namespace HomeskzIfcImport::draw
 		ADD_DISPATCH_EVENT(popupID(4), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(5), OnSymbolChanged);
 		ADD_DISPATCH_EVENT(popupID(6), OnSymbolChanged);
-		ADD_DISPATCH_EVENT(popupID(7), OnSymbolChanged); // 図面枠スタイル
-		ADD_DISPATCH_EVENT(popupID(8), OnSymbolChanged); // 寸法規格
+		ADD_DISPATCH_EVENT(popupID(7), OnSymbolChanged); // 継手（M33）
+		ADD_DISPATCH_EVENT(popupID(8), OnSymbolChanged); // 図面枠スタイル
+		ADD_DISPATCH_EVENT(popupID(9), OnSymbolChanged); // 寸法規格
 		EVENT_DISPATCH_MAP_END;
 
 		// 前回の選択（この VectorWorks を起動している間だけ覚えている）。初回は役割の表の

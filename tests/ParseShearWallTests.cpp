@@ -19,6 +19,7 @@
 #include "core/Document.h"
 #include "core/Geometry.h"
 #include "parse/BuildDocument.h"
+#include "parse/Context.h"
 #include "parse/Loader.h"
 #include "parse/ShearWall.h"
 #include "parse/Story.h"
@@ -295,6 +296,28 @@ TEST(shear_wall_brace_command_from_synthetic_model)
 	CHECK(core::validateDocument(document));
 }
 
+TEST(shear_wall_ignores_columns_outside_span_layers)
+{
+	// 柱を探すのは span 柱レイヤ（"{from}to{to}-柱"）に載る柱だけ。名前が span でない
+	// レイヤの柱は、壁端のすぐそばにあっても端の柱にしない（どの階を通るか決まらない）。
+	const Model model = loadIfcFromText(kBraceText);
+	parse::Context context(model);
+	std::vector<core::ColumnCommand> columns(2);
+	columns[0].layer = "柱"; // span でない（始端から 64mm）
+	columns[0].position = core::Vec2{-100.0, 0.0};
+	columns[0].width = 105.0;
+	columns[1].layer = "1to2-柱"; // 1 階を通る（終端から 64mm）
+	columns[1].position = core::Vec2{1900.0, 0.0};
+	columns[1].width = 105.0;
+
+	const std::vector<ShearWallCommand> walls = buildShearWallCommands(context, columns);
+	CHECK_EQ(walls.size(), std::size_t{1});
+	const ShearWallCommand& wall = walls.front();
+	CHECK_EQ(wall.targetLayers, std::string("1to2-柱"));
+	CHECK(near(wall.start.x, -36.0, 1e-6)); // 要素自身の端のまま
+	CHECK(near(wall.end.x, 1900.0, 1e-6));	// span の柱の芯へ寄る
+}
+
 TEST(shear_wall_double_brace_is_grouped_by_name)
 {
 	// たすき掛けは**同じ Name の 2 要素**として出るので、1 枚の耐力壁にまとまる。
@@ -500,6 +523,47 @@ TEST(shear_wall_fixture_target_layers_name_real_span_layers)
 			begin = end + 1;
 		}
 	}
+}
+
+TEST(shear_wall_fixture_target_layers_include_through_columns)
+{
+	// 柱を探すレイヤは**その階を通る** span 柱レイヤすべて。2 階の壁端の通し柱は 1 階を
+	// base とするレイヤ（"1to3-柱"）に載るので、base だけで絞ると取り逃がす（実機で
+	// 耐力壁 PIO が壁端の通し柱を認識しなかった不具合）。逆に 2 階の床で止まる管柱
+	// （"1to2-柱"）は 2 階の壁の端には立たないので挙げない。
+	std::size_t throughEnds = 0;
+	for (const auto& name : allFixtures())
+	{
+		const Document& document = fixtureDocument(name);
+		for (const ShearWallCommand& wall : document.shearWalls)
+		{
+			// レイヤ接頭辞は "{index+1}"（最上階の "R" には床の上に立つ柱が無いので見ない）。
+			const std::size_t dash = wall.layer.find('-');
+			CHECK(dash != std::string::npos);
+			if (dash == 0 || dash == std::string::npos ||
+				!std::ranges::all_of(wall.layer.substr(0, dash),
+									 [](char c) { return c >= '0' && c <= '9'; }))
+				continue;
+			const double level = std::stod(wall.layer.substr(0, dash));
+			const std::string targets = ";" + wall.targetLayers + ";";
+			for (const core::ColumnCommand& column : document.columns)
+			{
+				double from = 0.0;
+				double to = 0.0;
+				if (!parse::parseSpanLayer(column.layer, from, to))
+					continue;
+				const bool covers = from <= level && to > level;
+				const bool listed = targets.find(";" + column.layer + ";") != std::string::npos;
+				CHECK_EQ(listed, covers);
+				// 下の階から通っている柱に端が載った壁を数える。
+				if (covers && from < level &&
+					(core::samePoint(column.position, wall.start) ||
+					 core::samePoint(column.position, wall.end)))
+					++throughEnds;
+			}
+		}
+	}
+	CHECK(throughEnds > 0); // 通し柱に端が載る上階の耐力壁がフィクスチャに実在する
 }
 
 TEST(shear_wall_fixture_is_deterministic)

@@ -151,6 +151,12 @@ namespace HomeskzIfcImport::parse
 	bool overlapsFoundationWall(const core::Vec2& position, double postWidth,
 								const std::vector<core::WallCommand>& walls);
 
+	// 床束を立てる位置（センタリング済み）を**取り込み設定に依らず**求める。基礎が無い
+	// モデルでは空。並びは buildFloorPostCommands と同じ。命令を作る buildFloorPostCommands と、
+	// 大引の継手の向き（M33。支点側が女木）を決める parse/Splice の両方がこれを通る——継手の
+	// 向きが「床束を取り込むか」の設定で変わってはいけないので、命令ではなくこちらを見る。
+	std::vector<core::Vec2> floorPostPositions(Context& context);
+
 	// STEP Model から床束のシンボル配置命令を組み立てる。基礎が無いモデルでは空を返す。
 	// 並びは大引の連ごと（collectOhbikiLines の #id 昇順に由来）→ 連内は始点からの距離順で決
 	// 定的。

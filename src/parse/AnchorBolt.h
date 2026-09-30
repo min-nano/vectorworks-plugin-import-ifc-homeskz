@@ -67,6 +67,19 @@ namespace HomeskzIfcImport::parse
 	std::string resolveAnchorBoltSymbol(const std::string& typeName,
 										const core::ImportOptions& options);
 
+	// アンカーボルト本体 1 本（センタリング済みの軸芯と役割）。
+	struct AnchorBoltPoint
+	{
+		core::Vec2 position;
+		core::SymbolRole role = core::SymbolRole::AnchorBoltM12;
+	};
+
+	// アンカーボルト本体を**取り込み設定に依らず**すべて集める（#id 昇順）。命令を作る
+	// buildAnchorBoltCommands と、継手の向き（M33。男木に M12 が付く）を決める
+	// parse/Splice の両方がこれを通る——継手の向きが「アンカーボルトを取り込むか」の
+	// 設定で変わってはいけないので、命令ではなくこちらを見る。
+	std::vector<AnchorBoltPoint> collectAnchorBolts(Context& context);
+
 	// STEP Model からアンカーボルトのシンボル配置命令を組み立てる。
 	//
 	// IfcMechanicalFastener を #id 昇順に走査し、型名がボルト本体のものだけを採る。

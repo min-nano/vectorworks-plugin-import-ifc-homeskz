@@ -910,9 +910,11 @@ namespace HomeskzIfcImport::core
 	//   layer                  … PIO を置くデザインレイヤ名（"1-耐力壁"。parse/ShearWall）
 	//   drawClass              … PIO 本体の作図クラス（予約語 class を機械置換）
 	//   targetLayers           … 柱を探すデザインレイヤ名を ";" で連ねたもの
-	//                            （"1to2-柱;1to3-柱"）。**その階を base とする span 柱レイヤ
-	//                            すべて**を渡す——管柱と通し柱が別レイヤに分かれるため、
-	//                            1 つでは片端の柱を取り逃がす（parse/Column の span レイヤ）
+	//                            （"1to2-柱;1to3-柱"）。**その階を通る span 柱レイヤ
+	//                            すべて**を渡す——管柱と通し柱が別レイヤに分かれ、2 階の
+	//                            壁端の通し柱は 1 階を base とするレイヤ（"1to3-柱"）に
+	//                            載るため、base だけでは端の柱を取り逃がす
+	//                            （parse/ShearWall の spanCoversStory）
 	//   start                  … 軸の始点＝柱芯（センタリング済みの平面座標）
 	//   end                    … 同 終点。**start は (x, y) の辞書順で小さい方**に固定する
 	//                            ——表／裏の左右がこの向きで決まるので、列挙順で反転しては困る
@@ -1287,7 +1289,7 @@ namespace HomeskzIfcImport::core
 	// enum 等）で表す。
 	//
 	// TODO: 要素を足すときは、ここに命令リストを 1 本足す。
-	//   * M11 anchorBolts / floorPosts / fireBraces / joints …
+	//   * M11 anchorBolts / floorPosts / fireBraces / joints（＋ M33 splices） …
 	//   スキーマを変えるときは構造体・validateDocument・テストを同時更新する。
 	struct Document
 	{
@@ -1364,6 +1366,11 @@ namespace HomeskzIfcImport::core
 		// （parse/Joint）。members / columns から導出するので、その 2 つより後に組み立てる。
 		// 配置先は受ける側ではなく**その横架材自身のレイヤ**。
 		std::vector<SymbolCommand> joints;
+
+		// M33 継手。同一直線上で横架材の材端どうしが突き付く箇所へ "継手" を 1 つずつ置く
+		// （parse/Splice）。members から導出するので、その後に組み立てる。配置先は
+		// 横架材自身のレイヤ（仕口と同じ）。
+		std::vector<SymbolCommand> splices;
 
 		// M12 断面記号・伏図記号。**実在する span 柱レイヤごとに 2 つ**（断面記号と
 		// 伏図記号）で、断面記号をすべて先に、続けて伏図記号を並べる（parse/ColumnMark）。
@@ -1453,6 +1460,7 @@ namespace HomeskzIfcImport::core
 		std::size_t floorPosts = 0;
 		std::size_t fireBraces = 0;
 		std::size_t joints = 0;
+		std::size_t splices = 0; // M33 継手（同じくシンボル置換）
 
 		// M12 断面記号・伏図記号。**span 柱レイヤごとに置いた記号 PIO の数**（記号そのものの
 		// 個数ではない——1 つの PIO がそのレイヤの柱すべてに記号を描く）。

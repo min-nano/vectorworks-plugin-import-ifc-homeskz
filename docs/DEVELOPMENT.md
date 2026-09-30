@@ -114,7 +114,7 @@ src/
     Feedback.{h,cpp}          実機フィードバックの PR コメント本文（内訳・前の周との差分・
                               匿名化）
     Grid / Story / Floor / Member / Noboribari / Column / Rafter / Roof /
-    Footing / AnchorBolt / FloorPost / FireBrace / Joint / ColumnMark /
+    Footing / AnchorBolt / FloorPost / FireBrace / Joint / Splice / ColumnMark /
     Sheet / Tag / Section      要素ごとの解析
   draw/                     Phase 2: VW 描画（SDK 依存）。**まるごと本体に入る**
     ImportCommand.{h,cpp}     本番の取り込みコマンド（ファイル選択 → 設定 → 取り込み →
@@ -285,12 +285,13 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 基礎ストーリの名前・接尾辞・レベル・レイヤ名、基礎の許容値（統合・自由端・人通口・壁結合・地中梁・床付け） | `parse/Footing.h` |
 | 要素の判別述語（`isFloorSlab` / `isRoofSlab` / `isFireBrace` / `isBaseSlab` / `isShearBrace` / `isShearPanel` 等） | その要素のヘッダ |
 | 金物（`IfcMechanicalFastener`）の型名取得（`fastenerTypeName`） | `parse/Column` |
+| 取り込み設定に依らないアンカーボルトの位置と役割（`collectAnchorBolts`）・床束の位置（`floorPostPositions`）。命令とは別に継手の向き（`parse/Splice`）が使う | `parse/AnchorBolt` / `parse/FloorPost` |
 | 横架材の端部と相手の取り合いの幾何（`memberEndJoint`）・柱に取り付く端を柱芯へ送る関門（`resolveMemberColumnJoints`。`parse/BuildDocument` が一度だけ通す） | `parse/Member` |
 | ローカル配置原点の取り出し（`resolveLocalPlacementOrigin`）・屋根面の勾配座標系と退化の閾値・押し出しを鉛直とみなす閾値（`kVerticalExtrudeTol`） | `parse/IfcGeometry` |
 | 共有コンテキスト（下記）・階の屋根面の走査（`storyRoofPlanes`）・取り込み設定の参照（`options()`） | `parse/Context` |
 | 伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス・シンボル名 | `parse/ColumnMark` |
 | 耐力壁のレイヤレベル名・柱を探す許容 | `parse/ShearWall.h` |
-| 切断面に乗る材の判定（`memberOnCutPlane` / `columnOnCutPlane`。タグと寸法が共有） | `parse/Tag` |
+| 切断面に乗る材・横切る材の判定（`memberOnCutPlane` / `columnOnCutPlane` / `memberCrossesCutPlane`。タグと寸法が共有） | `parse/Tag` |
 | 寸法の測点のまとめ方（`mergeStops` / `unionStops`。許容 `kDimensionMergeTol`）・通り芯の位置（`gridStops`）・レベル記号の表示名 | `parse/Dimension` |
 | 軸組図の図番の一意化（`uniqueSectionNumbers`） | `parse/Section` |
 | 要素の一覧（表示名・助数詞・命令数・描けた数。`kElements`）・完了／エラーの文言（`importOutcome` 等） | `parse/Summary` |

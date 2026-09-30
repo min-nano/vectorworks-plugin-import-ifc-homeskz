@@ -40,8 +40,8 @@ namespace HomeskzIfcImport::core
 
 	// 解析フェーズの step() 呼び出し回数（parse/BuildDocument が要素ごとに 1 回進める:
 	// 柱・横架材・耐力壁・ストーリ・通り芯・床・垂木・野地板・立上り・底盤・アンカーボルト・
-	// 床束・火打・仕口・柱記号・シート・軸組図・データタグ）。要素を足したらここも増やす。
-	constexpr std::size_t kParseSteps = 18;
+	// 床束・火打・仕口・継手・柱記号・シート・軸組図・データタグ）。要素を足したらここも増やす。
+	constexpr std::size_t kParseSteps = 19;
 
 	// いま報告されている進捗。label は「横架材を描画しています…」のような見出し、
 	// done / total は件数（total = 0 は「総数が分からない／件数を出さない」の意味）。
@@ -80,6 +80,7 @@ namespace HomeskzIfcImport::core
 		FloorPosts,
 		FireBraces,
 		Joints,
+		Splices,
 		ColumnMarks,
 		ShearWalls,
 		Sheets,
