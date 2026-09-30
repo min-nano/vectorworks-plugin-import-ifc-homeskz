@@ -46,6 +46,7 @@
 
 #include "core/Document.h"
 #include "core/Geometry.h"
+#include "parse/PlanLevel.h"
 #include "parse/Step.h"
 #include "parse/Story.h"
 
@@ -180,8 +181,12 @@ namespace HomeskzIfcImport::parse
 	//     内法として潰れる（上端 ≦ 下端）なら、その耐力壁は丸ごと IFC の高さのまま残す。
 	// 内法の端は、軸の端（柱芯）に柱があればその半幅だけ内側（柱の内側面）で、柱の無い端は
 	// 軸の端そのもの（buildShearWallCommands の clearSpan と同じ約束）。
+	//
+	// levels は伏図レベル（parse/PlanLevel）。耐力壁は立つ天端の伏図レベルのレイヤに居て、
+	// 柱もその伏図レベルを通るものから探す。空なら階ごと（どの階も高さが 1 つのときと同じ）。
 	void fitShearWallsToMembers(std::vector<core::ShearWallCommand>& walls,
 								const std::vector<StoryInfo>& stories,
+								const std::vector<PlanLevel>& levels,
 								const std::vector<core::MemberCommand>& members,
 								const std::vector<core::ColumnCommand>& columns);
 

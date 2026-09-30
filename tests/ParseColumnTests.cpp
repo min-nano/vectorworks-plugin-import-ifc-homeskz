@@ -19,6 +19,8 @@
 
 #include "core/Document.h"
 #include "parse/Column.h"
+#include "parse/Context.h"
+#include "parse/PlanLevel.h"
 #include "parse/Loader.h"
 #include "parse/Member.h"
 #include "parse/Story.h"
@@ -626,7 +628,7 @@ TEST(collect_layers_by_story_groups_by_base_index)
 	const std::vector<ColumnCommand> columns = {
 		columnOnLayer("1to2-柱"), columnOnLayer("2to2.5-柱"), columnOnLayer("2to3-柱"),
 		columnOnLayer("3to3.5-柱")};
-	const std::map<int, std::vector<std::string>> byStory = collectColumnLayersByStory(columns);
+	const std::map<int, std::vector<std::string>> byStory = collectColumnLayersByStory(columns, {});
 	CHECK_EQ(byStory.size(), std::size_t(3));
 	CHECK(sameVec(byStory.at(0), {"1to2-柱"}));
 	CHECK(sameVec(byStory.at(1), {"2to2.5-柱", "2to3-柱"}));
@@ -1238,7 +1240,8 @@ TEST(reads_sample_house_fixture)
 
 	// 3 階建て相当（1FL/2FL/RFL）で、1 階には 2 階止まりの管柱と 3 階床まで届く通し柱、
 	// 屋根階には主屋根の小屋束（屋根面で止まる半整数）が立つ。
-	const std::map<int, std::vector<std::string>> byStory = collectColumnLayersByStory(commands);
+	const std::map<int, std::vector<std::string>> byStory =
+		collectColumnLayersByStory(commands, {});
 	CHECK(sameVec(byStory.at(0), {"1to2-柱", "1to3-柱"}));
 	CHECK(sameVec(byStory.at(1), {"2to2.5-柱", "2to3-柱"}));
 	CHECK(sameVec(byStory.at(2), {"3to3.5-柱"}));
@@ -1282,12 +1285,16 @@ TEST(all_fixtures_bounds_span_the_column_height)
 			const auto boundZ = [&](const core::StoryBoundCommand& bound, std::size_t storyIndex)
 			{ return bound.level == std::string("FL") ? floorZ[storyIndex] : levelZ[storyIndex]; };
 
-			for (const ColumnCommand& command : buildColumnCommands(model))
+			// span の番号は伏図レベルの通し番号（parse/PlanLevel）なので、階へは
+			// storyOfOrdinal で引き直す。
+			HomeskzIfcImport::parse::Context context(model);
+			const std::vector<HomeskzIfcImport::parse::PlanLevel>& levels = context.planLevels();
+			for (const ColumnCommand& command : buildColumnCommands(context))
 			{
 				double from = 0.0;
 				double to = 0.0;
 				CHECK(HomeskzIfcImport::parse::parseSpanLayer(command.layer, from, to));
-				const auto base = static_cast<std::size_t>(from) - 1;
+				const std::size_t base = HomeskzIfcImport::parse::storyOfOrdinal(levels, from);
 				const std::size_t top =
 					base + static_cast<std::size_t>(command.topBound.storyOffset);
 				CHECK(base < levelZ.size() && top < levelZ.size());

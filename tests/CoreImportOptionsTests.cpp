@@ -160,6 +160,44 @@ TEST(import_options_dimensions_are_off_by_default_and_keep_an_empty_name_as_off)
 	CHECK(options.dimensionStandard().empty());
 }
 
+TEST(import_options_merge_nothing_by_default)
+{
+	// 既定は「まとめない」＝横架材の高さごとに 1 枚ずつ伏図を作る（ご要望）。
+	const ImportOptions options;
+	CHECK(options.mergedPlanLevels.empty());
+	CHECK(!options.mergesWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}));
+}
+
+TEST(import_options_merge_is_keyed_by_story_and_height)
+{
+	// 鍵は（階・高さ）の組。同じ高さでも階が違えば別のレベル。
+	ImportOptions options;
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}, true);
+	CHECK(options.mergesWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}));
+	CHECK(!options.mergesWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 3531}));
+	CHECK(!options.mergesWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3530}));
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}, false);
+	CHECK(options.mergedPlanLevels.empty());
+}
+
+TEST(import_options_merge_list_stays_sorted_without_duplicates)
+{
+	// 二分探索で引くので、どの順に足しても昇順・重複なしに保つ。
+	ImportOptions options;
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}, true);
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6010}, true);
+	CHECK_EQ(options.mergedPlanLevels.size(), std::size_t(3));
+	CHECK((options.mergedPlanLevels[0] == HomeskzIfcImport::core::PlanLevelKey{1, 3531}));
+	CHECK((options.mergedPlanLevels[1] == HomeskzIfcImport::core::PlanLevelKey{2, 6010}));
+	CHECK((options.mergedPlanLevels[2] == HomeskzIfcImport::core::PlanLevelKey{2, 6374}));
+	CHECK(options.mergesWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6010}));
+	// 無いものを外しても何も起きない。
+	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{3, 1}, false);
+	CHECK_EQ(options.mergedPlanLevels.size(), std::size_t(3));
+}
+
 TEST(import_options_skip_no_sections_by_default)
 {
 	// M34 既定は「外す通りなし」＝従来どおり全部描く（設定ダイアログを出さない経路でも

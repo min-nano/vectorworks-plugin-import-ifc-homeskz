@@ -20,8 +20,10 @@
 #include "parse/BuildDocument.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -1086,6 +1088,122 @@ TEST(raise_modifier_top_is_a_no_op_without_bite)
 	const core::ModifierCommand same = core::raiseModifierTop(validModifier(), 0.0);
 	CHECK_EQ(same.profile.size(), validModifier().profile.size());
 	CHECK(same.profile[2].y == 140.0);
+}
+
+// ---------------------------------------------------------------------------
+// - core::modifierBasePolygon（地中梁の押し出しの基面）
+//
+// VWExtrudeObj は 3D ポリゴンの先頭の頂点から局所座標系を決める（原点＝先頭・U＝先頭の辺・
+// W＝U×(3 点目−先頭)・V＝W×U。SDK の VWFC ソース）。ここではその導出を写した frameOf で、
+// **どの向きの地中梁も U＝+u・V＝+Z・W＝押し出し方向**になることを見る。断面の鉛直面が
+// −u 側の地中梁で V＝−Z になり、実機で可視ソリッドが幅方向へ 24.59mm ずれた
+// （docs/DEV-NOTES.md「地中梁の可視ソリッドが幅方向にずれる」）。
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// VWPolygon3D::GetTransformMatrix と同じ取り方の局所座標系（単位ベクトル）。
+	struct PrismFrame
+	{
+		core::Vec3 u;
+		core::Vec3 v;
+		core::Vec3 w;
+	};
+
+	core::Vec3 unit(const core::Vec3& vector)
+	{
+		const double norm = core::length(vector);
+		return vector * (1.0 / norm);
+	}
+
+	PrismFrame frameOf(const std::vector<core::Vec3>& vertices)
+	{
+		const core::Vec3 u = vertices[1] - vertices[0];
+		const core::Vec3 w = core::cross(u, vertices[2] - vertices[0]);
+		const core::Vec3 v = core::cross(w, u);
+		return PrismFrame{unit(u), unit(v), unit(w)};
+	}
+
+	// 局所座標系が U＝+u・V＝+Z・W＝押し出し方向（方位角）か。
+	bool hasUprightFrame(const core::ModifierCommand& modifier)
+	{
+		const std::vector<core::Vec3> vertices = core::modifierBasePolygon(modifier);
+		if (vertices.size() < 3)
+			return false;
+		const double phi = modifier.azimuth * std::numbers::pi / 180.0;
+		const core::Vec3 axis{std::cos(phi), std::sin(phi), 0.0};
+		const core::Vec3 width{-axis.y, axis.x, 0.0};
+		const PrismFrame frame = frameOf(vertices);
+		return near(core::dot(frame.u, width), 1.0, 1e-9) && near(frame.v.z, 1.0, 1e-9) &&
+			   near(core::dot(frame.w, axis), 1.0, 1e-9);
+	}
+
+	// 実データの外周の地中梁（parse/Footing が出す断面）。鉛直面が u=0 にあり、内側へ広がる。
+	core::ModifierCommand outerBeam(double azimuth, bool verticalFaceOnMinusU)
+	{
+		const double sign = verticalFaceOnMinusU ? -1.0 : 1.0;
+		core::ModifierCommand modifier;
+		modifier.profile = {core::Vec2{0.0, 0.0}, core::Vec2{sign * 200.0, 0.0},
+							core::Vec2{sign * 380.0, 150.0}, core::Vec2{0.0, 150.0}};
+		modifier.depth = 6975.0;
+		modifier.origin = core::Vec3{-3715.0, 3215.0, -250.0};
+		modifier.azimuth = azimuth;
+		return modifier;
+	}
+} // namespace
+
+TEST(modifier_base_polygon_keeps_frame_upright_in_every_orientation)
+{
+	// 鉛直面が ±u のどちら側でも、方位角が軸に平行でも斜めでも、同じ向きの座標系になる。
+	// **鉛直面が −u 側（true）が、以前は上下逆になっていた側**。
+	for (const double azimuth : {0.0, -90.0, 90.0, 180.0, 30.0, -135.0})
+	{
+		for (const bool minusU : {false, true})
+		{
+			CHECK(hasUprightFrame(outerBeam(azimuth, minusU)));
+			CHECK(hasUprightFrame(core::raiseModifierTop(outerBeam(azimuth, minusU), 10.0)));
+		}
+	}
+	CHECK(hasUprightFrame(validModifier()));
+}
+
+TEST(modifier_base_polygon_starts_at_the_bottom_edge_toward_plus_u)
+{
+	// 鉛直面が −u 側の断面 (0,0) (−200,0) (−380,150) (0,150) は、法線を軸へ揃えると巻きが
+	// 反転する。先頭は下端の辺の始点（u=−200, v=0）で、次が (0,0)。
+	const core::ModifierCommand modifier = outerBeam(0.0, true);
+	const std::vector<core::Vec3> vertices = core::modifierBasePolygon(modifier);
+	CHECK_EQ(vertices.size(), std::size_t{4});
+	if (vertices.size() != 4)
+		return;
+	// 方位角 0 なら u はワールド +Y、v はワールド Z。
+	CHECK(near(vertices[0].x, -3715.0, 1e-9) && near(vertices[0].y, 3015.0, 1e-9) &&
+		  near(vertices[0].z, -250.0, 1e-9));
+	CHECK(near(vertices[1].x, -3715.0, 1e-9) && near(vertices[1].y, 3215.0, 1e-9) &&
+		  near(vertices[1].z, -250.0, 1e-9));
+	CHECK(near(vertices[2].y, 3215.0, 1e-9) && near(vertices[2].z, -100.0, 1e-9));
+	CHECK(near(vertices[3].y, 2835.0, 1e-9) && near(vertices[3].z, -100.0, 1e-9));
+}
+
+TEST(modifier_base_polygon_handles_non_convex_bedding)
+{
+	// 床付け（砕石）の断面は凹多角形で、+u 向きの辺が下端以外にもありうる。下端の辺
+	// （最も低い）を先頭に採り、座標系が同じ向きになる。
+	core::ModifierCommand bedding = outerBeam(-90.0, true);
+	bedding.profile = {core::Vec2{-427.1, 20.0},  core::Vec2{-247.1, -130.0},
+					   core::Vec2{50.0, -130.0},  core::Vec2{50.0, -30.0},
+					   core::Vec2{-200.0, -30.0}, core::Vec2{-200.0, 0.0},
+					   core::Vec2{-224.0, 20.0}};
+	CHECK(hasUprightFrame(bedding));
+	const std::vector<core::Vec3> vertices = core::modifierBasePolygon(bedding);
+	CHECK(!vertices.empty() && near(vertices.front().z, -380.0, 1e-9));
+}
+
+TEST(modifier_base_polygon_is_empty_for_degenerate_profile)
+{
+	core::ModifierCommand modifier = validModifier();
+	modifier.profile = {core::Vec2{0.0, 0.0}, core::Vec2{1.0, 0.0}};
+	CHECK(core::modifierBasePolygon(modifier).empty());
 }
 
 // ---------------------------------------------------------------------------

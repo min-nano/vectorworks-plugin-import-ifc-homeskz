@@ -107,7 +107,9 @@ namespace HomeskzIfcImport::parse
 		if (index >= geoms.size() || !geoms[index].valid)
 			return false;
 		const MemberGeom& self = geoms[index];
-		const std::string& layer = members[index].layer;
+		// 横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた材（"2-横架材天端(FL-872)"）
+		// も同じ階の横架材どうしなので、伏図レベルの印を外して比べる（parse/PlanLevel）。
+		const std::string layer = core::stripPlanLevelTag(members[index].layer);
 		// 登り梁は別レイヤの軒桁・母屋・棟木に取り付くのでレイヤ一致の制約を外す。
 		const bool crossLayer = members[index].drawClass == CLASS_NOBORIBARI;
 
@@ -115,7 +117,7 @@ namespace HomeskzIfcImport::parse
 		{
 			if (j == index || !geoms[j].valid)
 				continue;
-			if (!crossLayer && members[j].layer != layer)
+			if (!crossLayer && core::stripPlanLevelTag(members[j].layer) != layer)
 				continue;
 			const MemberGeom& other = geoms[j];
 			// 平行（同一直線上の継ぎ手・側並び）は受ける材とみなさない。

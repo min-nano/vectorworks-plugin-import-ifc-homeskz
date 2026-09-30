@@ -1115,7 +1115,10 @@ namespace HomeskzIfcImport::draw
 			if (!chooseIfcFile(ifcPath))
 				return false;
 			options = core::ImportOptions{};
-			const draw::SettingsOutcome settings = draw::showImportSettings(options, &settingsNote);
+			// 伏図のまとめ方の候補は取り込みの前に IFC を読んで集める（draw/ImportCommand と
+			// 同じ。draw/SettingsDialog.h）。
+			const draw::SettingsOutcome settings = draw::showImportSettings(
+				options, parse::scanPlanLevelChoices(ifcPath), &settingsNote);
 			if (settings == draw::SettingsOutcome::Cancelled)
 				return false;
 			settingsShown = settings == draw::SettingsOutcome::Accepted;

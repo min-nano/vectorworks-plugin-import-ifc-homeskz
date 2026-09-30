@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <numbers>
+#include <string>
 #include <vector>
 
 namespace HomeskzIfcImport::parse
@@ -185,11 +186,78 @@ namespace HomeskzIfcImport::parse
 		return commands;
 	}
 
+	std::string memberLevelNote(const core::MemberCommand& member,
+								const std::vector<StoryInfo>& stories,
+								const std::vector<long long>& standardHeights)
+	{
+		if (member.hipOrValley)
+			return {};
+		// 階はレイヤ名の接頭辞（"2-横架材天端(FL-872)" → "2"）から引く。伏図レベルの印は
+		// 接頭辞の後ろなので、外さなくても接頭辞は変わらない。
+		const std::size_t dash = member.layer.find('-');
+		if (dash == std::string::npos)
+			return {};
+		const std::string prefix = member.layer.substr(0, dash);
+		for (std::size_t i = 0; i < stories.size(); ++i)
+		{
+			const StoryInfo& story = stories[i];
+			if (storyLayerPrefix(i, story.isTop) != prefix)
+				continue;
+			const long long fl = std::llround(story.elevation);
+			const long long low = std::llround(std::min(member.elevation, member.endElevation));
+			const long long high = std::llround(std::max(member.elevation, member.endElevation));
+			// 最上階は "RFL" ではなく軒高と呼ぶ（RFL は図面で使わない。ご要望）。それ以外の
+			// 階は階名、名前が取れない階は番号で呼ぶ（IFC の階名は "…FL" で終わるものしか
+			// 採らない。parse/Story の collectStories）。**二重引用符を含む階名も番号で呼ぶ**
+			// ——注記はタグの式に "…" で囲んで埋め込むので（draw/Tag の TagFieldFormula）、
+			// 引用符が混ざると式の対応が崩れて式全体が評価されなくなる。
+			std::string name;
+			if (story.isTop)
+				name = core::kLevelEaves;
+			else if (story.name.empty() || story.name.find('"') != std::string::npos)
+				name = storyLayerPrefix(i, story.isTop) + "FL";
+			else
+				name = story.name;
+			if (low == high)
+			{
+				// 水平な材は標準の横架材の高さと違うときだけ（高さが分からない階は推した値）。
+				const long long standard = i < standardHeights.size()
+											   ? standardHeights[i]
+											   : std::llround(beamTopElevation(story));
+				if (low == standard)
+					return {};
+				return "(" + name + " " + core::signedMillimetreText(low - fl) + ")";
+			}
+			return "(" + name + " " + core::signedMillimetreText(low - fl) + "~" +
+				   core::signedMillimetreText(high - fl) + ")";
+		}
+		return {};
+	}
+
 	void attachTagCommands(core::Document& document)
 	{
+		attachTagCommands(document, {}, {});
+	}
+
+	void attachTagCommands(core::Document& document, const std::vector<StoryInfo>& stories,
+						   const std::vector<long long>& standardHeights)
+	{
+		// 注記は材ごとに 1 度だけ求め、その材のタグ（伏図・軸組図）すべてへ配る。
+		std::vector<std::string> notes(document.members.size());
+		for (std::size_t i = 0; i < document.members.size(); ++i)
+			notes[i] = memberLevelNote(document.members[i], stories, standardHeights);
+		const auto withNotes = [&notes](std::vector<core::TagCommand> tags)
+		{
+			for (core::TagCommand& tag : tags)
+			{
+				if (tag.memberIndex < notes.size())
+					tag.note = notes[tag.memberIndex];
+			}
+			return tags;
+		};
 		for (core::SheetCommand& sheet : document.sheets)
-			sheet.viewport.tags = buildPlanTagCommands(document.members, sheet.viewport);
+			sheet.viewport.tags = withNotes(buildPlanTagCommands(document.members, sheet.viewport));
 		for (core::SectionCommand& section : document.sections)
-			section.viewport.tags = buildSectionTagCommands(document.members, section);
+			section.viewport.tags = withNotes(buildSectionTagCommands(document.members, section));
 	}
 } // namespace HomeskzIfcImport::parse

@@ -88,18 +88,23 @@ namespace HomeskzIfcImport::parse
 			Vec2{command.end.x + center.x, command.end.y + center.y},
 		};
 
-		for (const NoboribariRoofPlane& plane : planes)
+		// 探す順は**点が外側・面が内側**。中点を内包する面を全面から探し、無いときだけ端点で
+		// 探し直す。面を外側に回すと、並びが先の面が端点をかすめただけで中点を内包する面より
+		// 先に選ばれてしまう（実データで、隣の屋根版の外形に始端だけが入った登り梁が、その
+		// 屋根版の高さ（272 mm 上）へ吸われた。docs/DEV-NOTES.md「登り梁が隣の屋根面へ吸われる」）。
+		for (const Vec2& probe : probes)
 		{
-			// 屋根面の勾配方向（RoofSlope::down は法線の水平成分の単位ベクトル）が登り梁の
-			// 勾配方向と平行な面だけを、その登り梁の屋根面とみなす。
-			const double dot =
-				(plane.slope.down.x * direction.x) + (plane.slope.down.y * direction.y);
-			if (std::abs(dot) < kNoboribariSlopeDirDot)
-				continue;
-			const bool covers = std::ranges::any_of(probes, [&plane](const Vec2& p)
-													{ return plane.contains(p.x, p.y); });
-			if (covers)
-				return &plane;
+			for (const NoboribariRoofPlane& plane : planes)
+			{
+				// 屋根面の勾配方向（RoofSlope::down は法線の水平成分の単位ベクトル）が登り梁の
+				// 勾配方向と平行な面だけを、その登り梁の屋根面とみなす。
+				const double dot =
+					(plane.slope.down.x * direction.x) + (plane.slope.down.y * direction.y);
+				if (std::abs(dot) < kNoboribariSlopeDirDot)
+					continue;
+				if (plane.contains(probe.x, probe.y))
+					return &plane;
+			}
 		}
 		return nullptr;
 	}

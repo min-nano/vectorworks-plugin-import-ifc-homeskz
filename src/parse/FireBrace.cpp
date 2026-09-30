@@ -10,6 +10,7 @@
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
+#include "parse/PlanLevel.h"
 #include "parse/Story.h"
 
 #include <cmath>
@@ -132,8 +133,9 @@ namespace HomeskzIfcImport::parse
 		{
 			const StoryInfo& story = stories[i];
 			// 火打は横架材と同じレイヤに置く（最上階には横架材天端が無いので軒高。
-			// beamTopLayerName が分岐を持つ）。
-			const std::string layer = beamTopLayerName(i, story);
+			// beamTopLayerName が分岐を持つ）。横架材の高さごとの伏図では、火打の高さに
+			// いちばん近い伏図レベルの横架材レイヤ（parse/PlanLevel。下のループ）。
+			const std::string storyLayer = beamTopLayerName(i, story);
 
 			for (const int elementId : context.storyElements(story.id))
 			{
@@ -150,6 +152,15 @@ namespace HomeskzIfcImport::parse
 					fireBraceBasePoint(fireBraceEndFaces(world, local));
 				if (!base.has_value())
 					continue; // 端面が 2 つ取れない／平行で交点が定まらない火打はスキップ
+
+				std::string layer = storyLayer;
+				double localZ = 0.0;
+				if (getLocalPlacementZ(model, *element, localZ))
+				{
+					if (const PlanLevel* level =
+							nearestPlanLevel(context.planLevels(), i, story.elevation + localZ))
+						layer = planLevelBeamLayer(*level, story);
+				}
 
 				SymbolCommand command;
 				command.layer = layer;
