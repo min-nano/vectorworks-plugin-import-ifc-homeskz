@@ -931,7 +931,14 @@ namespace HomeskzIfcImport::core
 	//        鉛直面**に置く（実物の位置へ外すと切断面の外に出て図から消える。M19）。
 	//   clearSpan              … IFC から測った内法（mm）。柱が見つからないときの控え
 	//   bottomHeight           … 軸組内法の下端（**配置先レイヤ平面からの相対 Z**。mm）
-	//   topHeight              … 同 上端
+	//   topHeight              … 同 上端の**始点側**（内法の始点側の端＝始端の柱の内側面での高さ）
+	//   topHeightEnd           … 同 上端の**終点側**。登り梁の下では topHeight と異なる
+	//
+	// 【高さは上下の横架材に合わせる】下端は下の横架材（土台・胴差）の天端、上端は上の
+	// 横架材の下端で、**内法の両端で**測る（parse/ShearWall の fitShearWallsToMembers）。
+	// 上の材が登り梁なら上端は両端で違い、内法は上辺の傾いた台形になる。段差梁の下のように
+	// 1 本の直線で上辺を表せないときは、高い方（梁下端の高い側）で水平にそろえる（梁下に隙間を
+	// 空けない）。下端は 1 つなので、下の梁が段差なら天端の低い方（同じく隙間を空けない）。
 	//
 	// 【高さは「レイヤ平面からの差」で持つ】配置先の "n-耐力壁" レイヤは**その階の横架材天端**
 	// に載る（parse/Story）ので、土台天端から梁下端までの内法はそのままこの 2 つで表せる。
@@ -954,6 +961,7 @@ namespace HomeskzIfcImport::core
 		double clearSpan = 0.0;
 		double bottomHeight = 0.0;
 		double topHeight = 0.0;
+		double topHeightEnd = 0.0;
 	};
 
 	// 断面寸法データタグ 1 つ（ビューポート注釈のデータタグ。docs/DEV-NOTES.md M13）。
