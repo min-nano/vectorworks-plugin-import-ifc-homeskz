@@ -1002,7 +1002,7 @@ TEST(SectionDimensionsAndLevelMarksReachCrossingMembers)
 	// 柱の範囲の内側の切り口は、下の列へ足さない（押さえるのは最外周だけ）。
 	document.members.push_back(
 		makeMember("2-横架材天端", Vec2{-910.0, 455.0}, Vec2{910.0, 455.0}, 3264.0));
-	// 外側の切り口の近く（20mm）に通り芯がある。下の列はその通り芯の値を採る。
+	// 外側の切り口の近く（20mm）に通り芯がある。下の列は通り芯へ寄せず、切り口の芯のまま。
 	document.grids.push_back(makeGrid("Y0", Vec2{-1000.0, -480.0}, Vec2{2820.0, -480.0}));
 	const SectionCommand section = xSection();
 
@@ -1020,12 +1020,12 @@ TEST(SectionDimensionsAndLevelMarksReachCrossingMembers)
 	CHECK(levels != nullptr);
 	if (levels != nullptr)
 		CHECK(near(levels->base, -5552.5));
-	// 下の列は柱・束の位置に、その面の最外周の切り口（左は通り芯 Y0 の −5480、右は材の芯の
+	// 下の列は柱・束の位置に、その面の最外周の切り口（左は材の芯の −5500、右は材の芯の
 	// −2500）を足す。内側の切り口（−4545）は足さない。
 	const DimensionChainCommand* columns = findChain(chains, DimensionAxis::Horizontal, -1, 0);
 	CHECK(columns != nullptr);
 	if (columns != nullptr)
-		CHECK(sameValues(columns->stops, {-5480.0, -5000.0, -4090.0, -3180.0, -2500.0}));
+		CHECK(sameValues(columns->stops, {-5500.0, -5000.0, -4090.0, -3180.0, -2500.0}));
 }
 
 TEST(SectionWithOnlyCrossingMembersHasNoDimensions)

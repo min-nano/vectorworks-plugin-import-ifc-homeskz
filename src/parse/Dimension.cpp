@@ -1253,7 +1253,7 @@ namespace HomeskzIfcImport::parse
 	buildSectionDimensionCommands(const core::Document& document,
 								  const core::SectionCommand& section)
 	{
-		// low / high は柱・沿う材の範囲（柱の位置の列が拾う通り芯を絞る）、left は切り口も
+		// low / high は柱・沿う材の範囲（最外周の切り口を足すかの判定に使う）、left は切り口も
 		// 含めた左端（高さの列の根元。レベル記号の x と揃える）。
 		double low = 0.0;
 		double high = 0.0;
@@ -1289,30 +1289,10 @@ namespace HomeskzIfcImport::parse
 		//   * 小屋束の列は上階の柱の列の 1 つ外の段（どの階の小屋束もまとめて 1 列。屋根の階に
 		//     立つ柱も含める）。**建物の外周芯**（屋根の階より下の柱の両端）も測点に入れる
 		//     （利用者の指定）。
-		//   * **部材の無い通り芯は測点にしない**（通り芯しか無い位置を測っても意味が無い）。
-		//     通り芯は測点と重なるときに値を貸すだけ（寸法の数字が通り芯の間隔ちょうどになる）。
-		std::vector<double> gridAll;
-		const DimensionAxis crossing = section.direction == core::SectionDirection::X
-										   ? DimensionAxis::Vertical
-										   : DimensionAxis::Horizontal;
-		for (const double value : gridStops(document.grids, crossing))
-			gridAll.push_back(value - origin);
-		const auto snapWithin = [&gridAll](double value, double tol)
-		{
-			for (const double g : gridAll)
-			{
-				if (std::abs(g - value) <= tol)
-					return g;
-			}
-			return value;
-		};
-		const auto lendGrid = [&snapWithin](std::vector<double> values)
-		{
-			for (double& value : values)
-				value = snapWithin(value, kDimensionMergeTol);
-			return mergeStops(std::move(values));
-		};
-
+		//   * **通り芯は見ない。** 部材の無い通り芯は測点にせず、測点も通り芯へ寄せない——
+		//     材の位置そのもの（利用者の指定。結果として通り芯と重なることが多いが、外壁芯が
+		//     通り芯より少し内側の建物で近くの通り芯へ寄せると、2685 が 2730 に・外壁芯と
+		//     通り芯の間に 45 が出た。は通り・い通りの 8通りの実機）。
 		// 屋根の階（軒高ストーリ。FL の階の数 + 1）。ここに立つ柱（軒高の梁の上の束。
 		// ホームズ君は柱として出すことがある）は小屋束と同じ列で押さえる（1通りの実機）。
 		const int roofFloor =
@@ -1348,13 +1328,11 @@ namespace HomeskzIfcImport::parse
 				floorColumns[floor].push_back(a);
 		}
 		for (auto& entry : floorColumns)
-			entry.second = lendGrid(std::move(entry.second));
+			entry.second = mergeStops(std::move(entry.second));
 		const int lowestFloor = floorColumns.empty() ? 1 : std::min(1, floorColumns.begin()->first);
 
 		// 紙面と平行な横架材が直交する横架材にぶつかる位置（階ごと）。測点は沿う材の端
-		// そのもので、通り芯はちょうど重なるときだけ値を貸す——外壁芯が通り芯より少し内側に
-		// ある建物で、端を近くの通り芯へ寄せると外壁芯と通り芯の間に 45 のような寸法が出た
-		// （い通りの 8通り。実機）。
+		// そのもの。
 		const std::map<std::string, int> floorsOfLayer = layerFloors(document.stories);
 		const auto floorOf = [&floorsOfLayer](const std::string& layer)
 		{
@@ -1383,7 +1361,7 @@ namespace HomeskzIfcImport::parse
 					cuts, [a, floor](const std::pair<double, int>& cut)
 					{ return cut.second == floor && std::abs(cut.first - a) <= kClusterTol; });
 				if (meets)
-					floorJunctions[floor].push_back(snapWithin(a, kDimensionMergeTol));
+					floorJunctions[floor].push_back(a);
 			}
 		}
 		// 階 floor の列の測点（柱＋ぶつかる位置）。
@@ -1402,17 +1380,16 @@ namespace HomeskzIfcImport::parse
 		// その面の**最外周**も押さえる（利用者の指定）。柱・沿う材より**kClusterTol を超えて**
 		// 外に横架材の切り口があれば、左右それぞれ最も外の切り口の芯を下の列の測点に足す
 		// （又は通りなら 1通り〜5通り）。間に並ぶ切り口は足さない（押さえるのは最外周だけ）。
-		// 外壁芯のすぐ外（通り芯の上など）の切り口は足さない——押さえるのは建物の外周
-		// （外壁芯）まで（い通りの 8通り。実機）。切り口の近く（kClusterTol 以内）に通り芯が
-		// あれば、寸法の数字が通り芯の間隔になるよう通り芯の値を採る。
+		// 外壁芯のすぐ外の切り口は足さない——押さえるのは建物の外周（外壁芯）まで（い通りの
+		// 8通り。実機）。
 		if (!cuts.empty())
 		{
 			const auto [lowest, highest] =
 				std::ranges::minmax_element(cuts, {}, &std::pair<double, int>::first);
 			if (lowest->first < low - kClusterTol)
-				columns.push_back(snapWithin(lowest->first, kClusterTol));
+				columns.push_back(lowest->first);
 			if (highest->first > high + kClusterTol)
-				columns.push_back(snapWithin(highest->first, kClusterTol));
+				columns.push_back(highest->first);
 		}
 		const std::vector<double> detail = mergeStops(std::move(columns));
 		if (detail.size() >= 2)
@@ -1448,7 +1425,7 @@ namespace HomeskzIfcImport::parse
 				posts.push_back(walls.front());
 				posts.push_back(walls.back());
 			}
-			posts = lendGrid(std::move(posts));
+			posts = mergeStops(std::move(posts));
 			if (posts.size() >= 2)
 				out.push_back(makeChain(DimensionAxis::Horizontal, posts, top, 1, topTier++));
 		}
