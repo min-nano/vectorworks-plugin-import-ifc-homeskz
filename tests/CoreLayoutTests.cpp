@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstddef>
 #include <numbers>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -446,6 +447,44 @@ TEST(PointsConvertToPaperMillimeters)
 	CHECK(near(core::pointsToMillimeters(72.0), 25.4));
 	CHECK(near(core::pointsToMillimeters(10.0), 10.0 * 25.4 / 72.0));
 	CHECK(near(core::pointsToMillimeters(0.0), 0.0));
+}
+
+TEST(RotatedRectHeightRecoversTheTagHeightFromItsBounds)
+{
+	// 長さ 170・高さ 15 のタグを −26.57 度（勾配 1/2 の登り梁）に置いたときの外接矩形から、
+	// タグ自身の高さ 15 が戻る。外接矩形の高さ（≒ 89.5）をそのまま使うと逃がし量が
+	// 文字の長さに比例して膨らむ（軸組図の傾斜材のタグが材から離れた不具合）。
+	const double angle = std::atan2(-1.0, 2.0) * 180.0 / std::numbers::pi;
+	const double c = std::abs(std::cos(angle * std::numbers::pi / 180.0));
+	const double s = std::abs(std::sin(angle * std::numbers::pi / 180.0));
+	const double width = (170.0 * c) + (15.0 * s);
+	const double height = (170.0 * s) + (15.0 * c);
+	const std::optional<double> solved = core::rotatedRectHeight(angle, width, height);
+	CHECK(solved.has_value());
+	CHECK(near(solved.value_or(0.0), 15.0));
+}
+
+TEST(RotatedRectHeightMatchesTheBoundsForAxisAlignedTags)
+{
+	// 水平のタグは外接矩形の高さ、鉛直（90 度）のタグは外接矩形の幅がそのまま高さ
+	// （伏図の南北に走る材。従来の逃がし量と変わらない）。
+	CHECK(near(core::rotatedRectHeight(0.0, 170.0, 15.0).value_or(0.0), 15.0));
+	CHECK(near(core::rotatedRectHeight(90.0, 15.0, 170.0).value_or(0.0), 15.0));
+	CHECK(near(core::rotatedRectHeight(-90.0, 15.0, 170.0).value_or(0.0), 15.0));
+	CHECK(near(core::rotatedRectHeight(60.0, (170.0 * 0.5) + (15.0 * std::sqrt(3.0) / 2.0),
+									   (170.0 * std::sqrt(3.0) / 2.0) + (15.0 * 0.5))
+				   .value_or(0.0),
+			   15.0));
+}
+
+TEST(RotatedRectHeightGivesUpNearFortyFiveDegrees)
+{
+	// 45 度では外接矩形が正方形になり、長さと高さを分けられない。
+	const double side = (170.0 + 15.0) / std::sqrt(2.0);
+	CHECK(!core::rotatedRectHeight(45.0, side, side).has_value());
+	CHECK(!core::rotatedRectHeight(-40.0, side, side).has_value());
+	// 実測が崩れて負に解けるものも返さない。
+	CHECK(!core::rotatedRectHeight(0.0, 170.0, 0.0).has_value());
 }
 
 TEST_MAIN();

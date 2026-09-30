@@ -38,14 +38,17 @@
 #include "draw/DrawUtil.h"
 #include "draw/StructuralMember.h"
 #include "core/Document.h"
+#include "core/Layout.h"
 
 #include "Interfaces/VectorWorks/Extension/IDataTagSupport.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -119,12 +122,22 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// タグの逃がし量（offset の向きに沿ったタグの差し渡しの半分）。命令の position は
-		// **部材の辺の中央**で、そこへタグの下端中央が接するようにしたい。タグの実寸は
-		// レイアウトの中身が決めるので、置いてから GetObjectBounds で測る。offset は軸に平行
-		// （伏図＝上または左、軸組図＝上）なので、|x| 成分には幅・|y| 成分には高さを当てれば
-		// よい（斜材で斜めになる場合も、外接矩形の差し渡しとして妥当な近似になる）。
-		double Clearance(const core::TagCommand& tag, double width, double height)
+		// タグの逃がし量は**タグ自身の高さの半分**（高さ＝文字の向きに直交する差し渡し）。命令の
+		// position は**部材の辺の中央**で、そこへタグの下端中央が接するようにしたい。offset は
+		// どちらの図でも**部材（＝文字の向き）に直交**するので、逃がす量はタグ自身の高さの
+		// 半分になる。タグの実寸はレイアウトの中身が決めるので、置いてから GetObjectBounds で
+		// 測る。
+		//
+		// 外接矩形は軸に平行なので、**傾いたタグ（傾斜材）では外接矩形の高さ≠タグの高さ**。
+		// 以前は外接矩形の幅・高さを offset の成分で按分していたが、これだと文字の長さの
+		// sin 成分まで逃がし量に入り、軸組図の登り梁のタグが材から大きく離れた。回転角から
+		// タグ自身の高さを戻す（core::rotatedRectHeight）。45 度近くで解けないタグは、同じ図の
+		// ほかのタグから高さを借りる（MovePendingTags）。
+		//
+		// 高さを解けず、借りる相手も無いときの逃がし量（外接矩形を offset の成分で按分した
+		// 差し渡しの半分）。45 度近くの傾きでは実際より大きく出る（離れる側へ倒れるので
+		// 材には重ならない）。
+		double FallbackClearance(const core::TagCommand& tag, double width, double height)
 		{
 			return (std::abs(tag.offset.x) * width + std::abs(tag.offset.y) * height) / 2.0;
 		}
@@ -137,8 +150,8 @@ namespace HomeskzIfcImport::draw
 			const core::TagCommand* command = nullptr;
 			double centreX = 0.0; // 置いた直後の実位置
 			double centreY = 0.0;
-			double clearX = 0.0; // 部材から逃がすベクトル（実寸から求めた）
-			double clearY = 0.0;
+			double width = 0.0; // 外接矩形の実寸
+			double height = 0.0;
 		};
 
 		// 置いたタグをまとめて目標へ動かす。
@@ -153,10 +166,31 @@ namespace HomeskzIfcImport::draw
 		// 実位置との差だけ動かす。
 		void MovePendingTags(const std::vector<PendingTag>& pending)
 		{
+			// 高さを解けたタグのうち最大のもの＝解けないタグ（45 度近く）へ貸す高さ。タグは
+			// どれも同じレイアウトの 1 行なので高さは揃う。揃わないとしても、大きい方へ
+			// 倒せば材に重ならない。
+			std::vector<std::optional<double>> heights;
+			heights.reserve(pending.size());
+			std::optional<double> lent;
 			for (const PendingTag& tag : pending)
 			{
-				const double targetX = tag.command->position.x + tag.clearX;
-				const double targetY = tag.command->position.y + tag.clearY;
+				heights.push_back(
+					core::rotatedRectHeight(tag.command->angle, tag.width, tag.height));
+				if (heights.back().has_value())
+					lent = std::max(lent.value_or(0.0), *heights.back());
+			}
+
+			for (std::size_t i = 0; i < pending.size(); ++i)
+			{
+				const PendingTag& tag = pending[i];
+				const std::optional<double> height = heights[i].has_value() ? heights[i] : lent;
+				const double clearance =
+					height.has_value() ? *height / 2.0
+									   : FallbackClearance(*tag.command, tag.width, tag.height);
+				const double targetX =
+					tag.command->position.x + (tag.command->offset.x * clearance);
+				const double targetY =
+					tag.command->position.y + (tag.command->offset.y * clearance);
 				gSDK->MoveObject(tag.object, targetX - tag.centreX, targetY - tag.centreY);
 			}
 		}
@@ -436,10 +470,8 @@ namespace HomeskzIfcImport::draw
 			pending.centreX = (bounds.left + bounds.right) / 2.0;
 			// WorldRect は top > bottom（Y 上向き）。
 			pending.centreY = (bounds.top + bounds.bottom) / 2.0;
-			const double clearance = Clearance(tag, std::abs(bounds.right - bounds.left),
-											   std::abs(bounds.top - bounds.bottom));
-			pending.clearX = tag.offset.x * clearance;
-			pending.clearY = tag.offset.y * clearance;
+			pending.width = std::abs(bounds.right - bounds.left);
+			pending.height = std::abs(bounds.top - bounds.bottom);
 			outPending.push_back(pending);
 
 			outPlaced.push_back(object);
