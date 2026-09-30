@@ -712,6 +712,27 @@ namespace HomeskzIfcImport::core
 	// ロジックは core へ寄せる）。
 	ModifierCommand raiseModifierTop(const ModifierCommand& modifier, double bite);
 
+	// 地中梁（台形プリズム）の押し出しの**基面をワールド 3D の頂点列**にして返す。描画側
+	// （draw/Footing）はこれをそのまま VWExtrudeObj へ渡し、方位角の向きへ depth だけ押し出す。
+	// profile が 3 点未満なら空。
+	//
+	// 頂点の並びに 2 つの決めごとがある:
+	//   1. **巻き**: 面法線（Newell 法）が押し出し方向（方位角）を向く並び。逆巻きだと押し
+	//      出しが梁の軸の反対側へ伸びる。
+	//   2. **始まり**: 先頭の辺が「+u へ最も向く辺（同じ向きなら低いほう）」になるよう回す。
+	//      VWExtrudeObj は 3D ポリゴンの**先頭の頂点から**局所座標系を決める（原点＝先頭・
+	//      U＝先頭の辺・W＝U×(3 点目−先頭)・V＝W×U）ため、揃えないと断面の鉛直面が −u 側の
+	//      地中梁だけ局所座標系が上下逆（V＝−Z）になり、実機で可視ソリッドが幅方向へ 24.59mm
+	//      ずれた（docs/DEV-NOTES.md「地中梁の可視ソリッドが幅方向にずれる」）。揃えればどの
+	//      向きでも U＝+u・V＝+Z・W＝押し出し方向になる。
+	//
+	// **core に置く理由**: SDK を触らない純計算で、この並び替えは「向きで結果が変わる」回帰
+	// しやすい性質なので無 SDK テストで押さえる（raiseModifierTop と同じ立ち位置）。
+	std::vector<Vec3> modifierBasePolygon(const ModifierCommand& modifier);
+
+	// modifierBasePolygon が先頭の辺を選ぶときに「同じ向き」とみなす許容（方向余弦の差）。
+	inline constexpr double kModifierBaseEdgeTol = 1e-6;
+
 	// 地中梁の天端とみなす頂点の許容差（mm）。最大 v からこの差以内の頂点を天端の辺とみなす。
 	// raiseModifierTop と、その期待値を書くテストが共有する。
 	inline constexpr double kModifierTopVertexTol = 0.5;
