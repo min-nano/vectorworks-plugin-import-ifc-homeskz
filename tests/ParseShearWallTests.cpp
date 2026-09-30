@@ -24,6 +24,7 @@
 #include "parse/Story.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -36,6 +37,7 @@ using HomeskzIfcImport::core::ShearWallKind;
 using HomeskzIfcImport::core::ShearWallPanelSide;
 using HomeskzIfcImport::parse::anyShearWallOnLayer;
 using HomeskzIfcImport::parse::buildShearWallCommands;
+using HomeskzIfcImport::parse::fitShearWallsToMembers;
 using HomeskzIfcImport::parse::isDoubleBrace;
 using HomeskzIfcImport::parse::isShearBrace;
 using HomeskzIfcImport::parse::isShearPanel;
@@ -43,6 +45,7 @@ using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::resolveShearWallPiece;
 using HomeskzIfcImport::parse::ShearWallPiece;
+using HomeskzIfcImport::parse::StoryInfo;
 using HomeskzIfcTests::allFixtures;
 using HomeskzIfcTests::fixture;
 using HomeskzIfcTests::fixtureDocument;
@@ -102,6 +105,58 @@ namespace
 							 "#28=IFCLOCALPLACEMENT($,#27);\n"
 							 "#29=IFCWALL('w',$,'面材:1_0_1',$,'STANDARD',#28,#23,$);\n"
 							 "#30=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#29),#1);\n";
+
+	// 合わせ込みの試験用の 1 階（Elevation 600・横架材天端 −174 ＝レイヤ平面 426）と
+	// 最上階。1 階の耐力壁レイヤは "1-耐力壁"。
+	std::vector<StoryInfo> fitStories()
+	{
+		return {StoryInfo{1, 600.0, -174.0, false}, StoryInfo{2, 3500.0, 0.0, true}};
+	}
+
+	// 軸 (0,0)→(1820,0) の耐力壁。IFC の高さはレイヤ平面から 0〜2700（絶対 426〜3126）。
+	ShearWallCommand fitWall()
+	{
+		ShearWallCommand wall;
+		wall.layer = "1-耐力壁";
+		wall.drawClass = "筋かい";
+		wall.start = core::Vec2{0.0, 0.0};
+		wall.end = core::Vec2{1820.0, 0.0};
+		wall.kind = ShearWallKind::Brace;
+		wall.width = 90.0;
+		wall.thickness = 45.0;
+		wall.clearSpan = 1715.0;
+		wall.bottomHeight = 0.0;
+		wall.topHeight = 2700.0;
+		wall.topHeightEnd = 2700.0;
+		return wall;
+	}
+
+	// 両端の柱（105 角。1 階を base とする span 柱）。内法は s = 52.5〜1767.5。
+	std::vector<core::ColumnCommand> fitColumns()
+	{
+		std::vector<core::ColumnCommand> columns(2);
+		columns[0].layer = "1to2-柱";
+		columns[0].position = core::Vec2{0.0, 0.0};
+		columns[0].width = 105.0;
+		columns[1].layer = "1to2-柱";
+		columns[1].position = core::Vec2{1820.0, 0.0};
+		columns[1].width = 105.0;
+		return columns;
+	}
+
+	// 横架材 1 本（天端中央線 start→end・天端 Z・せい）。幅は 105。
+	core::MemberCommand fitBeam(core::Vec2 start, core::Vec2 end, double elevation,
+								double endElevation, double height)
+	{
+		core::MemberCommand member;
+		member.start = start;
+		member.end = end;
+		member.width = 105.0;
+		member.height = height;
+		member.elevation = elevation;
+		member.endElevation = endElevation;
+		return member;
+	}
 
 	// 文字列が接尾辞で終わるか。
 	bool endsWith(const std::string& text, const std::string& suffix)
@@ -233,6 +288,8 @@ TEST(shear_wall_brace_command_from_synthetic_model)
 	// 最上階のレイヤ平面は軒高（オフセット 0）なので、高さはそのまま。
 	CHECK(near(wall.bottomHeight, -27.0, 1e-6));
 	CHECK(near(wall.topHeight, 2427.0, 1e-6));
+	// 解析の段階では水平（上下の横架材への合わせ込みは後処理）。
+	CHECK(near(wall.topHeightEnd, wall.topHeight, 1e-6));
 	Document document;
 	document.shearWalls = walls;
 	CHECK(core::validateDocument(document));
@@ -520,6 +577,180 @@ TEST(shear_wall_floor_plan_shows_its_own_storey)
 			  sheet.viewport.layers.end());
 	}
 	CHECK_EQ(checked, static_cast<std::size_t>(2));
+}
+
+// --- 上下の横架材への合わせ込み ---------------------------------------------
+
+TEST(shear_wall_fit_to_horizontal_beams)
+{
+	// 下＝土台（天端 426）、上＝胴差（天端 3420・せい 240 → 下端 3180）。高さはレイヤ平面
+	// （426）からの相対なので、下端 0・上端 2754（両端とも）。
+	std::vector<ShearWallCommand> walls{fitWall()};
+	const std::vector<core::MemberCommand> members{
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 426.0, 426.0, 105.0),
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 240.0)};
+	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	CHECK(near(walls[0].bottomHeight, 0.0, 1e-6));
+	CHECK(near(walls[0].topHeight, 2754.0, 1e-6));
+	CHECK(near(walls[0].topHeightEnd, 2754.0, 1e-6));
+}
+
+TEST(shear_wall_fit_trims_a_panel_that_overlaps_the_beams)
+{
+	// 面材は IFC では横架材に掛かる板の広がりで出る（下 −50・上は梁の天端まで）。軸組内法へ
+	// 縮める。
+	ShearWallCommand panel = fitWall();
+	panel.kind = ShearWallKind::Panel;
+	panel.width = 0.0;
+	panel.bottomHeight = -50.0;
+	panel.topHeight = 2994.0;
+	panel.topHeightEnd = 2994.0;
+	std::vector<ShearWallCommand> walls{panel};
+	const std::vector<core::MemberCommand> members{
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 426.0, 426.0, 105.0),
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 150.0)};
+	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	CHECK(near(walls[0].bottomHeight, 0.0, 1e-6));
+	CHECK(near(walls[0].topHeight, 2844.0, 1e-6));
+	CHECK(near(walls[0].topHeightEnd, 2844.0, 1e-6));
+}
+
+TEST(shear_wall_fit_follows_a_sloped_beam_at_the_clear_ends)
+{
+	// 上が登り梁: 天端中央線 (−500,0)→(2500,0)・天端 3400→4000（勾配 0.2）・せい 150。
+	// 断面は材軸に直交するので、鉛直に測ったせいは 150/cosθ = 150·√(1+0.2²)。
+	// 上端は**内法の両端**（s = 52.5 / 1767.5）で測る。
+	std::vector<ShearWallCommand> walls{fitWall()};
+	const std::vector<core::MemberCommand> members{
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 426.0, 426.0, 105.0),
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3400.0, 4000.0, 150.0)};
+	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+
+	const double depth = 150.0 * std::sqrt(1.0 + (0.2 * 0.2));
+	const double atStart = 3400.0 + (0.2 * (52.5 + 500.0)) - depth - 426.0;
+	const double atEnd = 3400.0 + (0.2 * (1767.5 + 500.0)) - depth - 426.0;
+	CHECK(near(walls[0].bottomHeight, 0.0, 1e-6));
+	CHECK(near(walls[0].topHeight, atStart, 1e-6));
+	CHECK(near(walls[0].topHeightEnd, atEnd, 1e-6));
+	CHECK(walls[0].topHeightEnd > walls[0].topHeight);
+}
+
+TEST(shear_wall_fit_follows_a_sloped_beam_running_the_other_way)
+{
+	// 同じ登り梁を逆向き（終端から始端へ）に持っても、軸の始点側・終点側の高さは同じ。
+	std::vector<ShearWallCommand> walls{fitWall()};
+	const std::vector<core::MemberCommand> members{
+		fitBeam({2500.0, 0.0}, {-500.0, 0.0}, 426.0, 426.0, 105.0),
+		fitBeam({2500.0, 0.0}, {-500.0, 0.0}, 4000.0, 3400.0, 150.0)};
+	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+
+	const double depth = 150.0 * std::sqrt(1.0 + (0.2 * 0.2));
+	CHECK(near(walls[0].topHeight, 3400.0 + (0.2 * 552.5) - depth - 426.0, 1e-6));
+	CHECK(near(walls[0].topHeightEnd, 3400.0 + (0.2 * 2267.5) - depth - 426.0, 1e-6));
+}
+
+TEST(shear_wall_fit_levels_the_top_under_a_stepped_beam)
+{
+	// 上の梁が内法の途中（s = 612）でせいを変える（240 → 105）段差梁。上辺は 1 本の直線で
+	// 表せないので、低い方（天端 3420 − 240 = 3180）で水平にそろえる（軸組の外へ出さない）。
+	// 実データ: グレー本モデルプラン1 の 2 階 (−5005, 455)→(−5005, 1820)。
+	std::vector<ShearWallCommand> walls{fitWall()};
+	const std::vector<core::MemberCommand> members{
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 426.0, 426.0, 105.0),
+		fitBeam({-500.0, 0.0}, {612.0, 0.0}, 3420.0, 3420.0, 240.0),
+		fitBeam({612.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 105.0)};
+	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	CHECK(near(walls[0].topHeight, 2754.0, 1e-6));
+	CHECK(near(walls[0].topHeightEnd, 2754.0, 1e-6));
+}
+
+TEST(shear_wall_fit_levels_the_top_under_a_beam_dropped_mid_span)
+{
+	// 内法の両端では同じ高さでも、途中に下がった梁がある（両端の直線が梁を割り込む）なら
+	// 水平にそろえるのは下がった梁の下端。
+	std::vector<ShearWallCommand> walls{fitWall()};
+	const std::vector<core::MemberCommand> members{
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 426.0, 426.0, 105.0),
+		fitBeam({-500.0, 0.0}, {700.0, 0.0}, 3420.0, 3420.0, 150.0),
+		fitBeam({700.0, 0.0}, {1100.0, 0.0}, 3300.0, 3300.0, 150.0),
+		fitBeam({1100.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 150.0)};
+	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	CHECK(near(walls[0].topHeight, 3150.0 - 426.0, 1e-6));
+	CHECK(near(walls[0].topHeightEnd, 3150.0 - 426.0, 1e-6));
+}
+
+TEST(shear_wall_fit_ignores_beams_off_the_axis_or_far_away)
+{
+	// 軸から外れた梁・直交する梁・はるか上の梁（母屋）は上下の材とみなさない。何も
+	// 取れなければ IFC の高さのまま。
+	std::vector<ShearWallCommand> walls{fitWall()};
+	const std::vector<core::MemberCommand> members{
+		fitBeam({-500.0, 910.0}, {2500.0, 910.0}, 3420.0, 3420.0, 150.0), // 隣の通り
+		fitBeam({910.0, -500.0}, {910.0, 500.0}, 3420.0, 3420.0, 150.0),  // 直交
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 6000.0, 6000.0, 105.0)};	  // はるか上
+	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	CHECK(near(walls[0].bottomHeight, 0.0, 1e-6));
+	CHECK(near(walls[0].topHeight, 2700.0, 1e-6));
+	CHECK(near(walls[0].topHeightEnd, 2700.0, 1e-6));
+}
+
+TEST(shear_wall_fit_leaves_other_layers_alone)
+{
+	// 配置先レイヤがどの階の耐力壁レイヤでもない命令は触らない。
+	ShearWallCommand wall = fitWall();
+	wall.layer = "9-耐力壁";
+	std::vector<ShearWallCommand> walls{wall};
+	const std::vector<core::MemberCommand> members{
+		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 240.0)};
+	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	CHECK(near(walls[0].topHeight, 2700.0, 1e-6));
+}
+
+TEST(shear_wall_fit_braces_and_panels_share_the_frame_in_fixtures)
+{
+	// 同じ軸の筋かいと面材は同じ軸組に入るので、合わせ込んだ後の高さが一致する
+	// （合わせ込む前の面材は横架材に掛かって上下にはみ出していた）。
+	std::size_t pairs = 0;
+	for (const std::string& name : allFixtures())
+	{
+		const Document& document = fixtureDocument(name);
+		for (const ShearWallCommand& brace : document.shearWalls)
+		{
+			if (brace.kind != ShearWallKind::Brace)
+				continue;
+			for (const ShearWallCommand& panel : document.shearWalls)
+			{
+				if (panel.kind != ShearWallKind::Panel || panel.layer != brace.layer ||
+					!core::samePoint(panel.start, brace.start) ||
+					!core::samePoint(panel.end, brace.end))
+					continue;
+				++pairs;
+				CHECK(near(panel.bottomHeight, brace.bottomHeight, 1e-6));
+				CHECK(near(panel.topHeight, brace.topHeight, 1e-6));
+				CHECK(near(panel.topHeightEnd, brace.topHeightEnd, 1e-6));
+			}
+		}
+	}
+	CHECK(pairs > 0); // 同じ軸の筋かいと面材が無いフィクスチャもある
+}
+
+TEST(shear_wall_fit_sample1_heights)
+{
+	// サンプル1 の 1 階 (2275,5460)→(3640,5460): 土台（天端 426）と軒桁（天端 3420・
+	// せい 150）のあいだ。面材も筋かいも下端 0・上端 2844（レイヤ平面 426 から）。
+	const Document& document = fixtureDocument("サンプル1 (住木邸新築工事).ifc");
+	std::size_t found = 0;
+	for (const ShearWallCommand& wall : document.shearWalls)
+	{
+		if (wall.layer != "1-耐力壁" || !core::samePoint(wall.start, core::Vec2{2275.0, 5460.0}) ||
+			!core::samePoint(wall.end, core::Vec2{3640.0, 5460.0}))
+			continue;
+		++found;
+		CHECK(near(wall.bottomHeight, 0.0, 1e-6));
+		CHECK(near(wall.topHeight, 2844.0, 1e-6));
+		CHECK(near(wall.topHeightEnd, 2844.0, 1e-6));
+	}
+	CHECK_EQ(found, static_cast<std::size_t>(2)); // 筋かいと面材
 }
 
 TEST_MAIN();

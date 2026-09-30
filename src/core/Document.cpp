@@ -301,7 +301,7 @@ namespace HomeskzIfcImport::core
 
 		// 耐力壁 1 枚が妥当か。PIO を置くレイヤ名・作図クラス名が非空で、軸（柱芯どうし）が
 		// 縮退しておらず（縮退した軸からは向きも長さも決まらない。判定は core/Geometry の
-		// samePoint）、材厚と軸組内法（下端 < 上端）が正であること。
+		// samePoint）、材厚と軸組内法（下端 < 上端。上端は始点側・終点側の両方）が正であること。
 		//
 		// **柱を探すレイヤ名（targetLayers）は空を許す**——柱の無い階（柱レイヤが 1 つも
 		// 生成されなかった）でも耐力壁そのものは描けるべきで、そのとき PIO は控えの内法
@@ -312,7 +312,7 @@ namespace HomeskzIfcImport::core
 		{
 			if (wall.layer.empty() || wall.drawClass.empty() || samePoint(wall.start, wall.end) ||
 				wall.thickness <= 0.0 || wall.topHeight <= wall.bottomHeight ||
-				wall.clearSpan <= 0.0)
+				wall.topHeightEnd <= wall.bottomHeight || wall.clearSpan <= 0.0)
 				return false;
 			return wall.kind != ShearWallKind::Brace || wall.width > 0.0;
 		}
