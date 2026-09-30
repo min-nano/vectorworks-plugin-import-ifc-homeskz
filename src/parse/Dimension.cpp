@@ -4,8 +4,8 @@
 //	寸法の解析（docs/DEV-NOTES.md M31）。【SDK 非依存】ここでは VectorWorks SDK を include しない。
 //
 //	寸法は命令セットだけから導出する（parse/Dimension.h 冒頭）。並びは入力の命令の並びに依らず、
-//	測点を昇順にまとめ、列を「外周（X を測る列→Y を測る列）→ 立上りに沿う列（東西の通り→
-//	南北の通り、それぞれ座標の昇順）」の順に出すので決定的になる。
+//	測点を昇順にまとめ、列を「外周（X を測る列→Y を測る列）→ 立上り・横架材に沿う列（東西の
+//	通り→南北の通り、それぞれ座標の昇順）」の順に出すので決定的になる。
 //
 
 #include "parse/Dimension.h"
@@ -99,7 +99,16 @@ namespace HomeskzIfcImport::parse
 				out.push_back(makeChain(axis, overall, detailBase, detailSide, firstTier + 1));
 		}
 
-		// 直線に乗る立上りの群（基礎伏図の「通り」1 本）。
+		// 通りに乗る線材 1 本（基礎伏図の立上り・床伏図／小屋伏図の横架材）。thickness は
+		// 立上りの厚み・横架材の幅（通りに乗る点・取り合いを拾う幅）。
+		struct LineSegment
+		{
+			core::Vec2 start;
+			core::Vec2 end;
+			double thickness = 0.0;
+		};
+
+		// 直線に乗る線材の群（基礎伏図の立上りの「通り」1 本。床伏図・小屋伏図では横架材）。
 		struct WallLine
 		{
 			double coord = 0.0; // 直交座標（東西の通りなら Y）
@@ -108,22 +117,21 @@ namespace HomeskzIfcImport::parse
 		};
 
 		// 立上りを東西の通り（eastWest=true）または南北の通りへまとめる。座標の昇順。
-		std::vector<WallLine> collectWallLines(const std::vector<core::WallCommand>& walls,
-											   bool eastWest)
+		std::vector<WallLine> collectWallLines(const std::vector<LineSegment>& walls, bool eastWest)
 		{
 			std::vector<WallLine> lines;
-			std::vector<const core::WallCommand*> picked;
-			for (const core::WallCommand& wall : walls)
+			std::vector<const LineSegment*> picked;
+			for (const LineSegment& wall : walls)
 			{
 				if (eastWest ? runsEastWest(wall.start, wall.end)
 							 : runsNorthSouth(wall.start, wall.end))
 					picked.push_back(&wall);
 			}
-			const auto coordOf = [eastWest](const core::WallCommand& wall) {
+			const auto coordOf = [eastWest](const LineSegment& wall) {
 				return eastWest ? (wall.start.y + wall.end.y) / 2.0
 								: (wall.start.x + wall.end.x) / 2.0;
 			};
-			const auto spanOf = [eastWest](const core::WallCommand& wall)
+			const auto spanOf = [eastWest](const LineSegment& wall)
 			{
 				const double a = eastWest ? wall.start.x : wall.start.y;
 				const double b = eastWest ? wall.end.x : wall.end.y;
@@ -131,7 +139,7 @@ namespace HomeskzIfcImport::parse
 			};
 			// 座標 → 区間の順に並べてから群にする（入力の並びに依らない）。
 			std::ranges::sort(picked,
-							  [&](const core::WallCommand* a, const core::WallCommand* b)
+							  [&](const LineSegment* a, const LineSegment* b)
 							  {
 								  const double ca = coordOf(*a);
 								  const double cb = coordOf(*b);
@@ -139,7 +147,7 @@ namespace HomeskzIfcImport::parse
 									  return ca < cb;
 								  return spanOf(*a) < spanOf(*b);
 							  });
-			for (const core::WallCommand* wall : picked)
+			for (const LineSegment* wall : picked)
 			{
 				const double coord = coordOf(*wall);
 				if (lines.empty() || std::abs(coord - lines.back().coord) > kDimensionMergeTol)
@@ -161,11 +169,12 @@ namespace HomeskzIfcImport::parse
 		{
 			const WallLine* line = nullptr;
 			std::vector<double> cores; // 端（芯で押さえ直したもの）と直交する立上りの芯
-			std::vector<double> all; // cores ＋ その通りに乗るアンカーボルト
+			std::vector<double> all; // cores ＋ その通りに乗る点（アンカーボルト・柱）
 			// 両端（cores の最初と最後）が何とも取り合わない自由端か。自由端を持つ一続き
 			// （半島状・独立した立上り）は長さも押さえる。
 			bool freeFront = false;
 			bool freeBack = false;
+			std::vector<double> points; // all のうち、その通りに乗る点（アンカーボルト・柱）
 		};
 
 		// 直交する立上りが通りと取り合う位置（その立上りの芯）と、その立上りの厚みの半分。
@@ -213,7 +222,7 @@ namespace HomeskzIfcImport::parse
 		//     寸法の数字が通り芯の間隔ちょうどになる）。**立上りの無い通り芯は測点にしない**
 		//     ——現場に通り芯の墨は無く、そこは距離でしか分からない（ご要望）。
 		WallLineStops lineStops(const WallLine& line, const std::vector<WallLine>& others,
-								const std::vector<core::SymbolCommand>& anchorBolts,
+								const std::vector<core::Vec2>& points,
 								const std::vector<double>& grid, bool eastWest)
 		{
 			const std::vector<Junction> junctions = junctionsOf(line, others);
@@ -242,17 +251,21 @@ namespace HomeskzIfcImport::parse
 				}
 			}
 
-			// その通りの立上りの上に乗るアンカーボルト（芯からのずれが立上りの厚みの半分以内で、
-			// どれかの区間の中にあるもの）。
-			std::vector<double> points = cores;
-			for (const core::SymbolCommand& bolt : anchorBolts)
+			// その通りの線材の上に乗る点（アンカーボルト・柱。芯からのずれが線材の厚みの半分
+			// 以内で、どれかの区間の中にあるもの）。
+			std::vector<double> onLine = cores;
+			std::vector<double> rawPoints;
+			for (const core::Vec2& point : points)
 			{
-				const double across = eastWest ? bolt.position.y : bolt.position.x;
-				const double along = eastWest ? bolt.position.x : bolt.position.y;
+				const double across = eastWest ? point.y : point.x;
+				const double along = eastWest ? point.x : point.y;
 				if (std::abs(across - line.coord) > line.halfThickness + kDimensionMergeTol)
 					continue;
 				if (inSpans(line.spans, along, kDimensionMergeTol))
-					points.push_back(along);
+				{
+					onLine.push_back(along);
+					rawPoints.push_back(along);
+				}
 			}
 
 			const auto snapToGrid = [&grid](const std::vector<double>& values)
@@ -262,7 +275,7 @@ namespace HomeskzIfcImport::parse
 									 [&values](double g) { return nearAny(values, g); });
 				return unionStops(onGrid, values);
 			};
-			WallLineStops result{&line, snapToGrid(cores), snapToGrid(points)};
+			WallLineStops result{&line, snapToGrid(cores), snapToGrid(onLine), false, false, {}};
 			const auto isFree = [&junctions](double value)
 			{
 				return std::ranges::none_of(
@@ -274,13 +287,21 @@ namespace HomeskzIfcImport::parse
 				result.freeFront = isFree(result.cores.front());
 				result.freeBack = isFree(result.cores.back());
 			}
+			// 通り芯へ寄せた後の値で持つ（all と同じ値で突き合わせられるように）。
+			std::ranges::copy_if(result.all, std::back_inserter(result.points),
+								 [&rawPoints](double value)
+								 {
+									 return std::ranges::any_of(
+										 rawPoints, [value](double raw)
+										 { return std::abs(raw - value) <= kDimensionMergeTol; });
+								 });
 			return result;
 		}
 
 		// 東西の通り（eastWest=true）または南北の通りの測点。座標の昇順。
 		std::vector<WallLineStops> wallLineStops(const std::vector<WallLine>& lines,
 												 const std::vector<WallLine>& others,
-												 const std::vector<core::SymbolCommand>& bolts,
+												 const std::vector<core::Vec2>& points,
 												 const std::vector<core::GridCommand>& grids,
 												 bool eastWest)
 		{
@@ -289,7 +310,7 @@ namespace HomeskzIfcImport::parse
 			std::vector<WallLineStops> out;
 			out.reserve(lines.size());
 			for (const WallLine& line : lines)
-				out.push_back(lineStops(line, others, bolts, grid, eastWest));
+				out.push_back(lineStops(line, others, points, grid, eastWest));
 			return out;
 		}
 
@@ -417,7 +438,7 @@ namespace HomeskzIfcImport::parse
 		// 昇順→通りに沿った位置の昇順。
 		std::vector<PlacedRun> placeFoundationRuns(const std::vector<WallLine>& eastWestRuns,
 												   const std::vector<WallLine>& northSouthRuns,
-												   const std::vector<core::SymbolCommand>& bolts,
+												   const std::vector<core::Vec2>& points,
 												   const std::vector<core::GridCommand>& grids,
 												   const core::Vec2& center)
 		{
@@ -426,7 +447,7 @@ namespace HomeskzIfcImport::parse
 			{
 				const std::vector<WallLine>& runs = eastWest ? eastWestRuns : northSouthRuns;
 				const std::vector<WallLineStops> stops = wallLineStops(
-					runs, eastWest ? northSouthRuns : eastWestRuns, bolts, grids, eastWest);
+					runs, eastWest ? northSouthRuns : eastWestRuns, points, grids, eastWest);
 				// 外側に面するか: 外向きの側（座標の大きい側／小さい側）に、芯の範囲が
 				// 重なる同じ向きの立上りが無い。範囲は芯で押さえ直した測点で見る（隅で
 				// 外面まで伸びた端どうしを重なりと取らない）。
@@ -662,38 +683,131 @@ namespace HomeskzIfcImport::parse
 		return out;
 	}
 
-	std::vector<core::DimensionChainCommand>
-	foundationDimensionChains(const std::vector<core::WallCommand>& walls,
-							  const std::vector<core::SymbolCommand>& anchorBolts,
-							  const std::vector<core::GridCommand>& grids, const core::Vec2& min,
-							  const core::Vec2& max)
+	namespace
 	{
-		const std::vector<WallLine> eastWestLines = collectWallLines(walls, true);
-		const std::vector<WallLine> northSouthLines = collectWallLines(walls, false);
-		const std::vector<WallLine> eastWestRuns = splitIntoRuns(eastWestLines, northSouthLines);
-		const std::vector<WallLine> northSouthRuns = splitIntoRuns(northSouthLines, eastWestLines);
-		const core::Vec2 center{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
-		const std::vector<PlacedRun> runs =
-			placeFoundationRuns(eastWestRuns, northSouthRuns, anchorBolts, grids, center);
-
-		// 外周の 2 段目より外: 四辺とも外側に面する立上りの「芯の列」（取り合う立上りの芯と
-		// 端。1 段目と同じなら重ねない）、上と右はその外に全長。
-		std::vector<DimensionChainCommand> out;
-		const auto sideStops = [&runs](bool eastWest, int side, bool cores)
+		// 外側の列に既に書いた芯・端どうしの寸法（同じ 2 点の間）。内部の列に同じ寸法を
+		// 重ねない（ご要望: 外側を優先）ために覚えておく。**点（アンカーボルト・柱）の絡む
+		// 寸法は覚えない**（別の通りの点がたまたま同じ位置にあるだけで、重なりではない）。
+		class WrittenSegments
 		{
-			std::vector<double> values;
+		public:
+			void remember(DimensionAxis axis, const std::vector<double>& stops,
+						  const std::vector<double>& cores)
+			{
+				for (std::size_t i = 0; i + 1 < stops.size(); ++i)
+				{
+					if (nearAny(cores, stops[i]) && nearAny(cores, stops[i + 1]))
+						segments_.at(static_cast<std::size_t>(axis))
+							.emplace_back(stops[i], stops[i + 1]);
+				}
+			}
+
+			[[nodiscard]] bool contains(DimensionAxis axis, double a, double b) const
+			{
+				return std::ranges::any_of(
+					segments_.at(static_cast<std::size_t>(axis)),
+					[a, b](const std::pair<double, double>& segment)
+					{
+						return std::abs(segment.first - a) <= kDimensionMergeTol &&
+							   std::abs(segment.second - b) <= kDimensionMergeTol;
+					});
+			}
+
+		private:
+			std::array<std::vector<std::pair<double, double>>, 2> segments_;
+		};
+
+		// values の隣り合う 2 点のうち skip(a, b) が真の区間を抜き、残りを続いている区間
+		// ごとの列（測点 2 つ以上）にする。
+		template <class Skip>
+		std::vector<std::vector<double>> splitWhere(const std::vector<double>& values, Skip skip)
+		{
+			std::vector<std::vector<double>> pieces;
+			std::vector<double> piece;
+			const auto flush = [&]()
+			{
+				if (piece.size() >= 2)
+					pieces.push_back(piece);
+				piece.clear();
+			};
+			for (std::size_t i = 0; i + 1 < values.size(); ++i)
+			{
+				if (skip(values[i], values[i + 1]))
+				{
+					flush();
+					continue;
+				}
+				if (piece.empty())
+					piece.push_back(values[i]);
+				piece.push_back(values[i + 1]);
+			}
+			flush();
+			return pieces;
+		}
+
+		// values を順に見て、芯・端どうしで既に書いた寸法を抜き、残りを続いている区間ごとの
+		// 列にする（内部の列用）。書いた寸法は覚える。
+		void emitUnwritten(std::vector<DimensionChainCommand>& out, WrittenSegments& written,
+						   DimensionAxis axis, const std::vector<double>& values,
+						   const std::vector<double>& cores, double base, int side, int tier)
+		{
+			for (std::vector<double>&piece : splitWhere(values,
+														[&](double a, double b) {
+															return nearAny(cores, a) &&
+																   nearAny(cores, b) &&
+																   written.contains(axis, a, b);
+														}))
+				out.push_back(makeChain(axis, std::move(piece), base, side, tier));
+			written.remember(axis, values, cores);
+		}
+
+		// 一続きに割った通りと、その置き場所。placed の WallLineStops::line は eastWest /
+		// northSouth の要素を指すので、**同じ入れ物で生かす**（ムーブしても要素の番地は
+		// 変わらない）。
+		struct RunLayout
+		{
+			std::vector<WallLine> eastWest;
+			std::vector<WallLine> northSouth;
+			std::vector<PlacedRun> placed;
+		};
+
+		// 線材を通りに集め、一続きに割って置き場所を決める（基礎伏図・床伏図・小屋伏図に共通）。
+		RunLayout placeRuns(const std::vector<LineSegment>& segments,
+							const std::vector<core::Vec2>& points,
+							const std::vector<core::GridCommand>& grids, const core::Vec2& center)
+		{
+			const std::vector<WallLine> eastWestLines = collectWallLines(segments, true);
+			const std::vector<WallLine> northSouthLines = collectWallLines(segments, false);
+			RunLayout layout;
+			layout.eastWest = splitIntoRuns(eastWestLines, northSouthLines);
+			layout.northSouth = splitIntoRuns(northSouthLines, eastWestLines);
+			layout.placed =
+				placeFoundationRuns(layout.eastWest, layout.northSouth, points, grids, center);
+			return layout;
+		}
+
+		// 内部の通りを、図の中心から遠い（外側の）順に並べる。
+		std::vector<const PlacedRun*> interiorRuns(const std::vector<PlacedRun>& runs,
+												   const core::Vec2& center)
+		{
+			std::vector<const PlacedRun*> interior;
 			for (const PlacedRun& run : runs)
 			{
-				if (run.eastWest != eastWest || run.exteriorSide != side)
-					continue;
-				const std::vector<double>& from = cores ? run.stops.cores : run.stops.all;
-				values.insert(values.end(), from.begin(), from.end());
+				if (run.exteriorSide == 0 && run.stops.all.size() >= 2)
+					interior.push_back(&run);
 			}
-			return mergeStops(std::move(values));
-		};
-		// 全長は立上りの芯の端から端（L 字などで最も外の通りが建物の全体に渡らなくても
+			const auto distance = [&center](const PlacedRun* run)
+			{
+				const double middle = run->eastWest ? center.y : center.x;
+				return std::abs(run->stops.line->coord - middle);
+			};
+			std::ranges::stable_sort(interior, std::ranges::greater{}, distance);
+			return interior;
+		}
+
+		// 全長は通りの芯の端から端（L 字などで最も外の通りが建物の全体に渡らなくても
 		// 全体を測る）。
-		const auto overallOf = [&runs](bool eastWest)
+		std::vector<double> overallOf(const std::vector<PlacedRun>& runs, bool eastWest)
 		{
 			std::vector<double> ends;
 			for (const PlacedRun& run : runs)
@@ -706,141 +820,312 @@ namespace HomeskzIfcImport::parse
 			return ends.empty()
 					   ? ends
 					   : std::vector<double>{std::ranges::min(ends), std::ranges::max(ends)};
-		};
-		const auto addSide =
-			[&](DimensionAxis axis, bool eastWest, int side, double base, bool withOverall)
-		{
-			const std::vector<double> all = sideStops(eastWest, side, false);
-			const std::vector<double> cores = sideStops(eastWest, side, true);
-			int tier = 1;
-			const std::vector<double>* inner = &all;
-			if (cores.size() >= 2 && !sameStops(cores, all))
-			{
-				out.push_back(makeChain(axis, cores, base, side, tier++));
-				inner = &cores;
-			}
-			const std::vector<double> overall = overallOf(eastWest);
-			if (withOverall && overall.size() == 2 && !sameStops(overall, *inner))
-				out.push_back(makeChain(axis, overall, base, side, tier));
-		};
-		addSide(DimensionAxis::Horizontal, true, 1, max.y, true);
-		addSide(DimensionAxis::Vertical, false, -1, min.x, false);
-		addSide(DimensionAxis::Horizontal, true, -1, min.y, false);
-		addSide(DimensionAxis::Vertical, false, 1, max.x, true);
+		}
 
-		// 1 段目: 立上りに沿う列。外側に面するものは図の外形を根元にして外周に並べる。
-		//
-		// 内部の立上りの列には、**既に外側の列にある立上りの芯・端どうしの寸法（同じ 2 点の
-		// 間）は書かない**（ご要望: 連続した立上りに同じ寸法を重ねない。外側を優先）。
-		// アンカーボルトの絡む寸法は比べない（別の立上りのボルトがたまたま同じ位置にある
-		// だけで、重なりではない）。外側から順に見て、書いた芯どうしの寸法を覚えていく。
-		std::array<std::vector<std::pair<double, double>>, 2> written;
-		const auto remember = [&written](DimensionAxis axis, const std::vector<double>& stops,
-										 const std::vector<double>& cores)
+		// 基礎伏図 1 枚ぶんの寸法の列（parse/Dimension.h 冒頭「基礎伏図は立上りに沿って
+		// 押さえる」）。segments は立上り、points はアンカーボルト。
+		std::vector<DimensionChainCommand>
+		lineDimensionChains(const std::vector<LineSegment>& segments,
+							const std::vector<core::Vec2>& points,
+							const std::vector<core::GridCommand>& grids, const core::Vec2& min,
+							const core::Vec2& max)
+		{
+			const core::Vec2 center{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
+			const RunLayout layout = placeRuns(segments, points, grids, center);
+			const std::vector<PlacedRun>& runs = layout.placed;
+
+			// 外周の 2 段目より外: 四辺とも外側に面する立上りの「芯の列」（取り合う立上りの芯と
+			// 端。1 段目と同じなら重ねない）、上と右はその外に全長。
+			std::vector<DimensionChainCommand> out;
+			const auto sideStops = [&runs](bool eastWest, int side, bool cores)
+			{
+				std::vector<double> values;
+				for (const PlacedRun& run : runs)
+				{
+					if (run.eastWest != eastWest || run.exteriorSide != side)
+						continue;
+					const std::vector<double>& from = cores ? run.stops.cores : run.stops.all;
+					values.insert(values.end(), from.begin(), from.end());
+				}
+				return mergeStops(std::move(values));
+			};
+			const auto addSide =
+				[&](DimensionAxis axis, bool eastWest, int side, double base, bool withOverall)
+			{
+				const std::vector<double> all = sideStops(eastWest, side, false);
+				const std::vector<double> cores = sideStops(eastWest, side, true);
+				int tier = 1;
+				const std::vector<double>* inner = &all;
+				if (cores.size() >= 2 && !sameStops(cores, all))
+				{
+					out.push_back(makeChain(axis, cores, base, side, tier++));
+					inner = &cores;
+				}
+				const std::vector<double> overall = overallOf(runs, eastWest);
+				if (withOverall && overall.size() == 2 && !sameStops(overall, *inner))
+					out.push_back(makeChain(axis, overall, base, side, tier));
+			};
+			addSide(DimensionAxis::Horizontal, true, 1, max.y, true);
+			addSide(DimensionAxis::Vertical, false, -1, min.x, false);
+			addSide(DimensionAxis::Horizontal, true, -1, min.y, false);
+			addSide(DimensionAxis::Vertical, false, 1, max.x, true);
+
+			// 1 段目: 立上りに沿う列。外側に面するものは図の外形を根元にして外周に並べる。
+			//
+			// 内部の立上りの列には、**既に外側の列にある立上りの芯・端どうしの寸法（同じ 2 点の
+			// 間）は書かない**（ご要望: 連続した立上りに同じ寸法を重ねない。外側を優先）。
+			// アンカーボルトの絡む寸法は比べない（WrittenSegments）。外側から順に見て、書いた
+			// 芯どうしの寸法を覚えていく。
+			WrittenSegments written;
+			// 外周の 2 段目より外は芯と端だけでできている。
+			for (const DimensionChainCommand& chain : out)
+				written.remember(chain.axis, chain.stops, chain.stops);
+
+			for (const PlacedRun& run : runs)
+			{
+				if (run.stops.all.size() < 2 || run.exteriorSide == 0)
+					continue;
+				const DimensionAxis axis =
+					run.eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
+				const core::Vec2& edge = run.exteriorSide > 0 ? max : min;
+				out.push_back(makeChain(axis, run.stops.all, run.eastWest ? edge.y : edge.x,
+										run.exteriorSide, 0));
+				written.remember(axis, run.stops.all, run.stops.cores);
+			}
+
+			// 内部の立上りの列は、その芯から図の外側（中心から遠い側）へ出す。
+			for (const PlacedRun* run : interiorRuns(runs, center))
+			{
+				const DimensionAxis axis =
+					run->eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
+				const double base = run->stops.line->coord;
+				const double middle = run->eastWest ? center.y : center.x;
+				const int side = base >= middle ? 1 : -1;
+				const std::vector<double>& stops = run->stops.all;
+				const std::vector<double>& cores = run->stops.cores;
+				const auto emit = [&](const std::vector<double>& values, int tier)
+				{ emitUnwritten(out, written, axis, values, cores, base, side, tier); };
+
+				// **立上りの芯・端の列とアンカーボルトの列を分ける**（ご要望: 現場では立上りの
+				// 位置が決まってからアンカーボルトを置くので、立上りの寸法だけを追えるように）。
+				// アンカーボルトが乗る立上りは、芯・端だけの列を 1 つ外の段に出し、1 段目には
+				// アンカーボルトの絡む寸法だけを残す（芯・端どうしは外の列にあるので抜ける）。
+				// アンカーボルトが無ければ芯・端の列が 1 段目。
+				const bool withBolts = !sameStops(stops, cores);
+				const int coreTier = withBolts ? 1 : 0;
+				emit(cores, coreTier);
+				if (withBolts)
+					emit(stops, 0);
+
+				// 半島状・独立した立上り（自由端で終わる一続き）は長さも押さえる（ご要望:
+				// y3 通りの x0〜x1 の端＝200＋510＋260＝970）。芯・端の列と同じなら出さない。
+				if ((run->stops.freeFront || run->stops.freeBack) && cores.size() >= 3 &&
+					!written.contains(axis, cores.front(), cores.back()))
+				{
+					out.push_back(
+						makeChain(axis, {cores.front(), cores.back()}, base, side, coreTier + 1));
+					written.remember(axis, {cores.front(), cores.back()}, cores);
+				}
+			}
+			return out;
+		}
+
+		// a〜b が stops の隣り合う 2 点か（同じ寸法が stops の列に既にあるか）。
+		bool isSegmentOf(const std::vector<double>& stops, double a, double b)
 		{
 			for (std::size_t i = 0; i + 1 < stops.size(); ++i)
 			{
-				if (nearAny(cores, stops[i]) && nearAny(cores, stops[i + 1]))
-					written.at(static_cast<std::size_t>(axis)).emplace_back(stops[i], stops[i + 1]);
+				if (std::abs(stops[i] - a) <= kDimensionMergeTol &&
+					std::abs(stops[i + 1] - b) <= kDimensionMergeTol)
+					return true;
 			}
-		};
-		// 外周の 2 段目より外は芯と端だけでできている。
-		for (const DimensionChainCommand& chain : out)
-			remember(chain.axis, chain.stops, chain.stops);
-
-		std::vector<const PlacedRun*> interior;
-		for (const PlacedRun& run : runs)
-		{
-			if (run.stops.all.size() < 2)
-				continue;
-			if (run.exteriorSide == 0)
-			{
-				interior.push_back(&run);
-				continue;
-			}
-			const DimensionAxis axis =
-				run.eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
-			const core::Vec2& edge = run.exteriorSide > 0 ? max : min;
-			out.push_back(makeChain(axis, run.stops.all, run.eastWest ? edge.y : edge.x,
-									run.exteriorSide, 0));
-			remember(axis, run.stops.all, run.stops.cores);
+			return false;
 		}
 
-		// 内部の立上りの列は、その芯から図の外側（中心から遠い側）へ出す。
-		const auto distance = [&center](const PlacedRun* run)
+		// 通り 1 本の柱の列（parse/Dimension.h 冒頭「床伏図・小屋伏図も横架材に沿って
+		// 押さえる」）。梁の取り合い・端から外れた柱があれば、柱の位置と通りの両端。
+		// 無ければ（柱の無い通り・柱が全部取り合いの上にある通り）柱と梁を分ける意味が
+		// 無いので、芯・端と柱すべての 1 列。
+		std::vector<double> columnStops(const WallLineStops& stops)
 		{
-			const double middle = run->eastWest ? center.y : center.x;
-			return std::abs(run->stops.line->coord - middle);
-		};
-		std::ranges::stable_sort(interior, std::ranges::greater{}, distance);
-		const auto isWritten = [&written](DimensionAxis axis, double a, double b)
+			const bool apart = std::ranges::any_of(stops.points, [&stops](double point)
+												   { return !nearAny(stops.cores, point); });
+			if (!apart || stops.cores.empty())
+				return stops.all;
+			std::vector<double> columns = stops.points;
+			columns.push_back(stops.cores.front());
+			columns.push_back(stops.cores.back());
+			return mergeStops(std::move(columns));
+		}
+
+		// 柱とは別に押さえる横架材の列（取り合う梁の芯・端）。柱の列から外れた取り合いが
+		// 1 つも無ければ作らない。柱の列に同じ寸法がある区間と、skip が真の区間は抜く。
+		template <class Skip>
+		std::vector<std::vector<double>> beamPieces(const std::vector<double>& cores,
+													const std::vector<double>& columns, Skip skip)
 		{
-			return std::ranges::any_of(
-				written.at(static_cast<std::size_t>(axis)),
-				[a, b](const std::pair<double, double>& segment)
-				{
-					return std::abs(segment.first - a) <= kDimensionMergeTol &&
-						   std::abs(segment.second - b) <= kDimensionMergeTol;
-				});
-		};
-		for (const PlacedRun* run : interior)
+			if (std::ranges::all_of(cores,
+									[&columns](double core) { return nearAny(columns, core); }))
+				return {};
+			return splitWhere(cores, [&](double a, double b)
+							  { return isSegmentOf(columns, a, b) || skip(a, b); });
+		}
+
+		// 床伏図・小屋伏図 1 枚ぶんの寸法の列。segments は横架材、points は柱。
+		std::vector<DimensionChainCommand>
+		framingLineChains(const std::vector<LineSegment>& segments,
+						  const std::vector<core::Vec2>& points,
+						  const std::vector<core::GridCommand>& grids, const core::Vec2& min,
+						  const core::Vec2& max)
 		{
-			const DimensionAxis axis =
-				run->eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
-			const double base = run->stops.line->coord;
-			const double middle = run->eastWest ? center.y : center.x;
-			const int side = base >= middle ? 1 : -1;
-			const std::vector<double>& stops = run->stops.all;
-			const std::vector<double>& cores = run->stops.cores;
-			// 重なる寸法（芯・端どうしで、既に書いたもの）を抜いて、残りを続いている区間
-			// ごとの列にし、書いた寸法を覚える。
-			const auto emit = [&](const std::vector<double>& values, int tier)
+			const core::Vec2 center{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
+			const RunLayout layout = placeRuns(segments, points, grids, center);
+			const std::vector<PlacedRun>& runs = layout.placed;
+			std::vector<DimensionChainCommand> out;
+			WrittenSegments written;
+
+			// 外周: 辺ごとに、外側に面する通りの柱の列を**1 本につなげて**図の外形から出す
+			// （ご要望: 段違いの外周で列が途切れるのは不自然）。全長を持つ上と右は全長の端まで
+			// 延ばす（外側に面する横架材の無い区間＝右の 5〜7' 間なども押さえる）。柱と梁の
+			// 取り合いが一致しない辺は、横架材の列を 1 段内側に出し、柱の列を 1 段外へ出す。
+			struct Side
 			{
-				std::vector<double> piece;
-				const auto flush = [&]()
-				{
-					if (piece.size() >= 2)
-						out.push_back(makeChain(axis, piece, base, side, tier));
-					piece.clear();
-				};
-				for (std::size_t i = 0; i + 1 < values.size(); ++i)
-				{
-					if (nearAny(cores, values[i]) && nearAny(cores, values[i + 1]) &&
-						isWritten(axis, values[i], values[i + 1]))
-					{
-						flush();
-						continue;
-					}
-					if (piece.empty())
-						piece.push_back(values[i]);
-					piece.push_back(values[i + 1]);
-				}
-				flush();
-				remember(axis, values, cores);
+				bool eastWest;
+				int side;
+				double base;
+				bool withOverall;
 			};
-
-			// **立上りの芯・端の列とアンカーボルトの列を分ける**（ご要望: 現場では立上りの
-			// 位置が決まってからアンカーボルトを置くので、立上りの寸法だけを追えるように）。
-			// アンカーボルトが乗る立上りは、芯・端だけの列を 1 つ外の段に出し、1 段目には
-			// アンカーボルトの絡む寸法だけを残す（芯・端どうしは外の列にあるので抜ける）。
-			// アンカーボルトが無ければ芯・端の列が 1 段目。
-			const bool withBolts = !sameStops(stops, cores);
-			const int coreTier = withBolts ? 1 : 0;
-			emit(cores, coreTier);
-			if (withBolts)
-				emit(stops, 0);
-
-			// 半島状・独立した立上り（自由端で終わる一続き）は長さも押さえる（ご要望:
-			// y3 通りの x0〜x1 の端＝200＋510＋260＝970）。芯・端の列と同じなら出さない。
-			if ((run->stops.freeFront || run->stops.freeBack) && cores.size() >= 3 &&
-				!isWritten(axis, cores.front(), cores.back()))
+			// 辺ごとの柱の列・横架材（取り合い）の測点・全長。
+			struct SideRows
 			{
-				out.push_back(
-					makeChain(axis, {cores.front(), cores.back()}, base, side, coreTier + 1));
-				remember(axis, {cores.front(), cores.back()}, cores);
+				Side edge;
+				DimensionAxis axis;
+				std::vector<double> row;
+				std::vector<double> cores;
+				std::vector<double> overall;
+			};
+			std::vector<SideRows> sides;
+			for (const Side& edge : {Side{true, 1, max.y, true}, Side{false, -1, min.x, false},
+									 Side{true, -1, min.y, false}, Side{false, 1, max.x, true}})
+			{
+				SideRows rows{edge,
+							  edge.eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical,
+							  {},
+							  {},
+							  overallOf(runs, edge.eastWest)};
+				for (const PlacedRun& run : runs)
+				{
+					if (run.eastWest != edge.eastWest || run.exteriorSide != edge.side ||
+						run.stops.all.size() < 2)
+						continue;
+					const std::vector<double> columns = columnStops(run.stops);
+					rows.row.insert(rows.row.end(), columns.begin(), columns.end());
+					rows.cores.insert(rows.cores.end(), run.stops.cores.begin(),
+									  run.stops.cores.end());
+				}
+				// 外側に面する通りが無い辺でも、全長を持つ上と右は全長を出す（基礎伏図と同じ。
+				// 通りが全部下／左に面する U 字の架構など）。そのときの列は全長そのもの。
+				if (edge.withOverall)
+					rows.row.insert(rows.row.end(), rows.overall.begin(), rows.overall.end());
+				rows.row = mergeStops(std::move(rows.row));
+				if (rows.row.size() < 2)
+					continue;
+				rows.cores = mergeStops(std::move(rows.cores));
+				// 柱の列は四辺とも先に覚える。横架材の列は、どの辺の柱の列にある寸法も重ねない
+				// （ご要望: い通りの 5〜8 の 2685 が、右の柱の列を全長の端まで延ばした 5〜7' と
+				// 重なっていた）。
+				written.remember(rows.axis, rows.row, rows.row);
+				sides.push_back(std::move(rows));
 			}
+			for (const SideRows& rows : sides)
+			{
+				const Side& edge = rows.edge;
+				std::vector<std::vector<double>> beams =
+					beamPieces(rows.cores, rows.row, [&written, &rows](double a, double b)
+							   { return written.contains(rows.axis, a, b); });
+				const int rowTier = beams.empty() ? 0 : 1;
+				if (rows.row.size() >= 2)
+					out.push_back(makeChain(rows.axis, rows.row, edge.base, edge.side, rowTier));
+				for (std::vector<double>& chain : beams)
+				{
+					written.remember(rows.axis, chain, chain);
+					out.push_back(makeChain(rows.axis, std::move(chain), edge.base, edge.side, 0));
+				}
+				if (edge.withOverall && rows.overall.size() == 2 &&
+					!sameStops(rows.overall, rows.row))
+					out.push_back(
+						makeChain(rows.axis, rows.overall, edge.base, edge.side, rowTier + 1));
+			}
+
+			// 内部の通り: 柱の列と横架材の列。どちらも外側の列（先に書いた列）にある芯・端
+			// どうしの寸法は重ねない（ご要望: ろ〜はの 910 が 1 通りと 5 通りに、1〜1' の 650 が
+			// ろ通りとは通りに重なっていた）。
+			for (const PlacedRun* run : interiorRuns(runs, center))
+			{
+				const DimensionAxis axis =
+					run->eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
+				const double base = run->stops.line->coord;
+				const double middle = run->eastWest ? center.y : center.x;
+				const int side = base >= middle ? 1 : -1;
+				const std::vector<double>& cores = run->stops.cores;
+				const std::vector<double> columns = columnStops(run->stops);
+				// 横架材の列は柱の列を覚える前に決める（柱の列と同じ区間は isSegmentOf が抜く）。
+				std::vector<std::vector<double>> beams =
+					beamPieces(cores, columns, [&written, axis](double a, double b)
+							   { return written.contains(axis, a, b); });
+				const int columnTier = beams.empty() ? 0 : 1;
+				emitUnwritten(out, written, axis, columns, cores, base, side, columnTier);
+				for (std::vector<double>& chain : beams)
+					out.push_back(makeChain(axis, std::move(chain), base, side, 0));
+				written.remember(axis, cores, cores);
+				// 半島状・独立した梁（自由端で終わる一続き）は長さも押さえる。
+				if ((run->stops.freeFront || run->stops.freeBack) && columns.size() >= 3 &&
+					!written.contains(axis, cores.front(), cores.back()))
+				{
+					out.push_back(
+						makeChain(axis, {cores.front(), cores.back()}, base, side, columnTier + 1));
+					written.remember(axis, {cores.front(), cores.back()}, cores);
+				}
+			}
+			return out;
 		}
-		return out;
+	} // namespace
+
+	std::vector<core::DimensionChainCommand>
+	foundationDimensionChains(const std::vector<core::WallCommand>& walls,
+							  const std::vector<core::SymbolCommand>& anchorBolts,
+							  const std::vector<core::GridCommand>& grids, const core::Vec2& min,
+							  const core::Vec2& max)
+	{
+		std::vector<LineSegment> segments;
+		segments.reserve(walls.size());
+		for (const core::WallCommand& wall : walls)
+			segments.push_back(LineSegment{wall.start, wall.end, wall.thickness});
+		std::vector<core::Vec2> points;
+		points.reserve(anchorBolts.size());
+		for (const core::SymbolCommand& bolt : anchorBolts)
+			points.push_back(bolt.position);
+		return lineDimensionChains(segments, points, grids, min, max);
+	}
+
+	std::vector<core::DimensionChainCommand>
+	framingDimensionChains(const std::vector<core::MemberCommand>& members,
+						   const std::vector<core::ColumnCommand>& columns,
+						   const std::vector<core::GridCommand>& grids, const core::Vec2& min,
+						   const core::Vec2& max)
+	{
+		// 横架材の端点は取り付く相手（横架材・柱）の芯の上にある（core::MemberCommand）
+		// ので、取り合いは立上りと同じ判定で拾える。斜めの材は通りを作らない
+		// （collectWallLines が拾わない）。
+		std::vector<LineSegment> segments;
+		segments.reserve(members.size());
+		for (const core::MemberCommand& member : members)
+			segments.push_back(LineSegment{member.start, member.end, member.width});
+		std::vector<core::Vec2> points;
+		points.reserve(columns.size());
+		for (const core::ColumnCommand& column : columns)
+			points.push_back(column.position);
+		return framingLineChains(segments, points, grids, min, max);
 	}
 
 	std::vector<core::DimensionChainCommand>
@@ -875,7 +1160,7 @@ namespace HomeskzIfcImport::parse
 			// 立上りの通りに沿う列（アンカーボルト・切れ目・取り合う立上りの芯）と、外周の
 			// 芯の列・全長。外周の列には外周の立上りに取り合うものしか載せない（内部の
 			// 立上りの位置はその立上りに沿う列が押さえる）ので、外周の部材の位置の列
-			// （perimeterDimensionChains）は使わない。
+			// （perimeterDimensionChains）は使わない。床伏図・小屋伏図も同じ。
 			std::vector<core::WallCommand> walls;
 			std::ranges::copy_if(document.walls, std::back_inserter(walls),
 								 [&layers](const core::WallCommand& wall)
@@ -887,20 +1172,20 @@ namespace HomeskzIfcImport::parse
 			return foundationDimensionChains(walls, bolts, document.grids, min, max);
 		}
 		case core::PlanKind::Framing:
-			// 柱（小屋束を含む）と梁。
-			for (const core::ColumnCommand& column : document.columns)
-			{
-				if (!onLayers(layers, column.layer))
-					continue;
-				elementX.push_back(column.position.x);
-				elementY.push_back(column.position.y);
-			}
-			for (const core::MemberCommand& member : document.members)
-			{
-				if (onLayers(layers, member.layer))
-					takeMember(member.start, member.end);
-			}
-			break;
+		{
+			// 柱（小屋束を含む）と梁を、基礎伏図と同じく横架材の通りに沿って押さえる。外周には
+			// 外周の横架材に乗る柱と、外周の横架材に取り合う直交する梁だけを出し、それ以外は
+			// 内部の横架材に沿う列が押さえる。
+			std::vector<core::MemberCommand> members;
+			std::ranges::copy_if(document.members, std::back_inserter(members),
+								 [&layers](const core::MemberCommand& member)
+								 { return onLayers(layers, member.layer); });
+			std::vector<core::ColumnCommand> columns;
+			std::ranges::copy_if(document.columns, std::back_inserter(columns),
+								 [&layers](const core::ColumnCommand& column)
+								 { return onLayers(layers, column.layer); });
+			return framingDimensionChains(members, columns, document.grids, min, max);
+		}
 		case core::PlanKind::Moya:
 			// 母屋だけ（垂木・登り梁は押さえない）。母屋かどうかは配置先レイヤのレベル種別で
 			// 決める——parse/Member が母屋を置いたレイヤそのもので、名前の綴りを見ない。
