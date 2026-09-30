@@ -360,7 +360,7 @@ namespace HomeskzIfcImport::draw
 			AddPanelCircle(host, (clearStart + clearEnd) / 2.0, offset);
 		}
 
-		// 軸組図の面材 1 枚（軸組内法を埋める矩形）。
+		// 軸組図の面材 1 枚（軸組内法を埋める矩形。登り梁の下では上辺が傾いた台形）。
 		//
 		// ★**面は壁芯（法線方向 0）へ置く。実物の離れ（板の中心面）へは置かない。**
 		// 軸組図は**通り芯＝壁芯で切った断面ビューポート**で、切断面より奥は表示しない
@@ -370,11 +370,11 @@ namespace HomeskzIfcImport::draw
 		// 両面のときは 2 枚が同じ位置に重なるが、ハッチングは重ねて見える（クラス属性の
 		// 塗りが透ける場合。表裏の見分けはそこに委ねる）。
 		void AddPanelFace(MCObjectHandle host, double clearStart, double clearEnd, double bottom,
-						  double top, const char* className)
+						  double topAtStart, double topAtEnd, const char* className)
 		{
 			AddPolygon3D(host,
 						 {core::Vec2{clearStart, bottom}, core::Vec2{clearEnd, bottom},
-						  core::Vec2{clearEnd, top}, core::Vec2{clearStart, top}},
+						  core::Vec2{clearEnd, topAtEnd}, core::Vec2{clearStart, topAtStart}},
 						 0.0, className);
 		}
 
@@ -561,10 +561,18 @@ namespace HomeskzIfcImport::draw
 			// 軸組内法の高さ。**ここが取れなくても伏図の記号は描く**——記号は平面だけで
 			// 決まるので、高さの取りこぼしで図面から耐力壁が丸ごと消えるのは割に合わない
 			// （ヘッダ「絵を全部止めない」）。
+			//
+			// 上端は**内法の両端（柱の内側面）ごとに持つ**（登り梁の下では左右で違う）。
+			// 終点側が下端以下なら始点側と同じとみなす——終点側のパラメータが無かった頃に
+			// 置いた PIO は既定値 0 のまま読まれるので、水平の耐力壁として描き続ける
+			// （Extensions/ExtShearWall.h の kParamShearTopEnd）。
 			const double bottom = ParamReal(self, kParamShearBottom);
-			const double top = ParamReal(self, kParamShearTop);
-			const bool hasHeight = top > bottom;
-			core::trace::log("  shearwall: 高さ z=[" + Number(bottom) + ", " + Number(top) + "]" +
+			const double topAtStart = ParamReal(self, kParamShearTop);
+			const double topEndParam = ParamReal(self, kParamShearTopEnd);
+			const double topAtEnd = topEndParam > bottom ? topEndParam : topAtStart;
+			const bool hasHeight = topAtStart > bottom && topAtEnd > bottom;
+			core::trace::log("  shearwall: 高さ z=[" + Number(bottom) + ", " + Number(topAtStart) +
+							 "→" + Number(topAtEnd) + "]" +
 							 (hasHeight ? "" : " ← 取れないので 3D は描かない"));
 
 			if (draw::PioParamString(self, kParamShearKind) == kShearKindPanel)
@@ -583,14 +591,14 @@ namespace HomeskzIfcImport::draw
 				{
 					AddPanelMark(object, clearStart, clearEnd, markOffset);
 					if (hasHeight)
-						AddPanelFace(object, clearStart, clearEnd, bottom, top,
+						AddPanelFace(object, clearStart, clearEnd, bottom, topAtStart, topAtEnd,
 									 kShearPanelFrontClass);
 				}
 				if (back)
 				{
 					AddPanelMark(object, clearStart, clearEnd, -markOffset);
 					if (hasHeight)
-						AddPanelFace(object, clearStart, clearEnd, bottom, top,
+						AddPanelFace(object, clearStart, clearEnd, bottom, topAtStart, topAtEnd,
 									 kShearPanelBackClass);
 				}
 				return kObjectEventNoErr;
@@ -613,18 +621,22 @@ namespace HomeskzIfcImport::draw
 				AddBraceTriangle(object, markCentre, markOffset, !risesToEnd);
 
 			// 軸組図: 形状どおりの帯。見付け幅が取れないと帯にならないので、そのときは
-			// 伏図の記号だけで済ませる。
+			// 伏図の記号だけで済ませる。たすき掛けは risesToEnd の側を手前として帯のまま
+			// 描き、逆向きの奥の 1 本は手前の帯の縁で切った 2 片で描く（2 本とも帯のままだと
+			// 交差部で輪郭が突き抜けて格子に見える。core::shearWallBehindBracePieces）。
 			if (hasHeight && width > 0.0)
 			{
 				AddPolygon3D(object,
-							 core::shearWallBracePolygon(clearStart, clearEnd, bottom, top, width,
-														 risesToEnd),
+							 core::shearWallBracePolygon(clearStart, clearEnd, bottom, topAtStart,
+														 topAtEnd, width, risesToEnd),
 							 0.0, "");
 				if (doubleBrace)
-					AddPolygon3D(object,
-								 core::shearWallBracePolygon(clearStart, clearEnd, bottom, top,
-															 width, !risesToEnd),
-								 0.0, "");
+				{
+					for (const std::vector<core::Vec2>& piece :
+						 core::shearWallBehindBracePieces(clearStart, clearEnd, bottom, topAtStart,
+														  topAtEnd, width, !risesToEnd))
+						AddPolygon3D(object, piece, 0.0, "");
+				}
 			}
 		}
 		catch (...)

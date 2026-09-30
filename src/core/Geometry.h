@@ -48,18 +48,27 @@ namespace HomeskzIfcImport::core
 		return std::abs(a.x - b.x) < tol && std::abs(a.y - b.y) < tol;
 	}
 
-	// 凸多角形を軸並行の矩形 [min, max] で切り取る（Sutherland–Hodgman）。頂点列は閉じた
-	// ポリゴン（末尾に始点を重複させない）で、周り方向は入力のまま保たれる。矩形の外へ
-	// 完全に出ている多角形は空を返す。
+	// 凸多角形を直線 origin + t·direction で切り、**左手側**（direction を向いて左。境界を
+	// 含む）だけを残す（Sutherland–Hodgman の 1 段）。周り方向は入力のまま。残りが 3 点に
+	// 満たなければ空を返す。clipPolygonToConvex はこれを切る側の辺ごとに当てたもの。
+	// ほかの利用者はたすき掛けの奥の筋かいを手前の帯の縁で切る
+	// core::shearWallBehindBracePieces。
+	std::vector<Vec2> clipPolygonToHalfPlane(const std::vector<Vec2>& polygon, const Vec2& origin,
+											 const Vec2& direction);
+
+	// 凸多角形を**凸多角形 clip**（反時計回り）で切り取る（Sutherland–Hodgman）。頂点列は
+	// 閉じたポリゴン（末尾に始点を重複させない）で、周り方向は入力のまま保たれる。clip の
+	// 外へ完全に出ている多角形は空を返す。clip が 3 点未満でも空。
 	//
-	// 【何に使うか】耐力壁の筋かいは「軸組内法の対角線に沿った帯」で、その帯は内法の
-	// 矩形からはみ出す（帯の角が柱・横架材へ食い込む）。実物も内法へ切り詰めて納まるので、
-	// 描くときも矩形で切る（core::shearWallBracePolygon。docs/DEV-NOTES.md M19）。
+	// 【何に使うか】耐力壁の筋かいは「軸組内法の対角線に沿った帯」で、その帯は内法から
+	// はみ出す（帯の角が柱・横架材へ食い込む）。実物も内法へ切り詰めて納まるので、
+	// 描くときも内法で切る（core::shearWallBracePolygon。docs/DEV-NOTES.md M19）。
+	// 内法は**登り梁の下では上辺が傾いた台形**になるので、矩形ではなく凸多角形で切る。
 	//
-	// 凹多角形には使わない（Sutherland–Hodgman は凹の切り口で退化した辺を残す）。用途は
+	// 切られる側も凸に限る（Sutherland–Hodgman は凹の切り口で退化した辺を残す）。用途は
 	// いまのところ帯＝凸なのでこれで足りる。
-	std::vector<Vec2> clipPolygonToRect(const std::vector<Vec2>& polygon, const Vec2& min,
-										const Vec2& max);
+	std::vector<Vec2> clipPolygonToConvex(const std::vector<Vec2>& polygon,
+										  const std::vector<Vec2>& clip);
 
 	// 3 次元ベクトル（ワールド座標の点・方向）。配置・押し出しに使う。
 	struct Vec3

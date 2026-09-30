@@ -69,6 +69,17 @@ namespace HomeskzIfcImport::core
 	// （draw/DrawUtil の SheetPaperArea）と、下の resolvePageMargins が共有する唯一の定義。
 	inline constexpr double kMillimetersPerInch = 25.4;
 
+	// 1 インチの pt 数。文字の大きさ（紙の pt）を mm へ直すのに使う唯一の定義
+	// （文字スタイルの大きさを読む draw/DrawUtil・寸法の文字を焼く draw/Dimension・
+	// 図面ラベルのタイトル draw/DrawingLabel が共有する）。
+	inline constexpr double kPointsPerInch = 72.0;
+
+	// 紙の pt → 紙の mm（10pt → 3.5278mm）。
+	constexpr double pointsToMillimeters(double points)
+	{
+		return points * kMillimetersPerInch / kPointsPerInch;
+	}
+
 	// 「用紙 − 余白」とシートレイヤの大きさを突き合わせるときの遊び（用紙 mm）。
 	inline constexpr double kPageMarginMatchTol = 0.5;
 
@@ -258,5 +269,61 @@ namespace HomeskzIfcImport::core
 	// 図の外周に出る段のうち最も外のもの（core::outermostDimensionTier）。負なら（寸法が
 	// 無ければ）0。
 	double dimensionBand(int outermostTier);
+
+	// ------------------------------------------------------------------------
+	// 軸組図のレベル記号の形と位置（M31 の後のご要望）
+	// ------------------------------------------------------------------------
+	//
+	// 記号は**基準線の起点から右へ**「▽（頂点で線に触れる正三角形）＋名前」を並べ、線は
+	// 図の右端を少し越えるまで伸ばす。
+	//
+	//     ▽1FL ─────────────────────────（図）─────
+	//     ↑起点（左の寸法列の文字より外）          ↑右端＋kLevelLineOvershoot
+	//
+	// 長さは**用紙 mm**（マーカーレイアウトの中身は紙の上の mm で効き、容れ物の縮尺は VW が
+	// 掛ける。Findings「Drawing Labels」のレイアウトの文字の大きさ）。名前の文字の大きさは
+	// 寸法の文字と同じ（寸法規格の文字スタイルの pt。draw/Dimension が読む）。
+
+	// 三角の高さ／名前の文字の大きさ（「文字より一回り小さい」。ご要望）。
+	inline constexpr double kLevelMarkTriangleRatio = 0.8;
+	// 三角と名前の隙間・線と名前の下端の隙間（用紙 mm）。
+	inline constexpr double kLevelMarkTextGap = 0.5;
+	// 名前の右端と寸法の文字の隙間（用紙 mm）。
+	inline constexpr double kLevelMarkClearance = 1.0;
+	// 基準線が図の右端を越える長さ（用紙 mm。「建物幅を少し超えたくらい」。ご要望）。
+	inline constexpr double kLevelLineOvershoot = 3.0;
+	// 軸組図の寸法の帯に足す、レベル記号が寸法より外へ張り出す見込み（用紙 mm）。名前の幅は
+	// 描くまで分からないので、三角と 3 文字ほどの名前（"1FL"・"軒高"）が収まる量で見込む。
+	inline constexpr double kLevelMarkBandAllowance = 10.0;
+
+	// 記号のレイアウトの中の配置（用紙 mm・起点＝(0, 0)・y は上が +）。
+	//   triangleHeight / triangleHalfWidth … ▽ の高さと底辺（上辺）の半分。頂点は
+	//                                        (triangleHalfWidth, 0)
+	//   textLeft / textBottom              … 名前の外形の左下
+	//   width                              … 起点から名前の右端まで
+	struct LevelMarkShape
+	{
+		double triangleHeight = 0.0;
+		double triangleHalfWidth = 0.0;
+		double textLeft = 0.0;
+		double textBottom = 0.0;
+		double width = 0.0;
+	};
+
+	// textSize は名前の文字の大きさ、textWidth は描いた名前の幅（どちらも用紙 mm。負は 0）。
+	LevelMarkShape levelMarkShape(double textSize, double textWidth);
+
+	// 記号の起点（注釈空間の x・モデル mm）。left は図の左端（高さの寸法列の根元）、
+	// dimensionTier は左に出る寸法列の最も外の段（無ければ負）、markWidth は
+	// LevelMarkShape::width。dimensionScale は寸法線までの距離に使う縮尺の分母
+	// （dimensionLineCoord と同じもの）、markScale は記号を描くビューポートの縮尺の分母。
+	// 名前の右端が寸法の文字（寸法線から kDimensionTextAllowance）より kLevelMarkClearance
+	// だけ外に来る位置を返す。
+	double levelMarkStartX(double left, int dimensionTier, double markWidth, double dimensionScale,
+						   double markScale);
+
+	// 基準線の長さ（用紙 mm）。起点 startX から図の右端 right を kLevelLineOvershoot だけ
+	// 越えるまで。scale は記号を描くビューポートの縮尺の分母。
+	double levelLineLength(double startX, double right, double scale);
 
 } // namespace HomeskzIfcImport::core

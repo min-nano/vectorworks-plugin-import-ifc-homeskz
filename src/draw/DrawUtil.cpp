@@ -229,7 +229,7 @@ namespace HomeskzIfcImport::draw
 		}
 	}
 
-	void SetAllAttributesByClass(MCObjectHandle object)
+	void SetAllAttributesByClass(MCObjectHandle object, bool withMarker)
 	{
 		// 【計測】7 つを 1 つずつ区間にする（上記 SetClassByName の【計測】と同じ理由）。
 		// **分け方に意味がある**——7 つが均等に重ければ「属性を 1 つ書くたびに PIO が
@@ -256,6 +256,7 @@ namespace HomeskzIfcImport::draw
 			VW_DRAW_TIME("属性:面パターン");
 			gSDK->SetFPatByClass(object);
 		}
+		if (withMarker)
 		{
 			VW_DRAW_TIME("属性:マーカー");
 			gSDK->SetArrowByClass(object);
@@ -266,10 +267,11 @@ namespace HomeskzIfcImport::draw
 		}
 	}
 
-	void SetClassWithAttributes(MCObjectHandle object, const std::string& className)
+	void SetClassWithAttributes(MCObjectHandle object, const std::string& className,
+								bool withMarker)
 	{
 		SetClassByName(object, className);
-		SetAllAttributesByClass(object);
+		SetAllAttributesByClass(object, withMarker);
 	}
 
 	ScopedCreationClass::ScopedCreationClass(const std::string& className)
@@ -1227,7 +1229,6 @@ namespace HomeskzIfcImport::draw
 
 	double TextStylePoints(InternalIndex style)
 	{
-		constexpr double kPointsPerInch = 72.0;
 		const MCObjectHandle resource = style != 0 ? gSDK->InternalIndexToHandle(style) : nil;
 		if (resource == nil)
 			return 0.0;
@@ -1237,7 +1238,7 @@ namespace HomeskzIfcImport::draw
 									value) == 0 ||
 			!value.GetReal64(inches) || inches <= 0.0)
 			return 0.0;
-		return inches * kPointsPerInch;
+		return inches * core::kPointsPerInch;
 	}
 
 	InternalIndex DimensionStandardTextStyle(const std::string& name)

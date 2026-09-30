@@ -17,6 +17,7 @@
 //
 
 #include "core/Document.h"
+#include "core/Layout.h"
 
 #include <algorithm>
 #include <cmath>
@@ -25,6 +26,7 @@
 #include <limits>
 #include <ranges>
 #include <string>
+#include <utility>
 
 namespace HomeskzIfcImport::core
 {
@@ -238,11 +240,13 @@ namespace HomeskzIfcImport::core
 		}
 
 		// レベル記号 1 つが妥当か（M31）。表示名・結ぶストーリ・レベル種別が非空で、高さ・
-		// 位置が有限であること。
+		// 図の左右の端が有限で右端が左端より左に無く、段が -1 以上であること。
 		bool isValidLevelMark(const LevelMarkCommand& level)
 		{
 			return !level.name.empty() && !level.story.empty() && !level.levelType.empty() &&
-				   std::isfinite(level.elevation) && std::isfinite(level.x);
+				   std::isfinite(level.elevation) && std::isfinite(level.x) &&
+				   std::isfinite(level.right) && level.right >= level.x &&
+				   level.dimensionTier >= -1;
 		}
 
 		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを持つ
@@ -653,6 +657,43 @@ namespace HomeskzIfcImport::core
 		return true;
 	}
 
+	double sectionAlongOrigin(const SectionCommand& section)
+	{
+		// 断面線の**終点**（画面右の端）の、切断線に沿った座標。ここが注釈空間の横方向の
+		// 原点（parse/Tag.h「断面の注釈空間」）。
+		return section.direction == SectionDirection::X ? section.lineEnd.y : section.lineEnd.x;
+	}
+
+	Vec2 sectionAnnotationPoint(const Vec2& plan, double elevation, SectionDirection direction,
+								double alongOrigin)
+	{
+		// 画面右方向は視線の向きが決める（parse/Tag.h「断面の注釈空間」）。X通りは −X 方向を
+		// 見るので右が +Y、Y通りは +Y 方向を見るので右が +X。**横は断面線の終点からの距離**、
+		// 高さはそのまま Z。
+		const double right = direction == SectionDirection::X ? plan.y : plan.x;
+		return Vec2{right - alongOrigin, elevation};
+	}
+
+	Vec2 sectionLabelAnchor(const SectionCommand& section, double rangeStart)
+	{
+		const Vec2 middle{(section.lineStart.x + section.lineEnd.x) / 2.0,
+						  (section.lineStart.y + section.lineEnd.y) / 2.0};
+		return sectionAnnotationPoint(middle, rangeStart + kSectionHeightMargin, section.direction,
+									  sectionAlongOrigin(section));
+	}
+
+	double sectionLabelDrop(const ViewportCommand& viewport)
+	{
+		int below = -1;
+		for (const DimensionChainCommand& chain : viewport.dimensions)
+		{
+			if (chain.axis == DimensionAxis::Horizontal && chain.side < 0)
+				below = std::max(below, chain.tier);
+		}
+		// 帯は寸法線までの距離＋文字の見込みで、寸法が無ければ 0（core::dimensionBand）。
+		return dimensionBand(below) + kSectionLabelGap;
+	}
+
 	bool sectionContentSize(const Document& document, Vec2& size)
 	{
 		Vec2 min;
@@ -789,27 +830,72 @@ namespace HomeskzIfcImport::core
 	} // namespace
 
 	std::vector<Vec2> shearWallBracePolygon(double clearStart, double clearEnd, double bottom,
-											double top, double width, bool risesToEnd)
+											double topAtStart, double topAtEnd, double width,
+											bool risesToEnd)
 	{
 		const double span = clearEnd - clearStart;
-		const double height = top - bottom;
-		if (span <= 0.0 || height <= 0.0 || width <= 0.0)
+		if (span <= 0.0 || topAtStart <= bottom || topAtEnd <= bottom || width <= 0.0)
 			return {};
 
-		// 帯の中心線（内法の対角線）。
+		// 帯の中心線（内法の対角線＝低い側の下隅から高い側の上隅へ）。上辺が傾いていれば
+		// 対角線の傾きもそれに従う。
 		const Vec2 low{risesToEnd ? clearStart : clearEnd, bottom};
-		const Vec2 high{risesToEnd ? clearEnd : clearStart, top};
-		// 上で内法の幅と高さが正だと確かめてあるので、対角線の長さも必ず正になる
-		// （length ≥ height > 0）。ゼロ除算の番人は要らない。
+		const Vec2 high{risesToEnd ? clearEnd : clearStart, risesToEnd ? topAtEnd : topAtStart};
+		// 上で内法の幅と高さが正だと確かめてあるので、対角線の長さも必ず正になる。
+		// ゼロ除算の番人は要らない。
 		const Vec2 along{high.x - low.x, high.y - low.y};
 		const double length = std::hypot(along.x, along.y);
 
 		// 中心線に直交する半幅ぶんのオフセット。
 		const Vec2 offset{-along.y / length * width / 2.0, along.x / length * width / 2.0};
 		const std::vector<Vec2> band = {low - offset, high - offset, high + offset, low + offset};
-		const Vec2 clipMin{std::min(clearStart, clearEnd), bottom};
-		const Vec2 clipMax{std::max(clearStart, clearEnd), top};
-		return clipPolygonToRect(band, clipMin, clipMax);
+		// 内法（反時計回り）。上辺が水平なら矩形、傾いていれば台形。
+		const std::vector<Vec2> frame = {Vec2{clearStart, bottom}, Vec2{clearEnd, bottom},
+										 Vec2{clearEnd, topAtEnd}, Vec2{clearStart, topAtStart}};
+		return clipPolygonToConvex(band, frame);
+	}
+
+	namespace
+	{
+		// 直線に触れただけの切れ端（面積の無いもの）を捨てる。
+		bool hasArea(const std::vector<Vec2>& polygon)
+		{
+			double area = 0.0;
+			for (std::size_t i = 0; i < polygon.size(); ++i)
+				area += cross(polygon[i], polygon[(i + 1) % polygon.size()]);
+			return std::abs(area) / 2.0 >= kPointEps;
+		}
+	} // namespace
+
+	std::vector<std::vector<Vec2>> shearWallBehindBracePieces(double clearStart, double clearEnd,
+															  double bottom, double topAtStart,
+															  double topAtEnd, double width,
+															  bool risesToEnd)
+	{
+		const std::vector<Vec2> behind = shearWallBracePolygon(
+			clearStart, clearEnd, bottom, topAtStart, topAtEnd, width, risesToEnd);
+		if (behind.empty())
+			return {};
+
+		// 手前の筋かい（逆向き）の帯の 2 本の縁。帯は内法の対角線を中心に幅 width
+		// （shearWallBracePolygon と同じ作り）。奥の筋かいのうち帯の外にある部分は、
+		// 縁のどちらか一方の外側にある。
+		const Vec2 low{risesToEnd ? clearEnd : clearStart, bottom};
+		const Vec2 high{risesToEnd ? clearStart : clearEnd, risesToEnd ? topAtStart : topAtEnd};
+		const Vec2 along = high - low;
+		const Vec2 offset = Vec2{-along.y, along.x} * (width / 2.0 / length(along));
+
+		// offset は along の左手なので、low − offset の縁は帯が左、low + offset の縁は
+		// 帯が右にある。それぞれ帯と反対の側（前者は右＝逆向きの左、後者は左）を残す。
+		std::vector<std::vector<Vec2>> pieces;
+		for (std::vector<Vec2> piece :
+			 {clipPolygonToHalfPlane(behind, low - offset, Vec2{} - along),
+			  clipPolygonToHalfPlane(behind, low + offset, along)})
+		{
+			if (hasArea(piece))
+				pieces.push_back(std::move(piece));
+		}
+		return pieces;
 	}
 
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,

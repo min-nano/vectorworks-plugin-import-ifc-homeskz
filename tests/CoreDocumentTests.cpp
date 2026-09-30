@@ -16,9 +16,12 @@
 
 #include "core/Document.h"
 #include "core/Geometry.h"
+#include "core/Layout.h"
 #include "parse/BuildDocument.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -1553,6 +1556,105 @@ TEST(section_height_range_fails_without_elements)
 }
 
 // ---------------------------------------------------------------------------
+// 断面の注釈空間（断面寸法タグ＝parse/Tag と図面ラベル＝draw/DrawingLabel が共有する投影。
+// parse/Tag.h「断面の注釈空間」）
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// 通り芯の外接が ±7000・余白 3000 の断面線（parse/Section と同じ形）。
+	core::SectionCommand makeCutSection(core::SectionDirection direction, double cut)
+	{
+		core::SectionCommand section;
+		section.direction = direction;
+		section.lineStart = direction == core::SectionDirection::X ? core::Vec2{cut, -10000.0}
+																   : core::Vec2{-10000.0, cut};
+		section.lineEnd = direction == core::SectionDirection::X ? core::Vec2{cut, 10000.0}
+																 : core::Vec2{10000.0, cut};
+		return section;
+	}
+} // namespace
+
+TEST(section_annotation_point_projects_to_the_view)
+{
+	using core::SectionDirection;
+	// 横方向の原点は断面線の**終点**（画面右向きに測った 0 点）。X通りは終点の Y、
+	// Y通りは終点の X。
+	CHECK(
+		near(core::sectionAlongOrigin(makeCutSection(SectionDirection::X, 1000.0)), 10000.0, 1e-9));
+	CHECK(
+		near(core::sectionAlongOrigin(makeCutSection(SectionDirection::Y, 1000.0)), 10000.0, 1e-9));
+
+	// X通り（−X 方向を見る）は画面右が +Y なので、注釈座標の x は材の Y −原点。
+	const core::Vec2 onX = core::sectionAnnotationPoint(core::Vec2{1500.0, -2000.0}, 3273.0,
+														SectionDirection::X, 500.0);
+	CHECK(near(onX.x, -2500.0, 1e-9));
+	CHECK(near(onX.y, 3273.0, 1e-9));
+
+	// Y通り（+Y 方向を見る）は画面右が +X なので、注釈座標の x は材の X −原点。
+	const core::Vec2 onY = core::sectionAnnotationPoint(core::Vec2{1500.0, -2000.0}, 3273.0,
+														SectionDirection::Y, 500.0);
+	CHECK(near(onY.x, 1000.0, 1e-9));
+	CHECK(near(onY.y, 3273.0, 1e-9));
+
+	// 縦は Z そのまま（原点の補正は横だけ）。
+	CHECK(near(
+		core::sectionAnnotationPoint(core::Vec2{0.0, 0.0}, 3273.0, SectionDirection::X, 9999.0).y,
+		3273.0, 1e-9));
+}
+
+TEST(section_label_anchor_is_below_the_middle_of_the_building)
+{
+	using core::SectionDirection;
+	// 断面線 −10000〜10000 の中点（0）は、終点（10000）から測ると −10000。高さは範囲の
+	// 下端に余白を戻した＝建物の最下点。
+	const double rangeStart = -600.0 - core::kSectionHeightMargin;
+	for (const SectionDirection direction : {SectionDirection::X, SectionDirection::Y})
+	{
+		const core::Vec2 anchor =
+			core::sectionLabelAnchor(makeCutSection(direction, 1000.0), rangeStart);
+		CHECK(near(anchor.x, -10000.0, 1e-9));
+		CHECK(near(anchor.y, -600.0, 1e-9));
+	}
+
+	// 断面線が原点に対して片寄っていても、中点は断面線の中点（通り芯の外接の中央）。
+	core::SectionCommand shifted = makeCutSection(SectionDirection::Y, 0.0);
+	shifted.lineStart = core::Vec2{2000.0, 0.0};
+	shifted.lineEnd = core::Vec2{18000.0, 0.0};
+	CHECK(near(core::sectionLabelAnchor(shifted, rangeStart).x, 10000.0 - 18000.0, 1e-9));
+}
+
+TEST(section_label_drop_clears_the_dimensions_below)
+{
+	// 寸法が無ければ間隔だけ。
+	core::ViewportCommand viewport;
+	CHECK(near(core::sectionLabelDrop(viewport), core::kSectionLabelGap, 1e-9));
+
+	// 図の左（垂直・side 負）や上（水平・side 正）の列はラベルに関係しない。
+	core::DimensionChainCommand left;
+	left.axis = core::DimensionAxis::Vertical;
+	left.side = -1;
+	left.tier = 3;
+	core::DimensionChainCommand above;
+	above.axis = core::DimensionAxis::Horizontal;
+	above.side = 1;
+	above.tier = 2;
+	viewport.dimensions = {left, above};
+	CHECK(near(core::sectionLabelDrop(viewport), core::kSectionLabelGap, 1e-9));
+
+	// 図の下（水平・side 負）の列があれば、その最も外の段の帯の外まで下げる。
+	core::DimensionChainCommand below;
+	below.axis = core::DimensionAxis::Horizontal;
+	below.side = -1;
+	below.tier = 0;
+	viewport.dimensions.push_back(below);
+	below.tier = 1;
+	viewport.dimensions.push_back(below);
+	CHECK(near(core::sectionLabelDrop(viewport), core::dimensionBand(1) + core::kSectionLabelGap,
+			   1e-9));
+}
+
+// ---------------------------------------------------------------------------
 // 平面の広がり（伏図の縮尺と位置を決めるのに使う。docs/DEV-NOTES.md M18）
 //
 // planContentBounds は「図に映るもの」を包む矩形を返す。layers を渡すとそのレイヤに載る
@@ -2058,7 +2160,7 @@ TEST(shear_wall_brace_polygon_is_clipped_to_the_frame)
 	// どの角も 2 頂点に切り分けられて八角形（端が斜めに落ちた形）になる。頂点はすべて
 	// 内法の中に収まる。
 	const std::vector<core::Vec2> brace =
-		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, true);
 	CHECK_EQ(brace.size(), std::size_t{8});
 	for (const core::Vec2& point : brace)
 	{
@@ -2086,9 +2188,9 @@ TEST(shear_wall_brace_polygon_follows_the_rise_direction)
 		return best;
 	};
 	const std::vector<core::Vec2> up =
-		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, true);
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, true);
 	const std::vector<core::Vec2> down =
-		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 100.0, false);
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, false);
 	CHECK(lowestX(up) < 1500.0);
 	CHECK(lowestX(down) > 1500.0);
 }
@@ -2096,9 +2198,131 @@ TEST(shear_wall_brace_polygon_follows_the_rise_direction)
 TEST(shear_wall_brace_polygon_rejects_a_degenerate_frame)
 {
 	// 内法が潰れている・幅が無いときは描けない（空を返す）。
-	CHECK(core::shearWallBracePolygon(0.0, 0.0, 0.0, 2400.0, 100.0, true).empty());
-	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 2400.0, 2400.0, 100.0, true).empty());
-	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 0.0, 0.0, 2400.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 2400.0, 2400.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 0.0, true).empty());
+	// 片端だけ上端が下端以下（登り梁が土台まで下りてきた等）でも描けない。
+	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, 100.0, true).empty());
+}
+
+TEST(shear_wall_brace_polygon_fits_under_a_sloped_top)
+{
+	// 内法 3000 で上端が 2400 → 3000 へ上がる台形。帯は上辺の傾きに沿って切られ、
+	// 頂点はすべて台形の中に収まる。高い側（終点）の上隅まで届く。
+	const std::vector<core::Vec2> brace =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 3000.0, 100.0, true);
+	CHECK(brace.size() >= std::size_t{6});
+	double highest = 0.0;
+	for (const core::Vec2& point : brace)
+	{
+		CHECK(point.x >= -1e-9 && point.x <= 3000.0 + 1e-9);
+		CHECK(point.y >= -1e-9 && point.y <= 2400.0 + (0.2 * point.x) + 1e-9);
+		highest = std::max(highest, point.y);
+	}
+	CHECK(highest > 2900.0);
+}
+
+namespace
+{
+	// 点が凸多角形の**内側（境界から tol 以上離れた所）**にあるか。
+	bool strictlyInsideConvex(const core::Vec2& point, const std::vector<core::Vec2>& convex,
+							  double tol)
+	{
+		double area = 0.0;
+		for (std::size_t i = 0; i < convex.size(); ++i)
+			area += core::cross(convex[i], convex[(i + 1) % convex.size()]);
+		const double sign = area >= 0.0 ? 1.0 : -1.0;
+		for (std::size_t i = 0; i < convex.size(); ++i)
+		{
+			const core::Vec2 edge = convex[(i + 1) % convex.size()] - convex[i];
+			const double distance =
+				sign * core::cross(edge, point - convex[i]) / core::length(edge);
+			if (distance <= tol)
+				return false;
+		}
+		return true;
+	}
+} // namespace
+
+TEST(shear_wall_behind_brace_is_split_on_both_sides_of_the_crossing)
+{
+	// たすき掛け。奥の筋かいは手前の帯の縁で切られて、交差部の両側の 2 片になる。
+	// どの片も手前の帯の内側へ入り込まず（頂点・辺の中点で確かめる）、切り口の頂点は
+	// 手前の帯の縁に載る（突き抜けも隙間も無い）。2 片の面積の和は、奥の帯から
+	// 手前の帯と重なる平行四辺形を引いたものになる。
+	const std::vector<core::Vec2> front =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, false);
+	const std::vector<core::Vec2> behind =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, true);
+	const std::vector<std::vector<core::Vec2>> pieces =
+		core::shearWallBehindBracePieces(0.0, 3000.0, 0.0, 2400.0, 2400.0, 100.0, true);
+	CHECK_EQ(pieces.size(), std::size_t{2});
+
+	const auto area = [](const std::vector<core::Vec2>& polygon)
+	{
+		double sum = 0.0;
+		for (std::size_t i = 0; i < polygon.size(); ++i)
+			sum += core::cross(polygon[i], polygon[(i + 1) % polygon.size()]);
+		return std::abs(sum) / 2.0;
+	};
+	std::size_t onFrontEdge = 0;
+	for (const std::vector<core::Vec2>& piece : pieces)
+	{
+		CHECK(piece.size() >= std::size_t{4});
+		for (std::size_t i = 0; i < piece.size(); ++i)
+		{
+			const core::Vec2& point = piece[i];
+			const core::Vec2 middle = (point + piece[(i + 1) % piece.size()]) * 0.5;
+			CHECK(!strictlyInsideConvex(point, front, 1e-6));
+			CHECK(!strictlyInsideConvex(middle, front, 1e-6));
+			if (strictlyInsideConvex(point, front, -1e-6))
+				++onFrontEdge;
+		}
+	}
+	// 片ごとに切り口の 2 頂点。
+	CHECK_EQ(onFrontEdge, std::size_t{4});
+
+	// 帯どうしの重なりは、辺の長さが width / sin(θ) の菱形（θ は 2 本の交角）。
+	const double theta = 2.0 * std::atan2(2400.0, 3000.0);
+	const double side = 100.0 / std::sin(theta);
+	const double overlap = side * side * std::sin(theta);
+	CHECK(std::abs(area(pieces[0]) + area(pieces[1]) - (area(behind) - overlap)) < 1e-6);
+
+	// 片方は内法の下半分、もう片方は上半分（交差部の両側）。
+	const auto isLow = [](const std::vector<core::Vec2>& piece)
+	{
+		double sum = 0.0;
+		for (const core::Vec2& point : piece)
+			sum += point.y;
+		return sum / static_cast<double>(piece.size()) < 1200.0;
+	};
+	CHECK(isLow(pieces[0]) != isLow(pieces[1]));
+}
+
+TEST(shear_wall_behind_brace_is_split_under_a_sloped_top)
+{
+	// 上端が 2400 → 3000 へ上がる台形でも、奥の筋かいは手前（台形の逆の対角線）の
+	// 帯の縁で 2 片に切られ、どの片も手前の帯の内側へ入り込まない。
+	const std::vector<core::Vec2> front =
+		core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 3000.0, 100.0, false);
+	const std::vector<std::vector<core::Vec2>> pieces =
+		core::shearWallBehindBracePieces(0.0, 3000.0, 0.0, 2400.0, 3000.0, 100.0, true);
+	CHECK_EQ(pieces.size(), std::size_t{2});
+	for (const std::vector<core::Vec2>& piece : pieces)
+	{
+		for (std::size_t i = 0; i < piece.size(); ++i)
+		{
+			const core::Vec2 middle = (piece[i] + piece[(i + 1) % piece.size()]) * 0.5;
+			CHECK(!strictlyInsideConvex(piece[i], front, 1e-6));
+			CHECK(!strictlyInsideConvex(middle, front, 1e-6));
+		}
+	}
+}
+
+TEST(shear_wall_behind_brace_rejects_a_degenerate_frame)
+{
+	CHECK(core::shearWallBehindBracePieces(0.0, 0.0, 0.0, 2400.0, 2400.0, 100.0, true).empty());
+	CHECK(core::shearWallBehindBracePieces(0.0, 3000.0, 0.0, 2400.0, 2400.0, 0.0, true).empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -2216,6 +2440,33 @@ TEST(validate_rejects_level_mark_without_story_level)
 	CHECK(!core::validateDocument(documentWith(core::LevelMarkCommand{"GL", 0.0, 0.0, "", "GL"})));
 	CHECK(
 		!core::validateDocument(documentWith(core::LevelMarkCommand{"GL", 0.0, 0.0, "基礎", ""})));
+}
+
+TEST(validate_rejects_level_mark_with_a_broken_extent)
+{
+	const auto documentWith = [](const core::LevelMarkCommand& level)
+	{
+		core::Document document;
+		document.dimensionStandard = "寸法";
+		core::SectionCommand section = validSection();
+		section.levels.push_back(level);
+		document.sections.push_back(section);
+		document.sectionSheet.startNumber = 8;
+		document.sectionSheet.title = "軸組図";
+		return document;
+	};
+	core::LevelMarkCommand level{"GL", 0.0, -5000.0, "基礎", "GL", -3180.0, 1};
+	CHECK(core::validateDocument(documentWith(level)));
+	// 右端が左端より左・右端が有限でない・段が -1 より小さい。
+	core::LevelMarkCommand reversed = level;
+	reversed.right = -6000.0;
+	CHECK(!core::validateDocument(documentWith(reversed)));
+	core::LevelMarkCommand infinite = level;
+	infinite.right = std::numeric_limits<double>::infinity();
+	CHECK(!core::validateDocument(documentWith(infinite)));
+	core::LevelMarkCommand badTier = level;
+	badTier.dimensionTier = -2;
+	CHECK(!core::validateDocument(documentWith(badTier)));
 }
 
 TEST(outermost_dimension_tier_is_the_largest_tier_or_minus_one)

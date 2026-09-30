@@ -23,6 +23,7 @@
 #include "core/Layout.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
+#include "VWFC/VWObjects/VWPolygon2DObj.h"
 #include "VWFC/VWObjects/VWViewportObj.h"
 
 #include <algorithm>
@@ -47,9 +48,6 @@ namespace HomeskzIfcImport::draw
 		// 取り込みの既定の縮尺（1/100）と同じ。
 		constexpr double kFallbackScale = 100.0;
 
-		// 1 インチの pt 数（文字スタイルの紙の pt を図面上の mm へ直す）。
-		constexpr double kPointsPerInch = 72.0;
-
 		// レベル基準線の universal 名（ローカライズ名「レベル基準線」。Findings
 		// 「Level Objects」の実測表）。
 		constexpr const char* kLevelMarkPlugin = "Elevation Benchmark2";
@@ -66,13 +64,18 @@ namespace HomeskzIfcImport::draw
 		// 描いた高さ（読み取り用の静的文字。Findings「Level Objects」のパラメータ表）。
 		constexpr const char* kParamShownElevation = "Elevation";
 
+		// PIO 自身が挿入点から左へ引く水平引出線（既定 True）。切って、基準線は
+		// レイアウトに自分で引く（DrawLevelLine）。
+		constexpr const char* kParamHorizontalLeader = "UseHorizontalLeader";
+
+		// レベル記号のレイアウトの中身のクラス（ご要望）。どれも**全属性をクラスに従わせる**
+		// （矢印マーカーだけは除く。DrawUtil の SetClassWithAttributes の withMarker）。
+		// 名前の文字は寸法と同じ kDimensionClass。
+		constexpr const char* kLevelTriangleClass = "01作図-04記号-01一般";
+		constexpr const char* kLevelLineClass = "01作図-01線-01基準線-02一般";
+
 		// 描いた高さが命令の高さからこれ以上ずれていたら「合わない」と数える（mm）。
 		constexpr double kLevelHeightTol = 0.5;
-
-		// マーカーレイアウトの中で「名前」を出しているテキストの目印（ストーリレベル名の
-		// 動的テキスト 〈#STLT#-#STPS#〉。Findings「Level Objects」の実測）。このテキストを
-		// 固定の名前に差し替える。
-		constexpr const char* kLevelNameToken = "#STLT#";
 
 		// 測点 a → b の直線寸法を 1 本作る。axis=Horizontal なら (a, base)→(b, base) を、
 		// Vertical なら (base, a)→(base, b) を測る。offset は根元から寸法線までの距離
@@ -253,55 +256,108 @@ namespace HomeskzIfcImport::draw
 			return placed > 0;
 		}
 
-		// レイアウトの中から名前のテキスト（ストーリレベル名の動的テキスト）を探す。
-		MCObjectHandle FindNameText(MCObjectHandle layout)
+		// レベル記号の形を決めるもの（ビューポート 1 枚ぶん。drawViewportDimensions が決める）。
+		//   textSize       … 名前の文字の大きさ（用紙 mm。寸法の文字と同じ。0 なら既定の
+		//                    レイアウトの名前の大きさのまま）
+		//   dimensionScale … 寸法線までの距離に使った縮尺の分母
+		//   markScale      … 記号を描くビューポートの縮尺の分母（用紙 mm → 注釈空間）
+		struct LevelMarkStyle
 		{
-			for (MCObjectHandle h = gSDK->FirstMemberObj(layout); h != nil; h = gSDK->NextObject(h))
+			double textSize = 0.0;
+			double dimensionScale = kFallbackScale;
+			double markScale = kFallbackScale;
+		};
+
+		// レイアウトへ入れる図形を仕上げる: container へ入れ、クラスを当てて全属性を
+		// クラスに従わせる（矢印マーカーは除く）。入らなければ消して false。
+		bool AddToLayout(MCObjectHandle container, MCObjectHandle object, const char* className)
+		{
+			if (object == nil)
+				return false;
+			if (!gSDK->AddObjectToContainer(object, container))
 			{
-				if (gSDK->GetObjectTypeN(h) != kTextNode)
-					continue;
-				const std::string text = static_cast<const char*>(gSDK->GetTextChars(h));
-				if (text.find(kLevelNameToken) != std::string::npos)
-					return h;
+				gSDK->DeleteObject(object, true);
+				return false;
 			}
-			return nil;
+			SetClassWithAttributes(object, className, false);
+			return true;
 		}
 
-		// 新しいテキストを古いテキストの位置へ合わせる。**揃える辺は古いテキストの揃え方で
-		// 決める**（左揃えなら左端、中央なら中心、右揃えなら右端。縦は中心）——名前の長さは
-		// トークンと違うので、外形の中心を合わせるだけだと左揃えの文字が左へはみ出す。
-		void AlignText(MCObjectHandle text, MCObjectHandle reference)
+#if VW_DRAW_VERIFY
+		// 検算（dev だけ）: container の中身を「型＋外形」で並べる（入れ子のグループも辿る。
+		// 深さは有限に留める）。
+		std::string DescribeMembers(MCObjectHandle container, int depth = 0);
+
+		// 検算（dev だけ）: 外形を "[左,右]x[下,上]" の 1 語にする。
+		std::string DescribeBounds(MCObjectHandle object)
 		{
-			WorldRect from;
-			WorldRect to;
-			if (!gSDK->GetObjectBounds(reference, from) || !gSDK->GetObjectBounds(text, to))
-				return;
-			short justification = kTextLeftJustify;
-			gSDK->GetTextJustification(reference, justification);
-			double dx = 0.0;
-			if (justification == kTextRightJustify)
-				dx = from.right - to.right;
-			else if (justification == kTextCenterJustify)
-				dx = ((from.left + from.right) - (to.left + to.right)) / 2.0;
-			else
-				dx = from.left - to.left;
-			const double dy = ((from.top + from.bottom) - (to.top + to.bottom)) / 2.0;
-			gSDK->MoveObject(text, dx, dy);
+			WorldRect bounds;
+			if (!gSDK->GetObjectBounds(object, bounds))
+				return "?";
+			std::array<char, 96> buffer{};
+			std::snprintf(buffer.data(), buffer.size(), "[%.1f,%.1f]x[%.1f,%.1f]", bounds.left,
+						  bounds.right, std::min(bounds.top, bounds.bottom),
+						  std::max(bounds.top, bounds.bottom));
+			return buffer.data();
 		}
 
-		// マーカーレイアウトの名前のテキストを固定の文字へ差し替えて、レイアウトを渡し直す。
-		// **中身を入れ替えるだけでは絵に出ない**ので、新しいテキストを作って入れ、古いものを
+		std::string DescribeMembers(MCObjectHandle container, int depth)
+		{
+			constexpr int kMaxDepth = 2;
+			std::string out;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(container); h != nil;
+				 h = gSDK->NextObject(h))
+			{
+				const short type = gSDK->GetObjectTypeN(h);
+				out += " 型" + std::to_string(type) + DescribeBounds(h);
+				if (type == kGroupNode && depth < kMaxDepth)
+					out += "{" + DescribeMembers(h, depth + 1) + " }";
+			}
+			return out.empty() ? std::string(" （なし）") : out;
+		}
+#endif
+
+		// **マーカーレイアウトを組み直して渡し直す**（draw/Dimension.h「レベル基準線の作法」）。
+		// 既定の中身（高さとストーリレベル名のテキスト・記号のポリライン）を消し、挿入点＝(0, 0)
+		// から右へ「▽＋名前」を置く（core/Layout.h「軸組図のレベル記号の形と位置」）。**基準線は
+		// 置かない**——線は起点が決まってから DrawLevelLine が足す。起点を決めるのに
+		// 要る記号の幅（用紙 mm）を markWidth へ返す。
+		// **中身を入れ替えるだけでは絵に出ない**ので、新しい図形を作って入れ、古いものを
 		// 消してから SetCustomObjectProfileGroup で渡す（Findings「Level Objects」の実測手順）。
-		bool ReplaceLevelName(MCObjectHandle mark, const std::string& name)
+		bool RebuildLevelLayout(MCObjectHandle mark, const core::LevelMarkCommand& level,
+								const LevelMarkStyle& style, double& markWidth,
+								[[maybe_unused]] std::string& probe)
 		{
+			markWidth = 0.0;
 			const MCObjectHandle layout = HeldProfileGroup(mark);
 			if (layout == nil)
 				return false;
-			const MCObjectHandle old = FindNameText(layout);
-			if (old == nil)
-				return false;
 
-			const TXString chars(name.c_str());
+			// 既定の中身を控える（型 0 は群の終端なので残す）。寸法の文字の大きさが読めな
+			// かったときは、既定の名前のテキストの大きさを使う。
+			std::vector<MCObjectHandle> old;
+			WorldCoord fallbackSize = 0.0;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(layout); h != nil; h = gSDK->NextObject(h))
+			{
+				const short type = gSDK->GetObjectTypeN(h);
+				if (type == 0)
+					continue;
+				old.push_back(h);
+				if (type == kTextNode && fallbackSize <= 0.0)
+					gSDK->GetTextSize(h, 0, fallbackSize);
+			}
+#if VW_DRAW_VERIFY
+			if (probe.empty())
+			{
+				probe = "組み直す前のレイアウト";
+				for (const MCObjectHandle h : old)
+					probe += " 型" + std::to_string(gSDK->GetObjectTypeN(h)) + DescribeBounds(h);
+			}
+#endif
+			const double size = style.textSize > 0.0 ? style.textSize : fallbackSize;
+
+			// 名前。左揃えで作り、測ってから ▽ の右・線の上へ動かす。
+			const TXString chars(level.name.c_str());
 			const MCObjectHandle text = gSDK->CreateTextBlock(chars, WorldPt(0.0, 0.0), false, 0);
 			if (text == nil)
 				return false;
@@ -310,24 +366,108 @@ namespace HomeskzIfcImport::draw
 				gSDK->DeleteObject(text, true);
 				return false;
 			}
-			// 書式は古いテキストから写す（文字スタイル・揃え方・大きさ）。
-			if (const InternalIndex style = gSDK->GetTextStyleRef(old); style != 0)
-				gSDK->SetTextStyleRef(text, style);
-			short justification = kTextLeftJustify;
-			gSDK->GetTextJustification(old, justification);
-			gSDK->SetTextJustification(text, justification);
-			short vertical = 0;
-			gSDK->GetTextVerticalAlignment(old, vertical);
-			gSDK->SetTextVerticalAlignment(text, vertical);
-			WorldCoord size = 0.0;
-			gSDK->GetTextSize(old, 0, size);
+			gSDK->SetTextJustification(text, kTextLeftJustify);
 			if (size > 0.0)
 				gSDK->SetTextSize(text, 0, static_cast<Sint32>(chars.GetLength()), size);
-			AlignText(text, old);
+			WorldRect bounds;
+			double textWidth = 0.0;
+			if (gSDK->GetObjectBounds(text, bounds))
+				textWidth = bounds.right - bounds.left;
+			const core::LevelMarkShape shape = core::levelMarkShape(size, textWidth);
+			if (textWidth > 0.0)
+				gSDK->MoveObject(text, shape.textLeft - bounds.left,
+								 shape.textBottom - std::min(bounds.top, bounds.bottom));
+			markWidth = shape.width;
 
-			gSDK->DeleteObject(old, true);
-			return gSDK->SetCustomObjectProfileGroup(mark, layout) != 0;
+			// 名前の文字は寸法のクラスへ（文字の大きさを当てた後にクラスを与える。
+			// Findings「Data Tags」: 書体・大きさは文字、色はクラスが受け持つ）。
+			SetClassWithAttributes(text, kDimensionClass, false);
+
+			// ▽（頂点で基準線に触れる正三角形）。**閉じたポリライン**で描く（塗りが効く。
+			// ご要望）。VWPolygon2DObj は既定で開いた折れ線なので閉じる（Findings
+			// 「Parametric Objects」）。
+			const double h = shape.triangleHeight;
+			const double w = shape.triangleHalfWidth;
+			bool drawn = true;
+			if (h > 0.0)
+			{
+				VWPolygon2DObj triangle(
+					{VWPoint2D(0.0, h), VWPoint2D(2.0 * w, h), VWPoint2D(w, 0.0)});
+				triangle.SetClosed(true);
+				drawn = AddToLayout(layout, triangle.GetThisObject(), kLevelTriangleClass);
+			}
+
+			for (const MCObjectHandle object : old)
+				gSDK->DeleteObject(object, true);
+			return gSDK->SetCustomObjectProfileGroup(mark, layout) != 0 && drawn;
 		}
+
+		// **PIO 自身が引く水平引出線を消し、基準線はレイアウトに自分で引く。**
+		// 実機で分かったこと（docs/DEV-NOTES.md「レベル基準線の描き方の調整」）:
+		//   * 既定のレイアウトに線は無く、PIO が挿入点から左へ 5400（1/150 で用紙 36mm）の
+		//     ポリゴンを 1 つ描く。パス（GetCustomObjectPath）は持たない。
+		//   * カスタム制御点（既定 (0, 3000)）を動かしても、そのポリゴンは変わらない。
+		//   * 全パラメータのどれにも -5400 は無い。線に関わりそうなのは
+		//     `UseHorizontalLeader`（水平引出線を使用。既定 True）だけ。
+		// そこで引出線を切り（kParamHorizontalLeader）、線は起点から右へレイアウトの中に
+		// 引く（最初の版で、レイアウトの線は右へ図の右端まで出た）。
+		bool DrawLevelLine(MCObjectHandle mark, double lengthOnPaper)
+		{
+			bool leaderOff = false;
+			try
+			{
+				VWParametricObj pio(mark);
+				pio.SetParamBool(kParamHorizontalLeader, false);
+				leaderOff = !pio.GetParamBool(kParamHorizontalLeader);
+			}
+			catch (...)
+			{
+				leaderOff = false;
+			}
+			const MCObjectHandle layout = HeldProfileGroup(mark);
+			if (layout == nil)
+				return false;
+			const bool drawn = AddToLayout(
+				layout, gSDK->CreateLine(WorldPt(0.0, 0.0), WorldPt(lengthOnPaper, 0.0)),
+				kLevelLineClass);
+			return gSDK->SetCustomObjectProfileGroup(mark, layout) != 0 && drawn && leaderOff;
+		}
+
+#if VW_DRAW_VERIFY
+		// 検算（dev だけ）: 制御点の持ち方を探る——カスタム制御点の 1 つ目と、全パラメータの
+		// 「名前=値」を 1 行にする（どこに -5400 があるかを見る）。
+		std::string DescribeControlPoints(MCObjectHandle mark)
+		{
+			try
+			{
+				const VWParametricObj pio(mark);
+				std::string out = "カスタム制御点 ";
+				VWPoint3D point;
+				if (pio.CustomControlPointsGet(0, point))
+				{
+					std::array<char, 64> buffer{};
+					std::snprintf(buffer.data(), buffer.size(), "(%g, %g)", point.x, point.y);
+					out += buffer.data();
+				}
+				else
+					out += "なし";
+				out += " / 欄";
+				const size_t count = pio.GetParamsCount();
+				for (size_t i = 0; i < count; ++i)
+				{
+					out += " ";
+					out += pio.GetParamName(i).GetStdString();
+					out += "=";
+					out += pio.GetParamAsString(i).GetStdString();
+				}
+				return out;
+			}
+			catch (...)
+			{
+				return "読めない";
+			}
+		}
+#endif
 
 #if VW_DRAW_VERIFY
 		// 検算（dev だけ）: container の中のテキストを**入れ子のグループまで**辿って集める
@@ -434,10 +574,14 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// レベル記号 1 つを置く。注釈へ置けたらそのハンドル、置けなければ nil。
+		// レベル記号 1 つを注釈へ置き、ストーリレベルへ結んでレイアウトを組み直す。注釈へ
+		// 置けたらそのハンドル、置けなければ nil。記号の幅（用紙 mm）を markWidth へ返す——
+		// 起点は同じ図の全記号の幅が揃ってから決める（PositionLevel）。
 		MCObjectHandle PlaceLevel(MCObjectHandle viewport, const core::LevelMarkCommand& level,
+								  const LevelMarkStyle& style, double& markWidth,
 								  DimensionCounts& counts)
 		{
+			markWidth = 0.0;
 			const MCObjectHandle mark = gSDK->CreateCustomObject(
 				TXString(kLevelMarkPlugin), WorldPt(level.x, level.elevation), 0.0, true);
 			if (mark == nil)
@@ -463,11 +607,52 @@ namespace HomeskzIfcImport::draw
 			}
 			gSDK->ResetObject(mark);
 
-			if (!ReplaceLevelName(mark, level.name))
-				++counts.levelNameFailed;
+			std::string shapeProbe;
+			if (!RebuildLevelLayout(mark, level, style, markWidth, shapeProbe))
+				++counts.levelLayoutFailed;
+#if VW_DRAW_VERIFY
+			if (counts.levelShapeProbe.empty())
+				counts.levelShapeProbe = shapeProbe;
+#endif
+			return mark;
+		}
+
+		// 置いた記号を起点 startX へ動かし、基準線（パス）を図の右端を少し越えるまで伸ばして
+		// 描き直す。基準線の終点（注釈空間の x）を返す。
+		double PositionLevel(MCObjectHandle mark, const core::LevelMarkCommand& level,
+							 double startX, const LevelMarkStyle& style, DimensionCounts& counts)
+		{
+			const double lengthOnPaper =
+				core::levelLineLength(startX, level.right, style.markScale);
+			const double length = lengthOnPaper * style.markScale;
+#if VW_DRAW_VERIFY
+			const bool probePath = !counts.levelPathProbed;
+			std::string pathBefore;
+			if (probePath)
+				pathBefore = DescribeControlPoints(mark);
+#endif
+			// 縦の位置は絵の置き場所だけで、描く数値には効かない。
+			try
+			{
+				VWParametricObj(mark).SetPointObjectPos(VWPoint2D(startX, level.elevation));
+			}
+			catch (...)
+			{
+				++counts.levelLayoutFailed;
+			}
+			if (!DrawLevelLine(mark, lengthOnPaper))
+				++counts.levelPathFailed;
 			gSDK->ResetObject(mark);
-			// **名前を差し替えた後も結び付きが残っているか**を読み戻す（書いても入らない値が
-			// ある。Findings「Level Objects」の作法）。
+#if VW_DRAW_VERIFY
+			if (probePath)
+			{
+				counts.levelPathProbed = true;
+				counts.levelShapeProbe +=
+					" / 引出線を切る前 " + pathBefore + " → 後 " + DescribeControlPoints(mark);
+			}
+#endif
+			// **レイアウトとパスを差し替えた後も結び付きが残っているか**を読み戻す（書いても
+			// 入らない値がある。Findings「Level Objects」の作法）。
 			try
 			{
 				const VWParametricObj pio(mark);
@@ -483,7 +668,7 @@ namespace HomeskzIfcImport::draw
 			if (!DrawsText(mark, level.name, counts.levelNameProbe))
 				++counts.levelNameUnseen;
 #endif
-			return mark;
+			return startX + length;
 		}
 	} // namespace
 
@@ -506,15 +691,24 @@ namespace HomeskzIfcImport::draw
 		// 決める——規格は文書に 1 つだが、縮尺はビューポートごとに違う）。縮尺は
 		// ビューポートの**実際の**値を読む（注釈はそれで描かれる）。読めなければ寸法線の
 		// 距離と同じ縮尺で代える。
+		// レベル記号の名前も同じ紙の大きさ（用紙 mm）で書く（レイアウトの中身は容れ物の
+		// 縮尺を VW が掛けるので、寸法と違って縮尺を掛けない。Findings「Drawing Labels」）。
 		DimensionText text;
+		LevelMarkStyle markStyle;
+		markStyle.dimensionScale = denominator;
+		markStyle.markScale = denominator;
 		try
 		{
 			text.style = DimensionStandardTextStyle(standard);
 			double viewportScale = denominator;
 			if (const double actual = VWViewportObj(viewport).GetScale(); actual > 0.0)
 				viewportScale = actual;
+			markStyle.markScale = viewportScale;
 			if (const double points = TextStylePoints(text.style); points > 0.0)
-				text.fontSize = points * core::kMillimetersPerInch / kPointsPerInch * viewportScale;
+			{
+				markStyle.textSize = core::pointsToMillimeters(points);
+				text.fontSize = markStyle.textSize * viewportScale;
+			}
 		}
 		catch (...)
 		{
@@ -533,17 +727,38 @@ namespace HomeskzIfcImport::draw
 		}
 		counts.chains += drawn;
 
+		// レベル記号はまず全部置いて幅を測り、**いちばん広い記号に合わせた 1 つの起点**へ
+		// 揃える（▽ の左端が縦に揃う。ご要望）。
+		struct PendingLevel
+		{
+			MCObjectHandle mark = nil;
+			const core::LevelMarkCommand* level = nullptr;
+		};
+		std::vector<PendingLevel> pending;
+		double widest = 0.0;
 		for (const core::LevelMarkCommand& level : levels)
 		{
-			if (const MCObjectHandle mark = PlaceLevel(viewport, level, counts); mark != nil)
+			double width = 0.0;
+			if (const MCObjectHandle mark = PlaceLevel(viewport, level, markStyle, width, counts);
+				mark != nil)
 			{
-				++counts.levels;
-				anyPlaced = true;
-				if (placedLevels != nullptr)
-					placedLevels->push_back({mark, level.elevation});
+				pending.push_back({mark, &level});
+				widest = std::max(widest, width);
 			}
 			else
 				++counts.levelsFailed;
+		}
+		for (const PendingLevel& placed : pending)
+		{
+			const core::LevelMarkCommand& level = *placed.level;
+			const double startX =
+				core::levelMarkStartX(level.x, level.dimensionTier, widest,
+									  markStyle.dimensionScale, markStyle.markScale);
+			const double endX = PositionLevel(placed.mark, level, startX, markStyle, counts);
+			++counts.levels;
+			anyPlaced = true;
+			if (placedLevels != nullptr)
+				placedLevels->push_back({placed.mark, level.elevation, startX, endX});
 		}
 
 		// 注釈へ後から足した図形のクラスは非表示のままなので、全クラスを表示へ戻して描き直す
@@ -575,6 +790,21 @@ namespace HomeskzIfcImport::draw
 			// 写しただけでは描き直されない。作り直したときに初めてストーリレベルの高さが入る。
 			gSDK->ResetObject(placed.mark);
 			CheckLevelHeight(placed.mark, placed.elevation, counts);
+#if VW_DRAW_VERIFY
+			// 描いた範囲と狙い（起点〜基準線の終点）を**文書で 1 個目だけ**控え、描いた中身を
+			// 1 つずつ並べる。round 1: 描いた範囲が狙いより用紙 36mm 広かった（既定の
+			// レイアウトに線は無かったので、PIO 自身が別の線を描いていると見ている）。
+			if (!counts.levelShapeDrawn)
+			{
+				counts.levelShapeDrawn = true;
+				std::array<char, 96> aim{};
+				std::snprintf(aim.data(), aim.size(), " / 狙い x=[%.1f,%.1f]", placed.startX,
+							  placed.endX);
+				counts.levelShapeProbe += " / 描いた範囲 " + DescribeBounds(placed.mark) +
+										  aim.data() + " / 描いた中身" +
+										  DescribeMembers(placed.mark);
+			}
+#endif
 		}
 	}
 
@@ -589,10 +819,11 @@ namespace HomeskzIfcImport::draw
 #endif
 		if (counts.failed == 0 && counts.standardRejected == 0 && counts.unjoined == 0 &&
 			counts.textStyleMissing == 0 && counts.textSizeUnread == 0 &&
-			counts.levelsFailed == 0 && counts.levelNameFailed == 0 &&
-			counts.levelBindFailed == 0 && counts.viewMatrixFailed == 0 &&
-			counts.levelHeightUnread == 0 && counts.levelHeightMismatch == 0 &&
-			counts.updateFailed == 0 && !classesBroken && !verifyIssue)
+			counts.levelsFailed == 0 && counts.levelLayoutFailed == 0 &&
+			counts.levelPathFailed == 0 && counts.levelBindFailed == 0 &&
+			counts.viewMatrixFailed == 0 && counts.levelHeightUnread == 0 &&
+			counts.levelHeightMismatch == 0 && counts.updateFailed == 0 && !classesBroken &&
+			!verifyIssue)
 			return {};
 
 		std::string text = label + "の寸法の診断: ";
@@ -606,7 +837,9 @@ namespace HomeskzIfcImport::draw
 			text, "文字の大きさを縮尺に合わせられなかった寸法", counts.textSizeUnread, "本",
 			"文字スタイルの大きさを読めませんでした。寸法値が小さすぎて見えない可能性があります");
 		AppendCount(text, "置けなかったレベル記号", counts.levelsFailed, "個");
-		AppendCount(text, "名前を書けなかったレベル記号", counts.levelNameFailed, "個");
+		AppendCount(text, "記号を組み直せなかったレベル記号", counts.levelLayoutFailed, "個");
+		AppendCount(text, "基準線を伸ばせなかったレベル記号", counts.levelPathFailed, "個",
+					"基準線が既定の長さのまま左へ出ます");
 		AppendCount(text, "ストーリレベルへ結べなかったレベル記号", counts.levelBindFailed, "個",
 					"高さが拘束されず、数値が 0 と出ることがあります");
 		AppendCount(text, "断面の向きをビュー行列へ写せなかった軸組図", counts.viewMatrixFailed,
@@ -630,8 +863,13 @@ namespace HomeskzIfcImport::draw
 		// misc-unused-parameters / misc-const-correctness に掛からない形にしておく
 		// （PR の CI は dev の分岐しか tidy しない）。
 #if VW_DRAW_VERIFY
+		std::string text;
 		if (!counts.dimensionProbe.empty())
-			return label + "の寸法の記録: 寸法 1 本目（検算）: " + counts.dimensionProbe + "。";
+			text += "寸法 1 本目（検算）: " + counts.dimensionProbe + "。";
+		if (!counts.levelShapeProbe.empty())
+			text += "レベル記号 1 個目の形（検算）: " + counts.levelShapeProbe + "。";
+		if (!text.empty())
+			return label + "の寸法の記録: " + text;
 #else
 		(void)label;
 		(void)counts;

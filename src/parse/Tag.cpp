@@ -103,24 +103,6 @@ namespace HomeskzIfcImport::parse
 		return std::abs(CutCoord(column.position, section.direction) - cut) <= kClusterTol;
 	}
 
-	double sectionAlongOrigin(const core::SectionCommand& section)
-	{
-		// 断面線の**終点**（画面右の端）の、切断線に沿った座標。ここが注釈空間の横方向の
-		// 原点（parse/Tag.h「断面の注釈空間」）。
-		return section.direction == core::SectionDirection::X ? section.lineEnd.y
-															  : section.lineEnd.x;
-	}
-
-	core::Vec2 sectionAnnotationPoint(const core::Vec2& plan, double elevation,
-									  core::SectionDirection direction, double alongOrigin)
-	{
-		// 画面右方向は視線の向きが決める（parse/Tag.h「断面の注釈空間」）。X通りは −X 方向を
-		// 見るので右が +Y、Y通りは +Y 方向を見るので右が +X。**横は断面線の終点からの距離**、
-		// 高さはそのまま Z。
-		const double right = direction == core::SectionDirection::X ? plan.y : plan.x;
-		return core::Vec2{right - alongOrigin, elevation};
-	}
-
 	std::vector<core::TagCommand>
 	buildPlanTagCommands(const std::vector<core::MemberCommand>& members,
 						 const core::ViewportCommand& viewport)
@@ -158,7 +140,7 @@ namespace HomeskzIfcImport::parse
 							const core::SectionCommand& section)
 	{
 		std::vector<core::TagCommand> commands;
-		const double alongOrigin = sectionAlongOrigin(section);
+		const double alongOrigin = core::sectionAlongOrigin(section);
 		for (std::size_t i = 0; i < members.size(); ++i)
 		{
 			const core::MemberCommand& member = members[i];
@@ -167,10 +149,10 @@ namespace HomeskzIfcImport::parse
 
 			// 断面に写る天端線（命令の start/end を注釈空間へ投影したもの）。その中点に
 			// タグの下端中央が来る＝部材の上辺に接する（伏図で辺の中央へ寄せるのと同じ意図）。
-			const core::Vec2 start = sectionAnnotationPoint(member.start, member.elevation,
-															section.direction, alongOrigin);
-			const core::Vec2 end = sectionAnnotationPoint(member.end, member.endElevation,
-														  section.direction, alongOrigin);
+			const core::Vec2 start = core::sectionAnnotationPoint(member.start, member.elevation,
+																  section.direction, alongOrigin);
+			const core::Vec2 end = core::sectionAnnotationPoint(member.end, member.endElevation,
+																section.direction, alongOrigin);
 
 			core::TagCommand tag;
 			tag.memberIndex = i;

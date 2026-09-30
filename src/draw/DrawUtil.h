@@ -131,11 +131,14 @@ namespace HomeskzIfcImport::draw
 	// SetObjectClass はクラスを割り当てるだけで各属性は by-instance の既定値のまま残るため、
 	// 属性ごとに by-class を指定する（ISDK の関数名は VS と異なる: PColors=ペン色 /
 	// FColors=面色 / PPat=線種 / FPat=面パターン / Arrow=マーカー）。
-	void SetAllAttributesByClass(MCObjectHandle object);
+	// withMarker=false なら矢印マーカーだけは個別のまま残す（軸組図のレベル記号の線・▽・
+	// 文字。ご要望で「矢印マーカーは除く」）。
+	void SetAllAttributesByClass(MCObjectHandle object, bool withMarker = true);
 
 	// クラスを割り当てて、描画属性をそのクラスに従わせる（上の 2 つをこの順で呼ぶ）。
 	// 描いたものは**ほぼ必ず**この組で仕上げるので、2 行の繰り返しを 1 か所にまとめる。
-	void SetClassWithAttributes(MCObjectHandle object, const std::string& className);
+	void SetClassWithAttributes(MCObjectHandle object, const std::string& className,
+								bool withMarker = true);
 
 	// 【PIO を作る前にクラスを「文書の既定」として立てる】構造材 PIO のように作り直しの重い
 	// PIO では、作った**後**の SetObjectClass と 6 つの Set*ByClass が**1 回ごとに PIO を

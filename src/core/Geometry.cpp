@@ -83,108 +83,64 @@ namespace HomeskzIfcImport::core
 		return result;
 	}
 
-	namespace
+	std::vector<Vec2> clipPolygonToHalfPlane(const std::vector<Vec2>& polygon, const Vec2& origin,
+											 const Vec2& direction)
 	{
-		// 矩形の 4 辺。Sutherland–Hodgman はこの順に半平面で切っていく。
-		enum class ClipEdge
-		{
-			Left,
-			Right,
-			Bottom,
-			Top,
-		};
+		// Sutherland–Hodgman の 1 段。直線 origin + t·direction の**左手側**
+		// （cross(direction, p − origin) ≥ 0）を残す。
+		const auto side = [&](const Vec2& point) { return cross(direction, point - origin); };
 
-		// 点が辺の内側（残す側）にあるか。
-		bool insideEdge(const Vec2& point, ClipEdge edge, const Vec2& min, const Vec2& max)
+		std::vector<Vec2> next;
+		next.reserve(polygon.size() + 1);
+		const std::size_t count = polygon.size();
+		for (std::size_t i = 0; i < count; ++i)
 		{
-			switch (edge)
+			const Vec2& from = polygon[(i + count - 1) % count];
+			const Vec2& to = polygon[i];
+			const double fromSide = side(from);
+			const double toSide = side(to);
+			const bool fromIn = fromSide >= 0.0;
+			const bool toIn = toSide >= 0.0;
+			// 交点。「一方が内側・他方が外側」のときだけ求めるので分母は 0 にならない
+			// （それでも念のため 0 除算だけは避ける）。
+			const auto crossing = [&]
 			{
-			case ClipEdge::Left:
-				return point.x >= min.x;
-			case ClipEdge::Right:
-				return point.x <= max.x;
-			case ClipEdge::Bottom:
-				return point.y >= min.y;
-			case ClipEdge::Top:
-				break;
-			}
-			return point.y <= max.y;
-		}
-
-		// 辺が「どの座標を何の値で切るか」。vertical なら x、そうでなければ y を limit で切る。
-		void edgeCut(ClipEdge edge, const Vec2& min, const Vec2& max, bool& outVertical,
-					 double& outLimit)
-		{
-			switch (edge)
+				const double denominator = fromSide - toSide;
+				if (std::abs(denominator) < kGeomEps)
+					return to;
+				return from + ((to - from) * (fromSide / denominator));
+			};
+			if (toIn)
 			{
-			case ClipEdge::Left:
-				outVertical = true;
-				outLimit = min.x;
-				return;
-			case ClipEdge::Right:
-				outVertical = true;
-				outLimit = max.x;
-				return;
-			case ClipEdge::Bottom:
-				outVertical = false;
-				outLimit = min.y;
-				return;
-			case ClipEdge::Top:
-				break;
+				if (!fromIn)
+					next.push_back(crossing());
+				next.push_back(to);
 			}
-			outVertical = false;
-			outLimit = max.y;
+			else if (fromIn)
+			{
+				next.push_back(crossing());
+			}
 		}
+		return next.size() >= 3 ? next : std::vector<Vec2>{};
+	}
 
-		// 線分 from→to が辺の直線と交わる点。呼び出し側は「一方が内側・他方が外側」と
-		// 分かっているときだけ呼ぶので、分母が 0 になることはない（それでも念のため
-		// 0 除算だけは避ける）。
-		Vec2 intersectEdge(const Vec2& from, const Vec2& to, ClipEdge edge, const Vec2& min,
-						   const Vec2& max)
-		{
-			bool vertical = false;
-			double limit = 0.0;
-			edgeCut(edge, min, max, vertical, limit);
-			const double span = vertical ? (to.x - from.x) : (to.y - from.y);
-			if (std::abs(span) < kGeomEps)
-				return to;
-			const double t = (limit - (vertical ? from.x : from.y)) / span;
-			return Vec2{from.x + ((to.x - from.x) * t), from.y + ((to.y - from.y) * t)};
-		}
-	} // namespace
-
-	std::vector<Vec2> clipPolygonToRect(const std::vector<Vec2>& polygon, const Vec2& min,
-										const Vec2& max)
+	std::vector<Vec2> clipPolygonToConvex(const std::vector<Vec2>& polygon,
+										  const std::vector<Vec2>& clip)
 	{
+		if (clip.size() < 3)
+			return {};
+
+		// 切る側の辺を 1 本ずつ半平面として当てていく。clip は反時計回りなので、
+		// 辺 a→b の**左手側**が残す側（clipPolygonToHalfPlane の向きそのまま）。
 		std::vector<Vec2> current = polygon;
-		for (const ClipEdge edge :
-			 {ClipEdge::Left, ClipEdge::Right, ClipEdge::Bottom, ClipEdge::Top})
+		const std::size_t edges = clip.size();
+		for (std::size_t e = 0; e < edges; ++e)
 		{
 			if (current.size() < 3)
 				return {};
-
-			std::vector<Vec2> next;
-			next.reserve(current.size() + 1);
-			const std::size_t count = current.size();
-			for (std::size_t i = 0; i < count; ++i)
-			{
-				const Vec2& from = current[(i + count - 1) % count];
-				const Vec2& to = current[i];
-				const bool fromIn = insideEdge(from, edge, min, max);
-				const bool toIn = insideEdge(to, edge, min, max);
-				if (toIn)
-				{
-					if (!fromIn)
-						next.push_back(intersectEdge(from, to, edge, min, max));
-					next.push_back(to);
-				}
-				else if (fromIn)
-				{
-					next.push_back(intersectEdge(from, to, edge, min, max));
-				}
-			}
-			current = std::move(next);
+			const Vec2& a = clip[e];
+			current = clipPolygonToHalfPlane(current, a, clip[(e + 1) % edges] - a);
 		}
-		return current.size() >= 3 ? current : std::vector<Vec2>{};
+		return current;
 	}
 } // namespace HomeskzIfcImport::core

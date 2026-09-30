@@ -444,6 +444,7 @@ if(VW_BUILD_PLUGIN)
 		src/draw/Section.cpp
 		src/draw/Sheet.cpp
 		src/draw/Tag.cpp
+		src/draw/DrawingLabel.cpp
 		src/draw/Dimension.cpp
 		src/draw/Legend.cpp
 		src/draw/TitleBlock.cpp)
