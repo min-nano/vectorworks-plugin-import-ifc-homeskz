@@ -80,6 +80,7 @@ namespace HomeskzIfcImport::draw
 		{
 			const core::SheetCommand* command = nullptr;
 			MCObjectHandle viewport = nil;
+			MCObjectHandle sheetLayer = nil; // 寸法を作る間アクティブにする（2 巡目）
 		};
 
 		// 伏図に映るデザインレイヤ（命令の表示レイヤ）の縮尺を、すべて伏図の縮尺へ揃える。
@@ -285,7 +286,7 @@ namespace HomeskzIfcImport::draw
 			if (command.legend.has_value())
 				drawSheetLegend(sheetLayer, provisional.legendTopRight, viewport, legends);
 
-			placed.push_back(PlacedSheet{&command, viewport});
+			placed.push_back(PlacedSheet{&command, viewport, sheetLayer});
 		}
 
 		// --- 凡例を実測して割り付けを確定する ---------------------------------------
@@ -380,8 +381,30 @@ namespace HomeskzIfcImport::draw
 			// 決める。draw/Dimension.h）。寸法は注釈の座標へそのまま置かれ、測って動かす
 			// ことはしないので、ビューポートを動かす前後どちらでもよいが、収まったかの判定に
 			// 含めるためここで置く。
-			drawViewportDimensions(sheet.viewport, command.viewport, {}, document.dimensionStandard,
-								   haveContent ? layout.scale : 0.0, dimensions);
+			//
+			// ★**寸法を作る間だけ、この伏図のシートレイヤをアクティブにする**（軸組図と同じ
+			// 状態）。寸法は作った瞬間にアクティブレイヤへ入り、連続寸法へ繋ぐとき
+			// （CreateChainDimension）に元の直線寸法が undo 記録つきで消える。取り消すと
+			// その削除だけが戻り、**作ったときのアクティブレイヤへ直線寸法が復活する**——
+			// デザインレイヤ（テンプレートに最初から在る「共通」等）がアクティブだと、
+			// 取り込み前から在ったレイヤに残骸が残った（実機の指摘。取り込み直後の図には
+			// 出ない）。このインポートが作ったシートレイヤの上で作れば、取り消しでレイヤごと
+			// 消える（DrawUtil.h「なぜレイヤを記録するのか」）。軸組図で残らなかったのも
+			// これによると見ている。復活する寸法を AddAfterSwapObject で申告する手（通り芯のパスの作法）は
+			// 効かなかった（実機 round 1。docs/DEV-NOTES.md M31）。
+			// 文字の大きさは縮尺で書いて引き直すので、1:1 のレイヤで作っても変わらない
+			// （軸組図と同じ。draw/Dimension.h）。タグはこれまでどおりの状態で作るよう、
+			// 寸法を置いたら元へ戻す。
+			{
+				const MCObjectHandle previous = gSDK->GetCurrentLayer();
+				if (sheet.sheetLayer != nil && previous != sheet.sheetLayer)
+					gSDK->SetCurrentLayer(sheet.sheetLayer);
+				drawViewportDimensions(sheet.viewport, command.viewport, {},
+									   document.dimensionStandard, haveContent ? layout.scale : 0.0,
+									   dimensions);
+				if (previous != nil && previous != sheet.sheetLayer)
+					gSDK->SetCurrentLayer(previous);
+			}
 
 			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
 			//
