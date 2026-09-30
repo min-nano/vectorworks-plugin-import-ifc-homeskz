@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -2439,6 +2440,33 @@ TEST(validate_rejects_level_mark_without_story_level)
 	CHECK(!core::validateDocument(documentWith(core::LevelMarkCommand{"GL", 0.0, 0.0, "", "GL"})));
 	CHECK(
 		!core::validateDocument(documentWith(core::LevelMarkCommand{"GL", 0.0, 0.0, "基礎", ""})));
+}
+
+TEST(validate_rejects_level_mark_with_a_broken_extent)
+{
+	const auto documentWith = [](const core::LevelMarkCommand& level)
+	{
+		core::Document document;
+		document.dimensionStandard = "寸法";
+		core::SectionCommand section = validSection();
+		section.levels.push_back(level);
+		document.sections.push_back(section);
+		document.sectionSheet.startNumber = 8;
+		document.sectionSheet.title = "軸組図";
+		return document;
+	};
+	core::LevelMarkCommand level{"GL", 0.0, -5000.0, "基礎", "GL", -3180.0, 1};
+	CHECK(core::validateDocument(documentWith(level)));
+	// 右端が左端より左・右端が有限でない・段が -1 より小さい。
+	core::LevelMarkCommand reversed = level;
+	reversed.right = -6000.0;
+	CHECK(!core::validateDocument(documentWith(reversed)));
+	core::LevelMarkCommand infinite = level;
+	infinite.right = std::numeric_limits<double>::infinity();
+	CHECK(!core::validateDocument(documentWith(infinite)));
+	core::LevelMarkCommand badTier = level;
+	badTier.dimensionTier = -2;
+	CHECK(!core::validateDocument(documentWith(badTier)));
 }
 
 TEST(outermost_dimension_tier_is_the_largest_tier_or_minus_one)

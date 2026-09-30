@@ -240,11 +240,13 @@ namespace HomeskzIfcImport::core
 		}
 
 		// レベル記号 1 つが妥当か（M31）。表示名・結ぶストーリ・レベル種別が非空で、高さ・
-		// 位置が有限であること。
+		// 図の左右の端が有限で右端が左端より左に無く、段が -1 以上であること。
 		bool isValidLevelMark(const LevelMarkCommand& level)
 		{
 			return !level.name.empty() && !level.story.empty() && !level.levelType.empty() &&
-				   std::isfinite(level.elevation) && std::isfinite(level.x);
+				   std::isfinite(level.elevation) && std::isfinite(level.x) &&
+				   std::isfinite(level.right) && level.right >= level.x &&
+				   level.dimensionTier >= -1;
 		}
 
 		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを持つ

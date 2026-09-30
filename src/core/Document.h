@@ -1066,11 +1066,17 @@ namespace HomeskzIfcImport::core
 	//   elevation                    … 高さ（注釈空間の y＝絶対 Z。mm）。描かれる数値は
 	//                                   ストーリレベルから来るので、描画側はこれを
 	//                                   置く位置と読み戻しの検算にだけ使う
-	//   x                            … 記号を置く注釈空間の x（図の左端＝高さの寸法列の
-	//                                   base と同じ）
+	//   x                            … 図の左端（注釈空間の x。高さの寸法列の base と同じ）
 	//   story                        … 結ぶストーリの名前（StoryCommand::name）
 	//   levelType                    … 結ぶレベル種別（"GL" / "FL" / "軒高"）。高さの基準を
 	//                                   このストーリレベルへ拘束する（ドラッグしても動かない）
+	//   right                        … 図の右端（注釈空間の x）。基準線はここを少し越える
+	//   dimensionTier                … 左に出る高さの寸法列の最も外の段（列が無ければ -1）
+	//
+	// 【起点と長さは描画側が決める】記号の起点は「左の寸法列の文字より外」、基準線の終点は
+	// 「右端を用紙で少し越えたところ」で、どちらも縮尺と名前の文字の幅（描くまで分からない）
+	// に依る（CLAUDE.md「描くときにしか決まらないものは命令に持たせない」）。命令は図の
+	// 左右の端と段だけを持ち、位置は core::levelMarkStartX / levelLineLength が決める。
 	struct LevelMarkCommand
 	{
 		std::string name;
@@ -1078,6 +1084,8 @@ namespace HomeskzIfcImport::core
 		double x = 0.0;
 		std::string story;
 		std::string levelType;
+		double right = 0.0;
+		int dimensionTier = -1;
 	};
 
 	// シートレイヤに載せるビューポート 1 枚。伏図は「特定のデザインレイヤ群だけを見下げた図」
