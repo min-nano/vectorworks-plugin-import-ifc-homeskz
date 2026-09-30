@@ -65,6 +65,10 @@
 #pragma once
 
 #include "core/Document.h"
+#include "parse/PlanLevel.h"
+#include "parse/Story.h"
+
+#include <string>
 
 #include <vector>
 
@@ -117,7 +121,24 @@ namespace HomeskzIfcImport::parse
 	buildSectionTagCommands(const std::vector<core::MemberCommand>& members,
 							const core::SectionCommand& section);
 
+	// 横架材のデータタグに添える高さの注記（ご要望）。**その階の FL から測った天端**を、
+	// 階の IFC 名（"2FL"。最上階は "RFL" ではなく "軒高"）とともに "(2FL -872)" と書く。傾斜材は低い端〜高い端を
+	// "(2FL -872~-40)"。数値は 3 桁ごとにコンマ（core::signedMillimetreText）。
+	// 添えない（空を返す）のは:
+	//   * 階の標準の横架材の高さ（standardHeights。parse/PlanLevel の standardBeamHeights）と
+	//     同じ高さの水平な材（標準の高さの材まで書くと伏図が注記だらけになる。違う高さの
+	//     材だけが目に留まるように）
+	//   * 隅木・谷木（垂木に近い材で、高さは要らない。MemberCommand::hipOrValley）
+	//   * 階を特定できない材（レイヤ名が階の規約に合わない）
+	// 高さは mm に丸めて比べる（伏図レベルと同じ。parse/PlanLevel）。
+	std::string memberLevelNote(const core::MemberCommand& member,
+								const std::vector<StoryInfo>& stories,
+								const std::vector<long long>& standardHeights);
+
 	// 文書中の全ビューポート（伏図・軸組図）へタグ命令を割り当てる。**sheets / sections が
-	// 確定した後**に呼ぶ（parse/BuildDocument の最後）。
+	// 確定した後**に呼ぶ（parse/BuildDocument の最後）。stories・standardHeights を渡すと各タグに
+	// 高さの注記（memberLevelNote）を添える。渡さなければ注記なし。
 	void attachTagCommands(core::Document& document);
+	void attachTagCommands(core::Document& document, const std::vector<StoryInfo>& stories,
+						   const std::vector<long long>& standardHeights);
 } // namespace HomeskzIfcImport::parse

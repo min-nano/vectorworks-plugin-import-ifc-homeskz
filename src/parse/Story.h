@@ -118,6 +118,7 @@ namespace HomeskzIfcImport::parse
 		double elevation = 0.0; // Elevation（ストーリ高さ。mm）
 		double beamOffset = 0.0; // 横架材天端オフセット（負値。最上階は未使用で 0）
 		bool isTop = false; // 最上階（Elevation 最大）＝「屋根」か
+		std::string name; // IfcBuildingStorey の Name（"1FL" / "2FL" / "RFL"。高さの注記の基準名）
 	};
 
 	// その階の横架材レベルの種別名。一般階は横架材天端、最上階は軒高（最上階に横架材天端

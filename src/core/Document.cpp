@@ -921,8 +921,10 @@ namespace HomeskzIfcImport::core
 		// ビューポートで柱・梁を覆い隠さないよう全ストーリ分をまとめて背面へ集める（野地板
 		// レベルは M6 で追加済み。この並びの適用先は M13 の per-viewport 上書き。
 		// desiredStoryLayerOrder の doc コメント参照）。
-		bool isBackgroundLevel(const std::string& type)
+		bool isBackgroundLevel(const std::string& rawType)
 		{
+			// 伏図レベルの印（"FL(FL-872)"）は外して元の種別で見る（planLevelTag）。
+			const std::string type = stripPlanLevelTag(rawType);
 			return type == kLevelFL || type == kLevelNojiita;
 		}
 
@@ -932,7 +934,7 @@ namespace HomeskzIfcImport::core
 		// （desiredStoryLayerOrder の doc コメント）。
 		bool isForegroundLevel(const std::string& type)
 		{
-			return type == kLevelShearWall;
+			return stripPlanLevelTag(type) == kLevelShearWall;
 		}
 	} // namespace
 
@@ -1003,6 +1005,75 @@ namespace HomeskzIfcImport::core
 				pieces.push_back(std::move(piece));
 		}
 		return pieces;
+	}
+
+	namespace
+	{
+		// 高さの符号（図面の書き方に合わせ、0 は "±"）。
+		constexpr const char* kPlanLevelPlus = "+";
+		constexpr const char* kPlanLevelMinus = "-";
+		constexpr const char* kPlanLevelZero = "±";
+
+		// 印の中身の基準の名前（一般階は FL・最上階は軒高）。
+		const char* planLevelDatumName(bool top)
+		{
+			return top ? kLevelEaves : kLevelFL;
+		}
+	} // namespace
+
+	std::string signedMillimetreText(long long deltaMm)
+	{
+		const char* sign = kPlanLevelZero;
+		if (deltaMm > 0)
+			sign = kPlanLevelPlus;
+		else if (deltaMm < 0)
+			sign = kPlanLevelMinus;
+		// 3 桁ごとのコンマは下の桁から差し込む。
+		const std::string digits = std::to_string(deltaMm < 0 ? -deltaMm : deltaMm);
+		std::string grouped;
+		for (std::size_t i = 0; i < digits.size(); ++i)
+		{
+			if (i > 0 && (digits.size() - i) % 3 == 0)
+				grouped += ',';
+			grouped += digits[i];
+		}
+		return sign + grouped;
+	}
+
+	std::string planLevelHeightText(long long heightMm, long long datumMm, bool top)
+	{
+		// 符号は必ず付ける（"FL872" と "FL-872" を読み違えない。signedMillimetreText）。
+		return std::string(planLevelDatumName(top)) + signedMillimetreText(heightMm - datumMm);
+	}
+
+	std::string planLevelTag(long long heightMm, long long datumMm, bool top)
+	{
+		return "(" + planLevelHeightText(heightMm, datumMm, top) + ")";
+	}
+
+	std::string stripPlanLevelTag(const std::string& name)
+	{
+		if (name.empty() || name.back() != ')')
+			return name;
+		const std::size_t open = name.rfind('(');
+		if (open == std::string::npos)
+			return name;
+		// 中身が「FL か軒高＋符号」で始まるものだけを印とみなす（"柱(通し)" のような
+		// 利用者の括弧を剥がさない）。
+		const std::string inner = name.substr(open + 1);
+		for (const bool top : {false, true})
+		{
+			const std::string datum = planLevelDatumName(top);
+			if (!inner.starts_with(datum))
+				continue;
+			const std::string rest = inner.substr(datum.size());
+			for (const char* sign : {kPlanLevelPlus, kPlanLevelMinus, kPlanLevelZero})
+			{
+				if (rest.starts_with(sign))
+					return name.substr(0, open);
+			}
+		}
+		return name;
 	}
 
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,

@@ -20,6 +20,10 @@
 //	    （小屋束・棟束）は屋根面で止まるので +0.5 の半整数、通し柱は複数階ぶん上。伏図が
 //	    切断レベルで表示レイヤを絞れるようにするための分け方で、下屋の小屋束（"2to2.5-柱"）が
 //	    上階の小屋伏図へ写り込まない。
+//	    **番号は伏図レベルの通し番号**（parse/PlanLevel）——伏図をまとめる単位で柱の
+//	    レイヤも区切る（ご要望）。from は柱が立つ天端の伏図レベル（spanFromOrdinal）、to は
+//	    上端が届く伏図レベル（spanToOrdinal。屋根束は到達階の最も高い伏図レベル +0.5）。
+//	    どの階も横架材の高さが 1 つなら通し番号＝階の番号なので、上の説明どおりになる。
 //	  * **to レベルの境界は上階横架材の「下端」**（天端ではない）。通常の管柱は梁を下から
 //	    受ける高さ＝横架材の下端までしか来ないため、天端を境界にするとホームズ君のモデルで
 //	    天端付近まで伸びた管柱を通し柱と誤判定する。ただし**到達階の横架材天端（最上階は
@@ -73,6 +77,7 @@
 
 #include "core/Document.h"
 #include "core/Geometry.h"
+#include "parse/PlanLevel.h"
 #include "parse/Step.h"
 
 #include <map>
@@ -216,10 +221,23 @@ namespace HomeskzIfcImport::parse
 	// 伏図（M13）が切断レベルで表示レイヤを絞るのに使う。
 	std::vector<ColumnSpan> collectColumnSpans(const std::vector<core::ColumnCommand>& columns);
 
-	// span 柱レイヤを base ストーリ（0 起点 index ＝ from − 1）ごとにまとめる。各ストーリの
-	// レイヤは (from, to) 昇順。parse/Story が各ストーリへ span レベルを作るのに使う。
+	// span の from（柱が立つ伏図レベルの通し番号）。baseIndex の階の伏図レベルのうち、柱の
+	// 下端 bottomAbs にいちばん近い天端を含むもの。伏図レベルが無ければ階の番号
+	// （baseIndex + 1）。
+	double spanFromOrdinal(const std::vector<PlanLevel>& levels, std::size_t baseIndex,
+						   double bottomAbs);
+
+	// span の to（上端が届く伏図レベルの通し番号）。storyToLevel は階の単位の to
+	// （resolveColumnToLevel）で、整数なら到達階の伏図レベルのうち上端 topAbs が届くもの
+	// （planLevelAbove）、半整数（屋根束）なら到達階の最も高い伏図レベル + 0.5。
+	double spanToOrdinal(const std::vector<PlanLevel>& levels, double storyToLevel, double topAbs);
+
+	// span 柱レイヤを base ストーリ（from の伏図レベルが属する階。0 起点）ごとにまとめる。
+	// 各ストーリのレイヤは (from, to) 昇順。parse/Story が各ストーリへ span レベルを作るのに
+	// 使う。
 	std::map<int, std::vector<std::string>>
-	collectColumnLayersByStory(const std::vector<core::ColumnCommand>& columns);
+	collectColumnLayersByStory(const std::vector<core::ColumnCommand>& columns,
+							   const std::vector<PlanLevel>& levels);
 
 	// STEP Model から柱の描画命令を組み立てる。
 	//

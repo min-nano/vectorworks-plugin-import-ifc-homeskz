@@ -71,6 +71,36 @@ namespace HomeskzIfcImport::core
 	// topHeight）がそのまま内法になる（ShearWallCommand 参照）。
 	inline constexpr const char* kLevelShearWall = "耐力壁";
 
+	// 伏図レベルの印（横架材の高さごとの伏図。docs/DEV-NOTES.md「横架材の高さごとに伏図を
+	// 作る」）。1 つの階に横架材の天端が複数あると（スキップフロア）、標準の天端（その階の
+	// 横架材天端・最上階は軒高）以外の高さの横架材・床・耐力壁は**別のレイヤ**へ置き、
+	// 伏図はレイヤでそれを切り分ける（ビューポートが映すものを絞れるのはレイヤとクラス
+	// だけ）。そのレイヤのレベル種別とレイヤ名には、元の種別の後ろにこの印を付ける
+	// （"横架材天端(FL-872)" / "2-横架材天端(FL-872)" / "R-軒高(軒高-832)"）。
+	//
+	// **高さは GL ではなくその階の FL（最上階は軒高）から測る**（ご要望。GL 基準では
+	// 図面の読み方と合わず分かりにくい）。FL も軒高もストーリの高さ（Elevation）その
+	// ものなので、基準は階の Elevation で、名前だけが一般階と最上階で違う。
+	//
+	// **印の書式はここが唯一**——付けるのは parse/PlanLevel、外して元の種別へ戻すのは
+	// 重ね順（desiredStoryLayerOrder）・仕口（parse/Joint）・継手（parse/Splice）・寸法
+	// （parse/Dimension）で、core/ は parse/ を include できないのでここに置く（kLevelFL を
+	// core が持つのと同じ理由）。heightMm / datumMm は GL からの高さ（mm）、top は最上階か。
+	std::string planLevelTag(long long heightMm, long long datumMm, bool top);
+
+	// 高さの表記（"FL-872" / "FL±0" / "軒高-832"）。印（planLevelTag）の中身で、伏図の
+	// タイトルと設定ダイアログの行もこれで高さを書く。
+	std::string planLevelHeightText(long long heightMm, long long datumMm, bool top);
+
+	// 基準からの差（mm）の表記。符号を必ず付け（0 は "±0"）、1,000 以上は 3 桁ごとに
+	// コンマで区切る（"+1,234" / "-872" / "±0"。ご要望）。伏図レベルの高さの表記と、
+	// 横架材のデータタグに添える高さ（parse/Tag の memberLevelNote）が同じ書き方をする。
+	std::string signedMillimetreText(long long deltaMm);
+
+	// 末尾の伏図レベルの印を外した名前（レベル種別・レイヤ名のどちらにも使える）。印が
+	// 無ければそのまま返す。
+	std::string stripPlanLevelTag(const std::string& name);
+
 	// 構造用途（構造材ツールのポップアップのキー）。**命令セットの語彙なのでここが唯一の
 	// 定義**で、ColumnCommand::structuralUse に入る値と、要素ごとに固定の用途——横架材
 	// （draw/Member）・垂木（draw/Rafter）——がこれになる。parse/Column.h は読みやすい名前で
@@ -421,6 +451,9 @@ namespace HomeskzIfcImport::core
 	//   endBound                        … 終端の高さ基準（同上）
 	//   startOffset                     … 始端の端部オフセット（mm。負＝短く・正＝長く。上記）
 	//   endOffset                       … 終端の端部オフセット（同上）
+	//   hipOrValley                     … 隅木・谷木（IFC の種別名が "隅木・谷木"）か。データタグ
+	//                                     に高さを添えない材を見分けるためだけに使う（垂木に
+	//                                     近い材で、高さの記載は要らない。ご要望。parse/Tag）
 	//
 	// 【start / end は「芯線の交点」】勝ち側の横架材へ突き当たる端（負け側）は、相手の面では
 	// なく**相手の天端中央線（＝芯線）上の点**に置き、面までの戻りを startOffset / endOffset
@@ -443,6 +476,7 @@ namespace HomeskzIfcImport::core
 		StoryBoundCommand endBound;
 		double startOffset = 0.0;
 		double endOffset = 0.0;
+		bool hipOrValley = false;
 	};
 
 	// 横架材の実体が占める Z 範囲。elevation / endElevation は**天端** Z で傾斜梁は両端で
@@ -1043,6 +1077,11 @@ namespace HomeskzIfcImport::core
 		Vec2 position;
 		Vec2 offset;
 		double angle = 0.0;
+		// 断面寸法の後ろに添える高さの注記（"(2FL -872)" / 傾斜材は "(2FL -872~-40)"）。
+		// **その階の FL から測った横架材の天端**で、階の標準の横架材天端と同じ高さの水平な
+		// 材・隅木谷木には添えない（空）。解析側が決めた文字をそのまま載せる（parse/Tag の
+		// memberLevelNote）。
+		std::string note;
 	};
 
 	// 寸法の測る向き（注釈空間の軸）。Horizontal＝注釈空間の x に沿って測る（伏図の東西・

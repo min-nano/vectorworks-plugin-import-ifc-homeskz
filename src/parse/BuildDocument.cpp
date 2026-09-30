@@ -31,6 +31,7 @@
 #include "parse/Loader.h"
 #include "parse/Member.h"
 #include "parse/Noboribari.h"
+#include "parse/PlanLevel.h"
 #include "parse/Rafter.h"
 #include "parse/Roof.h"
 #include "parse/Section.h"
@@ -112,8 +113,8 @@ namespace HomeskzIfcImport::parse
 		// 登り梁の下の耐力壁は上辺が傾き、IFC で横架材に掛かって出る面材も軸組内に収まる。
 		// 屋根面へスナップした後の登り梁に合わせたいので members の後に置く。
 		document.shearWalls = context.shearWalls();
-		fitShearWallsToMembers(document.shearWalls, context.stories(), document.members,
-							   document.columns);
+		fitShearWallsToMembers(document.shearWalls, context.stories(), context.planLevels(),
+							   document.members, document.columns);
 		progress.step();
 
 		// M3 ストーリ: IfcBuildingStorey を解析して StoryCommand を積む（parse/Story）。
@@ -221,7 +222,8 @@ namespace HomeskzIfcImport::parse
 		// 法を示すデータタグを載せる。タグはビューポート命令の中に入るので、**sheets /
 		// sections が確定した後**でなければ置き場所が決まらない——したがってここが最後になる
 		// （parse/Tag）。
-		attachTagCommands(document);
+		attachTagCommands(document, context.stories(),
+						  standardBeamHeights(context.stories(), context.planLevels()));
 		progress.step();
 
 		// M28 図面枠（タイトルブロック）: 設定で選ばれたスタイル名をそのまま命令セットへ
@@ -240,6 +242,27 @@ namespace HomeskzIfcImport::parse
 			attachDimensionCommands(document);
 
 		return document;
+	}
+
+	std::vector<core::PlanLevelChoice> scanPlanLevelChoices(const std::string& ifcPath)
+	{
+		try
+		{
+			bool ok = false;
+			const Model model = loadIfc(ifcPath, &ok);
+			if (!ok)
+				return {};
+			// 設定は要らない（候補はまとめる前の高さ）。横架材の解析は取り込み本番と同じ
+			// 関数を通すので、候補の高さと本番の伏図レベルの高さは必ず一致する。
+			Context context(model);
+			return collectPlanLevelChoices(context);
+		}
+		catch (...)
+		{
+			// 候補を出せないだけで取り込みは止めない（CLAUDE.md「1 要素の欠損で全体を
+			// 止めない」）。
+			return {};
+		}
 	}
 
 	std::vector<core::SectionCommand> buildSectionCandidates(const std::string& ifcPath,

@@ -9,6 +9,10 @@
 //	    図面枠をどのスタイルで置くか。空なら置かない（docs/DEV-NOTES.md M28）。
 //	  * **寸法規格**——伏図・軸組図へ自動で入れる寸法をどのスタイルで描くか。
 //	    空なら寸法を入れない（docs/DEV-NOTES.md M31）。
+//	  * **伏図のまとめ方**——横架材の高さごとに作る伏図のうち、どのレベルを前のレベルと
+//	    同じ伏図にまとめるか。既定は「まとめない」＝高さごとに 1 枚（docs/DEV-NOTES.md
+//	    「横架材の高さごとに伏図を作る」）。
+
 //	  * **軸組図から外す通り**——解析が軸組図にする通りのうち、描かないもの
 //	    （docs/DEV-NOTES.md M34）。空なら従来どおり全部描く。
 //
@@ -38,6 +42,7 @@
 #pragma once
 
 #include <array>
+#include <compare>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -84,6 +89,29 @@ namespace HomeskzIfcImport::core
 	// 役割の画面表示名。
 	const char* symbolRoleLabel(SymbolRole role);
 
+	// 伏図レベル（横架材の高さ）1 つを指す鍵。story は FL 階の 0 起点の番号（Elevation 昇順。
+	// parse/Story の collectStories の並び）、height はその高さの横架材の天端の GL からの
+	// 高さ（mm に丸めた整数）。**同じ IFC なら何度読んでも同じ鍵になる**ので、設定ダイアログ
+	// （取り込みの前に IFC を 1 度読んで一覧を出す）と解析（もう 1 度読む）の間で運べる。
+	struct PlanLevelKey
+	{
+		int story = 0;
+		long long height = 0;
+
+		auto operator<=>(const PlanLevelKey&) const = default;
+	};
+
+	// 設定ダイアログに出す伏図レベルの候補 1 つ（まとめる前の横架材の高さ 1 つ）。解析側が
+	// IFC から集め（parse/BuildDocument の scanPlanLevelChoices）、描画側のダイアログが
+	// 並べる——Document と同じ「フェーズ間で運ぶ値」なので core に置く。
+	struct PlanLevelChoice
+	{
+		PlanLevelKey key; // そのレベルの鍵（まとめる設定の鍵。key.height が高さ）
+		std::string planTitle; // その階の伏図の名前（"2階床伏図" / "2階小屋伏図"）
+		std::string heightText; // 高さの表記（"FL-872" / "軒高-832"。core::planLevelHeightText）
+		bool canMerge = false; // 前のレベル（同じ階で 1 つ低い高さ）があるか
+	};
+
 	// 取り込み 1 回ぶんの設定。既定では役割の表の defaultSymbol がそのまま入り、どの役割も
 	// 「取り込む」なので、**設定ダイアログを出さずに既定のまま使えば従来と同じ振る舞い**になる。
 	//
@@ -121,6 +149,18 @@ namespace HomeskzIfcImport::core
 		// 同じ——寸法の見え方は利用者の図面ごとに違い、既定と呼べる名前が無い。設定
 		// ダイアログを出さずに既定のまま使えば従来と同じ（寸法の無い）図になる。
 		std::string dimension;
+
+		// 伏図のまとめ方: **前のレベル（同じ階で 1 つ低い高さ）と同じ伏図にまとめる**
+		// レベルの鍵。既定は空＝高さごとに 1 枚ずつ伏図を作る。まとめるかどうかは設計者が
+		// 決めること（ご要望）なので、解析側は高さが 1mm でも違えば別のレベルとし、
+		// ここに挙がったものだけを寄せる（parse/PlanLevel）。階をまたいではまとめない
+		// ——レイヤは階に属するので、別の階の横架材を 1 つのレイヤへは置けない。
+		//
+		// **昇順・重複なしの vector で持つ**（setMergeWithPrevious が保つ）。std::set にすると
+		// MSVC ではムーブ構築が例外を投げうる（番兵ノードを確保する）ので、この構造体と
+		// それを持つ構造体（core::FeedbackSession ほか）の暗黙のムーブが clang-tidy の
+		// bugprone-exception-escape に掛かる（tidy-windows で実際に落ちた）。
+		std::vector<PlanLevelKey> mergedPlanLevels;
 
 		// M34 軸組図から**外す**通りの図番（core::SectionCommand の viewport.drawingNumber。
 		// "X1" / "い" / 方向をまたいで重なったときの "1(2)" …）。**空＝全部描く**。
@@ -171,6 +211,12 @@ namespace HomeskzIfcImport::core
 
 		// 寸法規格の名前を決める。空は「入れない」としてそのまま受け付ける（図面枠と同じ）。
 		void setDimensionStandard(const std::string& name);
+
+		// そのレベルを前のレベルと同じ伏図にまとめるか。
+		bool mergesWithPrevious(const PlanLevelKey& key) const;
+
+		// そのレベルを前のレベルと同じ伏図にまとめるかを決める。
+		void setMergeWithPrevious(const PlanLevelKey& key, bool merge);
 
 		// M34 その図番の通りを軸組図から外すか。
 		bool isSectionSkipped(const std::string& drawingNumber) const;

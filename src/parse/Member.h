@@ -82,6 +82,10 @@ namespace HomeskzIfcImport::parse
 	// レベル追加）と解析本体で同じ述語を使う**ため、ここに一本化する。
 	bool isMemberElement(const Entity& element);
 
+	// IFC の名前（"木梁:隅木・谷木:3"）が隅木・谷木か。ホームズ君は隅木と谷木を 1 つの種別で
+	// 出すので、どちらかの語を含めば真（データタグに高さを添えない材。parse/Tag）。
+	bool isHipOrValleyName(const std::string& name);
+
 	// 断面寸法と材種名から構造材 ID を組み立てる。例: makeMemberId(120, 180, "杉対称異等級集
 	// 成材 E105-F355")→ "120×180 - 杉対称異等級集成材E105-F355"材種が空なら "120×180"。
 	// 寸法は整数へ丸める（表示用の ID なので端数不要）。
