@@ -6,6 +6,7 @@
 //
 
 #include "parse/Roof.h"
+#include "core/ImportOptions.h"
 #include "parse/Context.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Rafter.h"
@@ -30,7 +31,8 @@ namespace HomeskzIfcImport::parse
 	} // namespace
 
 	std::optional<RoofCommand> roofCommandForPlane(const RoofPlane& plane, const std::string& layer,
-												   double storeyElevation, const Vec2& center)
+												   double storeyElevation, const Vec2& center,
+												   double rafterHeight)
 	{
 		// 勾配の座標系は垂木（parse/Rafter）と共有する（parse/IfcGeometry の RoofSlope）。
 		// ほぼ水平な面（勾配方向・軒が定まらない）と鉛直な面（平面式が nz で除算する）は
@@ -93,7 +95,7 @@ namespace HomeskzIfcImport::parse
 		// ［仕様メモ］持ち上げるのは**垂木せいのみ**（＝軸 Z は野地板の下端＝垂木上端で、
 		// 厚みは軸から上へ伸びる）。野地板厚まで足すと 1 枚ぶん浮くので足さない。
 		// 厚みが軸のどちら側へ伸びるかは実機での目視確認項目（docs/DEV-NOTES.md M6）。
-		const double lift = kDefaultRafterHeight / slope.run;
+		const double lift = rafterHeight / slope.run;
 
 		RoofCommand cmd;
 		cmd.layer = layer;
@@ -132,8 +134,8 @@ namespace HomeskzIfcImport::parse
 			// （Context::storyRoofPlanes。同じ屋根版を拾い、解決も 1 度で済む）。
 			for (const RoofPlane* plane : context.storyRoofPlanes(story.id))
 			{
-				std::optional<RoofCommand> command =
-					roofCommandForPlane(*plane, layer, story.elevation, center);
+				std::optional<RoofCommand> command = roofCommandForPlane(
+					*plane, layer, story.elevation, center, context.options().rafterHeight);
 				if (command.has_value())
 					commands.push_back(std::move(*command));
 			}

@@ -20,7 +20,8 @@
 //	    外形でクリップした区間を 1 本の垂木にする。**両端の垂木は屋根面の端から垂木幅の
 //	    半分だけ内側**（掃引位置＝断面中央なので端に軸を合わせると半幅がはみ出す）。内部は
 //	    kRafterInterval（455mm）**以下**で割り付ける（中間は 455mm ちょうど・端数は両端へ等分）。
-//	  * **断面**＝IFC に垂木の寸法情報が無いため既定 45×45（要件の決め打ち）。
+//	  * **断面**＝IFC に垂木の寸法情報が無いため、取り込み設定の一律の寸法
+//	    （core::ImportOptions の rafterWidth / rafterHeight。既定 45×45）。
 //	  * **配置先レイヤ**＝屋根版を含むストーリの母屋レイヤの直上に独立させた "n-垂木"。
 //	    最上階（屋根）の主屋根だけでなく、中間階に架かる下屋根（下屋）の屋根版も、その階の
 //	    "n-垂木" に置く。下屋根は母屋を持たないこともあるため、レイヤの有無・振り分けは
@@ -41,6 +42,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Step.h"
 
@@ -62,8 +64,10 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kLevelTaruki = core::kLevelTaruki;
 
 	// 垂木の既定断面（mm）。IFC に垂木の寸法情報が無いため決め打ち（要件どおり 45×45）。
-	inline constexpr double kDefaultRafterWidth = 45.0;
-	inline constexpr double kDefaultRafterHeight = 45.0;
+	// 定義は取り込み設定（core/ImportOptions.h。設定ダイアログで一律に差し替えられる）に
+	// あり、ここはその再公開。
+	inline constexpr double kDefaultRafterWidth = core::kDefaultRafterWidth;
+	inline constexpr double kDefaultRafterHeight = core::kDefaultRafterHeight;
 
 	// 垂木の配置間隔（mm）。IFC に情報が無いため決め打ち（要件どおり @455）。
 	inline constexpr double kRafterInterval = 455.0;
@@ -93,8 +97,11 @@ namespace HomeskzIfcImport::parse
 	// 同上。共有コンテキストの要素一覧を使う（parse/Context.h）。
 	bool storyHasRoofSlab(Context& context, int storeyId);
 
-	// 垂木の仕様ラベル（"45×45@455"）を返す。断面・間隔が決め打ちなので全垂木で共通。
-	std::string rafterLabel();
+	// 垂木の仕様ラベル（"45×45@455"）を返す。断面は取り込み設定の一律の寸法、間隔は
+	// 決め打ちなので全垂木で共通。寸法は core::formatRafterSize の表記（整数なら整数、
+	// 端数は小数 1 桁）。
+	std::string rafterLabel(double width = kDefaultRafterWidth,
+							double height = kDefaultRafterHeight);
 
 	// 屋根面の掃引方向の広がり [eMin, eMax] に垂木の掃引位置を割り付ける。
 	//   * **両端は屋根面の端から inset（＝垂木幅の半分）だけ内側**（端に軸を合わせると
@@ -125,12 +132,15 @@ namespace HomeskzIfcImport::parse
 	//   beamTopZ        … 支持点が乗る横架材天端（最上階は軒高）の絶対 Z。std::nullopt なら
 	//                     支持点を取らず start＝軒先・overhang=0 にする
 	//   storyMembers    … 同じ階の横架材命令（差し込みに使う桁幅の参照先。空なら既定桁幅）
+	//   width / height  … 垂木の断面（mm。取り込み設定の一律の寸法）。幅は両端の垂木を
+	//                     屋根面の端から内へ寄せる量（半幅）にも効く
 	// **start＝軒側（支持点）・end＝棟側（高い端）**。ほぼ水平な面・広がりが極小の面は空
 	// （勾配方向が定まらない）。区間の平面投影長が極小（隅木際の極小片等）のものは配置しない。
 	std::vector<core::RafterCommand>
 	raftersForPlane(const RoofPlane& plane, const std::string& layer, double storeyElevation,
 					const core::Vec2& center, std::optional<double> beamTopZ = std::nullopt,
-					const std::vector<core::MemberCommand>& storyMembers = {});
+					const std::vector<core::MemberCommand>& storyMembers = {},
+					double width = kDefaultRafterWidth, double height = kDefaultRafterHeight);
 
 	// STEP Model から垂木の描画命令を組み立てる。
 	//
