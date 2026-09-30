@@ -179,7 +179,9 @@ namespace HomeskzIfcImport::parse
 					layers.push_back(span.layer);
 			}
 			return layers;
-		}
+			// 閉じ括弧は push_back が例外を投げたときの後始末（layers の破棄）にしか通らず、
+			// テストでは踏めない（gcov の "====="）。その 1 行だけを計測から外す。
+		} // GCOVR_EXCL_LINE
 
 		// 点に最も近い柱を返す（許容内に無ければ nullptr）。同距離なら**先に現れた柱**を
 		// 採るので、列挙順に依存しない決定的な結果になる（columns の並びが決定的なため）。
