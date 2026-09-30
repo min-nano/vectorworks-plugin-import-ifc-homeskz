@@ -71,8 +71,9 @@ namespace HomeskzIfcImport::parse
 	// 向きの判定に使う許容値（mm）。
 	//
 	// kSpliceSideTol … 支点・アンカーボルトが材の上にあるとみなす直交方向の余裕（半幅に足す）。
-	// kSpliceAlongTol … 継手からこれ以内の支点・アンカーボルトはどちらの側とも決めない
-	//                   （継手の真上・真下にあるものは向きの手掛かりにならない）。
+	// kSpliceAlongTol … 軸方向の余裕。継手からこれ以内の支点・アンカーボルトはどちらの側とも
+	//                   決めない（継手の真上・真下にあるものは向きの手掛かりにならない）。
+	//                   材の反対の端を越える側の範囲にも同じ余裕を足す。
 	// kSpliceSupportZTol … 柱の上端が材の下端からこれ以内なら、その材を受ける支点とみなす
 	//                      （柱の上端は受ける横架材の下端に止まる。core の columnDrawnTop）。
 	inline constexpr double kSpliceSideTol = 1.0;

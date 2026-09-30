@@ -74,11 +74,12 @@ namespace HomeskzIfcImport::parse
 
 		// 点 p がその材の上（継手から材の内側へ、材の長さの範囲・幅の範囲）にあれば、継手からの
 		// 軸方向の距離を返す。継手の真上（kSpliceAlongTol 以内）はどちらの側でもない。
+		// 軸方向の余裕は kSpliceAlongTol、直交方向（幅）の余裕は kSpliceSideTol。
 		std::optional<double> distanceOnPiece(const SplicePiece& piece, const Vec2& p)
 		{
 			const Vec2 d = p - piece.end->point;
 			const double along = core::dot(d, piece.end->inward);
-			if (along <= kSpliceAlongTol || along > piece.geom->length + kSpliceSideTol)
+			if (along <= kSpliceAlongTol || along > piece.geom->length + kSpliceAlongTol)
 				return std::nullopt;
 			if (std::abs(core::cross(piece.end->inward, d)) >
 				piece.geom->halfWidth + kSpliceSideTol)
