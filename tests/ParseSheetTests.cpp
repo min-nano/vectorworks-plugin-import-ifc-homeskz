@@ -60,6 +60,7 @@ using HomeskzIfcImport::parse::kFoundationSheetTitle;
 using HomeskzIfcImport::parse::kLayerFoundationAnchor;
 using HomeskzIfcImport::parse::kMoyaPlanCutOffset;
 using HomeskzIfcImport::parse::Model;
+using HomeskzIfcImport::parse::moyaNoboribariLayer;
 using HomeskzIfcImport::parse::moyaPlanTitle;
 using HomeskzIfcImport::parse::PlanLevel;
 using HomeskzIfcImport::parse::planLevelTitleSuffix;
@@ -359,6 +360,39 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 				++seq;
 			}
 		});
+}
+
+// 登り梁は水下側の柱梁伏図（小屋伏図等）に映したものを母屋伏図に再掲しない（ご要望。
+// 母屋より低い材が母屋と同じ図に並ぶと高さの関係が直感に反する）。実フィクスチャには
+// 専用レイヤの登り梁が無いので、伏図レベルを手で組んで確かめる。
+TEST(NoboribariShownOnFramingSheetIsNotRepeatedOnMoyaSheet)
+{
+	parse::StoryInfo first;
+	first.id = 1;
+	first.elevation = 600.0;
+	first.beamOffset = -10.0;
+	parse::StoryInfo second;
+	second.id = 2;
+	second.elevation = 3500.0;
+	second.beamOffset = -10.0;
+	parse::StoryInfo roof;
+	roof.id = 3;
+	roof.elevation = 6300.0;
+	roof.isTop = true;
+	const std::vector<parse::StoryInfo> stories{first, second, roof};
+
+	// 2 階に高さが 2 つ（標準 3490 と FL-800 の 2700）。どちらの伏図レベルの登り梁も
+	// 柱梁伏図に映るので、母屋伏図には出さない。
+	const std::vector<PlanLevel> levels =
+		parse::buildPlanLevels(stories, {{590}, {2700, 3490}, {6300}}, core::ImportOptions{});
+	CHECK(moyaNoboribariLayer(levels, 1, stories[1]).empty());
+	CHECK(moyaNoboribariLayer(levels, 2, stories[2]).empty());
+
+	// 伏図レベルを 1 つも持たない階（柱梁伏図が無い）に残った登り梁だけは母屋伏図に出す
+	// （どの伏図にも出ない材を作らない）。
+	const std::vector<PlanLevel> noLevels;
+	CHECK_EQ(moyaNoboribariLayer(noLevels, 1, stories[1]), std::string("2-登り梁"));
+	CHECK_EQ(moyaNoboribariLayer(noLevels, 2, stories[2]), std::string("R-登り梁"));
 }
 
 TEST(SheetNumbersAreUniqueAndConsecutive)

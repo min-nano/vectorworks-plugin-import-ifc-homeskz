@@ -189,8 +189,8 @@ namespace HomeskzIfcImport::parse
 				anyShearWallOnLayer(shearWalls, shearLayer))
 				layers.push_back(shearLayer);
 
-			// 登り梁は**水下側**の伏図レベルの伏図にも映す（ご要望。parse/PlanLevel が水下側の
-			// 伏図レベルのレイヤへ分けてある）。母屋伏図にも従来どおり映る（下）。
+			// 登り梁は**水下側**の伏図レベルの伏図に映す（ご要望。parse/PlanLevel が水下側の
+			// 伏図レベルのレイヤへ分けてある）。ここに映したものは母屋伏図に再掲しない（下）。
 			if (const std::string noboribariLayer = planLevelLayer(level, story, kLevelNoboribari);
 				anyMemberOnLayer(members, noboribariLayer))
 				layers.push_back(noboribariLayer);
@@ -223,6 +223,21 @@ namespace HomeskzIfcImport::parse
 		return commands;
 	}
 
+	std::string moyaNoboribariLayer(const std::vector<PlanLevel>& levels, std::size_t index,
+									const StoryInfo& story)
+	{
+		// 柱梁伏図が映すのはその階の伏図レベルごとのレイヤ（planLevelLayer。標準なら従来の
+		// "n-登り梁"）。それに当たらない "n-登り梁"——伏図レベルを 1 つも持たない階に残った
+		// もの——だけを母屋伏図に回す（どの伏図にも出ない材を作らない）。
+		std::string layer = storyLayerName(index, story.isTop, kLevelNoboribari);
+		for (const PlanLevel* level : storyPlanLevels(levels, index))
+		{
+			if (planLevelLayer(*level, story, kLevelNoboribari) == layer)
+				return {};
+		}
+		return layer;
+	}
+
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(Context& context)
 	{
 		const std::vector<StoryInfo>& stories = context.stories();
@@ -250,16 +265,13 @@ namespace HomeskzIfcImport::parse
 			const bool isTop = stories[i].isTop;
 			std::vector<std::string> layers;
 			// 母屋・登り梁はその階に命令があるときだけ（下屋根は母屋を持たないこともあり、
-			// 登り梁はさらに稀）。parse/Story がレベルを作る条件と同じ判定。登り梁は水下側の
-			// 伏図レベルのレイヤへ分かれている（parse/PlanLevel）ので、その階の分を全部映す。
+			// 登り梁はさらに稀）。parse/Story がレベルを作る条件と同じ判定。登り梁は柱梁伏図
+			// に映したものを再掲しない（moyaNoboribariLayer）。
 			const std::vector<const PlanLevel*> storyLevels = storyPlanLevels(planLevels, i);
-			std::vector<std::string> candidates{storyLayerName(i, isTop, kLevelMoya),
-												storyLayerName(i, isTop, kLevelNoboribari)};
-			for (const PlanLevel* level : storyLevels)
-			{
-				if (!level->standard)
-					candidates.push_back(planLevelLayer(*level, stories[i], kLevelNoboribari));
-			}
+			std::vector<std::string> candidates{storyLayerName(i, isTop, kLevelMoya)};
+			if (std::string noboribariLayer = moyaNoboribariLayer(planLevels, i, stories[i]);
+				!noboribariLayer.empty())
+				candidates.push_back(std::move(noboribariLayer));
 			for (const std::string& layer : candidates)
 			{
 				if (anyMemberOnLayer(members, layer))
