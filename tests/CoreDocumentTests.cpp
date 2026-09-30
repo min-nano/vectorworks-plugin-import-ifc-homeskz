@@ -1772,6 +1772,32 @@ TEST(section_label_drop_clears_the_dimensions_below)
 			   1e-9));
 }
 
+TEST(section_top_dimension_reach_is_the_text_top_of_the_outer_top_chain)
+{
+	core::ViewportCommand viewport;
+	double reach = -1.0;
+	// 上の列が無ければ false（値は触らない）。下の列・縦の列は数えない。
+	core::DimensionChainCommand below;
+	below.axis = core::DimensionAxis::Horizontal;
+	below.side = -1;
+	below.tier = 3;
+	viewport.dimensions.push_back(below);
+	CHECK(!core::sectionTopDimensionReach(viewport, 100.0, reach));
+	CHECK(near(reach, -1.0, 1e-9));
+
+	core::DimensionChainCommand top;
+	top.axis = core::DimensionAxis::Horizontal;
+	top.side = 1;
+	top.base = 6000.0;
+	top.tier = 0;
+	viewport.dimensions.push_back(top);
+	top.tier = 1;
+	viewport.dimensions.push_back(top);
+	CHECK(core::sectionTopDimensionReach(viewport, 100.0, reach));
+	// 最も外（段 1）の寸法線 6000 + (8 + 7) × 100 に、文字の見込み 4 × 100。
+	CHECK(near(reach, 6000.0 + 1500.0 + 400.0, 1e-9));
+}
+
 TEST(section_bands_count_only_the_sides_with_annotations)
 {
 	// 注釈が何も無い図（タイトルも無い）は帯なし。

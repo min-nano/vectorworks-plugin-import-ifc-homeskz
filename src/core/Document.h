@@ -1656,6 +1656,12 @@ namespace HomeskzIfcImport::core
 	// 段で帯を測り、kSectionLabelGap を足す。描画側はこれに縮尺の分母を掛けてモデル mm にする。
 	double sectionLabelDrop(const ViewportCommand& viewport);
 
+	// 図の上に出す寸法の列（水平な列で side が正のもの＝上階の柱・小屋束の位置）の、最も外の
+	// 段の**文字の上端**（注釈空間の y・モデル mm）。寸法線（core::dimensionLineCoord）から
+	// kDimensionTextAllowance だけ上。scale は縮尺の分母。上の列が無ければ false（reach は
+	// 変更しない）。通り芯の符号をこれより上へ出すのに使う（core::gridShoulderAboveDimensions）。
+	bool sectionTopDimensionReach(const ViewportCommand& viewport, double scale, double& reach);
+
 	// 軸組図の外周に張り出す注釈の帯（用紙 mm・辺ごと。core::SectionBands）を、全命令の
 	// **最も広いもの**で返す（全軸組図は同じマスに並ぶ）。数えるのは次のとおり。
 	//   左 … 左へ出す縦の列（高さの寸法）の帯＋レベル記号があれば kLevelMarkBandAllowance

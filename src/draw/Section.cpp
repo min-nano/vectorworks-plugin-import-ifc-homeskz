@@ -82,6 +82,7 @@
 #include "draw/Tag.h"
 #include "draw/Dimension.h"
 #include "draw/TitleBlock.h"
+#include "draw/Verify.h"
 #include "core/Document.h"
 #include "core/Progress.h"
 
@@ -183,6 +184,109 @@ namespace HomeskzIfcImport::draw
 			// 読める値が実際の表示と一致しない以上、この読み戻しは誤警報しか生まないので
 			// 外した。書き込みはそのまま残す。
 			return rendered;
+		}
+
+		// 通り芯の符号を上の寸法の上へ出した件数（診断・記録用）。
+		//   viewports … 符号を上げた軸組図の枚数
+		//   axes      … 水平線を書き直したグリッド線の本数
+		//   failed    … 書けなかったグリッド線（注釈が取れなかった軸組図は 1 と数える）
+		//   shoulder  … 書いた水平線の長さ（先端）の最大（用紙 mm）
+		//   probe     … 1 枚目の実測（dev だけ。符号の上端の前後と寸法の文字の上端）
+		struct GridBubbleCounts
+		{
+			std::size_t viewports = 0;
+			std::size_t axes = 0;
+			std::size_t failed = 0;
+			double shoulder = 0.0;
+			std::string probe;
+		};
+
+		// グリッド線の「水平線の長さ（先端）」。符号を動かすのはこの欄だけ（Findings
+		// 「Viewports」#189。終端は絵を動かさない）。
+		constexpr const char* kGridShoulderAtStart = "ShoulderLengthAtStart";
+
+		// 図の上に寸法の列（上階の柱・小屋束の位置）があれば、注釈のグリッド線（通り芯）の
+		// 符号をその文字より上へ出す（ご要望: 上の寸法は符号の下に収める）。
+		//
+		// 【高さ範囲では動かない】符号は「映っているモデルの上端 ＋ 水平線の長さ（先端）＋
+		// ラベル枠」に描かれ、断面の高さ範囲の上端を上げても動かない（PR #181 round 1 の
+		// 実機・SDK リファレンス #189）。動かす口は注釈の中の GridAxis の
+		// ShoulderLengthAtStart（用紙 mm）だけで、書いたら ResetObject が要る。
+		//
+		// 【いつ呼ぶか】グリッド線は UpdateViewport が注釈に置くもの（作りたてでは注釈群が
+		// nil）なので、ConfigureViewport（最後が更新）の後。以後の更新で作り直されない
+		// （書いた値が残る）。位置合わせの MoveViewportBy より前に測る（タグと同じ）。
+		//
+		// dimensionScale は寸法線の位置に使った縮尺の分母（draw/Dimension と同じ値）。
+		void RaiseGridBubbles(MCObjectHandle viewport, const core::ViewportCommand& command,
+							  double dimensionScale, GridBubbleCounts& counts)
+		{
+			if (viewport == nil)
+				return;
+			double scale = dimensionScale;
+			if (const double actual = VWViewportObj(viewport).GetScale(); actual > 0.0)
+				scale = actual;
+			if (dimensionScale <= 0.0)
+				dimensionScale = scale;
+			double reach = 0.0;
+			if (scale <= 0.0 || !core::sectionTopDimensionReach(command, dimensionScale, reach))
+				return;
+			const MCObjectHandle annotation =
+				gSDK->GetViewportGroup(viewport, kViewportGroupAnnotation);
+			if (annotation == nil)
+			{
+				++counts.failed;
+				return;
+			}
+			bool raised = false;
+			for (MCObjectHandle h = gSDK->FirstMemberObj(annotation); h != nil;
+				 h = gSDK->NextObject(h))
+			{
+				if (gSDK->GetObjectTypeN(h) != kParametricNode)
+					continue;
+				VWParametricObj pio(h);
+				if (pio.GetInternalID() != kInternalID_GridAxis)
+					continue;
+				WorldRect bounds;
+				if (!gSDK->GetObjectBounds(h, bounds))
+				{
+					++counts.failed;
+					continue;
+				}
+				const double top = std::max(bounds.top, bounds.bottom);
+				const double shoulder = pio.GetParamReal(kGridShoulderAtStart);
+				const double wanted =
+					core::gridShoulderAboveDimensions(shoulder, top, reach, scale);
+				if (wanted <= shoulder)
+					continue;
+				if (!SetParamRealChecked(pio, kGridShoulderAtStart, wanted))
+				{
+					++counts.failed;
+					continue;
+				}
+				// 値は書いた直後に読めるが、絵は Reset まで動かない（Findings #189）。
+				gSDK->ResetObject(h);
+				++counts.axes;
+				counts.shoulder = std::max(counts.shoulder, wanted);
+				raised = true;
+#if VW_DRAW_VERIFY
+				// 検算（dev だけ）: 1 本目の符号の上端を測り直し、寸法の文字の上端と並べる。
+				if (counts.probe.empty())
+				{
+					WorldRect after;
+					const double afterTop =
+						gSDK->GetObjectBounds(h, after) ? std::max(after.top, after.bottom) : top;
+					counts.probe = "符号の上端 " + std::to_string(std::lround(top)) + "→" +
+								   std::to_string(std::lround(afterTop)) +
+								   " / 上の寸法の文字の上端 " + std::to_string(std::lround(reach)) +
+								   " / 水平線 " + std::to_string(shoulder) + "→" +
+								   std::to_string(wanted) + "mm / 縮尺 1/" +
+								   std::to_string(std::lround(scale));
+				}
+#endif
+			}
+			if (raised)
+				++counts.viewports;
 		}
 
 	} // namespace
@@ -326,6 +430,7 @@ namespace HomeskzIfcImport::draw
 		// M31 寸法・レベル記号。レベル基準線 PIO の定義を先に用意する（タグと同じ理由。
 		// レベル記号が 1 つも無い文書では定義そのものを作らない）。
 		DimensionCounts dimensions;
+		GridBubbleCounts gridBubbles;
 		if (std::ranges::any_of(commands, [](const core::SectionCommand& section)
 								{ return !section.levels.empty(); }))
 			prepareLevelMarkPlugin();
@@ -401,6 +506,9 @@ namespace HomeskzIfcImport::draw
 			drawViewportDimensions(viewport, command.viewport, command.levels,
 								   document.dimensionStandard, arrange ? layout.scale : 0.0,
 								   dimensions, &placedLevels);
+			// 上の寸法があれば通り芯の符号をその上へ出す（収まりの判定に含めるため、測り直す
+			// 前に）。
+			RaiseGridBubbles(viewport, command.viewport, arrange ? layout.scale : 0.0, gridBubbles);
 
 			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
 			//
@@ -476,6 +584,19 @@ namespace HomeskzIfcImport::draw
 		AppendLine(note, tagDiagnostics("軸組図", tags));
 		AppendLine(note, drawingLabelDiagnostics("軸組図", labels));
 		AppendLine(note, dimensionDiagnostics("軸組図", dimensions));
+		if (gridBubbles.failed > 0)
+			AppendLine(note, "軸組図の診断: 通り芯の符号を上の寸法の上へ出せなかったグリッド線 " +
+								 std::to_string(gridBubbles.failed) + " 本。");
+		if (gridBubbles.axes > 0)
+		{
+			std::string record = "軸組図の通り芯の符号: 上の寸法の上へ出した軸組図 " +
+								 std::to_string(gridBubbles.viewports) + " 枚・グリッド線 " +
+								 std::to_string(gridBubbles.axes) + " 本（水平線の最大 " +
+								 std::to_string(std::lround(gridBubbles.shoulder)) + "mm）";
+			if (!gridBubbles.probe.empty())
+				record += "。1 本目: " + gridBubbles.probe;
+			AppendLine(outInfo, record);
+		}
 		AppendLine(outInfo, dimensionInfo("軸組図", dimensions));
 		if (outCounts != nullptr)
 		{

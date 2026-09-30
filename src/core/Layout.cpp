@@ -283,6 +283,17 @@ namespace HomeskzIfcImport::core
 			   kDimensionTextAllowance;
 	}
 
+	double gridShoulderAboveDimensions(double shoulder, double gridTop, double dimensionTop,
+									   double scale)
+	{
+		if (scale <= 0.0)
+			return shoulder;
+		// いまの符号の下端（上端からラベル枠の高さだけ下）が、狙いより何 mm 低いか（用紙）。
+		const double bubbleBottom = gridTop - (kGridBubbleHeight * scale);
+		const double shortfall = ((dimensionTop - bubbleBottom) / scale) + kGridBubbleClearance;
+		return shortfall > 0.0 ? shoulder + shortfall : shoulder;
+	}
+
 	LevelMarkShape levelMarkShape(double textSize, double textWidth)
 	{
 		LevelMarkShape shape;
