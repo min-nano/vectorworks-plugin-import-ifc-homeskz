@@ -23,7 +23,7 @@
 //	      01土台   / 01土台
 //	      02床組   / 01大引・02根太
 //	      03柱     / 01通し柱・02管柱
-//	      04梁桁   / 01小屋梁・02軒桁・03床梁・04胴差
+//	      04梁桁   / 01小屋梁・02軒桁・03床梁・04胴差・05甲乙梁
 //	      05小屋組 / 02小屋束・03母屋・04棟木・05垂木・06登り梁
 //	      06耐力面材 / 01壁・02床・03屋根
 //	      07筋かい
@@ -55,6 +55,10 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* CLASS_NOKIGETA = "04構造-02木造-04梁桁-02軒桁";
 	inline constexpr const char* CLASS_YUKABARI = "04構造-02木造-04梁桁-03床梁";
 	inline constexpr const char* CLASS_DOUSASHI = "04構造-02木造-04梁桁-04胴差";
+	// 甲乙梁（床梁の間に架ける小梁）。床梁と同じ床組の梁だが、伏図で見え方を分けたい
+	// というご要望により専用クラスにする。ロフト床の合成（parse/Floor）では床梁と同じく
+	// 床を受ける梁として扱う（isFloorBeamClass）。
+	inline constexpr const char* CLASS_KOUOTSUBARI = "04構造-02木造-04梁桁-05甲乙梁";
 	inline constexpr const char* CLASS_KOYAZUKA = "04構造-02木造-05小屋組-02小屋束";
 	inline constexpr const char* CLASS_MOYA = "04構造-02木造-05小屋組-03母屋";
 	inline constexpr const char* CLASS_MUNAGI = "04構造-02木造-05小屋組-04棟木";
@@ -103,6 +107,9 @@ namespace HomeskzIfcImport::parse
 	// IFC Name の種別から横架材クラスを返す。直接対応が無ければ std::nullopt（未知種別＝火打
 	// ・隅木谷木・無名等）。
 	std::optional<std::string> memberClassFromName(const std::string& name);
+
+	// 床を受ける梁（床梁・甲乙梁）のクラスか。ロフト床の合成（parse/Floor）が見る。
+	bool isFloorBeamClass(const std::string& drawClass);
 
 	// 横架材のクラスを決定する。
 	//

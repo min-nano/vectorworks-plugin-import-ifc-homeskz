@@ -55,7 +55,7 @@ namespace HomeskzIfcImport::parse
 	std::optional<std::string> memberClassFromName(const std::string& name)
 	{
 		// IFC Name の種別トークン → 横架材クラス（ホームズ君 IFC の記録を信用する直接対応）。
-		// 床小梁・床大梁・甲乙梁はいずれも床組の梁なので床梁クラスにまとめる。直接対応が無け
+		// 床小梁・床大梁は床梁クラスにまとめ、甲乙梁は専用クラスに分ける。直接対応が無け
 		// れば std::nullopt。
 		const std::string type = memberTypeOfName(name);
 		if (type == "土台")
@@ -68,8 +68,10 @@ namespace HomeskzIfcImport::parse
 			return CLASS_NOKIGETA;
 		if (type == "胴差")
 			return CLASS_DOUSASHI;
-		if (type == "床小梁" || type == "床大梁" || type == "甲乙梁")
+		if (type == "床小梁" || type == "床大梁")
 			return CLASS_YUKABARI;
+		if (type == "甲乙梁")
+			return CLASS_KOUOTSUBARI;
 		if (type == "小屋梁")
 			return CLASS_KOYABARI;
 		if (type == "母屋")
@@ -79,6 +81,11 @@ namespace HomeskzIfcImport::parse
 		if (type == "登り梁")
 			return CLASS_NOBORIBARI;
 		return std::nullopt;
+	}
+
+	bool isFloorBeamClass(const std::string& drawClass)
+	{
+		return drawClass == CLASS_YUKABARI || drawClass == CLASS_KOUOTSUBARI;
 	}
 
 	std::string resolveMemberClass(const std::string& name, int index, int topIndex,
