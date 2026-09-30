@@ -119,6 +119,36 @@ namespace HomeskzIfcImport::parse
 		return levels;
 	}
 
+	std::vector<long long> standardBeamHeights(const std::vector<StoryInfo>& stories,
+											   const std::vector<PlanLevel>& levels)
+	{
+		std::vector<long long> result;
+		result.reserve(stories.size());
+		for (std::size_t i = 0; i < stories.size(); ++i)
+		{
+			const double standardZ = beamTopElevation(stories[i]);
+			long long best = roundedMm(standardZ);
+			double bestDistance = std::numeric_limits<double>::max();
+			// 伏図レベルは高さの昇順なので、厳密に近いときだけ差し替える＝同じ近さなら低い方。
+			for (const PlanLevel& level : levels)
+			{
+				if (level.story != i)
+					continue;
+				for (const long long height : level.heights)
+				{
+					const double distance = std::abs(static_cast<double>(height) - standardZ);
+					if (distance < bestDistance)
+					{
+						bestDistance = distance;
+						best = height;
+					}
+				}
+			}
+			result.push_back(best);
+		}
+		return result;
+	}
+
 	std::vector<const PlanLevel*> storyPlanLevels(const std::vector<PlanLevel>& levels,
 												  std::size_t story)
 	{

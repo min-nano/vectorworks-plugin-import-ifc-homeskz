@@ -222,7 +222,8 @@ namespace HomeskzIfcImport::parse
 		// 法を示すデータタグを載せる。タグはビューポート命令の中に入るので、**sheets /
 		// sections が確定した後**でなければ置き場所が決まらない——したがってここが最後になる
 		// （parse/Tag）。
-		attachTagCommands(document);
+		attachTagCommands(document, context.stories(),
+						  standardBeamHeights(context.stories(), context.planLevels()));
 		progress.step();
 
 		// M28 図面枠（タイトルブロック）: 設定で選ばれたスタイル名をそのまま命令セットへ

@@ -916,17 +916,29 @@ namespace HomeskzIfcImport::core
 		}
 	} // namespace
 
+	std::string signedMillimetreText(long long deltaMm)
+	{
+		const char* sign = kPlanLevelZero;
+		if (deltaMm > 0)
+			sign = kPlanLevelPlus;
+		else if (deltaMm < 0)
+			sign = kPlanLevelMinus;
+		// 3 桁ごとのコンマは下の桁から差し込む。
+		const std::string digits = std::to_string(deltaMm < 0 ? -deltaMm : deltaMm);
+		std::string grouped;
+		for (std::size_t i = 0; i < digits.size(); ++i)
+		{
+			if (i > 0 && (digits.size() - i) % 3 == 0)
+				grouped += ',';
+			grouped += digits[i];
+		}
+		return sign + grouped;
+	}
+
 	std::string planLevelHeightText(long long heightMm, long long datumMm, bool top)
 	{
-		// 符号は必ず付ける（"FL872" と "FL-872" を読み違えない）。
-		const long long delta = heightMm - datumMm;
-		const char* sign = kPlanLevelZero;
-		if (delta > 0)
-			sign = kPlanLevelPlus;
-		else if (delta < 0)
-			sign = kPlanLevelMinus;
-		return std::string(planLevelDatumName(top)) + sign +
-			   std::to_string(delta < 0 ? -delta : delta);
+		// 符号は必ず付ける（"FL872" と "FL-872" を読み違えない。signedMillimetreText）。
+		return std::string(planLevelDatumName(top)) + signedMillimetreText(heightMm - datumMm);
 	}
 
 	std::string planLevelTag(long long heightMm, long long datumMm, bool top)

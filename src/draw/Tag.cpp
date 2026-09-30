@@ -75,10 +75,16 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kTagClass = kDimensionClass;
 
 		// タグフィールドの式（VW のタグフィールド定義式）。構造材の断面幅×せいを mm 整数で
-		// 並べ、勾配（IPZL）が 0 でないときだけ括弧付きで添える。**レコード名・フィールド名は
-		// draw/StructuralMember の定義から組む**——構造材を書いているのはこちらなので、
-		// 名前を 2 か所に書かない（CLAUDE.md「重複を作らない置き場所」）。
-		TXString TagFieldFormula()
+		// 並べ、**高さの注記**（note。"(2FL -872)"）があれば後ろへそのまま添える。
+		// **レコード名・フィールド名は draw/StructuralMember の定義から組む**——構造材を書いて
+		// いるのはこちらなので、名前を 2 か所に書かない（CLAUDE.md「重複を作らない置き場所」）。
+		//
+		// 【高さは解析側が書いた文字】以前は構造材の IPZL（挿入点のレイヤからの高さ）を
+		// 0 でないときだけ括弧付きで添えていたが、横架材の高さごとの伏図で材の載るレイヤが
+		// 高さごとに分かれると、その値はレイヤによって基準が変わる。**常にその階の FL から
+		// 測った値**にするため（ご要望）、解析側が階名付きで書いた文字（core::TagCommand::
+		// note）を式の後ろへ置く。取り込んだ時点の高さなので、材を動かしても追随しない。
+		TXString TagFieldFormula(const std::string& note)
 		{
 			TXString formula;
 			formula += "#";
@@ -90,9 +96,11 @@ namespace HomeskzIfcImport::draw
 			formula += "#.#";
 			formula += kFieldMajorDepth;
 			formula += "##mm_0_0#";
-			// 勾配の添え書き。式の記法（条件・区切り）は VW のタグフィールド定義そのままで、
-			// 意味を持たせずに写す。
-			formula += R"FML(" ("@#IPZL#<>0:""#IPZL##thsep#sign#@#IPZL#<>0:""")"@#IPZL#<>0:"")FML";
+			if (!note.empty())
+			{
+				formula += " ";
+				formula += TXString(note.c_str());
+			}
 			return formula;
 		}
 
@@ -213,9 +221,9 @@ namespace HomeskzIfcImport::draw
 
 		// レイアウトへ置く断面寸法フィールドを 1 つ作って container へ入れる。フィールドの
 		// 実体は**式を持たせたテキスト**（リンクされたテキスト）。
-		bool CreateTagField(MCObjectHandle container, TagCounts& counts)
+		bool CreateTagField(MCObjectHandle container, const std::string& note, TagCounts& counts)
 		{
-			const TXString formula = TagFieldFormula();
+			const TXString formula = TagFieldFormula(note);
 
 			// 式そのものを本文にしておく（タグが評価するまでの見た目であり、評価後は
 			// 断面寸法に置き換わる）。fixedSize=false で幅は中身なり。
@@ -294,7 +302,8 @@ namespace HomeskzIfcImport::draw
 		// 渡した後は**実際にタグが持っているレイアウトを取り直して**数を確かめ、複製された
 		// ときはこちらのグループを消す（図面に空のグループを残さない）。取り直したものが
 		// 空だったときだけ、そちらへフィールドを作り直す。
-		MCObjectHandle ResolveTagLayout(MCObjectHandle pio, TagCounts& counts)
+		MCObjectHandle ResolveTagLayout(MCObjectHandle pio, const std::string& note,
+										TagCounts& counts)
 		{
 			// 既に持っていればそれを使う（生成したばかりのデータタグは既定のレイアウトを
 			// 持っているので、通常はこちら）。
@@ -302,7 +311,7 @@ namespace HomeskzIfcImport::draw
 			if (held != nil)
 			{
 				RemoveDefaultLoci(held);
-				if (!CreateTagField(held, counts))
+				if (!CreateTagField(held, note, counts))
 					return nil;
 				return ContainerCount(held) == 0 ? nil : held;
 			}
@@ -310,7 +319,7 @@ namespace HomeskzIfcImport::draw
 			MCObjectHandle group = gSDK->CreateGroup();
 			if (group == nil)
 				return nil;
-			if (!CreateTagField(group, counts))
+			if (!CreateTagField(group, note, counts))
 			{
 				gSDK->DeleteObject(group, true);
 				return nil;
@@ -335,7 +344,7 @@ namespace HomeskzIfcImport::draw
 			{
 				// VW が複製して持った。中身まで複製されていなければフィールドを作り直し、
 				// こちらのグループは消す。
-				const bool filled = ContainerCount(held) != 0 || CreateTagField(held, counts);
+				const bool filled = ContainerCount(held) != 0 || CreateTagField(held, note, counts);
 				gSDK->DeleteObject(group, true);
 				if (!filled)
 					return nil;
@@ -397,7 +406,7 @@ namespace HomeskzIfcImport::draw
 			// **ここも区間にしない。** 中の CreateTagField がタグ内のテキストへ
 			// SetClassByName / SetAllAttributesByClass を呼ぶので、包むと入れ子になる
 			// （draw/DrawUtil の【計測】）。round 1 の実測は 531 回で 221ms と軽い。
-			if (ResolveTagLayout(object, counts) == nil)
+			if (ResolveTagLayout(object, tag.note, counts) == nil)
 			{
 				++counts.layoutFailed;
 			}

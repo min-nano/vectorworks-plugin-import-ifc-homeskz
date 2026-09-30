@@ -81,6 +81,16 @@ namespace HomeskzIfcImport::parse
 										   const std::vector<std::vector<long long>>& heights,
 										   const core::ImportOptions& options);
 
+	// 各階の**標準の横架材の高さ**（添字は stories と同じ。GL からの mm）。その階の横架材の
+	// 天端の高さのうち、標準の横架材天端（beamTopElevation。柱・床版の配置から推す値）に
+	// いちばん近いもの——標準の伏図レベル（名前を変えない方）が含む高さで、データタグに高さの
+	// 注記を添えるかの基準（parse/Tag）。推した値そのものではなく**実在する横架材の高さ**を
+	// 採るのは、推した値と横架材がずれるモデルがあるため（グレー本モデルプラン1 は横架材が
+	// FL ちょうど・推した値は FL−100。推した値で比べると全部の梁に注記が付く）。伏図レベルが
+	// 無い階は推した値。
+	std::vector<long long> standardBeamHeights(const std::vector<StoryInfo>& stories,
+											   const std::vector<PlanLevel>& levels);
+
 	// 階 story の伏図レベル（通し番号の順）。
 	std::vector<const PlanLevel*> storyPlanLevels(const std::vector<PlanLevel>& levels,
 												  std::size_t story);

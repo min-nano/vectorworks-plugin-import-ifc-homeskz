@@ -258,6 +258,7 @@ namespace HomeskzIfcImport::parse
 			StoryInfo info;
 			info.id = id;
 			info.elevation = storey->attribute(attr::kBuildingStoreyElevation).asReal();
+			info.name = entityName(*storey);
 			stories.push_back(info);
 		}
 

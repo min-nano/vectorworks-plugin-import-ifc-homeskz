@@ -113,7 +113,7 @@ namespace
 	// 最上階。1 階の耐力壁レイヤは "1-耐力壁"。
 	std::vector<StoryInfo> fitStories()
 	{
-		return {StoryInfo{1, 600.0, -174.0, false}, StoryInfo{2, 3500.0, 0.0, true}};
+		return {StoryInfo{1, 600.0, -174.0, false, "1FL"}, StoryInfo{2, 3500.0, 0.0, true, "RFL"}};
 	}
 
 	// 軸 (0,0)→(1820,0) の耐力壁。IFC の高さはレイヤ平面から 0〜2700（絶対 426〜3126）。
