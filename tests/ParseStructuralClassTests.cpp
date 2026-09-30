@@ -7,7 +7,7 @@
 //	せることはしない）（docs/DEV-NOTES.md M4）。
 //
 //	検証項目: 種別トークン抽出（"木梁:{種別}:{連番}" は中央・2 要素名は接頭辞・空/未設定）・
-//	種別→クラスの直接対応（床小梁/床大梁/甲乙梁→床梁、登り梁、未知は無し）・横架材クラス
+//	種別→クラスの直接対応（床小梁/床大梁→床梁、甲乙梁、登り梁、未知は無し）・横架材クラス
 //	の状況推定（名前優先・最下階=土台・中間階=床梁・最上階の軒高=小屋梁・軒高超=母屋）・
 //	柱クラス（STANDCOLUMN/名前/最上階で小屋束、一般階は貫通で通し柱/管柱）。純ロジック。
 //
@@ -20,6 +20,7 @@
 
 using HomeskzIfcImport::parse::CLASS_DODAI;
 using HomeskzIfcImport::parse::CLASS_DOUSASHI;
+using HomeskzIfcImport::parse::CLASS_KOUOTSUBARI;
 using HomeskzIfcImport::parse::CLASS_KOYABARI;
 using HomeskzIfcImport::parse::CLASS_KOYAZUKA;
 using HomeskzIfcImport::parse::CLASS_KUDABASHIRA;
@@ -31,6 +32,7 @@ using HomeskzIfcImport::parse::CLASS_NOKIGETA;
 using HomeskzIfcImport::parse::CLASS_OOBIKI;
 using HomeskzIfcImport::parse::CLASS_TOSHIBASHIRA;
 using HomeskzIfcImport::parse::CLASS_YUKABARI;
+using HomeskzIfcImport::parse::isFloorBeamClass;
 using HomeskzIfcImport::parse::memberClassFromName;
 using HomeskzIfcImport::parse::memberTypeOfName;
 using HomeskzIfcImport::parse::resolveColumnClass;
@@ -62,7 +64,7 @@ TEST(member_type_handles_empty)
 // --- memberClassFromName ----------------------
 
 // 既知種別は直接クラスへ対応する（_MEMBER_CLASS_BY_TYPE の全対応を網羅する。床小梁・
-// 床大梁・甲乙梁はまとめて床梁、登り梁は小屋組の登り梁クラス）。
+// 床大梁はまとめて床梁、甲乙梁は専用クラス、登り梁は小屋組の登り梁クラス）。
 TEST(member_class_known_types_map_directly)
 {
 	CHECK(memberClassFromName("木梁:土台:1").has_value());
@@ -73,7 +75,7 @@ TEST(member_class_known_types_map_directly)
 	CHECK_EQ(memberClassFromName("木梁:胴差:1").value(), std::string(CLASS_DOUSASHI));
 	CHECK_EQ(memberClassFromName("木梁:床小梁:1").value(), std::string(CLASS_YUKABARI));
 	CHECK_EQ(memberClassFromName("木梁:床大梁:1").value(), std::string(CLASS_YUKABARI));
-	CHECK_EQ(memberClassFromName("木梁:甲乙梁:1").value(), std::string(CLASS_YUKABARI));
+	CHECK_EQ(memberClassFromName("木梁:甲乙梁:1").value(), std::string(CLASS_KOUOTSUBARI));
 	CHECK_EQ(memberClassFromName("木梁:小屋梁:1").value(), std::string(CLASS_KOYABARI));
 	CHECK_EQ(memberClassFromName("木梁:母屋:1").value(), std::string(CLASS_MOYA));
 	CHECK_EQ(memberClassFromName("木梁:棟木:1").value(), std::string(CLASS_MUNAGI));
@@ -86,6 +88,15 @@ TEST(member_class_unknown_types_return_nullopt)
 	CHECK(!memberClassFromName("木梁:隅木・谷木:1").has_value());
 	CHECK(!memberClassFromName("火打:0_1").has_value());
 	CHECK(!memberClassFromName("").has_value());
+}
+
+// 床を受ける梁は床梁と甲乙梁だけ（ロフト床の合成が見る）。
+TEST(floor_beam_class_covers_yukabari_and_kouotsubari)
+{
+	CHECK(isFloorBeamClass(CLASS_YUKABARI));
+	CHECK(isFloorBeamClass(CLASS_KOUOTSUBARI));
+	CHECK(!isFloorBeamClass(CLASS_KOYABARI));
+	CHECK(!isFloorBeamClass(""));
 }
 
 // --- resolveMemberClass ------------------------

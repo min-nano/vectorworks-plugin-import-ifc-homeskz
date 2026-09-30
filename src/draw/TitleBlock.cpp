@@ -16,6 +16,7 @@
 //	  * gSDK->UpdateStyledObjects(style)              … スタイルの中身を流し込む（1 回）
 //	  * gSDK->FirstMemberObj / InsertObjectBefore     … 最背面へ回す
 //	  * gSDK->GetObjectBounds / MoveObject            … 置いた後に測って動かす
+//	  * gSDK->DeleteObject                            … 割り付けのために仮に置いた枠を消す
 //
 
 #include "PluginPrefix.h"
@@ -24,7 +25,9 @@
 #include "core/Document.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -83,6 +86,39 @@ namespace HomeskzIfcImport::draw
 		// スタイル無しの図面枠は空の枠にしかならず、図面を汚すだけになる。
 		counts.styleRef = ResolvePluginStyle(TXString(counts.style.c_str()));
 		return counts;
+	}
+
+	std::optional<core::PaperArea> measureTitleBlockFrame(const TitleBlockCounts& counts,
+														  MCObjectHandle sheetLayer)
+	{
+		if (sheetLayer == nil || counts.styleRef == 0)
+			return std::nullopt;
+
+		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();
+		gSDK->SetCurrentLayer(sheetLayer);
+		std::optional<core::PaperArea> frame;
+		if (const MCObjectHandle probe = CreateTitleBlock(); probe != nil)
+		{
+			// 外形はスタイルの中身が流れてから定まる（finishTitleBlocks と同じ手順）。
+			gSDK->SetPluginObjectStyle(probe, counts.styleRef);
+			gSDK->UpdateStyledObjects(counts.styleRef);
+			WorldRect bounds;
+			if (gSDK->GetObjectBounds(probe, bounds))
+			{
+				// 本物は用紙の中心＝原点へ寄せて置く（finishTitleBlocks）ので、大きさだけを
+				// 採って原点の周りの矩形にする。
+				const double halfWidth = std::abs(bounds.right - bounds.left) / 2.0;
+				const double halfHeight = std::abs(bounds.top - bounds.bottom) / 2.0;
+				if (halfWidth > 0.0 && halfHeight > 0.0)
+					frame = core::PaperArea{
+						core::Vec2{kPaperCenter.x - halfWidth, kPaperCenter.y - halfHeight},
+						core::Vec2{kPaperCenter.x + halfWidth, kPaperCenter.y + halfHeight}};
+			}
+			gSDK->DeleteObject(probe, true);
+		}
+		if (previousLayer != nil)
+			gSDK->SetCurrentLayer(previousLayer);
+		return frame;
 	}
 
 	void addTitleBlockSheet(MCObjectHandle sheetLayer, TitleBlockCounts& counts)
@@ -154,6 +190,10 @@ namespace HomeskzIfcImport::draw
 			}
 			const double centerX = (bounds.left + bounds.right) / 2.0;
 			const double centerY = (bounds.bottom + bounds.top) / 2.0;
+			// 本置きの外形を控える（診断ログ。割り付けの前に仮に測った大きさと突き合わせる）。
+			if (counts.placedSize.x <= 0.0)
+				counts.placedSize = core::Vec2{std::abs(bounds.right - bounds.left),
+											   std::abs(bounds.top - bounds.bottom)};
 			gSDK->MoveObject(object, kPaperCenter.x - centerX, kPaperCenter.y - centerY);
 		}
 	}
@@ -191,8 +231,12 @@ namespace HomeskzIfcImport::draw
 			return {};
 		// **使った登録名を必ず出す**（別の環境で違っていたときに、ここが唯一の手掛かりに
 		// なる。draw/TitleBlock.h の ★）。
-		return std::string("図面枠（") + what + "）: スタイル「" + counts.style + "」を " +
-			   std::to_string(counts.drawn) + " 枚に置きました（登録名 \"" + counts.plugin +
-			   "\"）。";
+		std::string text = std::string("図面枠（") + what + "）: スタイル「" + counts.style +
+						   "」を " + std::to_string(counts.drawn) + " 枚に置きました（登録名 \"" +
+						   counts.plugin + "\"）。";
+		if (counts.placedSize.x > 0.0)
+			text += "外形 " + std::to_string(std::lround(counts.placedSize.x)) + "×" +
+					std::to_string(std::lround(counts.placedSize.y)) + "mm。";
+		return text;
 	}
 } // namespace HomeskzIfcImport::draw

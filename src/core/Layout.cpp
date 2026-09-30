@@ -138,24 +138,77 @@ namespace HomeskzIfcImport::core
 		return layout;
 	}
 
-	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area, double band)
+	PaperArea insetFrameArea(const PaperArea& printable, const PaperArea& frame)
+	{
+		const PaperArea inside{Vec2{std::max(printable.min.x, frame.min.x + kTitleBlockInset),
+									std::max(printable.min.y, frame.min.y + kTitleBlockInset)},
+							   Vec2{std::min(printable.max.x, frame.max.x - kTitleBlockInset),
+									std::min(printable.max.y, frame.max.y - kTitleBlockInset)}};
+		if (inside.width() <= 0.0 || inside.height() <= 0.0)
+			return printable;
+		return inside;
+	}
+
+	bool frameCoversPaper(const PaperArea& frame, const PaperArea& printable)
+	{
+		return frame.width() >= kTitleBlockMinCoverage * printable.width() &&
+			   frame.height() >= kTitleBlockMinCoverage * printable.height();
+	}
+
+	PaperArea reserveTitleStrip(const PaperArea& printable, const PaperArea& strip)
+	{
+		PaperArea area = printable;
+		area.min.y = printable.min.y + strip.height() + (2.0 * kTitleBlockInset);
+		if (area.height() <= 0.0)
+			return printable;
+		return area;
+	}
+
+	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area,
+								const SectionBands& bands, double heightMargin, bool alignTop)
 	{
 		SectionLayout layout;
 		layout.area = area;
+		layout.alignTop = alignTop;
 
-		// **上下 2 段が縦に収まる**ことを条件に縮尺を選ぶ（要件）。段の間に間隔が 1 つ
-		// 入るので、1 段に使える高さは (印刷可能領域の高さ − 間隔) ÷ 2。
 		const auto rows = static_cast<double>(kSectionRows);
-		const double perRow = (layout.area.height() - ((rows - 1.0) * kViewportGap)) / rows;
-		// 寸法の帯（M31）は 1 枚ごとに四辺へ付くので、図そのものに使えるのは帯を引いた
-		// 残り。マスは帯を含めた大きさにする（寸法ごと隣と重ならないように並べる）。
-		const double margin = band > 0.0 ? 2.0 * band : 0.0;
-		Vec2 available{layout.area.width(), perRow};
-		if (margin > 0.0 && available.x > margin && available.y > margin)
-			available = Vec2{available.x - margin, available.y - margin};
-		layout.scale = fitScale(content, available);
-		layout.cell =
-			Vec2{(content.x / layout.scale) + margin, (content.y / layout.scale) + margin};
+		const double left = std::max(bands.left, 0.0);
+		const double right = std::max(bands.right, 0.0);
+		const double margin = std::max(heightMargin, 0.0);
+
+		// 縮尺 scale でのマスと、図の中心のずれ。上下の帯は高さ範囲の余白（用紙の上では
+		// margin ÷ scale）に収め、はみ出すぶんだけを足す（Layout.h の sectionLayout）。
+		const auto cellAt = [&](double scale, Vec2& offset)
+		{
+			const double room = margin / scale;
+			const double below = std::max(bands.bottom - room, 0.0);
+			const double above = std::max(bands.top - room, 0.0);
+			offset = Vec2{(left - right) / 2.0, (below - above) / 2.0};
+			return Vec2{(content.x / scale) + left + right, (content.y / scale) + below + above};
+		};
+		// **上下 2 段が縦に収まる**ことを条件に縮尺を選ぶ（要件）。段の間に間隔が 1 つ入る。
+		const auto fits = [&](const Vec2& cell)
+		{
+			return cell.x <= layout.area.width() &&
+				   (rows * cell.y) + ((rows - 1.0) * kViewportGap) <= layout.area.height();
+		};
+
+		// 階梯は昇順（図が大きくなる順）なので、最初に収まったものが「収まる中で最も大きい
+		// 図」になる。**どれにも収まらなければいちばん小さい図**（fitScale と同じ）。
+		layout.scale = kScaleDenominators.back();
+		if (content.x > 0.0 && content.y > 0.0)
+		{
+			for (const double scale : kScaleDenominators)
+			{
+				Vec2 offset;
+				if (fits(cellAt(scale, offset)))
+				{
+					layout.scale = scale;
+					break;
+				}
+			}
+		}
+		layout.cell = cellAt(layout.scale, layout.viewportOffset);
 
 		// 1 段に並ぶ枚数。間隔は「枚数 − 1」個ぶんなので、幅に間隔 1 つを足してから
 		// 「1 枚＋間隔」で割ると枚数になる。**必ず 1 枚は置く**（1 枚も入らない大きさでも
@@ -179,18 +232,24 @@ namespace HomeskzIfcImport::core
 		const std::size_t row = index / columns;
 		const std::size_t column = index % columns;
 
-		// 段組み全体を印刷可能領域の中央に置く（左に寄せると右が間延びする）。
+		// 段組み全体を領域の左右の中央に置く（左に寄せると右が間延びする）。上下は中央か、
+		// 図面枠があれば上端（余りを表題欄のある下へ回す。Layout.h の SectionLayout）。
 		const double totalWidth = (static_cast<double>(columns) * layout.cell.x) +
 								  (static_cast<double>(columns - 1) * kViewportGap);
 		const double totalHeight = (static_cast<double>(kSectionRows) * layout.cell.y) +
 								   (static_cast<double>(kSectionRows - 1) * kViewportGap);
 		const Vec2 center = layout.area.center();
 		const double left = center.x - (totalWidth / 2.0);
-		const double top = center.y + (totalHeight / 2.0);
+		const double top = layout.alignTop ? layout.area.max.y : center.y + (totalHeight / 2.0);
 		return Vec2{left + (static_cast<double>(column) * (layout.cell.x + kViewportGap)) +
 						(layout.cell.x / 2.0),
 					top - (static_cast<double>(row) * (layout.cell.y + kViewportGap)) -
 						(layout.cell.y / 2.0)};
+	}
+
+	Vec2 sectionViewportCenter(const SectionLayout& layout, std::size_t indexInSheet)
+	{
+		return sectionSlotCenter(layout, indexInSheet) + layout.viewportOffset;
 	}
 
 	std::size_t sectionSheetCount(const SectionLayout& layout, std::size_t viewports)

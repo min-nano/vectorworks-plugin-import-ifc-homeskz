@@ -29,10 +29,15 @@
 //	書式で連番する——数字書式（"X1"）は `'` を足して "X1'" / "X1''"、いろは書式（"い"）は `又` を
 //	前置して "又い" / "又又い"（中間の順番ぶんだけ増やす）。
 //
+//	【外す通り（M34）】取り込み設定（core::ImportOptions::skippedSections）で外された通りは
+//	命令を作らない。外すのは**図番を一意にした後**——外す前後で残る通りの図番が変わらない
+//	ので、選ぶための解析（buildSectionCandidates）と取り込むための解析とで同じ通りを指せる。
+//
 
 #pragma once
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 #include "parse/Grid.h"
 #include "parse/Step.h"
 
@@ -122,9 +127,15 @@ namespace HomeskzIfcImport::parse
 	// 図面では、どちらの方向も "1" から連番になる）。図面タイトルも新しい図番から組み直す。
 	void uniqueSectionNumbers(std::vector<core::SectionCommand>& commands);
 
+	// M34 取り込み設定で外された通り（図番で指す）を取り除く。残る命令の並びは変えない。
+	void dropSkippedSections(std::vector<core::SectionCommand>& commands,
+							 const core::ImportOptions& options);
+
 	// 軸組図の section 命令を組み立てる。X 通りの切断位置を昇順に並べ、続けて Y通りを並べる。
 	// 通り芯が 1 本も無い（平面の広がりが決まらない）・映すレイヤが無い・柱梁の芯が
 	// 1 つも無いときは空を返す。
+	//
+	// 取り込み設定で外された通り（context.options()）は含めない（dropSkippedSections）。
 	//
 	// document は**組み立て済みの命令セット**（stories / members / columns …）を渡す——切断位
 	// 置は柱・梁の命令から、映すレイヤはストーリの命令から決まるので、IFC を見直さずに済む。

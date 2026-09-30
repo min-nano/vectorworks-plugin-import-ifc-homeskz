@@ -23,8 +23,8 @@
 | `GeometryTests` | `src/core/Geometry` + `src/parse/IfcGeometry` | 配置行列・断面・押し出しソリッド・boolean 辿り・屋根面と勾配・凸多角形の矩形クリップ・半平面クリップ（手計算値との突き合わせ） |
 | `CoreRegionTests` | `src/core/Region` | 部品が囲む領域の合成（ロフト床の外形） |
 | `CoreUnionFindTests` | `src/core/UnionFind` | ペア述語による連結成分（決定性の規約: 代表＝最小インデックス・代表昇順・成分内昇順） |
-| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付け・耐力壁を含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・断面の注釈空間への投影と図面ラベルを寄せる点（`sectionAnnotationPoint` / `sectionLabelAnchor` / `sectionLabelDrop`）・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`。**伏図のデータタグは含み、軸組図のタグは含まない**）・端部オフセットを戻した材の端（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop`）・耐力壁の筋かいの形（`shearWallBracePolygon`・たすき掛けの奥の筋かいの切り分け `shearWallBehindBracePieces`） |
-| `CoreLayoutTests` | `src/core/Layout` | 用紙の割り付け（縮尺は階梯の値だけ・**渡された印刷可能領域をそのまま使う**（余白を仮定しない）・凡例の幅を引いてから収まる中で最大の図・伏図は全図同じ縮尺と位置・軸組図は上下 2 段でマスが重ならないこと・シート枚数とタイトルの連番・紙の pt → mm の換算） |
+| `CoreDocumentTests` | `src/core/Document` | 命令セットの検証（`validateDocument`。地中梁の床付け・耐力壁を含む）・レイヤスタック順の計算・地中梁の呑み込み（`raiseModifierTop`）・垂木の軒先端（`rafterEaveEnd`）・軸組図の高さ範囲・軸組図の辺ごとの注釈の帯（`sectionBands`）・断面の注釈空間への投影と図面ラベルを寄せる点（`sectionAnnotationPoint` / `sectionLabelAnchor` / `sectionLabelDrop`）・図に映るものの平面／断面の広がり（`planContentBounds` / `sectionContentSize`。**伏図のデータタグは含み、軸組図のタグは含まない**）・端部オフセットを戻した材の端（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop`）・耐力壁の筋かいの形（`shearWallBracePolygon`・たすき掛けの奥の筋かいの切り分け `shearWallBehindBracePieces`） |
+| `CoreLayoutTests` | `src/core/Layout` | 用紙の割り付け（縮尺は階梯の値だけ・**渡された印刷可能領域をそのまま使う**（余白を仮定しない）・凡例の幅を引いてから収まる中で最大の図・伏図は全図同じ縮尺と位置・軸組図は上下 2 段でマスが重ならないこと・帯は出る辺にだけ取り、上下の帯は高さの余白に先に収めること・図面枠の内側へ絞り上へ寄せること・シート枚数とタイトルの連番・紙の pt → mm の換算） |
 | `ParseContextTests` | `src/parse/Context` | 解析中の共有キャッシュ（何度呼んでも同じ実体を返し、キャッシュを使わない従来の関数と結果が一致すること） |
 | `ParseGridTests` | `src/parse/Grid` | 通り芯（区間分割・重複除去・センタリング・X/Y 判定） |
 | `ParseStoryTests` | `src/parse/Story` | 階・レベル・レイヤ名（横架材天端オフセット・屋根組／母屋／span 柱レベルの追加条件・span レイヤ名の生成と分解）＋希望レイヤ順（`core::desiredStoryLayerOrder`。床・野地板を背面へ、耐力壁を最前面へ） |
@@ -87,8 +87,9 @@ SDK と実際の図面が要るためで、代わりに (a) SDK から切り離�
 無 SDK でテストし（`desiredStoryLayerOrder`・耐力壁の筋かいの形 `shearWallBracePolygon` など）、
 (b) 実描画は VectorWorks 実機で目視確認します
 （確認の作法は `docs/DEV-NOTES.md`「実機確認の作法」）。取り込み設定ダイアログ
-（`draw/SettingsDialog`）も同じで、**ダイアログの見え方と操作は実機確認**、そこで決まる値
-（`core::ImportOptions`）と解析への効き方は上の 2 つのテストが無 SDK で押さえます。
+（`draw/SettingsDialog`）と通りの選択（`draw/SectionPickDialog`）も同じで、**ダイアログの
+見え方と操作は実機確認**、そこで決まる値（`core::ImportOptions`）と解析への効き方は上の
+2 つのテストが無 SDK で押さえます（外した通りの扱いは `ParseSectionTests`）。
 
 MCP ブリッジ（`docs/DEV-NOTES.md` M24）も同じ切り分けです。**受け渡しの作法は無 SDK
 （`core/Bridge`）で、道具の中身（図面から何を読むか）は `draw/McpBridge` なのでテストは

@@ -435,10 +435,133 @@ TEST(SectionLayoutCellsIncludeTheDimensionBand)
 	const core::SectionLayout plain = core::sectionLayout(content, a3());
 	CHECK(near(plain.scale, 100.0));
 	CHECK(near(plain.cell.x, 200.0));
-	const core::SectionLayout banded = core::sectionLayout(content, a3(), 12.0);
+	const core::SectionLayout banded =
+		core::sectionLayout(content, a3(), core::SectionBands{12.0, 12.0, 12.0, 12.0});
 	CHECK(near(banded.scale, 125.0));
 	CHECK(near(banded.cell.x, 184.0));
 	CHECK(near(banded.cell.y, 120.0));
+}
+
+TEST(SectionLayoutTakesBandsOnlyOnTheSidesThatHaveThem)
+{
+	// 実機の A3（420 × 297・余白 0）と、2 階建て 9880 × 高さ範囲 11000（上下の余白 1000 込み）。
+	// 帯は左 29（高さの寸法 2 段＋レベル記号）・右 3（基準線の越え）・下 20（柱の位置の寸法＋
+	// 図面ラベル）・上 0。
+	const core::Vec2 content{9880.0, 11000.0};
+	const core::SectionBands bands{29.0, 3.0, 20.0, 0.0};
+
+	// 以前の割り付け（最も外の帯を四辺へ取り、高さの余白とも重ねて数える）では、
+	// 1/125 でも 1 段 88 + 58 = 146 で 2 段（307）が入らず 1/150 まで落ちていた。
+	const core::SectionLayout uniform =
+		core::sectionLayout(content, a3(), core::SectionBands{29.0, 29.0, 29.0, 29.0});
+	CHECK(near(uniform.scale, 150.0));
+
+	// 辺ごとに取り、下の帯を高さの余白（1/100 で用紙 10mm）に先に収めると 1/100。
+	// 1 段は 110 + (20 − 10) = 120 で 2 段 255、幅は 98.8 + 29 + 3 = 130.8。
+	// 1/75 は 1 段 146.7 + (20 − 13.3) = 153.3 で 2 段（321.7）が入らない。
+	const core::SectionLayout layout =
+		core::sectionLayout(content, a3(), bands, core::kSectionHeightMargin);
+	CHECK(near(layout.scale, 100.0));
+	CHECK(near(layout.cell.x, 130.8));
+	CHECK(near(layout.cell.y, 120.0));
+	CHECK((2.0 * layout.cell.y) + core::kViewportGap <= layout.area.height());
+	CHECK(layout.columns == 2);
+
+	// 図の中心はマスの中心から、左右は (29 − 3) ÷ 2 だけ右へ、上下は下に足した 10 の半分だけ
+	// 上へずれる——図の左に 29・右に 3、下に 10・上に 0 がちょうど残る。
+	CHECK(near(layout.viewportOffset.x, 13.0));
+	CHECK(near(layout.viewportOffset.y, 5.0));
+	const Vec2 slot = core::sectionSlotCenter(layout, 0);
+	const Vec2 viewport = core::sectionViewportCenter(layout, 0);
+	const double drawnWidth = content.x / layout.scale;
+	const double drawnHeight = content.y / layout.scale;
+	CHECK(near((viewport.x - (drawnWidth / 2.0)) - (slot.x - (layout.cell.x / 2.0)), 29.0));
+	CHECK(near((slot.x + (layout.cell.x / 2.0)) - (viewport.x + (drawnWidth / 2.0)), 3.0));
+	CHECK(near((viewport.y - (drawnHeight / 2.0)) - (slot.y - (layout.cell.y / 2.0)), 10.0));
+	CHECK(near((slot.y + (layout.cell.y / 2.0)) - (viewport.y + (drawnHeight / 2.0)), 0.0));
+}
+
+TEST(SectionLayoutAddsOnlyTheBandBeyondTheHeightMargin)
+{
+	// 余白に収まる帯（1/100 で余白は用紙 10mm、帯 8mm）はマスを大きくしない。
+	const core::Vec2 content{9880.0, 11000.0};
+	const core::SectionLayout layout = core::sectionLayout(
+		content, a3(), core::SectionBands{0.0, 0.0, 8.0, 8.0}, core::kSectionHeightMargin);
+	CHECK(near(layout.scale, 100.0));
+	CHECK(near(layout.cell.y, 110.0));
+	CHECK(near(layout.viewportOffset.y, 0.0));
+}
+
+TEST(SectionLayoutAlignedToTheTopLeavesTheSpareRoomAtTheBottom)
+{
+	const core::Vec2 content{9880.0, 11000.0};
+	const core::SectionBands bands{29.0, 3.0, 20.0, 0.0};
+	const core::SectionLayout centered =
+		core::sectionLayout(content, a3(), bands, core::kSectionHeightMargin, false);
+	const core::SectionLayout top =
+		core::sectionLayout(content, a3(), bands, core::kSectionHeightMargin, true);
+	CHECK(near(centered.scale, top.scale));
+
+	// 上へ寄せると、上段のマスの上端が領域の上端に接し、余りはすべて下に残る。
+	const Vec2 first = core::sectionSlotCenter(top, 0);
+	CHECK(near(first.y + (top.cell.y / 2.0), top.area.max.y));
+	const Vec2 lower = core::sectionSlotCenter(top, top.columns);
+	const double spare = (lower.y - (top.cell.y / 2.0)) - top.area.min.y;
+	CHECK(near(spare, top.area.height() - ((2.0 * top.cell.y) + core::kViewportGap)));
+	CHECK(spare > 0.0);
+
+	// 左右は変わらず中央。
+	CHECK(near(first.x, core::sectionSlotCenter(centered, 0).x));
+}
+
+TEST(InsetFrameAreaKeepsTheDrawingsInsideTheTitleBlock)
+{
+	// 用紙いっぱいの印刷可能領域に、四辺 10mm 内側の枠。並べる領域は枠からさらに
+	// kTitleBlockInset だけ内側。
+	const PaperArea frame{Vec2{-200.0, -138.5}, Vec2{200.0, 138.5}};
+	const PaperArea inside = core::insetFrameArea(a3(), frame);
+	CHECK(near(inside.min.x, -200.0 + core::kTitleBlockInset));
+	CHECK(near(inside.max.y, 138.5 - core::kTitleBlockInset));
+
+	// 印刷可能領域の方が狭い辺はそちらに従う（重なりを返す）。
+	const PaperArea narrow{Vec2{-150.0, -148.5}, Vec2{210.0, 148.5}};
+	const PaperArea both = core::insetFrameArea(narrow, frame);
+	CHECK(near(both.min.x, -150.0));
+	CHECK(near(both.max.x, 200.0 - core::kTitleBlockInset));
+
+	// 重なりが潰れるときは印刷可能領域のまま（図を並べる場所を失わない）。
+	const PaperArea tiny{Vec2{-2.0, -2.0}, Vec2{2.0, 2.0}};
+	const PaperArea kept = core::insetFrameArea(a3(), tiny);
+	CHECK(near(kept.width(), a3().width()));
+	CHECK(near(kept.height(), a3().height()));
+}
+
+TEST(TitleStripWithoutABorderReservesItsHeightAtTheBottom)
+{
+	// 実機（PR #176 round 1）の図面枠は右下の表題欄の帯だけで、仮に置いて測ると
+	// 235 × 19mm。用紙を囲む枠ではない。
+	const PaperArea strip{Vec2{-117.5, -9.5}, Vec2{117.5, 9.5}};
+	CHECK(!core::frameCoversPaper(strip, a3()));
+	// 下から「帯の高さ＋間隔 2 つ」を空け、上と左右は印刷可能領域のまま。
+	const PaperArea area = core::reserveTitleStrip(a3(), strip);
+	CHECK(near(area.min.y, a3().min.y + 19.0 + (2.0 * core::kTitleBlockInset)));
+	CHECK(near(area.max.y, a3().max.y));
+	CHECK(near(area.width(), a3().width()));
+
+	// round 1 の建物（16250 × 高さ範囲 10754）は、下を空けても 1/100・2 列に収まる。
+	const core::SectionLayout layout =
+		core::sectionLayout(Vec2{16250.0, 10754.0}, area, core::SectionBands{29.0, 3.0, 23.0, 10.0},
+							core::kSectionHeightMargin);
+	CHECK(near(layout.scale, 100.0));
+	CHECK(layout.columns == 2);
+
+	// 用紙を囲む枠（四辺 10mm 内側）は枠として扱う。
+	const PaperArea frame{Vec2{-200.0, -138.5}, Vec2{200.0, 138.5}};
+	CHECK(core::frameCoversPaper(frame, a3()));
+
+	// 空けると潰れるほど高い帯なら印刷可能領域のまま。
+	const PaperArea tall{Vec2{-10.0, -150.0}, Vec2{10.0, 150.0}};
+	CHECK(near(core::reserveTitleStrip(a3(), tall).height(), a3().height()));
 }
 
 TEST(PointsConvertToPaperMillimeters)

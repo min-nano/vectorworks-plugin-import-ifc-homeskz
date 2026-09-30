@@ -606,9 +606,11 @@ TEST(format_import_options_lists_every_role_and_marks_the_defaults)
 	CHECK(text.find("図面枠スタイル: 置かない") != std::string::npos);
 	// M31 寸法も同じく末尾に 1 行。既定は「入れない」。
 	CHECK(text.find("寸法規格: 入れない") != std::string::npos);
-	// 役割の数 ＋ 図面枠・寸法の 2 行だけ行がある（見出しの 1 行を足した数）。
+	// M34 軸組図から外す通りも末尾に 1 行。既定は「なし」（全部描く）。
+	CHECK(text.find("軸組図から外す通り: なし") != std::string::npos);
+	// 役割の数 ＋ 図面枠・寸法・外す通りの 3 行だけ行がある（見出しの 1 行を足した数）。
 	CHECK_EQ(std::ranges::count(text, '\n'),
-			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount) + 2);
+			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount) + 3);
 }
 
 TEST(format_import_options_names_the_chosen_title_block_style)
@@ -631,6 +633,17 @@ TEST(format_import_options_names_the_chosen_dimension_style)
 
 	CHECK(text.find("寸法規格: 構造図 寸法") != std::string::npos);
 	CHECK(text.find("寸法規格: 入れない") == std::string::npos);
+}
+
+TEST(format_import_options_lists_the_skipped_sections_in_name_order)
+{
+	// 外した通りは名前順に並ぶ（選んだ順に依らない）。
+	ImportOptions options;
+	options.setSkippedSections({"Y2", "X1"});
+	std::string const text = formatImportOptions(options);
+
+	CHECK(text.find("軸組図から外す通り: X1, Y2") != std::string::npos);
+	CHECK(text.find("軸組図から外す通り: なし") == std::string::npos);
 }
 
 TEST(format_import_options_says_which_roles_are_skipped)
