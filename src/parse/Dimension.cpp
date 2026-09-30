@@ -524,6 +524,24 @@ namespace HomeskzIfcImport::parse
 			std::vector<std::pair<double, double>> floorBeamTops;
 		};
 
+		// レベルに紐づくレイヤ → 何階か（1 始まり。柱の span レイヤの from と同じ数え方）。
+		// 基礎ストーリのレイヤは 0 階、軒高ストーリは最上階の 1 つ上。軸組図で、横架材を
+		// その上に立つ柱と同じ階として扱う（"2-横架材天端" の梁は 2 階の柱の足元）。
+		std::map<std::string, int> layerFloors(const std::vector<core::StoryCommand>& stories)
+		{
+			std::map<std::string, int> floors;
+			int floor = 0;
+			for (const core::StoryCommand& story : stories)
+			{
+				const bool foundation = hasLevel(story, core::kLevelGL);
+				if (!foundation)
+					++floor;
+				for (const core::LevelCommand& level : story.levels)
+					floors.emplace(level.layer, foundation ? 0 : floor);
+			}
+			return floors;
+		}
+
 		SectionHeights sectionHeights(const std::vector<core::StoryCommand>& stories)
 		{
 			SectionHeights heights;
@@ -1262,9 +1280,14 @@ namespace HomeskzIfcImport::parse
 		// 出す（利用者の指定）。
 		//   * 柱は立つ階ごとに分ける（span レイヤ "{from}to{to}-柱" の from〜to がまたぐ階。
 		//     通し柱はまたぐ階のすべてに数える）。span レイヤでない柱は 1 階とみなす。
+		//   * **紙面と平行な横架材が直交する横架材にぶつかる位置**も、その横架材の階の列の
+		//     測点にする（は通りの 5通り。利用者の指定）。沿う材の端（端点は接合点。M20）に、
+		//     同じ階の切り口があるところ。
 		//   * 上階の柱の列は、その階に**直下の階の柱と合わない柱が 1 本でもあるとき**だけ、その
-		//     階の柱すべてで作る（下の列と重なる寸法が出ても構わない。利用者の指定）。
-		//   * 小屋束の列は上階の柱の列の 1 つ外の段（どの階の小屋束もまとめて 1 列）。
+		//     階の柱すべて（＋上記のぶつかる位置）で作る（下の列と重なる寸法が出ても構わない。
+		//     利用者の指定）。合うかどうかは柱だけで見る。
+		//   * 小屋束の列は上階の柱の列の 1 つ外の段（どの階の小屋束もまとめて 1 列）。小屋束が
+		//     立つ階の**外壁芯**（その階の柱の両端）も測点に入れる（利用者の指定）。
 		//   * **部材の無い通り芯は測点にしない**（通り芯しか無い位置を測っても意味が無い）。
 		//     通り芯は測点と重なるときに値を貸すだけ（寸法の数字が通り芯の間隔ちょうどになる）。
 		std::vector<double> gridAll;
@@ -1290,20 +1313,22 @@ namespace HomeskzIfcImport::parse
 		};
 
 		std::map<int, std::vector<double>> floorColumns;
-		std::vector<double> koyazuka;
+		// 小屋束の位置と、それが立つ階（span レイヤの from。読めなければ 1 階）。
+		std::vector<std::pair<double, int>> koyazukaAt;
 		for (const core::ColumnCommand& column : document.columns)
 		{
 			if (!columnOnCutPlane(column, section))
 				continue;
 			const double a = along(column.position);
-			if (column.structuralUse == core::kStructuralUseKoyazuka)
-			{
-				koyazuka.push_back(a);
-				continue;
-			}
 			double from = 0.0;
 			double to = 0.0;
-			if (!parseSpanLayer(column.layer, from, to) || !(to > from))
+			const bool span = parseSpanLayer(column.layer, from, to) && to > from;
+			if (column.structuralUse == core::kStructuralUseKoyazuka)
+			{
+				koyazukaAt.emplace_back(a, span ? static_cast<int>(std::lround(from)) : 1);
+				continue;
+			}
+			if (!span)
 			{
 				floorColumns[1].push_back(a);
 				continue;
@@ -1314,53 +1339,106 @@ namespace HomeskzIfcImport::parse
 		}
 		for (auto& entry : floorColumns)
 			entry.second = lendGrid(std::move(entry.second));
-		koyazuka = lendGrid(std::move(koyazuka));
 		const int lowestFloor = floorColumns.empty() ? 1 : std::min(1, floorColumns.begin()->first);
-		std::vector<double> columns;
-		if (const auto lowest = floorColumns.find(lowestFloor); lowest != floorColumns.end())
-			columns = lowest->second;
+
+		// 紙面と平行な横架材が直交する横架材にぶつかる位置（階ごと）。切り口の芯は通り芯の
+		// 近く（kClusterTol 以内）なら通り芯の値を採る。
+		const std::map<std::string, int> floorsOfLayer = layerFloors(document.stories);
+		const auto floorOf = [&floorsOfLayer](const std::string& layer)
+		{
+			const auto found = floorsOfLayer.find(layer);
+			return found == floorsOfLayer.end() ? -1 : found->second;
+		};
+		std::vector<std::pair<double, int>> cuts;
+		for (const core::MemberCommand& member : document.members)
+		{
+			core::Vec2 point;
+			if (memberCrossesCutPlane(member, section, point))
+				cuts.emplace_back(along(point), floorOf(member.layer));
+		}
+		std::map<int, std::vector<double>> floorJunctions;
+		for (const core::MemberCommand& member : document.members)
+		{
+			if (!memberOnCutPlane(member, section))
+				continue;
+			const int floor = floorOf(member.layer);
+			if (floor < 0)
+				continue;
+			for (const core::Vec2& end : {member.start, member.end})
+			{
+				const double a = along(end);
+				const bool meets = std::ranges::any_of(
+					cuts, [a, floor](const std::pair<double, int>& cut)
+					{ return cut.second == floor && std::abs(cut.first - a) <= kClusterTol; });
+				if (meets)
+					floorJunctions[floor].push_back(snapWithin(a, kClusterTol));
+			}
+		}
+		// 階 floor の列の測点（柱＋ぶつかる位置）。
+		const auto floorStops = [&](int floor)
+		{
+			std::vector<double> stops;
+			if (const auto found = floorColumns.find(floor); found != floorColumns.end())
+				stops = found->second;
+			if (const auto found = floorJunctions.find(floor); found != floorJunctions.end())
+				stops.insert(stops.end(), found->second.begin(), found->second.end());
+			return mergeStops(std::move(stops));
+		};
+
+		std::vector<double> columns = floorStops(lowestFloor);
 
 		// その面の**最外周**も押さえる（利用者の指定）。柱・沿う材より外に横架材の切り口が
 		// あれば、左右それぞれ最も外の切り口の芯を下の列の測点に足す（又は通りなら 1通り〜
 		// 5通り）。間に並ぶ切り口は足さない（押さえるのは最外周だけ）。切り口の近く
 		// （kClusterTol 以内）に通り芯があれば、寸法の数字が通り芯の間隔になるよう通り芯の
 		// 値を採る。
-		bool anyCrossing = false;
-		double outerLow = 0.0;
-		double outerHigh = 0.0;
-		for (const core::MemberCommand& member : document.members)
+		if (!cuts.empty())
 		{
-			core::Vec2 point;
-			if (!memberCrossesCutPlane(member, section, point))
-				continue;
-			const double a = along(point);
-			outerLow = anyCrossing ? std::min(outerLow, a) : a;
-			outerHigh = anyCrossing ? std::max(outerHigh, a) : a;
-			anyCrossing = true;
+			const auto [lowest, highest] =
+				std::ranges::minmax_element(cuts, {}, &std::pair<double, int>::first);
+			if (lowest->first < low - kDimensionMergeTol)
+				columns.push_back(snapWithin(lowest->first, kClusterTol));
+			if (highest->first > high + kDimensionMergeTol)
+				columns.push_back(snapWithin(highest->first, kClusterTol));
 		}
-		if (anyCrossing && outerLow < low - kDimensionMergeTol)
-			columns.push_back(snapWithin(outerLow, kClusterTol));
-		if (anyCrossing && outerHigh > high + kDimensionMergeTol)
-			columns.push_back(snapWithin(outerHigh, kClusterTol));
 		const std::vector<double> detail = mergeStops(std::move(columns));
 		if (detail.size() >= 2)
 			out.push_back(makeChain(DimensionAxis::Horizontal, detail, bottom, -1, 0));
 
-		// 図の上: 根元は建物の上端（全軸組図で共通。通り芯の符号の直下に揃う）。
+		// 図の上: 根元は建物の上端（全軸組図で共通）。
 		int topTier = 0;
 		for (const auto& [floor, stops] : floorColumns)
 		{
-			if (floor <= lowestFloor || stops.size() < 2)
+			if (floor <= lowestFloor)
 				continue;
 			const auto lower = floorColumns.find(floor - 1);
 			const bool mismatched = lower == floorColumns.end() ||
 									std::ranges::any_of(stops, [&lower](double v)
 														{ return !nearAny(lower->second, v); });
-			if (mismatched)
-				out.push_back(makeChain(DimensionAxis::Horizontal, stops, top, 1, topTier++));
+			const std::vector<double> upper = floorStops(floor);
+			if (mismatched && upper.size() >= 2)
+				out.push_back(makeChain(DimensionAxis::Horizontal, upper, top, 1, topTier++));
 		}
-		if (koyazuka.size() >= 2)
-			out.push_back(makeChain(DimensionAxis::Horizontal, koyazuka, top, 1, topTier++));
+		if (!koyazukaAt.empty())
+		{
+			std::vector<double> posts;
+			for (const auto& [a, floor] : koyazukaAt)
+			{
+				posts.push_back(a);
+				// 外壁芯＝小屋束が立つ階の柱の両端（その階に柱が無ければ下の列の両端）。
+				const auto found = floorColumns.find(floor);
+				const std::vector<double>& walls =
+					found != floorColumns.end() && !found->second.empty() ? found->second : detail;
+				if (!walls.empty())
+				{
+					posts.push_back(walls.front());
+					posts.push_back(walls.back());
+				}
+			}
+			posts = lendGrid(std::move(posts));
+			if (posts.size() >= 2)
+				out.push_back(makeChain(DimensionAxis::Horizontal, posts, top, 1, topTier++));
+		}
 
 		// 縦: GL・FL・軒高と、そこからの標準の横架材天端 → GL・FL・軒高の間隔。図の左に出す。
 		for (DimensionChainCommand& chain :
