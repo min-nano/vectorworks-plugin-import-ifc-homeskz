@@ -453,20 +453,21 @@ namespace HomeskzIfcImport::parse
 
 			// 上端。両端とも取れて、両端を結ぶ直線がどの点でも上の材の下端に載るなら
 			// その直線（登り梁・水平の梁）。載らない（段差梁）・片端しか取れないなら、
-			// 取れた点のうち最も低い値で水平にそろえる。
+			// 取れた点のうち**最も高い**値で水平にそろえる——梁下に隙間が空く表現は不可で、
+			// 低い側の梁とは重なってよい（実機確認でのご指示）。
 			double topAtStart = layerZ + wall.topHeight;
 			double topAtEnd = layerZ + wall.topHeightEnd;
 			const std::optional<double> upperStart = samples.front().upper;
 			const std::optional<double> upperEnd = samples.back().upper;
 			bool straight = upperStart.has_value() && upperEnd.has_value();
-			std::optional<double> lowestUpper;
+			std::optional<double> highestUpper;
 			for (std::size_t k = 0; k < samples.size(); ++k)
 			{
 				const std::optional<double>& upper = samples[k].upper;
 				if (!upper.has_value())
 					continue;
-				if (!lowestUpper.has_value() || *upper < *lowestUpper)
-					lowestUpper = upper;
+				if (!highestUpper.has_value() || *upper > *highestUpper)
+					highestUpper = upper;
 				if (straight)
 				{
 					const double ratio = (points[k] - clearStart) / (clearEnd - clearStart);
@@ -480,10 +481,10 @@ namespace HomeskzIfcImport::parse
 				topAtStart = *upperStart;
 				topAtEnd = *upperEnd;
 			}
-			else if (lowestUpper.has_value())
+			else if (highestUpper.has_value())
 			{
-				topAtStart = *lowestUpper;
-				topAtEnd = *lowestUpper;
+				topAtStart = *highestUpper;
+				topAtEnd = *highestUpper;
 			}
 
 			// 下端。PIO は下端を 1 つしか持たないので、取れた点のうち最も高い天端

@@ -652,7 +652,7 @@ TEST(shear_wall_fit_follows_a_sloped_beam_running_the_other_way)
 TEST(shear_wall_fit_levels_the_top_under_a_stepped_beam)
 {
 	// 上の梁が内法の途中（s = 612）でせいを変える（240 → 105）段差梁。上辺は 1 本の直線で
-	// 表せないので、低い方（天端 3420 − 240 = 3180）で水平にそろえる（軸組の外へ出さない）。
+	// 表せないので、高い方（天端 3420 − 105 = 3315）で水平にそろえる（梁下に隙間を空けない）。
 	// 実データ: グレー本モデルプラン1 の 2 階 (−5005, 455)→(−5005, 1820)。
 	std::vector<ShearWallCommand> walls{fitWall()};
 	const std::vector<core::MemberCommand> members{
@@ -660,23 +660,23 @@ TEST(shear_wall_fit_levels_the_top_under_a_stepped_beam)
 		fitBeam({-500.0, 0.0}, {612.0, 0.0}, 3420.0, 3420.0, 240.0),
 		fitBeam({612.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 105.0)};
 	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
-	CHECK(near(walls[0].topHeight, 2754.0, 1e-6));
-	CHECK(near(walls[0].topHeightEnd, 2754.0, 1e-6));
+	CHECK(near(walls[0].topHeight, 2889.0, 1e-6));
+	CHECK(near(walls[0].topHeightEnd, 2889.0, 1e-6));
 }
 
-TEST(shear_wall_fit_levels_the_top_under_a_beam_dropped_mid_span)
+TEST(shear_wall_fit_levels_the_top_under_a_beam_raised_mid_span)
 {
-	// 内法の両端では同じ高さでも、途中に下がった梁がある（両端の直線が梁を割り込む）なら
-	// 水平にそろえるのは下がった梁の下端。
+	// 内法の両端では同じ高さでも、途中で梁の下端が上がる（両端の直線が梁から外れる）なら
+	// 段差とみなし、水平にそろえるのは上がった梁の下端（梁下に隙間を空けない）。
 	std::vector<ShearWallCommand> walls{fitWall()};
 	const std::vector<core::MemberCommand> members{
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 426.0, 426.0, 105.0),
 		fitBeam({-500.0, 0.0}, {700.0, 0.0}, 3420.0, 3420.0, 150.0),
-		fitBeam({700.0, 0.0}, {1100.0, 0.0}, 3300.0, 3300.0, 150.0),
+		fitBeam({700.0, 0.0}, {1100.0, 0.0}, 3420.0, 3420.0, 105.0),
 		fitBeam({1100.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 150.0)};
 	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
-	CHECK(near(walls[0].topHeight, 3150.0 - 426.0, 1e-6));
-	CHECK(near(walls[0].topHeightEnd, 3150.0 - 426.0, 1e-6));
+	CHECK(near(walls[0].topHeight, 3315.0 - 426.0, 1e-6));
+	CHECK(near(walls[0].topHeightEnd, 3315.0 - 426.0, 1e-6));
 }
 
 TEST(shear_wall_fit_ignores_beams_off_the_axis_or_far_away)
