@@ -746,17 +746,29 @@ namespace HomeskzIfcImport::parse
 			written.remember(axis, values, cores);
 		}
 
+		// 一続きに割った通りと、その置き場所。placed の WallLineStops::line は eastWest /
+		// northSouth の要素を指すので、**同じ入れ物で生かす**（ムーブしても要素の番地は
+		// 変わらない）。
+		struct RunLayout
+		{
+			std::vector<WallLine> eastWest;
+			std::vector<WallLine> northSouth;
+			std::vector<PlacedRun> placed;
+		};
+
 		// 線材を通りに集め、一続きに割って置き場所を決める（基礎伏図・床伏図・小屋伏図に共通）。
-		std::vector<PlacedRun> placeRuns(const std::vector<LineSegment>& segments,
-										 const std::vector<core::Vec2>& points,
-										 const std::vector<core::GridCommand>& grids,
-										 const core::Vec2& center)
+		RunLayout placeRuns(const std::vector<LineSegment>& segments,
+							const std::vector<core::Vec2>& points,
+							const std::vector<core::GridCommand>& grids, const core::Vec2& center)
 		{
 			const std::vector<WallLine> eastWestLines = collectWallLines(segments, true);
 			const std::vector<WallLine> northSouthLines = collectWallLines(segments, false);
-			return placeFoundationRuns(splitIntoRuns(eastWestLines, northSouthLines),
-									   splitIntoRuns(northSouthLines, eastWestLines), points, grids,
-									   center);
+			RunLayout layout;
+			layout.eastWest = splitIntoRuns(eastWestLines, northSouthLines);
+			layout.northSouth = splitIntoRuns(northSouthLines, eastWestLines);
+			layout.placed =
+				placeFoundationRuns(layout.eastWest, layout.northSouth, points, grids, center);
+			return layout;
 		}
 
 		// 内部の通りを、図の中心から遠い（外側の）順に並べる。
@@ -804,7 +816,8 @@ namespace HomeskzIfcImport::parse
 							const core::Vec2& max)
 		{
 			const core::Vec2 center{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
-			const std::vector<PlacedRun> runs = placeRuns(segments, points, grids, center);
+			const RunLayout layout = placeRuns(segments, points, grids, center);
+			const std::vector<PlacedRun>& runs = layout.placed;
 
 			// 外周の 2 段目より外: 四辺とも外側に面する立上りの「芯の列」（取り合う立上りの芯と
 			// 端。1 段目と同じなら重ねない）、上と右はその外に全長。
@@ -945,7 +958,8 @@ namespace HomeskzIfcImport::parse
 						  const core::Vec2& max)
 		{
 			const core::Vec2 center{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
-			const std::vector<PlacedRun> runs = placeRuns(segments, points, grids, center);
+			const RunLayout layout = placeRuns(segments, points, grids, center);
+			const std::vector<PlacedRun>& runs = layout.placed;
 			std::vector<DimensionChainCommand> out;
 			WrittenSegments written;
 
