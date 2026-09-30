@@ -14,6 +14,7 @@
 #include "core/FeedbackSession.h"
 #include "core/ImportOptions.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
@@ -64,6 +65,8 @@ namespace
 		session.options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
 		// M34 軸組図から外す通り（重なった図番の "(2)" も含めて）。
 		session.options.setSkippedSections({"X1", "1(2)", "又い"});
+		// 垂木の断面（端数付きの寸法も運べること）。
+		session.options.setRafterSize(60.5, 105.0);
 		return session;
 	}
 
@@ -210,6 +213,9 @@ TEST(feedback_session_round_trips_through_text)
 	// M34 外した通りも運ばれる（落ちると 2 周目以降は外したはずの通りまで描く）。
 	CHECK(after.options.skippedSections == before.options.skippedSections);
 	CHECK_EQ(after.options.skippedSections.size(), std::size_t(3));
+	// 垂木の断面も運ばれる（落ちると 2 周目以降は既定の 45×45 で描く）。
+	CHECK(std::abs(after.options.rafterWidth - 60.5) < 1e-9);
+	CHECK(std::abs(after.options.rafterHeight - 105.0) < 1e-9);
 }
 
 TEST(feedback_session_without_a_title_block_line_places_none)
@@ -224,6 +230,17 @@ TEST(feedback_session_without_a_title_block_line_places_none)
 	CHECK(session.options.skippedSections.empty());
 	// 伏図のまとめ方の行が無い記憶は**まとめない**と読む。
 	CHECK(session.options.mergedPlanLevels.empty());
+	// 垂木の断面の行が無い記憶は**既定の 45×45** と読む。
+	CHECK(std::abs(session.options.rafterWidth - 45.0) < 1e-9);
+	CHECK(std::abs(session.options.rafterHeight - 45.0) < 1e-9);
+}
+
+TEST(feedback_session_keeps_the_default_for_unreadable_rafter_lines)
+{
+	// 読めない値の寸法だけ既定のまま（もう一方は読んだ値）。
+	const FeedbackSession session = parseFeedbackSession("rafter.width=abc\nrafter.height=90\n");
+	CHECK(std::abs(session.options.rafterWidth - 45.0) < 1e-9);
+	CHECK(std::abs(session.options.rafterHeight - 90.0) < 1e-9);
 }
 
 TEST(feedback_session_skips_unreadable_merge_lines)

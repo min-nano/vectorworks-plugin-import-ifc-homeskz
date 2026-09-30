@@ -205,4 +205,7 @@ namespace HomeskzIfcImport::parse
 
 	// formatImportOptions が軸組図から外す通りの行に付ける見出し（M34）。
 	inline constexpr const char* kSkippedSectionsOptionLabel = "軸組図から外す通り: ";
+
+	// formatImportOptions が垂木の断面の行に付ける見出し。
+	inline constexpr const char* kRafterSizeOptionLabel = "垂木の断面: ";
 } // namespace HomeskzIfcImport::parse
