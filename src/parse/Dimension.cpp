@@ -667,6 +667,62 @@ namespace HomeskzIfcImport::parse
 			}
 			return true;
 		}
+
+		// 軸組図 1 枚に映る架構の上端（絶対 Z）。上の寸法の列の根元にする——全軸組図で共通の
+		// 建物の上端にすると、低い通り（い通り・ち通り）で寸法が図から離れすぎた（実機）。
+		// 見るのは切断面に乗る柱・横架材と、切断面を横切る横架材・垂木の切り口の高さ
+		// （傾いた材は切り口の位置で内挿する）。何も無ければ fallback。
+		double sectionContentTop(const core::Document& document,
+								 const core::SectionCommand& section, double fallback)
+		{
+			const bool alongX = section.direction == core::SectionDirection::X;
+			const auto cutOf = [alongX](const core::Vec2& p) { return alongX ? p.x : p.y; };
+			const double cut = cutOf(section.lineStart);
+			bool any = false;
+			double top = fallback;
+			const auto take = [&](double z)
+			{
+				top = any ? std::max(top, z) : z;
+				any = true;
+			};
+			// 端 start→end の材が切断面を横切る（または乗る）なら、その高さ（z0→z1 の内挿。
+			// 乗るなら高い方）を返す。
+			const auto cutHeight =
+				[&](const core::Vec2& start, const core::Vec2& end, double z0, double z1, double& z)
+			{
+				const double a = cutOf(start);
+				const double b = cutOf(end);
+				if (std::min(a, b) > cut + kClusterTol || std::max(a, b) < cut - kClusterTol)
+					return false;
+				if (std::abs(b - a) <= kClusterTol)
+				{
+					z = std::max(z0, z1);
+					return true;
+				}
+				const double t = std::clamp((cut - a) / (b - a), 0.0, 1.0);
+				z = z0 + ((z1 - z0) * t);
+				return true;
+			};
+			for (const core::ColumnCommand& column : document.columns)
+			{
+				if (columnOnCutPlane(column, section))
+					take(core::columnDrawnTop(column));
+			}
+			for (const core::MemberCommand& member : document.members)
+			{
+				double z = 0.0;
+				if (cutHeight(member.start, member.end, member.elevation, member.endElevation, z))
+					take(z);
+			}
+			// 垂木の elevation は下面なので背を足す。
+			for (const core::RafterCommand& rafter : document.rafters)
+			{
+				double z = 0.0;
+				if (cutHeight(rafter.start, rafter.end, rafter.elevation, rafter.endElevation, z))
+					take(z + rafter.height);
+			}
+			return top;
+		}
 	} // namespace
 
 	std::vector<double> mergeStops(std::vector<double> values)
@@ -1266,9 +1322,10 @@ namespace HomeskzIfcImport::parse
 		double top = 0.0;
 		if (!core::sectionHeightRange(document, bottom, top))
 			return {};
-		// 高さ範囲は上下に余白を足してあるので、建物の下端・上端へ戻す。
+		// 高さ範囲は上下に余白を足してあるので、建物の下端へ戻す。上はこの図に映る架構の
+		// 上端（通りごと）。
 		bottom += core::kSectionHeightMargin;
-		top -= core::kSectionHeightMargin;
+		top = sectionContentTop(document, section, top - core::kSectionHeightMargin);
 
 		const double origin = core::sectionAlongOrigin(section);
 		const auto along = [&](const core::Vec2& plan)
@@ -1395,7 +1452,7 @@ namespace HomeskzIfcImport::parse
 		if (detail.size() >= 2)
 			out.push_back(makeChain(DimensionAxis::Horizontal, detail, bottom, -1, 0));
 
-		// 図の上: 根元は建物の上端（全軸組図で共通）。
+		// 図の上: 根元はこの図に映る架構の上端（sectionContentTop）。
 		int topTier = 0;
 		for (const auto& [floor, stops] : floorColumns)
 		{

@@ -859,10 +859,9 @@ TEST(SectionDimensionsPutUpperColumnsAndKoyazukaAboveTheDrawing)
 	if (bottom != nullptr)
 		CHECK(sameValues(bottom->stops, {-5000.0, -4090.0, -3180.0}));
 
-	double start = 0.0;
-	double end = 0.0;
-	CHECK(core::sectionHeightRange(document, start, end));
-	const double top = end - core::kSectionHeightMargin;
+	// 上の列の根元はこの図に映る架構の上端＝切断面に乗る母屋の天端 4500（建物全体の上端＝
+	// 軒高 6000 ではない）。
+	const double top = 4500.0;
 	// 上の 1 段目: 2 階の柱すべて（1 階と重なる 0・1820 も含む）。2 段目: 小屋束に、
 	// 小屋束が立つ 2 階の外壁芯（2 階の柱の両端 0・1820）を足したもの。
 	const DimensionChainCommand* upper = findChain(chains, DimensionAxis::Horizontal, 1, 0);
@@ -956,6 +955,28 @@ TEST(SectionDimensionsStopAtTheOuterWallNotTheNearbyGrid)
 	CHECK(bottom != nullptr);
 	if (bottom != nullptr)
 		CHECK(sameValues(bottom->stops, {-5000.0, -4090.0, -3225.0}));
+}
+
+TEST(SectionTopDimensionsSitOnThisSectionsFrame)
+{
+	// 切断面を横切る傾いた材（棟へ向かう登り梁。y=0〜1820 の断面を x=−910→910 で横切り、
+	// 天端 4000→5000）の切り口の高さ（中央＝4500）と、切断面に乗る材の天端の高い方が
+	// 根元になる。切断面から離れた高い材（y=9000 の 7000）は数えない。
+	Document document = sectionDocument();
+	document.members.erase(document.members.begin() + 2); // 母屋（4500）を外す
+	MemberCommand rising =
+		makeMember("2-横架材天端", Vec2{-910.0, 900.0}, Vec2{910.0, 900.0}, 4000.0);
+	rising.endElevation = 5000.0;
+	document.members.push_back(rising);
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{3000.0, 9000.0}, Vec2{4000.0, 9000.0}, 7000.0));
+	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 455.0}));
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+	const DimensionChainCommand* upper = findChain(chains, DimensionAxis::Horizontal, 1, 0);
+	CHECK(upper != nullptr);
+	if (upper != nullptr)
+		CHECK(near(upper->base, 4500.0));
 }
 
 TEST(SectionLevelMarksNameGlFloorsAndEaves)
