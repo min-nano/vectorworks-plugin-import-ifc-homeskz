@@ -956,6 +956,17 @@ namespace HomeskzIfcImport::parse
 		// 標準の横架材天端と違う高さの横架材: 標準の天端からその材の天端までを、材の中央で
 		// 押さえる。対象は横架材レベル（横架材天端・軒高）に置かれた水平な材だけ——母屋・
 		// 登り梁は高さがもともと材ごとに違う（標準の天端という考えが無い）。
+		// 同じ高さの材が並ぶと材の数だけ同じ寸法が並ぶので、測る区間（標準の天端〜材の天端）
+		// が同じ材は 1 本にまとめ、そのうち最も長い材の中央に置く（まとめた材どうしが離れて
+		// いても、置いた位置の下には必ずその高さの材がある）。
+		struct OffStandard
+		{
+			double low = 0.0;
+			double high = 0.0;
+			double length = 0.0;
+			double middle = 0.0;
+		};
+		std::vector<OffStandard> offStandards;
 		const std::map<std::string, LayerLevel> levels = layerLevels(document.stories);
 		for (const core::MemberCommand& member : document.members)
 		{
@@ -971,10 +982,40 @@ namespace HomeskzIfcImport::parse
 			const double standard = level->second.z;
 			if (std::abs(memberTop - standard) <= kDimensionMergeTol)
 				continue;
-			const double middle = (along(member.start) + along(member.end)) / 2.0;
-			out.push_back(makeChain(DimensionAxis::Vertical,
-									{std::min(memberTop, standard), std::max(memberTop, standard)},
-									middle, 1, 0));
+			const double a = along(member.start);
+			const double b = along(member.end);
+			offStandards.push_back(OffStandard{std::min(memberTop, standard),
+											   std::max(memberTop, standard), std::abs(b - a),
+											   (a + b) / 2.0});
+		}
+		// 区間 → 長い順 → 位置の順に並べ、区間ごとの先頭（最も長い材）だけを残す
+		// （入力の並びに依らない）。
+		std::ranges::sort(offStandards,
+						  [](const OffStandard& p, const OffStandard& q)
+						  {
+							  if (p.low != q.low)
+								  return p.low < q.low;
+							  if (p.high != q.high)
+								  return p.high < q.high;
+							  if (p.length != q.length)
+								  return p.length > q.length;
+							  return p.middle < q.middle;
+						  });
+		std::vector<OffStandard> kept;
+		for (const OffStandard& candidate : offStandards)
+		{
+			const bool duplicate = std::ranges::any_of(
+				kept,
+				[&candidate](const OffStandard& k)
+				{
+					return std::abs(k.low - candidate.low) <= kDimensionMergeTol &&
+						   std::abs(k.high - candidate.high) <= kDimensionMergeTol;
+				});
+			if (duplicate)
+				continue;
+			kept.push_back(candidate);
+			out.push_back(makeChain(DimensionAxis::Vertical, {candidate.low, candidate.high},
+									candidate.middle, 1, 0));
 		}
 		return out;
 	}

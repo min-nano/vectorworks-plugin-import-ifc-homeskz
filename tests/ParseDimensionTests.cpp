@@ -32,6 +32,7 @@
 #include "parse/BuildDocument.h"
 #include "parse/Dimension.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -669,6 +670,60 @@ TEST(SectionDimensionsCoverColumnsLevelsAndOffStandardBeams)
 	CHECK(offStandard != nullptr);
 	if (offStandard != nullptr)
 		CHECK(isChain(*offStandard, DimensionAxis::Vertical, {3164.0, 3264.0}, -4545.0, 1, 0));
+	CHECK(chains.size() == 4);
+}
+
+TEST(SectionDimensionsMergeOffStandardBeamsOfTheSameHeight)
+{
+	// 標準より 100 低い梁が 2 本（0〜910 と 910〜1820）。寸法は 3164〜3264 の 1 本だけに
+	// まとまる。並びを変えても同じ結果になる。
+	Document document = sectionDocument();
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{0.0, 910.0}, Vec2{0.0, 1820.0}, 3164.0));
+	// 別の高さ（標準より 200 低い）は別の寸法になる。
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{0.0, 910.0}, Vec2{0.0, 1820.0}, 3064.0));
+	const SectionCommand section = xSection();
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, section);
+
+	std::vector<const DimensionChainCommand*> offStandard;
+	for (const DimensionChainCommand& chain : chains)
+	{
+		if (chain.axis == DimensionAxis::Vertical && chain.side == 1)
+			offStandard.push_back(&chain);
+	}
+	CHECK(offStandard.size() == 2);
+	if (offStandard.size() == 2)
+	{
+		CHECK(isChain(*offStandard[0], DimensionAxis::Vertical, {3064.0, 3264.0}, -3635.0, 1, 0));
+		// 同じ長さの材が 2 本なら位置の小さい方（0〜910 の中央 −4545）。
+		CHECK(isChain(*offStandard[1], DimensionAxis::Vertical, {3164.0, 3264.0}, -4545.0, 1, 0));
+	}
+
+	// 並びを逆にしても同じ。
+	Document reversed = document;
+	std::ranges::reverse(reversed.members);
+	const std::vector<DimensionChainCommand> again =
+		parse::buildSectionDimensionCommands(reversed, section);
+	CHECK(again.size() == chains.size());
+	for (std::size_t i = 0; i < again.size() && i < chains.size(); ++i)
+		CHECK(isChain(again[i], chains[i].axis, chains[i].stops, chains[i].base, chains[i].side,
+					  chains[i].tier));
+}
+
+TEST(SectionDimensionsPlaceMergedBeamHeightOnTheLongestMember)
+{
+	// 同じ高さの材（0〜910 と 0〜1820）のうち、最も長い材の中央に置く。
+	Document document = sectionDocument();
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3164.0));
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+	const DimensionChainCommand* offStandard = findChain(chains, DimensionAxis::Vertical, 1, 0);
+	CHECK(offStandard != nullptr);
+	if (offStandard != nullptr)
+		CHECK(isChain(*offStandard, DimensionAxis::Vertical, {3164.0, 3264.0}, -4090.0, 1, 0));
 	CHECK(chains.size() == 4);
 }
 
