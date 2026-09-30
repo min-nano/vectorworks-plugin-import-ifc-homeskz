@@ -42,8 +42,9 @@ namespace HomeskzIfcImport::draw
 		// VW 2026 の既定は 2 のほう（旧版 "Drawing Label" は内部 ID 96。Findings）。
 		constexpr const char* kDrawingLabelPlugin = "Drawing Label2";
 
-		// 図面タイトルのパラメータ（universal 名。Findings「パラメータ（16 件）」）。
+		// 図面タイトル・図番のパラメータ（universal 名。Findings「パラメータ（16 件）」）。
 		constexpr const char* kFieldTitle = "Title";
+		constexpr const char* kFieldNumber = "Drawing";
 
 		// タイトルの文字スタイル（要件）。**図面にあれば当て、無ければ大きさだけを直接
 		// 与える**——テンプレート由来の資源なので作らない（データタグの "寸法(6pt)" と同じ）。
@@ -180,13 +181,12 @@ namespace HomeskzIfcImport::draw
 			return gSDK->GetPluginObjectStyle(label, style) && style == 0;
 		}
 
-		// 図面タイトルを書く。書けたら true。
-		bool WriteTitle(MCObjectHandle label, const std::string& title)
+		// 文字の欄（図面タイトル・図番）を書く。書けたら true。
+		bool WriteField(MCObjectHandle label, const char* field, const std::string& value)
 		{
 			try
 			{
-				VWParametricObj(label).SetParamValue(TXString(kFieldTitle),
-													 TXString(title.c_str()));
+				VWParametricObj(label).SetParamValue(TXString(field), TXString(value.c_str()));
 				return true;
 			}
 			catch (...)
@@ -217,8 +217,8 @@ namespace HomeskzIfcImport::draw
 	}
 
 	bool drawSectionLabel(MCObjectHandle viewport, MCObjectHandle sheetLayer,
-						  const std::string& title, const core::Vec2& anchor, double drop,
-						  DrawingLabelCounts& counts)
+						  const std::string& title, const std::string& number,
+						  const core::Vec2& anchor, double drop, DrawingLabelCounts& counts)
 	{
 		if (viewport == nil)
 			return false;
@@ -264,6 +264,17 @@ namespace HomeskzIfcImport::draw
 		if (!RemoveStyle(label))
 			++counts.styleLeft;
 
+		// **注釈へ入れる前に図番を書く**。ラベルは作った瞬間に図番（Drawing）へ「その
+		// シートレイヤで使われていない最小の正整数」を自動で持ち（Findings「図番（Drawing）の
+		// 自動採番」）、注釈へ入れた瞬間に**ラベルの値がビューポートへ押し込まれる**
+		// （Title と同じ向き。Findings「置いたときに流れるのは『ラベル → ビューポート』」。
+		// 図番はビューポートの 1033 と対）。書かずに入れると、parse::uniqueSectionNumbers で
+		// 一意にした図番がラベルの自動の番号へすり替わり、同じシートの別の軸組図の図番と
+		// ぶつかって「その図番は…すでに使用中です」のモーダルが出る（parse 側で一意に
+		// しても実機で出続けた。自動の番号は数として読める図番しか「使用中」に数えない
+		// ので、当たるかどうかは図面ごとの図番の並びで変わる）。
+		WriteField(label, kFieldNumber, number);
+
 		bool annotated = false;
 		{
 			VW_DRAW_TIME("図面ラベル:注釈へ移す");
@@ -280,7 +291,10 @@ namespace HomeskzIfcImport::draw
 		// タイトルが入っていることがある（Findings「ビューポートとの紐づき」）。リンクは
 		// 生きたままなので、後から利用者がビューポートの図面タイトルを変えればラベルも
 		// 追随する。書けなくてもラベルは残す（VW がリンクで入れた値が出る）。
-		WriteTitle(label, title);
+		// 図番も念のため書き直す（入れた後にリンクが別の値を入れていても、ビューポートと
+		// 同じ図番へ揃える。図番はレイアウトから落としてあるので絵には出ない）。
+		WriteField(label, kFieldTitle, title);
+		WriteField(label, kFieldNumber, number);
 		{
 			VW_DRAW_TIME("図面ラベル:リセット");
 			gSDK->ResetObject(label);

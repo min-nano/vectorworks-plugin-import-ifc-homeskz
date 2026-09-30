@@ -356,6 +356,7 @@ namespace HomeskzIfcImport::draw
 			// 最下点の左右の中央（注釈空間。core::sectionLabelAnchor）で、そこから図の下の
 			// 寸法の帯の外まで下げる（core::sectionLabelDrop）。
 			drawSectionLabel(viewport, sheetLayer, command.viewport.drawingTitle,
+							 command.viewport.drawingNumber,
 							 core::sectionLabelAnchor(command, startHeight),
 							 core::sectionLabelDrop(command.viewport), labels);
 			drawViewportTags(viewport, command.viewport, members, tags);
