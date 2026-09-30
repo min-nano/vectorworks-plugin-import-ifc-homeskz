@@ -96,10 +96,6 @@ namespace HomeskzIfcImport::draw
 		{
 			if (gSDK->AddViewportAnnotationObject(viewport, object))
 				return true;
-			// 消す前に「自分が追加したもの」と申告する（下の PlaceChain の繋ぐ前と同じ理由。
-			// 申告しないと、取り消したときに undo 記録つきの削除が戻ってアクティブレイヤへ
-			// 復活する）。
-			RecordCreatedObject(object);
 			gSDK->DeleteObject(object, true);
 			return false;
 		}
@@ -238,19 +234,6 @@ namespace HomeskzIfcImport::draw
 					inCurrent = 1;
 					continue;
 				}
-				// **繋ぐ前に、繋がれる 2 つを「自分が追加したもの」と申告する。**
-				// CreateChainDimension は渡した 2 つ（直線寸法／繋ぎかけの連続寸法）を
-				// **undo 記録つきで削除して**新しい連続寸法を作るので、申告しないと取り消した
-				// ときに削除だけが戻り、**作った時点のアクティブレイヤへ寸法が復活する**
-				// （実機の指摘: テンプレートに最初から在った「共通」へ伏図の寸法が残った。
-				// 伏図の寸法は注釈へ移す前、デザインレイヤがアクティブなうちに作る）。通り芯の
-				// パス（draw/Grid の RecordCreatedObject）と同じ作法で、申告しておけば
-				// 取り消しで復活したそれが改めて消える。注釈へ入る最後の 1 つは申告しない
-				// ——シートレイヤごと消えるものを二重に登録しない（DrawUtil.h「なぜレイヤを
-				// 記録するのか」）。繋げなかったとき（joined が nil）だけは申告済みの 2 つが
-				// 生き残って注釈へ入るが、繋げたかどうかは呼ぶまで分からないので受け入れる。
-				RecordCreatedObject(current);
-				RecordCreatedObject(dimension);
 				const MCObjectHandle joined = gSDK->CreateChainDimension(current, dimension);
 				if (joined == nil)
 				{
