@@ -39,9 +39,18 @@
 //	draw/DrawUtil.h の SheetPaperArea）。**印刷可能領域の中心ではない**——余白が左右／上下で
 //	違う用紙ではそこが原点からずれるが、図面枠は用紙に属するものなので用紙に合わせる。
 //
-//	【ビューポートより先に置く】オブジェクトは後から作ったものが手前に来るので、図面枠は
-//	**シートレイヤを用意した直後**（ビューポート・凡例より前）に置く。呼び出し側
-//	（draw/Sheet・draw/Section）がその順を守る。
+//	【★ビューポートを仕上げた後に置き、最背面へ回す】図面枠の「縮尺」欄は、**作ったときに**
+//	用紙に載っているビューポートの縮尺を拾い、その後は勝手に取り直さない（ビューポートは
+//	1 枚の用紙へ何枚でも置けるので、どれが変わっても枠は追わない）。当初はオブジェクトの
+//	重なり（後から作ったものが手前に来る）だけを見て**ビューポートより先に**置いていたが、
+//	それでは縮尺欄が 1:1 のまま残り、スタイルの流し込み（`UpdateStyledObjects`）も
+//	1 つずつの `ResetObject` も効かなかった（実機。docs/DEV-NOTES.md M28）。そこで
+//	**ビューポートの縮尺を確定させた後**（finishTitleBlocks）に作り、重なりは
+//	`InsertObjectBefore` でシートレイヤの先頭へ差し込んで最背面へ回す（オブジェクト列は
+//	背面→前面の順。[Findings「Layers and Stories」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layers%20and%20Stories.md)
+//	のレイヤの並べ替えと同じ口）。呼び出し側（draw/Sheet・draw/Section）は、用意した
+//	シートレイヤを addTitleBlockSheet で控え、ビューポートを仕上げた後に finishTitleBlocks
+//	を呼ぶ。
 //
 //	【SDK 型を公開するヘッダ】シートレイヤのハンドルを引数に取るため、draw/Legend.h・
 //	draw/Tag.h と同じく**SDK 型を公開する共通ヘッダ**で、自分で PluginPrefix.h を
@@ -67,8 +76,8 @@ namespace HomeskzIfcImport::draw
 	// 位置がおかしいときに原因（スタイルが無い／PIO を作れない／測れない）を切り分けられる
 	// ように件数で持ち帰る（draw/Legend の LegendCounts と同じ流儀）。
 	//
-	// 呼び出し側は prepareTitleBlocks で 1 つ作り、シートレイヤごとに drawSheetTitleBlock へ
-	// 渡し、最後に finishTitleBlocks を呼ぶ。**伏図と軸組図は別々の集計を持つ**（フェーズが
+	// 呼び出し側は prepareTitleBlocks で 1 つ作り、シートレイヤごとに addTitleBlockSheet へ
+	// 渡し、ビューポートを仕上げた後に finishTitleBlocks を呼ぶ。**伏図と軸組図は別々の集計を持つ**（フェーズが
 	// 分かれており、診断行も別々に出るため）。
 	struct TitleBlockCounts
 	{
@@ -84,29 +93,28 @@ namespace HomeskzIfcImport::draw
 		std::size_t drawn = 0;	// 置けた図面枠
 		std::size_t failed = 0; // どの候補名でも PIO を作れなかったシートレイヤ
 		std::size_t placeLeft = 0; // 外形を測れず、用紙の中心へ寄せられなかった
+		std::size_t frontLeft = 0; // 最背面へ回せず、図を覆っているかもしれない
 
-		// 置いた図面枠そのもの（スタイルを流し込んでから測って動かすので覚えておく）。
-		std::vector<MCObjectHandle> objects;
-		// もう図面枠を置いたシートレイヤ。**軸組図は同じシートレイヤへ複数の命令が載る**
-		// ので、これが無いと 1 枚の用紙に図面枠が何重にも積まれる（draw/Section）。
+		// 図面枠を置くシートレイヤ（控えた順）。**軸組図は同じシートレイヤへ複数の命令が
+		// 載る**ので、重ねて控えない（1 枚の用紙に図面枠が何重にも積まれないように）。
 		std::vector<MCObjectHandle> sheets;
 	};
 
 	// 命令セットの図面枠の設定を読み、スタイルを解決する。置かない（スタイル名が空・
 	// その名前のスタイルが図面に無い）ときは styleRef が 0 のまま返り、以降の
-	// drawSheetTitleBlock は何もしない。**図面枠を置くフェーズの先頭で 1 回**呼ぶ。
+	// addTitleBlockSheet / finishTitleBlocks は何もしない。**図面枠を置くフェーズの先頭で
+	// 1 回**呼ぶ。
 	TitleBlockCounts prepareTitleBlocks(const core::Document& document);
 
-	// シートレイヤ 1 枚へ図面枠を 1 つ置く（置けたら true）。同じシートレイヤへ 2 つ目は
-	// 置かない（TitleBlockCounts::sheets）。**カレントレイヤをそのシートレイヤへ移す**
-	// （PIO はカレントレイヤに入るため）ので、呼び出し側は必要なら後で戻すこと。
-	//
-	// 位置合わせはまだ行わない——スタイルを流し込むまで枠の大きさが決まらないので、
-	// **測って動かすのは finishTitleBlocks**（draw/Legend の placeLegends と同じ事情）。
-	bool drawSheetTitleBlock(MCObjectHandle sheetLayer, TitleBlockCounts& counts);
+	// 図面枠を置くシートレイヤとして控える（まだ置かない。ヘッダ冒頭の ★）。同じシート
+	// レイヤは重ねて控えない（TitleBlockCounts::sheets）。
+	void addTitleBlockSheet(MCObjectHandle sheetLayer, TitleBlockCounts& counts);
 
-	// 置いた図面枠へスタイルを流し込み（`UpdateStyledObjects` を 1 回）、外形を測って
-	// 用紙の中心＝**原点**へ寄せる。**すべて置き終えてから**呼ぶ。
+	// 控えたシートレイヤへ図面枠を 1 つずつ置き、スタイルを流し込み（`UpdateStyledObjects`
+	// を 1 回）、最背面へ回し、外形を測って用紙の中心＝**原点**へ寄せる。**ビューポートの
+	// 縮尺を確定させた後に**呼ぶ（縮尺欄は作ったときのビューポートの縮尺を拾う）。
+	// **カレントレイヤを動かす**（PIO はカレントレイヤに入るため）ので、呼び出し側は
+	// 後で戻すこと。
 	void finishTitleBlocks(TitleBlockCounts& counts);
 
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空）。

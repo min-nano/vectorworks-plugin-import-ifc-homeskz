@@ -5,10 +5,11 @@
 //	この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse
 //	ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	【図面枠（M28）】取り込み設定で図面枠スタイルが選ばれていれば、シートレイヤを用意した
-//	**直後**（ビューポート・凡例より前）に図面枠を 1 つ置く——後から作ったオブジェクトが
-//	手前に来るので、先に置かないと図面枠が図を覆う。置き方・スタイルの当て方・位置合わせは
-//	draw/TitleBlock が持ち、ここは「用意した各シートレイヤへ 1 つずつ」呼ぶだけ。
+//	【図面枠（M28）】取り込み設定で図面枠スタイルが選ばれていれば、各シートレイヤへ図面枠を
+//	1 つ置く。**置くのはビューポートの縮尺を確定させた後**で、置いたら最背面へ回す——先に
+//	置くと縮尺欄が 1:1 のまま残り、後に置いたままだと図を覆う。置き方・スタイルの当て方・
+//	重ね順・位置合わせは draw/TitleBlock が持ち、ここは用意した各シートレイヤを控えて、
+//	最後に仕上げを呼ぶだけ。
 //
 //	【シートレイヤに載るのはビューポートだけではない】伏図には**グラフィック凡例**
 //	（VW 標準の "GraphicLegend" PIO）も 1 つ載る（M13）。凡例はビューポート注釈では
@@ -215,7 +216,7 @@ namespace HomeskzIfcImport::draw
 			prepareGraphicLegendPlugin();
 
 		// M28 図面枠。スタイル名が空（＝置かない）か、その名前のスタイルが図面に無ければ
-		// 以降の drawSheetTitleBlock は何もしない（draw/TitleBlock.h）。
+		// 以降の addTitleBlockSheet / finishTitleBlocks は何もしない（draw/TitleBlock.h）。
 		TitleBlockCounts titleBlocks = prepareTitleBlocks(document);
 
 		// --- 1 巡目: シートレイヤ・ビューポート・凡例を作る -------------------------
@@ -246,9 +247,9 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			// M28 図面枠は**ビューポートより先**に置く（後から作ったものが手前に来るので、
-			// 後で置くと図を覆う。draw/TitleBlock.h）。
-			drawSheetTitleBlock(sheetLayer, titleBlocks);
+			// M28 図面枠を置く用紙として控える（置くのはビューポートを仕上げた後の
+			// finishTitleBlocks。draw/TitleBlock.h）。
+			addTitleBlockSheet(sheetLayer, titleBlocks);
 
 			// 用紙の大きさは**最初に用意できたシートレイヤ**から読む（どのシートも同じ用紙
 			// という前提。M18）。仮の割り付けもここで 1 回だけ作る。
@@ -446,8 +447,8 @@ namespace HomeskzIfcImport::draw
 
 		placeLegends(legends, layout.legendTopRight);
 
-		// M28 図面枠へスタイルを流し込み、用紙の中心へ寄せる（大きさはスタイルの中身が
-		// 決めるので、置き終えてからでなければ測れない。draw/TitleBlock.h）。
+		// M28 図面枠を置き、最背面へ回して用紙の中心へ寄せる。**縮尺を確定させた後**で
+		// なければ縮尺欄がビューポートの縮尺を拾わない（draw/TitleBlock.h）。
 		finishTitleBlocks(titleBlocks);
 
 		if (previousLayer != nil)

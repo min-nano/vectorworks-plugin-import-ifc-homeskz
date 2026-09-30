@@ -314,9 +314,10 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			// M28 図面枠は**ビューポートより先**に置く（後から作ったものが手前に来る。
-			// draw/TitleBlock.h）。2 枚目以降の命令が同じ用紙に載ったときは何もしない。
-			drawSheetTitleBlock(sheetLayer, titleBlocks);
+			// M28 図面枠を置く用紙として控える（置くのはビューポートを仕上げた後の
+			// finishTitleBlocks。draw/TitleBlock.h）。2 枚目以降の命令が同じ用紙に載った
+			// ときは何もしない。
+			addTitleBlockSheet(sheetLayer, titleBlocks);
 
 			const MCObjectHandle viewport =
 				CreateSectionViewport(command, sheetLayer, startHeight, endHeight);
@@ -398,7 +399,8 @@ namespace HomeskzIfcImport::draw
 			++drawn;
 		}
 
-		// M28 図面枠へスタイルを流し込み、用紙の中心へ寄せる（伏図と同じ順序）。
+		// M28 図面枠を置き、最背面へ回して用紙の中心へ寄せる（伏図と同じ順序。ビューポートを
+		// 仕上げた後でなければ縮尺欄がビューポートの縮尺を拾わない。draw/TitleBlock.h）。
 		finishTitleBlocks(titleBlocks);
 
 		if (previousLayer != nil)
