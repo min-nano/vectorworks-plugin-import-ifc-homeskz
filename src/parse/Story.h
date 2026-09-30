@@ -94,10 +94,10 @@ namespace HomeskzIfcImport::parse
 	std::string storyLayerName(std::size_t index, bool isTop, const std::string& levelType);
 
 	// 横架材の取り合い・継手・柱の上端を見るときの「その階の横架材レイヤ」。軒桁の専用
-	// レイヤ（"n-軒桁"。母屋伏図に薄く重ねるために分けた。parse/Member）を同じ階の横架材
-	// レイヤ（"n-横架材天端" / "R-軒高"）へ読み替え、それ以外はそのまま返す。**レイヤ一致で
-	// 相手を絞るところは、どれもこれを通して比べる**（通さないと軒桁と小屋梁の仕口・継手が
-	// 黙って消える）。
+	// レイヤ（"n-軒桁" / "n-軒桁(FL-872)"。母屋伏図に薄く重ねるために分けた。
+	// parse/PlanLevel）を同じ伏図レベルの横架材レイヤ（"n-横架材天端" / "R-軒高"。伏図
+	// レベルの印は残す）へ読み替え、それ以外はそのまま返す。**レイヤ一致で相手を絞るところは、
+	// どれもこれを通して比べる**（通さないと軒桁と小屋梁の仕口・継手が黙って消える）。
 	std::string beamGroupLayer(const std::string& layer);
 
 	// 階（#storeyId）に属する要素の #id を返す。IfcRelContainedInSpatialStructure
@@ -126,6 +126,7 @@ namespace HomeskzIfcImport::parse
 		double elevation = 0.0; // Elevation（ストーリ高さ。mm）
 		double beamOffset = 0.0; // 横架材天端オフセット（負値。最上階は未使用で 0）
 		bool isTop = false; // 最上階（Elevation 最大）＝「屋根」か
+		std::string name; // IfcBuildingStorey の Name（"1FL" / "2FL" / "RFL"。高さの注記の基準名）
 	};
 
 	// その階の横架材レベルの種別名。一般階は横架材天端、最上階は軒高（最上階に横架材天端

@@ -264,6 +264,11 @@ namespace HomeskzIfcImport::parse
 		}
 	} // namespace
 
+	bool isHipOrValleyName(const std::string& name)
+	{
+		return name.find("隅木") != std::string::npos || name.find("谷木") != std::string::npos;
+	}
+
 	bool isMemberElement(const Entity& element)
 	{
 		return element.type == "IFCBEAM" || element.type == "IFCMEMBER";
@@ -526,7 +531,7 @@ namespace HomeskzIfcImport::parse
 				if (j == i || !geoms[j].valid)
 					continue;
 				const MemberCommand& other = commands[j];
-				if (beamGroupLayer(command.layer) != beamGroupLayer(other.layer))
+				if (command.layer != other.layer)
 					continue;
 				if (!zOverlaps(command.elevation, command.height, other.elevation, other.height))
 					continue;
@@ -742,14 +747,6 @@ namespace HomeskzIfcImport::parse
 					elementLayer = storyLayerName(i, story.isTop, kLevelNoboribari);
 					boundLevel = kLevelNoboribari;
 				}
-				else if (memberClass == CLASS_NOKIGETA)
-				{
-					// 軒桁は母屋伏図に薄く重ねるため専用レイヤへ（core::kLevelNokigeta）。
-					// 取り合い・継手・柱の上端は同じ階の横架材と同じ群として見る
-					// （beamGroupLayer）。
-					elementLayer = storyLayerName(i, story.isTop, kLevelNokigeta);
-					boundLevel = kLevelNokigeta;
-				}
 
 				MemberCommand cmd;
 				cmd.layer = std::move(elementLayer);
@@ -763,6 +760,10 @@ namespace HomeskzIfcImport::parse
 				cmd.endElevation = endElevation;
 				// offset はレベルの絶対 Z から天端 Z までの距離。平らな梁は ≈0、段差梁は
 				// 一定値、傾斜梁は始端／終端で異なる値になる。
+				// 隅木・谷木はデータタグに高さを添えない（垂木に近い材。parse/Tag）。IFC の
+				// 種別名（"木梁:隅木・谷木:…"）で見分ける——クラスは高さから床梁・母屋へ
+				// 推定されていて、名前でしか分からない。
+				cmd.hipOrValley = isHipOrValleyName(entityName(*element));
 				cmd.startBound = StoryBoundCommand{0, boundLevel, elevation - layerElevation};
 				cmd.endBound =
 					StoryBoundCommand{0, std::move(boundLevel), endElevation - layerElevation};

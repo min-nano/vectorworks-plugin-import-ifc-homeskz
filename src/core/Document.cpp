@@ -12,8 +12,8 @@
 //	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
 //	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
-//	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み、rafterEaveEnd＝垂木の軒先
-//	側の材端）。SDK を触らないので無 SDK テストで検証できる（CLAUDE.md「テスト方針」）。
+//	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み、modifierBasePolygon＝
+//	地中梁の押し出しの基面、rafterEaveEnd＝垂木の軒先側の材端）。SDK を触らないので無 SDK テストで検証できる（CLAUDE.md「テスト方針」）。
 //
 
 #include "core/Document.h"
@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <functional>
 #include <limits>
+#include <numbers>
 #include <ranges>
 #include <string>
 #include <utility>
@@ -856,14 +857,75 @@ namespace HomeskzIfcImport::core
 		return raised;
 	}
 
+	std::vector<Vec3> modifierBasePolygon(const ModifierCommand& modifier)
+	{
+		const std::size_t count = modifier.profile.size();
+		if (count < 3)
+			return {};
+
+		// 断面 (u, v) をワールドへ写す。u 軸は走る向きを +90 度回した水平単位ベクトル
+		// （解析側 parse/Footing の groundBeamModifier の取り方と対）、v 軸はワールド Z。
+		const double phi = modifier.azimuth * std::numbers::pi / 180.0;
+		const Vec2 axis{std::cos(phi), std::sin(phi)};
+		const Vec2 width{-axis.y, axis.x};
+
+		std::vector<Vec3> vertices;
+		vertices.reserve(count);
+		for (const Vec2& p : modifier.profile)
+		{
+			vertices.push_back(Vec3{modifier.origin.x + (width.x * p.x),
+									modifier.origin.y + (width.y * p.x), modifier.origin.z + p.y});
+		}
+
+		// 1. 巻き: 面法線（Newell 法）が軸と逆を向いていたら反転する。
+		Vec3 normal{0.0, 0.0, 0.0};
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			const Vec3& a = vertices[i];
+			const Vec3& b = vertices[(i + 1) % count];
+			normal.x += (a.y - b.y) * (a.z + b.z);
+			normal.y += (a.z - b.z) * (a.x + b.x);
+			normal.z += (a.x - b.x) * (a.y + b.y);
+		}
+		if ((normal.x * axis.x) + (normal.y * axis.y) < 0.0)
+			std::ranges::reverse(vertices);
+
+		// 2. 始まり: +u へ最も向く辺（同じ向きなら低いほう）の始点を先頭へ回す。法線を軸へ
+		// 揃えた後の巻きでは、+u へ向かう辺は断面の下端側にある。
+		std::size_t start = 0;
+		double bestAlong = -std::numeric_limits<double>::infinity();
+		double bestZ = std::numeric_limits<double>::infinity();
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			const Vec3& a = vertices[i];
+			const Vec3& b = vertices[(i + 1) % count];
+			const double edgeLength = length(b - a);
+			if (edgeLength <= 0.0)
+				continue;
+			const double along = (((b.x - a.x) * width.x) + ((b.y - a.y) * width.y)) / edgeLength;
+			const double z = (a.z + b.z) / 2.0;
+			if (along > bestAlong + kModifierBaseEdgeTol ||
+				(along >= bestAlong - kModifierBaseEdgeTol && z < bestZ))
+			{
+				start = i;
+				bestAlong = along;
+				bestZ = z;
+			}
+		}
+		std::ranges::rotate(vertices, vertices.begin() + static_cast<std::ptrdiff_t>(start));
+		return vertices;
+	}
+
 	namespace
 	{
 		// スタック最下段（背面）へ回すレベル種別か。床（FL）・野地板のレイヤは伏図
 		// ビューポートで柱・梁を覆い隠さないよう全ストーリ分をまとめて背面へ集める（野地板
 		// レベルは M6 で追加済み。この並びの適用先は M13 の per-viewport 上書き。
 		// desiredStoryLayerOrder の doc コメント参照）。
-		bool isBackgroundLevel(const std::string& type)
+		bool isBackgroundLevel(const std::string& rawType)
 		{
+			// 伏図レベルの印（"FL(FL-872)"）は外して元の種別で見る（planLevelTag）。
+			const std::string type = stripPlanLevelTag(rawType);
 			return type == kLevelFL || type == kLevelNojiita;
 		}
 
@@ -873,7 +935,7 @@ namespace HomeskzIfcImport::core
 		// （desiredStoryLayerOrder の doc コメント）。
 		bool isForegroundLevel(const std::string& type)
 		{
-			return type == kLevelShearWall;
+			return stripPlanLevelTag(type) == kLevelShearWall;
 		}
 	} // namespace
 
@@ -944,6 +1006,75 @@ namespace HomeskzIfcImport::core
 				pieces.push_back(std::move(piece));
 		}
 		return pieces;
+	}
+
+	namespace
+	{
+		// 高さの符号（図面の書き方に合わせ、0 は "±"）。
+		constexpr const char* kPlanLevelPlus = "+";
+		constexpr const char* kPlanLevelMinus = "-";
+		constexpr const char* kPlanLevelZero = "±";
+
+		// 印の中身の基準の名前（一般階は FL・最上階は軒高）。
+		const char* planLevelDatumName(bool top)
+		{
+			return top ? kLevelEaves : kLevelFL;
+		}
+	} // namespace
+
+	std::string signedMillimetreText(long long deltaMm)
+	{
+		const char* sign = kPlanLevelZero;
+		if (deltaMm > 0)
+			sign = kPlanLevelPlus;
+		else if (deltaMm < 0)
+			sign = kPlanLevelMinus;
+		// 3 桁ごとのコンマは下の桁から差し込む。
+		const std::string digits = std::to_string(deltaMm < 0 ? -deltaMm : deltaMm);
+		std::string grouped;
+		for (std::size_t i = 0; i < digits.size(); ++i)
+		{
+			if (i > 0 && (digits.size() - i) % 3 == 0)
+				grouped += ',';
+			grouped += digits[i];
+		}
+		return sign + grouped;
+	}
+
+	std::string planLevelHeightText(long long heightMm, long long datumMm, bool top)
+	{
+		// 符号は必ず付ける（"FL872" と "FL-872" を読み違えない。signedMillimetreText）。
+		return std::string(planLevelDatumName(top)) + signedMillimetreText(heightMm - datumMm);
+	}
+
+	std::string planLevelTag(long long heightMm, long long datumMm, bool top)
+	{
+		return "(" + planLevelHeightText(heightMm, datumMm, top) + ")";
+	}
+
+	std::string stripPlanLevelTag(const std::string& name)
+	{
+		if (name.empty() || name.back() != ')')
+			return name;
+		const std::size_t open = name.rfind('(');
+		if (open == std::string::npos)
+			return name;
+		// 中身が「FL か軒高＋符号」で始まるものだけを印とみなす（"柱(通し)" のような
+		// 利用者の括弧を剥がさない）。
+		const std::string inner = name.substr(open + 1);
+		for (const bool top : {false, true})
+		{
+			const std::string datum = planLevelDatumName(top);
+			if (!inner.starts_with(datum))
+				continue;
+			const std::string rest = inner.substr(datum.size());
+			for (const char* sign : {kPlanLevelPlus, kPlanLevelMinus, kPlanLevelZero})
+			{
+				if (rest.starts_with(sign))
+					return name.substr(0, open);
+			}
+		}
+		return name;
 	}
 
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,

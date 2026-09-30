@@ -42,7 +42,6 @@ using HomeskzIfcImport::parse::CLASS_DOUSASHI;
 using HomeskzIfcImport::parse::CLASS_MOYA;
 using HomeskzIfcImport::parse::CLASS_MUNAGI;
 using HomeskzIfcImport::parse::CLASS_NOBORIBARI;
-using HomeskzIfcImport::parse::CLASS_NOKIGETA;
 using HomeskzIfcImport::parse::Entity;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::makeMemberId;
@@ -813,29 +812,6 @@ TEST(top_story_munagi_uses_moya_layer)
 	{
 		CHECK_EQ(members[0].layer, "R-母屋");
 		CHECK_EQ(members[0].drawClass, CLASS_MUNAGI);
-	}
-}
-
-TEST(nokigeta_uses_its_own_layer_and_level)
-{
-	// 軒桁は母屋伏図に薄く重ねるため専用レイヤ "n-軒桁" に置き、軒桁レベルへバインドする。
-	// 軒桁レベルは横架材天端（最上階は軒高）と同じ高さなので offset は変わらない。
-	StepText step;
-	const int first = makeStorey(step, "1FL", 473.0);
-	const int roof = makeStorey(step, "RFL", 5973.0);
-	BeamSpec spec;
-	spec.name = "木梁:軒桁:1_1";
-	makeBeam(step, first, spec);
-	makeBeam(step, roof, spec);
-
-	const std::vector<MemberCommand> members = buildMemberCommands(step.build());
-	CHECK_EQ(members.size(), std::size_t(2));
-	for (const MemberCommand& member : members)
-	{
-		CHECK(member.layer == "1-軒桁" || member.layer == "R-軒桁");
-		CHECK_EQ(member.drawClass, CLASS_NOKIGETA);
-		CHECK_EQ(member.startBound.level, "軒桁");
-		CHECK_EQ(member.endBound.level, "軒桁");
 	}
 }
 

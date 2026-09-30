@@ -9,6 +9,7 @@
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
+#include "parse/PlanLevel.h"
 #include "parse/Story.h"
 #include "parse/StructuralClass.h"
 #include "core/Region.h"
@@ -153,15 +154,23 @@ namespace HomeskzIfcImport::parse
 
 			// 床 1 枚の命令を組み立てる。boundary は IFC の生座標（ここで通り芯センタリング
 			// を掛ける）、levelDelta は基準レベル（一般階＝FL／屋根階＝軒高）からの高低差。
+			//
+			// 配置先は床の下端（＝受ける横架材の天端）にいちばん近い伏図レベルの "n-FL"
+			// レイヤ（parse/PlanLevel。横架材の高さごとの伏図がその高さの床だけを映すため）。
 			const auto makeCommand = [&](std::vector<Vec2> boundary, double levelDelta)
 			{
+				std::string floorLayer = layer;
+				// levelDelta は床の下端の横架材天端からの高低差（呼び出し 2 か所とも）。
+				if (const PlanLevel* level =
+						nearestPlanLevel(context.planLevels(), i, beamTopAbs + levelDelta))
+					floorLayer = planLevelLayer(*level, story, kLevelFL);
 				for (Vec2& p : boundary)
 				{
 					p.x -= center.x;
 					p.y -= center.y;
 				}
 				FloorCommand cmd;
-				cmd.layer = layer;
+				cmd.layer = floorLayer;
 				cmd.drawClass = CLASS_FLOOR;
 				cmd.boundary = std::move(boundary);
 				cmd.components = {

@@ -55,9 +55,9 @@ namespace HomeskzIfcImport::core
 	inline constexpr const char* kLevelMoya = "母屋";
 	inline constexpr const char* kLevelNoboribari = "登り梁";
 	// 軒桁の専用レベル（"n-軒桁"）。母屋伏図に軒桁だけを薄く重ねるために、横架材天端（最上階
-	// は軒高）のレイヤから分ける（ご要望。parse/Member）。高さは横架材天端（軒高）と同じ。
-	// 取り合い・継手などを見るときは、同じ階の横架材レイヤと同じ群として扱う
-	// （parse/Story の beamGroupLayer）。
+	// は軒高）のレイヤから分ける（ご要望。parse/PlanLevel の assignMemberPlanLevels）。高さは
+	// 横架材天端（軒高）と同じで、材の高さ基準は横架材天端（軒高）のまま。取り合い・継手などを
+	// 見るときは、同じ階の横架材レイヤと同じ群として扱う（parse/Story の beamGroupLayer）。
 	inline constexpr const char* kLevelNokigeta = "軒桁";
 	// M9/M11 基礎ストーリのレベル。GL は基礎ストーリの原点（常に 0）で立上り（"F-立上り"）を、
 	// 底盤天端は底盤コンクリートの天端で底盤（"F-底盤"）を載せる（M9）。基礎天端は立上りの
@@ -75,6 +75,36 @@ namespace HomeskzIfcImport::core
 	// 梁下端までの内法に収まるので、この平面を基準にすれば命令が持つ高さ（bottomHeight /
 	// topHeight）がそのまま内法になる（ShearWallCommand 参照）。
 	inline constexpr const char* kLevelShearWall = "耐力壁";
+
+	// 伏図レベルの印（横架材の高さごとの伏図。docs/DEV-NOTES.md「横架材の高さごとに伏図を
+	// 作る」）。1 つの階に横架材の天端が複数あると（スキップフロア）、標準の天端（その階の
+	// 横架材天端・最上階は軒高）以外の高さの横架材・床・耐力壁は**別のレイヤ**へ置き、
+	// 伏図はレイヤでそれを切り分ける（ビューポートが映すものを絞れるのはレイヤとクラス
+	// だけ）。そのレイヤのレベル種別とレイヤ名には、元の種別の後ろにこの印を付ける
+	// （"横架材天端(FL-872)" / "2-横架材天端(FL-872)" / "R-軒高(軒高-832)"）。
+	//
+	// **高さは GL ではなくその階の FL（最上階は軒高）から測る**（ご要望。GL 基準では
+	// 図面の読み方と合わず分かりにくい）。FL も軒高もストーリの高さ（Elevation）その
+	// ものなので、基準は階の Elevation で、名前だけが一般階と最上階で違う。
+	//
+	// **印の書式はここが唯一**——付けるのは parse/PlanLevel、外して元の種別へ戻すのは
+	// 重ね順（desiredStoryLayerOrder）・仕口（parse/Joint）・継手（parse/Splice）・寸法
+	// （parse/Dimension）で、core/ は parse/ を include できないのでここに置く（kLevelFL を
+	// core が持つのと同じ理由）。heightMm / datumMm は GL からの高さ（mm）、top は最上階か。
+	std::string planLevelTag(long long heightMm, long long datumMm, bool top);
+
+	// 高さの表記（"FL-872" / "FL±0" / "軒高-832"）。印（planLevelTag）の中身で、伏図の
+	// タイトルと設定ダイアログの行もこれで高さを書く。
+	std::string planLevelHeightText(long long heightMm, long long datumMm, bool top);
+
+	// 基準からの差（mm）の表記。符号を必ず付け（0 は "±0"）、1,000 以上は 3 桁ごとに
+	// コンマで区切る（"+1,234" / "-872" / "±0"。ご要望）。伏図レベルの高さの表記と、
+	// 横架材のデータタグに添える高さ（parse/Tag の memberLevelNote）が同じ書き方をする。
+	std::string signedMillimetreText(long long deltaMm);
+
+	// 末尾の伏図レベルの印を外した名前（レベル種別・レイヤ名のどちらにも使える）。印が
+	// 無ければそのまま返す。
+	std::string stripPlanLevelTag(const std::string& name);
 
 	// 構造用途（構造材ツールのポップアップのキー）。**命令セットの語彙なのでここが唯一の
 	// 定義**で、ColumnCommand::structuralUse に入る値と、要素ごとに固定の用途——横架材
@@ -426,6 +456,9 @@ namespace HomeskzIfcImport::core
 	//   endBound                        … 終端の高さ基準（同上）
 	//   startOffset                     … 始端の端部オフセット（mm。負＝短く・正＝長く。上記）
 	//   endOffset                       … 終端の端部オフセット（同上）
+	//   hipOrValley                     … 隅木・谷木（IFC の種別名が "隅木・谷木"）か。データタグ
+	//                                     に高さを添えない材を見分けるためだけに使う（垂木に
+	//                                     近い材で、高さの記載は要らない。ご要望。parse/Tag）
 	//
 	// 【start / end は「芯線の交点」】勝ち側の横架材へ突き当たる端（負け側）は、相手の面では
 	// なく**相手の天端中央線（＝芯線）上の点**に置き、面までの戻りを startOffset / endOffset
@@ -448,6 +481,7 @@ namespace HomeskzIfcImport::core
 		StoryBoundCommand endBound;
 		double startOffset = 0.0;
 		double endOffset = 0.0;
+		bool hipOrValley = false;
 	};
 
 	// 横架材の実体が占める Z 範囲。elevation / endElevation は**天端** Z で傾斜梁は両端で
@@ -716,6 +750,27 @@ namespace HomeskzIfcImport::core
 	// （desiredStoryLayerOrder と同じ立ち位置。CLAUDE.md「テスト方針」: draw から切り離せる
 	// ロジックは core へ寄せる）。
 	ModifierCommand raiseModifierTop(const ModifierCommand& modifier, double bite);
+
+	// 地中梁（台形プリズム）の押し出しの**基面をワールド 3D の頂点列**にして返す。描画側
+	// （draw/Footing）はこれをそのまま VWExtrudeObj へ渡し、方位角の向きへ depth だけ押し出す。
+	// profile が 3 点未満なら空。
+	//
+	// 頂点の並びに 2 つの決めごとがある:
+	//   1. **巻き**: 面法線（Newell 法）が押し出し方向（方位角）を向く並び。逆巻きだと押し
+	//      出しが梁の軸の反対側へ伸びる。
+	//   2. **始まり**: 先頭の辺が「+u へ最も向く辺（同じ向きなら低いほう）」になるよう回す。
+	//      VWExtrudeObj は 3D ポリゴンの**先頭の頂点から**局所座標系を決める（原点＝先頭・
+	//      U＝先頭の辺・W＝U×(3 点目−先頭)・V＝W×U）ため、揃えないと断面の鉛直面が −u 側の
+	//      地中梁だけ局所座標系が上下逆（V＝−Z）になり、実機で可視ソリッドが幅方向へ 24.59mm
+	//      ずれた（docs/DEV-NOTES.md「地中梁の可視ソリッドが幅方向にずれる」）。揃えればどの
+	//      向きでも U＝+u・V＝+Z・W＝押し出し方向になる。
+	//
+	// **core に置く理由**: SDK を触らない純計算で、この並び替えは「向きで結果が変わる」回帰
+	// しやすい性質なので無 SDK テストで押さえる（raiseModifierTop と同じ立ち位置）。
+	std::vector<Vec3> modifierBasePolygon(const ModifierCommand& modifier);
+
+	// modifierBasePolygon が先頭の辺を選ぶときに「同じ向き」とみなす許容（方向余弦の差）。
+	inline constexpr double kModifierBaseEdgeTol = 1e-6;
 
 	// 地中梁の天端とみなす頂点の許容差（mm）。最大 v からこの差以内の頂点を天端の辺とみなす。
 	// raiseModifierTop と、その期待値を書くテストが共有する。
@@ -1027,6 +1082,11 @@ namespace HomeskzIfcImport::core
 		Vec2 position;
 		Vec2 offset;
 		double angle = 0.0;
+		// 断面寸法の後ろに添える高さの注記（"(2FL -872)" / 傾斜材は "(2FL -872~-40)"）。
+		// **その階の FL から測った横架材の天端**で、階の標準の横架材天端と同じ高さの水平な
+		// 材・隅木谷木には添えない（空）。解析側が決めた文字をそのまま載せる（parse/Tag の
+		// memberLevelNote）。
+		std::string note;
 	};
 
 	// 寸法の測る向き（注釈空間の軸）。Horizontal＝注釈空間の x に沿って測る（伏図の東西・

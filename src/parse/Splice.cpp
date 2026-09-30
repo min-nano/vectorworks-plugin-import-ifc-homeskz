@@ -234,8 +234,12 @@ namespace HomeskzIfcImport::parse
 			for (std::size_t j = i + 1; j < members.size(); ++j)
 			{
 				const MemberGeom& b = geoms[j];
-				if (!b.valid ||
-					beamGroupLayer(members[j].layer) != beamGroupLayer(members[i].layer))
+				// 横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた材
+				// （"2-横架材天端(FL-872)"）も、軒桁の専用レイヤの材（"2-軒桁"）も同じ階の
+				// 横架材どうしなので、伏図レベルの印を外し、軒桁を横架材レイヤへ読み替えて比べる
+				// （parse/PlanLevel・parse/Story。仕口の parse/Joint と同じ）。
+				if (!b.valid || core::stripPlanLevelTag(beamGroupLayer(members[j].layer)) !=
+									core::stripPlanLevelTag(beamGroupLayer(members[i].layer)))
 					continue;
 				if (std::abs(core::cross(a.axis, b.axis)) >= kSpliceParallelTol)
 					continue;
@@ -295,7 +299,8 @@ namespace HomeskzIfcImport::parse
 			if (!nearerSide(candidate.supportA, candidate.supportB).has_value())
 				continue;
 			const double near = std::min(*candidate.supportA, *candidate.supportB);
-			layerDistances[candidate.command.layer].push_back(near);
+			// レイヤは伏図レベルの印を外した元のレイヤで数える（振り分けで代表値を変えない）。
+			layerDistances[core::stripPlanLevelTag(candidate.command.layer)].push_back(near);
 			allDistances.push_back(near);
 		}
 		const std::optional<double> overall = medianOf(allDistances);
@@ -311,7 +316,8 @@ namespace HomeskzIfcImport::parse
 			}
 			else
 			{
-				const auto found = layerDistances.find(candidate.command.layer);
+				const auto found =
+					layerDistances.find(core::stripPlanLevelTag(candidate.command.layer));
 				const std::optional<double> reference =
 					found != layerDistances.end() ? medianOf(found->second) : overall;
 				female = beamFemaleSide(candidate, reference);

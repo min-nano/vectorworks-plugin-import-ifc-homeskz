@@ -10,6 +10,7 @@
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
+#include "parse/PlanLevel.h"
 #include "parse/StructuralClass.h"
 #include "parse/Story.h"
 
@@ -138,22 +139,31 @@ namespace HomeskzIfcImport::parse
 			return extent;
 		}
 
-		// span 柱レイヤ（from〜to）が 0 起点のストーリ index を**通っている**か。
+		// span 柱レイヤ（from〜to）が伏図レベル level（通し番号。parse/PlanLevel）を
+		// **通っている**か。耐力壁はその伏図レベルの横架材の天端に立つ。
 		//
 		// ★**base がその階の柱だけでは足りない。** 通し柱は下の階を base とするレイヤ
 		// （"1to3-柱"）に置かれるので、base だけで絞ると 2 階の耐力壁は壁端の通し柱を
-		// 見失い、柱芯へ寄らず控えの内法で描かれる。その階の床（index + 1）を下端以下に、
-		// 上端をそれより上に持つ span なら、その階の壁の端に立ちうる。
-		// 管柱 "1to2" は 2 階（index 1）を通らない（to == 2 は 2 階の床で止まる）。
-		bool spanCoversStory(double from, double to, std::size_t index)
+		// 見失い、柱芯へ寄らず控えの内法で描かれる。その伏図レベルを下端以下に、
+		// 上端をそれより上に持つ span なら、その高さの壁の端に立ちうる。
+		// 管柱 "1to2" は 2 階（伏図レベル 2）を通らない（to == 2 はその床で止まる）。
+		// span の番号は伏図レベルの通し番号なので（どの階も高さが 1 つなら階の番号）、
+		// スキップフロアでも「その高さの床を通るか」がそのまま言える。
+		bool spanCoversLevel(double from, double to, double level)
 		{
-			const double level = static_cast<double>(index) + 1.0;
 			return from <= level + core::kPointEps && to > level + core::kPointEps;
 		}
 
-		// ストーリ index を通る span 柱レイヤの柱を集める（spanCoversStory）。
+		// 耐力壁が立つ伏図レベルの通し番号。伏図レベルが無ければ階の番号（index + 1）。
+		double wallLevelOrdinal(const PlanLevel* level, std::size_t index)
+		{
+			return level != nullptr ? static_cast<double>(level->ordinal)
+									: static_cast<double>(index) + 1.0;
+		}
+
+		// 伏図レベル level を通る span 柱レイヤの柱を集める（spanCoversLevel）。
 		std::vector<const core::ColumnCommand*>
-		columnsOfStory(const std::vector<core::ColumnCommand>& columns, std::size_t index)
+		columnsAtLevel(const std::vector<core::ColumnCommand>& columns, double level)
 		{
 			std::vector<const core::ColumnCommand*> found;
 			for (const core::ColumnCommand& column : columns)
@@ -162,21 +172,21 @@ namespace HomeskzIfcImport::parse
 				double to = 0.0;
 				if (!parseSpanLayer(column.layer, from, to))
 					continue;
-				if (spanCoversStory(from, to, index))
+				if (spanCoversLevel(from, to, level))
 					found.push_back(&column);
 			}
 			return found;
 		}
 
-		// ストーリ index を通る span 柱レイヤ名を (from, to) 昇順で集める
-		// （PIO の TargetLayers。columnsOfStory と同じ判定）。
-		std::vector<std::string> columnLayersOfStory(const std::vector<ColumnSpan>& spans,
-													 std::size_t index)
+		// 伏図レベル level を通る span 柱レイヤ名を (from, to) 昇順で集める
+		// （PIO の TargetLayers。columnsAtLevel と同じ判定）。
+		std::vector<std::string> columnLayersAtLevel(const std::vector<ColumnSpan>& spans,
+													 double level)
 		{
 			std::vector<std::string> layers;
 			for (const ColumnSpan& span : spans)
 			{
-				if (spanCoversStory(span.from, span.to, index))
+				if (spanCoversLevel(span.from, span.to, level))
 					layers.push_back(span.layer);
 			}
 			return layers;
@@ -656,21 +666,36 @@ namespace HomeskzIfcImport::parse
 		// 通り芯と同じセンタリングオフセット（通り芯が無ければ (0,0)＝生の IFC 座標）。
 		const Vec2 center = context.gridCenter();
 		const std::vector<ColumnSpan> columnSpans = collectColumnSpans(columns);
+		// 伏図レベル（parse/PlanLevel）。耐力壁は立つ天端の伏図レベルのレイヤへ置く。
+		const std::vector<PlanLevel>& levels = context.planLevels();
 
 		std::vector<ShearWallCommand> commands;
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
 			const StoryInfo& story = stories[i];
-			const std::string layer = storyLayerName(i, story.isTop, kLevelShearWall);
-			// レイヤ平面（ストーリ相対）＝その階の横架材天端。最上階は軒高＝0。
-			const double layerZ = story.isTop ? 0.0 : story.beamOffset;
-			const std::string targets = joinLayers(columnLayersOfStory(columnSpans, i));
-			const std::vector<const core::ColumnCommand*> storyColumns = columnsOfStory(columns, i);
+			// レイヤ平面（ストーリ相対）＝その階の横架材天端。最上階は軒高＝0。伏図レベルの
+			// レイヤはそこから伏図レベルの高さのぶんずれる（下のループ）。
+			const double storyLayerZ = story.isTop ? 0.0 : story.beamOffset;
 
 			for (const Group& group : collectGroups(model, context.storyElements(story.id)))
 			{
 				const GroupExtent extent = groupExtent(group);
 				const ShearWallPiece& first = group.pieces.front();
+
+				// 耐力壁は下の横架材の天端に立つので、下端にいちばん近い伏図レベルの
+				// "n-耐力壁" レイヤへ置く（伏図はその階自身の耐力壁を映す。M19）。柱も
+				// その伏図レベルを通るものから探す（spanCoversLevel）。
+				const PlanLevel* planLevel =
+					nearestPlanLevel(levels, i, story.elevation + extent.zBottom);
+				const std::string layer = planLevel != nullptr
+											  ? planLevelLayer(*planLevel, story, kLevelShearWall)
+											  : storyLayerName(i, story.isTop, kLevelShearWall);
+				const double layerZ =
+					storyLayerZ + (planLevel != nullptr ? planLevelShift(*planLevel, story) : 0.0);
+				const double ordinal = wallLevelOrdinal(planLevel, i);
+				const std::string targets = joinLayers(columnLayersAtLevel(columnSpans, ordinal));
+				const std::vector<const core::ColumnCommand*> storyColumns =
+					columnsAtLevel(columns, ordinal);
 
 				// 要素自身の端（センタリング済み）で柱を探す。面材は壁芯から板厚ぶん
 				// 外れているが、探す許容（kShearWallColumnTol）に対しては誤差の範囲。
@@ -766,21 +791,43 @@ namespace HomeskzIfcImport::parse
 
 	void fitShearWallsToMembers(std::vector<ShearWallCommand>& walls,
 								const std::vector<StoryInfo>& stories,
+								const std::vector<PlanLevel>& levels,
 								const std::vector<core::MemberCommand>& members,
 								const std::vector<core::ColumnCommand>& columns)
 	{
-		for (std::size_t i = 0; i < stories.size(); ++i)
+		// 1 つのレイヤ（＝伏図レベル）ぶんを測り直す。layerZ はそのレイヤ平面の絶対 Z。
+		const auto fitLayer = [&](const std::string& layer, double layerZ, double ordinal)
 		{
-			const StoryInfo& story = stories[i];
-			const std::string layer = storyLayerName(i, story.isTop, kLevelShearWall);
-			// レイヤ平面（絶対 Z）＝その階の横架材天端（最上階は軒高）。
-			const double layerZ = beamTopElevation(story);
-			const std::vector<const core::ColumnCommand*> storyColumns = columnsOfStory(columns, i);
+			const std::vector<const core::ColumnCommand*> levelColumns =
+				columnsAtLevel(columns, ordinal);
 			for (ShearWallCommand& wall : walls)
 			{
 				if (wall.layer == layer)
-					fitShearWall(wall, layerZ, members, storyColumns);
+					fitShearWall(wall, layerZ, members, levelColumns);
 			}
+		};
+		// 伏図レベルが無い（単体テストで階だけを渡した）ときは階ごと＝従来どおり。
+		if (levels.empty())
+		{
+			for (std::size_t i = 0; i < stories.size(); ++i)
+			{
+				const StoryInfo& story = stories[i];
+				// レイヤ平面（絶対 Z）＝その階の横架材天端（最上階は軒高）。
+				fitLayer(storyLayerName(i, story.isTop, kLevelShearWall), beamTopElevation(story),
+						 static_cast<double>(i) + 1.0);
+			}
+			return;
+		}
+		// 耐力壁は立つ天端の伏図レベルのレイヤに居る（buildShearWallCommands）。レイヤ平面は
+		// その階の横架材天端を伏図レベルの高さのぶんずらしたもの（parse/PlanLevel）。
+		for (const PlanLevel& level : levels)
+		{
+			if (level.story >= stories.size())
+				continue;
+			const StoryInfo& story = stories[level.story];
+			fitLayer(planLevelLayer(level, story, kLevelShearWall),
+					 beamTopElevation(story) + planLevelShift(level, story),
+					 static_cast<double>(level.ordinal));
 		}
 	}
 

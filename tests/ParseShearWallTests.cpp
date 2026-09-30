@@ -22,11 +22,13 @@
 #include "parse/Context.h"
 #include "parse/Loader.h"
 #include "parse/ShearWall.h"
+#include "parse/PlanLevel.h"
 #include "parse/Story.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -111,7 +113,7 @@ namespace
 	// 最上階。1 階の耐力壁レイヤは "1-耐力壁"。
 	std::vector<StoryInfo> fitStories()
 	{
-		return {StoryInfo{1, 600.0, -174.0, false}, StoryInfo{2, 3500.0, 0.0, true}};
+		return {StoryInfo{1, 600.0, -174.0, false, "1FL"}, StoryInfo{2, 3500.0, 0.0, true, "RFL"}};
 	}
 
 	// 軸 (0,0)→(1820,0) の耐力壁。IFC の高さはレイヤ平面から 0〜2700（絶対 426〜3126）。
@@ -531,20 +533,31 @@ TEST(shear_wall_fixture_target_layers_include_through_columns)
 	// base とするレイヤ（"1to3-柱"）に載るので、base だけで絞ると取り逃がす（実機で
 	// 耐力壁 PIO が壁端の通し柱を認識しなかった不具合）。逆に 2 階の床で止まる管柱
 	// （"1to2-柱"）は 2 階の壁の端には立たないので挙げない。
+	//
+	// 「その階」は耐力壁が立つ**伏図レベル**（parse/PlanLevel）。span の番号も伏図レベルの
+	// 通し番号なので、壁のレイヤ（"2-耐力壁" / "2-耐力壁(FL-872)"）からその通し番号を引く
+	// （どの階も高さが 1 つなら階の番号と同じ）。
 	std::size_t throughEnds = 0;
 	for (const auto& name : allFixtures())
 	{
 		const Document& document = fixtureDocument(name);
+		bool ok = false;
+		parse::Context context(fixture(name, ok));
+		CHECK(ok);
+		std::map<std::string, double> ordinalOfLayer;
+		for (const parse::PlanLevel& planLevel : context.planLevels())
+			ordinalOfLayer[parse::planLevelLayer(planLevel, context.stories()[planLevel.story],
+												 parse::kLevelShearWall)] = planLevel.ordinal;
 		for (const ShearWallCommand& wall : document.shearWalls)
 		{
-			// レイヤ接頭辞は "{index+1}"（最上階の "R" には床の上に立つ柱が無いので見ない）。
-			const std::size_t dash = wall.layer.find('-');
-			CHECK(dash != std::string::npos);
-			if (dash == 0 || dash == std::string::npos ||
-				!std::ranges::all_of(wall.layer.substr(0, dash),
-									 [](char c) { return c >= '0' && c <= '9'; }))
+			// 最上階（"R-…"）には床の上に立つ柱が無いので見ない。
+			if (wall.layer.starts_with("R-"))
 				continue;
-			const double level = std::stod(wall.layer.substr(0, dash));
+			const auto found = ordinalOfLayer.find(wall.layer);
+			CHECK(found != ordinalOfLayer.end());
+			if (found == ordinalOfLayer.end())
+				continue;
+			const double level = found->second;
 			const std::string targets = ";" + wall.targetLayers + ";";
 			for (const core::ColumnCommand& column : document.columns)
 			{
@@ -653,7 +666,7 @@ TEST(shear_wall_fit_to_horizontal_beams)
 	const std::vector<core::MemberCommand> members{
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 426.0, 426.0, 105.0),
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 240.0)};
-	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	fitShearWallsToMembers(walls, fitStories(), {}, members, fitColumns());
 	CHECK(near(walls[0].bottomHeight, 0.0, 1e-6));
 	CHECK(near(walls[0].topHeight, 2754.0, 1e-6));
 	CHECK(near(walls[0].topHeightEnd, 2754.0, 1e-6));
@@ -673,7 +686,7 @@ TEST(shear_wall_fit_trims_a_panel_that_overlaps_the_beams)
 	const std::vector<core::MemberCommand> members{
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 426.0, 426.0, 105.0),
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 150.0)};
-	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	fitShearWallsToMembers(walls, fitStories(), {}, members, fitColumns());
 	CHECK(near(walls[0].bottomHeight, 0.0, 1e-6));
 	CHECK(near(walls[0].topHeight, 2844.0, 1e-6));
 	CHECK(near(walls[0].topHeightEnd, 2844.0, 1e-6));
@@ -688,7 +701,7 @@ TEST(shear_wall_fit_follows_a_sloped_beam_at_the_clear_ends)
 	const std::vector<core::MemberCommand> members{
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 426.0, 426.0, 105.0),
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3400.0, 4000.0, 150.0)};
-	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	fitShearWallsToMembers(walls, fitStories(), {}, members, fitColumns());
 
 	const double depth = 150.0 * std::sqrt(1.0 + (0.2 * 0.2));
 	const double atStart = 3400.0 + (0.2 * (52.5 + 500.0)) - depth - 426.0;
@@ -706,7 +719,7 @@ TEST(shear_wall_fit_follows_a_sloped_beam_running_the_other_way)
 	const std::vector<core::MemberCommand> members{
 		fitBeam({2500.0, 0.0}, {-500.0, 0.0}, 426.0, 426.0, 105.0),
 		fitBeam({2500.0, 0.0}, {-500.0, 0.0}, 4000.0, 3400.0, 150.0)};
-	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	fitShearWallsToMembers(walls, fitStories(), {}, members, fitColumns());
 
 	const double depth = 150.0 * std::sqrt(1.0 + (0.2 * 0.2));
 	CHECK(near(walls[0].topHeight, 3400.0 + (0.2 * 552.5) - depth - 426.0, 1e-6));
@@ -723,7 +736,7 @@ TEST(shear_wall_fit_levels_the_top_under_a_stepped_beam)
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 426.0, 426.0, 105.0),
 		fitBeam({-500.0, 0.0}, {612.0, 0.0}, 3420.0, 3420.0, 240.0),
 		fitBeam({612.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 105.0)};
-	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	fitShearWallsToMembers(walls, fitStories(), {}, members, fitColumns());
 	CHECK(near(walls[0].topHeight, 2889.0, 1e-6));
 	CHECK(near(walls[0].topHeightEnd, 2889.0, 1e-6));
 }
@@ -738,7 +751,7 @@ TEST(shear_wall_fit_levels_the_top_under_a_beam_raised_mid_span)
 		fitBeam({-500.0, 0.0}, {700.0, 0.0}, 3420.0, 3420.0, 150.0),
 		fitBeam({700.0, 0.0}, {1100.0, 0.0}, 3420.0, 3420.0, 105.0),
 		fitBeam({1100.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 150.0)};
-	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	fitShearWallsToMembers(walls, fitStories(), {}, members, fitColumns());
 	CHECK(near(walls[0].topHeight, 3315.0 - 426.0, 1e-6));
 	CHECK(near(walls[0].topHeightEnd, 3315.0 - 426.0, 1e-6));
 }
@@ -752,7 +765,7 @@ TEST(shear_wall_fit_takes_the_lower_top_of_a_stepped_beam_below)
 		fitBeam({-500.0, 0.0}, {900.0, 0.0}, 426.0, 426.0, 105.0),
 		fitBeam({900.0, 0.0}, {2500.0, 0.0}, 326.0, 326.0, 105.0),
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 240.0)};
-	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	fitShearWallsToMembers(walls, fitStories(), {}, members, fitColumns());
 	CHECK(near(walls[0].bottomHeight, -100.0, 1e-6));
 	CHECK(near(walls[0].topHeight, 2754.0, 1e-6));
 	CHECK(near(walls[0].topHeightEnd, 2754.0, 1e-6));
@@ -767,7 +780,7 @@ TEST(shear_wall_fit_ignores_beams_off_the_axis_or_far_away)
 		fitBeam({-500.0, 910.0}, {2500.0, 910.0}, 3420.0, 3420.0, 150.0), // 隣の通り
 		fitBeam({910.0, -500.0}, {910.0, 500.0}, 3420.0, 3420.0, 150.0),  // 直交
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 6000.0, 6000.0, 105.0)};	  // はるか上
-	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	fitShearWallsToMembers(walls, fitStories(), {}, members, fitColumns());
 	CHECK(near(walls[0].bottomHeight, 0.0, 1e-6));
 	CHECK(near(walls[0].topHeight, 2700.0, 1e-6));
 	CHECK(near(walls[0].topHeightEnd, 2700.0, 1e-6));
@@ -781,7 +794,7 @@ TEST(shear_wall_fit_leaves_other_layers_alone)
 	std::vector<ShearWallCommand> walls{wall};
 	const std::vector<core::MemberCommand> members{
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 240.0)};
-	fitShearWallsToMembers(walls, fitStories(), members, fitColumns());
+	fitShearWallsToMembers(walls, fitStories(), {}, members, fitColumns());
 	CHECK(near(walls[0].topHeight, 2700.0, 1e-6));
 }
 

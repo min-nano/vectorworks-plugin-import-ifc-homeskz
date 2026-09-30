@@ -122,6 +122,10 @@ namespace HomeskzIfcImport::core
 		out << "titleblock=" << sanitize(session.options.titleBlockStyle()) << "\n";
 		// M31 寸法規格（空＝入れない）。図面枠と同じ理由で漏らさず書く。
 		out << "dimension=" << sanitize(session.options.dimensionStandard()) << "\n";
+		// 伏図のまとめ方（前のレベルと同じ伏図にまとめる高さ）。図面枠と同じ理由で漏らさず
+		// 書く。**1 つにつき 1 行**で "<階の番号>:<高さ mm>"（core::PlanLevelKey）。
+		for (const PlanLevelKey& key : session.options.mergedPlanLevels)
+			out << "merge.level=" << key.story << ":" << key.height << "\n";
 		// M34 軸組図から外す通り（図番）。図面枠と同じ理由で漏らさず書く——書き落とすと
 		// 続きの周が外したはずの通りまで描く。レイヤと同じく**1 本 1 行**。
 		for (const std::string& number : session.options.skippedSections)
@@ -199,6 +203,19 @@ namespace HomeskzIfcImport::core
 			{
 				// 古い記憶（M31 より前）には行が無い——既定の空（入れない）のまま読む。
 				session.options.setDimensionStandard(value);
+			}
+			else if (key == "merge.level")
+			{
+				// "<階の番号>:<高さ mm>"。読めない行は黙って飛ばす（古い記憶には行が無く、
+				// まとめない＝既定のまま読む）。GL より下の横架材は無いので、高さも負を
+				// 読まない parseInt で足りる。
+				const std::string::size_type colon = value.find(':');
+				if (colon == std::string::npos)
+					continue;
+				const int story = parseInt(value.substr(0, colon), -1);
+				const int height = parseInt(value.substr(colon + 1), -1);
+				if (story >= 0 && height >= 0)
+					session.options.setMergeWithPrevious(PlanLevelKey{story, height}, true);
 			}
 			else if (key == "section.skip")
 			{

@@ -1541,11 +1541,13 @@ namespace HomeskzIfcImport::parse
 		{
 			if (!memberOnCutPlane(member, section))
 				continue;
-			const auto level = levels.find(member.layer);
-			// 軒桁（専用レイヤ）も横架材天端・軒高と同じ高さのレベルに載る。
+			// 伏図レベルのレイヤ（"2-横架材天端(FL-872)"）の材も、その階の標準の天端
+			// からの差を押さえる（印を外した元のレイヤのレベル。parse/PlanLevel）。軒桁の
+			// 専用レイヤの材は同じ階の横架材レイヤのレベルで見る（parse/Story の
+			// beamGroupLayer）。
+			const auto level = levels.find(core::stripPlanLevelTag(beamGroupLayer(member.layer)));
 			if (level == levels.end() || (level->second.type != core::kLevelBeamTop &&
-										  level->second.type != core::kLevelEaves &&
-										  level->second.type != core::kLevelNokigeta))
+										  level->second.type != core::kLevelEaves))
 				continue;
 			if (std::abs(member.elevation - member.endElevation) > kDimensionMergeTol)
 				continue;

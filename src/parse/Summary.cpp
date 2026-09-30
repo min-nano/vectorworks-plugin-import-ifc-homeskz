@@ -515,6 +515,18 @@ namespace HomeskzIfcImport::parse
 		// M31 寸法も同じく表の外（既定名が無い）。
 		out << "\n  " << kDimensionOptionLabel
 			<< (options.hasDimensions() ? options.dimensionStandard() : std::string("入れない"));
+		// 伏図のまとめ方（横架材の高さごとの伏図。parse/PlanLevel）。既定は高さごとに 1 枚。
+		out << "\n  " << kPlanMergeOptionLabel;
+		if (options.mergedPlanLevels.empty())
+			out << "まとめない（高さごとに 1 枚）";
+		for (const core::PlanLevelKey& key : options.mergedPlanLevels)
+		{
+			// 階は Elevation 昇順の何番目か（最上階＝屋根も数に入る）。設定の鍵は GL からの
+			// 高さなので、ここは GL で書く（FL を知るには IFC が要る。core::PlanLevelKey）。
+			out << (&key == &*options.mergedPlanLevels.begin() ? "" : " / ") << (key.story + 1)
+				<< "番目の階の GL" << (key.height < 0 ? "" : "+") << key.height
+				<< " を前のレベルとまとめる";
+		}
 		// M34 軸組図から外す通り。「軸組図が足りない」の切り分けは、まず外していないかを
 		// 見るところから始まる。並びは設定が名前順に揃えたもの（core/ImportOptions.h）。
 		out << "\n  " << kSkippedSectionsOptionLabel;

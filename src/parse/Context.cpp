@@ -98,11 +98,37 @@ namespace HomeskzIfcImport::parse
 		return planes;
 	}
 
+	const std::vector<core::MemberCommand>& Context::rawMembers()
+	{
+		if (!fRawMembers.has_value())
+			fRawMembers = buildMemberCommands(*this);
+		return *fRawMembers;
+	}
+
+	const std::vector<PlanLevel>& Context::planLevels()
+	{
+		if (!fPlanLevels.has_value())
+			fPlanLevels =
+				buildPlanLevels(stories(), collectBeamHeights(stories(), rawMembers()), fOptions);
+		return *fPlanLevels;
+	}
+
 	const std::vector<core::MemberCommand>& Context::members()
 	{
 		if (!fMembers.has_value())
-			fMembers = buildMemberCommands(*this);
+		{
+			std::vector<core::MemberCommand> members = rawMembers();
+			assignMemberPlanLevels(members, stories(), planLevels());
+			fMembers = std::move(members);
+		}
 		return *fMembers;
+	}
+
+	const std::vector<core::FloorCommand>& Context::floors()
+	{
+		if (!fFloors.has_value())
+			fFloors = buildFloorCommands(*this);
+		return *fFloors;
 	}
 
 	const std::vector<core::ColumnCommand>& Context::columns()

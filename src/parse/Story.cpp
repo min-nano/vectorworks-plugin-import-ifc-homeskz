@@ -12,6 +12,7 @@
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
 #include "parse/Member.h"
+#include "parse/PlanLevel.h"
 #include "parse/Rafter.h"
 #include "parse/ShearWall.h"
 #include "parse/Roof.h"
@@ -21,6 +22,7 @@
 #include <cmath>
 #include <cstddef>
 #include <map>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -159,11 +161,14 @@ namespace HomeskzIfcImport::parse
 
 	std::string beamGroupLayer(const std::string& layer)
 	{
+		// 伏図レベルの印（"(FL-872)"）は残す（同じ伏図レベルの横架材レイヤへ読み替える）。
+		const std::string base = core::stripPlanLevelTag(layer);
 		const std::string suffix = std::string("-") + kLevelNokigeta;
-		if (!layer.ends_with(suffix))
+		if (!base.ends_with(suffix))
 			return layer;
-		const std::string prefix = layer.substr(0, layer.size() - suffix.size());
-		return prefix + "-" + (prefix == kRoofSuffix ? kLevelEaves : kLevelBeamTop);
+		const std::string prefix = base.substr(0, base.size() - suffix.size());
+		return prefix + "-" + (prefix == kRoofSuffix ? kLevelEaves : kLevelBeamTop) +
+			   layer.substr(base.size());
 	}
 
 	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ)
@@ -265,6 +270,7 @@ namespace HomeskzIfcImport::parse
 			StoryInfo info;
 			info.id = id;
 			info.elevation = storey->attribute(attr::kBuildingStoreyElevation).asReal();
+			info.name = entityName(*storey);
 			stories.push_back(info);
 		}
 
@@ -304,7 +310,11 @@ namespace HomeskzIfcImport::parse
 		// 1 度だけ組み立てるので、ここと Document の columns は同じ結果を共有する
 		// （parse/Context.h の columns）。
 		const std::map<int, std::vector<std::string>> columnLayers =
-			collectColumnLayersByStory(context.columns());
+			collectColumnLayersByStory(context.columns(), context.planLevels());
+		// 横架材の高さごとの伏図（parse/PlanLevel）。標準でない伏図レベルは、元のレベルを
+		// その高さのぶんずらした別のレベル（＝レイヤ）を持つ（下の「伏図レベルのレベル」）。
+		const std::vector<PlanLevel>& planLevels = context.planLevels();
+		const std::vector<core::FloorCommand>& floors = context.floors();
 
 		std::vector<StoryCommand> commands;
 		commands.reserve(stories.size());
@@ -354,11 +364,13 @@ namespace HomeskzIfcImport::parse
 			const double upperOffset = info.isTop ? 0.0 : info.beamOffset;
 			const auto beamTopIndex = static_cast<std::ptrdiff_t>(cmd.levels.size()) - 1;
 			const auto insertAboveBeamTop =
-				[&cmd, &layerFor, upperOffset, beamTopIndex](const char* levelType)
+				[&cmd, &i, &info, beamTopIndex](const std::string& levelType, double offset)
 			{
-				cmd.levels.insert(cmd.levels.begin() + beamTopIndex,
-								  LevelCommand{levelType, upperOffset, layerFor(levelType)});
+				cmd.levels.insert(
+					cmd.levels.begin() + beamTopIndex,
+					LevelCommand{levelType, offset, storyLayerName(i, info.isTop, levelType)});
 			};
+			const std::vector<const PlanLevel*> storyLevels = storyPlanLevels(planLevels, i);
 
 			// M7 横架材: 母屋・棟木（"n-母屋"）と登り梁（"n-登り梁"）は、梁（小屋梁・軒桁）と
 			// 重なって見にくいため専用レイヤへ分離する（parse/Member）。そのレイヤはここで作る。
@@ -373,10 +385,20 @@ namespace HomeskzIfcImport::parse
 			// 命令の配置先で判定すれば、**レイヤは命令があるときだけ・命令があれば必ず**でき、
 			// 両方の齟齬が構造的に起きない。
 			// 軒桁: 母屋伏図に軒桁だけを薄く重ねるため、横架材天端（最上階は軒高）から分けた
-			// "n-軒桁" レイヤ（parse/Member）。高さは横架材天端と同じなので、そのすぐ上へ
-			// **最初に**挿す（耐力壁・小屋組より下）。条件は母屋・登り梁と同じく命令の配置先。
-			if (anyMemberOnLayer(members, layerFor(kLevelNokigeta)))
-				insertAboveBeamTop(kLevelNokigeta);
+			// "n-軒桁" レイヤ（parse/PlanLevel）。高さは横架材天端と同じなので、そのすぐ上へ
+			// **最初に**挿す（耐力壁・小屋組より下）。条件は母屋・登り梁と同じく命令の配置先で、
+			// 登り梁と同じく伏図レベルごとに確かめる（その高さのぶんずらす）。
+			if (storyLevels.empty())
+			{
+				if (anyMemberOnLayer(members, layerFor(kLevelNokigeta)))
+					insertAboveBeamTop(kLevelNokigeta, upperOffset);
+			}
+			for (const PlanLevel* level : storyLevels)
+			{
+				if (anyMemberOnLayer(members, planLevelLayer(*level, info, kLevelNokigeta)))
+					insertAboveBeamTop(planLevelType(*level, kLevelNokigeta),
+									   upperOffset + planLevelShift(*level, info));
+			}
 
 			// M19 耐力壁: 筋かい・面材の PIO を載せる "n-耐力壁" レイヤ。**横架材天端の
 			// すぐ上**（小屋組より下）へ置く。挿入は「後から挿したものが 1 段上」なので、
@@ -384,14 +406,38 @@ namespace HomeskzIfcImport::parse
 			//
 			// ［レベルを足す条件］母屋・登り梁と同じく**実際に組み立てた耐力壁命令の配置先
 			// レイヤ**で判定する（命令があるときだけ・命令があれば必ずレイヤができる）。
-			if (anyShearWallOnLayer(context.shearWalls(), layerFor(kLevelShearWall)))
-				insertAboveBeamTop(kLevelShearWall);
-
-			for (const char* levelType : {kLevelNoboribari, kLevelMoya})
+			//
+			// 耐力壁は立つ天端の伏図レベルのレイヤへ置かれる（parse/ShearWall）ので、伏図
+			// レベルごとに確かめ、そのレベルの高さのぶんずらす（伏図レベルが無い階は従来の
+			// 1 つだけ）。
+			if (storyLevels.empty())
 			{
-				if (anyMemberOnLayer(members, layerFor(levelType)))
-					insertAboveBeamTop(levelType);
+				if (anyShearWallOnLayer(context.shearWalls(), layerFor(kLevelShearWall)))
+					insertAboveBeamTop(kLevelShearWall, upperOffset);
 			}
+			for (const PlanLevel* level : storyLevels)
+			{
+				if (anyShearWallOnLayer(context.shearWalls(),
+										planLevelLayer(*level, info, kLevelShearWall)))
+					insertAboveBeamTop(planLevelType(*level, kLevelShearWall),
+									   upperOffset + planLevelShift(*level, info));
+			}
+
+			// 登り梁は水下側の伏図レベルのレイヤへ分かれている（parse/PlanLevel）ので、
+			// 耐力壁と同じく伏図レベルごとに確かめる。母屋は分けない。
+			if (storyLevels.empty())
+			{
+				if (anyMemberOnLayer(members, layerFor(kLevelNoboribari)))
+					insertAboveBeamTop(kLevelNoboribari, upperOffset);
+			}
+			for (const PlanLevel* level : storyLevels)
+			{
+				if (anyMemberOnLayer(members, planLevelLayer(*level, info, kLevelNoboribari)))
+					insertAboveBeamTop(planLevelType(*level, kLevelNoboribari),
+									   upperOffset + planLevelShift(*level, info));
+			}
+			if (anyMemberOnLayer(members, layerFor(kLevelMoya)))
+				insertAboveBeamTop(kLevelMoya, upperOffset);
 
 			// M6 屋根組: 屋根版（屋根面）を含む階に 垂木 → 野地板 レベル（"n-垂木" /
 			// "n-野地板" レイヤ）を足す。スタックは 横架材天端/軒高 ← 登り梁 ← 母屋 ← 垂木 ←
@@ -404,8 +450,41 @@ namespace HomeskzIfcImport::parse
 			// 「最上階＋下屋根のある階」に落ち着く。
 			if (storyHasRoofSlab(context, info.id))
 			{
-				insertAboveBeamTop(kLevelTaruki);
-				insertAboveBeamTop(kLevelNojiita);
+				insertAboveBeamTop(kLevelTaruki, upperOffset);
+				insertAboveBeamTop(kLevelNojiita, upperOffset);
+			}
+
+			// 伏図レベルのレベル（横架材の高さごとの伏図。parse/PlanLevel）: 標準でない伏図
+			// レベルの横架材・床は、元のレベル（横架材天端／軒高・FL）をその高さのぶんずらした
+			// 別のレベルのレイヤ（"2-横架材天端(FL-872)" / "2-FL(FL-872)"）へ置かれる。
+			// **元のレベルの直下**へ積む（同じ種類のレイヤが並ぶので、重ね順の決まり
+			// ——床は背面へ・耐力壁は前面へ——は印を外した種別で効く。core の
+			// desiredStoryLayerOrder）。命令があるときだけ作る（空のレイヤを作らない）。
+			const auto insertBelow = [&cmd, &i, &info](const std::string& baseType,
+													   const std::string& levelType, double offset)
+			{
+				auto at = std::ranges::find(cmd.levels, baseType, &LevelCommand::type);
+				// 元のレベルが無い（屋根階にロフト床が無い）ときは先頭（＝最上段）へ。
+				at = at == cmd.levels.end() ? cmd.levels.begin() : at + 1;
+				cmd.levels.insert(
+					at, LevelCommand{levelType, offset, storyLayerName(i, info.isTop, levelType)});
+			};
+			const char* const beamType = beamTopLevelType(info.isTop);
+			const double floorOffset = info.isTop ? kLoftFloorLevelOffset : 0.0;
+			// 後から挿したものが元のレベルのすぐ下に来るので、低い方から挿すと元のレベルの
+			// 下に高い順に並ぶ（重なりの無い高さどうしなので見え方には効かないが、並びは
+			// 決定的にしておく）。
+			for (const PlanLevel* level : storyLevels)
+			{
+				if (level->standard)
+					continue;
+				const double shift = planLevelShift(*level, info);
+				if (anyMemberOnLayer(members, planLevelBeamLayer(*level, info)))
+					insertBelow(beamType, planLevelType(*level, beamType), upperOffset + shift);
+				const std::string floorLayer = planLevelLayer(*level, info, kLevelFL);
+				if (std::ranges::any_of(floors, [&floorLayer](const core::FloorCommand& floor)
+										{ return floor.layer == floorLayer; }))
+					insertBelow(kLevelFL, planLevelType(*level, kLevelFL), floorOffset + shift);
 			}
 
 			// M8 柱: この階を base（from = i+1）とする span レイヤ（"{from}to{to}-柱"）
