@@ -267,19 +267,28 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 切断面に乗る柱・横架材の、注釈空間の横の範囲。どちらも無ければ false。
+		//
+		// withCrossings なら**切断面を横切る横架材の切り口**も範囲へ入れる（材幅の半分ずつ
+		// 広げる）。直交する横架材は断面に切り口として描かれ、通りに沿う材より外に出ることが
+		// ある（片側だけ跳ね出した架構など）。レベル記号と高さの列はこの範囲の左端から外へ
+		// 出すので、数えないと記号と寸法が切り口へ食い込む。**範囲を決めるのは切り口の有無
+		// だけ**で、切り口しか無い断面（柱も沿う材も無い）には寸法を作らない——そこは従来
+		// どおり（記号を置く根拠になる架構が無い）。柱の位置の列（下の横の列）が拾う通り芯の
+		// 範囲は変えない（押さえるのは柱・束の位置で、切り口ではない）。
 		bool sectionAlongRange(const core::Document& document, const core::SectionCommand& section,
-							   double& low, double& high)
+							   double& low, double& high, bool withCrossings)
 		{
 			const double origin = core::sectionAlongOrigin(section);
 			bool any = false;
-			const auto take = [&](const core::Vec2& plan)
+			const auto takeRange = [&](const core::Vec2& plan, double halfWidth)
 			{
 				const double along =
 					core::sectionAnnotationPoint(plan, 0.0, section.direction, origin).x;
-				low = any ? std::min(low, along) : along;
-				high = any ? std::max(high, along) : along;
+				low = any ? std::min(low, along - halfWidth) : along - halfWidth;
+				high = any ? std::max(high, along + halfWidth) : along + halfWidth;
 				any = true;
 			};
+			const auto take = [&](const core::Vec2& plan) { takeRange(plan, 0.0); };
 			for (const core::ColumnCommand& column : document.columns)
 			{
 				if (columnOnCutPlane(column, section))
@@ -292,7 +301,15 @@ namespace HomeskzIfcImport::parse
 				take(member.start);
 				take(member.end);
 			}
-			return any;
+			if (!any || !withCrossings)
+				return any;
+			for (const core::MemberCommand& member : document.members)
+			{
+				core::Vec2 crossing;
+				if (memberCrossesCutPlane(member, section, crossing))
+					takeRange(crossing, member.width / 2.0);
+			}
+			return true;
 		}
 	} // namespace
 
@@ -502,10 +519,15 @@ namespace HomeskzIfcImport::parse
 	buildSectionDimensionCommands(const core::Document& document,
 								  const core::SectionCommand& section)
 	{
+		// low / high は柱・沿う材の範囲（柱の位置の列が拾う通り芯を絞る）、left は切り口も
+		// 含めた左端（高さの列の根元。レベル記号の x と揃える）。
 		double low = 0.0;
 		double high = 0.0;
-		if (!sectionAlongRange(document, section, low, high))
+		if (!sectionAlongRange(document, section, low, high, false))
 			return {};
+		double left = low;
+		double right = high;
+		sectionAlongRange(document, section, left, right, true);
 		double bottom = 0.0;
 		double top = 0.0;
 		if (!core::sectionHeightRange(document, bottom, top))
@@ -545,7 +567,7 @@ namespace HomeskzIfcImport::parse
 
 		// 縦: GL・FL・軒高と、そこからの標準の横架材天端 → GL・FL・軒高の間隔。図の左に出す。
 		for (DimensionChainCommand& chain :
-			 sectionHeightChains(sectionHeights(document.stories), low))
+			 sectionHeightChains(sectionHeights(document.stories), left))
 			out.push_back(std::move(chain));
 
 		// 標準の横架材天端と違う高さの横架材: 標準の天端からその材の天端までを、材の中央で
@@ -577,9 +599,10 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::LevelMarkCommand> buildSectionLevelMarks(const core::Document& document,
 															   const core::SectionCommand& section)
 	{
+		// 切り口も含めた範囲（高さの列の根元と同じ。buildSectionDimensionCommands）。
 		double low = 0.0;
 		double high = 0.0;
-		if (!sectionAlongRange(document, section, low, high))
+		if (!sectionAlongRange(document, section, low, high, true))
 			return {};
 		const SectionHeights heights = sectionHeights(document.stories);
 		// 左の高さの列の最も外の段（列が無ければ -1）。記号の名前をこれより外へ出す。

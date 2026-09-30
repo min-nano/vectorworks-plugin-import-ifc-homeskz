@@ -453,6 +453,53 @@ TEST(SectionLevelMarksNameGlFloorsAndEaves)
 	}
 }
 
+TEST(SectionLevelMarksAndHeightChainsClearCrossingMembers)
+{
+	// 切断面を横切る横架材（東西に走る＝X通りの断面に切り口が写る）が、柱・沿う材より
+	// 外（y=−500 → 注釈の横 −5500）にある。レベル記号と高さの列はその切り口（材幅 105 の
+	// 半分だけ外）より外から出す。
+	Document document = sectionDocument();
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{-910.0, -500.0}, Vec2{910.0, -500.0}, 3264.0));
+	// 切断面で止まる材（x=0 で終わる）も切り口を持つ。右端（y=2500 → −2500）を広げる。
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{-910.0, 2500.0}, Vec2{0.0, 2500.0}, 3264.0));
+	// 切断面へ届かない材は数えない。
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{500.0, -2000.0}, Vec2{1500.0, -2000.0}, 3264.0));
+	const SectionCommand section = xSection();
+
+	const std::vector<LevelMarkCommand> marks = parse::buildSectionLevelMarks(document, section);
+	CHECK(marks.size() == 4);
+	for (const LevelMarkCommand& mark : marks)
+	{
+		CHECK(near(mark.x, -5552.5));
+		CHECK(near(mark.right, -2447.5));
+	}
+
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, section);
+	const DimensionChainCommand* levels = findChain(chains, DimensionAxis::Vertical, -1, 1);
+	CHECK(levels != nullptr);
+	if (levels != nullptr)
+		CHECK(near(levels->base, -5552.5));
+	// 柱の位置の列は切り口に引きずられない（押さえるのは柱・束の位置）。
+	const DimensionChainCommand* columns = findChain(chains, DimensionAxis::Horizontal, -1, 0);
+	CHECK(columns != nullptr);
+	if (columns != nullptr)
+		CHECK(sameValues(columns->stops, {-5000.0, -4090.0, -3180.0}));
+}
+
+TEST(SectionWithOnlyCrossingMembersHasNoDimensions)
+{
+	// 切り口だけでは記号を置く根拠にしない（柱も沿う材も無い断面は従来どおり空）。
+	Document document;
+	document.stories = twoStoreyStories();
+	document.members = {makeMember("2-横架材天端", Vec2{-910.0, 0.0}, Vec2{910.0, 0.0}, 3264.0)};
+	CHECK(parse::buildSectionDimensionCommands(document, xSection()).empty());
+	CHECK(parse::buildSectionLevelMarks(document, xSection()).empty());
+}
+
 TEST(SectionWithNothingOnTheCutHasNoDimensions)
 {
 	Document document = sectionDocument();
