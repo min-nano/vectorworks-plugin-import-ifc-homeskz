@@ -309,7 +309,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 描画ループの中止判定と歩進（`AdvanceProgress`）・診断の 1 文（`AppendCount`）・診断行の連結（`AppendLine`）・登場順の dedupe（`PushUnique`） | `draw/DrawUtil` |
 | 収まり判定の遊び（`kFitTol`。**遊びは緩める向きに足す**）・収まらなかった 1 枚目の実測の文言（`DescribeFitOverflow` / `DescribePaperSize`） | `draw/DrawUtil` |
 | シートレイヤの用意とビューポートの仕上げ・用紙と印刷可能領域の読み取り（`SheetPaperArea`）・測って動かす位置合わせ（`MeasureViewport` / `RefreshViewport` / `MoveViewportBy`）・断面の向きをビュー行列へ写す（`CopySectionViewMatrix`。注釈のレベル基準線に高さを出す） | `draw/DrawUtil` |
-| 図面から自分が作ったレイヤを消す（`RemoveCreatedLayers`）・取り消しを 1 段掛ける（`UndoOneStep`） | `draw/DrawUtil` |
+| 図面から自分が作ったレイヤを消す（`RemoveCreatedLayers`）・取り消しを 1 段掛ける（`UndoOneStep`）・取り込みの終わりに全レイヤの選択を解く（`DeselectEverything`） | `draw/DrawUtil` |
 | 「命令インデックス → ハンドル」の対応表 | `draw/ObjectHandles`（宣言）＋ `draw/DrawUtil`（実体） |
 | 断面寸法データタグ（`Data Tag` PIO の登録名・引出線・配置手順・タグレイアウトの組み方・クラス名 "寸法"） | `draw/Tag` |
 | 軸組図の図面ラベル（`Drawing Label2` PIO の登録名・ラベルレイアウトの組み直し・文字スタイル名 "図面ラベル(10pt)"） | `draw/DrawingLabel` |

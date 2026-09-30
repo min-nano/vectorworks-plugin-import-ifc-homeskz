@@ -287,6 +287,11 @@ namespace HomeskzIfcImport::draw
 		addNotes(core::drawTiming().format("描画の内訳（開発ビルドの計測）"));
 #endif
 
+		// **選択を解いて終える。** VectorWorks は作ったオブジェクトを選択したまま残すので、
+		// 放っておくと取り込んだ部材がすべて選ばれた状態で戻る（draw/DrawUtil.h
+		// DeselectEverything）。中止のときも、描けたところまでを同じく解く。
+		DeselectEverything();
+
 		// 途中で中止されたか（件数が命令数に届かないのが正常になる）。
 		counts.cancelled = progress.cancelled();
 
