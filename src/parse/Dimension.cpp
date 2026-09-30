@@ -98,6 +98,15 @@ namespace HomeskzIfcImport::parse
 			double halfAlong = 0.0;
 		};
 
+		// 母屋伏図で通りの列へ足す交点と、端の押さえ方。supportedEndsOnly なら、芯（取り合う
+		// 材の芯・交点）で 2 点以上押さえられる通りの自由端（材の端＝挿入点）は測点にしない
+		// （ご要望: 登り梁は直交する材の芯で押さえる）。
+		struct CrossingSet
+		{
+			std::vector<Crossing> items;
+			bool supportedEndsOnly = false;
+		};
+
 		// 直線に乗る線材の群（基礎伏図の立上りの「通り」1 本。床伏図・小屋伏図では横架材）。
 		struct WallLine
 		{
@@ -198,7 +207,8 @@ namespace HomeskzIfcImport::parse
 						return span.first - kDimensionMergeTol <= line.coord + line.halfThickness &&
 							   span.second + kDimensionMergeTol >= line.coord - line.halfThickness;
 					});
-				if (reaches && inSpans(line.spans, other.coord, other.halfThickness))
+				if (reaches &&
+					inSpans(line.spans, other.coord, other.halfThickness + kDimensionMergeTol))
 					out.push_back(Junction{other.coord, other.halfThickness});
 			}
 			return out;
@@ -216,9 +226,10 @@ namespace HomeskzIfcImport::parse
 		//   * crossings（母屋伏図の斜めの材＝登り梁の芯との交点）がその通りの線材の上に
 		//     あれば、直交する線材の芯と同じく押さえる（部材芯の交点。材の端＝挿入点は
 		//     押さえない。ご要望）。登り梁の幅の中で終わる端は交点へ押さえ直す。
+		//     crossings.supportedEndsOnly なら、芯で 2 点以上押さえられる通りの自由端は
+		//     押さえない（母屋伏図の登り梁の挿入点・跳ね出しの先）。
 		WallLineStops lineStops(const WallLine& line, const std::vector<WallLine>& others,
-								const std::vector<core::Vec2>& points,
-								const std::vector<Crossing>& crossings,
+								const std::vector<core::Vec2>& points, const CrossingSet& crossings,
 								const std::vector<double>& grid, bool eastWest)
 		{
 			const std::vector<Junction> junctions = junctionsOf(line, others);
@@ -239,14 +250,15 @@ namespace HomeskzIfcImport::parse
 				return values;
 			};
 			std::vector<core::Vec2> crossingPoints;
-			crossingPoints.reserve(crossings.size());
-			for (const Crossing& crossing : crossings)
+			crossingPoints.reserve(crossings.items.size());
+			for (const Crossing& crossing : crossings.items)
 				crossingPoints.push_back(crossing.point);
 			const std::vector<double> crossed = alongOnLine(crossingPoints);
 			std::vector<double> cores = crossed;
 			cores.reserve(crossed.size() + junctions.size() + (line.spans.size() * 2));
 			for (const Junction& junction : junctions)
 				cores.push_back(junction.coord);
+			const bool supportedOnly = crossings.supportedEndsOnly && mergeStops(cores).size() >= 2;
 			for (std::size_t i = 0; i < line.spans.size(); ++i)
 			{
 				for (const double end : {line.spans[i].first, line.spans[i].second})
@@ -264,14 +276,14 @@ namespace HomeskzIfcImport::parse
 													   junction.halfThickness + kDimensionMergeTol;
 											});
 					const bool atCrossing = std::ranges::any_of(
-						crossings,
+						crossings.items,
 						[&](const Crossing& crossing)
 						{
 							const double along = eastWest ? crossing.point.x : crossing.point.y;
 							return nearAny(crossed, along) &&
 								   std::abs(end - along) <= crossing.halfAlong + kDimensionMergeTol;
 						});
-					if (!continued && !atJunction && !atCrossing)
+					if (!continued && !atJunction && !atCrossing && !supportedOnly)
 						cores.push_back(end);
 				}
 			}
@@ -322,7 +334,7 @@ namespace HomeskzIfcImport::parse
 		// 東西の通り（eastWest=true）または南北の通りの測点。座標の昇順。
 		std::vector<WallLineStops>
 		wallLineStops(const std::vector<WallLine>& lines, const std::vector<WallLine>& others,
-					  const std::vector<core::Vec2>& points, const std::vector<Crossing>& crossings,
+					  const std::vector<core::Vec2>& points, const CrossingSet& crossings,
 					  const std::vector<core::GridCommand>& grids, bool eastWest)
 		{
 			const std::vector<double> grid =
@@ -459,7 +471,7 @@ namespace HomeskzIfcImport::parse
 		std::vector<PlacedRun> placeFoundationRuns(const std::vector<WallLine>& eastWestRuns,
 												   const std::vector<WallLine>& northSouthRuns,
 												   const std::vector<core::Vec2>& points,
-												   const std::vector<Crossing>& crossings,
+												   const CrossingSet& crossings,
 												   const std::vector<core::GridCommand>& grids,
 												   const core::Vec2& center)
 		{
@@ -779,8 +791,7 @@ namespace HomeskzIfcImport::parse
 
 		// 線材を通りに集め、一続きに割って置き場所を決める（基礎伏図・床伏図・小屋伏図に共通）。
 		RunLayout placeRuns(const std::vector<LineSegment>& segments,
-							const std::vector<core::Vec2>& points,
-							const std::vector<Crossing>& crossings,
+							const std::vector<core::Vec2>& points, const CrossingSet& crossings,
 							const std::vector<core::GridCommand>& grids, const core::Vec2& center)
 		{
 			const std::vector<WallLine> eastWestLines = collectWallLines(segments, true);
@@ -1001,10 +1012,11 @@ namespace HomeskzIfcImport::parse
 		// 同じく押さえる。moya（母屋伏図）なら、直交する材と取り合わない通りの芯を外周の列
 		// （南北の通りの X は上、東西の通りの Y は左）へ足して全長もそこまで延ばし（ほかの材と
 		// つながらない材の位置を押さえる）、下と左の列も全長の端まで延ばす。
-		std::vector<DimensionChainCommand> framingLineChains(
-			const std::vector<LineSegment>& segments, const std::vector<core::Vec2>& points,
-			const std::vector<Crossing>& crossings, const std::vector<core::GridCommand>& grids,
-			const core::Vec2& min, const core::Vec2& max, bool moya)
+		std::vector<DimensionChainCommand>
+		framingLineChains(const std::vector<LineSegment>& segments,
+						  const std::vector<core::Vec2>& points, const CrossingSet& crossings,
+						  const std::vector<core::GridCommand>& grids, const core::Vec2& min,
+						  const core::Vec2& max, bool moya)
 		{
 			const core::Vec2 center{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
 			const RunLayout layout = placeRuns(segments, points, crossings, grids, center);
@@ -1218,32 +1230,137 @@ namespace HomeskzIfcImport::parse
 		}
 	} // namespace
 
+	namespace
+	{
+		// 材 member の、平面の点 point での上下の範囲（天端を材軸に沿って補間し、せいを引く）。
+		void zRangeAt(const core::MemberCommand& member, const core::Vec2& point, double& bottom,
+					  double& top)
+		{
+			const double dx = member.end.x - member.start.x;
+			const double dy = member.end.y - member.start.y;
+			const double lengthSq = (dx * dx) + (dy * dy);
+			const double t =
+				lengthSq > 0.0
+					? (((point.x - member.start.x) * dx) + ((point.y - member.start.y) * dy)) /
+						  lengthSq
+					: 0.0;
+			top = member.elevation + (t * (member.endElevation - member.elevation));
+			bottom = top - member.height;
+		}
+
+		// 2 つの材が point で立体的に取り合う（上下の範囲が重なるか接する）か。平面で重なって
+		// 見えるだけの材（ご要望: い 5 の 420）を交点にしない。
+		bool meetInZ(const core::MemberCommand& a, const core::MemberCommand& b,
+					 const core::Vec2& point)
+		{
+			double aBottom = 0.0;
+			double aTop = 0.0;
+			double bBottom = 0.0;
+			double bTop = 0.0;
+			zRangeAt(a, point, aBottom, aTop);
+			zRangeAt(b, point, bBottom, bTop);
+			return std::min(aTop, bTop) - std::max(aBottom, bBottom) >= -kDimensionZTol;
+		}
+
+		bool sameMember(const core::MemberCommand& a, const core::MemberCommand& b)
+		{
+			return a.layer == b.layer && std::abs(a.start.x - b.start.x) <= kDimensionMergeTol &&
+				   std::abs(a.start.y - b.start.y) <= kDimensionMergeTol &&
+				   std::abs(a.end.x - b.end.x) <= kDimensionMergeTol &&
+				   std::abs(a.end.y - b.end.y) <= kDimensionMergeTol;
+		}
+
+		// 直交格子に沿う材 member を受ける（または横切って支える）直交する材 receiver の芯と、
+		// member の芯の交点。member の端が receiver の側面で止まっていても（登り梁の端は受け材の
+		// 面まで詰めてある。parse/Noboribari）、receiver の芯まで届いたものとみなす。
+		bool receiverCrossing(const core::MemberCommand& member,
+							  const core::MemberCommand& receiver, Crossing& crossing)
+		{
+			const bool eastWest = runsEastWest(member.start, member.end);
+			if (eastWest ? !runsNorthSouth(receiver.start, receiver.end)
+						 : !runsEastWest(receiver.start, receiver.end))
+				return false;
+			const double memberCoord = eastWest ? (member.start.y + member.end.y) / 2.0
+												: (member.start.x + member.end.x) / 2.0;
+			const double receiverCoord = eastWest ? (receiver.start.x + receiver.end.x) / 2.0
+												  : (receiver.start.y + receiver.end.y) / 2.0;
+			const auto within = [](double value, double a, double b, double margin)
+			{ return value >= std::min(a, b) - margin && value <= std::max(a, b) + margin; };
+			if (!within(receiverCoord, eastWest ? member.start.x : member.start.y,
+						eastWest ? member.end.x : member.end.y,
+						(receiver.width / 2.0) + kDimensionMergeTol))
+				return false;
+			if (!within(memberCoord, eastWest ? receiver.start.y : receiver.start.x,
+						eastWest ? receiver.end.y : receiver.end.x,
+						(member.width / 2.0) + kDimensionMergeTol))
+				return false;
+			const core::Vec2 point = eastWest ? core::Vec2{receiverCoord, memberCoord}
+											  : core::Vec2{memberCoord, receiverCoord};
+			if (!meetInZ(member, receiver, point))
+				return false;
+			crossing.point = point;
+			crossing.halfAlong = receiver.width / 2.0;
+			return true;
+		}
+	} // namespace
+
 	std::vector<core::DimensionChainCommand>
 	moyaDimensionChains(const std::vector<core::MemberCommand>& members,
+						const std::vector<core::MemberCommand>& eavesGirders,
+						const std::vector<core::MemberCommand>& receivers,
 						const std::vector<core::ColumnCommand>& columns,
 						const std::vector<core::GridCommand>& grids, const core::Vec2& min,
 						const core::Vec2& max)
 	{
-		// 直交格子に沿う材が通りを作り、斜めの材（登り梁）は通りの材の芯との交点だけを
-		// 押さえる（位置が 1 つの座標で言えない材そのものも、その端＝挿入点も測らない）。
-		std::vector<LineSegment> segments;
+		// 直交格子に沿う材（母屋・登り梁・軒桁）が通りを作り、斜めの材（登り梁）は通りの材の
+		// 芯との交点だけを押さえる（位置が 1 つの座標で言えない材そのものも、その端＝挿入点も
+		// 測らない）。
+		std::vector<const core::MemberCommand*> straights;
 		std::vector<const core::MemberCommand*> diagonals;
-		for (const core::MemberCommand& member : members)
+		for (const std::vector<core::MemberCommand>* from : {&members, &eavesGirders})
 		{
-			if (runsEastWest(member.start, member.end) || runsNorthSouth(member.start, member.end))
-				segments.push_back(LineSegment{member.start, member.end, member.width});
-			else if (std::hypot(member.end.x - member.start.x, member.end.y - member.start.y) >
-					 kDimensionAxisTol)
-				diagonals.push_back(&member);
+			for (const core::MemberCommand& member : *from)
+			{
+				if (runsEastWest(member.start, member.end) ||
+					runsNorthSouth(member.start, member.end))
+					straights.push_back(&member);
+				else if (std::hypot(member.end.x - member.start.x, member.end.y - member.start.y) >
+						 kDimensionAxisTol)
+					diagonals.push_back(&member);
+			}
 		}
-		std::vector<Crossing> crossings;
+		std::vector<LineSegment> segments;
+		segments.reserve(straights.size());
+		for (const core::MemberCommand* straight : straights)
+			segments.push_back(LineSegment{straight->start, straight->end, straight->width});
+
+		CrossingSet crossings;
+		crossings.supportedEndsOnly = true;
 		for (const core::MemberCommand* diagonal : diagonals)
 		{
-			for (const LineSegment& segment : segments)
+			for (const core::MemberCommand* straight : straights)
 			{
 				Crossing crossing;
-				if (crossingPoint(*diagonal, segment, crossing))
-					crossings.push_back(crossing);
+				if (crossingPoint(*diagonal,
+								  LineSegment{straight->start, straight->end, straight->width},
+								  crossing) &&
+					meetInZ(*diagonal, *straight, crossing.point))
+					crossings.items.push_back(crossing);
+			}
+		}
+		// 母屋・登り梁を受ける直交する材（母屋伏図に映らない別のレイヤの材も。い通りの
+		// 登り梁を受ける又 7 通りの材など）の芯。軒桁の通りには足さない（軒桁に取り付く
+		// 小屋梁などまで並べない。軒桁の上で押さえるのは登り梁の交点）。
+		for (const core::MemberCommand& member : members)
+		{
+			if (!runsEastWest(member.start, member.end) &&
+				!runsNorthSouth(member.start, member.end))
+				continue;
+			for (const core::MemberCommand& receiver : receivers)
+			{
+				Crossing crossing;
+				if (!sameMember(member, receiver) && receiverCrossing(member, receiver, crossing))
+					crossings.items.push_back(crossing);
 			}
 		}
 		std::vector<core::Vec2> points;
@@ -1340,9 +1457,8 @@ namespace HomeskzIfcImport::parse
 		case core::PlanKind::Moya:
 			// 母屋・登り梁を床伏図・小屋伏図と同じく通りに沿って押さえ、斜めの登り梁は交点を
 			// 押さえる（垂木は横架材の命令ではないので入らない）。その屋根の軒桁も加える。
-			for (const core::MemberCommand& member : eavesGirders(document, layers))
-				members.push_back(member);
-			return moyaDimensionChains(members, columns, document.grids, min, max);
+			return moyaDimensionChains(members, eavesGirders(document, layers), document.members,
+									   columns, document.grids, min, max);
 		}
 		return {};
 	}

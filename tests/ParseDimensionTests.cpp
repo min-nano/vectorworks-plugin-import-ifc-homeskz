@@ -628,9 +628,10 @@ TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)
 namespace
 {
 	// 軒桁（クラスで見分ける。幅 120）。
-	MemberCommand makeEavesGirder(const std::string& layer, Vec2 start, Vec2 end)
+	MemberCommand makeEavesGirder(const std::string& layer, Vec2 start, Vec2 end,
+								  double elevation = 3264.0)
 	{
-		MemberCommand member = makeMember(layer, start, end, 3264.0);
+		MemberCommand member = makeMember(layer, start, end, elevation);
 		member.drawClass = parse::CLASS_NOKIGETA;
 		member.width = 120.0;
 		return member;
@@ -644,44 +645,84 @@ namespace
 	}
 } // namespace
 
+namespace
+{
+	// 屋根の天端の高さ（1 通り 4770 → 5 通り 2999。軒高 3000 の −1）。
+	double roofTop(double y)
+	{
+		return 4770.0 - (y * 1771.0 / 3640.0);
+	}
+
+	// 屋根面に沿う登り梁（天端を roofTop に合わせる。120×150）。
+	MemberCommand makeRafterBeam(Vec2 start, Vec2 end)
+	{
+		MemberCommand member = makeMember("2-登り梁", start, end, roofTop(start.y));
+		member.endElevation = roofTop(end.y);
+		member.width = 120.0;
+		member.height = 150.0;
+		return member;
+	}
+
+	MemberCommand withSection(MemberCommand member, double width, double height)
+	{
+		member.width = width;
+		member.height = height;
+		return member;
+	}
+} // namespace
+
 TEST(MoyaChainsFollowMembersAndPressDiagonalCrossings)
 {
 	// 添付の母屋伏図（い〜り × 1〜8、910 の格子）に倣った架構。1 通りの棟木（1030〜5460）に
 	// に・へ通りの登り梁が取り付き、3 通りの母屋がそれを横切る。軒桁は 5 通り（い〜り）と
 	// い・り通り（1〜5）。斜めの登り梁 4 本は棟木から軒桁へ渡り、内側の 2 本が 3 通りの
-	// 母屋の端を受ける。い通りと又ち通りの材（3700〜6265）は 5 通りの軒桁から北へ出る。
+	// 母屋の端を受ける。い通りと又ち通りの登り梁（3700〜6265）は 5 通りの軒桁から北へ
+	// 下り、又 7 通り（y=5915）の材（母屋伏図に映らない別のレイヤ）に受けられて先は跳ね出す。
 	//
 	// 材の端（挿入点）は芯の交点からずらしてある: 棟木の端は外側の登り梁の幅の中、3 通りの
 	// 母屋の端は内側の登り梁の幅の中、登り梁は棟木・軒桁の側面（芯から 60）で止まる。
 	// 押さえるのはどれも芯の交点（ご要望）。
 	const Vec2 base1{1030.0, 0.0};
-	const Vec2 top1{134.0, 3640.0};
+	const Vec2 top1{60.0, 3640.0};
 	const Vec2 base2{1365.0, 0.0};
 	const Vec2 top2{500.0, 3640.0};
 	const Vec2 base3{5005.0, 0.0};
 	const Vec2 top3{6300.0, 3640.0};
 	const Vec2 base4{5460.0, 0.0};
-	const Vec2 top4{7146.0, 3640.0};
+	const Vec2 top4{7220.0, 3640.0};
+	// い・又ち通りの登り梁: 5 通りで軒高 −302、北へ下る（120×120）。い 5 の近くで外側の
+	// 登り梁と平面では重なるが、高さが離れている（ご指摘の 420）。
+	const auto northBeam = [](double x)
+	{
+		MemberCommand member = makeMember("2-登り梁", Vec2{x, 3700.0}, Vec2{x, 6265.0}, 2698.0);
+		member.endElevation = 1430.0;
+		return withSection(member, 120.0, 120.0);
+	};
 	const std::vector<MemberCommand> members{
-		makeMember("2-母屋", Vec2{1020.0, 0.0}, Vec2{5470.0, 0.0}, 5000.0),
-		makeMember("2-母屋", Vec2{925.0, 1820.0}, Vec2{2730.0, 1820.0}, 4500.0),
-		makeMember("2-母屋", Vec2{2730.0, 1820.0}, Vec2{4550.0, 1820.0}, 4500.0),
-		makeMember("2-母屋", Vec2{4550.0, 1820.0}, Vec2{5660.0, 1820.0}, 4500.0),
-		makeMember("2-登り梁", Vec2{2730.0, 0.0}, Vec2{2730.0, 3580.0}, 4000.0),
-		makeMember("2-登り梁", Vec2{4550.0, 0.0}, Vec2{4550.0, 3580.0}, 4000.0),
-		// 外側の 2 本は軒桁の隅の近くで止まる。い通りの外側の 1 本は、芯を延ばせば
-		// い通りの材（y≒4184）とも交わるが、そこまでは届いていない（拾わない）。
-		makeMember("2-登り梁", base1, onDiagonal(base1, top1, 3700.0), 4000.0),
-		makeMember("2-登り梁", onDiagonal(base2, top2, 60.0), onDiagonal(base2, top2, 3580.0),
-				   4000.0),
-		makeMember("2-登り梁", onDiagonal(base3, top3, 60.0), onDiagonal(base3, top3, 3580.0),
-				   4000.0),
-		makeMember("2-登り梁", base4, onDiagonal(base4, top4, 3700.0), 4000.0),
-		makeMember("2-登り梁", Vec2{0.0, 3700.0}, Vec2{0.0, 6265.0}, 3500.0),
-		makeMember("2-登り梁", Vec2{6825.0, 3700.0}, Vec2{6825.0, 6265.0}, 3500.0),
-		makeEavesGirder("2-横架材天端", Vec2{0.0, 3640.0}, Vec2{7280.0, 3640.0}),
-		makeEavesGirder("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 3640.0}),
-		makeEavesGirder("2-横架材天端", Vec2{7280.0, 0.0}, Vec2{7280.0, 3640.0})};
+		withSection(makeMember("2-母屋", Vec2{1020.0, 0.0}, Vec2{5470.0, 0.0}, 4830.0), 120.0,
+					210.0),
+		withSection(makeMember("2-母屋", Vec2{925.0, 1820.0}, Vec2{2730.0, 1820.0}, 3900.0), 90.0,
+					90.0),
+		withSection(makeMember("2-母屋", Vec2{2730.0, 1820.0}, Vec2{4550.0, 1820.0}, 3900.0), 90.0,
+					90.0),
+		withSection(makeMember("2-母屋", Vec2{4550.0, 1820.0}, Vec2{5660.0, 1820.0}, 3900.0), 90.0,
+					90.0),
+		makeRafterBeam(Vec2{2730.0, 0.0}, Vec2{2730.0, 3580.0}),
+		makeRafterBeam(Vec2{4550.0, 0.0}, Vec2{4550.0, 3580.0}),
+		// 外側の 2 本は軒桁の隅の近くで、内側の 2 本は棟木・軒桁の側面で止まる。
+		makeRafterBeam(base1, onDiagonal(base1, top1, 3700.0)),
+		makeRafterBeam(onDiagonal(base2, top2, 60.0), onDiagonal(base2, top2, 3580.0)),
+		makeRafterBeam(onDiagonal(base3, top3, 60.0), onDiagonal(base3, top3, 3580.0)),
+		makeRafterBeam(base4, onDiagonal(base4, top4, 3700.0)), northBeam(0.0), northBeam(6825.0)};
+	const std::vector<MemberCommand> eaves{
+		makeEavesGirder("2-横架材天端", Vec2{0.0, 3640.0}, Vec2{7280.0, 3640.0}, 3000.0),
+		makeEavesGirder("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 3640.0}, 3000.0),
+		makeEavesGirder("2-横架材天端", Vec2{7280.0, 0.0}, Vec2{7280.0, 3640.0}, 3000.0)};
+	// 受け材を探す先は文書の全横架材。又 7 通りの材は北の登り梁の下端に天端が接する。
+	std::vector<MemberCommand> receivers = members;
+	receivers.insert(receivers.end(), eaves.begin(), eaves.end());
+	receivers.push_back(
+		makeMember("2-横架材天端", Vec2{-300.0, 5915.0}, Vec2{7580.0, 5915.0}, 1483.0));
 	std::vector<GridCommand> grids;
 	for (int i = 0; i <= 8; ++i)
 		grids.push_back(
@@ -692,7 +733,7 @@ TEST(MoyaChainsFollowMembersAndPressDiagonalCrossings)
 	const Vec2 min{-100.0, -100.0};
 	const Vec2 max{7500.0, 6500.0};
 	const std::vector<DimensionChainCommand> chains =
-		parse::moyaDimensionChains(members, {}, grids, min, max);
+		parse::moyaDimensionChains(members, eaves, receivers, {}, grids, min, max);
 
 	// 下: 1 通りの棟木に取り付く登り梁の芯の交点（又ろ・又又ろ・又へ・と）と、に・へ通りの
 	// 芯。材の端（1020・1350.7・5019.6・5470）は押さえない。全長の端（い・り）まで延ばす。
@@ -700,14 +741,14 @@ TEST(MoyaChainsFollowMembersAndPressDiagonalCrossings)
 				   {0.0, 1030.0, 1365.0, 2730.0, 4550.0, 5005.0, 5460.0, 7280.0}, -100.0, -1, 0));
 	// 上: 5 通りの軒桁に取り付く材の芯（い・に・へ・又ち・り）と、登り梁の芯の交点。
 	CHECK(hasChain(chains, DimensionAxis::Horizontal,
-				   {0.0, 134.0, 500.0, 2730.0, 4550.0, 6300.0, 6825.0, 7146.0, 7280.0}, 6500.0, 1,
+				   {0.0, 60.0, 500.0, 2730.0, 4550.0, 6300.0, 6825.0, 7220.0, 7280.0}, 6500.0, 1,
 				   0));
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 7280.0}, 6500.0, 1, 1));
-	// 左右: 1・5 通りと北の端。軒桁の手前で止まる材の端（3580・3700）と、い通りの材との
-	// 見かけの交点（4184）は押さえない。全長は右。
-	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 3640.0, 6265.0}, -100.0, -1, 0));
-	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 3640.0, 6265.0}, 7500.0, 1, 0));
-	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 6265.0}, 7500.0, 1, 1));
+	// 左右: 1・5 通りと、北の登り梁を受ける又 7 通り。登り梁の端（3580・3700・6265）と、
+	// い通りの登り梁との見かけの交点（高さが離れている）は押さえない。全長は右。
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 3640.0, 5915.0}, -100.0, -1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 3640.0, 5915.0}, 7500.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 5915.0}, 7500.0, 1, 1));
 	// 3 通りの母屋は内部の列（端は登り梁の芯の交点）。に〜へは上下の列にあるので重ねない。
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {932.5, 2730.0}, 1820.0, -1, 0));
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {4550.0, 5652.5}, 1820.0, -1, 0));
@@ -717,10 +758,13 @@ TEST(MoyaChainsFollowMembersAndPressDiagonalCrossings)
 		const std::vector<double> unwanted =
 			chain.axis == DimensionAxis::Horizontal
 				? std::vector<double>{910.0, 1020.0, 1820.0, 3640.0, 5470.0, 6370.0}
-				: std::vector<double>{910.0, 2730.0, 3580.0, 3700.0, 4184.4, 4550.0, 5460.0};
+				: std::vector<double>{910.0, 2730.0, 3580.0, 3700.0, 4550.0, 5460.0, 6265.0};
 		for (const double value : unwanted)
 			CHECK(std::ranges::none_of(chain.stops, [value](double stop)
 									   { return std::abs(stop - value) <= 1.0; }));
+		CHECK(std::ranges::none_of(
+			chain.stops, [&chain](double stop)
+			{ return chain.axis == DimensionAxis::Vertical && stop > 3700.0 && stop < 5900.0; }));
 	}
 }
 
@@ -742,10 +786,12 @@ TEST(MoyaPlanDimensionsMembersOnItsLayersAndTheEavesGirders)
 
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildPlanDimensionCommands(document, sheet);
+	// 上: 軒桁に取り付く母屋・登り梁の芯。軒桁は 2 点を芯で押さえられるので、何とも取り合わ
+	// ない端（挿入点）は押さえない。
 	const DimensionChainCommand* top = findChain(chains, DimensionAxis::Horizontal, 1, 0);
 	CHECK(top != nullptr);
 	if (top != nullptr)
-		CHECK(sameValues(top->stops, {0.0, 455.0, 1365.0, 1820.0}));
+		CHECK(sameValues(top->stops, {455.0, 1365.0}));
 	const DimensionChainCommand* left = findChain(chains, DimensionAxis::Vertical, -1, 0);
 	CHECK(left != nullptr);
 	if (left != nullptr)

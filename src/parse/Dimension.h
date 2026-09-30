@@ -81,7 +81,13 @@
 //	    棟木に取り付く登り梁の位置＝又ろ・又へ など）。**材の端（挿入点）は押さえない**
 //	    （利用者の指定）。登り梁の幅の中で終わる通りの材の端は交点へ押さえ直し、自由端とは
 //	    しない。芯を延ばすのは相手の芯に届くまで（相手の幅の半分を斜めに横切る長さ）だけで、
-//	    浅い角度で遠くを通る材とは交わったことにしない。
+//	    浅い角度で遠くを通る材とは交わったことにしない。**交点は立体で見る**——その点で上下の
+//	    範囲が重なる（接する）ときだけ交わったとする（平面で重なって見えても離れている材を
+//	    拾わない。kDimensionZTol）。
+//	  * **母屋・登り梁は受け材の芯で押さえる。** 母屋・登り梁を受ける（横切って支える）直交
+//	    する材の芯を、母屋伏図に映らない別のレイヤの材も含めて（立体で接するものだけ）測点に
+//	    する。芯で 2 点以上押さえられる通りの材の端（挿入点・跳ね出しの先）は押さえない
+//	    （利用者の指定: い通りの登り梁は 5 通り〜又 7 通り）。
 //	  * **四辺の列を全長の端まで延ばす**（下と左も。1 通りの棟木の列に、い通り〜棟木の端・
 //	    棟木の端〜り通りを出す。利用者の指定）。
 //	  * **ほかの材と取り合わない通りの芯は外周へ出す。** 直交する材と 1 つも取り合わず交点も
@@ -109,6 +115,10 @@ namespace HomeskzIfcImport::parse
 
 	// 材・立上り・通り芯が直交格子に沿うとみなす許容（mm。始点と終点の、直交する座標の差）。
 	inline constexpr double kDimensionAxisTol = 1.0;
+
+	// 母屋伏図で 2 つの材が立体的に取り合うとみなす、上下の範囲の隙間の許容（mm）。登り梁は
+	// 屋根面へ合わせ直してある（parse/Noboribari）ので、受け材の天端とちょうどは接しない。
+	inline constexpr double kDimensionZTol = 10.0;
 
 	// 軸組図のレベル記号の表示名。FL は "{n}FL"（n は 1 始まりの階）。
 	inline constexpr const char* kLevelMarkGL = "GL";
@@ -150,10 +160,13 @@ namespace HomeskzIfcImport::parse
 						   const core::Vec2& max);
 
 	// 母屋伏図 1 枚ぶんの寸法の列（ヘッダ冒頭「母屋伏図も材の通りに沿って押さえる」）。
-	// members はその伏図に映る母屋・登り梁、columns は柱。min / max・列の並びは
+	// members はその伏図に映る母屋・登り梁、eavesGirders は同じ階の軒桁、receivers は
+	// 母屋・登り梁を受ける材を探す先（文書の全横架材）、columns は柱。min / max・列の並びは
 	// framingDimensionChains と同じ。
 	std::vector<core::DimensionChainCommand>
 	moyaDimensionChains(const std::vector<core::MemberCommand>& members,
+						const std::vector<core::MemberCommand>& eavesGirders,
+						const std::vector<core::MemberCommand>& receivers,
 						const std::vector<core::ColumnCommand>& columns,
 						const std::vector<core::GridCommand>& grids, const core::Vec2& min,
 						const core::Vec2& max);
