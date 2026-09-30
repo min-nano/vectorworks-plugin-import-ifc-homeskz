@@ -13,7 +13,8 @@
 //	    隅・T 字は立上りの芯で押さえ、取り合う立上りの無い通り芯は測点にしない。離れた
 //	    立上りの間はまたがない（取り合いの無い一続きだけはつなぐ）。外側に面する立上り
 //	    （段違いの外周を含む）は図の外に並べる。外周の列には外周の立上りに取り合う芯だけが載る。
-//	    外側の列にある寸法は内部の列に重ねない。半島状の立上りは長さも押さえる。
+//	    外側の列にある寸法は内部の列に重ねない。半島状の立上りは長さも押さえる。内部の
+//	    立上りは芯・端の列とアンカーボルトの列を分ける。
 //	  * 伏図の種類ごとに押さえるもの——床伏図は柱と梁（表示レイヤに載るものだけ）、
 //	    母屋伏図は母屋だけ。
 //	  * 軸組図——柱の位置（通り芯を合わせる。図の下）、GL・FL・軒高と標準の横架材天端（図の左）、
@@ -416,6 +417,26 @@ TEST(FoundationChainsSkipSegmentsTheOuterChainsAlreadyShow)
 	for (const DimensionChainCommand& chain : chains)
 		CHECK(!(chain.axis == DimensionAxis::Horizontal && near(chain.base, 600.0)));
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 455.0, 910.0}, 1300.0, 1, 0));
+}
+
+TEST(FoundationChainsSeparateWallCoresFromAnchorBolts)
+{
+	// 矩形の中を x=910 が通り、y=600 の半島状の立上り（910〜1400）が取り合う。x=910 には
+	// アンカーボルトが 1 本（y=300）。立上りの芯・端の列 0/600/1820 を 2 段目に、1 段目には
+	// アンカーボルトの絡む 0/300/600 だけを出す（600〜1820 は 2 段目にある）。
+	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{1895.0, 0.0}),
+										 makeWall(Vec2{-75.0, 1820.0}, Vec2{1895.0, 1820.0}),
+										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 1895.0}),
+										 makeWall(Vec2{1820.0, -75.0}, Vec2{1820.0, 1895.0}),
+										 makeWall(Vec2{910.0, 75.0}, Vec2{910.0, 1745.0}),
+										 makeWall(Vec2{985.0, 600.0}, Vec2{1400.0, 600.0})};
+	const std::vector<SymbolCommand> bolts{makeBolt(Vec2{910.0, 300.0})};
+	const std::vector<DimensionChainCommand> chains = parse::foundationDimensionChains(
+		walls, bolts, {}, Vec2{-75.0, -75.0}, Vec2{1895.0, 1895.0});
+
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 600.0, 1820.0}, 910.0, 1, 1));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 300.0, 600.0}, 910.0, 1, 0));
+	CHECK(!hasChain(chains, DimensionAxis::Vertical, {0.0, 300.0, 600.0, 1820.0}, 910.0, 1, 0));
 }
 
 TEST(FoundationChainsGivePeninsulasTheirLength)

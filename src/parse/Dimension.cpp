@@ -774,36 +774,52 @@ namespace HomeskzIfcImport::parse
 			const int side = base >= middle ? 1 : -1;
 			const std::vector<double>& stops = run->stops.all;
 			const std::vector<double>& cores = run->stops.cores;
-			// 重なる寸法を抜いて、残りを続いている区間ごとの列にする。
-			std::vector<double> piece;
-			const auto flush = [&]()
+			// 重なる寸法（芯・端どうしで、既に書いたもの）を抜いて、残りを続いている区間
+			// ごとの列にし、書いた寸法を覚える。
+			const auto emit = [&](const std::vector<double>& values, int tier)
 			{
-				if (piece.size() >= 2)
-					out.push_back(makeChain(axis, piece, base, side, 0));
-				piece.clear();
-			};
-			for (std::size_t i = 0; i + 1 < stops.size(); ++i)
-			{
-				if (nearAny(cores, stops[i]) && nearAny(cores, stops[i + 1]) &&
-					isWritten(axis, stops[i], stops[i + 1]))
+				std::vector<double> piece;
+				const auto flush = [&]()
 				{
-					flush();
-					continue;
+					if (piece.size() >= 2)
+						out.push_back(makeChain(axis, piece, base, side, tier));
+					piece.clear();
+				};
+				for (std::size_t i = 0; i + 1 < values.size(); ++i)
+				{
+					if (nearAny(cores, values[i]) && nearAny(cores, values[i + 1]) &&
+						isWritten(axis, values[i], values[i + 1]))
+					{
+						flush();
+						continue;
+					}
+					if (piece.empty())
+						piece.push_back(values[i]);
+					piece.push_back(values[i + 1]);
 				}
-				if (piece.empty())
-					piece.push_back(stops[i]);
-				piece.push_back(stops[i + 1]);
-			}
-			flush();
-			remember(axis, stops, cores);
+				flush();
+				remember(axis, values, cores);
+			};
+
+			// **立上りの芯・端の列とアンカーボルトの列を分ける**（ご要望: 現場では立上りの
+			// 位置が決まってからアンカーボルトを置くので、立上りの寸法だけを追えるように）。
+			// アンカーボルトが乗る立上りは、芯・端だけの列を 1 つ外の段に出し、1 段目には
+			// アンカーボルトの絡む寸法だけを残す（芯・端どうしは外の列にあるので抜ける）。
+			// アンカーボルトが無ければ芯・端の列が 1 段目。
+			const bool withBolts = !sameStops(stops, cores);
+			const int coreTier = withBolts ? 1 : 0;
+			emit(cores, coreTier);
+			if (withBolts)
+				emit(stops, 0);
 
 			// 半島状・独立した立上り（自由端で終わる一続き）は長さも押さえる（ご要望:
-			// y3 通りの x0〜x1 の端＝200＋510＋260＝970）。1 区間なら同じなので出さない。
-			if ((run->stops.freeFront || run->stops.freeBack) && stops.size() >= 3 &&
-				!isWritten(axis, stops.front(), stops.back()))
+			// y3 通りの x0〜x1 の端＝200＋510＋260＝970）。芯・端の列と同じなら出さない。
+			if ((run->stops.freeFront || run->stops.freeBack) && cores.size() >= 3 &&
+				!isWritten(axis, cores.front(), cores.back()))
 			{
-				out.push_back(makeChain(axis, {stops.front(), stops.back()}, base, side, 1));
-				remember(axis, {stops.front(), stops.back()}, cores);
+				out.push_back(
+					makeChain(axis, {cores.front(), cores.back()}, base, side, coreTier + 1));
+				remember(axis, {cores.front(), cores.back()}, cores);
 			}
 		}
 		return out;
