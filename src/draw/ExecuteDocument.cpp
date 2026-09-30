@@ -206,11 +206,20 @@ namespace HomeskzIfcImport::draw
 		// M19 耐力壁。**柱の後**に置く: PIO はリセット時に対象レイヤの柱を探して軸組内法を
 		// 決めるので、柱が置かれていないと控えの内法で描かれてしまう。配置先の "n-耐力壁"
 		// レイヤは drawStories が作る（レイヤが無い命令はスキップされる）。
+		// 開発ビルドの取り込み後の測り直し（recheckShearWalls）だけが使う表。**本番ビルドでは
+		// 表を作らない**（検算専用の付帯コストを本番へ漏らさない。CLAUDE.md「検算は開発
+		// ビルドだけに置く」）。
+#if VW_DRAW_VERIFY
+		ObjectHandles shearWallHandles;
+		ObjectHandles* const shearWallHandlesOut = &shearWallHandles;
+#else
+		ObjectHandles* const shearWallHandlesOut = nullptr;
+#endif
 		if (beginPhase("耐力壁を描画しています…", document.shearWalls.size(),
 					   core::DrawPhase::ShearWalls))
 		{
 			std::string note;
-			counts.shearWalls = drawShearWalls(document, progress, &note);
+			counts.shearWalls = drawShearWalls(document, progress, &note, shearWallHandlesOut);
 			addDiagnostics(note);
 		}
 
@@ -268,6 +277,14 @@ namespace HomeskzIfcImport::draw
 			std::string info;
 			recheckColumns(document, columnHandles, &note, &info);
 			addDiagnostics(note);
+			addNotes(info);
+		}
+		// **耐力壁も最後に測り直す**（描かずに内法を求め直すだけ）。取り込み後の最初の
+		// 編集で耐力壁が柱幅の半分ずれる不具合を追っている（draw/ShearWallPio.h の
+		// probeShearWall）。
+		{
+			std::string info;
+			recheckShearWalls(shearWallHandles, &info);
 			addNotes(info);
 		}
 #endif
