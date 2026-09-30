@@ -11,6 +11,8 @@
 #include <array>
 #include <cstddef>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace HomeskzIfcImport::core
 {
@@ -129,5 +131,26 @@ namespace HomeskzIfcImport::core
 			mergedPlanLevels.insert(at, key);
 		else if (!merge && present)
 			mergedPlanLevels.erase(at);
+	}
+
+	bool ImportOptions::isSectionSkipped(const std::string& drawingNumber) const
+	{
+		// 並びに頼らず線形に探す（フィールドは公開なので、setSkippedSections を通さずに
+		// 足されても正しく答える。数は通りの本数＝数十まで）。
+		return std::find(skippedSections.begin(), skippedSections.end(), drawingNumber) !=
+			   skippedSections.end();
+	}
+
+	void ImportOptions::setSkippedSections(const std::vector<std::string>& drawingNumbers)
+	{
+		std::vector<std::string> names;
+		for (const std::string& name : drawingNumbers)
+		{
+			if (!name.empty())
+				names.push_back(name);
+		}
+		std::sort(names.begin(), names.end());
+		names.erase(std::unique(names.begin(), names.end()), names.end());
+		skippedSections = std::move(names);
 	}
 } // namespace HomeskzIfcImport::core

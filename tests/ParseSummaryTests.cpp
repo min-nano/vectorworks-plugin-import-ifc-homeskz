@@ -606,11 +606,14 @@ TEST(format_import_options_lists_every_role_and_marks_the_defaults)
 	CHECK(text.find("図面枠スタイル: 置かない") != std::string::npos);
 	// M31 寸法も同じく末尾に 1 行。既定は「入れない」。
 	CHECK(text.find("寸法規格: 入れない") != std::string::npos);
+	// M34 軸組図から外す通りも末尾に 1 行。既定は「なし」（全部描く）。
+	CHECK(text.find("軸組図から外す通り: なし") != std::string::npos);
 	// 伏図のまとめ方も末尾に 1 行。既定は「まとめない」。
 	CHECK(text.find("伏図のまとめ方: まとめない") != std::string::npos);
-	// 役割の数 ＋ 図面枠・寸法・伏図のまとめ方の 3 行だけ行がある（見出しの 1 行を足した数）。
+	// 役割の数 ＋ 図面枠・寸法・伏図のまとめ方・外す通りの 4 行だけ行がある（見出しの 1 行を
+	// 足した数）。
 	CHECK_EQ(std::ranges::count(text, '\n'),
-			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount) + 3);
+			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount) + 4);
 }
 
 TEST(format_import_options_lists_the_merged_plan_levels)
@@ -647,6 +650,17 @@ TEST(format_import_options_names_the_chosen_dimension_style)
 
 	CHECK(text.find("寸法規格: 構造図 寸法") != std::string::npos);
 	CHECK(text.find("寸法規格: 入れない") == std::string::npos);
+}
+
+TEST(format_import_options_lists_the_skipped_sections_in_name_order)
+{
+	// 外した通りは名前順に並ぶ（選んだ順に依らない）。
+	ImportOptions options;
+	options.setSkippedSections({"Y2", "X1"});
+	std::string const text = formatImportOptions(options);
+
+	CHECK(text.find("軸組図から外す通り: X1, Y2") != std::string::npos);
+	CHECK(text.find("軸組図から外す通り: なし") == std::string::npos);
 }
 
 TEST(format_import_options_says_which_roles_are_skipped)

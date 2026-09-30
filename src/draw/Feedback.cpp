@@ -40,6 +40,7 @@
 #include "draw/HostServices.h"
 #include "draw/ImportRun.h"
 #include "draw/ResultDialog.h"
+#include "draw/SectionPickDialog.h"
 #include "draw/SettingsDialog.h"
 #include "parse/BuildDocument.h"
 #include "parse/Feedback.h"
@@ -1121,6 +1122,15 @@ namespace HomeskzIfcImport::draw
 			if (settings == draw::SettingsOutcome::Cancelled)
 				return false;
 			settingsShown = settings == draw::SettingsOutcome::Accepted;
+			// M34 軸組図にする通りも**1 周目で**尋ね切る（本番の取り込みと同じ順）。
+			// 選んだ結果は設定と一緒に記憶へ入り、続きの周はそれを使う。
+			std::string pickNote;
+			const draw::SettingsOutcome pick = draw::showSectionPicker(
+				parse::buildSectionCandidates(ifcPath, options), options, &pickNote);
+			if (pick == draw::SettingsOutcome::Cancelled)
+				return false;
+			if (!pickNote.empty())
+				settingsNote += (settingsNote.empty() ? "" : " / ") + pickNote;
 		}
 
 		// **尋ねることは全部、取り込みが始まる前に尋ね切る**（draw/Feedback.h）。

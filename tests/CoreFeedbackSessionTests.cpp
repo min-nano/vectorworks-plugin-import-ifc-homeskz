@@ -62,6 +62,8 @@ namespace
 		session.options.setDimensionStandard("構造図 寸法");
 		session.options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}, true);
 		session.options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
+		// M34 軸組図から外す通り（重なった図番の "(2)" も含めて）。
+		session.options.setSkippedSections({"X1", "1(2)", "又い"});
 		return session;
 	}
 
@@ -205,6 +207,9 @@ TEST(feedback_session_round_trips_through_text)
 	// 伏図のまとめ方も運ばれる（落ちると 2 周目以降は伏図の枚数が 1 周目と変わる）。
 	CHECK(after.options.mergedPlanLevels == before.options.mergedPlanLevels);
 	CHECK_EQ(after.options.mergedPlanLevels.size(), std::size_t(2));
+	// M34 外した通りも運ばれる（落ちると 2 周目以降は外したはずの通りまで描く）。
+	CHECK(after.options.skippedSections == before.options.skippedSections);
+	CHECK_EQ(after.options.skippedSections.size(), std::size_t(3));
 }
 
 TEST(feedback_session_without_a_title_block_line_places_none)
@@ -215,6 +220,8 @@ TEST(feedback_session_without_a_title_block_line_places_none)
 	CHECK(session.options.titleBlockStyle().empty());
 	// M31 より前の記憶には dimension の行も無い。**入れない**と読む。
 	CHECK(!session.options.hasDimensions());
+	// M34 より前の記憶には section.skip の行も無い。**全部描く**と読む。
+	CHECK(session.options.skippedSections.empty());
 	// 伏図のまとめ方の行が無い記憶は**まとめない**と読む。
 	CHECK(session.options.mergedPlanLevels.empty());
 }

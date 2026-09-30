@@ -202,4 +202,7 @@ namespace HomeskzIfcImport::parse
 
 	// formatImportOptions が伏図のまとめ方の行に付ける見出し（横架材の高さごとの伏図）。
 	inline constexpr const char* kPlanMergeOptionLabel = "伏図のまとめ方: ";
+
+	// formatImportOptions が軸組図から外す通りの行に付ける見出し（M34）。
+	inline constexpr const char* kSkippedSectionsOptionLabel = "軸組図から外す通り: ";
 } // namespace HomeskzIfcImport::parse

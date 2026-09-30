@@ -144,6 +144,7 @@ src/
     ProgressDialog.{h,cpp}    core::ProgressReporter を VW の進捗ダイアログへ橋渡し
     ResultDialog.{h,cpp}      完了・エラーのダイアログ（短い本文＋折り畳んだ診断ログ欄）
     SettingsDialog.{h,cpp}    取り込み設定ダイアログ（配置するシンボルを名前と絵で選ぶ）
+    SectionPickDialog.{h,cpp} 軸組図にする通りの選択（外した通りは軸組図を描かない。M34）
     Feedback.{h,cpp}          実機フィードバックの往復（取り込みの前に送るか決め、
                               終わったら黙って PR へ投稿。待たないし入れもしない）
     HostServices.{h,cpp}      殻から借りた道具（同梱スクリプトの実行）の置き場所
@@ -269,7 +270,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 軸組図のレベル記号の形と位置（▽ と名前の配置 `levelMarkShape`・起点 `levelMarkStartX`・基準線の長さ `levelLineLength`・帯の見込み `kLevelMarkBandAllowance`） | `core/Layout` |
 | 長さ・文字の単位の換算（インチ → mm `kMillimetersPerInch`・1 インチの pt 数 `kPointsPerInch`・紙の pt → mm `pointsToMillimeters`） | `core/Layout` |
 | 回転して置いた注釈の自身の高さを外接矩形から戻す（`rotatedRectHeight`。45 度近くで解けない境 `kRotatedRectMinConditioning`。傾斜材のデータタグの逃がし量＝`draw/Tag`） | `core/Layout` |
-| 取り込み設定（役割の表 `core::symbolRoles()`・図面枠のスタイル `core::ImportOptions::titleBlock` → `core::Document::titleBlockStyle`・寸法規格 `core::ImportOptions::dimension` → `core::Document::dimensionStandard`） | `core/ImportOptions` |
+| 取り込み設定（役割の表 `core::symbolRoles()`・図面枠のスタイル `core::ImportOptions::titleBlock` → `core::Document::titleBlockStyle`・寸法規格 `core::ImportOptions::dimension` → `core::Document::dimensionStandard`・軸組図から外す通り `core::ImportOptions::skippedSections` → `parse::dropSkippedSections`） | `core/ImportOptions` |
 | 伏図レベルの印（`planLevelTag` / `stripPlanLevelTag` / `planLevelHeightText`。"2-横架材天端(FL-872)" の "(FL-872)" を付ける・外す・高さの表記） | `core/Document.h` |
 | 伏図のまとめ方（`core::PlanLevelKey`・`ImportOptions::mergedPlanLevels`）・設定ダイアログへ運ぶ候補（`core::PlanLevelChoice`） | `core/ImportOptions.h` |
 | 進捗の整形と配分の計算・診断ログのフェーズの行（`beginPhase`） | `core/Progress` |
@@ -295,7 +296,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 伏図レベル（横架材の高さごとの伏図 1 枚ぶん。高さの集め方・まとめ方・標準の決め方・近い／届く伏図レベルの引き方・伏図レベルのレイヤ名とずらし量・横架材の振り分け・設定ダイアログの候補）。共有は `Context::planLevels()` を通す | `parse/PlanLevel` |
 | 柱の span の番号（伏図レベルの通し番号。`spanFromOrdinal` / `spanToOrdinal`） | `parse/Column` |
 | 耐力壁のレイヤレベル名・柱を探す許容 | `parse/ShearWall.h` |
-| 切断面に乗る材の判定（`memberOnCutPlane` / `columnOnCutPlane`。タグと寸法が共有） | `parse/Tag` |
+| 切断面に乗る材・横切る材の判定（`memberOnCutPlane` / `columnOnCutPlane` / `memberCrossesCutPlane`。タグと寸法が共有） | `parse/Tag` |
 | 寸法の測点のまとめ方（`mergeStops` / `unionStops`。許容 `kDimensionMergeTol`）・通り芯の位置（`gridStops`）・レベル記号の表示名 | `parse/Dimension` |
 | 軸組図の図番の一意化（`uniqueSectionNumbers`） | `parse/Section` |
 | 要素の一覧（表示名・助数詞・命令数・描けた数。`kElements`）・完了／エラーの文言（`importOutcome` 等） | `parse/Summary` |

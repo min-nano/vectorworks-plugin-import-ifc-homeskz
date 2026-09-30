@@ -41,7 +41,9 @@
 #include "parse/Story.h"
 #include "parse/Tag.h"
 
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace HomeskzIfcImport::parse
 {
@@ -105,7 +107,14 @@ namespace HomeskzIfcImport::parse
 		// より前**なのは、ストーリが「その階に耐力壁レベル（"n-耐力壁" レイヤ）を作るか」を
 		// この命令の配置先レイヤで決めるため（母屋・登り梁と同じ判定）。コンテキストが 1 回
 		// だけ解析して両者へ配る（parse/Context.h の shearWalls）。
+		//
+		// **高さは上の横架材（補正済み）に合わせ直す**（parse/ShearWall の
+		// fitShearWallsToMembers）。下端＝下の材の天端・上端＝上の材の下端を内法の両端で測るので、
+		// 登り梁の下の耐力壁は上辺が傾き、IFC で横架材に掛かって出る面材も軸組内に収まる。
+		// 屋根面へスナップした後の登り梁に合わせたいので members の後に置く。
 		document.shearWalls = context.shearWalls();
+		fitShearWallsToMembers(document.shearWalls, context.stories(), context.planLevels(),
+							   document.members, document.columns);
 		progress.step();
 
 		// M3 ストーリ: IfcBuildingStorey を解析して StoryCommand を積む（parse/Story）。
@@ -253,5 +262,18 @@ namespace HomeskzIfcImport::parse
 			// 止めない」）。
 			return {};
 		}
+	}
+
+	std::vector<core::SectionCommand> buildSectionCandidates(const std::string& ifcPath,
+															 const core::ImportOptions& options)
+	{
+		// **外す通りを空にして**解析し、軸組図の命令をそのまま候補にする。取り込みと
+		// 同じ buildDocument を通すので、候補と実際に描く通りが食い違わない（切断位置は
+		// 柱・横架材の命令から、映すレイヤはストーリの命令から決まり、どちらも全体の
+		// 解析を要する。大きなホームズ君 IFC でも 0.1 秒程度）。進捗は出さない。
+		core::ImportOptions all = options;
+		all.setSkippedSections({});
+		core::NullProgressReporter noProgress;
+		return buildDocument(ifcPath, noProgress, all).sections;
 	}
 } // namespace HomeskzIfcImport::parse

@@ -15,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace HomeskzIfcImport::core
 {
@@ -125,6 +126,10 @@ namespace HomeskzIfcImport::core
 		// 書く。**1 つにつき 1 行**で "<階の番号>:<高さ mm>"（core::PlanLevelKey）。
 		for (const PlanLevelKey& key : session.options.mergedPlanLevels)
 			out << "merge.level=" << key.story << ":" << key.height << "\n";
+		// M34 軸組図から外す通り（図番）。図面枠と同じ理由で漏らさず書く——書き落とすと
+		// 続きの周が外したはずの通りまで描く。レイヤと同じく**1 本 1 行**。
+		for (const std::string& number : session.options.skippedSections)
+			out << "section.skip=" << sanitize(number) << "\n";
 		return out.str();
 	}
 
@@ -211,6 +216,17 @@ namespace HomeskzIfcImport::core
 				const int height = parseInt(value.substr(colon + 1), -1);
 				if (story >= 0 && height >= 0)
 					session.options.setMergeWithPrevious(PlanLevelKey{story, height}, true);
+			}
+			else if (key == "section.skip")
+			{
+				// **重ねて読む**（行の数だけ通りがある）。古い記憶（M34 より前）には行が
+				// 無い——既定の空（全部描く）のまま読む。
+				if (!value.empty())
+				{
+					std::vector<std::string> skipped = session.options.skippedSections;
+					skipped.push_back(value);
+					session.options.setSkippedSections(skipped);
+				}
 			}
 			else if (key.starts_with("role."))
 			{

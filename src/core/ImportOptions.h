@@ -1,7 +1,7 @@
 //
 //	core/ImportOptions.h
 //
-//	取り込みの設定（インポート時の設定ダイアログで決める値）。中身は 3 つ:
+//	取り込みの設定（インポート時の設定ダイアログで決める値）。中身は 4 つ:
 //	  * **置換するシンボルの対応**——「どの要素を図面のどのシンボルで置くか」。要素ごとの
 //	    既定名（"アンカーボルト_M12" / "床束" / "鋼製火打" / "仕口" / 伏図記号 / "継手"）を
 //	    図面にある別のシンボルへ差し替えられるようにする（docs/DEV-NOTES.md M20）。
@@ -12,6 +12,9 @@
 //	  * **伏図のまとめ方**——横架材の高さごとに作る伏図のうち、どのレベルを前のレベルと
 //	    同じ伏図にまとめるか。既定は「まとめない」＝高さごとに 1 枚（docs/DEV-NOTES.md
 //	    「横架材の高さごとに伏図を作る」）。
+
+//	  * **軸組図から外す通り**——解析が軸組図にする通りのうち、描かないもの
+//	    （docs/DEV-NOTES.md M34）。空なら従来どおり全部描く。
 //
 //	【なぜ core/ に置くか】設定は**両フェーズにまたがる**唯一の入力である:
 //	  * 決めるのは描画側（draw/SettingsDialog）——図面にどんなシンボルがあるかは
@@ -41,8 +44,8 @@
 #include <array>
 #include <compare>
 #include <cstddef>
-#include <vector>
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::core
 {
@@ -159,6 +162,20 @@ namespace HomeskzIfcImport::core
 		// bugprone-exception-escape に掛かる（tidy-windows で実際に落ちた）。
 		std::vector<PlanLevelKey> mergedPlanLevels;
 
+		// M34 軸組図から**外す**通りの図番（core::SectionCommand の viewport.drawingNumber。
+		// "X1" / "い" / 方向をまたいで重なったときの "1(2)" …）。**空＝全部描く**。
+		//
+		// 【なぜ「描く通り」ではなく「外す通り」を持つか】候補（どの通りを軸組図にするか）
+		// は IFC を解析して初めて決まる。「描く」側を持つと、既定（何も選んでいない）が
+		// 「1 枚も描かない」になり、設定ダイアログを出さずに取り込む経路（実機テストの周・
+		// 設定を出せなかったとき）で軸組図が消える。外す側を持てば**既定の空が従来と同じ
+		// 振る舞い**になる（役割の表の既定名・図面枠の空と同じ考え方）。
+		//
+		// 【なぜ図番で指すか】図番は解析が通りごとに一意に付ける（parse/Section.h の
+		// uniqueSectionNumbers）ので、同じ IFC を解析し直せば同じ通りに同じ図番が付く
+		// ——選ぶための解析と取り込むための解析とで、同じ通りを指せる。
+		std::vector<std::string> skippedSections;
+
 		ImportOptions();
 
 		// 役割に対応するシンボル名。**取り込まない役割の名前は意味を持たない**
@@ -200,5 +217,12 @@ namespace HomeskzIfcImport::core
 
 		// そのレベルを前のレベルと同じ伏図にまとめるかを決める。
 		void setMergeWithPrevious(const PlanLevelKey& key, bool merge);
+
+		// M34 その図番の通りを軸組図から外すか。
+		bool isSectionSkipped(const std::string& drawingNumber) const;
+
+		// M34 外す通りの図番を差し替える（重複・空文字は落とし、名前順に並べ直す
+		// ——ログに出す並びを入力順に依らせないため。CLAUDE.md「決定性を守る」）。
+		void setSkippedSections(const std::vector<std::string>& drawingNumbers);
 	};
 } // namespace HomeskzIfcImport::core

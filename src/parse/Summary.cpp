@@ -527,6 +527,13 @@ namespace HomeskzIfcImport::parse
 				<< "番目の階の GL" << (key.height < 0 ? "" : "+") << key.height
 				<< " を前のレベルとまとめる";
 		}
+		// M34 軸組図から外す通り。「軸組図が足りない」の切り分けは、まず外していないかを
+		// 見るところから始まる。並びは設定が名前順に揃えたもの（core/ImportOptions.h）。
+		out << "\n  " << kSkippedSectionsOptionLabel;
+		if (options.skippedSections.empty())
+			out << "なし";
+		for (std::size_t i = 0; i < options.skippedSections.size(); ++i)
+			out << (i == 0 ? "" : ", ") << options.skippedSections[i];
 		return out.str();
 	}
 } // namespace HomeskzIfcImport::parse

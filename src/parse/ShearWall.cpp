@@ -18,7 +18,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
-#include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -139,11 +139,31 @@ namespace HomeskzIfcImport::parse
 			return extent;
 		}
 
-		// span 柱レイヤの base ストーリ（0 起点。from の伏図レベルが属する階）が index の柱
-		// だけを集める。
+		// span 柱レイヤ（from〜to）が伏図レベル level（通し番号。parse/PlanLevel）を
+		// **通っている**か。耐力壁はその伏図レベルの横架材の天端に立つ。
+		//
+		// ★**base がその階の柱だけでは足りない。** 通し柱は下の階を base とするレイヤ
+		// （"1to3-柱"）に置かれるので、base だけで絞ると 2 階の耐力壁は壁端の通し柱を
+		// 見失い、柱芯へ寄らず控えの内法で描かれる。その伏図レベルを下端以下に、
+		// 上端をそれより上に持つ span なら、その高さの壁の端に立ちうる。
+		// 管柱 "1to2" は 2 階（伏図レベル 2）を通らない（to == 2 はその床で止まる）。
+		// span の番号は伏図レベルの通し番号なので（どの階も高さが 1 つなら階の番号）、
+		// スキップフロアでも「その高さの床を通るか」がそのまま言える。
+		bool spanCoversLevel(double from, double to, double level)
+		{
+			return from <= level + core::kPointEps && to > level + core::kPointEps;
+		}
+
+		// 耐力壁が立つ伏図レベルの通し番号。伏図レベルが無ければ階の番号（index + 1）。
+		double wallLevelOrdinal(const PlanLevel* level, std::size_t index)
+		{
+			return level != nullptr ? static_cast<double>(level->ordinal)
+									: static_cast<double>(index) + 1.0;
+		}
+
+		// 伏図レベル level を通る span 柱レイヤの柱を集める（spanCoversLevel）。
 		std::vector<const core::ColumnCommand*>
-		columnsOfStory(const std::vector<core::ColumnCommand>& columns,
-					   const std::vector<PlanLevel>& levels, std::size_t index)
+		columnsAtLevel(const std::vector<core::ColumnCommand>& columns, double level)
 		{
 			std::vector<const core::ColumnCommand*> found;
 			for (const core::ColumnCommand& column : columns)
@@ -152,11 +172,27 @@ namespace HomeskzIfcImport::parse
 				double to = 0.0;
 				if (!parseSpanLayer(column.layer, from, to))
 					continue;
-				if (storyOfOrdinal(levels, from) == index)
+				if (spanCoversLevel(from, to, level))
 					found.push_back(&column);
 			}
 			return found;
 		}
+
+		// 伏図レベル level を通る span 柱レイヤ名を (from, to) 昇順で集める
+		// （PIO の TargetLayers。columnsAtLevel と同じ判定）。
+		std::vector<std::string> columnLayersAtLevel(const std::vector<ColumnSpan>& spans,
+													 double level)
+		{
+			std::vector<std::string> layers;
+			for (const ColumnSpan& span : spans)
+			{
+				if (spanCoversLevel(span.from, span.to, level))
+					layers.push_back(span.layer);
+			}
+			return layers;
+			// 閉じ括弧は push_back が例外を投げたときの後始末（layers の破棄）にしか通らず、
+			// テストでは踏めない（gcov の "====="）。その 1 行だけを計測から外す。
+		} // GCOVR_EXCL_LINE
 
 		// 点に最も近い柱を返す（許容内に無ければ nullptr）。同距離なら**先に現れた柱**を
 		// 採るので、列挙順に依存しない決定的な結果になる（columns の並びが決定的なため）。
@@ -291,6 +327,224 @@ namespace HomeskzIfcImport::parse
 			}
 			return groups;
 		}
+
+		// 耐力壁の軸に載る横架材 1 本を、軸の座標（始点からの距離 s）で表したもの。
+		struct AxisBeam
+		{
+			const core::MemberCommand* member = nullptr;
+			double from = 0.0; // 材の実際の範囲（端部オフセット込み）の s
+			double to = 0.0;   //
+		};
+
+		// 軸（start から axis の向き）に載る横架材を集める。軸と平行で、軸が材の芯線上
+		// （半幅の内）にあるものだけ。
+		std::vector<AxisBeam> beamsOnAxis(const std::vector<core::MemberCommand>& members,
+										  const Vec2& start, const Vec2& axis)
+		{
+			std::vector<AxisBeam> found;
+			for (const core::MemberCommand& member : members)
+			{
+				const Vec2 run = member.end - member.start;
+				const double length = std::hypot(run.x, run.y);
+				if (length < core::kPointEps)
+					continue;
+				const Vec2 dir = run * (1.0 / length);
+				if (std::abs((axis.x * dir.y) - (axis.y * dir.x)) > kShearWallBeamParallelTol)
+					continue;
+				const Vec2 rel = start - member.start;
+				if (std::abs((rel.x * dir.y) - (rel.y * dir.x)) >
+					(member.width / 2.0) + kShearWallBeamLateralTol)
+					continue;
+
+				// 実際の範囲（負のオフセット＝短く）を軸の s へ写す。
+				const double sStart = dot2(member.start - start, axis);
+				const double sign = dot2(dir, axis) >= 0.0 ? 1.0 : -1.0;
+				const double a = sStart + (sign * -member.startOffset);
+				const double b = sStart + (sign * (length + member.endOffset));
+				found.push_back(AxisBeam{&member, std::min(a, b), std::max(a, b)});
+			}
+			return found;
+		}
+
+		// 軸上の 1 点で見つけた上下の横架材の高さ（絶対 Z）。見つからない側は空。
+		struct BeamBounds
+		{
+			std::optional<double> upper; // 上の材の下端
+			std::optional<double> lower; // 下の材の天端
+		};
+
+		// 軸上の点 s の真上・真下の横架材を探す。mid より上に下端がある材から最も低い下端を、
+		// mid より下に天端がある材から最も高い天端を採る。探すのは IFC の要素自身の上端
+		// ifcTop・下端 ifcBottom から kShearWallBeamSearch 以内。
+		BeamBounds beamBoundsAt(const std::vector<AxisBeam>& beams, const Vec2& start,
+								const Vec2& axis, double s, double mid, double ifcBottom,
+								double ifcTop)
+		{
+			const Vec2 point = start + (axis * s);
+			BeamBounds found;
+			for (const AxisBeam& beam : beams)
+			{
+				if (s < beam.from - kShearWallBeamCoverTol || s > beam.to + kShearWallBeamCoverTol)
+					continue;
+				const core::MemberCommand& member = *beam.member;
+				const Vec2 run = member.end - member.start;
+				const double length = std::hypot(run.x, run.y);
+				const double along = dot2(point - member.start, run * (1.0 / length));
+
+				// その点での天端と下端。傾斜梁の断面は材軸に直交するので、鉛直に測った
+				// せいは せい/cosθ になる（parse/Member「登り梁の直切りの幾何」と同じ）。
+				const double rise = member.endElevation - member.elevation;
+				const double top = member.elevation + (rise * along / length);
+				const double bottom = top - (member.height * std::hypot(length, rise) / length);
+
+				if (bottom >= mid && std::abs(bottom - ifcTop) <= kShearWallBeamSearch)
+				{
+					if (!found.upper.has_value() || bottom < *found.upper)
+						found.upper = bottom;
+				}
+				else if (top <= mid && std::abs(top - ifcBottom) <= kShearWallBeamSearch)
+				{
+					if (!found.lower.has_value() || top > *found.lower)
+						found.lower = top;
+				}
+			}
+			return found;
+		}
+
+		// 測る点（軸の s）を並べる。内法の両端と、内法に入る**材の端の両側**（上下の材が
+		// 入れ替わりうる点）、さらに隣り合う点の中点。上下の材の高さは材の端のあいだでは
+		// 直線なので、これで段差を取りこぼさない。
+		std::vector<double> samplePoints(const std::vector<AxisBeam>& beams, double clearStart,
+										 double clearEnd)
+		{
+			std::vector<double> points{clearStart, clearEnd};
+			for (const AxisBeam& beam : beams)
+			{
+				for (const double edge : {beam.from, beam.to})
+				{
+					for (const double s :
+						 {edge - kShearWallBeamBreakGap, edge + kShearWallBeamBreakGap})
+					{
+						if (s > clearStart && s < clearEnd)
+							points.push_back(s);
+					}
+				}
+			}
+			std::ranges::sort(points);
+			const auto [first, last] = std::ranges::unique(
+				points, [](double a, double b) { return std::abs(a - b) < core::kPointEps; });
+			points.erase(first, last);
+
+			std::vector<double> withMids;
+			withMids.reserve((points.size() * 2) - 1);
+			for (std::size_t i = 0; i < points.size(); ++i)
+			{
+				if (i > 0)
+					withMids.push_back((points[i - 1] + points[i]) / 2.0);
+				withMids.push_back(points[i]);
+			}
+			return withMids;
+		}
+
+		// 柱芯 point に立つ柱の半幅（その階の span 柱から探す。柱が無ければ 0＝軸の端が
+		// そのまま内法の端）。buildShearWallCommands が柱芯を start / end に入れているので、
+		// 同じ点の柱がそのまま見つかる。
+		double halfColumnWidthAt(const std::vector<const core::ColumnCommand*>& columns,
+								 const Vec2& point)
+		{
+			for (const core::ColumnCommand* column : columns)
+			{
+				if (core::samePoint(column->position, point))
+					return column->width / 2.0;
+			}
+			return 0.0;
+		}
+
+		// 耐力壁 1 枚の高さを上下の横架材に合わせる（fitShearWallsToMembers の本体）。
+		// layerZ は配置先レイヤ平面の絶対 Z。測れない・潰れるときは wall を変えない。
+		void fitShearWall(ShearWallCommand& wall, double layerZ,
+						  const std::vector<core::MemberCommand>& members,
+						  const std::vector<const core::ColumnCommand*>& columns)
+		{
+			const Vec2 run = wall.end - wall.start;
+			const double length = std::hypot(run.x, run.y);
+			if (length < core::kPointEps)
+				return;
+			const Vec2 axis = run * (1.0 / length);
+
+			// 内法の両端（軸の始点からの距離）。
+			const double clearStart = halfColumnWidthAt(columns, wall.start);
+			const double clearEnd = length - halfColumnWidthAt(columns, wall.end);
+			if (clearEnd - clearStart < core::kPointEps)
+				return;
+
+			const double ifcBottom = layerZ + wall.bottomHeight;
+			const double ifcTop = layerZ + std::max(wall.topHeight, wall.topHeightEnd);
+			const double mid = (ifcBottom + ifcTop) / 2.0;
+
+			const std::vector<AxisBeam> beams = beamsOnAxis(members, wall.start, axis);
+			const std::vector<double> points = samplePoints(beams, clearStart, clearEnd);
+			std::vector<BeamBounds> samples;
+			samples.reserve(points.size());
+			for (const double s : points)
+				samples.push_back(beamBoundsAt(beams, wall.start, axis, s, mid, ifcBottom, ifcTop));
+
+			// 上端。両端とも取れて、両端を結ぶ直線がどの点でも上の材の下端に載るなら
+			// その直線（登り梁・水平の梁）。載らない（段差梁）・片端しか取れないなら、
+			// 取れた点のうち**最も高い**値で水平にそろえる——梁下に隙間が空く表現は不可で、
+			// 低い側の梁とは重なってよい（実機確認でのご指示）。
+			double topAtStart = layerZ + wall.topHeight;
+			double topAtEnd = layerZ + wall.topHeightEnd;
+			const std::optional<double> upperStart = samples.front().upper;
+			const std::optional<double> upperEnd = samples.back().upper;
+			bool straight = upperStart.has_value() && upperEnd.has_value();
+			std::optional<double> highestUpper;
+			for (std::size_t k = 0; k < samples.size(); ++k)
+			{
+				const std::optional<double>& upper = samples[k].upper;
+				if (!upper.has_value())
+					continue;
+				if (!highestUpper.has_value() || *upper > *highestUpper)
+					highestUpper = upper;
+				if (straight)
+				{
+					const double ratio = (points[k] - clearStart) / (clearEnd - clearStart);
+					const double line = *upperStart + ((*upperEnd - *upperStart) * ratio);
+					if (std::abs(line - *upper) > kShearWallStepTol)
+						straight = false;
+				}
+			}
+			if (straight)
+			{
+				topAtStart = *upperStart;
+				topAtEnd = *upperEnd;
+			}
+			else if (highestUpper.has_value())
+			{
+				topAtStart = *highestUpper;
+				topAtEnd = *highestUpper;
+			}
+
+			// 下端。PIO は下端を 1 つしか持たないので、取れた点のうち**最も低い**天端
+			// （上端と同じく、段差のある梁との間に隙間を空けない。実機確認でのご指示）。
+			double bottom = ifcBottom;
+			std::optional<double> lowestLower;
+			for (const BeamBounds& sample : samples)
+			{
+				if (sample.lower.has_value() &&
+					(!lowestLower.has_value() || *sample.lower < *lowestLower))
+					lowestLower = sample.lower;
+			}
+			if (lowestLower.has_value())
+				bottom = *lowestLower;
+
+			// 測り直した内法が潰れるなら（上下の材の取り違え）、IFC の高さのまま残す。
+			if (topAtStart <= bottom || topAtEnd <= bottom)
+				return;
+			wall.bottomHeight = bottom - layerZ;
+			wall.topHeight = topAtStart - layerZ;
+			wall.topHeightEnd = topAtEnd - layerZ;
+		}
 	} // namespace
 
 	bool isShearBrace(const Entity& element)
@@ -411,10 +665,9 @@ namespace HomeskzIfcImport::parse
 
 		// 通り芯と同じセンタリングオフセット（通り芯が無ければ (0,0)＝生の IFC 座標）。
 		const Vec2 center = context.gridCenter();
+		const std::vector<ColumnSpan> columnSpans = collectColumnSpans(columns);
 		// 伏図レベル（parse/PlanLevel）。耐力壁は立つ天端の伏図レベルのレイヤへ置く。
 		const std::vector<PlanLevel>& levels = context.planLevels();
-		const std::map<int, std::vector<std::string>> columnLayers =
-			collectColumnLayersByStory(columns, levels);
 
 		std::vector<ShearWallCommand> commands;
 		for (std::size_t i = 0; i < stories.size(); ++i)
@@ -423,11 +676,6 @@ namespace HomeskzIfcImport::parse
 			// レイヤ平面（ストーリ相対）＝その階の横架材天端。最上階は軒高＝0。伏図レベルの
 			// レイヤはそこから伏図レベルの高さのぶんずれる（下のループ）。
 			const double storyLayerZ = story.isTop ? 0.0 : story.beamOffset;
-			const auto layerList = columnLayers.find(static_cast<int>(i));
-			const std::string targets =
-				layerList == columnLayers.end() ? std::string() : joinLayers(layerList->second);
-			const std::vector<const core::ColumnCommand*> storyColumns =
-				columnsOfStory(columns, levels, i);
 
 			for (const Group& group : collectGroups(model, context.storyElements(story.id)))
 			{
@@ -435,7 +683,8 @@ namespace HomeskzIfcImport::parse
 				const ShearWallPiece& first = group.pieces.front();
 
 				// 耐力壁は下の横架材の天端に立つので、下端にいちばん近い伏図レベルの
-				// "n-耐力壁" レイヤへ置く（伏図はその階自身の耐力壁を映す。M19）。
+				// "n-耐力壁" レイヤへ置く（伏図はその階自身の耐力壁を映す。M19）。柱も
+				// その伏図レベルを通るものから探す（spanCoversLevel）。
 				const PlanLevel* planLevel =
 					nearestPlanLevel(levels, i, story.elevation + extent.zBottom);
 				const std::string layer = planLevel != nullptr
@@ -443,6 +692,10 @@ namespace HomeskzIfcImport::parse
 											  : storyLayerName(i, story.isTop, kLevelShearWall);
 				const double layerZ =
 					storyLayerZ + (planLevel != nullptr ? planLevelShift(*planLevel, story) : 0.0);
+				const double ordinal = wallLevelOrdinal(planLevel, i);
+				const std::string targets = joinLayers(columnLayersAtLevel(columnSpans, ordinal));
+				const std::vector<const core::ColumnCommand*> storyColumns =
+					columnsAtLevel(columns, ordinal);
 
 				// 要素自身の端（センタリング済み）で柱を探す。面材は壁芯から板厚ぶん
 				// 外れているが、探す許容（kShearWallColumnTol）に対しては誤差の範囲。
@@ -503,6 +756,7 @@ namespace HomeskzIfcImport::parse
 				command.clearSpan = clear;
 				command.bottomHeight = extent.zBottom - layerZ;
 				command.topHeight = extent.zTop - layerZ;
+				command.topHeightEnd = command.topHeight; // 上下の横架材で測り直す（後処理）
 
 				if (group.kind == core::ShearWallKind::Brace)
 				{
@@ -533,6 +787,48 @@ namespace HomeskzIfcImport::parse
 	{
 		Context context(model);
 		return buildShearWallCommands(context, context.columns());
+	}
+
+	void fitShearWallsToMembers(std::vector<ShearWallCommand>& walls,
+								const std::vector<StoryInfo>& stories,
+								const std::vector<PlanLevel>& levels,
+								const std::vector<core::MemberCommand>& members,
+								const std::vector<core::ColumnCommand>& columns)
+	{
+		// 1 つのレイヤ（＝伏図レベル）ぶんを測り直す。layerZ はそのレイヤ平面の絶対 Z。
+		const auto fitLayer = [&](const std::string& layer, double layerZ, double ordinal)
+		{
+			const std::vector<const core::ColumnCommand*> levelColumns =
+				columnsAtLevel(columns, ordinal);
+			for (ShearWallCommand& wall : walls)
+			{
+				if (wall.layer == layer)
+					fitShearWall(wall, layerZ, members, levelColumns);
+			}
+		};
+		// 伏図レベルが無い（単体テストで階だけを渡した）ときは階ごと＝従来どおり。
+		if (levels.empty())
+		{
+			for (std::size_t i = 0; i < stories.size(); ++i)
+			{
+				const StoryInfo& story = stories[i];
+				// レイヤ平面（絶対 Z）＝その階の横架材天端（最上階は軒高）。
+				fitLayer(storyLayerName(i, story.isTop, kLevelShearWall), beamTopElevation(story),
+						 static_cast<double>(i) + 1.0);
+			}
+			return;
+		}
+		// 耐力壁は立つ天端の伏図レベルのレイヤに居る（buildShearWallCommands）。レイヤ平面は
+		// その階の横架材天端を伏図レベルの高さのぶんずらしたもの（parse/PlanLevel）。
+		for (const PlanLevel& level : levels)
+		{
+			if (level.story >= stories.size())
+				continue;
+			const StoryInfo& story = stories[level.story];
+			fitLayer(planLevelLayer(level, story, kLevelShearWall),
+					 beamTopElevation(story) + planLevelShift(level, story),
+					 static_cast<double>(level.ordinal));
+		}
 	}
 
 	bool anyShearWallOnLayer(const std::vector<ShearWallCommand>& walls, const std::string& layer)

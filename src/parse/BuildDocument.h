@@ -54,4 +54,12 @@ namespace HomeskzIfcImport::parse
 	// ので、どんな高さがあるかを先に見せる。読めなければ空（ダイアログはまとめる行なしで
 	// 出る。取り込みは止めない）。
 	std::vector<core::PlanLevelChoice> scanPlanLevelChoices(const std::string& ifcPath);
+
+	// M34 軸組図にする通りの**候補**（取り込みの前に、描く通りを選ばせるため）。
+	// options の外す通り（skippedSections）を**無視して**解析し、軸組図の命令を返す
+	// ——並び・図番は、同じ options で取り込んだときに描かれる軸組図と一致する
+	// （外す通りは図番を一意にした後で除くので、残る通りの図番は変わらない。
+	// parse/Section.h 冒頭「外す通り」）。
+	std::vector<core::SectionCommand> buildSectionCandidates(const std::string& ifcPath,
+															 const core::ImportOptions& options);
 } // namespace HomeskzIfcImport::parse
