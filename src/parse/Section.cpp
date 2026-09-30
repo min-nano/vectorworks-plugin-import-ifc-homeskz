@@ -12,6 +12,7 @@
 
 #include "parse/Section.h"
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 #include "parse/Context.h"
 #include "parse/Grid.h"
 #include "parse/StructuralClass.h"
@@ -385,6 +386,15 @@ namespace HomeskzIfcImport::parse
 		}
 	}
 
+	void dropSkippedSections(std::vector<core::SectionCommand>& commands,
+							 const core::ImportOptions& options)
+	{
+		if (options.skippedSections.empty())
+			return;
+		std::erase_if(commands, [&options](const core::SectionCommand& command)
+					  { return options.isSectionSkipped(command.viewport.drawingNumber); });
+	}
+
 	int sectionSheetStartNumber(const std::vector<core::SheetCommand>& sheets)
 	{
 		// 伏図の番号は数字の文字列（"1" / "2" …）。**数字として読めたものだけ**を見て、その
@@ -466,6 +476,8 @@ namespace HomeskzIfcImport::parse
 		// uniqueSectionNumbers）。名前は方向ごとに採るので、連結したここが両方向の綴りを
 		// 突き合わせられる唯一の場所である。
 		uniqueSectionNumbers(commands);
+		// **外すのは図番を一意にした後**（parse/Section.h 冒頭「外す通り」）。
+		dropSkippedSections(commands, context.options());
 		return commands;
 	}
 

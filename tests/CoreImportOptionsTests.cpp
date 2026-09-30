@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 using HomeskzIfcImport::core::defaultSymbolName;
 using HomeskzIfcImport::core::ImportOptions;
@@ -157,6 +158,35 @@ TEST(import_options_dimensions_are_off_by_default_and_keep_an_empty_name_as_off)
 	options.setDimensionStandard("");
 	CHECK(!options.hasDimensions());
 	CHECK(options.dimensionStandard().empty());
+}
+
+TEST(import_options_skip_no_sections_by_default)
+{
+	// M34 既定は「外す通りなし」＝従来どおり全部描く（設定ダイアログを出さない経路でも
+	// 軸組図が消えない。core/ImportOptions.h の skippedSections）。
+	const ImportOptions options;
+	CHECK(options.skippedSections.empty());
+	CHECK(!options.isSectionSkipped("X1"));
+	CHECK(!options.isSectionSkipped(""));
+}
+
+TEST(import_options_skipped_sections_are_sorted_unique_and_non_empty)
+{
+	// 空文字・重複は落とし、名前順に並べ直す（ログの並びを選んだ順に依らせない）。
+	ImportOptions options;
+	options.setSkippedSections({"Y2", "", "X1", "Y2", "又い"});
+	CHECK_EQ(options.skippedSections.size(), std::size_t(3));
+	CHECK_EQ(options.skippedSections[0], std::string("X1"));
+	CHECK_EQ(options.skippedSections[1], std::string("Y2"));
+	CHECK(options.isSectionSkipped("X1"));
+	CHECK(options.isSectionSkipped("又い"));
+	CHECK(!options.isSectionSkipped("X2"));
+	CHECK(!options.isSectionSkipped(""));
+
+	// 差し替えは前の選択を残さない。
+	options.setSkippedSections(std::vector<std::string>{});
+	CHECK(options.skippedSections.empty());
+	CHECK(!options.isSectionSkipped("X1"));
 }
 
 TEST_MAIN();
