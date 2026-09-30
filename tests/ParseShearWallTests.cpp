@@ -445,6 +445,47 @@ TEST(shear_wall_fixture_target_layers_name_real_span_layers)
 	}
 }
 
+TEST(shear_wall_fixture_target_layers_include_through_columns)
+{
+	// 柱を探すレイヤは**その階を通る** span 柱レイヤすべて。2 階の壁端の通し柱は 1 階を
+	// base とするレイヤ（"1to3-柱"）に載るので、base だけで絞ると取り逃がす（実機で
+	// 耐力壁 PIO が壁端の通し柱を認識しなかった不具合）。逆に 2 階の床で止まる管柱
+	// （"1to2-柱"）は 2 階の壁の端には立たないので挙げない。
+	std::size_t throughEnds = 0;
+	for (const auto& name : allFixtures())
+	{
+		const Document& document = fixtureDocument(name);
+		for (const ShearWallCommand& wall : document.shearWalls)
+		{
+			// レイヤ接頭辞は "{index+1}"（最上階の "R" には床の上に立つ柱が無いので見ない）。
+			const std::size_t dash = wall.layer.find('-');
+			CHECK(dash != std::string::npos);
+			if (dash == 0 || dash == std::string::npos ||
+				!std::ranges::all_of(wall.layer.substr(0, dash),
+									 [](char c) { return c >= '0' && c <= '9'; }))
+				continue;
+			const double level = std::stod(wall.layer.substr(0, dash));
+			const std::string targets = ";" + wall.targetLayers + ";";
+			for (const core::ColumnCommand& column : document.columns)
+			{
+				double from = 0.0;
+				double to = 0.0;
+				if (!parse::parseSpanLayer(column.layer, from, to))
+					continue;
+				const bool covers = from <= level && to > level;
+				const bool listed = targets.find(";" + column.layer + ";") != std::string::npos;
+				CHECK_EQ(listed, covers);
+				// 下の階から通っている柱に端が載った壁を数える。
+				if (covers && from < level &&
+					(core::samePoint(column.position, wall.start) ||
+					 core::samePoint(column.position, wall.end)))
+					++throughEnds;
+			}
+		}
+	}
+	CHECK(throughEnds > 0); // 通し柱に端が載る上階の耐力壁がフィクスチャに実在する
+}
+
 TEST(shear_wall_fixture_is_deterministic)
 {
 	bool ok = false;

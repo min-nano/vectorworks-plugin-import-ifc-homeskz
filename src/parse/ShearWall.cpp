@@ -17,7 +17,6 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
-#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -138,7 +137,20 @@ namespace HomeskzIfcImport::parse
 			return extent;
 		}
 
-		// span 柱レイヤの base ストーリ（0 起点）が index の柱だけを集める。
+		// span 柱レイヤ（from〜to）が 0 起点のストーリ index を**通っている**か。
+		//
+		// ★**base がその階の柱だけでは足りない。** 通し柱は下の階を base とするレイヤ
+		// （"1to3-柱"）に置かれるので、base だけで絞ると 2 階の耐力壁は壁端の通し柱を
+		// 見失い、柱芯へ寄らず控えの内法で描かれる。その階の床（index + 1）を下端以下に、
+		// 上端をそれより上に持つ span なら、その階の壁の端に立ちうる。
+		// 管柱 "1to2" は 2 階（index 1）を通らない（to == 2 は 2 階の床で止まる）。
+		bool spanCoversStory(double from, double to, std::size_t index)
+		{
+			const double level = static_cast<double>(index) + 1.0;
+			return from <= level + core::kPointEps && to > level + core::kPointEps;
+		}
+
+		// ストーリ index を通る span 柱レイヤの柱を集める（spanCoversStory）。
 		std::vector<const core::ColumnCommand*>
 		columnsOfStory(const std::vector<core::ColumnCommand>& columns, std::size_t index)
 		{
@@ -149,10 +161,24 @@ namespace HomeskzIfcImport::parse
 				double to = 0.0;
 				if (!parseSpanLayer(column.layer, from, to))
 					continue;
-				if (std::llround(from) == static_cast<long long>(index) + 1)
+				if (spanCoversStory(from, to, index))
 					found.push_back(&column);
 			}
 			return found;
+		}
+
+		// ストーリ index を通る span 柱レイヤ名を (from, to) 昇順で集める
+		// （PIO の TargetLayers。columnsOfStory と同じ判定）。
+		std::vector<std::string> columnLayersOfStory(const std::vector<ColumnSpan>& spans,
+													 std::size_t index)
+		{
+			std::vector<std::string> layers;
+			for (const ColumnSpan& span : spans)
+			{
+				if (spanCoversStory(span.from, span.to, index))
+					layers.push_back(span.layer);
+			}
+			return layers;
 		}
 
 		// 点に最も近い柱を返す（許容内に無ければ nullptr）。同距離なら**先に現れた柱**を
@@ -408,8 +434,7 @@ namespace HomeskzIfcImport::parse
 
 		// 通り芯と同じセンタリングオフセット（通り芯が無ければ (0,0)＝生の IFC 座標）。
 		const Vec2 center = context.gridCenter();
-		const std::map<int, std::vector<std::string>> columnLayers =
-			collectColumnLayersByStory(columns);
+		const std::vector<ColumnSpan> columnSpans = collectColumnSpans(columns);
 
 		std::vector<ShearWallCommand> commands;
 		for (std::size_t i = 0; i < stories.size(); ++i)
@@ -418,9 +443,7 @@ namespace HomeskzIfcImport::parse
 			const std::string layer = storyLayerName(i, story.isTop, kLevelShearWall);
 			// レイヤ平面（ストーリ相対）＝その階の横架材天端。最上階は軒高＝0。
 			const double layerZ = story.isTop ? 0.0 : story.beamOffset;
-			const auto layerList = columnLayers.find(static_cast<int>(i));
-			const std::string targets =
-				layerList == columnLayers.end() ? std::string() : joinLayers(layerList->second);
+			const std::string targets = joinLayers(columnLayersOfStory(columnSpans, i));
 			const std::vector<const core::ColumnCommand*> storyColumns = columnsOfStory(columns, i);
 
 			for (const Group& group : collectGroups(model, context.storyElements(story.id)))
