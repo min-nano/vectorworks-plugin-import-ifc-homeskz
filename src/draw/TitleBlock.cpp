@@ -14,6 +14,7 @@
 //	  * gSDK->CreateCustomObject(name, 位置, 0, true) … 図面枠 PIO の生成
 //	  * gSDK->SetPluginObjectStyle(object, style)     … スタイルの関連付け
 //	  * gSDK->UpdateStyledObjects(style)              … スタイルの中身を流し込む（1 回）
+//	  * gSDK->ResetObject(object)                     … 縮尺欄をビューポートの縮尺で取り直す
 //	  * gSDK->GetObjectBounds / MoveObject            … 置いた後に測って動かす
 //
 
@@ -124,6 +125,16 @@ namespace HomeskzIfcImport::draw
 		// ResetObject は要らない。上記 Findings）。これを通さないと枠の外形が定まらず、
 		// 下の位置合わせが測るものを持たない。
 		gSDK->UpdateStyledObjects(counts.styleRef);
+
+		// ★**ビューポートを仕上げた後に 1 つずつ作り直す。** 図面枠の「縮尺」欄は用紙に
+		// 載っているビューポートの縮尺を映すが、図面枠はビューポートより**先に**置く
+		// （draw/TitleBlock.h）ので、生成時の作図ではまだ映すビューポートが無く 1:1 になる。
+		// 上の `UpdateStyledObjects` ではその欄が取り直されず、実機では取り込み後に 1:1 の
+		// まま残り、OIP から手動で更新すると正しい縮尺になった（docs/DEV-NOTES.md M28）。
+		// ここは伏図・軸組図とも**縮尺を当て直し終えた後**なので、作り直せば確定した縮尺を
+		// 拾える。測るのは作り直した後の外形（欄の文字で外形が動きうる）。
+		for (const MCObjectHandle object : counts.objects)
+			gSDK->ResetObject(object);
 
 		// 置いた後に測って用紙の中心へ寄せる（draw/TitleBlock.h「置き場所は測って決める」）。
 		for (const MCObjectHandle object : counts.objects)

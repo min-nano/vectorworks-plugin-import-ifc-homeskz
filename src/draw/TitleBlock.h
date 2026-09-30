@@ -105,8 +105,9 @@ namespace HomeskzIfcImport::draw
 	// **測って動かすのは finishTitleBlocks**（draw/Legend の placeLegends と同じ事情）。
 	bool drawSheetTitleBlock(MCObjectHandle sheetLayer, TitleBlockCounts& counts);
 
-	// 置いた図面枠へスタイルを流し込み（`UpdateStyledObjects` を 1 回）、外形を測って
-	// 用紙の中心＝**原点**へ寄せる。**すべて置き終えてから**呼ぶ。
+	// 置いた図面枠へスタイルを流し込み（`UpdateStyledObjects` を 1 回）、1 つずつ作り直して
+	// （縮尺欄にビューポートの縮尺を拾わせる）、外形を測って用紙の中心＝**原点**へ寄せる。
+	// **すべて置き終え、ビューポートの縮尺を確定させてから**呼ぶ。
 	void finishTitleBlocks(TitleBlockCounts& counts);
 
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空）。
