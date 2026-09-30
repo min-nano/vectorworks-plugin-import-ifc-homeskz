@@ -373,6 +373,13 @@ vw_add_test(ParseFireBraceTests ParseFireBraceTests.cpp CORE FIXTURES)
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
 vw_add_test(ParseJointTests ParseJointTests.cpp CORE FIXTURES)
 
+# Splice (継手) parsing (src/parse/Splice): like the joints, derived from the finished member
+# commands only — one symbol where two collinear members on the same layer butt end to end (the
+# drawn ends, so a pair split by a through member, whose ends stand a member width apart, is not
+# a splice). Exercised on synthetic commands and the checked-in fixtures; SDK-free.
+# HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
+vw_add_test(ParseSpliceTests ParseSpliceTests.cpp CORE FIXTURES)
+
 # Column marks (src/parse/ColumnMark): the section marks (× / ／ drawn as plain lines on the
 # column's own span layer) and the plan marks (VW data tags on the independent "{to}-柱伏図記号"
 # layer). Like the joints, this module never touches IFC — the marks are derived from the finished

@@ -114,7 +114,7 @@ src/
     Feedback.{h,cpp}          実機フィードバックの PR コメント本文（内訳・前の周との差分・
                               匿名化）
     Grid / Story / Floor / Member / Noboribari / Column / Rafter / Roof /
-    Footing / AnchorBolt / FloorPost / FireBrace / Joint / ColumnMark /
+    Footing / AnchorBolt / FloorPost / FireBrace / Joint / Splice / ColumnMark /
     Sheet / Tag / Section      要素ごとの解析
   draw/                     Phase 2: VW 描画（SDK 依存）。**まるごと本体に入る**
     ImportCommand.{h,cpp}     本番の取り込みコマンド（ファイル選択 → 設定 → 取り込み →
@@ -285,6 +285,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 基礎ストーリの名前・接尾辞・レベル・レイヤ名、基礎の許容値（統合・自由端・人通口・壁結合・地中梁・床付け） | `parse/Footing.h` |
 | 要素の判別述語（`isFloorSlab` / `isRoofSlab` / `isFireBrace` / `isBaseSlab` / `isShearBrace` / `isShearPanel` 等） | その要素のヘッダ |
 | 金物（`IfcMechanicalFastener`）の型名取得（`fastenerTypeName`） | `parse/Column` |
+| 取り込み設定に依らないアンカーボルトの位置と役割（`collectAnchorBolts`）・床束の位置（`floorPostPositions`）。命令とは別に継手の向き（`parse/Splice`）が使う | `parse/AnchorBolt` / `parse/FloorPost` |
 | 横架材の端部と相手の取り合いの幾何（`memberEndJoint`）・柱に取り付く端を柱芯へ送る関門（`resolveMemberColumnJoints`。`parse/BuildDocument` が一度だけ通す） | `parse/Member` |
 | ローカル配置原点の取り出し（`resolveLocalPlacementOrigin`）・屋根面の勾配座標系と退化の閾値・押し出しを鉛直とみなす閾値（`kVerticalExtrudeTol`） | `parse/IfcGeometry` |
 | 共有コンテキスト（下記）・階の屋根面の走査（`storyRoofPlanes`）・取り込み設定の参照（`options()`） | `parse/Context` |

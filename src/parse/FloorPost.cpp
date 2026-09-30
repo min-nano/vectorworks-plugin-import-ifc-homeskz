@@ -252,12 +252,8 @@ namespace HomeskzIfcImport::parse
 								   { return wallCovers(wall, position, clearance); });
 	}
 
-	std::vector<SymbolCommand> buildFloorPostCommands(Context& context)
+	std::vector<Vec2> floorPostPositions(Context& context)
 	{
-		// 取り込まない役割は命令を 1 つも作らない（core/ImportOptions.h）。
-		if (!context.options().isEnabled(core::SymbolRole::FloorPost))
-			return {};
-
 		const Model& model = context.model();
 		// 基礎が無いモデルは配置先レイヤ（F-床束）も高さ基準も定まらないので何も出さない。
 		if (!hasFoundation(model))
@@ -271,7 +267,7 @@ namespace HomeskzIfcImport::parse
 		// コンテキストが 1 回だけ組み立てたものを共有する（parse/Context）。
 		const std::vector<core::WallCommand>& walls = context.walls();
 
-		std::vector<SymbolCommand> commands;
+		std::vector<Vec2> positions;
 		for (const OhbikiRun& run : runs)
 		{
 			const Vec2 delta = run.end - run.start;
@@ -295,14 +291,27 @@ namespace HomeskzIfcImport::parse
 				// **その 1 本だけ落とす**——間隔は詰め替えない（parse/FloorPost.h の doc）。
 				if (overlapsFoundationWall(position, run.width, walls))
 					continue;
-
-				SymbolCommand command;
-				command.layer = kLayerFoundationFloorPost;
-				command.symbol = context.options().symbol(core::SymbolRole::FloorPost);
-				command.position = position;
-				// 回転角は持たない（床束は軸対称）。SymbolCommand::angle の既定 0 のまま。
-				commands.push_back(std::move(command));
+				positions.push_back(position);
 			}
+		}
+		return positions;
+	}
+
+	std::vector<SymbolCommand> buildFloorPostCommands(Context& context)
+	{
+		// 取り込まない役割は命令を 1 つも作らない（core/ImportOptions.h）。
+		if (!context.options().isEnabled(core::SymbolRole::FloorPost))
+			return {};
+
+		std::vector<SymbolCommand> commands;
+		for (const Vec2& position : floorPostPositions(context))
+		{
+			SymbolCommand command;
+			command.layer = kLayerFoundationFloorPost;
+			command.symbol = context.options().symbol(core::SymbolRole::FloorPost);
+			command.position = position;
+			// 回転角は持たない（床束は軸対称）。SymbolCommand::angle の既定 0 のまま。
+			commands.push_back(std::move(command));
 		}
 		return commands;
 	}
