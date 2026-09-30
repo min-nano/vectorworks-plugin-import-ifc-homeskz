@@ -34,6 +34,7 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <string>
 
 namespace HomeskzIfcImport::core
@@ -325,5 +326,33 @@ namespace HomeskzIfcImport::core
 	// 基準線の長さ（用紙 mm）。起点 startX から図の右端 right を kLevelLineOvershoot だけ
 	// 越えるまで。scale は記号を描くビューポートの縮尺の分母。
 	double levelLineLength(double startX, double right, double scale);
+
+	// --- 回転して置いた注釈（データタグ）の大きさ ----------------------------
+	//
+	// 回転して置いた矩形（データタグ）の**自身の高さ**（文字の向きに直交する差し渡し）を、
+	// 実測できる外接矩形（軸に平行。GetObjectBounds）の幅・高さと回転角から戻す。
+	//
+	// 【なぜ要るか】タグは部材の辺に下端を接させたいので、辺から「タグ自身の高さの半分」だけ
+	// 法線の向きへ逃がす（draw/Tag）。水平・鉛直のタグなら外接矩形の高さ／幅がそのまま
+	// タグの高さだが、**傾斜材（登り梁・隅木）のタグは傾いて置く**ので外接矩形の高さには文字の
+	// 長さの sin 成分が混ざり、逃がし量が文字の長さに比例して膨らむ——軸組図で傾斜材の
+	// 断面寸法が材から大きく離れて表示された原因（docs/DEV-NOTES.md M13）。
+	//
+	// 【解き方】自身の長さ l・高さ h の矩形を角度 θ で置くと、外接矩形は
+	//   W = l·|cosθ| + h·|sinθ|、H = l·|sinθ| + h·|cosθ|
+	// なので h = (H·|cosθ| − W·|sinθ|) / (cos²θ − sin²θ)。**45 度の近くでは分母が 0 へ
+	// 寄って解けない**（W と H が l と h の和しか語らない）ので、そのときは nullopt を返し、
+	// 呼び出し側が同じ図のほかのタグから高さを借りる（タグはどれも同じレイアウトの 1 行なので
+	// 高さは揃う）。
+	//
+	// angleDegrees は回転角（度）、boundsWidth / boundsHeight は外接矩形の幅・高さ（負は 0）。
+	// 解けないとき・解いた高さが 0 以下のときは nullopt。
+	std::optional<double> rotatedRectHeight(double angleDegrees, double boundsWidth,
+											double boundsHeight);
+
+	// rotatedRectHeight が「解けない」とみなす |cos²θ − sin²θ|（＝|cos2θ|）の下限。
+	// 0.25 は 45 度から ±7.2 度ほど。実測の誤差がこの倍率（1/0.25＝4 倍）までで収まる範囲に
+	// 留める。
+	inline constexpr double kRotatedRectMinConditioning = 0.25;
 
 } // namespace HomeskzIfcImport::core
