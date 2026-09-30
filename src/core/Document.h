@@ -910,9 +910,11 @@ namespace HomeskzIfcImport::core
 	//   layer                  … PIO を置くデザインレイヤ名（"1-耐力壁"。parse/ShearWall）
 	//   drawClass              … PIO 本体の作図クラス（予約語 class を機械置換）
 	//   targetLayers           … 柱を探すデザインレイヤ名を ";" で連ねたもの
-	//                            （"1to2-柱;1to3-柱"）。**その階を base とする span 柱レイヤ
-	//                            すべて**を渡す——管柱と通し柱が別レイヤに分かれるため、
-	//                            1 つでは片端の柱を取り逃がす（parse/Column の span レイヤ）
+	//                            （"1to2-柱;1to3-柱"）。**その階を通る span 柱レイヤ
+	//                            すべて**を渡す——管柱と通し柱が別レイヤに分かれ、2 階の
+	//                            壁端の通し柱は 1 階を base とするレイヤ（"1to3-柱"）に
+	//                            載るため、base だけでは端の柱を取り逃がす
+	//                            （parse/ShearWall の spanCoversStory）
 	//   start                  … 軸の始点＝柱芯（センタリング済みの平面座標）
 	//   end                    … 同 終点。**start は (x, y) の辞書順で小さい方**に固定する
 	//                            ——表／裏の左右がこの向きで決まるので、列挙順で反転しては困る

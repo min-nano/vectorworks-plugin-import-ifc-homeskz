@@ -25,6 +25,8 @@
 
 #include "core/Document.h"
 #include "core/Progress.h"
+#include "draw/ObjectHandles.h"
+#include "draw/Verify.h"
 
 #include <cstddef>
 #include <string>
@@ -34,6 +36,16 @@ namespace HomeskzIfcImport::draw
 	// 耐力壁（shearWall 命令）を線分 PIO として置く。置けた数を返す。配置先レイヤが
 	// 用意できない命令・PIO を作れない命令はスキップし、その件数を outNote に残す
 	// （完了ダイアログの診断。draw/ColumnMark と同じ流儀）。
+	//
+	// outHandles を渡すと「命令インデックス → 置いた PIO」を詰める（開発ビルドの
+	// recheckShearWalls が使う）。
 	std::size_t drawShearWalls(const core::Document& document, core::ProgressReporter& progress,
-							   std::string* outNote = nullptr);
+							   std::string* outNote = nullptr, ObjectHandles* outHandles = nullptr);
+
+#if VW_DRAW_VERIFY
+	// **取り込みの最後に、置いた耐力壁の軸組内法を描かずに求め直す**（開発ビルドだけ。
+	// draw/ShearWallPio.h の probeShearWall）。柱から引けた枚数・控えになった枚数と、
+	// 控えになった先頭の数枚の経過を outNotes に書く。図面には触らない。
+	void recheckShearWalls(const ObjectHandles& handles, std::string* outNotes);
+#endif
 } // namespace HomeskzIfcImport::draw

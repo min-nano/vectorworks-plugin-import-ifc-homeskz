@@ -103,6 +103,24 @@ namespace HomeskzIfcImport::parse
 		return std::abs(CutCoord(column.position, section.direction) - cut) <= kClusterTol;
 	}
 
+	bool memberCrossesCutPlane(const core::MemberCommand& member,
+							   const core::SectionCommand& section, core::Vec2& crossing)
+	{
+		if (memberOnCutPlane(member, section))
+			return false;
+		const double cut = CutCoord(section.lineStart, section.direction);
+		const double a = CutCoord(member.start, section.direction);
+		const double b = CutCoord(member.end, section.direction);
+		if (std::min(a, b) > cut + kClusterTol || std::max(a, b) < cut - kClusterTol)
+			return false;
+		// 芯と切断面の交点。切断面で止まる材（両端とも片側）は近い端へ寄せる。
+		const double t =
+			std::abs(b - a) > kDirTol ? std::clamp((cut - a) / (b - a), 0.0, 1.0) : 0.0;
+		crossing = core::Vec2{member.start.x + ((member.end.x - member.start.x) * t),
+							  member.start.y + ((member.end.y - member.start.y) * t)};
+		return true;
+	}
+
 	std::vector<core::TagCommand>
 	buildPlanTagCommands(const std::vector<core::MemberCommand>& members,
 						 const core::ViewportCommand& viewport)
