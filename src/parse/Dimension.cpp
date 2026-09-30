@@ -13,6 +13,7 @@
 #include "parse/Tag.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <iterator>
@@ -160,6 +161,10 @@ namespace HomeskzIfcImport::parse
 			const WallLine* line = nullptr;
 			std::vector<double> cores; // 端（芯で押さえ直したもの）と直交する立上りの芯
 			std::vector<double> all; // cores ＋ その通りに乗るアンカーボルト
+			// 両端（cores の最初と最後）が何とも取り合わない自由端か。自由端を持つ一続き
+			// （半島状・独立した立上り）は長さも押さえる。
+			bool freeFront = false;
+			bool freeBack = false;
 		};
 
 		// 直交する立上りが通りと取り合う位置（その立上りの芯）と、その立上りの厚みの半分。
@@ -256,7 +261,19 @@ namespace HomeskzIfcImport::parse
 									 [&values](double g) { return nearAny(values, g); });
 				return unionStops(onGrid, values);
 			};
-			return WallLineStops{&line, snapToGrid(cores), snapToGrid(points)};
+			WallLineStops result{&line, snapToGrid(cores), snapToGrid(points)};
+			const auto isFree = [&junctions](double value)
+			{
+				return std::ranges::none_of(
+					junctions, [value](const Junction& junction)
+					{ return std::abs(value - junction.coord) <= kDimensionMergeTol; });
+			};
+			if (!result.cores.empty())
+			{
+				result.freeFront = isFree(result.cores.front());
+				result.freeBack = isFree(result.cores.back());
+			}
+			return result;
 		}
 
 		// 東西の通り（eastWest=true）または南北の通りの測点。座標の昇順。
@@ -298,10 +315,40 @@ namespace HomeskzIfcImport::parse
 				});
 		}
 
+		// line の value が、直交する立上りと取り合う（その立上りの厚みの中にある）か。
+		bool meetsCrossWall(const WallLine& line, const std::vector<WallLine>& others, double value)
+		{
+			return std::ranges::any_of(
+				others,
+				[&](const WallLine& other)
+				{
+					if (std::abs(other.coord - value) > other.halfThickness + kDimensionMergeTol)
+						return false;
+					return std::ranges::any_of(other.spans,
+											   [&line](const std::pair<double, double>& span)
+											   {
+												   return span.first - kDimensionMergeTol <=
+															  line.coord + line.halfThickness &&
+														  span.second + kDimensionMergeTol >=
+															  line.coord - line.halfThickness;
+											   });
+				});
+		}
+
+		// line の low〜high の途切れが開口（玄関・人通口など）か。両側が自由端で終わり、
+		// 途切れの中を直交する立上りが横切らないもの。両側のどちらかが直交する立上りと
+		// 取り合って終わる途切れ（隅と隅の間。段違いの外周の外など）は開口ではない。
+		bool isOpening(const WallLine& line, const std::vector<WallLine>& others, double low,
+					   double high)
+		{
+			return !meetsCrossWall(line, others, low) && !meetsCrossWall(line, others, high) &&
+				   !crossedBetween(line, others, low, high);
+		}
+
 		// 通り 1 本を、区間が途切れるところで「一続きの立上り」ごとに割る（ご要望: 離れた
 		// 立上りの間を寸法でまたがない。y3 通りの 7220 のように、別の立上りを横切って何も
-		// 無い区間を測っても意味が無い）。割るのは**途切れの中を直交する立上りが横切るとき
-		// だけ**——横切らない途切れは開口（玄関・人通口など）で、その幅は押さえる（ご要望）。
+		// 無い区間を測っても意味が無い）。**開口（isOpening）だけは割らずに**その幅を押さえる
+		// （ご要望）。
 		// また直交する立上りと 1 つも取り合わない一続き（位置がどこからも決まらない）は、
 		// 近いほうの隣と 1 本にまとめたまま（間の寸法がその位置を押さえる）。
 		std::vector<WallLine> splitIntoRuns(const std::vector<WallLine>& lines,
@@ -315,7 +362,7 @@ namespace HomeskzIfcImport::parse
 				for (const std::pair<double, double>& span : line.spans)
 				{
 					if (runs.empty() || (span.first > reach + kDimensionMergeTol &&
-										 crossedBetween(line, others, reach, span.first)))
+										 !isOpening(line, others, reach, span.first)))
 					{
 						runs.push_back(WallLine{line.coord, {}, line.halfThickness});
 						reach = span.second;
@@ -663,24 +710,101 @@ namespace HomeskzIfcImport::parse
 		addSide(DimensionAxis::Horizontal, true, -1, min.y, false);
 		addSide(DimensionAxis::Vertical, false, 1, max.x, true);
 
-		// 1 段目: 立上りに沿う列。外側に面するものは図の外形を根元にして外周に並べ、
-		// それ以外はその立上りの芯から図の外側（中心から遠い側）へ出す。
+		// 1 段目: 立上りに沿う列。外側に面するものは図の外形を根元にして外周に並べる。
+		//
+		// 内部の立上りの列には、**既に外側の列にある立上りの芯・端どうしの寸法（同じ 2 点の
+		// 間）は書かない**（ご要望: 連続した立上りに同じ寸法を重ねない。外側を優先）。
+		// アンカーボルトの絡む寸法は比べない（別の立上りのボルトがたまたま同じ位置にある
+		// だけで、重なりではない）。外側から順に見て、書いた芯どうしの寸法を覚えていく。
+		std::array<std::vector<std::pair<double, double>>, 2> written;
+		const auto remember = [&written](DimensionAxis axis, const std::vector<double>& stops,
+										 const std::vector<double>& cores)
+		{
+			for (std::size_t i = 0; i + 1 < stops.size(); ++i)
+			{
+				if (nearAny(cores, stops[i]) && nearAny(cores, stops[i + 1]))
+					written.at(static_cast<std::size_t>(axis)).emplace_back(stops[i], stops[i + 1]);
+			}
+		};
+		// 外周の 2 段目より外は芯と端だけでできている。
+		for (const DimensionChainCommand& chain : out)
+			remember(chain.axis, chain.stops, chain.stops);
+
+		std::vector<const PlacedRun*> interior;
 		for (const PlacedRun& run : runs)
 		{
 			if (run.stops.all.size() < 2)
 				continue;
-			const DimensionAxis axis =
-				run.eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
-			if (run.exteriorSide != 0)
+			if (run.exteriorSide == 0)
 			{
-				const core::Vec2& edge = run.exteriorSide > 0 ? max : min;
-				const double base = run.eastWest ? edge.y : edge.x;
-				out.push_back(makeChain(axis, run.stops.all, base, run.exteriorSide, 0));
+				interior.push_back(&run);
 				continue;
 			}
-			const double middle = run.eastWest ? center.y : center.x;
-			const int side = run.stops.line->coord >= middle ? 1 : -1;
-			out.push_back(makeChain(axis, run.stops.all, run.stops.line->coord, side, 0));
+			const DimensionAxis axis =
+				run.eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
+			const core::Vec2& edge = run.exteriorSide > 0 ? max : min;
+			out.push_back(makeChain(axis, run.stops.all, run.eastWest ? edge.y : edge.x,
+									run.exteriorSide, 0));
+			remember(axis, run.stops.all, run.stops.cores);
+		}
+
+		// 内部の立上りの列は、その芯から図の外側（中心から遠い側）へ出す。
+		const auto distance = [&center](const PlacedRun* run)
+		{
+			const double middle = run->eastWest ? center.y : center.x;
+			return std::abs(run->stops.line->coord - middle);
+		};
+		std::ranges::stable_sort(interior, std::ranges::greater{}, distance);
+		const auto isWritten = [&written](DimensionAxis axis, double a, double b)
+		{
+			return std::ranges::any_of(
+				written.at(static_cast<std::size_t>(axis)),
+				[a, b](const std::pair<double, double>& segment)
+				{
+					return std::abs(segment.first - a) <= kDimensionMergeTol &&
+						   std::abs(segment.second - b) <= kDimensionMergeTol;
+				});
+		};
+		for (const PlacedRun* run : interior)
+		{
+			const DimensionAxis axis =
+				run->eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
+			const double base = run->stops.line->coord;
+			const double middle = run->eastWest ? center.y : center.x;
+			const int side = base >= middle ? 1 : -1;
+			const std::vector<double>& stops = run->stops.all;
+			const std::vector<double>& cores = run->stops.cores;
+			// 重なる寸法を抜いて、残りを続いている区間ごとの列にする。
+			std::vector<double> piece;
+			const auto flush = [&]()
+			{
+				if (piece.size() >= 2)
+					out.push_back(makeChain(axis, piece, base, side, 0));
+				piece.clear();
+			};
+			for (std::size_t i = 0; i + 1 < stops.size(); ++i)
+			{
+				if (nearAny(cores, stops[i]) && nearAny(cores, stops[i + 1]) &&
+					isWritten(axis, stops[i], stops[i + 1]))
+				{
+					flush();
+					continue;
+				}
+				if (piece.empty())
+					piece.push_back(stops[i]);
+				piece.push_back(stops[i + 1]);
+			}
+			flush();
+			remember(axis, stops, cores);
+
+			// 半島状・独立した立上り（自由端で終わる一続き）は長さも押さえる（ご要望:
+			// y3 通りの x0〜x1 の端＝200＋510＋260＝970）。1 区間なら同じなので出さない。
+			if ((run->stops.freeFront || run->stops.freeBack) && stops.size() >= 3 &&
+				!isWritten(axis, stops.front(), stops.back()))
+			{
+				out.push_back(makeChain(axis, {stops.front(), stops.back()}, base, side, 1));
+				remember(axis, {stops.front(), stops.back()}, cores);
+			}
 		}
 		return out;
 	}

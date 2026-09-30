@@ -13,6 +13,7 @@
 //	    隅・T 字は立上りの芯で押さえ、取り合う立上りの無い通り芯は測点にしない。離れた
 //	    立上りの間はまたがない（取り合いの無い一続きだけはつなぐ）。外側に面する立上り
 //	    （段違いの外周を含む）は図の外に並べる。外周の列には外周の立上りに取り合う芯だけが載る。
+//	    外側の列にある寸法は内部の列に重ねない。半島状の立上りは長さも押さえる。
 //	  * 伏図の種類ごとに押さえるもの——床伏図は柱と梁（表示レイヤに載るものだけ）、
 //	    母屋伏図は母屋だけ。
 //	  * 軸組図——柱の位置（通り芯を合わせる。図の下）、GL・FL・軒高と標準の横架材天端（図の左）、
@@ -371,6 +372,68 @@ TEST(FoundationChainsKeepOpeningsInTheChain)
 	const std::vector<DimensionChainCommand> chains = parse::foundationDimensionChains(
 		walls, {}, smallGrid(), Vec2{-75.0, -75.0}, Vec2{1895.0, 1895.0});
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 500.0, 1320.0, 1820.0}, 910.0, 1, 0));
+}
+
+TEST(FoundationChainsSplitGapsBetweenCorners)
+{
+	// 下の外周に切り欠き: y=0 は 0〜910 と 1820〜2730 で、間の 910〜1820 は y=910 まで
+	// 引っ込む。y=0 の途切れ（985〜1745）は両側が x=910・x=1820 の隅なので開口ではなく、
+	// 割る。3 本とも下の外側に面して外周に並び、2 段目に芯の列 0/910/1820/2730 が出る。
+	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{985.0, 0.0}),
+										 makeWall(Vec2{1745.0, 0.0}, Vec2{2805.0, 0.0}),
+										 makeWall(Vec2{835.0, 910.0}, Vec2{1895.0, 910.0}),
+										 makeWall(Vec2{-75.0, 1820.0}, Vec2{2805.0, 1820.0}),
+										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 1895.0}),
+										 makeWall(Vec2{910.0, -75.0}, Vec2{910.0, 985.0}),
+										 makeWall(Vec2{1820.0, -75.0}, Vec2{1820.0, 985.0}),
+										 makeWall(Vec2{2730.0, -75.0}, Vec2{2730.0, 1895.0})};
+	const std::vector<SymbolCommand> bolts{makeBolt(Vec2{200.0, 0.0})};
+	const std::vector<DimensionChainCommand> chains = parse::foundationDimensionChains(
+		walls, bolts, {}, Vec2{-75.0, -75.0}, Vec2{2805.0, 1895.0});
+
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 200.0, 910.0}, -75.0, -1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {910.0, 1820.0}, -75.0, -1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {1820.0, 2730.0}, -75.0, -1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 910.0, 1820.0, 2730.0}, -75.0, -1, 1));
+}
+
+TEST(FoundationChainsSkipSegmentsTheOuterChainsAlreadyShow)
+{
+	// 矩形の中を x=910 が通り、内部の y=600 が 0〜910（両端とも取り合い）に、y=1300 が
+	// 0〜910 にアンカーボルト 1 本（x=455）で渡る。y=600 の 0〜910 は外周の芯の列に
+	// あるので書かない。y=1300 は 0〜455〜910 で重ならないので書く。
+	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{1895.0, 0.0}),
+										 makeWall(Vec2{-75.0, 1820.0}, Vec2{1895.0, 1820.0}),
+										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 1895.0}),
+										 makeWall(Vec2{1820.0, -75.0}, Vec2{1820.0, 1895.0}),
+										 makeWall(Vec2{910.0, 75.0}, Vec2{910.0, 1745.0}),
+										 makeWall(Vec2{75.0, 600.0}, Vec2{835.0, 600.0}),
+										 makeWall(Vec2{75.0, 1300.0}, Vec2{835.0, 1300.0})};
+	const std::vector<SymbolCommand> bolts{makeBolt(Vec2{455.0, 1300.0})};
+	const std::vector<DimensionChainCommand> chains = parse::foundationDimensionChains(
+		walls, bolts, {}, Vec2{-75.0, -75.0}, Vec2{1895.0, 1895.0});
+
+	for (const DimensionChainCommand& chain : chains)
+		CHECK(!(chain.axis == DimensionAxis::Horizontal && near(chain.base, 600.0)));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 455.0, 910.0}, 1300.0, 1, 0));
+}
+
+TEST(FoundationChainsGivePeninsulasTheirLength)
+{
+	// 西の外周から突き出た半島状の立上り（y=910 の 0〜970。先は自由端）にアンカーボルトが
+	// 2 本。1 段目に 0/200/710/970、その外に長さ 970。
+	const std::vector<WallCommand> walls{makeWall(Vec2{-75.0, 0.0}, Vec2{1895.0, 0.0}),
+										 makeWall(Vec2{-75.0, 1820.0}, Vec2{1895.0, 1820.0}),
+										 makeWall(Vec2{0.0, -75.0}, Vec2{0.0, 1895.0}),
+										 makeWall(Vec2{1820.0, -75.0}, Vec2{1820.0, 1895.0}),
+										 makeWall(Vec2{75.0, 910.0}, Vec2{970.0, 910.0})};
+	const std::vector<SymbolCommand> bolts{makeBolt(Vec2{200.0, 910.0}),
+										   makeBolt(Vec2{710.0, 910.0})};
+	const std::vector<DimensionChainCommand> chains = parse::foundationDimensionChains(
+		walls, bolts, {}, Vec2{-75.0, -75.0}, Vec2{1895.0, 1895.0});
+
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 200.0, 710.0, 970.0}, 910.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 970.0}, 910.0, 1, 1));
 }
 
 TEST(FoundationChainsPutSteppedExteriorWallsOutside)
