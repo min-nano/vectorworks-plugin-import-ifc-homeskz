@@ -50,6 +50,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <numbers>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -488,32 +489,47 @@ namespace HomeskzIfcImport::draw
 		// ★**名前は 63 文字で黙って切られる**（SDK リファレンス Findings/Investigation
 		// Techniques.md）ので要約は短くする。**名前は図面の中で一意でなければ付かない**ので、
 		// 走行ごとに増える番号を先頭に付ける。
-		std::string DescribeForName(const ClearSpan& span)
+		std::string Whole(double value)
 		{
-			const auto whole = [](double value)
-			{
-				return value == std::numeric_limits<double>::max()
-						   ? std::string("-")
-						   : std::to_string(std::lround(value));
-			};
-			std::string text = std::string(span.fromColumns ? "柱" : "控") + " " +
-							   whole(span.start) + "~" + whole(span.end) + " 軸" +
-							   whole(span.axisStart) + "~" + whole(span.axisEnd) + " C" +
-							   whole(span.fallbackSpan);
-			if (!span.fromColumns)
-				text += " L" + std::to_string(span.columns.layers) + "/" +
-						std::to_string(span.layerCount) + " 柱" +
-						std::to_string(span.columns.columns) + "-" +
-						std::to_string(span.columns.offAxis) + " s" +
-						whole(span.columns.nearStart) + " e" + whole(span.columns.nearEnd);
-			return text;
+			return value == std::numeric_limits<double>::max() ? std::string("-")
+															   : std::to_string(std::lround(value));
 		}
 
-		void WriteDiagnosticName(MCObjectHandle object, const ClearSpan& span)
+		// 変換の原点と向き（度）を「x,y/角」に縮める。
+		std::string DescribeMatrix(const VWTransformMatrix& matrix)
+		{
+			const VWPoint3D offset = matrix.GetOffset();
+			const VWPoint3D u = matrix.GetUVector();
+			const double degrees = std::atan2(u.y, u.x) * 180.0 / std::numbers::pi;
+			return Whole(offset.x) + "," + Whole(offset.y) + "/" + Whole(degrees);
+		}
+
+		// 要約の中身（63 文字に収める）:
+		//   柱|控 内法 … 柱から引けたか控えか、その内法（ローカル x）
+		//   n外した数/見た数 s始端 … 別の通りとして除いた柱の数と、始端に最も近い柱芯の距離
+		//   T… … 柱探しに使った GetObjectToWorldTransform の原点と向き
+		//   M… … VWObject::GetObjectMatrix の原点と向き（別の口で同じものを読む）
+		// 取り込み後の最初の編集では「別の通り」が急に増えた（71 本中 58 本）ので、
+		// **柱をローカルへ落とす変換そのもの**を 2 つの口で並べる。SDK リファレンスの #183 は
+		// 原点・無回転に置いた PIO で測ったので、変換が原点・無回転へ化けても区別できない。
+		std::string DescribeForName(const ClearSpan& span, const VWTransformMatrix& toWorld,
+									const VWTransformMatrix& objectMatrix)
+		{
+			return std::string(span.fromColumns ? "柱" : "控") + Whole(span.start) + "~" +
+				   Whole(span.end) + " n" + std::to_string(span.columns.offAxis) + "/" +
+				   std::to_string(span.columns.columns) + " s" + Whole(span.columns.nearStart) +
+				   " T" + DescribeMatrix(toWorld) + " M" + DescribeMatrix(objectMatrix);
+		}
+
+		void WriteDiagnosticName(const VWParametricObj& self, MCObjectHandle object,
+								 const ClearSpan& span, const VWTransformMatrix& toWorld)
 		{
 			static unsigned long long serial = 0;
 			++serial;
-			const std::string name = "SW" + std::to_string(serial) + " " + DescribeForName(span);
+			VWTransformMatrix objectMatrix;
+			self.GetObjectMatrix(objectMatrix);
+			const std::string name =
+				"SW" + std::to_string(serial) + " " + DescribeForName(span, toWorld, objectMatrix);
 			gSDK->SetObjectName(object, TXString(name.c_str()));
 		}
 #endif
@@ -549,7 +565,7 @@ namespace HomeskzIfcImport::draw
 			const ClearSpan resolved = ResolveClearSpan(self, toWorld);
 			core::trace::log("  shearwall: " + resolved.axis);
 #if VW_DRAW_VERIFY
-			WriteDiagnosticName(object, resolved);
+			WriteDiagnosticName(self, object, resolved, toWorld);
 #endif
 			if (!resolved.ok)
 			{
