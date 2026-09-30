@@ -734,11 +734,28 @@ namespace HomeskzIfcImport::core
 			bands.right = std::max(bands.right, std::max(dimensionBand(right),
 														 haveLevels ? kLevelLineOvershoot : 0.0));
 			bands.bottom = std::max(bands.bottom, dimensionBand(bottom) + label);
-			bands.top =
-				std::max(bands.top, std::max(dimensionBand(top),
-											 gridBubbles ? kSectionGridBubbleAllowance : 0.0));
+			bands.top = std::max(bands.top, dimensionBand(top) +
+												(gridBubbles ? kSectionGridBubbleAllowance : 0.0));
 		}
 		return bands;
+	}
+
+	double sectionTopExtent(const std::vector<SectionCommand>& sections, bool gridBubbles,
+							double scale)
+	{
+		int top = -1;
+		for (const SectionCommand& section : sections)
+		{
+			for (const DimensionChainCommand& chain : section.viewport.dimensions)
+			{
+				if (chain.axis == DimensionAxis::Horizontal && chain.side > 0)
+					top = std::max(top, chain.tier);
+			}
+		}
+		if (top < 0 || scale <= 0.0)
+			return kSectionHeightMargin;
+		const double band = dimensionBand(top) + (gridBubbles ? kSectionGridBubbleAllowance : 0.0);
+		return std::max(kSectionHeightMargin, band * scale);
 	}
 
 	bool sectionContentSize(const Document& document, Vec2& size)

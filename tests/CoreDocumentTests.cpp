@@ -1716,10 +1716,31 @@ TEST(section_bands_count_only_the_sides_with_annotations)
 	CHECK(near(merged.top, core::dimensionBand(2), 1e-9));
 	CHECK(near(merged.left, bands.left, 1e-9));
 
-	// 通り芯があれば、上に符号のぶんを取る（上の列の帯の方が広ければそちら）。
+	// 通り芯があれば、上に符号のぶんを取る。上の列はその符号の下に並ぶので足して数える。
 	CHECK(near(core::sectionBands({section}, true).top, core::kSectionGridBubbleAllowance, 1e-9));
 	CHECK(near(core::sectionBands({section, tall}, true).top,
-			   std::max(core::dimensionBand(2), core::kSectionGridBubbleAllowance), 1e-9));
+			   core::dimensionBand(2) + core::kSectionGridBubbleAllowance, 1e-9));
+}
+
+TEST(section_top_extent_raises_the_range_for_top_dimensions)
+{
+	core::SectionCommand bare;
+	// 上の列が無ければ余白のまま。
+	CHECK(near(core::sectionTopExtent({bare}, true, 100.0), core::kSectionHeightMargin, 1e-9));
+
+	core::SectionCommand tall = bare;
+	core::DimensionChainCommand topChain;
+	topChain.axis = core::DimensionAxis::Horizontal;
+	topChain.side = 1;
+	topChain.tier = 1;
+	tall.viewport.dimensions.push_back(topChain);
+	// 1/100: 帯（2 段＋符号）が余白（用紙 10mm）に収まらないので上げる。
+	const double band = core::dimensionBand(1) + core::kSectionGridBubbleAllowance;
+	CHECK(near(core::sectionTopExtent({bare, tall}, true, 100.0), band * 100.0, 1e-9));
+	CHECK(near(core::sectionTopExtent({tall}, false, 100.0), core::dimensionBand(1) * 100.0, 1e-9));
+	// 縮尺が小さい数（大きい図）で余白に収まるなら余白のまま。縮尺が決まらなくても同じ。
+	CHECK(near(core::sectionTopExtent({tall}, true, 20.0), core::kSectionHeightMargin, 1e-9));
+	CHECK(near(core::sectionTopExtent({tall}, true, 0.0), core::kSectionHeightMargin, 1e-9));
 }
 
 // ---------------------------------------------------------------------------
