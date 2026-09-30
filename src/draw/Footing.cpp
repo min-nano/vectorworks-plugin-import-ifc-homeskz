@@ -103,7 +103,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <limits>
 #include <map>
 #include <memory>
 #include <numbers>
@@ -136,10 +135,6 @@ namespace HomeskzIfcImport::draw
 		// 丸め誤差で毎回動かさない程度に大きく、図面で見える差より十分小さい値。
 		constexpr double kPlacementTol = 0.5;
 
-		// 押し出しの先頭の辺を選ぶときに「同じ向き」とみなす許容（方向余弦の差）。同じ向きの
-		// 辺が複数あれば低いほうを採る（CreateModifierPrism）。
-		constexpr double kFrameEdgeTol = 1e-6;
-
 		// 壁の端部キャップ（端を閉じる線）を命令どおりに設定する。
 		//
 		// **既定値はドキュメントの壁ツール設定に従う**ため、明示的に設定しないと「自由端が
@@ -161,80 +156,17 @@ namespace HomeskzIfcImport::draw
 		// **位置はまだ合わせない**——合わせるのは AlignModifierPrism で、そのソリッドへの
 		// 設定（クラス・構造用図形）を**すべて済ませた後**に呼ぶ（AlignModifierPrism の doc）。
 		//
-		// 断面（profile の u, v）を**ワールド 3D の底面ポリゴン**へ写し、押し出し方向
-		// （方位角）へ depth だけ押し出す。u 軸は「走る向きを +90 度回した水平単位ベクトル」で、
-		// これは解析側（parse/Footing の groundBeamModifier）が断面を取り直すときの規約と対。
-		// v 軸はワールド Z、断面原点（u=v=0）は命令の origin（XY センタリング済み・Z 絶対値）。
-		//
-		// **押し出しは基面ポリゴンの法線方向へ伸びる**ので、頂点の並びを「法線が軸方向を
-		// 向く」向きに揃えてから渡す（法線は Newell 法。逆巻きだと梁が軸の反対側へ伸びる）。
-		//
-		// **さらに頂点の始まりを「+u へ向かう下端の辺」に揃える。** VWExtrudeObj は 3D
-		// ポリゴンから押し出しの局所座標系を**先頭の頂点で**決める（SDK の VWFC ソース:
-		// 原点＝先頭の頂点・U＝先頭の辺・W＝U×(3 点目−先頭)・V＝W×U）。揃えないと、断面の
-		// 鉛直面が −u 側にある地中梁（外周の外面が −u 側に来る向き）は反転で先頭の辺が −u 向き
-		// になり、**局所座標系が上下逆（V＝−Z）**になる。実機ではちょうどこの向きの地中梁
-		// （可視ソリッド）だけが幅方向へ 24.59mm ずれ、+u 側に鉛直面がある地中梁は正しい位置に
-		// あった（docs/DEV-NOTES.md M10「地中梁の可視ソリッドが幅方向にずれる」）。先頭を揃えれば
-		// どの向きの地中梁も U＝+u・V＝+Z・W＝軸方向の同じ座標系で作られる。
+		// 基面（ワールド 3D の頂点列）は core::modifierBasePolygon が作る。**頂点の巻きと
+		// 始まりに決めごとがある**——VWExtrudeObj は基面の法線方向へ押し出し、局所座標系を
+		// 先頭の頂点から決めるので、並びを変えると押し出しの向きや局所座標系が変わる
+		// （実機で可視ソリッドが幅方向へ 24.59mm ずれた。詳細は同関数の doc）。
 		MCObjectHandle CreateModifierPrism(const core::ModifierCommand& modifier)
 		{
-			if (modifier.profile.size() < 3 || modifier.depth <= 0.0)
+			if (modifier.depth <= 0.0)
 				return nil;
-
-			const double phi = modifier.azimuth * std::numbers::pi / 180.0;
-			const core::Vec2 axis{std::cos(phi), std::sin(phi)};
-			const core::Vec2 width{-axis.y, axis.x}; // 幅軸 u（解析側の w と同じ取り方）
-
-			std::vector<core::Vec3> vertices;
-			vertices.reserve(modifier.profile.size());
-			for (const core::Vec2& p : modifier.profile)
-			{
-				vertices.push_back(core::Vec3{modifier.origin.x + (width.x * p.x),
-											  modifier.origin.y + (width.y * p.x),
-											  modifier.origin.z + p.y});
-			}
-
-			// 面法線（Newell 法）。軸と逆を向いていたら頂点の並びを反転して、押し出しが
-			// 梁の走る向きへ伸びるようにする。
-			core::Vec3 normal{0.0, 0.0, 0.0};
-			const std::size_t count = vertices.size();
-			for (std::size_t i = 0; i < count; ++i)
-			{
-				const core::Vec3& a = vertices[i];
-				const core::Vec3& b = vertices[(i + 1) % count];
-				normal.x += (a.y - b.y) * (a.z + b.z);
-				normal.y += (a.z - b.z) * (a.x + b.x);
-				normal.z += (a.x - b.x) * (a.y + b.y);
-			}
-			if ((normal.x * axis.x) + (normal.y * axis.y) < 0.0)
-				std::ranges::reverse(vertices);
-
-			// 先頭を「+u へ最も向く辺（同じ向きなら低いほう）」の始点へ回す（上の doc）。
-			// 法線を軸へ揃えた後の巻きでは、+u へ向かう辺は断面の下端側にある。
-			std::size_t start = 0;
-			double bestAlong = -std::numeric_limits<double>::infinity();
-			double bestZ = std::numeric_limits<double>::infinity();
-			for (std::size_t i = 0; i < count; ++i)
-			{
-				const core::Vec3& a = vertices[i];
-				const core::Vec3& b = vertices[(i + 1) % count];
-				const double dx = b.x - a.x;
-				const double dy = b.y - a.y;
-				const double length = std::hypot(dx, dy, b.z - a.z);
-				if (length <= 0.0)
-					continue;
-				const double along = ((dx * width.x) + (dy * width.y)) / length;
-				const double z = (a.z + b.z) / 2.0;
-				if (along > bestAlong + kFrameEdgeTol ||
-					(along >= bestAlong - kFrameEdgeTol && z < bestZ))
-				{
-					start = i;
-					bestAlong = along;
-					bestZ = z;
-				}
-			}
-			std::ranges::rotate(vertices, vertices.begin() + static_cast<std::ptrdiff_t>(start));
+			const std::vector<core::Vec3> vertices = core::modifierBasePolygon(modifier);
+			if (vertices.size() < 3)
+				return nil;
 
 			VWPolygon3D base;
 			for (const core::Vec3& v : vertices)
