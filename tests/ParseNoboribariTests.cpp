@@ -76,6 +76,16 @@ namespace
 		return result;
 	}
 
+	// 平面外形が矩形 [xMin, xMax] × [yMin, yMax] の屋根面（勾配は flatRoofPlane と同じ +x へ
+	// slope）。外形の小さな面を並べて、どの面の外形に登り梁のどこが入るかを作り分ける。
+	NoboribariRoofPlane boxRoofPlane(double slope, double zAtOrigin, double xMin, double xMax,
+									 double yMin, double yMax)
+	{
+		NoboribariRoofPlane result = flatRoofPlane(slope, zAtOrigin);
+		result.plan = {Vec2{xMin, yMin}, Vec2{xMax, yMin}, Vec2{xMax, yMax}, Vec2{xMin, yMax}};
+		return result;
+	}
+
 	// 勾配方向が +y の屋根面（登り梁（+x 方向）と直交＝選ばれてはいけない面）。
 	NoboribariRoofPlane crossingRoofPlane()
 	{
@@ -308,6 +318,28 @@ TEST(roof_plane_for_selects_aligned_plane)
 													 flatRoofPlane(0.25, 900.0)};
 	const NoboribariRoofPlane* found = roofPlaneFor(command, planes, Vec2{0.0, 0.0});
 	CHECK(found == &planes[1]);
+}
+
+TEST(roof_plane_for_prefers_the_plane_under_the_midpoint)
+{
+	// 始端だけが先に並ぶ面（隣の屋根版）の外形にかかり、中点は後に並ぶ面の外形に入る登り梁。
+	// 中点の面を選ぶ（面を先に回すと始端をかすめた隣の面へ吸われ、その面の高さで描かれた）。
+	const MemberCommand command = noboribari(Vec2{0.0, 0.0}, Vec2{1000.0, 0.0}, 1000.0, 1300.0);
+	const std::vector<NoboribariRoofPlane> planes = {
+		boxRoofPlane(0.25, 1200.0, -500.0, 100.0, -500.0, 500.0),
+		boxRoofPlane(0.25, 900.0, 100.0, 1500.0, -500.0, 500.0)};
+	const NoboribariRoofPlane* found = roofPlaneFor(command, planes, Vec2{0.0, 0.0});
+	CHECK(found == &planes[1]);
+}
+
+TEST(roof_plane_for_falls_back_to_an_end_point)
+{
+	// 中点を内包する面が無いときだけ、端点を内包する面へ下がる。
+	const MemberCommand command = noboribari(Vec2{0.0, 0.0}, Vec2{1000.0, 0.0}, 1000.0, 1300.0);
+	const std::vector<NoboribariRoofPlane> planes = {
+		boxRoofPlane(0.25, 900.0, 800.0, 1500.0, -500.0, 500.0)};
+	const NoboribariRoofPlane* found = roofPlaneFor(command, planes, Vec2{0.0, 0.0});
+	CHECK(found == &planes[0]);
 }
 
 TEST(roof_plane_for_none_when_no_aligned_plane)
