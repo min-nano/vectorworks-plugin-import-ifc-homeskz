@@ -19,6 +19,7 @@
 #include "core/Document.h"
 #include "core/Geometry.h"
 #include "parse/BuildDocument.h"
+#include "parse/Context.h"
 #include "parse/Loader.h"
 #include "parse/ShearWall.h"
 #include "parse/Story.h"
@@ -236,6 +237,28 @@ TEST(shear_wall_brace_command_from_synthetic_model)
 	Document document;
 	document.shearWalls = walls;
 	CHECK(core::validateDocument(document));
+}
+
+TEST(shear_wall_ignores_columns_outside_span_layers)
+{
+	// 柱を探すのは span 柱レイヤ（"{from}to{to}-柱"）に載る柱だけ。名前が span でない
+	// レイヤの柱は、壁端のすぐそばにあっても端の柱にしない（どの階を通るか決まらない）。
+	const Model model = loadIfcFromText(kBraceText);
+	parse::Context context(model);
+	std::vector<core::ColumnCommand> columns(2);
+	columns[0].layer = "柱"; // span でない（始端から 64mm）
+	columns[0].position = core::Vec2{-100.0, 0.0};
+	columns[0].width = 105.0;
+	columns[1].layer = "1to2-柱"; // 1 階を通る（終端から 64mm）
+	columns[1].position = core::Vec2{1900.0, 0.0};
+	columns[1].width = 105.0;
+
+	const std::vector<ShearWallCommand> walls = buildShearWallCommands(context, columns);
+	CHECK_EQ(walls.size(), std::size_t{1});
+	const ShearWallCommand& wall = walls.front();
+	CHECK_EQ(wall.targetLayers, std::string("1to2-柱"));
+	CHECK(near(wall.start.x, -36.0, 1e-6)); // 要素自身の端のまま
+	CHECK(near(wall.end.x, 1900.0, 1e-6));	// span の柱の芯へ寄る
 }
 
 TEST(shear_wall_double_brace_is_grouped_by_name)
