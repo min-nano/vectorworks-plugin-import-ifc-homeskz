@@ -19,6 +19,9 @@
 //	    され、後から図面タイトルを変えるとラベルも追随する。**ただし置いた直後の Title は
 //	    当てにならない**（隣のビューポートのタイトルが入っていた実測がある）ので、注釈へ
 //	    入れた後に**命令の図面タイトルを Title へ自分で書く**。
+//	  * **図番（Drawing）も自分で書く**。ラベルは作った瞬間に自動の図番を持ち、注釈へ入れた
+//	    瞬間にそれをビューポートへ押し込む——書かないと一意にした図番がすり替わり、同じ
+//	    シートの別の図とぶつかって VW がモーダルで訊いてくる（実機で発生）。
 //
 //	★**スタイルは作らない・当てない**（CLAUDE.md 開発の基本方針 4。データタグと同じ扱い。
 //	draw/Tag.h の ★）。ただし**ツールのスタイルは作った直後に勝手に当たる**うえ、**既定の
@@ -86,6 +89,9 @@ namespace HomeskzIfcImport::draw
 	//   sheetLayer … ビューポートが載っているシートレイヤ（1:1）。文字スタイルを当てる間だけ
 	//                アクティブにする（当てたときのアクティブレイヤの縮尺が焼き付くため）
 	//   title  … 表示する図面タイトル（ビューポートに与えたものと同じ文字列）
+	//   number … 図番（ビューポートに与えたものと同じ文字列）。ラベルは表示しないが、
+	//            **注釈へ入れるとラベルの図番がビューポートへ押し込まれる**ので、自動の
+	//            番号のまま入れると一意にした図番がすり替わって衝突する（実装のコメント）
 	//   anchor … 注釈空間の、建物の最下点の左右の中央（core::sectionLabelAnchor）
 	//   drop   … anchor からラベルの上端までの距離（用紙 mm。下に出る寸法の帯を含む。
 	//            core::sectionLabelDrop）
@@ -94,8 +100,8 @@ namespace HomeskzIfcImport::draw
 	// MoveViewportBy）——注釈へ置いた実位置の実測は、ビューポートが用紙のどこに在るかに
 	// 影響される。
 	bool drawSectionLabel(MCObjectHandle viewport, MCObjectHandle sheetLayer,
-						  const std::string& title, const core::Vec2& anchor, double drop,
-						  DrawingLabelCounts& counts);
+						  const std::string& title, const std::string& number,
+						  const core::Vec2& anchor, double drop, DrawingLabelCounts& counts);
 
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空文字）。label は図の種別
 	// （"軸組図"）。
