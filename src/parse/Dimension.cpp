@@ -275,6 +275,125 @@ namespace HomeskzIfcImport::parse
 			return out;
 		}
 
+		// 通り 1 本を、区間が途切れるところで「一続きの立上り」ごとに割る（ご要望: 離れた
+		// 立上りの間を寸法でまたがない。y3 通りの 7220 のように、何も無い区間を測っても意味が
+		// 無い）。ただし直交する立上りと 1 つも取り合わない一続き（位置がどこからも決まらない）
+		// は、近いほうの隣と 1 本にまとめたまま（間の寸法がその位置を押さえる）。
+		std::vector<WallLine> splitIntoRuns(const std::vector<WallLine>& lines,
+											const std::vector<WallLine>& others)
+		{
+			std::vector<WallLine> out;
+			for (const WallLine& line : lines)
+			{
+				std::vector<WallLine> runs;
+				double reach = 0.0;
+				for (const std::pair<double, double>& span : line.spans)
+				{
+					if (runs.empty() || span.first > reach + kDimensionMergeTol)
+					{
+						runs.push_back(WallLine{line.coord, {}, line.halfThickness});
+						reach = span.second;
+					}
+					runs.back().spans.push_back(span);
+					reach = std::max(reach, span.second);
+				}
+				const auto floating = [&others](const WallLine& run)
+				{ return junctionsOf(run, others).empty(); };
+				const auto gapAfter = [&runs](std::size_t i)
+				{
+					const double end =
+						std::ranges::max(runs[i].spans, {}, &std::pair<double, double>::second)
+							.second;
+					return runs[i + 1].spans.front().first - end;
+				};
+				for (std::size_t i = 0; i < runs.size() && runs.size() > 1;)
+				{
+					if (!floating(runs[i]))
+					{
+						++i;
+						continue;
+					}
+					// 近いほうの隣へまとめる（同じなら後ろ）。
+					const bool intoNext =
+						i + 1 < runs.size() && (i == 0 || gapAfter(i) <= gapAfter(i - 1));
+					const std::size_t keep = intoNext ? i : i - 1;
+					WallLine& kept = runs[keep];
+					kept.spans.insert(kept.spans.end(), runs[keep + 1].spans.begin(),
+									  runs[keep + 1].spans.end());
+					std::ranges::sort(kept.spans);
+					runs.erase(runs.begin() + static_cast<std::ptrdiff_t>(keep) + 1);
+					i = keep;
+				}
+				out.insert(out.end(), runs.begin(), runs.end());
+			}
+			return out;
+		}
+
+		// 基礎伏図の立上り 1 続きの列と、それを図のどこへ出すか。
+		struct PlacedRun
+		{
+			WallLineStops stops;
+			bool eastWest = true;
+			// 図の外側に面する向き（+1 / −1。どちらにも面さなければ 0）。外側に面する
+			// 立上りの列は、図の外形（min / max）を根元にして外周の列の 1 段目に並べる。
+			int exteriorSide = 0;
+		};
+
+		// 基礎伏図の立上りを一続きに割り、測点と置き場所を決める。東西→南北、それぞれ座標の
+		// 昇順→通りに沿った位置の昇順。
+		std::vector<PlacedRun> placeFoundationRuns(const std::vector<WallLine>& eastWestRuns,
+												   const std::vector<WallLine>& northSouthRuns,
+												   const std::vector<core::SymbolCommand>& bolts,
+												   const std::vector<core::GridCommand>& grids,
+												   const core::Vec2& center)
+		{
+			std::vector<PlacedRun> out;
+			for (const bool eastWest : {true, false})
+			{
+				const std::vector<WallLine>& runs = eastWest ? eastWestRuns : northSouthRuns;
+				const std::vector<WallLineStops> stops = wallLineStops(
+					runs, eastWest ? northSouthRuns : eastWestRuns, bolts, grids, eastWest);
+				// 外側に面するか: 外向きの側（座標の大きい側／小さい側）に、芯の範囲が
+				// 重なる同じ向きの立上りが無い。範囲は芯で押さえ直した測点で見る（隅で
+				// 外面まで伸びた端どうしを重なりと取らない）。
+				const auto covered = [&stops](std::size_t i, int side)
+				{
+					const std::vector<double>& mine = stops[i].cores;
+					if (mine.size() < 2)
+						return true;
+					return std::ranges::any_of(
+						stops,
+						[&](const WallLineStops& other)
+						{
+							if (&other == &stops[i] || other.cores.size() < 2)
+								return false;
+							const double delta = other.line->coord - stops[i].line->coord;
+							if (delta * side <= kDimensionMergeTol)
+								return false;
+							return std::min(mine.back(), other.cores.back()) -
+									   std::max(mine.front(), other.cores.front()) >
+								   kDimensionMergeTol;
+						});
+				};
+				for (std::size_t i = 0; i < stops.size(); ++i)
+				{
+					const bool up = !covered(i, 1);
+					const bool down = !covered(i, -1);
+					const double middle = eastWest ? center.y : center.x;
+					const int outward = stops[i].line->coord >= middle ? 1 : -1;
+					int exterior = 0;
+					if (up && down)
+						exterior = outward;
+					else if (up)
+						exterior = 1;
+					else if (down)
+						exterior = -1;
+					out.push_back(PlacedRun{stops[i], eastWest, exterior});
+				}
+			}
+			return out;
+		}
+
 		// ストーリレベルのレイヤ → (レベル種別, 絶対 Z)。横架材の「標準の天端」を引くのに使う。
 		struct LayerLevel
 		{
@@ -453,91 +572,91 @@ namespace HomeskzIfcImport::parse
 	}
 
 	std::vector<core::DimensionChainCommand>
-	foundationWallDimensionChains(const std::vector<core::WallCommand>& walls,
-								  const std::vector<core::SymbolCommand>& anchorBolts,
-								  const std::vector<core::GridCommand>& grids,
-								  const core::Vec2& center)
-	{
-		const std::vector<WallLine> eastWestLines = collectWallLines(walls, true);
-		const std::vector<WallLine> northSouthLines = collectWallLines(walls, false);
-		std::vector<DimensionChainCommand> out;
-		for (const bool eastWest : {true, false})
-		{
-			// 東西の通りは X を測り、南北に走る立上りと取り合う。
-			const DimensionAxis axis =
-				eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
-			for (const WallLineStops& stops : wallLineStops(
-					 eastWest ? eastWestLines : northSouthLines,
-					 eastWest ? northSouthLines : eastWestLines, anchorBolts, grids, eastWest))
-			{
-				if (stops.all.size() < 2)
-					continue;
-				// 図の中心から遠い側（＝外側）へ出す。
-				const double middle = eastWest ? center.y : center.x;
-				const int side = stops.line->coord >= middle ? 1 : -1;
-				out.push_back(makeChain(axis, stops.all, stops.line->coord, side, 0));
-			}
-		}
-		return out;
-	}
-
-	std::vector<core::DimensionChainCommand>
-	foundationPerimeterChains(const std::vector<core::WallCommand>& walls,
+	foundationDimensionChains(const std::vector<core::WallCommand>& walls,
 							  const std::vector<core::SymbolCommand>& anchorBolts,
 							  const std::vector<core::GridCommand>& grids, const core::Vec2& min,
 							  const core::Vec2& max)
 	{
 		const std::vector<WallLine> eastWestLines = collectWallLines(walls, true);
 		const std::vector<WallLine> northSouthLines = collectWallLines(walls, false);
-		std::vector<DimensionChainCommand> out;
-		if (eastWestLines.empty() || northSouthLines.empty())
-			return out;
-		// 上＝最も北の東西の通り、左＝最も西の南北の通り（座標の昇順に並んでいる）。
-		const std::vector<WallLineStops> eastWest =
-			wallLineStops(eastWestLines, northSouthLines, anchorBolts, grids, true);
-		const std::vector<WallLineStops> northSouth =
-			wallLineStops(northSouthLines, eastWestLines, anchorBolts, grids, false);
+		const std::vector<WallLine> eastWestRuns = splitIntoRuns(eastWestLines, northSouthLines);
+		const std::vector<WallLine> northSouthRuns = splitIntoRuns(northSouthLines, eastWestLines);
+		const core::Vec2 center{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
+		const std::vector<PlacedRun> runs =
+			placeFoundationRuns(eastWestRuns, northSouthRuns, anchorBolts, grids, center);
 
+		// 外周の 2 段目より外: 上・左は外側に面する立上りの「芯の列」（取り合う立上りの芯と
+		// 端。1 段目と同じなら重ねない）、上はその外に全長、右は Y の全長。下には置かない。
+		std::vector<DimensionChainCommand> out;
+		const auto sideStops = [&runs](bool eastWest, int side, bool cores)
+		{
+			std::vector<double> values;
+			for (const PlacedRun& run : runs)
+			{
+				if (run.eastWest != eastWest || run.exteriorSide != side)
+					continue;
+				const std::vector<double>& from = cores ? run.stops.cores : run.stops.all;
+				values.insert(values.end(), from.begin(), from.end());
+			}
+			return mergeStops(std::move(values));
+		};
 		// 全長は立上りの芯の端から端（L 字などで最も外の通りが建物の全体に渡らなくても
 		// 全体を測る）。
-		const auto overallOf = [](const std::vector<WallLineStops>& lines)
+		const auto overallOf = [&runs](bool eastWest)
 		{
 			std::vector<double> ends;
-			for (const WallLineStops& stops : lines)
+			for (const PlacedRun& run : runs)
 			{
-				if (!stops.cores.empty())
-				{
-					ends.push_back(stops.cores.front());
-					ends.push_back(stops.cores.back());
-				}
+				if (run.eastWest != eastWest || run.stops.cores.empty())
+					continue;
+				ends.push_back(run.stops.cores.front());
+				ends.push_back(run.stops.cores.back());
 			}
 			return ends.empty()
 					   ? ends
 					   : std::vector<double>{std::ranges::min(ends), std::ranges::max(ends)};
 		};
-
-		// 芯の列（取り合う立上りの芯と端）。1 段目（立上りに沿う列）と同じなら重ねない。
-		// 全長はその外（内側の列と同じなら出さない）。
-		const auto addSide = [&out](DimensionAxis axis, const WallLineStops& stops,
-									const std::vector<double>& overall, double base, int side,
-									bool withOverall)
+		const auto addSide =
+			[&](DimensionAxis axis, bool eastWest, int side, double base, bool withOverall)
 		{
+			const std::vector<double> all = sideStops(eastWest, side, false);
+			const std::vector<double> cores = sideStops(eastWest, side, true);
 			int tier = 1;
-			const std::vector<double>* inner = &stops.all;
-			if (stops.cores.size() >= 2 && !sameStops(stops.cores, stops.all))
+			const std::vector<double>* inner = &all;
+			if (cores.size() >= 2 && !sameStops(cores, all))
 			{
-				out.push_back(makeChain(axis, stops.cores, base, side, tier++));
-				inner = &stops.cores;
+				out.push_back(makeChain(axis, cores, base, side, tier++));
+				inner = &cores;
 			}
+			const std::vector<double> overall = overallOf(eastWest);
 			if (withOverall && overall.size() == 2 && !sameStops(overall, *inner))
 				out.push_back(makeChain(axis, overall, base, side, tier));
 		};
-		addSide(DimensionAxis::Horizontal, eastWest.back(), overallOf(eastWest), max.y, 1, true);
-		addSide(DimensionAxis::Vertical, northSouth.front(), {}, min.x, -1, false);
-		// 右: Y の全長。右の立上りに沿う列（1 段目）の外。
-		const std::vector<double> overallY = overallOf(northSouth);
+		addSide(DimensionAxis::Horizontal, true, 1, max.y, true);
+		addSide(DimensionAxis::Vertical, false, -1, min.x, false);
+		const std::vector<double> overallY = overallOf(false);
 		if (overallY.size() == 2)
 			out.push_back(makeChain(DimensionAxis::Vertical, overallY, max.x, 1, 1));
+
+		// 1 段目: 立上りに沿う列。外側に面するものは図の外形を根元にして外周に並べ、
+		// それ以外はその立上りの芯から図の外側（中心から遠い側）へ出す。
+		for (const PlacedRun& run : runs)
+		{
+			if (run.stops.all.size() < 2)
+				continue;
+			const DimensionAxis axis =
+				run.eastWest ? DimensionAxis::Horizontal : DimensionAxis::Vertical;
+			if (run.exteriorSide != 0)
+			{
+				const core::Vec2& edge = run.exteriorSide > 0 ? max : min;
+				const double base = run.eastWest ? edge.y : edge.x;
+				out.push_back(makeChain(axis, run.stops.all, base, run.exteriorSide, 0));
+				continue;
+			}
+			const double middle = run.eastWest ? center.y : center.x;
+			const int side = run.stops.line->coord >= middle ? 1 : -1;
+			out.push_back(makeChain(axis, run.stops.all, run.stops.line->coord, side, 0));
+		}
 		return out;
 	}
 
@@ -582,14 +701,7 @@ namespace HomeskzIfcImport::parse
 			std::ranges::copy_if(document.anchorBolts, std::back_inserter(bolts),
 								 [&layers](const core::SymbolCommand& bolt)
 								 { return onLayers(layers, bolt.layer); });
-			const core::Vec2 center{(min.x + max.x) / 2.0, (min.y + max.y) / 2.0};
-			std::vector<DimensionChainCommand> out =
-				foundationPerimeterChains(walls, bolts, document.grids, min, max);
-			std::vector<DimensionChainCommand> local =
-				foundationWallDimensionChains(walls, bolts, document.grids, center);
-			out.insert(out.end(), std::make_move_iterator(local.begin()),
-					   std::make_move_iterator(local.end()));
-			return out;
+			return foundationDimensionChains(walls, bolts, document.grids, min, max);
 		}
 		case core::PlanKind::Framing:
 			// 柱（小屋束を含む）と梁。

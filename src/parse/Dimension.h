@@ -37,11 +37,18 @@
 //	    何とも取り合わない端だけは端そのもの（面）で押さえる。
 //	  * **取り合う立上りの無い通り芯は測点にしない**（現場に通り芯の墨は無く、どこが 2 通り
 //	    なのかは距離でしか分からない）。通り芯は測点と重なるときに値を貸すだけ。
-//	  * **外周に出す列は、外周の立上りに乗るアンカーボルトと、外周の立上りに取り合う立上りの
-//	    芯だけ**。上は最も北の、左は最も西の立上りの通りの「芯の列」（アンカーボルトを除いた
-//	    もの。1 段目と同じなら出さない）を 2 段目に、上はその外に全長を、右は Y の全長を
-//	    2 段目に置く。内部の立上りの位置は、それが取り合う立上りに沿う列が押さえる
-//	    （外周の寸法線に芯が乗らないものを外周へ集めない）。
+//	  * **離れた立上りの間はまたがない。** 同じ直線に乗っても、間が空いたら列を割る（何も
+//	    無い区間の寸法は意味が無い）。直交する立上りと 1 つも取り合わない一続きだけは、
+//	    位置が決まらないので近いほうの隣とつないだまま（間の寸法がその位置を押さえる）。
+//	  * **図の外側に面する立上りの列は、図の外に並べる。** 外向きの側に芯の範囲が重なる
+//	    同じ向きの立上りが無い一続き（段違いの外周——下の y0・y2・y1 のように）は、図の
+//	    外形（min / max）を根元にして外周の 1 段目に並べる。それ以外は立上りの芯から、
+//	    図の中心から遠い側へ出す。
+//	  * **外周の 2 段目より外は、外周の立上りに乗るものだけ**。上・左の 2 段目は外側に面する
+//	    立上りの「芯の列」（アンカーボルトを除いたもの。1 段目と同じなら出さない）、上は
+//	    その外に全長、右は Y の全長を 2 段目に置く（全長は立上りの芯の端から端）。内部の
+//	    立上りの位置は、それが取り合う立上りに沿う列が押さえる（外周の寸法線に芯が乗らない
+//	    ものを外周へ集めない）。
 //	  * したがって基礎伏図では「部材の位置の列」（perimeterDimensionChains）は使わない。
 //
 //	【軸組図の注釈空間】横＝切断線に沿った距離（断面線の終点からの距離）・縦＝高さ Z。原点
@@ -94,18 +101,11 @@ namespace HomeskzIfcImport::parse
 							 const std::vector<double>& gridY, const core::Vec2& min,
 							 const core::Vec2& max, int firstTier);
 
-	// 基礎伏図の立上りに沿う列（ヘッダ冒頭「基礎伏図は立上りに沿って押さえる」）。center は
-	// 図の中心（列をどちらへ出すかを決める＝中心から遠い側＝外側へ出す）。
+	// 基礎伏図 1 枚ぶんの寸法の列（ヘッダ冒頭「基礎伏図は立上りに沿って押さえる」）。
+	// min / max は図の外形（外側に面する列・外周の列の補助線の根元。列を出す向きは
+	// 図の中心から遠い側）。外周の列（2 段目より外）→ 立上りに沿う列（1 段目）の順。
 	std::vector<core::DimensionChainCommand>
-	foundationWallDimensionChains(const std::vector<core::WallCommand>& walls,
-								  const std::vector<core::SymbolCommand>& anchorBolts,
-								  const std::vector<core::GridCommand>& grids,
-								  const core::Vec2& center);
-
-	// 基礎伏図の外周の列（同上）。上・左の芯の列（2 段目）と全長（上はその外・右は 2 段目）。
-	// min / max は図の外形（補助線の根元）。
-	std::vector<core::DimensionChainCommand>
-	foundationPerimeterChains(const std::vector<core::WallCommand>& walls,
+	foundationDimensionChains(const std::vector<core::WallCommand>& walls,
 							  const std::vector<core::SymbolCommand>& anchorBolts,
 							  const std::vector<core::GridCommand>& grids, const core::Vec2& min,
 							  const core::Vec2& max);
