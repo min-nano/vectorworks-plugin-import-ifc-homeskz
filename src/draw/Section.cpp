@@ -288,6 +288,13 @@ namespace HomeskzIfcImport::draw
 							std::to_string(layout.columns) + " 列 2 段";
 		}
 
+		// 図の上に寸法の列（上階の柱・小屋束の位置）があれば、その帯と通り芯の符号が
+		// 収まるまで高さ範囲の上端を上げる（符号は範囲の上端に描かれる。
+		// core::sectionTopExtent）。縮尺が決まらなかったときは余白のまま。
+		if (arrange)
+			endHeight += core::sectionTopExtent(commands, !document.grids.empty(), layout.scale) -
+						 core::kSectionHeightMargin;
+
 		// 描画の前後でカレントレイヤが変わらないようにする（伏図と同じ作法）。
 		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();
 
