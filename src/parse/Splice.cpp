@@ -234,7 +234,7 @@ namespace HomeskzIfcImport::parse
 			{
 				const MemberGeom& b = geoms[j];
 				// 横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた材
-				// （"2-横架材天端(GL+2699)"）も同じ階の横架材どうしなので、伏図レベルの印を
+				// （"2-横架材天端(FL-872)"）も同じ階の横架材どうしなので、伏図レベルの印を
 				// 外して比べる（parse/PlanLevel。仕口の parse/Joint と同じ）。
 				if (!b.valid || core::stripPlanLevelTag(members[j].layer) !=
 									core::stripPlanLevelTag(members[i].layer))

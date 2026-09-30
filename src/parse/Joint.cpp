@@ -107,7 +107,7 @@ namespace HomeskzIfcImport::parse
 		if (index >= geoms.size() || !geoms[index].valid)
 			return false;
 		const MemberGeom& self = geoms[index];
-		// 横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた材（"2-横架材天端(GL+2699)"）
+		// 横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた材（"2-横架材天端(FL-872)"）
 		// も同じ階の横架材どうしなので、伏図レベルの印を外して比べる（parse/PlanLevel）。
 		const std::string layer = core::stripPlanLevelTag(members[index].layer);
 		// 登り梁は別レイヤの軒桁・母屋・棟木に取り付くのでレイヤ一致の制約を外す。

@@ -233,7 +233,7 @@ TEST(fire_brace_all_fixtures_build)
 					   for (const SymbolCommand& brace : braces)
 					   {
 						   CHECK_EQ(brace.symbol, std::string(kSymbolFireBrace));
-						   // 伏図レベルの印（"(GL+2699)"）は外して見る（parse/PlanLevel）。
+						   // 伏図レベルの印（"(FL-872)"）は外して見る（parse/PlanLevel）。
 						   const std::string layer = core::stripPlanLevelTag(brace.layer);
 						   CHECK(endsWith(layer, "横架材天端") || endsWith(layer, "軒高"));
 					   }

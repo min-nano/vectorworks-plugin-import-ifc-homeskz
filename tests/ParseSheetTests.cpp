@@ -246,19 +246,19 @@ TEST(FloorFramingSheetPerPlanLevelWithBeamAndGridLayers)
 
 TEST(SkipFloorGetsFramingSheetPerBeamHeight)
 {
-	// スキップフロア_サンプルは 2FL に GL+2699 / GL+3531、RFL に GL+5542 / GL+6010 /
-	// GL+6374 の横架材がある。伏図は高さごとに 1 枚（ご要望）、同じ階に高さが複数あれば
+	// スキップフロア_サンプルは 2FL に GL+2699（FL-872）/ GL+3531（FL-40）、RFL に GL+5542（軒高-832）/
+	// GL+6010（軒高-364）/ GL+6374（軒高±0）の横架材がある。高さは FL・軒高から書く。伏図は高さごとに 1 枚（ご要望）、同じ階に高さが複数あれば
 	// タイトルに高さを添える。
 	bool ok = false;
 	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
 	const std::vector<SheetCommand> sheets = buildFloorFramingSheetCommands(model);
 	const std::vector<std::string> titles = {"1階床伏図",
-											 "2階床伏図（GL+2699）",
-											 "2階床伏図（GL+3531）",
-											 "2階小屋伏図（GL+5542）",
-											 "2階小屋伏図（GL+6010）",
-											 "2階小屋伏図（GL+6374）"};
+											 "2階床伏図（FL-872）",
+											 "2階床伏図（FL-40）",
+											 "2階小屋伏図（軒高-832）",
+											 "2階小屋伏図（軒高-364）",
+											 "2階小屋伏図（軒高±0）"};
 	CHECK_EQ(sheets.size(), titles.size());
 	if (sheets.size() != titles.size())
 		return;
@@ -267,14 +267,14 @@ TEST(SkipFloorGetsFramingSheetPerBeamHeight)
 
 	// 標準の高さ（2FL の横架材天端 GL+3531・RFL の軒高 GL+6374）は従来のレイヤ名、それ以外は
 	// 高さの印の付いたレイヤ。
-	CHECK(contains(sheets[1].viewport.layers, "2-横架材天端(GL+2699)"));
+	CHECK(contains(sheets[1].viewport.layers, "2-横架材天端(FL-872)"));
 	CHECK(!contains(sheets[1].viewport.layers, "2-横架材天端"));
 	CHECK(contains(sheets[2].viewport.layers, "2-横架材天端"));
 	CHECK(contains(sheets[5].viewport.layers, "R-軒高"));
-	CHECK(contains(sheets[3].viewport.layers, "R-軒高(GL+5542)"));
+	CHECK(contains(sheets[3].viewport.layers, "R-軒高(軒高-832)"));
 	// 段差の床（GL+2699 の横架材に載る床）は GL+2699 の伏図にだけ出る。
-	CHECK(contains(sheets[1].viewport.layers, "2-FL(GL+2699)"));
-	CHECK(!contains(sheets[2].viewport.layers, "2-FL(GL+2699)"));
+	CHECK(contains(sheets[1].viewport.layers, "2-FL(FL-872)"));
+	CHECK(!contains(sheets[2].viewport.layers, "2-FL(FL-872)"));
 	CHECK(contains(sheets[2].viewport.layers, "2-FL"));
 }
 
@@ -310,13 +310,13 @@ TEST(MergedPlanLevelsShareOneFramingSheet)
 	CHECK_EQ(partialSheets.size(), std::size_t(5));
 	if (partialSheets.size() == 5)
 	{
-		CHECK_EQ(partialSheets[3].title, std::string("2階小屋伏図（GL+5542・GL+6010）"));
-		CHECK(contains(partialSheets[3].viewport.layers, "R-軒高(GL+5542)"));
-		CHECK_EQ(partialSheets[4].title, std::string("2階小屋伏図（GL+6374）"));
+		CHECK_EQ(partialSheets[3].title, std::string("2階小屋伏図（軒高-832・軒高-364）"));
+		CHECK(contains(partialSheets[3].viewport.layers, "R-軒高(軒高-832)"));
+		CHECK_EQ(partialSheets[4].title, std::string("2階小屋伏図（軒高±0）"));
 	}
 	// まとめたので高さ別のレイヤは無く、すべての横架材が標準のレイヤに載る。
 	for (const core::MemberCommand& member : context.members())
-		CHECK(member.layer.find("(GL") == std::string::npos);
+		CHECK(core::stripPlanLevelTag(member.layer) == member.layer);
 }
 
 TEST(MoyaSheetPerStoryWithRoofSlab)

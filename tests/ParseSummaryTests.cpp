@@ -622,8 +622,8 @@ TEST(format_import_options_lists_the_merged_plan_levels)
 	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
 	std::string const text = formatImportOptions(options);
 
-	CHECK(text.find("伏図のまとめ方: 2番目の階の(GL+3531)を前のレベルとまとめる / "
-					"3番目の階の(GL+6374)を前のレベルとまとめる") != std::string::npos);
+	CHECK(text.find("伏図のまとめ方: 2番目の階の GL+3531 を前のレベルとまとめる / "
+					"3番目の階の GL+6374 を前のレベルとまとめる") != std::string::npos);
 	CHECK(text.find("まとめない") == std::string::npos);
 }
 

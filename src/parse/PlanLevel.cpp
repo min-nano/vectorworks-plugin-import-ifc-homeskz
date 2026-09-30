@@ -106,8 +106,14 @@ namespace HomeskzIfcImport::parse
 			for (std::size_t k = storyBegin; k < levels.size(); ++k)
 			{
 				levels[k].standard = (k == standard);
-				levels[k].tag = levels[k].standard ? std::string()
-												   : core::planLevelTag(levels[k].heights.front());
+				// 高さは GL ではなくその階の FL（最上階は軒高）＝ストーリの高さから測る
+				// （ご要望。core::planLevelTag）。
+				levels[k].datum = std::llround(stories[i].elevation);
+				levels[k].top = stories[i].isTop;
+				levels[k].tag = levels[k].standard
+									? std::string()
+									: core::planLevelTag(levels[k].heights.front(), levels[k].datum,
+														 levels[k].top);
 			}
 		}
 		return levels;
@@ -198,7 +204,7 @@ namespace HomeskzIfcImport::parse
 		{
 			if (k > 0)
 				suffix += "・";
-			suffix += core::planLevelHeightText(level.heights[k]);
+			suffix += core::planLevelHeightText(level.heights[k], level.datum, level.top);
 		}
 		return suffix + "）";
 	}
@@ -243,6 +249,9 @@ namespace HomeskzIfcImport::parse
 			{
 				core::PlanLevelChoice choice;
 				choice.key = core::PlanLevelKey{static_cast<int>(i), heights[i][k]};
+				// ダイアログに出す高さは FL（最上階は軒高）から（core::planLevelHeightText）。
+				choice.heightText = core::planLevelHeightText(
+					heights[i][k], std::llround(stories[i].elevation), stories[i].isTop);
 				choice.planTitle = floorPlanTitle(i, stories[i].isTop, stories.size());
 				choice.canMerge = k > 0;
 				choices.push_back(std::move(choice));

@@ -75,18 +75,21 @@ namespace HomeskzIfcImport::core
 	// 横架材天端・最上階は軒高）以外の高さの横架材・床・耐力壁は**別のレイヤ**へ置き、
 	// 伏図はレイヤでそれを切り分ける（ビューポートが映すものを絞れるのはレイヤとクラス
 	// だけ）。そのレイヤのレベル種別とレイヤ名には、元の種別の後ろにこの印を付ける
-	// （"横架材天端(GL+2699)" / "2-横架材天端(GL+2699)"）。
+	// （"横架材天端(FL-872)" / "2-横架材天端(FL-872)" / "R-軒高(軒高-832)"）。
+	//
+	// **高さは GL ではなくその階の FL（最上階は軒高）から測る**（ご要望。GL 基準では
+	// 図面の読み方と合わず分かりにくい）。FL も軒高もストーリの高さ（Elevation）その
+	// ものなので、基準は階の Elevation で、名前だけが一般階と最上階で違う。
 	//
 	// **印の書式はここが唯一**——付けるのは parse/PlanLevel、外して元の種別へ戻すのは
-	// 重ね順（desiredStoryLayerOrder）・仕口（parse/Joint）・寸法（parse/Dimension）で、
-	// core/ は parse/ を include できないのでここに置く（kLevelFL を core が持つのと同じ理由）。
-	// heightMm は GL からの高さ（mm）。
-	inline constexpr const char* kPlanLevelTagOpen = "(GL";
-	std::string planLevelTag(long long heightMm);
+	// 重ね順（desiredStoryLayerOrder）・仕口（parse/Joint）・継手（parse/Splice）・寸法
+	// （parse/Dimension）で、core/ は parse/ を include できないのでここに置く（kLevelFL を
+	// core が持つのと同じ理由）。heightMm / datumMm は GL からの高さ（mm）、top は最上階か。
+	std::string planLevelTag(long long heightMm, long long datumMm, bool top);
 
-	// 高さの表記（"GL+2699" / "GL-100"）。印（planLevelTag）の中身で、伏図のタイトルと
-	// 設定ダイアログの行もこれで高さを書く。
-	std::string planLevelHeightText(long long heightMm);
+	// 高さの表記（"FL-872" / "FL±0" / "軒高-832"）。印（planLevelTag）の中身で、伏図の
+	// タイトルと設定ダイアログの行もこれで高さを書く。
+	std::string planLevelHeightText(long long heightMm, long long datumMm, bool top);
 
 	// 末尾の伏図レベルの印を外した名前（レベル種別・レイヤ名のどちらにも使える）。印が
 	// 無ければそのまま返す。

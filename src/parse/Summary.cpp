@@ -521,10 +521,11 @@ namespace HomeskzIfcImport::parse
 			out << "まとめない（高さごとに 1 枚）";
 		for (const core::PlanLevelKey& key : options.mergedPlanLevels)
 		{
-			// 印の書式（"(GL+3531)"）は core::planLevelTag が唯一。
-			// 階は Elevation 昇順の何番目か（最上階＝屋根も数に入る）。
+			// 階は Elevation 昇順の何番目か（最上階＝屋根も数に入る）。設定の鍵は GL からの
+			// 高さなので、ここは GL で書く（FL を知るには IFC が要る。core::PlanLevelKey）。
 			out << (&key == &*options.mergedPlanLevels.begin() ? "" : " / ") << (key.story + 1)
-				<< "番目の階の" << core::planLevelTag(key.height) << "を前のレベルとまとめる";
+				<< "番目の階の GL" << (key.height < 0 ? "" : "+") << key.height
+				<< " を前のレベルとまとめる";
 		}
 		return out.str();
 	}

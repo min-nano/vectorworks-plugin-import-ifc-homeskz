@@ -311,11 +311,9 @@ namespace HomeskzIfcImport::draw
 					continue;
 				// 前のレベル＝同じ階で 1 つ低い高さ（候補は階・高さの昇順）。
 				const core::PlanLevelChoice& previous = choices[k - 1];
-				rows.push_back(
-					MergeRow{choice.key, choice.planTitle + ": " +
-											 core::planLevelHeightText(choice.key.height) + " を " +
-											 core::planLevelHeightText(previous.key.height) +
-											 " と同じ伏図にまとめる"});
+				rows.push_back(MergeRow{choice.key, choice.planTitle + ": " + choice.heightText +
+														" を " + previous.heightText +
+														" と同じ伏図にまとめる"});
 			}
 			return rows;
 		}

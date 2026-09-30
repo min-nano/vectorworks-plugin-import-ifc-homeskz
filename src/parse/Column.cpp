@@ -358,7 +358,7 @@ namespace HomeskzIfcImport::parse
 			double lowest = 0.0;
 			for (const MemberCommand& member : members)
 			{
-				// 伏図レベルへ振り分けた横架材（"2-横架材天端(GL+2699)"）もその階の床梁
+				// 伏図レベルへ振り分けた横架材（"2-横架材天端(FL-872)"）もその階の床梁
 				// （parse/PlanLevel）。印を外して階の横架材レイヤと比べる。
 				if (core::stripPlanLevelTag(member.layer) != beamLayer)
 					continue;

@@ -105,6 +105,7 @@ namespace HomeskzIfcImport::core
 	{
 		PlanLevelKey key; // そのレベルの鍵（まとめる設定の鍵。key.height が高さ）
 		std::string planTitle; // その階の伏図の名前（"2階床伏図" / "2階小屋伏図"）
+		std::string heightText; // 高さの表記（"FL-872" / "軒高-832"。core::planLevelHeightText）
 		bool canMerge = false; // 前のレベル（同じ階で 1 つ低い高さ）があるか
 	};
 

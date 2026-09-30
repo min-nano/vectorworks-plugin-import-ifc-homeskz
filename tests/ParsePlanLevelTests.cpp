@@ -86,20 +86,25 @@ namespace
 // core の印（core::planLevelTag / stripPlanLevelTag）
 // ---------------------------------------------------------------------------
 
-TEST(plan_level_tag_names_the_height_from_gl)
+TEST(plan_level_tag_measures_from_fl_or_eaves)
 {
-	CHECK_EQ(core::planLevelTag(2699), std::string("(GL+2699)"));
-	CHECK_EQ(core::planLevelTag(0), std::string("(GL+0)"));
-	CHECK_EQ(core::planLevelTag(-100), std::string("(GL-100)"));
+	// 高さは GL ではなくその階の FL（最上階は軒高）から測る（ご要望）。0 は "±"。
+	CHECK_EQ(core::planLevelTag(2699, 3571, false), std::string("(FL-872)"));
+	CHECK_EQ(core::planLevelTag(3700, 3571, false), std::string("(FL+129)"));
+	CHECK_EQ(core::planLevelTag(6374, 6374, true), std::string("(軒高±0)"));
+	CHECK_EQ(core::planLevelHeightText(5542, 6374, true), std::string("軒高-832"));
 }
 
 TEST(strip_plan_level_tag_restores_the_base_name)
 {
-	CHECK_EQ(core::stripPlanLevelTag("2-横架材天端(GL+2699)"), std::string("2-横架材天端"));
-	CHECK_EQ(core::stripPlanLevelTag("FL(GL-100)"), std::string("FL"));
+	CHECK_EQ(core::stripPlanLevelTag("2-横架材天端(FL-872)"), std::string("2-横架材天端"));
+	CHECK_EQ(core::stripPlanLevelTag("R-軒高(軒高-832)"), std::string("R-軒高"));
+	CHECK_EQ(core::stripPlanLevelTag("R-軒高(軒高±0)"), std::string("R-軒高"));
+	CHECK_EQ(core::stripPlanLevelTag("FL(FL+100)"), std::string("FL"));
 	// 印の無い名前・印に見えない括弧はそのまま。
 	CHECK_EQ(core::stripPlanLevelTag("2-横架材天端"), std::string("2-横架材天端"));
 	CHECK_EQ(core::stripPlanLevelTag("柱(通し)"), std::string("柱(通し)"));
+	CHECK_EQ(core::stripPlanLevelTag("柱(FL)"), std::string("柱(FL)"));
 	CHECK_EQ(core::stripPlanLevelTag(""), std::string());
 }
 
@@ -111,18 +116,18 @@ TEST(layer_order_treats_tagged_levels_like_their_base_type)
 	story.name = "2階";
 	story.suffix = "2";
 	story.levels = {core::LevelCommand{"FL", 0.0, "2-FL"},
-					core::LevelCommand{"FL(GL+2699)", -832.0, "2-FL(GL+2699)"},
-					core::LevelCommand{"耐力壁(GL+2699)", -872.0, "2-耐力壁(GL+2699)"},
+					core::LevelCommand{"FL(FL-872)", -832.0, "2-FL(FL-872)"},
+					core::LevelCommand{"耐力壁(FL-872)", -872.0, "2-耐力壁(FL-872)"},
 					core::LevelCommand{"横架材天端", -40.0, "2-横架材天端"}};
 	const std::vector<std::string> order = core::desiredStoryLayerOrder({story}, {});
 	CHECK_EQ(order.size(), std::size_t(5));
 	if (order.size() != 5)
 		return;
 	CHECK_EQ(order[0], std::string(core::kGridLayer));
-	CHECK_EQ(order[1], std::string("2-耐力壁(GL+2699)"));
+	CHECK_EQ(order[1], std::string("2-耐力壁(FL-872)"));
 	CHECK_EQ(order[2], std::string("2-横架材天端"));
 	CHECK_EQ(order[3], std::string("2-FL"));
-	CHECK_EQ(order[4], std::string("2-FL(GL+2699)"));
+	CHECK_EQ(order[4], std::string("2-FL(FL-872)"));
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +169,7 @@ TEST(plan_levels_number_every_height_and_mark_the_standard)
 		CHECK_EQ(levels[k].ordinal, static_cast<int>(k) + 1);
 	// 標準の天端（2FL は 3490）を含むものは名前を変えず、ほかは高さの印。
 	CHECK(levels[1].story == 1 && !levels[1].standard);
-	CHECK_EQ(levels[1].tag, std::string("(GL+2700)"));
+	CHECK_EQ(levels[1].tag, std::string("(FL-800)"));
 	CHECK(levels[2].standard && levels[2].tag.empty());
 	CHECK(levels[0].standard && levels[3].standard);
 	// レベルのずらし量は代表の高さ − 標準の天端。
@@ -221,13 +226,13 @@ TEST(title_suffix_only_when_a_story_has_several_plans)
 	const std::vector<PlanLevel> split =
 		buildPlanLevels(stories, {{590}, {2700, 2800, 3490}, {6300}}, ImportOptions{});
 	CHECK(planLevelTitleSuffix(split, split[0]).empty());
-	CHECK_EQ(planLevelTitleSuffix(split, split[1]), std::string("（GL+2700）"));
+	CHECK_EQ(planLevelTitleSuffix(split, split[1]), std::string("（FL-800）"));
 
 	ImportOptions options;
 	options.setMergeWithPrevious(PlanLevelKey{1, 2800}, true);
 	const std::vector<PlanLevel> merged =
 		buildPlanLevels(stories, {{590}, {2700, 2800, 3490}, {6300}}, options);
-	CHECK_EQ(planLevelTitleSuffix(merged, merged[1]), std::string("（GL+2700・GL+2800）"));
+	CHECK_EQ(planLevelTitleSuffix(merged, merged[1]), std::string("（FL-800・FL-700）"));
 }
 
 // ---------------------------------------------------------------------------
@@ -248,12 +253,12 @@ TEST(members_move_to_their_plan_level_layer)
 		// 登り梁の専用レイヤの材も水下側で切り分ける（その高さの柱梁伏図に映すため）。
 		beam("2-登り梁", 3900.0, 2710.0), beam("2-登り梁", 3480.0, 4200.0)};
 	assignMemberPlanLevels(members, stories, levels);
-	CHECK_EQ(members[0].layer, std::string("2-横架材天端(GL+2700)"));
+	CHECK_EQ(members[0].layer, std::string("2-横架材天端(FL-800)"));
 	CHECK_EQ(members[1].layer, std::string("2-横架材天端"));
-	CHECK_EQ(members[2].layer, std::string("2-横架材天端(GL+2700)"));
+	CHECK_EQ(members[2].layer, std::string("2-横架材天端(FL-800)"));
 	CHECK_EQ(members[3].layer, std::string("2-横架材天端"));
 	CHECK_EQ(members[4].layer, std::string("2-母屋"));
-	CHECK_EQ(members[5].layer, std::string("2-登り梁(GL+2700)"));
+	CHECK_EQ(members[5].layer, std::string("2-登り梁(FL-800)"));
 	CHECK_EQ(members[6].layer, std::string("2-登り梁"));
 }
 
@@ -304,11 +309,11 @@ TEST(skip_floor_fixture_levels)
 	// 横架材はすべて自分の高さの伏図レベルのレイヤに載る（水平な材は天端がその高さ）。
 	for (const MemberCommand& member : context.members())
 	{
-		if (member.layer == "2-横架材天端(GL+2699)")
+		if (member.layer == "2-横架材天端(FL-872)")
 			CHECK(near(member.elevation, 2699.0, 0.5));
 		if (member.layer == "2-横架材天端")
 			CHECK(near(member.elevation, 3531.0, 0.5));
-		if (member.layer == "R-軒高(GL+6010)")
+		if (member.layer == "R-軒高(軒高-364)")
 			CHECK(near(member.elevation, 6010.0, 0.5));
 	}
 
@@ -357,6 +362,10 @@ TEST(plan_level_choices_list_every_height_before_merging)
 		return;
 	CHECK(choices[1].key == (PlanLevelKey{1, 2699}));
 	CHECK_EQ(choices[1].planTitle, std::string("2階床伏図"));
+	// 高さは FL（最上階は軒高）から書く（ご要望）。
+	CHECK_EQ(choices[1].heightText, std::string("FL-872"));
+	CHECK_EQ(choices[2].heightText, std::string("FL-40"));
+	CHECK_EQ(choices[5].heightText, std::string("軒高±0"));
 	CHECK(!choices[1].canMerge);
 	CHECK(choices[2].key == (PlanLevelKey{1, 3531}));
 	CHECK(choices[2].canMerge);

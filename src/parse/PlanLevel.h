@@ -29,7 +29,8 @@
 //	【標準のレベルは名前を変えない】各階で標準の天端にいちばん近い高さを含む伏図レベルを
 //	**標準**とし、そこは従来どおりのレイヤ（"2-横架材天端" / "R-軒高" / "2-FL" / "2-耐力壁"）
 //	へ置く。それ以外の伏図レベルは、元のレベル種別の後ろに高さの印（core::planLevelTag。
-//	"(GL+2699)"）を付けた別のレベル・レイヤ（"2-横架材天端(GL+2699)"）へ置く。レベルの高さは
+//	"(FL-872)"。高さはその階の FL、最上階は軒高から測る）を付けた別のレベル・レイヤ
+//	（"2-横架材天端(FL-872)"）へ置く。レベルの高さは
 //	元のレベルを伏図レベルの高さのぶんずらしたもの（planLevelShift）。材の高さ基準
 //	（StoryBoundCommand）は従来どおり元のレベルを指す——レイヤが違っても同じ階のレベルは
 //	指せる（柱が span レイヤに居ながら横架材天端へバインドしているのと同じ）。
@@ -56,6 +57,8 @@ namespace HomeskzIfcImport::parse
 		std::vector<long long> heights; // 含む天端の高さ（GL からの mm。昇順・1 つ以上）
 		int ordinal = 0;				// 建物全体の通し番号（1 始まり。下から）
 		bool standard = false; // その階の標準の横架材天端を含むか（＝レイヤ名を変えない）
+		long long datum = 0; // 高さの基準＝その階の FL（最上階は軒高）の GL からの高さ（mm）
+		bool top = false; // 最上階か（基準の名前が「軒高」になる）
 		std::string tag; // レベル種別・レイヤ名の印（標準は空。core::planLevelTag）
 
 		// 代表の高さ（いちばん低い天端）。レベルの高さ・レイヤの印はこれで決める。
@@ -96,10 +99,10 @@ namespace HomeskzIfcImport::parse
 	// ordinal − 1 を返す（どの階も高さが 1 つのときの従来の対応）。
 	std::size_t storyOfOrdinal(const std::vector<PlanLevel>& levels, double ordinal);
 
-	// 伏図レベルのレベル種別（"横架材天端" / "横架材天端(GL+2699)"）。
+	// 伏図レベルのレベル種別（"横架材天端" / "横架材天端(FL-872)"）。
 	std::string planLevelType(const PlanLevel& level, const std::string& levelType);
 
-	// 伏図レベルのレイヤ名（"2-横架材天端" / "2-横架材天端(GL+2699)"）。
+	// 伏図レベルのレイヤ名（"2-横架材天端" / "2-横架材天端(FL-872)"）。
 	std::string planLevelLayer(const PlanLevel& level, const StoryInfo& story,
 							   const std::string& levelType);
 
@@ -110,8 +113,8 @@ namespace HomeskzIfcImport::parse
 	// 代表の高さ − 標準の横架材天端。
 	double planLevelShift(const PlanLevel& level, const StoryInfo& story);
 
-	// 階に伏図レベルが 2 つ以上あるとき、伏図のタイトルへ添える高さ（"（GL+2699）"。まとめた
-	// ものは "（GL+2699・GL+2800）"）。1 つだけなら空（タイトルは従来のまま）。
+	// 階に伏図レベルが 2 つ以上あるとき、伏図のタイトルへ添える高さ（"（FL-872）"。まとめた
+	// ものは "（FL-872・FL-771）"。高さは FL、最上階は軒高から）。1 つだけなら空（タイトルは従来のまま）。
 	std::string planLevelTitleSuffix(const std::vector<PlanLevel>& levels, const PlanLevel& level);
 
 	// 横架材命令の配置先を伏図レベルのレイヤへ振り分ける。対象は横架材レイヤ

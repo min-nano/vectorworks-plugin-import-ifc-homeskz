@@ -155,7 +155,7 @@ namespace HomeskzIfcImport::parse
 			const StoryInfo& story = stories[i];
 			const bool isTop = story.isTop;
 			// その伏図レベルの横架材レイヤ（一般階＝横架材天端・最上階＝軒高。標準でない
-			// 高さは "(GL+…)" の付いたレイヤ）。
+			// 高さは "(FL-…)" の付いたレイヤ）。
 			std::vector<std::string> layers{planLevelBeamLayer(level, story)};
 
 			// 切断レベル（その伏図レベルの通し番号 + 0.25）を span が含む柱レイヤ。span の
@@ -211,7 +211,7 @@ namespace HomeskzIfcImport::parse
 			layers.emplace_back(core::kGridLayer);
 
 			// 階に伏図レベルが 2 つ以上あれば、タイトルに高さを添えて見分ける
-			// （"2階床伏図（GL+2699）"）。
+			// （"2階床伏図（FL-872）"）。
 			std::string title =
 				floorPlanTitle(i, isTop, stories.size()) + planLevelTitleSuffix(planLevels, level);
 			std::string number = std::to_string(kFloorPlanStartNumber + level.ordinal - 1);

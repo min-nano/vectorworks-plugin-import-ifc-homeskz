@@ -13,7 +13,7 @@
 //	  * **柱梁伏図**（buildFloorFramingSheetCommands）… **横架材の高さ（伏図レベル）1 つに
 //	    つき 1 枚**（parse/PlanLevel。どの階も高さが 1 つなら FL ストーリ 1 つにつき 1 枚）。
 //	    表示レイヤは その伏図レベルの横架材（一般階 "n-横架材天端" / 最上階 "R-軒高"。標準で
-//	    ない高さは "(GL+…)" 付き）・登り梁（水下側がその高さのもの）・耐力壁＋切断レベルを
+//	    ない高さは "(FL-…)" 付き）・登り梁（水下側がその高さのもの）・耐力壁＋切断レベルを
 //	    span が含む柱レイヤ＋（最上階以外は）床＋（最下階かつ基礎ありなら）アンカーボルト＋通り芯。
 //	  * **母屋伏図**（buildMoyaSheetCommands）… 屋根版を持つ階ごとに 1 枚。表示レイヤは
 //	    その階の小屋組（母屋・登り梁・垂木・野地板）＋切断レベルを span が含む柱レイヤ＋通り芯。
@@ -125,7 +125,7 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(const Model& model);
 
 	// 伏図レベル（横架材の高さ）ごとの柱梁伏図の sheet 命令（ストーリが無ければ空）。
-	// 階に伏図が 2 枚以上あればタイトルに高さを添える（"2階床伏図（GL+2699）"）。
+	// 階に伏図が 2 枚以上あればタイトルに高さを添える（"2階床伏図（FL-872）"）。
 	// グラフィック凡例を各シートに 1 つ載せる。
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(const Model& model);
