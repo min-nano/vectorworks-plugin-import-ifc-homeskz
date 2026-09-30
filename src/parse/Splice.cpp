@@ -13,6 +13,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <map>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -132,29 +133,76 @@ namespace HomeskzIfcImport::parse
 			return std::nullopt;
 		}
 
-		// 女木の側（0 = a、1 = b）。決まらなければ nullopt（parse/Splice.h「向き」）。
-		std::optional<int> femaleSide(const SplicePiece& a, const SplicePiece& b,
-									  const SpliceCues& cues)
+		// 土台の女木の側（0 = a、1 = b）: M12 のアンカーボルトが近い側が男木 → 女木はその反対。
+		// 決まらなければ nullopt（parse/Splice.h「向き」）。
+		std::optional<int> dodaiFemaleSide(const SplicePiece& a, const SplicePiece& b,
+										   const SpliceCues& cues)
 		{
-			// 土台: M12 のアンカーボルトが近い側が男木 → 女木はその反対。
-			if (a.member->drawClass == CLASS_DODAI || b.member->drawClass == CLASS_DODAI)
-			{
-				const std::optional<int> male = nearerSide(nearestOnPiece(a, cues.anchorsM12),
-														   nearestOnPiece(b, cues.anchorsM12));
-				if (!male.has_value())
-					return std::nullopt;
-				return 1 - *male;
-			}
+			const std::optional<int> male =
+				nearerSide(nearestOnPiece(a, cues.anchorsM12), nearestOnPiece(b, cues.anchorsM12));
+			if (!male.has_value())
+				return std::nullopt;
+			return 1 - *male;
+		}
 
-			// 梁・大引・母屋など: 支点（下階の柱・小屋束。大引は床束も）が近い側が女木。
-			const auto nearestSupport = [&cues](const SplicePiece& piece)
+		// 梁・大引・母屋など: その材の上で継手にいちばん近い支点（下階の柱・小屋束。大引は
+		// 床束も）までの距離。
+		std::optional<double> nearestSupport(const SplicePiece& piece, const SpliceCues& cues)
+		{
+			std::vector<Vec2> supports = supportsUnder(piece, cues.columns);
+			if (piece.member->drawClass == CLASS_OOBIKI)
+				supports.insert(supports.end(), cues.floorPosts.begin(), cues.floorPosts.end());
+			return nearestOnPiece(piece, supports);
+		}
+
+		// 継手 1 つの判定途中の値。土台以外は両側の支点までの距離を持ち、向きは全継手を
+		// 見てから決める（短いスパンは他の継手の支点からの距離を手掛かりにするため）。
+		struct SpliceCandidate
+		{
+			SymbolCommand command;
+			Vec2 inwardA;
+			Vec2 inwardB;
+			Vec2 axis;
+			bool dodai = false;
+			std::optional<int> dodaiFemale;
+			std::optional<double> supportA;
+			std::optional<double> supportB;
+		};
+
+		// 両側に支点があり、その間隔（継手をはさむ 2 つの支点の距離）が短いスパンか。
+		bool isShortSpan(const SpliceCandidate& candidate)
+		{
+			return candidate.supportA.has_value() && candidate.supportB.has_value() &&
+				   *candidate.supportA + *candidate.supportB <= kSpliceShortSpan;
+		}
+
+		// 支点からの距離の代表値（中央値。偶数個なら小さい方の中央＝実在する値）。
+		std::optional<double> medianOf(std::vector<double> values)
+		{
+			if (values.empty())
+				return std::nullopt;
+			std::ranges::sort(values);
+			return values[(values.size() - 1) / 2];
+		}
+
+		// 土台以外の女木の側（0 = a、1 = b）。reference は他の継手で確かめた「継手から支点
+		// までの距離」の代表値（無ければ nullopt）。
+		std::optional<int> beamFemaleSide(const SpliceCandidate& candidate,
+										  std::optional<double> reference)
+		{
+			// 短いスパンでは「近い方」が当てにならない（継手が 2 つの支点のほぼ中間に来る）。
+			// 他の継手の支点からの距離と同じ距離にある側の支点を、その継手の支点とする。
+			const std::optional<double>& supportA = candidate.supportA;
+			const std::optional<double>& supportB = candidate.supportB;
+			if (isShortSpan(candidate) && reference.has_value() && supportA.has_value() &&
+				supportB.has_value())
 			{
-				std::vector<Vec2> supports = supportsUnder(piece, cues.columns);
-				if (piece.member->drawClass == CLASS_OOBIKI)
-					supports.insert(supports.end(), cues.floorPosts.begin(), cues.floorPosts.end());
-				return nearestOnPiece(piece, supports);
-			};
-			return nearerSide(nearestSupport(a), nearestSupport(b));
+				const double offA = std::abs(*supportA - *reference);
+				const double offB = std::abs(*supportB - *reference);
+				if (std::abs(offA - offB) > kSpliceAlongTol)
+					return offA < offB ? 0 : 1;
+			}
+			return nearerSide(supportA, supportB);
 		}
 	} // namespace
 
@@ -175,7 +223,7 @@ namespace HomeskzIfcImport::parse
 		for (const MemberCommand& member : members)
 			geoms.push_back(memberGeom(member));
 
-		std::vector<SymbolCommand> commands;
+		std::vector<SpliceCandidate> candidates;
 		for (std::size_t i = 0; i < members.size(); ++i)
 		{
 			const MemberGeom& a = geoms[i];
@@ -205,22 +253,72 @@ namespace HomeskzIfcImport::parse
 						const SplicePiece pieceA{&members[i], &a, &endA};
 						const SplicePiece pieceB{&members[j], &b, &endB};
 
-						SymbolCommand command;
-						command.layer = members[i].layer;
-						command.symbol = symbol;
-						command.position = Vec2{(endA.point.x + endB.point.x) / 2.0,
-												(endA.point.y + endB.point.y) / 2.0};
-						// シンボルの +X を女木の側（その材の内側）へ向ける。
-						const std::optional<int> female = femaleSide(pieceA, pieceB, cues);
-						if (female.has_value())
-							command.angle = angleOf(*female == 0 ? endA.inward : endB.inward);
+						SpliceCandidate candidate;
+						candidate.command.layer = members[i].layer;
+						candidate.command.symbol = symbol;
+						candidate.command.position = Vec2{(endA.point.x + endB.point.x) / 2.0,
+														  (endA.point.y + endB.point.y) / 2.0};
+						candidate.command.zOffset = std::max(endA.zOffset, endB.zOffset);
+						candidate.inwardA = endA.inward;
+						candidate.inwardB = endB.inward;
+						candidate.axis = a.axis;
+						candidate.dodai = members[i].drawClass == CLASS_DODAI ||
+										  members[j].drawClass == CLASS_DODAI;
+						if (candidate.dodai)
+						{
+							candidate.dodaiFemale = dodaiFemaleSide(pieceA, pieceB, cues);
+						}
 						else
-							command.angle = normalizedAxisAngle(a.axis);
-						command.zOffset = std::max(endA.zOffset, endB.zOffset);
-						commands.push_back(std::move(command));
+						{
+							candidate.supportA = nearestSupport(pieceA, cues);
+							candidate.supportB = nearestSupport(pieceB, cues);
+						}
+						candidates.push_back(std::move(candidate));
 					}
 				}
 			}
+		}
+		// 「継手から支点までの距離」の代表値を、スパンが長く向きがはっきり決まる継手（両側に
+		// 支点があり、近い方が一意）から集める。**レイヤごと**に持ち（階・部材の種類で
+		// 持ち出しの寸法が違いうる）、そのレイヤに 1 つも無ければ全体の値を使う。
+		std::map<std::string, std::vector<double>> layerDistances;
+		std::vector<double> allDistances;
+		for (const SpliceCandidate& candidate : candidates)
+		{
+			if (candidate.dodai || isShortSpan(candidate) || !candidate.supportA.has_value() ||
+				!candidate.supportB.has_value())
+				continue;
+			if (!nearerSide(candidate.supportA, candidate.supportB).has_value())
+				continue;
+			const double near = std::min(*candidate.supportA, *candidate.supportB);
+			layerDistances[candidate.command.layer].push_back(near);
+			allDistances.push_back(near);
+		}
+		const std::optional<double> overall = medianOf(allDistances);
+
+		std::vector<SymbolCommand> commands;
+		commands.reserve(candidates.size());
+		for (SpliceCandidate& candidate : candidates)
+		{
+			std::optional<int> female;
+			if (candidate.dodai)
+			{
+				female = candidate.dodaiFemale;
+			}
+			else
+			{
+				const auto found = layerDistances.find(candidate.command.layer);
+				const std::optional<double> reference =
+					found != layerDistances.end() ? medianOf(found->second) : overall;
+				female = beamFemaleSide(candidate, reference);
+			}
+			// シンボルの +X を女木の側（その材の内側）へ向ける。決まらなければ正規化した材軸。
+			if (female.has_value())
+				candidate.command.angle =
+					angleOf(*female == 0 ? candidate.inwardA : candidate.inwardB);
+			else
+				candidate.command.angle = normalizedAxisAngle(candidate.axis);
+			commands.push_back(std::move(candidate.command));
 		}
 		return commands;
 	}

@@ -361,6 +361,58 @@ TEST(splice_orientation_follows_the_y_axis_too)
 		CHECK(near(splices[0].angle, 90.0));
 }
 
+TEST(splice_short_span_uses_the_support_distance_seen_elsewhere)
+{
+	// 短いスパン（継手をはさむ 2 支点の間隔 ≤ 500）は「近い方」ではなく、スパンの長い継手で
+	// 確かめた「継手から支点までの距離」と同じ距離にある側を女木とする。
+	// 継手 1（x=2000）: 長いスパン。左の支点 1800（距離 200）・右の支点 3000（距離 1000）
+	//                   → 女木は左、距離 200 が代表値になる。
+	// 継手 2（x=10000）: 短いスパン。左の支点 9880（距離 120）・右の支点 10200（距離 200）
+	//                   → 近いのは左だが、代表値 200 と同じ距離の右を女木とする。
+	std::vector<MemberCommand> members = {
+		beam(Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
+		beam(Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}),
+		beam(Vec2{8000.0, 0.0}, Vec2{10000.0, 0.0}),
+		beam(Vec2{10000.0, 0.0}, Vec2{12000.0, 0.0}),
+	};
+	SpliceCues cues;
+	cues.columns = {
+		column(Vec2{1800.0, 0.0}, 0.0, kBeamBottom), column(Vec2{3000.0, 0.0}, 0.0, kBeamBottom),
+		column(Vec2{9880.0, 0.0}, 0.0, kBeamBottom), column(Vec2{10200.0, 0.0}, 0.0, kBeamBottom)};
+	const std::vector<SymbolCommand> splices = buildSpliceCommands(members, cues);
+	CHECK_EQ(splices.size(), std::size_t{2});
+	if (splices.size() != 2)
+		return;
+	CHECK(near(std::abs(splices[0].angle), 180.0)); // 継手 1: 女木は左
+	CHECK(near(splices[1].angle, 0.0)); // 継手 2: 女木は右（代表値 200 の側）
+
+	// 代表値が無い（長いスパンの継手が無い）ときは従来どおり近い方。
+	const std::vector<MemberCommand> onlyShort = {members[2], members[3]};
+	const std::vector<SymbolCommand> alone = buildSpliceCommands(onlyShort, cues);
+	CHECK_EQ(alone.size(), std::size_t{1});
+	if (!alone.empty())
+		CHECK(near(std::abs(alone[0].angle), 180.0));
+
+	// 代表値は**レイヤごと**。別レイヤの継手の距離は、そのレイヤに代表値があれば使わない。
+	std::vector<MemberCommand> otherLayer = members;
+	otherLayer[2].layer = "3-横架材天端";
+	otherLayer[3].layer = "3-横架材天端";
+	// 3 階にも長いスパンの継手（距離 120 の支点）を足す → 3 階の代表値は 120 → 左が女木。
+	MemberCommand longLeft = beam(Vec2{20000.0, 0.0}, Vec2{22000.0, 0.0});
+	MemberCommand longRight = beam(Vec2{22000.0, 0.0}, Vec2{24000.0, 0.0});
+	longLeft.layer = "3-横架材天端";
+	longRight.layer = "3-横架材天端";
+	otherLayer.push_back(longLeft);
+	otherLayer.push_back(longRight);
+	SpliceCues layered = cues;
+	layered.columns.push_back(column(Vec2{21880.0, 0.0}, 0.0, kBeamBottom));
+	layered.columns.push_back(column(Vec2{23000.0, 0.0}, 0.0, kBeamBottom));
+	const std::vector<SymbolCommand> perLayer = buildSpliceCommands(otherLayer, layered);
+	CHECK_EQ(perLayer.size(), std::size_t{3});
+	if (perLayer.size() == 3)
+		CHECK(near(std::abs(perLayer[1].angle), 180.0)); // 3 階の短いスパン: 代表値 120 → 左
+}
+
 TEST(splice_fixtures_orient_most_splices_from_the_cues)
 {
 	// 実データ: 継手の向きはおおむね手掛かりから決まる（0 件なら向きの規則が何も効いて
