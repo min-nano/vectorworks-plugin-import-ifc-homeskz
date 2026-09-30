@@ -64,7 +64,7 @@ namespace HomeskzIfcImport::parse
 				continue;
 			const std::optional<std::string> memberClass =
 				memberClassFromName(entityName(*element));
-			if (!memberClass.has_value() || *memberClass != CLASS_YUKABARI)
+			if (!memberClass.has_value() || !isFloorBeamClass(*memberClass))
 				continue;
 
 			WorldSolid solid;
