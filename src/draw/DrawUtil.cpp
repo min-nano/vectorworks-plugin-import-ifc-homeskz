@@ -603,6 +603,32 @@ namespace HomeskzIfcImport::draw
 		return static_cast<RefNumber>(gSDK->GetObjectInternalIndex(style));
 	}
 
+	bool DeselectEverything()
+	{
+		try
+		{
+			gSDK->DeselectAll();
+			for (MCObjectHandle layer = VWDocument::GetDrawingHeaderFristMember(); layer != nil;
+				 layer = gSDK->NextObject(layer))
+			{
+				if (!VWLayerObj::IsLayerObject(layer))
+					continue;
+				for (MCObjectHandle h = gSDK->FirstMemberObj(layer); h != nil;
+					 h = gSDK->NextObject(h))
+				{
+					if (gSDK->IsSelected(h))
+						gSDK->SelectObject(h, false);
+				}
+			}
+		}
+		catch (...)
+		{
+			// 選択が残るだけで図は壊れない（ヘッダ参照）。そこで打ち切る。
+			return false;
+		}
+		return true;
+	}
+
 	// --- 取り込み全体の Undo（DrawUtil.h「なぜレイヤを記録するのか」）--------------------
 	namespace
 	{
