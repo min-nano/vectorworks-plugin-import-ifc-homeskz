@@ -29,7 +29,7 @@
 //	書式で連番する——数字書式（"X1"）は `'` を足して "X1'" / "X1''"、いろは書式（"い"）は `又` を
 //	前置して "又い" / "又又い"（中間の順番ぶんだけ増やす）。
 //
-//	【外す通り（M33）】取り込み設定（core::ImportOptions::skippedSections）で外された通りは
+//	【外す通り（M34）】取り込み設定（core::ImportOptions::skippedSections）で外された通りは
 //	命令を作らない。外すのは**図番を一意にした後**——外す前後で残る通りの図番が変わらない
 //	ので、選ぶための解析（buildSectionCandidates）と取り込むための解析とで同じ通りを指せる。
 //
@@ -127,7 +127,7 @@ namespace HomeskzIfcImport::parse
 	// 図面では、どちらの方向も "1" から連番になる）。図面タイトルも新しい図番から組み直す。
 	void uniqueSectionNumbers(std::vector<core::SectionCommand>& commands);
 
-	// M33 取り込み設定で外された通り（図番で指す）を取り除く。残る命令の並びは変えない。
+	// M34 取り込み設定で外された通り（図番で指す）を取り除く。残る命令の並びは変えない。
 	void dropSkippedSections(std::vector<core::SectionCommand>& commands,
 							 const core::ImportOptions& options);
 

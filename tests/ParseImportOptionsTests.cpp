@@ -4,8 +4,8 @@
 //	取り込み設定（配置するシンボルの対応）が解析の結果まで届くかの単体テスト。
 //	VectorWorks SDK を一切 include せず、無 SDK のテストハーネスで走る。
 //
-//	【何を守っているか】シンボル名は 5 つのモジュール（アンカーボルト・床束・火打・仕口・
-//	伏図記号）がそれぞれ命令へ書き込む。設定を通す経路が 1 つでも欠けると「ダイアログで
+//	【何を守っているか】シンボル名は 6 つのモジュール（アンカーボルト・床束・火打・仕口・
+//	継手・伏図記号）がそれぞれ命令へ書き込む。設定を通す経路が 1 つでも欠けると「ダイアログで
 //	選んだのに既定のまま置かれる」——絵を見ても気付きにくい壊れ方なので、**全フィクスチャの
 //	通しで「既定名がひとつも残っていないこと」**を確かめる（docs/DEV-NOTES.md M20）。
 //
@@ -54,12 +54,13 @@ namespace
 		return false;
 	}
 
-	// 命令セットの中で**シンボル名を持つ命令**をすべて回す（シンボル置換系 4 種＋伏図記号）。
+	// 命令セットの中で**シンボル名を持つ命令**をすべて回す（シンボル置換系 5 種＋伏図記号）。
 	// 断面記号は絵ではなく実断面の対角線を引くので symbol が空——そこは飛ばす。
 	template <class Body> void forEachSymbolName(const Document& document, Body&& body)
 	{
 		for (const std::vector<SymbolCommand>* list :
-			 {&document.anchorBolts, &document.floorPosts, &document.fireBraces, &document.joints})
+			 {&document.anchorBolts, &document.floorPosts, &document.fireBraces, &document.joints,
+			  &document.splices})
 			for (const SymbolCommand& command : *list)
 				body(command.symbol);
 		for (const auto& mark : document.columnMarks)
@@ -121,6 +122,7 @@ TEST(disabled_roles_produce_no_commands)
 		CHECK(document.floorPosts.empty());
 		CHECK(document.fireBraces.empty());
 		CHECK(document.joints.empty());
+		CHECK(document.splices.empty());
 		// 伏図記号だけが消え、**断面記号は残る**（あちらはシンボルを使わない）。
 		std::size_t planMarks = 0;
 		std::size_t sectionMarks = 0;

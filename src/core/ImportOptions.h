@@ -1,16 +1,16 @@
 //
 //	core/ImportOptions.h
 //
-//	取り込みの設定（インポート時の設定ダイアログで決める値）。中身は 3 つ:
+//	取り込みの設定（インポート時の設定ダイアログで決める値）。中身は 4 つ:
 //	  * **置換するシンボルの対応**——「どの要素を図面のどのシンボルで置くか」。要素ごとの
-//	    既定名（"アンカーボルト_M12" / "床束" / "鋼製火打" / "仕口" / 伏図記号）を図面に
-//	    ある別のシンボルへ差し替えられるようにする（docs/DEV-NOTES.md M20）。
+//	    既定名（"アンカーボルト_M12" / "床束" / "鋼製火打" / "仕口" / 伏図記号 / "継手"）を
+//	    図面にある別のシンボルへ差し替えられるようにする（docs/DEV-NOTES.md M20）。
 //	  * **図面枠（タイトルブロック）のスタイル**——シートレイヤ（伏図・軸組図）へ置く
 //	    図面枠をどのスタイルで置くか。空なら置かない（docs/DEV-NOTES.md M28）。
 //	  * **寸法規格**——伏図・軸組図へ自動で入れる寸法をどのスタイルで描くか。
 //	    空なら寸法を入れない（docs/DEV-NOTES.md M31）。
 //	  * **軸組図から外す通り**——解析が軸組図にする通りのうち、描かないもの
-//	    （docs/DEV-NOTES.md M33）。空なら従来どおり全部描く。
+//	    （docs/DEV-NOTES.md M34）。空なら従来どおり全部描く。
 //
 //	【なぜ core/ に置くか】設定は**両フェーズにまたがる**唯一の入力である:
 //	  * 決めるのは描画側（draw/SettingsDialog）——図面にどんなシンボルがあるかは
@@ -55,11 +55,16 @@ namespace HomeskzIfcImport::core
 		Joint,			  // 仕口
 		PlanMarkColumn,	  // 伏図記号（柱＝管柱・通し柱）
 		PlanMarkKoyazuka, // 伏図記号（小屋束）
+		Splice,			  // 継手（M33）
 	};
 
+	// 【新しい役割は末尾へ足す】値は往復の記憶（core/FeedbackSession の "role.<n>.…"）に
+	// **番号で**書かれる。途中へ挟むと後ろの役割の番号がずれ、進行中の往復が別の役割の
+	// シンボル名を読んでしまう（継手＝M33 を仕口の隣ではなく末尾に置いたのはこのため）。
+	//
 	// 役割の数（＝設定ダイアログの行数）。enum の最後の値 + 1。
 	inline constexpr std::size_t kSymbolRoleCount =
-		static_cast<std::size_t>(SymbolRole::PlanMarkKoyazuka) + 1;
+		static_cast<std::size_t>(SymbolRole::Splice) + 1;
 
 	// 役割 1 つの素性。label は設定ダイアログに出す行の名前で、defaultSymbol は
 	// 何も選ばなかったときに使うシンボル名（＝この設定を入れる前の固定値）。
@@ -117,7 +122,7 @@ namespace HomeskzIfcImport::core
 		// ダイアログを出さずに既定のまま使えば従来と同じ（寸法の無い）図になる。
 		std::string dimension;
 
-		// M33 軸組図から**外す**通りの図番（core::SectionCommand の viewport.drawingNumber。
+		// M34 軸組図から**外す**通りの図番（core::SectionCommand の viewport.drawingNumber。
 		// "X1" / "い" / 方向をまたいで重なったときの "1(2)" …）。**空＝全部描く**。
 		//
 		// 【なぜ「描く通り」ではなく「外す通り」を持つか】候補（どの通りを軸組図にするか）
@@ -167,10 +172,10 @@ namespace HomeskzIfcImport::core
 		// 寸法規格の名前を決める。空は「入れない」としてそのまま受け付ける（図面枠と同じ）。
 		void setDimensionStandard(const std::string& name);
 
-		// M33 その図番の通りを軸組図から外すか。
+		// M34 その図番の通りを軸組図から外すか。
 		bool isSectionSkipped(const std::string& drawingNumber) const;
 
-		// M33 外す通りの図番を差し替える（重複・空文字は落とし、名前順に並べ直す
+		// M34 外す通りの図番を差し替える（重複・空文字は落とし、名前順に並べ直す
 		// ——ログに出す並びを入力順に依らせないため。CLAUDE.md「決定性を守る」）。
 		void setSkippedSections(const std::vector<std::string>& drawingNumbers);
 	};

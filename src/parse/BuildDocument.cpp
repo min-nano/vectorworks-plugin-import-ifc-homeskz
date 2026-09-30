@@ -36,6 +36,7 @@
 #include "parse/Section.h"
 #include "parse/ShearWall.h"
 #include "parse/Sheet.h"
+#include "parse/Splice.h"
 #include "parse/Story.h"
 #include "parse/Tag.h"
 
@@ -169,6 +170,20 @@ namespace HomeskzIfcImport::parse
 		document.fireBraces = buildFireBraceCommands(context);
 		progress.step();
 		document.joints = buildJointCommands(document.members, document.columns, options);
+		progress.step();
+		// M33 継手。仕口と同じく横架材の命令（登り梁の屋根スナップ・柱芯への送り込みの後）
+		// から導出する。向きの手掛かり（柱・M12 アンカーボルト・床束）は**取り込み設定に
+		// 依らない**ものを渡す——アンカーボルトや床束を「取り込まない」にしても継手の向きは
+		// 変わらない（parse/Splice.h）。
+		{
+			SpliceCues cues;
+			cues.columns = document.columns;
+			for (const AnchorBoltPoint& bolt : collectAnchorBolts(context))
+				if (bolt.role == core::SymbolRole::AnchorBoltM12)
+					cues.anchorsM12.push_back(bolt.position);
+			cues.floorPosts = floorPostPositions(context);
+			document.splices = buildSpliceCommands(document.members, cues, options);
+		}
 		progress.step();
 
 		// M12 断面記号・伏図記号。柱の命令だけから決まる（IFC は見ない）ので columns の

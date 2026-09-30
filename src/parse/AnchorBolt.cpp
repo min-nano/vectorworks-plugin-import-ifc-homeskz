@@ -12,6 +12,7 @@
 #include "parse/Footing.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::parse
@@ -41,14 +42,14 @@ namespace HomeskzIfcImport::parse
 		return options.symbol(anchorBoltRole(typeName));
 	}
 
-	std::vector<SymbolCommand> buildAnchorBoltCommands(Context& context)
+	std::vector<AnchorBoltPoint> collectAnchorBolts(Context& context)
 	{
 		const Model& model = context.model();
 
 		// 通り芯と同じセンタリングオフセット（通り芯が無ければ (0,0)＝生の IFC 座標）。
 		const Vec2 center = context.gridCenter();
 
-		std::vector<SymbolCommand> commands;
+		std::vector<AnchorBoltPoint> bolts;
 		for (const int elementId : model.byType("IFCMECHANICALFASTENER"))
 		{
 			const Entity* element = model.entity(elementId);
@@ -67,16 +68,25 @@ namespace HomeskzIfcImport::parse
 			if (!columnPosition2D(model, *element, position))
 				continue;
 
+			bolts.push_back(AnchorBoltPoint{position - center, anchorBoltRole(typeName)});
+		}
+		return bolts;
+	}
+
+	std::vector<SymbolCommand> buildAnchorBoltCommands(Context& context)
+	{
+		std::vector<SymbolCommand> commands;
+		for (const AnchorBoltPoint& bolt : collectAnchorBolts(context))
+		{
 			// **取り込まない役割のボルトは命令を作らない。** 座金の有無で役割が分かれるので、
 			// 「M12 だけ置く」といった選び方ができる（core/ImportOptions.h）。
-			const core::SymbolRole role = anchorBoltRole(typeName);
-			if (!context.options().isEnabled(role))
+			if (!context.options().isEnabled(bolt.role))
 				continue;
 
 			SymbolCommand command;
 			command.layer = kLayerFoundationAnchor;
-			command.symbol = context.options().symbol(role);
-			command.position = position - center;
+			command.symbol = context.options().symbol(bolt.role);
+			command.position = bolt.position;
 			// 回転角は持たない（ボルトは軸対称）。SymbolCommand::angle の既定 0 のまま。
 			commands.push_back(std::move(command));
 		}

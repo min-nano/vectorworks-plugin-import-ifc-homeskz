@@ -68,6 +68,7 @@ namespace HomeskzIfcImport::core
 			{0.1, [](const Document& d) { return d.floorPosts.size(); }},
 			{0.2, [](const Document& d) { return d.fireBraces.size(); }},
 			{0.1, [](const Document& d) { return d.joints.size(); }},
+			{0.1, [](const Document& d) { return d.splices.size(); }}, // 仕口と同じ描き方
 			{6.0, [](const Document& d) { return d.columnMarks.size(); }},
 			{6.0, [](const Document& d) { return d.shearWalls.size(); }},
 			{480.0, [](const Document& d) { return d.sheets.size(); }},

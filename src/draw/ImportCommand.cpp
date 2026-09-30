@@ -51,7 +51,7 @@ namespace HomeskzIfcImport::draw
 		if (settings == draw::SettingsOutcome::Cancelled)
 			return;
 
-		// 3. 軸組図にする通りを選ぶ（M33。draw/SectionPickDialog.h）。候補は**取り込みと同じ
+		// 3. 軸組図にする通りを選ぶ（M34。draw/SectionPickDialog.h）。候補は**取り込みと同じ
 		//    解析**で出す——解析は大きなホームズ君 IFC でも 0.1 秒程度なので、選ぶために
 		//    1 度余分に回しても待たせない。キャンセルなら静かに終える（設定と同じ扱い）。
 		//    候補が無い・ダイアログを組めなかったときは全部描くで続ける。

@@ -482,7 +482,7 @@ TEST(SectionNumbersSkipASuffixThatIsAlreadyTaken)
 
 TEST(SkippedSectionsAreDroppedWithoutRenumberingTheRest)
 {
-	// M33 外した通りだけが消え、残る通りの図番・並びは変わらない（外すのは図番を一意に
+	// M34 外した通りだけが消え、残る通りの図番・並びは変わらない（外すのは図番を一意に
 	// した後。parse/Section.h 冒頭「外す通り」）。
 	std::vector<core::SectionCommand> commands(4);
 	const char* const kNames[] = {"1", "2", "1", "2"};
@@ -600,7 +600,7 @@ TEST(FixtureSectionsCutRealGridLinesAndShowExistingLayers)
 
 TEST(FixtureSectionCandidatesMatchTheImportAndSkippingDropsOnlyThose)
 {
-	// M33 候補は「外す通りなし」で取り込んだときの軸組図そのもの。外す通りを入れた設定を
+	// M34 候補は「外す通りなし」で取り込んだときの軸組図そのもの。外す通りを入れた設定を
 	// 渡しても候補は変わらない（外す通りを無視して解析する）。
 	const std::string path = HomeskzIfcTests::fixturePath("サンプル1 (住木邸新築工事).ifc");
 	const core::Document all = parse::buildDocument(path);

@@ -125,7 +125,7 @@ namespace HomeskzIfcImport::parse
 			return total;
 		}
 
-		constexpr std::array<ElementDef, 20> kElements = {{
+		constexpr std::array<ElementDef, 21> kElements = {{
 			{"ストーリ", "層", [](const core::Document& d) { return d.stories.size(); },
 			 [](const core::DrawCounts& c) { return c.stories; }},
 			{"通り芯", "本", [](const core::Document& d) { return d.grids.size(); },
@@ -154,6 +154,8 @@ namespace HomeskzIfcImport::parse
 			 [](const core::DrawCounts& c) { return c.fireBraces; }},
 			{"仕口", "箇所", [](const core::Document& d) { return d.joints.size(); },
 			 [](const core::DrawCounts& c) { return c.joints; }},
+			{"継手", "箇所", [](const core::Document& d) { return d.splices.size(); },
+			 [](const core::DrawCounts& c) { return c.splices; }},
 			{"柱記号", "個", [](const core::Document& d) { return d.columnMarks.size(); },
 			 [](const core::DrawCounts& c) { return c.columnMarks; }},
 			{"耐力壁", "枚", [](const core::Document& d) { return d.shearWalls.size(); },
@@ -513,7 +515,7 @@ namespace HomeskzIfcImport::parse
 		// M31 寸法も同じく表の外（既定名が無い）。
 		out << "\n  " << kDimensionOptionLabel
 			<< (options.hasDimensions() ? options.dimensionStandard() : std::string("入れない"));
-		// M33 軸組図から外す通り。「軸組図が足りない」の切り分けは、まず外していないかを
+		// M34 軸組図から外す通り。「軸組図が足りない」の切り分けは、まず外していないかを
 		// 見るところから始まる。並びは設定が名前順に揃えたもの（core/ImportOptions.h）。
 		out << "\n  " << kSkippedSectionsOptionLabel;
 		if (options.skippedSections.empty())

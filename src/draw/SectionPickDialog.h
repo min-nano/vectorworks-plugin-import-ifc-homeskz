@@ -1,7 +1,7 @@
 //
 //	draw/SectionPickDialog.h
 //
-//	軸組図にする通りを選ぶダイアログ（docs/DEV-NOTES.md M33）。取り込み設定ダイアログ
+//	軸組図にする通りを選ぶダイアログ（docs/DEV-NOTES.md M34）。取り込み設定ダイアログ
 //	（draw/SettingsDialog）の**次に** 1 枚出し、解析が軸組図にする通りを全部チェック付きで
 //	並べる。チェックを外した通りは軸組図を描かない（core::ImportOptions::skippedSections）。
 //

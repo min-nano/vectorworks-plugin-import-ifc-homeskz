@@ -161,6 +161,7 @@ namespace
 		document.floorPosts.resize(1);
 		document.fireBraces.resize(1);
 		document.joints.resize(1);
+		document.splices.resize(1);
 		document.columnMarks.resize(1);
 		document.shearWalls.resize(1);
 		document.sheets.resize(1);
@@ -187,6 +188,7 @@ namespace
 		counts.floorPosts = 1;
 		counts.fireBraces = 1;
 		counts.joints = 1;
+		counts.splices = 1;
 		counts.columnMarks = 1;
 		counts.shearWalls = 1;
 		counts.sheets = 1;
@@ -398,7 +400,7 @@ TEST(document_command_count_sums_every_element_list)
 {
 	// **要素を足したときに数え漏らさない**ための番人。Document の各リストに 1 件ずつ
 	// 入れたら、総数はリストの数と一致しなければならない（kElements の網羅性を固定する）。
-	CHECK_EQ(documentCommandCount(fullDocument()), static_cast<std::size_t>(18));
+	CHECK_EQ(documentCommandCount(fullDocument()), static_cast<std::size_t>(19));
 	CHECK_EQ(documentCommandCount(Document{}), static_cast<std::size_t>(0));
 }
 
@@ -472,7 +474,7 @@ TEST(format_log_result_lists_every_element_and_the_verdict)
 
 	CHECK(text.find("結果: 成功") != std::string::npos);
 	CHECK(text.find("所要: 1 分 11 秒") != std::string::npos);
-	CHECK(text.find("描いたもの: 18 件") != std::string::npos);
+	CHECK(text.find("描いたもの: 19 件") != std::string::npos);
 	CHECK(text.find("ストーリ: 1 層") != std::string::npos);
 	CHECK(text.find("通り芯: 1 本") != std::string::npos);
 	CHECK(text.find("立上り: 1 本") != std::string::npos);
@@ -487,6 +489,7 @@ TEST(format_log_result_lists_every_element_and_the_verdict)
 	CHECK(text.find("床束: 1 本") != std::string::npos);
 	CHECK(text.find("火打: 1 本") != std::string::npos);
 	CHECK(text.find("仕口: 1 箇所") != std::string::npos);
+	CHECK(text.find("継手: 1 箇所") != std::string::npos);
 	CHECK(text.find("柱記号: 1 個") != std::string::npos);
 	CHECK(text.find("耐力壁: 1 枚") != std::string::npos);
 	CHECK(text.find("伏図: 1 枚") != std::string::npos);
@@ -603,7 +606,7 @@ TEST(format_import_options_lists_every_role_and_marks_the_defaults)
 	CHECK(text.find("図面枠スタイル: 置かない") != std::string::npos);
 	// M31 寸法も同じく末尾に 1 行。既定は「入れない」。
 	CHECK(text.find("寸法規格: 入れない") != std::string::npos);
-	// M33 軸組図から外す通りも末尾に 1 行。既定は「なし」（全部描く）。
+	// M34 軸組図から外す通りも末尾に 1 行。既定は「なし」（全部描く）。
 	CHECK(text.find("軸組図から外す通り: なし") != std::string::npos);
 	// 役割の数 ＋ 図面枠・寸法・外す通りの 3 行だけ行がある（見出しの 1 行を足した数）。
 	CHECK_EQ(std::ranges::count(text, '\n'),
