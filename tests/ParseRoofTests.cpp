@@ -278,6 +278,19 @@ TEST(elevation_is_rafter_top)
 	CHECK(near(roof.elevation, 1000.0 + 6300.0 + lift));
 }
 
+TEST(elevation_follows_the_given_rafter_height)
+{
+	// 垂木せいを取り込み設定で変えれば、野地板もその分だけ持ち上がる（野地板下端＝
+	// 垂木上端を保つ）。
+	const std::optional<RoofCommand> roof =
+		roofCommandForPlane(shedPlane(), "R-野地板", 6300.0, Vec2{0.0, 0.0}, 90.0);
+	CHECK(roof.has_value());
+	if (!roof.has_value())
+		return;
+	const double nz = 3.0 / std::sqrt(10.0);
+	CHECK(near(roof->elevation, 1000.0 + 6300.0 + (90.0 / nz)));
+}
+
 TEST(roof_center_offset_subtracted_from_xy)
 {
 	bool ok = false;

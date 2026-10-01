@@ -189,8 +189,8 @@ namespace HomeskzIfcImport::parse
 				anyShearWallOnLayer(shearWalls, shearLayer))
 				layers.push_back(shearLayer);
 
-			// 登り梁は**水下側**の伏図レベルの伏図にも映す（ご要望。parse/PlanLevel が水下側の
-			// 伏図レベルのレイヤへ分けてある）。母屋伏図にも従来どおり映る（下）。
+			// 登り梁は**水下側**の伏図レベルの伏図に映す（ご要望。parse/PlanLevel が水下側の
+			// 伏図レベルのレイヤへ分けてある）。母屋伏図には映さない（下）。
 			if (const std::string noboribariLayer = planLevelLayer(level, story, kLevelNoboribari);
 				anyMemberOnLayer(members, noboribariLayer))
 				layers.push_back(noboribariLayer);
@@ -249,22 +249,18 @@ namespace HomeskzIfcImport::parse
 
 			const bool isTop = stories[i].isTop;
 			std::vector<std::string> layers;
-			// 母屋・登り梁はその階に命令があるときだけ（下屋根は母屋を持たないこともあり、
-			// 登り梁はさらに稀）。parse/Story がレベルを作る条件と同じ判定。登り梁は水下側の
-			// 伏図レベルのレイヤへ分かれている（parse/PlanLevel）ので、その階の分を全部映す。
+			// 母屋はその階に命令があるときだけ（下屋根は母屋を持たないこともある）。
+			// parse/Story がレベルを作る条件と同じ判定。
+			//
+			// **登り梁は映さない**（ご要望）。登り梁は水下側の伏図レベルのレイヤへ分けて
+			// （parse/PlanLevel）その高さの柱梁伏図（小屋伏図等）に映してあり、母屋伏図へ
+			// 重ねると母屋より低い材が母屋と同じ図に並んで高さの関係が直感に反する。どの階も
+			// 標準の伏図レベルを必ず 1 つ持つ（parse/PlanLevel の collectBeamHeights /
+			// buildPlanLevels）ので、登り梁はどれかの柱梁伏図に必ず出る。
 			const std::vector<const PlanLevel*> storyLevels = storyPlanLevels(planLevels, i);
-			std::vector<std::string> candidates{storyLayerName(i, isTop, kLevelMoya),
-												storyLayerName(i, isTop, kLevelNoboribari)};
-			for (const PlanLevel* level : storyLevels)
-			{
-				if (!level->standard)
-					candidates.push_back(planLevelLayer(*level, stories[i], kLevelNoboribari));
-			}
-			for (const std::string& layer : candidates)
-			{
-				if (anyMemberOnLayer(members, layer))
-					layers.push_back(layer);
-			}
+			if (const std::string moyaLayer = storyLayerName(i, isTop, kLevelMoya);
+				anyMemberOnLayer(members, moyaLayer))
+				layers.push_back(moyaLayer);
 			layers.push_back(storyLayerName(i, isTop, kLevelTaruki));
 			layers.push_back(storyLayerName(i, isTop, kLevelNojiita));
 

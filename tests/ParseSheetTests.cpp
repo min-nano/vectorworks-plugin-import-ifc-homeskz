@@ -356,6 +356,10 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 				CHECK(contains(sheet.viewport.layers, core::kGridLayer));
 				// 母屋伏図には床（FL）を載せない（梁組と分ける図なので）。
 				CHECK(!contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "FL")));
+				// 登り梁も載せない（水下側の柱梁伏図に映してあり、重ねると高さの関係が
+				// 直感に反する。ご要望）。
+				for (const std::string& layer : sheet.viewport.layers)
+					CHECK(layer.find("登り梁") == std::string::npos);
 				++seq;
 			}
 		});

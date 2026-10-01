@@ -18,6 +18,7 @@
 #include "core/Progress.h"
 #include "parse/BuildDocument.h"
 
+#include <cmath>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -86,6 +87,38 @@ TEST(import_options_reach_every_symbol_command)
 							  CHECK(symbol.starts_with(kTestPrefix));
 						  });
 	}
+}
+
+TEST(rafter_size_reaches_every_rafter_and_lifts_the_sheathing)
+{
+	// 垂木の断面は全垂木に一律で届き、野地板はそのせいの分だけ持ち上がる。経路が欠けると
+	// 「ダイアログで指定したのに 45×45 のまま」になる——絵では気付きにくい。
+	ImportOptions options;
+	options.setRafterSize(60.0, 90.0);
+	bool sawRafter = false;
+	for (const std::string& name : allFixtures())
+	{
+		NullProgressReporter progress;
+		const Document given =
+			HomeskzIfcImport::parse::buildDocument(fixturePath(name), progress, options);
+		for (const auto& rafter : given.rafters)
+		{
+			CHECK(std::abs(rafter.width - 60.0) < 1e-9);
+			CHECK(std::abs(rafter.height - 90.0) < 1e-9);
+			CHECK_EQ(rafter.label, std::string("60×90@455"));
+			sawRafter = true;
+		}
+		CHECK(HomeskzIfcImport::core::validateDocument(given));
+
+		// 野地板: 既定（せい 45）より高い位置に来る。枚数は変わらない。
+		NullProgressReporter defaultProgress;
+		const Document defaults = HomeskzIfcImport::parse::buildDocument(
+			fixturePath(name), defaultProgress, ImportOptions{});
+		CHECK_EQ(given.roofs.size(), defaults.roofs.size());
+		for (std::size_t i = 0; i < given.roofs.size() && i < defaults.roofs.size(); ++i)
+			CHECK(given.roofs[i].elevation > defaults.roofs[i].elevation);
+	}
+	CHECK(sawRafter); // 1 本も無いなら、この確認は何も守っていない
 }
 
 TEST(default_options_keep_the_previous_names)

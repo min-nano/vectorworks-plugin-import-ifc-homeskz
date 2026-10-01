@@ -560,6 +560,62 @@ TEST(label_shows_spec)
 		CHECK_EQ(rafter.label, std::string("45×45@455"));
 }
 
+TEST(given_section_reaches_every_rafter)
+{
+	// 取り込み設定の一律の断面（core::ImportOptions の rafterWidth / rafterHeight）が
+	// 命令の幅・せい・ラベルへそのまま入る。端数は丸めて消さない。
+	const std::vector<RafterCommand> rafters = raftersForPlane(
+		shedPlane(), "R-垂木", 0.0, Vec2{0.0, 0.0}, std::optional<double>(1500.0), {}, 60.5, 90.0);
+	CHECK(!rafters.empty());
+	for (const RafterCommand& rafter : rafters)
+	{
+		CHECK(near(rafter.width, 60.5));
+		CHECK(near(rafter.height, 90.0));
+		CHECK_EQ(rafter.label, std::string("60.5×90@455"));
+	}
+}
+
+TEST(given_width_moves_the_end_rafters_inward_by_half_width)
+{
+	// 両端の垂木は屋根面の端から**垂木幅の半分**だけ内側（sweepPositions の inset）。
+	// 幅を変えれば端の垂木の位置もそれに従う——掃引方向の端の座標を既定幅と比べる。
+	const auto extent = [](const std::vector<RafterCommand>& rafters, double& lo, double& hi)
+	{
+		// 片流れの試験面は掃引方向が X か Y のどちらかに揃っている（tests/RoofSample.h）。
+		// どちらでも取れるよう、start の X・Y それぞれの広がりの大きい方を掃引方向とみなす。
+		double minX = rafters.front().start.x;
+		double maxX = minX;
+		double minY = rafters.front().start.y;
+		double maxY = minY;
+		for (const RafterCommand& rafter : rafters)
+		{
+			minX = std::min(minX, rafter.start.x);
+			maxX = std::max(maxX, rafter.start.x);
+			minY = std::min(minY, rafter.start.y);
+			maxY = std::max(maxY, rafter.start.y);
+		}
+		const bool alongX = (maxX - minX) >= (maxY - minY);
+		lo = alongX ? minX : minY;
+		hi = alongX ? maxX : maxY;
+	};
+	const std::vector<RafterCommand> narrow = shedRafters();
+	const std::vector<RafterCommand> wide =
+		raftersForPlane(shedPlane(), "R-垂木", 0.0, Vec2{0.0, 0.0}, std::nullopt, {}, 105.0, 45.0);
+	CHECK(!narrow.empty());
+	CHECK(!wide.empty());
+	if (narrow.empty() || wide.empty())
+		return;
+	double narrowLo = 0.0;
+	double narrowHi = 0.0;
+	double wideLo = 0.0;
+	double wideHi = 0.0;
+	extent(narrow, narrowLo, narrowHi);
+	extent(wide, wideLo, wideHi);
+	// 半幅の差（(105 − 45) / 2 = 30mm）ずつ内側へ寄る。
+	CHECK(near(wideLo - narrowLo, 30.0));
+	CHECK(near(narrowHi - wideHi, 30.0));
+}
+
 // ---------------------------------------------------------------------------
 // 合成モデル: 屋根版の抽出条件（型 / Name 前方一致 / 形状の欠損）
 // ---------------------------------------------------------------------------
