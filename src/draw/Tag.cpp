@@ -74,27 +74,51 @@ namespace HomeskzIfcImport::draw
 		// テキストにも要る**——タグレイアウトの中身はタグ本体のクラスを継がない。
 		constexpr const char* kTagClass = kDimensionClass;
 
-		// 高さの注記を部材の高さに連動させる綴り＝**挿入点の高さ (Z)_ストーリの高さ**
-		// （部材の絶対Z − 部材の居るレイヤが属する階の高さ）。構造材の挿入点は始端の天端
-		// なので、水平な材では天端をその階の FL（最上階は軒高＝その階の高さ）から測った値に
-		// なる。SDK リファレンス Findings「Data Tags」の「連動する注記の作り方」で実機確認
-		// 済みの形（" (2FL "#IPZS#")"）をそのまま使う。
-		constexpr const char* kStoryHeightToken = "#IPZS#";
+		// 高さの注記を部材の高さに連動させる綴り。どちらも**階の高さを基準にした**値
+		// （部材の絶対Z − 部材の居るレイヤが属する階の高さ）で、SDK リファレンス
+		// Findings「Data Tags」の「傾斜材の両端の天端」で実機確認済み。
+		//   * kStartTopToken … 挿入点の高さ (Z)_ストーリの高さ＝**始端の天端**
+		//   * kHighTopToken  … バウンディングボックス上面の高さ (Z)_ストーリの高さ＝**高い端の
+		//                      天端**（断面の角が天端より上に出ることはない。同 Findings）
+		// 始端を低い端にそろえるのは横架材の描画（draw/Member の「始端は低い端」）。
+		constexpr const char* kStartTopToken = "#IPZS#";
+		constexpr const char* kHighTopToken = "#ZTBBS#";
+		// 数値の書式。mm の整数・3 桁ごとのコンマ・正に "+"（0 は "±0"）で、取り込んだ時点の
+		// 文字（core::signedMillimetreText）と同じ体裁になる（ご要望）。**#thsep# は単位・
+		// 精度の修飾子の後ろでだけ効く**ので mm_0_0（単位記号なし）を前に置く。単位の
+		// 修飾子は値を換算するので必ず mm（Findings「単位・精度の修飾子」）。修飾子は
+		// **各綴りの直後**に付ける（式の後ろでは効かない。同 Findings）。
+		constexpr const char* kHeightFormat = "#mm_0_0#thsep#sign#";
+
+		// 連動する高さの注記の式（" (2FL -872~-40)" / 水平な材は " (2FL -872)"）。
+		// Findings の推奨の 1 本に書式を足したもの:
+		//   " (2FL "<始端>"~"@<高い端><><始端>:""<高い端>@<高い端><><始端>:""")"
+		// 条件（"~"@条件:""）で、両端が同じ高さなら "~高い端" を畳む——水平な材と傾斜材で
+		// 式を分けずに済み、後から材を傾けても注記が追随する。**演算を混ぜない**（連結と
+		// 演算を混ぜると式が空になるか括弧が印字される。Findings「連結と演算は素直には
+		// 混ざらない」）。基準名は解析側が引用符を含まないものにしてある（validateDocument）。
+		std::string LinkedHeightFormula(const std::string& datum)
+		{
+			const std::string start = std::string(kStartTopToken) + kHeightFormat;
+			const std::string high = std::string(kHighTopToken) + kHeightFormat;
+			// 両端が違う高さのときだけ値を出す条件（"<値>@<条件>:"" "）。
+			const std::string sloped =
+				std::string("@") + kHighTopToken + "<>" + kStartTopToken + ":\"\"";
+			return "\" (" + datum + " \"" + start + "\"~\"" + sloped + high + sloped + "\")\"";
+		}
 
 		// タグフィールドの式（VW のタグフィールド定義式）。構造材の断面幅×せいを mm 整数で
 		// 並べ、**高さの注記**があれば後ろへ添える。
 		// **レコード名・フィールド名は draw/StructuralMember の定義から組む**——構造材を書いて
 		// いるのはこちらなので、名前を 2 か所に書かない（CLAUDE.md「重複を作らない置き場所」）。
 		//
-		// 【高さは部材から読む（水平な材）】linkHeight なら注記の数値を式で部材から読む
-		// （" (2FL "#IPZS#")"）——**材を動かしても注記が追随する**（ご要望）。階の高さを
+		// 【高さは部材から読む】linkHeight なら注記の数値を式で部材から読む
+		// （LinkedHeightFormula）——**材を動かしても注記が追随する**（ご要望）。階の高さを
 		// 基準にした綴りなので、横架材の高さごとに伏図のレイヤが分かれても、同じ階に属して
 		// いれば基準は FL のまま変わらない（以前の IPZL＝レイヤ基準はここで壊れた。
-		// docs/DEV-NOTES.md M36）。**演算を混ぜない**——連結と演算を混ぜると式が空になるか
-		// 括弧が印字される（Findings「連結と演算は素直には混ざらない」）。IPZS は既に階の
-		// 高さを引いてあるので演算が要らない。
-		// 傾斜材（"(2FL -872~-40)"）と連動できない材は、解析側が書いた文字（note）を
-		// そのまま置く（取り込んだ時点の値で、材を動かしても追随しない）。
+		// docs/DEV-NOTES.md M36）。
+		// 連動できない材は、解析側が書いた文字（note）をそのまま置く（取り込んだ時点の値で、
+		// 材を動かしても追随しない）。
 		TXString TagFieldFormula(const core::TagCommand& tag, bool linkHeight)
 		{
 			const std::string& note = tag.note;
@@ -114,14 +138,7 @@ namespace HomeskzIfcImport::draw
 			// 括弧・"~"・","・階名だけで書き、引用符を含む階名は番号で呼ぶ（parse/Tag の
 			// memberLevelNote）ので、引用符が中に入ることはない。
 			if (linkHeight)
-			{
-				// 基準名は解析側が引用符を含まないものにしてある（validateDocument）。
-				formula += "\" (";
-				formula += TXString(tag.noteDatum.c_str());
-				formula += " \"";
-				formula += kStoryHeightToken;
-				formula += "\")\"";
-			}
+				formula += TXString(LinkedHeightFormula(tag.noteDatum).c_str());
 			else if (!note.empty())
 			{
 				formula += "\" ";

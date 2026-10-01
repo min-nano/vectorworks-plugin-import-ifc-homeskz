@@ -397,10 +397,10 @@ TEST(LevelNoteMeasuresFromTheStoreyFl)
 			 std::string("(2FL -872)"));
 }
 
-TEST(LevelNoteLinksOnlyHorizontalMembers)
+TEST(LevelNoteCarriesTheLinkedDatum)
 {
-	// 水平な材の注記は描画側で部材の高さに連動させるので、基準の名前（最上階は軒高）を
-	// 持つ。傾斜材は低い端〜高い端を連動して読めないので文字のまま（基準なし）。
+	// 注記は描画側で部材の高さに連動させるので、基準の名前（最上階は軒高）を持つ。
+	// 傾斜材も同じ（低い端〜高い端を式で読む）。
 	const std::vector<StoryInfo> stories = noteStories();
 	const std::vector<long long> standard = {572, 3531, 6374};
 	const auto flat =
@@ -412,7 +412,7 @@ TEST(LevelNoteLinksOnlyHorizontalMembers)
 	const auto sloped =
 		memberLevelNoteParts(noteMember("2-登り梁", 3531.0, 2699.0), stories, standard);
 	CHECK_EQ(sloped.text, std::string("(2FL -872~-40)"));
-	CHECK(sloped.datum.empty());
+	CHECK_EQ(sloped.datum, std::string("2FL"));
 	// 注記を添えない材は基準も持たない。
 	const auto none =
 		memberLevelNoteParts(noteMember("2-横架材天端", 3531.0, 3531.0), stories, standard);

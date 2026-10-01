@@ -136,9 +136,8 @@ namespace HomeskzIfcImport::parse
 								const std::vector<long long>& standardHeights);
 
 	// 高さの注記と、それを部材の高さに連動させるときの基準の名前（core::TagCommand::note /
-	// noteDatum）。datum は**水平な材の注記にだけ**入る（"2FL" / "軒高"）——描画側はタグの
-	// 式で部材の挿入点の高さ（階の高さ基準）を読むが、連動して読めるのはその 1 点だけで、
-	// 傾斜材の「低い端〜高い端」は作れないため（draw/Tag の TagFieldFormula）。
+	// noteDatum）。datum は注記を添える材すべてに入る（"2FL" / "軒高"）——描画側はタグの
+	// 式で部材から高さを読む（始端の天端と高い端の天端。draw/Tag の TagFieldFormula）。
 	struct LevelNote
 	{
 		std::string text;

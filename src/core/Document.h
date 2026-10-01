@@ -782,6 +782,14 @@ namespace HomeskzIfcImport::core
 	Vec2 memberDrawnStart(const MemberCommand& member);
 	Vec2 memberDrawnEnd(const MemberCommand& member);
 
+	// **始端を低い端にした**同じ横架材（終端のほうが低ければ、端点・天端の高さ・高さ基準・
+	// 端部オフセットを両端で入れ替える。水平な材・始端が低い材はそのまま）。材の形は
+	// 変わらない。描画側が構造材を作る直前に通す——データタグの高さの注記は「始端の天端
+	// （#IPZS#）〜高い端の天端（#ZTBBS#）」を式で読むので、始端が高い端だと低い端が
+	// 読めず注記が "(2FL -40)" に化ける（SDK リファレンス Findings「Data Tags」の
+	// 「傾斜材の両端の天端」。draw/Tag の LinkedHeightFormula）。
+	MemberCommand memberLowEndFirst(const MemberCommand& member);
+
 	// 柱・束が実際に占める下端／上端の絶対 Z。下端は elevation − startOffset、上端は
 	// elevation + height + endOffset（オフセットは負で短く・正で長くする）。
 	double columnDrawnBottom(const ColumnCommand& column);
@@ -1084,9 +1092,9 @@ namespace HomeskzIfcImport::core
 		std::string note;
 		// 高さの注記を**部材の高さに連動させる**ときの基準の名前（"2FL" / 最上階は "軒高"）。
 		// 空でなければ描画側は note の数値を文字で置かず、タグの式で部材から読む
-		// （" (2FL "#IPZS#")"。draw/Tag の TagFieldFormula）——材を動かしても注記が追随する
-		// （ご要望）。**水平な材だけ**に入る: 式から連動して読める高さは挿入点（始端の天端）
-		// 1 つだけで、傾斜材の「低い端〜高い端」は作れないため、傾斜材は note の文字のまま。
+		// （始端の天端と高い端の天端。draw/Tag の TagFieldFormula）——材を動かしても注記が
+		// 追随する（ご要望）。注記を添える材にはすべて入る。note は連動させられないとき
+		// （階に属さないレイヤ・関連付け先が無い）の控え。
 		// 式に "…" で囲んで埋め込むので二重引用符を含まない（validateDocument）。
 		std::string noteDatum;
 	};
