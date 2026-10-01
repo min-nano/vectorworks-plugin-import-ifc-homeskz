@@ -233,13 +233,13 @@ namespace HomeskzIfcImport::parse
 											   : std::llround(beamTopElevation(story));
 				if (low == standard)
 					return {};
-				// 水平な材は描画側で部材の高さに連動させる（text は連動できないときの控え）。
+				// 描画側で部材の高さに連動させる（text は連動できないときの控え）。
 				return LevelNote{"(" + name + " " + core::signedMillimetreText(low - fl) + ")",
 								 name};
 			}
 			return LevelNote{"(" + name + " " + core::signedMillimetreText(low - fl) + "~" +
 								 core::signedMillimetreText(high - fl) + ")",
-							 {}};
+							 name};
 		}
 		return {};
 	}

@@ -814,6 +814,18 @@ namespace HomeskzIfcImport::core
 		return pullBack(member.end, member.start, member.endOffset);
 	}
 
+	MemberCommand memberLowEndFirst(const MemberCommand& member)
+	{
+		if (!(member.endElevation < member.elevation))
+			return member;
+		MemberCommand reversed = member;
+		std::swap(reversed.start, reversed.end);
+		std::swap(reversed.elevation, reversed.endElevation);
+		std::swap(reversed.startBound, reversed.endBound);
+		std::swap(reversed.startOffset, reversed.endOffset);
+		return reversed;
+	}
+
 	double columnDrawnBottom(const ColumnCommand& column)
 	{
 		return column.elevation - column.startOffset;
