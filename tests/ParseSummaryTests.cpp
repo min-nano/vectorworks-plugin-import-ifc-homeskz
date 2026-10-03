@@ -637,10 +637,10 @@ TEST(format_import_options_names_the_chosen_title_block_style)
 	// 図面枠を置く設定なら、当てるスタイル名がそのまま出る（「枠が出ない」の切り分けは
 	// まずこの行と、描画側の「図面枠:」の行を突き合わせるところから始まる）。
 	ImportOptions options;
-	options.setTitleBlockStyle("みんなのアトリエ一級建築士事務所");
+	options.setTitleBlockStyle("名無し建築士事務所");
 	std::string const text = formatImportOptions(options);
 
-	CHECK(text.find("図面枠スタイル: みんなのアトリエ一級建築士事務所") != std::string::npos);
+	CHECK(text.find("図面枠スタイル: 名無し建築士事務所") != std::string::npos);
 	CHECK(text.find("図面枠スタイル: 置かない") == std::string::npos);
 }
 

@@ -197,12 +197,12 @@ TEST(title_block_style_reaches_the_document)
 	// 欠けると「ダイアログで選んだのに枠が出ない」になり、絵を見ても原因が分からない
 	// （どこにも件数が出ないので、往復の PR コメントからも追えない）。
 	ImportOptions options;
-	options.setTitleBlockStyle("みんなのアトリエ一級建築士事務所");
+	options.setTitleBlockStyle("名無し建築士事務所");
 
 	NullProgressReporter progress;
 	const Document document = HomeskzIfcImport::parse::buildDocument(
 		fixturePath("伏図次郎【2階】.ifc"), progress, options);
-	CHECK_EQ(document.titleBlockStyle, std::string("みんなのアトリエ一級建築士事務所"));
+	CHECK_EQ(document.titleBlockStyle, std::string("名無し建築士事務所"));
 	CHECK(HomeskzIfcImport::core::validateDocument(document));
 }
 

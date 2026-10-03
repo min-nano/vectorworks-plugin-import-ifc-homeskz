@@ -129,9 +129,9 @@ TEST(import_options_title_block_keeps_an_empty_name_as_off)
 	// **図面枠には既定名が無い**ので、空文字は「置かない」という意味をそのまま持つ
 	// （シンボルの setSymbol が空を既定名へ戻すのとは逆。core/ImportOptions.h）。
 	ImportOptions options;
-	options.setTitleBlockStyle("みんなのアトリエ一級建築士事務所");
+	options.setTitleBlockStyle("名無し建築士事務所");
 	CHECK(options.hasTitleBlock());
-	CHECK_EQ(options.titleBlockStyle(), std::string("みんなのアトリエ一級建築士事務所"));
+	CHECK_EQ(options.titleBlockStyle(), std::string("名無し建築士事務所"));
 
 	options.setTitleBlockStyle("");
 	CHECK(!options.hasTitleBlock());
