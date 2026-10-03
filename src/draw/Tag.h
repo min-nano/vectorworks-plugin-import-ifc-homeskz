@@ -121,7 +121,10 @@ namespace HomeskzIfcImport::draw
 		std::size_t leaderLeft = 0; // 引出線を OFF にできなかった（引出線が残る）
 		std::size_t classesShown = 0; // タグを置いた後に表示へ戻せたクラス数（0 なら映らない）
 		std::size_t updateFailed = 0; // クラスを戻した後の再更新に失敗したビューポート
-		std::size_t unmeasured = 0;	   // 実位置を測れず動かせなかったタグ
+		std::size_t unmeasured = 0; // 実位置を測れず動かせなかったタグ
+		// 高さの注記を部材の高さに連動させられず、取り込んだ時点の文字で置いたタグ（横架材の
+		// レイヤが階に属していなかった。draw/Tag.cpp の LinksHeight）
+		std::size_t heightUnlinked = 0;
 		bool textStyleMissing = false; // 文字スタイル（"寸法(6pt)"）が文書に無かった
 		bool linkMissing = false; // テキストをタグフィールドにできなかった（式が入らない）
 		// 置いたタグ 1 本の実際の姿（レイアウトの中身の数）。**実描画はローカルの VW でしか

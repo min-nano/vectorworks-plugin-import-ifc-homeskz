@@ -404,6 +404,39 @@ TEST(member_drawn_ends_are_the_endpoints_without_offsets)
 	CHECK(near(core::memberDrawnEnd(member).x, 3000.0));
 }
 
+TEST(member_low_end_first_reverses_only_members_whose_start_is_high)
+{
+	// 始端が高い傾斜材は、端点・天端・高さ基準・端部オフセットを両端で入れ替える
+	// （データタグが始端の天端〜高い端の天端を式で読むため。draw/Tag）。
+	core::MemberCommand member = validMember();
+	member.elevation = 3531.0;
+	member.endElevation = 2699.0;
+	member.startBound.offset = -40.0;
+	member.endBound.offset = -872.0;
+	member.startOffset = -52.5;
+	member.endOffset = -60.0;
+	const core::MemberCommand low = core::memberLowEndFirst(member);
+	CHECK(near(low.start.x, 3000.0));
+	CHECK(near(low.end.x, 0.0));
+	CHECK(near(low.elevation, 2699.0));
+	CHECK(near(low.endElevation, 3531.0));
+	CHECK(near(low.startBound.offset, -872.0));
+	CHECK(near(low.endBound.offset, -40.0));
+	CHECK(near(low.startOffset, -60.0));
+	CHECK(near(low.endOffset, -52.5));
+	// 材が占める範囲は変わらない。
+	CHECK(near(core::memberDrawnStart(low).x, core::memberDrawnEnd(member).x));
+	CHECK(near(core::memberDrawnEnd(low).x, core::memberDrawnStart(member).x));
+
+	// 始端が低い材・水平な材はそのまま。
+	const core::MemberCommand already = core::memberLowEndFirst(low);
+	CHECK(near(already.start.x, 3000.0));
+	CHECK(near(already.elevation, 2699.0));
+	const core::MemberCommand flat = core::memberLowEndFirst(validMember());
+	CHECK(near(flat.start.x, 0.0));
+	CHECK(near(flat.end.x, 3000.0));
+}
+
 TEST(validate_rejects_member_with_empty_bound_level)
 {
 	// レベル種別が空だと SetObjectStoryBound が解決できず高さがレイヤ基準へ戻る。
@@ -1548,6 +1581,32 @@ TEST(validate_rejects_tag_pointing_past_the_members)
 	section.viewport.tags.push_back(outOfRange);
 	bySection.sections.push_back(section);
 	CHECK(!core::validateDocument(bySection));
+}
+
+TEST(validate_checks_linked_level_note_datum)
+{
+	// 連動する高さの注記は、添える注記があるときだけ・引用符を含まない基準名で持つ
+	// （基準名はタグの式に "…" で囲んで埋め込む。draw/Tag の TagFieldFormula）。
+	const auto withTag = [](const core::TagCommand& tag)
+	{
+		core::Document document = documentWithOneMember();
+		core::SheetCommand sheet = validSheet();
+		sheet.viewport.tags.push_back(tag);
+		document.sheets.push_back(sheet);
+		return document;
+	};
+	core::TagCommand linked = validTag();
+	linked.note = "(2FL -872)";
+	linked.noteDatum = "2FL";
+	CHECK(core::validateDocument(withTag(linked)));
+
+	core::TagCommand quoted = linked;
+	quoted.noteDatum = "2\"FL";
+	CHECK(!core::validateDocument(withTag(quoted)));
+
+	core::TagCommand bare = validTag();
+	bare.noteDatum = "2FL"; // 注記が無いのに基準だけある
+	CHECK(!core::validateDocument(withTag(bare)));
 }
 
 // --------------------------------------------------------------------------

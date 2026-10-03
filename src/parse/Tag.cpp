@@ -190,6 +190,13 @@ namespace HomeskzIfcImport::parse
 								const std::vector<StoryInfo>& stories,
 								const std::vector<long long>& standardHeights)
 	{
+		return memberLevelNoteParts(member, stories, standardHeights).text;
+	}
+
+	LevelNote memberLevelNoteParts(const core::MemberCommand& member,
+								   const std::vector<StoryInfo>& stories,
+								   const std::vector<long long>& standardHeights)
+	{
 		if (member.hipOrValley)
 			return {};
 		// 階はレイヤ名の接頭辞（"2-横架材天端(FL-872)" → "2"）から引く。伏図レベルの印は
@@ -226,10 +233,13 @@ namespace HomeskzIfcImport::parse
 											   : std::llround(beamTopElevation(story));
 				if (low == standard)
 					return {};
-				return "(" + name + " " + core::signedMillimetreText(low - fl) + ")";
+				// 描画側で部材の高さに連動させる（text は連動できないときの控え）。
+				return LevelNote{"(" + name + " " + core::signedMillimetreText(low - fl) + ")",
+								 name};
 			}
-			return "(" + name + " " + core::signedMillimetreText(low - fl) + "~" +
-				   core::signedMillimetreText(high - fl) + ")";
+			return LevelNote{"(" + name + " " + core::signedMillimetreText(low - fl) + "~" +
+								 core::signedMillimetreText(high - fl) + ")",
+							 name};
 		}
 		return {};
 	}
@@ -243,15 +253,18 @@ namespace HomeskzIfcImport::parse
 						   const std::vector<long long>& standardHeights)
 	{
 		// 注記は材ごとに 1 度だけ求め、その材のタグ（伏図・軸組図）すべてへ配る。
-		std::vector<std::string> notes(document.members.size());
+		std::vector<LevelNote> notes(document.members.size());
 		for (std::size_t i = 0; i < document.members.size(); ++i)
-			notes[i] = memberLevelNote(document.members[i], stories, standardHeights);
+			notes[i] = memberLevelNoteParts(document.members[i], stories, standardHeights);
 		const auto withNotes = [&notes](std::vector<core::TagCommand> tags)
 		{
 			for (core::TagCommand& tag : tags)
 			{
 				if (tag.memberIndex < notes.size())
-					tag.note = notes[tag.memberIndex];
+				{
+					tag.note = notes[tag.memberIndex].text;
+					tag.noteDatum = notes[tag.memberIndex].datum;
+				}
 			}
 			return tags;
 		};
