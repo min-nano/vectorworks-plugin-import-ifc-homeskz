@@ -51,6 +51,7 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kLevelFL = core::kLevelFL;
 	inline constexpr const char* kLevelBeamTop = core::kLevelBeamTop;
 	inline constexpr const char* kLevelEaves = core::kLevelEaves;
+	inline constexpr const char* kLevelNokigeta = core::kLevelNokigeta;
 
 	// 柱・小屋束を配置する span（またぐレベル区間）レイヤの接尾辞。レイヤ名は "{from}to{to}-
 	// 柱" で、from は柱が立つ床レベル（1 始まり・GL=0）、to は上端が届く床／屋根面レベル
@@ -91,6 +92,13 @@ namespace HomeskzIfcImport::parse
 	// 作るときと、各要素が配置先を引くときの**両方**がこれを通る（規約がズレると要素の
 	// レイヤ探索が黙って失敗し、命令はあるのに 1 つも描かれない形になる）。
 	std::string storyLayerName(std::size_t index, bool isTop, const std::string& levelType);
+
+	// 横架材の取り合い・継手・柱の上端を見るときの「その階の横架材レイヤ」。軒桁の専用
+	// レイヤ（"n-軒桁" / "n-軒桁(FL-872)"。母屋伏図に薄く重ねるために分けた。
+	// parse/PlanLevel）を同じ伏図レベルの横架材レイヤ（"n-横架材天端" / "R-軒高"。伏図
+	// レベルの印は残す）へ読み替え、それ以外はそのまま返す。**レイヤ一致で相手を絞るところは、
+	// どれもこれを通して比べる**（通さないと軒桁と小屋梁の仕口・継手が黙って消える）。
+	std::string beamGroupLayer(const std::string& layer);
 
 	// 階（#storeyId）に属する要素の #id を返す。IfcRelContainedInSpatialStructure
 	// を逆参照から辿り、RelatingStructure が当該階のものだけを採る。並びは rel の #id 昇順・

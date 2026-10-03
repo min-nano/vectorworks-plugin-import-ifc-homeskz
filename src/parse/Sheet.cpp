@@ -157,6 +157,11 @@ namespace HomeskzIfcImport::parse
 			// その伏図レベルの横架材レイヤ（一般階＝横架材天端・最上階＝軒高。標準でない
 			// 高さは "(FL-…)" の付いたレイヤ）。
 			std::vector<std::string> layers{planLevelBeamLayer(level, story)};
+			// 軒桁は専用レイヤに分けてある（母屋伏図に薄く重ねるため。parse/PlanLevel）ので、
+			// 横架材レイヤと一緒に映す。
+			if (const std::string eaves = planLevelLayer(level, story, kLevelNokigeta);
+				anyMemberOnLayer(members, eaves))
+				layers.push_back(eaves);
 
 			// 切断レベル（その伏図レベルの通し番号 + 0.25）を span が含む柱レイヤ。span の
 			// 番号も伏図レベルの通し番号なので（parse/Column）、この伏図の横架材の上に立つ柱
@@ -287,8 +292,24 @@ namespace HomeskzIfcImport::parse
 			std::string number = std::to_string(baseNumber + seq);
 			++seq;
 			// 柱梁伏図と同じく凡例を載せる（母屋伏図に映るシンボルも同じ形で集まる）。
-			commands.push_back(makeSheet(core::PlanKind::Moya, std::move(number), std::move(title),
-										 std::move(layers), true));
+			core::SheetCommand sheet = makeSheet(core::PlanKind::Moya, std::move(number),
+												 std::move(title), std::move(layers), true);
+			// 同じ階の軒桁を薄く重ねる（ご要望: 登り梁が取り付く相手を見せる。寸法は
+			// parse/Dimension がその交点を押さえる）。軒桁だけのレイヤなので、仕口・継手・
+			// 小屋梁は出ない（parse/Joint・parse/Splice は横架材レイヤへ置く）。軒桁も伏図
+			// レベルごとのレイヤへ分かれている（parse/PlanLevel）ので、その階の分を全部。
+			std::vector<std::string> eaves{storyLayerName(i, isTop, kLevelNokigeta)};
+			for (const PlanLevel* level : storyLevels)
+			{
+				if (!level->standard)
+					eaves.push_back(planLevelLayer(*level, stories[i], kLevelNokigeta));
+			}
+			for (const std::string& layer : eaves)
+			{
+				if (anyMemberOnLayer(members, layer))
+					sheet.viewport.grayedLayers.push_back(layer);
+			}
+			commands.push_back(std::move(sheet));
 		}
 		return commands;
 	}

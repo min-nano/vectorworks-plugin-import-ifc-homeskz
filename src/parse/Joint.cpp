@@ -7,6 +7,7 @@
 #include "parse/Joint.h"
 #include "core/ImportOptions.h"
 #include "parse/StructuralClass.h"
+#include "parse/Story.h"
 
 #include <algorithm>
 #include <array>
@@ -108,8 +109,9 @@ namespace HomeskzIfcImport::parse
 			return false;
 		const MemberGeom& self = geoms[index];
 		// 横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた材（"2-横架材天端(FL-872)"）
-		// も同じ階の横架材どうしなので、伏図レベルの印を外して比べる（parse/PlanLevel）。
-		const std::string layer = core::stripPlanLevelTag(members[index].layer);
+		// も、軒桁の専用レイヤの材（"2-軒桁"）も同じ階の横架材どうしなので、伏図レベルの印を
+		// 外し、軒桁を横架材レイヤへ読み替えて比べる（parse/PlanLevel・parse/Story）。
+		const std::string layer = core::stripPlanLevelTag(beamGroupLayer(members[index].layer));
 		// 登り梁は別レイヤの軒桁・母屋・棟木に取り付くのでレイヤ一致の制約を外す。
 		const bool crossLayer = members[index].drawClass == CLASS_NOBORIBARI;
 
@@ -117,7 +119,7 @@ namespace HomeskzIfcImport::parse
 		{
 			if (j == index || !geoms[j].valid)
 				continue;
-			if (!crossLayer && core::stripPlanLevelTag(members[j].layer) != layer)
+			if (!crossLayer && core::stripPlanLevelTag(beamGroupLayer(members[j].layer)) != layer)
 				continue;
 			const MemberGeom& other = geoms[j];
 			// 平行（同一直線上の継ぎ手・側並び）は受ける材とみなさない。
@@ -180,7 +182,9 @@ namespace HomeskzIfcImport::parse
 					continue;
 
 				SymbolCommand command;
-				command.layer = members[i].layer;
+				// 軒桁の仕口も横架材レイヤへ置く（"n-軒桁" には軒桁だけを載せ、母屋伏図に
+				// 薄く重ねたときに記号まで出さない。高さは同じ階の横架材天端と同じ）。
+				command.layer = beamGroupLayer(members[i].layer);
 				command.symbol = symbol;
 				command.position = point;
 				// 梁軸に沿って端部から部材内側へ向かう方向（度・反時計回り）。
