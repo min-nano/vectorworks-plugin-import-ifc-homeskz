@@ -611,3 +611,17 @@ TEST(RotatedRectHeightGivesUpNearFortyFiveDegrees)
 }
 
 TEST_MAIN();
+
+TEST(GridShoulderRaisesTheBubbleAboveTheTopDimensions)
+{
+	// 1/100。いまの符号の上端 7235（下端は 7235 − 750 = 6485）、上の寸法の文字の上端 7000。
+	// 符号の下端を 7000 + 100（隙間 1mm）まで上げるので、水平線は 5 + (7100 − 6485) / 100。
+	using HomeskzIfcImport::core::gridShoulderAboveDimensions;
+	CHECK(near(gridShoulderAboveDimensions(5.0, 7235.0, 7000.0, 100.0), 5.0 + 6.15, 1e-9));
+	// 1/50 でも同じ式（縮尺で割る）。
+	CHECK(near(gridShoulderAboveDimensions(5.0, 7235.0, 7000.0, 50.0),
+			   5.0 + ((7000.0 - (7235.0 - 375.0)) / 50.0) + 1.0, 1e-9));
+	// 既に上にあれば下げない。縮尺が分からなければ触らない。
+	CHECK(near(gridShoulderAboveDimensions(5.0, 9000.0, 7000.0, 100.0), 5.0, 1e-9));
+	CHECK(near(gridShoulderAboveDimensions(5.0, 7235.0, 7000.0, 0.0), 5.0, 1e-9));
+}

@@ -1656,6 +1656,12 @@ namespace HomeskzIfcImport::core
 	// 段で帯を測り、kSectionLabelGap を足す。描画側はこれに縮尺の分母を掛けてモデル mm にする。
 	double sectionLabelDrop(const ViewportCommand& viewport);
 
+	// 図の上に出す寸法の列（水平な列で side が正のもの＝上階の柱・小屋束の位置）の、最も外の
+	// 段の**文字の上端**（注釈空間の y・モデル mm）。寸法線（core::dimensionLineCoord）から
+	// kDimensionTextAllowance だけ上。scale は縮尺の分母。上の列が無ければ false（reach は
+	// 変更しない）。通り芯の符号をこれより上へ出すのに使う（core::gridShoulderAboveDimensions）。
+	bool sectionTopDimensionReach(const ViewportCommand& viewport, double scale, double& reach);
+
 	// 軸組図の外周に張り出す注釈の帯（用紙 mm・辺ごと。core::SectionBands）を、全命令の
 	// **最も広いもの**で返す（全軸組図は同じマスに並ぶ）。数えるのは次のとおり。
 	//   左 … 左へ出す縦の列（高さの寸法）の帯＋レベル記号があれば kLevelMarkBandAllowance
@@ -1666,9 +1672,10 @@ namespace HomeskzIfcImport::core
 	//        取る側へ倒す）
 	//   下 … 下へ出す横の列（柱の位置）の帯＋図面ラベル（kSectionLabelGap＋
 	//        kSectionLabelAllowance。図面タイトルがあるときだけ）
-	//   上 … 上へ出す横の列の帯と、通り芯があれば（gridBubbles）その符号の見込み
-	//        kSectionGridBubbleAllowance の大きい方。軸組図には切断面を横切る通り芯が映り、
-	//        符号の円（用紙基準で縮尺に追随しない）が建物の上へ出る（PR #176 round 1 の実機）
+	//   上 … 上へ出す横の列（上階の柱・小屋束の位置）の帯に、通り芯があれば（gridBubbles）
+	//        その符号の見込み kSectionGridBubbleAllowance を**足したもの**。軸組図には
+	//        切断面を横切る通り芯が映り、符号の円（用紙基準で縮尺に追随しない）が建物の上へ
+	//        出る（PR #176 round 1 の実機）。上の寸法はその符号の下に並ぶので重ねて数える
 	// 帯の量は core::dimensionBand（段が無ければ 0）。
 	SectionBands sectionBands(const std::vector<SectionCommand>& sections,
 							  bool gridBubbles = false);
