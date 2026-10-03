@@ -229,6 +229,24 @@ TEST(feedback_redaction_hides_the_open_drawing_path)
 	CHECK(!contains(shortClean, "図面.vwx"));
 }
 
+TEST(feedback_redaction_handles_several_and_odd_private_paths)
+{
+	// ファイル名の取れないパス・空のパスでも空の仮名を出さず、止まらない。
+	CHECK_EQ(anonymizedDrawingName("/Users/hanako/"), std::string("drawing-000000"));
+	CHECK_EQ(redactText("そのまま", "", "", {"", "/Users/x/"}), std::string("そのまま"));
+	// 十分に長い名前は、拡張子なしで出ても替える（ウィンドウの見出しなど）。
+	const std::string a = "/Users/x/山田邸の伏図.vwx";
+	const std::string b = "/Users/x/2026/山田邸の伏図.vwx";
+	const std::string untitled = "/Applications/VW2026/名称未設定 1";
+	const std::string clean = redactText(
+		"見出し: 山田邸の伏図 / " + a + " / " + b + " / " + untitled, "", "", {a, b, untitled});
+	CHECK(!contains(clean, "山田"));
+	CHECK(contains(clean, anonymizedDrawingName(untitled)));
+	// 長いパスから替える——短いほうが長いほうの一部でも、長いほうは丸ごと仮名になる。
+	CHECK(contains(clean, anonymizedDrawingName(b)));
+	CHECK(contains(clean, anonymizedDrawingName(a)));
+}
+
 TEST(feedback_redaction_masks_per_user_temp_and_volume_names)
 {
 	const std::string text =

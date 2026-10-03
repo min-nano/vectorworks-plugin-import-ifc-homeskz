@@ -404,23 +404,34 @@ namespace HomeskzIfcImport::parse
 			return text;
 		}
 
-		// 利用者のパスを 1 本、仮名へ替える。**パスまるごと → ファイル名 → 拡張子を除いた名前**
-		// の順（長いほうから。先に短いほうを替えると、長いほうが半端に残る）。拡張子を除いた
+		// 利用者のパスを仮名へ替える。**全部のパスを丸ごと → ファイル名 → 拡張子を除いた名前**
+		// の順に、段ごとに全部のパスを通す（1 本ずつ 3 段を通すと、同じファイル名を持つ別の
+		// パスが先にファイル名だけ替わって、丸ごと替わるはずのフォルダが残る）。拡張子を除いた
 		// 名前は**十分に長いときだけ**替える——「図面」のような短い名前を本文まるごとで
 		// 替えると、別の意味の同じ綴りまで仮名に化ける（スタイル名と同じ理由）。
-		std::string redactPrivatePath(std::string text, const std::string& path,
-									  const std::string& key)
+		std::string redactPrivatePaths(std::string text, std::vector<std::string> paths,
+									   const std::string& key)
 		{
-			const std::string name = fileNameOf(path);
-			if (path.empty() || name.empty())
-				return text;
-			const std::string alias = anonymizedDrawingName(path, key);
-			text = replaceAll(text, path, alias);
-			text = replaceAll(text, name, alias);
-			const std::string::size_type dot = name.rfind('.');
-			if (dot != std::string::npos && dot > 0)
+			// 空のパス・ファイル名の取れないパスは替えるものが無い。
+			paths.erase(std::remove_if(paths.begin(), paths.end(), [](const std::string& path)
+									   { return fileNameOf(path).empty(); }),
+						paths.end());
+			// **長いパスから**替える（あるパスが別のパスの一部であっても、長いほうを丸ごと
+			// 仮名にし損ねないように）。
+			std::sort(paths.begin(), paths.end(), [](const std::string& a, const std::string& b)
+					  { return a.size() != b.size() ? a.size() > b.size() : a < b; });
+			for (const std::string& path : paths)
+				text = replaceAll(text, path, anonymizedDrawingName(path, key));
+			for (const std::string& path : paths)
+				text = replaceAll(text, fileNameOf(path), anonymizedDrawingName(path, key));
+			for (const std::string& path : paths)
 			{
+				const std::string name = fileNameOf(path);
+				const std::string::size_type dot = name.rfind('.');
+				if (dot == std::string::npos || dot == 0)
+					continue;
 				const std::string stem = name.substr(0, dot);
+				const std::string alias = anonymizedDrawingName(path, key);
 				if (utf8Length(stem) >= kMinBareStyleNameChars)
 					text = replaceAll(text, stem, alias.substr(0, alias.rfind('.')));
 			}
@@ -448,13 +459,8 @@ namespace HomeskzIfcImport::parse
 		// 図面枠のスタイル名。**IFC のパスの後に**置き換える——スタイル名がパスの一部と
 		// 重なっていても、パスを丸ごと仮名にし損ねないように。
 		out = redactStyleName(out, titleBlockStyle, key);
-		// いま開いている図面など、IFC 以外の利用者のパス。**長いパスから**替える（あるパスが
-		// 別のパスの一部であっても、長いほうを丸ごと仮名にし損ねないように）。
-		std::vector<std::string> paths = privatePaths;
-		std::sort(paths.begin(), paths.end(), [](const std::string& a, const std::string& b)
-				  { return a.size() != b.size() ? a.size() > b.size() : a < b; });
-		for (const std::string& path : paths)
-			out = redactPrivatePath(out, path, key);
+		// いま開いている図面など、IFC 以外の利用者のパス。
+		out = redactPrivatePaths(out, privatePaths, key);
 		// ホームディレクトリのユーザー名（ログのパスに必ず出る）。
 		out = maskUserSegment(out, "/Users/", '/');
 		out = maskUserSegment(out, "/home/", '/');
