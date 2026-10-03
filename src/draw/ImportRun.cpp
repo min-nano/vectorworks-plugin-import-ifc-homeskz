@@ -86,11 +86,7 @@ namespace HomeskzIfcImport::draw
 		// 以外へ出したいとき用の逃げ道。値が無ければ既定の場所）。
 		void OpenImportTrace(const std::string& ifcPath)
 		{
-			// 環境変数の読み取りは core/Trace が持つ（getenv の作法をあちこちに書かない）。
-			const std::string custom = core::trace::envValue("HOMESKZ_IFC_TRACE");
-			const std::string path =
-				custom.empty() ? core::trace::defaultLogPath("min-nano_structure.log") : custom;
-			core::trace::open(path); // 開けなくても本文は溜まる（core/Trace.h）
+			core::trace::open(importLogPath()); // 開けなくても本文は溜まる（core/Trace.h）
 			// **`core::trace::path()` を必ず渡す。** ここを省くと `formatLogHeader` の
 			// 既定値（空）が効いて、**実際には書けているのに見出しが「ファイルへは
 			// 書けませんでした」と言う**（実機のログで発覚。M19 でこの見出しを足して以来
@@ -232,6 +228,16 @@ namespace HomeskzIfcImport::draw
 		// TXString → UTF-8 std::string（operator const char*() は UTF-8 を返す）。
 		outPath = static_cast<const char*>(fullPath);
 		return !outPath.empty();
+	}
+
+	std::string importLogPath()
+	{
+		// HOMESKZ_IFC_TRACE に**パスを入れると出力先を差し替えられる**（一時ディレクトリ
+		// 以外へ出したいとき用の逃げ道）。環境変数の読み取りは core/Trace が持つ。
+		std::string custom = core::trace::envValue("HOMESKZ_IFC_TRACE");
+		if (!custom.empty())
+			return custom;
+		return core::trace::defaultLogPath("min-nano_structure.log");
 	}
 
 	// 動かしているビルドの素性（診断ログの見出しに出す）。**ここで詰めるのは、

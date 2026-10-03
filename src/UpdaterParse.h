@@ -96,7 +96,7 @@ namespace HomeskzIfcImport::UpdaterParse
 		std::string name;
 		std::string url;
 		// そのビルドが出たブランチ（"feature/x"）。**取り込みのついでの確認**と
-		// **実機フィードバックの往復**が「いま動いているのと同じブランチの新しい
+		// **MCP の vw_update** が「いま動いているのと同じブランチの新しい
 		// ビルド」だけを拾うために要る。正規の出どころは q-dev の 5 列目で、その列を
 		// 出さない古い同梱スクリプトのときは表示名から補う（DevBuildBranch）。
 		std::string branch;
@@ -109,8 +109,8 @@ namespace HomeskzIfcImport::UpdaterParse
 	// **branch は任意。** インストール済みの（＝古い）同梱スクリプトが走ることが
 	// あるので、4 列しか出さない出力も読めなければならない（src/Updater.cpp）。
 	// その場合は**表示名から補う**（DevBuildBranch）——ここを空のまま通すと、
-	// 「同じブランチの新しいビルド」を拾う経路（取り込み時の確認・実機フィードバックの
-	// 往復）が、古いスクリプトが入っている間だけ黙って死ぬ。
+	// 「同じブランチの新しいビルド」を拾う経路（取り込み時の確認・MCP の vw_update）が、
+	// 古いスクリプトが入っている間だけ黙って死ぬ。
 	inline std::vector<DevBuild> ParseDevBuilds(const std::string& out)
 	{
 		std::vector<DevBuild> builds;
@@ -204,9 +204,9 @@ namespace HomeskzIfcImport::UpdaterParse
 	//   .../<name>.vwlibrary/Contents/Resources/<baseName>.sh
 	// Returns "" if the "/Contents/MacOS/" marker is not present.
 	//
-	// baseName は**拡張子を除いた名前**（"vw-update" / "vw-feedback"）。同梱スクリプトが
-	// 2 本になった（M23）ので名前を引数に取るが、既定はアップデータのまま——呼び出し側の
-	// ほとんどはそれで、ここを既定なしにすると綴りが 2 か所に散る。
+	// baseName は**拡張子を除いた名前**（"vw-update" など）。同梱スクリプトが 2 本あった
+	// 頃（M23〜M37 の vw-feedback）に名前を引数に取るようにした。既定はアップデータのまま
+	// ——呼び出し側のほとんどはそれで、ここを既定なしにすると綴りが 2 か所に散る。
 	inline std::string MacScriptPathFromBinary(const std::string& binaryPath,
 											   const std::string& baseName = "vw-update")
 	{
@@ -313,7 +313,7 @@ namespace HomeskzIfcImport::UpdaterParse
 	//
 	//   * 選択ダイアログが「現在: 前のブランチ」と出し、**いま入れたビルドをもう一度
 	//     候補に並べる**（選び直しても切り替わっていないように見える）。
-	//   * 取り込みのついでの確認と往復の確認が**前のブランチ**の新しいビルドを拾い、
+	//   * 取り込みのついでの確認と MCP の vw_update が**前のブランチ**の新しいビルドを拾い、
 	//     選んだブランチのビルドを黙って上書きして元のブランチへ戻す。
 	//
 	// という食い違いが起きる（実機で発生。docs/DEV-NOTES.md M26）。

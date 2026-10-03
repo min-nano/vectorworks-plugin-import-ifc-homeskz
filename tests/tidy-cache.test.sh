@@ -31,7 +31,7 @@
 #	scripts plus a small src/ tree whose files match the runner's hardcoded
 #	globs (src/draw/*.cpp, src/Extensions/*.cpp, src/payload/*.cpp and the five
 #	named glue units). That is what makes headers editable — the real tree
-#	cannot be modified by a test — and it keeps the run to 9 tiny translation
+#	cannot be modified by a test — and it keeps the run to 8 tiny translation
 #	units. clang-tidy itself is a stub that records which files it was asked to
 #	analyse, so "was this reused?" is answered by the stub's own log rather than
 #	by parsing timings.
@@ -149,7 +149,7 @@ printf '#include "core/Shared.h"\nint alpha() { return 1; }\n' >"$REPO/src/draw/
 printf 'int beta() { return 2; }\n' >"$REPO/src/draw/Beta.cpp"
 printf '#include "core/Other.h"\nint ext() { return 3; }\n' >"$REPO/src/Extensions/ExtAlpha.cpp"
 printf 'int payload() { return 4; }\n' >"$REPO/src/payload/PayloadMain.cpp"
-for named in ModuleMain Updater PayloadHost PayloadSession FeedbackLoopHost; do
+for named in ModuleMain Updater PayloadHost PayloadSession; do
 	printf 'int %s_unit() { return 0; }\n' "$named" >"$REPO/src/$named.cpp"
 done
 
@@ -157,7 +157,7 @@ printf '#pragma once\n#include "core/Deep.h"\n' >"$REPO/src/core/Shared.h"
 printf '#pragma once\nstatic const int kDeep = 1;\n' >"$REPO/src/core/Deep.h"
 printf '#pragma once\nstatic const int kOther = 1;\n' >"$REPO/src/core/Other.h"
 
-UNITS=9
+UNITS=8
 
 # The compile database. Nothing is compiled, so the command only has to be the
 # string the key folds in — but it carries the real shape (flags + the file) so
@@ -168,7 +168,7 @@ write_db() { # extra-define
 		printf '[\n'
 		for f in src/draw/Alpha.cpp src/draw/Beta.cpp src/Extensions/ExtAlpha.cpp \
 			src/payload/PayloadMain.cpp src/ModuleMain.cpp src/Updater.cpp \
-			src/PayloadHost.cpp src/PayloadSession.cpp src/FeedbackLoopHost.cpp; do
+			src/PayloadHost.cpp src/PayloadSession.cpp; do
 			[ "$first" -eq 1 ] || printf ',\n'
 			first=0
 			printf '  {"directory": "%s", "file": "%s/%s", "command": "c++ -I%s/src %s -c %s/%s"}' \

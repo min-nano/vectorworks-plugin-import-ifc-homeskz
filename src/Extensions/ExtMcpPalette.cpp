@@ -5,14 +5,17 @@
 //	中身は無い**——JS の時計から届いた呼び出しを本体の vw_payload_mcp_serve へ渡し、返って
 //	きた見え方（JSON）で Promise を解決するだけ。
 //
-//	使う SDK API は往復のパレット（Extensions/ExtFeedbackPalette.cpp）と同じもので、
-//	実機で確かめてある（docs/DEV-NOTES.md M24「実機で確かめられたこと（round 1）」）。
+//	使う SDK API は M24 の往復のパレット（M38 で外した）と同じもので、実機で確かめてある
+//	（docs/DEV-NOTES.md M24「実機で確かめられたこと（round 1）」）。殻に頼まれたこと
+//	（更新・再起動）もここで済ませる（ExtMcpPalette.h「殻に頼まれること」）。
 //
 
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtMcpPalette.h"
 #include "PayloadSession.h"
+#include "Updater.h"
+#include "UpdaterHost.h"
 
 #include <chrono>
 #include <string>
@@ -63,6 +66,145 @@ namespace HomeskzIfcImport
 			}
 		}
 
+		// **殻が済ませた頼みごとの結末**（本体へ渡して応答として書いてもらう。PayloadAbi.h の
+		// VwPayloadMcpServeFn）。本体が `reportDone` を返すまで渡し直す——入れ替えの直後は
+		// 新しい本体の用意（スプールの準備）が 1 回で済まないことがある。渡し直しは上限つき
+		// （Python 側はどのみち待ち切れずに諦めている）。
+		struct PendingReport
+		{
+			std::string json;
+			long long since = 0;
+		};
+		constexpr long long kReportGiveUpSeconds = 120;
+
+		PendingReport& Pending()
+		{
+			static PendingReport sPending;
+			return sPending;
+		}
+
+		// 本体の受け付けを 1 回呼ぶ。呼べなければ false と理由。
+		bool CallServe(const std::string& report, std::string& out, std::string& error)
+		{
+			const PayloadUse use;
+			if (!use.ok())
+			{
+				error = use.error();
+				return false;
+			}
+			return use->mcpServe(report, out, error);
+		}
+
+		// 見え方を読んで、結末を渡し終えたかを見る。
+		void SettleReport(const nlohmann::json& view, long long now)
+		{
+			PendingReport& pending = Pending();
+			if (pending.json.empty())
+				return;
+			const bool done = view.is_object() && view.value("reportDone", false);
+			if (done || now - pending.since > kReportGiveUpSeconds)
+				pending = PendingReport{};
+		}
+
+		nlohmann::json ParseView(const std::string& text)
+		{
+			try
+			{
+				return nlohmann::json::parse(text);
+			}
+			catch (...)
+			{
+				return nlohmann::json::object(); // 読めない見え方は「頼みごと無し」とみなす
+			}
+		}
+
+		const char* RemoteUpdateWord(RemoteUpdateOutcome outcome)
+		{
+			switch (outcome)
+			{
+			case RemoteUpdateOutcome::NoNewBuild:
+				return "no_new_build";
+			case RemoteUpdateOutcome::Installed:
+				return "installed";
+			case RemoteUpdateOutcome::NeedsRestart:
+				return "needs_restart";
+			case RemoteUpdateOutcome::Failed:
+				return "failed";
+			case RemoteUpdateOutcome::CheckFailed:
+				return "check_failed";
+			}
+			return "failed";
+		}
+
+		// **殻に頼まれたことを済ませる**（M38）。結末の JSON を返し、restartAfter には
+		// 「応答を書いてから再起動する」かが入る（再起動してからでは応答を書く者がいない）。
+		//
+		// **判断はここに持たせない。** 入れ替えの流れは src/UpdaterFlow.cpp の
+		// RemoteDevUpdateWith、再起動は src/Updater.cpp の RequestRestart にあり、ここは
+		// 引数を渡して結末を JSON に詰めるだけ（CLAUDE.md「インストールの経路は 1 本だけ」）。
+		std::string RunShellAction(const nlohmann::json& action, bool& restartAfter)
+		{
+			restartAfter = false;
+			nlohmann::json report = nlohmann::json::object();
+			report["id"] = action.value("id", std::string());
+			const std::string tool = action.value("tool", std::string());
+			const nlohmann::json args = action.contains("args") && action["args"].is_object()
+											? action["args"]
+											: nlohmann::json::object();
+			nlohmann::json result = nlohmann::json::object();
+			if (tool == "vw_update")
+			{
+				const std::string branch = args.contains("branch") && args["branch"].is_string()
+											   ? args["branch"].get<std::string>()
+											   : std::string();
+				const bool restartIfNeeded = args.contains("restart_if_needed") &&
+											 args["restart_if_needed"].is_boolean() &&
+											 args["restart_if_needed"].get<bool>();
+				const RemoteUpdateResult update = RemoteDevUpdate(branch);
+				result["outcome"] = RemoteUpdateWord(update.outcome);
+				result["branch"] = update.branch;
+				result["previous"] = update.previous;
+				result["commit"] = update.commit;
+				result["message"] = update.message;
+				const bool needsRestart = update.outcome == RemoteUpdateOutcome::NeedsRestart;
+				result["restart_required"] = needsRestart;
+				restartAfter = needsRestart && restartIfNeeded;
+				result["restarting"] = restartAfter;
+				const bool ok = update.outcome == RemoteUpdateOutcome::Installed ||
+								update.outcome == RemoteUpdateOutcome::NoNewBuild ||
+								update.outcome == RemoteUpdateOutcome::NeedsRestart;
+				report["ok"] = ok;
+				if (!ok)
+					report["error"] = update.message.empty() ? std::string("更新できませんでした。")
+															 : update.message;
+			}
+			else if (tool == "vw_restart")
+			{
+				result["requested"] = true;
+				report["ok"] = true;
+				restartAfter = true;
+			}
+			else
+			{
+				report["ok"] = false;
+				report["error"] = "殻の知らない頼みごとです: " + tool;
+			}
+			report["result"] = result;
+			try
+			{
+				return report.dump();
+			}
+			catch (...)
+			{
+				// 理由の文が UTF-8 として壊れていた。id だけは返す（Python を待たせ切らない）。
+				nlohmann::json fallback = nlohmann::json::object();
+				fallback["id"] = report["id"];
+				fallback["ok"] = false;
+				fallback["error"] = "結末を JSON にできませんでした。";
+				return fallback.dump();
+			}
+		}
+
 		// 時計 1 刻みぶん。本体へ届けて見え方を返す。
 		std::string ServeOnce()
 		{
@@ -78,15 +220,48 @@ namespace HomeskzIfcImport
 			if (now < sRetryAt)
 				return sFailure;
 
-			const PayloadUse use;
 			std::string out;
 			std::string error;
-			if (use.ok() && use->mcpServe(out, error))
-				return out;
+			if (!CallServe(Pending().json, out, error))
+			{
+				sRetryAt = now + kLoadRetrySeconds;
+				sFailure = ShellView("error", error);
+				return sFailure;
+			}
+			nlohmann::json view = ParseView(out);
+			SettleReport(view, now);
 
-			sRetryAt = now + kLoadRetrySeconds;
-			sFailure = ShellView("error", use.ok() ? error : use.error());
-			return sFailure;
+			// **本体が殻に頼んできた**（vw_update / vw_restart）。いまは本体がスタックに無いので
+			// 降ろして入れ替えられる（src/PayloadSession.h）。結末をすぐ渡して応答を書いて
+			// もらうと、その回で次の頼みごとを引き取ってくることがあるので、数回まで続けて
+			// 済ませる（上限は暴走止め）。
+			constexpr int kMaxActionsPerTick = 3;
+			for (int i = 0; i < kMaxActionsPerTick; ++i)
+			{
+				if (!view.is_object() || !view.contains("action") || !view["action"].is_object())
+					break;
+				bool restartAfter = false;
+				Pending().json = RunShellAction(view["action"], restartAfter);
+				Pending().since = now;
+
+				// **すぐ渡す**（入れ替えたなら新しい本体が書く）。渡せなければ次の刻みで渡し直す。
+				std::string replied;
+				if (!CallServe(Pending().json, replied, error))
+					replied.clear();
+				view = ParseView(replied);
+				SettleReport(view, now);
+				if (!replied.empty())
+					out = replied;
+
+				// **再起動は応答を書いてから。** 先に頼むと、応える者がいなくなる。
+				// 開いている文書の保存確認は Vectorworks が通常どおり出す（src/Updater.h）。
+				if (restartAfter)
+				{
+					(void)RequestRestart();
+					break;
+				}
+			}
+			return out;
 		}
 	} // namespace
 

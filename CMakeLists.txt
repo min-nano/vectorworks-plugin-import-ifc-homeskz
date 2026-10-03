@@ -326,10 +326,6 @@ if(VW_BUILD_PLUGIN)
 		src/UpdaterFlow.cpp
 		src/UpdaterHost.h
 		src/UpdaterParse.h
-		src/FeedbackLoop.h
-		src/FeedbackLoop.cpp
-		src/FeedbackLoopHost.h
-		src/FeedbackLoopHost.cpp
 		src/Extensions/ExtMenu.h
 		src/Extensions/ExtMenu.cpp
 		src/Extensions/ExtUpdateMenu.h
@@ -342,18 +338,15 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.h
 		src/Extensions/ExtShearWall.cpp
-		src/Extensions/ExtFeedbackPalette.h
-		src/Extensions/ExtFeedbackPalette.cpp
 		src/Extensions/ExtMcpPalette.h
 		src/Extensions/ExtMcpPalette.cpp)
-	# **パレットの HTML（`resources/<vwr>/html/index.html` / `resources/common.vwr/html/`）は
+	# **パレットの HTML（`resources/common.vwr/html/`）は
 	# ここに入れない。** `.vwr` の文字列（メニュー名）と同じく殻へコンパイルされるものでは
 	# なく、パレットを開くときに読まれる。起動時に読み込まれた `.vwr` が入れ替えに追随するかは実機未確認だが、
 	# 追随しなくても古い見た目のまま動くだけで、入れると HTML を直すたびに再起動を強いる。
 	# **同梱スクリプト（`scripts/vw-*.sh` / `.ps1`）はここに入れない。** どれも殻へ
 	# コンパイルされるものではなく、**呼ぶたびにパスからディスクを読む**（更新は
-	# `src/Updater.cpp` が、フィードバックの投稿は `src/draw/Feedback.cpp` が、いずれも
-	# その場でプロセスを起こす）。置き換えれば次の呼び出しから新しいほうが走るので、
+	# `src/Updater.cpp` がその場でプロセスを起こす）。置き換えれば次の呼び出しから新しいほうが走るので、
 	# 再起動は要らない。
 	#
 	# M22.1 でプラグインのものが**プラグイン名のフォルダ 1 つ**に閉じ、インストーラが
@@ -393,9 +386,9 @@ if(VW_BUILD_PLUGIN)
 	# ここは SDK 非依存ライブラリ（MinNanoStructureCore）を**リンクしない**。殻は core/ も parse/
 	# も呼ばないので、リンクしてしまうと「殻に入ってよいもの」の境界が曖昧になる。
 	#
-	# M24 で足した往復の駆動（FeedbackLoop / FeedbackLoopHost）とパレットの登録も殻に
-	# 入る——入れ替えは殻でしか起きず（本体は自分を降ろせない）、パレットの登録は
-	# Vectorworks に番地を握られるため（src/FeedbackLoop.h / Extensions/ExtFeedbackPalette.h）。
+	# MCP ブリッジのパレットの登録と、それが頼まれる更新・再起動（M38）も殻に入る——
+	# 入れ替えは殻でしか起きず（本体は自分を降ろせない）、パレットの登録は Vectorworks に
+	# 番地を握られるため（Extensions/ExtMcpPalette.h）。
 	set(VW_SHELL_SOURCES
 		src/ModuleMain.cpp
 		src/PayloadHost.cpp
@@ -406,12 +399,9 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtTestMenu.cpp
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.cpp
-		src/Extensions/ExtFeedbackPalette.cpp
 		src/Extensions/ExtMcpPalette.cpp
 		src/Updater.cpp
-		src/UpdaterFlow.cpp
-		src/FeedbackLoop.cpp
-		src/FeedbackLoopHost.cpp)
+		src/UpdaterFlow.cpp)
 
 	# --- 本体（ペイロード）の sources ----------------------------------------------
 	# **殻が dlopen / LoadLibrary で読み込む側。** SDK 依存の draw/ フェーズがまるごと
@@ -706,11 +696,10 @@ if(VW_BUILD_PLUGIN)
 		# See src/Updater.cpp. macOS reads Contents/Resources/<name>.sh from inside
 		# the bundle; Windows reads <name>.ps1 from next to the .vlb.
 		#
-		#   vw-update    自動アップデート（殻が 3 つの入口から走らせる）
-		#   vw-feedback  実機フィードバックの投稿（本体が殻越しに走らせる。M23）
-		#   vw-token     トークンの在り処。**上の 2 つが source する**ので、片方だけ配ると
-		#                認証が外れる（vw-update は認証なしのまま続くが、1 時間 60 回の
-		#                制限に当たる。scripts/vw-token.sh の冒頭。M27）
+		#   vw-update    自動アップデート（殻が入口から走らせる。MCP の vw_update も同じ）
+		#   vw-token     トークンの在り処。**vw-update が source する**ので、片方だけ配ると
+		#                認証が外れる（認証なしのまま続くが、1 時間 60 回の制限に当たる。
+		#                scripts/vw-token.sh の冒頭。M27）
 		if(APPLE)
 			add_custom_command(
 				TARGET ${target}
@@ -720,13 +709,10 @@ if(VW_BUILD_PLUGIN)
 				COMMAND
 					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.sh"
 					"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-update.sh"
-				COMMAND
-					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-feedback.sh"
-					"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-feedback.sh"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-token.sh"
 						"$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources/vw-token.sh"
 				VERBATIM
-				COMMENT "Bundling vw-update.sh / vw-feedback.sh / vw-token.sh into ${output_name}")
+				COMMENT "Bundling vw-update.sh / vw-token.sh into ${output_name}")
 		else()
 			# Windows has no Info.plist, so stamp the build commit into a sidecar
 			# "<name>.commit" file next to the module. The updater reads it to tell
@@ -753,9 +739,6 @@ if(VW_BUILD_PLUGIN)
 					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-update.ps1"
 					"$<TARGET_FILE_DIR:${target}>/vw-update.ps1"
 				COMMAND
-					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-feedback.ps1"
-					"$<TARGET_FILE_DIR:${target}>/vw-feedback.ps1"
-				COMMAND
 					"${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/scripts/vw-token.ps1"
 					"$<TARGET_FILE_DIR:${target}>/vw-token.ps1"
 				COMMAND "${CMAKE_COMMAND}" -E copy "${commit_file}"
@@ -766,8 +749,7 @@ if(VW_BUILD_PLUGIN)
 						"$<TARGET_FILE_DIR:${target}>/${output_name}.shell-id"
 				VERBATIM
 				COMMENT
-					"Bundling vw-update.ps1 / vw-feedback.ps1 / vw-token.ps1 and build stamps next to ${output_name}"
-			)
+					"Bundling vw-update.ps1 / vw-token.ps1 and build stamps next to ${output_name}")
 		endif()
 	endfunction()
 

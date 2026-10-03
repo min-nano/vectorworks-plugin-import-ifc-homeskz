@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "vectorworks": {
+      "command": "python3",
+      "args": ["scripts/mcp/vw-mcp-server.py"],
+      "env": {
+        "VW_MCP_PLUGIN": "min-nano_structureDev"
+      }
+    }
+  }
+}

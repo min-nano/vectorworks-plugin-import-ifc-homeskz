@@ -448,13 +448,24 @@ namespace HomeskzIfcImport
 #endif
 	}
 
-	DevBuildPollResult PollDevBuild()
+	RemoteUpdateResult RemoteDevUpdate(const std::string& wantedBranch)
 	{
 #ifdef VW_DEV_BUILD
 		CVectorworksUpdaterHost host;
-		return PollDevBuildWith(host, VW_BUILD_BRANCH, VW_BUILD_VERSION, VW_SHELL_ID);
+		return RemoteDevUpdateWith(host, VW_BUILD_BRANCH, VW_BUILD_VERSION, VW_SHELL_ID,
+								   wantedBranch);
 #else
-		return DevBuildPollResult{};
+		(void)wantedBranch;
+		RemoteUpdateResult result;
+		result.outcome = RemoteUpdateOutcome::CheckFailed;
+		result.message = "安定版は MCP から入れ替えません。";
+		return result;
 #endif
+	}
+
+	bool RequestRestart()
+	{
+		CVectorworksUpdaterHost host;
+		return host.Restart();
 	}
 } // namespace HomeskzIfcImport

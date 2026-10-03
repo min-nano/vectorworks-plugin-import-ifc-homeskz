@@ -10,12 +10,11 @@
 //	**いつ走るか。** 以前は Vectorworks の起動時（プラグインの読み込み中）に 1 度きり
 //	だったが、いまは
 //	  * メニューコマンド「アップデータを確認」……… UpdateCheckKind::Manual
-//	  * 取り込みコマンドのついで ………………………… UpdateCheckKind::Silent
-//	  * 実機フィードバックの往復の最中 …………… UpdateCheckKind::Auto
-//	の 3 つの入口から呼ばれる。分かれるのは**どこで口を開くか**だけで（UpdaterHost.h の
+//	  * 取り込みコマンド・実機テストのついで ………… UpdateCheckKind::Silent
+//	の入口から呼ばれる。分かれるのは**どこで口を開くか**だけで（UpdaterHost.h の
 //	UpdateCheckKind）、更新があるときの流れ——入れて、要るなら再起動——は同じである。
-//	Auto だけは尋ねも報せもせず、**入れたのに効かせられなかったときだけ**口を開いて
-//	false（＝この実行では取り込みへ進むな）を返す。
+//	もう 1 つ、MCP の `vw_update` から呼ばれる RemoteDevUpdateWith があり、こちらは
+//	ダイアログを 1 枚も出さずに結末を値で返す（M38）。
 //
 
 #include "UpdaterHost.h"
@@ -113,19 +112,11 @@ namespace HomeskzIfcImport
 		// 判断できないとき（スクリプトが ID を出さない古い版など）は「要る」へ倒れる。
 		void OfferRestart(IUpdaterHost& host, const std::string& text, const std::string& detail);
 
-		bool FinishInstall(IUpdaterHost& host, UpdateCheckKind kind, const std::string& text,
-						   const std::string& detail, const std::string& runningShellId,
-						   const std::string& installedShellId)
+		bool FinishInstall(IUpdaterHost& host, const std::string& text, const std::string& detail,
+						   const std::string& runningShellId, const std::string& installedShellId)
 		{
 			if (!NeedsRestartAfterInstall(runningShellId, installedShellId))
 			{
-				// **Auto は黙って入れ替える。** 往復の 1 周ごとにモーダルのダイアログを
-				// 出しては、絵を見ている人の前に立ちはだかるだけになる。降ろせなかった
-				// ときだけ false——古い本体のまま取り込んでも、前の周と同じ結果が出る
-				// だけで意味が無い。
-				if (kind == UpdateCheckKind::Auto)
-					return host.DropLoadedPayload();
-
 				// **ここでホットリロードが効く。** 降ろしておけば、次に本体を使うときに
 				// 新しいファイルが読み直される（src/PayloadSession.h）。降ろせなかった
 				// ——本体のコードがまだ走っている——ときだけ、次回の起動へ回す。
@@ -141,18 +132,6 @@ namespace HomeskzIfcImport
 						"（いま動いている処理があるため、その場では入れ替えられませんでした）";
 				host.Inform(text, advice);
 				return true;
-			}
-
-			// **殻まで変わった。** Auto では再起動を仕掛けない——利用者は図面を開いた
-			// まま往復を回しているので、勝手に終了させるわけにいかない。伝えて取り込みを
-			// 見送り、再起動するかどうかはその人に委ねる。
-			if (kind == UpdateCheckKind::Auto)
-			{
-				host.Inform(text, detail + "\n\n殻（プラグインのモジュール）まで変わったため、"
-										   "この実行では入れ替えられません。\n"
-										   "Vectorworks を再起動してから、もう一度取り込みを実行"
-										   "してください（同じ条件で続きから走ります）。");
-				return false;
 			}
 
 			OfferRestart(host, text, detail);
@@ -189,15 +168,9 @@ namespace HomeskzIfcImport
 		}
 	} // namespace
 
-	// **安定版に Auto は無い。** 往復するのは PR のビルドであって main の配布物では
-	// ないので、Auto で呼ばれることはそもそも無い。万一呼ばれても Silent と同じ
-	// ——尋ねずに入れる相手ではない——として扱い、輪は止めない。
 	bool RunStableUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
 								  const std::string& runningShellId)
 	{
-		if (kind == UpdateCheckKind::Auto)
-			kind = UpdateCheckKind::Silent;
-
 		std::string out;
 		if (!host.RunScript({"q-stable"}, out))
 		{
@@ -236,7 +209,7 @@ namespace HomeskzIfcImport
 		std::string err;
 		std::string installedShellId;
 		if (Install(host, st.url, kStablePluginName, installedShellId, err))
-			return FinishInstall(host, kind, std::string(kStableDisplayName) + "を更新しました。",
+			return FinishInstall(host, std::string(kStableDisplayName) + "を更新しました。",
 								 "build: " + st.latest, runningShellId, installedShellId);
 
 		host.Inform("更新に失敗しました。", err);
@@ -283,11 +256,7 @@ namespace HomeskzIfcImport
 				return true;
 			pick = others[static_cast<std::size_t>(idx)];
 
-			// **Auto は尋ねない。** 往復は「新しいビルドが出たら試す」ためのもので、
-			// 周ごとに確認を挟むのはこの仕組みが無くそうとしている手間そのもの
-			// （UpdaterHost.h の UpdateCheckKind::Auto）。
-			if (kind == UpdateCheckKind::Silent &&
-				!host.Ask("同じブランチの新しい開発版ビルドがあります。"
+			if (!host.Ask("同じブランチの新しい開発版ビルドがあります。"
 						  "今すぐインストールしますか？",
 						  "branch: " + current.branch + "\nインストール済み: " + current.commit +
 							  "\n新しいビルド: " + pick.commit,
@@ -336,51 +305,51 @@ namespace HomeskzIfcImport
 		std::string err;
 		std::string installedShellId;
 		if (Install(host, pick.url, kDevPluginName, installedShellId, err))
-			return FinishInstall(host, kind, "開発版ビルドをインストールしました。",
+			return FinishInstall(host, "開発版ビルドをインストールしました。",
 								 "branch: " + DevBuildLabel(pick) + "\ncommit: " + pick.commit,
 								 runningShellId, installedShellId);
 
-		// **入れられなかった。** Auto でも黙らない——尋ねずに入れる約束で呼ばれている
-		// のだから、入らなかったことは伝えなければならない。取り込みへは進ませない
-		// （古い本体で 1 分以上かけて、前の周と同じ結果をもう一度出すだけになる）。
+		// **入れられなかった。** 取り込みへは進ませない（入れると答えた人は新しいビルドで
+		// 取り込むつもりでいる）。
 		host.Inform("インストールに失敗しました。", err);
 		return false;
 	}
 
 	// -----------------------------------------------------------------------
-	// モードレスの往復（M24）向け。意図は UpdaterHost.h の DevBuildPoll 参照。
-	// **host の Inform / Ask / PickBuild / Restart は呼ばない**——結末はすべて値で返す。
-	DevBuildPollResult PollDevBuildWith(IUpdaterHost& host, const std::string& shellBranch,
-										const std::string& shellCommit,
-										const std::string& runningShellId)
+	// MCP の `vw_update` 向け（M38）。意図は UpdaterHost.h の RemoteDevUpdateWith 参照。
+	// **host の Inform / Ask / PickBuild / Restart は呼ばない**——結末はすべて値で返す
+	// （再起動するかは頼んだ側が決める。src/Extensions/ExtMcpPalette.cpp）。
+	RemoteUpdateResult RemoteDevUpdateWith(IUpdaterHost& host, const std::string& shellBranch,
+										   const std::string& shellCommit,
+										   const std::string& runningShellId,
+										   const std::string& wantedBranch)
 	{
-		DevBuildPollResult result;
+		RemoteUpdateResult result;
 		std::string out;
 		if (!host.RunScript({"q-dev"}, out))
 		{
-			result.outcome = DevBuildPoll::CheckFailed;
+			result.outcome = RemoteUpdateOutcome::CheckFailed;
 			result.message = "アップデータを起動できませんでした。";
 			return result;
 		}
 		const std::string scriptError = ValueOf(out, "error");
 		if (!scriptError.empty())
 		{
-			result.outcome = DevBuildPoll::CheckFailed;
+			result.outcome = RemoteUpdateOutcome::CheckFailed;
 			result.message = scriptError;
 			return result;
 		}
 
-		// いま入っている版（ディスク上）。**ブランチも sha もディスクを見る**——殻の
-		// 値は本体だけを入れ替えたあと古いままで、sha を取り違えれば同じビルドを毎周
-		// 入れ直し、ブランチを取り違えれば前のブランチのビルドで上書きしてしまう
-		// （UpdaterParse.h の ResolveCurrentDevBuild）。
+		// いま入っている版（ディスク上）。**ブランチも sha もディスクを見る**（UpdaterHost.h）。
 		CurrentDevBuild const current = ResolveCurrentDevBuild(out, shellBranch, shellCommit);
+		result.previous = current.commit;
+		result.branch = wantedBranch.empty() ? current.branch : wantedBranch;
 
 		std::vector<DevBuild> const others = DevSwitchCandidates(out, current.commit);
-		int const idx = FindDevBuildForBranch(others, current.branch);
+		int const idx = FindDevBuildForBranch(others, result.branch);
 		if (idx < 0)
 		{
-			result.outcome = DevBuildPoll::NoNewBuild;
+			result.outcome = RemoteUpdateOutcome::NoNewBuild;
 			return result;
 		}
 		const DevBuild& pick = others[static_cast<std::size_t>(idx)];
@@ -390,7 +359,7 @@ namespace HomeskzIfcImport
 		std::string installedShellId;
 		if (!Install(host, pick.url, kDevPluginName, installedShellId, err))
 		{
-			result.outcome = DevBuildPoll::Failed;
+			result.outcome = RemoteUpdateOutcome::Failed;
 			result.message = err;
 			return result;
 		}
@@ -398,18 +367,18 @@ namespace HomeskzIfcImport
 		if (NeedsRestartAfterInstall(runningShellId, installedShellId))
 		{
 			// 殻まで変わった。入ってはいるが、この実行では効かせられない。
-			result.outcome = DevBuildPoll::NeedsRestart;
+			result.outcome = RemoteUpdateOutcome::NeedsRestart;
 			result.message = "殻（プラグインのモジュール）まで変わったため、Vectorworks を"
 							 "再起動するまで新しいビルドは動きません。";
 			return result;
 		}
 		if (!host.DropLoadedPayload())
 		{
-			result.outcome = DevBuildPoll::Failed;
+			result.outcome = RemoteUpdateOutcome::Failed;
 			result.message = "本体を降ろせませんでした（いま動いている処理があります）。";
 			return result;
 		}
-		result.outcome = DevBuildPoll::Installed;
+		result.outcome = RemoteUpdateOutcome::Installed;
 		return result;
 	}
 } // namespace HomeskzIfcImport
