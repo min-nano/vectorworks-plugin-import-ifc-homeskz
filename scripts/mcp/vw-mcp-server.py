@@ -10,16 +10,25 @@
 #                                     │ 拾う／応える
 #                               Vectorworks（起動している間ずっと。パレットの時計が拾う）
 #
+# 【開発版専用】（M38）橋が架かるのは開発版（min-nano_structureDev）のプラグインだけで、
+# ローカルの Claude Code がこのリポジトリを開いたとき `.mcp.json` からこのサーバを起こす。
+# 図面を読むだけでなく、診断ログと実機テストの報告を読み、新しいビルドを入れ、再起動し、
+# 実機テストを走らせられる——**PR のコメントを介さずに実機確認を回す**ための道具である。
+#
 # 【このスクリプトが持たないもの】**道具の一覧を持たない。** 何ができるか（名前・説明・
-# 引数の形）はプラグイン側の表（src/draw/McpBridge.cpp の kTools）ただ 1 つが真実で、
-# ここは起動時にそれを `vw_tools` で取りに行くだけ。だから**道具を足すのにこの
-# スクリプトを直す必要が無い**（プラグインを更新すれば増える）。
+# 引数の形・待ち時間）はプラグイン側の表（src/draw/McpBridge.cpp の kTools）ただ 1 つが
+# 真実で、ここは起動時にそれを `vw_tools` で取りに行くだけ。だから**道具を足すのにこの
+# スクリプトを直す必要が無い**（プラグインを更新すれば増える）。例外は再起動の前後の
+# 待ち方（vw_restart / vw_update の restarting）で、橋の向こうが一度居なくなるのを
+# 見届けられるのはこちらだけなので、ここに持つ（wait_for_restart）。
 #
 # 【依存を持たない】標準ライブラリだけで書いてある。プラグインの zip に同梱して配るので、
 # 利用者に pip を要求しないことが要件（Python 3.8 以降）。
 #
 # 使い方（Claude Code に登録する）:
 #
+#   このリポジトリの .mcp.json が登録する（ローカルの Claude Code をリポジトリ直下で起動
+#   すれば使える）。別の場所から使うなら:
 #   claude mcp add vectorworks -- python3 <この scripts/mcp/vw-mcp-server.py のパス>
 #
 # 【Vectorworks を起こすのもこちら】道具 `vw_launch` が Vectorworks を起動し、橋が架かる
@@ -36,8 +45,9 @@
 #
 # 環境変数:
 #   VW_MCP_SPOOL   スプールの場所を明示する（プラグイン側と同じ値にすること）
-#   VW_MCP_PLUGIN  プラグイン名（既定 min-nano_structure。開発版は min-nano_structureDev）
-#   VW_MCP_TIMEOUT 1 件あたりの待ち時間（秒。既定 30）
+#   VW_MCP_PLUGIN  プラグイン名（既定 min-nano_structureDev。橋は開発版にしか無い）
+#   VW_MCP_TIMEOUT 1 件あたりの待ち時間（秒。既定 30。道具の表が timeoutSeconds を
+#                  持つものはそちらが優先——実機テストの 1 周は 1 分以上かかる）
 #   VW_MCP_APP     vw_launch が起動するもの（macOS は .app のパスかアプリ名、Windows は
 #                  .exe のパス。既定は Vectorworks 2026 の標準のインストール先）
 #
@@ -70,7 +80,7 @@ MCP_PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "vectorworks-bridge"
 SERVER_VERSION = "0.1.0"
 
-DEFAULT_PLUGIN = "min-nano_structure"
+DEFAULT_PLUGIN = "min-nano_structureDev"
 DEFAULT_TIMEOUT = 30.0
 
 # vw_launch の既定。**プラグインは Vectorworks 2026 用**なので、その版だけを探す
@@ -84,6 +94,9 @@ DEFAULT_WIN_EXE_GLOBS = (
 # さらに数秒遅らせてある（resources/common.vwr/html/mcp.html の FIRST_TICK_MS）。
 DEFAULT_LAUNCH_WAIT = 120.0
 LAUNCH_POLL_SECONDS = 1.0
+# 再起動を頼んでから、橋が**一度居なくなるのを**待つ上限（秒）。保存の確認が出ていると
+# Vectorworks はそこで止まるので、これを過ぎたら「人の応答待ち」と返す。
+RESTART_DOWN_WAIT = 60.0
 
 
 def log(message):
@@ -232,6 +245,9 @@ class Bridge:
         # 最後に取り直しを促した一覧（同じ一覧で何度も促さない——アプリが通知に応じない
         # 場合に、道具を呼ぶたびに通知が積み上がるのを防ぐ）。
         self.announced = []
+        # 道具ごとの待ち時間（秒）。**表の真実はプラグイン側**（kTools の timeoutSeconds）で、
+        # 一覧を取るたびにここへ写す（remember_timeouts）。
+        self.timeouts = {}
 
     # --- 生存確認 ---------------------------------------------------------
     @staticmethod
@@ -252,8 +268,14 @@ class Bridge:
         beat = status.get("beat")
         if not isinstance(beat, (int, float)):
             return None
-        if time.time() - float(beat) > STATUS_STALE_SECONDS:
-            return None
+        now = time.time()
+        if now - float(beat) > STATUS_STALE_SECONDS:
+            # **長く走る道具の最中は、印を書き直せない**（実機テストの 1 周）。プラグインは
+            # 走り出す前に busy_until（いつまでかかりうるか）を書いていくので、それが未来なら
+            # 生きていると見る（src/draw/McpBridge.cpp の StatusJson）。
+            busy_until = status.get("busy_until")
+            if not isinstance(busy_until, (int, float)) or now > float(busy_until):
+                return None
         return status
 
     def status(self):
@@ -275,7 +297,7 @@ class Bridge:
                 "Vectorworks 側でブリッジが動いていません。\n"
                 "Vectorworks が起動していなければ vw_launch で起動してください。"
                 "起動しているのに繋がらないときは、Vectorworks のメニュー"
-                "「MCP ブリッジを表示…」を 1 回実行してください。\n"
+                "「MCP ブリッジを表示…」（開発版だけ）を 1 回実行してください。\n"
                 "（探した場所: %s）" % ", ".join(self.candidates)
             )
         if status.get("protocol") != PROTOCOL_VERSION:
@@ -287,10 +309,19 @@ class Bridge:
         return status
 
     # --- 1 往復 -----------------------------------------------------------
+    def remember_timeouts(self, tools):
+        """一覧から道具ごとの待ち時間を写す。"""
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            value = tool.get("timeoutSeconds")
+            if isinstance(value, (int, float)) and value > 0:
+                self.timeouts[tool.get("name")] = float(value)
+
     def call(self, tool, args, timeout=None):
         self.require_status()
         if timeout is None:
-            timeout = call_timeout()
+            timeout = max(call_timeout(), self.timeouts.get(tool, 0.0))
 
         self.seq += 1
         # 名前の昇順が送った順になるように連番を先頭へ置く（プラグイン側はこの順で拾う）。
@@ -351,6 +382,7 @@ class Bridge:
                 tools = response.get("result", {}).get("tools", [])
                 if isinstance(tools, list) and tools:
                     self._save_cache(tools)
+                    self.remember_timeouts(tools)
                     return tools
         except (BridgeDown, TimeoutError, OSError) as error:
             log("道具の一覧を取りに行けませんでした: %s" % error)
@@ -368,6 +400,7 @@ class Bridge:
         if not isinstance(tools, list):
             return None
         self._save_cache(tools)
+        self.remember_timeouts(tools)
         return tools
 
     def announce_if_changed(self, tools, notify):
@@ -407,6 +440,7 @@ class Bridge:
                 with open(os.path.join(directory, TOOLS_CACHE_FILE), "r", encoding="utf-8") as h:
                     tools = json.load(h)
                 if isinstance(tools, list):
+                    self.remember_timeouts(tools)
                     return tools
             except (OSError, ValueError):
                 continue
@@ -420,6 +454,20 @@ class Bridge:
             # どちらも「一覧はまだ分からない」で、下の空リストがその答え。
             pass
         return []
+
+
+def public_tools(tools):
+    """Claude に見せる形へ（プラグインの表にしか意味の無い timeoutSeconds を落とす）。
+
+    MCP の tool は name / description / inputSchema を持つ。余計な鍵を嫌うアプリもあるので、
+    待ち時間はこのサーバの中だけで使う（Bridge.remember_timeouts）。
+    """
+    shown = []
+    for tool in tools:
+        if isinstance(tool, dict):
+            tool = {key: value for key, value in tool.items() if key != "timeoutSeconds"}
+        shown.append(tool)
+    return shown
 
 
 # --- このサーバ自身が答える道具 ----------------------------------------------
@@ -494,12 +542,12 @@ def bridge_status_result(bridge, notify=None):
             "searched": bridge.candidates,
             "hint": (
                 "Vectorworks が起動していなければ vw_launch で起動してください。"
-                "起動していれば、Vectorworks のメニュー「MCP ブリッジを表示…」を 1 回"
-                "実行してください（パレットが出て、以後は Vectorworks が終わるまで"
-                "受け付けます）。"
-                "それでも見つからないときは、開発版のプラグイン名"
-                "（環境変数 VW_MCP_PLUGIN に min-nano_structureDev）か、"
-                "スプールの場所（環境変数 VW_MCP_SPOOL）を確かめてください。"
+                "起動していれば、Vectorworks のメニュー「MCP ブリッジを表示…」（開発版の"
+                "プラグインにだけある）を 1 回実行してください（パレットが出て、以後は"
+                "Vectorworks が終わるまで受け付けます）。"
+                "それでも見つからないときは、プラグイン名（環境変数 VW_MCP_PLUGIN。既定は"
+                "min-nano_structureDev）か、スプールの場所（環境変数 VW_MCP_SPOOL）を"
+                "確かめてください。"
             ),
         }
     result = {"running": True, "spool": bridge.dir}
@@ -507,7 +555,7 @@ def bridge_status_result(bridge, notify=None):
     tools = bridge.live_tools()
     if tools is not None:
         # 名前・説明・引数の形をそのまま見せる（vw_call に渡す手掛かり）。
-        result["tools"] = tools
+        result["tools"] = public_tools(tools)
         if notify is not None:
             bridge.announce_if_changed(tools, notify)
     return result
@@ -663,6 +711,113 @@ def launch_vectorworks(bridge, args, notify):
     }, True
 
 
+# --- 再起動を見届ける（vw_restart / vw_update の restarting）--------------------
+# **再起動そのものはプラグインが頼む**（SDK の CloseAllFilesAndQuitVectorworks。開いている
+# 図面の保存確認は Vectorworks が通常どおり出す）。こちらは「一度居なくなって、また架かる」
+# のを見届けるだけ——橋の向こうが入れ替わるところは、橋の向こうからは見えない。
+
+
+def wait_for_restart(bridge, notify):
+    """橋が一度居なくなり、また受け付けるまで待つ。結果の dict を返す。"""
+    deadline = time.time() + RESTART_DOWN_WAIT
+    went_down = False
+    while time.time() < deadline:
+        if bridge.status() is None:
+            went_down = True
+            break
+        time.sleep(LAUNCH_POLL_SECONDS)
+    if not went_down:
+        return {
+            "restarted": False,
+            "hint": (
+                "Vectorworks がまだ終了していません。未保存の図面があれば保存の確認が"
+                "出ているはずなので、人に応えてもらってください（取り消すと再起動しません）。"
+                "終わったかは vw_bridge_status で確かめられます。"
+            ),
+        }
+    deadline = time.time() + DEFAULT_LAUNCH_WAIT
+    while time.time() < deadline:
+        status = bridge.status()
+        if status is not None:
+            notify()
+            result = {"restarted": True, "spool": bridge.dir}
+            result.update(status)
+            return result
+        time.sleep(LAUNCH_POLL_SECONDS)
+    return {
+        "restarted": False,
+        "hint": (
+            "Vectorworks は終了しましたが、待っている間に橋が架かりませんでした。"
+            "起動に時間がかかっているなら、少し待って vw_bridge_status で確かめてください。"
+            "起動しなかったなら vw_launch で起動できます。"
+        ),
+    }
+
+
+def mac_app_running(app):
+    """macOS で、その名前のアプリが動いているか（分からなければ False）。"""
+    try:
+        done = subprocess.run(
+            ["/usr/bin/osascript", "-e", 'application "%s" is running' % app],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.stdout.decode("utf-8", "replace").strip() == "true"
+
+
+def restart_without_bridge(bridge, notify):
+    """**橋が架かっていないときの再起動**（macOS だけ）。結果と、エラーかどうかを返す。
+
+    殻まで変わったビルドを入れた直後は、新しい本体を古い殻が読めず（ABI の版が違う）、
+    橋が落ちていることがある——そのとき再起動を頼める相手はプラグインには居ない。そこで
+    OS の作法で**普通に終了させてから**起こし直す（AppleScript の quit。開いている図面の
+    保存確認は通常どおり出る）。強制終了はしない。
+    """
+    if sys.platform != "darwin" or os.environ.get("VW_MCP_APP", ""):
+        return {
+            "restarted": False,
+            "error": (
+                "ブリッジが受け付けていないので、プラグインに再起動を頼めません。"
+                "Vectorworks を手で再起動してください（終了して起動し直すと、"
+                "新しいビルドが読み込まれます）。"
+            ),
+            "searched": bridge.candidates,
+        }, True
+    app = DEFAULT_MAC_APP
+    if not mac_app_running(app):
+        result, is_error = launch_vectorworks(bridge, {}, notify)
+        result["note"] = "Vectorworks は動いていなかったので、起動しました。"
+        return result, is_error
+    try:
+        subprocess.run(
+            ["/usr/bin/osascript", "-e", 'tell application "%s" to quit' % app],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return {"restarted": False, "error": "終了を頼めませんでした: %s" % error}, True
+    deadline = time.time() + DEFAULT_LAUNCH_WAIT
+    while time.time() < deadline and mac_app_running(app):
+        time.sleep(LAUNCH_POLL_SECONDS)
+    if mac_app_running(app):
+        return {
+            "restarted": False,
+            "hint": (
+                "Vectorworks がまだ終了していません。保存の確認が出ていれば、人に応えて"
+                "もらってください。"
+            ),
+        }, True
+    result, is_error = launch_vectorworks(bridge, {}, notify)
+    result["restarted"] = not is_error
+    return result, is_error
+
+
 # --- MCP（JSON-RPC over stdio）------------------------------------------------
 
 
@@ -714,7 +869,15 @@ def handle_tools_call(bridge, params):
 
     try:
         response = bridge.call(name, args)
-    except (BridgeDown, TimeoutError) as error:
+    except BridgeDown as error:
+        if name == "vw_restart":
+            # 橋が落ちていても再起動だけは頼みたい（殻まで変わった直後がそれ）。
+            result, is_error = restart_without_bridge(bridge, notify_tools_changed)
+            return text_content(
+                json.dumps(result, ensure_ascii=False, indent=2), is_error=is_error
+            )
+        return text_content(str(error), is_error=True)
+    except TimeoutError as error:
         return text_content(str(error), is_error=True)
     except OSError as error:
         return text_content("スプールへ書けませんでした: %s" % error, is_error=True)
@@ -724,15 +887,28 @@ def handle_tools_call(bridge, params):
             "Vectorworks 側でエラーになりました: %s" % response.get("error", "(理由不明)"),
             is_error=True,
         )
+    result = response.get("result", {})
+    # **再起動を頼んだ・頼まれた**なら、橋が架かり直すまで見届ける（応答はプラグインが
+    # 終了する前に書いたもの）。
+    restarting = name == "vw_restart" or (
+        name == "vw_update" and isinstance(result, dict) and result.get("restarting") is True
+    )
+    if restarting:
+        after = wait_for_restart(bridge, notify_tools_changed)
+        if isinstance(result, dict):
+            result = dict(result)
+            result["after_restart"] = after
+        return text_content(
+            json.dumps(result, ensure_ascii=False, indent=2),
+            is_error=after.get("restarted") is not True,
+        )
     if not bridge.listed:
         # 橋に届いたのに、Claude にはプラグインの道具を 1 つも見せていない（先に起動した
         # アプリの一覧が古い）。取り直しを促す。
         tools = bridge.live_tools()
         if tools:
             bridge.announce_if_changed(tools, notify_tools_changed)
-    return text_content(
-        json.dumps(response.get("result", {}), ensure_ascii=False, indent=2)
-    )
+    return text_content(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def handle(bridge, message):
@@ -759,7 +935,7 @@ def handle(bridge, message):
     if method == "tools/list":
         tools = bridge.tools()
         bridge.listed = [tool.get("name") for tool in tools if isinstance(tool, dict)]
-        return rpc_result(request_id, {"tools": LOCAL_TOOLS + tools})
+        return rpc_result(request_id, {"tools": LOCAL_TOOLS + public_tools(tools)})
     if method == "tools/call":
         return rpc_result(request_id, handle_tools_call(bridge, params))
     if request_id is None:

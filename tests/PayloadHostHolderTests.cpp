@@ -160,7 +160,7 @@ TEST(a_host_without_a_script_hook_is_accepted)
 	CHECK_EQ(holder.adopt(&host), static_cast<int>(kVwPayloadOk));
 	CHECK(!holder.canRunScripts());
 	std::string out = "not touched";
-	CHECK(!holder.runScript("vw-feedback", {"token-status"}, out));
+	CHECK(!holder.runScript("vw-update", {"q-dev"}, out));
 	CHECK(out.empty()); // 失敗しても出力は空にして返す（呼び出し側が古い値を読まない）
 }
 
@@ -175,8 +175,8 @@ TEST(run_script_passes_the_arguments_and_copies_the_reply)
 	gScriptReply = "source=keychain\nok=yes";
 	gScriptStatus = kVwPayloadOk;
 	std::string out;
-	CHECK(holder.runScript("vw-feedback", {"post", "o/r", "12"}, out));
-	CHECK_EQ(gScriptCall, std::string("vw-feedback post o/r 12"));
+	CHECK(holder.runScript("vw-update", {"do-install", "u", "n"}, out));
+	CHECK_EQ(gScriptCall, std::string("vw-update do-install u n"));
 	CHECK_EQ(out, std::string("source=keychain\nok=yes"));
 
 	// 引数が無くても呼べる（nullptr を渡す形になる）。
@@ -185,7 +185,7 @@ TEST(run_script_passes_the_arguments_and_copies_the_reply)
 
 	// 殻が失敗を返したら false（出力は使わせない）。
 	gScriptStatus = kVwPayloadErrHost;
-	CHECK(!holder.runScript("vw-feedback", {"token-status"}, out));
+	CHECK(!holder.runScript("vw-update", {"q-dev"}, out));
 	CHECK(out.empty());
 	gScriptStatus = kVwPayloadOk;
 }

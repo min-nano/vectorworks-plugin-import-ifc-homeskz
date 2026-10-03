@@ -88,12 +88,12 @@ $script:InstallerOutput = ''
 # GitHub REST + plug-in helpers.
 #
 # **公開リポジトリなのでトークンは要らない——が、あるなら必ず付ける。** 認証なしの
-# GitHub API は **IP ごとに 1 時間 60 回**で、往復のパレット（M24）は 1 分ごとに
+# GitHub API は **IP ごとに 1 時間 60 回**で、M24〜M37 の往復のパレットは 1 分ごとに
 # q-dev を呼ぶ＝ちょうど上限。取り込みコマンドのついでの確認・「今すぐ確認」が
 # 1 回でも挟まれば超え、以後その時間内はずっと 403 になる（実機 M27。macOS 側の
 # scripts/vw-update.sh と同じ理由・同じ作り）。トークンを付ければ 1 時間 5000 回。
 #
-# トークンの在り処は同梱の vw-token.ps1 ただ 1 つ（vw-feedback.ps1 と共有する）。
+# トークンの在り処は同梱の vw-token.ps1 ただ 1 つ（CLAUDE.md「重複を作らない置き場所」）。
 # **無くても止まらない**——読めなければ従来どおり認証なしで続ける。
 # ---------------------------------------------------------------------------
 
@@ -134,7 +134,7 @@ function Get-ResponseHeader($response, [string] $name) {
 
 # Get-ApiFailureReason: 例外を 1 行の日本語にする。**API 制限だけは別扱い**——いつ戻るかと
 # 「認証の有無で上限が違う」ことまで言えば、待てばよいのか設定が要るのかが分かる。
-# 「取得できませんでした」だけで終わらせないのは、往復が無人で回るから（実機 M27）。
+# 「取得できませんでした」だけで終わらせないのは、MCP の vw_update が無人で回るから（M27）。
 function Get-ApiFailureReason($err, [string] $token) {
     $response = $null
     try { $response = $err.Exception.Response } catch { }

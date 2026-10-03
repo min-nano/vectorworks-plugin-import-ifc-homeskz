@@ -1,12 +1,13 @@
 //
 //	CoreFeedbackSessionTests.cpp
 //
-//	実機フィードバックの記憶（src/core/FeedbackSession）の単体テスト。VectorWorks SDK を
+//	実機テストの記憶（src/core/FeedbackSession）の単体テスト。VectorWorks SDK を
 //	一切 include せず、無 SDK のテストハーネスで走る（CLAUDE.md「テスト方針」）。
 //
 //	検証項目（docs/DEV-NOTES.md M23）: 既定は「何もしない」・書いて読んで元に戻る・
 //	壊れた行を飛ばして読み続ける・ファイルへの読み書き。**2 周目が走るかどうかはこの
-//	記憶だけに懸かっている**ので、往復の要はここを壊さないこと。
+//	記憶だけに懸かっている**（MCP の vw_run_test はダイアログを出せない）ので、ここを
+//	壊さないこと。
 //
 
 #include "TestFramework.h"
@@ -23,36 +24,29 @@
 
 using HomeskzIfcImport::core::clearFeedbackSession;
 using HomeskzIfcImport::core::defaultFeedbackSessionPath;
-using HomeskzIfcImport::core::feedbackPullRequestEnded;
 using HomeskzIfcImport::core::FeedbackRoundKind;
 using HomeskzIfcImport::core::feedbackRoundKind;
 using HomeskzIfcImport::core::FeedbackSession;
+using HomeskzIfcImport::core::feedbackSessionRemembered;
 using HomeskzIfcImport::core::formatFeedbackSession;
 using HomeskzIfcImport::core::kSymbolRoleCount;
 using HomeskzIfcImport::core::parseFeedbackSession;
 using HomeskzIfcImport::core::readFeedbackSession;
-using HomeskzIfcImport::core::restartedFeedbackSession;
 using HomeskzIfcImport::core::SymbolRole;
+using HomeskzIfcImport::core::testReportPathFor;
 using HomeskzIfcImport::core::writeFeedbackSession;
 
 namespace
 {
-	// 一通り埋めた記憶（往復で実際に運ぶ値の全部）。
+	// 一通り埋めた記憶（周をまたいで実際に運ぶ値の全部）。
 	FeedbackSession sample()
 	{
 		FeedbackSession session;
-		session.send = true;
-		session.repo = "min-nano/vectorworks-plugin-import-ifc-homeskz";
-		session.pullRequest = 123;
-		session.branch = "claude/plugin-feedback-automation-01bi93";
 		session.ifcPath = "/Users/someone/Documents/物件A.ifc";
 		session.workPath = "/tmp/homeskz-work.vwx";
-		session.anonymize = false;
 		session.round = 3;
 		session.lastCommit = "a1b2c3d";
 		session.lastTally = "ストーリ:3/3,通り芯:44/44";
-		session.lastPostedAt = "2026-09-07T01:02:03Z";
-		session.loop = true;
 		session.baselineRecorded = true;
 		session.baselineLayers = {"共通", "デザイン レイヤ-1"};
 		session.lastCreatedLayers = {"1-伏図", "2-伏図"};
@@ -123,11 +117,9 @@ TEST(feedback_session_defaults_do_nothing)
 {
 	// 記憶が無いとき（＝1 周目）にそのまま使っても、従来どおりの手動の取り込みになる。
 	const FeedbackSession session;
-	CHECK(!session.send);
-	CHECK(session.anonymize); // **公開される側が既定**。伏せるほうを既定にする。
 	CHECK_EQ(session.round, 0);
-	CHECK_EQ(session.pullRequest, 0);
 	CHECK(session.ifcPath.empty());
+	CHECK(!feedbackSessionRemembered(session));
 }
 
 TEST(feedback_session_without_a_baseline_reads_as_not_recorded)
@@ -161,22 +153,14 @@ TEST(feedback_session_round_trips_through_text)
 	const FeedbackSession before = sample();
 	const FeedbackSession after = parseFeedbackSession(formatFeedbackSession(before));
 
-	CHECK_EQ(after.send, before.send);
-	CHECK_EQ(after.repo, before.repo);
-	CHECK_EQ(after.pullRequest, before.pullRequest);
-	CHECK_EQ(after.branch, before.branch);
 	CHECK_EQ(after.ifcPath, before.ifcPath);
 	// **毎周開き直す図面**（M25）。テンプレートのパスが落ちると、次の周は開き直さずに
 	// 前の周の図へ重ねて描いてしまう。開いた複製のパスが落ちると、その図面を閉じられず
 	// 周の数だけ積み上がる。
 	CHECK_EQ(after.workPath, before.workPath);
-	CHECK_EQ(after.anonymize, before.anonymize);
 	CHECK_EQ(after.round, before.round);
 	CHECK_EQ(after.lastCommit, before.lastCommit);
 	CHECK_EQ(after.lastTally, before.lastTally);
-	// モードレスの往復（M24）が持ち越すもの: 直近の投稿の時刻と、回っているか。
-	CHECK_EQ(after.lastPostedAt, before.lastPostedAt);
-	CHECK_EQ(after.loop, before.loop);
 	// 1 周目に採った基準（レイヤの顔ぶれ）。**ここが落ちると次の周で図面が戻っているかを
 	// 判定できなくなる**（テンプレートのレイヤと前の周の残りを区別できない）。
 	CHECK_EQ(after.baselineRecorded, before.baselineRecorded);
@@ -221,7 +205,7 @@ TEST(feedback_session_round_trips_through_text)
 TEST(feedback_session_without_a_title_block_line_places_none)
 {
 	// M28 より前の記憶には titleblock の行が無い。**置かない**（従来どおり）と読む。
-	const FeedbackSession session = parseFeedbackSession("send=1\nround=2\nbuild=a1b2c3d\n");
+	const FeedbackSession session = parseFeedbackSession("round=2\nbuild=a1b2c3d\n");
 	CHECK(!session.options.hasTitleBlock());
 	CHECK(session.options.titleBlockStyle().empty());
 	// M31 より前の記憶には dimension の行も無い。**入れない**と読む。
@@ -252,13 +236,24 @@ TEST(feedback_session_skips_unreadable_merge_lines)
 	CHECK(session.options.mergesWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}));
 }
 
-TEST(feedback_session_without_loop_lines_reads_as_not_looping)
+TEST(feedback_session_reads_an_m37_memory_without_the_pull_request_lines)
 {
-	// 古い版（M23）が書いた記憶には posted / loop の行が無い。**自動の往復は回って
-	// いない**と読むのが正しい——立てて読むと、古い記憶でパレットが勝手に回り出す。
-	const FeedbackSession session = parseFeedbackSession("send=1\nround=2\nbuild=a1b2c3d\n");
-	CHECK(!session.loop);
-	CHECK(session.lastPostedAt.empty());
+	// M37 までの記憶には PR へ投稿していた頃の行（send / repo / pr / branch / anon /
+	// posted / loop）が並ぶ。**黙って読み飛ばし、IFC と設定はそのまま続きの周に使う**
+	// ——更新しただけで 1 周目からやり直しになると、MCP から続きの周を起こせない。
+	const FeedbackSession session = parseFeedbackSession(
+		"send=1\nrepo=owner/repo\npr=137\nbranch=feature/x\nifc=/tmp/model.ifc\nanon=0\n"
+		"round=4\nbuild=a1b2c3d\nposted=2026-09-07T01:02:03Z\nloop=1\n"
+		"titleblock=図面枠 A3\n");
+	CHECK_EQ(session.ifcPath, std::string("/tmp/model.ifc"));
+	CHECK_EQ(session.round, 4);
+	CHECK_EQ(session.options.titleBlockStyle(), std::string("図面枠 A3"));
+	CHECK(feedbackSessionRemembered(session));
+	// 書き直すと古い行は残らない。
+	const std::string text = formatFeedbackSession(session);
+	CHECK(text.find("pr=") == std::string::npos);
+	CHECK(text.find("send=") == std::string::npos);
+	CHECK(text.find("loop=") == std::string::npos);
 }
 
 TEST(feedback_session_parse_skips_broken_lines)
@@ -272,49 +267,45 @@ TEST(feedback_session_parse_skips_broken_lines)
 							 "role.99.symbol=存在しない役割\n"
 							 "role.x.on=1\n"
 							 "roleでもドットが続かない=1\n"
-							 "pr=77\n"
+							 "round=7\n"
 							 "send=yes\n"
 							 "auto=off\n"; // 昔の版が書いた行。知らない鍵は黙って飛ばす
 	const FeedbackSession session = parseFeedbackSession(text);
-	CHECK_EQ(session.pullRequest, 77);
-	CHECK(session.send);
+	CHECK_EQ(session.round, 7);
 }
 
 TEST(feedback_session_parse_keeps_defaults_for_unreadable_values)
 {
-	// 真偽にならない綴り・空の数・桁あふれは**既定のまま**（0 に潰さない・例外を投げない）。
-	const FeedbackSession session = parseFeedbackSession("send=たぶん\n"
-														 "anon=たぶん\n"
-														 "pr=\n"
+	// 真偽にならない綴り・桁あふれは**既定のまま**（0 に潰さない・例外を投げない）。
+	const FeedbackSession session = parseFeedbackSession("baseline=たぶん\n"
 														 "round=99999999999\n");
-	CHECK(!session.send);	  // 既定（false）のまま
-	CHECK(session.anonymize); // 既定（true）のまま
-	CHECK_EQ(session.pullRequest, 0);
+	CHECK(!session.baselineRecorded); // 既定（false）のまま
 	CHECK_EQ(session.round, 0);
 }
 
 TEST(feedback_session_parse_trims_blank_values)
 {
 	// 値が空白だけの行は「空」として読む（前後の空白を落とすので何も残らない）。
-	const FeedbackSession session = parseFeedbackSession("repo=   \nbranch= feature/x \n");
-	CHECK(session.repo.empty());
-	CHECK_EQ(session.branch, std::string("feature/x"));
+	const FeedbackSession session = parseFeedbackSession("work=   \nifc= /tmp/a.ifc \n");
+	CHECK(session.workPath.empty());
+	CHECK_EQ(session.ifcPath, std::string("/tmp/a.ifc"));
 }
 
 TEST(feedback_session_parse_ignores_bad_numbers)
 {
-	// 数字でない周回数・PR 番号は既定のまま（例外を投げない・0 に潰さない）。
-	const FeedbackSession session = parseFeedbackSession("pr=abc\nround=-1\n");
-	CHECK_EQ(session.pullRequest, 0);
+	// 数字でない周回数は既定のまま（例外を投げない）。
+	const FeedbackSession session = parseFeedbackSession("round=abc\n");
 	CHECK_EQ(session.round, 0);
+	const FeedbackSession negative = parseFeedbackSession("round=-1\n");
+	CHECK_EQ(negative.round, 0);
 }
 
 TEST(feedback_session_reads_crlf)
 {
 	// Windows で手直しされたファイル（CRLF）も読める。
-	const FeedbackSession session = parseFeedbackSession("pr=5\r\nbranch=feature/x\r\n");
-	CHECK_EQ(session.pullRequest, 5);
-	CHECK_EQ(session.branch, std::string("feature/x"));
+	const FeedbackSession session = parseFeedbackSession("round=5\r\nifc=/tmp/a.ifc\r\n");
+	CHECK_EQ(session.round, 5);
+	CHECK_EQ(session.ifcPath, std::string("/tmp/a.ifc"));
 }
 
 TEST(feedback_session_file_round_trip)
@@ -328,7 +319,7 @@ TEST(feedback_session_file_round_trip)
 	CHECK(writeFeedbackSession(path, sample()));
 	FeedbackSession loaded;
 	CHECK(readFeedbackSession(path, loaded));
-	CHECK_EQ(loaded.pullRequest, 123);
+	CHECK_EQ(loaded.round, 3);
 	CHECK_EQ(loaded.ifcPath, std::string("/Users/someone/Documents/物件A.ifc"));
 
 	clearFeedbackSession(path);
@@ -340,7 +331,7 @@ TEST(feedback_session_file_round_trip)
 
 TEST(feedback_session_write_reports_a_place_it_cannot_write)
 {
-	// 書けなくても往復は続けられる（2 周目が走らないだけ）ので、**例外ではなく false**。
+	// 書けなくても取り込みは続けられる（2 周目が走らないだけ）ので、**例外ではなく false**。
 	// ファイルの下のパスは、ディレクトリとしても作れないので確実に失敗する。
 	const std::string file = tempPath("homeskz-feedback-not-a-dir.txt");
 	{
@@ -388,24 +379,35 @@ TEST(feedback_session_default_path_follows_the_platform)
 
 TEST(feedback_session_empty_path_is_refused)
 {
-	// 置き場所が決まらない環境では、黙って諦める（往復は 1 周で終わる）。
+	// 置き場所が決まらない環境では、黙って諦める（記憶を持たずに 1 周で終わる）。
 	FeedbackSession session;
 	CHECK(!readFeedbackSession("", session));
 	CHECK(!writeFeedbackSession("", session));
 	clearFeedbackSession("");
 }
 
+TEST(test_report_sits_next_to_the_memory)
+{
+	// 報告は記憶と同じフォルダに置く（MCP の vw_test_report が本体を入れ替えたあとも読める）。
+	const std::string report = testReportPathFor("/Users/hanako/Library/Application Support/"
+												 "HomeskzIfcImport/feedback.txt");
+	CHECK_EQ(std::filesystem::path(report).filename().string(), std::string("last-round.md"));
+	CHECK_EQ(std::filesystem::path(report).parent_path().filename().string(),
+			 std::string("HomeskzIfcImport"));
+	// 置き場所が分からなければ空（呼び出し側は報告を書かずに結末へ添える）。
+	CHECK(testReportPathFor("").empty());
+}
+
 // ---------------------------------------------------------------------------
-// **実機テストの周がどれになるか**（M25。core/FeedbackSession.h の feedbackRoundKind）。
-// この場合分けが M25 の要点なので、描画側に散らさず無 SDK でここに固定する。
+// **実機テストの周がどれになるか**（M25 / M38。core/FeedbackSession.h の feedbackRoundKind）。
+// この場合分けを描画側に散らさず、無 SDK でここに固定する。
 
 namespace
 {
-	// 「1 周投稿できた」記憶（この 3 つが揃って初めて続きの周を組み立てられる）。
-	FeedbackSession postedOnce()
+	// 「1 周済んだ」記憶（この 2 つが揃って初めて続きの周を組み立てられる）。
+	FeedbackSession ranOnce()
 	{
 		FeedbackSession session;
-		session.send = true;
 		session.round = 1;
 		session.ifcPath = "/tmp/model.ifc";
 		session.lastCommit = "aaaaaaa";
@@ -413,104 +415,40 @@ namespace
 	}
 } // namespace
 
-TEST(feedback_round_kind_continues_when_a_new_build_is_running)
+TEST(feedback_round_kind_continues_with_memory)
 {
-	// 記憶があり、動いているビルドがそれと違う——**これだけが続きの周**である。
-	CHECK(feedbackRoundKind(postedOnce(), "bbbbbbb", /*allowDialogs*/ true) ==
-		  FeedbackRoundKind::ContinueRound);
-	// パレットの周（ダイアログ禁止）でも同じ。ここへ来るのは新しいビルドを入れた直後だけ。
-	CHECK(feedbackRoundKind(postedOnce(), "bbbbbbb", /*allowDialogs*/ false) ==
-		  FeedbackRoundKind::ContinueRound);
+	// メニューからでも MCP からでも、記憶があれば続きの周になる。
+	CHECK(feedbackRoundKind(ranOnce(), /*allowDialogs*/ true) == FeedbackRoundKind::ContinueRound);
+	CHECK(feedbackRoundKind(ranOnce(), /*allowDialogs*/ false) == FeedbackRoundKind::ContinueRound);
 }
 
-TEST(feedback_round_kind_does_not_import_again_on_the_same_build)
+TEST(feedback_round_kind_imports_again_on_the_same_build)
 {
-	// **同じビルドでは取り込まない。** 取り込んでも前の周と同じ数字が並ぶだけで、その
-	// 1 分は最初から無駄である。M24 まではここを「新しい 1 周目」として取り込み直して
-	// おり、パレットが開いている最中にメニューを押した人が同じ round を二重に投稿した
-	// （実機で発生。docs/DEV-NOTES.md M25）。
-	CHECK(feedbackRoundKind(postedOnce(), "aaaaaaa", /*allowDialogs*/ true) ==
-		  FeedbackRoundKind::RearmOnly);
+	// **同じビルドでも取り込む**（M38）。M37 までは RearmOnly で取り込まなかったが、投稿を
+	// やめたので、取り込み直すかは頼んだ側が決める。判断はビルドの sha を見ない。
+	FeedbackSession session = ranOnce();
+	session.lastCommit = "bbbbbbb";
+	CHECK(feedbackRoundKind(session, true) == FeedbackRoundKind::ContinueRound);
 }
 
 TEST(feedback_round_kind_starts_a_first_round_without_memory)
 {
-	CHECK(feedbackRoundKind(FeedbackSession{}, "aaaaaaa", /*allowDialogs*/ true) ==
+	CHECK(feedbackRoundKind(FeedbackSession{}, /*allowDialogs*/ true) ==
 		  FeedbackRoundKind::FirstRound);
-
-	// **記憶として使えるのは 3 つ揃っているときだけ。** どれが欠けても 1 周目に戻る
-	// ——欠けたまま「続き」を組み立てると、宛先も IFC も無いまま走ることになる。
-	FeedbackSession notSending = postedOnce();
-	notSending.send = false;
-	CHECK(feedbackRoundKind(notSending, "bbbbbbb", true) == FeedbackRoundKind::FirstRound);
-
-	FeedbackSession neverPosted = postedOnce();
-	neverPosted.round = 0;
-	CHECK(feedbackRoundKind(neverPosted, "bbbbbbb", true) == FeedbackRoundKind::FirstRound);
-
-	FeedbackSession noFile = postedOnce();
+	// 1 周も済んでいない・IFC が分からない記憶も 1 周目。
+	FeedbackSession neverRan = ranOnce();
+	neverRan.round = 0;
+	CHECK(feedbackRoundKind(neverRan, true) == FeedbackRoundKind::FirstRound);
+	FeedbackSession noFile = ranOnce();
 	noFile.ifcPath.clear();
-	CHECK(feedbackRoundKind(noFile, "bbbbbbb", true) == FeedbackRoundKind::FirstRound);
+	CHECK(feedbackRoundKind(noFile, true) == FeedbackRoundKind::FirstRound);
 }
 
 TEST(feedback_round_kind_refuses_when_it_would_have_to_ask)
 {
-	// パレットの周はダイアログを 1 枚も出せない。尋ねないと始められない場面では
-	// **何もしない**——黙ってファイル選択を出すことも、勝手に始めることもしない。
-	CHECK(feedbackRoundKind(FeedbackSession{}, "aaaaaaa", /*allowDialogs*/ false) ==
+	// MCP（ダイアログ無し）は 1 周目を始められない——IFC と設定はダイアログでしか決まらない。
+	CHECK(feedbackRoundKind(FeedbackSession{}, /*allowDialogs*/ false) ==
 		  FeedbackRoundKind::Refuse);
-	CHECK(feedbackRoundKind(postedOnce(), "aaaaaaa", /*allowDialogs*/ false) ==
-		  FeedbackRoundKind::Refuse);
-}
-
-// ---------------------------------------------------------------------------
-// **同じブランチ名が別の PR で使い回されたとき**（#137 → #138 で実際に起きた）。
-// 記憶の PR が閉じていたら、それは終わった往復で、新しい PR の 1 周目から始める。
-
-TEST(feedback_pull_request_ended_only_on_closed_states)
-{
-	CHECK(feedbackPullRequestEnded("merged"));
-	CHECK(feedbackPullRequestEnded("closed"));
-	CHECK(!feedbackPullRequestEnded("open"));
-	// **確かめられなかった（空）ときは終わったことにしない。** オフラインで記憶を捨てると、
-	// 戻ったときに往復が最初からになる。
-	CHECK(!feedbackPullRequestEnded(""));
-}
-
-TEST(restarted_feedback_session_starts_a_first_round_for_the_new_pull_request)
-{
-	FeedbackSession ended = postedOnce();
-	ended.repo = "owner/private-feedback";
-	ended.anonymize = false;
-	ended.pullRequest = 137;
-	ended.branch = "claude/some-branch";
-	ended.workPath = "/tmp/work.vwx";
-	ended.baselineRecorded = true;
-	ended.baselineLayers = {"共通"};
-	ended.lastCreatedLayers = {"1FL"};
-	ended.lastTally = "柱 10";
-	ended.lastPostedAt = "2026-09-25T00:00:00Z";
-	ended.loop = true;
-
-	const FeedbackSession fresh = restartedFeedbackSession(ended);
-	// 人の好み（宛先のリポジトリと伏せ字）とブランチだけを持ち越す。
-	CHECK(fresh.repo == "owner/private-feedback");
-	CHECK(!fresh.anonymize);
-	CHECK(fresh.branch == "claude/some-branch");
-	// **前の PR を指すものは 1 つも残さない。** PR 番号が残ると、閉じた PR へ投稿し直す。
-	CHECK(fresh.pullRequest == 0);
-	CHECK(fresh.round == 0);
-	CHECK(fresh.lastCommit.empty());
-	CHECK(fresh.workPath.empty());
-	CHECK(!fresh.baselineRecorded);
-	CHECK(fresh.baselineLayers.empty());
-	CHECK(fresh.lastCreatedLayers.empty());
-	CHECK(fresh.lastTally.empty());
-	CHECK(fresh.lastPostedAt.empty());
-	CHECK(!fresh.loop);
-	// 同じビルドが動いていても「回し直すだけ」にならず、1 周目として尋ねる。
-	CHECK(feedbackRoundKind(fresh, "aaaaaaa", /*allowDialogs*/ true) ==
-		  FeedbackRoundKind::FirstRound);
 }
 
 TEST_MAIN();

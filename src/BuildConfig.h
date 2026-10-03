@@ -23,7 +23,6 @@
 #	define PLUGIN_UNIVERSAL_NAME "CExtMenuImportIfc_HomeskzIfcImportDev"
 #	define PLUGIN_UPDATE_UNIVERSAL_NAME "CExtMenuCheckUpdate_MinNanoStructureDev"
 #	define PLUGIN_MCP_UNIVERSAL_NAME "CExtMenuMcpBridge_MinNanoStructureDev"
-#	define PLUGIN_FEEDBACK_PALETTE_UNIVERSAL_NAME "CExtFeedbackPalette_MinNanoStructureDev"
 #	define PLUGIN_MCP_PALETTE_UNIVERSAL_NAME "CExtMcpPalette_MinNanoStructureDev"
 #	define PLUGIN_TEST_UNIVERSAL_NAME "CExtMenuTest_MinNanoStructureDev"
 #else
@@ -32,7 +31,6 @@
 #	define PLUGIN_UNIVERSAL_NAME "CExtMenuImportIfc_HomeskzIfcImport"
 #	define PLUGIN_UPDATE_UNIVERSAL_NAME "CExtMenuCheckUpdate_MinNanoStructure"
 #	define PLUGIN_MCP_UNIVERSAL_NAME "CExtMenuMcpBridge_MinNanoStructure"
-#	define PLUGIN_FEEDBACK_PALETTE_UNIVERSAL_NAME "CExtFeedbackPalette_MinNanoStructure"
 #	define PLUGIN_MCP_PALETTE_UNIVERSAL_NAME "CExtMcpPalette_MinNanoStructure"
 #	define PLUGIN_TEST_UNIVERSAL_NAME "CExtMenuTest_MinNanoStructure"
 #endif

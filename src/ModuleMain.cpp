@@ -9,7 +9,6 @@
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "Extensions/ExtColumnMark.h"
-#include "Extensions/ExtFeedbackPalette.h"
 #include "Extensions/ExtShearWall.h"
 #include "Extensions/ExtTestMenu.h"
 #include "Extensions/ExtMcpMenu.h"
@@ -90,29 +89,20 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuCheckUpdate>(
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
-	// 「MCP ブリッジを表示」コマンド。Claude から図面を読める橋のパレットを出す
-	// （Extensions/ExtMcpMenu.h）。登録だけがここにあり、実処理は本体側。
-	REGISTER_Extension<HomeskzIfcImport::CExtMenuMcpBridge>(
-		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
-
-	// M30 MCP ブリッジを常駐させるモードレスなパレット。**安定版にも登録する**（メニューが
-	// 安定版にもあるため。Extensions/ExtMcpPalette.h）。
-	REGISTER_Extension<HomeskzIfcImport::CExtMcpPalette>(
-		VectorWorks::Extension::GROUPID_ExtensionWebPalettes, action, moduleInfo, iid,
-		inOutInterface, cbp, reply);
-
 #ifdef VW_DEV_BUILD
-	// M25 「実機テストを実行」コマンド。**開発版だけ**——往復（記憶した条件で取り込み直して
-	// PR へ投稿する）はこのコマンドが丸ごと持ち、本番の取り込みコマンドは往復を知らない
+	// M25 「実機テストを実行」コマンド。**開発版だけ**——実機テスト（記憶した条件で図面を
+	// 戻して取り込み直す）はこのコマンドが丸ごと持ち、本番の取り込みコマンドはそれを知らない
 	// （Extensions/ExtTestMenu.h）。安定版はこのクラスを持つがどこにも登録しない。
 	REGISTER_Extension<HomeskzIfcImport::CExtMenuTest>(GROUPID_ExtensionMenu, action, moduleInfo,
 													   iid, inOutInterface, cbp, reply);
 
-	// M24 実機フィードバックの往復を回すモードレスなパレット。**開発版だけ**——往復するのは
-	// PR のビルドであって main の配布物ではない（Extensions/ExtFeedbackPalette.h）。
-	// 登録の枠組みはメニュー・PIO と同じ（グループ ID が違うだけ。SDK リファレンス
-	// Findings「モードレス（非モーダル）なパレット」）。
-	REGISTER_Extension<HomeskzIfcImport::CExtFeedbackPalette>(
+	// 「MCP ブリッジを表示」コマンドと、橋を常駐させるモードレスなパレット（M30）。
+	// **開発版だけ**（M38）——橋はローカルの Claude Code から実機テストを回す開発の道具で、
+	// 取り込み・更新・再起動まで起こせる（Extensions/ExtMcpPalette.h）。安定版はクラスを
+	// 持つがどこにも登録しない。
+	REGISTER_Extension<HomeskzIfcImport::CExtMenuMcpBridge>(
+		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
+	REGISTER_Extension<HomeskzIfcImport::CExtMcpPalette>(
 		VectorWorks::Extension::GROUPID_ExtensionWebPalettes, action, moduleInfo, iid,
 		inOutInterface, cbp, reply);
 #endif

@@ -12,6 +12,9 @@
 #   * 送った順に処理されること（要求ファイル名の連番）、
 #   * vw_launch が Vectorworks を起こし、橋が架かるまで待って一覧の取り直しを促すこと
 #     （起こすものは VW_MCP_APP で代役に差し替える）、
+#   * vw_restart のあと、橋が一度居なくなってまた架かるのを見届けること（M38）、
+#   * 長く走る道具の最中（busy_until）は、印が古びていても「生きている」と見ること、
+#   * プラグインの表の待ち時間（timeoutSeconds）を Claude へ見せないこと、
 #
 # を確かめる。**代役が真似ているのは src/core/Bridge.h の綴りと手順だけ**なので、
 # どちらかを変えたらこのテストが落ちる——それがこのテストの主眼である。
@@ -58,6 +61,8 @@ class FakeVectorworks(threading.Thread):
             "name": "vw_layers",
             "description": "レイヤ一覧",
             "inputSchema": {"type": "object", "properties": {}},
+            # プラグインの表が持つ待ち時間（kTools の timeoutSeconds）。Claude には見せない。
+            "timeoutSeconds": 5,
         },
     ]
 
@@ -67,10 +72,15 @@ class FakeVectorworks(threading.Thread):
         self.daemon = True
         self.stop_flag = threading.Event()
         self.seen = []  # 拾った順（＝送った順のはず）
+        # 再起動の代役: この時刻までは印を書かない（＝Vectorworks が居ない）。
+        self.down_until = 0.0
 
     def run(self):
         os.makedirs(self.spool, exist_ok=True)
         while not self.stop_flag.is_set():
+            if time.time() < self.down_until:
+                time.sleep(0.02)
+                continue
             self._beat()
             for name in sorted(os.listdir(self.spool)):
                 if not name.endswith(".req.json"):
@@ -93,7 +103,7 @@ class FakeVectorworks(threading.Thread):
             pass
 
     def _beat(self):
-        payload = {"plugin": "min-nano_structure", "protocol": 1, "beat": int(time.time())}
+        payload = {"plugin": "min-nano_structureDev", "protocol": 1, "beat": int(time.time())}
         temp = os.path.join(self.spool, "bridge.json.tmp")
         with open(temp, "w", encoding="utf-8") as handle:
             json.dump(payload, handle)
@@ -104,7 +114,15 @@ class FakeVectorworks(threading.Thread):
         if tool == "vw_tools":
             body = {"ok": True, "result": {"tools": self.TOOLS, "protocol": 1}}
         elif tool == "vw_ping":
-            body = {"ok": True, "result": {"plugin": "min-nano_structure", "document_open": True}}
+            body = {"ok": True, "result": {"plugin": "min-nano_structureDev", "document_open": True}}
+        elif tool == "vw_restart":
+            # プラグインは**応答を書いてから**再起動を頼む。代役は印を消して、しばらく黙る。
+            body = {"ok": True, "result": {"requested": True}}
+            self.down_until = time.time() + 2.5
+            try:
+                os.remove(os.path.join(self.spool, "bridge.json"))
+            except OSError:
+                pass  # 消せなくても、印が古びれば同じこと
         elif tool == "vw_layers":
             body = {"ok": True, "result": {"layers": [{"name": "1-FL"}], "count": 1}}
         elif tool == "vw_slow":
@@ -133,7 +151,8 @@ def drive(spool, messages, timeout="30", by_tmpdir=False, extra_env=None, with_n
         env["TMPDIR"] = os.path.dirname(spool.rstrip("/"))
         env["TMP"] = env["TMPDIR"]
         env["TEMP"] = env["TMPDIR"]
-        env["VW_MCP_PLUGIN"] = "min-nano_structure"
+        # **VW_MCP_PLUGIN を渡さない**——既定のプラグイン名（開発版）で探し当てることも押さえる。
+        env.pop("VW_MCP_PLUGIN", None)
     else:
         env["VW_MCP_SPOOL"] = spool
     env["VW_MCP_TIMEOUT"] = timeout
@@ -176,7 +195,7 @@ deadline = time.time() + 30
 while time.time() < deadline and not os.path.exists(stop):
     temp = os.path.join(spool, "bridge.json.tmp")
     with open(temp, "w") as handle:
-        json.dump({"plugin": "min-nano_structure", "protocol": 1, "beat": int(time.time())}, handle)
+        json.dump({"plugin": "min-nano_structureDev", "protocol": 1, "beat": int(time.time())}, handle)
     os.replace(temp, os.path.join(spool, "bridge.json"))
     time.sleep(0.2)
 '''
@@ -312,6 +331,21 @@ def check_spool_search(module, root):
         os.chmod(mine, 0o700)
         check(not module.spool_is_safe(os.path.join(root, "no-such-mcp")), "無い場所は使わない")
 
+        # **長く走る道具の最中は、印が古びていても生きている**（busy_until。M38）。
+        now = int(time.time())
+        def write_status(payload):
+            with open(os.path.join(mine, "bridge.json"), "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+        write_status({"protocol": 1, "beat": now - 100})
+        check(module.Bridge._read_status(mine) is None, "古びた印は動いていない")
+        write_status({"protocol": 1, "beat": now - 100, "busy": "vw_run_test",
+                      "busy_until": now + 600})
+        check(module.Bridge._read_status(mine) is not None, "busy_until が未来なら生きている")
+        write_status({"protocol": 1, "beat": now - 100, "busy": "vw_run_test",
+                      "busy_until": now - 1})
+        check(module.Bridge._read_status(mine) is None, "busy_until を過ぎたら動いていない")
+        os.remove(os.path.join(mine, "bridge.json"))
+
 
 def call(name, arguments=None, request_id=1):
     return {
@@ -397,7 +431,11 @@ def main():
             "**一覧の真実はプラグイン側**（代役が返した 2 つが並ぶ）",
         )
         ping = json.loads(content_text(replies[2]))
-        check_eq(ping["plugin"], "min-nano_structure", "vw_ping の結果が素通しで返る")
+        check_eq(ping["plugin"], "min-nano_structureDev", "vw_ping の結果が素通しで返る")
+        check(
+            all("timeoutSeconds" not in t for t in replies[1]["result"]["tools"]),
+            "プラグインの表の待ち時間は Claude へ見せない",
+        )
         layers = json.loads(content_text(replies[3]))
         check_eq(layers["count"], 1, "vw_layers の結果が素通しで返る")
         check(replies[4]["result"]["isError"] is True, "知らない道具はエラーとして返る")
@@ -452,6 +490,18 @@ def main():
         )
         check(replies[5]["result"]["isError"] is True, "tool の無い vw_call はエラー")
 
+        # --- 再起動を見届ける（M38）-------------------------------------
+        started = time.time()
+        replies = drive(spool, [call("vw_restart", request_id=1)])
+        result = json.loads(content_text(replies[0]))
+        check(replies[0]["result"]["isError"] is False, "再起動して橋が架かり直せば成功")
+        check(result.get("requested") is True, "プラグインの応答（頼んだ）を素通しで返す")
+        check(
+            result.get("after_restart", {}).get("restarted") is True,
+            "一度居なくなって、また架かるのを見届ける",
+        )
+        check(time.time() - started >= 2.0, "居なくなっている間は待つ")
+
         # --- 応答が返らないとき -----------------------------------------
         fake.seen = []
         started = time.time()
@@ -472,8 +522,9 @@ def main():
         # --- 場所を自力で探し当てる -------------------------------------
         # **本番はこの経路。** プラグイン側は自分の一時ディレクトリへ置き、こちらは
         # 候補を順に見て生きた印のある場所を使う（両側で $TMPDIR が食い違いうるため）。
-        # スプールは <一時ディレクトリ>/min-nano_structure-mcp でなければならない。
-        found = os.path.join(root, "min-nano_structure-mcp")
+        # スプールは <一時ディレクトリ>/min-nano_structureDev-mcp でなければならない
+        # （VW_MCP_PLUGIN を渡さないので、既定＝開発版の名前で探す）。
+        found = os.path.join(root, "min-nano_structureDev-mcp")
         os.rename(spool, found)
         found_fake = FakeVectorworks(found)
         found_fake.start()
@@ -497,7 +548,7 @@ def main():
         status = json.loads(content_text(replies[0]))
         check(status["running"] is False, "綴りが違うスプールは見つけない")
         check(
-            any(c.endswith("min-nano_structure-mcp") for c in status["searched"]),
+            any(c.endswith("min-nano_structureDev-mcp") for c in status["searched"]),
             "探した場所を返す（%r）" % status["searched"],
         )
     finally:

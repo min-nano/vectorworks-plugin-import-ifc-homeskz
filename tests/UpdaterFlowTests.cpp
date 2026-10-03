@@ -728,141 +728,6 @@ TEST(dev_silent_check_declined_does_not_install)
 	CHECK_EQ(h.CountScript("do-install"), 0);
 }
 
-// ---------------------------------------------------------------------------
-// 実機フィードバックの往復（UpdateCheckKind::Auto）
-//
-// **尋ねない・報せない・再起動しない。** 往復の最中に呼ばれるので、周ごとにダイアログを
-// 挟むのはこの仕組みが無くそうとしている手間そのものになる（src/UpdaterHost.h の
-// UpdateCheckKind::Auto）。口を開いて false（＝この実行では取り込みへ進むな）を返すのは、
-// **入れたのに効かせられなかったとき**だけ。
-// ---------------------------------------------------------------------------
-
-TEST(dev_auto_check_installs_the_same_branchs_build_without_asking)
-{
-	FakeHost h;
-	h.qDevOut = "installed=run1234\n"
-				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n"
-				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
-	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
-	const bool proceed =
-		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
-
-	CHECK(proceed);			  // そのまま取り込みへ進む
-	CHECK_EQ(h.askCount, 0);  // 尋ねない
-	CHECK_EQ(h.pickCount, 0); // 選ばせない
-	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0)); // 報せない
-	CHECK_EQ(h.restartCount, 0); // 再起動しない
-	CHECK_EQ(h.CountScript("do-install"), 1);
-	CHECK_EQ(h.dropCount, 1); // 本体は降ろす（＝次の周で読み直される）
-	const std::vector<std::string> args = h.DoInstallArgs();
-	if (args.size() == 3)
-		CHECK_EQ(args[1], "https://ex.com/x.zip"); // 同じブランチのほう
-}
-
-TEST(dev_auto_check_is_silent_and_proceeds_when_no_new_build_matches)
-{
-	// **まだ新しいビルドが出ていないだけ。** 人は自分の判断で取り込みを実行している
-	// のだから、黙って通す（往復を回すかどうかはその人が決める）。
-	FakeHost h;
-	h.qDevOut = "installed=run1234\n"
-				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
-	const bool proceed =
-		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
-
-	CHECK(proceed);
-	CHECK_EQ(h.askCount, 0);
-	CHECK_EQ(h.CountScript("do-install"), 0);
-	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
-}
-
-TEST(dev_auto_check_is_silent_and_proceeds_when_offline)
-{
-	// 確認できなかっただけで、取り込みを止める理由にはならない（更新は付随でしかない）。
-	FakeHost h;
-	h.qDevOut = "error=リリース一覧を取得できませんでした。\n";
-	const bool proceed =
-		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
-
-	CHECK(proceed);
-	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
-}
-
-TEST(dev_auto_check_is_silent_and_proceeds_when_the_script_cannot_start)
-{
-	FakeHost h;
-	h.qDevStarts = false;
-	const bool proceed =
-		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
-
-	CHECK(proceed);
-	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
-}
-
-TEST(dev_auto_check_skips_the_import_when_the_shell_changed)
-{
-	// **殻まで変わったら勝手に再起動しない。** 図面を開いたまま往復を回している人を
-	// 落とすわけにいかないので、伝えて取り込みを見送り、判断はその人に委ねる。
-	FakeHost h;
-	h.qDevOut = "installed=run1234\n"
-				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
-	h.doInstallOut = "installed-shell=DIFFERENT\nok";
-	const bool proceed =
-		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
-
-	CHECK(!proceed);
-	CHECK_EQ(h.askCount, 0); // 「再起動しますか？」は出さない
-	CHECK_EQ(h.restartCount, 0);
-	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
-	if (!h.informs.empty())
-		CHECK(h.informs[0][1].find("再起動") != std::string::npos);
-}
-
-TEST(dev_auto_check_skips_the_import_when_the_payload_cannot_be_dropped)
-{
-	// 降ろせなければ古い本体のまま。前の周と同じ結果をもう一度出しても意味が無い。
-	FakeHost h;
-	h.qDevOut = "installed=run1234\n"
-				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
-	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
-	h.dropAnswer = false;
-	const bool proceed =
-		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
-
-	CHECK(!proceed);
-	CHECK_EQ(h.dropCount, 1);
-}
-
-TEST(dev_auto_check_reports_and_skips_the_import_when_the_install_fails)
-{
-	// **入れられなかったときは黙らない。** 尋ねずに入れる約束で呼ばれているのだから、
-	// 入らなかったことは伝える。
-	FakeHost h;
-	h.qDevOut = "installed=run1234\n"
-				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
-	h.doInstallOut = "error=ダウンロードに失敗しました。\n";
-	const bool proceed =
-		RunDevUpdateCheckWith(h, UpdateCheckKind::Auto, "feature/x", "run1234", kRunningShell);
-
-	CHECK(!proceed);
-	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
-	if (!h.informs.empty())
-		CHECK_EQ(h.informs[0][0], "インストールに失敗しました。");
-}
-
-TEST(stable_auto_check_never_installs_without_asking)
-{
-	// **安定版に Auto は無い。** 往復するのは PR のビルドであって main の配布物では
-	// ないので、万一 Auto で呼ばれても Silent と同じ扱い＝必ず尋ねる。
-	FakeHost h;
-	h.qStableOut = "installed=old\nlatest=new\nurl=https://ex.com/s.zip\n";
-	h.askAnswer = false; // 「後で」
-	const bool proceed = RunStableUpdateCheckWith(h, UpdateCheckKind::Auto, kRunningShell);
-
-	CHECK(proceed);
-	CHECK_EQ(h.askCount, 1);
-	CHECK_EQ(h.CountScript("do-install"), 0);
-}
-
 TEST(dev_manual_picker_shows_the_branch_when_the_script_reports_it)
 {
 	// 5 列目があるときは、表示名（"Dev: feature/x (aaa1111)"）ではなくブランチ名を出す
@@ -992,22 +857,22 @@ TEST(install_without_a_shell_line_falls_back_to_restart)
 }
 
 // ---------------------------------------------------------------------------
-// モードレスの往復（M24）が周期的に呼ぶ確認（PollDevBuildWith）。
+// MCP の vw_update が頼む入れ替え（RemoteDevUpdateWith。M38）。
 //
-// **ダイアログを 1 枚も出さず、結末を値で返す。** パレットがその文言を出すので、ここで
-// Inform / Ask を呼ぶとモーダルのダイアログが図面の前に立ちはだかる。
+// **ダイアログを 1 枚も出さず、結末を値で返す。** 誰も見ていない Vectorworks にモーダルの
+// ダイアログを出すと、そこで止まる。再起動するかは頼んだ側（Claude）が決める。
 // ---------------------------------------------------------------------------
 
-TEST(poll_dev_build_installs_the_same_branchs_new_build_silently)
+TEST(remote_update_installs_the_same_branchs_new_build_silently)
 {
 	FakeHost h;
 	h.qDevOut = "installed=run1234\n"
 				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n"
 				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
 	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
-	const DevBuildPollResult r = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
+	const RemoteUpdateResult r = RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "");
 
-	CHECK(r.outcome == DevBuildPoll::Installed);
+	CHECK(r.outcome == RemoteUpdateOutcome::Installed);
 	CHECK_EQ(r.commit, "aaa1111");
 	CHECK_EQ(h.askCount, 0);
 	CHECK_EQ(h.pickCount, 0);
@@ -1020,70 +885,71 @@ TEST(poll_dev_build_installs_the_same_branchs_new_build_silently)
 		CHECK_EQ(args[1], "https://ex.com/x.zip");
 }
 
-TEST(poll_dev_build_waits_when_nothing_new_matches)
+TEST(remote_update_waits_when_nothing_new_matches)
 {
 	FakeHost h;
 	h.qDevOut = "installed=run1234\n"
 				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
-	const DevBuildPollResult r = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
-	CHECK(r.outcome == DevBuildPoll::NoNewBuild);
+	const RemoteUpdateResult r = RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "");
+	CHECK(r.outcome == RemoteUpdateOutcome::NoNewBuild);
 	CHECK_EQ(h.CountScript("do-install"), 0);
 }
 
-TEST(poll_dev_build_uses_the_installed_line_not_the_shells_sha)
+TEST(remote_update_uses_the_installed_line_not_the_shells_sha)
 {
 	// **本体だけを入れ替えたあと。** 殻の sha（run1234）は古いままだが、ディスク上は
-	// もう aaa1111 になっている。殻の sha を基準にすると同じビルドを毎周入れ直す。
+	// もう aaa1111 になっている。殻の sha を基準にすると同じビルドを入れ直す。
 	FakeHost h;
 	h.qDevOut = "installed=aaa1111\n"
 				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
-	const DevBuildPollResult r = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
-	CHECK(r.outcome == DevBuildPoll::NoNewBuild);
+	const RemoteUpdateResult r = RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "");
+	CHECK(r.outcome == RemoteUpdateOutcome::NoNewBuild);
 	CHECK_EQ(h.CountScript("do-install"), 0);
 }
 
-TEST(poll_dev_build_follows_the_installed_branch_not_the_shells)
+TEST(remote_update_follows_the_installed_branch_not_the_shells)
 {
-	// 往復の周期確認も同じ。殻のブランチを基準にすると、手で別のブランチへ乗り換えた
-	// 利用者の図面で、前のブランチのビルドを黙って入れ直してしまう。
+	// 殻のブランチを基準にすると、手で別のブランチへ乗り換えた利用者の図面で、前の
+	// ブランチのビルドを黙って入れ直してしまう。
 	FakeHost h;
 	h.qDevOut = "installed=bbb2222\n"
 				"installed-branch=feature/b\n"
 				"build\tbbb9999\tDev: feature/b (bbb9999)\thttps://ex.com/b9.zip\tfeature/b\n"
 				"build\taaa9999\tDev: feature/a (aaa9999)\thttps://ex.com/a9.zip\tfeature/a\n";
 	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
-	const DevBuildPollResult r = PollDevBuildWith(h, "feature/a", "aaa1111", kRunningShell);
+	const RemoteUpdateResult r = RemoteDevUpdateWith(h, "feature/a", "aaa1111", kRunningShell, "");
 
-	CHECK(r.outcome == DevBuildPoll::Installed);
+	CHECK(r.outcome == RemoteUpdateOutcome::Installed);
 	CHECK_EQ(r.commit, "bbb9999");
 	const std::vector<std::string> args = h.DoInstallArgs();
 	if (args.size() == 3)
 		CHECK_EQ(args[1], "https://ex.com/b9.zip");
 }
 
-TEST(poll_dev_build_reports_a_failed_check_without_a_dialog)
+TEST(remote_update_reports_a_failed_check_without_a_dialog)
 {
 	FakeHost h;
 	h.qDevOut = "error=リリース一覧を取得できませんでした。\n";
-	const DevBuildPollResult r = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
-	CHECK(r.outcome == DevBuildPoll::CheckFailed);
+	const RemoteUpdateResult r = RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "");
+	CHECK(r.outcome == RemoteUpdateOutcome::CheckFailed);
 	CHECK_EQ(r.message, "リリース一覧を取得できませんでした。");
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
 
 	FakeHost h2;
 	h2.qDevStarts = false;
-	CHECK(PollDevBuildWith(h2, "feature/x", "run1234", kRunningShell).outcome ==
-		  DevBuildPoll::CheckFailed);
+	CHECK(RemoteDevUpdateWith(h2, "feature/x", "run1234", kRunningShell, "").outcome ==
+		  RemoteUpdateOutcome::CheckFailed);
 }
 
-TEST(poll_dev_build_reports_install_failure_and_shell_change)
+TEST(remote_update_reports_install_failure_and_shell_change)
 {
 	FakeHost h;
 	h.qDevOut = "installed=run1234\n"
 				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
 	h.doInstallOut = "error=zip を展開できませんでした。\n";
-	const DevBuildPollResult failed = PollDevBuildWith(h, "feature/x", "run1234", kRunningShell);
-	CHECK(failed.outcome == DevBuildPoll::Failed);
+	const RemoteUpdateResult failed =
+		RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "");
+	CHECK(failed.outcome == RemoteUpdateOutcome::Failed);
 	CHECK_EQ(failed.message, "zip を展開できませんでした。");
 	CHECK_EQ(h.dropCount, 0);
 
@@ -1091,8 +957,9 @@ TEST(poll_dev_build_reports_install_failure_and_shell_change)
 	FakeHost h2;
 	h2.qDevOut = h.qDevOut;
 	h2.doInstallOut = "installed-shell=other-shell\nok";
-	const DevBuildPollResult restart = PollDevBuildWith(h2, "feature/x", "run1234", kRunningShell);
-	CHECK(restart.outcome == DevBuildPoll::NeedsRestart);
+	const RemoteUpdateResult restart =
+		RemoteDevUpdateWith(h2, "feature/x", "run1234", kRunningShell, "");
+	CHECK(restart.outcome == RemoteUpdateOutcome::NeedsRestart);
 	CHECK_EQ(restart.commit, "aaa1111");
 	CHECK_EQ(h2.dropCount, 0);
 	CHECK_EQ(h2.restartCount, 0);
@@ -1102,8 +969,43 @@ TEST(poll_dev_build_reports_install_failure_and_shell_change)
 	h3.qDevOut = h.qDevOut;
 	h3.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
 	h3.dropAnswer = false;
-	CHECK(PollDevBuildWith(h3, "feature/x", "run1234", kRunningShell).outcome ==
-		  DevBuildPoll::Failed);
+	CHECK(RemoteDevUpdateWith(h3, "feature/x", "run1234", kRunningShell, "").outcome ==
+		  RemoteUpdateOutcome::Failed);
+}
+
+TEST(remote_update_installs_the_named_branch)
+{
+	// **ブランチを名指しすれば、そのブランチの最新を入れる**（別の PR へ乗り換えるとき）。
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"installed-branch=feature/x\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n"
+				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
+	h.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";
+	const RemoteUpdateResult r =
+		RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "other");
+
+	CHECK(r.outcome == RemoteUpdateOutcome::Installed);
+	CHECK_EQ(r.branch, "other");
+	CHECK_EQ(r.previous, "run1234");
+	CHECK_EQ(r.commit, "bbb2222");
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
+	CHECK_EQ(h.askCount, 0);
+	const std::vector<std::string> args = h.DoInstallArgs();
+	if (args.size() == 3)
+		CHECK_EQ(args[1], "https://ex.com/y.zip");
+}
+
+TEST(remote_update_says_nothing_new_for_an_unknown_branch)
+{
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
+	const RemoteUpdateResult r =
+		RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "no-such-branch");
+	CHECK(r.outcome == RemoteUpdateOutcome::NoNewBuild);
+	CHECK_EQ(r.branch, "no-such-branch");
+	CHECK_EQ(h.CountScript("do-install"), 0);
 }
 
 // ---------------------------------------------------------------------------

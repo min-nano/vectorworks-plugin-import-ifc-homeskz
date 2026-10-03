@@ -25,7 +25,8 @@
 using namespace HomeskzIfcImport::parse;
 using HomeskzIfcImport::core::Document;
 using HomeskzIfcImport::core::DrawCounts;
-using HomeskzIfcImport::parse::kMaxFeedbackCommentBytes;
+using HomeskzIfcImport::parse::keepTail;
+using HomeskzIfcImport::parse::kMaxTestReportBytes;
 using HomeskzIfcImport::parse::TestRoundOutcome;
 
 namespace
@@ -122,171 +123,22 @@ TEST(feedback_tally_diff_ignores_broken_entries)
 // 匿名化
 // ---------------------------------------------------------------------------
 
-TEST(feedback_anonymized_name_is_stable_and_opaque)
+TEST(test_report_starts_with_the_round_and_build)
 {
-	const std::string a = anonymizedFileName("/Users/hanako/Documents/物件A.ifc");
-	const std::string b = anonymizedFileName("/elsewhere/物件A.ifc");
-	// 同じファイル名なら置き場所が変わっても同じ仮名（周回どうしで対象の同一性が分かる）。
-	CHECK_EQ(a, b);
-	// 別のファイルは別の仮名。
-	CHECK(a != anonymizedFileName("/Users/hanako/Documents/物件B.ifc"));
-	// 元の名前は残らない。拡張子は保つ（IFC を取り込んだことは伏せる必要が無い）。
-	CHECK(!contains(a, "物件A"));
-	CHECK(contains(a, ".ifc"));
-	CHECK(contains(a, "model-"));
-}
-
-TEST(feedback_redaction_removes_path_and_user_name)
-{
-	const std::string log = "ファイル: /Users/hanako/Documents/物件A.ifc\n"
-							"ログ: /Users/hanako/Library/Logs/min-nano_structure.log\n"
-							"対象 物件A.ifc を読み込みました\n";
-	const std::string clean = redactText(log, "/Users/hanako/Documents/物件A.ifc");
-	CHECK(!contains(clean, "hanako"));
-	CHECK(!contains(clean, "物件A"));
-	CHECK(contains(clean, "model-"));
-	// 伏せるのは名前だけ。診断の中身（何をしたか）はそのまま残る。
-	CHECK(contains(clean, "読み込みました"));
-}
-
-TEST(feedback_anonymized_name_handles_odd_paths)
-{
-	// 区切りの無い名前（相対パス）でも仮名になる。
-	CHECK(contains(anonymizedFileName("model.ifc"), "model-"));
-	// 末尾が区切りで終わっていてファイル名が取れないときも、名前を作って返す
-	// （**空の仮名を出さない**——伏せたつもりの本名が出るより悪い）。
-	CHECK_EQ(anonymizedFileName("/Users/hanako/"), std::string("model-000000.ifc"));
-	// 拡張子が無ければ .ifc を付ける（取り込んだのが IFC であることは伏せる必要が無い）。
-	CHECK(contains(anonymizedFileName("/tmp/plan"), ".ifc"));
-}
-
-TEST(feedback_redaction_survives_paths_without_a_file_name)
-{
-	// 対象のパスがディレクトリで終わっていても落ちない・止まらない。
-	const std::string clean = redactText("どこかの /Users/hanako/ の中", "/Users/hanako/");
-	CHECK(!contains(clean, "hanako"));
-}
-
-TEST(feedback_redaction_masks_a_trailing_or_doubled_user_segment)
-{
-	// 区切りで終わらないユーザー名（ログの末尾）も伏せる。
-	CHECK(!contains(redactText("home=/Users/hanako", ""), "hanako"));
-	// 区切りが続いただけの箇所は、伏せるものが無いのでそのまま進む（無限に回らない）。
-	CHECK_EQ(redactText("/Users//tmp", ""), std::string("/Users//tmp"));
-}
-
-TEST(feedback_redaction_handles_windows_paths)
-{
-	const std::string clean =
-		redactText("C:\\Users\\Taro\\Desktop\\model.ifc", "C:\\Users\\Taro\\Desktop\\model.ifc");
-	CHECK(!contains(clean, "Taro"));
-	CHECK(!contains(clean, "\\model.ifc"));
-}
-
-// ---------------------------------------------------------------------------
-// 本文
-// ---------------------------------------------------------------------------
-
-TEST(feedback_comment_starts_with_machine_marker)
-{
-	const std::string body = formatFeedbackComment(sampleRound(), sampleDocument(), sampleCounts());
-	// 目印は先頭行。読む側はこれで「プラグインの自動投稿・何周目・どのビルド」を拾う。
-	CHECK(body.starts_with("<!-- homeskz-ifc-feedback v1 round=1 build=a1b2c3d"));
-	CHECK(contains(body, "## 実機フィードバック round 1"));
+	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), sampleCounts());
+	// 見出しで「何周目・どのビルド」を言う。
+	CHECK(body.starts_with("## 実機テスト round 1 — `min-nano_structureDev` a1b2c3d"));
+	CHECK(contains(body, "claude/feedback"));
 	CHECK(contains(body, "**結果: 成功**"));
 	CHECK(contains(body, "| 横架材 | 4 / 4 本 |"));
-}
-
-TEST(feedback_comment_hides_the_file_name_by_default)
-{
-	const std::string body = formatFeedbackComment(sampleRound(), sampleDocument(), sampleCounts());
-	CHECK(!contains(body, "物件A"));
-	CHECK(!contains(body, "hanako"));
-	CHECK(contains(body, "model-"));
-	CHECK(contains(body, "伏せてあります"));
-}
-
-TEST(feedback_style_name_alias_is_stable_and_opaque)
-{
-	const std::string a = anonymizedStyleName("山田設計事務所 A3");
-	// 同じ名前なら毎回同じ仮名（周回どうしで同じスタイルを当てていると読める）。
-	CHECK_EQ(a, anonymizedStyleName("山田設計事務所 A3"));
-	CHECK(a != anonymizedStyleName("山田設計事務所 A2"));
-	CHECK(!contains(a, "山田"));
-	CHECK(contains(a, "style-"));
-	// 空のスタイル（図面枠を置かない）では何も置き換えない。
-	CHECK_EQ(redactText("図面枠: 置かない", "", ""), std::string("図面枠: 置かない"));
-}
-
-TEST(feedback_short_style_name_is_hidden_only_where_it_is_known_to_appear)
-{
-	// 「A3」のような短い名前は、名前が出ると分かっている形でだけ替える。本文まるごとで
-	// 替えると、別の意味の「A3」（用紙の大きさ等）まで仮名に化けて読み違えのもとになる。
-	const std::string alias = anonymizedStyleName("A3");
-	const std::string text = "図面枠（伏図）: スタイル「A3」を 6 枚に置きました。\n"
-							 "用紙: A3 横\n"
-							 "  図面枠スタイル: A3\n"
-							 "  図面枠スタイル: A3 以外";
-	const std::string clean = redactText(text, "", "A3");
-	CHECK(contains(clean, "スタイル「" + alias + "」を 6 枚"));
-	CHECK(contains(clean, "  図面枠スタイル: " + alias + "\n"));
-	// 行末まで名前でない（名前が続きの一部にすぎない）ところは替えない。
-	CHECK(contains(clean, "図面枠スタイル: A3 以外"));
-	CHECK(contains(clean, "用紙: A3 横"));
-
-	// 設定の行が本文の終わりにあっても替える。
-	CHECK_EQ(redactText("図面枠スタイル: 共通", "", "共通"),
-			 "図面枠スタイル: " + anonymizedStyleName("共通"));
-	// 4 字以上の名前は、形に依らずどこでも替える（形の分からない出どころからの漏れを塞ぐ）。
-	CHECK(!contains(redactText("どこかに 山田設計 と出た", "", "山田設計"), "山田設計"));
-}
-
-TEST(feedback_comment_hides_the_title_block_style_name)
-{
-	// 図面枠のスタイル名は利用者の図面のもので、事務所名を含むのが普通（PR #133 round 1 で
-	// 利用者が手で伏せ字へ書き換えていた）。記録・注意・ログの**どこにも**素のまま出さない。
-	const std::string style = "山田設計事務所 A3";
-	Document document = sampleDocument();
-	document.titleBlockStyle = style;
-	DrawCounts counts = sampleCounts();
-	counts.notes = "図面枠（伏図）: スタイル「" + style +
-				   "」を 6 枚に置きました（登録名 \"Title Block Border\"）。\n"
-				   "図面枠（軸組図）: スタイル「" +
-				   style + "」を 8 枚に置きました。";
-	counts.diagnostics = "図面枠スタイル「" + style + "」が見つかりません。";
-	FeedbackRound round = sampleRound();
-	round.log = "設定: 図面枠 = " + style + "\n";
-	const std::string body = formatFeedbackComment(round, document, counts);
-	CHECK(!contains(body, "山田"));
-	// 同じ名前は同じ仮名になる（伏図と軸組図の行で揃う）。
-	const std::string alias = anonymizedStyleName(style);
-	CHECK(contains(body, "スタイル「" + alias + "」を 6 枚"));
-	CHECK(contains(body, "スタイル「" + alias + "」を 8 枚"));
-	CHECK(contains(body, "図面枠のスタイル名"));
-
-	// 伏せない選択なら素の名前のまま（私有リポジトリ向け）。
-	round.anonymize = false;
-	CHECK(contains(formatFeedbackComment(round, document, counts), style));
-}
-
-TEST(feedback_comment_can_show_the_real_name)
-{
-	// 私有リポジトリへ投げるときは伏せない（core::FeedbackSession::anonymize）。
-	FeedbackRound round = sampleRound();
-	round.anonymize = false;
-	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
-	CHECK(contains(body, "物件A.ifc"));
-	CHECK(!contains(body, "伏せてあります"));
 }
 
 TEST(feedback_comment_does_not_carry_the_human_note)
 {
 	// **所見はこの本文に載らない。** 絵を見て気付いたことは人が Claude とのチャットへ
 	// 直接書く——プラグインは所見を訊く仕組みを持たない（docs/DEV-NOTES.md M23）。
-	// 本文はそのことを読む側へ伝える。
-	const std::string body = formatFeedbackComment(sampleRound(), sampleDocument(), sampleCounts());
-	CHECK(!contains(body, "### 実機を見ての所見"));
-	CHECK(contains(body, "チャットへ直接書かれます"));
+	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), sampleCounts());
+	CHECK(!contains(body, "所見"));
 }
 
 TEST(feedback_comment_shows_the_diff_from_the_previous_round)
@@ -295,10 +147,9 @@ TEST(feedback_comment_shows_the_diff_from_the_previous_round)
 	round.round = 2;
 	round.previousCommit = "9f8e7d6";
 	round.previousTally = "横架材:2/4,柱:2/2";
-	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+	const std::string body = formatTestRoundReport(round, sampleDocument(), sampleCounts());
 	CHECK(contains(body, "前の周（round 1 / 9f8e7d6）からの変化"));
 	CHECK(contains(body, "横架材: 2/4 → 4/4"));
-	CHECK(contains(body, "round 3 を投稿します"));
 }
 
 TEST(feedback_comment_says_when_nothing_changed)
@@ -306,7 +157,7 @@ TEST(feedback_comment_says_when_nothing_changed)
 	FeedbackRound round = sampleRound();
 	round.round = 2;
 	round.previousTally = "横架材:4/4,柱:2/2";
-	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+	const std::string body = formatTestRoundReport(round, sampleDocument(), sampleCounts());
 	CHECK(contains(body, "内訳に変化はありません"));
 }
 
@@ -315,14 +166,14 @@ TEST(feedback_comment_shows_the_size_in_kb_or_nothing)
 	// 1 MB 未満は KB で出す。
 	FeedbackRound small = sampleRound();
 	small.bytes = 4096;
-	CHECK(contains(formatFeedbackComment(small, sampleDocument(), sampleCounts()), "4.0 KB"));
+	CHECK(contains(formatTestRoundReport(small, sampleDocument(), sampleCounts()), "4.0 KB"));
 
 	// 大きさが取れなかった（0）ときは括弧ごと出さない——「0 バイトのファイルを
 	// 取り込んだ」と読み違えさせないため。
 	FeedbackRound unknown = sampleRound();
 	unknown.bytes = 0;
 	unknown.seconds = 0.0;
-	const std::string body = formatFeedbackComment(unknown, sampleDocument(), sampleCounts());
+	const std::string body = formatTestRoundReport(unknown, sampleDocument(), sampleCounts());
 	CHECK(!contains(body, "0.0 KB"));
 	CHECK(!contains(body, "所要"));
 }
@@ -333,7 +184,7 @@ TEST(feedback_comment_says_when_there_are_no_commands)
 	const Document empty;
 	DrawCounts counts;
 	counts.valid = true;
-	const std::string body = formatFeedbackComment(sampleRound(), empty, counts);
+	const std::string body = formatTestRoundReport(sampleRound(), empty, counts);
 	CHECK(contains(body, "命令が 1 つも出ていません"));
 	CHECK(contains(body, "対象なし"));
 }
@@ -346,13 +197,11 @@ TEST(feedback_comment_takes_the_baseline_on_the_first_round)
 	counts.existingLayers = {"共通"};
 	FeedbackRound first = sampleRound();
 	first.baselineKnown = false;
-	const std::string body = formatFeedbackComment(first, sampleDocument(), counts);
+	const std::string body = formatTestRoundReport(first, sampleDocument(), counts);
 	CHECK(contains(body, "図面の状態:"));
 	CHECK(contains(body, "取り込み前から在ったレイヤ 1 枚"));
 	CHECK(contains(body, "基準にします"));
 	CHECK(!contains(body, "重ねて描きました"));
-	// **レイヤ名そのものは公開の場へ出さない**（伏せ字の方針と同じ）。
-	CHECK(!contains(body, "共通"));
 }
 
 TEST(feedback_comment_says_the_drawing_was_restored_when_it_matches_the_baseline)
@@ -363,7 +212,7 @@ TEST(feedback_comment_says_the_drawing_was_restored_when_it_matches_the_baseline
 	FeedbackRound later = sampleRound();
 	later.baselineKnown = true;
 	later.baselineLayers = {"共通"};
-	const std::string body = formatFeedbackComment(later, sampleDocument(), counts);
+	const std::string body = formatTestRoundReport(later, sampleDocument(), counts);
 	CHECK(contains(body, "取り込み前の状態へ戻してから実行されています"));
 	CHECK(contains(body, "1 周目と同じ 1 枚"));
 }
@@ -376,7 +225,7 @@ TEST(feedback_comment_flags_a_drawing_that_was_not_restored)
 	FeedbackRound later = sampleRound();
 	later.baselineKnown = true;
 	later.baselineLayers = {"共通"};
-	const std::string body = formatFeedbackComment(later, sampleDocument(), counts);
+	const std::string body = formatTestRoundReport(later, sampleDocument(), counts);
 	CHECK(contains(body, "前の周の図が残ったまま重ねて描きました"));
 	CHECK(contains(body, "レイヤ 2 枚"));
 	CHECK(contains(body, "実装のせいにしないでください"));
@@ -390,7 +239,7 @@ TEST(feedback_comment_notices_a_different_drawing)
 	FeedbackRound later = sampleRound();
 	later.baselineKnown = true;
 	later.baselineLayers = {"共通"};
-	const std::string body = formatFeedbackComment(later, sampleDocument(), counts);
+	const std::string body = formatTestRoundReport(later, sampleDocument(), counts);
 	CHECK(contains(body, "見当たりません"));
 	CHECK(!contains(body, "重ねて描きました"));
 }
@@ -401,16 +250,16 @@ TEST(feedback_comment_handles_a_first_round_on_an_empty_drawing)
 	counts.existingLayers.clear();
 	FeedbackRound first = sampleRound();
 	first.baselineKnown = false;
-	const std::string body = formatFeedbackComment(first, sampleDocument(), counts);
+	const std::string body = formatTestRoundReport(first, sampleDocument(), counts);
 	CHECK(contains(body, "まっさらな図面から取り込みました"));
 }
 
-TEST(feedback_comment_folds_the_ordinary_notes)
+TEST(test_report_shows_the_ordinary_notes)
 {
-	// 平常でも出る記録（用紙の割り付け等）は折り畳む——毎回開いて読むものではない。
+	// 平常でも出る記録（用紙の割り付け等）も載せる（注意とは節を分ける）。
 	DrawCounts counts = sampleCounts();
 	counts.notes = "伏図: 1:50 で 3 面";
-	const std::string body = formatFeedbackComment(sampleRound(), sampleDocument(), counts);
+	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), counts);
 	CHECK(contains(body, "記録（用紙の割り付けなど）"));
 	CHECK(contains(body, "1:50 で 3 面"));
 }
@@ -420,49 +269,61 @@ TEST(feedback_comment_shows_draw_diagnostics_unfolded)
 	DrawCounts counts = sampleCounts();
 	counts.members = 2;
 	counts.diagnostics = "横架材: レイヤが無く置けなかった 2 本";
-	const std::string body = formatFeedbackComment(sampleRound(), sampleDocument(), counts);
+	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), counts);
 	CHECK(contains(body, "### 注意（描画側の異常）"));
 	CHECK(contains(body, "レイヤが無く置けなかった"));
-	// 異常は折り畳まない（読ませたいものを隠さない）。
-	const std::size_t at = body.find("### 注意（描画側の異常）");
-	CHECK(body.rfind("<details>", at) == std::string::npos);
 }
 
 TEST(feedback_comment_trims_an_oversized_log)
 {
 	FeedbackRound round = sampleRound();
 	round.log = std::string(200000, 'x') + "\n最後の行\n";
-	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
-	CHECK(body.size() <= kMaxFeedbackCommentBytes);
+	const std::string body = formatTestRoundReport(round, sampleDocument(), sampleCounts());
+	CHECK(body.size() <= kMaxTestReportBytes);
 	// 削るのは古いほう（結果に近い末尾を残す）。
 	CHECK(contains(body, "最後の行"));
 	CHECK(contains(body, "を省略"));
 }
 
-TEST(feedback_comment_asks_for_one_more_run_after_the_fix)
+// ---------------------------------------------------------------------------
+// **実機テストの結末は、実機テスト自身の言葉で言う**（M25）。取り込みコマンドの完了文言を
+// 借りると、押した人には本番の取り込みが同じことをしているように見える——コマンドを
+// 分けた意味が見た目の上で崩れる（実機の指摘）。
+
+TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
 {
-	// **「もう一度実行してください」と書く。** 待つのをやめた（＝待つあいだ図面が
-	// 見られないので）以上、パレットが開いていない周は人がコマンドを 1 回実行して始まる。
-	// ここを黙ると、読む側（Claude）が「push すれば勝手に回る」と思い込んだままになる。
-	//
-	// **頼むのは「実機テストを実行…」であって本番の取り込みではない**（M25）。この 2 つを
-	// 分けた以上、本番の取り込みを頼んでも往復は動かない。
-	const FeedbackRound round = sampleRound();
-	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
-	CHECK(contains(body, "「実機テストを実行…」をもう一度実行してください"));
-	CHECK(contains(body, "ファイル選択も設定ダイアログも確認も再起動も要りません"));
-	// **取り消しを頼むかどうかは実測で決める**（M25）。前の周が作ったレイヤはプラグインが
-	// 自分で取り除くが、**取り込み前から在ったレイヤへ描いた分は取り除けない**（そのレイヤは
-	// 自分が作ったものではないので消せない）。sampleCounts は undoPartial=false なので、
-	// この周は「戻す必要もありません」と言い切ってよい。
-	CHECK(contains(body, "「取り消し」で戻す必要もありません"));
-	CHECK(!contains(body, "取り除けません"));
+	const std::string done =
+		formatTestRoundResult(TestRoundOutcome::Completed, "round 3（a1b2c3d）");
+	CHECK(contains(done, "実機テストを終えました"));
+	CHECK(contains(done, "round 3（a1b2c3d）"));
+
+	const std::string failed = formatTestRoundResult(TestRoundOutcome::ImportFailed, {});
+	CHECK(contains(failed, "取り込みがエラーで中断しました"));
+	CHECK(contains(failed, "診断ログ"));
+	// 取り込みが中断したのだから「終えました」とは言わない。
+	CHECK(!contains(failed, "終えました"));
+	// PR の話はもうしない（M38）。
+	CHECK(!contains(failed, "PR"));
+
+	const std::string document =
+		formatTestRoundResult(TestRoundOutcome::DocumentFailed, "準備: 開き直せませんでした");
+	CHECK(contains(document, "図面には何も描いていません"));
+	CHECK(contains(document, "準備: 開き直せませんでした"));
+}
+
+TEST(test_round_result_says_how_to_start_the_first_round)
+{
+	// **MCP から 1 周目は起こせない**（IFC と設定はダイアログでしか決まらない）。何をすれば
+	// 続けられるかを、Claude が人へそのまま伝えられる形で言う。
+	const std::string text = formatTestRoundResult(TestRoundOutcome::NotRemembered, {});
+	CHECK(contains(text, "1 周目がまだ済んでいません"));
+	CHECK(contains(text, "「実機テストを実行…」"));
 }
 
 // ---------------------------------------------------------------------------
-// **切り詰めは UTF-8 の文字境界で**（M25）。ここが崩れると壊れたバイト列が本文へ入り、
-// GitHub が 400「Problems parsing JSON」で弾いて**その周の投稿がまるごと落ちる**
-// （実機で発生。round 1・2 が通っていたのは、たまたま境界に落ちていただけ）。
+// **切り詰めは UTF-8 の文字境界で**（M25）。ここが崩れると壊れたバイト列が本文へ入る。
+// PR へ投稿していた頃は GitHub が 400 で弾いて**その周の投稿がまるごと落ちた**（実機で
+// 発生）。いまの読み手（MCP の JSON）も壊れた UTF-8 は受け付けない。
 
 namespace
 {
@@ -497,44 +358,6 @@ namespace
 	}
 } // namespace
 
-// ---------------------------------------------------------------------------
-// **実機テストの結末は、実機テスト自身の言葉で言う**（M25）。取り込みコマンドの完了文言を
-// 借りて後ろへ PR の話を足すと、押した人には本番の取り込みが PR へ投稿しているように
-// 見える——コマンドを分けた意味が見た目の上で崩れる（実機の指摘）。
-
-TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
-{
-	const std::string posted =
-		formatTestRoundResult(TestRoundOutcome::PostFailed, "コメントを投稿できませんでした。");
-	CHECK(contains(posted, "PR へ投稿できませんでした"));
-	CHECK(contains(posted, "コメントを投稿できませんでした。"));
-	// **数字がどこにも残らない状態を作らない。** 投稿できていない以上、内訳を見られるのは
-	// このダイアログだけなので、そこにあることを言う。
-	CHECK(contains(posted, "ログを表示"));
-	CHECK(contains(posted, "PR には載っていません"));
-
-	const std::string failed = formatTestRoundResult(TestRoundOutcome::ImportFailed, {});
-	CHECK(contains(failed, "この周は PR へ送りませんでした"));
-	CHECK(contains(failed, "ログを表示"));
-	// 取り込みが中断したのだから「取り込みは終わりました」とは言わない。
-	CHECK(!contains(failed, "取り込みは終わりました"));
-}
-
-// **走らせないのが正しい周でも、押した人には結末を言う**（M25）。同じビルドでは取り込まない
-// ——数字が変わらないからだが、ダイアログも進捗も出ないと「何も起きていない」と読まれる
-// （実機で「再実行しても往復が始まらない」と読まれた。実際には回り直していた）。
-
-TEST(test_round_result_explains_that_the_same_build_was_not_imported_again)
-{
-	const std::string rearmed = formatTestRoundResult(TestRoundOutcome::Rearmed, "abc1234");
-	CHECK(contains(rearmed, "abc1234"));	  // どのビルドの話かを言う
-	CHECK(contains(rearmed, "前の周と同じ")); // なぜ走らせないのか
-	CHECK(contains(rearmed, "取り込みは行いませんでした"));
-	CHECK(contains(rearmed, "往復は回し直しました")); // 何が起きたのか
-	// **失敗と読ませない。** 走らせないのが正しい周である。
-	CHECK(!contains(rearmed, "できませんでした"));
-}
-
 TEST(feedback_comment_truncates_the_log_on_a_character_boundary)
 {
 	// 日本語だけの長いログ（1 文字 3 バイト）。上限を必ず超える長さにして、切り詰めが
@@ -545,14 +368,14 @@ TEST(feedback_comment_truncates_the_log_on_a_character_boundary)
 		FeedbackRound round = sampleRound();
 		round.preparation = std::string(pad, 'x'); // 予算を 1 バイトずつずらす
 		std::string log;
-		while (log.size() < kMaxFeedbackCommentBytes + 4096)
+		while (log.size() < kMaxTestReportBytes + 4096)
 			log += "あいうえお かきくけこ さしすせそ\n";
 		round.log = log;
 
-		const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+		const std::string body = formatTestRoundReport(round, sampleDocument(), sampleCounts());
 		CHECK(contains(body, "バイトを省略"));
 		CHECK(validUtf8(body));
-		CHECK(body.size() <= kMaxFeedbackCommentBytes);
+		CHECK(body.size() <= kMaxTestReportBytes);
 	}
 }
 
@@ -564,11 +387,11 @@ TEST(feedback_comment_shows_what_the_round_did_to_the_drawing_before_importing)
 	FeedbackRound round = sampleRound();
 	round.preparation =
 		"準備: 前の周が作ったレイヤを取り除きました（デザイン 5/5 枚・シート 3/3 枚）";
-	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+	const std::string body = formatTestRoundReport(round, sampleDocument(), sampleCounts());
 	CHECK(contains(body, "準備: 前の周が作ったレイヤを取り除きました"));
 	// 空なら 1 行も増やさない（1 周目や古い版の記憶）。
 	round.preparation.clear();
-	CHECK(!contains(formatFeedbackComment(round, sampleDocument(), sampleCounts()), "準備:"));
+	CHECK(!contains(formatTestRoundReport(round, sampleDocument(), sampleCounts()), "準備:"));
 }
 
 TEST(feedback_comment_asks_for_undo_only_when_the_round_touched_existing_layers)
@@ -580,24 +403,45 @@ TEST(feedback_comment_asks_for_undo_only_when_the_round_touched_existing_layers)
 	DrawCounts counts = sampleCounts();
 	counts.undoPartial = true;
 	counts.existingLayers = {"共通"};
-	const std::string body = formatFeedbackComment(round, sampleDocument(), counts);
+	const std::string body = formatTestRoundReport(round, sampleDocument(), counts);
 	CHECK(contains(body, "取り除けません"));
-	CHECK(!contains(body, "「取り消し」で戻す必要もありません"));
+	// 取り除ける周（undoPartial=false）は黙る。
+	CHECK(!contains(formatTestRoundReport(round, sampleDocument(), sampleCounts()),
+					"取り除けません"));
 }
 
-TEST(feedback_comment_tells_how_the_automatic_loop_runs_and_stops)
+TEST(test_report_shows_the_file_name_without_hiding_it)
 {
-	// **モードレスの往復（M24）。** パレットが開いていれば次の周は自動で走る。読む側は
-	// 「push すれば来る」と「合図で止められる」の 2 つを本文から拾えなければならない
-	// ——合図の綴りはここが唯一の案内（同梱スクリプトの loop-control が読む形と同じ）。
-	const FeedbackRound round = sampleRound();
-	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
-	CHECK(contains(body, "次の周が自動で走ります"));
-	CHECK(contains(body, "control=stop"));
-	// **生の目印は本文へ置かない。** この本文はプラグイン自身の投稿で、合図を探す側が
-	// これを読む——実機 round 1 で、この案内文が自分の合図として読まれ 1 通目で往復が
-	// 止まった（docs/DEV-NOTES.md M24）。読む側も直したが、書く側でも置かない。
-	CHECK(!contains(body, "<!-- homeskz-ifc-feedback v1 control=stop -->"));
+	// **伏せない**（M38）。報告は利用者の計算機の中だけで読まれる（PR へは投稿しない）ので、
+	// どのファイルを取り込んだかはそのまま見せる。
+	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), sampleCounts());
+	CHECK(contains(body, "物件A.ifc"));
+	CHECK(!contains(body, "model-"));
+	CHECK(!contains(body, "伏せてあります"));
+}
+
+TEST(test_report_carries_no_pull_request_markup)
+{
+	// **PR の作法を持ち込まない**（M38）。目印の HTML コメントも、合図の案内も、
+	// 「push したらもう一度実行して」の頼みも、もう要らない。
+	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), sampleCounts());
+	CHECK(!contains(body, "<!--"));
+	CHECK(!contains(body, "control=stop"));
+	CHECK(!contains(body, "push"));
+}
+
+TEST(keep_tail_keeps_short_text_and_trims_long_text_from_the_front)
+{
+	CHECK_EQ(keepTail("短い\n", 100), std::string("短い\n"));
+	std::string log;
+	for (int i = 0; i < 100; ++i)
+		log += "行 " + std::to_string(i) + "\n";
+	const std::string kept = keepTail(log, 200);
+	CHECK(kept.size() <= 200);
+	CHECK(contains(kept, "行 99"));
+	CHECK(!contains(kept, "行 0\n"));
+	CHECK(contains(kept, "バイトを省略"));
+	CHECK(validUtf8(kept));
 }
 
 TEST_MAIN();

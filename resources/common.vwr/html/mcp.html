@@ -8,8 +8,9 @@
 	閉じても（隠れても）ページとタイマーは生きている（docs/DEV-NOTES.md M24「隠れた
 	パレットは止まらない」）。
 
-	安定版と開発版で同じものを使う（resources/common.vwr。包むときに各 .vwr へ重ねる。
-	CMakeLists.txt）。外部のスクリプトもスタイルも読まない（埋め込みブラウザはオフラインで動く）。
+	置き場所は resources/common.vwr（包むときに各 .vwr へ重ねる。CMakeLists.txt）だが、パレットを
+	登録するのは開発版だけ（M38。src/ModuleMain.cpp）。外部のスクリプトもスタイルも読まない
+	（埋め込みブラウザはオフラインで動く）。
 -->
 <html lang="ja">
 <head>
@@ -32,8 +33,9 @@
 	<div id="phase" class="phase idle">起動しています…</div>
 	<div id="message" class="message"></div>
 	<div id="facts" class="facts"></div>
-	<div class="note">Vectorworks が動いている間、同じ PC の Claude から図面を読めます（読むだけで、
-		図面は変えません）。このパレットは閉じても受け付けを続けます。</div>
+	<div class="note">Vectorworks が動いている間、同じ PC の Claude Code から図面・診断ログ・実機テストの
+		報告を読み、頼まれたときだけ実機テスト・更新・再起動を行います。このパレットは閉じても
+		受け付けを続けます。</div>
 
 <script>
 (function () {
@@ -43,7 +45,7 @@
 	// 起動の最中に本体を読み込みに行かないため。
 	var FIRST_TICK_MS = 3000;
 	// 呼び出し中は次を投げない。**ただし返事が来ないまま固まらせない**——隠れたページは
-	// 応答を受け取れないことがある（往復のパレットで実機に起きた。index.html）。時間で解く。
+	// 応答を受け取れないことがある（M24 の往復のパレットで実機に起きた）。時間で解く。
 	var BUSY_TIMEOUT_MS = 2000;
 	var busy = false;
 	var busySince = 0;
