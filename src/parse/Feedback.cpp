@@ -58,6 +58,36 @@ namespace HomeskzIfcImport::parse
 			return hash;
 		}
 
+		// 鍵付きの仮名に使う FNV-1a（64bit）。**鍵を先に通す**ので、鍵を知らない人には
+		// 内部状態（64bit）が分からず、名前の心当たりから仮名を作り直せない。鍵は 64bit
+		// 以上を前提にする（core::newAnonymizationKey）。
+		std::uint64_t fnv1a64(const std::string& key, const std::string& text)
+		{
+			std::uint64_t hash = 14695981039346656037ULL;
+			auto feed = [&hash](const std::string& part)
+			{
+				for (const char c : part)
+				{
+					hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(c));
+					hash *= 1099511628211ULL;
+				}
+			};
+			feed(key);
+			feed(std::string(1, '\0')); // 鍵と名前の境目（"ab"+"c" と "a"+"bc" を分ける）
+			feed(text);
+			return hash;
+		}
+
+		// 仮名の 6 桁。鍵が無ければ従来どおり名前だけで決める（鍵を持たない古い記憶でも
+		// 同じ仮名が出る）。
+		std::uint32_t aliasHash(const std::string& key, const std::string& text)
+		{
+			if (key.empty())
+				return fnv1a(text);
+			const std::uint64_t hash = fnv1a64(key, text);
+			return static_cast<std::uint32_t>(hash ^ (hash >> 32U));
+		}
+
 		std::string hex6(std::uint32_t value)
 		{
 			std::ostringstream out;
@@ -285,7 +315,7 @@ namespace HomeskzIfcImport::parse
 		return out.str();
 	}
 
-	std::string anonymizedFileName(const std::string& path)
+	std::string anonymizedFileName(const std::string& path, const std::string& key)
 	{
 		const std::string name = fileNameOf(path);
 		if (name.empty())
@@ -293,12 +323,25 @@ namespace HomeskzIfcImport::parse
 		const std::string::size_type dot = name.rfind('.');
 		const std::string stem = (dot == std::string::npos) ? name : name.substr(0, dot);
 		const std::string ext = (dot == std::string::npos) ? std::string(".ifc") : name.substr(dot);
-		return "model-" + hex6(fnv1a(stem)) + ext;
+		return "model-" + hex6(aliasHash(key, stem)) + ext;
 	}
 
-	std::string anonymizedStyleName(const std::string& name)
+	std::string anonymizedStyleName(const std::string& name, const std::string& key)
 	{
-		return "style-" + hex6(fnv1a(name));
+		return "style-" + hex6(aliasHash(key, name));
+	}
+
+	std::string anonymizedDrawingName(const std::string& path, const std::string& key)
+	{
+		const std::string name = fileNameOf(path);
+		if (name.empty())
+			return "drawing-000000";
+		const std::string::size_type dot = name.rfind('.');
+		const bool hasExt = dot != std::string::npos && dot > 0;
+		// **フォルダも混ぜる**——同じ「伏図.vwx」でも物件ごとのフォルダが違えば別の図面
+		// なので、仮名も分ける（IFC はファイル名だけで決めるが、あちらは物件名が名前に入る）。
+		return "drawing-" + hex6(aliasHash(key, path)) +
+			   (hasExt ? name.substr(dot) : std::string());
 	}
 
 	namespace
@@ -348,27 +391,52 @@ namespace HomeskzIfcImport::parse
 		//   2. そのうえで**十分に長い名前**（kMinBareStyleNameChars 字以上）は、本文のどこに
 		//      出ても替える——形の分からない出どころ（将来足される文言）からの漏れを塞ぐ。
 		//      長い名前が別の意味で偶然現れることはまず無いので、読み違えの恐れは小さい。
-		std::string redactStyleName(std::string text, const std::string& name)
+		std::string redactStyleName(std::string text, const std::string& name,
+									const std::string& key)
 		{
 			if (name.empty())
 				return text;
-			const std::string alias = anonymizedStyleName(name);
+			const std::string alias = anonymizedStyleName(name, key);
 			text = replaceAll(text, "「" + name + "」", "「" + alias + "」");
 			text = replaceAtLineEnd(text, kTitleBlockOptionLabel, name, alias);
 			if (utf8Length(name) >= kMinBareStyleNameChars)
 				text = replaceAll(text, name, alias);
 			return text;
 		}
+
+		// 利用者のパスを 1 本、仮名へ替える。**パスまるごと → ファイル名 → 拡張子を除いた名前**
+		// の順（長いほうから。先に短いほうを替えると、長いほうが半端に残る）。拡張子を除いた
+		// 名前は**十分に長いときだけ**替える——「図面」のような短い名前を本文まるごとで
+		// 替えると、別の意味の同じ綴りまで仮名に化ける（スタイル名と同じ理由）。
+		std::string redactPrivatePath(std::string text, const std::string& path,
+									  const std::string& key)
+		{
+			const std::string name = fileNameOf(path);
+			if (path.empty() || name.empty())
+				return text;
+			const std::string alias = anonymizedDrawingName(path, key);
+			text = replaceAll(text, path, alias);
+			text = replaceAll(text, name, alias);
+			const std::string::size_type dot = name.rfind('.');
+			if (dot != std::string::npos && dot > 0)
+			{
+				const std::string stem = name.substr(0, dot);
+				if (utf8Length(stem) >= kMinBareStyleNameChars)
+					text = replaceAll(text, stem, alias.substr(0, alias.rfind('.')));
+			}
+			return text;
+		}
 	} // namespace
 
 	std::string redactText(const std::string& text, const std::string& ifcPath,
-						   const std::string& titleBlockStyle)
+						   const std::string& titleBlockStyle,
+						   const std::vector<std::string>& privatePaths, const std::string& key)
 	{
 		std::string out = text;
 		if (!ifcPath.empty())
 		{
 			const std::string name = fileNameOf(ifcPath);
-			const std::string alias = anonymizedFileName(ifcPath);
+			const std::string alias = anonymizedFileName(ifcPath, key);
 			// **長いほうから順に**置き換える（先に短いほうを消すと、長いほうの一部が
 			// 置き換わって「伏せたつもりのパス」が半端に残る）。
 			out = replaceAll(out, ifcPath, alias);
@@ -379,11 +447,25 @@ namespace HomeskzIfcImport::parse
 		}
 		// 図面枠のスタイル名。**IFC のパスの後に**置き換える——スタイル名がパスの一部と
 		// 重なっていても、パスを丸ごと仮名にし損ねないように。
-		out = redactStyleName(out, titleBlockStyle);
+		out = redactStyleName(out, titleBlockStyle, key);
+		// いま開いている図面など、IFC 以外の利用者のパス。**長いパスから**替える（あるパスが
+		// 別のパスの一部であっても、長いほうを丸ごと仮名にし損ねないように）。
+		std::vector<std::string> paths = privatePaths;
+		std::sort(paths.begin(), paths.end(), [](const std::string& a, const std::string& b)
+				  { return a.size() != b.size() ? a.size() > b.size() : a < b; });
+		for (const std::string& path : paths)
+			out = redactPrivatePath(out, path, key);
 		// ホームディレクトリのユーザー名（ログのパスに必ず出る）。
 		out = maskUserSegment(out, "/Users/", '/');
 		out = maskUserSegment(out, "/home/", '/');
 		out = maskUserSegment(out, "\\Users\\", '\\');
+		// macOS の利用者ごとの一時ディレクトリ（`/var/folders/vy/v8f1…gn/T/`）。名前では
+		// ないが**利用者と機械ごとに決まった値**なので、投稿どうしを結び付ける手掛かりになる。
+		// 2 区画とも伏せる（1 区画目を伏せたあとの綴りを目印にして 2 区画目を伏せる）。
+		out = maskUserSegment(out, "/var/folders/", '/');
+		out = maskUserSegment(out, "/var/folders/…/", '/');
+		// 外部ボリューム名（NAS・外付けディスク）。事務所名を付けていることがある。
+		out = maskUserSegment(out, "/Volumes/", '/');
 		return out;
 	}
 
@@ -481,10 +563,13 @@ namespace HomeskzIfcImport::parse
 
 		// 伏せるかどうかで、載せる名前と本文の作り方が変わる。**判断はここ 1 か所**
 		// （あちこちで if を書くと、必ずどこかで素の値が漏れる）。
-		const std::string shownFile =
-			round.anonymize ? anonymizedFileName(round.ifcPath) : fileNameOf(round.ifcPath);
-		auto clean = [&round, &document](const std::string& text) {
-			return round.anonymize ? redactText(text, round.ifcPath, document.titleBlockStyle)
+		const std::string shownFile = round.anonymize
+										  ? anonymizedFileName(round.ifcPath, round.anonKey)
+										  : fileNameOf(round.ifcPath);
+		auto clean = [&round, &document](const std::string& text)
+		{
+			return round.anonymize ? redactText(text, round.ifcPath, document.titleBlockStyle,
+												round.privatePaths, round.anonKey)
 								   : text;
 		};
 
@@ -601,8 +686,9 @@ namespace HomeskzIfcImport::parse
 		tail << "数字だけで判断が付かないときは、**実機で確かめてほしい点を返信で挙げて**"
 				"ください（絵を見られるのは人だけです）。\n";
 		if (round.anonymize)
-			tail << "<sub>対象ファイル名・ユーザー名・図面枠のスタイル名は伏せてあります"
-					"（同じ入力なら同じ仮名になります）。</sub>\n";
+			tail
+				<< "<sub>対象ファイル名・図面のパス・ユーザー名・図面枠のスタイル名は伏せてあります"
+				   "（同じ入力なら同じ仮名になります）。</sub>\n";
 		const std::string footer = tail.str();
 
 		// 診断ログの全文。**折り畳む**——ふだんは読まないが、要るときは全部要る。

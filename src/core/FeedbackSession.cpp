@@ -10,9 +10,12 @@
 #include "core/Trace.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -94,6 +97,7 @@ namespace HomeskzIfcImport::core
 		out << "branch=" << sanitize(session.branch) << "\n";
 		out << "ifc=" << sanitize(session.ifcPath) << "\n";
 		out << "anon=" << boolText(session.anonymize) << "\n";
+		out << "anonkey=" << sanitize(session.anonKey) << "\n";
 		out << "round=" << session.round << "\n";
 		out << "build=" << sanitize(session.lastCommit) << "\n";
 		out << "tally=" << sanitize(session.lastTally) << "\n";
@@ -168,6 +172,8 @@ namespace HomeskzIfcImport::core
 				session.ifcPath = value;
 			else if (key == "anon")
 				session.anonymize = parseBool(value, session.anonymize);
+			else if (key == "anonkey")
+				session.anonKey = value;
 			else if (key == "round")
 				session.round = parseInt(value, session.round);
 			else if (key == "build")
@@ -362,8 +368,21 @@ namespace HomeskzIfcImport::core
 		FeedbackSession fresh;
 		fresh.repo = std::move(ended.repo);
 		fresh.anonymize = ended.anonymize;
+		fresh.anonKey = std::move(ended.anonKey);
 		fresh.branch = std::move(ended.branch);
 		return fresh;
+	}
+
+	std::string newAnonymizationKey()
+	{
+		// **暗号の質までは要らない**が、推し量れない値である必要はある（時刻や連番だと、
+		// 投稿の時刻から鍵の候補を絞れてしまう）。random_device は OS の乱数源を引く。
+		std::random_device device;
+		std::ostringstream out;
+		out << std::hex << std::setfill('0');
+		for (int i = 0; i < 4; ++i)
+			out << std::setw(8) << static_cast<std::uint32_t>(device());
+		return out.str();
 	}
 
 } // namespace HomeskzIfcImport::core

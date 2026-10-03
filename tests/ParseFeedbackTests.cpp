@@ -183,6 +183,85 @@ TEST(feedback_redaction_handles_windows_paths)
 	CHECK(!contains(clean, "\\model.ifc"));
 }
 
+TEST(feedback_keyed_alias_cannot_be_recomputed_without_the_key)
+{
+	// 鍵なしの仮名は名前だけで決まるので、心当たりのある人が手元で作り直せる。鍵を混ぜた
+	// 仮名は、同じ鍵なら同じ（周回どうしで読める）・鍵が違えば別になる。
+	const std::string key = "00112233445566778899aabbccddeeff";
+	const std::string path = "/Users/hanako/Documents/物件A.ifc";
+	const std::string keyed = anonymizedFileName(path, key);
+	CHECK_EQ(keyed, anonymizedFileName("/elsewhere/物件A.ifc", key));
+	CHECK(keyed != anonymizedFileName(path));
+	CHECK(keyed != anonymizedFileName(path, "ffeeddccbbaa99887766554433221100"));
+	CHECK(contains(keyed, "model-"));
+	CHECK(contains(keyed, ".ifc"));
+	CHECK(anonymizedStyleName("山田設計事務所 A3", key) !=
+		  anonymizedStyleName("山田設計事務所 A3"));
+	// 鍵を混ぜても本文の伏せ字は鍵付きの仮名で揃う。
+	const std::string clean = redactText("対象 物件A.ifc", path, "", {}, key);
+	CHECK(contains(clean, keyed));
+	CHECK(!contains(clean, "物件A"));
+}
+
+TEST(feedback_redaction_hides_the_open_drawing_path)
+{
+	// いま開いている図面のパスは、保存済みなら物件名のフォルダとファイル名を含む。
+	const std::string drawing = "/Volumes/NAS/2026/山田邸/伏図.vwx";
+	const std::string text = "準備: いま開いている図面（" + drawing +
+							 "）は前の周の作業ファイルではないので、採り直しました。\n"
+							 "図面 伏図.vwx を保存しました。";
+	const std::string clean = redactText(text, "", "", {drawing});
+	CHECK(!contains(clean, "山田"));
+	CHECK(!contains(clean, "NAS"));
+	CHECK(!contains(clean, "伏図.vwx"));
+	const std::string alias = anonymizedDrawingName(drawing);
+	CHECK(contains(clean, "（" + alias + "）"));
+	CHECK(contains(alias, "drawing-"));
+	CHECK(contains(alias, ".vwx"));
+	// 同じファイル名でもフォルダが違えば別の図面なので、仮名も分ける。
+	CHECK(alias != anonymizedDrawingName("/Volumes/NAS/2026/佐藤邸/伏図.vwx"));
+	// 拡張子の無い名前（保存前の「名称未設定 1」）には拡張子を付けない。
+	CHECK(!contains(anonymizedDrawingName("/Applications/VW2026/名称未設定 1"), "."));
+	// 短い名前（拡張子を除いて 4 字未満）は本文まるごとでは替えない（別の意味の綴りを守る）。
+	const std::string shortClean =
+		redactText("図面: /Users/x/図面.vwx を開いた。図面の数 3", "", "", {"/Users/x/図面.vwx"});
+	CHECK(contains(shortClean, "図面の数 3"));
+	CHECK(!contains(shortClean, "図面.vwx"));
+}
+
+TEST(feedback_redaction_masks_per_user_temp_and_volume_names)
+{
+	const std::string text =
+		"ログ: /var/folders/vy/v8f1rgd10tjdzvqsplyr9r400000gn/T/min-nano.log\n"
+		"作業: /private/var/folders/vy/v8f1rgd10tjdzvqsplyr9r400000gn/T/w.vwx\n"
+		"外付け: /Volumes/山田事務所NAS/a.ifc\n";
+	const std::string clean = redactText(text, "");
+	CHECK(!contains(clean, "v8f1rgd10tjdzvqsplyr9r400000gn"));
+	CHECK(!contains(clean, "/vy/"));
+	CHECK(!contains(clean, "山田"));
+	// 伏せるのは区画の名前だけで、プラグインのファイル名（診断に要る）は残す。
+	CHECK(contains(clean, "/var/folders/…/…/T/min-nano.log"));
+	CHECK(contains(clean, "/Volumes/…/a.ifc"));
+}
+
+TEST(feedback_comment_hides_private_paths_with_the_key)
+{
+	FeedbackRound round = sampleRound();
+	round.anonKey = "00112233445566778899aabbccddeeff";
+	round.privatePaths = {"/Users/hanako/Desktop/山田邸/伏図.vwx"};
+	round.preparation =
+		"準備: いま開いている図面（/Users/hanako/Desktop/山田邸/伏図.vwx）を採り直しました";
+	round.log = "開いている図面: /Users/hanako/Desktop/山田邸/伏図.vwx\n";
+	const std::string body = formatFeedbackComment(round, sampleDocument(), sampleCounts());
+	CHECK(!contains(body, "山田"));
+	CHECK(!contains(body, "hanako"));
+	CHECK(!contains(body, "物件A"));
+	// 鍵は本文に出さない。
+	CHECK(!contains(body, round.anonKey));
+	CHECK(contains(body, anonymizedFileName(round.ifcPath, round.anonKey)));
+	CHECK(contains(body, anonymizedDrawingName(round.privatePaths[0], round.anonKey)));
+}
+
 // ---------------------------------------------------------------------------
 // 本文
 // ---------------------------------------------------------------------------
