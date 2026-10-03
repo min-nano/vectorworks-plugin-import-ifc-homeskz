@@ -76,6 +76,13 @@ namespace HomeskzIfcImport::core
 		std::string ifcPath;
 		ImportOptions options;
 
+		// **仮名に混ぜる秘密の鍵**（16 進。parse::FeedbackRound::anonKey へ渡す）。最初に
+		// 投稿するときに作り（newAnonymizationKey）、**往復をやり直しても持ち越す**——同じ
+		// 機械では同じ入力が同じ仮名になり、周回や PR をまたいで対象の同一性が読める。
+		// 鍵は投稿には出ない。鍵が無いと、名前の心当たりがある人が手元で同じ計算をして
+		// 仮名の当たりを確かめられる（公開済みの投稿を洗い直して分かった）。
+		std::string anonKey;
+
 		// 投稿する本文から、案件が分かるもの（ファイル名・パス・ユーザー名）を伏せるか。
 		// **既定は伏せる**——PR コメントは公開されるので、既定が「出す」であってはならない。
 		bool anonymize = true;
@@ -173,10 +180,13 @@ namespace HomeskzIfcImport::core
 	bool feedbackPullRequestEnded(const std::string& state);
 
 	// 終わった往復の記憶から、新しい往復の 1 周目に持ち越すものだけを残した記憶を作る。
-	// 持ち越すのは**人の好み**（投稿先のリポジトリと伏せ字の選択）だけで、PR 番号・周回・
+	// 持ち越すのは**人の好み**（投稿先のリポジトリと伏せ字の選択）と仮名の鍵だけで、PR 番号・周回・
 	// 基準・作業ファイル・前の周の内訳は捨てる（前の PR の周と引き比べても意味が無い）。
 	// 返す記憶は send=false なので、feedbackRoundKind は FirstRound を返す。
 	FeedbackSession restartedFeedbackSession(FeedbackSession ended);
+
+	// 仮名の鍵を新しく作る（16 進 32 桁 = 128bit。std::random_device から）。
+	std::string newAnonymizationKey();
 
 	// 記憶を key=value テキストへ（末尾は改行）。**行の順は固定**——差分を取ったときに
 	// 中身の変化だけが見えるようにするため。

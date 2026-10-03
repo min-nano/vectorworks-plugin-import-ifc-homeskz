@@ -29,6 +29,7 @@ using HomeskzIfcImport::core::feedbackRoundKind;
 using HomeskzIfcImport::core::FeedbackSession;
 using HomeskzIfcImport::core::formatFeedbackSession;
 using HomeskzIfcImport::core::kSymbolRoleCount;
+using HomeskzIfcImport::core::newAnonymizationKey;
 using HomeskzIfcImport::core::parseFeedbackSession;
 using HomeskzIfcImport::core::readFeedbackSession;
 using HomeskzIfcImport::core::restartedFeedbackSession;
@@ -48,6 +49,7 @@ namespace
 		session.ifcPath = "/Users/someone/Documents/物件A.ifc";
 		session.workPath = "/tmp/homeskz-work.vwx";
 		session.anonymize = false;
+		session.anonKey = "00112233445566778899aabbccddeeff";
 		session.round = 3;
 		session.lastCommit = "a1b2c3d";
 		session.lastTally = "ストーリ:3/3,通り芯:44/44";
@@ -171,6 +173,9 @@ TEST(feedback_session_round_trips_through_text)
 	// 周の数だけ積み上がる。
 	CHECK_EQ(after.workPath, before.workPath);
 	CHECK_EQ(after.anonymize, before.anonymize);
+	// 仮名の鍵。落ちると周ごとに仮名が変わり、同じ対象だと読めなくなる。
+	CHECK_EQ(after.anonKey, before.anonKey);
+	CHECK(!after.anonKey.empty());
 	CHECK_EQ(after.round, before.round);
 	CHECK_EQ(after.lastCommit, before.lastCommit);
 	CHECK_EQ(after.lastTally, before.lastTally);
@@ -491,11 +496,13 @@ TEST(restarted_feedback_session_starts_a_first_round_for_the_new_pull_request)
 	ended.lastTally = "柱 10";
 	ended.lastPostedAt = "2026-09-25T00:00:00Z";
 	ended.loop = true;
+	ended.anonKey = "0123456789abcdef0123456789abcdef";
 
 	const FeedbackSession fresh = restartedFeedbackSession(ended);
-	// 人の好み（宛先のリポジトリと伏せ字）とブランチだけを持ち越す。
+	// 人の好み（宛先のリポジトリと伏せ字）・仮名の鍵・ブランチだけを持ち越す。
 	CHECK(fresh.repo == "owner/private-feedback");
 	CHECK(!fresh.anonymize);
+	CHECK(fresh.anonKey == "0123456789abcdef0123456789abcdef");
 	CHECK(fresh.branch == "claude/some-branch");
 	// **前の PR を指すものは 1 つも残さない。** PR 番号が残ると、閉じた PR へ投稿し直す。
 	CHECK(fresh.pullRequest == 0);
@@ -511,6 +518,16 @@ TEST(restarted_feedback_session_starts_a_first_round_for_the_new_pull_request)
 	// 同じビルドが動いていても「回し直すだけ」にならず、1 周目として尋ねる。
 	CHECK(feedbackRoundKind(fresh, "aaaaaaa", /*allowDialogs*/ true) ==
 		  FeedbackRoundKind::FirstRound);
+}
+
+TEST(anonymization_key_is_long_hex_and_differs_each_time)
+{
+	const std::string a = newAnonymizationKey();
+	const std::string b = newAnonymizationKey();
+	// 128bit を 16 進で。短いと、名前の心当たりと鍵の総当たりで仮名を作り直せてしまう。
+	CHECK_EQ(a.size(), std::size_t{32});
+	CHECK(a.find_first_not_of("0123456789abcdef") == std::string::npos);
+	CHECK(a != b);
 }
 
 TEST_MAIN();
