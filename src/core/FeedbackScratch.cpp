@@ -94,8 +94,7 @@ namespace HomeskzIfcImport::core
 		// それを使い、別のブランチなら次の番号へ。上限に意味は無く、暴走を止めるだけ。
 		for (int i = 1; i <= 100; ++i)
 		{
-			const fs::path dir =
-				fs::path(root) / (i == 1 ? base : base + "-" + std::to_string(i));
+			const fs::path dir = fs::path(root) / (i == 1 ? base : base + "-" + std::to_string(i));
 			if (fs::is_directory(dir, ec))
 			{
 				if (fs::exists(dir / kScratchBranchFile, ec) && readMarker(dir) == branch)

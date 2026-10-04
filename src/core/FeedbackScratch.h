@@ -59,7 +59,7 @@ namespace HomeskzIfcImport::core
 	// 置き場にあるブランチのフォルダ 1 つ。
 	struct ScratchDir
 	{
-		std::string path;	// 絶対パス
+		std::string path; // 絶対パス
 		std::string branch; // 目印に書いてあるブランチ名（空なら読めなかった）
 	};
 
@@ -89,8 +89,8 @@ namespace HomeskzIfcImport::core
 	struct ScratchCleanup
 	{
 		std::vector<std::string> removedBranches; // 消したブランチ
-		std::vector<std::string> removedPaths;	  // 消したフォルダ（作業ファイルの照合用）
-		std::vector<std::string> kept;			  // 閉じていたが消さなかったもの（理由つき）
+		std::vector<std::string> removedPaths; // 消したフォルダ（作業ファイルの照合用）
+		std::vector<std::string> kept; // 閉じていたが消さなかったもの（理由つき）
 	};
 
 	// candidates（いま動いているブランチを除いたフォルダ）のうち、PR が閉じたものを消す。

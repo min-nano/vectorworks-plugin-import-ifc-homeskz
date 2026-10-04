@@ -155,8 +155,7 @@ TEST(parse_pr_states_leans_towards_keeping_on_conflicting_lines)
 	// 同じブランチに食い違う答えが出たら、消さない側を採る（順序に依らない）。
 	CHECK(parsePrStates("pr-state\tclosed\tb\npr-state\topen\tb\n").at("b") == PrState::Open);
 	CHECK(parsePrStates("pr-state\topen\tb\npr-state\tclosed\tb\n").at("b") == PrState::Open);
-	CHECK(parsePrStates("pr-state\tclosed\tb\npr-state\terror\tb\n").at("b") ==
-		  PrState::Unknown);
+	CHECK(parsePrStates("pr-state\tclosed\tb\npr-state\terror\tb\n").at("b") == PrState::Unknown);
 }
 
 TEST(remove_scratch_dir_removes_a_plain_marked_folder)

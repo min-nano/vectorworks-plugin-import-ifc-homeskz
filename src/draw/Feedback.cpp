@@ -370,14 +370,13 @@ namespace HomeskzIfcImport::draw
 			const std::string active = ActiveDocumentPath();
 			if (SamePath(active, session.workPath))
 			{
-				const std::string parked =
-					FreshTempPath("round-" + std::to_string(session.round));
+				const std::string parked = FreshTempPath("round-" + std::to_string(session.round));
 				if (!SaveActiveDocumentAs(parked))
 				{
 					// 退避できないなら閉じない（未保存の文書は閉じられない。実機確認済み）。
 					// いまの図面はまだ生きているので、従来のレイヤ削除へ回せる。
-					note = "前の周の図面を退避できなかったので開き直しませんでした（" +
-						   parked + "）。いま開いている図面へ描きます";
+					note = "前の周の図面を退避できなかったので開き直しませんでした（" + parked +
+						   "）。いま開いている図面へ描きます";
 					return RoundDocument::Fallback;
 				}
 				// **`CloseDocument` の戻り値で分岐しない。** false を返しても実際には
@@ -402,8 +401,7 @@ namespace HomeskzIfcImport::draw
 			const std::string opened = ActiveDocumentPath();
 			if (SamePath(opened, session.workPath))
 			{
-				note = undoNote + "作業ファイルを開き直しました（" + session.workPath +
-					   "）。";
+				note = undoNote + "作業ファイルを開き直しました（" + session.workPath + "）。";
 				note += closed;
 				// **作業ファイルそのものに前の周の絵が焼き付いていることがある**（実機
 				// round 13。作業ファイルを用意できなかった周の絵が載ったまま基準として
