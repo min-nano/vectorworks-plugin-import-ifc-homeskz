@@ -25,6 +25,10 @@
 //	ユーザー名は伏せ字へ、図面枠のスタイル名も同じく仮名（`style-4c1d09`）へ——スタイル名は
 //	利用者の図面にあるもので、事務所名のような組織・個人を特定できる文字列を含むのが普通
 //	だからである（PR #133 の round 1 で、利用者が投稿後に手で伏せ字へ書き換えていた）。
+//	いま開いている図面のパス（`drawing-8f3a12.vwx`）と、利用者ごとに決まる一時ディレクトリ・
+//	外部ボリューム名も伏せる。**仮名には利用者の機械にだけある秘密の鍵を混ぜる**——鍵が
+//	無いと、心当たりのある名前を手元で同じ計算にかければ当たりを確かめられてしまう
+//	（公開済みの投稿を洗い直して分かった。docs/DEV-NOTES.md「実機フィードバックの伏せ字」）。
 //	数字・要素名・VW の診断は案件ではなくプラグインの話なので残す。
 //	伏せない選択（私有リポジトリへ投げるとき）は core::FeedbackSession::anonymize が持つ。
 //
@@ -73,6 +77,16 @@ namespace HomeskzIfcImport::parse
 		std::string preparation;
 
 		bool anonymize = true; // 案件が分かるものを伏せるか
+
+		// **仮名に混ぜる秘密の鍵**（core::FeedbackSession::anonKey。本文には出さない）。
+		// 鍵が無いと仮名は名前だけで決まるので、「〇〇邸.ifc」のような心当たりのある人が
+		// 手元で同じ計算をすれば**当たりかどうかを確かめられてしまう**。空なら鍵なし。
+		std::string anonKey;
+
+		// IFC のほかに**利用者のものと分かっているパス**（いま開いている図面など）。
+		// 伏せるときは IFC と同じく仮名（`drawing-8f3a12.vwx`）へ替える——保存済みの図面の
+		// パスには物件名のフォルダやファイル名がそのまま入る。
+		std::vector<std::string> privatePaths;
 	};
 
 	// -----------------------------------------------------------------------
@@ -116,15 +130,25 @@ namespace HomeskzIfcImport::parse
 	// **同じ入力なら毎回同じになる仮名**（`model-8f3a12.ifc`）。周回どうしで対象が
 	// 同じであることを読む側が確かめられるよう、ランダムにはしない（ファイル名の
 	// 拡張子を除いた部分のハッシュ）。
-	std::string anonymizedFileName(const std::string& path);
+	// key は仮名に混ぜる秘密の鍵（FeedbackRound::anonKey）。空なら名前だけで決まる。
+	std::string anonymizedFileName(const std::string& path, const std::string& key = std::string());
 
 	// 図面枠のスタイル名の仮名（`style-4c1d09`）。ファイル名と同じく**同じ名前なら毎回
 	// 同じ仮名**にする——周回どうしで「同じスタイルを当てている」ことは読めるように。
-	std::string anonymizedStyleName(const std::string& name);
+	std::string anonymizedStyleName(const std::string& name,
+									const std::string& key = std::string());
+
+	// IFC 以外の利用者のパス（FeedbackRound::privatePaths）の仮名（`drawing-8f3a12.vwx`）。
+	// 拡張子は保ち、無ければ付けない。
+	std::string anonymizedDrawingName(const std::string& path,
+									  const std::string& key = std::string());
 
 	// 本文から案件・個人が分かるものを伏せる。伏せるのは (1) 与えられた IFC のパスと
 	// ファイル名、(2) 図面枠のスタイル名（titleBlockStyle。空なら何もしない）、
-	// (3) ホームディレクトリのユーザー名（`/Users/<名前>` `C:\Users\<名前>`）。
+	// (3) privatePaths のパスとファイル名（いま開いている図面など）、
+	// (4) ホームディレクトリのユーザー名（`/Users/<名前>` `C:\Users\<名前>`）、
+	// (5) 利用者ごとに決まる一時ディレクトリ（`/var/folders/<xx>/<yyyy>/`）と外部ボリューム名
+	// （`/Volumes/<名前>/`）。どちらも名前ではないが、投稿どうしを同じ人・同じ機械へ結び付ける。
 	// **それ以外は触らない**——診断の中身まで削ると、伝えるべきものが伝わらない。
 	//
 	// スタイル名は、名前が出ると分かっている形（「<名前>」と設定の行）では必ず、それ以外の
@@ -134,7 +158,9 @@ namespace HomeskzIfcImport::parse
 	// スタイル名は**描画側の文言を変えずに**ここで置き換える。本番の取り込みのログは
 	// 利用者自身が読むものなので伏せる理由が無く、伏せるのは公開の場へ出すときだけでよい。
 	std::string redactText(const std::string& text, const std::string& ifcPath,
-						   const std::string& titleBlockStyle = std::string());
+						   const std::string& titleBlockStyle = std::string(),
+						   const std::vector<std::string>& privatePaths = {},
+						   const std::string& key = std::string());
 
 	// **PR コメント本文**（Markdown）。先頭に機械可読の目印を置く——このコメントが
 	// プラグインの自動投稿であること、何周目か、どのビルドかを、読む側（Claude）が

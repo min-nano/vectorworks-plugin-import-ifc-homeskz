@@ -484,6 +484,8 @@ namespace HomeskzIfcImport::draw
 			std::string startedAt;
 			std::string log;		 // 診断ログ全文
 			std::string preparation; // 取り込みの前に図面へ何をしたか（1 行）
+			// 本文で伏せる利用者のパス（押したときに開いていた図面。parse::FeedbackRound）
+			std::vector<std::string> privatePaths;
 		};
 
 		// **周ごとに、まっさらな作業ファイルを開き直す。**
@@ -847,7 +849,13 @@ namespace HomeskzIfcImport::draw
 			// **別のブランチの記憶なら使わない。** 別ブランチのビルドに入れ替わったのなら、
 			// それは前の往復の続きではなく、新しい往復の 1 周目である。
 			if (!session.branch.empty() && !branch.empty() && session.branch != branch)
-				return core::FeedbackSession{};
+			{
+				// **仮名の鍵だけは持ち越す**——鍵が変わると、同じ IFC がブランチごとに別の
+				// 仮名になって、PR をまたいで同じ対象だと読めなくなる。
+				core::FeedbackSession fresh;
+				fresh.anonKey = session.anonKey;
+				return fresh;
+			}
 			return session;
 		}
 
@@ -931,6 +939,10 @@ namespace HomeskzIfcImport::draw
 				return false;
 
 			core::FeedbackSession session = plan.session;
+			// **仮名の鍵は最初の投稿で作る。** 投稿できたところで記憶ごと書き戻すので、
+			// 次の周からは同じ鍵（＝同じ仮名）になる。
+			if (session.anonKey.empty())
+				session.anonKey = core::newAnonymizationKey();
 
 			// 本文を組む（無 SDK 側。parse/Feedback）。
 			parse::FeedbackRound round;
@@ -949,6 +961,8 @@ namespace HomeskzIfcImport::draw
 			round.baselineLayers = session.baselineLayers;
 			round.preparation = input.preparation;
 			round.anonymize = session.anonymize;
+			round.anonKey = session.anonKey;
+			round.privatePaths = input.privatePaths;
 
 			const std::string commentBody =
 				parse::formatFeedbackComment(round, *input.document, *input.counts);
@@ -1024,6 +1038,11 @@ namespace HomeskzIfcImport::draw
 
 		const parse::BuildInfo build = currentBuildInfo();
 		core::FeedbackSession session = loadFeedbackSession(build.branch);
+		// **押したときに開いていた図面のパスは、投稿では伏せる**（parse::FeedbackRound::
+		// privatePaths）。準備の行やログに「いま開いている図面（…）」として出るが、保存済みの
+		// 図面なら物件名のフォルダやファイル名がそのまま入っている。前の周の作業ファイル
+		// （プラグインが一時ディレクトリに作ったもの）は利用者のものではないので伏せない。
+		const std::string openedAtStart = ActiveDocumentPath();
 
 		// **記憶の PR が閉じていたら、新しい往復の 1 周目から始める**
 		// （core/FeedbackSession.h の restartedFeedbackSession）。記憶はブランチでしか
@@ -1185,6 +1204,8 @@ namespace HomeskzIfcImport::draw
 		input.startedAt = round.startedAt;
 		input.log = core::trace::text();
 		input.preparation = preparation;
+		if (!openedAtStart.empty() && !SamePath(openedAtStart, session.workPath))
+			input.privatePaths.push_back(openedAtStart);
 
 		std::string postError;
 		if (postFeedbackRound(plan, input, postError))
