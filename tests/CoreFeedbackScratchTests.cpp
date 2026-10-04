@@ -261,8 +261,7 @@ TEST(remove_scratch_dir_refuses_a_mismatched_marker_or_a_folder_outside_the_root
 	CHECK(!removeScratchDir(temp.root(), ScratchDir{unmarked.string(), "claude/x"}, why));
 	CHECK(fs::exists(unmarked / "work-1.vwx"));
 	// フォルダでないもの（ファイル・無いパス）も。
-	CHECK(!removeScratchDir(temp.root(), ScratchDir{(unmarked / "work-1.vwx").string(), "x"},
-							why));
+	CHECK(!removeScratchDir(temp.root(), ScratchDir{(unmarked / "work-1.vwx").string(), "x"}, why));
 	CHECK(!removeScratchDir(temp.root(), ScratchDir{temp.root() + "/missing", "x"}, why));
 }
 
