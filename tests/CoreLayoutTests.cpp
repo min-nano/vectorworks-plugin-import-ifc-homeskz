@@ -625,3 +625,24 @@ TEST(GridShoulderRaisesTheBubbleAboveTheTopDimensions)
 	CHECK(near(gridShoulderAboveDimensions(5.0, 9000.0, 7000.0, 100.0), 5.0, 1e-9));
 	CHECK(near(gridShoulderAboveDimensions(5.0, 7235.0, 7000.0, 0.0), 5.0, 1e-9));
 }
+
+TEST(SectionGroundYIsTheSameAcrossARowAndSitsAboveTheRangeStart)
+{
+	// 高さ範囲 −2000〜9104（余白 1000 込み）の軸組図。下の帯 23mm は 1/125 の余白（8mm）を
+	// 15mm はみ出すので、マスの下端から 15mm 上が高さ範囲の下端、そこから 2000 / 125 = 16mm
+	// 上が GL（Z=0）。
+	const Vec2 content{9880.0, 11104.0};
+	const core::SectionBands bands{29.0, 3.0, 23.0, 29.0};
+	const core::SectionLayout layout =
+		core::sectionLayout(content, a3(), bands, core::kSectionHeightMargin);
+	CHECK(layout.columns >= 2);
+	const double below = std::max(23.0 - (core::kSectionHeightMargin / layout.scale), 0.0);
+	CHECK(near(layout.below, below));
+	const double cellBottom = core::sectionSlotCenter(layout, 0).y - (layout.cell.y / 2.0);
+	const double ground = core::sectionGroundY(layout, 0, -2000.0, 0.0);
+	CHECK(near(ground, cellBottom + below + (2000.0 / layout.scale)));
+	// 同じ段のマスは同じ GL。下の段は段の高さ＋間隔ぶん下。
+	CHECK(near(core::sectionGroundY(layout, 1, -2000.0, 0.0), ground));
+	const double nextRow = core::sectionGroundY(layout, layout.columns, -2000.0, 0.0);
+	CHECK(near(ground - nextRow, layout.cell.y + core::kViewportGap));
+}

@@ -257,6 +257,9 @@ namespace HomeskzIfcImport::core
 	//                    帯が辺ごとに違うので、図はマスの中央ではなく帯の広い側の反対へ寄る
 	//   alignTop       … 段組みを領域の**上端**へ寄せるか（false なら上下の中央）。図面枠を
 	//                    置くときは余りを下へ回す（表題欄は下に在ることが多い。draw/Section）
+	//   below          … マスの下端から断面の高さ範囲の下端までの空き（用紙 mm。下の帯の
+	//                    うち高さ範囲の余白に収まらなかったぶん）。GL を揃える位置
+	//                    （sectionGroundY）に使う
 	struct SectionLayout
 	{
 		double scale = 1.0;
@@ -265,6 +268,7 @@ namespace HomeskzIfcImport::core
 		PaperArea area;
 		Vec2 viewportOffset;
 		bool alignTop = false;
+		double below = 0.0;
 
 		// シートレイヤ 1 枚に並ぶ枚数。
 		std::size_t perSheet() const
@@ -300,6 +304,14 @@ namespace HomeskzIfcImport::core
 	// そのマスで**図（ビューポート）の中心**を合わせる点（用紙 mm）。マスの中心から
 	// viewportOffset だけずらした点で、帯が辺ごとに違っても図と帯がマスにちょうど収まる。
 	Vec2 sectionViewportCenter(const SectionLayout& layout, std::size_t indexInSheet);
+
+	// そのマスで**GL（高さ groundZ。注釈空間の y＝絶対 Z）を置く用紙の y**。マスの下端から
+	// below（下の帯のはみ出し）と「高さ範囲の下端 rangeStart から GL まで」を上がった高さで、
+	// 同じ段のマスでは同じ値になる——全軸組図は同じ高さ範囲・同じ縮尺なので、ここへ GL を
+	// 合わせると段ごとに GL が揃う（ご要望）。描画側はビューポートの位置（1025＝GL の
+	// 用紙 y。SDK リファレンス Findings「Viewports」#200）をこれへ合わせる。
+	double sectionGroundY(const SectionLayout& layout, std::size_t indexInSheet, double rangeStart,
+						  double groundZ);
 
 	// viewports 枚の軸組図に要るシートレイヤの枚数（0 枚なら 0）。
 	std::size_t sectionSheetCount(const SectionLayout& layout, std::size_t viewports);

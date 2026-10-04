@@ -491,7 +491,16 @@ namespace HomeskzIfcImport::draw
 			if (arrange && !measured)
 				++missingPlacement;
 			else if (arrange)
+			{
 				delta = core::sectionViewportCenter(layout, slot) - drawnCenter;
+				// **縦は GL を揃える**（ご要望）。測った外接は通りごとに違う（映る架構の高さ・
+				// 通り芯の符号の高さ）ので、その中心で合わせると同じ段でも GL がずれた（実機）。
+				// ビューポートの位置（1025）が注釈の Z=0 の用紙 y そのもの（SDK リファレンス
+				// Findings「Viewports」#200）なので、それを段ごとに同じ高さへ合わせる。全軸組図は
+				// 同じ高さ範囲・同じ縮尺なので、Z=0 が揃えば GL も揃う。
+				const WorldPt position = VWViewportObj(viewport).GetPosition();
+				delta.y = core::sectionGroundY(layout, slot, startHeight, 0.0) - position.y;
+			}
 			// 図面ラベルもタグと同じく**動かす前に**注釈へ置く（上記 ★）。寄せる点は建物の
 			// 最下点の左右の中央（注釈空間。core::sectionLabelAnchor）で、そこから図の下の
 			// 寸法の帯の外まで下げる（core::sectionLabelDrop）。

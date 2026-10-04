@@ -209,6 +209,7 @@ namespace HomeskzIfcImport::core
 			}
 		}
 		layout.cell = cellAt(layout.scale, layout.viewportOffset);
+		layout.below = std::max(bands.bottom - (margin / layout.scale), 0.0);
 
 		// 1 段に並ぶ枚数。間隔は「枚数 − 1」個ぶんなので、幅に間隔 1 つを足してから
 		// 「1 枚＋間隔」で割ると枚数になる。**必ず 1 枚は置く**（1 枚も入らない大きさでも
@@ -250,6 +251,14 @@ namespace HomeskzIfcImport::core
 	Vec2 sectionViewportCenter(const SectionLayout& layout, std::size_t indexInSheet)
 	{
 		return sectionSlotCenter(layout, indexInSheet) + layout.viewportOffset;
+	}
+
+	double sectionGroundY(const SectionLayout& layout, std::size_t indexInSheet, double rangeStart,
+						  double groundZ)
+	{
+		const double cellBottom = sectionSlotCenter(layout, indexInSheet).y - (layout.cell.y / 2.0);
+		const double scale = layout.scale > 0.0 ? layout.scale : 1.0;
+		return cellBottom + layout.below + ((groundZ - rangeStart) / scale);
 	}
 
 	std::size_t sectionSheetCount(const SectionLayout& layout, std::size_t viewports)
