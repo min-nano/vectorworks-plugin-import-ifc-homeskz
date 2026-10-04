@@ -697,6 +697,21 @@ namespace HomeskzIfcImport::core
 		return dimensionBand(below) + kSectionLabelGap;
 	}
 
+	bool sectionTopDimensionReach(const ViewportCommand& viewport, double scale, double& reach)
+	{
+		bool any = false;
+		for (const DimensionChainCommand& chain : viewport.dimensions)
+		{
+			if (chain.axis != DimensionAxis::Horizontal || chain.side <= 0)
+				continue;
+			const double top = dimensionLineCoord(chain.base, chain.side, chain.tier, scale) +
+							   (kDimensionTextAllowance * scale);
+			reach = any ? std::max(reach, top) : top;
+			any = true;
+		}
+		return any;
+	}
+
 	SectionBands sectionBands(const std::vector<SectionCommand>& sections, bool gridBubbles)
 	{
 		// 図の右端に根元がある、とみなす遊び（注釈空間・モデル mm）。
@@ -735,9 +750,8 @@ namespace HomeskzIfcImport::core
 			bands.right = std::max(bands.right, std::max(dimensionBand(right),
 														 haveLevels ? kLevelLineOvershoot : 0.0));
 			bands.bottom = std::max(bands.bottom, dimensionBand(bottom) + label);
-			bands.top =
-				std::max(bands.top, std::max(dimensionBand(top),
-											 gridBubbles ? kSectionGridBubbleAllowance : 0.0));
+			bands.top = std::max(bands.top, dimensionBand(top) +
+												(gridBubbles ? kSectionGridBubbleAllowance : 0.0));
 		}
 		return bands;
 	}

@@ -750,14 +750,23 @@ TEST(SectionDimensionsCoverColumnsLevelsAndOffStandardBeams)
 	if (columns != nullptr)
 		CHECK(columns->base <= 0.0);
 
-	// 左: GL 0・1FL 500・2FL 3300・軒高 6000 に、横架材天端 464・3264 が加わる。
-	const DimensionChainCommand* beams = findChain(chains, DimensionAxis::Vertical, -1, 0);
+	// 左の 1 段目: 各階の FL から横架材天端まで（1FL 500〜464・2FL 3300〜3264）を 1 本ずつ。
+	// GL〜土台天端・FL〜上階の横架材天端のような基準をまたぐ寸法は出さない。
+	std::vector<const DimensionChainCommand*> drops;
+	for (const DimensionChainCommand& chain : chains)
+	{
+		if (chain.axis == DimensionAxis::Vertical && chain.side == -1 && chain.tier == 0)
+			drops.push_back(&chain);
+	}
+	CHECK(drops.size() == 2);
+	if (drops.size() == 2)
+	{
+		CHECK(isChain(*drops[0], DimensionAxis::Vertical, {464.0, 500.0}, -5000.0, -1, 0));
+		CHECK(isChain(*drops[1], DimensionAxis::Vertical, {3264.0, 3300.0}, -5000.0, -1, 0));
+	}
+	// 左の 2 段目: GL 0・1FL 500・2FL 3300・軒高 6000 の間隔。
 	const DimensionChainCommand* levels = findChain(chains, DimensionAxis::Vertical, -1, 1);
-	CHECK(beams != nullptr);
 	CHECK(levels != nullptr);
-	if (beams != nullptr)
-		CHECK(isChain(*beams, DimensionAxis::Vertical, {0.0, 464.0, 500.0, 3264.0, 3300.0, 6000.0},
-					  -5000.0, -1, 0));
 	if (levels != nullptr)
 		CHECK(isChain(*levels, DimensionAxis::Vertical, {0.0, 500.0, 3300.0, 6000.0}, -5000.0, -1,
 					  1));
@@ -767,7 +776,9 @@ TEST(SectionDimensionsCoverColumnsLevelsAndOffStandardBeams)
 	CHECK(offStandard != nullptr);
 	if (offStandard != nullptr)
 		CHECK(isChain(*offStandard, DimensionAxis::Vertical, {3164.0, 3264.0}, -4545.0, 1, 0));
-	CHECK(chains.size() == 4);
+	// 上階の柱も小屋束も無いので、図の上には何も出さない。
+	CHECK(findChain(chains, DimensionAxis::Horizontal, 1, 0) == nullptr);
+	CHECK(chains.size() == 5);
 }
 
 TEST(SectionDimensionsMergeOffStandardBeamsOfTheSameHeight)
@@ -821,7 +832,151 @@ TEST(SectionDimensionsPlaceMergedBeamHeightOnTheLongestMember)
 	CHECK(offStandard != nullptr);
 	if (offStandard != nullptr)
 		CHECK(isChain(*offStandard, DimensionAxis::Vertical, {3164.0, 3264.0}, -4090.0, 1, 0));
-	CHECK(chains.size() == 4);
+	CHECK(chains.size() == 5);
+}
+
+TEST(SectionDimensionsPutUpperColumnsAndKoyazukaAboveTheDrawing)
+{
+	// 1 階の柱 0 / 910 / 1820 に対し、2 階の柱は 0 / 455 / 1820（455 が 1 階と合わない）。
+	// 通し柱（1to3）は 1 階・2 階の両方に数える。小屋束は 2 本（600・1820）。
+	Document document = sectionDocument();
+	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 0.0}));
+	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 455.0}));
+	document.columns.push_back(makeColumn("1to3-柱", Vec2{0.0, 1820.0}));
+	ColumnCommand koyazuka = makeColumn("2to2.5-柱", Vec2{0.0, 600.0});
+	koyazuka.structuralUse = core::kStructuralUseKoyazuka;
+	document.columns.push_back(koyazuka);
+	koyazuka.position = Vec2{0.0, 1820.0};
+	document.columns.push_back(koyazuka);
+	// 部材の無い通り芯（y=1365）は測点にしない。
+	document.grids.push_back(makeGrid("Y1.5", Vec2{-1000.0, 1365.0}, Vec2{2820.0, 1365.0}));
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+
+	// 下: 1 階の柱だけ（2 階の 455・小屋束・通り芯 1365 は入らない）。
+	const DimensionChainCommand* bottom = findChain(chains, DimensionAxis::Horizontal, -1, 0);
+	CHECK(bottom != nullptr);
+	if (bottom != nullptr)
+		CHECK(sameValues(bottom->stops, {-5000.0, -4090.0, -3180.0}));
+
+	// 上の列の根元はこの図に映る架構の上端＝切断面に乗る母屋の天端 4500（建物全体の上端＝
+	// 軒高 6000 ではない）。
+	const double top = 4500.0;
+	// 上の 1 段目: 2 階の柱すべて（1 階と重なる 0・1820 も含む）。2 段目: 小屋束に、
+	// 小屋束が立つ 2 階の外壁芯（2 階の柱の両端 0・1820）を足したもの。
+	const DimensionChainCommand* upper = findChain(chains, DimensionAxis::Horizontal, 1, 0);
+	CHECK(upper != nullptr);
+	if (upper != nullptr)
+		CHECK(isChain(*upper, DimensionAxis::Horizontal, {-5000.0, -4545.0, -3180.0}, top, 1, 0));
+	const DimensionChainCommand* posts = findChain(chains, DimensionAxis::Horizontal, 1, 1);
+	CHECK(posts != nullptr);
+	if (posts != nullptr)
+		CHECK(isChain(*posts, DimensionAxis::Horizontal, {-5000.0, -4400.0, -3180.0}, top, 1, 1));
+}
+
+TEST(SectionDimensionsSkipUpperColumnsThatMatchTheFloorBelow)
+{
+	// 2 階の柱がすべて 1 階の柱の上にあれば、図の上に 2 階の列は出さない。小屋束は 1 本
+	// でも外壁芯（2 階の柱の両端）から押さえる。
+	Document document = sectionDocument();
+	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 0.0}));
+	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 1820.0}));
+	ColumnCommand koyazuka = makeColumn("2to2.5-柱", Vec2{0.0, 600.0});
+	koyazuka.structuralUse = core::kStructuralUseKoyazuka;
+	document.columns.push_back(koyazuka);
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+	const DimensionChainCommand* posts = findChain(chains, DimensionAxis::Horizontal, 1, 0);
+	CHECK(posts != nullptr);
+	if (posts != nullptr)
+		CHECK(sameValues(posts->stops, {-5000.0, -4400.0, -3180.0}));
+	CHECK(findChain(chains, DimensionAxis::Horizontal, 1, 1) == nullptr);
+	CHECK(chains.size() == 6);
+}
+
+TEST(SectionDimensionsIncludeWhereAlongBeamsMeetCrossingBeams)
+{
+	// 1 階の土台（1-横架材天端）が y=0〜1365 に沿い、y=1365 で直交する 1 階の土台に
+	// ぶつかる。柱の無い 1365 も下の列の測点になる。y=1365〜1600 の土台は y=1600 で
+	// **2 階の**直交材の下を通るだけなので、1600 は数えない（階が違う）。沿う材の端に
+	// 無い切り口（y=700 を横切る 1 階の材）も数えない。
+	Document document = sectionDocument();
+	document.members.push_back(
+		makeMember("1-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1365.0}, 464.0));
+	document.members.push_back(
+		makeMember("1-横架材天端", Vec2{0.0, 1365.0}, Vec2{0.0, 1600.0}, 464.0));
+	document.members.push_back(
+		makeMember("1-横架材天端", Vec2{-910.0, 1365.0}, Vec2{910.0, 1365.0}, 464.0));
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{-910.0, 1600.0}, Vec2{910.0, 1600.0}, 3264.0));
+	document.members.push_back(
+		makeMember("1-横架材天端", Vec2{-910.0, 700.0}, Vec2{910.0, 700.0}, 464.0));
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+	const DimensionChainCommand* bottom = findChain(chains, DimensionAxis::Horizontal, -1, 0);
+	CHECK(bottom != nullptr);
+	if (bottom != nullptr)
+		CHECK(sameValues(bottom->stops, {-5000.0, -4090.0, -3635.0, -3180.0}));
+}
+
+TEST(SectionDimensionsMeasureRoofPostsFromTheBuildingPerimeter)
+{
+	// 屋根の階（軒高ストーリ＝3 階）に立つ柱は小屋束と同じ列。建物の外周芯（屋根の階より
+	// 下の柱の両端 0・1820）から押さえる。
+	Document document = sectionDocument();
+	document.columns.push_back(makeColumn("3to3.5-柱", Vec2{0.0, 1000.0}));
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+	const DimensionChainCommand* posts = findChain(chains, DimensionAxis::Horizontal, 1, 0);
+	CHECK(posts != nullptr);
+	if (posts != nullptr)
+		CHECK(sameValues(posts->stops, {-5000.0, -4000.0, -3180.0}));
+	CHECK(findChain(chains, DimensionAxis::Horizontal, 1, 1) == nullptr);
+}
+
+TEST(SectionDimensionsStopAtTheOuterWallNotTheNearbyGrid)
+{
+	// 外壁芯（柱 1775）の 45mm 外に通り芯 Y2（1820）がある（い通りの 8通りの形）。外壁の
+	// 土台の端（1775）は通り芯へ寄せず、通り芯の上の切り口（1820）も最外周に足さない
+	// （45 を出さない）。
+	Document document;
+	document.stories = twoStoreyStories();
+	document.grids = smallGrid();
+	document.columns = {makeColumn("1to2-柱", Vec2{0.0, 0.0}),
+						makeColumn("1to2-柱", Vec2{0.0, 910.0}),
+						makeColumn("1to2-柱", Vec2{0.0, 1775.0})};
+	document.members = {
+		makeMember("1-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1775.0}, 464.0),
+		makeMember("1-横架材天端", Vec2{-910.0, 1775.0}, Vec2{910.0, 1775.0}, 464.0),
+		makeMember("1-横架材天端", Vec2{-910.0, 1820.0}, Vec2{910.0, 1820.0}, 464.0)};
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+	const DimensionChainCommand* bottom = findChain(chains, DimensionAxis::Horizontal, -1, 0);
+	CHECK(bottom != nullptr);
+	if (bottom != nullptr)
+		CHECK(sameValues(bottom->stops, {-5000.0, -4090.0, -3225.0}));
+}
+
+TEST(SectionTopDimensionsSitOnThisSectionsFrame)
+{
+	// 切断面を横切る傾いた材（棟へ向かう登り梁。y=0〜1820 の断面を x=−910→910 で横切り、
+	// 天端 4000→5000）の切り口の高さ（中央＝4500）と、切断面に乗る材の天端の高い方が
+	// 根元になる。切断面から離れた高い材（y=9000 の 7000）は数えない。
+	Document document = sectionDocument();
+	document.members.erase(document.members.begin() + 2); // 母屋（4500）を外す
+	MemberCommand rising =
+		makeMember("2-横架材天端", Vec2{-910.0, 900.0}, Vec2{910.0, 900.0}, 4000.0);
+	rising.endElevation = 5000.0;
+	document.members.push_back(rising);
+	document.members.push_back(
+		makeMember("2-横架材天端", Vec2{3000.0, 9000.0}, Vec2{4000.0, 9000.0}, 7000.0));
+	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 455.0}));
+	const std::vector<DimensionChainCommand> chains =
+		parse::buildSectionDimensionCommands(document, xSection());
+	const DimensionChainCommand* upper = findChain(chains, DimensionAxis::Horizontal, 1, 0);
+	CHECK(upper != nullptr);
+	if (upper != nullptr)
+		CHECK(near(upper->base, 4500.0));
 }
 
 TEST(SectionLevelMarksNameGlFloorsAndEaves)
@@ -846,7 +1001,7 @@ TEST(SectionLevelMarksNameGlFloorsAndEaves)
 		// 図の左端（高さの寸法列の根元と同じ）と右端（柱 1820 → −3180）。
 		CHECK(near(marks[i].x, -5000.0));
 		CHECK(near(marks[i].right, -3180.0));
-		// 左の高さの列は 2 段（横架材天端を含む列・GL/FL/軒高の間隔）なので最も外は段 1。
+		// 左の高さの列は 2 段（FL〜横架材天端・GL/FL/軒高の間隔）なので最も外は段 1。
 		CHECK(marks[i].dimensionTier == 1);
 	}
 }
@@ -868,7 +1023,7 @@ TEST(SectionDimensionsAndLevelMarksReachCrossingMembers)
 	// 柱の範囲の内側の切り口は、下の列へ足さない（押さえるのは最外周だけ）。
 	document.members.push_back(
 		makeMember("2-横架材天端", Vec2{-910.0, 455.0}, Vec2{910.0, 455.0}, 3264.0));
-	// 外側の切り口の近く（20mm）に通り芯がある。下の列はその通り芯の値を採る。
+	// 外側の切り口の近く（20mm）に通り芯がある。下の列は通り芯へ寄せず、切り口の芯のまま。
 	document.grids.push_back(makeGrid("Y0", Vec2{-1000.0, -480.0}, Vec2{2820.0, -480.0}));
 	const SectionCommand section = xSection();
 
@@ -886,12 +1041,12 @@ TEST(SectionDimensionsAndLevelMarksReachCrossingMembers)
 	CHECK(levels != nullptr);
 	if (levels != nullptr)
 		CHECK(near(levels->base, -5552.5));
-	// 下の列は柱・束の位置に、その面の最外周の切り口（左は通り芯 Y0 の −5480、右は材の芯の
+	// 下の列は柱・束の位置に、その面の最外周の切り口（左は材の芯の −5500、右は材の芯の
 	// −2500）を足す。内側の切り口（−4545）は足さない。
 	const DimensionChainCommand* columns = findChain(chains, DimensionAxis::Horizontal, -1, 0);
 	CHECK(columns != nullptr);
 	if (columns != nullptr)
-		CHECK(sameValues(columns->stops, {-5480.0, -5000.0, -4090.0, -3180.0, -2500.0}));
+		CHECK(sameValues(columns->stops, {-5500.0, -5000.0, -4090.0, -3180.0, -2500.0}));
 }
 
 TEST(SectionWithOnlyCrossingMembersHasNoDimensions)
