@@ -260,7 +260,9 @@ TEST(members_are_cached_and_match_the_plain_call)
 	CHECK(!plain.empty());
 	for (std::size_t i = 0; i < first.size() && i < plain.size(); ++i)
 	{
-		CHECK_EQ(first[i].layer, plain[i].layer);
+		// 軒桁は伏図レベルへ振り分けるときに専用レイヤへ移る（parse/PlanLevel）。このモデルは
+		// 階ごとに高さが 1 つなので、それ以外のレイヤは組み立てたままと同じ。
+		CHECK_EQ(parse::beamGroupLayer(first[i].layer), plain[i].layer);
 		CHECK_EQ(first[i].memberId, plain[i].memberId);
 		CHECK(near(first[i].elevation, plain[i].elevation));
 		CHECK(near(first[i].start.x, plain[i].start.x));

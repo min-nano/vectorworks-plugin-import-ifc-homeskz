@@ -1398,6 +1398,28 @@ TEST(validate_rejects_sheet_with_empty_hidden_class_name)
 	CHECK(!core::validateDocument(document));
 }
 
+TEST(validate_rejects_sheet_with_empty_grayed_layer_name)
+{
+	// グレーで重ねるレイヤ（母屋伏図の軒桁）も名前が無ければ弾く。0 枚は妥当。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	sheet.viewport.grayedLayers = {"R-軒桁"};
+	document.sheets.push_back(sheet);
+	CHECK(core::validateDocument(document));
+	document.sheets.front().viewport.grayedLayers.emplace_back();
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_sheet_grayed_layer_also_shown)
+{
+	// 同じレイヤを表示とグレーの両方に挙げない（どちらのつもりかが命令から読めない）。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	sheet.viewport.grayedLayers = {sheet.viewport.layers.front()};
+	document.sheets.push_back(sheet);
+	CHECK(!core::validateDocument(document));
+}
+
 TEST(validate_accepts_sheet_without_drawing_label)
 {
 	// 図面タイトル・図番は空でも描ける（ラベルが空になるだけ）。

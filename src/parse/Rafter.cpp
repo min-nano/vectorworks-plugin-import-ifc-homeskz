@@ -10,6 +10,7 @@
 #include "parse/Context.h"
 #include "parse/IfcAttr.h"
 #include "parse/IfcGeometry.h"
+#include "parse/PlanLevel.h"
 #include "parse/Story.h"
 #include "parse/StructuralClass.h"
 
@@ -328,12 +329,20 @@ namespace HomeskzIfcImport::parse
 			const std::string layer = storyLayerName(i, story.isTop, kLevelTaruki);
 			// 支持点が乗る横架材天端の絶対 Z（最上階は軒高＝オフセット 0）。
 			const double beamTopZ = beamTopElevation(story);
-			// 桁幅の参照先は同じ階の横架材だけ（レイヤ接頭辞 "{n}-" で絞る）。
+			// 桁幅の参照先は同じ階の横架材だけ（レイヤ接頭辞 "{n}-" で絞る）。登り梁の span
+			// レイヤ（"3to4-登り梁"。parse/PlanLevel）は接頭辞が無いので、from の伏図レベルが
+			// 属する階で見る。
 			const std::string layerPrefix = storyLayerPrefix(i, story.isTop) + "-";
 			std::vector<core::MemberCommand> storyMembers;
 			for (const core::MemberCommand& member : members)
 			{
-				if (member.layer.starts_with(layerPrefix))
+				double from = 0.0;
+				double to = 0.0;
+				const bool sameStory =
+					parseSpanLayer(member.layer, core::kLevelNoboribari, from, to)
+						? storyOfOrdinal(context.planLevels(), from) == i
+						: member.layer.starts_with(layerPrefix);
+				if (sameStory)
 					storyMembers.push_back(member);
 			}
 

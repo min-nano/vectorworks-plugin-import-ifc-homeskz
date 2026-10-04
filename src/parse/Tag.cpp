@@ -188,27 +188,36 @@ namespace HomeskzIfcImport::parse
 
 	std::string memberLevelNote(const core::MemberCommand& member,
 								const std::vector<StoryInfo>& stories,
-								const std::vector<long long>& standardHeights)
+								const std::vector<long long>& standardHeights,
+								const std::vector<PlanLevel>& levels)
 	{
-		return memberLevelNoteParts(member, stories, standardHeights).text;
+		return memberLevelNoteParts(member, stories, standardHeights, levels).text;
 	}
 
 	LevelNote memberLevelNoteParts(const core::MemberCommand& member,
 								   const std::vector<StoryInfo>& stories,
-								   const std::vector<long long>& standardHeights)
+								   const std::vector<long long>& standardHeights,
+								   const std::vector<PlanLevel>& levels)
 	{
 		if (member.hipOrValley)
 			return {};
 		// 階はレイヤ名の接頭辞（"2-横架材天端(FL-872)" → "2"）から引く。伏図レベルの印は
-		// 接頭辞の後ろなので、外さなくても接頭辞は変わらない。
+		// 接頭辞の後ろなので、外さなくても接頭辞は変わらない。登り梁の span レイヤ
+		// （"3to4-登り梁"）は from の伏図レベルが属する階（parse/Story がその階にレベルを
+		// 作る。描画側のタグの式も「レイヤが属する階」から測る）。
 		const std::size_t dash = member.layer.find('-');
 		if (dash == std::string::npos)
 			return {};
 		const std::string prefix = member.layer.substr(0, dash);
+		double spanFrom = 0.0;
+		double spanTo = 0.0;
+		const bool span = !levels.empty() &&
+						  parseSpanLayer(member.layer, core::kLevelNoboribari, spanFrom, spanTo);
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
 			const StoryInfo& story = stories[i];
-			if (storyLayerPrefix(i, story.isTop) != prefix)
+			if (span ? storyOfOrdinal(levels, spanFrom) != i
+					 : storyLayerPrefix(i, story.isTop) != prefix)
 				continue;
 			const long long fl = std::llround(story.elevation);
 			const long long low = std::llround(std::min(member.elevation, member.endElevation));
@@ -250,12 +259,13 @@ namespace HomeskzIfcImport::parse
 	}
 
 	void attachTagCommands(core::Document& document, const std::vector<StoryInfo>& stories,
-						   const std::vector<long long>& standardHeights)
+						   const std::vector<long long>& standardHeights,
+						   const std::vector<PlanLevel>& levels)
 	{
 		// 注記は材ごとに 1 度だけ求め、その材のタグ（伏図・軸組図）すべてへ配る。
 		std::vector<LevelNote> notes(document.members.size());
 		for (std::size_t i = 0; i < document.members.size(); ++i)
-			notes[i] = memberLevelNoteParts(document.members[i], stories, standardHeights);
+			notes[i] = memberLevelNoteParts(document.members[i], stories, standardHeights, levels);
 		const auto withNotes = [&notes](std::vector<core::TagCommand> tags)
 		{
 			for (core::TagCommand& tag : tags)

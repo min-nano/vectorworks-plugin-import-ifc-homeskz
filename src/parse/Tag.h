@@ -130,10 +130,14 @@ namespace HomeskzIfcImport::parse
 	//     材だけが目に留まるように）
 	//   * 隅木・谷木（垂木に近い材で、高さは要らない。MemberCommand::hipOrValley）
 	//   * 階を特定できない材（レイヤ名が階の規約に合わない）
+	// 階はレイヤ名の接頭辞（"2-横架材天端"）から引く。登り梁の span レイヤ
+	// （"{from}to{to}-登り梁"。parse/PlanLevel の noboribariSpan）は接頭辞が無いので、from の
+	// 伏図レベルが属する階から引く（levels が要る。渡さなければ階を特定できない）。
 	// 高さは mm に丸めて比べる（伏図レベルと同じ。parse/PlanLevel）。
 	std::string memberLevelNote(const core::MemberCommand& member,
 								const std::vector<StoryInfo>& stories,
-								const std::vector<long long>& standardHeights);
+								const std::vector<long long>& standardHeights,
+								const std::vector<PlanLevel>& levels = {});
 
 	// 高さの注記と、それを部材の高さに連動させるときの基準の名前（core::TagCommand::note /
 	// noteDatum）。datum は注記を添える材すべてに入る（"2FL" / "軒高"）——描画側はタグの
@@ -145,12 +149,14 @@ namespace HomeskzIfcImport::parse
 	};
 	LevelNote memberLevelNoteParts(const core::MemberCommand& member,
 								   const std::vector<StoryInfo>& stories,
-								   const std::vector<long long>& standardHeights);
+								   const std::vector<long long>& standardHeights,
+								   const std::vector<PlanLevel>& levels = {});
 
 	// 文書中の全ビューポート（伏図・軸組図）へタグ命令を割り当てる。**sheets / sections が
 	// 確定した後**に呼ぶ（parse/BuildDocument の最後）。stories・standardHeights を渡すと各タグに
 	// 高さの注記（memberLevelNote）を添える。渡さなければ注記なし。
 	void attachTagCommands(core::Document& document);
 	void attachTagCommands(core::Document& document, const std::vector<StoryInfo>& stories,
-						   const std::vector<long long>& standardHeights);
+						   const std::vector<long long>& standardHeights,
+						   const std::vector<PlanLevel>& levels = {});
 } // namespace HomeskzIfcImport::parse

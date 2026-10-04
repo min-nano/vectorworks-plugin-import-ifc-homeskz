@@ -49,12 +49,14 @@ namespace HomeskzIfcImport::draw
 		Sheet = 2,	// シート（プレゼンテーション）レイヤ
 	};
 
-	// SetViewportLayerVisibility の表示種別。**グレー（2）は使わない**——対象外のレイヤを
-	// グレーにすると図に薄く残る。
+	// SetViewportLayerVisibility の表示種別。**対象外のレイヤにグレー（2）は使わない**——
+	// 図に薄く残る。グレーは、薄く残したいレイヤ（命令の grayedLayers。母屋伏図の軒桁）に
+	// だけ使う。
 	enum class LayerVisibility : short
 	{
 		Visible = 0,
 		Hidden = 1,
+		Grayed = 2,
 	};
 
 	// SetViewportClassVisibility の表示種別（SDK の EClassVisibility。VWFC/VWObjects/
@@ -789,7 +791,8 @@ namespace HomeskzIfcImport::draw
 	//
 	// 表示レイヤは「まず全部隠してから、命令に挙げたものだけ表示へ戻す」——ビューポートは
 	// 既定でドキュメントの表示状態を引き継ぐため、挙げていないレイヤが映り込む。グレー表示
-	// （2）は薄く残るので使わず、必ず非表示（1）にする。
+	// （2）は薄く残るので対象外のレイヤには使わず、必ず非表示（1）にする。命令の
+	// grayedLayers に挙がったレイヤだけをグレーにする（母屋伏図に軒桁を薄く重ねる）。
 	//
 	// **投影の作り直しは「表示レイヤを絞った後・最後の更新の前」**に行う（上の
 	// ViewportProjection）。作り直しは更新を 1 回挟むので、レイヤを絞る前に行うと図面の

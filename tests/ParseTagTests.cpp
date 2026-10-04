@@ -17,6 +17,7 @@
 #include "TestFramework.h"
 
 #include "core/Document.h"
+#include "core/ImportOptions.h"
 #include "parse/Context.h"
 #include "parse/Loader.h"
 #include "parse/Story.h"
@@ -418,6 +419,17 @@ TEST(LevelNoteCarriesTheLinkedDatum)
 		memberLevelNoteParts(noteMember("2-横架材天端", 3531.0, 3531.0), stories, standard);
 	CHECK(none.text.empty());
 	CHECK(none.datum.empty());
+	// 登り梁の span レイヤ（"{from}to{to}-登り梁"）は接頭辞で階が引けないので、from の伏図
+	// レベルが属する階から引く（伏図レベル: 1 階 1・2 階 2〜3・屋根 4）。伏図レベルを渡さ
+	// なければ階を特定できず添えない。
+	const std::vector<parse::PlanLevel> levels = parse::buildPlanLevels(
+		stories, {{572}, {2699, 3531}, {6374}}, HomeskzIfcImport::core::ImportOptions{});
+	const auto spanned = memberLevelNoteParts(noteMember("2to3.5-登り梁", 3531.0, 2699.0), stories,
+											  standard, levels);
+	CHECK_EQ(spanned.text, std::string("(2FL -872~-40)"));
+	CHECK_EQ(spanned.datum, std::string("2FL"));
+	CHECK(memberLevelNoteParts(noteMember("2to3.5-登り梁", 3531.0, 2699.0), stories, standard)
+			  .text.empty());
 	// 引用符を含む階名は番号で呼ぶ（基準名も同じ）。
 	std::vector<StoryInfo> quoted = stories;
 	quoted[1].name = "2\"FL";

@@ -8,6 +8,7 @@
 #include "core/ImportOptions.h"
 #include "parse/Joint.h"
 #include "parse/StructuralClass.h"
+#include "parse/Story.h"
 
 #include <algorithm>
 #include <array>
@@ -234,10 +235,11 @@ namespace HomeskzIfcImport::parse
 			{
 				const MemberGeom& b = geoms[j];
 				// 横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた材
-				// （"2-横架材天端(FL-872)"）も同じ階の横架材どうしなので、伏図レベルの印を
-				// 外して比べる（parse/PlanLevel。仕口の parse/Joint と同じ）。
-				if (!b.valid || core::stripPlanLevelTag(members[j].layer) !=
-									core::stripPlanLevelTag(members[i].layer))
+				// （"2-横架材天端(FL-872)"）も、軒桁の専用レイヤの材（"2-軒桁"）も同じ階の
+				// 横架材どうしなので、伏図レベルの印を外し、軒桁を横架材レイヤへ読み替えて比べる
+				// （parse/PlanLevel・parse/Story。仕口の parse/Joint と同じ）。
+				if (!b.valid || core::stripPlanLevelTag(beamGroupLayer(members[j].layer)) !=
+									core::stripPlanLevelTag(beamGroupLayer(members[i].layer)))
 					continue;
 				if (std::abs(core::cross(a.axis, b.axis)) >= kSpliceParallelTol)
 					continue;
@@ -259,7 +261,8 @@ namespace HomeskzIfcImport::parse
 						const SplicePiece pieceB{&members[j], &b, &endB};
 
 						SpliceCandidate candidate;
-						candidate.command.layer = members[i].layer;
+						// 軒桁の継手も横架材レイヤへ（仕口と同じ。parse/Joint）。
+						candidate.command.layer = beamGroupLayer(members[i].layer);
 						candidate.command.symbol = symbol;
 						candidate.command.position = Vec2{(endA.point.x + endB.point.x) / 2.0,
 														  (endA.point.y + endB.point.y) / 2.0};
