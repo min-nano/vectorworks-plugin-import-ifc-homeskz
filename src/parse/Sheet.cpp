@@ -29,6 +29,8 @@
 #include "parse/StructuralClass.h"
 
 #include <algorithm>
+#include <set>
+#include <tuple>
 #include <string>
 #include <utility>
 #include <vector>
@@ -100,6 +102,30 @@ namespace HomeskzIfcImport::parse
 		return layers;
 	}
 
+	namespace
+	{
+		// 登り梁の span レイヤ（"{from}to{to}-登り梁"。parse/PlanLevel の noboribariSpan）。
+		// 柱と同じく、切断を範囲に含むものを伏図に映す（spanLayersAtCut）。
+		std::vector<ColumnSpan>
+		collectNoboribariSpans(const std::vector<core::MemberCommand>& members)
+		{
+			// (from, to, レイヤ名) の昇順・重複なし（入力の並びに依らない）。
+			std::set<std::tuple<double, double, std::string>> found;
+			for (const core::MemberCommand& member : members)
+			{
+				double from = 0.0;
+				double to = 0.0;
+				if (parseSpanLayer(member.layer, kLevelNoboribari, from, to))
+					found.emplace(from, to, member.layer);
+			}
+			std::vector<ColumnSpan> spans;
+			spans.reserve(found.size());
+			for (const auto& [from, to, layer] : found)
+				spans.push_back(ColumnSpan{from, to, layer});
+			return spans;
+		}
+	} // namespace
+
 	std::vector<core::SheetCommand> buildFoundationSheetCommands(Context& context)
 	{
 		// 基礎が無ければ表示すべきレイヤ（"F-底盤" ほか）自体が作られないので伏図も作らない
@@ -144,6 +170,7 @@ namespace HomeskzIfcImport::parse
 		const std::vector<core::ShearWallCommand>& shearWalls = context.shearWalls();
 		const std::vector<core::FloorCommand>& floors = context.floors();
 		const std::vector<core::MemberCommand>& members = context.members();
+		const std::vector<ColumnSpan> noboribariSpans = collectNoboribariSpans(members);
 
 		std::vector<core::SheetCommand> commands;
 		commands.reserve(planLevels.size());
@@ -157,6 +184,11 @@ namespace HomeskzIfcImport::parse
 			// その伏図レベルの横架材レイヤ（一般階＝横架材天端・最上階＝軒高。標準でない
 			// 高さは "(FL-…)" の付いたレイヤ）。
 			std::vector<std::string> layers{planLevelBeamLayer(level, story)};
+			// 軒桁は専用レイヤに分けてある（母屋伏図に薄く重ねるため。parse/PlanLevel）ので、
+			// 横架材レイヤと一緒に映す。
+			if (const std::string eaves = planLevelLayer(level, story, kLevelNokigeta);
+				anyMemberOnLayer(members, eaves))
+				layers.push_back(eaves);
 
 			// 切断レベル（その伏図レベルの通し番号 + 0.25）を span が含む柱レイヤ。span の
 			// 番号も伏図レベルの通し番号なので（parse/Column）、この伏図の横架材の上に立つ柱
@@ -189,11 +221,10 @@ namespace HomeskzIfcImport::parse
 				anyShearWallOnLayer(shearWalls, shearLayer))
 				layers.push_back(shearLayer);
 
-			// 登り梁は**水下側**の伏図レベルの伏図に映す（ご要望。parse/PlanLevel が水下側の
-			// 伏図レベルのレイヤへ分けてある）。母屋伏図には映さない（下）。
-			if (const std::string noboribariLayer = planLevelLayer(level, story, kLevelNoboribari);
-				anyMemberOnLayer(members, noboribariLayer))
-				layers.push_back(noboribariLayer);
+			// 登り梁はこの伏図レベルの高さを跨ぐものを映す（ご要望。parse/PlanLevel の
+			// noboribariSpan が span レイヤへ分けてある。切断を範囲に含むもの）。
+			const std::vector<std::string> noboribariLayers = spanLayersAtCut(noboribariSpans, cut);
+			layers.insert(layers.end(), noboribariLayers.begin(), noboribariLayers.end());
 
 			if (!isTop)
 			{
@@ -233,6 +264,7 @@ namespace HomeskzIfcImport::parse
 		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns());
 		const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
 		const std::vector<core::MemberCommand>& members = context.members();
+		const std::vector<ColumnSpan> noboribariSpans = collectNoboribariSpans(members);
 
 		// 番号は 基礎伏図（1）＋柱梁伏図（伏図レベルの数）の次から。**柱梁伏図は基礎の
 		// 有無に関わらず 2 から振る**ので、ここも基礎の有無に依存しない。
@@ -257,6 +289,9 @@ namespace HomeskzIfcImport::parse
 			// 重ねると母屋より低い材が母屋と同じ図に並んで高さの関係が直感に反する。どの階も
 			// 標準の伏図レベルを必ず 1 つ持つ（parse/PlanLevel の collectBeamHeights /
 			// buildPlanLevels）ので、登り梁はどれかの柱梁伏図に必ず出る。
+			// ただし**上端がその階のいちばん上の伏図レベルの高さ以上の登り梁**は母屋伏図に
+			// 映す（ご要望。軒桁より上の登り梁は母屋伏図に描かれるほうが自然）。span レイヤ
+			// （parse/PlanLevel の noboribariSpan）の範囲が母屋伏図の切断を含むもの（下）。
 			const std::vector<const PlanLevel*> storyLevels = storyPlanLevels(planLevels, i);
 			if (const std::string moyaLayer = storyLayerName(i, isTop, kLevelMoya);
 				anyMemberOnLayer(members, moyaLayer))
@@ -273,6 +308,8 @@ namespace HomeskzIfcImport::parse
 			const double cut = top + kMoyaPlanCutOffset - 1.0;
 			const std::vector<std::string> spanLayers = spanLayersAtCut(spans, cut);
 			layers.insert(layers.end(), spanLayers.begin(), spanLayers.end());
+			const std::vector<std::string> noboribariLayers = spanLayersAtCut(noboribariSpans, cut);
+			layers.insert(layers.end(), noboribariLayers.begin(), noboribariLayers.end());
 
 			// 切断位置の直下の伏図記号レイヤ（M12）。母屋伏図ではこれが「母屋を支える
 			// 小屋束の位置」を示す平面記号になる（例 1 階母屋伏図＝切断 2.75 →
@@ -287,8 +324,24 @@ namespace HomeskzIfcImport::parse
 			std::string number = std::to_string(baseNumber + seq);
 			++seq;
 			// 柱梁伏図と同じく凡例を載せる（母屋伏図に映るシンボルも同じ形で集まる）。
-			commands.push_back(makeSheet(core::PlanKind::Moya, std::move(number), std::move(title),
-										 std::move(layers), true));
+			core::SheetCommand sheet = makeSheet(core::PlanKind::Moya, std::move(number),
+												 std::move(title), std::move(layers), true);
+			// 同じ階の軒桁を薄く重ねる（ご要望: 登り梁が取り付く相手を見せる。寸法は
+			// parse/Dimension がその交点を押さえる）。軒桁だけのレイヤなので、仕口・継手・
+			// 小屋梁は出ない（parse/Joint・parse/Splice は横架材レイヤへ置く）。軒桁も伏図
+			// レベルごとのレイヤへ分かれている（parse/PlanLevel）ので、その階の分を全部。
+			std::vector<std::string> eaves{storyLayerName(i, isTop, kLevelNokigeta)};
+			for (const PlanLevel* level : storyLevels)
+			{
+				if (!level->standard)
+					eaves.push_back(planLevelLayer(*level, stories[i], kLevelNokigeta));
+			}
+			for (const std::string& layer : eaves)
+			{
+				if (anyMemberOnLayer(members, layer))
+					sheet.viewport.grayedLayers.push_back(layer);
+			}
+			commands.push_back(std::move(sheet));
 		}
 		return commands;
 	}

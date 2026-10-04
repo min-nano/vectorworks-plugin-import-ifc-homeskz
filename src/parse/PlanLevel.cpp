@@ -8,6 +8,7 @@
 #include "parse/PlanLevel.h"
 #include "parse/Context.h"
 #include "parse/Sheet.h"
+#include "parse/StructuralClass.h"
 
 #include <algorithm>
 #include <cmath>
@@ -239,6 +240,55 @@ namespace HomeskzIfcImport::parse
 		return suffix + "）";
 	}
 
+	bool noboribariSpan(const core::MemberCommand& member, const std::vector<PlanLevel>& levels,
+						std::size_t story, double& from, double& to)
+	{
+		const std::vector<const PlanLevel*> storyLevels = storyPlanLevels(levels, story);
+		if (storyLevels.empty())
+			return false;
+		const double top = core::memberTopZ(member);
+		const double bottom = core::memberBottomZ(member);
+		// 跨ぐ伏図レベル（下端 ≤ 高さ ≤ 上端）の通し番号の範囲。
+		int low = 0;
+		int high = 0;
+		bool crosses = false;
+		for (const PlanLevel* level : storyLevels)
+		{
+			const double height = level->height();
+			if (bottom > height + kNoboribariLevelTol || top < height - kNoboribariLevelTol)
+				continue;
+			low = crosses ? std::min(low, level->ordinal) : level->ordinal;
+			high = crosses ? std::max(high, level->ordinal) : level->ordinal;
+			crosses = true;
+		}
+		// 母屋伏図: 上端がその階のいちばん上の伏図レベルの高さ以上。
+		const int topOrdinal = storyLevels.back()->ordinal;
+		const bool moya = top >= storyLevels.back()->height() - kNoboribariLevelTol;
+		if (crosses)
+		{
+			// 母屋伏図にも映るなら、いちばん上の伏図レベルも跨いでいる（high == topOrdinal）。
+			from = low;
+			to = moya ? topOrdinal + 1.0 : high + 0.5;
+			return true;
+		}
+		if (moya)
+		{
+			// いちばん上の伏図レベルより上にだけある: 母屋伏図だけ。
+			from = topOrdinal + 0.5;
+			to = topOrdinal + 1.0;
+			return true;
+		}
+		// どの伏図レベルも跨がない（伏図レベルの間・いちばん下より下）: 低い側の端に近い
+		// 伏図レベルの柱梁伏図に映す（従来どおり）。
+		const PlanLevel* nearest =
+			nearestPlanLevel(levels, story, std::min(member.elevation, member.endElevation));
+		if (nearest == nullptr)
+			return false;
+		from = nearest->ordinal;
+		to = nearest->ordinal + 0.5;
+		return true;
+	}
+
 	void assignMemberPlanLevels(std::vector<core::MemberCommand>& members,
 								const std::vector<StoryInfo>& stories,
 								const std::vector<PlanLevel>& levels)
@@ -253,15 +303,31 @@ namespace HomeskzIfcImport::parse
 				const bool beam = member.layer == beamLayer;
 				if (!beam && member.layer != noboribariLayer)
 					continue;
+				// 軒桁は母屋伏図に薄く重ねるため、横架材レイヤから専用の "n-軒桁" へ分ける
+				// （ご要望。core::kLevelNokigeta）。伏図レベルの分け方は横架材と同じ。
+				const bool eaves = beam && member.drawClass == CLASS_NOKIGETA;
 				// 水平な材は天端、傾いた材は水下（低い側の端）の天端で決める。
 				const double z = std::min(member.elevation, member.endElevation);
 				const PlanLevel* level = nearestPlanLevel(levels, i, z);
 				if (level == nullptr)
+				{
+					if (eaves)
+						member.layer = storyLayerName(i, story.isTop, kLevelNokigeta);
 					continue;
-				// 登り梁の専用レイヤの材も水下側の伏図レベルへ（その伏図に映すため）。
-				// 母屋伏図には再掲しない（parse/Sheet）。
-				member.layer = beam ? planLevelBeamLayer(*level, story)
-									: planLevelLayer(*level, story, kLevelNoboribari);
+				}
+				if (eaves)
+					member.layer = planLevelLayer(*level, story, kLevelNokigeta);
+				else if (beam)
+					member.layer = planLevelBeamLayer(*level, story);
+				else if (double from = 0.0, to = 0.0; noboribariSpan(member, levels, i, from, to))
+				{
+					// 登り梁は柱と同じく、映す伏図レベルの範囲の span レイヤ
+					// （"{from}to{to}-登り梁"）へ。高さ基準もそのレベルへ（高さは登り梁
+					// レベルと同じ。parse/Story）。
+					member.layer = spanLayerName(from, to, kLevelNoboribari);
+					member.startBound.level = member.layer;
+					member.endBound.level = member.layer;
+				}
 			}
 		}
 	}

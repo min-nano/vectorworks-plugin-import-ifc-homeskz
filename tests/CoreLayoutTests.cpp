@@ -611,3 +611,38 @@ TEST(RotatedRectHeightGivesUpNearFortyFiveDegrees)
 }
 
 TEST_MAIN();
+
+TEST(GridShoulderRaisesTheBubbleAboveTheTopDimensions)
+{
+	// 1/100。いまの符号の上端 7235（下端は 7235 − 750 = 6485）、上の寸法の文字の上端 7000。
+	// 符号の下端を 7000 + 100（隙間 1mm）まで上げるので、水平線は 5 + (7100 − 6485) / 100。
+	using HomeskzIfcImport::core::gridShoulderAboveDimensions;
+	CHECK(near(gridShoulderAboveDimensions(5.0, 7235.0, 7000.0, 100.0), 5.0 + 6.15, 1e-9));
+	// 1/50 でも同じ式（縮尺で割る）。
+	CHECK(near(gridShoulderAboveDimensions(5.0, 7235.0, 7000.0, 50.0),
+			   5.0 + ((7000.0 - (7235.0 - 375.0)) / 50.0) + 1.0, 1e-9));
+	// 既に上にあれば下げない。縮尺が分からなければ触らない。
+	CHECK(near(gridShoulderAboveDimensions(5.0, 9000.0, 7000.0, 100.0), 5.0, 1e-9));
+	CHECK(near(gridShoulderAboveDimensions(5.0, 7235.0, 7000.0, 0.0), 5.0, 1e-9));
+}
+
+TEST(SectionGroundYIsTheSameAcrossARowAndSitsAboveTheRangeStart)
+{
+	// 高さ範囲 −2000〜9104（余白 1000 込み）の軸組図。下の帯 23mm は 1/125 の余白（8mm）を
+	// 15mm はみ出すので、マスの下端から 15mm 上が高さ範囲の下端、そこから 2000 / 125 = 16mm
+	// 上が GL（Z=0）。
+	const Vec2 content{9880.0, 11104.0};
+	const core::SectionBands bands{29.0, 3.0, 23.0, 29.0};
+	const core::SectionLayout layout =
+		core::sectionLayout(content, a3(), bands, core::kSectionHeightMargin);
+	CHECK(layout.columns >= 2);
+	const double below = std::max(23.0 - (core::kSectionHeightMargin / layout.scale), 0.0);
+	CHECK(near(layout.below, below));
+	const double cellBottom = core::sectionSlotCenter(layout, 0).y - (layout.cell.y / 2.0);
+	const double ground = core::sectionGroundY(layout, 0, -2000.0, 0.0);
+	CHECK(near(ground, cellBottom + below + (2000.0 / layout.scale)));
+	// 同じ段のマスは同じ GL。下の段は段の高さ＋間隔ぶん下。
+	CHECK(near(core::sectionGroundY(layout, 1, -2000.0, 0.0), ground));
+	const double nextRow = core::sectionGroundY(layout, layout.columns, -2000.0, 0.0);
+	CHECK(near(ground - nextRow, layout.cell.y + core::kViewportGap));
+}

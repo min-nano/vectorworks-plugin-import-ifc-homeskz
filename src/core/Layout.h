@@ -257,6 +257,9 @@ namespace HomeskzIfcImport::core
 	//                    帯が辺ごとに違うので、図はマスの中央ではなく帯の広い側の反対へ寄る
 	//   alignTop       … 段組みを領域の**上端**へ寄せるか（false なら上下の中央）。図面枠を
 	//                    置くときは余りを下へ回す（表題欄は下に在ることが多い。draw/Section）
+	//   below          … マスの下端から断面の高さ範囲の下端までの空き（用紙 mm。下の帯の
+	//                    うち高さ範囲の余白に収まらなかったぶん）。GL を揃える位置
+	//                    （sectionGroundY）に使う
 	struct SectionLayout
 	{
 		double scale = 1.0;
@@ -265,6 +268,7 @@ namespace HomeskzIfcImport::core
 		PaperArea area;
 		Vec2 viewportOffset;
 		bool alignTop = false;
+		double below = 0.0;
 
 		// シートレイヤ 1 枚に並ぶ枚数。
 		std::size_t perSheet() const
@@ -300,6 +304,14 @@ namespace HomeskzIfcImport::core
 	// そのマスで**図（ビューポート）の中心**を合わせる点（用紙 mm）。マスの中心から
 	// viewportOffset だけずらした点で、帯が辺ごとに違っても図と帯がマスにちょうど収まる。
 	Vec2 sectionViewportCenter(const SectionLayout& layout, std::size_t indexInSheet);
+
+	// そのマスで**GL（高さ groundZ。注釈空間の y＝絶対 Z）を置く用紙の y**。マスの下端から
+	// below（下の帯のはみ出し）と「高さ範囲の下端 rangeStart から GL まで」を上がった高さで、
+	// 同じ段のマスでは同じ値になる——全軸組図は同じ高さ範囲・同じ縮尺なので、ここへ GL を
+	// 合わせると段ごとに GL が揃う（ご要望）。描画側はビューポートの位置（1025＝GL の
+	// 用紙 y。SDK リファレンス Findings「Viewports」#200）をこれへ合わせる。
+	double sectionGroundY(const SectionLayout& layout, std::size_t indexInSheet, double rangeStart,
+						  double groundZ);
 
 	// viewports 枚の軸組図に要るシートレイヤの枚数（0 枚なら 0）。
 	std::size_t sectionSheetCount(const SectionLayout& layout, std::size_t viewports);
@@ -370,6 +382,24 @@ namespace HomeskzIfcImport::core
 	// 上の帯は高さ範囲の余白（1/100 で用紙 10mm）に先に収めるので、1/100 以上の大きい図では
 	// マスを広げない。
 	inline constexpr double kSectionGridBubbleAllowance = 10.0;
+
+	// 断面ビューポートの注釈に VW が出すグリッド線（通り芯）の符号（ラベル枠）の高さと、
+	// 符号の下端と上の寸法の文字との隙間（どちらも用紙 mm）。符号は「映っているモデルの
+	// 上端 ＋ 水平線の長さ（先端）＋ ラベル枠」に描かれ、既定（水平線 5mm）で上端から
+	// 12.35〜12.45mm（1/100・1/50 の実測。SDK リファレンス Findings「Viewports」#189）
+	// なので、ラベル枠は 7.4mm 前後。少し大きめに見込む。上の帯（kSectionGridBubbleAllowance）
+	// は「隙間＋ラベル枠」を覆う。
+	inline constexpr double kGridBubbleHeight = 7.5;
+	inline constexpr double kGridBubbleClearance = 1.0;
+
+	// 断面の注釈のグリッド線の「水平線の長さ（先端）」（ShoulderLengthAtStart。用紙 mm）を、
+	// 符号の下端が上の寸法の文字（dimensionTop）より kGridBubbleClearance 上に来るように
+	// 決める。shoulder はいまの値、gridTop はいまの符号の上端（注釈空間の y・モデル mm。
+	// 測ったグリッド線の外接の上端）、dimensionTop は上の寸法の文字の上端（注釈空間の y。
+	// sectionTopDimensionReach）、scale は縮尺の分母。**下げはしない**（既に上にあれば
+	// shoulder のまま）。scale が 0 以下なら shoulder のまま。
+	double gridShoulderAboveDimensions(double shoulder, double gridTop, double dimensionTop,
+									   double scale);
 
 	// 記号のレイアウトの中の配置（用紙 mm・起点＝(0, 0)・y は上が +）。
 	//   triangleHeight / triangleHalfWidth … ▽ の高さと底辺（上辺）の半分。頂点は

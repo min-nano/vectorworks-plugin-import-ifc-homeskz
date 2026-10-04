@@ -54,6 +54,11 @@ namespace HomeskzIfcImport::core
 	// 専用レベル。母屋・棟木は "母屋"、登り梁は "登り梁"（parse/Member.h 参照）。
 	inline constexpr const char* kLevelMoya = "母屋";
 	inline constexpr const char* kLevelNoboribari = "登り梁";
+	// 軒桁の専用レベル（"n-軒桁"）。母屋伏図に軒桁だけを薄く重ねるために、横架材天端（最上階
+	// は軒高）のレイヤから分ける（ご要望。parse/PlanLevel の assignMemberPlanLevels）。高さは
+	// 横架材天端（軒高）と同じで、材の高さ基準は横架材天端（軒高）のまま。取り合い・継手などを
+	// 見るときは、同じ階の横架材レイヤと同じ群として扱う（parse/Story の beamGroupLayer）。
+	inline constexpr const char* kLevelNokigeta = "軒桁";
 	// M9/M11 基礎ストーリのレベル。GL は基礎ストーリの原点（常に 0）で立上り（"F-立上り"）を、
 	// 底盤天端は底盤コンクリートの天端で底盤（"F-底盤"）を載せる（M9）。基礎天端は立上りの
 	// 天端でアンカーボルト（"F-アンカーボルト"）を、床束は底盤天端に揃えて床束（"F-床束"）を
@@ -782,6 +787,14 @@ namespace HomeskzIfcImport::core
 	Vec2 memberDrawnStart(const MemberCommand& member);
 	Vec2 memberDrawnEnd(const MemberCommand& member);
 
+	// **始端を低い端にした**同じ横架材（終端のほうが低ければ、端点・天端の高さ・高さ基準・
+	// 端部オフセットを両端で入れ替える。水平な材・始端が低い材はそのまま）。材の形は
+	// 変わらない。描画側が構造材を作る直前に通す——データタグの高さの注記は「始端の天端
+	// （#IPZS#）〜高い端の天端（#ZTBBS#）」を式で読むので、始端が高い端だと低い端が
+	// 読めず注記が "(2FL -40)" に化ける（SDK リファレンス Findings「Data Tags」の
+	// 「傾斜材の両端の天端」。draw/Tag の LinkedHeightFormula）。
+	MemberCommand memberLowEndFirst(const MemberCommand& member);
+
 	// 柱・束が実際に占める下端／上端の絶対 Z。下端は elevation − startOffset、上端は
 	// elevation + height + endOffset（オフセットは負で短く・正で長くする）。
 	double columnDrawnBottom(const ColumnCommand& column);
@@ -1082,6 +1095,13 @@ namespace HomeskzIfcImport::core
 		// 材・隅木谷木には添えない（空）。解析側が決めた文字をそのまま載せる（parse/Tag の
 		// memberLevelNote）。
 		std::string note;
+		// 高さの注記を**部材の高さに連動させる**ときの基準の名前（"2FL" / 最上階は "軒高"）。
+		// 空でなければ描画側は note の数値を文字で置かず、タグの式で部材から読む
+		// （始端の天端と高い端の天端。draw/Tag の TagFieldFormula）——材を動かしても注記が
+		// 追随する（ご要望）。注記を添える材にはすべて入る。note は連動させられないとき
+		// （階に属さないレイヤ・関連付け先が無い）の控え。
+		// 式に "…" で囲んで埋め込むので二重引用符を含まない（validateDocument）。
+		std::string noteDatum;
 	};
 
 	// 寸法の測る向き（注釈空間の軸）。Horizontal＝注釈空間の x に沿って測る（伏図の東西・
@@ -1169,6 +1189,10 @@ namespace HomeskzIfcImport::core
 	//   layers                           … 表示するデザインレイヤ名（**それ以外は非表示**）
 	//   hiddenClasses                    … 非表示にするクラス名（**それ以外は表示**）。
 	//                                      図面に無いクラス名は描画側が読み飛ばす（作らない）
+	//   grayedLayers                     … グレー（薄く）で重ねるデザインレイヤ名。layers と
+	//                                      重ねない。母屋伏図に同じ階の軒桁（"n-軒桁"）を薄く
+	//                                      見せるのに使う（ご要望。parse/Sheet）。図の外形・
+	//                                      データタグ・寸法の対象には数えない（layers だけを見る）
 	//
 	// 【並びは重ね順ではない】layers の並び順は描画側の走査順にすぎず、伏図での重なりは
 	// **ドキュメントのデザインレイヤ重ね順**が決める。床・野地板が柱・梁を覆い隠さないように
@@ -1188,6 +1212,7 @@ namespace HomeskzIfcImport::core
 		std::string drawingNumber;
 		std::vector<std::string> layers;
 		std::vector<std::string> hiddenClasses;
+		std::vector<std::string> grayedLayers;
 
 		// M13 断面寸法データタグ。この図に載せる注釈（TagCommand の doc コメント参照）。
 		// 伏図・軸組図とも同じ形で持ち、描画側は種類を区別せずに置く。
@@ -1656,6 +1681,12 @@ namespace HomeskzIfcImport::core
 	// 段で帯を測り、kSectionLabelGap を足す。描画側はこれに縮尺の分母を掛けてモデル mm にする。
 	double sectionLabelDrop(const ViewportCommand& viewport);
 
+	// 図の上に出す寸法の列（水平な列で side が正のもの＝上階の柱・小屋束の位置）の、最も外の
+	// 段の**文字の上端**（注釈空間の y・モデル mm）。寸法線（core::dimensionLineCoord）から
+	// kDimensionTextAllowance だけ上。scale は縮尺の分母。上の列が無ければ false（reach は
+	// 変更しない）。通り芯の符号をこれより上へ出すのに使う（core::gridShoulderAboveDimensions）。
+	bool sectionTopDimensionReach(const ViewportCommand& viewport, double scale, double& reach);
+
 	// 軸組図の外周に張り出す注釈の帯（用紙 mm・辺ごと。core::SectionBands）を、全命令の
 	// **最も広いもの**で返す（全軸組図は同じマスに並ぶ）。数えるのは次のとおり。
 	//   左 … 左へ出す縦の列（高さの寸法）の帯＋レベル記号があれば kLevelMarkBandAllowance
@@ -1666,9 +1697,10 @@ namespace HomeskzIfcImport::core
 	//        取る側へ倒す）
 	//   下 … 下へ出す横の列（柱の位置）の帯＋図面ラベル（kSectionLabelGap＋
 	//        kSectionLabelAllowance。図面タイトルがあるときだけ）
-	//   上 … 上へ出す横の列の帯と、通り芯があれば（gridBubbles）その符号の見込み
-	//        kSectionGridBubbleAllowance の大きい方。軸組図には切断面を横切る通り芯が映り、
-	//        符号の円（用紙基準で縮尺に追随しない）が建物の上へ出る（PR #176 round 1 の実機）
+	//   上 … 上へ出す横の列（上階の柱・小屋束の位置）の帯に、通り芯があれば（gridBubbles）
+	//        その符号の見込み kSectionGridBubbleAllowance を**足したもの**。軸組図には
+	//        切断面を横切る通り芯が映り、符号の円（用紙基準で縮尺に追随しない）が建物の上へ
+	//        出る（PR #176 round 1 の実機）。上の寸法はその符号の下に並ぶので重ねて数える
 	// 帯の量は core::dimensionBand（段が無ければ 0）。
 	SectionBands sectionBands(const std::vector<SectionCommand>& sections,
 							  bool gridBubbles = false);

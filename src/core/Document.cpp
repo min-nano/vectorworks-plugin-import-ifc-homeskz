@@ -69,14 +69,22 @@ namespace HomeskzIfcImport::core
 		}
 
 		// ビューポートが表示レイヤを 1 つ以上持ち、そのレイヤ名がどれも非空であること。
-		// 表示レイヤ 0 枚は「何も映らないビューポート」なので作らせない。非表示にするクラス名
-		// も非空であること（0 個は可＝全クラス表示）。伏図（isValidSheet）と軸組図
+		// 表示レイヤ 0 枚は「何も映らないビューポート」なので作らせない。非表示にするクラス名・
+		// グレーで重ねるレイヤ名も非空であること（0 個は可）。グレーで重ねるレイヤは表示
+		// レイヤと重ねない（同じレイヤを表示とグレーの両方に挙げると、描画側が後から当てた
+		// 方で決まり、どちらのつもりかが命令から読めない）。伏図（isValidSheet）と軸組図
 		// （isValidSection）が同じ規則で見る。
 		bool hasDrawableLayers(const ViewportCommand& viewport)
 		{
 			const auto isEmpty = [](const std::string& name) { return name.empty(); };
 			return !viewport.layers.empty() && std::ranges::none_of(viewport.layers, isEmpty) &&
-				   std::ranges::none_of(viewport.hiddenClasses, isEmpty);
+				   std::ranges::none_of(viewport.hiddenClasses, isEmpty) &&
+				   std::ranges::none_of(viewport.grayedLayers, isEmpty) &&
+				   std::ranges::none_of(viewport.grayedLayers,
+										[&viewport](const std::string& name) {
+											return std::ranges::find(viewport.layers, name) !=
+												   viewport.layers.end();
+										});
 		}
 
 		// 床板 1 枚が妥当か。配置先レイヤ名・クラス名が非空で、平面外形が 3 点以上（面になる）
@@ -205,9 +213,14 @@ namespace HomeskzIfcImport::core
 		// 関連付け先の横架材が members の範囲内であること（範囲外の添字は「どの部材にも
 		// 付かないタグ」＝図面に寸法の出ない空のタグが残る）。position / angle は数値
 		// （double なので常に成立）で値域の制限は無い。**スタイル名は見ない**——タグは
-		// スタイルを持たないため（core/Document.h の TagCommand）。
+		// スタイルを持たないため（core/Document.h の TagCommand）。連動する高さの注記の基準名
+		// （noteDatum）は、添える注記（note）があるときだけ持ち、二重引用符を含まないこと
+		// （式に "…" で囲んで埋め込むので、引用符が混ざると式全体が評価されなくなる）。
 		bool isValidTag(const TagCommand& tag, std::size_t memberCount)
 		{
+			if (!tag.noteDatum.empty() &&
+				(tag.note.empty() || tag.noteDatum.find('"') != std::string::npos))
+				return false;
 			return tag.memberIndex < memberCount;
 		}
 
@@ -697,6 +710,21 @@ namespace HomeskzIfcImport::core
 		return dimensionBand(below) + kSectionLabelGap;
 	}
 
+	bool sectionTopDimensionReach(const ViewportCommand& viewport, double scale, double& reach)
+	{
+		bool any = false;
+		for (const DimensionChainCommand& chain : viewport.dimensions)
+		{
+			if (chain.axis != DimensionAxis::Horizontal || chain.side <= 0)
+				continue;
+			const double top = dimensionLineCoord(chain.base, chain.side, chain.tier, scale) +
+							   (kDimensionTextAllowance * scale);
+			reach = any ? std::max(reach, top) : top;
+			any = true;
+		}
+		return any;
+	}
+
 	SectionBands sectionBands(const std::vector<SectionCommand>& sections, bool gridBubbles)
 	{
 		// 図の右端に根元がある、とみなす遊び（注釈空間・モデル mm）。
@@ -735,9 +763,8 @@ namespace HomeskzIfcImport::core
 			bands.right = std::max(bands.right, std::max(dimensionBand(right),
 														 haveLevels ? kLevelLineOvershoot : 0.0));
 			bands.bottom = std::max(bands.bottom, dimensionBand(bottom) + label);
-			bands.top =
-				std::max(bands.top, std::max(dimensionBand(top),
-											 gridBubbles ? kSectionGridBubbleAllowance : 0.0));
+			bands.top = std::max(bands.top, dimensionBand(top) +
+												(gridBubbles ? kSectionGridBubbleAllowance : 0.0));
 		}
 		return bands;
 	}
@@ -807,6 +834,18 @@ namespace HomeskzIfcImport::core
 	Vec2 memberDrawnEnd(const MemberCommand& member)
 	{
 		return pullBack(member.end, member.start, member.endOffset);
+	}
+
+	MemberCommand memberLowEndFirst(const MemberCommand& member)
+	{
+		if (!(member.endElevation < member.elevation))
+			return member;
+		MemberCommand reversed = member;
+		std::swap(reversed.start, reversed.end);
+		std::swap(reversed.elevation, reversed.endElevation);
+		std::swap(reversed.startBound, reversed.endBound);
+		std::swap(reversed.startOffset, reversed.endOffset);
+		return reversed;
 	}
 
 	double columnDrawnBottom(const ColumnCommand& column)

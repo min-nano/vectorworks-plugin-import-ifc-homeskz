@@ -117,13 +117,23 @@ namespace HomeskzIfcImport::parse
 
 	std::string spanLayerName(double fromLevel, double toLevel)
 	{
-		return formatSpanLevel(fromLevel) + "to" + formatSpanLevel(toLevel) + "-" +
-			   kColumnLayerSuffix;
+		return spanLayerName(fromLevel, toLevel, kColumnLayerSuffix);
+	}
+
+	std::string spanLayerName(double fromLevel, double toLevel, const std::string& suffix)
+	{
+		return formatSpanLevel(fromLevel) + "to" + formatSpanLevel(toLevel) + "-" + suffix;
 	}
 
 	bool parseSpanLayer(const std::string& name, double& outFrom, double& outTo)
 	{
-		const std::string suffix = std::string("-") + kColumnLayerSuffix;
+		return parseSpanLayer(name, kColumnLayerSuffix, outFrom, outTo);
+	}
+
+	bool parseSpanLayer(const std::string& name, const std::string& layerSuffix, double& outFrom,
+						double& outTo)
+	{
+		const std::string suffix = "-" + layerSuffix;
 		if (name.size() <= suffix.size() ||
 			name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
 			return false;
@@ -157,6 +167,18 @@ namespace HomeskzIfcImport::parse
 	std::string storyLayerName(std::size_t index, bool isTop, const std::string& levelType)
 	{
 		return storyLayerPrefix(index, isTop) + "-" + levelType;
+	}
+
+	std::string beamGroupLayer(const std::string& layer)
+	{
+		// 伏図レベルの印（"(FL-872)"）は残す（同じ伏図レベルの横架材レイヤへ読み替える）。
+		const std::string base = core::stripPlanLevelTag(layer);
+		const std::string suffix = std::string("-") + kLevelNokigeta;
+		if (!base.ends_with(suffix))
+			return layer;
+		const std::string prefix = base.substr(0, base.size() - suffix.size());
+		return prefix + "-" + (prefix == kRoofSuffix ? kLevelEaves : kLevelBeamTop) +
+			   layer.substr(base.size());
 	}
 
 	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ)
@@ -287,6 +309,35 @@ namespace HomeskzIfcImport::parse
 		return collectStories(context);
 	}
 
+	namespace
+	{
+		// 階 story に属する登り梁の span レイヤ（"{from}to{to}-登り梁"。from の伏図レベルが
+		// その階のもの）。(from, to) 昇順・重複なし。
+		std::vector<std::string>
+		noboribariSpanLayers(const std::vector<core::MemberCommand>& members,
+							 const std::vector<PlanLevel>& levels, std::size_t story)
+		{
+			std::vector<std::pair<std::pair<double, double>, std::string>> spans;
+			for (const core::MemberCommand& member : members)
+			{
+				double from = 0.0;
+				double to = 0.0;
+				if (!parseSpanLayer(member.layer, kLevelNoboribari, from, to) ||
+					storyOfOrdinal(levels, from) != story)
+					continue;
+				spans.push_back({{from, to}, member.layer});
+			}
+			std::ranges::sort(spans);
+			const auto duplicates = std::ranges::unique(spans);
+			spans.erase(duplicates.begin(), duplicates.end());
+			std::vector<std::string> out;
+			out.reserve(spans.size());
+			for (const auto& span : spans)
+				out.push_back(span.second);
+			return out;
+		}
+	} // namespace
+
 	std::vector<StoryCommand> buildStoryCommands(Context& context)
 	{
 		const std::vector<StoryInfo>& stories = context.stories();
@@ -372,6 +423,22 @@ namespace HomeskzIfcImport::parse
 			//     空レイヤが残る（空レイヤを作らない方針。ロフト FL・垂木/野地板と同じ）。
 			// 命令の配置先で判定すれば、**レイヤは命令があるときだけ・命令があれば必ず**でき、
 			// 両方の齟齬が構造的に起きない。
+			// 軒桁: 母屋伏図に軒桁だけを薄く重ねるため、横架材天端（最上階は軒高）から分けた
+			// "n-軒桁" レイヤ（parse/PlanLevel）。高さは横架材天端と同じなので、そのすぐ上へ
+			// **最初に**挿す（耐力壁・小屋組より下）。条件は母屋・登り梁と同じく命令の配置先で、
+			// 登り梁と同じく伏図レベルごとに確かめる（その高さのぶんずらす）。
+			if (storyLevels.empty())
+			{
+				if (anyMemberOnLayer(members, layerFor(kLevelNokigeta)))
+					insertAboveBeamTop(kLevelNokigeta, upperOffset);
+			}
+			for (const PlanLevel* level : storyLevels)
+			{
+				if (anyMemberOnLayer(members, planLevelLayer(*level, info, kLevelNokigeta)))
+					insertAboveBeamTop(planLevelType(*level, kLevelNokigeta),
+									   upperOffset + planLevelShift(*level, info));
+			}
+
 			// M19 耐力壁: 筋かい・面材の PIO を載せる "n-耐力壁" レイヤ。**横架材天端の
 			// すぐ上**（小屋組より下）へ置く。挿入は「後から挿したものが 1 段上」なので、
 			// 小屋組（登り梁・母屋・垂木・野地板）より**先に**挿す。
@@ -395,19 +462,16 @@ namespace HomeskzIfcImport::parse
 									   upperOffset + planLevelShift(*level, info));
 			}
 
-			// 登り梁は水下側の伏図レベルのレイヤへ分かれている（parse/PlanLevel）ので、
-			// 耐力壁と同じく伏図レベルごとに確かめる。母屋は分けない。
-			if (storyLevels.empty())
-			{
-				if (anyMemberOnLayer(members, layerFor(kLevelNoboribari)))
-					insertAboveBeamTop(kLevelNoboribari, upperOffset);
-			}
-			for (const PlanLevel* level : storyLevels)
-			{
-				if (anyMemberOnLayer(members, planLevelLayer(*level, info, kLevelNoboribari)))
-					insertAboveBeamTop(planLevelType(*level, kLevelNoboribari),
-									   upperOffset + planLevelShift(*level, info));
-			}
+			// 登り梁は柱と同じく、映す伏図の範囲の span レイヤ（"{from}to{to}-登り梁"）へ
+			// 分かれている（parse/PlanLevel の noboribariSpan）。その階に属する span（from の
+			// 伏図レベルの階）ごとにレベルを作る。種別はレイヤ名そのもの（span ごとに一意。
+			// 柱の span レベルと同じ）で、高さは登り梁レベルと同じ。伏図レベルを持たず
+			// 振り分けられなかった材は従来の "n-登り梁" に残る。母屋は分けない。
+			if (anyMemberOnLayer(members, layerFor(kLevelNoboribari)))
+				insertAboveBeamTop(kLevelNoboribari, upperOffset);
+			for (const std::string& layer : noboribariSpanLayers(members, planLevels, i))
+				cmd.levels.insert(cmd.levels.begin() + beamTopIndex,
+								  LevelCommand{layer, upperOffset, layer});
 			if (anyMemberOnLayer(members, layerFor(kLevelMoya)))
 				insertAboveBeamTop(kLevelMoya, upperOffset);
 

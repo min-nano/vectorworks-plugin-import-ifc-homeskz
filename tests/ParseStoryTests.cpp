@@ -29,6 +29,7 @@ using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::desiredStoryLayerOrder;
 using HomeskzIfcImport::core::LevelCommand;
 using HomeskzIfcImport::core::StoryCommand;
+using HomeskzIfcImport::parse::beamGroupLayer;
 using HomeskzIfcImport::parse::buildStoryCommands;
 using HomeskzIfcImport::parse::collectStories;
 using HomeskzIfcImport::parse::Entity;
@@ -84,6 +85,16 @@ namespace
 // --------------------------------------------------------------------------
 // - getLocalPlacementZ: ローカル配置 Z の抽出
 // ---------------------------------------------------------------------------
+
+TEST(beam_group_layer_reads_nokigeta_as_the_beam_layer)
+{
+	// 軒桁の専用レイヤは同じ階の横架材レイヤ（最上階は軒高）と同じ群。それ以外はそのまま。
+	CHECK_EQ(beamGroupLayer("2-軒桁"), std::string("2-横架材天端"));
+	CHECK_EQ(beamGroupLayer("R-軒桁"), std::string("R-軒高"));
+	CHECK_EQ(beamGroupLayer("2-横架材天端"), std::string("2-横架材天端"));
+	CHECK_EQ(beamGroupLayer("R-母屋"), std::string("R-母屋"));
+	CHECK_EQ(beamGroupLayer("軒桁"), std::string("軒桁"));
+}
 
 TEST(get_local_placement_z_extracts_z)
 {
@@ -513,8 +524,9 @@ TEST(reads_sample_house_fixture)
 		// 命令があるので 母屋 レベルがその下（軒高の直上）に積まれる（M7）。このモデルに登り梁は
 		// 無いので 登り梁 レベルは作らない（空レイヤを作らない）。最上段は span 柱レベル
 		// （M8）で、屋根階に立つ主屋根の小屋束が "3to3.5-柱"（屋根面で止まる半整数）に入る。
-		CHECK(sameVec(levelTypes(*roof),
-					  std::vector<std::string>{"3to3.5-柱", "野地板", "垂木", "母屋", "軒高"}));
+		// 軒桁は専用の 軒桁 レベルで軒高のすぐ上（母屋伏図に薄く重ねるため）。
+		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"3to3.5-柱", "野地板", "垂木",
+																  "母屋", "軒桁", "軒高"}));
 	}
 
 	// 一般階は FL＋横架材天端の 2 レベル（順序は FL が上）。その上に span 柱レベル（M8）が
@@ -561,6 +573,7 @@ TEST(moya_level_only_on_stories_with_moya_member)
 	}
 
 	// 同じモデルから母屋を外す（軒桁にする）と、母屋レベルは作らない＝空レイヤを作らない。
+	// 軒桁は専用の 軒桁 レベル（軒高のすぐ上）に載る。
 	std::string girder = moya;
 	const std::string::size_type at = girder.find("木梁:母屋:1_1");
 	CHECK(at != std::string::npos);
@@ -569,7 +582,11 @@ TEST(moya_level_only_on_stories_with_moya_member)
 	const std::vector<StoryCommand> withoutMoya = buildStoryCommands(loadIfcFromText(girder));
 	CHECK_EQ(withoutMoya.size(), static_cast<std::size_t>(1));
 	if (withoutMoya.size() == 1)
-		CHECK(sameVec(levelTypes(withoutMoya[0]), std::vector<std::string>{"軒高"}));
+	{
+		CHECK(sameVec(levelTypes(withoutMoya[0]), std::vector<std::string>{"軒桁", "軒高"}));
+		CHECK_EQ(withoutMoya[0].levels.front().layer, std::string("R-軒桁"));
+		CHECK(near(withoutMoya[0].levels.front().offset, 0.0));
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -1780,8 +1780,9 @@ TEST(noboribari_uses_vertical_cut_top_without_xy_shift)
 
 TEST(noboribari_level_added_to_its_story)
 {
-	// 登り梁の命令がある階にだけ "登り梁" レベル（＝レイヤ "1-登り梁"）ができる（parse/Story
-	// が命令の配置先レイヤで判定する。Story.cpp の「レベルを足す条件」）。
+	// 登り梁の命令がある階にだけ登り梁のレベルができる（parse/Story が命令の配置先レイヤで
+	// 判定する。Story.cpp の「レベルを足す条件」）。登り梁は映す伏図の範囲の span レイヤ
+	// （"{from}to{to}-登り梁"。parse/PlanLevel）へ振り分けられ、レベルの種別はレイヤ名そのもの。
 	StepText step;
 	const int storey = makeStorey(step, "1FL", 473.0);
 	makeStorey(step, "RFL", 5973.0);
@@ -1797,11 +1798,19 @@ TEST(noboribari_level_added_to_its_story)
 		std::vector<std::string> types;
 		for (const core::LevelCommand& level : stories[0].levels)
 			types.push_back(level.type);
-		CHECK(types == (std::vector<std::string>{"FL", "登り梁", "横架材天端"}));
-		CHECK_EQ(stories[0].levels[1].layer, "1-登り梁");
-		// 最上階には登り梁の命令が無いので "登り梁" レベルを作らない（空レイヤを作らない）。
+		CHECK_EQ(types.size(), std::size_t(3));
+		if (types.size() == 3)
+		{
+			CHECK_EQ(types[0], "FL");
+			CHECK_EQ(types[2], "横架材天端");
+			double from = 0.0;
+			double to = 0.0;
+			CHECK(parse::parseSpanLayer(types[1], "登り梁", from, to));
+			CHECK_EQ(stories[0].levels[1].layer, types[1]);
+		}
+		// 最上階には登り梁の命令が無いので登り梁のレベルを作らない（空レイヤを作らない）。
 		for (const core::LevelCommand& level : stories[1].levels)
-			CHECK(level.type != "登り梁");
+			CHECK(level.type.find("登り梁") == std::string::npos);
 	}
 }
 

@@ -967,7 +967,8 @@ namespace HomeskzIfcImport::draw
 	//   * gSDK->NextObject(h) / VWLayerObj::IsLayerObject … レイヤの走査
 	//   * gSDK->GetNamedLayer / CreateLayer               … シートレイヤの取得・生成
 	//   * VWLayerObj(h).SetDescription / GetScale         … シートレイヤのタイトル・縮尺
-	//   * gSDK->SetViewportLayerVisibility(vp, layer, v)  … 表示レイヤの絞り込み（0=表示/1=非表示）
+	//   * gSDK->SetViewportLayerVisibility(vp, layer, v)  … 表示レイヤの絞り込み（0=表示/1=非表示/
+	//                                                       2=グレー）
 	//   * VWClass::ForEachClass(true, cb)                 … 図面の全クラスの列挙
 	//                                                       （ISDK::ForEachClass の VWFC 版）
 	//   * gSDK->SetViewportClassVisibility(vp, idx, 0)    … クラス表示（既定は非表示）
@@ -1049,6 +1050,14 @@ namespace HomeskzIfcImport::draw
 				if (layer != nil)
 					gSDK->SetViewportLayerVisibility(viewport, layer,
 													 static_cast<short>(LayerVisibility::Visible));
+			}
+			// 薄く重ねるレイヤ（母屋伏図の軒桁。core::ViewportCommand の grayedLayers）。
+			for (const std::string& name : command.grayedLayers)
+			{
+				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
+				if (layer != nil)
+					gSDK->SetViewportLayerVisibility(viewport, layer,
+													 static_cast<short>(LayerVisibility::Grayed));
 			}
 		}
 

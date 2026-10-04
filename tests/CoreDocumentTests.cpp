@@ -404,6 +404,39 @@ TEST(member_drawn_ends_are_the_endpoints_without_offsets)
 	CHECK(near(core::memberDrawnEnd(member).x, 3000.0));
 }
 
+TEST(member_low_end_first_reverses_only_members_whose_start_is_high)
+{
+	// 始端が高い傾斜材は、端点・天端・高さ基準・端部オフセットを両端で入れ替える
+	// （データタグが始端の天端〜高い端の天端を式で読むため。draw/Tag）。
+	core::MemberCommand member = validMember();
+	member.elevation = 3531.0;
+	member.endElevation = 2699.0;
+	member.startBound.offset = -40.0;
+	member.endBound.offset = -872.0;
+	member.startOffset = -52.5;
+	member.endOffset = -60.0;
+	const core::MemberCommand low = core::memberLowEndFirst(member);
+	CHECK(near(low.start.x, 3000.0));
+	CHECK(near(low.end.x, 0.0));
+	CHECK(near(low.elevation, 2699.0));
+	CHECK(near(low.endElevation, 3531.0));
+	CHECK(near(low.startBound.offset, -872.0));
+	CHECK(near(low.endBound.offset, -40.0));
+	CHECK(near(low.startOffset, -60.0));
+	CHECK(near(low.endOffset, -52.5));
+	// 材が占める範囲は変わらない。
+	CHECK(near(core::memberDrawnStart(low).x, core::memberDrawnEnd(member).x));
+	CHECK(near(core::memberDrawnEnd(low).x, core::memberDrawnStart(member).x));
+
+	// 始端が低い材・水平な材はそのまま。
+	const core::MemberCommand already = core::memberLowEndFirst(low);
+	CHECK(near(already.start.x, 3000.0));
+	CHECK(near(already.elevation, 2699.0));
+	const core::MemberCommand flat = core::memberLowEndFirst(validMember());
+	CHECK(near(flat.start.x, 0.0));
+	CHECK(near(flat.end.x, 3000.0));
+}
+
 TEST(validate_rejects_member_with_empty_bound_level)
 {
 	// レベル種別が空だと SetObjectStoryBound が解決できず高さがレイヤ基準へ戻る。
@@ -1365,6 +1398,28 @@ TEST(validate_rejects_sheet_with_empty_hidden_class_name)
 	CHECK(!core::validateDocument(document));
 }
 
+TEST(validate_rejects_sheet_with_empty_grayed_layer_name)
+{
+	// グレーで重ねるレイヤ（母屋伏図の軒桁）も名前が無ければ弾く。0 枚は妥当。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	sheet.viewport.grayedLayers = {"R-軒桁"};
+	document.sheets.push_back(sheet);
+	CHECK(core::validateDocument(document));
+	document.sheets.front().viewport.grayedLayers.emplace_back();
+	CHECK(!core::validateDocument(document));
+}
+
+TEST(validate_rejects_sheet_grayed_layer_also_shown)
+{
+	// 同じレイヤを表示とグレーの両方に挙げない（どちらのつもりかが命令から読めない）。
+	core::Document document;
+	core::SheetCommand sheet = validSheet();
+	sheet.viewport.grayedLayers = {sheet.viewport.layers.front()};
+	document.sheets.push_back(sheet);
+	CHECK(!core::validateDocument(document));
+}
+
 TEST(validate_accepts_sheet_without_drawing_label)
 {
 	// 図面タイトル・図番は空でも描ける（ラベルが空になるだけ）。
@@ -1548,6 +1603,32 @@ TEST(validate_rejects_tag_pointing_past_the_members)
 	section.viewport.tags.push_back(outOfRange);
 	bySection.sections.push_back(section);
 	CHECK(!core::validateDocument(bySection));
+}
+
+TEST(validate_checks_linked_level_note_datum)
+{
+	// 連動する高さの注記は、添える注記があるときだけ・引用符を含まない基準名で持つ
+	// （基準名はタグの式に "…" で囲んで埋め込む。draw/Tag の TagFieldFormula）。
+	const auto withTag = [](const core::TagCommand& tag)
+	{
+		core::Document document = documentWithOneMember();
+		core::SheetCommand sheet = validSheet();
+		sheet.viewport.tags.push_back(tag);
+		document.sheets.push_back(sheet);
+		return document;
+	};
+	core::TagCommand linked = validTag();
+	linked.note = "(2FL -872)";
+	linked.noteDatum = "2FL";
+	CHECK(core::validateDocument(withTag(linked)));
+
+	core::TagCommand quoted = linked;
+	quoted.noteDatum = "2\"FL";
+	CHECK(!core::validateDocument(withTag(quoted)));
+
+	core::TagCommand bare = validTag();
+	bare.noteDatum = "2FL"; // 注記が無いのに基準だけある
+	CHECK(!core::validateDocument(withTag(bare)));
 }
 
 // --------------------------------------------------------------------------
@@ -1772,6 +1853,32 @@ TEST(section_label_drop_clears_the_dimensions_below)
 			   1e-9));
 }
 
+TEST(section_top_dimension_reach_is_the_text_top_of_the_outer_top_chain)
+{
+	core::ViewportCommand viewport;
+	double reach = -1.0;
+	// 上の列が無ければ false（値は触らない）。下の列・縦の列は数えない。
+	core::DimensionChainCommand below;
+	below.axis = core::DimensionAxis::Horizontal;
+	below.side = -1;
+	below.tier = 3;
+	viewport.dimensions.push_back(below);
+	CHECK(!core::sectionTopDimensionReach(viewport, 100.0, reach));
+	CHECK(near(reach, -1.0, 1e-9));
+
+	core::DimensionChainCommand top;
+	top.axis = core::DimensionAxis::Horizontal;
+	top.side = 1;
+	top.base = 6000.0;
+	top.tier = 0;
+	viewport.dimensions.push_back(top);
+	top.tier = 1;
+	viewport.dimensions.push_back(top);
+	CHECK(core::sectionTopDimensionReach(viewport, 100.0, reach));
+	// 最も外（段 1）の寸法線 6000 + (8 + 7) × 100 に、文字の見込み 4 × 100。
+	CHECK(near(reach, 6000.0 + 1500.0 + 400.0, 1e-9));
+}
+
 TEST(section_bands_count_only_the_sides_with_annotations)
 {
 	// 注釈が何も無い図（タイトルも無い）は帯なし。
@@ -1834,10 +1941,10 @@ TEST(section_bands_count_only_the_sides_with_annotations)
 	CHECK(near(merged.top, core::dimensionBand(2), 1e-9));
 	CHECK(near(merged.left, bands.left, 1e-9));
 
-	// 通り芯があれば、上に符号のぶんを取る（上の列の帯の方が広ければそちら）。
+	// 通り芯があれば、上に符号のぶんを取る。上の列はその符号の下に並ぶので足して数える。
 	CHECK(near(core::sectionBands({section}, true).top, core::kSectionGridBubbleAllowance, 1e-9));
 	CHECK(near(core::sectionBands({section, tall}, true).top,
-			   std::max(core::dimensionBand(2), core::kSectionGridBubbleAllowance), 1e-9));
+			   core::dimensionBand(2) + core::kSectionGridBubbleAllowance, 1e-9));
 }
 
 // ---------------------------------------------------------------------------

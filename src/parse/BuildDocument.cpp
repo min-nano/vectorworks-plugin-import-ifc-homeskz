@@ -223,7 +223,8 @@ namespace HomeskzIfcImport::parse
 		// sections が確定した後**でなければ置き場所が決まらない——したがってここが最後になる
 		// （parse/Tag）。
 		attachTagCommands(document, context.stories(),
-						  standardBeamHeights(context.stories(), context.planLevels()));
+						  standardBeamHeights(context.stories(), context.planLevels()),
+						  context.planLevels());
 		progress.step();
 
 		// M28 図面枠（タイトルブロック）: 設定で選ばれたスタイル名をそのまま命令セットへ

@@ -31,6 +31,7 @@
 #include "parse/Story.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <set>
 #include <string>
@@ -240,6 +241,11 @@ TEST(FloorFramingSheetPerPlanLevelWithBeamAndGridLayers)
 				CHECK(contains(sheets[k].viewport.layers, kLayerFoundationAnchor) == expectAnchor);
 				// クラスで隠すのは基礎伏図だけ（柱梁伏図は全クラス表示）。
 				CHECK(sheets[k].viewport.hiddenClasses.empty());
+				// 軒桁は専用レイヤでも柱梁伏図にはふつうに映す（薄くしない）。
+				const std::string eaves = storyLayerName(i, isTop, std::string("軒桁") + level.tag);
+				CHECK(contains(sheets[k].viewport.layers, eaves) ==
+					  (storyLayerNames(model).count(eaves) == 1));
+				CHECK(sheets[k].viewport.grayedLayers.empty());
 			}
 		});
 }
@@ -356,10 +362,23 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 				CHECK(contains(sheet.viewport.layers, core::kGridLayer));
 				// 母屋伏図には床（FL）を載せない（梁組と分ける図なので）。
 				CHECK(!contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "FL")));
-				// 登り梁も載せない（水下側の柱梁伏図に映してあり、重ねると高さの関係が
-				// 直感に反する。ご要望）。
+				// 同じ階の軒桁は、あればグレーで重ねる（表示レイヤには入れない）。
+				const std::string eaves = storyLayerName(i, stories[i].isTop, "軒桁");
+				CHECK(!contains(sheet.viewport.layers, eaves));
+				CHECK(contains(sheet.viewport.grayedLayers, eaves) ==
+					  (storyLayerNames(model).count(eaves) == 1));
+				// 登り梁は上端がいちばん上の伏図レベルに届くものだけ（span レイヤの範囲が母屋
+				// 伏図の切断を含むもの。ご要望。parse/PlanLevel の noboribariSpan）。母屋伏図に
+				// 映る span の to は「いちばん上の通し番号 + 1」（整数）。
 				for (const std::string& layer : sheet.viewport.layers)
-					CHECK(layer.find("登り梁") == std::string::npos);
+				{
+					if (layer.find("登り梁") == std::string::npos)
+						continue;
+					double from = 0.0;
+					double to = 0.0;
+					CHECK(parse::parseSpanLayer(layer, "登り梁", from, to));
+					CHECK(to == std::floor(to) && from < to);
+				}
 				++seq;
 			}
 		});
@@ -414,6 +433,8 @@ TEST(ViewportLayersExistAmongStoryLayers)
 					   for (const SheetCommand& sheet : buildSheetCommands(model))
 					   {
 						   for (const std::string& layer : sheet.viewport.layers)
+							   CHECK(known.count(layer) == 1);
+						   for (const std::string& layer : sheet.viewport.grayedLayers)
 							   CHECK(known.count(layer) == 1);
 					   }
 				   });

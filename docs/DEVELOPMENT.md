@@ -251,7 +251,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | --- | --- |
 | 平面座標の同一判定と許容（`samePoint` / `kPointEps`）・Vec2 の基本演算（`dot` / `cross` / `length` / `distance`）・同一直線上の線分成分の芯線射影（`collinearSpan`）・凸多角形の凸多角形クリップ（`clipPolygonToConvex`。唯一の利用者は耐力壁の筋かいの形 `core::shearWallBracePolygon`）・その 1 段である半平面クリップ（`clipPolygonToHalfPlane`。ほかの利用者はたすき掛けの奥の筋かいの切り分け `core::shearWallBehindBracePieces`） | `core/Geometry.h` |
 | ペア述語による連結成分（Union-Find。立上り・大引・地中梁の統合と壁結合の交点クラスタ） | `core/UnionFind.h` |
-| 構成層の総厚（`totalThickness`）・横架材の Z 範囲と重なり（`memberTopZ` / `memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側）・端部オフセットの意味と値・オフセットを戻した「材の端」（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`） | `core/Document.h` |
+| 構成層の総厚（`totalThickness`）・横架材の Z 範囲と重なり（`memberTopZ` / `memberBottomZ` / `zRangesOverlap`。許容値は呼び出し側）・端部オフセットの意味と値・オフセットを戻した「材の端」（`memberDrawnStart` / `memberDrawnEnd` / `columnDrawnTop` / `columnDrawnBottom`）・始端を低い端にした横架材（`memberLowEndFirst`） | `core/Document.h` |
 | 描画側から切り離せる純計算（レイヤの希望スタック順 `desiredStoryLayerOrder`・地中梁の可視ソリッドの呑み込み `raiseModifierTop`・地中梁の押し出しの基面 `modifierBasePolygon`・図に映るものの広がり `planContentBounds` / `sectionContentSize`） | `core/Document` |
 | 断面の注釈空間への投影（`sectionAlongOrigin` / `sectionAnnotationPoint`。断面寸法タグ＝`parse/Tag`・寸法＝`parse/Dimension`・図面ラベル＝`draw/DrawingLabel` が共有）・軸組図の図面ラベルを寄せる点と下げる量（`sectionLabelAnchor` / `sectionLabelDrop`。寸法が無いときの間隔 `kSectionLabelGap`） | `core/Document` |
 | 用紙の割り付け（`core::planLayout` ほか。縮尺の階梯と選び方・伏図の縮尺と位置——**縮尺は実測した凡例の幅を引いてから決め**、凡例の置き場所は `legendTopRight`——・軸組図の上下 2 段とシートの分割・タイトルの連番・軸組図の辺ごとの帯 `SectionBands` と図を合わせる点 `sectionViewportCenter`・図面枠の内側へ絞る `insetFrameArea` / `kTitleBlockInset`・枠か表題欄の帯かの判定 `frameCoversPaper` と帯のぶん下を空ける `reserveTitleStrip`・通り芯の符号の帯 `kSectionGridBubbleAllowance`・図面ラベルの帯の見込み `kSectionLabelAllowance`） | `core/Layout` |
@@ -275,7 +275,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | もの | 置き場所 |
 | --- | --- |
 | IFC の属性インデックス | `parse/IfcAttr.h` |
-| レベル種別名・`storyLayerName`・横架材レベルの定型（`beamTopLevelType` / `beamTopElevation` / `beamTopLayerName`）・階の要素の有無（`storyHasElement`）・span レベルの表記（`formatSpanLevel`） | `parse/Story.h` |
+| レベル種別名・`storyLayerName`・横架材レベルの定型（`beamTopLevelType` / `beamTopElevation` / `beamTopLayerName`）・横架材の取り合いを見るときのレイヤの読み替え（`beamGroupLayer`。軒桁の専用レイヤ→横架材レイヤ）・階の要素の有無（`storyHasElement`）・span レベルの表記（`formatSpanLevel`）・span レイヤ名の組み立てと分解（`spanLayerName` / `parseSpanLayer`。柱・登り梁で接尾辞だけ違う） | `parse/Story.h` |
 | 屋根組の名前 | `parse/Rafter.h` / `parse/Roof.h` |
 | 基礎ストーリの名前・接尾辞・レベル・レイヤ名、基礎の許容値（統合・自由端・人通口・壁結合・地中梁・床付け） | `parse/Footing.h` |
 | 要素の判別述語（`isFloorSlab` / `isRoofSlab` / `isFireBrace` / `isBaseSlab` / `isShearBrace` / `isShearPanel` 等） | その要素のヘッダ |
@@ -289,7 +289,7 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 柱の span の番号（伏図レベルの通し番号。`spanFromOrdinal` / `spanToOrdinal`） | `parse/Column` |
 | 耐力壁のレイヤレベル名・柱を探す許容 | `parse/ShearWall.h` |
 | 切断面に乗る材・横切る材の判定（`memberOnCutPlane` / `columnOnCutPlane` / `memberCrossesCutPlane`。タグと寸法が共有） | `parse/Tag` |
-| データタグに添える横架材の高さの注記（`memberLevelNote`。その階の FL から）・各階の標準の横架材の高さ（`standardBeamHeights`。`parse/PlanLevel`） | `parse/Tag` |
+| データタグに添える横架材の高さの注記（`memberLevelNote` / 連動させる基準名も返す `memberLevelNoteParts`。その階の FL から）・各階の標準の横架材の高さ（`standardBeamHeights`。`parse/PlanLevel`） | `parse/Tag` |
 | 寸法の測点のまとめ方（`mergeStops` / `unionStops`。許容 `kDimensionMergeTol`）・通り芯の位置（`gridStops`）・レベル記号の表示名 | `parse/Dimension` |
 | 軸組図の図番の一意化（`uniqueSectionNumbers`） | `parse/Section` |
 | 要素の一覧（表示名・助数詞・命令数・描けた数。`kElements`）・完了／エラーの文言（`importOutcome` 等） | `parse/Summary` |

@@ -51,6 +51,7 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kLevelFL = core::kLevelFL;
 	inline constexpr const char* kLevelBeamTop = core::kLevelBeamTop;
 	inline constexpr const char* kLevelEaves = core::kLevelEaves;
+	inline constexpr const char* kLevelNokigeta = core::kLevelNokigeta;
 
 	// 柱・小屋束を配置する span（またぐレベル区間）レイヤの接尾辞。レイヤ名は "{from}to{to}-
 	// 柱" で、from は柱が立つ床レベル（1 始まり・GL=0）、to は上端が届く床／屋根面レベル
@@ -63,6 +64,9 @@ namespace HomeskzIfcImport::parse
 	// 柱がレイヤを名乗るときと、ストーリがそのレベル（＝レイヤ）を作るときの両方がこれを通る。
 	std::string spanLayerName(double fromLevel, double toLevel);
 
+	// 同じ規約で接尾辞だけを替えたもの（登り梁の "{from}to{to}-登り梁"。parse/PlanLevel）。
+	std::string spanLayerName(double fromLevel, double toLevel, const std::string& suffix);
+
 	// span レベル 1 つの表記。整数は小数点なし・半整数は".5" 付き（1 → "1"、2.5 → "2.5"）。
 	// **この表記の定義はここが唯一**で、span 柱レイヤ（spanLayerName）と伏図記号レイヤ
 	// （parse/ColumnMark の planMarkLayerName）の両方がこれを通る（別々に書くと
@@ -73,6 +77,10 @@ namespace HomeskzIfcImport::parse
 	// "{from}to{to}-柱" レイヤ名を (from, to) へ分解する。span 柱レイヤでなければ
 	// false（接尾辞が違う・"to" が無い・数値でない）。
 	bool parseSpanLayer(const std::string& name, double& outFrom, double& outTo);
+
+	// 同じく、接尾辞 suffix の span レイヤ（"{from}to{to}-登り梁" など）を分解する。
+	bool parseSpanLayer(const std::string& name, const std::string& suffix, double& outFrom,
+						double& outTo);
 
 	// IfcProduct（要素）のローカル配置 Z 座標を取り出す。取得できれば outZ に入れて true、
 	// ObjectPlacement が無い／IfcLocalPlacement でない／座標が足りない等で取れなければ false。
@@ -91,6 +99,13 @@ namespace HomeskzIfcImport::parse
 	// 作るときと、各要素が配置先を引くときの**両方**がこれを通る（規約がズレると要素の
 	// レイヤ探索が黙って失敗し、命令はあるのに 1 つも描かれない形になる）。
 	std::string storyLayerName(std::size_t index, bool isTop, const std::string& levelType);
+
+	// 横架材の取り合い・継手・柱の上端を見るときの「その階の横架材レイヤ」。軒桁の専用
+	// レイヤ（"n-軒桁" / "n-軒桁(FL-872)"。母屋伏図に薄く重ねるために分けた。
+	// parse/PlanLevel）を同じ伏図レベルの横架材レイヤ（"n-横架材天端" / "R-軒高"。伏図
+	// レベルの印は残す）へ読み替え、それ以外はそのまま返す。**レイヤ一致で相手を絞るところは、
+	// どれもこれを通して比べる**（通さないと軒桁と小屋梁の仕口・継手が黙って消える）。
+	std::string beamGroupLayer(const std::string& layer);
 
 	// 階（#storeyId）に属する要素の #id を返す。IfcRelContainedInSpatialStructure
 	// を逆参照から辿り、RelatingStructure が当該階のものだけを採る。並びは rel の #id 昇順・
