@@ -69,9 +69,16 @@ namespace HomeskzIfcImport::draw
 		// する。何か 1 つでも配置できたら true。**構造材ツールで描けたときだけ** outObject に
 		// そのハンドルを入れる（断面寸法データタグの関連付け先。フォールバックの直線は
 		// 断面寸法を持たないのでタグを付ける相手にしない。draw/Column の柱ハンドルと同じ扱い）。
-		bool DrawOne(const core::MemberCommand& member, StructuralFailures& failures,
+		bool DrawOne(const core::MemberCommand& command, StructuralFailures& failures,
 					 MCObjectHandle& outObject)
 		{
+			// 【始端は低い端】傾斜材は低い端から高い端へ向けて作る（core::memberLowEndFirst。
+			// 材の形は変わらない）。データタグの高さの注記が「始端の天端〜高い端の天端」を
+			// 式で読むので、始端が高い端だと低い端が読めず注記が化ける（draw/Tag の
+			// LinkedHeightFormula）。高さ基準の ID 0 がパスの始点に当たる（SDK リファレンス
+			// Findings「Parametric Objects」）ので、端点と一緒に基準も入れ替える。
+			const core::MemberCommand member = core::memberLowEndFirst(command);
+
 			// 断面（プロファイルグループ）を**先に**用意する。作れなければ PIO を作らない
 			// ——断面の無い構造材は生成できても実体が描かれず、「オブジェクトはあるのに
 			// 画面に出ない」状態になるだけなので、直線のフォールバックの方が有用。
