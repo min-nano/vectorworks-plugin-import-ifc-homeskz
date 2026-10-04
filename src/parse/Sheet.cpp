@@ -29,6 +29,7 @@
 #include "parse/StructuralClass.h"
 
 #include <algorithm>
+#include <set>
 #include <tuple>
 #include <string>
 #include <utility>
@@ -108,20 +109,19 @@ namespace HomeskzIfcImport::parse
 		std::vector<ColumnSpan>
 		collectNoboribariSpans(const std::vector<core::MemberCommand>& members)
 		{
-			std::vector<ColumnSpan> spans;
+			// (from, to, レイヤ名) の昇順・重複なし（入力の並びに依らない）。
+			std::set<std::tuple<double, double, std::string>> found;
 			for (const core::MemberCommand& member : members)
 			{
-				ColumnSpan span;
-				if (parseSpanLayer(member.layer, kLevelNoboribari, span.from, span.to))
-				{
-					span.layer = member.layer;
-					spans.push_back(std::move(span));
-				}
+				double from = 0.0;
+				double to = 0.0;
+				if (parseSpanLayer(member.layer, kLevelNoboribari, from, to))
+					found.emplace(from, to, member.layer);
 			}
-			std::ranges::sort(spans, {}, [](const ColumnSpan& span)
-							  { return std::tie(span.from, span.to, span.layer); });
-			const auto duplicates = std::ranges::unique(spans, {}, &ColumnSpan::layer);
-			spans.erase(duplicates.begin(), duplicates.end());
+			std::vector<ColumnSpan> spans;
+			spans.reserve(found.size());
+			for (const auto& [from, to, layer] : found)
+				spans.push_back(ColumnSpan{from, to, layer});
 			return spans;
 		}
 	} // namespace
