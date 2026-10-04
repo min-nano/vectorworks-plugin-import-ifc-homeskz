@@ -18,10 +18,12 @@
 #include "draw/Feedback.h"
 
 #include "core/Document.h"
+#include "core/FeedbackScratch.h"
 #include "core/FeedbackSession.h"
 #include "core/ImportOptions.h"
 #include "core/Trace.h"
 #include "draw/DrawUtil.h"
+#include "draw/HostServices.h"
 #include "draw/ImportRun.h"
 #include "draw/ResultDialog.h"
 #include "draw/SectionPickDialog.h"
@@ -36,8 +38,10 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <system_error>
+#include <vector>
 #include <vector>
 
 namespace HomeskzIfcImport::draw
@@ -148,19 +152,72 @@ namespace HomeskzIfcImport::draw
 		// **まだ無いパスを選ぶ。** 既にあるファイルへ別名保存できなかった実測がある
 		// （実機 round 12。round 8 は同じ呼び出しが新規のパスで通っている）ので、
 		// 上書きが効くことに賭けない。名前が尽きたら空を返す。
+		//
+		// **置き場はブランチごとのフォルダ**（core/FeedbackScratch.h）。PR が閉じたら
+		// フォルダごと片付けられるように、いま動いているビルドのブランチの下へ置く
+		// （M38 までは一時ディレクトリの直下へ置いたきりで、PR #188 の実機確認で
+		// 3.4 GB を超えて溜まっていた）。
 		std::string FreshTempPath(const std::string& stem)
 		{
+			const std::string root = TempPath(core::kScratchRootName);
+			const std::string dir = core::prepareBranchScratch(root, currentBuildInfo().branch);
+			if (dir.empty())
+				return "";
 			for (int i = 1; i <= 100; ++i)
 			{
 				// **const にしない**——返すときに move されなくなり、clang-tidy の
 				// performance-no-automatic-move がエラーになる（tidy-mac で実際に落ちた）。
-				std::string path = TempPath(stem + "-" + std::to_string(i) + ".vwx");
-				if (path.empty())
-					return "";
+				std::string path =
+					(std::filesystem::path(dir) / (stem + "-" + std::to_string(i) + ".vwx"))
+						.string();
 				if (!PathExists(path))
 					return path;
 			}
 			return "";
+		}
+
+		// **PR が閉じたブランチの一時ファイルを片付ける**（core/FeedbackScratch.h。利用者の
+		// ご要望で、PR が close／merge されたらその実機テストの図面は消す）。周の頭で
+		// 1 度だけ呼ぶ。戻り値は報告と診断ログへ出す 1 行（何もしなければ空）。
+		//
+		// いま動いているブランチのフォルダは尋ねもしない（使っている最中）。ほかの
+		// ブランチが 1 つも無ければ GitHub へも行かない——毎周の問い合わせで API の上限を
+		// 削らないため。PR の状態は同梱スクリプト（vw-update の q-pr-state。トークンは
+		// vw-token が持つ）に尋ねる。**分からなければ消さない。**
+		//
+		// 消したフォルダに記憶の作業ファイルがあったら、記憶から外す（無いファイルを
+		// 開き直しに行かせない）。次の周は 1 周目と同じく、いま開いている図面を基準に採る。
+		std::string CleanUpClosedBranches(core::FeedbackSession& session, const std::string& branch)
+		{
+			const std::string root = TempPath(core::kScratchRootName);
+			if (root.empty())
+				return "";
+			std::vector<core::ScratchDir> others;
+			for (const core::ScratchDir& dir : core::listScratchDirs(root))
+			{
+				if (!dir.branch.empty() && dir.branch != branch)
+					others.push_back(dir);
+			}
+			if (others.empty())
+				return "";
+
+			const HostServices& host = hostServices();
+			std::vector<std::string> args{"q-pr-state"};
+			for (const core::ScratchDir& dir : others)
+				args.push_back(dir.branch);
+			std::string out;
+			if (!host.canRunScripts() || !host.runScript("vw-update", args, out))
+				return "一時ファイル: PR の状態を尋ねるスクリプトを走らせられなかったので、"
+					   "ほかのブランチの作業ファイルは片付けませんでした";
+
+			const core::ScratchCleanup cleanup =
+				core::cleanUpClosedBranches(root, others, core::parsePrStates(out));
+			for (const std::string& removed : cleanup.removedPaths)
+			{
+				if (core::pathIsInside(session.workPath, removed))
+					session.workPath.clear();
+			}
+			return core::describeScratchCleanup(cleanup);
 		}
 
 		// アクティブな図面を指定のパスへ保存する（＝別名保存）。成功したら true。
@@ -255,8 +312,17 @@ namespace HomeskzIfcImport::draw
 				// 以後の周がずっと汚れた状態から始まる**（実機 round 13。round 12 の
 				// 失敗がそのまま基準へ焼き付いた）。ここで落としておけば、採り直した
 				// ときに自分で直る。
+				//
+				// **採り直した周（rebased）では落とさない。** 人が別の図面へ移ってから
+				// 押したのなら、いま開いているのは前の周が描いた図面ではない——そこで
+				// 前の周のレイヤ名（「1-FL」等）を名指しで消すと、**同じ名前を持つ利用者の
+				// レイヤ**（本番で取り込んだ図面など）まで消える（CLAUDE.md「開発の基本
+				// 方針」8。PR #188 の実機確認で、空の図面に対して 0/34 枚の取り除きが
+				// 走っていた）。round 13 の焼き付きは作業ファイルが無い周の話で、そのとき
+				// workPath は空なので rebased は立たない。
 				std::string cleaned;
-				if (!session.lastCreatedLayers.empty() || !session.lastCreatedSheets.empty())
+				if (rebased.empty() &&
+					(!session.lastCreatedLayers.empty() || !session.lastCreatedSheets.empty()))
 					cleaned = prepareDrawingForRound(session) + "。";
 
 				// **レイヤの基準も採り直す。** 別の図面で採った顔ぶれと引き比べても意味が
@@ -265,8 +331,8 @@ namespace HomeskzIfcImport::draw
 				session.baselineRecorded = false;
 				session.baselineLayers.clear();
 
-				const std::string prefix = cleaned + "準備: " + rebased;
-				const std::string work = FreshTempPath("homeskz-work");
+				const std::string prefix = cleaned + rebased;
+				const std::string work = FreshTempPath("work");
 				if (!SaveActiveDocumentAs(work))
 				{
 					// **証拠を残す**——ここが空振りすると、以後の周はぜんぶレイヤ削除の
@@ -291,7 +357,7 @@ namespace HomeskzIfcImport::draw
 			std::string undone;
 			if (undoPreviousRound(session, undone))
 			{
-				note = "準備: " + undone;
+				note = undone;
 				return RoundDocument::Ready;
 			}
 
@@ -305,12 +371,12 @@ namespace HomeskzIfcImport::draw
 			if (SamePath(active, session.workPath))
 			{
 				const std::string parked =
-					FreshTempPath("homeskz-round-" + std::to_string(session.round));
+					FreshTempPath("round-" + std::to_string(session.round));
 				if (!SaveActiveDocumentAs(parked))
 				{
 					// 退避できないなら閉じない（未保存の文書は閉じられない。実機確認済み）。
 					// いまの図面はまだ生きているので、従来のレイヤ削除へ回せる。
-					note = "準備: 前の周の図面を退避できなかったので開き直しませんでした（" +
+					note = "前の周の図面を退避できなかったので開き直しませんでした（" +
 						   parked + "）。いま開いている図面へ描きます";
 					return RoundDocument::Fallback;
 				}
@@ -336,7 +402,7 @@ namespace HomeskzIfcImport::draw
 			const std::string opened = ActiveDocumentPath();
 			if (SamePath(opened, session.workPath))
 			{
-				note = "準備: " + undoNote + "作業ファイルを開き直しました（" + session.workPath +
+				note = undoNote + "作業ファイルを開き直しました（" + session.workPath +
 					   "）。";
 				note += closed;
 				// **作業ファイルそのものに前の周の絵が焼き付いていることがある**（実機
@@ -354,7 +420,7 @@ namespace HomeskzIfcImport::draw
 			// 描く先はどこにも無い——描けば全要素 0 件の報告が出るだけで、直すべき場所を
 			// 指さない数字が報告に残る（実機 round 9）。**何が起きたかを証拠つきで残して
 			// 周ごと中止する。**
-			std::string why = "準備: " + undoNote;
+			std::string why = undoNote;
 			why += "作業ファイルを開き直せなかったので、この周は走らせません";
 			why += "でした（" + session.workPath + " / OpenDocumentPath=";
 			why += returned ? "true" : "false";
@@ -380,13 +446,13 @@ namespace HomeskzIfcImport::draw
 		std::string prepareDrawingForRound(const core::FeedbackSession& session)
 		{
 			if (session.lastCreatedLayers.empty() && session.lastCreatedSheets.empty())
-				return "準備: 前の周が作ったレイヤの記録が無いので、図面はそのままにしました"
+				return "前の周が作ったレイヤの記録が無いので、図面はそのままにしました"
 					   "（残っていれば、その上へ重ねて描きます）";
 			std::string note;
 			const std::size_t removed =
 				RemoveCreatedLayers(session.lastCreatedLayers, session.lastCreatedSheets, note);
 			if (removed == 0 && note.empty())
-				return "準備: 前の周が作ったレイヤは 1 枚も残っていませんでした（図面はそのまま）";
+				return "前の周が作ったレイヤは 1 枚も残っていませんでした（図面はそのまま）";
 			// **これは部分的な復元でしかない。** 取り込み前から在ったレイヤ（テンプレートの
 			// もの）へ描いた分は、そのレイヤが自分の作ったものではないので取り除けない
 			// ——上に描いた分だけが残る。**丸ごと戻す道は 3 つとも塞がっている**（SDK
@@ -524,6 +590,10 @@ namespace HomeskzIfcImport::draw
 		core::FeedbackSession session;
 		(void)core::readFeedbackSession(sessionPath, session); // 読めなければ 1 周目
 
+		// **片付けは基準の採り直しより先に。** 記憶の作業ファイルを消したなら、下の判断は
+		// それが無いものとして進む。
+		const std::string scratchNote = CleanUpClosedBranches(session, build.branch);
+
 		// **手動で押したときは、いま開いている図面を基準として採り直す。** 人が別の図面
 		// （空のテンプレート等）を開いてからメニューを押したのは「この図面で試したい」
 		// という意思なのに、覚えた作業ファイルを開き直すとその意思が黙って消える——実機で
@@ -589,6 +659,15 @@ namespace HomeskzIfcImport::draw
 		// 置かないと読めない周が出る（実機 round 2 で実際に落ちた）。
 		std::string preparation;
 		const RoundDocument document = openRoundDocument(session, rebased, preparation);
+		if (document == RoundDocument::Fallback)
+			preparation += "。" + prepareDrawingForRound(session);
+		// **「準備:」はここで 1 度だけ付ける。** 部品（openRoundDocument /
+		// prepareDrawingForRound / RemoveCreatedLayers）がめいめいに付けていた頃は、
+		// つないだ 1 行に「準備:」が 2 度出ていた（PR #188 の実機確認）。
+		if (!preparation.empty())
+			preparation = "準備: " + preparation;
+		if (!scratchNote.empty())
+			preparation += (preparation.empty() ? "" : "\n") + scratchNote;
 		if (document == RoundDocument::Abort)
 		{
 			// **描く先が無いなら取り込まない。** 記憶（作業ファイルの場所）は残すので、
@@ -597,9 +676,6 @@ namespace HomeskzIfcImport::draw
 			core::trace::note(preparation);
 			return Failure(allowDialogs, parse::TestRoundOutcome::DocumentFailed, preparation);
 		}
-		if (document == RoundDocument::Fallback)
-			preparation += "。" + prepareDrawingForRound(session);
-
 		const ImportRound round =
 			runImportRound(ifcPath, options, settingsShown, settingsNote, preparation);
 		if (round.failed)
@@ -625,6 +701,7 @@ namespace HomeskzIfcImport::draw
 		material.baselineKnown = session.baselineRecorded;
 		material.baselineLayers = session.baselineLayers;
 		material.preparation = preparation;
+		material.restorable = document == RoundDocument::Ready;
 		const std::string report =
 			parse::formatTestRoundReport(material, round.document, round.counts);
 

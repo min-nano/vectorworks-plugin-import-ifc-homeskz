@@ -165,6 +165,9 @@ api_get() { # api-subpath
 	case "$1" in
 		releases/tags/stable) fixture="${VW_TEST_STABLE_JSON:-}" ;;
 		releases*) fixture="${VW_TEST_RELEASES_JSON:-}" ;;
+		# q-pr-state: head= の値（url_encode 済み）をそのままファイル名にして引く。
+		# 無ければ「取れなかった」。
+		pulls*) fixture="${VW_TEST_PULLS_DIR:-}/${1##*head=}" ;;
 	esac
 	[ -n "$fixture" ] && [ -f "$fixture" ] || return 1
 	local f
@@ -541,6 +544,34 @@ out="$(VW_PLUGINS_DIR="$dest" VW_TEST_DL_ZIP="$MUTE_ZIP" \
 check_eq "$out" "ok" "the built-in placement reported success"
 if [ -f "$dest/min-nano_structureDev/min-nano_structureDev.vwpayload" ]; then fellback=yes; else fellback=no; fi
 check_eq "$fellback" "yes" "a mute/broken installer never counts as done"
+
+# ===========================================================================
+# q-pr-state — ブランチごとに PR が開いているか。プラグインは closed のものだけを片付ける
+# （src/core/FeedbackScratch.h）ので、**閉じたと言い切れないものを closed にしない**ことが
+# 本題。
+# ===========================================================================
+t "url_encode escapes everything but unreserved characters"
+check_eq "$(RUN url_encode "min-nano:claude/a b&c")" "min-nano%3Aclaude%2Fa%20b%26c" \
+	"':' '/' ' ' '&' are escaped"
+check_eq "$(RUN url_encode "A-z_0.9~")" "A-z_0.9~" "unreserved characters pass through"
+
+PULLS="$WORK/pulls"
+mkdir -p "$PULLS"
+printf '[{"state":"closed"},{"state":"open"}]' > "$PULLS/min-nano%3Aclaude%2Freopened"
+printf '[{"state":"closed"},{"state":"closed"}]' > "$PULLS/min-nano%3Aclaude%2Fmerged"
+printf '[]' > "$PULLS/min-nano%3Aclaude%2Fnever"
+
+t "q_pr_state answers open / closed / none / error per branch"
+out="$(VW_REPO=min-nano/vectorworks-plugin-import-ifc-homeskz VW_TEST_PULLS_DIR="$PULLS" \
+	RUN q_pr_state claude/reopened claude/merged claude/never claude/offline)"
+check_contains "$out" $'pr-state\topen\tclaude/reopened' "any open PR -> open"
+check_contains "$out" $'pr-state\tclosed\tclaude/merged' "only closed PRs -> closed"
+check_contains "$out" $'pr-state\tnone\tclaude/never' "no PR at all -> none (not closed)"
+check_contains "$out" $'pr-state\terror\tclaude/offline' "unreachable -> error (not closed)"
+check_eq "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "4" "one line per branch"
+
+t "q_pr_state with no branches prints nothing"
+check_eq "$(RUN q_pr_state)" "" "no arguments -> no output"
 
 # ===========================================================================
 echo "---------------------------------------------------------------"

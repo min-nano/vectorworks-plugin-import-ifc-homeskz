@@ -137,12 +137,19 @@ $script:FakeStableJson = $null
 $script:FakeReleasesJson = $null
 $script:FakeDownloadZip = $null
 $script:FakeDownloadFail = $false
+$script:FakePulls = @{}
 
 function Invoke-GH([string] $subpath) {
     if ($script:FakeApiFail) { $script:ApiError = $script:FakeApiReason; throw 'offline' }
     $script:ApiError = ''
     if ($subpath -eq 'releases/tags/stable') { return ($script:FakeStableJson | ConvertFrom-Json) }
     if ($subpath -like 'releases*') { return ($script:FakeReleasesJson | ConvertFrom-Json) }
+    # q-pr-state: head= の値（エスケープ済み）で引く。無ければ「取れなかった」。
+    if ($subpath -like 'pulls*') {
+        $head = $subpath.Substring($subpath.IndexOf('head=') + 5)
+        if (-not $script:FakePulls.ContainsKey($head)) { throw 'offline' }
+        return ($script:FakePulls[$head] | ConvertFrom-Json)
+    }
     throw "unexpected subpath: $subpath"
 }
 
@@ -472,6 +479,27 @@ CheckContains $out 'ok' 'the built-in placement reported success'
 CheckEq (Test-Path -LiteralPath (Join-Path (Join-Path $VW_PLUGINS_DIR 'min-nano_structureDev') 'min-nano_structureDev.vwpayload')) $true 'a mute installer never counts as done'
 
 $VW_PLUGINS_DIR = $SavedPluginsDir
+
+# ===========================================================================
+# q-pr-state — ブランチごとに PR が開いているか。プラグインは closed のものだけを片付ける
+# （src/core/FeedbackScratch.h）ので、**閉じたと言い切れないものを closed にしない**ことが本題。
+# ===========================================================================
+T 'Invoke-QPrState answers open / closed / none / error per branch'
+$script:FakePulls = @{
+    'min-nano%3Aclaude%2Freopened' = '[{"state":"closed"},{"state":"open"}]'
+    'min-nano%3Aclaude%2Fmerged'   = '[{"state":"closed"},{"state":"closed"}]'
+    'min-nano%3Aclaude%2Fsingle'   = '[{"state":"closed"}]'
+    'min-nano%3Aclaude%2Fnever'    = '[]'
+}
+$out = AsText (Invoke-QPrState @('claude/reopened', 'claude/merged', 'claude/single', 'claude/never',
+        'claude/offline'))
+CheckContains $out "pr-state`topen`tclaude/reopened" 'any open PR -> open'
+CheckContains $out "pr-state`tclosed`tclaude/merged" 'only closed PRs -> closed'
+CheckContains $out "pr-state`tclosed`tclaude/single" 'a single PR (not an array in PS 5.1) -> closed'
+CheckContains $out "pr-state`tnone`tclaude/never" 'no PR at all -> none (not closed)'
+CheckContains $out "pr-state`terror`tclaude/offline" 'unreachable -> error (not closed)'
+CheckEq (@($out -split "`n").Count) 5 'one line per branch'
+$script:FakePulls = @{}
 
 # ===========================================================================
 Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue

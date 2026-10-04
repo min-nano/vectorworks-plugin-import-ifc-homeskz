@@ -79,6 +79,8 @@ src/
   core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
     Document.{h,cpp}          命令セットの構造体定義・validateDocument・描画結果の件数
     ImportOptions.{h,cpp}     取り込み設定（配置するシンボルの対応）と役割の表 1 つ
+    FeedbackScratch.{h,cpp}   実機テストの一時ファイルの置き場（ブランチごと）と、
+                              PR が閉じたブランチの片付け
     FeedbackSession.{h,cpp}   実機テストで覚えておく値（1 周目の選択・前の周の内訳・
                               作業ファイル）とその読み書き、報告の置き場所
     Geometry.{h,cpp}          自前の Vec2 / Vec3 / Mat4（配置行列）と平面幾何の基本演算
@@ -263,6 +265,8 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | 伏図のまとめ方（`core::PlanLevelKey`・`ImportOptions::mergedPlanLevels`）・設定ダイアログへ運ぶ候補（`core::PlanLevelChoice`） | `core/ImportOptions.h` |
 | 進捗の整形と配分の計算・診断ログのフェーズの行（`beginPhase`） | `core/Progress` |
 | 実機テストの記憶と、どの周になるかの場合分け（`feedbackRoundKind`）・報告の置き場所（`testReportPathFor`） | `core/FeedbackSession` |
+| 実機テストの一時ファイルの置き場（`prepareBranchScratch`）・PR が閉じたブランチの片付け（`removeScratchDir` が唯一の削除口） | `core/FeedbackScratch` |
+| ブランチの PR が開いているか（`vw-update` の `q-pr-state`） | `scripts/vw-update.{sh,ps1}` |
 | MCP ブリッジの受け渡しの作法（要求／応答の形・スプールのファイル名・原子的な書き方・id の綴り検査） | `core/Bridge.h` |
 | 最小 JSON（MCP ブリッジ専用） | `core/Json` |
 
@@ -1461,11 +1465,44 @@ PR の行（`send` / `repo` / `pr` / `branch` / `anon` / `posted` / `loop`）は
 **伏せません。** M37 までは PR コメントが公開されるのでファイル名・ユーザー名・図面枠の
 スタイル名を伏せていましたが、報告は利用者の計算機の中だけで読まれます。
 
+### 一時ファイルと片付け（`core/FeedbackScratch`）
+
+作業ファイル（`work-N.vwx`）と、前の周の図面を退避した捨て場所（`round-R-N.vwx`）は
+**ブランチごとのフォルダ**に置きます。どちらも元の図面と同じ大きさがあり、M38 までは
+一時ディレクトリの直下へ置いたきりで誰も消さなかった（PR #188 の実機確認で 3.4 GB を
+超えていた）ためです。
+
+- macOS … `$TMPDIR/homeskz-test/<ブランチ>/`
+- Windows … `%TEMP%\homeskz-test\<ブランチ>\`
+
+フォルダ名はブランチ名を安全な綴りへ写したもので、元の名前は中の `branch.txt`（目印）が
+持ちます。**PR が close／merge されたブランチのフォルダは、次の実機テストの周の頭で消えます**
+（メニューからも `vw_run_test` からも）。いま動いているビルドのブランチ以外のフォルダが
+あるときだけ、同梱スクリプトの `vw-update q-pr-state <branch>…` で GitHub に尋ね（トークンは
+`vw-token`）、**閉じた PR があって開いている PR が無い**ものだけを消します。消したことは
+報告の「準備:」の次の行（「一時ファイル:」）に出ます。
+
+**ここはアンインストーラ・図面の戻しと並ぶ「消すコード」です**（CLAUDE.md「開発の基本
+方針」8）。安全弁は `removeScratchDir` の 1 か所にあり、緩めません:
+
+- 置き場（`homeskz-test`）の**直下**のフォルダだけ（正規化して確かめる）。
+- 目印があり、**目印のブランチ名が問い合わせた名前と一致する**こと。
+- 中身が**ふつうのファイルだけ**（フォルダ・シンボリックリンクがあれば触らない。
+  `remove_all` は使わない）。
+- **`*.lck` が無い**こと（Vectorworks が開いている図面の隣に置く。開いている作業ファイルを
+  足元から消さない）。
+- PR の状態が分からない（問い合わせの失敗・PR が 1 つも無い）ものは**消さない**。
+
+消したフォルダに記憶の作業ファイルがあったら、記憶から外します（次の周はいま開いている
+図面を基準に採り直す）。M38 より前の版が一時ディレクトリの直下に残した
+`homeskz-work-*.vwx` / `homeskz-round-*.vwx` は対象外なので、要らなければ手で消してください。
+
 ### 境界（どこに何があるか）
 
 | | 役割 |
 | --- | --- |
 | `src/core/FeedbackSession.*` | 覚えておく値と、その読み書き。**どの周になるかの場合分け**（`feedbackRoundKind`）と報告の置き場所もここ（無 SDK・テストあり） |
+| `src/core/FeedbackScratch.*` | 一時ファイルの置き場（ブランチごと）と、PR が閉じたブランチの片付け（無 SDK・テストあり） |
 | `src/parse/Feedback.*` | **報告の本文**（Markdown）・前の周との差分・診断ログの切り詰め（`keepTail`）・実機テストの結末の文言（無 SDK・テストあり） |
 | `src/draw/Feedback.*` | 実機テストの 1 周（`runTestRound`）——記憶・取り込み前のダイアログ・図面の準備・報告の書き出し（SDK 依存） |
 | `src/draw/ImportRun.*` | 取り込み 1 周ぶんの部品。**本番の取り込みと実機テストが共有する唯一の実装**（M25）。診断ログの在り処（`importLogPath`）もここ |
@@ -1522,7 +1559,10 @@ PR の行（`send` / `repo` / `pr` / `branch` / `anon` / `posted` / `loop`）は
 ここはアンインストーラと並ぶ「利用者のものを消す」コードなので、**歯止めを緩める方向へ
 変えません**。
 
-- **図面から消してよいのは「前の周が自分で作ったレイヤ」だけ。** 入口は `draw/Feedback` の
+- **図面から消してよいのは「前の周が自分で作ったレイヤ」だけ。** **基準を採り直した周
+  （人が作業ファイル以外の図面を開いてからメニューを押した周）では呼ばない**——いま開いて
+  いるのは前の周が描いた図面ではなく、同じ名前の利用者のレイヤを消しかねない（PR #188 の
+  実機確認）。入口は `draw/Feedback` の
   `prepareDrawingForRound` ただ 1 つで、SDK の作法（自分で undo イベントを開いて閉じる・
   **シートを先に消す**）と安全弁（名前と種別が一致し、消したあとに 1 枚も残らなくならない
   こと）は `draw/DrawUtil` の `RemoveCreatedLayers` が 1 か所で持ちます。消す相手は

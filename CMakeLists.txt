@@ -137,6 +137,7 @@ if(VW_BUILD_PLUGIN OR VW_BUILD_TESTS)
 		src/core/Bridge.cpp
 		src/core/Document.cpp
 		src/core/DrawTiming.cpp
+		src/core/FeedbackScratch.cpp
 		src/core/FeedbackSession.cpp
 		src/core/Geometry.cpp
 		src/core/ImportOptions.cpp

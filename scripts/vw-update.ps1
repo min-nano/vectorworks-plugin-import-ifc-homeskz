@@ -443,6 +443,32 @@ function Invoke-QDev {
     }
 }
 
+# q-pr-state <branch>...: ブランチごとに、PR が開いているかを 1 行で答える（macOS 側の
+# scripts/vw-update.sh の q_pr_state と同じ形）。
+#   pr-state<TAB><open|closed|none|error><TAB><branch>
+# **プラグインは closed のものだけを片付ける**（src/core/FeedbackScratch.h）。迷ったら
+# error へ倒す——消さない側である。
+function Invoke-QPrState([string[]] $branches) {
+    $owner = ($VW_REPO -split '/')[0]
+    foreach ($branch in $branches) {
+        if (-not $branch) { continue }
+        $head = [uri]::EscapeDataString("${owner}:$branch")
+        try { $prs = Invoke-GH "pulls?state=all&per_page=100&head=$head" }
+        catch { Write-Output ("pr-state`terror`t" + $branch); continue }
+        $any = $false
+        $open = $false
+        # **foreach 文で回す。** Windows PowerShell 5.1 の Invoke-RestMethod は JSON の配列を
+        # 1 つの Object[] のまま返すことがあり、@() で包むと 1 要素に潰れる。foreach 文は
+        # どちらの形でも中身を 1 つずつ回し、$null（空の配列）なら 1 度も回らない。
+        foreach ($pr in $prs) {
+            $any = $true
+            if ([string] $pr.state -eq 'open') { $open = $true }
+        }
+        $word = if ($open) { 'open' } elseif ($any) { 'closed' } else { 'none' }
+        Write-Output ("pr-state`t" + $word + "`t" + $branch)
+    }
+}
+
 function Invoke-DoInstall([string] $url, [string] $name) {
     $installed = Install-Build $url $name
     # 委ねたときは**その出力をそのまま流す**。プラグインが読む契約
@@ -545,6 +571,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         'q-stable'   { Invoke-QStable }
         'q-dev'      { Invoke-QDev }
         'do-install' { Invoke-DoInstall ([string] $args[1]) ([string] $args[2]) }
+        'q-pr-state' { Invoke-QPrState ([string[]] @($args | Select-Object -Skip 1)) }
         'stable'     { Invoke-Stable }
         'dev'        { Invoke-Dev }
         '' {
@@ -557,6 +584,6 @@ if ($MyInvocation.InvocationName -ne '.') {
                 default { Write-Host 'キャンセルしました。' }
             }
         }
-        default { Write-Output "error=不明なチャンネル: '$mode'（stable / dev / q-stable / q-dev / do-install）。" }
+        default { Write-Output "error=不明なチャンネル: '$mode'（stable / dev / q-stable / q-dev / do-install / q-pr-state）。" }
     }
 }

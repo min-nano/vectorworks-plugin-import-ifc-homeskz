@@ -68,6 +68,13 @@ namespace HomeskzIfcImport::parse
 		// へ落ちて読めなかった）。
 		std::string preparation;
 
+		// **次の周が図面を丸ごと戻せるか。** 作業ファイルを用意できた周（draw/Feedback の
+		// RoundDocument::Ready）なら、次の周は「取り消し」か作業ファイルの開き直しで
+		// 取り込み前へ戻るので、テンプレートのレイヤへ描いた分も残らない。false のとき
+		// だけ「取り除けません」の注記を出す（true の周に出すと、すぐ上の「取り消しで
+		// 戻っています」と食い違う。PR #188 の実機確認）。
+		bool restorable = false;
+
 		bool anonymize = true; // 案件が分かるものを伏せるか
 	};
 

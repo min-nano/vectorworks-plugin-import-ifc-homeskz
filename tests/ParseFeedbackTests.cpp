@@ -399,15 +399,20 @@ TEST(feedback_comment_asks_for_undo_only_when_the_round_touched_existing_layers)
 	// **取り込み前から在ったレイヤへ描いた周だけ**「取り消し」を頼む。プラグインが
 	// 取り除けるのは自分が作ったレイヤだけで、テンプレートのレイヤへ描いた分は残る
 	// ——ここを黙ると「戻す必要は無い」と読んだ人の図面に前の周が積み上がる。
-	const FeedbackRound round = sampleRound();
+	FeedbackRound round = sampleRound();
 	DrawCounts counts = sampleCounts();
 	counts.undoPartial = true;
 	counts.existingLayers = {"共通"};
 	const std::string body = formatTestRoundReport(round, sampleDocument(), counts);
-	CHECK(contains(body, "取り除けません"));
+	CHECK(contains(body, "人が「取り消し」で戻します"));
 	// 取り除ける周（undoPartial=false）は黙る。
 	CHECK(!contains(formatTestRoundReport(round, sampleDocument(), sampleCounts()),
-					"取り除けません"));
+					"人が「取り消し」で戻します"));
+	// **作業ファイルがある周も黙る**——次の周が取り消しか開き直しで丸ごと戻すので、
+	// 言うと同じ報告の「取り消しで戻っています」と食い違う（PR #188 の実機確認）。
+	round.restorable = true;
+	CHECK(!contains(formatTestRoundReport(round, sampleDocument(), counts),
+					"人が「取り消し」で戻します"));
 }
 
 TEST(test_report_shows_the_file_name_without_hiding_it)

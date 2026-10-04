@@ -28,6 +28,11 @@
 #                       (or error=<message>).
 #   do-install <url> <name>   Download+install <name>.vwlibrary; print "ok" or
 #                             error=<message>. No dialogs.
+#   q-pr-state <branch>...    For each branch, whether it still has an open PR:
+#                             "pr-state<TAB><open|closed|none|error><TAB><branch>".
+#                             The dev build's test rounds use it to clean up the
+#                             temp drawings of branches whose PR was closed/merged
+#                             (src/core/FeedbackScratch.h). No dialogs.
 #
 # The interactive stable/dev modes below are the manual, run-from-a-terminal
 # fallback and keep using macOS (osascript) dialogs.
@@ -49,6 +54,7 @@
 #   ./scripts/vw-update.sh q-stable                 # (used by the plug-in)
 #   ./scripts/vw-update.sh q-dev                    # (used by the plug-in)
 #   ./scripts/vw-update.sh do-install <url> <name>  # (used by the plug-in)
+#   ./scripts/vw-update.sh q-pr-state <branch>...   # (used by the plug-in)
 #
 # Requirements: macOS only. Uses tools that ship with macOS (curl, plutil,
 # unzip, codesign, xattr, osascript) — no Homebrew, no `gh`, and because the
@@ -638,6 +644,58 @@ q_dev() {
 	rm -f "$f"
 }
 
+# url_encode: クエリの値として安全な形へ（英数字と `-._~` 以外を %XX に）。**バイト単位で
+# 見る**ので LC_ALL=C で回す（日本語のブランチ名でも壊さない）。
+url_encode() { # text
+	local LC_ALL=C s="$1" out="" c i
+	for ((i = 0; i < ${#s}; i++)); do
+		c="${s:i:1}"
+		case "$c" in
+			[A-Za-z0-9._~-]) out="${out}${c}" ;;
+			*) out="${out}$(printf '%%%02X' "'$c")" ;;
+		esac
+	done
+	printf '%s' "$out"
+}
+
+# q-pr-state <branch>...: ブランチごとに、PR が開いているかを 1 行で答える。
+#   pr-state<TAB>open<TAB><branch>    開いている PR が 1 つでも在る
+#   pr-state<TAB>closed<TAB><branch>  PR は在るが、どれも閉じている（merge を含む）
+#   pr-state<TAB>none<TAB><branch>    PR が 1 つも無い
+#   pr-state<TAB>error<TAB><branch>   尋ねられなかった
+# **プラグインは closed のものだけを片付ける**（src/core/FeedbackScratch.h）。ここで
+# 迷ったら error へ倒す——消さない側である。ブランチ名を最後の列に置くのは、名前に
+# タブは入らない（git が許さない）が、ほかの何が入るかは分からないから。
+q_pr_state() {
+	local owner="${VW_REPO%%/*}" branch f i state any open
+	for branch in "$@"; do
+		[ -n "$branch" ] || continue
+		if ! api_get "pulls?state=all&per_page=100&head=$(url_encode "${owner}:${branch}")"; then
+			printf 'pr-state\terror\t%s\n' "$branch"
+			continue
+		fi
+		f="$VW_API_FILE"
+		any=0
+		open=0
+		i=0
+		while [ "$i" -lt 100 ]; do
+			state="$(jval "$f" "${i}.state")"
+			[ -n "$state" ] || break
+			any=1
+			if [ "$state" = "open" ]; then open=1; fi
+			i=$((i + 1))
+		done
+		rm -f "$f"
+		if [ "$open" -eq 1 ]; then
+			printf 'pr-state\topen\t%s\n' "$branch"
+		elif [ "$any" -eq 1 ]; then
+			printf 'pr-state\tclosed\t%s\n' "$branch"
+		else
+			printf 'pr-state\tnone\t%s\n' "$branch"
+		fi
+	done
+}
+
 # do-install <url> <name>: download and install "<name>.vwlibrary". Prints "ok"
 # or "error=<message>". Self-contained (does not use install_zip's die(), which
 # would show an osascript dialog) so the plug-in owns all UI.
@@ -722,7 +780,8 @@ main() {
 		q-stable)   q_stable ;;
 		q-dev)      q_dev ;;
 		do-install) do_install "${2:-}" "${3:-}" ;;
-		*)      die "不明なチャンネル: '$channel'（stable / dev / q-stable / q-dev / do-install）。" ;;
+		q-pr-state) shift; q_pr_state "$@" ;;
+		*)      die "不明なチャンネル: '$channel'（stable / dev / q-stable / q-dev / do-install / q-pr-state）。" ;;
 	esac
 }
 

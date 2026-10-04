@@ -355,9 +355,12 @@ namespace HomeskzIfcImport::parse
 		// （実機 round 2 で実際に落ちた）。
 		if (!round.preparation.empty())
 			out << round.preparation << "\n";
-		if (counts.undoPartial)
-			out << "（取り込み前から在ったレイヤ（テンプレートのもの）へ描いた分は、次の周の前に"
-				   "取り除けません。そこも戻したいときは、人が「取り消し」で戻します。）\n";
+		// 作業ファイルがある周は、次の周が取り消しか開き直しで丸ごと戻すので言わない
+		// （FeedbackRound::restorable）。
+		if (counts.undoPartial && !round.restorable)
+			out << "（作業ファイルを用意できなかったので、取り込み前から在ったレイヤ（テンプレートの"
+				   "もの）へ描いた分は、次の周の取り消しが効かなければ残ります。そこも戻したいときは、"
+				   "人が「取り消し」で戻します。）\n";
 
 		// 前の周からの差分。1 周目（previousTally が空）では節ごと出さない。
 		const std::string diff = formatTallyDiff(round.previousTally, tally);

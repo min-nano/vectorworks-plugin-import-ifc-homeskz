@@ -426,6 +426,14 @@ vw_add_test(CoreImportOptionsTests CoreImportOptionsTests.cpp CORE)
 # a temp file.
 vw_add_test(CoreFeedbackSessionTests CoreFeedbackSessionTests.cpp CORE)
 
+# 実機テストの一時ファイルの置き場と片付け（src/core/FeedbackScratch）: ブランチごとの
+# フォルダ・q-pr-state の出力の読み方・**消してよいものの安全弁**（置き場の直下・目印の
+# 一致・ふつうのファイルだけ・開いている図面の .lck が無い）と、閉じた PR のブランチ
+# だけを消すこと。書き先はビルドツリー（CoreBridgeTests と同じ理由）。
+vw_add_test(CoreFeedbackScratchTests CoreFeedbackScratchTests.cpp CORE)
+target_compile_definitions(CoreFeedbackScratchTests
+						   PRIVATE "HOMESKZ_SCRATCH_TEST_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\"")
+
 # The test-round report (src/parse/Feedback): the per-element tally, the diff
 # against the previous round, the drawing-state line and the log trimming that
 # keeps the report on a UTF-8 boundary. Pure string work, no fixtures.
