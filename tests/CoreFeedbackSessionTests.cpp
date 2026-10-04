@@ -396,6 +396,8 @@ TEST(test_report_sits_next_to_the_memory)
 			 std::string("HomeskzIfcImport"));
 	// 置き場所が分からなければ空（呼び出し側は報告を書かずに結末へ添える）。
 	CHECK(testReportPathFor("").empty());
+	// 区切りの無いパス（環境変数でファイル名だけを渡された）なら、同じ場所に置く。
+	CHECK_EQ(testReportPathFor("feedback.txt"), std::string("last-round.md"));
 }
 
 // ---------------------------------------------------------------------------

@@ -42,7 +42,6 @@
 #include <string>
 #include <system_error>
 #include <vector>
-#include <vector>
 
 namespace HomeskzIfcImport::draw
 {

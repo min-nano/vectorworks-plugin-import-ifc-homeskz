@@ -304,6 +304,11 @@ TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
 	CHECK(!contains(failed, "終えました"));
 	// PR の話はもうしない（M38）。
 	CHECK(!contains(failed, "PR"));
+	// 中断の詳しい事情があれば、診断ログの案内の前に添える。
+	const std::string detailed =
+		formatTestRoundResult(TestRoundOutcome::ImportFailed, "IFC を開けませんでした");
+	CHECK(contains(detailed, "IFC を開けませんでした"));
+	CHECK(detailed.find("IFC を開けませんでした") < detailed.find("診断ログ"));
 
 	const std::string document =
 		formatTestRoundResult(TestRoundOutcome::DocumentFailed, "準備: 開き直せませんでした");
@@ -447,6 +452,11 @@ TEST(keep_tail_keeps_short_text_and_trims_long_text_from_the_front)
 	CHECK(!contains(kept, "行 0\n"));
 	CHECK(contains(kept, "バイトを省略"));
 	CHECK(validUtf8(kept));
+	// 予算が省略の案内より小さくても、範囲の外を読まない（本文は 1 行も残らない）。
+	const std::string tiny = keepTail(log, 10);
+	CHECK(contains(tiny, "バイトを省略"));
+	CHECK(!contains(tiny, "行 99"));
+	CHECK(validUtf8(tiny));
 }
 
 TEST_MAIN();

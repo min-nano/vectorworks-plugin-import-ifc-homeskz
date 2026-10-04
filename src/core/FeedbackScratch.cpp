@@ -39,21 +39,10 @@ namespace HomeskzIfcImport::core
 
 		bool writeMarker(const fs::path& dir, const std::string& branch)
 		{
+			// 開けなかったストリームへの書き込みは失敗するだけなので、最後の状態で判じる。
 			std::ofstream out(dir / kScratchBranchFile, std::ios::binary | std::ios::trunc);
-			if (!out)
-				return false;
 			out << branch << "\n";
 			return static_cast<bool>(out);
-		}
-
-		// 正規化した絶対パス（在るものは実体へ。駄目なら素の絶対パス）。
-		fs::path canonicalOr(const fs::path& path)
-		{
-			std::error_code ec;
-			fs::path result = fs::weakly_canonical(path, ec);
-			if (ec)
-				result = fs::absolute(path, ec);
-			return result;
 		}
 
 		bool endsWith(const std::string& text, const std::string& suffix)
@@ -83,16 +72,15 @@ namespace HomeskzIfcImport::core
 
 	std::string prepareBranchScratch(const std::string& root, const std::string& branch)
 	{
-		if (root.empty())
-			return "";
 		std::error_code ec;
 		fs::create_directories(fs::path(root), ec);
-		if (ec)
+		if (root.empty() || ec)
 			return "";
 		const std::string base = scratchDirName(branch);
 		// **同じ名前に写る別のブランチとは番号で分ける。** 目印が自分のブランチなら
-		// それを使い、別のブランチなら次の番号へ。上限に意味は無く、暴走を止めるだけ。
-		for (int i = 1; i <= 100; ++i)
+		// それを使い、別のブランチなら次の番号へ。上限は置かない——進むのは既にある
+		// フォルダの上だけで、フォルダの数は有限なので必ず止まる。
+		for (int i = 1;; ++i)
 		{
 			const fs::path dir = fs::path(root) / (i == 1 ? base : base + "-" + std::to_string(i));
 			if (fs::is_directory(dir, ec))
@@ -101,22 +89,18 @@ namespace HomeskzIfcImport::core
 					return dir.string();
 				continue;
 			}
-			if (!fs::create_directory(dir, ec) || ec)
-				return "";
-			if (!writeMarker(dir, branch))
+			// 同じ名前のファイルが居座っている等で作れなければ諦める。
+			if (!fs::create_directory(dir, ec) || !writeMarker(dir, branch))
 				return "";
 			return dir.string();
 		}
-		return "";
 	}
 
 	std::vector<ScratchDir> listScratchDirs(const std::string& root)
 	{
 		std::vector<ScratchDir> dirs;
-		if (root.empty())
-			return dirs;
-		std::error_code ec;
-		fs::directory_iterator it(fs::path(root), ec);
+		std::error_code ec; // 置き場が無い（空のパスを含む）なら空のまま返る
+		const fs::directory_iterator it(fs::path(root), ec);
 		if (ec)
 			return dirs;
 		for (const fs::directory_entry& entry : it)
@@ -185,7 +169,10 @@ namespace HomeskzIfcImport::core
 			why = "フォルダではない";
 			return false;
 		}
-		if (canonicalOr(target).parent_path() != canonicalOr(fs::path(root)))
+		std::error_code rootEc;
+		const fs::path parent = fs::weakly_canonical(target, ec).parent_path();
+		const fs::path canonicalRoot = fs::weakly_canonical(fs::path(root), rootEc);
+		if (ec || rootEc || parent != canonicalRoot)
 		{
 			why = "置き場の直下ではない";
 			return false;
@@ -199,7 +186,7 @@ namespace HomeskzIfcImport::core
 		}
 
 		std::vector<fs::path> files;
-		fs::directory_iterator it(target, ec);
+		const fs::directory_iterator it(target, ec);
 		if (ec)
 		{
 			why = "中身を読めない";

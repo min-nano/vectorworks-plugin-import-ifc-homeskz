@@ -116,6 +116,28 @@ TEST(prepare_branch_scratch_separates_branches_that_map_to_the_same_name)
 	CHECK_EQ(listScratchDirs(temp.root()).size(), static_cast<std::size_t>(2));
 }
 
+TEST(prepare_branch_scratch_gives_up_when_it_cannot_create_the_folder)
+{
+	const TempRoot temp("cannot");
+	// 置き場が空・置き場の場所にファイルが居座っている・フォルダの場所にファイルが居座っている。
+	CHECK(prepareBranchScratch("", "claude/x").empty());
+	touch(fs::path(temp.outside()) / "not-a-dir");
+	CHECK(prepareBranchScratch((fs::path(temp.outside()) / "not-a-dir").string(), "claude/x")
+			  .empty());
+	touch(fs::path(temp.root()) / "claude-x");
+	CHECK(prepareBranchScratch(temp.root(), "claude/x").empty());
+}
+
+TEST(list_scratch_dirs_reads_a_marker_written_with_crlf)
+{
+	// Windows で手が入った目印（CRLF）でも、ブランチ名に CR を混ぜない。
+	const TempRoot temp("crlf");
+	const fs::path dir = fs::path(temp.root()) / "claude-crlf";
+	fs::create_directories(dir);
+	touch(dir / kScratchBranchFile, "claude/crlf\r\n");
+	CHECK_EQ(only(temp.root()).branch, std::string("claude/crlf"));
+}
+
 TEST(list_scratch_dirs_ignores_folders_without_a_marker_and_sorts_by_name)
 {
 	const TempRoot temp("list");
@@ -141,6 +163,7 @@ TEST(parse_pr_states_reads_the_script_lines)
 									  "pr-state\tnone\tclaude/c\n"
 									  "pr-state\terror\tclaude/d\n"
 									  "garbage line\n"
+									  "pr-state\topen\n"
 									  "pr-state\tclosed\t\n"
 									  "error=GitHub が HTTP 500 を返しました。\n");
 	CHECK_EQ(states.size(), static_cast<std::size_t>(4));
@@ -231,6 +254,70 @@ TEST(remove_scratch_dir_refuses_a_mismatched_marker_or_a_folder_outside_the_root
 	// 空のブランチ名（目印が読めなかった）は消さない。
 	CHECK(!removeScratchDir(temp.root(), ScratchDir{dir, ""}, why));
 	CHECK(fs::exists(dir));
+	// 目印の無いフォルダは、名乗りが何であれ消さない。
+	const fs::path unmarked = fs::path(temp.root()) / "unmarked";
+	fs::create_directories(unmarked);
+	touch(unmarked / "work-1.vwx");
+	CHECK(!removeScratchDir(temp.root(), ScratchDir{unmarked.string(), "claude/x"}, why));
+	CHECK(fs::exists(unmarked / "work-1.vwx"));
+	// フォルダでないもの（ファイル・無いパス）も。
+	CHECK(!removeScratchDir(temp.root(), ScratchDir{(unmarked / "work-1.vwx").string(), "x"},
+							why));
+	CHECK(!removeScratchDir(temp.root(), ScratchDir{temp.root() + "/missing", "x"}, why));
+}
+
+TEST(remove_scratch_dir_stops_without_partial_damage_when_permissions_refuse)
+{
+	// 権限で読めない・消せないフォルダは、途中まで消して壊さずに止まる。**root で走ると
+	// 権限が効かない**ので、そのときは確かめようが無く飛ばす（CI のランナーは root ではない）。
+	const auto perms = [](const std::string& path, fs::perms p)
+	{
+		std::error_code ec;
+		fs::permissions(path, p, fs::perm_options::replace, ec);
+	};
+	const fs::perms all = fs::perms::owner_all;
+	std::string why;
+
+	// 読めない（中身を数えられない）。
+	const TempRoot unreadable("unreadable");
+	const std::string dir1 = prepareBranchScratch(unreadable.root(), "claude/unreadable");
+	touch(fs::path(dir1) / "work-1.vwx");
+	perms(dir1, fs::perms::owner_write | fs::perms::owner_exec);
+	std::error_code probe;
+	const fs::directory_iterator readable(dir1, probe);
+	if (probe)
+	{
+		CHECK(!removeScratchDir(unreadable.root(), ScratchDir{dir1, "claude/unreadable"}, why));
+		perms(dir1, all);
+		CHECK(fs::exists(fs::path(dir1) / "work-1.vwx"));
+	}
+	perms(dir1, all);
+
+	// 書けない（中のファイルを消せない）。
+	const TempRoot locked("locked");
+	const std::string dir2 = prepareBranchScratch(locked.root(), "claude/locked");
+	touch(fs::path(dir2) / "work-1.vwx");
+	perms(dir2, fs::perms::owner_read | fs::perms::owner_exec);
+	const ScratchDir target2{dir2, "claude/locked"};
+	if (!removeScratchDir(locked.root(), target2, why))
+	{
+		perms(dir2, all);
+		CHECK(!why.empty());
+		CHECK(fs::exists(fs::path(dir2) / kScratchBranchFile)); // 目印は残る＝次の周でまた候補
+	}
+	perms(dir2, all);
+
+	// 目印しか残っていないのに消せない（最後の 1 枚で止まる）。
+	const TempRoot last("last");
+	const std::string dir3 = prepareBranchScratch(last.root(), "claude/last");
+	perms(dir3, fs::perms::owner_read | fs::perms::owner_exec);
+	if (!removeScratchDir(last.root(), ScratchDir{dir3, "claude/last"}, why))
+	{
+		perms(dir3, all);
+		CHECK(!why.empty());
+		CHECK(fs::exists(dir3));
+	}
+	perms(dir3, all);
 }
 
 TEST(clean_up_removes_only_branches_whose_pr_is_closed)
