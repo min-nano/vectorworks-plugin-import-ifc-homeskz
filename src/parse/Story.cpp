@@ -117,13 +117,23 @@ namespace HomeskzIfcImport::parse
 
 	std::string spanLayerName(double fromLevel, double toLevel)
 	{
-		return formatSpanLevel(fromLevel) + "to" + formatSpanLevel(toLevel) + "-" +
-			   kColumnLayerSuffix;
+		return spanLayerName(fromLevel, toLevel, kColumnLayerSuffix);
+	}
+
+	std::string spanLayerName(double fromLevel, double toLevel, const std::string& suffix)
+	{
+		return formatSpanLevel(fromLevel) + "to" + formatSpanLevel(toLevel) + "-" + suffix;
 	}
 
 	bool parseSpanLayer(const std::string& name, double& outFrom, double& outTo)
 	{
-		const std::string suffix = std::string("-") + kColumnLayerSuffix;
+		return parseSpanLayer(name, kColumnLayerSuffix, outFrom, outTo);
+	}
+
+	bool parseSpanLayer(const std::string& name, const std::string& layerSuffix, double& outFrom,
+						double& outTo)
+	{
+		const std::string suffix = "-" + layerSuffix;
 		if (name.size() <= suffix.size() ||
 			name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
 			return false;
@@ -299,6 +309,35 @@ namespace HomeskzIfcImport::parse
 		return collectStories(context);
 	}
 
+	namespace
+	{
+		// 階 story に属する登り梁の span レイヤ（"{from}to{to}-登り梁"。from の伏図レベルが
+		// その階のもの）。(from, to) 昇順・重複なし。
+		std::vector<std::string>
+		noboribariSpanLayers(const std::vector<core::MemberCommand>& members,
+							 const std::vector<PlanLevel>& levels, std::size_t story)
+		{
+			std::vector<std::pair<std::pair<double, double>, std::string>> spans;
+			for (const core::MemberCommand& member : members)
+			{
+				double from = 0.0;
+				double to = 0.0;
+				if (!parseSpanLayer(member.layer, kLevelNoboribari, from, to) ||
+					storyOfOrdinal(levels, from) != story)
+					continue;
+				spans.push_back({{from, to}, member.layer});
+			}
+			std::ranges::sort(spans);
+			const auto duplicates = std::ranges::unique(spans);
+			spans.erase(duplicates.begin(), duplicates.end());
+			std::vector<std::string> out;
+			out.reserve(spans.size());
+			for (const auto& span : spans)
+				out.push_back(span.second);
+			return out;
+		}
+	} // namespace
+
 	std::vector<StoryCommand> buildStoryCommands(Context& context)
 	{
 		const std::vector<StoryInfo>& stories = context.stories();
@@ -423,19 +462,16 @@ namespace HomeskzIfcImport::parse
 									   upperOffset + planLevelShift(*level, info));
 			}
 
-			// 登り梁は水下側の伏図レベルのレイヤへ分かれている（parse/PlanLevel）ので、
-			// 耐力壁と同じく伏図レベルごとに確かめる。母屋は分けない。
-			if (storyLevels.empty())
-			{
-				if (anyMemberOnLayer(members, layerFor(kLevelNoboribari)))
-					insertAboveBeamTop(kLevelNoboribari, upperOffset);
-			}
-			for (const PlanLevel* level : storyLevels)
-			{
-				if (anyMemberOnLayer(members, planLevelLayer(*level, info, kLevelNoboribari)))
-					insertAboveBeamTop(planLevelType(*level, kLevelNoboribari),
-									   upperOffset + planLevelShift(*level, info));
-			}
+			// 登り梁は柱と同じく、映す伏図の範囲の span レイヤ（"{from}to{to}-登り梁"）へ
+			// 分かれている（parse/PlanLevel の noboribariSpan）。その階に属する span（from の
+			// 伏図レベルの階）ごとにレベルを作る。種別はレイヤ名そのもの（span ごとに一意。
+			// 柱の span レベルと同じ）で、高さは登り梁レベルと同じ。伏図レベルを持たず
+			// 振り分けられなかった材は従来の "n-登り梁" に残る。母屋は分けない。
+			if (anyMemberOnLayer(members, layerFor(kLevelNoboribari)))
+				insertAboveBeamTop(kLevelNoboribari, upperOffset);
+			for (const std::string& layer : noboribariSpanLayers(members, planLevels, i))
+				cmd.levels.insert(cmd.levels.begin() + beamTopIndex,
+								  LevelCommand{layer, upperOffset, layer});
 			if (anyMemberOnLayer(members, layerFor(kLevelMoya)))
 				insertAboveBeamTop(kLevelMoya, upperOffset);
 

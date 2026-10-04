@@ -127,10 +127,26 @@ namespace HomeskzIfcImport::parse
 	// ものは "（FL-872・FL-771）"。高さは FL、最上階は軒高から）。1 つだけなら空（タイトルは従来のまま）。
 	std::string planLevelTitleSuffix(const std::vector<PlanLevel>& levels, const PlanLevel& level);
 
+	// 登り梁が基準高さ（伏図レベルの高さ）を跨ぐとみなす許容（mm）。端がちょうど基準高さに
+	// ある材は跨ぐものとする。
+	inline constexpr double kNoboribariLevelTol = 1.0;
+
+	// 登り梁を映す伏図の範囲（ご要望）。柱の span（"{from}to{to}-柱"）と同じ通し番号の範囲で
+	// 表し、柱梁伏図（切断＝通し番号 + 0.25）・母屋伏図（切断＝その階のいちばん上の通し番号
+	// + 0.75）は、切断を範囲に含む登り梁を映す（parse/Sheet の spanLayersAtCut）。
+	//   * 柱梁伏図: その階の伏図レベルのうち、高さを跨ぐ（下端 ≤ 高さ ≤ 上端）もの。
+	//   * 母屋伏図: 上端がその階のいちばん上の伏図レベルの高さ以上のもの。
+	//   * どちらにも当たらなければ、低い側の端に近い伏図レベルの柱梁伏図。
+	// 範囲は、柱梁伏図 o だけなら [o, o + 0.5]、母屋伏図にも映すなら to = いちばん上 + 1、
+	// 母屋伏図だけなら [いちばん上 + 0.5, いちばん上 + 1]。その階に伏図レベルが無ければ false。
+	bool noboribariSpan(const core::MemberCommand& member, const std::vector<PlanLevel>& levels,
+						std::size_t story, double& from, double& to);
+
 	// 横架材命令の配置先を伏図レベルのレイヤへ振り分ける。対象は横架材レイヤ
 	// （beamTopLayerName）と登り梁の専用レイヤ（"n-登り梁"）に載る材で、水平な材は天端、
 	// 傾いた材は低い側の端の天端にいちばん近い伏図レベルへ入れる（ヘッダ冒頭）。母屋の
-	// 専用レイヤは振り分けない（母屋伏図にだけ映る）。横架材レイヤの**軒桁**（クラスで判別）は
+	// 専用レイヤは振り分けない（母屋伏図にだけ映る）。登り梁は noboribariSpan の範囲の
+	// span レイヤ（"{from}to{to}-登り梁"）へ置き、高さ基準もそのレベルへ付け替える。横架材レイヤの**軒桁**（クラスで判別）は
 	// 軒桁の専用レイヤ（"n-軒桁" / "n-軒桁(FL-872)"）へ分ける（母屋伏図に薄く重ねるため。
 	// 取り合いを見るときは parse/Story の beamGroupLayer で横架材レイヤへ読み替える）。
 	void assignMemberPlanLevels(std::vector<core::MemberCommand>& members,

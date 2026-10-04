@@ -1470,23 +1470,29 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 母屋伏図 layers が映す階（そのレベルのレイヤを 1 枚でも映す階）の、登り梁の
-		// レイヤ（伏図レベルごとの "n-登り梁" / "n-登り梁(FL-872)"）。
+		// 母屋伏図 layers が映す階（その垂木のレイヤを映す階。母屋伏図は必ず垂木を映す。
+		// 下の階の柱の span レイヤも映るので、レイヤを 1 枚でも映す階、では広すぎる）の、
+		// 母屋伏図に映していない登り梁のレイヤ（span レイヤ "{from}to{to}-登り梁"。
+		// parse/PlanLevel の noboribariSpan。振り分けられずに残った "n-登り梁" も）。
 		std::vector<std::string> noboribariLayersOfSheet(const core::Document& document,
 														 const std::vector<std::string>& layers)
 		{
 			std::vector<std::string> out;
 			for (const core::StoryCommand& story : document.stories)
 			{
-				const bool shown =
-					std::ranges::any_of(story.levels, [&layers](const core::LevelCommand& level)
-										{ return onLayers(layers, level.layer); });
+				const bool shown = std::ranges::any_of(
+					story.levels, [&layers](const core::LevelCommand& level)
+					{ return level.type == core::kLevelTaruki && onLayers(layers, level.layer); });
 				if (!shown)
 					continue;
 				for (const core::LevelCommand& level : story.levels)
 				{
-					if (core::stripPlanLevelTag(level.type) == core::kLevelNoboribari &&
-						!onLayers(layers, level.layer))
+					double from = 0.0;
+					double to = 0.0;
+					const bool noboribari =
+						core::stripPlanLevelTag(level.type) == core::kLevelNoboribari ||
+						parseSpanLayer(level.layer, core::kLevelNoboribari, from, to);
+					if (noboribari && !onLayers(layers, level.layer))
 						out.push_back(level.layer);
 				}
 			}
@@ -1551,9 +1557,10 @@ namespace HomeskzIfcImport::parse
 			std::ranges::copy_if(document.members, std::back_inserter(eaves),
 								 [&sheet](const core::MemberCommand& member)
 								 { return onLayers(sheet.viewport.grayedLayers, member.layer); });
-			// 同じ階の登り梁も加える。登り梁は母屋伏図には映さない（水下側の柱梁伏図に映す。
-			// parse/Sheet）が、母屋・棟木・軒桁に取り付く位置は母屋伏図で押さえてきた
-			// （実機確認済みの押さえ方を保つ）。
+			// 同じ階の、母屋伏図に映していない登り梁（上端がいちばん上の伏図レベルに届かない
+			// もの。柱梁伏図に映す。parse/Sheet）も加える。母屋・棟木・軒桁に取り付く位置は
+			// 母屋伏図で押さえてきた（実機確認済みの押さえ方を保つ。い通りの登り梁の
+			// 5〜又 7 通り）。
 			for (const std::string& layer : noboribariLayersOfSheet(document, layers))
 			{
 				std::ranges::copy_if(document.members, std::back_inserter(members),

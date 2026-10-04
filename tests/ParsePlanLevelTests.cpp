@@ -39,6 +39,7 @@ using HomeskzIfcImport::parse::collectBeamHeights;
 using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::Model;
 using HomeskzIfcImport::parse::nearestPlanLevel;
+using HomeskzIfcImport::parse::noboribariSpan;
 using HomeskzIfcImport::parse::PlanLevel;
 using HomeskzIfcImport::parse::planLevelAbove;
 using HomeskzIfcImport::parse::planLevelLayer;
@@ -180,8 +181,7 @@ TEST(plan_levels_number_every_height_and_mark_the_standard)
 }
 
 // 水平な横架材が 1 本も無い階にも標準の伏図レベルが必ず 1 つでき、登り梁はどの階でも
-// いずれかの伏図レベルのレイヤ（＝柱梁伏図に映るレイヤ）へ入る。母屋伏図が登り梁を
-// 映さない（parse/Sheet）のは、これで登り梁がどの伏図からも消えないと言えるから。
+// 伏図に映る span レイヤ（"{from}to{to}-登り梁"）へ入る。
 TEST(every_story_has_one_standard_level_so_noboribari_always_reach_a_framing_plan)
 {
 	const std::vector<StoryInfo> stories = twoStories();
@@ -206,7 +206,11 @@ TEST(every_story_has_one_standard_level_so_noboribari_always_reach_a_framing_pla
 		bool onPlan = false;
 		for (const PlanLevel& level : levels)
 		{
-			if (member.layer == planLevelLayer(level, stories[level.story], "登り梁"))
+			double from = 0.0;
+			double to = 0.0;
+			if (parse::parseSpanLayer(member.layer, "登り梁", from, to) &&
+				static_cast<double>(level.ordinal) + 0.25 >= from &&
+				static_cast<double>(level.ordinal) + 0.25 <= to)
 				onPlan = true;
 		}
 		CHECK(onPlan);
@@ -286,7 +290,8 @@ TEST(members_move_to_their_plan_level_layer)
 		beam("2-横架材天端", 3490.0, 2750.0), beam("2-横架材天端", 3300.0, 4000.0),
 		// 母屋レイヤの材は振り分けない（母屋伏図が別にある）。
 		beam("2-母屋", 2700.0, 2700.0),
-		// 登り梁の専用レイヤの材も水下側で切り分ける（その高さの柱梁伏図に映すため）。
+		// 登り梁は映す伏図の範囲の span レイヤへ（noboribariSpan。下のテスト）。2700（通し
+		// 番号 2）と 3490（3）を跨ぎ母屋伏図にも届くもの、3490 だけを跨ぎ母屋伏図にも届くもの。
 		beam("2-登り梁", 3900.0, 2710.0), beam("2-登り梁", 3480.0, 4200.0)};
 	assignMemberPlanLevels(members, stories, levels);
 	CHECK_EQ(members[0].layer, std::string("2-横架材天端(FL-800)"));
@@ -294,8 +299,40 @@ TEST(members_move_to_their_plan_level_layer)
 	CHECK_EQ(members[2].layer, std::string("2-横架材天端(FL-800)"));
 	CHECK_EQ(members[3].layer, std::string("2-横架材天端"));
 	CHECK_EQ(members[4].layer, std::string("2-母屋"));
-	CHECK_EQ(members[5].layer, std::string("2-登り梁(FL-800)"));
-	CHECK_EQ(members[6].layer, std::string("2-登り梁"));
+	CHECK_EQ(members[5].layer, std::string("2to4-登り梁"));
+	CHECK_EQ(members[6].layer, std::string("3to4-登り梁"));
+	// 高さ基準もその span のレベルへ。
+	CHECK_EQ(members[6].startBound.level, std::string("3to4-登り梁"));
+	CHECK_EQ(members[6].endBound.level, std::string("3to4-登り梁"));
+}
+
+TEST(noboribari_take_the_span_of_the_plans_they_appear_on)
+{
+	// 2 階の伏図レベルは 2700（通し番号 2）と 3490（3。いちばん上）。柱梁伏図は高さを跨ぐ
+	// （下端 ≤ 高さ ≤ 上端）登り梁を、母屋伏図は上端が 3490 以上の登り梁を映す（ご要望）。
+	// 範囲は柱と同じく柱梁伏図の切断（通し番号 + 0.25）・母屋伏図の切断（3 + 0.75）を含む。
+	const std::vector<StoryInfo> stories = twoStories();
+	const std::vector<PlanLevel> levels =
+		buildPlanLevels(stories, {{590}, {2700, 3490}, {6300}}, ImportOptions{});
+	const auto span = [&](double startZ, double endZ)
+	{
+		double from = 0.0;
+		double to = 0.0;
+		CHECK(noboribariSpan(beam("2-登り梁", startZ, endZ), levels, 1, from, to));
+		return std::pair<double, double>{from, to};
+	};
+	// 3490 より上にだけある（下端 3550）: 母屋伏図だけ。
+	CHECK((span(3700.0, 4500.0) == std::pair<double, double>{3.5, 4.0}));
+	// 2700 を跨ぐが上端が 3490 に届かない（実機の軒高 -1570〜-302 の登り梁）: 2700 の柱梁
+	// 伏図だけ。
+	CHECK((span(2690.0, 3300.0) == std::pair<double, double>{2.0, 2.5}));
+	// 3490 を跨ぐ: 3490 の柱梁伏図と母屋伏図。
+	CHECK((span(3480.0, 4200.0) == std::pair<double, double>{3.0, 4.0}));
+	// どれも跨がず母屋伏図にも届かない: 低い側の端に近い伏図レベル（3300 → 3490）の
+	// 柱梁伏図。
+	CHECK((span(3480.0, 3300.0) == std::pair<double, double>{3.0, 3.5}));
+	// 端がちょうど伏図レベルの高さなら跨ぐとみなす（上端 2700）。
+	CHECK((span(2600.0, 2700.0) == std::pair<double, double>{2.0, 2.5}));
 }
 
 TEST(eaves_girders_move_to_their_own_layer)
