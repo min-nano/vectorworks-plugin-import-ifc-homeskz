@@ -240,6 +240,11 @@ TEST(FloorFramingSheetPerPlanLevelWithBeamAndGridLayers)
 				CHECK(contains(sheets[k].viewport.layers, kLayerFoundationAnchor) == expectAnchor);
 				// クラスで隠すのは基礎伏図だけ（柱梁伏図は全クラス表示）。
 				CHECK(sheets[k].viewport.hiddenClasses.empty());
+				// 軒桁は専用レイヤでも柱梁伏図にはふつうに映す（薄くしない）。
+				const std::string eaves = storyLayerName(i, isTop, std::string("軒桁") + level.tag);
+				CHECK(contains(sheets[k].viewport.layers, eaves) ==
+					  (storyLayerNames(model).count(eaves) == 1));
+				CHECK(sheets[k].viewport.grayedLayers.empty());
 			}
 		});
 }
@@ -356,6 +361,11 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 				CHECK(contains(sheet.viewport.layers, core::kGridLayer));
 				// 母屋伏図には床（FL）を載せない（梁組と分ける図なので）。
 				CHECK(!contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "FL")));
+				// 同じ階の軒桁は、あればグレーで重ねる（表示レイヤには入れない）。
+				const std::string eaves = storyLayerName(i, stories[i].isTop, "軒桁");
+				CHECK(!contains(sheet.viewport.layers, eaves));
+				CHECK(contains(sheet.viewport.grayedLayers, eaves) ==
+					  (storyLayerNames(model).count(eaves) == 1));
 				// 登り梁も載せない（水下側の柱梁伏図に映してあり、重ねると高さの関係が
 				// 直感に反する。ご要望）。
 				for (const std::string& layer : sheet.viewport.layers)
@@ -414,6 +424,8 @@ TEST(ViewportLayersExistAmongStoryLayers)
 					   for (const SheetCommand& sheet : buildSheetCommands(model))
 					   {
 						   for (const std::string& layer : sheet.viewport.layers)
+							   CHECK(known.count(layer) == 1);
+						   for (const std::string& layer : sheet.viewport.grayedLayers)
 							   CHECK(known.count(layer) == 1);
 					   }
 				   });

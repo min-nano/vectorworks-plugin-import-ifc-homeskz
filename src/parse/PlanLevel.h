@@ -130,7 +130,9 @@ namespace HomeskzIfcImport::parse
 	// 横架材命令の配置先を伏図レベルのレイヤへ振り分ける。対象は横架材レイヤ
 	// （beamTopLayerName）と登り梁の専用レイヤ（"n-登り梁"）に載る材で、水平な材は天端、
 	// 傾いた材は低い側の端の天端にいちばん近い伏図レベルへ入れる（ヘッダ冒頭）。母屋の
-	// 専用レイヤは振り分けない（母屋伏図にだけ映る）。
+	// 専用レイヤは振り分けない（母屋伏図にだけ映る）。横架材レイヤの**軒桁**（クラスで判別）は
+	// 軒桁の専用レイヤ（"n-軒桁" / "n-軒桁(FL-872)"）へ分ける（母屋伏図に薄く重ねるため。
+	// 取り合いを見るときは parse/Story の beamGroupLayer で横架材レイヤへ読み替える）。
 	void assignMemberPlanLevels(std::vector<core::MemberCommand>& members,
 								const std::vector<StoryInfo>& stories,
 								const std::vector<PlanLevel>& levels);

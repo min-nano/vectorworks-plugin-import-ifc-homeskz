@@ -23,6 +23,7 @@
 #include "parse/Loader.h"
 #include "parse/PlanLevel.h"
 #include "parse/Story.h"
+#include "parse/StructuralClass.h"
 
 #include <cstddef>
 #include <string>
@@ -295,6 +296,28 @@ TEST(members_move_to_their_plan_level_layer)
 	CHECK_EQ(members[4].layer, std::string("2-母屋"));
 	CHECK_EQ(members[5].layer, std::string("2-登り梁(FL-800)"));
 	CHECK_EQ(members[6].layer, std::string("2-登り梁"));
+}
+
+TEST(eaves_girders_move_to_their_own_layer)
+{
+	// 軒桁（クラスで判別）は母屋伏図に薄く重ねるため、横架材レイヤから軒桁の専用レイヤへ
+	// 分ける。伏図レベルの分け方は横架材と同じ（標準でない高さは印が付く）。高さ基準の
+	// レベルは元のまま（横架材天端）。
+	const std::vector<StoryInfo> stories = twoStories();
+	const std::vector<PlanLevel> levels =
+		buildPlanLevels(stories, {{590}, {2700, 3490}, {6300}}, ImportOptions{});
+	std::vector<MemberCommand> members = {beam("2-横架材天端", 3490.0, 3490.0),
+										  beam("2-横架材天端", 2700.0, 2700.0),
+										  beam("R-軒高", 6300.0, 6300.0)};
+	for (MemberCommand& member : members)
+		member.drawClass = parse::CLASS_NOKIGETA;
+	assignMemberPlanLevels(members, stories, levels);
+	CHECK_EQ(members[0].layer, std::string("2-軒桁"));
+	CHECK_EQ(members[1].layer, std::string("2-軒桁(FL-800)"));
+	CHECK_EQ(members[2].layer, std::string("R-軒桁"));
+	// 取り合いを見るときは同じ伏図レベルの横架材レイヤとして読み替える。
+	CHECK_EQ(parse::beamGroupLayer(members[1].layer), std::string("2-横架材天端(FL-800)"));
+	CHECK_EQ(parse::beamGroupLayer(members[2].layer), std::string("R-軒高"));
 }
 
 // ---------------------------------------------------------------------------

@@ -12,7 +12,6 @@
 #include "core/Document.h"
 #include "parse/Section.h"
 #include "parse/Story.h"
-#include "parse/StructuralClass.h"
 #include "parse/Tag.h"
 
 #include <algorithm>
@@ -1471,38 +1470,26 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 母屋伏図 layers に映る母屋・登り梁と同じ階の軒桁（その階の軒高・横架材天端の
-		// レイヤに置かれた、クラスが軒桁の材）。母屋伏図には映らないが、登り梁は軒桁に
-		// 取り付くので、その交点を押さえるのに要る（ご要望: 5 通り側も 1 通りと同様に）。
-		// 同じレイヤの小屋梁・床梁などは入れない。
-		std::vector<core::MemberCommand> eavesGirders(const core::Document& document,
-													  const std::vector<std::string>& layers)
+		// 母屋伏図 layers が映す階（そのレベルのレイヤを 1 枚でも映す階）の、登り梁の
+		// レイヤ（伏図レベルごとの "n-登り梁" / "n-登り梁(FL-872)"）。
+		std::vector<std::string> noboribariLayersOfSheet(const core::Document& document,
+														 const std::vector<std::string>& layers)
 		{
-			std::vector<std::string> eavesLayers;
+			std::vector<std::string> out;
 			for (const core::StoryCommand& story : document.stories)
 			{
-				const bool roofOfThisSheet =
-					std::ranges::any_of(story.levels,
-										[&layers](const core::LevelCommand& level)
-										{
-											return (level.type == core::kLevelMoya ||
-													level.type == core::kLevelNoboribari) &&
-												   onLayers(layers, level.layer);
-										});
-				if (!roofOfThisSheet)
+				const bool shown =
+					std::ranges::any_of(story.levels, [&layers](const core::LevelCommand& level)
+										{ return onLayers(layers, level.layer); });
+				if (!shown)
 					continue;
 				for (const core::LevelCommand& level : story.levels)
 				{
-					if (level.type == core::kLevelEaves || level.type == core::kLevelBeamTop)
-						eavesLayers.push_back(level.layer);
+					if (core::stripPlanLevelTag(level.type) == core::kLevelNoboribari &&
+						!onLayers(layers, level.layer))
+						out.push_back(level.layer);
 				}
 			}
-			std::vector<core::MemberCommand> out;
-			std::ranges::copy_if(document.members, std::back_inserter(out),
-								 [&eavesLayers](const core::MemberCommand& member) {
-									 return member.drawClass == CLASS_NOKIGETA &&
-											onLayers(eavesLayers, member.layer);
-								 });
 			return out;
 		}
 	} // namespace
@@ -1554,10 +1541,28 @@ namespace HomeskzIfcImport::parse
 			// 内部の横架材に沿う列が押さえる。
 			return framingDimensionChains(members, columns, document.grids, min, max);
 		case core::PlanKind::Moya:
+		{
 			// 母屋・登り梁を床伏図・小屋伏図と同じく通りに沿って押さえ、斜めの登り梁は交点を
-			// 押さえる（垂木は横架材の命令ではないので入らない）。その屋根の軒桁も加える。
-			return moyaDimensionChains(members, eavesGirders(document, layers), document.members,
-									   columns, document.grids, min, max);
+			// 押さえる（垂木は横架材の命令ではないので入らない）。薄く重ねる同じ階の軒桁
+			// （viewport.grayedLayers。parse/Sheet）も加える——図の外形・タグの対象では
+			// ないが、登り梁は軒桁に取り付くので、その交点を押さえる（ご要望: 5 通り側も
+			// 1 通りと同様に）。
+			std::vector<core::MemberCommand> eaves;
+			std::ranges::copy_if(document.members, std::back_inserter(eaves),
+								 [&sheet](const core::MemberCommand& member)
+								 { return onLayers(sheet.viewport.grayedLayers, member.layer); });
+			// 同じ階の登り梁も加える。登り梁は母屋伏図には映さない（水下側の柱梁伏図に映す。
+			// parse/Sheet）が、母屋・棟木・軒桁に取り付く位置は母屋伏図で押さえてきた
+			// （実機確認済みの押さえ方を保つ）。
+			for (const std::string& layer : noboribariLayersOfSheet(document, layers))
+			{
+				std::ranges::copy_if(document.members, std::back_inserter(members),
+									 [&layer](const core::MemberCommand& member)
+									 { return member.layer == layer; });
+			}
+			return moyaDimensionChains(members, eaves, document.members, columns, document.grids,
+									   min, max);
+		}
 		}
 		return {};
 	}
@@ -1769,8 +1774,10 @@ namespace HomeskzIfcImport::parse
 			if (!memberOnCutPlane(member, section))
 				continue;
 			// 伏図レベルのレイヤ（"2-横架材天端(FL-872)"）の材も、その階の標準の天端
-			// からの差を押さえる（印を外した元のレイヤのレベル。parse/PlanLevel）。
-			const auto level = levels.find(core::stripPlanLevelTag(member.layer));
+			// からの差を押さえる（印を外した元のレイヤのレベル。parse/PlanLevel）。軒桁の
+			// 専用レイヤの材は同じ階の横架材レイヤのレベルで見る（parse/Story の
+			// beamGroupLayer）。
+			const auto level = levels.find(core::stripPlanLevelTag(beamGroupLayer(member.layer)));
 			if (level == levels.end() || (level->second.type != core::kLevelBeamTop &&
 										  level->second.type != core::kLevelEaves))
 				continue;

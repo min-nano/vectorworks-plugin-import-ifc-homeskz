@@ -20,6 +20,7 @@
 #include "core/Geometry.h"
 #include "core/ImportOptions.h"
 #include "parse/Splice.h"
+#include "parse/Story.h"
 #include "parse/StructuralClass.h"
 
 #include <algorithm>
@@ -264,7 +265,8 @@ TEST(splice_fixtures_sit_where_two_member_ends_meet)
 				std::size_t endsHere = 0;
 				for (const MemberCommand& m : document.members)
 				{
-					if (m.layer != splice.layer)
+					// 軒桁の継手は横架材レイヤに置く（parse/Story の beamGroupLayer）。
+					if (HomeskzIfcImport::parse::beamGroupLayer(m.layer) != splice.layer)
 						continue;
 					for (const Vec2& end : {memberDrawnStart(m), memberDrawnEnd(m)})
 						if (HomeskzIfcImport::core::length(end - splice.position) <= 1.0)

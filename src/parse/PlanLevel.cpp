@@ -8,6 +8,7 @@
 #include "parse/PlanLevel.h"
 #include "parse/Context.h"
 #include "parse/Sheet.h"
+#include "parse/StructuralClass.h"
 
 #include <algorithm>
 #include <cmath>
@@ -253,15 +254,25 @@ namespace HomeskzIfcImport::parse
 				const bool beam = member.layer == beamLayer;
 				if (!beam && member.layer != noboribariLayer)
 					continue;
+				// 軒桁は母屋伏図に薄く重ねるため、横架材レイヤから専用の "n-軒桁" へ分ける
+				// （ご要望。core::kLevelNokigeta）。伏図レベルの分け方は横架材と同じ。
+				const bool eaves = beam && member.drawClass == CLASS_NOKIGETA;
 				// 水平な材は天端、傾いた材は水下（低い側の端）の天端で決める。
 				const double z = std::min(member.elevation, member.endElevation);
 				const PlanLevel* level = nearestPlanLevel(levels, i, z);
 				if (level == nullptr)
+				{
+					if (eaves)
+						member.layer = storyLayerName(i, story.isTop, kLevelNokigeta);
 					continue;
+				}
 				// 登り梁の専用レイヤの材も水下側の伏図レベルへ（その伏図に映すため）。
 				// 母屋伏図には再掲しない（parse/Sheet）。
-				member.layer = beam ? planLevelBeamLayer(*level, story)
-									: planLevelLayer(*level, story, kLevelNoboribari);
+				if (eaves)
+					member.layer = planLevelLayer(*level, story, kLevelNokigeta);
+				else
+					member.layer = beam ? planLevelBeamLayer(*level, story)
+										: planLevelLayer(*level, story, kLevelNoboribari);
 			}
 		}
 	}

@@ -54,6 +54,11 @@ namespace HomeskzIfcImport::core
 	// 専用レベル。母屋・棟木は "母屋"、登り梁は "登り梁"（parse/Member.h 参照）。
 	inline constexpr const char* kLevelMoya = "母屋";
 	inline constexpr const char* kLevelNoboribari = "登り梁";
+	// 軒桁の専用レベル（"n-軒桁"）。母屋伏図に軒桁だけを薄く重ねるために、横架材天端（最上階
+	// は軒高）のレイヤから分ける（ご要望。parse/PlanLevel の assignMemberPlanLevels）。高さは
+	// 横架材天端（軒高）と同じで、材の高さ基準は横架材天端（軒高）のまま。取り合い・継手などを
+	// 見るときは、同じ階の横架材レイヤと同じ群として扱う（parse/Story の beamGroupLayer）。
+	inline constexpr const char* kLevelNokigeta = "軒桁";
 	// M9/M11 基礎ストーリのレベル。GL は基礎ストーリの原点（常に 0）で立上り（"F-立上り"）を、
 	// 底盤天端は底盤コンクリートの天端で底盤（"F-底盤"）を載せる（M9）。基礎天端は立上りの
 	// 天端でアンカーボルト（"F-アンカーボルト"）を、床束は底盤天端に揃えて床束（"F-床束"）を
@@ -1184,6 +1189,10 @@ namespace HomeskzIfcImport::core
 	//   layers                           … 表示するデザインレイヤ名（**それ以外は非表示**）
 	//   hiddenClasses                    … 非表示にするクラス名（**それ以外は表示**）。
 	//                                      図面に無いクラス名は描画側が読み飛ばす（作らない）
+	//   grayedLayers                     … グレー（薄く）で重ねるデザインレイヤ名。layers と
+	//                                      重ねない。母屋伏図に同じ階の軒桁（"n-軒桁"）を薄く
+	//                                      見せるのに使う（ご要望。parse/Sheet）。図の外形・
+	//                                      データタグ・寸法の対象には数えない（layers だけを見る）
 	//
 	// 【並びは重ね順ではない】layers の並び順は描画側の走査順にすぎず、伏図での重なりは
 	// **ドキュメントのデザインレイヤ重ね順**が決める。床・野地板が柱・梁を覆い隠さないように
@@ -1203,6 +1212,7 @@ namespace HomeskzIfcImport::core
 		std::string drawingNumber;
 		std::vector<std::string> layers;
 		std::vector<std::string> hiddenClasses;
+		std::vector<std::string> grayedLayers;
 
 		// M13 断面寸法データタグ。この図に載せる注釈（TagCommand の doc コメント参照）。
 		// 伏図・軸組図とも同じ形で持ち、描画側は種類を区別せずに置く。
