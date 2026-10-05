@@ -423,11 +423,8 @@ namespace HomeskzIfcImport::draw
 
 		Json RunTestTool(const Json& /*args*/, std::string& error)
 		{
-			if (gSDK->GetCurrentLayer() == nil)
-			{
-				error = "文書が開いていません（実機テストは開いている図面へ描きます）。";
-				return Json::null();
-			}
+			// **開いている図面は要らない**（M39）——続きの周はテンプレートから自分で図面を
+			// 開く。再起動の直後は図面が 1 枚も開いていないのが普通なので、ここで弾かない。
 			// **ダイアログを 1 枚も出さない周**（draw/Feedback.h）。記憶が無ければ走らず、
 			// その理由を message に入れて返す。
 			const TestRoundResult round = runTestRound(/*allowDialogs*/ false);
@@ -524,8 +521,10 @@ namespace HomeskzIfcImport::draw
 			 R"({"type":"object","properties":{},"additionalProperties":false})", &TestReportTool,
 			 ToolKind::Read, 0},
 			{"vw_run_test",
-			 "実機テストを 1 周走らせる——前の周と同じ IFC・設定のまま、図面を取り込み前へ戻して"
-			 "取り込み直し、報告を返す。ダイアログは出さない。1 周目（IFC と設定の選択）は"
+			 "実機テストを 1 周走らせる——前の周の図面を保存せずに閉じ、テンプレートから開いた"
+			 "新しい図面へ前の周と同じ "
+			 "IFC・設定で取り込み、報告を返す。図面は開いていなくてよい。ダイアログは出さない。1 "
+			 "周目（IFC と設定の選択）は"
 			 "人が Vectorworks のメニュー「実機テストを実行…」から実行する。取り込みに 1 分以上"
 			 "かかる。",
 			 R"({"type":"object","properties":{},"additionalProperties":false})", &RunTestTool,
