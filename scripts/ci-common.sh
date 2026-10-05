@@ -77,7 +77,11 @@ gh_auth_token_bounded() {
 	# 0.5 秒刻みで生死を見る（整数秒の sleep だけでは普段の数十ミリ秒の応答に 1 秒払う）。
 	while kill -0 "$pid" 2>/dev/null; do
 		if [ "$ticks" -ge $((limit * 2)) ]; then
+			# TERM を捕まえて居座る相手もありうるので、start_watchdog と同じく
+			# 「TERM → 1 秒待つ → KILL」の二段にする。KILL は拒めないので wait は戻る。
 			kill "$pid" 2>/dev/null
+			sleep 1
+			kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
 			wait "$pid" 2>/dev/null
 			rm -f "$out"
 			return 1

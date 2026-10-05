@@ -560,6 +560,17 @@ elapsed=$(($(date +%s) - started))
 check_eq "$out" "ok:" "no token from a gh that never answers"
 check_le "$elapsed" "10" "and the source returns near the limit"
 
+t "token: a gh that ignores TERM is killed instead of hanging the source"
+STUBBORN_GH_BIN="${WORK}/stubborn-gh-bin"
+mkdir -p "$STUBBORN_GH_BIN"
+printf '#!/usr/bin/env bash\ntrap "" TERM\nwhile :; do sleep 1; done\n' >"${STUBBORN_GH_BIN}/gh"
+chmod +x "${STUBBORN_GH_BIN}/gh"
+started="$(date +%s)"
+out="$(token_after_source PATH="$STUBBORN_GH_BIN:$PATH" CI_GH_TOKEN_TIMEOUT=1)"
+elapsed=$(($(date +%s) - started))
+check_eq "$out" "ok:" "no token from a gh that ignores TERM"
+check_le "$elapsed" "10" "and the source still returns"
+
 # ---------------------------------------------------------------------------
 if [ "$TESTS_FAILED" -ne 0 ]; then
 	printf '\nci-wait.test.sh: %d/%d checks FAILED\n' "$TESTS_FAILED" "$TESTS_RUN"
