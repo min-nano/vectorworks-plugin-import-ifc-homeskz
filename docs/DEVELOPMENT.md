@@ -1340,10 +1340,10 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 - **Vectorworks を起こすのは Python サーバの道具**（`vw_launch`）で、プラグイン側には書きません
   （起こす前にはプラグインが居ない）。
 
-**実機未確認のところ**（M38）: パレットの時計の中から `CloseAllFilesAndQuitVectorworks` を
-頼むこと（これまではメニューコマンドの中からだけ頼んでいた）と、`vw_run_test` の 1 周を
-時計の中で走らせること（M24 の往復のパレットでは同じことをしていた）。分かったことは
-SDK の挙動なら `Findings/`、本プラグインの話なら `docs/DEV-NOTES.md` M38 へ足してください。
+**実機で確かめたこと**（M38・PR #188）: パレットの時計の中から
+`CloseAllFilesAndQuitVectorworks` を頼んだ再起動と、`vw_run_test` の 1 周を時計の中で走らせる
+ことは、どちらも実機で効いた（`docs/DEV-NOTES.md` M38）。新しく分かったことは SDK の挙動
+なら `Findings/`、本プラグインの話なら `docs/DEV-NOTES.md` M38 へ足してください。
 
 ## 実機テスト（`draw/Feedback`）
 
