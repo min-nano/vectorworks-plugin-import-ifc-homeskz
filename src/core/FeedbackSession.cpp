@@ -6,6 +6,7 @@
 //
 
 #include "core/FeedbackSession.h"
+#include "core/FeedbackScratch.h"
 #include "core/ImportOptions.h"
 #include "core/Trace.h"
 
@@ -15,6 +16,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace HomeskzIfcImport::core
@@ -91,17 +93,15 @@ namespace HomeskzIfcImport::core
 		out << "round=" << session.round << "\n";
 		out << "build=" << sanitize(session.lastCommit) << "\n";
 		out << "tally=" << sanitize(session.lastTally) << "\n";
-		out << "work=" << sanitize(session.workPath) << "\n";
+		out << "template=" << sanitize(session.templatePath) << "\n";
+		// 自分で保存した図面（次の周の頭で閉じる相手）。**1 つ 1 行**。
+		for (const std::string& doc : session.ownedDocuments)
+			out << "owned.doc=" << sanitize(doc) << "\n";
 		// 1 周目に採った基準。**レイヤ 1 枚につき 1 行**にしてあるのは、名前へ入れて
 		// よい文字を区切り記号で縛らないため（"," も "\t" もレイヤ名に使える）。
 		out << "baseline=" << boolText(session.baselineRecorded) << "\n";
 		for (const std::string& layer : session.baselineLayers)
 			out << "baseline.layer=" << sanitize(layer) << "\n";
-		// 前の周が作ったレイヤ（次の周の前に取り除く顔ぶれ）。基準と同じく**1 枚 1 行**。
-		for (const std::string& layer : session.lastCreatedLayers)
-			out << "created.layer=" << sanitize(layer) << "\n";
-		for (const std::string& layer : session.lastCreatedSheets)
-			out << "created.sheet=" << sanitize(layer) << "\n";
 		// 取り込み設定は役割の表の順に並べる（core/ImportOptions.h の symbolRoles）。
 		for (std::size_t i = 0; i < kSymbolRoleCount; ++i)
 		{
@@ -150,6 +150,9 @@ namespace HomeskzIfcImport::core
 
 			// M37 までの記憶にある send / repo / pr / branch / anon / posted / loop は、
 			// 下の「知らない行」として黙って読み飛ばす（PR への投稿をやめた。M38）。
+			// M38 までの work（作業ファイル。.vwx）と created.layer / created.sheet
+			// （レイヤ削除の相手）も同じく読み飛ばす——作業ファイルは開くと**その
+			// ファイル自体**が開いてしまい、テンプレートの代わりにならない（M39）。
 			if (key == "ifc")
 				session.ifcPath = value;
 			else if (key == "round")
@@ -158,8 +161,14 @@ namespace HomeskzIfcImport::core
 				session.lastCommit = value;
 			else if (key == "tally")
 				session.lastTally = value;
-			else if (key == "work")
-				session.workPath = value;
+			else if (key == "template")
+				session.templatePath = value;
+			else if (key == "owned.doc")
+			{
+				// **重ねて読む**。空の行は閉じる相手にならないので捨てる。
+				if (!value.empty())
+					session.ownedDocuments.push_back(value);
+			}
 			else if (key == "baseline")
 				session.baselineRecorded = parseBool(value, session.baselineRecorded);
 			else if (key == "baseline.layer")
@@ -167,17 +176,6 @@ namespace HomeskzIfcImport::core
 				// **重ねて読む**（行の数だけレイヤがある）。空行は基準にならないので捨てる。
 				if (!value.empty())
 					session.baselineLayers.push_back(value);
-			}
-			else if (key == "created.layer")
-			{
-				// 空の名前は消す相手にならないので捨てる（GetNamedLayer も引けない）。
-				if (!value.empty())
-					session.lastCreatedLayers.push_back(value);
-			}
-			else if (key == "created.sheet")
-			{
-				if (!value.empty())
-					session.lastCreatedSheets.push_back(value);
 			}
 			else if (key == "titleblock")
 			{
@@ -334,7 +332,33 @@ namespace HomeskzIfcImport::core
 	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session, bool allowDialogs)
 	{
 		if (feedbackSessionRemembered(session))
+		{
+			// **MCP の周はテンプレートが無ければ走らない**（Refuse の doc コメント）。
+			if (!allowDialogs && session.templatePath.empty())
+				return FeedbackRoundKind::Refuse;
 			return FeedbackRoundKind::ContinueRound;
+		}
 		return allowDialogs ? FeedbackRoundKind::FirstRound : FeedbackRoundKind::Refuse;
+	}
+
+	bool isOwnedTestDocument(const FeedbackSession& session, const std::string& openPath,
+							 const std::string& scratchRoot)
+	{
+		if (openPath.empty() || scratchRoot.empty())
+			return false;
+		for (const std::string& owned : session.ownedDocuments)
+		{
+			// **置き場の外を指す記憶は、一致していても相手にしない**（安全弁の 2 つ目）。
+			if (!pathIsInside(owned, scratchRoot))
+				continue;
+			if (owned == openPath)
+				return true;
+			std::error_code ec;
+			if (std::filesystem::equivalent(std::filesystem::path(owned),
+											std::filesystem::path(openPath), ec) &&
+				!ec)
+				return true;
+		}
+		return false;
 	}
 } // namespace HomeskzIfcImport::core

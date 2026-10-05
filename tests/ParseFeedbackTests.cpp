@@ -386,38 +386,28 @@ TEST(feedback_comment_truncates_the_log_on_a_character_boundary)
 
 TEST(feedback_comment_shows_what_the_round_did_to_the_drawing_before_importing)
 {
-	// **取り除きが効いたかは「図面の状態」の隣に置く。** 同じ 1 行は診断ログにも入るが、
+	// **図面をどう用意したかは「図面の状態」の隣に置く。** 同じ 1 行は診断ログにも入るが、
 	// ログは上限で切り詰められるので、そこだけを頼りにすると読めない周が出る
 	// （実機 round 2 でこの行が省略部分へ落ちて読めなかった）。
 	FeedbackRound round = sampleRound();
-	round.preparation =
-		"準備: 前の周が作ったレイヤを取り除きました（デザイン 5/5 枚・シート 3/3 枚）";
+	round.preparation = "準備: 前の周の図面 1 枚を保存せずに閉じました。テンプレートから新しい"
+						"図面を開きました（/tmp/homeskz-test/main/template-1.sta）";
 	const std::string body = formatTestRoundReport(round, sampleDocument(), sampleCounts());
-	CHECK(contains(body, "準備: 前の周が作ったレイヤを取り除きました"));
+	CHECK(contains(body, "準備: 前の周の図面 1 枚を保存せずに閉じました"));
 	// 空なら 1 行も増やさない（1 周目や古い版の記憶）。
 	round.preparation.clear();
 	CHECK(!contains(formatTestRoundReport(round, sampleDocument(), sampleCounts()), "準備:"));
 }
 
-TEST(feedback_comment_asks_for_undo_only_when_the_round_touched_existing_layers)
+TEST(test_report_never_asks_for_undo)
 {
-	// **取り込み前から在ったレイヤへ描いた周だけ**「取り消し」を頼む。プラグインが
-	// 取り除けるのは自分が作ったレイヤだけで、テンプレートのレイヤへ描いた分は残る
-	// ——ここを黙ると「戻す必要は無い」と読んだ人の図面に前の周が積み上がる。
-	FeedbackRound round = sampleRound();
+	// **人に「取り消し」を頼まない**（M39）。毎周テンプレートから開いた新しい図面へ描くので、
+	// 取り込み前から在ったレイヤへ描いた周でも、次の周は丸ごと元の状態から始まる。
 	DrawCounts counts = sampleCounts();
 	counts.undoPartial = true;
 	counts.existingLayers = {"共通"};
-	const std::string body = formatTestRoundReport(round, sampleDocument(), counts);
-	CHECK(contains(body, "人が「取り消し」で戻します"));
-	// 取り除ける周（undoPartial=false）は黙る。
-	CHECK(!contains(formatTestRoundReport(round, sampleDocument(), sampleCounts()),
-					"人が「取り消し」で戻します"));
-	// **作業ファイルがある周も黙る**——次の周が取り消しか開き直しで丸ごと戻すので、
-	// 言うと同じ報告の「取り消しで戻っています」と食い違う（PR #188 の実機確認）。
-	round.restorable = true;
-	CHECK(!contains(formatTestRoundReport(round, sampleDocument(), counts),
-					"人が「取り消し」で戻します"));
+	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), counts);
+	CHECK(!contains(body, "取り消し"));
 }
 
 TEST(test_report_shows_the_file_name_without_hiding_it)

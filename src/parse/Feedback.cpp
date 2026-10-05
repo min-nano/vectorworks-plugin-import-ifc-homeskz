@@ -133,8 +133,9 @@ namespace HomeskzIfcImport::parse
 				out << "\n\n" << detail;
 			// **描かなかったことを言い切る。** 「0 件」と紛らわしくしない
 			// （実機 round 9 でそれが起きた）。
-			out << "\n\n図面には何も描いていません。作業ファイルを開いてから、"
-				   "もう一度実行してください。";
+			out << "\n\n図面には何も描いていません。試したい図面を開いてから、メニュー"
+				   "「実機テストを実行…」をもう一度実行してください（その図面をテンプレート"
+				   "として採り直します）。";
 			return out.str();
 		case TestRoundOutcome::ImportFailed:
 			out << "取り込みがエラーで中断しました。";
@@ -355,14 +356,6 @@ namespace HomeskzIfcImport::parse
 		// （実機 round 2 で実際に落ちた）。
 		if (!round.preparation.empty())
 			out << round.preparation << "\n";
-		// 作業ファイルがある周は、次の周が取り消しか開き直しで丸ごと戻すので言わない
-		// （FeedbackRound::restorable）。
-		if (counts.undoPartial && !round.restorable)
-			out << "（作業ファイルを用意できなかったので、取り込み前から在ったレイヤ（テンプレート"
-				   "の"
-				   "もの）へ描いた分は、次の周の取り消しが効かなければ残ります。そこも戻したいとき"
-				   "は、"
-				   "人が「取り消し」で戻します。）\n";
 
 		// 前の周からの差分。1 周目（previousTally が空）では節ごと出さない。
 		const std::string diff = formatTallyDiff(round.previousTally, tally);

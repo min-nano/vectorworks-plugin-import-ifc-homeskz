@@ -75,7 +75,7 @@ namespace HomeskzIfcImport::draw
 	//
 	// prologue は**取り込みの前に何をしたか**を診断ログの見出しの次へ 1 行だけ書き添える
 	// もの（空なら何も書かない）。実機テストの周が「図面をどう用意したか」を残すための口
-	// で、本番のコマンドは空を渡す（draw/Feedback.cpp の prepareDrawingForRound）。
+	// で、本番のコマンドは空を渡す（draw/Feedback.cpp の openRoundDocument）。
 	ImportRound runImportRound(const std::string& ifcPath, const core::ImportOptions& options,
 							   bool settingsShown, const std::string& settingsNote,
 							   const std::string& prologue);
