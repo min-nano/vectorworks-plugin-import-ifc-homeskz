@@ -42,6 +42,7 @@
 # 共通の環境変数（CI_DEBUG_* は従来名。互換のため引き続き効く）:
 #   GITHUB_TOKEN / GH_TOKEN   API 呼び出しに使う。どちらも無ければ gh CLI の認証
 #                             （`gh auth token`）を使う
+#   CI_GH_TOKEN_TIMEOUT       `gh auth token` を待つ上限・秒（既定 5）
 #   VW_REPO                   owner/repo
 #   CI_HTTP_TIMEOUT           1 回の API 呼び出しの上限・秒（既定 45）
 #   CI_CONNECT_TIMEOUT        接続確立の上限・秒（既定 15）
@@ -58,10 +59,38 @@ TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 # クラウドのセッションには GITHUB_TOKEN が入っているが、**ローカルの Claude Code（Remote
 # Control で iOS から操作するものを含む）には入っていない**。実機確認はローカルでしか回せない
 # （docs/DEVELOPMENT.md「ローカルセッションの準備」）ので、開発機の gh の認証をそのまま使い、
-# 利用者にトークンを環境変数へ書き写させない。`gh auth token` は手元の設定を読むだけで
-# ネットワークに出ないので、「必ず有限時間で exit する」を崩さない。
+# 利用者にトークンを環境変数へ書き写させない。
+#
+# **ここはウォッチドッグより前（source の時点）に走るので、自前で時間を区切る。** `gh auth
+# token` は普段は手元の設定を読むだけだが、キーチェーンのロック解除や資格情報ヘルパーを
+# 経由する環境では固まりうる。macOS には `timeout` が無いので、裏で走らせて
+# CI_GH_TOKEN_TIMEOUT 秒（既定 5）を過ぎたら殺し、トークンは無しとして扱う（呼び出し側が
+# 「未設定です」で止まる＝固まるより原因が分かる）。標準入力を塞ぎ、対話のプロンプトも
+# 出させない。
+gh_auth_token_bounded() {
+	local out pid limit ticks=0
+	limit="${CI_GH_TOKEN_TIMEOUT:-5}"
+	case "$limit" in '' | *[!0-9]*) limit=5 ;; esac
+	out="$(mktemp)" || return 1
+	GH_PROMPT_DISABLED=1 gh auth token >"$out" 2>/dev/null </dev/null &
+	pid=$!
+	# 0.5 秒刻みで生死を見る（整数秒の sleep だけでは普段の数十ミリ秒の応答に 1 秒払う）。
+	while kill -0 "$pid" 2>/dev/null; do
+		if [ "$ticks" -ge $((limit * 2)) ]; then
+			kill "$pid" 2>/dev/null
+			wait "$pid" 2>/dev/null
+			rm -f "$out"
+			return 1
+		fi
+		sleep 0.5
+		ticks=$((ticks + 1))
+	done
+	wait "$pid" 2>/dev/null
+	cat "$out"
+	rm -f "$out"
+}
 if [ -z "$TOKEN" ] && command -v gh >/dev/null 2>&1; then
-	TOKEN="$(gh auth token 2>/dev/null || true)"
+	TOKEN="$(gh_auth_token_bounded || true)"
 fi
 
 # 1 回の HTTP 呼び出しの上限。**これが待機のぶら下がりを防ぐ一番の要**（ヘッダの

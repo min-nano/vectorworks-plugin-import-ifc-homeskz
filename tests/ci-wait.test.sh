@@ -549,6 +549,17 @@ mkdir -p "$NO_GH_BIN"
 for tool in jq curl; do ln -sf "$(command -v "$tool")" "${NO_GH_BIN}/${tool}"; done
 check_eq "$(token_after_source PATH="$NO_GH_BIN")" "ok:" "sourcing succeeds with an empty TOKEN"
 
+t "token: a hung gh is cut off instead of hanging the source"
+HUNG_GH_BIN="${WORK}/hung-gh-bin"
+mkdir -p "$HUNG_GH_BIN"
+printf '#!/usr/bin/env bash\nsleep 60\necho too-late\n' >"${HUNG_GH_BIN}/gh"
+chmod +x "${HUNG_GH_BIN}/gh"
+started="$(date +%s)"
+out="$(token_after_source PATH="$HUNG_GH_BIN:$PATH" CI_GH_TOKEN_TIMEOUT=1)"
+elapsed=$(($(date +%s) - started))
+check_eq "$out" "ok:" "no token from a gh that never answers"
+check_le "$elapsed" "10" "and the source returns near the limit"
+
 # ---------------------------------------------------------------------------
 if [ "$TESTS_FAILED" -ne 0 ]; then
 	printf '\nci-wait.test.sh: %d/%d checks FAILED\n' "$TESTS_FAILED" "$TESTS_RUN"

@@ -334,7 +334,7 @@ require_positive_int "$TIMEOUT" "--timeout"
 
 case "$CMD" in
 	run)
-		[ -n "$TOKEN" ] || die "GITHUB_TOKEN / GH_TOKEN が未設定です（ディスパッチには write 権限が要ります）"
+		[ -n "$TOKEN" ] || die "GITHUB_TOKEN / GH_TOKEN が未設定で、gh CLI の認証も見つかりません（gh auth login。ディスパッチには write 権限が要ります）"
 		[ -n "$MODE" ] || die "--mode が必要です"
 		# 締切＋余裕（ペイロード取得ぶん）を過ぎたら自分を殺す。締切判定より外側で
 		# 何かが固まっても、プロセスは必ず終わる。
