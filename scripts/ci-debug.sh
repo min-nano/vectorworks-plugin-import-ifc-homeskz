@@ -56,7 +56,7 @@
 # あり、PR の CI を待つ `ci-wait.sh` と共有している。詳細はそちらのヘッダを読むこと。
 #
 # 環境変数:
-#   GITHUB_TOKEN / GH_TOKEN   必須（ディスパッチには write 権限が要る）
+#   GITHUB_TOKEN / GH_TOKEN   ディスパッチには write 権限が要る（無ければ gh CLI の認証。ci-common.sh）
 #   VW_REPO                   owner/repo（既定は ci-common.sh）
 #   CI_DEBUG_POLL             ポーリング間隔・秒（既定 15。--poll と同じ）
 #   CI_DEBUG_TIMEOUT          待機の上限・秒（既定 2700 = 45 分。ジョブ側の
@@ -388,7 +388,7 @@ case "$CMD" in
 		;;
 
 	wait)
-		[ -n "$TOKEN" ] || die "GITHUB_TOKEN / GH_TOKEN が未設定です"
+		[ -n "$TOKEN" ] || die "GITHUB_TOKEN / GH_TOKEN が未設定で、gh CLI の認証も見つかりません（gh auth login）"
 		start_watchdog "$((TIMEOUT + 300))"
 		if [ -z "$RUN_ID" ]; then
 			[ -n "$LABEL" ] || die "--run-id か --label が必要です"
@@ -401,7 +401,7 @@ case "$CMD" in
 		;;
 
 	logs)
-		[ -n "$TOKEN" ] || die "GITHUB_TOKEN / GH_TOKEN が未設定です"
+		[ -n "$TOKEN" ] || die "GITHUB_TOKEN / GH_TOKEN が未設定で、gh CLI の認証も見つかりません（gh auth login）"
 		start_watchdog 600
 		if [ -z "$RUN_ID" ]; then
 			[ -n "$LABEL" ] || die "--run-id か --label が必要です"

@@ -45,7 +45,7 @@
 | --- | --- |
 | 共有する定数・述語・ヘルパーを足す／探す | `docs/DEVELOPMENT.md`「置き場所の一覧（重複を作らない）」 |
 | 実機テスト（`draw/Feedback`・`core/FeedbackSession`・`parse/Feedback`・`ExtTestMenu`） | `docs/DEVELOPMENT.md`「実機テスト」の「設計の決めごと」 |
-| ローカルの Claude Code から実機確認を回す（MCP の `vw_run_test` / `vw_test_report` / `vw_update` / `vw_restart`） | `docs/DEVELOPMENT.md`「実機テスト」の「ローカルセッションでの回し方」 |
+| ローカルの Claude Code から実機確認を回す（MCP の `vw_run_test` / `vw_test_report` / `vw_update` / `vw_restart`） | `docs/DEVELOPMENT.md`「実機テスト」の「ローカルセッションの準備」「ローカルセッションでの回し方」 |
 | 自動アップデート（`src/Updater*`・`scripts/vw-update.*` / `vw-install.*` / `vw-uninstall.*` / `vw-token.*`） | `docs/DEVELOPMENT.md`「自動アップデートの仕組み」 |
 | MCP ブリッジ（`core/Bridge`・`draw/McpBridge`・`ExtMcpPalette`・`scripts/mcp/`・`.mcp.json`） | `docs/DEVELOPMENT.md`「MCP ブリッジ」 |
 | CI を待つ・`ci-debug` を使う | `docs/DEVELOPMENT.md`「CI の完了待ち」「CI デバッグ」 |
@@ -350,6 +350,8 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 
 1. **PR は自動で作ってよい。** 疑義が無ければ PR を作り、`subscribe_pr_activity` で CI と
    レビューを監視し、CI の失敗は原因を直して push する（待ち方は下記「CI の完了を待つ」）。
+   購読はクラウドのセッションにしか無いので、**ローカルのセッションでは周の区切りごとに
+   `gh pr view <番号> --comments` でレビューを読みに行く**（GitHub は `gh` の認証で触る）。
    * **下書き（draft）で作る**: 実機確認か設計判断が要る変更——`draw/` を含むもの・殻・境界・
      同梱スクリプトなど実機でしか確かめられないもの・方針をユーザーに決めてもらうもの。
      **迷ったら下書き。**
@@ -382,6 +384,11 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 「dev ビルドが結果を PR へ投稿し、パレットが新しいビルドを入れて取り込み直す」往復は
 外した）。リポジトリ直下の `.mcp.json` が `scripts/mcp/vw-mcp-server.py` を登録するので、
 リポジトリで Claude Code を起動すれば道具が使える。橋は**開発版のプラグインにだけ**ある。
+
+**クラウドのセッションからは橋に届かない**（受け渡しがローカルのファイル）。実機確認が要る
+作業は Mac の `claude remote-control` で起動したセッションで回し、iOS からはそれを操作する。
+実機の要らない作業はクラウドで並行してよい。GitHub・iOS・許可の用意は
+`docs/DEVELOPMENT.md`「実機テスト」の「ローカルセッションの準備」。
 
 1 周の流れは **push → `scripts/ci-wait.sh` で dev ビルドを待つ → `vw_update`（殻まで変わった
 ら `vw_restart`）→ `vw_run_test` → 返った報告（`vw_test_report` / `vw_log`）を読む**。

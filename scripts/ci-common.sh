@@ -40,7 +40,8 @@
 #   TIMEOUT   待機の上限・秒（同上）
 #
 # 共通の環境変数（CI_DEBUG_* は従来名。互換のため引き続き効く）:
-#   GITHUB_TOKEN / GH_TOKEN   API 呼び出しに使う
+#   GITHUB_TOKEN / GH_TOKEN   API 呼び出しに使う。どちらも無ければ gh CLI の認証
+#                             （`gh auth token`）を使う
 #   VW_REPO                   owner/repo
 #   CI_HTTP_TIMEOUT           1 回の API 呼び出しの上限・秒（既定 45）
 #   CI_CONNECT_TIMEOUT        接続確立の上限・秒（既定 15）
@@ -54,6 +55,14 @@ VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-import-ifc-homeskz}"
 # shellcheck disable=SC2034 # source した側（ci-wait.sh / ci-debug.sh）が使う。
 VW_API="https://api.github.com/repos/${VW_REPO}"
 TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+# クラウドのセッションには GITHUB_TOKEN が入っているが、**ローカルの Claude Code（Remote
+# Control で iOS から操作するものを含む）には入っていない**。実機確認はローカルでしか回せない
+# （docs/DEVELOPMENT.md「ローカルセッションの準備」）ので、開発機の gh の認証をそのまま使い、
+# 利用者にトークンを環境変数へ書き写させない。`gh auth token` は手元の設定を読むだけで
+# ネットワークに出ないので、「必ず有限時間で exit する」を崩さない。
+if [ -z "$TOKEN" ] && command -v gh >/dev/null 2>&1; then
+	TOKEN="$(gh auth token 2>/dev/null || true)"
+fi
 
 # 1 回の HTTP 呼び出しの上限。**これが待機のぶら下がりを防ぐ一番の要**（ヘッダの
 # 「必ず有限時間で exit すること」参照）。接続の確立とデータ転送で別々に上限を持たせる。
