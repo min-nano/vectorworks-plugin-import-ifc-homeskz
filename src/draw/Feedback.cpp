@@ -203,9 +203,13 @@ namespace HomeskzIfcImport::draw
 			{
 				// **const にしない**——返すときに move されなくなり、clang-tidy の
 				// performance-no-automatic-move がエラーになる（tidy-mac で実際に落ちた）。
-				std::string path =
-					(std::filesystem::path(dir) / (stem + "-" + std::to_string(i) + extension))
-						.string();
+				// 名前は += で組む（ループの中の連結は clang-tidy の
+				// performance-inefficient-string-concatenation に掛かる）。
+				std::string name = stem;
+				name += "-";
+				name += std::to_string(i);
+				name += extension;
+				std::string path = (std::filesystem::path(dir) / name).string();
 				if (!PathExists(path))
 					return path;
 			}
