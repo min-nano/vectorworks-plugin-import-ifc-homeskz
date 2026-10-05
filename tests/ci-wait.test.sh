@@ -521,6 +521,57 @@ check_contains "$out" "ci-wait: done" "and the process still prints its final li
 check_le "$elapsed" "30" "near the deadline"
 
 # ---------------------------------------------------------------------------
+# Part 3 — where the token comes from. A local Claude Code session (the only
+# place the Vectorworks bridge is reachable) has no GITHUB_TOKEN, so the core
+# falls back to the developer's gh login. The env var must still win, and a
+# missing gh must leave TOKEN empty (ci-wait.sh then dies with a usage error)
+# rather than hang or crash while sourcing.
+# ---------------------------------------------------------------------------
+GH_BIN="${WORK}/gh-bin"
+mkdir -p "$GH_BIN"
+printf '#!/usr/bin/env bash\n[ "$1 $2" = "auth token" ] && echo from-gh\n' >"${GH_BIN}/gh"
+chmod +x "${GH_BIN}/gh"
+token_after_source() { # [env assignments...]
+	env -u GH_TOKEN -u GITHUB_TOKEN "$@" "$BASH" -c \
+		'source "$1" >/dev/null 2>&1 && printf "ok:%s" "$TOKEN"' _ "$COMMON"
+}
+
+t "token: falls back to the gh login when no env var is set"
+check_eq "$(token_after_source PATH="$GH_BIN:$PATH")" "ok:from-gh" "gh auth token is used"
+
+t "token: an env var wins over the gh login"
+check_eq "$(token_after_source PATH="$GH_BIN:$PATH" GITHUB_TOKEN=from-env)" "ok:from-env" \
+	"GITHUB_TOKEN is preferred"
+
+t "token: no env var and no gh leaves the token empty"
+NO_GH_BIN="${WORK}/no-gh-bin"
+mkdir -p "$NO_GH_BIN"
+for tool in jq curl; do ln -sf "$(command -v "$tool")" "${NO_GH_BIN}/${tool}"; done
+check_eq "$(token_after_source PATH="$NO_GH_BIN")" "ok:" "sourcing succeeds with an empty TOKEN"
+
+t "token: a hung gh is cut off instead of hanging the source"
+HUNG_GH_BIN="${WORK}/hung-gh-bin"
+mkdir -p "$HUNG_GH_BIN"
+printf '#!/usr/bin/env bash\nsleep 60\necho too-late\n' >"${HUNG_GH_BIN}/gh"
+chmod +x "${HUNG_GH_BIN}/gh"
+started="$(date +%s)"
+out="$(token_after_source PATH="$HUNG_GH_BIN:$PATH" CI_GH_TOKEN_TIMEOUT=1)"
+elapsed=$(($(date +%s) - started))
+check_eq "$out" "ok:" "no token from a gh that never answers"
+check_le "$elapsed" "10" "and the source returns near the limit"
+
+t "token: a gh that ignores TERM is killed instead of hanging the source"
+STUBBORN_GH_BIN="${WORK}/stubborn-gh-bin"
+mkdir -p "$STUBBORN_GH_BIN"
+printf '#!/usr/bin/env bash\ntrap "" TERM\nwhile :; do sleep 1; done\n' >"${STUBBORN_GH_BIN}/gh"
+chmod +x "${STUBBORN_GH_BIN}/gh"
+started="$(date +%s)"
+out="$(token_after_source PATH="$STUBBORN_GH_BIN:$PATH" CI_GH_TOKEN_TIMEOUT=1)"
+elapsed=$(($(date +%s) - started))
+check_eq "$out" "ok:" "no token from a gh that ignores TERM"
+check_le "$elapsed" "10" "and the source still returns"
+
+# ---------------------------------------------------------------------------
 if [ "$TESTS_FAILED" -ne 0 ]; then
 	printf '\nci-wait.test.sh: %d/%d checks FAILED\n' "$TESTS_FAILED" "$TESTS_RUN"
 	exit 1

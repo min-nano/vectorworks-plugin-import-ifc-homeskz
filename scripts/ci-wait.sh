@@ -56,7 +56,7 @@
 # いる。詳細はそちらのヘッダを読むこと。
 #
 # 環境変数:
-#   GITHUB_TOKEN / GH_TOKEN   必須（読み取り権限だけでよい）
+#   GITHUB_TOKEN / GH_TOKEN   読み取り権限だけでよい（無ければ gh CLI の認証。ci-common.sh）
 #   VW_REPO                   owner/repo（既定は ci-common.sh）
 #   CI_WAIT_POLL              ポーリング間隔・秒（既定 20。--poll と同じ）
 #   CI_WAIT_TIMEOUT           待機の上限・秒（既定 3600。--timeout と同じ）
@@ -114,7 +114,7 @@ while [ "$#" -gt 0 ]; do
 	esac
 done
 
-[ -n "$TOKEN" ] || die "GITHUB_TOKEN / GH_TOKEN が未設定です"
+[ -n "$TOKEN" ] || die "GITHUB_TOKEN / GH_TOKEN が未設定で、gh CLI の認証も見つかりません（gh auth login）"
 
 # 締切・間隔・猶予は必ず数値であること。空文字や誤字がそのまま通ると比較が常に偽に
 # なり、締切が効かない＝ぶら下がる。
