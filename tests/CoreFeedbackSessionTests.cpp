@@ -29,6 +29,7 @@ using HomeskzIfcImport::core::feedbackRoundKind;
 using HomeskzIfcImport::core::FeedbackSession;
 using HomeskzIfcImport::core::feedbackSessionRemembered;
 using HomeskzIfcImport::core::formatFeedbackSession;
+using HomeskzIfcImport::core::isOwnedTestDocument;
 using HomeskzIfcImport::core::kSymbolRoleCount;
 using HomeskzIfcImport::core::parseFeedbackSession;
 using HomeskzIfcImport::core::readFeedbackSession;
@@ -43,14 +44,14 @@ namespace
 	{
 		FeedbackSession session;
 		session.ifcPath = "/Users/someone/Documents/物件A.ifc";
-		session.workPath = "/tmp/homeskz-work.vwx";
+		session.templatePath = "/tmp/homeskz-test/main/template-1.sta";
+		session.ownedDocuments = {"/tmp/homeskz-test/main/template-1.sta",
+								  "/tmp/homeskz-test/main/round-3-1.vwx"};
 		session.round = 3;
 		session.lastCommit = "a1b2c3d";
 		session.lastTally = "ストーリ:3/3,通り芯:44/44";
 		session.baselineRecorded = true;
 		session.baselineLayers = {"共通", "デザイン レイヤ-1"};
-		session.lastCreatedLayers = {"1-伏図", "2-伏図"};
-		session.lastCreatedSheets = {"A-1", "A-2"};
 		session.options.setSymbol(SymbolRole::FloorPost, "床束（特注）");
 		session.options.setEnabled(SymbolRole::FireBrace, false);
 		session.options.setTitleBlockStyle("図面枠 A3（構造）");
@@ -129,13 +130,25 @@ TEST(feedback_session_without_a_baseline_reads_as_not_recorded)
 	const FeedbackSession session = parseFeedbackSession("round=2\nbuild=a1b2c3d\n");
 	CHECK(!session.baselineRecorded);
 	CHECK(session.baselineLayers.empty());
-	// 古い版には「前の周が作ったレイヤ」の行も無い。**空＝消す相手が分からない**ので、
-	// そのときは図面に触らない（draw/Feedback の prepareDrawingForRound）。
-	CHECK(session.lastCreatedLayers.empty());
-	CHECK(session.lastCreatedSheets.empty());
-	// 開き直しの行（M25）も無い。**空＝開き直さない**なので、古い記憶を読んでも従来
-	// どおり「いま開いている図面へ描く」に落ちる。
-	CHECK(session.workPath.empty());
+	// テンプレートの行（M39）も無い。**空＝基準が無い**ので、MCP の周は走らず、
+	// メニューの周はいま開いている図面から採り直す。閉じる相手も無い。
+	CHECK(session.templatePath.empty());
+	CHECK(session.ownedDocuments.empty());
+}
+
+TEST(feedback_session_drops_the_m38_rollback_lines)
+{
+	// M38 までの記憶（作業ファイル・前の周が作ったレイヤ）。**黙って読み飛ばす**——作業
+	// ファイル（.vwx）は開くとそのファイル自体が開くので、テンプレートの代わりにしない。
+	const FeedbackSession session =
+		parseFeedbackSession("round=4\nifc=/tmp/a.ifc\nwork=/tmp/homeskz-test/main/work-1.vwx\n"
+							 "created.layer=1-伏図\ncreated.sheet=A-1\n");
+	CHECK_EQ(session.round, 4);
+	CHECK(session.templatePath.empty());
+	CHECK(session.ownedDocuments.empty());
+	const std::string text = formatFeedbackSession(session);
+	CHECK(text.find("work=") == std::string::npos);
+	CHECK(text.find("created.") == std::string::npos);
 }
 
 TEST(feedback_session_keeps_an_empty_baseline_distinct_from_none)
@@ -154,10 +167,13 @@ TEST(feedback_session_round_trips_through_text)
 	const FeedbackSession after = parseFeedbackSession(formatFeedbackSession(before));
 
 	CHECK_EQ(after.ifcPath, before.ifcPath);
-	// **毎周開き直す図面**（M25）。テンプレートのパスが落ちると、次の周は開き直さずに
-	// 前の周の図へ重ねて描いてしまう。開いた複製のパスが落ちると、その図面を閉じられず
-	// 周の数だけ積み上がる。
-	CHECK_EQ(after.workPath, before.workPath);
+	// **毎周開くテンプレート**（M39）。落ちると MCP の周が走らなくなる。
+	CHECK_EQ(after.templatePath, before.templatePath);
+	// **自分で保存した図面**（M39）。落ちると次の周で閉じられず、周の数だけ積み上がる
+	// （再起動のときに保存の確認が並ぶ）。
+	CHECK_EQ(after.ownedDocuments.size(), before.ownedDocuments.size());
+	for (std::size_t i = 0; i < before.ownedDocuments.size(); ++i)
+		CHECK_EQ(after.ownedDocuments[i], before.ownedDocuments[i]);
 	CHECK_EQ(after.round, before.round);
 	CHECK_EQ(after.lastCommit, before.lastCommit);
 	CHECK_EQ(after.lastTally, before.lastTally);
@@ -167,16 +183,6 @@ TEST(feedback_session_round_trips_through_text)
 	CHECK_EQ(after.baselineLayers.size(), before.baselineLayers.size());
 	for (std::size_t i = 0; i < before.baselineLayers.size(); ++i)
 		CHECK_EQ(after.baselineLayers[i], before.baselineLayers[i]);
-	// **前の周が作ったレイヤ**（M25）。次の周の前にこれ**だけ**を図面から取り除くので、
-	// ここが落ちると「消してよいもの」を見失う——見失ったまま別の基準で消す作りに
-	// してはならない（利用者が足したレイヤを巻き込む）。デザインとシートは混ぜない
-	// （消す順序が違う: シートが先）。
-	CHECK_EQ(after.lastCreatedLayers.size(), before.lastCreatedLayers.size());
-	for (std::size_t i = 0; i < before.lastCreatedLayers.size(); ++i)
-		CHECK_EQ(after.lastCreatedLayers[i], before.lastCreatedLayers[i]);
-	CHECK_EQ(after.lastCreatedSheets.size(), before.lastCreatedSheets.size());
-	for (std::size_t i = 0; i < before.lastCreatedSheets.size(); ++i)
-		CHECK_EQ(after.lastCreatedSheets[i], before.lastCreatedSheets[i]);
 	// 取り込み設定も 1 周目のまま運ばれる（ここが落ちると 2 周目が別の条件で走る）。
 	for (std::size_t i = 0; i < kSymbolRoleCount; ++i)
 	{
@@ -286,8 +292,8 @@ TEST(feedback_session_parse_keeps_defaults_for_unreadable_values)
 TEST(feedback_session_parse_trims_blank_values)
 {
 	// 値が空白だけの行は「空」として読む（前後の空白を落とすので何も残らない）。
-	const FeedbackSession session = parseFeedbackSession("work=   \nifc= /tmp/a.ifc \n");
-	CHECK(session.workPath.empty());
+	const FeedbackSession session = parseFeedbackSession("template=   \nifc= /tmp/a.ifc \n");
+	CHECK(session.templatePath.empty());
 	CHECK_EQ(session.ifcPath, std::string("/tmp/a.ifc"));
 }
 
@@ -413,13 +419,14 @@ namespace
 		session.round = 1;
 		session.ifcPath = "/tmp/model.ifc";
 		session.lastCommit = "aaaaaaa";
+		session.templatePath = "/tmp/homeskz-test/main/template-1.sta";
 		return session;
 	}
 } // namespace
 
 TEST(feedback_round_kind_continues_with_memory)
 {
-	// メニューからでも MCP からでも、記憶があれば続きの周になる。
+	// メニューからでも MCP からでも、記憶（とテンプレート）があれば続きの周になる。
 	CHECK(feedbackRoundKind(ranOnce(), /*allowDialogs*/ true) == FeedbackRoundKind::ContinueRound);
 	CHECK(feedbackRoundKind(ranOnce(), /*allowDialogs*/ false) == FeedbackRoundKind::ContinueRound);
 }
@@ -451,6 +458,67 @@ TEST(feedback_round_kind_refuses_when_it_would_have_to_ask)
 	// MCP（ダイアログ無し）は 1 周目を始められない——IFC と設定はダイアログでしか決まらない。
 	CHECK(feedbackRoundKind(FeedbackSession{}, /*allowDialogs*/ false) ==
 		  FeedbackRoundKind::Refuse);
+}
+
+TEST(feedback_round_kind_refuses_mcp_without_a_template)
+{
+	// **テンプレートが無いと MCP の周は走らない**（M39）。人の居ない周に「いま開いている
+	// 図面」を基準に採らせない——前の周の絵が載った図面がそのまま基準になりうる。
+	FeedbackSession session = ranOnce();
+	session.templatePath.clear();
+	CHECK(feedbackRoundKind(session, /*allowDialogs*/ false) == FeedbackRoundKind::Refuse);
+	// メニューから押した周は続きの周のまま（いま開いている図面から採り直す）。
+	CHECK(feedbackRoundKind(session, /*allowDialogs*/ true) == FeedbackRoundKind::ContinueRound);
+}
+
+// ---------------------------------------------------------------------------
+// **閉じてよい図面か**（M39。core/FeedbackSession.h の isOwnedTestDocument）。
+// `CloseDocument()` は確認なしに変更を捨てるので、ここが利用者の図面を守る安全弁になる。
+
+TEST(owned_test_document_is_the_one_saved_in_the_scratch_root)
+{
+	FeedbackSession session;
+	session.ownedDocuments = {"/tmp/homeskz-test/main/round-2-1.vwx"};
+	CHECK(
+		isOwnedTestDocument(session, "/tmp/homeskz-test/main/round-2-1.vwx", "/tmp/homeskz-test"));
+	// 名指しに無い図面は、置き場の中でも閉じない。
+	CHECK(
+		!isOwnedTestDocument(session, "/tmp/homeskz-test/main/round-3-1.vwx", "/tmp/homeskz-test"));
+	// 利用者の図面は閉じない。
+	CHECK(!isOwnedTestDocument(session, "/Users/someone/物件A.vwx", "/tmp/homeskz-test"));
+	// 空のパス・置き場が分からないときは閉じない。
+	CHECK(!isOwnedTestDocument(session, "", "/tmp/homeskz-test"));
+	CHECK(!isOwnedTestDocument(session, "/tmp/homeskz-test/main/round-2-1.vwx", ""));
+}
+
+TEST(owned_test_document_outside_the_scratch_root_is_never_closed)
+{
+	// **記憶が置き場の外を指していたら、一致していても閉じない**（壊れた記憶・手で書き
+	// 換えた記憶から利用者の図面へ届かせない）。
+	FeedbackSession session;
+	session.ownedDocuments = {"/Users/someone/物件A.vwx", "/tmp/homeskz-test-other/x.vwx"};
+	CHECK(!isOwnedTestDocument(session, "/Users/someone/物件A.vwx", "/tmp/homeskz-test"));
+	CHECK(!isOwnedTestDocument(session, "/tmp/homeskz-test-other/x.vwx", "/tmp/homeskz-test"));
+}
+
+TEST(owned_test_document_matches_another_spelling_of_the_same_file)
+{
+	// macOS の一時ディレクトリは /var と /private/var の 2 通りで返る——字面が違っても
+	// 同じファイルなら同じと見る（std::filesystem::equivalent）。ここでは "." を挟んだ
+	// 綴りで確かめる（実在するファイルが要る）。
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	const fs::path root = fs::temp_directory_path(ec) / "homeskz-owned-doc-test";
+	fs::create_directories(root / "main", ec);
+	const fs::path file = root / "main" / "round-1-1.vwx";
+	{
+		std::ofstream(file) << "x";
+	}
+	FeedbackSession session;
+	session.ownedDocuments = {file.string()};
+	const std::string other = (root / "main" / "." / "round-1-1.vwx").string();
+	CHECK(isOwnedTestDocument(session, other, root.string()));
+	fs::remove_all(root, ec);
 }
 
 TEST_MAIN();
