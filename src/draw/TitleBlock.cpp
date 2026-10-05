@@ -63,7 +63,7 @@ namespace HomeskzIfcImport::draw
 
 		// 図面枠 PIO を 1 つ作る（作れなければ nil）。**定義の用意
 		// （PrepareCustomObjectDefinition）は生成の直前に行う**——最初の 1 個で
-		// 「オブジェクトの設定」ダイアログが出ると、無人で回る往復の周がそこで止まる
+		// 「オブジェクトの設定」ダイアログが出ると、無人で回る実機テストの周（MCP の vw_run_test）がそこで止まる
 		// （draw/DrawUtil.h の PrepareCustomObjectDefinition）。
 		MCObjectHandle CreateTitleBlock()
 		{

@@ -1,38 +1,24 @@
 //
 //	draw/Feedback.cpp
 //
-//	実機フィードバックの往復の実装（意図と 1 周の形は draw/Feedback.h 参照）。
+//	実機テストの 1 周の実装（意図と入口は draw/Feedback.h 参照）。
 //	【SDK 依存】PluginPrefix.h（VectorWorks SDK）と VWFC のダイアログを include する。
 //
-//	使う SDK API はダイアログ 2 種（draw/ResultDialog と同じ作法。VWFC/VWUI/…）だけで、
-//	**ネットワークには一切触れない**——
-//	投稿もビルドの取得も同梱スクリプトが行い、こちらはその機械可読な出力を読む
-//	（自動アップデートと同じ分担。src/Updater.h）。
+//	**ネットワークには一切触れない**（M38）。結果は手元のファイルへ書き、ローカルの
+//	Claude Code が MCP ブリッジ越しに読む（draw/McpBridge.cpp の `vw_test_report`）。
 //
-//	【文字列の受け渡し】スクリプトの出力は `UpdaterParse` の純粋な関数で解く
-//	（`ValueOf`）。**同じ解き方を 2 つ持たない**
-//	ため、殻の自動アップデートが使っているものをそのまま使う
-//	（CLAUDE.md「重複を作らない置き場所」）。
-//
-//	【待たないし、入れもしない】**新しいビルドをここで待ってはいけない。** 待つあいだ
-//	モーダルのダイアログが Vectorworks を止め、その周の絵が見られなくなる——絵を見るために
-//	回している往復で、それでは本末転倒である（実機 round 3 で判明。docs/DEV-NOTES.md M23）。
-//	入れるのも殻の仕事で（src/UpdaterFlow.cpp）、本体のコードがスタックに載っている間は
-//	本体を降ろせない以上どのみち殻へ返ってからにしかできない（src/PayloadSession.h）。
-//	ここがするのは「投稿して、**次の取り込みでは尋ねずに入れてよい**と伝えて戻る」だけ。
-//
-//	【尋ねるのは取り込みの前だけ】ダイアログを出してよいのは planFeedbackRound（取り込みが
-//	始まる前）だけで、postFeedbackRound（終わったあと）は**何も出さない**。取り込みは
-//	1 分以上かかるので、終わったところに確認が待っていると席を離れられない
-//	（docs/DEV-NOTES.md M23「取り込みのあとに操作を残さない」）。
+//	【尋ねるのは取り込みの前だけ】ダイアログを出してよいのは取り込みが始まる前だけで、
+//	終わったあとは**何も出さない**（失敗したときを除く）。取り込みは 1 分以上かかるので、
+//	終わったところに確認が待っていると席を離れられない（docs/DEV-NOTES.md M23
+//	「取り込みのあとに操作を残さない」）。
 //
 
 #include "PluginPrefix.h"
 #include "BuildConfig.h"
 #include "draw/Feedback.h"
 
-#include "UpdaterParse.h"
 #include "core/Document.h"
+#include "core/FeedbackScratch.h"
 #include "core/FeedbackSession.h"
 #include "core/ImportOptions.h"
 #include "core/Trace.h"
@@ -49,444 +35,22 @@
 // 周ごとに図面を開き直す（ISDK::OpenDocumentPath）。パスは IFileIdentifier で渡す。
 #include "Interfaces/VectorWorks/Filing/IFileIdentifier.h"
 
-#include <chrono>
-#include <cctype>
 #include <cstddef>
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <system_error>
 #include <vector>
-
-using namespace HomeskzIfcImport::UpdaterParse;
 
 namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 同梱スクリプトの名前（拡張子は殻が付ける。src/PayloadAbi.h）。
-		constexpr const char* kFeedbackScript = "vw-feedback";
-
 		// **実機テストの結果ダイアログのタイトル。** 本番の取り込み（「ホームズ君 IFC
 		// 取り込み」。draw/ImportCommand.cpp）と**必ず違う名前にする**——同じにすると、
-		// PR への投稿の顛末を本番の取り込みが言っているように見える（実機の指摘。M25）。
+		// 実機テストの顛末を本番の取り込みが言っているように見える（実機の指摘。M25）。
 		constexpr const char* kTestResultTitle = "実機テスト (みんなの構造設計支援Dev)";
-
-		// ダイアログのコントロール ID（1 = OK / 2 = キャンセルは SDK の予約）。
-		// kNoteLabelID / kNoteID はトークンの貼り付けダイアログが使う。
-		constexpr TControlID kNoteLabelID = 4;
-		constexpr TControlID kNoteID = 5;
-		constexpr TControlID kPrLabelID = 6;
-		constexpr TControlID kPrID = 7;
-		constexpr TControlID kAnonID = 9;
-		constexpr TControlID kLeadID = 10;
-		constexpr TControlID kSendsID = 11;
-		constexpr TControlID kQuietID = 12;
-		constexpr TControlID kNextID = 13;
-
-		// トークンの貼り付け欄の幅（標準文字数）と、PR 番号の欄の幅。
-		constexpr short kNoteWidthChars = 72;
-		constexpr short kPrWidthChars = 10;
-
-		// -------------------------------------------------------------------
-		// 殻から借りた道具（draw/HostServices）。
-		// -------------------------------------------------------------------
-
-		bool RunScript(const char* baseName, const std::vector<std::string>& args, std::string& out)
-		{
-			out.clear();
-			const HostServices& host = hostServices();
-			if (!host.canRunScripts())
-				return false;
-			return host.runScript(baseName, args, out);
-		}
-
-		// -------------------------------------------------------------------
-		// 一時ファイル（本文とトークンの受け渡し）。
-		// -------------------------------------------------------------------
-
-		// 一時ディレクトリに書き出して、そのパスを返す（書けなければ空）。
-		// **本文を引数に乗せない**ため（コマンドラインは長さに限りがあり、プロセス一覧
-		// からも見える）。tag は名前を分けるためのもの。
-		std::string WriteTempFile(const std::string& tag, const std::string& contents,
-								  bool ownerOnly)
-		{
-			std::error_code ec;
-			const std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
-			if (ec)
-				return "";
-			const std::filesystem::path path =
-				dir / ("homeskz-feedback-" + tag + "-" +
-					   std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-
-			{
-				std::ofstream out(path, std::ios::binary | std::ios::trunc);
-				if (!out)
-					return "";
-				out.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-				if (!out.good())
-					return "";
-			}
-			if (ownerOnly)
-			{
-				// **トークンを渡すファイルは本人しか読めなくする。** 一時ディレクトリは
-				// 共有なので、既定の許可のまま置くと他のユーザーに読まれうる。
-				std::filesystem::permissions(
-					path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-					std::filesystem::perm_options::replace, ec);
-			}
-			return path.string();
-		}
-
-		void RemoveTempFile(const std::string& path)
-		{
-			if (path.empty())
-				return;
-			std::error_code ec;
-			std::filesystem::remove(std::filesystem::path(path), ec);
-		}
-
-		// -------------------------------------------------------------------
-		// トークンを 1 度だけ受け取るダイアログ。
-		// -------------------------------------------------------------------
-
-		class CTokenDialog : public VWDialog
-		{
-		public:
-			CTokenDialog() : fLabel(kNoteLabelID), fToken(kNoteID) {}
-			~CTokenDialog() override = default;
-
-			const TXString& Token() const
-			{
-				return fTokenText;
-			}
-
-		protected:
-			bool CreateDialogLayout() override
-			{
-				if (!this->CreateDialog("GitHub のトークン", "保存", "やめる", false))
-					return false;
-				if (!fLabel.CreateControl(
-						this, "PR へ投稿するためのトークンを 1 度だけ登録します。\n"
-							  "GitHub の Fine-grained token（対象リポジトリの Pull "
-							  "requests: Read and write）を貼り付けてください。\n"
-							  "保存先は macOS のキーチェーン / Windows の暗号化ファイルで、"
-							  "図面にもログにも残りません。"))
-					return false;
-				if (!fToken.CreateControl(this, "", kNoteWidthChars, 1))
-					return false;
-				this->AddFirstGroupControl(&fLabel);
-				this->AddBelowControl(&fLabel, &fToken);
-				return true;
-			}
-
-			void OnDDXInitialize() override
-			{
-				this->AddDDX_EditText(kNoteID, &fTokenText);
-			}
-
-			DEFINE_EVENT_DISPATH_MAP;
-
-		private:
-			VWStaticTextCtrl fLabel;
-			VWEditTextCtrl fToken;
-			TXString fTokenText;
-		};
-
-		// NOLINTNEXTLINE(misc-const-correctness)
-		EVENT_DISPATCH_MAP_BEGIN(CTokenDialog);
-		EVENT_DISPATCH_MAP_END;
-
-		// **投稿できる状態にする。** トークンが無ければ 1 度だけ尋ねて保存する。
-		// 使えるようになったら true。理由は note へ（呼び出し側が見せる）。
-		bool EnsureToken(std::string& note)
-		{
-			std::string out;
-			if (!RunScript(kFeedbackScript, {"token-status"}, out))
-			{
-				note = "フィードバック用のスクリプトを起動できませんでした。";
-				return false;
-			}
-			if (ValueOf(out, "ok") == "yes")
-				return true;
-
-			CTokenDialog dialog;
-			if (dialog.RunDialogLayout("") != VWFC::VWUI::kDialogButton_Ok)
-			{
-				note = "トークンの登録をやめました。";
-				return false;
-			}
-			const std::string token = static_cast<const char*>(dialog.Token());
-			if (token.empty())
-			{
-				note = "トークンが空でした。";
-				return false;
-			}
-
-			// **引数に乗せずファイル経由で渡す**（プロセス一覧から秘密が見えないように）。
-			// 読んだスクリプトがその場で消す約束で、こちらも念のため消す。
-			const std::string file = WriteTempFile("token", token, /*ownerOnly*/ true);
-			if (file.empty())
-			{
-				note = "トークンを一時ファイルへ書けませんでした。";
-				return false;
-			}
-			const bool ran = RunScript(kFeedbackScript, {"login", file}, out);
-			RemoveTempFile(file);
-			if (!ran || Trim(out) != "ok")
-			{
-				const std::string reason = ValueOf(out, "error");
-				note = reason.empty() ? "トークンを保存できませんでした。" : reason;
-				return false;
-			}
-			return true;
-		}
-
-		// -------------------------------------------------------------------
-		// フィードバックのダイアログ。**取り込みが始まる前に**、送るかどうか・宛先・
-		// 伏せ字を 1 枚で決める。
-		//
-		// **結果はまだ無い。** 以前は取り込みのあとに結果を見せて「送りますか」と訊いて
-		// いたが、取り込みは 1 分以上かかるので、終わったところに確認が待っていると席を
-		// 離れられなかった（実機の指摘。docs/DEV-NOTES.md M23）。訊くことは全部前へ移し、
-		// 終わったあとは投稿して黙る。
-		// -------------------------------------------------------------------
-
-		class CFeedbackDialog : public VWDialog
-		{
-		public:
-			CFeedbackDialog(const std::string& title, const std::string& lead,
-							const core::FeedbackSession& session)
-				: fTitle(title.c_str()), fLeadText(lead.c_str()), fLead(kLeadID), fSends(kSendsID),
-				  fQuiet(kQuietID), fNext(kNextID), fPrLabel(kPrLabelID), fPr(kPrID),
-				  fAnon(kAnonID), fPrText(std::to_string(session.pullRequest).c_str()),
-				  fAnonymize(session.anonymize)
-			{
-			}
-			~CFeedbackDialog() override = default;
-
-			bool Shown() const
-			{
-				return fShown;
-			}
-			std::string PullRequest() const
-			{
-				return static_cast<const char*>(fPrText);
-			}
-			bool Anonymize() const
-			{
-				return fAnonymize;
-			}
-
-		protected:
-			bool CreateDialogLayout() override
-			{
-				// **ボタンは何が起きるかを名乗る。** ここで押した選択は取り込みの**あと**に
-				// 効くので、「送る」だけでは何のことか分からない。
-				if (!this->CreateDialog(fTitle, "取り込み結果を送る", "送らない", false))
-					return false;
-
-				if (!fLead.CreateControl(this, fLeadText))
-					return false;
-				this->AddFirstGroupControl(&fLead);
-				if (!fSends.CreateControl(this,
-										  "送るもの: 要素ごとの内訳・描画側の注意・診断ログ。"))
-					return false;
-				this->AddBelowControl(&fLead, &fSends);
-				// **終わったあとは何も出ない**ことを、押す前に言い切る。席を離れてよいと
-				// 分かることが、この往復では機能そのものである。
-				if (!fQuiet.CreateControl(
-						this, "投稿したあとは何も尋ねません（実行したら離れて構いません）。"))
-					return false;
-				this->AddBelowControl(&fSends, &fQuiet);
-				// **次の周に人がすることも、ここで言い切る。** 2 周目以降はダイアログを
-				// 1 枚も出さないので、頼めるのはこの 1 枚だけである（draw/Feedback.h
-				// 「取り込み前へ戻すのは人の手仕事」）。
-				if (!fNext.CreateControl(this, "次の周からは、実行する前に「取り消し」で図面を"
-											   "取り込み前へ戻してください。"))
-					return false;
-				this->AddBelowControl(&fQuiet, &fNext);
-
-				if (!fPrLabel.CreateControl(this, "送信先の PR 番号:"))
-					return false;
-				this->AddBelowControl(&fNext, &fPrLabel, 0, 1);
-				if (!fPr.CreateControl(this, "", kPrWidthChars, 1))
-					return false;
-				this->AddRightControl(&fPrLabel, &fPr);
-
-				if (!fAnon.CreateControl(this, "ファイル名とユーザー名を伏せて投稿する"))
-					return false;
-				this->AddBelowControl(&fPrLabel, &fAnon, 0, 1);
-				return true;
-			}
-
-			void OnInitializeContent() override
-			{
-				VWDialog::OnInitializeContent();
-				// **初期値は自分でも入れる。** DDX が流し込む前提には寄りかからない
-				// （draw/SettingsDialog も同じく SetState を明示している）——ここが空だと
-				// 「前回どおりでよい」ときに毎回打ち直すことになる。
-				fPr.SetText(fPrText);
-				fAnon.SetState(fAnonymize);
-				fShown = true;
-			}
-
-			void OnDDXInitialize() override
-			{
-				this->AddDDX_EditText(kPrID, &fPrText);
-				this->AddDDX_CheckButton(kAnonID, &fAnonymize);
-			}
-
-			DEFINE_EVENT_DISPATH_MAP;
-
-		private:
-			TXString fTitle;
-			TXString fLeadText;
-			VWStaticTextCtrl fLead;
-			VWStaticTextCtrl fSends;
-			VWStaticTextCtrl fQuiet;
-			VWStaticTextCtrl fNext;
-			VWStaticTextCtrl fPrLabel;
-			VWEditTextCtrl fPr;
-			VWCheckButtonCtrl fAnon;
-			TXString fPrText;
-			bool fAnonymize = true;
-			bool fShown = false;
-		};
-
-		// NOLINTNEXTLINE(misc-const-correctness)
-		EVENT_DISPATCH_MAP_BEGIN(CFeedbackDialog);
-		EVENT_DISPATCH_MAP_END;
-
-		// -------------------------------------------------------------------
-		// 宛先・投稿・待機。
-		// -------------------------------------------------------------------
-
-		// 10 進の PR 番号（数字以外・空は 0）。
-		int ParsePullRequest(const std::string& text)
-		{
-			const std::string trimmed = Trim(text);
-			if (trimmed.empty())
-				return 0;
-			int value = 0;
-			for (const char c : trimmed)
-			{
-				if (c < '0' || c > '9')
-					return 0;
-				if (value > 214748363)
-					return 0;
-				value = value * 10 + (c - '0');
-			}
-			return value;
-		}
-
-		// ブランチから open な PR 番号を引く（引けなければ 0）。**人に番号を打たせない**
-		// ための当て推量で、外れてもダイアログで直せる。
-		int ResolvePullRequest(const std::string& repo, const std::string& branch)
-		{
-			if (branch.empty() || branch == "local")
-				return 0;
-			std::string out;
-			if (!RunScript(kFeedbackScript, {"find-pr", repo, branch}, out))
-				return 0;
-			return ParsePullRequest(ValueOf(out, "pr"));
-		}
-
-		// 記憶の PR の状態（open / closed / merged）。**確かめられなければ空**——呼び出し側
-		// （core::feedbackPullRequestEnded）はそれを「終わっていない」と読む。聞き方は
-		// パレットの駆動と同じ loop-control（src/FeedbackLoop.cpp）で、合図の行は読まない。
-		std::string PullRequestState(const core::FeedbackSession& session)
-		{
-			std::string out;
-			if (!RunScript(kFeedbackScript,
-						   {"loop-control", session.repo, std::to_string(session.pullRequest),
-							session.lastPostedAt},
-						   out))
-				return {};
-			if (!ValueOf(out, "error").empty())
-				return {};
-			return ValueOf(out, "state");
-		}
-
-		// 本文を投稿する。投稿できたら true で、url にコメントの在り処、createdAt に
-		// GitHub が付けた時刻（ISO 8601）が入る（古いスクリプトは後者を出さないので空）。
-		bool PostComment(const std::string& repo, int pullRequest, const std::string& body,
-						 std::string& url, std::string& createdAt, std::string& error)
-		{
-			url.clear();
-			createdAt.clear();
-			error.clear();
-			const std::string file = WriteTempFile("body", body, /*ownerOnly*/ false);
-			if (file.empty())
-			{
-				error = "投稿する本文を一時ファイルへ書けませんでした。";
-				return false;
-			}
-			std::string out;
-			const bool ran =
-				RunScript(kFeedbackScript, {"post", repo, std::to_string(pullRequest), file}, out);
-			RemoveTempFile(file);
-			if (!ran)
-			{
-				error = "フィードバック用のスクリプトを起動できませんでした。";
-				return false;
-			}
-			const std::string reason = ValueOf(out, "error");
-			if (!reason.empty())
-			{
-				error = reason;
-				return false;
-			}
-			url = ValueOf(out, "url");
-			createdAt = ValueOf(out, "created");
-			return true;
-		}
-
-	} // namespace
-
-	// -----------------------------------------------------------------------
-	bool feedbackAvailable()
-	{
-#ifdef VW_DEV_BUILD
-		// 殻がスクリプトを貸してくれていること（古い殻・単体テストでは貸されない）。
-		return hostServices().canRunScripts();
-#else
-		// **安定版では動かさない。** 往復するのは PR のビルドであって、main の配布物では
-		// ない——安定版から PR へコメントが飛ぶのは筋が通らないし、利用者の図面の情報が
-		// 外へ出る経路を、開発用でないビルドに持たせない。
-		return false;
-#endif
-	}
-
-	// -----------------------------------------------------------------------
-	// **ここから下は往復の内側。** M25 で公開をやめた（呼ぶのは runTestRound だけ）
-	// ——本番の取り込みコマンドは往復を知らない（draw/Feedback.h）。
-
-	namespace
-	{
-		// **取り込みの前に決めたこと。**
-		struct FeedbackPlan
-		{
-			bool send = false;			   // 取り込みが終わったら投稿するか
-			core::FeedbackSession session; // 送るときの宛先と記憶
-		};
-
-		// 1 周ぶんの材料（runTestRound が詰める）。
-		struct FeedbackInput
-		{
-			const core::Document* document = nullptr;
-			const core::DrawCounts* counts = nullptr;
-			parse::BuildInfo build; // 動いていたビルド
-			std::string ifcPath;
-			unsigned long long bytes = 0;
-			double seconds = 0.0;
-			std::string startedAt;
-			std::string log;		 // 診断ログ全文
-			std::string preparation; // 取り込みの前に図面へ何をしたか（1 行）
-			// 本文で伏せる利用者のパス（押したときに開いていた図面。parse::FeedbackRound）
-			std::vector<std::string> privatePaths;
-		};
 
 		// **周ごとに、まっさらな作業ファイルを開き直す。**
 		//
@@ -587,19 +151,72 @@ namespace HomeskzIfcImport::draw
 		// **まだ無いパスを選ぶ。** 既にあるファイルへ別名保存できなかった実測がある
 		// （実機 round 12。round 8 は同じ呼び出しが新規のパスで通っている）ので、
 		// 上書きが効くことに賭けない。名前が尽きたら空を返す。
+		//
+		// **置き場はブランチごとのフォルダ**（core/FeedbackScratch.h）。PR が閉じたら
+		// フォルダごと片付けられるように、いま動いているビルドのブランチの下へ置く
+		// （M38 までは一時ディレクトリの直下へ置いたきりで、PR #188 の実機確認で
+		// 3.4 GB を超えて溜まっていた）。
 		std::string FreshTempPath(const std::string& stem)
 		{
+			const std::string root = TempPath(core::kScratchRootName);
+			const std::string dir = core::prepareBranchScratch(root, currentBuildInfo().branch);
+			if (dir.empty())
+				return "";
 			for (int i = 1; i <= 100; ++i)
 			{
 				// **const にしない**——返すときに move されなくなり、clang-tidy の
 				// performance-no-automatic-move がエラーになる（tidy-mac で実際に落ちた）。
-				std::string path = TempPath(stem + "-" + std::to_string(i) + ".vwx");
-				if (path.empty())
-					return "";
+				std::string path =
+					(std::filesystem::path(dir) / (stem + "-" + std::to_string(i) + ".vwx"))
+						.string();
 				if (!PathExists(path))
 					return path;
 			}
 			return "";
+		}
+
+		// **PR が閉じたブランチの一時ファイルを片付ける**（core/FeedbackScratch.h。利用者の
+		// ご要望で、PR が close／merge されたらその実機テストの図面は消す）。周の頭で
+		// 1 度だけ呼ぶ。戻り値は報告と診断ログへ出す 1 行（何もしなければ空）。
+		//
+		// いま動いているブランチのフォルダは尋ねもしない（使っている最中）。ほかの
+		// ブランチが 1 つも無ければ GitHub へも行かない——毎周の問い合わせで API の上限を
+		// 削らないため。PR の状態は同梱スクリプト（vw-update の q-pr-state。トークンは
+		// vw-token が持つ）に尋ねる。**分からなければ消さない。**
+		//
+		// 消したフォルダに記憶の作業ファイルがあったら、記憶から外す（無いファイルを
+		// 開き直しに行かせない）。次の周は 1 周目と同じく、いま開いている図面を基準に採る。
+		std::string CleanUpClosedBranches(core::FeedbackSession& session, const std::string& branch)
+		{
+			const std::string root = TempPath(core::kScratchRootName);
+			if (root.empty())
+				return "";
+			std::vector<core::ScratchDir> others;
+			for (const core::ScratchDir& dir : core::listScratchDirs(root))
+			{
+				if (!dir.branch.empty() && dir.branch != branch)
+					others.push_back(dir);
+			}
+			if (others.empty())
+				return "";
+
+			const HostServices& host = hostServices();
+			std::vector<std::string> args{"q-pr-state"};
+			for (const core::ScratchDir& dir : others)
+				args.push_back(dir.branch);
+			std::string out;
+			if (!host.canRunScripts() || !host.runScript("vw-update", args, out))
+				return "一時ファイル: PR の状態を尋ねるスクリプトを走らせられなかったので、"
+					   "ほかのブランチの作業ファイルは片付けませんでした";
+
+			const core::ScratchCleanup cleanup =
+				core::cleanUpClosedBranches(root, others, core::parsePrStates(out));
+			for (const std::string& removed : cleanup.removedPaths)
+			{
+				if (core::pathIsInside(session.workPath, removed))
+					session.workPath.clear();
+			}
+			return core::describeScratchCleanup(cleanup);
 		}
 
 		// アクティブな図面を指定のパスへ保存する（＝別名保存）。成功したら true。
@@ -678,7 +295,7 @@ namespace HomeskzIfcImport::draw
 			return false;
 		}
 
-		// 作業ファイルを開き直す。note には診断ログと PR コメントへ出す 1 行が入る。
+		// 作業ファイルを開き直す。note には診断ログと報告へ出す 1 行が入る。
 		// rebased は「基準を採り直した」ときにその理由（runTestRound が作る）。
 		RoundDocument openRoundDocument(core::FeedbackSession& session, const std::string& rebased,
 										std::string& note)
@@ -694,18 +311,27 @@ namespace HomeskzIfcImport::draw
 				// 以後の周がずっと汚れた状態から始まる**（実機 round 13。round 12 の
 				// 失敗がそのまま基準へ焼き付いた）。ここで落としておけば、採り直した
 				// ときに自分で直る。
+				//
+				// **採り直した周（rebased）では落とさない。** 人が別の図面へ移ってから
+				// 押したのなら、いま開いているのは前の周が描いた図面ではない——そこで
+				// 前の周のレイヤ名（「1-FL」等）を名指しで消すと、**同じ名前を持つ利用者の
+				// レイヤ**（本番で取り込んだ図面など）まで消える（CLAUDE.md「開発の基本
+				// 方針」8。PR #188 の実機確認で、空の図面に対して 0/34 枚の取り除きが
+				// 走っていた）。round 13 の焼き付きは作業ファイルが無い周の話で、そのとき
+				// workPath は空なので rebased は立たない。
 				std::string cleaned;
-				if (!session.lastCreatedLayers.empty() || !session.lastCreatedSheets.empty())
+				if (rebased.empty() &&
+					(!session.lastCreatedLayers.empty() || !session.lastCreatedSheets.empty()))
 					cleaned = prepareDrawingForRound(session) + "。";
 
 				// **レイヤの基準も採り直す。** 別の図面で採った顔ぶれと引き比べても意味が
-				// 無い（「基準に無いレイヤ」が出るだけで、読む側を惑わせる）。次の投稿が
+				// 無い（「基準に無いレイヤ」が出るだけで、読む側を惑わせる）。次の報告が
 				// この図面の顔ぶれを基準として採り直す。
 				session.baselineRecorded = false;
 				session.baselineLayers.clear();
 
-				const std::string prefix = cleaned + "準備: " + rebased;
-				const std::string work = FreshTempPath("homeskz-work");
+				const std::string prefix = cleaned + rebased;
+				const std::string work = FreshTempPath("work");
 				if (!SaveActiveDocumentAs(work))
 				{
 					// **証拠を残す**——ここが空振りすると、以後の周はぜんぶレイヤ削除の
@@ -730,7 +356,7 @@ namespace HomeskzIfcImport::draw
 			std::string undone;
 			if (undoPreviousRound(session, undone))
 			{
-				note = "準備: " + undone;
+				note = undone;
 				return RoundDocument::Ready;
 			}
 
@@ -743,14 +369,13 @@ namespace HomeskzIfcImport::draw
 			const std::string active = ActiveDocumentPath();
 			if (SamePath(active, session.workPath))
 			{
-				const std::string parked =
-					FreshTempPath("homeskz-round-" + std::to_string(session.round));
+				const std::string parked = FreshTempPath("round-" + std::to_string(session.round));
 				if (!SaveActiveDocumentAs(parked))
 				{
 					// 退避できないなら閉じない（未保存の文書は閉じられない。実機確認済み）。
 					// いまの図面はまだ生きているので、従来のレイヤ削除へ回せる。
-					note = "準備: 前の周の図面を退避できなかったので開き直しませんでした（" +
-						   parked + "）。いま開いている図面へ描きます";
+					note = "前の周の図面を退避できなかったので開き直しませんでした（" + parked +
+						   "）。いま開いている図面へ描きます";
 					return RoundDocument::Fallback;
 				}
 				// **`CloseDocument` の戻り値で分岐しない。** false を返しても実際には
@@ -775,8 +400,7 @@ namespace HomeskzIfcImport::draw
 			const std::string opened = ActiveDocumentPath();
 			if (SamePath(opened, session.workPath))
 			{
-				note = "準備: " + undoNote + "作業ファイルを開き直しました（" + session.workPath +
-					   "）。";
+				note = undoNote + "作業ファイルを開き直しました（" + session.workPath + "）。";
 				note += closed;
 				// **作業ファイルそのものに前の周の絵が焼き付いていることがある**（実機
 				// round 13。作業ファイルを用意できなかった周の絵が載ったまま基準として
@@ -791,9 +415,9 @@ namespace HomeskzIfcImport::draw
 
 			// **ここから先へ進まない。** 閉じたつもりの文書が本当に閉じているなら、いま
 			// 描く先はどこにも無い——描けば全要素 0 件の報告が出るだけで、直すべき場所を
-			// 指さない数字が PR に残る（実機 round 9）。**何が起きたかを証拠つきで残して
+			// 指さない数字が報告に残る（実機 round 9）。**何が起きたかを証拠つきで残して
 			// 周ごと中止する。**
-			std::string why = "準備: " + undoNote;
+			std::string why = undoNote;
 			why += "作業ファイルを開き直せなかったので、この周は走らせません";
 			why += "でした（" + session.workPath + " / OpenDocumentPath=";
 			why += returned ? "true" : "false";
@@ -819,13 +443,13 @@ namespace HomeskzIfcImport::draw
 		std::string prepareDrawingForRound(const core::FeedbackSession& session)
 		{
 			if (session.lastCreatedLayers.empty() && session.lastCreatedSheets.empty())
-				return "準備: 前の周が作ったレイヤの記録が無いので、図面はそのままにしました"
+				return "前の周が作ったレイヤの記録が無いので、図面はそのままにしました"
 					   "（残っていれば、その上へ重ねて描きます）";
 			std::string note;
 			const std::size_t removed =
 				RemoveCreatedLayers(session.lastCreatedLayers, session.lastCreatedSheets, note);
 			if (removed == 0 && note.empty())
-				return "準備: 前の周が作ったレイヤは 1 枚も残っていませんでした（図面はそのまま）";
+				return "前の周が作ったレイヤは 1 枚も残っていませんでした（図面はそのまま）";
 			// **これは部分的な復元でしかない。** 取り込み前から在ったレイヤ（テンプレートの
 			// もの）へ描いた分は、そのレイヤが自分の作ったものではないので取り除けない
 			// ——上に描いた分だけが残る。**丸ごと戻す道は 3 つとも塞がっている**（SDK
@@ -836,300 +460,45 @@ namespace HomeskzIfcImport::draw
 			return note + "。取り込み前から在ったレイヤへ描いた分は取り除けません";
 		}
 
-		// **毎周開き直す図面（テンプレート）を選ばせる。** 選ばなければ空のまま
-		// （＝従来どおり、いま開いている図面へ描いて前の周が作ったレイヤだけを取り除く）。
-		core::FeedbackSession loadFeedbackSession(const std::string& branch)
+		// **メニューから押した続きの周で、条件をどうするか。**
+		enum class Conditions
 		{
-			core::FeedbackSession session;
-			if (!feedbackAvailable())
-				return session;
-			if (!core::readFeedbackSession(core::defaultFeedbackSessionPath(), session))
-				return core::FeedbackSession{};
+			Same,	  // 前回と同じ IFC・設定で
+			Rechoose, // IFC と設定を選び直す（＝新しい 1 周目）
+			Cancel,	  // やめる
+		};
 
-			// **別のブランチの記憶なら使わない。** 別ブランチのビルドに入れ替わったのなら、
-			// それは前の往復の続きではなく、新しい往復の 1 周目である。
-			if (!session.branch.empty() && !branch.empty() && session.branch != branch)
-			{
-				// **仮名の鍵だけは持ち越す**——鍵が変わると、同じ IFC がブランチごとに別の
-				// 仮名になって、PR をまたいで同じ対象だと読めなくなる。
-				core::FeedbackSession fresh;
-				fresh.anonKey = session.anonKey;
-				return fresh;
-			}
-			return session;
+		// **1 度だけ尋ねる。** M37 までは続きの周を往復のパレットが回していたので、人が
+		// 押す周も「何も尋ねない」に揃えていた。いまは続きの周を無人で回すのは MCP の
+		// `vw_run_test` で、メニューを押すのは人だけ——その人が別の IFC や設定で試したいとき、
+		// 記憶のファイルを消す以外の手段が無いのでは困る。
+		Conditions AskConditions(const core::FeedbackSession& session)
+		{
+			// ファイル名は文字列のまま切り出す（std::filesystem::path は Windows で UTF-8 を
+			// ANSI として読み、日本語の名前が化ける）。
+			const std::string::size_type slash = session.ifcPath.find_last_of("/\\");
+			const std::string ifc =
+				slash == std::string::npos ? session.ifcPath : session.ifcPath.substr(slash + 1);
+			const std::string advice = "前回（round " + std::to_string(session.round) +
+									   "）の IFC: " + ifc +
+									   "\n図面は取り込み前へ戻してから描き直します。";
+			// AlertQuestion は 0 = 取り消し、1 = OK、2 / 3 = 追加のボタン A / B を返す
+			// （src/Updater.cpp の Ask と同じ作法）。
+			const short answer = gSDK->AlertQuestion(
+				"前回と同じ条件で実機テストを実行しますか？", advice.c_str(),
+				/*defaultButton*/ 1, "同じ条件で", "やめる", /*customButtonA*/ "選び直す",
+				/*customButtonB*/ "");
+			if (answer == 1)
+				return Conditions::Same;
+			if (answer == 2)
+				return Conditions::Rechoose;
+			return Conditions::Cancel;
 		}
 
-		FeedbackPlan planFeedbackRound(const core::FeedbackSession& remembered,
-									   const parse::BuildInfo& build, bool continuing)
-		{
-			FeedbackPlan plan;
-			if (!feedbackAvailable())
-				return plan;
-
-			plan.session = remembered;
-			plan.session.branch = build.branch;
-
-			if (continuing)
-			{
-				// **続きの周は何も尋ねない。** 宛先も伏せ字も 1 周目の選択のままで、ここで
-				// 訊き直す理由が無い（訊けば、往復から人の操作を消した意味が無くなる）。
-				plan.send = true;
-			}
-			else
-			{
-				// 宛先の PR。記憶が無ければブランチから引く（人に番号を打たせないため）。
-				if (plan.session.pullRequest == 0)
-					plan.session.pullRequest =
-						ResolvePullRequest(plan.session.repo, plan.session.branch);
-
-				// **ここへ来るのは 1 周目だけ。** 記憶があって同じビルドが動いているときは
-				// 呼び出し側（runTestRound）が手前で折り返すので、「新しいビルドを待っている
-				// あいだにもう一度実行した」という筋はここには来ない（M24 まではここで新しい
-				// 1 周目として数え直していた。docs/DEV-NOTES.md M25）。
-				const std::string lead = "取り込みが終わったら、結果を PR へ自動で投稿します。";
-				const std::string title =
-					"実機フィードバック（round " + std::to_string(plan.session.round + 1) + "）";
-				CFeedbackDialog dialog(title, lead, plan.session);
-				const bool accepted = dialog.RunDialogLayout("") == VWFC::VWUI::kDialogButton_Ok;
-				if (!dialog.Shown())
-					return FeedbackPlan{}; // ダイアログを組めなかった → 従来どおり取り込むだけ
-				if (!accepted)
-				{
-					// **「送らない」が往復の終わり方である。** 前の往復の記憶がまだ残って
-					// いるなら捨てておく——残しておくと、次に新しいビルドが出た日に、忘れた
-					// ころの IFC が黙って取り込まれる。
-					core::clearFeedbackSession(core::defaultFeedbackSessionPath());
-					return FeedbackPlan{};
-				}
-				plan.session.anonymize = dialog.Anonymize();
-				plan.session.pullRequest = ParsePullRequest(dialog.PullRequest());
-				plan.send = true;
-			}
-
-			if (plan.session.pullRequest == 0)
-			{
-				// **ここで言えば、まだ取り込みは始まっていない。** 終わってから「宛先が
-				// 分かりません」と言われても、その 1 分は取り返せない。
-				gSDK->AlertInform("投稿先の PR が分かりません。",
-								  "PR 番号を入れて、もう一度お試しください。\n"
-								  "（今回は投稿せずに取り込みます）",
-								  false);
-				return FeedbackPlan{};
-			}
-
-			// **トークンもここで確保する。** 未登録なら 1 度だけ貼り付けを求める——これが
-			// 取り込みのあとに出ては、無操作で終わるはずの取り込みに操作が 1 つ増える。
-			std::string note;
-			if (!EnsureToken(note))
-			{
-				gSDK->AlertInform("フィードバックを投稿できません。",
-								  (note + "\n（今回は投稿せずに取り込みます）").c_str(), false);
-				return FeedbackPlan{};
-			}
-
-			plan.session.send = true;
-			return plan;
-		}
-
-		bool postFeedbackRound(const FeedbackPlan& plan, const FeedbackInput& input,
-							   std::string& error)
-		{
-			error.clear();
-			if (!plan.send || input.document == nullptr || input.counts == nullptr)
-				return false;
-
-			core::FeedbackSession session = plan.session;
-			// **仮名の鍵は最初の投稿で作る。** 投稿できたところで記憶ごと書き戻すので、
-			// 次の周からは同じ鍵（＝同じ仮名）になる。
-			if (session.anonKey.empty())
-				session.anonKey = core::newAnonymizationKey();
-
-			// 本文を組む（無 SDK 側。parse/Feedback）。
-			parse::FeedbackRound round;
-			round.build = input.build;
-			round.ifcPath = input.ifcPath;
-			round.bytes = input.bytes;
-			round.seconds = input.seconds;
-			round.startedAt = input.startedAt;
-			round.log = input.log;
-			round.round = session.round + 1;
-			round.previousCommit = session.lastCommit;
-			round.previousTally = session.lastTally;
-			// 1 周目に採った基準（＝取り込み前に在ったレイヤの顔ぶれ）。次の周はここへ
-			// 戻っているかを引き比べる（parse/Feedback の restoredStateLine）。
-			round.baselineKnown = session.baselineRecorded;
-			round.baselineLayers = session.baselineLayers;
-			round.preparation = input.preparation;
-			round.anonymize = session.anonymize;
-			round.anonKey = session.anonKey;
-			round.privatePaths = input.privatePaths;
-
-			const std::string commentBody =
-				parse::formatFeedbackComment(round, *input.document, *input.counts);
-
-			std::string url;
-			std::string createdAt;
-			if (!PostComment(session.repo, session.pullRequest, commentBody, url, createdAt, error))
-				return false; // **ここでアラートを出さない**（呼び出し側が結果へ添える）
-
-			// **投稿できたところで記憶を進める。** 投稿できていない周を数えると、次の
-			// コメントが「前の周からの変化」を持たないまま round だけ進む。
-			session.round = round.round;
-			// **基準は 1 周目に採る。** 以後の周では触らない——基準そのものが周ごとに動くと、
-			// 「戻っているか」を引き比べる相手が消える。
-			if (!session.baselineRecorded)
-			{
-				session.baselineRecorded = true;
-				session.baselineLayers = input.counts->existingLayers;
-			}
-			// **キャンセルされた周は、そのビルドを「試し終えた」ことにしない。** ここで
-			// lastCommit を進めると、同じビルドをもう一度実行しても
-			// `feedbackRoundKind` が RearmOnly を返して取り込みが走らず、**押し間違えた
-			// 一度きりで往復が再開できなくなる**（実機 round 10 で発生）。投稿はする
-			// （途中までの数字にも意味がある）が、記憶の上では走っていない扱いにして、
-			// 同じビルドでの取り直しを許す。
-			if (!input.counts->cancelled)
-				session.lastCommit = input.build.commit;
-			// **次の周の前に取り除く顔ぶれ。** この周が自分で作ったレイヤだけを名指しで
-			// 持つ（prepareDrawingForRound）。前の周の分は用済みなので置き換える。
-			session.lastCreatedLayers = input.counts->createdLayers;
-			session.lastCreatedSheets = input.counts->createdSheets;
-			session.lastTally =
-				parse::formatTally(parse::elementRows(*input.document, *input.counts));
-			// **自動の往復（M24）はここで回り出す。** 殻のパレットは記憶の loop を見て周期的に
-			// 新しいビルドを確かめ、Claude の合図（control=stop）で止まる（src/FeedbackLoop.h）。
-			// 投稿の時刻は「自分の投稿より後の合図だけ」を読むための since になる。
-			session.loop = true;
-			if (!createdAt.empty())
-				session.lastPostedAt = createdAt;
-			if (!core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session))
-			{
-				// 投稿はできている。次の周がファイル選択から始まるだけなので、**結果へ添えて
-				// 伝える**（ここでアラートを出すと、無操作で終わるはずの最後に操作が増える）。
-				error = "投稿しましたが、次の周のための記憶を保存できませんでした"
-						"（次の取り込みはファイル選択から始まります）。";
-				return false;
-			}
-
-			// **次の取り込みでは尋ねずに入れてよい。** この人はいま往復の最中にいるので、
-			// 次に取り込みを実行するときには「新しいビルドがあります。インストールします
-			// か？」を挟まない（src/Extensions/ExtMenu.cpp が UpdateCheckKind::Auto を選ぶ）。
-			return true;
-		}
-
-	} // namespace
-
-	// -----------------------------------------------------------------------
-	// **実機テストの 1 周**（M25。draw/Feedback.h）。**往復を知っているのはここだけ。**
-	bool runTestRound(bool allowDialogs, bool& active)
-	{
-		active = false;
-		if (!feedbackAvailable())
-		{
-			// 安定版、または殻がスクリプトを貸してくれていない（古い殻）。押した人には
-			// 言う——黙って何も起きないと「壊れている」と読まれる。
-			if (allowDialogs)
-				gSDK->AlertInform("実機テストは開発版でのみ使えます。",
-								  "開発版（Dev）のビルドで、同梱スクリプトが揃っている"
-								  "ときだけ動きます。",
-								  false);
-			return false;
-		}
-
-		const parse::BuildInfo build = currentBuildInfo();
-		core::FeedbackSession session = loadFeedbackSession(build.branch);
-		// **押したときに開いていた図面のパスは、投稿では伏せる**（parse::FeedbackRound::
-		// privatePaths）。準備の行やログに「いま開いている図面（…）」として出るが、保存済みの
-		// 図面なら物件名のフォルダやファイル名がそのまま入っている。前の周の作業ファイル
-		// （プラグインが一時ディレクトリに作ったもの）は利用者のものではないので伏せない。
-		const std::string openedAtStart = ActiveDocumentPath();
-
-		// **記憶の PR が閉じていたら、新しい往復の 1 周目から始める**
-		// （core/FeedbackSession.h の restartedFeedbackSession）。記憶はブランチでしか
-		// 見分けていないので、マージされた PR と同じブランチ名で新しい PR を立てると、
-		// 閉じた前の PR へ続きの周を投稿し、パレットも「マージされました」で止まって
-		// **新しい PR のビルドを取りに行かなくなる**（#137 → #138 で実際に起きた）。
-		// 1 周目のダイアログはブランチから open な PR を引き直すので、宛先は新しい PR に
-		// なる。確かめるのは手で押した周だけ——パレットの周は駆動が直前に PR を確かめて
-		// いる（閉じていればそこで止まり、ここへは来ない）。
-		if (allowDialogs && session.pullRequest > 0 &&
-			core::feedbackPullRequestEnded(PullRequestState(session)))
-		{
-			core::trace::note("実機テスト: 記憶の PR #" + std::to_string(session.pullRequest) +
-							  " は閉じているので、新しい往復の 1 周目として始めます");
-			session = core::restartedFeedbackSession(session);
-			// **すぐ書き戻す。** 1 周目のダイアログで取りやめても、パレットが閉じた PR を
-			// 指し続けないように。
-			(void)core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session);
-		}
-
-		// **手動で押したときは、いま開いている図面を基準として採り直す。** 人が別の図面
-		// （空のテンプレート等）を開いてからメニューを押したのは「この図面で試したい」
-		// という意思なのに、覚えた作業ファイルを開き直すとその意思が黙って消える——実機で
-		// 二度、空のテンプレートで試そうとして前の周の作業ファイルに上書きされた。**記憶
-		// ごと消さない**（往復の宛先・IFC・設定はそのまま）——捨てるのは「どの図面から
-		// 始めるか」だけである。自動の周（パレット）はここへ来ない: そちらは前の周の続き
-		// なので、開いている図面が何であっても作業ファイルへ戻すのが正しい。
-		std::string rebased;
-		if (allowDialogs && !session.workPath.empty())
-		{
-			const std::string openPath = ActiveDocumentPath();
-			if (!SamePath(openPath, session.workPath))
-			{
-				rebased = "いま開いている図面（" +
-						  (openPath.empty() ? std::string("(取得できず)") : openPath) +
-						  "）は前の周の作業ファイル（" + session.workPath +
-						  "）ではないので、こちらを新しい基準として採り直しました。";
-				session.workPath.clear();
-				// **すぐ書き戻す。** 同じビルドで押した周（RearmOnly）はここで戻るので、
-				// 書かないと次の自動の周がまた古い作業ファイルを開いてしまう。
-				(void)core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session);
-			}
-		}
-
-		// **どの周になるかは無 SDK 側が決める**（core/FeedbackSession.h。M25 の要点なので
-		// 場合分けを描画側に散らさず、1 か所でテストできる形にしてある）。
-		const core::FeedbackRoundKind kind =
-			core::feedbackRoundKind(session, build.commit, allowDialogs);
-		if (kind == core::FeedbackRoundKind::Refuse)
-			return false; // パレットがここへ来るのは新しいビルドを入れた直後だけ
-
-		// **同じビルドでは取り込まない。** 前の周と同じ数字が並ぶだけなので、1 分を
-		// かける意味が無い——往復を回す（止まっていたら回し直す）だけにする。パレットが
-		// 開いている最中に人がメニューを押しても、round が二重に投稿されない（実機で
-		// 起きた。docs/DEV-NOTES.md M25）。
-		if (kind == core::FeedbackRoundKind::RearmOnly)
-		{
-			if (!session.loop)
-			{
-				session.loop = true;
-				(void)core::writeFeedbackSession(core::defaultFeedbackSessionPath(), session);
-			}
-			// **押した人に結末を言う。** 走らせないのが正しい周だが、ダイアログも進捗も
-			// 出ないので**何も起きていないように見える**——実機で「再実行しても往復が
-			// 始まらない」と読まれた（実際には回り直していた）。手で押した周
-			// （allowDialogs）にだけ返す。自動の周はここへ来ない（Refuse になる）。
-			if (allowDialogs)
-				(void)draw::showImportResult(
-					kTestResultTitle,
-					parse::formatTestRoundResult(parse::TestRoundOutcome::Rearmed, build.commit),
-					core::trace::text());
-			active = true;
-			return true;
-		}
-
-		const bool continuing = kind == core::FeedbackRoundKind::ContinueRound;
-		std::string ifcPath = session.ifcPath;
-		core::ImportOptions options = session.options;
-		bool settingsShown = true;
-		std::string settingsNote;
-		if (continuing)
-		{
-			// **続きの周は何も出さない。** 1 周目の選択（ファイル・設定）をそのまま使う
-			// ——ここで人の操作を挟むと、往復を自動にした意味が無くなる。
-			settingsNote = "前の周の設定をそのまま使いました（実機フィードバックの往復）";
-		}
-		else
+		// **1 周目の選択**（IFC → 取り込み設定 → 軸組図の通り。本番の取り込みと同じ順）。
+		// どれかで取り消されたら false。
+		bool ChooseConditions(std::string& ifcPath, core::ImportOptions& options,
+							  bool& settingsShown, std::string& settingsNote)
 		{
 			if (!chooseIfcFile(ifcPath))
 				return false;
@@ -1141,8 +510,8 @@ namespace HomeskzIfcImport::draw
 			if (settings == draw::SettingsOutcome::Cancelled)
 				return false;
 			settingsShown = settings == draw::SettingsOutcome::Accepted;
-			// M34 軸組図にする通りも**1 周目で**尋ね切る（本番の取り込みと同じ順）。
-			// 選んだ結果は設定と一緒に記憶へ入り、続きの周はそれを使う。
+			// M34 軸組図にする通りも**1 周目で**尋ね切る。選んだ結果は設定と一緒に記憶へ
+			// 入り、続きの周はそれを使う。
 			std::string pickNote;
 			const draw::SettingsOutcome pick = draw::showSectionPicker(
 				parse::buildSectionCandidates(ifcPath, options), options, &pickNote);
@@ -1150,136 +519,226 @@ namespace HomeskzIfcImport::draw
 				return false;
 			if (!pickNote.empty())
 				settingsNote += (settingsNote.empty() ? "" : " / ") + pickNote;
+			return true;
 		}
 
-		// **尋ねることは全部、取り込みが始まる前に尋ね切る**（draw/Feedback.h）。
-		FeedbackPlan plan = planFeedbackRound(session, build, continuing);
-		if (!plan.send)
-			return false; // 送らないなら、この周は走らせる意味が無い
-		plan.session.ifcPath = ifcPath;
-		plan.session.options = options;
+		// 報告を書く（置き場所の親フォルダは記憶を書くときに用意済み）。書けたら true。
+		bool WriteReport(const std::string& path, const std::string& report)
+		{
+			if (path.empty())
+				return false;
+			std::error_code ec;
+			const std::filesystem::path file(path);
+			if (file.has_parent_path())
+				std::filesystem::create_directories(file.parent_path(), ec);
+			std::ofstream out(path, std::ios::binary | std::ios::trunc);
+			if (!out)
+				return false;
+			out.write(report.data(), static_cast<std::streamsize>(report.size()));
+			return out.good();
+		}
+
+		// 失敗の結末を作る（メニューから押した周なら結果ダイアログでも伝える）。
+		TestRoundResult Failure(bool allowDialogs, parse::TestRoundOutcome outcome,
+								const std::string& detail)
+		{
+			TestRoundResult result;
+			result.message = parse::formatTestRoundResult(outcome, detail);
+			if (allowDialogs)
+				(void)draw::showImportResult(kTestResultTitle, result.message, core::trace::text());
+			return result;
+		}
+	} // namespace
+
+	// -----------------------------------------------------------------------
+	bool feedbackAvailable()
+	{
+#ifdef VW_DEV_BUILD
+		return true;
+#else
+		// **安定版では動かさない。** 開発の道具（記憶した条件での無人の取り込み）を
+		// 利用者向けの配布物に持たせない。
+		return false;
+#endif
+	}
+
+	std::string testReportPath()
+	{
+		return core::testReportPathFor(core::defaultFeedbackSessionPath());
+	}
+
+	// -----------------------------------------------------------------------
+	// **実機テストの 1 周**（M25 / M38。draw/Feedback.h）。
+	TestRoundResult runTestRound(bool allowDialogs)
+	{
+		if (!feedbackAvailable())
+		{
+			// 押した人には言う——黙って何も起きないと「壊れている」と読まれる。
+			TestRoundResult result;
+			result.message = "実機テストは開発版（Dev）のビルドでのみ使えます。";
+			if (allowDialogs)
+				gSDK->AlertInform("実機テストは開発版でのみ使えます。",
+								  "開発版（Dev）のビルドで動きます。", false);
+			return result;
+		}
+
+		const parse::BuildInfo build = currentBuildInfo();
+		const std::string sessionPath = core::defaultFeedbackSessionPath();
+		core::FeedbackSession session;
+		(void)core::readFeedbackSession(sessionPath, session); // 読めなければ 1 周目
+
+		// **片付けは基準の採り直しより先に。** 記憶の作業ファイルを消したなら、下の判断は
+		// それが無いものとして進む。
+		const std::string scratchNote = CleanUpClosedBranches(session, build.branch);
+
+		// **手動で押したときは、いま開いている図面を基準として採り直す。** 人が別の図面
+		// （空のテンプレート等）を開いてからメニューを押したのは「この図面で試したい」
+		// という意思なのに、覚えた作業ファイルを開き直すとその意思が黙って消える——実機で
+		// 二度、空のテンプレートで試そうとして前の周の作業ファイルに上書きされた。**記憶
+		// ごと消さない**（IFC・設定はそのまま）——捨てるのは「どの図面から始めるか」だけ。
+		// MCP の周はここへ来ない: そちらは前の周の続きなので、作業ファイルへ戻すのが正しい。
+		std::string rebased;
+		if (allowDialogs && !session.workPath.empty())
+		{
+			const std::string openPath = ActiveDocumentPath();
+			if (!SamePath(openPath, session.workPath))
+			{
+				rebased = "いま開いている図面（" +
+						  (openPath.empty() ? std::string("(取得できず)") : openPath) +
+						  "）は前の周の作業ファイル（" + session.workPath +
+						  "）ではないので、こちらを新しい基準として採り直しました。";
+				session.workPath.clear();
+			}
+		}
+
+		// **どの周になるかは無 SDK 側が決める**（core/FeedbackSession.h）。
+		const core::FeedbackRoundKind kind = core::feedbackRoundKind(session, allowDialogs);
+		if (kind == core::FeedbackRoundKind::Refuse)
+			return Failure(allowDialogs, parse::TestRoundOutcome::NotRemembered, {});
+
+		bool choose = kind == core::FeedbackRoundKind::FirstRound;
+		if (!choose && allowDialogs)
+		{
+			const Conditions conditions = AskConditions(session);
+			if (conditions == Conditions::Cancel)
+				return TestRoundResult{}; // やめた人に結末を重ねない
+			if (conditions == Conditions::Rechoose)
+				choose = true;
+		}
+
+		std::string ifcPath = session.ifcPath;
+		core::ImportOptions options = session.options;
+		bool settingsShown = true;
+		std::string settingsNote;
+		if (choose)
+		{
+			if (!ChooseConditions(ifcPath, options, settingsShown, settingsNote))
+				return TestRoundResult{};
+			// **選び直したら引き比べる相手も捨てる。** 別の IFC・設定の周と内訳を並べても
+			// 「直した結果どう動いたか」にならない。作業ファイルと前の周が作ったレイヤは
+			// 残す——図面を戻すのに要る。
+			session.round = 0;
+			session.lastCommit.clear();
+			session.lastTally.clear();
+			session.baselineRecorded = false;
+			session.baselineLayers.clear();
+		}
+		else
+		{
+			// **続きの周は何も出さない。** 1 周目の選択（ファイル・設定）をそのまま使う。
+			settingsNote = "前の周の設定をそのまま使いました（実機テストの続きの周）";
+		}
+		session.ifcPath = ifcPath;
+		session.options = options;
 
 		// **取り除きは 1 回だけ呼び、その説明を 2 か所へ配る**——診断ログ（prologue）と
-		// PR コメント（FeedbackInput::preparation）。ログは上限で切り詰められるので、
-		// コメント側にも置かないと読めない周が出る（実機 round 2 で実際に落ちた）。
-		// **まず作業ファイルを開き直す。** 開き直せたなら消すものは何も無い（レイヤも
-		// クラスもシンボル定義も、その図面には前の周の痕跡が 1 つも無い）。用意できな
-		// かった周だけ、従来どおり「前の周が作ったレイヤ」を取り除く。
+		// 報告（FeedbackRound::preparation）。ログは上限で切り詰められるので、報告の側にも
+		// 置かないと読めない周が出る（実機 round 2 で実際に落ちた）。
 		std::string preparation;
-		const RoundDocument document = openRoundDocument(plan.session, rebased, preparation);
+		const RoundDocument document = openRoundDocument(session, rebased, preparation);
+		if (document == RoundDocument::Fallback)
+			preparation += "。" + prepareDrawingForRound(session);
+		// **「準備:」はここで 1 度だけ付ける。** 部品（openRoundDocument /
+		// prepareDrawingForRound / RemoveCreatedLayers）がめいめいに付けていた頃は、
+		// つないだ 1 行に「準備:」が 2 度出ていた（PR #188 の実機確認）。
+		if (!preparation.empty())
+			preparation = "準備: " + preparation;
+		if (!scratchNote.empty())
+			preparation += (preparation.empty() ? "" : "\n") + scratchNote;
 		if (document == RoundDocument::Abort)
 		{
 			// **描く先が無いなら取り込まない。** 記憶（作業ファイルの場所）は残すので、
 			// 人がその図面を開いてからもう一度実行すれば続きの周として走る。
-			(void)core::writeFeedbackSession(core::defaultFeedbackSessionPath(), plan.session);
+			(void)core::writeFeedbackSession(sessionPath, session);
 			core::trace::note(preparation);
-			(void)draw::showImportResult(
-				kTestResultTitle,
-				parse::formatTestRoundResult(parse::TestRoundOutcome::DocumentFailed, preparation),
-				core::trace::text());
-			return false;
+			return Failure(allowDialogs, parse::TestRoundOutcome::DocumentFailed, preparation);
 		}
-		if (document == RoundDocument::Fallback)
-			preparation += "。" + prepareDrawingForRound(plan.session);
 		const ImportRound round =
 			runImportRound(ifcPath, options, settingsShown, settingsNote, preparation);
 		if (round.failed)
 		{
-			// 送るべき内訳がそもそも無い。**取り込みの完了文言（round.body）は使わない**
-			// ——このコマンド自身の言葉で言う（parse/Feedback.h「実機テストの周の結末」）。
-			(void)draw::showImportResult(
-				kTestResultTitle,
-				parse::formatTestRoundResult(parse::TestRoundOutcome::ImportFailed, {}),
-				core::trace::text());
-			return false;
+			// **取り込みの完了文言（round.body）は使わない**——このコマンド自身の言葉で言う
+			// （parse/Feedback.h「実機テストの周の結末」）。
+			return Failure(allowDialogs, parse::TestRoundOutcome::ImportFailed, {});
 		}
 
-		FeedbackInput input;
-		input.document = &round.document;
-		input.counts = &round.counts;
-		input.build = build;
-		input.ifcPath = ifcPath;
-		input.bytes = round.bytes;
-		input.seconds = round.seconds;
-		input.startedAt = round.startedAt;
-		input.log = core::trace::text();
-		input.preparation = preparation;
-		if (!openedAtStart.empty() && !SamePath(openedAtStart, session.workPath))
-			input.privatePaths.push_back(openedAtStart);
+		// 報告を組む（無 SDK 側。parse/Feedback）。
+		parse::FeedbackRound material;
+		material.build = build;
+		material.ifcPath = ifcPath;
+		material.bytes = round.bytes;
+		material.seconds = round.seconds;
+		material.startedAt = round.startedAt;
+		material.log = core::trace::text();
+		material.round = session.round + 1;
+		material.previousCommit = session.lastCommit;
+		material.previousTally = session.lastTally;
+		// 1 周目に採った基準（＝取り込み前に在ったレイヤの顔ぶれ）。次の周はここへ戻って
+		// いるかを引き比べる（parse/Feedback の restoredStateLine）。
+		material.baselineKnown = session.baselineRecorded;
+		material.baselineLayers = session.baselineLayers;
+		material.preparation = preparation;
+		material.restorable = document == RoundDocument::Ready;
+		const std::string report =
+			parse::formatTestRoundReport(material, round.document, round.counts);
 
-		std::string postError;
-		if (postFeedbackRound(plan, input, postError))
+		// **記憶を進める。**
+		session.round = material.round;
+		// **基準は 1 周目に採る。** 以後の周では触らない——基準そのものが周ごとに動くと、
+		// 「戻っているか」を引き比べる相手が消える。
+		if (!session.baselineRecorded)
 		{
-			// **投稿できたら何も出さない。** 内訳もログも PR にあるので、ここにボタンが
-			// 1 つでも残ると「実行して離れる」が成立しない。
-			active = true;
-			return true;
+			session.baselineRecorded = true;
+			session.baselineLayers = round.counts.existingLayers;
 		}
+		// **キャンセルされた周は、そのビルドを「試し終えた」ことにしない**（実機 round 10。
+		// 報告の「前の周」の見出しが、途中までしか描いていない周のビルドを名乗らないように）。
+		if (!round.counts.cancelled)
+			session.lastCommit = build.commit;
+		// **次の周の前に取り除く顔ぶれ。** この周が自分で作ったレイヤだけを名指しで持つ
+		// （prepareDrawingForRound）。前の周の分は用済みなので置き換える。
+		session.lastCreatedLayers = round.counts.createdLayers;
+		session.lastCreatedSheets = round.counts.createdSheets;
+		session.lastTally = parse::formatTally(parse::elementRows(round.document, round.counts));
 
-		// **投稿できなかったときだけ出す。** 数字が PR に載らないので、その代わりを
-		// ここで見せる。
-		//
-		// **取り込みの完了文言（round.body）を借りて後ろへ PR の話を足さない。** 以前は
-		// そうしていたが、押した人には**本番の取り込みが PR へ投稿しているように見える**
-		// ——コマンドを分けた意味が見た目の上で崩れる（実機の指摘。M25）。文言はこの
-		// コマンド自身のもの（parse/Feedback.h「実機テストの周の結末」）を使う。
-		(void)draw::showImportResult(
-			kTestResultTitle,
-			parse::formatTestRoundResult(parse::TestRoundOutcome::PostFailed, postError),
-			core::trace::text());
-		return false;
-	}
-
-	// -----------------------------------------------------------------------
-	// モードレスの往復（M24）が殻から尋ねてくるもの。
-
-	std::string feedbackLoopStatus()
-	{
-		// 記憶（別ブランチのものは読まない。loadFeedbackSession）。動いているビルドの
-		// **素性を作るのは draw/ImportRun ただ 1 か所**——同じ定数をここでも綴らない。
-		const core::FeedbackSession session = loadFeedbackSession(currentBuildInfo().branch);
-		const bool active = feedbackAvailable() && session.send && session.round > 0 &&
-							session.loop && !session.ifcPath.empty();
-		std::string out;
-		out += std::string("active=") + (active ? "1" : "0") + "\n";
-		out += "repo=" + session.repo + "\n";
-		out += "pr=" + std::to_string(session.pullRequest) + "\n";
-		out += "branch=" + session.branch + "\n";
-		out += "round=" + std::to_string(session.round) + "\n";
-		out += "build=" + session.lastCommit + "\n";
-		out += "posted=" + session.lastPostedAt + "\n";
-		return out;
-	}
-
-	void endFeedbackLoop(const std::string& reason, bool notifyPr)
-	{
-		const std::string path = core::defaultFeedbackSessionPath();
-		core::FeedbackSession session;
-		if (!core::readFeedbackSession(path, session))
-			return; // 記憶が無い＝止めるものが無い
-		if (!session.loop)
-			return; // 既に下りている（二重に投稿しない）
-		session.loop = false;
-		(void)core::writeFeedbackSession(path, session);
-
-		if (!notifyPr || !feedbackAvailable() || session.pullRequest <= 0)
-			return;
-
-		// **読む側（Claude）へ「もう自動の周は来ない」と伝える。** 目印は control=ended
-		// ——同梱スクリプトの loop-control は `control=stop` の直後が空白か `-->` のものしか
-		// 合図と読まないので、これを「止めろ」と取り違えることは無い。
-		std::string body;
-		body += "<!-- homeskz-ifc-feedback v1 control=ended build=" + session.lastCommit +
-				" round=" + std::to_string(session.round) + " -->\n";
-		body += "## 実機フィードバック — 自動の往復を終えました\n\n";
-		body += reason + "。\n\n";
-		body +=
-			"以後、新しいビルドが出ても**自動では取り込みません**。続きが要るときは、"
-			"利用者が Vectorworks で「実機テストを実行…」をもう一度実行します（同じ条件で round " +
-			std::to_string(session.round + 1) + " として走り、往復もそこから回り直します）。\n";
-		std::string url;
-		std::string createdAt;
-		std::string error;
-		(void)PostComment(session.repo, session.pullRequest, body, url, createdAt, error);
+		TestRoundResult result;
+		result.ran = true;
+		result.round = material.round;
+		result.report = report;
+		std::string detail = "round " + std::to_string(material.round) + "（" + build.commit + "）";
+		const std::string reportPath = core::testReportPathFor(sessionPath);
+		if (!core::writeFeedbackSession(sessionPath, session))
+			detail += "\n次の周のための記憶を保存できませんでした（次の実機テストはファイル選択から"
+					  "始まります）。";
+		if (WriteReport(reportPath, report))
+			result.reportPath = reportPath;
+		else
+			detail += "\n報告をファイルへ書けませんでした（" +
+					  (reportPath.empty() ? std::string("置き場所が分かりません") : reportPath) +
+					  "）。";
+		result.message = parse::formatTestRoundResult(parse::TestRoundOutcome::Completed, detail);
+		// **うまく行った周は何も出さない**（draw/Feedback.h「取り込みのあとに人の操作を
+		// 残さない」）。
+		return result;
 	}
 } // namespace HomeskzIfcImport::draw

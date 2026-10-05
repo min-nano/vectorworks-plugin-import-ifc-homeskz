@@ -50,7 +50,6 @@ namespace
 
 	// **殻へ返す文字列の置き場所。** 返した const char* は「次に本体を呼ぶまで」生きている
 	// 約束（src/PayloadAbi.h）なので、静的に 1 つ持って毎回書き換える。
-	std::string gLoopStatusText;
 	std::string gMcpViewText;
 } // namespace
 
@@ -157,7 +156,7 @@ VW_PAYLOAD_EXPORT int vw_payload_run_import()
 			return kVwPayloadErrNotInit;
 		// 取り込みは自分の中で例外を受け、ユーザーへはダイアログで見せる
 		// （draw/ImportRun.cpp）。ここは**境界の最後の砦**として、そこで漏れたものを
-		// 受けるだけ。**往復のことは何も持ち帰らない**——それは vw_payload_run_test の
+		// 受けるだけ。**実機テストのことは何も持ち帰らない**——それは vw_payload_run_test の
 		// 仕事である（M25。src/PayloadAbi.h）。
 		draw::runImportCommand();
 		return kVwPayloadOk;
@@ -168,21 +167,14 @@ VW_PAYLOAD_EXPORT int vw_payload_run_import()
 	}
 }
 
-VW_PAYLOAD_EXPORT int vw_payload_run_test(int allowDialogs, int* outActive)
+VW_PAYLOAD_EXPORT int vw_payload_run_test(int allowDialogs)
 {
 	try
 	{
-		if (outActive != nullptr)
-			*outActive = 0;
 		if (!gPayloadReady || gSDK == nil)
 			return kVwPayloadErrNotInit;
-		// **往復を知っているのは本体のここだけ**（src/draw/Feedback.h の runTestRound）。
-		// outActive が立って戻ったら、殻はパレットを開いて周を回し始める
-		// （src/Extensions/ExtTestMenu.cpp）。
-		bool active = false;
-		(void)draw::runTestRound(allowDialogs != 0, active);
-		if (outActive != nullptr)
-			*outActive = active ? 1 : 0;
+		// **実機テストを知っているのは本体のここだけ**（src/draw/Feedback.h の runTestRound）。
+		(void)draw::runTestRound(allowDialogs != 0);
 		return kVwPayloadOk;
 	}
 	catch (...)
@@ -191,7 +183,7 @@ VW_PAYLOAD_EXPORT int vw_payload_run_test(int allowDialogs, int* outActive)
 	}
 }
 
-VW_PAYLOAD_EXPORT int vw_payload_mcp_serve(const char** out)
+VW_PAYLOAD_EXPORT int vw_payload_mcp_serve(const char* shellReport, const char** out)
 {
 	try
 	{
@@ -201,7 +193,9 @@ VW_PAYLOAD_EXPORT int vw_payload_mcp_serve(const char** out)
 		if (!gPayloadReady || gSDK == nil)
 			return kVwPayloadErrNotInit;
 		// 1 回ぶん捌いて**すぐ戻る**（draw/McpBridge.h）。中で例外を受けて見え方に載せる。
-		gMcpViewText = draw::serveMcpBridge();
+		// 殻が済ませた頼みごとの結末は、ここで写してから渡す（寿命は殻の呼び出しの間だけ）。
+		gMcpViewText =
+			draw::serveMcpBridge(shellReport != nullptr ? std::string(shellReport) : std::string());
 		*out = gMcpViewText.c_str();
 		return kVwPayloadOk;
 	}
@@ -239,43 +233,6 @@ VW_PAYLOAD_EXPORT int vw_payload_recalculate(unsigned int kind, void* objectHand
 			// 消さない）。
 			return kVwPayloadErrUnknownId;
 		}
-	}
-	catch (...)
-	{
-		return kVwPayloadErrException;
-	}
-}
-
-VW_PAYLOAD_EXPORT int vw_payload_loop_status(const char** out)
-{
-	try
-	{
-		if (out == nullptr)
-			return kVwPayloadErrAbi;
-		*out = nullptr;
-		if (!gPayloadReady || gSDK == nil)
-			return kVwPayloadErrNotInit;
-		// 記憶の形を知っているのは本体だけ（core::FeedbackSession）。殻には key=value の
-		// 平たい行で渡す（draw/Feedback.h の feedbackLoopStatus）。
-		gLoopStatusText = draw::feedbackLoopStatus();
-		*out = gLoopStatusText.c_str();
-		return kVwPayloadOk;
-	}
-	catch (...)
-	{
-		return kVwPayloadErrException;
-	}
-}
-
-VW_PAYLOAD_EXPORT int vw_payload_loop_end(const char* reason, int notifyPr)
-{
-	try
-	{
-		if (!gPayloadReady || gSDK == nil)
-			return kVwPayloadErrNotInit;
-		draw::endFeedbackLoop(reason != nullptr ? std::string(reason) : std::string(),
-							  notifyPr != 0);
-		return kVwPayloadOk;
 	}
 	catch (...)
 	{

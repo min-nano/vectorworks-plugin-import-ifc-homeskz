@@ -856,9 +856,9 @@ namespace HomeskzIfcImport::draw
 			return scope.removed();
 		}
 
-		note = "準備: 前の周が作ったレイヤを取り除きました（デザイン " + std::to_string(designs) +
-			   "/" + std::to_string(designLayers.size()) + " 枚・シート " + std::to_string(sheets) +
-			   "/" + std::to_string(sheetLayers.size()) + " 枚）";
+		note = "前の周が作ったレイヤを取り除きました（デザイン " + std::to_string(designs) + "/" +
+			   std::to_string(designLayers.size()) + " 枚・シート " + std::to_string(sheets) + "/" +
+			   std::to_string(sheetLayers.size()) + " 枚）";
 		return scope.removed();
 	}
 

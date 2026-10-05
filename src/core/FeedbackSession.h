@@ -1,18 +1,18 @@
 //
 //	core/FeedbackSession.h
 //
-//	**実機フィードバックの往復 1 セッションぶんの記憶。** 開発版（dev）ビルドで取り込みを
-//	走らせたとき、その結果を PR へ投稿し、Claude が直した次のビルドを待って**同じ条件で
-//	取り込み直す**——この繰り返しを回すために覚えておく値をまとめたもの（docs/DEV-NOTES.md
-//	M23）。
+//	**実機テストの記憶。** 開発版（dev）ビルドの「実機テストを実行…」が、Claude が直した
+//	次のビルドで**同じ条件で取り込み直す**ために覚えておく値をまとめたもの（docs/DEV-NOTES.md
+//	M23 / M25 / M38）。
 //
-//	【なぜ覚えるのか】1 周目は人が決める（どの IFC を・どのシンボルで・どの PR へ）。
-//	2 周目からは**人の操作を 1 つも挟まずに**同じ条件で走らせたい——そうでないと
-//	「ファイルを選び直し、設定を選び直し、ログを貼り直す」という往復が残り、自動化の
-//	意味が無くなる。だから 1 周目の選択をそのままディスクへ置き、2 周目以降はここから読む。
+//	【なぜ覚えるのか】1 周目は人が決める（どの IFC を・どのシンボルで）。2 周目からは
+//	**人の操作を 1 つも挟まずに**同じ条件で走らせたい——Claude が MCP の `vw_run_test` から
+//	起こす周はダイアログを 1 枚も出せないので、1 周目の選択をそのままディスクへ置き、
+//	2 周目以降はここから読む。M37 までは結果を PR へ投稿していたので宛先も覚えていたが、
+//	いまは結果を手元に控えるだけになった（draw/Feedback.h）。
 //
 //	【なぜ core/ に置くか】ImportOptions とまったく同じ立ち位置である:
-//	  * 決めるのは描画側（draw/SettingsDialog・draw/Feedback）——PR 番号も IFC のパスも
+//	  * 決めるのは描画側（draw/SettingsDialog・draw/Feedback）——IFC のパスは
 //	    ダイアログでしか決まらない。
 //	  * 使うのは解析側と描画側の両方（解析は options を、描画は残り全部を読む）。
 //	SDK も STEP も知らない値なので core/ が置き場所になる（CLAUDE.md「依存の向き」）。
@@ -35,24 +35,10 @@
 
 namespace HomeskzIfcImport::core
 {
-	// 往復 1 セッションぶんの記憶。**既定値は「何もしない」**——記憶が無い（＝1 周目の）
+	// 実機テストの記憶。**既定値は「何もしない」**——記憶が無い（＝1 周目の）
 	// ときにそのまま使っても、従来どおりの手動の取り込みになる。
 	struct FeedbackSession
 	{
-		// 結果を PR へ投稿するか。false ならこの仕組みは丸ごと動かない。
-		bool send = false;
-
-		// 投稿先。repo は "owner/repo"、pullRequest は PR 番号（0 なら投稿しない）。
-		// **repo を持たせてあるのは、公開したくない往復を私有リポジトリへ逃がすため**
-		// （docs/DEVELOPMENT.md「フィードバックの往復」）。既定は本リポジトリ。
-		std::string repo;
-		int pullRequest = 0;
-
-		// 追いかけるブランチ（＝1 周目に動いていた dev ビルドのブランチ）。次の周回で
-		// 取りに行くのは**このブランチの新しいビルドだけ**で、他のブランチの dev
-		// プレリリースへ勝手に乗り換えない。
-		std::string branch;
-
 		// **周ごとに開き直す「まっさらな作業ファイル」の絶対パス**（空なら開き直さない）。
 		//
 		// レイヤ削除（`draw/Feedback` の `prepareDrawingForRound`）は「前の周が自分で作った
@@ -76,22 +62,10 @@ namespace HomeskzIfcImport::core
 		std::string ifcPath;
 		ImportOptions options;
 
-		// **仮名に混ぜる秘密の鍵**（16 進。parse::FeedbackRound::anonKey へ渡す）。最初に
-		// 投稿するときに作り（newAnonymizationKey）、**往復をやり直しても持ち越す**——同じ
-		// 機械では同じ入力が同じ仮名になり、周回や PR をまたいで対象の同一性が読める。
-		// 鍵は投稿には出ない。鍵が無いと、名前の心当たりがある人が手元で同じ計算をして
-		// 仮名の当たりを確かめられる（公開済みの投稿を洗い直して分かった）。
-		std::string anonKey;
-
-		// 投稿する本文から、案件が分かるもの（ファイル名・パス・ユーザー名）を伏せるか。
-		// **既定は伏せる**——PR コメントは公開されるので、既定が「出す」であってはならない。
-		bool anonymize = true;
-
-		// 済んだ周回数（1 周目の投稿で 1 になる）。コメントの見出しに出る。
+		// 済んだ周回数（1 周目が終わると 1 になる）。報告の見出しに出る。
 		int round = 0;
 
-		// 直近の周で動いていたビルドの短縮 sha。**新しいビルドかどうかの判定に使う**
-		// （同じ sha のビルドを取り込み直しても意味が無い）。
+		// 直近の周で動いていたビルドの短縮 sha（報告の「前の周からの変化」の見出しに出す）。
 		std::string lastCommit;
 
 		// **1 周目の「取り込み前に在ったレイヤ」の顔ぶれ**（core::DrawCounts::existingLayers）。
@@ -113,23 +87,10 @@ namespace HomeskzIfcImport::core
 		std::vector<std::string> lastCreatedLayers;
 		std::vector<std::string> lastCreatedSheets;
 
-		// 直近の周の要素内訳（parse::formatTally の 1 行表現）。次の周のコメントで
+		// 直近の周の要素内訳（parse::formatTally の 1 行表現）。次の周の報告で
 		// **「前回からどう変わったか」**を出すために持つ——数字の羅列を 2 つ並べて
 		// 読み比べさせるのでは、往復を減らした意味が薄い。
 		std::string lastTally;
-
-		// **直近の投稿の時刻**（GitHub が返した created_at。ISO 8601 / UTC）。モードレスの
-		// 往復（M24）が「止めろ」の合図を探すとき、**この時刻より後のコメントだけ**を読む
-		// ためのもの——読む範囲を切らないと、一度読んだ古い合図を毎回読み直すことになる。
-		// 空なら「最近のコメント」から読む（同梱スクリプトの loop-control）。
-		std::string lastPostedAt;
-
-		// **自動の往復（M24）が回っているか。** 投稿できた周の終わりに立ち、止まったとき
-		// （人がパレットで止めた・Claude が合図した・PR が閉じた・入れ替えに失敗した）に
-		// 下りる。**下りても記憶は消さない**——人がメニューから取り込みを実行すれば
-		// 続きの周として走り、そこでまた立つ（止めたことが「往復を最初からやり直す」に
-		// ならないように。docs/DEV-NOTES.md M24）。
-		bool loop = false;
 	};
 
 	// -----------------------------------------------------------------------
@@ -137,57 +98,29 @@ namespace HomeskzIfcImport::core
 	// 通す判断で、**SDK も IFC も知らない純粋な場合分け**なのでここに置き、無 SDK でテスト
 	// する（CLAUDE.md「テスト方針」——描画側から切り離せる計算は core/ へ寄せる）。
 	//
-	// **判断そのものが M25 の要点である。** M24 まではここが「記憶があって同じビルドなら、
-	// 新しい 1 周目として取り込み直す」で、パレットが開いている最中に人がメニューを押すと
-	// 同じ round が二重に投稿された（実機で発生。docs/DEV-NOTES.md M25）。
+	// **同じビルドでも取り込む**（M38）。M37 までは「同じビルドなら取り込まない」で、往復の
+	// パレットと人の手が同じ周を二重に投稿するのを防いでいた。投稿が無くなり、取り込み直す
+	// かどうかは頼んだ側（人か Claude）が決めるので、その歯止めは要らなくなった。
 	enum class FeedbackRoundKind
 	{
-		// 記憶が無い（別ブランチの記憶は呼び出し側が捨ててから渡す）。宛先と伏せ字を
-		// 尋ねてから 1 周目を走らせる。
+		// 記憶が無い。IFC・設定を尋ねてから 1 周目を走らせる。
 		FirstRound,
-		// 記憶があり、**動いているビルドがそれと違う**。何も尋ねずに続きの周を走らせる。
+		// 記憶がある。前の周と同じ条件で続きの周を走らせる（メニューから押したときは、
+		// 同じ条件でよいかを描画側が 1 度だけ尋ねる。draw/Feedback.cpp）。
 		ContinueRound,
-		// 記憶があり、**同じビルドが動いている**。取り込んでも前の周と同じ数字が並ぶだけ
-		// なので**走らせず**、往復を回す（止まっていたら回し直す）だけにする。
-		RearmOnly,
-		// ダイアログを出せない場面（パレットの周）なのに、尋ねないと始められない。
-		// 何もしない。
+		// ダイアログを出せない場面（MCP の `vw_run_test`）なのに、尋ねないと始められない。
+		// 何もしない（1 周目はメニューから人が実行する）。
 		Refuse,
 	};
 
-	// runningCommit は**いま動いている本体の短縮 sha**。allowDialogs はダイアログを出して
-	// よいか（メニューから実行したとき true、パレットの周は false）。
-	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session,
-										const std::string& runningCommit, bool allowDialogs);
+	// allowDialogs はダイアログを出してよいか（メニューから実行したとき true、MCP は false）。
+	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session, bool allowDialogs);
+
+	// 記憶が「続きの周を組み立てられるだけ揃っているか」（1 周は済んでいて、その周の IFC が
+	// 分かっている）。
+	bool feedbackSessionRemembered(const FeedbackSession& session);
 
 	// -----------------------------------------------------------------------
-	// **往復の相手は PR であって、ブランチではない。** 記憶はブランチで見分けている
-	// （別ブランチの記憶は使わない）が、**同じブランチ名が別の PR で使い回される**ことが
-	// ある——マージされた PR のブランチを main から作り直し、同じ名前のまま新しい PR を
-	// 立てる運用で、実際に起きた（#137 → #138）。そのとき記憶は閉じた前の PR を指した
-	// ままなので、
-	//
-	//   * パレットは PR の状態を先に見て「PR がマージされました」で止まり、**新しい PR の
-	//     ビルドを一度も取りに行かない**。
-	//   * メニューから押すと続きの周として走り、**閉じた前の PR へ投稿**して、また止まる。
-	//
-	// という形で、新しい PR の往復が始められなくなる。記憶の PR が閉じていたら（state が
-	// merged / closed）、それは**終わった往復**なので、1 周目からやり直す。
-
-	// loop-control の state= が「その PR はもう続ける相手ではない」を表すか。**確かめられ
-	// なかった（空）ときは false**——オフラインで記憶を捨てると、戻ったときに往復が
-	// 最初からになる（止まる入口と同じく、不確かなときは記憶を消す側へ倒さない）。
-	bool feedbackPullRequestEnded(const std::string& state);
-
-	// 終わった往復の記憶から、新しい往復の 1 周目に持ち越すものだけを残した記憶を作る。
-	// 持ち越すのは**人の好み**（投稿先のリポジトリと伏せ字の選択）と仮名の鍵だけで、PR 番号・周回・
-	// 基準・作業ファイル・前の周の内訳は捨てる（前の PR の周と引き比べても意味が無い）。
-	// 返す記憶は send=false なので、feedbackRoundKind は FirstRound を返す。
-	FeedbackSession restartedFeedbackSession(FeedbackSession ended);
-
-	// 仮名の鍵を新しく作る（16 進 32 桁 = 128bit。std::random_device から）。
-	std::string newAnonymizationKey();
-
 	// 記憶を key=value テキストへ（末尾は改行）。**行の順は固定**——差分を取ったときに
 	// 中身の変化だけが見えるようにするため。
 	std::string formatFeedbackSession(const FeedbackSession& session);
@@ -210,4 +143,9 @@ namespace HomeskzIfcImport::core
 
 	// 記憶を消す（セッションを畳むとき）。無ければ何もしない。
 	void clearFeedbackSession(const std::string& path);
+
+	// **直近の実機テストの報告**（Markdown。parse::formatTestRoundReport）の置き場所。
+	// 記憶と同じフォルダの last-round.md（記憶のパスが空なら空）。MCP の `vw_test_report`
+	// がここを読む——本体を入れ替えても読めるよう、メモリではなくファイルに置く。
+	std::string testReportPathFor(const std::string& sessionPath);
 } // namespace HomeskzIfcImport::core

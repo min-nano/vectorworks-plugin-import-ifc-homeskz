@@ -4,11 +4,14 @@
 //	**殻が本体（ペイロード）へ貸してくれる道具。** 境界（src/PayloadAbi.h）で受け取った
 //	ものを、本体の中で使いやすい形に包んで 1 か所に置く。
 //
-//	【なぜ要るか】本体は**同梱スクリプト**（vw-update.sh / vw-feedback.sh）に手が届かない。
+//	【なぜ要るか】本体は**同梱スクリプト**（scripts/vw-*.sh / .ps1）に手が届かない。
 //	本体が読み込まれるのは一時ディレクトリへ写した複製なので、自分の在り処からバンドルへは
 //	たどり着けないためである（src/PayloadHost.h「必ず複製してから読む」）。だから殻から
-//	借りる。借りたものは `payload/PayloadMain.cpp` が init のときにここへ預け、
-//	`draw/Feedback` が使う。
+//	借りる。借りたものは `payload/PayloadMain.cpp` が init のときにここへ預ける。
+//
+//	【いまの使い手】**無い**（M38）。唯一の使い手だった実機フィードバックの投稿
+//	（vw-feedback）を外した。口は境界（VwPayloadHost::runBundledScript）ごと残してある
+//	——本体から同梱スクリプトを走らせたくなったときに、境界の形を変えずに済むように。
 //
 //	【なぜ写して持つか】境界を越えて来たものは受け取った側がその場で写す——これは
 //	この仕組み全体の決めごとで、破ると実機で Vectorworks ごと落ちる
@@ -16,8 +19,8 @@
 //	なので、C++ の型が境界を越えることにはならない。
 //
 //	【SDK 依存ではない】このヘッダ自身は標準ライブラリしか見ないが、置き場所は draw/ に
-//	してある——使うのが描画側（draw/Feedback）だけで、core/ / parse/ から見えてはいけない
-//	もの（殻の存在は解析フェーズの知るところではない）だから。
+//	してある——core/ / parse/ から見えてはいけないもの（殻の存在は解析フェーズの知る
+//	ところではない）だから。
 //
 
 #pragma once
@@ -29,16 +32,16 @@
 namespace HomeskzIfcImport::draw
 {
 	// 借りた道具ひとそろい。**空でも動く**——貸してもらえなかった（古い殻・単体テスト）
-	// ときは runScript が空で、フィードバックの機能だけが静かに使えなくなる。
+	// ときは runScript が空になる。
 	struct HostServices
 	{
 		// 同梱スクリプトを 1 本走らせて標準出力を受け取る。baseName は拡張子を除いた
-		// 名前（"vw-update" / "vw-feedback"）。起動できなければ false。
+		// 名前（"vw-update" など）。起動できなければ false。
 		std::function<bool(const std::string& baseName, const std::vector<std::string>& args,
 						   std::string& out)>
 			runScript;
 
-		// スクリプトを走らせられるか（＝フィードバックの往復が使えるか）。
+		// スクリプトを走らせられるか。
 		bool canRunScripts() const
 		{
 			return static_cast<bool>(runScript);

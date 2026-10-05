@@ -11,31 +11,15 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <iomanip>
 #include <sstream>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::parse
 {
 	namespace
 	{
-		// text の中の from を to へ全部置き換える（from が空なら何もしない）。
-		std::string replaceAll(std::string text, const std::string& from, const std::string& to)
-		{
-			if (from.empty())
-				return text;
-			std::string::size_type pos = 0;
-			while ((pos = text.find(from, pos)) != std::string::npos)
-			{
-				text.replace(pos, from.size(), to);
-				pos += to.size();
-			}
-			return text;
-		}
-
 		// 末尾のファイル名（区切りは POSIX と Windows の両方を見る）。
 		std::string fileNameOf(const std::string& path)
 		{
@@ -43,78 +27,6 @@ namespace HomeskzIfcImport::parse
 			if (pos == std::string::npos)
 				return path;
 			return path.substr(pos + 1);
-		}
-
-		// FNV-1a（32bit）。**暗号用途ではない**——同じ入力なら同じ仮名になり、仮名から
-		// 元の名前が読めない、という 2 つだけが要るので、短くて依存の無いものを使う。
-		std::uint32_t fnv1a(const std::string& text)
-		{
-			std::uint32_t hash = 2166136261U;
-			for (const char c : text)
-			{
-				hash ^= static_cast<std::uint32_t>(static_cast<unsigned char>(c));
-				hash *= 16777619U;
-			}
-			return hash;
-		}
-
-		// 鍵付きの仮名に使う FNV-1a（64bit）。**鍵を先に通す**ので、鍵を知らない人には
-		// 内部状態（64bit）が分からず、名前の心当たりから仮名を作り直せない。鍵は 64bit
-		// 以上を前提にする（core::newAnonymizationKey）。
-		std::uint64_t fnv1a64(const std::string& key, const std::string& text)
-		{
-			std::uint64_t hash = 14695981039346656037ULL;
-			auto feed = [&hash](const std::string& part)
-			{
-				for (const char c : part)
-				{
-					hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(c));
-					hash *= 1099511628211ULL;
-				}
-			};
-			feed(key);
-			feed(std::string(1, '\0')); // 鍵と名前の境目（"ab"+"c" と "a"+"bc" を分ける）
-			feed(text);
-			return hash;
-		}
-
-		// 仮名の 6 桁。鍵が無ければ従来どおり名前だけで決める（鍵を持たない古い記憶でも
-		// 同じ仮名が出る）。
-		std::uint32_t aliasHash(const std::string& key, const std::string& text)
-		{
-			if (key.empty())
-				return fnv1a(text);
-			const std::uint64_t hash = fnv1a64(key, text);
-			return static_cast<std::uint32_t>(hash ^ (hash >> 32U));
-		}
-
-		std::string hex6(std::uint32_t value)
-		{
-			std::ostringstream out;
-			out << std::hex << std::setw(6) << std::setfill('0') << (value & 0xFFFFFFU);
-			return out.str();
-		}
-
-		// "/Users/<名前>/" のような区間のユーザー名を伏せる。marker は "/Users/" のような
-		// 区切りを含む接頭辞で、その直後の 1 区画（次の区切りまで）を "…" へ替える。
-		std::string maskUserSegment(std::string text, const std::string& marker, char separator)
-		{
-			std::string::size_type pos = 0;
-			while ((pos = text.find(marker, pos)) != std::string::npos)
-			{
-				const std::string::size_type nameAt = pos + marker.size();
-				std::string::size_type end = text.find(separator, nameAt);
-				if (end == std::string::npos)
-					end = text.size();
-				if (end == nameAt) // 区切りが続いただけ（伏せるものが無い）
-				{
-					pos = nameAt;
-					continue;
-				}
-				text.replace(nameAt, end - nameAt, "…");
-				pos = nameAt + std::string("…").size();
-			}
-			return text;
 		}
 
 		// 内訳の 1 行表現を要素ごとに切り分ける（"ラベル:描けた/命令" の並び）。
@@ -208,8 +120,14 @@ namespace HomeskzIfcImport::parse
 	std::string formatTestRoundResult(TestRoundOutcome outcome, const std::string& detail)
 	{
 		std::ostringstream out;
-		if (outcome == TestRoundOutcome::DocumentFailed)
+		switch (outcome)
 		{
+		case TestRoundOutcome::Completed:
+			out << "実機テストを終えました。";
+			if (!detail.empty())
+				out << "\n\n" << detail;
+			return out.str();
+		case TestRoundOutcome::DocumentFailed:
 			out << "描く図面を用意できなかったので、この周は走らせませんでした。";
 			if (!detail.empty())
 				out << "\n\n" << detail;
@@ -218,34 +136,22 @@ namespace HomeskzIfcImport::parse
 			out << "\n\n図面には何も描いていません。作業ファイルを開いてから、"
 				   "もう一度実行してください。";
 			return out.str();
-		}
-		if (outcome == TestRoundOutcome::Rearmed)
-		{
-			// **何も起きなかったのではなく、起こさないのが正しい周である**ことを言う。
-			out << "動いているビルド";
-			if (!detail.empty())
-				out << "（" << detail << "）";
-			out << "は前の周と同じなので、取り込みは行いませんでした"
-				   "——同じ数字がもう一度並ぶだけだからです。";
-			out << "\n\n往復は回し直しました。新しいビルドが出たら、パレットが自動で"
-				   "入れて同じ条件で取り込み、結果を PR へ投稿します。";
-			return out.str();
-		}
-		if (outcome == TestRoundOutcome::ImportFailed)
-		{
-			out << "取り込みがエラーで中断したので、この周は PR へ送りませんでした。";
+		case TestRoundOutcome::ImportFailed:
+			out << "取り込みがエラーで中断しました。";
 			if (!detail.empty())
 				out << "\n\n" << detail;
-			out << "\n\nくわしい原因は下の「ログを表示」にあります。";
+			out << "\n\nくわしい原因は診断ログにあります。";
+			return out.str();
+		case TestRoundOutcome::NotRemembered:
+			// **MCP から 1 周目は起こせない**（IFC と設定はダイアログでしか決まらない）。
+			// 何をすれば続けられるかを、頼んだ側（Claude）がそのまま人へ伝えられる形で言う。
+			out << "実機テストの 1 周目がまだ済んでいません。Vectorworks のメニュー"
+				   "「実機テストを実行…」を 1 度実行して、IFC と取り込み設定を選んでください"
+				   "（2 周目からは同じ条件でダイアログ無しに走ります）。";
+			if (!detail.empty())
+				out << "\n\n" << detail;
 			return out.str();
 		}
-		out << "取り込みは終わりましたが、PR へ投稿できませんでした。";
-		if (!detail.empty())
-			out << "\n\n" << detail;
-		// **数字がどこにも残らない、という状態を作らない。** 投稿できなかった以上、内訳を
-		// 見られるのはこのダイアログだけである。
-		out << "\n\nこの周の内訳と診断ログは下の「ログを表示」にあります（PR には載って"
-			   "いません）。";
 		return out.str();
 	}
 
@@ -315,169 +221,9 @@ namespace HomeskzIfcImport::parse
 		return out.str();
 	}
 
-	std::string anonymizedFileName(const std::string& path, const std::string& key)
-	{
-		const std::string name = fileNameOf(path);
-		if (name.empty())
-			return "model-000000.ifc";
-		const std::string::size_type dot = name.rfind('.');
-		const std::string stem = (dot == std::string::npos) ? name : name.substr(0, dot);
-		const std::string ext = (dot == std::string::npos) ? std::string(".ifc") : name.substr(dot);
-		return "model-" + hex6(aliasHash(key, stem)) + ext;
-	}
-
-	std::string anonymizedStyleName(const std::string& name, const std::string& key)
-	{
-		return "style-" + hex6(aliasHash(key, name));
-	}
-
-	std::string anonymizedDrawingName(const std::string& path, const std::string& key)
-	{
-		const std::string name = fileNameOf(path);
-		if (name.empty())
-			return "drawing-000000";
-		const std::string::size_type dot = name.rfind('.');
-		const bool hasExt = dot != std::string::npos && dot > 0;
-		// **フォルダも混ぜる**——同じ「伏図.vwx」でも物件ごとのフォルダが違えば別の図面
-		// なので、仮名も分ける（IFC はファイル名だけで決めるが、あちらは物件名が名前に入る）。
-		return "drawing-" + hex6(aliasHash(key, path)) +
-			   (hasExt ? name.substr(dot) : std::string());
-	}
-
 	namespace
 	{
-		// UTF-8 の文字数（先頭バイトだけを数える）。「短い名前か」を**バイトではなく字数で**
-		// 決めるため——バイトで数えると漢字 2 字（6 バイト）が長い名前に数えられてしまう。
-		std::size_t utf8Length(const std::string& text)
-		{
-			std::size_t count = 0;
-			for (const char c : text)
-				if ((static_cast<unsigned char>(c) & 0xC0U) != 0x80U)
-					++count;
-			return count;
-		}
-
-		// これより短いスタイル名は、**名前が出ると分かっている形**でしか置き換えない
-		// （redactStyleName）。「A3」「共通」のような短い名前を本文まるごとで置き換えると、
-		// 診断や記録の**別の意味の同じ綴り**まで仮名に化けて、読む側が読み違える
-		// （PR #135 のレビュー）。
-		constexpr std::size_t kMinBareStyleNameChars = 4;
-
-		// line の中の「marker ＋ name ＋ 行末（改行か本文の終わり）」の name を alias へ替える。
-		std::string replaceAtLineEnd(std::string text, const std::string& marker,
-									 const std::string& name, const std::string& alias)
-		{
-			const std::string needle = marker + name;
-			std::string::size_type pos = 0;
-			while ((pos = text.find(needle, pos)) != std::string::npos)
-			{
-				const std::string::size_type end = pos + needle.size();
-				if (end == text.size() || text[end] == '\n' || text[end] == '\r')
-				{
-					text.replace(pos + marker.size(), name.size(), alias);
-					pos += marker.size() + alias.size();
-				}
-				else
-					pos = end;
-			}
-			return text;
-		}
-
-		// 図面枠のスタイル名を仮名へ替える。2 段構え:
-		//   1. **名前が出ると分かっている形**は、長さに依らず必ず替える——描画側の記録と診断の
-		//      「…」（draw/TitleBlock）と、ログの設定の行「図面枠スタイル: <名前>」
-		//      （kTitleBlockOptionLabel。行末まで）。短い名前でも事務所名の略であり得るので、
-		//      ここは緩めない。
-		//   2. そのうえで**十分に長い名前**（kMinBareStyleNameChars 字以上）は、本文のどこに
-		//      出ても替える——形の分からない出どころ（将来足される文言）からの漏れを塞ぐ。
-		//      長い名前が別の意味で偶然現れることはまず無いので、読み違えの恐れは小さい。
-		std::string redactStyleName(std::string text, const std::string& name,
-									const std::string& key)
-		{
-			if (name.empty())
-				return text;
-			const std::string alias = anonymizedStyleName(name, key);
-			text = replaceAll(text, "「" + name + "」", "「" + alias + "」");
-			text = replaceAtLineEnd(text, kTitleBlockOptionLabel, name, alias);
-			if (utf8Length(name) >= kMinBareStyleNameChars)
-				text = replaceAll(text, name, alias);
-			return text;
-		}
-
-		// 利用者のパスを仮名へ替える。**全部のパスを丸ごと → ファイル名 → 拡張子を除いた名前**
-		// の順に、段ごとに全部のパスを通す（1 本ずつ 3 段を通すと、同じファイル名を持つ別の
-		// パスが先にファイル名だけ替わって、丸ごと替わるはずのフォルダが残る）。拡張子を除いた
-		// 名前は**十分に長いときだけ**替える——「図面」のような短い名前を本文まるごとで
-		// 替えると、別の意味の同じ綴りまで仮名に化ける（スタイル名と同じ理由）。
-		std::string redactPrivatePaths(std::string text, std::vector<std::string> paths,
-									   const std::string& key)
-		{
-			// 空のパス・ファイル名の取れないパスは替えるものが無い。
-			paths.erase(std::remove_if(paths.begin(), paths.end(), [](const std::string& path)
-									   { return fileNameOf(path).empty(); }),
-						paths.end());
-			// **長いパスから**替える（あるパスが別のパスの一部であっても、長いほうを丸ごと
-			// 仮名にし損ねないように）。
-			std::sort(paths.begin(), paths.end(), [](const std::string& a, const std::string& b)
-					  { return a.size() != b.size() ? a.size() > b.size() : a < b; });
-			for (const std::string& path : paths)
-				text = replaceAll(text, path, anonymizedDrawingName(path, key));
-			for (const std::string& path : paths)
-				text = replaceAll(text, fileNameOf(path), anonymizedDrawingName(path, key));
-			for (const std::string& path : paths)
-			{
-				const std::string name = fileNameOf(path);
-				const std::string::size_type dot = name.rfind('.');
-				if (dot == std::string::npos || dot == 0)
-					continue;
-				const std::string stem = name.substr(0, dot);
-				const std::string alias = anonymizedDrawingName(path, key);
-				if (utf8Length(stem) >= kMinBareStyleNameChars)
-					text = replaceAll(text, stem, alias.substr(0, alias.rfind('.')));
-			}
-			return text;
-		}
-	} // namespace
-
-	std::string redactText(const std::string& text, const std::string& ifcPath,
-						   const std::string& titleBlockStyle,
-						   const std::vector<std::string>& privatePaths, const std::string& key)
-	{
-		std::string out = text;
-		if (!ifcPath.empty())
-		{
-			const std::string name = fileNameOf(ifcPath);
-			const std::string alias = anonymizedFileName(ifcPath, key);
-			// **長いほうから順に**置き換える（先に短いほうを消すと、長いほうの一部が
-			// 置き換わって「伏せたつもりのパス」が半端に残る）。
-			out = replaceAll(out, ifcPath, alias);
-			out = replaceAll(out, name, alias);
-			const std::string::size_type dot = name.rfind('.');
-			if (dot != std::string::npos && dot > 0)
-				out = replaceAll(out, name.substr(0, dot), alias.substr(0, alias.rfind('.')));
-		}
-		// 図面枠のスタイル名。**IFC のパスの後に**置き換える——スタイル名がパスの一部と
-		// 重なっていても、パスを丸ごと仮名にし損ねないように。
-		out = redactStyleName(out, titleBlockStyle, key);
-		// いま開いている図面など、IFC 以外の利用者のパス。
-		out = redactPrivatePaths(out, privatePaths, key);
-		// ホームディレクトリのユーザー名（ログのパスに必ず出る）。
-		out = maskUserSegment(out, "/Users/", '/');
-		out = maskUserSegment(out, "/home/", '/');
-		out = maskUserSegment(out, "\\Users\\", '\\');
-		// macOS の利用者ごとの一時ディレクトリ（`/var/folders/vy/v8f1…gn/T/`）。名前では
-		// ないが**利用者と機械ごとに決まった値**なので、投稿どうしを結び付ける手掛かりになる。
-		// 2 区画とも伏せる（1 区画目を伏せたあとの綴りを目印にして 2 区画目を伏せる）。
-		out = maskUserSegment(out, "/var/folders/", '/');
-		out = maskUserSegment(out, "/var/folders/…/", '/');
-		// 外部ボリューム名（NAS・外付けディスク）。事務所名を付けていることがある。
-		out = maskUserSegment(out, "/Volumes/", '/');
-		return out;
-	}
-
-	namespace
-	{
-		// 図面が「取り込み前」へ戻してあるか（PR コメントの「図面の状態:」1 行）。
+		// 図面が「取り込み前」へ戻してあるか（報告の「図面の状態:」1 行）。
 		//
 		// 【なぜ真偽 1 つでは足りないのか】判断材料は描画側の実測
 		// （DrawCounts::existingLayers ＝取り込み前から在ったレイヤ）だが、**図面のテンプレートに
@@ -490,8 +236,8 @@ namespace HomeskzIfcImport::parse
 		// 【なぜ人に訊かないのか】押したかどうかは戻したかどうかではない。確認ダイアログは
 		// 「押したが戻していない」を防げないので、**実測だけで言う**。
 		//
-		// 【名前を載せない】レイヤ名は図面の側の言葉なので、PR コメントには**枚数と判定だけ**を
-		// 出す（伏せ字の方針と同じ。案件が分かるものを公開の場へ置かない）。
+		// 【名前を載せない】枚数と判定だけを出す（読む側が知りたいのは「戻っていたか」で、
+		// 顔ぶれは診断ログにある）。
 		std::string restoredStateLine(const FeedbackRound& round, const core::DrawCounts& counts)
 		{
 			const std::size_t now = counts.existingLayers.size();
@@ -539,11 +285,9 @@ namespace HomeskzIfcImport::parse
 	namespace
 	{
 		// **切り詰めは UTF-8 の文字境界で。** 素朴に「末尾から N バイト」を切り出すと、
-		// 3 バイトの日本語の途中で切れて**壊れた UTF-8** ができる。GitHub はそれを
-		// 400「Problems parsing JSON」で弾き、**その周の投稿がまるごと落ちる**（実機で
-		// 発生。docs/DEV-NOTES.md M25）——診断ログはほぼ日本語なので、境界に当たるほうが
-		// 珍しい。ここが落ちるまで 2 周ぶん通っていたのは、たまたま境界に落ちていただけ
-		// である。
+		// 3 バイトの日本語の途中で切れて**壊れた UTF-8** ができる。PR へ投稿していた頃は
+		// GitHub がそれを 400 で弾き、その周の投稿がまるごと落ちた（実機で発生。
+		// docs/DEV-NOTES.md M25）。いまの読み手（MCP の JSON）も壊れた UTF-8 は受け付けない。
 		//
 		// 継続バイト（0b10xxxxxx）の間は前へ進め、そのうえで**次の行頭まで**進める
 		// ——行の途中から始まるログは読む側にも読みにくいので、どうせ削るなら行で削る。
@@ -560,38 +304,38 @@ namespace HomeskzIfcImport::parse
 		}
 	} // namespace
 
-	std::string formatFeedbackComment(const FeedbackRound& round, const core::Document& document,
+	std::string keepTail(const std::string& text, std::size_t maxBytes)
+	{
+		if (text.size() <= maxBytes)
+			return text;
+		// 案内の 1 行ぶんも予算を食うので、その分だけ余計に削る。行数字を含めて高々
+		// 64 バイト。
+		constexpr std::size_t kOmittedNoticeBytes = 64;
+		std::size_t start = text.size() - maxBytes + kOmittedNoticeBytes;
+		if (start > text.size())
+			start = text.size();
+		start = utf8LineStart(text, start); // **文字と行の境界まで進める**
+		return "…（前半 " + std::to_string(start) + " バイトを省略）…\n" + text.substr(start);
+	}
+
+	std::string formatTestRoundReport(const FeedbackRound& round, const core::Document& document,
 									  const core::DrawCounts& counts)
 	{
 		const ImportOutcome outcome = importOutcome(document, counts);
 		const std::vector<ElementRow> rows = elementRows(document, counts);
 		const std::string tally = formatTally(rows);
 
-		// 伏せるかどうかで、載せる名前と本文の作り方が変わる。**判断はここ 1 か所**
-		// （あちこちで if を書くと、必ずどこかで素の値が漏れる）。
-		const std::string shownFile = round.anonymize
-										  ? anonymizedFileName(round.ifcPath, round.anonKey)
-										  : fileNameOf(round.ifcPath);
-		auto clean = [&round, &document](const std::string& text)
-		{
-			return round.anonymize ? redactText(text, round.ifcPath, document.titleBlockStyle,
-												round.privatePaths, round.anonKey)
-								   : text;
-		};
-
 		std::ostringstream out;
-		// 機械可読の目印。**本文の見た目を変えてもここは変えない**——読む側（Claude）が
-		// 「これはプラグインの自動投稿で、何周目のどのビルドか」を確実に拾えるようにする。
-		out << "<!-- homeskz-ifc-feedback v1 round=" << round.round
-			<< " build=" << round.build.commit << " branch=" << round.build.branch << " -->\n";
-
-		out << "## 実機フィードバック round " << round.round << " — `" << round.build.plugin << "` "
+		out << "## 実機テスト round " << round.round << " — `" << round.build.plugin << "` "
 			<< round.build.commit;
+		if (!round.build.branch.empty())
+			out << "（" << round.build.branch << "）";
 		if (!round.build.platform.empty())
-			out << "（" << round.build.platform << "）";
+			out << " " << round.build.platform;
 		out << "\n\n";
 
-		out << "**結果: " << importStatusWord(outcome.status) << "** ／ 対象 `" << shownFile << "`";
+		out << "**結果: " << importStatusWord(outcome.status) << "** ／ 対象 `"
+			<< fileNameOf(round.ifcPath) << "`";
 		const std::string size = formatBytes(round.bytes);
 		if (!size.empty())
 			out << "（" << size << "）";
@@ -601,16 +345,24 @@ namespace HomeskzIfcImport::parse
 			out << " ／ " << round.startedAt;
 		out << "\n";
 
-		// **取り込み前へ戻っていたか。** 2 周目以降は同じ文書へもう一度描くので、前の周を
-		// 「取り消し」で戻さずに実行すると図が二重になる——ところが**内訳の数字は命令の
-		// 数なので、戻したかどうかで 1 つも変わらない**。読む側（Claude）が「絵が壊れて
-		// いるのは実装のせいか、戻し忘れか」を切り分けられるよう、1 行を必ず載せる。
+		// **取り込み前へ戻っていたか。** 2 周目以降は同じ文書へもう一度描くので、戻し損ねると
+		// 図が二重になる——ところが**内訳の数字は命令の数なので、戻したかどうかで 1 つも
+		// 変わらない**。読む側（Claude）が「絵が壊れているのは実装のせいか、戻し損ねか」を
+		// 切り分けられるよう、1 行を必ず載せる。
 		out << "\n図面の状態: " << restoredStateLine(round, counts) << "\n";
 		// **取り除きが効いたかを、図面の状態のすぐ隣に置く。** 診断ログにも同じ行があるが、
 		// ログは上限で切り詰められるので、そこだけを頼りにすると読めない周が出る
 		// （実機 round 2 で実際に落ちた）。
 		if (!round.preparation.empty())
-			out << clean(round.preparation) << "\n";
+			out << round.preparation << "\n";
+		// 作業ファイルがある周は、次の周が取り消しか開き直しで丸ごと戻すので言わない
+		// （FeedbackRound::restorable）。
+		if (counts.undoPartial && !round.restorable)
+			out << "（作業ファイルを用意できなかったので、取り込み前から在ったレイヤ（テンプレート"
+				   "の"
+				   "もの）へ描いた分は、次の周の取り消しが効かなければ残ります。そこも戻したいとき"
+				   "は、"
+				   "人が「取り消し」で戻します。）\n";
 
 		// 前の周からの差分。1 周目（previousTally が空）では節ごと出さない。
 		const std::string diff = formatTallyDiff(round.previousTally, tally);
@@ -638,93 +390,21 @@ namespace HomeskzIfcImport::parse
 		if (!anyRow)
 			out << "| （命令が 1 つも出ていません） | 0 / 0 |\n";
 
-		// 描画側が持ち帰った異常と記録。異常は**折り畳まない**（読ませたいものを隠さない）。
+		// 描画側が持ち帰った異常と記録。
 		if (!counts.diagnostics.empty())
-			out << "\n### 注意（描画側の異常）\n\n" << codeBlock(clean(counts.diagnostics));
+			out << "\n### 注意（描画側の異常）\n\n" << codeBlock(counts.diagnostics);
 		if (!counts.notes.empty())
-			out << "\n<details><summary>記録（用紙の割り付けなど）</summary>\n\n"
-				<< codeBlock(clean(counts.notes)) << "\n</details>\n";
+			out << "\n### 記録（用紙の割り付けなど）\n\n" << codeBlock(counts.notes);
 
-		// **末尾の案内を先に組む。** 下のログはコメント 1 通の上限に収めるために削るので、
-		// 「あとどれだけ入るか」を知るには末尾の長さが先に要る（案内を削って字数を稼ぐ
-		// ことはしない——次に何が起きるかが読めなくなると、往復が人の手に戻る）。
-		std::ostringstream tail;
-		tail << "\n---\n";
-		tail << "この投稿は VectorWorks 上の開発版プラグインが自動生成しました。**`"
-			 << round.build.branch
-			 << "` へ修正を push したら、Vectorworks でメニューの「実機テストを実行…」を"
-				"もう一度実行してください**"
-				"——新しい dev ビルドが尋ねずに入り、同じ条件（同じ IFC・同じ設定）で round "
-			 << (round.round + 1)
-			 << " を投稿します。ファイル選択も設定ダイアログも確認も再起動も要りません。\n";
-		// **取り消しを頼むかどうかは、実測で決める。** 前の周が作ったレイヤはプラグインが
-		// 自分で取り除くが（M25）、**取り込み前から在ったレイヤへ描いた分は取り除けない**
-		// ——そのレイヤは自分が作ったものではないので消せず、上に描いた分だけが残る
-		// （SDK リファレンス Findings「Undo」の「処理前から在ったレイヤへ描いた分は戻らない」
-		// と同じ話）。だから**そこへ描いた周だけ**「取り消し」を頼む。**undo で丸ごと戻す道は
-		// 3 つとも塞がっている**ことが確定しているので（#23 / #31 / #27）、この頼みごとは
-		// 当面なくならない。
-		if (counts.undoPartial)
-			tail << "ただし**取り込み前から在ったレイヤ（テンプレートのもの）へ描いた分は"
-					"取り除けません**。そこも戻したいときは、実行する前に図面を「取り消し」で"
-					"取り込み前へ戻してください。\n";
-		else
-			tail << "**図面を「取り消し」で戻す必要もありません**——この周が描いたのは"
-					"プラグインが作ったレイヤだけなので、次の周はそれを取り除いてから"
-					"描き直します。\n";
-		// **自動の往復（M24）。** 殻のモードレスなパレットが開いていれば、新しいビルドが
-		// 出た時点で上の手順（入れる → 同じ条件で取り込む → 投稿）が自動で走る。読む側は
-		// 「push すれば次の周が来る」と「合図で止められる」の 2 つを知っていればよい。
-		//
-		// **ここに生の目印（`<!-- … control=stop -->`）を書かない。** この本文はプラグイン
-		// 自身の投稿であり、合図を探す側がそれを読む——実機 round 1 で、この案内文が自分の
-		// 合図として読まれ、1 通目で往復が止まった（docs/DEV-NOTES.md M24「合図は行であって、
-		// 文中の引用ではない」）。読む側の判定も直してあるが（scripts/vw-feedback.* は
-		// 「行がまるごと目印」だけを合図と読む）、**書く側でも生の目印を置かない**——
-		// 二重の歯止めにする。
-		tail << "往復のパレットが開いていれば、**push のあとは何もしなくても次の周が自動で"
-				"走ります**（新しい dev ビルドを見つけ次第、同じ条件で取り込んで投稿します）。"
-				"往復がもう要らなくなったら、`homeskz-ifc-feedback v1 control=stop` の HTML "
-				"コメントを**それだけの 1 行**にしてこの PR へ投稿してください（書き方は "
-				"CLAUDE.md）——次の確認でパレットが止まります。\n";
-		tail << "**絵を見ての所見はここには載りません。** 人が気付いたことは Claude との"
-				"チャットへ直接書かれます（スクリーンショットもそちらへ）。\n";
-		tail << "数字だけで判断が付かないときは、**実機で確かめてほしい点を返信で挙げて**"
-				"ください（絵を見られるのは人だけです）。\n";
-		if (round.anonymize)
-			tail
-				<< "<sub>対象ファイル名・図面のパス・ユーザー名・図面枠のスタイル名は伏せてあります"
-				   "（同じ入力なら同じ仮名になります）。</sub>\n";
-		const std::string footer = tail.str();
-
-		// 診断ログの全文。**折り畳む**——ふだんは読まないが、要るときは全部要る。
+		// 診断ログの全文。報告 1 つの上限に収める。削るのは**古いほう**（結果に近い末尾を
+		// 残す）。飾りの分は多めに見ておく。
 		if (!round.log.empty())
 		{
-			std::string log = clean(round.log);
-			// コメント 1 通の上限に収める。削るのは**古いほう**（結果に近い末尾を残す）。
-			// 差し引くのは「ここまでの本文＋末尾の案内＋折り畳みの飾り」で、飾りの分は
-			// 多めに見ておく（1 通が上限を超えると投稿そのものが弾かれる）。
-			const std::size_t used = out.str().size() + footer.size() + 256;
-			const std::size_t budget =
-				kMaxFeedbackCommentBytes > used ? kMaxFeedbackCommentBytes - used : 0;
-			if (log.size() > budget)
-			{
-				// 案内の 1 行ぶんも予算を食うので、その分だけ余計に削る。行数字を含めて
-				// 高々 64 バイト（`used` に積んだ 256 の余裕もある）。
-				constexpr std::size_t kOmittedNoticeBytes = 64;
-				std::size_t start = log.size() - budget + kOmittedNoticeBytes;
-				if (start > log.size())
-					start = log.size();
-				start = utf8LineStart(log, start); // **文字と行の境界まで進める**
-				const std::string omitted =
-					"…（前半 " + std::to_string(start) + " バイトを省略）…\n";
-				log = omitted + log.substr(start);
-			}
-			out << "\n<details><summary>診断ログ（全文）</summary>\n\n"
-				<< codeBlock(log) << "\n</details>\n";
+			const std::size_t used = out.str().size() + 256;
+			const std::size_t budget = kMaxTestReportBytes > used ? kMaxTestReportBytes - used : 0;
+			const std::string log = keepTail(round.log, budget);
+			out << "\n### 診断ログ\n\n" << codeBlock(log);
 		}
-
-		out << footer;
 		return out.str();
 	}
 } // namespace HomeskzIfcImport::parse

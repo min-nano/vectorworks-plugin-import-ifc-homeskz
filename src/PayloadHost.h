@@ -195,24 +195,16 @@ namespace HomeskzIfcImport
 		bool runImport(std::string& error);
 
 		// **実機テストを 1 周**（M25。dev だけ。src/draw/Feedback.h の runTestRound）。
-		// allowDialogs が false なら 1 枚もダイアログを出さない（パレットの周）。
-		// activeOut に true が入って戻ったら往復が回っている＝殻はパレットを開く。
-		bool runTest(bool allowDialogs, bool& activeOut, std::string& error);
+		bool runTest(bool allowDialogs, std::string& error);
 
 		// **MCP ブリッジの受け付けを 1 回**（M30。src/draw/McpBridge.h）。待たずに戻る。
-		// out にはパレットに見せる見え方の JSON が入る（本体が返した文字列は**ここで写す**）。
-		// 呼べなかったときだけ false。
-		bool mcpServe(std::string& out, std::string& error);
+		// shellReport は殻が済ませた頼みごとの結末（無ければ空。PayloadAbi.h の
+		// VwPayloadMcpServeFn）。out にはパレットに見せる見え方の JSON が入る（本体が返した
+		// 文字列は**ここで写す**）。呼べなかったときだけ false。
+		bool mcpServe(const std::string& shellReport, std::string& out, std::string& error);
 
 		// PIO のリセットを本体に描かせる。outEvent には EObjectEvent の値が入る。
 		bool recalculate(unsigned int kind, void* objectHandle, int& outEvent, std::string& error);
-
-		// **往復の記憶**（M24。src/PayloadAbi.h の VwPayloadLoopStatusFn）。out には
-		// key=value の行がそのまま入る（本体が返した文字列は**ここで写す**）。
-		bool loopStatus(std::string& out, std::string& error);
-
-		// 自動の往復を止めたと本体へ伝える（VwPayloadLoopEndFn）。
-		bool endLoop(const std::string& reason, bool notifyPr, std::string& error);
 
 	private:
 		// **本体へ渡した VwPayloadHost の実体。** load のローカルにしてはならない——
@@ -230,8 +222,6 @@ namespace HomeskzIfcImport
 		VwPayloadMcpServeFn fMcpServeFn = nullptr;
 		VwPayloadRecalculateFn fRecalcFn = nullptr;
 		VwPayloadShutdownFn fShutdownFn = nullptr;
-		VwPayloadLoopStatusFn fLoopStatusFn = nullptr;
-		VwPayloadLoopEndFn fLoopEndFn = nullptr;
 		bool fLoaded = false;
 	};
 

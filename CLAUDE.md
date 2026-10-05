@@ -17,17 +17,16 @@
 | --- | --- | --- |
 | IFC (ホームズ君) 取り込み… | メニュー | **ホームズ君構造EX** の木造軸組 IFC をパースし、ネイティブオブジェクトへ変換して配置する（主機能） |
 | アップデータを確認 (みんなの構造設計支援) | メニュー | 新しいビルドの確認と入れ替え |
-| MCP ブリッジを表示… | メニュー | Claude から図面を読むためのパレット（開発・デバッグ用。道具は読むだけ） |
+| MCP ブリッジを表示… | メニュー（**dev だけ**） | ローカルの Claude Code と Vectorworks をつなぐパレット。図面・診断ログ・実機テストの報告を読み、頼まれれば実機テスト・更新・再起動を起こす |
 | 柱記号 / 耐力壁 | PIO | 取り込みが置くプラグインオブジェクト |
-| 実機テストを実行… | メニュー（**dev だけ**） | 取り込みを実機テストとして走らせ、結果を PR へ投稿する |
-| 実機フィードバックの往復 | パレット（**dev だけ**） | 新しい dev ビルドが出るたびに入れて取り込み直し、結果を投稿する |
+| 実機テストを実行… | メニュー（**dev だけ**） | 覚えた条件で図面を取り込み前へ戻して取り込み直し、結果を手元に控える（MCP の `vw_run_test` と同じ周） |
 
 ## ドキュメントの分担
 
 | ファイル | 中身 |
 | --- | --- |
 | `README.md` | 利用者向け。何をするか・使い方・インストール・既知の制限 |
-| `docs/DEVELOPMENT.md` | 開発ガイド。ソースの構成・**置き場所の一覧**・ビルド・テスト・lint・CI（待ち方・デバッグ）・自動レビュー・MCP ブリッジ・実機フィードバックの往復・自動アップデート |
+| `docs/DEVELOPMENT.md` | 開発ガイド。ソースの構成・**置き場所の一覧**・ビルド・テスト・lint・CI（待ち方・デバッグ）・自動レビュー・MCP ブリッジ・実機テスト・自動アップデート |
 | `docs/DEV-NOTES.md` | 開発メモ。設計の考え方・ホームズ君 IFC の癖・打ち切った調査・実装の経緯（M0〜） |
 | [SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)の `Findings/` | **VW SDK の実測知見**（実機でしか判明しない落とし穴・SDK に無い／効かない API・SDK 側の打ち切った調査）。別リポジトリ |
 | `tests/README.md` | テストの一覧・方針・テストしていないもの |
@@ -45,10 +44,10 @@
 | 触るところ | 読む節 |
 | --- | --- |
 | 共有する定数・述語・ヘルパーを足す／探す | `docs/DEVELOPMENT.md`「置き場所の一覧（重複を作らない）」 |
-| 往復（`draw/Feedback`・`src/FeedbackLoop*`・`ExtTestMenu`・`ExtFeedbackPalette`・`scripts/vw-feedback.*`） | `docs/DEVELOPMENT.md`「実機フィードバックの往復」の「設計の決めごと」 |
-| 往復のコメント（`<!-- homeskz-ifc-feedback … -->`）が PR に届いた | `docs/DEVELOPMENT.md`「実機フィードバックの往復」の「届いたコメントの読み方」 |
+| 実機テスト（`draw/Feedback`・`core/FeedbackSession`・`parse/Feedback`・`ExtTestMenu`） | `docs/DEVELOPMENT.md`「実機テスト」の「設計の決めごと」 |
+| ローカルの Claude Code から実機確認を回す（MCP の `vw_run_test` / `vw_test_report` / `vw_update` / `vw_restart`） | `docs/DEVELOPMENT.md`「実機テスト」の「ローカルセッションでの回し方」 |
 | 自動アップデート（`src/Updater*`・`scripts/vw-update.*` / `vw-install.*` / `vw-uninstall.*` / `vw-token.*`） | `docs/DEVELOPMENT.md`「自動アップデートの仕組み」 |
-| MCP ブリッジ（`core/Bridge`・`draw/McpBridge`・`scripts/mcp/`） | `docs/DEVELOPMENT.md`「MCP ブリッジ」 |
+| MCP ブリッジ（`core/Bridge`・`draw/McpBridge`・`ExtMcpPalette`・`scripts/mcp/`・`.mcp.json`） | `docs/DEVELOPMENT.md`「MCP ブリッジ」 |
 | CI を待つ・`ci-debug` を使う | `docs/DEVELOPMENT.md`「CI の完了待ち」「CI デバッグ」 |
 | 自動レビュー（`pr-review.yml`） | `docs/DEVELOPMENT.md`「自動レビュー」 |
 | 実機での確認のしかた | `docs/DEV-NOTES.md`「実機確認の作法」 |
@@ -91,11 +90,13 @@
    依らない作業を進める）。本リポジトリの `ci-debug` の `sdk-grep` / `sdk-ls` は、`Findings/`
    に載っている宣言を写し取るときだけ使う。
 
-8. **利用者のものを消すコードは 2 か所だけで、歯止めを緩めない。** アンインストーラ
-   （`scripts/vw-uninstall.*`。フォルダ名が一致し中に殻があるときだけ消す）と、往復の図面の
+8. **利用者のものを消すコードは 3 か所だけで、歯止めを緩めない。** アンインストーラ
+   （`scripts/vw-uninstall.*`。フォルダ名が一致し中に殻があるときだけ消す）と、実機テストの図面の
    戻し（`draw/Feedback` の `prepareDrawingForRound` → `draw/DrawUtil` の
-   `RemoveCreatedLayers`。前の周が自分で作ったレイヤだけ消す）。どちらも回帰テストで押さえて
-   あり、安全弁を緩める方向へ変えない。
+   `RemoveCreatedLayers`。前の周が自分で作ったレイヤだけ消す。**基準を採り直した周では
+   呼ばない**）と、実機テストの一時ファイルの片付け（`core/FeedbackScratch` の
+   `removeScratchDir`。PR が閉じたブランチの、目印のあるフォルダだけ消す）。どれも回帰
+   テストで押さえてあり、安全弁を緩める方向へ変えない。
 
 ## アーキテクチャ: 2 フェーズ分離
 
@@ -168,7 +169,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 
 | | 入るもの | 入れないもの |
 | --- | --- | --- |
-| **殻**（`src/ModuleMain.cpp` / `src/Extensions/` / `src/Updater*` / `src/FeedbackLoop*` / `src/Payload{Host,Session}.*`） | VectorWorks に**番地を握られる**ものの**登録**（メニュー・PIO・パレットの `SMenuDef` / `SParametricDef` / パラメータ定義 / UUID）・本体の読み込み・**自動アップデート**（本体を置き換える当人が本体の中にいては足元を外す）・**往復の駆動**（入れ替えを起こす側。`src/FeedbackLoop`） | **これ以外の実処理**。解析・描画・PIO の作図は置かない。パレットは判断を持たない（JS は殻の駆動を叩いて返った文言を並べるだけ） |
+| **殻**（`src/ModuleMain.cpp` / `src/Extensions/` / `src/Updater*` / `src/Payload{Host,Session}.*`） | VectorWorks に**番地を握られる**ものの**登録**（メニュー・PIO・パレットの `SMenuDef` / `SParametricDef` / パラメータ定義 / UUID）・本体の読み込み・**自動アップデート**（本体を置き換える当人が本体の中にいては足元を外す）・**MCP から頼まれた更新と再起動**（本体は自分を降ろせない。`Extensions/ExtMcpPalette`） | **これ以外の実処理**。解析・描画・PIO の作図は置かない。パレットは判断を持たない（JS は殻を叩いて返った文言を並べるだけ。更新の判断は `src/UpdaterFlow.cpp`） |
 | **本体**（`src/payload/` / `src/draw/` / `src/parse/` / `src/core/`） | それ以外すべて（両フェーズまるごと） | 登録の定義（`.vwr` の文字列を引くもの）。本体は `.vwr` を持たない |
 
 - **殻に実処理を足すと、そこを直すたびに利用者へ再起動を強いる**ことになり、ホットリロードの
@@ -242,16 +243,17 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 - **診断ログへの書き出し口**は `core/Progress` の `beginPhase` と `Extensions/ExtMenu` の 2 か所
   だけ（各要素へ `trace::log` を撒かない）。
 - **GitHub のトークンの在り処**は `scripts/vw-token.{sh,ps1}` だけで、GitHub を読む側にも
-  必ず付ける（認証なしは IP ごとに 1 時間 60 回で、往復の確認がちょうど当たる。M27）。
+  必ず付ける（認証なしは IP ごとに 1 時間 60 回。M27 で M24 の往復の確認がちょうど当たった）。
 
-### 本番の取り込みコマンドに往復を書かない
+### 本番の取り込みコマンドに実機テストを書かない
 
-往復（実機フィードバック）を書いてよいのは dev だけの実機テストのコマンド
+実機テスト（記憶・図面の戻し・報告）を書いてよいのは dev だけの実機テストのコマンド
 （`Extensions/ExtTestMenu` ＋ `draw/Feedback` の `runTestRound`）だけで、`draw/ImportCommand` と
 `Extensions/ExtMenu` には 1 行も書かない。`#ifdef VW_DEV_BUILD` で囲っても制御フローは本番の
 入口に残るので、囲えばよいとも考えない。両者が共有してよいのは**絵を作るところ**
-（`draw/ImportRun` の `runImportRound`）だけ（M25）。往復のそのほかの決めごとは
-`docs/DEVELOPMENT.md`「実機フィードバックの往復」の「設計の決めごと」。
+（`draw/ImportRun` の `runImportRound`）だけ（M25）。MCP の `vw_run_test` も
+`draw/Feedback` の `runTestRound` を通る。そのほかの決めごとは `docs/DEVELOPMENT.md`
+「実機テスト」の「設計の決めごと」。
 
 ## C++ コード規約
 
@@ -320,7 +322,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 ### 検算は開発ビルドだけに置く
 
 `draw/` は書いた値（ストーリバウンドの record・PIO のパラメータ・パス）を**書いた直後に読み
-戻して命令と引き比べ**、食い違いを診断ログへ持ち帰る。これは往復で絵の破綻を数字から手繰る
+戻して命令と引き比べ**、食い違いを診断ログへ持ち帰る。これは実機テストで絵の破綻を数字から手繰る
 ための足場で、利用者には不要なので **`#if VW_DRAW_VERIFY` で囲み、dev ビルドにだけコンパイル
 する**（`src/draw/Verify.h`）。
 
@@ -353,7 +355,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
      **迷ったら下書き。**
    * **本番（ready for review）で作る**: それ以外（下記 5）。
 2. **下書きの間は自動レビューが走らない**（使用量を食うので、差分が動く段階では回さない）。
-   CI と dev ビルドは走るので、往復はそのまま回る。下書きの間に Claude が頼まれずに
+   CI と dev ビルドは走るので、実機テストはそのまま回せる。下書きの間に Claude が頼まれずに
    `/code-review` 等を回すこともしない。
 3. **下書きを本番へ昇格させるのは「マージしたい状態」になってから**——実機確認が済んだ
    （ユーザーが「確認できた」と言った）・設計判断が決着した・CI が green。GitHub MCP の
@@ -366,7 +368,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
    * **自動で走らないとき**（本文だけ直した・レビュー本文の指摘に答えた・行に紐づかない
      説明をした）は、PR に **`@claude review` で始まるコメント**を投稿して起こす。
 4. **実描画が変わる変更（`draw/` を含む PR）は、ユーザーが実機で「確認できた」と言うまで
-   マージしない。** CI green もレビューの承認も、往復の件数が揃ったことも実機確認の代わりには
+   マージしない。** CI green もレビューの承認も、実機テストの件数が揃ったことも実機確認の代わりには
    ならない（命令の数が合っていても絵が破綻していることは普通にある）。確認前にマージすると、
    不具合が出たときにどの変更が原因か切り分けられなくなる。
 5. **実機確認の要らない変更は CI green（＋レビュー）でマージしてよい**——`core/` `parse/` だけ・
@@ -374,14 +376,23 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 6. **コミットメッセージ**には Claude セッション URL（`https://claude.ai/code/session_<ID>`）を
    入れる。
 
-## 実機フィードバックの往復
+## ローカルセッションでの実機確認（MCP）
 
-dev ビルドは取り込みの結果を自分で PR へ投稿する（`<!-- homeskz-ifc-feedback v1 round=… -->`
-で始まるコメント）。**人は 1 文字も書いておらず、数字と診断ログしか無い。** 所見は利用者が
-チャットへ直接書く。届いたときの読み方・頼んでよいこと・往復を止める合図
-（`<!-- homeskz-ifc-feedback v1 control=stop -->` を**その行だけの行**として投稿する）は
-`docs/DEVELOPMENT.md`「実機フィードバックの往復」の「届いたコメントの読み方」に従う。
-**黙って push をやめても往復は止まらない**ので、要らなくなったら必ず合図を投稿する。
+実機確認は**ローカルの Claude Code セッション**が MCP ブリッジ越しに回す（M38。M37 までの
+「dev ビルドが結果を PR へ投稿し、パレットが新しいビルドを入れて取り込み直す」往復は
+外した）。リポジトリ直下の `.mcp.json` が `scripts/mcp/vw-mcp-server.py` を登録するので、
+リポジトリで Claude Code を起動すれば道具が使える。橋は**開発版のプラグインにだけ**ある。
+
+1 周の流れは **push → `scripts/ci-wait.sh` で dev ビルドを待つ → `vw_update`（殻まで変わった
+ら `vw_restart`）→ `vw_run_test` → 返った報告（`vw_test_report` / `vw_log`）を読む**。
+
+- **1 周目（IFC と取り込み設定の選択）は人がメニュー「実機テストを実行…」から行う。**
+  `vw_run_test` はダイアログを出せないので、記憶が無ければ走らずにそう返す。
+- **`vw_restart` を頼む前に人へ一言断る。** 未保存の図面があれば Vectorworks の保存の確認が
+  出るので、人の応答が要る（保存せずに閉じる道は持たない）。
+- **報告の数字は実機確認の代わりにならない。** 「図面の状態:」の行で図面が取り込み前へ
+  戻っていたかを先に見て、怪しければ絵で見て答えられる形で人に確かめてもらう（読み方は
+  `docs/DEVELOPMENT.md`「実機テスト」の「報告の読み方」）。所見は人がチャットへ書く。
 
 ## CI の完了を待つ
 

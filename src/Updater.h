@@ -46,7 +46,7 @@
 namespace HomeskzIfcImport
 {
 	// Run ONE of the bundled scripts (baseName without its extension —
-	// "vw-update" / "vw-feedback"; macOS adds ".sh", Windows ".ps1") and capture
+	// e.g. "vw-update"; macOS adds ".sh", Windows ".ps1") and capture
 	// its stdout. Returns false if the script could not be located or started.
 	//
 	// **本体（ペイロード）へ貸し出すためにここに口がある。** 本体は自分の在り処から
@@ -60,16 +60,18 @@ namespace HomeskzIfcImport
 	// 走る（起動時に 1 度きりだった頃の「済んだか」の見張りは持たない——手で押した
 	// コマンドが 2 度目に黙るのでは困る）。
 	//
-	// 戻り値は「**この実行のまま自動で続けてよいか**」（UpdaterHost.h）。見るのは
-	// UpdateCheckKind::Auto の呼び出し側——実機フィードバックの往復——だけで、
-	// 手で押したコマンドからの呼び出しは捨ててよい。
-	//
 	// 例外は投げない。呼び出し側（SDK のコールバック）へ漏らさないための最後の壁は
 	// それぞれの入口が持つ。
+	// 戻り値は「この実行のまま取り込みへ進んでよいか」（UpdaterHost.h）。
 	bool CheckForUpdates(UpdateCheckKind kind);
 
-	// **モードレスの往復（M24）が周期的に呼ぶ、尋ねも報せもしない開発版の確認**
-	// （UpdaterHost.h の PollDevBuildWith を実物の host と殻の素性で結ぶ）。安定版では
-	// 常に NoNewBuild——往復するのは PR のビルドであって main の配布物ではない。
-	DevBuildPollResult PollDevBuild();
+	// **MCP の `vw_update` が頼む、尋ねも報せもしない開発版の入れ替え**（M38。UpdaterHost.h の
+	// RemoteDevUpdateWith を実物の host と殻の素性で結ぶ）。安定版では常に CheckFailed
+	// ——MCP ブリッジは開発版にしか無く、安定版を尋ねずに入れ替える相手にしない。
+	RemoteUpdateResult RemoteDevUpdate(const std::string& wantedBranch);
+
+	// **MCP の `vw_restart` が頼む再起動**（M38）。手で押した確認の「再起動」と同じ口
+	// （SDK の CloseAllFilesAndQuitVectorworks。開いている文書の保存確認は通常どおり出る）。
+	// 頼むことすらできなかったときだけ false。
+	bool RequestRestart();
 } // namespace HomeskzIfcImport

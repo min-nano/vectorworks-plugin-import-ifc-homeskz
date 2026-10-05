@@ -84,17 +84,6 @@ namespace HomeskzIfcImport
 		// 取り込みコマンドのついで。**更新があるときだけ口を開く**——取り込みたい人の
 		// 前に「最新です」を挟まない。取得に失敗しても黙って取り込みへ進む。
 		Silent,
-		// **実機フィードバックの往復の最中**（docs/DEV-NOTES.md M23）。Silent と同じく
-		// 「いま動いているのと同じブランチの新しいビルド」だけを拾うが、**尋ねずに
-		// 入れる**。その人は「直したから、もう一度実行してほしい」と言われて実行して
-		// いるので、そこへ「インストールしますか？」を挟むのは、この往復が無くそうと
-		// している手間そのものだから。入れ替えたことも黙っている——モーダルのダイアログ
-		// は Vectorworks を止めるので、絵を見ている人の前に立ちはだかる。
-		//
-		// **口を開くのは、入れたのに効かせられなかったときだけ**（殻まで変わった・
-		// インストールに失敗した・本体を降ろせなかった）。そのときは false が返り、
-		// 呼び出し側はその実行の取り込みを見送る。
-		Auto,
 	};
 
 	// The SDK-independent update flows, parameterized by the host above. These
@@ -108,11 +97,9 @@ namespace HomeskzIfcImport
 	// テストでは注入する）。入れたビルドの殻が同じなら、本体を読み直すだけで反映される
 	// ＝**再起動を尋ねない**（src/UpdaterParse.h の NeedsRestartAfterInstall）。
 	//
-	// 戻り値は「**この実行のまま取り込みへ進んでよいか**」——尋ねずに入れたのに効かせ
-	// られなかった（殻まで変わった・失敗した・降ろせなかった）ときだけ false。
-	// **見るのは Auto の呼び出し側だけ**で（実機フィードバックの往復。
-	// src/Extensions/ExtMenu.cpp）、Manual・Silent は常に true を返す——そちらの結末は
-	// その場のダイアログで伝え終えており、呼び出し側が分岐する余地は無い。
+	// 戻り値は「**この実行のまま取り込みへ進んでよいか**」——入れると答えたのに入れられ
+	// なかったときだけ false（呼び出し側は取り込みを見送る。src/Extensions/ExtMenu.cpp）。
+	// 結末そのものはその場のダイアログで伝え終えている。
 	bool RunStableUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
 								  const std::string& runningShellId);
 
@@ -120,39 +107,47 @@ namespace HomeskzIfcImport
 	//   Manual … ビルドの選択ダイアログを出す（どのブランチのビルドを使うかを選ぶ）。
 	//   Silent … ダイアログは出さず、**いま動いているのと同じブランチ**の新しいビルド
 	//            だけを拾って尋ねる。取り込みのたびにブランチ選択が出ては邪魔になる。
-	//   Auto … Silent と同じものを拾い、**尋ねずに入れて黙って戻る**。
 	bool RunDevUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
 							   const std::string& shellBranch, const std::string& shellCommit,
 							   const std::string& runningShellId);
 
 	// -----------------------------------------------------------------------
-	// **モードレスの往復（M24）が周期的に呼ぶ、尋ねも報せもしない開発版の確認。**
-	// Auto と同じく「いま動いているのと同じブランチの新しいビルド」だけを拾って入れ、
-	// 本体を降ろす——違うのは**ダイアログを 1 枚も出さず、結末を値で返す**こと。
-	// 呼び出し側（src/FeedbackLoop.cpp）はモードレスのパレットにその文言を出すので、
-	// ここでモーダルのダイアログを重ねると、図面を見ている人の前に立ちはだかる。
+	// **MCP から頼まれた、尋ねも報せもしない開発版の入れ替え**（M38。道具 `vw_update`）。
+	// Claude は自分で push したビルドを入れたくて頼んでいるので、「インストールしますか？」も
+	// 「入れました」も出さず、**結末を値で返す**——ローカルの Claude Code がそれを読んで、
+	// 再起動が要るか・取り込みへ進めるかを決める（src/Extensions/ExtMcpPalette.cpp）。
+	// モーダルのダイアログを出すと、誰も見ていない Vectorworks が止まる。
+	//
+	// wantedBranch が空なら**いま入っているビルドのブランチ**の新しいビルドを拾う。名指し
+	// すればそのブランチの最新を入れる（別の PR へ乗り換えるとき）。どちらも、いま入って
+	// いるのと同じ sha は拾わない（UpdaterParse.h の DevSwitchCandidates）。
 	//
 	// **基準はディスク上に入っているビルド**（`q-dev` の `installed=` /
 	// `installed-branch=`）。殻にコンパイルされた値は本体だけを入れ替えたあと古いまま
-	// なので（殻は起動時にしか読み直されない）、sha を取り違えれば同じビルドを毎周入れ
-	// 直し、**ブランチを取り違えれば乗り換えたはずのブランチへ戻してしまう**。分からない
-	// ときだけ shellBranch / shellCommit へ落ちる（src/UpdaterParse.h の
-	// ResolveCurrentDevBuild）。
-	enum class DevBuildPoll
+	// なので（殻は起動時にしか読み直されない）、sha を取り違えれば同じビルドを入れ直し、
+	// **ブランチを取り違えれば乗り換えたはずのブランチへ戻してしまう**。分からないときだけ
+	// shellBranch / shellCommit へ落ちる（src/UpdaterParse.h の ResolveCurrentDevBuild）。
+	//
+	// **インストールの経路はこのファイルの Install ただ 1 つ**で、手で押した確認と同じものを
+	// 通る（CLAUDE.md「更新と配置の要点」）。
+	enum class RemoteUpdateOutcome
 	{
-		NoNewBuild, // 同じブランチに新しいビルドは無い（待ち続ける）
-		Installed,	// 入れて本体を降ろした。commit に新しい sha が入る
-		NeedsRestart, // 入れたが殻まで変わった（再起動するまで効かない＝往復は止める）
-		Failed, // 入れられなかった・降ろせなかった（message に理由）
-		CheckFailed, // 確認そのものができなかった（オフライン等。待ち続けてよい）
+		NoNewBuild, // そのブランチに、いま入っているのと別のビルドは無い
+		Installed, // 入れて本体を降ろした（次の呼び出しから新しい本体が動く）
+		NeedsRestart, // 入れたが殻まで変わった（再起動するまで効かない）
+		Failed,		  // 入れられなかった・降ろせなかった（message に理由）
+		CheckFailed,  // 確認そのものができなかった（オフライン等）
 	};
-	struct DevBuildPollResult
+	struct RemoteUpdateResult
 	{
-		DevBuildPoll outcome = DevBuildPoll::NoNewBuild;
-		std::string commit;	 // Installed / NeedsRestart のとき、入れたビルドの sha
-		std::string message; // 人に見せる 1 行（Failed / CheckFailed / NeedsRestart）
+		RemoteUpdateOutcome outcome = RemoteUpdateOutcome::NoNewBuild;
+		std::string branch;	  // 探したブランチ
+		std::string previous; // 入れる前に入っていたビルドの sha
+		std::string commit;	  // Installed / NeedsRestart のとき、入れたビルドの sha
+		std::string message;  // 人に見せる 1 行（Failed / CheckFailed / NeedsRestart）
 	};
-	DevBuildPollResult PollDevBuildWith(IUpdaterHost& host, const std::string& shellBranch,
-										const std::string& shellCommit,
-										const std::string& runningShellId);
+	RemoteUpdateResult RemoteDevUpdateWith(IUpdaterHost& host, const std::string& shellBranch,
+										   const std::string& shellCommit,
+										   const std::string& runningShellId,
+										   const std::string& wantedBranch);
 } // namespace HomeskzIfcImport

@@ -1,36 +1,28 @@
 //
 //	parse/Feedback.h
 //
-//	**実機フィードバックの本文**（docs/DEV-NOTES.md M23）。開発版ビルドで取り込みを走らせた
-//	結果を、そのまま PR コメントとして投げられる Markdown へ組み立てる。
+//	**実機テストの報告**（docs/DEV-NOTES.md M23 / M38）。開発版ビルドの「実機テストを実行…」
+//	（または MCP の `vw_run_test`）が取り込みを走らせた結果を、Claude が読む Markdown へ
+//	組み立てる。報告は手元のファイルに残り、ローカルの Claude Code が MCP の
+//	`vw_test_report` で読む（M37 までは PR へコメントとして投稿していた）。
 //
 //	【なぜ要るか】`draw/` の実描画は CI では検証できず、ローカルの VectorWorks でしか
 //	確かめられない（CLAUDE.md「テスト方針」）。その確認結果を人が手で写して伝えている限り、
-//	1 往復ごとに「ビルドを入れ直す・ファイルを選び直す・ログを貼る」という手間が乗る。
-//	**プラグイン自身に報告させれば、人がするのは「絵を見て一言書く」だけになる。**
+//	1 往復ごとに「ファイルを選び直す・ログを貼る」という手間が乗る。**プラグイン自身に
+//	報告させれば、人がするのは「絵を見て一言書く」だけになる。**
 //
 //	【何を載せるか】
 //	  * 結末・所要時間・**要素ごとの内訳**（parse/Summary の elementRows。表は 1 つきり）
 //	  * **前の周からの差分**——読む側が知りたいのは絶対値ではなく「直した結果どう動いたか」
+//	  * 図面が取り込み前へ戻してあったか（絵の破綻を実装のせいにしないための 1 行）
 //	  * 描画側が持ち帰った注意（`DrawCounts::diagnostics`）と記録（`notes`）
-//	  * 診断ログの全文（折り畳み）
+//	  * 診断ログ（上限を超える分は古いほうから削る）
 //
-//	【所見はここに載らない】**実機を見た人の所見**は自動化で決して代われない唯一のもの
-//	だが、それは**人が Claude とのチャットへ直接書く**。所見を書くには結局その人が実機を
-//	見ている必要があり、見ているならチャットのほうが速く、スクリーンショットも貼れる
+//	【所見はここに載らない】**実機を見た人の所見**は人が Claude とのチャットへ直接書く
 //	（docs/DEV-NOTES.md M23「所見はプラグインの仕事ではなかった」）。
 //
-//	【伏せるもの】PR コメントは公開される。だから既定で**案件が分かるものを伏せる**:
-//	IFC のファイル名は同じ入力なら毎回同じになる仮名（`model-8f3a12.ifc`）へ、パスの
-//	ユーザー名は伏せ字へ、図面枠のスタイル名も同じく仮名（`style-4c1d09`）へ——スタイル名は
-//	利用者の図面にあるもので、事務所名のような組織・個人を特定できる文字列を含むのが普通
-//	だからである（PR #133 の round 1 で、利用者が投稿後に手で伏せ字へ書き換えていた）。
-//	いま開いている図面のパス（`drawing-8f3a12.vwx`）と、利用者ごとに決まる一時ディレクトリ・
-//	外部ボリューム名も伏せる。**仮名には利用者の機械にだけある秘密の鍵を混ぜる**——鍵が
-//	無いと、心当たりのある名前を手元で同じ計算にかければ当たりを確かめられてしまう
-//	（公開済みの投稿を洗い直して分かった。docs/DEV-NOTES.md「実機フィードバックの伏せ字」）。
-//	数字・要素名・VW の診断は案件ではなくプラグインの話なので残す。
-//	伏せない選択（私有リポジトリへ投げるとき）は core::FeedbackSession::anonymize が持つ。
+//	【伏せない】M37 までは PR コメントが公開されるのでファイル名・ユーザー名・図面枠の
+//	スタイル名を伏せていた。報告は利用者の計算機の中だけで読まれるので、伏せる理由が無い。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を include しない。ここは Document と
 //	DrawCounts を読むだけの純粋な文字列組み立てなので、無 SDK で単体テストできる。
@@ -52,7 +44,7 @@ namespace HomeskzIfcImport::parse
 	struct FeedbackRound
 	{
 		BuildInfo build; // 動いていたビルド（ブランチ・コミット・プラットフォーム）
-		std::string ifcPath; // 取り込んだ IFC の絶対パス（**伏せ字の材料**。そのままは出さない）
+		std::string ifcPath; // 取り込んだ IFC の絶対パス（報告にはファイル名を出す）
 		unsigned long long bytes = 0; // 対象ファイルの大きさ（0 なら出さない）
 		double seconds = 0.0;		  // 所要（0 以下なら出さない）
 		std::string startedAt;		  // 壁時計（core::trace::localTimestamp）
@@ -76,45 +68,39 @@ namespace HomeskzIfcImport::parse
 		// へ落ちて読めなかった）。
 		std::string preparation;
 
+		// **次の周が図面を丸ごと戻せるか。** 作業ファイルを用意できた周（draw/Feedback の
+		// RoundDocument::Ready）なら、次の周は「取り消し」か作業ファイルの開き直しで
+		// 取り込み前へ戻るので、テンプレートのレイヤへ描いた分も残らない。false のとき
+		// だけ「取り除けません」の注記を出す（true の周に出すと、すぐ上の「取り消しで
+		// 戻っています」と食い違う。PR #188 の実機確認）。
+		bool restorable = false;
+
 		bool anonymize = true; // 案件が分かるものを伏せるか
-
-		// **仮名に混ぜる秘密の鍵**（core::FeedbackSession::anonKey。本文には出さない）。
-		// 鍵が無いと仮名は名前だけで決まるので、「〇〇邸.ifc」のような心当たりのある人が
-		// 手元で同じ計算をすれば**当たりかどうかを確かめられてしまう**。空なら鍵なし。
-		std::string anonKey;
-
-		// IFC のほかに**利用者のものと分かっているパス**（いま開いている図面など）。
-		// 伏せるときは IFC と同じく仮名（`drawing-8f3a12.vwx`）へ替える——保存済みの図面の
-		// パスには物件名のフォルダやファイル名がそのまま入る。
-		std::vector<std::string> privatePaths;
 	};
 
 	// -----------------------------------------------------------------------
-	// **実機テストの周の結末**（M25）。投稿できなかった／取り込みが中断したときに、
-	// **このコマンド自身の言葉で**短く伝える。
+	// **実機テストの周の結末**（M25）。結果ダイアログ（メニューから押した周）と MCP の応答
+	// （`vw_run_test`）に、**このコマンド自身の言葉で**短く伝える。
 	//
-	// **取り込みコマンドの完了文言（`formatImportResult` / `formatImportError`）を借りて
-	// 後ろへ PR の話を足さない。** 借りると、押した人には**本番の取り込みが PR へ投稿
-	// しているように見える**——コマンドを分けた意味が見た目の上で崩れる（実機の指摘。
-	// docs/DEV-NOTES.md M25）。「実装する場所が間違っている」とはこのことである。
+	// **取り込みコマンドの完了文言（`formatImportResult` / `formatImportError`）を借りない。**
+	// 借りると、押した人には本番の取り込みが同じことをしているように見える——コマンドを
+	// 分けた意味が見た目の上で崩れる（実機の指摘。docs/DEV-NOTES.md M25）。
 	enum class TestRoundOutcome
 	{
+		// 取り込みを終えた（内訳は報告にある）。detail は報告の在り処など。
+		Completed,
 		// **描く図面を用意できなかった**ので、取り込みを始めなかった。実機 round 9 で、
 		// 前の周の図面を閉じたあと作業ファイルを開き直せず、**どこにも属さない状態で
 		// 描いて全 18 要素が 0 件**になった——数字だけ見れば「全部描けなかった」だが、
 		// 実際には描く先が無かっただけである。**そうなる前に止める。**
 		DocumentFailed,
-		ImportFailed, // 取り込みがエラーで中断した（送るべき内訳が無い）
-		PostFailed,	  // 取り込みは終わったが、PR へ投稿できなかった
-		// **同じビルドが動いているので取り込まなかった**（往復を回し直しただけ）。
-		// 数字は前の周と同じにしかならないので走らせないのが正しいが、**押した人には
-		// 何も起きていないように見える**——実機で「再実行しても往復が始まらない」と
-		// 読まれた（実際には回り直していた）。手で押した周にだけ、その旨を返す。
-		Rearmed,
+		ImportFailed, // 取り込みがエラーで中断した
+		// **記憶が無いのにダイアログを出せない**（MCP の `vw_run_test` で 1 周目を頼まれた）。
+		// IFC と設定は人がメニューから選ぶしかない。
+		NotRemembered,
 	};
 
-	// detail は理由（空でもよい）。返るのは結果ダイアログの**短い本文**で、内訳と診断ログは
-	// 従来どおりダイアログのログ欄が見せる。
+	// detail は理由（空でもよい）。返るのは**短い本文**で、内訳と診断ログは報告が持つ。
 	std::string formatTestRoundResult(TestRoundOutcome outcome, const std::string& detail);
 
 	// **内訳の 1 行表現**（`ストーリ:3/3,通り芯:44/44,…`）。命令が 0 の要素は載せない
@@ -127,48 +113,17 @@ namespace HomeskzIfcImport::parse
 	// たいてい退行なので、黙って落とすと最悪の変化を見落とす。
 	std::string formatTallyDiff(const std::string& previous, const std::string& current);
 
-	// **同じ入力なら毎回同じになる仮名**（`model-8f3a12.ifc`）。周回どうしで対象が
-	// 同じであることを読む側が確かめられるよう、ランダムにはしない（ファイル名の
-	// 拡張子を除いた部分のハッシュ）。
-	// key は仮名に混ぜる秘密の鍵（FeedbackRound::anonKey）。空なら名前だけで決まる。
-	std::string anonymizedFileName(const std::string& path, const std::string& key = std::string());
+	// **長い本文の末尾だけを残す**（診断ログの切り詰め。報告と MCP の `vw_log` が使う）。
+	// maxBytes を超えるときは**古いほう（先頭）を削り**、「前半 N バイトを省略」の 1 行を
+	// 頭に付ける。切り口は **UTF-8 の文字境界の次の行頭**——3 バイトの日本語の途中で切ると
+	// 壊れた UTF-8 になり、JSON の読み手に弾かれる（docs/DEV-NOTES.md M25）。
+	std::string keepTail(const std::string& text, std::size_t maxBytes);
 
-	// 図面枠のスタイル名の仮名（`style-4c1d09`）。ファイル名と同じく**同じ名前なら毎回
-	// 同じ仮名**にする——周回どうしで「同じスタイルを当てている」ことは読めるように。
-	std::string anonymizedStyleName(const std::string& name,
-									const std::string& key = std::string());
-
-	// IFC 以外の利用者のパス（FeedbackRound::privatePaths）の仮名（`drawing-8f3a12.vwx`）。
-	// 拡張子は保ち、無ければ付けない。
-	std::string anonymizedDrawingName(const std::string& path,
-									  const std::string& key = std::string());
-
-	// 本文から案件・個人が分かるものを伏せる。伏せるのは (1) 与えられた IFC のパスと
-	// ファイル名、(2) 図面枠のスタイル名（titleBlockStyle。空なら何もしない）、
-	// (3) privatePaths のパスとファイル名（いま開いている図面など）、
-	// (4) ホームディレクトリのユーザー名（`/Users/<名前>` `C:\Users\<名前>`）、
-	// (5) 利用者ごとに決まる一時ディレクトリ（`/var/folders/<xx>/<yyyy>/`）と外部ボリューム名
-	// （`/Volumes/<名前>/`）。どちらも名前ではないが、投稿どうしを同じ人・同じ機械へ結び付ける。
-	// **それ以外は触らない**——診断の中身まで削ると、伝えるべきものが伝わらない。
-	//
-	// スタイル名は、名前が出ると分かっている形（「<名前>」と設定の行）では必ず、それ以外の
-	// 場所では**4 字以上の名前だけ**置き換える——「A3」「共通」のような短い名前を本文まるごとで
-	// 替えると、別の意味の同じ綴りまで仮名に化けて読み違えのもとになる（PR #135 のレビュー）。
-	//
-	// スタイル名は**描画側の文言を変えずに**ここで置き換える。本番の取り込みのログは
-	// 利用者自身が読むものなので伏せる理由が無く、伏せるのは公開の場へ出すときだけでよい。
-	std::string redactText(const std::string& text, const std::string& ifcPath,
-						   const std::string& titleBlockStyle = std::string(),
-						   const std::vector<std::string>& privatePaths = {},
-						   const std::string& key = std::string());
-
-	// **PR コメント本文**（Markdown）。先頭に機械可読の目印を置く——このコメントが
-	// プラグインの自動投稿であること、何周目か、どのビルドかを、読む側（Claude）が
-	// 本文の見た目に依らず拾えるようにするため。
-	std::string formatFeedbackComment(const FeedbackRound& round, const core::Document& document,
+	// **実機テストの報告**（Markdown）。先頭の見出しに何周目か・どのビルドかを置く。
+	std::string formatTestRoundReport(const FeedbackRound& round, const core::Document& document,
 									  const core::DrawCounts& counts);
 
-	// コメント 1 通の上限（バイト）。GitHub の 65536 文字より十分低く取ってあり、
-	// 超える分は**診断ログの古いほうから**削る（末尾＝結果に近いほうを残す）。
-	inline constexpr std::size_t kMaxFeedbackCommentBytes = 60000;
+	// 報告 1 つの上限（バイト）。超える分は**診断ログの古いほうから**削る（末尾＝結果に
+	// 近いほうを残す）。MCP の応答 1 つに載せても Claude の文脈を食い潰さない大きさ。
+	inline constexpr std::size_t kMaxTestReportBytes = 60000;
 } // namespace HomeskzIfcImport::parse

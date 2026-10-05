@@ -102,10 +102,6 @@ vw_add_test(UpdaterParseTests UpdaterParseTests.cpp)
 # header, so it links straight into the test binary.
 vw_add_test(UpdaterFlowTests UpdaterFlowTests.cpp "${CMAKE_SOURCE_DIR}/src/UpdaterFlow.cpp")
 
-# モードレスの往復の駆動（src/FeedbackLoop.cpp。M24）。UpdaterFlow と同じく SDK の
-# ヘッダを include しないので、偽の host を差してそのままリンクする。
-vw_add_test(FeedbackLoopTests FeedbackLoopTests.cpp "${CMAKE_SOURCE_DIR}/src/FeedbackLoop.cpp")
-
 # Robustness / adversarial-input tests: feed the parsers unexpected external
 # input (malformed script output, embedded NULs, huge/degenerate lines, random
 # byte soup) to prove they never read out of bounds or invoke undefined
@@ -425,13 +421,22 @@ vw_add_test(ParseSummaryTests ParseSummaryTests.cpp CORE FIXTURES)
 # with which symbol) and its defaults. Pure logic, no fixtures.
 vw_add_test(CoreImportOptionsTests CoreImportOptionsTests.cpp CORE)
 
-# The remembered feedback session (src/core/FeedbackSession): what the first,
-# manual run decides and every later round reads back. Pure logic + a temp file.
+# The remembered test-round session (src/core/FeedbackSession): what the first,
+# manual run decides and every later round (menu or MCP) reads back. Pure logic +
+# a temp file.
 vw_add_test(CoreFeedbackSessionTests CoreFeedbackSessionTests.cpp CORE)
 
-# The feedback comment body (src/parse/Feedback): the per-element tally, the diff
-# against the previous round, and the redaction that keeps a public PR comment
-# free of the client's file name. Pure string work, no fixtures.
+# 実機テストの一時ファイルの置き場と片付け（src/core/FeedbackScratch）: ブランチごとの
+# フォルダ・q-pr-state の出力の読み方・**消してよいものの安全弁**（置き場の直下・目印の
+# 一致・ふつうのファイルだけ・開いている図面の .lck が無い）と、閉じた PR のブランチ
+# だけを消すこと。書き先はビルドツリー（CoreBridgeTests と同じ理由）。
+vw_add_test(CoreFeedbackScratchTests CoreFeedbackScratchTests.cpp CORE)
+target_compile_definitions(CoreFeedbackScratchTests
+						   PRIVATE "HOMESKZ_SCRATCH_TEST_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\"")
+
+# The test-round report (src/parse/Feedback): the per-element tally, the diff
+# against the previous round, the drawing-state line and the log trimming that
+# keeps the report on a UTF-8 boundary. Pure string work, no fixtures.
 vw_add_test(ParseFeedbackTests ParseFeedbackTests.cpp CORE)
 
 # The options' path through the parse phase: every module that writes a symbol
@@ -543,23 +548,6 @@ if(NOT WIN32)
 	endif()
 endif()
 
-# macOS feedback back end (scripts/vw-feedback.sh) — the script that posts the
-# plug-in's run report to the pull request. Same bash + stubs approach (curl,
-# plutil and the keychain are the only fakes), so it runs on the Linux runner.
-if(NOT WIN32)
-	find_program(BASH_PROGRAM bash)
-	if(BASH_PROGRAM)
-		add_test(NAME FeedbackScriptTests COMMAND "${BASH_PROGRAM}"
-												  "${CMAKE_CURRENT_SOURCE_DIR}/vw-feedback.test.sh")
-		set_tests_properties(
-			FeedbackScriptTests PROPERTIES ENVIRONMENT
-										   "VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
-	elseif(VW_REQUIRE_SCRIPT_TESTS)
-		message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'bash' was not found: the macOS "
-							"feedback-script tests (vw-feedback.test.sh) cannot run.")
-	endif()
-endif()
-
 # Windows updater (scripts/vw-update.ps1) via PowerShell 7 (pwsh) + stubbed
 # Invoke-GH/Invoke-WebRequest. No Pester needed — the harness is self-contained.
 find_program(PWSH_PROGRAM pwsh)
@@ -599,19 +587,6 @@ if(PWSH_PROGRAM)
 elseif(VW_REQUIRE_SCRIPT_TESTS)
 	message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'pwsh' (PowerShell 7) was not found: "
 						"the Windows uninstaller-script tests (vw-uninstall.Tests.ps1) cannot run.")
-endif()
-
-# Windows feedback back end (scripts/vw-feedback.ps1) — the Windows half of the
-# poster above. Same pwsh harness; the DPAPI token store is the extra stub.
-if(PWSH_PROGRAM)
-	add_test(NAME FeedbackScriptTestsPs COMMAND "${PWSH_PROGRAM}" -NoProfile -File
-												"${CMAKE_CURRENT_SOURCE_DIR}/vw-feedback.Tests.ps1")
-	set_tests_properties(
-		FeedbackScriptTestsPs PROPERTIES ENVIRONMENT
-										 "VW_REQUIRE_SCRIPT_TESTS=${VW_REQUIRE_SCRIPT_TESTS}")
-elseif(VW_REQUIRE_SCRIPT_TESTS)
-	message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'pwsh' (PowerShell 7) was not found: "
-						"the Windows feedback-script tests (vw-feedback.Tests.ps1) cannot run.")
 endif()
 
 # CI-wait clients (scripts/ci-common.sh + scripts/ci-wait.sh) via bash + a fake

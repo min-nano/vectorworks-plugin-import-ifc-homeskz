@@ -15,7 +15,7 @@
 //	                                  ▼
 //	                              本体（core / parse / draw）            … いつでも読み直せる
 //
-//	殻に残るのは「Vectorworks に番地を握られるもの」だけ——メニュー 2 つと PIO 2 つの**登録**
+//	殻に残るのは「Vectorworks に番地を握られるもの」だけ——メニューと PIO の**登録**
 //	（SMenuDef / SParametricDef / パラメータ定義）と、自動アップデートである。**実処理は
 //	すべて本体側**で、殻はこの ABI 越しに呼ぶ。
 //
@@ -65,7 +65,10 @@
 //       「次は更新を尋ねずに入れてよいか」を返さなくなった（本番の経路から往復が消えた）
 //   6 … MCP ブリッジを常駐にした（M30）。「止められるまで戻らない」run_mcp_bridge を外し、
 //       殻のパレットの時計が 1 回ずつ呼ぶ mcp_serve に替えた
-#define VW_PAYLOAD_ABI_VERSION 6u
+//   7 … PR への自動投稿と自動の入れ替えを外し、MCP から更新・再起動を頼めるようにした
+//       （M38）。loop_status / loop_end を外し、run_test は outActive を持たなくなり、
+//       mcp_serve は殻が済ませた頼みごとの結末（shellReport）を受け取るようになった
+#define VW_PAYLOAD_ABI_VERSION 7u
 
 // 本体側の export 指定。Windows は明示しないと DLL の外から見えない。
 #if defined(_WIN32)
@@ -96,7 +99,7 @@ extern "C"
 		// （PayloadHost.h「必ず複製してから読む」）、dladdr / GetModuleFileName が返すのは
 		// バンドルの外の道である。だから殻の道具を借りる。
 		//
-		//   scriptName … 拡張子を除いた名前（"vw-update" / "vw-feedback"）。**どちらの
+		//   scriptName … 拡張子を除いた名前（"vw-update"）。**どちらの
 		//                拡張子を付けるかは殻が決める**（mac は .sh、Windows は .ps1）。
 		//   args/argc  … スクリプトへ渡す引数（UTF-8）。
 		//   out        … 標準出力（UTF-8）。**殻が所有し、次にこの関数を呼ぶまで有効**——
@@ -137,8 +140,6 @@ extern "C"
 #define VW_PAYLOAD_SYM_MCP_SERVE "vw_payload_mcp_serve"
 #define VW_PAYLOAD_SYM_RECALC "vw_payload_recalculate"
 #define VW_PAYLOAD_SYM_SHUTDOWN "vw_payload_shutdown"
-#define VW_PAYLOAD_SYM_LOOP_STATUS "vw_payload_loop_status"
-#define VW_PAYLOAD_SYM_LOOP_END "vw_payload_loop_end"
 
 	// その型。
 	using VwPayloadAbiVersionFn = unsigned int (*)();
@@ -150,40 +151,28 @@ extern "C"
 	using VwPayloadRunImportFn = int (*)();
 
 	// **実機テストの 1 周**（M25。dev だけ。src/draw/Feedback.h の runTestRound）。
-	// 往復（記憶した条件で取り込み直して PR へ投稿する）を知っているのはこちらだけで、
-	// 上の取り込みコマンドは往復を知らない。
+	// 実機テスト（記憶した条件で図面を戻して取り込み直し、結果を手元に控える）を知って
+	// いるのはこちらだけで、上の取り込みコマンドはそれを知らない。
 	//
 	//   allowDialogs … 0 以外ならダイアログを出してよい（メニューから実行したとき）。
-	//                  パレットの周は 0 で、そのとき 1 枚も出ない。
-	//   outActive    … 0 以外で戻ったら往復が回っている＝殻はパレットを開く
-	//                  （src/Extensions/ExtTestMenu.cpp）。
 	//
-	// **入れ替えを頼むのではない。** 本体を降ろせるのはそのコードがスタックに 1 つも
-	// 無いときだけなので、入れ替えはこの関数から戻ったあと、次の呼び出しの頭で起きる
-	// （src/PayloadSession.h）。
-	using VwPayloadRunTestFn = int (*)(int allowDialogs, int* outActive);
+	// MCP の `vw_run_test` はこの関数を通らない——橋の受け付け（下の mcp_serve）の中で
+	// 本体が自分で同じ周を走らせる。
+	using VwPayloadRunTestFn = int (*)(int allowDialogs);
 
 	// **MCP ブリッジの受け付け 1 回**（M30。src/draw/McpBridge.h）。置かれている要求を
 	// 捌いて**すぐ戻る**——殻のパレット（src/Extensions/ExtMcpPalette.h）の時計が数百 ms
 	// ごとに呼ぶ。out にはパレットに見せる見え方の JSON が入る（寿命は他の文字列と同じ
 	// ——**次に本体を呼ぶまで**。殻はその場で写す）。
-	using VwPayloadMcpServeFn = int (*)(const char** out);
+	//
+	// **殻にしかできない頼みごと**（更新・再起動。M38）は、本体が要求を引き取って見え方の
+	// `action`（id・種類・引数）に載せて返す。本体は自分を降ろせないので、入れ替えは本体から
+	// 戻ったあとの殻でしか起こせない（src/PayloadSession.h）。殻はそれを済ませたら、結末の
+	// JSON（`{"id":…,"ok":…,"result":…,"error":…}`）を次の呼び出しの shellReport に渡し、
+	// **そのとき載っている本体**（入れ替えたなら新しいほう）が応答を書く。無ければ nullptr。
+	using VwPayloadMcpServeFn = int (*)(const char* shellReport, const char** out);
 	using VwPayloadRecalculateFn = int (*)(unsigned int, void*, int*);
 	using VwPayloadShutdownFn = void (*)();
-
-	// **往復の記憶を殻へ見せる**（M24。src/FeedbackLoop.h）。out には key=value の行が
-	// 並ぶ（active / repo / pr / branch / round / build / posted。UpdaterParse の ValueOf で
-	// 解ける）。文字列の寿命は他と同じ——**次に本体を呼ぶまで**。殻はその場で写す。
-	//
-	// 記憶を読むのが本体なのは、その形（core::FeedbackSession）を知っているのが本体だけ
-	// だから——殻は core/ をリンクしない（CLAUDE.md「殻と本体」7）。
-	using VwPayloadLoopStatusFn = int (*)(const char** out);
-
-	// **自動の往復を止めたと本体へ伝える。** 本体は記憶の loop を下ろす（記憶そのものは
-	// 消さない——人がメニューから実行すれば続きの周として走る）。notifyPr が 0 以外なら
-	// PR へ「終えました」を 1 通投稿する（読む側が待ち続けないように）。reason は
-	// 人に見せる 1 行（UTF-8）。
-	using VwPayloadLoopEndFn = int (*)(const char* reason, int notifyPr);
 
 	// -----------------------------------------------------------------------
 	// 戻り値。**0 が成功**で、それ以外は理由を表す（例外は越えさせないので、失敗は

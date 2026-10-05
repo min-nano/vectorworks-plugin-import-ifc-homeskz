@@ -10,15 +10,11 @@
 #include "core/Trace.h"
 
 #include <cstddef>
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <optional>
-#include <random>
 #include <sstream>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace HomeskzIfcImport::core
@@ -89,20 +85,12 @@ namespace HomeskzIfcImport::core
 	{
 		std::ostringstream out;
 		// 先頭に版を置く。**形を変えるときはここを上げ、読む側で分岐する**（いまは 1 だけ）。
-		out << "# HomeskzIfcImport 実機フィードバックの記憶（自動生成。手で消してよい）\n";
+		out << "# HomeskzIfcImport 実機テストの記憶（自動生成。手で消してよい）\n";
 		out << "version=1\n";
-		out << "send=" << boolText(session.send) << "\n";
-		out << "repo=" << sanitize(session.repo) << "\n";
-		out << "pr=" << session.pullRequest << "\n";
-		out << "branch=" << sanitize(session.branch) << "\n";
 		out << "ifc=" << sanitize(session.ifcPath) << "\n";
-		out << "anon=" << boolText(session.anonymize) << "\n";
-		out << "anonkey=" << sanitize(session.anonKey) << "\n";
 		out << "round=" << session.round << "\n";
 		out << "build=" << sanitize(session.lastCommit) << "\n";
 		out << "tally=" << sanitize(session.lastTally) << "\n";
-		out << "posted=" << sanitize(session.lastPostedAt) << "\n";
-		out << "loop=" << boolText(session.loop) << "\n";
 		out << "work=" << sanitize(session.workPath) << "\n";
 		// 1 周目に採った基準。**レイヤ 1 枚につき 1 行**にしてあるのは、名前へ入れて
 		// よい文字を区切り記号で縛らないため（"," も "\t" もレイヤ名に使える）。
@@ -160,30 +148,16 @@ namespace HomeskzIfcImport::core
 			const std::string key = sanitize(line.substr(0, eq));
 			const std::string value = sanitize(line.substr(eq + 1));
 
-			if (key == "send")
-				session.send = parseBool(value, session.send);
-			else if (key == "repo")
-				session.repo = value;
-			else if (key == "pr")
-				session.pullRequest = parseInt(value, session.pullRequest);
-			else if (key == "branch")
-				session.branch = value;
-			else if (key == "ifc")
+			// M37 までの記憶にある send / repo / pr / branch / anon / posted / loop は、
+			// 下の「知らない行」として黙って読み飛ばす（PR への投稿をやめた。M38）。
+			if (key == "ifc")
 				session.ifcPath = value;
-			else if (key == "anon")
-				session.anonymize = parseBool(value, session.anonymize);
-			else if (key == "anonkey")
-				session.anonKey = value;
 			else if (key == "round")
 				session.round = parseInt(value, session.round);
 			else if (key == "build")
 				session.lastCommit = value;
 			else if (key == "tally")
 				session.lastTally = value;
-			else if (key == "posted")
-				session.lastPostedAt = value;
-			else if (key == "loop")
-				session.loop = parseBool(value, session.loop);
 			else if (key == "work")
 				session.workPath = value;
 			else if (key == "baseline")
@@ -283,10 +257,9 @@ namespace HomeskzIfcImport::core
 		// 環境変数も GUI アプリの子プロセスに必ず入っている。
 		//
 		// **フォルダ名（HomeskzIfcImport）は識別子なので、プラグインの改名に追随させない。**
-		// 付け替えると、進行中の往復の記憶（周回数・前の周の内訳・1 周目の選択）が黙って
-		// 行方不明になる。同梱スクリプトが同じフォルダへ置くトークンも同じ理由で据え置いて
-		// あり（scripts/vw-feedback.ps1 の Get-TokenFilePath）、**往復に要るものが 1 か所に
-		// まとまる**という利点もある。
+		// 付け替えると、実機テストの記憶（周回数・前の周の内訳・1 周目の選択）が黙って
+		// 行方不明になる。同梱スクリプトが同じフォルダから読むトークンも同じ理由で据え置いて
+		// ある（scripts/vw-token.ps1 の Get-TokenFilePath）。
 		const std::string localAppData = trace::envValue("LOCALAPPDATA");
 		if (!localAppData.empty())
 			return localAppData + "\\HomeskzIfcImport\\feedback.txt";
@@ -339,50 +312,29 @@ namespace HomeskzIfcImport::core
 		std::filesystem::remove(std::filesystem::path(path), ec);
 	}
 
-	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session,
-										const std::string& runningCommit, bool allowDialogs)
+	std::string testReportPathFor(const std::string& sessionPath)
 	{
-		// **記憶として使えるのは 3 つ揃っているときだけ。** 送ると決めてあり（send）、
-		// 1 周は投稿できていて（round>0）、その周の IFC が分かっている（ifcPath）——
-		// どれか欠けていれば続きの周は組み立てられないので、1 周目として扱う。
-		const bool remembered = session.send && session.round > 0 && !session.ifcPath.empty();
-		if (remembered && session.lastCommit != runningCommit)
+		// **文字列のまま差し替える。** std::filesystem::path へ通すと、Windows では UTF-8 の
+		// パスが ANSI のコードページとして読まれ、日本語のユーザー名で化ける。
+		if (sessionPath.empty())
+			return "";
+		const std::string::size_type slash = sessionPath.find_last_of("/\\");
+		if (slash == std::string::npos)
+			return "last-round.md";
+		return sessionPath.substr(0, slash + 1) + "last-round.md";
+	}
+
+	bool feedbackSessionRemembered(const FeedbackSession& session)
+	{
+		// 1 周は済んでいて（round>0）、その周の IFC が分かっている（ifcPath）——どちらか
+		// 欠けていれば続きの周は組み立てられないので、1 周目として扱う。
+		return session.round > 0 && !session.ifcPath.empty();
+	}
+
+	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session, bool allowDialogs)
+	{
+		if (feedbackSessionRemembered(session))
 			return FeedbackRoundKind::ContinueRound;
-		// ここから先は必ず人に尋ねるか、記憶を書き換えるかのどちらかになる。パレットの
-		// 周（allowDialogs=false）がここへ来るのは筋が通らない——新しいビルドを入れた
-		// 直後にしか呼ばれないので、必ず上で ContinueRound になるはずである。
-		if (!allowDialogs)
-			return FeedbackRoundKind::Refuse;
-		return remembered ? FeedbackRoundKind::RearmOnly : FeedbackRoundKind::FirstRound;
+		return allowDialogs ? FeedbackRoundKind::FirstRound : FeedbackRoundKind::Refuse;
 	}
-
-	bool feedbackPullRequestEnded(const std::string& state)
-	{
-		return state == "merged" || state == "closed";
-	}
-
-	FeedbackSession restartedFeedbackSession(FeedbackSession ended)
-	{
-		// 値で受けて持ち越すものだけを**移す**（移動は例外を投げないので、組み立ての途中で
-		// 投げて片付ける経路が生まれない）。
-		FeedbackSession fresh;
-		fresh.repo = std::move(ended.repo);
-		fresh.anonymize = ended.anonymize;
-		fresh.anonKey = std::move(ended.anonKey);
-		fresh.branch = std::move(ended.branch);
-		return fresh;
-	}
-
-	std::string newAnonymizationKey()
-	{
-		// **暗号の質までは要らない**が、推し量れない値である必要はある（時刻や連番だと、
-		// 投稿の時刻から鍵の候補を絞れてしまう）。random_device は OS の乱数源を引く。
-		std::random_device device;
-		std::ostringstream out;
-		out << std::hex << std::setfill('0');
-		for (int i = 0; i < 4; ++i)
-			out << std::setw(8) << static_cast<std::uint32_t>(device());
-		return out.str();
-	}
-
 } // namespace HomeskzIfcImport::core
