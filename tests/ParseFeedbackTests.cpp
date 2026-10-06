@@ -326,6 +326,9 @@ TEST(test_round_result_says_how_to_start_the_first_round)
 	CHECK(contains(text, "ifc"));
 	CHECK(contains(text, "tests/fixtures/Default.sta"));
 	CHECK(contains(text, "「実機テストを実行…」"));
+	// 理由があれば添える（テンプレートの記憶が無い等）。
+	const std::string why = formatTestRoundResult(TestRoundOutcome::NotRemembered, "（理由）");
+	CHECK(contains(why, "（理由）"));
 }
 
 TEST(test_round_result_rejects_an_unusable_request_without_drawing)

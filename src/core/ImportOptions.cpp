@@ -280,5 +280,7 @@ namespace HomeskzIfcImport::core
 			options.setDimensionStandard(
 				dimensionStandards[defaultDimensionStandardIndex(dimensionStandards)]);
 		return options;
-	}
+		// 閉じ括弧は setter が例外を投げたときの後始末（options の破棄）にしか通らず、
+		// テストでは踏めない（gcov の "====="。parse/ShearWall.cpp と同じ）。
+	} // GCOVR_EXCL_LINE
 } // namespace HomeskzIfcImport::core
