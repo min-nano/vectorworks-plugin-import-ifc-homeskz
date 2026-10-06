@@ -29,13 +29,17 @@ include しないので、SDK 無し（約 800MB のダウンロード無し）�
   突き合わせ自体がバグの温床になる。
 - **振り分けは解析側でやり切る。** 「このタグはどのビューポートに載るか」のような判断は
   `parse/` が決め、`draw/` は「渡されたものを置く」だけにする。伏図と軸組図で**描画実装を
-  1 つ**にできるのはこのため。
+  1 つ**にできるのはこのため。ただし**用紙に依るもの**（縮尺・用紙上の位置・軸組図の枚数）は
+  描くときにしか決まらないので命令に持たせず、決め方の算数を `core/Layout` に置いて描画側が
+  呼ぶ（[用紙の割り付けの決め事](page-layout.md)）。
 - スキーマを変えるときは、構造体定義・`validateDocument`・テストを**同時に**更新する。
 
 ## レイヤ・クラス・レベルの規約は 1 か所に置く
 
-同じ定数・述語を 2 か所に書かない。IFC 属性インデックスは `parse/IfcAttr.h`、レベル種別名は
-`parse/Story.h`、基礎のレイヤ名・許容値は `parse/Footing.h`、レイヤ名の組み立ては
+同じ定数・述語を 2 か所に書かない（唯一の置き場所の一覧は開発ガイドの
+[置き場所の一覧](../../development/placement-index.md)）。IFC 属性インデックスは
+`parse/IfcAttr.h`、レベル種別名は `core/Document.h`（`parse/Story.h` が再公開）、基礎の
+レイヤ名・許容値は `parse/Footing.h`、レイヤ名の組み立ては
 `storyLayerName` / `spanLayerName`、記号レイヤ名は `parse/ColumnMark`、構造クラス名は
 `parse/StructuralClass.h`。**要素を足すときに触る場所が 1 行で済む**形を保つ
 （完了ダイアログの要素一覧が `parse/Summary.cpp` の `kElements` 表 1 つなのが典型）。
