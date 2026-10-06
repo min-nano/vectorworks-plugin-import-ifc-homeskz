@@ -104,15 +104,23 @@ namespace HomeskzIfcImport::core
 		// 記憶がある。前の周と同じ条件で続きの周を走らせる（メニューから押したときは、
 		// 同じ条件でよいかを描画側が 1 度だけ尋ねる。draw/Feedback.cpp）。
 		ContinueRound,
+		// **尋ねずに始める 1 周目**（M40）。MCP の `vw_run_test` が IFC を名指しした周で、
+		// 記憶の有無にかかわらず新しい 1 周目として走る。設定は人に尋ねず、テンプレートから
+		// 開いた図面にあるもので既定の設定を組む（draw::presetImportSettings）。テンプレートは
+		// 同じ要求で渡されたもの（リポジトリの tests/fixtures/Default.sta）か、覚えたもの。
+		AutoFirstRound,
 		// ダイアログを出せない場面（MCP の `vw_run_test`）なのに、尋ねないと始められない。
-		// 何もしない（1 周目はメニューから人が実行する）。**テンプレートが無いときも
-		// ここ**——人の居ない周に「いま開いている図面」を基準に採らせると、前の周の絵が
-		// 載った図面や利用者の図面がそのまま基準になりうる（M39）。
+		// 何もしない（IFC を名指しして頼み直すか、1 周目をメニューから人が実行する）。
+		// **テンプレートが無いときもここ**——人の居ない周に「いま開いている図面」を基準に
+		// 採らせると、前の周の絵が載った図面や利用者の図面がそのまま基準になりうる（M39）。
 		Refuse,
 	};
 
 	// allowDialogs はダイアログを出してよいか（メニューから実行したとき true、MCP は false）。
-	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session, bool allowDialogs);
+	// ifcRequested は、頼んだ側が IFC を名指ししたか（MCP の `vw_run_test` の `ifc`。M40）。
+	// 名指しはダイアログを出せない周でだけ意味を持つ——メニューの周は人が選ぶ。
+	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session, bool allowDialogs,
+										bool ifcRequested = false);
 
 	// 記憶が「続きの周を組み立てられるだけ揃っているか」（1 周は済んでいて、その周の IFC が
 	// 分かっている）。

@@ -269,4 +269,26 @@ namespace HomeskzIfcImport::core
 		// 寸法の命令を作らない。
 		void setRafterSize(double width, double height);
 	};
+	// -----------------------------------------------------------------------
+	// **図面にあるものから組む既定の設定**（実機テストの自動の 1 周目。M40）。
+	//
+	// 設定ダイアログを「まだ一度も決めていない」状態で開いたときの初期値と同じものを、
+	// ダイアログを出さずに組む——Claude が MCP の `vw_run_test` から 1 周目を起こすとき、
+	// 誰も見ていない Vectorworks にダイアログを出せないため（draw/Feedback.h）。
+	//   * シンボルの役割 … 既定名（symbolRoles）のシンボルが図面に**ある役割だけ**取り込む
+	//     （ダイアログの「いまの対応先が図面に無い行はチェックを外して開く」と同じ）。
+	//   * 図面枠 … 図面にスタイルがあれば一覧の最初のもの（無ければ置かない）。
+	//   * 寸法規格 … defaultDimensionStandardIndex が選ぶもの（無ければ入れない）。
+	//   * 伏図のまとめ方・軸組図から外す通り・垂木の断面 … ImportOptions の既定のまま
+	//     （まとめない・全部描く・45×45。どれもダイアログの初期値と同じ）。
+	// 引数はどれも図面から集めた名前の一覧（draw/SettingsDialog が SDK で集める）。
+	ImportOptions presetImportOptions(const std::vector<std::string>& symbolNames,
+									  const std::vector<std::string>& titleBlockStyles,
+									  const std::vector<std::string>& dimensionStandards);
+
+	// 寸法規格の候補 names から、まだ決めていないときに選ぶものの添字。「JIS」があれば
+	// それ（日本の構造図の既定として自然で、一覧の最初は JIS とは限らない）、無ければ 0。
+	// **設定ダイアログの初期値と presetImportOptions が同じものを選ぶための唯一の置き場**。
+	// names が空でも 0 を返す（呼び出し側が範囲を確かめる）。
+	std::size_t defaultDimensionStandardIndex(const std::vector<std::string>& names);
 } // namespace HomeskzIfcImport::core

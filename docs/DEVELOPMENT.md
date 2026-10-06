@@ -315,6 +315,8 @@ PSScriptAnalyzerSettings.psd1  PowerShell 静的解析（PSScriptAnalyzer）の�
 | グラフィック凡例（`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗り・配置・ソース定義（タグ付きデータ `'GrLe'`）・縮率（伏図の縮尺に合わせる）・幅の実測 `measureLegendWidth`） | `draw/Legend` |
 | 図面枠（登録名の候補 `"Title Block Border"`・スタイルの当て方・用紙の中心への寄せ方） | `draw/TitleBlock` |
 | 図面枠スタイルの選択肢の集め方（シンボル定義のサブタイプ 552） | `draw/SettingsDialog` |
+| まだ決めていない設定の初期値（図面にあるものから組む既定 `core::presetImportOptions`・寸法規格の既定の選び方 `core::defaultDimensionStandardIndex`。設定ダイアログの初期値と実機テストの自動の 1 周目が共有する。M40） | `core/ImportOptions` |
+| 実機テストの 1 周目のテンプレート（MCP の `vw_run_test` の `template` に渡す `.sta`。M40） | `tests/fixtures/Default.sta` |
 | 構造材ツール（StructuralMember PIO）のフィールド名・値（`MemberTypeKey` / `AxisAlignKey` / `EndConditionKey`）・生成手順・失敗の内訳と文言（`StructuralFailures` / `DescribeStructuralFailures`） | `draw/StructuralMember` |
 | ハイブリッドシンボルの配置（4 要素で共有） | `draw/Symbol` |
 | 進捗の見出し・バー配分（要素ごとのフェーズ） | `draw/ExecuteDocument` |
@@ -1300,7 +1302,7 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 | `vw_ping` / `vw_layers` / `vw_classes` / `vw_layer_objects` / `vw_object_counts` | 読む | 図面の素性・レイヤ・クラス・中身 |
 | `vw_log` | 読む | 直近の取り込み（本番か実機テスト）の**診断ログ**。ファイルから読むので本体を入れ替えたあとも読める |
 | `vw_test_report` | 読む | 直近の**実機テストの報告**（下記「実機テスト」） |
-| `vw_run_test` | 長く走る | 実機テストを 1 周走らせて報告を返す（ダイアログを出さない。1 周目は人がメニューから） |
+| `vw_run_test` | 長く走る | 実機テストを 1 周走らせて報告を返す（ダイアログを出さない。`ifc` と `template` を名指しすれば 1 周目から。Vectorworks が居なければ Python 側が起こしてから頼む。M40） |
 | `vw_update` | 殻に頼む | 開発版の新しいビルドを入れて本体を読み直す（`branch` で名指し・`restart_if_needed`） |
 | `vw_restart` | 殻に頼む | Vectorworks を再起動する（保存の確認は通常どおり出る）。Python 側が架かり直すまで見届ける |
 
@@ -1313,8 +1315,11 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
   ただ 1 つ**で、Python サーバは起動時に `vw_tools` でそれを取りに行きます。**道具を足すときに
   触るのはその 1 行と実装 1 つだけ**で、Python 側は直しません。待ち時間（`timeoutSeconds`）も
   表が持ち、Python はそれを読んでから Claude へ見せる前に落とします。JSON は `core/Json`
-  （ブリッジ専用）。例外は**再起動の見届け**（`vw_restart` と `vw_update` の `restarting`）で、
-  橋の向こうが一度居なくなるのを見られるのは Python 側だけなので、そこに持ちます。
+  （ブリッジ専用）。例外は 2 つで、どちらも橋の向こうが居ないところは Python 側にしか
+  見えないので、そこに持ちます: **再起動の見届け**（`vw_restart` と `vw_update` の
+  `restarting`）と、**実機テストの起こし方**（`vw_run_test` は、橋が居なければ Vectorworks を
+  起こしてから頼む。`call_with_launch`。M40）。起こすのは `vw_run_test` のときだけで、読む
+  道具では起こしません（橋が落ちた理由を調べる前に覆い隠す）。
 - **受け付けは常駐のパレットの時計が 1 回ずつ呼びます**（M30。`draw::serveMcpBridge` は待たずに
   戻る）。**本体の中にループを書かない**——書けば図面がまた塞がります。本体のコードが
   スタックに載っている間（`PayloadInUse`）は見送ります。例外は `vw_run_test` で、その 1 周が
@@ -1340,8 +1345,8 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 - **新しく図面を書く道具を足すなら**、undo の作法
   （[SDK リファレンス「Undo」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Undo.md)）を
   必ず通してください。`vw_run_test` が書くのは本番の取り込みと同じ経路（`draw/ImportRun`）だけです。
-- **Vectorworks を起こすのは Python サーバの道具**（`vw_launch`）で、プラグイン側には書きません
-  （起こす前にはプラグインが居ない）。
+- **Vectorworks を起こすのは Python サーバ**（`vw_launch` と、`vw_run_test` の起こしてから
+  頼む道。M40）で、プラグイン側には書きません（起こす前にはプラグインが居ない）。
 
 **実機で確かめたこと**（M38・PR #188）: パレットの時計の中から
 `CloseAllFilesAndQuitVectorworks` を頼んだ再起動と、`vw_run_test` の 1 周を時計の中で走らせる
@@ -1365,7 +1370,8 @@ C++/VCOM SDK（[`developer-sdk`](https://github.com/Vectorworks/developer-sdk)�
 「dev ビルドが結果を PR へ投稿し、殻のパレットが新しいビルドを入れて取り込み直す」往復で
 回していましたが、**M38 で外しました**（`docs/DEV-NOTES.md` M38）。いまは**ローカルの
 Claude Code が MCP ブリッジ越しに**、更新・再起動・取り込み・報告の読み出しを自分で起こします。
-人がするのは「1 周目の条件を選ぶ」と「絵を見て一言書く」だけです。
+1 周目もリポジトリの IFC とテンプレートを名指しして Claude が始める（M40）ので、人がするのは
+「絵を見て一言書く」だけです。
 
 ### ローカルセッションの準備（GitHub・iOS・許可）
 
@@ -1449,9 +1455,14 @@ Claude Code が MCP ブリッジ越しに**、更新・再起動・取り込み�
 ### ローカルセッションでの回し方
 
 ```
-   ① 人: 試したい図面を開き、メニュー「実機テストを実行…」を 1 回実行する
-         （IFC → 取り込み設定 → 軸組図の通り。いま開いている図面をテンプレート（.sta）
-          として一時ファイルへ保存し、以後の周はそこから開いた新しい図面へ描く）
+   ① Claude: vw_run_test に ifc と template を渡して 1 周目を始める（M40）
+         （ifc は tests/fixtures/ の IFC、template は tests/fixtures/Default.sta。どちらも
+          絶対パス。テンプレートを一時ファイルの置き場へ写して覚え、そこから開いた新しい
+          図面へ、図面にあるもので組んだ既定の設定で取り込む。Vectorworks が起動して
+          いなければ起動してから。以後の周は同じ条件で走る）
+         ※ 人が別の図面・設定で試したいときは、その図面を開いてメニュー「実機テストを
+           実行…」を実行する（IFC → 取り込み設定 → 軸組図の通り。いま開いている図面を
+           テンプレートとして採る）
         ↓
    ② Claude: 直して push → scripts/ci-wait.sh で dev ビルドを待つ
         ↓
@@ -1464,8 +1475,13 @@ Claude Code が MCP ブリッジ越しに**、更新・再起動・取り込み�
    ⑤ Claude: 報告と vw_log を読み、人に絵で確かめてほしい点を返す → ② へ
 ```
 
-- **`vw_run_test` は 1 周目を始められません**（IFC と設定はダイアログでしか決まらない）。
-  記憶やテンプレートが無ければ「1 周目がまだ済んでいません」と返すので、①を人に頼みます。
+- **`vw_run_test` は `ifc` を渡すと、記憶があっても新しい 1 周目**になります（M40。別の IFC で
+  試し直すのにも人の手は要りません）。`ifc` を渡さずに記憶やテンプレートが無ければ
+  「1 周目がまだ済んでいません」と返すので、`ifc` と `template` を渡して頼み直します。
+- **自動の 1 周目の設定は、テンプレートから開いた図面にあるもので組みます**
+  （`draw::presetImportSettings`）。設定ダイアログをまだ一度も決めていないときの初期値と同じで
+  ——既定名のシンボルが図面にある役割だけ取り込み、図面枠は最初のスタイル、寸法規格は JIS
+  （無ければ最初）、伏図のまとめ方・外す通り・垂木は既定。人がその起動中に選んだ値は使いません。
 - **再起動しても保存の確認はふつう出ません**（M39）。実機テストの図面は周の終わりに一時
   ファイルへ保存してあるからです。出たら、人が保存していない図面を開いているということ
   なので、その応答は人に任せます。
@@ -1511,7 +1527,9 @@ Claude Code が MCP ブリッジ越しに**、更新・再起動・取り込み�
 
 1. **1 周目**（と、人が別の図面を開いてからメニューを押した周）は、いま開いている図面を
    一時ファイルの置き場へ**テンプレート（`template-N.sta`）として別名保存**します
-   （`CaptureTemplate`）。別名保存した文書はそのテンプレートのファイルそのものになるので、
+   （`CaptureTemplate`）。**MCP の `vw_run_test` に `template` を渡されたときは、その `.sta` を
+   同じ置き場へ写して**覚えます（`InstallTemplate`。M40。開いた図面を経ないので、閉じる
+   ものも無い）。別名保存した文書はそのテンプレートのファイルそのものになるので、
    自分の図面として覚えてすぐ閉じます。元の図面のファイルには何も書き戻りません。
 2. **周の頭で、自分で保存した図面のうち開いているものを保存せずに閉じます**
    （`CloseOwnedDocuments`）。
@@ -1585,10 +1603,10 @@ PR の行（`send` / `repo` / `pr` / `branch` / `anon` / `posted` / `loop`）は
 
 | | 役割 |
 | --- | --- |
-| `src/core/FeedbackSession.*` | 覚えておく値と、その読み書き。**どの周になるかの場合分け**（`feedbackRoundKind`）と報告の置き場所もここ（無 SDK・テストあり） |
+| `src/core/FeedbackSession.*` | 覚えておく値と、その読み書き。**どの周になるかの場合分け**（`feedbackRoundKind`。IFC を名指しされた無人の 1 周目 `AutoFirstRound` も。M40）と報告の置き場所もここ（無 SDK・テストあり） |
 | `src/core/FeedbackScratch.*` | 一時ファイルの置き場（ブランチごと）と、PR が閉じたブランチの片付け（無 SDK・テストあり） |
 | `src/parse/Feedback.*` | **報告の本文**（Markdown）・前の周との差分・診断ログの切り詰め（`keepTail`）・実機テストの結末の文言（無 SDK・テストあり） |
-| `src/draw/Feedback.*` | 実機テストの 1 周（`runTestRound`）——記憶・取り込み前のダイアログ・図面の用意（テンプレートから開く・自分の図面を閉じる・描き上がりを保存する）・報告の書き出し（SDK 依存） |
+| `src/draw/Feedback.*` | 実機テストの 1 周（`runTestRound`）——記憶・取り込み前のダイアログ・名指しされたテンプレートを写す（`InstallTemplate`。M40）・図面の用意（テンプレートから開く・自分の図面を閉じる・描き上がりを保存する）・報告の書き出し（SDK 依存） |
 | `src/draw/ImportRun.*` | 取り込み 1 周ぶんの部品。**本番の取り込みと実機テストが共有する唯一の実装**（M25）。診断ログの在り処（`importLogPath`）もここ |
 | `src/draw/McpBridge.*` | `vw_run_test` / `vw_test_report` / `vw_log` の道具 |
 | `src/Extensions/ExtTestMenu.*` | 実機テストの入口の登録と取り次ぎ（殻・**dev だけ登録**。M25） |
@@ -1623,7 +1641,10 @@ PR の行（`send` / `repo` / `pr` / `branch` / `anon` / `posted` / `loop`）は
 - **尋ねるのは取り込みが始まる前だけ。** 取り込みのあとにダイアログを足しません。失敗した
   理由も、アラートではなくいつもの結果ダイアログで伝えます（MCP には文言で返す）。
 - **MCP の周にダイアログを 1 枚も出さない。** 誰も見ていない Vectorworks が止まります。
-  1 周目が要るなら走らずにそう返します（`TestRoundOutcome::NotRemembered`）。
+  1 周目は名指し（`ifc` / `template`）で始め、設定はダイアログの初期値と同じものを図面から
+  組みます（M40）。名指しが無くて 1 周目が要るなら走らずにそう返し
+  （`TestRoundOutcome::NotRemembered`）、名指しが使えなければ何も変えずに理由を返します
+  （`InvalidRequest`）。
 - **うまく行った周は何も出さない。** モーダルが開いている間は橋が受け付けを見送ります。
 - **実機テストの結末は実機テスト自身の言葉で言う。** 取り込みコマンドの完了文言
   （`parse::formatImportResult` / `formatImportError`）を借りず、`parse::formatTestRoundResult`
@@ -1634,8 +1655,9 @@ PR の行（`send` / `repo` / `pr` / `branch` / `anon` / `posted` / `loop`）は
   `parse::uniqueSectionNumbers` が一意にする）。
 - **手動で押した周は、いま開いている図面からテンプレートを採り直す**（`allowDialogs` の
   ときだけ。いま開いているのが前の周の描き上がりなら続きの周）。捨てるのは「どの図面から
-  始めるか」だけで、IFC・設定はそのままです。MCP の周は常に覚えたテンプレートから始め、
-  テンプレートが無ければ走りません（人の居ない周に、いま開いている図面を基準に採らせない）。
+  始めるか」だけで、IFC・設定はそのままです。MCP の周は常に覚えたテンプレート（か、名指し
+  されて写したテンプレート）から始め、テンプレートが無ければ走りません（人の居ない周に、
+  いま開いている図面を基準に採らせない）。
 - **キャンセルされた周は「試し終えた」ことにしない**——記憶の `lastCommit` を進めません
   （実機 round 10）。
 

@@ -394,6 +394,45 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
+		// **頼まれたテンプレートを覚える**（M40。MCP の `vw_run_test` の `template`）。
+		// 一時ファイルの置き場へ**写してから**覚える——渡されるのはリポジトリの
+		// tests/fixtures/Default.sta で、ワークツリーが消えると続きの周が開くものを失う。
+		// 写したものは開かないので自分の図面（ownedDocuments）には入れない。成功したら true。
+		bool InstallTemplate(core::FeedbackSession& session, const std::string& source,
+							 std::string& note)
+		{
+			// `.sta` 以外を `OpenDocumentPath` へ渡すと**そのファイル自体**が開き、そこへ
+			// 描くことになる（SDK リファレンス「Documents」）。先に弾いて理由を言う。
+			const std::string::size_type dot = source.find_last_of('.');
+			if (dot == std::string::npos || source.substr(dot) != ".sta")
+			{
+				note = "テンプレートには .sta を渡してください（" + source + "）";
+				return false;
+			}
+			if (!PathExists(source))
+			{
+				note = "テンプレートが見つかりません（" + source + "）";
+				return false;
+			}
+			const std::string path = FreshTempPath("template", ".sta");
+			std::error_code ec;
+			if (path.empty() ||
+				!std::filesystem::copy_file(std::filesystem::path(source),
+											std::filesystem::path(path), ec) ||
+				ec)
+			{
+				note = "テンプレートを一時ファイルの置き場へ写せませんでした（" + source + " → " +
+					   (path.empty() ? std::string("一時ディレクトリが引けません") : path) + "）";
+				return false;
+			}
+			session.templatePath = path;
+			// 基準は採り直す（CaptureTemplate と同じ理由）。
+			session.baselineRecorded = false;
+			session.baselineLayers.clear();
+			note = "テンプレート " + source + " を " + path + " へ写して使います";
+			return true;
+		}
+
 		// **この周の図面を用意する。** note には診断ログと報告へ出す 1 行が入る。
 		// rebased は「テンプレートを採り直した」ときにその理由（runTestRound が作る）。
 		RoundDocument openRoundDocument(core::FeedbackSession& session, const std::string& rebased,
@@ -607,7 +646,7 @@ namespace HomeskzIfcImport::draw
 
 	// -----------------------------------------------------------------------
 	// **実機テストの 1 周**（M25 / M38。draw/Feedback.h）。
-	TestRoundResult runTestRound(bool allowDialogs)
+	TestRoundResult runTestRound(bool allowDialogs, const TestRoundRequest& request)
 	{
 		if (!feedbackAvailable())
 		{
@@ -650,15 +689,31 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
+		// **MCP が名指しした条件を受け取る**（M40）。メニューの周は人が選ぶので見ない。
+		// 使えない名指しは、何も変えずに（記憶も書かずに）理由を返す。
+		const bool ifcRequested = !allowDialogs && !request.ifcPath.empty();
+		std::string requestNote;
+		if (ifcRequested && !PathExists(request.ifcPath))
+			return Failure(allowDialogs, parse::TestRoundOutcome::InvalidRequest,
+						   "IFC が見つかりません（" + request.ifcPath + "）");
+		if (!allowDialogs && !request.templatePath.empty() &&
+			!InstallTemplate(session, request.templatePath, requestNote))
+			return Failure(allowDialogs, parse::TestRoundOutcome::InvalidRequest, requestNote);
+
 		// **どの周になるかは無 SDK 側が決める**（core/FeedbackSession.h）。
-		const core::FeedbackRoundKind kind = core::feedbackRoundKind(session, allowDialogs);
+		const core::FeedbackRoundKind kind =
+			core::feedbackRoundKind(session, allowDialogs, ifcRequested);
 		if (kind == core::FeedbackRoundKind::Refuse)
 			return Failure(allowDialogs, parse::TestRoundOutcome::NotRemembered,
-						   core::feedbackSessionRemembered(session)
+						   core::feedbackSessionRemembered(session) || ifcRequested
 							   ? "（テンプレートの記憶がありません——M39 より前の版の記憶か、"
-								 "一時ファイルが片付けられた後です）"
+								 "一時ファイルが片付けられた後です。template も渡してください）"
 							   : "");
 
+		// **尋ねずに始める 1 周目**（M40）。IFC は名指しされたもの、設定は図面を用意して
+		// から組む（テンプレートから開いた図面にあるシンボルで決まるので、ここではまだ
+		// 決められない）。
+		const bool automatic = kind == core::FeedbackRoundKind::AutoFirstRound;
 		bool choose = kind == core::FeedbackRoundKind::FirstRound;
 		if (!choose && allowDialogs)
 		{
@@ -669,14 +724,14 @@ namespace HomeskzIfcImport::draw
 				choose = true;
 		}
 
-		std::string ifcPath = session.ifcPath;
+		std::string ifcPath = automatic ? request.ifcPath : session.ifcPath;
 		core::ImportOptions options = session.options;
 		bool settingsShown = true;
 		std::string settingsNote;
-		if (choose)
+		if (choose && !ChooseConditions(ifcPath, options, settingsShown, settingsNote))
+			return TestRoundResult{};
+		if (choose || automatic)
 		{
-			if (!ChooseConditions(ifcPath, options, settingsShown, settingsNote))
-				return TestRoundResult{};
 			// **選び直したら引き比べる相手も捨てる。** 別の IFC・設定の周と内訳を並べても
 			// 「直した結果どう動いたか」にならない。テンプレートと自分の図面の記憶は残す
 			// ——この周の図面を用意するのに要る。
@@ -698,7 +753,8 @@ namespace HomeskzIfcImport::draw
 		// 報告（FeedbackRound::preparation）。ログは上限で切り詰められるので、報告の側にも
 		// 置かないと読めない周が出る（実機 round 2 で実際に落ちた）。
 		std::string preparation;
-		const RoundDocument document = openRoundDocument(session, rebased, preparation);
+		const RoundDocument document =
+			openRoundDocument(session, requestNote.empty() ? rebased : requestNote, preparation);
 		// **「準備:」はここで 1 度だけ付ける。** 部品がめいめいに付けていた頃は、つないだ
 		// 1 行に「準備:」が 2 度出ていた（PR #188 の実機確認）。
 		if (!preparation.empty())
@@ -712,6 +768,21 @@ namespace HomeskzIfcImport::draw
 			(void)core::writeFeedbackSession(sessionPath, session);
 			core::trace::note(preparation);
 			return Failure(allowDialogs, parse::TestRoundOutcome::DocumentFailed, preparation);
+		}
+		if (automatic)
+		{
+			// **設定はテンプレートから開いた図面から組む**（draw::presetImportSettings。設定
+			// ダイアログをまだ一度も決めていないときの初期値と同じ）。集められなければ
+			// ImportOptions の既定で続ける——設定を組めないことを理由に周を落とさない
+			// （設定ダイアログを出せなかったときと同じ考え方。draw/SettingsDialog.h）。
+			std::string presetNote;
+			if (!presetImportSettings(options, &presetNote))
+				options = core::ImportOptions{};
+			settingsNote = "自動の 1 周目: ダイアログを出さず、テンプレートの図面にあるもので"
+						   "既定の設定を組みました";
+			if (!presetNote.empty())
+				settingsNote += "（" + presetNote + "）";
+			session.options = options;
 		}
 		const ImportRound round =
 			runImportRound(ifcPath, options, settingsShown, settingsNote, preparation);

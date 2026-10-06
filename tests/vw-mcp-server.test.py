@@ -272,6 +272,74 @@ def check_launch(root):
     time.sleep(0.5)
 
 
+# vw_run_test の起こしてから頼む（M40）の代役。印を書くだけでなく、**vw_tools と
+# vw_run_test に応える**（本物のパレットの時計と同じ手順。綴りは src/core/Bridge.h）。
+SERVING_APP = '''#!%(python)s
+import json, os, time
+spool = %(spool)r
+stop = os.path.join(os.path.dirname(spool), "stop-serving-app")
+os.makedirs(spool, exist_ok=True)
+os.chmod(spool, 0o700)
+tools = [{"name": "vw_run_test", "description": "run", "inputSchema": {"type": "object"},
+          "timeoutSeconds": 20}]
+deadline = time.time() + 30
+while time.time() < deadline and not os.path.exists(stop):
+    temp = os.path.join(spool, "bridge.json.tmp")
+    with open(temp, "w") as handle:
+        json.dump({"plugin": "min-nano_structureDev", "protocol": 1, "beat": int(time.time())}, handle)
+    os.replace(temp, os.path.join(spool, "bridge.json"))
+    for name in sorted(os.listdir(spool)):
+        if not name.endswith(".req.json"):
+            continue
+        path = os.path.join(spool, name)
+        with open(path) as handle:
+            request = json.load(handle)
+        os.remove(path)
+        if request["tool"] == "vw_tools":
+            body = {"ok": True, "result": {"tools": tools, "protocol": 1}}
+        elif request["tool"] == "vw_run_test":
+            body = {"ok": True, "result": {"round": 1, "args": request["args"]}}
+        else:
+            body = {"ok": False, "error": "unknown"}
+        body["id"] = request["id"]
+        temp = os.path.join(spool, request["id"] + ".res.json.tmp")
+        with open(temp, "w") as handle:
+            json.dump(body, handle, ensure_ascii=False)
+        os.replace(temp, os.path.join(spool, request["id"] + ".res.json"))
+    time.sleep(0.1)
+'''
+
+
+def check_launch_on_demand(root):
+    """**vw_run_test は Vectorworks が居なければ起こしてから頼む**（M40）。"""
+    if os.name == "nt":
+        return  # check_launch と同じ（代役を直に起こせない）
+    spool = os.path.join(root, "on-demand-mcp")
+    app = os.path.join(root, "serving-vectorworks")
+    write_fake_app(app, spool, body=SERVING_APP % {"python": sys.executable, "spool": spool})
+
+    # 図面を読むだけの道具では起こさない（橋が落ちた理由を覆い隠さない）。
+    replies = drive(spool, [call("vw_ping", request_id=1)], timeout="1",
+                    extra_env={"VW_MCP_APP": app})
+    check(replies[0]["result"]["isError"] is True, "読む道具では起こさない")
+    check(not os.path.exists(os.path.join(spool, "bridge.json")), "起こしていない")
+
+    # 実機テストは起こしてから頼む。引数はそのまま届き、起こしたことも返る。
+    args = {"ifc": "/repo/tests/fixtures/a.ifc", "template": "/repo/tests/fixtures/Default.sta"}
+    replies = drive(spool, [call("vw_run_test", args, request_id=1)], timeout="1",
+                    extra_env={"VW_MCP_APP": app})
+    check(replies[0]["result"]["isError"] is False, "起こしてから実機テストを頼める")
+    result = json.loads(content_text(replies[0]))
+    check_eq(result["args"], args, "引数がそのまま届く")
+    check(result["launched"]["launched"] is True, "起こしたことを返す")
+
+    with open(os.path.join(root, "stop-serving-app"), "w", encoding="utf-8"):
+        pass
+    time.sleep(0.5)
+    # 起こしても橋が架からないときの諦め方は vw_launch と同じ（check_launch）。待つ上限が
+    # 既定の 120 秒なので、ここでは繰り返さない。
+
+
 def load_server_module():
     """サーバを module として読み込む（中の関数を直に試すため）。"""
     import importlib.util
@@ -373,6 +441,7 @@ def main():
 
         # --- Vectorworks を起こす ----------------------------------------
         check_launch(root)
+        check_launch_on_demand(root)
 
         # --- ブリッジが動いていないとき ---------------------------------
         os.makedirs(spool)

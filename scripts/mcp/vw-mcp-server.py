@@ -18,9 +18,12 @@
 # 【このスクリプトが持たないもの】**道具の一覧を持たない。** 何ができるか（名前・説明・
 # 引数の形・待ち時間）はプラグイン側の表（src/draw/McpBridge.cpp の kTools）ただ 1 つが
 # 真実で、ここは起動時にそれを `vw_tools` で取りに行くだけ。だから**道具を足すのにこの
-# スクリプトを直す必要が無い**（プラグインを更新すれば増える）。例外は再起動の前後の
-# 待ち方（vw_restart / vw_update の restarting）で、橋の向こうが一度居なくなるのを
-# 見届けられるのはこちらだけなので、ここに持つ（wait_for_restart）。
+# スクリプトを直す必要が無い**（プラグインを更新すれば増える）。例外は 2 つで、どちらも
+# 橋の向こうが居ないところはこちらにしか見えないから持つ:
+#   * 再起動の前後の待ち方（vw_restart / vw_update の restarting）… 橋が一度居なくなる
+#     のを見届ける（wait_for_restart）。
+#   * 実機テストの起こし方（vw_run_test）… Vectorworks が起動していなければ、起動して
+#     橋が架かってから頼む（M40。call_with_launch）。
 #
 # 【依存を持たない】標準ライブラリだけで書いてある。プラグインの zip に同梱して配るので、
 # 利用者に pip を要求しないことが要件（Python 3.8 以降）。
@@ -711,6 +714,37 @@ def launch_vectorworks(bridge, args, notify):
     }, True
 
 
+# --- 起こしてから頼む（vw_run_test）-------------------------------------------
+# **実機テストは Vectorworks が起動していなくても頼める**（M40）。1 周目から無人で回す
+# ために、橋が居なければこちらが Vectorworks を起こし、架かってから同じ要求を出し直す。
+# 起こすのは**頼まれた道具がこれのときだけ**——図面を読むだけの道具のために Vectorworks を
+# 起こすと、橋が落ちた理由（パレットが閉じている等）を Claude が調べる前に覆い隠す。
+LAUNCH_ON_DEMAND_TOOLS = ("vw_run_test",)
+
+
+def call_with_launch(bridge, name, args, notify):
+    """橋が居なければ Vectorworks を起こしてから name を頼む。
+
+    返すのは (応答, 起動の結果 or None)。起こしても橋が架からなければ BridgeDown を投げる
+    （起動の結果の文言を載せて）。
+    """
+    try:
+        return bridge.call(name, args), None
+    except BridgeDown:
+        if name not in LAUNCH_ON_DEMAND_TOOLS:
+            raise
+    launched, is_error = launch_vectorworks(bridge, {}, notify)
+    if is_error:
+        raise BridgeDown(
+            "Vectorworks を起動してから %s を頼もうとしましたが、橋が架かりませんでした。\n%s"
+            % (name, json.dumps(launched, ensure_ascii=False, indent=2))
+        )
+    # **待ち時間を取り直してから頼む。** 一度も繋がったことが無いとキャッシュが無く、
+    # 実機テストの 1 周（30 分まで）を既定の 30 秒で諦めてしまう。
+    bridge.live_tools()
+    return bridge.call(name, args), launched
+
+
 # --- 再起動を見届ける（vw_restart / vw_update の restarting）--------------------
 # **再起動そのものはプラグインが頼む**（SDK の CloseAllFilesAndQuitVectorworks。開いている
 # 図面の保存確認は Vectorworks が通常どおり出す）。こちらは「一度居なくなって、また架かる」
@@ -867,8 +901,9 @@ def handle_tools_call(bridge, params):
             # 自前の道具はそのまま自分で答える（vw_call の入れ子も防ぐ）。
             return handle_tools_call(bridge, {"name": name, "arguments": args})
 
+    launched = None
     try:
-        response = bridge.call(name, args)
+        response, launched = call_with_launch(bridge, name, args, notify_tools_changed)
     except BridgeDown as error:
         if name == "vw_restart":
             # 橋が落ちていても再起動だけは頼みたい（殻まで変わった直後がそれ）。
@@ -902,6 +937,10 @@ def handle_tools_call(bridge, params):
             json.dumps(result, ensure_ascii=False, indent=2),
             is_error=after.get("restarted") is not True,
         )
+    if launched is not None and isinstance(result, dict):
+        # 起こしたことも伝える（Claude が「起動していなかった」ことを知れるように）。
+        result = dict(result)
+        result["launched"] = launched
     if not bridge.listed:
         # 橋に届いたのに、Claude にはプラグインの道具を 1 つも見せていない（先に起動した
         # アプリの一覧が古い）。取り直しを促す。

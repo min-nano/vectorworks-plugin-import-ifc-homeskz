@@ -87,4 +87,13 @@ namespace HomeskzIfcImport::draw
 	SettingsOutcome showImportSettings(core::ImportOptions& options,
 									   const std::vector<core::PlanLevelChoice>& planLevels,
 									   std::string* note = nullptr);
+
+	// **ダイアログを出さずに、いま開いている図面から既定の設定を組む**（M40）。実機テストの
+	// 自動の 1 周目（MCP の `vw_run_test` に IFC を名指しされた周）が、テンプレートから
+	// 開いた図面に対して呼ぶ。中身は「まだ一度も決めていないときにダイアログが開く初期値」
+	// と同じ（core::presetImportOptions）で、**この起動中に人が選んだ前回の値は使わない**
+	// ——無人の周の条件が、その日に人が何を押したかで変わらないように。
+	//
+	// 図面から集められなかったら false（options は触らない。note に理由を足す）。
+	bool presetImportSettings(core::ImportOptions& options, std::string* note = nullptr);
 } // namespace HomeskzIfcImport::draw

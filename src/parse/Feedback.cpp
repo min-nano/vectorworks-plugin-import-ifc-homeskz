@@ -144,11 +144,19 @@ namespace HomeskzIfcImport::parse
 			out << "\n\nくわしい原因は診断ログにあります。";
 			return out.str();
 		case TestRoundOutcome::NotRemembered:
-			// **MCP から 1 周目は起こせない**（IFC と設定はダイアログでしか決まらない）。
-			// 何をすれば続けられるかを、頼んだ側（Claude）がそのまま人へ伝えられる形で言う。
-			out << "実機テストの 1 周目がまだ済んでいません。Vectorworks のメニュー"
-				   "「実機テストを実行…」を 1 度実行して、IFC と取り込み設定を選んでください"
-				   "（2 周目からは同じ条件でダイアログ無しに走ります）。";
+			// **名指しの無い MCP の周から 1 周目は起こせない**（何を取り込むかが分からない）。
+			// 何をすれば続けられるかを、頼んだ側（Claude）がそのまま使える形で言う（M40）。
+			out << "実機テストの 1 周目がまだ済んでいません。vw_run_test に ifc（取り込む IFC の"
+				   "絶対パス）と template（テンプレートの .sta の絶対パス。リポジトリの "
+				   "tests/fixtures/Default.sta）を渡せば、尋ねずに 1 周目から始めます。"
+				   "人が選ぶなら、Vectorworks のメニュー「実機テストを実行…」を 1 度実行して"
+				   "ください（2 周目からは同じ条件でダイアログ無しに走ります）。";
+			if (!detail.empty())
+				out << "\n\n" << detail;
+			return out.str();
+		case TestRoundOutcome::InvalidRequest:
+			out << "頼まれた条件では実機テストを始められませんでした。"
+				   "図面には何も描いていません。";
 			if (!detail.empty())
 				out << "\n\n" << detail;
 			return out.str();

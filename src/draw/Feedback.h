@@ -10,7 +10,8 @@
 //	    1 周目は IFC・設定・軸組図の通りを尋ね、2 周目からは「前回と同じ条件で」か
 //	    「選び直す」かを 1 度だけ尋ねる。
 //	  * MCP の `vw_run_test`（draw/McpBridge.cpp）… allowDialogs=false。**1 枚もダイアログを
-//	    出さない**（誰も見ていない Vectorworks を止めない）。記憶が無ければ走らない。
+//	    出さない**（誰も見ていない Vectorworks を止めない）。IFC とテンプレートを名指し
+//	    されれば尋ねずに 1 周目から始め（M40）、名指しも記憶も無ければ走らない。
 //
 //	【本番のコマンドは実機テストを知らない（M25）】M24 までは、往復が**本番の取り込み
 //	コマンドの中**に織り込まれていた。`#ifdef VW_DEV_BUILD` の外にあるので**安定版にも同じ
@@ -64,16 +65,32 @@ namespace HomeskzIfcImport::draw
 		std::string reportPath; // 報告を書いた場所（書けなければ空）
 	};
 
+	// **MCP の `vw_run_test` が名指しする条件**（M40）。どちらも空なら従来どおり（覚えた
+	// 条件で続きの周を走らせ、記憶が無ければ走らない）。メニューの周では使わない。
+	struct TestRoundRequest
+	{
+		// 取り込む IFC の絶対パス。**名指しされたら、記憶があっても新しい 1 周目**として、
+		// 尋ねずに走らせる（設定はテンプレートから開いた図面にあるもので組む。
+		// draw::presetImportSettings）。
+		std::string ifcPath;
+		// テンプレート（`.sta`）の絶対パス。一時ファイルの置き場へ**写してから**覚える
+		// （リポジトリの tests/fixtures/Default.sta を渡されても、ワークツリーが消えたあとの
+		// 周が開くものを失わないように）。空なら覚えたテンプレートを使う。
+		std::string templatePath;
+	};
+
 	// **実機テストの 1 周**（M25）。**このコマンドだけが実機テストを知っている。**
 	//
 	//   1. 記憶が無ければ 1 周目として、IFC・取り込み設定・軸組図の通りを尋ねてから取り込む
 	//      （allowDialogs のときだけ。MCP からは NotRemembered を返して何もしない）。
 	//   2. 記憶があれば、前の周と同じ条件で取り込む。メニューから押したときだけ
 	//      「前回と同じ条件で」か「選び直す」かを 1 度尋ねる。
+	//   3. MCP の周で IFC を名指しされたら（request.ifcPath）、尋ねずに新しい 1 周目を
+	//      走らせる（M40。テンプレートは request.templatePath か、覚えたもの）。
 	//
-	// どちらも、取り込む前に図面を取り込み前へ戻し、終わったら報告を書いて記憶を進める。
+	// どれも、テンプレートから開いた新しい図面へ描き、終わったら報告を書いて記憶を進める。
 	// 失敗したとき、allowDialogs なら結果ダイアログで伝える（MCP には message で返す）。
-	TestRoundResult runTestRound(bool allowDialogs);
+	TestRoundResult runTestRound(bool allowDialogs, const TestRoundRequest& request = {});
 
 	// 直近の報告の在り処（core::testReportPathFor。記憶の置き場所が分からなければ空）。
 	std::string testReportPath();

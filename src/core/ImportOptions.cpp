@@ -257,4 +257,28 @@ namespace HomeskzIfcImport::core
 		rafterWidth = isValidRafterSize(width) ? width : kDefaultRafterWidth;
 		rafterHeight = isValidRafterSize(height) ? height : kDefaultRafterHeight;
 	}
+	std::size_t defaultDimensionStandardIndex(const std::vector<std::string>& names)
+	{
+		const auto jis = std::ranges::find(names, "JIS");
+		return jis == names.end() ? 0 : static_cast<std::size_t>(jis - names.begin());
+	}
+
+	ImportOptions presetImportOptions(const std::vector<std::string>& symbolNames,
+									  const std::vector<std::string>& titleBlockStyles,
+									  const std::vector<std::string>& dimensionStandards)
+	{
+		ImportOptions options;
+		for (const SymbolRoleInfo& info : symbolRoles())
+		{
+			const bool present =
+				std::ranges::find(symbolNames, info.defaultSymbol) != symbolNames.end();
+			options.setEnabled(info.role, present);
+		}
+		if (!titleBlockStyles.empty())
+			options.setTitleBlockStyle(titleBlockStyles.front());
+		if (!dimensionStandards.empty())
+			options.setDimensionStandard(
+				dimensionStandards[defaultDimensionStandardIndex(dimensionStandards)]);
+		return options;
+	}
 } // namespace HomeskzIfcImport::core
