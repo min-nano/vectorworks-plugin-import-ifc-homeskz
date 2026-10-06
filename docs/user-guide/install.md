@@ -11,14 +11,15 @@
 - **`min-nano_structure`** — *stable*（表示名「みんなの構造設計支援」）。`main` から
   ビルドされます。コマンド名は **IFC (ホームズ君) 取り込み…** と
   **アップデータを確認 (みんなの構造設計支援)**。
-- **`min-nano_structureDev`** — *dev*（表示名「みんなの構造設計支援Dev」）。作業ブランチ
-  ／PR からビルドされます。コマンド名は **IFC (ホームズ君) 取り込み… (Dev)** と
+- **`min-nano_structureDev`** — *dev*（表示名「みんなの構造設計支援Dev」）。PR を開いて
+  いる作業ブランチからビルドされます。コマンド名は **IFC (ホームズ君) 取り込み… (Dev)** と
   **アップデータを確認 (みんなの構造設計支援Dev)**。
 
 出力名・リソース識別子・拡張機能 UUID がそれぞれ別なので、両方を同時に入れて使えます
 （通常利用は stable、作業中のブランチを試すのは dev）。ビルドは
 [GitHub のリリース](https://github.com/min-nano/vectorworks-plugin-import-ifc-homeskz/releases)
-から取得します（stable は `stable` リリース、dev は `dev-<ブランチ名>` プレリリース）。
+から取得します（stable は `stable` リリース、dev は `dev-<ブランチ名>` プレリリース。
+ブランチ名の `/` などの記号は `-` に置き換わり、PR を閉じるとそのプレリリースは消えます）。
 
 ## 置き場所: プラグインは自分のフォルダを 1 つ持つ
 
@@ -29,6 +30,7 @@
   └── min-nano_structure/
         ├── min-nano_structure.vwlibrary
         ├── min-nano_structure.vwpayload
+        ├── vw-mcp-server.py
         └── vw-uninstall.sh
 ```
 
@@ -43,8 +45,8 @@
 
 | ファイル | 何か |
 | --- | --- |
-| `min-nano_structure.vwlibrary`（mac）／ `min-nano_structure.vlb`（win） | **殻**。Vectorworks が起動時に読み込む本体で、メニューと記号 PIO の登録・アップデートを持ちます |
-| `min-nano_structure.vwpayload` | **中身**。取り込みの処理と記号の作図がすべて入っています。殻がこれを自分で読み込みます |
+| `min-nano_structure.vwlibrary`（mac）／ `min-nano_structure.vlb`（win） | **殻**。Vectorworks が起動時に読み込むモジュールで、メニューと PIO（柱記号・耐力壁）の登録・アップデートを持ちます |
+| `min-nano_structure.vwpayload` | **中身**。取り込みの処理と PIO の作図がすべて入っています。殻がこれを自分で読み込みます |
 
 こう割ってあるのは、**アップデートで Vectorworks を再起動しなくて済むように**するため
 です（[「アップデート」](update.md)）。`.vwpayload` は Vectorworks から見ればただのファイルなので、
@@ -72,8 +74,9 @@ powershell -ExecutionPolicy Bypass -File vw-install.ps1
 ```
 
 インストール先は Vectorworks 2026 のユーザフォルダ内の
-`Plug-Ins/min-nano_structure/` です。別の場所に入れたいときは `--plugins-dir <パス>`
-（Windows は `-PluginsDir <パス>`）で `Plug-Ins` にあたる場所を指定してください
+`Plug-Ins/min-nano_structure/`（dev は `Plug-Ins/min-nano_structureDev/`）です。別の場所に
+入れたいときは `--plugins-dir <パス>`（Windows は `-PluginsDir <パス>`）で `Plug-Ins` に
+あたる場所を指定してください
 （プラグイン名のフォルダはその中に作られます）。入れ終わったら、下記「macOS」の
 手順 3・4（Windows は 2・3）——Vectorworks を起動してコマンドをワークスペースに追加する
 ——だけ行ってください。
@@ -82,13 +85,17 @@ powershell -ExecutionPolicy Bypass -File vw-install.ps1
 `Plug-Ins/min-nano_structure/vw-uninstall.sh` にも入ります）。
 
 ```sh
-bash vw-uninstall.sh                             # stable を取り除く
+bash vw-uninstall.sh --name min-nano_structure     # stable を取り除く
 bash vw-uninstall.sh --name min-nano_structureDev  # dev を取り除く
 ```
 
 ```pwsh
-powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
+powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1 -Name min-nano_structure     # stable
+powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1 -Name min-nano_structureDev  # dev
 ```
+
+`--name`（Windows は `-Name`）を省くと、`Plug-Ins` の中で見つかったものを 1 つだけ
+取り除きます（stable と dev の両方が入っているときは、どちらを消すか名前で指定してください）。
 
 以下は、zip を自分で展開して置く**手作業の手順**です。
 
@@ -131,9 +138,8 @@ powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
    入っています——**IFC (ホームズ君) 取り込み…** と
    **アップデータを確認 (みんなの構造設計支援)** を、好きなメニューへドラッグして
    ください（2 つとも足しておくと、更新を思い立ったときにすぐ確認できます）。
-   開発版の **MCP ブリッジを表示…** と **実機テストを実行…** は開発用なので、
-   使うときだけ足せば十分です
-   （[「MCP ブリッジ」](mcp-bridge.md)）。
+   開発版の **MCP ブリッジを表示… (Dev)** と **実機テストを実行… (みんなの構造設計支援Dev)**
+   は開発用なので、使うときだけ足せば十分です（[「MCP ブリッジ」](mcp-bridge.md)）。
 
 ## Windows
 
@@ -143,10 +149,10 @@ powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
 1. **`min-nano_structure.vlb` と `min-nano_structure.vwpayload` と `min-nano_structure.vwr` を
    一緒に**、Vectorworks 2026 のユーザフォルダ内の `Plug-Ins/min-nano_structure/` へ
    置きます（`min-nano_structure` フォルダは自分で作ります）。3 つは同名・同フォルダで
-   ある必要があります。自動アップデートも使うなら
-   `min-nano_structure.commit`・`min-nano_structure.branch`・
-   `min-nano_structure.shell-id`・`vw-update.ps1`・
-   `vw-uninstall.ps1` も一緒に置きます（配布 zip にはこれらがすべて入っています）。
+   ある必要があります。自動アップデートも使うなら、配布 zip の直下にあるものを
+   `vw-install.ps1` 以外**すべて**一緒に置きます（`min-nano_structure.commit`・
+   `min-nano_structure.branch`・`min-nano_structure.shell-id`・`vw-update.ps1`・
+   `vw-token.ps1`・`vw-uninstall.ps1` など。インストーラと同じ置き方です）。
 
 2. **Vectorworks を起動します**（未署名の警告は macOS と同じ）。
 
