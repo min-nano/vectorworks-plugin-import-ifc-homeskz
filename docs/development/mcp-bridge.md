@@ -17,7 +17,7 @@
 | `vw_ping` / `vw_layers` / `vw_classes` / `vw_layer_objects` / `vw_object_counts` | 読む | 図面の素性・レイヤ・クラス・中身 |
 | `vw_log` | 読む | 直近の取り込み（本番か実機テスト）の**診断ログ**。ファイルから読むので本体を入れ替えたあとも読める |
 | `vw_test_report` | 読む | 直近の**実機テストの報告**（[「実機テスト」](live-test/README.md)） |
-| `vw_run_test` | 長く走る | 実機テストを 1 周走らせて報告を返す（ダイアログを出さない。1 周目は人がメニューから） |
+| `vw_run_test` | 長く走る | 実機テストを 1 周走らせて報告を返す（ダイアログを出さない。`ifc` と `template` を名指しすれば 1 周目から。Vectorworks が居なければ Python 側が起こしてから頼む。M40） |
 | `vw_update` | 殻に頼む | 開発版の新しいビルドを入れて本体を読み直す（`branch` で名指し・`restart_if_needed`） |
 | `vw_restart` | 殻に頼む | Vectorworks を再起動する（保存の確認は通常どおり出る）。Python 側が架かり直すまで見届ける |
 
@@ -30,8 +30,11 @@
   ただ 1 つ**で、Python サーバは起動時に `vw_tools` でそれを取りに行きます。**道具を足すときに
   触るのはその 1 行と実装 1 つだけ**で、Python 側は直しません。待ち時間（`timeoutSeconds`）も
   表が持ち、Python はそれを読んでから Claude へ見せる前に落とします。JSON は `core/Json`
-  （ブリッジ専用）。例外は**再起動の見届け**（`vw_restart` と `vw_update` の `restarting`）で、
-  橋の向こうが一度居なくなるのを見られるのは Python 側だけなので、そこに持ちます。
+  （ブリッジ専用）。例外は 2 つで、どちらも橋の向こうが居ないところは Python 側にしか
+  見えないので、そこに持ちます: **再起動の見届け**（`vw_restart` と `vw_update` の
+  `restarting`）と、**実機テストの起こし方**（`vw_run_test` は、橋が居なければ Vectorworks を
+  起こしてから頼む。`call_with_launch`。M40）。起こすのは `vw_run_test` のときだけで、読む
+  道具では起こしません（橋が落ちた理由を調べる前に覆い隠す）。
 - **受け付けは常駐のパレットの時計が 1 回ずつ呼びます**（M30。`draw::serveMcpBridge` は待たずに
   戻る）。**本体の中にループを書かない**——書けば図面がまた塞がります。本体のコードが
   スタックに載っている間（`PayloadInUse`）は見送ります。例外は `vw_run_test` で、その 1 周が
@@ -57,8 +60,8 @@
 - **新しく図面を書く道具を足すなら**、undo の作法
   （[SDK リファレンス「Undo」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Undo.md)）を
   必ず通してください。`vw_run_test` が書くのは本番の取り込みと同じ経路（`draw/ImportRun`）だけです。
-- **Vectorworks を起こすのは Python サーバの道具**（`vw_launch`）で、プラグイン側には書きません
-  （起こす前にはプラグインが居ない）。
+- **Vectorworks を起こすのは Python サーバ**（`vw_launch` と、`vw_run_test` の起こしてから
+  頼む道。M40）で、プラグイン側には書きません（起こす前にはプラグインが居ない）。
 
 **実機で確かめたこと**（M38・PR #188）: パレットの時計の中から
 `CloseAllFilesAndQuitVectorworks` を頼んだ再起動と、`vw_run_test` の 1 周を時計の中で走らせる

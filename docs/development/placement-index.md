@@ -79,6 +79,8 @@
 | グラフィック凡例（`GraphicLegend` PIO の登録名・箱幅／線の太さ／塗り・配置・ソース定義（タグ付きデータ `'GrLe'`）・縮率（伏図の縮尺に合わせる）・幅の実測 `measureLegendWidth`） | `draw/Legend` |
 | 図面枠（登録名の候補 `"Title Block Border"`・スタイルの当て方・用紙の中心への寄せ方） | `draw/TitleBlock` |
 | 図面枠スタイルの選択肢の集め方（シンボル定義のサブタイプ 552） | `draw/SettingsDialog` |
+| まだ決めていない設定の初期値（図面にあるものから組む既定 `core::presetImportOptions`・寸法規格の既定の選び方 `core::defaultDimensionStandardIndex`。設定ダイアログの初期値と実機テストの自動の 1 周目が共有する。M40） | `core/ImportOptions` |
+| 実機テストの 1 周目のテンプレート（MCP の `vw_run_test` の `template` に渡す `.sta`。M40） | `tests/fixtures/Default.sta` |
 | 構造材ツール（StructuralMember PIO）のフィールド名・値（`MemberTypeKey` / `AxisAlignKey` / `EndConditionKey`）・生成手順・失敗の内訳と文言（`StructuralFailures` / `DescribeStructuralFailures`） | `draw/StructuralMember` |
 | ハイブリッドシンボルの配置（4 要素で共有） | `draw/Symbol` |
 | 進捗の見出し・バー配分（要素ごとのフェーズ） | `draw/ExecuteDocument` |

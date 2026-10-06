@@ -329,8 +329,16 @@ namespace HomeskzIfcImport::core
 		return session.round > 0 && !session.ifcPath.empty();
 	}
 
-	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session, bool allowDialogs)
+	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session, bool allowDialogs,
+										bool ifcRequested)
 	{
+		if (!allowDialogs && ifcRequested)
+		{
+			// **IFC を名指しされたら、記憶があっても新しい 1 周目**（別の IFC で試し直すのに
+			// 人の手を要らなくする）。描く先はテンプレートからしか作らない（Refuse の doc）。
+			return session.templatePath.empty() ? FeedbackRoundKind::Refuse
+												: FeedbackRoundKind::AutoFirstRound;
+		}
 		if (feedbackSessionRemembered(session))
 		{
 			// **MCP の周はテンプレートが無ければ走らない**（Refuse の doc コメント）。

@@ -22,7 +22,10 @@ M38 で 3 つ足しました——**`vw_restart` のあと、橋が一度居な�
 こと（代役は応答を書いてから印を消してしばらく黙る）、**長く走る道具の最中（`busy_until`）は
 印が古びていても生きていると見る**こと（`vw_run_test` の 1 周は 1 分以上印を書き直せない）、
 **プラグインの表の待ち時間（`timeoutSeconds`）を Claude へ見せない**こと。既定のプラグイン名
-（開発版）でスプールを探し当てることも押さえます。殻が頼まれた更新・再起動を済ませる側
+（開発版）でスプールを探し当てることも押さえます。M40 で **`vw_run_test` は橋が居なければ
+Vectorworks を起こしてから頼む**こと（`check_launch_on_demand`。代役は印を書くだけでなく
+`vw_tools` と `vw_run_test` に応える・引数がそのまま届く・起こしたことを返す・読む道具では
+起こさない）を足しました。殻が頼まれた更新・再起動を済ませる側
 （`src/Extensions/ExtMcpPalette.cpp`）は SDK が要るので CI では動かせず、その判断は
 `RemoteDevUpdateWith`（`UpdaterFlowTests`）で押さえてあります。
 python3 だけで走り、ネットワークも SDK も要りません。

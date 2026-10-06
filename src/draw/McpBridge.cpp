@@ -421,13 +421,17 @@ namespace HomeskzIfcImport::draw
 			return value;
 		}
 
-		Json RunTestTool(const Json& /*args*/, std::string& error)
+		Json RunTestTool(const Json& args, std::string& error)
 		{
 			// **開いている図面は要らない**（M39）——続きの周はテンプレートから自分で図面を
 			// 開く。再起動の直後は図面が 1 枚も開いていないのが普通なので、ここで弾かない。
-			// **ダイアログを 1 枚も出さない周**（draw/Feedback.h）。記憶が無ければ走らず、
-			// その理由を message に入れて返す。
-			const TestRoundResult round = runTestRound(/*allowDialogs*/ false);
+			// **ダイアログを 1 枚も出さない周**（draw/Feedback.h）。`ifc` を名指しされれば
+			// 尋ねずに 1 周目から始め（M40）、名指しも記憶も無ければ走らず、その理由を
+			// message に入れて返す。
+			TestRoundRequest request;
+			request.ifcPath = args.at("ifc").asString();
+			request.templatePath = args.at("template").asString();
+			const TestRoundResult round = runTestRound(/*allowDialogs*/ false, request);
 			if (!round.ran)
 			{
 				error = round.message;
@@ -522,13 +526,16 @@ namespace HomeskzIfcImport::draw
 			 ToolKind::Read, 0},
 			{"vw_run_test",
 			 "実機テストを 1 周走らせる——前の周の図面を保存せずに閉じ、テンプレートから開いた"
-			 "新しい図面へ前の周と同じ "
-			 "IFC・設定で取り込み、報告を返す。図面は開いていなくてよい。ダイアログは出さない。1 "
-			 "周目（IFC と設定の選択）は"
-			 "人が Vectorworks のメニュー「実機テストを実行…」から実行する。取り込みに 1 分以上"
-			 "かかる。",
-			 R"({"type":"object","properties":{},"additionalProperties":false})", &RunTestTool,
-			 ToolKind::Long, kRunTestTimeoutSeconds},
+			 "新しい図面へ前の周と同じ IFC・設定で取り込み、報告を返す。図面は開いていなくて"
+			 "よい。ダイアログは出さない。ifc を渡すと、記憶があっても尋ねずに新しい 1 周目を"
+			 "始める（設定はテンプレートの図面にあるもので既定を組む）。1 周目は template に"
+			 "リポジトリの tests/fixtures/Default.sta の絶対パスも渡す。Vectorworks が起動して"
+			 "いなければ起動してから走らせる。取り込みに 1 分以上かかる。",
+			 R"({"type":"object","properties":{)"
+			 R"("ifc":{"type":"string","description":"取り込む IFC の絶対パス（渡すと新しい 1 周目。省略＝前の周と同じ）"},)"
+			 R"("template":{"type":"string","description":"テンプレート（.sta）の絶対パス（省略＝覚えたもの）"}},)"
+			 R"("additionalProperties":false})",
+			 &RunTestTool, ToolKind::Long, kRunTestTimeoutSeconds},
 			{"vw_update",
 			 "開発版の新しいビルドを入れ、本体を読み直す（尋ねない）。既定はいま入っているのと"
 			 "同じブランチの最新。branch で別のブランチを名指しできる。殻まで変わったビルドは"
