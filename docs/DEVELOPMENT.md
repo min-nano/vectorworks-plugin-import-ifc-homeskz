@@ -23,6 +23,7 @@
 | [置き場所の一覧（重複を作らない）](development/placement-index.md) | 共有する定数・述語・ヘルパーの唯一の置き場所（`core/` / `parse/` / `draw/` / 殻 / `tests/`・`scripts/`）。**新しく共有するものを作ったらここへ 1 行足す** |
 | [プラグイン識別子](development/identifiers.md) | 表示名・バンドル名・ユニバーサル名・UUID と、その在り処 |
 | [SDK ドキュメント（API 仕様）](development/sdk-docs.md) | SDK リファレンス（`Findings/`）と公式リファレンスの在り処 |
+| [文書とコメントの書き方](development/writing-style.md) | コメントの並べ方（目的 → 注意事項 → 理由）・用語の対応表・言い換えない用語 |
 
 ## ビルドとテスト
 
