@@ -17,9 +17,9 @@
 | --- | --- | --- |
 | IFC (ホームズ君) 取り込み… | メニュー | **ホームズ君構造EX** の木造軸組 IFC をパースし、ネイティブオブジェクトへ変換して配置する（主機能） |
 | アップデータを確認 (みんなの構造設計支援) | メニュー | 新しいビルドの確認と入れ替え |
-| MCP ブリッジを表示… | メニュー（**dev だけ**） | ローカルの Claude Code と Vectorworks をつなぐパレット。図面・診断ログ・実機テストの報告を読み、頼まれれば実機テスト・更新・再起動を起こす |
+| MCP ブリッジを表示… (Dev) | メニュー（**dev だけ**） | ローカルの Claude Code と Vectorworks をつなぐパレット。図面・診断ログ・実機テストの報告を読み、頼まれれば実機テスト・更新・再起動を起こす |
 | 柱記号 / 耐力壁 | PIO | 取り込みが置くプラグインオブジェクト |
-| 実機テストを実行… | メニュー（**dev だけ**） | 覚えた条件で、テンプレートから開いた新しい図面へ取り込み直し、結果を手元に控える（MCP の `vw_run_test` と同じ周） |
+| 実機テストを実行… (みんなの構造設計支援Dev) | メニュー（**dev だけ**） | 覚えた条件で、テンプレートから開いた新しい図面へ取り込み直し、結果を手元に控える（MCP の `vw_run_test` と同じ周） |
 
 ## ドキュメントの分担
 
@@ -50,7 +50,7 @@
 | 触るところ | 読む節 |
 | --- | --- |
 | 共有する定数・述語・ヘルパーを足す／探す | `docs/development/placement-index.md`（置き場所の一覧） |
-| 実機テスト（`draw/Feedback`・`core/FeedbackSession`・`parse/Feedback`・`ExtTestMenu`） | `docs/development/live-test/design-rules.md`（設計の決めごと） |
+| 実機テスト（`draw/Feedback`・`core/FeedbackSession`・`core/FeedbackScratch`・`parse/Feedback`・`ExtTestMenu`） | `docs/development/live-test/design-rules.md`（設計の決めごと）・一時ファイルの片付けは `scratch-files.md` |
 | ローカルの Claude Code から実機確認を回す（MCP の `vw_run_test` / `vw_test_report` / `vw_update` / `vw_restart`） | `docs/development/live-test/local-session-setup.md`（準備）・`running.md`（回し方） |
 | 自動アップデート（`src/Updater*`・`scripts/vw-update.*` / `vw-install.*` / `vw-uninstall.*` / `vw-token.*`） | `docs/development/auto-update/`（`README.md` から） |
 | MCP ブリッジ（`core/Bridge`・`draw/McpBridge`・`ExtMcpPalette`・`scripts/mcp/`・`.mcp.json`） | `docs/development/mcp-bridge.md` |
@@ -143,7 +143,7 @@ VectorWorks ネイティブオブジェクト
 - **プレーンな構造体**（`std::vector`・`std::string`・`double`・`enum` 等）で表す。スキーマは
   `core/Document.h` の `Document` の定義が正。
 - **同型が並ぶところは構造体 1 つへまとめる**（`anchorBolts` / `floorPosts` / `fireBraces` /
-  `joints` は `core::SymbolCommand` 1 つで受け、区別は「どのリストか」が担う）。
+  `joints` / `splices` は `core::SymbolCommand` 1 つで受け、区別は「どのリストか」が担う）。
 - **突き合わせが要る関係は入れ子で持つ**（データタグは `ViewportCommand::tags`、凡例は
   `SheetCommand` の中）。平らに並べて番号で突き合わせない。
 - **描くときにしか決まらないものは命令に持たせない。** 用紙の大きさはシートレイヤから SDK で
@@ -185,9 +185,9 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 - **殻が本体へ貸すのは「同梱スクリプトの実行」だけ**（`VwPayloadHost` → 本体側は
   `draw/HostServices` に写して持つ）。貸すものを増やすのは本体でしかできないことのためだけで、
   殻でできることは殻でやる。
-- **新しい入口（メニュー・PIO）は、登録を殻に、絵と処理を `src/draw/<要素>Pio.{h,cpp}` に置く。**
-  殻の `Recalculate()` は `PayloadUse` で本体を確保して取り次ぐだけ（`ExtColumnMark` /
-  `ExtShearWall` に倣う）。
+- **新しい入口（メニュー・PIO）は、登録を殻に、絵と処理を本体の `src/draw/` に置く**（PIO なら
+  `src/draw/<要素>Pio.{h,cpp}`）。殻の `Recalculate()`（メニューなら `DoInterface()`）は
+  `PayloadUse` で本体を確保して取り次ぐだけ（`ExtColumnMark` / `ExtShearWall` に倣う）。
 - **境界に口を足したら `VW_PAYLOAD_ABI_VERSION` を必ず上げる**（殻と本体は別々に配られるので、
   食い違いは実行時にしか気付けない）。
 - メニューコマンドのカテゴリは `.vwr` の `"category"` 1 つを全メニュー定義が引く（プラグイン名で
@@ -248,8 +248,8 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 - **SDK へ渡す素の数値・SDK 呼び出しの定型**は `draw/DrawUtil`。**SDK と無関係な純計算**は
   `core/` へ寄せる。
 - **解析側はシンボル名の固定値を持たない**（取り込み設定 `core/ImportOptions` から引く）。
-- **診断ログへの書き出し口**は `core/Progress` の `beginPhase` と `Extensions/ExtMenu` の 2 か所
-  だけ（各要素へ `trace::log` を撒かない）。
+- **診断ログへの書き出し口**は `core/Progress` の `beginPhase` と `draw/ImportRun`（見出し・
+  区切り・結果・例外）の 2 か所だけ（各要素へ `trace::log` を撒かない）。
 - **GitHub のトークンの在り処**は `scripts/vw-token.{sh,ps1}` だけで、GitHub を読む側にも
   必ず付ける（認証なしは IP ごとに 1 時間 60 回。M27 で M24 の往復の確認がちょうど当たった）。
 
@@ -377,7 +377,8 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
      スレッドが 0 になり CI が緑になると、レビューが自動で出し直される（push だけでは
      走らない）。
    * **自動で走らないとき**（本文だけ直した・レビュー本文の指摘に答えた・行に紐づかない
-     説明をした）は、PR に **`@claude review` で始まるコメント**を投稿して起こす。
+     説明をした・門が CI とスレッドの解決を 30 分待って諦めた）は、PR に **`@claude review`
+     で始まるコメント**を投稿して起こす。
 4. **実描画が変わる変更（`draw/` を含む PR）は、ユーザーが実機で「確認できた」と言うまで
    マージしない。** CI green もレビューの承認も、実機テストの件数が揃ったことも実機確認の代わりには
    ならない（命令の数が合っていても絵が破綻していることは普通にある）。確認前にマージすると、

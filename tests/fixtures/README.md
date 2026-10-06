@@ -38,8 +38,9 @@ VectorWorks で登り梁を含むモデルを開いて行います（[「残っ�
 | --- | --- |
 | `minimal_grid.ifc` | STEP リーダ / Loader の最小確認用に本リポジトリで自作した合成 IFC。非正規エンティティ（`IFCFOOTINGTYPE`）をサニタイズせず読めることも検証する（`LoaderTests.cpp`）。 |
 
-これらのフィクスチャのパスは CMake が `HOMESKZ_FIXTURES_DIR` でテストへ渡します
-（`tests/CMakeLists.txt`）。
+上の IFC フィクスチャ（実 IFC・最小）の置き場所（このディレクトリ）は、CMake が
+`HOMESKZ_FIXTURES_DIR` でテストへ渡します（`tests/CMakeLists.txt`）。全フィクスチャを
+回すテストが読む実 IFC の一覧は `tests/Fixtures.h` の `allFixtures()` です。
 
 ## 実機テストのテンプレート
 
