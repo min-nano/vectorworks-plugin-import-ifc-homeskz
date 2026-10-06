@@ -318,11 +318,27 @@ TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
 
 TEST(test_round_result_says_how_to_start_the_first_round)
 {
-	// **MCP から 1 周目は起こせない**（IFC と設定はダイアログでしか決まらない）。何をすれば
-	// 続けられるかを、Claude が人へそのまま伝えられる形で言う。
+	// **名指しの無い MCP の周から 1 周目は起こせない**。何をすれば続けられるかを、Claude が
+	// そのまま使える形で言う——IFC とテンプレートを名指しして頼み直す（M40）か、人が
+	// メニューから選ぶか。
 	const std::string text = formatTestRoundResult(TestRoundOutcome::NotRemembered, {});
 	CHECK(contains(text, "1 周目がまだ済んでいません"));
+	CHECK(contains(text, "ifc"));
+	CHECK(contains(text, "tests/fixtures/Default.sta"));
 	CHECK(contains(text, "「実機テストを実行…」"));
+	// 理由があれば添える（テンプレートの記憶が無い等）。
+	const std::string why = formatTestRoundResult(TestRoundOutcome::NotRemembered, "（理由）");
+	CHECK(contains(why, "（理由）"));
+}
+
+TEST(test_round_result_rejects_an_unusable_request_without_drawing)
+{
+	// **頼まれた IFC・テンプレートを使えない**（M40）。何も描いていないことを言い切り、
+	// 何が駄目だったかを添える。
+	const std::string text =
+		formatTestRoundResult(TestRoundOutcome::InvalidRequest, "IFC が見つかりません（/x.ifc）");
+	CHECK(contains(text, "図面には何も描いていません"));
+	CHECK(contains(text, "IFC が見つかりません（/x.ifc）"));
 }
 
 // ---------------------------------------------------------------------------

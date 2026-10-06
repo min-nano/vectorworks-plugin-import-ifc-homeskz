@@ -713,16 +713,13 @@ namespace HomeskzIfcImport::draw
 			}
 
 			// 初期値が「置く」の行（図面枠・寸法規格）で、前回の名前が使えないときに選ぶ
-			// 候補。寸法規格は「JIS」を優先する——日本の構造図の既定として自然で、一覧の
-			// 最初（組み込み index 1）は JIS とは限らない。図面枠には決め手が無いので最初。
+			// 候補。寸法規格は「JIS」を優先する（core::defaultDimensionStandardIndex。
+			// 自動の 1 周目の既定の設定と同じものを選ぶよう、選び方は core に 1 つだけ置く）。
+			// 図面枠には決め手が無いので最初。
 			std::size_t DefaultIndex(std::size_t row) const
 			{
 				if (row == kDimensionRow)
-				{
-					const std::size_t jis = IndexOf(row, "JIS");
-					if (jis < Candidates(row).names.size())
-						return jis;
-				}
+					return core::defaultDimensionStandardIndex(Candidates(row).names);
 				return 0;
 			}
 
@@ -1004,6 +1001,25 @@ namespace HomeskzIfcImport::draw
 			*note += line;
 		}
 	} // namespace
+
+	bool presetImportSettings(core::ImportOptions& options, std::string* note)
+	{
+		try
+		{
+			SymbolResources resources = CollectSymbolResources();
+			resources.dimensionStandards = CollectDimensionStandards();
+			options =
+				core::presetImportOptions(resources.symbols.names, resources.titleBlocks.names,
+										  resources.dimensionStandards.names);
+			return true;
+		}
+		catch (...)
+		{
+			// 集められなければ組まない（呼び出し側は周ごと止める。draw/SettingsDialog.h）。
+			AddNote(note, "図面からシンボル・図面枠・寸法規格を集められませんでした");
+			return false;
+		}
+	}
 
 	SettingsOutcome showImportSettings(core::ImportOptions& options,
 									   const std::vector<core::PlanLevelChoice>& planLevels,

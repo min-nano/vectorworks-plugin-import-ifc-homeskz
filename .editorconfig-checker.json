@@ -13,7 +13,8 @@
   ],
   "Exclude": [
     "\\.vwr/",
-    "\\.vwstrings$"
+    "\\.vwstrings$",
+    "\\.sta$"
   ],
   "Disable": {
     "Indentation": true

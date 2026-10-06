@@ -471,6 +471,34 @@ TEST(feedback_round_kind_refuses_mcp_without_a_template)
 	CHECK(feedbackRoundKind(session, /*allowDialogs*/ true) == FeedbackRoundKind::ContinueRound);
 }
 
+TEST(feedback_round_kind_starts_an_unattended_first_round_when_an_ifc_is_named)
+{
+	// **IFC を名指しした MCP の周は、尋ねずに 1 周目を始める**（M40）。記憶が無くても、
+	// テンプレートさえあればよい（テンプレートは同じ要求で渡され、先に記憶へ入る）。
+	FeedbackSession fresh;
+	fresh.templatePath = "/tmp/homeskz-test/main/template-1.sta";
+	CHECK(feedbackRoundKind(fresh, /*allowDialogs*/ false, /*ifcRequested*/ true) ==
+		  FeedbackRoundKind::AutoFirstRound);
+	// 記憶があっても、名指しされたら新しい 1 周目（別の IFC で試し直す）。
+	CHECK(feedbackRoundKind(ranOnce(), false, true) == FeedbackRoundKind::AutoFirstRound);
+	// 名指しが無ければ従来どおり。
+	CHECK(feedbackRoundKind(fresh, false, false) == FeedbackRoundKind::Refuse);
+}
+
+TEST(feedback_round_kind_refuses_a_named_ifc_without_a_template)
+{
+	// **テンプレートが無ければ、名指しされても走らない**——描く先をいま開いている図面に
+	// 求めない（M39 の Refuse と同じ理由）。
+	CHECK(feedbackRoundKind(FeedbackSession{}, /*allowDialogs*/ false, /*ifcRequested*/ true) ==
+		  FeedbackRoundKind::Refuse);
+	FeedbackSession session = ranOnce();
+	session.templatePath.clear();
+	CHECK(feedbackRoundKind(session, false, true) == FeedbackRoundKind::Refuse);
+	// メニューの周では名指しを見ない（人が選ぶ）。
+	CHECK(feedbackRoundKind(FeedbackSession{}, /*allowDialogs*/ true, /*ifcRequested*/ true) ==
+		  FeedbackRoundKind::FirstRound);
+}
+
 // ---------------------------------------------------------------------------
 // **閉じてよい図面か**（M39。core/FeedbackSession.h の isOwnedTestDocument）。
 // `CloseDocument()` は確認なしに変更を捨てるので、ここが利用者の図面を守る安全弁になる。

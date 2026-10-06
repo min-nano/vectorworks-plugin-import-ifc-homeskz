@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+using HomeskzIfcImport::core::defaultDimensionStandardIndex;
 using HomeskzIfcImport::core::defaultSymbolName;
 using HomeskzIfcImport::core::formatRafterSize;
 using HomeskzIfcImport::core::ImportOptions;
@@ -31,6 +32,7 @@ using HomeskzIfcImport::core::kDefaultRafterWidth;
 using HomeskzIfcImport::core::kMaxRafterSize;
 using HomeskzIfcImport::core::kSymbolRoleCount;
 using HomeskzIfcImport::core::parseRafterSize;
+using HomeskzIfcImport::core::presetImportOptions;
 using HomeskzIfcImport::core::SymbolRole;
 using HomeskzIfcImport::core::symbolRoleLabel;
 using HomeskzIfcImport::core::symbolRoles;
@@ -332,6 +334,53 @@ TEST(format_rafter_size_drops_trailing_zeros_and_round_trips)
 		const std::optional<double> back = parseRafterSize(formatRafterSize(mm));
 		CHECK(back.has_value() && std::abs(*back - mm) < 1e-9);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// **図面にあるものから組む既定の設定**（M40。実機テストの自動の 1 周目）。設定ダイアログを
+// まだ一度も決めていないときに開く初期値と同じになること。
+
+TEST(default_dimension_standard_prefers_jis)
+{
+	CHECK_EQ(defaultDimensionStandardIndex({"ANSI", "JIS", "DIN"}), std::size_t{1});
+	// JIS が無ければ最初。空でも 0（呼び出し側が範囲を見る）。
+	CHECK_EQ(defaultDimensionStandardIndex({"ANSI", "DIN"}), std::size_t{0});
+	CHECK_EQ(defaultDimensionStandardIndex({}), std::size_t{0});
+}
+
+TEST(preset_import_options_enables_only_symbols_in_the_drawing)
+{
+	// 図面に既定名のシンボルがある役割だけ取り込む（無い名前は置きようがない）。
+	const ImportOptions options =
+		presetImportOptions({"床束", "鋼製火打", "柱伏図記号", "関係ないシンボル"}, {}, {});
+	CHECK(options.isEnabled(SymbolRole::FloorPost));
+	CHECK(options.isEnabled(SymbolRole::FireBrace));
+	CHECK(options.isEnabled(SymbolRole::PlanMarkColumn));
+	CHECK(!options.isEnabled(SymbolRole::AnchorBoltM12));
+	CHECK(!options.isEnabled(SymbolRole::AnchorBoltM16));
+	CHECK(!options.isEnabled(SymbolRole::Joint));
+	CHECK(!options.isEnabled(SymbolRole::PlanMarkKoyazuka));
+	CHECK(!options.isEnabled(SymbolRole::Splice));
+	// 名前は既定名のまま（差し替えない）。
+	CHECK_EQ(options.symbol(SymbolRole::FloorPost), std::string("床束"));
+	// 図面枠・寸法規格の候補が無ければ置かない。
+	CHECK(!options.hasTitleBlock());
+	CHECK(!options.hasDimensions());
+}
+
+TEST(preset_import_options_places_the_first_title_block_and_jis)
+{
+	const ImportOptions options =
+		presetImportOptions({}, {"図面枠A3", "図面枠A2"}, {"ANSI", "JIS"});
+	CHECK_EQ(options.titleBlockStyle(), std::string("図面枠A3"));
+	CHECK_EQ(options.dimensionStandard(), std::string("JIS"));
+	// 残りは既定のまま（まとめない・全部描く・45×45）。
+	CHECK(options.mergedPlanLevels.empty());
+	CHECK(options.skippedSections.empty());
+	CHECK(std::fabs(options.rafterWidth - kDefaultRafterWidth) < 1e-9);
+	CHECK(std::fabs(options.rafterHeight - kDefaultRafterHeight) < 1e-9);
+	// JIS が無ければ最初の規格。
+	CHECK_EQ(presetImportOptions({}, {}, {"ANSI", "DIN"}).dimensionStandard(), std::string("ANSI"));
 }
 
 TEST_MAIN();
