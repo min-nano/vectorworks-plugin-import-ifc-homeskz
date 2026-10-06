@@ -37,7 +37,8 @@ zip にインストーラが無い＝この仕組みより前のリリースへ�
 <Plug-Ins>/min-nano_structure/vw-uninstall.sh
 ```
 
-Vectorworks が `Plug-Ins` のサブフォルダも読みに行くことは実機で確認済みです。こうして
+（ほかに `vw-mcp-server.py` など、zip の直下にあったものがそのまま並びます。全体は利用者向けの
+[インストール](../../user-guide/install.md)の図。）Vectorworks が `Plug-Ins` のサブフォルダも読みに行くことは実機で確認済みです。こうして
 おくと**そのプラグインのものが 1 か所に閉じる**ので、取り除くのが「フォルダを 1 つ消す」
 で済みます（[取り除く仕組み](uninstaller.md)）。
 

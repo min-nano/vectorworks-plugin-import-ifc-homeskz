@@ -32,7 +32,7 @@
 #
 #     <Plug-Ins>/min-nano_structure/min-nano_structure.vwlibrary
 #     <Plug-Ins>/min-nano_structure/min-nano_structure.vwpayload
-#     <Plug-Ins>/min-nano_structure/vw-uninstall.sh
+#     <Plug-Ins>/min-nano_structure/vw-uninstall.sh  ほか
 #
 # こうしておくと**そのプラグインのものが 1 か所に閉じる**ので、取り除くのが「フォルダを
 # 1 つ消す」で済む（`vw-uninstall.sh`）。Vectorworks が `Plug-Ins` のサブフォルダも

@@ -520,7 +520,7 @@ jobs:
               include しない。`draw/` は STEP / IFC を知らない。両者をつなぐのは
               `core/Document.h` の命令セットだけで、SDK ハンドルや STEP の
               ポインタを Document に載せない。
-            - **殻と本体の分割**。`src/Extensions/` `src/Updater*`
+            - **殻と本体の分割**。`src/ModuleMain.cpp` `src/Extensions/` `src/Updater*`
               `src/Payload{Host,Session}.*` (殻) に実処理を書かない。`CMakeLists.txt` の
               `VW_SHELL_INPUTS` に `draw/` や `parse/` が入っていない
               (入れると描画を直すだけで利用者に再起動を強いる)。境界
@@ -542,10 +542,13 @@ jobs:
               `tests/` + `parse/Summary.cpp` の `kElements` に 1 行) から
               外れていないか。
             - **利用者のものを消すコード**の歯止め。アンインストーラ
-              (`scripts/vw-uninstall.*`) と、実機テストのレイヤ削除
-              (`draw/DrawUtil` の `RemoveCreatedLayers`) は本リポジトリで唯一
-              「利用者のディスク／図面上のものを消す」場所です。安全弁を
-              緩める方向の変更は必ず指摘してください。
+              (`scripts/vw-uninstall.*`)・実機テストの図面を保存せずに閉じる
+              ところ (`draw/Feedback` の `CloseOwnedDocuments` と、相手を絞る
+              `core/FeedbackSession` の `isOwnedTestDocument`)・実機テストの
+              一時ファイルの片付け (`core/FeedbackScratch` の `removeScratchDir`)
+              の 3 か所だけが「利用者のディスク／図面上のものを消す」場所です
+              (CLAUDE.md「開発の基本方針」8)。安全弁を緩める方向の変更は必ず
+              指摘してください。
             - **書き残しの行き先**。SDK の挙動として分かったことは別リポジトリの
               `Findings/` へ、プラグイン固有のことは `docs/dev-notes/` へ。
               取り違えていないか。

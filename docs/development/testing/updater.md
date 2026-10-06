@@ -52,8 +52,8 @@
    アップデータ側には**委譲そのもの**のテストもあります（zip に入っていたインストーラが
    走ったか・その出力が素通しされるか・黙っているインストーラを成功と取り違えないか）。
 7. **`UninstallerScriptTests` / `UninstallerScriptTestsPs`** … **取り除く**
-   `scripts/vw-uninstall.sh` / `scripts/vw-uninstall.ps1`。ここは本リポジトリで唯一
-   「利用者のディスク上のものを消す」コードなので、中心の検査は**削除の安全弁**です——
+   `scripts/vw-uninstall.sh` / `scripts/vw-uninstall.ps1`。ここは本リポジトリで利用者の
+   ものを消す 3 か所の 1 つ（[`CLAUDE.md`](../../../CLAUDE.md)「開発の基本方針」8）なので、中心の検査は**削除の安全弁**です——
    フォルダ名が一致し、かつ中に殻があるときだけ消し、`Plug-Ins` そのものや無関係な
    フォルダを名指しされても消さないこと。あわせて「入っていなければ成功」（アップデートの
    入口で無条件に叩ける）も押さえます（`tests/vw-uninstall.test.sh` /

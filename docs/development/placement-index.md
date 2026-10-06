@@ -42,6 +42,7 @@
 | もの | 置き場所 |
 | --- | --- |
 | IFC の属性インデックス | `parse/IfcAttr.h` |
+| 構造クラス名（`04構造-…` の階層の葉クラス・構成要素の素材クラス）と部材種別からのクラス判定 | `parse/StructuralClass.h` |
 | レベル種別名（定義は `core/Document.h`。ここは再公開）・`storyLayerName`・横架材レベルの定型（`beamTopLevelType` / `beamTopElevation` / `beamTopLayerName`）・横架材の取り合いを見るときのレイヤの読み替え（`beamGroupLayer`。軒桁の専用レイヤ→横架材レイヤ）・階の要素の有無（`storyHasElement`）・span レベルの表記（`formatSpanLevel`）・span レイヤ名の組み立てと分解（`spanLayerName` / `parseSpanLayer`。柱・登り梁で接尾辞だけ違う） | `parse/Story.h` |
 | 屋根組の名前 | `parse/Rafter.h` / `parse/Roof.h` |
 | 基礎ストーリの名前・接尾辞・レベル・レイヤ名、基礎の許容値（統合・自由端・人通口・壁結合・地中梁・床付け） | `parse/Footing.h` |
