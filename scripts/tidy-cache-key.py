@@ -7,16 +7,16 @@
 # PR の待ち時間を決めているのは**ビルドではなく clang-tidy** である（実測 2026-09、
 # 41 翻訳単位: build-mac 1 分 50 秒 / build-windows 2 分 7 秒に対し、tidy-windows は
 # 6 分 55 秒）。clang-tidy はビルドを走らせずに解析するので PCH を使えず、翻訳単位ごとに
-# SDK のアンブレラヘッダを丸ごと解析し直す（CMakeLists.txt の VW_ENABLE_PCH）。1 本あたり
+# SDK のアンブレラヘッダ全体を解析し直す（CMakeLists.txt の VW_ENABLE_PCH）。1 本あたり
 # 20〜40 秒がそのまま積み上がる。
 #
 # コンパイルの側は ccache が「入力が同じなら結果を使い回す」で解いている。clang-tidy には
-# それが無い——**出力がオブジェクトではなく診断だから**で、ccache は面倒を見てくれない。
+# それが無い——**出力がオブジェクトではなく診断だから**で、ccache の対象外である。
 # そこで同じ原理を自前でやる: **翻訳単位の入力すべてを 1 つのハッシュにまとめ、それを鍵に
 # 「この入力では診断が 1 つも出なかった」という事実だけをキャッシュする**。次の実行で同じ
-# 鍵が出たら、その翻訳単位の解析は丸ごと省ける。
+# 鍵が出たら、その翻訳単位の解析はすべて省ける。
 #
-# 【鍵に入るもの】——ここに漏れがあると「直したのに緑」という最悪の事故になる。
+# 【鍵に入るもの】——ここに漏れがあると「直したのに緑」という最悪の不具合になる。
 #
 #   1. **その .cpp が推移的に include する src/ 配下のファイル**の中身（下記の走査）
 #   2. compile_commands.json に載っているその翻訳単位のコンパイル指令（＝フラグと定義。
@@ -31,16 +31,16 @@
 #      SDK・MSVC の STL・Windows SDK は -I ではなくコンパイラの既定の検索パスから来る
 #      ので、上の走査には映らない。これらが変われば診断も変わりうるが、数万ファイルを
 #      ハッシュするわけにはいかないので、**どのイメージで走っているか**（GitHub が渡す
-#      ImageOS / ImageVersion）で代表させる。イメージが更新された実行は全件が外れる
+#      ImageOS / ImageVersion）で代表させる。イメージが更新された実行は全件がヒットしない
 #      ——それが正しい（ヘッダが入れ替わっている）。手元では両方とも未設定なので空になり、
 #      値は安定する。
 #   7. clang-tidy へ渡す引数すべて（--extra。--warnings-as-errors='*' も、Windows の
 #      -fdelayed-template-parsing も含む）
 #   8. この仕組み自体の版（SCHEME。作りを変えたら上げる＝全部を捨てる）
 #
-# 【include の走査は「多めに拾う」側へ倒す】条件コンパイル（#if）は評価せず、**行として
+# 【include の走査は「多めに取り込む」側へ倒す】条件コンパイル（#if）は評価せず、**行として
 # 書かれている #include をすべて辿る**。実際には読まれない include まで依存に数えることは
-# あるが、それは「本当は使い回せたのに解析し直した」だけで無害である。逆に取りこぼすと
+# あるが、それは「本当は使い回せたのに解析し直した」だけで無害である。逆に漏らすと
 # 「変わったのに使い回す」になり、こちらは診断の見落としに直結する。
 #
 # 【外にあるものは辿らない】追いかけるのは src/ 配下に解決できた include だけ。SDK や
@@ -48,7 +48,7 @@
 # チェックアウトの中（<workspace>/vw-sdk）に置かれるため、「リポジトリの中か」ではなく
 # 「src/ の中か」で線を引く必要がある。
 #
-# 【使い回せないと分かったら潔く諦める】compile_commands.json に載っていない・
+# 【使い回せないと分かったらキャッシュを諦める】compile_commands.json に載っていない・
 # `#include SOME_MACRO` のように綴りが実行時にしか決まらない——こういう翻訳単位は
 # 終了コード 3 で「キャッシュ不可」を返す。呼び出し側（scripts/clang-tidy-sdk.sh）は
 # その 1 本を必ず解析する。**分からないときは必ず「解析する」へ倒す。**
@@ -72,7 +72,7 @@ import sys
 # キャッシュを一斉に無効にする）。
 SCHEME = "tidy-cache-v1"
 
-# include の指令。**まずこれで「取り込む行かどうか」だけを見る。** import は
+# include の指令。**まずこれで「取り込む行かどうか」だけを判定する。** import は
 # Objective-C++（mac 側の翻訳単位はこれでコンパイルされる）、include_next も指令である。
 DIRECTIVE_RE = re.compile(rb"^[ \t]*#[ \t]*(?:include_next|include|import)\b")
 
@@ -81,7 +81,7 @@ INCLUDE_RE = re.compile(
 	rb'^[ \t]*#[ \t]*(?:include_next|include|import)[ \t]*(?:"([^"\n]*)"|<([^>\n]*)>)'
 )
 
-# 引数として渡された値を持つ include 検索フラグ。長いものから見る（-I は -isystem の
+# 引数として渡された値を持つ include 検索フラグ。長いものから照合する（-I は -isystem の
 # 接頭辞ではないが、/external:I と /I のように前後関係のあるものが混ざるため）。
 INCLUDE_DIR_FLAGS = sorted(
 	["-I", "/I", "-isystem", "-imsvc", "-iquote", "-idirafter", "/external:I"],
@@ -102,7 +102,7 @@ def read_bytes(path):
 def resolve_include(spec, includer_dir, search_dirs, quoted):
     """include の綴りを実ファイルへ解決する。見つからなければ None。
 
-    "..." は includer のディレクトリを先に見る（コンパイラと同じ順序）。<...> は見ない。
+    "..." は includer のディレクトリを先に探す（コンパイラと同じ順序）。<...> は探さない。
     見つからないものは「src/ の外にあるもの」＝ SDK か標準ライブラリなので、鍵の側では
     --tidy-version / --sdk-key / --image-key が代表する。
     """
@@ -117,11 +117,11 @@ def resolve_include(spec, includer_dir, search_dirs, quoted):
 
 
 def include_dirs_from(entries):
-    """コンパイル指令から include の検索ディレクトリを拾う（-I / /I / -imsvc …）。
+    """コンパイル指令から include の検索ディレクトリを取得する（-I / /I / -imsvc …）。
 
-    **これがあると鍵の生成が自分で検算になる。** SDK のヘッダも実ファイルとして解決
+    **これがあると鍵の生成自体が自己検証を兼ねる。** SDK のヘッダも実ファイルとして解決
     できるようになるので、下の「解決できない \"...\" はキャッシュ不可」という規則を
-    安全に置ける——パスの扱いを外した環境（Windows など）では解決が総崩れになり、
+    安全に置ける——パスの扱いが想定と異なる環境（Windows など）では解決がすべて失敗し、
     控えを 1 件も書かない＝必ず解析する側へ倒れる。
     """
     resolved = []
@@ -165,7 +165,7 @@ def is_under(path, directory):
 def include_closure(source, follow_dirs, search_dirs):
     """source から辿れる follow_dirs 配下のファイルを、重複なく集める（source を含む）。
 
-    #if は評価しない——書かれている include をすべて辿る（多めに拾う側へ倒す）。
+    #if は評価しない——書かれている include をすべて辿る（多めに取り込む側へ倒す）。
     """
     seen = set()
     pending = [source]
@@ -195,7 +195,7 @@ def include_closure(source, follow_dirs, search_dirs):
             if resolved is None:
                 # <...> は既定の検索パス（標準ライブラリ）にあるもの——冒頭の 3・6 が
                 # 代表する。"..." は検索パスを全部渡してあるので、そこに無いなら
-                # **こちらの前提が外れている**。決めつけずにキャッシュ不可にする。
+                # **こちらの前提が成り立っていない**。決めつけずにキャッシュ不可にする。
                 if quoted:
                     raise Uncacheable(
                         '解決できない "..." の #include があります: '
@@ -208,7 +208,7 @@ def include_closure(source, follow_dirs, search_dirs):
 
 
 def load_entries(db_dir, source):
-    """compile_commands.json から、その source のコンパイル指令を（複数あれば全部）拾う。
+    """compile_commands.json から、その source のコンパイル指令を（複数あれば全部）取得する。
 
     殻と本体は別ターゲットなので、同じ .cpp が 2 つの指令を持ちうる。clang-tidy は
     最初の 1 つで解析するが、鍵には**全部**を入れる（どちらが変わっても解析し直す）。
@@ -236,10 +236,10 @@ def load_entries(db_dir, source):
 
 
 def normalize_paths(text, root):
-    """絶対パスを @ROOT@ へ畳む。
+    """絶対パスを @ROOT@ へ置き換える。
 
     CI のワークスペース（/Users/runner/work/... や D:\\a\\...）はローカルと綴りが違うし、
-    SDK も build-tidy もその下にあるので、根さえ畳めば指令は環境をまたいで同じ文字列に
+    SDK も build-tidy もその下にあるので、ルートさえ置き換えれば指令は環境をまたいで同じ文字列に
     なる。Windows は大文字小文字を区別しない。
     """
     variants = {root, root.replace("\\", "/"), root.replace("/", "\\")}

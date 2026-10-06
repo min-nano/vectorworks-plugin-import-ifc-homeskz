@@ -6,7 +6,7 @@
 //	つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
 //	検証項目（docs/DEV-NOTES.md M11）: 端点が相手材の footprint に入るかの判定・平行（継ぎ手・
-//	側並び）とレイヤ違いと Z 分離の除外・登り梁だけレイヤ一致を外すこと・柱に受けられる
+//	側並び）とレイヤ違いと Z 分離の除外・登り梁だけレイヤ一致の条件を除外すること・柱に受けられる
 //	端部・退化した材のスキップ・基準点（梁端の中央上端）と回転角（端部から内側へ）・
 //	**高さ（zOffset＝その端部のバウンド offset）**・
 //	配置先レイヤ（横架材と同じ）・並び順に依存しない決定性・実フィクスチャの通し。
@@ -63,12 +63,12 @@ using HomeskzIfcTests::near;
 namespace
 {
 	// 既定のシンボル名。**唯一の定義は役割の表**（core::symbolRoles()）なので、
-	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
+	// テストもそこから引く（名前をテストへ複製すると表と食い違っても気付けない）。
 	const std::string kSymbolJoint = defaultSymbolName(SymbolRole::Joint);
 
 	// 横架材命令。既定は幅 120 / せい 180 / 天端 425 の水平材。バウンド offset（レベルの絶対
 	// Z から天端 Z までの距離）は既定 0＝レイヤ平面ちょうど。仕口の高さはこの offset
-	// をそのまま写すので、高さを見るテストだけ明示的に入れる。
+	// をそのまま使うので、高さを検証するテストだけ明示的に入れる。
 	MemberCommand member(const std::string& layer, Vec2 start, Vec2 end, double width = 120.0,
 						 double height = 180.0, double elevation = 425.0,
 						 double endElevation = 425.0, double startOffset = 0.0,
@@ -219,7 +219,7 @@ TEST(joint_separated_z_is_not_received)
 TEST(joint_noboribari_receives_across_layers)
 {
 	// 登り梁（R-登り梁）の端部が別レイヤの母屋（R-母屋）に取り付く。登り梁はレイヤ一致の
-	// 制約を外すので、別レイヤでも受ける材とみなす。
+	// 制約を適用しないので、別レイヤでも受ける材とみなす。
 	std::vector<MemberCommand> members = {
 		member("R-母屋", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}),
 		member("R-登り梁", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0}),
@@ -342,7 +342,7 @@ TEST(joint_degenerate_member_is_skipped)
 TEST(joint_end_has_receiver_rejects_out_of_range_index)
 {
 	// 範囲外のインデックスは受ける材なしとして扱う（呼び出し側は範囲内しか渡さないが、
-	// 添字で落ちないことを守る）。
+	// 範囲外の添字で異常終了しないことを守る）。
 	const std::vector<MemberCommand> members = {
 		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})};
 	CHECK(!endHasReceiver(5, Vec2{0.0, 0.0}, geomsOf(members), members, {}));
@@ -390,7 +390,7 @@ TEST(joint_both_ends_received_places_two_joints)
 TEST(joint_noboribari_end_on_moya_places_joint)
 {
 	// 登り梁（R-登り梁）の上端が別レイヤの棟木（R-母屋）に取り付くと、登り梁の端部に
-	// 仕口が付く。仕口は登り梁と同じレイヤに描かれる。
+	// 仕口が付く。仕口は登り梁と同じレイヤに描画される。
 	const MemberCommand munagi =
 		member("R-母屋", Vec2{-2000.0, 3000.0}, Vec2{2000.0, 3000.0}, 120.0, 180.0, 6000.0, 6000.0);
 	MemberCommand nobori =
@@ -594,7 +594,7 @@ TEST(joint_fixture_height_matches_member_ends)
 					   {
 						   // 同じレイヤに同じ端点を持つ横架材のうち、その端部の offset が仕口の高さと
 						   // 一致するものが必ずある。端点は**材が実際に占める端**（端部オフセットを
-						   // 戻した点。core/Document.h「端部オフセット」）で突き合わせる——命令の
+						   // 戻した点。core/Document.h「端部オフセット」）で照合する——命令の
 						   // 端点は取り合い相手の芯線上にあり、仕口はそこではなく材の端に付く。
 						   const bool matched = std::ranges::any_of(
 							   members,

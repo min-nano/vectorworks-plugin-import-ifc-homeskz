@@ -6,7 +6,7 @@
 //	include するため、この翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の
 //	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	描画手順（横架材・柱と同じ道具立て。draw/StructuralMember が唯一の実装）:
+//	描画手順（横架材・柱と同じ構成。draw/StructuralMember が唯一の実装）:
 //	  1. **パス**＝下面中央線の軒先→棟を通る 2 点の曲線。頂点は命令のセンタリング済み
 //	     **平面座標だけ**で、**Z は持たない**（高さも勾配も下記のストーリバウンドが与える。
 //	     draw/StructuralMember.h 冒頭「パスは 2D で渡す」）。
@@ -17,13 +17,13 @@
 //	     構造用途（垂木）・配置先レイヤ——だけ。
 //	PIO を生成できない場合は平面投影の直線にフォールバックする（1 本の失敗で全体を止めない）。
 //
-//	【軸組ツール（FramingMember）から構造材ツールへ移した】M6 の垂木は軸組ツールで描いており、
+//	【軸組ツール（FramingMember）から構造材ツールへ移した】M6 の垂木は軸組ツールで描画しており、
 //	勾配・軒の出・差し込み・仕様ラベルを PIO のパラメータが持っていた。要件により**他の木部材
 //	（横架材・柱・小屋束）と同じ構造材ツール**へ揃える。クラス（小屋組-垂木）と配置先レイヤ
-//	（"n-垂木"）は変えない。移行にあたって効くのは次の 2 点で、どちらも命令セットは変えずに
-//	描画側で吸収できない性質のものなので、命令へ高さ基準（startBound / endBound）を足した:
+//	（"n-垂木"）は変えない。移行にあたって影響するのは次の 2 点で、どちらも命令セットを変えずに
+//	描画側で吸収できる性質のものではないので、命令へ高さ基準（startBound / endBound）を追加した:
 //	  * **構造材ツールに軒の出・差し込みのパラメータが無い。** 軸組ツールは「挿入点＝支持点」
-//	    から軒側へ 差し込み＋軒の出 だけ材を伸ばしてくれたが、構造材ツールは**パスがそのまま
+//	    から軒側へ 差し込み＋軒の出 だけ材を伸ばしていたが、構造材ツールは**パスがそのまま
 //	    材の範囲**になる。したがってパスの始端は支持点ではなく**軒先**（core::rafterEaveEnd が
 //	    命令から求める純計算）。
 //	  * **高さはストーリバウンドが支配する。** 構造材ツールは両端をストーリレベルへバインド
@@ -34,9 +34,9 @@
 //	【パスに高さを持たせない】勾配も高さも **SetObjectStoryBound の offset だけ**で表し、パスは
 //	平面（Z=0）に置く。構造材ツールの高さバインドは指定した高さ差をパス由来の部材長へ**加算**
 //	するため、パスにも傾斜を持たせると二重に適用される（登り梁で実機確認済み。draw/Member.cpp
-//	冒頭）。加えて M27 で、**パスの Z はそもそも PIO に受け取られていない**と分かった——3D の
-//	パスは PIO がバウンドの解決結果から自分で作るので、絶対 Z を入れる意味も無い
-//	（draw/StructuralMember.h 冒頭）。垂木は登り梁と同じ「傾いた線材」なので作法も同じ。
+//	冒頭）。加えて M27 で、**パスの Z はそもそも PIO に参照されていない**と判明した——3D の
+//	パスは PIO がバウンドの解決結果から自身で生成するので、絶対 Z を入れる意味も無い
+//	（draw/StructuralMember.h 冒頭）。垂木は登り梁と同じ「傾いた線材」なので扱いも同じ。
 //
 //	【スタイルは当てない】横架材・柱と同じく、プラグインスタイルを関連付けない。描画属性は
 //	クラス（小屋組-垂木）に従わせる（draw/StructuralMember.cpp 冒頭「スタイルを使わない」）。
@@ -50,7 +50,7 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 
-// フォールバックの直線は draw/Grid.cpp・draw/Member.cpp と同じ VWPolygon2DObj で描く。
+// フォールバックの直線は draw/Grid.cpp・draw/Member.cpp と同じ VWPolygon2DObj で描画する。
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
 
 #include <cstddef>
@@ -60,7 +60,7 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 垂木 1 本を構造材ツールで描く。PIO を作れなければ平面投影の直線でフォールバック
+		// 垂木 1 本を構造材ツールで描画する。PIO を生成できなければ平面投影の直線でフォールバック
 		// する。何か 1 つでも配置できたら true。
 		bool DrawOne(const core::RafterCommand& rafter, StructuralFailures& failures)
 		{
@@ -68,8 +68,8 @@ namespace HomeskzIfcImport::draw
 			const core::RafterEaveEnd eave = core::rafterEaveEnd(rafter);
 
 			// 断面の矩形は**下辺中央が原点**（断面基準点＝中下と一致させる。パスが下面中央線を
-			// 通る）。作れなければ PIO を作らない——断面の無い構造材は生成できても実体が
-			// 描かれず、「オブジェクトはあるのに画面に出ない」状態になるだけなので、直線の
+			// 通る）。生成できなければ PIO を生成しない——断面の無い構造材は生成できても実体が
+			// 描画されず、「オブジェクトはあるのに画面に出ない」状態になるだけなので、直線の
 			// フォールバックの方が有用（draw/DrawUtil 参照）。
 			const MCObjectHandle profile = CreateRectangleProfileGroup(
 				-rafter.width / 2.0, 0.0, rafter.width / 2.0, rafter.height);
@@ -77,9 +77,9 @@ namespace HomeskzIfcImport::draw
 			// パス＝下面中央線の軒先→棟を通る 2 点の曲線（横架材・柱と共通。
 			// draw/StructuralMember の CreatePath）。**平面座標だけを渡す**——高さも勾配も
 			// ストーリバウンドの offset が決め、構造材 PIO はその解決結果から 3D のパスを
-			// 自分で作る（冒頭「パスに高さを持たせない」／draw/StructuralMember.h 冒頭
+			// 自身で生成する（冒頭「パスに高さを持たせない」／draw/StructuralMember.h 冒頭
 			// 「パスは 2D で渡す」）。以前は両端とも軒先の下面 Z を入れていたが、**その Z は
-			// PIO に受け取られていなかった**（M27）。
+			// PIO に参照されていなかった**（M27）。
 			bool pathAppended = false;
 			const MCObjectHandle path =
 				profile == nil ? nil : CreatePath(eave.point, rafter.end, pathAppended);
@@ -90,32 +90,32 @@ namespace HomeskzIfcImport::draw
 			spec.path = path;
 			spec.profile = profile;
 			// 構造材 ID は仕様ラベル（"45×45@455"）。軸組ツール時代にラベルとして OIP へ
-			// 出していた文字で、断面と間隔がひと目で分かる。
+			// 表示していた文字で、断面と間隔がひと目で分かる。
 			spec.memberId = rafter.label;
 			spec.drawClass = rafter.drawClass;
 			spec.structuralUse = core::kStructuralUseRafter;
 			spec.width = rafter.width;
 			spec.depth = rafter.height;
 			spec.axisAlign = StructuralAxisAlign::BottomCentre; // 中下（断面矩形の置き方と一致）
-			// 始端＝軒先（支持点の offset から勾配ぶん下げた値）、終端＝棟側。
+			// 始端＝軒先（支持点の offset から勾配分下げた値）、終端＝棟側。
 			spec.startBound = rafter.startBound;
 			spec.startBound.offset = eave.offset;
 			spec.endBound = rafter.endBound;
-			// 【潰れ検出】描き上がりの長さ＝パスの水平長。**垂木も両端の Z が等しい**（勾配は
+			// 【退化の検出】描画結果の長さ＝パスの水平長。**垂木も両端の Z が等しい**（勾配は
 			// ストーリバウンドの offset 差が表す。冒頭「パスに高さを持たせない」）ので、
 			// 横架材と同じく**PIO が実際に持っているパスの両端の距離**で測る
 			// （draw/StructuralMember.h の StructuralExtentKind）。以前はここが OIP の
-			// 「スパン」で、**そのパラメータは実機に無い**ため潰れ検出も下の自己修復も
+			// 「スパン」で、**そのパラメータは実機に無い**ため退化の検出も下の自己修復も
 			// 一度も動いていなかった（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 			spec.expectedLength = core::distance(eave.point, rafter.end);
 			spec.extentKind = StructuralExtentKind::Horizontal;
-			// 【潰れていても繕わない】自己修復は撤去した。理由は横架材と同じ（draw/Member。
+			// 【退化していても修復しない】自己修復は撤去した。理由は横架材と同じ（draw/Member。
 			// 水平材は M27 の死角に落ちない／差し替えはバウンドの `fOffset` を書き換えるので
-			// 階を動かすと壊れる）。
-			// 【高さの検算】パスから Z を外した以上、垂木の高さと勾配を決めるのはバウンドの
-			// offset 差だけになった。ずれても本数にもスパンにも出ないので、**描き上がった
-			// 両端の絶対 Z を読み戻して命令と引き比べる**（draw/StructuralMember.h の
-			// checkElevation）。始端は軒先の下面 Z（支持点より勾配ぶん下がる）、終端は棟側の
+			// 階を動かすと長さが変わる）。
+			// 【高さの検算】パスから Z を削除した以上、垂木の高さと勾配を決めるのはバウンドの
+			// offset 差だけになった。ずれても本数にもスパンにも出ないので、**描画結果の
+			// 両端の絶対 Z を読み戻して命令と照合する**（draw/StructuralMember.h の
+			// checkElevation）。始端は軒先の下面 Z（支持点より勾配分下がる）、終端は棟側の
 			// 下面 Z（core/Document.h の RafterCommand）。**開発ビルドだけ**（draw/Verify.h）。
 #if VW_DRAW_VERIFY
 			spec.checkElevation = true;
@@ -166,7 +166,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// 診断: 実描画はローカルの VectorWorks でしか確認できないので、失敗の内訳を件数で
-		// 持ち帰る（文言は draw/StructuralMember。垂木が 1 本も見えないときに、原因が命令側
+		// 記録する（文言は draw/StructuralMember。垂木が 1 本も表示されないときに、原因が命令側
 		// （解析）か PIO のパラメータ側かを切り分けられる）。
 		const std::string note = DescribeStructuralFailures(failures, "材");
 		if (outDiagnostics != nullptr && !note.empty())

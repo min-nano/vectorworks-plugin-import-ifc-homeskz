@@ -52,19 +52,19 @@ namespace HomeskzIfcImport::draw
 		// 「Level Objects」の実測表）。
 		constexpr const char* kLevelMarkPlugin = "Elevation Benchmark2";
 
-		// ストーリレベルへ結ぶ 3 つ組（Findings「Level Objects」）。**3 つ揃って初めて効く**
-		// （Datum 単独では GroundPlane へ倒される）。Axis は既定の ZAxis3DMode のまま触らない
-		// ——YAxis2DMode にすると関連付けが外れる。結べば高さはストーリレベルから来るので、
-		// 記号をドラッグしても数値は動かない（round 3 のご指摘）。
+		// ストーリレベルへ結ぶ 3 つ組（Findings「Level Objects」）。**3 つ揃って初めて機能する**
+		// （Datum 単独では GroundPlane にフォールバックする）。Axis は既定の ZAxis3DMode の
+		// まま変更しない——YAxis2DMode にすると関連付けが解除される。結べば高さはストーリ
+		// レベルから来るので、記号をドラッグしても数値は動かない（round 3 のご指摘）。
 		constexpr const char* kParamStoryName = "__StoryName";
 		constexpr const char* kParamLevelTypeName = "__LevelTypeName";
 		constexpr const char* kParamDatum = "Datum";
 		constexpr const char* kDatumStoryLevel = "StoryLevel";
 
-		// 描いた高さ（読み取り用の静的文字。Findings「Level Objects」のパラメータ表）。
+		// 描画した高さ（読み取り用の静的文字。Findings「Level Objects」のパラメータ表）。
 		constexpr const char* kParamShownElevation = "Elevation";
 
-		// PIO 自身が挿入点から左へ引く水平引出線（既定 True）。切って、基準線は
+		// PIO 自身が挿入点から左へ引く水平引出線（既定 True）。無効にして、基準線は
 		// レイアウトに自分で引く（DrawLevelLine）。
 		constexpr const char* kParamHorizontalLeader = "UseHorizontalLeader";
 
@@ -74,7 +74,7 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kLevelTriangleClass = "01作図-04記号-01一般";
 		constexpr const char* kLevelLineClass = "01作図-01線-01基準線-02一般";
 
-		// 描いた高さが命令の高さからこれ以上ずれていたら「合わない」と数える（mm）。
+		// 描画した高さが命令の高さからこれ以上ずれていたら「合わない」と数える（mm）。
 		constexpr double kLevelHeightTol = 0.5;
 
 		// 測点 a → b の直線寸法を 1 本作る。axis=Horizontal なら (a, base)→(b, base) を、
@@ -101,7 +101,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 #if VW_DRAW_VERIFY
-		// 検算（dev だけ）: 寸法 1 本の見え方に効くオブジェクト変数を読んで 1 行にする
+		// 検算（dev だけ）: 寸法 1 本の表示に影響するオブジェクト変数を読んで 1 行にする
 		// （round 1: 軸組図だけ寸法値が出なかった。伏図と並べて違いを探す）。
 		std::string DescribeDimension(MCObjectHandle dimension)
 		{
@@ -145,8 +145,8 @@ namespace HomeskzIfcImport::draw
 		}
 #endif
 
-		// 寸法の文字の当て方（ビューポート 1 枚ぶん。drawViewportDimensions が決める）。
-		//   style    … 寸法規格の文字スタイル（ref number。0 なら当てない）
+		// 寸法の文字の適用方法（ビューポート 1 枚ぶん。drawViewportDimensions が決める）。
+		//   style    … 寸法規格の文字スタイル（ref number。0 なら適用しない）
 		//   fontSize … 文字の図面上の大きさ（mm）＝ 文字スタイルの紙の pt × 25.4/72 ×
 		//              ビューポートの縮尺（0 なら書かない）
 		struct DimensionText
@@ -191,24 +191,25 @@ namespace HomeskzIfcImport::draw
 					flush();
 					continue;
 				}
-				// **規格は繋ぐ前に当てる**（連続寸法そのものには効かない）。図面に無い
-				// 名前は false で弾かれ、文書の既定の規格のまま残る（数えて診断へ）。
+				// **規格は繋ぐ前に適用する**（連続寸法そのものには反映されない）。図面に無い
+				// 名前は false で拒否され、文書の既定の規格のまま残る（数えて診断へ）。
 				if (!SetTextVariable(dimension, ObjectVariable::DimStandardName, standard))
 					++counts.standardRejected;
 				// 寸法値は**明示して出す**（round 1: 軸組図の注釈で値が出なかった。伏図では出た）。
 				SetBooleanVariable(dimension, ObjectVariable::DimShowValue, true);
-				// **文字スタイルを明示し、文字の大きさをビューポートの縮尺で書いて引き直す**
+				// **文字スタイルを明示し、文字の大きさをビューポートの縮尺で書いて再計算する**
 				// （Findings「Dimensions」#157 / #161）。
-				//   * 注釈に置く寸法の文字の大きさは、作るとき（SetTextStyleRef を呼ぶとき）の
-				//     アクティブレイヤの縮尺で焼き付く。軸組図はシートレイヤ（1:1）がアクティブ
-				//     なので、そのままでは 1/125 の図の上で紙 0.02mm になり値が見えなかった
-				//     （round 1〜3。OIP で文字スタイルを選び直すと出たのは、注釈の縮尺で焼き直す
-				//     ため）。
-				//   * 大きさ（ovDimFontSize）は**書いただけでは絵に出ない**——ResetObject で
-				//     引き直す。読み戻しは書いた値を返すので、呼び忘れても気付けない。
-				//   * **繋ぐ前に**済ませる。文字スタイルが明示してあれば、繋いで作り直された
+				//   * 注釈に置く寸法の文字の大きさは、作成時（SetTextStyleRef を呼ぶとき）の
+				//     アクティブレイヤの縮尺で固定される。軸組図はシートレイヤ（1:1）がアクティブ
+				//     なので、そのままでは 1/125 の図の上で紙 0.02mm になり値が表示されなかった
+				//     （round 1〜3。OIP で文字スタイルを選び直すと表示されたのは、注釈の縮尺で
+				//     固定し直されるため）。
+				//   * 大きさ（ovDimFontSize）は**書いただけでは描画結果に反映されない**——
+				//     ResetObject で再計算する。読み戻しは書いた値を返すので、呼び忘れても
+				//     気付けない。
+				//   * **繋ぐ前に**済ませる。文字スタイルが明示してあれば、繋いで再生成された
 				//     中の直線寸法も書いた大きさを保つ（〈クラスの文字スタイル〉のままだと、
-				//     繋ぐときのアクティブレイヤの縮尺で焼き直される。#155）。
+				//     繋ぐときのアクティブレイヤの縮尺で固定し直される。#155）。
 				//   * 文字スタイルは寸法規格のもの（「寸法(6pt)」）をそのまま使い、縮尺ごとの
 				//     文字スタイルは作らない（名前付きリソースを増やさない。docs/DEV-NOTES.md M31）。
 				if (text.style != 0)
@@ -260,7 +261,7 @@ namespace HomeskzIfcImport::draw
 		//   textSize       … 名前の文字の大きさ（用紙 mm。寸法の文字と同じ。0 なら既定の
 		//                    レイアウトの名前の大きさのまま）
 		//   dimensionScale … 寸法線までの距離に使った縮尺の分母
-		//   markScale      … 記号を描くビューポートの縮尺の分母（用紙 mm → 注釈空間）
+		//   markScale      … 記号を描画するビューポートの縮尺の分母（用紙 mm → 注釈空間）
 		struct LevelMarkStyle
 		{
 			double textSize = 0.0;
@@ -268,7 +269,7 @@ namespace HomeskzIfcImport::draw
 			double markScale = kFallbackScale;
 		};
 
-		// レイアウトへ入れる図形を仕上げる: container へ入れ、クラスを当てて全属性を
+		// レイアウトへ入れる図形を仕上げる: container へ入れ、クラスを設定して全属性を
 		// クラスに従わせる（矢印マーカーは除く）。入らなければ消して false。
 		bool AddToLayout(MCObjectHandle container, MCObjectHandle object, const char* className)
 		{
@@ -284,7 +285,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 #if VW_DRAW_VERIFY
-		// 検算（dev だけ）: container の中身を「型＋外形」で並べる（入れ子のグループも辿る。
+		// 検算（dev だけ）: container の中身を「型＋外形」で並べる（入れ子のグループも走査する。
 		// 深さは有限に留める）。
 		std::string DescribeMembers(MCObjectHandle container, int depth = 0);
 
@@ -320,10 +321,11 @@ namespace HomeskzIfcImport::draw
 		// **マーカーレイアウトを組み直して渡し直す**（draw/Dimension.h「レベル基準線の作法」）。
 		// 既定の中身（高さとストーリレベル名のテキスト・記号のポリライン）を消し、挿入点＝(0, 0)
 		// から右へ「▽＋名前」を置く（core/Layout.h「軸組図のレベル記号の形と位置」）。**基準線は
-		// 置かない**——線は起点が決まってから DrawLevelLine が足す。起点を決めるのに
+		// 置かない**——線は起点が決まってから DrawLevelLine が追加する。起点を決めるのに
 		// 要る記号の幅（用紙 mm）を markWidth へ返す。
-		// **中身を入れ替えるだけでは絵に出ない**ので、新しい図形を作って入れ、古いものを
-		// 消してから SetCustomObjectProfileGroup で渡す（Findings「Level Objects」の実測手順）。
+		// **中身を入れ替えるだけでは描画結果に反映されない**ので、新しい図形を作って入れ、
+		// 古いものを削除してから SetCustomObjectProfileGroup で渡す（Findings「Level Objects」の
+		// 実測手順）。
 		bool RebuildLevelLayout(MCObjectHandle mark, const core::LevelMarkCommand& level,
 								const LevelMarkStyle& style, double& markWidth,
 								[[maybe_unused]] std::string& probe)
@@ -333,7 +335,7 @@ namespace HomeskzIfcImport::draw
 			if (layout == nil)
 				return false;
 
-			// 既定の中身を控える（型 0 は群の終端なので残す）。寸法の文字の大きさが読めな
+			// 既定の中身を記録する（型 0 は群の終端なので残す）。寸法の文字の大きさが読めな
 			// かったときは、既定の名前のテキストの大きさを使う。
 			std::vector<MCObjectHandle> old;
 			WorldCoord fallbackSize = 0.0;
@@ -379,11 +381,11 @@ namespace HomeskzIfcImport::draw
 								 shape.textBottom - std::min(bounds.top, bounds.bottom));
 			markWidth = shape.width;
 
-			// 名前の文字は寸法のクラスへ（文字の大きさを当てた後にクラスを与える。
+			// 名前の文字は寸法のクラスへ（文字の大きさを設定した後にクラスを与える。
 			// Findings「Data Tags」: 書体・大きさは文字、色はクラスが受け持つ）。
 			SetClassWithAttributes(text, kDimensionClass, false);
 
-			// ▽（頂点で基準線に触れる正三角形）。**閉じたポリライン**で描く（塗りが効く。
+			// ▽（頂点で基準線に触れる正三角形）。**閉じたポリライン**で描画する（塗りが反映される。
 			// ご要望）。VWPolygon2DObj は既定で開いた折れ線なので閉じる（Findings
 			// 「Parametric Objects」）。
 			const double h = shape.triangleHeight;
@@ -405,11 +407,11 @@ namespace HomeskzIfcImport::draw
 		// **PIO 自身が引く水平引出線を消し、基準線はレイアウトに自分で引く。**
 		// 実機で分かったこと（docs/DEV-NOTES.md「レベル基準線の描き方の調整」）:
 		//   * 既定のレイアウトに線は無く、PIO が挿入点から左へ 5400（1/150 で用紙 36mm）の
-		//     ポリゴンを 1 つ描く。パス（GetCustomObjectPath）は持たない。
+		//     ポリゴンを 1 つ描画する。パス（GetCustomObjectPath）は持たない。
 		//   * カスタム制御点（既定 (0, 3000)）を動かしても、そのポリゴンは変わらない。
 		//   * 全パラメータのどれにも -5400 は無い。線に関わりそうなのは
 		//     `UseHorizontalLeader`（水平引出線を使用。既定 True）だけ。
-		// そこで引出線を切り（kParamHorizontalLeader）、線は起点から右へレイアウトの中に
+		// そこで引出線を無効にし（kParamHorizontalLeader）、線は起点から右へレイアウトの中に
 		// 引く（最初の版で、レイアウトの線は右へ図の右端まで出た）。
 		bool DrawLevelLine(MCObjectHandle mark, double lengthOnPaper)
 		{
@@ -435,7 +437,7 @@ namespace HomeskzIfcImport::draw
 
 #if VW_DRAW_VERIFY
 		// 検算（dev だけ）: 制御点の持ち方を探る——カスタム制御点の 1 つ目と、全パラメータの
-		// 「名前=値」を 1 行にする（どこに -5400 があるかを見る）。
+		// 「名前=値」を 1 行にする（どこに -5400 があるかを確認する）。
 		std::string DescribeControlPoints(MCObjectHandle mark)
 		{
 			try
@@ -470,8 +472,8 @@ namespace HomeskzIfcImport::draw
 #endif
 
 #if VW_DRAW_VERIFY
-		// 検算（dev だけ）: container の中のテキストを**入れ子のグループまで**辿って集める
-		// （PIO が吐いた図形は、レイアウトを写したグループの中にテキストを持つことがある）。
+		// 検算（dev だけ）: container の中のテキストを**入れ子のグループまで**走査して集める
+		// （PIO が出力した図形は、レイアウトを複製したグループの中にテキストを持つことがある）。
 		// 深さは有限に留める（グループの入れ子は数段しか無い）。
 		void CollectTexts(MCObjectHandle container, std::vector<std::string>& out, int depth = 0)
 		{
@@ -495,10 +497,10 @@ namespace HomeskzIfcImport::draw
 			return joined.empty() ? std::string("（なし）") : joined;
 		}
 
-		// 検算（dev だけ）: レベル基準線が描いた文字に name があるか（Findings「Level
+		// 検算（dev だけ）: レベル基準線が描画した文字に name があるか（Findings「Level
 		// Objects」の「描いた文字を機械で読む」）。見つからなければ 1 個目について
-		// 「描いた文字」と「レイアウトの中身」を probe へ控える（実機で何が起きたかを
-		// 持ち帰る。差し替えが絵に届いていないのか、読み方が違うのかを分ける）。
+		// 「描いた文字」と「レイアウトの中身」を probe へ記録する（実機で何が起きたかを
+		// 記録する。差し替えが描画結果に反映されていないのか、読み方が違うのかを区別する）。
 		bool DrawsText(MCObjectHandle mark, const std::string& name, std::string& probe)
 		{
 			std::vector<std::string> drawn;
@@ -525,7 +527,7 @@ namespace HomeskzIfcImport::draw
 		}
 #endif
 
-		// 描いた高さ（"10953.18" のような文字）を数に読む。読めなければ false。
+		// 描画した高さ（"10953.18" のような文字）を数値として読む。読めなければ false。
 		bool ParseShownHeight(const std::string& shown, double& value)
 		{
 			std::string digits;
@@ -541,9 +543,10 @@ namespace HomeskzIfcImport::draw
 			return end != digits.c_str();
 		}
 
-		// **描いた高さを読み戻して命令の高さと引き比べる**（直さない）。ストーリレベルへ
+		// **描画した高さを読み戻して命令の高さと照合する**（修正しない）。ストーリレベルへ
 		// 結んだ個体の高さは書けない出力（Elev）なので、食い違いは数えて診断へ出す——
-		// 0 なら結べていないか、断面の向きがビュー行列へ写っていない（CopySectionViewMatrix）。
+		// 0 なら結べていないか、断面の向きがビュー行列へコピーされていない
+		// （CopySectionViewMatrix）。
 		void CheckLevelHeight(MCObjectHandle mark, double elevation, DimensionCounts& counts)
 		{
 			try
@@ -593,8 +596,8 @@ namespace HomeskzIfcImport::draw
 			try
 			{
 				VWParametricObj pio(mark);
-				// 注釈へ移すと VW が決めた位置へ落ちるので、座標を明示し直す（縦の位置は
-				// 絵の置き場所だけで、描く数値には効かない）。
+				// 注釈へ移すと VW が決めた位置へ移動するので、座標を明示し直す（縦の位置は
+				// 図形の置き場所だけで、描画される数値には影響しない）。
 				pio.SetPointObjectPos(VWPoint2D(level.x, level.elevation));
 				pio.SetParamString(kParamStoryName, TXString(level.story.c_str()));
 				pio.SetParamString(kParamLevelTypeName, TXString(level.levelType.c_str()));
@@ -618,7 +621,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// 置いた記号を起点 startX へ動かし、基準線（パス）を図の右端を少し越えるまで伸ばして
-		// 描き直す。基準線の終点（注釈空間の x）を返す。
+		// 再描画する。基準線の終点（注釈空間の x）を返す。
 		double PositionLevel(MCObjectHandle mark, const core::LevelMarkCommand& level,
 							 double startX, const LevelMarkStyle& style, DimensionCounts& counts)
 		{
@@ -631,7 +634,7 @@ namespace HomeskzIfcImport::draw
 			if (probePath)
 				pathBefore = DescribeControlPoints(mark);
 #endif
-			// 縦の位置は絵の置き場所だけで、描く数値には効かない。
+			// 縦の位置は図形の置き場所だけで、描画される数値には影響しない。
 			try
 			{
 				VWParametricObj(mark).SetPointObjectPos(VWPoint2D(startX, level.elevation));
@@ -687,10 +690,10 @@ namespace HomeskzIfcImport::draw
 		if (viewport == nil || (command.dimensions.empty() && levels.empty()))
 			return 0;
 		const double denominator = scale > 0.0 ? scale : kFallbackScale;
-		// 寸法規格の文字スタイルと、紙でその pt に見せる図面上の大きさ（ビューポートごとに
+		// 寸法規格の文字スタイルと、紙でその pt に表示される図面上の大きさ（ビューポートごとに
 		// 決める——規格は文書に 1 つだが、縮尺はビューポートごとに違う）。縮尺は
-		// ビューポートの**実際の**値を読む（注釈はそれで描かれる）。読めなければ寸法線の
-		// 距離と同じ縮尺で代える。
+		// ビューポートの**実際の**値を読む（注釈はそれで描画される）。読めなければ寸法線の
+		// 距離と同じ縮尺で代用する。
 		// レベル記号の名前も同じ紙の大きさ（用紙 mm）で書く（レイアウトの中身は容れ物の
 		// 縮尺を VW が掛けるので、寸法と違って縮尺を掛けない。Findings「Drawing Labels」）。
 		DimensionText text;
@@ -761,7 +764,7 @@ namespace HomeskzIfcImport::draw
 				placedLevels->push_back({placed.mark, level.elevation, startX, endX});
 		}
 
-		// 注釈へ後から足した図形のクラスは非表示のままなので、全クラスを表示へ戻して描き直す
+		// 注釈へ後から追加した図形のクラスは非表示のままなので、全クラスを表示へ戻して再描画する
 		// （draw/Dimension.h。データタグと同じ後処理）。
 		if (anyPlaced)
 		{
@@ -787,13 +790,13 @@ namespace HomeskzIfcImport::draw
 			++counts.viewMatrixFailed;
 		for (const PlacedLevelMark& placed : marks)
 		{
-			// 写しただけでは描き直されない。作り直したときに初めてストーリレベルの高さが入る。
+			// コピーしただけでは再描画されない。再計算したときに初めてストーリレベルの高さが入る。
 			gSDK->ResetObject(placed.mark);
 			CheckLevelHeight(placed.mark, placed.elevation, counts);
 #if VW_DRAW_VERIFY
-			// 描いた範囲と狙い（起点〜基準線の終点）を**文書で 1 個目だけ**控え、描いた中身を
-			// 1 つずつ並べる。round 1: 描いた範囲が狙いより用紙 36mm 広かった（既定の
-			// レイアウトに線は無かったので、PIO 自身が別の線を描いていると見ている）。
+			// 描画した範囲と目標（起点〜基準線の終点）を**文書で 1 個目だけ**記録し、描画した
+			// 中身を 1 つずつ並べる。round 1: 描画した範囲が目標より用紙 36mm 広かった（既定の
+			// レイアウトに線は無かったので、PIO 自身が別の線を描画していると推定している）。
 			if (!counts.levelShapeDrawn)
 			{
 				counts.levelShapeDrawn = true;

@@ -56,7 +56,7 @@ namespace HomeskzIfcImport::core
 			return true;
 		}
 
-		// 同じディレクトリへ書いてから rename する。**読み手に半端な内容を拾わせない**
+		// 同じディレクトリへ書いてから rename する。**読み手に半端な内容を読み取らせない**
 		// ための決まりで、応答も生存の印も同じ手順を通る。
 		bool WriteAtomically(const std::filesystem::path& target, const std::string& text,
 							 std::string& error)
@@ -197,7 +197,7 @@ namespace HomeskzIfcImport::core
 		}
 		return true;
 #else
-		// **自分にしか書けない形で作る**（0700）。umask はビットを落とすだけなので、
+		// **自分にしか書けない形で作る**（0700）。umask はビットを除去するだけなので、
 		// これより緩くはならない。親（一時ディレクトリ）は既にあるので 1 段でよい。
 		if (::mkdir(fDir.c_str(), S_IRWXU) != 0 && errno != EEXIST)
 		{
@@ -283,11 +283,11 @@ namespace HomeskzIfcImport::core
 			std::string text;
 			const bool read = ReadCapped(path, kBridgeMaxRequestBytes, text);
 
-			// **読めても読めなくても、まず消す。** 残すと同じものを毎周拾い直す。
+			// **読めても読めなくても、まず削除する。** 残すと同じものを毎回再取得する。
 			std::error_code ec;
 			std::filesystem::remove(path, ec);
 
-			// ファイル名から id を拾う（"<id>.req.json"）。壊れた要求にも応えるために要る。
+			// ファイル名から id を取り出す（"<id>.req.json"）。壊れた要求にも応答するために要る。
 			const std::string id =
 				name.substr(0, name.size() - std::string(kBridgeRequestSuffix).size());
 
@@ -347,7 +347,7 @@ namespace HomeskzIfcImport::core
 		if (!Json::parse(text, status, error) || !status.has("beat"))
 			return false;
 		const auto beat = static_cast<long long>(status.at("beat").asNumber(0.0));
-		// 未来の印（時計が戻った）も「生きている」側へ倒す——消さずに済むほうが安全。
+		// 未来の印（時計が戻った）も「生きている」とみなす——削除せずに済むほうが安全。
 		return now - beat <= staleSeconds;
 	}
 

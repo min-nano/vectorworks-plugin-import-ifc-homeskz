@@ -4,34 +4,35 @@
 //	耐力壁 PIO の実装（意図は ExtShearWall.h 参照）。
 //
 //	リセット（Recalculate）のたびに、
-//	  1. 自分の両端（線分 PIO の 2 点＝柱芯）をローカル座標へ落とし、
+//	  1. 自分の両端（線分 PIO の 2 点＝柱芯）をローカル座標へ変換し、
 //	  2. パラメータの対象レイヤ（";" 区切り）から**両端の柱**を探して内側面を求め、
 //	  3. その内側面と下端・上端で決まる「軸組内法」へ、伏図の記号（2D）と軸組図の面（3D）を
-//	     描く
-//	という流れで作図する。**内法は毎回実物の柱から導く**ので、柱を動かしても（リセットが
-//	走れば）耐力壁が追随して伸縮する。柱が見つからなければ控えの内法（ClearSpan）を両端の
+//	     描画する
+//	という流れで作図する。**内法は毎回実物の柱から求める**ので、柱を動かしても（リセットが
+//	実行されれば）耐力壁が追随して伸縮する。柱が見つからなければ控えの内法（ClearSpan）を両端の
 //	中央へ置く。
 //
 //	使用する SDK API は ci-debug の sdk-grep で実在を確認したもの:
 //	  gSDK->GetNamedLayer / FirstMemberObj / NextObject / GetObjectBounds / CreateLine /
 //	  CreateOval / AddObjectToContainer、VWParametricObj（GetLinearObjectPos /
-//	  GetObjectToWorldTransform / パラメータの読み）、VWPolygon2DObj、VWPolygon3D ＋
+//	  GetObjectToWorldTransform / パラメータの読み出し）、VWPolygon2DObj、VWPolygon3D ＋
 //	  VWPolygon3DObj。自分自身のハンドルは基底 VWParametric_EventSink の protected メンバ
 //	  fhObject から取る（柱記号 PIO と同じ。ExtColumnMark.cpp 冒頭）。
 //
 //	【座標系】PIO のジオメトリは**PIO 自身のローカル座標**で持たれる。線分 PIO なので
 //	ローカル X が壁の向き（始点→終点）、ローカル Y が壁面の法線（**+Y が表**）、
-//	ローカル Z が高さになる。柱はワールド座標で見つかるので、描く前に必ず
-//	InversePointTransform でローカルへ落とす（落とさないと PIO を動かした量だけ絵がずれ、
-//	リセットしても同じ相対位置に描き直すので直らない。ExtColumnMark.cpp で実証済み）。
+//	ローカル Z が高さになる。柱はワールド座標で見つかるので、描画する前に必ず
+//	InversePointTransform でローカルへ変換する（変換しないと PIO を動かした量だけ図形が
+//	ずれ、リセットしても同じ相対位置に再描画するので直らない。ExtColumnMark.cpp で実証済み）。
 //
-//	【実際の見え方はローカルで確認する】記号の大きさ・ハッチングの向き・断面ビューポートで
-//	3D の面がどう出るかは CI では検証できない（CLAUDE.md「テスト方針」）。純計算に落とせる
+//	【実際の表示はローカルで確認する】記号の大きさ・ハッチングの向き・断面ビューポートで
+//	3D の面がどう表示されるかは CI では検証できない（CLAUDE.md「テスト方針」）。純計算に分離できる
 //	部分——筋かいの帯を内法で切る形——は core::shearWallBracePolygon に置いて無 SDK で
 //	テストしてある。
-//	【ここに残るのは登録と取り次ぎだけ】絵を描くところは本体（ペイロード）側の
-//	draw::recalculateShearWall にある。PIO の登録は Vectorworks に番地を握られるので殻に
-//	残すほかないが、描き方は本体へ出せる——そうしておくと**耐力壁の直しが Vectorworks の
+//
+//	【ここに残るのは登録と取り次ぎだけ】描画の処理は本体（ペイロード）側の
+//	draw::recalculateShearWall にある。PIO の登録は Vectorworks に番地を保持されるので殻に
+//	残すほかないが、描画の処理は本体へ移せる——そうしておくと**耐力壁の修正が Vectorworks の
 //	再起動なしに反映される**（src/PayloadAbi.h / src/PayloadSession.h）。
 //
 
@@ -50,10 +51,10 @@ namespace HomeskzIfcImport
 	{
 		// PIO の定義。**関数ローカル static** で持つ理由は ExtMenu の menuDef と同じ
 		// （SDK の非ローカル static を名前空間スコープの初期化子から参照しない）。
-		// **線分 PIO**（両端の 2 点で置く）。
+		// **線分 PIO**（両端の 2 点で配置する）。
 		//
-		// 【移動・回転でリセットする】絵は対象レイヤの柱の**ワールド位置**から導くので、
-		// PIO 自体を動かしたら描き直さないと柱と食い違ったまま残る（柱記号 PIO と同じ理由）。
+		// 【移動・回転でリセットする】図形は対象レイヤの柱の**ワールド位置**から求めるので、
+		// PIO 自体を動かしたら再描画しないと柱と食い違ったまま残る（柱記号 PIO と同じ理由）。
 		const SParametricDef& parametricDef()
 		{
 			static const SParametricDef def = {/*LocalizedName*/ {PLUGIN_VWR_ID, "shearWallName"},
@@ -69,16 +70,16 @@ namespace HomeskzIfcImport
 
 		// パラメータ。種別・掛け方・面は文字列、寸法は**長さフィールド**（kFieldCoordDisp）
 		// にして OIP で単位付きに見えるようにする。既定値は「何も分からない耐力壁」＝
-		// 描かない状態（内法 0・下端＝上端）になるので、パラメータ未設定の PIO が
-		// でたらめな絵を描くことはない。
+		// 描画しない状態（内法 0・下端＝上端）になるので、パラメータ未設定の PIO が
+		// 誤った図形を描画することはない。
 		const SParametricParamDef* paramDefs()
 		{
 			// SDK は「番兵で終わる配列の先頭ポインタ」を受け取る（SParametricParamDef*）。
-			// 器を std::array にしても .data() で同じポインタを渡せるので、C 配列にする
+			// 入れ物を std::array にしても .data() で同じポインタを渡せるので、C 配列にする
 			// 理由は無い（番兵は最後の要素としてそのまま残す）。
 			static const std::array<SParametricParamDef, 12> defs = {
-				{// **並びは「絵にとってどれだけ要るか」の順**。OIP の上から重要な順に読める
-				 // うえに、万一 VW 側が一覧を途中までしか登録しなくても、落ちるのは
+				{// **並びは「描画にとってどれだけ要るか」の順**。OIP の上から重要な順に読める
+				 // うえに、万一 VW 側が一覧を途中までしか登録しなくても、欠けるのは
 				 // 既定値で代用が利くもの（記号の大きさ・面材の離れ・見付け幅）から順になる。
 				 {kParamShearBottom,
 				  {PLUGIN_VWR_ID, "shearWallBottom"},
@@ -193,21 +194,22 @@ namespace HomeskzIfcImport
 									static_cast<unsigned char>(kCustomObjectPrefNever));
 
 		// 印刷・書き出しの直前にリセットする。図面として外へ出る瞬間に必ず実物（柱の位置）と
-		// 一致させるための最後の砦（柱記号 PIO と同じ。docs/DEV-NOTES.md M12「追随の契機」）。
+		// 一致させるための最後の手段（柱記号 PIO と同じ。docs/DEV-NOTES.md M12「追随の契機」）。
 		gSDK->SetObjectProperty(objectID, kObjXPropResetBeforeExport, true);
 
-		// **レイヤの縮尺が変わったら描き直す。** いまの記号は図面 mm（縮尺に依らない）
+		// **レイヤの縮尺が変わったら再描画する。** いまの記号は図面 mm（縮尺に依らない）
 		// なので必須ではないが、記号のシンボルを用紙基準に戻すなら要る印として残す。
 		gSDK->SetObjectProperty(objectID, kObjXPropHasLayerScaleDeps, true);
 		return result;
 	}
 	// ---------------------------------------------------------------------------
-	// **描くのは本体（ペイロード）。** ここでするのは「本体を（必要なら読み直して）確保し、
-	// 自分のハンドルを渡す」だけ（PayloadSession.h）。読み込めなかったときは**黙って
-	// 何もしない**——柱記号 PIO と同じ理由（リセットは図面の耐力壁の数だけ走る）。
+	// **描画するのは本体（ペイロード）。** ここでするのは「本体を（必要なら再読み込みして）
+	// 確保し、自分のハンドルを渡す」だけ（PayloadSession.h）。読み込めなかったときは
+	// **何も表示せずに何もしない**——柱記号 PIO と同じ理由（リセットは図面の耐力壁の数だけ
+	// 実行される）。
 	EObjectEvent CShearWall_EventSink::Recalculate()
 	{
-		// 自分自身のハンドルは基底の protected メンバ（VWFC が Execute で詰める）。
+		// 自分自身のハンドルは基底の protected メンバ（VWFC が Execute で設定する）。
 		if (this->fhObject == nil)
 			return kObjectEventNoErr;
 
@@ -217,11 +219,11 @@ namespace HomeskzIfcImport
 
 		int event = kObjectEventNoErr;
 		std::string error;
-		// 境界はオブジェクトのハンドルを void* で運ぶ（src/PayloadAbi.h「SDK を include
+		// 境界はオブジェクトのハンドルを void* で受け渡す（src/PayloadAbi.h「SDK を include
 		// しない」）。MCObjectHandle は char** なので、この変換は
-		// bugprone-multi-level-implicit-pointer-conversion に当たる——**意図した変換**
-		// （受け取った本体が同じ型へ戻す）であり、明示キャストにしても消えないので、
-		// この 1 行だけ規則を外す。
+		// bugprone-multi-level-implicit-pointer-conversion の警告対象になる——**意図した変換**
+		// （受け取った本体が同じ型へ戻す）であり、明示キャストにしても警告は消えないので、
+		// この 1 行だけ規則を無効にする。
 		// NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
 		void* const handle = this->fhObject;
 		if (!use->recalculate(kVwPayloadPioShearWall, handle, event, error))

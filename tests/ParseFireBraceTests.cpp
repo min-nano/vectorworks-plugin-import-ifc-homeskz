@@ -48,7 +48,7 @@ using HomeskzIfcTests::near;
 namespace
 {
 	// 既定のシンボル名。**唯一の定義は役割の表**（core::symbolRoles()）なので、
-	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
+	// テストもそこから引く（名前をテストへ複製すると表と食い違っても気付けない）。
 	const std::string kSymbolFireBrace = defaultSymbolName(SymbolRole::FireBrace);
 
 	// 中心線 v=0 に対称な footprint（長辺 v=±5、端面が v をまたぐ）。ワールド座標は簡単のため
@@ -123,7 +123,7 @@ TEST(fire_brace_end_faces_need_matching_vertex_counts)
 TEST(fire_brace_angle_points_from_base_to_centroid)
 {
 	// 基準点 (0,0)・重心が (+1,−1) 方向＝二等分方向 −45 度。シンボル基準姿勢の補正
-	// （反時計方向 45 度）を足して 0 度になる。
+	// （反時計方向 45 度）を加えて 0 度になる。
 	const std::vector<Vec2> world = {{2.0, -2.0}, {2.0, -2.0}, {2.0, -2.0}, {2.0, -2.0}};
 	CHECK(near(fireBraceAngle(Vec2{0.0, 0.0}, world), 0.0));
 }
@@ -152,7 +152,7 @@ TEST(fire_brace_is_matched_by_name_and_type)
 TEST(fire_brace_angle_of_empty_footprint_is_zero)
 {
 	// 外形が空なら重心が定まらない。呼び出し側はここへ空の外形を渡さないが、
-	// 0 を返して落ちないことを守る（1 本の欠損で全体を止めない）。
+	// 0 を返して異常終了しないことを守る（1 本の欠損で全体を止めない）。
 	CHECK(near(fireBraceAngle(Vec2{1.0, 2.0}, {}), 0.0));
 }
 
@@ -233,7 +233,7 @@ TEST(fire_brace_all_fixtures_build)
 					   for (const SymbolCommand& brace : braces)
 					   {
 						   CHECK_EQ(brace.symbol, std::string(kSymbolFireBrace));
-						   // 伏図レベルの印（"(FL-872)"）は外して見る（parse/PlanLevel）。
+						   // 伏図レベルの印（"(FL-872)"）は除外して判定する（parse/PlanLevel）。
 						   const std::string layer = core::stripPlanLevelTag(brace.layer);
 						   CHECK(endsWith(layer, "横架材天端") || endsWith(layer, "軒高"));
 					   }

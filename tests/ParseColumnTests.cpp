@@ -184,7 +184,7 @@ namespace
 		return command;
 	}
 
-	// span の列挙だけを見るテスト用の最小 column 命令。
+	// span の列挙だけを検証するテスト用の最小 column 命令。
 	ColumnCommand columnOnLayer(const std::string& layer)
 	{
 		ColumnCommand command;
@@ -397,7 +397,7 @@ TEST(width_on_top_ignores_non_roof_top_member)
 
 TEST(width_on_top_matches_member_pierced_by_post)
 {
-	// 小屋束が母屋を貫いて天端付近まで伸びる（棟束）場合も拾う。母屋の Z 範囲
+	// 小屋束が母屋を貫いて天端付近まで伸びる（棟束）場合も対象にする。母屋の Z 範囲
 	// [6754, 6859] に小屋束上端 6861（天端 +2mm）が収まる。
 	TopMemberSpec spec;
 	spec.width = 105.0;
@@ -698,9 +698,9 @@ TEST(build_column_binds_top_to_upper_story_beam_top_even_with_beam_offset)
 	// offset にその差が入る。
 	//
 	// M27 の一時期ここは「offset が 0 になるときだけ上階の FL を基準に取り直す」形だった
-	// （`{上階, 横架材天端, 0}` が柱を潰す、という**外れた見立て**による回避策）。絶対 Z は
-	// 同じでも OIP の基準が FL になり、階の横架材天端オフセットに追随しなくなるので外した
-	// （parse/Column.h・docs/DEV-NOTES.md M27）。
+	// （`{上階, 横架材天端, 0}` が柱を長さ 0 に退化させる、という**誤った見立て**による
+	// 回避策）。絶対 Z は同じでも OIP の基準が FL になり、階の横架材天端オフセットに追随
+	// しなくなるので削除した（parse/Column.h・docs/DEV-NOTES.md M27）。
 	StepText step;
 	const int storey = makeStorey(step, "1FL", 600.0);
 	const int upper = makeStorey(step, "2FL", 3500.0);
@@ -768,7 +768,7 @@ TEST(build_column_keeps_upper_story_when_upper_floor_has_no_beam_offset)
 	CHECK(near(command.elevation, 600.0));
 	// 上端は**受ける横架材の天端**（上階の横架材天端 3500）に取るので、パス長は 2900。
 	// IFC の押し出し Depth 2718 との差 −182（＝受ける梁のせい）が端部オフセットに入り、
-	// 実際に描かれる高さは 2900 − 182 = 2718 に戻る（core/Document.h「端部オフセット」）。
+	// 実際に描画される高さは 2900 − 182 = 2718 に戻る（core/Document.h「端部オフセット」）。
 	CHECK(near(command.height, 2900.0));
 	CHECK(near(command.startOffset, 0.0));
 	CHECK(near(command.endOffset, -182.0));
@@ -1256,7 +1256,7 @@ TEST(reads_sample_house_fixture)
 
 TEST(all_fixtures_bounds_span_the_column_height)
 {
-	// **バウンドの差が描かれる高さを支配する**（描画側のパスは平面座標しか持たず、高さは
+	// **バウンドの差が描画される高さを決める**（描画側のパスは平面座標しか持たず、高さは
 	// バウンドだけが決める。parse/Column.h）。したがって全フィクスチャの全柱で次が
 	// 成り立たなければならない:
 	//   * 下端バウンドの絶対 Z ＝ elevation（柱下端）
@@ -1307,7 +1307,7 @@ TEST(all_fixtures_bounds_span_the_column_height)
 						   command.elevation + command.height));
 				// **上階を指す上端は、必ず横架材天端か軒高である**（FL を基準にしない）。
 				// M27 の一時期「offset が 0 になるときだけ上階の FL へ取り直す」回避策が
-				// 入っていたが、外れた見立てに基づくもので、絶対 Z が同じでも階の横架材天端
+				// 入っていたが、誤った見立てに基づくもので、絶対 Z が同じでも階の横架材天端
 				// オフセットに追随しない柱になっていた（parse/Column.h）。
 				if (command.topBound.storyOffset > 0)
 					CHECK(command.topBound.level == std::string("横架材天端") ||
@@ -1320,11 +1320,11 @@ TEST(all_fixtures_top_offset_returns_the_ifc_extrusion_height)
 {
 	// 上端は受ける横架材の天端に取り、梁せいぶんを端部オフセットへ入れる
 	// （core/Document.h「端部オフセット」）。実データで確かめるのは次の 3 点:
-	//   * 実際に描かれる高さ（パス長 ＋ 端部オフセット）が正のまま、
+	//   * 実際に描画される高さ（パス長 ＋ 端部オフセット）が正のまま、
 	//   * 下端は動かさない（startOffset は 0）、
-	//   * 上端を動かした柱が**必ず出る**（0 件ならこの調整は何も効いていない）。
+	//   * 上端を動かした柱が**必ず出る**（0 件ならこの調整は何も機能していない）。
 	// オフセットの大きさは受ける梁のせいなので、木造でありうる範囲（kColumnSeatTol）に
-	// 収まっていることも見る。
+	// 収まっていることも確認する。
 	std::size_t adjusted = 0;
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)

@@ -6,62 +6,62 @@
 //	（SDK あり）でのみコンパイルされ、無 SDK の core/parse ライブラリには入れない
 //	（CLAUDE.md「依存の向きは厳守する」）。
 //
-//	使う SDK API は VWFC のレイアウトダイアログ（draw/ResultDialog と同じ作法）と、
+//	使う SDK API は VWFC のレイアウトダイアログ（draw/ResultDialog と同じ方法）と、
 //	リソース一覧・サムネイル付きメニュー／シンボル表示:
 //
 //	  * VWResourceList::BuildList(kSymDefNode, sort) … 図面のシンボル定義の一覧
 //	    （kSymDefNode = 16。Kernel/API/Objs.TDType.h）
 //	  * VWResourceList::GetResourceName(i, name)     … その名前（UTF-8 の TXString）
 //	  * VWCheckButtonCtrl                            … その要素を取り込むか
-//	  * VWThumbnailPopupCtrl                         … サムネイル付きの選択（本命の形）
-//	  * VWPullDownMenuCtrl + VWSymbolDisplayCtrl     … 名前で選び、絵は隣に出す（退避の形）
+//	  * VWThumbnailPopupCtrl                         … サムネイル付きの選択（主の形）
+//	  * VWPullDownMenuCtrl + VWSymbolDisplayCtrl     … 名前で選び、図は隣に表示する（退避の形）
 //	  * AddRightControl / AddBelowControl            … 行と列の並べ方
 //	  * VWDialog::EnableControl(id, bool)            … チェックを外した行を灰色にする
 //
-//	【サムネイルは VWThumbnailPopupCtrl で出す（VWImagePopupCtrl ではない）】名前が似た
+//	【サムネイルは VWThumbnailPopupCtrl で表示する（VWImagePopupCtrl ではない）】名前が似た
 //	コントロールが 2 つあり、**VWImagePopupCtrl は使えない**——`CreateControl` が
 //	`return false` のスタブで、呼び順や初期化に関わらず必ず失敗する（SDK 同梱の実装ソースで
 //	確定。[SDK リファレンス「レイアウトダイアログ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md)）。
-//	実装が生きているのは同じコンポーネント種別を指す双子の VWThumbnailPopupCtrl の方で、
-//	項目はリソース一覧の ID と添字で足す（AddImageFromResource）。
+//	実装が機能しているのは同じコンポーネント種別を指す対の VWThumbnailPopupCtrl の方で、
+//	項目はリソース一覧の ID と添字で追加する（AddImageFromResource）。
 //
 //	【縦に積まず 2 列に折る】1 行の高さはサムネイルの高さで決まり、**サムネイルの大きさは
-//	選べない**（kStandardSize / kLineTypeSize の 2 つだけ。上記 Findings）。役割の数ぶん
+//	選べない**（kStandardSize / kLineTypeSize の 2 つだけ。上記 Findings）。役割の数の分だけ
 //	そのまま縦に積むと画面に対して細長くなりすぎるので、行を 2 列へ折って高さを半分にする
 //	（列の頭を「前の列の先頭行の右」へ置く。下記 kColumnCount / RowTail）。
 //
-//	【2 つの形を持ち、出せた方を使う】それでも**組み立てに失敗したときに黙って設定
-//	ダイアログごと出ないのが最悪**なので（画像ポップアップで実際にそうなった。cd8a415 の
-//	実測）、失敗したら**名前のプルダウン＋シンボル表示コントロール**という確実に出る形へ
-//	切り替えて開き直す。どちらの形で出したか（と、切り替えた理由）は取り込みログに残る。
+//	【2 つの形を持ち、出せた方を使う】それでも**構築に失敗したときに通知なしに設定
+//	ダイアログごと表示されないのが最悪**なので（画像ポップアップで実際にそうなった。cd8a415 の
+//	実測）、失敗したら**名前のプルダウン＋シンボル表示コントロール**という確実に表示できる形へ
+//	切り替えて開き直す。どちらの形で表示したか（と、切り替えた理由）は取り込みログに残る。
 //
-//	【絵の出し方（退避の形）】シンボル表示コントロールへ渡す描画モードとビューは、
+//	【図の表示方法（退避の形）】シンボル表示コントロールへ渡す描画モードとビューは、
 //	VectorWorks 自身がシンボルのサムネイルに使う既定値と同じ **Top/Plan（view = 2）＋
 //	ワイヤーフレーム（renderMode = 0）**（Kernel/API/MiniCadCallBacks.h の SymbolImgInfo の
-//	既定構築子）。**3D の標準ビュー（standardViewTop = 7）ではない**——伏図記号のような
-//	2D 部品だけのシンボルは 3D ビューでは何も映らない。
+//	既定コンストラクタ）。**3D の標準ビュー（standardViewTop = 7）ではない**——伏図記号のような
+//	2D 部品だけのシンボルは 3D ビューでは何も表示されない。
 //
 //	【図面枠の行はシンボルではない ── 図面枠スタイル（M28）】役割の行の次の 1 行は
 //	**図面枠（タイトルブロック）のスタイル**を選ぶ行で、選択肢の集め方だけが他と違う:
 //	`BuildList(kSymDefNode)` が返すシンボル定義のうち、**`GetSymbolDefSubType` が
 //	552（図面枠のスタイル）のもの**を並べる——他の行が「0＝普通のシンボル定義」を並べるのと
-//	表裏である（値は下記 Findings「シンボル」の実測表。**同じ一覧から 2 通りに拾うだけ**
+//	表裏である（値は下記 Findings「シンボル」の実測表。**同じ一覧から 2 通りに抽出するだけ**
 //	なので、リソース一覧は 1 つで足りる）。チェックを外せば図面枠を置かない（＝この設定を
 //	入れる前と同じ）。**図面枠スタイルが図面にあれば、初期値は「一覧の最初のもので置く」**
 //	（この起動中に一度 OK で閉じたあとは、その選択に従う）。
 //
 //	【その下の 1 行は寸法規格（M31）】図面枠の下にもう 1 行、伏図・軸組図へ入れる寸法の
-//	**寸法規格**を選ぶ行がある。寸法規格は資源（シンボル定義）ではなく**文書が配列で持つ
-//	もの**なので、サムネイルを出せない——この行だけは**形に依らず名前のプルダウン**で
-//	選ばせる（絵も出さない）。候補は `GetDimensionStandardVariable(index,
+//	**寸法規格**を選ぶ行がある。寸法規格はリソース（シンボル定義）ではなく**文書が配列で持つ
+//	もの**なので、サムネイルを表示できない——この行だけは**形に依らず名前のプルダウン**で
+//	選ばせる（図も表示しない）。候補は `GetDimensionStandardVariable(index,
 //	dimStdstandardName)` を組み込み（1〜9）→ カスタム（0〜−8）の順に総当たりして、名前が
 //	引けた index だけを並べる（SDK リファレンス Findings「Dimensions」）。チェックを外せば
 //	寸法を入れない。**初期値は図面枠と同じく「入れる」**（ご要望）——まだ決めていない
 //	うちは「JIS」があればそれ、無ければ一覧の最初の規格を選んだ状態で開く。
 //
 //	【その下は垂木の断面】寸法規格の下に、全垂木に一律で使う**垂木の断面（幅×せい、mm）**
-//	を打ち込む欄を 2 つ置く（IFC に垂木の寸法が無いので決め打ちしていた 45×45 を差し替える。
-//	core/ImportOptions.h の rafterWidth / rafterHeight）。選ぶものではなく数を打つので、
+//	を入力する欄を 2 つ置く（IFC に垂木の寸法が無いので決め打ちしていた 45×45 を差し替える。
+//	core/ImportOptions.h の rafterWidth / rafterHeight）。選ぶものではなく数値を入力するので、
 //	シンボルの行の仕組み（チェック・候補・サムネイル）には乗せず、**文字の入力欄
 //	（VWEditTextCtrl）を DDX で受ける**。読むのは
 //	core::parseRafterSize（全角の数字も読む）で、読めない・範囲外の値は**前回の値のまま**
@@ -71,27 +71,28 @@
 //	「前のレベルと同じ伏図にまとめる」高さのチェックを 1 つずつ並べる（draw/SettingsDialog.h）。
 //	数は IFC によって変わるので、**イベントマップには載せず DDX だけで受ける**——チェックを
 //	切り替えても他のコントロールを動かす必要が無い（シンボルの行のチェックは選択肢を灰色に
-//	するためにイベントを要る）。ID は kFirstMergeID から 1 つずつ。
+//	するためにイベントを必要とする）。ID は kFirstMergeID から 1 つずつ。
 //
 //	【項目は図面のシンボル定義そのもの】どちらの形でも候補は図面に実在するシンボルだけ。
 //	行ごとの「取り込む」チェックがあるのでそれで足りる——置くものが図面に無いなら、その要素は
 //	チェックを外せばよい（core/ImportOptions.h、docs/DEV-NOTES.md「取り込み設定の決め事」）。
-//	ただし**一覧をそのまま出さない**——`BuildList(kSymDefNode)` は VectorWorks 自身が
+//	ただし**一覧をそのまま表示しない**——`BuildList(kSymDefNode)` は VectorWorks 自身が
 //	プラグインオブジェクトのスタイルとして持っている定義まで返すので、`GetSymbolDefSubType`
-//	で拾い分ける（下記 SymbolSubType）。
+//	で選別する（下記 SymbolSubType）。
 //
 //	【リソース一覧はダイアログが持ち続ける】サムネイルの項目はリソース一覧を **ID で**
-//	指しているので、一覧を先に捨てると絵が引けなくなる（VWResourceList は参照カウント式で、
-//	最後の 1 つが消えるときに一覧そのものを破棄する）。ダイアログのメンバとして生存させる。
+//	指しているので、一覧を先に破棄すると図を取得できなくなる（VWResourceList は参照カウント式で、
+//	最後の 1 つが破棄されるときに一覧そのものを破棄する）。ダイアログのメンバとして生存させる。
 //
 //	【選択は名前で引き取る】サムネイルの選択は DDX で受けられないので、OnDefaultButtonEvent
 //	（＝OK が押された瞬間。**閉じた後のコントロールからは読めない**）に読む。読むのは
 //	`GetSelectedItem()`（選ばれたリソースの InternalIndex）→ `InternalIndexToNameN` で
-//	**名前**——項目の添字と候補の対応に頼らずに済む（対応は取れているが、候補を絞って
-//	足している以上、名前で引く方が崩れない）。名前を引けなかったときだけ添字
-//	（`GetSelectedItemIndex()`）へ落とす。名前のプルダウンは AddDDX_PulldownMenu で受ける。
+//	**名前**——項目の添字と候補の対応に依存せずに済む（対応は取れているが、候補を絞って
+//	追加している以上、名前で引く方が崩れない）。名前を引けなかったときだけ添字
+//	（`GetSelectedItemIndex()`）へフォールバックする。名前のプルダウンは AddDDX_PulldownMenu
+//	で受ける。
 //
-//	**「まだ選んでいない」は読み取れない**——項目を足した時点で先頭が選ばれた状態になる
+//	**「まだ選んでいない」は読み取れない**——項目を追加した時点で先頭が選ばれた状態になる
 //	（実機で確認済み。上記 Findings）。この画面では行ごとの「取り込む」チェックが
 //	その役目を持つので、未選択を判別する必要は無い。
 //
@@ -128,8 +129,8 @@ namespace HomeskzIfcImport::draw
 		constexpr Sint32 kTitleBlockStyleSubType = 552;
 
 		// コントロール ID。1 = OK / 2 = キャンセルは SDK の予約。行 i は
-		// [チェック, 説明, 選択, 絵] の 4 つを kFirstRowID から 4 つ刻みで使う
-		// （絵は退避の形でだけ作る。ID は形に依らず固定にしておく）。
+		// [チェック, 説明, 選択, 図] の 4 つを kFirstRowID から 4 つ刻みで使う
+		// （図は退避の形でだけ生成する。ID は形に依らず固定にしておく）。
 		constexpr TControlID kIntroID = 3;
 		// 伏図のまとめ方の見出しと、その下のチェック（冒頭「いちばん下は伏図のまとめ方」）。
 		// シンボルの行（kFirstRowID から kRowStride 刻み）と重ならない所から振る。
@@ -186,14 +187,14 @@ namespace HomeskzIfcImport::draw
 		constexpr std::size_t kRowsPerColumn =
 			(core::kSymbolRoleCount + kColumnCount - 1) / kColumnCount;
 
-		// 列と列の間隔（標準文字幅）。0 だと左の列の絵と右の列のチェックがくっつく。
+		// 列と列の間隔（標準文字幅）。0 だと左の列の図と右の列のチェックが接してしまう。
 		constexpr short kColumnGapChars = 2;
 
-		// 退避の形で使うシンボルの絵の出し方（冒頭「絵の出し方（退避の形）」）。
+		// 退避の形で使うシンボルの図の表示方法（冒頭「図の表示方法（退避の形）」）。
 		constexpr TRenderMode kPreviewRenderMode = 0; // ワイヤーフレーム
 		constexpr TStandardView kPreviewView = 2;	  // Top/Plan
 
-		// ダイアログの形。**本命はサムネイル、退避は名前＋絵**（冒頭「2 つの形を持ち…」）。
+		// ダイアログの形。**主はサムネイル、退避は名前＋図**（冒頭「2 つの形を持ち…」）。
 		enum class Form
 		{
 			Thumbnail,
@@ -201,7 +202,7 @@ namespace HomeskzIfcImport::draw
 		};
 
 		// 図面のシンボル定義の一覧と、そこから採った**候補**。names[i] が i 番目の候補の
-		// 名前で、listIndices[i] がその一覧側の添字（サムネイルの項目はこの添字で足す）。
+		// 名前で、listIndices[i] がその一覧側の添字（サムネイルの項目はこの添字で追加する）。
 		// **候補の並びと項目の並びは 1 対 1**なので、選択された項目の添字がそのまま候補の
 		// 添字になる。
 		struct CandidateList
@@ -218,13 +219,13 @@ namespace HomeskzIfcImport::draw
 
 		// 候補は 2 組ある（冒頭「図面枠の行はシンボルではない」）——普通のシンボル
 		// 定義（シンボルを置く行）と、図面枠スタイル（図面枠の行）。**元の一覧は同じ
-		// 1 つ**で、subType で拾い分けるだけ。
+		// 1 つ**で、subType で選別するだけ。
 		struct SymbolResources
 		{
 			VWFC::Tools::VWResourceList list;
 			CandidateList symbols;	   // 普通のシンボル定義（subType 0）
 			CandidateList titleBlocks; // 図面枠スタイル（subType 552）
-			// 寸法規格（M31）。資源ではないので names だけを持つ（listIndices は空）。
+			// 寸法規格（M31）。リソースではないので names だけを持つ（listIndices は空）。
 			CandidateList dimensionStandards;
 		};
 
@@ -233,7 +234,7 @@ namespace HomeskzIfcImport::draw
 		// 【なぜ要るか】`BuildList(kSymDefNode)` は図面のシンボル定義を**全部**返すので、
 		// VectorWorks 自身がプラグインオブジェクトのスタイルとして持っている定義
 		// （図面枠・データタグ・図面ラベル・立断面指示線・グラフィック凡例・木質構造材…）
-		// まで並ぶ。シンボルを置く行の選択肢に出しても置けるものではないので外し、
+		// まで並ぶ。シンボルを置く行の選択肢に表示しても置けるものではないので除外し、
 		// **図面枠のスタイルだけは図面枠の行の選択肢に使う**（冒頭「図面枠の行は…」）。
 		//
 		// 切り分けは `GetSymbolDefSubType`——**0 なら普通のシンボル定義、0 以外はその
@@ -249,8 +250,8 @@ namespace HomeskzIfcImport::draw
 			return gSDK->GetSymbolDefSubType(definition);
 		}
 
-		// いま開いている図面の**置けるシンボル定義**と**図面枠スタイル**（どちらも名前順）。
-		// 読めなければ空（＝どの要素も取り込めない。ダイアログ自体は出せる）。
+		// 現在開いている図面の**置けるシンボル定義**と**図面枠スタイル**（どちらも名前順）。
+		// 読めなければ空（＝どの要素も取り込めない。ダイアログ自体は表示できる）。
 		SymbolResources CollectSymbolResources()
 		{
 			SymbolResources resources;
@@ -259,8 +260,8 @@ namespace HomeskzIfcImport::draw
 				const std::size_t count = resources.list.BuildList(kSymDefNode, true);
 				for (std::size_t i = 0; i < count; ++i)
 				{
-					// **拾うのは 2 通りだけ。** ほかの PIO スタイル（データタグ・図面
-					// ラベル・グラフィック凡例…）はどちらの行にも出さない。
+					// **抽出するのは 2 通りだけ。** ほかの PIO スタイル（データタグ・図面
+					// ラベル・グラフィック凡例…）はどちらの行にも表示しない。
 					const Sint32 subType = SymbolSubType(resources.list.GetResource(i));
 					CandidateList* into = nullptr;
 					if (subType == 0)
@@ -281,9 +282,9 @@ namespace HomeskzIfcImport::draw
 			}
 			catch (...)
 			{
-				// リソース一覧を作れない図面でも設定ダイアログ自体は出す（候補が空になり、
+				// リソース一覧を生成できない図面でも設定ダイアログ自体は表示する（候補が空になり、
 				// どの要素にもチェックが入らない）。1 つの失敗で取り込みの入口を塞がない。
-				// **途中まで採れていた候補は捨てる**——半端な一覧は項目と対応しない。
+				// **途中まで取得できていた候補は破棄する**——不完全な一覧は項目と対応しない。
 				resources.symbols.clear();
 				resources.titleBlocks.clear();
 			}
@@ -316,7 +317,7 @@ namespace HomeskzIfcImport::draw
 			std::string label;
 		};
 
-		// 候補からチェックの行を作る。**まとめる相手の居ない高さ（階の最も低い高さ）は
+		// 候補からチェックの行を生成する。**まとめる相手の無い高さ（階の最も低い高さ）は
 		// 並べない**——問う意味が無い（parse/PlanLevel はそれを無視する）。
 		std::vector<MergeRow> MergeRows(const std::vector<core::PlanLevelChoice>& choices)
 		{
@@ -336,7 +337,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// 役割の並びは表の順（core::symbolRoles()）。行番号 → 役割。**図面枠の行
-		// （kTitleBlockRow）には役割が無い**ので、呼ぶ前に行を確かめること。
+		// （kTitleBlockRow）には役割が無い**ので、呼ぶ前に行を確認すること。
 		core::SymbolRole roleAt(std::size_t row)
 		{
 			return core::symbolRoles()[row].role;
@@ -354,10 +355,10 @@ namespace HomeskzIfcImport::draw
 
 		// 取り込み設定ダイアログ 1 枚。行は**役割の数 ＋ 図面枠スタイルと寸法規格の 2 行**で、
 		// 役割の増減は core/ImportOptions.h の表に従う（**イベントマップだけはコンパイル時の
-		// ID が要る**ので、下の static_assert が「表を増やしたらここも増やせ」と教える）。
+		// ID が要る**ので、下の static_assert が「表を増やしたらここも増やす」ことを知らせる）。
 		//
 		// **行の違いは「候補がどの組か」と「名前で選ぶか」だけ**に閉じてある（Candidates /
-		// HasPulldown / HasPreview）——作り方・埋め方・選択の読み取りは全行で同じコードが通る。
+		// HasPulldown / HasPreview）——生成・値の設定・選択の読み取りは全行で同じコードを通る。
 		class CImportSettingsDialog : public VWDialog
 		{
 		public:
@@ -386,23 +387,23 @@ namespace HomeskzIfcImport::draw
 				{
 					fChecks.emplace_back(checkID(row));
 					fLabels.emplace_back(labelID(row));
-					// **3 種類とも全行ぶん持つ**（作るのは使うものだけ。添字を行番号と
-					// 揃えるため）。サムネイルとプルダウンは同じ ID だが、1 行で作るのは
+					// **3 種類とも全行分持つ**（生成するのは使うものだけ。添字を行番号と
+					// 揃えるため）。サムネイルとプルダウンは同じ ID だが、1 行で生成するのは
 					// どちらか一方だけ。
 					fThumbs.emplace_back(popupID(row));
 					fPopups.emplace_back(popupID(row));
 					fPreviews.emplace_back(previewID(row));
 
-					// **いまの対応先が図面にある行だけを「取り込む」で開く。** 無い名前は
-					// 項目にできない（＝置きようがない）ので、チェックを外した状態にする。
+					// **現在の対応先が図面にある行だけを「取り込む」で開く。** 無い名前は
+					// 項目にできない（＝配置できない）ので、チェックを外した状態にする。
 					//
 					// 【図面枠と寸法規格は初期値が「置く／入れる」】図面に候補があるなら、
 					// **まだ決めていないうちは候補の 1 つで置く**を初期値にする（ご要望）。
 					// 図面枠は一覧の最初のスタイル、寸法規格は「JIS」があればそれ・無ければ
-					// 一覧の最初（DefaultIndex）。前回選んだものがいまの図面に無いときも
+					// 一覧の最初（DefaultIndex）。前回選んだものが現在の図面に無いときも
 					// そこへ寄せる——名前は図面ごとに違うので、名前が合わないことを
 					// 「置かない」理由にしない。前回チェックを外して閉じたならそれに従う。
-					// 設定ダイアログを出さずに取り込むとき（core::ImportOptions の既定）は
+					// 設定ダイアログを表示せずに取り込むとき（core::ImportOptions の既定）は
 					// 従来どおりどちらも置かない。
 					const bool defaultsOn = row == kTitleBlockRow || row == kDimensionRow;
 					const bool wanted =
@@ -419,20 +420,20 @@ namespace HomeskzIfcImport::draw
 			}
 			~CImportSettingsDialog() override = default;
 
-			// **実際に出せたか。** 組めなかったときは呼び出し側が次の形（または
-			// 「既定のまま取り込む」）へ落とす（draw/SettingsDialog.h）。
+			// **実際に表示できたか。** 構築できなかったときは呼び出し側が次の形（または
+			// 「既定のまま取り込む」）へフォールバックする（draw/SettingsDialog.h）。
 			bool Shown() const
 			{
 				return fShown;
 			}
 
-			// この形では出せないと分かった（＝別の形で開き直してほしい）。
+			// この形では表示できないと判明した（＝別の形で開き直してほしい）。
 			bool Failed() const
 			{
 				return !fShown || fAborted;
 			}
 
-			// 何が起きたか（ログへ出す 1 行ぶん。問題が無ければ空）。
+			// 何が起きたか（ログへ出力する 1 行分。問題が無ければ空）。
 			const std::string& Note() const
 			{
 				return fNote;
@@ -476,8 +477,8 @@ namespace HomeskzIfcImport::draw
 				return options;
 			}
 
-			// 垂木の断面の欄に読めない値があったか（ログへ出す 1 行ぶん。無ければ空）。
-			// Result と同じく OK で閉じた後に呼ぶ（DDX が欄の文字を写した後）。
+			// 垂木の断面の欄に読めない値があったか（ログへ出力する 1 行分。無ければ空）。
+			// Result と同じく OK で閉じた後に呼ぶ（DDX が欄の文字を複製した後）。
 			std::string RafterNote() const
 			{
 				std::string note;
@@ -506,7 +507,7 @@ namespace HomeskzIfcImport::draw
 					fNote = "ダイアログの枠を作れませんでした";
 					return false;
 				}
-				// 図面にシンボルが 1 つも無いなら、選ばせる前にそう言う。
+				// 図面にシンボルが 1 つも無いなら、選ばせる前にその旨を表示する。
 				const TXString intro =
 					fResources.symbols.names.empty()
 						? "この図面にはシンボルが登録されていないため、シンボルで置く要素は"
@@ -523,7 +524,7 @@ namespace HomeskzIfcImport::draw
 
 				for (std::size_t row = 0; row < kRowCount; ++row)
 				{
-					// チェックは文字を持たない（行の名前は隣の説明が出す）——文字を
+					// チェックは文字を持たない（行の名前は隣の説明が表示する）——文字を
 					// 持たせると幅が行ごとに変わり、右の列が揃わない。
 					if (!fChecks[row].CreateControl(this, ""))
 					{
@@ -539,13 +540,13 @@ namespace HomeskzIfcImport::draw
 						return false;
 
 					// 行の頭（チェック）の置き場所は 4 通り。**図面枠の行**は 2 列の下へ
-					// 1 行ぶん空けて置く（役割の列に混ぜると、列の折り返しがずれるうえに
+					// 1 行分空けて置く（役割の列に混ぜると、列の折り返しがずれるうえに
 					// 「シンボルではないもの」がシンボルの列に紛れる）。置き先は**左の列の
 					// いちばん下**——列は左から埋まるので、そこが必ず最後まで埋まっている。
-					// **列の先頭**は、1 列目なら説明文の下（ここだけ 1 行ぶん空ける）、
+					// **列の先頭**は、1 列目なら説明文の下（ここだけ 1 行分空ける）、
 					// 2 列目以降なら**前の列の先頭行の右端の右**——列の頭どうしを揃えると、
 					// 行の高さが全列で同じなので以降の行も自然に揃う。**列の途中**は
-					// 1 つ上の行の頭の下で、行間は空けない（絵が文字より背が高いぶん、
+					// 1 つ上の行の頭の下で、行間は空けない（図が文字より背が高い分、
 					// 詰めても窮屈にならない）。
 					if (row == kTitleBlockRow)
 						this->AddBelowControl(&fChecks[kRowsPerColumn - 1], &fChecks[row], 0, 1);
@@ -578,8 +579,8 @@ namespace HomeskzIfcImport::draw
 			void OnInitializeContent() override
 			{
 				VWDialog::OnInitializeContent();
-				// **中身を入れる前に「出た」ことにする。** ここから先で例外が出ても、
-				// 呼び出し側は「組めなかった」ではなく「この形では駄目だった」と分かる。
+				// **中身を入れる前に「表示できた」ことにする。** ここから先で例外が出ても、
+				// 呼び出し側は「構築できなかった」ではなく「この形では失敗した」と判別できる。
 				fShown = true;
 				try
 				{
@@ -591,14 +592,14 @@ namespace HomeskzIfcImport::draw
 					}
 					for (std::size_t k = 0; k < fMergeRows.size(); ++k)
 						fMergeChecks[k].SetState(fMergeStates[k]);
-					// 初期値は自分でも入れる（DDX が流し込む前提に寄りかからない）。
+					// 初期値は自身でも入れる（DDX が値を設定する前提に依存しない）。
 					fRafterWidth.SetText(fRafterWidthText);
 					fRafterHeight.SetText(fRafterHeightText);
 				}
 				catch (...)
 				{
-					// 項目を入れられなかった（サムネイル側で起きうる）。**この形は諦めて
-					// 開き直してもらう**——中身の無いダイアログを見せない。
+					// 項目を入れられなかった（サムネイル側で起きうる）。**この形は断念して
+					// 開き直してもらう**——中身の無いダイアログを表示しない。
 					fAborted = true;
 					fNote = "選択肢を入れられませんでした";
 					this->SetDialogClose(false); // キャンセル扱いで閉じる
@@ -623,7 +624,7 @@ namespace HomeskzIfcImport::draw
 				this->AddDDX_EditText(kRafterHeightID, &fRafterHeightText);
 			}
 
-			// OK が押された。**閉じる前に**サムネイルの選択を控える（閉じた後のコントロール
+			// OK が押された。**閉じる前に**サムネイルの選択を記録する（閉じた後のコントロール
 			// からは読めない）。
 			void OnDefaultButtonEvent() override
 			{
@@ -644,8 +645,8 @@ namespace HomeskzIfcImport::draw
 				VWDialog::OnDefaultButtonEvent();
 			}
 
-			// プルダウン（退避の形）が動いたら**その行の絵**を差し替える。DDX は OK のときに
-			// しか流れないので、いまの選択はコントロールから直接読む。
+			// プルダウン（退避の形）が変わったら**その行の図**を差し替える。DDX は OK のときに
+			// しか値を渡さないので、現在の選択はコントロールから直接読む。
 			void OnSymbolChanged(TControlID controlID, VWDialogEventArgs& /*eventArgs*/)
 			{
 				for (std::size_t row = 0; row < kRowCount; ++row)
@@ -661,7 +662,7 @@ namespace HomeskzIfcImport::draw
 			}
 
 			// チェックが変わったら、その行の選択肢を有効／無効にする（取り込まない行が
-			// 見て分かるように）。
+			// 一目で分かるように）。
 			void OnEnabledChanged(TControlID controlID, VWDialogEventArgs& /*eventArgs*/)
 			{
 				for (std::size_t row = 0; row < kRowCount; ++row)
@@ -678,7 +679,7 @@ namespace HomeskzIfcImport::draw
 
 		private:
 			// **その行の候補**（冒頭「図面枠の行はシンボルではない」）。ここだけが
-			// 行による違いで、以降の作り方・埋め方・読み取りは全行で同じ。
+			// 行による違いで、以降の生成・値の設定・読み取りは全行で同じ。
 			const CandidateList& Candidates(std::size_t row) const
 			{
 				if (row == kTitleBlockRow)
@@ -688,14 +689,14 @@ namespace HomeskzIfcImport::draw
 				return fResources.symbols;
 			}
 
-			// その行を**名前のプルダウン**で選ぶか。退避の形は全行、本命の形でも寸法規格の
-			// 行だけ（資源ではないのでサムネイルにできない。冒頭「その下の 1 行は寸法規格」）。
+			// その行を**名前のプルダウン**で選ぶか。退避の形は全行、主の形でも寸法規格の
+			// 行だけ（リソースではないのでサムネイルにできない。冒頭「その下の 1 行は寸法規格」）。
 			bool HasPulldown(std::size_t row) const
 			{
 				return fForm == Form::NameList || row == kDimensionRow;
 			}
 
-			// その行に**絵**を出すか（退避の形のシンボルの行だけ。寸法規格には絵が無い）。
+			// その行に**図**を表示するか（退避の形のシンボルの行だけ。寸法規格には図が無い）。
 			bool HasPreview(std::size_t row) const
 			{
 				return fForm == Form::NameList && row != kDimensionRow;
@@ -714,7 +715,7 @@ namespace HomeskzIfcImport::draw
 			// 初期値が「置く」の行（図面枠・寸法規格）で、前回の名前が使えないときに選ぶ
 			// 候補。寸法規格は「JIS」を優先する（core::defaultDimensionStandardIndex。
 			// 自動の 1 周目の既定の設定と同じものを選ぶよう、選び方は core に 1 つだけ置く）。
-			// 図面枠には決め手が無いので最初。
+			// 図面枠には選ぶ基準が無いので最初。
 			std::size_t DefaultIndex(std::size_t row) const
 			{
 				if (row == kDimensionRow)
@@ -732,7 +733,7 @@ namespace HomeskzIfcImport::draw
 			}
 
 			// その行の**右端**のコントロール（次の列を右へ置くときの相手）。何が右端かは
-			// 形で変わる——サムネイルの形は選択そのもの、名前の形は隣に出す絵。
+			// 形で変わる——サムネイルの形は選択そのもの、名前の形は隣に表示する図。
 			VWControl* RowTail(std::size_t row)
 			{
 				if (!HasPulldown(row))
@@ -742,7 +743,7 @@ namespace HomeskzIfcImport::draw
 				return &fPreviews[row];
 			}
 
-			// 行の選択コントロールを作る（形で中身が変わる唯一の場所）。
+			// 行の選択コントロールを生成する（形で中身が変わる唯一の場所）。
 			bool CreateSelector(std::size_t row)
 			{
 				if (!HasPulldown(row))
@@ -768,7 +769,7 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			// 行の選択コントロールへ候補を流し込む（**項目はリソース一覧の順**——項目の
+			// 行の選択コントロールへ候補を設定する（**項目はリソース一覧の順**——項目の
 			// 添字と名前の添字を一致させておくと、選択をそのまま名前へ引き直せる）。
 			void FillSelector(std::size_t row)
 			{
@@ -777,8 +778,8 @@ namespace HomeskzIfcImport::draw
 				if (!HasPulldown(row))
 				{
 					VWThumbnailPopupCtrl& popup = fThumbs[row];
-					// 項目はリソース一覧の **ID と（一覧側の）添字**で足す（絵は VW が引く）。
-					// **候補だけを候補の順に足す**ので、項目 i ＝ 候補 i になる。
+					// 項目はリソース一覧の **ID と（一覧側の）添字**で追加する（図は VW
+					// が取得する）。**候補だけを候補の順に追加する**ので、項目 i ＝ 候補 i になる。
 					const Sint32 listID = fResources.list.GetListID();
 					for (const std::size_t listIndex : candidates.listIndices)
 						popup.AddImageFromResource(listID, listIndex);
@@ -794,7 +795,7 @@ namespace HomeskzIfcImport::draw
 			}
 
 			// サムネイルで選ばれている項目を**名前で**引き当て、候補の添字にして返す
-			// （冒頭「選択は名前で引き取る」）。名前が引けなければ項目の添字に落とし、
+			// （冒頭「選択は名前で引き取る」）。名前が引けなければ項目の添字へフォールバックし、
 			// それも範囲外なら開いたときの選択のまま返す。
 			std::size_t SelectedIndexOf(std::size_t row) const
 			{
@@ -829,7 +830,7 @@ namespace HomeskzIfcImport::draw
 				return static_cast<const char*>(text);
 			}
 
-			// 垂木の断面の欄を作る。寸法規格の行の下へ 1 行ぶん空けて、見出し・幅・「×」・
+			// 垂木の断面の欄を生成する。寸法規格の行の下へ 1 行分空けて、見出し・幅・「×」・
 			// せいを横に並べる（冒頭「その下は垂木の断面」）。
 			bool CreateRafterSize()
 			{
@@ -852,8 +853,8 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			// 伏図のまとめ方の欄を作る（候補が無ければ何も作らない）。垂木の断面の欄の下へ
-			// 1 行ぶん空けて見出し、その下にチェックを 1 つずつ縦に並べる——行の数は IFC
+			// 伏図のまとめ方の欄を生成する（候補が無ければ何も生成しない）。垂木の断面の欄の下へ
+			// 1 行分空けて見出し、その下にチェックを 1 つずつ縦に並べる——行の数は IFC
 			// 次第なので、2 列に折る役割の行とは混ぜない。
 			bool CreateMergeRows()
 			{
@@ -882,7 +883,7 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			// その行の見た目を今の状態に合わせる。**選ぶものが無い行は常に無効**——選べる
+			// その行の表示を現在の状態に合わせる。**選ぶものが無い行は常に無効**——選べる
 			// ものが無いのにチェックできると、「取り込むと言ったのに何も置かれない」ことになる。
 			void UpdateRow(std::size_t row)
 			{
@@ -894,7 +895,7 @@ namespace HomeskzIfcImport::draw
 				this->EnableControl(popupID(row), hasItems && fEnabled[row]);
 				if (!HasPreview(row))
 					return;
-				// 退避の形だけは絵が別のコントロールなので、選択に追随させる。
+				// 退避の形だけは図が別のコントロールなので、選択に追随させる。
 				const std::size_t index = fSelection[row];
 				const TXString name =
 					index < names.size() ? TXString(names[index].c_str()) : TXString("");
@@ -908,22 +909,22 @@ namespace HomeskzIfcImport::draw
 			VWEditTextCtrl fRafterWidth;
 			VWStaticTextCtrl fRafterTimes;
 			VWEditTextCtrl fRafterHeight;
-			// **deque に直接作る。** 行数ぶんのコントロールを溜めるが、vector だと追加の
-			// たびに既存の要素が動いてしまう（ダイアログは生存中ずっとコントロールの
-			// アドレスを持つ）。deque は追加しても既存の要素を動かさない
+			// **deque に直接生成する。** 行数分のコントロールを溜めるが、vector だと追加の
+			// たびに既存の要素が移動してしまう（ダイアログは生存中ずっとコントロールの
+			// アドレスを保持する）。deque は追加しても既存の要素を動かさない
 			// （draw/ResultDialog.cpp の本文行と同じ理由）。
 			std::deque<VWCheckButtonCtrl> fChecks;
 			std::deque<VWStaticTextCtrl> fLabels;
-			std::deque<VWThumbnailPopupCtrl> fThumbs; // サムネイルの行だけ作る
-			std::deque<VWPullDownMenuCtrl> fPopups; // 名前で選ぶ行だけ作る（HasPulldown）
-			std::deque<VWSymbolDisplayCtrl> fPreviews; // 絵を出す行だけ作る（HasPreview）
+			std::deque<VWThumbnailPopupCtrl> fThumbs; // サムネイルの行だけ生成する
+			std::deque<VWPullDownMenuCtrl> fPopups; // 名前で選ぶ行だけ生成する（HasPulldown）
+			std::deque<VWSymbolDisplayCtrl> fPreviews; // 図を表示する行だけ生成する（HasPreview）
 			// 伏図のまとめ方（冒頭「いちばん下は伏図のまとめ方」）。コントロールも状態も
-			// **deque**——DDX とダイアログがアドレスを持ち続けるので、動かしてはいけない
+			// **deque**——DDX とダイアログがアドレスを保持し続けるので、移動してはいけない
 			// （deque<bool> は vector<bool> と違って本物の bool を並べる）。
 			VWStaticTextCtrl fMergeIntro;
 			std::deque<VWCheckButtonCtrl> fMergeChecks;
 			std::deque<bool> fMergeStates;
-			SymbolResources fResources; // 項目の元（ダイアログより長生きさせない）
+			SymbolResources fResources; // 項目の元（ダイアログより長く生存させない）
 			std::vector<MergeRow> fMergeRows;
 			Form fForm = Form::Thumbnail;
 			std::array<std::size_t, kRowCount> fSelection = {};
@@ -938,7 +939,7 @@ namespace HomeskzIfcImport::draw
 			std::string fNote;
 		};
 
-		// 行を 1 つ足したら、下のイベントマップにも 2 行足すこと（コントロールの ID は
+		// 行を 1 つ追加したら、下のイベントマップにも 2 行追加すること（コントロールの ID は
 		// コンパイル時の定数でなければならないので、ここだけは表から回せない）。
 		// **図面枠の行（kTitleBlockRow）もイベントマップに要る**ので、数えるのは
 		// 役割の数ではなく行の数。
@@ -946,7 +947,7 @@ namespace HomeskzIfcImport::draw
 					  "行を増減したら CImportSettingsDialog のイベントマップも直すこと");
 
 		// EVENT_DISPATCH_MAP_BEGIN は SDK のマクロで、その展開が misc-const-correctness に
-		// 引っかかる（マクロ側のコードでこちらの落ち度ではない。draw/ResultDialog.cpp と同じ）。
+		// 該当する（マクロ側のコードでこちらの誤りではない。draw/ResultDialog.cpp と同じ）。
 		// NOLINTNEXTLINE(misc-const-correctness)
 		EVENT_DISPATCH_MAP_BEGIN(CImportSettingsDialog);
 		ADD_DISPATCH_EVENT(checkID(0), OnEnabledChanged);
@@ -971,7 +972,7 @@ namespace HomeskzIfcImport::draw
 		ADD_DISPATCH_EVENT(popupID(9), OnSymbolChanged); // 寸法規格
 		EVENT_DISPATCH_MAP_END;
 
-		// 前回の選択（この VectorWorks を起動している間だけ覚えている）。初回は役割の表の
+		// 前回の選択（この VectorWorks を起動している間だけ記憶している）。初回は役割の表の
 		// 既定名＋全要素を取り込む＝従来と同じ対応。**図面には何も書かない**——名前付き
 		// リソースを増やさないのと同じで、取り込みの設定を図面へ書き戻すことはしない
 		// （CLAUDE.md「開発の基本方針」4）。
@@ -990,7 +991,7 @@ namespace HomeskzIfcImport::draw
 			return decided;
 		}
 
-		// note へ 1 行足す（複数の形を試したときは、試した順に並ぶ）。
+		// note へ 1 行追加する（複数の形を試したときは、試した順に並ぶ）。
 		void AddNote(std::string* note, const std::string& line)
 		{
 			if (note == nullptr || line.empty())
@@ -1014,7 +1015,7 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// 集められなければ組まない（呼び出し側は ImportOptions の既定で続ける。
+			// 収集できなければ構築しない（呼び出し側は ImportOptions の既定で続ける。
 			// draw/Feedback.cpp の runTestRound）。
 			AddNote(note, "図面からシンボル・図面枠・寸法規格を集められませんでした");
 			return false;
@@ -1031,8 +1032,8 @@ namespace HomeskzIfcImport::draw
 			SymbolResources resources = CollectSymbolResources();
 			resources.dimensionStandards = CollectDimensionStandards();
 
-			// **本命（サムネイル）→ 退避（名前＋絵）の順に試す。** 前者で出せなかった
-			// ときだけ後者へ落ちる（冒頭「2 つの形を持ち、出せた方を使う」）。
+			// **主（サムネイル）→ 退避（名前＋図）の順に試す。** 前者で表示できなかった
+			// ときだけ後者へフォールバックする（冒頭「2 つの形を持ち、出せた方を使う」）。
 			for (const Form form : {Form::Thumbnail, Form::NameList})
 			{
 				CImportSettingsDialog dialog(remembered, resources, MergeRows(planLevels), form,

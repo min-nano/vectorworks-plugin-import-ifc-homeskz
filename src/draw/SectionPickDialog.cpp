@@ -5,18 +5,18 @@
 //	【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include するため、プラグインビルドでのみ
 //	コンパイルされる。
 //
-//	使う SDK API は取り込み設定ダイアログ（draw/SettingsDialog）で実機に出ているものだけ:
+//	使う SDK API は取り込み設定ダイアログ（draw/SettingsDialog）で実機での動作を確認済みのものだけ:
 //	VWStaticTextCtrl・VWCheckButtonCtrl・AddFirstGroupControl / AddBelowControl /
 //	AddRightControl・AddDDX_CheckButton。
 //
 //	【並べ方】方向ごとに見出し（"X通り" / "Y通り"）を置き、その下へ通りを**縦に**並べる。
-//	1 列が kRowsPerColumn 本を超えたら右へ列を足す（30 本の通りを 1 列に積むと画面から
+//	1 列が kRowsPerColumn 本を超えたら右へ列を追加する（30 本の通りを 1 列に積むと画面から
 //	はみ出す）。Y通りの見出しは X通りのいちばん左の列の下に置く——列は左から埋まるので、
 //	そこが必ず最後まで埋まっている（設定ダイアログの図面枠の行と同じ考え方）。
 //
 //	【チェックに文字を持たせない】行は「チェック（文字なし）＋幅を固定した名前」の 2 つで
 //	組む。チェックに名前を持たせると幅が名前ごとに変わり、右の列の頭が揃わない
-//	（設定ダイアログと同じ作法）。
+//	（設定ダイアログと同じ方法）。
 //
 
 #include "PluginPrefix.h"
@@ -35,7 +35,7 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 1 列に並べる通りの本数。これを超えたら右へ列を足す。
+		// 1 列に並べる通りの本数。これを超えたら右へ列を追加する。
 		constexpr std::size_t kRowsPerColumn = 10;
 
 		// 名前の欄の幅（標準文字幅）。通り名は "X10''" / "又又い" / "1(2)" ほどの長さ。
@@ -67,8 +67,8 @@ namespace HomeskzIfcImport::draw
 														  : "Y通り（横の通り芯）";
 		}
 
-		// 通り 1 本ぶん。**deque に直接作る**——ダイアログは生存中ずっとコントロールと
-		// DDX の変数のアドレスを持つので、追加で既存の要素が動いてはいけない
+		// 通り 1 本分。**deque に直接生成する**——ダイアログは生存中ずっとコントロールと
+		// DDX の変数のアドレスを保持するので、追加で既存の要素が動いてはいけない
 		// （draw/SettingsDialog.cpp と同じ理由）。
 		struct Item
 		{
@@ -82,10 +82,10 @@ namespace HomeskzIfcImport::draw
 			std::string number; // 図番（core::ImportOptions::skippedSections に入れる綴り）
 			VWCheckButtonCtrl check;
 			VWStaticTextCtrl label;
-			bool drawn = true; // DDX の受け先。**初期値は全部描く**（ヘッダ冒頭）
+			bool drawn = true; // DDX の受け先。**初期値は全部描画する**（ヘッダ冒頭）
 		};
 
-		// 方向 1 つぶん（見出しと、その方向の通りの範囲）。
+		// 方向 1 つ分（見出しと、その方向の通りの範囲）。
 		struct Group
 		{
 			core::SectionDirection direction = core::SectionDirection::X;
@@ -100,7 +100,7 @@ namespace HomeskzIfcImport::draw
 				: fIntro(kIntroID)
 			{
 				// 方向ごとに括る。候補は X通り → Y通りの順で来る（parse/Section）が、
-				// 並びに頼らず方向で分けてから並べる。
+				// 並び順に依存せず方向で分けてから並べる。
 				for (const core::SectionDirection direction :
 					 {core::SectionDirection::X, core::SectionDirection::Y})
 				{
@@ -261,7 +261,7 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// ダイアログ由来の異常で取り込みの入口を塞がない（全部描くで続ける）。
+			// ダイアログ由来の異常で取り込みの入口を塞がない（全部描画するで続ける）。
 			if (note != nullptr)
 				*note = "通りの選択で例外が出ました";
 			return SettingsOutcome::Unavailable;

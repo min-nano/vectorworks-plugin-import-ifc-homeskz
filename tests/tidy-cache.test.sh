@@ -365,10 +365,12 @@ run_tidy -c "$CACHE" -x --extra-arg=-fsomething
 check_eq "$CALLED" "$UNITS" "adding an argument re-analyses every unit"
 
 # ---------------------------------------------------------------------------
-# 実機で最初に壊れたのがここ。キャッシュは actions/cache から復元できているのに
-# 1 件も再利用されず（0 reused / 21 analysed）、速さのための仕組みが黙って何も
-# しなくなっていた。原因は鍵に入れていた `clang-tidy --version` の出力で、そこには
-# `Host CPU:` という**実行機ごとに変わる行**がある。ランナーが変われば鍵も変わる。
+# 鍵が clang-tidy を実行する機械に依存しないことを確かめる。鍵に入れていた
+# `clang-tidy --version` の出力には `Host CPU:` という**実行機ごとに変わる行**があり、
+# ランナーが変われば鍵も変わってしまう。
+# 経緯: 実機で最初に壊れたのがここ。キャッシュは actions/cache から復元できているのに
+# 1 件も再利用されず（0 reused / 21 analysed）、速さのための仕組みが通知なしに機能
+# しなくなっていた。
 t "the key does not depend on the machine clang-tidy runs on"
 rm -rf "$CACHE"
 export TIDY_HOST_CPU="apple-m1"
@@ -402,9 +404,10 @@ run_tidy -c "$CACHE"
 check_eq "$CALLED" "$UNITS" "and so does leaving the runners entirely"
 
 # ---------------------------------------------------------------------------
-# 上の壊れ方は CI を緑のまま通り抜ける（結果は正しく、ただ遅いだけ）ので、気付ける
-# 手立てを 1 つ持たせてある。規則を変えた実行のように**正当に全件外れる**場面でも
-# 出るが、黙って何もしないよりよい。
+# 復元したキャッシュが 1 件も再利用されないときに警告を出すことを確かめる。
+# 上の壊れ方は CI を緑のまま通過する（結果は正しく、ただ遅いだけ）ので、気付ける
+# 手立てを 1 つ持たせてある。規則を変えた実行のように**正当に全件が再利用されない**
+# 場面でも出るが、何も知らせないよりよい。
 t "a restored cache that reuses nothing is called out"
 run_tidy -c "$CACHE"
 check_eq "$CALLED" "0" "(settled)"

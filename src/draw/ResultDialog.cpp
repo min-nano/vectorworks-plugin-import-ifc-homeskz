@@ -6,34 +6,34 @@
 //	ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	使う SDK API は VWFC のレイアウトダイアログ（VWFC/VWUI/…）。Updater の
-//	CBuildPickerDialog と同じ作法で組む:
+//	CBuildPickerDialog と同じ方法で構築する:
 //
-//	  * CreateDialog(title, ok, cancel, hasHelp)  … 枠を作る（ID 1=OK / 2=キャンセル は予約）
+//	  * CreateDialog(title, ok, cancel, hasHelp)  … 枠を生成する（ID 1=OK / 2=キャンセル は予約）
 //	  * AddFirstGroupControl / AddBelowControl    … 上から順にコントロールを積む
-//	  * OnInitializeContent()                     … コントロールができた後の中身の流し込み
+//	  * OnInitializeContent()                     … コントロールの生成後に中身を設定する
 //	  * OnCancelButtonEvent()                     … 「ログを表示」が押された（下記）
 //	  * Get/SetDialogPosition(left, top)          … 位置（開き直しても動かさないため）
 //
-//	【本文は 1 行 1 コントロール】VWStaticTextCtrl は 1 行を出すためのもので、埋め込んだ
+//	【本文は 1 行 1 コントロール】VWStaticTextCtrl は 1 行を表示するためのもので、埋め込んだ
 //	改行がそのまま行になる保証が無い。本文（parse/Summary が組み立てた数行）を確実に
-//	そのままの形で見せるため、**改行で切って 1 行ずつ静的テキストにする**。空行は
-//	コントロールを作らず、次の行の行間（AddBelowControl の lineSpacing）で表す。
+//	そのままの形で表示するため、**改行で区切って 1 行ずつ静的テキストにする**。空行は
+//	コントロールを生成せず、次の行の行間（AddBelowControl の lineSpacing）で表す。
 //
 //	【ログ欄は VWEditTextCtrl】複数行の編集欄なので**スクロールし、選択してコピーできる**
-//	（静的テキストではコピーできず、報告に貼れない）。編集はできてしまうが、閉じるときに
-//	捨てるだけなので害は無い。
+//	（静的テキストではコピーできず、報告に貼り付けられない）。編集もできるが、閉じるときに
+//	破棄するだけなので害は無い。
 //
-//	【ログは一度開いたら畳まない】レイアウトダイアログの大きさは**作るときに 1 度だけ**
+//	【ログは一度開いたら畳まない】レイアウトダイアログの大きさは**生成時に 1 度だけ**
 //	決まる。`ShowControl` で後からログ欄を隠しても縮まず、初期状態で隠しておいてもその分の
 //	高さは空いたままで、`SetDialogSize` で押し込んでも安定しなかった（いずれも実機で確認。
-//	SDK リファレンス Findings「Layout Dialogs」）。畳めるように見せると、そのたびに作り直すことに
-//	なって落ち着かない——**開くのは一方通行**とし、そのぶん確実に振る舞わせる。
+//	SDK リファレンス Findings「Layout Dialogs」）。畳めるようにすると、そのたびに再生成することに
+//	なって安定しない——**開くのは一方向のみ**とし、その分確実に動作させる。
 //
-//	【「ログを表示」はキャンセル枠】ボタン行（OK のある行）へコントロールを足す API は
-//	SDK に無い（この行は `GS_CreateLayout` が作る）。そこで**キャンセルのボタンに
+//	【「ログを表示」はキャンセル枠】ボタン行（OK のある行）へコントロールを追加する API は
+//	SDK に無い（この行は `GS_CreateLayout` が生成する）。そこで**キャンセルのボタンに
 //	「ログを表示」の名前を付ける**——OK と同じ行に並び（macOS ではその左）、押されたことは
 //	`OnCancelButtonEvent` で分かる。押されたら**ログ付きでもう 1 枚開く**。そちらは
-//	キャンセルの名前を空にするので、ボタンは消えてログ欄だけが増える。位置は引き継ぐので、
+//	キャンセルの名前を空にするので、ボタンは表示されずログ欄だけが追加される。位置は引き継ぐので、
 //	その場で開いたように見える。
 //
 //	（Esc もキャンセル扱いなので、畳んでいる間の Esc は「ログを表示」になる。ログを開いた
@@ -60,11 +60,11 @@ namespace HomeskzIfcImport::draw
 
 		// ログ欄の大きさ（標準文字幅・行数）。**用紙のように広げない**——ふだんは畳んで
 		// あるものなので、開いたときに画面へ収まる範囲で、割り付けの 1 行（長い）が
-		// 折り返さずに読める幅を採る。
+		// 折り返さずに読める幅とする。
 		constexpr short kLogWidthChars = 92;
 		constexpr short kLogHeightLines = 18;
 
-		// ダイアログの置き場所（作り直すときに引き継ぐ）。known=false なら VW に任せる。
+		// ダイアログの置き場所（再生成するときに引き継ぐ）。known=false なら VW に任せる。
 		struct DialogPlacement
 		{
 			bool known = false;
@@ -87,8 +87,8 @@ namespace HomeskzIfcImport::draw
 			}
 			~CImportResultDialog() override = default;
 
-			// **実際に出せたか。** レイアウトを組めなかったときは呼び出し側が素のアラートへ
-			// 落とす（ResultDialog.h）。
+			// **実際に表示できたか。** レイアウトを構築できなかったときは呼び出し側が標準の
+			// アラートへフォールバックする（ResultDialog.h）。
 			bool Shown() const
 			{
 				return fShown;
@@ -100,7 +100,7 @@ namespace HomeskzIfcImport::draw
 				return fRevealRequested;
 			}
 
-			// 閉じたときの置き場所（作り直す側が引き継ぐ）。
+			// 閉じたときの置き場所（再生成する側が引き継ぐ）。
 			const DialogPlacement& Placement() const
 			{
 				return fPlacement;
@@ -110,13 +110,13 @@ namespace HomeskzIfcImport::draw
 			bool CreateDialogLayout() override
 			{
 				// **キャンセル枠を「ログを表示」に使う**（冒頭「『ログを表示』はキャンセル枠」）。
-				// ログが無い枚・すでに開いた枚は空文字＝ボタンを出さない。
-				// hasHelp = false でヘルプも出さない。
+				// ログが無い枚・すでに開いた枚は空文字＝ボタンを表示しない。
+				// hasHelp = false でヘルプも表示しない。
 				const TXString revealButton = (fHasLog && !fShowLog) ? "ログを表示" : "";
 				if (!this->CreateDialog(fTitle, "OK", revealButton, false))
 					return false;
 
-				// 本文は上から 1 行ずつ。空行はコントロールを作らず、**次の行の行間**で表す
+				// 本文は上から 1 行ずつ。空行はコントロールを生成せず、**次の行の行間**で表す
 				// （空の静的テキストは高さを持たない環境がある）。
 				TControlID id = kFirstBodyID;
 				VWControl* previous = nullptr;
@@ -125,14 +125,14 @@ namespace HomeskzIfcImport::draw
 				{
 					if (line.empty())
 					{
-						pendingSpacing = 1; // 次の行の前に 1 行ぶん空ける
+						pendingSpacing = 1; // 次の行の前に 1 行分空ける
 						continue;
 					}
-					// **deque に直接作る。** 行数は本文で変わるので器が要るが、vector だと
-					// 追加のたびに既存の要素が動いてしまい（ダイアログは生存中ずっと
-					// コントロールのアドレスを持つ）、unique_ptr で逃がすと今度は静的解析が
-					// 「漏れるかもしれない」と誤検出する。deque は追加しても既存の要素を
-					// 動かさないので、どちらの問題も出ない。
+					// **deque に直接生成する。** 行数は本文で変わるのでコンテナが要るが、vector
+					// だと追加のたびに既存の要素が移動してしまい（ダイアログは生存中ずっと
+					// コントロールのアドレスを保持する）、unique_ptr で別に確保すると今度は
+					// 静的解析が「漏れるかもしれない」と誤検出する。deque は追加しても既存の
+					// 要素を動かさないので、どちらの問題も出ない。
 					VWStaticTextCtrl& control = fLines.emplace_back(id++);
 					if (!control.CreateControl(this, line.c_str()))
 						return false;
@@ -144,9 +144,9 @@ namespace HomeskzIfcImport::draw
 					pendingSpacing = 0;
 				}
 				if (previous == nullptr)
-					return false; // 本文が空（呼び出し側の誤り）。素のアラートへ落とす
+					return false; // 本文が空（呼び出し側の誤り）。標準のアラートへ切り替える
 
-				// **畳んだ枚ではログ欄を作らない。** 作って隠すのでは高さが空いたままになる
+				// **畳んだ枚ではログ欄を生成しない。** 生成して隠すのでは高さが空いたままになる
 				// （冒頭「ログは一度開いたら畳まない」）。
 				if (!fShowLog)
 					return true;
@@ -163,7 +163,7 @@ namespace HomeskzIfcImport::draw
 				// （畳んだ状態では欄そのものが無いので、何もしない）。
 				if (fShowLog)
 					fLog.SetText(fLogText);
-				// 開き直しのときは元の場所へ。**その場で開き直したように見せる**ため
+				// 開き直しのときは元の場所へ。**その場で開き直したように表示する**ため
 				// （引き継がないと画面中央へ飛ぶ）。
 				if (fPlacement.known)
 					this->SetDialogPosition(fPlacement.left, fPlacement.top);
@@ -171,19 +171,19 @@ namespace HomeskzIfcImport::draw
 			}
 
 			// DDX（コントロールと変数の結び付け）は使わない——このダイアログは値を集めず、
-			// 結果を見せるだけ。**それでも空実装が要る**（VWDialog の純粋仮想。SDK 自身の
-			// CStandardInfoDlg も同じく空で潰している）。
+			// 結果を表示するだけ。**それでも空実装が要る**（VWDialog の純粋仮想。SDK 自身の
+			// CStandardInfoDlg も同じく空実装で済ませている）。
 			void OnDDXInitialize() override {}
 
-			// キャンセル枠＝「ログを表示」。畳んだ枚でだけボタンが出ているので、そのときの
-			// キャンセルは「ログを見たい」の意味になる（Esc も同じ扱い。冒頭の但し書き）。
+			// キャンセル枠＝「ログを表示」。畳んだ枚でだけボタンが表示されているので、そのときの
+			// キャンセルは「ログを表示したい」の意味になる（Esc も同じ扱い。冒頭の但し書き）。
 			void OnCancelButtonEvent() override
 			{
 				VWDialog::OnCancelButtonEvent();
 				if (!fHasLog || fShowLog)
 					return;
 				fRevealRequested = true;
-				// 開き直す先の位置（いまの場所）を控える。
+				// 開き直す先の位置（現在の場所）を記録する。
 				const ViewPt position = this->GetDialogPosition();
 				fPlacement.known = true;
 				fPlacement.left = position.x;
@@ -197,19 +197,19 @@ namespace HomeskzIfcImport::draw
 		private:
 			TXString fTitle;
 			std::vector<std::string> fBody; // 本文（改行で切った 1 行ずつ）
-			std::deque<VWStaticTextCtrl> fLines; // その行を出す静的テキスト（空行の分は作らない）
+			std::deque<VWStaticTextCtrl> fLines; // 各行の静的テキスト（空行の分は作らない）
 			VWEditTextCtrl fLog;
 			TXString fLogText;
-			bool fHasLog = false; // ログの本文があるか（無ければボタンもログ欄も出さない）
+			bool fHasLog = false; // ログの本文があるか（無ければボタンもログ欄も表示しない）
 			bool fShowLog = false;		   // この 1 枚はログ欄を持つか
-			bool fShown = false;		   // 実際に出せたか
+			bool fShown = false;		   // 実際に表示できたか
 			bool fRevealRequested = false; // 「ログを表示」が押されたか
 			DialogPlacement fPlacement;	   // 開き直すときに引き継ぐ置き場所
 		};
 
 		// EVENT_DISPATCH_MAP_BEGIN は SDK のマクロ。展開に const 化できるローカルが出るが、
 		// それはマクロ側のコードでこちらのものではない（Updater の同じ箇所と同じ理由）。
-		// 受けるイベントは無い（ボタンはキャンセル枠なので OnCancelButtonEvent が拾う）。
+		// 受けるイベントは無い（ボタンはキャンセル枠なので OnCancelButtonEvent が受け取る）。
 		// NOLINTNEXTLINE(misc-const-correctness)
 		EVENT_DISPATCH_MAP_BEGIN(CImportResultDialog);
 		EVENT_DISPATCH_MAP_END;
@@ -221,7 +221,7 @@ namespace HomeskzIfcImport::draw
 		if (lines.empty())
 			return false;
 
-		// 畳んだ枚を出し、「ログを表示」が押されたらログ付きで**1 度だけ**開き直す
+		// 畳んだ枚を表示し、「ログを表示」が押されたらログ付きで**1 度だけ**開き直す
 		// （冒頭「ログは一度開いたら畳まない」）。2 周目はボタンが無いので、ここは
 		// 高々 2 回しか回らない。
 		bool showLog = false;
@@ -230,7 +230,8 @@ namespace HomeskzIfcImport::draw
 		{
 			CImportResultDialog dialog(title, lines, log, showLog, placement);
 			dialog.RunDialogLayout("");
-			// 押されたボタンそのものは見ない。見るのは「出せたか」と「ログを見たいか」。
+			// 押されたボタンそのものは参照しない。参照するのは「表示できたか」
+			// と「ログを表示したいか」。
 			if (!dialog.Shown())
 				return false;
 			if (!dialog.RevealRequested())

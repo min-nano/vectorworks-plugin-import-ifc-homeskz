@@ -3,7 +3,7 @@
 **実機確認を回すセッションは、Vectorworks が動いている Mac で起動した Claude Code だけ**です。
 クラウドのセッション（claude.ai/code）は橋のファイルに届かず、逆にローカルの Claude Code には
 クラウドで注入される GitHub MCP も PR の購読（`subscribe_pr_activity`）もありません
-（PR #188 で両方を踏んだ）。そこで次のように割ります。
+（PR #188 で両方の問題に遭遇した）。そこで次のように分担します。
 
 | | ローカル（Remote Control） | クラウド |
 | --- | --- | --- |
@@ -23,7 +23,7 @@
    `ci-debug.sh run`（起動と待機をまとめた形）もそのまま動きます。PR の作成・コメント・
    ドラフトの昇格は `gh pr create` / `gh pr comment` / `gh pr ready` で足ります。
    CLAUDE.md の手順（下書きの昇格を `update_pull_request` で行う等）どおり **GitHub MCP の
-   道具名で呼びたい**なら、ユーザー設定に足します
+   道具名で呼びたい**なら、ユーザー設定に追加します
    （PAT はこのリポジトリに絞った fine-grained で、Contents / Pull requests / Actions /
    Issues を読み書き・Checks を読み取り）:
 
@@ -44,17 +44,17 @@
    **`vw_restart` は確認を残します**——CLAUDE.md の「頼む前に人へ一言断る」を、iOS の承認の
    画面がそのまま担います。`vw_call` は `vw_restart` も呼べるので同じく確認を残します。
 
-   このファイルの `deny` の後ろ 3 つは `allow` の `git push -u origin:*` の抜け道を塞ぐもの。
+   このファイルの `deny` の後ろ 3 つは `allow` の `git push -u origin:*` のすり抜けを防ぐもの。
    末尾の `:*` は「後ろに何が続いてもよい」なので、`git push -u origin <branch> --force`・
-   `… -f`・`git push -u origin +<branch>`（先頭の `+` は強制更新）は `deny` の頭の 2 つに当たらず、
-   `allow` だけに当たって確認なしで通ってしまう。後ろ 3 つは `*` を途中に置いて間を飛ばす。
-   `*` はどこに置いても空白込みの任意の文字列に当たり（`:*` の書き方は末尾でしか効かない）、
-   規則は `deny` → `ask` → `allow` の順に見られて `deny` が必ず勝つ
+   `… -f`・`git push -u origin +<branch>`（先頭の `+` は強制更新）は `deny` の先頭の 2 つに一致せず、
+   `allow` だけに一致して確認なしで通ってしまう。後ろ 3 つは `*` を途中に置いて間を飛ばす。
+   `*` はどこに置いても空白込みの任意の文字列に一致し（`:*` の書き方は末尾でしか機能しない）、
+   規則は `deny` → `ask` → `allow` の順に評価されて `deny` が必ず勝つ
    （[Claude Code の Permissions](https://code.claude.com/docs/en/permissions)）。それでも
    文字列の照合なので万全ではない（`main` への force push は GitHub のブランチ保護で禁じて
    おく）。
 
 **ローカルでの PR の見方。** 購読が無いので、CI は `scripts/ci-wait.sh` をバックグラウンドで
 投げてその終了で知り（クラウドと同じ）、レビューとコメントは**周の区切りごとに**
-`gh pr view <番号> --comments` で読みに行きます。放っておく時間が長いときは `/loop` で
-間隔を決めて見に行かせます。
+`gh pr view <番号> --comments` で読みに行きます。長く離れるときは `/loop` で
+間隔を決めて確認させます。

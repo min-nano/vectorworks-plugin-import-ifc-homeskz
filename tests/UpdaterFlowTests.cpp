@@ -40,8 +40,8 @@ namespace
 		std::vector<bool> askAnswers;
 		int pickAnswer = 0;		   // what PickBuild returns
 		bool restartAnswer = true; // what Restart returns (false -> could not be arranged)
-		// 本体（ペイロード）を降ろせたか。false は「まだ走っているので降ろせなかった」
-		// ＝反映は次の起動、という分岐（src/UpdaterHost.h の DropLoadedPayload）。
+		// 本体（ペイロード）をアンロードできたか。false は「まだ走っているのでアンロード
+		// できなかった」＝反映は次の起動、という分岐（src/UpdaterHost.h の DropLoadedPayload）。
 		bool dropAnswer = true;
 
 		// --- Recorded interactions ------------------------------------------
@@ -135,10 +135,10 @@ namespace
 			return {};
 		}
 	};
-	// いま動いている殻の ID（実物ではコンパイル時に焼かれる VW_SHELL_ID）。既定の
+	// いま動いている殻の ID（実物ではコンパイル時に埋め込まれる VW_SHELL_ID）。既定の
 	// do-install 出力は "installed-shell=" の行を持たないので、下のほとんどのテストは
 	// 「殻の新旧を判断できない＝安全側の再起動」を通る（src/UpdaterParse.h の
-	// NeedsRestartAfterInstall）。ホットリロードの分岐だけ、その行を足して確かめる。
+	// NeedsRestartAfterInstall）。ホットリロードの分岐だけ、その行を追加して確かめる。
 	constexpr const char* kRunningShell = "aaaa1111bbbb";
 } // namespace
 
@@ -327,7 +327,7 @@ TEST(dev_manual_check_says_so_when_no_prereleases_exist)
 	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.pickCount, 0); // nothing to choose -> no picker
 	CHECK_EQ(h.CountScript("do-install"), 0);
-	// **黙って終わらない。** 手で押したコマンドなので、選べるものが無いことを言う。
+	// **何も表示せずに終わらない。** 手動で実行したコマンドなので、選べるものが無いことを言う。
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
 	{
@@ -383,7 +383,7 @@ TEST(dev_picker_lists_current_first_then_other_builds)
 }
 
 // 殻にコンパイルされたブランチ／sha と、ディスクに入っているビルドが**食い違っている**
-// ときの姿。本体（.vwpayload）だけの更新は再起動せずに効くので、別のブランチのビルドへ
+// ときの動作。本体（.vwpayload）だけの更新は再起動せずに反映されるので、別のブランチのビルドへ
 // 乗り換えたあとの殻はずっと前のブランチを名乗る（docs/DEV-NOTES.md M26）。
 TEST(dev_picker_treats_the_installed_build_as_the_current_one)
 {
@@ -434,7 +434,7 @@ TEST(dev_cancelled_does_not_install)
 	h.pickAnswer = -1; // cancelled the dialog
 	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.CountScript("do-install"), 0);
-	// **取り消したときだけは黙る**（それ自体が「何もしない」という意思表示なので、
+	// **取り消したときだけは何も表示しない**（それ自体が「何もしない」という意思表示なので、
 	// 結末を返すと押していないボタンの返事が返ってくることになる）。
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
 }
@@ -494,7 +494,7 @@ TEST(dev_out_of_range_selection_keeps_current)
 	h.pickAnswer = 5; // past the last candidate
 	RunDevUpdateCheckWith(h, UpdateCheckKind::Manual, "main", "run1234", kRunningShell);
 	CHECK_EQ(h.CountScript("do-install"), 0); // safeguard -> no install
-	// **黙って閉じない。** 範囲外は起こらないはずの値なので、起きたときに何も出ないと
+	// **何も表示せずに閉じない。** 範囲外は起こらないはずの値なので、起きたときに何も出ないと
 	// 「選んだのに切り替わらない」としか見えない。
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
@@ -522,11 +522,11 @@ TEST(dev_install_failure_is_reported)
 }
 
 // ---------------------------------------------------------------------------
-// 手で押したとき（UpdateCheckKind::Manual）は必ず結末を出す
+// 手動で実行したとき（UpdateCheckKind::Manual）は必ず結末を出す
 //
-// 起動時に自動で走っていた頃は「黙っている」が正しかった——起動の邪魔をしないため。
-// いまはメニューコマンドから呼ばれるので、**押したのに何も起きない**のでは、最新
+// メニューコマンドから呼ばれるので、**実行したのに何も表示されない**のでは、最新
 // だったのか、そもそも動いていないのかが区別できない（src/Updater.h）。
+// 起動時に自動で走っていた頃は「何も表示しない」が正しかった——起動の邪魔をしないため。
 // ---------------------------------------------------------------------------
 
 TEST(stable_manual_check_reports_being_up_to_date)
@@ -557,7 +557,7 @@ TEST(stable_manual_check_reports_an_offline_error)
 	if (!h.informs.empty())
 	{
 		CHECK_EQ(h.informs[0][0], "更新を確認できませんでした。");
-		// スクリプトの言い分を先に、続けて「繋がっていないのでは」を添える。
+		// スクリプトのメッセージを先に、続けて「繋がっていないのでは」を添える。
 		CHECK_EQ(h.informs[0][1],
 				 "stable リリースを取得できませんでした。\n\n"
 				 "ネットワークに繋がっていないか、リリースを取得できませんでした。\n"
@@ -609,7 +609,7 @@ TEST(stable_silent_check_says_nothing_about_an_incomplete_release)
 // 取り込みのついで（UpdateCheckKind::Silent）の開発版
 //
 // **ブランチ選択のダイアログを出さない。** 取り込みたいだけの人の前に「どのブランチを
-// 使いますか」を挟むのは邪魔でしかないので、拾うのは**いま動いているのと同じブランチの
+// 使いますか」を挟むのは邪魔でしかないので、対象にするのは**いま動いているのと同じブランチの
 // 新しいビルド**だけにする（src/UpdaterFlow.cpp）。
 // ---------------------------------------------------------------------------
 
@@ -639,7 +639,7 @@ TEST(dev_silent_check_offers_the_same_branchs_newer_build)
 		CHECK_EQ(h.asks[0][1], "branch: feature/x\nインストール済み: run1234\n"
 							   "新しいビルド: aaa1111");
 	}
-	// 結末（再起動を尋ねる）には素のブランチ名が出る（表示名ではなく）。
+	// 結末（再起動を尋ねる）にはそのままのブランチ名が出る（表示名ではなく）。
 	if (h.asks.size() == 2)
 		CHECK_EQ(h.asks[1][1].find("branch: feature/x\ncommit: aaa1111"),
 				 static_cast<std::size_t>(0));
@@ -698,12 +698,12 @@ TEST(dev_silent_check_says_nothing_when_the_branch_cannot_be_told)
 
 TEST(dev_silent_check_reads_the_branch_from_the_title_when_the_column_is_missing)
 {
-	// **古いスクリプトでも往復が回る。** 5 列目が無くても、CI の題
-	// "Dev: <branch> (<sha>)" からブランチが読めるので同じブランチを拾える。
+	// **古いスクリプトでも更新の確認が機能する。** 5 列目が無くても、CI の題
+	// "Dev: <branch> (<sha>)" からブランチが読めるので同じブランチを検出できる。
 	FakeHost h;
 	h.qDevOut = "installed=run1234\n"
 				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\n";
-	h.askAnswer = false; // 「後で」——ここで見たいのは「尋ねたかどうか」だけ
+	h.askAnswer = false; // 「後で」——ここで確認したいのは「尋ねたかどうか」だけ
 	RunDevUpdateCheckWith(h, UpdateCheckKind::Silent, "feature/x", "run1234", kRunningShell);
 
 	CHECK_EQ(h.askCount, 1);
@@ -747,8 +747,8 @@ TEST(dev_manual_picker_shows_the_branch_when_the_script_reports_it)
 // ---------------------------------------------------------------------------
 // ホットリロード（殻が同じなら再起動を尋ねない）
 //
-// プラグインは殻と本体に割れていて、Vectorworks が起動時にしか読み込めないのは殻だけ
-// （src/PayloadAbi.h）。**入れたビルドの殻が同じなら、本体を降ろすだけで次の操作から
+// プラグインは殻と本体に分かれていて、Vectorworks が起動時にしか読み込めないのは殻だけ
+// （src/PayloadAbi.h）。**入れたビルドの殻が同じなら、本体をアンロードするだけで次の操作から
 // 新しいコードが動く**ので、再起動を尋ねてはならない——それがこの分岐の全部である。
 // ---------------------------------------------------------------------------
 
@@ -767,7 +767,7 @@ TEST(stable_same_shell_reloads_without_asking_to_restart)
 	// 尋ねたのは「インストールしますか？」の 1 回だけ（再起動は尋ねない）。
 	CHECK_EQ(h.askCount, 1);
 	CHECK_EQ(h.restartCount, 0);
-	// 代わりに本体を降ろして、そう伝える。
+	// 代わりに本体をアンロードして、そう伝える。
 	CHECK_EQ(h.dropCount, 1);
 	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(1));
 	if (!h.informs.empty())
@@ -811,7 +811,7 @@ TEST(stable_different_shell_still_offers_restart)
 	h.doInstallOut = "installed-shell=cccc2222dddd\nok\n";
 	RunStableUpdateCheckWith(h, UpdateCheckKind::Silent, kRunningShell);
 
-	// 殻まで変わったので、従来どおり再起動を尋ねる。本体は降ろさない
+	// 殻まで変わったので、従来どおり再起動を尋ねる。本体はアンロードしない
 	// （どうせ次の起動で殻ごと入れ替わる）。
 	CHECK_EQ(h.askCount, 2);
 	CHECK_EQ(h.dropCount, 0);
@@ -911,7 +911,7 @@ TEST(remote_update_uses_the_installed_line_not_the_shells_sha)
 TEST(remote_update_follows_the_installed_branch_not_the_shells)
 {
 	// 殻のブランチを基準にすると、手で別のブランチへ乗り換えた利用者の図面で、前の
-	// ブランチのビルドを黙って入れ直してしまう。
+	// ブランチのビルドを断りなく入れ直してしまう。
 	FakeHost h;
 	h.qDevOut = "installed=bbb2222\n"
 				"installed-branch=feature/b\n"
@@ -954,7 +954,7 @@ TEST(remote_update_reports_install_failure_and_shell_change)
 	CHECK_EQ(failed.message, "zip を展開できませんでした。");
 	CHECK_EQ(h.dropCount, 0);
 
-	// 殻まで変わった。入ってはいるが、この実行では効かせられない＝降ろさない。
+	// 殻まで変わった。入ってはいるが、この実行では反映できない＝アンロードしない。
 	FakeHost h2;
 	h2.qDevOut = h.qDevOut;
 	h2.doInstallOut = "installed-shell=other-shell\nok";
@@ -965,7 +965,7 @@ TEST(remote_update_reports_install_failure_and_shell_change)
 	CHECK_EQ(h2.dropCount, 0);
 	CHECK_EQ(h2.restartCount, 0);
 
-	// 降ろせなかった（本体のコードがまだ走っている）。
+	// アンロードできなかった（本体のコードがまだ走っている）。
 	FakeHost h3;
 	h3.qDevOut = h.qDevOut;
 	h3.doInstallOut = std::string("installed-shell=") + kRunningShell + "\nok";

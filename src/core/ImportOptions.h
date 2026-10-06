@@ -7,13 +7,13 @@
 //	    図面にある別のシンボルへ差し替えられるようにする（docs/DEV-NOTES.md M20）。
 //	  * **図面枠（タイトルブロック）のスタイル**——シートレイヤ（伏図・軸組図）へ置く
 //	    図面枠をどのスタイルで置くか。空なら置かない（docs/DEV-NOTES.md M28）。
-//	  * **寸法規格**——伏図・軸組図へ自動で入れる寸法をどのスタイルで描くか。
+//	  * **寸法規格**——伏図・軸組図へ自動で入れる寸法をどのスタイルで描画するか。
 //	    空なら寸法を入れない（docs/DEV-NOTES.md M31）。
 //	  * **伏図のまとめ方**——横架材の高さごとに作る伏図のうち、どのレベルを前のレベルと
 //	    同じ伏図にまとめるか。既定は「まとめない」＝高さごとに 1 枚（docs/DEV-NOTES.md
 //	    「横架材の高さごとに伏図を作る」）。
-//	  * **軸組図から外す通り**——解析が軸組図にする通りのうち、描かないもの
-//	    （docs/DEV-NOTES.md M34）。空なら従来どおり全部描く。
+//	  * **軸組図から除外する通り**——解析が軸組図にする通りのうち、描画しないもの
+//	    （docs/DEV-NOTES.md M34）。空なら従来どおり全部描画する。
 //	  * **垂木の断面寸法**——IFC に垂木の寸法が無いので決め打ちしていた 45×45 を、取り込み
 //	    ごとに一律で指定できるようにしたもの（docs/DEV-NOTES.md「垂木の断面を一律に指定する」）。
 //	    既定は 45×45 で従来どおり。
@@ -35,7 +35,7 @@
 //
 //	【役割の表はここ 1 つ】役割（SymbolRole）・画面に出す名前（label）・既定のシンボル名
 //	（defaultSymbol）の対応は symbolRoles() ただ 1 つの表が持つ。シンボルを 1 つ増やすときに
-//	触るのはその表の 1 行と、それを読む解析側の 1 行だけ（parse/Summary.cpp の kElements 表と
+//	変更するのはその表の 1 行と、それを読む解析側の 1 行だけ（parse/Summary.cpp の kElements 表と
 //	同じ考え方。CLAUDE.md「重複を作らない置き場所」）。
 //
 //	【SDK 非依存】core/ は VectorWorks SDK を include しない。
@@ -66,7 +66,7 @@ namespace HomeskzIfcImport::core
 		Splice,			  // 継手（M33）
 	};
 
-	// 【新しい役割は末尾へ足す】値は往復の記憶（core/FeedbackSession の "role.<n>.…"）に
+	// 【新しい役割は末尾へ追加する】値は往復の記憶（core/FeedbackSession の "role.<n>.…"）に
 	// **番号で**書かれる。途中へ挟むと後ろの役割の番号がずれ、進行中の往復が別の役割の
 	// シンボル名を読んでしまう（継手＝M33 を仕口の隣ではなく末尾に置いたのはこのため）。
 	//
@@ -141,14 +141,14 @@ namespace HomeskzIfcImport::core
 	std::optional<double> parseRafterSize(const std::string& text);
 
 	// 垂木の寸法（mm）を表示用の文字列にする。小数点以下 1 桁までに丸め、末尾の 0 と
-	// 小数点は落とす（45 → "45"、45.5 → "45.5"）。parseRafterSize で読み戻せる形。
+	// 小数点は取り除く（45 → "45"、45.5 → "45.5"）。parseRafterSize で読み戻せる形。
 	std::string formatRafterSize(double mm);
 
 	// 取り込み 1 回ぶんの設定。既定では役割の表の defaultSymbol がそのまま入り、どの役割も
 	// 「取り込む」なので、**設定ダイアログを出さずに既定のまま使えば従来と同じ振る舞い**になる。
 	//
 	// 【役割ごとに「取り込むかどうか」を持つ理由】置きたいシンボルが図面に無いことは普通に
-	// ある（テンプレートを当てていない図面・その要素を使わない案件）。そのとき**名前だけを
+	// ある（テンプレートを適用していない図面・その要素を使わない案件）。そのとき**名前だけを
 	// 持たせて「あるつもり」で置きに行っても必ず失敗する**ので、はじめから「この役割は
 	// 取り込まない」と言えるようにする。解析側はその役割の命令を 1 つも作らない——描画側で
 	// 失敗させて診断に出すのではなく、**そもそも指示を出さない**（docs/DEV-NOTES.md
@@ -191,17 +191,17 @@ namespace HomeskzIfcImport::core
 		// **昇順・重複なしの vector で持つ**（setMergeWithPrevious が保つ）。std::set にすると
 		// MSVC ではムーブ構築が例外を投げうる（番兵ノードを確保する）ので、この構造体と
 		// それを持つ構造体（core::FeedbackSession ほか）の暗黙のムーブが clang-tidy の
-		// bugprone-exception-escape に掛かる（tidy-windows で実際に落ちた）。
+		// bugprone-exception-escape に掛かる（tidy-windows で実際に失敗した）。
 		std::vector<PlanLevelKey> mergedPlanLevels;
 
-		// M34 軸組図から**外す**通りの図番（core::SectionCommand の viewport.drawingNumber。
-		// "X1" / "い" / 方向をまたいで重なったときの "1(2)" …）。**空＝全部描く**。
+		// M34 軸組図から**除外する**通りの図番（core::SectionCommand の viewport.drawingNumber。
+		// "X1" / "い" / 方向をまたいで重なったときの "1(2)" …）。**空＝全部描画する**。
 		//
-		// 【なぜ「描く通り」ではなく「外す通り」を持つか】候補（どの通りを軸組図にするか）
-		// は IFC を解析して初めて決まる。「描く」側を持つと、既定（何も選んでいない）が
-		// 「1 枚も描かない」になり、設定ダイアログを出さずに取り込む経路（実機テストの周・
-		// 設定を出せなかったとき）で軸組図が消える。外す側を持てば**既定の空が従来と同じ
-		// 振る舞い**になる（役割の表の既定名・図面枠の空と同じ考え方）。
+		// 【なぜ「描画する通り」ではなく「除外する通り」を持つか】候補（どの通りを軸組図に
+		// するか）は IFC を解析して初めて決まる。「描画する」側を持つと、既定（何も選んで
+		// いない）が「1 枚も描画しない」になり、設定ダイアログを出さずに取り込む経路（実機
+		// テストの周・設定を出せなかったとき）で軸組図が消える。除外する側を持てば**既定の
+		// 空が従来と同じ振る舞い**になる（役割の表の既定名・図面枠の空と同じ考え方）。
 		//
 		// 【なぜ図番で指すか】図番は解析が通りごとに一意に付ける（parse/Section.h の
 		// uniqueSectionNumbers）ので、同じ IFC を解析し直せば同じ通りに同じ図番が付く
@@ -217,7 +217,7 @@ namespace HomeskzIfcImport::core
 		ImportOptions();
 
 		// 役割に対応するシンボル名。**取り込まない役割の名前は意味を持たない**
-		// （解析側は isEnabled() を先に見る）。
+		// （解析側は isEnabled() を先に参照する）。
 		const std::string& symbol(SymbolRole role) const;
 
 		// その役割を取り込むか。
@@ -256,15 +256,15 @@ namespace HomeskzIfcImport::core
 		// そのレベルを前のレベルと同じ伏図にまとめるかを決める。
 		void setMergeWithPrevious(const PlanLevelKey& key, bool merge);
 
-		// M34 その図番の通りを軸組図から外すか。
+		// M34 その図番の通りを軸組図から除外するか。
 		bool isSectionSkipped(const std::string& drawingNumber) const;
 
-		// M34 外す通りの図番を差し替える（重複・空文字は落とし、名前順に並べ直す
+		// M34 除外する通りの図番を差し替える（重複・空文字は取り除き、名前順に並べ直す
 		// ——ログに出す並びを入力順に依らせないため。CLAUDE.md「決定性を守る」）。
 		void setSkippedSections(const std::vector<std::string>& drawingNumbers);
 
 		// 垂木の断面を決める。**受け付けない値（isValidRafterSize を満たさない）はその寸法
-		// だけ既定へ戻す**——シンボル名の空文字を既定名へ戻すのと同じ考え方で、描けない
+		// だけ既定へ戻す**——シンボル名の空文字を既定名へ戻すのと同じ考え方で、描画できない
 		// 寸法の命令を作らない。
 		void setRafterSize(double width, double height);
 	};
@@ -273,13 +273,13 @@ namespace HomeskzIfcImport::core
 	//
 	// 設定ダイアログを「まだ一度も決めていない」状態で開いたときの初期値と同じものを、
 	// ダイアログを出さずに組む——Claude が MCP の `vw_run_test` から 1 周目を起こすとき、
-	// 誰も見ていない Vectorworks にダイアログを出せないため（draw/Feedback.h）。
+	// 誰も操作していない Vectorworks にダイアログを出せないため（draw/Feedback.h）。
 	//   * シンボルの役割 … 既定名（symbolRoles）のシンボルが図面に**ある役割だけ**取り込む
 	//     （ダイアログの「いまの対応先が図面に無い行はチェックを外して開く」と同じ）。
 	//   * 図面枠 … 図面にスタイルがあれば一覧の最初のもの（無ければ置かない）。
 	//   * 寸法規格 … defaultDimensionStandardIndex が選ぶもの（無ければ入れない）。
-	//   * 伏図のまとめ方・軸組図から外す通り・垂木の断面 … ImportOptions の既定のまま
-	//     （まとめない・全部描く・45×45。どれもダイアログの初期値と同じ）。
+	//   * 伏図のまとめ方・軸組図から除外する通り・垂木の断面 … ImportOptions の既定のまま
+	//     （まとめない・全部描画する・45×45。どれもダイアログの初期値と同じ）。
 	// 引数はどれも図面から集めた名前の一覧（draw/SettingsDialog が SDK で集める）。
 	ImportOptions presetImportOptions(const std::vector<std::string>& symbolNames,
 									  const std::vector<std::string>& titleBlockStyles,

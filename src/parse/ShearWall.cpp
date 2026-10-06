@@ -60,7 +60,7 @@ namespace HomeskzIfcImport::parse
 		// 壁面内の見付け幅（筋かいの軸に直交する広がり）を返す。外形が面にならない・
 		// 縮退しているときは 0。
 		//
-		// 押し出しが壁面の法線方向なので、(s, z) へ落とした外形は IFC のプロファイルを
+		// 押し出しが壁面の法線方向なので、(s, z) へ投影した外形は IFC のプロファイルを
 		// 回転しただけの形になる。筋かいは「長い帯」なので、**外形を回転キャリパで測った
 		// 最小の幅**がそのまま見付け幅（45×90 なら 90）になる——凸多角形の最小幅は
 		// どれかの辺に直交する向きで実現されるので、辺ごとに直交方向の広がりを測って
@@ -68,7 +68,7 @@ namespace HomeskzIfcImport::parse
 		//
 		// **「最も離れた 2 点」を軸と見なしてはいけない。** 実データの筋かいは端が
 		// 尖った六角形なので偶然それでも合うが、単純な矩形断面では最長が対角線になり、
-		// 幅が 2 倍近くに化ける（軸が対角線へ傾くため）。
+		// 幅が 2 倍近くの誤った値になる（軸が対角線へ傾くため）。
 		double faceWidth(const std::vector<FacePoint>& face)
 		{
 			if (face.size() < 3)
@@ -144,11 +144,11 @@ namespace HomeskzIfcImport::parse
 		//
 		// ★**base がその階の柱だけでは足りない。** 通し柱は下の階を base とするレイヤ
 		// （"1to3-柱"）に置かれるので、base だけで絞ると 2 階の耐力壁は壁端の通し柱を
-		// 見失い、柱芯へ寄らず控えの内法で描かれる。その伏図レベルを下端以下に、
+		// 見失い、柱芯へ寄らず控えの内法で描画される。その伏図レベルを下端以下に、
 		// 上端をそれより上に持つ span なら、その高さの壁の端に立ちうる。
 		// 管柱 "1to2" は 2 階（伏図レベル 2）を通らない（to == 2 はその床で止まる）。
 		// span の番号は伏図レベルの通し番号なので（どの階も高さが 1 つなら階の番号）、
-		// スキップフロアでも「その高さの床を通るか」がそのまま言える。
+		// スキップフロアでも「その高さの床を通るか」をそのまま判定できる。
 		bool spanCoversLevel(double from, double to, double level)
 		{
 			return from <= level + core::kPointEps && to > level + core::kPointEps;
@@ -191,7 +191,7 @@ namespace HomeskzIfcImport::parse
 			}
 			return layers;
 			// 閉じ括弧は push_back が例外を投げたときの後始末（layers の破棄）にしか通らず、
-			// テストでは踏めない（gcov の "====="）。その 1 行だけを計測から外す。
+			// テストでは通過できない（gcov の "====="）。その 1 行だけを計測から除外する。
 		} // GCOVR_EXCL_LINE
 
 		// 点に最も近い柱を返す（許容内に無ければ nullptr）。同距離なら**先に現れた柱**を
@@ -356,7 +356,7 @@ namespace HomeskzIfcImport::parse
 					(member.width / 2.0) + kShearWallBeamLateralTol)
 					continue;
 
-				// 実際の範囲（負のオフセット＝短く）を軸の s へ写す。
+				// 実際の範囲（負のオフセット＝短く）を軸の s へ変換する。
 				const double sStart = dot2(member.start - start, axis);
 				const double sign = dot2(dir, axis) >= 0.0 ? 1.0 : -1.0;
 				const double a = sStart + (sign * -member.startOffset);
@@ -413,7 +413,7 @@ namespace HomeskzIfcImport::parse
 
 		// 測る点（軸の s）を並べる。内法の両端と、内法に入る**材の端の両側**（上下の材が
 		// 入れ替わりうる点）、さらに隣り合う点の中点。上下の材の高さは材の端のあいだでは
-		// 直線なので、これで段差を取りこぼさない。
+		// 直線なので、これで段差を見落とさない。
 		std::vector<double> samplePoints(const std::vector<AxisBeam>& beams, double clearStart,
 										 double clearEnd)
 		{
@@ -461,7 +461,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 耐力壁 1 枚の高さを上下の横架材に合わせる（fitShearWallsToMembers の本体）。
-		// layerZ は配置先レイヤ平面の絶対 Z。測れない・潰れるときは wall を変えない。
+		// layerZ は配置先レイヤ平面の絶対 Z。測れない・退化するときは wall を変えない。
 		void fitShearWall(ShearWallCommand& wall, double layerZ,
 						  const std::vector<core::MemberCommand>& members,
 						  const std::vector<const core::ColumnCommand*>& columns)
@@ -538,7 +538,7 @@ namespace HomeskzIfcImport::parse
 			if (lowestLower.has_value())
 				bottom = *lowestLower;
 
-			// 測り直した内法が潰れるなら（上下の材の取り違え）、IFC の高さのまま残す。
+			// 測り直した内法が退化するなら（上下の材の取り違え）、IFC の高さのまま残す。
 			if (topAtStart <= bottom || topAtEnd <= bottom)
 				return;
 			wall.bottomHeight = bottom - layerZ;
@@ -735,7 +735,7 @@ namespace HomeskzIfcImport::parse
 					continue; // 両端が同じ柱に寄った（＝軸が決まらない）
 
 				// 内法は柱芯間から両側の半柱幅を引いたもの。柱が見つからなければ要素自身の
-				// 広がりで代用する（PIO は図面の柱から引き直すので、これは控え）。
+				// 広がりで代用する（PIO は図面の柱から再取得するので、これは控え）。
 				double clear = std::hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y);
 				if (startColumn != nullptr)
 					clear -= startColumn->width / 2.0;

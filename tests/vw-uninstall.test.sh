@@ -11,7 +11,7 @@
 #
 #	  * **消してよいものだけを消す** — フォルダ名が一致し、かつ中に殻がある
 #	    ときだけ。`Plug-Ins` そのものや無関係なフォルダを名指しされても消さない。
-#	  * **入っていなければ成功** — アップデートの入口で無条件に叩けること
+#	  * **入っていなければ成功** — アップデートの入口で無条件に呼び出せること
 #	    （初回インストールでも、この仕組みより前の版からでも止まらない）。
 #
 #	The script is SOURCED (its `main` is guarded, see its tail), so the real
@@ -127,7 +127,7 @@ t "plugin_dir does not nest when it is already the plug-in's folder"
 check_eq "$(RUN plugin_dir "/x/Plug-Ins/$NAME" "$NAME")" "/x/Plug-Ins/$NAME" "already there -> unchanged"
 
 # ===========================================================================
-# 取り除く — フォルダごと。**その版が増やしたファイルも一緒に消えること**が肝で、
+# 取り除く — フォルダごと。**その版が増やしたファイルも一緒に消えること**が要点で、
 # ファイル名を列挙していたら取りこぼす。
 # ===========================================================================
 t "remove_plugin_dir removes the whole plug-in folder"
@@ -162,7 +162,7 @@ check_file "$root/important.txt" "the other plug-ins are untouched"
 check_file "$root/SomeoneElsePlugin" "the other plug-ins are untouched"
 
 # ===========================================================================
-# 入っていなければ成功 — アップデートの入口で無条件に叩けること。
+# 入っていなければ成功 — アップデートの入口で無条件に呼び出せること。
 # ===========================================================================
 t "remove_plugin_dir succeeds when there is nothing installed"
 MACHINE=1 RUN remove_plugin_dir "$WORK/nowhere/$NAME" "$NAME"

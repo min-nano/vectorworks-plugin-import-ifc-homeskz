@@ -23,9 +23,9 @@ namespace HomeskzIfcImport::core
 {
 	namespace
 	{
-		// 値に混ざってはいけないもの（改行）を落とし、前後の空白を削る。**行の書式が
+		// 値に混ざってはいけないもの（改行）を取り除き、前後の空白を削る。**行の書式が
 		// key=value 1 行きりである以上、改行を含む値は書けない**——切り詰めるより
-		// 落としたほうが、読み直したときに「途中で切れた行」を値と誤読せずに済む。
+		// 取り除いたほうが、再度読み込んだときに「途中で切れた行」を値と誤読せずに済む。
 		std::string sanitize(const std::string& value)
 		{
 			std::string out;
@@ -111,7 +111,7 @@ namespace HomeskzIfcImport::core
 		}
 		// M28 図面枠のスタイル（空＝置かない）。**役割の表の外にある設定も漏らさず書く**——
 		// 2 周目以降は設定ダイアログを出さずにここから復元するので、書き落とすと 1 周目と
-		// 違う条件（図面枠なし）で黙って走る（PR #133 の round 2 で実際に起きた）。
+		// 違う条件（図面枠なし）で警告なしに実行される（PR #133 の round 2 で実際に起きた）。
 		out << "titleblock=" << sanitize(session.options.titleBlockStyle()) << "\n";
 		// M31 寸法規格（空＝入れない）。図面枠と同じ理由で漏らさず書く。
 		out << "dimension=" << sanitize(session.options.dimensionStandard()) << "\n";
@@ -119,12 +119,12 @@ namespace HomeskzIfcImport::core
 		// 書く。**1 つにつき 1 行**で "<階の番号>:<高さ mm>"（core::PlanLevelKey）。
 		for (const PlanLevelKey& key : session.options.mergedPlanLevels)
 			out << "merge.level=" << key.story << ":" << key.height << "\n";
-		// M34 軸組図から外す通り（図番）。図面枠と同じ理由で漏らさず書く——書き落とすと
-		// 続きの周が外したはずの通りまで描く。レイヤと同じく**1 本 1 行**。
+		// M34 軸組図から除外する通り（図番）。図面枠と同じ理由で漏らさず書く——書き落とすと
+		// 続きの周が除外したはずの通りまで描画する。レイヤと同じく**1 本 1 行**。
 		for (const std::string& number : session.options.skippedSections)
 			out << "section.skip=" << sanitize(number) << "\n";
 		// 垂木の断面（mm）。図面枠と同じ理由で漏らさず書く——書き落とすと続きの周が
-		// 既定の 45×45 で描く。読み戻せる表記（core::formatRafterSize）で書く。
+		// 既定の 45×45 で描画する。読み戻せる表記（core::formatRafterSize）で書く。
 		out << "rafter.width=" << formatRafterSize(session.options.rafterWidth) << "\n";
 		out << "rafter.height=" << formatRafterSize(session.options.rafterHeight) << "\n";
 		return out.str();
@@ -149,7 +149,7 @@ namespace HomeskzIfcImport::core
 			const std::string value = sanitize(line.substr(eq + 1));
 
 			// M37 までの記憶にある send / repo / pr / branch / anon / posted / loop は、
-			// 下の「知らない行」として黙って読み飛ばす（PR への投稿をやめた。M38）。
+			// 下の「知らない行」として通知せずに読み飛ばす（PR への投稿をやめた。M38）。
 			// M38 までの work（作業ファイル。.vwx）と created.layer / created.sheet
 			// （レイヤ削除の相手）も同じく読み飛ばす——作業ファイルは開くと**その
 			// ファイル自体**が開いてしまい、テンプレートの代わりにならない（M39）。
@@ -201,7 +201,7 @@ namespace HomeskzIfcImport::core
 			}
 			else if (key == "merge.level")
 			{
-				// "<階の番号>:<高さ mm>"。読めない行は黙って飛ばす（古い記憶には行が無く、
+				// "<階の番号>:<高さ mm>"。読めない行は通知せずに読み飛ばす（古い記憶には行が無く、
 				// まとめない＝既定のまま読む）。GL より下の横架材は無いので、高さも負を
 				// 読まない parseInt で足りる。
 				const std::string::size_type colon = value.find(':');
@@ -215,7 +215,7 @@ namespace HomeskzIfcImport::core
 			else if (key == "section.skip")
 			{
 				// **重ねて読む**（行の数だけ通りがある）。古い記憶（M34 より前）には行が
-				// 無い——既定の空（全部描く）のまま読む。
+				// 無い——既定の空（全部描画する）のまま読む。
 				if (!value.empty())
 				{
 					std::vector<std::string> skipped = session.options.skippedSections;
@@ -225,7 +225,7 @@ namespace HomeskzIfcImport::core
 			}
 			else if (key.starts_with("role."))
 			{
-				// "role.<n>.symbol" / "role.<n>.on"。表に無い番号は黙って飛ばす
+				// "role.<n>.symbol" / "role.<n>.on"。表に無い番号は通知せずに読み飛ばす
 				// （役割が増減しても古いファイルを読める）。
 				const std::string::size_type dot = key.find('.', 5);
 				if (dot == std::string::npos)
@@ -255,8 +255,8 @@ namespace HomeskzIfcImport::core
 		// 環境変数も GUI アプリの子プロセスに必ず入っている。
 		//
 		// **フォルダ名（HomeskzIfcImport）は識別子なので、プラグインの改名に追随させない。**
-		// 付け替えると、実機テストの記憶（周回数・前の周の内訳・1 周目の選択）が黙って
-		// 行方不明になる。同梱スクリプトが同じフォルダから読むトークンも同じ理由で据え置いて
+		// 付け替えると、実機テストの記憶（周回数・前の周の内訳・1 周目の選択）が警告なしに
+		// 参照できなくなる。同梱スクリプトが同じフォルダから読むトークンも同じ理由で据え置いて
 		// ある（scripts/vw-token.ps1 の Get-TokenFilePath）。
 		const std::string localAppData = trace::envValue("LOCALAPPDATA");
 		if (!localAppData.empty())
@@ -313,7 +313,7 @@ namespace HomeskzIfcImport::core
 	std::string testReportPathFor(const std::string& sessionPath)
 	{
 		// **文字列のまま差し替える。** std::filesystem::path へ通すと、Windows では UTF-8 の
-		// パスが ANSI のコードページとして読まれ、日本語のユーザー名で化ける。
+		// パスが ANSI のコードページとして読まれ、日本語のユーザー名が文字化けする。
 		if (sessionPath.empty())
 			return "";
 		const std::string::size_type slash = sessionPath.find_last_of("/\\");
@@ -335,7 +335,7 @@ namespace HomeskzIfcImport::core
 		if (!allowDialogs && ifcRequested)
 		{
 			// **IFC を名指しされたら、記憶があっても新しい 1 周目**（別の IFC で試し直すのに
-			// 人の手を要らなくする）。描く先はテンプレートからしか作らない（Refuse の doc）。
+			// 人の手を要らなくする）。描画先はテンプレートからしか作らない（Refuse の doc）。
 			return session.templatePath.empty() ? FeedbackRoundKind::Refuse
 												: FeedbackRoundKind::AutoFirstRound;
 		}
@@ -356,7 +356,7 @@ namespace HomeskzIfcImport::core
 			return false;
 		for (const std::string& owned : session.ownedDocuments)
 		{
-			// **置き場の外を指す記憶は、一致していても相手にしない**（安全弁の 2 つ目）。
+			// **置き場の外を指す記憶は、一致していても対象にしない**（安全弁の 2 つ目）。
 			if (!pathIsInside(owned, scratchRoot))
 				continue;
 			if (owned == openPath)

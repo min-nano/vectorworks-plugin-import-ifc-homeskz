@@ -1,10 +1,10 @@
 //
 //	CoreBridgeTests.cpp
 //
-//	MCP ブリッジのスプール（src/core/Bridge.h）の単体テスト。**Vectorworks も MCP も
-//	要らない**——このファイルが押さえるのは「置かれた要求を送った順に拾い、消し、応える」
-//	という受け渡しの作法と、外から来たものに対する安全側の振る舞いだけである
-//	（何を返す道具があるかは draw/McpBridge.cpp。そちらは実機で確かめる）。
+//	MCP ブリッジのスプール（src/core/Bridge.h）の単体テスト。このファイルが確かめるのは
+//	「置かれた要求を送った順に取得し、削除し、応答する」という受け渡しの手順と、外部から
+//	来たものに対する安全側の振る舞いだけである。**Vectorworks も MCP も要らない**
+//	（どの道具が何を返すかは draw/McpBridge.cpp。そちらは実機で確認する）。
 //
 
 #include "TestFramework.h"
@@ -31,7 +31,7 @@ using HomeskzIfcImport::core::parseBridgeRequest;
 
 namespace
 {
-	// テスト 1 件ぶんの作業ディレクトリ（作って、抜けるときに消す）。
+	// テスト 1 件分の作業ディレクトリ（作成し、スコープを抜けるときに削除する）。
 	//
 	// **一時ディレクトリを使わない。** TMPDIR / TEMP から組み立てたパスがファイル操作へ
 	// 届くと CodeQL が環境変数由来のパスとして報告する（cpp/path-injection）ので、
@@ -93,7 +93,7 @@ TEST(bridge_spool_dir_is_the_same_rule_on_both_sides)
 	// （stable と dev が同居しても取り違えない）。
 	CHECK_EQ(bridgeSpoolDir("/var/folders/ab/cd/T", "min-nano_structure"),
 			 std::string("/var/folders/ab/cd/T/min-nano_structure-mcp"));
-	// 末尾の区切りは足さない（一時ディレクトリの綴りが環境によって揺れる）。
+	// 末尾の区切りは追加しない（一時ディレクトリの綴りが環境によって揺れる）。
 	CHECK_EQ(bridgeSpoolDir("/tmp/", "min-nano_structure"),
 			 std::string("/tmp/min-nano_structure-mcp"));
 	CHECK_EQ(bridgeSpoolDir("C:\\Users\\me\\AppData\\Local\\Temp\\", "min-nano_structureDev"),
@@ -124,11 +124,11 @@ TEST(bridge_request_parsing)
 	CHECK_EQ(request.tool, std::string("vw_layers"));
 	CHECK_EQ(request.args.at("limit").asNumber(), 5.0);
 
-	// args を省いてもオブジェクトとして受け取れる（道具側に分岐を撒かない）。
+	// args を省いてもオブジェクトとして受け取れる（道具側の各所に分岐を書かない）。
 	CHECK(parseBridgeRequest("{\"id\":\"abc\",\"tool\":\"vw_ping\"}", request, error));
 	CHECK(request.args.isObject());
 
-	// 綴りの悪い id・tool 無し・JSON でないものは受けない。
+	// 綴りの不正な id・tool 無し・JSON でないものは受け付けない。
 	CHECK(!parseBridgeRequest("{\"id\":\"../x\",\"tool\":\"vw_ping\"}", request, error));
 	CHECK(!parseBridgeRequest("{\"id\":\"abc\"}", request, error));
 	CHECK(!parseBridgeRequest("[1,2]", request, error));
@@ -150,7 +150,7 @@ TEST(bridge_spool_round_trip)
 	CHECK_EQ(requests.size(), std::size_t(1));
 	CHECK(broken.empty());
 	CHECK_EQ(requests[0].tool, std::string("vw_ping"));
-	// **拾ったら消える**（同じものを毎周拾い直さない）。
+	// **取得したら削除される**（同じものをポーリングのたびに取得し直さない）。
 	CHECK(!std::filesystem::exists(spool.dir() + "/000000000001-aaaa" + kBridgeRequestSuffix));
 
 	BridgeResponse response;
@@ -176,7 +176,7 @@ TEST(bridge_spool_polls_in_name_order)
 	std::string error;
 	CHECK(spool.prepare(error));
 
-	// 置く順を入れ替えても、拾う順は名前（＝Python が付ける連番）の昇順。
+	// 置く順を入れ替えても、取得する順は名前（＝Python が付ける連番）の昇順。
 	PutRequest(spool.dir(), "000000000003-cccc", "c");
 	PutRequest(spool.dir(), "000000000001-aaaa", "a");
 	PutRequest(spool.dir(), "000000000002-bbbb", "b");
@@ -197,7 +197,7 @@ TEST(bridge_spool_reports_broken_requests_once)
 	CHECK(spool.prepare(error));
 
 	WriteFile(spool.dir() + "/000000000001-aaaa" + kBridgeRequestSuffix, "{ not json");
-	// 中身の id がファイル名と食い違うもの（応答の宛先が定まらない）。
+	// 中身の id がファイル名と一致しないもの（応答の宛先が定まらない）。
 	WriteFile(spool.dir() + "/000000000002-bbbb" + kBridgeRequestSuffix,
 			  "{\"id\":\"zzzz\",\"tool\":\"vw_ping\"}");
 	PutRequest(spool.dir(), "000000000003-cccc", "vw_ping");
@@ -209,7 +209,7 @@ TEST(bridge_spool_reports_broken_requests_once)
 	CHECK_EQ(broken[0], std::string("000000000001-aaaa"));
 	CHECK_EQ(broken[1], std::string("000000000002-bbbb"));
 
-	// **壊れた要求も消えている**（残すと永久に拾い直す）。
+	// **壊れた要求も削除されている**（残すと永久に取得し直す）。
 	const std::vector<BridgeRequest> again = spool.poll(broken);
 	CHECK(again.empty());
 	CHECK(broken.empty());
@@ -247,14 +247,15 @@ TEST(bridge_spool_status_appears_and_disappears)
 
 	spool.removeStatus();
 	CHECK(!std::filesystem::exists(spool.dir() + "/" + kBridgeStatusFile));
-	// 2 回目は何もしない（止め損ねても落ちない）。
+	// 2 回目は何もしない（停止処理が重複しても異常終了しない）。
 	spool.removeStatus();
 }
 
 TEST(bridge_spool_tells_a_live_status_from_a_stale_one)
 {
-	// 常駐（M30）では本体の入れ替えのたびに「開始」が来る。**生きた橋の後を継ぐときは
-	// 掃除しない**ので、その見分けがここに懸かっている。
+	// 動作中の橋の状態と、古い状態とを区別できること。**動作中の橋の後を継ぐときは
+	// 掃除しない**ので、その判定がここに依存する。常駐（M30）では本体の入れ替えのたびに
+	// 「開始」が来る。
 	const TempDir temp("live");
 	BridgeSpool spool(temp.path() + "/mcp");
 	std::string error;
@@ -269,10 +270,10 @@ TEST(bridge_spool_tells_a_live_status_from_a_stale_one)
 	CHECK(spool.statusIsLive(1000, kBridgeStatusStaleSeconds));
 	CHECK(spool.statusIsLive(1000 + kBridgeStatusStaleSeconds, kBridgeStatusStaleSeconds));
 	CHECK(!spool.statusIsLive(1001 + kBridgeStatusStaleSeconds, kBridgeStatusStaleSeconds));
-	// 時計が戻っても消す側へは倒さない。
+	// 時計が戻っても削除する側へは倒さない。
 	CHECK(spool.statusIsLive(900, kBridgeStatusStaleSeconds));
 
-	// 壊れた印・beat の無い印は「生きていない」。
+	// 壊れた印・beat の無い印は「動作中でない」と判定する。
 	WriteFile(spool.dir() + "/" + kBridgeStatusFile, "{");
 	CHECK(!spool.statusIsLive(1000, kBridgeStatusStaleSeconds));
 	WriteFile(spool.dir() + "/" + kBridgeStatusFile, R"({"protocol":1})");
@@ -281,7 +282,7 @@ TEST(bridge_spool_tells_a_live_status_from_a_stale_one)
 
 TEST(bridge_failure_response_carries_the_reason)
 {
-	// 失敗の応答は error だけを載せる（result は載せない）。壊れた要求へ応えるのに使う。
+	// 失敗の応答は error だけを載せる（result は載せない）。壊れた要求への応答に使う。
 	const BridgeResponse response = HomeskzIfcImport::core::bridgeFailure("abc", "読めません");
 	CHECK_EQ(response.id, std::string("abc"));
 	CHECK(!response.ok);
@@ -306,15 +307,15 @@ TEST(bridge_spool_prepare_reports_why_it_could_not)
 	CHECK(!blocked.prepare(error));
 	CHECK(!error.empty());
 
-	// 親が無い（＝一時ディレクトリの綴りがおかしい）。作れないことを理由ごと返す。
+	// 親が無い（＝一時ディレクトリの綴りが不正）。作成できないことを理由とともに返す。
 	BridgeSpool orphan(temp.path() + "/missing/mcp");
 	error.clear();
 	CHECK(!orphan.prepare(error));
 	CHECK(!error.empty());
 
 #ifndef _WIN32
-	// **行き先の無いシンボリックリンク。** mkdir は「既にある」と言い、素性は確かめ
-	// られない——どちらの言い分も真に受けずに断る。
+	// **リンク先の無いシンボリックリンク。** 使わずに失敗を返す。
+	// mkdir は「既にある」と返すが、実体は確認できない——どちらの結果も信用しない。
 	const std::string dangling = temp.path() + "/dangling";
 	std::error_code ec;
 	std::filesystem::create_symlink(temp.path() + "/nowhere", dangling, ec);
@@ -330,9 +331,10 @@ TEST(bridge_spool_prepare_reports_why_it_could_not)
 
 TEST(bridge_spool_refuses_a_world_writable_directory)
 {
-	// **スプールは一時ディレクトリの下にある**（`/tmp` に落ちることもある）。そこは同じ
-	// 計算機の他の利用者からも書けるので、**他から書ける状態のディレクトリは使わない**
-	// ——要求を投げ込まれれば図面を読まれ、応答を読まれれば中身が漏れる。
+	// **他の利用者から書ける状態のディレクトリは使わない**こと。
+	// 理由: スプールは一時ディレクトリの下にあり（`/tmp` になることもある）、そこは同じ
+	// 計算機の他の利用者からも書ける——要求を置かれれば図面を読まれ、応答を読まれれば
+	// 内容が漏れる。
 	const TempDir temp("world-writable");
 	const std::string dir = temp.path() + "/mcp";
 
@@ -358,21 +360,21 @@ TEST(bridge_spool_refuses_a_world_writable_directory)
 
 TEST(bridge_spool_is_quiet_when_the_directory_is_missing)
 {
-	// **開始前・止めた後でも落ちない。** 掃除は 0 件、要求は空。
+	// **開始前・停止後でも異常終了しない。** 掃除は 0 件、要求は空。
 	const TempDir temp("missing");
 	BridgeSpool spool(temp.path() + "/not-created");
 	CHECK_EQ(spool.sweep(), std::size_t(0));
 	std::vector<std::string> broken;
 	CHECK(spool.poll(broken).empty());
 	CHECK(broken.empty());
-	// 印を消すのも安全（無くても何も言わない）。
+	// 印の削除も安全（無くてもエラーにしない）。
 	spool.removeStatus();
 }
 
 TEST(bridge_spool_caps_how_many_it_takes_per_poll)
 {
-	// **1 周で捌く件数に上限がある**（溜まっていても Vectorworks を握り続けない）。
-	// 残りは次の周で拾われる。
+	// **1 回のポーリングで処理する件数に上限がある**
+	// （溜まっていても Vectorworks を占有し続けない）。残りは次のポーリングで取得される。
 	const TempDir temp("cap");
 	BridgeSpool spool(temp.path() + "/mcp");
 	std::string error;
@@ -397,7 +399,7 @@ TEST(bridge_spool_caps_how_many_it_takes_per_poll)
 
 TEST(bridge_spool_rejects_an_oversized_request)
 {
-	// **巨大な要求を丸ごと読み込まない**（上限を越えたら壊れた要求として 1 度だけ報告）。
+	// **巨大な要求を全体まで読み込まない**（上限を越えたら壊れた要求として 1 度だけ報告）。
 	const TempDir temp("oversized");
 	BridgeSpool spool(temp.path() + "/mcp");
 	std::string error;
@@ -411,7 +413,7 @@ TEST(bridge_spool_rejects_an_oversized_request)
 	CHECK(requests.empty());
 	CHECK_EQ(broken.size(), std::size_t(1));
 	CHECK_EQ(broken[0], std::string("000000000001-aaaa"));
-	// 消えている（毎周読み直さない）。
+	// 削除されている（ポーリングのたびに読み直さない）。
 	CHECK(!std::filesystem::exists(spool.dir() + "/000000000001-aaaa" +
 								   std::string(kBridgeRequestSuffix)));
 }

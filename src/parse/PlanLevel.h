@@ -4,7 +4,7 @@
 //	Phase 1（IFC 解析）の伏図レベル（docs/DEV-NOTES.md「横架材の高さごとに伏図を作る」）。
 //	**伏図は横架材の高さごとに 1 枚作る**（ご要望）。ホームズ君の IFC は階（1FL / 2FL / RFL）
 //	単位で要素を出すが、スキップフロアでは 1 つの階に横架材の天端が複数ある——例えば
-//	GL+2699 と GL+3531 がどちらも 2FL に入る。伏図はそれぞれの高さの梁伏図を描くのが基本で、
+//	GL+2699 と GL+3531 がどちらも 2FL に入る。伏図はそれぞれの高さの梁伏図を作成するのが基本で、
 //	設計者が取り込みの設定で「前のレベルと同じ伏図にまとめる」と選んだものだけを寄せる
 //	（core::ImportOptions::mergedPlanLevels）。
 //
@@ -13,7 +13,7 @@
 //	【レベルの決め方】
 //	  * 高さは**その階の横架材レイヤ（横架材天端・最上階は軒高）に載る水平な横架材の天端**を
 //	    mm に丸めた値。**1mm でも違えば別のレベル**（まとめるかどうかは設計者が決める。
-//	    ご要望）。母屋・登り梁の専用レイヤの材は見ない——高さがもともと材ごとに違い、
+//	    ご要望）。母屋・登り梁の専用レイヤの材は参照しない——高さがもともと材ごとに違い、
 //	    母屋伏図が別にある。
 //	  * **傾いた材（登り梁・隅木）は水下側で切り分ける**（ご要望）——低い側の端の天端に
 //	    いちばん近いレベルへ入れる。レベルを作る材にはしない。登り梁の専用レイヤ
@@ -137,7 +137,7 @@ namespace HomeskzIfcImport::parse
 	// + 0.75）は、切断を範囲に含む登り梁を映す（parse/Sheet の spanLayersAtCut）。
 	//   * 柱梁伏図: その階の伏図レベルのうち、高さを跨ぐ（下端 ≤ 高さ ≤ 上端）もの。
 	//   * 母屋伏図: 上端がその階のいちばん上の伏図レベルの高さ以上のもの。
-	//   * どちらにも当たらなければ、低い側の端に近い伏図レベルの柱梁伏図。
+	//   * どちらにも該当しなければ、低い側の端に近い伏図レベルの柱梁伏図。
 	// 範囲は、柱梁伏図 o だけなら [o, o + 0.5]、母屋伏図にも映すなら to = いちばん上 + 1、
 	// 母屋伏図だけなら [いちばん上 + 0.5, いちばん上 + 1]。その階に伏図レベルが無ければ false。
 	bool noboribariSpan(const core::MemberCommand& member, const std::vector<PlanLevel>& levels,
@@ -149,13 +149,13 @@ namespace HomeskzIfcImport::parse
 	// 専用レイヤは振り分けない（母屋伏図にだけ映る）。登り梁は noboribariSpan の範囲の
 	// span レイヤ（"{from}to{to}-登り梁"）へ置き、高さ基準もそのレベルへ付け替える。横架材レイヤの**軒桁**（クラスで判別）は
 	// 軒桁の専用レイヤ（"n-軒桁" / "n-軒桁(FL-872)"）へ分ける（母屋伏図に薄く重ねるため。
-	// 取り合いを見るときは parse/Story の beamGroupLayer で横架材レイヤへ読み替える）。
+	// 取り合いを判定するときは parse/Story の beamGroupLayer で横架材レイヤへ読み替える）。
 	void assignMemberPlanLevels(std::vector<core::MemberCommand>& members,
 								const std::vector<StoryInfo>& stories,
 								const std::vector<PlanLevel>& levels);
 
 	// 伏図レベルの候補（まとめる前の高さ 1 つずつ。階の昇順・高さの昇順）。設定ダイアログの
 	// 「前のレベルと同じ伏図にまとめる」の行になる。IFC を読んで候補を返す入口は
-	// parse/BuildDocument の scanPlanLevelChoices（draw/ が STEP の型を見ずに呼べるように）。
+	// parse/BuildDocument の scanPlanLevelChoices（draw/ が STEP の型を参照せずに呼べるように）。
 	std::vector<core::PlanLevelChoice> collectPlanLevelChoices(Context& context);
 } // namespace HomeskzIfcImport::parse

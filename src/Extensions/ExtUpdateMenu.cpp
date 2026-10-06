@@ -24,12 +24,12 @@ namespace HomeskzIfcImport
 		//
 		// カテゴリは取り込みコマンドと**同じ "category"**（＝プラグイン名）を引く。
 		// このプラグインのコマンドはワークスペースの中で 1 か所にまとまっているのが
-		// 筋で、同じ文字列を .vwr へ 2 度書く理由も無い（Extensions/ExtMenu.cpp）。
+		// 適切で、同じ文字列を .vwr へ 2 度書く理由も無い（Extensions/ExtMenu.cpp）。
 		//
 		// Needs = None: **文書が開いていなくても有効**。取り込みコマンドは描画先が要る
 		// ので DocIsActive を宣言しているが（Extensions/ExtMenu.cpp）、更新の確認に
 		// 図面は要らない。むしろ「取り込む前に新しくしておく」ために、文書を開く前に
-		// 押せなければ困る。
+		// 実行できなければ困る。
 		//
 		// 関数ローカル static で持つ理由は取り込みコマンドと同じ（EMenuEnableFlags は
 		// SDK の別 TU にある非ローカル static なので、名前空間スコープ変数の初期化子で
@@ -89,7 +89,7 @@ CCheckUpdateMenu_EventSink::~CCheckUpdateMenu_EventSink() = default;
 void CCheckUpdateMenu_EventSink::DoInterface()
 {
 	// **例外を SDK のコールバックへ漏らさない**（CLAUDE.md「エラーハンドリング」）。
-	// ここは起動時と違って報告先があるので、握り潰さずに一言出す。
+	// ここは起動時と違って報告先があるので、握り潰さずに短いメッセージを表示する。
 	try
 	{
 		CheckForUpdates(UpdateCheckKind::Manual);

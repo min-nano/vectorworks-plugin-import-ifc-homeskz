@@ -56,7 +56,7 @@ namespace HomeskzIfcImport::parse
 		if (found != fLoftFloorRegions.end())
 			return found->second;
 		// 先に計算してから emplace する（loftFloorRegions は storyElements を引くので、
-		// 計算中に別のキャッシュが埋まってもこの map は触られない）。
+		// 計算中に別のキャッシュが埋まってもこの map は変更されない）。
 		std::vector<LoftFloorRegion> regions = parse::loftFloorRegions(*this, storeyId);
 		return fLoftFloorRegions.emplace(storeyId, std::move(regions)).first->second;
 	}

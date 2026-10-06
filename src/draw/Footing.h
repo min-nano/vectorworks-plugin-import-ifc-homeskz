@@ -10,7 +10,7 @@
 //	しか参照せず SDK ヘッダを引き込まない（draw/*.h 共通の約束。draw/DrawUtil.h 参照）。
 //
 //	M10 で人通口（解析側で立上りが分割・切り下げ済みなので描画は変わらない）・壁結合
-//	（drawWallJoins）・地中梁（底盤の modifiers）を足した。配筋は保留。
+//	（drawWallJoins）・地中梁（底盤の modifiers）を追加した。配筋は保留。
 //
 
 #pragma once
@@ -24,12 +24,12 @@
 
 namespace HomeskzIfcImport::draw
 {
-	// 立上り（wall 命令）を壁オブジェクトとして描く。配置先レイヤ（"F-立上り"）が無い命令は
-	// スキップする（レイヤは基礎ストーリの story 命令が作る）。実際に配置できた本数を返す。
+	// 立上り（wall 命令）を壁オブジェクトとして描画する。配置先レイヤ（"F-立上り"）が無い命令
+	// はスキップする（レイヤは基礎ストーリの story 命令が作る）。実際に配置できた本数を返す。
 	//
 	// handles を渡すと、**命令のインデックスをキーに**配置した壁ハンドルを記録する（壁結合が
-	// 引く。フォールバック描画＝壁を作れなかった命令とレイヤ未生成でスキップした命令は記録し
-	// ない）。描画は必ず**底盤より先**に行う。
+	// 参照する。フォールバック描画＝壁を作れなかった命令とレイヤ未生成でスキップした命令は
+	// 記録しない）。描画は必ず**底盤より先**に行う。
 	std::size_t drawWalls(const core::Document& document, core::ProgressReporter& progress,
 						  ObjectHandles* handles = nullptr);
 
@@ -38,13 +38,13 @@ namespace HomeskzIfcImport::draw
 	// る。実行は立上りの直後・底盤の前。
 	//
 	// 結合の**後に各立上りの端部キャップを命令どおりへ揃え直し、壁をリセットする**
-	// （JoinWalls が結合した端のキャップを書き換え、平面の 2D 表現も作り直すまで古いまま
+	// （JoinWalls が結合した端のキャップを書き換え、平面の 2D 表現も再計算するまで古いまま
 	// になるため。draw/Footing.cpp「端部のキャップ」）。VW に拒否された結合があれば outNote に
 	// 件数を残す（完了ダイアログの診断。draw/Member と同じ流儀）。
 	std::size_t drawWallJoins(const core::Document& document, core::ProgressReporter& progress,
 							  const ObjectHandles& handles, std::string* outNote = nullptr);
 
-	// 底盤（slab 命令）をスラブオブジェクトとして描く。配置先レイヤ（"F-底盤"）が無い命令は
+	// 底盤（slab 命令）をスラブオブジェクトとして描画する。配置先レイヤ（"F-底盤"）が無い命令は
 	// スキップする。実際に配置できた枚数を返す。手順は床板（draw/Floor）と同じで、共通部分は
 	// draw/DrawUtil（SetComponents / SetSlabDatum）にある。
 	//

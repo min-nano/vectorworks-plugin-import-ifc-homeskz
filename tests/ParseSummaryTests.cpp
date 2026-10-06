@@ -27,7 +27,7 @@ using HomeskzIfcImport::core::SymbolRole;
 namespace
 {
 	// counts の中から表示用 IFC 型名で件数を引く（見つからなければ最大値を返して
-	// テストを分かりやすく落とす）。
+	// テストを明確に失敗させる）。
 	std::size_t countOf(const IfcSummary& summary, const std::string& ifcType)
 	{
 		for (const IfcTypeCount& c : summary.counts)
@@ -132,7 +132,7 @@ TEST(summarize_ifc_missing_file_reports_not_loaded)
 
 namespace
 {
-	// 横架材 3 本・柱 2 本だけを持つ最小の命令セット。中身は見ないので既定値のままでよい
+	// 横架材 3 本・柱 2 本だけを持つ最小の命令セット。中身は参照しないので既定値のままでよい
 	// （formatImportResult が読むのは**件数**だけ）。
 	Document sampleDocument()
 	{
@@ -143,7 +143,7 @@ namespace
 	}
 
 	// 全要素に 1 件ずつ入れた命令セット。**要素表（Summary.cpp の kElements）を端から端まで
-	// 通す**ために使う——要素を足したときに表へ書き忘れると、下の 2 つのケースが落ちる。
+	// 通す**ために使う——要素を追加したときに表へ書き忘れると、下の 2 つのケースが失敗する。
 	Document fullDocument()
 	{
 		Document document;
@@ -169,7 +169,7 @@ namespace
 		return document;
 	}
 
-	// fullDocument をすべて描けた場合の件数。
+	// fullDocument をすべて描画できた場合の件数。
 	DrawCounts fullCounts()
 	{
 		DrawCounts counts;
@@ -217,13 +217,13 @@ TEST(format_import_result_is_short_and_names_the_file)
 	CHECK(text.find("柱:") == std::string::npos);
 	// ログの場所も出さない（ログ自身の見出しが持つ）。
 	CHECK(text.find("ログ: ") == std::string::npos);
-	// 問題が無いのだから、ログを見に行かせる案内も出さない。
+	// 問題が無いのだから、ログの確認を促す案内も出さない。
 	CHECK(text.find("ログを表示") == std::string::npos);
 }
 
 TEST(format_import_result_flags_a_shortfall_as_a_problem)
 {
-	// 命令はあるのに描けなかったなら「うまくいかなかったところがある」と言い、
+	// 命令はあるのに描画できなかったなら「うまくいかなかったところがある」と言い、
 	// 内訳（どの要素が何本足りないか）はログへ送る。
 	DrawCounts counts;
 	counts.valid = true;
@@ -234,13 +234,13 @@ TEST(format_import_result_flags_a_shortfall_as_a_problem)
 
 	CHECK(text.find("うまくいかなかったところがあります") != std::string::npos);
 	CHECK(text.find("くわしい内訳と原因はログにあります") != std::string::npos);
-	// 何件描けたかはログで読む（ダイアログには出さない）。
+	// 何件描画できたかはログで読む（ダイアログには出さない）。
 	CHECK(text.find("3/5") == std::string::npos);
 }
 
 TEST(format_import_result_flags_draw_diagnostics_as_a_problem)
 {
-	// 件数が揃っていても描画側が異常を持ち帰ったなら「問題あり」。**平常の記録（notes）は
+	// 件数が揃っていても描画側が異常を記録したなら「問題あり」。**平常の記録（notes）は
 	// 問題にしない**——毎回出るものを問題にすると、ダイアログが常に「問題あり」になる。
 	DrawCounts counts;
 	counts.valid = true;
@@ -263,11 +263,11 @@ TEST(format_import_result_flags_draw_diagnostics_as_a_problem)
 
 TEST(format_import_result_tells_to_update_viewports_only_when_drawings_were_made)
 {
-	// **取り込み直後の伏図・軸組図は 1 回の「更新」が要る**（VW はレイヤを高さの降順で描くので、
-	// 床仕上げ天端が構造天端より上にある以上、そのままでは床が柱・梁を覆う。並べた重ね順は
-	// 図面には入っていて、更新すればそちらで描き直される。SDK リファレンス Findings
-	// 「Layers and Stories」）。
-	// 黙って誤った絵を見せないよう、図を 1 枚でも作ったなら必ず伝える。
+	// 図を 1 枚でも作ったなら、**取り込み直後の伏図・軸組図は 1 回の「更新」が要る**ことを
+	// 必ず伝える（誤った描画結果を断りなく見せないため）。
+	// 理由: VW はレイヤを高さの降順で描画するので、床仕上げ天端が構造天端より上にある以上、
+	// そのままでは床が柱・梁を覆う。並べた重ね順は図面には入っていて、更新すればそちらで
+	// 再描画される（SDK リファレンス Findings「Layers and Stories」）。
 	DrawCounts drawn;
 	drawn.valid = true;
 	drawn.sheets = 1;
@@ -288,7 +288,7 @@ TEST(format_import_result_tells_to_update_viewports_only_when_drawings_were_made
 
 TEST(format_import_result_reports_cancel)
 {
-	// 中止は「描き切れなくて当然」なので、問題あり扱いにしない（原因を探しに行かせない）。
+	// 中止は「最後まで描画されなくて当然」なので、問題あり扱いにしない（原因を探しに行かせない）。
 	DrawCounts counts;
 	counts.valid = true;
 	counts.members = 1;
@@ -302,7 +302,7 @@ TEST(format_import_result_reports_cancel)
 
 TEST(format_import_result_warns_only_when_undo_falls_short)
 {
-	// **1 回で戻せるなら黙る**——メニューの「取り消し」が効くのは当たり前で、書くと
+	// **1 回で戻せるなら何も書かない**——メニューの「取り消し」が機能するのは当たり前で、書くと
 	// かえって読む量が増える。戻せない／一部しか戻らないのは当然ではないので伝える
 	// （間違えたときの戻し方が変わる。判断材料は描画側が置く。core::DrawCounts）。
 	DrawCounts counts;
@@ -314,7 +314,7 @@ TEST(format_import_result_warns_only_when_undo_falls_short)
 	counts.undoArmed = true;
 	CHECK(formatImportResult(sampleDocument(), counts).find("取り消し") == std::string::npos);
 
-	// (2) 取り込み前から在ったレイヤへも描いた＝その分は戻らない。
+	// (2) 取り込み前から在ったレイヤへも描画した＝その分は戻らない。
 	counts.undoPartial = true;
 	CHECK(formatImportResult(sampleDocument(), counts).find("新しく作ったレイヤの分だけ") !=
 		  std::string::npos);
@@ -325,7 +325,7 @@ TEST(format_import_result_warns_only_when_undo_falls_short)
 	CHECK(formatImportResult(sampleDocument(), counts).find("「取り消し」では戻せません") !=
 		  std::string::npos);
 
-	// 何も描いていないとき（命令が 0 件）は取り消しの話をしない。
+	// 何も描画していないとき（命令が 0 件）は取り消しの話をしない。
 	DrawCounts empty;
 	empty.valid = true;
 	CHECK(formatImportResult(Document{}, empty).find("取り消し") == std::string::npos);
@@ -333,7 +333,7 @@ TEST(format_import_result_warns_only_when_undo_falls_short)
 
 TEST(format_log_result_always_records_how_far_undo_reaches)
 {
-	// **ログには常に残す**——ダイアログから外した「1 回で戻せる」も、後から
+	// **ログには常に残す**——ダイアログから除いた「1 回で戻せる」も、後から
 	// 「戻せたはずでは」を確かめるときの手掛かりになる。
 	DrawCounts counts;
 	counts.valid = true;
@@ -347,7 +347,7 @@ TEST(format_log_result_always_records_how_far_undo_reaches)
 
 TEST(format_import_result_reports_invalid_document)
 {
-	// 検証に落ちたときは何も描いていないので、件数は並べず理由だけを返す。
+	// 検証に落ちたときは何も描画していないので、件数は並べず理由だけを返す。
 	DrawCounts const counts; // 既定は valid=false
 	std::string const text = formatImportResult(sampleDocument(), counts);
 
@@ -384,7 +384,7 @@ TEST(import_outcome_classifies_the_run)
 	warning.columns = 1;
 	CHECK(importOutcome(sampleDocument(), warning).status == ImportStatus::Warning);
 
-	// 中止は Warning より優先（描き切れないのが当たり前だから）。
+	// 中止は Warning より優先（最後まで描画されないのが当たり前だから）。
 	DrawCounts cancelled = warning;
 	cancelled.cancelled = true;
 	CHECK(importOutcome(sampleDocument(), cancelled).status == ImportStatus::Cancelled);
@@ -399,7 +399,7 @@ TEST(import_outcome_classifies_the_run)
 
 TEST(document_command_count_sums_every_element_list)
 {
-	// **要素を足したときに数え漏らさない**ための番人。Document の各リストに 1 件ずつ
+	// **要素を追加したときに数え漏らさない**ための検査。Document の各リストに 1 件ずつ
 	// 入れたら、総数はリストの数と一致しなければならない（kElements の網羅性を固定する）。
 	CHECK_EQ(documentCommandCount(fullDocument()), static_cast<std::size_t>(19));
 	CHECK_EQ(documentCommandCount(Document{}), static_cast<std::size_t>(0));
@@ -438,8 +438,8 @@ TEST(format_log_header_names_the_build_time_and_file)
 
 TEST(format_log_header_says_when_there_is_no_log_file)
 {
-	// 一時ディレクトリへ書けなかったとき。**黙らない**——場所を出さないと、出ていない
-	// ファイルを探しに行かせる。本文はダイアログのログ欄に出ているので、そこを
+	// 一時ディレクトリへ書けなかったとき。**省略せずに書けなかったと出す**——場所を出さないと、
+	// 存在しないファイルを探させてしまう。本文はダイアログのログ欄に出ているので、そこを
 	// コピーすればよいと伝える。
 	std::string const text = formatLogHeader(BuildInfo{}, "a.ifc", 0, "2026-08-29 14:03:21");
 	CHECK(text.find("ログ: （ファイルへは書けませんでした") != std::string::npos);
@@ -447,7 +447,7 @@ TEST(format_log_header_says_when_there_is_no_log_file)
 
 TEST(format_log_header_scales_the_file_size)
 {
-	// 大きさは桁に合わせて読める形にする（「12876543 バイト」では大小が掴めない）。
+	// 大きさは桁に合わせて読める形にする（「12876543 バイト」では大小が把握できない）。
 	CHECK(formatLogHeader(BuildInfo{}, "a.ifc", 3ULL * 1024ULL * 1024ULL, "").find("3.0 MB") !=
 		  std::string::npos);
 	CHECK(formatLogHeader(BuildInfo{}, "a.ifc", 2048ULL, "").find("2.0 KB") != std::string::npos);
@@ -457,7 +457,7 @@ TEST(format_log_header_scales_the_file_size)
 
 TEST(format_log_header_fills_unknown_fields)
 {
-	// 素性が分からなくても行は落とさない（「無い」ことも情報なので黙らない）。
+	// ビルドの素性が分からなくても行は省略しない（「無い」ことも情報なので書き出す）。
 	std::string const text = formatLogHeader(BuildInfo{}, "", 0, "");
 	CHECK(text.find("日時: 不明") != std::string::npos);
 	CHECK(text.find("ビルド: 不明") != std::string::npos);
@@ -468,9 +468,9 @@ TEST(format_log_header_fills_unknown_fields)
 
 TEST(format_log_result_lists_every_element_and_the_verdict)
 {
-	// 表（kElements）の**全行**を通し、表示名と助数詞をここで固定する。要素を足したときに
+	// 表（kElements）の**全行**を通し、表示名と助数詞をここで固定する。要素を追加したときに
 	// 表へ書き忘れれば document_command_count のケースが、ラベルや助数詞を取り違えれば
-	// このケースが落ちる。**完了ダイアログから外した内訳はここにある。**
+	// このケースが失敗する。**完了ダイアログから除いた内訳はここにある。**
 	std::string const text = formatLogResult(fullDocument(), fullCounts(), 71.4);
 
 	CHECK(text.find("結果: 成功") != std::string::npos);
@@ -501,7 +501,7 @@ TEST(format_log_result_lists_every_element_and_the_verdict)
 
 TEST(format_log_result_shows_shortfall_notes_and_records)
 {
-	// 描けなかったぶんは「描けた数/命令数」で、原因（注意）と平常の記録（記録）は
+	// 描画できなかった分は「描画できた数/命令数」で、原因（注意）と平常の記録（記録）は
 	// 見出しを分けて並べる——前者だけが「問題あり」の根拠になるから。
 	DrawCounts counts; // 件数はすべて 0 のまま
 	counts.valid = true;
@@ -537,7 +537,7 @@ TEST(format_log_result_reports_an_empty_document)
 TEST(format_log_result_indents_multi_line_notes)
 {
 	// 描画側の説明は要素ごとに 1 行ずつ積まれる（draw/ExecuteDocument）。ログでは 2 字
-	// 下げて並べ、**空行は落とす**（積み方の都合で混じっても箇条書きが崩れない）。
+	// 下げて並べ、**空行は除く**（積み方の都合で混じっても箇条書きが崩れない）。
 	DrawCounts counts;
 	counts.valid = true;
 	counts.members = 3;
@@ -560,7 +560,7 @@ TEST(format_log_result_reports_cancel_and_invalid)
 	DrawCounts const invalid; // valid=false
 	std::string const text = formatLogResult(sampleDocument(), invalid, 1.0);
 	CHECK(text.find("結果: 失敗") != std::string::npos);
-	// 何も描いていないので内訳は並べない。
+	// 何も描画していないので内訳は並べない。
 	CHECK(text.find("横架材") == std::string::npos);
 }
 
@@ -599,22 +599,22 @@ TEST(format_import_options_lists_every_role_and_marks_the_defaults)
 	std::string const text = formatImportOptions(options);
 
 	CHECK(text.find("設定: 配置するシンボル") != std::string::npos);
-	// 差し替えた行は名前だけ、触っていない行は「（既定）」付き。
+	// 差し替えた行は名前だけ、変更していない行は「（既定）」付き。
 	CHECK(text.find("床束: 床束_大") != std::string::npos);
 	CHECK(text.find("床束: 床束_大（既定）") == std::string::npos);
 	CHECK(text.find("仕口: 仕口（既定）") != std::string::npos);
-	// M28 図面枠は役割の表に載らないので、末尾に 1 行だけ足される。既定は「置かない」。
+	// M28 図面枠は役割の表に載らないので、末尾に 1 行だけ追加される。既定は「置かない」。
 	CHECK(text.find("図面枠スタイル: 置かない") != std::string::npos);
 	// M31 寸法も同じく末尾に 1 行。既定は「入れない」。
 	CHECK(text.find("寸法規格: 入れない") != std::string::npos);
-	// M34 軸組図から外す通りも末尾に 1 行。既定は「なし」（全部描く）。
+	// M34 軸組図から外す通りも末尾に 1 行。既定は「なし」（すべて描画する）。
 	CHECK(text.find("軸組図から外す通り: なし") != std::string::npos);
 	// 伏図のまとめ方も末尾に 1 行。既定は「まとめない」。
 	CHECK(text.find("伏図のまとめ方: まとめない") != std::string::npos);
 	// 垂木の断面も末尾に 1 行。既定は 45×45。
 	CHECK(text.find("垂木の断面: 45×45 mm（既定）") != std::string::npos);
 	// 役割の数 ＋ 図面枠・寸法・伏図のまとめ方・外す通り・垂木の断面の 5 行だけ行がある
-	// （見出しの 1 行を足した数）。
+	// （見出しの 1 行を加えた数）。
 	CHECK_EQ(std::ranges::count(text, '\n'),
 			 std::ptrdiff_t(HomeskzIfcImport::core::kSymbolRoleCount) + 5);
 }
@@ -657,7 +657,7 @@ TEST(format_import_options_names_the_chosen_dimension_style)
 
 TEST(format_import_options_lists_the_skipped_sections_in_name_order)
 {
-	// 外した通りは名前順に並ぶ（選んだ順に依らない）。
+	// 除外した通りは名前順に並ぶ（選んだ順に依らない）。
 	ImportOptions options;
 	options.setSkippedSections({"Y2", "X1"});
 	std::string const text = formatImportOptions(options);

@@ -128,7 +128,7 @@ TEST(parsedevbuilds_parses_multiple_rows)
 TEST(parsedevbuilds_reads_the_optional_branch_column)
 {
 	// 5 列目のブランチ名。取り込みのついでの確認は、これで「いま動いているのと同じ
-	// ブランチのビルド」だけを拾う（src/UpdaterFlow.cpp）。
+	// ブランチのビルド」だけを対象にする（src/UpdaterFlow.cpp）。
 	const std::string out = "build\tc0ffee1\tDev: feature/one (c0ffee1)\t"
 							"https://ex.com/one.zip\tfeature/one\n";
 	std::vector<DevBuild> builds = ParseDevBuilds(out);
@@ -144,7 +144,7 @@ TEST(parsedevbuilds_reads_the_optional_branch_column)
 TEST(parsedevbuilds_without_the_branch_column_leaves_it_empty)
 {
 	// インストール済みの（＝古い）同梱スクリプトは 4 列しか出さない。**それも読める
-	// こと**が要件で、ブランチが空なら黙って何もしない側へ倒れる。
+	// こと**が要件で、ブランチが空なら通知せずに何もしない側へ倒れる。
 	const std::string out = "build\tc1\tfeature/x\thttps://ex.com/a.zip\n";
 	std::vector<DevBuild> builds = ParseDevBuilds(out);
 	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
@@ -471,7 +471,7 @@ TEST(dev_switch_candidates_empty_when_no_builds)
 TEST(resolve_current_dev_build_prefers_the_installed_stamps)
 {
 	// 殻は feature/a (aaa1111) だが、ディスクには feature/b (bbb2222) が入っている
-	// ——手で別のブランチのビルドへ乗り換えた直後の姿。**基準はディスクの側**。
+	// ——手で別のブランチのビルドへ乗り換えた直後の状態。**基準はディスクの側**。
 	const std::string out =
 		"installed=bbb2222\n"
 		"installed-branch=feature/b\n"
@@ -520,7 +520,7 @@ TEST(resolve_current_dev_build_ignores_a_none_branch)
 // ---------------------------------------------------------------------------
 // DevBuildBranch / FindDevBuildForBranch — pick the SAME branch's next build.
 // 取り込みコマンドのついでの確認（Silent。src/UpdaterFlow.cpp）と MCP の vw_update（M38。
-// RemoteDevUpdateWith）が、同じブランチの新しいビルドを拾うときに使う（M23 で入れた）。
+// RemoteDevUpdateWith）が、同じブランチの新しいビルドを探すときに使う（M23 で入れた）。
 // ---------------------------------------------------------------------------
 
 TEST(dev_build_branch_reads_the_ci_title)
@@ -534,8 +534,8 @@ TEST(dev_build_branch_reads_the_ci_title)
 TEST(dev_build_branch_is_empty_when_the_title_does_not_match)
 {
 	// 題の形が違う（古いリリース・題を変えた）ときは空。**これは 5 列目が無いときの
-	// 保険なので、当てずっぽうのブランチ名を作らない**——空なら「分からない」として
-	// 何も拾わない側へ倒れる（FindDevBuildForBranch）。
+	// 代替手段なので、推測でブランチ名を作らない**——空なら「分からない」として
+	// 何も選ばない側へ倒れる（FindDevBuildForBranch）。
 	CHECK_EQ(DevBuildBranch("feature/x"), "");
 	CHECK_EQ(DevBuildBranch("Dev: "), "");
 	CHECK_EQ(DevBuildBranch(""), "");
@@ -543,9 +543,9 @@ TEST(dev_build_branch_is_empty_when_the_title_does_not_match)
 
 TEST(parse_dev_builds_fills_the_branch_from_the_title_when_the_column_is_missing)
 {
-	// **古い同梱スクリプト（4 列）でも「同じブランチの新しいビルド」を拾える。**
+	// **古い同梱スクリプト（4 列）でも「同じブランチの新しいビルド」を見つけられる。**
 	// ここを空のまま通すと、古いスクリプトが入っている間だけ、取り込み時の確認も
-	// 実機フィードバックの往復も黙って死ぬ（UpdaterParse.h の ParseDevBuilds）。
+	// 実機フィードバックの往復も通知なしに機能しなくなる（UpdaterParse.h の ParseDevBuilds）。
 	const std::string out = "build\tfeed123\tDev: feature/x (feed123)\thttps://ex.com/c.zip\n";
 	const std::vector<DevBuild> builds = ParseDevBuilds(out);
 	CHECK_EQ(builds.size(), static_cast<std::size_t>(1));
@@ -654,7 +654,7 @@ TEST(install_error_text_falls_back_when_no_error)
 // ---------------------------------------------------------------------------
 // ホットリロードの判断材料 — InstalledShellId / NeedsRestartAfterInstall
 //
-// プラグインは殻と本体に割れていて、Vectorworks が起動時にしか読み込めないのは殻だけ
+// プラグインは殻と本体に分かれていて、Vectorworks が起動時にしか読み込めないのは殻だけ
 // （src/PayloadAbi.h）。**入れたビルドの殻が同じなら再起動は要らない**——その 1 点を
 // 決めるのがこの 2 つ。
 // ---------------------------------------------------------------------------
@@ -662,7 +662,7 @@ TEST(install_error_text_falls_back_when_no_error)
 TEST(install_reported_ok_accepts_extra_lines_before_ok)
 {
 	// do-install は "ok" の前に installed-shell= を出す。**その行があっても成功と読む**
-	// ——出力全体が "ok" であることを求めていた頃の書き方だと、成功が失敗に化ける。
+	// ——出力全体が "ok" であることを求めていた頃の書き方だと、成功が失敗と判定される。
 	CHECK(InstallReportedOk("installed-shell=abc123def456\nok\n"));
 	CHECK(InstallReportedOk("installed-shell=abc123def456\nok"));
 	// それでも error= だけの出力は失敗のまま。
@@ -681,7 +681,7 @@ TEST(installed_shell_id_reads_the_line)
 
 TEST(needs_restart_is_false_only_when_both_shells_are_known_and_equal)
 {
-	// 殻が同じ＝本体だけが新しい → 読み直すだけでよい。
+	// 殻が同じ＝本体だけが新しい → 再読み込みするだけでよい。
 	CHECK(!NeedsRestartAfterInstall("abc123def456", "abc123def456"));
 	// 殻が違う → 次の起動でしか読み込めない。
 	CHECK(NeedsRestartAfterInstall("abc123def456", "cccc2222dddd"));

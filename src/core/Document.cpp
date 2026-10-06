@@ -9,12 +9,13 @@
 //	columnMarks（M12）・shearWalls（M19）・
 //	sheets（M13。シートレイヤ上のグラフィック凡例を含む）・sections（M14）と sectionSheet（M18）・
 //	ビューポート注釈の断面寸法データタグ（M13）・寸法とレベル記号（M31）の
-//	各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
-//	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
+//	各命令の必須フィールド・値域を検証する。命令リストが追加されるたびに、対応する検証規則
+//	（必須フィールドの有無・参照整合性・値域）をここへ追加していく。
 //
 //	加えて、描画側から切り離せる純計算をここに置く（desiredStoryLayerOrder＝レイヤの希望
 //	スタック順、raiseModifierTop＝地中梁の可視ソリッドの呑み込み、modifierBasePolygon＝
-//	地中梁の押し出しの基面、rafterEaveEnd＝垂木の軒先側の材端）。SDK を触らないので無 SDK テストで検証できる（CLAUDE.md「テスト方針」）。
+//	地中梁の押し出しの基面、rafterEaveEnd＝垂木の軒先側の材端）。SDK を呼び出さないので
+//	無 SDK テストで検証できる（CLAUDE.md「テスト方針」）。
 //
 
 #include "core/Document.h"
@@ -72,9 +73,9 @@ namespace HomeskzIfcImport::core
 		// ビューポートが表示レイヤを 1 つ以上持ち、そのレイヤ名がどれも非空であること。
 		// 表示レイヤ 0 枚は「何も映らないビューポート」なので作らせない。非表示にするクラス名・
 		// グレーで重ねるレイヤ名も非空であること（0 個は可）。グレーで重ねるレイヤは表示
-		// レイヤと重ねない（同じレイヤを表示とグレーの両方に挙げると、描画側が後から当てた
+		// レイヤと重ねない（同じレイヤを表示とグレーの両方に挙げると、描画側が後から適用した
 		// 方で決まり、どちらのつもりかが命令から読めない）。伏図（isValidSheet）と軸組図
-		// （isValidSection）が同じ規則で見る。
+		// （isValidSection）が同じ規則で検証する。
 		bool hasDrawableLayers(const ViewportCommand& viewport)
 		{
 			const auto isEmpty = [](const std::string& name) { return name.empty(); };
@@ -103,7 +104,7 @@ namespace HomeskzIfcImport::core
 		// 非空**であること（構造材ツールは両端をストーリレベルへバインドして高さを決めるので、
 		// レベル名が空だと高さが崩れる。横架材・柱と同じ関門）。elevation / endElevation /
 		// overhang / embedment は数値（double なので常に成立）。型で保証できるもの（数値で
-		// あること等）は見ず、「描けない値」を弾く幾何の関門に絞る（床板と同じ方針）。
+		// あること等）は検証せず、「描画できない値」を拒否する幾何の関門に絞る（床板と同じ方針）。
 		bool isValidRafter(const RafterCommand& rafter)
 		{
 			return !rafter.layer.empty() && !rafter.drawClass.empty() && rafter.width > 0.0 &&
@@ -111,8 +112,8 @@ namespace HomeskzIfcImport::core
 				   !rafter.startBound.level.empty() && !rafter.endBound.level.empty();
 		}
 
-		// 横架材が**実際に描かれる長さ**（mm）。パス（天端中央線）の平面長に両端の端部
-		// オフセットを足したもの（オフセットは負で短く・正で長くする。core/Document.h
+		// 横架材が**実際に描画される長さ**（mm）。パス（天端中央線）の平面長に両端の端部
+		// オフセットを加えたもの（オフセットは負で短く・正で長くする。core/Document.h
 		// 「端部オフセット」）。
 		double drawnLength(const MemberCommand& member)
 		{
@@ -125,9 +126,9 @@ namespace HomeskzIfcImport::core
 		// が解決できず、高さがレイヤ基準へリセットされる）。elevation / endElevation
 		// は数値（double なので常に成立）。
 		// **端部オフセットは材を消してはならない**: 端部オフセットは負値で材を短くするので
-		// （core/Document.h「端部オフセット」）、パス長に両端のオフセットを足した「実際に
-		// 描かれる長さ」が正であることを確かめる。ここが 0 以下だと、命令はあるのに材が
-		// 1mm も描かれない（＝図面に出ない）。正値（材を伸ばす向き）は長さを増やすだけなので
+		// （core/Document.h「端部オフセット」）、パス長に両端のオフセットを加えた「実際に
+		// 描画される長さ」が正であることを確かめる。ここが 0 以下だと、命令はあるのに材が
+		// 1mm も描画されない（＝図面に出ない）。正値（材を伸ばす向き）は長さを増やすだけなので
 		// この関門には掛からない。
 		bool isValidMember(const MemberCommand& member)
 		{
@@ -140,8 +141,8 @@ namespace HomeskzIfcImport::core
 		// 柱 1 本が妥当か。配置先レイヤ名（span レイヤ）・クラス名・構造材 ID・構造用途が非空
 		// で、断面（幅・せい）とパス長（height）が正で、上下端の高さ基準のレベル種別が非空で
 		// あること（空だと SetObjectStoryBound が解決できず、高さがレイヤ基準へリセットされ
-		// る）。elevation は数値（double なので常に成立）。端部オフセットを足した「実際に
-		// 描かれる高さ」も正であること（isValidMember と同じ理由）。
+		// る）。elevation は数値（double なので常に成立）。端部オフセットを加えた「実際に
+		// 描画される高さ」も正であること（isValidMember と同じ理由）。
 		bool isValidColumn(const ColumnCommand& column)
 		{
 			return !column.layer.empty() && !column.drawClass.empty() && !column.memberId.empty() &&
@@ -154,7 +155,7 @@ namespace HomeskzIfcImport::core
 		// 基礎の立上り 1 本が妥当か。配置先レイヤ名・クラス名が非空で、壁厚が正で、
 		// 壁芯の始点と終点が縮退していないこと（判定は core/Geometry の samePoint）。
 		// 上下端の高さ基準のレベル種別も非空（空だと SetWallOverallHeights が解決できず、
-		// レイヤの「壁の高さ」設定に落ちる）。構成層も妥当であること（スラブと同じ関門。
+		// レイヤの「壁の高さ」設定が使われる）。構成層も妥当であること（スラブと同じ関門。
 		// 構成層の合計＝壁厚）。
 		bool isValidWall(const WallCommand& wall)
 		{
@@ -164,15 +165,15 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 床付け（捨てコン・砕石）1 区間が妥当か。断面が 3 点以上（面になる）で、素材クラス名が
-		// 非空で、押し出し長が正であること（長さ 0 のプリズムは描けない。向きと断面の座標系は
-		// 地中梁と共有するのでここでは見ない）。
+		// 非空で、押し出し長が正であること（長さ 0 のプリズムは描画できない。向きと断面の座標系は
+		// 地中梁と共有するのでここでは検証しない）。
 		bool isValidBedding(const BeddingCommand& bedding)
 		{
 			return bedding.profile.size() >= 3 && !bedding.drawClass.empty() && bedding.depth > 0.0;
 		}
 
 		// 地中梁（台形プリズム）1 本が妥当か。断面が 3 点以上（面になる）で、押し出し長が正で
-		// あること（長さ 0 のプリズムは描けない）。origin / azimuth は数値（double
+		// あること（長さ 0 のプリズムは描画できない）。origin / azimuth は数値（double
 		// なので常に成立）。ぶら下がる床付けもすべて妥当であること。
 		bool isValidModifier(const ModifierCommand& modifier)
 		{
@@ -182,7 +183,7 @@ namespace HomeskzIfcImport::core
 
 		// 基礎の底盤 1 枚が妥当か。床板と同じ関門（レイヤ名・クラス名が非空／外形
 		// 3 点以上／高さ基準のレベル種別が非空／構成層が妥当）に、コンクリート厚が正で
-		// あることと、噛み合う地中梁がすべて妥当であることを足す。
+		// あることと、組み合う地中梁がすべて妥当であることを加える。
 		bool isValidSlab(const SlabCommand& slab)
 		{
 			return !slab.layer.empty() && !slab.drawClass.empty() && slab.boundary.size() >= 3 &&
@@ -192,8 +193,8 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 壁結合 1 件が妥当か。結合する 2 本が**異なる**立上りで、どちらも walls
-		// の範囲内を指すこと（範囲外の添字は描画側でハンドルを引けず、黙って結合されないだけ
-		// になるので検証で弾く）。結合種別は enum なので値域は型が保証する。ピック点・
+		// の範囲内を指すこと（範囲外の添字は描画側でハンドルを引けず、警告なしに結合されないだけ
+		// になるので検証で拒否する）。結合種別は enum なので値域は型が保証する。ピック点・
 		// 交点は数値（double なので常に成立）。
 		bool isValidWallJoin(const WallJoinCommand& join, std::size_t wallCount)
 		{
@@ -202,8 +203,8 @@ namespace HomeskzIfcImport::core
 
 		// 野地板 1 枚が妥当か。配置先レイヤ名・クラス名が非空で、平面外形が 3 点以上（面にな
 		// る）で、厚みが正であること。勾配（rise/run）と高さは数値（double なので常に成立）で、
-		// 退化した勾配は描画側がフォールバックで扱うためここでは弾かない（1 枚の異常で文書全
-		// 体を描かないのは過剰）。
+		// 退化した勾配は描画側がフォールバックで扱うためここでは拒否しない（1 枚の異常で文書全
+		// 体を描画しないのは過剰）。
 		bool isValidRoof(const RoofCommand& roof)
 		{
 			return !roof.layer.empty() && !roof.drawClass.empty() && roof.boundary.size() >= 3 &&
@@ -213,7 +214,7 @@ namespace HomeskzIfcImport::core
 		// ビューポート注釈の断面寸法データタグ 1 つが妥当か。
 		// 関連付け先の横架材が members の範囲内であること（範囲外の添字は「どの部材にも
 		// 付かないタグ」＝図面に寸法の出ない空のタグが残る）。position / angle は数値
-		// （double なので常に成立）で値域の制限は無い。**スタイル名は見ない**——タグは
+		// （double なので常に成立）で値域の制限は無い。**スタイル名は検証しない**——タグは
 		// スタイルを持たないため（core/Document.h の TagCommand）。連動する高さの注記の基準名
 		// （noteDatum）は、添える注記（note）があるときだけ持ち、二重引用符を含まないこと
 		// （式に "…" で囲んで埋め込むので、引用符が混ざると式全体が評価されなくなる）。
@@ -225,7 +226,7 @@ namespace HomeskzIfcImport::core
 			return tag.memberIndex < memberCount;
 		}
 
-		// ビューポート 1 枚のタグがすべて妥当か。伏図・軸組図が同じ規則で見る。
+		// ビューポート 1 枚のタグがすべて妥当か。伏図・軸組図が同じ規則で検証する。
 		bool areValidTags(const ViewportCommand& viewport, std::size_t memberCount)
 		{
 			return std::ranges::all_of(viewport.tags, [memberCount](const TagCommand& tag)
@@ -266,8 +267,8 @@ namespace HomeskzIfcImport::core
 
 		// シート（伏図）1 枚が妥当か。
 		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを持つ
-		// こと（hasDrawableLayers）。図面タイトル・図番は空でも描ける（ラベルが空になる
-		// だけ）ので弾かない。
+		// こと（hasDrawableLayers）。図面タイトル・図番は空でも描画できる（ラベルが空になる
+		// だけ）ので拒否しない。
 		bool isValidSheet(const SheetCommand& sheet)
 		{
 			// グラフィック凡例（M13）は**載せるか載せないか**しか持たない（置き場所は描画側が
@@ -280,16 +281,16 @@ namespace HomeskzIfcImport::core
 		// 断面ビューポート（軸組図）1 枚が妥当か。表示レイヤを持ち（hasDrawableLayers。
 		// 伏図と同じ理由＝何も映らないビューポートを作らせない）、**断面指示線が縮退して
 		// いない**（始点≠終点。縮退した線からは切断面が決まらない）こと。断面の範囲も配置先の
-		// シートレイヤも命令が持たない（core/Document.h の SectionCommand 参照）ので見ない
+		// シートレイヤも命令が持たない（core/Document.h の SectionCommand 参照）ので検証しない
 		// ——シートレイヤの通し方は文書に 1 つの SectionSheetCommand が持ち、下の
-		// isValidSectionSheet が見る。
+		// isValidSectionSheet が検証する。
 		bool isValidSection(const SectionCommand& section)
 		{
 			return hasDrawableLayers(section.viewport) &&
 				   !samePoint(section.lineStart, section.lineEnd);
 		}
 
-		// 軸組図のシートレイヤの通し方が妥当か（軸組図が 1 枚でもあるときだけ見る）。
+		// 軸組図のシートレイヤの通し方が妥当か（軸組図が 1 枚でもあるときだけ検証する）。
 		// 番号の始まりが正（シートレイヤ名になるので 0 や負では伏図の続きにならない）で、
 		// タイトルの基が非空であること。
 		bool isValidSectionSheet(const SectionSheetCommand& sheet)
@@ -308,7 +309,7 @@ namespace HomeskzIfcImport::core
 		// 記号（断面記号・伏図記号）1 つが妥当か。PIO を置くレイヤ名・作図クラス名・
 		// **検索対象レイヤ名**が非空であること（対象レイヤが空だと PIO は何も見つけられず、
 		// 記号 0 個の空オブジェクトが図面に残る）。伏図記号はシンボル名も非空であること
-		// （シンボルが無ければ平面記号は描けない）。targetClass は**空が正常**＝全クラス。
+		// （シンボルが無ければ平面記号は描画できない）。targetClass は**空が正常**＝全クラス。
 		bool isValidColumnMark(const ColumnMarkCommand& mark)
 		{
 			return !mark.layer.empty() && !mark.drawClass.empty() && !mark.targetLayer.empty() &&
@@ -320,10 +321,10 @@ namespace HomeskzIfcImport::core
 		// samePoint）、材厚と軸組内法（下端 < 上端。上端は始点側・終点側の両方）が正であること。
 		//
 		// **柱を探すレイヤ名（targetLayers）は空を許す**——柱の無い階（柱レイヤが 1 つも
-		// 生成されなかった）でも耐力壁そのものは描けるべきで、そのとき PIO は控えの内法
-		// （clearSpan）で描く。空を弾くと「柱が無いと耐力壁が丸ごと消える」という、
-		// 図面としては黙って欠ける最悪の形になる。
-		// 筋かいは見付け幅が正であること（幅 0 の帯は描けない）。面材は幅を使わない。
+		// 生成されなかった）でも耐力壁そのものは描画できるべきで、そのとき PIO は予備の内法
+		// （clearSpan）で描画する。空を拒否すると「柱が無いと耐力壁が丸ごと消える」という、
+		// 図面としては警告なしに欠ける最悪の形になる。
+		// 筋かいは見付け幅が正であること（幅 0 の帯は描画できない）。面材は幅を使わない。
 		bool isValidShearWall(const ShearWallCommand& wall)
 		{
 			if (wall.layer.empty() || wall.drawClass.empty() || samePoint(wall.start, wall.end) ||
@@ -335,7 +336,7 @@ namespace HomeskzIfcImport::core
 
 		// 通り芯 1 本が妥当か。配置先レイヤ名が空でなく、始点と終点が異なる（縮退していない）
 		// こと。同一判定は parse/Grid の重複線除去と同じ core/Geometry の samePoint を通す
-		// （閾値がズレると「畳まれた線が検証では非縮退」のような食い違いが起こる）。クラス名は
+		// （閾値がズレると「まとめられた線が検証では非縮退」のような食い違いが起こる）。クラス名は
 		// 空でもよい（無クラス＝既定クラスへ）。
 		bool isValidGrid(const GridCommand& grid)
 		{
@@ -355,7 +356,7 @@ namespace HomeskzIfcImport::core
 
 		// 床板: 配置先レイヤ名・クラス名が非空で、外形が 3 点以上、高さ基準のレベル種別が
 		// 非空、構成層が妥当（1 枚以上・総厚が正）であること（isValidFloor 参照。
-		// docs/DEV-NOTES.md M5。スタイルは作らない・当てないのでスタイル名は持たない）。
+		// docs/DEV-NOTES.md M5。スタイルは作らない・適用しないのでスタイル名は持たない）。
 		if (!std::ranges::all_of(document.floors, isValidFloor))
 			return false;
 
@@ -381,7 +382,7 @@ namespace HomeskzIfcImport::core
 
 		// 壁結合（M10）: 結合する 2 本が異なり、どちらも walls の範囲内であること
 		// （isValidWallJoin 参照。docs/DEV-NOTES.md M10）。地中梁は底盤の modifiers として
-		// isValidSlab が併せて見る。
+		// isValidSlab が併せて検証する。
 		if (!std::ranges::all_of(document.wallJoins, [&document](const WallJoinCommand& join)
 								 { return isValidWallJoin(join, document.walls.size()); }))
 			return false;
@@ -395,7 +396,7 @@ namespace HomeskzIfcImport::core
 
 		// シンボル置換系（アンカーボルト・床束・火打・仕口・継手）: 配置先レイヤ名とシンボル名
 		// が非空であること（isValidSymbol 参照。docs/DEV-NOTES.md M11 / M33）。5 種は同じ命令型
-		// なので同じ規則で見る。
+		// なので同じ規則で検証する。
 		if (!std::ranges::all_of(document.anchorBolts, isValidSymbol) ||
 			!std::ranges::all_of(document.floorPosts, isValidSymbol) ||
 			!std::ranges::all_of(document.fireBraces, isValidSymbol) ||
@@ -423,14 +424,14 @@ namespace HomeskzIfcImport::core
 		if (!std::ranges::all_of(document.sections, isValidSection))
 			return false;
 		// 軸組図があるなら、その配置先シートレイヤの通し方（番号の始まり・タイトルの基）も
-		// 埋まっていること（M18）。**軸組図が 1 枚も無ければ見ない**——使わない値なので、
+		// 埋まっていること（M18）。**軸組図が 1 枚も無ければ検証しない**——使わない値なので、
 		// 空のままでも文書は妥当。
 		if (!document.sections.empty() && !isValidSectionSheet(document.sectionSheet))
 			return false;
 
 		// 断面寸法データタグ（M13）: 伏図・軸組図どちらのビューポート注釈も、関連付け先の
 		// 横架材が members の範囲内であること（areValidTags 参照）。
-		// タグはビューポート命令の中に住むので、シート・軸組図の関門を通った後に見る。
+		// タグはビューポート命令の中に住むので、シート・軸組図の関門を通った後に検証する。
 		const std::size_t memberCount = document.members.size();
 		if (!std::ranges::all_of(document.sheets, [memberCount](const SheetCommand& sheet)
 								 { return areValidTags(sheet.viewport, memberCount); }))
@@ -441,8 +442,8 @@ namespace HomeskzIfcImport::core
 
 		// 寸法（M31）: 伏図・軸組図どちらの列も測点が狭義の昇順で 2 つ以上あること
 		// （isValidDimensionChain 参照）。軸組図のレベル記号は表示名が非空であること。
-		// **寸法規格の名前が空なのに寸法がある**文書は、描画側が何のスタイルで描くか
-		// 決められないので弾く（解析側は空なら 1 つも作らない＝core/Document.h）。
+		// **寸法規格の名前が空なのに寸法がある**文書は、描画側が何のスタイルで描画するか
+		// 決められないので拒否する（解析側は空なら 1 つも作らない＝core/Document.h）。
 		const bool anyDimension =
 			std::ranges::any_of(document.sheets, [](const SheetCommand& sheet)
 								{ return !sheet.viewport.dimensions.empty(); }) ||
@@ -512,7 +513,7 @@ namespace HomeskzIfcImport::core
 			take(floor.elevation);
 			take(floor.elevation - totalThickness(floor.components));
 		}
-		// 横架材（天端と、せいのぶん下がった下端。傾斜梁は両端とも見る）。
+		// 横架材（天端と、せいのぶん下がった下端。傾斜梁は両端とも考慮する）。
 		for (const MemberCommand& member : document.members)
 		{
 			take(member.elevation);
@@ -520,7 +521,7 @@ namespace HomeskzIfcImport::core
 			take(memberBottomZ(member));
 		}
 		// 柱（下端と上端）。命令の上端は受ける横架材の天端＝材が実際に止まる高さより上なので、
-		// **端部オフセットを戻した実際の上端**を見る（core/Document.h「端部オフセット」）。
+		// **端部オフセットを戻した実際の上端**を参照する（core/Document.h「端部オフセット」）。
 		for (const ColumnCommand& column : document.columns)
 		{
 			take(columnDrawnBottom(column));
@@ -541,9 +542,9 @@ namespace HomeskzIfcImport::core
 			take(slab.elevation);
 			take(slab.elevation - slab.thickness);
 			// 地中梁（底盤にぶら下がる台形プリズム）と、その下の床付け（捨てコン・砕石）。
-			// **モデルの最深部はふつう底盤の下端ではなく床付けの下端**なので、これを見ないと
+			// **モデルの最深部はふつう底盤の下端ではなく床付けの下端**なので、これを考慮しないと
 			// 余白（kSectionHeightMargin）より深い足元が軸組図で切れる。断面原点が梁下端
-			// （v=0）で origin.z が絶対 Z なので、プロファイルの v をそのまま足せば上下端に
+			// （v=0）で origin.z が絶対 Z なので、プロファイルの v をそのまま加えれば上下端に
 			// なる（床付けも同じ断面座標系＝ModifierCommand / BeddingCommand 参照）。
 			for (const ModifierCommand& modifier : slab.modifiers)
 			{
@@ -576,7 +577,7 @@ namespace HomeskzIfcImport::core
 		double maxY = maxX;
 		bool any = false;
 
-		// layers が空なら全部見る（文書全体の広がり）。指定があればそのレイヤに載る命令だけ
+		// layers が空なら全部参照する（文書全体の広がり）。指定があればそのレイヤに載る命令だけ
 		// ——伏図 1 枚が映す範囲になる。
 		const auto wanted = [&layers](const std::string& layer)
 		{ return layers.empty() || std::ranges::find(layers, layer) != layers.end(); };
@@ -616,14 +617,14 @@ namespace HomeskzIfcImport::core
 			takeBoundary(slab.layer, slab.boundary);
 		for (const RoofCommand& roof : document.roofs)
 			takeBoundary(roof.layer, roof.boundary);
-		// 横架材の端点は取り合い相手の芯線上にあるので、**実際に材が占める端**を見る
-		// （垂木を軒先まで見るのと同じ理由。過大でも過小でも縮尺の判断がずれる）。
+		// 横架材の端点は取り合い相手の芯線上にあるので、**実際に材が占める端**を参照する
+		// （垂木を軒先まで考慮するのと同じ理由。過大でも過小でも縮尺の判断がずれる）。
 		for (const MemberCommand& member : document.members)
 			takeSegment(member.layer, memberDrawnStart(member), memberDrawnEnd(member));
 		for (const WallCommand& wall : document.walls)
 			takeSegment(wall.layer, wall.start, wall.end);
-		// 垂木は**軒先まで伸ばして描く**（M16。draw/Rafter が rafterEaveEnd でパスの始端を
-		// 軒先へ送る）ので、命令の start ではなく軒先を見る——ここで実際より狭く見積もると、
+		// 垂木は**軒先まで伸ばして描画する**（M16。draw/Rafter が rafterEaveEnd でパスの始端を
+		// 軒先へ送る）ので、命令の start ではなく軒先を参照する——ここで実際より狭く見積もると、
 		// 決めた縮尺では図が用紙に収まらない。
 		for (const RafterCommand& rafter : document.rafters)
 			takeSegment(rafter.layer, rafterEaveEnd(rafter).point, rafter.end);
@@ -634,7 +635,7 @@ namespace HomeskzIfcImport::core
 		// 耐力壁（M19）は柱芯どうしを結ぶ線分。伏図に映る範囲へ含める。
 		for (const ShearWallCommand& wall : document.shearWalls)
 			takeSegment(wall.layer, wall.start, wall.end);
-		// シンボル置換系 5 種は同じ命令型（SymbolCommand）なので同じ扱いで畳む。
+		// シンボル置換系 5 種は同じ命令型（SymbolCommand）なので同じ扱いでまとめる。
 		for (const std::vector<SymbolCommand>* list :
 			 {&document.anchorBolts, &document.floorPosts, &document.fireBraces, &document.joints,
 			  &document.splices})
@@ -644,16 +645,16 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 断面寸法データタグ（M13）は**注釈**なのでデザインレイヤには載らないが、ビューポート
-		// の中には映るので図の広がりに効く。どの伏図に出るかは**関連付け先の横架材が載る
+		// の中には映るので図の広がりに影響する。どの伏図に出るかは**関連付け先の横架材が載る
 		// レイヤ**が決める（その材が映る図に出る）ので、レイヤの絞り込みもその材のレイヤで
 		// 行う——タグ自身は 'layer' を持たない（core/Document.h の TagCommand）。
 		//
-		// ★**軸組図（sections）のタグは見ない。** あちらの注釈空間は平面座標ではなく
+		// ★**軸組図（sections）のタグは参照しない。** あちらの注釈空間は平面座標ではなく
 		// **(切断線に沿った距離, 高さ Z)** なので、平面の広がりへ混ぜると意味を成さない
 		// （TagCommand の「position は注釈空間の座標」）。
 		//
-		// ★**拾えるのはタグが接する点（position）まで**である。タグ自身の差し渡しは
-		// タグレイアウトの中身が決める**用紙 mm** で、モデル座標へ落とすと縮尺に比例する
+		// ★**取得できるのはタグが接する点（position）まで**である。タグ自身の差し渡しは
+		// タグレイアウトの中身が決める**用紙 mm** で、モデル座標へ換算すると縮尺に比例する
 		// ——その見込みは kPlanContentMargin が持つ（そちらの doc コメント）。
 		for (const SheetCommand& sheet : document.sheets)
 		{
@@ -903,7 +904,7 @@ namespace HomeskzIfcImport::core
 		if (count < 3)
 			return {};
 
-		// 断面 (u, v) をワールドへ写す。u 軸は走る向きを +90 度回した水平単位ベクトル
+		// 断面 (u, v) をワールドへ変換する。u 軸は走る向きを +90 度回した水平単位ベクトル
 		// （解析側 parse/Footing の groundBeamModifier の取り方と対）、v 軸はワールド Z。
 		const double phi = modifier.azimuth * std::numbers::pi / 180.0;
 		const Vec2 axis{std::cos(phi), std::sin(phi)};
@@ -964,13 +965,13 @@ namespace HomeskzIfcImport::core
 		// desiredStoryLayerOrder の doc コメント参照）。
 		bool isBackgroundLevel(const std::string& rawType)
 		{
-			// 伏図レベルの印（"FL(FL-872)"）は外して元の種別で見る（planLevelTag）。
+			// 伏図レベルの印（"FL(FL-872)"）は取り除いて元の種別で判定する（planLevelTag）。
 			const std::string type = stripPlanLevelTag(rawType);
 			return type == kLevelFL || type == kLevelNojiita;
 		}
 
 		// 逆に、スタック最上段（前面）へ回すレベル種別か。耐力壁（M19）の伏図記号は
-		// **横架材・柱と同じ場所に重ねて読ませる注記**なので、実体（材）の絵に隠されると
+		// **横架材・柱と同じ場所に重ねて読ませる注記**なので、実体（材）の図形に隠されると
 		// 用を成さない。実機で「記号が横架材の後ろに隠れる」ことを確認して前面へ回した
 		// （desiredStoryLayerOrder の doc コメント）。
 		bool isForegroundLevel(const std::string& type)

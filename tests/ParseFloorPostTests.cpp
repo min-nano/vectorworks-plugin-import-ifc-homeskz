@@ -7,7 +7,7 @@
 //
 //	検証項目（docs/DEV-NOTES.md M11）: 910mm 間隔の割り付け（端点には置かない）・支持材芯の探索
 //	（半支持材厚以内・区間内・平行は除外）・同一直線上の継手統合（すき間 ≤ 半モジュール）・
-//	支持材に土台だけでなく大引も含めること・**立上りと重なる床束を落とすこと**・基礎が
+//	支持材に土台だけでなく大引も含めること・**立上りと重なる床束を除外すること**・基礎が
 //	無いモデルは空・配置先レイヤ（F-床束）・センタリング・決定性。実フィクスチャのパスは
 //	CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -63,7 +63,7 @@ using HomeskzIfcTests::StepText;
 namespace
 {
 	// 既定のシンボル名。**唯一の定義は役割の表**（core::symbolRoles()）なので、
-	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
+	// テストもそこから引く（名前をテストへ複製すると表と食い違っても気付けない）。
 	const std::string kSymbolFloorPost = defaultSymbolName(SymbolRole::FloorPost);
 
 	// 幅 105mm の支持材（土台または他の大引）を x=0 の位置に Y 方向へ通す（芯線 x=0、区間 y
@@ -274,7 +274,7 @@ TEST(floor_post_merge_is_order_independent)
 	const std::vector<OhbikiRun> b = mergeCollinearOhbiki(reversed);
 	CHECK_EQ(a.size(), std::size_t{1});
 	CHECK_EQ(b.size(), std::size_t{1});
-	// 区間そのもの（[最小, 最大]）は同じ。向きは先頭材の向きに従うので、両端の集合で比べる。
+	// 区間そのもの（[最小, 最大]）は同じ。向きは先頭材の向きに従うので、両端の集合で比較する。
 	CHECK(near(std::min(a.front().start.x, a.front().end.x),
 			   std::min(b.front().start.x, b.front().end.x)));
 	CHECK(near(std::max(a.front().start.x, a.front().end.x),
@@ -349,8 +349,8 @@ TEST(floor_post_collinear_ohbiki_are_merged_in_fixture)
 TEST(floor_post_count_matches_merged_run_shin_spans)
 {
 	// 床束の総数は「継手統合後の大引 1 連の支持材芯どうしの区間」に floorPostOffsets を
-	// 適用し、**立上りと重なる位置を落とした**合計と一致する（継手は端部として扱わず、
-	// 支持材芯を端部にする）。ここは割り付けと除外の両方を通しで見る唯一のケース。
+	// 適用し、**立上りと重なる位置を除外した**合計と一致する（継手は端部として扱わず、
+	// 支持材芯を端部にする）。ここは割り付けと除外の両方を通しで検証する唯一のケース。
 	bool ok = false;
 	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
@@ -388,13 +388,13 @@ TEST(floor_post_count_matches_merged_run_shin_spans)
 
 	CHECK(!runs.empty());
 	CHECK(placed > 0);
-	// 実データには立上りを跨ぐ大引があるので、除外は必ず 1 本以上効く（効かなければ
+	// 実データには立上りを跨ぐ大引があるので、除外は必ず 1 本以上機能する（機能しなければ
 	// 判定が壊れている＝立上りの上に床束が残る）。
 	CHECK(dropped > 0);
 	CHECK_EQ(buildFloorPostCommands(model).size(), placed);
 }
 
-// --- 立上りとの重なり（実機で立上りの上に床束が描かれていた回帰）----------------
+// --- 立上りとの重なり（実機で立上りの上に床束が描画されていた回帰）----------------
 
 TEST(floor_post_overlaps_wall_on_centerline)
 {
@@ -429,7 +429,7 @@ TEST(floor_post_beyond_wall_end_does_not_overlap)
 	walls.front().thickness = 150.0;
 
 	// 壁の端から先は**半床束幅＋余裕**（52.5 + 1.0 = 53.5mm）までが重なり（端に寄りかかる
-	// 床束）。半壁厚は壁芯からの直交方向の寸法なので、こちらには効かない。
+	// 床束）。半壁厚は壁芯からの直交方向の寸法なので、こちらには適用されない。
 	CHECK(overlapsFoundationWall(Vec2{0.0, 3693.0}, 105.0, walls));
 	CHECK(!overlapsFoundationWall(Vec2{0.0, 3694.0}, 105.0, walls));
 }
@@ -443,7 +443,7 @@ TEST(floor_post_overlap_ignores_degenerate_wall)
 	walls.front().thickness = 150.0;
 
 	CHECK(!overlapsFoundationWall(Vec2{0.0, 0.0}, 105.0, walls));
-	// 立上りが 1 本も無ければ何も落とさない。
+	// 立上りが 1 本も無ければ何も除外しない。
 	CHECK(!overlapsFoundationWall(Vec2{0.0, 0.0}, 105.0, {}));
 }
 
@@ -460,8 +460,8 @@ TEST(floor_post_fixture_has_no_post_on_foundation_wall)
 	const std::vector<SymbolCommand> posts = buildFloorPostCommands(model);
 	CHECK(!posts.empty());
 	// 床束の実サイズは連ごと（大引の断面幅）なので、ここは**どの床束にも共通に言える**
-	// 「中心が立上りの footprint に入っていない」だけを見る（幅 0＝点として判定）。
-	// 幅を織り込んだ厳密な本数は floor_post_count_matches_merged_run_shin_spans が見る。
+	// 「中心が立上りの footprint に入っていない」だけを確認する（幅 0＝点として判定）。
+	// 幅を織り込んだ厳密な本数は floor_post_count_matches_merged_run_shin_spans が検証する。
 	for (const SymbolCommand& post : posts)
 		CHECK(!overlapsFoundationWall(post.position, 0.0, walls));
 }

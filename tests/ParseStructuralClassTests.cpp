@@ -90,7 +90,7 @@ TEST(member_class_unknown_types_return_nullopt)
 	CHECK(!memberClassFromName("").has_value());
 }
 
-// 床を受ける梁は床梁と甲乙梁だけ（ロフト床の合成が見る）。
+// 床を受ける梁は床梁と甲乙梁だけ（ロフト床の合成が参照する）。
 TEST(floor_beam_class_covers_yukabari_and_kouotsubari)
 {
 	CHECK(isFloorBeamClass(CLASS_YUKABARI));

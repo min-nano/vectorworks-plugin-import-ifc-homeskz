@@ -4,8 +4,8 @@
 `.clang-tidy` ルールを、SDK がないとコンパイルできない側（`src/draw/*.cpp`・
 `src/Extensions/*.cpp`・`src/payload/*.cpp` と `ModuleMain.cpp` / `Updater.cpp` /
 `PayloadHost.cpp` / `PayloadSession.cpp`。一覧は `scripts/clang-tidy-sdk.sh`）にも
-適用します。`src/draw/` `src/Extensions/` `src/payload/` はグロブで拾うため、要素や PIO を
-追加しても対象漏れが起きません（`core/` `parse/` を `lint.yml` がグロブで拾うのと同じ理屈）。
+適用します。`src/draw/` `src/Extensions/` `src/payload/` はグロブで集めるため、要素や PIO を
+追加しても対象漏れが起きません（`core/` `parse/` を `lint.yml` がグロブで集めるのと同じ理屈）。
 
 - **`tidy-mac`** — `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` で生成した compile
   database に対して clang-tidy を実行し、`#if GS_MAC` 側の分岐を解析します。
@@ -62,7 +62,7 @@ PCH が使えず（`VW_ENABLE_PCH`）、1 翻訳単位ごとに SDK のアンブ
 入れ直していましたが、実測すると**既に入っているものの入れ直しに毎回 11〜31 秒**かかるだけだった
 ので、インストールはやめてバージョンが 20 以上であることを確認するだけにしました
 （将来ランナーの LLVM が MSVC ヘッダの要求より古くなったら、パースエラーの山ではなく
-その旨のメッセージで落ちます）。Ninja も同様にイメージに入っているものを使います。
+その旨のメッセージで失敗します）。Ninja も同様にイメージに入っているものを使います。
 
 `tidy-windows` に vcvars（`msvc-dev-cmd`）のステップもありません。clang-cl は MSVC
 ツールチェインと Windows SDK をレジストリ／vswhere から自力で見つけるので、`INCLUDE` /

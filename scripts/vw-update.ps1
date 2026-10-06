@@ -39,13 +39,13 @@
     **ファイルの配置はこのスクリプトが決めない。** 走るのは常に**インストール済みの
     （＝古い）**この 1 本なので、ここに配置手順を持たせると「新しいビルドがどんな
     ファイルでできているか」を永遠に知らないままになる。実際 M21 で本体
-    （.vwpayload）が増えたとき、古いアップデータはそれを写さず、利用者は zip を手で
-    落として置き直す羽目になった。
+    （.vwpayload）が増えたとき、古いアップデータはそれをコピーせず、利用者は zip を手動で
+    ダウンロードして置き直す必要があった。
 
-    そこで配置は**落とした zip の中の vw-install.ps1**（リリースのアセットとしても公開
+    そこで配置は**ダウンロードした zip の中の vw-install.ps1**（リリースのアセットとしても公開
     されている）へ委ねる。委ね先はそのビルドと同じ版なので、ファイル構成や手順が変わって
     も自動アップデートだけで追随できる。zip にインストーラが無い——この仕組みより前の
-    リリース——ときだけ、下の自前の配置へ落ちる。
+    リリース——ときだけ、下の自前の配置へ切り替わる。
 
     Usage:
       powershell -ExecutionPolicy Bypass -File vw-update.ps1            # ask which channel
@@ -80,11 +80,11 @@ $VW_REPO = if ($env:VW_REPO) { $env:VW_REPO } else { 'min-nano/vectorworks-plugi
 $VW_API  = "https://api.github.com/repos/$VW_REPO"
 $VW_PLUGINS_DIR = if ($env:VW_PLUGINS_DIR) { $env:VW_PLUGINS_DIR } else { Join-Path $env:APPDATA 'Nemetschek\Vectorworks\2026\Plug-Ins' }
 
-# 配布 zip のアセット名の末尾。アセット名を丸ごと決め打ちにせず末尾でも拾えるように
+# 配布 zip のアセット名の末尾。アセット名全体を固定せず末尾でも選べるように
 # してあるのは、**将来アセット名（プラグイン名）が変わっても、インストール済みの古い
 # このスクリプトが「見つかりません」で止まらない**ようにするため（Get-PluginZipUrl）。
 $VW_ZIP_SUFFIX = '.vlb.zip'
-# 配置を委ねる先（落とした zip の直下にある）。冒頭のコメント参照。
+# 配置を委ねる先（ダウンロードした zip の直下にある）。冒頭のコメント参照。
 $VW_INSTALLER = 'vw-install.ps1'
 
 $script:LastError = ''
@@ -97,7 +97,7 @@ $script:InstallerOutput = ''
 # **公開リポジトリなのでトークンは要らない——が、あるなら必ず付ける。** 認証なしの
 # GitHub API は **IP ごとに 1 時間 60 回**で、M24〜M37 の往復のパレットは 1 分ごとに
 # q-dev を呼ぶ＝ちょうど上限。取り込みコマンドのついでの確認・「今すぐ確認」が
-# 1 回でも挟まれば超え、以後その時間内はずっと 403 になる（実機 M27。macOS 側の
+# 1 回でも加われば超え、以後その時間内はずっと 403 になる（実機 M27。macOS 側の
 # scripts/vw-update.sh と同じ理由・同じ作り）。トークンを付ければ 1 時間 5000 回。
 #
 # トークンの在り処は同梱の vw-token.ps1 ただ 1 つ（CLAUDE.md「重複を作らない置き場所」）。
@@ -125,8 +125,8 @@ function Get-ApiToken {
 }
 
 # Get-ResponseHeader: 応答ヘッダの値（無ければ空文字）。**読み方が 2 つある**——Windows
-# PowerShell 5.1 の HttpWebResponse は添字で引けるが、PowerShell 7 の HttpResponseMessage は
-# GetValues で引く。プラグインが起動するのは 5.1 だが、端末から 7 で走らせる人もいる。
+# PowerShell 5.1 の HttpWebResponse は添字で取得できるが、PowerShell 7 の HttpResponseMessage は
+# GetValues で取得する。プラグインが起動するのは 5.1 だが、端末から 7 で走らせる人もいる。
 function Get-ResponseHeader($response, [string] $name) {
     try {
         $value = $response.Headers[$name]
@@ -161,7 +161,7 @@ function Get-ApiFailureReason($err, [string] $token) {
         $limit = if ($token) { '1 時間 5000 回' } else { '認証なしは 1 時間 60 回' }
         $mins = $null
         if ($reset -match '^[0-9]+$') {
-            # **UFormat %s を使わない**——文化圏によっては小数点が変わり、解釈が揺れる。
+            # **UFormat %s を使わない**——文化圏によっては小数点が変わり、解釈が一定しない。
             $now = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
             $mins = [Math]::Ceiling(([int]$reset - $now) / 60.0)
             if ($mins -lt 0) { $mins = 0 }
@@ -174,7 +174,7 @@ function Get-ApiFailureReason($err, [string] $token) {
     return "GitHub が HTTP $code を返しました。"
 }
 
-# Get-ApiError: error= の 1 行に添える本文。理由が分かっていれば足す。**改行を入れない**
+# Get-ApiError: error= の 1 行に添える本文。理由が分かっていれば追加する。**改行を入れない**
 # ——プラグインは key=value の 1 行として読む（src/UpdaterParse.h の ValueOf）。
 function Get-ApiError([string] $base) {
     if ($script:ApiError) { return ($base + '理由: ' + $script:ApiError) }
@@ -208,10 +208,10 @@ function Get-AssetUrl($release, [string] $want) {
     return $null
 }
 
-# 配布 zip の URL。**名前が完全一致しなければ、末尾が $VW_ZIP_SUFFIX のアセットで拾い
+# 配布 zip の URL。**名前が完全一致しなければ、末尾が $VW_ZIP_SUFFIX のアセットで選び
 # 直す。** このスクリプトはインストール済みの（＝古い）ものが走るので、アセット名を
-# 決め打ちにすると名前が変わった瞬間にアップデートの経路そのものが途切れる（利用者は
-# 手で落とすしかなくなる）。1 つのリリースが持つ配布 zip はそのチャンネルの 1 つだけ
+# 固定すると名前が変わった瞬間にアップデートの経路そのものが途切れる（利用者は
+# 手動でダウンロードするしかなくなる）。1 つのリリースが持つ配布 zip はそのチャンネルの 1 つだけ
 # なので、末尾での照合で取り違えは起きない。
 function Get-PluginZipUrl($release, [string] $name) {
     $url = Get-AssetUrl $release ($name + $VW_ZIP_SUFFIX)
@@ -224,7 +224,7 @@ function Get-PluginZipUrl($release, [string] $name) {
 
 # Get-PluginDir: そのプラグインが持つフォルダ（<Plug-Ins>\<name>\）。**インストーラと
 # 同じ規則**でなければならない（scripts/vw-install.ps1 の同名関数。片方だけ変えると、
-# 入れた場所と読む場所が食い違う）。渡された先が既にそのフォルダなら足さない——
+# 入れた場所と読む場所が食い違う）。渡された先が既にそのフォルダなら追加しない——
 # プラグインは「いま自分が読み込まれたフォルダ」を渡してくるので、そこが既に
 # <Plug-Ins>\<name> である。
 function Get-PluginDir([string] $root, [string] $name) {
@@ -255,7 +255,7 @@ function Get-InstalledCommit([string] $name) {
 # 読む（mac 側は Info.plist の VWBuildBranch）。**乗り換え先のブランチを覚えている唯一の
 # 場所**で、殻にコンパイルされた VW_BUILD_BRANCH は本体だけを入れ替えたあと前のブランチを
 # 名乗ったままになる（src/UpdaterParse.h の ResolveCurrentDevBuild）。読めなければ空文字
-# （プラグイン側はビルド一覧の sha 照合か、最後に殻の値へ落ちる）。
+# （プラグイン側はビルド一覧の sha 照合か、最後に殻の値を使う）。
 function Get-InstalledBranch([string] $name) {
     $f = Join-Path (Get-PluginDir $VW_PLUGINS_DIR $name) "$name.branch"
     if (Test-Path -LiteralPath $f) {
@@ -267,7 +267,7 @@ function Get-InstalledBranch([string] $name) {
 
 # 殻（.vlb）の ID。ビルドが .vlb の隣へ置く "<name>.shell-id" から読む。**「アップデートに
 # Vectorworks の再起動が要るか」を決める鍵**で、プラグイン側は自分にコンパイルされた
-# VW_SHELL_ID と突き合わせる——一致するなら本体（.vwpayload）を読み直すだけで反映される
+# VW_SHELL_ID と突き合わせる——一致するなら本体（.vwpayload）を再読み込みするだけで反映される
 # （src/PayloadAbi.h / src/UpdaterParse.h）。読めなければ空文字（＝判断できないので、
 # プラグイン側は安全側＝「再起動が要る」へ倒す）。
 function Get-InstalledShellId([string] $name) {
@@ -296,23 +296,23 @@ function Install-File([string] $src, [string] $dst) {
 
 # ---------------------------------------------------------------------------
 # 配置は zip の中のインストーラへ委ねる（冒頭のコメント参照）。ここから下の自前の配置は
-# **この仕組みより前のリリースへ当たったときだけ**使う予備。
+# **この仕組みより前のリリースが対象のときだけ**使う予備。
 # ---------------------------------------------------------------------------
 
 # Invoke-ZipInstaller: 展開済みの zip に入っている vw-install.ps1 へ配置を委ねる。委ね
 # られたら、その機械可読な出力（installed-shell= / ok / error=）を 1 つの文字列で返す。
-# 委ねられなければ $null（呼び出し側は自前の配置へ落ちる）。
+# 委ねられなければ $null（呼び出し側は自前の配置へ切り替える）。
 #
 # 「委ねられた」の判定は**結末の行が返ってきたか**で行う——インストーラが古い／壊れて
-# いて何も言わないときに、成功したと取り違えないため。
+# いて何も出力しないときに、成功したと取り違えないため。
 function Invoke-ZipInstaller([string] $work, [string] $name) {
     $inst = Join-Path $work $VW_INSTALLER
     if (-not (Test-Path -LiteralPath $inst)) { return $null }
-    # ダウンロード由来の「ブロック」印（Zone.Identifier）を外す。-ExecutionPolicy
-    # Bypass でも走るが、外しておくほうが確実で副作用が無い。
+    # ダウンロード由来の「ブロック」印（Zone.Identifier）を除去する。-ExecutionPolicy
+    # Bypass でも走るが、除去しておくほうが確実で副作用が無い。
     try { Unblock-File -LiteralPath $inst -ErrorAction SilentlyContinue } catch {}
     try {
-        # 子スクリプトとして呼ぶ（& なので exit しても此方は死なない）。
+        # 子スクリプトとして呼ぶ（& なので exit してもこちらは終了しない）。
         $lines = & $inst -Machine -From $work -Name $name -PluginsDir $VW_PLUGINS_DIR
     }
     catch { return $null }
@@ -328,7 +328,7 @@ function Invoke-ZipInstaller([string] $work, [string] $name) {
 # on failure. Shows no UI (callers decide what, if anything, to display).
 #
 # 委ねられたときは、その出力を $script:InstallerOutput にそのまま入れて返す
-# （Invoke-DoInstall がプラグインへ素通しする。増えたキーを途中で落とさないため）。
+# （Invoke-DoInstall がプラグインへそのまま渡す。増えたキーを途中で失わないため）。
 function Install-Build([string] $url, [string] $name) {
     $script:LastError = ''
     $script:InstallerOutput = ''
@@ -344,7 +344,7 @@ function Install-Build([string] $url, [string] $name) {
         try { Expand-Archive -LiteralPath $zip -DestinationPath $work -Force }
         catch { $script:LastError = 'アーカイブの展開に失敗しました。'; return $false }
 
-        # **配置は落とした zip の中のインストーラへ委ねる**（上の Invoke-ZipInstaller）。
+        # **配置はダウンロードした zip の中のインストーラへ委ねる**（上の Invoke-ZipInstaller）。
         $delegated = Invoke-ZipInstaller $work $name
         if ($delegated) {
             $script:InstallerOutput = $delegated
@@ -401,11 +401,11 @@ function Install-Build([string] $url, [string] $name) {
 #
 # **なぜ表示名では駄目か。** dev プレリリースの name は "Dev: <branch> (<sha>)" なので、
 # 「いま動いているのと同じブランチか」の照合には使えない。取り込みコマンドのついでに
-# 走る確認は、**同じブランチの新しいビルドだけ**を拾ってブランチ選択のダイアログを
-# 出さずに済ませる（src/UpdaterFlow.cpp の RunDevUpdateCheckWith）ので、素のブランチ名が
+# 走る確認は、**同じブランチの新しいビルドだけ**を抽出してブランチ選択のダイアログを
+# 出さずに済ませる（src/UpdaterFlow.cpp の RunDevUpdateCheckWith）ので、そのままのブランチ名が
 # 要る。読めなければ空——プラグイン側はそのとき何もしない側へ倒れる。
 #
-# **`body` は無いことがある**ので、直に `$rel.body` と書かない。GitHub の API は本文の
+# **`body` は無いことがある**ので、直接 `$rel.body` と書かない。GitHub の API は本文の
 # 無いリリースでもキー自体は返すが、テストの合成 JSON にはキーごと無い場合があり、
 # `Set-StrictMode -Version Latest` の下では「存在しないプロパティ」が例外になる
 # （tests/vw-update.Tests.ps1）。PSObject.Properties で有無を確かめてから読む。
@@ -466,7 +466,7 @@ function Invoke-QPrState([string[]] $branches) {
         $any = $false
         $open = $false
         # **foreach 文で回す。** Windows PowerShell 5.1 の Invoke-RestMethod は JSON の配列を
-        # 1 つの Object[] のまま返すことがあり、@() で包むと 1 要素に潰れる。foreach 文は
+        # 1 つの Object[] のまま返すことがあり、@() で包むと 1 要素にまとまってしまう。foreach 文は
         # どちらの形でも中身を 1 つずつ回し、$null（空の配列）なら 1 度も回らない。
         foreach ($pr in $prs) {
             $any = $true
@@ -479,13 +479,13 @@ function Invoke-QPrState([string[]] $branches) {
 
 function Invoke-DoInstall([string] $url, [string] $name) {
     $installed = Install-Build $url $name
-    # 委ねたときは**その出力をそのまま流す**。プラグインが読む契約
+    # 委ねたときは**その出力をそのまま出力する**。プラグインが読む契約
     # （installed-shell= / ok / error=）はインストーラ側が満たすので、ここで組み直すと
-    # 将来キーが増えたときに落としてしまう。
+    # 将来キーが増えたときに失ってしまう。
     if ($script:InstallerOutput) { Write-Output $script:InstallerOutput; return }
     if ($installed) {
         # **いま入れた殻の ID を先に出す。** プラグインはこれを自分の VW_SHELL_ID と
-        # 突き合わせて「再起動が要るか／本体の読み直しで済むか」を決める
+        # 突き合わせて「再起動が要るか／本体の再読み込みで済むか」を決める
         # （src/UpdaterParse.h の NeedsRestartAfterInstall）。読めなければ行を出さない
         # ＝プラグインは安全側へ倒す。
         $shell = Get-InstalledShellId $name

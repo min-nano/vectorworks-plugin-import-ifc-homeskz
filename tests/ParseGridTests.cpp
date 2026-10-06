@@ -152,7 +152,7 @@ TEST(classifies_by_geometry_when_name_absent)
 
 TEST(removes_duplicate_lines_including_reversed)
 {
-	// 同一線分（向き反転を含む）は 1 本に畳む。最初に現れた軸を残す（決定的）。
+	// 同一線分（向き反転を含む）は 1 本にまとめる。最初に現れた軸を残す（決定的）。
 	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
 										"#11=IFCCARTESIANPOINT((0.,1000.,0.));\n"
 										"#20=IFCPOLYLINE((#10,#11));\n"
@@ -192,7 +192,7 @@ TEST(skips_axes_with_bad_points)
 	// 点の解決（parse/IfcGeometry の resolvePoint2D）の失敗 2 系統をスキップさせる:
 	//   (a) ポリラインの点参照が未解決（#900 が存在しない）→ 始点解決失敗。
 	//   (b) 座標が 1 つしかない点（#12）→ 座標不足で解決失敗。
-	// どちらの軸も落とし、健全な X1 の 1 本だけ返す（1 軸の欠損で全体を止めない）。
+	// どちらの軸も除外し、健全な X1 の 1 本だけ返す（1 軸の欠損で全体を止めない）。
 	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
 										"#11=IFCCARTESIANPOINT((0.,1000.,0.));\n"
 										"#12=IFCCARTESIANPOINT((5.));\n" // 座標 1 つ（不足）

@@ -2,13 +2,13 @@
 //	CoreImportOptionsTests.cpp
 //
 //	取り込み設定（src/core/ImportOptions）の単体テスト。VectorWorks SDK を一切 include
-//	せず、無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
+//	せず、無 SDK のテストハーネス（TestFramework.h）で実行する（CLAUDE.md「テスト方針」）。
 //
-//	検証項目（docs/DEV-NOTES.md M20 / M28）: 役割の表が全役割ぶん・添字と enum がずれて
-//	いない・既定は従来の固定名・差し替えと空文字の扱い・図面枠スタイルは既定で空
-//	（＝置かない）で、空文字は既定名へ戻らない。**既定名は「この設定を入れる前に解析側が
-//	書いていた名前」そのもの**なので、ここだけは名前を手書きで持つ（表が書き換わったら
-//	気付けるようにするための固定値）。
+//	検証項目（docs/DEV-NOTES.md M20 / M28）: 役割の表が全役割分ある・添字と enum が
+//	一致している・既定は従来の固定名・差し替えと空文字の扱い・図面枠スタイルは既定で空
+//	（＝置かない）で、空文字は既定名へ戻らない。ここだけは名前を手書きで持つ（表が
+//	書き換わったら気付けるようにするための固定値）。**既定名は「この設定を導入する前に
+//	解析側が書いていた名前」そのもの**であるため。
 //
 
 #include "TestFramework.h"
@@ -47,7 +47,7 @@ TEST(import_options_role_table_matches_enum)
 
 TEST(import_options_defaults_are_the_previous_fixed_names)
 {
-	// 設定を触らなければ従来と同じ名前で置かれる（既定の取り込み結果を変えない）。
+	// 設定を変更しなければ従来と同じ名前で置かれる（既定の取り込み結果を変えない）。
 	const ImportOptions options;
 	CHECK_EQ(options.symbol(SymbolRole::AnchorBoltM12), std::string("アンカーボルト_M12"));
 	CHECK_EQ(options.symbol(SymbolRole::AnchorBoltM16), std::string("アンカーボルト_M16"));
@@ -94,13 +94,13 @@ TEST(import_options_disabling_a_role_keeps_the_others)
 	options.setEnabled(SymbolRole::FireBrace, false);
 	CHECK(!options.isEnabled(SymbolRole::FireBrace));
 	CHECK(options.isEnabled(SymbolRole::Joint));
-	// 名前は触らない（取り込まない役割の名前は使われないだけで、消えはしない）。
+	// 名前は変更しない（取り込まない役割の名前は使われないだけで、削除はされない）。
 	CHECK_EQ(options.symbol(SymbolRole::FireBrace), std::string("鋼製火打"));
 }
 
 TEST(import_options_set_symbol_does_not_re_enable_a_role)
 {
-	// 名前の差し替えと「取り込むか」は独立（片方を触ってもう片方が戻ると、
+	// 名前の差し替えと「取り込むか」は独立（片方を変更してもう片方が戻ると、
 	// ダイアログの操作順で結果が変わってしまう）。
 	ImportOptions options;
 	options.setEnabled(SymbolRole::FloorPost, false);
@@ -142,7 +142,7 @@ TEST(import_options_title_block_keeps_an_empty_name_as_off)
 
 TEST(import_options_title_block_does_not_touch_the_symbol_roles)
 {
-	// 図面枠は役割の表に載らない別物——触っても既定のシンボル対応は変わらない。
+	// 図面枠は役割の表に載らない別の設定——変更しても既定のシンボル対応は変わらない。
 	ImportOptions options;
 	options.setTitleBlockStyle("図面枠A");
 	for (const auto& info : symbolRoles())
@@ -193,7 +193,7 @@ TEST(import_options_merge_is_keyed_by_story_and_height)
 
 TEST(import_options_merge_list_stays_sorted_without_duplicates)
 {
-	// 二分探索で引くので、どの順に足しても昇順・重複なしに保つ。
+	// 二分探索で検索するので、どの順に追加しても昇順・重複なしに保つ。
 	ImportOptions options;
 	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
 	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}, true);
@@ -204,14 +204,14 @@ TEST(import_options_merge_list_stays_sorted_without_duplicates)
 	CHECK((options.mergedPlanLevels[1] == HomeskzIfcImport::core::PlanLevelKey{2, 6010}));
 	CHECK((options.mergedPlanLevels[2] == HomeskzIfcImport::core::PlanLevelKey{2, 6374}));
 	CHECK(options.mergesWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6010}));
-	// 無いものを外しても何も起きない。
+	// 無いものを除外しても何も起きない。
 	options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{3, 1}, false);
 	CHECK_EQ(options.mergedPlanLevels.size(), std::size_t(3));
 }
 
 TEST(import_options_skip_no_sections_by_default)
 {
-	// M34 既定は「外す通りなし」＝従来どおり全部描く（設定ダイアログを出さない経路でも
+	// M34 既定は「除外する通りなし」＝従来どおり全部描画する（設定ダイアログを出さない経路でも
 	// 軸組図が消えない。core/ImportOptions.h の skippedSections）。
 	const ImportOptions options;
 	CHECK(options.skippedSections.empty());
@@ -221,7 +221,7 @@ TEST(import_options_skip_no_sections_by_default)
 
 TEST(import_options_skipped_sections_are_sorted_unique_and_non_empty)
 {
-	// 空文字・重複は落とし、名前順に並べ直す（ログの並びを選んだ順に依らせない）。
+	// 空文字・重複は除去し、名前順に並べ直す（ログの並びを選んだ順に依らせない）。
 	ImportOptions options;
 	options.setSkippedSections({"Y2", "", "X1", "Y2", "又い"});
 	CHECK_EQ(options.skippedSections.size(), std::size_t(3));
@@ -240,7 +240,7 @@ TEST(import_options_skipped_sections_are_sorted_unique_and_non_empty)
 
 TEST(import_options_rafter_size_defaults_to_45_by_45)
 {
-	// 設定を触らなければ従来の決め打ち 45×45 のまま（既定の取り込み結果を変えない）。
+	// 設定を変更しなければ従来の固定値 45×45 のまま（既定の取り込み結果を変えない）。
 	const ImportOptions options;
 	CHECK(std::abs(options.rafterWidth - 45.0) < 1e-9);
 	CHECK(std::abs(options.rafterHeight - 45.0) < 1e-9);
@@ -343,7 +343,7 @@ TEST(format_rafter_size_drops_trailing_zeros_and_round_trips)
 TEST(default_dimension_standard_prefers_jis)
 {
 	CHECK_EQ(defaultDimensionStandardIndex({"ANSI", "JIS", "DIN"}), std::size_t{1});
-	// JIS が無ければ最初。空でも 0（呼び出し側が範囲を見る）。
+	// JIS が無ければ最初。空でも 0（呼び出し側が範囲を確認する）。
 	CHECK_EQ(defaultDimensionStandardIndex({"ANSI", "DIN"}), std::size_t{0});
 	CHECK_EQ(defaultDimensionStandardIndex({}), std::size_t{0});
 }
@@ -374,7 +374,7 @@ TEST(preset_import_options_places_the_first_title_block_and_jis)
 		presetImportOptions({}, {"図面枠A3", "図面枠A2"}, {"ANSI", "JIS"});
 	CHECK_EQ(options.titleBlockStyle(), std::string("図面枠A3"));
 	CHECK_EQ(options.dimensionStandard(), std::string("JIS"));
-	// 残りは既定のまま（まとめない・全部描く・45×45）。
+	// 残りは既定のまま（まとめない・全部描画する・45×45）。
 	CHECK(options.mergedPlanLevels.empty());
 	CHECK(options.skippedSections.empty());
 	CHECK(std::fabs(options.rafterWidth - kDefaultRafterWidth) < 1e-9);

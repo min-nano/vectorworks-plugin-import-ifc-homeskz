@@ -23,13 +23,13 @@
 //	VW 2026 では AddStoryLevel + AssociateLayerWithStory ではレイヤ→レベルの紐付けが UI
 //	上「なし」になるため、バインドが保証される CreateStoryLevelTemplate +
 //	AddStoryLevelFromTemplate を使う。テンプレートは CreateStory の suffix を末尾に付けた名前
-//	でレイヤを作る（例 "1-FL-1"）ため、GetLayerForStory で取り直して SetObjectName
+//	でレイヤを作る（例 "1-FL-1"）ため、GetLayerForStory で再取得して SetObjectName
 //	で意図した名前（"1-FL"）へ直す。
 //
 //	レイヤのスタック順の並べ替え（reorderStoryLayers）もここに置く。**ISDK の
 //	InsertObjectAfter / InsertObjectBefore** で図面のオブジェクト列（＝レイヤの並び）を
-//	組み替える——M3 では「重ね順を変える呼び出しが無い」と見て per-viewport 上書きへ
-//	委ねたが、実機でそちらは効かず、この 2 つが VS の HMoveForward 相当だと分かった
+//	並べ替える——M3 では「重ね順を変える呼び出しが無い」と判断して per-viewport 上書きへ
+//	委ねたが、実機でそちらは反映されず、この 2 つが VS の HMoveForward 相当だと判明した
 //	（ヘッダの reorderStoryLayers 参照）。
 //
 //	実描画（ストーリ高さ・レベルのバインド・単位）はローカルの VectorWorks で目視確認する
@@ -53,12 +53,12 @@ namespace HomeskzIfcImport::draw
 	namespace
 	{
 		// レベルテンプレートの既定値。スケール 1.0、壁高 2400mm。実描画の高さは要素側の
-		// ストーリバウンドで決まるためここは器の既定。
+		// ストーリバウンドで決まるためここは形式上の既定値。
 		constexpr double kTemplateScale = 1.0;
 		constexpr double kTemplateWallHeight = 2400.0;
 
 		// 1 つのストーリレベルをレベルテンプレート経由で生成し、紐づくレイヤを意図した名前へ
-		// リネームする。生成に失敗したら静かに戻る（1 レベルの欠損で全体を止めない）。
+		// リネームする。生成に失敗したら通知せずに戻る（1 レベルの欠損で全体を止めない）。
 		void CreateStoryLevelViaTemplate(MCObjectHandle story, const std::string& levelType,
 										 double offset, const std::string& desiredLayerName)
 		{
@@ -75,13 +75,14 @@ namespace HomeskzIfcImport::draw
 				return;
 			if (!gSDK->AddStoryLevelFromTemplate(story, templateIndex))
 				return;
-			// AddStoryLevelFromTemplate はレイヤ名に suffix を付ける（"1-FL-1"）。取り直して直す。
+			// AddStoryLevelFromTemplate はレイヤ名に suffix を付ける（"1-FL-1"）。
+			// 再取得して名前を直す。
 			MCObjectHandle layer = gSDK->GetLayerForStory(story, levelTypeName);
 			if (layer != nil)
 			{
 				gSDK->SetObjectName(layer, TXString(desiredLayerName.c_str()));
 				// **このインポートが作ったレイヤ**として undo イベントへ登録する。取り消すと
-				// このレイヤごと——上に描いた構造材・壁・スラブ・シンボルもまとめて——消える
+				// このレイヤごと——上に描画した構造材・壁・スラブ・シンボルもまとめて——消える
 				// （draw/DrawUtil.h「なぜレイヤを記録するのか」）。
 				RecordCreatedLayer(layer);
 			}
@@ -102,8 +103,8 @@ namespace HomeskzIfcImport::draw
 		// 列全体が希望どおりの重ね順になる。
 		//
 		// 希望順に出てこないレイヤ（ユーザーが別途作ったもの・まだ生成されていないもの）は
-		// 触らない。GetNamedLayer が nil を返すレイヤは黙って飛ばす（要素の描画がスキップ
-		// されてレイヤが無い場合など）。
+		// 変更しない。GetNamedLayer が nil を返すレイヤは通知せずにスキップする（要素の描画が
+		// スキップされてレイヤが無い場合など）。
 		std::size_t moved = 0;
 		MCObjectHandle previous = nil;
 		for (const std::string& name : std::ranges::reverse_view(desired))

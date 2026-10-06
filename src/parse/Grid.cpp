@@ -59,7 +59,7 @@ namespace HomeskzIfcImport::parse
 			pts.reserve(points.items.size());
 			for (const Value& ref : points.items)
 			{
-				// 点の解決規則は parse/IfcGeometry と共有する（通り芯は Z を捨てた平面）。
+				// 点の解決規則は parse/IfcGeometry と共有する（通り芯は Z を除いた平面）。
 				Vec2 point;
 				if (!resolvePoint2D(model, ref, point))
 					return false; // 点が解決できない軸はスキップ

@@ -11,16 +11,16 @@
 //	                        スプール（一時ディレクトリの <プラグイン名>-mcp。橋は開発版
 //	                        だけにあるので、ふつうは min-nano_structureDev-mcp）
 //	                              ▲
-//	                              │ 拾う／応える（Vectorworks が動いている間ずっと）
+//	                              │ 取得する／応答する（Vectorworks が動いている間ずっと）
 //	                        Vectorworks（draw::serveMcpBridge。パレットの時計が数百 ms ごとに呼ぶ）
 //
 //	【なぜファイルなのか】ソケットを開くと (1) macOS のファイアウォールが利用者に問い、
 //	(2) Winsock と BSD ソケットで分岐が増え、(3) 受け口をメインスレッド以外に置くと
 //	SDK 呼び出しの前提（Vectorworks はメインスレッドから呼ぶ）を壊す。**ファイルなら
 //	どれも起きない**——ブリッジは Vectorworks のメインスレッドで時計に呼ばれるたびに、
-//	置かれたファイルを拾って応えるだけでよい。速さは要らない（人が待つ対話の速度）。
+//	置かれたファイルを取得して応答するだけでよい。速さは要らない（人が待つ対話の速度）。
 //
-//	【なぜ 2 プロセスなのか】MCP そのもの（JSON-RPC・stdio・initialize の握手）は
+//	【なぜ 2 プロセスなのか】MCP そのもの（JSON-RPC・stdio・initialize のハンドシェイク）は
 //	Claude 側の作法であって図面の話ではない。**プラグインに持ち込まず Python の小さな
 //	サーバへ出す**と、プロトコルが変わってもプラグインを配り直さずに済み、C++ 側は
 //	「道具の名前と引数を受けて図面から値を返す」だけになる。
@@ -28,8 +28,9 @@
 //	【安全側の決めごと】スプールへ書くのは**別プロセス**である。したがって:
 //	  * id は綴りを検査してからファイル名に使う（`../` を混ぜてスプールの外へ書かせない）。
 //	  * 要求 1 件の大きさに上限を設ける（巨大なファイルを丸ごと読み込まない）。
-//	  * 1 周で捌く件数に上限を設ける（溜まっていても Vectorworks を握り続けない）。
-//	  * 壊れた要求は**消してから**エラーで応える（同じものを永久に拾い直さない）。
+//	  * 1 回のポーリングで処理する件数に上限を設ける（溜まっていても Vectorworks を占有し
+//	    続けない）。
+//	  * 壊れた要求は**削除してから**エラーで応答する（同じものを永久に再取得しない）。
 //
 
 #pragma once
@@ -53,11 +54,11 @@ namespace HomeskzIfcImport::core
 	// プラグインと Python サーバは別々に配られうる）。status に載せて Python 側が確かめる。
 	inline constexpr int kBridgeProtocolVersion = 1;
 
-	// 要求 1 件の大きさの上限（バイト）と、1 周で捌く件数の上限。
+	// 要求 1 件の大きさの上限（バイト）と、1 回のポーリングで処理する件数の上限。
 	inline constexpr std::size_t kBridgeMaxRequestBytes = 1U << 20U; // 1 MiB
 	inline constexpr std::size_t kBridgeMaxRequestsPerPoll = 16;
 
-	// 生存の印（`beat`）がこれより古ければ「動いていない」と見る（秒）。**Python 側の
+	// 生存の印（`beat`）がこれより古ければ「動いていない」と判定する（秒）。**Python 側の
 	// STATUS_STALE_SECONDS と対。** プラグイン側は数秒ごとに書き直す。
 	inline constexpr long long kBridgeStatusStaleSeconds = 15;
 
@@ -68,8 +69,8 @@ namespace HomeskzIfcImport::core
 	//
 	// **両側が同じ場所を指すとは限らない。** 一時ディレクトリは環境変数で決まり、
 	// macOS の $TMPDIR は利用者ごとの `/var/folders/…` だが、ssh や cron から起動した
-	// プロセスにはそれが無く `/tmp` に落ちる。そこで**探すのは Python 側の仕事**にした
-	// ——候補を順に見て、生きた印（bridge.json）があるところを使う
+	// プロセスにはそれが無く `/tmp` になる。そこで**探すのは Python 側の役割**にした
+	// ——候補を順に確認し、有効な生存の印（bridge.json）があるところを使う
 	// （scripts/mcp/vw-mcp-server.py の spool_candidates）。プラグイン側は自分の
 	// 一時ディレクトリへ素直に置くだけでよい。
 	std::string bridgeSpoolDir(const std::string& tempDir, const std::string& pluginName);
@@ -106,7 +107,7 @@ namespace HomeskzIfcImport::core
 	BridgeResponse bridgeFailure(const std::string& id, const std::string& error);
 
 	// -----------------------------------------------------------------------
-	// **スプール 1 つ。** ディレクトリを用意し、要求を拾い、応答を書く。SDK を知らないので
+	// **スプール 1 つ。** ディレクトリを用意し、要求を取得し、応答を書く。SDK を知らないので
 	// 単体テストできる（tests/CoreBridgeTests.cpp）。
 	class BridgeSpool
 	{
@@ -118,15 +119,15 @@ namespace HomeskzIfcImport::core
 			return fDir;
 		}
 
-		// ディレクトリを用意する。作れない・**素性が怪しい**ときは false と理由。
+		// ディレクトリを用意する。作れない・**持ち主や権限が不適切な**ときは false と理由。
 		//
-		// **持ち主と権限を確かめる。** 一時ディレクトリは `/tmp` に落ちることがあり、
+		// **持ち主と権限を確かめる。** 一時ディレクトリは `/tmp` になることがあり、
 		// そこは同じ計算機の他の利用者からも書ける。要求を投げ込まれれば図面を読まれ、
 		// 応答を読まれれば中身が漏れるので、**自分のもので・自分にしか書けない**
 		// ディレクトリでなければ使わない（POSIX のみ。Windows の %TEMP% は利用者ごと）。
 		bool prepare(std::string& error);
 
-		// 前の回の残骸（要求・応答・書きかけ）を消す。**開始時に 1 回**呼ぶ——落ちた
+		// 前の回の残骸（要求・応答・書きかけ）を削除する。**開始時に 1 回**呼ぶ——異常終了した
 		// セッションの応答を新しいセッションのものと取り違えないため。消した数を返す。
 		//
 		// **生きた橋がいる間は呼ばない**（statusIsLive で確かめてから）。常駐になって
@@ -135,7 +136,7 @@ namespace HomeskzIfcImport::core
 		std::size_t sweep();
 
 		// 生存の印が在り、`beat` が now から staleSeconds 以内か。**前の回の橋がまだ
-		// 生きている（＝本体を入れ替えただけ）のか、Vectorworks ごと落ちたあとの残骸か**を
+		// 生きている（＝本体を入れ替えただけ）のか、Vectorworks ごと異常終了したあとの残骸か**を
 		// 見分けるのに使う（sweep してよいかの判断）。now は epoch 秒。
 		bool statusIsLive(long long now, long long staleSeconds) const;
 
@@ -143,11 +144,11 @@ namespace HomeskzIfcImport::core
 		// Python が付ける連番の順（＝送った順）である（CLAUDE.md「決定性を守る」）。
 		//
 		// 読めなかった要求は戻り値に入れず、その id だけを `broken` に載せる（id は
-		// ファイル名から拾う）。呼ぶ側はそれにエラーで応えればよく、**拾い直しは起きない**。
+		// ファイル名から取得する）。呼ぶ側はそれにエラーで応答すればよく、**再取得は起きない**。
 		std::vector<BridgeRequest> poll(std::vector<std::string>& broken);
 
 		// 応答を書く（同じディレクトリへ書いてから rename する＝読み手が半端な内容を
-		// 拾わない）。
+		// 読み取らない）。
 		bool reply(const BridgeResponse& response, std::string& error);
 
 		// 生存の印。ブリッジが動いている間だけ置かれ、止まると消える。

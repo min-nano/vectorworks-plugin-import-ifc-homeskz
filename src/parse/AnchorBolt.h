@@ -1,9 +1,9 @@
 //
 //	parse/AnchorBolt.h
 //
-//	Phase 1（IFC 解析）のアンカーボルトモジュール（docs/DEV-NOTES.md M11「シンボル置換系」）。
-//	IfcMechanicalFastener のうちボルト本体だけを拾い、ハイブリッドシンボルへ置換する
-//	core::SymbolCommand を組み立てる。
+//	Phase 1（IFC 解析）のアンカーボルトモジュール。IfcMechanicalFastener のうちボルト本体
+//	だけを抽出し、ハイブリッドシンボルへ置換する core::SymbolCommand を組み立てる
+//	（docs/DEV-NOTES.md M11「シンボル置換系」）。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ
 //	グラフ（parse/Step）・柱（parse/Column の配置・型名ヘルパー）・通り芯（parse/Grid の
@@ -25,7 +25,7 @@
 //
 //	【配置先レイヤ】"F-アンカーボルト" は**基礎ストーリの基礎天端レベル**に紐づくデザイン
 //	レイヤで、これを作るのは parse/Footing の buildFoundationStoryCommand（M9 の基礎ストーリに
-//	M11 で基礎天端レベルを足した）。レイヤ名の定数は parse/Footing.h に 1 つだけ置き、
+//	M11 で基礎天端レベルを追加した）。レイヤ名の定数は parse/Footing.h に 1 つだけ置き、
 //	配置先を名乗る側（ここ）とレベルを作る側の両方がそれを通る。解析自体は基礎の有無に
 //	依存しないので、ここでは常に命令を組み立てる（基礎の無いモデルではレイヤが無く、
 //	描画側がスキップして診断行に出す）。
@@ -77,7 +77,7 @@ namespace HomeskzIfcImport::parse
 	// アンカーボルト本体を**取り込み設定に依らず**すべて集める（#id 昇順）。命令を作る
 	// buildAnchorBoltCommands と、継手の向き（M33。男木に M12 が付く）を決める
 	// parse/Splice の両方がこれを通る——継手の向きが「アンカーボルトを取り込むか」の
-	// 設定で変わってはいけないので、命令ではなくこちらを見る。
+	// 設定で変わってはいけないので、命令ではなくこちらを参照する。
 	std::vector<AnchorBoltPoint> collectAnchorBolts(Context& context);
 
 	// STEP Model からアンカーボルトのシンボル配置命令を組み立てる。

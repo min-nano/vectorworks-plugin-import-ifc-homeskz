@@ -13,10 +13,10 @@
 //	  * gSDK->SetCurrentLayer(sheetLayer)        … 置き場所（用紙）の指定
 //	  * gSDK->CreateCustomObject(name, 位置, 0, true) … 図面枠 PIO の生成
 //	  * gSDK->SetPluginObjectStyle(object, style)     … スタイルの関連付け
-//	  * gSDK->UpdateStyledObjects(style)              … スタイルの中身を流し込む（1 回）
+//	  * gSDK->UpdateStyledObjects(style)              … スタイルの中身を反映する（1 回）
 //	  * gSDK->FirstMemberObj / InsertObjectBefore     … 最背面へ回す
 //	  * gSDK->GetObjectBounds / MoveObject            … 置いた後に測って動かす
-//	  * gSDK->DeleteObject                            … 割り付けのために仮に置いた枠を消す
+//	  * gSDK->DeleteObject                            … 割り付けのために仮に置いた枠を削除する
 //
 
 #include "PluginPrefix.h"
@@ -42,33 +42,33 @@ namespace HomeskzIfcImport::draw
 		//
 		// 当初は候補を 3 つ並べて順に試していた（登録名が `Findings/` に無く、型番号
 		// ＝`GetSymbolDefSubType` が返す 552 から名前を引く呼び出しも知られていないため）。
-		// 1 周で `"Title Block Border"` が通ったので、**候補は畳んだ**——通らない名前を
-		// 抱えたままにすると、いつ何が効いているのか分からなくなる。
+		// 1 周で `"Title Block Border"` が通ったので、**候補は削除した**——通らない名前を
+		// 残したままにすると、いつ何が機能しているのか分からなくなる。
 		//
 		// **universal 名はローカライズもプラットフォーム依存もしない**ので Windows でも
-		// 同じはずだが、確かめたのは macOS の 1 周だけである。**置けなかった件数は必ず
-		// 診断へ出す**ので、違っていれば次の周で分かる（titleBlockDiagnostics）。
+		// 同じはずだが、確認したのは macOS の 1 周だけである。**置けなかった件数は必ず
+		// 診断へ出力する**ので、違っていれば次の周で分かる（titleBlockDiagnostics）。
 		constexpr const char* kTitleBlockPlugin = "Title Block Border";
 
 		// 用紙の中心。**原点である**（draw/TitleBlock.h「置き場所は測って決める」。
 		// draw/DrawUtil.h の SheetPaperArea が同じ前提で印刷可能領域を組み立てている）。
 		constexpr core::Vec2 kPaperCenter{0.0, 0.0};
 
-		// そのシートレイヤはもう控えたか。軸組図は同じシートレイヤへ複数の命令が載るので、
+		// そのシートレイヤは既に記録したか。軸組図は同じシートレイヤへ複数の命令が載るので、
 		// これが無いと 1 枚の用紙に枠が何重にも積まれる（draw/Section）。
 		bool AlreadyPlaced(const TitleBlockCounts& counts, MCObjectHandle sheetLayer)
 		{
 			return std::ranges::find(counts.sheets, sheetLayer) != counts.sheets.end();
 		}
 
-		// 図面枠 PIO を 1 つ作る（作れなければ nil）。**定義の用意
+		// 図面枠 PIO を 1 つ生成する（生成できなければ nil）。**定義の用意
 		// （PrepareCustomObjectDefinition）は生成の直前に行う**——最初の 1 個で
-		// 「オブジェクトの設定」ダイアログが出ると、無人で回る実機テストの周（MCP の vw_run_test）がそこで止まる
-		// （draw/DrawUtil.h の PrepareCustomObjectDefinition）。
+		// 「オブジェクトの設定」ダイアログが表示されると、無人で実行される実機テストの周（MCP の
+		// vw_run_test）がそこで止まる（draw/DrawUtil.h の PrepareCustomObjectDefinition）。
 		MCObjectHandle CreateTitleBlock()
 		{
 			PrepareCustomObjectDefinition(kTitleBlockPlugin);
-			// 生成位置は仮（用紙の中心へ寄せるのは、スタイルを流し込んで大きさが定まって
+			// 生成位置は仮（用紙の中心へ寄せるのは、スタイルを反映して大きさが定まって
 			// から＝finishTitleBlocks）。
 			return gSDK->CreateCustomObject(TXString(kTitleBlockPlugin),
 											WorldPt(kPaperCenter.x, kPaperCenter.y), 0.0, true);
@@ -83,7 +83,7 @@ namespace HomeskzIfcImport::draw
 			return counts; // 置かない（設定の既定）
 
 		// **スタイルが図面に無ければ 1 つも置かない**（draw/TitleBlock.h の ★）。
-		// スタイル無しの図面枠は空の枠にしかならず、図面を汚すだけになる。
+		// スタイル無しの図面枠は空の枠にしかならず、図面に不要な図形を増やすだけになる。
 		counts.styleRef = ResolvePluginStyle(TXString(counts.style.c_str()));
 		return counts;
 	}
@@ -99,14 +99,14 @@ namespace HomeskzIfcImport::draw
 		std::optional<core::PaperArea> frame;
 		if (const MCObjectHandle probe = CreateTitleBlock(); probe != nil)
 		{
-			// 外形はスタイルの中身が流れてから定まる（finishTitleBlocks と同じ手順）。
+			// 外形はスタイルの中身が反映されてから定まる（finishTitleBlocks と同じ手順）。
 			gSDK->SetPluginObjectStyle(probe, counts.styleRef);
 			gSDK->UpdateStyledObjects(counts.styleRef);
 			WorldRect bounds;
 			if (gSDK->GetObjectBounds(probe, bounds))
 			{
 				// 本物は用紙の中心＝原点へ寄せて置く（finishTitleBlocks）ので、大きさだけを
-				// 採って原点の周りの矩形にする。
+				// 取得して原点の周りの矩形にする。
 				const double halfWidth = std::abs(bounds.right - bounds.left) / 2.0;
 				const double halfHeight = std::abs(bounds.top - bounds.bottom) / 2.0;
 				if (halfWidth > 0.0 && halfHeight > 0.0)
@@ -138,8 +138,8 @@ namespace HomeskzIfcImport::draw
 		// --- 置く ------------------------------------------------------------------
 		//
 		// ★**ここはビューポートの縮尺を確定させた後**（draw/TitleBlock.h）。図面枠の縮尺欄は
-		// 作ったときに用紙に載っているビューポートの縮尺を拾い、その後は勝手に取り直さない
-		// ので、先に作ると 1:1 のまま残る（`UpdateStyledObjects` も `ResetObject` も効かな
+		// 生成時に用紙に載っているビューポートの縮尺を取得し、その後は自動で再取得しない
+		// ので、先に生成すると 1:1 のまま残る（`UpdateStyledObjects` も `ResetObject` も機能しな
 		// かった。docs/DEV-NOTES.md M28）。
 		std::vector<std::pair<MCObjectHandle, MCObjectHandle>> placed; // (シートレイヤ, 図面枠)
 		placed.reserve(counts.sheets.size());
@@ -155,9 +155,9 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 			counts.plugin = kTitleBlockPlugin;
-			// スタイルは関連付けるだけでは中身が流れない（[Findings「Parametric Objects」]
+			// スタイルは関連付けるだけでは中身が反映されない（[Findings「Parametric Objects」]
 			// (https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)
-			// の「プラグインスタイル」）。流し込みは全部置き終えてから 1 回（下）。
+			// の「プラグインスタイル」）。反映は全部置き終えてから 1 回（下）。
 			gSDK->SetPluginObjectStyle(object, counts.styleRef);
 			placed.emplace_back(sheetLayer, object);
 			++counts.drawn;
@@ -165,7 +165,7 @@ namespace HomeskzIfcImport::draw
 		if (placed.empty())
 			return;
 
-		// スタイルの中身を流し込む（**ジオメトリの作り直しまで行う**ので、1 つずつの
+		// スタイルの中身を反映する（**ジオメトリの再生成まで行う**ので、1 つずつの
 		// ResetObject は要らない。上記 Findings）。これを通さないと枠の外形が定まらず、
 		// 下の位置合わせが測るものを持たない。
 		gSDK->UpdateStyledObjects(counts.styleRef);
@@ -174,7 +174,7 @@ namespace HomeskzIfcImport::draw
 		{
 			// --- 最背面へ回す ------------------------------------------------------
 			//
-			// 後から作ったので、このままでは**ビューポート・凡例の手前**にあって図を覆う。
+			// 後から生成したので、このままでは**ビューポート・凡例の手前**にあって図を覆う。
 			// オブジェクト列は背面→前面の順なので、シートレイヤの先頭の前へ差し込めば
 			// 最背面になる（draw/TitleBlock.h の ★）。
 			const MCObjectHandle first = gSDK->FirstMemberObj(sheetLayer);
@@ -190,7 +190,7 @@ namespace HomeskzIfcImport::draw
 			}
 			const double centerX = (bounds.left + bounds.right) / 2.0;
 			const double centerY = (bounds.bottom + bounds.top) / 2.0;
-			// 本置きの外形を控える（診断ログ。割り付けの前に仮に測った大きさと突き合わせる）。
+			// 本置きの外形を記録する（診断ログ。割り付けの前に仮に測った大きさと照合する）。
 			if (counts.placedSize.x <= 0.0)
 				counts.placedSize = core::Vec2{std::abs(bounds.right - bounds.left),
 											   std::abs(bounds.top - bounds.bottom)};
@@ -200,7 +200,7 @@ namespace HomeskzIfcImport::draw
 
 	std::string titleBlockDiagnostics(const TitleBlockCounts& counts)
 	{
-		// **「置かない」は異常ではない**（設定の既定）ので何も言わない。
+		// **「置かない」は異常ではない**（設定の既定）ので何も出力しない。
 		if (counts.style.empty())
 			return {};
 
@@ -212,7 +212,7 @@ namespace HomeskzIfcImport::draw
 		if (styleMissing)
 			text += "図面枠スタイル「" + counts.style +
 					"」がこの図面に無いので、図面枠を置いていません。";
-		// **登録名を文面へ入れる**——ここが効かないときの原因はほぼそれなので、次の周で
+		// **登録名を文面へ入れる**——ここが機能しないときの原因はほぼそれなので、次の周で
 		// 名前を疑えるようにしておく。**綴りは kTitleBlockPlugin から引く**（書き下すと
 		// 登録名を変えたときにこの診断だけ古いまま残る。CLAUDE.md「重複を作らない置き場所」）。
 		const std::string missing =
@@ -229,7 +229,7 @@ namespace HomeskzIfcImport::draw
 	{
 		if (counts.style.empty() || counts.drawn == 0)
 			return {};
-		// **使った登録名を必ず出す**（別の環境で違っていたときに、ここが唯一の手掛かりに
+		// **使った登録名を必ず出力する**（別の環境で違っていたときに、ここが唯一の手掛かりに
 		// なる。draw/TitleBlock.h の ★）。
 		std::string text = std::string("図面枠（") + what + "）: スタイル「" + counts.style +
 						   "」を " + std::to_string(counts.drawn) + " 枚に置きました（登録名 \"" +

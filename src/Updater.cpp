@@ -47,8 +47,8 @@ namespace
 	//   BundlePluginsDir()   the Plug-Ins folder this build was loaded from, or "".
 	//   RunBundledScript(args, out) run the script with args, capture stdout.
 	//
-	// **再起動はここには無い。** Vectorworks 自身に頼むので（CVectorworksUpdaterHost::
-	// Restart）、プロセスを起こす仕掛けも、アプリの在り処を突き止める仕掛けも要らない。
+	// **再起動はここには無い。** Vectorworks 自身に要求するので（CVectorworksUpdaterHost::
+	// Restart）、プロセスを起動する仕組みも、アプリの場所を特定する仕組みも要らない。
 	// -----------------------------------------------------------------------
 
 #if GS_MAC
@@ -379,21 +379,21 @@ namespace
 			return dlg.GetSelection();
 		}
 
-		// Vectorworks を終了して起動し直す。**Vectorworks 自身に頼む**——SDK の
+		// Vectorworks を終了して再起動する。**Vectorworks 自身に要求する**——SDK の
 		// CloseAllFilesAndQuitVectorworks(bAskForSave, bRestart) がその両方を行い、
-		// 開いている文書の保存確認も通常どおり通る（保存ダイアログで取り消せば
-		// Vectorworks は落ちず、更新はディスクに残ったまま次回の起動で反映される）。
+		// 開いている文書の保存確認も通常どおり行われる（保存ダイアログで取り消せば
+		// Vectorworks は終了せず、更新はディスクに残ったまま次回の起動で反映される）。
+		//
+		// false を返すのは SDK をまだ取得できていないときだけ（呼び出し側は「手動で
+		// 再起動してください」と案内する）。true は「終了を要求した」以上の意味を持たない。
 		//
 		// **以前はこれが使えなかった。** 更新の確認がプラグインの読み込み中
-		// （スプラッシュ表示中）に走っていた頃は、SDK に終了を頼むと bRestart の
-		// 有無にかかわらず「サポートファイルの読み込みに失敗しました」で落ちたため、
-		// 終了要求も起動し直しも切り離したヘルパープロセスへ任せていた
+		// （スプラッシュ表示中）に実行されていた頃は、SDK に終了を要求すると bRestart の
+		// 有無にかかわらず「サポートファイルの読み込みに失敗しました」で異常終了したため、
+		// 終了要求も再起動も分離したヘルパープロセスへ任せていた
 		// （docs/DEVELOPMENT.md）。確認がメニューコマンドと取り込みコマンドへ移り、
-		// **Vectorworks が完全に動いている最中にしか呼ばれなくなった**ので、その回り道は
+		// **Vectorworks が完全に動いている最中にしか呼ばれなくなった**ので、その回避策は
 		// 要らなくなった（Updater.h）。
-		//
-		// false を返すのは SDK をまだ掴めていないときだけ（呼び出し側は「手動で
-		// 再起動してください」と案内する）。true は「終了を頼んだ」以上の意味を持たない。
 		bool Restart() override
 		{
 			if (gSDK == nullptr)
@@ -402,9 +402,9 @@ namespace
 			return true;
 		}
 
-		// **入れ替えた本体（ペイロード）をこの実行のまま効かせる。** 降ろしておけば、次に
-		// 本体を使うとき（取り込み・PIO のリセット）に新しいファイルが読み直される
-		// （src/PayloadSession.h）。更新の確認は本体を確保する前に走るので、ここが
+		// **入れ替えた本体（ペイロード）をこの実行のまま反映させる。** アンロードしておけば、
+		// 次に本体を使うとき（取り込み・PIO のリセット）に新しいファイルが再読み込みされる
+		// （src/PayloadSession.h）。更新の確認は本体を確保する前に実行されるので、ここが
 		// 呼ばれる時点では本体はスタックに載っていない。
 		bool DropLoadedPayload() override
 		{
@@ -415,10 +415,10 @@ namespace
 
 namespace HomeskzIfcImport
 {
-	// **本体（ペイロード）へ貸し出す道具。** 本体は自分の在り処から同梱物へたどり着け
-	// ない——読み込まれるのは一時ディレクトリへ写した複製なので、dladdr /
-	// GetModuleFileName が返すのはバンドルの外の道である（src/PayloadHost.h「必ず複製
-	// してから読む」）。そこで殻がここを開けておき、境界越しに関数ポインタで渡す
+	// **本体（ペイロード）へ貸し出す機能。** 本体は自分の場所から同梱物の場所を特定でき
+	// ない——読み込まれるのは一時ディレクトリへ複製したものなので、dladdr /
+	// GetModuleFileName が返すのはバンドルの外のパスである（src/PayloadHost.h「必ず複製
+	// してから読む」）。そこで殻がこの関数を用意し、境界越しに関数ポインタで渡す
 	// （src/PayloadAbi.h の VwPayloadHost::runBundledScript）。
 	bool RunBundledScriptNamed(const std::string& baseName, const std::vector<std::string>& args,
 							   std::string& out)
@@ -430,16 +430,16 @@ namespace HomeskzIfcImport
 	// build identity into the SDK-independent flows (UpdaterFlow.cpp), which hold
 	// the actual logic (and the tests).
 	//
-	// **「一度きり」の見張りは持たない。** 起動時に自動で走っていた頃は
-	// plugin_module_main が複数回呼ばれても 1 度で済ませる必要があったが、いまの入口は
-	// 手で押すコマンドと取り込みコマンドなので、呼ばれた回数だけ確認するのが正しい。
+	// **「一度きり」のフラグは持たない。** いまの入口は手で実行するコマンドと取り込み
+	// コマンドなので、呼ばれた回数だけ確認するのが正しい。起動時に自動で実行していた頃は
+	// plugin_module_main が複数回呼ばれても 1 度で済ませる必要があった。
 	bool CheckForUpdates(UpdateCheckKind kind)
 	{
 		CVectorworksUpdaterHost host;
 #ifdef VW_DEV_BUILD
 		// 殻にコンパイルされたブランチと sha を渡す。**これは「いま動いているビルド」の
-		// 控えではなく、ディスクから何も分からなかったときの落としどころである**
-		// ——本体（.vwpayload）だけの更新は再起動せずに効くので、別のブランチへ乗り換えた
+		// 記録ではなく、ディスクから何も分からなかったときのフォールバックである**
+		// ——本体（.vwpayload）だけの更新は再起動せずに反映されるので、別のブランチへ乗り換えた
 		// あともこの 2 つは前のブランチを名乗り続ける（src/UpdaterParse.h の
 		// ResolveCurrentDevBuild）。
 		return RunDevUpdateCheckWith(host, kind, VW_BUILD_BRANCH, VW_BUILD_VERSION, VW_SHELL_ID);

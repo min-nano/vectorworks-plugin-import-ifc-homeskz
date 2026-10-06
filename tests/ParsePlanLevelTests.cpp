@@ -114,7 +114,7 @@ TEST(strip_plan_level_tag_restores_the_base_name)
 TEST(layer_order_treats_tagged_levels_like_their_base_type)
 {
 	// 床は背面・耐力壁は前面へ回す決まり（core::desiredStoryLayerOrder）が、伏図レベルの
-	// 印の付いたレベルにも効く。
+	// 印の付いたレベルにも適用される。
 	core::StoryCommand story;
 	story.name = "2階";
 	story.suffix = "2";
@@ -352,7 +352,7 @@ TEST(eaves_girders_move_to_their_own_layer)
 	CHECK_EQ(members[0].layer, std::string("2-軒桁"));
 	CHECK_EQ(members[1].layer, std::string("2-軒桁(FL-800)"));
 	CHECK_EQ(members[2].layer, std::string("R-軒桁"));
-	// 取り合いを見るときは同じ伏図レベルの横架材レイヤとして読み替える。
+	// 取り合いを判定するときは同じ伏図レベルの横架材レイヤとして読み替える。
 	CHECK_EQ(parse::beamGroupLayer(members[1].layer), std::string("2-横架材天端(FL-800)"));
 	CHECK_EQ(parse::beamGroupLayer(members[2].layer), std::string("R-軒高"));
 }

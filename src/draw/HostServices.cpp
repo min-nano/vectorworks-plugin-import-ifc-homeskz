@@ -1,7 +1,7 @@
 //
 //	draw/HostServices.cpp
 //
-//	殻から借りた道具の置き場所（意図は draw/HostServices.h 参照）。**本体の中の 1 つきり**
+//	殻から借りた機能の置き場所（意図は draw/HostServices.h 参照）。**本体の中の 1 つきり**
 //	で、入れるのも捨てるのも payload/PayloadMain.cpp だけ。
 //
 
@@ -11,8 +11,8 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 関数ローカル static。**名前空間スコープの変数にしない**——本体は降ろされて
-		// 読み直されるので、静的初期化の順序に依存させない（core/ の作法と同じ）。
+		// 関数ローカル static。**名前空間スコープの変数にしない**——本体はアンロードされて
+		// 再読み込みされるので、静的初期化の順序に依存させない（core/ の作法と同じ）。
 		HostServices& storage()
 		{
 			static HostServices services;

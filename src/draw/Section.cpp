@@ -15,7 +15,7 @@
 //	  * gSDK->SetObjectVariable(h, ObjectVariable::Viewport…, …) … 断面の見え方（下記）
 //	  * VWViewportObj::SetRenderType(renderFinalHiddenLine) … レンダリング（下記）
 //	  * draw/DrawUtil の MeasureViewport / MoveViewportBy
-//	                                    … できたビューポートを測って用紙のマスへ置く
+//	                                    … 生成したビューポートを測って用紙のマスへ置く
 //	                                        （GetObjectBounds ＋ MoveObject。M18）
 //	  * draw/DrawingLabel の drawSectionLabel … 1 枚ごとに真下の中央へ図面ラベル（図面
 //	                                        タイトル）を注釈として置く
@@ -24,7 +24,7 @@
 //	VW の UI は「切断線の点を 2 つ以上クリック → **切断の向き**をクリック → 奥行きを指定」
 //	という順で、API の引数もこの順（点 2 つ＋向きの点＋奥行き）に対応する:
 //	  * pt1 / pt2 … 切断線（通りの上を端から端まで。命令の lineStart / lineEnd）
-//	  * pt3       … **見る側**を示す点（命令の viewPoint。指示線の中点から視線方向へ離した点）
+//	  * pt3       … **視線の側**を示す点（命令の viewPoint。指示線の中点から視線方向へ離した点）
 //	**実機で断面指示線が直線になり、視線の向きも意図どおりであることを確認済み**（pt3 が
 //	「切断線の 3 点目」であれば指示線は L 字に折れるはずで、そうならなかった）。視線の向きの
 //	決め方（X通り＝−X 方向・Y通り＝+Y 方向。図面の右へ座標が増える＝通り名が左から右へ並ぶ）は
@@ -36,43 +36,43 @@
 //	断面線の長さ**（指示線を十分外まで延ばして実質無制限にする）。
 //
 //	【レンダリングは〈隠線消去〉にする（オブジェクト情報パレットの項目が減る原因）】
-//	インポートした軸組図を選ぶと、**手で作った断面ビューポートには在る項目がパレットから
-//	丸ごと消えている**という実機の症状があった（〈2D コンポーネントを表示〉と〈2D の面を
+//	インポートした軸組図を選ぶと、**手動で作成した断面ビューポートにはある項目がパレットから
+//	すべて消えている**という実機の症状があった（〈2D コンポーネントを表示〉と〈2D の面を
 //	表示〉が無い・〈切断面より手前を表示〉が灰色で押せない）。原因は**ビューポートの
-//	レンダリング（バックグラウンド）**の違いで、手作りは〈隠線消去〉、`CreateSectionViewport`
-//	が作ったものは〈シェイド〉になっていた（1 枚目・2 枚目のパレットを見比べると、
-//	消えている項目は**すべて隠線消去でしか意味を持たない項目**で、それ以外の項目は同じ）。
-//	VW は**その描き方で効かない設定をパレットから隠す**（SDK にも読み取り専用の
-//	`ovViewportHiddenLineDisplay2DFillsAllowed`＝「2D の面を出せる状態か」という変数がある）
-//	ので、シェイドのままでは項目が出ない。**2D コンポーネント（1059）へ true を書いても
-//	入らなかった**のも同じ理由と考えられる（ハイブリッドシンボルの 2D 表現は隠線消去・
-//	ワイヤーフレームでしか描かれない）。
-//	そこで**作った直後・更新より前にレンダリングを `renderFinalHiddenLine`（隠線消去）へ
-//	揃える**。これで手作りの断面と同じ項目が並び、同じように設定を変えられる。
+//	レンダリング（バックグラウンド）**の違いで、手動作成のものは〈隠線消去〉、
+//	`CreateSectionViewport` が生成したものは〈シェイド〉になっていた（1 枚目・2 枚目のパレットを
+//	比較すると、消えている項目は**すべて隠線消去でしか意味を持たない項目**で、
+//	それ以外の項目は同じ）。VW は**その描画方法で反映されない設定をパレットから隠す**（SDK
+//	にも読み取り専用の `ovViewportHiddenLineDisplay2DFillsAllowed`＝「2D の面を出せる状態か」
+//	という変数がある）ので、シェイドのままでは項目が表示されない。**2D コンポーネント（1059）へ
+//	true を書いても反映されなかった**のも同じ理由と考えられる（ハイブリッドシンボルの 2D
+//	表現は隠線消去・ワイヤーフレームでしか描画されない）。
+//	そこで**生成した直後・更新より前にレンダリングを `renderFinalHiddenLine`（隠線消去）へ
+//	揃える**。これで手動作成の断面と同じ項目が並び、同じように設定を変えられる。
 //	なお〈切断面より奥の範囲〉の中の項目が灰色なのは**〈切断面より奥を表示〉が off だから**で
-//	（要件どおり。手作りでも off にすれば同じく灰色になる）、こちらは不具合ではない。
+//	（要件どおり。手動作成でも off にすれば同じく灰色になる）、こちらは不具合ではない。
 //
 //	【用紙の割り付け（M18）】軸組図は 1 枚の用紙に複数並ぶ。**上下 2 段**になる縮尺を選び
-//	（core::sectionLayout）、1 段の枚数は用紙の幅が決める。入りきらないぶんはシートレイヤを
-//	足し、タイトルを "軸組図(1)" … と連番にする（core::sectionSheetTitle）。シートレイヤ番号は
+//	（core::sectionLayout）、1 段の枚数は用紙の幅が決める。入りきらない分はシートレイヤを
+//	追加し、タイトルを "軸組図(1)" … と連番にする（core::sectionSheetTitle）。シートレイヤ番号は
 //	**伏図の続き**で、その始まりだけを命令セットが持つ（core::SectionSheetCommand）。
 //	**用紙の大きさはシートレイヤからしか読めない**のに、タイトルの連番は「何枚に分かれるか」
 //	＝用紙が分からないと決まらないので、**先に 1 枚目のシートレイヤを用意して**用紙を読み、
-//	割り付けを決めてからタイトルを付け直す（PrepareSheetLayer は同じ番号なら作り直さない）。
+//	割り付けを決めてからタイトルを付け直す（PrepareSheetLayer は同じ番号なら再生成しない）。
 //
-//	【範囲を「無限」にはできない（調べ尽くした結論）】UI で断面ビューポートを手で作ると
+//	【範囲を「無限」にはできない（調査を尽くした結論）】UI で断面ビューポートを手動で作成すると
 //	〈長さ・高さの範囲〉は既定で〈無限〉になるが、**SDK からその状態にする手段は無い**。
 //	  * 断面まわりの API は CreateSectionViewport / CreateSectionLineInstance /
 //	    IsSectionLineLinkedToViewport / UpdateSectionLineInstances の 4 つだけで、範囲を
 //	    切り替える呼び出しは無い（ci-debug で SDK 全体を検索）。
 //	  * ovSectionViewport* のオブジェクト変数にも範囲の項目は無い。
 //	  * 公開ヘッダの**欠番**（1060〜1090）に隠れている可能性を dev ビルドの一時診断で
-//	    調べたが、**手で〈無限〉にした 1 枚とプラグインが作った 65 枚とで値の違う変数は
+//	    調べたが、**手動で〈無限〉にした 1 枚とプラグインが生成した 65 枚とで値の違う変数は
 //	    1 つも無かった**（断面ビューポート 66 枚・値の組み合わせ 1 通り）。範囲はオブジェクト
 //	    変数の外に保持されている。
 //	そこで**建物の大きさから有限の範囲を決める**（高さ＝core::sectionHeightRange、長さ＝
-//	指示線を通り芯 bbox より十分外へ延ばす）。実用上は無限と同じ見え方になる。
-//	いずれも「どこを切るか」ではなく「どう描くか」なので、命令セット（core::SectionCommand）
+//	指示線を通り芯 bbox より十分外へ延ばす）。実用上は無限と同じ表示になる。
+//	いずれも「どこを切るか」ではなく「どう描画するか」なので、命令セット（core::SectionCommand）
 //	には載せずここが持つ。
 //
 
@@ -103,13 +103,13 @@ namespace HomeskzIfcImport::draw
 	{
 		// 切断面より奥の範囲に渡す値。**0 が「無限」**（ローカル確認で実測: 0 を渡した
 		// ビューポートの「断面の詳細設定」で〈切断面より奥の範囲: 無限〉になっていた）。
-		// 奥は表示しない設定（下記 1064）なので実際には効かないが、範囲の指定としては
+		// 奥は表示しない設定（下記 1064）なので実際には反映されないが、範囲の指定としては
 		// 無制限にしておく。
 		constexpr double kInfiniteDepth = 0.0;
 
 		// **高さの範囲だけは実寸を渡す**（core::sectionHeightRange。建物の上下＋余白）。
 		// 同じ 0 を高さへ渡すと〈高さの範囲: 有限・始点 0・終点 0〉になり、断面から建物が
-		// 消えてしまうことがローカル確認で分かった。**高さ・長さを「無限」にする手段は
+		// 消えてしまうことがローカル確認で判明した。**高さ・長さを「無限」にする手段は
 		// SDK に無い**（ファイル冒頭「範囲を『無限』にはできない」）ので、実寸＋余白の
 		// 有限範囲で建物全体を収める（docs/DEV-NOTES.md M14）。
 		//
@@ -117,26 +117,27 @@ namespace HomeskzIfcImport::draw
 		// bbox より十分外まで延ばす**ことで実質無制限にしている（parse/Section の
 		// kSectionLineMargin）。
 
-		// 断面ビューポートの見え方（セレクタは draw/DrawUtil の ObjectVariable）。
+		// 断面ビューポートの表示設定（セレクタは draw/DrawUtil の ObjectVariable）。
 		//   奥の図形          … 表示しない
 		//   プレイナー図形    … 表示しない
 		//   2D コンポーネント … 表示する。**CreateSectionViewport の直後は非表示**で、しかも
-		//                       **レンダリングがシェイドのままでは書いても入らない**——先に
+		//                       **レンダリングがシェイドのままでは書いても反映されない**——先に
 		//                       隠線消去へ揃えること（冒頭「レンダリングは〈隠線消去〉にする」）
-		// **どれもビューポートの更新より前に設定する**（更新時の描画へ効かせるため。
+		// **どれもビューポートの更新より前に設定する**（更新時の描画へ反映させるため。
 		// CreateSectionViewport のヘッダコメントも「表示設定は呼び出し後、更新はその後」）。
 		constexpr Boolean kShowObjectsBeyondCutPlane = false;
 		constexpr Boolean kShowPlanarObjects = false;
 		constexpr Boolean kShow2DComponents = true;
 
-		// ビューポートのレンダリング（バックグラウンド）。**手で作った断面ビューポートと
+		// ビューポートのレンダリング（バックグラウンド）。**手動で作成した断面ビューポートと
 		// 同じ〈隠線消去〉**に揃える（ファイル冒頭「レンダリングは〈隠線消去〉にする」）。
 		// TRenderMode は Kernel/API/MiniCadCallBacks.h（renderFinalHiddenLine = 6 が
 		// VW の UI の〈隠線消去〉、renderOpenGL = 11 が〈シェイド〉）。
-		// **レンダリング（輪郭）は触らない**——手作りも既定の〈なし〉で、こちらは差が無い。
+		// **レンダリング（輪郭）は変更しない**——手動作成のものも既定の〈なし〉で、
+		// こちらは差が無い。
 		constexpr TRenderMode kSectionRenderMode = renderFinalHiddenLine;
 
-		// 断面ビューポートを 1 枚作る。作れなければ nil。奥行きは無制限、高さは建物を包む
+		// 断面ビューポートを 1 枚生成する。生成できなければ nil。奥行きは無制限、高さは建物を包む
 		// 実寸（上記）。
 		MCObjectHandle CreateSectionViewport(const core::SectionCommand& command,
 											 MCObjectHandle sheetLayer, double startHeight,
@@ -149,7 +150,7 @@ namespace HomeskzIfcImport::draw
 											   endHeight, sheetLayer);
 		}
 
-		// レンダリング（バックグラウンド）を〈隠線消去〉にする。できたら true
+		// レンダリング（バックグラウンド）を〈隠線消去〉にする。設定できたら true
 		// （ファイル冒頭「レンダリングは〈隠線消去〉にする」）。
 		bool ApplySectionRenderMode(MCObjectHandle viewport)
 		{
@@ -159,18 +160,18 @@ namespace HomeskzIfcImport::draw
 			}
 			catch (...)
 			{
-				// レンダリングを変えられなくても断面そのものは図面に残る（見え方だけの
+				// レンダリングを変えられなくても断面そのものは図面に残る（表示だけの
 				// 設定）。1 枚の失敗で残りを止めず、件数だけ診断へ残す。
 				return false;
 			}
 			return true;
 		}
 
-		// 軸組図としての見え方を整える（要件。ConfigureViewport＝更新より**前**に呼ぶ）。
+		// 軸組図としての表示を整える（要件。ConfigureViewport＝更新より**前**に呼ぶ）。
 		// レンダリングを揃えられたら true。
 		//
-		// **レンダリングを先に決める**——2D コンポーネント（1059）のような「その描き方でしか
-		// 意味を持たない設定」は、レンダリングがシェイドのままだと書いても入らない
+		// **レンダリングを先に決める**——2D コンポーネント（1059）のような「その描画方法でしか
+		// 意味を持たない設定」は、レンダリングがシェイドのままだと書いても反映されない
 		// （ファイル冒頭「レンダリングは〈隠線消去〉にする」）。順番を入れ替えないこと。
 		bool ApplySectionDisplayOptions(MCObjectHandle viewport)
 		{
@@ -179,18 +180,18 @@ namespace HomeskzIfcImport::draw
 							   kShowObjectsBeyondCutPlane);
 			SetBooleanVariable(viewport, ObjectVariable::ViewportPlanarObjects, kShowPlanarObjects);
 			SetBooleanVariable(viewport, ObjectVariable::Viewport2DComponents, kShow2DComponents);
-			// 【読み戻して確かめない】以前は 2D コンポーネント（1059）を読み戻して
-			// 「入らなかった」を診断へ出していたが、**実機ではハイブリッドシンボルの 2D
-			// 表現がちゃんと出ているのに読み戻しは false を返す**（ローカル確認）。
+			// 【読み戻して確認しない】以前は 2D コンポーネント（1059）を読み戻して
+			// 「反映されなかった」を診断へ出力していたが、**実機ではハイブリッドシンボルの 2D
+			// 表現が正しく表示されているのに読み戻しは false を返す**（ローカル確認）。
 			// 読める値が実際の表示と一致しない以上、この読み戻しは誤警報しか生まないので
-			// 外した。書き込みはそのまま残す。
+			// 削除した。書き込みはそのまま残す。
 			return rendered;
 		}
 
-		// 通り芯の符号を上の寸法の上へ出した件数（診断・記録用）。
+		// 通り芯の符号を上の寸法の上へ移動した件数（診断・記録用）。
 		//   viewports … 符号を上げた軸組図の枚数
 		//   axes      … 水平線を書き直したグリッド線の本数
-		//   failed    … 書けなかったグリッド線（注釈が取れなかった軸組図は 1 と数える）
+		//   failed    … 書けなかったグリッド線（注釈を取得できなかった軸組図は 1 と数える）
 		//   shoulder  … 書いた水平線の長さ（先端）の最大（用紙 mm）
 		//   probe     … 1 枚目の実測（dev だけ。符号の上端の前後と寸法の文字の上端）
 		struct GridBubbleCounts
@@ -203,19 +204,19 @@ namespace HomeskzIfcImport::draw
 		};
 
 		// グリッド線の「水平線の長さ（先端）」。符号を動かすのはこの欄だけ（Findings
-		// 「Viewports」#189。終端は絵を動かさない）。
+		// 「Viewports」#189。終端は描画結果を動かさない）。
 		constexpr const char* kGridShoulderAtStart = "ShoulderLengthAtStart";
 
 		// 図の上に寸法の列（上階の柱・小屋束の位置）があれば、注釈のグリッド線（通り芯）の
-		// 符号をその文字より上へ出す（ご要望: 上の寸法は符号の下に収める）。
+		// 符号をその文字より上へ移動する（ご要望: 上の寸法は符号の下に収める）。
 		//
 		// 【高さ範囲では動かない】符号は「映っているモデルの上端 ＋ 水平線の長さ（先端）＋
-		// ラベル枠」に描かれ、断面の高さ範囲の上端を上げても動かない（PR #181 round 1 の
-		// 実機・SDK リファレンス #189）。動かす口は注釈の中の GridAxis の
+		// ラベル枠」に描画され、断面の高さ範囲の上端を上げても動かない（PR #181 round 1 の
+		// 実機・SDK リファレンス #189）。動かす手段は注釈の中の GridAxis の
 		// ShoulderLengthAtStart（用紙 mm）だけで、書いたら ResetObject が要る。
 		//
-		// 【いつ呼ぶか】グリッド線は UpdateViewport が注釈に置くもの（作りたてでは注釈群が
-		// nil）なので、ConfigureViewport（最後が更新）の後。以後の更新で作り直されない
+		// 【いつ呼ぶか】グリッド線は UpdateViewport が注釈に置くもの（生成直後は注釈群が
+		// nil）なので、ConfigureViewport（最後が更新）の後。以後の更新で再生成されない
 		// （書いた値が残る）。位置合わせの MoveViewportBy より前に測る（タグと同じ）。
 		//
 		// dimensionScale は寸法線の位置に使った縮尺の分母（draw/Dimension と同じ値）。
@@ -265,13 +266,13 @@ namespace HomeskzIfcImport::draw
 					++counts.failed;
 					continue;
 				}
-				// 値は書いた直後に読めるが、絵は Reset まで動かない（Findings #189）。
+				// 値は書いた直後に読めるが、描画結果は Reset まで動かない（Findings #189）。
 				gSDK->ResetObject(h);
 				++counts.axes;
 				counts.shoulder = std::max(counts.shoulder, wanted);
 				raised = true;
 #if VW_DRAW_VERIFY
-				// 検算（dev だけ）: 1 本目の符号の上端を測り直し、寸法の文字の上端と並べる。
+				// 検算（dev だけ）: 1 本目の符号の上端を再測定し、寸法の文字の上端と並べる。
 				if (counts.probe.empty())
 				{
 					WorldRect after;
@@ -304,8 +305,8 @@ namespace HomeskzIfcImport::draw
 		const ViewportSetup setup = PrepareViewportSetup();
 
 		// 断面の高さ範囲も全命令で共通（建物を包む実寸＋余白。core::sectionHeightRange）。
-		// **求まらないときは描かない**——高さの分かる要素が 1 つも無い文書では out が
-		// 触られず 0〜0 のままで、その範囲で作ると「軸組図はあるのに空」になる（高さに 0 を
+		// **求まらないときは描画しない**——高さの分かる要素が 1 つも無い文書では out が
+		// 変更されず 0〜0 のままで、その範囲で生成すると「軸組図はあるのに空」になる（高さに 0 を
 		// 渡すと〈高さの範囲: 有限・0〜0〉になる。ファイル冒頭）。parse/Section を通った
 		// 文書ならここへは来ないが、drawSections は**任意の Document を取れる公開関数**
 		// なので、暗黙の不変条件に寄りかからず理由を残して抜ける。
@@ -323,7 +324,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// M18 用紙の割り付け。軸組図は 1 枚の用紙に**上下 2 段**で並べ、収まらなければ
-		// シートレイヤを足す。1 枚ぶんの広がり（幅＝建物の平面の広がり・高さ＝断面の高さ
+		// シートレイヤを追加する。1 枚分の広がり（幅＝建物の平面の広がり・高さ＝断面の高さ
 		// 範囲）から縮尺と段組みを決める（core::sectionLayout）。
 		core::Vec2 content;
 		const bool haveContent = core::sectionContentSize(document, content);
@@ -331,7 +332,7 @@ namespace HomeskzIfcImport::draw
 		// シートレイヤ番号は**伏図の続き**、タイトルは複数枚なら "軸組図(1)" … と連番
 		// （命令セットが持つのはその始まりと基だけ。core/Document.h の SectionSheetCommand）。
 		// **番号が正でタイトルが非空であることは検証済み**（core::validateDocument が
-		// 軸組図のある文書に要求する）。ここでは素直に使う。
+		// 軸組図のある文書に要求する）。ここではそのまま使う。
 		const int startNumber = document.sectionSheet.startNumber;
 		const std::string& baseTitle = document.sectionSheet.title;
 		const auto sheetNumber = [startNumber](std::size_t page)
@@ -339,16 +340,17 @@ namespace HomeskzIfcImport::draw
 
 		// M28 図面枠。伏図と同じ設定・同じ実装（draw/TitleBlock）。**軸組図は 1 枚の用紙へ
 		// 複数の命令が載る**ので、同じシートレイヤへ 2 つ目を置かないのは draw/TitleBlock の
-		// 側が見る。割り付けに枠の大きさを使うので、割り付けより先に用意する。
+		// 側が判定する。割り付けに枠の大きさを使うので、割り付けより先に用意する。
 		TitleBlockCounts titleBlocks = prepareTitleBlocks(document);
 
 		// **用紙の大きさを読むために 1 枚目のシートレイヤを先に用意する**（用紙は
 		// シートレイヤからしか読めず、一方で「何枚に分かれるか＝タイトルの連番」は用紙が
 		// 分からないと決まらない）。タイトルはこの後の本番のループで付け直す。
 		//
-		// 注釈の帯（寸法・レベル記号・図面ラベル・通り芯の符号）は**出る辺にだけ**取る（core::sectionBands。
-		// 四辺に取っていた頃は上と右が空いて縮尺を落としていた）。上下の帯は断面の高さ範囲の
-		// 余白（core::kSectionHeightMargin）の中にまず収める（core/Layout.h の sectionLayout）。
+		// 注釈の帯（寸法・レベル記号・図面ラベル・通り芯の符号）は**表示される辺にだけ**
+		// 確保する（core::sectionBands。四辺に確保していた頃は上と右が空いて縮尺を落として
+		// いた）。上下の帯は断面の高さ範囲の余白（core::kSectionHeightMargin）の中にまず
+		// 収める（core/Layout.h の sectionLayout）。
 		//
 		// 図面枠を置くなら、その大きさを測って図と重ならないように並べる（印刷可能領域が
 		// 用紙いっぱいだと下段が表題欄と重なった。draw/TitleBlock.h の measureTitleBlockFrame）。
@@ -366,7 +368,7 @@ namespace HomeskzIfcImport::draw
 				measureTitleBlockFrame(titleBlocks, first);
 			// 用紙を囲む枠ならその内側へ上寄せで、枠線の無い表題欄の帯なら下にその高さを
 			// 空けて並べる（core::frameCoversPaper。実機のスタイルは右下の帯だけで、それを
-			// 枠として扱った PR #176 round 1 は並べる領域が潰れた）。
+			// 枠として扱った PR #176 round 1 は並べる領域が失われた）。
 			const bool enclosing = probed.has_value() && core::frameCoversPaper(*probed, printable);
 			if (enclosing)
 				area = core::insetFrameArea(printable, *probed);
@@ -376,9 +378,9 @@ namespace HomeskzIfcImport::draw
 				core::sectionLayout(content, area, bands, core::kSectionHeightMargin, enclosing);
 			pages = core::sectionSheetCount(layout, commands.size());
 			arrange = true;
-			// 割り付けの記録（診断ログだけ。伏図の「伏図の割り付け（mm）」と同じ流儀）。
+			// 割り付けの記録（診断ログだけ。伏図の「伏図の割り付け（mm）」と同じ形式）。
 			// 縮尺は「並べる領域・帯・建物の広がり」だけで決まるので、その 3 つと結果を残す
-			// ——余白が多すぎる／枠と重なるときに、どれが効いたかを実機の周で確かめられる。
+			// ——余白が多すぎる／枠と重なるときに、どれが影響したかを実機の周で確認できる。
 			const auto mm = [](double value) { return std::to_string(std::lround(value)); };
 			layoutRecord = "軸組図の割り付け（mm）: 印刷可能 " + mm(printable.width()) + "×" +
 						   mm(printable.height());
@@ -393,7 +395,7 @@ namespace HomeskzIfcImport::draw
 							std::to_string(layout.columns) + " 列 2 段";
 		}
 
-		// 描画の前後でカレントレイヤが変わらないようにする（伏図と同じ作法）。
+		// 描画の前後でカレントレイヤが変わらないようにする（伏図と同じ方法）。
 		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();
 
 		std::size_t drawn = 0;
@@ -405,7 +407,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t missingPlacement = 0;
 		// 見積もった縮尺ではマスに収まらなかった枚数（隣の図と重なる）と、その**1 枚目の
 		// 実測**（図番・測った外形・割り当てたマス・はみ出し量）。件数だけでは「見積もりが
-		// 少し足りない」と「図そのものが壊れている」を分けられない（M29。伏図と同じ流儀で、
+		// 少し足りない」と「図そのものが壊れている」を分けられない（M29。伏図と同じ形式で、
 		// 組み立ては draw/DrawUtil の DescribeFitOverflow が持つ唯一の実装）。
 		std::size_t oversized = 0;
 		std::string oversizedProbe;
@@ -418,7 +420,7 @@ namespace HomeskzIfcImport::draw
 			memberHandles != nullptr ? memberHandles->table() : emptyHandles.table();
 		TagCounts tags;
 		// タグ PIO の定義を先に用意する（伏図と同じ。draw/Tag.h）。タグが 1 つも無い文書では
-		// 定義そのものを作らない。
+		// 定義そのものを生成しない。
 		if (std::ranges::any_of(commands, [](const core::SectionCommand& section)
 								{ return !section.viewport.tags.empty(); }))
 			prepareDataTagPlugin();
@@ -429,7 +431,7 @@ namespace HomeskzIfcImport::draw
 		prepareDrawingLabelPlugin();
 
 		// M31 寸法・レベル記号。レベル基準線 PIO の定義を先に用意する（タグと同じ理由。
-		// レベル記号が 1 つも無い文書では定義そのものを作らない）。
+		// レベル記号が 1 つも無い文書では定義そのものを生成しない）。
 		DimensionCounts dimensions;
 		GridBubbleCounts gridBubbles;
 		if (std::ranges::any_of(commands, [](const core::SectionCommand& section)
@@ -443,7 +445,7 @@ namespace HomeskzIfcImport::draw
 				break;
 
 			// 何枚目の用紙のどのマスか。割り付けが決まらなかった文書（建物の広がりが
-			// 求まらない）では 1 枚目へ全部載せ、縮尺も位置も触らない。
+			// 求まらない）では 1 枚目へ全部載せ、縮尺も位置も変更しない。
 			const std::size_t page = arrange ? index / layout.perSheet() : 0;
 			const std::size_t slot = arrange ? index % layout.perSheet() : 0;
 			const MCObjectHandle sheetLayer = PrepareSheetLayer(
@@ -463,18 +465,19 @@ namespace HomeskzIfcImport::draw
 				CreateSectionViewport(command, sheetLayer, startHeight, endHeight);
 			if (viewport == nil)
 			{
-				// 断面ビューポートを作れなかった。件数を診断へ残して「命令はあるのに軸組図が
+				// 断面ビューポートを生成できなかった。件数を診断へ残して「命令はあるのに軸組図が
 				// 無い」原因を切り分けられるようにする（1 枚の失敗で残りを止めない）。
 				++missingViewports;
 				continue;
 			}
 
-			// 表示の作法（奥を出さない・プレイナー図形を出さない・2D コンポーネントは出す）は
-			// **更新より前**に設定する（ConfigureViewport の最後が更新）。
+			// 表示の設定（奥を表示しない・プレイナー図形を表示しない・2D
+			// コンポーネントは表示する）は**更新より前**に設定する（ConfigureViewport
+			// の最後が更新）。
 			if (!ApplySectionDisplayOptions(viewport))
 				++missingRenderMode;
-			// **投影は触らない**（ViewportProjection::Keep）——断面の向きで作られているので、
-			// 伏図がやる 2D/平面への作り直し（draw/DrawUtil.h の ViewportProjection）は
+			// **投影は変更しない**（ViewportProjection::Keep）——断面の向きで生成されているので、
+			// 伏図が行う 2D/平面への再設定（draw/DrawUtil.h の ViewportProjection）は
 			// ここでは意味を成さない。
 			classesApplied +=
 				ConfigureViewport(viewport, sheetLayer, setup, command.viewport,
@@ -495,10 +498,11 @@ namespace HomeskzIfcImport::draw
 			{
 				delta = core::sectionViewportCenter(layout, slot) - drawnCenter;
 				// **縦は GL を揃える**（ご要望）。測った外接は通りごとに違う（映る架構の高さ・
-				// 通り芯の符号の高さ）ので、その中心で合わせると同じ段でも GL がずれた（実機）。
-				// ビューポートの位置（1025）が注釈の Z=0 の用紙 y そのもの（SDK リファレンス
-				// Findings「Viewports」#200）なので、それを段ごとに同じ高さへ合わせる。全軸組図は
-				// 同じ高さ範囲・同じ縮尺なので、Z=0 が揃えば GL も揃う。
+				// 通り芯の符号の高さ）ので、その中心で位置を合わせると同じ段でも GL
+				// がずれた（実機）。ビューポートの位置（1025）が注釈の Z=0 の用紙 y そのもの（SDK
+				// リファレンス Findings「Viewports」#200）なので、
+				// それを段ごとに同じ高さへ合わせる。全軸組図は同じ高さ範囲・同じ縮尺なので、
+				// Z=0 が揃えば GL も揃う。
 				const WorldPt position = VWViewportObj(viewport).GetPosition();
 				delta.y = core::sectionGroundY(layout, slot, startHeight, 0.0) - position.y;
 			}
@@ -516,11 +520,11 @@ namespace HomeskzIfcImport::draw
 			drawViewportDimensions(viewport, command.viewport, command.levels,
 								   document.dimensionStandard, arrange ? layout.scale : 0.0,
 								   dimensions, &placedLevels);
-			// 上の寸法があれば通り芯の符号をその上へ出す（収まりの判定に含めるため、測り直す
+			// 上の寸法があれば通り芯の符号をその上へ移動する（収まりの判定に含めるため、測り直す
 			// 前に）。
 			RaiseGridBubbles(viewport, command.viewport, arrange ? layout.scale : 0.0, gridBubbles);
 
-			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
+			// --- 収まったかは**タグを置いた後**の外形で判定する --------------------------
 			//
 			// 用紙に載るのは「ビューポート＋その注釈（タグ・図面ラベル）」なので、タグを置く前の
 			// 外形で判定すると実際にマスを占める大きさとは別のものを測っていることになる
@@ -530,13 +534,13 @@ namespace HomeskzIfcImport::draw
 			{
 				core::Vec2 finalCenter;
 				core::Vec2 finalSize;
-				// 測り直せなければタグを置く前の実測で見る（判定を捨てるよりはよい）。
+				// 再測定できなければタグを置く前の実測で判定する（判定を省くよりはよい）。
 				const core::Vec2 footprint =
 					MeasureViewport(viewport, finalCenter, finalSize) ? finalSize : drawnSize;
 				largest =
 					core::Vec2{std::max(largest.x, footprint.x), std::max(largest.y, footprint.y)};
 				// マス（layout.cell）に収まったかを測って確かめる。はみ出していれば隣の
-				// 図と重なるので、黙って重ねずに診断へ残す（伏図と同じ考え方。M18）。
+				// 図と重なるので、通知せずに重ねることはせず診断へ残す（伏図と同じ考え方。M18）。
 				if (footprint.x > layout.cell.x + kFitTol || footprint.y > layout.cell.y + kFitTol)
 				{
 					++oversized;
@@ -548,13 +552,13 @@ namespace HomeskzIfcImport::draw
 			if (arrange && measured)
 				MoveViewportBy(viewport, delta);
 			// レベル記号の仕上げは**このビューポートの更新をすべて済ませた後**（更新が断面の
-			// 向きを写したビュー行列を戻すため。draw/Dimension.h）。
+			// 向きを反映したビュー行列を戻すため。draw/Dimension.h）。
 			finishLevelMarks(viewport, placedLevels, dimensions);
 			++drawn;
 		}
 
 		// M28 図面枠を置き、最背面へ回して用紙の中心へ寄せる（伏図と同じ順序。ビューポートを
-		// 仕上げた後でなければ縮尺欄がビューポートの縮尺を拾わない。draw/TitleBlock.h）。
+		// 仕上げた後でなければ縮尺欄がビューポートの縮尺を取得しない。draw/TitleBlock.h）。
 		finishTitleBlocks(titleBlocks);
 
 		if (previousLayer != nil)
@@ -613,8 +617,8 @@ namespace HomeskzIfcImport::draw
 			outCounts->dimensions += dimensions.chains;
 			outCounts->levelMarks += dimensions.levels;
 		}
-		// M28 図面枠。**伏図とは別に 1 行出す**——枚数が違う（伏図は命令の数、軸組図は
-		// 用紙の数）ので、伏図の行だけでは「全シートレイヤへ置けたか」を確かめられない
+		// M28 図面枠。**伏図とは別に 1 行出力する**——枚数が違う（伏図は命令の数、軸組図は
+		// 用紙の数）ので、伏図の行だけでは「全シートレイヤへ置けたか」を確認できない
 		// （draw/TitleBlock.h の titleBlockInfo）。異常は note、平常の内訳は outInfo。
 		if (!layoutRecord.empty())
 			AppendLine(outInfo, layoutRecord + " / 実測の最大 " +

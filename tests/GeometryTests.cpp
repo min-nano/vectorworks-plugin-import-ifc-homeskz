@@ -3,9 +3,9 @@
 //
 //	幾何の土台（src/core/Geometry ＋ src/parse/IfcGeometry）の単体テスト。
 //	VectorWorks SDK を一切 include せず、無 SDK のテストハーネス（TestFramework.h）で
-//	走る（CLAUDE.md「テスト方針」: core/ parse/ は無 SDK で単体テスト）。docs/DEV-NOTES.md M2
-//	「幾何の土台」の検証にあたる。M3 以降のほぼ全要素がここを共有するため、後工程へ
-//	ズレを持ち越さないよう、数式を手計算値と許容誤差で突き合わせる。
+//	実行する（CLAUDE.md「テスト方針」: core/ parse/ は無 SDK で単体テスト）。docs/DEV-NOTES.md M2
+//	「幾何の土台」の検証にあたる。数式を手計算値と許容誤差で照合する。M3 以降のほぼ全要素が
+//	ここを共有するため、後工程へ誤差を持ち越さないようにする。
 //
 //	検証項目:
 //	  * Vec2/Vec3 演算（内積・外積・正規化・ゼロ割り回避）と Mat4（生成・積・点/方向適用）。
@@ -126,7 +126,7 @@ TEST(collinear_span_projects_all_endpoints_onto_head_axis)
 	};
 	const std::vector<Seg> segs{
 		Seg{Vec2{2.0, 0.0}, Vec2{4.0, 0.0}}, // 代表（軸 +X）
-		Seg{Vec2{8.0, 0.0}, Vec2{6.0, 0.0}}, // 逆向きでも端点で見る
+		Seg{Vec2{8.0, 0.0}, Vec2{6.0, 0.0}}, // 逆向きでも端点で判定する
 		Seg{Vec2{-1.0, 0.0}, Vec2{1.0, 0.0}},
 	};
 	Vec2 start;
@@ -257,7 +257,7 @@ TEST(axis2placement3d_rotated_axes)
 
 TEST(axis2placement3d_gram_schmidt_orthonormalizes)
 {
-	// RefDirection が Axis に直交していない場合、成分を落として正規直交化する。
+	// RefDirection が Axis に直交していない場合、成分を除いて正規直交化する。
 	// Axis=(0,0,1)、RefDirection=(1,0,1) → X=正規化((1,0,1)−(0,0,1))=(1,0,0)。
 	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
 										"#11=IFCDIRECTION((0.,0.,1.));\n"
@@ -339,7 +339,7 @@ TEST(object_placement_ignores_parent_placement)
 						"#370=IFCCOLUMN('gid',$,'柱',$,$,#369,$,$,$);\n");
 	const Mat4 m = parse::resolveObjectPlacement(model, model.entity(370));
 	const Vec3 o = m.transformPoint(Vec3{0.0, 0.0, 0.0});
-	// 親の +600 を足さない → Z は要素自身の −174（+426 ではない）。
+	// 親の +600 を加えない → Z は要素自身の −174（+426 ではない）。
 	CHECK(near(o.x, 37765.0));
 	CHECK(near(o.y, -25480.0));
 	CHECK(near(o.z, -174.0));
@@ -418,7 +418,7 @@ TEST(rectangle_profile_rejects_nonpositive_dims)
 
 TEST(arbitrary_profile_reads_outline)
 {
-	// 三角形の外形（IfcPolyline）。始点＝終点の重複を落として 3 頂点にする。
+	// 三角形の外形（IfcPolyline）。始点＝終点の重複を除いて 3 頂点にする。
 	Model const model = loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.));\n"
 										"#11=IFCCARTESIANPOINT((100.,0.));\n"
 										"#12=IFCCARTESIANPOINT((0.,50.));\n"
@@ -437,8 +437,8 @@ TEST(arbitrary_profile_with_voids_reads_outer_curve)
 {
 	// IfcArbitraryProfileDefWithVoids（階段の吹抜け等の開口を持つ床版の断面）は
 	// IfcArbitraryClosedProfileDef の派生で属性の並びが同じなので、外形（属性 2）を
-	// 同じ経路で読む。開口（InnerCurves）は無視する——開口ごと落として床を丸ごと
-	// 失うより、開口を塞いだ床を入れる方がましだという判断。
+	// 同じ経路で読む。開口（InnerCurves）は無視する——開口ごと除外して床全体を
+	// 失うより、開口を塞いだ床を入れる方が望ましいという判断。
 	Model const model =
 		loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.));\n"
 						"#11=IFCCARTESIANPOINT((100.,0.));\n"
@@ -482,7 +482,7 @@ TEST(arbitrary_profile_rejects_non_polyline_or_short)
 
 TEST(extrude_vertical_with_world_placement)
 {
-	// 105x105 の柱断面を Z へ 2844 押し出し、要素配置で (300,400,0) へ据える。
+	// 105x105 の柱断面を Z へ 2844 押し出し、要素配置で (300,400,0) へ配置する。
 	// 底面は z=0（配置 Z）、天面は z=2844、押し出しベクトルは (0,0,2844)。
 	Model const model = loadIfcFromText("#40=IFCCARTESIANPOINT((0.,0.));\n"
 										"#41=IFCAXIS2PLACEMENT2D(#40,$);\n"
@@ -572,7 +572,7 @@ TEST(extrude_rejects_non_solid)
 
 TEST(boolean_result_walks_to_base_solid)
 {
-	// DIFFERENCE の第 1 オペランドが素の押し出しソリッド → それを返す。
+	// DIFFERENCE の第 1 オペランドが加工されていない押し出しソリッド → それを返す。
 	Model const model = loadIfcFromText("#40=IFCCARTESIANPOINT((0.,0.));\n"
 										"#41=IFCAXIS2PLACEMENT2D(#40,$);\n"
 										"#42=IFCRECTANGLEPROFILEDEF(.AREA.,$,#41,100.,100.);\n"
@@ -590,7 +590,7 @@ TEST(boolean_result_walks_to_base_solid)
 
 TEST(boolean_result_walks_nested_first_operands)
 {
-	// 入れ子の boolean → 第 1 オペランドを再帰的に辿って最奥の素ソリッドへ。
+	// 入れ子の boolean → 第 1 オペランドを再帰的に辿って最奥の非 boolean ソリッドへ。
 	Model const model = loadIfcFromText("#40=IFCCARTESIANPOINT((0.,0.));\n"
 										"#41=IFCAXIS2PLACEMENT2D(#40,$);\n"
 										"#42=IFCRECTANGLEPROFILEDEF(.AREA.,$,#41,100.,100.);\n"
@@ -620,7 +620,7 @@ TEST(boolean_result_walks_nested_first_operands)
 TEST(resolves_geometry_on_real_fixture)
 {
 	// ホームズ君の実モデルに含まれる押し出しソリッドを、要素配置抜き（単位行列）で
-	// 解決できること・矩形断面が拾えることを確認する。数値の厳密一致ではなく、
+	// 解決できること・矩形断面が取得できることを確認する。数値の厳密一致ではなく、
 	// パイプライン（プロファイル→押し出し）が実データで通ることの担保。
 	bool ok = false;
 	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
@@ -649,7 +649,7 @@ TEST(resolves_geometry_on_real_fixture)
 	CHECK(resolved > 100);
 	CHECK(rectangles > 100);
 
-	// 第 1 オペランド辿りも実 boolean で素ソリッドへ到達する。
+	// 第 1 オペランド辿りも実 boolean で非 boolean ソリッドへ到達する。
 	for (const int id : model.byType("IFCBOOLEANRESULT"))
 	{
 		const parse::Entity* base = parse::resolveBaseSolid(model, model.entity(id));
@@ -727,7 +727,7 @@ TEST(first_extruded_solid_finds_body_solid)
 
 TEST(first_extruded_solid_walks_boolean_first_operand)
 {
-	// 端部を削られた形状（差演算）は第 1 オペランド＝素の押し出しを採る。
+	// 端部を削られた形状（差演算）は第 1 オペランド＝加工されていない押し出しを採る。
 	Model const model = loadIfcFromText("#30=IFCCARTESIANPOINT((0.,0.));\n"
 										"#31=IFCAXIS2PLACEMENT2D(#30,$);\n"
 										"#32=IFCRECTANGLEPROFILEDEF(.AREA.,$,#31,1000.,2000.);\n"
@@ -823,7 +823,7 @@ TEST(z_top_and_thickness_of_vertical_extrusion)
 
 TEST(z_top_and_thickness_of_empty_solid_is_zero)
 {
-	// プロファイルを持たない（手で組んだ縮退した）ソリッドでも落ちず 0 を返す。
+	// プロファイルを持たない（手で組んだ縮退した）ソリッドでも異常終了せず 0 を返す。
 	WorldSolid empty;
 	double top = 1.0;
 	double thickness = 1.0;
@@ -881,7 +881,7 @@ TEST(footprint_of_horizontal_extrusion_is_swept_rectangle)
 
 TEST(footprint_of_empty_profile_is_empty)
 {
-	// プロファイルを持たない（手で組んだ縮退した）水平押し出しは空を返す（落ちない）。
+	// プロファイルを持たない（手で組んだ縮退した）水平押し出しは空を返す（異常終了しない）。
 	WorldSolid empty;
 	empty.extrudeDir = Vec3{1.0, 0.0, 0.0};
 	empty.depth = 1000.0;
@@ -915,7 +915,7 @@ TEST(roof_slope_directions_and_height)
 	CHECK(near(slope.run, 3.0 / s));
 	CHECK(near(slope.rise / slope.run, 1.0 / 3.0));
 
-	// 平面上の天端 Z。ストーリ相対で、elevationOffset を足すと絶対値になる。
+	// 平面上の天端 Z。ストーリ相対で、elevationOffset を加えると絶対値になる。
 	CHECK(near(slope.zAt(0.0, 0.0), 1000.0));
 	CHECK(near(slope.zAt(4000.0, 3000.0), 2000.0));
 	CHECK(near(slope.zAt(1234.0, 1500.0), 1500.0));
@@ -937,7 +937,7 @@ TEST(roof_slope_rejects_degenerate_planes)
 	CHECK(!parse::roofSlope(flat, slope));
 
 	// 鉛直な面（法線の鉛直成分が極小）: 平面式の分母が 0 になり天端 Z が定まらない。
-	// 垂木・野地板の双方がこれを弾く（parse/Rafter.cpp の共有メモ参照）。
+	// 垂木・野地板の双方がこれを除外する（parse/Rafter.cpp の共有メモ参照）。
 	parse::RoofPlane vertical = shedPlane();
 	vertical.normal = Vec3{0.0, 1.0, 0.0};
 	CHECK(!parse::roofSlope(vertical, slope));
@@ -947,7 +947,7 @@ TEST(roof_slope_plan_and_projection_range)
 {
 	const parse::RoofPlane plane = shedPlane();
 
-	// plan は頂点の Z を落とした平面投影。
+	// plan は頂点の Z を除いた平面投影。
 	const std::vector<Vec2> plan = parse::RoofSlope::plan(plane);
 	CHECK_EQ(plan.size(), plane.vertices.size());
 	CHECK(near(plan[2].x, 4000.0));
@@ -966,7 +966,7 @@ TEST(roof_slope_plan_and_projection_range)
 	parse::RoofSlope::projectionRange(plan, slope.down, lo, hi);
 	CHECK(near(hi - lo, 3000.0));
 
-	// 空の点列は [0, 0]（呼び出し側が落ちないための防御。退化面はここへ来る前に弾かれる）。
+	// 空の点列は [0, 0]（呼び出し側が異常終了しないための防御。退化面はここへ来る前に除外される）。
 	parse::RoofSlope::projectionRange({}, slope.along, lo, hi);
 	CHECK(near(lo, 0.0));
 	CHECK(near(hi, 0.0));
@@ -988,7 +988,7 @@ TEST(clip_polygon_keeps_a_polygon_already_inside)
 TEST(clip_polygon_cuts_the_corners_that_stick_out)
 {
 	// 矩形 [0,10]×[0,10] を斜めにまたぐ帯。4 つの角がそれぞれ別の辺の外へ出るので、
-	// どの角も 2 頂点に切り分けられて八角形になる（＝筋かいの端が斜めに落ちた形）。
+	// どの角も 2 頂点に切り分けられて八角形になる（＝筋かいの端が斜めに切られた形）。
 	const std::vector<core::Vec2> band = {{-2.0, 2.0}, {8.0, 12.0}, {12.0, 8.0}, {2.0, -2.0}};
 	const std::vector<core::Vec2> clipped =
 		core::clipPolygonToConvex(band, {{0.0, 0.0}, {10.0, 0.0}, {10.0, 10.0}, {0.0, 10.0}});

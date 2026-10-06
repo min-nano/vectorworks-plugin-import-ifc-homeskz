@@ -6,47 +6,47 @@
 //	ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 //	【図面枠（M28）】取り込み設定で図面枠スタイルが選ばれていれば、各シートレイヤへ図面枠を
-//	1 つ置く。**置くのはビューポートの縮尺を確定させた後**で、置いたら最背面へ回す——先に
-//	置くと縮尺欄が 1:1 のまま残り、後に置いたままだと図を覆う。置き方・スタイルの当て方・
-//	重ね順・位置合わせは draw/TitleBlock が持ち、ここは用意した各シートレイヤを控えて、
+//	1 つ置く。**置くのはビューポートの縮尺を確定させた後**で、置いたら最背面へ移動する——先に
+//	置くと縮尺欄が 1:1 のまま残り、後に置いたままだと図を覆う。置き方・スタイルの適用方法・
+//	重ね順・位置合わせは draw/TitleBlock が持ち、ここは用意した各シートレイヤを記録して、
 //	最後に仕上げを呼ぶだけ。
 //
 //	【シートレイヤに載るのはビューポートだけではない】伏図には**グラフィック凡例**
 //	（VW 標準の "GraphicLegend" PIO）も 1 つ載る（M13）。凡例はビューポート注釈では
 //	なくシートレイヤ（＝用紙）へ直接置くので、置き方は draw/Legend が持つ。ここは
 //	ビューポートを仕上げた後にそれを呼ぶ。凡例は**スタイル無しで置く**ので、置いた後に
-//	スタイルを反映させる手当ては要らない。**イメージの縮率は触らない**（PIO 既定の 1:50 の
+//	スタイルを反映させる処理は要らない。**イメージの縮率は変更しない**（PIO 既定の 1:50 の
 //	まま。理由は draw/Legend.h「イメージの縮率」）。
 //
 //	【シートレイヤとビューポートの手当ては draw/DrawUtil が持つ】シートレイヤの用意
 //	（PrepareSheetLayer）・表示レイヤの絞り込み・クラス表示・縮尺・図面タイトル/図番・更新
 //	（ConfigureViewport）は、軸組図（draw/Section。M14）と**逐語的に同じ**手順なので
 //	draw/DrawUtil へ寄せてある（かつてはこのファイルの無名名前空間にあった）。ここに残るのは
-//	「伏図 1 枚ごとに平面ビューポートを 1 つ作る」というこの要素固有の流れだけ。
+//	「伏図 1 枚ごとに平面ビューポートを 1 つ生成する」というこの要素固有の流れだけ。
 //
 //	使用する SDK API のうちこのファイル固有のもの:
 //	  * gSDK->CreateViewport(sheetLayer)  … 平面ビューポート生成
 //	  * gSDK->GetCurrentLayer / SetCurrentLayer … カレントレイヤの退避と復帰
 //
-//	【投影は 2D/平面へ作り直させる】`CreateViewport` が作ったビューポートは、パレット上は「2D/
+//	【投影は 2D/平面へ作り直させる】`CreateViewport` が生成したビューポートは、パレット上は「2D/
 //	平面」なのに**描画は 3D の「上」ビューのまま**という食い違いを起こす（更新ボタンを押しても
-//	直らない）。伏図なので `ViewportProjection::Plan` を渡して作り直させる——手順と理由は
+//	直らない）。伏図なので `ViewportProjection::Plan` を渡して再設定させる——手順と理由は
 //	draw/DrawUtil.h の ViewportProjection。**軸組図（draw/Section）は Keep** で、
-//	こちらだけの手当て。
+//	こちらだけの処理。
 //
 //	【用紙の割り付け（M18）】縮尺も用紙上の位置も、**文書全体の平面の広がりと用紙の大きさ**
 //	から 1 回だけ決める（core::planLayout）。伏図は全図が同じ縮尺・同じ位置でなければならない
 //	——用紙をめくったときに建物が動くと、図面として読めない。位置は「ビューポートの外形の
 //	中心を用紙の中心へ」ではなく、**建物の中心が常に用紙の同じ点へ来る**ように合わせる
-//	（伏図ごとに映すレイヤが違えば図の中身の広がりも違うので、外形で揃えるとページごとに
+//	（伏図ごとに表示するレイヤが違えば図の中身の広がりも違うので、外形で揃えるとページごとに
 //	ずれる）。凡例はビューポートのために空けた右の 1 列へ寄せるので、図とは重ならない。
 //
 //	【重ね順はここでは扱わない】床・野地板が柱・梁を覆わないようにする件は、**ドキュメントの
 //	デザインレイヤの並べ替え**（draw/Story の reorderStoryLayers）が担う。per-viewport の
-//	上書き（SetViewportLayerStackingOverride）は実機で効かなかった——呼び出しは true を
+//	上書き（SetViewportLayerStackingOverride）は実機で反映されなかった——呼び出しは true を
 //	返すのに GetNumViewportLayerStackingOverrides は 0 のままで、OIP も「順序を上書き:
-//	いいえ」だった——ので捨てた。**並べ替えはビューポート生成より前**に済ませる必要がある
-//	（生成時の重ね順で描かれるため。draw/ExecuteDocument の実行順）。
+//	いいえ」だった——ので採用しなかった。**並べ替えはビューポート生成より前**に済ませる必要がある
+//	（生成時の重ね順で描画されるため。draw/ExecuteDocument の実行順）。
 //
 
 #include "PluginPrefix.h"
@@ -72,36 +72,36 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 1 巡目で作った伏図 1 枚（2 巡目で縮尺・タグ・位置を仕上げる。drawSheets）。
-		// 命令はポインタで持つ——commands は drawSheets の間ずっと生きている（呼び出し元の
+		// 1 巡目で生成した伏図 1 枚（2 巡目で縮尺・タグ・位置を仕上げる。drawSheets）。
+		// 命令はポインタで持つ——commands は drawSheets の間ずっと生存している（呼び出し元の
 		// Document が所有する）ので、コピーせずに指しておけばよい。
 		struct PlacedSheet
 		{
 			const core::SheetCommand* command = nullptr;
 			MCObjectHandle viewport = nil;
-			MCObjectHandle sheetLayer = nil; // 寸法を作る間アクティブにする（2 巡目）
+			MCObjectHandle sheetLayer = nil; // 寸法を生成する間アクティブにする（2 巡目）
 		};
 
-		// 伏図に映るデザインレイヤ（命令の表示レイヤ）の縮尺を、すべて伏図の縮尺へ揃える。
+		// 伏図に表示されるデザインレイヤ（命令の表示レイヤ）の縮尺を、すべて伏図の縮尺へ揃える。
 		// 揃えたレイヤ数を返す。
 		//
 		// 【なぜ要るか】用紙基準（縮尺無視）のシンボル——耐力壁の伏図記号・柱記号・通り芯の
 		// 丸——の大きさは「定義の図形（用紙 mm）× **置いたレイヤの縮尺**」で決まる（実機で
 		// 確認: 図形 300mm・用紙基準のシンボルを縮尺 1/100 のレイヤへ置くと外接 30000mm）。
-		// 伏図はビューポート越しに見るので、**レイヤの縮尺を伏図の縮尺に揃えて初めて**紙の
-		// 上の大きさが一定になる。プラグインはレイヤを作るときに縮尺を書かないので、放って
+		// 伏図はビューポート越しに表示されるので、**レイヤの縮尺を伏図の縮尺に揃えて初めて**紙の
+		// 上の大きさが一定になる。プラグインはレイヤを作るときに縮尺を書かないので、何もしないで
 		// おくと図面の既定（1/100 等）のまま残る。
 		//
 		// 【耐力壁レイヤだけにしない】かつては耐力壁レイヤ（"n-耐力壁"）だけを揃えていたが、
 		// そうすると伏図が 1/50 に決まった図面で**耐力壁だけ 1/50・他は 1/100** と
 		// レイヤの縮尺が食い違い、同じ用紙基準の記号でも柱記号・通り芯の丸だけ紙の上で
-		// 倍の大きさに出た（スキップフロアのフィクスチャで指摘）。伏図が映すレイヤは
-		// すべて同じ縮尺で見るのだから、揃える範囲も伏図が映すレイヤ全部にする。
+		// 倍の大きさで表示された（スキップフロアのフィクスチャで指摘）。伏図が表示するレイヤは
+		// すべて同じ縮尺で表示されるのだから、揃える範囲も伏図が表示するレイヤ全部にする。
 		//
 		// **伏図の縮尺は用紙を読まないと決まらない**（core::planLayout）ので、レイヤを作る
 		// ときには分からない。割り付けが確定したあと、ビューポートを仕上げる前に呼ぶ。
-		// 耐力壁 PIO はレイヤ縮尺の変化で描き直す印（kObjXPropHasLayerScaleDeps）を
-		// 立ててあるので、呼べば記号が付いて回る。
+		// 耐力壁 PIO はレイヤ縮尺の変化で再描画する印（kObjXPropHasLayerScaleDeps）を
+		// 設定してあるので、呼べば記号も追従する。
 		std::size_t applyPlanLayerScale(const core::Document& document, double scale)
 		{
 			if (!(scale > 0.0))
@@ -109,8 +109,8 @@ namespace HomeskzIfcImport::draw
 
 			// 伏図の表示レイヤを**重複なく・決まった順で**集める（同じレイヤへ何度も縮尺を
 			// 書かない。順序に依らない結果にする＝CLAUDE.md「決定性を守る」）。耐力壁の
-			// レイヤも足しておく——どの伏図にも映らない耐力壁があっても記号の大きさは
-			// これまでどおり伏図の縮尺で出す。
+			// レイヤも追加しておく——どの伏図にも表示されない耐力壁があっても記号の大きさは
+			// これまでどおり伏図の縮尺で決める。
 			std::vector<std::string> layers;
 			for (const core::SheetCommand& sheet : document.sheets)
 				layers.insert(layers.end(), sheet.viewport.layers.begin(),
@@ -124,7 +124,8 @@ namespace HomeskzIfcImport::draw
 			std::size_t applied = 0;
 			for (const std::string& name : layers)
 			{
-				// 無いレイヤは黙って飛ばす（その階の生成がスキップされただけ。描画と同じ規約）。
+				// 無いレイヤは通知せずにスキップする（その階の生成がスキップされただけ。
+				// 描画と同じ規約）。
 				const MCObjectHandle layer = gSDK->GetNamedLayer(TXString(name.c_str()));
 				if (layer == nil)
 					continue;
@@ -132,8 +133,8 @@ namespace HomeskzIfcImport::draw
 				++applied;
 			}
 
-			// 揃えた枚数は呼び出し側（drawSheets）が割り付けの行と並べて outInfo へ出す
-			// ——診断ログへは要素から直に書かない（CLAUDE.md「重複を作らない置き場所」の
+			// 揃えた枚数は呼び出し側（drawSheets）が割り付けの行と並べて outInfo へ出力する
+			// ——診断ログへは要素から直接書かない（CLAUDE.md「重複を作らない置き場所」の
 			// 診断ログへの書き出し口）。
 			return applied;
 		}
@@ -153,7 +154,7 @@ namespace HomeskzIfcImport::draw
 		// M18 用紙の割り付け。**縮尺も位置も全伏図で同じ**にするため、文書全体の平面の
 		// 広がり（＝どの伏図にも共通の「建物の大きさ」）から 1 回だけ決める。用紙の大きさは
 		// 最初に用意できたシートレイヤから読む（どのシートも同じ用紙という前提。M18）ので、
-		// 割り付けの計算はループの中で 1 度だけ走る。
+		// 割り付けの計算はループの中で 1 度だけ実行される。
 		core::Vec2 contentMin;
 		core::Vec2 contentMax;
 		const bool haveContent = core::planContentBounds(document, {}, contentMin, contentMax);
@@ -162,25 +163,25 @@ namespace HomeskzIfcImport::draw
 		// めくっても図が動かない）。
 		const core::Vec2 anchor{(contentMin.x + contentMax.x) / 2.0,
 								(contentMin.y + contentMax.y) / 2.0};
-		// M31 寸法の帯（用紙 mm）。寸法は図の外へ張り出すので、縮尺はそのぶんを用紙から
+		// M31 寸法の帯（用紙 mm）。寸法は図の外へ張り出すので、縮尺はその分を用紙から
 		// 引いてから選ぶ（core/Layout.h の planLayout）。寸法を入れない文書では 0。
 		const double band = core::dimensionBand(core::outermostDimensionTier(commands));
 		// M31 寸法の集計。
 		DimensionCounts dimensions;
-		// 描画の前後でカレントレイヤが変わると以降のフェーズ（軸組図＝M14）に響くので、
-		// 元のレイヤへ戻せるよう控えておく。
+		// 描画の前後でカレントレイヤが変わると以降のフェーズ（軸組図＝M14）に影響するので、
+		// 元のレイヤへ戻せるよう記録しておく。
 		MCObjectHandle const previousLayer = gSDK->GetCurrentLayer();
 
 		std::size_t drawn = 0;
 		std::size_t missingSheetLayers = 0;
 		std::size_t missingViewports = 0;
-		// クラス表示は「設定できた数」を数える（0 なら図形が 1 つも映らない）。
+		// クラス表示は「設定できた数」を数える（0 なら図形が 1 つも表示されない）。
 		std::size_t classesApplied = 0;
-		// 2D/平面へ作り直せなかった枚数（＝3D の「上」に見えるビューポートの数）。
+		// 2D/平面へ再設定できなかった枚数（＝3D の「上」に見えるビューポートの数）。
 		std::size_t missingPlanView = 0;
 		// 用紙の上で位置を合わせられなかった枚数（外形を測れなかった＝置いた場所のまま）。
 		std::size_t missingPlacement = 0;
-		// 確定した縮尺を当て直せなかった枚数（仮の縮尺のまま残る）。
+		// 確定した縮尺を再設定できなかった枚数（仮の縮尺のまま残る）。
 		std::size_t missingScale = 0;
 		// 見積もった縮尺では用紙に収まらなかった枚数（測った外形が図の領域より大きい）と、
 		// その**1 枚目の実測**（図番・測った外形・割り当てた枠・はみ出し量）。件数だけでは
@@ -191,8 +192,8 @@ namespace HomeskzIfcImport::draw
 		// 凡例と重なった枚数（図が広くて右上の空きへ避けきれなかった）と 1 枚目の実測。
 		std::size_t legendOverlap = 0;
 		std::string legendProbe;
-		// 測る前に描き直せなかった枚数。**「はみ出した」とは別に数える**——描き直せて
-		// いないビューポートの外形は「前に何が在ったか」でしかなく、収まったかの判定に
+		// 測る前に再描画できなかった枚数。**「はみ出した」とは別に数える**——再描画できて
+		// いないビューポートの外形は「前に何があったか」でしかなく、収まったかの判定に
 		// 使える値ではない（draw/DrawUtil の RefreshViewport）。
 		std::size_t staleViewports = 0;
 		// 断面寸法データタグ（M13）。関連付け先は drawMembers が記録した対応表から引く
@@ -201,14 +202,15 @@ namespace HomeskzIfcImport::draw
 		const ObjectHandleTable& members =
 			memberHandles != nullptr ? memberHandles->table() : emptyHandles.table();
 		TagCounts tags;
-		// タグ PIO の定義を先に用意する（最初の 1 個で設定ダイアログが出るのを防ぐ。draw/Tag.h）。
-		// タグが 1 つも無い文書では定義そのものを作らない（使わない PIO を文書へ足さない）。
+		// タグ PIO の定義を先に用意する（最初の 1 個で設定ダイアログが表示されるのを防ぐ。
+		// draw/Tag.h）。タグが 1 つも無い文書では定義そのものを生成しない（使わない PIO
+		// を文書へ追加しない）。
 		if (std::ranges::any_of(commands, [](const core::SheetCommand& sheet)
 								{ return !sheet.viewport.tags.empty(); }))
 			prepareDataTagPlugin();
 
 		// M13 グラフィック凡例。タグと同じ理由で PIO の定義を先に用意する（凡例を載せる
-		// 伏図が 1 枚も無ければ定義そのものを作らない。draw/Legend.h）。
+		// 伏図が 1 枚も無ければ定義そのものを生成しない。draw/Legend.h）。
 		LegendCounts legends;
 		if (std::ranges::any_of(commands, [](const core::SheetCommand& sheet)
 								{ return sheet.legend.has_value(); }))
@@ -218,19 +220,19 @@ namespace HomeskzIfcImport::draw
 		// 以降の addTitleBlockSheet / finishTitleBlocks は何もしない（draw/TitleBlock.h）。
 		TitleBlockCounts titleBlocks = prepareTitleBlocks(document);
 
-		// --- 1 巡目: シートレイヤ・ビューポート・凡例を作る -------------------------
+		// --- 1 巡目: シートレイヤ・ビューポート・凡例を生成する -------------------------
 		//
 		// **縮尺はまだ確定できない。** 用紙をどれだけ凡例のために空けるかは
 		// 「実際に置いた凡例の幅」で決まり（core/Layout.h「凡例の幅は定数で持たない」）、
-		// その凡例に何が並ぶかは**ビューポートに映るもの**が決めるので、鶏と卵になる。
-		// そこで 1 巡目は**凡例のぶんを空けない仮の割り付け**で図を作り、凡例を置いてから
+		// その凡例に何が並ぶかは**ビューポートに表示されるもの**が決めるので、相互に依存する。
+		// そこで 1 巡目は**凡例の分を空けない仮の割り付け**で図を生成し、凡例を置いてから
 		// 幅を測って割り付けを確定し、2 巡目で縮尺と位置を仕上げる。
 		std::vector<PlacedSheet> placed;
 		placed.reserve(commands.size());
-		// **仮の割り付けは素の値で持つ**（optional にしない）。用紙が読めるまでは既定値の
+		// **仮の割り付けはそのままの値で持つ**（optional にしない）。用紙が読めるまでは既定値の
 		// ままで、最初のシートレイヤで埋める——2 つの optional を連動させると
 		// 「片方が入っていればもう片方も入っている」ことをコンパイラにも clang-tidy にも
-		// 説明できず、bugprone-unchecked-optional-access に引っかかる。
+		// 説明できず、bugprone-unchecked-optional-access に該当する。
 		std::optional<SheetPaper> paper;
 		core::PlanLayout provisional;
 
@@ -246,12 +248,12 @@ namespace HomeskzIfcImport::draw
 				continue;
 			}
 
-			// M28 図面枠を置く用紙として控える（置くのはビューポートを仕上げた後の
+			// M28 図面枠を置く用紙として記録する（置くのはビューポートを仕上げた後の
 			// finishTitleBlocks。draw/TitleBlock.h）。
 			addTitleBlockSheet(sheetLayer, titleBlocks);
 
 			// 用紙の大きさは**最初に用意できたシートレイヤ**から読む（どのシートも同じ用紙
-			// という前提。M18）。仮の割り付けもここで 1 回だけ作る。
+			// という前提。M18）。仮の割り付けもここで 1 回だけ生成する。
 			if (!paper.has_value())
 			{
 				paper = SheetPaperArea(sheetLayer);
@@ -263,7 +265,7 @@ namespace HomeskzIfcImport::draw
 			if (viewport == nil)
 			{
 				// シートレイヤは残る（＝図面に空のシートができる）。件数を診断へ残して
-				// 「シートはあるのに図が無い」原因が描画側だと分かるようにする。
+				// 「シートはあるのに図が無い」原因が描画側だと判別できるようにする。
 				++missingViewports;
 				continue;
 			}
@@ -276,11 +278,11 @@ namespace HomeskzIfcImport::draw
 				++missingPlanView;
 
 			// グラフィック凡例は**ビューポートではなくシートレイヤ**に載せる（用紙の上）。
-			// 置き場所は仮——中身が流し込まれて大きさが定まってから右上へ揃える
+			// 置き場所は仮——中身が設定されて大きさが定まってから右上へ揃える
 			// （draw/Legend の placeLegends）。凡例に並ぶのは**このシートのビューポートに
-			// 映っているシンボルだけ**にしたいので、いま作ったビューポートを渡す
+			// 表示されているシンボルだけ**にしたいので、直前に生成したビューポートを渡す
 			// （draw/Legend.h「そのシートのビューポートでフィルタする」）——**凡例を
-			// ビューポートより後に作る**のはそのためでもある。
+			// ビューポートより後に生成する**のはそのためでもある。
 			if (command.legend.has_value())
 				drawSheetLegend(sheetLayer, provisional.legendTopRight, viewport, legends);
 
@@ -289,8 +291,8 @@ namespace HomeskzIfcImport::draw
 
 		// --- 凡例を実測して割り付けを確定する ---------------------------------------
 		//
-		// **中身を流し込むまで凡例の大きさは決まらない**（draw/Legend.h）。流し込んでから
-		// いちばん広い凡例の幅を測り、そのぶんだけ右を空けた割り付けを作る。
+		// **中身を設定するまで凡例の大きさは決まらない**（draw/Legend.h）。設定してから
+		// いちばん広い凡例の幅を測り、その分だけ右を空けた割り付けを生成する。
 		//
 		refreshLegends(legends);
 		const double legendWidth = measureLegendWidth(legends);
@@ -303,21 +305,21 @@ namespace HomeskzIfcImport::draw
 		//
 		// 耐力壁の伏図記号・柱記号・通り芯の丸は**用紙基準（縮尺無視）のシンボル**で、
 		// その大きさは「定義の図形（用紙 mm）× そのレイヤの縮尺」で決まる。伏図は
-		// ビューポート越しに見るので、**伏図に映るレイヤの縮尺を伏図の縮尺へ揃えて初めて**
-		// 紙の上で一定になる（applyPlanLayerScale）。
+		// ビューポート越しに表示されるので、**伏図に表示されるレイヤの縮尺を伏図の縮尺へ
+		// 揃えて初めて**紙の上で一定になる（applyPlanLayerScale）。
 		//
 		// **ここでしかできない。** 伏図の縮尺は用紙を読まないと決まらない（core::planLayout）
-		// ので、耐力壁を描く時点では分からない。ビューポートを仕上げる 2 巡目より**前**に
-		// 済ませて、更新が新しい縮尺を見るようにする。
-		// **揃えたかを控える**（2 巡目で描き直すかの判断に要る）——レイヤの縮尺を
-		// 動かすと伏図に映る記号の大きさが変わるので、縮尺が同じでビューポートを描き直さ
-		// ないままだと、**中身が変わった後の図を描き直す前に測る**ことになる（M29）。
+		// ので、耐力壁を描画する時点では分からない。ビューポートを仕上げる 2 巡目より**前**に
+		// 済ませて、更新が新しい縮尺を参照するようにする。
+		// **揃えたかを記録する**（2 巡目で再描画するかの判断に要る）——レイヤの縮尺を
+		// 変えると伏図に表示される記号の大きさが変わるので、縮尺が同じでビューポートを再描画し
+		// ないままだと、**中身が変わった後の図を再描画する前に測る**ことになる（M29）。
 		const std::size_t rescaledLayers = applyPlanLayerScale(document, layout.scale);
 		const bool layersRescaled = rescaledLayers > 0;
 
-		// --- 2 巡目: 確定した縮尺を当て、タグを置き、用紙の上へ動かす ----------------
+		// --- 2 巡目: 確定した縮尺を設定し、タグを置き、用紙の上へ動かす ----------------
 		//
-		// **縮尺が変わったときだけ**当て直す（更新は重い。draw/DrawUtil の
+		// **縮尺が変わったときだけ**再設定する（更新は重い。draw/DrawUtil の
 		// ApplyViewportScale）。凡例が細くて仮の割り付けと同じ縮尺に落ち着くなら、
 		// 1 巡目の図をそのまま使える。
 		const bool rescale = haveContent && paper.has_value() && layout.scale != provisional.scale;
@@ -326,30 +328,30 @@ namespace HomeskzIfcImport::draw
 			const core::SheetCommand& command = *sheet.command;
 			if (rescale)
 			{
-				// 縮尺を当て直す＝描き直しも兼ねる（ApplyViewportScale が Update する）。
+				// 縮尺の再設定＝再描画も兼ねる（ApplyViewportScale が Update する）。
 				if (!ApplyViewportScale(sheet.viewport, layout.scale))
 					++missingScale;
 			}
-			// ★**測る前に描き直す。** 縮尺を当て直したなら ApplyViewportScale が済ませて
-			// いるが、縮尺が同じでも**伏図のレイヤの縮尺を動かしていれば図の中身は変わって
-			// いる**（用紙基準の伏図記号の大きさがレイヤ縮尺で決まるため）。ここを飛ばすと
-			// `GetObjectBounds` は**変える前に描いた外形**を返すので、同じ命令・同じ割り付け
-			// でも「収まったか」の答えが図面の直前の状態で動く（M29 で実際にそうなった:
-			// 絵を変えない 2 つのビルドで件数が 1 枚 → 2 枚 ＋ 凡例と重なり 1 枚）。
-			// **どちらも起きていないなら描き直さない**（1 巡目の更新のまま中身は変わって
-			// いない）。更新は重いので、要らない周回を足さない。
+			// ★**測る前に再描画する。** 縮尺を再設定したなら ApplyViewportScale が済ませて
+			// いるが、縮尺が同じでも**伏図のレイヤの縮尺を変えていれば図の中身は変わって
+			// いる**（用紙基準の伏図記号の大きさがレイヤ縮尺で決まるため）。ここを省くと
+			// `GetObjectBounds` は**変える前に描画した外形**を返すので、同じ命令・同じ割り付け
+			// でも「収まったか」の答えが図面の直前の状態で変わる（M29 で実際にそうなった:
+			// 描画結果を変えない 2 つのビルドで件数が 1 枚 → 2 枚 ＋ 凡例と重なり 1 枚）。
+			// **どちらも起きていないなら再描画しない**（1 巡目の更新のまま中身は変わって
+			// いない）。更新は重いので、要らない処理を追加しない。
 			else if (layersRescaled && !RefreshViewport(sheet.viewport))
 				++staleViewports;
 
-			// M18 用紙の上での位置。**この伏図に映る範囲**（命令の表示レイヤで絞った平面の
-			// 広がり）の中心が、用紙のどこへ来るべきかを計算して合わせる——伏図ごとに映す
+			// M18 用紙の上での位置。**この伏図に表示される範囲**（命令の表示レイヤで絞った平面の
+			// 広がり）の中心が、用紙のどこへ来るべきかを計算して合わせる——伏図ごとに表示する
 			// ものが違えば図の中身の広がりも違うので、単に外形の中心を用紙の中心へ置くと
 			// 用紙をめくるたびに建物がずれる。建物の中心（anchor）が常に同じ点へ来るよう、
 			// その差だけずらした位置へ外形の中心を合わせる。
 			//
 			// ★**測る → データタグを置く → 動かす**の順で行う（draw/DrawUtil の
-			// MoveViewportBy）。タグは注釈へ置いた実位置を測って直す作りで、その実測は
-			// ビューポートが用紙のどこに在るかに影響されるため、先に動かすとタグだけが
+			// MoveViewportBy）。タグは注釈へ置いた実位置を測って補正する仕組みで、その実測は
+			// ビューポートが用紙のどこにあるかに影響されるため、先に動かすとタグだけが
 			// 同じ量ずれる。注釈はビューポートと一緒に動くので、後から動かせば位置は保たれる。
 			core::Vec2 drawnCenter;
 			core::Vec2 drawnSize;
@@ -373,7 +375,7 @@ namespace HomeskzIfcImport::draw
 			}
 
 			// 断面寸法データタグは**ビューポートを仕上げた後**に置く（ConfigureViewport
-			// の最後が更新で、注釈はその後に足しても図に出る）。**ビューポートを動かす前**
+			// の最後が更新で、注釈はその後に追加しても図に表示される）。**ビューポートを動かす前**
 			// でなければならない（上記 ★）。
 			drawViewportTags(sheet.viewport, command.viewport, members, tags);
 			// M31 寸法も注釈なので同じ時機に置く（**確定した縮尺**で寸法線までの距離を
@@ -381,19 +383,19 @@ namespace HomeskzIfcImport::draw
 			// ことはしないので、ビューポートを動かす前後どちらでもよいが、収まったかの判定に
 			// 含めるためここで置く。
 			//
-			// ★**寸法を作る間だけ、この伏図のシートレイヤをアクティブにする**（軸組図と同じ
-			// 状態）。寸法は作った瞬間にアクティブレイヤへ入り、連続寸法へ繋ぐとき
+			// ★**寸法を生成する間だけ、この伏図のシートレイヤをアクティブにする**（軸組図と同じ
+			// 状態）。寸法は生成した瞬間にアクティブレイヤへ入り、連続寸法へ繋ぐとき
 			// （CreateChainDimension）に元の直線寸法が undo 記録つきで消える。取り消すと
-			// その削除だけが戻り、**作ったときのアクティブレイヤへ直線寸法が復活する**——
-			// デザインレイヤ（テンプレートに最初から在る「共通」等）がアクティブだと、
-			// 取り込み前から在ったレイヤに残骸が残った（実機の指摘。取り込み直後の図には
-			// 出ない）。このインポートが作ったシートレイヤの上で作れば、取り消しでレイヤごと
-			// 消える（DrawUtil.h「なぜレイヤを記録するのか」）。軸組図で残らなかったのも
-			// これによると見ている。復活する寸法を AddAfterSwapObject で申告する手（通り芯のパスの作法）は
-			// 効かなかった（実機 round 1。docs/DEV-NOTES.md M31）。
-			// 文字の大きさは縮尺で書いて引き直すので、1:1 のレイヤで作っても変わらない
-			// （軸組図と同じ。draw/Dimension.h）。タグはこれまでどおりの状態で作るよう、
-			// 寸法を置いたら元へ戻す。
+			// その削除だけが戻り、**生成したときのアクティブレイヤへ直線寸法が復活する**——
+			// デザインレイヤ（テンプレートに最初からある「共通」等）がアクティブだと、
+			// 取り込み前からあったレイヤに不要な寸法が残った（実機の指摘。取り込み直後の図には
+			// 表示されない）。このインポートが作ったシートレイヤの上で生成すれば、
+			// 取り消しでレイヤごと消える（DrawUtil.h「なぜレイヤを記録するのか」）。
+			// 軸組図で残らなかったのもこれによると考えている。復活する寸法を AddAfterSwapObject
+			// で申告する方法（通り芯のパスの作法）は機能しなかった（実機 round 1。
+			// docs/DEV-NOTES.md M31）。文字の大きさは縮尺で書いて再取得するので、
+			// 1:1 のレイヤで生成しても変わらない（軸組図と同じ。draw/Dimension.h）。
+			// タグはこれまでどおりの状態で生成するよう、寸法を置いたら元へ戻す。
 			{
 				const MCObjectHandle previous = gSDK->GetCurrentLayer();
 				if (sheet.sheetLayer != nil && previous != sheet.sheetLayer)
@@ -405,7 +407,7 @@ namespace HomeskzIfcImport::draw
 					gSDK->SetCurrentLayer(previous);
 			}
 
-			// --- 収まったかは**タグを置いた後**の外形で見る --------------------------
+			// --- 収まったかは**タグを置いた後**の外形で判定する --------------------------
 			//
 			// 用紙に載るのは「ビューポート＋その注釈」なので、タグを置く前の外形で判定すると
 			// **実際に用紙を占める大きさとは別のもの**を測っていることになる（タグも用紙
@@ -416,11 +418,11 @@ namespace HomeskzIfcImport::draw
 				core::Vec2 finalCenter;
 				core::Vec2 finalSize;
 				const bool remeasured = MeasureViewport(sheet.viewport, finalCenter, finalSize);
-				// 測り直せなければタグを置く前の実測で見る（判定を捨てるよりはよい）。
+				// 再測定できなければタグを置く前の実測で判定する（判定を省くよりはよい）。
 				const core::Vec2 footprint = remeasured ? finalSize : drawnSize;
 				// **見積もりどおりに収まったかを測って確かめる**（core/Layout.h の
 				// PlanLayout::plan）。命令の座標には現れないもの（通り芯の丸など）が
-				// 図に出るぶん、実際の図は見積もりより大きくなりうる。
+				// 図に表示される分、実際の図は見積もりより大きくなりうる。
 				if (footprint.x > layout.plan.width() + kFitTol ||
 					footprint.y > layout.plan.height() + kFitTol)
 				{
@@ -429,18 +431,18 @@ namespace HomeskzIfcImport::draw
 						oversizedProbe = DescribeFitOverflow(command.viewport.drawingNumber,
 															 footprint, layout.plan.size());
 				}
-				// 凡例の帯へ食い込んだか。縮尺は凡例のぶんを引いてから決めている
+				// 凡例の帯へ入り込んだか。縮尺は凡例の分を引いてから決めている
 				// （core/Layout.h の planLayout）ので通常は重ならないが、命令の座標に
-				// 現れないもの（通り芯の丸など）のぶん実際の図は見積もりより大きく
-				// なりうる——黙って重ねずに数えて診断へ残す。
+				// 現れないもの（通り芯の丸など）の分だけ実際の図は見積もりより大きく
+				// なりうる——通知せずに重ねることはせず、数えて診断へ残す。
 				//
-				// **動かした後の右端**で見る。delta はタグを置く前の中心から決めてあるので、
-				// 測り直した中心へそのまま足せば、用紙の上での位置になる。
+				// **動かした後の右端**で判定する。delta はタグを置く前の中心から決めてあるので、
+				// 再測定した中心へそのまま加えれば、用紙の上での位置になる。
 				//
-				// ★**遊び（kFitTol）は緩める向きに足す**（M29）。かつてここだけ引いており
+				// ★**許容差（kFitTol）は緩める向きに加える**（M29）。かつてここだけ引いており
 				// （`… - legendWidth - kFitTol` と比べていた）、ぴったり接した図を
-				// 「重なった」と数えていた——遊びは「ぴったりの図をはみ出したと数えない」
-				// ためのものなので、はみ出しの判定（上）と同じく足す側でなければならない。
+				// 「重なった」と数えていた——許容差は「ぴったりの図をはみ出したと数えない」
+				// ためのものなので、はみ出しの判定（上）と同じく加える側でなければならない。
 				const double legendLeft = layout.legendTopRight.x - legendWidth;
 				const double right =
 					(remeasured ? finalCenter.x : drawnCenter.x) + delta.x + (footprint.x / 2.0);
@@ -463,36 +465,37 @@ namespace HomeskzIfcImport::draw
 			++drawn;
 		}
 
-		// 図が仕上がったので**もう一度**中身を流し込み（凡例に並ぶのはそのシートの
-		// ビューポートに映るシンボルなので、縮尺を当て直した後の図で取り直す）、右上を揃える。
+		// 図が仕上がったので**もう一度**中身を設定し（凡例に並ぶのはそのシートの
+		// ビューポートに表示されるシンボルなので、縮尺を再設定した後の図で再取得する）、
+		// 右上を揃える。
 		refreshLegends(legends);
 
 		placeLegends(legends, layout.legendTopRight);
 
-		// M28 図面枠を置き、最背面へ回して用紙の中心へ寄せる。**縮尺を確定させた後**で
-		// なければ縮尺欄がビューポートの縮尺を拾わない（draw/TitleBlock.h）。
+		// M28 図面枠を置き、最背面へ移動して用紙の中心へ寄せる。**縮尺を確定させた後**で
+		// なければ縮尺欄がビューポートの縮尺を取得しない（draw/TitleBlock.h）。
 		finishTitleBlocks(titleBlocks);
 
 		if (previousLayer != nil)
 			gSDK->SetCurrentLayer(previousLayer);
 
-		// 診断行は要素ごとに 1 行ずつ足す（原因が別物なので混ぜない。連結は draw/DrawUtil の
-		// AppendLine）。**異常は note、平常でも出る内訳は outInfo** と行き先を分ける
-		// （前者だけが完了ダイアログの「問題あり」に効き、後者は診断ログにだけ出る。
+		// 診断行は要素ごとに 1 行ずつ追加する（原因が別物なので混ぜない。連結は draw/DrawUtil の
+		// AppendLine）。**異常は note、平常でも出力される内訳は outInfo** と出力先を分ける
+		// （前者だけが完了ダイアログの「問題あり」に影響し、後者は診断ログにだけ出力される。
 		// core::DrawCounts）。
 		const auto addNote = [note](const std::string& text) { AppendLine(note, text); };
 		const auto addInfo = [outInfo](const std::string& text) { AppendLine(outInfo, text); };
 
 		// M18 割り付けの結果。**縮尺は「印刷可能領域・凡例の幅・建物の広がり」の 3 つで
-		// 決まる**（M31 からは寸法の帯 band も効くが、この行には出していない）ので、その 3 つと
-		// 結果の縮尺を残す——思ったより小さい（大きい）ときに、
-		// どれが効いたのかをローカル確認の場で確かめられる（実際に「1/50 のはずが 1/75 に
-		// なる」の切り分けで要った。docs/DEV-NOTES.md M18）。
+		// 決まる**（M31 からは寸法の帯 band も影響するが、この行には出力していない）ので、
+		// その 3 つと結果の縮尺を残す——思ったより小さい（大きい）ときに、
+		// どれが影響したのかをローカル確認の場で確認できる（実際に「1/50 のはずが 1/75 に
+		// なる」の切り分けで必要になった。docs/DEV-NOTES.md M18）。
 		//
-		// **調査のための値はここには出さない**（DEV-NOTES「実機確認の作法」——「役目を終えた
-		// 計装は消す」）。余白の生の値と単位の解釈は規約を詰めるために要ったもので、
+		// **調査のための値はここには出力しない**（DEV-NOTES「実機確認の作法」——「役目を終えた
+		// 計装は消す」）。余白の生の値と単位の解釈は規約を確定するために必要だったもので、
 		// 実機で確定した（図面の単位で返る）ので、**解釈できなかったときだけ**下の診断行へ
-		// 出す。はみ出し・凡例との重なりも同じく件数として下で数える。
+		// 出力する。はみ出し・凡例との重なりも同じく件数として下で数える。
 
 		// 用紙まわりの長さは mm の整数で書く（下の割り付けの行と、余白の食い違いを説明する
 		// 行が共有する）。
@@ -507,11 +510,12 @@ namespace HomeskzIfcImport::draw
 						mm(contentSize.x / layout.scale) + "×" + mm(contentSize.y / layout.scale) +
 						" / 縮尺 1/" + mm(layout.scale);
 			// ★**余白が四辺 0 のときだけ、その根拠を添える**（M29）。「印刷可能 ＝ 用紙」に
-			// なる道は 2 つあり——本当に縁なしの用紙設定なのか、`ISDK::GetPageMargins` が
-			// 何も書かなかったのか——**出てくる数字は同じ**なので、見分けるには
+			// なる経路は 2 つあり——本当に縁なしの用紙設定なのか、`ISDK::GetPageMargins` が
+			// 何も書かなかったのか——**出力される数字は同じ**なので、区別するには
 			// 「SDK が値を書いたか」と「シートレイヤの大きさ」が要る。
-			// **平常でも出る記録なので outInfo（＝ログだけ）へ出す**（core::DrawCounts）。
-			// 0 でない余白が読めているときは何も足さない（役目を終えた計装は残さない）。
+			// **平常でも出力される記録なので outInfo（＝ログだけ）
+			// へ出力する**（core::DrawCounts）。0 でない余白が読めているときは何も追加しない
+			// （役目を終えた計装は残さない）。
 			if (paper->marginsRead && paper->margins.left <= 0.0 && paper->margins.right <= 0.0 &&
 				paper->margins.bottom <= 0.0 && paper->margins.top <= 0.0)
 			{
@@ -520,7 +524,7 @@ namespace HomeskzIfcImport::draw
 				// しない（既定 false）ので、`marginsRead` は `marginsQueried` を含意する。
 				// **読み出せなかった側はこの行では表せない**——そちらは下の
 				// 「用紙の余白を解釈できなかったので…」が受け持つ。条件分岐にすると
-				// 到達しない枝が残り、両方生きていると読み違える（自動レビューの指摘）。
+				// 到達しない分岐が残り、両方とも到達しうると読み違える（自動レビューの指摘）。
 				text += " / 余白 四辺 0（SDK は値を書いた / シートレイヤ ";
 				text += paper->sheet.x > 0.0 && paper->sheet.y > 0.0
 							? mm(paper->sheet.x) + "×" + mm(paper->sheet.y)
@@ -530,13 +534,13 @@ namespace HomeskzIfcImport::draw
 			addInfo(text);
 		}
 		// 伏図のレイヤの縮尺を揃えた記録（applyPlanLayerScale）。用紙基準の記号の大きさが
-		// 紙の上で一定にならないときの手掛かりで、平常でも出るので outInfo へ。
+		// 紙の上で一定にならないときの手掛かりで、平常でも出力されるので outInfo へ。
 		if (rescaledLayers > 0)
 			addInfo("伏図のデザインレイヤ " + std::to_string(rescaledLayers) +
 					" 枚の縮尺を伏図に合わせた（1/" + mm(layout.scale) + "）");
 
-		// 「命令はあるのに 0 枚」のときに、シートレイヤを作れないのか、ビューポートを
-		// 作れないのかを切り分けられるようにする。
+		// 「命令はあるのに 0 枚」のときに、シートレイヤを生成できないのか、ビューポートを
+		// 生成できないのかを切り分けられるようにする。
 		const bool classesBroken = drawn > 0 && classesApplied == 0;
 		// 余白を解釈できなかった（＝用紙いっぱいで割り付けた）のは異常側。生の値を添えて、
 		// 単位の解釈を疑えるようにする（draw/DrawUtil の SheetPaperArea）。
@@ -585,9 +589,9 @@ namespace HomeskzIfcImport::draw
 				const core::PageMargins& margins = paper->rawMargins;
 				const bool zero = margins.left <= 0.0 && margins.right <= 0.0 &&
 								  margins.bottom <= 0.0 && margins.top <= 0.0;
-				// 四辺 0 でここへ来る道は 2 つしかない（core::resolvePageMargins が 0 を
+				// 四辺 0 でここへ来る経路は 2 つしかない（core::resolvePageMargins が 0 を
 				// 「余白なし」として受け取るため）——シートレイヤが用紙より小さい
-				// （＝余白が在るはずなのに 0 が返った）か、SDK から読み出せずに 0 のままか。
+				// （＝余白があるはずなのに 0 が返った）か、SDK から読み出せずに 0 のままか。
 				// **どちらなのかを書き分ける**（縁なし印刷の 0 と取り違えないため）。
 				const bool sheetSmaller =
 					paper->sheet.x > 0.0 && paper->sheet.y > 0.0 &&
@@ -620,8 +624,8 @@ namespace HomeskzIfcImport::draw
 		if (outCounts != nullptr)
 			outCounts->dimensions += dimensions.chains;
 		addNote(legendDiagnostics(legends));
-		// M28 図面枠。異常は note、平常でも出る内訳（当てたスタイル名・通った登録名）は
-		// outInfo——行き先を分ける理由は上の割り付けの行と同じ。
+		// M28 図面枠。異常は note、平常でも出力される内訳（適用したスタイル名・通った登録名）は
+		// outInfo——出力先を分ける理由は上の割り付けの行と同じ。
 		addNote(titleBlockDiagnostics(titleBlocks));
 		addInfo(titleBlockInfo("伏図", titleBlocks));
 		return drawn;

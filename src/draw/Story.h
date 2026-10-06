@@ -3,7 +3,7 @@
 //
 //	Phase 2（VW 描画）のストーリモジュール。命令セット（core::StoryCommand の列）から
 //	VectorWorks のストーリ・ストーリレベル・デザインレイヤを生成する。ExecuteDocument
-//	から通り芯より先にディスパッチされる（以降の要素はここで作ったレベルに配置される。
+//	から通り芯より先にディスパッチされる（以降の要素はここで生成したレベルに配置される。
 //	docs/DEV-NOTES.md M3）。
 //
 //	【SDK 依存】draw/ は VectorWorks SDK のみに依存し、IFC / STEP の知識を持たない。
@@ -27,32 +27,32 @@
 
 namespace HomeskzIfcImport::draw
 {
-	// Document 内の全ストーリを描く。まず命令に登場するレベル種別を登場順に登録し、各
+	// Document 内の全ストーリを描画する。まず命令に登場するレベル種別を登場順に登録し、各
 	// StoryCommand ごとに CreateStory（同名のストーリが既にあればそれを再利用）→
 	// SetStoryElevation → 各レベルをレベルテンプレートで生成（レイヤも同時に作成し
 	// 意図した名前へリネーム）する。実際に用意できたストーリ数を返す。
 	//
-	// progress には 1 件描くごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
-	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
-	// 決める）。描けたところまでは図面に残る。
+	// progress には 1 件描画するごとに 1 ステップ報告し、**ループの先頭で中止要求を確認して
+	// 抜ける**（進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
+	// 決める）。描画済みの分は図面に残る。
 	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress);
 
 	// デザインレイヤのスタック順を希望順（core::desiredStoryLayerOrder）へ並べ替える。
-	// 動かせたレイヤ数を返す。
+	// 移動できたレイヤ数を返す。
 	//
-	// 【なぜ要るか】伏図ビューポートは**ドキュメントのレイヤ重ね順で描かれる**ので、
+	// 【なぜ要るか】伏図ビューポートは**ドキュメントのレイヤ重ね順で描画される**ので、
 	// 床（"n-FL"）・野地板が柱・梁より前面にあると覆い隠してしまう。希望順は
 	// 「共通（通り芯）を最前面 → 伏図記号・耐力壁 → 最上階→最下階 → 床・野地板は最背面」
 	// で、計算そのものは SDK 非依存の core::desiredStoryLayerOrder が持つ（無 SDK テスト済み）。
 	//
 	// 【ドキュメントの重ね順を並べ替える（per-viewport の上書きではない）】
 	// **ISDK には InsertObjectAfter / InsertObjectBefore があり、レイヤは図面のオブジェクト
-	// 列に並んでいる**（VectorScript の HMoveForward に当たるのがこの 2 つ）ので、列そのものを
-	// 組み替える。ビューポート単位の上書き（SetViewportLayerStackingOverride）は**実機で
-	// 効かない**——呼び出しは true を返すのに GetNumViewportLayerStackingOverrides は 0 のまま
+	// 列に並んでいる**（VectorScript の HMoveForward に相当するのがこの 2 つ）ので、列そのものを
+	// 並べ替える。ビューポート単位の上書き（SetViewportLayerStackingOverride）は**実機で
+	// 反映されない**——呼び出しは true を返すのに GetNumViewportLayerStackingOverrides は 0 のまま
 	// で、OIP も「順序を上書き: いいえ」だった（SDK リファレンス Findings「Layers and Stories」）。
 	//
-	// **伏図より前に呼ぶこと。** ビューポートは生成時の重ね順で描かれるので、並べ替えを後にす
+	// **伏図より前に呼ぶこと。** ビューポートは生成時の重ね順で描画されるので、並べ替えを後にす
 	// ると既存のビューポートへ反映されない。draw/ExecuteDocument は全要素の描画後・
 	// drawSheets の直前に呼ぶ。
 	std::size_t reorderStoryLayers(const core::Document& document);

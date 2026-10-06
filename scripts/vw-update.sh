@@ -43,12 +43,12 @@
 # **ファイルの配置はこのスクリプトが決めない。** 走るのは常に**インストール済みの
 # （＝古い）**この 1 本なので、ここに配置手順を持たせると「新しいビルドがどんなファイルで
 # できているか」を永遠に知らないままになる。実際 M21 で本体（.vwpayload）が増えたとき、
-# 古いアップデータはそれを写さず、利用者は zip を手で落として置き直す羽目になった。
+# 古いアップデータはそれをコピーせず、利用者は zip を手動でダウンロードして置き直す必要があった。
 #
-# そこで配置は**落とした zip の中の scripts/vw-install.sh**（リリースのアセットとしても
+# そこで配置は**ダウンロードした zip の中の scripts/vw-install.sh**（リリースのアセットとしても
 # 公開されている）へ委ねる。委ね先はそのビルドと同じ版なので、ファイル構成や手順が
 # 変わっても自動アップデートだけで追随できる。zip にインストーラが無い——この仕組みより
-# 前のリリース——ときだけ、下の自前の配置へ落ちる。
+# 前のリリース——ときだけ、下の自前の配置へ切り替わる。
 #
 # Usage:
 #   ./scripts/vw-update.sh            # ask which channel (or double-click)
@@ -74,12 +74,12 @@ VW_REPO="${VW_REPO:-min-nano/vectorworks-plugin-import-ifc-homeskz}"
 VW_PLUGINS_DIR="${VW_PLUGINS_DIR:-$HOME/Library/Application Support/Vectorworks/2026/Plug-Ins}"
 VW_API="https://api.github.com/repos/${VW_REPO}"
 
-# 配布 zip のアセット名の末尾。アセット名を丸ごと決め打ちにせず末尾で拾えるようにして
+# 配布 zip のアセット名の末尾。アセット名全体を固定せず末尾で選べるようにして
 # あるのは、**将来アセット名（プラグイン名）が変わっても、インストール済みの古いこの
 # スクリプトが「見つかりません」で止まらない**ようにするため（plugin_zip_url）。
 VW_ZIP_SUFFIX=".vwlibrary.zip"
 
-# 配置を委ねる先（落とした zip の直下にある）。冒頭のコメント参照。
+# 配置を委ねる先（ダウンロードした zip の直下にある）。冒頭のコメント参照。
 VW_INSTALLER="vw-install.sh"
 
 # ---------------------------------------------------------------------------
@@ -142,14 +142,14 @@ APPLESCRIPT
 # **公開リポジトリなのでトークンは要らない——が、あるなら必ず付ける。** 認証なしの
 # GitHub API は **IP ごとに 1 時間 60 回**で、M24〜M37 の往復のパレットは 1 分ごとに
 # `q-dev` を呼ぶ＝ちょうど上限。取り込みコマンドのついでの確認・「今すぐ確認」・
-# 同じ回線のもう 1 台が 1 回でも挟まれば超え、以後その時間内はずっと 403 になる
+# 同じ回線のもう 1 台が 1 回でも加われば超え、以後その時間内はずっと 403 になる
 # （実機 M27。パレットには「リリース一覧を取得できませんでした」とだけ出ていて、
 # ネットワークが切れたようにしか見えなかった）。トークンを付ければ 1 時間 5000 回に
-# なるので、この経路では事実上当たらない。
+# なるので、この経路では事実上上限に達しない。
 #
 # トークンの在り処は同梱の vw-token.sh ただ 1 つ（
 # CLAUDE.md「重複を作らない置き場所」）。**無くても止まらない**——読めなければ従来
-# どおり認証なしで続け、上限に当たったときだけその旨を理由に載せる。
+# どおり認証なしで続け、上限に達したときだけその旨を理由に載せる。
 # ---------------------------------------------------------------------------
 
 if [ -r "$(dirname "${BASH_SOURCE[0]}")/vw-token.sh" ]; then
@@ -158,7 +158,7 @@ if [ -r "$(dirname "${BASH_SOURCE[0]}")/vw-token.sh" ]; then
 	. "$(dirname "${BASH_SOURCE[0]}")/vw-token.sh"
 fi
 
-# api_get の結果を持ち帰る 2 つ。**戻り値は標準出力ではなくこの変数**にする——理由
+# api_get の結果を受け渡す 2 つ。**戻り値は標準出力ではなくこの変数**にする——理由
 # （VW_API_ERROR）を呼び出し元へ渡すには同じシェルで動く必要があり、`$(api_get …)` の
 # 形にすると副シェルの中で立てた変数が捨てられる。
 VW_API_FILE=""   # 取れた JSON の一時ファイル（呼び出し元が rm する）
@@ -177,7 +177,7 @@ curl_reason() { # curl exit code
 }
 
 # header_value: 応答ヘッダの値（名前は小文字で渡す。無ければ空）。**最後の 1 つ**を採る
-# ——リダイレクトを追うとヘッダの塊が複数並ぶので、効いているのは最後のもの。
+# ——リダイレクトを追うとヘッダの塊が複数並ぶので、有効なのは最後のもの。
 header_value() { # header-file, lowercase-name
 	tr -d '\r' < "$1" |
 		awk -F': ' -v want="$2" 'tolower($1) == want { v = $2 } END { if (v != "") print v }'
@@ -194,7 +194,7 @@ http_reason() { # code, header-file, token(空なら認証なし)
 		now="$(date +%s)"
 		mins=""
 		# **`&&` で終わらせない。** 偽のとき節そのものが失敗扱いになり、`set -e` の下では
-		# 呼び出し元（api_get）ごと落ちる。
+		# 呼び出し元（api_get）ごと終了する。
 		case "$reset" in
 			'' | *[!0-9]*) ;;
 			*)
@@ -212,7 +212,7 @@ http_reason() { # code, header-file, token(空なら認証なし)
 	printf 'GitHub が HTTP %s を返しました。' "$code"
 }
 
-# api_error: error= の 1 行に添える本文。理由が分かっていれば足す。**改行を入れない**
+# api_error: error= の 1 行に添える本文。理由が分かっていれば追加する。**改行を入れない**
 # ——プラグインは key=value の 1 行として読む（src/UpdaterParse.h の ValueOf）。
 api_error() { # base message
 	if [ -n "${VW_API_ERROR:-}" ]; then
@@ -222,7 +222,7 @@ api_error() { # base message
 	fi
 }
 
-# api_get: GitHub REST を 1 回叩く。取れたら 0 を返して JSON を VW_API_FILE へ、
+# api_get: GitHub REST を 1 回呼び出す。取れたら 0 を返して JSON を VW_API_FILE へ、
 # 取れなかったら 1 を返して理由を VW_API_ERROR へ置く。
 api_get() { # api-subpath
 	# --max-time bounds the request so the plug-in's periodic check can never
@@ -236,8 +236,8 @@ api_get() { # api-subpath
 		token="$(resolve_token || true)"
 	fi
 	# **配列を使わない**（vw-token.sh 冒頭の理由）ので、付ける／付けないで curl の
-	# 呼び出しを 2 つ書く。`-f` は使わない——HTTP の番号を自分で見たいから（`-f` だと
-	# 本文もヘッダも捨てられ、403 が「なぜか失敗した」に潰れる）。
+	# 呼び出しを 2 つ書く。`-f` は使わない——HTTP の番号を自分で確認したいから（`-f` だと
+	# 本文もヘッダも捨てられ、403 が「なぜか失敗した」と区別されなくなる）。
 	rc=0
 	if [ -n "$token" ]; then
 		code="$(curl -sSL --max-time 20 --retry 2 -o "$f" -D "$hdr" -w '%{http_code}' \
@@ -268,8 +268,8 @@ jval() { # json-file, keypath -> raw scalar value (empty if missing)
 #
 # **なぜ表示名では駄目か。** dev プレリリースの name は "Dev: <branch> (<sha>)" なので、
 # 「いま動いているのと同じブランチか」の照合には使えない。取り込みコマンドのついでに
-# 走る確認は、**同じブランチの新しいビルドだけ**を拾ってブランチ選択のダイアログを
-# 出さずに済ませる（src/UpdaterFlow.cpp の RunDevUpdateCheckWith）ので、素のブランチ名が
+# 走る確認は、**同じブランチの新しいビルドだけ**を抽出してブランチ選択のダイアログを
+# 出さずに済ませる（src/UpdaterFlow.cpp の RunDevUpdateCheckWith）ので、そのままのブランチ名が
 # 要る。読めなければ空——プラグイン側はそのとき何もしない側へ倒れる。
 release_branch() { # file, index-prefix -> branch name or ""
 	jval "$1" "${2}.body" | sed -n 's/^branch=//p' | head -n 1 | tr -d '\r'
@@ -311,10 +311,10 @@ asset_url() { # file, prefix, want
 
 # plugin_zip_url: the download URL of the plug-in's distribution zip.
 #
-# **名前が完全一致しなければ、末尾が "<VW_ZIP_SUFFIX>" のアセットで拾い直す。** この
-# スクリプトはインストール済みの（＝古い）ものが走るので、アセット名を決め打ちにすると
-# 名前が変わった瞬間にアップデートの経路そのものが途切れる（利用者は手で落とすしかなく
-# なる）。1 つのリリースが持つ配布 zip はそのチャンネルの 1 つだけなので、末尾での照合で
+# **名前が完全一致しなければ、末尾が "<VW_ZIP_SUFFIX>" のアセットで選び直す。** この
+# スクリプトはインストール済みの（＝古い）ものが走るので、アセット名を固定すると
+# 名前が変わった瞬間にアップデートの経路そのものが途切れる（利用者は手動でダウンロード
+# するしかなくなる）。1 つのリリースが持つ配布 zip はそのチャンネルの 1 つだけなので、末尾での照合で
 # 取り違えは起きない。
 plugin_zip_url() { # file, prefix, plugin-name
 	find_asset_url "$1" "$2" exact "$3${VW_ZIP_SUFFIX}" ||
@@ -331,7 +331,7 @@ download() { # url, out-file
 
 # plugin_dir: そのプラグインが持つフォルダ（`<Plug-Ins>/<name>/`）。**インストーラと
 # 同じ規則**でなければならない（scripts/vw-install.sh の同名関数。片方だけ変えると、
-# 入れた場所と読む場所が食い違う）。渡された先が既にそのフォルダなら足さない——
+# 入れた場所と読む場所が食い違う）。渡された先が既にそのフォルダなら追加しない——
 # プラグインは「いま自分が読み込まれたフォルダ」を渡してくるので、そこが既に
 # `<Plug-Ins>/<name>` である。
 plugin_dir() { # plugins-dir, name -> the plug-in's own folder
@@ -361,7 +361,7 @@ installed_commit() { # bundle-path -> stamped VWBuildCommit or "none"
 # **乗り換え先のブランチを覚えている唯一の場所**で、殻にコンパイルされた VW_BUILD_BRANCH は
 # 本体だけを入れ替えたあと前のブランチを名乗ったままになる（src/UpdaterParse.h の
 # ResolveCurrentDevBuild）。読めなければ空文字（プラグイン側はビルド一覧の sha 照合か、
-# 最後に殻の値へ落ちる）。
+# 最後に殻の値を使う）。
 installed_branch() { # bundle-path -> stamped VWBuildBranch or ""
 	local plist="$1/Contents/Info.plist"
 	if [ -f "$plist" ]; then
@@ -373,7 +373,7 @@ installed_branch() { # bundle-path -> stamped VWBuildBranch or ""
 
 # 殻（バンドル）の ID。**「アップデートに Vectorworks の再起動が要るか」を決める鍵**で、
 # プラグイン側は自分にコンパイルされた VW_SHELL_ID と突き合わせる——一致するなら本体
-# （.vwpayload）を読み直すだけで反映される（src/PayloadAbi.h / src/UpdaterParse.h）。
+# （.vwpayload）を再読み込みするだけで反映される（src/PayloadAbi.h / src/UpdaterParse.h）。
 # 読めなければ空文字（＝判断できないので、プラグイン側は安全側＝「再起動が要る」へ倒す）。
 installed_shell_id() { # bundle-path -> stamped VWShellId or ""
 	local plist="$1/Contents/Info.plist"
@@ -388,10 +388,10 @@ installed_shell_id() { # bundle-path -> stamped VWShellId or ""
 # 通常は zip 同梱の vw-install.sh がまとめて置く（下の run_zip_installer）。**殻とは別の
 # ファイルで、これが入れ替わると Vectorworks を再起動しなくても次の操作から新しいコードが動く**
 # （src/PayloadAbi.h）。zip に入っていなければ**何もしないで成功扱い**にする——古い形の
-# リリース（本体を持たない）へ当たったときに、殻の入れ替えまで巻き添えで失敗させないため。
+# リリース（本体を持たない）が対象のときに、殻の入れ替えまで連鎖して失敗させないため。
 #
 # 書き込みは必ず「別名へ書いてから mv」にする。走っている Vectorworks は入口ごとに
-# このファイルを見て読み直すので、**途中まで書かれたファイルを掴ませない**ことが要る
+# このファイルを確認して再読み込みするので、**途中まで書かれたファイルを読み込ませない**ことが要る
 # （src/PayloadSession.cpp）。
 install_payload() { # work-dir, name -> 0 on success (or nothing to do)
 	local work="$1" name="$2"
@@ -400,7 +400,7 @@ install_payload() { # work-dir, name -> 0 on success (or nothing to do)
 	local dir
 	dir="$(plugin_dir "$VW_PLUGINS_DIR" "$name")"
 
-	# Gatekeeper: 殻と同じ手当て。dlopen する側なので、隔離属性が残っていると
+	# Gatekeeper: 殻と同じ処置。dlopen する側なので、隔離属性が残っていると
 	# Apple Silicon では読み込めない。
 	xattr -d com.apple.quarantine "$src" 2>/dev/null || true
 	codesign --force --sign - "$src" >/dev/null 2>&1 || true
@@ -414,15 +414,15 @@ install_payload() { # work-dir, name -> 0 on success (or nothing to do)
 
 # ---------------------------------------------------------------------------
 # 配置は zip の中のインストーラへ委ねる（冒頭のコメント参照）。ここから下の自前の配置は
-# **この仕組みより前のリリースへ当たったときだけ**使う予備。
+# **この仕組みより前のリリースが対象のときだけ**使う予備。
 # ---------------------------------------------------------------------------
 
 # run_zip_installer: 展開済みの zip に入っている vw-install.sh へ配置を委ねる。委ねられた
 # ら、その機械可読な出力（installed-shell= / ok / error=）をそのまま stdout へ流して 0 を
-# 返す。委ねられなければ 1（呼び出し側は自前の配置へ落ちる）。
+# 返す。委ねられなければ 1（呼び出し側は自前の配置へ切り替える）。
 #
 # 「委ねられた」の判定は**結末の行が返ってきたか**で行う——インストーラが古い／壊れて
-# いて何も言わないときに、成功したと取り違えないため。
+# いて何も出力しないときに、成功したと取り違えないため。
 run_zip_installer() { # work-dir, name -> the installer's machine-readable output
 	local work="$1" name="$2"
 	local inst="$work/$VW_INSTALLER"
@@ -615,7 +615,7 @@ q_stable() {
 # q-dev: installed dev build (commit + branch), then one line per downloadable
 # dev build.
 #   installed=<commit|none>
-#   installed-branch=<branch>   （刻印が読めなければ空。プラグイン側は落としどころを持つ）
+#   installed-branch=<branch>   （刻印が読めなければ空。プラグイン側は代替の判定を持つ）
 #   build<TAB>commit<TAB>name<TAB>url<TAB>branch
 # branch は空のことがある（リリース本文に branch= が無い古いリリース）。プラグイン側の
 # パーサはこの列が無い出力も読める（src/UpdaterParse.h の ParseDevBuilds）。
@@ -649,7 +649,7 @@ q_dev() {
 }
 
 # url_encode: クエリの値として安全な形へ（英数字と `-._~` 以外を %XX に）。**バイト単位で
-# 見る**ので LC_ALL=C で回す（日本語のブランチ名でも壊さない）。
+# 処理する**ので LC_ALL=C で回す（日本語のブランチ名でも壊さない）。
 url_encode() { # text
 	local LC_ALL=C s="$1" out="" c i
 	for ((i = 0; i < ${#s}; i++)); do
@@ -718,9 +718,9 @@ do_install() {
 		rm -rf "$tmp" "$work"; echo "error=アーカイブの展開に失敗しました。"; return 0
 	fi
 
-	# **配置は落とした zip の中のインストーラへ委ねる**（冒頭のコメント／
+	# **配置はダウンロードした zip の中のインストーラへ委ねる**（冒頭のコメント／
 	# run_zip_installer）。プラグインが読む契約（installed-shell= / ok / error=）は
-	# インストーラ側が満たすので、その出力をそのまま流す。
+	# インストーラ側が満たすので、その出力をそのまま出力する。
 	local out
 	if out="$(run_zip_installer "$work" "$name")"; then
 		rm -rf "$tmp" "$work"
@@ -755,7 +755,7 @@ do_install() {
 	fi
 	rm -rf "$tmp" "$work"
 	# **いま入れた殻の ID を先に出す。** プラグインはこれを自分の VW_SHELL_ID と突き合わせて
-	# 「再起動が要るか／本体の読み直しで済むか」を決める（src/UpdaterParse.h の
+	# 「再起動が要るか／本体の再読み込みで済むか」を決める（src/UpdaterParse.h の
 	# NeedsRestartAfterInstall）。読めなければ行を出さない＝プラグインは安全側へ倒す。
 	local shell_id; shell_id="$(installed_shell_id "$dst")"
 	if [ -n "$shell_id" ]; then

@@ -36,7 +36,7 @@ namespace HomeskzIfcImport::parse
 	{
 		// 勾配の座標系は垂木（parse/Rafter）と共有する（parse/IfcGeometry の RoofSlope）。
 		// ほぼ水平な面（勾配方向・軒が定まらない）と鉛直な面（平面式が nz で除算する）は
-		// ここで弾かれる（閾値 kRoofFlatTol も垂木と共有＝roofSlope の既定値）。
+		// ここで除外される（閾値 kRoofFlatTol も垂木と共有＝roofSlope の既定値）。
 		RoofSlope slope;
 		if (!roofSlope(plane, slope))
 			return std::nullopt;
@@ -59,15 +59,9 @@ namespace HomeskzIfcImport::parse
 		// {along, down} は正規直交（parse/IfcGeometry の roofSlope が down を単位化し
 		// along をその直交にする）ので、射影値の組 (e, d) から平面座標へそのまま戻せる。
 		//
-		// ★**軸は footprint の外へ出してはならない**（M29）。かつては「最も軒側の頂点を 1 つ
-		// 選び、そこから along 方向へ eSpan だけ伸ばす」作りだったが、選んだ頂点が軒方向の
-		// **終わり側**（e = eMax）に在ると、終点が eMax + eSpan ＝ footprint 1 つぶん外へ
-		// 飛び出す。屋根面オブジェクトは**この軸を勾配の基準線として図に描く**ので、飛び出した
-		// 軸がそのままビューポートの外形を広げ、伏図が用紙に収まらなくなっていた（実機で
-		// 母屋伏図が縦に建物 1 つぶん＝5,680mm 大きく測られた。docs/DEV-NOTES.md M29）。
-		//
-		// **屋根面の平面そのものは変わらない**——軸は変更前と同じ d = dMax の直線上にあり、
-		// 動かすのは直線上での端点だけなので、勾配も軒の高さ（elevation）も同じである。
+		// ★**軸は footprint の外へ出してはならない**（M29）。屋根面オブジェクトは**この軸を
+		// 勾配の基準線として図に描画する**ので、外へ出た軸がそのままビューポートの外形を
+		// 広げ、伏図が用紙に収まらなくなる。
 		//
 		// ★**これで xy の外接矩形に収まるわけではない。** footprint が矩形でなければ
 		// (e, d) の角を xy へ戻した点は外接矩形の外に出うる——**三角形の屋根面では軒が
@@ -75,13 +69,20 @@ namespace HomeskzIfcImport::parse
 		// （実フィクスチャにも三角形の面がある）。保証できるのは「射影範囲 [eMin, eMax] を
 		// 超えない」までで、**旧実装のように 1 つぶん余計に伸びることが無い**のが要点である
 		// （core/Document.h の RoofCommand に不変条件として書いてある）。
+		//
+		// 経緯: かつては「最も軒側の頂点を 1 つ選び、そこから along 方向へ eSpan だけ伸ばす」
+		// 作りだったが、選んだ頂点が軒方向の**終わり側**（e = eMax）に在ると、終点が
+		// eMax + eSpan ＝ footprint 1 つぶん外へはみ出していた（実機で母屋伏図が縦に建物
+		// 1 つぶん＝5,680mm 大きく測られた。docs/DEV-NOTES.md M29）。この変更でも
+		// **屋根面の平面そのものは変わらない**——軸は変更前と同じ d = dMax の直線上にあり、
+		// 動かすのは直線上での端点だけなので、勾配も軒の高さ（elevation）も同じである。
 		const auto atSlopeCoord = [&slope](double e, double d)
 		{
 			return Vec2{(slope.along.x * e) + (slope.down.x * d),
 						(slope.along.y * e) + (slope.down.y * d)};
 		};
 		// 軸は軒（最も +d 側）の辺を端から端まで。upslope 定義点は棟（最も -d 側）の中央
-		// ——**方向ではなく「棟側にある点」**なので、footprint の内側に採れば足りる
+		// ——**方向ではなく「棟側にある点」**なので、footprint の内側に採れば十分
 		// （core/Document.h の RoofCommand）。
 		const Vec2 axisStart = atSlopeCoord(eMin, dMax);
 		const Vec2 axisEnd = atSlopeCoord(eMax, dMax);
@@ -93,7 +94,7 @@ namespace HomeskzIfcImport::parse
 		// の目標にする。
 		//
 		// ［仕様メモ］持ち上げるのは**垂木せいのみ**（＝軸 Z は野地板の下端＝垂木上端で、
-		// 厚みは軸から上へ伸びる）。野地板厚まで足すと 1 枚ぶん浮くので足さない。
+		// 厚みは軸から上へ伸びる）。野地板厚まで加えると 1 枚ぶん浮くので加えない。
 		// 厚みが軸のどちら側へ伸びるかは実機での目視確認項目（docs/DEV-NOTES.md M6）。
 		const double lift = rafterHeight / slope.run;
 
@@ -131,7 +132,7 @@ namespace HomeskzIfcImport::parse
 			const std::string layer = storyLayerName(i, story.isTop, kLevelNojiita);
 
 			// 屋根版の判定・屋根面の走査は垂木（parse/Rafter）・登り梁と共有する
-			// （Context::storyRoofPlanes。同じ屋根版を拾い、解決も 1 度で済む）。
+			// （Context::storyRoofPlanes。同じ屋根版を抽出し、解決も 1 度で済む）。
 			for (const RoofPlane* plane : context.storyRoofPlanes(story.id))
 			{
 				std::optional<RoofCommand> command = roofCommandForPlane(

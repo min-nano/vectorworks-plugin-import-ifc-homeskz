@@ -44,7 +44,7 @@ namespace HomeskzIfcTests
 	// 平面外形を面法線方向へ押し出す）。
 	//   * Axis=(0,−1,3) → 正規化した局所 Z が面法線（上向き）
 	//   * RefDirection=(1,0,0) → 局所 X は X 軸のまま（Gram-Schmidt で直交化）
-	// slabName を "屋根版" 以外にすると屋根版として拾われないことの確認にも使う。
+	// slabName を "屋根版" 以外にすると屋根版として検出されないことの確認にも使う。
 	inline std::string minimalRoofText(const std::string& slabName)
 	{
 		return "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"

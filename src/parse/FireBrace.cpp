@@ -83,7 +83,7 @@ namespace HomeskzIfcImport::parse
 		{
 			const std::size_t next = (i + 1) % n;
 			// 中心線（局所 v=0）をまたぐ辺だけが端面。長辺は v が ±半幅で一定なので
-			// 積が正になり、ここで落ちる。
+			// 積が正になり、ここで除外される。
 			if (local[i].y * local[next].y < 0.0)
 				faces.push_back(Segment2D{world[i], world[next]});
 		}

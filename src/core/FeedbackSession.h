@@ -9,7 +9,7 @@
 //	**人の操作を 1 つも挟まずに**同じ条件で走らせたい——Claude が MCP の `vw_run_test` から
 //	起こす周はダイアログを 1 枚も出せないので、1 周目の選択をそのままディスクへ置き、
 //	2 周目以降はここから読む。M37 までは結果を PR へ投稿していたので宛先も覚えていたが、
-//	いまは結果を手元に控えるだけになった（draw/Feedback.h）。
+//	いまは結果を手元に記録するだけになった（draw/Feedback.h）。
 //
 //	【なぜ core/ に置くか】ImportOptions とまったく同じ立ち位置である:
 //	  * 決めるのは描画側（draw/SettingsDialog・draw/Feedback）——IFC のパスは
@@ -42,21 +42,21 @@ namespace HomeskzIfcImport::core
 		// **毎周の図面の元になるテンプレート（`.sta`）の絶対パス**（空なら 1 周目と同じく、
 		// いま開いている図面から採る）。
 		//
+		// **これは実機テストの周だけの都合である。** 本番の取り込みは開いている図面へ描画する
+		// のが役割なので、この値を参照するのは draw/Feedback だけ。
+		//
 		// 1 周目に、そのとき開いている図面をこの場所へ**別名保存**し、以後の周は毎回これを
 		// `OpenDocumentPath` で開く。`.sta` を渡すと**そのファイル自体ではなく、中身を
-		// 写した無題の新規文書**が開く（SDK リファレンス Findings「Documents」）ので、
-		// テンプレートには前の周の絵が 1 つも書き戻らず、どの周もまったく同じ初期状態から
+		// 複製した無題の新規文書**が開く（SDK リファレンス Findings「Documents」）ので、
+		// テンプレートには前の周の描画結果が 1 つも書き戻らず、どの周もまったく同じ初期状態から
 		// 始まる。M38 までの「取り消し」「レイヤ削除」による戻しはやめた（M39。どちらも
-		// 取り込み前から在ったレイヤへ描いた分や取り消しスタックの中身に左右された）。
-		//
-		// **これは実機テストの周だけの都合である。** 本番の取り込みは開いている図面へ描く
-		// のが仕事なので、この値を見るのは draw/Feedback だけ。
+		// 取り込み前から在ったレイヤへ描画した分や取り消しスタックの中身に左右された）。
 		std::string templatePath;
 
-		// **実機テストが自分で保存した図面のパス**（テンプレートと、各周の描き上がり）。
+		// **実機テストが自分で保存した図面のパス**（テンプレートと、各周の描画結果）。
 		//
 		// 次の周の頭で、この中で**いま開いているものを保存せずに閉じる**（draw/Feedback の
-		// CloseOwnedDocuments）。各周の描き上がりは周の終わりに一時ファイルへ保存してある
+		// CloseOwnedDocuments）。各周の描画結果は周の終わりに一時ファイルへ保存してある
 		// ので、人が手を入れていなければ未保存の変更は無く、Vectorworks を再起動しても
 		// 保存の確認が出ない。**閉じてよいのはここに名指しで在り、かつ一時ファイルの置き場
 		// （core/FeedbackScratch）の中にあるものだけ**——利用者の図面を閉じない安全弁で、
@@ -74,7 +74,7 @@ namespace HomeskzIfcImport::core
 		std::string lastCommit;
 
 		// **1 周目の「取り込み前に在ったレイヤ」の顔ぶれ**（core::DrawCounts::existingLayers）。
-		// 次の周でこれと引き比べ、図面が取り込み前へ戻してあるかを見る——テンプレートに
+		// 次の周でこれと照合し、図面が取り込み前へ戻してあるかを確認する——テンプレートに
 		// 「共通」等が最初から在ると真偽 1 つでは「戻し忘れ」と区別できないため、**基準は
 		// 1 周目に採る**（docs/DEV-NOTES.md M23「基準は 1 周目に採る」）。
 		//
@@ -112,7 +112,7 @@ namespace HomeskzIfcImport::core
 		// ダイアログを出せない場面（MCP の `vw_run_test`）なのに、尋ねないと始められない。
 		// 何もしない（IFC を名指しして頼み直すか、1 周目をメニューから人が実行する）。
 		// **テンプレートが無いときもここ**——人の居ない周に「いま開いている図面」を基準に
-		// 採らせると、前の周の絵が載った図面や利用者の図面がそのまま基準になりうる（M39）。
+		// 採らせると、前の周の描画結果が載った図面や利用者の図面がそのまま基準になりうる（M39）。
 		Refuse,
 	};
 
@@ -144,14 +144,14 @@ namespace HomeskzIfcImport::core
 	// 中身の変化だけが見えるようにするため。
 	std::string formatFeedbackSession(const FeedbackSession& session);
 
-	// key=value テキストから記憶を復元する。**知らない行・壊れた行は黙って飛ばす**
+	// key=value テキストから記憶を復元する。**知らない行・壊れた行は通知せずに読み飛ばす**
 	// （古い版が書いたファイルを読めなくして往復を止めない）。値の無い項目は既定のまま。
 	FeedbackSession parseFeedbackSession(const std::string& text);
 
 	// 記憶の置き場所。**一時ディレクトリには置かない**（消えると 2 周目が走らない）:
 	//   macOS   … $HOME/Library/Application Support/HomeskzIfcImport/feedback.txt
 	//   Windows … %LOCALAPPDATA%\HomeskzIfcImport\feedback.txt
-	// どちらの環境変数も取れなければ空を返す（呼び出し側は記憶を諦めて 1 周で終わる）。
+	// どちらの環境変数も取れなければ空を返す（呼び出し側は記憶を使わずに 1 周で終わる）。
 	// **環境変数 HOMESKZ_IFC_FEEDBACK_STATE が指定されていればそれを優先する**（試験用）。
 	std::string defaultFeedbackSessionPath();
 
@@ -160,7 +160,7 @@ namespace HomeskzIfcImport::core
 	bool readFeedbackSession(const std::string& path, FeedbackSession& out);
 	bool writeFeedbackSession(const std::string& path, const FeedbackSession& session);
 
-	// 記憶を消す（セッションを畳むとき）。無ければ何もしない。
+	// 記憶を消す（セッションを終了するとき）。無ければ何もしない。
 	void clearFeedbackSession(const std::string& path);
 
 	// **直近の実機テストの報告**（Markdown。parse::formatTestRoundReport）の置き場所。

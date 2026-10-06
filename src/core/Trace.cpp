@@ -24,7 +24,7 @@ namespace HomeskzIfcImport::core::trace
 			std::ofstream out;
 			std::chrono::steady_clock::time_point start;
 			std::string path;
-			// 書いた本文の控え。完了ダイアログのログ欄がこれを見せる（Trace.h
+			// 書いた本文の記録。完了ダイアログのログ欄がこれを見せる（Trace.h
 			// 「なぜ本文を持つか」）。ファイルを開けなかったときでも溜める。
 			std::string text;
 			bool open = false; // ファイルの有無に関わらず「セッションが開いている」か
@@ -69,7 +69,7 @@ namespace HomeskzIfcImport::core::trace
 			s.out.close();
 		s.path.clear();
 		// **本文は必ず溜め始める。** ファイルを開けなくてもログ自体は成り立ち（完了
-		// ダイアログのログ欄はメモリの本文を見せる）、そこで諦めると「書けない環境では
+		// ダイアログのログ欄はメモリの本文を見せる）、そこで溜めるのをやめると「書けない環境では
 		// 何も分からない」に逆戻りする。
 		s.text.clear();
 		s.start = std::chrono::steady_clock::now();
@@ -93,9 +93,9 @@ namespace HomeskzIfcImport::core::trace
 
 	namespace
 	{
-		// 本文へ 1 ブロック足し、開いていればファイルへも書いて**即フラッシュする**。
-		// **1 行ごとにフラッシュする。** 落ちたときにバッファの中身は残らないので、
-		// これをしないと肝心の最終行（＝原因箇所の直前）が消える。
+		// 本文へ 1 ブロック追加し、開いていればファイルへも書いて**即フラッシュする**。
+		// **1 行ごとにフラッシュする。** 異常終了したときにバッファの中身は残らないので、
+		// これをしないと最も重要な最終行（＝原因箇所の直前）が消える。
 		void emit(const std::string& block)
 		{
 			State& s = state();
@@ -161,7 +161,7 @@ namespace HomeskzIfcImport::core::trace
 		const std::time_t now = std::time(nullptr);
 		std::tm local{};
 		// **スレッド安全版の綴りが処理系で違う**（MSVC は localtime_s、POSIX は
-		// localtime_r）。素の localtime は MSVC が C4996 を出し、無 SDK ライブラリは
+		// localtime_r）。そのままの localtime は MSVC が C4996 を出し、無 SDK ライブラリは
 		// 警告をエラー扱いにするので、場合分けをここへ閉じ込める（Trace.h）。
 #if defined(_MSC_VER)
 		const bool ok = localtime_s(&local, &now) == 0;
@@ -170,7 +170,7 @@ namespace HomeskzIfcImport::core::trace
 #endif
 		std::array<char, 32> buffer{};
 		// 時刻を取れなければ書式化もしない。strftime も入り切らなければ 0 を返すので、
-		// **どちらの失敗も「書けた長さ 0」＝空文字**に畳んで 1 本の戻りにする
+		// **どちらの失敗も「書けた長さ 0」＝空文字**にまとめて 1 本の戻りにする
 		// （失敗ごとに return を分けると、まず起きない経路がテストで通らない行になる）。
 		const std::size_t written =
 			ok ? std::strftime(buffer.data(), buffer.size(), "%Y-%m-%d %H:%M:%S", &local) : 0;

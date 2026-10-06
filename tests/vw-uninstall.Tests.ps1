@@ -11,7 +11,7 @@
 #
 #     * **消してよいものだけを消す** — フォルダ名が一致し、かつ中に殻があるときだけ。
 #       Plug-Ins そのものや無関係なフォルダを名指しされても消さない。
-#     * **入っていなければ成功** — アップデートの入口で無条件に叩けること。
+#     * **入っていなければ成功** — アップデートの入口で無条件に呼び出せること。
 #
 #   The script is DOT-SOURCEd (its dispatch is guarded, see its tail) so the real
 #   functions run in-process. **Nothing is stubbed** — the deletion itself is what
@@ -52,12 +52,12 @@ $env:VW_PLUGINS_DIR = Join-Path $Work 'plugins'
 # **エラーの扱いはローカルと CI で変える。** これは「CI では緩めない」という
 # VW_REQUIRE_SCRIPT_TESTS の方針（上記 $RequireTools）をそのまま延長したもの。
 #
-#   * ローカル（Continue）… 落ちた文があっても最後まで走り、失敗を一覧できる。
+#   * ローカル（Continue）… 失敗した文があっても最後まで走り、失敗を一覧できる。
 #   * CI（Stop）………………… 想定外のエラーでその場で終了し、exit 1 になる。
 #
-# Stop が要る理由: Continue だと**落ちた文の CheckXxx が呼ばれないまま**次へ進むので、
-# 検査が空振りしたのに「PASS: all N checks」と出る。実際に `Join-Path 'C:\x' …`
-# （Linux の pwsh に C: ドライブは無い）で 2 件が黙って抜け、N だけが減っていた。
+# Stop が要る理由: Continue だと**失敗した文の CheckXxx が呼ばれないまま**次へ進むので、
+# 検査が実行されなかったのに「PASS: all N checks」と出る。実際に `Join-Path 'C:\x' …`
+# （Linux の pwsh に C: ドライブは無い）で 2 件が通知なしに抜け、N だけが減っていた。
 # ローカルを Continue のままにしてあるのは、直すときは失敗を一覧できたほうが速いから。
 $ErrorActionPreference = if ($RequireTools) { 'Stop' } else { 'Continue' }
 

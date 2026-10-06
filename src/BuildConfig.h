@@ -35,12 +35,12 @@
 #	define PLUGIN_TEST_UNIVERSAL_NAME "CExtMenuTest_MinNanoStructure"
 #endif
 
-// **ユニバーサル名（と UUID）は改名しても据え置く。** これはコマンドの同一性そのもので、
-// ワークスペースはこの名前でコマンドを覚えている——付け替えると、利用者のワークスペース
-// からコマンドが消える（作り直しになる）。プラグインの名前（表示名・ファイル名）が
-// 変わっただけでコマンドが別物になる理由は無いので、取り込みコマンドの
-// PLUGIN_UNIVERSAL_NAME は "HomeskzIfcImport" を名乗ったままにしてある。新しく足す
-// コマンド（アップデータの確認）だけが新しい綴りを名乗る。
+// **ユニバーサル名（と UUID）はプラグインを改名しても変更しない。** これはコマンドの
+// 同一性そのもので、ワークスペースはこの名前でコマンドを記録している——変更すると、利用者の
+// ワークスペースからコマンドが消える（ワークスペースへの登録をやり直すことになる）。
+// プラグインの名前（表示名・ファイル名）が変わっただけでコマンドが別物になる理由は無いので、
+// 取り込みコマンドの PLUGIN_UNIVERSAL_NAME は "HomeskzIfcImport" を名乗ったままにしてある。
+// 新しく追加したコマンド（アップデータの確認）だけが新しい綴りを名乗る。
 
 // NB: there is deliberately no build-channel macro here. The channel a build
 // belongs to ("stable" / "dev") is stamped into the packaged build by CMake —
@@ -72,14 +72,16 @@
 
 // **殻の ID**——「アップデートに Vectorworks の再起動が要るか」を決める鍵。
 //
-// プラグインは 2 つに割れている（src/PayloadAbi.h）: Vectorworks が起動時にしか読み込め
-// ない**殻**（このモジュール）と、殻が自分で読み込む**本体**（`<name>.vwpayload`）。本体
-// だけが新しくなったのなら次の操作で読み直されるので再起動は要らず、殻まで変わっていれば
-// 要る。CMake が「殻に入るものだけ」のハッシュを -DVW_SHELL_ID で渡し、インストール済みの
-// ビルドにも同じ値が控えられる（mac: Info.plist の VWShellId、win: `<name>.shell-id`）ので、
-// 更新の直後に両者を突き合わせられる（src/UpdaterParse.h の NeedsRestartAfterInstall）。
+// CMake が「殻に入るものだけ」のハッシュを -DVW_SHELL_ID で渡し、インストール済みの
+// ビルドにも同じ値が記録される（mac: Info.plist の VWShellId、win: `<name>.shell-id`）ので、
+// 更新の直後に両者を照合できる（src/UpdaterParse.h の NeedsRestartAfterInstall）。
 //
-// 既定の "local" は保険にすぎない——プラグインのビルドでは CMake が必ず実際のハッシュを
+// プラグインは 2 つのモジュールに分かれている（src/PayloadAbi.h）: Vectorworks が起動時にしか
+// 読み込めない**殻**（このモジュール）と、殻が自分で読み込む**本体**（`<name>.vwpayload`）。
+// 本体だけが新しくなったのなら次の操作で再読み込みされるので再起動は要らず、殻まで
+// 変わっていれば要る。
+//
+// 既定の "local" はフォールバックにすぎない——プラグインのビルドでは CMake が必ず実際のハッシュを
 // 渡すので（CMakeLists.txt の VW_SHELL_INPUTS）、配布物がこの値を名乗ることはない。
 #ifndef VW_SHELL_ID
 #	define VW_SHELL_ID "local"

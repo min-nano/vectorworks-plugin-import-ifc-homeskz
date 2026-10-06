@@ -4,12 +4,12 @@
 癖**、実機確認の作法をまとめたものです。トピックごとに [`docs/dev-notes/`](dev-notes/) の
 下へ分けてあり、**このページはその目次**です。
 
-**Vectorworks SDK の実測知見（実機でしか判明しなかった落とし穴・SDK に無い／効かない
+**Vectorworks SDK の実測知見（実機でしか判明しなかった落とし穴・SDK に無い／機能しない
 API・SDK 側の打ち切った調査）は、SDK リファレンスリポジトリ
 [vectorworks-developer-sdk-reference](https://github.com/min-nano/vectorworks-developer-sdk-reference)
 の [`Findings/`](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/README.md)
 へ移動しました。** SDK の挙動について新しく分かったことも、開発メモではなくあちらへ
-足します（[`CLAUDE.md`](../CLAUDE.md)「ドキュメントの分担」）。
+追加します（[`CLAUDE.md`](../CLAUDE.md)「ドキュメントの分担」）。
 
 - 利用者向けの説明（何をするプラグインか・使い方）は [`README.md`](../README.md)。
 - ビルド・テスト・lint・CI の手順は [`DEVELOPMENT.md`](DEVELOPMENT.md)。
@@ -18,9 +18,9 @@ API・SDK 側の打ち切った調査）は、SDK リファレンスリポジト
 
 **ソースコードのコメントにある `docs/DEV-NOTES.md M<数字>`** は、機能を積み上げていった
 当時のマイルストーン番号です。[実装の経緯（M0〜M40）](dev-notes/milestones/README.md)に
-対応表があり、ページのあるものは下の「実装の経緯」から番号で引けます。番号は**振り直さない**
+対応表があり、ページのあるものは下の「実装の経緯」から番号で参照できます。番号は**振り直さない**
 （既存のコメント・PR 本文が参照しているため）。`docs/DEV-NOTES.md「<節の名前>」` も、
-下の一覧の同じ名前のページ（小見出しはそのページの中）で引けます。
+下の一覧の同じ名前のページ（小見出しはそのページの中）で参照できます。
 
 ## 設計の考え方
 
@@ -41,7 +41,7 @@ API・SDK 側の打ち切った調査）は、SDK リファレンスリポジト
 | [IFC / STEP 側の癖](dev-notes/ifc-quirks.md) | ホームズ君の出力仕様（公式の説明）／読んでみて分かった癖 |
 | [打ち切った調査（もう一度やらないこと）](dev-notes/abandoned-investigations.md) | 本プラグインの方針・実装として打ち切ったもの |
 | [Vectorworks SDK の実測知見（SDK リファレンスへ移動）](dev-notes/sdk-findings-moved.md) | 旧トピックと `Findings/` の移動先の対応 |
-| [実機確認の作法](dev-notes/live-verification.md) | 診断行と OIP の読み合わせ・API の無い設定の突き止め方・往復の回し方 |
+| [実機確認の作法](dev-notes/live-verification.md) | 診断行と OIP の読み合わせ・API の無い設定の特定の仕方・往復の回し方 |
 | [描画の高速化（測って初めて場所が分かった）](dev-notes/draw-performance.md) | 予想と実測・何が重いか・`doRegen=false`・打ち切った候補 |
 | [残っている宿題](dev-notes/open-issues.md) | 未対応・未確認のもの |
 
@@ -86,9 +86,9 @@ API・SDK 側の打ち切った調査）は、SDK リファレンスリポジト
 
 ## 書き足すとき
 
-- **新しいマイルストーン**は [対応表](dev-notes/milestones/README.md)に 1 行足し、経緯を残す
-  なら `dev-notes/milestones/m<番号>-<内容>.md` を作って上の表にも 1 行足す。長くなったら
+- **新しいマイルストーン**は [対応表](dev-notes/milestones/README.md)に 1 行追加し、経緯を残す
+  なら `dev-notes/milestones/m<番号>-<内容>.md` を作って上の表にも 1 行追加する。長くなったら
   フォルダにして `README.md` から読み始められるようにする。
 - **設計の決め事**は `dev-notes/design/` に、**入力データの癖**は
-  [IFC / STEP 側の癖](dev-notes/ifc-quirks.md)に足す。
+  [IFC / STEP 側の癖](dev-notes/ifc-quirks.md)に追加する。
 - **SDK の挙動**はここではなく SDK リファレンスの `Findings/` へ（上記）。

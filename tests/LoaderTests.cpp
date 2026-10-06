@@ -1,11 +1,12 @@
 //
 //	LoaderTests.cpp
 //
-//	IFC 読み込み（src/parse/Loader）の単体テスト。無 SDK のテストハーネスで走る
-//	（CLAUDE.md「テスト方針」）。自前 STEP リーダはスキーマ検証をしないので、
-//	非正規エンティティ（IFC2X3 に混入する IFC4 専用 IFCFOOTINGTYPE 等）を除去せず
-//	そのまま読める——ことと、実フィクスチャのファイル読み込みを確かめる。
-//	フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
+//	IFC 読み込み（src/parse/Loader）の単体テスト。非正規エンティティ（IFC2X3 に混入する
+//	IFC4 専用 IFCFOOTINGTYPE 等）を除去せずそのまま読めることと、実フィクスチャの
+//	ファイル読み込みを確かめる。
+//	無 SDK のテストハーネスで走る（CLAUDE.md「テスト方針」）。フィクスチャのパスは CMake が
+//	HOMESKZ_FIXTURES_DIR で渡す。
+//	非正規エンティティをそのまま読めるのは、自前 STEP リーダがスキーマ検証をしないため。
 //
 
 #include "TestFramework.h"
@@ -38,8 +39,8 @@ TEST(loads_nonstandard_entity_without_stripping)
 
 TEST(reference_to_nonstandard_entity_resolves)
 {
-	// IFCFOOTINGTYPE を参照する IFCRELDEFINESBYTYPE の参照は、除去しないので
-	// ちゃんと当該エンティティに解決する（宙ぶらりんにならない）。
+	// IFCFOOTINGTYPE を参照する IFCRELDEFINESBYTYPE の参照は、当該エンティティに解決する
+	// （未解決の参照にならない）。エンティティを除去しないため。
 	std::string const text = "#1=IFCFOOTINGTYPE('g',$,'FT1',$);\n"
 							 "#2=IFCRELDEFINESBYTYPE('r',$,$,$,(#3),#1);\n";
 	Model const model = loadIfcFromText(text);
@@ -115,7 +116,7 @@ TEST(missing_file_reports_not_ok)
 TEST(loads_all_homeskz_fixtures)
 {
 	// フィクスチャの一覧は tests/Fixtures.h が唯一の定義（各テストが独自の一覧を持つと、
-	// フィクスチャを足したときに一部のテストだけ素通りする）。
+	// フィクスチャを追加したときに一部のテストだけが新しいフィクスチャを検証しない）。
 	HomeskzIfcTests::forEachFixture(failures,
 									[&](const std::string&, const Model& model)
 									{

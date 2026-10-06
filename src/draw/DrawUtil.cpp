@@ -1,8 +1,9 @@
 //
 //	draw/DrawUtil.cpp
 //
-//	draw/ 共通ヘルパーの実装。呼ぶ SDK API はいずれも従来 各 draw/*.cpp が個別に
+//	draw/ 共通ヘルパーの実装。呼び出す SDK API はいずれも従来 各 draw/*.cpp が個別に
 //	持っていたものと同一で、集約しただけ（振る舞いは変えない）。
+//
 //	【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include するため、この翻訳単位は
 //	プラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse ライブラリには
 //	入れない（CLAUDE.md「依存の向きは厳守する」）。
@@ -37,8 +38,8 @@ namespace HomeskzIfcImport::draw
 	{
 		// 図面の**デザインレイヤ**を先頭から順に辿る。VWDocument::GetDrawingHeaderFristMember
 		// （SDK の綴りママ）が図面のオブジェクト列の先頭＝最初のレイヤで、以降は NextObject で
-		// たどれる。レイヤ以外が混ざっても IsLayerObject で弾く（ISDK に「レイヤだけを列挙する」
-		// 呼び出しは無いため、この走査が唯一の手立て）。
+		// 辿れる。レイヤ以外が混ざっても IsLayerObject で除外する（ISDK に「レイヤだけを列挙
+		// する」呼び出しは無いため、この走査が唯一の手段）。
 		//
 		// **シートレイヤは除く**（VWLayerObj::GetLayerType が kLayerSheet=2 を返すもの）。
 		// ビューポートに映るのはデザインレイヤだけなので、シートレイヤを混ぜても
@@ -62,7 +63,7 @@ namespace HomeskzIfcImport::draw
 			catch (...)
 			{
 				// 走査中の異常で図全体を落とさない（CLAUDE.md「エラーハンドリング」）。
-				// そこまでに拾えたレイヤだけを返す（絞り込みの取りこぼしは、そのレイヤが
+				// そこまでに取得できたレイヤだけを返す（絞り込みの取りこぼしは、そのレイヤが
 				// 図に映り込むだけで済む）。
 				return layers;
 			}
@@ -71,17 +72,17 @@ namespace HomeskzIfcImport::draw
 
 		// 図面のクラスをすべて集める（昇順・重複なしの vector で返す）。
 		//
-		// **ビューポートはクラスの表示を明示しないと非表示のまま**なので（M13 のローカル確認
-		// で判明。レイヤは命令どおりなのに図形が 1 つも出なかった）、映したいクラスを
-		// 1 つずつ表示へ戻す必要がある。ここでは**ドキュメントの全クラスを表示**にする——
-		// ビューポートごとに映る/映らないをクラスで絞る要件は無く、絞らないなら「どのクラスが
-		// 要るか」を推し量る必要も無い。
-		//
 		// 列挙は VWClass::ForEachClass（ISDK::ForEachClass の VWFC 版）。**受け取った VWClass は
 		// そのまま InternalIndex へ変換できる**（VWClass::operator InternalIndex）。
 		// doGuestClasses=true は参照ファイル由来（ゲスト）のクラスも含める指定で、
 		// 「全クラス表示」の趣旨どおり含める（ビューポートへ設定できないものは
 		// SetViewportClassVisibility が false を返すだけで無害）。
+		//
+		// 理由: **ビューポートはクラスの表示を明示しないと非表示のまま**なので（M13 のローカル
+		// 確認で判明。レイヤは命令どおりなのに図形が 1 つも表示されなかった）、映したいクラスを
+		// 1 つずつ表示へ戻す必要がある。ここでは**ドキュメントの全クラスを表示**にする——
+		// ビューポートごとに映る/映らないをクラスで絞る要件は無く、絞らないなら「どのクラスが
+		// 要るか」を推定する必要も無い。
 		std::vector<InternalIndex> AllClasses()
 		{
 			std::set<InternalIndex> classes;
@@ -98,17 +99,18 @@ namespace HomeskzIfcImport::draw
 			catch (...)
 			{
 				// 列挙中の異常で図全体を落とさない（CLAUDE.md「エラーハンドリング」）。
-				// そこまでに拾えたクラスだけを返す（取りこぼしたクラスは、そのクラスの
+				// そこまでに取得できたクラスだけを返す（取りこぼしたクラスは、そのクラスの
 				// 図形がビューポートに映らないだけで済む）。**catch の中で return する**のは
 				// AllLayers と同じ形で、clang-tidy の bugprone-empty-catch（コメントだけの
-				// catch は握り潰しとみなす）を避けるためでもある。
+				// catch は例外の無視とみなす）を避けるためでもある。
 				return {classes.begin(), classes.end()};
 			}
 			return {classes.begin(), classes.end()};
 		}
 
-		// 名前が hiddenNames のどれかに当たるクラスか。**図面に無い名前は当たらないだけ**で、
-		// クラスを作らない（AddClass は無ければ作るので使わない。CLAUDE.md 開発の基本方針 5）。
+		// 名前が hiddenNames のどれかに一致するクラスか。**図面に無い名前は一致しないだけ**で、
+		// クラスを作成しない（AddClass は無ければ作成するので使わない。CLAUDE.md 開発の
+		// 基本方針 5）。
 		bool IsHiddenClass(InternalIndex index, const std::vector<std::string>& hiddenNames)
 		{
 			if (hiddenNames.empty())
@@ -122,7 +124,7 @@ namespace HomeskzIfcImport::draw
 		// ビューポートで指定のクラスを表示へ戻し、hiddenNames に挙がったものだけ非表示にする
 		// （表示へ戻せた数を返す）。**表示種別の値をここ 1 か所に閉じ込める**ためのもの。
 		// 隠すクラスも**明示的に非表示を書く**——ビューポートの既定が非表示なのは M13 の実機で
-		// 見ただけで、既存のビューポートや SDK の版で違っても隠れるようにする。
+		// 確認しただけで、既存のビューポートや SDK の版で違っても隠れるようにする。
 		std::size_t ShowClasses(MCObjectHandle viewport, const std::vector<InternalIndex>& classes,
 								const std::vector<std::string>& hiddenNames)
 		{
@@ -150,7 +152,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// 構成要素（層）1 枚のクラスを名前で設定する。オブジェクト本体の SetClassByName と
-		// 同じ作法（AddClass は既存なら索引を返し、無ければ作る）で、クラス名が空なら
+		// 同じ作法（AddClass は既存なら索引を返し、無ければ作成する）で、クラス名が空なら
 		// 何もしない（層は無クラス＝既定クラスのまま）。
 		void SetComponentClassByName(MCObjectHandle object, short componentIndex,
 									 const std::string& className)
@@ -178,16 +180,16 @@ namespace HomeskzIfcImport::draw
 		if (className.empty())
 			return;
 
-		// 【計測】実機 round 1 で `SetClassByName` ＋ `SetAllAttributesByClass` が構造材 1 本
-		// につき 82.8ms（全体の 45%）だった（docs/DEV-NOTES.md「描画の高速化」）。**2 つの
-		// どちらが重いのか・その中のどの呼び出しかを分けないと直しようが無い**ので、
-		// 呼び出し 1 つずつを区間にする。
+		// 【計測】呼び出し 1 つずつを区間にする。**区間は要素で分けず、呼び出しで分ける。**
 		//
-		// **区間は要素で分けず、呼び出しで分ける。** ここは構造材・タグ・スラブ・線が共通で
-		// 通る場所なので、要素ごとに分けるには呼び出し側で包むしかなく、そうすると内側の
-		// この区間と入れ子になる（core/DrawTiming.h「使う側の作法」）。要素の内訳は round 1
-		// で採れている——**タグ・スラブは合わせても 1.3 秒**なので、大きく出た区間は構造材の
-		// ものと読んでよい。
+		// 理由: 実機 round 1 で `SetClassByName` ＋ `SetAllAttributesByClass` が構造材 1 本
+		// につき 82.8ms（全体の 45%）だった（docs/DEV-NOTES.md「描画の高速化」）。**2 つの
+		// どちらが重いのか・その中のどの呼び出しかを分けないと修正できない。**
+		// ここは構造材・タグ・スラブ・線が共通で通る場所なので、要素ごとに分けるには
+		// 呼び出し側で包むしかなく、そうすると内側のこの区間と入れ子になる
+		// （core/DrawTiming.h「使う側の作法」）。要素の内訳は round 1 で取得済み——
+		// **タグ・スラブは合わせても 1.3 秒**なので、大きく出た区間は構造材のものと
+		// 判断してよい。
 		InternalIndex classID = 0;
 		{
 			VW_DRAW_TIME("クラス:索引引き(AddClass)");
@@ -207,8 +209,8 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// パラメータが無い PIO を覗いたときは例外が出る。呼び出し側は「読めなかった」
-			// を空文字で受ければよいので、ここで畳む（1 つの読み損ないで描画を止めない）。
+			// パラメータが無い PIO を参照したときは例外が出る。呼び出し側は「読めなかった」
+			// を空文字で受ければよいので、ここで処理する（1 つの読み取り失敗で描画を止めない）。
 			return {};
 		}
 	}
@@ -230,9 +232,9 @@ namespace HomeskzIfcImport::draw
 	{
 		// 【計測】7 つを 1 つずつ区間にする（上記 SetClassByName の【計測】と同じ理由）。
 		// **分け方に意味がある**——7 つが均等に重ければ「属性を 1 つ書くたびに PIO が
-		// 作り直されている」という仮説の裏づけになり、1 つだけ突出していれば、その呼び出し
-		// 固有の話なので直し方は別になる。（実測はマーカー以外の 6 つが同額で、費用は PIO の
-		// 作り直しだった。構造材の直しは作る前に既定を立てる ScopedCreationClass になった。
+		// 再計算されている」という仮説の裏づけになり、1 つだけ突出していれば、その呼び出し
+		// 固有の問題なので対処は別になる。（実測はマーカー以外の 6 つが同額で、費用は PIO の
+		// 再計算だった。構造材の対処は作成前に既定を設定する ScopedCreationClass になった。
 		// docs/DEV-NOTES.md「描画の高速化」）
 		{
 			VW_DRAW_TIME("属性:ペン色");
@@ -278,7 +280,7 @@ namespace HomeskzIfcImport::draw
 			return;
 		VW_DRAW_TIME("クラス:既定を立てる");
 		fClassID = gSDK->AddClass(TXString(className.c_str()));
-		// 退避する（戻し方はヘッダ）。不透明度は 2 旗版で読む（1 旗版
+		// 退避する（戻し方はヘッダ）。不透明度は 2 フラグ版で読む（1 フラグ版
 		// GetDefaultOpacityByClass は書いた後も false を返す。Findings「Attributes and Classes」）。
 		fPreviousClass = gSDK->GetDefaultClass();
 		gSDK->GetDefaultOpacityByClassN(fPreviousPenOpacity, fPreviousFillOpacity);
@@ -307,14 +309,15 @@ namespace HomeskzIfcImport::draw
 		if (!fActive)
 			return;
 		VW_DRAW_TIME("クラス:既定を戻す");
-		// **値を書くことが旗を下ろすことである**（1 対 1。色だけ 1 本で 2 つ）。
+		// **値を書くことがフラグを解除することである**（1 対 1。色だけ 1 回の呼び出しで 2 つ）。
 		gSDK->SetDefaultColors(fPreviousColors);
 		gSDK->SetDefaultLineWeight(fPreviousLineWeight);
 		gSDK->SetDefaultPenPatN(fPreviousPenPat);
 		gSDK->SetDefaultFillPat(fPreviousFillPat);
 		gSDK->SetDefaultOpacityByClassN(fPreviousPenOpacity, fPreviousFillOpacity);
 		gSDK->SetDefaultClass(fPreviousClass);
-		// 値を書いた時点で 5 つとも下りているので、元から立っていた旗だけを立て直す。
+		// 値を書いた時点で 5 つとも解除されているので、元から設定されていたフラグだけを
+		// 設定し直す。
 		if (fPreviousPColorsByClass)
 			gSDK->SetDefaultPColorsByClass();
 		if (fPreviousFColorsByClass)
@@ -342,7 +345,7 @@ namespace HomeskzIfcImport::draw
 		}
 		if (!inherited)
 		{
-			// 継いでいなければ従来の作り方へ戻す（中で区間を開くので、ここは包まない）。
+			// 継承していなければ従来の設定方法へ戻す（中で区間を開くので、ここは包まない）。
 			SetClassWithAttributes(object, className);
 			return false;
 		}
@@ -402,14 +405,14 @@ namespace HomeskzIfcImport::draw
 
 	void SetComponents(MCObjectHandle object, const std::vector<core::ComponentCommand>& components)
 	{
-		// 【計測】実機 round 1 でここが 51 回・1 回 539.7ms（全体の 29%）だった
+		// 【計測】呼び出し 1 つずつを区間にする（外側のひとまとめの区間は入れ子になるので
+		// 削除した）。実機 round 1 でここが 51 回・1 回 539.7ms（全体の 29%）だった
 		// （docs/DEV-NOTES.md「描画の高速化」）。**層 1 枚につき 6 回以上の書き込み**が、
-		// そのたびに壁／スラブを作り直しているのではないか、という仮説を確かめるため
-		// 呼び出し 1 つずつを区間にする（外側のひとまとめの区間は入れ子になるので外した）。
+		// そのたびに壁／スラブを再計算させているのではないか、という仮説を確認するため。
 		//
 		// **立上りとスラブは区間では分けない**——分けるには呼び出し側で包むしかなく、
 		// それでは内側のこの区間と入れ子になる。どちらがどれだけかは、診断ログのフェーズの
-		// 時刻差（「基礎の立上りを描画しています…」と「床を描画しています…」）が持つ。
+		// 時刻差（「基礎の立上りを描画しています…」と「床を描画しています…」）で分かる。
 		const short original = CountComponents(object);
 		const auto wanted = static_cast<short>(components.size());
 
@@ -426,8 +429,9 @@ namespace HomeskzIfcImport::draw
 			}
 			{
 				// **厚みは挿入のときにも渡している**（上の第 3 引数）。ここが重いなら、
-				// この 1 行は二重に書いているだけの可能性がある——外してよいかは
-				// 実機で確かめる（外すと層の厚みが既定になる恐れがあるので、数字を見てから）。
+				// この 1 行は二重に書いているだけの可能性がある——削除してよいかは
+				// 実機で確認する（削除すると層の厚みが既定になる恐れがあるので、計測値を
+				// 確認してから）。
 				VW_DRAW_TIME("構成層:幅");
 				gSDK->SetComponentWidth(object, index, component.thickness);
 			}
@@ -621,7 +625,7 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// 選択が残るだけで図は壊れない（ヘッダ参照）。そこで打ち切る。
+			// 選択が残るだけで図は壊れない（ヘッダ参照）。ここで打ち切る。
 			return false;
 		}
 		return true;
@@ -632,7 +636,7 @@ namespace HomeskzIfcImport::draw
 	{
 		// いま開いている undo スコープ（無ければ nullptr）。インポートはメインスレッドから
 		// 1 本しか走らないので、高々 1 つで足りる。要素側が引数で持ち回らずに済むように、
-		// 記録の入口（RecordCreatedLayer / NoteExistingLayerUsed）はここを見る。
+		// 記録の入口（RecordCreatedLayer / NoteExistingLayerUsed）はここを参照する。
 		ImportUndoScope* gActiveUndoScope = nullptr;
 	} // namespace
 
@@ -671,8 +675,8 @@ namespace HomeskzIfcImport::draw
 		ImportUndoScope* scope = gActiveUndoScope;
 		if (scope == nullptr || layer == nil || scope->contains(layer))
 			return;
-		// 「あとで消してよいもの」として undo テーブルへ登録する。レイヤを消せば、その上の
-		// 図形（構造材・壁・スラブ・シンボル・ビューポート）もまとめて消える。
+		// 「あとで削除してよいもの」として undo テーブルへ登録する。レイヤを削除すれば、その上の
+		// 図形（構造材・壁・スラブ・シンボル・ビューポート）もまとめて削除される。
 		gSDK->AddAfterSwapObject(layer);
 		scope->fCreatedLayers.push_back(layer);
 	}
@@ -681,7 +685,7 @@ namespace HomeskzIfcImport::draw
 	{
 		if (gActiveUndoScope == nullptr || object == nil)
 			return;
-		// レイヤと違い一覧には控えない（数えるのは「取り消しで戻せるか」の判断材料であって、
+		// レイヤと違い一覧には記録しない（数えるのは「取り消しで戻せるか」の判断材料であって、
 		// 下ごしらえのオブジェクトはその判断に関係しないため）。
 		gSDK->AddAfterSwapObject(object);
 	}
@@ -691,7 +695,7 @@ namespace HomeskzIfcImport::draw
 		ImportUndoScope* scope = gActiveUndoScope;
 		if (scope == nullptr || layer == nil || scope->contains(layer))
 			return;
-		// **登場順で重複なし。** 同じレイヤへは要素ごとに何度も描くので、素朴に押し込むと
+		// **登場順で重複なし。** 同じレイヤへは要素ごとに何度も描画するので、そのまま追加すると
 		// 同じ名前が並ぶ（PushUnique と同じ理由）。
 		if (std::ranges::find(scope->fExistingLayers, name) == scope->fExistingLayers.end())
 			scope->fExistingLayers.push_back(name);
@@ -700,8 +704,8 @@ namespace HomeskzIfcImport::draw
 	MCObjectHandle PrepareLayer(const std::string& layerName)
 	{
 		// **命令 1 件ごとに通る**（横架材 266 本なら 266 回）。名前引きとカレントレイヤの
-		// 切り替えが積み上がっていないかを見るための区間。ActivateExistingLayer と同じ
-		// 名前へ積む——どちらも「描く前にレイヤを決める」1 つの仕事である。
+		// 切り替えの時間が累積していないかを確認するための区間。ActivateExistingLayer と同じ
+		// 名前で計上する——どちらも「描画する前にレイヤを決める」1 つの処理である。
 		VW_DRAW_TIME("共通:レイヤ切替");
 
 		const TXString name(layerName.c_str());
@@ -709,7 +713,7 @@ namespace HomeskzIfcImport::draw
 		if (layer == nil)
 		{
 			layer = gSDK->CreateLayer(name, static_cast<short>(LayerKind::Design));
-			RecordCreatedLayer(layer); // 取り消しで消してよい（このインポートが作った）
+			RecordCreatedLayer(layer); // 取り消しで削除してよい（このインポートが作成した）
 		}
 		else
 		{
@@ -727,7 +731,7 @@ namespace HomeskzIfcImport::draw
 		MCObjectHandle layer = gSDK->GetNamedLayer(TXString(layerName.c_str()));
 		if (layer == nil)
 			return nil;
-		// ストーリ由来のレイヤは drawStories が作った（＝登録済み）なので何も起きない。
+		// ストーリ由来のレイヤは drawStories が作成した（＝登録済み）なので何も起きない。
 		// 取り込み前から在ったものだけが「戻らない」印になる。
 		NoteExistingLayerUsed(layer, layerName);
 		gSDK->SetCurrentLayer(layer);
@@ -741,18 +745,19 @@ namespace HomeskzIfcImport::draw
 		// 扱う**（DrawUtil.h の ViewportProjection）。
 		constexpr TStandardView kViewTop = standardViewTop;
 
-		// ビューポートを 2D/平面（Top/Plan）で**正しく描かせる**。作り直せたら true。
+		// ビューポートを 2D/平面（Top/Plan）で**正しく描画させる**。再生成できたら true。
+		// 最後の更新は呼び出し元（ConfigureViewport の末尾）が行い、そこで 2D/平面の
+		// キャッシュが生成される。
 		//
-		// 【なぜ「OFF → 更新 → ON」なのか】ただ Project 2D を ON にするだけでは足りない——生成
+		// **反映されたかどうかは読み戻して確認する**——SDK の setter は書き込めなかったときも
+		// 失敗を返さずに何もしないので、戻り値の無いまま「設定したつもり」で終わらせない。
+		//
+		// 【なぜ「OFF → 更新 → ON」なのか】Project 2D を ON にするだけでは足りない——生成
 		// 直後のビューポートはパレット上こそ「2D/平面」だが、描画キャッシュは 3D の「上」
-		// ビューのままで、**更新ボタンを押しても作り直されない**（実機の症状）。
+		// ビューのままで、**更新ボタンを押しても再生成されない**（実機の症状）。
 		// 手動での唯一の対処が「いったん『上』を選んでから『2D/平面』へ戻す」ことなので、
-		// その操作をそのままなぞる: 向きを「上」にし、Project 2D を OFF にして**更新を挟み**
-		// （＝ 3D の「上」でキャッシュを作り直させ）、その上で ON へ戻す。最後の更新は呼び出し
-		// 元（ConfigureViewport の末尾）が行い、そこで 2D/平面のキャッシュができる。
-		//
-		// **入ったかどうかは読み戻して確かめる**——SDK の setter は書けなかったときも黙って
-		// 何もしないので、戻り値の無いまま「設定したつもり」で終わらせない。
+		// その操作をそのまま再現する: 向きを「上」にし、Project 2D を OFF にして**更新を挟み**
+		// （＝ 3D の「上」でキャッシュを再生成させ）、その上で ON へ戻す。
 		bool ForcePlanView(VWViewportObj& viewport)
 		{
 			viewport.SetViewType(kViewTop);
@@ -777,13 +782,13 @@ namespace HomeskzIfcImport::draw
 	//   * VWClass::ForEachClass(true, cb)                 … 図面の全クラスの列挙
 	//                                                       （ISDK::ForEachClass の VWFC 版）
 	//   * gSDK->SetViewportClassVisibility(vp, idx, 0)    … クラス表示（既定は非表示）
-	//   * gSDK->InternalIndexToNameN(idx, name)           … 隠すクラスを名前で見分ける
+	//   * gSDK->InternalIndexToNameN(idx, name)           … 隠すクラスを名前で判別する
 	//   * VWViewportObj(vp).SetScale / SetDescription / SetLocator / Update
 	//                                                     … 縮尺（1003）・図面タイトル（1032）・
 	//                                                       図番（1033）・描画更新
 	//   * VWViewportObj(vp).SetViewType / SetProject2D / GetProject2D
 	//                                                     … ビューの向き（1007）・2D/平面か
-	//                                                       （1005）。伏図の作り直しに使う
+	//                                                       （1005）。伏図の再生成に使う
 	//                                                       （DrawUtil.h の ViewportProjection）
 	ViewportSetup PrepareViewportSetup()
 	{
@@ -815,7 +820,7 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// タイトルが付かなくても図は描ける（1 つの失敗で全体を止めない）ので、
+			// タイトルが付かなくても図は描画できる（1 つの失敗で全体を止めない）ので、
 			// レイヤはそのまま返す。
 			return layer;
 		}
@@ -833,13 +838,14 @@ namespace HomeskzIfcImport::draw
 									 const core::ViewportCommand& command,
 									 ViewportProjection projection, double scale)
 	{
-		// 【計測】実機 round 1 で 35 枚・1 枚 178.6ms（全体の 6.5%）だった
-		// （docs/DEV-NOTES.md「描画の高速化」）。**`vp.Update()` が何回走るかが効く**はず
-		// （伏図は ForcePlanView の中でもう 1 回走る）ので、ひとまとめではなく仕上げの
-		// 手順ごとに区間へ割る。
+		// 【計測】ひとまとめではなく仕上げの手順ごとに区間へ分ける。実機 round 1 で 35 枚・
+		// 1 枚 178.6ms（全体の 6.5%）だった（docs/DEV-NOTES.md「描画の高速化」）。
+		// **`vp.Update()` の実行回数が影響する**はず（伏図は ForcePlanView の中でもう 1 回
+		// 実行される）なので、手順ごとの内訳を取る。
 		ViewportFinish finish;
 		// 表示レイヤ: まず全部隠し、命令に挙げたものだけ表示へ戻す。**存在しないレイヤ名は
-		// 黙って読み飛ばす**（要素の描画がスキップされてレイヤが無い場合など。図自体は残す）。
+		// 何も報告せずに読み飛ばす**（要素の描画がスキップされてレイヤが無い場合など。図自体は
+		// 残す）。
 		{
 			VW_DRAW_TIME("図:表示レイヤ");
 			for (const MCObjectHandle layer : setup.layers)
@@ -874,7 +880,7 @@ namespace HomeskzIfcImport::draw
 		}
 		finish.planViewApplied = projection == ViewportProjection::Keep;
 
-		// 縮尺・［投影の作り直し］・ラベル・更新。**縮尺は呼び出し側が用紙と建物の大きさから
+		// 縮尺・［投影の再生成］・ラベル・更新。**縮尺は呼び出し側が用紙と建物の大きさから
 		// 決めて渡す**（DrawUtil.h の ConfigureViewport）。設定に失敗しても図そのものは残す。
 		try
 		{
@@ -886,7 +892,7 @@ namespace HomeskzIfcImport::draw
 			}
 			if (projection == ViewportProjection::Plan)
 			{
-				// **この中で 1 回 Update が走る**（ForcePlanView の「OFF → 更新 → ON」）。
+				// **この中で 1 回 Update が実行される**（ForcePlanView の「OFF → 更新 → ON」）。
 				VW_DRAW_TIME("図:2D平面の作り直し");
 				finish.planViewApplied = ForcePlanView(vp);
 			}
@@ -950,8 +956,8 @@ namespace HomeskzIfcImport::draw
 			!inches(ObjectVariable::SheetPaperHeight, size.y))
 			size = paper.sheet;
 		if (size.x <= 0.0 || size.y <= 0.0)
-			// 用紙が読めなかった。既定（A3 横）で割り付ける——用紙が読めないことで図を捨てる
-			// より、既定で置いてローカルで直す方がよい。
+			// 用紙が読めなかった。既定（A3 横）で割り付ける——用紙が読めないことで図を破棄する
+			// より、既定で配置してローカルで修正する方がよい。
 			size = core::kDefaultPaperSize;
 		paper.paper = size;
 
@@ -965,8 +971,8 @@ namespace HomeskzIfcImport::draw
 		// 置いてある（単位の決め方・**四辺 0 を余白なしとして受け取る**理由は core/Layout.h）。
 		// ここは「SDK から読む」ことと「読めなかったこと」だけを持つ。
 		// **どの解釈を採ったかは生の値ごと診断へ出す**（draw/Sheet）ので、実機で確かめられる。
-		// ★**ISDK::GetPageMargins は戻り値を持たない**（void）ので、「書いてくれたのか」を
-		// 呼び出しの結果からは知れない。そこで**有り得ない値（負）を種に置いてから呼ぶ**
+		// ★**ISDK::GetPageMargins は戻り値を持たない**（void）ので、「値が書き込まれたか」を
+		// 呼び出しの結果からは判別できない。そこで**有り得ない値（負）を種に置いてから呼ぶ**
 		// ——戻ってきて種のままなら、SDK は 4 辺のどれにも触れていない。
 		// **これをしないと「縁なし印刷の 0」と「読み出せずに 0 のまま」が見分けられない**
 		// （実機は用紙も印刷可能領域も 420×297 ＝ A3 いっぱいで、どちらの説明も付いた。
@@ -981,17 +987,17 @@ namespace HomeskzIfcImport::draw
 		catch (...)
 		{
 			// 余白を読めなかった。用紙いっぱいを使う（狭める方向の仮定を置かない）。
-			// **ここで得た 0 は「余白なし」ではない**ので、解釈にはかけずに落とす
+			// **ここで得た 0 は「余白なし」ではない**ので、解釈にはかけずに破棄する
 			// ——縁なし印刷の 0 と、読めなかった 0 を同じ扱いにしない。
 			raw = core::PageMargins{};
 			marginsQueried = false;
 		}
 		// **4 辺とも種のまま（負）＝ SDK は 1 つも書かなかった。** 例外が飛ばなくても
-		// 「読めなかった」と同じ扱いにし、生の値は 0 に均してから診断へ出す——種の値を
+		// 「読めなかった」と同じ扱いにし、生の値は 0 に揃えてから診断へ出す——種の値を
 		// 「SDK が返した値」として見せると、読む側が実在の余白だと取り違える。
-		// **一部だけ書かれたときは均さない**（残った負の値がそのまま診断に出て、部分的に
+		// **一部だけ書かれたときは 0 に揃えない**（残った負の値がそのまま診断に出て、部分的に
 		// しか書かれなかったことが読み取れる。負がある時点で resolvePageMargins は
-		// 解釈できなかった側へ倒す）。
+		// 解釈できなかった側として扱う）。
 		if (marginsQueried && raw.left < 0.0 && raw.right < 0.0 && raw.bottom < 0.0 &&
 			raw.top < 0.0)
 		{
@@ -1191,7 +1197,7 @@ namespace HomeskzIfcImport::draw
 		if (!gSDK->GetObjectStoryBound(object, boundID, data))
 			return "読めない";
 		// fBound は SDK の EStoryObjectBound（0=レイヤの高さ / 1=レイヤの壁高 / 2=ストーリ）。
-		// **数のまま出す**——名前を付け替えると、SDK 側で値が増えたときに嘘になる。
+		// **数値のまま出力する**——名前に置き換えると、SDK 側で値が増えたときに誤った表示になる。
 		std::array<char, 192> buffer{};
 		std::snprintf(buffer.data(), buffer.size(), "種別=%d 階=%+d レベル=\"%s\" offset=%g",
 					  static_cast<int>(data.fBound), static_cast<int>(data.fBoundStory),
@@ -1208,7 +1214,7 @@ namespace HomeskzIfcImport::draw
 			return "パスを引けない";
 		std::string text;
 		// ピース索引の起点は 0 / 1 のどちらの規約もありうる（PathProbe と同じ用心）ので
-		// 両方見る。点は先頭 3 つまで（潰れているかは 2 点あれば分かる）。
+		// 両方確認する。点は先頭 3 つまで（長さ 0 に退化しているかは 2 点あれば分かる）。
 		for (Sint32 piece = 0; piece <= 1; ++piece)
 		{
 			const Sint32 count = gSDK->NurbsGetNumPts(path, piece);
@@ -1246,7 +1252,7 @@ namespace HomeskzIfcImport::draw
 		if (path == nil)
 			return false;
 		// ピース索引の起点は 0 / 1 のどちらの規約もありうる（DescribePioPath と同じ用心）ので
-		// 両方見て、**2 点以上あった最初のピース**を測る。測るのは先頭と末尾の距離
+		// 両方確認して、**2 点以上あった最初のピース**を測る。測るのは先頭と末尾の距離
 		// ——構造材のパスは直線 1 本なので、途中の点は通過点にすぎない。
 		for (Sint32 piece = 0; piece <= 1; ++piece)
 		{
@@ -1274,7 +1280,7 @@ namespace HomeskzIfcImport::draw
 		if (!gSDK->GetObjectBounds(viewport, bounds))
 			return false;
 		// WorldRect は top > bottom（Y 上向き）。中心は上下どちらから見ても同じ式でよいが、
-		// 大きさは絶対値で見る。
+		// 大きさは絶対値で求める。
 		center = core::Vec2{(bounds.left + bounds.right) / 2.0, (bounds.top + bounds.bottom) / 2.0};
 		size =
 			core::Vec2{std::abs(bounds.right - bounds.left), std::abs(bounds.top - bounds.bottom)};
@@ -1317,7 +1323,7 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// 描き直せなくても図は残る（前の中身のまま）。**測った外形は当てにならない**
+			// 再描画できなくても図は残る（前の中身のまま）。**測った外形は信頼できない**
 			// ので、呼び出し側はこれを「はみ出した」とは別に数える（DrawUtil.h）。
 			return false;
 		}
@@ -1329,7 +1335,7 @@ namespace HomeskzIfcImport::draw
 		std::array<char, 48> buffer{};
 		std::snprintf(buffer.data(), buffer.size(), "%.1f×%.1f", size.x, size.y);
 		// **戻り型を繰り返さない**（`return std::string(...)` は clang-tidy の
-		// modernize-return-braced-init-list に引っかかる。CI の tidy-mac / tidy-windows）。
+		// modernize-return-braced-init-list で警告される。CI の tidy-mac / tidy-windows）。
 		// 無名名前空間のラムダが同じ形を書けているのは、あちらが戻り型を宣言していないため。
 		return {buffer.data()};
 	}
@@ -1339,8 +1345,8 @@ namespace HomeskzIfcImport::draw
 	{
 		std::string text =
 			number + ": 測った " + DescribePaperSize(drawn) + " / 枠 " + DescribePaperSize(frame);
-		// はみ出した軸と量。**両軸とも収まっているのに呼ばれた**ときは何も足さない
-		// （呼び出し側の判定と食い違ったことが読み取れるように、黙って辻褄を合わせない）。
+		// はみ出した軸と量。**両軸とも収まっているのに呼ばれた**ときは何も追加しない
+		// （呼び出し側の判定と食い違ったことが読み取れるように、出力を整合させる補正はしない）。
 		const auto over = [](const char* axis, double drawnLen, double frameLen)
 		{
 			std::string part;

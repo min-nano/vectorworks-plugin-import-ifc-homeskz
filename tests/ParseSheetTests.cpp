@@ -9,9 +9,9 @@
 //	レイヤの絞り込み・シートレイヤ番号の連番（基礎伏図 1 →柱梁伏図 2… →母屋伏図）・
 //	基礎の有無による基礎伏図とアンカーボルトの出し分け・母屋伏図を作る階（屋根版のある階）・
 //	**グラフィック凡例**（柱梁伏図・母屋伏図は常に載せる。基礎伏図はアンカーボルトを
-//	置いたときだけ）・
-//	**表示レイヤが必ずストーリの作るレイヤに実在すること**（レイヤ名の規約がズレていない）・
-//	並び順に依存しない決定性。実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
+//	置いたときだけ）・**表示レイヤが必ずストーリの作るレイヤに実在すること**（レイヤ名の
+//	規約がずれていない）・並び順に依存しない決定性。実フィクスチャのパスは CMake が
+//	HOMESKZ_FIXTURES_DIR で渡す。
 //
 
 #include "Fixtures.h"
@@ -89,7 +89,7 @@ namespace
 
 	// story 命令が作るデザインレイヤ名の全集合（伏図の表示レイヤはここに実在しなければ
 	// ならない）。基礎ストーリは buildStoryCommands には含まれないので、呼び出し側が
-	// 基礎のレイヤを足す。
+	// 基礎のレイヤを追加する。
 	std::set<std::string> storyLayerNames(const Model& model)
 	{
 		std::set<std::string> names;
@@ -160,7 +160,7 @@ TEST(MoyaCutShowsOnlyColumnsPiercingTheRoof)
 
 TEST(SpanLayersAtCutHandlesEmptySpans)
 {
-	// 柱が 1 本も無い（span レイヤが無い）文書でも落ちず、単に空になる。
+	// 柱が 1 本も無い（span レイヤが無い）文書でも異常終了せず、単に空になる。
 	CHECK(spanLayersAtCut({}, 1.25).empty());
 }
 
@@ -252,8 +252,9 @@ TEST(FloorFramingSheetPerPlanLevelWithBeamAndGridLayers)
 
 TEST(SkipFloorGetsFramingSheetPerBeamHeight)
 {
-	// スキップフロア_サンプルは 2FL に GL+2699（FL-872）/ GL+3531（FL-40）、RFL に GL+5542（軒高-832）/
-	// GL+6010（軒高-364）/ GL+6374（軒高±0）の横架材がある。高さは FL・軒高から書く。伏図は高さごとに 1 枚（ご要望）、同じ階に高さが複数あれば
+	// スキップフロア_サンプルは 2FL に GL+2699（FL-872）/ GL+3531（FL-40）、RFL に
+	// GL+5542（軒高-832）/ GL+6010（軒高-364）/ GL+6374（軒高±0）の横架材がある。高さは
+	// FL・軒高から書く。伏図は高さごとに 1 枚（ご要望）、同じ階に高さが複数あれば
 	// タイトルに高さを添える。
 	bool ok = false;
 	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
@@ -411,10 +412,10 @@ TEST(ViewportLayersExistAmongStoryLayers)
 {
 	// **伏図が映そうとするレイヤは必ず実在する**。ストーリが作るレイヤ名（＋通り芯・
 	// 基礎ストーリの 4 枚・伏図記号レイヤ）に含まれない名前があれば、レイヤ名の規約が
-	// どこかでズレている（命令はあるのにビューポートが空になる、という形の不具合を防ぐ
+	// どこかでずれている（命令はあるのにビューポートが空になる、という形の不具合を防ぐ
 	// 関門）。**伏図記号レイヤ（"{to}-柱伏図記号"）はストーリが作らない独立レイヤ**で、
 	// 通り芯 "共通" と同じく描画側（draw/ColumnMark）が用意するので、ここも通り芯と
-	// 同じ扱いで既知の名前に足す（規約を持つ parse/ColumnMark から引く）。
+	// 同じ扱いで既知の名前に追加する（規約を持つ parse/ColumnMark から引く）。
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)
 				   {

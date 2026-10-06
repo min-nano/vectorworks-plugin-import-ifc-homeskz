@@ -4,11 +4,12 @@
 //	解析中の共有コンテキスト（src/parse/Context）の単体テスト。VectorWorks SDK を一切
 //	include せず、無 SDK のテストハーネスで走る（CLAUDE.md「テスト方針」）。
 //
-//	コンテキストは「同じ Model に対する同じ前処理を 1 回で済ませる」ためのもので、
-//	**振る舞いを変えないこと**が最も重要な性質。したがってここでは
-//	  1. 何度呼んでも同じ結果を返す（キャッシュが効いており、かつ内容が壊れない）
+//	ここでは次の 2 点を確かめる。
+//	  1. 何度呼んでも同じ結果を返す（キャッシュが機能しており、かつ内容が壊れない）
 //	  2. コンテキスト経由の結果が、コンテキストを使わない従来の関数と一致する
-//	の 2 点を確かめる。2 が崩れればキャッシュがどこかで嘘をついている。
+//	2 が崩れれば、キャッシュがどこかで誤った結果を返している。
+//	コンテキストは「同じ Model に対する同じ前処理を 1 回で済ませる」ためのもので、
+//	**振る舞いを変えないこと**が最も重要な性質であるため、この 2 点を検証の対象とする。
 //
 //	実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
@@ -133,7 +134,7 @@ TEST(unknown_storey_id_yields_no_elements)
 	const Model& model = fixture(kLoftFixture, ok);
 	CHECK(ok);
 
-	// 存在しない #id でも落ちず、空を返して覚える（1 要素の欠損で全体を止めない）。
+	// 存在しない #id でも異常終了せず、空を返して記憶する（1 要素の欠損で全体を止めない）。
 	Context context(model);
 	CHECK(context.storyElements(-1).empty());
 	CHECK(context.storyElements(-1).empty());
@@ -156,14 +157,14 @@ TEST(loft_floor_regions_are_cached_and_match_the_plain_call)
 
 	// 1 回目は合成が走り、2 回目はキャッシュヒット（本番では storyHasLoftFloor と
 	// buildFloorCommands が同じ屋根階について続けて呼ぶ経路にあたる）。**同じ実体を
-	// 返すこと**がキャッシュが効いている証拠で、セル格子の flood fill をやり直していない。
+	// 返すこと**がキャッシュが機能している証拠で、セル格子の flood fill をやり直していない。
 	const std::vector<parse::LoftFloorRegion>& first = context.loftFloorRegions(topId);
 	const std::vector<parse::LoftFloorRegion>& second = context.loftFloorRegions(topId);
 	CHECK_EQ(&first, &second);
 
 	// 内容はコンテキストを使わない従来の関数と一致する（実フィクスチャの屋根階は床梁が
 	// 領域を囲まないため空になる——合成そのものの中身は ParseFloorTests の合成モデルで
-	// 検証しており、ここで見たいのは「キャッシュが答えを変えないこと」）。
+	// 検証しており、ここで確かめたいのは「キャッシュが答えを変えないこと」）。
 	const std::vector<parse::LoftFloorRegion> plain = parse::loftFloorRegions(model, topId);
 	CHECK_EQ(first.size(), plain.size());
 	for (std::size_t i = 0; i < first.size(); ++i)
@@ -241,9 +242,9 @@ TEST(unresolvable_roof_plane_is_remembered_as_absent)
 
 TEST(members_are_cached_and_match_the_plain_call)
 {
+	// 2 度目が同じ結果（同じ実体）を返し、キャッシュを通さない呼び出しとも一致すること。
 	// 横架材の解析はストーリ・垂木・登り梁の補正が共有するので、コンテキストは 1 回だけ
-	// 走らせて覚える。2 度目が同じ結果（同じ実体）を返し、キャッシュを通さない呼び出しとも
-	// 一致すること。
+	// 実行して結果を保持する。
 	bool ok = false;
 	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
@@ -271,9 +272,9 @@ TEST(members_are_cached_and_match_the_plain_call)
 
 TEST(columns_are_cached_and_match_the_plain_call)
 {
+	// 2 度目が同じ結果（同じ実体）を返し、キャッシュを通さない呼び出しとも一致すること。
 	// 柱の解析はストーリ（span 柱レベル）・Document の columns・登り梁の端部詰めが共有する
-	// ので、コンテキストは 1 回だけ走らせて覚える。2 度目が同じ結果（同じ実体）を返し、
-	// キャッシュを通さない呼び出しとも一致すること。
+	// ので、コンテキストは 1 回だけ実行して結果を保持する。
 	bool ok = false;
 	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
@@ -299,9 +300,9 @@ TEST(columns_are_cached_and_match_the_plain_call)
 
 TEST(walls_are_cached_and_match_the_plain_call)
 {
+	// 2 度目が同じ結果（同じ実体）を返し、キャッシュを通さない呼び出しとも一致すること。
 	// 立上りの解析は Document の walls と底盤の外面合わせが共有するので、コンテキストは
-	// 1 回だけ走らせて覚える。2 度目が同じ結果（同じ実体）を返し、キャッシュを通さない
-	// 呼び出しとも一致すること。
+	// 1 回だけ実行して結果を保持する。
 	bool ok = false;
 	const Model& model = fixture(kRoofFixture, ok);
 	CHECK(ok);
@@ -332,7 +333,7 @@ TEST(context_backed_commands_match_the_plain_commands)
 		[&](const std::string&, const Model& model)
 		{
 			// 1 つのコンテキストを全要素で共有した結果（＝buildDocument と同じ経路）と、
-			// 要素ごとに作り直した結果（＝従来の経路）が一致すること。
+			// 要素ごとに前処理を再計算した結果（＝従来の経路）が一致すること。
 			Context shared(model);
 			const std::vector<core::StoryCommand> stories = parse::buildStoryCommands(shared);
 			const std::vector<core::GridCommand> grids = parse::buildGridCommands(shared);

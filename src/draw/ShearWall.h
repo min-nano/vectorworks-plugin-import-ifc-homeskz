@@ -3,22 +3,22 @@
 //
 //	Phase 2（VW 描画）の耐力壁モジュール（docs/DEV-NOTES.md M19）。命令 1 つにつき
 //	**線分 PIO を 1 つ**置き、両端（柱芯）・種別・断面・内法をパラメータへ書いてリセットする。
-//	耐力壁そのものを描くのは PIO 本体（Extensions/ExtShearWall）で、ここはその設置だけを担う。
+//	耐力壁そのものを描画するのは PIO 本体（Extensions/ExtShearWall）で、ここはその設置だけを担う。
 //
 //	【PIO は本プラグインが提供する】柱記号（draw/ColumnMark）と同じく**同じモジュールへ
 //	同梱**する（ModuleMain がメニューコマンドと一緒に登録する）。インストールも自動更新も
 //	1 つで済み、耐力壁の規約（柱の探し方・クラス名）を解析側と 1 か所で共有できる。
 //
-//	【両端は柱芯】線分 PIO の 2 点は命令の start / end ＝**柱芯**で、実際に絵を描く範囲
-//	（軸組内法）は PIO がリセット時に見つけた柱の断面から引く。したがって柱を動かして
+//	【両端は柱芯】線分 PIO の 2 点は命令の start / end ＝**柱芯**で、実際に描画する範囲
+//	（軸組内法）は PIO がリセット時に検出した柱の断面から求める。したがって柱を動かして
 //	リセットすれば、耐力壁が追随して伸縮する。
 //
 //	【レイヤはストーリが作る】配置先の "n-耐力壁" はストーリのレベルなので**無ければ
-//	スキップ**（ActivateExistingLayer の規約）。柱記号の伏図記号レイヤのように自分で
-//	作ることはしない。
+//	スキップ**（ActivateExistingLayer の規約）。柱記号の伏図記号レイヤのように自身で
+//	生成することはしない。
 //
 //	**柱の描画後に呼ぶこと。** PIO はリセット時に対象レイヤの柱を検索するので、柱が
-//	置かれていないと控えの内法で描かれてしまう。
+//	置かれていないと控えの内法で描画されてしまう。
 //
 
 #pragma once
@@ -34,20 +34,20 @@
 namespace HomeskzIfcImport::draw
 {
 	// 耐力壁（shearWall 命令）を線分 PIO として置く。置けた数を返す。配置先レイヤが
-	// 用意できない命令・PIO を作れない命令はスキップし、その件数を outNote に残す
-	// （完了ダイアログの診断。draw/ColumnMark と同じ流儀）。
+	// 用意できない命令・PIO を生成できない命令はスキップし、その件数を outNote に残す
+	// （完了ダイアログの診断。draw/ColumnMark と同じ方式）。
 	//
-	// outHandles を渡すと「命令インデックス → 置いた PIO」を詰める（開発ビルドの
-	// recheckShearWalls が使う）。outInfo には平常でも出る記録（伏図記号のシンボルを
+	// outHandles を渡すと「命令インデックス → 置いた PIO」を格納する（開発ビルドの
+	// recheckShearWalls が使う）。outInfo には平常でも出力される記録（伏図記号のシンボルを
 	// 用意できたか）を返す（診断ログの「記録:」へ。core::DrawCounts）。
 	std::size_t drawShearWalls(const core::Document& document, core::ProgressReporter& progress,
 							   std::string* outNote = nullptr, ObjectHandles* outHandles = nullptr,
 							   std::string* outInfo = nullptr);
 
 #if VW_DRAW_VERIFY
-	// **取り込みの最後に、置いた耐力壁の軸組内法を描かずに求め直す**（開発ビルドだけ。
-	// draw/ShearWallPio.h の probeShearWall）。柱から引けた枚数・控えになった枚数と、
-	// 控えになった先頭の数枚の経過を outNotes に書く。図面には触らない。
+	// **取り込みの最後に、置いた耐力壁の軸組内法を描画せずに再計算する**（開発ビルドだけ。
+	// draw/ShearWallPio.h の probeShearWall）。柱から求められた枚数・控えになった枚数と、
+	// 控えになった先頭の数枚の経過を outNotes に書く。図面は変更しない。
 	void recheckShearWalls(const ObjectHandles& handles, std::string* outNotes);
 #endif
 } // namespace HomeskzIfcImport::draw

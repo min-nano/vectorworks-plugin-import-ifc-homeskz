@@ -1,8 +1,8 @@
 //
 //	CoreJsonTests.cpp
 //
-//	最小 JSON（src/core/Json.h）の単体テスト。**外から来たテキストを読む**ところなので、
-//	素直な往復だけでなく「壊れた入力で落ちない・受け付けない」ことを重点的に押さえる。
+//	最小 JSON（src/core/Json.h）の単体テスト。正常な往復だけでなく「壊れた入力で異常終了
+//	しない・受け付けない」ことを重点的に確認する。**外部から来たテキストを読む**処理であるため。
 //
 
 #include "TestFramework.h"
@@ -40,7 +40,7 @@ TEST(json_dump_scalars)
 
 TEST(json_dump_escapes)
 {
-	// 引用符・傍線・制御文字だけを逃がし、UTF-8 はそのまま通す。
+	// 引用符・傍線・制御文字だけをエスケープし、UTF-8 はそのまま通す。
 	CHECK_EQ(jsonQuote("a\"b\\c"), "\"a\\\"b\\\\c\"");
 	CHECK_EQ(jsonQuote("1\n2\t3"), "\"1\\n2\\t3\"");
 	CHECK_EQ(jsonQuote(std::string("\x01")), "\"\\u0001\"");
@@ -71,7 +71,7 @@ TEST(json_array_and_nesting)
 	CHECK_EQ(root.dump(), "{\"layers\":[\"1-FL\",\"2-FL\"]}");
 	CHECK(root.at("layers").isArray());
 	CHECK_EQ(root.at("layers").items().size(), std::size_t(2));
-	// 無い鍵は null（呼ぶ側に has() を撒かないための約束）。
+	// 無い鍵は null（呼ぶ側の各所に has() を書かせないための約束）。
 	CHECK(root.at("missing").isNull());
 	CHECK_EQ(root.at("missing").asString("既定"), std::string("既定"));
 }
@@ -133,7 +133,7 @@ TEST(json_dump_non_integral_and_non_finite)
 	// 整数で表せない数はそのまま（**ロケールに依らず小数点は "."**）。
 	CHECK_EQ(Json::number(1.5).dump(), "1.5");
 	CHECK_EQ(Json::number(-0.0125).dump(), "-0.0125");
-	// 巨大な値は整数扱いの範囲を外れるので指数表記へ落ちる（JSON として正しい）。
+	// 巨大な値は整数扱いの範囲を超えるので指数表記になる（JSON として正しい）。
 	CHECK(Json::number(1e300).dump().find('e') != std::string::npos);
 	// **短く書けるなら短く書くが、値は失わない**（17 桁要る値は 17 桁で書く）。
 	const double awkward = 0.1 + 0.2;
@@ -157,7 +157,7 @@ TEST(json_dump_escapes_the_rest_of_the_control_characters)
 
 TEST(json_kind_mismatch_is_a_no_op)
 {
-	// 型の違う操作は**黙って何もしない**（呼ぶ側に型検査を撒かないための約束）。
+	// 型の違う操作は**通知なく何もしない**（呼ぶ側の各所に型検査を書かせないための約束）。
 	Json number = Json::number(1);
 	number.push(Json::integer(2));
 	number.set("a", Json::integer(3));
@@ -196,7 +196,7 @@ TEST(json_parse_every_escape)
 	CHECK(Json::parse(R"("Aéあ")", value, error));
 	CHECK_EQ(value.asString(), std::string("Aéあ"));
 
-	// 知らない綴り・傍線で終わる・\u の桁が足りない／16 進でないものは受けない。
+	// 知らない綴り・傍線で終わる・\u の桁が足りない／16 進でないものは受け付けない。
 	CHECK(!Json::parse(R"("\q")", value, error));
 	CHECK(!Json::parse("\"\\", value, error));
 	CHECK(!Json::parse(R"("\u12")", value, error));
@@ -207,13 +207,13 @@ TEST(json_parse_surrogates)
 {
 	Json value;
 	std::string error;
-	// 上位サロゲートの後ろが \u でない → 単独の符号位置として読む（落ちない）。
+	// 上位サロゲートの後ろが \u でない → 単独の符号位置として読む（異常終了しない）。
 	CHECK(Json::parse(R"("\ud83dx")", value, error));
 	CHECK(!value.asString().empty());
 	// 上位の後ろが \u だが下位ではない → 位置を戻して両方を別々に読む。
 	CHECK(Json::parse(R"("\ud83dA")", value, error));
 	CHECK(!value.asString().empty());
-	// 上位の後ろの \u が壊れている → 受けない。
+	// 上位の後ろの \u が壊れている → 受け付けない。
 	CHECK(!Json::parse(R"("\ud83d\uZZZZ")", value, error));
 }
 
@@ -232,7 +232,7 @@ TEST(json_parse_rejects_more_broken_shapes)
 
 TEST(json_parse_rejects_deep_nesting)
 {
-	// **深い入れ子で再帰させない**（外から来たテキストでスタックを溢れさせない）。
+	// **深い入れ子で再帰させない**（外部から来たテキストでスタックを溢れさせない）。
 	std::string text(200, '[');
 	Json value;
 	std::string error;

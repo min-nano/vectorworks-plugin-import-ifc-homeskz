@@ -2,19 +2,19 @@
 //	CoreLayoutTests.cpp
 //
 //	用紙の割り付け（src/core/Layout）の単体テスト。VectorWorks SDK を一切 include せず、
-//	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
+//	無 SDK のテストハーネス（TestFramework.h）で実行する（CLAUDE.md「テスト方針」）。
 //	**期待値は手書きで持つ**（実装をなぞらず、A3・A2 といった実在の用紙で手計算した値を書く）。
 //
 //	検証項目（docs/DEV-NOTES.md M18）:
 //	  * 縮尺は**階梯の値だけ**から選ばれ、収まる中で最も大きい図（＝最小の分母）になること。
-//	    収まらなければ最も小さい図（1/200）へ倒れること。
+//	    収まらなければ最も小さい図（1/200）を選ぶこと。
 //	  * 伏図は**凡例のぶんだけ右を空けた**残りへ収まり、図の中心が空けた側にはみ出さないこと。
 //	    同じ内容・同じ印刷可能領域なら**何度計算しても同じ**（用紙をめくっても図が動かない）。
 //	  * 軸組図は**上下 2 段**が縦に収まる縮尺になること・1 段の枚数が用紙の幅から決まること・
 //	    マスが重ならないこと・必要なシートレイヤの枚数とタイトルの連番。
 //	  * 用紙の余白の解釈（resolvePageMargins）——単位がインチか mm かを「用紙 − 余白 ＝
 //	    シートレイヤの大きさ」で決めること・**四辺 0 を「余白なし」として受け取る**こと
-//	    （縁なし印刷ができる機種の設定。ここを「読めなかった」に倒すと誤警告になる）・
+//	    （縁なし印刷ができる機種の設定。ここを「読めなかった」と扱うと誤警告になる）・
 //	    そのうえで**シートレイヤが用紙より小さいときの 0 は信用しない**こと。
 //
 
@@ -60,8 +60,8 @@ namespace
 		return PaperArea{Vec2{-200.0, -138.5}, Vec2{200.0, 138.5}};
 	}
 
-	// 用紙の端との比較に持たせる遊び（mm）。マスの大きさは割り算で端数が出るので、
-	// 「はみ出していない」の判定は厳密な不等号では見ない。
+	// 用紙の端との比較に持たせる許容誤差（mm）。マスの大きさは割り算で端数が出るので、
+	// 「はみ出していない」の判定は厳密な不等号では行わない。
 	constexpr double kEdgeTol = 1e-6;
 
 	// 縮尺が階梯の値そのものか。
@@ -109,7 +109,7 @@ TEST(FitScalePicksTheLargestDrawingThatFits)
 
 TEST(FitScaleFallsBackToTheSmallestDrawing)
 {
-	// どの縮尺でも収まらない（1/200 でも 500mm 必要）→ いちばん小さい図で描く。
+	// どの縮尺でも収まらない（1/200 でも 500mm 必要）→ いちばん小さい図で描画する。
 	CHECK(core::fitScale(Vec2{100000.0, 1000.0}, Vec2{100.0, 100.0}) == 200.0);
 	// 退化した入力でも階梯の値を返す（0 除算や 0 縮尺を後段へ流さない）。
 	CHECK(core::fitScale(Vec2{0.0, 0.0}, Vec2{100.0, 100.0}) == 200.0);
@@ -133,7 +133,7 @@ TEST(PlanLayoutSubtractsTheLegendBeforeChoosingTheScale)
 	// 420 × 297mm のとき、凡例 60mm ＋ 間隔 15mm を引くと図の領域は 345 × 297mm。
 	//   * 引いた領域では 9m × 5m は 1/30（300 × 166.7mm。1/25 だと 360mm で入らない）
 	//   * 引かなければ 1/25 まで上がる——**凡例が縮尺を 1 段階下げる**のが意図した挙動で、
-	//     こうしないとギリギリの建物で凡例の置き場所が無くなる。
+	//     こうしないと収まる限界の大きさの建物で凡例の置き場所が無くなる。
 	constexpr double kLegend = 60.0;
 	const core::PlanLayout wide = core::planLayout(Vec2{9000.0, 5000.0}, a3(), kLegend);
 	const core::PlanLayout none = core::planLayout(Vec2{9000.0, 5000.0}, a3(), 0.0);
@@ -276,7 +276,7 @@ TEST(PageMarginsZeroMeansNoMargin)
 {
 	// ★**四辺 0 は「読めなかった」ではない**（縁なし印刷ができる機種では余白 0 の用紙設定
 	// が実際に選べる）。用紙とシートレイヤの大きさが同じ＝余白の入る隙が無いのだから、
-	// 0 をそのまま受け取る（ここを false に倒すと、正しい設定に警告が出る）。
+	// 0 をそのまま受け取る（ここを false にすると、正しい設定に警告が出る）。
 	const core::PageMarginsResolution resolved =
 		core::resolvePageMargins(core::PageMargins{}, Vec2{420.0, 297.0}, Vec2{420.0, 297.0});
 	CHECK(resolved.resolved);
@@ -294,7 +294,7 @@ TEST(PageMarginsZeroMeansNoMargin)
 TEST(PageMarginsZeroIsRejectedWhenTheSheetIsSmallerThanThePaper)
 {
 	// 印刷可能領域（シートレイヤ 414 × 291）が用紙（420 × 297）より小さいのに余白 0 が
-	// 返るのは辻褄が合わない＝その 0 は信用できない。解釈できなかった側へ倒して、生の値を
+	// 返るのは辻褄が合わない＝その 0 は信用できない。解釈できなかったものとして扱い、生の値を
 	// 診断へ出させる（draw/Sheet）。
 	const core::PageMarginsResolution resolved =
 		core::resolvePageMargins(core::PageMargins{}, Vec2{420.0, 297.0}, Vec2{414.0, 291.0});
@@ -331,7 +331,7 @@ TEST(PageMarginsFallBackToWhicheverUnitFitsThePaper)
 {
 	// シートレイヤの大きさが読めない（0）ときは突き合わせができないので、用紙に収まる方を
 	// 採る。0.25 はインチでもmm でも収まる → **インチ**（用紙まわりの長さは SDK では
-	// 一貫してインチなので、そちらが本命）。
+	// 一貫してインチなので、そちらが有力）。
 	const core::PageMarginsResolution inches = core::resolvePageMargins(
 		core::PageMargins{0.25, 0.25, 0.25, 0.25}, Vec2{420.0, 297.0}, Vec2{});
 	CHECK(inches.resolved);
@@ -422,7 +422,7 @@ TEST(PlanLayoutLeavesRoomForTheDimensionBand)
 	const core::Vec2 content{38000.0, 26000.0};
 	CHECK(near(core::planLayout(content, a3(), 0.0).scale, 100.0));
 	CHECK(near(core::planLayout(content, a3(), 0.0, 26.0).scale, 125.0));
-	// 帯は縮尺の選び方にだけ効き、図の中心は変わらない。
+	// 帯は縮尺の選び方にだけ影響し、図の中心は変わらない。
 	CHECK(near(core::planLayout(content, a3(), 0.0, 26.0).viewportCenter.x, 0.0));
 }
 
@@ -451,7 +451,7 @@ TEST(SectionLayoutTakesBandsOnlyOnTheSidesThatHaveThem)
 	const core::SectionBands bands{29.0, 3.0, 20.0, 0.0};
 
 	// 以前の割り付け（最も外の帯を四辺へ取り、高さの余白とも重ねて数える）では、
-	// 1/125 でも 1 段 88 + 58 = 146 で 2 段（307）が入らず 1/150 まで落ちていた。
+	// 1/125 でも 1 段 88 + 58 = 146 で 2 段（307）が入らず 1/150 まで下がっていた。
 	const core::SectionLayout uniform =
 		core::sectionLayout(content, a3(), core::SectionBands{29.0, 29.0, 29.0, 29.0});
 	CHECK(near(uniform.scale, 150.0));
@@ -467,7 +467,7 @@ TEST(SectionLayoutTakesBandsOnlyOnTheSidesThatHaveThem)
 	CHECK((2.0 * layout.cell.y) + core::kViewportGap <= layout.area.height());
 	CHECK(layout.columns == 2);
 
-	// 図の中心はマスの中心から、左右は (29 − 3) ÷ 2 だけ右へ、上下は下に足した 10 の半分だけ
+	// 図の中心はマスの中心から、左右は (29 − 3) ÷ 2 だけ右へ、上下は下に加えた 10 の半分だけ
 	// 上へずれる——図の左に 29・右に 3、下に 10・上に 0 がちょうど残る。
 	CHECK(near(layout.viewportOffset.x, 13.0));
 	CHECK(near(layout.viewportOffset.y, 5.0));
@@ -529,7 +529,7 @@ TEST(InsetFrameAreaKeepsTheDrawingsInsideTheTitleBlock)
 	CHECK(near(both.min.x, -150.0));
 	CHECK(near(both.max.x, 200.0 - core::kTitleBlockInset));
 
-	// 重なりが潰れるときは印刷可能領域のまま（図を並べる場所を失わない）。
+	// 重なりが無くなる（面積 0 になる）ときは印刷可能領域のまま（図を並べる場所を失わない）。
 	const PaperArea tiny{Vec2{-2.0, -2.0}, Vec2{2.0, 2.0}};
 	const PaperArea kept = core::insetFrameArea(a3(), tiny);
 	CHECK(near(kept.width(), a3().width()));
@@ -559,7 +559,7 @@ TEST(TitleStripWithoutABorderReservesItsHeightAtTheBottom)
 	const PaperArea frame{Vec2{-200.0, -138.5}, Vec2{200.0, 138.5}};
 	CHECK(core::frameCoversPaper(frame, a3()));
 
-	// 空けると潰れるほど高い帯なら印刷可能領域のまま。
+	// 空けると領域が無くなるほど高い帯なら印刷可能領域のまま。
 	const PaperArea tall{Vec2{-10.0, -150.0}, Vec2{10.0, 150.0}};
 	CHECK(near(core::reserveTitleStrip(a3(), tall).height(), a3().height()));
 }
@@ -606,7 +606,7 @@ TEST(RotatedRectHeightGivesUpNearFortyFiveDegrees)
 	const double side = (170.0 + 15.0) / std::sqrt(2.0);
 	CHECK(!core::rotatedRectHeight(45.0, side, side).has_value());
 	CHECK(!core::rotatedRectHeight(-40.0, side, side).has_value());
-	// 実測が崩れて負に解けるものも返さない。
+	// 実測値が不正で負の解になるものも返さない。
 	CHECK(!core::rotatedRectHeight(0.0, 170.0, 0.0).has_value());
 }
 
@@ -621,7 +621,7 @@ TEST(GridShoulderRaisesTheBubbleAboveTheTopDimensions)
 	// 1/50 でも同じ式（縮尺で割る）。
 	CHECK(near(gridShoulderAboveDimensions(5.0, 7235.0, 7000.0, 50.0),
 			   5.0 + ((7000.0 - (7235.0 - 375.0)) / 50.0) + 1.0, 1e-9));
-	// 既に上にあれば下げない。縮尺が分からなければ触らない。
+	// 既に上にあれば下げない。縮尺が分からなければ変更しない。
 	CHECK(near(gridShoulderAboveDimensions(5.0, 9000.0, 7000.0, 100.0), 5.0, 1e-9));
 	CHECK(near(gridShoulderAboveDimensions(5.0, 7235.0, 7000.0, 0.0), 5.0, 1e-9));
 }

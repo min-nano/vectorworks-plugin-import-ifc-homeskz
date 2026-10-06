@@ -45,7 +45,7 @@ using HomeskzIfcTests::StepText;
 namespace
 {
 	// 既定のシンボル名。**唯一の定義は役割の表**（core::symbolRoles()）なので、
-	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
+	// テストもそこから引く（名前をテストへ複製すると表と食い違っても気付けない）。
 	const std::string kSymbolAnchorBoltM12 = defaultSymbolName(SymbolRole::AnchorBoltM12);
 	const std::string kSymbolAnchorBoltM16 = defaultSymbolName(SymbolRole::AnchorBoltM16);
 
@@ -113,7 +113,7 @@ TEST(anchor_bolt_empty_type_does_not_match)
 {
 	// 型が付いていない金物（fastenerTypeName が空文字を返す）も対象外。
 	CHECK(!isAnchorBoltType(""));
-	// 柱頭・柱脚金物（parse/Column が拾う別種の IfcMechanicalFastener）も対象外。
+	// 柱頭・柱脚金物（parse/Column が取得する別種の IfcMechanicalFastener）も対象外。
 	CHECK(!isAnchorBoltType("柱頭金物:(ろ)"));
 }
 

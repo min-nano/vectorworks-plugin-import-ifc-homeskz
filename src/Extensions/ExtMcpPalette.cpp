@@ -3,11 +3,11 @@
 //
 //	MCP ブリッジのパレットの登録と取り次ぎ（意図は ExtMcpPalette.h）。**ここに受け付けの
 //	中身は無い**——JS の時計から届いた呼び出しを本体の vw_payload_mcp_serve へ渡し、返って
-//	きた見え方（JSON）で Promise を解決するだけ。
+//	きた表示状態（JSON）で Promise を解決するだけ。殻に要求されたこと（更新・再起動）も
+//	ここで実行する（ExtMcpPalette.h「殻に要求されること」）。
 //
-//	使う SDK API は M24 の往復のパレット（M38 で外した）と同じもので、実機で確かめてある
-//	（docs/DEV-NOTES.md M24「実機で確かめられたこと（round 1）」）。殻に頼まれたこと
-//	（更新・再起動）もここで済ませる（ExtMcpPalette.h「殻に頼まれること」）。
+//	使う SDK API は M24 の往復のパレット（M38 で削除した）と同じもので、実機で確かめてある
+//	（docs/DEV-NOTES.md M24「実機で確かめられたこと（round 1）」）。
 //
 
 #include "PluginPrefix.h"
@@ -38,7 +38,7 @@ namespace HomeskzIfcImport
 		constexpr ViewCoord kMinimalHeight = 100;
 
 		// 本体を読み込めなかったとき、次に試すまで（秒）。**時計は数百 ms ごとに来る**ので、
-		// 読めない本体を毎回複製して読みに行かない（PayloadHost.h「必ず複製してから読む」）。
+		// 読み込めない本体を毎回複製して読み込まない（PayloadHost.h「必ず複製してから読む」）。
 		constexpr long long kLoadRetrySeconds = 10;
 
 		long long NowSeconds()
@@ -48,8 +48,8 @@ namespace HomeskzIfcImport
 				.count();
 		}
 
-		// 殻で組む見え方（本体へ届かなかったとき）。**nlohmann::json で組む**——文字列を
-		// 手で継ぐと、理由の文に引用符や改行が混じったときに JSON が壊れる。
+		// 殻で組み立てる表示状態（本体へ届かなかったとき）。**nlohmann::json で組み立てる**
+		// ——文字列を手で連結すると、理由の文に引用符や改行が混じったときに JSON が壊れる。
 		std::string ShellView(const char* phase, const std::string& message)
 		{
 			nlohmann::json view = nlohmann::json::object();
@@ -61,15 +61,15 @@ namespace HomeskzIfcImport
 			}
 			catch (...)
 			{
-				// 理由の文が UTF-8 として壊れていた。見え方だけは返す。
+				// 理由の文が UTF-8 として壊れていた。表示状態だけは返す。
 				return std::string(R"({"phase":")") + phase + R"("})";
 			}
 		}
 
-		// **殻が済ませた頼みごとの結末**（本体へ渡して応答として書いてもらう。PayloadAbi.h の
+		// **殻が実行した要求の結末**（本体へ渡して応答として書いてもらう。PayloadAbi.h の
 		// VwPayloadMcpServeFn）。本体が `reportDone` を返すまで渡し直す——入れ替えの直後は
 		// 新しい本体の用意（スプールの準備）が 1 回で済まないことがある。渡し直しは上限つき
-		// （Python 側はどのみち待ち切れずに諦めている）。
+		// （上限に達するころには Python 側がすでにタイムアウトしている）。
 		struct PendingReport
 		{
 			std::string json;
@@ -95,7 +95,7 @@ namespace HomeskzIfcImport
 			return use->mcpServe(report, out, error);
 		}
 
-		// 見え方を読んで、結末を渡し終えたかを見る。
+		// 表示状態を読んで、結末を渡し終えたかを確認する。
 		void SettleReport(const nlohmann::json& view, long long now)
 		{
 			PendingReport& pending = Pending();
@@ -114,7 +114,7 @@ namespace HomeskzIfcImport
 			}
 			catch (...)
 			{
-				return nlohmann::json::object(); // 読めない見え方は「頼みごと無し」とみなす
+				return nlohmann::json::object(); // 読めない表示状態は「要求無し」とみなす
 			}
 		}
 
@@ -136,7 +136,7 @@ namespace HomeskzIfcImport
 			return "failed";
 		}
 
-		// **殻に頼まれたことを済ませる**（M38）。結末の JSON を返し、restartAfter には
+		// **殻に要求されたことを実行する**（M38）。結末の JSON を返し、restartAfter には
 		// 「応答を書いてから再起動する」かが入る（再起動してからでは応答を書く者がいない）。
 		//
 		// **判断はここに持たせない。** 入れ替えの流れは src/UpdaterFlow.cpp の
@@ -196,7 +196,7 @@ namespace HomeskzIfcImport
 			}
 			catch (...)
 			{
-				// 理由の文が UTF-8 として壊れていた。id だけは返す（Python を待たせ切らない）。
+				// 理由の文が UTF-8 として壊れていた。id だけは返す（Python を待たせ続けない）。
 				nlohmann::json fallback = nlohmann::json::object();
 				fallback["id"] = report["id"];
 				fallback["ok"] = false;
@@ -205,7 +205,7 @@ namespace HomeskzIfcImport
 			}
 		}
 
-		// 時計 1 刻みぶん。本体へ届けて見え方を返す。
+		// 時計 1 回ぶん。本体へ届けて表示状態を返す。
 		std::string ServeOnce()
 		{
 			// **取り込みの最中は本体へ入り直さない**（ExtMcpPalette.h「取り込みの最中は
@@ -231,10 +231,10 @@ namespace HomeskzIfcImport
 			nlohmann::json view = ParseView(out);
 			SettleReport(view, now);
 
-			// **本体が殻に頼んできた**（vw_update / vw_restart）。いまは本体がスタックに無いので
-			// 降ろして入れ替えられる（src/PayloadSession.h）。結末をすぐ渡して応答を書いて
-			// もらうと、その回で次の頼みごとを引き取ってくることがあるので、数回まで続けて
-			// 済ませる（上限は暴走止め）。
+			// **本体が殻に要求してきた**（vw_update / vw_restart）。いまは本体がスタックに無い
+			// のでアンロードして入れ替えられる（src/PayloadSession.h）。結末をすぐ渡して応答を
+			// 書いてもらうと、その回で次の要求を受け取ってくることがあるので、数回まで続けて
+			// 実行する（上限は無限ループの防止）。
 			constexpr int kMaxActionsPerTick = 3;
 			for (int i = 0; i < kMaxActionsPerTick; ++i)
 			{
@@ -244,7 +244,7 @@ namespace HomeskzIfcImport
 				Pending().json = RunShellAction(view["action"], restartAfter);
 				Pending().since = now;
 
-				// **すぐ渡す**（入れ替えたなら新しい本体が書く）。渡せなければ次の刻みで渡し直す。
+				// **すぐ渡す**（入れ替えたなら新しい本体が書く）。渡せなければ次の回で渡し直す。
 				std::string replied;
 				if (!CallServe(Pending().json, replied, error))
 					replied.clear();
@@ -253,7 +253,7 @@ namespace HomeskzIfcImport
 				if (!replied.empty())
 					out = replied;
 
-				// **再起動は応答を書いてから。** 先に頼むと、応える者がいなくなる。
+				// **再起動は応答を書いてから。** 先に要求すると、応答する者がいなくなる。
 				// 開いている文書の保存確認は Vectorworks が通常どおり出す（src/Updater.h）。
 				if (restartAfter)
 				{
@@ -287,7 +287,7 @@ void CMcpPaletteJS::OnInit(VectorWorks::Extension::IWebJavaScriptProvider::IInit
 		return;
 	context->AddExecute(
 		TXString((std::string("var ") + kJsObject + " = window." + kJsObject + " || {};").c_str()));
-	// **Sync**（Vectorworks のメインスレッドで呼ばれる＝SDK と本体を安全に触れる）。
+	// **Sync**（Vectorworks のメインスレッドで呼ばれる＝SDK と本体へ安全にアクセスできる）。
 	context->AddFunctionPromiseSync(kJsServe);
 }
 
@@ -310,10 +310,10 @@ void CMcpPaletteJS::OnFunctionCall(const TXString& /*objName*/, const TXString& 
 		return;
 	if (functionName != "serve")
 	{
-		context->Reject("unknown function"); // 知らない名前は黙って落とさず JS へ返す
+		context->Reject("unknown function"); // 知らない名前は無視せず JS へエラーを返す
 		return;
 	}
-	// 例外を JS の橋へ漏らさない（SDK のコールバックと同じ扱い）。
+	// 例外を JS のブリッジへ漏らさない（SDK のコールバックと同じ扱い）。
 	try
 	{
 		// JSON 文字列のまま渡し、JS 側で parse する（ExtFeedbackPalette.cpp の ResolveView と
@@ -347,7 +347,7 @@ IMPLEMENT_VWPaletteExtension(
 #endif
 // NOLINTEND(misc-const-correctness)
 
-// 中身は .vwr の html/mcp.html（resources/common.vwr から包む。CMakeLists.txt）。
+// 中身は .vwr の html/mcp.html（resources/common.vwr から梱包する。CMakeLists.txt）。
 CExtMcpPalette::CExtMcpPalette(CallBackPtr /*cbp*/) : VWExtensionWebPalette("html", "mcp.html") {}
 
 CExtMcpPalette::~CExtMcpPalette() = default;

@@ -55,7 +55,7 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* CLASS_NOKIGETA = "04構造-02木造-04梁桁-02軒桁";
 	inline constexpr const char* CLASS_YUKABARI = "04構造-02木造-04梁桁-03床梁";
 	inline constexpr const char* CLASS_DOUSASHI = "04構造-02木造-04梁桁-04胴差";
-	// 甲乙梁（床梁の間に架ける小梁）。床梁と同じ床組の梁だが、伏図で見え方を分けたい
+	// 甲乙梁（床梁の間に架ける小梁）。床梁と同じ床組の梁だが、伏図で表示を分けたい
 	// というご要望により専用クラスにする。ロフト床の合成（parse/Floor）では床梁と同じく
 	// 床を受ける梁として扱う（isFloorBeamClass）。
 	inline constexpr const char* CLASS_KOUOTSUBARI = "04構造-02木造-04梁桁-05甲乙梁";
@@ -69,8 +69,8 @@ namespace HomeskzIfcImport::parse
 
 	// 耐力壁（M19）。筋かいは軸材なので専用の葉クラス、面材は耐力面材の「壁」に置く
 	// （床＝CLASS_FLOOR・屋根＝CLASS_ROOF_SHEATHING と同じ枝）。この 2 つは
-	// core::ShearWallCommand::drawClass ＝ **PIO 本体**のクラスになる。PIO が自分で描いた
-	// ジオメトリ（伏図の記号・軸組図の帯／面）へ与えるクラスは、描き方の一部なので
+	// core::ShearWallCommand::drawClass ＝ **PIO 本体**のクラスになる。PIO が自分で描画した
+	// ジオメトリ（伏図の記号・軸組図の帯／面）へ与えるクラスは、描画方法の一部なので
 	// Extensions/ExtShearWall.h が持つ（表と裏をハッチングの向きで分ける 2 クラスを含む）。
 	inline constexpr const char* CLASS_BRACE = "04構造-02木造-07筋かい";
 	inline constexpr const char* CLASS_SHEAR_PANEL = "04構造-02木造-06耐力面材-01壁";
@@ -79,13 +79,13 @@ namespace HomeskzIfcImport::parse
 	// **クラス名の定義はこのヘッダに集約する**（要素ごとのヘッダへ散らさない）。
 	//   立上り（基礎梁）… 壁オブジェクト（parse/Footing の buildWallCommands）
 	//   底盤            … スラブオブジェクト（同 buildSlabCommands）。地中梁（M10）も
-	//                     底盤に噛み合う一体の形状なので同じクラスで描く。
+	//                     底盤に噛み合う一体の形状なので同じクラスで描画する。
 	inline constexpr const char* CLASS_FOUNDATION_WALL = "04構造-01基礎-03立ち上がり";
 	inline constexpr const char* CLASS_FOUNDATION_SLAB = "04構造-01基礎-02基礎スラブ";
 
 	// 複合オブジェクト（スラブ・壁）の**構成要素**へ割り当てるクラス（core::ComponentCommand の
 	// drawClass）。部材そのもののクラス（上の 04構造-… ＝「その部材が何か」）とは別の軸で、
-	// **層が何でできているか**＝素材を表す。断面のハッチング・線の見え方を素材で揃えるため、
+	// **層が何でできているか**＝素材を表す。断面のハッチング・線の表示を素材で揃えるため、
 	// 層の描画属性はすべてこのクラスの属性に従わせる（draw/DrawUtil の SetComponents）。
 	//
 	// 接頭辞 "z" は VW のクラス一覧（名前順）で構造クラス（04構造-…）の後ろへ回すためのもの。
@@ -108,7 +108,7 @@ namespace HomeskzIfcImport::parse
 	// ・隅木谷木・無名等）。
 	std::optional<std::string> memberClassFromName(const std::string& name);
 
-	// 床を受ける梁（床梁・甲乙梁）のクラスか。ロフト床の合成（parse/Floor）が見る。
+	// 床を受ける梁（床梁・甲乙梁）のクラスか。ロフト床の合成（parse/Floor）が参照する。
 	bool isFloorBeamClass(const std::string& drawClass);
 
 	// 横架材のクラスを決定する。
@@ -119,14 +119,14 @@ namespace HomeskzIfcImport::parse
 	//   2. 最上階のそれより高い横架材（aboveEaves）               → 母屋
 	//   3. 最下階（index <= 0）の横架材                          → 土台
 	//   4. 中間階の横架材                                       → 床梁
-	// 最上階の判定が先なので、単層（topIndex == 0）では 3 ではなく 1/2 が効く。
+	// 最上階の判定が先なので、単層（topIndex == 0）では 3 ではなく 1/2 が適用される。
 	std::string resolveMemberClass(const std::string& name, int index, int topIndex,
 								   bool aboveEaves);
 
 	// 小屋束を識別する IfcColumn.ObjectType。
 	// **この定義が唯一**で、クラス判定（resolveColumnClass）と柱種別名の変換
-	// （parse/Column の resolveColumnType）が同じ文字列を見る（片方だけ直すと、
-	// クラスは小屋束なのに構造材 ID の種別が管柱のまま、といったズレが起こる）。
+	// （parse/Column の resolveColumnType）が同じ文字列を参照する（片方だけ直すと、
+	// クラスは小屋束なのに構造材 ID の種別が管柱のまま、といった食い違いが起こる）。
 	inline constexpr const char* kStandColumnObjectType = "STANDCOLUMN";
 
 	// 柱のクラスを決定する。

@@ -28,7 +28,7 @@
 //	  * **登り梁の分離と任意断面の抽出**: 登り梁は矩形断面ではなく、材の側面（長さ×せいの
 //	    平行四辺形。端部は直切り＝鉛直面）を厚み方向へ押し出した任意断面
 //	    （IfcArbitraryClosedProfileDef）で出力される。矩形前提の memberProfileDims では
-//	    拾えず**取りこぼされて全く描画されない**ため、slopedMemberGeometry が平行四辺形の
+//	    取得できず**欠落して全く描画されない**ため、slopedMemberGeometry が平行四辺形の
 //	    4 頂点から中心軸・幅・せい・傾斜を導出する。専用レイヤ "n-登り梁" に置く（M36 から
 //	    parse/PlanLevel の noboribariSpan が span レイヤ "{from}to{to}-登り梁" へ移す）。
 //	    誤取り込み防止に、押し出し軸が鉛直な材（火打）は断面種別より**先に**軸で除外し、
@@ -43,13 +43,13 @@
 //	    軸位置へ送る（resolveMemberColumnJoints。柱は横架材の後に組み上がるので別の関門）。
 //	  * **取り合いの端点は相手の芯線**: 命令を組み立てた後、甲乙梁の T 字で負ける側の端点を
 //	    勝ち側の**天端中央線（＝芯線）上**へ移し、そこから手前の面までの戻りを端部オフセット
-//	    に入れる（resolveMemberInterferences）。実際に描かれる材の範囲は「相手の面まで」で
-//	    従来と同じで、命令の端点だけが接合点になる——構造材同士の接合状況を座標から拾える
+//	    に入れる（resolveMemberInterferences）。実際に描画される材の範囲は「相手の面まで」で
+//	    従来と同じで、命令の端点だけが接合点になる——構造材同士の接合状況を座標から取得できる
 //	    ようにするため（core/Document.h「端部オフセット」）。出隅の L 字は勝ち負けが付かない
-//	    ので触らない。
+//	    ので変更しない。
 //
 //	登り梁の端部詰め（parse/Noboribari）は、受ける材として本モジュールの横架材と柱（M8）の
-//	両方を見る（M7 の時点では横架材だけだった。docs/DEV-NOTES.md M7/M8）。
+//	両方を参照する（M7 の時点では横架材だけだった。docs/DEV-NOTES.md M7/M8）。
 //
 
 #pragma once
@@ -81,7 +81,7 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kSlopeTol = 1.0;
 
 	// 要素が横架材（IfcBeam / IfcMember）か。解析本体（buildMemberCommands）が使う
-	// （母屋・登り梁レベルを足すかは、parse/Story が IFC ではなく命令の配置先レイヤで決める）。
+	// （母屋・登り梁レベルを追加するかは、parse/Story が IFC ではなく命令の配置先レイヤで決める）。
 	bool isMemberElement(const Entity& element);
 
 	// IFC の名前（"木梁:隅木・谷木:3"）が隅木・谷木か。ホームズ君は隅木と谷木を 1 つの種別で
@@ -123,8 +123,8 @@ namespace HomeskzIfcImport::parse
 	};
 
 	// 要素の Body 表現から矩形断面の寸法を得る。
-	// **RepresentationIdentifier が "Body" の表現の、素の IfcExtrudedAreaSolid ＋
-	// IfcRectangleProfileDef だけ**を見る（差演算は剥がさない。剥がすと登り梁の任意断面と
+	// **RepresentationIdentifier が "Body" の表現の、差演算を伴わない IfcExtrudedAreaSolid ＋
+	// IfcRectangleProfileDef だけ**を対象にする（差演算は剥がさない。剥がすと登り梁の任意断面と
 	// 見分けが付かなくなる）。見つからなければ false ＝ 呼び出し側が登り梁経路へ回す。
 	bool memberProfileDims(const Model& model, const Entity& element, MemberProfile& out);
 
@@ -149,7 +149,7 @@ namespace HomeskzIfcImport::parse
 	bool slopedMemberGeometry(const Model& model, const Entity& element, SlopedMemberGeometry& out);
 
 	// 要素に関連付けられた材種名を返す。IfcRelAssociatesMaterial を逆参照から辿り、
-	// IfcMaterial / IfcMaterialList / IfcMaterialLayerSetUsage の順に名前を拾う。
+	// IfcMaterial / IfcMaterialList / IfcMaterialLayerSetUsage の順に名前を取得する。
 	// 見つからなければ空文字。逆参照は #id 昇順なので、エンティティ列挙順に依存しない決定的な
 	// 結果になる。
 	std::string memberMaterialName(const Model& model, const Entity& element);
@@ -198,12 +198,12 @@ namespace HomeskzIfcImport::parse
 	// ある横架材の端点が別の横架材の矩形に載り、かつ配置レイヤが一致し Z 範囲
 	// （[天端 − せい, 天端]）が重なり、その取り合いが相手の**途中**（＝相手が通し材で勝ち）
 	// なら、端点を相手の**天端中央線（芯線）上**へ移し、そこから手前の面までの戻りを端部
-	// オフセット（startOffset / endOffset）へ入れる。実際に描かれる材の範囲は「相手の面まで」
+	// オフセット（startOffset / endOffset）へ入れる。実際に描画される材の範囲は「相手の面まで」
 	// で従来と変わらず、変わるのは**命令が持つ端点が接合点（芯線の交点）になる**こと
 	// （core/Document.h「端部オフセット」）。
 	//
-	// 端部どうしがぶつかる出隅（L 字）は勝ち負けが付かないので触らない。相手も自分の途中へ
-	// 取り付いている（相互に負け）ときも触らない。傾斜梁（両端の天端 Z が異なる材）は水平面内
+	// 端部どうしがぶつかる出隅（L 字）は勝ち負けが付かないので変更しない。相手も自分の途中へ
+	// 取り付いている（相互に負け）ときも変更しない。傾斜梁（両端の天端 Z が異なる材）は水平面内
 	// の矩形モデルが成り立たないため、動かす側にも相手側にもしない。相手の形状は変えず、
 	// 負け側の端点とオフセットだけを与える。
 	//
@@ -221,8 +221,8 @@ namespace HomeskzIfcImport::parse
 	//
 	// **横架材どうしの取り合い（resolveMemberInterferences）とは別の関門**なのは、柱命令が
 	// 横架材命令の**後**に組み上がるため（parse/BuildDocument の順序）。既に横架材どうしの
-	// 取り合いでオフセットが入っている端は触らない——1 つの端が取り付く先は 1 つで、
-	// 二重に送ると節点が飛ぶ。
+	// 取り合いでオフセットが入っている端は変更しない——1 つの端が取り付く先は 1 つで、
+	// 二重に送ると節点がずれる。
 	//
 	// 平面座標だけを変え、傾斜梁（登り梁。両端の天端 Z が異なる材）は対象にしない
 	// （端部詰めは parse/Noboribari が受け持つ）。柱は方向を持たないので断面を軸平行の矩形と

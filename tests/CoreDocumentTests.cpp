@@ -91,7 +91,7 @@ TEST(validate_rejects_grid_with_empty_layer)
 
 namespace
 {
-	// 検証を通る最小のストーリ命令（名前・接尾辞・1 レベル）。各テストで一部を壊す。
+	// 検証を通る最小のストーリ命令（名前・接尾辞・1 レベル）。各テストで一部を不正にする。
 	core::StoryCommand validStory()
 	{
 		core::StoryCommand story;
@@ -284,7 +284,7 @@ TEST(validate_rejects_floor_with_zero_total_thickness)
 
 namespace
 {
-	// 検証を通る横架材命令（1 本）。個々のテストはここから 1 か所だけ崩す。
+	// 検証を通る横架材命令（1 本）。個々のテストはここから 1 か所だけ不正にする。
 	core::MemberCommand validMember()
 	{
 		core::MemberCommand member;
@@ -354,7 +354,7 @@ TEST(validate_rejects_member_with_nonpositive_section)
 
 TEST(validate_rejects_degenerate_member)
 {
-	// 天端中央線が縮退している（始端＝終端）命令は描けない。
+	// 天端中央線が縮退している（始端＝終端）命令は描画できない。
 	core::Document document;
 	core::MemberCommand member = validMember();
 	member.end = member.start;
@@ -364,7 +364,7 @@ TEST(validate_rejects_degenerate_member)
 
 TEST(validate_rejects_member_whose_end_offsets_consume_the_whole_length)
 {
-	// 端部オフセットが負値でパス長を食い尽くすと、材が 1mm も描かれない
+	// 端部オフセットが負値でパス長をすべて消費すると、材が 1mm も描画されない
 	// （core/Document.h「端部オフセット」）。
 	core::Document document;
 	core::MemberCommand member = validMember();
@@ -459,7 +459,7 @@ TEST(validate_rejects_member_with_empty_bound_level)
 
 namespace
 {
-	// 検証を通る柱命令（1 本）。個々のテストはここから 1 か所だけ崩す。
+	// 検証を通る柱命令（1 本）。個々のテストはここから 1 か所だけ不正にする。
 	core::ColumnCommand validColumn()
 	{
 		core::ColumnCommand column;
@@ -511,7 +511,7 @@ TEST(validate_rejects_column_with_empty_class_or_member_id)
 
 TEST(validate_rejects_column_with_empty_structural_use)
 {
-	// 構造用途が空だと VW の既定（自動）になり、小屋束が柱の高さモデルで描かれてしまう。
+	// 構造用途が空だと VW の既定（自動）になり、小屋束が柱の高さモデルで描画されてしまう。
 	core::Document document;
 	core::ColumnCommand column = validColumn();
 	column.structuralUse = "";
@@ -558,7 +558,7 @@ TEST(validate_rejects_column_with_empty_bound_level)
 
 TEST(validate_rejects_column_whose_end_offset_consumes_the_whole_height)
 {
-	// 端部オフセットがパス長を食い尽くすと柱が 1mm も描かれない（横架材と同じ関門）。
+	// 端部オフセットがパス長をすべて消費すると柱が 1mm も描画されない（横架材と同じ関門）。
 	core::Document document;
 	core::ColumnCommand column = validColumn();
 	column.endOffset = -column.height;
@@ -581,7 +581,7 @@ TEST(column_drawn_top_pulls_back_by_the_end_offset)
 
 namespace
 {
-	// 検証を通る垂木命令（1 本）。個々のテストはここから 1 か所だけ崩す。
+	// 検証を通る垂木命令（1 本）。個々のテストはここから 1 か所だけ不正にする。
 	core::RafterCommand validRafter()
 	{
 		core::RafterCommand rafter;
@@ -649,7 +649,7 @@ TEST(validate_rejects_rafter_with_empty_class)
 
 TEST(validate_rejects_rafter_with_nonpositive_section)
 {
-	// 断面（幅・せい）が 0 以下の垂木は描けない。
+	// 断面（幅・せい）が 0 以下の垂木は描画できない。
 	core::Document width;
 	core::RafterCommand thin = validRafter();
 	thin.width = 0.0;
@@ -676,7 +676,7 @@ TEST(validate_rejects_degenerate_rafter)
 TEST(validate_rejects_rafter_without_bound_levels)
 {
 	// 構造材ツールは両端をストーリレベルへバインドして高さを決める（draw/Rafter）。
-	// レベル種別が空だと高さが崩れるので、横架材・柱と同じく命令の段階で弾く。
+	// レベル種別が空だと高さが不正になるので、横架材・柱と同じく命令の段階で不正とする。
 	core::Document start;
 	core::RafterCommand noStart = validRafter();
 	noStart.startBound.level = "";
@@ -781,7 +781,7 @@ TEST(validate_rejects_roof_with_nonpositive_thickness)
 
 namespace
 {
-	// 検証を通る立上り命令（1 本）。個々のテストはここから 1 か所だけ崩す。
+	// 検証を通る立上り命令（1 本）。個々のテストはここから 1 か所だけ不正にする。
 	core::WallCommand validWall()
 	{
 		core::WallCommand wall;
@@ -840,7 +840,7 @@ TEST(validate_rejects_wall_with_empty_layer_or_class)
 
 TEST(validate_rejects_wall_without_components)
 {
-	// 構成層は描画側が壁へ直接組む（合計＝壁厚）ので、無い壁は描けない（底盤と同じ関門）。
+	// 構成層は描画側が壁へ直接組む（合計＝壁厚）ので、無い壁は描画できない（底盤と同じ関門）。
 	core::Document components;
 	core::WallCommand wall = validWall();
 	wall.components.clear();
@@ -967,7 +967,7 @@ namespace
 		return modifier;
 	}
 
-	// 立上り 2 本＋壁結合 1 件の Document（結合の検証は walls の本数を見るため対で作る）。
+	// 立上り 2 本＋壁結合 1 件の Document（結合の検証は walls の本数を参照するため対で作る）。
 	core::Document documentWithJoin(const core::WallJoinCommand& join)
 	{
 		core::Document document;
@@ -995,7 +995,7 @@ TEST(validate_rejects_wall_join_of_a_wall_with_itself)
 
 TEST(validate_rejects_wall_join_pointing_outside_walls)
 {
-	// 範囲外の添字は描画側で壁ハンドルを引けず、黙って結合されないだけになるので弾く。
+	// 範囲外の添字は描画側で壁ハンドルを取得できず、通知なく結合されないだけになるので不正とする。
 	core::WallJoinCommand join = validJoin();
 	join.b = 2; // walls は 2 本（添字 0/1）
 	CHECK(!core::validateDocument(documentWithJoin(join)));
@@ -1016,7 +1016,7 @@ TEST(validate_accepts_slab_with_ground_beam_modifiers)
 
 TEST(validate_rejects_degenerate_ground_beam_modifier)
 {
-	// 断面が面にならない（2 点）・押し出し長が 0 のプリズムは描けない。
+	// 断面が面にならない（2 点）・押し出し長が 0 のプリズムは描画できない。
 	core::Document profile;
 	core::SlabCommand slab = validSlab();
 	core::ModifierCommand modifier = validModifier();
@@ -1037,7 +1037,7 @@ TEST(validate_rejects_degenerate_ground_beam_modifier)
 TEST(validate_checks_the_ground_beam_bedding)
 {
 	// 床付け（捨てコン・砕石）は地中梁と押し出しの向き・断面の座標系を共有するので、断面が
-	// 面になること・素材クラス名が非空であること・押し出し長が正であることだけを見る。
+	// 面になること・素材クラス名が非空であること・押し出し長が正であることだけを確認する。
 	core::Document document;
 	core::SlabCommand slab = validSlab();
 	core::ModifierCommand modifier = validModifier();
@@ -1127,8 +1127,8 @@ TEST(raise_modifier_top_is_a_no_op_without_bite)
 // - core::modifierBasePolygon（地中梁の押し出しの基面）
 //
 // VWExtrudeObj は 3D ポリゴンの先頭の頂点から局所座標系を決める（原点＝先頭・U＝先頭の辺・
-// W＝U×(3 点目−先頭)・V＝W×U。SDK の VWFC ソース）。ここではその導出を写した frameOf で、
-// **どの向きの地中梁も U＝+u・V＝+Z・W＝押し出し方向**になることを見る。断面の鉛直面が
+// W＝U×(3 点目−先頭)・V＝W×U。SDK の VWFC ソース）。ここではその導出を複製した frameOf で、
+// **どの向きの地中梁も U＝+u・V＝+Z・W＝押し出し方向**になることを確認する。断面の鉛直面が
 // −u 側の地中梁で V＝−Z になり、実機で可視ソリッドが幅方向へ 24.59mm ずれた
 // （docs/DEV-NOTES.md「地中梁の可視ソリッドが幅方向にずれる」）。
 // ---------------------------------------------------------------------------
@@ -1298,7 +1298,7 @@ TEST(validate_rejects_symbol_with_empty_layer)
 
 TEST(validate_rejects_symbol_with_empty_name)
 {
-	// シンボル名が空だと置換対象を引けない（名前でシンボル定義を探すため）。
+	// シンボル名が空だと置換対象を取得できない（名前でシンボル定義を探すため）。
 	core::Document document;
 	core::SymbolCommand symbol = validSymbol();
 	symbol.symbol.clear();
@@ -1323,9 +1323,9 @@ TEST(validate_accepts_symbol_with_any_angle)
 // シート（伏図。docs/DEV-NOTES.md M13）
 //
 // 関門は「シートレイヤ番号（＝レイヤ名）とタイトルが非空」「ビューポートが非空のレイヤ名を
-// 1 つ以上持つ」の 2 つ。図面タイトル・図番は空でも描ける（ラベルが空になるだけ）ので弾かな
-// い。**グラフィック凡例は載せるか載せないかしか持たない**（スタイル名を持たない＝スタイル
-// 無しで置く。core/Document.h の LegendCommand）ので、凡例に関門は無い。
+// 1 つ以上持つ」の 2 つ。図面タイトル・図番は空でも描画できる（ラベルが空になるだけ）ので
+// 不正としない。**グラフィック凡例は載せるか載せないかしか持たない**（スタイル名を
+// 持たない＝スタイル無しで置く。core/Document.h の LegendCommand）ので、凡例に関門は無い。
 // ---------------------------------------------------------------------------
 
 namespace
@@ -1377,7 +1377,7 @@ TEST(validate_rejects_sheet_with_no_layers)
 
 TEST(validate_rejects_sheet_with_empty_layer_name)
 {
-	// 名前の無いレイヤは引けない（描画側が黙って読み飛ばすだけになる）ので検証で弾く。
+	// 名前の無いレイヤは取得できない（描画側が通知なく読み飛ばすだけになる）ので検証で不正とする。
 	core::Document document;
 	core::SheetCommand sheet = validSheet();
 	sheet.viewport.layers.emplace_back();
@@ -1387,7 +1387,7 @@ TEST(validate_rejects_sheet_with_empty_layer_name)
 
 TEST(validate_rejects_sheet_with_empty_hidden_class_name)
 {
-	// 名前の無いクラスは隠せない（描画側が黙って読み飛ばすだけになる）ので検証で弾く。
+	// 名前の無いクラスは隠せない（描画側が通知なく読み飛ばすだけになる）ので検証で不正とする。
 	// 0 個（全クラス表示）は妥当。
 	core::Document document;
 	core::SheetCommand sheet = validSheet();
@@ -1400,7 +1400,7 @@ TEST(validate_rejects_sheet_with_empty_hidden_class_name)
 
 TEST(validate_rejects_sheet_with_empty_grayed_layer_name)
 {
-	// グレーで重ねるレイヤ（母屋伏図の軒桁）も名前が無ければ弾く。0 枚は妥当。
+	// グレーで重ねるレイヤ（母屋伏図の軒桁）も名前が無ければ不正とする。0 枚は妥当。
 	core::Document document;
 	core::SheetCommand sheet = validSheet();
 	sheet.viewport.grayedLayers = {"R-軒桁"};
@@ -1422,7 +1422,7 @@ TEST(validate_rejects_sheet_grayed_layer_also_shown)
 
 TEST(validate_accepts_sheet_without_drawing_label)
 {
-	// 図面タイトル・図番は空でも描ける（ラベルが空になるだけ）。
+	// 図面タイトル・図番は空でも描画できる（ラベルが空になるだけ）。
 	core::Document document;
 	core::SheetCommand sheet = validSheet();
 	sheet.viewport.drawingTitle.clear();
@@ -1456,11 +1456,11 @@ TEST(validate_accepts_sheet_without_legend)
 // ---------------------------------------------------------------------------
 // 断面ビューポート（軸組図。docs/DEV-NOTES.md M14）
 //
-// 非空の表示レイヤに加えて、**指示線が縮退していない**ことを見る（縮退した線からは切断面の
+// 非空の表示レイヤに加えて、**指示線が縮退していない**ことを確認する（縮退した線からは切断面の
 // 向きが決まらない）。断面の範囲（長さ・高さ・奥行き）は命令が持たない——軸組図は範囲を
 // 限らないので、描画側の定数が受け持つ。**配置先のシートレイヤも命令は持たない**（M18）
 // ——何枚の用紙に分かれるかは用紙の大きさと縮尺が決めるので、文書に 1 つの
-// SectionSheetCommand（番号の始まり・タイトルの基）だけを見る。
+// SectionSheetCommand（番号の始まり・タイトルの基）だけを確認する。
 // ---------------------------------------------------------------------------
 
 namespace
@@ -1517,7 +1517,7 @@ TEST(validate_rejects_section_sheet_without_number_or_title)
 	byTitle.sectionSheet.title.clear();
 	CHECK(!core::validateDocument(byTitle));
 
-	// **軸組図が 1 枚も無ければ見ない**（使わない値なので空のままでも妥当）。
+	// **軸組図が 1 枚も無ければ確認しない**（使わない値なので空のままでも妥当）。
 	core::Document empty;
 	CHECK(core::validateDocument(empty));
 }
@@ -1533,9 +1533,9 @@ TEST(validate_rejects_section_with_degenerate_line)
 // ---------------------------------------------------------------------------
 // 断面寸法データタグ（ビューポート注釈。docs/DEV-NOTES.md M13）
 //
-// タグはビューポート命令の中に住む（伏図・軸組図で同じ形）。関門は「スタイル名が非空」と
+// タグはビューポート命令の中に置かれる（伏図・軸組図で同じ形）。関門は「スタイル名が非空」と
 // 「関連付け先の横架材が members の範囲内」の 2 つ——範囲外の添字はどの部材にも付かない
-// タグ＝寸法の出ない空のタグが図面に残るので描かせない。
+// タグ＝寸法の出ない空のタグが図面に残るので描画させない。
 // ---------------------------------------------------------------------------
 
 namespace
@@ -1589,7 +1589,7 @@ TEST(validate_accepts_viewport_tags_on_sheets_and_sections)
 
 TEST(validate_rejects_tag_pointing_past_the_members)
 {
-	// 伏図でも軸組図でも、範囲外の添字は同じ規則で弾く。
+	// 伏図でも軸組図でも、範囲外の添字は同じ規則で不正とする。
 	core::Document bySheet = documentWithOneMember();
 	core::SheetCommand sheet = validSheet();
 	core::TagCommand outOfRange = validTag();
@@ -1723,7 +1723,7 @@ TEST(section_height_range_reaches_ground_beam_bottom)
 TEST(section_height_range_covers_floors_and_rafters)
 {
 	core::Document document;
-	// 床は**基準面と構成層の合計だけ下がった下端**の両方を見る（合計 12+150=162 なので
+	// 床は**基準面と構成層の合計だけ下がった下端**の両方を考慮する（合計 12+150=162 なので
 	// 基準面 3000 の床の下端は 2838）。ここが範囲の下端になる。
 	core::FloorCommand floor;
 	floor.elevation = 3000.0;
@@ -1731,7 +1731,7 @@ TEST(section_height_range_covers_floors_and_rafters)
 	floor.components.push_back(core::ComponentCommand{"床下地", "z構成要素-合板", 150.0});
 	document.floors.push_back(floor);
 
-	// 垂木は勾配があるので**両端**を見る（軒 5000・棟 7000）。棟が範囲の上端になる。
+	// 垂木は勾配があるので**両端**を考慮する（軒 5000・棟 7000）。棟が範囲の上端になる。
 	core::RafterCommand rafter;
 	rafter.elevation = 5000.0;
 	rafter.endElevation = 7000.0;
@@ -1746,7 +1746,7 @@ TEST(section_height_range_covers_floors_and_rafters)
 
 TEST(section_height_range_fails_without_elements)
 {
-	// 高さの分かる要素が 1 つも無ければ範囲は求まらない（out は触らない）。
+	// 高さの分かる要素が 1 つも無ければ範囲は求まらない（out は変更しない）。
 	double start = -1.0;
 	double end = -2.0;
 	CHECK(!core::sectionHeightRange(core::Document{}, start, end));
@@ -1857,7 +1857,7 @@ TEST(section_top_dimension_reach_is_the_text_top_of_the_outer_top_chain)
 {
 	core::ViewportCommand viewport;
 	double reach = -1.0;
-	// 上の列が無ければ false（値は触らない）。下の列・縦の列は数えない。
+	// 上の列が無ければ false（値は変更しない）。下の列・縦の列は数えない。
 	core::DimensionChainCommand below;
 	below.axis = core::DimensionAxis::Horizontal;
 	below.side = -1;
@@ -1941,7 +1941,7 @@ TEST(section_bands_count_only_the_sides_with_annotations)
 	CHECK(near(merged.top, core::dimensionBand(2), 1e-9));
 	CHECK(near(merged.left, bands.left, 1e-9));
 
-	// 通り芯があれば、上に符号のぶんを取る。上の列はその符号の下に並ぶので足して数える。
+	// 通り芯があれば、上に符号のぶんを取る。上の列はその符号の下に並ぶので加算して数える。
 	CHECK(near(core::sectionBands({section}, true).top, core::kSectionGridBubbleAllowance, 1e-9));
 	CHECK(near(core::sectionBands({section, tall}, true).top,
 			   core::dimensionBand(2) + core::kSectionGridBubbleAllowance, 1e-9));
@@ -1951,7 +1951,7 @@ TEST(section_bands_count_only_the_sides_with_annotations)
 // 平面の広がり（伏図の縮尺と位置を決めるのに使う。docs/DEV-NOTES.md M18）
 //
 // planContentBounds は「図に映るもの」を包む矩形を返す。layers を渡すとそのレイヤに載る
-// 命令だけを見る（伏図 1 枚が映す範囲）。sectionContentSize は軸組図 1 枚ぶんの広がり
+// 命令だけを参照する（伏図 1 枚が映す範囲）。sectionContentSize は軸組図 1 枚ぶんの広がり
 // （幅＝平面の広がりの大きい方・高さ＝断面の高さ範囲）。
 // ---------------------------------------------------------------------------
 
@@ -1990,9 +1990,9 @@ TEST(plan_content_bounds_wraps_every_command_with_margin)
 
 TEST(plan_content_bounds_sees_every_kind_of_command)
 {
-	// **座標を持つ命令はどれも広がりに効く**ことを、種類ごとに 1 つずつ載せて確かめる。
-	// 命令リストを 1 本足したときにここへ足し忘れると、その要素だけが図からはみ出す
-	// （縮尺の見積もりに入らない）ので、種類の網羅そのものが検証項目になる。
+	// **座標を持つ命令はどれも広がりに反映される**ことを、種類ごとに 1 つずつ載せて確認する。
+	// 種類の網羅そのものが検証項目である——命令リストを 1 本追加したときにここへの追加を
+	// 忘れると、その要素だけが図からはみ出す（縮尺の見積もりに入らない）。
 	core::Document document;
 
 	const auto boundaryAt = [](double half)
@@ -2050,7 +2050,7 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	shear.end = core::Vec2{1750.0, 0.0};
 	document.shearWalls.push_back(shear);
 
-	// シンボル置換系 4 種（同じ命令型なので 4 本のリストすべてを見ていることを確かめる）。
+	// シンボル置換系 4 種（同じ命令型なので 4 本のリストすべてを参照していることを確認する）。
 	const auto symbolAt = [](const char* layer, const core::Vec2& position)
 	{
 		core::SymbolCommand symbol;
@@ -2077,7 +2077,7 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	CHECK(near(min.y, -2200.0 - core::kPlanContentMargin));
 	CHECK(near(max.y, 2200.0 + core::kPlanContentMargin));
 
-	// レイヤで絞ると、線分・外形・点のどれも同じ規則で外れる（立上りだけが残る）。
+	// レイヤで絞ると、線分・外形・点のどれも同じ規則で除外される（立上りだけが残る）。
 	CHECK(core::planContentBounds(document, {"F-立上り"}, min, max));
 	CHECK(near(min.x, -1400.0 - core::kPlanContentMargin));
 	CHECK(near(max.x, 1400.0 + core::kPlanContentMargin));
@@ -2093,7 +2093,7 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 TEST(plan_content_bounds_sees_sheet_data_tags)
 {
 	// **データタグは注釈なのでデザインレイヤに載らないが、図には映る**（M29）。どの伏図に
-	// 出るかは関連付け先の横架材のレイヤが決めるので、広がりも絞り込みもその材で引く。
+	// 出るかは関連付け先の横架材のレイヤが決めるので、広がりも絞り込みもその材で判定する。
 	core::Document document;
 
 	core::MemberCommand member;
@@ -2102,7 +2102,7 @@ TEST(plan_content_bounds_sees_sheet_data_tags)
 	member.end = core::Vec2{1000.0, 0.0};
 	document.members.push_back(member);
 
-	// 材より外（＋3000）へ逃がしたタグ。**これを見ないと図の広がりを取りこぼす**。
+	// 材より外（＋3000）へ移したタグ。**これを考慮しないと図の広がりを取りこぼす**。
 	core::TagCommand tag;
 	tag.memberIndex = 0;
 	tag.position = core::Vec2{0.0, 3000.0};
@@ -2137,13 +2137,13 @@ TEST(plan_content_bounds_sees_sheet_data_tags)
 
 TEST(plan_content_bounds_takes_unlinked_sheet_tags_into_the_whole_document)
 {
-	// **関連付け先を引けないタグも図には出る。** draw/Tag は対応表に無い添字のタグを
-	// 「関連付け無し」で置くので（draw/Tag.cpp の drawViewportTags）、そのぶん図は広がる。
-	// validateDocument はこういう Document を弾くが、planContentBounds は**任意の
-	// Document を取れる公開関数**なので、暗黙の不変条件に寄りかからず広がりへ入れる。
-	//
-	// ただし**レイヤで絞るときは入れない**——どのレイヤに出るかを決める材が引けないので、
-	// 「この伏図に映るか」を答えられない。文書全体の広がり（layers が空）にだけ効かせる。
+	// **関連付け先を取得できないタグも図の広がりに入れる。** ただし**レイヤで絞るときは
+	// 入れない**——文書全体の広がり（layers が空）にだけ反映させる。
+	// 理由: draw/Tag は対応表に無い添字のタグを「関連付け無し」で置くので
+	// （draw/Tag.cpp の drawViewportTags）、その分だけ図は広がる。validateDocument は
+	// こういう Document を不正とするが、planContentBounds は**任意の Document を受け取る
+	// 公開関数**なので、暗黙の不変条件に依存せず広がりへ入れる。レイヤで絞るときは、どの
+	// レイヤに出るかを決める材が取得できないので「この伏図に映るか」を判定できない。
 	core::Document document;
 
 	core::ColumnCommand column;
@@ -2152,7 +2152,7 @@ TEST(plan_content_bounds_takes_unlinked_sheet_tags_into_the_whole_document)
 	document.columns.push_back(column);
 
 	core::TagCommand tag;
-	tag.memberIndex = 7; // members は空＝引けない
+	tag.memberIndex = 7; // members は空＝取得できない
 	tag.position = core::Vec2{0.0, 4000.0};
 
 	core::SheetCommand sheet;
@@ -2169,7 +2169,7 @@ TEST(plan_content_bounds_takes_unlinked_sheet_tags_into_the_whole_document)
 	CHECK(core::planContentBounds(document, {}, min, max));
 	CHECK(near(max.y, 4000.0 + core::kPlanContentMargin));
 
-	// レイヤで絞れば効かない（柱だけが残る）。
+	// レイヤで絞れば反映されない（柱だけが残る）。
 	CHECK(core::planContentBounds(document, {"1to2-柱"}, min, max));
 	CHECK(near(max.y, 0.0 + core::kPlanContentMargin));
 }
@@ -2177,8 +2177,8 @@ TEST(plan_content_bounds_takes_unlinked_sheet_tags_into_the_whole_document)
 TEST(plan_content_bounds_ignores_section_data_tags)
 {
 	// **軸組図のタグは平面の広がりに入れない**（M29）。あちらの注釈空間は平面座標ではなく
-	// (切断線に沿った距離, 高さ Z) なので、混ぜると縮尺の見積もりが壊れる——高さ 8000 の
-	// 建物のタグが平面の Y 8000 として効いてしまう。
+	// (切断線に沿った距離, 高さ Z) なので、混ぜると縮尺の見積もりが崩れる——高さ 8000 の
+	// 建物のタグが平面の Y 8000 として扱われてしまう。
 	core::Document document;
 
 	core::MemberCommand member;
@@ -2205,14 +2205,14 @@ TEST(plan_content_bounds_ignores_section_data_tags)
 
 TEST(plan_content_bounds_fails_without_coordinates)
 {
-	// 座標を持つ命令が 1 つも無ければ広がりは求まらない（out は触らない）。
+	// 座標を持つ命令が 1 つも無ければ広がりは求まらない（out は変更しない）。
 	core::Vec2 min{1.0, 2.0};
 	core::Vec2 max{3.0, 4.0};
 	CHECK(!core::planContentBounds(core::Document{}, {}, min, max));
 	CHECK(near(min.x, 1.0));
 	CHECK(near(max.y, 4.0));
 
-	// 指定したレイヤに何も載っていないときも同じ（伏図の表示レイヤが 1 つも描かれなかった）。
+	// 指定したレイヤに何も載っていないときも同じ（伏図の表示レイヤが 1 つも描画されなかった）。
 	core::Document document;
 	core::ColumnCommand column;
 	column.layer = "1to2-柱";
@@ -2327,7 +2327,7 @@ TEST(validate_rejects_column_mark_without_layer_class_or_target)
 
 TEST(validate_rejects_plan_mark_without_symbol)
 {
-	// 伏図記号はシンボルを置くだけの記号なので、名前が無ければ何も描けない。
+	// 伏図記号はシンボルを置くだけの記号なので、名前が無ければ何も描画できない。
 	core::Document document;
 	core::ColumnMarkCommand mark = validPlanMark();
 	mark.symbol.clear();
@@ -2337,7 +2337,7 @@ TEST(validate_rejects_plan_mark_without_symbol)
 
 TEST(validate_accepts_section_mark_without_symbol)
 {
-	// 断面記号は実断面から描くのでシンボルを使わない（空が正常）。対象クラスも
+	// 断面記号は実断面から描画するのでシンボルを使わない（空が正常）。対象クラスも
 	// **空が正常**＝全クラス。
 	core::Document document;
 	core::ColumnMarkCommand mark = validSectionMark();
@@ -2367,7 +2367,7 @@ TEST(geometry_vectors_default_to_origin)
 
 namespace
 {
-	// 妥当な耐力壁 1 枚（筋かい）。各ケースはここから 1 か所だけ壊す。
+	// 妥当な耐力壁 1 枚（筋かい）。各ケースはここから 1 か所だけ不正にする。
 	core::ShearWallCommand validShearWall()
 	{
 		core::ShearWallCommand wall;
@@ -2399,8 +2399,8 @@ TEST(validate_accepts_a_valid_shear_wall)
 {
 	CHECK(acceptsShearWall(validShearWall()));
 
-	// 柱の無い階でも描けなければならないので、探索先レイヤは空でも妥当
-	// （PIO は控えの内法で描く。core/Document.cpp の isValidShearWall）。
+	// 柱の無い階でも描画できなければならないので、探索先レイヤは空でも妥当
+	// （PIO は控えの内法で描画する。core/Document.cpp の isValidShearWall）。
 	core::ShearWallCommand noColumns = validShearWall();
 	noColumns.targetLayers.clear();
 	CHECK(acceptsShearWall(noColumns));
@@ -2419,7 +2419,7 @@ TEST(validate_accepts_a_valid_shear_wall)
 
 TEST(validate_rejects_a_broken_shear_wall)
 {
-	// 描けない値を 1 つずつ入れて、そのたびに文書ごと弾かれること。
+	// 描画できない値を 1 つずつ入れて、そのたびに文書ごと不正とされること。
 	core::ShearWallCommand noLayer = validShearWall();
 	noLayer.layer.clear();
 	CHECK(!acceptsShearWall(noLayer));
@@ -2441,7 +2441,7 @@ TEST(validate_rejects_a_broken_shear_wall)
 	CHECK(!acceptsShearWall(flat));
 
 	core::ShearWallCommand flatEnd = validShearWall();
-	flatEnd.topHeightEnd = flatEnd.bottomHeight; // 終点側だけ潰れた内法も描けない
+	flatEnd.topHeightEnd = flatEnd.bottomHeight; // 終点側だけ高さ 0 の内法も描画できない
 	CHECK(!acceptsShearWall(flatEnd));
 
 	core::ShearWallCommand noSpan = validShearWall();
@@ -2449,7 +2449,7 @@ TEST(validate_rejects_a_broken_shear_wall)
 	CHECK(!acceptsShearWall(noSpan));
 
 	core::ShearWallCommand noWidth = validShearWall();
-	noWidth.width = 0.0; // 筋かいは見付け幅が要る（幅 0 の帯は描けない）
+	noWidth.width = 0.0; // 筋かいは見付け幅が要る（幅 0 の帯は描画できない）
 	CHECK(!acceptsShearWall(noWidth));
 }
 
@@ -2500,11 +2500,11 @@ TEST(shear_wall_brace_polygon_follows_the_rise_direction)
 
 TEST(shear_wall_brace_polygon_rejects_a_degenerate_frame)
 {
-	// 内法が潰れている・幅が無いときは描けない（空を返す）。
+	// 内法が退化している・幅が無いときは描画できない（空を返す）。
 	CHECK(core::shearWallBracePolygon(0.0, 0.0, 0.0, 2400.0, 2400.0, 100.0, true).empty());
 	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 2400.0, 2400.0, 2400.0, 100.0, true).empty());
 	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 2400.0, 0.0, true).empty());
-	// 片端だけ上端が下端以下（登り梁が土台まで下りてきた等）でも描けない。
+	// 片端だけ上端が下端以下（登り梁が土台まで下りてきた等）でも描画できない。
 	CHECK(core::shearWallBracePolygon(0.0, 3000.0, 0.0, 2400.0, 0.0, 100.0, true).empty());
 }
 
@@ -2672,7 +2672,7 @@ TEST(validate_accepts_dimension_chains_with_a_style)
 
 TEST(validate_rejects_dimensions_without_a_style)
 {
-	// 何のスタイルで描くか決められない（解析側は空なら 1 つも作らない）。
+	// 何のスタイルで描画するか決められない（解析側は空なら 1 つも作らない）。
 	core::Document document = documentWithChain(validChain());
 	document.dimensionStandard.clear();
 	CHECK(!core::validateDocument(document));

@@ -23,7 +23,7 @@ namespace HomeskzIfcImport::core
 	{
 		PageMarginsResolution resolution;
 
-		// 負の余白は意味を成さない（＝読めていない）。用紙いっぱいへ倒す。
+		// 負の余白は意味を成さない（＝読めていない）。用紙いっぱいとして扱う。
 		if (raw.left < 0.0 || raw.right < 0.0 || raw.bottom < 0.0 || raw.top < 0.0)
 			return resolution;
 
@@ -44,12 +44,12 @@ namespace HomeskzIfcImport::core
 		{
 			// ★**四辺 0 は「読めなかった」ではない**（Layout.h）。縁なし印刷ができる機種
 			// では余白 0 の用紙設定が実際に選べるので、そのまま「余白なし」として受け取る。
-			// 単位の突き合わせは要らない——0 はインチでも mm でも 0 なので、どちらの解釈でも
+			// 単位の照合は要らない——0 はインチでも mm でも 0 なので、どちらの解釈でも
 			// 同じ矩形になる。
 			//
 			// 例外は**シートレイヤが用紙より小さい**とき。印刷可能領域が用紙より狭いのに
-			// 余白が 0 で返ったということなので、その 0 は信用しない（解釈できなかった側へ
-			// 倒し、生の値を診断へ出させる）。逆にシートレイヤが読めない・用紙と同じなら、
+			// 余白が 0 で返ったということなので、その 0 は信用しない（解釈できなかったものと
+			// して扱い、生の値を診断へ出させる）。逆にシートレイヤが読めない・用紙と同じなら、
 			// 0 を疑う根拠が無いので受け取る。
 			const bool contradicted = haveSheet && ((paper.x - sheet.x) > kPageMarginMatchTol ||
 													(paper.y - sheet.y) > kPageMarginMatchTol);
@@ -62,8 +62,8 @@ namespace HomeskzIfcImport::core
 		const auto fits = [&](double scale)
 		{ return (horizontal * scale) < paper.x && (vertical * scale) < paper.y; };
 
-		// 1. 「用紙 − 余白」がシートレイヤの大きさと一致する単位。両方の候補を先に見てから
-		//    2 へ落ちる（一致は「収まる」より強い根拠なので順序を混ぜない）。
+		// 1. 「用紙 − 余白」がシートレイヤの大きさと一致する単位。両方の候補を先に確認してから
+		//    2 へ進む（一致は「収まる」より強い根拠なので順序を混ぜない）。
 		// 2. どちらとも一致しなければ、用紙に収まる方。
 		double scale = 0.0;
 		for (const double unit : kUnits)
@@ -95,7 +95,7 @@ namespace HomeskzIfcImport::core
 	{
 		// 階梯は昇順（図が大きくなる順）なので、最初に収まったものが「収まる中で最も大きい
 		// 図」になる。**どれにも収まらなければいちばん小さい図**（末尾＝最大の分母）を返す
-		// ——図がはみ出すくらいなら小さく描く。
+		// ——図がはみ出すくらいなら小さく描画する。
 		const double smallest = kScaleDenominators.back();
 		if (content.x <= 0.0 || content.y <= 0.0 || available.x <= 0.0 || available.y <= 0.0)
 			return smallest;
@@ -112,19 +112,19 @@ namespace HomeskzIfcImport::core
 	{
 		// ★**縮尺は凡例のぶんを差し引いてから決める**（要件）。用紙いっぱいで縮尺を決めて
 		// しまうと、建物がギリギリの大きさのときに凡例を置く場所が残らない——凡例は図面の
-		// 一部なので、置けなくなるくらいなら図を 1 段階小さく描く。差し引くのは
+		// 一部なので、置けなくなるくらいなら図を 1 段階小さく描画する。差し引くのは
 		// 「実測した凡例の幅＋間隔」で、凡例が 1 つも無ければ何も引かない。
 		PaperArea plan = area;
 		if (legendWidth > 0.0)
 		{
-			// 引くと潰れる（＝図の領域が無くなる）ほど凡例が広いときは引かない。0 幅の領域を
+			// 引くと退化する（＝図の領域が無くなる）ほど凡例が広いときは引かない。0 幅の領域を
 			// 渡すと fitScale がいちばん小さい図を返すだけで、かえって読めない図になる。
 			if (const double width = area.width() - (legendWidth + kViewportGap); width > 0.0)
 				plan.max.x = area.min.x + width;
 		}
 
 		PlanLayout layout;
-		// 寸法の帯（M31）を四辺から引いた残りで縮尺を選ぶ。引くと潰れるときは引かない
+		// 寸法の帯（M31）を四辺から引いた残りで縮尺を選ぶ。引くと領域が退化するときは引かない
 		// （凡例と同じ理由）。
 		Vec2 available = plan.size();
 		if (band > 0.0 && available.x > 2.0 * band && available.y > 2.0 * band)
@@ -177,7 +177,7 @@ namespace HomeskzIfcImport::core
 		const double margin = std::max(heightMargin, 0.0);
 
 		// 縮尺 scale でのマスと、図の中心のずれ。上下の帯は高さ範囲の余白（用紙の上では
-		// margin ÷ scale）に収め、はみ出すぶんだけを足す（Layout.h の sectionLayout）。
+		// margin ÷ scale）に収め、はみ出すぶんだけを追加する（Layout.h の sectionLayout）。
 		const auto cellAt = [&](double scale, Vec2& offset)
 		{
 			const double room = margin / scale;
@@ -211,7 +211,7 @@ namespace HomeskzIfcImport::core
 		layout.cell = cellAt(layout.scale, layout.viewportOffset);
 		layout.below = std::max(bands.bottom - (margin / layout.scale), 0.0);
 
-		// 1 段に並ぶ枚数。間隔は「枚数 − 1」個ぶんなので、幅に間隔 1 つを足してから
+		// 1 段に並ぶ枚数。間隔は「枚数 − 1」個ぶんなので、幅に間隔 1 つを加えてから
 		// 「1 枚＋間隔」で割ると枚数になる。**必ず 1 枚は置く**（1 枚も入らない大きさでも
 		// 図を捨てない。はみ出しはローカルで縮尺を見直す手掛かりになる）。
 		if (layout.cell.x > 0.0)

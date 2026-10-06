@@ -7,14 +7,14 @@
 //	decisions delegate to the pure helpers in UpdaterParse.h; all side effects go
 //	through the injected host.
 //
-//	**いつ走るか。** 以前は Vectorworks の起動時（プラグインの読み込み中）に 1 度きり
-//	だったが、いまは
+//	**いつ実行されるか。**
 //	  * メニューコマンド「アップデータを確認」……… UpdateCheckKind::Manual
-//	  * 取り込みコマンド・実機テストのついで ………… UpdateCheckKind::Silent
-//	の入口から呼ばれる。分かれるのは**どこで口を開くか**だけで（UpdaterHost.h の
-//	UpdateCheckKind）、更新があるときの流れ——入れて、要るなら再起動——は同じである。
-//	もう 1 つ、MCP の `vw_update` から呼ばれる RemoteDevUpdateWith があり、こちらは
-//	ダイアログを 1 枚も出さずに結末を値で返す（M38）。
+//	  * 取り込みコマンド・実機テストに付随して …… UpdateCheckKind::Silent
+//	の入口から呼ばれる。異なるのは**どの場面で利用者へ表示するか**だけで（UpdaterHost.h の
+//	UpdateCheckKind）、更新があるときの流れ——インストールして、要るなら再起動——は同じで
+//	ある。もう 1 つ、MCP の `vw_update` から呼ばれる RemoteDevUpdateWith があり、こちらは
+//	ダイアログを 1 枚も出さずに結末を値で返す（M38）。以前は Vectorworks の起動時
+//	（プラグインの読み込み中）に 1 度きり実行していた。
 //
 
 #include "UpdaterHost.h"
@@ -29,7 +29,7 @@ namespace HomeskzIfcImport
 {
 	namespace
 	{
-		// 配布物の名前（＝インストール先のフォルダ名・アセット名）と、人に見せる名前。
+		// 配布物の名前（＝インストール先のフォルダ名・アセット名）と、利用者に表示する名前。
 		// **この 2 つは別物**——前者はファイル名なので ASCII、後者はプラグインの名前。
 		constexpr const char* kStablePluginName = "min-nano_structure";
 		constexpr const char* kDevPluginName = "min-nano_structureDev";
@@ -51,9 +51,9 @@ namespace HomeskzIfcImport
 			}
 			if (InstallReportedOk(out))
 			{
-				// 入れたビルドの殻の ID。**「再起動が要るか」はこれで決まる**
-				// （UpdaterParse.h）。古いスクリプトはこの行を出さないので空になり、
-				// そのときは安全側＝再起動を尋ねる側へ倒れる。
+				// インストールしたビルドの殻の ID。**「再起動が要るか」はこれで決まる**
+				// （UpdaterParse.h）。古いスクリプトはこの行を出力しないので空になり、
+				// そのときは安全側＝再起動を尋ねる側として扱う。
 				installedShellIdOut = InstalledShellId(out);
 				return true;
 			}
@@ -62,18 +62,18 @@ namespace HomeskzIfcImport
 			return false;
 		}
 
-		// ビルドを人に見せるときの名前。**ブランチ名があればそれ**——リリースの表示名
+		// ビルドを利用者に表示するときの名前。**ブランチ名があればそれ**——リリースの表示名
 		// （name）は "Dev: <branch> (<sha>)" なので、コミットを並べると同じものが 2 度
-		// 出る。branch はこの列を出さない古い同梱スクリプトでは空になるので、そのときは
+		// 表示される。branch はこの列を出力しない古い同梱スクリプトでは空になるので、そのときは
 		// 表示名で代用する（UpdaterParse.h の DevBuild）。
 		std::string DevBuildLabel(const DevBuild& b)
 		{
 			return b.branch.empty() ? b.name : b.branch;
 		}
 
-		// **いま入っているビルドの言い方は 1 か所**（開発版の流れは 3 か所でこれを出す
-		// ——「ほかに選べるビルドはありません」「そのままです」、そして選択ダイアログの
-		// 先頭）。どれも同じ 1 つのビルドを指しているので、綴りが割れると同じ状態が
+		// **いまインストールされているビルドの表記は 1 か所で定める**（開発版の流れは 3 か所で
+		// これを表示する——「ほかに選べるビルドはありません」「そのままです」、そして選択
+		// ダイアログの先頭）。どれも同じ 1 つのビルドを指しているので、表記が揺れると同じ状態が
 		// 別物に見える。
 		std::string CurrentDevLabel(const CurrentDevBuild& current)
 		{
@@ -83,10 +83,10 @@ namespace HomeskzIfcImport
 		// **確認そのものができなかった。** オフライン・GitHub の一時的な不調・同梱
 		// スクリプトを起動できない、のいずれか。
 		//
-		// Manual（メニューコマンド）のときは**必ず伝える**——押したのに何も起きないと、
+		// Manual（メニューコマンド）のときは**必ず伝える**——実行したのに何も起きないと、
 		// 「最新だった」のか「そもそも動いていない」のかが利用者には区別できない。
-		// Silent（取り込みのついで）では黙って進む: 取り込みたいだけの人に、繋がらない
-		// ことを毎回知らせても仕方がない。
+		// Silent（取り込みに付随する確認）では何も表示せずに進む: 取り込みたいだけの人に、
+		// 接続できないことを毎回知らせても意味が無い。
 		void ReportCheckFailed(IUpdaterHost& host, UpdateCheckKind kind, const std::string& reason)
 		{
 			if (kind != UpdateCheckKind::Manual)
@@ -100,16 +100,19 @@ namespace HomeskzIfcImport
 			host.Inform("更新を確認できませんでした。", advice);
 		}
 
-		// **入れ替えが済んだあとの結末。** プラグインは 2 つに割れていて（src/PayloadAbi.h）、
-		// Vectorworks が起動時にしか読み込めないのは**殻**だけ。中身（解析・描画・PIO の
-		// 作図）は殻が自分で読み込む**本体**にあるので、
+		// **入れ替えが済んだあとの結末。**
 		//
-		//   * 本体だけが新しくなった（殻の ID が同じ）… 載っている本体を降ろすだけで、
-		//     次の取り込み・次の PIO リセットから新しいコードが動く。**再起動を尋ねない。**
+		//   * 本体だけが新しくなった（殻の ID が同じ）… 読み込まれている本体をアンロード
+		//     するだけで、次の取り込み・次の PIO リセットから新しいコードが動く。
+		//     **再起動を尋ねない。**
 		//   * 殻まで変わった …………………………………… 読み込めるのは次の起動だけなので、
 		//     従来どおり再起動を尋ねる（OfferRestart）。
 		//
-		// 判断できないとき（スクリプトが ID を出さない古い版など）は「要る」へ倒れる。
+		// 判断できないとき（スクリプトが ID を出力しない古い版など）は「要る」として扱う。
+		//
+		// プラグインは 2 つのモジュールに分かれていて（src/PayloadAbi.h）、Vectorworks が
+		// 起動時にしか読み込めないのは**殻**だけ。中身（解析・描画・PIO の作図）は殻が
+		// 自分で読み込む**本体**にあるので、この 2 通りになる。
 		void OfferRestart(IUpdaterHost& host, const std::string& text, const std::string& detail);
 
 		bool FinishInstall(IUpdaterHost& host, const std::string& text, const std::string& detail,
@@ -117,9 +120,9 @@ namespace HomeskzIfcImport
 		{
 			if (!NeedsRestartAfterInstall(runningShellId, installedShellId))
 			{
-				// **ここでホットリロードが効く。** 降ろしておけば、次に本体を使うときに
-				// 新しいファイルが読み直される（src/PayloadSession.h）。降ろせなかった
-				// ——本体のコードがまだ走っている——ときだけ、次回の起動へ回す。
+				// **ここでホットリロードが機能する。** アンロードしておけば、次に本体を使う
+				// ときに新しいファイルが再読み込みされる（src/PayloadSession.h）。アンロード
+				// できなかった——本体のコードがまだ実行中の——ときだけ、次回の起動へ回す。
 				std::string advice = detail;
 				if (!advice.empty())
 					advice += "\n\n";
@@ -141,17 +144,17 @@ namespace HomeskzIfcImport
 		// 殻まで変わったときの結末。コンパイル済みの殻は起動時にしか読み込まれないので、
 		// 新しいビルドは Vectorworks を再起動するまで動かない——だからこれは通知ではなく
 		// **再起動ボタンを持つ質問**にしてある。「後で」を選んだら何もしない: いま閉じた
-		// ダイアログが既に再起動の必要を告げているので、追い討ちの通知は小言にしかならない。
+		// ダイアログが既に再起動の必要を告げているので、重ねて通知しても煩わしいだけである。
 		// チャンネルごとの詳細（build / branch+commit）は `detail` で受け取り、共通の
-		// 再起動の文言の上に出す。
+		// 再起動の文言の上に表示する。
 		void OfferRestart(IUpdaterHost& host, const std::string& text, const std::string& detail)
 		{
 			std::string advice = detail;
 			if (!advice.empty())
 				advice += "\n\n";
-			// 再起動は Vectorworks 自身に頼む（SDK の CloseAllFilesAndQuitVectorworks。
+			// 再起動は Vectorworks 自身に要求する（SDK の CloseAllFilesAndQuitVectorworks。
 			// src/Updater.cpp）。開いている文書は通常どおり保存を確認してから閉じられ、
-			// そこで取り消せば Vectorworks は落ちない——だからそう書く。
+			// そこで取り消せば Vectorworks は終了しない——だからそう表示する。
 			advice += "反映するには Vectorworks の再起動が必要です。\n"
 					  "今すぐ再起動しますか？（開いているファイルは保存を確認します）";
 
@@ -190,7 +193,7 @@ namespace HomeskzIfcImport
 		StableStatus const st = EvaluateStable(out);
 		if (!st.offerUpdate)
 		{
-			// 出力が足りない（リリースに配布 zip が無い等）のと、既に最新なのとは
+			// 出力が不足している（リリースに配布 zip が無い等）のと、既に最新なのとは
 			// 意味が違う——前者は**確認できていない**ので、そう伝える。
 			if (st.latest.empty() || st.url.empty())
 				ReportCheckFailed(host, kind, "リリースの情報が不完全です。");
@@ -234,23 +237,23 @@ namespace HomeskzIfcImport
 			return true;
 		}
 
-		// **「いま」はディスク上に入っているビルドである**（UpdaterParse.h の
+		// **「いま」はディスク上にインストールされているビルドである**（UpdaterParse.h の
 		// ResolveCurrentDevBuild）。殻にコンパイルされたブランチと sha は、本体だけを
 		// 入れ替えたあとでは前のブランチを名乗ったままなので、それを基準にすると
-		// 乗り換えたはずのブランチへ切り替わらない（docs/DEV-NOTES.md M26）。
+		// 切り替えたはずのブランチへ切り替わらない（docs/DEV-NOTES.md M26）。
 		CurrentDevBuild const current = ResolveCurrentDevBuild(out, shellBranch, shellCommit);
 
 		// Candidates to switch TO: every prerelease except the installed build.
 		std::vector<DevBuild> const others = DevSwitchCandidates(out, current.commit);
 
-		// どのビルドを入れるか。Manual は選ばせ、Silent は同じブランチのものだけを拾う。
+		// どのビルドをインストールするか。Manual は選ばせ、Silent は同じブランチのものだけを選ぶ。
 		DevBuild pick;
 		if (kind != UpdateCheckKind::Manual)
 		{
-			// **取り込みのついでにブランチ選択を出さない。** ここで拾うのは「いま動いて
-			// いるのと同じブランチの、別のコミット」だけ——それだけが「自分のビルドが
-			// 新しくなった」に当たる（UpdaterParse.h の FindDevBuildForBranch）。
-			// ブランチが分からないときは何も拾わない＝黙って取り込みへ進む。
+			// **取り込みに付随する確認ではブランチ選択を出さない。** ここで選ぶのは「いま
+			// 動いているのと同じブランチの、別のコミット」だけ——それだけが「自分のビルドが
+			// 新しくなった」に該当する（UpdaterParse.h の FindDevBuildForBranch）。
+			// ブランチが分からないときは何も選ばない＝何も表示せずに取り込みへ進む。
 			int const idx = FindDevBuildForBranch(others, current.branch);
 			if (idx < 0)
 				return true;
@@ -267,7 +270,7 @@ namespace HomeskzIfcImport
 		{
 			// Nothing to choose between: no prereleases exist, or the only one is
 			// the running build itself. **メニューから明示的に呼ばれている**ので、
-			// 起動時に自動で走っていた頃と違って黙ってはいられない。
+			// 起動時に自動で実行していた頃と違って何も表示せずに終えることはできない。
 			if (others.empty())
 			{
 				host.Inform("ほかに選べる開発版ビルドはありません。", CurrentDevLabel(current));
@@ -290,10 +293,10 @@ namespace HomeskzIfcImport
 			int const idx = ResolveDevSelection(static_cast<short>(sel), others.size());
 			if (idx < 0)
 			{
-				// **選んだ結末は必ず返す。** 「現在のまま」を選んだときに黙って閉じると、
+				// **選んだ結末は必ず返す。** 「現在のまま」を選んだときに何も表示せずに閉じると、
 				// 別のものを選んだつもりの人には「選んだのに切り替わらない」と映り、
-				// 取り違えたのか何も起きなかったのかを区別できない（取り消したときだけは
-				// 黙っていてよい——それは「何もしない」という意思表示だから）。
+				// 選び間違えたのか何も起きなかったのかを区別できない（取り消したときだけは
+				// 何も表示しなくてよい——それは「何もしない」という意思表示だから）。
 				host.Inform("開発版ビルドはそのままです。", CurrentDevLabel(current));
 				return true;
 			}
@@ -309,8 +312,8 @@ namespace HomeskzIfcImport
 								 "branch: " + DevBuildLabel(pick) + "\ncommit: " + pick.commit,
 								 runningShellId, installedShellId);
 
-		// **入れられなかった。** 取り込みへは進ませない（入れると答えた人は新しいビルドで
-		// 取り込むつもりでいる）。
+		// **インストールできなかった。** 取り込みへは進ませない（インストールすると答えた人は
+		// 新しいビルドで取り込むつもりでいる）。
 		host.Inform("インストールに失敗しました。", err);
 		return false;
 	}
@@ -318,7 +321,7 @@ namespace HomeskzIfcImport
 	// -----------------------------------------------------------------------
 	// MCP の `vw_update` 向け（M38）。意図は UpdaterHost.h の RemoteDevUpdateWith 参照。
 	// **host の Inform / Ask / PickBuild / Restart は呼ばない**——結末はすべて値で返す
-	// （再起動するかは頼んだ側が決める。src/Extensions/ExtMcpPalette.cpp）。
+	// （再起動するかは要求した側が決める。src/Extensions/ExtMcpPalette.cpp）。
 	RemoteUpdateResult RemoteDevUpdateWith(IUpdaterHost& host, const std::string& shellBranch,
 										   const std::string& shellCommit,
 										   const std::string& runningShellId,
@@ -340,7 +343,8 @@ namespace HomeskzIfcImport
 			return result;
 		}
 
-		// いま入っている版（ディスク上）。**ブランチも sha もディスクを見る**（UpdaterHost.h）。
+		// いまインストールされている版（ディスク上）。**ブランチも sha もディスクから読む**
+		// （UpdaterHost.h）。
 		CurrentDevBuild const current = ResolveCurrentDevBuild(out, shellBranch, shellCommit);
 		result.previous = current.commit;
 		result.branch = wantedBranch.empty() ? current.branch : wantedBranch;
@@ -366,7 +370,7 @@ namespace HomeskzIfcImport
 
 		if (NeedsRestartAfterInstall(runningShellId, installedShellId))
 		{
-			// 殻まで変わった。入ってはいるが、この実行では効かせられない。
+			// 殻まで変わった。インストールはされたが、この実行では反映できない。
 			result.outcome = RemoteUpdateOutcome::NeedsRestart;
 			result.message = "殻（プラグインのモジュール）まで変わったため、Vectorworks を"
 							 "再起動するまで新しいビルドは動きません。";

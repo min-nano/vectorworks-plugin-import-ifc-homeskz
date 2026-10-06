@@ -23,7 +23,7 @@ namespace HomeskzIfcImport::parse
 		constexpr double kDirTol = 1e-9;
 
 		// 「上または左」の比較を小数 9 桁の粒度で行うための丸め。厳密な等値比較を避けつつ、
-		// `py` がほぼ 0（材が南北向き）のときに「左」の判定へ落ちるようにする。
+		// `py` がほぼ 0（材が南北向き）のときに「左」の判定になるようにする。
 		double RoundToCompare(double value)
 		{
 			constexpr double kScale = 1e9;
@@ -53,7 +53,7 @@ namespace HomeskzIfcImport::parse
 		if (length <= kDirTol)
 			return core::Vec2{0.0, 1.0};
 		// 線の法線 2 候補のうち上を向く側。真横（法線が水平）になることは天端線では
-		// 起きない（鉛直な天端線＝長さ 0 の投影）ので、上下の判定だけで足りる。
+		// 起きない（鉛直な天端線＝長さ 0 の投影）ので、上下の判定だけで十分である。
 		const double nx = -dv / length;
 		const double ny = du / length;
 		return ny < 0.0 ? core::Vec2{-nx, -ny} : core::Vec2{nx, ny};
@@ -138,8 +138,8 @@ namespace HomeskzIfcImport::parse
 			const double dy = member.end.y - member.start.y;
 			const core::Vec2 side = tagOffsetSide(dx, dy);
 			// 軸中央から部材の面（断面幅/2）まで寄せた点＝**部材の辺の中央**。ここにタグの
-			// 下端中央が接する（余白を足さず面ちょうどに置くことで引出線が出ない。parse/Tag.h）。
-			// タグ自身の大きさぶんの逃がしは描画側が実寸を測って足す（core/Document.h の
+			// 下端中央が接する（余白を加えず面ちょうどに置くことで引出線が出ない。parse/Tag.h）。
+			// タグ自身の大きさぶんのずらしは描画側が実寸を測って加える（core/Document.h の
 			// TagCommand）。
 			const double half = member.width / 2.0;
 
@@ -176,7 +176,7 @@ namespace HomeskzIfcImport::parse
 			core::TagCommand tag;
 			tag.memberIndex = i;
 			tag.position = core::Vec2{(start.x + end.x) / 2.0, (start.y + end.y) / 2.0};
-			// 断面では天端線がそのまま部材の上辺なので、逃がす向きは**その線の法線のうち
+			// 断面では天端線がそのまま部材の上辺なので、ずらす向きは**その線の法線のうち
 			// 上を向く側**（水平材なら真上）。伏図で「上または左」へ寄せるのと同じ意図。
 			tag.offset = upwardNormal(end.x - start.x, end.y - start.y);
 			// 傾斜材（登り梁・隅木）は立面でも傾くので、文字も天端線に沿わせる。
@@ -202,7 +202,7 @@ namespace HomeskzIfcImport::parse
 		if (member.hipOrValley)
 			return {};
 		// 階はレイヤ名の接頭辞（"2-横架材天端(FL-872)" → "2"）から引く。伏図レベルの印は
-		// 接頭辞の後ろなので、外さなくても接頭辞は変わらない。登り梁の span レイヤ
+		// 接頭辞の後ろなので、除かなくても接頭辞は変わらない。登り梁の span レイヤ
 		// （"3to4-登り梁"）は from の伏図レベルが属する階（parse/Story がその階にレベルを
 		// 作る。描画側のタグの式も「レイヤが属する階」から測る）。
 		const std::size_t dash = member.layer.find('-');

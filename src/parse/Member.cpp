@@ -38,7 +38,7 @@ namespace HomeskzIfcImport::parse
 		// 柱の軸と横架材の Z 範囲が「接する」とみなす余裕（mm）。管柱の軸の上端は受ける梁の
 		// 天端に**一致する**ので、丸め誤差を吸収できればよい。
 		constexpr double kColumnJointZTol = 1.0;
-		constexpr double kMinLength = 1.0; // 調整後に描かれる長さがこれ未満なら調整しない
+		constexpr double kMinLength = 1.0; // 調整後に描画される長さがこれ未満なら調整しない
 		constexpr double kSymmetryTol = 1.0; // 出隅で相互の食い込み量がこの差以内なら対称とみなす
 
 		// Body 表現の識別子（IfcShapeRepresentation.RepresentationIdentifier）。
@@ -57,7 +57,7 @@ namespace HomeskzIfcImport::parse
 
 		// 2 つの横架材の Z 範囲（[天端 − せい, 天端]）が重なるか。重なりが許容値以下（段差で
 		// 上下に離れている等）なら干渉とみなさない。式は core/Document.h の zRangesOverlap
-		// （仕口の取り付き・登り梁の受け材と共有。傾斜梁は geomOf が先に弾くので、ここは
+		// （仕口の取り付き・登り梁の受け材と共有。傾斜梁は geomOf が先に除外するので、ここは
 		// elevation だけで天端を代表できる）。
 		bool zOverlaps(double elevA, double heightA, double elevB, double heightB)
 		{
@@ -88,15 +88,15 @@ namespace HomeskzIfcImport::parse
 
 		// 端点 point・外向き outward が相手 b に負けるか。
 		//   * 相手の**途中**へ取り付いている（T 字）なら負け。相手が通し材だからで、食い込みが
-		//     無い（既に相手の面で止まっている）取り合いもこれで拾える。ただし相手の端部も
+		//     無い（既に相手の面で止まっている）取り合いもこれで判定できる。ただし相手の端部も
 		//     自分の途中へ取り付いているとき（相互）は勝ち負けが付かない。
 		//   * 相手の**端部**での取り合い（L 字の出隅）は 2 通りで決める。
 		//     1. **端点が相手の芯線に届いていない**（reach が負＝手前で止まっている）なら負け。
 		//        外周の出隅はホームズ君が既に負け側を勝ち側の面で切っていることが多く、
-		//        食い込みが両方 0 になって勝ち負けが付かない——**そこを拾うのがこの規則**
+		//        食い込みが両方 0 になって勝ち負けが付かない——**そこを判定するのがこの規則**
 		//        （実機で「外周部の負け側横架材の端点が短いまま」として出た）。
 		//     2. 届いている（reach ≈ 0 以上）なら、従来どおり**相互の食い込み量**で決める。
-		//        自分の方が深く食い込むなら負け、同等（同寸の出隅・火打）なら触らない
+		//        自分の方が深く食い込むなら負け、同等（同寸の出隅・火打）なら変更しない
 		//        ——両材が角で重なっているだけの対称な出隅を片側だけ短くしないため。
 		bool losesTo(const MemberJoint& joint, const Vec2& point, const Vec2& outward,
 					 const MemberGeom& self, double selfHalfWidth, const MemberGeom& b,
@@ -159,7 +159,7 @@ namespace HomeskzIfcImport::parse
 		//
 		// **②で「接する」も採るのが要点**——管柱は梁を下から受けるので、柱の軸の上端は
 		// ちょうど梁の天端（＝梁の芯線）に一致し、範囲は重ならず接するだけになる。重なりだけを
-		// 見ると、いちばん多い「梁の端が柱の上に乗る」取り合いを丸ごと取りこぼす（実機で
+		// 判定すると、いちばん多い「梁の端が柱の上に乗る」取り合いを丸ごと検出し損なう（実機で
 		// 「柱に取り付く梁の端点が短いまま」として出た）。柱の上に立つ管柱（軸の下端が梁の
 		// 天端）も同じ節点なので同様に採る。
 		//
@@ -204,7 +204,7 @@ namespace HomeskzIfcImport::parse
 			return found ? best : 0.0;
 		}
 
-		// 命令 1 件を平面の中心線へ落とす（傾斜梁・退化した材は valid=false）。
+		// 命令 1 件を平面の中心線へ変換する（傾斜梁・退化した材は valid=false）。
 		MemberGeom geomOf(const MemberCommand& command)
 		{
 			MemberGeom geom;
@@ -324,7 +324,7 @@ namespace HomeskzIfcImport::parse
 			const Entity* representation = model.resolve(representationRef);
 			if (representation == nullptr)
 				continue;
-			// Body 表現だけを見る。
+			// Body 表現だけを対象にする。
 			if (entityString(*representation, attr::kShapeRepresentationIdentifier) !=
 				kBodyRepresentation)
 				continue;
@@ -541,8 +541,8 @@ namespace HomeskzIfcImport::parse
 			const Vec2 backward{-self.axis.x, -self.axis.y};
 			const EndAdjust end = adjustForEnd(self.end, self.axis, self, selfHalfWidth, others);
 			const EndAdjust start = adjustForEnd(self.start, backward, self, selfHalfWidth, others);
-			// 実際に描かれる長さ（芯線間のパス長 − 両端の戻り）。従来「相手の面まで詰めた
-			// 長さ」と同じ値で、これが残らないなら取り合いの解釈が破綻しているので触らない。
+			// 実際に描画される長さ（芯線間のパス長 − 両端の戻り）。従来「相手の面まで詰めた
+			// 長さ」と同じ値で、これが残らないなら取り合いの解釈が破綻しているので変更しない。
 			const double drawn =
 				self.length - start.reach - end.reach - start.setback - end.setback;
 			if (drawn > kMinLength)
@@ -582,7 +582,8 @@ namespace HomeskzIfcImport::parse
 			const double zBottom = core::memberBottomZ(command);
 
 			const Vec2 backward{-self.axis.x, -self.axis.y};
-			// 始端（外向きは −軸）・終端（＋軸）の順に、既にオフセットの入っていない端だけ見る。
+			// 始端（外向きは −軸）・終端（＋軸）の順に、既にオフセットの入っていない端だけを
+			// 対象にする。
 			const std::array<std::pair<Vec2, Vec2>, 2> ends = {
 				std::pair<Vec2, Vec2>{self.start, backward},
 				std::pair<Vec2, Vec2>{self.end, self.axis},
@@ -662,7 +663,7 @@ namespace HomeskzIfcImport::parse
 				}
 				else
 				{
-					// 矩形断面で拾えない材は、登り梁等の傾斜梁（任意断面＝平行四辺形の側面を
+					// 矩形断面として取得できない材は、登り梁等の傾斜梁（任意断面＝平行四辺形の側面を
 					// 厚み方向へ押し出したソリッド）として中心軸を導出する。平行四辺形として
 					// 解釈できない材（筋かいの 6 頂点等）はスキップ。
 					SlopedMemberGeometry sloped;
@@ -705,7 +706,8 @@ namespace HomeskzIfcImport::parse
 				{
 					// 登り梁: 断面中心軸は鉛直な端面の中央高さを通るため、天端中央線の端点は
 					// 端面中央の**直上**（XY は同じ）＝鉛直な端面の上端にあり、高さは
-					// 断面中心 ＋ せい/(2·cosθ)（cosθ = horiz）。ヘッダ「登り梁の直切りの幾何」参照。
+					// 断面中心 ＋ せい/(2·cosθ)（cosθ = horiz）。
+					// ヘッダ「登り梁の直切りの幾何」参照。
 					elevation = story.elevation + oz + (half / horiz);
 					endElevation = elevation + (axis.z * length);
 				}

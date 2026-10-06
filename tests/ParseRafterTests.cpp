@@ -4,15 +4,15 @@
 //	垂木解析（src/parse/Rafter）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK
 //	のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」:core/ parse/ は無 SDK
 //	で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
-//	桁幅参照（girderWidthAt）は M7 で横架材が入って実寸を引けるようになったので、実寸の選択・
-//	垂木と平行な材の除外・見つからないときの既定値フォールバックをそれぞれ検証する
-//	（docs/DEV-NOTES.md M6 / M7）。
 //
 //	検証項目（docs/DEV-NOTES.md M6）: 屋根面の掃引（両端は半幅内側・内部 455 以下・中間 455 ちょうど・
 //	端数は両端へ等分）・走査線クリップ（非凸面の分割）・勾配（start=軒側の支持点／end=棟側）・
 //	支持点（屋根面と横架材天端 Z の交点）・軒の出と差し込み・仕様ラベル・断面とクラス・
 //	センタリング・ストーリ Elevation の加算・レイヤ振り分け・決定性。実フィクスチャのパスは
 //	CMake が HOMESKZ_FIXTURES_DIR で渡す。
+//	桁幅参照（girderWidthAt）は、実寸の選択・垂木と平行な材の除外・見つからないときの
+//	既定値フォールバックをそれぞれ検証する（M7 で横架材が入って実寸を引けるようになった。
+//	docs/DEV-NOTES.md M6 / M7）。
 //
 
 #include "TestFramework.h"
@@ -63,14 +63,14 @@ namespace
 	// 試験用の屋根面（4m×3m の片流れ）と、それに対応する最小の屋根版 IFC は
 	// tests/RoofSample.h が唯一の定義。野地板（ParseRoofTests）と共有する。
 
-	// 桁幅参照（girderWidthAt）に渡す軒桁の member 命令。芯線と幅だけを見るので、
+	// 桁幅参照（girderWidthAt）に渡す軒桁の member 命令。芯線と幅だけを参照するので、
 	// 高さ・クラス・レイヤは既定のままでよい。
 	MemberCommand girderMember(const Vec2& start, const Vec2& end, double width)
 	{
 		MemberCommand member;
 		member.layer = "R-軒高";
 		member.memberId = "girder";
-		member.drawClass = CLASS_TARUKI; // 桁幅の判定はクラスを見ない
+		member.drawClass = CLASS_TARUKI; // 桁幅の判定はクラスを参照しない
 		member.start = start;
 		member.end = end;
 		member.width = width;
@@ -332,10 +332,11 @@ TEST(rafter_with_beam_top_at_the_ridge_uses_the_eaves_tip)
 
 TEST(no_degenerate_rafters_in_any_fixture)
 {
-	// **回帰（実データ）**: 全フィクスチャで縮退した垂木が 1 本も出ないこと。かつては
-	// サンプル1 で 8 本・グレー本モデルプラン1 で 7 本の縮退垂木が出ており、
-	// validateDocument がその 2 モデルの Document 全体を弾いていた（＝インポートしても
-	// 何も描かれなかった）。core::samePoint は validateDocument の isValidRafter と同じ述語。
+	// **回帰（実データ）**: 全フィクスチャで縮退した垂木が 1 本も出ないこと。
+	// core::samePoint は validateDocument の isValidRafter と同じ述語。
+	// かつてはサンプル1 で 8 本・グレー本モデルプラン1 で 7 本の縮退垂木が出ており、
+	// validateDocument がその 2 モデルの Document 全体を除外していた（＝インポートしても
+	// 何も描画されなかった）。
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)
 				   {
@@ -512,7 +513,7 @@ TEST(girder_width_ignores_members_parallel_to_rafter)
 
 TEST(girder_width_ignores_degenerate_members)
 {
-	// 平面投影長が 0 の材（点に潰れた命令）は候補にしない → 既定桁幅。
+	// 平面投影長が 0 の材（点に退化した命令）は候補にしない → 既定桁幅。
 	const std::vector<MemberCommand> members = {
 		girderMember(Vec2{0.0, 0.0}, Vec2{0.0, 0.0}, 150.0)};
 	CHECK(near(girderWidthAt(0.0, 0.0, 0.0, 1000.0, members), kDefaultGirderWidth));
@@ -621,7 +622,7 @@ TEST(given_width_moves_the_end_rafters_inward_by_half_width)
 // ---------------------------------------------------------------------------
 
 // 最小の屋根版 IFC（minimalRoofText）は tests/RoofSample.h が唯一の定義で、野地板
-// （ParseRoofTests）と共有する。slabName を "屋根版" 以外にすると拾われないことの確認に使う。
+// （ParseRoofTests）と共有する。slabName を "屋根版" 以外にすると抽出されないことの確認に使う。
 
 TEST(extracts_rafters_from_minimal_roof_slab)
 {
@@ -642,7 +643,7 @@ TEST(extracts_rafters_from_minimal_roof_slab)
 
 TEST(ignores_slabs_with_other_names)
 {
-	// 床版など "屋根版" 始まり以外の IfcSlab は屋根面として拾わない。
+	// 床版など "屋根版" 始まり以外の IfcSlab は屋根面として抽出しない。
 	Model const model = loadIfcFromText(minimalRoofText("床版"));
 	CHECK(buildRafterCommands(model).empty());
 }
@@ -671,7 +672,7 @@ TEST(returns_empty_without_stories)
 
 TEST(story_has_roof_slab_detects_roof_face)
 {
-	// parse/Story が該当階へ 垂木・野地板 レベルを足すかの判定に使う。
+	// parse/Story が該当階へ 垂木・野地板 レベルを追加するかの判定に使う。
 	Model const model = loadIfcFromText(minimalRoofText("屋根版:1"));
 	CHECK(storyHasRoofSlab(model, 11));
 	CHECK(!storyHasRoofSlab(model, 10));
@@ -702,7 +703,7 @@ TEST(fixture_rafters_are_valid)
 		CHECK(rafter.layer.rfind("-垂木") == rafter.layer.size() - std::string("-垂木").size());
 		// 軒の出は 0 以上、仕様ラベルは 45×45@455。差し込みは**軒桁に乗る垂木なら
 		// 桁幅/2（正）、乗らない垂木なら 0**（軒先が挿入点＝軒高になり、差し込み・軒の出が
-		// 乗ると実形状より長く描かれるため。src/parse/Rafter.cpp）。
+		// 乗ると実形状より長く描画されるため。src/parse/Rafter.cpp）。
 		CHECK(rafter.overhang >= 0.0);
 		CHECK(rafter.embedment >= 0.0);
 		if (rafter.embedment == 0.0)

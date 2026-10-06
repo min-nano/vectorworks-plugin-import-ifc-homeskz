@@ -1,26 +1,26 @@
 //
 //	payload/PayloadMain.cpp
 //
-//	**本体（ペイロード）の入口。** Vectorworks はこのモジュールを知らない——読み込むのは
-//	殻（src/PayloadHost.cpp）で、境界は C の ABI（src/PayloadAbi.h）。だから**降ろして、
-//	置き換えて、読み直せる**＝プラグインのアップデートに Vectorworks の再起動が要らない。
+//	**本体（ペイロード）の入口。** ここが持っているのは「殻から呼ばれたものを、中の実装へ
+//	取り次ぐ」処理だけ。実処理は draw::runImportCommand（本番の取り込み）・
+//	draw::runTestRound（実機テスト。M25）と draw::recalculate*（PIO のリセット）にある。
+//	メニュー・PIO の登録と自動アップデートは殻の側（そちらはめったに変わらない＝再起動も
+//	めったに要らない）。
 //
-//	ここが持っているのは「殻から呼ばれたものを、中の実装へ取り次ぐ」ところだけ。実処理は
-//	draw::runImportCommand（本番の取り込み）・draw::runTestRound（実機テスト。M25）と
-//	draw::recalculate*（PIO のリセット）にある。
-//	メニュー・PIO の登録と自動アップデートは殻の側（そちらは滅多に変わらない＝再起動も
-//	滅多に要らない）。
+//	Vectorworks はこのモジュールを知らない——読み込むのは殻（src/PayloadHost.cpp）で、
+//	境界は C の ABI（src/PayloadAbi.h）。だから**アンロードして、置き換えて、再読み込み
+//	できる**＝プラグインのアップデートに Vectorworks の再起動が要らない。
 //
 //	【SDK をどう使えるようにするか】gSDK / gCBP / gVWMM は静的ライブラリ（libVWSDK.a /
 //	VWSDK.lib）が持つ**モジュールごとのグローバル**である。このモジュールは自分の複製を
-//	持っているので、読み込んだだけでは全部 nil のまま。殻が受け取った CallBackPtr をもらって
-//	::GS_InitializeVCOM へ渡すと、そこで埋まる——普通のプラグインの plugin_module_main が
-//	やっているのと同じことを、外から材料をもらって行う形
+//	持っているので、読み込んだだけでは全部 nil のまま。殻が受け取った CallBackPtr を受け取って
+//	::GS_InitializeVCOM へ渡すと、そこで設定される——通常のプラグインの plugin_module_main が
+//	行っているのと同じことを、必要な値を外から受け取って行う形
 //	（[SDK リファレンス「プラグインモジュールの読み込みと入れ替え」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Plug-in%20Modules.md)
 //	で実測済み）。
 //
-//	【境界を越えさせないもの】例外（すべてここで受ける）、C++ のオブジェクト、降ろした後も
-//	使われる文字列（返す const char* は殻がその場で写す約束）。
+//	【境界を越えさせないもの】例外（すべてここで捕捉する）、C++ のオブジェクト、アンロード
+//	した後も使われる文字列（返す const char* は殻がその場で複製する約束）。
 //
 
 #include "PluginPrefix.h"
@@ -43,12 +43,12 @@ namespace
 {
 	using namespace HomeskzIfcImport;
 
-	// **殻から渡されたものは、ポインタで持たずに写す。** そうしないと、殻の load から
-	// 戻った時点で腐ったポインタを持つことになる（理由と落ち方は PayloadHostHolder.h）。
+	// **殻から渡されたものは、ポインタで持たずに複製する。** そうしないと、殻の load から
+	// 戻った時点で無効なポインタを持つことになる（理由と異常終了の仕方は PayloadHostHolder.h）。
 	payload::HostHolder gHost;
 	bool gPayloadReady = false;
 
-	// **殻へ返す文字列の置き場所。** 返した const char* は「次に本体を呼ぶまで」生きている
+	// **殻へ返す文字列の置き場所。** 返した const char* は「次に本体を呼ぶまで」有効である
 	// 約束（src/PayloadAbi.h）なので、静的に 1 つ持って毎回書き換える。
 	std::string gMcpViewText;
 } // namespace
@@ -86,13 +86,13 @@ VW_PAYLOAD_EXPORT int vw_payload_init(const VwPayloadHost* host)
 {
 	try
 	{
-		// **受け取ってその場で写す**（版と大きさの確認も入れ物の側でやる）。以降、殻から
-		// 渡された記憶域には二度と触らない。
+		// **受け取ってその場で複製する**（版と大きさの確認も入れ物の側で行う）。以降、殻から
+		// 渡された記憶域には二度とアクセスしない。
 		const int adopted = gHost.adopt(host);
 		if (adopted != kVwPayloadOk)
 			return adopted;
 
-		// **ここが要（かなめ）。** 自分の側の gSDK / gCBP / gVWMM を埋める。
+		// **ここが要点。** 自分の側の gSDK / gCBP / gVWMM を設定する。
 		const VCOMError err = ::GS_InitializeVCOM(gHost.callbacks());
 		if (err != kVCOMError_NoError)
 		{
@@ -105,10 +105,10 @@ VW_PAYLOAD_EXPORT int vw_payload_init(const VwPayloadHost* host)
 			return kVwPayloadErrVcom;
 		}
 
-		// **殻から借りた道具を本体の中へ預ける**（draw/HostServices.h）。借りるのは同梱
-		// スクリプトの実行だけで、本体からは手が届かない——同梱物の在り処が要るが、本体が
-		// 読まれるのは一時ディレクトリの複製だから。
-		// **写して持つ**のは境界の決めごとどおり（PayloadHostHolder.h）。
+		// **殻から借りた機能を本体の中へ登録する**（draw/HostServices.h）。借りるのは同梱
+		// スクリプトの実行だけで、本体からは実行できない——同梱物の場所が要るが、本体が
+		// 読み込まれるのは一時ディレクトリの複製だから。
+		// **複製して保持する**のは境界の決めごとどおり（PayloadHostHolder.h）。
 		draw::HostServices services;
 		if (gHost.canRunScripts())
 		{
@@ -133,9 +133,9 @@ VW_PAYLOAD_EXPORT int vw_payload_info(VwPayloadInfo* out)
 {
 	try
 	{
-		// **init の前でも答える。** 殻は「読んだものが何か」を先に言えたほうがよい
-		// （ABI が合わずに捨てるときも、何を捨てたのか出せる）。返す const char* は
-		// 静的な文字列リテラルなので、降ろすまで生きている。
+		// **init の前でも答える。** 殻は「読み込んだものが何か」を先に示せたほうがよい
+		// （ABI が合わずに破棄するときも、何を破棄したのか表示できる）。返す const char* は
+		// 静的な文字列リテラルなので、アンロードするまで有効である。
 		if (out == nullptr || out->size < sizeof(VwPayloadInfo))
 			return kVwPayloadErrAbi;
 		out->commit = VW_BUILD_VERSION;
@@ -154,10 +154,10 @@ VW_PAYLOAD_EXPORT int vw_payload_run_import()
 	{
 		if (!gPayloadReady || gSDK == nil)
 			return kVwPayloadErrNotInit;
-		// 取り込みは自分の中で例外を受け、ユーザーへはダイアログで見せる
-		// （draw/ImportRun.cpp）。ここは**境界の最後の砦**として、そこで漏れたものを
-		// 受けるだけ。**実機テストのことは何も持ち帰らない**——それは vw_payload_run_test の
-		// 仕事である（M25。src/PayloadAbi.h）。
+		// 取り込みは自分の中で例外を捕捉し、ユーザーへはダイアログで表示する
+		// （draw/ImportRun.cpp）。ここは**境界の最後の防御**として、そこで漏れたものを
+		// 捕捉するだけ。**実機テストのことは何も返さない**——それは vw_payload_run_test の
+		// 役割である（M25。src/PayloadAbi.h）。
 		draw::runImportCommand();
 		return kVwPayloadOk;
 	}
@@ -192,8 +192,8 @@ VW_PAYLOAD_EXPORT int vw_payload_mcp_serve(const char* shellReport, const char**
 		*out = nullptr;
 		if (!gPayloadReady || gSDK == nil)
 			return kVwPayloadErrNotInit;
-		// 1 回ぶん捌いて**すぐ戻る**（draw/McpBridge.h）。中で例外を受けて見え方に載せる。
-		// 殻が済ませた頼みごとの結末は、ここで写してから渡す（寿命は殻の呼び出しの間だけ）。
+		// 1 回ぶん処理して**すぐ戻る**（draw/McpBridge.h）。中で例外を捕捉して表示状態に載せる。
+		// 殻が実行した要求の結末は、ここで複製してから渡す（寿命は殻の呼び出しの間だけ）。
 		gMcpViewText =
 			draw::serveMcpBridge(shellReport != nullptr ? std::string(shellReport) : std::string());
 		*out = gMcpViewText.c_str();
@@ -212,12 +212,12 @@ VW_PAYLOAD_EXPORT int vw_payload_recalculate(unsigned int kind, void* objectHand
 		if (outEvent == nullptr)
 			return kVwPayloadErrAbi;
 		// kObjectEventNoErr は VWFC::PluginSupport にあり、ここは大域スコープなので
-		// 修飾して引く（draw/ColumnMarkPio.h の注記と同じ理由）。
+		// 修飾して参照する（draw/ColumnMarkPio.h の注記と同じ理由）。
 		*outEvent = VWFC::PluginSupport::kObjectEventNoErr;
 		if (!gPayloadReady || gSDK == nil)
 			return kVwPayloadErrNotInit;
 
-		// MCObjectHandle は境界を void* で渡る（src/PayloadAbi.h「SDK を include しない」）。
+		// MCObjectHandle は境界を void* で受け渡す（src/PayloadAbi.h「SDK を include しない」）。
 		auto* const object = reinterpret_cast<MCObjectHandle>(objectHandle);
 		switch (kind)
 		{
@@ -228,8 +228,8 @@ VW_PAYLOAD_EXPORT int vw_payload_recalculate(unsigned int kind, void* objectHand
 			*outEvent = draw::recalculateShearWall(object);
 			return kVwPayloadOk;
 		default:
-			// 殻のほうが新しく、こちらの知らない PIO を頼んできた。**描かずに正常
-			// 終了として返す**（殻は kObjectEventNoErr を返し、既に描いてあるものを
+			// 殻のほうが新しく、こちらの知らない PIO を要求してきた。**描画せずに正常
+			// 終了として返す**（殻は kObjectEventNoErr を返し、既に描画してあるものを
 			// 消さない）。
 			return kVwPayloadErrUnknownId;
 		}
@@ -242,8 +242,8 @@ VW_PAYLOAD_EXPORT int vw_payload_recalculate(unsigned int kind, void* objectHand
 
 VW_PAYLOAD_EXPORT void vw_payload_shutdown()
 {
-	// 降ろす直前に殻が呼ぶ。**殻へ渡したものを手放す**のがここの仕事——このモジュールの
-	// 番地を持たれたまま降ろすと、次に触った瞬間に落ちる。
+	// アンロードする直前に殻が呼ぶ。**殻へ渡したものを手放す**のがここの役割——このモジュールの
+	// 番地を保持されたままアンロードすると、次にアクセスした瞬間に異常終了する。
 	gPayloadReady = false;
 	// 殻から借りたものを手放す（このモジュールの番地も、殻の番地も持ち越さない）。
 	draw::clearHostServices();

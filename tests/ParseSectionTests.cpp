@@ -12,7 +12,7 @@
 //	命令の並び順に依存しない決定性。
 //
 //	通り芯は**最小の STEP テキストから Model を作って**与える（loadIfcFromText）——通り芯の読み
-//	方は parse/Grid の担当で、ここでは「通り芯がこう並んでいるとき何を切るか」だけを見たいため。
+//	方は parse/Grid の担当で、ここでは「通り芯がこう並んでいるとき何を切るか」だけを確かめたいため。
 //
 
 #include "Fixtures.h"
@@ -58,9 +58,9 @@ namespace
 	// y∈[0,6000] で中心は (4000,3000) なので、センタリング後は ±4000 / ±3000 になる。
 	//
 	// 実データに寄せて、次の 3 つも混ぜてある（いずれも bbox は広げない）:
-	//   * **宣言順は座標順ではない**（X3 → X1 → X2）。並べ替えが効いていることを見る。
+	//   * **宣言順は座標順ではない**（X3 → X1 → X2）。並べ替えが機能していることを確かめる。
 	//   * **同名で 2 区間に分かれた通り芯**（X1 の短い区間）。1 本にまとめられる。
-	//   * **無名の通り芯**（命名に使えないので通り名の候補から外れる）。
+	//   * **無名の通り芯**（命名に使えないので通り名の候補から除外される）。
 	Model sampleGridModel()
 	{
 		return loadIfcFromText("#10=IFCCARTESIANPOINT((0.,0.,0.));\n"
@@ -126,7 +126,7 @@ namespace
 				member(-4000.0, 0.0, 4000.0, 0.0)};
 	}
 
-	// ストーリ 1 つ（レイヤ 2 枚）。表示レイヤの組み立てを見るための最小構成。
+	// ストーリ 1 つ（レイヤ 2 枚）。表示レイヤの組み立てを確かめるための最小構成。
 	std::vector<core::StoryCommand> sampleStories()
 	{
 		core::StoryCommand story;
@@ -311,7 +311,7 @@ TEST(NameCutsHandleMultiByteAndBrokenAxisNames)
 {
 	// 通り名は UTF-8 で、いろは文字だけなら「又」書式・それ以外は「'」書式になる。
 	// 1〜4 バイトの文字と、壊れた並び（継続バイトが先頭・途中で切れている）を混ぜても
-	// 落ちず、いろは以外として扱われる。
+	// 異常終了せず、いろは以外として扱われる。
 	const std::vector<NamedAxis> ascii{NamedAxis{"A1", 0.0}};
 	CHECK(nameSectionCuts({1000.0}, ascii) == (std::vector<std::string>{"A1'"}));
 
@@ -436,11 +436,11 @@ TEST(BuildSectionCommandsIsDeterministic)
 
 // **図番はシートの中で一意でなければならない**（実機で発覚）。重なっていると
 // Vectorworks が「その図番は、このシートレイヤの他の図面ですでに使用中です」という
-// モーダルのダイアログを出して止まり、無人で回している周がそこで死ぬ。
+// モーダルのダイアログを出して停止し、無人で実行している周がそこから進まなくなる。
 TEST(SectionNumbersAreMadeUniqueAcrossDirections)
 {
 	std::vector<core::SectionCommand> commands(5);
-	// X通り・Y通りは別々に採番するので、名前付きの通り芯が拾えない図面では
+	// X通り・Y通りは別々に採番するので、名前付きの通り芯が取得できない図面では
 	// どちらも "1" から始まる——連結すると同じ綴りが並ぶ。
 	const char* const kNames[] = {"1", "2", "1", "2", "1"};
 	for (std::size_t i = 0; i < commands.size(); ++i)
@@ -533,8 +533,8 @@ TEST(BuildSectionCommandsPassDocumentValidation)
 {
 	Model const model = sampleGridModel();
 	// **section 命令だけ**を空の Document に載せて検証する（試験用の柱・横架材はレイヤ名や
-	// クラス名を持たない骨だけの命令なので、そのまま検証へ回すと section とは無関係な理由で落
-	// ちる）。
+	// クラス名を持たない最小限の命令なので、そのまま検証へ回すと section とは無関係な理由で
+	// 失敗する）。
 	core::Document document;
 	document.sections = buildSectionCommands(model, sampleDocument());
 	// 軸組図があるならシートレイヤの通し方（番号の始まり・タイトルの基）も要る（M18）。

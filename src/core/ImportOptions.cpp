@@ -28,7 +28,7 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 全角の数字・小数点（UTF-8 で EF BC 90〜99 / EF BC 8E）を半角へ読み替える。
-		// それ以外の文字はそのまま残す（後段が数字列でないとして弾く）。
+		// それ以外の文字はそのまま残す（後段が数字列でないとして受け付けない）。
 		std::string toHalfWidthDigits(const std::string& text)
 		{
 			std::string out;
@@ -234,7 +234,7 @@ namespace HomeskzIfcImport::core
 	bool ImportOptions::isSectionSkipped(const std::string& drawingNumber) const
 	{
 		// 並びに頼らず線形に探す（フィールドは公開なので、setSkippedSections を通さずに
-		// 足されても正しく答える。数は通りの本数＝数十まで）。
+		// 追加されても正しく答える。数は通りの本数＝数十まで）。
 		return std::find(skippedSections.begin(), skippedSections.end(), drawingNumber) !=
 			   skippedSections.end();
 	}
@@ -281,6 +281,6 @@ namespace HomeskzIfcImport::core
 				dimensionStandards[defaultDimensionStandardIndex(dimensionStandards)]);
 		return options;
 		// 閉じ括弧は setter が例外を投げたときの後始末（options の破棄）にしか通らず、
-		// テストでは踏めない（gcov の "====="。parse/ShearWall.cpp と同じ）。
+		// テストでは通らない（gcov の "====="。parse/ShearWall.cpp と同じ）。
 	} // GCOVR_EXCL_LINE
 } // namespace HomeskzIfcImport::core

@@ -2,7 +2,7 @@
 //	draw/ImportRun.cpp
 //
 //	取り込み 1 周ぶんの部品の実装（意図は draw/ImportRun.h 参照）。**中身は M24 まで
-//	draw/ImportCommand.cpp の無名名前空間に在ったものをそのまま出しただけ**で、絵を作る
+//	draw/ImportCommand.cpp の無名名前空間に在ったものをそのまま移しただけ**で、描画の
 //	手順は 1 行も変えていない（M25 で分けたのは「誰が呼ぶか」だけ）。
 //
 
@@ -54,7 +54,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// パスから末尾のファイル名だけを取り出す（進捗ダイアログの上段に出す 1 行）。
-		// 区切りは POSIX とネイティブ Windows の両方を見る（SDK が返すパスは実行環境の
+		// 区切りは POSIX とネイティブ Windows の両方を考慮する（SDK が返すパスは実行環境の
 		// 流儀に従う）。区切りが無ければパスそのものがファイル名。
 		std::string FileNameOf(const std::string& path)
 		{
@@ -65,11 +65,12 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// undo イベントの状態を診断ログへ 1 行残す（docs/DEV-NOTES.md M15「Undo」）。
+		// いまは描画を draw::ImportUndoScope で包むので、**afterDraw は no（自分で開いた
+		// イベントを閉じ切った状態）が正しい**。
 		//
-		// **実機でしか分からない挙動なので残してある。** 実測では start=no / afterParse=no /
-		// afterDraw=yes で、「VW は取り込みの開始時にイベントを開かない」「SDK 内部が描画の
-		// 途中で勝手に開く」ことが分かった。いまは描画を draw::ImportUndoScope で包むので、
-		// **afterDraw は no（自分で開いたイベントを閉じ切った状態）が正しい**。
+		// **実機でしか分からない挙動なので残してある。** 包む前の実測では start=no /
+		// afterParse=no / afterDraw=yes で、「VW は取り込みの開始時にイベントを開かない」
+		// 「SDK 内部が描画の途中で勝手に開く」ことが分かった。
 		void LogUndoState(const char* when)
 		{
 			core::trace::log(std::string("undo: ") + when + " building=" +
@@ -77,20 +78,22 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// 診断ログを開き、見出しを書く（docs/DEV-NOTES.md「診断・完了報告の方針（M15/M19）」）。
-		// **取り込みのたびに必ず開く**——完了ダイアログがログをそのまま見せて「困ったら
-		// これを貼る」経路にした以上、要るときに限って無いのでは意味がない（以前は
-		// dev ビルドと HOMESKZ_IFC_TRACE 指定時だけだった）。開けなくても黙って続ける
-		// （付随機能。本文はメモリに溜まるので、ダイアログのログ欄は変わらず読める）。
-		//
 		// HOMESKZ_IFC_TRACE に**パスを入れると出力先を差し替えられる**（一時ディレクトリ
-		// 以外へ出したいとき用の逃げ道。値が無ければ既定の場所）。
+		// 以外へ出したいとき用の回避策。値が無ければ既定の場所）。
+		//
+		// **取り込みのたびに必ず開く。** 開けなくても黙って続ける（付随機能。本文はメモリに
+		// 溜まるので、ダイアログのログ欄は変わらず読める）。
+		//
+		// 理由: 完了ダイアログがログをそのまま表示して「困ったらこれを貼る」経路にした以上、
+		// 必要なときに限って無いのでは意味がない（以前は dev ビルドと HOMESKZ_IFC_TRACE
+		// 指定時だけだった）。
 		void OpenImportTrace(const std::string& ifcPath)
 		{
 			core::trace::open(importLogPath()); // 開けなくても本文は溜まる（core/Trace.h）
 			// **`core::trace::path()` を必ず渡す。** ここを省くと `formatLogHeader` の
-			// 既定値（空）が効いて、**実際には書けているのに見出しが「ファイルへは
-			// 書けませんでした」と言う**（実機のログで発覚。M19 でこの見出しを足して以来
-			// ずっとそうなっていた）。`path()` は開けたときだけ値を持ち、開けなければ空を
+			// 既定値（空）が使われて、**実際には書けているのに見出しが「ファイルへは
+			// 書けませんでした」と表示される**（実機のログで発覚。M19 でこの見出しを追加して
+			// 以来ずっとそうなっていた）。`path()` は開けたときだけ値を持ち、開けなければ空を
 			// 返すので、そのまま渡せば両方の場合が正しくなる（core/Trace.h）。
 			core::trace::note(
 				parse::formatLogHeader(currentBuildInfo(), ifcPath, FileSizeOf(ifcPath),
@@ -125,22 +128,22 @@ namespace HomeskzIfcImport::draw
 			if (!prologue.empty())
 				core::trace::note(prologue);
 			// **その次に設定を書く。** 「シンボルが 1 つも置かれない」の切り分けは
-			// まず対応表を見るところから始まる（parse/Summary の formatImportOptions）。
+			// まず対応表を確認するところから始まる（parse/Summary の formatImportOptions）。
 			// 設定ダイアログを出せなかったときは、既定で続けたことも残す。**ダイアログ側の
-			// 記録（どの形で出したか・何が駄目だったか）もここへ**——「設定ダイアログが
+			// 記録（どの形で出したか・何が失敗したか）もここへ**——「設定ダイアログが
 			// 出ない」の切り分けはこの 1 行から始まる（draw/SettingsDialog.h）。
 			if (!settingsShown)
 				core::trace::note("設定: ダイアログを出せなかったため既定の対応で取り込みます");
 			if (!settingsNote.empty())
 				core::trace::note("設定ダイアログ: " + settingsNote);
 			core::trace::note(parse::formatImportOptions(options));
-			// 所要時間は**トレースとは別に**測る（ログの結果行と実機テストの報告に出す。
+			// 所要時間は**トレースとは別に**計測する（ログの結果行と実機テストの報告に出す。
 			// 完了ダイアログには出さない——M19）。
 			const auto started = std::chrono::steady_clock::now();
 			LogUndoState("start");
 
 			// 進捗ダイアログを開く。両フェーズへ**同じ 1 つ**を渡し、解析→描画を通して
-			// 見出しとバーを進める。描画は横架材・垂木を 1 本ずつ SDK で作るため数百回の
+			// 見出しとバーを進める。描画は横架材・垂木を 1 本ずつ SDK で生成するため数百回の
 			// 呼び出しになり、これが無いと VectorWorks が固まったように見える
 			// （draw/ProgressDialog.h「なぜ要るか」）。
 			draw::ProgressDialog progress("ホームズ君 IFC インポート", FileNameOf(ifcPath));
@@ -148,18 +151,18 @@ namespace HomeskzIfcImport::draw
 			// Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
 			// 読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
 			// フェーズの区切りは**ここだけ**が書く——各フェーズの行は進捗報告（core/Progress の
-			// beginPhase）が流し、要素側は `trace::log` を持たない（core/Trace.h「誰が書くか」。
-			// 例外は耐力壁 PIO のリセットだけ）。
+			// beginPhase）が書き出し、要素側は `trace::log` を持たない（core/Trace.h「誰が
+			// 書くか」。例外は耐力壁 PIO のリセットだけ）。
 			core::trace::note("=== 解析 ===");
 			core::Document document = parse::buildDocument(ifcPath, progress, options);
 			LogUndoState("afterParse");
 
-			// Phase 2（SDK 依存）: 命令セットを検証してから各要素を描く。検証を通らなければ
-			// valid=false で何も描かない。途中でキャンセルされたら、その時点までを描いて
+			// Phase 2（SDK 依存）: 命令セットを検証してから各要素を描画する。検証を通らなければ
+			// valid=false で何も描画しない。途中でキャンセルされたら、その時点までを描画して
 			// cancelled=true で戻る。
 			// 図面変更は draw 側が自前の undo イベント（draw::ImportUndoScope）で包む。
 			// executeDocument から戻った時点でイベントは閉じているので、building=no に
-			// なっているはず——そこが崩れると「取り消し」で図面が壊れるので、ログで見る。
+			// なっているはず——そこが崩れると「取り消し」で図面が壊れるので、ログで確認する。
 			core::trace::note("=== 描画 ===");
 			const draw::DrawCounts drawn = draw::executeDocument(document, progress);
 			LogUndoState("afterDraw");
@@ -189,12 +192,12 @@ namespace HomeskzIfcImport::draw
 	// -------------------------------------------------------------------
 	// ネイティブの「開く」ダイアログで IFC ファイルを 1 つ選ばせる。選ばれたら
 	// その絶対パス（UTF-8）を outPath に入れて true を返す。キャンセルや取得失敗は
-	// false（呼び出し側は何も描かず静かに終える）。
+	// false（呼び出し側は何も描画せずに終える）。
 	//
 	// VCOM の作法（SDK リファレンスの Info「VCOM」）: VCOMPtr に IID を渡して生成し、ポインタが
 	// 有効かを if で確かめ、各呼び出しの VCOMError を kVCOMError_NoError と比較する。選択結果は
 	// IFileIdentifier（0 番目）から GetFileFullPath で受け取り、TXString の
-	// operator const char*()（UTF-8）で std::string へ写す。
+	// operator const char*()（UTF-8）で std::string へ複製する。
 	bool chooseIfcFile(std::string& outPath)
 	{
 		// IFileChooserDialogPtr は VCOMPtr<IFileChooserDialog> の SDK 標準 typedef。
@@ -235,15 +238,15 @@ namespace HomeskzIfcImport::draw
 	std::string importLogPath()
 	{
 		// HOMESKZ_IFC_TRACE に**パスを入れると出力先を差し替えられる**（一時ディレクトリ
-		// 以外へ出したいとき用の逃げ道）。環境変数の読み取りは core/Trace が持つ。
+		// 以外へ出したいとき用の回避策）。環境変数の読み取りは core/Trace が持つ。
 		std::string custom = core::trace::envValue("HOMESKZ_IFC_TRACE");
 		if (!custom.empty())
 			return custom;
 		return core::trace::defaultLogPath("min-nano_structure.log");
 	}
 
-	// 動かしているビルドの素性（診断ログの見出しに出す）。**ここで詰めるのは、
-	// BuildConfig.h のマクロを見られるのが SDK 側だけ**だから——parse/Summary は
+	// 実行中のビルドの素性（診断ログの見出しに出す）。**ここで組み立てるのは、
+	// BuildConfig.h のマクロを参照できるのが SDK 側だけ**だから——parse/Summary は
 	// 受け取った文字列を並べるだけで、ビルド種別を知らない。
 	parse::BuildInfo currentBuildInfo()
 	{
@@ -257,7 +260,7 @@ namespace HomeskzIfcImport::draw
 		build.commit = VW_BUILD_VERSION;
 		build.branch = VW_BUILD_BRANCH;
 		// プラットフォームは PluginPrefix.h と同じ判定（SDK の GS_MAC / GS_WIN は
-		// 値で定義される流儀があるので、素の処理系マクロを見る）。
+		// 値で定義される流儀があるので、処理系の定義済みマクロをそのまま参照する）。
 #if defined(_WINDOWS)
 		build.platform = "Windows";
 #elif defined(__APPLE__)
@@ -272,7 +275,7 @@ namespace HomeskzIfcImport::draw
 	// 「エラーハンドリング・所有権」）。1 要素の欠損で全体を止めない寛容さ（parse / draw の
 	// 中で continue する）は従来どおりで、ここへ来るのは「そこでも吸収できなかった異常」だけ。
 	//
-	// **呼び出し側は failed を見るだけでよい。** 本番のコマンドは結果ダイアログへ、テストの
+	// **呼び出し側は failed を確認するだけでよい。** 本番のコマンドは結果ダイアログへ、テストの
 	// 周は「報告を書かずに失敗として返す」の判断へ使う——どちらも try/catch を書かずに済む。
 	ImportRound runImportRound(const std::string& ifcPath, const core::ImportOptions& options,
 							   bool settingsShown, const std::string& settingsNote,

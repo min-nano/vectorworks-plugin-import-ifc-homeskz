@@ -24,7 +24,7 @@ namespace HomeskzIfcImport::core
 				   c == '.' || c == '_' || c == '-';
 		}
 
-		// 目印に書いてあるブランチ名（読めなければ空）。1 行目だけを採り、行末の CR は落とす。
+		// 目印に書いてあるブランチ名（読めなければ空）。1 行目だけを採り、行末の CR は取り除く。
 		std::string readMarker(const fs::path& dir)
 		{
 			std::ifstream in(dir / kScratchBranchFile, std::ios::binary);
@@ -39,7 +39,7 @@ namespace HomeskzIfcImport::core
 
 		bool writeMarker(const fs::path& dir, const std::string& branch)
 		{
-			// 開けなかったストリームへの書き込みは失敗するだけなので、最後の状態で判じる。
+			// 開けなかったストリームへの書き込みは失敗するだけなので、最後の状態で判定する。
 			std::ofstream out(dir / kScratchBranchFile, std::ios::binary | std::ios::trunc);
 			out << branch << "\n";
 			return static_cast<bool>(out);
@@ -77,7 +77,7 @@ namespace HomeskzIfcImport::core
 		if (root.empty() || ec)
 			return "";
 		const std::string base = scratchDirName(branch);
-		// **同じ名前に写る別のブランチとは番号で分ける。** 目印が自分のブランチなら
+		// **同じ名前に変換される別のブランチとは番号で分ける。** 目印が自分のブランチなら
 		// それを使い、別のブランチなら次の番号へ。上限は置かない——進むのは既にある
 		// フォルダの上だけで、フォルダの数は有限なので必ず止まる。
 		for (int i = 1;; ++i)
@@ -89,7 +89,7 @@ namespace HomeskzIfcImport::core
 					return dir.string();
 				continue;
 			}
-			// 同じ名前のファイルが居座っている等で作れなければ諦める。
+			// 同じ名前のファイルが既に在る等で作れなければ空を返す。
 			if (!fs::create_directory(dir, ec) || !writeMarker(dir, branch))
 				return "";
 			return dir.string();
@@ -143,7 +143,7 @@ namespace HomeskzIfcImport::core
 				state = PrState::Closed;
 			else if (word == "none")
 				state = PrState::None;
-			// 2 度出たら消さない側へ（Closed は他のどれにも負ける）。
+			// 2 度出たら削除しない側を採る（Closed は他のどの状態よりも優先度が低い）。
 			const auto found = states.find(branch);
 			if (found == states.end())
 				states.emplace(branch, state);
@@ -202,7 +202,7 @@ namespace HomeskzIfcImport::core
 				return false;
 			}
 			// Vectorworks は開いている図面の隣に `.<名前>.lck` を置く（実機の一時
-			// ディレクトリで確認）。在るなら開いている——足元から消さない。
+			// ディレクトリで確認）。在るなら開いている——使用中の図面を削除しない。
 			if (endsWith(name, ".lck"))
 			{
 				why = "Vectorworks が開いている図面がある";
@@ -259,7 +259,7 @@ namespace HomeskzIfcImport::core
 		const fs::path child = fs::path(path).lexically_normal();
 		fs::path parent = fs::path(dir).lexically_normal();
 		if (!parent.has_filename())
-			parent = parent.parent_path(); // 末尾の区切り（"a/"）を落とす
+			parent = parent.parent_path(); // 末尾の区切り（"a/"）を取り除く
 		auto c = child.begin();
 		for (const fs::path& part : parent)
 		{

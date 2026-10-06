@@ -51,7 +51,7 @@ namespace HomeskzIfcImport::parse
 	{
 		// 屋根階の床梁（床大梁・床小梁・甲乙梁）の平面外形を集める。種別は IFC Name の
 		// 記録だけで判定する（resolveMemberClass の高さ推定は使わない。屋根階の無名部材
-		// ＝火打・隅木谷木まで床梁に化けると、床でない領域まで囲ってしまうため）。
+		// ＝火打・隅木谷木まで床梁と判定されると、床でない領域まで囲ってしまうため）。
 		const Model& model = context.model();
 		std::vector<std::vector<Vec2>> parts;
 		double beamTop = 0.0;
@@ -196,7 +196,7 @@ namespace HomeskzIfcImport::parse
 				// IFC の床位置を尊重する: 床版ソリッドの最下端（ストーリ高さ ＋ ローカル
 				// 最下端 Z）が床を受ける位置で、横架材天端（屋根階は軒高）からの高低差が
 				// 段差＝スキップフロアになる。命令が持つ高さは基準面（一般階＝床仕上げ
-				// 上端、屋根階＝床下地下端）なので、その高低差を基準レベルへ足す
+				// 上端、屋根階＝床下地下端）なので、その高低差を基準レベルへ加える
 				// （段差が無ければ一般階は FL ちょうど、屋根階は軒高ちょうど）。
 				double topLocal = 0.0;
 				double thicknessLocal = 0.0;

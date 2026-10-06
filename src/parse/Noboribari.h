@@ -2,30 +2,32 @@
 //	parse/Noboribari.h
 //
 //	Phase 1（IFC 解析）の登り梁（傾斜梁）位置補正モジュール（docs/DEV-NOTES.md M7）。
-//
-//	【なぜ後処理なのか】ホームズ君 IFC の登り梁は**位置が正確でない**:
-//	  * 軸の勾配が屋根版（垂木下面）より急で、天端が中央付近で屋根面と交わり両端で上下に
-//	    ずれる（実データで屋根勾配 0.321 に対し登り梁 0.346／0.331）。
-//	  * 端部（直切り＝鉛直面）が受ける材（横架材・母屋）の footprint へ数 mm 食い込む。
-//	そこで parse/Member が組み立てた命令を、**屋根面を基準に**後から整える。屋根版への依存を
-//	parse/Member へ持ち込まないための分離で、垂木・野地板が屋根版から導出されるのと同じく
-//	「形状（屋根面）へ支持部材を合わせる」というロードマップの方針そのものになっている
-//	（docs/DEV-NOTES.md「形状を先に確定し、支持部材を合わせる」）。
+//	parse/Member が組み立てた登り梁の命令を、**屋根面を基準に**後から整える。
 //
 //	補正は 2 段:
 //	  1. **端部の食い込み解消**: 端点を梁軸に沿って内側へ引き戻し、鉛直な端面を受ける材の
 //	     手前の面に合わせる（parse/Member の memberPenetrationDepth を再利用）。
 //	  2. **屋根勾配へのスナップ**: 天端中央線の両端（詰めた後の XY）を、その真上にある屋根版
-//	     （parse/IfcGeometry の roofPlane。M6 で確定した屋根面と同じもの）の平面へ落とし、
+//	     （parse/IfcGeometry の roofPlane。M6 で確定した屋根面と同じもの）の平面へ投影し、
 //	     勾配・高さを屋根面＝垂木下面に一致させる（バインド offset も更新する）。屋根面が
 //	     見つからない登り梁は parse/Member の直切りの幾何（フォールバック）のまま残す。
+//
+//	受ける材は横架材と**柱**の両方を参照する。柱は方向を持たないので、断面の軸平行矩形へ
+//	食い込む量を別式で求める（noboribariColumnPenetration）。
 //
 //	件数・並び順は保つ（後続 M のタグが命令インデックスで横架材を参照するため）。判定は
 //	命令の並び順に依存しない決定的な結果になる。
 //
-//	【M8 で最終化】受ける材は横架材と**柱**の両方を見る（M7 の時点では横架材だけだった。
-//	docs/DEV-NOTES.md M7 / M8）。柱は方向を持たないので、断面の軸平行矩形へ食い込む量を
-//	別式で求める（noboribariColumnPenetration）。
+//	【なぜ後処理なのか】ホームズ君 IFC の登り梁は**位置が正確でない**:
+//	  * 軸の勾配が屋根版（垂木下面）より急で、天端が中央付近で屋根面と交わり両端で上下に
+//	    ずれる（実データで屋根勾配 0.321 に対し登り梁 0.346／0.331）。
+//	  * 端部（直切り＝鉛直面）が受ける材（横架材・母屋）の footprint へ数 mm 食い込む。
+//	後処理として分けるのは屋根版への依存を parse/Member へ持ち込まないためで、垂木・野地板が
+//	屋根版から導出されるのと同じく「形状（屋根面）へ支持部材を合わせる」というロードマップの
+//	方針そのものになっている（docs/DEV-NOTES.md「形状を先に確定し、支持部材を合わせる」）。
+//
+//	【M8 で最終化】柱を受ける材に加えたのは M8 で、M7 の時点では横架材だけだった
+//	（docs/DEV-NOTES.md M7 / M8）。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。
 //
@@ -81,7 +83,7 @@ namespace HomeskzIfcImport::parse
 	// 向が平行（kNoboribariSlopeDirDot 以上）で、外形が登り梁の中点を内包する最初の面。中点を
 	// 内包する面が 1 つも無いときだけ、端点（始端→終端）を内包する最初の面へ下がる（端点は隣の
 	// 屋根版の外形にもかかりやすいので、中点の面より先に選ばない）。命令座標はセンタリング済み
-	// なので center を足してワールドへ戻して判定する。見つからなければ nullptr。
+	// なので center を加えてワールドへ戻して判定する。見つからなければ nullptr。
 	const NoboribariRoofPlane* roofPlaneFor(const core::MemberCommand& command,
 											const std::vector<NoboribariRoofPlane>& planes,
 											const core::Vec2& center);
@@ -93,7 +95,7 @@ namespace HomeskzIfcImport::parse
 									   const core::ColumnCommand& column);
 
 	// 登り梁の端点 point・外向き outward を、受ける材（横架材）・柱の面まで詰める量を返す。Z
-	// 範囲 [zBottom, zTop] が重なる材・柱だけを見て、食い込み量の最大値を返す。平行な材（継ぎ
+	// 範囲 [zBottom, zTop] が重なる材・柱だけを対象に、食い込み量の最大値を返す。平行な材（継ぎ
 	// 手・側並び）は 0 になる。
 	double noboribariEndTrim(const core::Vec2& point, const core::Vec2& outward, double zBottom,
 							 double zTop, const std::vector<core::MemberCommand>& receivers,
@@ -107,13 +109,13 @@ namespace HomeskzIfcImport::parse
 											 const std::vector<core::ColumnCommand>& columns,
 											 const core::Vec2& center);
 
-	// 横架材命令のうち登り梁だけを補正した新しいリストを返す。登り梁でない材は素通しし、
+	// 横架材命令のうち登り梁だけを補正した新しいリストを返す。登り梁でない材は変更せずに含め、
 	// 件数・並び順は保つ。受ける材は「登り梁でない横架材」と柱。
 	std::vector<core::MemberCommand>
 	correctNoboribari(Context& context, const std::vector<core::MemberCommand>& members,
 					  const std::vector<core::ColumnCommand>& columns);
 
-	// 同上（コンテキストを内部で 1 つ作って捨てる。単体テスト用）。
+	// 同上（コンテキストを内部で 1 つ生成し、使い終えたら破棄する。単体テスト用）。
 	std::vector<core::MemberCommand>
 	correctNoboribari(const Model& model, const std::vector<core::MemberCommand>& members,
 					  const std::vector<core::ColumnCommand>& columns);

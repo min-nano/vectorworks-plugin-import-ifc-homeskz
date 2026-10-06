@@ -8,19 +8,19 @@
   実測知見は [SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)の
   `Findings/`**（下記「SDK ドキュメント」）。
 - 全変更に共通する規約（アーキテクチャ・依存の向き・コード規約・テスト方針・PR とマージの
-  規則）は [`CLAUDE.md`](../CLAUDE.md)。ここには、そこから外した**領域ごとの細則**
+  規則）は [`CLAUDE.md`](../CLAUDE.md)。ここには、そこから分離した**領域ごとの細則**
   （置き場所の一覧・MCP ブリッジ・実機テスト・自動アップデート・CI の待ち方と
   デバッグ）も置いています。
 
 ソースのコメントや PR にある `docs/DEVELOPMENT.md「<節の名前>」` は、下の一覧の同じ名前の
-ページで引けます。
+ページで参照できます。
 
 ## コードの構成
 
 | ページ | 中身 |
 | --- | --- |
 | [ソースの構成](development/source-layout.md) | 2 フェーズ分離と殻・本体の分割、ディレクトリとファイルの一覧 |
-| [置き場所の一覧（重複を作らない）](development/placement-index.md) | 共有する定数・述語・ヘルパーの唯一の置き場所（`core/` / `parse/` / `draw/` / 殻 / `tests/`・`scripts/`）。**新しく共有するものを作ったらここへ 1 行足す** |
+| [置き場所の一覧（重複を作らない）](development/placement-index.md) | 共有する定数・述語・ヘルパーの唯一の置き場所（`core/` / `parse/` / `draw/` / 殻 / `tests/`・`scripts/`）。**新しく共有するものを作ったらここへ 1 行追加する** |
 | [プラグイン識別子](development/identifiers.md) | 表示名・バンドル名・ユニバーサル名・UUID と、その在り処 |
 | [SDK ドキュメント（API 仕様）](development/sdk-docs.md) | SDK リファレンス（`Findings/`）と公式リファレンスの在り処 |
 | [文書とコメントの書き方](development/writing-style.md) | コメントの並べ方（目的 → 注意事項 → 理由）・用語の対応表・言い換えない用語 |
@@ -55,14 +55,14 @@
 
 | ページ | 中身 |
 | --- | --- |
-| [MCP ブリッジ](development/mcp-bridge.md) | 道具の一覧と、変えるときの決めごと |
+| [MCP ブリッジ](development/mcp-bridge.md) | ツールの一覧と、変えるときの決めごと |
 | [実機テスト](development/live-test/README.md) | 概要と境界（どこに何があるか） |
 | [ローカルセッションの準備（GitHub・iOS・許可）](development/live-test/local-session-setup.md) | ローカルとクラウドの分担・`gh` の認証・Remote Control・`.claude/settings.json` |
 | [ローカルセッションでの回し方](development/live-test/running.md) | 1 周の流れ（push → `ci-wait` → `vw_update` → `vw_run_test`） |
 | [報告の読み方（Claude 向け）](development/live-test/reading-reports.md) | 「図面の状態:」から読む・人に頼んでよいこと |
 | [図面の用意（M39）](development/live-test/drawing-preparation.md) | テンプレートから開いた新しい図面へ描く |
 | [覚えているもの（`core/FeedbackSession`）](development/live-test/session-state.md) | 記憶のファイルと置き場所 |
-| [一時ファイルと片付け（`core/FeedbackScratch`）](development/live-test/scratch-files.md) | ブランチごとの置き場と、消してよい条件 |
+| [一時ファイルと片付け（`core/FeedbackScratch`）](development/live-test/scratch-files.md) | ブランチごとの置き場と、削除してよい条件 |
 | [設計の決めごと（実機テストを変えるときに守ること）](development/live-test/design-rules.md) | 入口と分担・尋ねる／伝える・図面を閉じる安全弁 |
 
 ## 自動アップデート
@@ -74,6 +74,6 @@
 | [入れる前に、前の版をその版自身のアンインストーラで取り除く](development/auto-update/uninstaller.md) | アンインストーラの規則と安全弁 |
 | [いつ確認するか — コマンドの入口で（起動時ではない）](development/auto-update/when-to-check.md) | 入口ごとの `UpdateCheckKind`・インストールの経路は 1 本 |
 | [チャンネルごとの挙動](development/auto-update/channels.md) | stable / dev・「いま」の判定・ブランチの照合 |
-| [インストール後 — まず「再起動が要るか」を決める](development/auto-update/after-install.md) | 殻の ID（`VW_SHELL_ID`）と本体の読み直し |
-| [殻まで変わったときの再起動](development/auto-update/restart.md) | `CloseAllFilesAndQuitVectorworks`・以前は SDK に頼めなかった経緯 |
+| [インストール後 — まず「再起動が要るか」を決める](development/auto-update/after-install.md) | 殻の ID（`VW_SHELL_ID`）と本体の再読み込み |
+| [殻まで変わったときの再起動](development/auto-update/restart.md) | `CloseAllFilesAndQuitVectorworks`・以前は SDK に依頼できなかった経緯 |
 | [スクリプトを直接実行する（手動 CLI）](development/auto-update/manual-cli.md) | `vw-install` / `vw-uninstall` / `vw-update` の手動実行 |

@@ -8,11 +8,11 @@
 301 リダイレクトされます。
 
 **本プラグインの開発でまず参照するのは、公式リファレンスをフォークして実測知見
-（`Findings/`）と調査用 CI を足した
+（`Findings/`）と調査用 CI を追加した
 [`min-nano/vectorworks-developer-sdk-reference`](https://github.com/min-nano/vectorworks-developer-sdk-reference)。**
-公式リファレンスに無い「実機でしか判明しない挙動」「SDK に無い／効かない API」は
+公式リファレンスに無い「実機でしか判明しない挙動」「SDK に無い／機能しない API」は
 そちらの [`Findings/`](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/README.md)
-にあり、SDK の挙動について新しく分かったこともそちらへ足す（調査のフローは同
+にあり、SDK の挙動について新しく分かったこともそちらへ追加する（調査のフローは同
 リポジトリの CLAUDE.md）。
 
 | 内容 | リポジトリ |
@@ -24,7 +24,7 @@
 
 すべて Markdown なので、Web ブラウザが使えない環境（CI やエージェントのサンドボックス
 など）でも、GitHub へ到達できれば内容を確認できます。`git clone` でまるごと手元に
-落とすこともできます:
+取得することもできます:
 
 ```sh
 git clone --depth 1 https://github.com/Vectorworks/developer-sdk

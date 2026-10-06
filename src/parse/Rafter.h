@@ -78,7 +78,7 @@ namespace HomeskzIfcImport::parse
 
 	// 桁幅の探索許容。
 	//   Search … 支持点から軒桁の芯線までの直交距離の上限（mm）
-	//   Along  … 芯線に沿う射影位置が区間内かの余裕（mm。角部も拾う）
+	//   Along  … 芯線に沿う射影位置が区間内かの余裕（mm。角部も含める）
 	//   PerpSin… 垂木となす角の sin の下限。これ未満（＝垂木と平行に走る材）は軒桁でない
 	inline constexpr double kGirderSearchTol = 100.0;
 	inline constexpr double kGirderAlongTol = 1.0;
@@ -86,11 +86,11 @@ namespace HomeskzIfcImport::parse
 
 	// 要素が屋根版（IfcSlab かつ Name が "屋根版" 始まり）か。**垂木（parse/Rafter）と
 	// 野地板（parse/Roof）は同じ屋根面を共有するので、判定はここに一本化する**（かつては
-	// 両 .cpp に逐語的な複製があり、片方だけ直せば拾う屋根版がズレる形だった）。
+	// 両 .cpp に逐語的な複製があり、片方だけ直せば判定する屋根版が食い違う形だった）。
 	bool isRoofSlab(const Entity& element);
 
 	// 階（#storeyId）が屋根版を含むか。屋根版を含む階は垂木・野地板レイヤ（"n-垂木" /
-	// "n-野地板"）を持つため、parse/Story がレベルを足す条件に使う。垂木・野地板を配置する階
+	// "n-野地板"）を持つため、parse/Story がレベルを追加する条件に使う。垂木・野地板を配置する階
 	// と一致させる必要があるので、判定はここに一本化する。
 	bool storyHasRoofSlab(const Model& model, int storeyId);
 
@@ -111,7 +111,7 @@ namespace HomeskzIfcImport::parse
 	//     n = ceil(W / interval) を採り、中間 n−2 区間を interval、残りを両端へ等分する。
 	//   * 半幅を差し引くと広がりが極小（屋根が垂木幅程度に狭い）な面は中央 1 本だけ返す。
 	// 両端を半幅内側へ寄せることで掃引線が外形頂点に接して退化せず（走査線法の半開判定が
-	// 上端で交点を落とす問題も回避）、確実に区間を得られる。
+	// 上端で交点が欠落する問題も回避）、確実に区間を得られる。
 	std::vector<double> sweepPositions(double eMin, double eMax, double interval, double inset);
 
 	// 支持点 (px, py) の真下にある軒桁（横架材命令）の幅を返す。支持点は屋根面（垂木下面）
@@ -133,7 +133,7 @@ namespace HomeskzIfcImport::parse
 	//                     支持点を取らず start＝軒先・overhang=0 にする
 	//   storyMembers    … 同じ階の横架材命令（差し込みに使う桁幅の参照先。空なら既定桁幅）
 	//   width / height  … 垂木の断面（mm。取り込み設定の一律の寸法）。幅は両端の垂木を
-	//                     屋根面の端から内へ寄せる量（半幅）にも効く
+	//                     屋根面の端から内へ寄せる量（半幅）にも影響する
 	// **start＝軒側（支持点）・end＝棟側（高い端）**。ほぼ水平な面・広がりが極小の面は空
 	// （勾配方向が定まらない）。区間の平面投影長が極小（隅木際の極小片等）のものは配置しない。
 	std::vector<core::RafterCommand>

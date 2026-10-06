@@ -6,16 +6,18 @@
 #	is shipped inside every release zip (and published as a release asset), and
 #	to which the installed updater hands the actual file placement.
 #
-#	なぜここを厚くテストするか: **このスクリプトが「配置の手順」の唯一の持ち主**に
-#	なったから。ここが取りこぼすと、利用者の Plug-Ins に半端なプラグインが残る
-#	（M21 で本体 .vwpayload が増えたときに実際に起きた事故で、この仕組みはその
-#	再発を止めるためにある）。したがって中心の検査は 1 つ:
+#	中心の検査は 1 つ:
 #
 #	    **zip の直下にあるものが、列挙されていなくても全部入ること。**
 #
 #	置き先が **`Plug-Ins` 直下ではなくプラグインのフォルダ**（`<Plug-Ins>/<name>/`）に
-#	なったので、そこも同じ重さで見る——**入れ子にならないこと**（アップデータは「いま
+#	なったので、そこも同じ重みで確認する——**入れ子にならないこと**（アップデータは「いま
 #	自分が読み込まれたフォルダ」を渡してくる）と、**入れる前に前の版が取り除かれること**。
+#
+#	ここを厚くテストする理由: **このスクリプトが「配置の手順」の唯一の担い手**に
+#	なったから。ここで配置漏れがあると、利用者の Plug-Ins に半端なプラグインが残る
+#	（M21 で本体 .vwpayload が増えたときに実際に起きた事故で、この仕組みはその
+#	再発を止めるためにある）。
 #
 #	The script is SOURCED (its `main` is guarded, see the tail of vw-install.sh),
 #	so the real functions run in-process and only their outermost macOS-only
@@ -188,7 +190,7 @@ make_tree() { # dir, name
 	printf 'a file added by a future layout\n' >"$dir/$name.brand-new"
 	printf '#!/bin/bash\n' >"$dir/vw-install.sh"
 	# 本物のアンインストーラを入れる。**前の版を取り除く段**（remove_installed）は
-	# これを写して走らせるので、偽物では意味が無い。
+	# これを複製して走らせるので、偽物では意味が無い。
 	cp "${HERE}/../scripts/vw-uninstall.sh" "$dir/vw-uninstall.sh"
 }
 
@@ -215,7 +217,7 @@ check_no_file "$dest/$NAME/vw-install.sh" "the installer itself is not installed
 check_file "$dest/$NAME/vw-uninstall.sh" "the uninstaller travels with the install"
 
 # ===========================================================================
-# 入れ子にならないこと — **落とすと更新のたびに深くなる。** 自動アップデートでは
+# 入れ子にならないこと — **守れないと更新のたびに階層が深くなる。** 自動アップデートでは
 # プラグインが「いま自分が読み込まれたフォルダ」を渡してくるので、そこは既に
 # <Plug-Ins>/<name> である。
 # ===========================================================================
@@ -230,7 +232,7 @@ check_no_file "$dest/$NAME/$NAME" "no <name>/<name> nesting"
 # （残ると、消えたはずのものが Vectorworks から見え続ける）。
 # ===========================================================================
 # 直接呼ぶので TMP_ROOT は空のまま——**取り除く段が自分で一時ディレクトリを作れる
-# こと**（呼び出し側の状態に頼っていないこと）も、ここで一緒に押さえている。
+# こと**（呼び出し側の状態に頼っていないこと）も、ここで一緒に確かめている。
 t "install_tree removes the previously installed release first"
 printf 'only in the old release\n' >"$dest/$NAME/$NAME.only-in-old"
 MACHINE=1 PLUGINS_DIR="$dest/$NAME" RUN install_tree "$src" "$NAME"

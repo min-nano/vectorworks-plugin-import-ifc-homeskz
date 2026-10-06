@@ -54,12 +54,12 @@ using HomeskzIfcTests::near;
 namespace
 {
 	// 既定のシンボル名。**唯一の定義は役割の表**（core::symbolRoles()）なので、
-	// テストもそこから引く（名前を書き写すと表と食い違っても気付けない）。
+	// テストもそこから引く（名前をテストへ複製すると表と食い違っても気付けない）。
 	const std::string kPlanMarkSymbolColumn = defaultSymbolName(SymbolRole::PlanMarkColumn);
 	const std::string kPlanMarkSymbolKoyazuka = defaultSymbolName(SymbolRole::PlanMarkKoyazuka);
 
 	// 試験用の柱 1 本。中心 (x, y)・断面 width×depth・span レイヤ・構造用途だけを持つ
-	// （記号の組み立てはこの 4 つしか見ない）。
+	// （記号の組み立てはこの 4 つしか参照しない）。
 	ColumnCommand makeColumn(double x, double y, double width, double depth,
 							 const std::string& layer, const char* use)
 	{
@@ -84,7 +84,7 @@ TEST(EachSpanLayerGetsASectionMarkAndAPlanMark)
 
 	const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns);
 	// span は 2 つ（"1to2-柱" / "2to2.5-柱"）なので記号は 4 つ。**柱の本数には依存しない**
-	// ——記号は PIO が対象レイヤを検索して描くので、柱が何本あっても命令は 1 つ。
+	// ——記号は PIO が対象レイヤを検索して描画するので、柱が何本あっても命令は 1 つ。
 	CHECK(marks.size() == 4);
 	CHECK(marks[0].style == ColumnMarkStyle::Section);
 	CHECK(marks[1].style == ColumnMarkStyle::Section);
@@ -141,7 +141,7 @@ TEST(SameSpanTopSharesOnePlanMarkLayer)
 {
 	// 同じ to の span（"1to2.5-柱" と "2to2.5-柱"）は同じ伏図記号レイヤに載る。
 	// **記号は span ごとに 1 つずつ**なので、命令は 2 つ出て配置先だけが同じになる
-	// （検索対象がそれぞれの span レイヤなので、まとめてしまうと片方が描かれない）。
+	// （検索対象がそれぞれの span レイヤなので、まとめてしまうと片方が描画されない）。
 	const std::vector<ColumnCommand> columns{
 		makeColumn(0.0, 0.0, 90.0, 90.0, "1to2.5-柱", kStructuralUseKoyazuka),
 		makeColumn(500.0, 0.0, 90.0, 90.0, "2to2.5-柱", kStructuralUseKoyazuka)};

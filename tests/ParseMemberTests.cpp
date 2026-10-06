@@ -250,9 +250,10 @@ namespace
 		std::string memberId = "m";
 	};
 
-	// 取り付く柱 1 本。position は断面中心、elevation 〜 elevation + height が**柱の軸**
-	// （M20 で上端が受ける横架材の天端になった）。既定は 1-横架材天端 の材（天端 473・せい
-	// 180）に取り付く 105 角の柱で、軸の上端が材の天端に一致する（管柱が下から受ける形）。
+	// 取り付く柱 1 本。position は断面中心、elevation 〜 elevation + height が**柱の軸**。
+	// 既定は 1-横架材天端 の材（天端 473・せい 180）に取り付く 105 角の柱で、軸の上端が
+	// 材の天端に一致する（管柱が下から受ける形）。
+	// 柱の軸の上端は M20 で、受ける横架材の天端になった。
 	struct ColumnSpec
 	{
 		Vec2 position;
@@ -421,7 +422,7 @@ TEST(member_profile_dims_reads_rectangle)
 
 TEST(member_profile_dims_ignores_non_body_representation)
 {
-	// Body 以外の表現（例: Axis）に押し出しがあっても矩形断面としては拾わない。
+	// Body 以外の表現（例: Axis）に押し出しがあっても矩形断面としては取得しない。
 	StepText step;
 	const int profile = step.add("IFCRECTANGLEPROFILEDEF(.AREA.,$,$,120.,180.)");
 	const int extrudeDir = step.add("IFCDIRECTION((1.,0.,0.))");
@@ -721,7 +722,7 @@ TEST(sloped_geometry_false_when_end_edge_midpoints_coincide)
 
 TEST(sloped_geometry_false_for_degenerate_profile)
 {
-	// 4 頂点でも広がりが 0（一直線に潰れた断面）なら中心軸を導出できない。
+	// 4 頂点でも広がりが 0（一直線に退化した断面）なら中心軸を導出できない。
 	StepText step;
 	const int storey = makeStorey(step, "2FL", 0.0);
 	SlopedBeamSpec spec;
@@ -1205,7 +1206,7 @@ TEST(build_trims_interfering_beam_end)
 	if (otsu != nullptr && kou != nullptr)
 	{
 		// 乙の端点は甲の**芯線**（x=0）に乗り、甲の +x 面（x=60）までの戻りが端部オフセット
-		// （−60）に入る（core/Document.h「端部オフセット」）。実際に描かれる範囲は
+		// （−60）に入る（core/Document.h「端部オフセット」）。実際に描画される範囲は
 		// x=60〜600 で、端点を面まで詰めていたころと同じ。
 		CHECK(near(otsu->end.x, 0.0));
 		CHECK(near(otsu->end.y, 500.0));
@@ -1296,7 +1297,7 @@ TEST(parallel_beams_not_trimmed)
 
 TEST(symmetric_l_corner_not_trimmed)
 {
-	// 同寸の材が出隅で相互に食い込む対称な角（勝ち負けが付かない）は触らない。
+	// 同寸の材が出隅で相互に食い込む対称な角（勝ち負けが付かない）は変更しない。
 	const MemberCommand a = member(MemberSpec{Vec2{0.0, 0.0}, Vec2{0.0, 1000.0}});
 	const MemberCommand b = member(MemberSpec{Vec2{1000.0, 0.0}, Vec2{0.0, 0.0}});
 	const std::vector<MemberCommand> result = resolveMemberInterferences({a, b});
@@ -1308,10 +1309,11 @@ TEST(symmetric_l_corner_not_trimmed)
 
 TEST(outer_corner_loser_already_cut_at_the_face_snaps_to_the_centreline)
 {
-	// **外周の出隅**。ホームズ君は負け側を既に勝ち側の面で切っていることが多く、そのときは
-	// 相互の食い込みが両方 0 になって勝ち負けが付かない。端点が相手の芯線に**届いていない**
-	// ことを手掛かりに負けと判定し、芯線まで送る（実機で「外周部の負け側横架材の端点が短い
-	// まま」として出た件）。
+	// **外周の出隅**で、端点が相手の芯線に**届いていない**材を負けと判定し、芯線まで送る
+	// ことを確かめる。
+	// 理由: ホームズ君は負け側を既に勝ち側の面で切っていることが多く、そのときは相互の
+	// 食い込みが両方 0 になって勝ち負けが付かない（実機で「外周部の負け側横架材の端点が
+	// 短いまま」として出た件）。
 	//
 	// 勝ち: x=0 を南北に走る通し材（幅 120。南端は負け材の外面 y=−60 まで伸びている）
 	// 負け: y=0 を東西に走り、勝ち材の東面（x=60）で既に切られている
@@ -1332,7 +1334,7 @@ TEST(outer_corner_loser_already_cut_at_the_face_snaps_to_the_centreline)
 		CHECK(near(loser->end.x, 0.0));
 		CHECK(near(loser->end.y, 0.0));
 		CHECK(near(loser->endOffset, -60.0));
-		// 実際に描かれる端は動かない（x=60 のまま）。
+		// 実際に描画される端は動かない（x=60 のまま）。
 		CHECK(near(core::memberDrawnEnd(*loser).x, 60.0));
 		CHECK(near(loser->start.x, 2000.0));
 		CHECK(near(loser->startOffset, 0.0));
@@ -1397,7 +1399,7 @@ TEST(column_joint_sends_end_stopping_at_the_near_face_out_to_the_centre)
 		return;
 	CHECK(near(result[0].end.x, 0.0));
 	CHECK(near(result[0].endOffset, -52.5));
-	// 実際に描かれる端は動かない。
+	// 実際に描画される端は動かない。
 	CHECK(near(core::memberDrawnEnd(result[0]).x, 52.5));
 	CHECK(near(result[0].startOffset, 0.0)); // 反対側は自由端
 }
@@ -1413,7 +1415,7 @@ TEST(column_joint_pulls_an_end_reaching_the_far_face_back_to_the_centre)
 		return;
 	CHECK(near(result[0].end.x, 0.0));
 	CHECK(near(result[0].endOffset, 52.5));
-	CHECK(near(core::memberDrawnEnd(result[0]).x, -52.5)); // 描かれる端は動かない
+	CHECK(near(core::memberDrawnEnd(result[0]).x, -52.5)); // 描画される端は動かない
 }
 
 TEST(column_joint_leaves_an_end_already_on_the_centre)
@@ -1456,7 +1458,7 @@ TEST(column_joint_ignores_a_column_at_another_storey)
 TEST(column_joint_accepts_a_column_standing_on_the_member)
 {
 	// 材の上に立つ管柱（軸の下端＝材の天端 473）。接するだけで重ならないが同じ節点なので採る
-	// ——ここを「重なりだけ」で見ると、いちばん多い取り合いを丸ごと取りこぼす。
+	// ——ここを「重なりだけ」で判定すると、いちばん多い取り合いをすべて検出できない。
 	ColumnSpec spec{Vec2{0.0, 0.0}};
 	spec.elevation = 473.0;
 	spec.height = 2500.0;
@@ -1471,7 +1473,7 @@ TEST(column_joint_accepts_a_column_standing_on_the_member)
 
 TEST(column_joint_keeps_an_end_already_sent_to_a_member_centreline)
 {
-	// 横架材どうしの取り合いで既にオフセットが入っている端は触らない（節点が飛ぶため）。
+	// 横架材どうしの取り合いで既にオフセットが入っている端は変更しない（節点が飛ぶため）。
 	MemberCommand beam = beamEndingAt(52.5);
 	beam.end = Vec2{0.0, 0.0};
 	beam.endOffset = -52.5;
@@ -1519,7 +1521,7 @@ TEST(column_joint_result_is_order_independent)
 
 TEST(diagonal_brace_corner_not_trimmed)
 {
-	// 同寸・同長の斜材が一点で交わる対称な角（火打等）は触らない。
+	// 同寸・同長の斜材が一点で交わる対称な角（火打等）は変更しない。
 	MemberSpec aSpec{Vec2{0.0, 0.0}, Vec2{1000.0, 1000.0}};
 	aSpec.width = 105.0;
 	MemberSpec bSpec{Vec2{0.0, 0.0}, Vec2{1000.0, -1000.0}};
@@ -1587,7 +1589,7 @@ TEST(different_layers_not_trimmed)
 
 TEST(degenerate_member_is_not_trimmed_and_passes_through)
 {
-	// 平面投影長が 0 の命令（点に潰れた材）は調整対象にせず、そのまま返す。
+	// 平面投影長が 0 の命令（点に退化した材）は調整対象にせず、そのまま返す。
 	const MemberCommand primary = member(MemberSpec{Vec2{0.0, -1000.0}, Vec2{0.0, 1000.0}});
 	MemberSpec pointSpec{Vec2{0.0, 500.0}, Vec2{0.0, 500.0}};
 	pointSpec.memberId = "point";
@@ -1842,7 +1844,7 @@ TEST(sloped_beam_with_vertical_centre_axis_skipped)
 	makeSlopedBeam(step, storey, spec);
 
 	Model const model = step.build();
-	// 中心軸そのものは導出できる（長さは正）——弾かれるのは水平成分が無いから。
+	// 中心軸そのものは導出できる（長さは正）——除外されるのは水平成分が無いから。
 	const std::vector<core::MemberCommand> members = buildMemberCommands(model);
 	CHECK(members.empty());
 }
@@ -1882,7 +1884,7 @@ TEST(fixtures_produce_members_with_valid_fields)
 						   CHECK(m.height > 0.0);
 						   CHECK(!m.startBound.level.empty());
 						   CHECK(!m.endBound.level.empty());
-						   // 天端中央線が縮退していない（描けない命令を出さない）。
+						   // 天端中央線が縮退していない（描画できない命令を出さない）。
 						   CHECK(std::hypot(m.end.x - m.start.x, m.end.y - m.start.y) > 0.0);
 					   }
 				   });
@@ -1892,8 +1894,8 @@ TEST(fixture_member_end_offsets_land_on_the_winner_centreline)
 {
 	// 実データでも取り合いの端点が芯線へ移り、戻りが端部オフセットに入る。
 	//   * 端部オフセットは 0 以下（材を短くする向き）で、
-	//   * 実際に描かれる長さ（パス長 ＋ 両端のオフセット）は正のまま、
-	//   * オフセットの入った端が**必ず出る**（0 件ならこの調整は何も効いていない）。
+	//   * 実際に描画される長さ（パス長 ＋ 両端のオフセット）は正のまま、
+	//   * オフセットの入った端が**必ず出る**（0 件ならこの調整は機能していない）。
 	std::size_t adjusted = 0;
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)
@@ -1917,9 +1919,9 @@ TEST(fixture_column_joints_move_endpoints_without_moving_the_material)
 {
 	// 実データでも柱に取り付く端が柱芯へ移り、**材が実際に占める範囲は 1 つも動かない**
 	// ——これが端部オフセットの仕組みの要点で、崩れたら実描画が変わっている。
-	//   * 柱で動かした端が**必ず出る**（0 件ならこの関門は何も効いていない）、
-	//   * 動かした端の描かれる位置は移動前と一致する、
-	//   * 実際に描かれる長さは正のまま。
+	//   * 柱で動かした端が**必ず出る**（0 件ならこの関門は機能していない）、
+	//   * 動かした端の描画される位置は移動前と一致する、
+	//   * 実際に描画される長さは正のまま。
 	std::size_t adjusted = 0;
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)

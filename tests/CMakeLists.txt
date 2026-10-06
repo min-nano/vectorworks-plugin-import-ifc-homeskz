@@ -117,10 +117,10 @@ vw_add_test(UpdaterRobustnessTests UpdaterRobustnessTests.cpp)
 #
 #   * PayloadPathTests       … 本体を探すパスの組み立て（src/PayloadHost.h の
 #                              payloadpath）。純粋な文字列操作。
-#   * PayloadHostHolderTests … **殻の記憶域を本体が持ち続けないこと**
-#                              （src/PayloadHostHolder.h）。実機で Vectorworks ごと
-#                              落ちた壊れ方の回帰テストで、渡した記憶域を後から
-#                              塗り潰しても中身が生きていることで確かめる。
+#   * PayloadHostHolderTests … **殻の記憶域を本体が保持し続けないこと**
+#                              （src/PayloadHostHolder.h）。渡した記憶域を後から
+#                              上書きしても内容が保たれていることで確認する。実機で
+#                              Vectorworks ごと異常終了した不具合の回帰テスト。
 vw_add_test(PayloadPathTests PayloadPathTests.cpp)
 vw_add_test(PayloadHostHolderTests PayloadHostHolderTests.cpp)
 
@@ -150,7 +150,7 @@ vw_add_test(CoreProgressTests CoreProgressTests.cpp CORE)
 vw_add_test(CoreLayoutTests CoreLayoutTests.cpp CORE)
 
 # Crash-diagnosis log (src/core/Trace): enable/disable, per-line flushing (a crash
-# must not eat the last line), truncate-on-reopen, a non-fatal open failure, the
+# must not lose the last line), truncate-on-reopen, a non-fatal open failure, the
 # default temp-dir path, and the one place phases reach the log (core/Progress's
 # beginPhase). SDK-free; writes into the build tree and removes what it wrote.
 vw_add_test(CoreTraceTests CoreTraceTests.cpp CORE)
@@ -163,21 +163,22 @@ target_compile_definitions(CoreTraceTests
 
 # 描画の区間計測（src/core/DrawTiming）: 名前ごとの累計と回数、時間の長い順の並び
 # （同着は積んだ順＝決定性）、診断ログへ載せる本文の整形、そして計測点が共有する
-# 唯一の集計先（drawTiming）。**実際の所要時間は測らない**——実描画はローカルの
-# VectorWorks でしか走らず、時間に依るテストは CI で必ず揺れる。SDK 非依存・
-# フィクスチャ不要。
+# 唯一の集計先（drawTiming）。SDK 非依存・フィクスチャ不要。**実際の所要時間は
+# 測らない**——実描画はローカルの VectorWorks でしか実行されず、時間に依存する
+# テストは CI で必ず結果が揺れる。
 vw_add_test(CoreDrawTimingTests CoreDrawTimingTests.cpp CORE)
 
-# 最小 JSON（src/core/Json）: 書き出し（整数の見え方・逃がし・挿入順）と読み取り
+# 最小 JSON（src/core/Json）: 書き出し（整数の表記・エスケープ・挿入順）と読み取り
 # （往復・数・\u とサロゲート対）、そして**壊れた入力を受け付けない・深い入れ子で
-# 再帰しない**こと。MCP ブリッジが外から来たテキストを読む土台なので、後者が本題。
-# SDK 非依存・フィクスチャ不要。
+# 再帰しない**こと。SDK 非依存・フィクスチャ不要。MCP ブリッジが外部から来た
+# テキストを読む基盤なので、後者が主目的。
 vw_add_test(CoreJsonTests CoreJsonTests.cpp CORE)
 
-# MCP ブリッジのスプール（src/core/Bridge）: 要求を「送った順（＝名前の昇順）に拾い、
-# 拾ったら消し、応答を原子的に書く」という受け渡しの作法と、外から来たものへの安全弁
-# （id の綴り検査＝スプールの外へ書かせない、壊れた要求を 1 度だけ報告する、残骸の掃除）。
-# 何を返す道具があるか（draw/McpBridge）は SDK 側なので、ここには入らない。
+# MCP ブリッジのスプール（src/core/Bridge）: 要求を「送った順（＝名前の昇順）に取得し、
+# 取得したら削除し、応答を原子的に書く」という受け渡しの手順と、外部から来たものへの
+# 安全弁（id の綴り検査＝スプールの外へ書かせない、壊れた要求を 1 度だけ報告する、
+# 残ったファイルの掃除）。どの道具が何を返すか（draw/McpBridge）は SDK 側なので、
+# ここには含まない。
 vw_add_test(CoreBridgeTests CoreBridgeTests.cpp CORE)
 # 書き先はビルドツリー（CoreTraceTests と同じ理由: TMPDIR 由来のパスがファイル操作へ
 # 届くと CodeQL が cpp/path-injection として報告する）。
@@ -435,9 +436,9 @@ vw_add_test(CoreImportOptionsTests CoreImportOptionsTests.cpp CORE)
 vw_add_test(CoreFeedbackSessionTests CoreFeedbackSessionTests.cpp CORE)
 
 # 実機テストの一時ファイルの置き場と片付け（src/core/FeedbackScratch）: ブランチごとの
-# フォルダ・q-pr-state の出力の読み方・**消してよいものの安全弁**（置き場の直下・目印の
-# 一致・ふつうのファイルだけ・開いている図面の .lck が無い）と、閉じた PR のブランチ
-# だけを消すこと。書き先はビルドツリー（CoreBridgeTests と同じ理由）。
+# フォルダ・q-pr-state の出力の読み方・**削除してよいものの安全弁**（置き場の直下・目印の
+# 一致・通常のファイルだけ・開いている図面の .lck が無い）と、閉じた PR のブランチ
+# だけを削除すること。書き先はビルドツリー（CoreBridgeTests と同じ理由）。
 vw_add_test(CoreFeedbackScratchTests CoreFeedbackScratchTests.cpp CORE)
 target_compile_definitions(CoreFeedbackScratchTests
 						   PRIVATE "HOMESKZ_SCRATCH_TEST_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\"")
@@ -454,21 +455,21 @@ vw_add_test(ParseFeedbackTests ParseFeedbackTests.cpp CORE)
 vw_add_test(ParseImportOptionsTests ParseImportOptionsTests.cpp CORE FIXTURES)
 
 # --- 並列実行（ctest -j）の詰め方 ---------------------------------------------
-# ctest は COST の降順にテストを開始する。COST が無いと前回の実行の実測
-# （build/Testing/Temporary/CTestCostData.txt）を使うが、CI は毎回まっさらな
+# 重いテストから開始させるため、所要時間の長い数本に COST を明示する。ctest が必要と
+# するのは**相対的な重さ**であって秒数の正確さではないので、テストの所要時間が多少
+# 変わっても更新し続ける必要はない（順位が入れ替わったときだけ見直せばよい）。ここに
+# 挙げるのは長い方から数本だけで、残りは既定の 0 のまま——空いたスロットを埋める側に回る。
+#
+# 理由: ctest は COST の降順にテストを開始する。COST が無いと前回の実行の実測
+# （build/Testing/Temporary/CTestCostData.txt）を使うが、CI は毎回新規の
 # チェックアウトなのでそれが存在せず、登録順に開始することになる。**長いテストが
-# 最後に始まると、その分だけ全体の終わりが後ろへずれる**（同じマシン・同じ -j4 での
+# 最後に始まると、その分だけ全体の終了が遅れる**（同じマシン・同じ -j4 での
 # 実測: コストデータ有り 36 秒に対し、無しでは 60 秒）。
 #
-# そこで「重いものから始める」という情報だけを明示する。ctest が必要とするのは
-# **相対的な重さ**であって秒数の正確さではないので、テストが少し伸び縮みしても
-# 直し続ける必要はない（順位が入れ替わったときだけ見直せばよい）。ここに挙げるのは
-# 長い方から数本だけで、残りは既定の 0 のまま——空いたスロットを埋める側に回る。
-#
 # 数字はローカルの逐次実行の実測秒（このディレクトリの各テストの Passed 表示）を
-# 丸めたもの。CiWaitScriptTests だけは性質が違い、本物の締切を待つ**ほぼ純粋な
-# 待ち時間**なので、CPU を占有しない代わりに何を足しても短くならない。いちばん先に
-# 始めておくのが効く。
+# 丸めたもの。CiWaitScriptTests だけは性質が異なり、実際の締切を待つ**ほぼ純粋な
+# 待ち時間**なので、CPU を占有しない代わりに並列度を上げても短くならない。最初に
+# 開始しておくのが有効である。
 set_tests_properties(ParseImportOptionsTests PROPERTIES COST 14)
 set_tests_properties(ParseRafterTests PROPERTIES COST 13)
 set_tests_properties(LoaderTests PROPERTIES COST 12)
@@ -614,9 +615,9 @@ if(NOT WIN32)
 		# The suite deliberately waits on real deadlines (a few seconds each), and
 		# has its own ceiling; keep ctest's above it so a hang is reported by the
 		# suite itself rather than as an opaque ctest timeout.
-		# COST は「いちばん先に始めさせる」ため（上記「並列実行の詰め方」）。実測 26 秒
-		# のうちほとんどが待ち時間で、他のテストと並べても互いに邪魔をしない代わりに、
-		# 後から始めるとその 26 秒がまるごと最後尾に足される。
+		# COST は「最初に開始させる」ため（上記「並列実行の詰め方」）。実測 26 秒
+		# のうちほとんどが待ち時間で、他のテストと並行しても互いに干渉しない代わりに、
+		# 後から開始するとその 26 秒がそのまま全体の末尾に加算される。
 		set_tests_properties(CiWaitScriptTests PROPERTIES TIMEOUT 900 COST 30)
 	elseif(VW_REQUIRE_SCRIPT_TESTS)
 		message(FATAL_ERROR "VW_REQUIRE_SCRIPT_TESTS is ON but 'bash' was not found: the CI-wait "
@@ -625,13 +626,14 @@ if(NOT WIN32)
 endif()
 
 # clang-tidy の結果キャッシュ（scripts/tidy-cache-key.py ＋ scripts/clang-tidy-sdk.sh -c）。
-# これも開発者向けの道具だが、**間違えたときの現れ方が最悪**なので回帰テストで押さえる
-# ——鍵に漏れがあると「直した翻訳単位を解析しないまま緑になる」という、誰にも見えない
-# 失敗になるからである。合成のリポジトリを作って、翻訳単位・**推移的に include された
-# ヘッダ**・.clang-tidy・コンパイル指令・SDK の同一性のどれが変わってもキャッシュが
-# 外れること、診断の出た翻訳単位が「きれい」として控えられないこと、入力を突き止め
-# られない翻訳単位は必ず解析されることを確かめる。bash と python3 だけで走り、
-# clang-tidy の実体は要らない（スタブに差し替える）。
+# 合成のリポジトリを作って、翻訳単位・**推移的に include されたヘッダ**・.clang-tidy・
+# コンパイル指令・SDK の同一性のどれが変わってもキャッシュが無効になること、診断の
+# 出た翻訳単位が「きれい」として記録されないこと、入力を特定できない翻訳単位は必ず
+# 解析されることを確認する。bash と python3 だけで実行でき、clang-tidy の実体は
+# 要らない（スタブに差し替える）。
+# 開発者向けの道具だが、**誤ったときに気付きにくい**ので回帰テストで押さえる——鍵に
+# 漏れがあると「修正した翻訳単位を解析しないまま緑になる」という、誰も気付かない
+# 失敗になるからである。
 if(NOT WIN32)
 	find_program(BASH_PROGRAM bash)
 	if(BASH_PROGRAM AND PYTHON3_PROGRAM)

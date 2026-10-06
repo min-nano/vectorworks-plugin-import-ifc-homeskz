@@ -152,8 +152,8 @@ fi
 # with the word "shellcheck" or the tool reads it as a directive.)
 if have shellcheck; then
 	echo "==> shellcheck (scripts/*.sh)"
-	# -x: source した先（vw-token.sh）まで読ませる。付けないと「その先は見ていない」の
-	# 一言（SC1091）で落ちる。
+	# -x: source した先（vw-token.sh）まで読ませる。付けないと「その先は解析していない」
+	# という警告（SC1091）で失敗する。
 	shellcheck -x scripts/*.sh
 	report "shellcheck"
 else
