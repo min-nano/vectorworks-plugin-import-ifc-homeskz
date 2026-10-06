@@ -23,10 +23,12 @@ M21 以降、**本体（`.vwpayload`）だけの更新は再起動せずにそ�
 
 **直し方は「いまはディスクに入っているビルドである」に統一すること。** 次に読み込まれるのは
 ディスクのものなのだから、そちらが「いま」である——安定版が最初から `q-stable` の
-`installed=` を基準にしているのと同じ考え方で、往復の周期確認も M24 で sha だけは
+`installed=` を基準にしているのと同じ考え方で、往復の周期確認も
+[M24](m24-feedback-palette.md#分かったこと決めたこと) で sha だけは
 すでにそうなっていた（`installed=` を見ないと同じビルドを毎周入れ直す）。M26 でそれを
 **ブランチにも広げ、3 つの入口（Manual / Silent / 往復の周期確認）で共有**した
-（`src/UpdaterParse.h` の `ResolveCurrentDevBuild`）。
+（`src/UpdaterParse.h` の `ResolveCurrentDevBuild`）。（往復の周期確認は M38 で外れ、代わりに
+MCP の `vw_update`（`RemoteDevUpdateWith`）が同じ関数を使う。）
 
 - `q-dev` が `installed-branch=` を出す（mac: `Info.plist` の `VWBuildBranch`、win: 新しく
   足した `<name>.branch` の控え。`.commit` / `.shell-id` と同じやり方）。

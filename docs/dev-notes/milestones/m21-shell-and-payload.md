@@ -20,7 +20,7 @@ VectorWorks ──読み込む──▶ 殻（登録・更新・読み込み） 
 [「プラグインモジュールの読み込みと入れ替え」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Plug-in%20Modules.md)
 に、`dlopen` できること・`GS_InitializeVCOM` を自分で呼べば `gSDK` が埋まること・
 `dlclose` で本当に消えること・置き換えて読み直すと走るコードが実際に入れ替わることが
-実機の数字つきで載っている。**この節はその知見を本プラグインへ当てはめた記録**である。
+実機の数字つきで載っている。**このページはその知見を本プラグインへ当てはめた記録**である。
 
 ## 本プラグイン固有の判断
 
