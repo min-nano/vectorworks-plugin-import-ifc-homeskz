@@ -58,7 +58,6 @@
 #include "draw/TitleBlock.h"
 #include "core/Document.h"
 #include "core/Progress.h"
-#include "core/Trace.h"
 
 #include <algorithm>
 #include <array>
@@ -133,10 +132,9 @@ namespace HomeskzIfcImport::draw
 				++applied;
 			}
 
-			if (applied > 0 && core::trace::isOpen())
-				core::trace::log("  sheet: 伏図のデザインレイヤ " + std::to_string(applied) +
-								 " 枚の縮尺を伏図に合わせた（1/" +
-								 std::to_string(static_cast<int>(scale)) + "）");
+			// 揃えた枚数は呼び出し側（drawSheets）が割り付けの行と並べて outInfo へ出す
+			// ——診断ログへは要素から直に書かない（CLAUDE.md「重複を作らない置き場所」の
+			// 診断ログへの書き出し口）。
 			return applied;
 		}
 	} // namespace
@@ -314,7 +312,8 @@ namespace HomeskzIfcImport::draw
 		// **揃えたかを控える**（2 巡目で描き直すかの判断に要る）——レイヤの縮尺を
 		// 動かすと伏図に映る記号の大きさが変わるので、縮尺が同じでビューポートを描き直さ
 		// ないままだと、**中身が変わった後の図を描き直す前に測る**ことになる（M29）。
-		const bool layersRescaled = applyPlanLayerScale(document, layout.scale) > 0;
+		const std::size_t rescaledLayers = applyPlanLayerScale(document, layout.scale);
+		const bool layersRescaled = rescaledLayers > 0;
 
 		// --- 2 巡目: 確定した縮尺を当て、タグを置き、用紙の上へ動かす ----------------
 		//
@@ -530,6 +529,11 @@ namespace HomeskzIfcImport::draw
 			}
 			addInfo(text);
 		}
+		// 伏図のレイヤの縮尺を揃えた記録（applyPlanLayerScale）。用紙基準の記号の大きさが
+		// 紙の上で一定にならないときの手掛かりで、平常でも出るので outInfo へ。
+		if (rescaledLayers > 0)
+			addInfo("伏図のデザインレイヤ " + std::to_string(rescaledLayers) +
+					" 枚の縮尺を伏図に合わせた（1/" + mm(layout.scale) + "）");
 
 		// 「命令はあるのに 0 枚」のときに、シートレイヤを作れないのか、ビューポートを
 		// 作れないのかを切り分けられるようにする。

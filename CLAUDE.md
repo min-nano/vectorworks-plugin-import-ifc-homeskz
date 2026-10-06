@@ -249,7 +249,11 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
   `core/` へ寄せる。
 - **解析側はシンボル名の固定値を持たない**（取り込み設定 `core/ImportOptions` から引く）。
 - **診断ログへの書き出し口**は `core/Progress` の `beginPhase` と `draw/ImportRun`（見出し・
-  区切り・結果・例外）の 2 か所だけ（各要素へ `trace::log` を撒かない）。
+  区切り・結果・例外）の 2 か所だけ（各要素へ `trace::log` を撒かない。要素の記録は
+  `core::DrawCounts` の diagnostics / notes へ返す）。**例外は耐力壁 PIO のリセット
+  （`draw/ShearWallPio`）だけ**——Vectorworks から直に呼ばれる別の入口なので、ログが開いて
+  いる取り込みの最中に限り 1 枚ずつ自分で書く（1 行ごとにフラッシュされるので、リセットの
+  途中で落ちたときにどの壁かが最終行に残る）。
 - **GitHub のトークンの在り処**は `scripts/vw-token.{sh,ps1}` だけで、GitHub を読む側にも
   必ず付ける（認証なしは IP ごとに 1 時間 60 回。M27 で M24 の往復の確認がちょうど当たった）。
 

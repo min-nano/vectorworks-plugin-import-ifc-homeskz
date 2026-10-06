@@ -219,8 +219,11 @@ namespace HomeskzIfcImport::draw
 					   core::DrawPhase::ShearWalls))
 		{
 			std::string note;
-			counts.shearWalls = drawShearWalls(document, progress, &note, shearWallHandlesOut);
+			std::string info;
+			counts.shearWalls =
+				drawShearWalls(document, progress, &note, shearWallHandlesOut, &info);
 			addDiagnostics(note);
+			addNotes(info);
 		}
 
 		// M3 の【決定】の実装箇所（M13 で確定）: **デザインレイヤのスタック順を希望順へ

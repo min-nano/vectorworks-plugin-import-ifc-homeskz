@@ -148,7 +148,8 @@ namespace HomeskzIfcImport::draw
 			// Phase 1（SDK 非依存）: IFC を解析して命令セット（Document）を組み立てる。
 			// 読み込み失敗も例外を漏らさず空の Document として返る（1 要素の欠損で止めない）。
 			// フェーズの区切りは**ここだけ**が書く——各フェーズの行は進捗報告（core/Progress の
-			// beginPhase）が流し、要素側は `trace::log` を持たない（core/Trace.h「誰が書くか」）。
+			// beginPhase）が流し、要素側は `trace::log` を持たない（core/Trace.h「誰が書くか」。
+			// 例外は耐力壁 PIO のリセットだけ）。
 			core::trace::note("=== 解析 ===");
 			core::Document document = parse::buildDocument(ifcPath, progress, options);
 			LogUndoState("afterParse");

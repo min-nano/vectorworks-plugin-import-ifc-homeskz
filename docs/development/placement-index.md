@@ -86,7 +86,7 @@
 | ハイブリッドシンボルの配置（アンカーボルト・床束・火打・仕口・継手の 5 要素で共有） | `draw/Symbol` |
 | 進捗の見出し・バー配分（要素ごとのフェーズ） | `draw/ExecuteDocument` |
 | 結果ダイアログの器（短い本文＋折り畳んだログ欄） | `draw/ResultDialog` |
-| 診断ログの見出し・区切り・結果・例外（`trace::note`） | `draw/ImportRun`（ログへの書き出し口はここと `core/Progress` の 2 か所だけ。各要素へ `trace::log` を撒かない。実機テストの周では `draw/Feedback` も図面の保存の結果などを `note` で足す） |
+| 診断ログの見出し・区切り・結果・例外（`trace::note`） | `draw/ImportRun`（ログへの書き出し口はここと `core/Progress` の 2 か所だけ。各要素へ `trace::log` を撒かず、記録は `core::DrawCounts` の diagnostics / notes へ返す。実機テストの周の準備の行も `runImportRound` へ渡してここで書く。例外は耐力壁 PIO のリセット `draw/ShearWallPio` だけ——[`CLAUDE.md`](../../CLAUDE.md)「重複を作らない置き場所」） |
 | 検算と区間計測を dev ビルドだけにするスイッチ（`VW_DRAW_VERIFY` / `VW_DRAW_TIMING` と区間を刻む `VW_DRAW_TIME`。集計先は `core/DrawTiming` の `drawTiming()`） | `draw/Verify.h` |
 | 殻から借りた道具（同梱スクリプトの実行） | `draw/HostServices` |
 | MCP ブリッジの道具の表（`kTools`） | `draw/McpBridge.cpp` |
