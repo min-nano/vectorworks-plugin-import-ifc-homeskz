@@ -21,6 +21,12 @@
 #include <string>
 #include <vector>
 
+#if defined(__APPLE__)
+// App Nap から外す（KeepAwakeWhileServing）。殻は mac では Objective-C++ でコンパイルする
+// （CMakeLists.txt）。
+#	include <Foundation/Foundation.h>
+#endif
+
 using namespace HomeskzIfcImport;
 
 namespace HomeskzIfcImport
@@ -205,9 +211,39 @@ namespace HomeskzIfcImport
 			}
 		}
 
+		// **Vectorworks が裏に回っても受け付けを止めない**（macOS の App Nap から外す）。
+		//
+		// 実機で、Vectorworks が前面に無いあいだは生存の印の書き直しが 40〜60 秒に 1 回まで
+		// 落ち、要求が拾われずに Python 側が「ブリッジが止まりました」と諦め続けた。前面へ
+		// 出した途端に、待っていた要求へ数秒で応えた（docs/DEV-NOTES.md「裏に回った
+		// Vectorworks は受け付けない」）。ローカルの Claude Code から実機確認を回すとき、
+		// Vectorworks はたいてい Claude のアプリの裏にいるので、これでは往復が回らない。
+		//
+		// 外すのは**橋が動き出してから（最初の刻み）Vectorworks が終わるまで**。パレットは
+		// 開発版にしか登録しないので（ExtMcpPalette.h「開発版だけ」）、利用者の Vectorworks の
+		// 省電力の振る舞いは変えない。アイドル時のシステムスリープは止めない
+		// （…AllowingIdleSystemSleep）。
+		void KeepAwakeWhileServing()
+		{
+#if defined(__APPLE__)
+			static id sActivity = nil;
+			if (sActivity != nil)
+				return;
+			sActivity = [[NSProcessInfo processInfo]
+				beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep
+								  reason:@"MCP bridge for Claude Code (min-nano_structureDev)"];
+#	if !__has_feature(objc_arc)
+			// 返るのは autorelease されたオブジェクト。手放すと活動が終わるので持ち続ける。
+			[sActivity retain];
+#	endif
+#endif
+		}
+
 		// 時計 1 刻みぶん。本体へ届けて見え方を返す。
 		std::string ServeOnce()
 		{
+			KeepAwakeWhileServing();
+
 			// **取り込みの最中は本体へ入り直さない**（ExtMcpPalette.h「取り込みの最中は
 			// 見送る」）。
 			if (PayloadInUse())

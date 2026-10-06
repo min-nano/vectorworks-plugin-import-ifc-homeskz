@@ -734,6 +734,30 @@ Python が macOS の作法（AppleScript の quit。保存の確認は通常ど�
   dev プレリリースが消えたことで判じる手は採らなかった——`build.yml` が push のたびに
   消して作り直すので、その間の「無い」を閉じたと取り違える。
 
+#### 裏に回った Vectorworks は受け付けない
+
+**実機で起きたこと**（PR #192 の実機確認）: Vectorworks を `vw_launch` で起動したあと、
+`vw_update` も `vw_ping` も「待っている間にブリッジが止まりました」で返った。ダイアログは
+1 枚も出ておらず、パレットも開いていた。スプールを見ると、生存の印の書き直しが
+**40〜60 秒に 1 回**まで落ちていて、置いた要求は拾われないまま残っていた。`osascript` で
+Vectorworks を前面へ出すと、**待っていた要求に数秒で応えた**。
+
+ローカルの Claude Code から実機確認を回すとき、Vectorworks はたいてい Claude のアプリの裏に
+いる——M38 の作りはそのままでは往復が回らない（M38 の実機確認は Vectorworks を前面に
+置いたまま回していたので気付かなかった）。
+
+**直し方**: 殻のパレットが最初の刻みで `NSProcessInfo` の
+`beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep` を始め、Vectorworks が
+終わるまで持ち続ける（`Extensions/ExtMcpPalette.cpp` の `KeepAwakeWhileServing`）。macOS の
+App Nap から外れ、裏に回っても時計が間引かれない。パレットは開発版にしか登録しないので、
+利用者の Vectorworks の省電力の振る舞いは変えない。アイドル時のシステムスリープは止めない。
+
+**まだ分かっていないこと**: 間引いているのが App Nap ではなく、パレットの中のウェブページ
+（隠れたページのタイマー）のほうである可能性が残る。間隔が 1 分前後だったのはその形にも
+合う。App Nap から外しても裏で間引かれるなら、時計をページの外（殻のネイティブなタイマー）へ
+移すことになるが、SDK を JS の橋の外から呼んでよいかは SDK リファレンスで確かめてからにする
+（CLAUDE.md「SDK の調査はリファレンス側で行う」）。
+
 ### 垂木の断面を一律に指定する（M37）
 
 **ご要望**: インポート時に垂木の寸法を指定したい。一律指定でよい。
