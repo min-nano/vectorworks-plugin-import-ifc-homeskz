@@ -238,9 +238,10 @@ jobs:
           path: dist
 
   # ---------------------------------------------------------------------------
-  # Windows build. Produces the ".vlb" module (a DLL) plus its sibling ".vwr"
-  # resource, the "<name>.commit" build stamp and the PowerShell updater, zipped
-  # per plug-in. Runs in PARALLEL with the macOS build and with both
+  # Windows build. Produces the ".vlb" module (a DLL — the shell) plus its sibling
+  # ".vwpayload" (the payload) and ".vwr" resource, the build stamps and the
+  # PowerShell scripts, zipped into "<name>.vlb.zip" (the exact set is in the
+  # "Package module" step). Runs in PARALLEL with the macOS build and with both
   # static-analysis jobs, so nothing here waits on anything else. Publishing the
   # releases is deferred to the separate "release" job, which runs once all four
   # have finished — this job just produces and uploads its artifacts.
@@ -379,7 +380,8 @@ jobs:
   # WHY THESE ARE THEIR OWN JOBS. The SDK-free lint workflow (lint.yml) tidies the
   # 2-phase import code on a free Linux runner; these jobs extend the SAME
   # .clang-tidy rules to the code that only compiles against the Vectorworks SDK
-  # (src/draw/ + ModuleMain / ExtMenu / Updater). clang-tidy cannot use a PCH (it
+  # (src/draw/, src/Extensions/ and the rest of the SDK-dependent glue; the exact
+  # list is in scripts/clang-tidy-sdk.sh). clang-tidy cannot use a PCH (it
   # analyses without running the build), so every translation unit re-parses the
   # whole SDK umbrella header and the analysis costs minutes — far more than the
   # build it used to sit inside. Run as separate jobs it happens CONCURRENTLY with
@@ -399,8 +401,10 @@ jobs:
   # The compile database is generated for the ONE channel this run publishes (dev
   # on a pull request, stable on main). At the "both" default the database holds
   # two entries per source and clang-tidy analyses every file twice; the only
-  # per-channel difference is the VW_DEV_BUILD define (3 branches in ModuleMain /
-  # ExtMenu), and the pipeline covers both — PRs analyse dev, main analyses stable.
+  # per-channel difference is the VW_DEV_BUILD define (its #ifdef branches are
+  # spread across src/, and it also switches on the VW_DRAW_VERIFY blocks of
+  # src/draw/Verify.h), and the pipeline covers both — PRs analyse dev, main
+  # analyses stable.
   # ビルドスタンプを持たないぶん、これらのジョブが要るのは「チェックアウトする sha」と
   # 「チャンネル」だけ。どちらもビルドジョブと同じ式で、同じように env / with へ直に書く。
   tidy-mac:

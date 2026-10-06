@@ -5,7 +5,7 @@
 	C++ 側が `vwmcp.serve` を Promise で公開する。ここは数百 ms ごとにそれを呼び、返った
 	見え方（JSON）を並べるだけで、受け付けの判断は 1 つも持たない（受け付けは
 	src/draw/McpBridge.cpp）。**このページが生きている間じゅう受け付ける**——パレットを
-	閉じても（隠れても）ページとタイマーは生きている（docs/DEV-NOTES.md M24「隠れた
+	閉じても（隠れても）ページとタイマーは生きている（docs/DEV-NOTES.md M25「隠れた
 	パレットは止まらない」）。
 
 	置き場所は resources/common.vwr（包むときに各 .vwr へ重ねる。CMakeLists.txt）だが、パレットを

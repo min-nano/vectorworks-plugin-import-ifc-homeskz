@@ -1,8 +1,8 @@
 # Dependabot configuration
 # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 #
-# This is a C++/CMake plugin template. The only dependency ecosystem that
-# Dependabot can manage here is the GitHub Actions used in the workflows.
+# This is a C++/CMake plug-in. The only dependency ecosystem that Dependabot can
+# manage here is the GitHub Actions used in the workflows.
 version: 2
 updates:
   - package-ecosystem: "github-actions"

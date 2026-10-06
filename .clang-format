@@ -1,4 +1,4 @@
-# clang-format configuration for the Vectorworks plug-in template.
+# clang-format configuration for the min-nano_structure Vectorworks plug-in.
 #
 # It encodes the house style the sources already use so `clang-format` becomes
 # the single source of truth for formatting:

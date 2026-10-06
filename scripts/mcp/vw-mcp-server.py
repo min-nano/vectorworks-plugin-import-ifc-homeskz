@@ -5,7 +5,7 @@
 #   Claude ──MCP(stdio/JSON-RPC)──▶ このスクリプト
 #                                     │ <id>.req.json を書く／<id>.res.json を待つ
 #                                     ▼
-#                        スプール（一時ディレクトリの min-nano_structure-mcp）
+#                        スプール（一時ディレクトリの min-nano_structureDev-mcp）
 #                                     ▲
 #                                     │ 拾う／応える
 #                               Vectorworks（起動している間ずっと。パレットの時計が拾う）
@@ -231,7 +231,7 @@ def call_timeout():
 
 
 class BridgeDown(Exception):
-    """Vectorworks 側でブリッジが動いていない（＝メニューを実行していない）。"""
+    """Vectorworks 側でブリッジが動いていない（起動していないか、パレットが開いていない）。"""
 
 
 class Bridge:

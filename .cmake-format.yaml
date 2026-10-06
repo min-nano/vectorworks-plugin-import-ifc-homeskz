@@ -1,4 +1,4 @@
-# cmake-format / cmake-lint configuration for the Vectorworks plug-in template.
+# cmake-format / cmake-lint configuration for the min-nano_structure Vectorworks plug-in.
 # https://cmake-format.readthedocs.io
 #
 # It makes `cmake-format` the single source of truth for how the CMakeLists.txt
@@ -28,6 +28,7 @@ format:
   max_pargs_hwrap: 4
   # A trailing comment beyond the line width is the author's to wrap, not a
   # reason to reflow the command.
+  # LF line endings, matching end_of_line in .editorconfig.
   line_ending: unix
 
 markup:

@@ -160,8 +160,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# PSScriptAnalyzer — static analysis for the PowerShell updater script under
-# scripts/ (the same production-only scope as clang-tidy and shellcheck; the test
+# PSScriptAnalyzer — static analysis for the PowerShell scripts under scripts/
+# (updater / installer / uninstaller / token helper; the same production-only
+# scope as clang-tidy and shellcheck; the test
 # harness under tests/ is not analysed). Needs pwsh AND the PSScriptAnalyzer
 # module. Rules: PSScriptAnalyzerSettings.psd1. With --fix, the correctable rules
 # are auto-applied in place.

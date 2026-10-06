@@ -1,7 +1,8 @@
 # PSScriptAnalyzer configuration — https://learn.microsoft.com/powershell/utility-modules/psscriptanalyzer/overview
 #
-# Static analysis for the Windows updater and installer scripts
-# (scripts/vw-update.ps1 / scripts/vw-install.ps1). This is
+# Static analysis for the Windows updater, installer, uninstaller and token
+# scripts (scripts/vw-update.ps1 / vw-install.ps1 / vw-uninstall.ps1 /
+# vw-token.ps1 — every *.ps1 directly under scripts/). This is
 # the PowerShell analogue of what clang-tidy does for the C/C++ updater logic and
 # shellcheck does for the bash scripts: it flags bug-prone patterns, unapproved
 # cmdlet verbs, unused parameters, unsafe comparisons and the like, BEFORE they

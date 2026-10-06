@@ -25,11 +25,16 @@
                           then one TSV line per dev build:
                           "build<TAB>commit<TAB>name<TAB>url<TAB>branch"
                           (or error=<message>).
-      do-install <url> <name>   Download+install "<name>.vlb"; print "ok" or
+      do-install <url> <name>   Download+install "<name>.vlb"; print
+                                [installed-shell=<id>] then "ok", or
                                 error=<message>. No dialogs.
+      q-pr-state <branch>...    For each branch, whether it still has an open PR:
+                                "pr-state<TAB><open|closed|none|error><TAB><branch>"
+                                (same contract as vw-update.sh). No dialogs.
 
     The interactive stable/dev modes are the manual, run-from-a-terminal fallback
-    and prompt on the console.
+    and prompt on the console. Like the macOS ones they always ask for a restart,
+    although a payload-only change is picked up without one (src/PayloadSession.h).
 
     **ファイルの配置はこのスクリプトが決めない。** 走るのは常に**インストール済みの
     （＝古い）**この 1 本なので、ここに配置手順を持たせると「新しいビルドがどんな
@@ -49,11 +54,13 @@
       powershell -ExecutionPolicy Bypass -File vw-update.ps1 q-stable                 # (used by the plug-in)
       powershell -ExecutionPolicy Bypass -File vw-update.ps1 q-dev                    # (used by the plug-in)
       powershell -ExecutionPolicy Bypass -File vw-update.ps1 do-install <url> <name>  # (used by the plug-in)
+      powershell -ExecutionPolicy Bypass -File vw-update.ps1 q-pr-state <branch>...   # (used by the plug-in)
 
     Requirements: Windows PowerShell 5.1+ (ships with Windows) or PowerShell 7.
     Uses only built-in cmdlets (Invoke-RestMethod / Invoke-WebRequest /
     Expand-Archive) — no extra tools, and because the repository is public, no
-    authentication.
+    authentication is required. A GitHub token is still sent when vw-token.ps1
+    finds one (env / saved token / `gh`), to lift the API rate limit.
 
     Overridable via environment:
       VW_REPO         owner/repo             (default below)
@@ -315,8 +322,9 @@ function Invoke-ZipInstaller([string] $work, [string] $name) {
     return ($out -join "`n")
 }
 
-# Download <url> and install "<name>.vlb" (plus its .vwr, .commit and the updater
-# script) into $VW_PLUGINS_DIR. Returns $true on success; sets $script:LastError
+# Download <url> and install "<name>.vlb" (plus its .vwpayload, .vwr, .commit,
+# .branch, .shell-id and the updater script) into the plug-in's own folder under
+# $VW_PLUGINS_DIR. Returns $true on success; sets $script:LastError
 # on failure. Shows no UI (callers decide what, if anything, to display).
 #
 # 委ねられたときは、その出力を $script:InstallerOutput にそのまま入れて返す
@@ -559,11 +567,11 @@ function Invoke-Dev {
 # Dispatch only when this file is EXECUTED (the plug-in runs it with -File; a
 # manual run is the same), NOT when it is dot-sourced. The unit tests
 # (tests/vw-update.Tests.ps1) dot-source the script to call its back-end
-# functions (Get-AssetUrl / Invoke-QStable / Invoke-QDev / Invoke-DoInstall) with
-# Invoke-GH / Invoke-WebRequest stubbed out — there $MyInvocation.InvocationName
-# is '.', so the switch below does not run. This is the PowerShell analogue of the
-# BASH_SOURCE guard in vw-update.sh, and of the IUpdaterHost seam that makes
-# UpdaterFlow.cpp testable.
+# functions (Get-AssetUrl / Invoke-QStable / Invoke-QDev / Invoke-QPrState /
+# Invoke-DoInstall and their helpers) with Invoke-GH / Invoke-WebRequest stubbed
+# out — there $MyInvocation.InvocationName is '.', so the switch below does not
+# run. This is the PowerShell analogue of the BASH_SOURCE guard in vw-update.sh,
+# and of the IUpdaterHost seam that makes UpdaterFlow.cpp testable.
 if ($MyInvocation.InvocationName -ne '.') {
     $mode = if ($args.Count -ge 1) { [string] $args[0] } else { '' }
 

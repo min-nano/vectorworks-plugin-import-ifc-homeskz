@@ -44,8 +44,11 @@
 #   ci-wait: done (conclusion=<結果> exit=<終了コード>)
 #
 # で、この行が無ければ「まだ動いている」か「外から殺された」かのどちらか。
-# conclusion は success / failure / cancelled / no-checks / head-moved /
-# timed-out-waiting / api-error のいずれか。**success 以外は exit 1。**
+# conclusion は success / failure / unknown / no-checks / head-moved /
+# timed-out-waiting / api-error のいずれか。**success 以外は exit 1。** チェックの
+# cancelled は failure に数える（下の BAD_CONCLUSIONS）。unknown は失敗も成功も
+# 言い切れない結論（success / skipped / neutral 以外で、失敗側にも無いもの）が
+# 混ざったとき。
 #
 # `timed-out-waiting` / `api-error` は「CI が失敗した」ではなく**待機側が見届けられ
 # なかった**という意味で、CI 自体はまだ動いているかもしれない（同じ行に合流用の
