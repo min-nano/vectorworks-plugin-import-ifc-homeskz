@@ -1444,11 +1444,15 @@ Claude Code が MCP ブリッジ越しに**、更新・再起動・取り込み�
    }
    ```
 
-   `deny` の後ろ 3 つは `allow` の `git push -u origin:*` の抜け道を塞ぐもの。許可は前方一致
-   なので、`git push -u origin <branch> --force`・`… -f`・`git push -u origin +<branch>`
-   （先頭の `+` は強制更新）は頭の 2 つに当たらず、`allow` だけに当たって確認なしで通って
-   しまう。文字列の照合なので万全ではない（`main` への force push は GitHub のブランチ保護で
-   禁じておく）。
+   `deny` の後ろ 3 つは `allow` の `git push -u origin:*` の抜け道を塞ぐもの。末尾の `:*` は
+   「後ろに何が続いてもよい」なので、`git push -u origin <branch> --force`・`… -f`・
+   `git push -u origin +<branch>`（先頭の `+` は強制更新）は `deny` の頭の 2 つに当たらず、
+   `allow` だけに当たって確認なしで通ってしまう。後ろ 3 つは `*` を途中に置いて間を飛ばす。
+   `*` はどこに置いても空白込みの任意の文字列に当たり（`:*` の書き方は末尾でしか効かない）、
+   規則は `deny` → `ask` → `allow` の順に見られて `deny` が必ず勝つ
+   （[Claude Code の Permissions](https://code.claude.com/docs/en/permissions)）。それでも
+   文字列の照合なので万全ではない（`main` への force push は GitHub のブランチ保護で禁じて
+   おく）。
 
 **ローカルでの PR の見方。** 購読が無いので、CI は `scripts/ci-wait.sh` をバックグラウンドで
 投げてその終了で知り（クラウドと同じ）、レビューとコメントは**周の区切りごとに**
