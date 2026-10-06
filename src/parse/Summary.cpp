@@ -376,7 +376,7 @@ namespace HomeskzIfcImport::parse
 	}
 
 	// ------------------------------------------------------------------------
-	// 診断ログの本文（M19「短い完了・厚いログ」）
+	// 診断ログの本文（M19。docs/dev-notes/design/diagnostics.md「診断・完了報告の方針」）
 	// ------------------------------------------------------------------------
 
 	std::string formatLogHeader(const BuildInfo& build, const std::string& ifcPath,

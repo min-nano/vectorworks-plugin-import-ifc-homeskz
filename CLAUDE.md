@@ -338,8 +338,8 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 
 - 囲む … 検算そのもの・その件数・実測を文字列にする道具（`DescribeSizeParams` /
   `DescribeStoryBound` / `DescribePioPath` / `DescribeParamsContaining`）・取り込み後の測り直し
-  （`recheckColumns`）・パスの観測（`PathProbe`）・描き上がった実体の測り直し
-  （`MeasureDrawnMember` / `PioPathChord`）。
+  （`recheckColumns` / `recheckShearWalls`・`probeShearWall`）・パスの観測（`PathProbe`）・
+  描き上がった実体の測り直し（`MeasureDrawnMember` / `PioPathChord`）。
 - 囲まない … 読み戻した結果が絵を変えるもの（`SetParamRealChecked`・`CreatePath` の
   `NurbsSetPt3D`・データタグのレイアウトの取り直し・`draw/Symbol` の置けたことの確認）。
   **ただし「絵を変える」は「絵を良くする」ではない**——潰れた材のパスを作り直す自己修復は
