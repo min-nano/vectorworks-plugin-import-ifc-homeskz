@@ -813,6 +813,15 @@ diff-cover coverage.xml --compare-branch origin/main --markdown-report diff-cove
     足すべきかを判断できなかったためです。ステップサマリーは REST API で取れず Claude の
     セッションから読めないので、同じものをジョブログにも出します（`get_job_logs` で
     読めます。モデルが組んだ文字列なので `::stop-commands::` で囲みます）。
+  * **裏で走らせない・待たない・ファイルへ書かない。** レビューは 1 回きりの応答なので、
+    完了を待つつもりで応答を閉じるとそこで終わります。PR #195 では 28 ターン・$0.99 で
+    `gh pr review` を一度も呼ばずに終わりました（拒否 7 件は差分のリダイレクト・検査
+    スクリプトの書き出し・`pkill -f "sleep 60"`）。プロンプトで明示し、大きな PR は
+    `gh pr diff <番号> --name-only` から入らせます。
+  * **提出されなかったことを ::warning:: にする**（「レビューが提出されたかを確かめる」）。
+    この実行の開始以降に `github-actions[bot]` のレビューが 1 件も無ければ警告し、
+    `@claude review` での出し直しを促します。これが無いと、ジョブは緑のまま PR に何も
+    残らず、気付けません。
 
 **承認は実機確認の代わりではありません。** `draw/` を含む PR は、レビューが承認しても
 人が Vectorworks 実機で見て「確認できた」と言うまでマージしません
@@ -1442,10 +1451,23 @@ Claude Code が MCP ブリッジ越しに**、更新・再起動・取り込み�
          "Bash(gh run view:*)", "Bash(gh run list:*)"
        ],
        "ask": ["mcp__vectorworks__vw_restart", "mcp__vectorworks__vw_call"],
-       "deny": ["Bash(git push --force:*)", "Bash(git push -f:*)"]
+       "deny": [
+         "Bash(git push --force:*)", "Bash(git push -f:*)",
+         "Bash(git push * --force*)", "Bash(git push * -f*)", "Bash(git push *+*)"
+       ]
      }
    }
    ```
+
+   `deny` の後ろ 3 つは `allow` の `git push -u origin:*` の抜け道を塞ぐもの。末尾の `:*` は
+   「後ろに何が続いてもよい」なので、`git push -u origin <branch> --force`・`… -f`・
+   `git push -u origin +<branch>`（先頭の `+` は強制更新）は `deny` の頭の 2 つに当たらず、
+   `allow` だけに当たって確認なしで通ってしまう。後ろ 3 つは `*` を途中に置いて間を飛ばす。
+   `*` はどこに置いても空白込みの任意の文字列に当たり（`:*` の書き方は末尾でしか効かない）、
+   規則は `deny` → `ask` → `allow` の順に見られて `deny` が必ず勝つ
+   （[Claude Code の Permissions](https://code.claude.com/docs/en/permissions)）。それでも
+   文字列の照合なので万全ではない（`main` への force push は GitHub のブランチ保護で禁じて
+   おく）。
 
 **ローカルでの PR の見方。** 購読が無いので、CI は `scripts/ci-wait.sh` をバックグラウンドで
 投げてその終了で知り（クラウドと同じ）、レビューとコメントは**周の区切りごとに**

@@ -326,6 +326,9 @@ jobs:
           {
             echo "run=true"
             echo "pr_number=$PR_NUMBER"
+            # 後の「提出されたかを確かめる」が、この実行より前のレビューを
+            # 数えないための境目。
+            echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "threads<<$delim"
             printf '%s\n' "$threads"
             echo "$delim"
@@ -359,7 +362,7 @@ jobs:
         # 付け替えられるため、v1 のままだと中身が黙って変わりうる。更新は
         # Dependabot が # の後ろの版を見て上げてくれる (他のワークフローが
         # actions/checkout などを固定しているのと同じ作法)。
-        uses: anthropics/claude-code-action@ed670b4cf9de2a5a570d130d2f6197b9e543cd64 # v1
+        uses: anthropics/claude-code-action@cab360f6565aa35a51d6ce9e43f1f4287c0a32ea # v1
         env:
           # 何かの経路で環境に残っていても拾われないよう、空で上書きする。
           # 拾われると API のクレジットを別枠で消費しかねない。
@@ -419,6 +422,21 @@ jobs:
             通りません——実測では、同じ 1 つの `gh api` を 6 通り書き直して
             6 ターン捨てた実行があります。ターンには上限があり、使い切ると
             インラインコメントは投稿されず判定も出ないまま終わります。
+
+            **ファイルへ書き出すこと・スクリプトを書くことはできません。**
+            `gh pr diff … > file` のようなリダイレクトも、ヒアドキュメントで
+            検査スクリプトを作ることも拒否されます。差分は `gh pr diff` の
+            出力をそのまま読んでください。大きな PR では、まず
+            `gh pr diff <番号> --name-only` で変更ファイルの一覧を取り、
+            要るところだけを見てください。
+
+            **コマンドを裏で走らせたり、何かの完了を待ったりしないでください**
+            (`sleep` も含みます)。この実行は 1 回きりの応答で、あなたが
+            応答を終えた瞬間に終わります——「終わるのを待つ」つもりで
+            応答を閉じると、何も提出されないまま終わります (PR #195 で
+            実際に起きました。28 ターン・予算の半分で、`gh pr review` を
+            一度も呼ばずに終わっています)。**応答を終えてよいのは
+            `gh pr review` を実行したあとだけです。**
 
             したがって、次の 2 つは**はじめから見ないでください**。
 
@@ -777,3 +795,37 @@ jobs:
               echo '```'
             fi
           } >>"$GITHUB_STEP_SUMMARY"
+
+      # レビューが提出されたかを確かめる。モデルが `gh pr review` を呼ばずに
+      # 応答を終えると、ジョブは緑のまま PR に何も残らない (PR #195: 28 ターン・
+      # $0.99 で終わり、拒否された呼び出しにも `gh pr review` は無かった)。
+      # 上限に当たったのか自分から終えたのかはアクションが会話を隠すので
+      # 分からないが、少なくとも「出なかった」ことはここで ::warning:: にする。
+      #
+      # 数えるのは github-actions[bot] がこの実行の開始以降に出したレビュー。
+      # インラインコメントだけが出た場合もレビューとして数えられるので、
+      # 判定が無くても指摘が届いていれば警告しない。
+      - name: レビューが提出されたかを確かめる
+        if: always() && steps.prep.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.prep.outputs.pr_number }}
+          STARTED_AT: ${{ steps.prep.outputs.started_at }}
+        run: |
+          # パイプで wc へ渡すと gh の失敗が消える (pipefail が無い) ので、
+          # いったん受けてから数える。
+          if ! ids=$(gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/reviews" \
+                       --jq ".[] | select(.user.login == \"github-actions[bot]\" and .submitted_at >= \"$STARTED_AT\") | .id" \
+                       2>"$RUNNER_TEMP/reviews-err"); then
+            echo "::warning::レビューの提出を確認できませんでした: $(tr '\n' ' ' <"$RUNNER_TEMP/reviews-err")"
+            exit 0
+          fi
+          posted=$(printf '%s' "$ids" | grep -c . || true)
+          if [ "$posted" -eq 0 ]; then
+            msg="レビューが提出されずに終わりました。PR に \`@claude review\` とコメントすると出し直せます。"
+            echo "::warning::$msg"
+            { echo; echo "**$msg**"; } >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "この実行で提出されたレビュー: ${posted} 件"
+          fi
