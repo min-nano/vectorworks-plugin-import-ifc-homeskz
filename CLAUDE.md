@@ -25,17 +25,23 @@
 
 | ファイル | 中身 |
 | --- | --- |
-| `README.md` | 利用者向け。何をするか・使い方・インストール・既知の制限 |
-| `docs/DEVELOPMENT.md` | 開発ガイド。ソースの構成・**置き場所の一覧**・ビルド・テスト・lint・CI（待ち方・デバッグ）・自動レビュー・MCP ブリッジ・実機テスト・自動アップデート |
-| `docs/DEV-NOTES.md` | 開発メモ。設計の考え方・ホームズ君 IFC の癖・打ち切った調査・実装の経緯（M0〜） |
+| `README.md`（目次）＋ `docs/user-guide/` | 利用者向け。何をするか・取り込むもの・使い方・インストール・アップデート・既知の制限 |
+| `docs/DEVELOPMENT.md`（目次）＋ `docs/development/` | 開発ガイド。ソースの構成・**置き場所の一覧**・ビルド・テスト・lint・CI（待ち方・デバッグ）・自動レビュー・MCP ブリッジ・実機テスト・自動アップデート |
+| `docs/DEV-NOTES.md`（目次）＋ `docs/dev-notes/` | 開発メモ。設計の考え方（`design/`）・ホームズ君 IFC の癖・打ち切った調査・実装の経緯（`milestones/`。M0〜） |
 | [SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)の `Findings/` | **VW SDK の実測知見**（実機でしか判明しない落とし穴・SDK に無い／効かない API・SDK 側の打ち切った調査）。別リポジトリ |
-| `tests/README.md` | テストの一覧・方針・テストしていないもの |
+| `tests/README.md`（目次）＋ `docs/development/testing/` | テストの一覧・方針・テストしていないもの |
 | `CLAUDE.md`（本ファイル） | 全変更に共通する規約 |
+
+**ドキュメントは 1 ページ 1 トピックに保つ。** 目次（表の「目次」の 4 つ）には本文を書かず、
+本文はフォルダの下のページに書いて目次へ 1 行足す。ページが長くなったら（目安 300 行）
+フォルダに分け、`README.md` から読み始められるようにする。目次は元のパスのまま残してあり、
+ソースのコメントにある `docs/DEV-NOTES.md M<数字>` / `docs/DEVELOPMENT.md「<節>」` は
+目次から引ける（コメントを書き換えて回らない）。
 
 **新しく分かったことは書き残す。** 行き先は 2 つで、取り違えない。
 
 - **Vectorworks SDK の挙動** → SDK リファレンスの `Findings/`。本リポジトリには書かない。
-- **本プラグイン固有のこと**（設計判断・ホームズ君 IFC の癖・描き方の方針） → `docs/DEV-NOTES.md`。
+- **本プラグイン固有のこと**（設計判断・ホームズ君 IFC の癖・描き方の方針） → `docs/dev-notes/`。
 
 **どちらかの「打ち切った調査」に書いてあることは再調査しない。**
 
@@ -43,14 +49,15 @@
 
 | 触るところ | 読む節 |
 | --- | --- |
-| 共有する定数・述語・ヘルパーを足す／探す | `docs/DEVELOPMENT.md`「置き場所の一覧（重複を作らない）」 |
-| 実機テスト（`draw/Feedback`・`core/FeedbackSession`・`parse/Feedback`・`ExtTestMenu`） | `docs/DEVELOPMENT.md`「実機テスト」の「設計の決めごと」 |
-| ローカルの Claude Code から実機確認を回す（MCP の `vw_run_test` / `vw_test_report` / `vw_update` / `vw_restart`） | `docs/DEVELOPMENT.md`「実機テスト」の「ローカルセッションの準備」「ローカルセッションでの回し方」 |
-| 自動アップデート（`src/Updater*`・`scripts/vw-update.*` / `vw-install.*` / `vw-uninstall.*` / `vw-token.*`） | `docs/DEVELOPMENT.md`「自動アップデートの仕組み」 |
-| MCP ブリッジ（`core/Bridge`・`draw/McpBridge`・`ExtMcpPalette`・`scripts/mcp/`・`.mcp.json`） | `docs/DEVELOPMENT.md`「MCP ブリッジ」 |
-| CI を待つ・`ci-debug` を使う | `docs/DEVELOPMENT.md`「CI の完了待ち」「CI デバッグ」 |
-| 自動レビュー（`pr-review.yml`） | `docs/DEVELOPMENT.md`「自動レビュー」 |
-| 実機での確認のしかた | `docs/DEV-NOTES.md`「実機確認の作法」 |
+| 共有する定数・述語・ヘルパーを足す／探す | `docs/development/placement-index.md`（置き場所の一覧） |
+| 実機テスト（`draw/Feedback`・`core/FeedbackSession`・`parse/Feedback`・`ExtTestMenu`） | `docs/development/live-test/design-rules.md`（設計の決めごと） |
+| ローカルの Claude Code から実機確認を回す（MCP の `vw_run_test` / `vw_test_report` / `vw_update` / `vw_restart`） | `docs/development/live-test/local-session-setup.md`（準備）・`running.md`（回し方） |
+| 自動アップデート（`src/Updater*`・`scripts/vw-update.*` / `vw-install.*` / `vw-uninstall.*` / `vw-token.*`） | `docs/development/auto-update/`（`README.md` から） |
+| MCP ブリッジ（`core/Bridge`・`draw/McpBridge`・`ExtMcpPalette`・`scripts/mcp/`・`.mcp.json`） | `docs/development/mcp-bridge.md` |
+| CI を待つ・`ci-debug` を使う | `docs/development/ci/ci-wait.md`・`ci-debug.md` |
+| 自動レビュー（`pr-review.yml`） | `docs/development/ci/pr-review.md` |
+| 実機での確認のしかた | `docs/dev-notes/live-verification.md`（実機確認の作法） |
+| ドキュメントを書き足す・並べ替える | 上の「ドキュメントの分担」と、`docs/DEV-NOTES.md` の「書き足すとき」 |
 
 ## 開発の基本方針
 
@@ -63,7 +70,7 @@
    採らない。
 
 3. **仕様の根拠を残す。** なぜその値・その作りなのかはコードのコメント（**なぜ**を書く）と
-   `docs/DEV-NOTES.md` に、SDK の落とし穴は `Findings/` に残す。
+   `docs/dev-notes/` に、SDK の落とし穴は `Findings/` に残す。
 
 4. **既存の図面リソースを作らない・書き換えない。** 利用者の図面に名前付きリソースを増やさない。
    スラブ／ウォールスタイル・データタグスタイル・凡例スタイルは作らず、構成層・基準面・
@@ -209,7 +216,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 
 ### 更新と配置の要点
 
-詳細は `docs/DEVELOPMENT.md`「自動アップデートの仕組み」。全変更で守るのは次の 3 つ。
+詳細は `docs/development/auto-update/`（自動アップデートの仕組み）。全変更で守るのは次の 3 つ。
 
 - **起動時（`plugin_module_main`）に更新を確認しない。** 確認はコマンドの入口だけで行う。
   再起動を SDK（`CloseAllFilesAndQuitVectorworks`）に頼めるのは、確認が VectorWorks が完全に
@@ -224,12 +231,12 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 
 ## 置き場所の規約
 
-`src/` の全体像は `docs/DEVELOPMENT.md`「ソースの構成」にある。
+`src/` の全体像は `docs/development/source-layout.md`（ソースの構成）にある。
 
 ### 重複を作らない置き場所
 
 **同じ定数・述語・ヘルパー・文言を 2 か所に書かない。** 既存の唯一の置き場所の一覧は
-`docs/DEVELOPMENT.md`「置き場所の一覧（重複を作らない）」にあり、新しく共有するものを作ったら
+`docs/development/placement-index.md`（置き場所の一覧）にあり、新しく共有するものを作ったら
 そこへ 1 行足す。特に次は取り違えやすい:
 
 - **要素を 1 つ足すときの型**: `parse/<要素>.{h,cpp}` ＋ `core/Document.h` の命令構造体と
@@ -253,8 +260,8 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 `Extensions/ExtMenu` には 1 行も書かない。`#ifdef VW_DEV_BUILD` で囲っても制御フローは本番の
 入口に残るので、囲えばよいとも考えない。両者が共有してよいのは**絵を作るところ**
 （`draw/ImportRun` の `runImportRound`）だけ（M25）。MCP の `vw_run_test` も
-`draw/Feedback` の `runTestRound` を通る。そのほかの決めごとは `docs/DEVELOPMENT.md`
-「実機テスト」の「設計の決めごと」。
+`draw/Feedback` の `runTestRound` を通る。そのほかの決めごとは
+`docs/development/live-test/design-rules.md`（実機テストの設計の決めごと）。
 
 ## C++ コード規約
 
@@ -282,7 +289,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
   `className`）。意味は各構造体の doc コメントに書く。
 - **ユニバーサル名と拡張機能 UUID は付け替えない**（コマンド・PIO の同一性そのもので、付け替えると
   ワークスペースからコマンドが消え、図面上の既存オブジェクトが孤児になる）。一覧は
-  `docs/DEVELOPMENT.md`「プラグイン識別子」。
+  `docs/development/identifiers.md`（プラグイン識別子）。
 
 ### 幾何の型
 
@@ -302,7 +309,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 ### コメント・言語
 
 - **日本語コメントを基本**とし、既存ソースの手折りコメントの密度に合わせる。
-- **なぜ（意図・仕様の根拠）を書く。** 大きな知見は、プラグイン固有なら `docs/DEV-NOTES.md`、
+- **なぜ（意図・仕様の根拠）を書く。** 大きな知見は、プラグイン固有なら `docs/dev-notes/`、
   SDK の挙動なら `Findings/` にも足し、コメントからはその置き場所を指す。
 
 ## テスト方針
@@ -317,7 +324,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 - **`draw/`**: SDK 依存で CI では実行できない。
   - **描画側から切り離せる純計算は `core/` へ寄せて**無 SDK でテストする（レイヤ順・地中梁の
     呑み込み・用紙の割り付け等）。
-  - 実描画は**ローカルの VectorWorks で目視確認**する（`docs/DEV-NOTES.md`「実機確認の作法」）。
+  - 実描画は**ローカルの VectorWorks で目視確認**する（`docs/dev-notes/live-verification.md`）。
     SDK 呼び出しの薄いラッパーは、要るならモックで「正しい引数で呼んだか」を見る程度に留める。
 
 ### 検算は開発ビルドだけに置く
@@ -337,7 +344,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
   `NurbsSetPt3D`・データタグのレイアウトの取り直し・`draw/Symbol` の置けたことの確認）。
   **ただし「絵を変える」は「絵を良くする」ではない**——潰れた材のパスを作り直す自己修復は
   ここに並んでいたが、繕った結果のほうが悪いと分かって撤去した（`src/draw/Verify.h` /
-  `docs/DEV-NOTES.md`「柱が長さ 0 で描かれる（M27）」）。
+  `docs/dev-notes/milestones/m27-zero-length-column/`）。
 
 `#if` の中は dev の CI でしか型検査されないので、**両方の分岐がコンパイルできることは
 `ci-debug` の `build`（既定の `VW_BUILD_CHANNEL=both`）で確かめる**。
@@ -345,7 +352,8 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 ## 既知の制限・非目標
 
 - **ホームズ君 IFC 以外の汎用 IFC 対応は非目標**（既知サブセット前提）。
-- そのほかの制限は `README.md`「既知の制限」と `docs/DEV-NOTES.md`「残っている宿題」。
+- そのほかの制限は `docs/user-guide/known-limitations.md`（既知の制限）と
+  `docs/dev-notes/open-issues.md`（残っている宿題）。
 
 ## 開発プロセス: PR とマージ
 
@@ -389,7 +397,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 **クラウドのセッションからは橋に届かない**（受け渡しがローカルのファイル）。実機確認が要る
 作業は Mac の `claude remote-control` で起動したセッションで回し、iOS からはそれを操作する。
 実機の要らない作業はクラウドで並行してよい。GitHub・iOS・許可の用意は
-`docs/DEVELOPMENT.md`「実機テスト」の「ローカルセッションの準備」。
+`docs/development/live-test/local-session-setup.md`（ローカルセッションの準備）。
 
 1 周の流れは **push → `scripts/ci-wait.sh` で dev ビルドを待つ → `vw_update`（殻まで変わった
 ら `vw_restart`）→ `vw_run_test` → 返った報告（`vw_test_report` / `vw_log`）を読む**。
@@ -405,7 +413,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
   閉じる道は持たない）。
 - **報告の数字は実機確認の代わりにならない。** 「図面の状態:」の行で図面が取り込み前へ
   戻っていたかを先に見て、怪しければ絵で見て答えられる形で人に確かめてもらう（読み方は
-  `docs/DEVELOPMENT.md`「実機テスト」の「報告の読み方」）。所見は人がチャットへ書く。
+  `docs/development/live-test/reading-reports.md`）。所見は人がチャットへ書く。
 
 ## CI の完了を待つ
 
@@ -423,9 +431,9 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 - **`build.yml` に一時的な調査ステップを挿さない**（dev プレリリースとして公開され、キャッシュを
   汚す）。
 - 使い方・`conclusion` の一覧・CI が始まらないときに疑う順序・`ci-debug` の起動手順とモードは
-  `docs/DEVELOPMENT.md`「CI の完了待ち」「CI デバッグ」。
+  `docs/development/ci/ci-wait.md`・`ci-debug.md`。
 
 ## ビルド・リント・リリース
 
 ローカルビルド（`VW_SDK_DIR`）・dual build（`VW_DEV_BUILD`）・テストとカバレッジ・lint・CI と
-リリース・自動アップデートは `docs/DEVELOPMENT.md`。プラグイン名は `min-nano_structure`。
+リリース・自動アップデートは `docs/DEVELOPMENT.md`（目次）から。プラグイン名は `min-nano_structure`。
