@@ -38,9 +38,11 @@ namespace HomeskzIfcImport::draw
 	// （完了ダイアログの診断。draw/ColumnMark と同じ流儀）。
 	//
 	// outHandles を渡すと「命令インデックス → 置いた PIO」を詰める（開発ビルドの
-	// recheckShearWalls が使う）。
+	// recheckShearWalls が使う）。outInfo には平常でも出る記録（伏図記号のシンボルを
+	// 用意できたか）を返す（診断ログの「記録:」へ。core::DrawCounts）。
 	std::size_t drawShearWalls(const core::Document& document, core::ProgressReporter& progress,
-							   std::string* outNote = nullptr, ObjectHandles* outHandles = nullptr);
+							   std::string* outNote = nullptr, ObjectHandles* outHandles = nullptr,
+							   std::string* outInfo = nullptr);
 
 #if VW_DRAW_VERIFY
 	// **取り込みの最後に、置いた耐力壁の軸組内法を描かずに求め直す**（開発ビルドだけ。

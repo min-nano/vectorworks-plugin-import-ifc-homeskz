@@ -21,7 +21,6 @@
 #include "Extensions/ExtShearWall.h"
 #include "core/Document.h"
 #include "core/Progress.h"
-#include "core/Trace.h"
 
 #include "VWFC/VWObjects/VWParametricObj.h"
 #include "VWFC/VWObjects/VWSymbolDefObj.h"
@@ -118,19 +117,21 @@ namespace HomeskzIfcImport::draw
 			return gSDK->CreateOval(bounds);
 		}
 
-		// 定義を「使える状態」にして返す（用紙基準にし、外接を計算し直す）。
+		// 定義を「使える状態」にする（用紙基準にし、外接を計算し直す）。用紙基準にできたら
+		// true（できなくても外接は計算し直す）。
 		//
 		// ★**中身がある定義にも ResetObject を呼ぶ。** 外接は中身と別に持たれていて、
 		// 中身があっても外接が無い定義は**図に何も出ない**（実機: 面材の丸は定義に
 		// 入っているのに図面へ出なかった。壊れた定義を作った版で図面に残ったものが、
 		// 「中身がある」判定でそのまま使われていた）。ResetObject は絵を書き換えないので、
 		// 「既にある定義は触らない」という約束（CLAUDE.md 4）とも矛盾しない。
-		void PrepareDefinition(MCObjectHandle definition)
+		bool PrepareDefinition(MCObjectHandle definition)
 		{
 			// **用紙基準（縮尺無視）にする。** 記号は表記なので、伏図の縮尺が変わっても
 			// 紙の上の大きさは変えない（ご要望）。大きさは「定義の図形（用紙 mm）×
 			// レイヤの縮尺」で決まるので、耐力壁レイヤの縮尺を伏図の縮尺へ揃える
 			// （draw/Sheet の applyPlanLayerScale）ところまでが 1 組。
+			bool pageBased = true;
 			try
 			{
 				VWSymbolDefObj(definition).SetPageBased(true);
@@ -138,22 +139,27 @@ namespace HomeskzIfcImport::draw
 			catch (...)
 			{
 				// 用紙基準にできなくても記号自体は出る（縮尺に追従するだけ）ので止めない。
-				// ただし黙って捨てない——「縮尺無視になっていない」の唯一の手掛かり。
-				core::trace::log("  shearwall: 記号シンボルを用紙基準にできない");
+				// ただし黙って捨てない——「縮尺無視になっていない」の唯一の手掛かりなので、
+				// 呼び出し側が記録へ残す（EnsureMarkSymbols）。
+				pageBased = false;
 			}
 			gSDK->ResetObject(definition);
+			return pageBased;
 		}
 
-		// 定義を 1 つ用意する。使える定義が図面にある（か、作れた）なら true。
-		bool EnsureMarkSymbol(const char* name, const std::function<MCObjectHandle()>& makeShape)
+		// 定義を 1 つ用意する。使える定義が図面にある（か、作れた）なら true。用紙基準に
+		// できたかを pageBased に返す。
+		bool EnsureMarkSymbol(const char* name, const std::function<MCObjectHandle()>& makeShape,
+							  bool& pageBased)
 		{
+			pageBased = false;
 			const TXString wanted(name);
 			if (const MCObjectHandle existing = FindSymbolDefinition(wanted); existing != nil)
 			{
 				if (DefinitionHasContent(existing))
 				{
 					// 絵は図面のものを尊重してそのまま使い、外接と用紙基準だけ整える。
-					PrepareDefinition(existing);
+					pageBased = PrepareDefinition(existing);
 					return true;
 				}
 				// 空＝上記の不具合で壊れた定義。名前を空けないと作り直せない。
@@ -177,13 +183,16 @@ namespace HomeskzIfcImport::draw
 			if (!gSDK->AddObjectToContainer(shape, definition))
 				return false;
 
-			PrepareDefinition(definition); // ★外接が付くのはここ（無いと空のシンボルに見える）
+			// ★外接が付くのはここ（無いと空のシンボルに見える）
+			pageBased = PrepareDefinition(definition);
 			return true;
 		}
 
-		// まとめて。用意できなかった名前をログに残す（記号が出ない原因になるので、
-		// 黙って諦めない）。
-		void EnsureMarkSymbols()
+		// まとめて。用意できたか・用紙基準にできたかを 1 行にして outInfo へ返す（記号が
+		// 出ない・縮尺に追従してしまう原因になるので、黙って諦めない）。平常でも出る記録
+		// なので完了ダイアログの診断ではなくログの記録へ（core::DrawCounts）。診断ログへは
+		// 要素から直に書かない（CLAUDE.md「重複を作らない置き場所」の診断ログへの書き出し口）。
+		void EnsureMarkSymbols(std::string* outInfo)
 		{
 			struct Wanted
 			{
@@ -194,13 +203,20 @@ namespace HomeskzIfcImport::draw
 				Wanted{kShearMarkBraceSymbol, [] { return MakeBraceTriangle(); }},
 				Wanted{kShearMarkPanelSymbol, [] { return MakePanelCircle(); }}};
 
+			std::string text = "耐力壁の記号シンボル:";
 			for (const Wanted& item : wanted)
 			{
-				const bool ready = EnsureMarkSymbol(item.name, item.makeShape);
-				if (core::trace::isOpen())
-					core::trace::log(std::string("  shearwall: 記号シンボル ") + item.name + " = " +
-									 (ready ? "用意できた" : "**用意できない**"));
+				bool pageBased = false;
+				const bool ready = EnsureMarkSymbol(item.name, item.makeShape, pageBased);
+				text += std::string(" ") + item.name + " = ";
+				if (!ready)
+					text += "**用意できない**";
+				else if (!pageBased)
+					text += "用意できた（**用紙基準にできない**）";
+				else
+					text += "用意できた";
 			}
+			AppendLine(outInfo, text);
 		}
 
 		// ------------------------------------------------------------------
@@ -331,7 +347,8 @@ namespace HomeskzIfcImport::draw
 	} // namespace
 
 	std::size_t drawShearWalls(const core::Document& document, core::ProgressReporter& progress,
-							   std::string* outNote, ObjectHandles* outHandles)
+							   std::string* outNote, ObjectHandles* outHandles,
+							   std::string* outInfo)
 	{
 		std::size_t drawn = 0;
 		std::size_t missingLayers = 0;
@@ -343,7 +360,7 @@ namespace HomeskzIfcImport::draw
 		if (!document.shearWalls.empty())
 		{
 			PrepareCustomObjectDefinition(kShearWallUniversalName);
-			EnsureMarkSymbols();
+			EnsureMarkSymbols(outInfo);
 		}
 
 		for (std::size_t index = 0; index < document.shearWalls.size(); ++index)
@@ -422,7 +439,8 @@ namespace HomeskzIfcImport::draw
 		if (undecided > 0)
 			text += " / 内法が決まらない " + std::to_string(undecided) + " 枚";
 		text += shown;
-		core::trace::log(text);
+		// 行き先は呼び出し側の記録（draw/ExecuteDocument の addNotes）だけ。診断ログへ
+		// 直に書くと、結果の「記録:」と同じ行が二度出る。
 		if (outNotes != nullptr)
 			*outNotes = text;
 	}
