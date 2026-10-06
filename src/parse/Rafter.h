@@ -36,7 +36,7 @@
 //	【M7 で精緻化済み】差し込みに使う桁幅は、支持点の真下にある軒桁（parse/Member の
 //	横架材命令）の実寸から採る（girderWidthAt）。受ける軒桁が見つからないときだけ既定桁幅
 //	kDefaultGirderWidth へフォールバックする（M6 では横架材が未導入で常にこの既定値だった。
-//	docs/DEV-NOTES.md M6「依存メモ」/ M7）。
+//	docs/DEV-NOTES.md M6 / M7）。
 //
 
 #pragma once

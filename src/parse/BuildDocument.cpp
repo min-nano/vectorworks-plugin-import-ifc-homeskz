@@ -6,8 +6,9 @@
 //	処理の順は、
 //	  1. parse/Loader … IFC を読み込む（parse/Step でトークナイズ＋エンティティグラフ構築。
 //	                    サニタイズはしない。理由は parse/Loader.h 参照）
-//	  2. parse/Story … parse/Grid … parse/Floor … 要素ごとに Document を組み立てる
-//	で、以降のマイルストーンでは 2 に要素を足していく（docs/DEV-NOTES.md）。
+//	  2. 要素ごとの parse モジュール … Document を組み立てる（呼ぶ順は要素どうしの依存で
+//	                    決まる。下の buildDocument の各段のコメント参照）
+//	で、要素を足すときは 2 に足す（docs/DEV-NOTES.md）。
 //
 //	各要素の解析は「ストーリ一覧」「通り芯のセンタリング中心」「階に属する要素」「屋根面」を
 //	共通して必要とするので、**共有コンテキスト（parse/Context）を 1 つだけ作って全要素へ
@@ -137,8 +138,7 @@ namespace HomeskzIfcImport::parse
 		// M6 屋根面・屋根組: 屋根版（IfcSlab "屋根版"）から垂木・野地板を導出する
 		// （parse/Rafter / parse/Roof）。屋根面は建物形状の要で、上の登り梁はここで確定した屋
 		// 根面へスナップ補正されている（形状先行）。垂木の差し込みに使う桁幅は**補正後の**横
-		// 架材命令から引く。以降のマイルストーンで Column … の解析を同様に足していく
-		// （docs/DEV-NOTES.md）。
+		// 架材命令から引く。
 		document.rafters = buildRafterCommands(context, document.members);
 		progress.step();
 		document.roofs = buildRoofCommands(context);
@@ -202,14 +202,14 @@ namespace HomeskzIfcImport::parse
 
 		// M13 シート（伏図）: 基礎伏図・各階の柱梁伏図・母屋伏図。**どの伏図に何を映すかは
 		// 他の要素が出した答え（基礎の有無・柱の span・横架材の配置先レイヤ・屋根版の有無）
-		// から決まる**ので、それらが確定した後＝最後に組み立てる（parse/Sheet）。
+		// から決まる**ので、それらが確定した後に組み立てる（parse/Sheet）。
 		document.sheets = buildSheetCommands(context);
 		progress.step();
 
 		// M14 軸組図（断面ビューポート）: 柱梁の芯を通る通りを切断位置にし、そこへ断面
 		// ビューポートを 1 枚ずつ作る。**組み立て済みの Document を入力に取る**——切断位置は
 		// 柱・横架材の命令から、映すレイヤはストーリの命令から、断面の高さ範囲は各要素の Z から
-		// 決まるので、ここが最後になる（parse/Section）。
+		// 決まるので、要素の命令がすべて揃った後に置く（parse/Section）。
 		document.sections = buildSectionCommands(context, document);
 		// 軸組図を載せるシートレイヤの通し方（番号は**伏図の続き**・タイトルの基）。M18。
 		// **何枚の用紙に分かれるかは用紙の大きさと縮尺が決める**ので、ここでは枚数に依らない
@@ -220,7 +220,7 @@ namespace HomeskzIfcImport::parse
 
 		// M13 断面寸法データタグ: 伏図・軸組図の**両方**のビューポート注釈に、横架材の断面寸
 		// 法を示すデータタグを載せる。タグはビューポート命令の中に入るので、**sheets /
-		// sections が確定した後**でなければ置き場所が決まらない——したがってここが最後になる
+		// sections が確定した後**でなければ置き場所が決まらない——したがって軸組図の後に置く
 		// （parse/Tag）。
 		attachTagCommands(document, context.stories(),
 						  standardBeamHeights(context.stories(), context.planLevels()),

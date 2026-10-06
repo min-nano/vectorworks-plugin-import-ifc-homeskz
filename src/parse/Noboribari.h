@@ -24,8 +24,8 @@
 //	命令の並び順に依存しない決定的な結果になる。
 //
 //	【M8 で最終化】受ける材は横架材と**柱**の両方を見る（M7 の時点では横架材だけだった。
-//	docs/DEV-NOTES.md M7「端部詰めは…柱導入後（M8）に最終化する」）。柱は方向を持たないので、
-//	断面の軸平行矩形へ食い込む量を別式で求める（noboribariColumnPenetration）。
+//	docs/DEV-NOTES.md M7 / M8）。柱は方向を持たないので、断面の軸平行矩形へ食い込む量を
+//	別式で求める（noboribariColumnPenetration）。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。
 //

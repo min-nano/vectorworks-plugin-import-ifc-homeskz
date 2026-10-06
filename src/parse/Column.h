@@ -126,8 +126,9 @@ namespace HomeskzIfcImport::parse
 	inline constexpr double kKoyazukaMatchAlongTol = 50.0; // 材の軸方向の範囲（棟束は端に立つ）
 	inline constexpr double kKoyazukaMatchZTol = 30.0; // 小屋束上端が材の Z 範囲に収まる余裕
 
-	// 要素が柱（IfcColumn）か。**ストーリの横架材天端オフセット（parse/Story）と解析本体で
-	// 同じ述語を使う**ため、判定はここに一本化する。
+	// 要素が柱（IfcColumn）か。解析本体（buildColumnCommands）が使う。ストーリの横架材天端
+	// オフセット（parse/Story の resolveBeamTopOffset）も IfcColumn を見るが、こちらは通らず
+	// 型名を直接比べている。
 	bool isColumnElement(const Entity& element);
 
 	// IfcColumn.ObjectType を柱種別名へ変換する。未設定（空文字）・未知の値は既定種別（管柱）

@@ -443,8 +443,8 @@ namespace HomeskzIfcImport::parse
 
 				// 上下端高さを横架材天端（最上階は軒高）のストーリレベルへバインドする。
 				// offset はバインド先レベルの絶対 Z から実際の下端／上端 Z までの距離。
-				// **実体の高さはパス（下端 → 上端の鉛直線）が担い**、バインドは高さの基準を
-				// 与える（ヘッダ冒頭「高さはパスのジオメトリ…」）。
+				// **実体の高さは上下端バウンドの差が担う**（描画側のパスは平面座標しか持た
+				// ない。ヘッダ冒頭「高さを表すのは上下端バウンドの差だけ」）。
 				const char* currentLevel = beamTopLevelType(story.isTop);
 				const double bottomOffset = bottomAbs - beamTopAbs[i];
 
@@ -487,7 +487,8 @@ namespace HomeskzIfcImport::parse
 					// 小屋束（および上階の無い最上階の柱）は上下端とも当階の横架材天端
 					// （最上階は軒高）へバインドし、**上端 offset には上端（受ける材の天端）
 					// までの距離**（＝下端 offset ＋ パス長）を入れる。バウンドの差がパス長に
-					// なるので、管柱・通し柱と同じ形になる（ヘッダ冒頭「高さは…」）。
+					// なるので、管柱・通し柱と同じ形になる（ヘッダ冒頭「高さを表すのは上下端
+					// バウンドの差だけ」）。
 					cmd.topBound = StoryBoundCommand{0, currentLevel, seatTop - beamTopAbs[i]};
 				}
 				else
