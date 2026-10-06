@@ -3,8 +3,9 @@
 #	vw-update.test.sh
 #
 #	Unit tests for the macOS updater back end (scripts/vw-update.sh). They cover
-#	the machine-readable modes the plug-in actually drives — q-stable, q-dev and
-#	do-install — plus the helpers they build on (asset_url, installed_commit).
+#	the machine-readable modes the plug-in actually drives — q-stable, q-dev,
+#	do-install and q-pr-state — plus the helpers they build on (asset_url,
+#	installed_commit).
 #
 #	The script is SOURCED (its `main` is guarded, see the tail of vw-update.sh),
 #	so the real functions run in-process and we override just their outermost

@@ -1,10 +1,14 @@
-# Unit tests for the plug-in's SDK-independent code. Two families of executables:
+# Unit tests for the plug-in's SDK-independent code. Two main families of executables:
 #
-#   * the updater tests (UpdaterParse / UpdaterFlow / UpdaterRobustness + the two
-#     bundled-script suites) — the template's own SDK-free logic;
+#   * the updater tests (UpdaterParse / UpdaterFlow / UpdaterRobustness + the
+#     bundled-script suites for vw-update / vw-install / vw-uninstall, .sh and .ps1)
+#     — the template's own SDK-free logic;
 #   * the 2-phase tests (Core* / Step / Loader / Parse*) — the IFC import's
 #     SDK-free half (src/core/ + src/parse/), each linking the MinNanoStructureCore
 #     library. A new parse module gets a new vw_add_test entry here.
+#
+# plus the shell/payload boundary (Payload*), the developer tools (ci-wait,
+# tidy-cache) and the MCP server (vw-mcp-server.test.py). tests/README.md has the map.
 #
 # None of them links the Vectorworks SDK, so they build and run on any toolchain —
 # including a plain Linux runner — which is what makes the coverage job cheap.
@@ -121,8 +125,9 @@ vw_add_test(PayloadPathTests PayloadPathTests.cpp)
 vw_add_test(PayloadHostHolderTests PayloadHostHolderTests.cpp)
 
 # The instruction set (src/core/Document): the command structs' invariants and
-# validateDocument's gate for every command list that has landed so far (stories,
-# grids, floors, members, columns, rafters, roofs), plus the desired layer-stack order.
+# validateDocument's gate for the command lists, plus the pure helpers kept next to it
+# (rafter eave end, ground-beam prisms, section/plan extents, shear-wall brace polygons).
+# The desired layer-stack order is tested with the story parsing (ParseStoryTests).
 # Links the MinNanoStructureCore library (defined in the top-level CMakeLists.txt) rather than
 # compiling those sources directly, which also proves the CMake target split
 # builds and links with no SDK present. Extend it whenever a command list is
@@ -219,9 +224,9 @@ vw_add_test(CoreUnionFindTests CoreUnionFindTests.cpp CORE)
 vw_add_test(GeometryTests GeometryTests.cpp CORE FIXTURES)
 
 # Story (ストーリ) parsing (src/parse/Story) + the SDK-free desired-layer-order
-# computation (src/core/desiredStoryLayerOrder): IfcBuildingStorey -> stories sorted by
-# Elevation, beam-top offset from contained IfcColumn/IfcSlab local Z, base level/layer
-# assembly (FL + 横架材天端, top = 軒高), the span column layer name round-trip
+# computation (core::desiredStoryLayerOrder in src/core/Document): IfcBuildingStorey ->
+# stories sorted by Elevation, beam-top offset from contained IfcColumn/IfcSlab local Z,
+# base level/layer assembly (FL + 横架材天端, top = 軒高), the span column layer name round-trip
 # ({from}to{to}-柱) with its per-storey levels, and the layer stack order (共通 first,
 # top→bottom, floor to background). Exercised on synthetic STEP snippets and a real fixture; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
@@ -229,7 +234,8 @@ vw_add_test(ParseStoryTests ParseStoryTests.cpp CORE FIXTURES)
 
 # Sheet (伏図) parsing (src/parse/Sheet): which plan sheets to make and what each viewport
 # shows — the foundation plan (only when foundation elements exist), one framing plan per
-# storey and one moya plan per storey with a roof slab, the sheet numbering (1 → 2… → moya),
+# beam height (per storey when it has one; M36) and one moya plan per storey with a roof
+# slab, the sheet numbering (1 → 2… → moya),
 # the titles (床/小屋/母屋) and the cut-level filter that picks the span column layers
 # ({from}to{to}-柱) a plan crosses. Also cross-checks that every layer a viewport lists is
 # one the story commands actually create. Exercised on the checked-in fixtures; SDK-free.
@@ -273,8 +279,8 @@ vw_add_test(ParseDimensionTests ParseDimensionTests.cpp CORE FIXTURES)
 vw_add_test(ParseStructuralClassTests ParseStructuralClassTests.cpp CORE)
 
 # Floor (床板) parsing (src/parse/Floor): IfcSlab "床版" -> per-storey FL-layer slab
-# commands — the per-storey slab style and its 床仕上げ/床下地 components, the datum
-# face (Top on a normal storey, Bottom for the loft), the footprint centred on the
+# commands — the per-storey 床仕上げ/床下地 components (given to each slab; no slab
+# style), the datum face (Top on a normal storey, Bottom for the loft), the footprint centred on the
 # grid centre, the floor's Z taken straight from the IFC (so skip-floor steps survive)
 # bound to the FL level (軒高 for the loft) with that difference as its offset, and the
 # loft floor synthesised from the roof storey's floor beams when no floor slab exists.
@@ -309,7 +315,8 @@ vw_add_test(ParseMemberTests ParseMemberTests.cpp CORE FIXTURES)
 # the span layer ({from}to{to}-柱) with its to-level rule (next floor for a 管柱, +0.5 for a roof
 # post, several floors up for a 通し柱, all measured against the upper storeys' beam BOTTOMS),
 # the story-level binding of both ends (柱 = current + upper storey, 小屋束 = current twice with
-# equal offsets so the path length is not double-counted), the structural use, the column-head /
+# offsets that differ by exactly the column height — equal offsets drew a zero-height post), the
+# structural use, the column-head /
 # base hardware matched by plan position and folded into the member ID, and the 小屋束 section
 # resized to the width of the 母屋/棟木/登り梁 resting on it. Exercised on synthetic STEP snippets
 # and the checked-in fixtures; SDK-free.
@@ -382,9 +389,10 @@ vw_add_test(ParseJointTests ParseJointTests.cpp CORE FIXTURES)
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
 vw_add_test(ParseSpliceTests ParseSpliceTests.cpp CORE FIXTURES)
 
-# Column marks (src/parse/ColumnMark): the section marks (× / ／ drawn as plain lines on the
-# column's own span layer) and the plan marks (VW data tags on the independent "{to}-柱伏図記号"
-# layer). Like the joints, this module never touches IFC — the marks are derived from the finished
+# Column marks (src/parse/ColumnMark): one mark PIO per span column layer for each kind — the
+# section marks (× / ／ on the column's own span layer) and the plan marks (a symbol per column,
+# on the independent "{to}-柱伏図記号" layer); the PIO finds the columns itself when it resets.
+# Like the joints, this module never touches IFC — the marks are derived from the finished
 # column commands, so the whole thing is exercised on synthetic commands plus the fixtures; SDK-free.
 # HOMESKZ_FIXTURES_DIR points the file-based cases at tests/fixtures/.
 vw_add_test(ParseColumnMarkTests ParseColumnMarkTests.cpp CORE FIXTURES)
@@ -411,10 +419,10 @@ target_compile_definitions(ParseShearWallTests
 vw_add_test(ParseContextTests ParseContextTests.cpp CORE FIXTURES)
 
 # IFC read-result summary (src/parse/Summary): counts the homeskz-relevant entity
-# types and formats them into the dialog text the import command shows. SDK-free —
-# the counting + formatting is tested here; only the file picker and the alert
-# itself live in the SDK menu command. HOMESKZ_FIXTURES_DIR points the file-based
-# cases at the checked-in fixtures (tests/fixtures/).
+# types, and builds the import-completion dialog text and the diagnostic-log header /
+# result from the one element table (kElements). SDK-free — the counting + formatting
+# is tested here; only the dialogs themselves live on the SDK side (draw/).
+# HOMESKZ_FIXTURES_DIR points the file-based cases at the checked-in fixtures (tests/fixtures/).
 vw_add_test(ParseSummaryTests ParseSummaryTests.cpp CORE FIXTURES)
 
 # Import options (src/core/ImportOptions): the role table (which element is placed
@@ -531,9 +539,9 @@ if(NOT WIN32)
 	endif()
 endif()
 
-# macOS uninstaller (scripts/vw-uninstall.sh) — **本リポジトリで唯一「利用者のディスク上の
-# ものを消す」コード**なので、削除の安全弁（消してよい形のときだけ消す）を回帰テストで
-# 押さえる。スタブは無く、本物が temp ディレクトリに対して走る。
+# macOS uninstaller (scripts/vw-uninstall.sh) — **「利用者のディスク上のものを消す」コード**
+# （CLAUDE.md「開発の基本方針」8 の 3 か所の 1 つ）なので、削除の安全弁（消してよい形のとき
+# だけ消す）を回帰テストで押さえる。スタブは無く、本物が temp ディレクトリに対して走る。
 if(NOT WIN32)
 	find_program(BASH_PROGRAM bash)
 	if(BASH_PROGRAM)

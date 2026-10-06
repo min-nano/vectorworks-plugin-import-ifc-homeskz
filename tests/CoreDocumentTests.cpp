@@ -3,11 +3,11 @@
 //
 //	命令セット（core/Document）の検証規則 validateDocument の単体テスト。併せて、
 //	SDK 非依存のライブラリ（core/ + parse/）が無 SDK のテストハーネスから実際に
-//	リンク・実行できること——CMake のターゲット分割（HomeskzIfcCore）が正しく通ること
+//	リンク・実行できること——CMake のターゲット分割（MinNanoStructureCore）が正しく通ること
 //	——もここで担保する（buildDocument / Vec* のスモークテスト）。
 //
-//	この翻訳単位は VectorWorks SDK を一切 include せず、core/Document.h・
-//	core/Geometry.h・parse/BuildDocument.h だけに依存する。要素ごとの解析そのものは
+//	この翻訳単位は VectorWorks SDK を一切 include せず、core/Document.h・core/Geometry.h・
+//	core/Layout.h・parse/BuildDocument.h だけに依存する。要素ごとの解析そのものは
 //	隣の parse モジュールのテスト（ParseGridTests 等）で検証する。
 //
 

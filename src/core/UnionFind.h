@@ -9,8 +9,8 @@
 //	何を「つながっている」とみなすか（同一直線・距離・すき間の許容値）は**呼び出し側の
 //	述語が持つ**。要素ごとに意味の違う許容値をここへ統合しないこと。
 //
-//	【SDK 非依存】標準 C++ のみに依存（CLAUDE.md「Phase 1」。core/ は VectorWorks SDK を
-//	include しない）。純粋な計算なので無 SDK テストで検証する。
+//	【SDK 非依存】標準 C++ のみに依存（CLAUDE.md「依存の向きは厳守する」。core/ は
+//	VectorWorks SDK を include しない）。純粋な計算なので無 SDK テストで検証する。
 //
 
 #pragma once

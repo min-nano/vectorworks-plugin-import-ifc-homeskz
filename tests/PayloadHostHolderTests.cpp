@@ -153,8 +153,8 @@ TEST(a_failed_adopt_forgets_what_was_there_before)
 
 TEST(a_host_without_a_script_hook_is_accepted)
 {
-	// 古い殻（スクリプトを貸さない）でも本体は動く——フィードバックの往復だけが
-	// 使えなくなる。
+	// 古い殻（スクリプトを貸さない）でも本体は動く——同梱スクリプトに頼るもの（実機テストの
+	// 一時ファイルの片付け＝vw-update の q-pr-state）だけが使えなくなる。
 	HostHolder holder;
 	VwPayloadHost host = MakeHost(&gCallbackTarget);
 	CHECK_EQ(holder.adopt(&host), static_cast<int>(kVwPayloadOk));

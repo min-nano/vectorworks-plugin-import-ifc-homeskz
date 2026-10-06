@@ -234,8 +234,10 @@ namespace HomeskzIfcImport::core
 	PaperArea reserveTitleStrip(const PaperArea& printable, const PaperArea& strip);
 
 	// 軸組図 1 枚の外周に張り出す注釈の帯（用紙 mm・**辺ごと**）。寸法・レベル記号・図面
-	// ラベルは図の決まった辺にしか出ない（左に高さの寸法とレベル記号、下に柱の位置の寸法と
-	// 図面ラベル。parse/Dimension・draw/DrawingLabel）ので、**出ない辺には帯を取らない**。
+	// ラベル・通り芯の符号は辺ごとに出るものが違う（左に高さの寸法とレベル記号、下に柱の
+	// 位置の寸法と図面ラベル、上に上階の柱・小屋束の位置の寸法と通り芯の符号、右は右端に
+	// 根元のある縦の列とレベルの基準線の越えだけ。parse/Dimension・draw/DrawingLabel。
+	// 内訳は core::sectionBands の doc コメント）ので、**辺ごとに要るぶんだけ帯を取る**。
 	// かつては最も外の段の帯を四辺すべてに取っており、上と右に図 1 枚あたり数十 mm の
 	// 空きが出ていた（それが 2 段 × 列の数だけ効いて縮尺を 1〜2 段落としていた）。
 	// 値は core::sectionBands が命令から求める。

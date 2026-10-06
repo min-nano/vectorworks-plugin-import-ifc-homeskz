@@ -1,8 +1,9 @@
 //
 //	UpdaterFlowTests.cpp
 //
-//	Tests for the update FLOWS (src/UpdaterFlow.cpp): RunStableUpdateCheckWith
-//	and RunDevUpdateCheckWith. They are driven through a FAKE IUpdaterHost that
+//	Tests for the update FLOWS (src/UpdaterFlow.cpp): RunStableUpdateCheckWith,
+//	RunDevUpdateCheckWith and RemoteDevUpdateWith (the swap the MCP vw_update
+//	asks for, M38). They are driven through a FAKE IUpdaterHost that
 //	records every call and returns canned answers, so the entire flow — each
 //	branch and the exact dialog wording — is exercised WITHOUT the Vectorworks
 //	SDK. This is still a unit test: the flow is the unit, the fake host is a test

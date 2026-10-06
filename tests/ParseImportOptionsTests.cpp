@@ -195,7 +195,7 @@ TEST(title_block_style_reaches_the_document)
 {
 	// M28 図面枠のスタイル名は**解析側が判断を挟まず**命令セットへ写るだけ。ここが
 	// 欠けると「ダイアログで選んだのに枠が出ない」になり、絵を見ても原因が分からない
-	// （どこにも件数が出ないので、往復の PR コメントからも追えない）。
+	// （どこにも件数が出ないので、実機テストの報告からも追えない）。
 	ImportOptions options;
 	options.setTitleBlockStyle("名無し建築士事務所");
 

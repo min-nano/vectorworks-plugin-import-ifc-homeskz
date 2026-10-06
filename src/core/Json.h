@@ -121,6 +121,7 @@ namespace HomeskzIfcImport::core
 		std::vector<std::pair<std::string, Json>> fMembers;
 	};
 
-	// JSON の文字列リテラル 1 つ分（引用符と傍線を含む）。ログや手組みの応答で使う。
+	// JSON の文字列リテラル 1 つ分（引用符と傍線を含む）。ログや手組みの応答に使える形で
+	// 公開しているが、いまの呼び手はテスト（CoreJsonTests）だけ。
 	std::string jsonQuote(const std::string& text);
 } // namespace HomeskzIfcImport::core

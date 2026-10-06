@@ -6,8 +6,8 @@
 #	that ships inside every release zip, is INSTALLED alongside the plug-in, and
 #	is re-run by the NEXT release's installer to remove the one it replaces.
 #
-#	**このスイートが本当に守っているのは削除の安全性である。** ここは本リポジトリで
-#	唯一「利用者のディスク上のものを消す」コードなので、中心の検査は 2 つ:
+#	**このスイートが本当に守っているのは削除の安全性である。** ここは「利用者のディスク上の
+#	ものを消す」コード（CLAUDE.md「開発の基本方針」8 の 3 か所の 1 つ）なので、中心の検査は 2 つ:
 #
 #	  * **消してよいものだけを消す** — フォルダ名が一致し、かつ中に殻がある
 #	    ときだけ。`Plug-Ins` そのものや無関係なフォルダを名指しされても消さない。

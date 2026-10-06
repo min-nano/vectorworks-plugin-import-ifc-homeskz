@@ -105,9 +105,9 @@ VW_PAYLOAD_EXPORT int vw_payload_init(const VwPayloadHost* host)
 			return kVwPayloadErrVcom;
 		}
 
-		// **殻から借りた道具を本体の中へ預ける**（draw/HostServices.h）。同梱スクリプトの
-		// 実行と殻の ID は、本体からは手が届かない——前者は同梱物の在り処が要り（本体が
-		// 読まれるのは一時ディレクトリの複製）、後者は殻にしかコンパイルされていない。
+		// **殻から借りた道具を本体の中へ預ける**（draw/HostServices.h）。借りるのは同梱
+		// スクリプトの実行だけで、本体からは手が届かない——同梱物の在り処が要るが、本体が
+		// 読まれるのは一時ディレクトリの複製だから。
 		// **写して持つ**のは境界の決めごとどおり（PayloadHostHolder.h）。
 		draw::HostServices services;
 		if (gHost.canRunScripts())

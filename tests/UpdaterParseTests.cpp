@@ -519,7 +519,8 @@ TEST(resolve_current_dev_build_ignores_a_none_branch)
 
 // ---------------------------------------------------------------------------
 // DevBuildBranch / FindDevBuildForBranch — pick the SAME branch's next build.
-// 実機フィードバックの往復（docs/DEV-NOTES.md M23）が、修正版のビルドを待つときに使う。
+// 取り込みコマンドのついでの確認（Silent。src/UpdaterFlow.cpp）と MCP の vw_update（M38。
+// RemoteDevUpdateWith）が、同じブランチの新しいビルドを拾うときに使う（M23 で入れた）。
 // ---------------------------------------------------------------------------
 
 TEST(dev_build_branch_reads_the_ci_title)
