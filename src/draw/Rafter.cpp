@@ -28,7 +28,7 @@
 //	    命令から求める純計算）。
 //	  * **高さはストーリバウンドが支配する。** 構造材ツールは両端をストーリレベルへバインド
 //	    して高さを決め、offset を「レベル Z − オブジェクト Z」で再計算して上書きすることさえ
-//	    ある（draw/StructuralMember.h 冒頭）。軸組ツール時代の「配置行列の絶対 Z」は使えない
+//	    ある（draw/Column.cpp 冒頭）。軸組ツール時代の「配置行列の絶対 Z」は使えない
 //	    ので、垂木レベル（"n-垂木" レイヤのレベル）からの offset を parse が命令に載せる。
 //
 //	【パスに高さを持たせない】勾配も高さも **SetObjectStoryBound の offset だけ**で表し、パスは
@@ -77,7 +77,7 @@ namespace HomeskzIfcImport::draw
 			// パス＝下面中央線の軒先→棟を通る 2 点の曲線（横架材・柱と共通。
 			// draw/StructuralMember の CreatePath）。**平面座標だけを渡す**——高さも勾配も
 			// ストーリバウンドの offset が決め、構造材 PIO はその解決結果から 3D のパスを
-			// 自分で作る（冒頭「パスに傾斜を持たせない」／draw/StructuralMember.h 冒頭
+			// 自分で作る（冒頭「パスに高さを持たせない」／draw/StructuralMember.h 冒頭
 			// 「パスは 2D で渡す」）。以前は両端とも軒先の下面 Z を入れていたが、**その Z は
 			// PIO に受け取られていなかった**（M27）。
 			bool pathAppended = false;
@@ -102,7 +102,7 @@ namespace HomeskzIfcImport::draw
 			spec.startBound.offset = eave.offset;
 			spec.endBound = rafter.endBound;
 			// 【潰れ検出】描き上がりの長さ＝パスの水平長。**垂木も両端の Z が等しい**（勾配は
-			// ストーリバウンドの offset 差が表す。冒頭「パスに傾斜を持たせない」）ので、
+			// ストーリバウンドの offset 差が表す。冒頭「パスに高さを持たせない」）ので、
 			// 横架材と同じく**PIO が実際に持っているパスの両端の距離**で測る
 			// （draw/StructuralMember.h の StructuralExtentKind）。以前はここが OIP の
 			// 「スパン」で、**そのパラメータは実機に無い**ため潰れ検出も下の自己修復も
@@ -138,7 +138,7 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			// 失敗の内訳を数え込む（診断。drawRafters が完了ダイアログへ載せる）。
+			// 失敗の内訳を数え込む（診断。drawRafters が診断へ載せる）。
 			failures.record(result);
 			return true;
 		}

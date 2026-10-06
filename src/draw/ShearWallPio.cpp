@@ -418,8 +418,8 @@ namespace HomeskzIfcImport::draw
 		// （最悪は何も描かれない）——実機でしか起きないうえ、症状からは原因が
 		// 「解析が値を出していない」のか「PIO に届いていない」のか区別できない。
 		// 登録済みの名前を並べておけば、そのどちらかが 1 行で分かる。
-		// ログが開いていなければ何もしない（dev ビルドと HOMESKZ_IFC_TRACE のときだけ。
-		// core/Trace.h）。
+		// ログが開いていなければ何もしない（ログが開いているのは取り込みの最中だけ——
+		// 利用者の編集で走るリセットでは書かない。core/Trace.h）。
 		void TraceParameters(const VWParametricObj& pio)
 		{
 			static bool logged = false;
@@ -560,7 +560,7 @@ namespace HomeskzIfcImport::draw
 			TraceParameters(self);
 
 			// 両端（柱芯）をローカルへ落とす。線分 PIO のローカル X が壁の向き、
-			// +Y が表側になる（ヘッダ「座標系」）。
+			// +Y が表側になる（ファイル冒頭「座標系」）。
 			VWTransformMatrix toWorld;
 			self.GetObjectToWorldTransform(toWorld);
 
@@ -585,7 +585,7 @@ namespace HomeskzIfcImport::draw
 
 			// 軸組内法の高さ。**ここが取れなくても伏図の記号は描く**——記号は平面だけで
 			// 決まるので、高さの取りこぼしで図面から耐力壁が丸ごと消えるのは割に合わない
-			// （ヘッダ「絵を全部止めない」）。
+			// （Extensions/ExtShearWall.h「絵を全部止めない」）。
 			//
 			// 上端は**内法の両端（柱の内側面）ごとに持つ**（登り梁の下では左右で違う）。
 			// 終点側が下端以下なら始点側と同じとみなす——終点側のパラメータが無かった頃に
@@ -602,7 +602,7 @@ namespace HomeskzIfcImport::draw
 
 			if (draw::PioParamString(self, kParamShearKind) == kShearKindPanel)
 			{
-				// 面材。表＝+Y・裏＝−Y（ヘッダ「座標系」）。離れが分からなければ記号の
+				// 面材。表＝+Y・裏＝−Y（ファイル冒頭「座標系」）。離れが分からなければ記号の
 				// 大きさで代用する（伏図で線が壁芯に重なって読めなくなるのを避ける）。
 				const std::string side = draw::PioParamString(self, kParamShearPanelSide);
 				const bool front = side != kShearSideBack;

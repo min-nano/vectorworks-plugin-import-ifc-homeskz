@@ -2,8 +2,8 @@
 //	draw/ProgressDialog.h
 //
 //	VectorWorks の進捗ダイアログへ橋渡しする ProgressReporter（core/Progress.h）の実装。
-//	インポートの入口（Extensions/ExtMenu）がこれを 1 つ作り、Phase 1（parse::buildDocument）と
-//	Phase 2（draw::executeDocument）の両方へ同じものを渡す。
+//	取り込み 1 周（draw/ImportRun の runImportRound）がこれを 1 つ作り、Phase 1
+//	（parse::buildDocument）と Phase 2（draw::executeDocument）の両方へ同じものを渡す。
 //
 //	【なぜ要るか】インポートの体感時間はほぼすべて描画で、その間 VectorWorks は再描画も
 //	イベント処理もしないため**フリーズしたように見える**。進捗ダイアログは (1) いま何を

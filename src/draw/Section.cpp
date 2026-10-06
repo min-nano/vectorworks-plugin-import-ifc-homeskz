@@ -14,7 +14,8 @@
 //	                                        ConfigureViewport）で仕上げる。
 //	  * gSDK->SetObjectVariable(h, ObjectVariable::Viewport…, …) … 断面の見え方（下記）
 //	  * VWViewportObj::SetRenderType(renderFinalHiddenLine) … レンダリング（下記）
-//	  * draw/DrawUtil の PlaceViewport   … できたビューポートを測って用紙のマスへ置く
+//	  * draw/DrawUtil の MeasureViewport / MoveViewportBy
+//	                                    … できたビューポートを測って用紙のマスへ置く
 //	                                        （GetObjectBounds ＋ MoveObject。M18）
 //	  * draw/DrawingLabel の drawSectionLabel … 1 枚ごとに真下の中央へ図面ラベル（図面
 //	                                        タイトル）を注釈として置く
@@ -409,7 +410,7 @@ namespace HomeskzIfcImport::draw
 		std::size_t oversized = 0;
 		std::string oversizedProbe;
 		// 測った外形（注釈込み）のいちばん大きいもの（用紙 mm）。マスとの差が詰めしろになる
-		// ので、割り付けの記録に添える（core::describeSectionLayout の行の後ろ）。
+		// ので、割り付けの記録に添える（割り付けの記録 layoutRecord の行の後ろ）。
 		core::Vec2 largest;
 		// 断面寸法データタグ（M13）。伏図と同じ受け渡し・同じ実装（draw/Tag）。
 		const ObjectHandles emptyHandles;

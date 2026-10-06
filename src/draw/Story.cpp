@@ -33,7 +33,7 @@
 //	（ヘッダの reorderStoryLayers 参照）。
 //
 //	実描画（ストーリ高さ・レベルのバインド・単位）はローカルの VectorWorks で目視確認する
-//	（docs/DEV-NOTES.md M3「ローカル確認」）。
+//	（docs/DEV-NOTES.md M3）。
 //
 
 #include "PluginPrefix.h"

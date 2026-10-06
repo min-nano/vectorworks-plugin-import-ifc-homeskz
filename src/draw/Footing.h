@@ -46,7 +46,7 @@ namespace HomeskzIfcImport::draw
 
 	// 底盤（slab 命令）をスラブオブジェクトとして描く。配置先レイヤ（"F-底盤"）が無い命令は
 	// スキップする。実際に配置できた枚数を返す。手順は床板（draw/Floor）と同じで、共通部分は
-	// draw/DrawUtil（SetComponents / SetSlabDatum / ResolveSlabStyle）にある。
+	// draw/DrawUtil（SetComponents / SetSlabDatum）にある。
 	//
 	// **地中梁（modifiers）を持つ底盤は台形プリズムを 2 回作る**: 削り取りモディファイア
 	// （プロファイル群としてスラブへ渡し、底盤を clip する）と、可視の 3D ソリッド（削り取った

@@ -41,7 +41,7 @@
 //	既定構築子）。**3D の標準ビュー（standardViewTop = 7）ではない**——伏図記号のような
 //	2D 部品だけのシンボルは 3D ビューでは何も映らない。
 //
-//	【いちばん下の行だけシンボルではない ── 図面枠スタイル（M28）】最後の 1 行は
+//	【図面枠の行はシンボルではない ── 図面枠スタイル（M28）】役割の行の次の 1 行は
 //	**図面枠（タイトルブロック）のスタイル**を選ぶ行で、選択肢の集め方だけが他と違う:
 //	`BuildList(kSymDefNode)` が返すシンボル定義のうち、**`GetSymbolDefSubType` が
 //	552（図面枠のスタイル）のもの**を並べる——他の行が「0＝普通のシンボル定義」を並べるのと
@@ -63,7 +63,7 @@
 //	を打ち込む欄を 2 つ置く（IFC に垂木の寸法が無いので決め打ちしていた 45×45 を差し替える。
 //	core/ImportOptions.h の rafterWidth / rafterHeight）。選ぶものではなく数を打つので、
 //	シンボルの行の仕組み（チェック・候補・サムネイル）には乗せず、**文字の入力欄
-//	（VWEditTextCtrl。draw/Feedback の PR 番号の欄と同じ作法）を DDX で受ける**。読むのは
+//	（VWEditTextCtrl）を DDX で受ける**。読むのは
 //	core::parseRafterSize（全角の数字も読む）で、読めない・範囲外の値は**前回の値のまま**
 //	取り込み、そのことをログへ残す（Note）。初期値は前回の値（初回は 45×45）。
 //
@@ -115,8 +115,8 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// 【行の数】役割の数 ＋ 図面枠スタイルの 1 行 ＋ 寸法規格の 1 行（冒頭「いちばん下の
-		// 行だけ…」「その下の 1 行は寸法規格」）。どちらも役割の 2 列の下に置く。
+		// 【行の数】役割の数 ＋ 図面枠スタイルの 1 行 ＋ 寸法規格の 1 行（冒頭「図面枠の
+		// 行は…」「その下の 1 行は寸法規格」）。どちらも役割の 2 列の下に置く。
 		constexpr std::size_t kTitleBlockRow = core::kSymbolRoleCount;
 		constexpr std::size_t kDimensionRow = core::kSymbolRoleCount + 1;
 		constexpr std::size_t kRowCount = core::kSymbolRoleCount + 2;
@@ -216,8 +216,8 @@ namespace HomeskzIfcImport::draw
 			}
 		};
 
-		// 候補は 2 組ある（冒頭「いちばん下の行だけシンボルではない」）——普通のシンボル
-		// 定義（シンボルを置く行）と、図面枠スタイル（いちばん下の行）。**元の一覧は同じ
+		// 候補は 2 組ある（冒頭「図面枠の行はシンボルではない」）——普通のシンボル
+		// 定義（シンボルを置く行）と、図面枠スタイル（図面枠の行）。**元の一覧は同じ
 		// 1 つ**で、subType で拾い分けるだけ。
 		struct SymbolResources
 		{
@@ -234,7 +234,7 @@ namespace HomeskzIfcImport::draw
 		// VectorWorks 自身がプラグインオブジェクトのスタイルとして持っている定義
 		// （図面枠・データタグ・図面ラベル・立断面指示線・グラフィック凡例・木質構造材…）
 		// まで並ぶ。シンボルを置く行の選択肢に出しても置けるものではないので外し、
-		// **図面枠のスタイルだけは図面枠の行の選択肢に使う**（冒頭「いちばん下の行だけ…」）。
+		// **図面枠のスタイルだけは図面枠の行の選択肢に使う**（冒頭「図面枠の行は…」）。
 		//
 		// 切り分けは `GetSymbolDefSubType`——**0 なら普通のシンボル定義、0 以外はその
 		// プラグインオブジェクトのスタイル**（値は PIO の型。図面枠は 552）。フォルダ名では
@@ -352,7 +352,7 @@ namespace HomeskzIfcImport::draw
 			return core::symbolRoleLabel(roleAt(row));
 		}
 
-		// 取り込み設定ダイアログ 1 枚。行は**役割の数 ＋ 図面枠スタイルの 1 行**で、
+		// 取り込み設定ダイアログ 1 枚。行は**役割の数 ＋ 図面枠スタイルと寸法規格の 2 行**で、
 		// 役割の増減は core/ImportOptions.h の表に従う（**イベントマップだけはコンパイル時の
 		// ID が要る**ので、下の static_assert が「表を増やしたらここも増やせ」と教える）。
 		//
@@ -591,8 +591,7 @@ namespace HomeskzIfcImport::draw
 					}
 					for (std::size_t k = 0; k < fMergeRows.size(); ++k)
 						fMergeChecks[k].SetState(fMergeStates[k]);
-					// 初期値は自分でも入れる（DDX が流し込む前提に寄りかからない。
-					// draw/Feedback の PR 番号の欄と同じ）。
+					// 初期値は自分でも入れる（DDX が流し込む前提に寄りかからない）。
 					fRafterWidth.SetText(fRafterWidthText);
 					fRafterHeight.SetText(fRafterHeightText);
 				}
@@ -607,7 +606,7 @@ namespace HomeskzIfcImport::draw
 			}
 
 			// チェックは DDX で受ける。名前のプルダウンも DDX で受けられる（サムネイルの
-			// 選択だけは OnDefaultButtonEvent で読む。冒頭「選択を読む時機」）。
+			// 選択だけは OnDefaultButtonEvent で読む。冒頭「選択は名前で引き取る」）。
 			void OnDDXInitialize() override
 			{
 				for (std::size_t row = 0; row < kRowCount; ++row)
@@ -678,7 +677,7 @@ namespace HomeskzIfcImport::draw
 			DEFINE_EVENT_DISPATH_MAP;
 
 		private:
-			// **その行の候補**（冒頭「いちばん下の行だけシンボルではない」）。ここだけが
+			// **その行の候補**（冒頭「図面枠の行はシンボルではない」）。ここだけが
 			// 行による違いで、以降の作り方・埋め方・読み取りは全行で同じ。
 			const CandidateList& Candidates(std::size_t row) const
 			{
@@ -1015,7 +1014,8 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// 集められなければ組まない（呼び出し側は周ごと止める。draw/SettingsDialog.h）。
+			// 集められなければ組まない（呼び出し側は ImportOptions の既定で続ける。
+			// draw/Feedback.cpp の runTestRound）。
 			AddNote(note, "図面からシンボル・図面枠・寸法規格を集められませんでした");
 			return false;
 		}

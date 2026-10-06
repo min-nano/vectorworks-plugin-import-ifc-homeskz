@@ -7,7 +7,7 @@
 //
 //	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（立上り・底盤）→
 //	draw/Floor → draw/Member → draw/Column → draw/Rafter → draw/Roof → draw/Symbol
-//	（アンカーボルト・床束・火打・仕口）→ draw/ColumnMark（記号）→ draw/ShearWall（耐力壁）→
+//	（アンカーボルト・床束・火打・仕口・継手）→ draw/ColumnMark（記号）→ draw/ShearWall（耐力壁）→
 //	draw/Sheet（伏図）→
 //	draw/Section（軸組図）へディスパッチする。伏図・軸組図のビューポート注釈に載る断面寸法
 //	データタグ（draw/Tag）は、それぞれのフェーズの中で置かれる。
@@ -53,7 +53,7 @@ namespace HomeskzIfcImport::draw
 		DrawCounts counts;
 
 		// **区間計測を空にしてから始める**（開発ビルドだけ。draw/Verify.h）。積みっぱなしに
-		// すると、実機フィードバックの 2 周目以降が 1 周目ぶんを抱えた数字になる。
+		// すると、実機テストの 2 周目以降が 1 周目ぶんを抱えた数字になる。
 #if VW_DRAW_TIMING
 		core::drawTiming().clear();
 #endif
@@ -145,8 +145,8 @@ namespace HomeskzIfcImport::draw
 		// M8 柱を描く。配置先の span レイヤ（"1to2-柱" 等）も drawStories が作るので、必ず
 		// その後に置く（レイヤが無い命令はスキップされる）。横架材の後なのは、柱が横架材と
 		// 同じ構造材ツール／同じスタイル更新の作法を採るため揃えているだけで依存は無い。
-		// **柱ハンドルを記録する**——伏図記号のデータタグがこれを関連付け先として引く
-		// （立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
+		// **柱ハンドルを記録する**——取り込み後の測り直し（recheckColumns。開発ビルドだけ）が
+		// これを引く（立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
 		ObjectHandles columnHandles;
 		if (beginPhase("柱を描画しています…", document.columns.size(), core::DrawPhase::Columns))
 		{
@@ -157,8 +157,6 @@ namespace HomeskzIfcImport::draw
 
 		// M6 屋根組を描く。垂木 → 野地板 の順。配置先の "n-垂木" / "n-野地板" レイヤも
 		// drawStories が作るので、必ずその後に置く（レイヤが無い命令はそれぞれがスキップする）。
-		// 以降のマイルストーンで footing … と命令ごとに draw モジュールへのディスパッチを足し
-		// ていく（docs/DEV-NOTES.md）。
 		if (beginPhase("垂木を描画しています…", document.rafters.size(), core::DrawPhase::Rafters))
 		{
 			std::string note;
@@ -265,9 +263,10 @@ namespace HomeskzIfcImport::draw
 			addNotes(info);
 		}
 
-		// **最後に柱を測り直す。** 生成直後は入っていたのに、あとの要素を描くあいだに長さ 0 へ
-		// 潰れる事故を追っている（docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。ここが
-		// 全要素・伏図・軸組図まで済んだ唯一の地点なので、**いつ潰れたか**はここでしか分け
+		// **最後に柱を測り直す。** 「生成直後は入っていたのに、あとの要素を描くあいだに長さ 0 へ
+		// 潰れたのでは」を切り分けるために M27 で足した（答えは生成直後から潰れていた。原因は
+		// 解消済みで、いまは再発の見張り。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+		// ここが全要素・伏図・軸組図まで済んだ唯一の地点なので、**いつ潰れたか**はここでしか分け
 		// られない。**測って診断へ載せるだけ**で、直しはしない（解かせ直しは実機で 46 本中
 		// 0 本しか直らず、打ち切ってある）。
 		//
@@ -282,8 +281,8 @@ namespace HomeskzIfcImport::draw
 			addNotes(info);
 		}
 		// **耐力壁も最後に測り直す**（描かずに内法を求め直すだけ）。取り込み後の最初の
-		// 編集で耐力壁が柱幅の半分ずれる不具合を追っている（draw/ShearWallPio.h の
-		// probeShearWall）。
+		// 編集で耐力壁が柱幅の半分ずれる不具合（M19。#161 で直した）を追うために足し、
+		// 再発の見張りとして残してある（draw/ShearWallPio.h の probeShearWall）。
 		{
 			std::string info;
 			recheckShearWalls(shearWallHandles, &info);

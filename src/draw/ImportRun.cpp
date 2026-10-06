@@ -76,7 +76,7 @@ namespace HomeskzIfcImport::draw
 							 (gSDK->IsCurrentlyBuildingAnUndoEvent() ? "yes" : "no"));
 		}
 
-		// 診断ログを開き、見出しを書く（docs/DEV-NOTES.md M19「短い完了・厚いログ」）。
+		// 診断ログを開き、見出しを書く（docs/DEV-NOTES.md「診断・完了報告の方針（M15/M19）」）。
 		// **取り込みのたびに必ず開く**——完了ダイアログがログをそのまま見せて「困ったら
 		// これを貼る」経路にした以上、要るときに限って無いのでは意味がない（以前は
 		// dev ビルドと HOMESKZ_IFC_TRACE 指定時だけだった）。開けなくても黙って続ける
@@ -134,7 +134,8 @@ namespace HomeskzIfcImport::draw
 			if (!settingsNote.empty())
 				core::trace::note("設定ダイアログ: " + settingsNote);
 			core::trace::note(parse::formatImportOptions(options));
-			// 所要時間は**トレースとは別に**測る（ログを開けなくても完了ダイアログに出す）。
+			// 所要時間は**トレースとは別に**測る（ログの結果行と実機テストの報告に出す。
+			// 完了ダイアログには出さない——M19）。
 			const auto started = std::chrono::steady_clock::now();
 			LogUndoState("start");
 
@@ -189,8 +190,8 @@ namespace HomeskzIfcImport::draw
 	// その絶対パス（UTF-8）を outPath に入れて true を返す。キャンセルや取得失敗は
 	// false（呼び出し側は何も描かず静かに終える）。
 	//
-	// VCOM の作法（Info「VCOM」）: VCOMPtr に IID を渡して生成し、ポインタが有効かを
-	// if で確かめ、各呼び出しの VCOMError を kVCOMError_NoError と比較する。選択結果は
+	// VCOM の作法（SDK リファレンスの Info「VCOM」）: VCOMPtr に IID を渡して生成し、ポインタが
+	// 有効かを if で確かめ、各呼び出しの VCOMError を kVCOMError_NoError と比較する。選択結果は
 	// IFileIdentifier（0 番目）から GetFileFullPath で受け取り、TXString の
 	// operator const char*()（UTF-8）で std::string へ写す。
 	bool chooseIfcFile(std::string& outPath)
@@ -271,7 +272,7 @@ namespace HomeskzIfcImport::draw
 	// 中で continue する）は従来どおりで、ここへ来るのは「そこでも吸収できなかった異常」だけ。
 	//
 	// **呼び出し側は failed を見るだけでよい。** 本番のコマンドは結果ダイアログへ、テストの
-	// 周は「この周は送らない」の判断へ使う——どちらも try/catch を書かずに済む。
+	// 周は「報告を書かずに失敗として返す」の判断へ使う——どちらも try/catch を書かずに済む。
 	ImportRound runImportRound(const std::string& ifcPath, const core::ImportOptions& options,
 							   bool settingsShown, const std::string& settingsNote,
 							   const std::string& prologue)

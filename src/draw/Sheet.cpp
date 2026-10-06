@@ -484,8 +484,9 @@ namespace HomeskzIfcImport::draw
 		const auto addNote = [note](const std::string& text) { AppendLine(note, text); };
 		const auto addInfo = [outInfo](const std::string& text) { AppendLine(outInfo, text); };
 
-		// M18 割り付けの結果。**縮尺は「印刷可能領域・凡例の幅・建物の広がり」の 3 つだけで
-		// 決まる**ので、その 3 つと結果の縮尺を残す——思ったより小さい（大きい）ときに、
+		// M18 割り付けの結果。**縮尺は「印刷可能領域・凡例の幅・建物の広がり」の 3 つで
+		// 決まる**（M31 からは寸法の帯 band も効くが、この行には出していない）ので、その 3 つと
+		// 結果の縮尺を残す——思ったより小さい（大きい）ときに、
 		// どれが効いたのかをローカル確認の場で確かめられる（実際に「1/50 のはずが 1/75 に
 		// なる」の切り分けで要った。docs/DEV-NOTES.md M18）。
 		//

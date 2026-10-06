@@ -16,19 +16,21 @@
 //	  * 図面に**そのスタイルが無ければ 1 つも置かない**——スタイル無しの図面枠は「線だけの
 //	    空の枠」になり、図面を汚すだけで誰の役にも立たない。置かずに診断へ残すほうが良い。
 //	  * スタイルは `SetPluginObjectStyle` で関連付けるだけでは**中身が流れない**ので、
-//	    全部置いてから `UpdateStyledObjects` を 1 回呼ぶ（横架材・柱と同じ作法。
+//	    全部置いてから `UpdateStyledObjects` を 1 回呼ぶ（横架材・柱にスタイルを当てていた
+//	    頃と同じ作法。
 //	    [SDK リファレンス「Parametric Objects」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Parametric%20Objects.md)
 //	    の「プラグインスタイル」）。
 //
 //	【★PIO の登録名は `"Title Block Border"`（実機で確定）】SDK リファレンスの `Findings/`
-//	に載っているのは「図面枠スタイルはシンボル定義の `GetSymbolDefSubType` が 552 になる」
+//	に当時載っていたのは「図面枠スタイルはシンボル定義の `GetSymbolDefSubType` が 552 になる」
 //	ことだけで
 //	（[Findings「Symbols」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Symbols.md)）、
 //	**その型番号から登録名を引く呼び出しは知られていない**。そこで当初は候補を順に試して
 //	通った名前を採る形にし（PIO のパラメータ名を universal 名 → ローカライズ名の順で引き
 //	直すのと同じ作法。draw/DrawUtil.h の ResolveParamName）、**実機フィードバックの
 //	round 1 で `"Title Block Border"` に確定した**（VW 2026 / macOS。PR #129）ので候補は
-//	畳んである。**この知見は SDK リファレンス側へ送ること**（CLAUDE.md「ドキュメントの分担」）。
+//	畳んである。この知見はその後 SDK リファレンス側にも載った（Findings「Parametric Objects」の
+//	「スタイルは SDK だけで作れる」の表に `Title Block Border` ＝ 552）。
 //	置けなかった件数と登録名は診断へ出すので、別の環境で違っていれば次の周で分かる。
 //
 //	【置き場所は測って決める】図面枠の挿入点が枠のどこを指すかは分からないので、

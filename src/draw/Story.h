@@ -42,8 +42,8 @@ namespace HomeskzIfcImport::draw
 	//
 	// 【なぜ要るか】伏図ビューポートは**ドキュメントのレイヤ重ね順で描かれる**ので、
 	// 床（"n-FL"）・野地板が柱・梁より前面にあると覆い隠してしまう。希望順は
-	// 「共通（通り芯）を最前面 → 最上階→最下階 → 床・野地板は最背面」で、計算そのものは
-	// SDK 非依存の core::desiredStoryLayerOrder が持つ（無 SDK テスト済み）。
+	// 「共通（通り芯）を最前面 → 伏図記号・耐力壁 → 最上階→最下階 → 床・野地板は最背面」
+	// で、計算そのものは SDK 非依存の core::desiredStoryLayerOrder が持つ（無 SDK テスト済み）。
 	//
 	// 【ドキュメントの重ね順を並べ替える（per-viewport の上書きではない）】
 	// **ISDK には InsertObjectAfter / InsertObjectBefore があり、レイヤは図面のオブジェクト

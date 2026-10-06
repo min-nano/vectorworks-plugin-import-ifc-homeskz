@@ -15,7 +15,7 @@
 //	  ClassNameToID / GetObjectClass / CreateLine、VWSymbolObj、
 //	  VWParametricObj（パラメータの読み）。
 //	実際の見え方（線の太さ・シンボルの向き・リセットの契機）はローカルの VectorWorks で
-//	目視確認する（docs/DEV-NOTES.md M12「ローカル確認」）。
+//	目視確認する（docs/DEV-NOTES.md M12）。
 //
 
 #include "PluginPrefix.h"

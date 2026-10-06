@@ -14,8 +14,8 @@
 //	【なぜ分けるのか】実描画はローカルの VectorWorks でしか確認できない（CLAUDE.md
 //	「テスト方針」）。そこで draw/ の各要素は、書いた値（ストーリバウンドの record・PIO の
 //	パラメータ・PIO が持つパス）を**書いた直後に読み戻して命令と引き比べ**、食い違った
-//	件数と 1 件目の実測を診断ログへ持ち帰るようにしてある。これは**実機フィードバックの
-//	往復で絵の破綻を数字から手繰るための足場**であって（docs/DEV-NOTES.md M27「柱が
+//	件数と 1 件目の実測を診断ログへ持ち帰るようにしてある。これは**実機テストで絵の
+//	破綻を数字から手繰るための足場**であって（docs/DEV-NOTES.md M27「柱が
 //	長さ 0 で描かれる」がまさにこれで解けた）、**利用者が本番ビルドで受け取るものではない**
 //	——読み戻しはパラメータの走査を伴うので取り込みのたびに数百〜数千回走り、出てくる文言も
 //	開発者にしか意味が無い。
@@ -26,7 +26,8 @@
 //	  囲む   … 検算そのもの（描き上がった両端の絶対 Z と命令の引き比べ）・その件数・
 //	           実測を文字列にする道具（`DescribeSizeParams` / `DescribeStoryBound` /
 //	           `DescribePioPath` / `DescribeParamsContaining`）・取り込み後の測り直し
-//	           （`recheckColumns`）・パスの観測（`PathProbe`）。
+//	           （`recheckColumns` / `recheckShearWalls`）・パスの観測（`PathProbe`）・
+//	           描き上がった実体の測り直し（`MeasureDrawnMember` / `PioPathChord`）。
 //	  囲まない … **読み戻した結果が絵を変えるもの**。`SetParamRealChecked`（実数で入らな
 //	           ければ文字列で入れ直す）・`CreatePath` の `NurbsSetPt3D`（足した点を入れ直す）・
 //	           データタグのレイアウトの取り直し（draw/Tag）・シンボルが置けたことを確かめて

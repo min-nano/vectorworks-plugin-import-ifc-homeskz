@@ -84,7 +84,8 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// 「ビューポートでフィルタ」の保存先（draw/Legend.h 冒頭・docs/DEV-NOTES.md）。
+		// 「ビューポートでフィルタ」の保存先（draw/Legend.h 冒頭・SDK リファレンス Findings
+		// 「Graphic Legends」）。
 		//
 		// **`'GrLg'` を文字リテラルで書かない**のは、多文字リテラルが処理系定義で警告の
 		// 対象になるため。値は 'G'=0x47 / 'r'=0x72 / 'L'=0x4C / 'g'=0x67 を並べたもので、

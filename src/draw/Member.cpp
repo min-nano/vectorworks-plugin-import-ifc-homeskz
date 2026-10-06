@@ -90,7 +90,7 @@ namespace HomeskzIfcImport::draw
 			// パス＝天端中央線の始端→終端を通る 2 点の曲線（柱・垂木と共通。
 			// draw/StructuralMember の CreatePath）。**平面座標だけを渡す**——高さも勾配も
 			// 上下端のストーリバウンドが決め、構造材 PIO はその解決結果から 3D のパスを
-			// 自分で作る（冒頭「パスに傾斜を持たせない」／draw/StructuralMember.h 冒頭
+			// 自分で作る（冒頭「パスに高さを持たせない」／draw/StructuralMember.h 冒頭
 			// 「パスは 2D で渡す」）。以前は両端とも天端 Z を入れていたが、**その Z は
 			// PIO に受け取られていなかった**（M27）ので、同じ高さをバウンドとパスの
 			// 2 か所へ書く形をやめた。
@@ -152,8 +152,8 @@ namespace HomeskzIfcImport::draw
 			// 呼ぶ——は向きを問わず起こりうるが、**本番ビルドでも件数が出る**
 			// （`StructuralFailures::bound` ＝「高さ基準を図面へ書けなかった材 N 本」。
 			// draw/Verify.h の外）ので、黙って見逃すことにはならない。**潰れの検出そのものは
-			// 開発ビルドでは引き金に依らず走る**（draw/StructuralMember の measureDrawn）ので、
-			// 武装を外しても診断は 1 つも失われない。
+			// 開発ビルドで走る**（draw/StructuralMember の MeasureDrawnMember）ので、自己修復を
+			// 外しても診断は 1 つも失われない。
 			// 【高さの検算】パスから Z を外した以上、高さを決めるのはバウンドだけになった。
 			// その解決が意図とずれても本数にもスパンにも出ないので、**描き上がった両端の
 			// 絶対 Z を読み戻して命令と引き比べる**（draw/StructuralMember.h の
@@ -186,7 +186,7 @@ namespace HomeskzIfcImport::draw
 			// 断面寸法データタグの関連付け先として記録する（draw/Tag が引く）。
 			outObject = result.object;
 
-			// 失敗の内訳を数え込む（診断。drawMembers が完了ダイアログへ載せる）。
+			// 失敗の内訳を数え込む（診断。drawMembers が診断へ載せる）。
 			failures.record(result);
 			return true;
 		}
@@ -217,8 +217,7 @@ namespace HomeskzIfcImport::draw
 				++drawn;
 
 			// **命令インデックス → ハンドル**の対応表へ記録する（断面寸法データタグが
-			// 関連付け先として引く。立上り → 壁結合・柱 → 伏図記号と同じ受け渡し方式。
-			// draw/ObjectHandles.h）。
+			// 関連付け先として引く。立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
 			if (handles != nullptr && object != nil)
 				handles->table().handles.emplace(index, object);
 		}

@@ -238,7 +238,7 @@ namespace HomeskzIfcImport::draw
 		// VWFC の setter は名前が通らないと例外を投げるので、まとめて 1 つの try に入れると
 		// **最初の 1 つで残り全部と ResetObject までが飛ぶ**——PIO は図面に残るのに絵が
 		// 1 つも描かれない、という「命令はあるのに見えない」最悪の形になる（M19 のローカル
-		// 確認で実際にこうなった。docs/DEV-NOTES.md M19「パラメータが 1 つ通らないと…」）。
+		// 確認で実際にこうなった。docs/DEV-NOTES.md M19）。
 		bool PlaceOne(const core::ShearWallCommand& wall, std::size_t& outUnwritten,
 					  MCObjectHandle& outObject)
 		{

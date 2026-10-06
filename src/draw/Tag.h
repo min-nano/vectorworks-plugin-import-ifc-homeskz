@@ -60,8 +60,7 @@
 //	【SDK 型を公開するヘッダ】ビューポートのハンドルを引数に取るため、このヘッダは
 //	draw/DrawUtil.h・draw/StructuralMember.h と同じく**SDK 型を公開する共通ヘッダ**で、
 //	自分で PluginPrefix.h を（DrawUtil.h 経由で）取り込む。したがって**要素ごとの draw/*.h から
-//	include してはならない**（あちらは SDK を持たない翻訳単位＝Extensions/ExtMenu からも
-//	include されるため。DrawUtil.h 冒頭の約束）。呼び出し元は draw/Sheet.cpp と
+//	include してはならない**（DrawUtil.h 冒頭の約束）。呼び出し元は draw/Sheet.cpp と
 //	draw/Section.cpp の 2 つだけ。
 //
 //	【データタグの作法（ローカル確認を重ねて定まった順）】
@@ -94,7 +93,7 @@
 //	     **ローカル確認で正しい位置に出ることを確認済み。**
 //
 //	実描画（タグの見え方・レイアウトの効き・注釈空間での位置）はローカルの VectorWorks で
-//	目視確認する（docs/DEV-NOTES.md M13「ローカル確認」）。
+//	目視確認する（docs/DEV-NOTES.md M13）。
 //
 
 #pragma once

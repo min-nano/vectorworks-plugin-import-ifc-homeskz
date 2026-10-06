@@ -9,9 +9,9 @@
 //	たどり着けないためである（src/PayloadHost.h「必ず複製してから読む」）。だから殻から
 //	借りる。借りたものは `payload/PayloadMain.cpp` が init のときにここへ預ける。
 //
-//	【いまの使い手】**無い**（M38）。唯一の使い手だった実機フィードバックの投稿
-//	（vw-feedback）を外した。口は境界（VwPayloadHost::runBundledScript）ごと残してある
-//	——本体から同梱スクリプトを走らせたくなったときに、境界の形を変えずに済むように。
+//	【いまの使い手】実機テストの一時ファイルの片付けだけ（draw/Feedback.cpp の
+//	CleanUpClosedBranches が `vw-update q-pr-state` で PR の状態を尋ねる）。M38 までの
+//	使い手だった実機フィードバックの投稿（vw-feedback）は M38 で外した。
 //
 //	【なぜ写して持つか】境界を越えて来たものは受け取った側がその場で写す——これは
 //	この仕組み全体の決めごとで、破ると実機で Vectorworks ごと落ちる

@@ -10,7 +10,7 @@
 //	【尋ねるのは取り込みの前だけ】ダイアログを出してよいのは取り込みが始まる前だけで、
 //	終わったあとは**何も出さない**（失敗したときを除く）。取り込みは 1 分以上かかるので、
 //	終わったところに確認が待っていると席を離れられない（docs/DEV-NOTES.md M23
-//	「取り込みのあとに操作を残さない」）。
+//	「取り込みのあとに人の操作を残さない」）。
 //
 
 #include "PluginPrefix.h"
@@ -74,7 +74,8 @@ namespace HomeskzIfcImport::draw
 		// （CLAUDE.md「開発の基本方針」8）。
 		//
 		// **ここは実機テストの周だけ。** 本番の取り込みは開いている図面へ描くのが仕事で、
-		// この関数群を呼ばない（draw/Feedback.h・CLAUDE.md M25）。
+		// この関数群を呼ばない（draw/Feedback.h・CLAUDE.md「本番の取り込みコマンドに実機テストを
+		// 書かない」）。
 
 		// 絶対パスから IFileIdentifier を作る（作れなければ空の VCOMPtr）。
 		VectorWorks::Filing::IFileIdentifierPtr FileIdFor(const std::string& path)
@@ -226,7 +227,8 @@ namespace HomeskzIfcImport::draw
 		// vw-token が持つ）に尋ねる。**分からなければ消さない。**
 		//
 		// 消したフォルダに記憶のテンプレートがあったら、記憶から外す（無いファイルを
-		// 開きに行かせない）。次の周は 1 周目と同じく、いま開いている図面から採る。
+		// 開きに行かせない）。次のメニューの周は 1 周目と同じく、いま開いている図面から採る
+		// （MCP の周は template を渡さないと走らない。core::feedbackRoundKind）。
 		std::string CleanUpClosedBranches(core::FeedbackSession& session, const std::string& branch)
 		{
 			const std::string root = TempPath(core::kScratchRootName);
