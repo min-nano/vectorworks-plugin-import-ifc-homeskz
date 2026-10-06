@@ -1436,10 +1436,19 @@ Claude Code が MCP ブリッジ越しに**、更新・再起動・取り込み�
          "Bash(gh run view:*)", "Bash(gh run list:*)"
        ],
        "ask": ["mcp__vectorworks__vw_restart", "mcp__vectorworks__vw_call"],
-       "deny": ["Bash(git push --force:*)", "Bash(git push -f:*)"]
+       "deny": [
+         "Bash(git push --force:*)", "Bash(git push -f:*)",
+         "Bash(git push * --force*)", "Bash(git push * -f*)", "Bash(git push *+*)"
+       ]
      }
    }
    ```
+
+   `deny` の後ろ 3 つは `allow` の `git push -u origin:*` の抜け道を塞ぐもの。許可は前方一致
+   なので、`git push -u origin <branch> --force`・`… -f`・`git push -u origin +<branch>`
+   （先頭の `+` は強制更新）は頭の 2 つに当たらず、`allow` だけに当たって確認なしで通って
+   しまう。文字列の照合なので万全ではない（`main` への force push は GitHub のブランチ保護で
+   禁じておく）。
 
 **ローカルでの PR の見方。** 購読が無いので、CI は `scripts/ci-wait.sh` をバックグラウンドで
 投げてその終了で知り（クラウドと同じ）、レビューとコメントは**周の区切りごとに**

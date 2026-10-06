@@ -23,6 +23,9 @@
       "Bash(gh run view:*)", "Bash(gh run list:*)"
     ],
     "ask": ["mcp__vectorworks__vw_restart", "mcp__vectorworks__vw_call"],
-    "deny": ["Bash(git push --force:*)", "Bash(git push -f:*)"]
+    "deny": [
+      "Bash(git push --force:*)", "Bash(git push -f:*)",
+      "Bash(git push * --force*)", "Bash(git push * -f*)", "Bash(git push *+*)"
+    ]
   }
 }
