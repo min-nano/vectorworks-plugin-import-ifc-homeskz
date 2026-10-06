@@ -768,7 +768,8 @@ namespace HomeskzIfcImport::draw
 			// **描く先が無いなら取り込まない。** 記憶（テンプレートの場所・閉じ残した図面）は
 			// 書き残すので、直してからもう一度実行すれば続きの周として走る。
 			(void)core::writeFeedbackSession(sessionPath, session);
-			core::trace::note(preparation);
+			// 準備の行は結末の文言に載せる（ここではまだ取り込みのログを開いていないので、
+			// ログへは書けない）。
 			return Failure(allowDialogs, parse::TestRoundOutcome::DocumentFailed, preparation);
 		}
 		if (automatic)
@@ -789,14 +790,17 @@ namespace HomeskzIfcImport::draw
 		const ImportRound round =
 			runImportRound(ifcPath, options, settingsShown, settingsNote, preparation);
 		// **描き上がりは、成否にかかわらず保存して覚える**（SaveRoundDocument）。
-		const std::string saved = SaveRoundDocument(session, session.round + 1);
-		core::trace::note(saved);
+		// ★保存の結果は**報告か結末の文言に載せる**——取り込みのログは runImportRound が
+		// 閉じ終えているので、ここで trace へ書いても捨てられる（保存できなかったことが
+		// どこにも残らなかった）。
+		const std::string saved = "後始末: " + SaveRoundDocument(session, session.round + 1);
 		if (round.failed)
 		{
 			(void)core::writeFeedbackSession(sessionPath, session);
 			// **取り込みの完了文言（round.body）は使わない**——このコマンド自身の言葉で言う
-			// （parse/Feedback.h「実機テストの周の結末」）。
-			return Failure(allowDialogs, parse::TestRoundOutcome::ImportFailed, {});
+			// （parse/Feedback.h「実機テストの周の結末」）。報告は書かない周なので、保存の
+			// 結果はここで添える。
+			return Failure(allowDialogs, parse::TestRoundOutcome::ImportFailed, saved);
 		}
 
 		// 報告を組む（無 SDK 側。parse/Feedback）。
@@ -814,7 +818,7 @@ namespace HomeskzIfcImport::draw
 		// いるかを引き比べる（parse/Feedback の restoredStateLine）。
 		material.baselineKnown = session.baselineRecorded;
 		material.baselineLayers = session.baselineLayers;
-		material.preparation = preparation + (preparation.empty() ? "" : "\n") + "後始末: " + saved;
+		material.preparation = preparation + (preparation.empty() ? "" : "\n") + saved;
 		const std::string report =
 			parse::formatTestRoundReport(material, round.document, round.counts);
 
