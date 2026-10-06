@@ -13,7 +13,7 @@ C++ 側と同じ発想で SDK ／ネットワーク抜きに単体テストし�
 
 いずれも「実行（プラグイン・手動）ではディスパッチが走り、テストでは `source`
 （dot-source）して個々の関数を直接呼ぶ」という**シーム**をスクリプト末尾に用意して
-あります（`UpdaterFlow.cpp` の `IUpdaterHost` に対応するスクリプト版）。
+あります（C++ のフローの `IUpdaterHost`（`src/UpdaterHost.h`）に対応するスクリプト版）。
 
 ```sh
 # vw-update.sh
@@ -40,6 +40,8 @@ if ($MyInvocation.InvocationName -ne '.') {
 | `api_get` | `curl` で GitHub REST API | フィクスチャファイルを返す（オフラインも再現） |
 | `download` | `curl` でアセット取得 | ローカルの zip を配置（失敗も再現） |
 | `installed_commit` | `PlistBuddy`（macOS 専用） | 既定コミットを返す（「バンドル無し → none」の枝は本物を直接検証） |
+| `installed_branch` / `installed_shell_id` | `PlistBuddy`（macOS 専用） | 既定値（空）を返す |
+| `codesign` / `xattr` | Gatekeeper の再署名・隔離属性の除去（macOS 専用） | 何もしない |
 
 > **PowerShell のハーネスは、エラーの扱いをローカルと CI で変えている。** これは
 > 「CI では緩めない」という `VW_REQUIRE_SCRIPT_TESTS` の方針をそのまま延長したもので、
@@ -73,7 +75,7 @@ if ($MyInvocation.InvocationName -ne '.') {
 **インストーラ（`vw-install.*`）のテストはさらに実物寄り**です。差し替えるのは JSON 抽出
 （`jval`）と Gatekeeper のツール（`codesign` / `xattr`）と `PlistBuddy` だけで、配置そのもの
 ——展開済みディレクトリの走査・差し替え・インストーラ自身の除外——は本物が temp ディレクトリ
-に対して動きます。要となる検査は次の 3 つです。
+に対して動きます。要となる検査は次の 5 つです。
 
 * **列挙されていないファイルも入ること**（フィクスチャに `<name>.brand-new` を混ぜてある。
   これが落ちたら、次にファイルが増えたとき利用者が手で入れ直す羽目になる）。
@@ -83,6 +85,7 @@ if ($MyInvocation.InvocationName -ne '.') {
 * **プラグインのフォルダに入り、入れ子にならないこと**（アップデータは「いま自分が
   読み込まれたフォルダ」を渡してくるので、無条件に足すと更新のたびに深くなる）。
 * **入れる前に前の版が取り除かれること**（前の版にしか無かったファイルが残らない）。
+
 更新後の**再起動**はスクリプトの仕事ではありません。Vectorworks 自身に頼むので
 （SDK の `CloseAllFilesAndQuitVectorworks`。`src/Updater.cpp` の `Restart`）、テストで
 押さえるのは**いつ再起動を尋ねるか**——殻まで変わったときだけで、本体だけなら尋ねずに
@@ -94,9 +97,8 @@ if ($MyInvocation.InvocationName -ne '.') {
 `tests/vw-update.Tests.ps1`）と、**列が無い古い出力も読めること**
 （`tests/UpdaterParseTests.cpp` の `ParseDevBuilds`）。
 
-各スクリプトに残る OS 固有の面（`.sh` の osascript ダイアログ・`codesign` / `xattr` の
-再署名・`PlistBuddy`、`.ps1` の `%APPDATA%` 既定パス）は、その OS でしか動かないため、
-C++ 側が `dladdr` / `gSDK` のグルーを対象外にしているのと同様、手動／e2e に委ねます。
+各スクリプトに残る OS 固有の面は、その OS でしか動かないため手動／e2e に委ねます
+（一覧は[「それでも残る部分」](updater.md#2-スクリプトの-os-固有部分)）。
 必要なツール（`.sh`: python3 / unzip / zip、`.ps1`: `pwsh`）が無い**ローカル**環境では、
 ハーネス自体が自動で SKIP、あるいは CMake がそのテストを登録しません（`scripts/lint.sh` の
 `skip` と同じ方針）。

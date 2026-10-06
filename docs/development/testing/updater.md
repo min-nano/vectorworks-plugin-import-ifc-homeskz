@@ -8,9 +8,10 @@
 2. **`UpdaterFlowTests`** … 更新フロー本体（`RunStableUpdateCheckWith` /
    `RunDevUpdateCheckWith`、`src/UpdaterFlow.cpp`）を、**フェイクの `IUpdaterHost`**
    越しに丸ごと動かして、分岐とダイアログ文言まで検証します（後述）。**3 つの入口の
-   違い**（`UpdateCheckKind`）もここで押さえます——手で押した確認（`Manual`）は最新・
-   オフラインを必ず伝えてブランチ選択を出す、取り込みのついで（`Silent`）は黙って同じ
-   ブランチのビルドだけ拾って尋ねる。MCP の `vw_update` が通る `RemoteDevUpdateWith`（M38）は
+   違い**（`UpdateCheckKind` の `Manual` / `Silent` と、MCP の入口）もここで押さえます
+   ——手で押した確認（`Manual`）は最新・オフラインを必ず伝えてブランチ選択を出す、
+   取り込みのついで（`Silent`）は黙って同じブランチのビルドだけ拾って尋ねる。MCP の
+   `vw_update` が通る `RemoteDevUpdateWith`（M38）は
    **ダイアログを 1 枚も出さず結末を値で返す**こと（名指ししたブランチの最新を入れること・
    殻まで変わったら降ろさず `NeedsRestart` を返すこと）も押さえます。加えて **どの入口も
    「いま」をディスクに入っているビルドで決める**こと（`q-dev` の `installed=` /
@@ -22,8 +23,8 @@
    食わせ、境界外アクセスや未定義動作を起こさないこと、そして「戻り値の `url` は必ず
    非空」「`EvaluateStable` が更新を提示するのは整形式のときだけ」「`ResolveDevSelection`
    は範囲外を返さない」といった**契約**が保たれることを検証します。とりわけ
-   **ASan / UBSan 有効時**（[テストの実行](../../../tests/README.md#テストの実行)）に真価を発揮し、リファクタが招くメモリ不正や、GitHub 側
-   仕様変更で崩れた入力への耐性を守ります（`tests/UpdaterRobustnessTests.cpp`）。
+   **ASan / UBSan 有効時**（[テストの実行](running.md)）に真価を発揮し、リファクタが招く
+   メモリ不正や、GitHub 側仕様変更で崩れた入力への耐性を守ります（`tests/UpdaterRobustnessTests.cpp`）。
 4. **`UpdaterScriptTests`** … 同梱スクリプト `scripts/vw-update.sh`（macOS）の
    **機械可読バックエンド**（`q-stable` / `q-dev` / `do-install` と、その土台の
    `asset_url` / `installed_commit` / `installed_branch`）を、`curl` / `plutil` を差し替えて
@@ -59,8 +60,32 @@
    `tests/vw-uninstall.Tests.ps1`）。**スタブはありません**——削除そのものが対象なので、
    本物が temp ディレクトリに対して走ります。
 
-以降の節（`IUpdaterHost` によるフロー全体のテスト・残る部分）と
+以降の節（判断とグルーの切り分け・`IUpdaterHost` によるフロー全体のテスト・残る部分）と
 [スクリプトのテスト](updater-scripts.md)は、すべてこのアップデータ系統の話です。
+
+## 判断とグルーの切り分け（`UpdaterParse.h` / `Updater.cpp`）
+
+`Updater.cpp` は残った
+
+- 自分自身のバイナリ位置の解決（`dladdr` / `GetModuleFileName`）
+- スクリプトの起動（`popen` / `_popen`）
+- ネイティブダイアログの表示（`gSDK->AlertInform` / `AlertQuestion`、`VWDialog`）
+- 再起動と本体の取り下ろし（`gSDK->CloseAllFilesAndQuitVectorworks` / `ReleaseLoadedPayload`）
+
+という **プラットフォーム／SDK 固有のグルーだけ** を担います。
+
+`UpdaterParse.h` の関数は 4 層に分かれます。
+
+| 層 | 関数 | 役割 |
+|----|------|------|
+| スクリプト出力の解析 | `Trim` / `ValueOf` / `ParseDevBuilds` | `key=value` 行・`build\t…` 行の解析 |
+| コマンドライン生成 | `ShellQuote` / `CmdQuote` | `/bin/sh`・cmd.exe 用の安全なクオート |
+| 自パスからの導出 | `Mac*FromBinary` / `Win*FromPath/Dir` | 同梱スクリプト・Plug-Ins フォルダのパス導出 |
+| **更新フローの判断** | `EvaluateStable` / `ResolveCurrentDevBuild` / `DevSwitchCandidates` / `FindDevBuildForBranch` / `ResolveDevSelection` / `InstallReportedOk` / `InstallErrorText` / `InstalledShellId` / `NeedsRestartAfterInstall` | 「更新があるか」「**いま入っているのはどのブランチのどのビルドか**」「切替候補はどれか」「同じブランチの新しいビルドはどれか」「選択→ビルド」「インストール成否」「**再起動が要るか、本体の読み直しで済むか**」 |
+
+最後の「更新フローの判断」層は、もともと `Updater.cpp` の `gSDK` 呼び出しの合間に
+インラインで書かれていた分岐です。純粋関数として切り出したことで単体テストの対象になり、
+`Updater.cpp` 側は判断結果を受けてダイアログを出すだけになりました。
 
 ## フロー全体のテスト（インターフェイス／フェイク方式）
 
@@ -76,8 +101,8 @@
 | `Restart` | SDK の `CloseAllFilesAndQuitVectorworks(true, true)` を呼ぶ | 呼び出し回数を数える／成否を返す |
 | `DropLoadedPayload` | 載っている本体を降ろす（次の操作で新しいものが読み直される） | 呼び出し回数を数える／成否を返す |
 
-フロー本体（`RunStableUpdateCheckWith` / `RunDevUpdateCheckWith`、`src/UpdaterFlow.cpp`）
-は `IUpdaterHost&` だけに依存し、SDK ヘッダを一切 include しません。よって
+フロー本体（`RunStableUpdateCheckWith` / `RunDevUpdateCheckWith` / `RemoteDevUpdateWith`、
+`src/UpdaterFlow.cpp`）は `IUpdaterHost&` だけに依存し、SDK ヘッダを一切 include しません。よって
 
 - **本番** は `Updater.cpp` が `gSDK` / `popen` / VWFC で実装した本物の host を渡し、
 - **テスト** は呼び出しを記録して canned な回答を返すフェイク host を渡す
