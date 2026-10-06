@@ -93,7 +93,7 @@ namespace HomeskzIfcImport::draw
 		// ヘッダ冒頭の ★「登録名は候補から実地に決める」。
 		std::string plugin;
 
-		std::size_t drawn = 0;	// 置けた図面枠
+		std::size_t drawn = 0; // 置けた図面枠
 		std::size_t failed = 0; // どの候補名でも PIO を生成できなかったシートレイヤ
 		std::size_t placeLeft = 0; // 外形を測れず、用紙の中心へ寄せられなかった
 		std::size_t frontLeft = 0; // 最背面へ回せず、図を覆っているかもしれない

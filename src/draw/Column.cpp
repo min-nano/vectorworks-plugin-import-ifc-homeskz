@@ -286,7 +286,7 @@ namespace HomeskzIfcImport::draw
 		if (document.columns.empty())
 			return;
 
-		std::size_t measured = 0;  // 測れた本数（両端の絶対 Z を取得できた本数）
+		std::size_t measured = 0; // 測れた本数（両端の絶対 Z を取得できた本数）
 		std::size_t collapsed = 0; // そのうち実体が 0 だった本数
 		std::size_t differs = 0;   // 実体はあるが命令と食い違う本数
 		std::string probe; // 1 本目の実測（どのパラメータが何を返しているか）

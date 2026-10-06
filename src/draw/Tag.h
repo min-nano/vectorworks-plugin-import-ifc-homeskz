@@ -115,7 +115,7 @@ namespace HomeskzIfcImport::draw
 
 	struct TagCounts
 	{
-		std::size_t drawn = 0;	// 注釈に置けたタグ
+		std::size_t drawn = 0; // 注釈に置けたタグ
 		std::size_t failed = 0; // PIO を生成できなかった／注釈に入れられなかった
 		std::size_t unassociated = 0; // 関連付け先の横架材ハンドルが無かった
 		std::size_t layoutFailed = 0; // タグレイアウトを構築できなかった（断面寸法が空になる）

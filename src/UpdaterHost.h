@@ -139,16 +139,16 @@ namespace HomeskzIfcImport
 		NoNewBuild, // そのブランチに、いまインストールされているのと別のビルドは無い
 		Installed, // インストールして本体をアンロードした（次の呼び出しから新しい本体が動く）
 		NeedsRestart, // インストールしたが殻まで変わった（再起動するまで反映されない）
-		Failed,		  // インストールできなかった・アンロードできなかった（message に理由）
-		CheckFailed,  // 確認そのものができなかった（オフライン等）
+		Failed, // インストールできなかった・アンロードできなかった（message に理由）
+		CheckFailed, // 確認そのものができなかった（オフライン等）
 	};
 	struct RemoteUpdateResult
 	{
 		RemoteUpdateOutcome outcome = RemoteUpdateOutcome::NoNewBuild;
-		std::string branch;	  // 探したブランチ
+		std::string branch; // 探したブランチ
 		std::string previous; // インストール前にインストールされていたビルドの sha
-		std::string commit;	  // Installed / NeedsRestart のとき、インストールしたビルドの sha
-		std::string message;  // 利用者に表示する 1 行（Failed / CheckFailed / NeedsRestart）
+		std::string commit; // Installed / NeedsRestart のとき、インストールしたビルドの sha
+		std::string message; // 利用者に表示する 1 行（Failed / CheckFailed / NeedsRestart）
 	};
 	RemoteUpdateResult RemoteDevUpdateWith(IUpdaterHost& host, const std::string& shellBranch,
 										   const std::string& shellCommit,
