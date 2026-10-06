@@ -418,9 +418,11 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 
 ## CI の完了を待つ
 
-**待機は必ず `scripts/ci-wait.sh`（PR・ブランチの CI）/ `scripts/ci-debug.sh wait`（`ci-debug`）を
+**待機は `scripts/ci-wait.sh`（PR・ブランチの CI）/ `scripts/ci-debug.sh wait`（`ci-debug`）を
 `run_in_background: true` で投げて行う。** 完了した瞬間に exit するので、その終了通知が完了
-通知になる（PR 購読では CI の成功は配信されない）。
+通知になる。クラウドのセッションで PR を購読していれば、その PR の CI の完了は成功も失敗も
+購読で届くので、それを合図にしてもよい（ローカルのセッションには購読が無く、`ci-debug` の
+run は PR の CI ではないので、どちらもスクリプトで待つ）。
 
 - **`sleep` で待たない。待機ループをその場で手書きしない。** どちらも「CI は終わっているのに
   気付かない」事故を実際に起こしている。

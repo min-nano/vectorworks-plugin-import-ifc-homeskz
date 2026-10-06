@@ -102,3 +102,34 @@
   本当の自由端が大半だが、**柱の断面から 100mm 以上外れた端**（実測の最小はみ出しは 80〜145mm）
   が各モデルに十数件ある。取り付く相手を柱・横架材のどちらとも言えていないので、必要になったら
   「何にも取り付いていない端」を診断へ出して実物と突き合わせる。
+- **殻のファイルのコメントに古い記述が残っている（次に殻を触る PR で直す）。** 直すと殻の ID
+  （`VW_SHELL_ID`）が変わり、利用者に再起動を求めるので、殻を直す用事のある PR に相乗りさせる
+  （PR #198 の点検で見つけたもの）:
+  - `CMakeLists.txt` … 「殻の sources」の「メニュー 2 つと PIO 2 つ」→ メニュー 4（うち dev だけ 2）・
+    パレット 1・PIO 2。冒頭の README「プラグイン識別子」→ `docs/development/identifiers.md`。
+    「the plug-in links it」「draw/ is compiled into the plug-in target」→ 本体（payload）。
+  - `src/ModuleMain.cpp` … README「SDK ドキュメント」→ `docs/development/sdk-docs.md`。
+    「確認の入口は 2 つ」→ 4 つ（取り込み・アップデータ・実機テスト・MCP の `vw_update`）。
+  - `src/Updater.h` … 「入口は次の 2 つだけ」→ 4 つ。節名の無い `docs/DEVELOPMENT.md` →
+    `docs/development/auto-update/restart.md`（`src/Updater.cpp` も同じ）。
+  - `src/UpdaterHost.h` … 副作用の列挙に `DropLoadedPayload` が抜けている（実際は 6 つ）。
+    `Silent` の説明が取り込みのついでだけ。
+  - `src/UpdaterParse.h` … 「Updater.cpp」→ `UpdaterFlow.cpp`（2 か所）。`ResolveDevSelection` の
+    説明が `FindDevBuildForBranch` の上に付いている。`FindDevBuildForBranch` の用途はいま
+    `Silent` の確認と `RemoteDevUpdateWith`。
+  - `src/PayloadHost.cpp` … 冒頭の「印は std::filesystem で分岐しない」と、`StampOf`（std::filesystem を
+    使わない）の説明が食い違う。
+  - `src/PayloadAbi.h` … 殻に残るものの列挙に、パレットの登録と MCP から頼まれる更新・再起動が無い。
+  - `src/Extensions/ExtMenu.cpp` … 「入れられなかった・殻まで変わった、のどちらかで取り込みへ
+    進まない」→ 進まないのは入れられなかったときだけ（**実装が正**。`src/UpdaterHost.h` の戻り値）。
+  - `src/Extensions/ExtMcpPalette.cpp` … M38 で消えた `ExtFeedbackPalette.cpp` への参照。
+    `ExtMcpPalette.h` … M24「隠れたパレットは止まらない」→ M25。
+  - `src/Extensions/ExtTestMenu.h` … 「図面の戻し」「取り込み前へ戻してから」→ テンプレートから
+    開いた新しい図面へ描く（M39）。
+  - `src/Extensions/ExtMcpMenu.h` … メニュー名（dev は「MCP ブリッジを表示… (Dev)」）。参照先の
+    CLAUDE.md「ビルド・リント・リリース」→「命名」と `docs/development/identifiers.md`。
+  - `src/Extensions/ExtShearWall.h` … 「dev ビルド（と HOMESKZ_IFC_TRACE 指定時）は診断ログへ書く」→
+    取り込みの最中に書く。`draw/ShearWall` の `applyShearWallLayerScale` → `draw/Sheet` の
+    `applyPlanLayerScale`。
+  - `src/Extensions/ExtColumnMark.cpp` / `ExtShearWall.cpp` … どのページにも無い節 M12「ローカル確認」
+    「追随の契機」（parse/ draw/ に倣って番号だけにする）。

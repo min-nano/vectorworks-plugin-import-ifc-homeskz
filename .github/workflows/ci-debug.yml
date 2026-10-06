@@ -176,8 +176,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      # 完了通知の保険。PR 購読中のセッションには「CI 失敗」とコメントは配信される
-      # が、成功は配信されない。scripts/ci-debug.sh のバックグラウンド待機が主たる
+      # 完了通知の保険。ci-debug の run は PR の CI ではないので、PR 購読の通知は
+      # 当てにできない。scripts/ci-debug.sh のバックグラウンド待機が主たる
       # 通知経路で、これはその待機プロセスが失われた場合（セッション再開など）に
       # 結果へ追いつくための冗長化。既定はオフ（notify_pr が空なら投稿しない）。
       - name: Comment the result on a pull request
