@@ -1,17 +1,19 @@
 # SDK 依存コードの静的解析（`tidy-mac` / `tidy-windows`）
 
 **SDK 依存コードの静的解析（`build.yml` の `tidy-mac` / `tidy-windows`）** — 同じ
-`.clang-tidy` ルールを、SDK がないとコンパイルできない側（`src/draw/*.cpp` と
-`ModuleMain.cpp` / `Extensions/ExtMenu.cpp` / `Updater.cpp`）にも適用します。
-`src/draw/` はグロブで拾うため、要素を追加しても対象漏れが起きません
-（`core/` `parse/` を `lint.yml` がグロブで拾うのと同じ理屈）。
+`.clang-tidy` ルールを、SDK がないとコンパイルできない側（`src/draw/*.cpp`・
+`src/Extensions/*.cpp`・`src/payload/*.cpp` と `ModuleMain.cpp` / `Updater.cpp` /
+`PayloadHost.cpp` / `PayloadSession.cpp`。一覧は `scripts/clang-tidy-sdk.sh`）にも
+適用します。`src/draw/` `src/Extensions/` `src/payload/` はグロブで拾うため、要素や PIO を
+追加しても対象漏れが起きません（`core/` `parse/` を `lint.yml` がグロブで拾うのと同じ理屈）。
 
 - **`tidy-mac`** — `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` で生成した compile
   database に対して clang-tidy を実行し、`#if GS_MAC` 側の分岐を解析します。
 - **`tidy-windows`** — Visual Studio ジェネレータは compile database を出力しない
   ため、解析専用に **Ninja + clang-cl** でビルドせずに再コンフィグして database を
-  生成し、`#if GS_WIN` 側の分岐（`Updater.cpp` の `Widen` / `Narrow` /
-  `OwnModulePath` / `RunBundledScript`）を解析します。
+  生成し、Windows 側の分岐（`Updater.cpp` の `#if GS_WIN` にある `Widen` / `Narrow` /
+  `OwnModulePath` / `RunBundledScript`、`PayloadHost.cpp` の `#if defined(_WIN32)` 側）を
+  解析します。
 
 macOS が `GS_MAC`、Windows が `GS_WIN` の分岐をそれぞれ担当するので、両者を合わせて
 **すべての行**が clang-tidy でチェックされます。
@@ -48,15 +50,16 @@ PCH が使えず（`VW_ENABLE_PCH`）、1 翻訳単位ごとに SDK のアンブ
 （`-DVW_BUILD_CHANNEL`。PR は `dev`、`main` は `stable`）。既定の `both` のままだと
 1 ソースにつき database のエントリが 2 つでき、clang-tidy が同じファイルを 2 回解析して
 所要時間が倍になっていました（Windows で約 9 分）。チャンネル間の差は `VW_DEV_BUILD`
-の定義だけ（`ModuleMain.cpp` / `Extensions/ExtMenu.cpp` の 3 分岐）で、PR が dev 側、
+の定義だけ（`#ifdef VW_DEV_BUILD` で囲んだ dev だけのコード——MCP ブリッジ・実機テスト・
+検算など。`src/draw/Verify.h` の `VW_DRAW_VERIFY` もこれから決まります）で、PR が dev 側、
 `main` が stable 側を解析するので、パイプライン全体では両方が解析されます。
 
 バージョンについて: SDK 非依存の `lint.yml` と `tidy-mac` は clang 18 に固定して
-います。`tidy-windows` だけは**ランナーイメージに入っている LLVM**（現在 20 系）を
-そのまま使います — ランナーの MSVC 標準ライブラリヘッダが「Clang 20 以降」を要求する
+います。`tidy-windows` だけは**ランナーイメージに入っている LLVM**（20 以上であることを
+ジョブが確かめる）をそのまま使います — ランナーの MSVC 標準ライブラリヘッダが「Clang 20 以降」を要求する
 （`static_assert` と Clang 20 の組み込み関数を使う）ため、clang-cl / clang-tidy が
 それを解析できる新しさである必要があるからです。以前は `choco install llvm` で最新版を
-入れ直していましたが、実測すると**既に入っているものの入れ直しに 31 秒**かかるだけだった
+入れ直していましたが、実測すると**既に入っているものの入れ直しに毎回 11〜31 秒**かかるだけだった
 ので、インストールはやめてバージョンが 20 以上であることを確認するだけにしました
 （将来ランナーの LLVM が MSVC ヘッダの要求より古くなったら、パースエラーの山ではなく
 その旨のメッセージで落ちます）。Ninja も同様にイメージに入っているものを使います。
@@ -71,6 +74,6 @@ PCH が使えず（`VW_ENABLE_PCH`）、1 翻訳単位ごとに SDK のアンブ
 > **このジョブの所要時間を測るときの注意:** clang-tidy ステップの実時間は、同じ作業
 > でも**ランナーによって 1.4 倍ほど振れます**（同一の 1 翻訳単位が、あるホストでは
 > 25 秒、別のホストでは 37 秒）。したがって**2 つの run を比べてもチューニングの
-> 良し悪しは分かりません**。実際この節の内容は、その誤りによって一度「修正」され、
+> 良し悪しは分かりません**。実際 `tidy-windows` の構成は、その誤りによって一度「修正」され、
 > 元に戻された経緯があります。比較するときは A と B を**同一ジョブ内で交互に**測り、
 > 最後にもう一度 A を測ってドリフトの対照とすること。

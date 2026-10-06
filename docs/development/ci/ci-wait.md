@@ -28,9 +28,10 @@ Bash(run_in_background: true):
 | conclusion | 意味 |
 | --- | --- |
 | `success` | 全チェックが成功（skipped / neutral を含む） |
-| `failure` | 1 つ以上が失敗・キャンセル・timed_out。**cancelled も失敗扱い**（新しい push で古い run が消えたものを green と取り違えないため） |
+| `failure` | 1 つ以上の結論が `failure` / `timed_out` / `cancelled` / `action_required` / `startup_failure` / `stale`。**cancelled も失敗扱い**（新しい push で古い run が消えたものを green と取り違えないため） |
 | `no-checks` | 猶予（既定 180 秒）を過ぎてもチェックが 1 件も登録されなかった。**「CI が始まってすらいない」を成功と読まない**ための結果 |
 | `head-moved` | `--no-follow` 指定時に、待っている間に head が動いた（古い結果は返さない） |
+| `unknown` | 全チェックが終わったが、結論が上の成功側にも失敗側にも当たらないものがある（GitHub が見慣れない結論を返したときなど）。成功とは読まない |
 | `timed-out-waiting` / `api-error` | **CI の失敗ではなく待機側が見届けられなかった**。CI 自体はまだ動いているかもしれない（同じ行に合流用のコマンドが出る） |
 
 状態が変わらなくても 5 分ごとに生存行が stderr に出るので、固まっているのか単に長いのかは

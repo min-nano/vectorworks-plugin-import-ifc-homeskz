@@ -17,7 +17,7 @@
 
 `do-install` は zip を展開したあと、その直下にある `vw-install.sh` /
 `vw-install.ps1` を `--machine --from <展開先> --name <プラグイン名> --plugins-dir <先>`
-で呼び、**その機械可読な出力（`installed-shell=` / `ok` / `error=`）をそのまま
+（PowerShell 版は `-Machine -From … -Name … -PluginsDir …`）で呼び、**その機械可読な出力（`installed-shell=` / `ok` / `error=`）をそのまま
 プラグインへ流します**（途中で組み直すと、将来キーが増えたときに落としてしまうため）。
 zip にインストーラが無い＝この仕組みより前のリリースへ当たったときだけ、同梱スクリプト
 自身の予備の配置へ落ちます。

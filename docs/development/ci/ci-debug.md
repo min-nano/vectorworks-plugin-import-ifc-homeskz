@@ -42,7 +42,7 @@ dev プレリリースとして公開される・ccache / SDK キャッシュを
 書き込み権限のあるトークン（PAT など）がある環境では、起動と待機をまとめた
 `scripts/ci-debug.sh run --mode build --platform windows` が使えます。ローカルの
 Claude Code では `gh auth login` 済みならそれで足ります（`ci-common.sh` が `gh auth token`
-を使う。「ローカルセッションの準備」）。
+を使う。[「ローカルセッションの準備」](../live-test/local-session-setup.md)）。
 
 | mode | 用途 | `--args` |
 | --- | --- | --- |
@@ -56,7 +56,7 @@ Claude Code では `gh auth login` 済みならそれで足ります（`ci-commo
 SDK 非依存コード専用（速い）。`--ref` は既定で現在のブランチ。
 
 **`build` / `compile-one` は本番 CI の代わりになりません。** どちらも clang-tidy を通さずに
-コンパイルするだけなので、`build-mac` / `build-windows` が落とす lint（例:
+コンパイルするだけなので、`tidy-mac` / `tidy-windows` が落とす lint（例:
 `readability-uppercase-literal-suffix`）は素通りします。「ci-debug の build が通ったから CI も
 通る」と報告しないこと。SDK 依存コードの最終確認は PR の CI が緑になったことで行います。
 
