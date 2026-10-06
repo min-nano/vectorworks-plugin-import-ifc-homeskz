@@ -8,9 +8,8 @@
 //	ツールチェインだけでコンパイル・単体実行・テストできる（CLAUDE.md「Phase 1」）。
 //	この宣言も core/Document.h しか依存しない。
 //
-//	現状は parse/Loader で IFC を読み（テキスト→STEP グラフ）、parse/Story（M3）・
-//	parse/Grid（M1）・parse/Floor（M5）・parse/Rafter / parse/Roof（M6）を呼んで Document を
-//	組み立てる。残りの要素は対応マイルストーンで足していく。
+//	parse/Loader で IFC を読み（テキスト→STEP グラフ）、要素ごとの parse モジュールを呼んで
+//	Document を組み立てる。呼ぶ順とその理由は parse/BuildDocument.cpp にある。
 //
 
 #pragma once
@@ -27,9 +26,6 @@ namespace HomeskzIfcImport::parse
 	// IFC ファイルを解析して命令セットを返す。フェーズ境界は値で返す（例外をフェーズ外へ漏ら
 	// さない）。1 要素の欠損で全体を止めず、解決できないものはスキップ・フォールバックで済ま
 	// せる。
-	//
-	// TODO(M7〜): 横架材（M7）以降の要素ごとの parse モジュールを呼び、Document を
-	// さらに肉付けする（docs/DEV-NOTES.md）。
 	core::Document buildDocument(const std::string& ifcPath);
 
 	// 進捗を報告しながら解析する。読み込みと要素ごとの解析を core/Progress の

@@ -30,7 +30,7 @@
 //	（draw/Footing。M9）と共有する**——違うのは層の中身だけ。
 //
 //	実描画（天端の与え方・厚み・バインドのアンカー・2D 表現）はローカルの VectorWorks で
-//	目視確認する方針（docs/DEV-NOTES.md M5「ローカル確認」）。
+//	目視確認する方針（docs/DEV-NOTES.md M5）。
 //
 
 #include "PluginPrefix.h"
@@ -78,7 +78,7 @@ namespace HomeskzIfcImport::draw
 				VW_DRAW_TIME("スラブ:スタイル解除");
 				gSDK->ConvertToUnstyledSlab(slab);
 			}
-			// 構成層そのものの時間は draw/DrawUtil の SetComponents が「共通:構成層」へ
+			// 構成層そのものの時間は draw/DrawUtil の SetComponents が「構成層:*」の区間へ
 			// 積む（床板・底盤・立上りの合算。どれがどれかはフェーズの時刻差が持つ）。
 			SetComponents(slab, floor.components);
 			{

@@ -890,7 +890,7 @@ TEST(base_slab_outer_boundary_matches_wall_outer_face)
 TEST(all_fixtures_parse_without_error)
 {
 	// 全フィクスチャで立上り・底盤・基礎ストーリが例外なく組み立てられ、命令が命令セットの
-	// 検証を通ること（docs/DEV-NOTES.md の完了条件 1）。
+	// 検証を通ること（CLAUDE.md「テスト方針」: 要素を足したら全フィクスチャで通ることを確かめる）。
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)
 				   {

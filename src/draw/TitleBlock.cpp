@@ -37,8 +37,8 @@ namespace HomeskzIfcImport::draw
 	namespace
 	{
 		// 【図面枠 PIO の登録名】**実機で確定した**（VW 2026 / macOS。PR #129 の実機
-		// フィードバック round 1 の診断ログ）。SDK リファレンスの `Findings/` にはまだ
-		// 無いので、**知見としてあちらへ送ること**（CLAUDE.md「ドキュメントの分担」）。
+		// フィードバック round 1 の診断ログ）。SDK リファレンスの `Findings/` にもその後
+		// 載った（「Parametric Objects」の内部 ID の表。draw/TitleBlock.h の ★）。
 		//
 		// 当初は候補を 3 つ並べて順に試していた（登録名が `Findings/` に無く、型番号
 		// ＝`GetSymbolDefSubType` が返す 552 から名前を引く呼び出しも知られていないため）。

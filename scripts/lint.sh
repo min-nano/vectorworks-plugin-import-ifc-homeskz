@@ -21,7 +21,8 @@
 # Usage:
 #   scripts/lint.sh            # check only; non-zero exit if anything is off
 #   scripts/lint.sh --fix      # auto-fix what can be fixed (clang-format,
-#                              # clang-tidy, cmake-format), then check the rest
+#                              # clang-tidy, cmake-format, PSScriptAnalyzer),
+#                              # then check the rest
 #
 # Any tool that is not installed is reported and skipped, so a partial local run
 # still works — CI remains the complete gate. Install hints are printed per tool.
@@ -160,8 +161,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# PSScriptAnalyzer — static analysis for the PowerShell updater script under
-# scripts/ (the same production-only scope as clang-tidy and shellcheck; the test
+# PSScriptAnalyzer — static analysis for the PowerShell scripts under scripts/
+# (updater / installer / uninstaller / token helper; the same production-only
+# scope as clang-tidy and shellcheck; the test
 # harness under tests/ is not analysed). Needs pwsh AND the PSScriptAnalyzer
 # module. Rules: PSScriptAnalyzerSettings.psd1. With --fix, the correctable rules
 # are auto-applied in place.

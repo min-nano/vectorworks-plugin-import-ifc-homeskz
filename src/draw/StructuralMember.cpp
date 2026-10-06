@@ -3,7 +3,7 @@
 //
 //	構造材ツール（StructuralMember PIO）共通ヘルパーの実装。呼ぶ SDK API はいずれも
 //	従来 draw/Member.cpp・draw/Column.cpp が個別に持っていたものと同一で、集約しただけ
-//	（振る舞いは変えない）。設計の意図・パスを共通化しない理由はヘッダ冒頭を参照。
+//	（振る舞いは変えない）。設計の意図・パスも共通にした理由はヘッダ冒頭を参照。
 //	【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include するため、この翻訳単位は
 //	プラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse ライブラリには
 //	入れない（CLAUDE.md「依存の向きは厳守する」）。
@@ -92,10 +92,10 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kOffsetParamNeedle = "オフセット";
 #endif
 
-		// 描き上がった部材の長さ（OIP の「長さ」）。**端部オフセットと同じく universal 名が
-		// SDK ヘッダに無い**ので候補を並べて引き、引けなければ手掛かりを診断へ持ち帰る。
-		// 読むだけで、書きはしない（PIO がリセットのたびに入れる値）。
-		// **両端の解決済み絶対 Z**（実機 round 2 で判明。ヘッダ DrawnMemberSize 参照）。
+		// 描き上がった部材の**両端の解決済み絶対 Z**（実機 round 2 で判明。ヘッダ
+		// DrawnMemberSize 参照）。**端部オフセットと同じく universal 名が SDK ヘッダに無い**
+		// ので候補の形で引き、引けなければ手掛かりを診断へ持ち帰る。読むだけで、書きは
+		// しない（PIO がリセットのたびに入れる値）。OIP の「長さ」は部材長ではないので読まない。
 		// **ローカライズ名で引かない**——「始端高さオフセット」は設定ダイアログ側の
 		// `DialogStartElevation`（別物。レイヤの高さ基準で 0 を返す）とぶつかる。
 		// **読むのは `MeasureDrawnMember` だけ**で、そこは検算専用になったので開発ビルドだけ
@@ -440,10 +440,12 @@ namespace HomeskzIfcImport::draw
 		// 区間として測れるように**代入を 1 段はさんである（draw/Verify.h の VW_DRAW_TIME。
 		// 本番ビルドでは丸ごと畳まれて、残るのは代入 1 つだけになる）。
 		//
-		// ★**解決を書き込みより前へ動かさない。** パラメータ表が断面形状（矩形/H 形…）で
-		// 変わりうるかは分かっていない——**分かるまでは、いまの順序（断面形状を書いた後に
-		// B / D を引く）を守る**。SDK リファレンス側で調査中
-		// （min-nano/vectorworks-developer-sdk-reference#82）。
+		// ★**解決は断面形状を書いた後に置いてある。** パラメータ表が断面形状（矩形/H 形…）で
+		// 変わりうるかが分からなかったので、この順序（断面形状を書いた後に B / D を引く）を
+		// 守ってきた。SDK リファレンス側の答えは出ている——表は値やポップアップの選択では
+		// 変わらない（min-nano/vectorworks-developer-sdk-reference#82。Findings
+		// 「Parametric Objects」の「名前の解決は『種別 × 文書』ごとに 1 度でよい」）。順序は
+		// そのままにしてある。
 		TXString breadth;
 		TXString depth;
 		TXString profileShape;
@@ -466,8 +468,8 @@ namespace HomeskzIfcImport::draw
 
 		// B / D は矩形断面のときの別名。上と同じ値を入れる（存在しなければ無視される）。
 		// 2 つの解決をまとめたので `D` を引くのが `B` を書く前になったが、**寸法の値は
-		// パラメータ表の顔ぶれを変えない**ので順序の意味は変わらない（変わりうるのは
-		// 上の ★ の断面形状の方で、そちらは動かしていない）。
+		// パラメータ表の顔ぶれを変えない**ので順序の意味は変わらない（上の ★ の断面形状の
+		// 順序も動かしていない）。
 		TXString bAlias;
 		TXString dAlias;
 		{

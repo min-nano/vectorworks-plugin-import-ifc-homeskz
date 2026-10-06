@@ -35,9 +35,9 @@
 //	【描けたかを読み戻す】バウンドもパスも命令どおりなのに**実体が無い**ことがある（M27。
 //	実機で 46 本発生）。OIP の値は正しいままなので、**画面を見ない限り気付けない**——そこで
 //	**両端の解決済み絶対 Z の差**を読み戻し（spec.expectedLength ＝ 命令のパス長）、実体が
-//	無い柱を件数で診断へ載せる。この測定で原因が分かった: 上下端のバウンドが「階だけ違う
-//	同じ記録」になった柱だけ、終端が始端と同じ Z に解決されていた（解析側で潰してある。
-//	parse/Column.h ／ docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
+//	無い柱を件数で診断へ載せる。この測定から原因まで辿れた: 渡したパスの両端の Z に
+//	1 ULP の丸めが残った柱だけが `ResetObject` の作り直しから外れていた（上下端のバウンドを
+//	疑った見立ては外れ。下記「高さの与え方」／docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
 //
 //	【柱のパスも 2 点の曲線】横架材・垂木と同じ口で作る（draw/StructuralMember の CreatePath）。
 //	    gSDK->CreateNurbsCurve(平面座標, byCtrlPts=false, degree=1)  ← VS CreateNurbsCurve
@@ -64,7 +64,7 @@
 //
 //	【診断を必ず持ち帰る】実描画はローカルの VectorWorks でしか確認できない。そこで
 //	draw/Member と同じく、断面が入ったか・パスの頂点が 2 つになったかを**読み戻して確かめ**、
-//	駄目だった本数を完了ダイアログへ返す（上記のとおり、パスが 1 点のままだと何も描かれない）。
+//	駄目だった本数を診断へ返す（上記のとおり、パスが 1 点のままだと何も描かれない）。
 //	**スパン（平面投影長）だけは横架材と違って数えない**——鉛直材では 0 が正常なので、
 //	同じ数え方をすると全数を誤報する。
 //
@@ -99,8 +99,8 @@ namespace HomeskzIfcImport::draw
 
 		// 柱 1 本を構造材ツールで描く。PIO を作れなければ断面の矩形でフォールバックする。
 		// 何か 1 つでも配置できたら true。outObject には**構造材ツールで作れたときだけ**その
-		// ハンドルを入れる（伏図記号のデータタグはこれに関連付ける。フォールバックの矩形は
-		// タグを付ける相手にしない）。失敗の内訳は failures へ数え込む（draw/StructuralMember）。
+		// ハンドルを入れる（取り込み後の測り直し recheckColumns が引く。フォールバックの矩形は
+		// 測る相手にしない）。失敗の内訳は failures へ数え込む（draw/StructuralMember）。
 		bool DrawOne(const core::ColumnCommand& column, StructuralFailures& failures,
 					 MCObjectHandle& outObject)
 		{
@@ -205,7 +205,7 @@ namespace HomeskzIfcImport::draw
 				return true;
 			}
 
-			// 失敗の内訳を数え込む（診断。drawColumns が完了ダイアログへ載せる）。
+			// 失敗の内訳を数え込む（診断。drawColumns が診断へ載せる）。
 			// **スパン（平面投影長）は数えない**——鉛直材では 0 が正常なので、横架材と同じ
 			// 数え方をすると全数を誤報する（冒頭「診断を必ず持ち帰る」）。
 			// 高さ基準（bound）は**書けたことを実機で確かめた**うえで実体 0 の柱があったので
@@ -264,8 +264,8 @@ namespace HomeskzIfcImport::draw
 			MCObjectHandle object = nil;
 			if (DrawOne(column, failures, object))
 				++drawn;
-			// 伏図記号のデータタグが引けるよう、**構造材ツールで描けた柱だけ**を記録する
-			// （立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
+			// 取り込み後の測り直し（recheckColumns）が引けるよう、**構造材ツールで描けた柱
+			// だけ**を記録する（立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
 			if (handles != nullptr && object != nil)
 				handles->table().handles.emplace(index, object);
 		}

@@ -23,7 +23,8 @@
 **代わりに実測を載せた。** 描画側は「取り込み前から在ったレイヤへ描いたか」を
 `DrawCounts::undoPartial` として既に持っている（`draw/DrawUtil.h` の `ImportUndoScope`。
 取り消しがどこまで効くかの判断に使っていたもの）。これを PR コメントの「図面の状態:」
-として毎回出す（`parse/Feedback.cpp`）。**押した／押さないではなく、実際に何が起きたか**
+として毎回出す（`parse/Feedback.cpp`。M38 からは PR ではなく実機テストの報告に出る）。
+**押した／押さないではなく、実際に何が起きたか**
 なので、読む側は絵の破綻が実装のせいか戻し忘れかを切り分けられる。
 
 ## 基準は 1 周目に採る（実機の指摘）
@@ -56,3 +57,8 @@
 レイヤのハンドルを消して中身ごと消えるかも、**SDK の挙動なので本リポジトリでは調べない**
 ——リファレンス側で issue を立て、`Findings/` に載ってから実装する（`CLAUDE.md`）。
 起票済み: [min-nano/vectorworks-developer-sdk-reference#23](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/23)。
+
+（このあと M25 でプログラムから戻すようにし
+（[前の周の図を取り除く・取り消す](../m25-test-separate-from-import/layer-removal-and-undo.md)）、
+M39 で戻すのをやめて毎周テンプレートから開いた新しい図面へ描く形にした
+（[M39](../m39-test-from-template.md)）。）

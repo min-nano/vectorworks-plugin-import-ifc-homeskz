@@ -771,7 +771,8 @@ namespace HomeskzIfcImport::parse
 			}
 		}
 
-		// 横架材同士が食い込んでいる箇所は端部の長さを詰めて干渉を解消する。
+		// 横架材同士の取り合いは、負け側の端点を勝ち側の芯線へ移し、相手の面までの戻りを
+		// 端部オフセットに入れる（材が実際に止まる位置は相手の面のまま）。
 		return resolveMemberInterferences(commands);
 	}
 

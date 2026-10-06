@@ -57,9 +57,9 @@ namespace HomeskzIfcImport::parse
 	};
 
 	// 既に読み込んだ Model の主要型を数える。ホームズ君 IFC の骨格をなす型
-	// （通り芯・階・横架材・柱・基礎・スラブ・金物）を固定順で数える（CLAUDE.md
-	// 「移植の基本方針」で挙げる IfcGridAxis / IfcBuildingStorey / IfcBeam / IfcColumn /
-	// IfcFooting / IfcSlab / IfcMechanicalFastener に対応）。loaded は true。
+	// （通り芯・階・横架材・柱・基礎・スラブ・金物）を固定順で数える（IfcGridAxis /
+	// IfcBuildingStorey / IfcBeam / IfcColumn / IfcFooting / IfcSlab / IfcMechanicalFastener
+	// に対応。並びは Summary.cpp の kTypes）。loaded は true。
 	IfcSummary summarizeModel(const Model& model);
 
 	// ファイルを読み込んでサマリを返す。読み込みに失敗したら loaded=false・counts 空で
@@ -146,7 +146,7 @@ namespace HomeskzIfcImport::parse
 	// （std::exception::what()。分からなければ空）で、空なら「原因不明」として出す。
 	//
 	// **なぜ要るか**: ネイティブプラグインの未捕捉例外は VectorWorks 本体を巻き込んで落とす。
-	// フェーズ境界（Extensions/ExtMenu の DoInterface）で必ず受け止め、ユーザーへ
+	// フェーズ境界（draw/ImportRun の runImportRound）で必ず受け止め、ユーザーへ
 	// 1 通のエラーダイアログとして見せる（docs/DEV-NOTES.md M15「例外処理」）。文言はここに置
 	// いて無 SDK でテストする（完了文言と同じ理由）。
 	std::string formatImportError(const std::string& detail, const std::string& fileName = {});
@@ -155,8 +155,9 @@ namespace HomeskzIfcImport::parse
 	// 診断ログの本文（M19「短い完了・厚いログ」）
 	// ------------------------------------------------------------------------
 
-	// 動かしているビルドの素性。**SDK 側（Extensions/ExtMenu）が BuildConfig.h から詰める**
-	// ——ビルド種別のマクロを見られるのはあちらだけで、こちらは受け取った文字列を並べるだけ。
+	// 動かしているビルドの素性。**SDK 側（draw/ImportRun の currentBuildInfo）が BuildConfig.h
+	// から詰める**——ビルド種別のマクロを見られるのはあちらだけで、こちらは受け取った文字列を
+	// 並べるだけ。
 	struct BuildInfo
 	{
 		std::string plugin;	 // プラグイン名（"min-nano_structure" / "…Dev"）

@@ -174,7 +174,7 @@ namespace HomeskzIfcImport::draw
 
 	// DrawStructuralMember の結果。**断面が入ったかを呼び出し側へ返す**のは、実描画を
 	// ローカルの VectorWorks でしか確認できないため（断面が 0 だとオブジェクトはあるのに
-	// 画面へ出ない。各 draw モジュールが件数を完了ダイアログへ載せる）。
+	// 画面へ出ない。各 draw モジュールが件数を診断へ載せる）。
 	struct StructuralMemberResult
 	{
 		MCObjectHandle object = nil; // 生成できなければ nil（呼び出し側はフォールバックへ）
@@ -332,8 +332,8 @@ namespace HomeskzIfcImport::draw
 
 	// 描き上がった部材を**読み戻して測る**。生成直後だけでなく、**取り込みが終わったあと**
 	// にも同じ口で測れるようにしてある——「描いた直後は入っていたのに、あとの要素を描く
-	// あいだに潰れた」という順序の問題を、実機を見ずに切り分けるため（実機 round 1 で、
-	// 生成直後の測定では 197 本とも潰れていなかった。docs/DEV-NOTES.md M27）。
+	// あいだに潰れた」という順序の問題を、実機を見ずに切り分けるため（M27 で足した。答えは
+	// 「描いた直後から潰れていた」で、順序の問題ではなかった。docs/DEV-NOTES.md M27）。
 	//
 	// 【測るのは両端の絶対 Z の差】実機 round 2 で、構造材 PIO は**解決済みの絶対 Z**を
 	// `StartElevation` / `EndElevation` に持つと分かった（1 本目で 572 / 5905 ＝ 命令の

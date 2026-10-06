@@ -159,7 +159,7 @@ namespace HomeskzIfcImport::draw
 	// （"伏図" / "軸組図"）。
 	std::string dimensionDiagnostics(const std::string& label, const DimensionCounts& counts);
 
-	// 平常の内訳（レベル記号の高さの補正・dev の検算）を 1 行にする（無ければ空文字）。
+	// 平常の内訳（いまは dev の検算だけ）を 1 行にする（無ければ空文字）。
 	// 診断（dimensionDiagnostics）と違って「問題あり」にはしない——描画側の outInfo へ出す。
 	std::string dimensionInfo(const std::string& label, const DimensionCounts& counts);
 } // namespace HomeskzIfcImport::draw

@@ -24,7 +24,7 @@
 # ディレクトリを巻き込まないための歯止めで、これが唯一の削除の安全弁である。
 #
 # Usage:
-#   ./vw-uninstall.sh                          # 既定の場所から min-nano_structure を消す
+#   ./vw-uninstall.sh                          # 既定の場所から消す（名前は置かれているものから判定）
 #   ./vw-uninstall.sh --name min-nano_structureDev
 #   ./vw-uninstall.sh --plugins-dir <dir> --machine   # (vw-install.sh が使う)
 #

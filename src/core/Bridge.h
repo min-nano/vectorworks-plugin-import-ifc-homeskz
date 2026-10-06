@@ -8,7 +8,8 @@
 //	    Claude ──MCP(stdio)──▶ scripts/mcp/vw-mcp-server.py
 //	                              │ <id>.req.json を書く／<id>.res.json を待つ
 //	                              ▼
-//	                        スプール（一時ディレクトリの min-nano_structure-mcp）
+//	                        スプール（一時ディレクトリの <プラグイン名>-mcp。橋は開発版
+//	                        だけにあるので、ふつうは min-nano_structureDev-mcp）
 //	                              ▲
 //	                              │ 拾う／応える（Vectorworks が動いている間ずっと）
 //	                        Vectorworks（draw::serveMcpBridge。パレットの時計が数百 ms ごとに呼ぶ）
@@ -141,7 +142,7 @@ namespace HomeskzIfcImport::core
 		// 置かれている要求を**名前の昇順で**取り出し、そのファイルを消す。名前の昇順は
 		// Python が付ける連番の順（＝送った順）である（CLAUDE.md「決定性を守る」）。
 		//
-		// 読めなかった要求は `out` に「壊れている」印の付いた要求として載せる（id は
+		// 読めなかった要求は戻り値に入れず、その id だけを `broken` に載せる（id は
 		// ファイル名から拾う）。呼ぶ側はそれにエラーで応えればよく、**拾い直しは起きない**。
 		std::vector<BridgeRequest> poll(std::vector<std::string>& broken);
 

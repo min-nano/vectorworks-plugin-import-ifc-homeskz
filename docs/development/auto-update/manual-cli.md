@@ -28,6 +28,7 @@
 ./scripts/vw-update.sh q-stable                # stable の状態を表示
 ./scripts/vw-update.sh q-dev                   # dev ビルド一覧を表示
 ./scripts/vw-update.sh do-install <url> <name> # ダウンロードしてインストール
+./scripts/vw-update.sh q-pr-state <branch>...  # ブランチごとに PR が開いているか
 ```
 
 ```pwsh
@@ -39,10 +40,11 @@ powershell -ExecutionPolicy Bypass -File scripts\vw-uninstall.ps1
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 stable
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 dev
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1          # チャンネルを尋ねる
-# 非対話モード（プラグインが使うもの。stable/dev/do-install は sh 版と同じ契約）:
+# 非対話モード（プラグインが使うもの。q-stable/q-dev/do-install/q-pr-state は sh 版と同じ契約）:
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 q-stable
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 q-dev
 powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 do-install <url> <name>
+powershell -ExecutionPolicy Bypass -File scripts\vw-update.ps1 q-pr-state <branch>...
 ```
 
 環境変数で上書き可能: `VW_REPO`（owner/repo）、`VW_PLUGINS_DIR`（インストール先）。

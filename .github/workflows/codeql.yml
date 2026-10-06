@@ -19,9 +19,12 @@ name: CodeQL
 #               is exactly the code that handles data fetched from the network,
 #               so scanning it is where CodeQL earns its keep — without the
 #               ~800 MB proprietary Vectorworks SDK or the macOS/Windows runners
-#               the full plug-in build needs. The SDK-only platform glue
-#               (#if GS_MAC / GS_WIN in ModuleMain / ExtMenu / Updater) is thin
-#               and already covered by clang-tidy in build.yml.
+#               the full plug-in build needs. The same configure also builds the
+#               SDK-free import code (src/core/ + src/parse/, which reads the
+#               user-supplied IFC file), so that is traced too. The SDK-dependent
+#               code (src/draw/, src/Extensions/, src/payload/ and the
+#               #if GS_MAC / GS_WIN glue in ModuleMain / Updater) is not compiled
+#               here, so CodeQL does not see it; clang-tidy in build.yml covers it.
 #
 #   * actions — the workflows in this very directory. This repo publishes
 #               releases with `contents: write` and threads branch names
@@ -95,9 +98,9 @@ jobs:
 
       # Compile the SDK-free subset so CodeQL can trace it. This mirrors the
       # lint / test jobs' configure line (VW_BUILD_PLUGIN=OFF, VW_BUILD_TESTS=ON)
-      # so the exact translation units carrying the updater logic are built and
-      # traced. Runs only for the c-cpp leg; the Actions leg uses build-mode:
-      # none and skips straight to Analyze.
+      # so the exact translation units carrying the updater logic and the
+      # core/ + parse/ import code are built and traced. Runs only for the c-cpp
+      # leg; the Actions leg uses build-mode: none and skips straight to Analyze.
       - name: Build (SDK-free subset)
         if: matrix.language == 'c-cpp'
         run: |

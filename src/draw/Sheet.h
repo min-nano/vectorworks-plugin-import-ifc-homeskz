@@ -20,7 +20,7 @@
 //	になる。
 //
 //	実描画（ビューポートの見え方・縮尺・表示レイヤ）はローカルの VectorWorks で目視確認する
-//	（docs/DEV-NOTES.md M13「ローカル確認」）。
+//	（docs/DEV-NOTES.md M13）。
 //
 
 #pragma once
@@ -50,9 +50,9 @@ namespace HomeskzIfcImport::draw
 	// 置かれるが寸法が空になる（draw/Tag.h）。
 	//
 	// outInfo には**異常ではない内訳**（用紙の割り付け——用紙・印刷可能領域・凡例の幅・
-	// 建物の広がり・選んだ縮尺）を入れる。平常でも必ず出るので note とは行き先を分ける:
-	// 完了ダイアログは note が空かどうかで「問題あり」を判断し、outInfo は診断ログにだけ
-	// 出る（core::DrawCounts の diagnostics / notes）。
+	// 建物の広がり・選んだ縮尺——と、寸法・図面枠の記録）を入れる。平常でも必ず出るので
+	// note とは行き先を分ける: 完了ダイアログは note が空かどうかで「問題あり」を判断し、
+	// outInfo は診断ログにだけ出る（core::DrawCounts の diagnostics / notes）。
 	//
 	// outCounts には**寸法の列とレベル記号の描けた数**を足し込む（M31。core::DrawCounts の
 	// dimensions / levelMarks。件数は完了文言の表 parse/Summary の kElements が読む）。

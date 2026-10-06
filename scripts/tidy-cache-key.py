@@ -44,7 +44,7 @@
 # 「変わったのに使い回す」になり、こちらは診断の見落としに直結する。
 #
 # 【外にあるものは辿らない】追いかけるのは src/ 配下に解決できた include だけ。SDK や
-# 標準ライブラリのヘッダはそこに解決できないので、上の 3・5 が代表する。CI では SDK が
+# 標準ライブラリのヘッダはそこに解決できないので、上の 3・5・6 が代表する。CI では SDK が
 # チェックアウトの中（<workspace>/vw-sdk）に置かれるため、「リポジトリの中か」ではなく
 # 「src/ の中か」で線を引く必要がある。
 #
@@ -104,7 +104,7 @@ def resolve_include(spec, includer_dir, search_dirs, quoted):
 
     "..." は includer のディレクトリを先に見る（コンパイラと同じ順序）。<...> は見ない。
     見つからないものは「src/ の外にあるもの」＝ SDK か標準ライブラリなので、鍵の側では
-    --tidy-version / --sdk-key が代表する。
+    --tidy-version / --sdk-key / --image-key が代表する。
     """
     candidates = []
     if quoted:
@@ -193,7 +193,7 @@ def include_closure(source, follow_dirs, search_dirs):
             spec = raw.decode("utf-8", "surrogateescape")
             resolved = resolve_include(spec, current_dir, search_dirs, quoted)
             if resolved is None:
-                # <...> は既定の検索パス（標準ライブラリ）にあるもの——上の 3・5 が
+                # <...> は既定の検索パス（標準ライブラリ）にあるもの——冒頭の 3・6 が
                 # 代表する。"..." は検索パスを全部渡してあるので、そこに無いなら
                 # **こちらの前提が外れている**。決めつけずにキャッシュ不可にする。
                 if quoted:

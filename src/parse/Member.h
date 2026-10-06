@@ -29,7 +29,8 @@
 //	    平行四辺形。端部は直切り＝鉛直面）を厚み方向へ押し出した任意断面
 //	    （IfcArbitraryClosedProfileDef）で出力される。矩形前提の memberProfileDims では
 //	    拾えず**取りこぼされて全く描画されない**ため、slopedMemberGeometry が平行四辺形の
-//	    4 頂点から中心軸・幅・せい・傾斜を導出する。専用レイヤ "n-登り梁" に置く。
+//	    4 頂点から中心軸・幅・せい・傾斜を導出する。専用レイヤ "n-登り梁" に置く（M36 から
+//	    parse/PlanLevel の noboribariSpan が span レイヤ "{from}to{to}-登り梁" へ移す）。
 //	    誤取り込み防止に、押し出し軸が鉛直な材（火打）は断面種別より**先に**軸で除外し、
 //	    プロファイルが 4 頂点でない材（筋かい＝6 頂点）は導出が失敗してスキップされる。
 //	  * **登り梁の直切りの幾何**: 端部が鉛直面なので、天端中央線の端点は断面中心軸の
@@ -47,8 +48,8 @@
 //	    ようにするため（core/Document.h「端部オフセット」）。出隅の L 字は勝ち負けが付かない
 //	    ので触らない。
 //
-//	【M7 のスコープ】登り梁の端部詰め（parse/Noboribari）は受ける材＝本モジュールの
-//	横架材だけを見る。柱（M8）を参照する最終化は柱の導入時に行う（docs/DEV-NOTES.md M7/M8）。
+//	登り梁の端部詰め（parse/Noboribari）は、受ける材として本モジュールの横架材と柱（M8）の
+//	両方を見る（M7 の時点では横架材だけだった。docs/DEV-NOTES.md M7/M8）。
 //
 
 #pragma once
@@ -65,7 +66,8 @@ namespace HomeskzIfcImport::parse
 	class Context;
 
 	// 母屋（棟木を含む小屋組の上端材）・登り梁のレベル／レイヤ名。配置先レイヤは
-	// "{接頭辞}-母屋" / "{接頭辞}-登り梁"。文字列の定義は core/Document.h（命令セットの語彙）
+	// "{接頭辞}-母屋" / "{接頭辞}-登り梁"（登り梁はのちに parse/PlanLevel が span レイヤへ
+	// 移す）。文字列の定義は core/Document.h（命令セットの語彙）
 	// にあり、ここはその再公開（parse/Story.h の kLevelFL ほか、parse/Rafter.h の
 	// kLevelTaruki と同じ流儀）。
 	inline constexpr const char* kLevelMoya = core::kLevelMoya;
@@ -78,8 +80,8 @@ namespace HomeskzIfcImport::parse
 	// 食い込み調整の対象外判定（傾斜梁）に使う。
 	inline constexpr double kSlopeTol = 1.0;
 
-	// 要素が横架材（IfcBeam / IfcMember）か。**母屋・登り梁の判定（parse/Story の
-	// レベル追加）と解析本体で同じ述語を使う**ため、ここに一本化する。
+	// 要素が横架材（IfcBeam / IfcMember）か。解析本体（buildMemberCommands）が使う
+	// （母屋・登り梁レベルを足すかは、parse/Story が IFC ではなく命令の配置先レイヤで決める）。
 	bool isMemberElement(const Entity& element);
 
 	// IFC の名前（"木梁:隅木・谷木:3"）が隅木・谷木か。ホームズ君は隅木と谷木を 1 つの種別で
@@ -243,8 +245,8 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::MemberCommand> buildMemberCommands(const Model& model);
 
 	// 同上。共有コンテキストのストーリ一覧・センタリング中心・階の要素を使う
-	// （parse/Context.h）。**Context 自身がこの結果をキャッシュする**（Context::members）
-	// ので、ストーリ（母屋・登り梁レベルの有無）・垂木（桁幅の参照）・登り梁の補正が
-	// 同じ 1 回の解析結果を共有する。
+	// （parse/Context.h）。**Context 自身がこの結果をキャッシュする**（Context::rawMembers。
+	// 伏図レベルへ振り分けたものが Context::members）ので、ストーリ（母屋・登り梁レベルの
+	// 有無）・柱・伏図・登り梁の補正が同じ 1 回の解析結果を共有する。
 	std::vector<core::MemberCommand> buildMemberCommands(Context& context);
 } // namespace HomeskzIfcImport::parse

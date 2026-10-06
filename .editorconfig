@@ -34,11 +34,12 @@ indent_size = 2
 [*.md]
 trim_trailing_whitespace = false
 
-# Shell / PowerShell updater scripts.
+# Shell scripts (scripts/ and tests/): tabs, like the existing sources.
 [*.sh]
-indent_style = space
-indent_size = 2
+indent_style = tab
+indent_size = 4
 
+# PowerShell scripts (scripts/ and tests/): 4 spaces.
 [*.ps1]
 indent_style = space
 indent_size = 4

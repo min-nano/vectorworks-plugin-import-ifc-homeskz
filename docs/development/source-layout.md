@@ -14,8 +14,8 @@ Vectorworks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb    … 起�
                           本体 <name>.vwpayload          … いつでも読み直せる
 ```
 
-**殻**に入るのは「Vectorworks に番地を握られるもの」だけ——メニュー 4 つ（うち 1 つは
-開発版だけ）と PIO 2 つ、パレット 1 つの*登録*、
+**殻**に入るのは「Vectorworks に番地を握られるもの」だけ——メニュー 4 つ（うち 2 つは
+開発版だけ）と PIO 2 つ、パレット 1 つ（開発版だけ）の*登録*、
 自動アップデート、そして本体を読み込む仕掛け（`src/PayloadHost.*` / `src/PayloadSession.*`）。
 **本体**に `core/` `parse/` `draw/` のすべてが入ります。境界は C の ABI
 （`src/PayloadAbi.h`）1 枚きりです。
@@ -27,7 +27,8 @@ Vectorworks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb    … 起�
 ```
 CMakeLists.txt              macOS / Windows 両対応の CMake ビルド。SDK 非依存の
                             静的ライブラリ MinNanoStructureCore（core/ + parse/）と、
-                            SDK 依存のプラグイン本体（draw/ ほか）に分かれる
+                            SDK 依存の殻（.vwlibrary / .vlb）と本体（.vwpayload。
+                            draw/ ほか。MinNanoStructureCore をリンクする）に分かれる
 src/
   ModuleMain.cpp            モジュールのエントリポイント。拡張機能を登録し、本体へ
                             渡す CallBackPtr を預ける（**アップデートの確認はここでは
@@ -55,7 +56,7 @@ src/
                               コマンドの登録と実行（**殻に残る唯一の実処理**である
                               自動アップデートを呼ぶ）
     ExtMcpMenu.{h,cpp}        「MCP ブリッジを表示…」メニューコマンドの登録（パレットを
-                              出すだけ。**dev だけ登録**。利用者向けの「MCP ブリッジ」）
+                              出すだけ。**dev だけ登録**）
     ExtMcpPalette.{h,cpp}     MCP ブリッジを常駐させる**モードレスなパレット**の登録と、
                               JS の時計から本体の draw::serveMcpBridge への取り次ぎ（M30）。
                               本体から頼まれた更新・再起動をここで済ませる（M38）。
@@ -65,7 +66,9 @@ src/
     ExtShearWall.{h,cpp}      耐力壁 PIO の同上（→ draw::recalculateShearWall）
   core/                     フェーズ非依存の土台（SDK も STEP も知らない純粋コード）
     Document.{h,cpp}          命令セットの構造体定義・validateDocument・描画結果の件数
-    ImportOptions.{h,cpp}     取り込み設定（配置するシンボルの対応）と役割の表 1 つ
+    ImportOptions.{h,cpp}     取り込み設定（配置するシンボルの対応・図面枠のスタイル・
+                              寸法規格・伏図のまとめ方・軸組図から外す通り・垂木の断面）と
+                              シンボルの役割の表 1 つ
     FeedbackScratch.{h,cpp}   実機テストの一時ファイルの置き場（ブランチごと）と、
                               PR が閉じたブランチの片付け
     FeedbackSession.{h,cpp}   実機テストで覚えておく値（1 周目の選択・前の周の内訳・
@@ -97,7 +100,7 @@ src/
                               診断ログの切り詰め）
     Grid / Story / Floor / Member / Noboribari / PlanLevel / Column / Rafter / Roof /
     Footing / AnchorBolt / FloorPost / FireBrace / Joint / Splice / ColumnMark /
-    Sheet / Tag / Section      要素ごとの解析
+    ShearWall / Sheet / Tag / Section / Dimension   要素ごとの解析
   draw/                     Phase 2: VW 描画（SDK 依存）。**まるごと本体に入る**
     ImportCommand.{h,cpp}     本番の取り込みコマンド（ファイル選択 → 設定 → 取り込み →
                               完了ダイアログ）。**実機テストの分岐が 1 つも無い**（M25）
@@ -130,31 +133,31 @@ src/
     SectionPickDialog.{h,cpp} 軸組図にする通りの選択（外した通りは軸組図を描かない。M34）
     HostServices.{h,cpp}      殻から借りた道具（同梱スクリプトの実行）の置き場所（いまの
                               使い手は無い。M38）
-    Symbol.{h,cpp}            ハイブリッドシンボルの配置（4 要素で共有する唯一の実装）
+    Symbol.{h,cpp}            ハイブリッドシンボルの配置（アンカーボルト・床束・火打・仕口・
+                              継手の 5 要素で共有する唯一の実装）
     Tag.{h,cpp}               断面寸法データタグ（伏図・軸組図で共有。スタイルは当てず、
                               タグの中身はタグ 1 本ずつへ直接組む）
     DrawingLabel.{h,cpp}      軸組図の図面ラベル（真下の中央へ図面タイトルだけを出す。
                               スタイルは当てず、既定のレイアウトを複製して組み直す）
-    Grid / Story / Floor / Member / Column / Rafter / Roof / Footing /
     TitleBlock.{h,cpp}        図面枠（伏図・軸組図で共有。図面にあるスタイルを当てる
                               だけで、スタイルは作らない）
-    ColumnMark / Sheet / Legend / Section   要素ごとの描画
+    Grid / Story / Floor / Member / Column / Rafter / Roof / Footing /
+    ColumnMark / ShearWall / Sheet / Legend / Section / Dimension   要素ごとの描画
   Updater*.{h,cpp}          同梱した更新スクリプトを起動してアップデートを駆動する
                             （同梱スクリプトの実行は本体へも貸し出す）
   BuildConfig.h             stable / dev の識別切り替えスイッチ（VW_DEV_BUILD）
   PluginPrefix.h            共有プレフィックスヘッダ（SDK を取り込む）
   Module-Info.plist.in      バンドルの Info.plist テンプレート（macOS 専用）
-scripts/
-  mcp/vw-mcp-server.py      MCP ブリッジの Claude 側（依存の無い Python。リポジトリ直下の
-                            .mcp.json が登録する。配布 zip へも同梱され、インストール先へ
-                            一緒に置かれる）
 tests/                      無 SDK の単体テスト（詳細は tests/README.md）
   TestFramework.h           依存ゼロの極小テストハーネス
-  Fixtures.h / RoofSample.h 共有するフィクスチャ読み込み・近似比較・試験用屋根面
-  fixtures/                 ホームズ君 EX 出力の実 IFC
+  Fixtures.h / StepText.h / RoofSample.h
+                            共有するフィクスチャ読み込み・近似比較・合成 STEP テキストの
+                            組み立て・試験用屋根面
+  fixtures/                 ホームズ君 EX 出力の実 IFC・最小の合成 IFC・実機テストの
+                            テンプレート（Default.sta）
 resources/
-  min-nano_structure.vwr/…           stable プラグインのメニュー文字列
-  min-nano_structureDev.vwr/…        dev プラグインのメニュー文字列
+  min-nano_structure.vwr/…           stable プラグインのメニュー・PIO の文字列
+  min-nano_structureDev.vwr/…        dev プラグインのメニュー・PIO の文字列
   common.vwr/…                       両方に共通の中身（MCP ブリッジのパレットの
                                      html/mcp.html。M30。パレットを登録するのは dev
                                      だけ）。包む直前に各 .vwr の写しへ重ねる
@@ -195,6 +198,9 @@ scripts/
                             いるレコード・オブジェクト変数・文書内のビューポート一覧）。
                             SDK に API の無い PIO の設定を、UI で手作業したものと
                             見比べて突き止めるための道具（CI では使わない）
+  mcp/vw-mcp-server.py      MCP ブリッジの Claude 側（依存の無い Python。リポジトリ直下の
+                            .mcp.json が登録する。配布 zip へも同梱され、インストール先へ
+                            一緒に置かれる）
 .clang-format               C/C++ フォーマット規則（タブ・Allman ブレース等）
 .clang-tidy                 C/C++ 静的解析チェックの設定（WarningsAsErrors）
 .cmake-format.yaml          CMake の整形（cmake-format）＋ lint（cmake-lint）設定

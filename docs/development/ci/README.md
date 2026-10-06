@@ -17,12 +17,15 @@
   （clang-tidy はビルドより時間がかかるので、ビルドの中に置かず並走させています。
   詳細は[「SDK 依存コードの静的解析」](../lint/clang-tidy-sdk.md)）。
 - SDK は一度だけダウンロードし、（トリミングした）SDK を**キャッシュ**するので、大きな
-  zip は以降の実行で再ダウンロードされません。強制的に再ダウンロードするにはワーク
-  フロー内の `VW_SDK_CACHE_KEY`（プラットフォームごとに 1 つ）を変更します。SDK を
+  zip は以降の実行で再ダウンロードされません。強制的に再ダウンロードするには
+  `VW_SDK_CACHE_KEY` を上げます。値はプラットフォームごとに 1 つですが、`build.yml` の
+  ビルドジョブと `tidy-*` ジョブ、および `ci-debug.yml` に同じ値が書いてあるので、
+  **すべて揃えて**変えてください（SDK の同一性として clang-tidy の結果キャッシュの鍵にも
+  入ります。[「clang-tidy の結果キャッシュ」](../lint/clang-tidy-cache.md)）。SDK を
   用意する手順そのものは `scripts/fetch-vw-sdk.sh` に 1 つだけあり、4 ジョブと
   `ci-debug.yml` が共有します（キャッシュがヒットしていれば検証だけして抜けます）。
 - 各ジョブは**その実行が公開するチャンネルだけ**をビルドします（`-DVW_BUILD_CHANNEL`。
-  `main` は `min-nano_structure`、PR は `min-nano_structureDev`）。コミットで刻印
+  `main` は `stable` ＝ `min-nano_structure`、PR は `dev` ＝ `min-nano_structureDev`）。コミットで刻印
   （`-DVW_BUILD_VERSION`）して成果物を確認・アップロードします（macOS はさらにアドホック
   署名）。PR ではエフェメラルなマージコミットではなく、PR の **head** コミット（あなたが
   push したもの）をビルドします。
@@ -33,6 +36,9 @@
   - PR はブランチごとの **`dev-<branch>`** プレリリースを更新します
     （`min-nano_structureDev.vwlibrary.zip` + `min-nano_structureDev.vlb.zip`。トークンで公開でき
     ないフォーク PR では `release` ジョブごとスキップされます）。
+  - どちらのリリースにも、ほかにインストーラとアンインストーラ（`vw-install.sh` /
+    `vw-install.ps1` / `vw-uninstall.sh` / `vw-uninstall.ps1`）を単独のアセットとして
+    添付します（手動インストールの入口。[配置の仕組み](../auto-update/installer.md)）。
 
   リリースの公開は独立した **`release` ジョブ**が担当します。このジョブは 4 つのジョブ
   （`build-mac` / `build-windows` / `tidy-mac` / `tidy-windows`）が**すべて**完了してから
@@ -63,9 +69,9 @@
 持たないブランチの削除でも起動していました。
 
 `pull_request` の `closed` で起動するため、ワークフローの実体は PR のマージ ref
-（head を base にマージしたもの）側のコピーから実行されます。したがってこの変更が
-`main` に入って初めて有効になり、それ以前から開いている PR も、マージ ref が新しい
-`main` に対して作り直された時点でこの版を拾います。フォークからの PR は
+（head を base にマージしたもの）側のコピーから実行されます。したがってこのワーク
+フローを変えたときは、その変更が `main` に入って初めて有効になり、それ以前から開いている
+PR も、マージ ref が新しい `main` に対して作り直された時点で新しい版を拾います。フォークからの PR は
 （そもそも `build.yml` がプレリリースを公開しないので）ジョブの `if` で除外します。
 
 これと対になる取り決めが `build.yml` 側にもあります。ビルドの実行中に PR が閉じられると、

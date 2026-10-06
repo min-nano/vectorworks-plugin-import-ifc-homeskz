@@ -25,13 +25,14 @@
 #
 # 配置の規則はひとつ: **zip の直下にあるものを、そのまま置く。**
 # ファイル名を列挙しない——列挙した瞬間に「増えたファイルを取りこぼす」という、いま
-# 直している事故がそっくり戻ってくる。除くのはこのスクリプト自身だけ。
+# 直している事故がそっくり戻ってくる。除くのはインストーラ自身（.sh / .ps1）と、
+# unzip / macOS が残す残骸（__MACOSX / .DS_Store）だけ（install_tree）。
 #
 # 置き先は **`Plug-Ins` の直下ではなく、プラグインが自分で持つフォルダ**である:
 #
 #     <Plug-Ins>/min-nano_structure/min-nano_structure.vwlibrary
 #     <Plug-Ins>/min-nano_structure/min-nano_structure.vwpayload
-#     <Plug-Ins>/min-nano_structure/vw-uninstall.sh
+#     <Plug-Ins>/min-nano_structure/vw-uninstall.sh  ほか
 #
 # こうしておくと**そのプラグインのものが 1 か所に閉じる**ので、取り除くのが「フォルダを
 # 1 つ消す」で済む（`vw-uninstall.sh`）。Vectorworks が `Plug-Ins` のサブフォルダも
@@ -132,9 +133,10 @@ USAGE
 }
 
 # ---------------------------------------------------------------------------
-# GitHub REST helpers. **`vw-update.sh` と同じものが写っているのは意図的**で、この
+# GitHub REST helpers. **`vw-update.sh` と似たものが写っているのは意図的**で、この
 # ファイルは**単独で配られて単独で走る**（リリースから落としてきた 1 枚だけが手元に
-# ある）から、他のスクリプトを source できない。
+# ある）から、他のスクリプトを source できない。写しは簡略版で、トークン（vw-token.sh）
+# も失敗理由の組み立ても持たない（API を叩くのは手動でリリースから入れるときだけ）。
 # ---------------------------------------------------------------------------
 api_get() { # api-subpath -> path to a temp file holding the JSON, or fail
 	local f

@@ -93,7 +93,7 @@ jobs:
             -DVW_REQUIRE_SCRIPT_TESTS=ON
 
       # One translation unit per core. `cmake --build` compiles SERIALLY unless
-      # told otherwise, and this build is ~60 TUs of instrumented C++ — the same
+      # told otherwise, and this build is ~90 TUs of instrumented C++ — the same
       # reason build.yml passes --parallel for the plug-in. No -v: the per-command
       # echo buys nothing here (a compile error prints itself either way) and only
       # buries the warnings in the log.

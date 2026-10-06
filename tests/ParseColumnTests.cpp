@@ -1136,8 +1136,8 @@ TEST(build_general_column_not_resized_by_member)
 
 namespace
 {
-	// 金物を「型の辿り方」だけ変えて置く。typeRelBody は IfcRelDefinesByType の本体で、
-	// 空文字なら型そのものを作らない。placement=false なら配置を持たない金物にする。
+	// 金物を「型の辿り方」だけ変えて置く。typeRelKind は IfcRelDefinesByType の壊し方で、
+	// "none" なら rel そのものを作らない。placement=false なら配置を持たない金物にする。
 	std::vector<ColumnCommand> buildWithHardware(const std::string& typeRelKind, bool placement)
 	{
 		StepText step;

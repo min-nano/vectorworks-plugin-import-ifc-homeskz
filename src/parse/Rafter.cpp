@@ -238,9 +238,11 @@ namespace HomeskzIfcImport::parse
 				// 寄り切って部材が残らない（隅棟際の三角形の先端。下記）——これらは受ける
 				// 軒桁が無いので、支持点を採らず**軒先そのものを挿入点＝高さの基準**にし、
 				// 差し込み・軒の出を 0 にして**長さと高さを実形状に合わせる**
-				// （docs/DEV-NOTES.md M6「ローカル確認」の指示）。描画側は start の XY と
-				// elevation をパスの始端に、start→end の水平投影長をスパンにするので、これで
-				// OIP の長さ・高さが実形状どおりになる（draw/Rafter.cpp）。
+				// （M6 のローカル確認での指示。docs/DEV-NOTES.md M6）。描画側はパスを軒先
+				// （core::rafterEaveEnd＝start から 差し込み ＋ 軒の出 だけ軒側。両方 0 なら
+				// start そのもの）から end へ張り、高さは垂木レベルからの offset（軒先は
+				// rafterEaveEnd の offset、棟側は endBound）で与えるので、これで OIP の
+				// 長さ・高さが実形状どおりになる（draw/Rafter.cpp）。
 				//
 				// **s の丸めに頼らない。** 屋根面の棟側の端が軒高ちょうどに来る面では
 				// zRidge == beamTopZ となり s は本来ちょうど 1.0 だが、割り算の丸めで 1−ε に

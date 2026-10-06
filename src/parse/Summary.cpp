@@ -23,8 +23,6 @@ namespace HomeskzIfcImport::parse
 		// ホームズ君 IFC が使う主要エンティティ型の一覧（表示順）。key は byType へ渡す
 		// 大文字の型名（parse/Step は型名を常に大文字で保持する）、displayType は
 		// ダイアログに出すキャメルケース名、label はホームズ君での役割を表す日本語。
-		// 対応: CLAUDE.md「移植の基本方針」が挙げる IfcGridAxis / IfcBeam / IfcColumn /
-		// IfcFooting / IfcSlab / IfcBuildingStorey / IfcMechanicalFastener。
 		struct TypeDef
 		{
 			const char* key;		 // byType のキー（大文字）
@@ -378,7 +376,7 @@ namespace HomeskzIfcImport::parse
 	}
 
 	// ------------------------------------------------------------------------
-	// 診断ログの本文（M19「短い完了・厚いログ」）
+	// 診断ログの本文（M19。docs/dev-notes/design/diagnostics.md「診断・完了報告の方針」）
 	// ------------------------------------------------------------------------
 
 	std::string formatLogHeader(const BuildInfo& build, const std::string& ifcPath,

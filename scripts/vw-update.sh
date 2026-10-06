@@ -10,8 +10,10 @@
 #              you pick which branch's build to install.
 #
 # Flow: check the latest build, tell you whether a newer one is available, then
-# let you choose: 更新しない / 更新だけ (skip / update only). The new build is
-# loaded the next time you (re)start Vectorworks yourself.
+# let you choose: 更新しない / 更新だけ (skip / update only). These interactive
+# modes do not judge whether a restart is needed and always ask for one; a
+# payload-only change is in fact picked up at the next command without a restart
+# (src/PayloadSession.h), only a changed shell needs it.
 #
 # The plug-in itself drives its own updates by invoking this same script (it is
 # bundled inside the .vwlibrary, see src/Updater.cpp). The plug-in shows all of
@@ -26,7 +28,8 @@
 #                       then one TSV line per dev build:
 #                       "build<TAB>commit<TAB>name<TAB>url<TAB>branch"
 #                       (or error=<message>).
-#   do-install <url> <name>   Download+install <name>.vwlibrary; print "ok" or
+#   do-install <url> <name>   Download+install <name>.vwlibrary; print
+#                             [installed-shell=<id>] then "ok", or
 #                             error=<message>. No dialogs.
 #   q-pr-state <branch>...    For each branch, whether it still has an open PR:
 #                             "pr-state<TAB><open|closed|none|error><TAB><branch>".
@@ -57,8 +60,9 @@
 #   ./scripts/vw-update.sh q-pr-state <branch>...   # (used by the plug-in)
 #
 # Requirements: macOS only. Uses tools that ship with macOS (curl, plutil,
-# unzip, codesign, xattr, osascript) — no Homebrew, no `gh`, and because the
-# repository is public, no authentication.
+# unzip, codesign, xattr, osascript) — no Homebrew, and because the repository
+# is public, no authentication is required. A GitHub token is still sent when
+# vw-token.sh finds one (env / keychain / `gh`), to lift the API rate limit.
 #
 # Overridable via environment:
 #   VW_REPO         owner/repo             (default below)
@@ -789,9 +793,10 @@ main() {
 # sourced. The plug-in and the manual/terminal use both EXECUTE the script, so
 # they are unaffected: run directly, $0 equals BASH_SOURCE[0] and main runs. The
 # unit tests (tests/vw-update.test.sh) SOURCE the file instead, to call the pure
-# back-end functions (asset_url / q_stable / q_dev / do_install) with curl/plutil
-# stubbed out — there BASH_SOURCE[0] != $0, so main does not run. This is the
-# shell analogue of the IUpdaterHost seam that makes UpdaterFlow.cpp testable.
+# back-end functions (asset_url / q_stable / q_dev / q_pr_state / do_install and
+# their helpers) with curl/plutil stubbed out — there BASH_SOURCE[0] != $0, so
+# main does not run. This is the shell analogue of the IUpdaterHost seam that
+# makes UpdaterFlow.cpp testable.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	main "$@"
 fi

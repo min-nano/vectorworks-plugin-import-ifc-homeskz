@@ -64,7 +64,7 @@ namespace HomeskzIfcImport::parse
 			// **取り込まない役割の伏図記号は作らない**（柱と小屋束は別の役割なので、
 			// 片方だけ置くこともできる）。記号レイヤはその span のぶんだけ作られなくなるが、
 			// 伏図は**存在しない表示レイヤを黙って読み飛ばす**ので図は成立する
-			// （draw/DrawUtil の FinishViewport）。断面記号（上のループ）はシンボルを
+			// （draw/DrawUtil の ConfigureViewport）。断面記号（上のループ）はシンボルを
 			// 使わないので、この設定に左右されない。
 			const core::SymbolRole role =
 				spanRole(use != useByLayer.end() ? use->second : std::string());

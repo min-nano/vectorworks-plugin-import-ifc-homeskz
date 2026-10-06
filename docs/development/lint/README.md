@@ -36,8 +36,8 @@ C/C++ を対象とするジョブ:
   静的解析します。
 - **`shellcheck`** — `scripts/` 配下のスタンドアロンなシェルスクリプトを解析
   します（ワークフロー内のインラインスクリプトは actionlint が担当）。
-- **`PSScriptAnalyzer`** — Windows 版アップデータとインストーラ（`scripts/*.ps1`）の
-  PowerShell 静的解析です。未承認の動詞・未使用パラメータ・危険な null 比較など
+- **`psscriptanalyzer`**（PSScriptAnalyzer）— Windows 版アップデータとインストーラ
+  （`scripts/*.ps1`）の PowerShell 静的解析です。未承認の動詞・未使用パラメータ・危険な null 比較など
   バグを招きやすいパターンを検出します。clang-tidy（`src/` の実ロジックのみ）や
   shellcheck（`scripts/*.sh` のみ）と同じく、テストハーネス（`tests/`）ではなく
   `scripts/` 配下の**本番スクリプト**を対象にします。ルールは
@@ -46,8 +46,8 @@ C/C++ を対象とするジョブ:
 - **`yamllint`** — ワークフローや Dependabot 設定など YAML の構造スタイル
   （インデント・キー重複・記号まわりの空白）を `.yamllint.yaml` に照らして
   チェックします。
-- **`editorconfig-checker`** — **すべての**テキストファイルについて、末尾改行・
-  行末空白なし・UTF-8・LF を強制します（フォーマッタがカバーしない衛生面）。
+- **`editorconfig`**（editorconfig-checker）— **すべての**テキストファイルについて、
+  末尾改行・行末空白なし・UTF-8・LF を強制します（フォーマッタがカバーしない衛生面）。
   対象規則は `.editorconfig`、実行する検査と除外は `.editorconfig-checker.json`
   で設定します。インデントは各フォーマッタ（clang-format / cmake-format）が
   タブ＋スペース整列で管理するため、この検査ではあえて無効化しています。
@@ -63,8 +63,8 @@ SDK 依存コード（`src/draw/` ほか）へ同じ規則をかけるジョブ�
   （`int* p`）、コード幅 100 桁で折り返し。コメントは再整形しません
   （`ReflowComments: false`）— 手作業で整形された重厚なコメント（日本語・罫線を
   含む）を壊さないためです。
-- 静的解析（`.clang-tidy`）— `bugprone-*`、`performance-*`、`modernize-*`、
-  `readability-*`、`cppcoreguidelines-*`、`clang-analyzer-*` を有効化し、
+- 静的解析（`.clang-tidy`）— `bugprone-*`、`performance-*`、`portability-*`、`modernize-*`、
+  `readability-*`、`misc-*`、`cppcoreguidelines-*`、`clang-analyzer-*` を有効化し、
   スタイル系のノイズ（フォーマットは clang-format が担当）や大規模な無関係リ
   ファクタを要求するチェックは無効化しています。
 
@@ -73,7 +73,7 @@ SDK 依存コード（`src/draw/` ほか）へ同じ規則をかけるジョブ�
 ```bash
 scripts/lint.sh          # チェックのみ（違反があれば非ゼロ終了）
 scripts/lint.sh --fix    # その場で自動修正（clang-format -i / clang-tidy --fix /
-                         # cmake-format -i）。残りは検査のみ
+                         # cmake-format -i / PSScriptAnalyzer -Fix）。残りは検査のみ
 ```
 
 `scripts/lint.sh` は CI と同じ全ツールを走らせ、未インストールのツールは
@@ -89,5 +89,7 @@ scripts/lint.sh --fix    # その場で自動修正（clang-format -i / clang-ti
 > [`cppcheck`](https://cppcheck.sourceforge.io/) を組み合わせられます。SDK 依存の
 > プラグイン本体（`Updater.cpp` など）は CI（`build.yml`）で clang-tidy を掛けて
 > いますが、ローカルで掛けたい場合は SDK を用意したうえで
-> `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` でコンフィグし、生成された
-> `compile_commands.json` に対して `clang-tidy` を実行してください。
+> `-DVW_ENABLE_PCH=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` でコンフィグし（PCH を
+> 切らないと、ビルドしていない database が存在しない `.pch` を指し、全ファイルが
+> エラーになります）、`scripts/clang-tidy-sdk.sh -p <そのビルドディレクトリ>` を
+> 実行してください（対象の翻訳単位の一覧はこのスクリプトが持っています）。

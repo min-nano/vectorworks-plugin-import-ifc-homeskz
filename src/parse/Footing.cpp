@@ -2786,8 +2786,8 @@ namespace HomeskzIfcImport::parse
 			double topAbs = 0.0;
 			double thickness = 0.0;
 			zTopAndThickness(solid, topAbs, thickness);
-			// スラブスタイルのコンクリート厚は整数 mm に丸める（同厚の底盤が別スタイルへ散ら
-			// ないようにする）。
+			// コンクリート厚は整数 mm に丸める（同厚の底盤が統合キー slabMergeKey で別の
+			// グループへ散らないようにする）。
 			const double concrete = std::round(thickness);
 
 			std::vector<Vec2> boundary = footprint(solid);

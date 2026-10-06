@@ -3,7 +3,7 @@
 **Vectorworks の起動時（`plugin_module_main`）には確認しません。** 以前は起動時に 1 度だけ
 走らせていましたが、殻と本体に割れて以降（[「ソースの構成」の殻と本体](../source-layout.md)）、機能追加以外の更新は
 **再起動なしでその場から効く**ようになったので、起動のたびに問う理由が無くなりました。
-起動を待たせずに済むうえ、[後述](restart.md)のとおり**再起動を Vectorworks 自身に頼めるようになる**
+起動を待たせずに済むうえ、[「殻まで変わったときの再起動」](restart.md)のとおり**再起動を Vectorworks 自身に頼めるようになる**
 という副産物もあります。**起動時の確認を復活させるなら、再起動の作りも一緒に戻してください**
 （[「以前は SDK に頼めなかった」](restart.md#以前は-sdk-に頼めなかった実機で確かめた失敗とその前提が消えた経緯)）。
 
@@ -12,7 +12,7 @@
 | 入口 | kind | ふるまい |
 | --- | --- | --- |
 | メニューコマンド「アップデータを確認」（`src/Extensions/ExtUpdateMenu.cpp`） | `Manual` | 尋ねて入れる。**結末を必ず伝える**（最新です／確認できませんでした） |
-| 取り込みコマンドの頭（`src/Extensions/ExtMenu.cpp`） | `Silent` | 更新があるときだけ尋ねる。**無ければ黙って取り込みへ進む**。実機テストの分岐は持たない（M25） |
+| 取り込みコマンドの頭（`src/Extensions/ExtMenu.cpp`） | `Silent` | 更新があるときだけ尋ねる。**無ければ黙って取り込みへ進む**。入れたあとも、殻まで変わって再起動を後にしたときも取り込みへ進み、止めるのは入れられなかったときだけ（`src/UpdaterHost.h` の戻り値）。実機テストの分岐は持たない（M25） |
 | 実機テストの頭（`src/Extensions/ExtTestMenu.cpp`。**dev だけ**） | `Silent` | 同上 |
 | MCP の `vw_update`（`src/Extensions/ExtMcpPalette.cpp` → `src/UpdaterFlow.cpp` の `RemoteDevUpdateWith`。**dev だけ**。M38） | — | **ダイアログを 1 枚も出さず、結末を値で返す**（ローカルの Claude Code がそれを読む）。再起動は頼まれたときだけ |
 

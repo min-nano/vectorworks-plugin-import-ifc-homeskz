@@ -214,7 +214,7 @@ namespace HomeskzIfcImport::draw
 		//
 		// **この後処理が最終位置を決める。** VW は指定した挿入点にタグを留めない（伏図は
 		// タグ幅の半分だけ −X へ寄り、軸組図はビューポートごとにばらばらの場所へ落ちる。
-		// ローカル確認で実測。draw/Tag.h の落とし穴 2）ので、どこへ置かれたかに依らず
+		// ローカル確認で実測。draw/Tag.h の落とし穴 1）ので、どこへ置かれたかに依らず
 		// 実位置との差だけ動かす。
 		void MovePendingTags(const std::vector<PendingTag>& pending)
 		{
@@ -461,8 +461,8 @@ namespace HomeskzIfcImport::draw
 			// 残した方が原因を追いやすい（寸法が空になるので件数を数えて診断へ回す）。
 			// **レイアウトはタグ 1 本ごとに組み直している**（スタイルを作らない方針の裏返し。
 			// 文字スタイル資源の引き当て・式の組み立て・リンク支援の取得が 1 本ごとに走る）。
-			// 400〜530 本ぶんが伏図・軸組図の時間に溶け込んでいるので、ここを 1 区間にする。
-			// **ここも区間にしない。** 中の CreateTagField がタグ内のテキストへ
+			// 400〜530 本ぶんが伏図・軸組図の時間に溶け込んでいる。
+			// **それでもここは区間にしない。** 中の CreateTagField がタグ内のテキストへ
 			// SetClassByName / SetAllAttributesByClass を呼ぶので、包むと入れ子になる
 			// （draw/DrawUtil の【計測】）。round 1 の実測は 531 回で 221ms と軽い。
 			const TXString formula = TagFieldFormula(tag, LinksHeight(tag, member, counts));

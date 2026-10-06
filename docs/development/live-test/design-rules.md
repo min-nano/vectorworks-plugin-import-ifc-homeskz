@@ -2,7 +2,7 @@
 
 実機テストまわり（`draw/Feedback`・`core/FeedbackSession`・`parse/Feedback`・`ExtTestMenu`）を
 変えるときの決めごとです。**どれも実機で一度壊れて決まったもの**なので、緩める前に
-[M23](../../dev-notes/milestones/m23-feedback-loop/README.md)・[M24](../../dev-notes/milestones/m24-feedback-palette.md)・[M25](../../dev-notes/milestones/m25-test-separate-from-import/README.md)・[M38](../../dev-notes/milestones/m38-local-mcp-verification.md) を読んでください。
+[M23](../../dev-notes/milestones/m23-feedback-loop/README.md)・[M24](../../dev-notes/milestones/m24-feedback-palette.md)・[M25](../../dev-notes/milestones/m25-test-separate-from-import/README.md)・[M38](../../dev-notes/milestones/m38-local-mcp-verification.md)・[M39](../../dev-notes/milestones/m39-test-from-template.md) を読んでください。
 
 **入口と分担**
 
@@ -12,7 +12,7 @@
   **`#ifdef VW_DEV_BUILD` で囲っても制御フローは本番の入口に残る**ので、囲えばよいとも
   考えません。共有してよいのは `draw/ImportRun` の `runImportRound` だけです。
 - **本体は待たない・入れない。** `draw/Feedback` にビルドを待つコードを書かない（モーダルの
-  ダイアログが図面を塞ぐ。実機 round 3）。インストールも書かない（経路は
+  ダイアログが図面を塞ぐ。M23 の実機 round 3）。インストールも書かない（経路は
   `src/UpdaterFlow.cpp` の 1 本。入れ替えは MCP の `vw_update` が殻に頼む）。
 - **勝手に回る時計を持たない（M38）。** 取り込みが起きるのは人がメニューを押したときと
   Claude が `vw_run_test` を頼んだときだけです。M24 の往復で、パレットの JS タイマーが誰も
@@ -43,7 +43,7 @@
   されて写したテンプレート）から始め、テンプレートが無ければ走りません（人の居ない周に、
   いま開いている図面を基準に採らせない）。
 - **キャンセルされた周は「試し終えた」ことにしない**——記憶の `lastCommit` を進めません
-  （実機 round 10）。
+  （M25 の実機 round 10）。
 
 **図面を閉じる（利用者のものを消すコード）**
 

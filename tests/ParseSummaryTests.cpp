@@ -265,7 +265,8 @@ TEST(format_import_result_tells_to_update_viewports_only_when_drawings_were_made
 {
 	// **取り込み直後の伏図・軸組図は 1 回の「更新」が要る**（VW はレイヤを高さの降順で描くので、
 	// 床仕上げ天端が構造天端より上にある以上、そのままでは床が柱・梁を覆う。並べた重ね順は
-	// 図面には入っていて、更新すればそちらで描き直される。docs/DEV-NOTES.md）。
+	// 図面には入っていて、更新すればそちらで描き直される。SDK リファレンス Findings
+	// 「Layers and Stories」）。
 	// 黙って誤った絵を見せないよう、図を 1 枚でも作ったなら必ず伝える。
 	DrawCounts drawn;
 	drawn.valid = true;

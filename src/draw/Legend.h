@@ -59,8 +59,7 @@
 //	【SDK 型を公開するヘッダ】シートレイヤのハンドルを引数に取るため、draw/Tag.h・
 //	draw/DrawUtil.h と同じく**SDK 型を公開する共通ヘッダ**で、自分で PluginPrefix.h を
 //	（DrawUtil.h 経由で）取り込む。したがって**要素ごとの draw/*.h から include しては
-//	ならない**（あちらは SDK を持たない翻訳単位＝Extensions/ExtMenu からも include される
-//	ため。DrawUtil.h 冒頭の約束）。呼び出し元は draw/Sheet.cpp だけ。
+//	ならない**（DrawUtil.h 冒頭の約束）。呼び出し元は draw/Sheet.cpp だけ。
 //
 //	【凡例の作法】シートレイヤをアクティブに → CreateCustomObject("GraphicLegend", 位置, 0)
 //	→ 箱幅 BoxWidth を与える → ソース定義とビューポートでフィルタ（上記のタグ付きデータ）
@@ -80,7 +79,7 @@
 //	    線の太さ（0.13mm）と塗り（なし）を**オブジェクトの属性として直接**設定する。
 //
 //	実描画（凡例の中身・大きさ・位置）はローカルの VectorWorks で目視確認する
-//	（docs/DEV-NOTES.md M13「ローカル確認」）。
+//	（docs/DEV-NOTES.md M13）。
 //
 
 #pragma once
@@ -159,8 +158,6 @@ namespace HomeskzIfcImport::draw
 	// 決まらないので、先に動かしても揃わない。
 	void placeLegends(const LegendCounts& counts, const core::Vec2& topRight);
 
-	// 置いた凡例のイメージの縮率を scale（1:75 なら 75）に合わせる。
-	//
 	// 集計を人が読める 1 行の診断にする（異常が無ければ空文字）。
 	std::string legendDiagnostics(const LegendCounts& counts);
 } // namespace HomeskzIfcImport::draw

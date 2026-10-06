@@ -7,19 +7,20 @@
 （`min-nano_structureDev`）にだけ登録し、安定版はクラスを持つだけで登録しません
 （`src/ModuleMain.cpp`）。リポジトリ直下の `.mcp.json` が `scripts/mcp/vw-mcp-server.py` を
 登録するので、**このリポジトリでローカルの Claude Code を起動すれば道具が使えます**
-（Windows で `python3` が無いときは `.mcp.json` の `command` を `py` 等へ読み替えてください）。
+（用意の細部は利用者向けの[「用意する」](../user-guide/mcp-bridge.md#用意する)）。
 
 ## 道具
 
-| 道具 | 種類 | 中身 |
+道具ごとに何をするかは利用者向けの[「使う」の表](../user-guide/mcp-bridge.md#使う)、名前・
+説明・引数の真実は `draw/McpBridge.cpp` の `kTools`（下の「決めごと」）にあります。ここでは
+誰が答えるか（種類）で分けます。
+
+| 種類 | 道具 | 誰が答えるか |
 | --- | --- | --- |
-| `vw_bridge_status` / `vw_launch` / `vw_call` | Python | 橋の生死・Vectorworks の起動・一覧が古いときの汎用の呼び出し口（橋が無くても答える） |
-| `vw_ping` / `vw_layers` / `vw_classes` / `vw_layer_objects` / `vw_object_counts` | 読む | 図面の素性・レイヤ・クラス・中身 |
-| `vw_log` | 読む | 直近の取り込み（本番か実機テスト）の**診断ログ**。ファイルから読むので本体を入れ替えたあとも読める |
-| `vw_test_report` | 読む | 直近の**実機テストの報告**（[「実機テスト」](live-test/README.md)） |
-| `vw_run_test` | 長く走る | 実機テストを 1 周走らせて報告を返す（ダイアログを出さない。`ifc` と `template` を名指しすれば 1 周目から。Vectorworks が居なければ Python 側が起こしてから頼む。M40） |
-| `vw_update` | 殻に頼む | 開発版の新しいビルドを入れて本体を読み直す（`branch` で名指し・`restart_if_needed`） |
-| `vw_restart` | 殻に頼む | Vectorworks を再起動する（保存の確認は通常どおり出る）。Python 側が架かり直すまで見届ける |
+| Python | `vw_bridge_status` / `vw_launch` / `vw_call` | Python サーバ自身（橋が無くても一覧に並ぶ） |
+| 読む | `vw_ping` / `vw_layers` / `vw_classes` / `vw_layer_objects` / `vw_object_counts` / `vw_log` / `vw_test_report` | 本体がその場で。`vw_log`（**診断ログ**）と `vw_test_report`（**実機テストの報告**。[「実機テスト」](live-test/README.md)）はファイルから読むので、本体を入れ替えたあとも読める |
+| 長く走る | `vw_run_test` | 本体。1 周が終わるまで戻らない（Vectorworks が居なければ Python 側が起こしてから頼む。M40） |
+| 殻に頼む | `vw_update` / `vw_restart` | 殻（本体は要求を引き取るだけ）。再起動は Python 側が架かり直すまで見届ける |
 
 ## 決めごと
 

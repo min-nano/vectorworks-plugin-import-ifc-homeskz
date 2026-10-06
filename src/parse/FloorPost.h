@@ -57,7 +57,6 @@ namespace HomeskzIfcImport::parse
 {
 	class Context;
 
-	// 置換するハイブリッドシンボル名。
 	// 置換するハイブリッドシンボル名は**取り込み設定が持つ**（core::SymbolRole::FloorPost。
 	// 既定は "床束"）。設定ダイアログで図面の別のシンボルへ差し替えられる
 	// （core/ImportOptions.h）。

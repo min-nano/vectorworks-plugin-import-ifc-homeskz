@@ -6,7 +6,7 @@
 # (trailing spaces, final newline, LF, UTF-8) is enforced separately by
 # editorconfig-checker, and the workflow SEMANTICS by actionlint.
 #
-# Check locally:  yamllint .
+# Check locally:  yamllint --strict .   (what lint.yml and scripts/lint.sh run)
 
 extends: default
 

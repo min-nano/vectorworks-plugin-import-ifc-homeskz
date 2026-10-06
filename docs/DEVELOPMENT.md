@@ -28,7 +28,7 @@
 
 | ページ | 中身 |
 | --- | --- |
-| [ローカルでのビルド](development/build.md) | `VW_SDK_DIR`・macOS・Windows（x64 だけの理由） |
+| [ローカルでのビルド](development/build.md) | `VW_SDK_DIR`・安定版と開発版（`VW_BUILD_CHANNEL` / `VW_DEV_BUILD`）・macOS・Windows（x64 だけの理由） |
 | [テストの実行（テストとカバレッジ）](development/testing/running.md) | 無 SDK のテストの回し方・サニタイザ・ビルドオプション |
 | [`tests/README.md`](../tests/README.md) | テストの一覧・方針・何をテストしていないか（領域ごとのページは [`development/testing/`](development/testing/)） |
 

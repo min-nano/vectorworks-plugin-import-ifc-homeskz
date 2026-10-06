@@ -370,8 +370,8 @@ namespace HomeskzIfcImport::parse
 			const auto layerFor = [i, &info](const char* levelType)
 			{ return storyLayerName(i, info.isTop, levelType); };
 
-			// 基本レベル（M3）＋屋根組の垂木・野地板（M6）。登り梁・母屋・span 柱は後続 M で
-			// 追加する（ヘッダ参照）。levels の並び順は希望するデザインレイヤのスタック順（上→下）。
+			// 基本レベル（M3）。要素ごとのレベルはこの後で足す（ヘッダ冒頭「作るレベル」）。
+			// levels の並び順は希望するデザインレイヤのスタック順（上→下）。
 			if (info.isTop)
 			{
 				// 最上階（屋根）は軒高（オフセット 0）。ロフト（小屋裏収納）の床があるときだ

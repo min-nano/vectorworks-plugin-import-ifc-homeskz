@@ -29,7 +29,7 @@
 #	------------
 #	Against a SYNTHETIC repository built in a temp dir: copies of the two
 #	scripts plus a small src/ tree whose files match the runner's hardcoded
-#	globs (src/draw/*.cpp, src/Extensions/*.cpp, src/payload/*.cpp and the five
+#	globs (src/draw/*.cpp, src/Extensions/*.cpp, src/payload/*.cpp and the four
 #	named glue units). That is what makes headers editable — the real tree
 #	cannot be modified by a test — and it keeps the run to 8 tiny translation
 #	units. clang-tidy itself is a stub that records which files it was asked to

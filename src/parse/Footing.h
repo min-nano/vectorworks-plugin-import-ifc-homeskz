@@ -24,11 +24,13 @@
 //	は先に作らない＝空レイヤを作らない」方針の下で、対象が入った時点で足す）。基礎天端・
 //	床束は M11 のシンボルの高さ基準で、シンボル自身は高さを持たない。
 //
-//	【立上りの後処理は 3 段】ホームズ君 IFC の立上りは通り芯の交点等で細かく分断され、かつ
+//	【立上りの後処理は 4 段】ホームズ君 IFC の立上りは通り芯の交点等で細かく分断され、かつ
 //	自由端が柱芯までの長さで入力されている。そこで
-//	  1. mergeWallCommands  … 同一直線上・同一断面の立上りを 1 本へ統合する
-//	  2. extendFreeWallEnds … 他の立上りと交差しない端点を「柱芯 + 半壁厚」へ延長する
-//	  3. applyWallOpenings  … 人通口の区間で立上りを分割／天端を切り下げる（M10）
+//	  1. mergeWallCommands         … 同一直線上・同一断面の立上りを 1 本へ統合する
+//	  2. extendFreeWallEnds        … 他の立上りと交差しない端点を「柱芯 + 半壁厚」へ延長する
+//	  3. extendDeeperCollinearEnds … 同一直線上で突き合う下端違いの立上りのうち、深いほうを
+//	                                 直交する立上りの半壁厚だけ伸ばす（M10）
+//	  4. applyWallOpenings         … 人通口の区間で立上りを分割／天端を切り下げる（M10）
 //	の順に通してから命令にする。**人通口は統合・延長の後に当てはめる**ので、開口を跨いで
 //	統合された立上りも開口位置で正しく分割され、開口境界の端は実寸法のまま（延長しない）に
 //	なる。交差する立上りどうしの壁結合（buildWallJoinCommands）はこの結果に対して求める。
@@ -223,9 +225,9 @@ namespace HomeskzIfcImport::parse
 	// docs/DEV-NOTES.md M9）。深さの差（外周が深い等）は地中梁（M10）が持つので、
 	// 基礎梁側で作り込まない。
 	//
-	// 組み立てたあと mergeWallCommands → extendFreeWallEnds → applyWallOpenings（人通口）を
-	// 通す。自由端を柱芯へ寄せるのに柱命令（columns）を使う（未指定なら端点から半壁厚延長
-	// する＝後方互換）。
+	// 組み立てたあと mergeWallCommands → extendFreeWallEnds → extendDeeperCollinearEnds →
+	// applyWallOpenings（人通口）を通す（ヘッダ冒頭「立上りの後処理」）。自由端を柱芯へ
+	// 寄せるのに柱命令（columns）を使う（未指定なら端点から半壁厚延長する＝後方互換）。
 	//
 	// 1 階（最下階の FL ストーリ）が無い IFC では上端のバインド先が決まらないので空を返す。
 	std::vector<core::WallCommand> buildWallCommands(const Model& model);
@@ -384,13 +386,14 @@ namespace HomeskzIfcImport::parse
 								   const std::vector<core::ModifierCommand>& modifiers);
 
 	// 底盤から slab 命令を組み立てる。平面外形をグリッド中心オフセットで補正して格納し、
-	// 天端の絶対 Z を elevation に、Z 厚を整数 mm に丸めた値を thickness（＝スラブスタイルの
+	// 天端の絶対 Z を elevation に、Z 厚を整数 mm に丸めた値を thickness（＝構成層の
 	// コンクリート厚）に入れる。天端は底盤天端レベルへバインドし、offset は実天端 Z
 	// と底盤天端の絶対 Z の差（主たる底盤は ≈0）。
 	//
-	// 組み立てたあと mergeSlabCommands → alignSlabsToWallFaces → attachGroundBeamModifiers を
-	// 通す（外面合わせに使う立上りは walls）。**地中梁はスラブにせず**、統合・外面合わせの
-	// 済んだ底盤の modifiers へ振り分ける（台形断面は単一のスラブで描けないため）。
+	// 組み立てたあと mergeSlabCommands → alignSlabsToWallFaces → attachGroundBeamModifiers →
+	// applyGroundBeamBedding を通す（外面合わせに使う立上りは walls。ヘッダ冒頭「底盤の
+	// 後処理」）。**地中梁はスラブにせず**、統合・外面合わせの済んだ底盤の modifiers へ
+	// 振り分ける（台形断面は単一のスラブで描けないため）。
 	std::vector<core::SlabCommand> buildSlabCommands(const Model& model);
 	std::vector<core::SlabCommand> buildSlabCommands(Context& context,
 													 const std::vector<core::WallCommand>& walls);

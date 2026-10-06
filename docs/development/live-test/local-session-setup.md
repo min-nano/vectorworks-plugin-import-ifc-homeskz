@@ -22,7 +22,8 @@
    `GH_TOKEN` / `GITHUB_TOKEN` が無ければ `gh auth token` を使うので、`ci-wait.sh` も
    `ci-debug.sh run`（起動と待機をまとめた形）もそのまま動きます。PR の作成・コメント・
    ドラフトの昇格は `gh pr create` / `gh pr comment` / `gh pr ready` で足ります。
-   この文書の手順どおり **GitHub MCP の道具名で呼びたい**なら、ユーザー設定に足します
+   CLAUDE.md の手順（下書きの昇格を `update_pull_request` で行う等）どおり **GitHub MCP の
+   道具名で呼びたい**なら、ユーザー設定に足します
    （PAT はこのリポジトリに絞った fine-grained で、Contents / Pull requests / Actions /
    Issues を読み書き・Checks を読み取り）:
 
@@ -36,48 +37,16 @@
    セッションを残すため。Mac はスリープさせない（`caffeinate -dims` を別の窓で走らせるか、
    省エネルギーの設定で）。Vectorworks は開いたまま、MCP ブリッジのパレットも出したままに
    します。
-3. **許可の確認を絞る。** iOS で毎回承認しなくて済むよう、`.claude/settings.json`
-   （無ければ作る。個人だけなら `.claude/settings.local.json`）へ次を置きます。
+3. **許可の確認を絞る。** iOS で毎回承認しなくて済むよう、リポジトリの
+   [`.claude/settings.json`](../../../.claude/settings.json) が、`vectorworks` の MCP サーバを
+   有効にし、`vw_restart` / `vw_call` を除く MCP の道具と、CI 待ち・lint・ふだんの `git` /
+   `gh` の操作を確認なしに通します（個人だけの上書きは `.claude/settings.local.json` へ）。
    **`vw_restart` は確認を残します**——CLAUDE.md の「頼む前に人へ一言断る」を、iOS の承認の
    画面がそのまま担います。`vw_call` は `vw_restart` も呼べるので同じく確認を残します。
 
-   ```json
-   {
-     "enabledMcpjsonServers": ["vectorworks"],
-     "permissions": {
-       "allow": [
-         "mcp__vectorworks__vw_bridge_status",
-         "mcp__vectorworks__vw_launch",
-         "mcp__vectorworks__vw_ping",
-         "mcp__vectorworks__vw_layers",
-         "mcp__vectorworks__vw_classes",
-         "mcp__vectorworks__vw_layer_objects",
-         "mcp__vectorworks__vw_object_counts",
-         "mcp__vectorworks__vw_log",
-         "mcp__vectorworks__vw_test_report",
-         "mcp__vectorworks__vw_run_test",
-         "mcp__vectorworks__vw_update",
-         "Bash(scripts/ci-wait.sh:*)",
-         "Bash(scripts/ci-debug.sh:*)",
-         "Bash(scripts/lint.sh:*)",
-         "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
-         "Bash(git fetch:*)", "Bash(git pull:*)", "Bash(git add:*)",
-         "Bash(git commit:*)", "Bash(git push -u origin:*)",
-         "Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh pr diff:*)",
-         "Bash(gh run view:*)", "Bash(gh run list:*)"
-       ],
-       "ask": ["mcp__vectorworks__vw_restart", "mcp__vectorworks__vw_call"],
-       "deny": [
-         "Bash(git push --force:*)", "Bash(git push -f:*)",
-         "Bash(git push * --force*)", "Bash(git push * -f*)", "Bash(git push *+*)"
-       ]
-     }
-   }
-   ```
-
-   `deny` の後ろ 3 つは `allow` の `git push -u origin:*` の抜け道を塞ぐもの。末尾の `:*` は
-   「後ろに何が続いてもよい」なので、`git push -u origin <branch> --force`・`… -f`・
-   `git push -u origin +<branch>`（先頭の `+` は強制更新）は `deny` の頭の 2 つに当たらず、
+   このファイルの `deny` の後ろ 3 つは `allow` の `git push -u origin:*` の抜け道を塞ぐもの。
+   末尾の `:*` は「後ろに何が続いてもよい」なので、`git push -u origin <branch> --force`・
+   `… -f`・`git push -u origin +<branch>`（先頭の `+` は強制更新）は `deny` の頭の 2 つに当たらず、
    `allow` だけに当たって確認なしで通ってしまう。後ろ 3 つは `*` を途中に置いて間を飛ばす。
    `*` はどこに置いても空白込みの任意の文字列に当たり（`:*` の書き方は末尾でしか効かない）、
    規則は `deny` → `ask` → `allow` の順に見られて `deny` が必ず勝つ

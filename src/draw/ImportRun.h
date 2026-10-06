@@ -36,7 +36,7 @@
 namespace HomeskzIfcImport::draw
 {
 	// 取り込み 1 周ぶんの結果。**完了ダイアログの本文だけでは足りない**——実機
-	// フィードバック（draw/Feedback）は命令セットと描画結果そのものを見て内訳と差分を
+	// テスト（draw/Feedback）は命令セットと描画結果そのものを見て内訳と差分を
 	// 組み立てるので、それらをここから持ち帰る。
 	struct ImportRound
 	{
@@ -54,19 +54,15 @@ namespace HomeskzIfcImport::draw
 	// 何も描かず静かに終える）。
 	bool chooseIfcFile(std::string& outPath);
 
-	// 同じ「開く」ダイアログを、拡張子と見出しだけ差し替えて開く（`chooseIfcFile` の実体）。
-	// **ダイアログの作法を 2 か所に書かないため**に公開してある——実機テストの周が「毎周
-	// 開き直す図面」を選ばせるのに使う（draw/Feedback）。extension は "ifc" のように点を
-	// 含めない綴りで、複数なら空白区切り。
-	// 動かしているビルドの素性（診断ログの見出しと、実機テストの報告の見出しに使う）。
-	// **ここで詰めるのは、BuildConfig.h のマクロを見られるのが SDK 側だけ**だから
-	// ——parse/Summary は受け取った文字列を並べるだけで、ビルド種別を知らない。
 	// **取り込みの診断ログの在り処**（本番の取り込みと実機テストで同じ 1 つ）。
 	// HOMESKZ_IFC_TRACE があればそれ、無ければ一時ディレクトリの既定の名前。MCP の
 	// `vw_log` が本体を入れ替えたあとも同じファイルを読めるよう、**決め方はここ 1 か所**
 	// （draw/McpBridge.cpp）。
 	std::string importLogPath();
 
+	// 動かしているビルドの素性（診断ログの見出しと、実機テストの報告の見出しに使う）。
+	// **ここで詰めるのは、BuildConfig.h のマクロを見られるのが SDK 側だけ**だから
+	// ——parse/Summary は受け取った文字列を並べるだけで、ビルド種別を知らない。
 	parse::BuildInfo currentBuildInfo();
 
 	// **取り込み本体。** 診断ログを開き、解析（Phase 1）→ 描画（Phase 2）を通して結果

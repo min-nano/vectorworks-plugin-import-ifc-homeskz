@@ -69,7 +69,7 @@
 //	★**C++ SDK でも「足す」噛み合わせはできない（試して確認済み。もう試さないこと）。** ISDK
 //	には `ModifySlab(slab, modifier, isClipObject, componentFlags)`（"Adds to or clips from a
 //	slab"）があり、`isClipObject = false` が「足す」にあたる——が、実機（VW 2026）では
-//	実機では**「選択が間違っています」のダイアログを出して false を返す**（底盤は直方体のまま
+//	**「選択が間違っています」のダイアログを出して false を返す**（底盤は直方体のまま
 //	・地中梁は独立したプリズムのまま残り、ダイアログは呼んだ回数ぶん出る）。この文言は VW
 //	のコマンドが**ドキュメントの選択**を検証したときの定型なので「全解除 →底盤とプリズムだけを
 //	選択 → 呼ぶ」も試したが結果は同じで、**VW 側の不具合の可能性が高い**。SDK に他の手段も無い
@@ -86,7 +86,7 @@
 //
 //	実描画（壁の高さ基準・壁の構成層・底盤の天端と構成層・壁結合の詰まり方・
 //	地中梁の向きと削り取り）はローカルの VectorWorks で目視確認する方針
-//	（docs/DEV-NOTES.md M9 / M10「ローカル確認」）。
+//	（docs/DEV-NOTES.md M9 / M10）。
 //
 
 #include "PluginPrefix.h"
@@ -116,7 +116,7 @@ namespace HomeskzIfcImport::draw
 		// 地中梁の可視ソリッドを底盤へ呑み込ませる量（mm）。地中梁の天端は底盤の底面とちょう
 		// ど接する（実データで確認: 天端 = 底盤天端 − 底盤厚）ため、可視ソリッドだけを少し大
 		// きくして底盤本体に重ね、断面ビューポートで境界線が不安定に出るのを防ぐ。
-		// **削り取りモディファイアは実形状のまま**（ヘッダ冒頭）。
+		// **削り取りモディファイアは実形状のまま**（ヘッダ冒頭「地中梁の描画」）。
 		constexpr double kGroundBeamSlabBite = 10.0;
 
 		// 地中梁のソリッドに立てるオブジェクト変数（SDK 側の名前付き selector を使う）。
@@ -232,7 +232,7 @@ namespace HomeskzIfcImport::draw
 
 		// 削り取りモディファイア群を 1 つのグループにまとめて返す（SetCustomObjectProfileGroup
 		// へ渡すと通常スラブを**削り取る**）。1 本も作れなければ nil（＝削り取りをしない）。
-		// **形状は実形状のまま**にする（呑み込みは可視ソリッドだけ。ヘッダ冒頭）。
+		// **形状は実形状のまま**にする（呑み込みは可視ソリッドだけ。ヘッダ冒頭「地中梁の描画」）。
 		MCObjectHandle CreateModifierGroup(const std::vector<core::ModifierCommand>& modifiers)
 		{
 			VWGroupObj group;
@@ -340,7 +340,7 @@ namespace HomeskzIfcImport::draw
 			SetWallComponents(object, wall.components);
 
 			// 高さは壁専用の SetWallOverallHeights でストーリレベルへバインドする
-			// （ヘッダ冒頭「立上りの描画手順」3）。
+			// （ヘッダ冒頭「立上りの描画手順」4）。
 			gSDK->SetWallOverallHeights(object, StoryBoundData(wall.bottomBound),
 										StoryBoundData(wall.topBound));
 
@@ -398,7 +398,7 @@ namespace HomeskzIfcImport::draw
 				VW_DRAW_TIME("スラブ:スタイル解除");
 				gSDK->ConvertToUnstyledSlab(object);
 			}
-			// 構成層そのものの時間は draw/DrawUtil の SetComponents が「共通:構成層」へ積む
+			// 構成層そのものの時間は draw/DrawUtil の SetComponents が「構成層:*」の区間へ積む
 			// （床板・底盤・立上りの合算。どれがどれかはフェーズの時刻差が持つ）。
 			SetComponents(object, slab.components);
 			{
@@ -428,7 +428,8 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// 壁結合の joinModifier（SDK の JoinModifierType）へ写す。命令の enum は SDK の値
-		// （T=1 / L=2 / X=3）に合わせてあるので、そのまま数値で渡せる（core/Document.h）。
+		// （T=1 / L=2 / X=3 / Auto=4）に合わせてある（core/Document.h）が、数値の一致に
+		// 頼らず名前で写す。
 		JoinModifierType JoinModifier(core::WallJoinType type)
 		{
 			switch (type)

@@ -12,9 +12,11 @@
 //	【SDK 依存・include の順序】このヘッダは draw/StructuralMember.h とともに**SDK 型を
 //	公開する共通ヘッダ**（MCObjectHandle を引数に取るため）。自分で PluginPrefix.h を
 //	include するので、draw/*.cpp のどこから include しても成立する。逆に、要素ごとの
-//	draw/*.h は従来どおり core::Document.h までしか参照しない（SDK を持たない翻訳単位＝
-//	Extensions/ExtMenu から安全に include できるようにするため。CLAUDE.md「依存の向きは
-//	厳守する」）。したがって**このヘッダを draw/*.h から include してはならない**。
+//	draw/*.h は従来どおり core::Document.h までしか参照しない（かつて Extensions/ExtMenu から
+//	include されていたための約束。いまは殻が draw/ を include しない——draw/ は本体側——が、
+//	約束そのものは残してある。CLAUDE.md「依存の向きは厳守する」）。したがって**このヘッダを
+//	要素ごとの draw/*.h から include してはならない**（SDK 型を公開する共通ヘッダ——
+//	draw/Tag.h・draw/Legend.h など——は別）。
 //
 
 #pragma once
@@ -318,7 +320,7 @@ namespace HomeskzIfcImport::draw
 	//
 	// ※ **中身が在るかは分からない**——空のシンボル定義でも true になるし、
 	// `GetFirstMemberObject()` も空の定義で非 nil を返す（M19 の実機確認。
-	// docs/DEV-NOTES.md「シンボル定義を SDK から組み立てるのは断念した」）。
+	// SDK リファレンス Findings「Symbols」の「付随して分かったこと」）。
 	bool HasSymbolDefinition(const std::string& name);
 
 	// オブジェクト変数への書き込みの定型（TVariableBlock の組み立てを 1 か所に）。型ごとに
@@ -363,9 +365,9 @@ namespace HomeskzIfcImport::draw
 	void AppendLine(std::string* sink, const std::string& text);
 
 	// 本文を改行で切って 1 行ずつにする（末尾の空行は落とす）。**ダイアログの本文は
-	// 1 行 1 コントロール**で組むので、結果ダイアログ（draw/ResultDialog）と
-	// フィードバックのダイアログ（draw/Feedback）がこれを共有する——VWStaticTextCtrl は
-	// 埋め込んだ改行がそのまま行になる保証を持たないため、切るのは呼ぶ側の仕事になる。
+	// 1 行 1 コントロール**で組むので、結果ダイアログ（draw/ResultDialog）がこれを使う
+	// ——VWStaticTextCtrl は埋め込んだ改行がそのまま行になる保証を持たないため、切るのは
+	// 呼ぶ側の仕事になる。
 	std::vector<std::string> SplitLines(const std::string& text);
 
 	// 「用紙・マスに収まったか」を測って確かめるときの遊び（用紙 mm）。線の太さのぶん外形が
@@ -529,8 +531,8 @@ namespace HomeskzIfcImport::draw
 	// 図形を 1 つずつ登録する必要は無く、**二重登録（レイヤと中身の両方）で undo が既に
 	// 消えたものを消しにいく事故**も避けられる。
 	//
-	// 取り込みが作らないもの（クラス・ストーリ・レベルテンプレート）はリソースであり、
-	// undo では戻らない。空のクラスが残るが、図面の見た目は取り込み前に戻る。
+	// レイヤ以外に取り込みが作るもの（クラス・ストーリ・レベルテンプレート）はリソースで、
+	// undo へ登録しないので戻らない。空のクラスが残るが、図面の見た目は取り込み前に戻る。
 	//
 	// 【既にあったレイヤ】2 回目の取り込みのように、**取り込み前から在ったレイヤ**へ描いた
 	// 分は登録できない（そのレイヤごと消すわけにいかない）。その場合は取り消しが部分的に
@@ -604,7 +606,8 @@ namespace HomeskzIfcImport::draw
 	void RecordCreatedLayer(MCObjectHandle layer);
 
 	// 取り込み前から在ったレイヤへ描いたことを控える（取り消しが部分的になる）。
-	// レイヤを用意するヘルパー（下記 3 つ）が自分で呼ぶので、要素側は意識しなくてよい。
+	// レイヤを用意するヘルパー（PrepareLayer / ActivateExistingLayer / PrepareSheetLayer）が
+	// 自分で呼ぶので、要素側は意識しなくてよい。
 	// **名前も一緒に渡す**——1 周目の顔ぶれを基準に、次の周で図面が戻っているかを
 	// 引き比べるため（ImportUndoScope::existingLayers）。
 	void NoteExistingLayerUsed(MCObjectHandle layer, const std::string& name);

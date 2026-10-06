@@ -80,9 +80,9 @@ API・SDK 側の打ち切った調査）は、SDK リファレンスリポジト
 | M39 | [実機テストは毎周テンプレートから描き、自分の図面は保存せずに閉じる（M39）](dev-notes/milestones/m39-test-from-template.md) |
 | M40 | [実機テストの 1 周目を MCP から尋ねずに始める（M40）](dev-notes/milestones/m40-auto-first-round.md) |
 
-表に無い番号（M1〜M16 など）は[対応表](dev-notes/milestones/README.md)の要約だけで、決め事として
-残したもの（M15 / M19 の診断・M18 の用紙の割り付け・M20 の取り込み設定と部材の端点）は
-上の「設計の考え方」にあります。
+表に無い番号（M10 を除く M0〜M16・M18・M20）は[対応表](dev-notes/milestones/README.md)の
+要約だけで、決め事として残したもの（M15 / M19 の診断・M18 の用紙の割り付け・M20 の
+取り込み設定と部材の端点）は上の「設計の考え方」にあります。
 
 ## 書き足すとき
 

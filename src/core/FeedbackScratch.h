@@ -2,10 +2,12 @@
 //	core/FeedbackScratch.h
 //
 //	**実機テストの一時ファイルの置き場と、その片付け。** 実機テスト（draw/Feedback）は
-//	周ごとに図面を別名保存する——1 周目の「作業ファイル」と、2 周目以降に前の周の図面を
-//	退避した「捨て場所」である。どちらも元の図面と同じ大きさがあり（実機で 1 つ 1.7 GB
-//	のものがあった）、M38 までは一時ディレクトリの直下へ置いたきり誰も消さなかった
-//	（PR #188 の実機確認で 3.4 GB を超えて溜まっていた）。
+//	図面を別名保存する——1 周目に採るテンプレート（`template-<n>.sta`）と、各周の描き上がり
+//	（`round-<周>-<n>.vwx`）である（M39。M38 までは 1 周目の「作業ファイル」と、前の周の
+//	図面を退避した「捨て場所」だった）。
+//	どれも元の図面と同じ大きさがあり（実機で 1 つ 1.7 GB のものがあった）、M38 までは
+//	一時ディレクトリの直下へ置いたきり誰も消さなかった（PR #188 の実機確認で 3.4 GB を
+//	超えて溜まっていた）。
 //
 //	【置き場】`<一時ディレクトリ>/homeskz-test/<ブランチ>/`。**ブランチごとに分ける**のは、
 //	片付けの単位が「PR が閉じたブランチ」だから（利用者のご要望。PR が close／merge
@@ -27,7 +29,7 @@
 //	  * 中身が**ふつうのファイルだけ**であること（フォルダ・シンボリックリンクが 1 つでも
 //	    あれば触らない。`remove_all` は使わない）。
 //	  * **Vectorworks が開いている図面が無い**こと（`*.lck` が在れば触らない——開いている
-//	    作業ファイルを足元から消さない）。
+//	    図面を足元から消さない）。
 //
 //	【SDK 非依存】標準ライブラリだけで完結するので、無 SDK で単体テストする
 //	（tests/CoreFeedbackScratchTests.cpp）。PR の状態を GitHub へ尋ねるのは描画側
@@ -89,7 +91,7 @@ namespace HomeskzIfcImport::core
 	struct ScratchCleanup
 	{
 		std::vector<std::string> removedBranches; // 消したブランチ
-		std::vector<std::string> removedPaths; // 消したフォルダ（作業ファイルの照合用）
+		std::vector<std::string> removedPaths; // 消したフォルダ（記憶のテンプレート・図面の照合用）
 		std::vector<std::string> kept; // 閉じていたが消さなかったもの（理由つき）
 	};
 
@@ -98,7 +100,7 @@ namespace HomeskzIfcImport::core
 										 const std::vector<ScratchDir>& candidates,
 										 const std::map<std::string, PrState>& states);
 
-	// path が dir の中を指しているか（字面で比べる。作業ファイルを消したかの照合用）。
+	// path が dir の中を指しているか（字面で比べる。記憶のテンプレート・図面を消したかの照合用）。
 	bool pathIsInside(const std::string& path, const std::string& dir);
 
 	// 報告と診断ログへ出す 1 行（何もしなかったら空）。

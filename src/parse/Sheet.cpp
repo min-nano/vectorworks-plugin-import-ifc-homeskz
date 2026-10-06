@@ -284,14 +284,13 @@ namespace HomeskzIfcImport::parse
 			// 母屋はその階に命令があるときだけ（下屋根は母屋を持たないこともある）。
 			// parse/Story がレベルを作る条件と同じ判定。
 			//
-			// **登り梁は映さない**（ご要望）。登り梁は水下側の伏図レベルのレイヤへ分けて
-			// （parse/PlanLevel）その高さの柱梁伏図（小屋伏図等）に映してあり、母屋伏図へ
-			// 重ねると母屋より低い材が母屋と同じ図に並んで高さの関係が直感に反する。どの階も
-			// 標準の伏図レベルを必ず 1 つ持つ（parse/PlanLevel の collectBeamHeights /
-			// buildPlanLevels）ので、登り梁はどれかの柱梁伏図に必ず出る。
+			// **登り梁は原則として映さない**（ご要望）。登り梁は跨ぐ高さの柱梁伏図（小屋伏図
+			// 等）に映してあり、母屋伏図へ重ねると母屋より低い材が母屋と同じ図に並んで高さの
+			// 関係が直感に反する。
 			// ただし**上端がその階のいちばん上の伏図レベルの高さ以上の登り梁**は母屋伏図に
-			// 映す（ご要望。軒桁より上の登り梁は母屋伏図に描かれるほうが自然）。span レイヤ
-			// （parse/PlanLevel の noboribariSpan）の範囲が母屋伏図の切断を含むもの（下）。
+			// 映す（ご要望。軒桁より上の登り梁は母屋伏図に描かれるほうが自然）。どちらに映すかは
+			// span レイヤ（parse/PlanLevel の noboribariSpan）の範囲が決め、ここではその範囲が
+			// 母屋伏図の切断を含むものを載せる（下）。
 			const std::vector<const PlanLevel*> storyLevels = storyPlanLevels(planLevels, i);
 			if (const std::string moyaLayer = storyLayerName(i, isTop, kLevelMoya);
 				anyMemberOnLayer(members, moyaLayer))

@@ -230,9 +230,10 @@ namespace HomeskzIfcImport::draw
 	{
 		// 【計測】7 つを 1 つずつ区間にする（上記 SetClassByName の【計測】と同じ理由）。
 		// **分け方に意味がある**——7 つが均等に重ければ「属性を 1 つ書くたびに PIO が
-		// 作り直されている」という仮説の裏づけになり、直し方は「クラスと属性を
-		// `ResetObject` の直前へ寄せて再生成を 1 回にまとめる」になる。1 つだけ突出して
-		// いれば、その呼び出し固有の話なので直し方は別になる。
+		// 作り直されている」という仮説の裏づけになり、1 つだけ突出していれば、その呼び出し
+		// 固有の話なので直し方は別になる。（実測はマーカー以外の 6 つが同額で、費用は PIO の
+		// 作り直しだった。構造材の直しは作る前に既定を立てる ScopedCreationClass になった。
+		// docs/DEV-NOTES.md「描画の高速化」）
 		{
 			VW_DRAW_TIME("属性:ペン色");
 			gSDK->SetPColorsByClass(object);
@@ -629,7 +630,7 @@ namespace HomeskzIfcImport::draw
 	// --- 取り込み全体の Undo（DrawUtil.h「なぜレイヤを記録するのか」）--------------------
 	namespace
 	{
-		// いま開いている undo スコープ（無ければ nullptr）。インポートはメニューコマンドから
+		// いま開いている undo スコープ（無ければ nullptr）。インポートはメインスレッドから
 		// 1 本しか走らないので、高々 1 つで足りる。要素側が引数で持ち回らずに済むように、
 		// 記録の入口（RecordCreatedLayer / NoteExistingLayerUsed）はここを見る。
 		ImportUndoScope* gActiveUndoScope = nullptr;

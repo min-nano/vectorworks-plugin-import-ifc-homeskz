@@ -23,24 +23,3 @@
 あります。**殻が本体へ貸すもの**（同梱スクリプトの実行。M23）も `PayloadHostHolderTests`
 の担当で、引数がそのまま渡ること・**返ってきた文字列を写していること**・貸されなかった
 古い殻でも本体が動くことを確かめます。
-
-`Updater.cpp` は残った
-
-- 自分自身のバイナリ位置の解決（`dladdr` / `GetModuleFileName`）
-- スクリプトの起動（`popen` / `_popen`）
-- ネイティブダイアログの表示（`gSDK->AlertInform` / `AlertQuestion`、`VWDialog`）
-
-という **プラットフォーム／SDK 固有のグルーだけ** を担います。
-
-`UpdaterParse.h` の関数は 3 層に分かれます。
-
-| 層 | 関数 | 役割 |
-|----|------|------|
-| スクリプト出力の解析 | `Trim` / `ValueOf` / `ParseDevBuilds` | `key=value` 行・`build\t…` 行の解析 |
-| コマンドライン生成 | `ShellQuote` / `CmdQuote` | `/bin/sh`・cmd.exe 用の安全なクオート |
-| 自パスからの導出 | `Mac*FromBinary` / `Win*FromPath/Dir` | 同梱スクリプト・Plug-Ins フォルダのパス導出 |
-| **更新フローの判断** | `EvaluateStable` / `ResolveCurrentDevBuild` / `DevSwitchCandidates` / `FindDevBuildForBranch` / `ResolveDevSelection` / `InstallReportedOk` / `InstallErrorText` / `InstalledShellId` / `NeedsRestartAfterInstall` | 「更新があるか」「**いま入っているのはどのブランチのどのビルドか**」「切替候補はどれか」「同じブランチの新しいビルドはどれか」「選択→ビルド」「インストール成否」「**再起動が要るか、本体の読み直しで済むか**」 |
-
-最後の「更新フローの判断」層は、もともと `Updater.cpp` の `gSDK` 呼び出しの合間に
-インラインで書かれていた分岐です。純粋関数として切り出したことで単体テストの対象になり、
-`Updater.cpp` 側は判断結果を受けてダイアログを出すだけになりました。

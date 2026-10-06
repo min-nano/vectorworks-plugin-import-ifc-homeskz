@@ -27,7 +27,7 @@
 //	センタリング済みの絶対座標をそのまま頂点にする。
 //
 //	実描画（クラス分け・軸名ラベル・基点バブルの位置と向き）はローカルの VectorWorks で
-//	目視確認する（docs/DEV-NOTES.md M1「ローカル確認」）。GridAxis PIO のパラメータ名や座標単位は
+//	目視確認する（docs/DEV-NOTES.md M1）。GridAxis PIO のパラメータ名や座標単位は
 //	VW 実機でのみ最終確認できる。
 //
 
@@ -109,7 +109,8 @@ namespace HomeskzIfcImport::draw
 			return 0;
 
 		// 通り芯はすべて「共通」レイヤ（全命令で同一）。最初の命令のレイヤ名で用意する。
-		// 通り芯は**自分でレイヤを作ってよい**唯一の要素（他はストーリ由来のレイヤに乗る）。
+		// 通り芯は**自分でレイヤを作ってよい**要素（ほかは伏図記号のレイヤだけ。draw/ColumnMark。
+		// 他はストーリ由来のレイヤに乗る）。
 		PrepareLayer(document.grids.front().layer);
 
 		std::size_t drawn = 0;

@@ -1,10 +1,11 @@
 //
 //	ParseStoryTests.cpp
 //
-//	ストーリ解析（src/parse/Story）＋希望レイヤ順の計算（src/core/desiredStoryLayerOrder）
-//	の単体テスト。VectorWorks SDK を一切 include せず、無 SDK のテストハーネス
-//	（TestFramework.h）で走る（CLAUDE.md「テスト方針」: core/ parse/ は無 SDK で単体テスト）。
-//	**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
+//	ストーリ解析（src/parse/Story）＋希望レイヤ順の計算（src/core/Document の
+//	desiredStoryLayerOrder）の単体テスト。VectorWorks SDK を一切 include せず、無 SDK の
+//	テストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」: core/ parse/ は
+//	無 SDK で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせる
+//	ことはしない）。
 //
 //	検証項目（docs/DEV-NOTES.md M3）: ローカル配置 Z 抽出・横架材天端オフセット（列挙順に
 //	依存しない最大負値）・ストーリ収集（Elevation 昇順・最上階判定・非 FL 除外）・

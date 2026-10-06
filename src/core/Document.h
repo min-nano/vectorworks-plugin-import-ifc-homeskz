@@ -9,10 +9,8 @@
 //	フィールド名は図面側の語彙（レイヤ・クラス・レベル・構成層…）に合わせる。C++
 //	の予約語と衝突するもの（class 等）は drawClass / className のように置き換える。
 //
-//	現状は「バージョン＋ stories / grids / floors / members / columns / rafters / roofs /
-//	walls / wallJoins / slabs」を持つ（M1 通り芯・M3 ストーリ・M5 床板・M6 屋根組・M7 横架材・
-//	M8 柱・M9 基礎・M10 基礎の高度化ぶん）。残りの命令リスト（anchorBolts …）は、対応する
-//	マイルストーンで要素を移植するたびに 1 つずつ追加する（docs/DEV-NOTES.md）。
+//	持っている命令リストの一覧は末尾の Document 構造体（各メンバに M 番号を付けてある）が
+//	正。要素を足すマイルストーンごとに命令リストを 1 つずつ追加する（docs/DEV-NOTES.md）。
 //
 
 #pragma once
@@ -278,7 +276,7 @@ namespace HomeskzIfcImport::core
 	};
 
 	// 垂木（構造材ツール StructuralMember、構造用途＝垂木）を描く命令。draw/Rafter がこれを
-	// 構造材オブジェクトへ変換する（docs/DEV-NOTES.md M6・M15）。垂木はホームズ君 IFC に一切
+	// 構造材オブジェクトへ変換する（docs/DEV-NOTES.md M6・M16）。垂木はホームズ君 IFC に一切
 	// 出力されないため、**屋根版（IfcSlab の屋根面）の勾配・外形から導出**した結果がこの命令に
 	// なる（parse/Rafter.h 参照）。
 	//
@@ -357,8 +355,8 @@ namespace HomeskzIfcImport::core
 	//
 	// 【高さの持ち方】elevation は**軒（屋根軸）の天端 Z の絶対値**。野地板は垂木の上に
 	// 載る（野地板下端＝垂木上端）ため、屋根版の平面（＝垂木下面）から垂木せいを鉛直換算して
-	// 持ち上げた値になる（parse/Roof.h 参照）。屋根オブジェクトはレイヤ基準（レイヤ相対）の
-	// 座標系を持つため、描画フェーズが「絶対 Z − レイヤ Z」へ読み替える。
+	// 持ち上げた値になる（parse/Roof.h 参照）。描画側はこの絶対 Z を屋根軸の Z（ovSlabHeight）
+	// へそのまま渡す（draw/Roof.cpp 冒頭「高さは絶対 Z で与える」）。
 	//
 	// フィールド:
 	//   layer                     … 配置先デザインレイヤ名（"n-野地板"）
@@ -712,8 +710,8 @@ namespace HomeskzIfcImport::core
 	// 回した水平軸）・v＝鉛直軸（v=0 が断面原点＝梁下端）。origin は断面原点のワールド
 	// 絶対座標（XY はセンタリング済み・z は絶対値）で、azimuth は押し出し方向（梁の走る
 	// 向き）の方位角（度・+X から反時計回り）。**u 軸の取り方は描画側の復元規約と対で
-	// 決まっている**ので、片方だけ変えてはいけない（parse/Footing の groundBeamModifier と
-	// draw/Footing の ModifierPrism）。
+	// 決まっている**ので、片方だけ変えてはいけない（parse/Footing の groundBeamModifier と、
+	// draw/Footing の CreateModifierPrism が使う core::modifierBasePolygon）。
 	//
 	// 【床付け（beddings）】地中梁の下には捨てコン・砕石を敷く（M17）。同じ押し出しの中で
 	// 断面と区間だけが違うので、プリズム 1 本ぶんの origin / azimuth を共有する入れ子に
@@ -839,15 +837,15 @@ namespace HomeskzIfcImport::core
 		std::vector<ModifierCommand> modifiers;
 	};
 
-	// ハイブリッドシンボルを平面座標＋回転角で置く命令。アンカーボルト・床束・火打・仕口の
-	// 4 種（docs/DEV-NOTES.md M11「シンボル置換系」）が共通で使う。draw/Symbol がこれをシンボル
-	// オブジェクトへ変換する。
+	// ハイブリッドシンボルを平面座標＋回転角で置く命令。アンカーボルト・床束・火打・仕口
+	// （docs/DEV-NOTES.md M11「シンボル置換系」）と継手（M33）の 5 種が共通で使う。draw/Symbol が
+	// これをシンボルオブジェクトへ変換する。
 	//
-	// 【4 要素を 1 つの構造体で受ける】アンカーボルト・床束・火打・仕口は、命令の中身が
-	// (layer,symbol, position ＋ 火打・仕口だけ angle) で同型であり、描画も「配置先レイヤが在
+	// 【5 要素を 1 つの構造体で受ける】アンカーボルト・床束・火打・仕口・継手は、命令の中身が
+	// (layer,symbol, position ＋ 火打・仕口・継手だけ angle) で同型であり、描画も「配置先レイヤが在
 	// るか確かめてシンボルを置く」だけで違いが無い。そこで構造体 1 つ・描画 1 つ（draw/Symbol）
 	// にまとめる（CLAUDE.md「重複を作らない置き場所」）。要素の区別は **Document
-	// のどのリストに入っているか**が担い、進捗の見出しと完了ダイアログの件数は要素ごとに出る。
+	// のどのリストに入っているか**が担い、進捗の見出しと診断ログの内訳は要素ごとに出る。
 	// 角度を持たない命令（アンカーボルト・床束）は angle = 0 ＝シンボルの基準姿勢。
 	// フィールド:
 	//   layer                 … 配置先デザインレイヤ名（既存のみ・無ければスキップ）
@@ -858,7 +856,7 @@ namespace HomeskzIfcImport::core
 	// 【高さは「レイヤ平面からの差」だけを持つ】シンボルの Z は既定で配置先レイヤの
 	// ストーリレベル（基礎天端／底盤天端／横架材天端…）が決める。そこでちょうど合う要素
 	// （アンカーボルト・床束・火打）は zOffset = 0 のままでよい。
-	// **レイヤ平面と実際の取り付き高さがずれる要素だけ** zOffset に差を入れる——仕口は
+	// **レイヤ平面と実際の取り付き高さがずれる要素だけ** zOffset に差を入れる——仕口・継手は
 	// 横架材の天端（傾斜梁・段差梁・母屋／棟木では 1 本ごとに違う）に合わせる必要があり、
 	// レイヤ平面に置いたままでは登り梁の仕口が軒高に落ちてしまう（parse/Joint.h）。
 	//
@@ -893,10 +891,11 @@ namespace HomeskzIfcImport::core
 	// （素のジオメトリやデータタグでは、位置は追えても実断面の変化に追随できず、
 	// 「間違った記号が残る」＝図面としては記号が無いより悪い状態になる。）
 	//
-	// 【PIO はこのプラグインが提供する】Extensions/ExtColumnMark が本体で、モジュールの
-	// 拡張としてメニューコマンドと一緒に登録される（別プラグインにしない）。VW は PIO が
-	// **描いたジオメトリを図面に保存する**ので、プラグインを入れていない環境でも
-	// 図面はそのまま表示できる（更新だけができない。実機で確認済み）。
+	// 【PIO はこのプラグインが提供する】登録は殻の Extensions/ExtColumnMark、作図は本体の
+	// draw/ColumnMarkPio で、モジュールの拡張としてメニューコマンドと一緒に登録される（別
+	// プラグインにしない）。VW は PIO が**描いたジオメトリを図面に保存する**ので、
+	// プラグインを入れていない環境でも図面はそのまま表示できる（更新だけができない。
+	// 実機で確認済み）。
 	//
 	// フィールド:
 	//   layer                        … PIO を置くデザインレイヤ名（断面記号＝span レイヤ
@@ -979,11 +978,11 @@ namespace HomeskzIfcImport::core
 	//   layer                  … PIO を置くデザインレイヤ名（"1-耐力壁"。parse/ShearWall）
 	//   drawClass              … PIO 本体の作図クラス（予約語 class を機械置換）
 	//   targetLayers           … 柱を探すデザインレイヤ名を ";" で連ねたもの
-	//                            （"1to2-柱;1to3-柱"）。**その階を通る span 柱レイヤ
-	//                            すべて**を渡す——管柱と通し柱が別レイヤに分かれ、2 階の
-	//                            壁端の通し柱は 1 階を base とするレイヤ（"1to3-柱"）に
-	//                            載るため、base だけでは端の柱を取り逃がす
-	//                            （parse/ShearWall の spanCoversStory）
+	//                            （"1to2-柱;1to3-柱"）。**その階（伏図レベル）を通る span
+	//                            柱レイヤすべて**を渡す——管柱と通し柱が別レイヤに分かれ、
+	//                            2 階の壁端の通し柱は 1 階を base とするレイヤ（"1to3-柱"）
+	//                            に載るため、base だけでは端の柱を取り逃がす
+	//                            （parse/ShearWall の spanCoversLevel）
 	//   start                  … 軸の始点＝柱芯（センタリング済みの平面座標）
 	//   end                    … 同 終点。**start は (x, y) の辞書順で小さい方**に固定する
 	//                            ——表／裏の左右がこの向きで決まるので、列挙順で反転しては困る
@@ -1070,7 +1069,7 @@ namespace HomeskzIfcImport::core
 	// **測るついでに置き直しも兼ねる**: VW は作成時の挿入点をそのまま守るとは限らない
 	// （ローカル確認で、指定した点ではなく横架材の端部に置かれた）。描画側は最後に実位置を
 	// 測って目標との差だけ動かすので、VW がどこへ置いたかに依らず同じ結果になる
-	// （draw/Tag.cpp「置いた後に測って直す」）。
+	// （draw/Tag.cpp の MovePendingTags）。
 	//
 	// 【スタイル名は持たない】タグの見た目も中身（断面寸法の書式）も、描画側が**タグ 1 本ずつへ
 	// 直接組むタグレイアウト**が決める——データタグスタイルは作らないし当てない（draw/Tag.h の
@@ -1322,8 +1321,8 @@ namespace HomeskzIfcImport::core
 	//   viewPoint                  … **視線の向き**を示す点（指示線の中点から見る側へ
 	//                                 離した点）。断面ビューポートを新規に作るので、視線の
 	//                                 向きは命令が決める。
-	//   viewport                       / 'drawing_title' … 図番（通り名 "X1" / "又い"）・
-	//                                 図面タイトル（"X1通り"）と、映すデザインレイヤ
+	//   viewport                   … 図番（通り名 "X1" / "又い"）・図面タイトル（"X1通り"）と、
+	//                                 映すデザインレイヤ（ViewportCommand）
 	//
 	// **断面の範囲（長さ・高さ・奥行き）は持たない**: **命令ごとに変わる値が無い**ため。
 	// 内訳は 奥行き＝0（＝無限）／高さ＝建物を包む実寸＋余白（core::sectionHeightRange。
@@ -1374,9 +1373,9 @@ namespace HomeskzIfcImport::core
 	// 命令セット本体。プレーンな構造体の集約（std::vector / std::string / double /
 	// enum 等）で表す。
 	//
-	// TODO: 要素を足すときは、ここに命令リストを 1 本足す。
-	//   * M11 anchorBolts / floorPosts / fireBraces / joints（＋ M33 splices） …
-	//   スキーマを変えるときは構造体・validateDocument・テストを同時更新する。
+	// 要素を足すときは、ここに命令リストを 1 本足す（CLAUDE.md「重複を作らない置き場所」の
+	// 「要素を 1 つ足すときの型」）。スキーマを変えるときは構造体・validateDocument・テストを
+	// 同時更新する。
 	struct Document
 	{
 		int version = kDocumentVersion;
@@ -1514,7 +1513,7 @@ namespace HomeskzIfcImport::core
 	// 描画結果の件数
 	// ------------------------------------------------------------------------
 
-	// 命令セットを描画した結果、実際に**描けた**数（命令数ではない）。draw/executeDocument が
+	// 命令セットを描画した結果、実際に**描けた**数（命令数ではない）。draw::executeDocument が
 	// 返し、メニューコマンドの完了ダイアログ（parse/Summary の formatImportResult）が読む。
 	// 命令はあるのに 0 なら「配置先レイヤが無い」「PIO / オブジェクトを作れなかった」等の
 	// 描画側の問題だと分かり、ローカル確認で原因を解析側と切り分けられる（命令数は
@@ -1585,10 +1584,10 @@ namespace HomeskzIfcImport::core
 		//
 		// **undoPartial の真偽では足りない場面がある。** 図面のテンプレートに「共通」等が
 		// 最初から在れば 1 周目からこれは空にならないので、「前の周を戻し忘れた」と
-		// 「もともと在った」を真偽では区別できない。実機フィードバックの往復は、
+		// 「もともと在った」を真偽では区別できない。実機テストは、
 		// **1 周目のこの顔ぶれを基準に**次の周と引き比べて図面が戻っているかを見る
-		// （parse/Feedback の restoredStateLine）。図面の外へ出す値ではないので、
-		// PR コメントには名前そのものを載せず、枚数と判定だけを出す。
+		// （parse/Feedback の restoredStateLine）。報告の「図面の状態:」の行には名前そのものを
+		// 載せず、枚数と判定だけを出す（顔ぶれは診断ログにある）。
 		std::vector<std::string> existingLayers;
 
 		// 描画側で起きた**異常**の説明（無ければ空）。要素ごとに 1 行を改行で連ねる。実描画は
@@ -1607,9 +1606,9 @@ namespace HomeskzIfcImport::core
 	};
 
 	// Document を描画前に検証する。draw/ は検証を通った Document だけを SDK API へ渡す。
-	// 現状はバージョンと stories / floors / rafters / roofs / grids / シンボル 4 種を見る（規
-	// 則は Document.cpp の各 isValid* 参照。空の Document は妥当）。各命令リストの追加に合わせ
-	// て検証規則を足していく。
+	// バージョンと、Document のすべての命令リスト（と sectionSheet・dimensionStandard）を見る
+	// （規則と対象の一覧は Document.cpp の validateDocument と各 isValid* 参照。空の Document は
+	// 妥当）。命令リストを足したら検証規則も足す。
 	bool validateDocument(const Document& document);
 
 	// 図の外周に出る寸法の段のうち最も外のもの（M31）。sheets（伏図）か sections（軸組図）の

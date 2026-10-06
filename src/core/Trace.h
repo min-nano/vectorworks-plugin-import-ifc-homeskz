@@ -8,8 +8,9 @@
 //
 //	【誰が書くか】呼び出しを各要素へ撒かない。フェーズの見出しはすでに進捗報告
 //	（core/Progress の beginPhase）が受け取っているので、**そこ 1 か所から**ログへ流す
-//	（解析 17 フェーズ・描画の各要素がそのまま行になる）。見出し・区切り・結果・例外だけは
-//	入口（Extensions/ExtMenu）が note() で書く。
+//	（解析の 2 フェーズ＝読み込み・解析と、描画の各要素がそのまま行になる）。見出し・区切り・
+//	結果・例外だけは入口（draw/ImportRun。実機テストの周の用意と保存は draw/Feedback）が
+//	note() で書く。
 //
 //	【いつ有効か】**取り込みのたびに必ず開く**（M19）。以前は dev ビルドと
 //	HOMESKZ_IFC_TRACE 指定時だけだったが、完了ダイアログがログをそのまま見せて
@@ -72,8 +73,9 @@ namespace HomeskzIfcImport::core::trace
 
 	// 環境変数の値（未設定・空文字は空文字列）。
 	//
-	// 出力先の差し替え（HOMESKZ_IFC_TRACE にパスを入れる）を SDK 側（Extensions/ExtMenu）が
-	// 読むのに使う。**ここに置くのは、`std::getenv` の作法をこのファイル 1 つへ
+	// 出力先の差し替え（HOMESKZ_IFC_TRACE にパスを入れる）を SDK 側（draw/ImportRun）が
+	// 読むのに使う（実機テストの記憶の置き場所＝core/FeedbackSession も同じ口で読む）。
+	// **ここに置くのは、`std::getenv` の作法をこのファイル 1 つへ
 	// 閉じ込めるため**——MSVC は getenv に C4996（"_dupenv_s を使え"）を出し、無 SDK
 	// ライブラリは /W4 /WX で警告をエラー扱いにしているので、抑止をあちこちに書きたくない。
 	std::string envValue(const char* name);

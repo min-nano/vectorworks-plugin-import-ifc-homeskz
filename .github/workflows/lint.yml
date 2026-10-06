@@ -24,10 +24,10 @@ name: Lint
 #   * actionlint    — validates the GitHub workflows themselves and runs
 #                     shellcheck over every inline `run:` script in them.
 #   * shellcheck    — the stand-alone shell scripts under scripts/.
-#   * PSScriptAnalyzer — static analysis for the PowerShell updater script under
+#   * PSScriptAnalyzer — static analysis for the PowerShell scripts under
 #                     scripts/ (unapproved verbs, unused params, unsafe patterns),
 #                     per PSScriptAnalyzerSettings.psd1. Scoped to the production
-#                     script like clang-tidy/shellcheck, not the tests.
+#                     scripts like clang-tidy/shellcheck, not the tests.
 #   * yamllint      — structural YAML style (.yamllint.yaml) for the workflows
 #                     and Dependabot config.
 #   * editorconfig  — final newline, no trailing whitespace, UTF-8 and LF across
@@ -37,7 +37,7 @@ name: Lint
 # Every tool is pinned so results are stable and match what the checked-in config
 # files were tuned against. Reproduce all of it locally with scripts/lint.sh
 # (add --fix to auto-format), or individually:
-#     clang-format-18 --dry-run --Werror src/*.cpp src/**/*.h tests/*
+#     clang-format-18 --dry-run --Werror $(find src tests -name '*.cpp' -o -name '*.h')
 #     cmake -S . -B build -DVW_BUILD_PLUGIN=OFF -DVW_BUILD_TESTS=ON \
 #           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 #     clang-tidy-18 -p build src/core/*.cpp src/parse/*.cpp src/UpdaterFlow.cpp
@@ -45,7 +45,7 @@ name: Lint
 #     actionlint
 #     shellcheck -x scripts/*.sh
 #     pwsh -c 'Invoke-ScriptAnalyzer -Path scripts -Settings ./PSScriptAnalyzerSettings.psd1'
-#     yamllint .
+#     yamllint --strict .
 #     editorconfig-checker
 
 on:
@@ -62,8 +62,8 @@ permissions:
   contents: read
 
 env:
-  # Pinned tool versions. Keep these in step with scripts/lint.sh so local runs
-  # and CI use the same tools.
+  # Pinned tool versions. scripts/lint.sh uses whatever is installed (pick the
+  # clang with CLANG_SUFFIX), so install these versions locally to match CI.
   CLANG_VERSION: "18"
   CMAKELANG_VERSION: "0.6.13"    # cmake-format + cmake-lint
   YAMLLINT_VERSION: "1.38.0"
@@ -198,8 +198,9 @@ jobs:
           shellcheck --version
           "$(go env GOPATH)/bin/actionlint" -color
 
-  # shellcheck over the stand-alone shell scripts (the updater + this repo's own
-  # lint helper). The workflows' inline scripts are covered by actionlint above.
+  # shellcheck over the stand-alone shell scripts under scripts/ (the updater /
+  # installer / uninstaller / token helper and this repo's own CI and lint
+  # helpers). The workflows' inline scripts are covered by actionlint above.
   shellcheck:
     runs-on: ubuntu-latest
     steps:
@@ -214,12 +215,13 @@ jobs:
           # いない」の一言（SC1091）で落ちる。
           shellcheck -x scripts/*.sh
 
-  # PSScriptAnalyzer over the stand-alone PowerShell script (the Windows updater,
-  # scripts/vw-update.ps1). This is PowerShell's counterpart to clang-tidy and
-  # shellcheck: it flags bug-prone patterns, unapproved cmdlet verbs, unused
-  # parameters, unsafe null comparisons and the like. Like clang-tidy (the SDK-free
-  # src/ logic, not the tests) and shellcheck (scripts/*.sh, not tests/), it lints
-  # the production script under scripts/ — not the test harness under tests/, whose
+  # PSScriptAnalyzer over the stand-alone PowerShell scripts (scripts/vw-update.ps1
+  # / vw-install.ps1 / vw-uninstall.ps1 / vw-token.ps1). This is PowerShell's
+  # counterpart to clang-tidy and shellcheck: it flags bug-prone patterns,
+  # unapproved cmdlet verbs, unused parameters, unsafe null comparisons and the
+  # like. Like clang-tidy (the SDK-free src/ logic, not the tests) and shellcheck
+  # (scripts/*.sh, not tests/), it lints the production scripts under scripts/ —
+  # not the test harness under tests/, whose
   # test doubles legitimately override built-in cmdlets and leave stubs unused. The
   # rule set (full defaults minus a few that conflict with the script's deliberate
   # design) lives in PSScriptAnalyzerSettings.psd1; every surviving finding fails

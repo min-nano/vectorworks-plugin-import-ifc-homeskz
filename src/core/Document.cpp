@@ -6,8 +6,9 @@
 //	現状はバージョンの妥当性と、stories（M3）・floors（M5）・members（M7）・columns（M8）・
 //	walls / slabs（M9）・wallJoins / 底盤の modifiers＝地中梁（M10）・rafters / roofs（M6）・
 //	grids（M1）・シンボル置換系（M11: anchorBolts / floorPosts / fireBraces / joints、M33: splices）・
-//	sheets（M13。シートレイヤ上のグラフィック凡例を含む）・sections（M14）・
-//	ビューポート注釈の断面寸法データタグ（M13）の
+//	columnMarks（M12）・shearWalls（M19）・
+//	sheets（M13。シートレイヤ上のグラフィック凡例を含む）・sections（M14）と sectionSheet（M18）・
+//	ビューポート注釈の断面寸法データタグ（M13）・寸法とレベル記号（M31）の
 //	各命令の必須フィールド・値域を見る。命令リストが追加されるたびに、対応する検証規則
 //	（必須フィールドの有無・参照整合性・値域）をここへ足していく。
 //
@@ -209,7 +210,7 @@ namespace HomeskzIfcImport::core
 				   roof.thickness > 0.0;
 		}
 
-		// シート（伏図）1 枚が妥当か。ビューポート注釈の断面寸法データタグ 1 つが妥当か。
+		// ビューポート注釈の断面寸法データタグ 1 つが妥当か。
 		// 関連付け先の横架材が members の範囲内であること（範囲外の添字は「どの部材にも
 		// 付かないタグ」＝図面に寸法の出ない空のタグが残る）。position / angle は数値
 		// （double なので常に成立）で値域の制限は無い。**スタイル名は見ない**——タグは
@@ -263,13 +264,14 @@ namespace HomeskzIfcImport::core
 				   level.dimensionTier >= -1;
 		}
 
+		// シート（伏図）1 枚が妥当か。
 		// シートレイヤ番号（＝レイヤ名）とタイトルが非空で、ビューポートが表示レイヤを持つ
 		// こと（hasDrawableLayers）。図面タイトル・図番は空でも描ける（ラベルが空になる
 		// だけ）ので弾かない。
 		bool isValidSheet(const SheetCommand& sheet)
 		{
-			// グラフィック凡例（M13）は**載せるか載せないか**しか持たない（配置点は用紙座標
-			// なので値域の縛りが無く、スタイル名も持たない＝スタイル無しで置く。
+			// グラフィック凡例（M13）は**載せるか載せないか**しか持たない（置き場所は描画側が
+			// 用紙から決め、スタイル名も持たない＝スタイル無しで置く。
 			// core/Document.h の LegendCommand）。したがって凡例そのものに検証する項目は無い。
 			return !sheet.number.empty() && !sheet.title.empty() &&
 				   hasDrawableLayers(sheet.viewport);
@@ -958,7 +960,7 @@ namespace HomeskzIfcImport::core
 	{
 		// スタック最下段（背面）へ回すレベル種別か。床（FL）・野地板のレイヤは伏図
 		// ビューポートで柱・梁を覆い隠さないよう全ストーリ分をまとめて背面へ集める（野地板
-		// レベルは M6 で追加済み。この並びの適用先は M13 の per-viewport 上書き。
+		// レベルは M6 で追加済み。この並びの適用先は draw/Story の reorderStoryLayers。
 		// desiredStoryLayerOrder の doc コメント参照）。
 		bool isBackgroundLevel(const std::string& rawType)
 		{
