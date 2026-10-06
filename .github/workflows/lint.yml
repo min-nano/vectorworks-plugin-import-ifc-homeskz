@@ -62,8 +62,8 @@ permissions:
   contents: read
 
 env:
-  # Pinned tool versions. Keep these in step with scripts/lint.sh so local runs
-  # and CI use the same tools.
+  # Pinned tool versions. scripts/lint.sh uses whatever is installed (pick the
+  # clang with CLANG_SUFFIX), so install these versions locally to match CI.
   CLANG_VERSION: "18"
   CMAKELANG_VERSION: "0.6.13"    # cmake-format + cmake-lint
   YAMLLINT_VERSION: "1.38.0"

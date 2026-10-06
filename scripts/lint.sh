@@ -21,7 +21,8 @@
 # Usage:
 #   scripts/lint.sh            # check only; non-zero exit if anything is off
 #   scripts/lint.sh --fix      # auto-fix what can be fixed (clang-format,
-#                              # clang-tidy, cmake-format), then check the rest
+#                              # clang-tidy, cmake-format, PSScriptAnalyzer),
+#                              # then check the rest
 #
 # Any tool that is not installed is reported and skipped, so a partial local run
 # still works — CI remains the complete gate. Install hints are printed per tool.

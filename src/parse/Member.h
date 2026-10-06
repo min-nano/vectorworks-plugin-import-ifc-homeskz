@@ -29,7 +29,8 @@
 //	    平行四辺形。端部は直切り＝鉛直面）を厚み方向へ押し出した任意断面
 //	    （IfcArbitraryClosedProfileDef）で出力される。矩形前提の memberProfileDims では
 //	    拾えず**取りこぼされて全く描画されない**ため、slopedMemberGeometry が平行四辺形の
-//	    4 頂点から中心軸・幅・せい・傾斜を導出する。専用レイヤ "n-登り梁" に置く。
+//	    4 頂点から中心軸・幅・せい・傾斜を導出する。専用レイヤ "n-登り梁" に置く（M36 から
+//	    parse/PlanLevel の noboribariSpan が span レイヤ "{from}to{to}-登り梁" へ移す）。
 //	    誤取り込み防止に、押し出し軸が鉛直な材（火打）は断面種別より**先に**軸で除外し、
 //	    プロファイルが 4 頂点でない材（筋かい＝6 頂点）は導出が失敗してスキップされる。
 //	  * **登り梁の直切りの幾何**: 端部が鉛直面なので、天端中央線の端点は断面中心軸の
@@ -65,7 +66,8 @@ namespace HomeskzIfcImport::parse
 	class Context;
 
 	// 母屋（棟木を含む小屋組の上端材）・登り梁のレベル／レイヤ名。配置先レイヤは
-	// "{接頭辞}-母屋" / "{接頭辞}-登り梁"。文字列の定義は core/Document.h（命令セットの語彙）
+	// "{接頭辞}-母屋" / "{接頭辞}-登り梁"（登り梁はのちに parse/PlanLevel が span レイヤへ
+	// 移す）。文字列の定義は core/Document.h（命令セットの語彙）
 	// にあり、ここはその再公開（parse/Story.h の kLevelFL ほか、parse/Rafter.h の
 	// kLevelTaruki と同じ流儀）。
 	inline constexpr const char* kLevelMoya = core::kLevelMoya;

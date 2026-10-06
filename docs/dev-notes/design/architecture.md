@@ -36,10 +36,8 @@ include しないので、SDK 無し（約 800MB のダウンロード無し）�
 
 ## レイヤ・クラス・レベルの規約は 1 か所に置く
 
-同じ定数・述語を 2 か所に書かない（唯一の置き場所の一覧は開発ガイドの
-[置き場所の一覧](../../development/placement-index.md)）。IFC 属性インデックスは
-`parse/IfcAttr.h`、レベル種別名は `core/Document.h`（`parse/Story.h` が再公開）、基礎の
-レイヤ名・許容値は `parse/Footing.h`、レイヤ名の組み立ては
-`storyLayerName` / `spanLayerName`、記号レイヤ名は `parse/ColumnMark`、構造クラス名は
-`parse/StructuralClass.h`。**要素を足すときに触る場所が 1 行で済む**形を保つ
+同じ定数・述語を 2 か所に書かない。IFC 属性インデックス・レベル種別名・基礎のレイヤ名と
+許容値・レイヤ名の組み立て・記号レイヤ名・構造クラス名などの唯一の置き場所は、開発ガイドの
+[置き場所の一覧](../../development/placement-index.md)にまとめてある（ここには写さない）。
+**要素を足すときに触る場所が 1 行で済む**形を保つ
 （完了ダイアログの要素一覧が `parse/Summary.cpp` の `kElements` 表 1 つなのが典型）。
