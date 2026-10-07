@@ -64,6 +64,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -142,7 +143,8 @@ namespace HomeskzIfcImport::draw
 
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
 						   std::string* note, const ObjectHandles* memberHandles,
-						   std::string* outInfo, core::DrawCounts* outCounts)
+						   std::string* outInfo, core::DrawCounts* outCounts,
+						   const std::function<bool(std::size_t)>& beginFinishing)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
@@ -289,6 +291,9 @@ namespace HomeskzIfcImport::draw
 			placed.push_back(PlacedSheet{&command, viewport, sheetLayer});
 		}
 
+		// ここから先（凡例の実測〜2 巡目）を進捗の別フェーズにする（ヘッダ参照）。
+		const bool finishing = beginFinishing && beginFinishing(placed.size());
+
 		// --- 凡例を実測して割り付けを確定する ---------------------------------------
 		//
 		// **中身を設定するまで凡例の大きさは決まらない**（draw/Legend.h）。設定してから
@@ -325,6 +330,8 @@ namespace HomeskzIfcImport::draw
 		const bool rescale = haveContent && paper.has_value() && layout.scale != provisional.scale;
 		for (const PlacedSheet& sheet : placed)
 		{
+			if (finishing)
+				progress.step();
 			const core::SheetCommand& command = *sheet.command;
 			if (rescale)
 			{

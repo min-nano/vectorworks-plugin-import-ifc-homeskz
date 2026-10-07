@@ -30,6 +30,7 @@
 #include "draw/ObjectHandles.h"
 
 #include <cstddef>
+#include <functional>
 #include <string>
 
 namespace HomeskzIfcImport::draw
@@ -45,6 +46,13 @@ namespace HomeskzIfcImport::draw
 	// 抜ける**（フェーズの見出しと配分は draw/ExecuteDocument が決める）。描画済みの分は
 	// 図面に残る。note には異常（ビューポートを生成できなかった等）の説明を入れる（無ければ空）。
 	//
+	// beginFinishing は 1 巡目（生成）を終えて 2 巡目（縮尺の確定・タグ・寸法・位置合わせ）に
+	// 入るときに 1 度呼ぶ。渡すのは 2 巡目で回る枚数（＝1 巡目でビューポートまで生成できた
+	// 枚数）。進捗の別フェーズを開けたら true を返し、そのときだけ 2 巡目も 1 枚ごとに
+	// 1 ステップ報告する。2 巡目は伏図の所要の 7 割を占めるので、刻まないとバーが数秒
+	// 止まって見える（core::DrawPhase::SheetsFinish）。2 巡目そのものは中止されても行う
+	// （1 巡目で生成した図を仕上げずに残さないため）。
+	//
 	// memberHandles には drawMembers が記録した「命令インデックス → 横架材ハンドル」の
 	// 対応表を渡す。**断面寸法データタグの関連付け先**で、渡さない（nullptr）とタグは
 	// 置かれるが寸法が空になる（draw/Tag.h）。
@@ -59,5 +67,6 @@ namespace HomeskzIfcImport::draw
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
 						   std::string* note = nullptr,
 						   const ObjectHandles* memberHandles = nullptr,
-						   std::string* outInfo = nullptr, core::DrawCounts* outCounts = nullptr);
+						   std::string* outInfo = nullptr, core::DrawCounts* outCounts = nullptr,
+						   const std::function<bool(std::size_t)>& beginFinishing = {});
 } // namespace HomeskzIfcImport::draw

@@ -62,8 +62,11 @@ namespace HomeskzIfcImport::core
 	// 3 桁違うので、下の drawPhaseShare（重み付き）を使う。
 	double phaseShare(std::size_t count, std::size_t total, double totalShare);
 
-	// 描画フェーズの種類（＝Document の命令リスト 1 つ）。並びは draw/ExecuteDocument の
-	// ディスパッチ順で、Count は表の網羅性を固定するための番兵。
+	// 描画フェーズの種類（＝Document の命令リスト 1 つ。伏図だけは 2 巡に分ける）。並びは
+	// draw/ExecuteDocument のディスパッチ順で、Count は表の網羅性を固定するための番兵。
+	//
+	// 伏図を 2 つに分けるのは、2 巡目が伏図の所要の 7 割を占めるから——1 巡目だけを刻むと、
+	// バーが伏図の配分の端で数秒止まって見える（draw/Sheet.h の drawSheets）。
 	enum class DrawPhase : std::size_t
 	{
 		Stories = 0,
@@ -83,7 +86,8 @@ namespace HomeskzIfcImport::core
 		Splices,
 		ColumnMarks,
 		ShearWalls,
-		Sheets,
+		Sheets, // 伏図の 1 巡目（シートレイヤ・ビューポート・凡例の生成）
+		SheetsFinish, // 伏図の 2 巡目（縮尺の確定・タグ・寸法・位置合わせ）。draw/Sheet.h
 		Sections,
 		Count
 	};
@@ -91,9 +95,9 @@ namespace HomeskzIfcImport::core
 	// そのフェーズの **1 件あたりの重さ**（実測値。単位は ms/件）。
 	//
 	// **なぜ件数比では駄目か**: 実測では 1 件あたりの重さが要素で 3 桁違う——仕口は
-	// 0.1ms/件なのに底盤は 670ms/件。件数比で配分すると、シンボル 472 件（全命令の 4 割超）が
-	// 0.05 秒で終わってバーを 4 割進め、その後 33 枚の軸組図（命令の 3%）が 17 秒かけて
-	// 3% しか進まない。**バーの進み方が実態と合わない**ので、実測の重さで按分する。
+	// 0.2ms/件なのに伏図は 800ms/枚。件数比で配分すると、シンボル 470 件（全命令の 3 割弱）が
+	// 0.1 秒で終わってバーを 3 割進め、その後 23 枚の軸組図（命令の 1%）が 15 秒かけて
+	// 1% しか進まない。**バーの進み方が実態と合わない**ので、実測の重さで按分する。
 	double drawWeight(DrawPhase phase);
 
 	// 命令セット全体の重み付き総量（Σ 件数 × 重さ）。drawPhaseShare の分母。
