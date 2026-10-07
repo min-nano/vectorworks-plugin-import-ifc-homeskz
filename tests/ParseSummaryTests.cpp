@@ -592,6 +592,15 @@ TEST(format_log_result_splits_long_items_at_commas)
 	CHECK(text.find("    Param11(説明)=100\n") != std::string::npos);
 }
 
+TEST(fold_record_lines_is_shared_with_the_test_report)
+{
+	// 実機テストの報告（parse/Feedback）も同じ形で見せる。字下げは付けず、空行は除く。
+	const std::string folded = foldRecordLines(
+		"\n短い: そのまま\n\n長い記録: " + std::string(60, 'a') + " / " + std::string(60, 'b'));
+	CHECK_EQ(folded, "短い: そのまま\n長い記録:\n  " + std::string(60, 'a') + "\n  " +
+						 std::string(60, 'b'));
+}
+
 TEST(format_log_result_reports_cancel_and_invalid)
 {
 	DrawCounts cancelled;

@@ -425,24 +425,33 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 改行区切りの説明を、ログの箇条書き（2 字下げ）へ組み替える。長すぎる行は
-		// foldLine で見出しと項目に折る（項目はさらに 2 字下げる）。
+		// foldRecordLines で見出しと項目に折る（項目はさらに 2 字下げる）。
 		std::string indentLines(const std::string& text)
 		{
 			std::string out;
-			std::istringstream in(text);
+			std::istringstream in(foldRecordLines(text));
 			std::string line;
 			while (std::getline(in, line))
-			{
-				if (line.empty())
-					continue;
-				std::istringstream folded(foldLine(line));
-				std::string piece;
-				while (std::getline(folded, piece))
-					out += "  " + piece + "\n";
-			}
+				out += "  " + line + "\n";
 			return out;
 		}
 	} // namespace
+
+	std::string foldRecordLines(const std::string& text)
+	{
+		std::string out;
+		std::istringstream in(text);
+		std::string line;
+		while (std::getline(in, line))
+		{
+			if (line.empty())
+				continue;
+			if (!out.empty())
+				out += "\n";
+			out += foldLine(line);
+		}
+		return out;
+	}
 
 	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts,
 								   const std::string& fileName)
