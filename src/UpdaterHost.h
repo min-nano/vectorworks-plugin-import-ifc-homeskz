@@ -125,6 +125,11 @@ namespace HomeskzIfcImport
 	// とき）。どちらも、いまインストールされているのと同じ sha は選ばない（UpdaterParse.h の
 	// DevSwitchCandidates）。
 	//
+	// **「新しいビルドが無い」と「そのブランチのビルドが無い」は区別する**（NoNewBuild /
+	// NoSuchBranch）。開発版は PR のブランチからしかビルドされない（main は安定版）ので、
+	// main やタイプミスしたブランチを名指しされたときに「新しいビルドは無い」と返すと、
+	// 待てばビルドされるかのように読めてしまう。
+	//
 	// **基準はディスク上にインストールされているビルド**（`q-dev` の `installed=` /
 	// `installed-branch=`）。分からないときだけ shellBranch / shellCommit を使う
 	// （src/UpdaterParse.h の ResolveCurrentDevBuild）。殻にコンパイルされた値は本体だけを
@@ -137,6 +142,7 @@ namespace HomeskzIfcImport
 	enum class RemoteUpdateOutcome
 	{
 		NoNewBuild, // そのブランチに、いまインストールされているのと別のビルドは無い
+		NoSuchBranch, // そのブランチの開発版ビルドが 1 つも無い（名指しの誤り。message に理由）
 		Installed, // インストールして本体をアンロードした（次の呼び出しから新しい本体が動く）
 		NeedsRestart, // インストールしたが殻まで変わった（再起動するまで反映されない）
 		Failed, // インストールできなかった・アンロードできなかった（message に理由）
@@ -148,7 +154,7 @@ namespace HomeskzIfcImport
 		std::string branch; // 探したブランチ
 		std::string previous; // インストール前にインストールされていたビルドの sha
 		std::string commit; // Installed / NeedsRestart のとき、インストールしたビルドの sha
-		std::string message; // 利用者に表示する 1 行（Failed / CheckFailed / NeedsRestart）
+		std::string message; // 利用者に表示する 1 行（Failed / CheckFailed / NeedsRestart / NoSuchBranch）
 	};
 	RemoteUpdateResult RemoteDevUpdateWith(IUpdaterHost& host, const std::string& shellBranch,
 										   const std::string& shellCommit,
