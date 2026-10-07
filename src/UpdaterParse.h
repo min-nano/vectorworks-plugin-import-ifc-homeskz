@@ -400,6 +400,46 @@ namespace HomeskzIfcImport::UpdaterParse
 		return -1;
 	}
 
+	// **名指しされたブランチに開発版ビルドが 1 つも無い**ときの 1 行（MCP の vw_update。
+	// src/UpdaterFlow.cpp の RemoteDevUpdateWith）。ビルドのあるブランチを並べて添える
+	// ——読むのは無人で回っている Claude で、この 1 行だけを手掛かりに名指しし直す。
+	// 開発版が開いている PR のブランチからしかビルドされないことも書く（main を名指しする
+	// 誤りが実際に起きた。PR が閉じると cleanup-dev-release.yml がビルドを消す）。
+	inline std::string NoSuchDevBranchMessage(const std::vector<DevBuild>& builds,
+											  const std::string& branch)
+	{
+		std::string msg;
+		if (branch.empty())
+		{
+			msg += "いまインストールされているビルドのブランチが分からないため、";
+			msg += "更新するビルドを選べません。branch を指定してください。";
+		}
+		else
+		{
+			msg += "ブランチ「" + branch + "」の開発版ビルドはありません。";
+			msg += "開発版は開いている PR のブランチからしかビルドされません";
+			msg += "（main は安定版のみ。PR が閉じるとビルドも消えます）。";
+			msg += "ブランチ名を確かめてください。";
+		}
+		std::vector<std::string> names;
+		for (const DevBuild& b : builds)
+		{
+			if (b.branch.empty())
+				continue;
+			bool seen = false;
+			for (const std::string& n : names)
+				seen = seen || n == b.branch;
+			if (!seen)
+				names.push_back(b.branch);
+		}
+		if (names.empty())
+			return msg + "開発版ビルドのあるブランチはいまありません。";
+		msg += "開発版ビルドのあるブランチ: ";
+		for (std::size_t i = 0; i < names.size(); ++i)
+			msg += (i == 0 ? "" : ", ") + names[i];
+		return msg;
+	}
+
 	// Map the picker's 0-based selection back to an index into the candidate list
 	// (as returned by DevSwitchCandidates). Entry 0 is "keep the current build",
 	// so a selection <= 0 -> -1. A selection past the last candidate is also

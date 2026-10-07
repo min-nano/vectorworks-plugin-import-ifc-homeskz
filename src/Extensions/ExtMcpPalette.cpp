@@ -129,6 +129,8 @@ namespace HomeskzIfcImport
 			{
 			case RemoteUpdateOutcome::NoNewBuild:
 				return "no_new_build";
+			case RemoteUpdateOutcome::NoSuchBranch:
+				return "no_such_branch";
 			case RemoteUpdateOutcome::Installed:
 				return "installed";
 			case RemoteUpdateOutcome::NeedsRestart:
