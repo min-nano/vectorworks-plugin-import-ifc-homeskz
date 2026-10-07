@@ -37,11 +37,12 @@
   起こしてから頼む。`call_with_launch`。M40）。起こすのは `vw_run_test` のときだけで、読む
   道具では起こしません（橋が落ちた理由を調べる前に覆い隠す）。
 - **受け付けは殻の時計（OS のタイマー）が 1 回ずつ呼びます**（M41。`draw::serveMcpBridge` は
-  待たずに戻る）。M30〜M40 はパレットの JS タイマーでしたが、パレットを隠す・Vectorworks が裏に
-  回ると 60 秒に 1 回まで間引かれ、図面が無い間は動きませんでした（[M41](../dev-notes/milestones/m41-bridge-os-timer.md)）。
-  殻の時計は**既定のモードにだけ載せ、undo の記録が開いている刻みは見送ります**（刻みの中の
-  書き込みは開いている記録へ混ざる。[Findings「Timers and Notifications」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Timers%20and%20Notifications.md)）。
-  パレットが出ている間はその JS タイマーも同じ受け付けを呼びます（入れ子では入らない）。**本体の中にループを書かない**——書けば図面がまた塞がります。本体のコードが
+  待たずに戻る）。パレットが表示されている間はその JS タイマーも同じ受け付けを呼びます
+  （入れ子では入らない）。殻の時計は**既定のモードにだけ登録し、undo の記録が開いている間の
+  呼び出しは見送ります**（その間の書き込みは開いている記録へ混ざる。[Findings「Timers and Notifications」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Timers%20and%20Notifications.md)）。
+  M30〜M40 はパレットの JS タイマーでしたが、パレットを隠す・Vectorworks が背面に回ると
+  60 秒に 1 回まで間引かれ、図面が無い間は動きませんでした（[M41](../dev-notes/milestones/m41-bridge-os-timer.md)）。
+  **本体の中にループを書かない**——書けば図面が再び操作できなくなります。本体のコードが
   スタックに載っている間（`PayloadInUse`）は見送ります。例外は `vw_run_test` で、その 1 周が
   終わるまで戻りません（走る前に生存の印へ `busy_until` を書き、Python はそれが未来のうちは
   印が古くても「生きている」と判定します）。

@@ -3,16 +3,16 @@
 //
 //	**MCP ブリッジを常駐させる**（M30 / M41）。殻の時計（OS のタイマー。StartMcpBridgeClock）が
 //	数百 ms ごとに本体の draw::serveMcpBridge（src/draw/McpBridge.h）を呼び、スプールに置かれた
-//	要求を捌いて**すぐ戻る**。戻っている間は Vectorworks が自由に動くので、**人は図面を触った
-//	まま、Claude は図面を読める**。パレット（中身は `resources/common.vwr/html/mcp.html`）は
-//	受け付けの様子を見せる窓で、出ている間はその JS タイマーも同じ受け付けを呼ぶ。
+//	要求を処理して**すぐ戻る**。戻っている間は Vectorworks が通常どおり動くので、**人は図面を
+//	操作したまま、Claude は図面を読める**。パレット（中身は `resources/common.vwr/html/mcp.html`）
+//	は受け付けの状況を表示する画面で、表示されている間はその JS タイマーも同じ受け付けを呼ぶ。
 //
-//	【なぜ OS のタイマーなのか】（M41）SDK に「常時開けておく口」（アイドルコールバック）は
+//	【なぜ OS のタイマーなのか】（M41）SDK に「常時呼ばれる入口」（アイドルコールバック）は
 //	無い。M30〜M40 はパレットの JS タイマーを時計にしていたが、埋め込みブラウザ（CEF）は
-//	**パレットを隠す・Vectorworks が裏に回ると 60 秒に 1 回まで間引き**、**図面が 1 枚も
-//	開いていない間はパレットそのものが出ない**——Claude から実機確認を回すとき、Vectorworks は
-//	たいてい裏にいて、再起動の直後は図面が無い。OS のタイマーはどちらでも間引かれずに刻み、
-//	そこから gSDK を読み書きできる（[SDK リファレンス「Timers and Notifications」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Timers%20and%20Notifications.md)。
+//	**パレットを隠す・Vectorworks が背面に回ると 60 秒に 1 回まで間引き**、**図面が 1 枚も
+//	開いていない間はパレットそのものが表示されない**——Claude から実機確認を行うとき、
+//	Vectorworks はたいてい背面にあり、再起動の直後は図面が無い。OS のタイマーはどちらでも
+//	間引かれずに呼ばれ、そこから gSDK を読み書きできる（[SDK リファレンス「Timers and Notifications」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Timers%20and%20Notifications.md)。
 //	docs/dev-notes/milestones/m41-bridge-os-timer.md）。
 //
 //	【殻に要求されること】（M38）更新（`vw_update`）と再起動（`vw_restart`）は本体の中では

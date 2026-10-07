@@ -106,10 +106,11 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 		VectorWorks::Extension::GROUPID_ExtensionWebPalettes, action, moduleInfo, iid,
 		inOutInterface, cbp, reply);
 
-	// 橋の受け付けを刻む殻の時計（M41。OS のタイマー）。パレットを開かなくても、図面が
-	// 1 枚も開いていなくても受け付ける（Extensions/ExtMcpPalette.h「なぜ OS のタイマーなのか」）。
-	// この関数は何度も呼ばれるが、時計は 1 度しか仕掛けない。**更新の確認はしない**——
-	// 刻みが更新を起こすのは Claude が vw_update を頼んだときだけ。
+	// MCP ブリッジの受け付けを周期的に呼ぶ殻の時計（M41。OS のタイマー）を開始する。
+	// パレットを開かなくても、図面が 1 枚も開いていなくても受け付ける
+	// （Extensions/ExtMcpPalette.h「なぜ OS のタイマーなのか」）。
+	// この関数は何度も呼ばれるが、時計は 1 度しか登録しない。**更新の確認はしない**——
+	// 時計の呼び出しが更新を実行するのは Claude が vw_update を要求したときだけ。
 	HomeskzIfcImport::StartMcpBridgeClock();
 #endif
 

@@ -7,8 +7,8 @@
 #                                     ▼
 #                        スプール（一時ディレクトリの min-nano_structureDev-mcp）
 #                                     ▲
-#                                     │ 拾う／応える
-#                               Vectorworks（起動している間ずっと。殻の時計が拾う。M41）
+#                                     │ 読み取る／応答する
+#                               Vectorworks（起動している間ずっと。殻の時計が読み取る。M41）
 #
 # 【開発版専用】（M38）ブリッジを持つのは開発版（min-nano_structureDev）のプラグインだけで、
 # ローカルの Claude Code がこのリポジトリを開いたとき `.mcp.json` からこのサーバを起動する。
@@ -95,8 +95,8 @@ DEFAULT_WIN_EXE_GLOBS = (
     r"%ProgramFiles%\Vectorworks 2026\Vectorworks2026.exe",
     r"%ProgramFiles%\Vectorworks 2026*\Vectorworks*.exe",
 )
-# 橋が架かるまで待つ既定（秒）。起動そのものに数十秒かかり、殻の時計の最初の刻みは
-# 起動からさらに 10 秒遅らせてある（src/Extensions/ExtMcpPalette.cpp の kClockFirstTickSeconds）。
+# ブリッジが受け付けるまで待つ既定（秒）。起動そのものに数十秒かかり、殻の時計の最初の
+# 呼び出しは起動からさらに 10 秒遅らせてある（src/Extensions/ExtMcpPalette.cpp の kClockFirstTickSeconds）。
 DEFAULT_LAUNCH_WAIT = 120.0
 LAUNCH_POLL_SECONDS = 1.0
 # 再起動を要求してから、ブリッジが**一度停止するのを**待つ上限（秒）。保存の確認が出ていると
