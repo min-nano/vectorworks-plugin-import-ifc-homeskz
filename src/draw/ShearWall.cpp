@@ -433,7 +433,7 @@ namespace HomeskzIfcImport::draw
 				shown += "\n    #" + std::to_string(index) + ": " + probe.text;
 		}
 
-		// 取り込み中のリセットの行（`shearwall: 内法 柱から／控え`）と枚数を照合する。
+		// 取り込み中のリセットの行（`耐力壁 (x, y): 内法 柱から／控え`）と枚数を照合する。
 		// ここで控えが増えていれば「取り込みの後段で柱が見つからなくなった」と読める。
 		std::string text = "耐力壁の測り直し（取り込み後・描かない）: 柱から " +
 						   std::to_string(fromColumns) + " 枚 / 控え " + std::to_string(fallbacks) +

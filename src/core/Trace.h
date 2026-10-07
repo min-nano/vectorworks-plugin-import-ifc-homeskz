@@ -37,6 +37,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 namespace HomeskzIfcImport::core::trace
@@ -58,8 +59,8 @@ namespace HomeskzIfcImport::core::trace
 	const std::string& path();
 
 	// 1 行書いて**即フラッシュする**。開いていなければ何もしない。行頭には open からの
-	// 経過ミリ秒が付く（どのフェーズで時間を使ったかが後から読めるので、進捗バーの
-	// 配分の見直しにも使える）。
+	// 経過ミリ秒が桁を揃えて付く（`[  6319 ms] `）。どのフェーズで時間を使ったかが後から
+	// 読めるので、進捗バーの配分の見直しにも使える。
 	void log(const std::string& message);
 
 	// 経過ミリ秒を**付けずに**そのまま書く（複数行可）。見出しブロックや結果の一覧のように、
@@ -69,6 +70,11 @@ namespace HomeskzIfcImport::core::trace
 	// **これまでに書いた本文**（open からの全行。開けていなければ空）。完了ダイアログの
 	// ログ欄がこれを表示する。close() しても消えない——閉じた後に見せるのが常だから。
 	const std::string& text();
+
+	// **何回目に開いたログか**（一度も開いていなければ 0。open のたびに 1 つ増える）。
+	// 「この取り込みで既に書いたか」を覚えておく側が、前の取り込みの記憶を捨てる合図に使う
+	// （draw/ShearWallPio が、同じ壁の同じ内容を 2 度書かないために持つ）。
+	std::size_t session();
 
 	// open からの経過ミリ秒（開いていなければ 0）。
 	long long elapsedMs();

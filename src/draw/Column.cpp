@@ -412,8 +412,10 @@ namespace HomeskzIfcImport::draw
 		}
 		if (outNotes != nullptr)
 		{
+			// 「N / M 本」と書くと、ログの長い行を " / " で折るとき（parse/Summary の
+			// formatLogResult）に数が 2 行へ裂けるので、全数は括弧に入れる。
 			std::string note = "柱の実測（取り込み後）: 測れた " + std::to_string(measured) +
-							   " / " + std::to_string(document.columns.size()) + " 本。";
+							   " 本（全 " + std::to_string(document.columns.size()) + " 本）。";
 			note += probe.empty() ? "長さ・高さのパラメータを 1 つも引けませんでした。"
 								  : "1 本目 " + probe;
 			*outNotes = std::move(note);

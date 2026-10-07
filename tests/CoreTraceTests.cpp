@@ -66,6 +66,8 @@ TEST(trace_writes_each_line_immediately)
 	// 行頭に経過ミリ秒が付く。
 	CHECK(midway.find("[") == 0);
 	CHECK(midway.find(" ms] ") != std::string::npos);
+	// 経過ミリ秒は 6 桁へ右寄せする（本文の字下げが桁の繰り上がりでずれないように）。
+	CHECK_EQ(midway.find(" ms] "), static_cast<std::size_t>(7));
 
 	trace::log("描画: 開始");
 	trace::close();
@@ -142,6 +144,22 @@ TEST(trace_text_survives_close_and_resets_on_open)
 
 	CHECK(trace::open(path));
 	CHECK(trace::text().find("前回の行") == std::string::npos);
+	trace::close();
+	std::remove(path.c_str());
+}
+
+TEST(trace_session_counts_up_on_each_open_and_survives_close)
+{
+	// 取り込みごとに番号が変わる（「この取り込みで既に書いたか」の記憶を捨てる合図）。
+	// 閉じても番号は変わらない——閉じた後のリセットで書かないのは isOpen が担う。
+	std::string const path = logPath("session");
+	CHECK(trace::open(path));
+	const std::size_t first = trace::session();
+	CHECK(first > 0);
+	trace::close();
+	CHECK_EQ(trace::session(), first);
+	CHECK(trace::open(path));
+	CHECK_EQ(trace::session(), first + 1);
 	trace::close();
 	std::remove(path.c_str());
 }
