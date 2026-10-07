@@ -253,7 +253,7 @@ TEST(draw_phase_share_follows_time_not_command_count)
 	const double joints = drawPhaseShare(284, DrawPhase::Joints, total, 100.0);
 	const double sections = drawPhaseShare(33, DrawPhase::Sections, total, 100.0);
 
-	CHECK(sections > joints * 100.0); // 桁で違う（実測では 0.03 秒 対 17 秒）
+	CHECK(sections > joints * 100.0); // 桁で違う（実測では 0.06 秒 対 15 秒）
 	CHECK(near(joints + sections, 100.0, 1e-9)); // 取りこぼしなく 100% を配る
 }
 
@@ -268,6 +268,45 @@ TEST(draw_phase_share_handles_empty_and_single_phase)
 	document.members.resize(7);
 	const double total = drawWeightedTotal(document);
 	CHECK_EQ(drawPhaseShare(7, DrawPhase::Members, total, 97.0), 97.0);
+}
+
+TEST(draw_phase_share_matches_measured_round)
+{
+	// **重みの表が実測と合っていることの確認**。グレー本モデルプラン1【3階】の実機テスト
+	// （dev ビルド・macOS）の命令数で、伏図・軸組図より前の要素に配るバーの割合が、
+	// 実測の時間の割合（描画 27.3 秒のうち 6.5 秒＝ 24%）に近いこと。
+	// 以前の表ではここが 8 割になり、伏図以降の 21 秒でバーが 2 割しか進まなかった
+	// （docs/dev-notes/design/diagnostics.md「進捗バーの重み」）。
+	Document document;
+	document.stories.resize(5);
+	document.grids.resize(22);
+	document.walls.resize(15);
+	document.wallJoins.resize(20);
+	document.slabs.resize(28);
+	document.floors.resize(3);
+	document.members.resize(196);
+	document.columns.resize(165);
+	document.rafters.resize(106);
+	document.roofs.resize(9);
+	document.anchorBolts.resize(60);
+	document.floorPosts.resize(41);
+	document.fireBraces.resize(28);
+	document.joints.resize(309);
+	document.splices.resize(25);
+	document.columnMarks.resize(16);
+	document.shearWalls.resize(122);
+	document.sheets.resize(8);
+	document.sections.resize(23);
+	const double total = drawWeightedTotal(document);
+
+	const double sheets = drawPhaseShare(8, DrawPhase::Sheets, total, 100.0) +
+						  drawPhaseShare(8, DrawPhase::SheetsFinish, total, 100.0);
+	const double sections = drawPhaseShare(23, DrawPhase::Sections, total, 100.0);
+	const double before = 100.0 - sheets - sections;
+
+	CHECK(before > 15.0 && before < 35.0);	   // 実測 24%
+	CHECK(sheets > 15.0 && sheets < 30.0);	   // 実測 22%（6.0 秒）
+	CHECK(sections > 45.0 && sections < 60.0); // 実測 54%（14.8 秒）
 }
 
 TEST_MAIN();

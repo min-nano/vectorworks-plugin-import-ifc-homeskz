@@ -43,10 +43,16 @@ namespace HomeskzIfcImport::core
 		// 描画フェーズの表。**ここが唯一の一覧**で、要素を追加したら DrawPhase に 1 つ、
 		// この表に 1 行を追加する（Count と行数が食い違えばテストが失敗する）。
 		//
-		// weight は**実測の 1 件あたりミリ秒**（安藤邸 IFC・命令 1,000 超・macOS。診断ログの
-		// フェーズ見出しの時刻差 ÷ 件数を丸めたもの）。絶対値に意味は無く、要素どうしの比だけを
-		// 使う。1 サンプルの粗い値なので、モデルが変われば多少ずれる——それでも件数比
+		// weight は**実測の 1 件あたりミリ秒**（dev ビルド・macOS。診断ログのフェーズ見出しの
+		// 時刻差 ÷ 件数を、2 つのフィクスチャ——グレー本モデルプラン1【3階】（描画 27 秒）と
+		// スキップフロア_サンプル（同 37 秒）——で平均して丸めたもの）。絶対値に意味は無く、
+		// 要素どうしの比だけを使う。モデルが変われば多少ずれる——それでも件数比
 		// （＝全要素が同じ重さという仮定）よりはるかに実時間に近い。
+		//
+		// **描画の処理を変えたら測り直す。** 実機テストの診断ログの見出しの時刻から求まる
+		// （docs/dev-notes/design/diagnostics.md「進捗バーの重み」）。以前の表（安藤邸 IFC で
+		// 測ったもの）は横架材・柱・底盤を 10 倍以上重く見積もっていて、伏図に入る前にバーが
+		// 8 割まで進み、残りの 2 割に描画時間の 4 分の 3 を費やしていた。
 		struct PhaseCost
 		{
 			double weight;							  // 1 件あたりの重さ（ms/件）
@@ -56,23 +62,25 @@ namespace HomeskzIfcImport::core
 		constexpr std::array<PhaseCost, static_cast<std::size_t>(DrawPhase::Count)> kCosts = {{
 			{5.0, [](const Document& d) { return d.stories.size(); }},
 			{4.0, [](const Document& d) { return d.grids.size(); }},
-			{50.0, [](const Document& d) { return d.walls.size(); }},
-			{20.0, [](const Document& d) { return d.wallJoins.size(); }},
-			{670.0, [](const Document& d) { return d.slabs.size(); }},
-			{360.0, [](const Document& d) { return d.floors.size(); }},
-			{130.0, [](const Document& d) { return d.members.size(); }},
-			{93.0, [](const Document& d) { return d.columns.size(); }},
-			{21.0, [](const Document& d) { return d.rafters.size(); }},
-			{19.0, [](const Document& d) { return d.roofs.size(); }},
-			{0.1, [](const Document& d) { return d.anchorBolts.size(); }},
+			{40.0, [](const Document& d) { return d.walls.size(); }},
+			{17.0, [](const Document& d) { return d.wallJoins.size(); }},
+			// 底盤は形で重さが 1 桁変わる（31ms/枚 と 297ms/枚）。2 つの中間を採る。
+			{80.0, [](const Document& d) { return d.slabs.size(); }},
+			{45.0, [](const Document& d) { return d.floors.size(); }},
+			{10.0, [](const Document& d) { return d.members.size(); }},
+			{6.0, [](const Document& d) { return d.columns.size(); }},
+			{10.0, [](const Document& d) { return d.rafters.size(); }},
+			{5.0, [](const Document& d) { return d.roofs.size(); }},
+			{0.15, [](const Document& d) { return d.anchorBolts.size(); }},
 			{0.1, [](const Document& d) { return d.floorPosts.size(); }},
 			{0.2, [](const Document& d) { return d.fireBraces.size(); }},
-			{0.1, [](const Document& d) { return d.joints.size(); }},
-			{0.1, [](const Document& d) { return d.splices.size(); }}, // 仕口と同じ描画方法
-			{6.0, [](const Document& d) { return d.columnMarks.size(); }},
-			{6.0, [](const Document& d) { return d.shearWalls.size(); }},
-			{480.0, [](const Document& d) { return d.sheets.size(); }},
-			{520.0, [](const Document& d) { return d.sections.size(); }},
+			{0.2, [](const Document& d) { return d.joints.size(); }},
+			{0.2, [](const Document& d) { return d.splices.size(); }}, // 仕口と同じ描画方法
+			{2.0, [](const Document& d) { return d.columnMarks.size(); }},
+			{2.0, [](const Document& d) { return d.shearWalls.size(); }},
+			{210.0, [](const Document& d) { return d.sheets.size(); }}, // 1 巡目
+			{620.0, [](const Document& d) { return d.sheets.size(); }}, // 2 巡目
+			{680.0, [](const Document& d) { return d.sections.size(); }},
 		}};
 	} // namespace
 
