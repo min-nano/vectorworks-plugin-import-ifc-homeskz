@@ -408,13 +408,19 @@ namespace HomeskzIfcImport::UpdaterParse
 	inline std::string NoSuchDevBranchMessage(const std::vector<DevBuild>& builds,
 											  const std::string& branch)
 	{
-		std::string msg = branch.empty()
-							  ? std::string("いまインストールされているビルドのブランチが分からないため、"
-											"更新するビルドを選べません。branch を指定してください。")
-							  : "ブランチ「" + branch +
-									"」の開発版ビルドはありません。開発版は開いている PR の"
-									"ブランチからしかビルドされません（main は安定版のみ。PR が"
-									"閉じるとビルドも消えます）。ブランチ名を確かめてください。";
+		std::string msg;
+		if (branch.empty())
+		{
+			msg += "いまインストールされているビルドのブランチが分からないため、";
+			msg += "更新するビルドを選べません。branch を指定してください。";
+		}
+		else
+		{
+			msg += "ブランチ「" + branch + "」の開発版ビルドはありません。";
+			msg += "開発版は開いている PR のブランチからしかビルドされません";
+			msg += "（main は安定版のみ。PR が閉じるとビルドも消えます）。";
+			msg += "ブランチ名を確かめてください。";
+		}
 		std::vector<std::string> names;
 		for (const DevBuild& b : builds)
 		{

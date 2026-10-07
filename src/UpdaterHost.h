@@ -154,7 +154,7 @@ namespace HomeskzIfcImport
 		std::string branch; // 探したブランチ
 		std::string previous; // インストール前にインストールされていたビルドの sha
 		std::string commit; // Installed / NeedsRestart のとき、インストールしたビルドの sha
-		std::string message; // 利用者に表示する 1 行（Failed / CheckFailed / NeedsRestart / NoSuchBranch）
+		std::string message; // 利用者に表示する 1 行（Installed / NoNewBuild では空）
 	};
 	RemoteUpdateResult RemoteDevUpdateWith(IUpdaterHost& host, const std::string& shellBranch,
 										   const std::string& shellCommit,
