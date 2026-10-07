@@ -144,7 +144,7 @@ namespace HomeskzIfcImport::draw
 	std::size_t drawSheets(const core::Document& document, core::ProgressReporter& progress,
 						   std::string* note, const ObjectHandles* memberHandles,
 						   std::string* outInfo, core::DrawCounts* outCounts,
-						   const std::function<bool()>& beginFinishing)
+						   const std::function<bool(std::size_t)>& beginFinishing)
 	{
 		const std::vector<core::SheetCommand>& commands = document.sheets;
 		if (commands.empty())
@@ -292,7 +292,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// ここから先（凡例の実測〜2 巡目）を進捗の別フェーズにする（ヘッダ参照）。
-		const bool finishing = beginFinishing && beginFinishing();
+		const bool finishing = beginFinishing && beginFinishing(placed.size());
 
 		// --- 凡例を実測して割り付けを確定する ---------------------------------------
 		//

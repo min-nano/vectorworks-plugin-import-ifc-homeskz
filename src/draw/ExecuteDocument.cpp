@@ -249,10 +249,18 @@ namespace HomeskzIfcImport::draw
 		{
 			std::string note;
 			std::string info;
-			const auto beginFinishing = [&]
+			// 配分は命令数で決め、刻む回数は 1 巡目で生成できた枚数にする（生成できなかった
+			// 伏図は 2 巡目で回らないので、命令数で刻むとバーがこのフェーズの端まで届かない）。
+			const auto beginFinishing = [&](std::size_t steps)
 			{
-				return beginPhase("伏図を仕上げています…", document.sheets.size(),
-								  core::DrawPhase::SheetsFinish);
+				if (progress.cancelled())
+					return false;
+				progress.beginPhase("伏図を仕上げています…",
+									core::drawPhaseShare(document.sheets.size(),
+														 core::DrawPhase::SheetsFinish,
+														 weightedTotal, core::kDrawShare),
+									steps);
+				return true;
 			};
 			counts.sheets = drawSheets(document, progress, &note, &memberHandles, &info, &counts,
 									   beginFinishing);
