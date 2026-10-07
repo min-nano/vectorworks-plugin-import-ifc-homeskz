@@ -321,6 +321,9 @@ namespace HomeskzIfcImport
 			return sStartedAt;
 		}
 
+		// NOLINTBEGIN(bugprone-empty-catch): 黙って次の刻みを待つのが**この場所では正しい**
+		// 振る舞い（OS のタイマーのコールバックへ例外を漏らさない。受け付けの失敗は本体が
+		// 応答と診断に載せる）。Extensions/ExtMenu.cpp と同じ扱い。
 		void ClockTick()
 		{
 			try
@@ -336,6 +339,7 @@ namespace HomeskzIfcImport
 				// OS のタイマーのコールバックへ例外を漏らさない（SDK のコールバックと同じ扱い）。
 			}
 		}
+		// NOLINTEND(bugprone-empty-catch)
 
 #if defined(__APPLE__)
 		void OnClock(CFRunLoopTimerRef /*timer*/, void* /*info*/)
