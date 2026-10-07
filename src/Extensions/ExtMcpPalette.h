@@ -1,18 +1,19 @@
 //
 //	Extensions/ExtMcpPalette.h
 //
-//	**MCP ブリッジを常駐させるモードレスなパレット**（M30。docs/DEV-NOTES.md）。中身の
-//	HTML（`resources/common.vwr/html/mcp.html`）の JS タイマーが数百 ms ごとに
-//	`vwmcp.serve` を呼び、そのたびに本体の draw::serveMcpBridge（src/draw/McpBridge.h）が
-//	スプールに置かれた要求を処理して**すぐ戻る**。戻っている間は Vectorworks が通常どおり
-//	動くので、**人は図面を操作したまま、Claude は図面を読める**。
+//	**MCP ブリッジを常駐させる**（M30 / M41）。殻の時計（OS のタイマー。StartMcpBridgeClock）が
+//	数百 ms ごとに本体の draw::serveMcpBridge（src/draw/McpBridge.h）を呼び、スプールに置かれた
+//	要求を捌いて**すぐ戻る**。戻っている間は Vectorworks が自由に動くので、**人は図面を触った
+//	まま、Claude は図面を読める**。パレット（中身は `resources/common.vwr/html/mcp.html`）は
+//	受け付けの様子を見せる窓で、出ている間はその JS タイマーも同じ受け付けを呼ぶ。
 //
-//	【なぜパレットなのか】SDK に「常時呼ばれる入口」（アイドルコールバック）は無く
-//	（[SDK リファレンス「レイヤ・ストーリ」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layers%20and%20Stories.md)）、
-//	周期的に動く手段は**パレットの JS タイマー**だけである。JS のタイマーから C++ へ
-//	メインスレッドで呼び出しが届き、**パレットを隠しても時計は止まらない**ことは M24 の往復の
-//	パレットで実機に確かめてある（docs/DEV-NOTES.md M25「隠れたパレットは止まらない」）。
-//	往復ではこの性質が不具合の原因だったが、ここでは**常駐が必要なのでそのまま使う**。
+//	【なぜ OS のタイマーなのか】（M41）SDK に「常時開けておく口」（アイドルコールバック）は
+//	無い。M30〜M40 はパレットの JS タイマーを時計にしていたが、埋め込みブラウザ（CEF）は
+//	**パレットを隠す・Vectorworks が裏に回ると 60 秒に 1 回まで間引き**、**図面が 1 枚も
+//	開いていない間はパレットそのものが出ない**——Claude から実機確認を回すとき、Vectorworks は
+//	たいてい裏にいて、再起動の直後は図面が無い。OS のタイマーはどちらでも間引かれずに刻み、
+//	そこから gSDK を読み書きできる（[SDK リファレンス「Timers and Notifications」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Timers%20and%20Notifications.md)。
+//	docs/dev-notes/milestones/m41-bridge-os-timer.md）。
 //
 //	【殻に要求されること】（M38）更新（`vw_update`）と再起動（`vw_restart`）は本体の中では
 //	実行できない（本体は自分をアンロードできない。src/PayloadSession.h）。本体は要求を
@@ -34,10 +35,9 @@
 //	DoYield で Vectorworks へ制御を返すので、その間にも時計は届く。`vw_run_test` の 1 周も
 //	同じで、実行中に届いた時計は見送る（その 1 周を求めた要求には、終わってから応答する）。
 //
-//	【いつ動き出すか】パレットのページが読み込まれたとき。メニュー「MCP ブリッジを表示…」
-//	（Extensions/ExtMcpMenu.h）が表示を要求する。**Vectorworks を再起動してもパレットは
-//	開いたまま**なので（実機で確認。docs/DEV-NOTES.md M30）、メニューを実行するのは最初の
-//	1 回だけ。
+//	【いつ動き出すか】（M41）**Vectorworks の起動から**（plugin_module_main が殻の時計を
+//	仕掛け、最初の刻みは起動の 10 秒後）。メニュー「MCP ブリッジを表示…」もパレットも
+//	要らない。パレットは様子を見たいときに出す。
 //
 //	【殻に置く理由】拡張の登録は Vectorworks に番地を保持される（PIO と同じ）。ここに置くのは
 //	**登録と取り次ぎ**だけで、受け付けそのものは本体（CLAUDE.md「殻と本体」）。
@@ -105,4 +105,9 @@ namespace HomeskzIfcImport
 
 	// パレットを表示する（メニュー「MCP ブリッジを表示…」から）。
 	void ShowMcpPalette();
+
+	// **殻の時計を動かす**（M41）。OS のタイマー（mac: CFRunLoopTimer / Windows: SetTimer）
+	// で受け付けを刻む——パレットが隠れていても、図面が 1 枚も開いていなくても受け付ける。
+	// plugin_module_main が開発版でだけ呼ぶ（何度呼んでも 1 度しか動かさない）。
+	void StartMcpBridgeClock();
 } // namespace HomeskzIfcImport

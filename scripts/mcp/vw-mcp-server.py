@@ -7,8 +7,8 @@
 #                                     ▼
 #                        スプール（一時ディレクトリの min-nano_structureDev-mcp）
 #                                     ▲
-#                                     │ 読み取る／応答する
-#                               Vectorworks（起動している間ずっと。パレットのタイマーが読み取る）
+#                                     │ 拾う／応える
+#                               Vectorworks（起動している間ずっと。殻の時計が拾う。M41）
 #
 # 【開発版専用】（M38）ブリッジを持つのは開発版（min-nano_structureDev）のプラグインだけで、
 # ローカルの Claude Code がこのリポジトリを開いたとき `.mcp.json` からこのサーバを起動する。
@@ -95,8 +95,8 @@ DEFAULT_WIN_EXE_GLOBS = (
     r"%ProgramFiles%\Vectorworks 2026\Vectorworks2026.exe",
     r"%ProgramFiles%\Vectorworks 2026*\Vectorworks*.exe",
 )
-# ブリッジが受け付けるまで待つ既定（秒）。起動そのものに数十秒かかり、パレットの最初の周期は
-# さらに数秒遅らせてある（resources/common.vwr/html/mcp.html の FIRST_TICK_MS）。
+# 橋が架かるまで待つ既定（秒）。起動そのものに数十秒かかり、殻の時計の最初の刻みは
+# 起動からさらに 10 秒遅らせてある（src/Extensions/ExtMcpPalette.cpp の kClockFirstTickSeconds）。
 DEFAULT_LAUNCH_WAIT = 120.0
 LAUNCH_POLL_SECONDS = 1.0
 # 再起動を要求してから、ブリッジが**一度停止するのを**待つ上限（秒）。保存の確認が出ていると
@@ -301,7 +301,8 @@ class Bridge:
             raise BridgeDown(
                 "Vectorworks 側でブリッジが動いていません。\n"
                 "Vectorworks が起動していなければ vw_launch で起動してください。"
-                "起動しているのに繋がらないときは、Vectorworks のメニュー"
+                "起動しているのに繋がらないときは、起動から 10 秒ほど待つか、"
+                "（M41 より古い開発版なら）図面を開いてメニュー"
                 "「MCP ブリッジを表示…」（開発版だけ）を 1 回実行してください。\n"
                 "（探した場所: %s）" % ", ".join(self.candidates)
             )
@@ -550,9 +551,9 @@ def bridge_status_result(bridge, notify=None):
             "searched": bridge.candidates,
             "hint": (
                 "Vectorworks が起動していなければ vw_launch で起動してください。"
-                "起動していれば、Vectorworks のメニュー「MCP ブリッジを表示…」（開発版の"
-                "プラグインにだけある）を 1 回実行してください（パレットが出て、以後は"
-                "Vectorworks が終わるまで受け付けます）。"
+                "起動していれば、起動から 10 秒ほどで受け付け始めます（M41 以降の開発版）。"
+                "それより古い開発版なら、図面を開いてメニュー「MCP ブリッジを表示…」を"
+                "1 回実行してください（パレットが出ている間だけ受け付けます）。"
                 "それでも見つからないときは、プラグイン名（環境変数 VW_MCP_PLUGIN。既定は"
                 "min-nano_structureDev）か、スプールの場所（環境変数 VW_MCP_SPOOL）を"
                 "確かめてください。"
@@ -713,9 +714,9 @@ def launch_vectorworks(bridge, args, notify):
         "hint": (
             "Vectorworks は起動しましたが、待っている間にブリッジが受け付けませんでした。"
             "起動に時間がかかっているなら、少し待って vw_bridge_status で確かめてください。"
-            "Vectorworks が開いているのに受け付けないときは、メニュー"
-            "「MCP ブリッジを表示…」を 1 回実行してください（パレットが開いていないと"
-            "受け付けません）。"
+            "入っている開発版が M41 より古いと、図面を開いてメニュー"
+            "「MCP ブリッジを表示…」を 1 回実行するまで受け付けません（パレットが"
+            "出ている間だけ受け付ける）。"
         ),
     }, True
 

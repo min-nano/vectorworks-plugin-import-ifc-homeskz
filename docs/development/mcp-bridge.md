@@ -1,7 +1,7 @@
 # MCP ブリッジ（`core/Bridge` ＋ `draw/McpBridge` ＋ `scripts/mcp/vw-mcp-server.py`）
 
 利用者から見た使い方は[「MCP ブリッジ」](../user-guide/mcp-bridge.md)、経緯は
-[M24](../dev-notes/milestones/m24-mcp-bridge.md) / [M30](../dev-notes/milestones/m30-mcp-resident.md) / [M38](../dev-notes/milestones/m38-local-mcp-verification.md)。ここは変えるときの決めごとです。
+[M24](../dev-notes/milestones/m24-mcp-bridge.md) / [M30](../dev-notes/milestones/m30-mcp-resident.md) / [M38](../dev-notes/milestones/m38-local-mcp-verification.md) / [M41](../dev-notes/milestones/m41-bridge-os-timer.md)。ここは変えるときの決めごとです。
 
 **開発版だけの道具です（M38）。** メニュー「MCP ブリッジを表示…」とパレットは開発版
 （`min-nano_structureDev`）にだけ登録し、安定版はクラスを持つだけで登録しません
@@ -34,10 +34,14 @@
   （ブリッジ専用）。例外は 2 つで、どちらも橋の向こうが居ない状態は Python 側でしか
   検知できないので、そこに持ちます: **再起動の見届け**（`vw_restart` と `vw_update` の
   `restarting`）と、**実機テストの起こし方**（`vw_run_test` は、橋が居なければ Vectorworks を
-  起動してから要求する。`call_with_launch`。M40）。起動するのは `vw_run_test` のときだけで、読む
-  道具では起動しません（橋が停止した理由を調べる前にその状態を覆い隠す）。
-- **受け付けは常駐のパレットの時計が 1 回ずつ呼びます**（M30。`draw::serveMcpBridge` は待たずに
-  戻る）。**本体の中にループを書かない**——書けば図面がまた塞がります。本体のコードが
+  起こしてから頼む。`call_with_launch`。M40）。起こすのは `vw_run_test` のときだけで、読む
+  道具では起こしません（橋が落ちた理由を調べる前に覆い隠す）。
+- **受け付けは殻の時計（OS のタイマー）が 1 回ずつ呼びます**（M41。`draw::serveMcpBridge` は
+  待たずに戻る）。M30〜M40 はパレットの JS タイマーでしたが、パレットを隠す・Vectorworks が裏に
+  回ると 60 秒に 1 回まで間引かれ、図面が無い間は動きませんでした（[M41](../dev-notes/milestones/m41-bridge-os-timer.md)）。
+  殻の時計は**既定のモードにだけ載せ、undo の記録が開いている刻みは見送ります**（刻みの中の
+  書き込みは開いている記録へ混ざる。[Findings「Timers and Notifications」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Timers%20and%20Notifications.md)）。
+  パレットが出ている間はその JS タイマーも同じ受け付けを呼びます（入れ子では入らない）。**本体の中にループを書かない**——書けば図面がまた塞がります。本体のコードが
   スタックに載っている間（`PayloadInUse`）は見送ります。例外は `vw_run_test` で、その 1 周が
   終わるまで戻りません（走る前に生存の印へ `busy_until` を書き、Python はそれが未来のうちは
   印が古くても「生きている」と判定します）。
