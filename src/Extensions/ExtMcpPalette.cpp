@@ -21,6 +21,11 @@
 #include <string>
 #include <vector>
 
+#if defined(__APPLE__)
+// 殻の時計（StartMcpBridgeClock）。
+#	include <CoreFoundation/CoreFoundation.h>
+#endif
+
 using namespace HomeskzIfcImport;
 
 namespace HomeskzIfcImport
@@ -205,7 +210,9 @@ namespace HomeskzIfcImport
 			}
 		}
 
-		// 時計 1 刻みぶん。本体へ届けて見え方を返す。
+		// 時計 1 刻みぶん。本体へ届けて見え方を返す。**呼ぶのは 2 つの時計**——殻の OS の
+		// タイマー（StartMcpBridgeClock。受け付けの本線）と、パレットの JS タイマー（見え方を
+		// 描き直すため。パレットが出ている間だけ）。どちらもメインスレッドから来る。
 		std::string ServeOnce()
 		{
 			// **取り込みの最中は本体へ入り直さない**（ExtMcpPalette.h「取り込みの最中は
@@ -213,6 +220,26 @@ namespace HomeskzIfcImport
 			if (PayloadInUse())
 				return ShellView("paused", "取り込みなどの最中なので、終わるまで受け付けを"
 										   "見送っています。");
+
+			// **入れ子で入らない。** 殻に頼まれた更新（RunShellAction）は本体の外で走るので
+			// PayloadInUse では止まらず、その途中で Vectorworks がイベントを回せば、もう一方の
+			// 時計の刻みがここへ入り直しうる。
+			static bool sServing = false;
+			if (sServing)
+				return ShellView("paused", "前の刻みの受け付けが終わるまで見送っています。");
+			sServing = true;
+			struct ServingGuard
+			{
+				ServingGuard(const ServingGuard&) = delete;
+				ServingGuard& operator=(const ServingGuard&) = delete;
+				ServingGuard(ServingGuard&&) = delete;
+				ServingGuard& operator=(ServingGuard&&) = delete;
+				ServingGuard() = default;
+				~ServingGuard()
+				{
+					sServing = false;
+				}
+			} const guard;
 
 			static long long sRetryAt = 0;
 			static std::string sFailure;
@@ -263,7 +290,90 @@ namespace HomeskzIfcImport
 			}
 			return out;
 		}
+
+		// --- 殻の時計（OS のタイマー）---------------------------------------
+		//
+		// **受け付けの本線はパレットの JS タイマーではなく、ここ。** JS タイマーは埋め込み
+		// ブラウザ（CEF）が、パレットを隠す・Vectorworks が裏に回ると 60 秒に 1 回まで間引き、
+		// 図面が 1 枚も開いていない間はパレットそのものが出ない——ローカルの Claude Code から
+		// 実機確認を回すとき、Vectorworks はたいてい裏にいて、再起動の直後は図面が無い
+		// （docs/dev-notes/milestones/m41-bridge-os-timer.md）。OS のタイマーはどちらでも間引かれずに刻み、
+		// その刻みから gSDK を読み書きできる（[SDK リファレンス「Timers and Notifications」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Timers%20and%20Notifications.md)）。
+		//
+		// 決めごと（どれも同 Findings の実測から）:
+		//   * **既定のモード（kCFRunLoopDefaultMode）にだけ載せる。** 共通モードに載せると
+		//     Vectorworks のモーダルダイアログの最中にも刻み、そのとき開いている undo の記録へ
+		//     書き込みが混ざる（利用者の 1 回の取り消しが、無関係な取り込みごと持っていく）。
+		//   * **undo の記録が開いている刻みは見送る**（IsCurrentlyBuildingAnUndoEvent）。
+		//     信用できるのは「開いていない」の側だけなので、開いている間は何もしない。開いた
+		//     ままの置き土産で見送り続けることはありうるが、そのときもパレットが出ていれば
+		//     JS の時計が従来どおり受け付ける。
+		//   * **間隔は当てにしない**（平均 250 ms 強・数秒空くことがある）。受け付けの待ち時間は
+		//     Python 側が時刻で測っている。
+		//   * **起動の直後は待つ。** 起動の最中に本体を読み込みに行かない（パレットの最初の
+		//     刻みを遅らせていたのと同じ理由。resources/common.vwr/html/mcp.html の FIRST_TICK_MS）。
+		constexpr long long kClockFirstTickSeconds = 10;
+		constexpr unsigned kClockIntervalMs = 250;
+
+		long long& ClockStartedAt()
+		{
+			static long long sStartedAt = 0;
+			return sStartedAt;
+		}
+
+		// NOLINTBEGIN(bugprone-empty-catch): 黙って次の刻みを待つのが**この場所では正しい**
+		// 振る舞い（OS のタイマーのコールバックへ例外を漏らさない。受け付けの失敗は本体が
+		// 応答と診断に載せる）。Extensions/ExtMenu.cpp と同じ扱い。
+		void ClockTick()
+		{
+			try
+			{
+				if (gSDK == nullptr || NowSeconds() < ClockStartedAt() + kClockFirstTickSeconds)
+					return;
+				if (gSDK->IsCurrentlyBuildingAnUndoEvent())
+					return;
+				(void)ServeOnce();
+			}
+			catch (...)
+			{
+				// OS のタイマーのコールバックへ例外を漏らさない（SDK のコールバックと同じ扱い）。
+			}
+		}
+		// NOLINTEND(bugprone-empty-catch)
+
+#if defined(__APPLE__)
+		void OnClock(CFRunLoopTimerRef /*timer*/, void* /*info*/)
+		{
+			ClockTick();
+		}
+#elif defined(_WIN32)
+		void CALLBACK OnClock(HWND /*hwnd*/, UINT /*msg*/, UINT_PTR /*id*/, DWORD /*time*/)
+		{
+			ClockTick();
+		}
+#endif
 	} // namespace
+
+	void StartMcpBridgeClock()
+	{
+		static bool sStarted = false;
+		if (sStarted)
+			return;
+		sStarted = true;
+		ClockStartedAt() = NowSeconds();
+#if defined(__APPLE__)
+		// Vectorworks が終わるまで持ち続ける（解放しない。殻は起動中ずっと読み込まれている）。
+		static CFRunLoopTimerRef sTimer = nullptr;
+		sTimer = CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent(),
+									  kClockIntervalMs / 1000.0, 0, 0, &OnClock, nullptr);
+		if (sTimer != nullptr)
+			CFRunLoopAddTimer(CFRunLoopGetMain(), sTimer, kCFRunLoopDefaultMode);
+#elif defined(_WIN32)
+		// ウィンドウを持たないタイマー。WM_TIMER は Vectorworks のメッセージポンプが配る
+		// （同 Findings）。
+		(void)SetTimer(nullptr, 0, kClockIntervalMs, &OnClock);
+#endif
+	}
 
 	void ShowMcpPalette()
 	{
