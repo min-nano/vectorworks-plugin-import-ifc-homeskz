@@ -243,11 +243,19 @@ namespace HomeskzIfcImport::draw
 		// M13 シート（伏図）。**必ず最後**に置く: ビューポートはデザインレイヤ（＝ここまでに
 		// 描画したモデル）を映すので、全要素の描画が済んでいないと空の図になる。表示レイヤの
 		// 絞り込みも、対象のレイヤが揃っていて初めて機能する（draw/Sheet.h）。
+		// 2 巡目（縮尺の確定・タグ・寸法・位置合わせ）は伏図の所要の 7 割を占めるので、
+		// 別のフェーズとして刻む（drawSheets が 1 巡目を終えたところで開く。draw/Sheet.h）。
 		if (beginPhase("伏図を作成しています…", document.sheets.size(), core::DrawPhase::Sheets))
 		{
 			std::string note;
 			std::string info;
-			counts.sheets = drawSheets(document, progress, &note, &memberHandles, &info, &counts);
+			const auto beginFinishing = [&]
+			{
+				return beginPhase("伏図を仕上げています…", document.sheets.size(),
+								  core::DrawPhase::SheetsFinish);
+			};
+			counts.sheets = drawSheets(document, progress, &note, &memberHandles, &info, &counts,
+									   beginFinishing);
 			addDiagnostics(note);
 			addNotes(info);
 		}
