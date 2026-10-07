@@ -349,6 +349,16 @@ namespace HomeskzIfcImport
 		result.previous = current.commit;
 		result.branch = wantedBranch.empty() ? current.branch : wantedBranch;
 
+		// そのブランチのビルドが 1 つも無ければ、名指しの誤り（UpdaterHost.h）。いま
+		// インストールされているビルドも数える——それしか無いのは「新しいビルドが無い」である。
+		std::vector<DevBuild> const all = ParseDevBuilds(out);
+		if (FindDevBuildForBranch(all, result.branch) < 0)
+		{
+			result.outcome = RemoteUpdateOutcome::NoSuchBranch;
+			result.message = NoSuchDevBranchMessage(all, result.branch);
+			return result;
+		}
+
 		std::vector<DevBuild> const others = DevSwitchCandidates(out, current.commit);
 		int const idx = FindDevBuildForBranch(others, result.branch);
 		if (idx < 0)
