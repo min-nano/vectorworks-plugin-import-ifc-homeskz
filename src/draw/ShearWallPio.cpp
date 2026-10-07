@@ -583,11 +583,13 @@ namespace HomeskzIfcImport::draw
 				lastSession = core::trace::session();
 				last.clear();
 			}
+			// 比べるのは**原点を含めた行全体**（壁が動いて原点だけ変わったリセットも書く）。
+			const std::string line = "  耐力壁 " + origin + ": " + text;
 			std::string& previous = last[object];
-			if (previous == text)
+			if (previous == line)
 				return;
-			previous = text;
-			core::trace::log("  耐力壁 " + origin + ": " + text);
+			previous = line;
+			core::trace::log(line);
 		}
 	} // namespace
 
