@@ -196,7 +196,7 @@ namespace HomeskzIfcImport::core
 			{
 				text += "\n    ほか ";
 				text += std::to_string(negligible);
-				text += " 項目（いずれも 1ms 未満）";
+				text += " 項目（いずれも 0.5ms 未満）";
 			}
 		}
 

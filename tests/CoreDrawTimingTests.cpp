@@ -114,7 +114,7 @@ TEST(format_lists_the_heading_total_and_one_line_per_section_under_its_category)
 
 TEST(format_orders_categories_by_their_total_and_folds_negligible_sections)
 {
-	// 分類は**合計の大きい順**（個々の区間が最大のものの順ではない）。1ms に満たない区間は
+	// 分類は**合計の大きい順**（個々の区間が最大のものの順ではない）。0.5ms に満たない区間は
 	// 分類ごとに 1 行へまとめる。分類の無い名前は 1 段目に 1 行で出す。
 	TimingTable table;
 	table.add("タグ:生成", 40.0);
@@ -128,7 +128,7 @@ TEST(format_orders_categories_by_their_total_and_folds_negligible_sections)
 										 "  属性 50ms\n"
 										 "    ペン色 25ms（1 回・25.00ms/回）\n"
 										 "    面色 25ms（1 回・25.00ms/回）\n"
-										 "    ほか 2 項目（いずれも 1ms 未満）\n"
+										 "    ほか 2 項目（いずれも 0.5ms 未満）\n"
 										 "  タグ 40ms\n"
 										 "    生成 40ms（1 回・40.00ms/回）\n"
 										 "  外側 5ms（1 回・5.00ms/回）");
