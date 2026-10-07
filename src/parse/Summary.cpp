@@ -372,8 +372,13 @@ namespace HomeskzIfcImport::parse
 				}
 				// UTF-8 の 1 文字ぶんをまとめて送る（先頭バイトから長さが決まる）。
 				const auto lead = static_cast<unsigned char>(body[i]);
-				const std::size_t length =
-					lead < 0x80U ? 1 : (lead < 0xE0U ? 2 : (lead < 0xF0U ? 3 : 4));
+				std::size_t length = 4;
+				if (lead < 0x80U)
+					length = 1;
+				else if (lead < 0xE0U)
+					length = 2;
+				else if (lead < 0xF0U)
+					length = 3;
 				current += body.substr(i, length);
 				i += length;
 			}
@@ -410,7 +415,12 @@ namespace HomeskzIfcImport::parse
 			const std::string indent(line.find_first_not_of(' '), ' ');
 			std::string out = line.substr(0, colon + 1);
 			for (const std::string& item : items)
-				out += "\n" + indent + "  " + item;
+			{
+				out += "\n";
+				out += indent;
+				out += "  ";
+				out += item;
+			}
 			return out;
 		}
 
