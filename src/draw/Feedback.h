@@ -97,7 +97,7 @@ namespace HomeskzIfcImport::draw
 	// 実機テストを終えた結末（endTestSession）。
 	struct TestCleanupResult
 	{
-		bool done = false;	 // 図面を閉じ、一時ファイル・記憶・報告をすべて片付けたか
+		bool done = false; // 図面を閉じ、一時ファイル・記憶・報告をすべて片付けたか
 		std::string message; // 何をしたか（人と Claude に見せる）
 	};
 

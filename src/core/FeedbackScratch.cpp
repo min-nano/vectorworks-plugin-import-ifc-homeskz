@@ -253,14 +253,16 @@ namespace HomeskzIfcImport::core
 		for (const ScratchDir& dir : dirs)
 		{
 			const bool current = !branch.empty() && dir.branch == branch;
-			const bool used = std::any_of(usedPaths.begin(), usedPaths.end(),
-										  [&dir](const std::string& path)
-										  { return pathIsInside(path, dir.path); });
+			const bool used =
+				std::any_of(usedPaths.begin(), usedPaths.end(), [&dir](const std::string& path)
+							{ return pathIsInside(path, dir.path); });
 			if (current || used)
 				chosen.push_back(dir);
 		}
 		return chosen;
-	}
+		// 閉じ括弧は push_back が例外を投げたときの後始末（chosen の破棄）にしか通らず、
+		// テストでは通らない（gcov の "====="。parse/ShearWall.cpp と同じ）。
+	} // GCOVR_EXCL_LINE
 
 	ScratchCleanup removeScratchDirs(const std::string& root, const std::vector<ScratchDir>& dirs)
 	{

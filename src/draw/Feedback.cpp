@@ -688,7 +688,7 @@ namespace HomeskzIfcImport::draw
 		if (!session.ownedDocuments.empty())
 		{
 			(void)core::writeFeedbackSession(sessionPath, session);
-			notes.push_back("閉じられない図面が残ったので、一時ファイルと記憶は残しました");
+			notes.emplace_back("閉じられない図面が残ったので、一時ファイルと記憶は残しました");
 			result.message = joined();
 			return result;
 		}
@@ -721,7 +721,7 @@ namespace HomeskzIfcImport::draw
 		// 結果として読みうる（M42 で占有を設けた理由と同じ）。
 		core::clearFeedbackSession(sessionPath);
 		core::clearFeedbackSession(core::testReportPathFor(sessionPath));
-		notes.push_back("実機テストの記憶と報告を消しました（次の周は 1 周目から）");
+		notes.emplace_back("実機テストの記憶と報告を消しました（次の周は 1 周目から）");
 		result.done = true;
 		result.message = joined();
 		return result;
