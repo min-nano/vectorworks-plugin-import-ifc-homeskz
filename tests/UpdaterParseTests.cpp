@@ -581,6 +581,21 @@ TEST(find_dev_build_for_branch_picks_only_that_branch)
 	CHECK_EQ(FindDevBuildForBranch(builds, ""), -1);
 }
 
+TEST(no_such_dev_branch_message_covers_unknown_branch_and_no_builds)
+{
+	// ビルドが 1 つも無い（どのブランチにも PR が開いていない）。
+	const std::string none = NoSuchDevBranchMessage({}, "main");
+	CHECK(none.find("「main」") != std::string::npos);
+	CHECK(none.find("開発版ビルドのあるブランチはいまありません。") != std::string::npos);
+
+	// いまのブランチが分からない（刻印も殻の値も空）。名指しを促す。
+	const std::vector<DevBuild> builds = ParseDevBuilds(
+		"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n");
+	const std::string unknown = NoSuchDevBranchMessage(builds, "");
+	CHECK(unknown.find("branch を指定してください。") != std::string::npos);
+	CHECK(unknown.find("開発版ビルドのあるブランチ: feature/x") != std::string::npos);
+}
+
 TEST(find_dev_build_for_branch_takes_the_first_match)
 {
 	// GitHub は新しい順に返すので、同じブランチが 2 つ並んだら先頭が新しい。
