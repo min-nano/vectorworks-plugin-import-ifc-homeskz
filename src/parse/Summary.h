@@ -186,6 +186,12 @@ namespace HomeskzIfcImport::parse
 	std::string formatLogResult(const core::Document& document, const core::DrawCounts& counts,
 								double seconds);
 
+	// **描画側の注意・記録（改行区切り）を読める幅へ折る。** 100 字を超える行は「見出し:」の
+	// 下へ項目（" / "・"。"、それでも長ければ ", " で区切る。括弧の中では区切らない）を
+	// 2 字下げて並べる。空行は除く。診断ログの結果（formatLogResult）と実機テストの報告
+	// （parse/Feedback）が同じ形で見せるために共有する。
+	std::string foldRecordLines(const std::string& text);
+
 	// **取り込み設定（置換するシンボルの対応）の記録**。設定ダイアログで選んだ結果を
 	// ログの見出しの次に置く（docs/DEV-NOTES.md M20）。**「シンボルが 1 つも置かれない」
 	// という報告の原因はまずここ**——取り込まない設定になっていないか、既定と違う対応に

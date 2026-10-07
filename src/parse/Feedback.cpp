@@ -397,9 +397,11 @@ namespace HomeskzIfcImport::parse
 
 		// 描画側が記録した異常と記録。
 		if (!counts.diagnostics.empty())
-			out << "\n### 注意（描画側の異常）\n\n" << codeBlock(counts.diagnostics);
+			out << "\n### 注意（描画側の異常）\n\n"
+				<< codeBlock(foldRecordLines(counts.diagnostics));
 		if (!counts.notes.empty())
-			out << "\n### 記録（用紙の割り付けなど）\n\n" << codeBlock(counts.notes);
+			out << "\n### 記録（用紙の割り付けなど）\n\n"
+				<< codeBlock(foldRecordLines(counts.notes));
 
 		// 診断ログの全文。報告 1 つの上限に収める。削るのは**古いほう**（結果に近い末尾を
 		// 残す）。装飾の分は多めに見積もる。

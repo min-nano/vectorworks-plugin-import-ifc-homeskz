@@ -61,6 +61,7 @@
 | 寸法の測点のまとめ方（`mergeStops` / `unionStops`。許容 `kDimensionMergeTol`）・通り芯の位置（`gridStops`）・レベル記号の表示名 | `parse/Dimension` |
 | 軸組図の図番の一意化（`uniqueSectionNumbers`） | `parse/Section` |
 | 要素の一覧（表示名・助数詞・命令数・描画できた数。`kElements`）・完了／エラーの文言（`importOutcome` 等） | `parse/Summary` |
+| 描画側の注意・記録の長い行の折り返し（`foldRecordLines`。診断ログの結果と実機テストの報告が共有） | `parse/Summary` |
 | 実機テストの結末の文言（`formatTestRoundResult`）・報告の本文（内訳・前の周との差分・図面の状態・診断ログの切り詰め `keepTail`） | `parse/Feedback` |
 
 **`draw/`**

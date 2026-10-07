@@ -123,6 +123,9 @@ namespace HomeskzIfcImport::draw
 			result.startedAt = core::trace::localTimestamp();
 			result.bytes = FileSizeOf(ifcPath);
 			OpenImportTrace(ifcPath);
+			// 見出し（何を・どのビルドで）と準備・設定を節で分ける。ログは「=== 節 ===」で
+			// 準備 → 解析 → 描画 → 結果の順に区切り、読む側は節の見出しで目的の箇所へ飛ぶ。
+			core::trace::note("=== 準備 ===");
 			// **準備は設定より先に書く。** 図面をどう用意したかは、数字を読むより前に
 			// 知りたい 1 行である（実機テストの周だけが渡す。draw/ImportRun.h）。
 			if (!prologue.empty())

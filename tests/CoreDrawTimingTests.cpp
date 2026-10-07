@@ -99,7 +99,7 @@ TEST(format_is_empty_when_nothing_was_measured)
 	CHECK_EQ(table.format("描画の内訳"), "");
 }
 
-TEST(format_lists_the_heading_total_and_one_line_per_section)
+TEST(format_lists_the_heading_total_and_one_line_per_section_under_its_category)
 {
 	TimingTable table;
 	table.add("構造材:リセット", 30.0);
@@ -107,8 +107,31 @@ TEST(format_lists_the_heading_total_and_one_line_per_section)
 	table.add("構造材:名前解決", 10.0);
 
 	CHECK_EQ(table.format("描画の内訳"), "描画の内訳（合計 70ms）:\n"
-										 "  構造材:リセット 60ms（2 回・30.00ms/回）\n"
-										 "  構造材:名前解決 10ms（1 回・10.00ms/回）");
+										 "  構造材 70ms\n"
+										 "    リセット 60ms（2 回・30.00ms/回）\n"
+										 "    名前解決 10ms（1 回・10.00ms/回）");
+}
+
+TEST(format_orders_categories_by_their_total_and_folds_negligible_sections)
+{
+	// 分類は**合計の大きい順**（個々の区間が最大のものの順ではない）。0.5ms に満たない区間は
+	// 分類ごとに 1 行へまとめる。分類の無い名前は 1 段目に 1 行で出す。
+	TimingTable table;
+	table.add("タグ:生成", 40.0);
+	table.add("属性:ペン色", 25.0);
+	table.add("属性:面色", 25.0);
+	table.add("属性:マーカー", 0.2);
+	table.add("属性:線種", 0.1);
+	table.add("外側", 5.0);
+
+	CHECK_EQ(table.format("描画の内訳"), "描画の内訳（合計 95ms）:\n"
+										 "  属性 50ms\n"
+										 "    ペン色 25ms（1 回・25.00ms/回）\n"
+										 "    面色 25ms（1 回・25.00ms/回）\n"
+										 "    ほか 2 項目（いずれも 0.5ms 未満）\n"
+										 "  タグ 40ms\n"
+										 "    生成 40ms（1 回・40.00ms/回）\n"
+										 "  外側 5ms（1 回・5.00ms/回）");
 }
 
 // --- 集計先とスコープ ------------------------------------------------------
