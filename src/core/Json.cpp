@@ -2,7 +2,7 @@
 //	core/Json.cpp
 //
 //	最小 JSON の実装（意図と制約は core/Json.h）。書き出しは再帰、読み取りは深さ制限つきの
-//	再帰下降。**外から来たテキストを読む**ので、壊れた入力で落ちないことを最優先にする。
+//	再帰下降。**外から来たテキストを読む**ので、壊れた入力で異常終了しないことを最優先にする。
 //
 
 #include "core/Json.h"
@@ -24,7 +24,7 @@ namespace HomeskzIfcImport::core
 	{
 		// 入れ子の上限。**外から来たテキストで再帰を深くさせない**ための歯止め
 		// （[[[[[… と書いただけでスタックを溢れさせられるのを防ぐ）。ブリッジが運ぶのは
-		// 素直な 2〜3 段の構造なので、64 段あれば実用上は当たらない。
+		// 素直な 2〜3 段の構造なので、64 段あれば実用上は上限に達しない。
 		constexpr int kMaxDepth = 64;
 
 		// 空のときに返す不変の値（at() が「無ければ null」を返すための実体）。
@@ -88,7 +88,7 @@ namespace HomeskzIfcImport::core
 
 		void AppendNumber(std::string& out, double value)
 		{
-			// 非有限は JSON で表せない。**null に落とす**（例外にすると 1 つの異常値で
+			// 非有限は JSON で表せない。**null に置き換える**（例外にすると 1 つの異常値で
 			// 応答全体が消える）。
 			if (!std::isfinite(value))
 			{
@@ -101,7 +101,7 @@ namespace HomeskzIfcImport::core
 				out += std::to_string(static_cast<long long>(value));
 				return;
 			}
-			// **ロケールを固定する**（小数点がカンマになる環境で壊れた JSON を吐かない）。
+			// **ロケールを固定する**（小数点がカンマになる環境で壊れた JSON を出力しない）。
 			//
 			// **短く書けるなら短く書く。** max_digits10（17 桁）で一律に書くと 0.0125 が
 			// 0.012500000000000001 になり、読む側——人にとっても Claude にとっても——
@@ -201,7 +201,7 @@ namespace HomeskzIfcImport::core
 			}
 
 		private:
-			// **参照ではなく view で持つ**（参照のメンバは clang-tidy が咎める。
+			// **参照ではなく view で持つ**（参照のメンバは clang-tidy が警告する。
 			// 読むだけなので view で足りる）。
 			std::string_view fText;
 			std::size_t fPos = 0;
@@ -379,7 +379,7 @@ namespace HomeskzIfcImport::core
 				return true;
 			}
 
-			// 符号位置を UTF-8 で足す。
+			// 符号位置を UTF-8 で追加する。
 			static void appendUtf8(std::string& out, unsigned int code)
 			{
 				if (code < 0x80U)

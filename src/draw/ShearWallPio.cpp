@@ -4,12 +4,12 @@
 //	耐力壁 PIO のリセット本体（意図は draw/ShearWallPio.h・Extensions/ExtShearWall.h）。
 //	**Extensions/ExtShearWall.cpp から本体（ペイロード）側へ移したもの**で、中身は移設前と
 //	同じ。リセットのたびに、
-//	  1. 自分の両端（線分 PIO の 2 点＝柱芯）をローカル座標へ落とし、
-//	  2. パラメータの対象レイヤ（";" 区切り）から**両端の柱**を探して内側面を求め、
+//	  1. 自身の両端（線分 PIO の 2 点＝柱芯）をローカル座標へ変換し、
+//	  2. パラメータの対象レイヤ（";" 区切り）から**両端の柱**を検索して内側面を求め、
 //	  3. その内側面と下端・上端で決まる「軸組内法」へ、伏図の記号（2D）と軸組図の面（3D）を
-//	     描く
+//	     描画する
 //	という流れで作図する。**内法は毎回実物の柱から導く**ので、柱を動かしても（リセットが
-//	走れば）耐力壁が追随して伸縮する。柱が見つからなければ控えの内法（ClearSpan）を両端の
+//	実行されれば）耐力壁が追随して伸縮する。柱が見つからなければ控えの内法（ClearSpan）を両端の
 //	中央へ置く。
 //
 //	使用する SDK API は ci-debug の sdk-grep で実在を確認したもの:
@@ -20,21 +20,21 @@
 //
 //	【座標系】PIO のジオメトリは**PIO 自身のローカル座標**で持たれる。線分 PIO なので
 //	ローカル X が壁の向き（始点→終点）、ローカル Y が壁面の法線（**+Y が表**）、
-//	ローカル Z が高さになる。柱はワールド座標で見つかるので、描く前に必ず
-//	InversePointTransform でローカルへ落とす（落とさないと PIO を動かした量だけ絵がずれ、
-//	リセットしても同じ相対位置に描き直すので直らない。draw/ColumnMarkPio.cpp で実証済み）。
+//	ローカル Z が高さになる。柱はワールド座標で検出されるので、描画する前に必ず
+//	InversePointTransform でローカルへ変換する（変換しないと PIO を動かした量だけ図形がずれ、
+//	リセットしても同じ相対位置に再描画するので直らない。draw/ColumnMarkPio.cpp で実証済み）。
 //
-//	【診断ログ】リセットのたびに、軸・内法・高さ・記号の離れを診断ログへ 1 行ずつ**自分で**
+//	【診断ログ】リセットのたびに、軸・内法・高さ・記号の離れを診断ログへ 1 行ずつ**自身で**
 //	書く。ログへの書き出し口を入口（draw/ImportRun）へ寄せる規約（CLAUDE.md「重複を作らない
-//	置き場所」）の**唯一の例外**で、PIO のリセットは Vectorworks から直に呼ばれる別の入口だから
-//	である（取り込みの記録へ返す道が無い）。ログが開いているのは取り込みの最中だけなので、
-//	利用者の編集で走るリセットでは何も書かない。1 行ごとにフラッシュされるので、リセットの
-//	途中で落ちたときに、どの壁かが最終行に残る（core/Trace.h）。
+//	置き場所」）の**唯一の例外**で、PIO のリセットは Vectorworks から直接呼ばれる別の入口だから
+//	である（取り込みの記録へ返す経路が無い）。ログが開いているのは取り込みの最中だけなので、
+//	利用者の編集で実行されるリセットでは何も書かない。1 行ごとにフラッシュされるので、リセットの
+//	途中でクラッシュしたときに、どの壁かが最終行に残る（core/Trace.h）。
 //
 //	【実際の見え方はローカルで確認する】記号の大きさ・ハッチングの向き・断面ビューポートで
-//	3D の面がどう出るかは CI では検証できない（CLAUDE.md「テスト方針」）。純計算に落とせる
-//	部分——筋かいの帯を内法で切る形——は core::shearWallBracePolygon に置いて無 SDK で
-//	テストしてある。
+//	3D の面がどう表示されるかは CI では検証できない（CLAUDE.md「テスト方針」）。
+//	純計算として切り出せる部分——筋かいの帯を内法で切る形——は core::shearWallBracePolygon
+//	に置いて無 SDK でテストしてある。
 //
 
 #include "PluginPrefix.h"
@@ -67,20 +67,20 @@ namespace HomeskzIfcImport::draw
 	namespace
 	{
 		// 柱を「この耐力壁の端の柱」とみなす許容（mm）。壁の軸から法線方向にこれ以上
-		// 離れた柱は別の通りのものなので採らない。半柱幅（〜75）＋モデリング誤差を見込む。
+		// 離れた柱は別の通りのものなので対象にしない。半柱幅（〜75）＋モデリング誤差を見込む。
 		constexpr double kColumnOffAxisTol = 300.0;
 
 		// 端の柱とみなす軸方向の許容（mm）。柱芯は耐力壁の端点そのものなので本来 0 だが、
-		// 手で動かした耐力壁でも拾えるだけの余裕を取る。
+		// 手動で動かした耐力壁でも検出できるだけの余裕を取る。
 		constexpr double kColumnAlongTol = 300.0;
 
 		// PIO の実数パラメータを読む。**長さフィールドでも文字列で保持されていることがある**
-		// ので、実数で 0 が返ったら文字列でも試す（書き手側の SetParamRealChecked が実数／
+		// ので、実数で 0 が返ったら文字列でも試す（書き込む側の SetParamRealChecked が実数／
 		// 文字列のどちらでも入れるのと対。draw/DrawUtil.h）。
 		//
 		// **「読めて 0 だった」と「そもそも読めなかった」を区別する。** 前者は正しい 0
-		// （耐力壁の下端は土台天端＝0 が普通）なので 0 を返し、後者だけ fallback へ落とす。
-		// 混同すると、値が 0 の正常なパラメータに既定値が化けて入る。
+		// （耐力壁の下端は土台天端＝0 が普通）なので 0 を返し、後者だけ fallback を返す。
+		// 混同すると、値が 0 の正常なパラメータが誤って既定値に置き換わる。
 		//
 		// 名前は TXString で受ける。構造材の寸法のように ResolveParamName で解決した名前
 		// （ローカライズ名から引いた内部名）を、std::string へ往復させずにそのまま渡すため。
@@ -100,7 +100,7 @@ namespace HomeskzIfcImport::draw
 			if (read && value != 0.0)
 				return value;
 
-			// 文字列としてなら読めることがある（単位付きの表記など）。読めた数だけ採る。
+			// 文字列としてなら読めることがある（単位付きの表記など）。読めた数値だけ採用する。
 			std::string text;
 			try
 			{
@@ -108,7 +108,7 @@ namespace HomeskzIfcImport::draw
 			}
 			catch (...)
 			{
-				text.clear(); // 文字列としても読めない。下の判断へ落とす。
+				text.clear(); // 文字列としても読めない。下の判断へ進む。
 			}
 			if (!text.empty())
 			{
@@ -121,7 +121,7 @@ namespace HomeskzIfcImport::draw
 				}
 				catch (...)
 				{
-					parsed = false; // 数値に見えない文字列。下の判断へ落とす。
+					parsed = false; // 数値に見えない文字列。下の判断へ進む。
 				}
 				if (parsed)
 					return number;
@@ -129,7 +129,7 @@ namespace HomeskzIfcImport::draw
 			return read ? value : fallback;
 		}
 
-		// ";" 区切りのレイヤ名を分解する（空の要素は落とす）。
+		// ";" 区切りのレイヤ名を分解する（空の要素は除外する）。
 		std::vector<std::string> SplitLayers(const std::string& joined)
 		{
 			std::vector<std::string> names;
@@ -148,7 +148,7 @@ namespace HomeskzIfcImport::draw
 			return names;
 		}
 
-		// 見つけた柱 1 本の、PIO ローカル座標での広がり。
+		// 検出した柱 1 本の、PIO ローカル座標での広がり。
 		struct ColumnRange
 		{
 			double loX = 0.0;	  // 軸方向の最小（＝始点側の面）
@@ -160,8 +160,8 @@ namespace HomeskzIfcImport::draw
 		//
 		// ★**柱の位置は柱自身の行列（原点＝柱芯）から取り、外接（GetObjectBounds）は
 		// 使わない。** 取り込み直後に耐力壁を OIP で 1 度編集すると、そのリセットの中でだけ
-		// **柱の外接が本当の位置と違う値を返し**、両端の柱を見失って控えの内法で描かれる
-		// ——絵が柱幅の半分ずれて見えた不具合の正体（#161。編集の前後で耐力壁自身の行列は
+		// **柱の外接が本当の位置と違う値を返し**、両端の柱を検出できず控えの内法で描画される
+		// ——描画結果が柱幅の半分ずれて見えた不具合の原因（#161。編集の前後で耐力壁自身の行列は
 		// 同じなのに、「別の通り」と判定された柱が 61 → 65 本に増え、始端に最も近い柱芯が
 		// 0 → 901mm になった。docs/DEV-NOTES.md M19）。構造材の柱はパスが柱自身のローカル Z
 		// 軸に沿って原点に立つ（パス (0,0,0)→(0,0,H)）ので、行列の原点がそのまま柱芯になる。
@@ -180,7 +180,8 @@ namespace HomeskzIfcImport::draw
 				const VWParametricObj pio(column);
 				// 寸法は ResolveParamName を通して読む（draw/ColumnMarkPio の ColumnSection と
 				// 同じ理由）。日本語環境では universal 名で引くと 0 が返ることがあり、そうなると
-				// 下の外接へ静かに戻って、柱幅の半分ずれる不具合（#161）がぶり返す。
+				// 下の外接へ通知なしにフォールバックして、柱幅の半分ずれる不具合（#161）
+				// が再発する。
 				breadth = ParamReal(pio, draw::ResolveParamName(pio, draw::kFieldMajorBreadth,
 																draw::kLocalizedBreadth));
 				depth = ParamReal(pio, draw::ResolveParamName(pio, draw::kFieldMajorDepth,
@@ -189,11 +190,11 @@ namespace HomeskzIfcImport::draw
 				// （GetObjectToWorldTransform）と同じ座標系でよいのは、ここへ来る柱が
 				// **対象レイヤの直下の図形だけ**だから（下の ClearSpanFromColumns は
 				// FirstMemberObj(layer) → NextObject でレイヤ直下しか辿らない。グループや
-				// シンボルの中の柱は最初から対象外）——入れ物が無ければ 2 つの口は同じ行列を
-				// 返す。実測でも、耐力壁自身の 2 つの口は取り込み時・OIP 編集時とも一致し
+				// シンボルの中の柱は最初から対象外）——コンテナが無ければ 2 つの API は同じ行列を
+				// 返す。実測でも、耐力壁自身の 2 つの API は取り込み時・OIP 編集時とも一致し
 				// （#161: T5005,-2730/0 == M5005,-2730/0）、柱の行列の原点は外接・3D 外接の
-				// 中心と一致した（#161 round 3）。柱をレイヤ直下以外からも拾うように変える
-				// なら、ここも入れ物の行列を掛けた値へ直すこと。
+				// 中心と一致した（#161 round 3）。柱をレイヤ直下以外からも検出するように変える
+				// なら、ここもコンテナの行列を掛けた値へ直すこと。
 				pio.GetObjectMatrix(matrix);
 			}
 			catch (...)
@@ -206,7 +207,7 @@ namespace HomeskzIfcImport::draw
 				const VWPoint3D offset = matrix.GetOffset();
 				const VWPoint2D centre =
 					toWorld.InversePointTransform(VWPoint2D(offset.x, offset.y));
-				// 柱の断面軸（ワールド）を壁の軸（ローカル X）へ射影して、軸方向の半幅を出す。
+				// 柱の断面軸（ワールド）を壁の軸（ローカル X）へ射影して、軸方向の半幅を求める。
 				const VWPoint2D u0 = toWorld.InversePointTransform(VWPoint2D(0.0, 0.0));
 				const VWPoint3D cu = matrix.GetUVector();
 				const VWPoint3D cv = matrix.GetVVector();
@@ -226,7 +227,7 @@ namespace HomeskzIfcImport::draw
 			range.hiX = std::numeric_limits<double>::lowest();
 			double loY = std::numeric_limits<double>::max();
 			double hiY = std::numeric_limits<double>::lowest();
-			// 外接矩形の 4 隅をローカルへ落とす（壁が斜めでも広がりを取り違えない）。
+			// 外接矩形の 4 隅をローカルへ変換する（壁が斜めでも広がりを取り違えない）。
 			const std::array<double, 2> xs = {bounds.left, bounds.right};
 			const std::array<double, 2> ys = {bounds.bottom, bounds.top};
 			for (const double x : xs)
@@ -244,12 +245,12 @@ namespace HomeskzIfcImport::draw
 			return range;
 		}
 
-		// 柱を探した経過（見つからなかったときに、**なぜ**見つからなかったかを診断ログへ
-		// 出すための数え上げ）。見つかったときは使わない。
+		// 柱を検索した経過（見つからなかったときに、**なぜ**見つからなかったかを診断ログへ
+		// 出力するための集計）。見つかったときは使わない。
 		struct ColumnSearch
 		{
 			std::size_t layers = 0;	 // 名前で引けた対象レイヤの数
-			std::size_t columns = 0; // 見た柱（構造用途 4）の数
+			std::size_t columns = 0; // 確認した柱（構造用途 4）の数
 			std::size_t offAxis = 0; // そのうち別の通りとして除いた数
 			double minOffAxis = std::numeric_limits<double>::max(); // 柱の法線方向の離れの最小
 			double nearStart = std::numeric_limits<double>::max(); // 始端に最も近い柱芯までの距離
@@ -278,7 +279,7 @@ namespace HomeskzIfcImport::draw
 					 h = gSDK->NextObject(h))
 				{
 					if (draw::StructuralUseOf(h) != core::kStructuralUseColumn)
-						continue; // 柱（構造用途 4）だけを見る（小屋束・梁は取らない）
+						continue; // 柱（構造用途 4）だけを対象にする（小屋束・梁は除外する）
 					++search.columns;
 
 					const ColumnRange range = LocalRangeOf(h, toWorld);
@@ -311,7 +312,7 @@ namespace HomeskzIfcImport::draw
 
 		// 壁面内の 2D 点列（x＝軸方向・y＝高さ）を、法線方向 offset の鉛直面へ置いた
 		// 3D ポリゴンとして PIO のジオメトリに加える。className が空ならクラスを与えない
-		// （PIO 本体のクラスがそのまま効く）。
+		// （PIO 本体のクラスがそのまま適用される）。
 		void AddPolygon3D(MCObjectHandle host, const std::vector<core::Vec2>& points, double offset,
 						  const char* className)
 		{
@@ -335,13 +336,13 @@ namespace HomeskzIfcImport::draw
 		// 伏図記号 1 つ（シンボルの配置）。定義は draw/ShearWall の EnsureMarkSymbols が
 		// 用意しておく（Extensions/ExtShearWall.h の kShearMark*Symbol）。
 		//
-		// ★**VWFC で作ったシンボルインスタンスはどのコンテナにも入らない**ので
+		// ★**VWFC で生成したシンボルインスタンスはどのコンテナにも入らない**ので
 		//   AddObjectToContainer で PIO（host）へ入れ直す（draw/Symbol.cpp の 1 番目の作法）。
 		//   同じ場所で使っている gSDK->CreateLine / CreateOval は PIO のジオメトリへ自動で
-		//   入るが、**シンボルは入らない**——ここを揃えて書くと静かに消える。
+		//   入るが、**シンボルは入らない**——ここを同じ書き方にすると通知なしに消える。
 		// ★**非 nil を成功と読まない**（PlaceSymbol は定義が無くても非 nil を返す。
 		//   draw/Symbol.cpp の 2 番目の作法）。定義が用意できていない図面では、記号を
-		//   置かずに黙って通す——ログには EnsureMarkSymbols が理由を残している。
+		//   置かずにそのまま進む——ログには EnsureMarkSymbols が理由を残している。
 		void AddMarkSymbol(MCObjectHandle host, const char* name, double x, double y, double scaleX,
 						   double scaleY)
 		{
@@ -352,7 +353,7 @@ namespace HomeskzIfcImport::draw
 				return;
 			// **反転は負の倍率で与える**（VW が反転したシンボルを表す唯一の形。中身は
 			// ovSymbolXScaleFactor / ovSymbolYScaleFactor）。X と Y を別々に持たせるには
-			// 倍率の種別を**非対称**にしておく必要があるので、先に立てる。
+			// 倍率の種別を**非対称**にしておく必要があるので、先に設定する。
 			instance.SetScaleType(kScaleTypeAsymmetric);
 			instance.SetScaleFactorX(scaleX);
 			instance.SetScaleFactorY(scaleY);
@@ -365,7 +366,7 @@ namespace HomeskzIfcImport::draw
 		// （同じ矩形の中で斜辺が交差する＝たすきに見える）。置き場所は内法の中央で、
 		// 三角は**記号を寄せた側へさらに外側**へ伸びる。
 		//
-		// **定義は 1 つで、4 通りの向きは軸ごとの反転で作る**（対応表は
+		// **定義は 1 つで、4 通りの向きは軸ごとの反転で表す**（対応表は
 		// Extensions/ExtShearWall.h）。斜辺の向きが X の反転、寄せる側が Y の反転。
 		void AddBraceTriangle(MCObjectHandle host, double centre, double offset, bool risesToEnd)
 		{
@@ -396,9 +397,9 @@ namespace HomeskzIfcImport::draw
 		//
 		// ★**面は壁芯（法線方向 0）へ置く。実物の離れ（板の中心面）へは置かない。**
 		// 軸組図は**通り芯＝壁芯で切った断面ビューポート**で、切断面より奥は表示しない
-		// 設定にしてある（draw/Section）。実物どおり壁芯から 58.5mm 外した面は、表側は
-		// 手前で切り落とされ裏側は奥に隠れて、**どちらも図に出ない**（実機で確認。M19）。
-		// 筋かいの帯が出るのは offset 0＝切断面の上に載っているからで、面材も同じ扱いにする。
+		// 設定にしてある（draw/Section）。実物どおり壁芯から 58.5mm 離した面は、表側は
+		// 手前で切り落とされ裏側は奥に隠れて、**どちらも図に表示されない**（実機で確認。M19）。
+		// 筋かいの帯が表示されるのは offset 0＝切断面の上に載っているからで、面材も同じ扱いにする。
 		// 両面のときは 2 枚が同じ位置に重なるが、ハッチングは重ねて見える（クラス属性の
 		// 塗りが透ける場合。表裏の見分けはそこに委ねる）。
 		void AddPanelFace(MCObjectHandle host, double clearStart, double clearEnd, double bottom,
@@ -421,12 +422,12 @@ namespace HomeskzIfcImport::draw
 
 		// **PIO が実際に持っているパラメータを診断ログへ 1 度だけ書き出す。**
 		//
-		// パラメータが登録されていなければ setter も getter も黙って通らず、絵が痩せる
-		// （最悪は何も描かれない）——実機でしか起きないうえ、症状からは原因が
-		// 「解析が値を出していない」のか「PIO に届いていない」のか区別できない。
+		// パラメータが登録されていなければ setter も getter も通知なしに失敗し、描画結果が欠ける
+		// （最悪は何も描画されない）——実機でしか起きないうえ、症状からは原因が
+		// 「解析が値を出力していない」のか「PIO に届いていない」のか区別できない。
 		// 登録済みの名前を並べておけば、そのどちらかが 1 行で分かる。
 		// ログが開いていなければ何もしない（ログが開いているのは取り込みの最中だけ——
-		// 利用者の編集で走るリセットでは書かない。core/Trace.h）。
+		// 利用者の編集で実行されるリセットでは書かない。core/Trace.h）。
 		void TraceParameters(const VWParametricObj& pio)
 		{
 			static bool logged = false;
@@ -452,7 +453,7 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// 柱を探した経過を 1 行にする（診断ログ用。見つからなかったときだけ出す）。
+		// 柱を検索した経過を 1 行にする（診断ログ用。見つからなかったときだけ出力する）。
 		std::string DescribeSearch(const ColumnSearch& search, std::size_t layerCount)
 		{
 			const auto distance = [](double value) {
@@ -466,13 +467,13 @@ namespace HomeskzIfcImport::draw
 				   distance(search.nearStart) + "・終端 " + distance(search.nearEnd);
 		}
 
-		// 軸組内法をどう決めたか。recalculateShearWall（描く）と probeShearWall（dev の
-		// 測り直し。描かない）が**同じ決め方**を通るよう 1 つにまとめる——別々に書くと、
-		// 測り直しが描いたものと違う経路を見て「再現しない」と読み違える。
+		// 軸組内法をどう決めたか。recalculateShearWall（描画する）と probeShearWall（dev の
+		// 再測定。描画しない）が**同じ決め方**を通るよう 1 つにまとめる——別々に書くと、
+		// 再測定が描画したものと違う経路をたどって「再現しない」と読み違える。
 		struct ClearSpan
 		{
-			bool ok = false;		  // 内法が決まった（false なら描かない）
-			bool fromColumns = false; // 柱から引けた（false なら控え）
+			bool ok = false;		  // 内法が決まった（false なら描画しない）
+			bool fromColumns = false; // 柱から求められた（false なら控え）
 			double start = 0.0;		  // 内法の始まり（ローカル x）
 			double end = 0.0;		  // 内法の終わり（ローカル x）
 			std::string axis;		  // 軸の取り方（診断ログ用）
@@ -485,10 +486,10 @@ namespace HomeskzIfcImport::draw
 
 			// ★**両端が取れないことを想定する。** 線分として置けていれば
 			// GetLinearObjectPos が 2 点を返すが、1 点のオブジェクトとして置かれていれば
-			// 例外か縮退した 2 点が返る。そこで諦めると図面から耐力壁が丸ごと消える
-			// （症状からは何が起きたか分からない）ので、**控えの内法から軸を組み直す**——
+			// 例外か縮退した 2 点が返る。そこで中断すると図面から耐力壁が丸ごと消える
+			// （症状からは何が起きたか分からない）ので、**控えの内法から軸を再構築する**——
 			// 挿入点は始端の柱芯・ローカル +X は壁の向き（draw/ShearWall が角度も与える）
-			// なので、原点から控えの内法ぶん伸ばせば柱の探索窓としては十分に近い。
+			// なので、原点から控えの内法の分だけ伸ばせば柱の探索窓としては十分に近い。
 			double startX = 0.0;
 			double endX = 0.0;
 			bool haveAxis = false;
@@ -524,7 +525,7 @@ namespace HomeskzIfcImport::draw
 				result.axis += "・軸を控えの内法から組み直す x=[0, " + Number(endX) + "]";
 			}
 
-			// 軸組内法。**実物の柱から引くのが本筋**で、見つからないときだけ控えを使う。
+			// 軸組内法。**実物の柱から求めるのが原則**で、見つからないときだけ控えを使う。
 			const std::vector<std::string> layers =
 				SplitLayers(draw::PioParamString(self, kParamShearTargetLayers));
 			ColumnSearch search;
@@ -557,7 +558,7 @@ namespace HomeskzIfcImport::draw
 	// -------------------------------------------------------------------
 	EObjectEvent recalculateShearWall(MCObjectHandle object)
 	{
-		// リセット以外の経路で空のまま呼ばれても落とさないよう nil を見ておく。
+		// リセット以外の経路で空のまま呼ばれてもクラッシュしないよう nil を確認しておく。
 		if (object == nil)
 			return kObjectEventNoErr;
 
@@ -566,7 +567,7 @@ namespace HomeskzIfcImport::draw
 			const VWParametricObj self(object);
 			TraceParameters(self);
 
-			// 両端（柱芯）をローカルへ落とす。線分 PIO のローカル X が壁の向き、
+			// 両端（柱芯）をローカルへ変換する。線分 PIO のローカル X が壁の向き、
 			// +Y が表側になる（ファイル冒頭「座標系」）。
 			VWTransformMatrix toWorld;
 			self.GetObjectToWorldTransform(toWorld);
@@ -590,13 +591,13 @@ namespace HomeskzIfcImport::draw
 				ParamReal(self, kParamShearMarkOffset, kShearMarkOffsetDefault);
 			core::trace::log("  shearwall: 記号の離れ " + Number(markOffset) + "mm");
 
-			// 軸組内法の高さ。**ここが取れなくても伏図の記号は描く**——記号は平面だけで
-			// 決まるので、高さの取りこぼしで図面から耐力壁が丸ごと消えるのは割に合わない
+			// 軸組内法の高さ。**ここが取得できなくても伏図の記号は描画する**——記号は平面だけで
+			// 決まるので、高さを取得できないことで図面から耐力壁が丸ごと消えるのは避ける
 			// （Extensions/ExtShearWall.h「絵を全部止めない」）。
 			//
 			// 上端は**内法の両端（柱の内側面）ごとに持つ**（登り梁の下では左右で違う）。
 			// 終点側が下端以下なら始点側と同じとみなす——終点側のパラメータが無かった頃に
-			// 置いた PIO は既定値 0 のまま読まれるので、水平の耐力壁として描き続ける
+			// 置いた PIO は既定値 0 のまま読まれるので、水平の耐力壁として描画し続ける
 			// （Extensions/ExtShearWall.h の kParamShearTopEnd）。
 			const double bottom = ParamReal(self, kParamShearBottom);
 			const double topAtStart = ParamReal(self, kParamShearTop);
@@ -616,7 +617,7 @@ namespace HomeskzIfcImport::draw
 				const bool back = side == kShearSideBack || side == kShearSideBoth;
 
 				// 伏図の記号は**実物の離れ（板の中心面）ではなく MarkOffset で置く**。実物の
-				// 離れは半柱幅ほどしかなく、壁芯に載る横架材（土台・胴差）の下へ必ず潜る。
+				// 離れは半柱幅ほどしかなく、壁芯に載る横架材（土台・胴差）の下に必ず隠れる。
 				// 表・裏の区別は「どちら側へ寄せるか」で保たれる。
 				// 軸組図の面は逆に**壁芯へ置く**（AddPanelFace の doc コメント）。
 				if (front)
@@ -652,9 +653,9 @@ namespace HomeskzIfcImport::draw
 			if (doubleBrace)
 				AddBraceTriangle(object, markCentre, markOffset, !risesToEnd);
 
-			// 軸組図: 形状どおりの帯。見付け幅が取れないと帯にならないので、そのときは
+			// 軸組図: 形状どおりの帯。見付け幅が取得できないと帯にならないので、そのときは
 			// 伏図の記号だけで済ませる。たすき掛けは risesToEnd の側を手前として帯のまま
-			// 描き、逆向きの奥の 1 本は手前の帯の縁で切った 2 片で描く（2 本とも帯のままだと
+			// 描画し、逆向きの奥の 1 本は手前の帯の縁で切った 2 片で描画する（2 本とも帯のままだと
 			// 交差部で輪郭が突き抜けて格子に見える。core::shearWallBehindBracePieces）。
 			if (hasHeight && width > 0.0)
 			{
@@ -673,9 +674,9 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// 1 枚の異常で耐力壁全体を落とさない（CLAUDE.md「エラーハンドリング」）。
+			// 1 枚の異常で耐力壁全体を停止させない（CLAUDE.md「エラーハンドリング」）。
 			// kObjectEventHadError を返すと VW がオブジェクトをエラー表示にするので、
-			// ここまでに描けたものを残したまま正常終了として抜ける（柱記号 PIO と同じ）。
+			// ここまでに描画できたものを残したまま正常終了として抜ける（柱記号 PIO と同じ）。
 			core::trace::log("  shearwall: 例外（ここまでに描けたものを残して抜ける）");
 			return kObjectEventNoErr;
 		}

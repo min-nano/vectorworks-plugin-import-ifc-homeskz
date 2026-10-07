@@ -8,7 +8,7 @@
 //
 //	手順:配置先レイヤを用意 → CreateCustomObject で PIO を作る → 本体のクラスを設定
 //	→パラメータ（検索対象レイヤ・クラス・記号スタイル・シンボル）を書く → ResetObject
-//	リセットで PIO 本体（Extensions/ExtColumnMark）が対象レイヤを検索して記号を描く。
+//	リセットで PIO 本体（Extensions/ExtColumnMark）が対象レイヤを検索して記号を描画する。
 //
 //	**パラメータは PIO 本体と同じ名前**でなければ黙って無視される（M6 の垂木で実証済み。
 //	draw/DrawUtil の ResolveParamName の doc コメント）。名前の定義は 1 か所に集めたい
@@ -36,7 +36,7 @@ namespace HomeskzIfcImport::draw
 		// 記号 1 つを置く。PIO を作ってパラメータを書き、リセットまでできたら true。
 		bool PlaceOne(const core::ColumnMarkCommand& mark)
 		{
-			// 挿入点は原点でよい（記号は検索した柱の位置に描かれる）。第 4 引数
+			// 挿入点は原点でよい（記号は検索した柱の位置に描画される）。第 4 引数
 			// bInsert=true でアクティブレイヤへ入れる。
 			const MCObjectHandle object =
 				gSDK->CreateCustomObject(TXString(kColumnMarkUniversalName),
@@ -44,7 +44,7 @@ namespace HomeskzIfcImport::draw
 			if (object == nil)
 				return false;
 
-			// PIO 本体のクラス（記号の線・シンボルはこのクラスの属性で描かれる）。
+			// PIO 本体のクラス（記号の線・シンボルはこのクラスの属性で描画される）。
 			SetClassByName(object, mark.drawClass);
 
 			try
@@ -64,7 +64,7 @@ namespace HomeskzIfcImport::draw
 				return false;
 			}
 
-			// リセットでここが本体の Recalculate を呼び、記号が描かれる。
+			// リセットでここが本体の Recalculate を呼び、記号が描画される。
 			gSDK->ResetObject(object);
 			return true;
 		}

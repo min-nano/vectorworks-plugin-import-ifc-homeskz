@@ -1,7 +1,7 @@
 //
 //	CoreTraceTests.cpp
 //
-//	診断ログ（src/core/Trace）の単体テスト。無 SDK のテストハーネスで走る。
+//	診断ログ（src/core/Trace）の単体テスト。無 SDK のテストハーネスで実行する。
 //	出力先は CMake が渡すビルドディレクトリ（HOMESKZ_TRACE_TEST_DIR）で、各ケースは
 //	書いたファイルを必ず消してから終わる。
 //
@@ -36,7 +36,7 @@ namespace
 	// （cpp/path-injection）と報告する。テストが書く先は CMake から受け取るビルド
 	// ディレクトリで十分——共有の一時ディレクトリを汚さずに済むという実利もある。
 	// `defaultLogPath` 自体は下の default_log_path_… が**文字列として**検証する
-	// （ファイルは開かないので流れが繋がらない）。
+	// （ファイルは開かないのでデータの流れがつながらない）。
 	std::string logPath(const std::string& name)
 	{
 		return std::string(HOMESKZ_TRACE_TEST_DIR) + "/homeskz-trace-test-" + name + ".log";
@@ -60,7 +60,7 @@ TEST(trace_writes_each_line_immediately)
 	CHECK_EQ(trace::path(), path);
 
 	trace::log("解析: 開始");
-	// **閉じる前に読める**ことが肝心（落ちてもバッファに残さない＝1 行ごとにフラッシュ）。
+	// **閉じる前に読める**ことが要点（異常終了してもバッファに残さない＝1 行ごとにフラッシュ）。
 	std::string const midway = readAll(path);
 	CHECK(midway.find("解析: 開始") != std::string::npos);
 	// 行頭に経過ミリ秒が付く。
@@ -82,7 +82,7 @@ TEST(trace_writes_each_line_immediately)
 
 TEST(trace_reopen_truncates)
 {
-	// 欲しいのは「最後に落ちたときの記録」なので、開き直したら前回の行は残さない。
+	// 欲しいのは「最後に異常終了したときの記録」なので、開き直したら前回の行は残さない。
 	std::string const path = logPath("truncate");
 	CHECK(trace::open(path));
 	trace::log("前回の行");
@@ -99,7 +99,7 @@ TEST(trace_reopen_truncates)
 TEST(trace_open_failure_still_records_in_memory)
 {
 	// 書けない場所を指されても false を返すだけ（診断は付随機能で、インポートは続く）。
-	// **それでも本文は溜める**——完了ダイアログのログ欄はメモリの本文を見せるので、
+	// **それでも本文は蓄積する**——完了ダイアログのログ欄はメモリの本文を表示するので、
 	// 一時ディレクトリへ書けない環境でも「何が起きたか」は読める（core/Trace.h）。
 	CHECK(!trace::open("/this/directory/does/not/exist/homeskz.log"));
 	CHECK(trace::isOpen()); // セッションは開いている（ファイルに書けているとは限らない）
@@ -125,14 +125,14 @@ TEST(trace_note_writes_without_the_elapsed_prefix)
 	// note の行には ms が付かない（log の行には付く）。
 	CHECK(text.find(" ms] 日時") == std::string::npos);
 	CHECK(text.find(" ms] 解析: 開始") != std::string::npos);
-	// 書いたものはメモリの本文とも一致する（ダイアログのログ欄が見せるのはこちら）。
+	// 書いたものはメモリの本文とも一致する（ダイアログのログ欄が表示するのはこちら）。
 	CHECK_EQ(trace::text(), text);
 	std::remove(path.c_str());
 }
 
 TEST(trace_text_survives_close_and_resets_on_open)
 {
-	// **閉じても本文は残る**（完了ダイアログは閉じた後にログを見せる）。次の取り込みで
+	// **閉じても本文は残る**（完了ダイアログは閉じた後にログを表示する）。次の取り込みで
 	// 開き直したら前回の本文は消える（ファイルと同じく「今回の記録」だけを持つ）。
 	std::string const path = logPath("text");
 	CHECK(trace::open(path));
@@ -148,7 +148,7 @@ TEST(trace_text_survives_close_and_resets_on_open)
 
 TEST(env_value_reads_the_environment)
 {
-	// 立っていない変数は空・false。**getenv を使うのは core/Trace だけ**なので、その
+	// 設定されていない変数は空・false。**getenv を使うのは core/Trace だけ**なので、その
 	// 読み取り（未設定・空文字の扱い）はここで固定しておく。
 	CHECK(trace::envValue("HOMESKZ_IFC_TRACE_DEFINITELY_NOT_SET").empty());
 	CHECK(!trace::envFlag("HOMESKZ_IFC_TRACE_DEFINITELY_NOT_SET"));
@@ -181,8 +181,8 @@ TEST(default_log_path_uses_temp_dir_and_single_separator)
 
 TEST(progress_phases_land_in_the_trace)
 {
-	// **トレースの呼び出しを各要素へ撒かない**設計の要: 進捗のフェーズ見出しが
-	// そのままログの行になる（core/Progress の beginPhase が 1 か所で流す）。
+	// 進捗のフェーズ見出しがそのままログの行になる（core/Progress の beginPhase が
+	// 1 か所で出力する）。**トレースの呼び出しを各要素に書かない**設計の要点。
 	std::string const path = logPath("phases");
 	CHECK(trace::open(path));
 

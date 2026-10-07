@@ -198,7 +198,7 @@ TEST(MergeStopsSortsAndMergesNearbyValues)
 
 TEST(UnionStopsKeepsTheGridValue)
 {
-	// 部材（0.5・909.8）が通り芯（0・910）の上にあれば通り芯の値が残り、455 だけが足される。
+	// 部材（0.5・909.8）が通り芯（0・910）の上にあれば通り芯の値が残り、455 だけが追加される。
 	CHECK(sameValues(parse::unionStops({0.0, 910.0}, {0.5, 455.0, 909.8}), {0.0, 455.0, 910.0}));
 }
 
@@ -628,7 +628,7 @@ TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)
 
 namespace
 {
-	// 軒桁（クラスで見分ける。幅 120）。
+	// 軒桁（クラスで判別する。幅 120）。
 	MemberCommand makeEavesGirder(const std::string& layer, Vec2 start, Vec2 end,
 								  double elevation = 3264.0)
 	{
@@ -981,7 +981,7 @@ TEST(SectionDimensionsPutUpperColumnsAndKoyazukaAboveTheDrawing)
 	// 軒高 6000 ではない）。
 	const double top = 4500.0;
 	// 上の 1 段目: 2 階の柱すべて（1 階と重なる 0・1820 も含む）。2 段目: 小屋束に、
-	// 小屋束が立つ 2 階の外壁芯（2 階の柱の両端 0・1820）を足したもの。
+	// 小屋束が立つ 2 階の外壁芯（2 階の柱の両端 0・1820）を加えたもの。
 	const DimensionChainCommand* upper = findChain(chains, DimensionAxis::Horizontal, 1, 0);
 	CHECK(upper != nullptr);
 	if (upper != nullptr)
@@ -1055,7 +1055,7 @@ TEST(SectionDimensionsMeasureRoofPostsFromTheBuildingPerimeter)
 TEST(SectionDimensionsStopAtTheOuterWallNotTheNearbyGrid)
 {
 	// 外壁芯（柱 1775）の 45mm 外に通り芯 Y2（1820）がある（い通りの 8通りの形）。外壁の
-	// 土台の端（1775）は通り芯へ寄せず、通り芯の上の切り口（1820）も最外周に足さない
+	// 土台の端（1775）は通り芯へ寄せず、通り芯の上の切り口（1820）も最外周に加えない
 	// （45 を出さない）。
 	Document document;
 	document.stories = twoStoreyStories();
@@ -1081,7 +1081,7 @@ TEST(SectionTopDimensionsSitOnThisSectionsFrame)
 	// 天端 4000→5000）の切り口の高さ（中央＝4500）と、切断面に乗る材の天端の高い方が
 	// 根元になる。切断面から離れた高い材（y=9000 の 7000）は数えない。
 	Document document = sectionDocument();
-	document.members.erase(document.members.begin() + 2); // 母屋（4500）を外す
+	document.members.erase(document.members.begin() + 2); // 母屋（4500）を削除する
 	MemberCommand rising =
 		makeMember("2-横架材天端", Vec2{-910.0, 900.0}, Vec2{910.0, 900.0}, 4000.0);
 	rising.endElevation = 5000.0;
@@ -1138,7 +1138,7 @@ TEST(SectionDimensionsAndLevelMarksReachCrossingMembers)
 	// 切断面へ届かない材は数えない。
 	document.members.push_back(
 		makeMember("2-横架材天端", Vec2{500.0, -2000.0}, Vec2{1500.0, -2000.0}, 3264.0));
-	// 柱の範囲の内側の切り口は、下の列へ足さない（押さえるのは最外周だけ）。
+	// 柱の範囲の内側の切り口は、下の列へ加えない（押さえるのは最外周だけ）。
 	document.members.push_back(
 		makeMember("2-横架材天端", Vec2{-910.0, 455.0}, Vec2{910.0, 455.0}, 3264.0));
 	// 外側の切り口の近く（20mm）に通り芯がある。下の列は通り芯へ寄せず、切り口の芯のまま。
@@ -1160,7 +1160,7 @@ TEST(SectionDimensionsAndLevelMarksReachCrossingMembers)
 	if (levels != nullptr)
 		CHECK(near(levels->base, -5552.5));
 	// 下の列は柱・束の位置に、その面の最外周の切り口（左は材の芯の −5500、右は材の芯の
-	// −2500）を足す。内側の切り口（−4545）は足さない。
+	// −2500）を加える。内側の切り口（−4545）は加えない。
 	const DimensionChainCommand* columns = findChain(chains, DimensionAxis::Horizontal, -1, 0);
 	CHECK(columns != nullptr);
 	if (columns != nullptr)

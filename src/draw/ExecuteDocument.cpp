@@ -1,17 +1,17 @@
 //
 //	draw/ExecuteDocument.cpp
 //
-//	executeDocument の実装。【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include する。
-//	したがってこの翻訳単位はプラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の
-//	core/parse ライブラリには入れない（CLAUDE.md「依存の向きは厳守する」）。
-//
-//	現状は Document を検証したうえで draw/Story → draw/Grid → draw/Footing（立上り・底盤）→
-//	draw/Floor → draw/Member → draw/Column → draw/Rafter → draw/Roof → draw/Symbol
-//	（アンカーボルト・床束・火打・仕口・継手）→ draw/ColumnMark（記号）→ draw/ShearWall（耐力壁）→
-//	draw/Sheet（伏図）→
-//	draw/Section（軸組図）へディスパッチする。伏図・軸組図のビューポート注釈に載る断面寸法
-//	データタグ（draw/Tag）は、それぞれのフェーズの中で置かれる。
+//	executeDocument の実装。現状は Document を検証したうえで draw/Story → draw/Grid →
+//	draw/Footing（立上り・底盤）→ draw/Floor → draw/Member → draw/Column → draw/Rafter →
+//	draw/Roof → draw/Symbol（アンカーボルト・床束・火打・仕口・継手）→ draw/ColumnMark（記号）→
+//	draw/ShearWall（耐力壁）→ draw/Sheet（伏図）→ draw/Section（軸組図）へディスパッチする。
+//	伏図・軸組図のビューポート注釈に載る断面寸法データタグ（draw/Tag）は、それぞれのフェーズの
+//	中で置かれる。
 //	実描画（高さ・傾き・スタイル・PIO の挙動）はローカルの VectorWorks で目視確認する。
+//
+//	【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include する。したがってこの翻訳単位は
+//	プラグインビルド（SDK あり）でのみコンパイルされ、無 SDK の core/parse ライブラリには
+//	入れない（CLAUDE.md「依存の向きは厳守する」）。
 //
 
 #include "PluginPrefix.h"
@@ -52,7 +52,7 @@ namespace HomeskzIfcImport::draw
 	{
 		DrawCounts counts;
 
-		// **区間計測を空にしてから始める**（開発ビルドだけ。draw/Verify.h）。積みっぱなしに
+		// **区間計測を空にしてから始める**（開発ビルドだけ。draw/Verify.h）。蓄積したままに
 		// すると、実機テストの 2 周目以降が 1 周目ぶんを抱えた数字になる。
 #if VW_DRAW_TIMING
 		core::drawTiming().clear();
@@ -71,7 +71,7 @@ namespace HomeskzIfcImport::draw
 
 		// 進捗バーの配分は**実測した 1 件あたりの重さ×件数**で按分する（重さの表と計算は
 		// core/Progress。件数比では 1 件 0.1ms のシンボル 472 件がバーを 4 割進め、1 枚 0.5 秒の
-		// 軸組図 33 枚が 3% しか進まない、という嘘の進捗になっていた）。
+		// 軸組図 33 枚が 3% しか進まない、という実態と合わない進捗になっていた）。
 		const double weightedTotal = core::drawWeightedTotal(document);
 
 		// 要素ごとの診断（無ければ空）を改行で連ねる（連結は draw/DrawUtil の AppendLine）。
@@ -83,8 +83,8 @@ namespace HomeskzIfcImport::draw
 		{ AppendLine(&counts.diagnostics, note); };
 		const auto addNotes = [&](const std::string& note) { AppendLine(&counts.notes, note); };
 
-		// フェーズを開く。中止済みなら false を返し、呼び出し側はそのフェーズごと飛ばす
-		// （各 draw* も自分のループの先頭で中止を見て抜けるので、途中で押されても止まる）。
+		// フェーズを開く。中止済みなら false を返し、呼び出し側はそのフェーズごと省く
+		// （各 draw* も自分のループの先頭で中止要求を確認して抜けるので、途中で押されても止まる）。
 		const auto beginPhase = [&](const char* label, std::size_t count, core::DrawPhase phase)
 		{
 			if (progress.cancelled())
@@ -94,18 +94,18 @@ namespace HomeskzIfcImport::draw
 			return true;
 		};
 
-		// M3 ストーリを先に描く。以降の要素はここで生成したストーリレベル・デザインレイヤに配
+		// M3 ストーリを先に描画する。以降の要素はここで生成したストーリレベル・デザインレイヤに配
 		// 置されるため、通り芯や他要素より前に用意する。
 		if (beginPhase("ストーリとレイヤを作成しています…", document.stories.size(),
 					   core::DrawPhase::Stories))
 			counts.stories = drawStories(document, progress);
 
-		// M1 通り芯を描く。
+		// M1 通り芯を描画する。
 		if (beginPhase("通り芯を描画しています…", document.grids.size(), core::DrawPhase::Grids))
 			counts.grids = drawGrids(document, progress);
 
-		// M9/M10 基礎を描く。立上り（壁）→ 壁結合 → 底盤（スラブ）の順。**壁結合は立上りの
-		// ハンドルを引く**ので、立上りをすべて配置した直後に置く（対応表は WallHandles
+		// M9/M10 基礎を描画する。立上り（壁）→ 壁結合 → 底盤（スラブ）の順。**壁結合は立上りの
+		// ハンドルを参照する**ので、立上りをすべて配置した直後に置く（対応表は WallHandles
 		// で受け渡す。draw/Footing.h）。配置先の "F-立上り" / "F-底盤" レイヤは基礎ストーリの
 		// story 命令が作るので、必ず drawStories の後に置く（レイヤが無い命令はそれぞれが
 		// スキップする）。
@@ -124,15 +124,15 @@ namespace HomeskzIfcImport::draw
 					   core::DrawPhase::Slabs))
 			counts.slabs = drawSlabs(document, progress);
 
-		// M5 床板を描く。配置先の FL レイヤは上の drawStories が作るので、必ずその後に
+		// M5 床板を描画する。配置先の FL レイヤは上の drawStories が作るので、必ずその後に
 		// 置く（レイヤが無い命令は drawFloors がスキップする）。
 		if (beginPhase("床を描画しています…", document.floors.size(), core::DrawPhase::Floors))
 			counts.floors = drawFloors(document, progress);
 
-		// M7 横架材を描く。配置先の "n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁" レイヤは
+		// M7 横架材を描画する。配置先の "n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁" レイヤは
 		// drawStories が作るので、必ずその後に置く（レイヤが無い命令はスキップされる）。
 		// **横架材ハンドルを記録する**——伏図・軸組図の断面寸法データタグがこれを関連付け先
-		// として引く（立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
+		// として参照する（立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
 		ObjectHandles memberHandles;
 		if (beginPhase("横架材を描画しています…", document.members.size(),
 					   core::DrawPhase::Members))
@@ -142,11 +142,11 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 		}
 
-		// M8 柱を描く。配置先の span レイヤ（"1to2-柱" 等）も drawStories が作るので、必ず
+		// M8 柱を描画する。配置先の span レイヤ（"1to2-柱" 等）も drawStories が作るので、必ず
 		// その後に置く（レイヤが無い命令はスキップされる）。横架材の後なのは、柱が横架材と
 		// 同じ構造材ツール／同じスタイル更新の作法を採るため揃えているだけで依存は無い。
 		// **柱ハンドルを記録する**——取り込み後の測り直し（recheckColumns。開発ビルドだけ）が
-		// これを引く（立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
+		// これを参照する（立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
 		ObjectHandles columnHandles;
 		if (beginPhase("柱を描画しています…", document.columns.size(), core::DrawPhase::Columns))
 		{
@@ -155,7 +155,7 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 		}
 
-		// M6 屋根組を描く。垂木 → 野地板 の順。配置先の "n-垂木" / "n-野地板" レイヤも
+		// M6 屋根組を描画する。垂木 → 野地板 の順。配置先の "n-垂木" / "n-野地板" レイヤも
 		// drawStories が作るので、必ずその後に置く（レイヤが無い命令はそれぞれがスキップする）。
 		if (beginPhase("垂木を描画しています…", document.rafters.size(), core::DrawPhase::Rafters))
 		{
@@ -204,7 +204,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// M19 耐力壁。**柱の後**に置く: PIO はリセット時に対象レイヤの柱を探して軸組内法を
-		// 決めるので、柱が置かれていないと控えの内法で描かれてしまう。配置先の "n-耐力壁"
+		// 決めるので、柱が置かれていないと既定の内法で描画されてしまう。配置先の "n-耐力壁"
 		// レイヤは drawStories が作る（レイヤが無い命令はスキップされる）。
 		// 開発ビルドの取り込み後の測り直し（recheckShearWalls）だけが使う表。**本番ビルドでは
 		// 表を作らない**（検算専用の付帯コストを本番へ漏らさない。CLAUDE.md「検算は開発
@@ -227,22 +227,22 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// M3 の【決定】の実装箇所（M13 で確定）: **デザインレイヤのスタック順を希望順へ
-		// 並べ替える**。伏図ビューポートはドキュメントの重ね順で描かれるので、床・野地板が
+		// 並べ替える**。**必ず伏図より前**に行う——ビューポートは生成時の重ね順で描画される
+		// ため。伏図ビューポートはドキュメントの重ね順で描画されるので、床・野地板が
 		// 柱・梁を覆わないようにするにはここで並べ替えるしかない（per-viewport の重ね順
-		// 上書きは実機で効かなかった。draw/Story.h の reorderStoryLayers）。**必ず伏図より
-		// 前**に行う——ビューポートは生成時の重ね順で描かれるため。
+		// 上書きは実機で反映されなかった。draw/Story.h の reorderStoryLayers）。
 		if (!progress.cancelled())
 		{
-			// 並べ替えは図面から効いたか分かる（動かせたレイヤ数）。0 件なら伏図で床・野地板が
-			// 柱・梁を覆うので、原因の切り分け材料として診断行に出す。
+			// 並べ替えが反映されたかは図面から分かる（動かせたレイヤ数）。0 件なら伏図で床・
+			// 野地板が柱・梁を覆うので、原因の切り分け材料として診断行に出す。
 			const std::size_t reordered = reorderStoryLayers(document);
 			if (reordered == 0 && !document.stories.empty())
 				addDiagnostics("レイヤの重ね順を並べ替えられませんでした（0 件）。");
 		}
 
 		// M13 シート（伏図）。**必ず最後**に置く: ビューポートはデザインレイヤ（＝ここまでに
-		// 描いたモデル）を映すので、全要素の描画が済んでいないと空の図になる。表示レイヤの
-		// 絞り込みも、対象のレイヤが揃っていて初めて効く（draw/Sheet.h）。
+		// 描画したモデル）を映すので、全要素の描画が済んでいないと空の図になる。表示レイヤの
+		// 絞り込みも、対象のレイヤが揃っていて初めて機能する（draw/Sheet.h）。
 		if (beginPhase("伏図を作成しています…", document.sheets.size(), core::DrawPhase::Sheets))
 		{
 			std::string note;
@@ -266,15 +266,17 @@ namespace HomeskzIfcImport::draw
 			addNotes(info);
 		}
 
-		// **最後に柱を測り直す。** 「生成直後は入っていたのに、あとの要素を描くあいだに長さ 0 へ
-		// 潰れたのでは」を切り分けるために M27 で足した（答えは生成直後から潰れていた。原因は
-		// 解消済みで、いまは再発の見張り。docs/DEV-NOTES.md「柱が長さ 0 で描かれる（M27）」）。
-		// ここが全要素・伏図・軸組図まで済んだ唯一の地点なので、**いつ潰れたか**はここでしか分け
-		// られない。**測って診断へ載せるだけ**で、直しはしない（解かせ直しは実機で 46 本中
-		// 0 本しか直らず、打ち切ってある）。
+		// **最後に柱を再計測する。** **計測して診断へ載せるだけ**で、修正はしない。
+		// ここが全要素・伏図・軸組図まで済んだ唯一の地点なので、**いつ退化したか**はここで
+		// しか区別できない。
 		//
 		// **開発ビルドだけ**（draw/Verify.h）——図面には一切触らない検算なので、本番では
 		// 全柱のパラメータを走査するぶんの時間しか生まない。
+		//
+		// 経緯: 「生成直後は値が入っていたのに、あとの要素を描画するあいだに長さ 0 へ
+		// 退化したのでは」を切り分けるために M27 で追加した（答えは生成直後から退化していた。
+		// 原因は解消済みで、いまは再発の監視。docs/DEV-NOTES.md「柱が長さ 0 で描かれる
+		// （M27）」）。再計算による修正は実機で 46 本中 0 本しか直らず、打ち切ってある。
 #if VW_DRAW_VERIFY
 		{
 			std::string note;
@@ -283,9 +285,9 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 			addNotes(info);
 		}
-		// **耐力壁も最後に測り直す**（描かずに内法を求め直すだけ）。取り込み後の最初の
-		// 編集で耐力壁が柱幅の半分ずれる不具合（M19。#161 で直した）を追うために足し、
-		// 再発の見張りとして残してある（draw/ShearWallPio.h の probeShearWall）。
+		// **耐力壁も最後に再計測する**（描画せずに内法を求め直すだけ）。取り込み後の最初の
+		// 編集で耐力壁が柱幅の半分ずれる不具合（M19。#161 で直した）を追跡するために追加し、
+		// 再発の監視として残してある（draw/ShearWallPio.h の probeShearWall）。
 		{
 			std::string info;
 			recheckShearWalls(shearWallHandles, &info);
@@ -296,7 +298,7 @@ namespace HomeskzIfcImport::draw
 		// **描画のどこで時間を使ったかを診断ログへ載せる**（開発ビルドだけ。draw/Verify.h）。
 		// フェーズごとの所要は core/Trace が行頭に付ける経過ミリ秒で読めるが、**その 1 件の
 		// 中の何が重いのか**——生成か・パラメータ名の解決か・`ResetObject` そのものか——は
-		// ここでしか分からない。実描画はローカルの VectorWorks でしか走らないので、
+		// ここでしか分からない。実描画はローカルの VectorWorks でしか実行されないので、
 		// **実機テスト 1 周で内訳が数字として返る**ことに意味がある
 		// （core/DrawTiming.h「なぜ要るのか」）。
 		//
@@ -306,9 +308,9 @@ namespace HomeskzIfcImport::draw
 		addNotes(core::drawTiming().format("描画の内訳（開発ビルドの計測）"));
 #endif
 
-		// **選択を解いて終える。** VectorWorks は作ったオブジェクトを選択したまま残すので、
-		// 放っておくと取り込んだ部材がすべて選ばれた状態で戻る（draw/DrawUtil.h
-		// DeselectEverything）。中止のときも、描けたところまでを同じく解く。
+		// **選択を解除して終える。** VectorWorks は生成したオブジェクトを選択したまま残すので、
+		// 放っておくと取り込んだ部材がすべて選択された状態で戻る（draw/DrawUtil.h
+		// DeselectEverything）。中止のときも、描画できたところまでを同じく解除する。
 		DeselectEverything();
 
 		// 途中で中止されたか（件数が命令数に届かないのが正常になる）。
@@ -316,7 +318,7 @@ namespace HomeskzIfcImport::draw
 
 		// 「取り消し」で取り込みを戻せる状態にできたか（完了ダイアログがこれを伝える）。
 		// armed=false は「登録できるレイヤが 1 つも無かった」＝取り込み前から在るレイヤへ
-		// だけ描いた場合で、そのときイベントはスコープの破棄で捨てられる。
+		// だけ描画した場合で、そのときイベントはスコープの破棄で捨てられる。
 		counts.undoArmed = undoScope.armed();
 		counts.undoPartial = undoScope.partial();
 		counts.existingLayers = undoScope.existingLayers();

@@ -2,7 +2,7 @@
 
 1 周目の選択（IFC のパス・取り込み設定）・テンプレートのパス・自分で保存した図面のパス・
 前の周の内訳は `key=value` のテキストで残ります。**ここが 2 周目以降からファイル選択と設定ダイアログを
-消している唯一の仕掛け**で、MCP の `vw_run_test` が名指し無しで続きの周を走れるのもこれが
+省いている唯一の仕組み**で、MCP の `vw_run_test` が名指し無しで続きの周を走れるのもこれが
 あるからです。報告は同じフォルダの `last-round.md` です。
 
 - macOS … `~/Library/Application Support/HomeskzIfcImport/feedback.txt`

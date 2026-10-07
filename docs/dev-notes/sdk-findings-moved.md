@@ -1,11 +1,11 @@
 # Vectorworks SDK の実測知見（SDK リファレンスへ移動）
 
 かつて開発メモ（`docs/DEV-NOTES.md`）にあった SDK の実測知見（実機でしか判明しなかった落とし穴・SDK に
-無い／効かない API・SDK 側の打ち切った調査）は、プロジェクトをまたいで参照できるよう
+無い／機能しない API・SDK 側の打ち切った調査）は、プロジェクトをまたいで参照できるよう
 **[SDK リファレンスリポジトリ](https://github.com/min-nano/vectorworks-developer-sdk-reference)の
-`Findings/` へ移動した**。**SDK の挙動はあちらだけを正とし、開発メモには書かない**
-（新しい知見もあちらへ足す。着手前の「この API は SDK にあるか」の確かめ方——`sdk-grep`
-——もあちらの CLAUDE.md にある）。
+`Findings/` へ移動した**。**SDK の挙動は SDK リファレンスだけを正とし、開発メモには書かない**
+（新しい知見も SDK リファレンスへ追加する。着手前の「この API は SDK にあるか」の確かめ方
+——`sdk-grep`——も SDK リファレンスの CLAUDE.md にある）。
 
 | 旧トピック | 移動先（`Findings/`） |
 | --- | --- |
@@ -26,6 +26,6 @@
 | 結果ダイアログ（レイアウトダイアログの作法） | [Layout Dialogs](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layout%20Dialogs.md) |
 | 調査の作法（読み戻す・測る・正解と差分） | [Investigation Techniques](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Investigation%20Techniques.md) |
 
-このプラグイン固有の方針（何をどう描くか・診断の出し方・割り付けの決め事）は開発メモの
+このプラグイン固有の方針（何をどう描画するか・診断の出し方・割り付けの決め事）は開発メモの
 「[設計の考え方](../DEV-NOTES.md#設計の考え方)」、入力データの癖は「[IFC / STEP 側の癖](ifc-quirks.md)」
 に残っている。

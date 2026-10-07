@@ -23,7 +23,7 @@ namespace HomeskzIfcImport
 		CImportIfcMenu_EventSink(IVWUnknown* parent);
 		~CImportIfcMenu_EventSink() override;
 
-		// メニュー項目を実行したときの本体（ファイル選択→解析→描画）。
+		// メニュー項目を実行したときの処理（ファイル選択→解析→描画）。
 		//
 		// 文書が開いていないときのグレーアウトは menuDef() の Needs =
 		// EMenuEnableFlags::DocIsActive（ExtMenu.cpp）で宣言的に行うため、

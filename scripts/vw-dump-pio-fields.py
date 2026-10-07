@@ -7,36 +7,37 @@
 #	  * 付いているレコードフォーマットの全フィールド
 #	  * **オブジェクト間の関連（association）** ── 「消したら一緒に消える／リセットされる」links
 #	  * **PIO の中に生成されている図形**（型・名前・UUID・レコード名・UUID らしき値）
-#	  * （任意）オブジェクト変数の総なめ ── 既定値でないものだけ
+#	  * （任意）オブジェクト変数の全件走査 ── 既定値でないものだけ
 #	をテキストへ書き出し、あわせて**文書内のグラフィック凡例と全ビューポートの一覧**を出す。
 #
 #	【なぜ要るか】VW 標準 PIO の設定には**SDK にも VectorScript にも API が無いもの**がある。
 #	グラフィック凡例の「ビューポートでフィルタ」がその 1 つで、公開されているのは
 #	`ovGraphicLegend*`（PIO のリセット中しか有効でない画像再生成用）だけ
 #	（SDK リファレンス Findings「Graphic Legends」）。この種の設定は**UI で手作業をしたオブジェクトと、
-#	していないオブジェクトのダンプを見比べる**以外に突き止めようが無い（`ModifySlab` の
+#	していないオブジェクトのダンプを比較する**以外に特定する方法が無い（`ModifySlab` の
 #	噛み合わせも断面ビューポートの範囲も、同じやり方で決着した。SDK リファレンス
 #	Findings「Investigation Techniques」）。
 #
-#	【分かっていること】「ビューポートでフィルタ」の保存先は、実機のダンプで次まで潰れている。
+#	【分かっていること】「ビューポートでフィルタ」の保存先は、実機のダンプで次の候補まで除外できている。
 #	  * **パラメトリックレコードには載らない**（フィルタの前後で 36 フィールド中 `BoxWidth`
 #	    しか変わらず、それは凡例が細くなった結果にすぎない）。
 #	  * **関連（association）でもない**（フィルタ済みの凡例で `associations=0`。ビューポート側に
 #	    出る `associations=3` は断面ビューポート固有で、凡例とは無関係）。
 #	  * **凡例の中の図形が UUID で持っているのでもない**（セルは group ＋ `GraphicLegendFrame`
 #	    ＋ 画像用のビューポートで、UUID を値に持つレコード欄は 1 つも無い）。
-#	そこでこの版は**フィルタ済みの凡例と、していない凡例を機械的に見比べる**——オブジェクト
-#	変数の総なめと中身の型ヒストグラムを 2 枚ぶん並べて出す。ここも空振りなら、残るのは
-#	補助オブジェクト（`FirstAuxObject`）で、それは VS から触れないので dev ビルドの一時診断へ。
-#	（**決着済み**: 保存先は凡例にぶら下がるデータオブジェクトのタグ付きデータ（容れ物
+#	そこでこの版は**フィルタ済みの凡例と、していない凡例を機械的に比較する**——オブジェクト
+#	変数の全件走査と中身の型ヒストグラムを 2 枚ぶん並べて出す。ここでも差が見つからなければ、
+#	残るのは補助オブジェクト（`FirstAuxObject`）で、それは VS からアクセスできないので dev
+#	ビルドの一時診断へ。
+#	（**決着済み**: 保存先は凡例に付属するデータオブジェクトのタグ付きデータ（格納先
 #	`'GrLg'`）で、いまは取り込みが書き込んでいる。src/draw/Legend.h・SDK リファレンス
 #	Findings「Graphic Legends」。このスクリプトは同種の設定を突き止める道具として残す。）
 #
 #	【使い方】
 #	  1. VW で ツール > スクリプト > VectorScript 編集… に Python スクリプトとして貼る。
 #	  2. 調べたいオブジェクトを**1 つだけ**選択して実行する。書き出し先がダイアログに出る。
-#	     **1 枚だけ手で「ビューポートでフィルタ」した状態**にしておくと、同じ文書の中に
-#	     「フィルタ済みの凡例」と「していない凡例」が並ぶので、**1 回の実行で見比べられる**
+#	     **1 枚だけ手作業で「ビューポートでフィルタ」した状態**にしておくと、同じ文書の中に
+#	     「フィルタ済みの凡例」と「していない凡例」が並ぶので、**1 回の実行で比較できる**
 #	     （凡例の一覧は文書内の全グラフィック凡例を出す）。
 #	  3. それでも差が出なければ `DUMP_OBJECT_VARIABLES = True` にして取り直す。
 #
@@ -49,7 +50,7 @@ import time
 
 import vs
 
-# オブジェクト変数（1〜）の総なめ。**掛けるのは見比べる 2 枚だけ**なので既定で行う
+# オブジェクト変数（1〜）の全件走査。**対象は比較する 2 枚だけ**なので既定で行う
 # （1 枚あたり 1 万回強の呼び出しで数秒）。
 DUMP_OBJECT_VARIABLES = True
 OBJECT_VARIABLE_RANGE = range(1, 2200)
@@ -58,17 +59,17 @@ OBJECT_VARIABLE_RANGE = range(1, 2200)
 CHILD_MAX_DEPTH = 3
 CHILD_MAX_LINES = 300
 
-# 「どこかに紛れ込んだビューポートの UUID」を拾うための形。フィルタ先が UUID で
+# 「どこかに紛れ込んだビューポートの UUID」を検出するための形。フィルタ先が UUID で
 # 持たれているなら、この形の文字列がどこかに現れるはず。
 UUID_PATTERN = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 
 def _safe(name, *args):
-	"""`vs` の関数を**名前で引いて**呼ぶ。戻り値はそのまま、駄目なら "<error: …>" を返す。
+	"""`vs` の関数を**名前で取得して**呼ぶ。戻り値はそのまま、失敗したら "<error: …>" を返す。
 
-	名前で引くのは、**VW のバージョンによって在ったり無かったりする関数がある**ため
+	名前で取得するのは、**VW のバージョンによって在ったり無かったりする関数がある**ため
 	（`vs.GetObjectUuid` は 2018.4 以降）。`_safe(vs.Foo, …)` と書くと、呼ぶ前の属性参照の
-	時点で AttributeError になってスクリプトごと止まる——調査の道具がそれで死んでは困る。
+	時点で AttributeError になってスクリプトごと止まる——調査用のスクリプトがそれで停止しては困る。
 	"""
 	call = getattr(vs, name, None)
 	if call is None:
@@ -85,7 +86,7 @@ def _bad(value):
 
 
 def _describe(handle):
-	"""1 行の素性書き。ハンドルそのものは実行ごとに変わるので出さない（UUID で突き合わせる）。"""
+	"""1 行の識別情報。ハンドルそのものは実行ごとに変わるので出さない（UUID で突き合わせる）。"""
 	return "type=%s name=%s uuid=%s" % (
 		_safe("GetTypeN", handle),
 		_safe("GetName", handle),
@@ -118,7 +119,7 @@ def _dump_record(out, handle, record, title):
 
 
 def _association_lines(handle):
-	"""オブジェクトに張られた関連を 1 行ずつ。索引の起点が 0 か 1 か不明なので両方なめる。"""
+	"""オブジェクトに張られた関連を 1 行ずつ。索引の起点が 0 か 1 か不明なので両方を試す。"""
 	lines = []
 	count = _safe("GetNumAssociations", handle)
 	lines.append("associations=%s" % count)
@@ -187,7 +188,7 @@ def _layer_name(handle):
 
 def _dump_legends(out, selected):
 	"""文書内の全グラフィック凡例。**フィルタ済みの 1 枚と、していない残り**が並ぶので、
-	1 回の実行でそのまま見比べられる。"""
+	1 回の実行でそのまま比較できる。"""
 	out.append("")
 	out.append("--- graphic legends in this document ---")
 	rows = []
@@ -225,7 +226,7 @@ def _dump_viewports(out):
 
 
 def _object_variable_lines(handle):
-	"""オブジェクト変数の総なめ。既定値（0 / False / 空文字 / NULL）は落とす。"""
+	"""オブジェクト変数の全件走査。既定値（0 / False / 空文字 / NULL）は除外する。"""
 	lines = []
 	getters = (
 		("int", "GetObjectVariableInt"),
@@ -246,7 +247,7 @@ def _object_variable_lines(handle):
 
 
 def _child_histogram(handle):
-	"""中身の型を数え上げる。**2 枚の凡例の構造を機械的に見比べる**ための要約で、
+	"""中身の型を数え上げる。**2 枚の凡例の構造を機械的に比較する**ための要約で、
 	フィルタで増減する図形があれば数の差として出る。"""
 	counts = {}
 	budget = [CHILD_MAX_LINES * 4]
@@ -268,7 +269,7 @@ def _child_histogram(handle):
 
 def _custom_group_lines(handle):
 	"""PIO が持つ「もう 1 つの入れ物」たち。中身とは別に per-instance のデータが
-	紛れ込んでいないかを見る。"""
+	紛れ込んでいないかを確認する。"""
 	lines = []
 	for name in ("GetCustomObjectProfileGroup", "GetCustomObjectPath",
 				 "GetCustomObjectSelectionGroup", "GetCustomObjectWallHoleGroup"):
@@ -287,7 +288,7 @@ AUX_MAX = 50
 
 
 def _aux_lines(handle):
-	"""補助オブジェクトの連鎖を頭からたどる。**「ビューポートでフィルタ」の保存先はここ**
+	"""補助オブジェクトの連鎖を先頭からたどる。**「ビューポートでフィルタ」の保存先はここ**
 	（フィルタ済みの凡例だけ、先頭がデータオブジェクト `type=76` になっていた）。"""
 	lines = []
 	aux = _safe("GetObjectVariableHandle", handle, OV_FIRST_AUX_OBJECT)

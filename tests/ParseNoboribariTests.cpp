@@ -7,10 +7,9 @@
 //
 //	検証項目（docs/DEV-NOTES.md M7）: 屋根面の天端 Z と内包判定・受ける材への端部詰め（Z 範囲で
 //	絞る・極小の食い込みは詰めない・詰めすぎになるなら詰めない。受ける柱の面まで詰めるケースは
-//	M8 で足した）・登り梁の真上の屋根面の
-//	選択（勾配方向が平行・外形が内包）・天端の屋根面スナップ（勾配・高さ・バインド offset）・
-//	登り梁でない材の素通し・実フィクスチャからの屋根面収集。実フィクスチャのパスは CMake が
-//	HOMESKZ_FIXTURES_DIR で渡す。
+//	M8 で追加した）・登り梁の真上の屋根面の選択（勾配方向が平行・外形が内包）・天端の屋根面
+//	スナップ（勾配・高さ・バインド offset）・登り梁でない材の素通し・実フィクスチャからの
+//	屋根面収集。実フィクスチャのパスは CMake が HOMESKZ_FIXTURES_DIR で渡す。
 //
 
 #include "Fixtures.h"
@@ -69,7 +68,7 @@ namespace
 
 		NoboribariRoofPlane result;
 		// 退化していない面なので必ず成功する（万一失敗すれば run=0 のまま zAt が破綻し、
-		// 呼び出し側の期待値が合わずテストが落ちる）。
+		// 呼び出し側の期待値が合わずテストが失敗する）。
 		roofSlope(plane, result.slope);
 		result.plan = parse::RoofSlope::plan(plane);
 		result.storeyElevation = zAtOrigin;
@@ -142,7 +141,7 @@ namespace
 		return command;
 	}
 
-	// 受ける柱の column 命令（M8。登り梁の端部詰めは柱面まで見る）。
+	// 受ける柱の column 命令（M8。登り梁の端部詰めは柱面まで考慮する）。
 	core::ColumnCommand column(const Vec2& position, double elevation, double height = 500.0,
 							   double width = 105.0, double depth = 105.0)
 	{
@@ -322,8 +321,9 @@ TEST(roof_plane_for_selects_aligned_plane)
 
 TEST(roof_plane_for_prefers_the_plane_under_the_midpoint)
 {
-	// 始端だけが先に並ぶ面（隣の屋根版）の外形にかかり、中点は後に並ぶ面の外形に入る登り梁。
-	// 中点の面を選ぶ（面を先に回すと始端をかすめた隣の面へ吸われ、その面の高さで描かれた）。
+	// 始端だけが先に並ぶ面（隣の屋根版）の外形にかかり、中点は後に並ぶ面の外形に入る登り梁で、
+	// 中点の面を選ぶことを確かめる。
+	// 理由: 面を先に回すと、始端をかすめた隣の面が選ばれ、その面の高さで描画されていた。
 	const MemberCommand command = noboribari(Vec2{0.0, 0.0}, Vec2{1000.0, 0.0}, 1000.0, 1300.0);
 	const std::vector<NoboribariRoofPlane> planes = {
 		boxRoofPlane(0.25, 1200.0, -500.0, 100.0, -500.0, 500.0),
@@ -428,7 +428,7 @@ TEST(over_trim_is_skipped)
 TEST(tiny_penetration_not_trimmed)
 {
 	// 母屋の中心 x=1052.4・半幅 52.5 → 手前の面 999.9。端点 1000 は 0.1mm だけ内側で、
-	// 詰める下限（0.5mm）未満なので触らない。
+	// 詰める下限（0.5mm）未満なので変更しない。
 	const MemberCommand command =
 		noboribari(Vec2{0.0, 0.0}, Vec2{1000.0, 0.0}, 1000.0, 1150.0, 800.0);
 	const std::vector<MemberCommand> receivers = {
@@ -512,7 +512,7 @@ TEST(collects_roof_planes_from_fixture)
 	CHECK(!planes.empty());
 	for (const NoboribariRoofPlane& plane : planes)
 	{
-		// 勾配方向が定まる面だけを集める（退化した面は roofSlope が弾く）。
+		// 勾配方向が定まる面だけを集める（退化した面は roofSlope が除外する）。
 		CHECK(plane.slope.rise > 0.0);
 		CHECK(plane.slope.run > 0.0);
 		CHECK(plane.plan.size() >= 3);
@@ -522,7 +522,7 @@ TEST(collects_roof_planes_from_fixture)
 TEST(processes_injected_noboribari)
 {
 	// フィクスチャの屋根版と重ならない位置に合成登り梁＋受け材を置く（屋根スナップは
-	// 効かないが、端部の食い込み詰めが働くことを検証する）。
+	// 機能しないが、端部の食い込み詰めが働くことを検証する）。
 	bool ok = false;
 	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);

@@ -53,7 +53,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 要素の形状表現アイテムを出現順に訪ねる（Representation → Representations → Items）。
-		// visit が true を返したら打ち切る。**素のソリッド探索（firstExtrudedSolid）と
+		// visit が true を返したら打ち切る。**未加工のソリッド探索（firstExtrudedSolid）と
 		// 削り取り収集（elementVoidSolids）が同じ道筋を辿る**ので、走査はここに 1 つだけ置く。
 		template <typename Visit>
 		void forEachShapeItem(const Model& model, const Entity* element, Visit visit)
@@ -131,7 +131,7 @@ namespace HomeskzIfcImport::parse
 	bool resolvePoint2D(const Model& model, const Value& ref, Vec2& out)
 	{
 		// 3D 点でも Z は捨てる（通り芯のように平面だけで決まる要素向け）。判定規則は
-		// resolvePoint と完全に同じにしたいので、そちらへ委譲して XY だけを写す。
+		// resolvePoint と完全に同じにしたいので、そちらへ委譲して XY だけを取得する。
 		Vec3 point{0.0, 0.0, 0.0};
 		if (!resolvePoint(model, ref, point))
 			return false;
@@ -242,7 +242,7 @@ namespace HomeskzIfcImport::parse
 			const double hx = xDim * 0.5;
 			const double hy = yDim * 0.5;
 			// 中心原点の 4 隅を反時計回り（左下→右下→右上→左上）に並べる。Position は
-			// Location の平行移動のみ足す（RefDirection の回転は反映しない）。
+			// Location の平行移動のみ加算する（RefDirection の回転は反映しない）。
 			Vec2 offset{0.0, 0.0};
 			const Entity* pos = model.resolve(profileDef->attribute(attr::kProfilePosition));
 			if (pos != nullptr && pos->type == "IFCAXIS2PLACEMENT2D")
@@ -268,7 +268,7 @@ namespace HomeskzIfcImport::parse
 		// 属性の並びは (ProfileType, ProfileName, OuterCurve, InnerCurves)。外形の
 		// 位置（属性 2）は同じなので、同じ経路で外形だけを読む。
 		// ［既知の制限］InnerCurves（階段の吹抜け等の開口）は無視するので、床は開口を
-		// 塞いだ形で入る。開口ごと落として床を丸ごと失うよりは良い、という判断
+		// 塞いだ形で入る。開口のために床全体を除外するよりは良い、という判断
 		// （CLAUDE.md「1 要素の欠損で全体を止めない」）。開口の再現は今後の課題
 		// （docs/DEV-NOTES.md「残っている宿題」）。
 		if (profileDef->type == "IFCARBITRARYCLOSEDPROFILEDEF" ||
@@ -293,7 +293,7 @@ namespace HomeskzIfcImport::parse
 					return false; // 1 点でも解決できなければ断面ごとスキップ
 				outline.push_back(Vec2{p.x, p.y});
 			}
-			// 明示的に閉じている（始点＝終点）ときは終点の重複を落とす。
+			// 明示的に閉じている（始点＝終点）ときは終点の重複を削除する。
 			if (outline.size() >= 2)
 			{
 				const Vec2& first = outline.front();
@@ -317,7 +317,7 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<Vec3> WorldSolid::base() const
 	{
-		// プロファイル 2D 頂点 (u,v) を origin + xAxis·u + yAxis·v で世界系へ写す。
+		// プロファイル 2D 頂点 (u,v) を origin + xAxis·u + yAxis·v で世界系へ変換する。
 		std::vector<Vec3> result;
 		result.reserve(profile.size());
 		for (const Vec2& p : profile)
@@ -354,12 +354,13 @@ namespace HomeskzIfcImport::parse
 			return false;
 
 		// Position はプロファイルを 3D（オブジェクト座標）へ据える。要素配置と合成すると
-		// プロファイル 2D 点 (u,v,0) をそのまま世界系へ写せる。
+		// プロファイル 2D 点 (u,v,0) をそのまま世界系へ変換できる。
 		const Mat4 position = resolveAxis2Placement3D(
 			model, model.resolve(solid->attribute(attr::kExtrudedAreaSolidPosition)));
 		const Mat4 full = placement * position;
 
-		// 押し出し方向は Position 座標系。単位化して同じ基底で世界系へ（長さは depth 別持ち）。
+		// 押し出し方向は Position 座標系。単位化して同じ基底で世界系へ（長さは depth で別に
+		// 保持する）。
 		Vec3 dir{0.0, 0.0, 1.0};
 		Vec3 rawDir{0.0, 0.0, 0.0};
 		if (resolveDirection(model, solid->attribute(attr::kExtrudedAreaSolidDirection), rawDir))
@@ -369,7 +370,7 @@ namespace HomeskzIfcImport::parse
 				dir = nd;
 		}
 
-		// 配置基底（origin/軸）を full から取り出す。
+		// 配置基底（origin/軸）を full から取得する。
 		out.origin = full.transformPoint(Vec3{0.0, 0.0, 0.0});
 		out.xAxis = full.transformDirection(Vec3{1.0, 0.0, 0.0});
 		out.yAxis = full.transformDirection(Vec3{0.0, 1.0, 0.0});
@@ -409,7 +410,7 @@ namespace HomeskzIfcImport::parse
 						voids.push_back(second);
 					item = model.resolve(item->attribute(attr::kBooleanResultFirstOperand));
 				}
-				return false; // すべてのアイテムを見る
+				return false; // すべてのアイテムを走査する
 			});
 		return voids;
 	}
@@ -417,7 +418,7 @@ namespace HomeskzIfcImport::parse
 	const Entity* firstExtrudedSolid(const Model& model, const Entity* element)
 	{
 		// 最初に見つかった押し出しを採る。差演算（端部が他材で削られた形状）は第 1
-		// オペランド＝素のソリッドを使う。
+		// オペランド＝未加工のソリッドを使う。
 		const Entity* found = nullptr;
 		forEachShapeItem(model, element,
 						 [&model, &found](const Entity* item)
@@ -446,7 +447,7 @@ namespace HomeskzIfcImport::parse
 		if (!resolveElementWorldSolid(model, element, solid))
 			return false;
 
-		// 平面外形はプロファイル頂点をワールドへ写した底面ループ（origin + xAxis·u + yAxis·v）。
+		// 平面外形はプロファイル頂点をワールドへ変換した底面ループ（origin + xAxis·u + yAxis·v）。
 		// 3 点未満（面にならない）屋根版は扱わない。
 		std::vector<Vec3> vertices = solid.base();
 		if (vertices.size() < 3)

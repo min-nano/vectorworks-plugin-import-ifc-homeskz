@@ -12,7 +12,7 @@
 #
 # **キャッシュがヒットしていれば何もしない。** 呼び出し側は actions/cache で
 # $VW_SDK_DIR を復元してからこれを呼ぶだけでよく、「ヒットしたか」で分岐する必要は
-# ない（このスクリプトが中身を見て判断する）。ヒット時は検証だけ行って抜けるので、
+# ない（このスクリプトが中身を確認して判断する）。ヒット時は検証だけ行って抜けるので、
 # 壊れたキャッシュを引いた場合もその場で分かる。
 #
 # 環境変数:
@@ -47,7 +47,7 @@ case "${RUNNER_OS:-$(uname -s)}" in
 esac
 
 # verify: プラグインのビルドに最低限要る 3 点が揃っているか。ダウンロード直後だけ
-# でなくキャッシュヒット時にも走らせる（壊れた・古い形のキャッシュをここで弾く）。
+# でなくキャッシュヒット時にも走らせる（壊れた・古い形のキャッシュをここで検出する）。
 verify() {
 	local ok=0
 	[ -f "$SDK_DIR/SDKLib/Include/VectorworksSDK.h" ] || ok=1
@@ -68,7 +68,7 @@ fi
 
 if [ -e "$SDK_DIR" ]; then
 	# キャッシュはヒットしたが中身が期待と違う、というケース。中途半端に混ざると
-	# 原因が分かりにくいので、作り直す。
+	# 原因が分かりにくいので、再構築する。
 	echo "$SDK_DIR exists but is incomplete — re-fetching from scratch."
 	rm -rf "$SDK_DIR"
 fi
@@ -79,7 +79,7 @@ trap 'rm -rf "$work"' EXIT
 echo "Downloading the Vectorworks SDK (a large zip: ~140 MB mac / ~90 MB win)..."
 curl -fL --retry 4 --retry-delay 5 -o "$work/sdk.zip" "$SDK_URL"
 
-# 展開。ランナーによって入っている道具が違うので順に試す（git-bash には unzip が
+# 展開。ランナーによって入っているツールが違うので順に試す（git-bash には unzip が
 # 無いことがあり、そこでは 7z か PowerShell の Expand-Archive を使う）。
 echo "Extracting..."
 if command -v unzip >/dev/null 2>&1; then

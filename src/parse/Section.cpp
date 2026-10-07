@@ -4,9 +4,9 @@
 //	軸組図（断面ビューポート）の解析（docs/DEV-NOTES.md M14）。【SDK 非依存】ここでは
 //	VectorWorks SDK を include しない。
 //
-//	このモジュールも parse/Sheet と同じく IFC の幾何をほとんど見ない——**他のモジュールが
+//	このモジュールも parse/Sheet と同じく IFC の幾何をほとんど参照しない——**他のモジュールが
 //	既に出した答え**（柱・横架材の命令／通り芯の線分／ストーリの作るレイヤ）を組み合わせて
-//	「どこを切り、どう名付け、何を映すか」を決める。IFC を直接見るのは通り芯の線分だけで、
+//	「どこを切り、どう名付け、何を映すか」を決める。IFC を直接参照するのは通り芯の線分だけで、
 //	それも parse/Grid（共有コンテキスト）から受け取る。
 //
 
@@ -85,7 +85,7 @@ namespace HomeskzIfcImport::parse
 									   { return std::ranges::find(iroha, c) != iroha.end(); });
 		}
 
-		// 座標に付く種別（柱か梁か）。クラスタが両方を含むかだけを見る。
+		// 座標に付く種別（柱か梁か）。クラスタが両方を含むかだけを判定する。
 		struct Tagged
 		{
 			double coord = 0.0;
@@ -124,7 +124,7 @@ namespace HomeskzIfcImport::parse
 			double last = tagged.front().coord;
 			Cluster current;
 			// 溜まっている座標を 1 クラスタとして確定する。**呼ぶ時点で必ず 1 件以上ある**
-			// （空の入力は上で弾き、ループ内では隙間を見つけたときだけ呼ぶ）ので、
+			// （空の入力は上で除外し、ループ内では隙間を見つけたときだけ呼ぶ）ので、
 			// 0 件の番人は置かない。
 			const auto flush = [&]()
 			{
@@ -271,7 +271,7 @@ namespace HomeskzIfcImport::parse
 				continue;
 			const double dx = member.end.x - member.start.x;
 			const double dy = member.end.y - member.start.y;
-			// X通りは Y 方向に走る梁（|Δx| < |Δy|）、Y通りは X 方向に走る梁を見る
+			// X通りは Y 方向に走る梁（|Δx| < |Δy|）、Y通りは X 方向に走る梁を対象にする
 			// ——切断面に**平行**な梁だけがその通りの軸組を成す。
 			const bool runsY = std::abs(dx) < std::abs(dy);
 			if (xDirection != runsY)
@@ -369,7 +369,7 @@ namespace HomeskzIfcImport::parse
 			std::string number = command.viewport.drawingNumber;
 			if (used.contains(number))
 			{
-				// 2 つ目以降に "(2)" … を足す。**既にある綴りとぶつからなくなるまで**
+				// 2 つ目以降に "(2)" … を付加する。**既にある綴りとぶつからなくなるまで**
 				// 進める（"い(2)" が通り名として実在することも有りうる）。
 				std::string candidate;
 				for (int suffix = 2;; ++suffix)
@@ -397,7 +397,7 @@ namespace HomeskzIfcImport::parse
 
 	int sectionSheetStartNumber(const std::vector<core::SheetCommand>& sheets)
 	{
-		// 伏図の番号は数字の文字列（"1" / "2" …）。**数字として読めたものだけ**を見て、その
+		// 伏図の番号は数字の文字列（"1" / "2" …）。**数字として読めたものだけ**を対象に、その
 		// 最大値の次を返す。読めない番号を 0 と扱って番号を巻き戻すより、読み飛ばす方が安全
 		// （番号が衝突すると別の伏図と同じシートレイヤへ軸組図を載せてしまう）。
 		int last = 0;
@@ -481,8 +481,8 @@ namespace HomeskzIfcImport::parse
 		return commands;
 	}
 
-	// --- const Model& を直接取るオーバーロード（単体テスト用。内部でコンテキストを作って
-	// 捨てる＝従来どおりの挙動。docs/DEVELOPMENT.md「置き場所の一覧」の共有コンテキスト）--
+	// --- const Model& を直接取るオーバーロード（単体テスト用。内部でコンテキストを生成して
+	// 破棄する＝従来どおりの挙動。docs/DEVELOPMENT.md「置き場所の一覧」の共有コンテキスト）--
 	std::vector<core::SectionCommand> buildSectionCommands(const Model& model,
 														   const core::Document& document)
 	{

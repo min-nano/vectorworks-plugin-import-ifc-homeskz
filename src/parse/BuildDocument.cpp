@@ -8,11 +8,11 @@
 //	                    サニタイズはしない。理由は parse/Loader.h 参照）
 //	  2. 要素ごとの parse モジュール … Document を組み立てる（呼ぶ順は要素どうしの依存で
 //	                    決まる。下の buildDocument の各段のコメント参照）
-//	で、要素を足すときは 2 に足す（docs/DEV-NOTES.md）。
+//	で、要素を追加するときは 2 に追加する（docs/DEV-NOTES.md）。
 //
 //	各要素の解析は「ストーリ一覧」「通り芯のセンタリング中心」「階に属する要素」「屋根面」を
 //	共通して必要とするので、**共有コンテキスト（parse/Context）を 1 つだけ作って全要素へ
-//	渡す**。要素ごとに作り直すと同じ走査が要素の数だけ走る（parse/Context.h の冒頭参照）。
+//	渡す**。要素ごとに再構築すると同じ走査が要素の数だけ走る（parse/Context.h の冒頭参照）。
 //
 
 #include "parse/BuildDocument.h"
@@ -91,7 +91,7 @@ namespace HomeskzIfcImport::parse
 		progress.step();
 
 		// M7 横架材: ストーリ（母屋・登り梁レイヤを作るか）・垂木（差し込みの桁幅）・登り梁の
-		// 位置補正が同じ結果を必要とするため、Context が 1 回だけ解析して全員へ配る
+		// 位置補正が同じ結果を必要とするため、Context が 1 回だけ解析して各要素へ配る
 		// （parse/Context.h の members）。**登り梁は屋根面へスナップ補正**してから Document に
 		// 載せる（形状先行。parse/Noboribari）。受ける材は横架材と柱の両方（M8 で最終化）。
 		//
@@ -168,9 +168,9 @@ namespace HomeskzIfcImport::parse
 
 		// M11 シンボル置換系（アンカーボルト・床束・火打・仕口）。互いに独立だが、
 		// **仕口だけは横架材・柱の命令から導出する**ので、上の members / columns
-		// が確定した後に置く。仕口が見る横架材は登り梁の屋根スナップ**後**——受ける材との取り
+		// が確定した後に置く。仕口が参照する横架材は登り梁の屋根スナップ**後**——受ける材との取り
 		// 合いは補正後の位置で決まる。アンカーボルトはコンテキストが 1 回だけ組み立てる（伏図
-		// のグラフィック凡例が「1 本でも置いたか」を見るため。parse/Sheet）。
+		// のグラフィック凡例が「1 本でも置いたか」を判定に使うため。parse/Sheet）。
 		document.anchorBolts = context.anchorBolts();
 		progress.step();
 		document.floorPosts = buildFloorPostCommands(context);
@@ -194,7 +194,7 @@ namespace HomeskzIfcImport::parse
 		}
 		progress.step();
 
-		// M12 断面記号・伏図記号。柱の命令だけから決まる（IFC は見ない）ので columns の
+		// M12 断面記号・伏図記号。柱の命令だけから決まる（IFC は参照しない）ので columns の
 		// 後ならどこでもよいが、**伏図より前**に置く必要がある——伏図は伏図記号レイヤを
 		// 表示レイヤに載せるため、そのレイヤ名を決める側が先に確定していないといけない。
 		document.columnMarks = buildColumnMarkCommands(document.columns, options);
@@ -228,7 +228,7 @@ namespace HomeskzIfcImport::parse
 		progress.step();
 
 		// M28 図面枠（タイトルブロック）: 設定で選ばれたスタイル名をそのまま命令セットへ
-		// 写す（空なら置かない）。**ここには判断が要らない**——図面枠は IFC の中身とは
+		// コピーする（空なら置かない）。**ここには判断が要らない**——図面枠は IFC の中身とは
 		// 無関係に「作ったシートレイヤすべてへ 1 つずつ」置くもので、解析が数えるものも
 		// 選ぶものも無い。設定を描画側へ運ぶ経路が Document だけ（CLAUDE.md「依存の向き」）
 		// なので、ここを通す。
@@ -269,8 +269,8 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::SectionCommand> buildSectionCandidates(const std::string& ifcPath,
 															 const core::ImportOptions& options)
 	{
-		// **外す通りを空にして**解析し、軸組図の命令をそのまま候補にする。取り込みと
-		// 同じ buildDocument を通すので、候補と実際に描く通りが食い違わない（切断位置は
+		// **除外する通りを空にして**解析し、軸組図の命令をそのまま候補にする。取り込みと
+		// 同じ buildDocument を通すので、候補と実際に描画する通りが食い違わない（切断位置は
 		// 柱・横架材の命令から、映すレイヤはストーリの命令から決まり、どちらも全体の
 		// 解析を要する。大きなホームズ君 IFC でも 0.1 秒程度）。進捗は出さない。
 		core::ImportOptions all = options;

@@ -2,8 +2,8 @@
 //	PayloadHost.cpp
 //
 //	PayloadHost.h の実装。**SDK の型は使わない**（境界を SDK から独立に保つため。
-//	プリコンパイルヘッダ経由で宣言は入ってくるが、ここでは触らない）。プラットフォーム
-//	判別も SDK の GS_MAC / GS_WIN ではなく素の __APPLE__ / _WIN32 で行う。
+//	プリコンパイルヘッダ経由で宣言は入ってくるが、ここでは使わない）。プラットフォーム
+//	判別も SDK の GS_MAC / GS_WIN ではなくコンパイラ定義の __APPLE__ / _WIN32 で行う。
 //
 //	プラットフォーム依存はここに閉じている:
 //	  * 自分の位置           … mac: dladdr / win: GetModuleHandleExW
@@ -56,7 +56,7 @@ namespace HomeskzIfcImport
 			return s;
 		}
 
-		// GetLastError() を読める形に（メッセージまでは要らない。番号があれば追える）。
+		// GetLastError() を読める形に（メッセージまでは要らない。番号があれば特定できる）。
 		std::string LastError(const char* what)
 		{
 			return std::string(what) + " が失敗しました（GetLastError=" +
@@ -92,10 +92,10 @@ namespace HomeskzIfcImport
 		}
 		fHandle = (void*)handle;
 #else
-		// RTLD_NOW: 未解決シンボルを**読み込んだ時点で**弾く（呼んだ瞬間に落ちるより、
-		// 読み込みが失敗して理由が出るほうが調査になる）。
-		// RTLD_LOCAL: このモジュールの記号をプロセス全体へ晒さない。本体は自分の SDK
-		// （libVWSDK.a）の複製を持つので、晒すと殻の側の同名記号と混ざりうる。
+		// RTLD_NOW: 未解決シンボルを**読み込んだ時点で**検出して失敗させる（呼んだ瞬間に
+		// 異常終了するより、読み込みが失敗して理由が出るほうが調査しやすい）。
+		// RTLD_LOCAL: このモジュールのシンボルをプロセス全体へ公開しない。本体は自分の SDK
+		// （libVWSDK.a）の複製を持つので、公開すると殻の側の同名シンボルと混ざりうる。
 		void* handle = ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
 		if (handle == nullptr)
 		{
@@ -196,8 +196,8 @@ namespace HomeskzIfcImport
 	// **std::filesystem を使わない。** MSVC の <filesystem> は file_size /
 	// last_write_time の中でフラグの enum を範囲外にキャストしており、clang-tidy の
 	// 静的解析（clang-analyzer-optin.core.EnumCastOutOfRange）がそれを我々の呼び出しの
-	// 経路として報告する（tidy-windows で実測）。**標準ライブラリの中の話を黙らせるより、
-	// OS の API を直に叩くほうが素直**で、ついでに「file_time_type の epoch は処理系依存」
+	// 経路として報告する（tidy-windows で実測）。**標準ライブラリ内部の警告を抑制するより、
+	// OS の API を直接呼び出すほうが単純**で、あわせて「file_time_type の epoch は処理系依存」
 	// という但し書きも要らなくなる（st_mtime も FILETIME も実時刻である）。
 	PayloadStamp StampOf(const std::string& path)
 	{
@@ -214,12 +214,12 @@ namespace HomeskzIfcImport
 		ULARGE_INTEGER when{};
 		when.LowPart = info.ftLastWriteTime.dwLowDateTime;
 		when.HighPart = info.ftLastWriteTime.dwHighDateTime;
-		// FILETIME は 100ns 刻み。秒まで丸めれば「前と違うか」を見るには十分。
+		// FILETIME は 100ns 刻み。秒まで丸めれば「前と違うか」を判定するには十分。
 		stamp.modified = static_cast<long long>(when.QuadPart / 10000000ULL);
 #else
 		// `stat` は関数名でもあるので型は elaborated-type-specifier で綴る。別名を挟むのは
 		// clang-format が `struct stat info{};` を型定義と読んで改行してしまうため。値初期化
-		// しておく（未初期化のままだと cppcoreguidelines-pro-type-member-init に当たる）。
+		// しておく（未初期化のままだと cppcoreguidelines-pro-type-member-init の警告が出る）。
 		using FileStat = struct stat;
 		FileStat info{};
 		if (::stat(path.c_str(), &info) != 0)
@@ -253,7 +253,7 @@ namespace HomeskzIfcImport
 	{
 		error.clear();
 		std::error_code ec;
-		// 上書きで写す（世代ごとに別名にするので通常は新規だが、作り直しでも通るように）。
+		// 上書きで複製する（世代ごとに別名にするので通常は新規だが、再作成でも通るように）。
 		std::filesystem::copy_file(from, to, std::filesystem::copy_options::overwrite_existing, ec);
 		if (ec)
 		{
@@ -300,7 +300,7 @@ namespace HomeskzIfcImport
 	}
 
 	// -----------------------------------------------------------------------
-	// Payload — 本体との付き合い 1 世代ぶん（PayloadHost.h）。
+	// Payload — 本体の 1 世代ぶんの管理（PayloadHost.h）。
 	// -----------------------------------------------------------------------
 	namespace
 	{
@@ -315,9 +315,9 @@ namespace HomeskzIfcImport
 		// **本体へ貸す「同梱スクリプトの実行」の実体**（src/PayloadAbi.h の
 		// VwPayloadHost::runBundledScript）。
 		//
-		// 戻す文字列は**殻が所有し、次にこの関数を呼ぶまで生かす**。だから関数ローカルの
-		// static に置く——本体側の記憶域に置くと、降ろした瞬間に消えるものを殻が指すことに
-		// なる（境界を越える記憶域の扱いは PayloadHostHolder.h と同じ理由で慎重にやる）。
+		// 戻す文字列は**殻が所有し、次にこの関数を呼ぶまで保持する**。だから関数ローカルの
+		// static に置く——本体側の記憶域に置くと、アンロードした瞬間に消えるものを殻が指す
+		// ことになる（境界を越える記憶域の扱いは PayloadHostHolder.h と同じ理由で慎重にやる）。
 		//
 		// **例外を境界の外へ出さない。** 呼ぶのは本体（別モジュール）なので、ここから
 		// 投げると巻き戻せる保証が無い。
@@ -375,7 +375,7 @@ namespace HomeskzIfcImport
 			return false;
 		}
 
-		// **印は複製の前に取る。** 読み込んだ世代がどのファイルだったかを覚えるのが
+		// **印は複製の前に取る。** 読み込んだ世代がどのファイルだったかを記録するのが
 		// 目的なので、途中で置き換えられても「読んだもの＝印」の対応が崩れない。
 		fStamp = StampOf(fSourcePath);
 
@@ -395,7 +395,7 @@ namespace HomeskzIfcImport
 		{
 			// **いちばん多いのは「本体だけが置かれていない」**——配布 zip には殻と本体の
 			// 2 つが入っており、片方だけ置くと（あるいは殻しか入れ替えない古いアップデータ
-			// で更新すると）この状態になる。**直し方を名指しで出す**: 症状は「取り込みが
+			// で更新すると）この状態になる。**対処方法を具体的に示す**: 症状は「取り込みが
 			// 始まらない」だけなので、これが無いと何をすればよいか分からない。
 			error = "本体（" + payloadpath::FileNameFor(PLUGIN_VWR_ID) +
 					"）が見つかりません。\n"
@@ -443,7 +443,7 @@ namespace HomeskzIfcImport
 			return false;
 		}
 
-		// 素性は init の前でも取れる（読んだものが何かを先に言えるように）。
+		// 素性は init の前でも取得できる（読み込んだものが何かを先に示せるように）。
 		VwPayloadInfo info{};
 		info.size = static_cast<unsigned int>(sizeof(VwPayloadInfo));
 		if (infoFn(&info) != kVwPayloadOk)
@@ -452,21 +452,21 @@ namespace HomeskzIfcImport
 			this->unload();
 			return false;
 		}
-		// **その場で写す**（向こうの const char* は次の呼び出しまでしか生きていない）。
+		// **その場で複製する**（本体の const char* は次の呼び出しまでしか有効でない）。
 		fCommit = (info.commit != nullptr) ? info.commit : "";
 		fBranch = (info.branch != nullptr) ? info.branch : "";
 
 		// **これはメンバである（load のローカルではない）。** 古い本体は渡された
 		// VwPayloadHost のポインタを持ち続けることがあり、その先がローカルだと load から
-		// 戻った時点で腐る（PayloadAbi.h / PayloadHostHolder.h）。**降ろすまで生かす**の
-		// が殻の側の歯止め。
+		// 戻った時点で無効になる（PayloadAbi.h / PayloadHostHolder.h）。**アンロードするまで
+		// 保持する**のが殻の側の歯止め。
 		fHost = VwPayloadHost{};
 		fHost.size = static_cast<unsigned int>(sizeof(VwPayloadHost));
 		fHost.abiVersion = VW_PAYLOAD_ABI_VERSION;
 		fHost.callbacks = callbacks;
-		// **殻の ID と、同梱スクリプトを走らせる道具を貸す**（src/PayloadAbi.h）。どちらも
-		// 本体からは手が届かないもので、前者は殻にしかコンパイルされておらず、後者は
-		// 同梱物の在り処（本体が読まれるのは一時ディレクトリの複製）を要する。
+		// **殻の ID と、同梱スクリプトを実行する機能を貸す**（src/PayloadAbi.h）。どちらも
+		// 本体からは取得できないもので、前者は殻にしかコンパイルされておらず、後者は
+		// 同梱物の場所（本体が読み込まれるのは一時ディレクトリの複製）を要する。
 		// VW_SHELL_ID は文字列リテラル＝この殻が生きている間ずっと有効。
 		fHost.runBundledScript = &ShellRunBundledScript;
 
@@ -532,7 +532,7 @@ namespace HomeskzIfcImport
 			return false;
 		}
 		if (text != nullptr)
-			out = text; // ← その場で写す（PayloadAbi.h「返る文字列の寿命」）
+			out = text; // ← その場で複製する（PayloadAbi.h「返る文字列の寿命」）
 		return true;
 	}
 
@@ -557,7 +557,7 @@ namespace HomeskzIfcImport
 
 	void Payload::unload()
 	{
-		// 順序が肝。① 本体に殻への参照を手放させる ② 降ろす ③ 複製を消す。
+		// 順序が要点。① 本体に殻への参照を手放させる ② アンロードする ③ 複製を削除する。
 		if (fLoaded && fShutdownFn != nullptr)
 			fShutdownFn();
 		fLoaded = false;
@@ -569,17 +569,17 @@ namespace HomeskzIfcImport
 		fCommit.clear();
 		fBranch.clear();
 		fStamp = PayloadStamp{};
-		// 本体は shutdown で手放したはず。殻の側も、渡していたものをここで捨てる
-		// （降ろした後に触られても、少なくとも「腐った値」ではなくなる）。
+		// 本体は shutdown で手放したはず。殻の側も、渡していたものをここで破棄する
+		// （アンロードした後に参照されても、少なくとも「無効な値」ではなくなる）。
 		fHost = VwPayloadHost{};
 
 		std::string ignored;
 		(void)fModule.close(ignored);
 		if (!fTempPath.empty())
 		{
-			// **降りたことを別の目で確かめてから消す。** dlclose が 0 を返しても消えて
-			// いるとは限らないし、Windows では読み込み中のファイルは消せない。残しても
-			// 世代ごとに名前が違うので次回に響かない。
+			// **アンロードできたことを別の手段で確かめてから削除する。** dlclose が 0 を
+			// 返しても消えているとは限らないし、Windows では読み込み中のファイルは削除できない。
+			// 残しても世代ごとに名前が違うので次回に影響しない。
 			if (!IsModuleStillLoaded(fTempPath))
 				(void)RemoveFileAt(fTempPath, ignored);
 			fTempPath.clear();

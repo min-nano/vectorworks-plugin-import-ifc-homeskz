@@ -9,13 +9,13 @@
     配布 zip の直下に同梱され、リリースのアセットとしても単独で公開される。走るのは
     常に**インストール済みの（＝古い）** vw-update.ps1 なので、配置の知識をそちらに
     置くと「新しいビルドがどんなファイルでできているか」を永遠に知らないままになる
-    ——実際 M21 で本体（.vwpayload）が増えたとき、古いアップデータはそれを写さず、
-    利用者は zip を手で落として置き直す羽目になった。そこで vw-update.ps1 は**落とした
-    zip の中のこのスクリプトへ配置を委ねる**。
+    ——実際 M21 で本体（.vwpayload）が増えたとき、古いアップデータはそれをコピーせず、
+    利用者は zip を手動でダウンロードして置き直す必要があった。そこで vw-update.ps1 は
+    **ダウンロードした zip の中のこのスクリプトへ配置を委ねる**。
 
     配置の規則はひとつ: **zip の直下にあるものを、そのまま置く。**
-    ファイル名を列挙しない——列挙した瞬間に「増えたファイルを取りこぼす」という、いま
-    直している事故がそっくり戻ってくる。除くのはインストーラ自身（.ps1 / .sh）と
+    ファイル名を列挙しない——列挙した瞬間に「増えたファイルを漏らす」という、いま
+    直している不具合がそのまま再発する。除くのはインストーラ自身（.ps1 / .sh）と
     __MACOSX だけ（$VW_NOT_INSTALLED）。
 
     置き先は **Plug-Ins の直下ではなく、プラグインが自分で持つフォルダ**である:
@@ -42,14 +42,14 @@
                           VW_PLUGINS_DIR、無ければ VW2026 のユーザフォルダ
       -From <dir>         展開済みのディレクトリから入れる（ダウンロードしない）
       -Zip <file>         手元の zip から入れる
-      -Url <url>          この zip を落として入れる
-      -Tag <tag>          このリリース（既定 "stable"）から落として入れる
+      -Url <url>          この zip をダウンロードして入れる
+      -Tag <tag>          このリリース（既定 "stable"）からダウンロードして入れる
       -Machine            機械可読な出力にする（installed-shell= / ok / error=）。
                           プラグイン側の vw-update.ps1 do-install が使う
       -Help               使い方
 
-    **知らないオプションは黙って読み飛ばす。** 新しい vw-update.ps1 が古いリリースの zip
-    に入ったこのスクリプトを呼ぶ、という向きが起こりうるので、増えた引数で落ちないように
+    **知らないオプションはエラーにせず読み飛ばす。** 新しい vw-update.ps1 が古いリリースの zip
+    に入ったこのスクリプトを呼ぶ、という向きが起こりうるので、増えた引数で失敗しないように
     しておく（そのために param() ブロックを使わず $args を自分で読む——param() だと未知の
     名前付き引数が束縛エラーになる）。
 
@@ -75,9 +75,9 @@ $VW_REPO = if ($env:VW_REPO) { $env:VW_REPO } else { 'min-nano/vectorworks-plugi
 $VW_API = "https://api.github.com/repos/$VW_REPO"
 
 # 殻の拡張子（Windows のプラグインモジュールは "<name>.vlb" という DLL）。zip の
-# 取り違えを弾くのと、アーカイブからプラグイン名を読み取るのに使う。
+# 取り違えを検出するのと、アーカイブからプラグイン名を読み取るのに使う。
 $VW_SHELL_EXT = '.vlb'
-# 配布 zip のアセット名の末尾。**プラグイン名が変わっても効く**ようにアセット名そのもの
+# 配布 zip のアセット名の末尾。**プラグイン名が変わっても機能する**ようにアセット名そのもの
 # ではなく末尾で照合する。
 $VW_ZIP_SUFFIX = '.vlb.zip'
 # 置かないもの（インストーラ自身。プラグインの一部ではない）。**アンインストーラは
@@ -108,10 +108,10 @@ function Show-Usage {
 }
 
 # ---------------------------------------------------------------------------
-# GitHub REST helpers. **vw-update.ps1 と似たものが写っているのは意図的**で、この
-# ファイルは**単独で配られて単独で走る**（リリースから落としてきた 1 枚だけが手元に
-# ある）から、他のスクリプトをドットソースできない。写しは簡略版で、トークン
-# （vw-token.ps1）も失敗理由の組み立ても持たない（API を叩くのは手動でリリースから
+# GitHub REST helpers. **vw-update.ps1 と似たものがコピーされているのは意図的**で、この
+# ファイルは**単独で配られて単独で走る**（リリースからダウンロードした 1 ファイルだけが
+# 手元にある）から、他のスクリプトをドットソースできない。コピーは簡略版で、トークン
+# （vw-token.ps1）も失敗理由の組み立ても持たない（API を呼び出すのは手動でリリースから
 # 入れるときだけ）。
 # ---------------------------------------------------------------------------
 function Invoke-GH([string] $subpath) {
@@ -121,7 +121,7 @@ function Invoke-GH([string] $subpath) {
 }
 
 # リリースの JSON から配布 zip を 1 つ選ぶ。`want` が与えられていればその名前で厳密に、
-# そうでなければ**末尾が $VW_ZIP_SUFFIX のアセット**を拾う（アセット名が将来変わっても
+# そうでなければ**末尾が $VW_ZIP_SUFFIX のアセット**を選ぶ（アセット名が将来変わっても
 # 追随できる）。戻りは @{ Url; Name } か $null。
 function Get-ReleaseZip($release, [string] $want) {
     foreach ($a in $release.assets) {
@@ -139,8 +139,8 @@ function Get-ReleaseZip($release, [string] $want) {
 }
 
 # 展開済みディレクトリから殻を探し、その名前をプラグイン名として返す（-Name 省略時）。
-# -Filter ではなく Where-Object で絞るのは、Windows の -Filter が 8.3 名まで見て
-# "*.vlb" が ".vlb 以外で始まる長い拡張子" にも当たることがあるため。
+# -Filter ではなく Where-Object で絞るのは、Windows の -Filter が 8.3 名まで照合して
+# "*.vlb" が ".vlb 以外で始まる長い拡張子" にも一致することがあるため。
 function Get-PluginName([string] $dir) {
     $hit = Get-ChildItem -LiteralPath $dir -ErrorAction SilentlyContinue |
         Where-Object { $_.Name.EndsWith($VW_SHELL_EXT) } | Select-Object -First 1
@@ -150,7 +150,7 @@ function Get-PluginName([string] $dir) {
 
 # 殻の ID（ビルドが .vlb の隣へ置く "<name>.shell-id"）。**「アップデートに Vectorworks の
 # 再起動が要るか」を決める鍵**で、プラグインは自分にコンパイルされた VW_SHELL_ID と
-# 突き合わせる——一致するなら本体（.vwpayload）を読み直すだけで反映される
+# 突き合わせる——一致するなら本体（.vwpayload）を再読み込みするだけで反映される
 # （src/PayloadAbi.h / src/UpdaterParse.h）。読めなければ空＝プラグインは安全側
 # （再起動が要る）へ倒す。
 function Get-InstalledShellId([string] $name) {
@@ -163,13 +163,13 @@ function Get-InstalledShellId([string] $name) {
 }
 
 # ---------------------------------------------------------------------------
-# 配置。**このスクリプトの本体で、ここだけが「プラグインがどんなファイルでできているか」を
+# 配置。**このスクリプトの中心部分で、ここだけが「プラグインがどんなファイルでできているか」を
 # 知っている。**
 # ---------------------------------------------------------------------------
 
-# Install-File: $src を $dst へ置く。**読み込み中の .vlb は削除できないが、退かすことは
-# できる**ので、既にあるものは best-effort で改名して退かしてから写す。残った ".old-*" は
-# 次のインストールで（Vectorworks が手を離したあとに）掃く。ロック中のファイルが消せない
+# Install-File: $src を $dst へ置く。**読み込み中の .vlb は削除できないが、退避することは
+# できる**ので、既にあるものは best-effort で改名して退避してからコピーする。残った ".old-*" は
+# 次のインストールで（Vectorworks がファイルを解放したあとに）削除する。ロック中のファイルが消せない
 # のは想定内なので、catch は空でよい。
 function Install-File([string] $src, [string] $dst) {
     if (Test-Path -LiteralPath $dst) {
@@ -183,9 +183,9 @@ function Install-File([string] $src, [string] $dst) {
 # Get-PluginDir: 実際に置くフォルダ。**プラグインは自分のフォルダを 1 つ持つ**
 # （<Plug-Ins>\<name>\。冒頭のコメント参照）。
 #
-# **渡された先が既にそのフォルダなら足さない。** 自動アップデートのとき、プラグインは
+# **渡された先が既にそのフォルダなら追加しない。** 自動アップデートのとき、プラグインは
 # 「いま自分が読み込まれたフォルダ」を渡してくる——サブフォルダ化のあとはそれ自身が
-# <Plug-Ins>\<name> なので、無条件に足すと更新のたびに <name>\<name>\… と際限なく
+# <Plug-Ins>\<name> なので、無条件に追加すると更新のたびに <name>\<name>\… と際限なく
 # 深くなる。vw-uninstall.ps1 の同名関数と**同じ規則**でなければならない。
 function Get-PluginDir([string] $root, [string] $name) {
     if ((Split-Path -Leaf $root) -eq $name) { return $root }
@@ -198,16 +198,16 @@ function Get-PluginDir([string] $root, [string] $name) {
 #
 # 見つからなければ何もしない（初回インストール、あるいはこの仕組みより前の版）。失敗
 # しても続行する——このあとどのみち上書きするので、取り除けなかったことを理由に
-# インストールごと失敗させるのは損。
+# インストールごと失敗させるのは得策ではない。
 #
-# **一時ディレクトリへ写してから走らせる。** アンインストーラは自分が消すフォルダの中に
-# 居るためで、写しておけば消えても走り切れる。
+# **一時ディレクトリへコピーしてから走らせる。** アンインストーラは自分が消すフォルダの中に
+# あるためで、コピーしておけば元が消えても最後まで実行できる。
 # 動詞が "Uninstall" なのは意図的（"Remove" だと PSScriptAnalyzer が ShouldProcess の
 # 実装を要求する。scripts/vw-uninstall.ps1 の Uninstall-PluginDir と同じ理由）。
 function Uninstall-PreviousRelease([string] $dest, [string] $name) {
     $src = Join-Path $dest $VW_UNINSTALLER
     if (-not (Test-Path -LiteralPath $src)) { return }
-    # 写し先は**この関数が自分で作る**——呼び出し側から受け取ると、渡し忘れたときに変な
+    # コピー先は**この関数が自分で作る**——呼び出し側から受け取ると、渡し忘れたときに想定外の
     # 場所へ書きに行く（bash 版で実際にそれをやり、root では成功してしまってテストと
     # CI の結果が食い違った）。
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('vwunin-' + [System.IO.Path]::GetRandomFileName())
@@ -226,10 +226,10 @@ function Uninstall-PreviousRelease([string] $dest, [string] $name) {
 }
 
 # Install-Tree: 展開済みディレクトリの直下にあるものを、そのままプラグインのフォルダへ
-# 置く。**列挙しない**のが肝（冒頭のコメント参照）。
+# 置く。**列挙しない**のが要点（冒頭のコメント参照）。
 function Install-Tree([string] $work, [string] $name) {
-    # 取り違えた zip を黙って撒かないための最低限の確認。**取り除くより先に確かめる**
-    # ——ここで弾けなかったら、消しただけで入れられない状態になる。
+    # 取り違えた zip をそのまま配置しないための最低限の確認。**取り除くより先に確かめる**
+    # ——ここで検出できなかったら、消しただけで入れられない状態になる。
     if (-not (Test-Path -LiteralPath (Join-Path $work "$name$VW_SHELL_EXT"))) {
         $script:LastError = "$name$VW_SHELL_EXT がアーカイブ内に見つかりません。"
         return $false
@@ -244,8 +244,8 @@ function Install-Tree([string] $work, [string] $name) {
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
     }
 
-    # 退避（*.old-*）の掃除。アンインストールが退かしたものと、前回の更新が残したもの
-    # の両方が対象で、Vectorworks が手を離していれば消える。
+    # 退避（*.old-*）の掃除。アンインストールが退避したものと、前回の更新が残したもの
+    # の両方が対象で、Vectorworks がファイルを解放していれば消える。
     Get-ChildItem -LiteralPath $dest -Filter '*.old-*' -ErrorAction SilentlyContinue |
         ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop } catch {} }
 
@@ -262,7 +262,7 @@ function Install-Tree([string] $work, [string] $name) {
 }
 
 # ---------------------------------------------------------------------------
-# 取ってくる → 展開する。戻りは @{ Dir; Name } か $null（理由は $script:LastError）。
+# 取得する → 展開する。戻りは @{ Dir; Name } か $null（理由は $script:LastError）。
 # ---------------------------------------------------------------------------
 function Resolve-Source([hashtable] $opt, [string] $tmp) {
     $name = $opt.Name
@@ -316,7 +316,7 @@ function Read-Option([string[]] $argv) {
         $a = [string] $argv[$i]
         $next = if ($i + 1 -lt $argv.Count) { [string] $argv[$i + 1] } else { '' }
         # switch -regex は**一致した節をすべて**実行するので、各節を break で閉じる
-        # （閉じないと "-machine" が最後の "^-" にも掛かって二重に走る）。
+        # （閉じないと "-machine" が最後の "^-" にも一致して二重に走る）。
         switch -regex ($a) {
             '^-(?i:machine)$' { $script:Machine = $true; break }
             '^-(?i:name)$' { $opt.Name = $next; $i++; break }
@@ -340,8 +340,8 @@ function Read-Option([string[]] $argv) {
 
 # ---------------------------------------------------------------------------
 # 結末は **$script:ExitCode** で返す。戻り値（return）にすると、機械可読な行を出す
-# Write-Output と同じ「出力ストリーム」に混ざり、呼び出し側が受け取る／飲み込むという
-# 事故になる（PowerShell の関数は return した値も出力の一部）。
+# Write-Output と同じ「出力ストリーム」に混ざり、呼び出し側が受け取る／取り込んでしまう
+# という不具合になる（PowerShell の関数は return した値も出力の一部）。
 function Invoke-Main([string[]] $argv) {
     $script:ExitCode = 0
     $opt = Read-Option $argv
@@ -388,7 +388,7 @@ function Invoke-Main([string[]] $argv) {
     $script:ExitCode = 1
 }
 
-# 直接実行したときだけ走らせる（テストはドットソースして個々の関数を叩く。
+# 直接実行したときだけ走らせる（テストはドットソースして個々の関数を呼び出す。
 # scripts/vw-update.ps1 の末尾と同じ作法）。
 if ($MyInvocation.InvocationName -ne '.') {
     Invoke-Main $args

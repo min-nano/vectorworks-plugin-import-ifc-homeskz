@@ -256,8 +256,8 @@ TEST(build_rows_with_too_few_or_extra_tabs)
 	CHECK_EQ(builds.size(), static_cast<std::size_t>(2));
 	if (builds.size() == 2)
 	{
-		// 5 列目からはブランチ名。それ以上の列は分けずにブランチへ残す——余りを黙って
-		// 捨てるより、照合に失敗して「何もしない」へ倒れるほうが安全。
+		// 5 列目からはブランチ名。それ以上の列は分けずにブランチへ残す——余りを断りなく
+		// 破棄するより、照合に失敗して「何もしない」へ倒れるほうが安全。
 		CHECK_EQ(builds[0].url, "u1");
 		CHECK_EQ(builds[0].branch, "extra\tmore");
 		CHECK_EQ(builds[1].url, "https://ex.com/ok.zip");

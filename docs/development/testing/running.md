@@ -19,7 +19,7 @@ ctest --test-dir build-tests --output-on-failure -j "$(nproc)"
 ```
 
 `--parallel` / `-j` を付けないと、cmake も ctest も**既定で 1 コアしか使いません**。
-テストは 20 本以上の独立した実行ファイルなので、コア数を渡すだけで素直に短くなります
+テストは 20 本以上の独立した実行ファイルなので、コア数を渡すだけで実行時間が短くなります
 （CI の `test` ジョブも同じ指定で回します。[「カバレッジレポート」](../ci/coverage.md)）。
 
 サニタイザ（AddressSanitizer + UBSan）を有効にして回す（メモリ不正・未定義動作の検出）:
@@ -31,18 +31,18 @@ ctest --test-dir build-san --output-on-failure -j "$(nproc)"
 ```
 
 CI の `test` ジョブは常にこの設定（に `VW_ENABLE_COVERAGE=ON` と
-`VW_REQUIRE_SCRIPT_TESTS=ON` を足したもの）で
+`VW_REQUIRE_SCRIPT_TESTS=ON` を加えたもの）で
 テストを回すため、リファクタが招くメモリ不正
 （境界外アクセス・use-after-free・リーク）や、updater パーサが GitHub 側の仕様変更で
-崩れた入力を誤処理するケースは、その場でビルドを赤にできます。予期しない外部入力に
+崩れた入力を誤処理するケースは、その場でビルドの失敗として検出できます。予期しない外部入力に
 対する耐性は `tests/UpdaterRobustnessTests.cpp` の擬似ファズ／敵対的入力テストが担い、
-サニタイザがその番人になります（詳細は[アップデータのテスト](updater.md)）。
+サニタイザがその検出役になります（詳細は[アップデータのテスト](updater.md)）。
 
 ビルドオプション:
 
 - `VW_BUILD_PLUGIN`（既定 `ON`）… プラグイン（殻と本体）をビルドします（SDK が必要で、
   macOS / Windows のみ）。テストだけをビルドしたいときは `OFF` にします。プラグインの
-  ビルドにだけ効く `VW_BUILD_CHANNEL` は[「ローカルでのビルド」](../build.md)。
+  ビルドにだけ影響する `VW_BUILD_CHANNEL` は[「ローカルでのビルド」](../build.md)。
 - `VW_BUILD_TESTS`（既定 `OFF`）… ユニットテストをビルドします。
 - `VW_ENABLE_COVERAGE`（既定 `OFF`）… テストに gcov 用の計測を付けます（GCC / Clang）。
 - `VW_ENABLE_SANITIZERS`（既定 `OFF`）… テストを ASan + UBSan

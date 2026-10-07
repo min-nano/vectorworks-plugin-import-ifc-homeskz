@@ -84,9 +84,9 @@ namespace
 	//   * 軸の 2 点は勾配方向 d の片方の端（軒側）に乗る
 	//   * upslope 定義点は逆の端に乗り、e は範囲の内側
 	//
-	// ★**xy の外接矩形では見ない。** 非矩形の footprint では外接矩形の外に出うる
+	// ★**xy の外接矩形では確認しない。** 非矩形の footprint では外接矩形の外に出うる
 	// （三角形の屋根面では軒が 1 頂点に退化するため。理由は core/Document.h）。ここで
-	// 押さえたいのは「射影範囲 1 つぶん余計に伸びていないこと」である。
+	// 確かめたいのは「射影範囲 1 つぶん余計に伸びていないこと」である。
 	//
 	// CHECK マクロは囲みスコープの failures 変数を使う設計（TestFramework.h）なので、
 	// 呼び出し側の failures を明示的に受け取る（tests/Fixtures.h の forEachFixture と同じ）。
@@ -116,7 +116,7 @@ namespace
 		projectRange(axis, along, axisEMin, axisEMax);
 		projectRange(axis, down, axisDMin, axisDMax);
 
-		// 軒方向は footprint の広がりちょうど。**旧実装はここで落ちる**（選んだ頂点から
+		// 軒方向は footprint の広がりちょうど。**旧実装はここで失敗する**（選んだ頂点から
 		// 広がりぶん伸ばしていたので、軸の範囲が footprint の範囲とずれる）。
 		CHECK(std::abs(axisEMin - eMin) <= kTol);
 		CHECK(std::abs(axisEMax - eMax) <= kTol);
@@ -185,14 +185,15 @@ TEST(axis_lies_on_eaves_low_edge)
 
 TEST(axis_stays_inside_the_footprint_whatever_the_winding)
 {
-	// ★**軸を footprint の外へ出さない**（M29）。かつては「最も軒側の頂点を 1 つ選び、
-	// そこから軒方向へ広がりぶん伸ばす」作りで、**選ばれた頂点が軒方向の終わり側に在ると
-	// 終点が footprint 1 つぶん外へ飛び出して**いた。屋根面オブジェクトはこの軸を勾配の
-	// 基準線として図に描くので、飛び出した軸がビューポートの外形を広げ、伏図が用紙に
-	// 収まらなくなる（実機の母屋伏図が縦に 5,680mm 大きく測られた）。
+	// ★**軸を footprint の外へ出さない**（M29）ことを、**周り方向を逆にした同じ矩形**で
+	// 確かめる——軒（y=0）の頂点が先に (4000,0) の側で見つかる並び。
+	// shedPlane（頂点が (0,0) から始まる）ではたまたま正しい端が選ばれるので使わない。
 	//
-	// shedPlane（頂点が (0,0) から始まる）ではたまたま正しい端が選ばれるので、**周り方向を
-	// 逆にした同じ矩形**で押さえる——軒（y=0）の頂点が先に (4000,0) の側で見つかる並び。
+	// 経緯: かつては「最も軒側の頂点を 1 つ選び、そこから軒方向へ広がりぶん伸ばす」作りで、
+	// **選ばれた頂点が軒方向の終わり側に在ると終点が footprint 1 つぶん外へ飛び出して**
+	// いた。屋根面オブジェクトはこの軸を勾配の基準線として図に描画するので、飛び出した軸が
+	// ビューポートの外形を広げ、伏図が用紙に収まらなくなる（実機の母屋伏図が縦に 5,680mm
+	// 大きく測られた）。
 	using HomeskzIfcImport::parse::RoofPlane;
 	const double s = std::sqrt(10.0);
 	RoofPlane plane;
@@ -224,7 +225,7 @@ TEST(axis_stays_inside_the_footprint_whatever_the_winding)
 TEST(axis_spans_the_projection_range_on_a_non_rectangular_face)
 {
 	// **非矩形の footprint でも射影範囲ちょうど**であることを、勾配の向きを 45°振った
-	// 直角三角形で押さえる（実フィクスチャには三角形の屋根面が 4 面ある）。
+	// 直角三角形で確かめる（実フィクスチャには三角形の屋根面が 4 面ある）。
 	//
 	// ★**この面では「xy の外接矩形に収まる」は成り立たない**——軒（勾配方向 d の最大）が
 	// 1 頂点に退化するので、その点を通る軒の直線上に長さを持つ線分を取れば、必ず外接矩形の
@@ -338,7 +339,7 @@ TEST(degenerate_span_returns_no_command)
 // ---------------------------------------------------------------------------
 
 // 最小の屋根版 IFC（minimalRoofText）は tests/RoofSample.h が唯一の定義で、垂木
-// （ParseRafterTests）と共有する。slabName を "屋根版" 以外にすると拾われないことの確認に使う。
+// （ParseRafterTests）と共有する。slabName を "屋根版" 以外にすると抽出されないことの確認に使う。
 
 TEST(extracts_one_roof_per_roof_slab)
 {
@@ -402,9 +403,9 @@ TEST(fixture_roofs_are_valid)
 			  0.0);
 
 		// ★**軒軸は footprint の射影範囲をはみ出さない**（M29）。屋根面オブジェクトは軸を
-		// 勾配の基準線として図に描くので、余計に伸びるとそのぶん図が広がり、伏図が用紙に
+		// 勾配の基準線として図に描画するので、余計に伸びるとそのぶん図が広がり、伏図が用紙に
 		// 収まらなくなる。**実データには三角形の屋根面（4 面）も非矩形の面（7 面）もある**
-		// ので、xy の外接矩形ではなく射影範囲で見る（理由は checkAxisSpansFootprint）。
+		// ので、xy の外接矩形ではなく射影範囲で確認する（理由は checkAxisSpansFootprint）。
 		checkAxisSpansFootprint(failures, roof);
 	}
 }

@@ -1,13 +1,13 @@
 //
 //	tests/Fixtures.h
 //
-//	テスト共通の小道具。フィクスチャの読み込みと実数の近似比較を 1 か所に置く。
+//	テスト共通の補助関数。フィクスチャの読み込みと実数の近似比較を 1 か所に置く。
 //
 //	フィクスチャのパス（HOMESKZ_FIXTURES_DIR）は CMake が各テストターゲットへ
 //	コンパイル定義で渡す（tests/CMakeLists.txt）。フィクスチャを読むヘルパー
 //	（fixture / allFixtures / forEachFixture / forEachFixtureDocument）は**その定義がある
 //	ときだけ**現れるので、定義を受け取らないターゲットで使えばコンパイルエラーになる
-//	（登録漏れは黙って通らない）。近似比較（near）はフィクスチャに依存しないので、
+//	（登録漏れは見逃されない）。近似比較（near）はフィクスチャに依存しないので、
 //	フィクスチャを使わないテスト（CoreRegionTests 等）もこのヘッダから使える。
 //
 //	【無 SDK】ここも他のテストと同じく VectorWorks SDK に触れない（CLAUDE.md「テスト方針」）。
@@ -42,7 +42,7 @@ namespace HomeskzIfcTests
 
 #ifdef HOMESKZ_FIXTURES_DIR
 	// フィクスチャのフルパス。**ディレクトリと名前を連結するのはここだけ**（各テストが
-	// 自前で連結すると、置き場所を変えたときに直し漏れる）。ローダ自身をテストする
+	// 自前で連結すると、置き場所を変えたときに修正漏れが出る）。ローダ自身をテストする
 	// ケースのように、Model ではなくパスが要るときに使う（存在しないファイル名も可）。
 	inline std::string fixturePath(std::string_view filename)
 	{
@@ -52,7 +52,7 @@ namespace HomeskzIfcTests
 	// フィクスチャを読む（読み込めなければ ok=false。呼び出し側で CHECK 失敗させる）。
 	//
 	// 【1 プロセス 1 回だけパースする】実 IFC は 1 ファイル 2MB 前後あり、テストは
-	// ASan+UBSan と gcov を載せた -O0 ビルドで走るので、パース 1 回のコストが大きい。
+	// ASan+UBSan と gcov を載せた -O0 ビルドで実行されるので、パース 1 回のコストが大きい。
 	// 一方ひとつのテスト実行ファイルは同じフィクスチャを何十回も読む（`allFixtures()`
 	// を回すケースが並ぶため）。同じファイルからは毎回まったく同じ Model ができる以上、
 	// 読み直しは純粋な待ち時間でしかないので、ファイル名をキーに **プロセス内で 1 回
@@ -66,15 +66,15 @@ namespace HomeskzIfcTests
 	//
 	// 引数が `std::string_view`（値渡し）なのは GCC の `-Wdangling-reference` 対策。
 	// 参照を返す関数を**一時オブジェクトの参照引数**付きで呼ぶと、GCC 13 は戻り値が
-	// その一時を指すかもしれないと見て警告する（ここでは誤検知——返すのは static な
-	// キャッシュの中身）。テストは `-Werror` で組むので、これはビルドを止める。値渡しの
+	// その一時を指すかもしれないと判断して警告する（ここでは誤検知——返すのは static な
+	// キャッシュの中身）。テストは `-Werror` でビルドするので、これはビルドを止める。値渡しの
 	// string_view なら参照引数が無いので警告そのものが起きない（呼び出し側は文字列
 	// リテラルでも `std::string` でもそのまま渡せる）。
 	inline const HomeskzIfcImport::parse::Model& fixture(std::string_view filename, bool& ok)
 	{
 		// pair の second が loadIfc の成否。map はイテレータ・参照が無効化されないので、
-		// 後から別のフィクスチャを読んでも、先に返した参照はそのまま生きている。
-		// std::less<> は string_view のまま引ける（探すたびに std::string を作らない）。
+		// 後から別のフィクスチャを読んでも、先に返した参照はそのまま有効である。
+		// std::less<> は string_view のまま検索できる（探すたびに std::string を作らない）。
 		static std::map<std::string, std::pair<HomeskzIfcImport::parse::Model, bool>, std::less<>>
 			cache;
 
@@ -96,20 +96,20 @@ namespace HomeskzIfcTests
 	// 【1 プロセス 1 回だけ組み立てる】上の fixture() と同じ理由。buildDocument は
 	// 読み込み（loadIfc）と全要素の解析を通しで行うので、実 IFC 1 件で最も重い呼び出しに
 	// なる。「全フィクスチャに対して回す」ケースが 1 つの実行ファイルに 2 つあれば、それだけで
-	// 素の 2 倍の時間がかかる（実際 ParseTagTests がそうなっていた）。同じファイルからは
+	// 本来の 2 倍の時間がかかる（実際 ParseTagTests がそうなっていた）。同じファイルからは
 	// 毎回まったく同じ Document ができる以上、組み直しは純粋な待ち時間でしかない。
 	//
 	// **fixture() のキャッシュとは別に持つ**——buildDocument はパスを取って自分で読むので、
-	// Model のキャッシュは通らない（読み込みぶんもここで 1 回に畳まれる）。
+	// Model のキャッシュは通らない（読み込み分もここで 1 回にまとめられる）。
 	//
-	// 戻り値が **const 参照**なのも fixture() と同じ理由（コピーを返すと畳んだ意味が薄れる）。
+	// 戻り値が **const 参照**なのも fixture() と同じ理由（コピーを返すとまとめた意味が薄れる）。
 	// 命令セットを書き換えるテスト（べき等性の確認など）は、この参照から自分のコピーを
 	// 作って使う——共有しているのは読み取り専用の原本、という約束にする。
 	// 引数の値渡し string_view も fixture() と同じ（GCC の -Wdangling-reference 対策）。
 	inline const HomeskzIfcImport::core::Document& fixtureDocument(std::string_view filename)
 	{
 		// map はイテレータ・参照が無効化されないので、後から別のフィクスチャを組み立てても、
-		// 先に返した参照はそのまま生きている。std::less<> は string_view のまま引ける。
+		// 先に返した参照はそのまま有効である。std::less<> は string_view のまま検索できる。
 		static std::map<std::string, HomeskzIfcImport::core::Document, std::less<>> cache;
 
 		auto it = cache.find(filename);
@@ -127,7 +127,7 @@ namespace HomeskzIfcTests
 
 	// 検証済みのホームズ君 EX 実 IFC 一式（tests/fixtures/README.md）。**この一覧が唯一の
 	// 定義**で、「全フィクスチャに対して回す」テストはここを参照する（各テストが独自の
-	// 一覧を持つと、フィクスチャを足したときに一部のテストだけ素通りする）。
+	// 一覧を持つと、フィクスチャを追加したときに一部のテストだけ対象から漏れる）。
 	inline const std::vector<std::string>& allFixtures()
 	{
 		static const std::vector<std::string> names = {
@@ -139,11 +139,11 @@ namespace HomeskzIfcTests
 	}
 
 	// 「全フィクスチャに対して回す」定型。読み込みの成否確認までをここで済ませ、
-	// 読めなかったフィクスチャは失敗を数えて飛ばす（**この定型が各テストに逐語複製されて
-	// いた**のを 1 か所に畳んだもの）。CHECK マクロは囲みスコープの failures 変数を使う
+	// 読めなかったフィクスチャは失敗を数えて読み飛ばす（**この定型が各テストに逐語複製
+	// されていた**のを 1 か所にまとめたもの）。CHECK マクロは囲みスコープの failures 変数を使う
 	// 設計（TestFramework.h）なので、呼び出し側の failures を明示的に受け取る。ここの
 	// CHECK(ok) の失敗は Fixtures.h の行を指すが、失敗したテスト名は出るので特定はできる
-	// （どのフィクスチャで落ちたかまで要る検証は body 側の CHECK が担う）。
+	// （どのフィクスチャで失敗したかまで要る検証は body 側の CHECK が担う）。
 	template <class Body>
 	inline void forEachFixture(int& failures, Body&& body) // body(name, model)
 	{

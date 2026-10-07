@@ -267,7 +267,7 @@ TEST(reads_bare_keyword_as_enum)
 
 TEST(skips_unparseable_value_character)
 {
-	// 値位置の解釈できない文字は 1 つ捨てて Null にする。
+	// 値位置の解釈できない文字は 1 つ破棄して Null にする。
 	Model const model = parseStep("#1=IFCX(@);");
 	const Entity* e = model.entity(1);
 	CHECK(e != nullptr);
@@ -293,7 +293,7 @@ TEST(reads_complex_entity_record)
 }
 
 // ---------------------------------------------------------------------------
-// 桁溢れ・数字なし参照は 0 に落とす（寛容な握りつぶし）
+// 桁溢れ・数字なし参照は 0 にする（エラーにせず寛容に扱う）
 // ---------------------------------------------------------------------------
 
 TEST(overflowing_integer_becomes_zero)
@@ -355,7 +355,7 @@ TEST(tolerates_input_truncated_mid_instance)
 
 TEST(unterminated_string_is_tolerated)
 {
-	// 閉じられない文字列を含む文は捨てられる。クラッシュ・無限ループしないこと。
+	// 閉じられない文字列を含む文は破棄される。クラッシュ・無限ループしないこと。
 	Model const model = parseStep("#1=IFCX('abc");
 	CHECK_EQ(model.size(), static_cast<std::size_t>(0));
 }
@@ -421,7 +421,7 @@ TEST(leaves_plain_and_broken_escapes_alone)
 	// エスケープを含まない文字列はそのまま。
 	CHECK_EQ(decodeStepString("X1"), std::string("X1"));
 	// 壊れた（16 進でない・閉じられない）エスケープでも文字列全体を失わない。16 進として
-	// 読めなくなった時点で打ち切り、残りはそのまま文字として通す（内容を捨てない）。
+	// 読めなくなった時点で打ち切り、残りはそのまま文字として通す（内容を破棄しない）。
 	CHECK_EQ(decodeStepString("a\\X2\\ZZZZ\\X0\\b"), std::string("aZZZZ\\X0\\b"));
 	CHECK_EQ(decodeStepString("a\\X2\\"), std::string("a"));
 	CHECK_EQ(decodeStepString("a\\qb"), std::string("a\\qb"));

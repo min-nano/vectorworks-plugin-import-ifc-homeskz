@@ -77,12 +77,12 @@ $env:VW_PLUGINS_DIR = $PluginsDir
 # **エラーの扱いはローカルと CI で変える。** これは「CI では緩めない」という
 # VW_REQUIRE_SCRIPT_TESTS の方針（上記 $RequireTools）をそのまま延長したもの。
 #
-#   * ローカル（Continue）… 落ちた文があっても最後まで走り、失敗を一覧できる。
+#   * ローカル（Continue）… 失敗した文があっても最後まで走り、失敗を一覧できる。
 #   * CI（Stop）………………… 想定外のエラーでその場で終了し、exit 1 になる。
 #
-# Stop が要る理由: Continue だと**落ちた文の CheckXxx が呼ばれないまま**次へ進むので、
-# 検査が空振りしたのに「PASS: all N checks」と出る。実際に `Join-Path 'C:\x' …`
-# （Linux の pwsh に C: ドライブは無い）で 2 件が黙って抜け、N だけが減っていた。
+# Stop が要る理由: Continue だと**失敗した文の CheckXxx が呼ばれないまま**次へ進むので、
+# 検査が実行されなかったのに「PASS: all N checks」と出る。実際に `Join-Path 'C:\x' …`
+# （Linux の pwsh に C: ドライブは無い）で 2 件が通知なしに抜け、N だけが減っていた。
 # ローカルを Continue のままにしてあるのは、直すときは失敗を一覧できたほうが速いから。
 $ErrorActionPreference = if ($RequireTools) { 'Stop' } else { 'Continue' }
 
@@ -208,7 +208,7 @@ function New-BuildZip([string] $zipPath, [string] $vlbName) {
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.commit") -Value 'newcommit' -NoNewline
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.branch") -Value 'feature/new' -NoNewline
     # 本体と殻の ID も、実際のリリース zip と同じように入れる。**殻だけ入れて本体を
-    # 取りこぼす退行**を捕まえるため（src/PayloadAbi.h）。
+    # 入れ漏らす退行**を検出するため（src/PayloadAbi.h）。
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.vwpayload") -Value 'payload' -NoNewline
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.shell-id") -Value 'abc123def456' -NoNewline
     Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -Force
@@ -247,7 +247,7 @@ CheckEq (Get-InstalledCommit 'min-nano_structureDev') 'none' 'absent sidecar -> 
 
 # ===========================================================================
 # Get-InstalledBranch — reads the "<name>.branch" sidecar. **別のブランチのビルドへ
-# 乗り換えたことを覚えている唯一の場所**で、殻にコンパイルされた VW_BUILD_BRANCH は
+# 乗り換えたことを記録している唯一の場所**で、殻にコンパイルされた VW_BUILD_BRANCH は
 # 本体だけを入れ替えたあと前のブランチを名乗ったままになる（src/UpdaterParse.h の
 # ResolveCurrentDevBuild）。
 # ===========================================================================
@@ -287,7 +287,7 @@ $out = AsText (Invoke-QDev)
 CheckContains $out 'installed=none' 'installed line (no dev build installed here)'
 CheckContains $out 'installed-branch=' 'installed-branch line'
 # **5 列目はリリース本文（notes）の branch=。** 取り込みのついでの確認が「いま動いて
-# いるのと同じブランチのビルド」だけを拾うために要る（src/UpdaterFlow.cpp）。
+# いるのと同じブランチのビルド」だけを対象にするために要る（src/UpdaterFlow.cpp）。
 CheckContains $out ("build`taaa1111`tfeature/x`thttps://example.test/dl/x.zip`tfeature/x") `
     'feature/x row carries the branch from the release body'
 # 本文に branch= が無いリリースでは空欄になる（プラグイン側は照合できず何もしない）。
@@ -302,7 +302,7 @@ $out = AsText (Invoke-QDev)
 CheckContains $out 'error=' 'offline -> error= line'
 $script:FakeApiFail = $false
 
-# **理由を必ず添える**（M27）。往復は無人で回るので、パレットに出るこの 1 行だけが
+# **理由を必ず添える**（M27）。往復は無人で実行されるので、パレットに出るこの 1 行だけが
 # 手掛かりになる——「取得できませんでした。」だけでは、回線が切れたようにしか見えない。
 T 'the error line carries the reason Invoke-GH left behind'
 $script:FakeApiFail = $true
@@ -362,12 +362,12 @@ $own = Join-Path $VW_PLUGINS_DIR 'min-nano_structureDev'
 CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.vlb')) $true 'the .vlb landed'
 CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.commit')) $true 'the .commit sidecar landed'
 CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.branch')) $true 'the .branch sidecar landed'
-# **本体も入っていること。** 殻だけ入れて本体を取りこぼすと、次の起動でプラグインは
+# **本体も入っていること。** 殻だけ入れて本体を入れ漏らすと、次の起動でプラグインは
 # 何もできなくなる（src/PayloadHost.cpp が「本体が見つかりません」と言うだけ）。
 CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.vwpayload')) $true 'the .vwpayload landed'
 CheckEq (Test-Path -LiteralPath (Join-Path $own 'min-nano_structureDev.shell-id')) $true 'the shell-id stamp landed'
-# 入れた殻の ID を先に出す。プラグインはこれを自分の VW_SHELL_ID と突き合わせて、
-# **本体の読み直しで済むなら再起動を尋ねない**（src/UpdaterParse.h）。
+# 入れた殻の ID を先に出す。プラグインはこれを自分の VW_SHELL_ID と照合して、
+# **本体の再読み込みで済むなら再起動を尋ねない**（src/UpdaterParse.h）。
 CheckContains $out 'installed-shell=abc123def456' 'prints the installed shell id'
 
 T 'Invoke-DoInstall reports a download failure'
@@ -387,9 +387,9 @@ CheckContains $out 'error=' 'empty args -> error= line'
 
 # ===========================================================================
 # Get-PluginZipUrl — the distribution zip is found by exact name, and STILL found
-# after the asset is renamed. **これが効かないと、アセット名を変えた瞬間に
-# インストール済みの古いアップデータからは何も落とせなくなる**（利用者は手で落とす
-# しかなくなる）。
+# after the asset is renamed. **これが機能しないと、アセット名を変えた瞬間に
+# インストール済みの古いアップデータからは何もダウンロードできなくなる**（利用者は
+# 手動でダウンロードするしかなくなる）。
 # ===========================================================================
 # ===========================================================================
 # Get-PluginDir — **インストーラと同じ規則**でなければならない（片方だけ変えると、
@@ -420,18 +420,18 @@ $relRenamed = @'
 CheckEq (Get-PluginZipUrl $relRenamed 'min-nano_structure') 'https://example.test/dl/renamed.zip' 'falls back to any *.vlb.zip'
 
 # ===========================================================================
-# do-install の委譲 — **この変更の要**。落とした zip に vw-install.ps1 が入っていたら、
+# do-install の委譲 — **この変更の要点**。ダウンロードした zip に vw-install.ps1 が入っていたら、
 # 配置はそちらへ渡し、その機械可読な出力をそのまま流す。自前の配置（予備）は使わない。
 #
 # 偽インストーラは「自分が呼ばれた証拠」を残して ok を出すだけ。**自前の配置なら必ず
-# 置かれるはずの .vlb が置かれていないこと**を見て、委譲が起きたと判定する。
+# 置かれるはずの .vlb が置かれていないこと**を確認して、委譲が起きたと判定する。
 # ===========================================================================
 function New-BuildZipWithInstaller([string] $zipPath, [string] $vlbName, [string] $installerBody) {
     $stage = Join-Path $Work ("stage-inst-" + [System.IO.Path]::GetRandomFileName())
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.vlb") -Value 'dll' -NoNewline
     Set-Content -LiteralPath (Join-Path $stage "$vlbName.vwpayload") -Value 'payload' -NoNewline
-    # param() ブロックを持たない = 未知の名前付き引数も $args に落ちるだけで束縛エラーに
+    # param() ブロックを持たない = 未知の名前付き引数も $args に入るだけで束縛エラーに
     # ならない（本物の vw-install.ps1 と同じ作法）。
     Set-Content -LiteralPath (Join-Path $stage 'vw-install.ps1') -Value $installerBody
     Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -Force

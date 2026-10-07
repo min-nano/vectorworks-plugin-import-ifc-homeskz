@@ -4,9 +4,10 @@
 //	基礎解析の実装（基礎ストーリ・立上り・底盤と、その統合・外面合わせ）。【SDK 非依存】
 //	ここでは VectorWorks SDK を include しない（core/parse のみ依存）。
 //
-//	M10 で人通口（立上りの分割・切り下げ）・壁結合・地中梁（底盤のモディファイア）を足した。
-//	**配筋は保留**（足すときは wallSectionKey / slabMergeKey にも足す。理由は各キーの doc
-//	コメント）。
+//	**配筋は保留**（追加するときは wallSectionKey / slabMergeKey にも追加する。理由は各キーの
+//	doc コメント）。
+//
+//	M10 で人通口（立上りの分割・切り下げ）・壁結合・地中梁（底盤のモディファイア）を追加した。
 //
 
 #include "parse/Footing.h"
@@ -78,8 +79,8 @@ namespace HomeskzIfcImport::parse
 
 		// 立上りの断面形状（統合可否）を表すキー。レイヤ・クラス・壁厚・上下端の高さ基準がす
 		// べて一致する立上り同士だけを統合対象にする。
-		// **配筋（M10）を足すときはこのキーにも足す**（配筋の違う立上りを 1 本へ統合すると片
-		// 方の配筋が失われるため）。
+		// **配筋（M10）を追加するときはこのキーにも追加する**（配筋の違う立上りを 1 本へ統合する
+		// と片方の配筋が失われるため）。
 		using WallKey = std::tuple<std::string, std::string, long long, int, std::string, long long,
 								   int, std::string, long long>;
 
@@ -209,7 +210,7 @@ namespace HomeskzIfcImport::parse
 		// 届いていれば、その端は「何も無い自由端」ではなく collinear な隣と接している。
 		//
 		// 【なぜ要るか】交点判定（wallIntersection）は平行な立上りを除外するので、**同一直線上で
-		// 端どうしが接する立上り**はどちらの端も自由端に見える。そのまま半壁厚ずつ延長すると
+		// 端どうしが接する立上り**はどちらの端も自由端と判定される。そのまま半壁厚ずつ延長すると
 		// 互いに食い込み、実データで 75mm（片側）・150mm（両側）の重なりになっていた（統合
 		// できない＝上端／下端の違う隣どうしで顕在化する。docs/DEV-NOTES.md M10）。
 		void collinearAbutment(const WallCommand& a, const WallCommand& b, bool& outAtStart,
@@ -594,7 +595,7 @@ namespace HomeskzIfcImport::parse
 
 		// 地中梁 1 本の押し出しソリッドを台形プリズムのモディファイアにする。押し出し方向の水
 		// 平成分から方位角を求め、断面頂点を幅軸 u（走る向きを +90 度回した水平単位ベクトル w）
-		// ・鉛直軸 v（ワールド Z の差分）へ取り直す。押し出しが水平でない（鉛直）
+		// ・鉛直軸 v（ワールド Z の差分）の座標で表し直す。押し出しが水平でない（鉛直）
 		// ソリッドは地中梁でないので false。
 		bool groundBeamModifier(const WorldSolid& solid, const Vec2& center,
 								core::ModifierCommand& out)
@@ -612,8 +613,8 @@ namespace HomeskzIfcImport::parse
 			cmd.profile.reserve(solid.profile.size());
 			for (const Vec2& p : solid.profile)
 			{
-				// プロファイル頂点 (u, v) を配置基底でワールドへ写し、断面原点からの
-				// 幅方向（w）成分と鉛直（Z）成分に取り直す。
+				// プロファイル頂点 (u, v) を配置基底でワールドへ変換し、断面原点からの
+				// 幅方向（w）成分と鉛直（Z）成分に分解する。
 				const core::Vec3 world = solid.origin + (solid.xAxis * p.x) + (solid.yAxis * p.y);
 				cmd.profile.push_back(
 					Vec2{((world.x - solid.origin.x) * wx) + ((world.y - solid.origin.y) * wy),
@@ -662,7 +663,7 @@ namespace HomeskzIfcImport::parse
 		//
 		// 多角形の和（union）は「頂点を丸めて厳密比較できるようにし、全辺を交点で細分し、
 		// すぐ右（外側）がどの多角形にも入らない有向辺だけを境界として残してつなぐ」
-		// という手順で求める。丸めた点をキーにするので、集合・辞書は素直な std::set /
+		// という手順で求める。丸めた点をキーにするので、集合・辞書は標準の std::set /
 		// std::map（辞書順比較）で足りる。
 
 		// 交点計算で頂点を丸める小数桁（1e-4 mm = 0.1 ミクロン）。
@@ -737,7 +738,7 @@ namespace HomeskzIfcImport::parse
 
 		// 線分 ab を分割すべき点（線分 cd との交点）を ab 上の点として返す。非平行なら区間内
 		// の交点、共線なら cd の端点を ab 上へ射影した点（区間内）。これで交差・T 字接合・
-		// 共線オーバーラップの分割点をすべて拾う。
+		// 共線オーバーラップの分割点をすべて検出する。
 		std::vector<Pt2> segSplitPoints(const Pt2& a, const Pt2& b, const Pt2& c, const Pt2& d)
 		{
 			const double rx = b.first - a.first;
@@ -1042,8 +1043,8 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 底盤の統合可否を表すキー。レイヤ・クラス・コンクリート厚・高さ基準がすべて一致する
-		// 底盤同士だけを統合対象にする。**配筋（M10）を足すときはこのキーにも足す**（配筋の違
-		// う底盤を 1 枚へ統合すると片方が失われるため）。
+		// 底盤同士だけを統合対象にする。**配筋（M10）を追加するときはこのキーにも
+		// 追加する**（配筋の違う底盤を 1 枚へ統合すると片方が失われるため）。
 		using SlabKey =
 			std::tuple<std::string, std::string, long long, int, std::string, long long>;
 
@@ -1327,9 +1328,9 @@ namespace HomeskzIfcImport::parse
 			return found && last > first && path[last].x > path[first].x + kBeddingEdgeEps;
 		}
 
-		// 地中梁の側面（断面 u の最小側・最大側）が外周部かを判定する。側面のすぐ外側を
-		// 押し出し方向の 3 か所で突き、**すべてが底盤の外形の外**なら外周部とみなす。
-		// 一部だけ外に出る（外形の角を跨ぐ）地中梁を外周部と読まないよう、全点一致にする。
+		// 地中梁の側面（断面 u の最小側・最大側）が外周部かを判定する。側面のすぐ外側に
+		// 押し出し方向の 3 か所で判定点を置き、**すべてが底盤の外形の外**なら外周部とみなす。
+		// 一部だけ外に出る（外形の角を跨ぐ）地中梁を外周部と判定しないよう、全点一致にする。
 		void groundBeamPerimeterSides(const core::ModifierCommand& modifier,
 									  const std::vector<Pt2>& slabRing, bool& low, bool& high)
 		{
@@ -1367,7 +1368,7 @@ namespace HomeskzIfcImport::parse
 		// 断面を半平面 v ≤ top で切った多角形（Sutherland-Hodgman）。床付けの帯を切り上げる
 		// のに使う（上記「地中梁の床付け」）。**切っても 2 つに割れない**ことは形が保証する
 		// ——床付けは下端の下で全幅に繋がっており、top は必ずその繋がりより上にあるので、
-		// 落ちるのは左右の帯の上端だけになる。面にならなくなったら空を返す。
+		// 除去されるのは左右の帯の上端だけになる。面にならなくなったら空を返す。
 		std::vector<Vec2> clipProfileBelow(const std::vector<Vec2>& profile, double top)
 		{
 			std::vector<Vec2> out;
@@ -1391,8 +1392,8 @@ namespace HomeskzIfcImport::parse
 			return out.size() >= 3 ? out : std::vector<Vec2>{};
 		}
 
-		// 床付けを 1 つ足す。**同じ層（クラスと断面が同じ）で押し出し方向に続く区間は
-		// 1 本へ繋ぐ**（区間を切ったせいで、断面の変わらない捨てコンまで細切れのソリッドに
+		// 床付けを 1 つ追加する。**同じ層（クラスと断面が同じ）で押し出し方向に続く区間は
+		// 1 本へつなぐ**（区間を切ったせいで、断面の変わらない捨てコンまで細切れのソリッドに
 		// なるのを防ぐ）。
 		void appendBedding(std::vector<core::BeddingCommand>& out, core::BeddingCommand bedding)
 		{
@@ -1427,8 +1428,8 @@ namespace HomeskzIfcImport::parse
 		// 切り下げる（相手のコンクリートがある高さには床付けを置かない）。
 		//
 		// 掛かるかどうかは A の**床付けの平面外形**（帯を含む幅）と相手のコンクリートの平面外形
-		// で見る。相手の外形の 4 隅を A の (t, u) 座標へ写した外接矩形を使うので、直交・平行な
-		// 取り合い（実データはこの 2 通りしか無い）では厳密、斜めでは安全側（広めに切る）になる。
+		// で判定する。相手の外形の 4 隅を A の (t, u) 座標へ変換した外接矩形を使うので、直交・
+		// 平行な取り合い（実データはこの 2 通りしか無い）では厳密、斜めでは安全側（広めに切る）になる。
 		std::vector<BeddingSpan> beddingSpans(const std::vector<core::ModifierCommand>& beams,
 											  std::size_t self, double slabTop,
 											  double beddingWidthLo, double beddingWidthHi)
@@ -1438,7 +1439,7 @@ namespace HomeskzIfcImport::parse
 			const Vec2 width{-axis.y, axis.x};
 
 			// 掛かる区間（[t0, t1] と、そこで切り下げる高さ）を集める。**自分自身は除く**
-			// （添字で外す。同じ値の写しを持ち回るのでアドレス比較では外れない）。
+			// （添字で除外する。同じ値のコピーを受け渡すのでアドレス比較では除外できない）。
 			std::vector<BeddingSpan> blocks;
 			for (std::size_t i = 0; i < beams.size(); ++i)
 			{
@@ -1798,7 +1799,7 @@ namespace HomeskzIfcImport::parse
 			const double ux = (wall.end.x - wall.start.x) / length;
 			const double uy = (wall.end.y - wall.start.y) / length;
 
-			// 端ごとに「そこで一直線の線が続いていて、自分が深いほう」かを見る。
+			// 端ごとに「そこで一直線の線が続いていて、自分が深いほう」かを判定する。
 			for (int side = 0; side < 2; ++side)
 			{
 				const bool atStart = (side == 0);
@@ -1807,7 +1808,7 @@ namespace HomeskzIfcImport::parse
 				const double ox = atStart ? -ux : ux;
 				const double oy = atStart ? -uy : uy;
 
-				// (1) この端が同一直線上の隣に「越えられている」か（線が続いているか）を見て、
+				// (1) この端が同一直線上の隣に「越えられている」か（線が続いているか）を判定し、
 				//     続いているなら自分が深いほう（下端が低い。同値なら添字が小さいほう）か。
 				bool lineContinues = false;
 				bool deepest = true;
@@ -1824,7 +1825,7 @@ namespace HomeskzIfcImport::parse
 						atStart ? (lo < -kWallMergeDistTol) : (hi > length + kWallMergeDistTol);
 					if (!beyond)
 						continue;
-					// 天端が違う隣は「1 本に見せたい線」ではない（低い側の端部は閉じる）。
+					// 天端が違う隣は「1 本に表示したい線」ではない（低い側の端部は閉じる）。
 					if (std::abs(wall.topBound.offset - walls[j].topBound.offset) >
 						kWallMergeDistTol)
 						continue;
@@ -1849,9 +1850,9 @@ namespace HomeskzIfcImport::parse
 					bool aAtEnd = false;
 					bool bAtEnd = false;
 					if (!wallIntersection(wall, walls[j], point, aAtEnd, bAtEnd))
-						continue; // 平行（同一直線の隣）はここで落ちる
+						continue; // 平行（同一直線の隣）はここで除外される
 					// 端そのもの（丸め誤差ぶん）で交わっている場合だけが対象。半壁厚の許容
-					// （wallPointAtEnd）ではなく厳密に見る——相手の外面まで伸びている立上りを
+					// （wallPointAtEnd）ではなく厳密に判定する——相手の外面まで伸びている立上りを
 					// さらに伸ばさないため。
 					if (core::distance(tip, point) > kWallEndpointTol)
 						continue;
@@ -1881,7 +1882,7 @@ namespace HomeskzIfcImport::parse
 			const std::vector<const Entity*> voids = elementVoidSolids(model, element);
 			if (voids.empty())
 				continue;
-			// 素の立上り（差演算で削られる前）の天端・底面。人通口かどうかの判定に使う。
+			// 差演算で削られる前の立上りの天端・底面。人通口かどうかの判定に使う。
 			WorldSolid base;
 			if (!resolveElementWorldSolid(model, element, base))
 				continue;
@@ -1904,7 +1905,7 @@ namespace HomeskzIfcImport::parse
 				zTopAndThickness(solid, topAbs, thickness);
 				const double bottomAbs = topAbs - thickness;
 				// 人通口は「天端まで届き、底面には届かない」削り。端部が他材で削られた
-				// 全高の差演算（素のソリッドを辿って無視するもの）を誤認しないための関門。
+				// 全高の差演算（削られる前のソリッドを辿って無視するもの）を誤認しないための条件。
 				if (topAbs < wallTopAbs - kWallMergeDistTol)
 					continue;
 				if (bottomAbs <= wallBottomAbs + kWallMergeDistTol)
@@ -2027,7 +2028,7 @@ namespace HomeskzIfcImport::parse
 
 			// T 結合。stem（端点側＝延長される壁）を a、through（通し壁）を b にする。
 			// **2 本目以降の stem を Auto にする判定は pushJoin 側**（実際に出す命令だけを
-			// 数えるため。同一直線で落とす stem を数えてしまうと 1 本目が Auto になる）。
+			// 数えるため。同一直線で除外する stem を数えてしまうと 1 本目が Auto になる）。
 			const auto makeT = [&](std::size_t stem, std::size_t through)
 			{
 				const bool capped = std::abs(tops.at(stem) - tops.at(through)) > kWallMergeDistTol;
@@ -2071,17 +2072,17 @@ namespace HomeskzIfcImport::parse
 			// ジャンクションとして入ってくる（例: 一直線に並ぶ 2 本の突き合わせ位置を別の
 			// 立上りが横切る）。そこへ L / T 結合を出すと、コーナーにならないので VW が
 			// 拒否する——実データで「壁結合: 1 件を VW が拒否しました (T:1): (6370,1820)」の
-			// 正体がこれだった（docs/DEV-NOTES.md M10）。同一直線上の突き合わせは結合ではなく
-			// 端部のキャップ（applyWallCaps の collinearAbutment）で 1 本に見せる。
+			// 原因がこれだった（docs/DEV-NOTES.md M10）。同一直線上の突き合わせは結合ではなく
+			// 端部のキャップ（applyWallCaps の collinearAbutment）で 1 本に表示する。
 			//
 			// あわせて、**同じ通し壁の同じ交点へ 2 本目以降の stem が取り付く T 結合は Auto へ
-			// 落とす**。明示的な T では実機で **JoinWalls が両方 true を返すのに、図面では先に
-			// 実行した 1 本だけが結合されて見えた**（拒否件数は増えない）。通し壁側のピック点を
-			// 反対側へ寄せて区別させる案は実機で描画が変わらず外れたので、`kAutoWallJoin`
-			// （ピック点を無視して VW に種別を判断させる）で通す。1 本目は従来どおり T なので、
-			// **交点に stem が 1 本だけの既存の T 結合の引数は変わらない**（docs/DEV-NOTES.md M10）。
-			// 数えるのは**実際に出した命令だけ**（同一直線で落とす stem を数えると 1 本目が
-			// Auto になってしまう）。
+			// 切り替える**。数えるのは**実際に出した命令だけ**（同一直線で除外する stem を
+			// 数えると 1 本目が Auto になってしまう）。1 本目は従来どおり T なので、**交点に
+			// stem が 1 本だけの既存の T 結合の引数は変わらない**。理由: 明示的な T では実機で
+			// **JoinWalls が両方 true を返すのに、図面では先に実行した 1 本だけが結合されて
+			// 表示された**（拒否件数は増えない）。通し壁側のピック点を反対側へ寄せて区別させる
+			// 案は実機で描画結果が変わらず効果が無かったので、`kAutoWallJoin`（ピック点を無視して
+			// VW に種別を判断させる）で処理する（docs/DEV-NOTES.md M10）。
 			std::map<std::size_t, std::size_t> stemsPerThrough;
 			const auto pushJoin =
 				[&](std::vector<core::WallJoinCommand>& into, core::WallJoinCommand cmd)
@@ -2126,7 +2127,7 @@ namespace HomeskzIfcImport::parse
 				// **深いほう（下端が低い。同値なら添字が小さいほう）を通し壁にして、直交する
 				// 立上りをそこへ T 結合する。** その通し壁は extendDeeperCollinearEnds が相手の
 				// 半壁厚だけ伸ばして交点を越えているので、T 結合が成立する。同一直線の隣とは
-				// 結合せず、端部のキャップ（applyWallCaps）で 1 本に見せる。
+				// 結合せず、端部のキャップ（applyWallCaps）で 1 本に表示する。
 				std::vector<std::size_t> collinearGroup;
 				for (const std::size_t index : ordered)
 				{
@@ -2156,7 +2157,7 @@ namespace HomeskzIfcImport::parse
 					{
 						if (stem == through)
 							continue;
-						// 同一直線の隣は pushJoin が落とす（結合ではなくキャップで見せる）。
+						// 同一直線の隣は pushJoin が除外する（結合ではなくキャップで表示する）。
 						pushJoin(junctionCommands, makeT(stem, through));
 					}
 				}
@@ -2172,7 +2173,7 @@ namespace HomeskzIfcImport::parse
 			}
 
 			// capped=false（天端の高い立上りどうし）を先に、capped=true を後に並べる
-			// （高い者どうしを先に繋いでから低い者を突き当てる）。安定ソートで同順の
+			// （高いものどうしを先につないでから低いものを突き当てる）。安定ソートで同順の
 			// 並びを保ち、入力順に対して決定的にする。
 			std::ranges::stable_sort(
 				junctionCommands,
@@ -2183,7 +2184,7 @@ namespace HomeskzIfcImport::parse
 
 		// **X 結合（交差結合）はすべて最後に回す。** VW の X 結合は 1 本目の壁を交点で 2 本に
 		// 分割する仕様なので（makeLX の doc コメント）、分割された壁の**ハンドルが古くなる**。
-		// 描画側は「命令インデックス → 壁ハンドル」の対応表で壁を引くため、X 結合より後に
+		// 描画側は「命令インデックス → 壁ハンドル」の対応表で壁を取得するため、X 結合より後に
 		// その壁を使う結合が残っていると、**分割された片方だけを相手にしてしまう**。実機で
 		// まさにこれが起きた: 交差する横の立上りは両端に T 結合を持ち、X 結合（交点）→
 		// T 結合（端）の順に実行されたため、**分割後の半分の壁が T 結合されて全長の壁は
@@ -2249,7 +2250,7 @@ namespace HomeskzIfcImport::parse
 			cmd.start = start;
 			cmd.end = end;
 			cmd.thickness = thickness;
-			// 構成はコンクリート 1 層＝壁厚。描画側はこれを**壁へ直接**組む（スタイルは
+			// 構成はコンクリート 1 層＝壁厚。描画側はこれを**壁へ直接**設定する（スタイルは
 			// 作らない。draw/Footing.cpp 参照）。
 			cmd.components = foundationWallComponents(thickness);
 			// 下端は IFC 実形状のまま（呑み込みはしない。parse/Footing.h「下端は IFC 実形状の
@@ -2402,7 +2403,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 交点が壁芯のどちら側の端に当たるかは、端点までの距離が近いほうで決める
-		// （交点が壁の内部にある通し壁は端部を持たないので触らない）。
+		// （交点が壁の内部にある通し壁は端部を持たないので変更しない）。
 		const auto openEnd = [&walls](std::size_t index, const Vec2& point)
 		{
 			if (index >= walls.size())
@@ -2428,7 +2429,7 @@ namespace HomeskzIfcImport::parse
 
 		// **同一直線上の突き合わせ**（交点判定に掛からない平行な隣）も、天端が同じなら
 		// コンクリートは連続しているので端部を閉じない。統合できなかった隣——上端／下端の
-		// 違う立上り——のうち、**下端だけが違うもの**は平面では 1 本に見えるべきで、天端の
+		// 違う立上り——のうち、**下端だけが違うもの**は平面では 1 本に表示されるべきで、天端の
 		// 違うものは段差が実在するので閉じたままにする（結合の capped と同じ判断）。
 		const std::size_t count = walls.size();
 		for (std::size_t i = 0; i < count; ++i)
@@ -2528,7 +2529,7 @@ namespace HomeskzIfcImport::parse
 		if (slabs.empty())
 			return; // 底盤が 1 枚も無ければ付けられない（地中梁だけの基礎は稀）
 
-		// 底盤の外形は pointInPoly（丸めた頂点列）で判定する。判定用の写しは 1 回だけ作る。
+		// 底盤の外形は pointInPoly（丸めた頂点列）で判定する。判定用のコピーは 1 回だけ作る。
 		std::vector<std::vector<Pt2>> polys;
 		polys.reserve(slabs.size());
 		for (const SlabCommand& slab : slabs)
@@ -2597,14 +2598,14 @@ namespace HomeskzIfcImport::parse
 		const double uLow = path[first].x;	// 下端の辺の u 小さい側
 		const double uHigh = path[last].x;	// 同 大きい側
 
-		// オフセットする辺の範囲。外周部の側面はここから外し、下端の床付けを横へ張り出して
+		// オフセットする辺の範囲。外周部の側面はここから除外し、下端の床付けを横へ張り出して
 		// 終わらせる（上記「地中梁の床付け」）。
 		const std::size_t begin = lowPerimeter ? first : 0;
 		const std::size_t end = highPerimeter ? last : path.size() - 1;
 
 		// 各辺を外向き法線へ kSlabBeddingThickness だけ動かした線分。
 		//
-		// **辺は必ず 1 本以上あり、長さも必ず正**なので、空判定も 0 除算の番人も要らない:
+		// **辺は必ず 1 本以上あり、長さも必ず正**なので、空判定も 0 除算の検査も要らない:
 		// begin ≤ first < last ≤ end（下端の辺が 1 本以上あることは groundBeamUnderside が
 		// 保証する）だから範囲は空にならず、折れ線の連続する 2 点は dedupeRing が
 		// kBeddingEdgeEps 以上離れていることを保証している。
@@ -2680,7 +2681,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 各層は最後に v ≤ topLimit で切り上げる（傾斜部の帯が直交する地中梁へ食い込むのを
-		// 防ぐ。ヘッダ冒頭「傾斜部の帯は切り上げる」）。面にならなくなった層は落とす。
+		// 防ぐ。ヘッダ冒頭「傾斜部の帯は切り上げる」）。面にならなくなった層は除外する。
 		std::vector<core::BeddingCommand> beddings;
 		// 捨てコンは下端の平らな面の直下だけ（傾斜部は砕石のみ）。
 		std::vector<Vec2> lean =
@@ -2719,7 +2720,7 @@ namespace HomeskzIfcImport::parse
 			const double beddingBottomAbs = slab.elevation - slabTotal;
 
 			// 取り合いの判定は**床付けを付ける前の**地中梁どうしで行う（付けながら書き換える
-			// と、後の地中梁が前の地中梁の床付けを見てしまう）。
+			// と、後の地中梁が前の地中梁の床付けを参照してしまう）。
 			const std::vector<core::ModifierCommand> beams = slab.modifiers;
 			for (std::size_t index = 0; index < slab.modifiers.size(); ++index)
 			{
@@ -2728,7 +2729,7 @@ namespace HomeskzIfcImport::parse
 				bool highPerimeter = false;
 				groundBeamPerimeterSides(modifier, ring, lowPerimeter, highPerimeter);
 
-				// 帯を含む床付けの幅（区間の判定に使う）。まず全長ぶんを組み立てて幅を測る。
+				// 帯を含む床付けの幅（区間の判定に使う）。まず全長ぶんを組み立てて幅を求める。
 				const double slabTop =
 					std::max(beddingBottomAbs - modifier.origin.z, 0.0); // 下端より下は切らない
 				const std::vector<core::BeddingCommand> full =
@@ -2787,7 +2788,7 @@ namespace HomeskzIfcImport::parse
 			double thickness = 0.0;
 			zTopAndThickness(solid, topAbs, thickness);
 			// コンクリート厚は整数 mm に丸める（同厚の底盤が統合キー slabMergeKey で別の
-			// グループへ散らないようにする）。
+			// グループへ分かれないようにする）。
 			const double concrete = std::round(thickness);
 
 			std::vector<Vec2> boundary = footprint(solid);
@@ -2810,7 +2811,7 @@ namespace HomeskzIfcImport::parse
 		}
 		// 統合 → 外面合わせ → 地中梁の振り分け（docs/DEV-NOTES.md M10）→ 床付け（M17）。
 		// 地中梁は**単独のスラブ命令にせず**、外形の確定した底盤の modifiers へ付ける
-		// （台形断面は単一のスラブで描けない）。床付けは外周部の判定に振り分け先の底盤の外形を
+		// （台形断面は単一のスラブで描画できない）。床付けは外周部の判定に振り分け先の底盤の外形を
 		// 使うので、**振り分けの後**でなければ求められない（parse/Footing.h 冒頭「底盤の後処理」）。
 		std::vector<SlabCommand> slabs = alignSlabsToWallFaces(mergeSlabCommands(commands), walls);
 		attachGroundBeamModifiers(slabs, buildGroundBeamModifiers(model, center));

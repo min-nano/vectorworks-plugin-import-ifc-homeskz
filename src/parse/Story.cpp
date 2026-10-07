@@ -70,7 +70,7 @@ namespace HomeskzIfcImport::parse
 			return std::to_string(index + 1) + "階";
 		}
 
-		// 横架材命令のどれかが layer を配置先に指しているか。母屋・登り梁レベルを足すかの判定
+		// 横架材命令のどれかが layer を配置先に指しているか。母屋・登り梁レベルを追加するかの判定
 		// に使う（buildStoryCommands の「レベルを足す条件」参照）。
 		bool anyMemberOnLayer(const std::vector<core::MemberCommand>& members,
 							  const std::string& layer)
@@ -370,12 +370,12 @@ namespace HomeskzIfcImport::parse
 			const auto layerFor = [i, &info](const char* levelType)
 			{ return storyLayerName(i, info.isTop, levelType); };
 
-			// 基本レベル（M3）。要素ごとのレベルはこの後で足す（ヘッダ冒頭「作るレベル」）。
+			// 基本レベル（M3）。要素ごとのレベルはこの後で追加する（ヘッダ冒頭「作るレベル」）。
 			// levels の並び順は希望するデザインレイヤのスタック順（上→下）。
 			if (info.isTop)
 			{
 				// 最上階（屋根）は軒高（オフセット 0）。ロフト（小屋裏収納）の床があるときだ
-				// け、その標準床レベル FL（軒高 + kLoftFloorLevelOffset）を足す（床の無い屋根
+				// け、その標準床レベル FL（軒高 + kLoftFloorLevelOffset）を追加する（床の無い屋根
 				// に空の FL レイヤを作らない）。この FL がロフト床の配置先レイヤ "R-FL"
 				// になる。ロフトの床は床版（IfcSlab）でも床梁から合成した領域でもよい
 				// （parse/Floor の storyHasLoftFloor）。
@@ -416,11 +416,11 @@ namespace HomeskzIfcImport::parse
 			// スタックは 横架材天端/軒高 ← 登り梁 ← 母屋 なので、登り梁 → 母屋 の順に挿入する。
 			//
 			// ［レベルを足す条件］**実際に組み立てた横架材命令の配置先レイヤ**で判定する
-			// （IFC の名前で「母屋がある階か」を見ない）。理由は 2 つ:
+			// （IFC の名前で「母屋がある階か」を判定しない）。理由は 2 つ:
 			//   * 名前判定は「名前では判別できないが高さで母屋と推定された材」（隅木谷木等）を
-			//     取りこぼし、その材だけ置き場所を失う。
-			//   * 名前で拾えない材を救おうと最上階へ無条件に足すと、母屋を持たない最上階に
-			//     空レイヤが残る（空レイヤを作らない方針。ロフト FL・垂木/野地板と同じ）。
+			//     見落とし、その材だけ置き場所を失う。
+			//   * 名前で判別できない材を扱うために最上階へ無条件に追加すると、母屋を持たない
+			//     最上階に空レイヤが残る（空レイヤを作らない方針。ロフト FL・垂木/野地板と同じ）。
 			// 命令の配置先で判定すれば、**レイヤは命令があるときだけ・命令があれば必ず**でき、
 			// 両方の齟齬が構造的に起きない。
 			// 軒桁: 母屋伏図に軒桁だけを薄く重ねるため、横架材天端（最上階は軒高）から分けた
@@ -476,10 +476,10 @@ namespace HomeskzIfcImport::parse
 				insertAboveBeamTop(kLevelMoya, upperOffset);
 
 			// M6 屋根組: 屋根版（屋根面）を含む階に 垂木 → 野地板 レベル（"n-垂木" /
-			// "n-野地板" レイヤ）を足す。スタックは 横架材天端/軒高 ← 登り梁 ← 母屋 ← 垂木 ←
+			// "n-野地板" レイヤ）を追加する。スタックは 横架材天端/軒高 ← 登り梁 ← 母屋 ← 垂木 ←
 			// 野地板（上ほど上段）なので、垂木・野地板の順に挿入する。
 			//
-			// ［レベルを足す条件］**屋根版がある階だけ**に絞る（最上階だから足す、とはしない）:
+			// ［レベルを足す条件］**屋根版がある階だけ**に絞る（最上階だから追加する、とはしない）:
 			// 垂木・野地板の命令は屋根版からのみ生まれるので、屋根版の無い階にレベルを作ると
 			// 空レイヤが残るだけになる（ロフトの FL レベルを床版の有無で絞るのと同じ方針）。
 			// ホームズ君の出力では最上階が必ず主屋根の屋根版を含むので、実データでは
@@ -494,7 +494,7 @@ namespace HomeskzIfcImport::parse
 			// レベルの横架材・床は、元のレベル（横架材天端／軒高・FL）をその高さのぶんずらした
 			// 別のレベルのレイヤ（"2-横架材天端(FL-872)" / "2-FL(FL-872)"）へ置かれる。
 			// **元のレベルの直下**へ積む（同じ種類のレイヤが並ぶので、重ね順の決まり
-			// ——床は背面へ・耐力壁は前面へ——は印を外した種別で効く。core の
+			// ——床は背面へ・耐力壁は前面へ——は印を除いた種別で適用される。core の
 			// desiredStoryLayerOrder）。命令があるときだけ作る（空のレイヤを作らない）。
 			const auto insertBelow = [&cmd, &i, &info](const std::string& baseType,
 													   const std::string& levelType, double offset)
@@ -508,7 +508,7 @@ namespace HomeskzIfcImport::parse
 			const char* const beamType = beamTopLevelType(info.isTop);
 			const double floorOffset = info.isTop ? kLoftFloorLevelOffset : 0.0;
 			// 後から挿したものが元のレベルのすぐ下に来るので、低い方から挿すと元のレベルの
-			// 下に高い順に並ぶ（重なりの無い高さどうしなので見え方には効かないが、並びは
+			// 下に高い順に並ぶ（重なりの無い高さどうしなので表示には影響しないが、並びは
 			// 決定的にしておく）。
 			for (const PlanLevel* level : storyLevels)
 			{

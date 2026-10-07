@@ -20,13 +20,13 @@
 
 namespace HomeskzIfcImport::draw
 {
-	// Document 内の全通り芯を描く。配置先の「共通」デザインレイヤを（無ければ）用意し、各
-	// GridCommand を GridAxis のカスタムオブジェクト（PIO）として生成する。PIO の生成に失敗し
-	// た場合は通常の直線へフォールバックする（1 本の失敗で全体を止めない）。実際に配置できた
-	// 本数を返す。
+	// Document 内の全通り芯を描画する。配置先の「共通」デザインレイヤを（無ければ）用意し、
+	// 各 GridCommand を GridAxis のカスタムオブジェクト（PIO）として生成する。PIO の生成に
+	// 失敗した場合は通常の直線へフォールバックする（1 本の失敗で全体を止めない）。実際に配置
+	// できた本数を返す。
 	//
-	// progress には 1 件描くごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
-	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
-	// 決める）。描けたところまでは図面に残る。
+	// progress には 1 件描画するごとに 1 ステップ報告し、**ループの先頭で中止要求を確認して
+	// 抜ける**（進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument
+	// が決める）。描画済みの分は図面に残る。
 	std::size_t drawGrids(const core::Document& document, core::ProgressReporter& progress);
 } // namespace HomeskzIfcImport::draw

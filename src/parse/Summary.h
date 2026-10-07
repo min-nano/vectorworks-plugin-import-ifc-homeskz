@@ -8,15 +8,15 @@
 //	  * summarizeModel / formatSummary … Document を経由せず生の Model から「どの IFC 型が
 //	    何件あるか」を数える診断（M0 の名残。パースが動いている確証を件数で示す）。
 //	  * documentCommandCount / importOutcome / formatImportResult … **インポート完了
-//	    ダイアログの本文**を組み立てる（M15「完了文言の集約」）。以前は
-//	    Extensions/ExtMenu.cpp に要素名を手書きで連ねていたが、要素が増えるたびに SDK 側の
-//	    文字列を伸ばす作業が必要で、しかもその文言はテストできなかった。要素の一覧
-//	    （ラベル・単位・命令数・描けた数）を Summary.cpp の表 1 つに集約し、SDK 側は
-//	    組み上がった本文を出すだけにしてある。
+//	    ダイアログの本文**を組み立てる（M15「完了文言の集約」）。要素の一覧（ラベル・
+//	    単位・命令数・描画できた数）を Summary.cpp の表 1 つに集約し、SDK 側は組み上がった
+//	    本文を表示するだけにしてある。以前は Extensions/ExtMenu.cpp に要素名を手書きで
+//	    連ねていたが、要素が増えるたびに SDK 側の文字列を伸ばす作業が必要で、しかもその
+//	    文言はテストできなかった。
 //	  * formatLogHeader / formatLogResult … **診断ログの見出しと結果**を組み立てる（M19）。
 //	    完了ダイアログを「終わったか・問題があったか」だけに絞った代わりに、要素ごとの
 //	    内訳・注意・記録はすべてログへ回した。要素の一覧は上と**同じ表**から出すので、
-//	    要素を足すときに触るのは相変わらず 1 行だけ。
+//	    要素を追加するときに変更するのは引き続き 1 行だけ。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。
 //	ここは Model（parse/Step）を読むだけの純ロジックなので、通常の C++ ツールチェインで
@@ -48,7 +48,7 @@ namespace HomeskzIfcImport::parse
 
 	// IFC 読み取りサマリ。loaded はファイルを読み込めたか、entityCount は総エンティティ
 	// 数、counts はホームズ君が使う主要型ごとの件数（固定順・欠けている型も count=0 で
-	// 含める。件数表示が入力によってブレず、テストしやすいようにするため）。
+	// 含める。件数表示が入力によって変わらず、テストしやすいようにするため）。
 	struct IfcSummary
 	{
 		bool loaded = false;
@@ -76,7 +76,7 @@ namespace HomeskzIfcImport::parse
 
 	// 命令セットに含まれる命令の総数（要素ごとの命令数の合計）。0 なら「取り込める要素が
 	// 1 つも無かった」。要素の一覧は Summary.cpp の kElements ただ 1 か所に持つので、
-	// 要素を足すときに数え漏らすことがない。
+	// 要素を追加するときに数え漏らすことがない。
 	std::size_t documentCommandCount(const core::Document& document);
 
 	// インポートの結末。**完了ダイアログもログも同じ判断を使う**ので、「成功と言いながら
@@ -84,24 +84,24 @@ namespace HomeskzIfcImport::parse
 	enum class ImportStatus
 	{
 		Empty,	 // 解析は通ったが取り込める要素が 1 つも無かった
-		Invalid, // 命令セットの検証に落ちた（何も描いていない）
-		Cancelled, // ユーザーが進捗ダイアログで中止した（描けたところまでは残る）
-		Warning, // 描き切れなかった要素があった／描画側の異常が出た
-		Success	 // 命令をすべて描けて、異常も無かった
+		Invalid, // 命令セットの検証で不合格になった（何も描画していない）
+		Cancelled, // ユーザーが進捗ダイアログで中止した（描画できたところまでは残る）
+		Warning, // 描画しきれなかった要素があった／描画側の異常が出た
+		Success	 // 命令をすべて描画できて、異常も無かった
 	};
 
 	struct ImportOutcome
 	{
 		ImportStatus status = ImportStatus::Empty;
 		std::size_t commands = 0; // 命令の総数
-		std::size_t placed = 0;	  // 実際に描けた総数
+		std::size_t placed = 0;	  // 実際に描画できた総数
 	};
 
-	// 命令セットと描画結果から結末を求める。中止は「描き切れなくて当然」なので Warning
+	// 命令セットと描画結果から結末を求める。中止は「描画しきれなくて当然」なので Warning
 	// より優先する（中止したのに「問題あり」と言われると、原因を探しに行ってしまう）。
 	ImportOutcome importOutcome(const core::Document& document, const core::DrawCounts& counts);
 
-	// **要素ごとの内訳（表そのもの）。** ラベル・助数詞・命令数・描けた数を、Summary.cpp の
+	// **要素ごとの内訳（表そのもの）。** ラベル・助数詞・命令数・描画できた数を、Summary.cpp の
 	// kElements 表の順で返す。formatLogResult が文章に組み上げているのと同じ数字を、
 	// **整形せずに**渡す口である。
 	//
@@ -113,7 +113,7 @@ namespace HomeskzIfcImport::parse
 		std::string label;		  // 表示名（例: "横架材"）
 		std::string unit;		  // 助数詞（例: "本"）
 		std::size_t commands = 0; // 解析が出した命令の数
-		std::size_t placed = 0;	  // 描画が実際に描けた数
+		std::size_t placed = 0;	  // 描画で実際に配置できた数
 	};
 
 	std::vector<ElementRow> elementRows(const core::Document& document,
@@ -126,16 +126,16 @@ namespace HomeskzIfcImport::parse
 
 	// **インポート完了ダイアログの本文**（M19）。読むのは「どのファイルを・成功したのか・
 	// 問題はあったのか」の 3 つだけで済むよう短く保つ——**件数も所要時間もログにある**ので
-	// ここには出さない（描けた数はうまくいっているときには読む必要が無く、うまくいって
+	// ここには出さない（描画できた数はうまくいっているときには読む必要が無く、うまくいって
 	// いないときはその数だけでは足りない）。**一覧も戻さない**（読まれないものを毎回
-	// 見せると、肝心の「問題あり」が埋もれる）。fileName は取り込んだファイル名
+	// 見せると、重要な「問題あり」が埋もれる）。fileName は取り込んだファイル名
 	// （空なら行を出さない）。
 	//
 	// 例外として残す 2 行は、どちらも**その場で操作が要る**もの:
-	//   * 伏図・軸組図を作ったなら「1 回更新してください」（黙ると誤った絵を見せる）
-	//   * 「取り消し」が普通に効かないとき——戻せない／新しく作ったレイヤの分しか戻らない
+	//   * 伏図・軸組図を作ったなら「1 回更新してください」（黙ると誤った描画結果を見せる）
+	//   * 「取り消し」が通常どおり機能しないとき——戻せない／新しく作ったレイヤの分しか戻らない
 	//     （間違えたときの戻し方が変わる。**1 回で戻せるときは黙る**——「取り消し」が
-	//     効くのは当たり前で、書くと読む量が増えるだけ。ログには常に残す）
+	//     機能するのは当然で、書くと読む量が増えるだけ。ログには常に残す）
 	//
 	// **ログの場所もここには出さない。** ログ自身の見出しが持つ（formatLogHeader）ので、
 	// ダイアログの「ログを表示」を開けば 1 行目の近くで読める。
@@ -145,10 +145,10 @@ namespace HomeskzIfcImport::parse
 	// インポートが例外で中断したときのダイアログ本文。detail は例外の説明
 	// （std::exception::what()。分からなければ空）で、空なら「原因不明」として出す。
 	//
-	// **なぜ要るか**: ネイティブプラグインの未捕捉例外は VectorWorks 本体を巻き込んで落とす。
-	// フェーズ境界（draw/ImportRun の runImportRound）で必ず受け止め、ユーザーへ
-	// 1 通のエラーダイアログとして見せる（docs/DEV-NOTES.md M15「例外処理」）。文言はここに置
-	// いて無 SDK でテストする（完了文言と同じ理由）。
+	// **なぜ要るか**: ネイティブプラグインの未捕捉例外は VectorWorks 本体を巻き込んで
+	// 異常終了させる。フェーズ境界（draw/ImportRun の runImportRound）で必ず受け止め、ユーザーへ
+	// 1 通のエラーダイアログとして見せる（docs/DEV-NOTES.md M15「例外処理」）。文言はここに
+	// 置いて無 SDK でテストする（完了文言と同じ理由）。
 	std::string formatImportError(const std::string& detail, const std::string& fileName = {});
 
 	// ------------------------------------------------------------------------
@@ -156,7 +156,7 @@ namespace HomeskzIfcImport::parse
 	// ------------------------------------------------------------------------
 
 	// 動かしているビルドの素性。**SDK 側（draw/ImportRun の currentBuildInfo）が BuildConfig.h
-	// から詰める**——ビルド種別のマクロを見られるのはあちらだけで、こちらは受け取った文字列を
+	// から詰める**——ビルド種別のマクロを参照できるのはあちらだけで、こちらは受け取った文字列を
 	// 並べるだけ。
 	struct BuildInfo
 	{
@@ -180,9 +180,9 @@ namespace HomeskzIfcImport::parse
 								unsigned long long bytes, const std::string& startedAt,
 								const std::string& logPath = {});
 
-	// **診断ログの結果**。結末・所要時間・要素ごとの内訳（描けた数／命令数）・描画側の注意・
-	// 平常の記録（用紙の割り付け等）・取り消しの効き方を、この順に並べる。完了ダイアログから
-	// 外した細かい情報はすべてここにある。
+	// **診断ログの結果**。結末・所要時間・要素ごとの内訳（描画できた数／命令数）・描画側の注意・
+	// 平常の記録（用紙の割り付け等）・取り消しの可否を、この順に並べる。完了ダイアログから
+	// 除いた細かい情報はすべてここにある。
 	std::string formatLogResult(const core::Document& document, const core::DrawCounts& counts,
 								double seconds);
 

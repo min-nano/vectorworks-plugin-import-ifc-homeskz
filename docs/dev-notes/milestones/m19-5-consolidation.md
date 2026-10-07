@@ -7,7 +7,7 @@
   IFCAXIS2PLACEMENT3D → Location）は `parse/IfcGeometry` の `resolveLocalPlacementOrigin` に
   統一した。かつて柱・横架材・ストーリが各々書いており、**Location の型チェック
   （IFCCARTESIANPOINT）はストーリだけが持っていた**。統一では**厳格側（型チェックあり）に
-  揃えた**——IfcDirection も同じ属性位置に実数リストを持つため、型を見ないと方向比を座標
+  揃えた**——IfcDirection も同じ属性位置に実数リストを持つため、型を確認しないと方向比を座標
   として誤読する（`ParseStoryTests` の `get_local_placement_z_false_when_location_not_cartesian`
   が守っている仕様）。柱・横架材はこの統一で従来より厳格になったが、ホームズ君 IFC の
   実データでは挙動は同一（全フィクスチャで確認）。
@@ -24,5 +24,5 @@
   意味が違う（取り付き・受け・食い込み）ので、片方だけ調整できる形を保つ。
 - **Member.cpp のローカル `MemberGeom` と `parse/Joint.h` の公開 `MemberGeom` は敢えて
   統合しなかった**。同名・同形に見えるが関門が違う——食い込み調整側（`geomOf`）は傾斜梁を
-  弾き長さ 0 だけ拒否、仕口側（`memberGeom`）は傾斜梁を受け入れ長さ < 1mm を拒否。統合すると
+  除外し長さ 0 だけ拒否、仕口側（`memberGeom`）は傾斜梁を受け入れ長さ < 1mm を拒否。統合すると
   この差分がポリシー引数になって読みにくくなるうえ、閾値の差で挙動が変わる。

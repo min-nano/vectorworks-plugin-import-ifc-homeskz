@@ -2,25 +2,25 @@
 //	draw/DrawingLabel.cpp
 //
 //	軸組図の図面ラベル描画の実装。意図・規約は draw/DrawingLabel.h を参照。
+//
+//	【注釈に入らなかったラベルは削除する】bInsert=false で生成するので、注釈へ入れられなければ
+//	どこにも属さないまま残る——失敗したら必ず削除する（データタグと同じ後始末）。
 //	【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include するため、この翻訳単位は
 //	プラグインビルド（SDK あり）でのみコンパイルされる。
 //
 //	使用する SDK API（すべて SDK リファレンス Findings「Drawing Labels」の実測に拠る）:
 //	  * gSDK->CreateCustomObject("Drawing Label2", 挿入点, 角度, bInsert) … 図面ラベルの生成
 //	  * gSDK->GetCustomObjectProfileGroup / SetCustomObjectProfileGroup   … ラベルレイアウト
-//	    （`…InAux` は nil なので見ない）
-//	  * gSDK->CreateGroup / DuplicateObject / AddObjectToContainer        … レイアウトの組み直し
+//	    （`…InAux` は nil なので参照しない）
+//	  * gSDK->CreateGroup / DuplicateObject / AddObjectToContainer        … レイアウトの再構築
 //	  * gSDK->SetTextStyleRef / SetTextSize / GetNamedObject             … タイトルの文字
-//	  * gSDK->GetCurrentLayer / SetCurrentLayer                          … 文字スタイルを当てる間
+//	  * gSDK->GetCurrentLayer / SetCurrentLayer                          … 文字スタイルを適用する間
 //	    だけ 1:1 のシートレイヤをアクティブにする（下記 ApplyTitleTextStyle）
-//	  * gSDK->SetPluginObjectStyle(h, 0) / GetPluginObjectStyle          … スタイルを外す・確かめる
+//	  * gSDK->SetPluginObjectStyle(h, 0) / GetPluginObjectStyle          … スタイルを解除・確認する
 //	  * gSDK->AddViewportAnnotationObject(viewport, object)              … ビューポート注釈へ
-//	    （作りたてのビューポートでは GetViewportGroup の注釈が nil なので、そちらは使わない）
+//	    （生成直後のビューポートでは GetViewportGroup の注釈が nil なので、そちらは使わない）
 //	  * VWParametricObj::SetParamValue("Title", …)                       … 図面タイトル
-//	  * gSDK->GetObjectBounds / MoveObject                               … 測って動かす
-//
-//	【注釈に入らなかったラベルは消す】bInsert=false で作るので、注釈へ入れられなければ
-//	どこにも属さないまま残る——失敗したら必ず削除する（データタグと同じ後始末）。
+//	  * gSDK->GetObjectBounds / MoveObject                               … 計測して動かす
 //
 
 #include "PluginPrefix.h"
@@ -46,22 +46,22 @@ namespace HomeskzIfcImport::draw
 		constexpr const char* kFieldTitle = "Title";
 		constexpr const char* kFieldNumber = "Drawing";
 
-		// タイトルの文字スタイル（要件）。**図面にあれば当て、無ければ大きさだけを直接
+		// タイトルの文字スタイル（要件）。**図面にあれば適用し、無ければ大きさだけを直接
 		// 与える**——テンプレート由来の資源なので作らない（データタグの "寸法(6pt)" と同じ）。
 		constexpr const char* kTextStyleName = "図面ラベル(10pt)";
 		constexpr double kTextSizePoints = 10.0;
 
-		// タイトルの文字を整える。図面に文字スタイル（"図面ラベル(10pt)"）があればそれを当て、
+		// タイトルの文字を整える。図面に文字スタイル（"図面ラベル(10pt)"）があればそれを適用し、
 		// 無ければ大きさだけを直接与える（データタグの ApplyFieldTextStyle と同じ流儀）。
-		// **複製したテキストへ当てても式は外れない**（Findings: 文字を SetText で潰しても
-		// Title が描かれた＝式は文字でも書式でもない隠れた状態が持っている）。
+		// **複製したテキストへ適用しても式は失われない**（Findings: 文字を SetText で上書きしても
+		// Title が描画された＝式は文字でも書式でもない隠れた状態が持っている）。
 		//
 		// 【大きさは「紙の上の mm」】（Findings「レイアウトの文字の大きさ」）:
 		//   * SetTextSize の値は **pt ではなく mm**（WorldCoord）で、しかも**紙の上の mm**
-		//     として効く——容れ物（ビューポートの注釈）の縮尺は VW が掛けるので、こちらで
+		//     として反映される——容れ物（ビューポートの注釈）の縮尺は VW が掛けるので、こちらで
 		//     掛けてはいけない。当初 10 を渡していて紙で 28pt になっていた（実機 round 1）。
-		//   * 文字スタイルは**当てたときのアクティブレイヤの縮尺**が焼き付き、容れ物の縮尺と
-		//     二重に掛かる。そこで**当てる間だけ 1:1 のシートレイヤ（sheetLayer）を
+		//   * 文字スタイルは**適用したときのアクティブレイヤの縮尺**が固定され、容れ物の縮尺と
+		//     二重に掛かる。そこで**適用する間だけ 1:1 のシートレイヤ（sheetLayer）を
 		//     アクティブにする**（1:1 なら SetTextSize と同じ結果になる。Findings）。
 		void ApplyTitleTextStyle(MCObjectHandle text, MCObjectHandle sheetLayer,
 								 DrawingLabelCounts& counts)
@@ -78,27 +78,28 @@ namespace HomeskzIfcImport::draw
 				return;
 			}
 			// 文字スタイルが無い（または 1:1 のレイヤを渡されなかった）。紙の 10pt を mm で
-			// 直に与える（Findings が勧める道。アクティブレイヤに依らない）。
+			// 直に与える（Findings が勧める方法。アクティブレイヤに依らない）。
 			if (resource == nil)
 				counts.textStyleMissing = true;
 			gSDK->SetTextSize(text, 0, gSDK->GetTextLength(text),
 							  core::pointsToMillimeters(kTextSizePoints));
 		}
 
-		// ラベルレイアウトを「タイトルのテキストと下線だけ」に組み直す。組めたら true。
+		// ラベルレイアウトを「タイトルのテキストと下線だけ」に再構築する。構築できたら true。
 		//
-		// **複製して、要らないものを落とす**（Findings「SDK から組む手順」）。式はテキストが
+		// **複製して、不要なものを除外する**（Findings「SDK から組む手順」）。式はテキストが
 		// 抱える隠れた状態なので、新しく作ったテキストでは図面タイトルに置き換わらない。
 		// 既定のレイアウトは「タイトル・下線・縮尺・丸・図番」の順なので、**最初の
 		// テキスト＝タイトル**・**最初の線＝その下線**を取る（テキストに名前は付いておらず、
 		// 見えている文字は UI の言語で変わるので、文字では選ばない）。
 		//
-		// **中身を入れてから渡す**（空の群を先に渡すと迷子になる。データタグと同じ筋）。
+		// **中身を入れてから設定する**（空の群を先に設定すると所在不明になる。データタグと
+		// 同じ理由）。
 		//
-		// **既定のレイアウトはスタイルが配る**（Findings「既定のレイアウトはスタイルが持って
-		// いる」）。ツールにスタイルが設定されていない図面では、作ったラベルのレイアウトが
+		// **既定のレイアウトはスタイルが提供する**（Findings「既定のレイアウトはスタイルが持って
+		// いる」）。ツールにスタイルが設定されていない図面では、生成したラベルのレイアウトが
 		// 空（テキスト 0 件）で複製する元が無い——そのときは outEmpty を立てて false を返す
-		// （呼び出し側は何も描かないラベルを残さず消す）。
+		// （呼び出し側は何も描画しないラベルを残さず削除する）。
 		bool KeepTitleOnly(MCObjectHandle label, MCObjectHandle sheetLayer, bool& outEmpty,
 						   DrawingLabelCounts& counts)
 		{
@@ -145,7 +146,7 @@ namespace HomeskzIfcImport::draw
 					tookLine = true;
 			}
 
-			// タイトルが取れなければ組み直さない（既定のレイアウトのまま＝図番と縮尺も出るが、
+			// タイトルを取得できなければ再構築しない（既定のレイアウトのまま＝図番と縮尺も出るが、
 			// タイトルが消えるよりはよい）。
 			if (!tookText || !gSDK->SetCustomObjectProfileGroup(label, group))
 			{
@@ -153,7 +154,7 @@ namespace HomeskzIfcImport::draw
 				return false;
 			}
 
-			// VW が渡した群を複製して持った場合は、こちらの群は図面上の residue なので消す
+			// VW が渡した群を複製して持った場合は、こちらの群は図面上の residue なので削除する
 			// （データタグと同じ後始末。draw/Tag の ResolveTagLayout）。
 			const MCObjectHandle held = gSDK->GetCustomObjectProfileGroup(label);
 			if (held == nil)
@@ -166,14 +167,14 @@ namespace HomeskzIfcImport::draw
 			return true;
 		}
 
-		// スタイルを外す（CLAUDE.md 開発の基本方針 4。スタイル無しのオブジェクトとして置く）。
-		// 外れたら true。
+		// スタイルを解除する（CLAUDE.md 開発の基本方針 4。スタイル無しのオブジェクトとして置く）。
+		// 解除できたら true。**レイアウトを再構築した後に**呼ぶ（既定のレイアウトは
+		// スタイルが提供するので、先に解除すると複製する元が無い。解除してもレイアウトは残る）。
 		//
-		// **CreateCustomObject は作った直後にツールのスタイルを当てる**（新規の空図面でも
+		// **CreateCustomObject は生成直後にツールのスタイルを適用する**（新規の空図面でも
 		// 「図面ラベル - 図番」が既定で入っている。Findings「スタイルは勝手に当たる」）。
-		// 外す口は gSDK->SetPluginObjectStyle(h, 0) だけ——VWParametricObj::SetStyle(0) は
-		// 0 を門で弾くので効かない。**レイアウトを組み直した後に**呼ぶ（既定のレイアウトは
-		// スタイルが配るので、先に外すと複製する元が無い。外してもレイアウトは残る）。
+		// 解除できる API は gSDK->SetPluginObjectStyle(h, 0) だけ——VWParametricObj::SetStyle(0)
+		// は 0 を入口の検査で弾くので機能しない。
 		bool RemoveStyle(MCObjectHandle label)
 		{
 			gSDK->SetPluginObjectStyle(label, 0);
@@ -224,8 +225,8 @@ namespace HomeskzIfcImport::draw
 			return false;
 
 		// bInsert=false: どのレイヤにも入れず、この後 AddViewportAnnotationObject で注釈へ
-		// 入れる（Findings の手順）。挿入点は目標の近くにしておく——最終位置は下で測って
-		// 決めるので、ここは目安でよい。**スタイルが当たった状態で生まれる**（下の
+		// 入れる（Findings の手順）。挿入点は目標の近くにしておく——最終位置は下で計測して
+		// 決めるので、ここは目安でよい。**スタイルが適用された状態で生成される**（下の
 		// RemoveStyle）。
 		MCObjectHandle label = nil;
 		{
@@ -239,11 +240,11 @@ namespace HomeskzIfcImport::draw
 			return false;
 		}
 
-		// **レイアウトを組み直す**（タイトルと下線だけ。図番と縮尺を落とす。文字の大きさも
-		// ここで当てる）。**注釈へ入れる前に**組む（Findings が勧める順）。組めなくても
+		// **レイアウトを再構築する**（タイトルと下線だけ。図番と縮尺を除外する。文字の大きさも
+		// ここで設定する）。**注釈へ入れる前に**構築する（Findings が勧める順）。構築できなくても
 		// ラベルは置く——タイトルは出るので、図番と縮尺が残るだけで済む（件数を診断へ
 		// 回す）。ただし**既定のレイアウトが空**（ツールにスタイルが無い図面）なら、何も
-		// 描かないラベルになるので置かない。
+		// 描画しないラベルになるので置かない。
 		{
 			VW_DRAW_TIME("図面ラベル:レイアウト");
 			bool empty = false;
@@ -259,20 +260,20 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// **組み直した後にスタイルを外す**（RemoveStyle）。外せなくてもラベルは置く
-		// （見た目は組み直したレイアウトのまま。スタイルの編集だけが食い違う）。
+		// **再構築した後にスタイルを解除する**（RemoveStyle）。解除できなくてもラベルは置く
+		// （見た目は再構築したレイアウトのまま。スタイルの編集だけが食い違う）。
 		if (!RemoveStyle(label))
 			++counts.styleLeft;
 
-		// **注釈へ入れる前に図番を書く**。ラベルは作った瞬間に図番（Drawing）へ「その
+		// **注釈へ入れる前に図番を書く**。ラベルは生成した時点で図番（Drawing）へ「その
 		// シートレイヤで使われていない最小の正整数」を自動で持ち（Findings「図番（Drawing）の
-		// 自動採番」）、注釈へ入れた瞬間に**ラベルの値がビューポートへ押し込まれる**
+		// 自動採番」）、注釈へ入れた時点で**ラベルの値がビューポートへ上書きされる**
 		// （Title と同じ向き。Findings「置いたときに流れるのは『ラベル → ビューポート』」。
 		// 図番はビューポートの 1033 と対）。書かずに入れると、parse::uniqueSectionNumbers で
-		// 一意にした図番がラベルの自動の番号へすり替わり、同じシートの別の軸組図の図番と
-		// ぶつかって「その図番は…すでに使用中です」のモーダルが出る（parse 側で一意に
+		// 一意にした図番がラベルの自動の番号へ置き換わり、同じシートの別の軸組図の図番と
+		// 衝突して「その図番は…すでに使用中です」のモーダルが出る（parse 側で一意に
 		// しても実機で出続けた。自動の番号は数として読める図番しか「使用中」に数えない
-		// ので、当たるかどうかは図面ごとの図番の並びで変わる）。
+		// ので、衝突するかどうかは図面ごとの図番の並びで変わる）。
 		WriteField(label, kFieldNumber, number);
 
 		bool annotated = false;
@@ -289,10 +290,10 @@ namespace HomeskzIfcImport::draw
 
 		// **注釈へ入れた後に Title を書く**。置いた直後の Title は隣のビューポートの
 		// タイトルが入っていることがある（Findings「ビューポートとの紐づき」）。リンクは
-		// 生きたままなので、後から利用者がビューポートの図面タイトルを変えればラベルも
+		// 維持されているので、後から利用者がビューポートの図面タイトルを変えればラベルも
 		// 追随する。書けなくてもラベルは残す（VW がリンクで入れた値が出る）。
 		// 図番も念のため書き直す（入れた後にリンクが別の値を入れていても、ビューポートと
-		// 同じ図番へ揃える。図番はレイアウトから落としてあるので絵には出ない）。
+		// 同じ図番へ揃える。図番はレイアウトから除外してあるので描画結果には出ない）。
 		WriteField(label, kFieldTitle, title);
 		WriteField(label, kFieldNumber, number);
 		{
@@ -300,7 +301,7 @@ namespace HomeskzIfcImport::draw
 			gSDK->ResetObject(label);
 		}
 
-		// **測って動かす**——上端中央を「建物の最下点の中央から用紙で drop 下」へ合わせる
+		// **計測して動かす**——上端中央を「建物の最下点の中央から用紙で drop 下」へ合わせる
 		// （drop は下に出る寸法の帯を含む。core::sectionLabelDrop）。注釈空間の長さは
 		// モデル mm なので、用紙 mm に縮尺を掛ける。
 		WorldRect bounds;
@@ -321,7 +322,7 @@ namespace HomeskzIfcImport::draw
 
 	std::string drawingLabelDiagnostics(const std::string& label, const DrawingLabelCounts& counts)
 	{
-		// 異常が無ければ 1 行も出さない（うまくいった取り込みでは雑音でしかない）。
+		// 異常が無ければ 1 行も出さない（成功した取り込みでは不要な情報でしかない）。
 		if (counts.failed == 0 && counts.layoutFailed == 0 && counts.noDefaultLayout == 0 &&
 			counts.styleLeft == 0 && counts.unmeasured == 0 && !counts.textStyleMissing)
 			return {};

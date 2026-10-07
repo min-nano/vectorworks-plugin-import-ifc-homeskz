@@ -1,7 +1,7 @@
 //
 //	parse/ColumnMark.cpp
 //
-//	断面記号・伏図記号の解析の実装（意図と規約は parse/ColumnMark.h を参照）。IFC は見ず、
+//	断面記号・伏図記号の解析の実装（意図と規約は parse/ColumnMark.h を参照）。IFC は参照せず、
 //	柱の命令だけから記号を組み立てる。
 //
 
@@ -86,7 +86,7 @@ namespace HomeskzIfcImport::parse
 	{
 		// spans は (from, to) 昇順なので to は単調ではない（"1to3" の次に "2to2.5" が来る）。
 		// 同じ to をまとめたうえで to 昇順に並べ替える——伏図は「切断の直下で最大の to」を
-		// 選ぶので、昇順に並んでいると走査が素直になる。
+		// 選ぶので、昇順に並んでいると走査が単純になる。
 		std::vector<PlanMarkLayer> layers;
 		for (const ColumnSpan& span : spans)
 		{

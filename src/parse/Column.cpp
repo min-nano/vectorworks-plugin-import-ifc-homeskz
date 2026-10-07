@@ -32,7 +32,7 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 小屋束の断面幅を合わせる対象＝小屋組の上端材。母屋・棟木・登り梁だけを見る（軒桁等
+		// 小屋束の断面幅を合わせる対象＝小屋組の上端材。母屋・棟木・登り梁だけを対象にする（軒桁等
 		// は対象外）。
 		bool isKoyazukaTopMemberClass(const std::string& memberClass)
 		{
@@ -41,7 +41,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 金物と柱を対応付ける XY 位置キー。
-		// 0.001mm 単位の整数へ丸めるので、浮動小数の最下位ビット差で照合が外れない。
+		// 0.001mm 単位の整数へ丸めるので、浮動小数の最下位ビット差で照合に失敗しない。
 		using PositionKey = std::pair<long long, long long>;
 
 		PositionKey positionKey(double x, double y)
@@ -89,7 +89,7 @@ namespace HomeskzIfcImport::parse
 			return hardware;
 		}
 
-		// 索引から仕様を引く（無ければ空文字）。
+		// 索引から仕様を取得する（無ければ空文字）。
 		std::string hardwareAt(const std::map<PositionKey, std::string>& index,
 							   const PositionKey& key)
 		{
@@ -348,7 +348,8 @@ namespace HomeskzIfcImport::parse
 			beamTopAbs.push_back(beamTopElevation(story));
 
 		// 各階の横架材（床梁）下端の最小値。span の to レベル判定の境界に使う（母屋・登り梁の
-		// 専用レイヤは含めず、横架材天端／軒高レイヤの床梁だけを見る）。梁が無い階は天端で代用。
+		// 専用レイヤは含めず、横架材天端／軒高レイヤの床梁だけを対象にする）。梁が無い階は
+		// 天端で代用。
 		std::vector<double> beamBottoms;
 		beamBottoms.reserve(stories.size());
 		for (std::size_t i = 0; i < stories.size(); ++i)
@@ -359,7 +360,7 @@ namespace HomeskzIfcImport::parse
 			for (const MemberCommand& member : members)
 			{
 				// 伏図レベルへ振り分けた横架材（"2-横架材天端(FL-872)"）もその階の床梁
-				// （parse/PlanLevel）。印を外して階の横架材レイヤと比べる。軒桁の専用レイヤ
+				// （parse/PlanLevel）。印を除去して階の横架材レイヤと比較する。軒桁の専用レイヤ
 				// （"2-軒桁"）も横架材レイヤへ読み替える（parse/Story の beamGroupLayer）。
 				if (core::stripPlanLevelTag(beamGroupLayer(member.layer)) != beamLayer)
 					continue;
@@ -451,13 +452,14 @@ namespace HomeskzIfcImport::parse
 				// **上端は受ける横架材の天端（＝その芯線）に取り、梁せいぶんを端部オフセット
 				// へ入れる**（core/Document.h「端部オフセット」）。柱・束の上端を材が実際に
 				// 止まる高さ（梁の下端）に置くと、その座標はどの部材の芯線にも乗らず、座標
-				// だけを見て接合を言えない。受ける材が分からない柱は上端を動かさない
+				// だけから接合を判定できない。受ける材が分からない柱は上端を動かさない
 				// （seatTop == topAbs → オフセット 0）。
 				double seat = beamSeatAbove(topAbs, beamTopAbs, i);
 				if (isKoyazuka || story.isTop)
 					seat = onTop.has_value() ? onTop->topElevation : topAbs;
 				// 受け材の天端が柱の下端を上回らない（＝パス長が残らない）異常なモデルでは
-				// 上端を動かさない。ここで潰れると命令が検証に落ち、取り込み全体が止まる。
+				// 上端を動かさない。ここでパス長が退化すると命令が検証で不合格になり、取り込み
+				// 全体が止まる。
 				const double seatTop = seat > bottomAbs ? seat : topAbs;
 				const double topEndOffset = topAbs - seatTop;
 
@@ -471,7 +473,7 @@ namespace HomeskzIfcImport::parse
 				cmd.position = Vec2{px, py};
 				cmd.width = width;
 				cmd.depth = depth;
-				// height は**パス長**（下端 → 上端）。実際に描かれる高さは height + endOffset
+				// height は**パス長**（下端 → 上端）。実際に描画される高さは height + endOffset
 				// ＝ IFC の押し出し Depth に戻る（core/Document.h の ColumnCommand）。
 				cmd.height = seatTop - bottomAbs;
 				cmd.elevation = bottomAbs;
@@ -502,15 +504,15 @@ namespace HomeskzIfcImport::parse
 
 					// **上端は常に上階の横架材天端（最上階なら軒高）へバインドする。**
 					// M27 の一時期ここに「offset が 0 になるときだけ上階の FL を基準に取り直す」
-					// という分岐があった。`{上階, 横架材天端, 0}` という形が柱を潰している、と
-					// いう見立てによるものだったが、**その見立ては外れだった**——真犯人は
-					// `CreateCustomObjectPath` が潰したパスに 1 ULP の丸めが残り `ResetObject`
-					// の再構築から外れることで、バウンドの側に落ち度は無い（実機 round 1〜4 と
+					// という分岐があった。`{上階, 横架材天端, 0}` という形が柱を退化させている、
+					// という推定によるものだったが、**その推定は誤りだった**——真の原因は
+					// `CreateCustomObjectPath` が退化させたパスに 1 ULP の丸めが残り `ResetObject`
+					// の再構築から除外されることで、バウンドの側に問題は無い（実機 round 1〜4 と
 					// SDK リファレンス issue #59。docs/DEV-NOTES.md M27）。
 					//
-					// 回避策は絶対 Z を変えなかったので絵の高さは合っていたが、**基準が FL に
-					// なる**ため OIP には「FL −40」と出て、階の横架材天端オフセットを変えても
-					// 追随しない柱になっていた（実機で指摘）。見立てが消えたいま残す理由が無い。
+					// 回避策は絶対 Z を変えなかったので描画結果の高さは合っていたが、**基準が FL
+					// になる**ため OIP には「FL −40」と出て、階の横架材天端オフセットを変えても
+					// 追随しない柱になっていた（実機で指摘）。推定が否定されたいま残す理由が無い。
 					cmd.topBound = StoryBoundCommand{1, nextLevel, nextOffset};
 				}
 

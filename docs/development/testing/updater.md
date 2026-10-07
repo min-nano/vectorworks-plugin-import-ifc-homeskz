@@ -10,17 +10,17 @@
    越しに丸ごと動かして、分岐とダイアログ文言まで検証します（後述）。**3 つの入口の
    違い**（`UpdateCheckKind` の `Manual` / `Silent` と、MCP の入口）もここで押さえます
    ——手で押した確認（`Manual`）は最新・オフラインを必ず伝えてブランチ選択を出す、
-   取り込みのついで（`Silent`）は黙って同じブランチのビルドだけ拾って尋ねる。MCP の
+   取り込みのついで（`Silent`）は通知なしに同じブランチのビルドだけ取得して尋ねる。MCP の
    `vw_update` が通る `RemoteDevUpdateWith`（M38）は
    **ダイアログを 1 枚も出さず結末を値で返す**こと（名指ししたブランチの最新を入れること・
-   殻まで変わったら降ろさず `NeedsRestart` を返すこと）も押さえます。加えて **どの入口も
+   殻まで変わったらアンロードせず `NeedsRestart` を返すこと）も押さえます。加えて **どの入口も
    「いま」をディスクに入っているビルドで決める**こと（`q-dev` の `installed=` /
    `installed-branch=`。M26）——殻にコンパイルされた sha を基準にすると本体だけを入れ替えた
    あと同じビルドを毎周入れ直し、**殻のブランチを基準にすると、手で別のブランチのビルドへ
    乗り換えても前のブランチへ戻してしまう**（[M26](../../dev-notes/milestones/m26-current-build-from-disk.md)）。
 3. **`UpdaterRobustnessTests`** … `src/UpdaterParse.h` のパーサに **予期しない外部入力**
    （壊れたスクリプト出力・埋め込み NUL・巨大／退化した行・ランダムなバイト列）を
-   食わせ、境界外アクセスや未定義動作を起こさないこと、そして「戻り値の `url` は必ず
+   与え、境界外アクセスや未定義動作を起こさないこと、そして「戻り値の `url` は必ず
    非空」「`EvaluateStable` が更新を提示するのは整形式のときだけ」「`ResolveDevSelection`
    は範囲外を返さない」といった**契約**が保たれることを検証します。とりわけ
    **ASan / UBSan 有効時**（[テストの実行](running.md)）に真価を発揮し、リファクタが招く
@@ -40,7 +40,7 @@
    押さえます。
 5. **`UpdaterScriptTestsPs`** … その Windows 版 `scripts/vw-update.ps1` を、同じ発想で
    `Invoke-GH` / `Invoke-WebRequest` を差し替えて検証します（`tests/vw-update.Tests.ps1`。
-   [スクリプトのテスト](updater-scripts.md)）。理由づくり（`Get-ApiFailureReason`。M27）も mac 側と同じ観点で押さえます
+   [スクリプトのテスト](updater-scripts.md)）。理由の文面の生成（`Get-ApiFailureReason`。M27）も mac 側と同じ観点で押さえます
    ——応答は形だけ揃えたもので作るので、ネットワークも Windows も要りません。
    PowerShell 7（`pwsh`）は Linux でも動くので、**同じ Linux ランナー**で回せます。
 6. **`InstallerScriptTests` / `InstallerScriptTestsPs`** … **配置を担うインストーラ**
@@ -50,13 +50,13 @@
    `Plug-Ins` に半端なプラグインが残る、というのが実際に起きた事故で、この仕組みはその再発を
    止めるためにあります（`tests/vw-install.test.sh` / `tests/vw-install.Tests.ps1`）。
    アップデータ側には**委譲そのもの**のテストもあります（zip に入っていたインストーラが
-   走ったか・その出力が素通しされるか・黙っているインストーラを成功と取り違えないか）。
+   走ったか・その出力がそのまま渡されるか・何も出力しないインストーラを成功と取り違えないか）。
 7. **`UninstallerScriptTests` / `UninstallerScriptTestsPs`** … **取り除く**
    `scripts/vw-uninstall.sh` / `scripts/vw-uninstall.ps1`。ここは本リポジトリで利用者の
    ものを消す 3 か所の 1 つ（[`CLAUDE.md`](../../../CLAUDE.md)「開発の基本方針」8）なので、中心の検査は**削除の安全弁**です——
    フォルダ名が一致し、かつ中に殻があるときだけ消し、`Plug-Ins` そのものや無関係な
    フォルダを名指しされても消さないこと。あわせて「入っていなければ成功」（アップデートの
-   入口で無条件に叩ける）も押さえます（`tests/vw-uninstall.test.sh` /
+   入口で無条件に呼び出せる）も押さえます（`tests/vw-uninstall.test.sh` /
    `tests/vw-uninstall.Tests.ps1`）。**スタブはありません**——削除そのものが対象なので、
    本物が temp ディレクトリに対して走ります。
 
@@ -70,7 +70,7 @@
 - 自分自身のバイナリ位置の解決（`dladdr` / `GetModuleFileName`）
 - スクリプトの起動（`popen` / `_popen`）
 - ネイティブダイアログの表示（`gSDK->AlertInform` / `AlertQuestion`、`VWDialog`）
-- 再起動と本体の取り下ろし（`gSDK->CloseAllFilesAndQuitVectorworks` / `ReleaseLoadedPayload`）
+- 再起動と本体のアンロード（`gSDK->CloseAllFilesAndQuitVectorworks` / `ReleaseLoadedPayload`）
 
 という **プラットフォーム／SDK 固有のグルーだけ** を担います。
 
@@ -81,7 +81,7 @@
 | スクリプト出力の解析 | `Trim` / `ValueOf` / `ParseDevBuilds` | `key=value` 行・`build\t…` 行の解析 |
 | コマンドライン生成 | `ShellQuote` / `CmdQuote` | `/bin/sh`・cmd.exe 用の安全なクオート |
 | 自パスからの導出 | `Mac*FromBinary` / `Win*FromPath/Dir` | 同梱スクリプト・Plug-Ins フォルダのパス導出 |
-| **更新フローの判断** | `EvaluateStable` / `ResolveCurrentDevBuild` / `DevSwitchCandidates` / `FindDevBuildForBranch` / `ResolveDevSelection` / `InstallReportedOk` / `InstallErrorText` / `InstalledShellId` / `NeedsRestartAfterInstall` | 「更新があるか」「**いま入っているのはどのブランチのどのビルドか**」「切替候補はどれか」「同じブランチの新しいビルドはどれか」「選択→ビルド」「インストール成否」「**再起動が要るか、本体の読み直しで済むか**」 |
+| **更新フローの判断** | `EvaluateStable` / `ResolveCurrentDevBuild` / `DevSwitchCandidates` / `FindDevBuildForBranch` / `ResolveDevSelection` / `InstallReportedOk` / `InstallErrorText` / `InstalledShellId` / `NeedsRestartAfterInstall` | 「更新があるか」「**いま入っているのはどのブランチのどのビルドか**」「切替候補はどれか」「同じブランチの新しいビルドはどれか」「選択→ビルド」「インストール成否」「**再起動が要るか、本体の再読み込みで済むか**」 |
 
 最後の「更新フローの判断」層は、もともと `Updater.cpp` の `gSDK` 呼び出しの合間に
 インラインで書かれていた分岐です。純粋関数として切り出したことで単体テストの対象になり、
@@ -99,7 +99,7 @@
 | `Inform` / `Ask` | `gSDK->AlertInform` / `AlertQuestion` | 呼び出しを記録／既定の回答を返す |
 | `PickBuild` | VWFC のプルダウンダイアログ | 選択インデックスを返す |
 | `Restart` | SDK の `CloseAllFilesAndQuitVectorworks(true, true)` を呼ぶ | 呼び出し回数を数える／成否を返す |
-| `DropLoadedPayload` | 載っている本体を降ろす（次の操作で新しいものが読み直される） | 呼び出し回数を数える／成否を返す |
+| `DropLoadedPayload` | 載っている本体をアンロードする（次の操作で新しいものが再読み込みされる） | 呼び出し回数を数える／成否を返す |
 
 フロー本体（`RunStableUpdateCheckWith` / `RunDevUpdateCheckWith` / `RemoteDevUpdateWith`、
 `src/UpdaterFlow.cpp`）は `IUpdaterHost&` だけに依存し、SDK ヘッダを一切 include しません。よって
@@ -113,7 +113,7 @@
 
 > これは **ユニットテスト（コンポーネントテスト）** です。テスト対象の「ユニット」は
 > フロー関数で、host はそれを差し替えるテストダブル（フェイク）です。**e2e ではありません**
-> — e2e なら実際に Vectorworks 上でプラグインを起動し、本物の GitHub API を叩き、本物の
+> — e2e なら実際に Vectorworks 上でプラグインを起動し、本物の GitHub API を呼び出し、本物の
 > ダイアログを出して確認することになります。ここではプロセス内で SDK ゼロで完結します。
 
 ## それでも残る部分（アップデータ）

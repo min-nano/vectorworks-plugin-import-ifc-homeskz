@@ -5,7 +5,7 @@
     This is the Windows counterpart of scripts/vw-uninstall.sh; see that file's
     header for the full rationale. In short:
 
-    **これは vw-install.ps1 の裏返しで、同じ理由で同じところに配られる。** 配布 zip の
+    **これは vw-install.ps1 と逆の処理で、同じ理由で同じところに配られる。** 配布 zip の
     直下に同梱され、インストール時に**プラグインのフォルダの中へ一緒に置かれる**
     （インストーラ自身は置かれないが、これは置かれる）。リリースのアセットとしても
     単独で公開される。
@@ -14,7 +14,7 @@
     その版自身のアンインストーラだけ**だから。アップデートは「前の版を取り除いてから
     新しい版を入れる」順で走る（vw-install.ps1 の Uninstall-PreviousRelease）。
 
-    取り除くものの規則もひとつだけ: **そのプラグインのフォルダをまるごと。**
+    取り除くものの規則もひとつだけ: **そのプラグインのフォルダ全体。**
     ファイル名を列挙しない。
 
     **消してよいフォルダかどうかは必ず確かめる。** 名前が一致し、かつ中に殻
@@ -22,8 +22,8 @@
     巻き込まないための歯止めで、これが唯一の削除の安全弁である。
 
     **読み込み中の .vlb は削除できない。** Windows では実行中の DLL を消せないので、
-    中身は「退かしてから消す」（消せなければ退かしたまま残す）。退いた ".old-*" は
-    拡張子が .vlb ではないので Vectorworks は読み込まないし、次のインストールが掃く。
+    中身は「退避してから消す」（消せなければ退避したまま残す）。退避した ".old-*" は
+    拡張子が .vlb ではないので Vectorworks は読み込まないし、次のインストールが削除する。
 
     Usage:
       powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1
@@ -100,7 +100,7 @@ function Get-InstalledName([string] $root) {
 # 動詞が "Uninstall" なのは意図的。**"Remove" は PSScriptAnalyzer が「システムの状態を
 # 変える動詞」とみなし、ShouldProcess（-WhatIf / -Confirm）の実装を要求する**
 # （PSUseShouldProcessForStateChangingFunctions）。この関数は対話を持たない機械向けの
-# 部品で、確認は呼び出し側（人が叩く vw-uninstall / アップデートの流れ）が持つ。
+# 部品で、確認は呼び出し側（人が実行する vw-uninstall / アップデートの流れ）が持つ。
 # 隣の vw-install.ps1 が Install-* を使っているのとも揃う。
 function Uninstall-PluginDir([string] $dir, [string] $name) {
     if (-not (Test-Path -LiteralPath $dir)) {
@@ -118,10 +118,10 @@ function Uninstall-PluginDir([string] $dir, [string] $name) {
         return $false
     }
 
-    # 中身を 1 つずつ「退かしてから消す」。**読み込み中の .vlb は消せないが退かせる**
-    # ので、Vectorworks が走っていても殻は確実にどかせる（拡張子が変わるため、次の
-    # 起動でもう読み込まれない）。消せなかったものは退いたまま残し、次のインストールが
-    # 掃く（vw-install.ps1 の Install-Tree）。ロック中のファイルが消せないのは想定内
+    # 中身を 1 つずつ「退避してから消す」。**読み込み中の .vlb は消せないが退避できる**
+    # ので、Vectorworks が走っていても殻は確実に退避できる（拡張子が変わるため、次の
+    # 起動でもう読み込まれない）。消せなかったものは退避したまま残し、次のインストールが
+    # 削除する（vw-install.ps1 の Install-Tree）。ロック中のファイルが消せないのは想定内
     # なので catch は空でよい。
     foreach ($item in Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue) {
         $bak = "$($item.Name).old-$([System.IO.Path]::GetRandomFileName())"
@@ -140,7 +140,7 @@ function Uninstall-PluginDir([string] $dir, [string] $name) {
     return $true
 }
 
-# 引数を読む。**知らないオプションは黙って読み飛ばす。**
+# 引数を読む。**知らないオプションはエラーにせず読み飛ばす。**
 function Read-Option([string[]] $argv) {
     $opt = @{ Name = ''; Help = $false }
     if (-not $argv) { return $opt }
@@ -170,8 +170,8 @@ function Read-Option([string[]] $argv) {
 # vw-install.ps1 の Invoke-Main と同じ理由）。
 function Invoke-Main([string[]] $argv) {
     # **1 回ごとに結末の状態を初期化する。** 実行ファイルとしては 1 プロセス 1 回だが、
-    # テストは同じセッションで何度も呼ぶ——初期化を落とすと「前回取り除いた場所」を
-    # 持ち越して報告してしまう（実際にそれで落ちた）。
+    # テストは同じセッションで何度も呼ぶ——初期化を省くと「前回取り除いた場所」を
+    # 引き継いで報告してしまう（実際にそれでテストが失敗した）。
     $script:ExitCode = 0
     $script:Removed = ''
     $script:LastError = ''
@@ -183,7 +183,7 @@ function Invoke-Main([string[]] $argv) {
 
     $ok = $false
     if (-not $name) {
-        # 何も入っていない。**これも成功**（アップデートの入口で無条件に叩ける）。
+        # 何も入っていない。**これも成功**（アップデートの入口で無条件に呼び出せる）。
         Write-Note "取り除くものはありません（$script:PluginsDir にプラグインが見つかりません）。"
         $ok = $true
     }
@@ -210,7 +210,7 @@ function Invoke-Main([string[]] $argv) {
     $script:ExitCode = 1
 }
 
-# 直接実行したときだけ走らせる（テストはドットソースして個々の関数を叩く）。
+# 直接実行したときだけ走らせる（テストはドットソースして個々の関数を呼び出す）。
 if ($MyInvocation.InvocationName -ne '.') {
     Invoke-Main $args
     exit $script:ExitCode

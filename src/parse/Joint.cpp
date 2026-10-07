@@ -46,7 +46,7 @@ namespace HomeskzIfcImport::parse
 
 	MemberGeom memberGeom(const MemberCommand& command)
 	{
-		// **端部オフセットを戻した「材が実際に占める範囲」**を見る（core の memberDrawnStart /
+		// **端部オフセットを戻した「材が実際に占める範囲」**を使う（core の memberDrawnStart /
 		// memberDrawnEnd）。命令の端点は取り合い相手の芯線上にあるので、そのまま使うと仕口
 		// シンボルが相手の材の中へ潜り込む——仕口が付くのは材の端（相手の面）である
 		// （core/Document.h「端部オフセット」）。
@@ -110,9 +110,9 @@ namespace HomeskzIfcImport::parse
 		const MemberGeom& self = geoms[index];
 		// 横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた材（"2-横架材天端(FL-872)"）
 		// も、軒桁の専用レイヤの材（"2-軒桁"）も同じ階の横架材どうしなので、伏図レベルの印を
-		// 外し、軒桁を横架材レイヤへ読み替えて比べる（parse/PlanLevel・parse/Story）。
+		// 除き、軒桁を横架材レイヤへ読み替えて比べる（parse/PlanLevel・parse/Story）。
 		const std::string layer = core::stripPlanLevelTag(beamGroupLayer(members[index].layer));
-		// 登り梁は別レイヤの軒桁・母屋・棟木に取り付くのでレイヤ一致の制約を外す。
+		// 登り梁は別レイヤの軒桁・母屋・棟木に取り付くのでレイヤ一致の制約を適用しない。
 		const bool crossLayer = members[index].drawClass == CLASS_NOBORIBARI;
 
 		for (std::size_t j = 0; j < geoms.size(); ++j)

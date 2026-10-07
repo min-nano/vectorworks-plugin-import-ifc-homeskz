@@ -42,7 +42,7 @@ namespace HomeskzIfcImport::core
 	// 2 つの平面座標が実質同一か（通り芯の重複線除去と縮退判定に使う）。**この述語と
 	// 閾値はここに 1 つだけ置く**: かつて core/Document.cpp の isDegenerate と
 	// parse/Grid.cpp の samePoint が同じ式・同じ 1e-6 を各々持っており、片方の閾値を
-	// 直すと「重複として畳んだ線が検証では非縮退」のような食い違いが起こり得た。
+	// 直すと「重複としてまとめた線が検証では非縮退」のような食い違いが起こり得た。
 	inline bool samePoint(const Vec2& a, const Vec2& b, double tol = kPointEps)
 	{
 		return std::abs(a.x - b.x) < tol && std::abs(a.y - b.y) < tol;
@@ -50,7 +50,7 @@ namespace HomeskzIfcImport::core
 
 	// 凸多角形を直線 origin + t·direction で切り、**左手側**（direction を向いて左。境界を
 	// 含む）だけを残す（Sutherland–Hodgman の 1 段）。周り方向は入力のまま。残りが 3 点に
-	// 満たなければ空を返す。clipPolygonToConvex はこれを切る側の辺ごとに当てたもの。
+	// 満たなければ空を返す。clipPolygonToConvex はこれを切る側の辺ごとに適用したもの。
 	// ほかの利用者はたすき掛けの奥の筋かいを手前の帯の縁で切る
 	// core::shearWallBehindBracePieces。
 	std::vector<Vec2> clipPolygonToHalfPlane(const std::vector<Vec2>& polygon, const Vec2& origin,
@@ -60,13 +60,13 @@ namespace HomeskzIfcImport::core
 	// 閉じたポリゴン（末尾に始点を重複させない）で、周り方向は入力のまま保たれる。clip の
 	// 外へ完全に出ている多角形は空を返す。clip が 3 点未満でも空。
 	//
-	// 【何に使うか】耐力壁の筋かいは「軸組内法の対角線に沿った帯」で、その帯は内法から
-	// はみ出す（帯の角が柱・横架材へ食い込む）。実物も内法へ切り詰めて納まるので、
-	// 描くときも内法で切る（core::shearWallBracePolygon。docs/DEV-NOTES.md M19）。
-	// 内法は**登り梁の下では上辺が傾いた台形**になるので、矩形ではなく凸多角形で切る。
-	//
 	// 切られる側も凸に限る（Sutherland–Hodgman は凹の切り口で退化した辺を残す）。用途は
 	// いまのところ帯＝凸なのでこれで足りる。
+	//
+	// 【何に使うか】耐力壁の筋かいは「軸組内法の対角線に沿った帯」で、その帯は内法から
+	// はみ出す（帯の角が柱・横架材へ食い込む）。実物も内法へ切り詰めて納まるので、
+	// 描画するときも内法で切る（core::shearWallBracePolygon。docs/DEV-NOTES.md M19）。
+	// 内法は**登り梁の下では上辺が傾いた台形**になるので、矩形ではなく凸多角形で切る。
 	std::vector<Vec2> clipPolygonToConvex(const std::vector<Vec2>& polygon,
 										  const std::vector<Vec2>& clip);
 
@@ -216,7 +216,7 @@ namespace HomeskzIfcImport::core
 	//	行優先（m[row][col]）で保持する。点 p の変換は p' = M·[x,y,z,1]^T。
 	//	上位 3x3 が回転（基底ベクトル）、第 4 列が平行移動、最下行は (0,0,0,1)。
 	//	fromAxes で列に基底ベクトル X/Y/Z を並べるので、ローカル座標 (1,0,0) は
-	//	X 軸へ、(0,1,0) は Y 軸へ写る（IfcAxis2Placement の定義と一致）。
+	//	X 軸へ、(0,1,0) は Y 軸へ移る（IfcAxis2Placement の定義と一致）。
 	struct Mat4
 	{
 		std::array<std::array<double, 4>, 4> m{};

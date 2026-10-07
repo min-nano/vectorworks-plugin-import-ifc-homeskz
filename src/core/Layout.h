@@ -5,7 +5,7 @@
 //	（docs/DEV-NOTES.md M18）。伏図（draw/Sheet）と軸組図（draw/Section）が「用紙のどこへ・
 //	どの縮尺で置くか」を決めるために使う**純計算**で、SDK も IFC も知らない。
 //
-//	【なぜ core に置くか】用紙の大きさは**描くときにしか分からない**（シートレイヤから SDK で
+//	【なぜ core に置くか】用紙の大きさは**描画するときにしか分からない**（シートレイヤから SDK で
 //	読む）ので、割り付けを解析フェーズで決めることはできない。一方、決め方そのもの——縮尺の
 //	階梯・収まる縮尺の選び方・段組みの数え方——は SDK と無関係な算数なので、描画側から切り
 //	離してここへ置き、無 SDK テスト（CoreLayoutTests）で検証する（CLAUDE.md「描画側から
@@ -21,7 +21,7 @@
 //	    差し引く幅は**描画側が実測した凡例の幅**（planLayout の legendWidth）で、凡例は
 //	    図面の内容で伸び縮みするので定数で決め打ちにしない。
 //	  * 軸組図は 1 枚の用紙に複数並ぶ。**上下 2 段**になるように縮尺を決め（kSectionRows）、
-//	    1 段に何枚入るかは用紙の幅が決める。入りきらなければシートレイヤを足す
+//	    1 段に何枚入るかは用紙の幅が決める。入りきらなければシートレイヤを追加する
 //	    （sectionSheetCount）。
 //
 //	【単位】用紙まわりの長さはすべて**用紙座標の mm**、建物の広がり（content）は**実寸の
@@ -44,22 +44,21 @@ namespace HomeskzIfcImport::core
 	inline constexpr std::array<double, 13> kScaleDenominators{
 		5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 50.0, 75.0, 100.0, 125.0, 150.0, 175.0, 200.0};
 
-	// **用紙端の余白は定数で持たない**（M18。ローカル確認を経ての結論）。かつては四辺
-	// 15mm と決め打ちしていたが、余白は用紙ではなく**印刷の設定**が決めるものなので、
-	// 仮定すると実際より狭い（または広い）領域で縮尺を選んでしまう。描画側が
-	// シートレイヤから**印刷可能領域そのもの**を読み（draw/DrawUtil の SheetPaperArea。
-	// ISDK::GetPageMargins ＋ 用紙の大きさ）、この割り付けへはその矩形を渡す。
+	// **用紙端の余白は定数で持たない。** 描画側がシートレイヤから**印刷可能領域そのもの**を
+	// 読み（draw/DrawUtil の SheetPaperArea。ISDK::GetPageMargins ＋ 用紙の大きさ）、この
+	// 割り付けへはその矩形を渡す。余白は用紙ではなく**印刷の設定**が決めるものなので、
+	// 仮定すると実際より狭い（または広い）領域で縮尺を選んでしまう（M18。ローカル確認を
+	// 経ての結論。かつては四辺 15mm と決め打ちしていた）。
 
 	// ビューポート同士・ビューポートと凡例の間隔（用紙 mm）。
 	inline constexpr double kViewportGap = 15.0;
 
-	// **凡例の幅は定数で持たない**（M18。実機のローカル確認を経ての結論）。グラフィック凡例
-	// の大きさは**その図面に何が並ぶか**で決まる——シンボルの種類が増えれば伸びるし、
-	// アンカーボルトを置かない文書では凡例そのものが無い。当初は箱幅の定数（150mm）を
+	// **凡例の幅は定数で持たない。** **描画側が置いた凡例を実測して**（draw/Legend の
+	// measureLegendWidth）planLayout へ渡す。グラフィック凡例の大きさは**その図面に何が
+	// 並ぶか**で決まる——シンボルの種類が増えれば伸びるし、アンカーボルトを置かない文書では
+	// 凡例そのものが無い（M18。実機のローカル確認を経ての結論）。当初は箱幅の定数（150mm）を
 	// そのまま「空けておく幅」にしていたが、実機の凡例は 25mm ほどにしか広がらず、
-	// 余らせた 125mm のせいで **1/50 で収まる建物が 1/75 まで落ちて**いた。
-	// そこで**描画側が置いた凡例を実測して**（draw/Legend の measureLegendWidth）
-	// planLayout へ渡す形にしてある。
+	// 余らせた 125mm のせいで **1/50 で収まる建物が 1/75 まで小さくなって**いた。
 
 	// 用紙の大きさが読めなかったときに使う既定（A3 横。用紙 mm）。**シートレイヤから
 	// 読めた値があれば必ずそちらを使う**（draw/DrawUtil の SheetPaperArea）。
@@ -81,7 +80,7 @@ namespace HomeskzIfcImport::core
 		return points * kMillimetersPerInch / kPointsPerInch;
 	}
 
-	// 「用紙 − 余白」とシートレイヤの大きさを突き合わせるときの遊び（用紙 mm）。
+	// 「用紙 − 余白」とシートレイヤの大きさを照合するときの許容差（用紙 mm）。
 	inline constexpr double kPageMarginMatchTol = 0.5;
 
 	// 軸組図の段数。**上下 2 段**（要件）。1 段に何枚入るかは用紙の幅と縮尺が決める。
@@ -142,7 +141,7 @@ namespace HomeskzIfcImport::core
 	// 用紙 mm。
 	//
 	// 【なぜ core に置くか】余白を読むのは SDK の仕事だが、**読めた数字をどう解釈するか**
-	// は単位の突き合わせという算数でしかないので、描画側から切り離してここで無 SDK テスト
+	// は単位の照合という算数でしかないので、描画側から切り離してここで無 SDK テスト
 	// する（CLAUDE.md「描画側から切り離せる純計算」）。
 	//
 	// ★**GetPageMargins だけ単位がヘッダに書かれていない**（M18。実機では図面の単位で
@@ -156,16 +155,16 @@ namespace HomeskzIfcImport::core
 	//
 	// ★**四辺 0 は「読めなかった」ではない。** 縁なし印刷ができる機種では**余白 0 の用紙
 	// 設定が実際に選べる**ので、0 はそのまま「余白なし＝用紙いっぱいが印刷可能領域」として
-	// 受け取る（resolved = true）——ここを「読めなかった」に倒すと、正しい設定に警告が出る
-	// （M18 の後で実機から上がった誤判定）。例外は**シートレイヤが用紙より小さい**とき
-	// ——余白が在るはずなのに 0 が返ったということなので、そのときだけ解釈できなかった側へ
-	// 倒して生の値を診断に出させる。
+	// 受け取る（resolved = true）——ここを「読めなかった」と判定すると、正しい設定に警告が
+	// 出る（M18 の後で実機から上がった誤判定）。例外は**シートレイヤが用紙より小さい**とき
+	// ——余白が在るはずなのに 0 が返ったということなので、そのときだけ解釈できなかったもの
+	// として扱い、生の値を診断に出させる。
 	PageMarginsResolution resolvePageMargins(const PageMargins& raw, const Vec2& paper,
 											 const Vec2& sheet);
 
 	// content（実寸 mm）が available（用紙 mm）に収まる最大の図＝**最小の分母**を階梯から
 	// 選ぶ。どれにも収まらなければ最大の分母（＝いちばん小さい図）を返す——**図がはみ出す
-	// くらいなら小さく描く**。content・available が退化している（0 以下）ときも同じ。
+	// くらいなら小さく描画する**。content・available が退化している（0 以下）ときも同じ。
 	double fitScale(const Vec2& content, const Vec2& available);
 
 	// 伏図 1 枚の割り付け。**全シートで同じ値**になる（同じ内容・同じ用紙から計算する）ので、
@@ -176,10 +175,10 @@ namespace HomeskzIfcImport::core
 	//   viewportCenter … 図の中心を合わせる点（用紙 mm）。**建物の中心**がここへ来る
 	//   legendTopRight … グラフィック凡例の右上を合わせる点（用紙 mm。印刷可能領域の右上）
 	//
-	// plan を持つのは、**描けた図が本当に用紙へ収まったかを描画側が測って確かめられる**
+	// plan を持つのは、**描画した図が本当に用紙へ収まったかを描画側が測って確かめられる**
 	// ようにするため（M18）。縮尺は「命令セットから求めた建物の広がり」で決めるが、実際に
-	// 描かれる図はそれより少し大きくなりうる（通り芯の丸のように、命令の座標には現れない
-	// ものが図には出る）。はみ出したら診断へ残す——黙って用紙から出ているより、
+	// 描画される図はそれより少し大きくなりうる（通り芯の丸のように、命令の座標には現れない
+	// ものが図には出る）。はみ出したら診断へ残す——気付かれないまま用紙からはみ出しているより、
 	// ローカル確認のときに気付ける方がよい。
 	struct PlanLayout
 	{
@@ -195,11 +194,11 @@ namespace HomeskzIfcImport::core
 	//
 	// ★**縮尺は凡例の幅を引いてから決める**（要件）。用紙いっぱいで縮尺を決めると、建物が
 	// ギリギリの大きさのときに凡例を置くスペースが無くなる——凡例も図面の一部なので、
-	// 置けなくなるくらいなら図を 1 段階小さく描く。図は「凡例のぶんを除いた領域」の中央へ
+	// 置けなくなるくらいなら図を 1 段階小さく描画する。図は「凡例のぶんを除いた領域」の中央へ
 	// 置き、空けた右の帯の右上へ凡例が載る。
 	//
 	// **幅を実測で受け取る理由**は上記（凡例は図面の内容で伸び縮みするので、定数で
-	// 決め打ちにすると余らせたぶんだけ縮尺が落ちる）。
+	// 決め打ちにすると余らせたぶんだけ縮尺が小さくなる）。
 	//
 	// **band は寸法の帯**（M31。用紙 mm・四辺それぞれ）。寸法は図の外へ張り出すので、縮尺は
 	// 図の領域から四辺の帯を引いた残りで選ぶ（凡例の幅を引くのと同じ考え方）。寸法を
@@ -211,9 +210,9 @@ namespace HomeskzIfcImport::core
 	inline constexpr double kTitleBlockInset = 5.0;
 
 	// 図を並べてよい領域を、図面枠の外形（frame）の内側へ絞る。印刷可能領域（printable）と
-	// 「枠を kTitleBlockInset だけ内へ寄せた矩形」の重なりを返す。重なりが潰れる（枠が
+	// 「枠を kTitleBlockInset だけ内へ寄せた矩形」の重なりを返す。重なりが退化する（枠が
 	// 測り違いで極端に小さい等）ときは printable をそのまま返す——図を並べる場所を失う
-	// くらいなら枠と重なる方がよい（重なりは実機で見れば分かる）。
+	// くらいなら枠と重なる方がよい（重なりは実機で確認すれば分かる）。
 	PaperArea insetFrameArea(const PaperArea& printable, const PaperArea& frame);
 
 	// 測った図面枠の外形が「用紙を囲む枠」か。幅・高さとも印刷可能領域の
@@ -222,7 +221,7 @@ namespace HomeskzIfcImport::core
 	//
 	// 【なぜ分けるか】実機（PR #176 round 1）の図面枠スタイルは**用紙の右下に表題欄の帯が
 	// あるだけ**で枠線を持たず、仮に置いて測ると 235 × 19mm が返った。これを「用紙を囲む
-	// 枠」として内側へ絞ると並べる領域が 225 × 9mm に潰れ、軸組図が 1/200 まで落ちた。
+	// 枠」として内側へ絞ると並べる領域が 225 × 9mm まで縮み、軸組図が 1/200 まで小さくなった。
 	bool frameCoversPaper(const PaperArea& frame, const PaperArea& printable);
 	inline constexpr double kTitleBlockMinCoverage = 0.5;
 
@@ -230,7 +229,7 @@ namespace HomeskzIfcImport::core
 	// 空けるのは「表題欄の高さ＋用紙端からの離れと図との間隔（kTitleBlockInset の 2 倍）」
 	// で、幅いっぱいに取る（表題欄が左右のどこにあっても下段の図と重ならない）。
 	// **表題欄は下にある**前提（実機のスタイルは右下。一般の図面枠も下か右下に置く）。
-	// 空けると潰れるときは printable をそのまま返す。
+	// 空けると領域が退化するときは printable をそのまま返す。
 	PaperArea reserveTitleStrip(const PaperArea& printable, const PaperArea& strip);
 
 	// 軸組図 1 枚の外周に張り出す注釈の帯（用紙 mm・**辺ごと**）。寸法・レベル記号・図面
@@ -238,9 +237,9 @@ namespace HomeskzIfcImport::core
 	// 位置の寸法と図面ラベル、上に上階の柱・小屋束の位置の寸法と通り芯の符号、右は右端に
 	// 根元のある縦の列とレベルの基準線の越えだけ。parse/Dimension・draw/DrawingLabel。
 	// 内訳は core::sectionBands の doc コメント）ので、**辺ごとに要るぶんだけ帯を取る**。
-	// かつては最も外の段の帯を四辺すべてに取っており、上と右に図 1 枚あたり数十 mm の
-	// 空きが出ていた（それが 2 段 × 列の数だけ効いて縮尺を 1〜2 段落としていた）。
 	// 値は core::sectionBands が命令から求める。
+	// かつては最も外の段の帯を四辺すべてに取っており、上と右に図 1 枚あたり数十 mm の
+	// 空きが出ていた（それが 2 段 × 列の数だけ影響して縮尺を 1〜2 段小さくしていた）。
 	struct SectionBands
 	{
 		double left = 0.0;
@@ -289,11 +288,11 @@ namespace HomeskzIfcImport::core
 	//
 	// heightMargin は content の高さに**上下それぞれ**含まれている空き（実寸 mm。断面の
 	// 高さ範囲の余白 core::kSectionHeightMargin）。上下の帯はまずこの空きに収め、はみ出す
-	// ぶんだけをマスに足す——図の下の寸法と図面ラベルは実際にこの余白の中に描かれる
+	// ぶんだけをマスに追加する——図の下の寸法と図面ラベルは実際にこの余白の中に描画される
 	// （docs/DEV-NOTES.md M32）ので、帯と余白を両方取ると同じ場所を 2 度数えることになる。
-	// 空きは縮尺で用紙の上の長さが変わるので、**縮尺ごとに**マスを組み直して収まりを見る。
+	// 空きは縮尺で用紙の上の長さが変わるので、**縮尺ごとに**マスを組み直して収まりを確認する。
 	//
-	// alignTop は SectionLayout::alignTop へそのまま写す。
+	// alignTop は SectionLayout::alignTop へそのまま設定する。
 	SectionLayout sectionLayout(const Vec2& content, const PaperArea& area,
 								const SectionBands& bands = {}, double heightMargin = 0.0,
 								bool alignTop = false);
@@ -329,13 +328,13 @@ namespace HomeskzIfcImport::core
 	// 段と段の間隔。用紙の上の長さで持つのは、どの縮尺でも段の間隔が同じに見えるように
 	// するため（命令は段の番号だけを持つ。core/Document.h の DimensionChainCommand）。
 	// 値は寸法の文字（おおむね 2.5mm 前後）が 1 段に収まり、隣の段と重ならない大きさの
-	// 見込みで、実機で見て詰める。
+	// 見込みで、実機で確認して調整する。
 	inline constexpr double kDimensionFirstGap = 8.0;
 	inline constexpr double kDimensionTierPitch = 7.0;
 
 	// 寸法線の直交座標（注釈空間・モデル mm）。base から side の向きへ
 	// （kDimensionFirstGap + tier × kDimensionTierPitch）× 縮尺の分母 だけ離す。
-	// side は ±1（それ以外は符号だけを見る）、tier は 0 以上（負は 0 とみなす）。
+	// side は ±1（それ以外は符号だけを参照する）、tier は 0 以上（負は 0 とみなす）。
 	double dimensionLineCoord(double base, int side, int tier, double scale);
 
 	// 寸法の文字が寸法線から外へはみ出す見込み（用紙 mm）。寸法の文字（おおむね 2〜3mm）と
@@ -357,7 +356,7 @@ namespace HomeskzIfcImport::core
 	//     ▽1FL ─────────────────────────（図）─────
 	//     ↑起点（左の寸法列の文字より外）          ↑右端＋kLevelLineOvershoot
 	//
-	// 長さは**用紙 mm**（マーカーレイアウトの中身は紙の上の mm で効き、容れ物の縮尺は VW が
+	// 長さは**用紙 mm**（マーカーレイアウトの中身は紙の上の mm で適用され、容れ物の縮尺は VW が
 	// 掛ける。Findings「Drawing Labels」のレイアウトの文字の大きさ）。名前の文字の大きさは
 	// 寸法の文字と同じ（寸法規格の文字スタイルの pt。draw/Dimension が読む）。
 
@@ -369,11 +368,11 @@ namespace HomeskzIfcImport::core
 	inline constexpr double kLevelMarkClearance = 1.0;
 	// 基準線が図の右端を越える長さ（用紙 mm。「建物幅を少し超えたくらい」。ご要望）。
 	inline constexpr double kLevelLineOvershoot = 3.0;
-	// 軸組図の寸法の帯に足す、レベル記号が寸法より外へ張り出す見込み（用紙 mm）。名前の幅は
-	// 描くまで分からないので、三角と 3 文字ほどの名前（"1FL"・"軒高"）が収まる量で見込む。
+	// 軸組図の寸法の帯に加える、レベル記号が寸法より外へ張り出す見込み（用紙 mm）。名前の幅は
+	// 描画するまで分からないので、三角と 3 文字ほどの名前（"1FL"・"軒高"）が収まる量で見込む。
 	inline constexpr double kLevelMarkBandAllowance = 10.0;
 
-	// 軸組図の下の帯に足す、図面ラベル（紙の 10pt のタイトル＋下線）の高さの見込み（用紙 mm。
+	// 軸組図の下の帯に加える、図面ラベル（紙の 10pt のタイトル＋下線）の高さの見込み（用紙 mm。
 	// docs/DEV-NOTES.md M32 で「用紙 5mm 前後」）。ラベルの上の間隔は core::kSectionLabelGap。
 	// 当初 6mm としたが、実機（PR #176 round 1・1/200）で下の注釈が見込みより 2.4mm 深く、
 	// 19 枚がマスから縦にはみ出したので 9mm にした。
@@ -387,7 +386,7 @@ namespace HomeskzIfcImport::core
 
 	// 断面ビューポートの注釈に VW が出すグリッド線（通り芯）の符号（ラベル枠）の高さと、
 	// 符号の下端と上の寸法の文字との隙間（どちらも用紙 mm）。符号は「映っているモデルの
-	// 上端 ＋ 水平線の長さ（先端）＋ ラベル枠」に描かれ、既定（水平線 5mm）で上端から
+	// 上端 ＋ 水平線の長さ（先端）＋ ラベル枠」に描画され、既定（水平線 5mm）で上端から
 	// 12.35〜12.45mm（1/100・1/50 の実測。SDK リファレンス Findings「Viewports」#189）
 	// なので、ラベル枠は 7.4mm 前後。少し大きめに見込む。上の帯（kSectionGridBubbleAllowance）
 	// は「隙間＋ラベル枠」を覆う。
@@ -417,20 +416,20 @@ namespace HomeskzIfcImport::core
 		double width = 0.0;
 	};
 
-	// textSize は名前の文字の大きさ、textWidth は描いた名前の幅（どちらも用紙 mm。負は 0）。
+	// textSize は名前の文字の大きさ、textWidth は描画した名前の幅（どちらも用紙 mm。負は 0）。
 	LevelMarkShape levelMarkShape(double textSize, double textWidth);
 
 	// 記号の起点（注釈空間の x・モデル mm）。left は図の左端（高さの寸法列の根元）、
 	// dimensionTier は左に出る寸法列の最も外の段（無ければ負）、markWidth は
 	// LevelMarkShape::width。dimensionScale は寸法線までの距離に使う縮尺の分母
-	// （dimensionLineCoord と同じもの）、markScale は記号を描くビューポートの縮尺の分母。
+	// （dimensionLineCoord と同じもの）、markScale は記号を描画するビューポートの縮尺の分母。
 	// 名前の右端が寸法の文字（寸法線から kDimensionTextAllowance）より kLevelMarkClearance
 	// だけ外に来る位置を返す。
 	double levelMarkStartX(double left, int dimensionTier, double markWidth, double dimensionScale,
 						   double markScale);
 
 	// 基準線の長さ（用紙 mm）。起点 startX から図の右端 right を kLevelLineOvershoot だけ
-	// 越えるまで。scale は記号を描くビューポートの縮尺の分母。
+	// 越えるまで。scale は記号を描画するビューポートの縮尺の分母。
 	double levelLineLength(double startX, double right, double scale);
 
 	// --- 回転して置いた注釈（データタグ）の大きさ ----------------------------
@@ -439,9 +438,9 @@ namespace HomeskzIfcImport::core
 	// 実測できる外接矩形（軸に平行。GetObjectBounds）の幅・高さと回転角から戻す。
 	//
 	// 【なぜ要るか】タグは部材の辺に下端を接させたいので、辺から「タグ自身の高さの半分」だけ
-	// 法線の向きへ逃がす（draw/Tag）。水平・鉛直のタグなら外接矩形の高さ／幅がそのまま
+	// 法線の向きへずらす（draw/Tag）。水平・鉛直のタグなら外接矩形の高さ／幅がそのまま
 	// タグの高さだが、**傾斜材（登り梁・隅木）のタグは傾いて置く**ので外接矩形の高さには文字の
-	// 長さの sin 成分が混ざり、逃がし量が文字の長さに比例して膨らむ——軸組図で傾斜材の
+	// 長さの sin 成分が混ざり、ずらす量が文字の長さに比例して膨らむ——軸組図で傾斜材の
 	// 断面寸法が材から大きく離れて表示された原因（docs/DEV-NOTES.md M13）。
 	//
 	// 【解き方】自身の長さ l・高さ h の矩形を角度 θ で置くと、外接矩形は

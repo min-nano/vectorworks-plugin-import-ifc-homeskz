@@ -83,14 +83,14 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 要素の表。**ここが唯一の一覧**で、要素を 1 つ足すときに
-		// 触るのはこの表の 1 行だけ（以前は Extensions/ExtMenu.cpp の文字列連結と命令数の
+		// 要素の表。**ここが唯一の一覧**で、要素を 1 つ追加するときに
+		// 変更するのはこの表の 1 行だけ（以前は Extensions/ExtMenu.cpp の文字列連結と命令数の
 		// 足し算の 2 か所を手で伸ばしていた。docs/DEV-NOTES.md M15「完了文言の集約」）。
 		//
-		// commands は「解析が出した命令の数」を Document から、placed は「描画が実際に
-		// 描けた数」を DrawCounts から取り出す関数。キャプチャの無いラムダは関数ポインタへ
+		// commands は「解析が出した命令の数」を Document から、placed は「描画で実際に
+		// 配置できた数」を DrawCounts から取り出す関数。キャプチャの無いラムダは関数ポインタへ
 		// 変換できるので constexpr の表に置ける。並びは draw/ExecuteDocument のディスパッチ順
-		// （ストーリ → 通り芯 → … → 伏図 → 軸組図）に揃えてあり、読む側が描かれた順にたどれる。
+		// （ストーリ → 通り芯 → … → 伏図 → 軸組図）に揃えてあり、読む側が描画された順にたどれる。
 		//
 		// placed をメンバポインタ（`std::size_t core::DrawCounts::*`）にしないのは、
 		// `counts.*element.placed` という書き方を CodeQL が追えず、初期化済みのローカルを
@@ -101,10 +101,10 @@ namespace HomeskzIfcImport::parse
 			const char* label;								// 表示名（例: "横架材"）
 			const char* unit;								// 助数詞（例: "本"）
 			std::size_t (*commands)(const core::Document&); // 命令数
-			std::size_t (*placed)(const core::DrawCounts&); // 描けた数
+			std::size_t (*placed)(const core::DrawCounts&); // 描画できた数
 		};
 
-		// 寸法の列・レベル記号はビューポート命令の中に住むので、数えるには歩く必要がある。
+		// 寸法の列・レベル記号はビューポート命令の中に含まれるので、数えるには走査する必要がある。
 		std::size_t dimensionChainCount(const core::Document& document)
 		{
 			std::size_t total = 0;
@@ -163,7 +163,7 @@ namespace HomeskzIfcImport::parse
 			{"軸組図", "枚", [](const core::Document& d) { return d.sections.size(); },
 			 [](const core::DrawCounts& c) { return c.sections; }},
 			// M31 寸法は**列**（連続寸法 1 本）で数える。命令がその単位なので、描画側も
-			// 1 列を描き切ったら 1 と数える。
+			// 1 列を描画し終えたら 1 と数える。
 			{"寸法", "列", [](const core::Document& d) { return dimensionChainCount(d); },
 			 [](const core::DrawCounts& c) { return c.dimensions; }},
 			{"レベル記号", "個", [](const core::Document& d) { return levelMarkCount(d); },
@@ -193,12 +193,12 @@ namespace HomeskzIfcImport::parse
 		else if (outcome.commands == 0)
 			outcome.status = ImportStatus::Empty;
 		else if (counts.cancelled)
-			// **中止は Warning より優先する。** 中止すれば描き切れないのが当たり前で、
+			// **中止は Warning より優先する。** 中止すれば描画しきれないのが当然で、
 			// そこで「問題あり」と言われると原因を探しに行ってしまう。
 			outcome.status = ImportStatus::Cancelled;
 		else if (outcome.placed != outcome.commands || !counts.diagnostics.empty())
-			// 描き切れなかった（＝命令はあるのに図面に出ていない）か、描画側が異常を
-			// 持ち帰った（リソースが無い・PIO を作れない等）。どちらもログに理由がある。
+			// 描画しきれなかった（＝命令はあるのに図面に出ていない）か、描画側が異常を
+			// 記録した（リソースが無い・PIO を作れない等）。どちらもログに理由がある。
 			outcome.status = ImportStatus::Warning;
 		else
 			outcome.status = ImportStatus::Success;
@@ -208,7 +208,7 @@ namespace HomeskzIfcImport::parse
 	namespace
 	{
 		// 所要時間を人の言葉にする（"1 分 11 秒" / "12.3 秒" / "0.4 秒"）。ミリ秒まで
-		// 出さないのは、ここで見たいのが「待たされたかどうか」の桁だけだから——
+		// 出さないのは、ここで知りたいのが「待たされたかどうか」の桁だけだから——
 		// フェーズごとの内訳は診断ログの行頭にある経過ミリ秒が持つ。
 		std::string formatDuration(double seconds)
 		{
@@ -241,7 +241,7 @@ namespace HomeskzIfcImport::parse
 			return out.str();
 		}
 
-		// 要素 1 つぶんの件数表記（"270 本" / 描き切れなければ "3/12 本"）。完了ダイアログの
+		// 要素 1 つぶんの件数表記（"270 本" / 描画しきれなければ "3/12 本"）。完了ダイアログの
 		// 一覧を畳んだ後も、ログの内訳と総数はこの同じ書き方で読める。
 		std::string formatCount(std::size_t placed, std::size_t commands, const char* unit)
 		{
@@ -255,16 +255,16 @@ namespace HomeskzIfcImport::parse
 			return text;
 		}
 
-		// 「取り消し」がどこまで効くか（判断材料は描画側が置く。core::DrawCounts の
-		// undoArmed / undoPartial）。図形を 1 つでも描いたときだけ意味がある。
+		// 「取り消し」がどこまで機能するか（判断材料は描画側が置く。core::DrawCounts の
+		// undoArmed / undoPartial）。図形を 1 つでも描画したときだけ意味がある。
 		//
 		// **ダイアログに出すのは例外の 2 つだけ**（下の needsUndoWarning）。「取り消し」
-		// コマンドが有効なら取り消せるのは当たり前で、わざわざ書くとかえって読む量が増える。
+		// コマンドが有効なら取り消せるのは当然で、わざわざ書くとかえって読む量が増える。
 		// ログには常に残す——後から「戻せたはずでは」を確かめられるようにするため。
 		std::string undoLine(const core::DrawCounts& counts)
 		{
 			// **1 行に収める。** 但し書き（何が戻らないか）は README とログの内訳に譲る——
-			// ダイアログで説明を始めると、肝心の「成功したか」が読まれなくなる。
+			// ダイアログで説明を始めると、重要な「成功したか」が読まれなくなる。
 			if (!counts.undoArmed)
 				return "「取り消し」では戻せません（保存せずに文書を閉じてください）。";
 			if (counts.undoPartial)
@@ -273,7 +273,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// ダイアログで断りが要るか。**普通に 1 回で戻せるなら黙る**——メニューの
-		// 「取り消し」が効くのは当然だから。戻せない・一部しか戻らないのは当然ではないので
+		// 「取り消し」が機能するのは当然だから。戻せない・一部しか戻らないのは当然ではないので
 		// 伝える（間違えたときの戻し方が変わる）。
 		bool needsUndoWarning(const core::DrawCounts& counts)
 		{
@@ -333,17 +333,17 @@ namespace HomeskzIfcImport::parse
 		if (!fileName.empty())
 			out << "\n\nファイル: " << fileName;
 
-		// **その場で操作が要ることだけ**を書き足す（Summary.h「例外として残す 2 行」）。
+		// **その場で操作が要ることだけ**を追記する（Summary.h「例外として残す 2 行」）。
 		//
 		// 取り込み直後の伏図・軸組図は 1 回の「更新」が要る。VW はデザインレイヤを
-		// **高さの降順**（上にあるものが前面）で描くので、床仕上げ天端が構造天端より上にある
+		// **高さの降順**（上にあるものが前面）で描画するので、床仕上げ天端が構造天端より上にある
 		// 以上、取り込み直後は床・野地板が柱・梁を覆う。こちらで並べた重ね順は図面には
-		// 入っていて、ユーザーが 1 回更新すればそちらで描き直される（経緯は
-		// SDK リファレンス Findings「Layers and Stories」）。黙って誤った絵を見せない。
+		// 入っていて、ユーザーが 1 回更新すればそちらで再描画される（経緯は
+		// SDK リファレンス Findings「Layers and Stories」）。黙って誤った描画結果を見せない。
 		if (counts.sheets + counts.sections > 0)
 			out << "\n\n※ 伏図・軸組図はビューポートを 1 回「更新」してください。";
-		// 取り消しの効き方は**例外のときだけ**伝える（needsUndoWarning）。1 回で戻せるのは
-		// 当たり前なので書かない。
+		// 取り消しの可否は**例外のときだけ**伝える（needsUndoWarning）。1 回で戻せるのは
+		// 当然なので書かない。
 		if (outcome.status != ImportStatus::Invalid && outcome.status != ImportStatus::Empty &&
 			needsUndoWarning(counts))
 			out << "\n※ " << undoLine(counts);
@@ -366,7 +366,7 @@ namespace HomeskzIfcImport::parse
 		if (!fileName.empty())
 			out << "\n\nファイル: " << fileName;
 		// 原因の手掛かりは**必ず出す**。ネイティブの異常は再現条件が分からなくなりがちで、
-		// ここで捨てるとユーザーからは「黙って途中で止まった」としか見えない。
+		// ここで破棄するとユーザーからは「黙って途中で止まった」としか見えない。
 		out << (fileName.empty() ? "\n\n" : "\n")
 			<< "詳細: " << (detail.empty() ? std::string("原因不明") : detail);
 		// ログの**最終行**が「どのフェーズまで進んでいたか」で、その直後が原因箇所になる
@@ -406,7 +406,7 @@ namespace HomeskzIfcImport::parse
 		if (!size.empty())
 			out << "（" << size << "）";
 		// **このログ自身の置き場所。** ダイアログには出さない（場所を知りたいのはログを
-		// 見ようとしたときだけで、そのときログはもう目の前にある）。書けなかったなら
+		// 読もうとしたときだけで、そのときログはもう目の前にある）。書けなかったなら
 		// 「ファイルは無い」と明示する——黙ると、出ていないログを探しに行かせる。
 		out << "\nログ: "
 			<< (logPath.empty() ? std::string("（ファイルへは書けませんでした。この欄の内容を"
@@ -457,8 +457,8 @@ namespace HomeskzIfcImport::parse
 		out << "描いたもの: " << formatCount(outcome.placed, outcome.commands, "件") << "\n";
 
 		// 要素ごとの内訳。**命令の無い要素は行ごと出さない**（無い物の「0 件」は読む側の
-		// 邪魔になるだけで、行が無いこと自体が「解析で 0 件」を意味する）。検証に落ちた
-		// ときは 1 つも描いていないので、全要素が "0/n" と並ぶだけになる——理由は
+		// 邪魔になるだけで、行が無いこと自体が「解析で 0 件」を意味する）。検証で不合格になった
+		// ときは 1 つも描画していないので、全要素が "0/n" と並ぶだけになる——理由は
 		// 「結果:」の行が言っているので、内訳ごと省く。
 		if (outcome.commands != 0 && counts.valid)
 		{
@@ -473,7 +473,7 @@ namespace HomeskzIfcImport::parse
 			}
 		}
 
-		// 描画側が持ち帰った異常（リソースが無い・PIO を作れない等）。
+		// 描画側が記録した異常（リソースが無い・PIO を作れない等）。
 		if (!counts.diagnostics.empty())
 			out << "注意:\n" << indentLines(counts.diagnostics);
 		// 異常ではないが後から知りたい記録（用紙の割り付けの内訳など）。
@@ -488,7 +488,7 @@ namespace HomeskzIfcImport::parse
 	std::string formatImportOptions(const core::ImportOptions& options)
 	{
 		// 並びは役割の表の順（core::symbolRoles()）＝設定ダイアログの行の順。表に 1 行
-		// 足せばログにも 1 行増える（CLAUDE.md「重複を作らない置き場所」）。
+		// 追加すればログにも 1 行増える（CLAUDE.md「重複を作らない置き場所」）。
 		std::ostringstream out;
 		out << "設定: 配置するシンボル";
 		for (const core::SymbolRoleInfo& info : core::symbolRoles())
@@ -507,7 +507,7 @@ namespace HomeskzIfcImport::parse
 				out << "（既定）";
 		}
 		// M28 図面枠は役割の表に載らない（既定名が無く、選択肢の集め方も違う。
-		// core/ImportOptions.h）。1 行だけ末尾に足す。
+		// core/ImportOptions.h）。1 行だけ末尾に追加する。
 		out << "\n  " << kTitleBlockOptionLabel
 			<< (options.hasTitleBlock() ? options.titleBlockStyle() : std::string("置かない"));
 		// M31 寸法も同じく表の外（既定名が無い）。
@@ -526,13 +526,13 @@ namespace HomeskzIfcImport::parse
 				<< " を前のレベルとまとめる";
 		}
 		// M34 軸組図から外す通り。「軸組図が足りない」の切り分けは、まず外していないかを
-		// 見るところから始まる。並びは設定が名前順に揃えたもの（core/ImportOptions.h）。
+		// 確認するところから始まる。並びは設定が名前順に揃えたもの（core/ImportOptions.h）。
 		out << "\n  " << kSkippedSectionsOptionLabel;
 		if (options.skippedSections.empty())
 			out << "なし";
 		for (std::size_t i = 0; i < options.skippedSections.size(); ++i)
 			out << (i == 0 ? "" : ", ") << options.skippedSections[i];
-		// 垂木の断面（全垂木に一律）。「垂木が太い／細い」の切り分けはまずここを見る。
+		// 垂木の断面（全垂木に一律）。「垂木が太い／細い」の切り分けはまずここを確認する。
 		out << "\n  " << kRafterSizeOptionLabel << core::formatRafterSize(options.rafterWidth)
 			<< "×" << core::formatRafterSize(options.rafterHeight) << " mm";
 		if (options.rafterWidth == core::kDefaultRafterWidth &&

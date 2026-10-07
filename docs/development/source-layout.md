@@ -5,7 +5,7 @@
 **SDK を一切 include しない**ので、SDK 無しでコンパイル・単体テストできます
 （設計の詳細は [「設計の考え方」](../dev-notes/design/architecture.md)）。
 
-**ビルドの成果物も 2 つに割れています**（こちらはフェーズ分離とは別の軸）。
+**ビルドの成果物も 2 つに分かれています**（こちらはフェーズ分離とは別の軸）。
 
 ```
 Vectorworks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb    … 起動時に 1 度きり
@@ -14,13 +14,13 @@ Vectorworks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb    … 起�
                           本体 <name>.vwpayload          … いつでも読み直せる
 ```
 
-**殻**に入るのは「Vectorworks に番地を握られるもの」だけ——メニュー 4 つ（うち 2 つは
+**殻**に入るのは「Vectorworks に番地を保持されるもの」だけ——メニュー 4 つ（うち 2 つは
 開発版だけ）と PIO 2 つ、パレット 1 つ（開発版だけ）の*登録*、
-自動アップデート、そして本体を読み込む仕掛け（`src/PayloadHost.*` / `src/PayloadSession.*`）。
+自動アップデート、そして本体を読み込む仕組み（`src/PayloadHost.*` / `src/PayloadSession.*`）。
 **本体**に `core/` `parse/` `draw/` のすべてが入ります。境界は C の ABI
 （`src/PayloadAbi.h`）1 枚きりです。
 
-こう割ってあるのは、**アップデートに Vectorworks の再起動を要らなくする**ためです
+このように分けているのは、**アップデートに Vectorworks の再起動を不要にする**ためです
 （[「自動アップデートの仕組み」](auto-update/README.md)／[SDK リファレンス「プラグインモジュールの読み込みと
 入れ替え」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Plug-in%20Modules.md)）。
 

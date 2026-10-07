@@ -1,9 +1,9 @@
 name: PR Review
 # 実行の名前に PR 番号と入口の種類 (auto / explicit) を入れる。自動の実行が
-# 同じ PR の `@claude review` を見つけて身を引くのに使う (下の門)。
+# 同じ PR の `@claude review` を見つけて実行を見送るのに使う (下の門)。
 # explicit は「`@claude review` で始まる PR へのコメント」だけにする——ジョブの
-# if で落ちるただのコメントまで explicit と名乗ると、自動の実行がありもしない
-# レビューに身を引いてしまう。
+# if で除外されるただのコメントまで explicit と名乗ると、自動の実行が存在しない
+# レビューのために実行を見送ってしまう。
 run-name: "PR Review #${{ github.event.pull_request.number || github.event.issue.number }} (${{ (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '@claude review')) && 'explicit' || 'auto' }})"
 
 # プルリクエストを Claude にレビューさせる。
@@ -14,16 +14,16 @@ run-name: "PR Review #${{ github.event.pull_request.number || github.event.issue
 #
 # 認証はサブスクリプションの OAuth トークンを使う (API のクレジットは使わない)。
 # シークレット `CLAUDE_CODE_OAUTH_TOKEN` が未設定のリポジトリでは、赤くせずに
-# 警告だけ出して素通りする。
+# 警告だけ出して何もせずに終了する。
 #
 # 他のチェックとの分担:
 #   * lint.yml   -> 書式と静的解析 (clang-format / clang-tidy / cmake-format /
 #                   actionlint / shellcheck / PSScriptAnalyzer / yamllint /
-#                   editorconfig)。書式の話はここでは見ない。
+#                   editorconfig)。書式はここでは確認しない。
 #   * test.yml   -> 無 SDK の単体テストとカバレッジ。
 #   * build.yml  -> SDK 依存のビルドと clang-tidy。
 #   * codeql.yml -> データフローを追う機械的なセキュリティ解析。
-#   * pr-review.yml (このファイル) -> 機械が見られないもの。すなわち
+#   * pr-review.yml (このファイル) -> 機械的には検査できないもの。すなわち
 #                   **本リポジトリの設計規約** (2 フェーズ分離・殻と本体の
 #                   分割・依存の向き・決定性・置き場所) と、変更の意図に
 #                   照らした正しさ。CLAUDE.md がその規約の出どころ。
@@ -31,17 +31,8 @@ run-name: "PR Review #${{ github.event.pull_request.number || github.event.issue
 # 順序もこの分担のとおりで、**lint / build / test が 3 つとも success に
 # なるまでレビューしない** (「レビューするか決める」が待つ)。
 #
-# **入口は PR 系のイベントだけにする** (下の `on:`)。以前は CI の完了
-# (`workflow_run`) を主な入口にしていたが、`workflow_run` は PR のイベント
-# ではないので、アクションがインラインコメントの MCP サーバを起動しない
-# (anthropics/claude-code-action の src/mcp/install-mcp-server.ts が
-# `context.isPR` のときだけ入れる)。道具が無いのにプロンプトは「行の指摘は
-# インラインで」と求めるので、モデルが道具を探し、代わりの手を試して拒否され、
-# ターンを捨てていた (18 回中 16 回はインラインコメントが 0 件。PR #141 の
-# レビュー本文にも「ツールが見当たらない」とある)。後でまとめて投稿する
-# ステップも `workflow_run` では PR 番号が空になり、投稿できない。
-#
-# 代わりに、**起動したあとで CI を待つ**。起動のきっかけは次の 3 つ:
+# **入口は PR 系のイベントだけにし** (下の `on:`)、**起動したあとで CI を
+# 待つ**。起動のきっかけは次の 3 つ:
 #
 #   1. 本番 (ready for review) で作った・下書きから上がった・開き直した
 #      (`pull_request`)。
@@ -49,19 +40,29 @@ run-name: "PR Review #${{ github.event.pull_request.number || github.event.issue
 #      対応は「返信して push し、スレッドを解決する」ので、**未解決の
 #      スレッドが無くなり、その時点の head で lint / build / test が 3 つとも
 #      success になるまで待ってから**レビューする。返信は push より前に
-#      来ることがあるので、起動した瞬間の head を見ても意味がない。
+#      来ることがあるので、起動した瞬間の head で判定しても意味がない。
 #   3. **`@claude review` で始まる PR 本体へのコメント** (`issue_comment`)。
 #      自動では起きない場合 (PR の本文だけ直した・行に紐づかない指摘に
 #      答えた、など) の合図で、スレッドの解決は問わない (CI は待つ)。
 #
 # 1 と 2 は PR の head にある版のワークフローが走る (作業ブランチから試せる)。
-# 3 は既定ブランチの版が走るので、main にマージされて初めて効く。
+# 3 は既定ブランチの版が走るので、main にマージされて初めて反映される。
+#
+# 理由: 以前は CI の完了 (`workflow_run`) を主な入口にしていたが、
+# `workflow_run` は PR のイベントではないので、アクションがインラインコメントの
+# MCP サーバを起動しない (anthropics/claude-code-action の
+# src/mcp/install-mcp-server.ts が `context.isPR` のときだけ組み込む)。ツールが
+# 無いのにプロンプトは「行の指摘はインラインで」と求めるので、モデルがツールを
+# 探し、代替手段を試して拒否され、ターンを消費していた (18 回中 16 回は
+# インラインコメントが 0 件。PR #141 のレビュー本文にも「ツールが見当たらない」
+# とある)。後でまとめて投稿するステップも `workflow_run` では PR 番号が空になり、
+# 投稿できない。
 on:
   pull_request:
     types: [opened, reopened, ready_for_review]
   pull_request_review_comment:   # インラインコメントとその返信
     types: [created]
-  issue_comment:            # PR 本体へのコメント (`@claude review` の合図だけ拾う)
+  issue_comment:            # PR 本体へのコメント (`@claude review` の合図だけ取得する)
     types: [created]
 
 # 同じ PR のレビューは、入口の種類 (自動 / `@claude review`) ごとに 1 つずつ
@@ -72,11 +73,11 @@ on:
 # ci-wait.md)。順番待ち (pending) の実行は次が来た時点で GitHub が打ち切るが、
 # そちらはジョブが始まっていないのでチェックランが作られない (PR #112 で実測)。
 # 返信が続けて来ても、走るのは待っている 1 つと、最後に来た 1 つだけになる。
-# 後者は「その head はもうレビューした」で素通りする (下の門)。
+# 後者は「その head はもうレビューした」で何もせずに終了する (下の門)。
 #
 # 種類でグループを分けるのは、自動の実行が門で最大 30 分待っている最中に
 # `@claude review` が来たとき、その後ろに並ばせないため。2 重のレビューは
-# 打ち切りではなく、**自動の実行のほうが身を引く** (下の門) ことで防ぐ。
+# 打ち切りではなく、**自動の実行のほうが実行を見送る** (下の門) ことで防ぐ。
 # 種類の判定は上の run-name と同じ式にする。
 concurrency:
   group: "pr-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{ (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '@claude review')) && 'explicit' || 'auto' }}"
@@ -85,7 +86,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write   # インラインコメントとレビューの提出に要る
-  actions: read          # lint / build / test がその head で緑になったかを見るのに要る
+  actions: read          # lint / build / test がその head で緑になったかを確認するのに要る
   # ドキュメントの例には id-token: write もあるが、あれは Bedrock / Vertex /
   # WIF を OIDC で使う場合のもの。ここは OAuth トークンなので要らない。
 
@@ -98,12 +99,12 @@ jobs:
     # 実行を呼び、際限なく回るため。
     #
     # issue_comment はイシューにも飛んでくるので、プルリクエストのもので、
-    # しかも `@claude review` で始まるものだけ拾う。「含む」にしないのは、
+    # しかも `@claude review` で始まるものだけを対象にする。「含む」にしないのは、
     # この合図を説明する文 (PR の本文やコメント) で走らせないため。M37 までの
     # dev ビルドが投稿していた実機フィードバックの自動コメント
-    # (`<!-- homeskz-ifc-feedback`) もここで落ちていた (いまは投稿されない)。
+    # (`<!-- homeskz-ifc-feedback`) もここで除外していた (いまは投稿されない)。
     #
-    # 下書きの PR は、自動の入口 (1・2) では落とす。下書きは実機確認・設計
+    # 下書きの PR は、自動の入口 (1・2) では除外する。下書きは実機確認・設計
     # 判断の途中で差分がまだ動く段階なので (CLAUDE.md「開発プロセス: PR と
     # マージ」)。合図 (3) は人がはっきり頼んだものなので、下書きでも通す。
     if: >-
@@ -115,10 +116,10 @@ jobs:
           || github.event.pull_request.draft != true)
     steps:
       # 走らせてよいかを決め、条件が揃うまで待つ。fork の判定と PR の状態を
-      # 見るため gh を使うが、ここではまだ checkout していない (GH_REPO で
+      # 確認するため gh を使うが、ここではまだ checkout していない (GH_REPO で
       # 対象を指定する)。
       #
-      # secrets は job の if で参照できないため、トークンの有無もここで見る。
+      # secrets は job の if で参照できないため、トークンの有無もここで確認する。
       - name: レビューするか決める
         id: prep
         env:
@@ -129,7 +130,7 @@ jobs:
           # 合図 (`@claude review`) で起動したか。自動の入口とは待つものが違う。
           EXPLICIT: ${{ github.event_name == 'issue_comment' }}
           # コメントが起点のときは、書いた人が信用できる場合だけ走らせる。
-          # pull_request 起点では空になるので、その場合は見ない。
+          # pull_request 起点では空になるので、その場合は判定に使わない。
           ACTOR_LOGIN: ${{ github.event.comment.user.login }}
           ACTOR_ASSOCIATION: ${{ github.event.comment.author_association }}
         run: |
@@ -140,7 +141,7 @@ jobs:
           }
 
           # トークンが無いのは「まだ設定していない」だけのことが多い。
-          # 赤くせず、警告を出して素通りする。
+          # 赤くせず、警告を出して何もせずに終了する。
           if [ "$HAS_TOKEN" != "true" ]; then
             echo "::warning::CLAUDE_CODE_OAUTH_TOKEN が未設定のためレビューを行いません。"
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -153,20 +154,21 @@ jobs:
           #
           # author_association だけでは判定できない。このリポジトリの管理者でも
           # CONTRIBUTOR になることがあり (組織の所属が公開されていない場合など)、
-          # それだけを見ると正当な人を黙って弾いてしまう。実際の権限を引く。
+          # それだけで判定すると正当な人を警告なしに拒否してしまう。実際の権限を
+          # 取得する。
           if [ -n "$ACTOR_LOGIN" ]; then
             if perm=$(gh api "repos/$GH_REPO/collaborators/$ACTOR_LOGIN/permission" \
                         --jq .permission 2>"$RUNNER_TEMP/perm-err"); then
-              # 権限を引けた。これだけで判断する。association は見ない。
+              # 権限を取得できた。これだけで判断する。association は参照しない。
               # 読み取り専用の collaborator は association が COLLABORATOR に
-              # なるので、ここで association に落とすと通してしまう。
+              # なるので、ここで association の判定に切り替えると通してしまう。
               #
-              # maintain はおそらく届かない。この API の permission は
+              # maintain はおそらく返らない。この API の permission は
               # admin / write / read / none に丸められると documented されて
               # おり、Maintain や Triage といった役割はそちら側では write /
-              # read に畳まれて role_name のほうに出る (実地では未確認)。
-              # それでも並べておくのは、届いたときに通すのが正しく、
-              # 外しても admin / write の判定が変わらないから——「無い値を
+              # read にまとめられて role_name のほうに出る (実地では未確認)。
+              # それでも並べておくのは、返ったときに通すのが正しく、
+              # 除外しても admin / write の判定が変わらないから——「無い値を
               # 書いている」のではなく「役割が増えても安全側に倒れる」ため
               # の 1 語である。
               case "$perm" in
@@ -174,14 +176,14 @@ jobs:
                 *) skip "書き込み権限のない人の投稿なのでレビューを行いません (permission=$perm)。" ;;
               esac
             else
-              # 引けなかったときの受け皿。ここで COLLABORATOR を通してはいけない
-              # ——それは上のコメントが「だから association を見ない」と言っている
+              # 取得できなかったときの代替の判定。ここで COLLABORATOR を通してはいけない
+              # ——それは上のコメントが「だから association を参照しない」と言っている
               # 当のケース (読み取り専用の collaborator) そのもので、通せば
-              # 「書き込める人だけ」という前提が受け皿の側から崩れる。
+              # 「書き込める人だけ」という前提が代替の判定の側から崩れる。
               # OWNER (このリポジトリの持ち主) と MEMBER (組織のメンバー) だけを
               # 通す。association に頼ること自体が次善なので、範囲は最小にする。
               #
-              # 黙って落とすと機能が働かない理由が分からなくなるので、警告に
+              # 警告なしに拒否すると機能が働かない理由が分からなくなるので、警告に
               # API の失敗理由も載せる。
               echo "::warning::書き込み権限を API で確認できなかったため author_association で判断します (association=$ACTOR_ASSOCIATION): $(tr '\n' ' ' <"$RUNNER_TEMP/perm-err")"
               case "$ACTOR_ASSOCIATION" in
@@ -194,7 +196,7 @@ jobs:
           owner=${GH_REPO%%/*}
           name=${GH_REPO#*/}
 
-          # **条件が揃うまで待つ。** 見るもの:
+          # **条件が揃うまで待つ。** 確認するもの:
           #
           #   * PR が open で、fork でなく、(自動の入口なら) 下書きでない。
           #   * **その時点の head** で lint / build / test が 3 つとも success。
@@ -202,29 +204,29 @@ jobs:
           #     返信か合図でまた走る)。
           #   * (自動の入口なら) 未解決のレビュースレッドが 0。
           #
-          # head は毎回引き直す。返信は push より前に来ることがあり、起動した
+          # head は毎回取得し直す。返信は push より前に来ることがあり、起動した
           # 瞬間の head が緑でも、そのあと push されればそちらを待つのが正しい。
           # CI は 7 分前後で終わるので、30 分で打ち切る。打ち切ったら赤くせず、
           # 合図で起こせることを notice に残す。
           #
           # CI の結末は**その sha に対する最新の pull_request 起点の実行**で
-          # 見て、チェック名は見ない (ジョブを足したり改名したりしても、ここを
-          # 直さなくてよい)。build.yml には workflow_dispatch も残っているので、
-          # 種別を絞らないと別の起点の実行の結末で判定しうる。引けなかった
-          # とき (actions: read が外れている、API エラー) は止める——分からない
+          # 判定し、チェック名は参照しない (ジョブを追加したり改名したりしても、
+          # ここを直さなくてよい)。build.yml には workflow_dispatch も残っているので、
+          # 種別を絞らないと別の起点の実行の結末で判定しうる。取得できなかった
+          # とき (actions: read が無い、API エラー) は止める——分からない
           # ときは走らせないほうへ倒す。
           #
           # 一時的な API エラー (レート制限や 5xx) でステップごと failure に
           # しないよう、失敗は skip で吸収する (既定のシェルは -e)。
           # 自動の実行は、同じ PR の `@claude review` の実行が並んでいるか
-          # 走っていれば、**身を引く** (成功として素通りする)。見るのは実行の
-          # 名前 (上の run-name) で、終わったものは数えない——終わった
+          # 走っていれば、**実行を見送る** (成功として何もせずに終了する)。判定に
+          # 使うのは実行の名前 (上の run-name) で、終わったものは数えない——終わった
           # `@claude review` がその head をレビューしていれば、下の
-          # 「もうレビューした」で素通りする。
+          # 「もうレビューした」で何もせずに終了する。
           #
           # 自動の実行が門を抜けた直後に `@claude review` が来ると 2 つとも
           # レビューしうるが、窓は数秒で、人が頼んだものなので止めない。
-          # 引けなかったときは身を引かない (レビューが出ないほうが高くつく)。
+          # 取得できなかったときは実行を見送らない (レビューが出ないほうが損失が大きい)。
           yield_to_explicit() {
             [ "$EXPLICIT" != "true" ] || return 0
             local n
@@ -247,7 +249,7 @@ jobs:
 
             [ "$state" = "OPEN" ] || skip "プルリクエストが $state なのでレビューを行いません。"
             # fork にはシークレットを渡せない。コメント起点だと base 側の文脈で
-            # 走ってしまうので、ここで明示的に落とす。
+            # 走ってしまうので、ここで明示的に除外する。
             [ "$cross" = "false" ] || skip "fork からのプルリクエストなのでレビューを行いません。"
             if [ "$EXPLICIT" != "true" ] && [ "$draft" != "false" ]; then
               skip "下書きのプルリクエストなのでレビューを行いません。"
@@ -272,7 +274,7 @@ jobs:
             unresolved=0
             if [ "$EXPLICIT" != "true" ]; then
               # スレッドの解決はイベントにならないので、ここで数える。
-              # 100 件を超える PR は想定しない (超えた分は見ない)。
+              # 100 件を超える PR は想定しない (超えた分は数えない)。
               # shellcheck disable=SC2016  # $o などは GraphQL の変数
               unresolved=$(gh api graphql \
                   -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{isResolved}}}}}' \
@@ -292,10 +294,10 @@ jobs:
           done
           yield_to_explicit
 
-          # 自動の入口では、**その head をもうレビューしていれば素通りする**。
+          # 自動の入口では、**その head をもうレビューしていれば何もせずに終了する**。
           # 返信が続けて来たとき、待っていた実行のあとに順番待ちの 1 つが
-          # 走るので、それが同じ head をもう一度見ないように。合図 (3) は
-          # 「同じ head でも見直してほしい」(本文だけ直した等) なので見ない。
+          # 走るので、それが同じ head をもう一度レビューしないように。合図 (3) は
+          # 「同じ head でも見直してほしい」(本文だけ直した等) なので確認しない。
           if [ "$EXPLICIT" != "true" ]; then
             reviewed=$(gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/reviews" \
                          --jq ".[] | select(.user.login == \"github-actions[bot]\" and .commit_id == \"$head_sha\") | .id" \
@@ -306,13 +308,13 @@ jobs:
 
           # インラインのスレッド (指摘とその返信) をプロンプトへ渡す。
           # gh pr view はスレッドの返信を返さず、レビューに許した道具では
-          # 読めない——読もうとして `gh api` を試し、拒否されてターンを捨てる。
-          # ここで引いておけば 1 ターンも使わない。直近 30 スレッド・各 20 件・
+          # 読めない——読もうとして `gh api` を試し、拒否されてターンを消費する。
+          # ここで取得しておけば 1 ターンも使わない。直近 30 スレッド・各 20 件・
           # 本文 800 字で切り、全体も 20,000 字で切る (長く回った PR で
           # プロンプトが膨れないように)。
           #
           # 中身は外から来た文章なので、シェルには展開しない (GITHUB_OUTPUT へ
-          # 乱数の区切りで書き、プロンプトの式が読むだけ)。
+          # 乱数の区切り文字で書き、プロンプトの式が読むだけ)。
           # shellcheck disable=SC2016  # $o などは GraphQL の変数
           threads=$(gh api graphql \
               -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(last:30){nodes{isResolved path line originalLine comments(first:20){nodes{author{login} body}}}}}}}' \
@@ -342,7 +344,7 @@ jobs:
       # 信頼できないコードを checkout している」ことになる
       # (CodeQL: untrusted checkout)。その場合は既定ブランチのままにして、
       # PR の中身は gh pr diff で読む (プロンプトは「作業ディレクトリは PR の
-      # ブランチとは限らない」前提で書いてある)。fork の PR は上の門で落ちる。
+      # ブランチとは限らない」前提で書いてある)。fork の PR は上の門で除外される。
       - name: PR のブランチを取る
         if: steps.prep.outputs.run == 'true' && github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -360,13 +362,13 @@ jobs:
         # 失敗自体は実行のログと ::warning:: に残る。
         continue-on-error: true
         # サードパーティの action なのでコミットハッシュで固定する。タグは
-        # 付け替えられるため、v1 のままだと中身が黙って変わりうる。更新は
-        # Dependabot が # の後ろの版を見て上げてくれる (他のワークフローが
+        # 付け替えられるため、v1 のままだと中身が知らないうちに変わりうる。更新は
+        # Dependabot が # の後ろの版を参照して上げる (他のワークフローが
         # actions/checkout などを固定しているのと同じ作法)。
         uses: anthropics/claude-code-action@cab360f6565aa35a51d6ce9e43f1f4287c0a32ea # v1
         env:
-          # 何かの経路で環境に残っていても拾われないよう、空で上書きする。
-          # 拾われると API のクレジットを別枠で消費しかねない。
+          # 何かの経路で環境に残っていても使われないよう、空で上書きする。
+          # 使われると API のクレジットを別枠で消費しかねない。
           ANTHROPIC_API_KEY: ""
         with:
           # claude setup-token で発行した、サブスクリプションのトークン。
@@ -690,7 +692,7 @@ jobs:
             提出するところまでが仕事です。
           # ツールは差分の取得と、インラインコメント・レビューの提出に要る
           # ものだけを許可する。そのうえで Edit / Write / NotebookEdit を
-          # 明示的に外し、ファイルを書き換えられないようにする。
+          # 明示的に除外し、ファイルを書き換えられないようにする。
           # gh pr comment は使わない。行に紐づかない指摘は gh pr review の
           # --body に入れるので、別途コメントを積む必要がない。
           #
@@ -704,19 +706,19 @@ jobs:
           #
           # 読むだけの gh pr diff / gh pr view は縛らない。番号を間違えても
           # 他所のものを読んでしまうだけで、書き換えは起きない。逆に縛ると
-          # 引数の並びが少し変わっただけで拒否され、レビューが黙って
-          # 痩せる——防いでいるものと釣り合わない。
+          # 引数の並びが少し変わっただけで拒否され、レビューの内容が気付かれない
+          # まま乏しくなる——防いでいるものと釣り合わない。
           #
           # claude_args のうち、アクションが自前で扱うもの (model / max-turns /
           # allowedTools / disallowedTools など) は SDK の設定に取り出され、
           # 残りは extraArgs としてそのまま CLI に渡る。--effort と
-          # --max-budget-usd は後者なので効く。ジョブログの "SDK options" に
+          # --max-budget-usd は後者なので反映される。ジョブログの "SDK options" に
           # これらが出ないのは、extraArgs をログから除外しているためで、
           # 無視されているわけではない (base-action/src/run-claude-sdk.ts)。
           #
           # --effort は high。xhigh では 1,650 行ほどの PR で 37 ターン・$2 に
           # 達し、何も提出されずに終わった (PR #140)。規約との突き合わせが
-          # 主な仕事なので、思考の深さより「最後まで見て提出する」ほうが効く。
+          # 主な仕事なので、思考の深さより「最後まで確認して提出する」ほうが有効である。
           claude_args: >-
             --model claude-sonnet-5
             --effort high
@@ -729,7 +731,7 @@ jobs:
       # ステップサマリーへ出す。アクションは会話の全文を「セキュリティのため」
       # 隠すので、ログには `permission_denials_count` の件数しか残らず、
       # **何が拒否されたのか**が分からない (PR #140 の実行では 9 件あったが
-      # 中身を追えなかった)。許可の足し引きを判断する材料をここで残す。
+      # 中身を追えなかった)。許可の追加・削除を判断する材料をここで残す。
       #
       # 出すのは拒否された呼び出しの道具名と引数の頭 (200 字) だけで、会話の
       # 本文は出さない。
@@ -751,7 +753,7 @@ jobs:
           fi
 
           # 実行ログは JSON の配列 (版によっては 1 行 1 メッセージ) なので、
-          # どちらでも読めるよう -s で畳んでから result を拾う。
+          # どちらでも読めるよう -s で 1 つの配列にまとめてから result を取り出す。
           result=$(jq -c -s '
             (if length == 1 and (.[0] | type) == "array" then .[0] else . end)
             | map(select(type == "object" and .type == "result")) | last // empty
@@ -803,7 +805,7 @@ jobs:
       # レビューが提出されたかを確かめる。モデルが `gh pr review` を呼ばずに
       # 応答を終えると、ジョブは緑のまま PR に何も残らない (PR #195: 28 ターン・
       # $0.99 で終わり、拒否された呼び出しにも `gh pr review` は無かった)。
-      # 上限に当たったのか自分から終えたのかはアクションが会話を隠すので
+      # 上限に達したのか自分から終えたのかはアクションが会話を隠すので
       # 分からないが、少なくとも「出なかった」ことはここで ::warning:: にする。
       #
       # 数えるのは github-actions[bot] がこの実行の開始以降に出したレビュー。

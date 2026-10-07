@@ -3,11 +3,11 @@
 //
 //	MCP ブリッジのパレットの登録と取り次ぎ（意図は ExtMcpPalette.h）。**ここに受け付けの
 //	中身は無い**——JS の時計から届いた呼び出しを本体の vw_payload_mcp_serve へ渡し、返って
-//	きた見え方（JSON）で Promise を解決するだけ。
+//	きた表示状態（JSON）で Promise を解決するだけ。殻に要求されたこと（更新・再起動）も
+//	ここで実行する（ExtMcpPalette.h「殻に要求されること」）。
 //
-//	使う SDK API は M24 の往復のパレット（M38 で外した）と同じもので、実機で確かめてある
-//	（docs/DEV-NOTES.md M24「実機で確かめられたこと（round 1）」）。殻に頼まれたこと
-//	（更新・再起動）もここで済ませる（ExtMcpPalette.h「殻に頼まれること」）。
+//	使う SDK API は M24 の往復のパレット（M38 で削除した）と同じもので、実機で確かめてある
+//	（docs/DEV-NOTES.md M24「実機で確かめられたこと（round 1）」）。
 //
 
 #include "PluginPrefix.h"
@@ -43,7 +43,7 @@ namespace HomeskzIfcImport
 		constexpr ViewCoord kMinimalHeight = 100;
 
 		// 本体を読み込めなかったとき、次に試すまで（秒）。**時計は数百 ms ごとに来る**ので、
-		// 読めない本体を毎回複製して読みに行かない（PayloadHost.h「必ず複製してから読む」）。
+		// 読み込めない本体を毎回複製して読み込まない（PayloadHost.h「必ず複製してから読む」）。
 		constexpr long long kLoadRetrySeconds = 10;
 
 		long long NowSeconds()
@@ -53,8 +53,8 @@ namespace HomeskzIfcImport
 				.count();
 		}
 
-		// 殻で組む見え方（本体へ届かなかったとき）。**nlohmann::json で組む**——文字列を
-		// 手で継ぐと、理由の文に引用符や改行が混じったときに JSON が壊れる。
+		// 殻で組み立てる表示状態（本体へ届かなかったとき）。**nlohmann::json で組み立てる**
+		// ——文字列を手で連結すると、理由の文に引用符や改行が混じったときに JSON が壊れる。
 		std::string ShellView(const char* phase, const std::string& message)
 		{
 			nlohmann::json view = nlohmann::json::object();
@@ -66,15 +66,15 @@ namespace HomeskzIfcImport
 			}
 			catch (...)
 			{
-				// 理由の文が UTF-8 として壊れていた。見え方だけは返す。
+				// 理由の文が UTF-8 として壊れていた。表示状態だけは返す。
 				return std::string(R"({"phase":")") + phase + R"("})";
 			}
 		}
 
-		// **殻が済ませた頼みごとの結末**（本体へ渡して応答として書いてもらう。PayloadAbi.h の
+		// **殻が実行した要求の結末**（本体へ渡して応答として書いてもらう。PayloadAbi.h の
 		// VwPayloadMcpServeFn）。本体が `reportDone` を返すまで渡し直す——入れ替えの直後は
 		// 新しい本体の用意（スプールの準備）が 1 回で済まないことがある。渡し直しは上限つき
-		// （Python 側はどのみち待ち切れずに諦めている）。
+		// （上限に達するころには Python 側がすでにタイムアウトしている）。
 		struct PendingReport
 		{
 			std::string json;
@@ -100,7 +100,7 @@ namespace HomeskzIfcImport
 			return use->mcpServe(report, out, error);
 		}
 
-		// 見え方を読んで、結末を渡し終えたかを見る。
+		// 表示状態を読んで、結末を渡し終えたかを確認する。
 		void SettleReport(const nlohmann::json& view, long long now)
 		{
 			PendingReport& pending = Pending();
@@ -119,7 +119,7 @@ namespace HomeskzIfcImport
 			}
 			catch (...)
 			{
-				return nlohmann::json::object(); // 読めない見え方は「頼みごと無し」とみなす
+				return nlohmann::json::object(); // 読めない表示状態は「要求無し」とみなす
 			}
 		}
 
@@ -141,7 +141,7 @@ namespace HomeskzIfcImport
 			return "failed";
 		}
 
-		// **殻に頼まれたことを済ませる**（M38）。結末の JSON を返し、restartAfter には
+		// **殻に要求されたことを実行する**（M38）。結末の JSON を返し、restartAfter には
 		// 「応答を書いてから再起動する」かが入る（再起動してからでは応答を書く者がいない）。
 		//
 		// **判断はここに持たせない。** 入れ替えの流れは src/UpdaterFlow.cpp の
@@ -201,7 +201,7 @@ namespace HomeskzIfcImport
 			}
 			catch (...)
 			{
-				// 理由の文が UTF-8 として壊れていた。id だけは返す（Python を待たせ切らない）。
+				// 理由の文が UTF-8 として壊れていた。id だけは返す（Python を待たせ続けない）。
 				nlohmann::json fallback = nlohmann::json::object();
 				fallback["id"] = report["id"];
 				fallback["ok"] = false;
@@ -210,9 +210,9 @@ namespace HomeskzIfcImport
 			}
 		}
 
-		// 時計 1 刻みぶん。本体へ届けて見え方を返す。**呼ぶのは 2 つの時計**——殻の OS の
-		// タイマー（StartMcpBridgeClock。受け付けの本線）と、パレットの JS タイマー（見え方を
-		// 描き直すため。パレットが出ている間だけ）。どちらもメインスレッドから来る。
+		// 時計 1 回ぶん。本体へ届けて表示状態を返す。**呼び出し元は 2 つの時計**——殻の OS の
+		// タイマー（StartMcpBridgeClock。受け付けの主経路）と、パレットの JS タイマー（表示状態を
+		// 再描画するため。パレットが表示されている間だけ）。どちらもメインスレッドから呼ばれる。
 		std::string ServeOnce()
 		{
 			// **取り込みの最中は本体へ入り直さない**（ExtMcpPalette.h「取り込みの最中は
@@ -221,9 +221,9 @@ namespace HomeskzIfcImport
 				return ShellView("paused", "取り込みなどの最中なので、終わるまで受け付けを"
 										   "見送っています。");
 
-			// **入れ子で入らない。** 殻に頼まれた更新（RunShellAction）は本体の外で走るので
-			// PayloadInUse では止まらず、その途中で Vectorworks がイベントを回せば、もう一方の
-			// 時計の刻みがここへ入り直しうる。
+			// **入れ子で入らない。** 殻が要求された更新（RunShellAction）は本体の外で実行される
+			// ので PayloadInUse では止まらず、その途中で Vectorworks がイベントを処理すれば、
+			// もう一方の時計の呼び出しがここへ再入しうる。
 			static bool sServing = false;
 			if (sServing)
 				return ShellView("paused", "前の刻みの受け付けが終わるまで見送っています。");
@@ -258,10 +258,10 @@ namespace HomeskzIfcImport
 			nlohmann::json view = ParseView(out);
 			SettleReport(view, now);
 
-			// **本体が殻に頼んできた**（vw_update / vw_restart）。いまは本体がスタックに無いので
-			// 降ろして入れ替えられる（src/PayloadSession.h）。結末をすぐ渡して応答を書いて
-			// もらうと、その回で次の頼みごとを引き取ってくることがあるので、数回まで続けて
-			// 済ませる（上限は暴走止め）。
+			// **本体が殻に要求してきた**（vw_update / vw_restart）。いまは本体がスタックに無い
+			// のでアンロードして入れ替えられる（src/PayloadSession.h）。結末をすぐ渡して応答を
+			// 書いてもらうと、その回で次の要求を受け取ってくることがあるので、数回まで続けて
+			// 実行する（上限は無限ループの防止）。
 			constexpr int kMaxActionsPerTick = 3;
 			for (int i = 0; i < kMaxActionsPerTick; ++i)
 			{
@@ -271,7 +271,7 @@ namespace HomeskzIfcImport
 				Pending().json = RunShellAction(view["action"], restartAfter);
 				Pending().since = now;
 
-				// **すぐ渡す**（入れ替えたなら新しい本体が書く）。渡せなければ次の刻みで渡し直す。
+				// **すぐ渡す**（入れ替えたなら新しい本体が書く）。渡せなければ次の回で渡し直す。
 				std::string replied;
 				if (!CallServe(Pending().json, replied, error))
 					replied.clear();
@@ -280,7 +280,7 @@ namespace HomeskzIfcImport
 				if (!replied.empty())
 					out = replied;
 
-				// **再起動は応答を書いてから。** 先に頼むと、応える者がいなくなる。
+				// **再起動は応答を書いてから。** 先に要求すると、応答する者がいなくなる。
 				// 開いている文書の保存確認は Vectorworks が通常どおり出す（src/Updater.h）。
 				if (restartAfter)
 				{
@@ -293,25 +293,26 @@ namespace HomeskzIfcImport
 
 		// --- 殻の時計（OS のタイマー）---------------------------------------
 		//
-		// **受け付けの本線はパレットの JS タイマーではなく、ここ。** JS タイマーは埋め込み
-		// ブラウザ（CEF）が、パレットを隠す・Vectorworks が裏に回ると 60 秒に 1 回まで間引き、
-		// 図面が 1 枚も開いていない間はパレットそのものが出ない——ローカルの Claude Code から
-		// 実機確認を回すとき、Vectorworks はたいてい裏にいて、再起動の直後は図面が無い
-		// （docs/dev-notes/milestones/m41-bridge-os-timer.md）。OS のタイマーはどちらでも間引かれずに刻み、
-		// その刻みから gSDK を読み書きできる（[SDK リファレンス「Timers and Notifications」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Timers%20and%20Notifications.md)）。
+		// 殻の OS タイマーで、MCP ブリッジの受け付けを周期的に呼ぶ。
+		// **受け付けの主経路はパレットの JS タイマーではなく、ここ。** 理由: JS タイマーは埋め込み
+		// ブラウザ（CEF）が、パレットを隠す・Vectorworks が背面に回ると 60 秒に 1 回まで間引き、
+		// 図面が 1 枚も開いていない間はパレットそのものが表示されない——ローカルの Claude Code
+		// から実機確認を行うとき、Vectorworks はたいてい背面にあり、再起動の直後は図面が無い
+		// （docs/dev-notes/milestones/m41-bridge-os-timer.md）。OS のタイマーはどちらでも
+		// 間引かれずに呼ばれ、そのコールバックから gSDK を読み書きできる（[SDK リファレンス「Timers and Notifications」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Timers%20and%20Notifications.md)）。
 		//
 		// 決めごと（どれも同 Findings の実測から）:
-		//   * **既定のモード（kCFRunLoopDefaultMode）にだけ載せる。** 共通モードに載せると
-		//     Vectorworks のモーダルダイアログの最中にも刻み、そのとき開いている undo の記録へ
-		//     書き込みが混ざる（利用者の 1 回の取り消しが、無関係な取り込みごと持っていく）。
-		//   * **undo の記録が開いている刻みは見送る**（IsCurrentlyBuildingAnUndoEvent）。
-		//     信用できるのは「開いていない」の側だけなので、開いている間は何もしない。開いた
-		//     ままの置き土産で見送り続けることはありうるが、そのときもパレットが出ていれば
-		//     JS の時計が従来どおり受け付ける。
-		//   * **間隔は当てにしない**（平均 250 ms 強・数秒空くことがある）。受け付けの待ち時間は
+		//   * **既定のモード（kCFRunLoopDefaultMode）にだけ登録する。** 共通モードに登録すると
+		//     Vectorworks のモーダルダイアログの最中にも呼ばれ、そのとき開いている undo の記録へ
+		//     書き込みが混ざる（利用者の 1 回の取り消しで、無関係な取り込みまで取り消される）。
+		//   * **undo の記録が開いている間の呼び出しは見送る**（IsCurrentlyBuildingAnUndoEvent）。
+		//     信頼できるのは「開いていない」という判定だけなので、開いている間は何もしない。
+		//     記録が閉じられずに残って見送り続けることはありうるが、そのときもパレットが
+		//     表示されていれば JS の時計が従来どおり受け付ける。
+		//   * **間隔を前提にしない**（平均 250 ms 強・数秒空くことがある）。受け付けの待ち時間は
 		//     Python 側が時刻で測っている。
-		//   * **起動の直後は待つ。** 起動の最中に本体を読み込みに行かない（パレットの最初の
-		//     刻みを遅らせていたのと同じ理由。resources/common.vwr/html/mcp.html の FIRST_TICK_MS）。
+		//   * **起動の直後は待つ。** 起動の最中に本体を読み込まない（パレットの最初の
+		//     呼び出しを遅らせていたのと同じ理由。resources/common.vwr/html/mcp.html の FIRST_TICK_MS）。
 		constexpr long long kClockFirstTickSeconds = 10;
 		constexpr unsigned kClockIntervalMs = 250;
 
@@ -321,7 +322,7 @@ namespace HomeskzIfcImport
 			return sStartedAt;
 		}
 
-		// NOLINTBEGIN(bugprone-empty-catch): 黙って次の刻みを待つのが**この場所では正しい**
+		// NOLINTBEGIN(bugprone-empty-catch): 何もせずに次の呼び出しを待つのが**この場所では正しい**
 		// 振る舞い（OS のタイマーのコールバックへ例外を漏らさない。受け付けの失敗は本体が
 		// 応答と診断に載せる）。Extensions/ExtMenu.cpp と同じ扱い。
 		void ClockTick()
@@ -397,7 +398,7 @@ void CMcpPaletteJS::OnInit(VectorWorks::Extension::IWebJavaScriptProvider::IInit
 		return;
 	context->AddExecute(
 		TXString((std::string("var ") + kJsObject + " = window." + kJsObject + " || {};").c_str()));
-	// **Sync**（Vectorworks のメインスレッドで呼ばれる＝SDK と本体を安全に触れる）。
+	// **Sync**（Vectorworks のメインスレッドで呼ばれる＝SDK と本体へ安全にアクセスできる）。
 	context->AddFunctionPromiseSync(kJsServe);
 }
 
@@ -420,10 +421,10 @@ void CMcpPaletteJS::OnFunctionCall(const TXString& /*objName*/, const TXString& 
 		return;
 	if (functionName != "serve")
 	{
-		context->Reject("unknown function"); // 知らない名前は黙って落とさず JS へ返す
+		context->Reject("unknown function"); // 知らない名前は無視せず JS へエラーを返す
 		return;
 	}
-	// 例外を JS の橋へ漏らさない（SDK のコールバックと同じ扱い）。
+	// 例外を JS のブリッジへ漏らさない（SDK のコールバックと同じ扱い）。
 	try
 	{
 		// JSON 文字列のまま渡し、JS 側で parse する（ExtFeedbackPalette.cpp の ResolveView と
@@ -457,7 +458,7 @@ IMPLEMENT_VWPaletteExtension(
 #endif
 // NOLINTEND(misc-const-correctness)
 
-// 中身は .vwr の html/mcp.html（resources/common.vwr から包む。CMakeLists.txt）。
+// 中身は .vwr の html/mcp.html（resources/common.vwr から梱包する。CMakeLists.txt）。
 CExtMcpPalette::CExtMcpPalette(CallBackPtr /*cbp*/) : VWExtensionWebPalette("html", "mcp.html") {}
 
 CExtMcpPalette::~CExtMcpPalette() = default;

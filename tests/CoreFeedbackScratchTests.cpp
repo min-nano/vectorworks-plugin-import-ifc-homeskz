@@ -3,8 +3,8 @@
 //
 //	実機テストの一時ファイルの置き場と片付け（src/core/FeedbackScratch.h）の単体テスト。
 //	**ここは利用者の計算機でファイルを消すコード**（CLAUDE.md「開発の基本方針」8）なので、
-//	消すことよりも**消さない場面**を厚く押さえる——置き場の外・目印の食い違い・
-//	フォルダやリンクが混じる・Vectorworks が開いている・PR が閉じたと言い切れない。
+//	消すことよりも**消さない場面**を重点的に確認する——置き場の外・目印の不一致・
+//	フォルダやリンクが混じる・Vectorworks が開いている・PR が閉じたと断定できない。
 //
 
 #include "TestFramework.h"
@@ -32,8 +32,8 @@ namespace
 {
 	namespace fs = std::filesystem;
 
-	// テスト 1 件ぶんの置き場（作って、抜けるときに消す）。**一時ディレクトリを使わない**
-	// （CoreBridgeTests と同じ理由: CodeQL の cpp/path-injection）。
+	// テスト 1 件分の置き場（作成し、スコープを抜けるときに削除する）。**一時ディレクトリを
+	// 使わない**（CoreBridgeTests と同じ理由: CodeQL の cpp/path-injection）。
 	class TempRoot
 	{
 	public:
@@ -105,7 +105,7 @@ TEST(prepare_branch_scratch_creates_a_marked_folder_and_reuses_it)
 
 TEST(prepare_branch_scratch_separates_branches_that_map_to_the_same_name)
 {
-	// `claude/a` と `claude-a` はどちらも `claude-a` に写る。目印で見分けて別のフォルダへ。
+	// `claude/a` と `claude-a` はどちらも `claude-a` に変換される。目印で区別して別のフォルダへ。
 	const TempRoot temp("collide");
 	const std::string first = prepareBranchScratch(temp.root(), "claude/a");
 	const std::string second = prepareBranchScratch(temp.root(), "claude-a");
@@ -119,7 +119,7 @@ TEST(prepare_branch_scratch_separates_branches_that_map_to_the_same_name)
 TEST(prepare_branch_scratch_gives_up_when_it_cannot_create_the_folder)
 {
 	const TempRoot temp("cannot");
-	// 置き場が空・置き場の場所にファイルが居座っている・フォルダの場所にファイルが居座っている。
+	// 置き場が空・置き場の場所にファイルが既にある・フォルダの場所にファイルが既にある。
 	CHECK(prepareBranchScratch("", "claude/x").empty());
 	touch(fs::path(temp.outside()) / "not-a-dir");
 	CHECK(prepareBranchScratch((fs::path(temp.outside()) / "not-a-dir").string(), "claude/x")
@@ -130,7 +130,7 @@ TEST(prepare_branch_scratch_gives_up_when_it_cannot_create_the_folder)
 
 TEST(list_scratch_dirs_reads_a_marker_written_with_crlf)
 {
-	// Windows で手が入った目印（CRLF）でも、ブランチ名に CR を混ぜない。
+	// Windows で手作業で編集された目印（CRLF）でも、ブランチ名に CR を混ぜない。
 	const TempRoot temp("crlf");
 	const fs::path dir = fs::path(temp.root()) / "claude-crlf";
 	fs::create_directories(dir);
@@ -175,7 +175,7 @@ TEST(parse_pr_states_reads_the_script_lines)
 
 TEST(parse_pr_states_leans_towards_keeping_on_conflicting_lines)
 {
-	// 同じブランチに食い違う答えが出たら、消さない側を採る（順序に依らない）。
+	// 同じブランチに矛盾する答えが出たら、消さない側を採る（順序に依らない）。
 	CHECK(parsePrStates("pr-state\tclosed\tb\npr-state\topen\tb\n").at("b") == PrState::Open);
 	CHECK(parsePrStates("pr-state\topen\tb\npr-state\tclosed\tb\n").at("b") == PrState::Open);
 	CHECK(parsePrStates("pr-state\tclosed\tb\npr-state\terror\tb\n").at("b") == PrState::Unknown);
@@ -218,7 +218,7 @@ TEST(remove_scratch_dir_refuses_folders_with_anything_but_plain_files)
 	CHECK(!removeScratchDir(temp.root(), only(temp.root()), why));
 	CHECK(fs::exists(fs::path(dir) / "work-1.vwx"));
 
-	// シンボリックリンクも（指す先を消しに行かない）。作れない環境では飛ばす。
+	// シンボリックリンクも（リンク先を消しに行かない）。作成できない環境では省略する。
 	const TempRoot linked("symlink");
 	const std::string ldir = prepareBranchScratch(linked.root(), "claude/link");
 	touch(fs::path(linked.outside()) / "precious.vwx");
@@ -267,8 +267,8 @@ TEST(remove_scratch_dir_refuses_a_mismatched_marker_or_a_folder_outside_the_root
 
 TEST(remove_scratch_dir_stops_without_partial_damage_when_permissions_refuse)
 {
-	// 権限で読めない・消せないフォルダは、途中まで消して壊さずに止まる。**root で走ると
-	// 権限が効かない**ので、そのときは確かめようが無く飛ばす（CI のランナーは root ではない）。
+	// 権限で読めない・消せないフォルダは、途中まで消して壊さずに止まる。**root で実行すると
+	// 権限が機能しない**ので、そのときは確認できず省略する（CI のランナーは root ではない）。
 	const auto perms = [](const std::string& path, fs::perms p)
 	{
 		std::error_code ec;

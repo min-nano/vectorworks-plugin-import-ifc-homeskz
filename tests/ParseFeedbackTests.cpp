@@ -6,9 +6,9 @@
 //	対象外で、ここで確かめるのは**組み上がった Markdown**と周の結末の文言だけ。
 //
 //	検証項目（docs/DEV-NOTES.md M23 / M38）:
-//	  * 内訳の 1 行表現と、その差分（周回どうしの突き合わせ）
+//	  * 内訳の 1 行表現と、その差分（周どうしの比較）
 //	  * 図面の状態の 1 行（1 周目に基準を採る・戻っていたか）
-//	  * **伏せない**——ファイル名をそのまま見せ、PR 向けの目印や頼みを持ち込まない（M38）
+//	  * **伏せない**——ファイル名をそのまま示し、PR 向けの目印や依頼を持ち込まない（M38）
 //	  * 注意・ログが本文に載ること、所見は載らないこと、上限で（文字境界で）切り詰めること
 //	  * 周の結末（formatTestRoundResult）の文言
 //
@@ -32,7 +32,7 @@ using HomeskzIfcImport::parse::TestRoundOutcome;
 
 namespace
 {
-	// 横架材 4 本・柱 2 本の最小の命令セット（読むのは件数だけ）。
+	// 横架材 4 本・柱 2 本の最小の命令セット（参照するのは件数だけ）。
 	Document sampleDocument()
 	{
 		Document document;
@@ -105,14 +105,14 @@ TEST(feedback_tally_diff_reports_appearing_and_vanishing_elements)
 
 TEST(feedback_tally_diff_without_previous_is_empty)
 {
-	// 1 周目は比べる相手がいない（節ごと出さないので空でよい）。
+	// 1 周目は比較対象が無い（節ごと出さないので空でよい）。
 	CHECK(formatTallyDiff("", "横架材:4/4").empty());
 }
 
 TEST(feedback_tally_diff_ignores_broken_entries)
 {
-	// 壊れた記憶を読んでも落ちない・止まらない。区切りの無い項目・数字でない数・
-	// 名前の無い項目は、どれも黙って飛ばす。
+	// 壊れた記憶を読んでも異常終了・中断しない。区切りの無い項目・数字でない数・
+	// 名前の無い項目は、どれも通知せずにスキップする。
 	const std::string diff =
 		formatTallyDiff("こわれた,柱:x/2,:3/3,横架材:2/4,梁:4/y", "横架材:4/4");
 	CHECK(contains(diff, "横架材: 2/4 → 4/4"));
@@ -127,7 +127,7 @@ TEST(feedback_tally_diff_ignores_broken_entries)
 TEST(test_report_starts_with_the_round_and_build)
 {
 	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), sampleCounts());
-	// 見出しで「何周目・どのビルド」を言う。
+	// 見出しで「何周目・どのビルド」を示す。
 	CHECK(body.starts_with("## 実機テスト round 1 — `min-nano_structureDev` a1b2c3d"));
 	CHECK(contains(body, "claude/feedback"));
 	CHECK(contains(body, "**結果: 成功**"));
@@ -136,7 +136,7 @@ TEST(test_report_starts_with_the_round_and_build)
 
 TEST(feedback_comment_does_not_carry_the_human_note)
 {
-	// **所見はこの本文に載らない。** 絵を見て気付いたことは人が Claude とのチャットへ
+	// **所見はこの本文に載らない。** 描画結果を見て気付いたことは人が Claude とのチャットへ
 	// 直接書く——プラグインは所見を訊く仕組みを持たない（docs/DEV-NOTES.md M23）。
 	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), sampleCounts());
 	CHECK(!contains(body, "所見"));
@@ -169,7 +169,7 @@ TEST(feedback_comment_shows_the_size_in_kb_or_nothing)
 	small.bytes = 4096;
 	CHECK(contains(formatTestRoundReport(small, sampleDocument(), sampleCounts()), "4.0 KB"));
 
-	// 大きさが取れなかった（0）ときは括弧ごと出さない——「0 バイトのファイルを
+	// 大きさを取得できなかった（0）ときは括弧ごと出さない——「0 バイトのファイルを
 	// 取り込んだ」と読み違えさせないため。
 	FeedbackRound unknown = sampleRound();
 	unknown.bytes = 0;
@@ -193,7 +193,7 @@ TEST(feedback_comment_says_when_there_are_no_commands)
 TEST(feedback_comment_takes_the_baseline_on_the_first_round)
 {
 	// **1 周目は判定しない。** 図面のテンプレートに「共通」等が最初から在るのは普通なので、
-	// ここで「戻っていません」と書くと毎回の誤報になる——採ったことだけ言う。
+	// ここで「戻っていません」と書くと毎回の誤報になる——基準を採ったことだけを書く。
 	DrawCounts counts = sampleCounts();
 	counts.existingLayers = {"共通"};
 	FeedbackRound first = sampleRound();
@@ -220,7 +220,7 @@ TEST(feedback_comment_says_the_drawing_was_restored_when_it_matches_the_baseline
 
 TEST(feedback_comment_flags_a_drawing_that_was_not_restored)
 {
-	// 基準に無いレイヤ（前の周が作ったもの）へも描いている＝戻していない。
+	// 基準に無いレイヤ（前の周が作ったもの）へも描画している＝戻していない。
 	DrawCounts counts = sampleCounts();
 	counts.existingLayers = {"共通", "1-FL", "2-FL"};
 	FeedbackRound later = sampleRound();
@@ -234,7 +234,7 @@ TEST(feedback_comment_flags_a_drawing_that_was_not_restored)
 
 TEST(feedback_comment_notices_a_different_drawing)
 {
-	// 基準にあったものが無い＝別の図面か、テンプレートが変わった。**戻し忘れとは言わない。**
+	// 基準にあったものが無い＝別の図面か、テンプレートが変わった。**戻し忘れとは報告しない。**
 	DrawCounts counts = sampleCounts();
 	counts.existingLayers.clear();
 	FeedbackRound later = sampleRound();
@@ -287,8 +287,8 @@ TEST(feedback_comment_trims_an_oversized_log)
 }
 
 // ---------------------------------------------------------------------------
-// **実機テストの結末は、実機テスト自身の言葉で言う**（M25）。取り込みコマンドの完了文言を
-// 借りると、押した人には本番の取り込みが同じことをしているように見える——コマンドを
+// **実機テストの結末は、実機テスト自身の文言で報告する**（M25）。取り込みコマンドの完了文言を
+// 流用すると、実行した人には本番の取り込みが同じことをしているように見える——コマンドを
 // 分けた意味が見た目の上で崩れる（実機の指摘）。
 
 TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
@@ -301,9 +301,9 @@ TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
 	const std::string failed = formatTestRoundResult(TestRoundOutcome::ImportFailed, {});
 	CHECK(contains(failed, "取り込みがエラーで中断しました"));
 	CHECK(contains(failed, "診断ログ"));
-	// 取り込みが中断したのだから「終えました」とは言わない。
+	// 取り込みが中断したのだから「終えました」とは書かない。
 	CHECK(!contains(failed, "終えました"));
-	// PR の話はもうしない（M38）。
+	// PR には言及しない（M38）。
 	CHECK(!contains(failed, "PR"));
 	// 中断の詳しい事情があれば、診断ログの案内の前に添える。
 	const std::string detailed =
@@ -319,8 +319,8 @@ TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
 
 TEST(test_round_result_says_how_to_start_the_first_round)
 {
-	// **名指しの無い MCP の周から 1 周目は起こせない**。何をすれば続けられるかを、Claude が
-	// そのまま使える形で言う——IFC とテンプレートを名指しして頼み直す（M40）か、人が
+	// **名指しの無い MCP の周から 1 周目は開始できない**。何をすれば続けられるかを、Claude が
+	// そのまま使える形で示す——IFC とテンプレートを名指しして依頼し直す（M40）か、人が
 	// メニューから選ぶか。
 	const std::string text = formatTestRoundResult(TestRoundOutcome::NotRemembered, {});
 	CHECK(contains(text, "1 周目がまだ済んでいません"));
@@ -334,8 +334,8 @@ TEST(test_round_result_says_how_to_start_the_first_round)
 
 TEST(test_round_result_rejects_an_unusable_request_without_drawing)
 {
-	// **頼まれた IFC・テンプレートを使えない**（M40）。何も描いていないことを言い切り、
-	// 何が駄目だったかを添える。
+	// **依頼された IFC・テンプレートを使えない**（M40）。何も描画していないことを明示し、
+	// 使えなかった理由を添える。
 	const std::string text =
 		formatTestRoundResult(TestRoundOutcome::InvalidRequest, "IFC が見つかりません（/x.ifc）");
 	CHECK(contains(text, "図面には何も描いていません"));
@@ -344,7 +344,7 @@ TEST(test_round_result_rejects_an_unusable_request_without_drawing)
 
 // ---------------------------------------------------------------------------
 // **切り詰めは UTF-8 の文字境界で**（M25）。ここが崩れると壊れたバイト列が本文へ入る。
-// PR へ投稿していた頃は GitHub が 400 で弾いて**その周の投稿がまるごと落ちた**（実機で
+// PR へ投稿していた頃は GitHub が 400 で拒否して**その周の投稿がすべて失われた**（実機で
 // 発生）。いまの読み手（MCP の JSON）も壊れた UTF-8 は受け付けない。
 
 namespace
@@ -383,8 +383,8 @@ namespace
 TEST(feedback_comment_truncates_the_log_on_a_character_boundary)
 {
 	// 日本語だけの長いログ（1 文字 3 バイト）。上限を必ず超える長さにして、切り詰めが
-	// 走る場面を作る。**開始位置を 1 バイトずつずらしても**壊れないことを見る——実機で
-	// 落ちたのは、本文へ 1 行足したせいで予算が数十バイトずれた回だった。
+	// 実行される場面を作る。**開始位置を 1 バイトずつずらしても**壊れないことを確かめる
+	// ——実機で失敗したのは、本文へ 1 行追加したことで予算が数十バイトずれた回だった。
 	for (std::size_t pad = 0; pad < 6; ++pad)
 	{
 		FeedbackRound round = sampleRound();
@@ -405,7 +405,7 @@ TEST(feedback_comment_shows_what_the_round_did_to_the_drawing_before_importing)
 {
 	// **図面をどう用意したかは「図面の状態」の隣に置く。** 同じ 1 行は診断ログにも入るが、
 	// ログは上限で切り詰められるので、そこだけを頼りにすると読めない周が出る
-	// （実機 round 2 でこの行が省略部分へ落ちて読めなかった）。
+	// （実機 round 2 でこの行が省略部分に入って読めなかった）。
 	FeedbackRound round = sampleRound();
 	round.preparation = "準備: 前の周の図面 1 枚を保存せずに閉じました。テンプレートから新しい"
 						"図面を開きました（/tmp/homeskz-test/main/template-1.sta）";
@@ -418,8 +418,8 @@ TEST(feedback_comment_shows_what_the_round_did_to_the_drawing_before_importing)
 
 TEST(test_report_never_asks_for_undo)
 {
-	// **人に「取り消し」を頼まない**（M39）。毎周テンプレートから開いた新しい図面へ描くので、
-	// 取り込み前から在ったレイヤへ描いた周でも、次の周は丸ごと元の状態から始まる。
+	// **人に「取り消し」を依頼しない**（M39）。毎周テンプレートから開いた新しい図面へ描画する
+	// ので、取り込み前から在ったレイヤへ描画した周でも、次の周はすべて元の状態から始まる。
 	DrawCounts counts = sampleCounts();
 	counts.undoPartial = true;
 	counts.existingLayers = {"共通"};
@@ -430,7 +430,7 @@ TEST(test_report_never_asks_for_undo)
 TEST(test_report_shows_the_file_name_without_hiding_it)
 {
 	// **伏せない**（M38）。報告は利用者の計算機の中だけで読まれる（PR へは投稿しない）ので、
-	// どのファイルを取り込んだかはそのまま見せる。
+	// どのファイルを取り込んだかはそのまま示す。
 	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), sampleCounts());
 	CHECK(contains(body, "物件A.ifc"));
 	CHECK(!contains(body, "model-"));
@@ -440,7 +440,7 @@ TEST(test_report_shows_the_file_name_without_hiding_it)
 TEST(test_report_carries_no_pull_request_markup)
 {
 	// **PR の作法を持ち込まない**（M38）。目印の HTML コメントも、合図の案内も、
-	// 「push したらもう一度実行して」の頼みも、もう要らない。
+	// 「push したらもう一度実行して」の依頼も、もう不要。
 	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), sampleCounts());
 	CHECK(!contains(body, "<!--"));
 	CHECK(!contains(body, "control=stop"));

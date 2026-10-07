@@ -52,14 +52,14 @@ namespace HomeskzIfcImport
 		// negative value if the user cancelled.
 		virtual int PickBuild(const std::vector<std::string>& items, int initialSel) = 0;
 
-		// 載っている本体（ペイロード）を降ろす。**インストールした本体をこの実行のまま
-		// 効かせるための最後の一押し**で、次に本体を使うとき（取り込み・PIO のリセット）に
-		// 新しいファイルが読み直される（src/PayloadSession.h）。降ろせなかった——本体の
-		// コードがまだ走っている——ときだけ false。
+		// 読み込まれている本体（ペイロード）をアンロードする。**インストールした本体をこの
+		// 実行のまま反映させるための最後の処理**で、次に本体を使うとき（取り込み・PIO の
+		// リセット）に新しいファイルが再読み込みされる（src/PayloadSession.h）。アンロード
+		// できなかった——本体のコードがまだ実行中の——ときだけ false。
 		//
-		// 更新の確認は本体を確保する**前**に走るので（src/Extensions/ExtMenu.cpp）、
-		// ここが呼ばれる時点で本体はスタックに載っていない——降ろせるのが常態である。
-		// 降ろせなかったときだけ false になり、反映は次の起動へ回る。
+		// 更新の確認は本体を確保する**前**に実行されるので（src/Extensions/ExtMenu.cpp）、
+		// ここが呼ばれる時点で本体はスタックに載っていない——アンロードできるのが通常である。
+		// アンロードできなかったときだけ false になり、反映は次の起動へ回る。
 		virtual bool DropLoadedPayload() = 0;
 
 		// Quit Vectorworks and start it again, so the build just installed is
@@ -72,17 +72,17 @@ namespace HomeskzIfcImport
 		virtual bool Restart() = 0;
 	};
 
-	// **更新の確認をどこから起こしたか。** 分かれるのは「新しいビルドが無かった」
-	// ときの振る舞いだけで、更新があるときの流れ（尋ねて入れて、要るなら再起動）は
+	// **更新の確認をどこから実行したか。** 異なるのは「新しいビルドが無かった」
+	// ときの振る舞いだけで、更新があるときの流れ（尋ねてインストールし、要るなら再起動）は
 	// 同じである。
 	enum class UpdateCheckKind
 	{
 		// メニューコマンド「アップデータを確認」から。**必ず結果を伝える**——
-		// 押したのに何も起きないのでは、確認できたのか、そもそも動いていないのかが
-		// 分からない。取得に失敗した（オフライン等）ときもその旨を出す。
+		// 実行したのに何も起きないのでは、確認できたのか、そもそも動いていないのかが
+		// 分からない。取得に失敗した（オフライン等）ときもその旨を表示する。
 		Manual,
-		// 取り込みコマンドのついで。**更新があるときだけ口を開く**——取り込みたい人の
-		// 前に「最新です」を挟まない。取得に失敗しても黙って取り込みへ進む。
+		// 取り込みコマンドに付随する確認。**更新があるときだけ表示する**——取り込みたい人の
+		// 前に「最新です」を挟まない。取得に失敗しても何も表示せずに取り込みへ進む。
 		Silent,
 	};
 
@@ -91,14 +91,15 @@ namespace HomeskzIfcImport
 	// **殻にコンパイルされた**ブランチと sha（実行時は VW_BUILD_BRANCH /
 	// VW_BUILD_VERSION、テストでは注入する）。**「いま動いているビルド」そのものでは
 	// ない**——本体だけを入れ替えたあとは前のブランチを名乗ったままなので、開発版の流れは
-	// ディスク上のビルドを基準にし、分からないときだけこの 2 つへ落ちる
+	// ディスク上のビルドを基準にし、分からないときだけこの 2 つを使う
 	// （src/UpdaterParse.h の ResolveCurrentDevBuild）。
-	// runningShellId は**いま動いている殻の ID**（コンパイル時に焼かれた VW_SHELL_ID。
-	// テストでは注入する）。入れたビルドの殻が同じなら、本体を読み直すだけで反映される
-	// ＝**再起動を尋ねない**（src/UpdaterParse.h の NeedsRestartAfterInstall）。
+	// runningShellId は**いま動いている殻の ID**（コンパイル時に埋め込まれた VW_SHELL_ID。
+	// テストでは注入する）。インストールしたビルドの殻が同じなら、本体を再読み込みするだけで
+	// 反映される＝**再起動を尋ねない**（src/UpdaterParse.h の NeedsRestartAfterInstall）。
 	//
-	// 戻り値は「**この実行のまま取り込みへ進んでよいか**」——入れると答えたのに入れられ
-	// なかったときだけ false（呼び出し側は取り込みを見送る。src/Extensions/ExtMenu.cpp）。
+	// 戻り値は「**この実行のまま取り込みへ進んでよいか**」——インストールすると答えたのに
+	// インストールできなかったときだけ false（呼び出し側は取り込みを見送る。
+	// src/Extensions/ExtMenu.cpp）。
 	// 結末そのものはその場のダイアログで伝え終えている。
 	bool RunStableUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
 								  const std::string& runningShellId);
@@ -106,45 +107,48 @@ namespace HomeskzIfcImport
 	// 開発版。**kind で挙動が大きく変わる唯一の流れ**:
 	//   Manual … ビルドの選択ダイアログを出す（どのブランチのビルドを使うかを選ぶ）。
 	//   Silent … ダイアログは出さず、**いま動いているのと同じブランチ**の新しいビルド
-	//            だけを拾って尋ねる。取り込みのたびにブランチ選択が出ては邪魔になる。
+	//            だけを選んで尋ねる。取り込みのたびにブランチ選択が出ては作業の妨げになる。
 	bool RunDevUpdateCheckWith(IUpdaterHost& host, UpdateCheckKind kind,
 							   const std::string& shellBranch, const std::string& shellCommit,
 							   const std::string& runningShellId);
 
 	// -----------------------------------------------------------------------
-	// **MCP から頼まれた、尋ねも報せもしない開発版の入れ替え**（M38。道具 `vw_update`）。
-	// Claude は自分で push したビルドを入れたくて頼んでいるので、「インストールしますか？」も
-	// 「入れました」も出さず、**結末を値で返す**——ローカルの Claude Code がそれを読んで、
-	// 再起動が要るか・取り込みへ進めるかを決める（src/Extensions/ExtMcpPalette.cpp）。
-	// モーダルのダイアログを出すと、誰も見ていない Vectorworks が止まる。
+	// **MCP から要求された、確認も通知もしない開発版の入れ替え**（M38。道具 `vw_update`）。
+	// 「インストールしますか？」も「インストールしました」も表示せず、**結末を値で返す**
+	// ——ローカルの Claude Code がそれを読んで、再起動が要るか・取り込みへ進めるかを決める
+	// （src/Extensions/ExtMcpPalette.cpp）。Claude は自分で push したビルドをインストール
+	// したくて要求しているので、確認は要らない。モーダルのダイアログを出すと、誰も見ていない
+	// Vectorworks が止まる。
 	//
-	// wantedBranch が空なら**いま入っているビルドのブランチ**の新しいビルドを拾う。名指し
-	// すればそのブランチの最新を入れる（別の PR へ乗り換えるとき）。どちらも、いま入って
-	// いるのと同じ sha は拾わない（UpdaterParse.h の DevSwitchCandidates）。
+	// wantedBranch が空なら**いまインストールされているビルドのブランチ**の新しいビルドを
+	// 選ぶ。ブランチを指定すればそのブランチの最新をインストールする（別の PR へ切り替える
+	// とき）。どちらも、いまインストールされているのと同じ sha は選ばない（UpdaterParse.h の
+	// DevSwitchCandidates）。
 	//
-	// **基準はディスク上に入っているビルド**（`q-dev` の `installed=` /
-	// `installed-branch=`）。殻にコンパイルされた値は本体だけを入れ替えたあと古いまま
-	// なので（殻は起動時にしか読み直されない）、sha を取り違えれば同じビルドを入れ直し、
-	// **ブランチを取り違えれば乗り換えたはずのブランチへ戻してしまう**。分からないときだけ
-	// shellBranch / shellCommit へ落ちる（src/UpdaterParse.h の ResolveCurrentDevBuild）。
+	// **基準はディスク上にインストールされているビルド**（`q-dev` の `installed=` /
+	// `installed-branch=`）。分からないときだけ shellBranch / shellCommit を使う
+	// （src/UpdaterParse.h の ResolveCurrentDevBuild）。殻にコンパイルされた値は本体だけを
+	// 入れ替えたあと古いままなので（殻は起動時にしか再読み込みされない）、sha を取り違えれば
+	// 同じビルドを再インストールし、**ブランチを取り違えれば切り替えたはずのブランチへ戻して
+	// しまう**。
 	//
-	// **インストールの経路はこのファイルの Install ただ 1 つ**で、手で押した確認と同じものを
+	// **インストールの経路はこのファイルの Install ただ 1 つ**で、手で実行した確認と同じ経路を
 	// 通る（CLAUDE.md「更新と配置の要点」）。
 	enum class RemoteUpdateOutcome
 	{
-		NoNewBuild, // そのブランチに、いま入っているのと別のビルドは無い
-		Installed, // 入れて本体を降ろした（次の呼び出しから新しい本体が動く）
-		NeedsRestart, // 入れたが殻まで変わった（再起動するまで効かない）
-		Failed,		  // 入れられなかった・降ろせなかった（message に理由）
-		CheckFailed,  // 確認そのものができなかった（オフライン等）
+		NoNewBuild, // そのブランチに、いまインストールされているのと別のビルドは無い
+		Installed, // インストールして本体をアンロードした（次の呼び出しから新しい本体が動く）
+		NeedsRestart, // インストールしたが殻まで変わった（再起動するまで反映されない）
+		Failed, // インストールできなかった・アンロードできなかった（message に理由）
+		CheckFailed, // 確認そのものができなかった（オフライン等）
 	};
 	struct RemoteUpdateResult
 	{
 		RemoteUpdateOutcome outcome = RemoteUpdateOutcome::NoNewBuild;
-		std::string branch;	  // 探したブランチ
-		std::string previous; // 入れる前に入っていたビルドの sha
-		std::string commit;	  // Installed / NeedsRestart のとき、入れたビルドの sha
-		std::string message;  // 人に見せる 1 行（Failed / CheckFailed / NeedsRestart）
+		std::string branch; // 探したブランチ
+		std::string previous; // インストール前にインストールされていたビルドの sha
+		std::string commit; // Installed / NeedsRestart のとき、インストールしたビルドの sha
+		std::string message; // 利用者に表示する 1 行（Failed / CheckFailed / NeedsRestart）
 	};
 	RemoteUpdateResult RemoteDevUpdateWith(IUpdaterHost& host, const std::string& shellBranch,
 										   const std::string& shellCommit,

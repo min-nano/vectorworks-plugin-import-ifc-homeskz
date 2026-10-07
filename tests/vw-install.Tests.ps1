@@ -6,16 +6,18 @@
 #   shipped inside every release zip (and published as a release asset), and to
 #   which the installed updater hands the actual file placement.
 #
-#   なぜここを厚くテストするか: **このスクリプトが「配置の手順」の唯一の持ち主**に
-#   なったから。ここが取りこぼすと、利用者の Plug-Ins に半端なプラグインが残る
-#   （M21 で本体 .vwpayload が増えたときに実際に起きた事故で、この仕組みはその再発を
-#   止めるためにある）。したがって中心の検査は 1 つ:
+#   中心の検査は 1 つ:
 #
 #       **zip の直下にあるものが、列挙されていなくても全部入ること。**
 #
 #   置き先が Plug-Ins 直下ではなく**プラグインのフォルダ**（<Plug-Ins>\<name>\）に
-#   なったので、そこも同じ重さで見る——入れ子にならないこと、そして入れる前に前の版が
+#   なったので、そこも同じ重みで確認する——入れ子にならないこと、そして入れる前に前の版が
 #   取り除かれること。
+#
+#   ここを厚くテストする理由: **このスクリプトが「配置の手順」の唯一の担い手**に
+#   なったから。ここで配置漏れがあると、利用者の Plug-Ins に半端なプラグインが残る
+#   （M21 で本体 .vwpayload が増えたときに実際に起きた事故で、この仕組みはその再発を
+#   止めるためにある）。
 #
 #   The script is DOT-SOURCEd (its dispatch is guarded, see its tail) so the real
 #   functions run in-process. Only the GitHub REST boundary needs faking; the
@@ -60,12 +62,12 @@ $env:VW_PLUGINS_DIR = Join-Path $Work 'plugins'
 # **エラーの扱いはローカルと CI で変える。** これは「CI では緩めない」という
 # VW_REQUIRE_SCRIPT_TESTS の方針（上記 $RequireTools）をそのまま延長したもの。
 #
-#   * ローカル（Continue）… 落ちた文があっても最後まで走り、失敗を一覧できる。
+#   * ローカル（Continue）… 失敗した文があっても最後まで走り、失敗を一覧できる。
 #   * CI（Stop）………………… 想定外のエラーでその場で終了し、exit 1 になる。
 #
-# Stop が要る理由: Continue だと**落ちた文の CheckXxx が呼ばれないまま**次へ進むので、
-# 検査が空振りしたのに「PASS: all N checks」と出る。実際に `Join-Path 'C:\x' …`
-# （Linux の pwsh に C: ドライブは無い）で 2 件が黙って抜け、N だけが減っていた。
+# Stop が要る理由: Continue だと**失敗した文の CheckXxx が呼ばれないまま**次へ進むので、
+# 検査が実行されなかったのに「PASS: all N checks」と出る。実際に `Join-Path 'C:\x' …`
+# （Linux の pwsh に C: ドライブは無い）で 2 件が通知なしに抜け、N だけが減っていた。
 # ローカルを Continue のままにしてあるのは、直すときは失敗を一覧できたほうが速いから。
 $ErrorActionPreference = if ($RequireTools) { 'Stop' } else { 'Continue' }
 
@@ -119,7 +121,7 @@ function New-Tree([string] $dir, [string] $name) {
     Set-Content -LiteralPath (Join-Path $dir "$name.brand-new") -Value 'future' -NoNewline
     Set-Content -LiteralPath (Join-Path $dir 'vw-install.ps1') -Value '# installer' -NoNewline
     # 本物のアンインストーラを入れる。**前の版を取り除く段**（Uninstall-PreviousRelease）は
-    # これを写して走らせるので、偽物では意味が無い。
+    # これを複製して走らせるので、偽物では意味が無い。
     Copy-Item -LiteralPath (Join-Path $Here '..' 'scripts' 'vw-uninstall.ps1') `
         -Destination (Join-Path $dir 'vw-uninstall.ps1') -Force
 }

@@ -153,10 +153,10 @@ namespace HomeskzIfcImport::parse
 		// 勾配の座標系（勾配方向 down・掃引方向 along・平面上の天端 Z）は野地板と共有する
 		// （parse/IfcGeometry の RoofSlope）。
 		//
-		// ［共有に伴う挙動差・意図的］ほぼ水平な面（法線の水平成分が極小）を弾くのは従来と
-		// 同じだが、**鉛直な面（法線の鉛直成分 nz が極小）も弾くようになった**。従来の垂木は
-		// nz を見ずに平面式の分母へ渡していたため、退化した鉛直の屋根版に当たると天端 Z が
-		// 発散して無意味な垂木を並べていた。野地板（parse/Roof）は元から nz を弾いており、
+		// ［共有に伴う挙動差・意図的］ほぼ水平な面（法線の水平成分が極小）を除外するのは従来と
+		// 同じだが、**鉛直な面（法線の鉛直成分 nz が極小）も除外するようになった**。従来の垂木は
+		// nz を参照せずに平面式の分母へ渡していたため、退化した鉛直の屋根版が入力されると天端 Z が
+		// 発散して無意味な垂木を並べていた。野地板（parse/Roof）は元から nz を除外しており、
 		// 屋根面を共有する以上こちらへ揃えるのが正しい（実フィクスチャには該当する屋根版が
 		// 無いため、実データでの出力は従来と一致する）。退化とみなす閾値（kRoofFlatTol）も
 		// 野地板と共有する——roofSlope の既定値なので明示的に渡さない。
@@ -226,7 +226,7 @@ namespace HomeskzIfcImport::parse
 				if (segmentRun < kMinRafterLength)
 					continue; // 隅木際の極小片・端で退化した区間は配置しない
 
-				// 天端 Z（絶対値）。ストーリ相対の平面式に Elevation を足す。
+				// 天端 Z（絶対値）。ストーリ相対の平面式に Elevation を加える。
 				const double zTip = slope.zAt(low.x, low.y, storeyElevation);	  // 軒先
 				const double zRidge = slope.zAt(high.x, high.y, storeyElevation); // 棟側
 
@@ -248,8 +248,8 @@ namespace HomeskzIfcImport::parse
 				// zRidge == beamTopZ となり s は本来ちょうど 1.0 だが、割り算の丸めで 1−ε に
 				// なることがある。`s < 1.0` だけで判定すると支持点が棟側の端に重なり、長さが
 				// ほぼ 0 の垂木が出てしまう（実測: 区間 850mm に対し支持点→棟側が 3.4e-8mm。
-				// core::samePoint から見れば縮退で、validateDocument が Document 全体を弾く＝
-				// その IFC が 1 つも描かれない）。そこで s ではなく**支持点→棟側に部材が
+				// core::samePoint から見れば縮退で、validateDocument が Document 全体を棄却する＝
+				// その IFC が 1 つも描画されない）。そこで s ではなく**支持点→棟側に部材が
 				// 残るか**で判定する。
 				bool restsOnGirder = false;
 				double supportX = low.x;
@@ -284,7 +284,7 @@ namespace HomeskzIfcImport::parse
 				// 差し込み（支持点→壁外面）＝支持点の真下にある軒桁の桁幅の半分。受ける
 				// 軒桁が見つからなければ既定桁幅（M6 の挙動と同じ値）。**軒桁に乗らない
 				// 垂木は 0**——差し込む相手が無く、描画側は軒先を「支持点＋差し込み＋軒の出」に
-				// 置くので、0 でなければ実形状より長く描かれてしまう。
+				// 置くので、0 でなければ実形状より長く描画されてしまう。
 				const double embedment =
 					restsOnGirder ? girderWidthAt(cmd.start.x, cmd.start.y, cmd.end.x - cmd.start.x,
 												  cmd.end.y - cmd.start.y, storyMembers) /
@@ -333,7 +333,7 @@ namespace HomeskzIfcImport::parse
 			const double beamTopZ = beamTopElevation(story);
 			// 桁幅の参照先は同じ階の横架材だけ（レイヤ接頭辞 "{n}-" で絞る）。登り梁の span
 			// レイヤ（"3to4-登り梁"。parse/PlanLevel）は接頭辞が無いので、from の伏図レベルが
-			// 属する階で見る。
+			// 属する階で判定する。
 			const std::string layerPrefix = storyLayerPrefix(i, story.isTop) + "-";
 			std::vector<core::MemberCommand> storyMembers;
 			for (const core::MemberCommand& member : members)

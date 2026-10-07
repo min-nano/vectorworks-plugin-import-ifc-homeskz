@@ -1,8 +1,24 @@
 //
 //	draw/McpBridge.cpp
 //
-//	MCP ブリッジの実装（意図と制約は draw/McpBridge.h）。**道具を足すときに触るのは
+//	MCP ブリッジの実装（意図と制約は draw/McpBridge.h）。**道具を追加するときに変更するのは
 //	kTools の 1 行と、その実装 1 つだけ**である。
+//
+//	【道具は 3 種類】（M38。Tool::kind）
+//	  * **読む**（Read）… 図面・診断ログ・報告を読むだけで、何も生成・変更しない。
+//	  * **長く走る**（Long）… `vw_run_test`。実機テストの 1 周（draw/Feedback.h）をこの場で
+//	    実行し、終わってから応答する。図面を書くのは**本番の取り込みと同じ経路**
+//	    （draw/ImportRun の runImportRound）だけで、undo の作法もそちらが持つ
+//	    （ImportUndoScope）。実行中は生存の印に `busy_until` を書いておく
+//	    （Python 側が「止まった」と誤認しないように）。
+//	  * **殻に頼む**（Shell）… `vw_update` / `vw_restart`。本体は自分をアンロードできないので、
+//	    要求を受け取って見え方の `action` に載せて返すだけで、**応答しない**。殻が処理した
+//	    結果を次の呼び出しで受け取り（shellReport）、そのとき読み込まれている本体が応答する
+//	    （src/PayloadAbi.h の VwPayloadMcpServeFn）。
+//
+//	**新しく図面を書く道具を追加するときは** undo の作法（[SDK リファレンス「Undo」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Undo.md)）を
+//	必ず通すこと——不完全な記録を取り消すと図面が壊れる。**常駐なので、書く道具は人が図面を
+//	操作している最中にも届きうる**——人の操作と undo の記録が混ざらないかを先に確かめること。
 //
 //	使う SDK API は、いずれも本プラグインの他の場所で既に使っているもの（＝実機で通ることが
 //	確かめてあるもの）に限ってある。SDK の調査は本リポジトリでは行わない
@@ -16,22 +32,6 @@
 //	  * gSDK->GetObjectName(h, TXString&)（**戻り値ではなく出力引数**）… 名前
 //	  * gSDK->GetObjectBounds(h, WorldRect&) … 外接（WorldRect は top > bottom）
 //	  * gSDK->GetCurrentLayer() … 文書が開いているかの判定を兼ねる
-//
-//	【道具は 3 種類】（M38。Tool::kind）
-//	  * **読む**（Read）… 図面・診断ログ・報告を読むだけで、何も作らず・変えない。
-//	  * **長く走る**（Long）… `vw_run_test`。実機テストの 1 周（draw/Feedback.h）をこの場で
-//	    走らせ、終わってから応える。図面を書くのは**本番の取り込みと同じ経路**
-//	    （draw/ImportRun の runImportRound）だけで、undo の作法もそちらが持つ
-//	    （ImportUndoScope）。走っている間は生存の印に `busy_until` を書いておく
-//	    （Python 側が「止まった」と取り違えないように）。
-//	  * **殻に頼む**（Shell）… `vw_update` / `vw_restart`。本体は自分を降ろせないので、
-//	    要求を引き取って見え方の `action` に載せて返すだけで、**応えない**。殻が済ませた
-//	    結末を次の呼び出しで受け取り（shellReport）、そのとき載っている本体が応える
-//	    （src/PayloadAbi.h の VwPayloadMcpServeFn）。
-//
-//	**新しく図面を書く道具を足すときは** undo の作法（[SDK リファレンス「Undo」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Undo.md)）を
-//	必ず通すこと——半端な記録を取り消すと図面が壊れる。**常駐なので、書く道具は人が図面を
-//	触っている最中にも届きうる**——人の操作と undo の記録が混ざらないかを先に確かめること。
 //
 
 #include "PluginPrefix.h"
@@ -69,17 +69,17 @@ namespace HomeskzIfcImport::draw
 		using core::Json;
 
 		// --- 受け付けの目安 -------------------------------------------------
-		// 生存の印を書き直す間隔。Python 側はこれが古びていたら「動いていない」と見る
+		// 生存の印を書き直す間隔。Python 側はこれが古びていたら「動いていない」と判定する
 		// （core::kBridgeStatusStaleSeconds）。**毎回は書かない**——パレットの時計は数百 ms
 		// ごとに来るので、そのたびにファイルを書き換えるのは無駄が大きい。
 		constexpr long long kStatusBeatSeconds = 2;
 		// スプールを用意できなかったとき、次に試すまで。一時ディレクトリが読めない・
-		// 素性が怪しい、はすぐには直らないので、毎回 mkdir / stat を叩かない。
+		// 素性が怪しい、はすぐには直らないので、毎回 mkdir / stat を呼び出さない。
 		constexpr long long kPrepareRetrySeconds = 10;
 
 		// --- 小さな共通ヘルパー ---------------------------------------------
 
-		// TXString（UTF-8）→ std::string。空ハンドルでも落ちないように受ける。
+		// TXString（UTF-8）→ std::string。空ハンドルでも異常終了しないように受ける。
 		std::string Utf8(const TXString& text)
 		{
 			const char* const raw = static_cast<const char*>(text);
@@ -106,8 +106,8 @@ namespace HomeskzIfcImport::draw
 
 		// **種別番号の読み替えは分かっているものだけ。** `Kernel/API/Objs.TDType.h` の
 		// 一覧は本リポジトリでは持たない（SDK の調査はリファレンス側。CLAUDE.md）ので、
-		// 既に Findings / 本リポジトリのコードで名前の割れているものだけを表にし、
-		// それ以外は番号のまま返す。**推測で名前を付けない**——嘘の名前は番号より悪い。
+		// 既に Findings / 本リポジトリのコードで名前の判明しているものだけを表にし、
+		// それ以外は番号のまま返す。**推測で名前を付けない**——誤った名前は番号より悪い。
 		const char* KnownTypeName(short type)
 		{
 			switch (type)
@@ -138,7 +138,7 @@ namespace HomeskzIfcImport::draw
 			return count;
 		}
 
-		// 名前でデザイン／シートレイヤを 1 枚引く（無ければ nil）。
+		// 名前でデザイン／シートレイヤを 1 枚取得する（無ければ nil）。
 		MCObjectHandle FindLayer(const std::string& name)
 		{
 			if (name.empty())
@@ -303,7 +303,7 @@ namespace HomeskzIfcImport::draw
 			const std::string only = args.at("layer").asString();
 
 			// 種別番号 → 件数。**番号の昇順で返す**（列挙順に依存させない。
-			// CLAUDE.md「決定性を守る」）。種別は 16 bit なので素直な配列で足りる。
+			// CLAUDE.md「決定性を守る」）。種別は 16 bit なので単純な配列で足りる。
 			std::vector<std::pair<short, long long>> tally;
 			const auto bump = [&tally](short type)
 			{
@@ -423,10 +423,10 @@ namespace HomeskzIfcImport::draw
 
 		Json RunTestTool(const Json& args, std::string& error)
 		{
-			// **開いている図面は要らない**（M39）——続きの周はテンプレートから自分で図面を
+			// **開いている図面は不要**（M39）——続きの周はテンプレートから自分で図面を
 			// 開く。再起動の直後は図面が 1 枚も開いていないのが普通なので、ここで弾かない。
 			// **ダイアログを 1 枚も出さない周**（draw/Feedback.h）。`ifc` を名指しされれば
-			// 尋ねずに 1 周目から始め（M40）、名指しも記憶も無ければ走らず、その理由を
+			// 尋ねずに 1 周目から始め（M40）、名指しも記憶も無ければ実行せず、その理由を
 			// message に入れて返す。
 			TestRoundRequest request;
 			request.ifcPath = args.at("ifc").asString();
@@ -448,7 +448,7 @@ namespace HomeskzIfcImport::draw
 
 		// --- 道具の表 --------------------------------------------------------
 		//
-		// **道具を足すときに触るのはここ 1 行と、その実装 1 つだけ。** 一覧は
+		// **道具を追加するときに変更するのはここ 1 行と、その実装 1 つだけ。** 一覧は
 		// `vw_tools` として Python 側（MCP の tools/list）へそのまま渡るので、
 		// **名前と引数の綴りをプラグインと Python の 2 か所へ書かなくてよい**。
 		// schema は MCP の inputSchema（JSON Schema）をそのまま書く。
@@ -459,7 +459,7 @@ namespace HomeskzIfcImport::draw
 		enum class ToolKind
 		{
 			Read, // その場で答える
-			Long, // その場で答えるが時間がかかる（生存の印に busy_until を書いてから走る）
+			Long, // その場で答えるが時間がかかる（生存の印に busy_until を書いてから実行する）
 			Shell, // 殻に頼む（本体は応えず、見え方の action に載せて返す）
 		};
 
@@ -468,11 +468,11 @@ namespace HomeskzIfcImport::draw
 			const char* name;
 			const char* description;
 			const char* schema;
-			ToolFn run; // Shell の道具は nullptr（殻が済ませる）
+			ToolFn run; // Shell の道具は nullptr（殻が処理する）
 			ToolKind kind;
 			// Python 側が応答を待つ上限（秒。0 は既定）。**表の外へ書き写さない**——
 			// tools/list の元（ToolCatalog）に `timeoutSeconds` として載り、Python はそれを
-			// 読んでから Claude へ見せる前に落とす（scripts/mcp/vw-mcp-server.py）。
+			// 読んでから Claude へ見せる前に除外する（scripts/mcp/vw-mcp-server.py）。
 			int timeoutSeconds;
 		};
 
@@ -565,7 +565,7 @@ namespace HomeskzIfcImport::draw
 				Json schema;
 				std::string error;
 				if (!Json::parse(tool.schema, schema, error))
-					schema = Json::object(); // 表の綴り間違いで一覧ごと落とさない
+					schema = Json::object(); // 表の綴り間違いで一覧ごと失敗させない
 				entry.set("inputSchema", schema);
 				if (tool.timeoutSeconds > 0)
 					entry.set("timeoutSeconds", Json::integer(tool.timeoutSeconds));
@@ -577,7 +577,7 @@ namespace HomeskzIfcImport::draw
 			return value;
 		}
 
-		// 名前で道具を引く（無ければ nullptr）。
+		// 名前で道具を検索する（無ければ nullptr）。
 		const Tool* FindTool(const std::string& name)
 		{
 			for (const Tool& tool : kTools)
@@ -588,15 +588,15 @@ namespace HomeskzIfcImport::draw
 			return nullptr;
 		}
 
-		// 要求 1 件を捌く。**例外をここで受ける**（1 件の失敗で橋を落とさない）。
-		// 殻に頼む道具（ToolKind::Shell）はここへ来ない（serveMcpBridge が引き取る）。
+		// 要求 1 件を処理する。**例外をここで受ける**（1 件の失敗で橋を停止させない）。
+		// 殻に頼む道具（ToolKind::Shell）はここへ来ない（serveMcpBridge が受け取る）。
 		core::BridgeResponse Handle(const core::BridgeRequest& request)
 		{
 			core::BridgeResponse response;
 			response.id = request.id;
 			try
 			{
-				// 道具の一覧そのものは表を引かずに答える（Python の tools/list の元）。
+				// 道具の一覧そのものは表を検索せずに答える（Python の tools/list の元）。
 				if (request.tool == "vw_tools")
 				{
 					response.ok = true;
@@ -649,9 +649,9 @@ namespace HomeskzIfcImport::draw
 
 		// 使うスプール。VW_MCP_SPOOL があればそれを優先する（Python 側も同じ）。
 		//
-		// **こちらは探さない。** 一時ディレクトリが両側で食い違いうる（macOS の $TMPDIR は
+		// **こちらは探索しない。** 一時ディレクトリが両側で食い違いうる（macOS の $TMPDIR は
 		// 利用者ごとで、ssh や cron から起動したプロセスには無い）ことへの手当ては
-		// Python 側が持つ——あちらが候補を順に見て、生きた印のあるところへ要求を置く
+		// Python 側が持つ——あちらが候補を順に確認して、有効な印のあるところへ要求を置く
 		// （core/Bridge.h の bridgeSpoolDir）。
 		std::string SpoolDirectory()
 		{
@@ -670,7 +670,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// busyTool / busyUntil は長く走る道具の最中だけ（空・0 なら載せない）。**Python 側は
-		// busy_until が未来なら、beat が古びていても「生きている」と見る**——実機テストの
+		// busy_until が未来なら、beat が古びていても「生きている」と判定する**——実機テストの
 		// 1 周は 1 分以上かかり、その間この本体は印を書き直せない。
 		Json StatusJson(long long served, long long failed, const std::string& busyTool = {},
 						long long busyUntil = 0)
@@ -681,7 +681,7 @@ namespace HomeskzIfcImport::draw
 			value.set("branch", Json::string(VW_BUILD_BRANCH));
 			value.set("protocol", Json::integer(core::kBridgeProtocolVersion));
 			// **これが「生きているか」の判定に使われる。** Python 側は現在時刻と比べて、
-			// 古びていたら「動いていない」と見る。
+			// 古びていたら「動いていない」と判定する。
 			value.set("beat", Json::integer(NowSeconds()));
 			value.set("served", Json::integer(served));
 			value.set("failed", Json::integer(failed));
@@ -699,7 +699,7 @@ namespace HomeskzIfcImport::draw
 	{
 		// 受け付けの状態。**本体の静的データなので、本体を入れ替えると初めからになる**
 		// （件数が 0 に戻るだけで、橋は途切れない——印は前の本体が書いたものが残っていて、
-		// 次の 1 回で書き直される）。メインスレッドしか触らないので排他は要らない。
+		// 次の 1 回で書き直される）。メインスレッドしかアクセスしないので排他は要らない。
 		struct ServeState
 		{
 			bool prepared = false;
@@ -711,12 +711,12 @@ namespace HomeskzIfcImport::draw
 			long long failed = 0;
 			long long lastRequestAt = -1;
 			std::string lastTool;
-			// **殻に頼む要求**（この 1 回で引き取ったもの。無ければ空）。見え方の `action` に
-			// 載せて殻へ渡し、結末は次の呼び出しの shellReport で戻ってくる。
+			// **殻に頼む要求**（この 1 回で受け取ったもの。無ければ空）。見え方の `action` に
+			// 載せて殻へ渡し、結果は次の呼び出しの shellReport で戻ってくる。
 			core::BridgeRequest action;
 			bool hasAction = false;
-			// 殻から受け取った結末を応答として書けたか（見え方の `reportDone`）。殻は
-			// これが立つまで同じ結末を渡し直す。
+			// 殻から受け取った結果を応答として書けたか（見え方の `reportDone`）。殻は
+			// これが立つまで同じ結果を渡し直す。
 			bool reportDone = false;
 		};
 
@@ -752,9 +752,9 @@ namespace HomeskzIfcImport::draw
 			return view.dump();
 		}
 
-		// スプールを用意する（済んでいれば何もしない）。**前の回の残骸は、生きた橋の後を
-		// 継ぐのでなければ消す**——本体の入れ替えのたびにここへ来るので、生きた橋がいるうちに
-		// 消すと、入れ替えの直前に書いた応答や、Python が置いたばかりの要求まで消える
+		// スプールを用意する（済んでいれば何もしない）。**前の回の残骸は、稼働中の橋の後を
+		// 継ぐのでなければ削除する**——本体の入れ替えのたびにここへ来るので、稼働中の橋が
+		// あるうちに削除すると、入れ替えの直前に書いた応答や、Python が置いたばかりの要求まで消える
 		// （core/Bridge.h の sweep）。
 		bool Prepare(ServeState& state, long long now)
 		{
@@ -777,16 +777,16 @@ namespace HomeskzIfcImport::draw
 
 	namespace
 	{
-		// **殻が済ませた頼みごとの結末を応答として書く**（PayloadAbi.h の VwPayloadMcpServeFn）。
+		// **殻が処理した要求の結果を応答として書く**（PayloadAbi.h の VwPayloadMcpServeFn）。
 		// 形は `{"id":…,"ok":…,"result":{…},"error":"…"}`（src/Extensions/ExtMcpPalette.cpp）。
-		// 書けたら true。**書いたのはいま載っている本体**なので、その素性を結果に添える
+		// 書けたら true。**書いたのはいま読み込まれている本体**なので、その素性を結果に添える
 		// ——vw_update のあと、新しい本体が応えたことを Claude が確かめられる。
 		bool ReplyShellReport(core::BridgeSpool& spool, const std::string& text)
 		{
 			Json report;
 			std::string error;
 			if (!Json::parse(text, report, error) || !report.isObject())
-				return true; // 読めない結末を何度渡されても書けない。受け取ったことにする
+				return true; // 読めない結果を何度渡されても書けない。受け取ったことにする
 			core::BridgeResponse response;
 			response.id = report.at("id").asString();
 			if (!core::isValidBridgeId(response.id))
@@ -832,7 +832,7 @@ namespace HomeskzIfcImport::draw
 				const Tool* const tool = FindTool(request.tool);
 				if (tool != nullptr && tool->kind == ToolKind::Shell)
 				{
-					// **殻に頼む。** 1 回に引き取れるのは 1 つだけ（済ませるあいだに本体が
+					// **殻に頼む。** 1 回に受け取れるのは 1 つだけ（処理するあいだに本体が
 					// 入れ替わりうるので、2 つ目は同じ本体に約束できない）。
 					std::string replyError;
 					if (state.hasAction)
@@ -853,7 +853,7 @@ namespace HomeskzIfcImport::draw
 				}
 				if (tool != nullptr && tool->kind == ToolKind::Long)
 				{
-					// 走っている間は印を書き直せないので、先に「いつまでかかりうるか」を書く。
+					// 実行中は印を書き直せないので、先に「いつまでかかりうるか」を書く。
 					std::string statusError;
 					(void)spool.writeStatus(StatusJson(state.served, state.failed, tool->name,
 													   now + tool->timeoutSeconds),
@@ -866,12 +866,12 @@ namespace HomeskzIfcImport::draw
 					++state.served;
 				else
 					++state.failed;
-				// vw_tools は Python が起動のたびに引くだけなので、「最後の道具」には数えない。
+				// vw_tools は Python が起動のたびに取得するだけなので、「最後の道具」には数えない。
 				if (request.tool != "vw_tools")
 					state.lastTool = request.tool;
 				if (tool != nullptr && tool->kind == ToolKind::Long)
 				{
-					// 時計が大きく進んでいる。印をすぐ書き直す（busy を下ろす）。
+					// 時計が大きく進んでいる。印をすぐ書き直す（busy を解除する）。
 					now = NowSeconds();
 					state.lastBeat = 0;
 				}

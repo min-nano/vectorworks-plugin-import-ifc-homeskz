@@ -25,7 +25,7 @@ namespace HomeskzIfcImport::parse
 	double NoboribariRoofPlane::zAt(double x, double y) const
 	{
 		// 天端 Z の式は垂木・野地板と共有する（parse/IfcGeometry の RoofSlope::zAt）。
-		// 平面のストーリ相対 Z に階の Elevation を足すと絶対 Z になる。
+		// 平面のストーリ相対 Z に階の Elevation を加えると絶対 Z になる。
 		return slope.zAt(x, y, storeyElevation);
 	}
 
@@ -58,7 +58,7 @@ namespace HomeskzIfcImport::parse
 			for (const RoofPlane* plane : context.storyRoofPlanes(story.id))
 			{
 				// 勾配方向が定まらない面（ほぼ水平）と平面式が発散する面（鉛直）は roofSlope が
-				// 弾く。垂木・野地板とまったく同じ関門なので、拾う面が三者でズレない。
+				// 除外する。垂木・野地板とまったく同じ関門なので、採用する面が三者で食い違わない。
 				RoofSlope slope;
 				if (!roofSlope(*plane, slope))
 					continue;
@@ -91,7 +91,8 @@ namespace HomeskzIfcImport::parse
 		// 探す順は**点が外側・面が内側**。中点を内包する面を全面から探し、無いときだけ端点で
 		// 探し直す。面を外側に回すと、並びが先の面が端点をかすめただけで中点を内包する面より
 		// 先に選ばれてしまう（実データで、隣の屋根版の外形に始端だけが入った登り梁が、その
-		// 屋根版の高さ（272 mm 上）へ吸われた。docs/DEV-NOTES.md「登り梁が隣の屋根面へ吸われる」）。
+		// 屋根版の高さ（272 mm 上）へ引き寄せられた。
+		// docs/DEV-NOTES.md「登り梁が隣の屋根面へ吸われる」）。
 		for (const Vec2& probe : probes)
 		{
 			for (const NoboribariRoofPlane& plane : planes)
@@ -151,7 +152,7 @@ namespace HomeskzIfcImport::parse
 		for (const MemberCommand& receiver : receivers)
 		{
 			// 受け材の footprint は**材が実際に占める範囲**（端部オフセットを戻した端点）で
-			// 見る。命令の端点は取り合い相手の芯線上まで伸びているので、そのままだと受け材が
+			// 判定する。命令の端点は取り合い相手の芯線上まで伸びているので、そのままだと受け材が
 			// 実際より長く見える（core/Document.h「端部オフセット」）。
 			const Vec2 receiverStart = core::memberDrawnStart(receiver);
 			const Vec2 receiverEnd = core::memberDrawnEnd(receiver);
@@ -220,7 +221,7 @@ namespace HomeskzIfcImport::parse
 			Vec2{command.start.x + (axis.x * sStart), command.start.y + (axis.y * sStart)};
 		updated.end = Vec2{command.end.x - (axis.x * sEnd), command.end.y - (axis.y * sEnd)};
 
-		// 2. 屋根面スナップ: 天端中央線の両端（詰めた後の XY）を屋根面へ落として、勾配・高さを
+		// 2. 屋根面スナップ: 天端中央線の両端（詰めた後の XY）を屋根面へ投影して、勾配・高さを
 		//    垂木下面に合わせる。屋根面が無ければ parse/Member の直切りの幾何のまま残す。
 		const NoboribariRoofPlane* plane = roofPlaneFor(command, planes, center);
 		if (plane != nullptr)
@@ -239,7 +240,7 @@ namespace HomeskzIfcImport::parse
 												 const std::vector<MemberCommand>& members,
 												 const std::vector<core::ColumnCommand>& columns)
 	{
-		// 登り梁が 1 本も無ければ屋根面の収集ごと省く（素通しと同じ結果）。
+		// 登り梁が 1 本も無ければ屋根面の収集ごと省く（変更せずに返すのと同じ結果）。
 		const bool hasNoboribari = std::ranges::any_of(members, [](const MemberCommand& m)
 													   { return m.drawClass == CLASS_NOBORIBARI; });
 		if (!hasNoboribari)

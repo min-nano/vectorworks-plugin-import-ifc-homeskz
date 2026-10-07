@@ -5,7 +5,7 @@
 //	読み取りだけを持つ。用途は 1 つ——**MCP ブリッジ**（core/Bridge.h）が Claude 側の
 //	MCP サーバと交わす要求／応答の器である。
 //
-//	【なぜ自前か】この 1 用途のために外部ライブラリを足すと、SDK 非依存ライブラリの
+//	【なぜ自前か】この 1 用途のために外部ライブラリを追加すると、SDK 非依存ライブラリの
 //	依存が増え、無 SDK でどこでもビルドできるという CI の土台（CLAUDE.md「テスト方針」）に
 //	外部の都合が入り込む。要るのは「素直な JSON を読み書きする」だけで、STEP リーダを
 //	自前で持っているのと同じ理由でここも自前にする。
@@ -16,13 +16,13 @@
 //	読みにくくなる。引きは線形探索だが、扱う要素数は数十なので問題にならない。
 //
 //	【外から来たものを読む】要求は**プラグインの外**（別プロセス）が書いたテキストである。
-//	壊れた入力・悪意ある入力で落ちないことが要件なので:
+//	壊れた入力・悪意ある入力で異常終了しないことが要件なので:
 //	  * 入れ子の深さに上限を設ける（深い配列で再帰させてスタックを溢れさせない）。
 //	  * 失敗は例外ではなく戻り値と error 文字列で返す（境界を越えさせない。CLAUDE.md
 //	    「エラーハンドリング」）。
 //
 //	【数値】書き出しはロケールに依存させない（`std::ostringstream` へ `std::locale::classic`
-//	を被せる）。小数点がカンマになる環境で壊れた JSON を吐くのを防ぐため。
+//	を適用する）。小数点がカンマになる環境で壊れた JSON を出力するのを防ぐため。
 //
 
 #pragma once
@@ -76,7 +76,7 @@ namespace HomeskzIfcImport::core
 			return fKind == Kind::Object;
 		}
 
-		// 型が違えば既定値を返す（呼ぶ側に型検査を撒かないための約束）。
+		// 型が違えば既定値を返す（呼ぶ側に型検査を分散させないための約束）。
 		bool asBool(bool fallback = false) const;
 		double asNumber(double fallback = 0.0) const;
 		std::string asString(const std::string& fallback = std::string()) const;
@@ -98,7 +98,7 @@ namespace HomeskzIfcImport::core
 		const Json& at(const std::string& key) const;
 		bool has(const std::string& key) const;
 
-		// --- 足す ----------------------------------------------------------
+		// --- 追加する ------------------------------------------------------
 		// 配列へ 1 つ（配列でなければ何もしない）。
 		void push(Json value);
 		// オブジェクトへ 1 つ。**同じ鍵が既にあれば置き換える**（並びは最初に入れた位置の
@@ -109,7 +109,7 @@ namespace HomeskzIfcImport::core
 		// 1 行の JSON テキスト（整形しない。読むのは機械だけ）。
 		std::string dump() const;
 
-		// 読み取り。成功したら true。失敗したら out は触らず error に理由が入る。
+		// 読み取り。成功したら true。失敗したら out は変更せず error に理由が入る。
 		static bool parse(const std::string& text, Json& out, std::string& error);
 
 	private:

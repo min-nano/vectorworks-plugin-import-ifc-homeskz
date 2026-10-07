@@ -46,7 +46,7 @@ namespace HomeskzIfcImport::parse
 			};
 		}
 
-		// 継手の片側 1 本（その材の命令とジオメトリ、継手にある端）。一時的に借りるだけなので
+		// 継手の片側 1 本（その材の命令とジオメトリ、継手にある端）。一時的に参照するだけなので
 		// ポインタで持つ（参照メンバは clang-tidy の cppcoreguidelines が禁じる）。
 		struct SplicePiece
 		{
@@ -61,7 +61,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 材軸の向き（度・反時計回り）を (−90, 90] に正規化する。向きの手掛かりが無いときの
-		// 既定で、どちらの材から見るかで 180 度変わるのを並び順に依存させないため
+		// 既定で、どちらの材を基準にするかで 180 度変わるのを並び順に依存させないため
 		// （parse/Splice.h「向き」）。
 		double normalizedAxisAngle(const Vec2& axis)
 		{
@@ -158,7 +158,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 継手 1 つの判定途中の値。土台以外は両側の支点までの距離を持ち、向きは全継手を
-		// 見てから決める（短いスパンは他の継手の支点からの距離を手掛かりにするため）。
+		// 確認してから決める（短いスパンは他の継手の支点からの距離を手掛かりにするため）。
 		struct SpliceCandidate
 		{
 			SymbolCommand command;
@@ -192,7 +192,7 @@ namespace HomeskzIfcImport::parse
 		std::optional<int> beamFemaleSide(const SpliceCandidate& candidate,
 										  std::optional<double> reference)
 		{
-			// 短いスパンでは「近い方」が当てにならない（継手が 2 つの支点のほぼ中間に来る）。
+			// 短いスパンでは「近い方」が信頼できない（継手が 2 つの支点のほぼ中間に来る）。
 			// 他の継手の支点からの距離と同じ距離にある側の支点を、その継手の支点とする。
 			const std::optional<double>& supportA = candidate.supportA;
 			const std::optional<double>& supportB = candidate.supportB;
@@ -218,7 +218,7 @@ namespace HomeskzIfcImport::parse
 
 		const std::string& symbol = options.symbol(core::SymbolRole::Splice);
 
-		// 材の端は仕口と同じ「材が実際に占める端」で見る（parse/Joint の memberGeom。
+		// 材の端は仕口と同じ「材が実際に占める端」で判定する（parse/Joint の memberGeom。
 		// parse/Splice.h「ホームズ君 IFC での継手の現れ方」）。
 		std::vector<MemberGeom> geoms;
 		geoms.reserve(members.size());
@@ -236,7 +236,7 @@ namespace HomeskzIfcImport::parse
 				const MemberGeom& b = geoms[j];
 				// 横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた材
 				// （"2-横架材天端(FL-872)"）も、軒桁の専用レイヤの材（"2-軒桁"）も同じ階の
-				// 横架材どうしなので、伏図レベルの印を外し、軒桁を横架材レイヤへ読み替えて比べる
+				// 横架材どうしなので、伏図レベルの印を除き、軒桁を横架材レイヤへ読み替えて比べる
 				// （parse/PlanLevel・parse/Story。仕口の parse/Joint と同じ）。
 				if (!b.valid || core::stripPlanLevelTag(beamGroupLayer(members[j].layer)) !=
 									core::stripPlanLevelTag(beamGroupLayer(members[i].layer)))
@@ -299,7 +299,7 @@ namespace HomeskzIfcImport::parse
 			if (!nearerSide(candidate.supportA, candidate.supportB).has_value())
 				continue;
 			const double near = std::min(*candidate.supportA, *candidate.supportB);
-			// レイヤは伏図レベルの印を外した元のレイヤで数える（振り分けで代表値を変えない）。
+			// レイヤは伏図レベルの印を除いた元のレイヤで数える（振り分けで代表値を変えない）。
 			layerDistances[core::stripPlanLevelTag(candidate.command.layer)].push_back(near);
 			allDistances.push_back(near);
 		}

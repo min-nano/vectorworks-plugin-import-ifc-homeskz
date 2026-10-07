@@ -23,7 +23,7 @@ namespace HomeskzIfcImport
 	{
 		// メニュー項目の宣言。カテゴリは他のコマンドと**同じ "category"**（＝プラグイン名）
 		// を引く——このプラグインのコマンドはワークスペースの中で 1 か所にまとまっている
-		// のが筋である（CLAUDE.md「殻と本体」）。
+		// のが適切である（CLAUDE.md「殻と本体」）。
 		//
 		// 関数ローカル static で持つ理由は他のコマンドと同じ（EMenuEnableFlags は SDK の
 		// 別 TU にある非ローカル static なので、名前空間スコープ変数の初期化子で参照すると
@@ -80,11 +80,12 @@ CTestMenu_EventSink::~CTestMenu_EventSink() = default;
 // ---------------------------------------------------------------------------
 void CTestMenu_EventSink::DoInterface()
 {
-	// **本体を確保する前に更新を確認する。** ここで新しい本体が入れば、下の PayloadUse が
-	// それを読み直すので、**この回からもう新しいコードが動く**（src/PayloadSession.h）。
+	// **本体を確保する前に更新を確認する。** ここで新しい本体がインストールされれば、下の
+	// PayloadUse がそれを再読み込みするので、**この回からもう新しいコードが動く**
+	// （src/PayloadSession.h）。
 	//
-	// NOLINTBEGIN(bugprone-empty-catch): 黙って諦めるのが**この場所では正しい**振る舞い
-	// （オフラインのときに無言なのと同じ扱い）。
+	// NOLINTBEGIN(bugprone-empty-catch): 何も表示せずに中断するのが**この場所では正しい**
+	// 振る舞い（オフラインのときに何も表示しないのと同じ扱い）。
 	bool proceed = true;
 	try
 	{
@@ -95,7 +96,7 @@ void CTestMenu_EventSink::DoInterface()
 	}
 	// NOLINTEND(bugprone-empty-catch)
 
-	// 入れると答えたのに入れられなかった。更新の側が理由を出し終えている。
+	// インストールすると答えたのにインストールできなかった。更新の側が理由を表示し終えている。
 	if (!proceed)
 		return;
 

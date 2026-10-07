@@ -114,7 +114,7 @@ namespace HomeskzIfcImport::parse
 	std::vector<std::string> spanLayersAtCut(const std::vector<ColumnSpan>& spans, double cut);
 
 	// **凡例の配置点も中身もここでは決めない**（M18・スタイル無し化）。用紙の大きさは
-	// 描くときにシートレイヤから読むもので解析側には分からないため、置き場所は描画側が
+	// 描画するときにシートレイヤから読むもので解析側には分からないため、置き場所は描画側が
 	// 用紙の割り付け（core::planLayout の legendTopRight＝ビューポートのために空けた右の
 	// 1 列）から決める。何を並べるか（ソース定義）も描画側がタグ付きデータで与える
 	// （draw/Legend）。

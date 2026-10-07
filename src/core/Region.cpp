@@ -21,7 +21,7 @@ namespace HomeskzIfcImport::core
 		// 座標の同一視幅（mm 単位系。IFC の座標は mm なので 1µm 未満は同一点とみなす）。
 		constexpr double kAxisEps = 1e-6;
 
-		// 部品の軸平行バウンディングボックス（セル中心の内外判定を安く弾くため）。
+		// 部品の軸平行バウンディングボックス（セル中心の内外判定の前に低コストで候補を絞るため）。
 		struct Bounds
 		{
 			double minX = 0.0;
@@ -43,7 +43,7 @@ namespace HomeskzIfcImport::core
 			return b;
 		}
 
-		// 値を昇順に並べて重複（kAxisEps 以内）を潰した格子線座標を返す。引数の器を
+		// 値を昇順に並べて重複（kAxisEps 以内）を除いた格子線座標を返す。引数の器を
 		// そのまま詰め直して返す（作業用のコンテナを増やさない）。
 		std::vector<double> makeAxis(std::vector<double> values)
 		{
@@ -55,7 +55,7 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 点がポリゴンの内側か（ray casting。境界上の扱いは不定でよい——格子線は必ず
-		// 部品の辺に載るので、判定はセル「中心」で行い境界には当たらない）。
+		// 部品の辺に載るので、判定はセル「中心」で行い境界上の点にはならない）。
 		bool pointInPolygon(const std::vector<Vec2>& poly, double x, double y)
 		{
 			bool inside = false;
@@ -190,7 +190,7 @@ namespace HomeskzIfcImport::core
 
 		// 領域を「囲まれた空隙」＋「それに接する実体セル（＝空隙を囲っている部材）」に
 		// 絞り込む。どの空隙にも接しない実体セル——骨組みから外へ突き出しただけの部材や
-		// 孤立した部材——は落ちるので、外形に細いヒゲが生えない。
+		// 孤立した部材——は除外されるので、外形に細い突起が生じない。
 		void keepEnclosingOnly(Grid& grid)
 		{
 			const std::vector<char> enclosed = enclosedCells(grid);
@@ -203,7 +203,7 @@ namespace HomeskzIfcImport::core
 					if (grid.solid[at] == 0)
 						continue;
 					// 斜めも含む 8 近傍で空隙に接していれば、その空隙を囲う部材とみなす
-					// （4 近傍だけだと角のセルが落ちて外形がギザギザになる）。
+					// （4 近傍だけだと角のセルが除外されて外形がギザギザになる）。
 					const std::size_t x0 = ix > 0 ? ix - 1 : 0;
 					const std::size_t x1 = std::min(ix + 1, grid.nx - 1);
 					const std::size_t y0 = iy > 0 ? iy - 1 : 0;
@@ -308,7 +308,7 @@ namespace HomeskzIfcImport::core
 			return sum;
 		}
 
-		// 共線の中間点を落とす（軸並行の外形は角だけで表せる）。ring を詰め直す。
+		// 共線の中間点を取り除く（軸並行の外形は角だけで表せる）。ring を詰め直す。
 		void dropCollinear(std::vector<Vec2>& ring)
 		{
 			const std::vector<Vec2> source = ring;
@@ -327,7 +327,7 @@ namespace HomeskzIfcImport::core
 		}
 
 		// 有向辺を繋いで閉ループを取り出し、面積が最大のもの（＝外形）を outline へ入れる。
-		// 穴のループは面積が小さい（かつ向きが逆）ので落ちる。edges は消費する。
+		// 穴のループは面積が小さい（かつ向きが逆）ので除外される。edges は消費する。
 		void traceOutline(const Grid& grid, std::multimap<std::size_t, std::size_t>& edges,
 						  std::vector<Vec2>& outline)
 		{
@@ -365,7 +365,7 @@ namespace HomeskzIfcImport::core
 	{
 		std::vector<std::vector<Vec2>> outlines;
 
-		// 3 点未満の部品は面積を持たないので落とす（内外判定も定義できない）。
+		// 3 点未満の部品は面積を持たないので除外する（内外判定も定義できない）。
 		std::vector<std::vector<Vec2>> usable;
 		for (const std::vector<Vec2>& part : parts)
 		{

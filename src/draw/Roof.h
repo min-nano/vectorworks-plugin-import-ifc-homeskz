@@ -20,14 +20,14 @@
 
 namespace HomeskzIfcImport::draw
 {
-	// Document の roof 命令を描く。配置した枚数を返す。
+	// Document の roof 命令を描画する。配置した枚数を返す。
 	//
 	// 配置先レイヤ（"n-野地板"）が無い命令はスキップする（レイヤは story 命令が作るので、
-	// 無い＝そのストーリの生成がスキップされたということ。野地板のために勝手にレイヤを作らな
+	// 無い＝そのストーリの生成がスキップされたということ。野地板のために独自にレイヤを作らな
 	// い）。
 	//
-	// progress には 1 件描くごとに 1 ステップ報告し、**ループの先頭で中止を見て抜ける**
-	// （進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
-	// 決める）。描けたところまでは図面に残る。
+	// progress には 1 件描画するごとに 1 ステップ報告し、**ループの先頭で中止要求を確認して
+	// 抜ける**（進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
+	// 決める）。描画済みの分は図面に残る。
 	std::size_t drawRoofs(const core::Document& document, core::ProgressReporter& progress);
 } // namespace HomeskzIfcImport::draw

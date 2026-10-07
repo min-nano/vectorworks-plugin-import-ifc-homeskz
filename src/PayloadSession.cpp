@@ -21,7 +21,7 @@ namespace HomeskzIfcImport
 			return sPayload;
 		}
 
-		// **本体のコードがスタックに載っている深さ。** 0 のときだけ降ろしてよい。
+		// **本体のコードがスタックに載っている深さ。** 0 のときだけアンロードしてよい。
 		int& Depth()
 		{
 			static int sDepth = 0;
@@ -45,23 +45,23 @@ namespace HomeskzIfcImport
 	{
 		Payload& payload = ThePayload();
 
-		// **入れ替えの判定は深さ 0 のときだけ。** 本体のコードが 1 つでも走っている間に
-		// 降ろすと、そのコードと静的データが消える（PayloadSession.h）。
+		// **入れ替えの判定は深さ 0 のときだけ。** 本体のコードが 1 つでも実行中のときに
+		// アンロードすると、そのコードと静的データが消える（PayloadSession.h）。
 		if (Depth() == 0 && payload.isLoaded())
 		{
 			const PayloadStamp now = StampOf(BundledPayloadPath());
 			// 印が取れなかったときは**何もしない**（古いまま動かすほうが安全で、次の
-			// 入口でもう一度見る機会がある）。
+			// 入口でもう一度確認する機会がある）。
 			if (now.valid && payload.stamp().valid && now != payload.stamp())
 				payload.unload();
 		}
 
 		if (!payload.isLoaded())
 		{
-			// 読み直しに失敗したら本体は載っていない状態になる。**古いほうへ戻す道は
-			// 無い**（降ろした時点でコードは消えている）ので、呼び出し側が理由を見せる。
-			// アップデータは新しい本体を一時ファイルへ落としてから置き換える約束なので、
-			// 途中まで書かれたファイルを掴むことは無い（scripts/vw-update.*）。
+			// 再読み込みに失敗したら本体は読み込まれていない状態になる。**古いほうへ戻す手段は
+			// 無い**（アンロードした時点でコードは消えている）ので、呼び出し側が理由を表示する。
+			// アップデータは新しい本体を一時ファイルへダウンロードしてから置き換える約束なので、
+			// 途中まで書かれたファイルを読み込むことは無い（scripts/vw-update.*）。
 			if (!payload.load(Callbacks(), fError))
 				return;
 		}

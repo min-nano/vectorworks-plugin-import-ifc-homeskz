@@ -40,8 +40,8 @@ namespace HomeskzIfcImport::core
 
 	namespace
 	{
-		// 描画フェーズの表。**ここが唯一の一覧**で、要素を足したら DrawPhase に 1 つ、
-		// この表に 1 行を足す（Count と行数が食い違えばテストが落ちる）。
+		// 描画フェーズの表。**ここが唯一の一覧**で、要素を追加したら DrawPhase に 1 つ、
+		// この表に 1 行を追加する（Count と行数が食い違えばテストが失敗する）。
 		//
 		// weight は**実測の 1 件あたりミリ秒**（安藤邸 IFC・命令 1,000 超・macOS。診断ログの
 		// フェーズ見出しの時刻差 ÷ 件数を丸めたもの）。絶対値に意味は無く、要素どうしの比だけを
@@ -68,7 +68,7 @@ namespace HomeskzIfcImport::core
 			{0.1, [](const Document& d) { return d.floorPosts.size(); }},
 			{0.2, [](const Document& d) { return d.fireBraces.size(); }},
 			{0.1, [](const Document& d) { return d.joints.size(); }},
-			{0.1, [](const Document& d) { return d.splices.size(); }}, // 仕口と同じ描き方
+			{0.1, [](const Document& d) { return d.splices.size(); }}, // 仕口と同じ描画方法
 			{6.0, [](const Document& d) { return d.columnMarks.size(); }},
 			{6.0, [](const Document& d) { return d.shearWalls.size(); }},
 			{480.0, [](const Document& d) { return d.sheets.size(); }},
@@ -110,9 +110,9 @@ namespace HomeskzIfcImport::core
 		fStatus.done = 0;
 		fStatus.total = totalSteps;
 
-		// クラッシュ診断ログへフェーズの区切りを流す（有効でなければ何もしない）。
-		// **トレースの呼び出しを各要素へ撒かないための 1 か所**——解析も描画も
-		// フェーズの見出しはここを通るので、ログの最終行がそのまま「どこで落ちたか」に
+		// クラッシュ診断ログへフェーズの区切りを出力する（有効でなければ何もしない）。
+		// **トレースの呼び出しを各要素へ分散させないための 1 か所**——解析も描画も
+		// フェーズの見出しはここを通るので、ログの最終行がそのまま「どこで異常終了したか」に
 		// なる（core/Trace.h「誰が書くか」）。
 		trace::log(formatProgressText(fStatus));
 
@@ -122,7 +122,7 @@ namespace HomeskzIfcImport::core
 	void ProgressReporter::step(std::size_t count)
 	{
 		fStatus.done += count;
-		// 総数が分かっているなら超えさせない（呼び出し側が数え違えてもバーが暴れない）。
+		// 総数が分かっているなら超えさせない（呼び出し側が数え違えてもバーの表示が乱れない）。
 		if (fStatus.total != 0)
 			fStatus.done = std::min(fStatus.done, fStatus.total);
 		onStep(fStatus);

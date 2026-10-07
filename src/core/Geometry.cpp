@@ -5,7 +5,7 @@
 //	行列の生成・合成・適用だけをここに分ける（凸多角形のクリップ clipPolygonToHalfPlane /
 //	clipPolygonToConvex も同じ理由でここ）。
 //	純粋な数値計算で SDK 非依存（core/Geometry.h の方針に従う）。GeometryTests で
-//	手計算値と突き合わせる。
+//	手計算値と照合する。
 //
 
 #include "core/Geometry.h"
@@ -131,7 +131,7 @@ namespace HomeskzIfcImport::core
 		if (clip.size() < 3)
 			return {};
 
-		// 切る側の辺を 1 本ずつ半平面として当てていく。clip は反時計回りなので、
+		// 切る側の辺を 1 本ずつ半平面として適用していく。clip は反時計回りなので、
 		// 辺 a→b の**左手側**が残す側（clipPolygonToHalfPlane の向きそのまま）。
 		std::vector<Vec2> current = polygon;
 		const std::size_t edges = clip.size();

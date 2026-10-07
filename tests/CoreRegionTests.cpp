@@ -76,7 +76,7 @@ namespace
 
 TEST(closed_ring_becomes_one_filled_outline)
 {
-	// 4 本で閉じた骨組み → 内側の空隙が埋まり、外形は外周の矩形 1 つ（共線点は落ちる）。
+	// 4 本で閉じた骨組み → 内側の空隙が埋まり、外形は外周の矩形 1 つ（共線点は除去される）。
 	const std::vector<std::vector<Vec2>> outlines = filledUnionOutlines(ring());
 	CHECK_EQ(outlines.size(), static_cast<std::size_t>(1));
 	if (outlines.empty())
@@ -110,7 +110,7 @@ TEST(inner_joists_do_not_change_the_outline)
 TEST(protruding_member_is_excluded)
 {
 	// 骨組みから外へ突き出しただけの部材は、どの空隙も囲っていないので床にならない
-	// （外形に部材 1 本分の幅のヒゲが生えない）。
+	// （外形に部材 1 本分の幅の突起ができない）。
 	std::vector<std::vector<Vec2>> parts = ring();
 	parts.push_back(rect(1000.0, 0.0, 900.0, 100.0)); // 右へ 1450 まで突き出す
 

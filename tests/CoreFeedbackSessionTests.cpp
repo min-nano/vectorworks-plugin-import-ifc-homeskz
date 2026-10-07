@@ -2,12 +2,12 @@
 //	CoreFeedbackSessionTests.cpp
 //
 //	実機テストの記憶（src/core/FeedbackSession）の単体テスト。VectorWorks SDK を
-//	一切 include せず、無 SDK のテストハーネスで走る（CLAUDE.md「テスト方針」）。
+//	一切 include せず、無 SDK のテストハーネスで実行する（CLAUDE.md「テスト方針」）。
 //
 //	検証項目（docs/DEV-NOTES.md M23）: 既定は「何もしない」・書いて読んで元に戻る・
-//	壊れた行を飛ばして読み続ける・ファイルへの読み書き。**2 周目が走るかどうかはこの
-//	記憶だけに懸かっている**（MCP の vw_run_test はダイアログを出せない）ので、ここを
-//	壊さないこと。
+//	壊れた行を読み飛ばして読み続ける・ファイルへの読み書き。ここを壊さないこと——
+//	**2 周目が実行されるかどうかはこの記憶だけで決まる**（MCP の vw_run_test は
+//	ダイアログを出せない）。
 //
 
 #include "TestFramework.h"
@@ -39,7 +39,7 @@ using HomeskzIfcImport::core::writeFeedbackSession;
 
 namespace
 {
-	// 一通り埋めた記憶（周をまたいで実際に運ぶ値の全部）。
+	// 一通り埋めた記憶（周をまたいで実際に引き継ぐ値のすべて）。
 	FeedbackSession sample()
 	{
 		FeedbackSession session;
@@ -58,9 +58,9 @@ namespace
 		session.options.setDimensionStandard("構造図 寸法");
 		session.options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{1, 3531}, true);
 		session.options.setMergeWithPrevious(HomeskzIfcImport::core::PlanLevelKey{2, 6374}, true);
-		// M34 軸組図から外す通り（重なった図番の "(2)" も含めて）。
+		// M34 軸組図から除外する通り（重なった図番の "(2)" も含めて）。
 		session.options.setSkippedSections({"X1", "1(2)", "又い"});
-		// 垂木の断面（端数付きの寸法も運べること）。
+		// 垂木の断面（端数付きの寸法も引き継げること）。
 		session.options.setRafterSize(60.5, 105.0);
 		return session;
 	}
@@ -73,9 +73,10 @@ namespace
 		return (dir / name).string();
 	}
 
-	// 環境変数の付け外し。**置き場所の決め方は環境変数だけで決まる**ので、これが無いと
-	// その分岐（Windows 流・macOS 流・どちらも取れない）を確かめられない。綴りが処理系で
-	// 違うのでここに閉じ込める（core/Trace が getenv を 1 か所へ閉じ込めているのと同じ）。
+	// 環境変数の設定と解除。**置き場所は環境変数だけで決まる**ので、これが無いと
+	// その分岐（Windows 流・macOS 流・どちらも取得できない）を確認できない。綴りが
+	// 処理系で異なるのでここに閉じ込める（core/Trace が getenv を 1 か所へ閉じ込めて
+	// いるのと同じ）。
 	void setEnv(const char* name, const char* value)
 	{
 #if defined(_WIN32)
@@ -88,7 +89,7 @@ namespace
 #endif
 	}
 
-	// 環境変数を 1 つ預かって、抜けるときに元へ戻す（他のテストへ漏らさない）。
+	// 環境変数を 1 つ保存し、スコープを抜けるときに元へ戻す（他のテストへ影響させない）。
 	class ScopedEnv
 	{
 	public:
@@ -125,12 +126,12 @@ TEST(feedback_session_defaults_do_nothing)
 
 TEST(feedback_session_without_a_baseline_reads_as_not_recorded)
 {
-	// 古い版が書いた記憶（baseline の行が無い）。**空の基準と取り違えない**——
-	// 取り違えると、基準を採る前の周を「戻っています」と報告してしまう。
+	// 古い版が書いた記憶（baseline の行が無い）。**空の基準と区別する**——
+	// 混同すると、基準を採る前の周を「戻っています」と報告してしまう。
 	const FeedbackSession session = parseFeedbackSession("round=2\nbuild=a1b2c3d\n");
 	CHECK(!session.baselineRecorded);
 	CHECK(session.baselineLayers.empty());
-	// テンプレートの行（M39）も無い。**空＝基準が無い**ので、MCP の周は走らず、
+	// テンプレートの行（M39）も無い。**空＝基準が無い**ので、MCP の周は実行されず、
 	// メニューの周はいま開いている図面から採り直す。閉じる相手も無い。
 	CHECK(session.templatePath.empty());
 	CHECK(session.ownedDocuments.empty());
@@ -138,7 +139,7 @@ TEST(feedback_session_without_a_baseline_reads_as_not_recorded)
 
 TEST(feedback_session_drops_the_m38_rollback_lines)
 {
-	// M38 までの記憶（作業ファイル・前の周が作ったレイヤ）。**黙って読み飛ばす**——作業
+	// M38 までの記憶（作業ファイル・前の周が作ったレイヤ）。**警告せずに読み飛ばす**——作業
 	// ファイル（.vwx）は開くとそのファイル自体が開くので、テンプレートの代わりにしない。
 	const FeedbackSession session =
 		parseFeedbackSession("round=4\nifc=/tmp/a.ifc\nwork=/tmp/homeskz-test/main/work-1.vwx\n"
@@ -153,7 +154,7 @@ TEST(feedback_session_drops_the_m38_rollback_lines)
 
 TEST(feedback_session_keeps_an_empty_baseline_distinct_from_none)
 {
-	// まっさらな図面で始めた 1 周目は「基準は採ったが 0 枚」。真偽が無いと区別できない。
+	// 空の図面で始めた 1 周目は「基準は採ったが 0 枚」。真偽が無いと区別できない。
 	FeedbackSession empty;
 	empty.baselineRecorded = true;
 	const FeedbackSession after = parseFeedbackSession(formatFeedbackSession(empty));
@@ -167,9 +168,9 @@ TEST(feedback_session_round_trips_through_text)
 	const FeedbackSession after = parseFeedbackSession(formatFeedbackSession(before));
 
 	CHECK_EQ(after.ifcPath, before.ifcPath);
-	// **毎周開くテンプレート**（M39）。落ちると MCP の周が走らなくなる。
+	// **毎周開くテンプレート**（M39）。欠けると MCP の周が実行されなくなる。
 	CHECK_EQ(after.templatePath, before.templatePath);
-	// **自分で保存した図面**（M39）。落ちると次の周で閉じられず、周の数だけ積み上がる
+	// **自分で保存した図面**（M39）。欠けると次の周で閉じられず、周の数だけ増えていく
 	// （再起動のときに保存の確認が並ぶ）。
 	CHECK_EQ(after.ownedDocuments.size(), before.ownedDocuments.size());
 	for (std::size_t i = 0; i < before.ownedDocuments.size(); ++i)
@@ -177,33 +178,33 @@ TEST(feedback_session_round_trips_through_text)
 	CHECK_EQ(after.round, before.round);
 	CHECK_EQ(after.lastCommit, before.lastCommit);
 	CHECK_EQ(after.lastTally, before.lastTally);
-	// 1 周目に採った基準（レイヤの顔ぶれ）。**ここが落ちると次の周で図面が戻っているかを
+	// 1 周目に採った基準（レイヤの構成）。**ここが欠けると次の周で図面が戻っているかを
 	// 判定できなくなる**（テンプレートのレイヤと前の周の残りを区別できない）。
 	CHECK_EQ(after.baselineRecorded, before.baselineRecorded);
 	CHECK_EQ(after.baselineLayers.size(), before.baselineLayers.size());
 	for (std::size_t i = 0; i < before.baselineLayers.size(); ++i)
 		CHECK_EQ(after.baselineLayers[i], before.baselineLayers[i]);
-	// 取り込み設定も 1 周目のまま運ばれる（ここが落ちると 2 周目が別の条件で走る）。
+	// 取り込み設定も 1 周目のまま引き継がれる（ここが欠けると 2 周目が別の条件で実行される）。
 	for (std::size_t i = 0; i < kSymbolRoleCount; ++i)
 	{
 		const auto role = static_cast<SymbolRole>(i);
 		CHECK_EQ(after.options.symbol(role), before.options.symbol(role));
 		CHECK_EQ(after.options.isEnabled(role), before.options.isEnabled(role));
 	}
-	// 役割の表の外にある設定（M28 図面枠のスタイル）も運ばれる。ここが落ちると 2 周目
+	// 役割の表の外にある設定（M28 図面枠のスタイル）も引き継がれる。ここが欠けると 2 周目
 	// 以降は図面枠が 1 枚も置かれない（PR #133 の round 2 で実際に起きた）。
 	CHECK_EQ(after.options.titleBlockStyle(), before.options.titleBlockStyle());
 	CHECK(after.options.hasTitleBlock());
-	// M31 寸法規格も運ばれる（落ちると 2 周目以降は寸法が 1 つも入らない）。
+	// M31 寸法規格も引き継がれる（欠けると 2 周目以降は寸法が 1 つも入らない）。
 	CHECK_EQ(after.options.dimensionStandard(), before.options.dimensionStandard());
 	CHECK(after.options.hasDimensions());
-	// 伏図のまとめ方も運ばれる（落ちると 2 周目以降は伏図の枚数が 1 周目と変わる）。
+	// 伏図のまとめ方も引き継がれる（欠けると 2 周目以降は伏図の枚数が 1 周目と変わる）。
 	CHECK(after.options.mergedPlanLevels == before.options.mergedPlanLevels);
 	CHECK_EQ(after.options.mergedPlanLevels.size(), std::size_t(2));
-	// M34 外した通りも運ばれる（落ちると 2 周目以降は外したはずの通りまで描く）。
+	// M34 除外した通りも引き継がれる（欠けると 2 周目以降は除外したはずの通りまで描画する）。
 	CHECK(after.options.skippedSections == before.options.skippedSections);
 	CHECK_EQ(after.options.skippedSections.size(), std::size_t(3));
-	// 垂木の断面も運ばれる（落ちると 2 周目以降は既定の 45×45 で描く）。
+	// 垂木の断面も引き継がれる（欠けると 2 周目以降は既定の 45×45 で描画する）。
 	CHECK(std::abs(after.options.rafterWidth - 60.5) < 1e-9);
 	CHECK(std::abs(after.options.rafterHeight - 105.0) < 1e-9);
 }
@@ -216,7 +217,7 @@ TEST(feedback_session_without_a_title_block_line_places_none)
 	CHECK(session.options.titleBlockStyle().empty());
 	// M31 より前の記憶には dimension の行も無い。**入れない**と読む。
 	CHECK(!session.options.hasDimensions());
-	// M34 より前の記憶には section.skip の行も無い。**全部描く**と読む。
+	// M34 より前の記憶には section.skip の行も無い。**全部描画する**と読む。
 	CHECK(session.options.skippedSections.empty());
 	// 伏図のまとめ方の行が無い記憶は**まとめない**と読む。
 	CHECK(session.options.mergedPlanLevels.empty());
@@ -245,8 +246,8 @@ TEST(feedback_session_skips_unreadable_merge_lines)
 TEST(feedback_session_reads_an_m37_memory_without_the_pull_request_lines)
 {
 	// M37 までの記憶には PR へ投稿していた頃の行（send / repo / pr / branch / anon /
-	// posted / loop）が並ぶ。**黙って読み飛ばし、IFC と設定はそのまま続きの周に使う**
-	// ——更新しただけで 1 周目からやり直しになると、MCP から続きの周を起こせない。
+	// posted / loop）が並ぶ。**警告せずに読み飛ばし、IFC と設定はそのまま続きの周に使う**
+	// ——更新しただけで 1 周目からやり直しになると、MCP から続きの周を開始できない。
 	const FeedbackSession session = parseFeedbackSession(
 		"send=1\nrepo=owner/repo\npr=137\nbranch=feature/x\nifc=/tmp/model.ifc\nanon=0\n"
 		"round=4\nbuild=a1b2c3d\nposted=2026-09-07T01:02:03Z\nloop=1\n"
@@ -264,8 +265,8 @@ TEST(feedback_session_reads_an_m37_memory_without_the_pull_request_lines)
 
 TEST(feedback_session_parse_skips_broken_lines)
 {
-	// 見出し・空行・"=" の無い行・知らないキー・番号にならない／範囲外の役割は黙って
-	// 飛ばし、読める行だけを拾う（古い版が書いたファイルで往復を止めない）。
+	// 見出し・空行・"=" の無い行・知らないキー・番号にならない／範囲外の役割は警告せずに
+	// 読み飛ばし、読める行だけを取得する（古い版が書いたファイルで往復を止めない）。
 	const std::string text = "# コメント\n"
 							 "\n"
 							 "イコールがまったく無い行\n"
@@ -275,14 +276,14 @@ TEST(feedback_session_parse_skips_broken_lines)
 							 "roleでもドットが続かない=1\n"
 							 "round=7\n"
 							 "send=yes\n"
-							 "auto=off\n"; // 昔の版が書いた行。知らない鍵は黙って飛ばす
+							 "auto=off\n"; // 昔の版が書いた行。知らない鍵は警告せずに読み飛ばす
 	const FeedbackSession session = parseFeedbackSession(text);
 	CHECK_EQ(session.round, 7);
 }
 
 TEST(feedback_session_parse_keeps_defaults_for_unreadable_values)
 {
-	// 真偽にならない綴り・桁あふれは**既定のまま**（0 に潰さない・例外を投げない）。
+	// 真偽にならない綴り・桁あふれは**既定のまま**（0 にしない・例外を投げない）。
 	const FeedbackSession session = parseFeedbackSession("baseline=たぶん\n"
 														 "round=99999999999\n");
 	CHECK(!session.baselineRecorded); // 既定（false）のまま
@@ -291,7 +292,7 @@ TEST(feedback_session_parse_keeps_defaults_for_unreadable_values)
 
 TEST(feedback_session_parse_trims_blank_values)
 {
-	// 値が空白だけの行は「空」として読む（前後の空白を落とすので何も残らない）。
+	// 値が空白だけの行は「空」として読む（前後の空白を除去するので何も残らない）。
 	const FeedbackSession session = parseFeedbackSession("template=   \nifc= /tmp/a.ifc \n");
 	CHECK(session.templatePath.empty());
 	CHECK_EQ(session.ifcPath, std::string("/tmp/a.ifc"));
@@ -331,13 +332,13 @@ TEST(feedback_session_file_round_trip)
 	clearFeedbackSession(path);
 	FeedbackSession gone;
 	CHECK(!readFeedbackSession(path, gone));
-	// 二度消しても落ちない。
+	// 二度削除しても異常終了しない。
 	clearFeedbackSession(path);
 }
 
 TEST(feedback_session_write_reports_a_place_it_cannot_write)
 {
-	// 書けなくても取り込みは続けられる（2 周目が走らないだけ）ので、**例外ではなく false**。
+	// 書けなくても取り込みは続けられる（2 周目が実行されないだけ）ので、**例外ではなく false**。
 	// ファイルの下のパスは、ディレクトリとしても作れないので確実に失敗する。
 	const std::string file = tempPath("homeskz-feedback-not-a-dir.txt");
 	{
@@ -351,8 +352,8 @@ TEST(feedback_session_write_reports_a_place_it_cannot_write)
 
 TEST(feedback_session_default_path_follows_the_platform)
 {
-	// **置き場所は環境変数だけで決まる。** 一時ディレクトリには置かない（消えると
-	// 2 周目が走らない）ので、ここが狂うと往復が静かに 1 周で終わる。
+	// **置き場所は環境変数だけで決まる。** ここが誤ると往復が通知なく 1 周で終わる。
+	// 一時ディレクトリには置かない（消えると 2 周目が実行されない）。
 	{
 		// 差し替え（試験用）が最優先。
 		const ScopedEnv custom("HOMESKZ_IFC_FEEDBACK_STATE", "/tmp/custom-feedback.txt");
@@ -385,7 +386,7 @@ TEST(feedback_session_default_path_follows_the_platform)
 
 TEST(feedback_session_empty_path_is_refused)
 {
-	// 置き場所が決まらない環境では、黙って諦める（記憶を持たずに 1 周で終わる）。
+	// 置き場所が決まらない環境では、通知なく諦める（記憶を持たずに 1 周で終わる）。
 	FeedbackSession session;
 	CHECK(!readFeedbackSession("", session));
 	CHECK(!writeFeedbackSession("", session));
@@ -408,7 +409,7 @@ TEST(test_report_sits_next_to_the_memory)
 
 // ---------------------------------------------------------------------------
 // **実機テストの周がどれになるか**（M25 / M38。core/FeedbackSession.h の feedbackRoundKind）。
-// この場合分けを描画側に散らさず、無 SDK でここに固定する。
+// この場合分けを描画側に分散させず、無 SDK でここに固定する。
 
 namespace
 {
@@ -433,8 +434,8 @@ TEST(feedback_round_kind_continues_with_memory)
 
 TEST(feedback_round_kind_imports_again_on_the_same_build)
 {
-	// **同じビルドでも取り込む**（M38）。M37 までは RearmOnly で取り込まなかったが、投稿を
-	// やめたので、取り込み直すかは頼んだ側が決める。判断はビルドの sha を見ない。
+	// **同じビルドでも取り込む**（M38）。取り込み直すかは頼んだ側が決め、判断にビルドの
+	// sha を参照しない。M37 までは RearmOnly で取り込まなかったが、投稿をやめたため。
 	FeedbackSession session = ranOnce();
 	session.lastCommit = "bbbbbbb";
 	CHECK(feedbackRoundKind(session, true) == FeedbackRoundKind::ContinueRound);
@@ -462,8 +463,8 @@ TEST(feedback_round_kind_refuses_when_it_would_have_to_ask)
 
 TEST(feedback_round_kind_refuses_mcp_without_a_template)
 {
-	// **テンプレートが無いと MCP の周は走らない**（M39）。人の居ない周に「いま開いている
-	// 図面」を基準に採らせない——前の周の絵が載った図面がそのまま基準になりうる。
+	// **テンプレートが無いと MCP の周は実行されない**（M39）。人の居ない周に「いま開いている
+	// 図面」を基準に採らせない——前の周の描画結果が載った図面がそのまま基準になりうる。
 	FeedbackSession session = ranOnce();
 	session.templatePath.clear();
 	CHECK(feedbackRoundKind(session, /*allowDialogs*/ false) == FeedbackRoundKind::Refuse);
@@ -487,14 +488,14 @@ TEST(feedback_round_kind_starts_an_unattended_first_round_when_an_ifc_is_named)
 
 TEST(feedback_round_kind_refuses_a_named_ifc_without_a_template)
 {
-	// **テンプレートが無ければ、名指しされても走らない**——描く先をいま開いている図面に
+	// **テンプレートが無ければ、名指しされても実行されない**——描画先をいま開いている図面に
 	// 求めない（M39 の Refuse と同じ理由）。
 	CHECK(feedbackRoundKind(FeedbackSession{}, /*allowDialogs*/ false, /*ifcRequested*/ true) ==
 		  FeedbackRoundKind::Refuse);
 	FeedbackSession session = ranOnce();
 	session.templatePath.clear();
 	CHECK(feedbackRoundKind(session, false, true) == FeedbackRoundKind::Refuse);
-	// メニューの周では名指しを見ない（人が選ぶ）。
+	// メニューの周では名指しを参照しない（人が選ぶ）。
 	CHECK(feedbackRoundKind(FeedbackSession{}, /*allowDialogs*/ true, /*ifcRequested*/ true) ==
 		  FeedbackRoundKind::FirstRound);
 }
@@ -531,9 +532,9 @@ TEST(owned_test_document_outside_the_scratch_root_is_never_closed)
 
 TEST(owned_test_document_matches_another_spelling_of_the_same_file)
 {
-	// macOS の一時ディレクトリは /var と /private/var の 2 通りで返る——字面が違っても
-	// 同じファイルなら同じと見る（std::filesystem::equivalent）。ここでは "." を挟んだ
-	// 綴りで確かめる（実在するファイルが要る）。
+	// 字面が違っても同じファイルなら同じとみなす（std::filesystem::equivalent）。ここでは
+	// "." を挟んだ綴りで確認する（実在するファイルが要る）。macOS の一時ディレクトリは
+	// /var と /private/var の 2 通りで返るため。
 	namespace fs = std::filesystem;
 	std::error_code ec;
 	const fs::path root = fs::temp_directory_path(ec) / "homeskz-owned-doc-test";

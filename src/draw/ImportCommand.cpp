@@ -6,8 +6,8 @@
 //	要素が増えても入口はこの形のまま（各要素の追加は Document と draw 側で行う）。
 //
 //	**ここには往復（実機フィードバック）の分岐が 1 つも無い**——M25 でそれを dev だけの
-//	テストコマンド（draw/Feedback.h の runTestRound）へ出したため。両者が共有するのは
-//	絵を作るところ（draw/ImportRun.h）だけである。
+//	テストコマンド（draw/Feedback.h の runTestRound）へ分離したため。両者が共有するのは
+//	描画結果を作るところ（draw/ImportRun.h）だけである。
 //
 
 #include "PluginPrefix.h"
@@ -37,15 +37,15 @@ namespace HomeskzIfcImport::draw
 		// the time this function runs, the payload is already loaded and cannot be
 		// swapped. So the command just does its work below, every time it runs.
 
-		// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら静かに終える。
+		// 1. ネイティブの「開く」ダイアログで IFC を 1 つ選ばせる。キャンセルなら何もせずに終える。
 		std::string ifcPath;
 		if (!chooseIfcFile(ifcPath))
 			return;
 
-		// 2. 取り込みの設定（配置するシンボルの対応）を決める。キャンセルなら静かに終える
-		//    ——ファイルは選んだが取り込みたくない、という意思表示なので何も描かない。
+		// 2. 取り込みの設定（配置するシンボルの対応）を決める。キャンセルなら何もせずに
+		//    終える——ファイルは選んだが取り込みたくない、という意思表示なので何も描画しない。
 		//    ダイアログを組めなかったときは**既定の対応でそのまま進む**（設定を出せない
-		//    ことを理由に取り込み自体を落とさない。draw/SettingsDialog.h）。
+		//    ことを理由に取り込み自体を失敗させない。draw/SettingsDialog.h）。
 		//
 		//    伏図のまとめ方を問うために、**ダイアログより先に IFC を 1 度読んで横架材の高さを
 		//    集める**（伏図は高さごとに 1 枚。どの高さをまとめるかは設計者が決める）。
@@ -61,8 +61,8 @@ namespace HomeskzIfcImport::draw
 
 		// 3. 軸組図にする通りを選ぶ（M34。draw/SectionPickDialog.h）。候補は**取り込みと同じ
 		//    解析**で出す——解析は大きなホームズ君 IFC でも 0.1 秒程度なので、選ぶために
-		//    1 度余分に回しても待たせない。キャンセルなら静かに終える（設定と同じ扱い）。
-		//    候補が無い・ダイアログを組めなかったときは全部描くで続ける。
+		//    1 度余分に実行しても待たせない。キャンセルなら何もせずに終える（設定と同じ扱い）。
+		//    候補が無い・ダイアログを組めなかったときはすべて描画する扱いで続ける。
 		std::string pickNote;
 		const draw::SettingsOutcome pick = draw::showSectionPicker(
 			parse::buildSectionCandidates(ifcPath, options), options, &pickNote);
@@ -82,8 +82,8 @@ namespace HomeskzIfcImport::draw
 		//    開いて丸ごとコピーする）。
 		if (!draw::showImportResult("ホームズ君 IFC 取り込み", round.body, core::trace::text()))
 		{
-			// ダイアログを組めなかったときの逃げ道。結果を伝えられないまま黙って終わるのが
-			// 最悪なので、素のアラートへ落とす（advice 行にファイルパス。false = 最小アラート
+			// ダイアログを組めなかったときの代替手段。結果を伝えられないまま黙って終わるのが
+			// 最悪なので、標準のアラートで代替する（advice 行にファイルパス。false = 最小アラート
 			// でなくモーダル）。TXString は UTF-8 の const char* から暗黙変換される。
 			gSDK->AlertInform(round.body.c_str(), ifcPath.c_str(),
 							  false /* not a minor alert: show a modal dialog */);

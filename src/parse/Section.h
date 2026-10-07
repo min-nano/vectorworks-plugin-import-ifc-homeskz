@@ -26,7 +26,7 @@
 //
 //	【どう名付けるか】切断位置が名前付き通り芯（IfcGridAxis）に kAxisMatchTol 以内で一致すれば
 //	その名前。外れれば**中間の通り**として、直前（座標の小さい側）の通りを基準に、その通りの
-//	書式で連番する——数字書式（"X1"）は `'` を足して "X1'" / "X1''"、いろは書式（"い"）は `又` を
+//	書式で連番する——数字書式（"X1"）は `'` を付加して "X1'" / "X1''"、いろは書式（"い"）は `又` を
 //	前置して "又い" / "又又い"（中間の順番ぶんだけ増やす）。
 //
 //	【外す通り（M34）】取り込み設定（core::ImportOptions::skippedSections）で外された通りは
@@ -49,7 +49,7 @@ namespace HomeskzIfcImport::parse
 	class Context;
 
 	// 軸組図を載せるシートレイヤのタイトルの基。**用紙 1 枚に収まらなければシートレイヤを
-	// 足す**ので（M18）、複数枚になるときは "軸組図(1)" … と連番になる
+	// 追加する**ので（M18）、複数枚になるときは "軸組図(1)" … と連番になる
 	// （core::sectionSheetTitle）。何枚になるかは用紙の大きさと縮尺が決めるため、ここでは
 	// 基の文字列だけを持つ。
 	inline constexpr const char* kSectionSheetTitle = "軸組図";
@@ -106,7 +106,7 @@ namespace HomeskzIfcImport::parse
 	// 断面ビューポートが映すデザインレイヤ名（ストーリが作るレイヤすべて）。軸組図は
 	// 建物まるごとの断面なので、伏図のように階・切断レベルで絞らない。**伏図記号レイヤ
 	// （"{to}-柱伏図記号"）は含まない**——平面用の 2D 記号なので断面には要らない（story 命令が
-	// 作るレイヤではないため、この実装では自然に外れる）。並びは stories の順＋通り芯。
+	// 作るレイヤではないため、この実装では自然に除外される）。並びは stories の順＋通り芯。
 	std::vector<std::string> sectionLayers(const std::vector<core::StoryCommand>& stories);
 
 	// 軸組図のシートレイヤ番号の始まり＝**伏図の続き**（要件）。伏図の番号（数字の文字列）の
@@ -119,11 +119,11 @@ namespace HomeskzIfcImport::parse
 	core::SectionSheetCommand
 	buildSectionSheetCommand(const std::vector<core::SheetCommand>& sheets);
 
-	// **図番を図面の中で一意にする**（2 つ目以降に "(2)" … を足す。先頭はそのまま）。
+	// **図番を図面の中で一意にする**（2 つ目以降に "(2)" … を付加する。先頭はそのまま）。
 	// シートレイヤ 1 枚に軸組図が何枚も載るので、同じ図番が 2 つあると Vectorworks が
 	// 「その図番は、このシートレイヤの他の図面ですでに使用中です」という**モーダルの
 	// ダイアログ**を出して止まる（実機で発生）——無人で回している周はそこで止まる。
-	// 通り名は方向ごとに採るので、両方向が同じ綴りを出しうる（名前付きの通り芯が拾えない
+	// 通り名は方向ごとに採るので、両方向が同じ綴りを出しうる（名前付きの通り芯が取得できない
 	// 図面では、どちらの方向も "1" から連番になる）。図面タイトルも新しい図番から組み直す。
 	void uniqueSectionNumbers(std::vector<core::SectionCommand>& commands);
 
@@ -138,7 +138,7 @@ namespace HomeskzIfcImport::parse
 	// 取り込み設定で外された通り（context.options()）は含めない（dropSkippedSections）。
 	//
 	// document は**組み立て済みの命令セット**（stories / members / columns …）を渡す——切断位
-	// 置は柱・梁の命令から、映すレイヤはストーリの命令から決まるので、IFC を見直さずに済む。
+	// 置は柱・梁の命令から、映すレイヤはストーリの命令から決まるので、IFC を再び参照せずに済む。
 	std::vector<core::SectionCommand> buildSectionCommands(Context& context,
 														   const core::Document& document);
 	std::vector<core::SectionCommand> buildSectionCommands(const Model& model,

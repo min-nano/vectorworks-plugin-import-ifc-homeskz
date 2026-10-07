@@ -5,9 +5,9 @@
 //	`payloadpath` 名前空間）。**純粋な文字列操作なので SDK も実機も要らない**——
 //	自動アップデートの UpdaterParse と同じ作法で、ここだけ切り出して単体で確かめる。
 //
-//	ここが狂うと症状は「本体が見つからない」だけになり、どこで曲がったのかが分から
+//	ここが誤ると症状は「本体が見つからない」だけになり、どこで誤ったのかが分から
 //	なくなる（実機でしか出ない）。特に **mac でバンドルの中を指してしまう**のは
-//	静かな事故で、署名が壊れて次の起動から読み込めなくなりうる。
+//	気付きにくい事故で、署名が壊れて次の起動から読み込めなくなりうる。
 //
 
 #include "TestFramework.h"
@@ -21,8 +21,8 @@ using namespace HomeskzIfcImport::payloadpath;
 
 TEST(file_name_is_the_plugin_name_with_the_payload_extension)
 {
-	// 拡張子が .vwpayload なのは**Vectorworks にプラグインとして拾わせないため**
-	// （.vlb / .vwlibrary だと Plug-Ins の走査に引っかかり、殻と二重に読み込まれる）。
+	// 拡張子が .vwpayload なのは**Vectorworks にプラグインとして検出させないため**
+	// （.vlb / .vwlibrary だと Plug-Ins の走査の対象になり、殻と二重に読み込まれる）。
 	CHECK_EQ(FileNameFor("min-nano_structure"), "min-nano_structure.vwpayload");
 	// stable と dev は名前が違う＝同じ Plug-Ins に同居しても取り違えない。
 	CHECK_EQ(FileNameFor("min-nano_structureDev"), "min-nano_structureDev.vwpayload");
@@ -79,7 +79,7 @@ TEST(win_payload_path_is_empty_without_a_separator)
 
 TEST(temp_copy_path_differs_per_generation)
 {
-	// **世代ごとに名前を変える**のが肝。Windows は読み込み中の DLL を置き換えられない
+	// **世代ごとに名前を変える**のが要点。Windows は読み込み中の DLL を置き換えられない
 	// ので、同じパスを使い回すと 2 回目が古いまま読まれる（src/PayloadHost.h）。
 	const std::string a = TempCopyPath("/tmp", "1", "P.vwpayload", '/');
 	const std::string b = TempCopyPath("/tmp", "2", "P.vwpayload", '/');

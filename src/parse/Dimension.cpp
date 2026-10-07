@@ -62,7 +62,7 @@ namespace HomeskzIfcImport::parse
 			return std::ranges::find(layers, layer) != layers.end();
 		}
 
-		// 2 つの測点の列が（許容の範囲で）同じか。同じ列を 2 段に重ねて出さないために見る。
+		// 2 つの測点の列が（許容の範囲で）同じか。同じ列を 2 段に重ねて出さないために確認する。
 		bool sameStops(const std::vector<double>& a, const std::vector<double>& b)
 		{
 			if (a.size() != b.size())
@@ -82,7 +82,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 通りに乗る線材 1 本（基礎伏図の立上り・床伏図／小屋伏図の横架材）。thickness は
-		// 立上りの厚み・横架材の幅（通りに乗る点・取り合いを拾う幅）。
+		// 立上りの厚み・横架材の幅（通りに乗る点・取り合いを検出する幅）。
 		struct LineSegment
 		{
 			core::Vec2 start;
@@ -99,7 +99,7 @@ namespace HomeskzIfcImport::parse
 			double halfAlong = 0.0;
 		};
 
-		// 母屋伏図で通りの列へ足す交点と、端の押さえ方。supportedEndsOnly なら、芯（取り合う
+		// 母屋伏図で通りの列へ追加する交点と、端の押さえ方。supportedEndsOnly なら、芯（取り合う
 		// 材の芯・交点）で 2 点以上押さえられる通りの自由端（材の端＝挿入点）は測点にしない
 		// （ご要望: 登り梁は直交する材の芯で押さえる）。
 		struct CrossingSet
@@ -221,7 +221,7 @@ namespace HomeskzIfcImport::parse
 		//     その芯へ押さえ直す（端そのものは測点にしない）。
 		//   * 何とも取り合わない端（自由端）は端そのもの（立上りの面）で押さえる。
 		//   * 同じ通りの別の立上りへ続く端は切れ目ではないので押さえない。
-		//   * 通り芯は、取り合う立上りの芯などの測点と重なるときだけ値を借りる（重なれば
+		//   * 通り芯は、取り合う立上りの芯などの測点と重なるときだけその値を使う（重なれば
 		//     寸法の数字が通り芯の間隔ちょうどになる）。**立上りの無い通り芯は測点にしない**
 		//     ——現場に通り芯の墨は無く、そこは距離でしか分からない（ご要望）。
 		//   * crossings（母屋伏図の斜めの材＝登り梁の芯との交点）がその通りの線材の上に
@@ -321,7 +321,7 @@ namespace HomeskzIfcImport::parse
 				result.freeFront = isFree(result.cores.front());
 				result.freeBack = isFree(result.cores.back());
 			}
-			// 通り芯へ寄せた後の値で持つ（all と同じ値で突き合わせられるように）。
+			// 通り芯へ寄せた後の値で持つ（all と同じ値で照合できるように）。
 			std::ranges::copy_if(result.all, std::back_inserter(result.points),
 								 [&rawPoints](double value)
 								 {
@@ -400,12 +400,12 @@ namespace HomeskzIfcImport::parse
 				   !crossedBetween(line, others, low, high);
 		}
 
-		// 通り 1 本を、区間が途切れるところで「一続きの立上り」ごとに割る（ご要望: 離れた
-		// 立上りの間を寸法でまたがない。y3 通りの 7220 のように、別の立上りを横切って何も
-		// 無い区間を測っても意味が無い）。**開口（isOpening）だけは割らずに**その幅を押さえる
-		// （ご要望）。
-		// また直交する立上りと 1 つも取り合わない一続き（位置がどこからも決まらない）は、
-		// 近いほうの隣と 1 本にまとめたまま（間の寸法がその位置を押さえる）。
+		// 通り 1 本を、区間が途切れるところで「一続きの立上り」ごとに割る。**開口
+		// （isOpening）だけは割らずに**その幅を押さえる。直交する立上りと 1 つも取り合わない
+		// 一続き（位置がどこからも決まらない）は、近いほうの隣と 1 本にまとめたままにする
+		// （間の寸法がその位置を押さえる）。
+		// 理由: 離れた立上りの間を寸法でまたがない（ご要望。y3 通りの 7220 のように、別の
+		// 立上りを横切って何も無い区間を測っても意味が無い）。開口の幅を押さえるのもご要望。
 		std::vector<WallLine> splitIntoRuns(const std::vector<WallLine>& lines,
 											const std::vector<WallLine>& others)
 		{
@@ -484,7 +484,7 @@ namespace HomeskzIfcImport::parse
 					wallLineStops(runs, eastWest ? northSouthRuns : eastWestRuns, points, crossings,
 								  grids, eastWest);
 				// 外側に面するか: 外向きの側（座標の大きい側／小さい側）に、芯の範囲が
-				// 重なる同じ向きの立上りが無い。範囲は芯で押さえ直した測点で見る（隅で
+				// 重なる同じ向きの立上りが無い。範囲は芯で押さえ直した測点で判定する（隅で
 				// 外面まで伸びた端どうしを重なりと取らない）。
 				const auto covered = [&stops](std::size_t i, int side)
 				{
@@ -524,7 +524,7 @@ namespace HomeskzIfcImport::parse
 			return out;
 		}
 
-		// ストーリレベルのレイヤ → (レベル種別, 絶対 Z)。横架材の「標準の天端」を引くのに使う。
+		// ストーリレベルのレイヤ → (レベル種別, 絶対 Z)。横架材の「標準の天端」を取得するのに使う。
 		struct LayerLevel
 		{
 			std::string type;
@@ -616,7 +616,7 @@ namespace HomeskzIfcImport::parse
 		// 軸組図の左に出す高さの列。内側の段（0）に**各階の FL から横架材天端まで**を 1 本
 		// ずつ、その外の段に **GL・FL・軒高の間隔**を置く（利用者の指定）。GL から土台天端・
 		// FL から上階の横架材天端のような「基準の間をまたぐ」寸法は出さない——全体の高さは
-		// 外の段の GL〜FL〜軒高が押さえ、横架材天端は各階の FL からの下がりで読めば足りる。
+		// 外の段の GL〜FL〜軒高が押さえ、横架材天端は各階の FL からの下がりで読めば十分。
 		// left は図の左端（補助線の根元）。レベル記号の起点をこの列より外へ出すので、寸法の
 		// 命令とレベル記号の両方がここから段を知る（最も外の段は outermostTier）。
 		std::vector<DimensionChainCommand> sectionHeightChains(const SectionHeights& heights,
@@ -659,12 +659,12 @@ namespace HomeskzIfcImport::parse
 		// 切断面に乗る柱・横架材の、注釈空間の横の範囲。どちらも無ければ false。
 		//
 		// withCrossings なら**切断面を横切る横架材の切り口**も範囲へ入れる（材幅の半分ずつ
-		// 広げる）。直交する横架材は断面に切り口として描かれ、通りに沿う材より外に出ることが
+		// 広げる）。直交する横架材は断面に切り口として描画され、通りに沿う材より外に出ることが
 		// ある（片側だけ跳ね出した架構など）。レベル記号と高さの列はこの範囲の左端から外へ
-		// 出すので、数えないと記号と寸法が切り口へ食い込む。**範囲を決めるのは切り口の有無
+		// 出すので、数えないと記号と寸法が切り口へ重なる。**範囲を決めるのは切り口の有無
 		// だけ**で、切り口しか無い断面（柱も沿う材も無い）には寸法を作らない——そこは従来
-		// どおり（記号を置く根拠になる架構が無い）。柱の位置の列（下の横の列）が拾う通り芯の
-		// 範囲は変えない（押さえるのは柱・束の位置で、切り口ではない）。
+		// どおり（記号を置く根拠になる架構が無い）。柱の位置の列（下の横の列）が取得する
+		// 通り芯の範囲は変えない（押さえるのは柱・束の位置で、切り口ではない）。
 		bool sectionAlongRange(const core::Document& document, const core::SectionCommand& section,
 							   double& low, double& high, bool withCrossings)
 		{
@@ -702,10 +702,11 @@ namespace HomeskzIfcImport::parse
 			return true;
 		}
 
-		// 軸組図 1 枚に映る架構の上端（絶対 Z）。上の寸法の列の根元にする——全軸組図で共通の
-		// 建物の上端にすると、低い通り（い通り・ち通り）で寸法が図から離れすぎた（実機）。
-		// 見るのは切断面に乗る柱・横架材と、切断面を横切る横架材・垂木の切り口の高さ
-		// （傾いた材は切り口の位置で内挿する）。何も無ければ fallback。
+		// 軸組図 1 枚に映る架構の上端（絶対 Z）。上の寸法の列の根元にする。参照するのは
+		// 切断面に乗る柱・横架材と、切断面を横切る横架材・垂木の切り口の高さ（傾いた材は
+		// 切り口の位置で内挿する）。何も無ければ fallback。
+		// 理由: 全軸組図で共通の建物の上端にすると、低い通り（い通り・ち通り）で寸法が図から
+		// 離れすぎた（実機）。
 		double sectionContentTop(const core::Document& document,
 								 const core::SectionCommand& section, double fallback)
 		{
@@ -748,7 +749,7 @@ namespace HomeskzIfcImport::parse
 				if (cutHeight(member.start, member.end, member.elevation, member.endElevation, z))
 					take(z);
 			}
-			// 垂木の elevation は下面なので背を足す。
+			// 垂木の elevation は下面なので背を加える。
 			for (const core::RafterCommand& rafter : document.rafters)
 			{
 				double z = 0.0;
@@ -803,8 +804,8 @@ namespace HomeskzIfcImport::parse
 	namespace
 	{
 		// 外側の列に既に書いた芯・端どうしの寸法（同じ 2 点の間）。内部の列に同じ寸法を
-		// 重ねない（ご要望: 外側を優先）ために覚えておく。**点（アンカーボルト・柱）の絡む
-		// 寸法は覚えない**（別の通りの点がたまたま同じ位置にあるだけで、重なりではない）。
+		// 重ねない（ご要望: 外側を優先）ために記録しておく。**点（アンカーボルト・柱）の絡む
+		// 寸法は記録しない**（別の通りの点がたまたま同じ位置にあるだけで、重なりではない）。
 		class WrittenSegments
 		{
 		public:
@@ -834,7 +835,7 @@ namespace HomeskzIfcImport::parse
 			std::array<std::vector<std::pair<double, double>>, 2> segments_;
 		};
 
-		// values の隣り合う 2 点のうち skip(a, b) が真の区間を抜き、残りを続いている区間
+		// values の隣り合う 2 点のうち skip(a, b) が真の区間を除外し、残りを続いている区間
 		// ごとの列（測点 2 つ以上）にする。
 		template <class Skip>
 		std::vector<std::vector<double>> splitWhere(const std::vector<double>& values, Skip skip)
@@ -862,8 +863,8 @@ namespace HomeskzIfcImport::parse
 			return pieces;
 		}
 
-		// values を順に見て、芯・端どうしで既に書いた寸法を抜き、残りを続いている区間ごとの
-		// 列にする（内部の列用）。書いた寸法は覚える。
+		// values を順に処理し、芯・端どうしで既に書いた寸法を除外して、残りを続いている区間
+		// ごとの列にする（内部の列用）。書いた寸法は記録する。
 		void emitUnwritten(std::vector<DimensionChainCommand>& out, WrittenSegments& written,
 						   DimensionAxis axis, const std::vector<double>& values,
 						   const std::vector<double>& cores, double base, int side, int tier)
@@ -879,8 +880,8 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 一続きに割った通りと、その置き場所。placed の WallLineStops::line は eastWest /
-		// northSouth の要素を指すので、**同じ入れ物で生かす**（ムーブしても要素の番地は
-		// 変わらない）。
+		// northSouth の要素を指すので、**同じ入れ物で保持する**（ムーブしても要素の
+		// アドレスは変わらない）。
 		struct RunLayout
 		{
 			std::vector<WallLine> eastWest;
@@ -991,8 +992,8 @@ namespace HomeskzIfcImport::parse
 			//
 			// 内部の立上りの列には、**既に外側の列にある立上りの芯・端どうしの寸法（同じ 2 点の
 			// 間）は書かない**（ご要望: 連続した立上りに同じ寸法を重ねない。外側を優先）。
-			// アンカーボルトの絡む寸法は比べない（WrittenSegments）。外側から順に見て、書いた
-			// 芯どうしの寸法を覚えていく。
+			// アンカーボルトの絡む寸法は照合しない（WrittenSegments）。外側から順に処理し、
+			// 書いた芯どうしの寸法を記録していく。
 			WrittenSegments written;
 			// 外周の 2 段目より外は芯と端だけでできている。
 			for (const DimensionChainCommand& chain : out)
@@ -1026,7 +1027,7 @@ namespace HomeskzIfcImport::parse
 				// **立上りの芯・端の列とアンカーボルトの列を分ける**（ご要望: 現場では立上りの
 				// 位置が決まってからアンカーボルトを置くので、立上りの寸法だけを追えるように）。
 				// アンカーボルトが乗る立上りは、芯・端だけの列を 1 つ外の段に出し、1 段目には
-				// アンカーボルトの絡む寸法だけを残す（芯・端どうしは外の列にあるので抜ける）。
+				// アンカーボルトの絡む寸法だけを残す（芯・端どうしは外の列にあるので除外される）。
 				// アンカーボルトが無ければ芯・端の列が 1 段目。
 				const bool withBolts = !sameStops(stops, cores);
 				const int coreTier = withBolts ? 1 : 0;
@@ -1076,7 +1077,7 @@ namespace HomeskzIfcImport::parse
 		}
 
 		// 柱とは別に押さえる横架材の列（取り合う梁の芯・端）。柱の列から外れた取り合いが
-		// 1 つも無ければ作らない。柱の列に同じ寸法がある区間と、skip が真の区間は抜く。
+		// 1 つも無ければ作らない。柱の列に同じ寸法がある区間と、skip が真の区間は除外する。
 		template <class Skip>
 		std::vector<std::vector<double>> beamPieces(const std::vector<double>& cores,
 													const std::vector<double>& columns, Skip skip)
@@ -1109,7 +1110,7 @@ namespace HomeskzIfcImport::parse
 		// 床伏図・小屋伏図・母屋伏図 1 枚ぶんの寸法の列。segments は直交格子に沿う横架材、
 		// points は柱。crossings（母屋伏図の登り梁の交点）は通りの上にあれば取り合う梁の芯と
 		// 同じく押さえる。moya（母屋伏図）なら、直交する材と取り合わない通りの芯を外周の列
-		// （南北の通りの X は上、東西の通りの Y は左）へ足して全長もそこまで延ばし（ほかの材と
+		// （南北の通りの X は上、東西の通りの Y は左）へ追加して全長もそこまで延ばし（ほかの材と
 		// つながらない材の位置を押さえる）、下と左の列も全長の端まで延ばす。
 		std::vector<DimensionChainCommand>
 		framingLineChains(const std::vector<LineSegment>& segments,
@@ -1191,7 +1192,7 @@ namespace HomeskzIfcImport::parse
 				if (rows.row.size() < 2)
 					continue;
 				rows.cores = mergeStops(std::move(rows.cores));
-				// 柱の列は四辺とも先に覚える。横架材の列は、どの辺の柱の列にある寸法も重ねない
+				// 柱の列は四辺とも先に記録する。横架材の列は、どの辺の柱の列にある寸法も重ねない
 				// （ご要望: い通りの 5〜8 の 2685 が、右の柱の列を全長の端まで延ばした 5〜7' と
 				// 重なっていた）。
 				written.remember(rows.axis, rows.row, rows.row);
@@ -1229,7 +1230,8 @@ namespace HomeskzIfcImport::parse
 				const int side = base >= middle ? 1 : -1;
 				const std::vector<double>& cores = run->stops.cores;
 				const std::vector<double> columns = columnStops(run->stops);
-				// 横架材の列は柱の列を覚える前に決める（柱の列と同じ区間は isSegmentOf が抜く）。
+				// 横架材の列は柱の列を記録する前に決める（柱の列と同じ区間は isSegmentOf が
+				// 除外する）。
 				std::vector<std::vector<double>> beams =
 					beamPieces(cores, columns, [&written, axis](double a, double b)
 							   { return written.contains(axis, a, b); });
@@ -1275,8 +1277,8 @@ namespace HomeskzIfcImport::parse
 						   const core::Vec2& max)
 	{
 		// 横架材の端点は取り付く相手（横架材・柱）の芯の上にある（core::MemberCommand）
-		// ので、取り合いは立上りと同じ判定で拾える。斜めの材は通りを作らない
-		// （collectWallLines が拾わない）。
+		// ので、取り合いは立上りと同じ判定で検出できる。斜めの材は通りを作らない
+		// （collectWallLines が取得しない）。
 		std::vector<LineSegment> segments;
 		segments.reserve(members.size());
 		for (const core::MemberCommand& member : members)
@@ -1307,7 +1309,7 @@ namespace HomeskzIfcImport::parse
 			const double alongTo = eastWest ? diagonal.end.x : diagonal.end.y;
 			// 芯を延ばしてよいのは、材の端から相手の芯までの、相手の幅の半分を斜めに横切る
 			// 長さ（＋自分の幅の半分）まで。端が相手の側面で止まっていれば届き、浅い角度で
-			// 遠くを通るだけの材（い通りの材の 420 のずれ。round 1 のご指摘）は拾わない。
+			// 遠くを通るだけの材（い通りの材の 420 のずれ。round 1 のご指摘）は検出しない。
 			const double length = std::hypot(alongTo - alongFrom, to - from);
 			const double sine = std::abs(to - from) / length;
 			const double beyond = (t < 0.0 ? -t : std::max(0.0, t - 1.0)) * length;
@@ -1448,7 +1450,7 @@ namespace HomeskzIfcImport::parse
 			}
 		}
 		// 母屋・登り梁を受ける直交する材（母屋伏図に映らない別のレイヤの材も。い通りの
-		// 登り梁を受ける又 7 通りの材など）の芯。軒桁の通りには足さない（軒桁に取り付く
+		// 登り梁を受ける又 7 通りの材など）の芯。軒桁の通りには追加しない（軒桁に取り付く
 		// 小屋梁などまで並べない。軒桁の上で押さえるのは登り梁の交点）。
 		for (const core::MemberCommand& member : members)
 		{
@@ -1579,7 +1581,7 @@ namespace HomeskzIfcImport::parse
 	buildSectionDimensionCommands(const core::Document& document,
 								  const core::SectionCommand& section)
 	{
-		// low / high は柱・沿う材の範囲（最外周の切り口を足すかの判定に使う）、left は切り口も
+		// low / high は柱・沿う材の範囲（最外周の切り口を追加するかの判定に使う）、left は切り口も
 		// 含めた左端（高さの列の根元。レベル記号の x と揃える）。
 		double low = 0.0;
 		double high = 0.0;
@@ -1592,7 +1594,7 @@ namespace HomeskzIfcImport::parse
 		double top = 0.0;
 		if (!core::sectionHeightRange(document, bottom, top))
 			return {};
-		// 高さ範囲は上下に余白を足してあるので、建物の下端へ戻す。上はこの図に映る架構の
+		// 高さ範囲は上下に余白を加えてあるので、建物の下端へ戻す。上はこの図に映る架構の
 		// 上端（通りごと）。
 		bottom += core::kSectionHeightMargin;
 		top = sectionContentTop(document, section, top - core::kSectionHeightMargin);
@@ -1612,11 +1614,11 @@ namespace HomeskzIfcImport::parse
 		//     同じ階の切り口があるところ。
 		//   * 上階の柱の列は、その階に**直下の階の柱と合わない柱が 1 本でもあるとき**だけ、その
 		//     階の柱すべて（＋上記のぶつかる位置）で作る（下の列と重なる寸法が出ても構わない。
-		//     利用者の指定）。合うかどうかは柱だけで見る。
+		//     利用者の指定）。合うかどうかは柱だけで判定する。
 		//   * 小屋束の列は上階の柱の列の 1 つ外の段（どの階の小屋束もまとめて 1 列。屋根の階に
 		//     立つ柱も含める）。**建物の外周芯**（屋根の階より下の柱の両端）も測点に入れる
 		//     （利用者の指定）。
-		//   * **通り芯は見ない。** 部材の無い通り芯は測点にせず、測点も通り芯へ寄せない——
+		//   * **通り芯は参照しない。** 部材の無い通り芯は測点にせず、測点も通り芯へ寄せない——
 		//     材の位置そのもの（利用者の指定。結果として通り芯と重なることが多いが、外壁芯が
 		//     通り芯より少し内側の建物で近くの通り芯へ寄せると、2685 が 2730 に・外壁芯と
 		//     通り芯の間に 45 が出た。は通り・い通りの 8通りの実機）。
@@ -1705,9 +1707,9 @@ namespace HomeskzIfcImport::parse
 		std::vector<double> columns = floorStops(lowestFloor);
 
 		// その面の**最外周**も押さえる（利用者の指定）。柱・沿う材より**kClusterTol を超えて**
-		// 外に横架材の切り口があれば、左右それぞれ最も外の切り口の芯を下の列の測点に足す
-		// （又は通りなら 1通り〜5通り）。間に並ぶ切り口は足さない（押さえるのは最外周だけ）。
-		// 外壁芯のすぐ外の切り口は足さない——押さえるのは建物の外周（外壁芯）まで（い通りの
+		// 外に横架材の切り口があれば、左右それぞれ最も外の切り口の芯を下の列の測点に追加する
+		// （又は通りなら 1通り〜5通り）。間に並ぶ切り口は追加しない（押さえるのは最外周だけ）。
+		// 外壁芯のすぐ外の切り口は追加しない——押さえるのは建物の外周（外壁芯）まで（い通りの
 		// 8通り。実機）。
 		if (!cuts.empty())
 		{
@@ -1782,8 +1784,8 @@ namespace HomeskzIfcImport::parse
 			if (!memberOnCutPlane(member, section))
 				continue;
 			// 伏図レベルのレイヤ（"2-横架材天端(FL-872)"）の材も、その階の標準の天端
-			// からの差を押さえる（印を外した元のレイヤのレベル。parse/PlanLevel）。軒桁の
-			// 専用レイヤの材は同じ階の横架材レイヤのレベルで見る（parse/Story の
+			// からの差を押さえる（印を除いた元のレイヤのレベル。parse/PlanLevel）。軒桁の
+			// 専用レイヤの材は同じ階の横架材レイヤのレベルで判定する（parse/Story の
 			// beamGroupLayer）。
 			const auto level = levels.find(core::stripPlanLevelTag(beamGroupLayer(member.layer)));
 			if (level == levels.end() || (level->second.type != core::kLevelBeamTop &&

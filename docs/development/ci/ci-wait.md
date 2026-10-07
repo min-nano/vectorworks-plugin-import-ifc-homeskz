@@ -31,13 +31,13 @@ Bash(run_in_background: true):
 | `failure` | 1 つ以上の結論が `failure` / `timed_out` / `cancelled` / `action_required` / `startup_failure` / `stale`。**cancelled も失敗扱い**（新しい push で古い run が消えたものを green と取り違えないため） |
 | `no-checks` | 猶予（既定 180 秒）を過ぎてもチェックが 1 件も登録されなかった。**「CI が始まってすらいない」を成功と読まない**ための結果 |
 | `head-moved` | `--no-follow` 指定時に、待っている間に head が動いた（古い結果は返さない） |
-| `unknown` | 全チェックが終わったが、結論が上の成功側にも失敗側にも当たらないものがある（GitHub が見慣れない結論を返したときなど）。成功とは読まない |
+| `unknown` | 全チェックが終わったが、結論が上の成功側にも失敗側にも該当しないものがある（GitHub が見慣れない結論を返したときなど）。成功とは読まない |
 | `timed-out-waiting` / `api-error` | **CI の失敗ではなく待機側が見届けられなかった**。CI 自体はまだ動いているかもしれない（同じ行に合流用のコマンドが出る） |
 
 状態が変わらなくても 5 分ごとに生存行が stderr に出るので、固まっているのか単に長いのかは
 出力で分かります。
 
-**`success` を鵜呑みにしない。** `--pr` は「その sha に登録されているチェック」を見るので、
+**`success` をそのまま信用しない。** `--pr` は「その sha に登録されているチェック」を参照するので、
 `ci-debug`（`workflow_dispatch`）の `debug` チェックしか無い状態でも `success` を返します。
 並んだチェック名を読み、`build-mac` / `build-windows` / `clang-tidy` / `test` … があることを
 確かめてください（**`debug` だけなら本来の CI は走っていない**）。
@@ -49,7 +49,7 @@ Bash(run_in_background: true):
    ことがある（main を取り込んで解消したら何も操作せずに CI が起動した実測がある）。ただし
    毎回そうなるわけでもない。
 2. **PR がまだ無い／その head に PR が向いていない。** 作業ブランチへの push は
-   `push: branches: [main]` に当たらないので、PR を作る前のコミットにチェックが付かないのは
+   `push: branches: [main]` に該当しないので、PR を作る前のコミットにチェックが付かないのは
    正常。
 3. どれでもなければ、GitHub MCP で run（`actions_list` の `list_workflow_runs`）と
    check-run（`pull_request_read` の `get_check_runs`）を直接数えて、登録の有無を確かめる。

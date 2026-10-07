@@ -5,9 +5,9 @@
 //	純ロジック——名前ごとの累計・並び（決定性）・本文の整形——なので、無 SDK のテスト
 //	ハーネスだけで完結する（CLAUDE.md「テスト方針」）。
 //
-//	**実際に何ミリ秒かかるか**は測らない（実描画はローカルの VectorWorks でしか走らず、
-//	時間に依るテストは CI で必ず揺れる）。ここで担保するのは「積んだものが、積んだとおりに
-//	数えられ、同じ並びで出てくる」ところまで。
+//	ここで担保するのは「記録したものが、記録したとおりに数えられ、同じ並びで出力される」
+//	ところまで。**実際に何ミリ秒かかるか**は測らない（実描画はローカルの VectorWorks で
+//	しか実行されず、時間に依存するテストは CI で必ず結果が揺れる）。
 //
 
 #include "TestFramework.h"
@@ -43,8 +43,8 @@ TEST(add_accumulates_per_name)
 
 TEST(add_counts_the_call_even_when_it_took_no_time)
 {
-	// 速すぎて 0 と出る区間も「呼ばれた回数」は数える——回数が 0 だと 1 回あたりを
-	// 出せないし、「呼ばれていない」と読み違える。
+	// 短すぎて 0 になる区間も「呼ばれた回数」は数える——回数が 0 だと 1 回あたりを
+	// 算出できず、「呼ばれていない」と誤読される。
 	TimingTable table;
 	table.add("A", 0.0);
 	table.add("A", 0.0);
@@ -54,7 +54,7 @@ TEST(add_counts_the_call_even_when_it_took_no_time)
 
 TEST(add_treats_a_negative_span_as_zero)
 {
-	// 合計が減ると読む側が必ず混乱するので、負は 0 として積む（回数は数える）。
+	// 負の値は 0 として加算する（回数は数える）。合計が減ると読む側が必ず混乱するため。
 	TimingTable table;
 	table.add("A", 5.0);
 	table.add("A", -3.0);
@@ -79,8 +79,8 @@ TEST(sorted_puts_the_slowest_first)
 
 TEST(sorted_keeps_the_first_seen_order_on_a_tie)
 {
-	// 同じ時間の区間は積まれた順のまま。走らせるたびに並びが入れ替わると、周どうしの
-	// 引き比べができない（CLAUDE.md「決定性を守る」）。
+	// 同じ時間の区間は記録された順のまま。実行するたびに並びが入れ替わると、周どうしの
+	// 比較ができない（CLAUDE.md「決定性を守る」）。
 	TimingTable table;
 	table.add("先", 7.0);
 	table.add("後", 7.0);
@@ -93,7 +93,7 @@ TEST(sorted_keeps_the_first_seen_order_on_a_tie)
 
 TEST(format_is_empty_when_nothing_was_measured)
 {
-	// 呼び出し側は AppendLine へ渡すだけでよい（空行を積ませない）。
+	// 呼び出し側は AppendLine へ渡すだけでよい（空行を追加させない）。
 	const TimingTable table;
 	CHECK(table.empty());
 	CHECK_EQ(table.format("描画の内訳"), "");
@@ -122,13 +122,13 @@ TEST(clear_empties_the_table)
 	CHECK(table.total() == 0.0);
 }
 
-// --- 入れ子の見張り --------------------------------------------------------
+// --- 入れ子の検出 --------------------------------------------------------
 
 TEST(nested_scopes_are_reported_by_name)
 {
-	// 入れ子は禁じ手（core/DrawTiming.h「使う側の作法」）だが、**防がずに数える**——
-	// 計測点は draw/ のあちこちに散るので、共有の関数が自分でも区間を開いていた、
-	// という取りこぼしは必ず起きる。二重計上は消せないので、**気付けるようにする**。
+	// 入れ子は禁止（core/DrawTiming.h「使う側の作法」）だが、**防がずに数え、気付ける
+	// ようにする**。理由: 計測点は draw/ の各所に分散するので、共有の関数が自身でも区間を
+	// 開いていた、という見落としは必ず起きる。二重計上は取り消せない。
 	drawTiming().clear();
 	{
 		const TimingScope outer("外側");
@@ -174,8 +174,8 @@ TEST(the_same_nested_section_is_named_once)
 
 TEST(format_lists_every_nested_section_separated_by_commas)
 {
-	// 入れ子は 1 か所とは限らない。**全部の名前を出す**——1 つしか出さないと、直した
-	// つもりで残っているもう 1 か所に気付けない。
+	// 入れ子は 1 か所とは限らない。**全部の名前を出力する**——1 つしか出力しないと、修正
+	// したつもりで残っているもう 1 か所に気付けない。
 	TimingTable table;
 	table.add("外側", 10.0);
 	table.noteNested("構造材:パス生成");
@@ -212,7 +212,7 @@ TEST(clear_also_forgets_the_nesting_watch)
 
 TEST(scope_adds_one_entry_to_the_shared_table)
 {
-	// 計測点は draw/ のあちこちに散るが、集計先は drawTiming() ただ 1 つ
+	// 計測点は draw/ の各所に分散するが、集計先は drawTiming() ただ 1 つ
 	// （core/DrawTiming.h「集計先が 1 つである理由」）。
 	drawTiming().clear();
 	{

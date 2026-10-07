@@ -192,7 +192,7 @@ installed_commit() { printf '%s\n' "${VW_TEST_INSTALLED:-none}"; }
 
 # installed_branch: 同上（実物はインストール済みバンドルの Info.plist から VWBuildBranch を
 # 読む）。既定は空＝「どのブランチのビルドが入っているか分からない」で、プラグイン側は
-# ビルド一覧の sha 照合か、最後に殻の値へ落ちる（src/UpdaterParse.h の
+# ビルド一覧の sha 照合か、最後に殻の値へフォールバックする（src/UpdaterParse.h の
 # ResolveCurrentDevBuild）。
 installed_branch() { printf '%s\n' "${VW_TEST_INSTALLED_BRANCH:-}"; }
 
@@ -249,7 +249,7 @@ export VW_TEST_RELEASES_JSON="$RELEASES_JSON"
 # Build a real "min-nano_structureDev.vwlibrary.zip" for the do-install tests, and a
 # malformed one whose top-level dir has the wrong name.
 # 本体（"<name>.vwpayload"）も一緒に入れる——**実際のリリース zip と同じ形**にしないと、
-# 殻だけ入れて本体を取りこぼす退行を捕まえられない（src/PayloadAbi.h）。
+# 殻だけ入れて本体を入れ漏らす退行を検出できない（src/PayloadAbi.h）。
 build_zip() { # zip-path, bundle-dir-name
 	local dir="$WORK/stage-$$-$RANDOM"
 	local name="${2%.vwlibrary}"
@@ -316,12 +316,12 @@ check_not_contains "$out" "latest=" "no latest when offline"
 t "q_dev lists only dev-* builds that have a downloadable asset"
 out="$(VW_TEST_INSTALLED=run1234 VW_TEST_INSTALLED_BRANCH=feature/x RUN q_dev)"
 check_contains "$out" "installed=run1234" "installed line first"
-# **入っているビルドのブランチも出す。** 別のブランチのビルドへ乗り換えたことを覚えて
+# **入っているビルドのブランチも出す。** 別のブランチのビルドへ乗り換えたことを記録して
 # いるのはディスク上の刻印だけで、殻にコンパイルされた値は前のブランチを名乗ったままに
 # なる（src/UpdaterParse.h の ResolveCurrentDevBuild）。
 check_contains "$out" "installed-branch=feature/x" "installed-branch line"
 # **5 列目はリリース本文（notes）の branch=。** 取り込みのついでの確認が「いま動いて
-# いるのと同じブランチのビルド」だけを拾うために要る（src/UpdaterFlow.cpp）。
+# いるのと同じブランチのビルド」だけを対象にするために要る（src/UpdaterFlow.cpp）。
 check_contains "$out" $'build\taaa1111\tfeature/x\thttps://example.test/dl/x.zip\tfeature/x' \
 	"feature/x row carries the branch from the release body"
 # 本文に branch= が無いリリースでは空欄になる（プラグイン側は照合できず何もしない）。
@@ -336,7 +336,7 @@ check_contains "$out" "installed-branch=" "installed-branch line is still presen
 check_not_contains "$out" "installed-branch=feature" "…but carries no branch"
 
 t "installed_branch is empty when the bundle is absent"
-# installed_commit と同じ理屈で、実物の「バンドルが無い」枝だけを呼ぶ（PlistBuddy の枝は
+# installed_commit と同じ理屈で、実物の「バンドルが無い」分岐だけを呼ぶ（PlistBuddy の分岐は
 # macOS 専用）。親のフェイクはそのまま。
 out="$( set -euo pipefail
 	# shellcheck source=/dev/null
@@ -348,8 +348,8 @@ t "q_dev emits an error line when the API is unreachable"
 out="$(VW_TEST_API_FAIL=1 RUN q_dev)"
 check_contains "$out" "error=" "offline -> error= line"
 
-# **理由を必ず添える。** 往復は無人で回るので、パレットに出るこの 1 行だけが手掛かりに
-# なる（実機 M27: 1 分ごとの確認が GitHub の API 制限に当たっていたのに、「リリース一覧を
+# **理由を必ず添える。** 往復は無人で実行されるので、パレットに出るこの 1 行だけが手掛かりに
+# なる（実機 M27: 1 分ごとの確認が GitHub の API 制限に達していたのに、「リリース一覧を
 # 取得できませんでした。」としか出ず、ネットワークが切れたようにしか見えなかった）。
 t "q_dev carries the reason api_get left behind"
 out="$(VW_TEST_API_FAIL=1 VW_TEST_API_REASON="GitHub の API 制限に達しました（認証なしは 1 時間 60 回）。あと 37 分で戻ります。" \
@@ -408,7 +408,7 @@ check_eq "$out" "ok" "do_install prints ok"
 # 予備の配置もそこへ入れる——読む側（installed_bundle）と食い違わせないため。
 if [ -f "$dest/min-nano_structureDev/min-nano_structureDev.vwlibrary/Contents/Info.plist" ]; then installed=yes; else installed=no; fi
 check_eq "$installed" "yes" "the .vwlibrary landed in the plug-in's own folder"
-# **本体も入っていること。** 殻だけ入れて本体を取りこぼすと、次の起動でプラグインは
+# **本体も入っていること。** 殻だけ入れて本体を入れ漏らすと、次の起動でプラグインは
 # 何もできなくなる（src/PayloadHost.cpp が「本体が見つかりません」と言うだけ）。
 if [ -f "$dest/min-nano_structureDev/min-nano_structureDev.vwpayload" ]; then installed=yes; else installed=no; fi
 check_eq "$installed" "yes" "the .vwpayload landed next to the bundle"
@@ -448,7 +448,7 @@ check_contains "$out" "error=" "empty args -> error= line"
 # plugin_dir / installed_bundle — **プラグインは自分のフォルダを 1 つ持つ**。ここが
 # インストーラ（scripts/vw-install.sh の同名関数）とずれると、入れた場所と読む場所が
 # 食い違い、「更新したのに古いままに見える」事故になる。**渡された先が既にその
-# フォルダなら足さない**のが肝で、これを落とすと更新のたびに入れ子が深くなる。
+# フォルダなら追加しない**のが要点で、これを守れないと更新のたびに入れ子が深くなる。
 # ===========================================================================
 t "plugin_dir appends the plug-in's own folder"
 check_eq "$(RUN plugin_dir "/x/Plug-Ins" "min-nano_structure")" "/x/Plug-Ins/min-nano_structure" \
@@ -464,9 +464,9 @@ check_eq "$(VW_PLUGINS_DIR=/x/Plug-Ins RUN installed_bundle "min-nano_structure"
 
 # ===========================================================================
 # plugin_zip_url — the distribution zip is found by exact name, and STILL found
-# after the asset is renamed. **これが効かないと、アセット名を変えた瞬間に
-# インストール済みの古いアップデータからは何も落とせなくなる**（利用者は手で
-# 落とすしかなくなる）。
+# after the asset is renamed. **これが機能しないと、アセット名を変えた瞬間に
+# インストール済みの古いアップデータからは何もダウンロードできなくなる**（利用者は
+# 手動でダウンロードするしかなくなる）。
 # ===========================================================================
 RENAMED_JSON="$WORK/renamed.json"
 cat >"$RENAMED_JSON" <<'JSON'
@@ -489,12 +489,12 @@ out="$(RUN plugin_zip_url "$RENAMED_JSON" "assets" "min-nano_structure")"
 check_eq "$out" "https://example.test/dl/renamed.zip" "falls back to any *.vwlibrary.zip"
 
 # ===========================================================================
-# do-install の委譲 — **この変更の要**。落とした zip に vw-install.sh が入っていたら、
+# do-install の委譲 — **この変更の要点**。ダウンロードした zip に vw-install.sh が入っていたら、
 # 配置はそちらへ渡し、その機械可読な出力をそのまま流す。自前の配置（下の予備）は
 # 使わない。
 #
 # 偽インストーラは「自分が呼ばれた証拠」を残して ok を出すだけ。**自前の配置なら必ず
-# 置かれるはずの .vwlibrary が置かれていないこと**を見て、委譲が起きたと判定する。
+# 置かれるはずの .vwlibrary が置かれていないこと**を確認して、委譲が起きたと判定する。
 # ===========================================================================
 # build_zip_with_installer <zip> <bundle-dir-name> <installer-body>
 build_zip_with_installer() {

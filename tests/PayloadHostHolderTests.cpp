@@ -1,14 +1,17 @@
 //
 //	PayloadHostHolderTests.cpp
 //
-//	**本体が殻の記憶域を持ち続けないこと**（src/PayloadHostHolder.h）。
+//	**本体が殻の記憶域を持ち続けないこと**（src/PayloadHostHolder.h）を確かめる。
 //
-//	これは実機で Vectorworks ごと落ちた壊れ方の回帰テストである。殻が渡す
+//	複製しているかどうかは「渡した記憶域を後から上書きしても中身が有効なままか」で
+//	確かめる。この壊れ方は**コンパイルもリンクも CI の実ビルドも通る**ので、こうして
+//	確かめるしかない。
+//
+//	これは実機で Vectorworks ごと異常終了した壊れ方の回帰テストである。殻が渡す
 //	`const VwPayloadHost*` を本体がポインタのまま持つと、殻がそれをローカルに置いていた
-//	場合に load から戻った時点で腐り、次に触った瞬間にスタックの番地へ分岐して落ちる
+//	場合に load から戻った時点で無効になり、次にアクセスした瞬間にスタックの番地へ分岐して
+//	異常終了する
 //	（[SDK リファレンス「プラグインモジュールの読み込みと入れ替え」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Plug-in%20Modules.md)）。
-//	**コンパイルもリンクも CI の実ビルドも通る**——だから、写しているかどうかを
-//	「渡した記憶域を後から塗り潰しても中身が生きているか」で確かめる。
 //
 //	SDK にもプラットフォームにも依存しないので、ここで完結する。
 //
@@ -24,7 +27,7 @@ using namespace HomeskzIfcImport::payload;
 
 namespace
 {
-	// 殻が渡す体の VwPayloadHost を 1 つ作る。
+	// 殻が渡すものに見立てた VwPayloadHost を 1 つ作る。
 	VwPayloadHost MakeHost(void* callbacks)
 	{
 		VwPayloadHost host{};
@@ -34,10 +37,10 @@ namespace
 		return host;
 	}
 
-	// 「殻の記憶域」の代わり。ここを塗り潰しても本体が無事なら、写せている。
+	// 「殻の記憶域」の代わり。ここを上書きしても本体が影響を受けなければ、複製できている。
 	int gCallbackTarget = 0;
 
-	// 殻が貸す体のスクリプト実行。呼ばれた引数を控え、決め打ちの出力を返す。
+	// 殻が貸すものに見立てたスクリプト実行。呼ばれた引数を記録し、固定の出力を返す。
 	// **戻す文字列は「殻が所有し、次の呼び出しまで有効」**という契約なので、
 	// 実物と同じく static に置く（src/PayloadAbi.h）。
 	std::string gScriptCall;
@@ -65,10 +68,10 @@ TEST(adopt_copies_the_struct_so_the_callers_storage_can_die)
 {
 	HostHolder holder;
 	{
-		// **わざとローカルに置く**（実機で落ちたときの殻がこの形だった）。
+		// **わざとローカルに置く**（実機で異常終了したときの殻がこの形だった）。
 		VwPayloadHost host = MakeHost(&gCallbackTarget);
 		CHECK_EQ(holder.adopt(&host), static_cast<int>(kVwPayloadOk));
-		// 呼び出し側の記憶域を塗り潰す（スコープを抜けた後の使い回しの模擬）。
+		// 呼び出し側の記憶域を上書きする（スコープを抜けた後の使い回しの模擬）。
 		std::memset(&host, 0xAB, sizeof(host));
 	}
 	CHECK(holder.valid());
@@ -106,7 +109,7 @@ TEST(adopt_rejects_a_short_struct)
 TEST(adopt_accepts_a_longer_struct_from_a_newer_shell)
 {
 	// 殻のほうが新しく、後ろに知らない項目が付いていても構わない（こちらが知っている
-	// 分だけ写す）。
+	// 分だけ複製する）。
 	HostHolder holder;
 	VwPayloadHost host = MakeHost(&gCallbackTarget);
 	host.size = static_cast<unsigned int>(sizeof(VwPayloadHost)) + 16u;
@@ -127,7 +130,7 @@ TEST(adopt_rejects_a_missing_callback_pointer)
 
 TEST(forget_drops_everything)
 {
-	// 降ろす直前に殻への参照を手放すのが本体の仕事（src/payload/PayloadMain.cpp の
+	// アンロードする直前に殻への参照を手放すのが本体の仕事（src/payload/PayloadMain.cpp の
 	// vw_payload_shutdown）。
 	HostHolder holder;
 	VwPayloadHost host = MakeHost(&gCallbackTarget);
@@ -148,7 +151,7 @@ TEST(a_failed_adopt_forgets_what_was_there_before)
 }
 
 // ---------------------------------------------------------------------------
-// 殻から借りるもの（M23）。**返ってきた文字列は写す・関数ポインタは素通し**。
+// 殻から借りるもの（M23）。**返ってきた文字列は複製する・関数ポインタはそのまま保持する**。
 // ---------------------------------------------------------------------------
 
 TEST(a_host_without_a_script_hook_is_accepted)

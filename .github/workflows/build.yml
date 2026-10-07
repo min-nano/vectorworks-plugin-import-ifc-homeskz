@@ -61,12 +61,12 @@ jobs:
       CCACHE_SLOPPINESS: pch_defines,time_macros
 
       # --- 何をビルドするか（式で直に決める。tidy-* と同じ書き方） ------------
-      # かつてはこれらを "Resolve build context" という if/else のシェルステップで
-      # 求め、step の output 経由で配っていたが、どれも 1 本の式で書けるので
-      # ジョブレベルの env に畳んだ（同じ値を求める tidy-mac / tidy-windows は
-      # 最初からこの書き方をしている）。値は env なので、攻撃者が内容を決められる
-      # ブランチ名（head_ref）もスクリプトへ展開されずに渡る——これは以前
-      # HEAD_REF を env で渡していたのと同じ配慮。
+      # どれも 1 本の式で書けるので、ジョブレベルの env にまとめてある（同じ値を
+      # 求める tidy-mac / tidy-windows は最初からこの書き方をしている）。値は env
+      # なので、攻撃者が内容を決められるブランチ名（head_ref）もスクリプトへ展開
+      # されずに渡る——これは以前 HEAD_REF を env で渡していたのと同じ配慮。
+      # 経緯: かつてはこれらを "Resolve build context" という if/else のシェル
+      # ステップで求め、step の output 経由で配っていた。
       #
       # PR では GITHUB_SHA が一時的なマージコミットなので PR head の sha を使う。
       # これが開発者の push したコミットであり、dev プレリリースが指すべき対象。
@@ -154,7 +154,7 @@ jobs:
       # signature seals the packaged .vwr resource too.
       #
       # 本体（<name>.vwpayload）も同じアドホック署名で署名する。**殻が dlopen する側**
-      # なので、署名が無いと Apple Silicon のライブラリ検証に弾かれて読み込めない
+      # なので、署名が無いと Apple Silicon のライブラリ検証に拒否されて読み込めない
       # （SDK リファレンス「プラグインモジュールの読み込みと入れ替え」でアドホックで
       # 足りることを実測済み）。バンドルの中ではなく隣に置いてあるので、--deep には
       # 含まれず個別に署名する必要がある。
@@ -183,7 +183,7 @@ jobs:
           test -e "$bundle/Contents/Resources/$name.vwr" \
             || { echo "::error::$name.vwr was not packaged into the bundle"; exit 1; }
           # 同梱スクリプトは**2 つで 1 組**。vw-update は vw-token を source するので、
-          # 片方が欠けたまま配ると認証が静かに落ちる（M27）。
+          # 片方が欠けたまま配ると認証が警告なしに無効になる（M27）。
           for s in vw-update.sh vw-token.sh; do
             test -e "$bundle/Contents/Resources/$s" \
               || { echo "::error::$s was not packaged into the bundle"; exit 1; }
@@ -213,7 +213,7 @@ jobs:
           # **インストーラとアンインストーラを zip の直下に同梱する。**
           # インストール済みの（＝古い）vw-update.sh は、インストーラを見つけたら配置を
           # こちらへ委ねる——配置の知識が「そのビルドと同じ版」の側にあるので、ファイル
-          # 構成が変わっても利用者は手で入れ直さずに済む（scripts/vw-install.sh の冒頭）。
+          # 構成が変わっても利用者は手動で入れ直さずに済む（scripts/vw-install.sh の冒頭）。
           # アンインストーラは**インストール先へ一緒に置かれ**、次のアップデートが
           # 「前の版を、その版自身の知識で取り除く」ために使う（scripts/vw-uninstall.sh）。
           cp scripts/vw-install.sh scripts/vw-uninstall.sh "stage/$name/"
@@ -221,7 +221,7 @@ jobs:
           # **MCP サーバも一緒に配る。** MCP ブリッジ（開発版のパレット）の相手側。開発では
           # リポジトリの .mcp.json がリポジトリ内のものを使うが、リポジトリを持たない機械
           # からも登録できるようインストール先にも置く（README「MCP ブリッジ」）。依存の
-          # 無い 1 ファイルなので、インストーラは他のものと同じく素通しで置く。
+          # 無い 1 ファイルなので、インストーラは他のものと同じくそのまま置く。
           cp scripts/mcp/vw-mcp-server.py "stage/$name/"
           ( cd "stage/$name" && zip -qry "$GITHUB_WORKSPACE/dist/$name.vwlibrary.zip" \
               "$name.vwlibrary" "$name.vwpayload" vw-install.sh vw-uninstall.sh \
@@ -319,7 +319,7 @@ jobs:
             || { echo "::error::$name.vwpayload (the payload module) was not produced"; exit 1; }
           test -f "$d/$name.shell-id" || { echo "::error::$name.shell-id stamp missing"; exit 1; }
           # 同梱スクリプトは**2 つで 1 組**。vw-update は vw-token を dot-source するので、
-          # 片方が欠けたまま配ると認証が静かに落ちる（M27）。
+          # 片方が欠けたまま配ると認証が警告なしに無効になる（M27）。
           for s in vw-update.ps1 vw-token.ps1; do
             test -f "$d/$s" || { echo "::error::$s was not staged next to the module"; exit 1; }
           done
@@ -341,7 +341,7 @@ jobs:
           # 「どのブランチのビルドが入っているか」の控え（mac は Info.plist に持つ）。
           # scripts/vw-install.ps1 が**インストーラ**。zip の直下に同梱しておくと、
           # インストール済みの（＝古い）vw-update.ps1 が配置をこちらへ委ねるので、
-          # ファイル構成が変わっても利用者は手で入れ直さずに済む
+          # ファイル構成が変わっても利用者は手動で入れ直さずに済む
           # （scripts/vw-install.ps1 の冒頭）。scripts/vw-uninstall.ps1 は
           # **インストール先へ一緒に置かれ**、次のアップデートが「前の版を、その版自身の
           # 知識で取り除く」ために使う（scripts/vw-uninstall.ps1 の冒頭）。
@@ -354,12 +354,12 @@ jobs:
             "build/Release/$name.shell-id",
             "build/Release/vw-update.ps1",
             # vw-token.ps1 は**vw-update.ps1 が dot-source する**トークンの在り処
-            # （scripts/vw-token.ps1）。片方だけ配ると認証が外れる。
+            # （scripts/vw-token.ps1）。片方だけ配ると認証が無効になる。
             "build/Release/vw-token.ps1",
             "scripts/vw-install.ps1",
             "scripts/vw-uninstall.ps1",
             # **MCP サーバ**（MCP ブリッジ（パレット）の相手側）。依存の無い
-            # 1 ファイルなので、インストーラが他のものと同じく素通しで置く。
+            # 1 ファイルなので、インストーラが他のものと同じくそのまま置く。
             "scripts/mcp/vw-mcp-server.py"
           ) | Where-Object { Test-Path $_ }
           Compress-Archive -Path $files -DestinationPath "dist/$name.vlb.zip" -Force
@@ -435,8 +435,8 @@ jobs:
       # PR は dev、それ以外（main への push / 再ディスパッチ）は stable。
       VW_BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
       # clang-tidy の結果キャッシュ（scripts/clang-tidy-sdk.sh -c）。翻訳単位の入力が
-      # 前と同じなら解析ごと飛ばす——このジョブは PR の待ち時間そのものなので、
-      # 「数ファイルしか触っていない push」で効くかどうかが体感を決める。
+      # 前と同じなら解析ごと省く——このジョブは PR の待ち時間そのものなので、
+      # 「数ファイルしか変えていない push」で機能するかどうかが待ち時間を左右する。
       TIDY_CACHE_DIR: ${{ github.workspace }}/.tidy-cache
 
     steps:
@@ -518,7 +518,7 @@ jobs:
       VW_SDK_CACHE_KEY: vw-sdk-2026-NNA-win-v1
       VW_BUILD_CHANNEL: ${{ github.event_name == 'pull_request' && 'dev' || 'stable' }}
       # clang-tidy の結果キャッシュ（tidy-mac と同じ。理由はそちらのコメント参照）。
-      # **このジョブがワークフローの最長経路**なので、効き目がいちばん大きいのはここ。
+      # **このジョブがワークフローの最長経路**なので、効果がいちばん大きいのはここ。
       TIDY_CACHE_DIR: ${{ github.workspace }}/.tidy-cache
       # The LLVM preinstalled on the runner image, named once. Every clang tool
       # this job runs (clang-cl for the compile database, clang-tidy for the
@@ -668,10 +668,7 @@ jobs:
   release:
     needs: [build-mac, build-windows, tidy-mac, tidy-windows]
 
-    # 公開できる実行でだけジョブを起動する。以前は 2 つの公開ステップの if だけで
-    # 制御していたため、フォーク PR や main 以外での workflow_dispatch でもジョブは
-    # 走り、成果物をダウンロードしたうえで両ステップが skip される（何も公開しない
-    # ジョブが緑で終わる）という無駄があった。公開に至る組み合わせは次の 2 つだけ
+    # 公開できる実行でだけジョブを起動する。公開に至る組み合わせは次の 2 つだけ
     # なので、ここで先に振り分ける:
     #   - main への push / main での workflow_dispatch → stable リリース
     #   - 同一リポジトリのブランチから出た PR         → dev-<branch> プレリリース
@@ -679,7 +676,11 @@ jobs:
     # ジョブがスキップされてもチェックの結論は skipped（＝失敗ではない）なので、
     # ブランチ保護や ci-wait の判定には影響しない。
     # 折り畳みスカラ（>-）の継続行は、YAML の「より深くインデントした行は折り畳まない」
-    # 規則に当たらないよう、すべて同じ桁に揃える（揃えないと式に改行が残る）。
+    # 規則に該当しないよう、すべて同じ桁に揃える（揃えないと式に改行が残る）。
+    # 経緯: 以前は 2 つの公開ステップの if だけで制御していたため、フォーク PR や
+    # main 以外での workflow_dispatch でもジョブは走り、成果物をダウンロードした
+    # うえで両ステップが skip される（何も公開しないジョブが緑で終わる）という
+    # 無駄があった。
     if: >-
       (github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository)
@@ -778,7 +779,7 @@ jobs:
       - name: Publish dev prerelease (pull requests)
         # Feature branches are built via their pull request. フォーク PR
         # （GITHUB_TOKEN が読み取り専用でリリースを作れない）はジョブ側の if で
-        # すでに除外済みなので、ここは PR かどうかだけを見る。
+        # すでに除外済みなので、ここは PR かどうかだけを判定する。
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}

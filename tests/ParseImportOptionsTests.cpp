@@ -1,13 +1,14 @@
 //
 //	ParseImportOptionsTests.cpp
 //
-//	取り込み設定（配置するシンボルの対応）が解析の結果まで届くかの単体テスト。
+//	取り込み設定（配置するシンボルの対応）が解析の結果まで届くかの単体テスト。**全フィクスチャ
+//	の通しで「既定名がひとつも残っていないこと」**を確かめる。
 //	VectorWorks SDK を一切 include せず、無 SDK のテストハーネスで走る。
 //
 //	【何を守っているか】シンボル名は 6 つのモジュール（アンカーボルト・床束・火打・仕口・
 //	継手・伏図記号）がそれぞれ命令へ書き込む。設定を通す経路が 1 つでも欠けると「ダイアログで
-//	選んだのに既定のまま置かれる」——絵を見ても気付きにくい壊れ方なので、**全フィクスチャの
-//	通しで「既定名がひとつも残っていないこと」**を確かめる（docs/DEV-NOTES.md M20）。
+//	選んだのに既定のまま置かれる」——描画結果を見ても気付きにくい壊れ方なので、全フィクスチャ
+//	の通しで確かめる（docs/DEV-NOTES.md M20）。
 //
 
 #include "Fixtures.h"
@@ -37,7 +38,7 @@ namespace
 	// 差し替えたことが一目で分かる接頭辞（既定名とは 1 文字も重ならない）。
 	constexpr const char* kTestPrefix = "試験_";
 
-	// 役割ごとに見分けの付く名前を与えた設定。
+	// 役割ごとに区別できる名前を与えた設定。
 	ImportOptions testOptions()
 	{
 		ImportOptions options;
@@ -56,7 +57,7 @@ namespace
 	}
 
 	// 命令セットの中で**シンボル名を持つ命令**をすべて回す（シンボル置換系 5 種＋伏図記号）。
-	// 断面記号は絵ではなく実断面の対角線を引くので symbol が空——そこは飛ばす。
+	// 断面記号はシンボルではなく実断面の対角線を描画するので symbol が空——そこはスキップする。
 	template <class Body> void forEachSymbolName(const Document& document, Body&& body)
 	{
 		for (const std::vector<SymbolCommand>* list :
@@ -92,7 +93,7 @@ TEST(import_options_reach_every_symbol_command)
 TEST(rafter_size_reaches_every_rafter_and_lifts_the_sheathing)
 {
 	// 垂木の断面は全垂木に一律で届き、野地板はそのせいの分だけ持ち上がる。経路が欠けると
-	// 「ダイアログで指定したのに 45×45 のまま」になる——絵では気付きにくい。
+	// 「ダイアログで指定したのに 45×45 のまま」になる——描画結果では気付きにくい。
 	ImportOptions options;
 	options.setRafterSize(60.0, 90.0);
 	bool sawRafter = false;
@@ -123,7 +124,7 @@ TEST(rafter_size_reaches_every_rafter_and_lifts_the_sheathing)
 
 TEST(default_options_keep_the_previous_names)
 {
-	// 設定を触らない取り込みは従来どおり（＝共有キャッシュの命令セットがそのまま既定名）。
+	// 設定を変更しない取り込みは従来どおり（＝共有キャッシュの命令セットがそのまま既定名）。
 	bool sawSymbol = false;
 	forEachFixtureDocument(
 		[&](const std::string&, const Document& document)
@@ -193,8 +194,8 @@ TEST(disabling_one_anchor_bolt_role_keeps_the_other)
 
 TEST(title_block_style_reaches_the_document)
 {
-	// M28 図面枠のスタイル名は**解析側が判断を挟まず**命令セットへ写るだけ。ここが
-	// 欠けると「ダイアログで選んだのに枠が出ない」になり、絵を見ても原因が分からない
+	// M28 図面枠のスタイル名は**解析側が判断を挟まず**命令セットへそのまま渡るだけ。ここが
+	// 欠けると「ダイアログで選んだのに枠が出ない」になり、描画結果を見ても原因が分からない
 	// （どこにも件数が出ないので、実機テストの報告からも追えない）。
 	ImportOptions options;
 	options.setTitleBlockStyle("名無し建築士事務所");

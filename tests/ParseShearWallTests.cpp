@@ -7,7 +7,7 @@
 //
 //	検証項目（docs/DEV-NOTES.md M19）: 筋かい・面材の判別（Name 接頭辞＋エンティティ型）・
 //	壁面座標への落とし込み（軸＝押し出し方向の直交・軸の向きの決定性・材厚・見付け幅・
-//	傾きの向き）・鉛直押し出しを弾くこと・たすき掛けの同名まとめ・表裏の面材のまとめ・
+//	傾きの向き）・鉛直押し出しを除外すること・たすき掛けの同名まとめ・表裏の面材のまとめ・
 //	配置先レイヤ・レイヤ平面からの相対高さ・決定性・全フィクスチャの通し、そして
 //	耐力壁レベル（"n-耐力壁"）と伏図の表示レイヤに載ること。実フィクスチャのパスは CMake が
 //	HOMESKZ_FIXTURES_DIR で渡す。
@@ -181,7 +181,7 @@ TEST(shear_wall_elements_are_matched_by_name_and_type)
 										"#6=IFCMEMBER('m',$,'火打:0_1',$,$,$,$,$);\n");
 	CHECK(isShearBrace(*model.entity(1)));
 	CHECK(!isDoubleBrace(*model.entity(1)));
-	// たすき掛けも「筋かい」始まりなので筋かいとして拾い、種別だけを別に見る。
+	// たすき掛けも「筋かい」始まりなので筋かいとして抽出し、種別だけを別に判定する。
 	CHECK(isShearBrace(*model.entity(2)));
 	CHECK(isDoubleBrace(*model.entity(2)));
 	CHECK(!isShearBrace(*model.entity(3))); // 名前は筋かいでも IfcBeam は対象外
@@ -213,7 +213,7 @@ TEST(shear_wall_brace_piece_is_measured_in_the_wall_plane)
 	CHECK(near(piece.zBottom, -27.0, 1e-6));
 	CHECK(near(piece.zTop, 2427.0, 1e-6));
 	// 見付け幅は矩形断面の短辺（90）。**最も離れた 2 点は対角線（3001）なので、
-	// そちらを軸と見なすと 2 倍近くに化ける**——回転キャリパの最小幅で測る。
+	// そちらを軸と見なすと 2 倍近くの値になる**——回転キャリパの最小幅で測る。
 	CHECK(near(piece.width, 90.0, 1e-6));
 	// 材は +X 側で高くなる（局所 X が (0.6, 0, 0.8)）。
 	CHECK(piece.risesToMax);
@@ -240,7 +240,7 @@ TEST(shear_wall_panel_piece_is_measured_in_the_wall_plane)
 TEST(shear_wall_vertical_extrusion_is_rejected)
 {
 	// 押し出しが鉛直（＝壁面に直交しない）ものは耐力壁として解釈できない。火打が
-	// この形で、名前が違うので拾いはしないが、幾何の関門としても閉じておく。
+	// この形で、名前が違うので抽出はしないが、幾何の関門としても閉じておく。
 	const std::string text =
 		std::string(kBraceText)
 			.replace(std::string(kBraceText).find("#25=IFCDIRECTION((0.,-1.,0.));"),
@@ -255,7 +255,7 @@ TEST(shear_wall_vertical_extrusion_is_rejected)
 TEST(shear_wall_degenerate_solid_is_rejected)
 {
 	// 押し出し長 0 のソリッドは「厚みの無い壁」で、材厚も表裏も決まらない。壁面座標へ
-	// 落とした時点で弾く（1 枚の異常で全体を止めないための関門）。
+	// 落とした時点で除外する（1 枚の異常で全体を止めないための関門）。
 	const std::string zero =
 		std::string(kBraceText)
 			.replace(std::string(kBraceText).find("#21=IFCEXTRUDEDAREASOLID(#15,#19,#20,45.);"),
@@ -377,7 +377,7 @@ TEST(shear_wall_double_sided_panels_are_one_wall)
 TEST(shear_wall_parallel_walls_on_the_same_line_are_not_merged)
 {
 	// 同じ通りに並ぶ 2 枚の壁は軸も軸方向の区間も一致しうる。法線方向に離れていれば
-	// 別々の耐力壁でなければならない（表裏のまとめが暴発しないこと）。
+	// 別々の耐力壁でなければならない（表裏のまとめが誤って適用されないこと）。
 	std::string text = kPanelText;
 	text += "#40=IFCCARTESIANPOINT((0.,4000.,0.));\n"
 			"#41=IFCDIRECTION((0.,-1.,0.));\n"
@@ -451,7 +451,7 @@ TEST(shear_wall_fixture_count_and_layers)
 
 TEST(shear_wall_fixture_ends_sit_on_column_centres)
 {
-	// 端は柱芯へ寄せてある。柱の命令と突き合わせて、少なくとも大半の端が柱の位置に
+	// 端は柱芯へ寄せてある。柱の命令と照合して、少なくとも大半の端が柱の位置に
 	// 一致することを確かめる（開口部の側柱が無い端はそのままなので全数一致は求めない）。
 	const Document& document = fixtureDocument("サンプル1 (住木邸新築工事).ifc");
 	CHECK(!document.shearWalls.empty());
@@ -474,7 +474,7 @@ TEST(shear_wall_fixture_ends_sit_on_column_centres)
 TEST(shear_wall_fixture_kinds_and_sides_are_all_seen)
 {
 	// 実データには片掛け・たすき掛け・表／裏／両面がひととおり出る。どれかの経路が
-	// 死んでいたら気付けるように、まとめて確かめる。
+	// 機能していなかったら気付けるように、まとめて確かめる。
 	bool sawSingle = false;
 	bool sawDouble = false;
 	bool sawFront = false;
@@ -530,7 +530,7 @@ TEST(shear_wall_fixture_target_layers_name_real_span_layers)
 TEST(shear_wall_fixture_target_layers_include_through_columns)
 {
 	// 柱を探すレイヤは**その階を通る** span 柱レイヤすべて。2 階の壁端の通し柱は 1 階を
-	// base とするレイヤ（"1to3-柱"）に載るので、base だけで絞ると取り逃がす（実機で
+	// base とするレイヤ（"1to3-柱"）に載るので、base だけで絞ると検出できない（実機で
 	// 耐力壁 PIO が壁端の通し柱を認識しなかった不具合）。逆に 2 階の床で止まる管柱
 	// （"1to2-柱"）は 2 階の壁の端には立たないので挙げない。
 	//
@@ -550,7 +550,7 @@ TEST(shear_wall_fixture_target_layers_include_through_columns)
 												 parse::kLevelShearWall)] = planLevel.ordinal;
 		for (const ShearWallCommand& wall : document.shearWalls)
 		{
-			// 最上階（"R-…"）には床の上に立つ柱が無いので見ない。
+			// 最上階（"R-…"）には床の上に立つ柱が無いので確認しない。
 			if (wall.layer.starts_with("R-"))
 				continue;
 			const auto found = ordinalOfLayer.find(wall.layer);
@@ -788,7 +788,7 @@ TEST(shear_wall_fit_ignores_beams_off_the_axis_or_far_away)
 
 TEST(shear_wall_fit_leaves_other_layers_alone)
 {
-	// 配置先レイヤがどの階の耐力壁レイヤでもない命令は触らない。
+	// 配置先レイヤがどの階の耐力壁レイヤでもない命令は変更しない。
 	ShearWallCommand wall = fitWall();
 	wall.layer = "9-耐力壁";
 	std::vector<ShearWallCommand> walls{wall};

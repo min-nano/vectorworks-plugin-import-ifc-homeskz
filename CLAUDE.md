@@ -11,15 +11,15 @@
 **構造設計に使う機能をまとめて収める**、VectorWorks 2026 用の **C++ SDK 製ネイティブ
 プラグイン**です。表示名は**みんなの構造設計支援**、ファイル名・フォルダ名は
 `min-nano_structure`（dev ビルドは `…Dev`）。**機能ごとにプラグインを分けず、この 1 つへ
-コマンドと PIO を足していきます。**
+コマンドと PIO を追加していきます。**
 
 | 入口 | 種類 | 概要 |
 | --- | --- | --- |
 | IFC (ホームズ君) 取り込み… | メニュー | **ホームズ君構造EX** の木造軸組 IFC をパースし、ネイティブオブジェクトへ変換して配置する（主機能） |
 | アップデータを確認 (みんなの構造設計支援) | メニュー | 新しいビルドの確認と入れ替え |
-| MCP ブリッジを表示… (Dev) | メニュー（**dev だけ**） | ローカルの Claude Code と Vectorworks をつなぐパレット。図面・診断ログ・実機テストの報告を読み、頼まれれば実機テスト・更新・再起動を起こす |
+| MCP ブリッジを表示… (Dev) | メニュー（**dev だけ**） | ローカルの Claude Code と Vectorworks をつなぐパレット。図面・診断ログ・実機テストの報告を読み出し、要求に応じて実機テスト・更新・再起動を実行する |
 | 柱記号 / 耐力壁 | PIO | 取り込みが置くプラグインオブジェクト |
-| 実機テストを実行… (みんなの構造設計支援Dev) | メニュー（**dev だけ**） | 覚えた条件で、テンプレートから開いた新しい図面へ取り込み直し、結果を手元に控える（MCP の `vw_run_test` と同じ周） |
+| 実機テストを実行… (みんなの構造設計支援Dev) | メニュー（**dev だけ**） | 記憶した条件で、テンプレートから開いた新しい図面へ再度取り込み、結果をローカルに記録する（MCP の `vw_run_test` と同じ周） |
 
 ## ドキュメントの分担
 
@@ -28,20 +28,20 @@
 | `README.md`（目次）＋ `docs/user-guide/` | 利用者向け。何をするか・取り込むもの・使い方・インストール・アップデート・既知の制限 |
 | `docs/DEVELOPMENT.md`（目次）＋ `docs/development/` | 開発ガイド。ソースの構成・**置き場所の一覧**・ビルド・テスト・lint・CI（待ち方・デバッグ）・自動レビュー・MCP ブリッジ・実機テスト・自動アップデート |
 | `docs/DEV-NOTES.md`（目次）＋ `docs/dev-notes/` | 開発メモ。設計の考え方（`design/`）・ホームズ君 IFC の癖・打ち切った調査・実装の経緯（`milestones/`。M0〜） |
-| [SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)の `Findings/` | **VW SDK の実測知見**（実機でしか判明しない落とし穴・SDK に無い／効かない API・SDK 側の打ち切った調査）。別リポジトリ |
+| [SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)の `Findings/` | **VW SDK の実測知見**（実機でしか判明しない落とし穴・SDK に無い／機能しない API・SDK 側の打ち切った調査）。別リポジトリ |
 | `tests/README.md`（目次）＋ `docs/development/testing/` | テストの一覧・方針・テストしていないもの |
 | `CLAUDE.md`（本ファイル） | 全変更に共通する規約 |
 
 **ドキュメントは 1 ページ 1 トピックに保つ。** 目次（表の「目次」の 4 つ）には本文を書かず、
-本文はフォルダの下のページに書いて目次へ 1 行足す。ページが長くなったら（目安 300 行）
+本文はフォルダの下のページに書いて目次へ 1 行追加する。ページが長くなったら（目安 300 行）
 フォルダに分け、`README.md` から読み始められるようにする。目次は元のパスのまま残してあり、
 ソースのコメントにある `docs/DEV-NOTES.md M<数字>` / `docs/DEVELOPMENT.md「<節>」` は
-目次から引ける（コメントを書き換えて回らない）。
+目次から参照できる（コメントを書き換える必要はない）。
 
 **新しく分かったことは書き残す。** 行き先は 2 つで、取り違えない。
 
 - **Vectorworks SDK の挙動** → SDK リファレンスの `Findings/`。本リポジトリには書かない。
-- **本プラグイン固有のこと**（設計判断・ホームズ君 IFC の癖・描き方の方針） → `docs/dev-notes/`。
+- **本プラグイン固有のこと**（設計判断・ホームズ君 IFC の癖・描画の方針） → `docs/dev-notes/`。
 
 **どちらかの「打ち切った調査」に書いてあることは再調査しない。**
 
@@ -49,7 +49,7 @@
 
 | 触るところ | 読む節 |
 | --- | --- |
-| 共有する定数・述語・ヘルパーを足す／探す | `docs/development/placement-index.md`（置き場所の一覧） |
+| 共有する定数・述語・ヘルパーを追加する／探す | `docs/development/placement-index.md`（置き場所の一覧） |
 | 実機テスト（`draw/Feedback`・`core/FeedbackSession`・`core/FeedbackScratch`・`parse/Feedback`・`ExtTestMenu`） | `docs/development/live-test/design-rules.md`（設計の決めごと）・一時ファイルの片付けは `scratch-files.md` |
 | ローカルの Claude Code から実機確認を回す（MCP の `vw_run_test` / `vw_test_report` / `vw_update` / `vw_restart`） | `docs/development/live-test/local-session-setup.md`（準備）・`running.md`（回し方） |
 | 自動アップデート（`src/Updater*`・`scripts/vw-update.*` / `vw-install.*` / `vw-uninstall.*` / `vw-token.*`） | `docs/development/auto-update/`（`README.md` から） |
@@ -57,7 +57,7 @@
 | CI を待つ・`ci-debug` を使う | `docs/development/ci/ci-wait.md`・`ci-debug.md` |
 | 自動レビュー（`pr-review.yml`） | `docs/development/ci/pr-review.md` |
 | 実機での確認のしかた | `docs/dev-notes/live-verification.md`（実機確認の作法） |
-| ドキュメントを書き足す・並べ替える | 上の「ドキュメントの分担」と、`docs/DEV-NOTES.md` の「書き足すとき」 |
+| ドキュメントを追加する・並べ替える | 上の「ドキュメントの分担」と、`docs/DEV-NOTES.md` の「書き足すとき」 |
 
 ## 開発の基本方針
 
@@ -79,13 +79,13 @@
    **唯一の例外は耐力壁の伏図記号のシンボル定義**（`耐力壁記号_筋かい` / `耐力壁記号_面材`。
    `Extensions/ExtShearWall.h`）。図面側で 1 か所を編集すれば全耐力壁の記号を差し替えられる
    ように、というご要望による。次を満たせないなら例外にしない:
-   * **描く対象があるときだけ作る**（耐力壁が 1 枚も無い図面には作らない。下記 5）。
-   * **同じ名前の定義が既にあれば触らない**（利用者が編集した絵を尊重する）。
+   * **描画対象があるときだけ作る**（耐力壁が 1 枚も無い図面には作らない。下記 5）。
+   * **同じ名前の定義が既にあれば変更しない**（利用者が編集した図形を尊重する）。
    * 作った定義には**必ず `ResetObject` を呼ぶ**（呼ばないと外接が計算されず空に見える。
      [Findings「Symbols」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Symbols.md)）。
 
-   図面枠は**スタイルを当てるが作らない**（利用者の図面にあるスタイルを名前で指すだけで、
-   無ければ置かない）。
+   図面枠は**スタイルを適用するが作らない**（利用者の図面にあるスタイルを名前で参照する
+   だけで、無ければ配置しない）。
 
 5. **空のもの（レイヤ・レベル・凡例）を先に作らない。** 描画対象がある要素にだけ作る。
 
@@ -95,13 +95,13 @@
    分からないまま実装に入らない。[SDK リファレンス](https://github.com/min-nano/vectorworks-developer-sdk-reference)で
    issue を立て、`Findings/` に反映されてから、その知見を根拠に実装する（待つ間は SDK に
    依らない作業を進める）。本リポジトリの `ci-debug` の `sdk-grep` / `sdk-ls` は、`Findings/`
-   に載っている宣言を写し取るときだけ使う。
+   に載っている宣言をコピーするときだけ使う。
 
 8. **利用者のものを消すコードは 3 か所だけで、歯止めを緩めない。** アンインストーラ
    （`scripts/vw-uninstall.*`。フォルダ名が一致し中に殻があるときだけ消す）と、実機テストの
    図面を保存せずに閉じるところ（`draw/Feedback` の `CloseOwnedDocuments`。`CloseDocument` は
    確認なしに変更を捨てるので、閉じる相手は `core/FeedbackSession` の `isOwnedTestDocument`
-   が絞る——記憶に名指しで在り、一時ファイルの置き場の中にある自分の図面だけ。M39）と、
+   が限定する——記憶に名前で記録され、一時ファイルの置き場の中にある自分の図面だけ。M39）と、
    実機テストの一時ファイルの片付け（`core/FeedbackScratch` の `removeScratchDir`。PR が
    閉じたブランチの、目印のあるフォルダだけ消す）。どれも回帰テストで押さえてあり、安全弁を
    緩める方向へ変えない。
@@ -146,11 +146,11 @@ VectorWorks ネイティブオブジェクト
   `joints` / `splices` は `core::SymbolCommand` 1 つで受け、区別は「どのリストか」が担う）。
 - **突き合わせが要る関係は入れ子で持つ**（データタグは `ViewportCommand::tags`、凡例は
   `SheetCommand` の中）。平らに並べて番号で突き合わせない。
-- **描くときにしか決まらないものは命令に持たせない。** 用紙の大きさはシートレイヤから SDK で
+- **描画するときにしか決まらないものは命令に持たせない。** 用紙の大きさはシートレイヤから SDK で
   読むので、それに依る値（縮尺・用紙上の位置・軸組図の枚数）は解析側で決めない。決め方
   そのものは SDK と無関係な算数なので `core/Layout` に置き、無 SDK でテストする。
 - 受け渡しは**構造体のまま**。JSON 直列化は予定に無い（ダンプが実際に要る場面が出たら最小限を
-  足す）。
+  追加する）。
 - スキーマを変えるときは、構造体定義・`validateDocument`・テストを同時に更新する。
 
 ### 依存の向きは厳守する
@@ -161,8 +161,8 @@ VectorWorks ネイティブオブジェクト
 
 ## アーキテクチャ: 殻と本体（ホットリロード）
 
-2 フェーズ分離とは別の軸で、成果物が 2 つに割れている。目的は**アップデートに VectorWorks の
-再起動を要らなくする**こと。境界は C の ABI（`src/PayloadAbi.h`）1 枚きり。
+2 フェーズ分離とは別の軸で、成果物が 2 つに分かれている。目的は**アップデートに VectorWorks の
+再起動を要らなくする**こと。境界は C の ABI（`src/PayloadAbi.h`）1 つだけ。
 
 ```
 VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動時に 1 度きり
@@ -177,40 +177,40 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 
 | | 入るもの | 入れないもの |
 | --- | --- | --- |
-| **殻**（`src/ModuleMain.cpp` / `src/Extensions/` / `src/Updater*` / `src/Payload{Host,Session}.*`） | VectorWorks に**番地を握られる**ものの**登録**（メニュー・PIO・パレットの `SMenuDef` / `SParametricDef` / パラメータ定義 / UUID）・本体の読み込み・**自動アップデート**（本体を置き換える当人が本体の中にいては足元を外す）・**MCP から頼まれた更新と再起動**（本体は自分を降ろせない。`Extensions/ExtMcpPalette`） | **これ以外の実処理**。解析・描画・PIO の作図は置かない。パレットは判断を持たない（JS は殻を叩いて返った文言を並べるだけ。更新の判断は `src/UpdaterFlow.cpp`） |
+| **殻**（`src/ModuleMain.cpp` / `src/Extensions/` / `src/Updater*` / `src/Payload{Host,Session}.*`） | VectorWorks に**アドレスを保持される**ものの**登録**（メニュー・PIO・パレットの `SMenuDef` / `SParametricDef` / パラメータ定義 / UUID）・本体の読み込み・**自動アップデート**（本体を置き換える処理が本体の中にあると、実行中の自身を置き換えることになる）・**MCP から要求された更新と再起動**（本体は自身をアンロードできない。`Extensions/ExtMcpPalette`） | **これ以外の実処理**。解析・描画・PIO の作図は置かない。パレットは判断を持たない（JS は殻を呼び出して返った文言を表示するだけ。更新の判断は `src/UpdaterFlow.cpp`） |
 | **本体**（`src/payload/` / `src/draw/` / `src/parse/` / `src/core/`） | それ以外すべて（両フェーズまるごと） | 登録の定義（`.vwr` の文字列を引くもの）。本体は `.vwr` を持たない |
 
-- **殻に実処理を足すと、そこを直すたびに利用者へ再起動を強いる**ことになり、ホットリロードの
-  前提が静かに崩れる。
-- **殻が本体へ貸すのは「同梱スクリプトの実行」だけ**（`VwPayloadHost` → 本体側は
-  `draw/HostServices` に写して持つ）。貸すものを増やすのは本体でしかできないことのためだけで、
-  殻でできることは殻でやる。
-- **新しい入口（メニュー・PIO）は、登録を殻に、絵と処理を本体の `src/draw/` に置く**（PIO なら
+- **殻に実処理を追加すると、そこを直すたびに利用者へ再起動を強いる**ことになり、ホットリロードの
+  前提が気付かれないまま崩れる。
+- **殻が本体へ提供するのは「同梱スクリプトの実行」だけ**（`VwPayloadHost` → 本体側は
+  `draw/HostServices` に複製して保持する）。提供するものを増やすのは本体でしかできないことの
+  ためだけで、殻でできることは殻でやる。
+- **新しい入口（メニュー・PIO）は、登録を殻に、描画と処理を本体の `src/draw/` に置く**（PIO なら
   `src/draw/<要素>Pio.{h,cpp}`）。殻の `Recalculate()`（メニューなら `DoInterface()`）は
   `PayloadUse` で本体を確保して取り次ぐだけ（`ExtColumnMark` / `ExtShearWall` に倣う）。
-- **境界に口を足したら `VW_PAYLOAD_ABI_VERSION` を必ず上げる**（殻と本体は別々に配られるので、
+- **境界に関数を追加したら `VW_PAYLOAD_ABI_VERSION` を必ず上げる**（殻と本体は別々に配られるので、
   食い違いは実行時にしか気付けない）。
 - メニューコマンドのカテゴリは `.vwr` の `"category"` 1 つを全メニュー定義が引く（プラグイン名で
   揃える）。
 
 ### 破ってはならない決めごと
 
-1. **境界は C の ABI に保つ。** 例外・C++ のオブジェクト・vtable・`std::string` を跨がせない
-   （降ろした瞬間にそのモジュールのコードと静的データが消える）。
-2. **境界を越えて来た構造体は、受け取った側がその場で写す。** 渡した側も降ろすまで生かす——
-   **両方やる**。落とすと実機で VectorWorks ごと落ちる（`src/PayloadHostHolder.h` と
-   `tests/PayloadHostHolderTests.cpp`）。
-3. **本体のコードがスタックに載っている間は降ろさない。** 入れ替えの判定は入口で、入れ子の
-   深さが 0 のときだけ（`src/PayloadSession.h`）。
-4. **本体は必ず一時ディレクトリへ複製してから読む**（Windows は読み込み中の DLL を置き換え
-   られない）。
-5. **本体をバンドルの中に置かない**（mac の署名がリソースまで封をする）。殻の隣に置く。
+1. **境界は C の ABI に保つ。** 例外・C++ のオブジェクト・vtable・`std::string` を境界を越えて
+   受け渡さない（アンロードした瞬間にそのモジュールのコードと静的データが消える）。
+2. **境界を越えて来た構造体は、受け取った側がその場で複製する。** 渡した側もアンロードする
+   まで保持する——**両方やる**。どちらかを欠くと実機で VectorWorks ごと異常終了する
+   （`src/PayloadHostHolder.h` と `tests/PayloadHostHolderTests.cpp`）。
+3. **本体のコードがスタックに載っている間はアンロードしない。** 入れ替えの判定は入口で、
+   入れ子の深さが 0 のときだけ（`src/PayloadSession.h`）。
+4. **本体は必ず一時ディレクトリへ複製してから読み込む**（Windows は読み込み中の DLL を
+   置き換えられない）。
+5. **本体をバンドルの中に置かない**（mac の署名の対象がリソースにまで及ぶ）。殻の隣に置く。
 6. **殻の ID（`VW_SHELL_ID`）が「再起動が要るか」を決める。** `CMakeLists.txt` の
    `VW_SHELL_INPUTS` には**起動のときにしか読まれないもの（＝殻にコンパイルされるもの）だけ**を
    最小限に並べる。`draw/`・`parse/`・インストーラ／アンインストーラ・同梱スクリプト
-   （`scripts/vw-*.sh` / `.ps1`。呼ぶたびにディスクから読み直される）は入れない——入れると
+   （`scripts/vw-*.sh` / `.ps1`。呼ぶたびにディスクから再読み込みされる）は入れない——入れると
    そこを直すたびに再起動を強いる（M23 で実際にそうなった）。判断できないときは「再起動が
-   要る」へ倒す（`src/UpdaterParse.h` の `NeedsRestartAfterInstall`）。
+   要る」と判定する（`src/UpdaterParse.h` の `NeedsRestartAfterInstall`）。
 7. **殻は `MinNanoStructureCore`（core/ + parse/）をリンクしない**（殻に入れてよいものの境界が
    曖昧になる）。
 
@@ -219,7 +219,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 詳細は `docs/development/auto-update/`（自動アップデートの仕組み）。全変更で守るのは次の 3 つ。
 
 - **起動時（`plugin_module_main`）に更新を確認しない。** 確認はコマンドの入口だけで行う。
-  再起動を SDK（`CloseAllFilesAndQuitVectorworks`）に頼めるのは、確認が VectorWorks が完全に
+  再起動を SDK（`CloseAllFilesAndQuitVectorworks`）に依頼できるのは、確認が VectorWorks が完全に
   動いている最中にしか走らないからである。PIO のリセットからも確認しない（取り込み直後に
   数百回走る）。
 - **インストールの経路は `src/UpdaterFlow.cpp` の 1 本だけ。** 別の都合で 2 本目を書かない。
@@ -237,32 +237,32 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 
 **同じ定数・述語・ヘルパー・文言を 2 か所に書かない。** 既存の唯一の置き場所の一覧は
 `docs/development/placement-index.md`（置き場所の一覧）にあり、新しく共有するものを作ったら
-そこへ 1 行足す。特に次は取り違えやすい:
+そこへ 1 行追加する。特に次は取り違えやすい:
 
-- **要素を 1 つ足すときの型**: `parse/<要素>.{h,cpp}` ＋ `core/Document.h` の命令構造体と
+- **要素を 1 つ追加するときの型**: `parse/<要素>.{h,cpp}` ＋ `core/Document.h` の命令構造体と
   `validateDocument` の検証 ＋ `draw/<要素>.{h,cpp}` ＋ `tests/Parse<要素>Tests.cpp` ＋
-  `parse/Summary.cpp` の `kElements` に 1 行。どれも本体側なので殻は変わらない。PIO を足す
-  ときだけ `Extensions/Ext<要素>.{h,cpp}`（殻: 登録と取り次ぎ）＋ `draw/<要素>Pio.{h,cpp}`
-  （本体: 作図）に割る。
-- **要素の一覧**（表示名・助数詞・命令数・描けた数）は `parse/Summary` の `kElements` ただ 1 つ。
-- **SDK へ渡す素の数値・SDK 呼び出しの定型**は `draw/DrawUtil`。**SDK と無関係な純計算**は
+  `parse/Summary.cpp` の `kElements` に 1 行。どれも本体側なので殻は変わらない。PIO を追加
+  するときだけ `Extensions/Ext<要素>.{h,cpp}`（殻: 登録と取り次ぎ）＋ `draw/<要素>Pio.{h,cpp}`
+  （本体: 作図）に分ける。
+- **要素の一覧**（表示名・助数詞・命令数・描画できた数）は `parse/Summary` の `kElements` ただ 1 つ。
+- **SDK へ渡す未加工の数値・SDK 呼び出しの定型**は `draw/DrawUtil`。**SDK と無関係な純計算**は
   `core/` へ寄せる。
-- **解析側はシンボル名の固定値を持たない**（取り込み設定 `core/ImportOptions` から引く）。
+- **解析側はシンボル名の固定値を持たない**（取り込み設定 `core/ImportOptions` から取得する）。
 - **診断ログへの書き出し口**は `core/Progress` の `beginPhase` と `draw/ImportRun`（見出し・
-  区切り・結果・例外）の 2 か所だけ（各要素へ `trace::log` を撒かない。要素の記録は
+  区切り・結果・例外）の 2 か所だけ（各要素に `trace::log` を書かない。要素の記録は
   `core::DrawCounts` の diagnostics / notes へ返す）。**例外は耐力壁 PIO のリセット
   （`draw/ShearWallPio`）だけ**——Vectorworks から直に呼ばれる別の入口なので、ログが開いて
   いる取り込みの最中に限り 1 枚ずつ自分で書く（1 行ごとにフラッシュされるので、リセットの
-  途中で落ちたときにどの壁かが最終行に残る）。
+  途中で異常終了したときにどの壁かが最終行に残る）。
 - **GitHub のトークンの在り処**は `scripts/vw-token.{sh,ps1}` だけで、GitHub を読む側にも
-  必ず付ける（認証なしは IP ごとに 1 時間 60 回。M27 で M24 の往復の確認がちょうど当たった）。
+  必ず付ける（認証なしは IP ごとに 1 時間 60 回。M27 で M24 の往復の確認がこの上限に達した）。
 
 ### 本番の取り込みコマンドに実機テストを書かない
 
 実機テスト（記憶・図面の用意・報告）を書いてよいのは dev だけの実機テストのコマンド
 （`Extensions/ExtTestMenu` ＋ `draw/Feedback` の `runTestRound`）だけで、`draw/ImportCommand` と
 `Extensions/ExtMenu` には 1 行も書かない。`#ifdef VW_DEV_BUILD` で囲っても制御フローは本番の
-入口に残るので、囲えばよいとも考えない。両者が共有してよいのは**絵を作るところ**
+入口に残るので、囲えばよいとも考えない。両者が共有してよいのは**描画するところ**
 （`draw/ImportRun` の `runImportRound`）だけ（M25）。MCP の `vw_run_test` も
 `draw/Feedback` の `runTestRound` を通る。そのほかの決めごとは
 `docs/development/live-test/design-rules.md`（実機テストの設計の決めごと）。
@@ -315,6 +315,12 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 - **日本語コメントを基本**とし、既存ソースの手折りコメントの密度に合わせる。
 - **なぜ（意図・仕様の根拠）を書く。** 大きな知見は、プラグイン固有なら `docs/dev-notes/`、
   SDK の挙動なら `Findings/` にも足し、コメントからはその置き場所を指す。
+- **関数・型・モジュールのコメントは「何をするものか → 注意事項 → 注意事項の理由や補足」の
+  順に書く。** 経緯（「以前は…」）や調査の結果は最後に置く。
+- **くだけた言い回し・比喩・俗語を使わず、技術文書の語で書き、表記を揃える**（「絵を描く」
+  → 「描画する」、「中止は見ない」→「中止要求はこの処理に割り込めない」など）。用語の対応表と
+  言い換えない定義済みの用語（殻・本体・命令・周など）は
+  `docs/development/writing-style.md`。Markdown も同じ。
 
 ## テスト方針
 
@@ -329,25 +335,26 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
   - **描画側から切り離せる純計算は `core/` へ寄せて**無 SDK でテストする（レイヤ順・地中梁の
     呑み込み・用紙の割り付け等）。
   - 実描画は**ローカルの VectorWorks で目視確認**する（`docs/dev-notes/live-verification.md`）。
-    SDK 呼び出しの薄いラッパーは、要るならモックで「正しい引数で呼んだか」を見る程度に留める。
+    SDK 呼び出しの薄いラッパーは、要るならモックで「正しい引数で呼んだか」を確認する程度に留める。
 
 ### 検算は開発ビルドだけに置く
 
 `draw/` は書いた値（ストーリバウンドの record・PIO のパラメータ・パス）を**書いた直後に読み
-戻して命令と引き比べ**、食い違いを診断ログへ持ち帰る。これは実機テストで絵の破綻を数字から手繰る
-ための足場で、利用者には不要なので **`#if VW_DRAW_VERIFY` で囲み、dev ビルドにだけコンパイル
-する**（`src/draw/Verify.h`）。
+戻して命令と照合し**、食い違いを診断ログへ記録する。利用者には不要なので
+**`#if VW_DRAW_VERIFY` で囲み、dev ビルドにだけコンパイルする**（`src/draw/Verify.h`）。
+これは実機テストで描画結果の破綻を数値から追跡するための補助の仕組みである。
 
-囲むかどうかの基準はひとつ——**「外したら利用者の絵が変わるか」**。
+囲むかどうかの基準はひとつ——**「除外したら利用者の描画結果が変わるか」**。
 
-- 囲む … 検算そのもの・その件数・実測を文字列にする道具（`DescribeSizeParams` /
-  `DescribeStoryBound` / `DescribePioPath` / `DescribeParamsContaining`）・取り込み後の測り直し
+- 囲む … 検算そのもの・その件数・実測を文字列にする関数（`DescribeSizeParams` /
+  `DescribeStoryBound` / `DescribePioPath` / `DescribeParamsContaining`）・取り込み後の再測定
   （`recheckColumns` / `recheckShearWalls`・`probeShearWall`）・パスの観測（`PathProbe`）・
-  描き上がった実体の測り直し（`MeasureDrawnMember` / `PioPathChord`）。
-- 囲まない … 読み戻した結果が絵を変えるもの（`SetParamRealChecked`・`CreatePath` の
-  `NurbsSetPt3D`・データタグのレイアウトの取り直し・`draw/Symbol` の置けたことの確認）。
-  **ただし「絵を変える」は「絵を良くする」ではない**——潰れた材のパスを作り直す自己修復は
-  ここに並んでいたが、繕った結果のほうが悪いと分かって撤去した（`src/draw/Verify.h` /
+  描画された実体の再測定（`MeasureDrawnMember` / `PioPathChord`）。
+- 囲まない … 読み戻した結果が描画結果を変えるもの（`SetParamRealChecked`・`CreatePath` の
+  `NurbsSetPt3D`・データタグのレイアウトの再取得・`draw/Symbol` の配置できたことの確認）。
+  **ただし「描画結果を変える」は「描画結果を良くする」ではない**——退化した（長さ 0 になった）
+  部材のパスを再生成する自己修復はここに並んでいたが、修復した結果のほうが悪いと分かって
+  撤去した（`src/draw/Verify.h` /
   `docs/dev-notes/milestones/m27-zero-length-column/`）。
 
 `#if` の中は dev の CI でしか型検査されないので、**両方の分岐がコンパイルできることは
@@ -369,7 +376,7 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
      同梱スクリプトなど実機でしか確かめられないもの・方針をユーザーに決めてもらうもの。
      **迷ったら下書き。**
    * **本番（ready for review）で作る**: それ以外（下記 5）。
-2. **下書きの間は自動レビューが走らない**（使用量を食うので、差分が動く段階では回さない）。
+2. **下書きの間は自動レビューが走らない**（使用量を消費するので、差分が動く段階では回さない）。
    CI と dev ビルドは走るので、実機テストはそのまま回せる。下書きの間に Claude が頼まれずに
    `/code-review` 等を回すこともしない。
 3. **下書きを本番へ昇格させるのは「マージしたい状態」になってから**——実機確認が済んだ
@@ -385,21 +392,22 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
      で始まるコメント**を投稿して起こす。
 4. **実描画が変わる変更（`draw/` を含む PR）は、ユーザーが実機で「確認できた」と言うまで
    マージしない。** CI green もレビューの承認も、実機テストの件数が揃ったことも実機確認の代わりには
-   ならない（命令の数が合っていても絵が破綻していることは普通にある）。確認前にマージすると、
+   ならない（命令の数が合っていても描画結果が破綻していることは普通にある）。確認前にマージすると、
    不具合が出たときにどの変更が原因か切り分けられなくなる。
 5. **実機確認の要らない変更は CI green（＋レビュー）でマージしてよい**——`core/` `parse/` だけ・
-   テスト・ドキュメント・CI 設定など描画に触れないもの。迷ったら 4 に倒す。
+   テスト・ドキュメント・CI 設定など描画に触れないもの。迷ったら 4 として扱う。
 6. **コミットメッセージ**には Claude セッション URL（`https://claude.ai/code/session_<ID>`）を
    入れる。
 
 ## ローカルセッションでの実機確認（MCP）
 
-実機確認は**ローカルの Claude Code セッション**が MCP ブリッジ越しに回す（M38。M37 までの
+実機確認は**ローカルの Claude Code セッション**が MCP ブリッジ越しに回す。リポジトリ直下の
+`.mcp.json` が `scripts/mcp/vw-mcp-server.py` を登録するので、リポジトリで Claude Code を
+起動すればツールが使える。ブリッジは**開発版のプラグインにだけ**ある（M38。M37 までの
 「dev ビルドが結果を PR へ投稿し、パレットが新しいビルドを入れて取り込み直す」往復は
-外した）。リポジトリ直下の `.mcp.json` が `scripts/mcp/vw-mcp-server.py` を登録するので、
-リポジトリで Claude Code を起動すれば道具が使える。橋は**開発版のプラグインにだけ**ある。
+廃止した）。
 
-**クラウドのセッションからは橋に届かない**（受け渡しがローカルのファイル）。実機確認が要る
+**クラウドのセッションからはブリッジに接続できない**（受け渡しがローカルのファイル）。実機確認が要る
 作業は Mac の `claude remote-control` で起動したセッションで回し、iOS からはそれを操作する。
 実機の要らない作業はクラウドで並行してよい。GitHub・iOS・許可の用意は
 `docs/development/live-test/local-session-setup.md`（ローカルセッションの準備）。
@@ -410,14 +418,14 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 - **1 周目も Claude が始める（M40）。** `vw_run_test` に `ifc`（`tests/fixtures/` の IFC の
   絶対パス）と `template`（`tests/fixtures/Default.sta` の絶対パス）を渡すと、記憶が無くても
   尋ねずに 1 周目から走る（設定はテンプレートの図面にあるもので既定を組む）。Vectorworks が
-  起動していなければ MCP サーバが起こしてから頼む。名指しせず記憶も無ければ走らずにそう返す。
+  起動していなければ MCP サーバが起動してから要求を送る。名指しせず記憶も無ければ走らずにそう返す。
   人がメニュー「実機テストを実行…」から選ぶ 1 周目も従来どおり使える。
 - **`vw_restart` を頼む前に人へ一言断る。** 実機テストの図面は周の終わりに一時ファイルへ
   保存してある（次の周の頭で保存せずに閉じる。M39）ので、ふつうは保存の確認は出ない。人が
   保存していない図面を開いていれば確認が出るので、人の応答が要る（利用者の図面を保存せずに
-  閉じる道は持たない）。
+  閉じる手段は持たない）。
 - **報告の数字は実機確認の代わりにならない。** 「図面の状態:」の行で図面が取り込み前へ
-  戻っていたかを先に見て、怪しければ絵で見て答えられる形で人に確かめてもらう（読み方は
+  戻っていたかを先に確認し、怪しければ描画結果を見て答えられる形で人に確かめてもらう（読み方は
   `docs/development/live-test/reading-reports.md`）。所見は人がチャットへ書く。
 
 ## CI の完了を待つ

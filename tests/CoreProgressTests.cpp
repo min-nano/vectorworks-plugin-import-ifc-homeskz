@@ -5,7 +5,7 @@
 //	純ロジック——表示文言の整形・進捗バーの配分・件数の勘定・中止の保持——なので、
 //	無 SDK のテストハーネス（TestFramework.h）だけで完結する（CLAUDE.md「テスト方針」）。
 //
-//	実際の表示（進捗ダイアログの見た目・yield の効き）は SDK 側（draw/ProgressDialog）に
+//	実際の表示（進捗ダイアログの見た目・yield の効果）は SDK 側（draw/ProgressDialog）に
 //	あり、ローカルの VectorWorks でしか確認できない。ここで担保するのは「呼び出し側が
 //	報告した内容が、そのままフックへ正しい形で届くこと」まで。
 //
@@ -110,14 +110,14 @@ TEST(phase_share_handles_empty_and_full_phases)
 	// 命令が無いフェーズはバーを進めない。総数 0（＝命令が 1 つも無い Document）も同じ。
 	CHECK(nearly(phaseShare(0, 100, 90.0), 0.0));
 	CHECK(nearly(phaseShare(0, 0, 90.0), 0.0));
-	// 全命令が 1 フェーズに属するなら、そのフェーズが配分を丸ごと取る。
+	// 全命令が 1 フェーズに属するなら、そのフェーズが配分をすべて取る。
 	CHECK(nearly(phaseShare(7, 7, 90.0), 90.0));
 	CHECK(nearly(phaseShare(9, 7, 90.0), 90.0));
 }
 
 TEST(phase_shares_sum_to_the_draw_share)
 {
-	// 要素ごとの配分を足すと描画フェーズ全体の配分になる（バーが 100% で終わる根拠）。
+	// 要素ごとの配分を合計すると描画フェーズ全体の配分になる（バーが 100% で終わる根拠）。
 	const std::size_t total = 4 + 22 + 3 + 196 + 106 + 9;
 	double sum = 0.0;
 	for (std::size_t count : {std::size_t{4}, std::size_t{22}, std::size_t{3}, std::size_t{196},
@@ -219,8 +219,8 @@ TEST(null_reporter_is_inert)
 
 TEST(draw_weights_are_defined_for_every_phase)
 {
-	// **表の網羅性の番人**。DrawPhase を足したのに重みの表へ書き忘れると、その要素の重さが
-	// 0 になってバーが進まなくなる（気付きにくい）。全フェーズが正の重さを持つことを固定する。
+	// **表の網羅性の確認**。全フェーズが正の重さを持つことを固定する。DrawPhase を追加した
+	// のに重みの表へ書き忘れると、その要素の重さが 0 になってバーが進まなくなる（気付きにくい）。
 	for (std::size_t i = 0; i < static_cast<std::size_t>(DrawPhase::Count); ++i)
 		CHECK(drawWeight(static_cast<DrawPhase>(i)) > 0.0);
 	// 番兵そのものは重さを持たない（範囲外は 0）。
@@ -242,9 +242,9 @@ TEST(draw_weighted_total_sums_count_times_weight)
 
 TEST(draw_phase_share_follows_time_not_command_count)
 {
-	// **これが直したかったこと。** 実測モデルに近い内訳（仕口 284 件は 0.03 秒、
-	// 軸組図 33 枚は 17 秒）で、件数比なら仕口が軸組図の 8 倍以上バーを進めてしまう。
-	// 重み付きなら逆転し、時間を食う軸組図のほうが大きく進む。
+	// **重み付きなら、時間を消費する軸組図のほうが大きく進む**（この修正の目的）。
+	// 実測モデルに近い内訳（仕口 284 件は 0.03 秒、軸組図 33 枚は 17 秒）では、件数比なら
+	// 仕口が軸組図の 8 倍以上バーを進めてしまう。
 	Document document;
 	document.joints.resize(284);
 	document.sections.resize(33);
@@ -259,7 +259,7 @@ TEST(draw_phase_share_follows_time_not_command_count)
 
 TEST(draw_phase_share_handles_empty_and_single_phase)
 {
-	// 描く物が無ければ 0（0 除算しない）。
+	// 描画する物が無ければ 0（0 除算しない）。
 	CHECK_EQ(drawPhaseShare(0, DrawPhase::Members, 0.0, 97.0), 0.0);
 	CHECK_EQ(drawPhaseShare(5, DrawPhase::Members, 0.0, 97.0), 0.0);
 

@@ -3,7 +3,7 @@
 //
 //	断面寸法データタグの解析（src/parse/Tag）の単体テスト。VectorWorks SDK を一切 include せず、
 //	無 SDK のテストハーネス（TestFramework.h）で走る（CLAUDE.md「テスト方針」）。
-//	**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
+//	**期待値は手書きで持つ**（他の実装の出力と機械的に照合することはしない）。
 //
 //	検証項目（docs/DEV-NOTES.md M13）: 文字角度の (-90, 90] 正規化・タグを寄せる側（上または左）・
 //	伏図では表示レイヤに乗る横架材だけが対象で位置が部材の辺の中央になること・軸組図では
@@ -51,7 +51,7 @@ using HomeskzIfcTests::near;
 
 namespace
 {
-	// 試験用の横架材 1 本。タグの組み立てが見るのは配置先レイヤ・天端中央線・断面幅・
+	// 試験用の横架材 1 本。タグの組み立てが参照するのは配置先レイヤ・天端中央線・断面幅・
 	// 両端の天端 Z だけなので、そこだけを埋める。
 	MemberCommand makeMember(const std::string& layer, Vec2 start, Vec2 end, double width,
 							 double elevation, double endElevation)
@@ -103,7 +103,7 @@ TEST(TagAngleIsNormalisedToReadableRange)
 	CHECK(near(tagAngle(0.0, 1000.0), 90.0, 1e-9));
 	CHECK(near(tagAngle(0.0, -1000.0), 90.0, 1e-9));
 	CHECK(near(tagAngle(-1000.0, 0.0), 0.0, 1e-9));
-	// 斜材は素直な傾き。西向きに 45 度上がる材は −45 度へ折り返す。
+	// 斜材は傾きをそのまま使う。西向きに 45 度上がる材は −45 度へ折り返す。
 	CHECK(near(tagAngle(1000.0, 1000.0), 45.0, 1e-9));
 	CHECK(near(tagAngle(-1000.0, 1000.0), -45.0, 1e-9));
 }
@@ -283,7 +283,7 @@ TEST(TagCommandsAreDeterministic)
 {
 	// 同じ入力から 2 度割り当てても同じ並び・同じ値（CLAUDE.md「決定性を守る」）。
 	// 原本は共有のキャッシュ（fixtureDocument）から借り、**書き換えるほうだけ**自分の
-	// コピーにする。原本を書き換えると同じフィクスチャを見る他のケースに漏れる。
+	// コピーにする。原本を書き換えると同じフィクスチャを参照する他のケースに影響が及ぶ。
 	forEachFixtureDocument(
 		[&](const std::string&, const Document& a)
 		{
@@ -367,11 +367,11 @@ TEST(LevelNoteMeasuresFromTheStoreyFl)
 			 std::string("(2FL ±0)"));
 	CHECK_EQ(memberLevelNote(noteMember("1-横架材天端", 1612.4, 1612.4), stories, standard),
 			 std::string("(1FL +1,000)"));
-	// 標準は推した値（横架材天端）ではなく実在する高さ。推した値ちょうどの材でも、標準の
+	// 標準は推定した値（横架材天端）ではなく実在する高さ。推定した値ちょうどの材でも、標準の
 	// 高さと違えば添える。
 	CHECK_EQ(memberLevelNote(noteMember("1-横架材天端", 572.0, 572.0), stories, {612, 3531, 6374}),
 			 std::string("(1FL -40)"));
-	// 標準を渡さない階は推した値で比べる。
+	// 標準を渡さない階は推定した値で比べる。
 	CHECK(memberLevelNote(noteMember("2-横架材天端", 3531.0, 3531.0), stories, {}).empty());
 	// 最上階の標準は軒高（RFL そのもの）。母屋は軒高より上なので必ず添える。最上階は
 	// "RFL" ではなく "軒高" と書く（RFL は図面で使わない）。
@@ -419,8 +419,8 @@ TEST(LevelNoteCarriesTheLinkedDatum)
 		memberLevelNoteParts(noteMember("2-横架材天端", 3531.0, 3531.0), stories, standard);
 	CHECK(none.text.empty());
 	CHECK(none.datum.empty());
-	// 登り梁の span レイヤ（"{from}to{to}-登り梁"）は接頭辞で階が引けないので、from の伏図
-	// レベルが属する階から引く（伏図レベル: 1 階 1・2 階 2〜3・屋根 4）。伏図レベルを渡さ
+	// 登り梁の span レイヤ（"{from}to{to}-登り梁"）は接頭辞で階を特定できないので、from の伏図
+	// レベルが属する階から求める（伏図レベル: 1 階 1・2 階 2〜3・屋根 4）。伏図レベルを渡さ
 	// なければ階を特定できず添えない。
 	const std::vector<parse::PlanLevel> levels = parse::buildPlanLevels(
 		stories, {{572}, {2699, 3531}, {6374}}, HomeskzIfcImport::core::ImportOptions{});
@@ -467,7 +467,7 @@ TEST(FixtureTagsCarryLevelNotes)
 		if (std::string(name) == "スキップフロア_サンプル.ifc")
 			CHECK(skipNote);
 	}
-	// グレー本モデルプラン1 は横架材が FL ちょうどで、推した横架材天端（FL−100 など）と
+	// グレー本モデルプラン1 は横架材が FL ちょうどで、推定した横架材天端（FL−100 など）と
 	// ずれる。標準は実在する高さなので、床伏図の梁には注記が付かない（付くのは母屋だけ）。
 	const Document& grey = HomeskzIfcTests::fixtureDocument("グレー本モデルプラン1【3階】.ifc");
 	for (const core::SheetCommand& sheet : grey.sheets)

@@ -18,7 +18,7 @@
 //	    「負の値のうち最大のもの」（＝床に最も近い負のオフセット）。列挙順に依存しない決定値。
 //
 //	【作るレベル】基本レベル（一般階=FL＋横架材天端、最上階=軒高）（M3）に、要素を導入した
-//	マイルストーンのレベルを足している（いずれも描くものがあるときだけ。Story.cpp の
+//	マイルストーンのレベルを追加している（いずれも描画するものがあるときだけ。Story.cpp の
 //	「レベルを足す条件」参照）:
 //	  * M5 床板 … 屋根階に床版（ロフト）があるときだけ FL レベル（軒高 + 36mm）
 //	  * M6 屋根組 … 屋根版を含む階に 垂木・野地板 レベル（横架材天端／軒高の直上）
@@ -73,7 +73,7 @@ namespace HomeskzIfcImport::parse
 	// span レベル 1 つの表記。整数は小数点なし・半整数は".5" 付き（1 → "1"、2.5 → "2.5"）。
 	// **この表記の定義はここが唯一**で、span 柱レイヤ（spanLayerName）と伏図記号レイヤ
 	// （parse/ColumnMark の planMarkLayerName）の両方がこれを通る（別々に書くと
-	// "2.5-柱伏図記号" と "2.5to…-柱" の桁がズレたときに、伏図の表示レイヤ探索が黙って失敗す
+	// "2.5-柱伏図記号" と "2.5to…-柱" の桁が食い違ったときに、伏図の表示レイヤ探索が黙って失敗す
 	// る形になる）。
 	std::string formatSpanLevel(double value);
 
@@ -87,7 +87,7 @@ namespace HomeskzIfcImport::parse
 
 	// IfcProduct（要素）のローカル配置 Z 座標を取り出す。取得できれば outZ に入れて true、
 	// ObjectPlacement が無い／IfcLocalPlacement でない／座標が足りない等で取れなければ false。
-	// 親 PlacementRelTo は辿らず RelativePlacement の Location.Z だけを見る（M2 の
+	// 親 PlacementRelTo は辿らず RelativePlacement の Location.Z だけを参照する（M2 の
 	// resolveObjectPlacement と同じく、階高は描画フェーズのストーリで反映するため親配置を合成
 	// しない）。
 	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ);
@@ -99,11 +99,11 @@ namespace HomeskzIfcImport::parse
 
 	// 配置先デザインレイヤ名 "{接頭辞}-{レベル種別}" を組み立てる（"1-FL" / "R-軒高" /
 	// "2-垂木" …）。レイヤ名の規約を 1 か所に固定するためのヘルパーで、ストーリがレベルを
-	// 作るときと、各要素が配置先を引くときの**両方**がこれを通る（規約がズレると要素の
-	// レイヤ探索が黙って失敗し、命令はあるのに 1 つも描かれない形になる）。
+	// 作るときと、各要素が配置先を引くときの**両方**がこれを通る（規約が食い違うと要素の
+	// レイヤ探索が黙って失敗し、命令はあるのに 1 つも描画されない形になる）。
 	std::string storyLayerName(std::size_t index, bool isTop, const std::string& levelType);
 
-	// 横架材の取り合い・継手・柱の上端を見るときの「その階の横架材レイヤ」。軒桁の専用
+	// 横架材の取り合い・継手・柱の上端を判定するときの「その階の横架材レイヤ」。軒桁の専用
 	// レイヤ（"n-軒桁" / "n-軒桁(FL-872)"。母屋伏図に薄く重ねるために分けた。
 	// parse/PlanLevel）を同じ伏図レベルの横架材レイヤ（"n-横架材天端" / "R-軒高"。伏図
 	// レベルの印は残す）へ読み替え、それ以外はそのまま返す。**レイヤ一致で相手を絞るところは、
@@ -142,7 +142,7 @@ namespace HomeskzIfcImport::parse
 	// その階の横架材レベルの種別名。一般階は横架材天端、最上階は軒高（最上階に横架材天端
 	// レベルは無い）。**この分岐はここに 1 つだけ置く**——横架材・柱・火打・伏図の表示レイヤ
 	// が同じ分岐を要り、かつて各所が三項演算子を各々書いていた（片方だけ直すと配置先と
-	// バインド先のレベルがズレる）。
+	// バインド先のレベルが食い違う）。
 	inline const char* beamTopLevelType(bool isTop)
 	{
 		return isTop ? kLevelEaves : kLevelBeamTop;
@@ -150,7 +150,7 @@ namespace HomeskzIfcImport::parse
 
 	// その階の横架材天端（最上階は軒高＝ストーリ原点）の絶対 Z。バインド offset の基準や
 	// 床下地の下端の算出に使う。最上階の beamOffset は未使用（StoryInfo の doc コメント）
-	// なので足さない。
+	// なので加算しない。
 	inline double beamTopElevation(const StoryInfo& story)
 	{
 		return story.isTop ? story.elevation : story.elevation + story.beamOffset;

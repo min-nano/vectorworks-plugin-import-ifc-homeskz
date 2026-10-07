@@ -35,7 +35,7 @@ namespace HomeskzIfcImport::parse
 		constexpr std::array<const char*, 2> kMemberTypes = {"IFCBEAM", "IFCMEMBER"};
 
 		// 要素の平面芯線（始点・単位方向・長さ・断面幅）を取り出す。配置・断面を解決
-		// できない／平面へ落とすと長さ 0 の材は false（1 本の欠損で全体を止めない）。
+		// できない／平面へ投影すると長さ 0 の材は false（1 本の欠損で全体を止めない）。
 		bool memberCenterLine(const Model& model, const Entity& element, Vec2& outOrigin,
 							  Vec2& outDirection, double& outLength, double& outWidth)
 		{
@@ -61,7 +61,7 @@ namespace HomeskzIfcImport::parse
 
 		// 床束（position を中心）が立上り 1 本の footprint を clearance だけ広げた領域に
 		// 入っているか。壁芯を軸に、直交方向は 半壁厚 + clearance、沿軸方向は区間の外側へ
-		// clearance まで見る（半壁厚は直交方向の寸法なので沿軸には効かない）。
+		// clearance までを判定する（半壁厚は直交方向の寸法なので沿軸方向には影響しない）。
 		bool wallCovers(const core::WallCommand& wall, const Vec2& position, double clearance)
 		{
 			const Vec2 delta = wall.end - wall.start;
@@ -233,7 +233,7 @@ namespace HomeskzIfcImport::parse
 
 			// 成分の先頭（＝代表）の芯線方向へ全端点を射影し、最小〜最大区間の 1 本にする
 			// （core/Geometry の collinearSpan）。統合した連の床束幅は成分の最大値
-			// （安全側＝立上りとの重なりを拾い漏らさない）。
+			// （安全側＝立上りとの重なりを検出し漏らさない）。
 			OhbikiRun run;
 			core::collinearSpan(lines, members, run.start, run.end);
 			for (const std::size_t index : members)
@@ -246,7 +246,7 @@ namespace HomeskzIfcImport::parse
 	bool overlapsFoundationWall(const Vec2& position, double postWidth,
 								const std::vector<core::WallCommand>& walls)
 	{
-		// 床束の半幅ぶん（＋丸め誤差の下駄）だけ立上りの footprint を広げてから点で判定する。
+		// 床束の半幅ぶん（＋丸め誤差の余裕）だけ立上りの footprint を広げてから点で判定する。
 		const double clearance = (postWidth / 2.0) + kFloorPostWallMargin;
 		return std::ranges::any_of(walls, [&position, clearance](const core::WallCommand& wall)
 								   { return wallCovers(wall, position, clearance); });
@@ -288,7 +288,7 @@ namespace HomeskzIfcImport::parse
 			{
 				const Vec2 position = start + (direction * distance) - center;
 				// 立上りと重なる位置には立てられない（その位置の大引は立上りが受ける）ので
-				// **その 1 本だけ落とす**——間隔は詰め替えない（parse/FloorPost.h の doc）。
+				// **その 1 本だけ除外する**——間隔は詰め替えない（parse/FloorPost.h の doc）。
 				if (overlapsFoundationWall(position, run.width, walls))
 					continue;
 				positions.push_back(position);

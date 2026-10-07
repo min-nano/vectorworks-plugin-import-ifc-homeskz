@@ -6,9 +6,9 @@
 //	同じ。リセットのたびに、
 //	  1. パラメータの対象レイヤを名前で引き、
 //	  2. そのレイヤの構造材（StructuralMember）を走査して構造用途 4/5 だけを採り、
-//	  3. 1 本ごとに記号を描く（断面＝実断面の対角線／平面＝シンボル 1 つ）
+//	  3. 1 本ごとに記号を描画する（断面＝実断面の対角線／平面＝シンボル 1 つ）
 //	という流れで作図する。**記号の大きさ・位置・本数は毎回実物から導く**ので、柱を編集
-//	しても（リセットが走れば）記号が嘘にならない。
+//	しても（リセットが走れば）記号が実物と食い違わない。
 //
 //	使用する SDK API は ci-debug の sdk-grep で実在を確認したもの:
 //	  gSDK->GetNamedLayer / FirstMemberObj / NextObject / GetObjectBounds /
@@ -38,10 +38,11 @@ namespace HomeskzIfcImport::draw
 	{
 		// 対象オブジェクトが構造材で、構造用途が柱／小屋束なら true。併せて断面寸法も返す。
 		//
-		// **寸法は draw/DrawUtil の ResolveParamName を通して読む。** 構造材ツールの
-		// パラメータは universal 名で引けないことがあり（日本語環境。M6 の垂木で実証済み）、
-		// draw/StructuralMember は書くときに同じ解決でローカライズ名へ落ちる。読み手が
-		// universal 名だけを見ると、書けているのに 0 が返って全部の柱が弾かれる。
+		// **寸法は draw/DrawUtil の ResolveParamName を通して読む。**
+		// 理由: 構造材ツールのパラメータは universal 名で取得できないことがあり（日本語環境。
+		// M6 の垂木で実証済み）、draw/StructuralMember は書くときに同じ解決でローカライズ名へ
+		// フォールバックする。読む側が universal 名だけを参照すると、書けているのに 0 が返って
+		// 全部の柱が除外される。
 		bool ColumnSection(MCObjectHandle object, bool& outKoyazuka, double& outWidth,
 						   double& outDepth)
 		{
@@ -64,15 +65,16 @@ namespace HomeskzIfcImport::draw
 			}
 		}
 
-		// 記号 1 つ分を描く。断面記号は実断面の対角線（柱＝×・小屋束＝／）、平面記号は
-		// シンボル 1 つ。作った図形は PIO（host）のジオメトリとして取り込まれる。
+		// 記号 1 つ分を描画する。断面記号は実断面の対角線（柱＝×・小屋束＝／）、平面記号は
+		// シンボル 1 つ。作成した図形は PIO（host）のジオメトリとして取り込まれる。
 		//
-		// 【シンボルは置いただけでは図面に現れない】VWSymbolObj の構築子はレガシーの
-		// PlaceSymbol を包んでおり、できたインスタンスはどのコンテナにも入らない——
-		// M11 のアンカーボルトで「シンボルがひとつも配置できない」ところから切り分けた
-		// 落とし穴で、**AddObjectToContainer を外すと静かに壊れる**（draw/Symbol.cpp 冒頭）。
-		// PIO の中では配置先が PIO 自身（host）になる。線（CreateLine）は自動で入るので
-		// この手当てが要るのはシンボルだけ。
+		// 【シンボルは置いただけでは図面に現れない】シンボルは AddObjectToContainer で PIO
+		// 自身（host）へ入れる。**AddObjectToContainer を省くと警告なしに配置されなくなる**
+		// （draw/Symbol.cpp 冒頭）。線（CreateLine）は自動で入るので、この処置が要るのは
+		// シンボルだけ。
+		// 理由: VWSymbolObj の構築子はレガシーの PlaceSymbol を包んでおり、できたインスタンスは
+		// どのコンテナにも入らない——M11 のアンカーボルトで「シンボルがひとつも配置できない」
+		// ところから切り分けた落とし穴。
 		void DrawMark(MCObjectHandle host, bool plan, const TXString& symbol, bool koyazuka,
 					  const WorldPt& centre, double width, double depth)
 		{
@@ -92,7 +94,7 @@ namespace HomeskzIfcImport::draw
 
 			const double halfW = width / 2.0;
 			const double halfD = depth / 2.0;
-			// ／（左下→右上）。小屋束はこの 1 本だけ、柱はもう 1 本足して ×。
+			// ／（左下→右上）。小屋束はこの 1 本だけ、柱はもう 1 本追加して ×。
 			gSDK->CreateLine(WorldPt(centre.x - halfW, centre.y - halfD),
 							 WorldPt(centre.x + halfW, centre.y + halfD));
 			if (!koyazuka)
@@ -104,7 +106,7 @@ namespace HomeskzIfcImport::draw
 	// -------------------------------------------------------------------
 	EObjectEvent recalculateColumnMark(MCObjectHandle object)
 	{
-		// リセット以外の経路で空のまま呼ばれても落とさないよう nil を見ておく。
+		// リセット以外の経路で空のまま呼ばれても落とさないよう nil を確認しておく。
 		if (object == nil)
 			return kObjectEventNoErr;
 
@@ -113,7 +115,7 @@ namespace HomeskzIfcImport::draw
 			const VWParametricObj self(object);
 			const std::string targetLayer = draw::PioParamString(self, kParamTargetLayer);
 			if (targetLayer.empty())
-				return kObjectEventNoErr; // 対象未指定なら何も描かない
+				return kObjectEventNoErr; // 対象未指定なら何も描画しない
 
 			const std::string style = draw::PioParamString(self, kParamMarkStyle);
 			const bool plan = style == kMarkStylePlan;
@@ -125,16 +127,17 @@ namespace HomeskzIfcImport::draw
 				return kObjectEventNoErr; // レイヤが無い＝その階が生成されていない
 
 			// **PIO のジオメトリは PIO 自身のローカル座標で持たれる。** 柱はワールド座標で
-			// 見つかるので、描く前に必ずローカルへ落とす。これをしないと PIO を動かした量
-			// だけ記号がまるごとずれ、しかもリセットしても同じ相対位置に描き直すので直らない
-			// （実機で確認。ResetOnMove を立てただけでは解決しない）。InversePointTransform
-			// は回転も含めて戻すので、PIO を回しても記号は柱の上に残る。
+			// 見つかるので、描画する前に必ずローカル座標へ変換する。InversePointTransform
+			// は回転も含めて戻すので、PIO を回転しても記号は柱の上に残る。
+			// これをしないと PIO を動かした量だけ記号がまるごとずれ、しかもリセットしても同じ
+			// 相対位置に再描画するので解消しない（実機で確認。ResetOnMove を立てただけでは
+			// 解決しない）。
 			VWTransformMatrix toWorld;
 			self.GetObjectToWorldTransform(toWorld);
 
 			for (MCObjectHandle h = gSDK->FirstMemberObj(layer); h != nil; h = gSDK->NextObject(h))
 			{
-				// クラスで絞る指定があれば、それ以外は飛ばす（空＝全クラス）。
+				// クラスで絞る指定があれば、それ以外はスキップする（空＝全クラス）。
 				if (!targetClass.empty())
 				{
 					const InternalIndex wanted = gSDK->ClassNameToID(TXString(targetClass.c_str()));
@@ -149,7 +152,7 @@ namespace HomeskzIfcImport::draw
 					continue;
 
 				// 位置は柱のバウンディングボックスの中心（鉛直材なので平面の中心＝柱心）。
-				// 求まるのはワールド座標なので、PIO のローカルへ落としてから描く（上記）。
+				// 求まるのはワールド座標なので、PIO のローカル座標へ変換してから描画する（上記）。
 				WorldRect bounds;
 				gSDK->GetObjectBounds(h, bounds);
 				const VWPoint2D centre = toWorld.InversePointTransform(VWPoint2D(
@@ -160,9 +163,9 @@ namespace HomeskzIfcImport::draw
 		}
 		catch (...)
 		{
-			// 1 本の異常で記号全体を落とさない（CLAUDE.md「エラーハンドリング」）。
+			// 1 本の異常で記号全体を失敗させない（CLAUDE.md「エラーハンドリング」）。
 			// kObjectEventHadError を返すと VW がオブジェクトをエラー表示にするので、
-			// ここまでに描けた記号を残したまま正常終了として抜ける。
+			// ここまでに描画できた記号を残したまま正常終了として抜ける。
 			return kObjectEventNoErr;
 		}
 		return kObjectEventNoErr;

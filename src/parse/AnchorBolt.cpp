@@ -57,7 +57,7 @@ namespace HomeskzIfcImport::parse
 				continue;
 
 			// 型（IfcMechanicalFastenerType）の名前でボルト本体／座金／柱頭・柱脚金物を
-			// 見分ける。本体以外はここで落ちる（座金を採ると同じ軸芯に二重で置かれる）。
+			// 見分ける。本体以外はここで除外する（座金を採ると同じ軸芯に二重で置かれる）。
 			const std::string typeName = fastenerTypeName(model, *element);
 			if (!isAnchorBoltType(typeName))
 				continue;

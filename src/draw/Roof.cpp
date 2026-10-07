@@ -12,7 +12,8 @@
 //	はオブジェクト変数で与え、厚みは SetThickness）。作図状態（レイヤ Z/ΔZ ・テンプレート図形・
 //	確定後の後付け操作）に一切依存しないので、手続き型の作図につきまとう落とし穴——テンプレート
 //	のポリゴンを屋根と誤認する／確定後の操作でクラッシュする——が構造的に起きない。
-//	**仕様の意図（屋根版 1 面＝単勾配の野地板 1 枚）は同じで、実現手段を SDK の作法へ寄せた**。
+//	**仕様の意図（屋根版 1 面＝単勾配の野地板 1 枚）は同じで、実現手段を SDK
+//	の標準的な方法へ寄せた**。
 //
 //	描画手順:
 //	  1. 命令の平面外形を閉じた 2D ポリゴンにする（屋根面の水平投影）。
@@ -21,16 +22,16 @@
 //	     オブジェクト変数で与える」）。屋根軸（ovSlabRoofPt1/Pt2）・棟側の点
 //	     （ovSlabRoofUpslopePt）・勾配（ovSlabRoofRise/Run）・軸の Z（ovSlabHeight）。
 //	  4. **図面（レイヤ）へ挿入する**（下記「生成しただけでは図面に入らない」）。
-//	  5. ハンドルから屋根面オブジェクトを作り直して形状を再構築し（VWRoofFaceObj の
+//	  5. ハンドルから屋根面オブジェクトを再生成して形状を再構築し（VWRoofFaceObj の
 //	     ハンドル版コンストラクタが InitGeometry を呼ぶ）、厚み（野地板 12mm）を設定する。
 //	  6. クラス（耐力面材-屋根）を割り当て、描画属性をすべてクラス属性に従わせて再計算する。
-//	屋根面を作れない場合は外形ポリゴンにフォールバックする（1 枚の失敗で全体を止めない）。
+//	屋根面を生成できない場合は外形ポリゴンにフォールバックする（1 枚の失敗で全体を止めない）。
 //
 //	【生成しただけでは図面に入らない】VWRoofFaceObj は gSDK->CreateBasicSlab でオブジェクトを
-//	作るだけで、どのコンテナにも入れない（外形ポリゴンを自分の中へ入れるのみ）。VWPolygon2DObj
+//	生成するだけで、どのコンテナにも入れない（外形ポリゴンを自身の中へ入れるのみ）。VWPolygon2DObj
 //	のように図面へ入る wrapper とは違うので、**明示的にレイヤへ AddObjectToContainer しないと
-//	オブジェクトはできているのに図面に現れない**（ローカル確認で、完了ダイアログは枚数を数えて
-//	いるのに 1 枚も見えないという形で判明した）。二重登録を避けるため親が無いときだけ入れる。
+//	オブジェクトは生成されているのに図面に現れない**（ローカル確認で、完了ダイアログは枚数を数えて
+//	いるのに 1 枚も表示されないという形で判明した）。二重登録を避けるため親が無いときだけ入れる。
 //
 //	【屋根軸はオブジェクト変数で与える（重要）】VWFC の
 //	`VWRoofFaceObj(type, poly, z, upSlopeDir, rise, run)` は一見これだけで屋根面を組めそうだが、
@@ -38,20 +39,20 @@
 //
 //	  * 引数 z を**一度も使っていない**（軸の Z は 0 のまま）
 //	  * 屋根軸を `±upSlopeDir.Perp() * dim`（dim＝外形バウンズの短辺の半分）＝**原点を通る線**
-//	    として設定する。外形の位置を見ておらず、外形が原点から離れているほど軸は外形の外に出る
+//	    として設定する。外形の位置を参照しておらず、外形が原点から離れているほど軸は外形の外に出る
 //
-//	という実装で、任意の位置・高さの片流れ面を作る用途には使えない。屋根面の形状を実際に
+//	という実装で、任意の位置・高さの片流れ面を生成する用途には使えない。屋根面の形状を実際に
 //	決めているのは InitGeometry が読む
 //	オブジェクト変数（ovSlabRoofPt1/Pt2/UpslopePt/Rise/Run・ovSlabHeight・ovSlabThickness）
 //	なので、生成後にそれらを命令の値で上書きし、ハンドル版コンストラクタで InitGeometry を
-//	もう一度走らせて形状を作り直す。**ovSlabRoofUpslopePt は「方向」ではなく「棟側にある点」**
+//	もう一度実行して形状を再生成する。**ovSlabRoofUpslopePt は「方向」ではなく「棟側にある点」**
 //	（ObjectVariables.h のコメント "a point on the upslope side of the roof"）なので、命令の
 //	upslope（軸から棟側へ進んだ点）をそのまま渡す。
 //
 //	【高さは絶対 Z で与える】屋根軸の Z（ovSlabHeight）には命令の elevation（軒の絶対 Z）を
 //	そのまま渡す。M6 の垂木（当時は軸組ツールで、配置行列に絶対 Z を渡していた）で
 //	「絶対 Z を渡すのが正しい」ことが確認できたので、同じ規約に揃えてある（垂木はのちに
-//	構造材ツールへ移り、いまはストーリバウンドで高さを持つ。draw/Rafter.cpp 冒頭）。
+//	構造材ツールへ移り、現在はストーリバウンドで高さを持つ。draw/Rafter.cpp 冒頭）。
 //	Z の計算は 1 か所（DrawOne の ovSlabHeight 設定）に集約してある。
 //
 
@@ -62,7 +63,7 @@
 #include "core/Progress.h"
 
 // 屋根面オブジェクト（VWRoofFaceObj）と、その外形に渡す 2D ポリゴン。フォールバックの
-// 外形ポリゴンは draw/Floor.cpp と同じ VWPolygon2DObj で描く。
+// 外形ポリゴンは draw/Floor.cpp と同じ VWPolygon2DObj で描画する。
 #include "VWFC/Math/VWPolygon.h"
 #include "VWFC/VWObjects/VWRoofFaceObj.h"
 #include "VWFC/VWObjects/VWPolygon2DObj.h"
@@ -94,7 +95,7 @@ namespace HomeskzIfcImport::draw
 			return points;
 		}
 
-		// 外形ポリゴンをクラス付きで残す（屋根面を作れなかったときのフォールバック）。
+		// 外形ポリゴンをクラス付きで残す（屋根面を生成できなかったときのフォールバック）。
 		void DrawFallbackPolygon(const core::RoofCommand& roof)
 		{
 			VWPolygon2DObj polygon(BoundaryPoints(roof.boundary));
@@ -105,14 +106,14 @@ namespace HomeskzIfcImport::draw
 			SetClassWithAttributes(handle, roof.drawClass);
 		}
 
-		// 野地板 1 枚を屋根面オブジェクトとして描く。**屋根面として作れたときだけ true** を返し、
-		// 外形ポリゴンへフォールバックした場合は false（診断ログの内訳の「描けた数」が
+		// 野地板 1 枚を屋根面オブジェクトとして描画する。**屋根面として生成できたときだけ true**
+		// を返し、外形ポリゴンへフォールバックした場合は false（診断ログの内訳の「描けた数」が
 		// 「6/6」ではなく「0/6」になるので、ローカル確認で屋根面生成の失敗が一目で分かる）。
 		bool DrawOne(const core::RoofCommand& roof, MCObjectHandle layer)
 		{
 			if (roof.run <= 0.0 || roof.boundary.size() < 3)
 			{
-				// 勾配が定まらない（鉛直面等の退化した）命令は屋根面を作らずフォールバック。
+				// 勾配が定まらない（鉛直面等の退化した）命令は屋根面を生成せずフォールバック。
 				DrawFallbackPolygon(roof);
 				return false;
 			}
@@ -127,14 +128,14 @@ namespace HomeskzIfcImport::draw
 				return false;
 			}
 
-			// 水平投影外形（閉じたポリゴン）から屋根面オブジェクトを作る。位置・高さ・勾配は
+			// 水平投影外形（閉じたポリゴン）から屋根面オブジェクトを生成する。位置・高さ・勾配は
 			// このコンストラクタでは与えられない（冒頭「屋根軸はオブジェクト変数で与える」）ので、
 			// ここでは外形だけを渡す。
 			const VWPolygon2D outline(BoundaryPoints(roof.boundary), true);
 			const VWRoofFaceObj face(kRoofFaceType_Roof, outline);
 			const MCObjectHandle handle = face.GetThisObject();
 			// 屋根面として成立していなければ外形ポリゴンへフォールバックする（nil だけでなく
-			// 種別も確かめる。屋根面でないものに屋根専用の設定を続けない）。
+			// 種別も確認する。屋根面でないものに屋根専用の設定を続けない）。
 			if (handle == nil || !VWRoofFaceObj::IsRoofFaceObjectN(handle))
 			{
 				DrawFallbackPolygon(roof);
@@ -142,9 +143,9 @@ namespace HomeskzIfcImport::draw
 			}
 
 			// **図面（レイヤ）へ挿入する。** VWFC の VWRoofFaceObj は gSDK->CreateBasicSlab で
-			// オブジェクトを作るだけで、どのコンテナにも入れない（外形ポリゴンを自分の中へ
+			// オブジェクトを生成するだけで、どのコンテナにも入れない（外形ポリゴンを自身の中へ
 			// AddObjectToContainer するのみ）。VWPolygon2DObj のように図面へ入る wrapper と
-			// 違うため、入れないと**オブジェクトはできているのに図面に現れない**。すでに
+			// 違うため、入れないと**オブジェクトは生成されているのに図面に現れない**。すでに
 			// どこかに入っている場合に二重登録しないよう、親が無いときだけ入れる。
 			if (gSDK->ParentObject(handle) == nil)
 				gSDK->AddObjectToContainer(handle, layer);
@@ -162,10 +163,10 @@ namespace HomeskzIfcImport::draw
 			SetRealVariable(handle, ObjectVariable::SlabRoofRun, kSlopeRunUnit);
 			SetRealVariable(handle, ObjectVariable::SlabHeight, roof.elevation);
 
-			// 上書きした変数から形状を作り直す。ハンドル版コンストラクタが InitGeometry を
+			// 上書きした変数から形状を再生成する。ハンドル版コンストラクタが InitGeometry を
 			// 呼ぶので、これが「変数 → 屋根面の 3D 形状」の再構築にあたる。
 			VWRoofFaceObj placed(handle);
-			// 厚み（野地板 12mm 固定）。屋根面は厚みを自分で持つ（スラブのような構成層ではない）。
+			// 厚み（野地板 12mm 固定）。屋根面は厚みを自身で持つ（スラブのような構成層ではない）。
 			placed.SetThickness(roof.thickness);
 
 			SetClassWithAttributes(handle, roof.drawClass);

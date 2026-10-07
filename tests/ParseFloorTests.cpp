@@ -82,7 +82,7 @@ namespace
 		return total;
 	}
 
-	// 指定レイヤの命令だけを取り出す。**伏図レベルの印（"2-FL(FL-872)"）は外して比べる**
+	// 指定レイヤの命令だけを取り出す。**伏図レベルの印（"2-FL(FL-872)"）は除外して比較する**
 	// ——横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた床も、その階の FL の床
 	// （parse/PlanLevel）。
 	std::vector<FloorCommand> onLayer(const std::vector<FloorCommand>& floors,
@@ -107,7 +107,7 @@ namespace
 	// 1FL（Elevation 0）と 2FL（Elevation 3000）の 2 階を持ち、1FL に床版 1 枚
 	// （ローカル配置 Z=-120・厚み 28・1000×2000 の鉛直押し出し）を含む最小モデル。
 	// 横架材天端オフセットは同じ床版の Z=-120 から決まる（IfcSlab のローカル Z 負値）。
-	// slabName を "床版" 以外にすると床板として拾われないことの確認にも使う。
+	// slabName を "床版" 以外にすると床板として抽出されないことの確認にも使う。
 	std::string minimalFloorText(const std::string& slabName)
 	{
 		return "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
@@ -173,7 +173,7 @@ TEST(extracts_floor_slab_from_minimal_model)
 
 TEST(ignores_slabs_with_other_names)
 {
-	// 屋根版など "床版" 以外の IfcSlab は床板として拾わない。
+	// 屋根版など "床版" 以外の IfcSlab は床板として抽出しない。
 	Model const model = loadIfcFromText(minimalFloorText("屋根版"));
 	CHECK(buildFloorCommands(model).empty());
 }
@@ -236,7 +236,7 @@ TEST(top_story_floor_is_a_loft)
 
 TEST(story_has_floor_slab_detects_loft)
 {
-	// parse/Story が屋根階へ FL レベルを足すかの判定に使う。
+	// parse/Story が屋根階へ FL レベルを追加するかの判定に使う。
 	std::string text = minimalFloorText("床版");
 	const std::string from = "(#40),#10)";
 	const std::string to = "(#40),#11)";
@@ -289,7 +289,7 @@ TEST(sample1_components_and_class_are_fixed)
 			continue;
 
 		const double slab = flIt->second - beamIt->second;
-		CHECK(slab > kSubfloorThickness); // 実データは仕上げが 0 に潰れない
+		CHECK(slab > kSubfloorThickness); // 実データは仕上げ厚が 0 にならない
 		CHECK_EQ(floor.components[0].name, std::string("床仕上げ"));
 		CHECK(near(floor.components[0].thickness, slab - kSubfloorThickness));
 		CHECK_EQ(floor.components[1].name, std::string("床下地"));
@@ -377,7 +377,7 @@ TEST(skip_floor_steps_are_represented)
 {
 	// スキップフロア_サンプルの 2FL には段差のある床（832mm 下がる）と横架材天端に
 	// ある通常の床が混在する。床ごとに実際の高さ（elevation）を持ち、offset に高低差が
-	// 現れる（全床を横架材天端へ潰すと段差が失われる）。
+	// 現れる（全床を横架材天端へ揃えると段差が失われる）。
 	bool ok = false;
 	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
@@ -393,7 +393,7 @@ TEST(skip_floor_steps_are_represented)
 			hasZero = true;
 		if (near(floor.bound.offset, -832.0))
 			hasStep = true;
-		// 高さが 1 種類に潰れていないことを見るため mm 単位で丸めて数える。
+		// 高さが 1 種類にまとまっていないことを確認するため mm 単位で丸めて数える。
 		elevations.insert(static_cast<long long>(std::llround(floor.elevation * 1000.0)));
 	}
 	CHECK(hasZero);
@@ -414,7 +414,7 @@ TEST(skip_floor_steps_are_represented)
 TEST(floor_above_beam_top_respects_ifc_position)
 {
 	// グレー本モデルプラン1の床は横架材天端より 100〜150mm 高い位置にある。
-	// 横架材天端へ潰さず、IFC の床位置（正の offset）を保つ。
+	// 横架材天端へ揃えず、IFC の床位置（正の offset）を保つ。
 	bool ok = false;
 	const Model& model = fixture("グレー本モデルプラン1【3階】.ifc", ok);
 	CHECK(ok);
@@ -534,7 +534,7 @@ TEST(loft_floor_is_synthesised_from_floor_beams)
 	// 床梁の天端が軒高ちょうど（ローカル Z=-100 ＋ 厚み 100）なので段差は 0。
 	CHECK(near(loft.bound.offset, 0.0));
 	CHECK(near(loft.elevation, 3000.0));
-	// 外形は骨組みの外周（±550 の矩形。共線点は落ちて 4 点）。
+	// 外形は骨組みの外周（±550 の矩形。共線点は除かれて 4 点）。
 	CHECK_EQ(loft.boundary.size(), static_cast<std::size_t>(4));
 	double maxAbs = 0.0;
 	for (const core::Vec2& point : loft.boundary)
@@ -567,7 +567,7 @@ TEST(loft_floor_slab_wins_over_synthesis)
 	const std::string from = "(#40),#10)";
 	const std::string to = "(#40),#11)";
 	text.replace(text.find(from), from.size(), to);
-	// 床梁のリングも同じ屋根階（#11）に足す（床版が優先されることの確認）。
+	// 床梁のリングも同じ屋根階（#11）に追加する（床版が優先されることの確認）。
 	std::string frame = loftFrameText("木梁:床大梁:1");
 	frame = frame.substr(frame.find("#20=IFCCARTESIANPOINT((0.,0.,-100.));"));
 
@@ -583,7 +583,7 @@ TEST(loft_floor_slab_wins_over_synthesis)
 
 TEST(story_has_loft_floor_covers_both_sources)
 {
-	// parse/Story が屋根階へ FL レベルを足すかの判定。床版でも合成床でも真になる。
+	// parse/Story が屋根階へ FL レベルを追加するかの判定。床版でも合成床でも真になる。
 	Model const beams = loadIfcFromText(loftFrameText("木梁:床小梁:1"));
 	CHECK(HomeskzIfcImport::parse::storyHasLoftFloor(beams, 11));
 	CHECK(!HomeskzIfcImport::parse::storyHasFloorSlab(beams, 11));
@@ -599,7 +599,7 @@ TEST(story_has_loft_floor_covers_both_sources)
 
 TEST(loft_synthesis_skips_beams_without_solid)
 {
-	// 形状表現を持たない床梁は飛ばす（1 本の欠損で全体を止めない）。リングの 1 本が
+	// 形状表現を持たない床梁はスキップする（1 本の欠損で全体を止めない）。リングの 1 本が
 	// 欠けると閉じないので、床は合成されない。
 	std::string text = loftFrameText("木梁:床大梁:1");
 	const std::string from = "#106=IFCBEAM('b',$,'木梁:床大梁:1',$,$,#22,#105,$);";
@@ -613,7 +613,7 @@ TEST(loft_synthesis_skips_beams_without_solid)
 TEST(loft_floor_is_synthesised_from_a_real_fixture)
 {
 	// 実データ: 屋根階に床梁（床大梁・床小梁）を持つモデルは無く、既存フィクスチャでは
-	// ロフト床が合成されない＝屋根階の床は増えないことを確かめる（合成が暴発しない）。
+	// ロフト床が合成されない＝屋根階の床は増えないことを確かめる（合成が誤って実行されない）。
 	bool ok = false;
 	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);

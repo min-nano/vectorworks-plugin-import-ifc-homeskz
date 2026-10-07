@@ -3,7 +3,8 @@
 //
 //	「MCP ブリッジを表示」コマンドの登録と取り次ぎ。受け付けはパレット
 //	（Extensions/ExtMcpPalette.h）の時計と本体の draw::serveMcpBridge（src/draw/McpBridge.h）が
-//	持つので、ここはパレットを出すだけ。**ここに実処理は 1 行も置かない**（CLAUDE.md「殻と本体」）。
+//	持つので、ここはパレットを表示するだけ。
+//	**ここに実処理は 1 行も置かない**（CLAUDE.md「殻と本体」）。
 //
 
 #include "PluginPrefix.h"
@@ -19,9 +20,9 @@ namespace HomeskzIfcImport
 	{
 		// メニュー項目の宣言。カテゴリは他のコマンドと**同じ "category"**（＝プラグイン名）
 		// を引く——このプラグインのコマンドはワークスペースの中で 1 か所にまとまっている
-		// のが筋である（CLAUDE.md「殻と本体」）。
+		// のが適切である（CLAUDE.md「殻と本体」）。
 		//
-		// Needs = None: 文書が開いていなくても押せる（ExtMcpMenu.h「Needs = None」）。
+		// Needs = None: 文書が開いていなくても実行できる（ExtMcpMenu.h「Needs = None」）。
 		//
 		// 関数ローカル static で持つ理由は他のコマンドと同じ（EMenuEnableFlags は SDK の
 		// 別 TU にある非ローカル static なので、名前空間スコープ変数の初期化子で参照すると
@@ -77,11 +78,12 @@ CMcpBridgeMenu_EventSink::~CMcpBridgeMenu_EventSink() = default;
 // ---------------------------------------------------------------------------
 void CMcpBridgeMenu_EventSink::DoInterface()
 {
-	// **パレットを出すだけ。** 出たページの時計が受け付けを始める（ExtMcpPalette.h）。
-	// M24 まではここで進捗ダイアログを開いてループしていたので、架けている間は図面を
-	// 触れなかった（docs/DEV-NOTES.md M30）。
+	// **パレットを表示するだけ。** 表示されたページの時計が受け付けを始める（ExtMcpPalette.h）。
 	//
-	// **本体はここでは読み込まない。** 時計の最初の 1 刻みが PayloadUse で読み込む——
-	// ここで読んでも、戻った時点で使う区間が閉じるだけで、得るものが無い。
+	// **本体はここでは読み込まない。** 時計の最初の 1 回が PayloadUse で読み込む——
+	// ここで読み込んでも、戻った時点で使う区間が閉じるだけで、利点が無い。
+	//
+	// M24 まではここで進捗ダイアログを開いてループしていたので、接続している間は図面を
+	// 操作できなかった（docs/DEV-NOTES.md M30）。
 	ShowMcpPalette();
 }

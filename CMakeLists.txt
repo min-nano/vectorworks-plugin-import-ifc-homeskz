@@ -288,23 +288,23 @@ if(VW_BUILD_PLUGIN)
 	# --- 殻の ID ---------------------------------------------------------------
 	# **「アップデートに再起動が要るか」を決める鍵**（src/UpdaterParse.h の
 	# NeedsRestartAfterInstall）。Vectorworks が読み込むのは殻だけなので、**本体
-	# （.vwpayload）しか変わっていないなら置き換えて読み直すだけで済み、殻まで変わって
+	# （.vwpayload）しか変わっていないなら置き換えて再読み込みするだけで済み、殻まで変わって
 	# いれば再起動が要る**（src/PayloadAbi.h）。
 	#
 	# 値は**殻にコンパイルされるものだけ**のハッシュにする。つまり draw/ や parse/ を
-	# 直しても動かず、殻の登録・更新・境界（src/PayloadAbi.h）を直せば必ず動く——後者が
-	# 肝で、版の食い違ったまま動かさないための歯止めになっている。
+	# 直しても値は変わらず、殻の登録・更新・境界（src/PayloadAbi.h）を直せば必ず変わる
+	# ——後者が要点で、版の食い違ったまま動作させないための歯止めになっている。
 	#
 	# **入れる基準はひとつ——「起動のときにしか読まれないか」。** Vectorworks が読み込むのは
 	# 殻の**モジュール**だけで、そこへコンパイルされたものは次の起動まで入れ替わらない。
-	# 逆に、**プロセスへ読み込まれず、使うたびにディスクから読み直されるもの**は、置き換えた
-	# 瞬間から新しいほうが効く＝再起動は要らない。だから後者はここへ入れない。
+	# 逆に、**プロセスへ読み込まれず、使うたびにディスクから読み込まれるもの**は、置き換えた
+	# 瞬間から新しいほうが使われる＝再起動は要らない。だから後者はここへ入れない。
 	# **最小限に保つこと**——1 つ余計に入れるたびに、そこを直しただけで利用者へ再起動を
 	# 強いることになる。
 	#
 	# 外部ツールを使わず CMake 組み込みのハッシュだけで出すのは、**mac と Windows の両方の
-	# CI で同じ値が出ること**が要るため（片方でしか動かない道具を挟むと、そこが食い違った
-	# 瞬間に「毎回再起動が要る」に化ける）。
+	# CI で同じ値が出ること**が要るため（片方でしか動かないツールを間に置くと、そこで値が
+	# 食い違った時点で常に「再起動が要る」と判定されてしまう）。
 	#
 	# **改行を正規化してから混ぜる。** Windows のランナーは CRLF でチェックアウトするので、
 	# 生のバイト列をそのままハッシュすると同じソースからプラットフォームごとに違う ID が
@@ -355,7 +355,7 @@ if(VW_BUILD_PLUGIN)
 	# 「いま入っているビルドのもの」**でもある。
 	#
 	# ここへ入れていたせいで実際に困った: M23 の実機 1 周目で見つかった
-	# `vw-feedback.sh` の不具合（macOS の bash 3.2 で空配列を展開して死ぬ）を直すだけで、
+	# `vw-feedback.sh` の不具合（macOS の bash 3.2 で空配列を展開して異常終了する）を直すだけで、
 	# 利用者に Vectorworks の再起動を強いることになった——**往復から再起動を無くす**のが
 	# この仕組みの目的なのに、その修正のたびに再起動が要るのでは本末転倒である。
 	#
@@ -388,8 +388,8 @@ if(VW_BUILD_PLUGIN)
 	# も呼ばないので、リンクしてしまうと「殻に入ってよいもの」の境界が曖昧になる。
 	#
 	# MCP ブリッジのパレットの登録と、それが頼まれる更新・再起動（M38）も殻に入る——
-	# 入れ替えは殻でしか起きず（本体は自分を降ろせない）、パレットの登録は Vectorworks に
-	# 番地を握られるため（Extensions/ExtMcpPalette.h）。
+	# 入れ替えは殻でしか起きず（本体は自分をアンロードできない）、パレットの登録は
+	# Vectorworks に番地を保持されるため（Extensions/ExtMcpPalette.h）。
 	set(VW_SHELL_SOURCES
 		src/ModuleMain.cpp
 		src/PayloadHost.cpp
@@ -405,7 +405,7 @@ if(VW_BUILD_PLUGIN)
 		src/UpdaterFlow.cpp)
 
 	# --- 本体（ペイロード）の sources ----------------------------------------------
-	# **殻が dlopen / LoadLibrary で読み込む側。** SDK 依存の draw/ フェーズがまるごと
+	# **殻が dlopen / LoadLibrary で読み込む側。** SDK 依存の draw/ フェーズがすべて
 	# ここに入り、SDK 非依存の core/ + parse/ は MinNanoStructureCore として下でリンクする。
 	# Vectorworks はこのモジュールの存在を知らないので、**入れ替えに再起動が要らない**。
 	set(VW_PAYLOAD_SOURCES
@@ -445,7 +445,7 @@ if(VW_BUILD_PLUGIN)
 
 	# 殻と本体は**同じ SDK 設定でビルドする**（本体も libVWSDK.a を自分でリンクし、
 	# GS_InitializeVCOM を自分で呼ぶ。src/payload/PayloadMain.cpp）。設定を 2 か所へ
-	# 書き写すと片方だけ古くなるので、当てるところを 1 つにまとめてある。
+	# 重複して書くと片方だけ古くなるので、適用するところを 1 つにまとめてある。
 	#
 	#   vw_apply_sdk_module(<target> <sources...>)
 	#
@@ -486,9 +486,9 @@ if(VW_BUILD_PLUGIN)
 		# diagnostics log. VW_SHELL_ID: **本体だけの更新で済むかを決める鍵**
 		# （src/UpdaterParse.h）。
 		#
-		# **ビルドのたびに変わる値をここへ足さないこと**（時刻など）。この定義は殻と本体の
-		# 全 TU に効くので、configure ごとに動く値を入れるとコンパイラキャッシュ（ccache）が
-		# 毎回まるごと外れ、CI が丸ごと再ビルドになる。
+		# **ビルドのたびに変わる値をここへ追加しないこと**（時刻など）。この定義は殻と本体の
+		# 全 TU に適用されるので、configure ごとに変わる値を入れるとコンパイラキャッシュ
+		# （ccache）が毎回すべてヒットしなくなり、CI が全体を再ビルドすることになる。
 		target_compile_definitions(
 			${target}
 			PRIVATE RELEASE_BLD=1 "VW_BUILD_VERSION=\"${VW_BUILD_VERSION}\""
@@ -598,8 +598,8 @@ if(VW_BUILD_PLUGIN)
 		# 置き場所は**殻の隣**（mac もバンドルの中ではない）。mac のバンドルは署名が
 		# リソースまで封をするので、中のファイルを差し替えると署名が壊れる。隣に置けば、
 		# 本体を何度置き換えても殻の署名に触れない。拡張子 .vwpayload は Vectorworks に
-		# プラグインとして拾わせないため（.vlb / .vwlibrary だと Plug-Ins の走査に
-		# 引っかかり、殻と二重に読み込まれてしまう）。
+		# プラグインとして検出させないため（.vlb / .vwlibrary だと Plug-Ins の走査で
+		# 検出され、殻と二重に読み込まれてしまう）。
 		set(payload_target "${target}Payload")
 		add_library(${payload_target} MODULE ${VW_PAYLOAD_SOURCES})
 		#
@@ -657,8 +657,8 @@ if(VW_BUILD_PLUGIN)
 		# Contents/Resources; on Windows it sits next to the .vlb module.
 		set(vwr_src "${CMAKE_CURRENT_SOURCE_DIR}/resources/${output_name}.vwr")
 		# **安定版と開発版に共通の中身は `resources/common.vwr` に 1 つだけ置き**、包む前に
-		# 作業用の写しへ重ねる（MCP ブリッジのパレットの HTML。Extensions/ExtMcpPalette.h）。
-		# 同じ HTML を 2 つの `.vwr` へ書き写すと、片方だけ直す事故が必ず起きる。
+		# 作業用のコピーへ重ねる（MCP ブリッジのパレットの HTML。Extensions/ExtMcpPalette.h）。
+		# 同じ HTML を 2 つの `.vwr` へ重複して書くと、片方だけ直す誤りが必ず起きる。
 		set(vwr_common "${CMAKE_CURRENT_SOURCE_DIR}/resources/common.vwr")
 		set(vwr_stage "${CMAKE_CURRENT_BINARY_DIR}/vwr-stage/${output_name}.vwr")
 		if(EXISTS "${VW_BUILDVWR}")
@@ -699,7 +699,7 @@ if(VW_BUILD_PLUGIN)
 		#
 		#   vw-update    自動アップデート（殻が入口から走らせる。MCP の vw_update も同じ）
 		#   vw-token     トークンの在り処。**vw-update が source する**ので、片方だけ配ると
-		#                認証が外れる（認証なしのまま続くが、1 時間 60 回の制限に当たる。
+		#                認証が無効になる（認証なしのまま続くが、1 時間 60 回の制限に達する。
 		#                scripts/vw-token.sh の冒頭。M27）
 		if(APPLE)
 			add_custom_command(

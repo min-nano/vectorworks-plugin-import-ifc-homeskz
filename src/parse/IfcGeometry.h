@@ -3,7 +3,7 @@
 //
 //	IFC の配置・断面・押し出しを自前で解決する幾何ユーティリティ（docs/DEV-NOTES.md
 //	M2「幾何の土台」）。幾何エンジンには頼らず、配置行列・断面・押し出しをここで自前に解く。
-//	M3 以降のほぼ全要素がここを共有するので、描画を伴わずに先に固めて de-risk する。
+//	M3 以降のほぼ全要素がここを共有するので、描画とは独立に先に確定させてリスクを減らす。
 //
 //	扱う IFC エンティティ（ホームズ君 IFC の既知サブセット。IFC2X3 / IFC4 共通の
 //	座標系ジオメトリ）:
@@ -13,7 +13,7 @@
 //	  * IfcRectangleProfileDef                … 矩形断面（XDim / YDim）
 //	  * IfcArbitraryClosedProfileDef          … 任意閉断面（外形ポリライン）
 //	  * IfcExtrudedAreaSolid                  … 押し出しソリッド
-//	  * IfcBooleanResult / …ClippingResult    … 差演算の第 1 オペランド（素ソリッド）と
+//	  * IfcBooleanResult / …ClippingResult    … 差演算の第 1 オペランド（基のソリッド）と
 //	                                            第 2 オペランド（削り取り＝人通口。M10）
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md
@@ -73,8 +73,8 @@ namespace HomeskzIfcImport::parse
 	// ObjectType, ObjectPlacement, Representation, …）。解決できない・型不一致なら単位行列。
 	//
 	// ［M7/M8 への注意］最終的な要素高さ（elevation）は「ストーリ高さ ＋ ローカル配置 Z」
-	// で決まる。本行列の Z はローカル配置 Z のみを表すので、階の高さは各要素の描画側で別途足
-	// す。また Location が 2 座標のときの Z の扱い（未設定＝レイヤ基準高さへフォールバック）
+	// で決まる。本行列の Z はローカル配置 Z のみを表すので、階の高さは各要素の描画側で別途加
+	// 算する。また Location が 2 座標のときの Z の扱い（未設定＝レイヤ基準高さへフォールバック）
 	// や、梁軸方向に Axis を使うといった**要素固有の解釈**は各要素の解析（parse/Member ・
 	// parse/Column）が行い、本関数は純粋な配置行列だけを返す。
 	Mat4 resolveObjectPlacement(const Model& model, const Entity* element);
@@ -94,12 +94,14 @@ namespace HomeskzIfcImport::parse
 	// ／型不一致・座標が 2 つ未満なら false（out は変更しない）。
 	//
 	// outAxisPlacement（省略可）には解決した IfcAxis2Placement3D を返す（Axis＝梁軸を続けて
-	// 読む横架材のため）。**この 4 段の鎖はここに 1 つだけ置く**——かつて柱
-	// （columnPosition2D）・横架材（memberPlacement3D）・ストーリ（getLocalPlacementZ）が
-	// 同じ鎖を各々書いていた。Location の型（IFCCARTESIANPOINT）は必ず確認する——
-	// IfcDirection 等も同じ属性位置に実数リストを持つため、型を見ないと方向比を座標として
-	// 誤読する。従来ストーリだけが確認していたが、柱・横架材も同じ誤読があり得るので厳格側
-	// に揃えた（ホームズ君 IFC の実データで挙動は同一。全フィクスチャで確認済み）。
+	// 読む横架材のため）。**この 4 段の鎖はここに 1 つだけ置く**。Location の型
+	// （IFCCARTESIANPOINT）は必ず確認する——IfcDirection 等も同じ属性位置に実数リストを持つ
+	// ため、型を確認しないと方向比を座標として誤読する。
+	//
+	// 経緯: かつて柱（columnPosition2D）・横架材（memberPlacement3D）・ストーリ
+	// （getLocalPlacementZ）が同じ鎖を各々書いていた。型の確認は従来ストーリだけが行って
+	// いたが、柱・横架材も同じ誤読があり得るので厳格側に揃えた（ホームズ君 IFC の実データで
+	// 挙動は同一。全フィクスチャで確認済み）。
 	bool resolveLocalPlacementOrigin(const Model& model, const Entity& element, LocalOrigin& out,
 									 const Entity** outAxisPlacement = nullptr);
 
@@ -118,16 +120,16 @@ namespace HomeskzIfcImport::parse
 	// IfcProfileDef（IfcRectangleProfileDef / IfcArbitraryClosedProfileDef）を解決して 2D
 	// 外形を得る:
 	// * 矩形は中心原点の 4 隅（−hx,−hy）(hx,−hy)(hx,hy)(−hx,hy) に Position の**平行移動のみ
-	// **（Location 座標）を足す。RefDirection の回転は反映しない（ホームズ君 IFC の矩形断面
+	// **（Location 座標）を加える。RefDirection の回転は反映しない（ホームズ君 IFC の矩形断面
 	// Position は RefDirection を持たないので実データでは同一）。
-	//   * 任意断面は OuterCurve(IfcPolyline) の点列をそのまま。始点＝終点の重複は 1 つ落とす。
+	//   * 任意断面は OuterCurve(IfcPolyline) の点列をそのまま。始点＝終点の重複は 1 つ除く。
 	// 未対応の型・欠損・点数不足は false。
 	bool resolveProfile(const Model& model, const Entity* profileDef, Profile& out);
 
 	// 押し出しソリッドのワールド情報。配置基底（origin / xAxis / yAxis / zAxis）・
 	// 押し出し単位方向（extrudeDir）・押し出し長（depth）・プロファイル 2D 頂点（profile）・
 	// 矩形寸法（rectangle / xDim / yDim）を保持する。ワールド底面点はプロファイル頂点 (u,v)
-	// を origin + xAxis·u + yAxis·v で写して得る（base() が返す。**2D プロファイルと基底を分
+	// を origin + xAxis·u + yAxis·v で変換して得る（base() が返す。**2D プロファイルと基底を分
 	// けて持つ**のは、平面外形・ Z 範囲・傾斜部材の断面といった要素側の計算がこの
 	// 2 つから直に組み立てられるようにするため）。
 	struct WorldSolid
@@ -143,7 +145,7 @@ namespace HomeskzIfcImport::parse
 		double xDim = 0.0;
 		double yDim = 0.0;
 
-		// プロファイル頂点をワールド底面へ写す（origin + xAxis·u + yAxis·v）。
+		// プロファイル頂点をワールド底面へ変換する（origin + xAxis·u + yAxis·v）。
 		std::vector<Vec3> base() const;
 		// 押し出しベクトル（extrudeDir · depth）。
 		Vec3 extrusion() const;
@@ -160,8 +162,8 @@ namespace HomeskzIfcImport::parse
 	bool resolveExtrudedAreaSolid(const Model& model, const Entity* solid, const Mat4& placement,
 								  WorldSolid& out);
 
-	// IfcBooleanResult / IfcBooleanClippingResult の FirstOperand を素のソリッドまで辿る（差
-	// 演算で削られる前の基のソリッドを取り出す）。boolean でない要素はそれ自身を返す。
+	// IfcBooleanResult / IfcBooleanClippingResult の FirstOperand を差演算を含まないソリッド
+	// まで辿る（差演算で削られる前の基のソリッドを取り出す）。boolean でない要素はそれ自身を返す。
 	// 参照が解決できない・深さ上限に達したときは nullptr。
 	const Entity* resolveBaseSolid(const Model& model, const Entity* item);
 
@@ -171,13 +173,13 @@ namespace HomeskzIfcImport::parse
 	//
 	// 複数の削りは ((base − void1) − void2) のように第 1 オペランドが入れ子の差演算に
 	// なるので、第 1 オペランドを辿りながら各差演算の第 2 オペランドを集める（＝
-	// resolveBaseSolid が捨てていく側を拾う関係）。第 2 オペランドが押し出しでないもの
-	// （回転体・ブレップ等）は解析外なので落とす。並びは表現の出現順で決定的。
+	// resolveBaseSolid が除外していく側を収集する関係）。第 2 オペランドが押し出しでないもの
+	// （回転体・ブレップ等）は解析外なので除外する。並びは表現の出現順で決定的。
 	std::vector<const Entity*> elementVoidSolids(const Model& model, const Entity* element);
 
 	// 要素（IfcProduct）の形状表現から最初の IfcExtrudedAreaSolid を返す。Representation →
 	// Representations → Items を順に辿り、各アイテムは resolveBaseSolid で差演算を剥がしてから
-	// 押し出しかどうかを見る。見つからなければ nullptr（1 要素の欠損で全体を止めない）。
+	// 押し出しかどうかを判定する。見つからなければ nullptr（1 要素の欠損で全体を止めない）。
 	const Entity* firstExtrudedSolid(const Model& model, const Entity* element);
 
 	// 要素の押し出しソリッドをワールド座標へ変換する。firstExtrudedSolid ＋
@@ -191,7 +193,7 @@ namespace HomeskzIfcImport::parse
 
 	// 屋根面（屋根版＝IfcSlab "屋根版" の勾配した平面）。vertices … ワールド座標の平面外形頂
 	// 点列（末尾に始点を重複させない）。Z は要素配置基準＝**ストーリ相対**（階高は要素側で
-	// Elevation を足して絶対値にする。parse/IfcGeometry の resolveObjectPlacement
+	// Elevation を加算して絶対値にする。parse/IfcGeometry の resolveObjectPlacement
 	// が親を合成しないため）。normal   … 面の単位法線。**必ず上向き**（z 成分 ≥ 0）
 	// に揃える（平面式・勾配方向は符号反転に対して不変だが、上向きに固定して勾配計算の分母
 	// nz を正にする）。
@@ -203,7 +205,7 @@ namespace HomeskzIfcImport::parse
 
 	// 屋根面の法線から導かれる勾配の座標系。垂木（parse/Rafter）と野地板（parse/Roof）は
 	// どちらも「勾配方向へ流す／軒方向へ掃引する／面上の点の天端 Z を引く」を行うため、
-	// その計算をここに一本化する（両者に逐語的な複製があり、片方だけ直すとズレていた）。
+	// その計算をここに一本化する（両者に逐語的な複製があり、片方だけ直すと食い違っていた）。
 	//
 	//   down   … 勾配方向（最急降下＝法線の水平成分の向き）。+down へ進むと天端 Z が下がる
 	//            ＝軒側へ向かう。単位ベクトル。
@@ -225,7 +227,7 @@ namespace HomeskzIfcImport::parse
 		// 絶対 Z になる（RoofPlane の Z はストーリ相対のため。IfcGeometry.h の RoofPlane 参照）。
 		double zAt(double x, double y, double elevationOffset = 0.0) const;
 
-		// 平面外形の XY 射影（RoofPlane::vertices の Z を落としたもの）。
+		// 平面外形の XY 射影（RoofPlane::vertices の Z を除いたもの）。
 		// 掃引・クリップ・軒軸の算出はいずれもこの平面図形の上で行う。
 		static std::vector<Vec2> plan(const RoofPlane& plane);
 
@@ -254,7 +256,7 @@ namespace HomeskzIfcImport::parse
 
 	// 押し出し方向が**鉛直**とみなす Z 成分の閾値（|extrudeDir.z| > これ）。床版・
 	// 底盤は鉛直押し出し、立上り・地中梁・人通口は水平押し出し。**平面外形の求め方（footprint）
-	// と、人通口・地中梁の「水平押し出しか」判定（parse/Footing）が同じ閾値を見る**必要がある
+	// と、人通口・地中梁の「水平押し出しか」判定（parse/Footing）が同じ閾値を参照する**必要がある
 	// ので、ここに 1 つだけ置く。
 	inline constexpr double kVerticalExtrudeTol = 0.9;
 

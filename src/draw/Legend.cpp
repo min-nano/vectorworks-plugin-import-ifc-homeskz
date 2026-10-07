@@ -45,20 +45,20 @@ namespace HomeskzIfcImport::draw
 		// **表示名「グラフィック凡例」とは別物**で、登録名はスペース無しの "GraphicLegend"。
 		constexpr const char* kGraphicLegendPlugin = "GraphicLegend";
 
-		// 箱幅パラメータ。凡例は矩形モードの PIO なので、点で生成すると幅 0 のまま潰れる
+		// 箱幅パラメータ。凡例は矩形モードの PIO なので、点で生成すると幅 0 のまま退化する
 		// （draw/Legend.h）。ここで与えるのは**生成時の箱の幅**で、用紙をどれだけ空けるかは
-		// これではなく**置いた後の実測**が決める（measureLegendWidth）——凡例は図面の内容で
+		// これではなく**置いた後の計測値**が決める（measureLegendWidth）——凡例は図面の内容で
 		// 伸び縮みするので、決め打ちの幅を割り付けに使わない。高さは行の内容から自動で
 		// 決まるので与えない。
 		constexpr const char* kFieldBoxWidth = "BoxWidth";
-		// ★**要求した幅がそのまま図の取り分を減らす。** 用紙に空ける幅は実測で決まるので
-		// （measureLegendWidth）、ここで広く頼むほど伏図の縮尺が落ちる。実機では並ぶ
-		// シンボルが 25mm ほどしか使っておらず、60mm を頼んでいたときは 1/50 に 330mm 要る
+		// ★**要求した幅がそのまま図の取り分を減らす。** 用紙に空ける幅は計測値で決まるので
+		// （measureLegendWidth）、ここで広く要求するほど伏図の縮尺が落ちる。実機では並ぶ
+		// シンボルが 25mm ほどしか使っておらず、60mm を要求していたときは 1/50 に 330mm 要る
 		// 建物に対して使える幅が 315mm しか残らず 1/75 へ落ちていた（M18 のローカル確認）。
 		// **中身が必要とする幅より少し広い程度**に留める。
 		constexpr double kBoxWidth = 40.0;
 
-		// 見た目。凡例 PIO が内部で描く枠線・セルは**クラスでは制御できない**ので、
+		// 見た目。凡例 PIO が内部で描画する枠線・セルは**クラスでは制御できない**ので、
 		// オブジェクトの属性として直接与える（draw/Legend.h）。線の太さの単位はミル（1/1000
 		// インチ）で、5 ミル = 0.127mm を VW は 0.13mm と表示する。塗りパターン 0 = なし。
 		constexpr short kLineWeightMils = 5;
@@ -78,7 +78,7 @@ namespace HomeskzIfcImport::draw
 			}
 			catch (...)
 			{
-				// PIO として開けなかった（＝箱幅を書けていない）。幅 0 のまま潰れるだけで
+				// PIO として開けなかった（＝箱幅を書けていない）。幅 0 のまま退化するだけで
 				// 凡例自体は図面に残るので、続ける。
 				++counts.paramsFailed;
 			}
@@ -111,7 +111,7 @@ namespace HomeskzIfcImport::draw
 		// データオブジェクトのタグ付きデータとして持っており、SDK からは
 		// TaggedDataCreate ＋ TaggedDataSet で書ける（読み書きの API はあるが、**凡例の
 		// フィルタ専用の呼び出しは SDK にも VectorScript にも無い**——容れ物と型とタグは
-		// 実機のバイト列から突き止めた。SDK リファレンス Findings「Graphic Legends」）。
+		// 実機のバイト列から特定した。SDK リファレンス Findings「Graphic Legends」）。
 		bool ApplyViewportFilter(MCObjectHandle legend, MCObjectHandle viewport)
 		{
 			if (legend == nil || viewport == nil)
@@ -142,19 +142,20 @@ namespace HomeskzIfcImport::draw
 		constexpr Sint32 kSourceDataType = static_cast<Sint32>(TaggedDataType::ByteArray);
 		constexpr Sint32 kSourceDataTag = 0;
 
-		// **手で設定した凡例からそのまま写した 22 バイト**（実機のダンプ）。検索条件は文字列
+		// **手で設定した凡例からそのまま複製した 22 バイト**（実機のダンプ）。検索条件は文字列
 		// ではなく **11 個の 16 ビット値のトークン列**で保存されていて（`(INVIEWPORT &
 		// (T=SYMBOL))` は ASCII で 25 文字あり、そもそも 22 バイトに入らない）、条件だけが
-		// 違う 4 枚を突き合わせると
+		// 違う 4 枚を照合すると
 		// 666 / 662 / 798 / 662 / 777 / **型** / 1607 / 1637 / 1615 / 677 / 1680 と並んで
 		// **6 番目だけが変わった**（`T=SYMBOL` の 3 枚が 15、`T=PLUGINOBJECT` の 1 枚が 86）。
 		// つまり残りの 10 個は `( INVIEWPORT & ( T = … ) )` の器で、**6 番目にオブジェクトの
 		// 型番号を入れれば条件を差し替えられる**（下記 kCriteriaObjectType）。
 		//
-		// **これは実験である。** 既定のソースが空で、スタイルを当てないと凡例が何も表示しない
-		// （実機で確認）以上、ソース定義を per-instance で書き込む以外に道が無い。器の 10 個の
+		// **これは実験である。** 既定のソースが空で、スタイルを適用しないと凡例が何も表示しない
+		// （実機で確認）以上、ソース定義を per-instance で書き込む以外に方法が無い。器の 10 個の
 		// 意味は解けていないので、文書や VW の版をまたいで通用するかは**確かめられていない**。
-		// 実機で「並ぶかどうか」を見て判断する（SDK リファレンス Findings「Graphic Legends」）。
+		// 実機で「並ぶかどうか」を確認して判断する（SDK リファレンス Findings
+		// 「Graphic Legends」）。
 		constexpr std::array<Uint8, 22> kSourceDefinition{
 			0x9a, 0x02, 0x96, 0x02, 0x1e, 0x03, 0x96, 0x02, 0x09, 0x03, 0x00,
 			0x00, 0x47, 0x06, 0x65, 0x06, 0x4f, 0x06, 0xa5, 0x02, 0x90, 0x06};
@@ -174,7 +175,7 @@ namespace HomeskzIfcImport::draw
 		constexpr std::size_t kCriteriaTypeOffset = 10;
 
 		// ソース定義を書き込む（書けたら true）。フィルタと同じく**`ResetObject` より前**に
-		// 済ませる（凡例の作り直しでセルが決まるため）。
+		// 済ませる（凡例の再計算でセルが決まるため）。
 		bool ApplySourceDefinition(MCObjectHandle legend)
 		{
 			if (legend == nil)
@@ -228,7 +229,7 @@ namespace HomeskzIfcImport::draw
 			return false;
 		}
 
-		// 箱幅。**スタイルは当てない**（draw/Legend.h の ★）ので、凡例の姿を決めるのは
+		// 箱幅。**スタイルは適用しない**（draw/Legend.h の ★）ので、凡例の姿を決めるのは
 		// このオブジェクト自身の設定だけになる。
 		ApplyBoxWidth(object, counts);
 
@@ -239,8 +240,8 @@ namespace HomeskzIfcImport::draw
 		else
 			++counts.sourceLeft;
 
-		// そのシートのビューポートで絞る（**ResetObject より前**——凡例の作り直しで
-		// 並ぶセルが決まるため）。書けなくても凡例自体は残るので、件数だけ持ち帰って続ける
+		// そのシートのビューポートで絞る（**ResetObject より前**——凡例の再計算で
+		// 並ぶセルが決まるため）。書けなくても凡例自体は残るので、件数だけ記録して続ける
 		// （文書中の全シンボルが並ぶ状態になる）。
 		if (ApplyViewportFilter(object, filterViewport))
 			++counts.filtered;
@@ -249,12 +250,12 @@ namespace HomeskzIfcImport::draw
 
 		gSDK->ResetObject(object);
 
-		// 見た目はクラスでは効かないのでオブジェクトの属性として直接与える。**ResetObject
+		// 見た目はクラスでは制御できないのでオブジェクトの属性として直接与える。**ResetObject
 		// の後**に置くと by-instance の属性として保たれる。
 		gSDK->SetLineWeight(object, kLineWeightMils);
 		gSDK->SetFillPat(object, kFillNone);
 
-		// 位置合わせのために覚えておく（中身を流し込んだ後に placeLegends が動かす）。
+		// 位置合わせのために保持しておく（中身を流し込んだ後に placeLegends が動かす）。
 		counts.objects.push_back(object);
 		++counts.drawn;
 		return true;
@@ -263,7 +264,7 @@ namespace HomeskzIfcImport::draw
 	void refreshLegends(const LegendCounts& counts)
 	{
 		// **スタイルは使わない**ので、中身を決めるのは各オブジェクトに書き込んだソース定義と
-		// ビューポートのフィルタ（draw/Legend.h の ★）。作り直せばその時点の図の状態で
+		// ビューポートのフィルタ（draw/Legend.h の ★）。再計算すればその時点の図の状態で
 		// セルが集まり直す。by-instance の箱幅・線の太さ・塗りは保たれる。
 		for (const MCObjectHandle object : counts.objects)
 			gSDK->ResetObject(object);

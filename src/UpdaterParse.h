@@ -15,10 +15,11 @@
 //	  * The update flows' branch-y decisions (EvaluateStable / ResolveCurrentDevBuild /
 //	    DevSwitchCandidates / InstallReportedOk / NeedsRestartAfterInstall).
 //
-//	**再起動のコマンドを組み立てる関数はここには無い。** 以前は終了と起動し直しを
-//	切り離したヘルパープロセスへ任せていて、その 1 行をここで組み立てていたが、
-//	更新の確認が「起動中」から**メニューコマンド**へ移ったことで、Vectorworks 自身に
-//	頼めるようになった（SDK の CloseAllFilesAndQuitVectorworks。src/Updater.cpp の
+//	**再起動のコマンドを組み立てる関数はここには無い。** 再起動は Vectorworks 自身に
+//	要求する。以前は終了と再起動を分離したヘルパープロセスへ任せていて、その 1 行を
+//	ここで組み立てていたが、更新の確認が「起動中」から**メニューコマンド**へ移ったことで、
+//	Vectorworks 自身に要求できるようになった
+//	（SDK の CloseAllFilesAndQuitVectorworks。src/Updater.cpp の
 //	CVectorworksUpdaterHost::Restart）。
 //
 //	Updater.cpp keeps only the genuinely platform-specific glue (locating its own
@@ -74,11 +75,11 @@ namespace HomeskzIfcImport::UpdaterParse
 	// "Dev: <branch> (<short sha>)"（.github/workflows/build.yml の
 	// `--title "Dev: ${branch} (${short})"`）。その形でなければ空を返す。
 	//
-	// **これは保険で、正規の出どころは q-dev の 5 列目**（DevBuild::branch）である。
-	// 列を出さない**古い同梱スクリプト**が走ることがあり（インストール済みのものが
-	// 走るので、新しい殻＋古いスクリプトという組み合わせが必ず起こる）、そのときに
-	// ブランチが分からないと「同じブランチの新しいビルド」を拾う経路が丸ごと死ぬ。
-	// 題からでも確実に取れるので、空欄はここで埋める（ParseDevBuilds）。
+	// **これはフォールバックで、正規の取得元は q-dev の 5 列目**（DevBuild::branch）である。
+	// 列を出力しない**古い同梱スクリプト**が実行されることがあり（インストール済みのものが
+	// 実行されるので、新しい殻＋古いスクリプトという組み合わせが必ず起こる）、そのときに
+	// ブランチが分からないと「同じブランチの新しいビルド」を選ぶ経路がすべて機能しなくなる。
+	// 題からでも確実に取得できるので、空欄はここで埋める（ParseDevBuilds）。
 	inline std::string DevBuildBranch(const std::string& name)
 	{
 		const std::string prefix = "Dev: ";
@@ -95,10 +96,10 @@ namespace HomeskzIfcImport::UpdaterParse
 		std::string commit;
 		std::string name;
 		std::string url;
-		// そのビルドが出たブランチ（"feature/x"）。**取り込みのついでの確認**と
+		// そのビルドが出たブランチ（"feature/x"）。**取り込みに付随する確認**と
 		// **MCP の vw_update** が「いま動いているのと同じブランチの新しい
-		// ビルド」だけを拾うために要る。正規の出どころは q-dev の 5 列目で、その列を
-		// 出さない古い同梱スクリプトのときは表示名から補う（DevBuildBranch）。
+		// ビルド」だけを選ぶために要る。正規の取得元は q-dev の 5 列目で、その列を
+		// 出力しない古い同梱スクリプトのときは表示名から補う（DevBuildBranch）。
 		std::string branch;
 	};
 
@@ -106,11 +107,11 @@ namespace HomeskzIfcImport::UpdaterParse
 	// output. Lines that are not "build\t..." rows, or that are missing fields or
 	// a URL, are skipped.
 	//
-	// **branch は任意。** インストール済みの（＝古い）同梱スクリプトが走ることが
-	// あるので、4 列しか出さない出力も読めなければならない（src/Updater.cpp）。
+	// **branch は任意。** インストール済みの（＝古い）同梱スクリプトが実行されることが
+	// あるので、4 列しか出力しない出力も読めなければならない（src/Updater.cpp）。
 	// その場合は**表示名から補う**（DevBuildBranch）——ここを空のまま通すと、
-	// 「同じブランチの新しいビルド」を拾う経路（取り込み時の確認・MCP の vw_update）が、
-	// 古いスクリプトが入っている間だけ黙って死ぬ。
+	// 「同じブランチの新しいビルド」を選ぶ経路（取り込み時の確認・MCP の vw_update）が、
+	// 古いスクリプトがインストールされている間だけ警告なしに機能しなくなる。
 	inline std::vector<DevBuild> ParseDevBuilds(const std::string& out)
 	{
 		std::vector<DevBuild> builds;
@@ -206,7 +207,7 @@ namespace HomeskzIfcImport::UpdaterParse
 	//
 	// baseName は**拡張子を除いた名前**（"vw-update" など）。同梱スクリプトが 2 本あった
 	// 頃（M23〜M37 の vw-feedback）に名前を引数に取るようにした。既定はアップデータのまま
-	// ——呼び出し側のほとんどはそれで、ここを既定なしにすると綴りが 2 か所に散る。
+	// ——呼び出し側のほとんどはそれで、ここを既定なしにすると綴りが 2 か所に分散する。
 	inline std::string MacScriptPathFromBinary(const std::string& binaryPath,
 											   const std::string& baseName = "vw-update")
 	{
@@ -304,40 +305,40 @@ namespace HomeskzIfcImport::UpdaterParse
 	}
 
 	// -----------------------------------------------------------------------
-	// **いま効いている開発版ビルドの素性**（ブランチと短縮 sha）。
+	// **いま有効な開発版ビルドの素性**（ブランチと短縮 sha）。
+	//
+	// 基準にするのは**ディスク上にインストールされているビルド**——次に読み込まれるのは
+	// それだからで、安定版が最初から `q-stable` の `installed=` を基準にしているのと同じ
+	// 考え方である（EvaluateStable）。
 	//
 	// 殻にコンパイルされた VW_BUILD_BRANCH / VW_BUILD_VERSION を「いま動いているビルド」
 	// と呼べるのは、**殻ごと入れ替わったときだけ**である。本体（.vwpayload）だけの更新は
-	// 再起動せずにその場で効くので（src/PayloadAbi.h）、別のブランチのビルドへ乗り換えた
-	// あとも殻のその 2 つの定数は前のブランチを名乗り続ける——そのまま基準にすると、
+	// 再起動せずにその場で反映されるので（src/PayloadAbi.h）、別のブランチのビルドへ切り
+	// 替えたあとも殻のその 2 つの定数は前のブランチを名乗り続ける——そのまま基準にすると、
 	//
-	//   * 選択ダイアログが「現在: 前のブランチ」と出し、**いま入れたビルドをもう一度
-	//     候補に並べる**（選び直しても切り替わっていないように見える）。
-	//   * 取り込みのついでの確認と MCP の vw_update が**前のブランチ**の新しいビルドを拾い、
-	//     選んだブランチのビルドを黙って上書きして元のブランチへ戻す。
+	//   * 選択ダイアログが「現在: 前のブランチ」と表示し、**いまインストールしたビルドを
+	//     もう一度候補に並べる**（選び直しても切り替わっていないように見える）。
+	//   * 取り込みに付随する確認と MCP の vw_update が**前のブランチ**の新しいビルドを選び、
+	//     選んだブランチのビルドを警告なしに上書きして元のブランチへ戻す。
 	//
 	// という食い違いが起きる（実機で発生。docs/DEV-NOTES.md M26）。
-	//
-	// 基準にするのは**ディスク上に入っているビルド**——次に読み込まれるのはそれだから
-	// で、安定版が最初から `q-stable` の `installed=` を基準にしているのと同じ考え方で
-	// ある（EvaluateStable）。
 	struct CurrentDevBuild
 	{
 		std::string branch; // ディスク上のビルドが出たブランチ
 		std::string commit; // その短縮 sha
 	};
 
-	// q-dev の出力から「いま入っている開発版ビルド」を決める。shellBranch / shellCommit は
-	// 殻にコンパイルされた値で、**ディスクから分からなかったときだけ**使う。
+	// q-dev の出力から「いまインストールされている開発版ビルド」を決める。shellBranch /
+	// shellCommit は殻にコンパイルされた値で、**ディスクから分からなかったときだけ**使う。
 	//
-	// ブランチの出どころは 3 段構え。**どれも「新しい殻＋古い同梱スクリプト」という組み
-	// 合わせが必ず起こる**（走るのはインストール済みの＝古いスクリプト）ことへの備えで、
-	// 1 つ上の段が無いときに下へ落ちる。
+	// ブランチの取得元は 3 段階。1 つ上の段が無いときに下の段を使う。**どれも「新しい殻＋
+	// 古い同梱スクリプト」という組み合わせが必ず起こる**（実行されるのはインストール済みの
+	// ＝古いスクリプト）ことへの備えである。
 	//
 	//   1. `installed-branch=`（ディスク上のビルドの刻印。mac は Info.plist の
 	//      VWBuildBranch、Windows は `<name>.branch`）。
 	//   2. 並んでいるビルドの中で **sha が一致する行のブランチ**。古いスクリプトは 1 を
-	//      出さないので、手で乗り換えた直後（そのビルドがまだそのブランチの頭）はこれで
+	//      出力しないので、手で切り替えた直後（そのビルドがまだそのブランチの先頭）はこれで
 	//      足りる。
 	//   3. 殻の値。ディスクについて何も分からないときはこれしかない。
 	inline CurrentDevBuild ResolveCurrentDevBuild(const std::string& out,
@@ -381,16 +382,12 @@ namespace HomeskzIfcImport::UpdaterParse
 		return others;
 	}
 
-	// Map the picker's 0-based selection back to an index into the candidate list
-	// (as returned by DevSwitchCandidates). Entry 0 is "keep the current build",
-	// so a selection <= 0 -> -1. A selection past the last candidate is also
-	// treated as "keep current" (a safeguard) -> -1. Otherwise -> selection - 1.
 	// **同じブランチの、いま動いているものとは違うビルド**を選ぶ（実機フィードバックの
 	// 往復。docs/DEV-NOTES.md M23）。見つかった添字、無ければ -1。
+	// 候補が複数あるときは先頭（GitHub が返すのは新しい順）を採る。
 	//
-	// **ブランチで絞るのが肝。** 絞らずに「自分と違う dev ビルド」を取ると、他人が別の
-	// ブランチを push しただけで、まったく関係の無いビルドへ乗り換えてしまう。候補が
-	// 複数あるときは先頭（GitHub が返すのは新しい順）を採る。
+	// **ブランチで絞るのが要点。** 絞らずに「自分と違う dev ビルド」を取ると、他人が別の
+	// ブランチを push しただけで、まったく関係の無いビルドへ切り替えてしまう。
 	inline int FindDevBuildForBranch(const std::vector<DevBuild>& builds, const std::string& branch)
 	{
 		if (branch.empty())
@@ -403,6 +400,10 @@ namespace HomeskzIfcImport::UpdaterParse
 		return -1;
 	}
 
+	// Map the picker's 0-based selection back to an index into the candidate list
+	// (as returned by DevSwitchCandidates). Entry 0 is "keep the current build",
+	// so a selection <= 0 -> -1. A selection past the last candidate is also
+	// treated as "keep current" (a safeguard) -> -1. Otherwise -> selection - 1.
 	inline int ResolveDevSelection(short selection, std::size_t candidateCount)
 	{
 		if (selection <= 0)
@@ -447,13 +448,13 @@ namespace HomeskzIfcImport::UpdaterParse
 	// ---------------------------------------------------------------------
 	// アップデートの後始末: **Vectorworks の再起動が要るか。**
 	//
-	// プラグインは 2 つに割れている（src/PayloadAbi.h）——Vectorworks が起動時にしか
-	// 読み込めない**殻**と、殻が自分で読み込む**本体（.vwpayload）**。本体だけが新しく
-	// なったのなら、次の取り込み・次の PIO リセットで読み直されるので**再起動は要らない**。
+	// プラグインは 2 つのモジュールに分かれている（src/PayloadAbi.h）——Vectorworks が起動時
+	// にしか読み込めない**殻**と、殻が自分で読み込む**本体（.vwpayload）**。本体だけが新しく
+	// なったのなら、次の取り込み・次の PIO リセットで再読み込みされるので**再起動は要らない**。
 	// 殻まで変わっていれば、それを読み込めるのは次の起動だけなので要る。
 	// ---------------------------------------------------------------------
 
-	// `do-install` の出力から「いま入れた殻の ID」を取り出す。この行を出さない古い
+	// `do-install` の出力から「いまインストールした殻の ID」を取り出す。この行を出力しない古い
 	// スクリプトが同梱されていた場合は空になる。
 	inline std::string InstalledShellId(const std::string& out)
 	{
@@ -462,7 +463,7 @@ namespace HomeskzIfcImport::UpdaterParse
 
 	// 入れ替えたあと、Vectorworks の再起動が要るか。
 	//
-	// **判断できないとき（どちらかが空）は必ず「要る」へ倒す。** 殻と本体は別々に配られる
+	// **判断できないとき（どちらかが空）は必ず「要る」と判定する。** 殻と本体は別々に配布される
 	// ので、食い違ったまま動かすほうが危ない——本体の版が合わなければ殻はそれを読み込まず、
 	// プラグインは何もできない状態になる（src/PayloadHost.cpp の版チェック）。
 	inline bool NeedsRestartAfterInstall(const std::string& runningShellId,

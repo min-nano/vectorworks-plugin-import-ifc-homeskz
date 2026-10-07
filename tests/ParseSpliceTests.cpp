@@ -7,7 +7,7 @@
 //
 //	検証項目（docs/DEV-NOTES.md M33）: 同一直線上で材の端が突き付く箇所に 1 つだけ置くこと・
 //	**直交材を挟んで材の端が離れている箇所には置かない**こと（端部オフセットを戻した材の端で
-//	見る）・重なる材／直交する材／レイヤ違い／Z 分離の除外・基準点（材の端の一致点）・
+//	判定する）・重なる材／直交する材／レイヤ違い／Z 分離の除外・基準点（材の端の一致点）・
 //	**向き（+X が女木。土台は M12 アンカーボルトの反対側、それ以外は支点＝下階の柱・小屋束・
 //	床束の側。決まらなければ (−90°, 90°] に正規化した材軸）**・高さ（2 本の端の offset の
 //	大きい方）・設定（シンボル名・取り込まない）・並び順に依存しない決定性・実フィクスチャの通し。
@@ -193,7 +193,7 @@ TEST(splice_excludes_overlap_corner_layer_and_z)
 	CHECK(buildSpliceCommands({member(layer, Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
 							   member(layer, Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}, 1500.0)})
 			  .empty());
-	// 平面投影長が極小の材は判定から外す。
+	// 平面投影長が極小の材は判定から除外する。
 	CHECK(buildSpliceCommands({member(layer, Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
 							   member(layer, Vec2{2000.0, 0.0}, Vec2{2000.5, 0.0})})
 			  .empty());
@@ -253,7 +253,7 @@ TEST(splice_result_does_not_depend_on_member_order)
 TEST(splice_fixtures_sit_where_two_member_ends_meet)
 {
 	// 実データ: どのフィクスチャにも継手があり、どの継手も**同じレイヤの 2 本の材の端**が
-	// 一致する点にある（直交材を挟んだ突き付けを拾っていれば、そこには材の端が無い）。
+	// 一致する点にある（直交材を挟んだ突き付けを検出していれば、そこには材の端が無い）。
 	forEachFixtureDocument(
 		[&](const std::string&, const Document& document)
 		{
@@ -337,7 +337,7 @@ TEST(splice_beam_female_is_on_the_supported_side)
 
 TEST(splice_ohbiki_uses_floor_posts_and_beams_do_not)
 {
-	// 大引: 床束も支点。梁は床束を見ない（平面で重なっても 2 階の梁は床束に載らない）。
+	// 大引: 床束も支点。梁は床束を考慮しない（平面で重なっても 2 階の梁は床束に載らない）。
 	const std::vector<MemberCommand> ohbiki = {
 		beam(Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}, CLASS_OOBIKI),
 		beam(Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}, CLASS_OOBIKI)};
@@ -399,7 +399,7 @@ TEST(splice_short_span_uses_the_support_distance_seen_elsewhere)
 	std::vector<MemberCommand> otherLayer = members;
 	otherLayer[2].layer = "3-横架材天端";
 	otherLayer[3].layer = "3-横架材天端";
-	// 3 階にも長いスパンの継手（距離 120 の支点）を足す → 3 階の代表値は 120 → 左が女木。
+	// 3 階にも長いスパンの継手（距離 120 の支点）を追加する → 3 階の代表値は 120 → 左が女木。
 	MemberCommand longLeft = beam(Vec2{20000.0, 0.0}, Vec2{22000.0, 0.0});
 	MemberCommand longRight = beam(Vec2{22000.0, 0.0}, Vec2{24000.0, 0.0});
 	longLeft.layer = "3-横架材天端";
@@ -417,7 +417,7 @@ TEST(splice_short_span_uses_the_support_distance_seen_elsewhere)
 
 TEST(splice_fixtures_orient_most_splices_from_the_cues)
 {
-	// 実データ: 継手の向きはおおむね手掛かりから決まる（0 件なら向きの規則が何も効いて
+	// 実データ: 継手の向きはおおむね手掛かりから決まる（0 件なら向きの規則が機能して
 	// いない）。どの継手も材軸に沿う（角度は材軸と平行）。
 	std::size_t total = 0;
 	std::size_t oriented = 0;

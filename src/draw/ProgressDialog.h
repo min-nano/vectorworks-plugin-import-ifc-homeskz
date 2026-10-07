@@ -6,8 +6,8 @@
 //	（parse::buildDocument）と Phase 2（draw::executeDocument）の両方へ同じものを渡す。
 //
 //	【なぜ要るか】インポートの体感時間はほぼすべて描画で、その間 VectorWorks は再描画も
-//	イベント処理もしないため**フリーズしたように見える**。進捗ダイアログは (1) いま何を
-//	何件目まで進めたかを見せ、(2) 1 件ごとに yield して VW に描き直す機会を与え、
+//	イベント処理もしないため**フリーズしたように見える**。進捗ダイアログは (1) 現在何を
+//	何件目まで進めたかを表示し、(2) 1 件ごとに yield して VW に再描画する機会を与え、
 //	(3) キャンセルを受け付ける——この 3 つを 1 か所で担う（core/Progress.h「なぜ要るか」）。
 //
 //	【SDK 依存】実装（draw/ProgressDialog.cpp）は PluginPrefix.h（VectorWorks SDK）と
@@ -25,16 +25,16 @@
 
 namespace HomeskzIfcImport::draw
 {
-	// 進捗ダイアログ。構築で開き、close()（またはデストラクタ）で閉じる。
+	// 進捗ダイアログ。コンストラクタで開き、close()（またはデストラクタ）で閉じる。
 	//
 	// **完了ダイアログを出す前に close() すること。** 進捗ダイアログを開いたまま
 	// モーダルの完了通知を出すと、2 枚のダイアログが重なる。
 	class ProgressDialog final : public core::ProgressReporter
 	{
 	public:
-		// title はダイアログのタイトル、topText は上段に出す 1 行（インポート対象の
-		// ファイル名を想定）。canCancel=true でキャンセルボタンを出す（押されたことは
-		// cancelled() が返し、描画側がその時点で切り上げる）。
+		// title はダイアログのタイトル、topText は上段に表示する 1 行（インポート対象の
+		// ファイル名を想定）。canCancel=true でキャンセルボタンを表示する（押されたことは
+		// cancelled() が返し、描画側がその時点で処理を打ち切る）。
 		ProgressDialog(const std::string& title, const std::string& topText, bool canCancel = true);
 		~ProgressDialog() override;
 
@@ -42,7 +42,7 @@ namespace HomeskzIfcImport::draw
 		void close();
 
 	protected:
-		// core::ProgressReporter のフック。見出しの更新・1 件ぶんの前進（＝yield）・
+		// core::ProgressReporter のフック。見出しの更新・1 件分の前進（＝yield）・
 		// キャンセルの問い合わせを、それぞれ SDK の進捗ダイアログへ流す。
 		void onBeginPhase(const core::ProgressStatus& status, double share) override;
 		void onStep(const core::ProgressStatus& status) override;

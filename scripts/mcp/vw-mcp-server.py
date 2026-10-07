@@ -7,23 +7,23 @@
 #                                     ▼
 #                        スプール（一時ディレクトリの min-nano_structureDev-mcp）
 #                                     ▲
-#                                     │ 拾う／応える
-#                               Vectorworks（起動している間ずっと。殻の時計が拾う。M41）
+#                                     │ 読み取る／応答する
+#                               Vectorworks（起動している間ずっと。殻の時計が読み取る。M41）
 #
-# 【開発版専用】（M38）橋が架かるのは開発版（min-nano_structureDev）のプラグインだけで、
-# ローカルの Claude Code がこのリポジトリを開いたとき `.mcp.json` からこのサーバを起こす。
+# 【開発版専用】（M38）ブリッジを持つのは開発版（min-nano_structureDev）のプラグインだけで、
+# ローカルの Claude Code がこのリポジトリを開いたとき `.mcp.json` からこのサーバを起動する。
 # 図面を読むだけでなく、診断ログと実機テストの報告を読み、新しいビルドを入れ、再起動し、
 # 実機テストを走らせられる——**PR のコメントを介さずに実機確認を回す**ための道具である。
 #
 # 【このスクリプトが持たないもの】**道具の一覧を持たない。** 何ができるか（名前・説明・
 # 引数の形・待ち時間）はプラグイン側の表（src/draw/McpBridge.cpp の kTools）ただ 1 つが
-# 真実で、ここは起動時にそれを `vw_tools` で取りに行くだけ。だから**道具を足すのにこの
+# 真実で、ここは起動時にそれを `vw_tools` で取得するだけ。だから**道具を追加するのにこの
 # スクリプトを直す必要が無い**（プラグインを更新すれば増える）。例外は 2 つで、どちらも
-# 橋の向こうが居ないところはこちらにしか見えないから持つ:
-#   * 再起動の前後の待ち方（vw_restart / vw_update の restarting）… 橋が一度居なくなる
-#     のを見届ける（wait_for_restart）。
-#   * 実機テストの起こし方（vw_run_test）… Vectorworks が起動していなければ、起動して
-#     橋が架かってから頼む（M40。call_with_launch）。
+# プラグイン側が動いていない間の状態はこちらからしか確認できないので持つ:
+#   * 再起動の前後の待ち方（vw_restart / vw_update の restarting）… ブリッジが一度停止
+#     するのを確認する（wait_for_restart）。
+#   * 実機テストの開始のしかた（vw_run_test）… Vectorworks が起動していなければ、起動して
+#     ブリッジが受け付けるようになってから要求する（M40。call_with_launch）。
 #
 # 【依存を持たない】標準ライブラリだけで書いてある。プラグインの zip に同梱して配るので、
 # 利用者に pip を要求しないことが要件（Python 3.8 以降）。
@@ -34,28 +34,30 @@
 #   すれば使える）。別の場所から使うなら:
 #   claude mcp add vectorworks -- python3 <この scripts/mcp/vw-mcp-server.py のパス>
 #
-# 【Vectorworks を起こすのもこちら】道具 `vw_launch` が Vectorworks を起動し、橋が架かる
-# まで待つ（launch_vectorworks）。起動の口は OS の作法にだけ頼る——macOS は `open -a`、
-# Windows は既定のインストール先の実行ファイル。プラグインは起動していないので何も訊けない。
+# 【Vectorworks の起動もこちらが担う】道具 `vw_launch` が Vectorworks を起動し、ブリッジが
+# 受け付けるまで待つ（launch_vectorworks）。起動の手段は OS の標準の方法にだけ頼る——macOS
+# は `open -a`、Windows は既定のインストール先の実行ファイル。起動前はプラグインが動いて
+# いないので、プラグインには何も問い合わせられない。
 #
-# 【スプールは探す】プラグイン側は自分の一時ディレクトリへ置くが、一時ディレクトリは
-# 環境変数で決まるので両側で食い違いうる。**実機ではこれが実際に起きた**——Claude の
-# デスクトップアプリはこのサーバを $TMPDIR の無い環境で起動するので gettempdir() は
-# /tmp に落ちるが、Vectorworks（GUI アプリ）のそれは利用者ごとの /var/folders/…/T/ で、
-# 橋は動いているのに見つけられなかった（DEV-NOTES M24）。そこでこちらが候補を順に見て、
-# **生きた印がある場所**を使う（spool_candidates / Bridge.status）。利用者ごとの一時
-# ディレクトリは環境変数ではなく利用者から決まるので、confstr で直に引ける。
+# 【スプールは探す】候補を順に調べ、**有効な生存の印がある場所**を使う（spool_candidates /
+# Bridge.status）。プラグイン側は自分の一時ディレクトリへ置くが、一時ディレクトリは
+# 環境変数で決まるので両側で食い違いうるためである。利用者ごとの一時ディレクトリは
+# 環境変数ではなく利用者から決まるので、confstr で直接取得できる。
+# 経緯: **実機ではこれが実際に起きた**——Claude のデスクトップアプリはこのサーバを
+# $TMPDIR の無い環境で起動するので gettempdir() は /tmp になるが、Vectorworks（GUI
+# アプリ）のそれは利用者ごとの /var/folders/…/T/ で、ブリッジは動いているのに見つけ
+# られなかった（DEV-NOTES M24）。
 #
 # 環境変数:
 #   VW_MCP_SPOOL   スプールの場所を明示する（プラグイン側と同じ値にすること）
-#   VW_MCP_PLUGIN  プラグイン名（既定 min-nano_structureDev。橋は開発版にしか無い）
+#   VW_MCP_PLUGIN  プラグイン名（既定 min-nano_structureDev。ブリッジは開発版にしか無い）
 #   VW_MCP_TIMEOUT 1 件あたりの待ち時間（秒。既定 30。道具の表が timeoutSeconds を
 #                  持つものはそちらが優先——実機テストの 1 周は 1 分以上かかる）
 #   VW_MCP_APP     vw_launch が起動するもの（macOS は .app のパスかアプリ名、Windows は
 #                  .exe のパス。既定は Vectorworks 2026 の標準のインストール先）
 #
 # 【受け渡しの作法はプラグイン側と対になっている】ファイル名の綴り・原子的な書き方
-# （.tmp へ書いてから rename）・生存の印の見方は src/core/Bridge.h に書いてある。
+# （.tmp へ書いてから rename）・生存の印の判定方法は src/core/Bridge.h に書いてある。
 # どちらかを変えるときは必ず両方を直す。
 
 import glob
@@ -75,7 +77,7 @@ STATUS_FILE = "bridge.json"
 TOOLS_CACHE_FILE = "tools-cache.json"
 PROTOCOL_VERSION = 1
 
-# 生存の印がこれより古ければ「動いていない」と見る（プラグイン側は数秒ごとに書き直す）。
+# 生存の印がこれより古ければ「動いていない」と判定する（プラグイン側は数秒ごとに書き直す）。
 STATUS_STALE_SECONDS = 15
 
 # MCP の版（stdio + tools）。
@@ -87,17 +89,17 @@ DEFAULT_PLUGIN = "min-nano_structureDev"
 DEFAULT_TIMEOUT = 30.0
 
 # vw_launch の既定。**プラグインは Vectorworks 2026 用**なので、その版だけを探す
-# （別の版を起こしても、このプラグインは読み込まれない）。
+# （別の版を起動しても、このプラグインは読み込まれない）。
 DEFAULT_MAC_APP = "Vectorworks 2026"
 DEFAULT_WIN_EXE_GLOBS = (
     r"%ProgramFiles%\Vectorworks 2026\Vectorworks2026.exe",
     r"%ProgramFiles%\Vectorworks 2026*\Vectorworks*.exe",
 )
-# 橋が架かるまで待つ既定（秒）。起動そのものに数十秒かかり、殻の時計の最初の刻みは
-# 起動からさらに 10 秒遅らせてある（src/Extensions/ExtMcpPalette.cpp の kClockFirstTickSeconds）。
+# ブリッジが受け付けるまで待つ既定（秒）。起動そのものに数十秒かかり、殻の時計の最初の
+# 呼び出しは起動からさらに 10 秒遅らせてある（src/Extensions/ExtMcpPalette.cpp の kClockFirstTickSeconds）。
 DEFAULT_LAUNCH_WAIT = 120.0
 LAUNCH_POLL_SECONDS = 1.0
-# 再起動を頼んでから、橋が**一度居なくなるのを**待つ上限（秒）。保存の確認が出ていると
+# 再起動を要求してから、ブリッジが**一度停止するのを**待つ上限（秒）。保存の確認が出ていると
 # Vectorworks はそこで止まるので、これを過ぎたら「人の応答待ち」と返す。
 RESTART_DOWN_WAIT = 60.0
 
@@ -107,21 +109,21 @@ def log(message):
     print("[vw-mcp] " + message, file=sys.stderr, flush=True)
 
 
-# confstr の名前。**CPython の os.confstr_names には載っていない**ので、名前では引けず
-# 番号で引く（macOS の <unistd.h> の _CS_DARWIN_USER_TEMP_DIR）。
+# confstr の名前。**CPython の os.confstr_names には載っていない**ので、名前では取得できず
+# 番号で取得する（macOS の <unistd.h> の _CS_DARWIN_USER_TEMP_DIR）。
 CS_DARWIN_USER_TEMP_DIR = 65537
 
 
 def darwin_user_temp_dir():
-    """macOS の利用者ごとの一時ディレクトリ（`/var/folders/…/T/`）を環境変数に頼らず引く。
-
-    **実機で繋がらなかったのは正にここである。** Claude のデスクトップアプリは MCP サーバを
-    **$TMPDIR の無い環境で起動する**ので、こちらの `gettempdir()` は `/tmp` に落ちる。
-    一方 Vectorworks（GUI アプリ）の一時ディレクトリは利用者ごとの `/var/folders/…/T/` で、
-    スプールはそちらに在る——探す場所が `/tmp` だけになり、動いている橋を見つけられない。
+    """macOS の利用者ごとの一時ディレクトリ（`/var/folders/…/T/`）を環境変数に頼らず取得する。
 
     この値は環境変数ではなく利用者から決まるので、**同じ利用者なら両側で必ず一致する**。
-    引き方は 3 手: 名前（将来 CPython の表に載ったとき）→ 番号 → getconf(1)。
+    取得方法は 3 段階: 名前（将来 CPython の表に載ったとき）→ 番号 → getconf(1)。
+
+    **実機で接続できなかった原因はここである。** Claude のデスクトップアプリは MCP サーバを
+    **$TMPDIR の無い環境で起動する**ので、こちらの `gettempdir()` は `/tmp` になる。
+    一方 Vectorworks（GUI アプリ）の一時ディレクトリは利用者ごとの `/var/folders/…/T/` で、
+    スプールはそちらに在る——探す場所が `/tmp` だけになり、動いているブリッジを見つけられない。
     """
     if sys.platform != "darwin":
         return ""
@@ -129,7 +131,7 @@ def darwin_user_temp_dir():
         try:
             value = os.confstr(name)
         except (AttributeError, OSError, ValueError):
-            # 名前が表に無い（いまの CPython はこちら）か、この環境には無い。次の手へ。
+            # 名前が表に無い（いまの CPython はこちら）か、この環境には無い。次の方法へ。
             continue
         if value:
             return value
@@ -152,13 +154,13 @@ def darwin_user_temp_dir():
 def spool_is_safe(directory):
     """そのスプールを使ってよいか（持ち主と権限）。
 
-    **`/tmp` は同じ計算機の誰でも書ける。** 偽の印を置かれれば、こちらは要求をそこへ書いて
-    しまい——引数（レイヤ名など）が漏れ、偽の応答を掴まされる。プラグイン側は自分が作る
-    場所を 0700・自分の持ち物に限っている（`src/core/Bridge.cpp` の prepare）ので、
-    こちらも同じ物差しで見て、合わないものは使わない。
+    プラグイン側は自分が作る場所を 0700・自分の所有に限っている（`src/core/Bridge.cpp` の
+    prepare）ので、こちらも同じ基準で判定し、合わないものは使わない。
+    理由: **`/tmp` は同じ計算機の誰でも書ける。** 偽の印を置かれれば、こちらは要求をそこへ
+    書いてしまい——引数（レイヤ名など）が漏れ、偽の応答を受け取ってしまう。
     """
     if os.name == "nt":
-        # Windows の ACL は stat では測れない。プラグイン側と同じくここでは見ない。
+        # Windows の ACL は stat では判定できない。プラグイン側と同じくここでは確認しない。
         return True
     try:
         info = os.stat(directory)
@@ -174,21 +176,21 @@ def spool_is_safe(directory):
 def spool_candidates():
     """スプールの候補を、確からしい順に並べて返す。
 
-    **探すのはこちらの仕事である。** プラグイン側は自分の一時ディレクトリへ素直に置く
-    （`<temp>/<プラグイン名>-mcp`）が、一時ディレクトリは環境変数で決まるので**両側で
-    食い違いうる**——macOS の $TMPDIR は利用者ごとの `/var/folders/…` で、Claude の
-    デスクトップアプリから起動されたこちらにはそれが無く `/tmp` に落ちる。そこで候補を
-    順に見て、**生きた印（bridge.json）があるところ**を使う（Bridge.status）。
+    候補を順に調べ、**有効な生存の印（bridge.json）があるところ**を使う（Bridge.status）。
+    VW_MCP_SPOOL が指定されていれば、それだけを候補にする（両側で同じ値にすること）。
 
-    **当てずっぽうは持たない。** 候補はどれも「プラグイン側が一時ディレクトリを決めるのに
+    **推測による候補は持たない。** 候補はどれも「プラグイン側が一時ディレクトリを決めるのに
     使うのと同じ仕組み」から出したものだけにする——利用者ごとの一時ディレクトリ（confstr）と、
     環境変数から来る場所（`gettempdir` / `TMPDIR` / `TMP` / `TEMP`）。**`/tmp` への
     フォールバックや `/var/folders` の総当たりは置かない**: 前者は同じ計算機の誰でも書ける
-    場所で、後者は同じ利用者の**別のセッション**の橋を掴みうる。どちらも「たまたま繋がる」
-    ことがあり、そのとき何処へ繋がったのかが分かりにくい。**場所が知れているなら
-    `VW_MCP_SPOOL` で名指しするほうが確かで、分からないなら繋がらないほうが良い。**
+    場所で、後者は同じ利用者の**別のセッション**のブリッジに接続しうる。どちらも「偶然
+    接続できる」ことがあり、そのとき何処へ接続したのかが分かりにくい。**場所が分かって
+    いるなら `VW_MCP_SPOOL` で明示するほうが確実で、分からないなら接続しないほうが良い。**
 
-    VW_MCP_SPOOL が指定されていれば、それだけを候補にする（両側で同じ値にすること）。
+    理由: スプールを探すのはこちらの役割である。プラグイン側は自分の一時ディレクトリへ
+    そのまま置く（`<temp>/<プラグイン名>-mcp`）が、一時ディレクトリは環境変数で決まるので
+    **両側で食い違いうる**——macOS の $TMPDIR は利用者ごとの `/var/folders/…` で、Claude の
+    デスクトップアプリから起動されたこちらにはそれが無く `/tmp` になる。
     """
     override = os.environ.get("VW_MCP_SPOOL", "")
     if override:
@@ -198,15 +200,15 @@ def spool_candidates():
     roots = []
 
     def add(root):
-        # **末尾の区切りを落としてから見比べる。** `$TMPDIR` は `/var/…/T/` の形で来るが
+        # **末尾の区切りを除去してから比較する。** `$TMPDIR` は `/var/…/T/` の形で来るが
         # `getconf` や利用者の設定は `/T` のこともあり、揃えないと同じ場所が
-        # `searched` に 2 行並ぶ（繋がらないときに読むのは正にこの一覧なので、濁らせない）。
+        # `searched` に 2 行並ぶ（接続できないときに読むのは正にこの一覧なので、重複させない）。
         root = root.rstrip("/\\") or root
         if root and root not in roots:
             roots.append(root)
 
-    # **利用者ごとの一時ディレクトリを最初に見る。** GUI アプリ（＝Vectorworks）が使うのは
-    # ここで、$TMPDIR を渡されないこちらの gettempdir() は /tmp に落ちるため。
+    # **利用者ごとの一時ディレクトリを最初に調べる。** GUI アプリ（＝Vectorworks）が使うのは
+    # ここで、$TMPDIR を渡されないこちらの gettempdir() は /tmp になるため。
     user_temp = darwin_user_temp_dir()
     add(user_temp)
     add(tempfile.gettempdir())
@@ -214,10 +216,10 @@ def spool_candidates():
         add(os.environ.get(name, ""))
 
     if user_temp:
-        # **macOS で利用者ごとの場所が引けたなら、/tmp は見ない。** そこは Vectorworks の
+        # **macOS で利用者ごとの場所が取得できたなら、/tmp は調べない。** そこは Vectorworks の
         # 一時ディレクトリになり得ない（GUI アプリは launchd から /var/folders/…/T/ を
-        # 受け取る）ので、残しても当たらないか、誰かが置いたものに当たるかのどちらかになる。
-        # 上の gettempdir() が $TMPDIR 不在で /tmp に落ちた結果もここで消える。
+        # 受け取る）ので、残しても見つからないか、誰かが置いたものを見つけるかのどちらかになる。
+        # 上の gettempdir() が $TMPDIR 不在で /tmp になった結果もここで除外される。
         roots = [root for root in roots if root != "/tmp"]
 
     return [os.path.join(root, plugin + "-mcp") for root in roots]
@@ -239,23 +241,23 @@ class Bridge:
 
     def __init__(self, candidates):
         self.candidates = candidates
-        # いまの当て（生きた印が見つかるまでは先頭。案内の文言にも使う）。
+        # 現在の候補（有効な印が見つかるまでは先頭。案内の文言にも使う）。
         self.dir = candidates[0] if candidates else ""
         self.seq = 0
-        # 最後の tools/list で Claude に見せたプラグイン側の道具の名前。**これと食い違う一覧が
-        # 取れたら list_changed を送る**（announce_if_changed）。
+        # 最後の tools/list で Claude に示したプラグイン側の道具の名前。**これと食い違う一覧を
+        # 取得したら list_changed を送る**（announce_if_changed）。
         self.listed = []
-        # 最後に取り直しを促した一覧（同じ一覧で何度も促さない——アプリが通知に応じない
+        # 最後に再取得を促した一覧（同じ一覧で何度も促さない——アプリが通知に応じない
         # 場合に、道具を呼ぶたびに通知が積み上がるのを防ぐ）。
         self.announced = []
         # 道具ごとの待ち時間（秒）。**表の真実はプラグイン側**（kTools の timeoutSeconds）で、
-        # 一覧を取るたびにここへ写す（remember_timeouts）。
+        # 一覧を取得するたびにここへコピーする（remember_timeouts）。
         self.timeouts = {}
 
     # --- 生存確認 ---------------------------------------------------------
     @staticmethod
     def _read_status(directory):
-        """その場所の印を読む。生きていなければ None。"""
+        """その場所の印を読む。有効でなければ None。"""
         if not spool_is_safe(directory):
             # 持ち主か権限が違う（＝誰かが置いた偽物かもしれない）。使わない。
             return None
@@ -267,7 +269,7 @@ class Bridge:
             return None
         if not isinstance(status, dict):
             return None
-        # **印が古びていたら動いていない。** Vectorworks ごと落ちた場合、印は残る。
+        # **印が古ければ動いていない。** Vectorworks ごと異常終了した場合、印は残る。
         beat = status.get("beat")
         if not isinstance(beat, (int, float)):
             return None
@@ -275,7 +277,7 @@ class Bridge:
         if now - float(beat) > STATUS_STALE_SECONDS:
             # **長く走る道具の最中は、印を書き直せない**（実機テストの 1 周）。プラグインは
             # 走り出す前に busy_until（いつまでかかりうるか）を書いていくので、それが未来なら
-            # 生きていると見る（src/draw/McpBridge.cpp の StatusJson）。
+            # 動作中と判定する（src/draw/McpBridge.cpp の StatusJson）。
             busy_until = status.get("busy_until")
             if not isinstance(busy_until, (int, float)) or now > float(busy_until):
                 return None
@@ -284,7 +286,7 @@ class Bridge:
     def status(self):
         """動いていれば status の dict、動いていなければ None。
 
-        **見つけた場所を憶える。** 以降の要求はそこへ置く。
+        **見つけた場所を記録する。** 以降の要求はそこへ置く。
         """
         for directory in self.candidates:
             status = self._read_status(directory)
@@ -314,7 +316,7 @@ class Bridge:
 
     # --- 1 往復 -----------------------------------------------------------
     def remember_timeouts(self, tools):
-        """一覧から道具ごとの待ち時間を写す。"""
+        """一覧から道具ごとの待ち時間をコピーする。"""
         for tool in tools:
             if not isinstance(tool, dict):
                 continue
@@ -328,7 +330,7 @@ class Bridge:
             timeout = max(call_timeout(), self.timeouts.get(tool, 0.0))
 
         self.seq += 1
-        # 名前の昇順が送った順になるように連番を先頭へ置く（プラグイン側はこの順で拾う）。
+        # 名前の昇順が送った順になるように連番を先頭へ置く（プラグイン側はこの順で読み取る）。
         request_id = "%012d-%s" % (self.seq, secrets.token_hex(4))
         payload = json.dumps(
             {"id": request_id, "tool": tool, "args": args or {}}, ensure_ascii=False
@@ -339,7 +341,7 @@ class Bridge:
         os.makedirs(self.dir, exist_ok=True)
         with open(temp_path, "w", encoding="utf-8") as handle:
             handle.write(payload)
-        # **書き上がってから見せる**（プラグイン側に半端な内容を拾わせない）。
+        # **書き終えてから公開する**（プラグイン側に書きかけの内容を読ませない）。
         os.replace(temp_path, request_path)
 
         response_path = os.path.join(self.dir, request_id + RESPONSE_SUFFIX)
@@ -351,20 +353,20 @@ class Bridge:
                 try:
                     os.remove(response_path)
                 except OSError:
-                    # 消せなくても応答は手に入っている。残骸は次の開始時に
+                    # 消せなくても応答は取得できている。残骸は次の開始時に
                     # プラグイン側が掃除する（src/core/Bridge.h の sweep）。
                     pass
                 return response
             except (OSError, ValueError):
                 # **まだ書かれていない**（大半はこちら）か、書きかけを読んだ。
-                # どちらも「もう一度見る」が正しい——下の締切までは回り続ける。
+                # どちらも「もう一度読む」が正しい——下の締切までは繰り返す。
                 pass
             if time.time() >= deadline:
-                # 置いたままの要求を引き上げる（次のセッションが拾わないように）。
+                # 置いたままの要求を取り下げる（次のセッションが読み取らないように）。
                 try:
                     os.remove(request_path)
                 except OSError:
-                    # 引き上げられなくても害は小さい（拾われれば応答が 1 つ残るだけで、
+                    # 取り下げられなくても害は小さい（読み取られれば応答が 1 つ残るだけで、
                     # それも次の開始時に掃除される）。諦めた理由は下で必ず伝える。
                     pass
                 if self.status() is None:
@@ -379,7 +381,7 @@ class Bridge:
 
     # --- 道具の一覧（真実はプラグイン側にある）---------------------------
     def tools(self):
-        """`vw_tools` を取りに行く。取れなければ前回のものを使う。"""
+        """`vw_tools` を取得する。取得できなければ前回のものを使う。"""
         try:
             response = self.call("vw_tools", {}, timeout=5.0)
             if response.get("ok"):
@@ -393,7 +395,7 @@ class Bridge:
         return self._load_cache()
 
     def live_tools(self):
-        """いま動いているプラグインから一覧を取る。取れなければ None（キャッシュは使わない）。"""
+        """いま動いているプラグインから一覧を取得する。取得できなければ None（キャッシュは使わない）。"""
         try:
             response = self.call("vw_tools", {}, timeout=5.0)
         except (BridgeDown, TimeoutError, OSError):
@@ -408,12 +410,14 @@ class Bridge:
         return tools
 
     def announce_if_changed(self, tools, notify):
-        """取れた一覧が最後に見せたものと違えば、Claude に取り直しを促す。
+        """取得した一覧が最後に示したものと違えば、Claude に再取得を促す。
 
-        **Claude のアプリは tools/list を起動したときに 1 回しか呼ばないことが多い**（実機で、
-        Vectorworks より先にアプリを起動すると図面を読む道具が最後まで見えなかった。M30）。
-        vw_launch 以外の経路で橋が架かったとき（人が Vectorworks を起動した・パレットが
-        自動で開き直された）にも気付けるよう、橋に触れた道具のたびにここを通す。
+        vw_launch 以外の経路でブリッジが受け付けるようになったとき（人が Vectorworks を
+        起動した・パレットが自動で開き直された）にも気付けるよう、ブリッジにアクセスした
+        道具のたびにここを通す。
+        理由: **Claude のアプリは tools/list を起動したときに 1 回しか呼ばないことが多い**
+        （実機で、Vectorworks より先にアプリを起動すると図面を読む道具が最後まで表示され
+        なかった。M30）。
         """
         names = [tool.get("name") for tool in tools if isinstance(tool, dict)]
         if names and names != self.listed and names != self.announced:
@@ -431,12 +435,12 @@ class Bridge:
                 json.dump(tools, handle, ensure_ascii=False)
             os.replace(temp, self._cache_path())
         except OSError:
-            # **キャッシュは無くても困らない**（次にブリッジへ繋がったときに取り直す）。
+            # **キャッシュは無くても困らない**（次にブリッジへ接続したときに再取得する）。
             # 書けないことを理由に道具の一覧を返せなくするほうが困る。
             pass
 
     def _load_cache(self):
-        # まだ繋がっていないと self.dir は当てでしかないので、候補を順に見る。
+        # まだ接続していないと self.dir は推定でしかないので、候補を順に調べる。
         for directory in self.candidates:
             if not spool_is_safe(directory):
                 continue  # 偽物かもしれない一覧を Claude に見せない（_read_status と同じ）。
@@ -454,14 +458,14 @@ class Bridge:
             if isinstance(tools, list):
                 return tools
         except (OSError, ValueError):
-            # 一度も繋がっていない（＝キャッシュが無い）か、壊れている。
+            # 一度も接続していない（＝キャッシュが無い）か、壊れている。
             # どちらも「一覧はまだ分からない」で、下の空リストがその答え。
             pass
         return []
 
 
 def public_tools(tools):
-    """Claude に見せる形へ（プラグインの表にしか意味の無い timeoutSeconds を落とす）。
+    """Claude に示す形へ（プラグインの表にしか意味の無い timeoutSeconds を除去する）。
 
     MCP の tool は name / description / inputSchema を持つ。余計な鍵を嫌うアプリもあるので、
     待ち時間はこのサーバの中だけで使う（Bridge.remember_timeouts）。
@@ -475,7 +479,7 @@ def public_tools(tools):
 
 
 # --- このサーバ自身が答える道具 ----------------------------------------------
-# **ブリッジが動いていなくても答えられる**ことが要件（「なぜ繋がらないのか」を
+# **ブリッジが動いていなくても答えられる**ことが要件（「なぜ接続できないのか」を
 # Claude 自身が調べられるように）。
 LAUNCH_TOOL = {
     "name": "vw_launch",
@@ -512,11 +516,12 @@ STATUS_TOOL = {
 
 # **汎用の呼び出し口。** プラグイン側の道具（vw_layers など）を名前で呼ぶ。
 #
-# 道具の一覧はプラグインから取る（一覧の真実はプラグイン側）が、Claude のアプリは多くの
-# 場合 tools/list を起動時に 1 回しか呼ばず、list_changed の通知にも応じないことがある。
-# すると Vectorworks より先にアプリを起動しただけで、図面を読む道具が**最後まで見えない**
-# （実機で起きた。M30）。この口は常に一覧に並ぶので、一覧が古くても道具に届く。
-# 何を呼べるかは vw_bridge_status が返す（ここに道具の名前を書き写さない）。
+# この口は常に一覧に並ぶので、一覧が古くても道具を呼び出せる。何を呼べるかは
+# vw_bridge_status が返す（ここに道具の名前を重複して書かない）。
+# 理由: 道具の一覧はプラグインから取得する（一覧の真実はプラグイン側）が、Claude の
+# アプリは多くの場合 tools/list を起動時に 1 回しか呼ばず、list_changed の通知にも
+# 応じないことがある。すると Vectorworks より先にアプリを起動しただけで、図面を読む
+# 道具が**最後まで表示されない**（実機で起きた。M30）。
 CALL_TOOL = {
     "name": "vw_call",
     "description": (
@@ -558,26 +563,27 @@ def bridge_status_result(bridge, notify=None):
     result.update(status)
     tools = bridge.live_tools()
     if tools is not None:
-        # 名前・説明・引数の形をそのまま見せる（vw_call に渡す手掛かり）。
+        # 名前・説明・引数の形をそのまま示す（vw_call に渡す手掛かり）。
         result["tools"] = public_tools(tools)
         if notify is not None:
             bridge.announce_if_changed(tools, notify)
     return result
 
 
-# --- Vectorworks を起こす（vw_launch）-----------------------------------------
-# **ブリッジが動いていなくても答えられる**道具のもう 1 つ。橋の向こう（プラグイン）は
-# Vectorworks が起動するまで居ないので、起こすのはこちらの仕事になる。
+# --- Vectorworks を起動する（vw_launch）---------------------------------------
+# **ブリッジが動いていなくても答えられる**道具のもう 1 つ。ブリッジの相手側（プラグイン）は
+# Vectorworks が起動するまで動いていないので、起動はこちらの役割になる。
 
 
 def launch_command():
     """Vectorworks を起動するコマンド（argv）と、人に見せる名前を返す。見つからなければ
     (None, 理由)。
 
-    **起動の口は OS の作法にだけ頼る。** macOS は `open -a`（アプリ名でも .app のパスでも
-    LaunchServices が引く。既に動いていれば手前に出すだけで、2 つ目は起きない）。Windows は
-    既定のインストール先の実行ファイルを探す。VW_MCP_APP で名指しできる——そのときは
-    macOS でも .app で終わらなければ実行ファイルとしてそのまま起こす（テストの代役もこの経路）。
+    **起動の手段は OS の標準の方法にだけ頼る。** macOS は `open -a`（アプリ名でも .app の
+    パスでも LaunchServices が解決する。既に動いていれば前面に出すだけで、2 つ目は起動
+    しない）。Windows は既定のインストール先の実行ファイルを探す。VW_MCP_APP で明示できる
+    ——そのときは macOS でも .app で終わらなければ実行ファイルとしてそのまま起動する
+    （テスト用の代替プログラムもこの経路）。
     """
     override = os.environ.get("VW_MCP_APP", "")
     if sys.platform == "darwin":
@@ -607,9 +613,9 @@ def launch_command():
 def windows_process_running(exe_path):
     """Windows で同じ実行ファイルが既に動いているか（分からなければ False）。
 
-    **Windows では 2 つ目を起こさない。** macOS の `open -a` と違い、実行ファイルを直に
-    起こすと 2 つ目の Vectorworks が立ち上がりうる。橋が見えないのに動いているなら、
-    足りないのはパレット（メニュー「MCP ブリッジを表示…」）のほうである。
+    **Windows では 2 つ目を起動しない。** macOS の `open -a` と違い、実行ファイルを直接
+    起動すると 2 つ目の Vectorworks が立ち上がりうる。ブリッジが見つからないのに動いて
+    いるなら、足りないのはパレット（メニュー「MCP ブリッジを表示…」）のほうである。
     """
     if os.name != "nt":
         return False
@@ -628,7 +634,7 @@ def windows_process_running(exe_path):
 
 
 def spawn_detached(argv):
-    """起こして手を放す（このサーバが終わっても Vectorworks は残る）。"""
+    """起動して切り離す（このサーバが終わっても Vectorworks は残る）。"""
     kwargs = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
@@ -653,8 +659,8 @@ def launch_timeout(args):
 def launch_vectorworks(bridge, args, notify):
     """vw_launch の中身。結果（dict）と、エラーかどうかを返す。
 
-    notify は橋が架かったときに呼ぶ（MCP の tools/list_changed を送る——起動前の一覧は
-    自前の道具だけなので、Claude に取り直させる）。
+    notify はブリッジが受け付けるようになったときに呼ぶ（MCP の tools/list_changed を送る
+    ——起動前の一覧は自前の道具だけなので、Claude に再取得させる）。
     """
     status = bridge.status()
     if status is not None:
@@ -715,19 +721,20 @@ def launch_vectorworks(bridge, args, notify):
     }, True
 
 
-# --- 起こしてから頼む（vw_run_test）-------------------------------------------
-# **実機テストは Vectorworks が起動していなくても頼める**（M40）。1 周目から無人で回す
-# ために、橋が居なければこちらが Vectorworks を起こし、架かってから同じ要求を出し直す。
-# 起こすのは**頼まれた道具がこれのときだけ**——図面を読むだけの道具のために Vectorworks を
-# 起こすと、橋が落ちた理由（パレットが閉じている等）を Claude が調べる前に覆い隠す。
+# --- 起動してから要求する（vw_run_test）---------------------------------------
+# **実機テストは Vectorworks が起動していなくても要求できる**（M40）。ブリッジが動いて
+# いなければこちらが Vectorworks を起動し、受け付けるようになってから同じ要求を出し直す。
+# 起動するのは**要求された道具がこれのときだけ**。
+# 理由: 1 周目から無人で回すため。図面を読むだけの道具のために Vectorworks を起動すると、
+# ブリッジが停止した理由（パレットが閉じている等）を Claude が調べる前に覆い隠してしまう。
 LAUNCH_ON_DEMAND_TOOLS = ("vw_run_test",)
 
 
 def call_with_launch(bridge, name, args, notify):
-    """橋が居なければ Vectorworks を起こしてから name を頼む。
+    """ブリッジが動いていなければ Vectorworks を起動してから name を要求する。
 
-    返すのは (応答, 起動の結果 or None)。起こしても橋が架からなければ BridgeDown を投げる
-    （起動の結果の文言を載せて）。
+    返すのは (応答, 起動の結果 or None)。起動してもブリッジが受け付けなければ BridgeDown を
+    投げる（起動の結果の文言を載せて）。
     """
     try:
         return bridge.call(name, args), None
@@ -740,20 +747,21 @@ def call_with_launch(bridge, name, args, notify):
             "Vectorworks を起動してから %s を頼もうとしましたが、橋が架かりませんでした。\n%s"
             % (name, json.dumps(launched, ensure_ascii=False, indent=2))
         )
-    # **待ち時間を取り直してから頼む。** 一度も繋がったことが無いとキャッシュが無く、
+    # **待ち時間を再取得してから要求する。** 一度も接続したことが無いとキャッシュが無く、
     # 実機テストの 1 周（30 分まで）を既定の 30 秒で諦めてしまう。
     bridge.live_tools()
     return bridge.call(name, args), launched
 
 
-# --- 再起動を見届ける（vw_restart / vw_update の restarting）--------------------
-# **再起動そのものはプラグインが頼む**（SDK の CloseAllFilesAndQuitVectorworks。開いている
-# 図面の保存確認は Vectorworks が通常どおり出す）。こちらは「一度居なくなって、また架かる」
-# のを見届けるだけ——橋の向こうが入れ替わるところは、橋の向こうからは見えない。
+# --- 再起動を確認する（vw_restart / vw_update の restarting）--------------------
+# **再起動そのものはプラグインが要求する**（SDK の CloseAllFilesAndQuitVectorworks。開いて
+# いる図面の保存確認は Vectorworks が通常どおり出す）。こちらは「一度停止して、また受け
+# 付けるようになる」のを確認するだけ——プラグイン側が入れ替わる過程は、プラグイン側からは
+# 確認できない。
 
 
 def wait_for_restart(bridge, notify):
-    """橋が一度居なくなり、また受け付けるまで待つ。結果の dict を返す。"""
+    """ブリッジが一度停止し、また受け付けるまで待つ。結果の dict を返す。"""
     deadline = time.time() + RESTART_DOWN_WAIT
     went_down = False
     while time.time() < deadline:
@@ -805,12 +813,12 @@ def mac_app_running(app):
 
 
 def restart_without_bridge(bridge, notify):
-    """**橋が架かっていないときの再起動**（macOS だけ）。結果と、エラーかどうかを返す。
+    """**ブリッジが動いていないときの再起動**（macOS だけ）。結果と、エラーかどうかを返す。
 
-    殻まで変わったビルドを入れた直後は、新しい本体を古い殻が読めず（ABI の版が違う）、
-    橋が落ちていることがある——そのとき再起動を頼める相手はプラグインには居ない。そこで
-    OS の作法で**普通に終了させてから**起こし直す（AppleScript の quit。開いている図面の
-    保存確認は通常どおり出る）。強制終了はしない。
+    OS の標準の方法で**通常どおり終了させてから**起動し直す（AppleScript の quit。開いて
+    いる図面の保存確認は通常どおり出る）。強制終了はしない。
+    理由: 殻まで変わったビルドを入れた直後は、新しい本体を古い殻が読めず（ABI の版が
+    違う）、ブリッジが停止していることがある——そのときはプラグインに再起動を要求できない。
     """
     if sys.platform != "darwin" or os.environ.get("VW_MCP_APP", ""):
         return {
@@ -870,13 +878,13 @@ def text_content(text, is_error=False):
 
 
 def send(message):
-    """stdout へ JSON-RPC を 1 行（応答も通知も同じ口を通す）。"""
+    """stdout へ JSON-RPC を 1 行書く（応答も通知も同じ経路を通す）。"""
     sys.stdout.write(json.dumps(message, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 
 def notify_tools_changed():
-    """道具の一覧が変わったと Claude へ知らせる（橋が架かって本物の一覧が取れるようになった）。"""
+    """道具の一覧が変わったと Claude へ知らせる（ブリッジが受け付けるようになり、本来の一覧を取得できるようになった）。"""
     send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
 
 
@@ -907,7 +915,7 @@ def handle_tools_call(bridge, params):
         response, launched = call_with_launch(bridge, name, args, notify_tools_changed)
     except BridgeDown as error:
         if name == "vw_restart":
-            # 橋が落ちていても再起動だけは頼みたい（殻まで変わった直後がそれ）。
+            # ブリッジが停止していても再起動だけは要求したい（殻まで変わった直後がそれ）。
             result, is_error = restart_without_bridge(bridge, notify_tools_changed)
             return text_content(
                 json.dumps(result, ensure_ascii=False, indent=2), is_error=is_error
@@ -924,7 +932,7 @@ def handle_tools_call(bridge, params):
             is_error=True,
         )
     result = response.get("result", {})
-    # **再起動を頼んだ・頼まれた**なら、橋が架かり直すまで見届ける（応答はプラグインが
+    # **再起動を要求した・要求された**なら、ブリッジが再び受け付けるまで確認する（応答はプラグインが
     # 終了する前に書いたもの）。
     restarting = name == "vw_restart" or (
         name == "vw_update" and isinstance(result, dict) and result.get("restarting") is True
@@ -939,12 +947,12 @@ def handle_tools_call(bridge, params):
             is_error=after.get("restarted") is not True,
         )
     if launched is not None and isinstance(result, dict):
-        # 起こしたことも伝える（Claude が「起動していなかった」ことを知れるように）。
+        # 起動したことも伝える（Claude が「起動していなかった」ことを知れるように）。
         result = dict(result)
         result["launched"] = launched
     if not bridge.listed:
-        # 橋に届いたのに、Claude にはプラグインの道具を 1 つも見せていない（先に起動した
-        # アプリの一覧が古い）。取り直しを促す。
+        # ブリッジに届いたのに、Claude にはプラグインの道具を 1 つも示していない（先に起動した
+        # アプリの一覧が古い）。再取得を促す。
         tools = bridge.live_tools()
         if tools:
             bridge.announce_if_changed(tools, notify_tools_changed)
@@ -963,7 +971,7 @@ def handle(bridge, message):
             {
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 # **一覧は変わる。** Vectorworks が起動していない間は自前の道具しか
-                # 返せないので、vw_launch で橋が架かったら取り直してもらう。
+                # 返せないので、vw_launch でブリッジが受け付けるようになったら再取得してもらう。
                 "capabilities": {"tools": {"listChanged": True}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
             },
@@ -979,7 +987,7 @@ def handle(bridge, message):
     if method == "tools/call":
         return rpc_result(request_id, handle_tools_call(bridge, params))
     if request_id is None:
-        return None  # 知らない通知は黙って捨てる
+        return None  # 知らない通知は応答せずに捨てる
     return rpc_error(request_id, -32601, "知らないメソッドです: %s" % method)
 
 
@@ -999,7 +1007,7 @@ def main():
             continue
         try:
             reply = handle(bridge, message)
-        except Exception as error:  # サーバごと落とさない
+        except Exception as error:  # サーバごと異常終了させない
             log("処理中の例外: %r" % error)
             reply = rpc_error(message.get("id"), -32603, "内部エラー: %s" % error)
         if reply is not None:

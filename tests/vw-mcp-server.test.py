@@ -2,7 +2,7 @@
 #
 # vw-mcp-server.test.py — MCP サーバ（scripts/mcp/vw-mcp-server.py）の回帰テスト
 #
-# 【何を押さえるか】このスクリプトは**受け渡しの Claude 側**である。Vectorworks 側
+# 【何を確かめるか】このスクリプトは**受け渡しの Claude 側**である。Vectorworks 側
 # （src/draw/McpBridge.cpp）は SDK が要るので CI では動かせないから、ここでは
 # **プラグインと同じ作法でスプールに応える代役**を立てて、
 #
@@ -12,15 +12,15 @@
 #   * 送った順に処理されること（要求ファイル名の連番）、
 #   * vw_launch が Vectorworks を起こし、橋が架かるまで待って一覧の取り直しを促すこと
 #     （起こすものは VW_MCP_APP で代役に差し替える）、
-#   * vw_restart のあと、橋が一度居なくなってまた架かるのを見届けること（M38）、
-#   * 長く走る道具の最中（busy_until）は、印が古びていても「生きている」と見ること、
+#   * vw_restart のあと、橋が一度居なくなってまた架かるのを確認すること（M38）、
+#   * 長く走る道具の最中（busy_until）は、印が古びていても「生きている」とみなすこと、
 #   * プラグインの表の待ち時間（timeoutSeconds）を Claude へ見せないこと、
 #   * vw_run_test は Vectorworks が居なければ起こしてから頼み、図面を読むだけの道具では
 #     起こさないこと（M40）、
 #   * スプールの探し方（一時ディレクトリの候補・持ち主と権限・綴りが対であること）、
 #
 # を確かめる。**代役が真似ているのは src/core/Bridge.h の綴りと手順だけ**なので、
-# どちらかを変えたらこのテストが落ちる——それがこのテストの主眼である。
+# どちらかを変えたらこのテストが失敗する——それがこのテストの主眼である。
 #
 # ネットワークも SDK も要らない。python3 だけで走る。
 
@@ -74,7 +74,7 @@ class FakeVectorworks(threading.Thread):
         self.spool = spool
         self.daemon = True
         self.stop_flag = threading.Event()
-        self.seen = []  # 拾った順（＝送った順のはず）
+        self.seen = []  # 処理した順（＝送った順のはず）
         # 再起動の代役: この時刻までは印を書かない（＝Vectorworks が居ない）。
         self.down_until = 0.0
 
@@ -102,7 +102,7 @@ class FakeVectorworks(threading.Thread):
             os.remove(os.path.join(self.spool, "bridge.json"))
         except OSError:
             # 代役の後始末。消せなくてもテストの結果は変わらない（作業ディレクトリごと
-            # 捨てる）ので、ここで止めない。
+            # 削除する）ので、ここで止めない。
             pass
 
     def _beat(self):
@@ -119,7 +119,7 @@ class FakeVectorworks(threading.Thread):
         elif tool == "vw_ping":
             body = {"ok": True, "result": {"plugin": "min-nano_structureDev", "document_open": True}}
         elif tool == "vw_restart":
-            # プラグインは**応答を書いてから**再起動を頼む。代役は印を消して、しばらく黙る。
+            # プラグインは**応答を書いてから**再起動を頼む。代役は印を消して、しばらく応答しない。
             body = {"ok": True, "result": {"requested": True}}
             self.down_until = time.time() + 2.5
             try:
@@ -129,7 +129,7 @@ class FakeVectorworks(threading.Thread):
         elif tool == "vw_layers":
             body = {"ok": True, "result": {"layers": [{"name": "1-FL"}], "count": 1}}
         elif tool == "vw_slow":
-            return  # わざと応えない（待ち切らずに諦めるかを見る）
+            return  # わざと応えない（待ち切らずに諦めるかを確かめる）
         else:
             body = {"ok": False, "error": "知らない道具です: " + tool}
         body["id"] = request["id"]
@@ -143,7 +143,7 @@ def drive(spool, messages, timeout="30", by_tmpdir=False, extra_env=None, with_n
     """サーバへ一括で流し込み、返ってきた応答（id のある行）を返す。
 
     with_notes=True のときは (応答, 通知のメソッド名の列) を返す。通知は応答の間に挟まるので、
-    既定では落として、応答だけを添字で見られるようにする。
+    既定では除いて、応答だけを添字で参照できるようにする。
 
     by_tmpdir=True のときは VW_MCP_SPOOL を渡さず、**TMPDIR から自力で探させる**
     （プラグイン側と Claude 側が別々に場所を決める、本番と同じ経路）。
@@ -154,7 +154,7 @@ def drive(spool, messages, timeout="30", by_tmpdir=False, extra_env=None, with_n
         env["TMPDIR"] = os.path.dirname(spool.rstrip("/"))
         env["TMP"] = env["TMPDIR"]
         env["TEMP"] = env["TMPDIR"]
-        # **VW_MCP_PLUGIN を渡さない**——既定のプラグイン名（開発版）で探し当てることも押さえる。
+        # **VW_MCP_PLUGIN を渡さない**——既定のプラグイン名（開発版）で探し当てることも確かめる。
         env.pop("VW_MCP_PLUGIN", None)
     else:
         env["VW_MCP_SPOOL"] = spool
@@ -354,12 +354,12 @@ def load_server_module():
 
 
 def check_spool_search(module, root):
-    """**場所の探し方**を直に試す（本番で外したのはここ）。
+    """**場所の探し方**を直に試す（本番で失敗したのはここ）。
 
     実機では、Claude のデスクトップアプリが $TMPDIR の無い環境でサーバを起動するため
     候補が /tmp だけになり、Vectorworks が /var/folders/…/T/ に置いた橋を見つけられなかった
     （DEV-NOTES M24）。以降そうならないよう、**利用者ごとの一時ディレクトリが候補に
-    入ること**を押さえる。
+    入ること**を確かめる。
     """
     if sys.platform == "darwin":
         user_temp = module.darwin_user_temp_dir()
@@ -382,8 +382,8 @@ def check_spool_search(module, root):
             any(c.startswith(user_temp.rstrip("/")) for c in candidates),
             "$TMPDIR が無くても利用者ごとの場所を候補に入れる (%r)" % candidates,
         )
-        # **当てずっぽうを持たない。** /tmp は Vectorworks の一時ディレクトリになり得ず、
-        # 同じ計算機の誰でも書ける場所なので、利用者ごとの場所が引けたなら候補に残さない。
+        # **推測の候補を持たない。** /tmp は Vectorworks の一時ディレクトリになり得ず、
+        # 同じ計算機の誰でも書ける場所なので、利用者ごとの場所が取得できたなら候補に残さない。
         check(
             not any(c.startswith("/tmp/") for c in candidates),
             "/tmp は候補にしない (%r)" % candidates,
@@ -391,7 +391,7 @@ def check_spool_search(module, root):
     else:
         check_eq(module.darwin_user_temp_dir(), "", "macOS 以外では引かない")
 
-    # **持ち主と権限を見る。** /tmp は誰でも書けるので、偽の印を置かれても使わない。
+    # **持ち主と権限を確認する。** /tmp は誰でも書けるので、偽の印を置かれても使わない。
     if os.name != "nt":
         mine = os.path.join(root, "mine-mcp")
         os.makedirs(mine, exist_ok=True)
@@ -439,7 +439,7 @@ def main():
     root = tempfile.mkdtemp(prefix="vw-mcp-test-")
     spool = os.path.join(root, "mcp")
     try:
-        # --- 場所の探し方（本番で外したところ）--------------------------
+        # --- 場所の探し方（本番で失敗したところ）------------------------
         check_spool_search(load_server_module(), root)
 
         # --- Vectorworks を起こす ----------------------------------------
@@ -517,7 +517,7 @@ def main():
         )
         check_eq(replies[5]["result"], {}, "ping に空で答える")
 
-        # 送った順に拾われている（要求ファイル名の連番が効いている）。
+        # 送った順に処理されている（要求ファイル名の連番が機能している）。
         check_eq(
             fake.seen,
             ["vw_tools", "vw_ping", "vw_layers", "vw_nope"],
@@ -527,7 +527,7 @@ def main():
         # --- 一覧が古いまま（アプリを Vectorworks より先に起動した）------------
         # **実機で起きたのはここ。** アプリは tools/list を起動時に 1 回しか呼ばず、その
         # ときブリッジが居なければ、図面を読む道具が最後まで見えない（M30）。そのサーバが
-        # 橋の架かったあとに初めて触れる場面を再現する: tools/list を挟まずに
+        # 橋の架かったあとに初めてアクセスする場面を再現する: tools/list を挟まずに
         # vw_bridge_status を呼ぶ（＝まだプラグインの道具を 1 つも見せていない）。
         # 取り直しは 1 度だけ促し、一覧に頼らない vw_call でも道具に届くこと。
         replies, notes = drive(
@@ -562,7 +562,7 @@ def main():
         )
         check(replies[5]["result"]["isError"] is True, "tool の無い vw_call はエラー")
 
-        # --- 再起動を見届ける（M38）-------------------------------------
+        # --- 再起動の完了を確認する（M38）-------------------------------
         started = time.time()
         replies = drive(spool, [call("vw_restart", request_id=1)])
         result = json.loads(content_text(replies[0]))
@@ -582,18 +582,18 @@ def main():
         check(replies[0]["result"]["isError"] is True, "応答が無ければエラーで返る")
         check("応答がありません" in content_text(replies[0]), "待ち切れなかったと言う")
         check(elapsed < 30, "待ち時間の上限で諦める（%.1f 秒）" % elapsed)
-        # 置きっぱなしの要求は引き上げてある（次のセッションが拾わないように）。
+        # 置きっぱなしの要求は引き上げてある（次のセッションが処理しないように）。
         leftovers = [n for n in os.listdir(spool) if n.endswith(".req.json")]
         check_eq(leftovers, [], "諦めた要求はスプールに残さない")
 
         # ここから先は代役を建て直すので、先に止める（走ったままディレクトリの名前を
-        # 変えると、代役が印を書けずに落ちる）。
+        # 変えると、代役が印を書けずに異常終了する）。
         fake.stop_flag.set()
         fake.join(timeout=5)
 
         # --- 場所を自力で探し当てる -------------------------------------
         # **本番はこの経路。** プラグイン側は自分の一時ディレクトリへ置き、こちらは
-        # 候補を順に見て生きた印のある場所を使う（両側で $TMPDIR が食い違いうるため）。
+        # 候補を順に確認して生きた印のある場所を使う（両側で $TMPDIR が食い違いうるため）。
         # スプールは <一時ディレクトリ>/min-nano_structureDev-mcp でなければならない
         # （VW_MCP_PLUGIN を渡さないので、既定＝開発版の名前で探す）。
         found = os.path.join(root, "min-nano_structureDev-mcp")

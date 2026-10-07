@@ -4,7 +4,7 @@
 //	Implementation of the plug-in's menu command.
 //
 //	**ここに残るのは登録と取り次ぎだけ。** 取り込みの実処理（ファイル選択 → 解析 → 描画
-//	→ 結果ダイアログ）は本体（ペイロード）側の draw::runImportCommand が持つ。こう割って
+//	→ 結果ダイアログ）は本体（ペイロード）側の draw::runImportCommand が持つ。こう分けて
 //	あるのは、**Vectorworks を再起動せずにプラグインを入れ替えられる**ようにするため——
 //	Vectorworks が起動時に読み込むこのモジュール（＝殻）は滅多に変わらず、変わるのは本体の
 //	ほうだけ、という形にしてある（src/PayloadAbi.h / src/PayloadSession.h）。
@@ -39,18 +39,6 @@ namespace HomeskzIfcImport
 		// EMenuEnableFlags::DocIsActive を Needs に指定している。本プラグインは
 		// アクティブなレイヤへ描画するため、文書が無い状態では実行させない。
 		//
-		// 以前は Needs を None（= EMenuEnableFlags{}）にしたうえで GetItemEnabled()
-		// 動的フックで GetCurrentLayer() を判定していたが、VW のメニュー有効化は
-		// まず Needs/NeedsNot フラグで決まり、None のままだと文書の有無に関わらず
-		// 常に有効になってしまう（ローカル確認で「常に実行でき、文書未オープンでも
-		// 描画メッセージが出る」と判明）。そのため宣言的な DocIsActive フラグへ
-		// 移し、動的フックは廃止した。
-		//
-		// EMenuEnableFlags は SDK 内で
-		//   None        = EMenuEnableFlags(0)
-		//   DocIsActive = EMenuEnableFlags(1 << 0)
-		// と定義されている（Kernel/API/MiniCadCallBacks）。
-		//
 		// menuDef() は名前空間スコープ変数ではなく関数ローカル static で保持する。
 		// EMenuEnableFlags::DocIsActive / ::None は SDK（別 TU）の非ローカル static
 		// なので、これを名前空間スコープ変数の初期化子で直接参照すると静的初期化
@@ -59,7 +47,19 @@ namespace HomeskzIfcImport
 		// depending on uninitialized non-local variable 'DocIsActive'"）。関数
 		// ローカル static は初回呼び出し時に初期化されるため、その順序問題を避け
 		// つつ名前付き定数のまま書ける（EMenuEnableFlags{} の頃はこの依存が無く
-		// 出なかった）。
+		// 警告は出なかった）。
+		//
+		// EMenuEnableFlags は SDK 内で
+		//   None        = EMenuEnableFlags(0)
+		//   DocIsActive = EMenuEnableFlags(1 << 0)
+		// と定義されている（Kernel/API/MiniCadCallBacks）。
+		//
+		// 以前は Needs を None（= EMenuEnableFlags{}）にしたうえで GetItemEnabled()
+		// 動的フックで GetCurrentLayer() を判定していたが、VW のメニュー有効化は
+		// まず Needs/NeedsNot フラグで決まり、None のままだと文書の有無に関わらず
+		// 常に有効になってしまう（ローカル確認で「常に実行でき、文書未オープンでも
+		// 描画メッセージが出る」と判明）。そのため宣言的な DocIsActive フラグへ
+		// 移し、動的フックは廃止した。
 		const SMenuDef& menuDef()
 		{
 			static const SMenuDef def = {/*Needs*/ EMenuEnableFlags::DocIsActive,
@@ -119,30 +119,31 @@ CImportIfcMenu_EventSink::~CImportIfcMenu_EventSink() = default;
 // な有効／無効判定を持たないので GetItemEnabled() は override せず、基底の VWMenu_EventSink::
 // GetItemEnabled()（常に true）に委ねる。
 //
-// **中身は本体（ペイロード）が持つ。** ここでするのは「本体を（必要なら読み直して）
-// 確保し、呼ぶ」だけ。読み直しの判定は PayloadUse の構築時に行われるので、**アップデータ
-// が新しい本体を置いていれば、この 1 回目の取り込みからもう新しいコードが動く**
+// **処理の中身は本体（ペイロード）が持つ。** ここでするのは「本体を（必要なら再読み込み
+// して）確保し、呼ぶ」だけ。再読み込みの判定は PayloadUse の構築時に行われるので、
+// **アップデータが新しい本体を配置していれば、この 1 回目の取り込みからもう新しいコードが動く**
 // （Vectorworks の再起動は要らない。src/PayloadSession.h）。
 void CImportIfcMenu_EventSink::DoInterface()
 {
-	// **取り込みの前に更新を確認する。** 起動時の自動確認をやめた代わりがここで
-	// （src/Updater.h）、ふだんは更新があるときだけ尋ね、オフライン等は黙って取り込みへ
-	// 進む（UpdateCheckKind::Silent）。
+	// **取り込みの前に更新を確認する。** 更新があるときだけ尋ね、オフライン等は何も表示
+	// せずに取り込みへ進む（UpdateCheckKind::Silent）。起動時の自動確認をやめた代わりの
+	// 確認箇所である（src/Updater.h）。
 	//
 	// **本体（ペイロード）を確保する前に置くことに意味がある。** ここで新しい本体が
-	// 入れば、下の PayloadUse がそれを読み直すので、**この取り込みからもう新しいコードが
-	// 動く**（src/PayloadSession.h）。確保したあとでは、本体のコードがスタックに載って
-	// いるぶん降ろせず、反映は次回に回る。
+	// インストールされれば、下の PayloadUse がそれを再読み込みするので、**この取り込みから
+	// もう新しいコードが動く**（src/PayloadSession.h）。確保したあとでは、本体のコードが
+	// スタックに載っているためアンロードできず、反映は次回になる。
 	//
-	// **ここに実機フィードバックの往復は無い**（M25）。「尋ねずに入れる」も「投稿できたか」
-	// も dev だけのテストコマンドが持つ（src/Extensions/ExtTestMenu.cpp）——本番の入口を
-	// 開発の都合で分岐させない、というのがこの分け方の要点である。
+	// **ここに実機フィードバックの往復は無い**（M25）。「尋ねずにインストールする」も
+	// 「投稿できたか」も dev だけのテストコマンドが持つ（src/Extensions/ExtTestMenu.cpp）
+	// ——本番の入口を開発の都合で分岐させない、というのがこの分け方の要点である。
 	//
-	// 例外はここで止める——更新は取り込みの付随でしかなく、失敗しても取り込みは
+	// 例外はここで止める——更新は取り込みに付随する処理でしかなく、失敗しても取り込みは
 	// 続けなければならない。
 	//
-	// NOLINTBEGIN(bugprone-empty-catch): 黙って諦めるのが**この場所では正しい**振る舞い
-	// （オフラインのときに無言なのと同じ扱い）。握り潰しを禁じる規則をここだけ外す。
+	// NOLINTBEGIN(bugprone-empty-catch): 何も表示せずに中断するのが**この場所では正しい**
+	// 振る舞い（オフラインのときに何も表示しないのと同じ扱い）。例外の握り潰しを禁じる規則を
+	// ここだけ無効にする。
 	bool proceed = true;
 	try
 	{
@@ -153,13 +154,13 @@ void CImportIfcMenu_EventSink::DoInterface()
 	}
 	// NOLINTEND(bugprone-empty-catch)
 
-	// 入れられなかった・殻まで変わった、のどちらかで取り込みへ進まない。更新の側が
-	// 理由を出し終えている（src/UpdaterFlow.cpp）。
+	// インストールできなかった・殻まで変わった、のどちらかで取り込みへ進まない。更新の側が
+	// 理由を表示し終えている（src/UpdaterFlow.cpp）。
 	if (!proceed)
 		return;
 
-	// 本体を確保する。**ここは唯一「読み込めなかった」をユーザーへ見せられる場所**
-	// （PIO のリセットは黙って諦めるしかない——数百回出るダイアログに意味は無い）。
+	// 本体を確保する。**ここは唯一「読み込めなかった」をユーザーへ表示できる場所**
+	// （PIO のリセットは何も表示せずに中断するしかない——数百回出るダイアログに意味は無い）。
 	const PayloadUse use;
 	if (!use.ok())
 	{

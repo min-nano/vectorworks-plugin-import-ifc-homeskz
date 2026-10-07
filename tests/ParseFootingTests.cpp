@@ -211,7 +211,7 @@ TEST(name_predicates_classify_footing_elements)
 	CHECK(!isBaseSlab("基礎梁:1"));
 	CHECK(!isBaseSlab("床版"));
 
-	// 空の Name（Name 未設定の要素）はいずれにも当たらない。
+	// 空の Name（Name 未設定の要素）はいずれにも該当しない。
 	CHECK(!isFoundationWall(""));
 	CHECK(!isGroundBeam(""));
 	CHECK(!isBaseSlab(""));
@@ -352,7 +352,7 @@ TEST(extend_t_junction_stem_end_not_extended)
 TEST(extend_does_not_push_into_a_collinear_neighbour)
 {
 	// **同一直線上で突き合わせになっている端は自由端ではない**（交点判定は平行な立上りを
-	// 除外するので、これを見ないと双方が半壁厚ずつ延びて重なる）。統合できない＝上端／下端の
+	// 除外するので、これを考慮しないと双方が半壁厚ずつ延びて重なる）。統合できない＝上端／下端の
 	// 違う隣どうしで顕在化する（実データで 150mm＝半壁厚 2 つぶんの重なりになっていた）。
 	const std::vector<WallCommand> ext =
 		extendFreeWallEnds({wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 150.0, -100.0, -125.0),
@@ -385,7 +385,7 @@ TEST(extend_keeps_free_ends_of_a_wall_that_swallows_a_short_neighbour)
 TEST(caps_open_a_collinear_butt_joint_of_the_same_top)
 {
 	// 統合できない（下端が違う）けれど**天端が同じ**で突き合わせ／重なる立上りは、平面で
-	// 1 本に見えるべきなので端部を閉じない。天端が違えば段差が実在するので閉じる。
+	// 1 本に表示されるべきなので端部を閉じない。天端が違えば段差が実在するので閉じる。
 	std::vector<WallCommand> same = {
 		wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 150.0, -100.0, -125.0),
 		wall(Vec2{3000.0, 0.0}, Vec2{5000.0, 0.0}, 150.0, -70.0, -125.0)};
@@ -445,7 +445,7 @@ TEST(extend_free_end_at_column_center_is_plain_half_thickness)
 
 TEST(extend_ignores_far_and_offaxis_columns)
 {
-	// 沿軸許容（150mm）を超えて内側にある柱は終端柱にしない（隣モジュールを拾わない）。
+	// 沿軸許容（150mm）を超えて内側にある柱は終端柱にしない（隣モジュールの柱を対象にしない）。
 	const std::vector<WallCommand> farColumn = extendFreeWallEnds(
 		{wall(Vec2{0.0, 5512.0}, Vec2{0.0, 4550.0}, 120.0)}, {column(0.0, 5000.0)});
 	CHECK(near(farColumn[0].start.y, 5572.0)); // 端点 5512 + 半壁厚 60
@@ -480,7 +480,7 @@ TEST(merge_slabs_two_adjacent_rects_into_one)
 	const std::vector<Vec2>& pts = merged[0].boundary;
 	CHECK(near(minX(pts), 0.0) && near(maxX(pts), 2000.0));
 	CHECK(near(minY(pts), 0.0) && near(maxY(pts), 1000.0));
-	CHECK_EQ(pts.size(), std::size_t{4}); // 共線の中間点は落として 1 つの矩形になる
+	CHECK_EQ(pts.size(), std::size_t{4}); // 共線の中間点は除いて 1 つの矩形になる
 }
 
 TEST(merge_slabs_l_shape_has_six_vertices)
@@ -675,7 +675,7 @@ TEST(foundation_story_command_shape)
 	CHECK_EQ(story.suffix, std::string(kFoundationSuffix));
 	CHECK(near(story.elevation, 0.0)); // GL は常に 0
 	// レベルは希望スタック順（上→下）で 基礎天端（アンカーボルト）→ GL（立上り）→
-	// 床束 → 底盤天端（底盤）の 4 つ（M9 の 2 つに M11 のシンボル 2 つを足した）。
+	// 床束 → 底盤天端（底盤）の 4 つ（M9 の 2 つに M11 のシンボル 2 つを加えた）。
 	CHECK_EQ(story.levels.size(), std::size_t{4});
 	if (story.levels.size() < 4)
 		return;
@@ -802,7 +802,7 @@ TEST(wall_bottom_is_the_ifc_solid_bottom)
 TEST(wall_bottom_keeps_per_wall_depth_from_the_ifc)
 {
 	// 深さの違う基礎梁を持つモデルでは、その差が命令にそのまま残ること（底盤天端から
-	// 一律に決めると深い基礎が潰れてしまう）。スキップフロアは −100 と −150 が混在する。
+	// 一律に決めると深い基礎の深さが失われる）。スキップフロアは −100 と −150 が混在する。
 	bool ok = false;
 	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
@@ -890,7 +890,8 @@ TEST(base_slab_outer_boundary_matches_wall_outer_face)
 TEST(all_fixtures_parse_without_error)
 {
 	// 全フィクスチャで立上り・底盤・基礎ストーリが例外なく組み立てられ、命令が命令セットの
-	// 検証を通ること（CLAUDE.md「テスト方針」: 要素を足したら全フィクスチャで通ることを確かめる）。
+	// 検証を通ること（CLAUDE.md「テスト方針」: 要素を追加したら全フィクスチャで通ることを
+	// 確かめる）。
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)
 				   {
@@ -945,7 +946,7 @@ TEST(is_deterministic)
 
 TEST(opening_below_slab_top_splits_wall_without_middle)
 {
-	// 開口の下端が底盤天端以下 → その区間に立上りは生じない（両側だけを描く）。
+	// 開口の下端が底盤天端以下 → その区間に立上りは生じない（両側だけを描画する）。
 	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})};
 	const WallOpening opening{Vec2{1000.0, 0.0}, Vec2{1600.0, 0.0}, 50.0, 400.0};
 	const std::vector<WallCommand> carved = applyWallOpenings(walls, {opening}, 50.0, 400.0);
@@ -1011,7 +1012,7 @@ TEST(opening_off_the_wall_is_ignored)
 
 TEST(multiple_openings_on_one_wall_all_apply)
 {
-	// 1 本に複数の人通口があっても、更新後の列に順に当てはめるので全部効く。
+	// 1 本に複数の人通口があっても、更新後の列に順に当てはめるのですべて反映される。
 	const std::vector<WallCommand> walls = {wall(Vec2{0.0, 0.0}, Vec2{6000.0, 0.0})};
 	const std::vector<WallOpening> openings = {
 		WallOpening{Vec2{1000.0, 0.0}, Vec2{1600.0, 0.0}, 50.0, 400.0},
@@ -1028,14 +1029,14 @@ TEST(multiple_openings_on_one_wall_all_apply)
 
 namespace
 {
-	// 人通口の判定を突くための最小 STEP モデル。**立上り 1 本＋削り取り 4 つ**で、
+	// 人通口の判定を検証するための最小 STEP モデル。**立上り 1 本＋削り取り 4 つ**で、
 	// 4 つのうち 1 つだけが人通口として採られる。
 	//
 	// 立上りの配置は「局所 Z＝押し出し方向＝ワールド +X」「局所 X＝ワールド +Y（＝壁厚）」
 	// 「局所 Y＝ワールド +Z（＝壁高）」で、原点 (0,0,250)・断面 120×500 なので、壁芯は
 	// (0,0)→(3000,0)・壁厚 120・天端 Z=500・底面 Z=0 になる（ホームズ君の基礎梁と同じ
 	// 「鉛直断面を水平に押し出す」表現）。削り取りは Body の差演算を入れ子にして与える
-	// （((((素 − v1) − v2) − v3) − v4)）。
+	// （((((元 − v1) − v2) − v3) − v4)）。
 	//
 	//   v1（採用）  … 天端まで届き底面には届かない Z 帯 [300, 500]＝人通口
 	//   v2（不採用）… 底面まで届く全高の削り Z 帯 [0, 500]＝端部が他材で削られたもの
@@ -1048,7 +1049,7 @@ namespace
 			   "#3=IFCDIRECTION((0.,1.,0.));\n" // 局所 X＝壁厚方向（ワールド +Y）
 			   "#4=IFCAXIS2PLACEMENT3D(#1,#2,#3);\n"
 			   "#5=IFCLOCALPLACEMENT($,#4);\n"
-			   // 素の立上り: 断面 120（壁厚）×500（壁高）を 3000 押し出す。
+			   // 元の立上り（削り取り前）: 断面 120（壁厚）×500（壁高）を 3000 押し出す。
 			   "#10=IFCCARTESIANPOINT((0.,0.));\n"
 			   "#11=IFCAXIS2PLACEMENT2D(#10,$);\n"
 			   "#12=IFCRECTANGLEPROFILEDEF(.AREA.,$,#11,120.,500.);\n"
@@ -1080,7 +1081,7 @@ namespace
 			   "#51=IFCDIRECTION((0.,1.,0.));\n"
 			   "#52=IFCAXIS2PLACEMENT3D(#50,#51,$);\n"
 			   "#53=IFCEXTRUDEDAREASOLID(#22,#52,#14,600.);\n"
-			   // Body: ((((素 − v1) − v2) − v3) − v4)
+			   // Body: ((((元 − v1) − v2) − v3) − v4)
 			   "#60=IFCBOOLEANRESULT(.DIFFERENCE.,#15,#25);\n"
 			   "#61=IFCBOOLEANRESULT(.DIFFERENCE.,#60,#34);\n"
 			   "#62=IFCBOOLEANRESULT(.DIFFERENCE.,#61,#45);\n"
@@ -1095,7 +1096,7 @@ TEST(only_top_down_horizontal_cuts_count_as_openings)
 {
 	// 差演算の第 2 オペランドのうち、**天端まで届き底面には届かない水平押し出し**だけが
 	// 人通口。端部が他材で削られた全高の削り・天端に届かない中間帯・鉛直押し出しは
-	// 人通口ではない（これらを拾うと立上りを誤って分割・切り下げしてしまう）。
+	// 人通口ではない（これらを対象にすると立上りを誤って分割・切り下げしてしまう）。
 	const Model model = HomeskzIfcImport::parse::loadIfcFromText(wallWithOpeningsText());
 	const std::vector<WallOpening> openings =
 		HomeskzIfcImport::parse::collectWallOpenings(model, Vec2{0.0, 0.0});
@@ -1121,7 +1122,7 @@ TEST(only_top_down_horizontal_cuts_count_as_openings)
 TEST(openings_come_from_the_real_fixtures)
 {
 	// 実フィクスチャの立上りには人通口（差演算の第 2 オペランド）がある。天端まで届き
-	// 底面には届かない削りだけを拾うので、Z 帯は必ず「下端 < 上端」で厚みを持つ。
+	// 底面には届かない削りだけを抽出するので、Z 帯は必ず「下端 < 上端」で厚みを持つ。
 	bool ok = false;
 	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
@@ -1132,7 +1133,7 @@ TEST(openings_come_from_the_real_fixtures)
 	for (const WallOpening& opening : openings)
 	{
 		CHECK(opening.zTop > opening.zBottom);
-		// 壁芯上の線分として非縮退（水平押し出しだけを拾っている）。
+		// 壁芯上の線分として非縮退（水平押し出しだけを抽出している）。
 		CHECK(!HomeskzIfcImport::core::samePoint(opening.start, opening.end));
 	}
 
@@ -1214,7 +1215,7 @@ TEST(join_crossing_interiors_is_an_X_join)
 TEST(a_lone_stem_keeps_the_kept_side_pick_on_the_through_wall)
 {
 	// 交点に stem が 1 本だけの T 結合は従来どおり「残す側」（交点から遠い端点の方向）。
-	// 上のテストの「2 本目は逆側」が既存の T 結合の引数を変えていないことを押さえる。
+	// 上のテストの「2 本目は逆側」が既存の T 結合の引数を変えていないことを確かめる。
 	const std::vector<WallCommand> walls = {
 		wall(Vec2{0.0, 0.0}, Vec2{6000.0, 0.0}, 120.0, -100.0, 0.0), // 通し壁（バックボーン）
 		wall(Vec2{4000.0, 0.0}, Vec2{4000.0, 3000.0})};				 // stem
@@ -1269,7 +1270,7 @@ TEST(deeper_extension_leaves_a_plain_corner_alone)
 TEST(x_joins_are_emitted_last)
 {
 	// **X 結合はすべて最後**（VW の X 結合は a を分割するので、分割された壁のハンドルを
-	// 後の結合が使うと片方だけを相手にしてしまう。parse/Footing.cpp の末尾）。
+	// 後の結合が使うと片方だけを対象にしてしまう。parse/Footing.cpp の末尾）。
 	// 横の通し壁が交差（内部）と両端の T 結合を持つ形で確かめる。
 	const std::vector<WallCommand> walls = {
 		wall(Vec2{0.0, 0.0}, Vec2{9000.0, 0.0}), // [0] 横の通し壁（交差＋両端 T）
@@ -1512,7 +1513,7 @@ TEST(attach_ground_beams_to_the_overlapping_slab)
 
 	CHECK_EQ(slabs[0].modifiers.size(), std::size_t{1});
 	CHECK_EQ(slabs[1].modifiers.size(), std::size_t{2});
-	// 底盤が 1 枚も無ければ付けようがない（落として先へ進む）。
+	// 底盤が 1 枚も無ければ振り分けられない（除外して処理を続ける）。
 	std::vector<SlabCommand> none;
 	attachGroundBeamModifiers(none, modifiers);
 	CHECK(none.empty());
@@ -1520,7 +1521,7 @@ TEST(attach_ground_beams_to_the_overlapping_slab)
 
 TEST(ground_beams_of_the_real_fixtures_land_on_slabs)
 {
-	// 実フィクスチャ: 地中梁は 1 本も取りこぼさず底盤へ付く。断面は下端が v=0 で天端が
+	// 実フィクスチャ: 地中梁は 1 本も漏れなく底盤へ付く。断面は下端が v=0 で天端が
 	// 正（下り梁）、押し出し長は正。命令セットの検証も通る。
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)
@@ -1606,7 +1607,7 @@ namespace
 		return cmd;
 	}
 
-	// 断面を切り上げない（天端より十分高い）topLimit。切り上げそのものは専用のケースで見る。
+	// 断面を切り上げない（天端より十分高い）topLimit。切り上げそのものは専用のケースで検証する。
 	constexpr double kNoTopLimit = 1e9;
 
 	// 断面座標 (u, v) の点が単純多角形の内部にあるか（水平レイキャスト）。
@@ -1780,7 +1781,7 @@ TEST(ground_beam_bedding_spills_out_at_the_perimeter)
 
 TEST(ground_beam_bedding_is_clipped_at_the_top_limit)
 {
-	// topLimit より上は落とす（傾斜部の帯が直交する地中梁へ食い込むのを防ぐ切り上げ）。
+	// topLimit より上は除去する（傾斜部の帯が直交する地中梁へ食い込むのを防ぐ切り上げ）。
 	// 45 度の傾斜なので、v=50 で切ると帯の外側の端は「傾斜の下端から 130√2 − 50」になる。
 	const std::vector<core::BeddingCommand> beddings =
 		groundBeamBedding(beddingBeam(), false, false, 50.0);
@@ -1799,7 +1800,7 @@ TEST(ground_beam_bedding_is_clipped_at_the_top_limit)
 	CHECK(hasVertex(gravel, -150.0, 50.0)); // 内側（地中梁の傾斜 ∩ v=50）
 	CHECK(!hasVertex(gravel, -(200.0 + diagonal), 100.0)); // 天端まで立ち上がらない
 
-	// 下端より下まで切り下げると、捨てコンごと落ちる（相手のコンクリートが占める高さ）。
+	// 下端より下まで切り下げると、捨てコンごと除去される（相手のコンクリートが占める高さ）。
 	const std::vector<core::BeddingCommand> deep =
 		groundBeamBedding(beddingBeam(), false, false, -60.0);
 	CHECK_EQ(deep.size(), std::size_t{1});
@@ -1814,7 +1815,7 @@ TEST(ground_beam_bedding_never_bites_into_a_crossing_beam)
 {
 	// 直交する地中梁と取り合う区間では、傾斜部の帯を相手の下端まで切り下げる（実機で
 	// 「端部で直交する斜め部分の砕石が食い込む」と分かった。docs/DEV-NOTES.md M17）。
-	// 実フィクスチャ全件で、床付けのどの点も他の地中梁のコンクリートの中に入らないことを見る。
+	// 実フィクスチャ全件で、床付けのどの点も他の地中梁のコンクリートの中に入らないことを確かめる。
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)
 				   {
@@ -1871,7 +1872,7 @@ TEST(ground_beam_bedding_of_the_real_fixtures)
 						first = false;
 					}
 
-					// 層ごとに区間を集めて、全長を隙間なく覆っているかを見る。
+					// 層ごとに区間を集めて、全長を隙間なく覆っているかを確かめる。
 					double leanCovered = 0.0;
 					double gravelCovered = 0.0;
 					double leanEnd = 0.0;
@@ -1911,7 +1912,7 @@ TEST(ground_beam_bedding_of_the_real_fixtures)
 						}
 					}
 					// 砕石は全長を覆う。捨てコンは**それより 30mm しか厚みが無い**ので、
-					// 30mm 以上深い地中梁と取り合う区間では丸ごと落ちる（そこは相手の
+					// 30mm 以上深い地中梁と取り合う区間ではすべて除去される（そこは相手の
 					// コンクリート）——実データにも出る（スキップフロアの外周 × 内部）ので、
 					// 覆う長さは全長以下であればよい。
 					CHECK(near(gravelCovered, modifier.depth, 0.01));
@@ -1922,7 +1923,7 @@ TEST(ground_beam_bedding_of_the_real_fixtures)
 			}
 		});
 	CHECK(checked > 0);
-	// 実データの外周の地中梁は必ず外周部として拾われる（1 本も無ければ判定が壊れている）。
+	// 実データの外周の地中梁は必ず外周部として判定される（1 本も無ければ判定が壊れている）。
 	CHECK(perimeter > 0);
 }
 
@@ -1960,11 +1961,11 @@ TEST(ground_beam_bedding_skips_sections_it_cannot_read)
 
 TEST(ground_beam_bedding_handles_awkward_sections)
 {
-	// 実データには出ないが、断面の作りようで縮退する経路がある。**落とさずに組み立てる**
-	// ことだけを確かめる（形は素直な断面のテストが押さえている）。
+	// 実データには出ないが、断面の作りようで縮退する経路がある。**省略せずに組み立てる**
+	// ことだけを確かめる（形は単純な断面のテストが検証している）。
 	core::ModifierCommand cmd = beddingBeam();
 
-	// 末尾が始点に戻る閉じた頂点列（重複は落として扱う）。
+	// 末尾が始点に戻る閉じた頂点列（重複は除いて扱う）。
 	cmd.profile = {Vec2{-100.0, 0.0}, Vec2{100.0, 0.0}, Vec2{200.0, 100.0}, Vec2{-200.0, 100.0},
 				   Vec2{-100.0, 0.0}};
 	std::vector<core::BeddingCommand> beddings = groundBeamBedding(cmd, false, false, kNoTopLimit);

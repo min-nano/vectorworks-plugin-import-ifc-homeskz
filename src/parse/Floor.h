@@ -3,7 +3,7 @@
 //
 //	Phase 1（IFC 解析）の床板モジュール。ホームズ君 IFC の床板（Name が "床版" の IfcSlab。
 //	鉛直押し出しで、押し出しプロファイルがそのまま床の平面外形になる）を各階の FL
-//	レイヤ（"n-FL"）へ描くための命令（core::FloorCommand）に変換する（描画オブジェクトはスラブ。
+//	レイヤ（"n-FL"）へ描画するための命令（core::FloorCommand）に変換する（描画オブジェクトはスラブ。
 //	draw/Floor.h 参照）。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ
@@ -93,11 +93,11 @@ namespace HomeskzIfcImport::parse
 
 	// 同上。共有コンテキストの要素一覧を使う（parse/Context.h）。**結果をキャッシュしたい
 	// ときは Context::loftFloorRegions を呼ぶこと**（この関数は毎回セル格子の flood fill を
-	// やり直す。ストーリのレベル追加と床の合成で 2 回走っていたのがキャッシュ導入の動機）。
+	// 再計算する。ストーリのレベル追加と床の合成で 2 回走っていたのがキャッシュ導入の動機）。
 	std::vector<LoftFloorRegion> loftFloorRegions(Context& context, int storeyId);
 
 	// 屋根階（#storeyId）にロフトの床（床版、または床梁から合成できる領域）があるか。
-	// あるときだけ屋根ストーリへ FL レベル（軒高 + kLoftFloorLevelOffset）を足すために
+	// あるときだけ屋根ストーリへ FL レベル（軒高 + kLoftFloorLevelOffset）を追加するために
 	// parse/Story が使う。
 	bool storyHasLoftFloor(const Model& model, int storeyId);
 

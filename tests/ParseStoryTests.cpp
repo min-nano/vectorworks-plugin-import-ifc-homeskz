@@ -452,7 +452,7 @@ TEST(desired_layer_order_grid_top_then_stories_top_down)
 TEST(desired_layer_order_brings_shear_wall_layers_to_the_front)
 {
 	// 耐力壁レイヤは階をまたいで集めて "共通"／topLayers の直後（最前面群）へ回す。
-	// 伏図へ出るのは注記（筋かいの三角・面材の丸）なので、横架材や柱の絵に隠されると
+	// 伏図へ出るのは注記（筋かいの三角・面材の丸）なので、横架材や柱の図形に隠されると
 	// 読めない（core::desiredStoryLayerOrder）。階の並び（最上階→最下階）は崩さない。
 	std::vector<StoryCommand> stories = {
 		{"1階",
@@ -543,7 +543,7 @@ TEST(reads_sample_house_fixture)
 }
 
 // ---------------------------------------------------------------------------
-// 母屋レベル（母屋・棟木の命令がある階にだけ足す。M7）
+// 母屋レベル（母屋・棟木の命令がある階にだけ追加する。M7）
 // ---------------------------------------------------------------------------
 
 TEST(moya_level_only_on_stories_with_moya_member)
@@ -573,7 +573,7 @@ TEST(moya_level_only_on_stories_with_moya_member)
 		CHECK(near(withMoya[0].levels.front().offset, 0.0));
 	}
 
-	// 同じモデルから母屋を外す（軒桁にする）と、母屋レベルは作らない＝空レイヤを作らない。
+	// 同じモデルから母屋を除く（軒桁にする）と、母屋レベルは作らない＝空レイヤを作らない。
 	// 軒桁は専用の 軒桁 レベル（軒高のすぐ上）に載る。
 	std::string girder = moya;
 	const std::string::size_type at = girder.find("木梁:母屋:1_1");
@@ -591,13 +591,13 @@ TEST(moya_level_only_on_stories_with_moya_member)
 }
 
 // ---------------------------------------------------------------------------
-// 屋根階のロフト床レベル（床版がある屋根にだけ FL を足す）
+// 屋根階のロフト床レベル（床版がある屋根にだけ FL を追加する）
 // ---------------------------------------------------------------------------
 
 TEST(roof_story_gets_fl_level_only_with_floor_slab)
 {
 	// 屋根階に床版（ロフト＝小屋裏収納の床）があれば、軒高の上に FL（軒高 +36mm）を
-	// 足してレイヤ "R-FL" を作る。床版が無ければ軒高だけ（空の FL レイヤを作らない）。
+	// 追加してレイヤ "R-FL" を作る。床版が無ければ軒高だけ（空の FL レイヤを作らない）。
 	const std::string base = "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
 							 "#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
 							 "#3=IFCLOCALPLACEMENT($,#2);\n"
@@ -672,7 +672,8 @@ TEST(roof_story_gets_fl_level_from_synthesised_loft_floor)
 	if (roof != nullptr)
 	{
 		// 床梁は向きの違う 2 組で天端が GL+3050 と GL+3550 に分かれるので、軒高に近い
-		// 3050 が標準・3550 は伏図レベルの軒高（印は軒高からの高さ "軒高+550"。parse/PlanLevel）になり、軒高の直下へ積む。
+		// 3050 が標準・3550 は伏図レベルの軒高（印は軒高からの高さ "軒高+550"。
+		// parse/PlanLevel）になり、軒高の直下へ積む。
 		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"FL", "軒高", "軒高(軒高+550)"}));
 		CHECK_EQ(roof->levels.front().layer, std::string("R-FL"));
 	}
@@ -686,7 +687,7 @@ namespace
 {
 	// 1FL / 2FL の 2 階建て。屋根版（Name が "屋根版" 始まりの IfcSlab）を storeyRef
 	// （"#10" or "#11"）の階に 1 枚だけ含める。形状表現は不要（レベル追加の判定は名前と
-	// 収容関係だけを見る）。
+	// 収容関係だけを参照する）。
 	std::string roofSlabStoryText(const std::string& storeyRef)
 	{
 		return "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
@@ -841,7 +842,7 @@ TEST(parse_span_layer_rejects_malformed_core)
 }
 
 // --------------------------------------------------------------------------
-// - span 柱レベル（柱の命令がある階にだけ足す。M8）
+// - span 柱レベル（柱の命令がある階にだけ追加する。M8）
 // ---------------------------------------------------------------------------
 
 TEST(span_column_levels_are_stacked_on_top)

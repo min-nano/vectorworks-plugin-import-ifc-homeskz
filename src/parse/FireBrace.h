@@ -1,8 +1,8 @@
 //
 //	parse/FireBrace.h
 //
-//	Phase 1（IFC 解析）の火打（火打梁）モジュール（docs/DEV-NOTES.md M11「シンボル置換系」）。
-//	火打をハイブリッドシンボル "鋼製火打"へ置換する core::SymbolCommand を組み立てる。
+//	Phase 1（IFC 解析）の火打（火打梁）モジュール。火打をハイブリッドシンボル "鋼製火打"へ
+//	置換する core::SymbolCommand を組み立てる（docs/DEV-NOTES.md M11「シンボル置換系」）。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない。STEP エンティティ
 //	グラフ（parse/Step）・幾何（parse/IfcGeometry）・ストーリ（parse/Story）だけで
@@ -11,7 +11,7 @@
 //	解析の要点:
 //	  * 火打は Name が "火打…" の IfcBeam / IfcMember。押し出し方向が**鉛直**
 //	    （Axis=(0,0,1)）で断面が IfcArbitraryClosedProfileDef（平面外形が火打の
-//	    footprint）なので、横架材（parse/Member）は**鉛直軸で先に除外**していて拾わない。
+//	    footprint）なので、横架材（parse/Member）は**鉛直軸で先に除外**していて抽出しない。
 //	    そこで専用にここで処理する。
 //	  * **基準点は「横架材接合部の内側面交点」**。火打の平面外形は 2 本の長辺（材の長さ
 //	    方向に平行）と 2 つの端面（各梁に取り付く面）からなり、2 つの端面の直線を延長した

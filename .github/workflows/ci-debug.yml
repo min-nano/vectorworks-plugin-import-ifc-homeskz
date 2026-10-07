@@ -6,14 +6,14 @@ name: CI debug
 # なぜ必要か: リモートセッション（claude.ai/code などクラウド上のコンテナ）には
 # Vectorworks SDK が無く、SDK 依存のビルドエラーは CI 上でしか確かめられない
 # （「この API は SDK にあるか」という調査そのものは SDK リファレンス側で行い、
-# sdk-grep / sdk-ls は Findings/ に載っている宣言を写し取るときだけ使う。CLAUDE.md
+# sdk-grep / sdk-ls は Findings/ に載っている宣言を転記するときだけ使う。CLAUDE.md
 # 「開発の基本方針」7）。それを build.yml に一時ステップを挿して調べるのは、
 # (1) 戻し忘れる (2) その commit が dev プレリリースとして公開される
 # (3) ccache / SDK キャッシュを汚す — と副作用が大きい。
 #
 # このワークフローは push / pull_request では**決して**起動せず（トリガは
 # workflow_dispatch のみ）、リリースも公開しない。調査したいことがあるときだけ
-# 叩き、終わったら何も残らない。
+# 実行し、終わったら何も残らない。
 #
 # 使い方（AI・人間とも）は scripts/ci-debug.sh 経由が基本:
 #
@@ -82,7 +82,7 @@ permissions:
 
 # concurrency グループは意図的に設定しない。デバッグ実行は互いに独立で、条件を変えた
 # 2 本を同時に流したいことがあるため（グループ化すると片方が cancel され、完了待ち
-# している呼び出し側が結果を取り逃す）。暴走は timeout-minutes で頭打ちにする。
+# している呼び出し側が結果を取り逃す）。実行時間の上限は timeout-minutes で抑える。
 
 jobs:
   debug:
@@ -96,7 +96,7 @@ jobs:
 
     env:
       # SDK の場所・キャッシュキー・URL は build.yml と同一にしてある。build.yml が
-      # 温めたキャッシュにそのままヒットするので、SDK の再ダウンロードは基本発生
+      # 保存したキャッシュにそのままヒットするので、SDK の再ダウンロードは基本発生
       # しない。build.yml 側でキーを上げたらここも合わせること（用意する手順そのものは
       # scripts/fetch-vw-sdk.sh に一本化済みで、残る重複はこの 3 つの値だけ）。
       VW_SDK_DIR: ${{ github.workspace }}/${{ inputs.platform == 'windows' && 'vw-sdk-win' || 'vw-sdk' }}
@@ -119,7 +119,7 @@ jobs:
           echo "args=$ARGS"
 
       # SDK が要るかどうかはモードで決まる。platform=linux では SDK を用意できない
-      # ので、SDK を必要とするモードはここで即座に落とす（大きな zip を無駄に取りに
+      # ので、SDK を必要とするモードはここで即座に失敗させる（大きな zip を無駄に取りに
       # いってから失敗するより、理由が明確で速い）。
       - name: Decide whether the SDK is needed
         id: sdk
@@ -150,14 +150,14 @@ jobs:
           key: ${{ env.VW_SDK_CACHE_KEY }}
 
       # キャッシュミス時のみダウンロードし、ヒット時は検証だけして抜ける（その判断は
-      # スクリプト側が $VW_SDK_DIR の中身を見て行うので、ここに cache-hit の分岐は
+      # スクリプト側が $VW_SDK_DIR の中身を確認して行うので、ここに cache-hit の分岐は
       # 要らない）。build.yml の 4 ジョブと同じスクリプトで、SDK の用意手順はここに
       # 1 つしかない（CLAUDE.md「重複を作らない置き場所」）。
       - name: Set up Vectorworks SDK
         if: steps.sdk.outputs.need == 'yes'
         run: scripts/fetch-vw-sdk.sh
 
-      # ここが本体。ログの末尾がペイロードになるよう、これ以降のステップは
+      # ここが主処理。ログの末尾がペイロードになるよう、これ以降のステップは
       # アーティファクトのアップロードと（任意の）PR コメントだけに絞ってある。
       - name: Run debug command
         id: payload
@@ -166,7 +166,7 @@ jobs:
         run: scripts/ci-debug-job.sh
 
       # AI は GitHub MCP でアーティファクトを取得できないため、これはあくまで人間用の
-      # 保険（切り捨てられた全文ログ・compile_commands.json などを後から追える）。
+      # 予備（切り捨てられた全文ログ・compile_commands.json などを後から追える）。
       - name: Upload raw output
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -176,8 +176,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      # 完了通知の保険。ci-debug の run は PR の CI ではないので、PR 購読の通知は
-      # 当てにできない。scripts/ci-debug.sh のバックグラウンド待機が主たる
+      # 完了通知の予備。ci-debug の run は PR の CI ではないので、PR 購読の通知には
+      # 頼れない。scripts/ci-debug.sh のバックグラウンド待機が主たる
       # 通知経路で、これはその待機プロセスが失われた場合（セッション再開など）に
       # 結果へ追いつくための冗長化。既定はオフ（notify_pr が空なら投稿しない）。
       - name: Comment the result on a pull request

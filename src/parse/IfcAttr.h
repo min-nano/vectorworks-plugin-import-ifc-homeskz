@@ -5,10 +5,10 @@
 //	取り出す極小のヘルパー。自前 STEP リーダ（parse/Step）はスキーマを持たず属性を
 //	番号でしか引けないため、この番号が実質のスキーマになる。
 //
-//	**番号は 1 か所にだけ書く。** 以前は同じ番号（IfcRoot.Name=2 / IfcProduct
-//	.ObjectPlacement=5 …）が parse/Floor・parse/Rafter・parse/Roof・parse/Story・
-//	parse/IfcGeometry の無名名前空間に個別の定数として散っており、片方だけ直せば静かに
-//	ズレる形になっていた。参照する要素型が増えるたびに、ここへ 1 行足す。
+//	**番号は 1 か所にだけ書く。** 参照する要素型が増えるたびに、ここへ 1 行追加する。
+//	以前は同じ番号（IfcRoot.Name=2 / IfcProduct.ObjectPlacement=5 …）が parse/Floor・
+//	parse/Rafter・parse/Roof・parse/Story・parse/IfcGeometry の無名名前空間に個別の定数として
+//	分散しており、片方だけ直すと気付かれないまま食い違う形になっていた。
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。
 //	ここは parse/Step の Value / Entity しか知らないヘッダオンリーの定義。
@@ -91,7 +91,7 @@ namespace HomeskzIfcImport::parse
 		inline constexpr std::size_t kExtrudedAreaSolidDepth = 3;
 
 		// IfcBooleanResult(Operator=0, FirstOperand=1, SecondOperand=2)。第 1 オペランドは
-		// 削られる前の素のソリッド、第 2 オペランドは**削り取る側**（人通口＝M10 はこちら）。
+		// 削られる前の元のソリッド、第 2 オペランドは**削り取る側**（人通口＝M10 はこちら）。
 		inline constexpr std::size_t kBooleanResultOperator = 0;
 		inline constexpr std::size_t kBooleanResultFirstOperand = 1;
 		inline constexpr std::size_t kBooleanResultSecondOperand = 2;
@@ -125,8 +125,8 @@ namespace HomeskzIfcImport::parse
 		return (value.type == ValueType::String) ? value.text : std::string();
 	}
 
-	// IfcRoot.Name を文字列で返す（未設定なら空文字）。要素種別の判定はこの名前に
-	// ホームズ君固有の命名規約（"床版" / "屋根版:…" / "木梁:{種別}:{連番}"）が乗る。
+	// IfcRoot.Name を文字列で返す（未設定なら空文字）。要素種別の判定は、この名前に
+	// 含まれるホームズ君固有の命名規約（"床版" / "屋根版:…" / "木梁:{種別}:{連番}"）を使う。
 	inline std::string entityName(const Entity& entity)
 	{
 		return entityString(entity, attr::kRootName);

@@ -21,7 +21,7 @@
 //	  number       := [+-]? digits ( '.' digits? ( ('e'|'E') [+-]? digits )? )?
 //
 //	寛容さ: 想定外の文字に出会ったら現在の文（次の ';'）まで読み飛ばして続行する。
-//	数値変換の失敗は 0 として握りつぶす（CLAUDE.md「エラーハンドリング」）。
+//	数値変換の失敗はエラーにせず 0 として扱う（CLAUDE.md「エラーハンドリング」）。
 //
 
 #include "parse/Step.h"
@@ -118,7 +118,7 @@ namespace HomeskzIfcImport::parse
 		{
 			fByType[entity.type].push_back(id);
 
-			// 逆参照: この #id が参照する各 #id の被参照リストへ自分を足す。1 つの
+			// 逆参照: この #id が参照する各 #id の被参照リストへ自分を追加する。1 つの
 			// エンティティが同じ #id を複数回参照しても被参照は 1 回だけにする。
 			std::vector<int> refs;
 			for (const Value& attr : entity.attributes)
@@ -136,7 +136,7 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// コードポイント 1 つを UTF-8 で末尾に足す（不正値は置換文字にせず捨てる）。
+		// コードポイント 1 つを UTF-8 で末尾に追加する（不正値は置換文字にせず破棄する）。
 		void appendUtf8(std::string& out, unsigned int codePoint)
 		{
 			if (codePoint < 0x80U)
@@ -362,7 +362,7 @@ namespace HomeskzIfcImport::parse
 			}
 
 			// 現在の文の終端（トップレベルの ';'）まで読み飛ばす。文字列内の ';'
-			// は無視する。エラー復帰と # 以外の文の読み捨てに使う。
+			// は無視する。エラー復帰と # 以外の文の読み飛ばしに使う。
 			void skipToStatementEnd()
 			{
 				while (fPos < fText.size())
@@ -554,7 +554,7 @@ namespace HomeskzIfcImport::parse
 				if (std::isdigit(static_cast<unsigned char>(c)) || c == '+' || c == '-')
 					return parseNumber();
 
-				// 解釈できない文字は 1 つ捨てて Null を返す（寛容）。
+				// 解釈できない文字は 1 つ読み飛ばして Null を返す（寛容）。
 				++fPos;
 				return value;
 			}
@@ -623,7 +623,7 @@ namespace HomeskzIfcImport::parse
 				}
 				catch (const std::exception&)
 				{
-					// 変換失敗（空・桁溢れ等）は 0 として握りつぶす（寛容）。
+					// 変換失敗（空・桁溢れ等）はエラーにせず 0 として扱う（寛容）。
 					value.type = isReal ? ValueType::Real : ValueType::Integer;
 				}
 				return value;
