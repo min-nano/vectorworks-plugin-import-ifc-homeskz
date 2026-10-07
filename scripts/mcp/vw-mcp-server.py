@@ -58,7 +58,7 @@
 #   VW_MCP_PLUGIN  プラグイン名（既定 min-nano_structureDev。ブリッジは開発版にしか無い）
 #   VW_MCP_TIMEOUT 1 件あたりの待ち時間（秒。既定 30。道具の表が timeoutSeconds を
 #                  持つものはそちらが優先——実機テストの 1 周は 1 分以上かかる）
-#   VW_MCP_LEASE_IDLE 占有を解くまでの、最後の操作からの秒数（既定 600。M42）
+#   VW_MCP_LEASE_IDLE 占有を解くまでの、最後の操作からの秒数（既定 3600。M42）
 #   VW_MCP_LEASE   占有の状態を置く場所（拡張子の前まで。既定はスプールの第 1 候補の隣）
 #   VW_MCP_SESSION_LABEL 占有の表示に使うこのセッションの名前（既定は作業ディレクトリとブランチ）
 #   VW_MCP_APP     vw_launch が起動するもの（macOS は .app のパスかアプリ名、Windows は
@@ -254,6 +254,10 @@ def call_timeout():
 #   * 解放は vw_lock_release・このサーバの終了・最後の操作から LEASE_IDLE_SECONDS 経過・
 #     持ち主のプロセスの消滅（同じ計算機なので確認できる）のいずれか。操作の最中は持ち主が
 #     心拍（heartbeat）を書き続け、それが LEASE_BUSY_STALE_SECONDS 途絶えたら停止とみなす。
+#   * **解放するときは実機テストを片付ける**（プラグインの vw_test_cleanup。実機テストの図面を
+#     閉じ、一時ファイル・記憶・報告を消す）。持ち主が自分で片付けられずに解かれたとき
+#     （時間切れ・異常終了・Vectorworks が居なかった）は「片付けが残っている」と記録し、
+#     次に占有したセッションが自分の操作の前に片付ける（end_test_session）。
 #
 # 状態は 1 つの JSON（<スプールの第 1 候補>.lease.json）に置き、読み書きは OS のファイル
 # ロック（.lease.lock）の中でだけ行う。ロックはプロセスが終われば OS が外すので、異常終了
@@ -263,10 +267,11 @@ def call_timeout():
 # 開始時に掃除するから（src/core/Bridge.h の sweep）。
 LEASE_SUFFIX = ".lease.json"
 LEASE_MUTEX_SUFFIX = ".lease.lock"
-# 最後の操作からこれだけ経てば占有を解く（秒。VW_MCP_LEASE_IDLE で変えられる）。CI を待つ
-# 間（十数分）まで占有し続けると他のセッションが長く止まるので、1 周の操作の間隔より長く、
-# CI の待ちより短くする。
-LEASE_IDLE_SECONDS = 600.0
+# 最後の操作からこれだけ経てば占有を解く（秒。VW_MCP_LEASE_IDLE で変えられる）。**CI の
+# 往復（push → dev ビルド → vw_update）を待つ間も占有し続けられる長さにする**——その間に
+# 他のセッションが周を走らせると、待っていた側の記憶と図面が置き換わる。続けて使わないなら
+# 持ち主が vw_lock_release で片付けて解放する（運用。docs/development/live-test/running.md）。
+LEASE_IDLE_SECONDS = 3600.0
 # 操作の最中に心拍を書く間隔と、途絶えたら停止とみなす長さ（秒）。持ち主が待つ最長の
 # 一続きの処理は osascript の 10 秒なので、十分に長くとる。
 LEASE_HEARTBEAT_SECONDS = 5.0
@@ -275,6 +280,11 @@ LEASE_EVENTS_KEPT = 50
 # vw_lock_status の wait の上限（秒）。実機テストの 1 周の上限（30 分）に揃える。
 LEASE_WAIT_MAX = 1800.0
 LEASE_WAIT_POLL_SECONDS = 1.0
+# 実機テストを片付けるプラグイン側の道具（src/draw/McpBridge.cpp の kTools）。
+CLEANUP_TOOL = "vw_test_cleanup"
+# サーバの終了のときに片付けを待つ上限（秒）。Claude Code はセッションを閉じるとこのサーバを
+# 止めるので、長く待たない（間に合わなければ次に占有したセッションが片付ける）。
+SHUTDOWN_CLEANUP_TIMEOUT = 20.0
 
 
 def lease_idle_seconds():
@@ -393,6 +403,8 @@ class Lease:
         self.label = session_label()
         self.cwd = os.getcwd()
         self.last_beat = 0.0
+        # 直近の begin で、前の持ち主の片付けを引き継いだならその名前（run_exclusive が片付ける）。
+        self.inherited = None
 
     # --- 読み書き（必ず FileMutex の中で呼ぶ）--------------------------------
     def _read(self):
@@ -457,6 +469,8 @@ class Lease:
             return False
         self._event(state, holder.get("label"), "占有を解いた（%s）" % reason)
         state["holder"] = None
+        # **持ち主は自分で片付けられなかった。** 次に占有したセッションが片付ける。
+        state["cleanup_pending"] = holder.get("label") or "(不明)"
         return True
 
     # --- 操作 ----------------------------------------------------------------
@@ -470,7 +484,10 @@ class Lease:
             if holder is not None and holder.get("id") != self.id:
                 self._write(state)
                 return self._view(state, now)
+            self.inherited = None
             if holder is None:
+                # 前の持ち主の片付けが残っていれば引き継ぐ（自分の操作の前に片付ける）。
+                self.inherited = state.pop("cleanup_pending", None)
                 holder = {
                     "id": self.id,
                     "pid": self.pid,
@@ -520,14 +537,32 @@ class Lease:
             # 心拍が書けなくても操作は続ける（途絶えが続けば他から解かれるだけ）。
             log("占有の心拍を書けませんでした: %s" % error)
 
-    def release(self, reason):
-        """自分の占有を解く。解いたら True。"""
+    def holds(self):
+        """いま自分が占有しているか。"""
+        with self._mutex():
+            holder = self._read().get("holder")
+            return isinstance(holder, dict) and holder.get("id") == self.id
+
+    def note(self, text):
+        """出来事を 1 つ記録する（片付けの結果など。購読している側へ届く）。"""
+        with self._mutex():
+            state = self._read()
+            self._event(state, self.label, text)
+            self._write(state)
+
+    def release(self, reason, cleanup_pending=False):
+        """自分の占有を解く。解いたら True。
+
+        cleanup_pending は「片付けられなかった」（次に占有したセッションへ引き継ぐ）。
+        """
         with self._mutex():
             state = self._read()
             holder = state.get("holder")
             if not isinstance(holder, dict) or holder.get("id") != self.id:
                 return False
             state["holder"] = None
+            if cleanup_pending:
+                state["cleanup_pending"] = self.label
             self._event(state, self.label, "占有を解いた（%s）" % reason)
             self._write(state)
             return True
@@ -557,6 +592,8 @@ class Lease:
                 if isinstance(event, dict)
             ],
         }
+        if state.get("cleanup_pending"):
+            view["cleanup_pending"] = state.get("cleanup_pending")
         if not isinstance(holder, dict):
             view["state"] = "free"
             return view
@@ -949,8 +986,10 @@ LOCK_STATUS_TOOL = {
 LOCK_RELEASE_TOOL = {
     "name": "vw_lock_release",
     "description": (
-        "このセッションの Vectorworks の占有を解く（1 周の確認が済んだら呼ぶ。"
-        "呼ばなくても最後の操作から一定時間で解かれる）。"
+        "実機テストを片付けてから、このセッションの Vectorworks の占有を解く。"
+        "片付けでは実機テストの図面を閉じ、一時ファイル・記憶・報告を消す。"
+        "次の実行まで状態を持ち越さないなら（確認が済んだ・当分使わない）必ず呼ぶ。"
+        "CI の往復を待って続けるなら呼ばない（最後の操作から 60 分は占有が続く）。"
     ),
     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
 }
@@ -1352,8 +1391,59 @@ def lock_status(bridge, args, progress=None):
     return result
 
 
+def end_test_session(bridge, timeout=None):
+    """実機テストを片付ける（プラグインの vw_test_cleanup）。結果の dict を返す。
+
+    pending が True なら「片付けられなかった（次に占有したセッションへ引き継ぐ）」。
+    Vectorworks が居ない・1 周の最中（busy_until）・応答が無いときがそれに当たる。
+    **プラグインが道具を知らない**（M42 より古い開発版）ときは引き継がない（何度試しても同じ）。
+    """
+    status = bridge.status()
+    if status is None:
+        return {"done": False, "pending": True,
+                "message": "Vectorworks のブリッジが動いていないので、片付けは次に占有した"
+                           "セッションへ引き継ぎました。"}
+    busy_until = status.get("busy_until")
+    if isinstance(busy_until, (int, float)) and busy_until > time.time():
+        return {"done": False, "pending": True,
+                "message": "Vectorworks が %s の最中なので、片付けは次に占有したセッションへ"
+                           "引き継ぎました。" % status.get("busy", "別の処理")}
+    try:
+        if timeout is None:
+            response = bridge.call(CLEANUP_TOOL, {})
+        else:
+            response = bridge.call(CLEANUP_TOOL, {}, timeout=timeout)
+    except (BridgeDown, TimeoutError, OSError) as error:
+        return {"done": False, "pending": True,
+                "message": "片付けを頼めませんでした（%s）。次に占有したセッションへ"
+                           "引き継ぎました。" % error}
+    if not response.get("ok"):
+        return {"done": False, "pending": False,
+                "message": "Vectorworks 側で片付けられませんでした: %s"
+                           % response.get("error", "(理由不明)")}
+    result = response.get("result", {})
+    if not isinstance(result, dict):
+        result = {}
+    return {"done": result.get("done") is True, "pending": False,
+            "message": result.get("message", "")}
+
+
+def release_with_cleanup(bridge, reason, timeout=None):
+    """片付けてから自分の占有を解く。占有していなければ何もしない。結果の dict を返す。"""
+    if not bridge.lease.holds():
+        return {"released": False, "cleanup": None}
+    bridge.lease.begin(CLEANUP_TOOL)
+    cleanup = end_test_session(bridge, timeout)
+    bridge.lease.end(CLEANUP_TOOL, "片付けた" if cleanup["done"] else "片付けきれなかった")
+    released = bridge.lease.release(reason, cleanup_pending=cleanup["pending"])
+    return {"released": released, "cleanup": cleanup}
+
+
 def run_exclusive(bridge, name, action):
-    """占有を取ってから action（content を返す）を実行する。他が占有していれば断る。"""
+    """占有を取ってから action（content を返す）を実行する。他が占有していれば断る。
+
+    前の持ち主の片付けを引き継いだら、action の前に片付ける（その結果も返す）。
+    """
     try:
         view = bridge.lease.begin(name)
     except OSError as error:
@@ -1362,9 +1452,22 @@ def run_exclusive(bridge, name, action):
         return text_content(
             json.dumps(blocked_result(name, view), ensure_ascii=False, indent=2), is_error=True
         )
+    inherited_note = None
+    if bridge.lease.inherited is not None:
+        # **引き継いだ片付けは 1 度だけ試す。** Vectorworks が居なければ図面は開いておらず、
+        # 残るのはファイルだけ（PR が閉じれば周の頭で片付く）。ここで再び引き継ぐと、
+        # この操作（vw_run_test など）が作った自分の図面を次の操作の前に消してしまう。
+        cleanup = end_test_session(bridge)
+        inherited_note = "前の持ち主（%s）の実機テストの片付け: %s" % (
+            bridge.lease.inherited, cleanup["message"])
+        bridge.lease.note(inherited_note)
     outcome = "失敗"
     try:
         content = action()
+        if inherited_note is not None:
+            content = dict(content)
+            content["content"] = list(content["content"]) + [
+                {"type": "text", "text": inherited_note}]
         if not content.get("isError"):
             outcome = "成功"
         return content
@@ -1427,8 +1530,7 @@ def handle_tools_call(bridge, params):
         result = lock_status(bridge, args, progress_sender(params))
         return text_content(json.dumps(result, ensure_ascii=False, indent=2))
     if name == LOCK_RELEASE_TOOL["name"]:
-        released = bridge.lease.release("vw_lock_release")
-        result = {"released": released}
+        result = release_with_cleanup(bridge, "vw_lock_release")
         result.update(bridge.lease.snapshot())
         return text_content(json.dumps(result, ensure_ascii=False, indent=2))
     if name == STATUS_TOOL["name"]:
@@ -1557,7 +1659,9 @@ def main():
         serve(bridge)
     finally:
         try:
-            bridge.lease.release("セッションを終了した")
+            release_with_cleanup(
+                bridge, "セッションを終了した", min(SHUTDOWN_CLEANUP_TIMEOUT, call_timeout())
+            )
         except OSError as error:
             log("占有を解けませんでした: %s" % error)
 

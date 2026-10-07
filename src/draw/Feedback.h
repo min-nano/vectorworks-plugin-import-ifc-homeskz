@@ -94,6 +94,24 @@ namespace HomeskzIfcImport::draw
 	// 失敗したとき、allowDialogs なら結果ダイアログで伝える（MCP には message で返す）。
 	TestRoundResult runTestRound(bool allowDialogs, const TestRoundRequest& request = {});
 
+	// 実機テストを終えた結末（endTestSession）。
+	struct TestCleanupResult
+	{
+		bool done = false;	 // 図面を閉じ、一時ファイル・記憶・報告をすべて片付けたか
+		std::string message; // 何をしたか（人と Claude に見せる）
+	};
+
+	// **実機テストを終える**（M42。MCP の `vw_test_cleanup`——Python サーバが占有を解く
+	// ときに呼ぶ）。次の周まで状態を持ち越さないときの片付けで、次の順に行う:
+	//   1. 自分で保存した図面のうち開いているものを保存せずに閉じる（CloseOwnedDocuments。
+	//      閉じてよい相手の判定は周の頭と同じ core::isOwnedTestDocument）。
+	//   2. いま動いているビルドのブランチと、記憶が指すファイルを含む一時フォルダを消す
+	//      （core::sessionScratchDirs → removeScratchDir の安全弁）。
+	//   3. 記憶と報告を消す（次の周は MCP なら ifc と template を渡して 1 周目から）。
+	// **閉じ残した図面・消せなかったフォルダがあれば、記憶は残す**（次の周の頭か次の片付けで
+	// もう一度試せるように）。ダイアログは出さない。
+	TestCleanupResult endTestSession();
+
 	// 直近の報告の在り処（core::testReportPathFor。記憶の置き場所が分からなければ空）。
 	std::string testReportPath();
 } // namespace HomeskzIfcImport::draw

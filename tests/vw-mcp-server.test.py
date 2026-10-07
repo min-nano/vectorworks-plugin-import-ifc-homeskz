@@ -77,6 +77,7 @@ class FakeVectorworks(threading.Thread):
         self.daemon = True
         self.stop_flag = threading.Event()
         self.seen = []  # 処理した順（＝送った順のはず）
+        self.cleanups = 0  # vw_test_cleanup を受けた回数
         # 再起動の代役: この時刻までは印を書かない（＝Vectorworks が居ない）。
         self.down_until = 0.0
 
@@ -130,6 +131,10 @@ class FakeVectorworks(threading.Thread):
                 pass  # 消せなくても、印が古びれば同じこと
         elif tool == "vw_layers":
             body = {"ok": True, "result": {"layers": [{"name": "1-FL"}], "count": 1}}
+        elif tool == "vw_test_cleanup":
+            # 占有を解くときの片付け（M42）。
+            self.cleanups += 1
+            body = {"ok": True, "result": {"done": True, "message": "片付けました"}}
         elif tool == "vw_slow":
             return  # わざと応えない（待ち切らずに諦めるかを確かめる）
         else:
@@ -258,6 +263,8 @@ def check_launch(root):
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
             call("vw_launch", {"timeout": 20}, request_id=2),
         ],
+        # 代役は印を書くだけで応えないので、終了のときの片付けを長く待たせない。
+        timeout="2",
         extra_env={"VW_MCP_APP": app},
         with_notes=True,
     )
@@ -274,6 +281,7 @@ def check_launch(root):
     replies = drive(
         spool,
         [call("vw_launch", request_id=1)],
+        timeout="2",
         extra_env={"VW_MCP_APP": os.path.join(root, "no-such-app")},
     )
     result = json.loads(content_text(replies[0]))
@@ -522,10 +530,12 @@ def check_lease(root):
         check(json.loads(text)["released"] is False, "他の占有は解けない")
 
         # 購読: 解放されるまで待ち、その間の出来事を受け取る（progress 通知も）。
+        released = {}
+
         def release_later():
             time.sleep(1.5)
             a.call("vw_layers")
-            a.call("vw_lock_release")
+            released["reply"] = a.call("vw_lock_release")
 
         releaser = threading.Thread(target=release_later)
         releaser.start()
@@ -544,23 +554,44 @@ def check_lease(root):
         check(len(progress) >= 2, "出来事を progress 通知でも送る (%d)" % len(progress))
         check(all(n["params"]["progressToken"] == "t1" for n in progress), "progressToken を返す")
 
+        # 解放するときは片付ける（実機テストの図面・一時ファイル・記憶・報告）。
+        is_error, text = released["reply"]
+        result = json.loads(text)
+        check(result["released"] is True, "vw_lock_release で解放する")
+        check_eq(result["cleanup"]["done"], True, "解放する前に片付ける")
+        check_eq(fake.cleanups, 1, "片付けはプラグインの vw_test_cleanup に頼む")
+        check(
+            any("vw_test_cleanup" in e for e in events),
+            "片付けたことも購読している側へ届く (%r)" % events,
+        )
+        check("cleanup_pending" not in read_lease(spool), "片付けたら引き継ぎを残さない")
+
         # 解放されれば他のセッションが使える。
         is_error, _ = b.call("vw_ping")
         check(is_error is False, "解放されたら他のセッションが占有できる")
 
-        # 終了したら解く（stdin が閉じた＝Claude Code がセッションを閉じた）。
+        # 終了したら片付けて解く（stdin が閉じた＝Claude Code がセッションを閉じた）。
         b.close()
         check(read_lease(spool)["holder"] is None, "セッションを終了したら占有を解く")
+        check_eq(fake.cleanups, 2, "セッションを終了するときも片付ける")
 
         # 最後の操作から一定時間で解く（相手が手を止めたまま）。
         is_error, _ = a.call("vw_ping")
         c = Session(spool, "session-C", extra_env={"VW_MCP_LEASE_IDLE": "1"})
         try:
             time.sleep(1.5)
-            is_error, _ = c.call("vw_ping")
+            is_error, text = c.call("vw_ping")
             check(is_error is False, "最後の操作から一定時間で解く")
             events = [e["event"] for e in read_lease(spool)["events"]]
             check(any("最後の操作から" in e for e in events), "解いた理由を記録する")
+            # 時間切れで解かれた持ち主は片付けていない。次に占有したほうが自分の操作の前に片付ける。
+            check_eq(fake.cleanups, 3, "時間切れの持ち主の片付けを引き継ぐ")
+            # 一覧の取得（vw_tools）は占有と無関係に挟まるので除いて比べる。
+            sent = [tool for tool in fake.seen if tool != "vw_tools"]
+            check_eq(sent[-2:], ["vw_test_cleanup", "vw_ping"], "片付けてから自分の操作を送る")
+            reply = c.request({"jsonrpc": "2.0", "method": "tools/call",
+                               "params": {"name": "vw_lock_status", "arguments": {}}})
+            check("cleanup_pending" not in json.loads(content_text(reply)), "引き継ぎは 1 度だけ")
         finally:
             c.close()
 
@@ -572,10 +603,26 @@ def check_lease(root):
             a.proc.wait(timeout=10)
             d = Session(spool, "session-D")
             try:
+                before = fake.cleanups
                 is_error, _ = d.call("vw_ping")
                 check(is_error is False, "持ち主のプロセスが消えていれば解く")
+                check_eq(fake.cleanups, before + 1, "異常終了した持ち主の片付けを引き継ぐ")
             finally:
                 d.close()
+
+        # Vectorworks が居なければ片付けられない。解放はして、片付けは次へ引き継ぐ。
+        fake.stop_flag.set()
+        fake.join(timeout=5)
+        e = Session(spool, "session-E", extra_env={"VW_MCP_TIMEOUT": "1"})
+        try:
+            e.call("vw_ping")  # 届かないが、占有は取る
+            is_error, text = e.call("vw_lock_release")
+            result = json.loads(text)
+            check(result["released"] is True, "Vectorworks が居なくても解放する")
+            check_eq(result["cleanup"]["pending"], True, "片付けられなかったと言う")
+            check_eq(read_lease(spool).get("cleanup_pending"), "session-E", "片付けを引き継ぐ印を残す")
+        finally:
+            e.close()
     finally:
         for session in (a, b):
             if session.proc.poll() is None:
@@ -686,12 +733,14 @@ def main():
         )
         check_eq(replies[5]["result"], {}, "ping に空で答える")
 
-        # 送った順に処理されている（要求ファイル名の連番が機能している）。
+        # 送った順に処理されている（要求ファイル名の連番が機能している）。片付け
+        # （vw_test_cleanup）は占有の出入りで挟まる（M42。check_lease）ので、ここでは除く。
         check_eq(
-            fake.seen,
+            [tool for tool in fake.seen if tool != "vw_test_cleanup"],
             ["vw_tools", "vw_ping", "vw_layers", "vw_nope"],
             "送った順に処理される",
         )
+        check_eq(fake.seen[-1], "vw_test_cleanup", "終了するときは片付けてから占有を解く")
 
         # --- 一覧が古いまま（アプリを Vectorworks より先に起動した）------------
         # **実機で起きたのはここ。** アプリは tools/list を起動時に 1 回しか呼ばず、その
