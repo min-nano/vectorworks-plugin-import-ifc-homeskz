@@ -25,6 +25,11 @@
 #   * 実機テストの開始のしかた（vw_run_test）… Vectorworks が起動していなければ、起動して
 #     ブリッジが受け付けるようになってから要求する（M40。call_with_launch）。
 #
+# 【複数のセッションから呼ばれる】（M42）このサーバは Claude のセッションごとに 1 つ起動するが、
+# Vectorworks は 1 つしか起動できない。ブリッジへ届く操作は**占有しているセッションだけ**が
+# 送れ、他は断られて vw_lock_status で状況を購読する（Lease）。どの道具にも同じにかかるので、
+# 道具の一覧を持たないことの例外ではない。
+#
 # 【依存を持たない】標準ライブラリだけで書いてある。プラグインの zip に同梱して配るので、
 # 利用者に pip を要求しないことが要件（Python 3.8 以降）。
 #
@@ -53,6 +58,9 @@
 #   VW_MCP_PLUGIN  プラグイン名（既定 min-nano_structureDev。ブリッジは開発版にしか無い）
 #   VW_MCP_TIMEOUT 1 件あたりの待ち時間（秒。既定 30。道具の表が timeoutSeconds を
 #                  持つものはそちらが優先——実機テストの 1 周は 1 分以上かかる）
+#   VW_MCP_LEASE_IDLE 占有を解くまでの、最後の操作からの秒数（既定 3600。M42）
+#   VW_MCP_LEASE   占有の状態を置く場所（拡張子の前まで。既定はスプールの第 1 候補の隣）
+#   VW_MCP_SESSION_LABEL 占有の表示に使うこのセッションの名前（既定は作業ディレクトリとブランチ）
 #   VW_MCP_APP     vw_launch が起動するもの（macOS は .app のパスかアプリ名、Windows は
 #                  .exe のパス。既定は Vectorworks 2026 の標準のインストール先）
 #
@@ -64,6 +72,7 @@ import glob
 import json
 import os
 import secrets
+import signal
 import stat
 import subprocess
 import sys
@@ -232,6 +241,409 @@ def call_timeout():
         return DEFAULT_TIMEOUT
 
 
+# --- 占有（複数のセッションから同時に呼ばれたとき。M42）-------------------------
+# **Vectorworks は 1 つしか起動できず、このサーバは Claude のセッションごとに 1 つ起動する。**
+# 2 つのセッションが同時に使うと、片方の実機テストの最中にもう片方が更新・再起動を要求したり、
+# 片方の周の報告をもう片方が自分のものとして読んだりする。そこで**ブリッジへ届く操作は、
+# 占有しているセッションだけが行える**ようにする。
+#
+#   * 占有はプラグイン側の道具（読むものも含む）と vw_launch を最初に呼んだときに自動で取る。
+#     読む道具も含めるのは、他の周の報告・描画途中の図面を自分の結果と取り違えないため。
+#   * 他のセッションが占有している間は**要求をスプールへ書かずに断り**、誰が何をしているかを返す。
+#     断られた側は vw_lock_status に wait を渡して、解放されるまで経過を受け取りながら待てる。
+#   * 解放は vw_lock_release・このサーバの終了・最後の操作から LEASE_IDLE_SECONDS 経過・
+#     持ち主のプロセスの消滅（同じ計算機なので確認できる）のいずれか。操作の最中は持ち主が
+#     心拍（heartbeat）を書き続け、それが LEASE_BUSY_STALE_SECONDS 途絶えたら停止とみなす。
+#   * **解放するときは実機テストを片付ける**（プラグインの vw_test_cleanup。実機テストの図面を
+#     閉じ、一時ファイル・記憶・報告を消す）。持ち主が自分で片付けられずに解かれたとき
+#     （時間切れ・異常終了・Vectorworks が居なかった）は「片付けが残っている」と記録し、
+#     次に占有したセッションが自分の操作の前に片付ける（end_test_session）。
+#
+# 状態は 1 つの JSON（<スプールの第 1 候補>.lease.json）に置き、読み書きは OS のファイル
+# ロック（.lease.lock）の中でだけ行う。ロックはプロセスが終われば OS が外すので、異常終了
+# しても残らない。**場所はスプールの第 1 候補の隣**——Vectorworks が起動する前（vw_launch）
+# にも決まっていて、同じ利用者のセッションどうしで一致する必要があるため（macOS は利用者
+# ごとの一時ディレクトリ。spool_candidates）。スプールの中に置かないのは、プラグイン側が
+# 開始時に掃除するから（src/core/Bridge.h の sweep）。
+LEASE_SUFFIX = ".lease.json"
+LEASE_MUTEX_SUFFIX = ".lease.lock"
+# 最後の操作からこれだけ経てば占有を解く（秒。VW_MCP_LEASE_IDLE で変えられる）。**CI の
+# 往復（push → dev ビルド → vw_update）を待つ間も占有し続けられる長さにする**——その間に
+# 他のセッションが周を走らせると、待っていた側の記憶と図面が置き換わる。続けて使わないなら
+# 持ち主が vw_lock_release で片付けて解放する（運用。docs/development/live-test/running.md）。
+LEASE_IDLE_SECONDS = 3600.0
+# 操作の最中に心拍を書く間隔と、途絶えたら停止とみなす長さ（秒）。持ち主が待つ最長の
+# 一続きの処理は osascript の 10 秒なので、十分に長くとる。
+LEASE_HEARTBEAT_SECONDS = 5.0
+LEASE_BUSY_STALE_SECONDS = 120.0
+LEASE_EVENTS_KEPT = 50
+# vw_lock_status の wait の上限（秒）。実機テストの 1 周の上限（30 分）に揃える。
+LEASE_WAIT_MAX = 1800.0
+LEASE_WAIT_POLL_SECONDS = 1.0
+# 実機テストを片付けるプラグイン側の道具（src/draw/McpBridge.cpp の kTools）。
+CLEANUP_TOOL = "vw_test_cleanup"
+# サーバの終了のときに片付けを待つ上限（秒）。Claude Code はセッションを閉じるとこのサーバを
+# 止めるので、長く待たない（間に合わなければ次に占有したセッションが片付ける）。
+SHUTDOWN_CLEANUP_TIMEOUT = 20.0
+
+
+def lease_idle_seconds():
+    try:
+        value = float(os.environ.get("VW_MCP_LEASE_IDLE", "") or LEASE_IDLE_SECONDS)
+    except ValueError:
+        return LEASE_IDLE_SECONDS
+    return value if value > 0 else LEASE_IDLE_SECONDS
+
+
+def format_time(value):
+    """人に見せる時刻（ローカル時刻）。"""
+    if not isinstance(value, (int, float)):
+        return None
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(value))
+
+
+def process_alive(pid):
+    """そのプロセスが動いているか。分からなければ True（占有を早まって解かない）。
+
+    **Windows では確かめない。** os.kill(pid, 0) は Windows では「終了コード 0 で終了させる」
+    意味になるので使えない。そちらは心拍と最後の操作の時刻だけで判定する。
+    """
+    if os.name == "nt" or not isinstance(pid, int) or pid <= 0:
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # 権限が無い＝別の利用者のプロセスとして動いている
+    return True
+
+
+def session_label():
+    """このセッションを人が見分けるための名前（作業ディレクトリとブランチ）。
+
+    VW_MCP_SESSION_LABEL があればそれを使う。このサーバは Claude Code がリポジトリ（または
+    worktree）で起動するので、ディレクトリとブランチで「どの作業か」が分かる。
+    """
+    override = os.environ.get("VW_MCP_SESSION_LABEL", "")
+    if override:
+        return override
+    cwd = os.getcwd()
+    label = os.path.basename(cwd.rstrip("/\\")) or cwd
+    try:
+        done = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+        branch = done.stdout.decode("utf-8", "replace").strip()
+        if done.returncode == 0 and branch:
+            label += " (%s)" % branch
+    except (OSError, subprocess.SubprocessError):
+        # git が無い・リポジトリの外。ディレクトリ名だけでも見分けられる。
+        pass
+    return label
+
+
+class FileMutex:
+    """OS のファイルロック（排他）。プロセスが終われば OS が外す。"""
+
+    def __init__(self, path):
+        self.path = path
+        self.handle = None
+
+    def __enter__(self):
+        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        self.handle = os.fdopen(fd, "r+b")
+        if os.name == "nt":
+            import msvcrt
+
+            while True:
+                try:
+                    msvcrt.locking(self.handle.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    # LK_LOCK は 10 秒で諦める。ロックを持つのは読み書きの一瞬だけなので、
+                    # 待ち続けてよい。
+                    time.sleep(0.05)
+        else:
+            import fcntl
+
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                self.handle.seek(0)
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            self.handle.close()
+            self.handle = None
+        return False
+
+
+class Lease:
+    """ブリッジの占有（このサーバ＝1 つの Claude セッションが持つ）。"""
+
+    def __init__(self, base):
+        self.path = base + LEASE_SUFFIX
+        self.mutex_path = base + LEASE_MUTEX_SUFFIX
+        self.id = "%d-%s" % (os.getpid(), secrets.token_hex(4))
+        self.pid = os.getpid()
+        self.label = session_label()
+        self.cwd = os.getcwd()
+        self.last_beat = 0.0
+        # 直近の begin で、前の持ち主の片付けを引き継いだならその名前（run_exclusive が片付ける）。
+        self.inherited = None
+
+    # --- 読み書き（必ず FileMutex の中で呼ぶ）--------------------------------
+    def _read(self):
+        try:
+            with open(self.path, "r", encoding="utf-8") as handle:
+                state = json.load(handle)
+        except (OSError, ValueError):
+            # 無い（まだ誰も占有していない）か壊れている。どちらも「空き」から始める。
+            state = None
+        if not isinstance(state, dict):
+            state = {}
+        state.setdefault("seq", 0)
+        state.setdefault("holder", None)
+        state.setdefault("events", [])
+        return state
+
+    def _write(self, state):
+        parent = os.path.dirname(self.path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        temp = self.path + ".%d.tmp" % self.pid
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, ensure_ascii=False)
+        os.replace(temp, self.path)
+
+    def _mutex(self):
+        parent = os.path.dirname(self.mutex_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        return FileMutex(self.mutex_path)
+
+    @staticmethod
+    def _event(state, who, text):
+        state["seq"] = int(state.get("seq", 0)) + 1
+        state["events"].append(
+            {"seq": state["seq"], "time": time.time(), "session": who, "event": text}
+        )
+        del state["events"][:-LEASE_EVENTS_KEPT]
+
+    @staticmethod
+    def _lapse(holder, now):
+        """占有が切れていればその理由、続いていれば None。"""
+        if not process_alive(holder.get("pid")):
+            return "セッションが終了していた"
+        if holder.get("busy"):
+            if now - float(holder.get("heartbeat") or 0) > LEASE_BUSY_STALE_SECONDS:
+                return "%s の最中に応答が途絶えた" % holder.get("busy")
+            return None
+        if now - float(holder.get("last_used") or 0) > lease_idle_seconds():
+            return "最後の操作から %d 秒経った" % int(lease_idle_seconds())
+        return None
+
+    def _settle(self, state, now):
+        """切れた占有を解く。解いたら True。"""
+        holder = state.get("holder")
+        if not isinstance(holder, dict):
+            state["holder"] = None
+            return False
+        reason = self._lapse(holder, now)
+        if reason is None:
+            return False
+        self._event(state, holder.get("label"), "占有を解いた（%s）" % reason)
+        state["holder"] = None
+        # **持ち主は自分で片付けられなかった。** 次に占有したセッションが片付ける。
+        state["cleanup_pending"] = holder.get("label") or "(不明)"
+        return True
+
+    # --- 操作 ----------------------------------------------------------------
+    def begin(self, tool):
+        """tool を始める。始められれば None、他が占有していれば状況（view）を返す。"""
+        with self._mutex():
+            now = time.time()
+            state = self._read()
+            self._settle(state, now)
+            holder = state["holder"]
+            if holder is not None and holder.get("id") != self.id:
+                self._write(state)
+                return self._view(state, now)
+            self.inherited = None
+            if holder is None:
+                # 前の持ち主の片付けが残っていれば引き継ぐ（自分の操作の前に片付ける）。
+                self.inherited = state.pop("cleanup_pending", None)
+                holder = {
+                    "id": self.id,
+                    "pid": self.pid,
+                    "label": self.label,
+                    "cwd": self.cwd,
+                    "acquired": now,
+                }
+                state["holder"] = holder
+                self._event(state, self.label, "占有した")
+            holder["busy"] = tool
+            holder["busy_since"] = now
+            holder["heartbeat"] = now
+            holder["last_used"] = now
+            self._event(state, self.label, "%s を始めた" % tool)
+            self._write(state)
+            self.last_beat = now
+            return None
+
+    def end(self, tool, outcome):
+        with self._mutex():
+            now = time.time()
+            state = self._read()
+            holder = state.get("holder")
+            if not isinstance(holder, dict) or holder.get("id") != self.id:
+                return  # 途中で解かれていた（心拍が途絶えたとみなされた）。何もしない。
+            holder["busy"] = None
+            holder["busy_since"] = None
+            holder["heartbeat"] = now
+            holder["last_used"] = now
+            self._event(state, self.label, "%s を終えた（%s）" % (tool, outcome))
+            self._write(state)
+
+    def beat(self):
+        """操作の最中に心拍を書く（間隔は LEASE_HEARTBEAT_SECONDS まで間引く）。"""
+        now = time.time()
+        if now - self.last_beat < LEASE_HEARTBEAT_SECONDS:
+            return
+        self.last_beat = now
+        try:
+            with self._mutex():
+                state = self._read()
+                holder = state.get("holder")
+                if isinstance(holder, dict) and holder.get("id") == self.id:
+                    holder["heartbeat"] = now
+                    self._write(state)
+        except OSError as error:
+            # 心拍が書けなくても操作は続ける（途絶えが続けば他から解かれるだけ）。
+            log("占有の心拍を書けませんでした: %s" % error)
+
+    def holds(self):
+        """いま自分が占有しているか。"""
+        with self._mutex():
+            holder = self._read().get("holder")
+            return isinstance(holder, dict) and holder.get("id") == self.id
+
+    def note(self, text):
+        """出来事を 1 つ記録する（片付けの結果など。購読している側へ届く）。"""
+        with self._mutex():
+            state = self._read()
+            self._event(state, self.label, text)
+            self._write(state)
+
+    def release(self, reason, cleanup_pending=False):
+        """自分の占有を解く。解いたら True。
+
+        cleanup_pending は「片付けられなかった」（次に占有したセッションへ引き継ぐ）。
+        """
+        with self._mutex():
+            state = self._read()
+            holder = state.get("holder")
+            if not isinstance(holder, dict) or holder.get("id") != self.id:
+                return False
+            state["holder"] = None
+            if cleanup_pending:
+                state["cleanup_pending"] = self.label
+            self._event(state, self.label, "占有を解いた（%s）" % reason)
+            self._write(state)
+            return True
+
+    def snapshot(self):
+        """いまの状況（view）。切れた占有はここでも解く。"""
+        with self._mutex():
+            now = time.time()
+            state = self._read()
+            if self._settle(state, now):
+                self._write(state)
+            return self._view(state, now)
+
+    def _view(self, state, now):
+        holder = state.get("holder")
+        view = {
+            "you": self.label,
+            "seq": state.get("seq", 0),
+            "events": [
+                {
+                    "seq": event.get("seq"),
+                    "time": format_time(event.get("time")),
+                    "session": event.get("session"),
+                    "event": event.get("event"),
+                }
+                for event in state.get("events", [])[-10:]
+                if isinstance(event, dict)
+            ],
+        }
+        if state.get("cleanup_pending"):
+            view["cleanup_pending"] = state.get("cleanup_pending")
+        if not isinstance(holder, dict):
+            view["state"] = "free"
+            return view
+        view["state"] = "yours" if holder.get("id") == self.id else "held"
+        shown = {
+            "session": holder.get("label"),
+            "cwd": holder.get("cwd"),
+            "pid": holder.get("pid"),
+            "since": format_time(holder.get("acquired")),
+        }
+        if holder.get("busy"):
+            shown["busy"] = holder.get("busy")
+            shown["busy_since"] = format_time(holder.get("busy_since"))
+            shown["busy_seconds"] = int(now - float(holder.get("busy_since") or now))
+        else:
+            idle = now - float(holder.get("last_used") or now)
+            shown["idle_seconds"] = int(idle)
+            shown["released_in_seconds"] = max(0, int(lease_idle_seconds() - idle))
+        view["holder"] = shown
+        return view
+
+    def events_after(self, seq):
+        """seq より後の出来事（購読のため。切れた占有はここでも解く）。"""
+        with self._mutex():
+            now = time.time()
+            state = self._read()
+            if self._settle(state, now):
+                self._write(state)
+            events = [
+                event
+                for event in state.get("events", [])
+                if isinstance(event, dict) and int(event.get("seq", 0)) > seq
+            ]
+            return events, self._view(state, now)
+
+
+def lease_base(candidates):
+    """占有の状態を置く場所（拡張子の前まで）。スプールの第 1 候補の隣。
+
+    VW_MCP_LEASE で明示できる（テストが本物の占有に触れないように使う）。
+    """
+    override = os.environ.get("VW_MCP_LEASE", "")
+    if override:
+        return override
+    if candidates:
+        return candidates[0].rstrip("/\\")
+    plugin = os.environ.get("VW_MCP_PLUGIN", "") or DEFAULT_PLUGIN
+    return os.path.join(tempfile.gettempdir(), plugin + "-mcp")
+
+
 class BridgeDown(Exception):
     """Vectorworks 側でブリッジが動いていない（起動していないか、パレットが開いていない）。"""
 
@@ -253,6 +665,12 @@ class Bridge:
         # 道具ごとの待ち時間（秒）。**表の真実はプラグイン側**（kTools の timeoutSeconds）で、
         # 一覧を取得するたびにここへコピーする（remember_timeouts）。
         self.timeouts = {}
+        # 占有（M42）。操作の最中に待つループは tick() で心拍を書く。
+        self.lease = Lease(lease_base(candidates))
+
+    def tick(self):
+        """待っている間に呼ぶ（占有の心拍）。"""
+        self.lease.beat()
 
     # --- 生存確認 ---------------------------------------------------------
     @staticmethod
@@ -377,6 +795,7 @@ class Bridge:
                     "Vectorworks からの応答がありません（%s、%.0f 秒待ちました）。"
                     % (tool, timeout)
                 )
+            self.tick()
             time.sleep(0.05)
 
     # --- 道具の一覧（真実はプラグイン側にある）---------------------------
@@ -539,8 +958,44 @@ CALL_TOOL = {
     },
 }
 
+# 占有の状況と購読（M42）。**他のセッションが使っている間も答えられる**ことが要件。
+LOCK_STATUS_TOOL = {
+    "name": "vw_lock_status",
+    "description": (
+        "Vectorworks をどの Claude セッションが占有しているか（何をしているか・いつ解放されるか）"
+        "と、直近の出来事を返す。他のセッションが使用中で断られたときは wait（秒）を渡すと、"
+        "解放されるまで（until=change なら次の出来事まで）待ち、その間の出来事を返す。"
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "wait": {
+                "type": "number",
+                "description": "待つ上限（秒。既定 0＝待たない。上限 %d）" % int(LEASE_WAIT_MAX),
+            },
+            "until": {
+                "type": "string",
+                "enum": ["free", "change"],
+                "description": "free（既定）は解放されるまで、change は次の出来事まで待つ",
+            },
+        },
+        "additionalProperties": False,
+    },
+}
+
+LOCK_RELEASE_TOOL = {
+    "name": "vw_lock_release",
+    "description": (
+        "実機テストを片付けてから、このセッションの Vectorworks の占有を解く。"
+        "片付けでは実機テストの図面を閉じ、一時ファイル・記憶・報告を消す。"
+        "次の実行まで状態を持ち越さないなら（確認が済んだ・当分使わない）必ず呼ぶ。"
+        "CI の往復を待って続けるなら呼ばない（最後の操作から 60 分は占有が続く）。"
+    ),
+    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+}
+
 # このサーバ自身が答える道具（ブリッジが動いていなくても一覧に並ぶ）。
-LOCAL_TOOLS = [STATUS_TOOL, LAUNCH_TOOL, CALL_TOOL]
+LOCAL_TOOLS = [STATUS_TOOL, LAUNCH_TOOL, CALL_TOOL, LOCK_STATUS_TOOL, LOCK_RELEASE_TOOL]
 
 
 def bridge_status_result(bridge, notify=None):
@@ -548,6 +1003,7 @@ def bridge_status_result(bridge, notify=None):
     if status is None:
         return {
             "running": False,
+            "lock": bridge.lease.snapshot(),
             "searched": bridge.candidates,
             "hint": (
                 "Vectorworks が起動していなければ vw_launch で起動してください。"
@@ -561,6 +1017,7 @@ def bridge_status_result(bridge, notify=None):
         }
     result = {"running": True, "spool": bridge.dir}
     result.update(status)
+    result["lock"] = bridge.lease.snapshot()
     tools = bridge.live_tools()
     if tools is not None:
         # 名前・説明・引数の形をそのまま示す（vw_call に渡す手掛かり）。
@@ -704,6 +1161,7 @@ def launch_vectorworks(bridge, args, notify):
             return result, False
         if time.time() >= deadline:
             break
+        bridge.tick()
         time.sleep(LAUNCH_POLL_SECONDS)
 
     return {
@@ -768,6 +1226,7 @@ def wait_for_restart(bridge, notify):
         if bridge.status() is None:
             went_down = True
             break
+        bridge.tick()
         time.sleep(LAUNCH_POLL_SECONDS)
     if not went_down:
         return {
@@ -786,6 +1245,7 @@ def wait_for_restart(bridge, notify):
             result = {"restarted": True, "spool": bridge.dir}
             result.update(status)
             return result
+        bridge.tick()
         time.sleep(LAUNCH_POLL_SECONDS)
     return {
         "restarted": False,
@@ -847,6 +1307,7 @@ def restart_without_bridge(bridge, notify):
         return {"restarted": False, "error": "終了を頼めませんでした: %s" % error}, True
     deadline = time.time() + DEFAULT_LAUNCH_WAIT
     while time.time() < deadline and mac_app_running(app):
+        bridge.tick()
         time.sleep(LAUNCH_POLL_SECONDS)
     if mac_app_running(app):
         return {
@@ -859,6 +1320,162 @@ def restart_without_bridge(bridge, notify):
     result, is_error = launch_vectorworks(bridge, {}, notify)
     result["restarted"] = not is_error
     return result, is_error
+
+
+# --- 占有の状況・購読・解放（vw_lock_status / vw_lock_release。M42）---------------
+
+
+def blocked_result(name, view):
+    """他のセッションが占有しているので断るときの本文。"""
+    holder = view.get("holder", {})
+    hint = "別のセッション（%s）が Vectorworks を使用中なので、%s は送りませんでした。" % (
+        holder.get("session"),
+        name,
+    )
+    if holder.get("busy"):
+        hint += "いま %s を %d 秒実行しています。" % (holder.get("busy"), holder.get("busy_seconds", 0))
+    else:
+        hint += "操作が無ければ %d 秒後に解放されます。" % holder.get("released_in_seconds", 0)
+    hint += (
+        "vw_lock_status に wait（秒）を渡すと、解放されるまで経過を受け取りながら待てます。"
+        "相手のセッションの作業を人に確かめずに上書きしないでください。"
+    )
+    return {"blocked": True, "tool": name, "hint": hint, "lock": view}
+
+
+def lock_wait_seconds(args):
+    try:
+        value = float(args.get("wait", 0) or 0)
+    except (TypeError, ValueError):
+        value = 0.0
+    return max(0.0, min(value, LEASE_WAIT_MAX))
+
+
+def lock_status(bridge, args, progress=None):
+    """vw_lock_status の中身。
+
+    wait があれば、解放される（until=change なら何か起きる）まで待ち、その間の出来事を返す。
+    progress は出来事のたびに呼ぶ（MCP の progress 通知。要求に progressToken があるときだけ）。
+    """
+    lease = bridge.lease
+    view = lease.snapshot()
+    wait = lock_wait_seconds(args)
+    until = args.get("until") or "free"
+    if wait <= 0:
+        return view
+    start_seq = int(view.get("seq", 0))
+    seen = start_seq
+    observed = []
+    deadline = time.time() + wait
+    while True:
+        done = view["state"] != "held" if until == "free" else bool(observed)
+        if done or time.time() >= deadline:
+            break
+        time.sleep(LEASE_WAIT_POLL_SECONDS)
+        events, view = lease.events_after(seen)
+        for event in events:
+            seen = max(seen, int(event.get("seq", 0)))
+            shown = {
+                "time": format_time(event.get("time")),
+                "session": event.get("session"),
+                "event": event.get("event"),
+            }
+            observed.append(shown)
+            if progress is not None:
+                progress(len(observed), "%s: %s" % (shown["session"], shown["event"]))
+    result = dict(view)
+    result["observed"] = observed
+    result["waited_until"] = until
+    if view["state"] == "held" and until == "free":
+        result["timed_out"] = True
+    return result
+
+
+def end_test_session(bridge, timeout=None):
+    """実機テストを片付ける（プラグインの vw_test_cleanup）。結果の dict を返す。
+
+    pending が True なら「片付けられなかった（次に占有したセッションへ引き継ぐ）」。
+    Vectorworks が居ない・1 周の最中（busy_until）・応答が無いときがそれに当たる。
+    **プラグインが道具を知らない**（M42 より古い開発版）ときは引き継がない（何度試しても同じ）。
+    """
+    status = bridge.status()
+    if status is None:
+        return {"done": False, "pending": True,
+                "message": "Vectorworks のブリッジが動いていないので、片付けは次に占有した"
+                           "セッションへ引き継ぎました。"}
+    busy_until = status.get("busy_until")
+    if isinstance(busy_until, (int, float)) and busy_until > time.time():
+        return {"done": False, "pending": True,
+                "message": "Vectorworks が %s の最中なので、片付けは次に占有したセッションへ"
+                           "引き継ぎました。" % status.get("busy", "別の処理")}
+    try:
+        if timeout is None:
+            response = bridge.call(CLEANUP_TOOL, {})
+        else:
+            response = bridge.call(CLEANUP_TOOL, {}, timeout=timeout)
+    except (BridgeDown, TimeoutError, OSError) as error:
+        return {"done": False, "pending": True,
+                "message": "片付けを頼めませんでした（%s）。次に占有したセッションへ"
+                           "引き継ぎました。" % error}
+    if not response.get("ok"):
+        return {"done": False, "pending": False,
+                "message": "Vectorworks 側で片付けられませんでした: %s"
+                           % response.get("error", "(理由不明)")}
+    result = response.get("result", {})
+    if not isinstance(result, dict):
+        result = {}
+    return {"done": result.get("done") is True, "pending": False,
+            "message": result.get("message", "")}
+
+
+def release_with_cleanup(bridge, reason, timeout=None):
+    """片付けてから自分の占有を解く。占有していなければ何もしない。結果の dict を返す。"""
+    if not bridge.lease.holds():
+        return {"released": False, "cleanup": None}
+    bridge.lease.begin(CLEANUP_TOOL)
+    cleanup = end_test_session(bridge, timeout)
+    bridge.lease.end(CLEANUP_TOOL, "片付けた" if cleanup["done"] else "片付けきれなかった")
+    released = bridge.lease.release(reason, cleanup_pending=cleanup["pending"])
+    return {"released": released, "cleanup": cleanup}
+
+
+def run_exclusive(bridge, name, action):
+    """占有を取ってから action（content を返す）を実行する。他が占有していれば断る。
+
+    前の持ち主の片付けを引き継いだら、action の前に片付ける（その結果も返す）。
+    """
+    try:
+        view = bridge.lease.begin(name)
+    except OSError as error:
+        return text_content("占有の状態を書けませんでした: %s" % error, is_error=True)
+    if view is not None:
+        return text_content(
+            json.dumps(blocked_result(name, view), ensure_ascii=False, indent=2), is_error=True
+        )
+    inherited_note = None
+    if bridge.lease.inherited is not None:
+        # **引き継いだ片付けは 1 度だけ試す。** Vectorworks が居なければ図面は開いておらず、
+        # 残るのはファイルだけ（PR が閉じれば周の頭で片付く）。ここで再び引き継ぐと、
+        # この操作（vw_run_test など）が作った自分の図面を次の操作の前に消してしまう。
+        cleanup = end_test_session(bridge)
+        inherited_note = "前の持ち主（%s）の実機テストの片付け: %s" % (
+            bridge.lease.inherited, cleanup["message"])
+        bridge.lease.note(inherited_note)
+    outcome = "失敗"
+    try:
+        content = action()
+        if inherited_note is not None:
+            content = dict(content)
+            content["content"] = list(content["content"]) + [
+                {"type": "text", "text": inherited_note}]
+        if not content.get("isError"):
+            outcome = "成功"
+        return content
+    finally:
+        try:
+            bridge.lease.end(name, outcome)
+        except OSError as error:
+            log("占有の状態を書けませんでした: %s" % error)
 
 
 # --- MCP（JSON-RPC over stdio）------------------------------------------------
@@ -888,10 +1505,34 @@ def notify_tools_changed():
     send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
 
 
+def progress_sender(params):
+    """要求に progressToken があれば、MCP の progress 通知を送る関数を返す。"""
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    token = meta.get("progressToken") if isinstance(meta, dict) else None
+    if token is None:
+        return None
+
+    def progress(count, message):
+        send({
+            "jsonrpc": "2.0",
+            "method": "notifications/progress",
+            "params": {"progressToken": token, "progress": count, "message": message},
+        })
+
+    return progress
+
+
 def handle_tools_call(bridge, params):
     name = params.get("name", "")
     args = params.get("arguments") or {}
 
+    if name == LOCK_STATUS_TOOL["name"]:
+        result = lock_status(bridge, args, progress_sender(params))
+        return text_content(json.dumps(result, ensure_ascii=False, indent=2))
+    if name == LOCK_RELEASE_TOOL["name"]:
+        result = release_with_cleanup(bridge, "vw_lock_release")
+        result.update(bridge.lease.snapshot())
+        return text_content(json.dumps(result, ensure_ascii=False, indent=2))
     if name == STATUS_TOOL["name"]:
         return text_content(
             json.dumps(
@@ -899,8 +1540,13 @@ def handle_tools_call(bridge, params):
             )
         )
     if name == LAUNCH_TOOL["name"]:
-        result, is_error = launch_vectorworks(bridge, args, notify_tools_changed)
-        return text_content(json.dumps(result, ensure_ascii=False, indent=2), is_error=is_error)
+        def launch():
+            result, is_error = launch_vectorworks(bridge, args, notify_tools_changed)
+            return text_content(
+                json.dumps(result, ensure_ascii=False, indent=2), is_error=is_error
+            )
+
+        return run_exclusive(bridge, name, launch)
     if name == CALL_TOOL["name"]:
         name = args.get("tool", "")
         args = args.get("arguments") or {}
@@ -908,8 +1554,16 @@ def handle_tools_call(bridge, params):
             return text_content("vw_call には tool（道具の名前）が要ります。", is_error=True)
         if any(name == tool["name"] for tool in LOCAL_TOOLS):
             # 自前の道具はそのまま自分で答える（vw_call の入れ子も防ぐ）。
-            return handle_tools_call(bridge, {"name": name, "arguments": args})
+            return handle_tools_call(
+                bridge, {"name": name, "arguments": args, "_meta": params.get("_meta")}
+            )
 
+    # プラグイン側の道具は、占有してから送る（M42）。
+    return run_exclusive(bridge, name, lambda: call_plugin_tool(bridge, name, args))
+
+
+def call_plugin_tool(bridge, name, args):
+    """プラグイン側の道具を呼ぶ（占有を取ったあと）。"""
     launched = None
     try:
         response, launched = call_with_launch(bridge, name, args, notify_tools_changed)
@@ -996,7 +1650,23 @@ def main():
     log("探す場所: %s" % ", ".join(bridge.candidates))
     if bridge.status() is None:
         log("いまブリッジは動いていません（vw_launch で Vectorworks を起動できます）。")
+    # **終了するときは占有を解く。** Claude Code はセッションを閉じるとこのサーバを SIGTERM で
+    # 止めるので、それも通常の終了（finally）として扱う。解けずに終わっても、持ち主の
+    # プロセスが消えたことを他のセッションが確かめて解く（Lease._lapse）。
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    try:
+        serve(bridge)
+    finally:
+        try:
+            release_with_cleanup(
+                bridge, "セッションを終了した", min(SHUTDOWN_CLEANUP_TIMEOUT, call_timeout())
+            )
+        except OSError as error:
+            log("占有を解けませんでした: %s" % error)
 
+
+def serve(bridge):
     for line in sys.stdin:
         line = line.strip()
         if not line:

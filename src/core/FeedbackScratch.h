@@ -17,6 +17,9 @@
 //	（同梱スクリプト `vw-update` の `q-pr-state`）、**開いている PR が無く、閉じた PR が
 //	在る**ものだけを消す。問い合わせに失敗した・PR が 1 つも見つからない（＝閉じたとは
 //	言えない）ものは残す。**判断できなければ削除しない。**
+//	もう 1 つは**実機テストを終えるとき**（M42。MCP の占有を解くときの `vw_test_cleanup`）で、
+//	いま動いているビルドのブランチと、記憶が指すファイルを含むフォルダを消す
+//	（sessionScratchDirs）。頼まれたときにしか起きず、安全弁は同じ removeScratchDir を通る。
 //
 //	【消してよいもの】ここは CLAUDE.md「開発の基本方針」8 の 3 か所目の「消すコード」で
 //	ある。安全弁は removeScratchDir の 1 か所に集め、緩めない:
@@ -95,6 +98,16 @@ namespace HomeskzIfcImport::core
 		std::vector<std::string> removedPaths; // 消したフォルダ（記憶のテンプレート・図面の照合用）
 		std::vector<std::string> kept; // 閉じていたが消さなかったもの（理由つき）
 	};
+
+	// dirs を順に安全弁つきで消す（removeScratchDir）。消さなかったものは理由つきで kept へ。
+	ScratchCleanup removeScratchDirs(const std::string& root, const std::vector<ScratchDir>& dirs);
+
+	// **実機テストを終えるときに消すフォルダを選ぶ**（M42）。dirs のうち、目印が branch
+	// （いま動いているビルドのブランチ）と一致するものと、usedPaths（記憶のテンプレート・
+	// 自分の図面）のどれかを中に含むものを、dirs の順のまま返す。どちらも空なら何も選ばない。
+	std::vector<ScratchDir> sessionScratchDirs(const std::vector<ScratchDir>& dirs,
+											   const std::string& branch,
+											   const std::vector<std::string>& usedPaths);
 
 	// candidates（いま動いているブランチを除いたフォルダ）のうち、PR が閉じたものを消す。
 	ScratchCleanup cleanUpClosedBranches(const std::string& root,

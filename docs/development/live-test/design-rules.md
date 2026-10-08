@@ -50,6 +50,8 @@
 `CloseDocument()` は**確認なしに未保存の変更を捨てます**（Findings「Documents」）。ここは
 アンインストーラと並ぶ「利用者のものを消す」コードなので、**歯止めを緩める方向へ変えません**。
 
+- **閉じるのは周の頭と、実機テストを終えるとき（M42。MCP の占有を解くときの
+  `vw_test_cleanup`）だけ。** どちらも同じ `CloseOwnedDocuments` を通ります。
 - **閉じてよいのは、実機テストが自分で保存した図面だけ。** 判定は `core/FeedbackSession` の
   `isOwnedTestDocument` 1 か所で、記憶（`ownedDocuments`）に**名指しで在り**、そのパスが
   **一時ファイルの置き場の中**にあるものに限ります（壊れた記憶・書き換えた記憶から利用者の

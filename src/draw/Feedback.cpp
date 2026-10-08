@@ -652,6 +652,82 @@ namespace HomeskzIfcImport::draw
 	}
 
 	// -----------------------------------------------------------------------
+	// **実機テストを終える**（M42。draw/Feedback.h）。
+	TestCleanupResult endTestSession()
+	{
+		TestCleanupResult result;
+		if (!feedbackAvailable())
+		{
+			result.message = "実機テストは開発版（Dev）のビルドでのみ使えます。";
+			return result;
+		}
+
+		const std::string sessionPath = core::defaultFeedbackSessionPath();
+		core::FeedbackSession session;
+		(void)core::readFeedbackSession(sessionPath, session); // 読めなければ空の記憶
+		// **消すフォルダを選ぶ手掛かりは閉じる前に控える**——CloseOwnedDocuments は閉じた
+		// 図面を記憶から削除する。
+		std::vector<std::string> used = session.ownedDocuments;
+		if (!session.templatePath.empty())
+			used.push_back(session.templatePath);
+
+		std::vector<std::string> notes;
+		const std::string closed = CloseOwnedDocuments(session);
+		if (!closed.empty())
+			notes.push_back(closed);
+		const auto joined = [&notes]()
+		{
+			std::string text;
+			for (const std::string& note : notes)
+				text += (text.empty() ? "" : "。") + note;
+			return text;
+		};
+
+		// **閉じ残しがあれば何も消さない。** 開いている図面のファイルは removeScratchDir も
+		// 消さない（`*.lck`）が、記憶まで消すと次の周がその図面を閉じられなくなる。
+		if (!session.ownedDocuments.empty())
+		{
+			(void)core::writeFeedbackSession(sessionPath, session);
+			notes.emplace_back("閉じられない図面が残ったので、一時ファイルと記憶は残しました");
+			result.message = joined();
+			return result;
+		}
+
+		const std::string root = TempPath(core::kScratchRootName);
+		const core::ScratchCleanup cleanup =
+			root.empty() ? core::ScratchCleanup{}
+						 : core::removeScratchDirs(
+							   root, core::sessionScratchDirs(core::listScratchDirs(root),
+															  currentBuildInfo().branch, used));
+		if (!cleanup.removedBranches.empty())
+		{
+			std::string note = "一時ファイルを片付けました（";
+			for (std::size_t i = 0; i < cleanup.removedBranches.size(); ++i)
+				note += (i == 0 ? "" : " / ") + cleanup.removedBranches[i];
+			notes.push_back(note + "）");
+		}
+		if (!cleanup.kept.empty())
+		{
+			std::string note = "片付けなかった一時ファイル: ";
+			for (std::size_t i = 0; i < cleanup.kept.size(); ++i)
+				note += (i == 0 ? "" : " / ") + cleanup.kept[i];
+			notes.push_back(note + "。記憶は残しました");
+			(void)core::writeFeedbackSession(sessionPath, session);
+			result.message = joined();
+			return result;
+		}
+
+		// **記憶と報告を消す。** 報告を残すと、次に使うセッションが前の周の報告を自分の
+		// 結果として読みうる（M42 で占有を設けた理由と同じ）。
+		core::clearFeedbackSession(sessionPath);
+		core::clearFeedbackSession(core::testReportPathFor(sessionPath));
+		notes.emplace_back("実機テストの記憶と報告を消しました（次の周は 1 周目から）");
+		result.done = true;
+		result.message = joined();
+		return result;
+	}
+
+	// -----------------------------------------------------------------------
 	// **実機テストの 1 周**（M25 / M38。draw/Feedback.h）。
 	TestRoundResult runTestRound(bool allowDialogs, const TestRoundRequest& request)
 	{

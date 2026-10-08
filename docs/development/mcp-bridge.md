@@ -1,7 +1,7 @@
 # MCP ブリッジ（`core/Bridge` ＋ `draw/McpBridge` ＋ `scripts/mcp/vw-mcp-server.py`）
 
 利用者から見た使い方は[「MCP ブリッジ」](../user-guide/mcp-bridge.md)、経緯は
-[M24](../dev-notes/milestones/m24-mcp-bridge.md) / [M30](../dev-notes/milestones/m30-mcp-resident.md) / [M38](../dev-notes/milestones/m38-local-mcp-verification.md) / [M41](../dev-notes/milestones/m41-bridge-os-timer.md)。ここは変えるときの決めごとです。
+[M24](../dev-notes/milestones/m24-mcp-bridge.md) / [M30](../dev-notes/milestones/m30-mcp-resident.md) / [M38](../dev-notes/milestones/m38-local-mcp-verification.md) / [M41](../dev-notes/milestones/m41-bridge-os-timer.md) / [M42](../dev-notes/milestones/m42-bridge-lease.md)。ここは変えるときの決めごとです。
 
 **開発版だけの道具です（M38）。** メニュー「MCP ブリッジを表示…」とパレットは開発版
 （`min-nano_structureDev`）にだけ登録し、安定版はクラスを持つだけで登録しません
@@ -17,9 +17,9 @@
 
 | 種類 | 道具 | 誰が答えるか |
 | --- | --- | --- |
-| Python | `vw_bridge_status` / `vw_launch` / `vw_call` | Python サーバ自身（橋が無くても一覧に並ぶ） |
+| Python | `vw_bridge_status` / `vw_launch` / `vw_call` / `vw_lock_status` / `vw_lock_release` | Python サーバ自身（橋が無くても一覧に並ぶ） |
 | 読む | `vw_ping` / `vw_layers` / `vw_classes` / `vw_layer_objects` / `vw_object_counts` / `vw_log` / `vw_test_report` | 本体がその場で。`vw_log`（**診断ログ**）と `vw_test_report`（**実機テストの報告**。[「実機テスト」](live-test/README.md)）はファイルから読むので、本体を入れ替えたあとも読める |
-| 長く走る | `vw_run_test` | 本体。1 周が終わるまで戻らない（Vectorworks が居なければ Python 側が起動してから要求する。M40） |
+| 長く走る | `vw_run_test` / `vw_test_cleanup` | 本体。1 周（片付け）が終わるまで戻らない（`vw_run_test` は、Vectorworks が居なければ Python 側が起動してから要求する。M40。`vw_test_cleanup` は Python 側が占有を解くときに呼ぶ。M42） |
 | 殻に頼む | `vw_update` / `vw_restart` | 殻（本体は要求を引き取るだけ）。再起動は Python 側が橋の再接続まで見届ける |
 
 ## 決めごと
@@ -66,6 +66,17 @@
 - **新しく図面に書き込む道具を追加するなら**、undo の作法
   （[SDK リファレンス「Undo」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Undo.md)）を
   必ず通してください。`vw_run_test` が書くのは本番の取り込みと同じ経路（`draw/ImportRun`）だけです。
+- **複数のセッションの排他は Python サーバの占有で行います**（M42。`Lease`）。サーバは
+  Claude のセッションごとに 1 つ起動し、Vectorworks は 1 つしか起動できないので、**ブリッジへ
+  届く操作（プラグイン側の道具すべてと `vw_launch`）は占有しているセッションだけが送れます。**
+  他は要求をスプールへ書かずに断られ、`vw_lock_status` の `wait` で解放まで経過を購読します。
+  占有の状態は `<スプールの第 1 候補>.lease.json` で、読み書きは OS のファイルロックの中でだけ
+  行います。セッションを見分けられるのは Python 側だけなので、**プラグイン側には排他を
+  持たせません**（持たせると殻・本体・ABI が変わる）。占有なしで通すのは状況を調べる道具
+  （`vw_bridge_status`・`vw_lock_status`）と一覧の取得（`vw_tools`）だけです。**道具を
+  追加しても占有は自動でかかる**ので、Python 側は直しません。**占有を解くときは
+  `vw_test_cleanup` で実機テストを片付けます**（Python 側が呼ぶ。持ち主が片付けられずに
+  解かれたら、次に占有したセッションが自分の操作の前に 1 度だけ片付ける）。
 - **Vectorworks を起動するのは Python サーバ**（`vw_launch` と、`vw_run_test` の起動してから
   要求する経路。M40）で、プラグイン側には書きません（起動する前にはプラグインが居ない）。
 

@@ -24,9 +24,11 @@ using HomeskzIfcImport::core::pathIsInside;
 using HomeskzIfcImport::core::prepareBranchScratch;
 using HomeskzIfcImport::core::PrState;
 using HomeskzIfcImport::core::removeScratchDir;
+using HomeskzIfcImport::core::removeScratchDirs;
 using HomeskzIfcImport::core::ScratchCleanup;
 using HomeskzIfcImport::core::ScratchDir;
 using HomeskzIfcImport::core::scratchDirName;
+using HomeskzIfcImport::core::sessionScratchDirs;
 
 namespace
 {
@@ -347,6 +349,37 @@ TEST(clean_up_removes_only_branches_whose_pr_is_closed)
 	CHECK(note.find("claude/busy") != std::string::npos);
 	// 何もしなかった周は 1 行も増やさない。
 	CHECK(describeScratchCleanup(ScratchCleanup{}).empty());
+}
+
+TEST(session_scratch_dirs_picks_the_current_branch_and_the_folders_the_memory_points_into)
+{
+	// M42: 実機テストを終えるとき（MCP の占有を解くとき）に消すフォルダ。
+	const TempRoot temp("session");
+	const std::string current = prepareBranchScratch(temp.root(), "claude/current");
+	const std::string used = prepareBranchScratch(temp.root(), "claude/used");
+	const std::string other = prepareBranchScratch(temp.root(), "claude/other");
+	const std::vector<ScratchDir> dirs = listScratchDirs(temp.root());
+	const std::string templatePath = (fs::path(used) / "template-1.sta").string();
+
+	const std::vector<ScratchDir> chosen =
+		sessionScratchDirs(dirs, "claude/current", {templatePath});
+	CHECK_EQ(chosen.size(), static_cast<std::size_t>(2));
+	for (const ScratchDir& dir : chosen)
+		CHECK(dir.branch != "claude/other"); // 記憶と無関係なほかのブランチは選ばない
+
+	// どちらも空なら何も選ばない（全部消す方向へ倒れない）。
+	CHECK(sessionScratchDirs(dirs, "", {}).empty());
+	// 名前の頭が同じだけのフォルダを「中」と取り違えない。
+	CHECK(sessionScratchDirs(dirs, "", {other + "x/round-1-1.vwx"}).empty());
+
+	// 消すのは removeScratchDir の安全弁を通ったものだけ（開いている図面があれば残す）。
+	touch(fs::path(used) / ".template-1.sta.lck");
+	const ScratchCleanup result = removeScratchDirs(temp.root(), chosen);
+	CHECK(!fs::exists(current));
+	CHECK(fs::exists(used));
+	CHECK(fs::exists(other));
+	CHECK_EQ(result.removedBranches.size(), static_cast<std::size_t>(1));
+	CHECK_EQ(result.kept.size(), static_cast<std::size_t>(1));
 }
 
 TEST(path_is_inside_compares_whole_components)

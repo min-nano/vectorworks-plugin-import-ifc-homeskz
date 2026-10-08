@@ -234,12 +234,41 @@ namespace HomeskzIfcImport::core
 										 const std::vector<ScratchDir>& candidates,
 										 const std::map<std::string, PrState>& states)
 	{
-		ScratchCleanup result;
+		std::vector<ScratchDir> closed;
 		for (const ScratchDir& dir : candidates)
 		{
 			const auto found = states.find(dir.branch);
 			if (found == states.end() || found->second != PrState::Closed)
 				continue; // 開いている・分からない・PR が無い——どれも残す
+			closed.push_back(dir);
+		}
+		return removeScratchDirs(root, closed);
+	}
+
+	std::vector<ScratchDir> sessionScratchDirs(const std::vector<ScratchDir>& dirs,
+											   const std::string& branch,
+											   const std::vector<std::string>& usedPaths)
+	{
+		std::vector<ScratchDir> chosen;
+		for (const ScratchDir& dir : dirs)
+		{
+			const bool current = !branch.empty() && dir.branch == branch;
+			const bool used =
+				std::any_of(usedPaths.begin(), usedPaths.end(), [&dir](const std::string& path)
+							{ return pathIsInside(path, dir.path); });
+			if (current || used)
+				chosen.push_back(dir);
+		}
+		return chosen;
+		// 閉じ括弧は push_back が例外を投げたときの後始末（chosen の破棄）にしか通らず、
+		// テストでは通らない（gcov の "====="。parse/ShearWall.cpp と同じ）。
+	} // GCOVR_EXCL_LINE
+
+	ScratchCleanup removeScratchDirs(const std::string& root, const std::vector<ScratchDir>& dirs)
+	{
+		ScratchCleanup result;
+		for (const ScratchDir& dir : dirs)
+		{
 			std::string why;
 			if (removeScratchDir(root, dir, why))
 			{

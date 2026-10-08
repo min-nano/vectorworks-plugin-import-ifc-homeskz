@@ -6,7 +6,8 @@
 //
 //	【道具は 3 種類】（M38。Tool::kind）
 //	  * **読む**（Read）… 図面・診断ログ・報告を読むだけで、何も生成・変更しない。
-//	  * **長く走る**（Long）… `vw_run_test`。実機テストの 1 周（draw/Feedback.h）をこの場で
+//	  * **長く走る**（Long）… `vw_run_test` / `vw_test_cleanup`（M42。実機テストの図面を
+//	    閉じて一時ファイルを片付ける）。実機テストの 1 周（draw/Feedback.h）をこの場で
 //	    実行し、終わってから応答する。図面を書くのは**本番の取り込みと同じ経路**
 //	    （draw/ImportRun の runImportRound）だけで、undo の作法もそちらが持つ
 //	    （ImportUndoScope）。実行中は生存の印に `busy_until` を書いておく
@@ -446,6 +447,17 @@ namespace HomeskzIfcImport::draw
 			return value;
 		}
 
+		Json EndTestTool(const Json& /*args*/, std::string& /*error*/)
+		{
+			// **片付けられなかったこともエラーにしない**——何を残したかを message で返し、
+			// 占有を解く側（Python）がそのまま Claude へ見せる。
+			const TestCleanupResult cleanup = endTestSession();
+			Json value = Json::object();
+			value.set("done", Json::boolean(cleanup.done));
+			value.set("message", Json::string(cleanup.message));
+			return value;
+		}
+
 		// --- 道具の表 --------------------------------------------------------
 		//
 		// **道具を追加するときに変更するのはここ 1 行と、その実装 1 つだけ。** 一覧は
@@ -479,6 +491,7 @@ namespace HomeskzIfcImport::draw
 		// 長く走る道具・殻に頼む道具の待ち時間。実機テストは取り込みに 1 分以上、更新は
 		// ダウンロードを含む。
 		constexpr int kRunTestTimeoutSeconds = 1800;
+		constexpr int kEndTestTimeoutSeconds = 120;
 		constexpr int kUpdateTimeoutSeconds = 600;
 		constexpr int kRestartTimeoutSeconds = 60;
 
@@ -536,6 +549,13 @@ namespace HomeskzIfcImport::draw
 			 R"("template":{"type":"string","description":"テンプレート（.sta）の絶対パス（省略＝覚えたもの）"}},)"
 			 R"("additionalProperties":false})",
 			 &RunTestTool, ToolKind::Long, kRunTestTimeoutSeconds},
+			{"vw_test_cleanup",
+			 "実機テストを終える——実機テストが保存した図面を保存せずに閉じ、一時ファイル"
+			 "（テンプレートと各周の図面）・記憶・報告を消す。vw_lock_release が占有を解く"
+			 "ときに自動で呼ぶので、ふつうは直接呼ばない。次の周は ifc と template を渡して"
+			 "1 周目から始める。",
+			 R"({"type":"object","properties":{},"additionalProperties":false})", &EndTestTool,
+			 ToolKind::Long, kEndTestTimeoutSeconds},
 			{"vw_update",
 			 "開発版の新しいビルドを入れ、本体を読み直す（尋ねない）。既定はいま入っているのと"
 			 "同じブランチの最新。branch で別のブランチを名指しできる。殻まで変わったビルドは"

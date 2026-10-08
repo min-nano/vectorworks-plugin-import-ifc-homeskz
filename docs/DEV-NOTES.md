@@ -17,7 +17,7 @@ API・SDK 側の打ち切った調査）は、SDK リファレンスリポジト
   [`CLAUDE.md`](../CLAUDE.md)。
 
 **ソースコードのコメントにある `docs/DEV-NOTES.md M<数字>`** は、機能を積み上げていった
-当時のマイルストーン番号です。[実装の経緯（M0〜M41）](dev-notes/milestones/README.md)に
+当時のマイルストーン番号です。[実装の経緯（M0〜M42）](dev-notes/milestones/README.md)に
 対応表があり、ページのあるものは下の「実装の経緯」から番号で引けます。番号は**振り直さない**
 （既存のコメント・PR 本文が参照しているため）。`docs/DEV-NOTES.md「<節の名前>」` も、
 下の一覧の同じ名前のページ（小見出しはそのページの中）で参照できます。
@@ -45,9 +45,9 @@ API・SDK 側の打ち切った調査）は、SDK リファレンスリポジト
 | [描画の高速化（測って初めて場所が分かった）](dev-notes/draw-performance.md) | 予想と実測・何が重いか・`doRegen=false`・打ち切った候補 |
 | [残っている宿題](dev-notes/open-issues.md) | 未対応・未確認のもの |
 
-## 実装の経緯（M0〜M41）
+## 実装の経緯（M0〜M42）
 
-[対応表（M0〜M41 の要約）](dev-notes/milestones/README.md)と、ページのあるマイルストーン
+[対応表（M0〜M42 の要約）](dev-notes/milestones/README.md)と、ページのあるマイルストーン
 （番号順）。いくつかは長いのでフォルダに分けてあり、`README.md` から読み始めます。
 
 | # | ページ |
@@ -80,6 +80,7 @@ API・SDK 側の打ち切った調査）は、SDK リファレンスリポジト
 | M39 | [実機テストは毎周テンプレートから描き、自分の図面は保存せずに閉じる（M39）](dev-notes/milestones/m39-test-from-template.md) |
 | M40 | [実機テストの 1 周目を MCP から尋ねずに始める（M40）](dev-notes/milestones/m40-auto-first-round.md) |
 | M41 | [MCP ブリッジの受け付けを殻の OS タイマーへ移す（M41）](dev-notes/milestones/m41-bridge-os-timer.md) |
+| M42 | [複数のセッションからの MCP の呼び出しを占有で排他する（M42）](dev-notes/milestones/m42-bridge-lease.md) |
 
 表に無い番号（M10 を除く M0〜M16・M18・M20）は[対応表](dev-notes/milestones/README.md)の
 要約だけで、決め事として残したもの（M15 / M19 の診断・M18 の用紙の割り付け・M20 の
