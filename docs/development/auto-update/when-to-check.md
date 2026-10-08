@@ -13,7 +13,6 @@
 | --- | --- | --- |
 | メニューコマンド「アップデータを確認」（`src/Extensions/ExtUpdateMenu.cpp`） | `Manual` | 尋ねて入れる。**結末を必ず伝える**（最新です／確認できませんでした） |
 | 取り込みコマンドの頭（`src/Extensions/ExtMenu.cpp`） | `Silent` | 更新があるときだけ尋ねる。**無ければ黙って取り込みへ進む**。入れたあとも、殻まで変わって再起動を後にしたときも取り込みへ進み、止めるのは入れられなかったときだけ（`src/UpdaterHost.h` の戻り値）。実機テストの分岐は持たない（M25） |
-| 実機テストの頭（`src/Extensions/ExtTestMenu.cpp`。**dev だけ**） | `Silent` | 同上 |
 | MCP の `vw_update`（`src/Extensions/ExtMcpPalette.cpp` → `src/UpdaterFlow.cpp` の `RemoteDevUpdateWith`。**dev だけ**。M38） | — | **ダイアログを 1 枚も出さず、結末を値で返す**（ローカルの Claude Code がそれを読む）。再起動は頼まれたときだけ |
 
 **「いま入っているビルド」はどの入口もディスクで判定します**（`q-dev` の `installed=` /

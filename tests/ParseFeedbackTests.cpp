@@ -6,8 +6,7 @@
 //	対象外で、ここで確かめるのは**組み上がった Markdown**と周の結末の文言だけ。
 //
 //	検証項目（docs/DEV-NOTES.md M23 / M38）:
-//	  * 内訳の 1 行表現と、その差分（周どうしの比較）
-//	  * 図面の状態の 1 行（1 周目に基準を採る・戻っていたか）
+//	  * 図面の状態の 1 行（取り込み前から在ったレイヤの枚数。周どうしの比較は読む側。M43）
 //	  * **伏せない**——ファイル名をそのまま示し、PR 向けの目印や依頼を持ち込まない（M38）
 //	  * 注意・ログが本文に載ること、所見は載らないこと、上限で（文字境界で）切り詰めること
 //	  * 周の結末（formatTestRoundResult）の文言
@@ -21,7 +20,6 @@
 
 #include <cstddef>
 #include <string>
-#include <vector>
 
 using namespace HomeskzIfcImport::parse;
 using HomeskzIfcImport::core::Document;
@@ -62,7 +60,6 @@ namespace
 		round.bytes = 3ULL * 1024ULL * 1024ULL;
 		round.seconds = 12.25;
 		round.startedAt = "2026-09-05 14:03:21";
-		round.round = 1;
 		return round;
 	}
 
@@ -73,62 +70,15 @@ namespace
 } // namespace
 
 // ---------------------------------------------------------------------------
-// 内訳の 1 行表現と差分
-// ---------------------------------------------------------------------------
-
-TEST(feedback_tally_lists_only_elements_with_commands)
-{
-	// 命令の無い要素は載せない（無い物の 0 を並べても差分の役に立たない）。
-	const std::string tally = formatTally(elementRows(sampleDocument(), sampleCounts()));
-	CHECK_EQ(tally, std::string("横架材:4/4,柱:2/2"));
-}
-
-TEST(feedback_tally_diff_reports_only_changes)
-{
-	const std::string diff = formatTallyDiff("横架材:2/4,柱:2/2", "横架材:4/4,柱:2/2");
-	CHECK(contains(diff, "横架材: 2/4 → 4/4"));
-	CHECK(!contains(diff, "柱")); // 変わっていない行は出さない
-}
-
-TEST(feedback_tally_diff_is_empty_when_nothing_moved)
-{
-	CHECK(formatTallyDiff("横架材:4/4", "横架材:4/4").empty());
-}
-
-TEST(feedback_tally_diff_reports_appearing_and_vanishing_elements)
-{
-	// 要素が丸ごと消えるのはたいてい退行なので、必ず出す。
-	const std::string diff = formatTallyDiff("横架材:4/4,耐力壁:3/3", "横架材:4/4,通り芯:8/8");
-	CHECK(contains(diff, "通り芯: （前回は無し）→ 8/8"));
-	CHECK(contains(diff, "耐力壁: 3/3 → （今回は命令なし）"));
-}
-
-TEST(feedback_tally_diff_without_previous_is_empty)
-{
-	// 1 周目は比較対象が無い（節ごと出さないので空でよい）。
-	CHECK(formatTallyDiff("", "横架材:4/4").empty());
-}
-
-TEST(feedback_tally_diff_ignores_broken_entries)
-{
-	// 壊れた記憶を読んでも異常終了・中断しない。区切りの無い項目・数字でない数・
-	// 名前の無い項目は、どれも通知せずにスキップする。
-	const std::string diff =
-		formatTallyDiff("こわれた,柱:x/2,:3/3,横架材:2/4,梁:4/y", "横架材:4/4");
-	CHECK(contains(diff, "横架材: 2/4 → 4/4"));
-	CHECK(!contains(diff, "柱"));
-	CHECK(!contains(diff, "梁"));
-}
-
-// ---------------------------------------------------------------------------
 // 匿名化
 // ---------------------------------------------------------------------------
 
-TEST(test_report_starts_with_the_round_and_build)
+TEST(test_report_starts_with_the_build)
 {
 	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), sampleCounts());
-	// 見出しで「何周目・どのビルド」を示す。
-	CHECK(body.starts_with("## 実機テスト round 1 — `min-nano_structureDev` a1b2c3d"));
+	// 見出しで「どのビルド」かを示す。**前の周と比べない**（M43）ので周の番号も差分も無い。
+	CHECK(body.starts_with("## 実機テスト — `min-nano_structureDev` a1b2c3d"));
+	CHECK(!contains(body, "前の周"));
 	CHECK(contains(body, "claude/feedback"));
 	CHECK(contains(body, "**結果: 成功**"));
 	CHECK(contains(body, "| 横架材 | 4 / 4 本 |"));
@@ -140,26 +90,6 @@ TEST(feedback_comment_does_not_carry_the_human_note)
 	// 直接書く——プラグインは所見を訊く仕組みを持たない（docs/DEV-NOTES.md M23）。
 	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), sampleCounts());
 	CHECK(!contains(body, "所見"));
-}
-
-TEST(feedback_comment_shows_the_diff_from_the_previous_round)
-{
-	FeedbackRound round = sampleRound();
-	round.round = 2;
-	round.previousCommit = "9f8e7d6";
-	round.previousTally = "横架材:2/4,柱:2/2";
-	const std::string body = formatTestRoundReport(round, sampleDocument(), sampleCounts());
-	CHECK(contains(body, "前の周（round 1 / 9f8e7d6）からの変化"));
-	CHECK(contains(body, "横架材: 2/4 → 4/4"));
-}
-
-TEST(feedback_comment_says_when_nothing_changed)
-{
-	FeedbackRound round = sampleRound();
-	round.round = 2;
-	round.previousTally = "横架材:4/4,柱:2/2";
-	const std::string body = formatTestRoundReport(round, sampleDocument(), sampleCounts());
-	CHECK(contains(body, "内訳に変化はありません"));
 }
 
 TEST(feedback_comment_shows_the_size_in_kb_or_nothing)
@@ -190,68 +120,25 @@ TEST(feedback_comment_says_when_there_are_no_commands)
 	CHECK(contains(body, "対象なし"));
 }
 
-TEST(feedback_comment_takes_the_baseline_on_the_first_round)
+TEST(feedback_comment_counts_the_layers_that_were_there_before)
 {
-	// **1 周目は判定しない。** 図面のテンプレートに「共通」等が最初から在るのは普通なので、
-	// ここで「戻っていません」と書くと毎回の誤報になる——基準を採ったことだけを書く。
+	// **判定はしない。** 図面のテンプレートに「共通」等が最初から在るのは普通なので、
+	// 「戻っていません」と書くと毎回の誤報になる——枚数だけを書き、周どうしの比較は報告を
+	// 読む側に任せる（M43）。
 	DrawCounts counts = sampleCounts();
 	counts.existingLayers = {"共通"};
-	FeedbackRound first = sampleRound();
-	first.baselineKnown = false;
-	const std::string body = formatTestRoundReport(first, sampleDocument(), counts);
+	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), counts);
 	CHECK(contains(body, "図面の状態:"));
 	CHECK(contains(body, "取り込み前から在ったレイヤ 1 枚"));
-	CHECK(contains(body, "基準にします"));
-	CHECK(!contains(body, "重ねて描きました"));
+	// レイヤの名前そのものは載せない（顔ぶれは診断ログにある）。
+	CHECK(!contains(body, "図面の状態: 共通"));
 }
 
-TEST(feedback_comment_says_the_drawing_was_restored_when_it_matches_the_baseline)
-{
-	// テンプレートのレイヤが基準どおりに在るだけ＝取り込み前へ戻してある。
-	DrawCounts counts = sampleCounts();
-	counts.existingLayers = {"共通"};
-	FeedbackRound later = sampleRound();
-	later.baselineKnown = true;
-	later.baselineLayers = {"共通"};
-	const std::string body = formatTestRoundReport(later, sampleDocument(), counts);
-	CHECK(contains(body, "取り込み前の状態へ戻してから実行されています"));
-	CHECK(contains(body, "1 周目と同じ 1 枚"));
-}
-
-TEST(feedback_comment_flags_a_drawing_that_was_not_restored)
-{
-	// 基準に無いレイヤ（前の周が作ったもの）へも描画している＝戻していない。
-	DrawCounts counts = sampleCounts();
-	counts.existingLayers = {"共通", "1-FL", "2-FL"};
-	FeedbackRound later = sampleRound();
-	later.baselineKnown = true;
-	later.baselineLayers = {"共通"};
-	const std::string body = formatTestRoundReport(later, sampleDocument(), counts);
-	CHECK(contains(body, "前の周の図が残ったまま重ねて描きました"));
-	CHECK(contains(body, "レイヤ 2 枚"));
-	CHECK(contains(body, "実装のせいにしないでください"));
-}
-
-TEST(feedback_comment_notices_a_different_drawing)
-{
-	// 基準にあったものが無い＝別の図面か、テンプレートが変わった。**戻し忘れとは報告しない。**
-	DrawCounts counts = sampleCounts();
-	counts.existingLayers.clear();
-	FeedbackRound later = sampleRound();
-	later.baselineKnown = true;
-	later.baselineLayers = {"共通"};
-	const std::string body = formatTestRoundReport(later, sampleDocument(), counts);
-	CHECK(contains(body, "見当たりません"));
-	CHECK(!contains(body, "重ねて描きました"));
-}
-
-TEST(feedback_comment_handles_a_first_round_on_an_empty_drawing)
+TEST(feedback_comment_handles_an_empty_drawing)
 {
 	DrawCounts counts = sampleCounts();
 	counts.existingLayers.clear();
-	FeedbackRound first = sampleRound();
-	first.baselineKnown = false;
-	const std::string body = formatTestRoundReport(first, sampleDocument(), counts);
+	const std::string body = formatTestRoundReport(sampleRound(), sampleDocument(), counts);
 	CHECK(contains(body, "まっさらな図面から取り込みました"));
 }
 
@@ -293,10 +180,9 @@ TEST(feedback_comment_trims_an_oversized_log)
 
 TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
 {
-	const std::string done =
-		formatTestRoundResult(TestRoundOutcome::Completed, "round 3（a1b2c3d）");
+	const std::string done = formatTestRoundResult(TestRoundOutcome::Completed, "a1b2c3d");
 	CHECK(contains(done, "実機テストを終えました"));
-	CHECK(contains(done, "round 3（a1b2c3d）"));
+	CHECK(contains(done, "a1b2c3d"));
 
 	const std::string failed = formatTestRoundResult(TestRoundOutcome::ImportFailed, {});
 	CHECK(contains(failed, "取り込みがエラーで中断しました"));
@@ -317,24 +203,9 @@ TEST(test_round_result_speaks_for_itself_not_for_the_import_command)
 	CHECK(contains(document, "準備: 開き直せませんでした"));
 }
 
-TEST(test_round_result_says_how_to_start_the_first_round)
-{
-	// **名指しの無い MCP の周から 1 周目は開始できない**。何をすれば続けられるかを、Claude が
-	// そのまま使える形で示す——IFC とテンプレートを名指しして依頼し直す（M40）か、人が
-	// メニューから選ぶか。
-	const std::string text = formatTestRoundResult(TestRoundOutcome::NotRemembered, {});
-	CHECK(contains(text, "1 周目がまだ済んでいません"));
-	CHECK(contains(text, "ifc"));
-	CHECK(contains(text, "tests/fixtures/Default.sta"));
-	CHECK(contains(text, "「実機テストを実行…」"));
-	// 理由があれば添える（テンプレートの記憶が無い等）。
-	const std::string why = formatTestRoundResult(TestRoundOutcome::NotRemembered, "（理由）");
-	CHECK(contains(why, "（理由）"));
-}
-
 TEST(test_round_result_rejects_an_unusable_request_without_drawing)
 {
-	// **依頼された IFC・テンプレートを使えない**（M40）。何も描画していないことを明示し、
+	// **依頼された IFC・テンプレート・settings を使えない**（M40 / M43）。何も描画していないことを明示し、
 	// 使えなかった理由を添える。
 	const std::string text =
 		formatTestRoundResult(TestRoundOutcome::InvalidRequest, "IFC が見つかりません（/x.ifc）");
@@ -411,7 +282,7 @@ TEST(feedback_comment_shows_what_the_round_did_to_the_drawing_before_importing)
 						"図面を開きました（/tmp/homeskz-test/main/template-1.sta）";
 	const std::string body = formatTestRoundReport(round, sampleDocument(), sampleCounts());
 	CHECK(contains(body, "準備: 前の周の図面 1 枚を保存せずに閉じました"));
-	// 空なら 1 行も増やさない（1 周目や古い版の記憶）。
+	// 空なら 1 行も増やさない。
 	round.preparation.clear();
 	CHECK(!contains(formatTestRoundReport(round, sampleDocument(), sampleCounts()), "準備:"));
 }

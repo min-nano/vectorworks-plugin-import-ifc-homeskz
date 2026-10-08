@@ -3,7 +3,8 @@
 //
 //	**本体（ペイロード）の入口。** ここが持っているのは「殻から呼ばれたものを、中の実装へ
 //	取り次ぐ」処理だけ。実処理は draw::runImportCommand（本番の取り込み）・
-//	draw::runTestRound（実機テスト。M25）と draw::recalculate*（PIO のリセット）にある。
+//	draw::serveMcpBridge（MCP ブリッジ。実機テストの draw::runTestRound もこの中から
+//	呼ばれる）と draw::recalculate*（PIO のリセット）にある。
 //	メニュー・PIO の登録と自動アップデートは殻の側（そちらはめったに変わらない＝再起動も
 //	めったに要らない）。
 //
@@ -156,25 +157,9 @@ VW_PAYLOAD_EXPORT int vw_payload_run_import()
 			return kVwPayloadErrNotInit;
 		// 取り込みは自分の中で例外を捕捉し、ユーザーへはダイアログで表示する
 		// （draw/ImportRun.cpp）。ここは**境界の最後の防御**として、そこで漏れたものを
-		// 捕捉するだけ。**実機テストのことは何も返さない**——それは vw_payload_run_test の
-		// 役割である（M25。src/PayloadAbi.h）。
+		// 捕捉するだけ。**実機テストのことは何も知らない**——実機テストは MCP の
+		// `vw_run_test`（vw_payload_mcp_serve の中）だけが起こす（M25 / M43）。
 		draw::runImportCommand();
-		return kVwPayloadOk;
-	}
-	catch (...)
-	{
-		return kVwPayloadErrException;
-	}
-}
-
-VW_PAYLOAD_EXPORT int vw_payload_run_test(int allowDialogs)
-{
-	try
-	{
-		if (!gPayloadReady || gSDK == nil)
-			return kVwPayloadErrNotInit;
-		// **実機テストを知っているのは本体のここだけ**（src/draw/Feedback.h の runTestRound）。
-		(void)draw::runTestRound(allowDialogs != 0);
 		return kVwPayloadOk;
 	}
 	catch (...)

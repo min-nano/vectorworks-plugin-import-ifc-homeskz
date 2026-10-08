@@ -69,7 +69,9 @@
 //   7 … PR への自動投稿と自動の入れ替えを削除し、MCP から更新・再起動を要求できるように
 //       した（M38）。loop_status / loop_end を削除し、run_test は outActive を持たなくなり、
 //       mcp_serve は殻が済ませた頼みごとの結末（shellReport）を受け取るようになった
-#define VW_PAYLOAD_ABI_VERSION 7u
+//   8 … メニュー「実機テストを実行…」を削除した（M43）。run_test を削除し、実機テストは
+//       MCP の `vw_run_test`（mcp_serve の中）だけになった
+#define VW_PAYLOAD_ABI_VERSION 8u
 
 // 本体側の export 指定。Windows は明示しないと DLL の外から見えない。
 #if defined(_WIN32)
@@ -137,7 +139,6 @@ extern "C"
 #define VW_PAYLOAD_SYM_INIT "vw_payload_init"
 #define VW_PAYLOAD_SYM_INFO "vw_payload_info"
 #define VW_PAYLOAD_SYM_IMPORT "vw_payload_run_import"
-#define VW_PAYLOAD_SYM_TEST "vw_payload_run_test"
 #define VW_PAYLOAD_SYM_MCP_SERVE "vw_payload_mcp_serve"
 #define VW_PAYLOAD_SYM_RECALC "vw_payload_recalculate"
 #define VW_PAYLOAD_SYM_SHUTDOWN "vw_payload_shutdown"
@@ -150,16 +151,6 @@ extern "C"
 	// ダイアログ）。M25 で往復の処理を取り除いたので、返すものは「呼べたか」だけになった
 	// （src/draw/ImportCommand.h）。
 	using VwPayloadRunImportFn = int (*)();
-
-	// **実機テストの 1 周**（M25。dev だけ。src/draw/Feedback.h の runTestRound）。
-	// 実機テスト（記憶した条件で図面を戻して取り込み直し、結果を手元に控える）を知って
-	// いるのはこちらだけで、上の取り込みコマンドはそれを知らない。
-	//
-	//   allowDialogs … 0 以外ならダイアログを出してよい（メニューから実行したとき）。
-	//
-	// MCP の `vw_run_test` はこの関数を通らない——橋の受け付け（下の mcp_serve）の中で
-	// 本体が自分で同じ周を走らせる。
-	using VwPayloadRunTestFn = int (*)(int allowDialogs);
 
 	// **MCP ブリッジの受け付け 1 回**（M30。src/draw/McpBridge.h）。置かれている要求を
 	// 処理して**すぐ戻る**——殻のパレット（src/Extensions/ExtMcpPalette.h）の時計が数百 ms

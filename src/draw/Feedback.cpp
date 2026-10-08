@@ -7,12 +7,11 @@
 //
 //	**ネットワークには一切アクセスしない**（M38）。
 //
-//	【尋ねるのは取り込みの前だけ】ダイアログを出してよいのは取り込みが始まる前だけで、
-//	終わったあとは**何も出さない**（失敗したときを除く）。取り込みは 1 分以上かかるので、
-//	終わったところに確認が待っていると席を離れられない（docs/DEV-NOTES.md M23
-//	「取り込みのあとに人の操作を残さない」）。
+//	【ダイアログを 1 枚も出さない】周を起こすのは MCP の `vw_run_test` だけで、誰も操作して
+//	いない Vectorworks を止めないため。失敗も結末の文言で返す（M43 でメニューの入口を
+//	削除するまでは、人が押した周だけダイアログで尋ね・伝えていた）。
 //
-//	【SDK 依存】PluginPrefix.h（VectorWorks SDK）と VWFC のダイアログを include する。
+//	【SDK 依存】PluginPrefix.h（VectorWorks SDK）を include する。
 //
 
 #include "PluginPrefix.h"
@@ -27,8 +26,6 @@
 #include "draw/DrawUtil.h"
 #include "draw/HostServices.h"
 #include "draw/ImportRun.h"
-#include "draw/ResultDialog.h"
-#include "draw/SectionPickDialog.h"
 #include "draw/SettingsDialog.h"
 #include "parse/BuildDocument.h"
 #include "parse/Feedback.h"
@@ -50,21 +47,16 @@ namespace HomeskzIfcImport::draw
 {
 	namespace
 	{
-		// **実機テストの結果ダイアログのタイトル。** 本番の取り込み（「ホームズ君 IFC
-		// 取り込み」。draw/ImportCommand.cpp）と**必ず違う名前にする**——同じにすると、
-		// 実機テストの結果を本番の取り込みが報告しているように見える（実機の指摘。M25）。
-		constexpr const char* kTestResultTitle = "実機テスト (みんなの構造設計支援Dev)";
-
 		// **周ごとに、テンプレートから開いた新しい図面へ描画する**（M39）。
 		//
-		// 1 周目に、そのとき開いている図面を一時ファイルの置き場へ**テンプレート（`.sta`）
-		// として別名保存**し、以後の周は毎回それを `OpenDocumentPath` で開く。`.sta` を渡すと
+		// テンプレートは周ごとに `vw_run_test` の `template` で渡される（M43）。それを
+		// `OpenDocumentPath` で開く。`.sta` を渡すと
 		// **そのファイル自体ではなく、中身を複製した無題の新規文書**が開く（[SDK リファレンス
 		// 「Documents」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Documents.md)）
 		// ので、テンプレートには前の周の描画結果が 1 つも書き戻らず、どの周もまったく同じ
 		// 初期状態から始まる。
 		//
-		// **自分で保存した図面は記憶しておき、次の周の頭で保存せずに閉じる**
+		// **自分で保存した図面は記録しておき、次の周の頭で保存せずに閉じる**
 		// （core::FeedbackSession::ownedDocuments）。閉じる相手は core::isOwnedTestDocument
 		// が 1 か所で絞る（CLAUDE.md「開発の基本方針」8）——`CloseDocument()` は確認なしに
 		// 未保存の変更を捨てる（同 Findings）。各周の描画結果は周の終わりに一時ファイルへ
@@ -228,9 +220,7 @@ namespace HomeskzIfcImport::draw
 		// 問い合わせの対象にしない（使っている最中）。ほかのブランチが 1 つも無ければ GitHub へも
 		// 問い合わせない——毎周の問い合わせで API の上限を消費しないため。
 		//
-		// 消したフォルダに記憶のテンプレートがあったら、記憶から削除する（無いファイルを
-		// 開きに行かせない）。次のメニューの周は 1 周目と同じく、いま開いている図面から採る
-		// （MCP の周は template を渡さないと実行されない。core::feedbackRoundKind）。
+		// 消したフォルダにあった図面は、閉じる相手の記録から削除する。
 		std::string CleanUpClosedBranches(core::FeedbackSession& session, const std::string& branch)
 		{
 			const std::string root = TempPath(core::kScratchRootName);
@@ -258,8 +248,6 @@ namespace HomeskzIfcImport::draw
 				core::cleanUpClosedBranches(root, others, core::parsePrStates(out));
 			for (const std::string& removed : cleanup.removedPaths)
 			{
-				if (core::pathIsInside(session.templatePath, removed))
-					session.templatePath.clear();
 				std::erase_if(session.ownedDocuments, [&removed](const std::string& doc)
 							  { return core::pathIsInside(doc, removed); });
 			}
@@ -281,7 +269,7 @@ namespace HomeskzIfcImport::draw
 		// **自分で保存した図面のうち、いま開いているものを保存せずに閉じる**（M39）。
 		// 戻り値は報告へ出す 1 行（閉じるものが無ければ空）。
 		//
-		// 閉じる相手は core::isOwnedTestDocument が絞る（記憶に名前が在り、一時ファイルの
+		// 閉じる相手は core::isOwnedTestDocument が絞る（記録に名前が在り、一時ファイルの
 		// 置き場の中にあるものだけ）。**切り替えたあとにもう一度確かめる**——
 		// SwitchToOpenFile が別の図面をアクティブにしたまま CloseDocument を呼ぶと、
 		// 利用者の図面の変更を確認なしに捨ててしまう。
@@ -289,14 +277,14 @@ namespace HomeskzIfcImport::draw
 		// **`CloseDocument` の戻り値で判定しない。** 閉じていても false を返す（実機 round 9
 		// と SDK リファレンス「Documents」）。閉じたかは開いている図面の一覧を読み戻して確認する。
 		//
-		// 閉じ終えたら、記憶から「もう開いていないもの」を削除する（再起動で閉じたものも含めて）。
-		// 閉じられずに開いたまま残ったものは記憶に残し、次の周でもう一度試す。
+		// 閉じ終えたら、記録から「もう開いていないもの」を削除する（再起動で閉じたものも含めて）。
+		// 閉じられずに開いたまま残ったものは記録に残し、次の周でもう一度試す。
 		std::string CloseOwnedDocuments(core::FeedbackSession& session)
 		{
 			const std::string root = TempPath(core::kScratchRootName);
 			std::size_t closed = 0;
 			std::vector<std::string> failed;
-			// 1 つ閉じるたびに一覧を取得し直す。上限は無限ループ防止のためだけ（記憶の数より
+			// 1 つ閉じるたびに一覧を取得し直す。上限は無限ループ防止のためだけ（記録の数より
 			// 多くは回らない）。
 			for (std::size_t guard = 0; guard <= session.ownedDocuments.size(); ++guard)
 			{
@@ -352,101 +340,34 @@ namespace HomeskzIfcImport::draw
 			Abort,
 		};
 
-		// **テンプレートを採る**（1 周目と、人が別の図面へ移ってから押した周）。いま開いて
-		// いる図面を一時ファイルの置き場へ `.sta` で別名保存する。成功したら true。
-		//
-		// 別名保存すると**その文書自身がテンプレートのファイルになる**（同じパスはもう一度は
-		// 開けない。SDK リファレンス「Documents」）。この文書は自分の図面として記憶し、すぐ
-		// あとの CloseOwnedDocuments で閉じる——保存した直後なので失うものは無い。元の
-		// 図面のファイルには何も書き戻らない。
-		bool CaptureTemplate(core::FeedbackSession& session, std::string& note)
-		{
-			const std::string root = TempPath(core::kScratchRootName);
-			const std::string active = ActiveDocumentPath();
-			if (OpenDocuments().empty() || active.empty())
-			{
-				note = "開いている図面が無いので、テンプレートを採れませんでした";
-				return false;
-			}
-			// **前の周の描画結果をテンプレートにしない**——以後の周がずっと前の周の描画結果
-			// の上から始まる（M25 の実機 round 13 で、前の周の描画が残った図面が基準として
-			// 固定された）。
-			if (core::isOwnedTestDocument(session, active, root))
-			{
-				note = "いま開いているのは前の周の図面（" + active +
-					   "）なので、テンプレートには採りませんでした";
-				return false;
-			}
-
-			const std::string path = FreshTempPath("template", ".sta");
-			if (!SaveActiveDocumentAs(path))
-			{
-				// **失敗の詳細を残す**——何を保存しようとして失敗したのかが分からないと、次の
-				// 周も同じところで止まる（実機 round 12）。
-				note = "テンプレートを保存できませんでした（" +
-					   (path.empty() ? std::string("一時ディレクトリが引けません") : path) +
-					   " / いまの図面は " + active + "）";
-				return false;
-			}
-			session.templatePath = path;
-			session.ownedDocuments.push_back(path);
-			// **基準も採り直す。** 次の報告がこの図面のレイヤ構成を基準として採り直す。別の
-			// 図面で採ったレイヤ構成と照合しても意味が無い（「基準に無いレイヤ」が出るだけで、
-			// 読む側を惑わせる）。
-			session.baselineRecorded = false;
-			session.baselineLayers.clear();
-			note = "いま開いている図面（" + active + "）をテンプレートとして保存しました（" + path +
-				   "）。元の図面のファイルは変わっていません";
-			return true;
-		}
-
-		// **指定されたテンプレートを記憶する**（M40。MCP の `vw_run_test` の `template`）。
-		// 成功したら true。一時ファイルの置き場へ**複製してから**記憶する——渡されるのは
-		// リポジトリの tests/fixtures/Default.sta で、ワークツリーが消えると続きの周が開く
-		// ものを失う。複製したものは開かないので自分の図面（ownedDocuments）には入れない。
-		bool InstallTemplate(core::FeedbackSession& session, const std::string& source,
-							 std::string& note)
+		// **MCP に渡されたテンプレートを使えるか**（M40）。使えなければ理由を note に入れて
+		// false。**写さずにそのまま開く**——`.sta` を開くと中身を複製した無題の新規文書が
+		// 開き、ファイルそのものには何も書き戻らない（SDK リファレンス「Documents」）。
+		// M42 までは記憶して続きの周でも開くために一時ファイルの置き場へ写していたが、
+		// テンプレートは毎周渡されるようになった（M43）。
+		bool CheckTemplate(const std::string& path, std::string& note)
 		{
 			// `.sta` 以外を `OpenDocumentPath` へ渡すと**そのファイル自体**が開き、そこへ
 			// 描画することになる（SDK リファレンス「Documents」）。先に除外して理由を返す。
-			const std::string::size_type dot = source.find_last_of('.');
-			if (dot == std::string::npos || source.substr(dot) != ".sta")
+			const std::string::size_type dot = path.find_last_of('.');
+			if (dot == std::string::npos || path.substr(dot) != ".sta")
 			{
-				note = "テンプレートには .sta を渡してください（" + source + "）";
+				note = "テンプレートには .sta を渡してください（" + path + "）";
 				return false;
 			}
-			if (!PathExists(source))
+			if (!PathExists(path))
 			{
-				note = "テンプレートが見つかりません（" + source + "）";
+				note = "テンプレートが見つかりません（" + path + "）";
 				return false;
 			}
-			const std::string path = FreshTempPath("template", ".sta");
-			std::error_code ec;
-			if (path.empty() ||
-				!std::filesystem::copy_file(std::filesystem::path(source),
-											std::filesystem::path(path), ec) ||
-				ec)
-			{
-				note = "テンプレートを一時ファイルの置き場へ写せませんでした（" + source + " → " +
-					   (path.empty() ? std::string("一時ディレクトリが引けません") : path) + "）";
-				return false;
-			}
-			session.templatePath = path;
-			// 基準は採り直す（CaptureTemplate と同じ理由）。
-			session.baselineRecorded = false;
-			session.baselineLayers.clear();
-			note = "テンプレート " + source + " を " + path + " へ写して使います";
 			return true;
 		}
 
 		// **この周の図面を用意する。** note には診断ログと報告へ出す 1 行が入る。
-		// rebased は「テンプレートを採り直した」ときにその理由（runTestRound が作る）。
-		RoundDocument openRoundDocument(core::FeedbackSession& session, const std::string& rebased,
-										std::string& note)
+		RoundDocument openRoundDocument(core::FeedbackSession& session,
+										const std::string& templatePath, std::string& note)
 		{
 			std::vector<std::string> parts;
-			if (!rebased.empty())
-				parts.push_back(rebased);
 			const auto joined = [&parts]()
 			{
 				std::string text;
@@ -455,37 +376,22 @@ namespace HomeskzIfcImport::draw
 				return text;
 			};
 
-			if (session.templatePath.empty())
-			{
-				std::string captured;
-				const bool ok = CaptureTemplate(session, captured);
-				parts.push_back(captured);
-				if (!ok)
-				{
-					note = joined();
-					return RoundDocument::Abort;
-				}
-			}
-
-			// **自分の図面を閉じる**（いま採ったテンプレートの文書も、前の周の描画結果も）。
-			// テンプレートのファイルが開いたままだと、それを開いて新しい図面を作れない。
+			// **自分の図面を閉じる**（前の周の描画結果）。
 			const std::string closed = CloseOwnedDocuments(session);
 			if (!closed.empty())
 				parts.push_back(closed);
 
-			if (!PathExists(session.templatePath))
+			if (!PathExists(templatePath))
 			{
-				// 次のメニューの周がいま開いている図面から採り直せるよう、記憶から削除する。
-				parts.push_back("テンプレートが見つかりません（" + session.templatePath + "）");
-				session.templatePath.clear();
+				parts.push_back("テンプレートが見つかりません（" + templatePath + "）");
 				note = joined();
 				return RoundDocument::Abort;
 			}
-			if (IsOpen(session.templatePath))
+			if (IsOpen(templatePath))
 			{
 				parts.push_back(
 					"テンプレートのファイルが開いたままなので、新しい図面を作れません（" +
-					session.templatePath + "）");
+					templatePath + "）");
 				note = joined();
 				return RoundDocument::Abort;
 			}
@@ -494,18 +400,16 @@ namespace HomeskzIfcImport::draw
 			// （SDK リファレンス「Documents」）。bShowErrorMessages=false: 誰も操作していない
 			// 周でダイアログを出さない。
 			const std::size_t before = OpenDocuments().size();
-			const VectorWorks::Filing::IFileIdentifierPtr fileID = FileIdFor(session.templatePath);
+			const VectorWorks::Filing::IFileIdentifierPtr fileID = FileIdFor(templatePath);
 			const bool returned = fileID && gSDK->OpenDocumentPath(fileID, false);
 			// **戻り値だけで判定しない**——開いたかどうかは一覧とカレント文書を読み戻して確かめる。
 			// 増えたのが 1 枚で、アクティブな図面が未保存（無題）なら、テンプレートから
 			// 開いた新しい図面である。
 			bool saved = true;
 			const std::string opened = ActiveDocumentPath(&saved);
-			if (OpenDocuments().size() == before + 1 && !saved &&
-				!SamePath(opened, session.templatePath))
+			if (OpenDocuments().size() == before + 1 && !saved && !SamePath(opened, templatePath))
 			{
-				parts.push_back("テンプレートから新しい図面を開きました（" + session.templatePath +
-								"）");
+				parts.push_back("テンプレートから新しい図面を開きました（" + templatePath + "）");
 				note = joined();
 				return RoundDocument::Ready;
 			}
@@ -525,16 +429,16 @@ namespace HomeskzIfcImport::draw
 			return RoundDocument::Abort;
 		}
 
-		// **描画結果を一時ファイルへ保存する**（M39）。保存した図面は自分の図面として記憶し、
+		// **描画結果を一時ファイルへ保存する**（M39）。保存した図面は自分の図面として記録し、
 		// 次の周の頭で閉じる。戻り値は報告へ出す 1 行。
 		//
 		// 取り込みが失敗・中止した周も呼ぶ——描画途中の図面も自分の図面であり、残すと
 		// 次の周で閉じられない。
 		//
 		// 保存しておけば未保存の変更が残らず、Vectorworks を再起動しても保存の確認が出ない。
-		std::string SaveRoundDocument(core::FeedbackSession& session, int round)
+		std::string SaveRoundDocument(core::FeedbackSession& session)
 		{
-			const std::string path = FreshTempPath("round-" + std::to_string(round), ".vwx");
+			const std::string path = FreshTempPath("round", ".vwx");
 			if (!SaveActiveDocumentAs(path))
 				return "描き上がりを一時ファイルへ保存できませんでした（" +
 					   (path.empty() ? std::string("一時ディレクトリが引けません") : path) +
@@ -544,69 +448,7 @@ namespace HomeskzIfcImport::draw
 			return "描き上がりを " + path + " へ保存しました（次の周の頭で閉じます）";
 		}
 
-		// **メニューから押した続きの周で、条件をどうするか。**
-		enum class Conditions
-		{
-			Same,	  // 前回と同じ IFC・設定で
-			Rechoose, // IFC と設定を選び直す（＝新しい 1 周目）
-			Cancel,	  // やめる
-		};
-
-		// **1 度だけ尋ねる。** いま続きの周を無人で実行するのは MCP の `vw_run_test` で、
-		// メニューを押すのは人だけ——その人が別の IFC や設定で試したいとき、記憶のファイルを
-		// 消す以外の手段が無いのでは困る。M37 までは続きの周を往復のパレットが実行していた
-		// ので、人が押す周も「何も尋ねない」に揃えていた。
-		Conditions AskConditions(const core::FeedbackSession& session)
-		{
-			// ファイル名は文字列のまま切り出す（std::filesystem::path は Windows で UTF-8 を
-			// ANSI として読み、日本語の名前が文字化けする）。
-			const std::string::size_type slash = session.ifcPath.find_last_of("/\\");
-			const std::string ifc =
-				slash == std::string::npos ? session.ifcPath : session.ifcPath.substr(slash + 1);
-			const std::string advice =
-				"前回（round " + std::to_string(session.round) + "）の IFC: " + ifc +
-				"\n前の周の図面は保存せずに閉じ、テンプレートから開いた新しい図面へ描きます。";
-			// AlertQuestion は 0 = 取り消し、1 = OK、2 / 3 = 追加のボタン A / B を返す
-			// （src/Updater.cpp の Ask と同じ作法）。
-			const short answer = gSDK->AlertQuestion(
-				"前回と同じ条件で実機テストを実行しますか？", advice.c_str(),
-				/*defaultButton*/ 1, "同じ条件で", "やめる", /*customButtonA*/ "選び直す",
-				/*customButtonB*/ "");
-			if (answer == 1)
-				return Conditions::Same;
-			if (answer == 2)
-				return Conditions::Rechoose;
-			return Conditions::Cancel;
-		}
-
-		// **1 周目の選択**（IFC → 取り込み設定 → 軸組図の通り。本番の取り込みと同じ順）。
-		// どれかで取り消されたら false。
-		bool ChooseConditions(std::string& ifcPath, core::ImportOptions& options,
-							  bool& settingsShown, std::string& settingsNote)
-		{
-			if (!chooseIfcFile(ifcPath))
-				return false;
-			options = core::ImportOptions{};
-			// 伏図のまとめ方の候補は取り込みの前に IFC を読んで集める（draw/ImportCommand と
-			// 同じ。draw/SettingsDialog.h）。
-			const draw::SettingsOutcome settings = draw::showImportSettings(
-				options, parse::scanPlanLevelChoices(ifcPath), &settingsNote);
-			if (settings == draw::SettingsOutcome::Cancelled)
-				return false;
-			settingsShown = settings == draw::SettingsOutcome::Accepted;
-			// M34 軸組図にする通りも**1 周目で**尋ね切る。選んだ結果は設定と一緒に記憶へ
-			// 入り、続きの周はそれを使う。
-			std::string pickNote;
-			const draw::SettingsOutcome pick = draw::showSectionPicker(
-				parse::buildSectionCandidates(ifcPath, options), options, &pickNote);
-			if (pick == draw::SettingsOutcome::Cancelled)
-				return false;
-			if (!pickNote.empty())
-				settingsNote += (settingsNote.empty() ? "" : " / ") + pickNote;
-			return true;
-		}
-
-		// 報告を書く（置き場所の親フォルダは記憶を書くときに用意済み）。書けたら true。
+		// 報告を書く。書けたら true。
 		bool WriteReport(const std::string& path, const std::string& report)
 		{
 			if (path.empty())
@@ -622,14 +464,11 @@ namespace HomeskzIfcImport::draw
 			return out.good();
 		}
 
-		// 失敗の結末を作る（メニューから押した周なら結果ダイアログでも伝える）。
-		TestRoundResult Failure(bool allowDialogs, parse::TestRoundOutcome outcome,
-								const std::string& detail)
+		// 失敗の結末を作る。
+		TestRoundResult Failure(parse::TestRoundOutcome outcome, const std::string& detail)
 		{
 			TestRoundResult result;
 			result.message = parse::formatTestRoundResult(outcome, detail);
-			if (allowDialogs)
-				(void)draw::showImportResult(kTestResultTitle, result.message, core::trace::text());
 			return result;
 		}
 	} // namespace
@@ -640,7 +479,7 @@ namespace HomeskzIfcImport::draw
 #ifdef VW_DEV_BUILD
 		return true;
 #else
-		// **安定版では動かさない。** 開発の道具（記憶した条件での無人の取り込み）を
+		// **安定版では動かさない。** 開発の道具（頼まれた条件での無人の取り込み）を
 		// 利用者向けの配布物に持たせない。
 		return false;
 #endif
@@ -664,12 +503,10 @@ namespace HomeskzIfcImport::draw
 
 		const std::string sessionPath = core::defaultFeedbackSessionPath();
 		core::FeedbackSession session;
-		(void)core::readFeedbackSession(sessionPath, session); // 読めなければ空の記憶
+		(void)core::readFeedbackSession(sessionPath, session); // 読めなければ空の記録
 		// **消すフォルダを選ぶ手掛かりは閉じる前に控える**——CloseOwnedDocuments は閉じた
-		// 図面を記憶から削除する。
-		std::vector<std::string> used = session.ownedDocuments;
-		if (!session.templatePath.empty())
-			used.push_back(session.templatePath);
+		// 図面を記録から削除する。
+		const std::vector<std::string> used = session.ownedDocuments;
 
 		std::vector<std::string> notes;
 		const std::string closed = CloseOwnedDocuments(session);
@@ -684,11 +521,11 @@ namespace HomeskzIfcImport::draw
 		};
 
 		// **閉じ残しがあれば何も消さない。** 開いている図面のファイルは removeScratchDir も
-		// 消さない（`*.lck`）が、記憶まで消すと次の周がその図面を閉じられなくなる。
+		// 消さない（`*.lck`）が、記録まで消すと次の周がその図面を閉じられなくなる。
 		if (!session.ownedDocuments.empty())
 		{
 			(void)core::writeFeedbackSession(sessionPath, session);
-			notes.emplace_back("閉じられない図面が残ったので、一時ファイルと記憶は残しました");
+			notes.emplace_back("閉じられない図面が残ったので、一時ファイルと記録は残しました");
 			result.message = joined();
 			return result;
 		}
@@ -711,133 +548,65 @@ namespace HomeskzIfcImport::draw
 			std::string note = "片付けなかった一時ファイル: ";
 			for (std::size_t i = 0; i < cleanup.kept.size(); ++i)
 				note += (i == 0 ? "" : " / ") + cleanup.kept[i];
-			notes.push_back(note + "。記憶は残しました");
+			notes.push_back(note + "。記録は残しました");
 			(void)core::writeFeedbackSession(sessionPath, session);
 			result.message = joined();
 			return result;
 		}
 
-		// **記憶と報告を消す。** 報告を残すと、次に使うセッションが前の周の報告を自分の
+		// **記録と報告を消す。** 報告を残すと、次に使うセッションが前の周の報告を自分の
 		// 結果として読みうる（M42 で占有を設けた理由と同じ）。
 		core::clearFeedbackSession(sessionPath);
 		core::clearFeedbackSession(core::testReportPathFor(sessionPath));
-		notes.emplace_back("実機テストの記憶と報告を消しました（次の周は 1 周目から）");
+		notes.emplace_back("実機テストの記録と報告を消しました");
 		result.done = true;
 		result.message = joined();
 		return result;
 	}
 
 	// -----------------------------------------------------------------------
-	// **実機テストの 1 周**（M25 / M38。draw/Feedback.h）。
-	TestRoundResult runTestRound(bool allowDialogs, const TestRoundRequest& request)
+	// **実機テストの 1 周**（M25 / M38 / M43。draw/Feedback.h）。
+	TestRoundResult runTestRound(const TestRoundRequest& request)
 	{
 		if (!feedbackAvailable())
 		{
-			// 押した人には伝える——何も表示されないと「壊れている」と受け取られる。
 			TestRoundResult result;
 			result.message = "実機テストは開発版（Dev）のビルドでのみ使えます。";
-			if (allowDialogs)
-				gSDK->AlertInform("実機テストは開発版でのみ使えます。",
-								  "開発版（Dev）のビルドで動きます。", false);
 			return result;
 		}
 
 		const parse::BuildInfo build = currentBuildInfo();
 		const std::string sessionPath = core::defaultFeedbackSessionPath();
 		core::FeedbackSession session;
-		(void)core::readFeedbackSession(sessionPath, session); // 読めなければ 1 周目
+		(void)core::readFeedbackSession(sessionPath, session); // 読めなければ閉じる相手が無い
 
-		// **片付けはテンプレートの採り直しより先に行う。** 記憶のテンプレートを消したなら、
-		// 下の判断はそれが無いものとして進む。
-		const std::string scratchNote = CleanUpClosedBranches(session, build.branch);
-
-		// **手動で押したときは、いま開いている図面からテンプレートを採り直す。** **記憶ごと
-		// 消さない**（IFC・設定はそのまま）——捨てるのは「どの図面から始めるか」だけ。
-		// いま開いているのが前の周の描画結果（自分の図面）なら続きの周で、図面が 1 枚も
-		// 開いていなければ採りようが無いので、記憶したテンプレートを使う。
-		// MCP の周はここへ来ない: そちらは前の周の続きなので、テンプレートから始めるのが正しい。
-		// 理由: 人が別の図面（空のテンプレート等）を開いてからメニューを押したのは「この図面で
-		// 試したい」という意思なのに、記憶したテンプレートを開くとその意思が警告なく無視
-		// される——実機で二度、空のテンプレートで試そうとして前の周の図面に上書きされた。
-		std::string rebased;
-		if (allowDialogs && !session.templatePath.empty() && !OpenDocuments().empty())
-		{
-			const std::string openPath = ActiveDocumentPath();
-			if (!core::isOwnedTestDocument(session, openPath, TempPath(core::kScratchRootName)))
-			{
-				rebased = "いま開いている図面（" +
-						  (openPath.empty() ? std::string("(取得できず)") : openPath) +
-						  "）は前の周の図面ではないので、こちらから新しいテンプレートを採りました";
-				session.templatePath.clear();
-			}
-		}
-
-		// **MCP が指定した条件を受け取る**（M40）。メニューの周は人が選ぶので参照しない。
-		// 使えない指定は、何も変えずに（記憶も書かずに）理由を返す。
-		const bool ifcRequested = !allowDialogs && !request.ifcPath.empty();
-		std::string requestNote;
-		if (ifcRequested && !PathExists(request.ifcPath))
-			return Failure(allowDialogs, parse::TestRoundOutcome::InvalidRequest,
+		// **条件は毎回渡してもらう**（M43。記憶しない）。使えない指定は、何も変えずに理由を
+		// 返す。
+		if (request.ifcPath.empty() || request.templatePath.empty())
+			return Failure(parse::TestRoundOutcome::InvalidRequest,
+						   "vw_run_test には ifc（取り込む IFC の絶対パス）と template"
+						   "（テンプレートの .sta の絶対パス。リポジトリの "
+						   "tests/fixtures/Default.sta）を毎回渡してください");
+		if (!PathExists(request.ifcPath))
+			return Failure(parse::TestRoundOutcome::InvalidRequest,
 						   "IFC が見つかりません（" + request.ifcPath + "）");
-		if (!allowDialogs && !request.templatePath.empty() &&
-			!InstallTemplate(session, request.templatePath, requestNote))
-			return Failure(allowDialogs, parse::TestRoundOutcome::InvalidRequest, requestNote);
+		std::string why;
+		if (!CheckTemplate(request.templatePath, why))
+			return Failure(parse::TestRoundOutcome::InvalidRequest, why);
+		// settings は図面を開く前に一度当ててみて、読めなければ図面に触れずに断る。
+		// 本当に当てるのは、図面にあるもので既定を組んだあと（下）。
+		core::ImportOptions probe;
+		if (!core::applyTestSettings(request.settings, probe, why))
+			return Failure(parse::TestRoundOutcome::InvalidRequest, why);
 
-		// **どの周になるかは無 SDK 側が決める**（core/FeedbackSession.h）。
-		const core::FeedbackRoundKind kind =
-			core::feedbackRoundKind(session, allowDialogs, ifcRequested);
-		if (kind == core::FeedbackRoundKind::Refuse)
-			return Failure(allowDialogs, parse::TestRoundOutcome::NotRemembered,
-						   core::feedbackSessionRemembered(session) || ifcRequested
-							   ? "（テンプレートの記憶がありません——M39 より前の版の記憶か、"
-								 "一時ファイルが片付けられた後です。template も渡してください）"
-							   : "");
-
-		// **尋ねずに始める 1 周目**（M40）。IFC は指定されたもの、設定は図面を用意して
-		// から組む（テンプレートから開いた図面にあるシンボルで決まるので、ここではまだ
-		// 決められない）。
-		const bool automatic = kind == core::FeedbackRoundKind::AutoFirstRound;
-		bool choose = kind == core::FeedbackRoundKind::FirstRound;
-		if (!choose && allowDialogs)
-		{
-			const Conditions conditions = AskConditions(session);
-			if (conditions == Conditions::Cancel)
-				return TestRoundResult{}; // やめた人に結末を重ねない
-			if (conditions == Conditions::Rechoose)
-				choose = true;
-		}
-
-		std::string ifcPath = automatic ? request.ifcPath : session.ifcPath;
-		core::ImportOptions options = session.options;
-		bool settingsShown = true;
-		std::string settingsNote;
-		if (choose && !ChooseConditions(ifcPath, options, settingsShown, settingsNote))
-			return TestRoundResult{};
-		if (choose || automatic)
-		{
-			// **選び直したら比較する相手も捨てる。** 別の IFC・設定の周と内訳を並べても
-			// 「直した結果どう動いたか」にならない。テンプレートと自分の図面の記憶は残す
-			// ——この周の図面を用意するのに要る。
-			session.round = 0;
-			session.lastCommit.clear();
-			session.lastTally.clear();
-			session.baselineRecorded = false;
-			session.baselineLayers.clear();
-		}
-		else
-		{
-			// **続きの周は何も出さない。** 1 周目の選択（ファイル・設定）をそのまま使う。
-			settingsNote = "前の周の設定をそのまま使いました（実機テストの続きの周）";
-		}
-		session.ifcPath = ifcPath;
-		session.options = options;
+		const std::string scratchNote = CleanUpClosedBranches(session, build.branch);
 
 		// **図面の用意は 1 回だけ呼び、その説明を 2 か所へ配る**——診断ログ（prologue）と
 		// 報告（FeedbackRound::preparation）。ログは上限で切り詰められるので、報告の側にも
 		// 置かないと読めない周が出る（実機 round 2 で実際に欠落した）。
 		std::string preparation;
 		const RoundDocument document =
-			openRoundDocument(session, requestNote.empty() ? rebased : requestNote, preparation);
+			openRoundDocument(session, request.templatePath, preparation);
 		// **「準備:」はここで 1 度だけ付ける。** 各部品がそれぞれ付けていた頃は、連結した
 		// 1 行に「準備:」が 2 度出ていた（PR #188 の実機確認）。
 		if (!preparation.empty())
@@ -846,87 +615,65 @@ namespace HomeskzIfcImport::draw
 			preparation += (preparation.empty() ? "" : "\n") + scratchNote;
 		if (document == RoundDocument::Abort)
 		{
-			// **描画先が無いなら取り込まない。** 記憶（テンプレートの場所・閉じ残した図面）は
-			// 書き残すので、直してからもう一度実行すれば続きの周として走る。
+			// **描画先が無いなら取り込まない。** 閉じ残した図面の記録は書き残す。
 			(void)core::writeFeedbackSession(sessionPath, session);
 			// 準備の行は結末の文言に載せる（ここではまだ取り込みのログを開いていないので、
 			// ログへは書けない）。
-			return Failure(allowDialogs, parse::TestRoundOutcome::DocumentFailed, preparation);
+			return Failure(parse::TestRoundOutcome::DocumentFailed, preparation);
 		}
-		if (automatic)
-		{
-			// **設定はテンプレートから開いた図面から組む**（draw::presetImportSettings。設定
-			// ダイアログをまだ一度も決めていないときの初期値と同じ）。集められなければ
-			// ImportOptions の既定で続ける——設定を組めないことを理由に周を中止しない
-			// （設定ダイアログを出せなかったときと同じ考え方。draw/SettingsDialog.h）。
-			std::string presetNote;
-			if (!presetImportSettings(options, &presetNote))
-				options = core::ImportOptions{};
-			settingsNote = "自動の 1 周目: ダイアログを出さず、テンプレートの図面にあるもので"
-						   "既定の設定を組みました";
-			if (!presetNote.empty())
-				settingsNote += "（" + presetNote + "）";
-			session.options = options;
-		}
-		const ImportRound round =
-			runImportRound(ifcPath, options, settingsShown, settingsNote, preparation);
-		// **描画結果は、成否にかかわらず保存して記憶する**（SaveRoundDocument）。
+		// **設定はテンプレートから開いた図面から組み、settings で上書きする**
+		// （draw::presetImportSettings。設定ダイアログをまだ一度も決めていないときの初期値と
+		// 同じ）。既定を集められなければ ImportOptions の既定で続ける——設定を組めない
+		// ことを理由に周を中止しない（設定ダイアログを出せなかったときと同じ考え方。
+		// draw/SettingsDialog.h）。settings は上で読めることを確かめてある。
+		core::ImportOptions options;
+		std::string presetNote;
+		if (!presetImportSettings(options, &presetNote))
+			options = core::ImportOptions{};
+		std::string ignored;
+		(void)core::applyTestSettings(request.settings, options, ignored);
+		std::string settingsNote = "ダイアログを出さず、テンプレートの図面にあるもので既定の"
+								   "設定を組みました";
+		if (!presetNote.empty())
+			settingsNote += "（" + presetNote + "）";
+		if (!request.settings.isNull())
+			settingsNote += "。settings で上書きしました: " + request.settings.dump();
+		const ImportRound round = runImportRound(request.ifcPath, options, /*settingsShown*/ true,
+												 settingsNote, preparation);
+		// **描画結果は、成否にかかわらず保存して記録する**（SaveRoundDocument）。
 		// ★保存の結果は**報告か結末の文言に載せる**——取り込みのログは runImportRound が
 		// 閉じ終えているので、ここで trace へ書いても捨てられる（以前は保存できなかったことが
 		// どこにも残らなかった）。
-		const std::string saved = "後始末: " + SaveRoundDocument(session, session.round + 1);
+		const std::string saved = "後始末: " + SaveRoundDocument(session);
+		const bool sessionWritten = core::writeFeedbackSession(sessionPath, session);
 		if (round.failed)
 		{
-			(void)core::writeFeedbackSession(sessionPath, session);
 			// **取り込みの完了文言（round.body）は使わない**——このコマンド自身の言葉で言う
 			// （parse/Feedback.h「実機テストの周の結末」）。報告は書かない周なので、保存の
 			// 結果はここで添える。
-			return Failure(allowDialogs, parse::TestRoundOutcome::ImportFailed, saved);
+			return Failure(parse::TestRoundOutcome::ImportFailed, saved);
 		}
 
 		// 報告を組む（無 SDK 側。parse/Feedback）。
 		parse::FeedbackRound material;
 		material.build = build;
-		material.ifcPath = ifcPath;
+		material.ifcPath = request.ifcPath;
 		material.bytes = round.bytes;
 		material.seconds = round.seconds;
 		material.startedAt = round.startedAt;
 		material.log = core::trace::text();
-		material.round = session.round + 1;
-		material.previousCommit = session.lastCommit;
-		material.previousTally = session.lastTally;
-		// 1 周目に採った基準（＝取り込み前に在ったレイヤの構成）。次の周はここへ戻って
-		// いるかを照合する（parse/Feedback の restoredStateLine）。
-		material.baselineKnown = session.baselineRecorded;
-		material.baselineLayers = session.baselineLayers;
 		material.preparation = preparation + (preparation.empty() ? "" : "\n") + saved;
 		const std::string report =
 			parse::formatTestRoundReport(material, round.document, round.counts);
 
-		// **記憶を進める。**
-		session.round = material.round;
-		// **基準は 1 周目に採る。** 以後の周では変更しない——基準そのものが周ごとに変わると、
-		// 「戻っているか」を照合する相手が無くなる。
-		if (!session.baselineRecorded)
-		{
-			session.baselineRecorded = true;
-			session.baselineLayers = round.counts.existingLayers;
-		}
-		// **キャンセルされた周は、そのビルドを「試し終えた」ことにしない**（実機 round 10。
-		// 報告の「前の周」の見出しが、途中までしか描画していない周のビルドを名乗らないように）。
-		if (!round.counts.cancelled)
-			session.lastCommit = build.commit;
-		session.lastTally = parse::formatTally(parse::elementRows(round.document, round.counts));
-
 		TestRoundResult result;
 		result.ran = true;
-		result.round = material.round;
 		result.report = report;
-		std::string detail = "round " + std::to_string(material.round) + "（" + build.commit + "）";
+		std::string detail = build.commit;
 		const std::string reportPath = core::testReportPathFor(sessionPath);
-		if (!core::writeFeedbackSession(sessionPath, session))
-			detail += "\n次の周のための記憶を保存できませんでした（次の実機テストはファイル選択から"
-					  "始まります）。";
+		if (!sessionWritten)
+			detail += "\n保存した図面の記録を書けませんでした（次の周でこの周の図面を閉じられず、"
+					  "Vectorworks を再起動するときに保存の確認が出ることがあります）。";
 		if (WriteReport(reportPath, report))
 			result.reportPath = reportPath;
 		else
@@ -934,8 +681,6 @@ namespace HomeskzIfcImport::draw
 					  (reportPath.empty() ? std::string("置き場所が分かりません") : reportPath) +
 					  "）。";
 		result.message = parse::formatTestRoundResult(parse::TestRoundOutcome::Completed, detail);
-		// **うまく行った周は何も出さない**（draw/Feedback.h「取り込みのあとに人の操作を
-		// 残さない」）。
 		return result;
 	}
 } // namespace HomeskzIfcImport::draw

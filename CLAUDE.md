@@ -19,7 +19,6 @@
 | アップデータを確認 (みんなの構造設計支援) | メニュー | 新しいビルドの確認と入れ替え |
 | MCP ブリッジを表示… (Dev) | メニュー（**dev だけ**） | ローカルの Claude Code と Vectorworks をつなぐパレット。図面・診断ログ・実機テストの報告を読み出し、要求に応じて実機テスト・更新・再起動を実行する |
 | 柱記号 / 耐力壁 | PIO | 取り込みが置くプラグインオブジェクト |
-| 実機テストを実行… (みんなの構造設計支援Dev) | メニュー（**dev だけ**） | 記憶した条件で、テンプレートから開いた新しい図面へ再度取り込み、結果をローカルに記録する（MCP の `vw_run_test` と同じ周） |
 
 ## ドキュメントの分担
 
@@ -50,7 +49,7 @@
 | 触るところ | 読む節 |
 | --- | --- |
 | 共有する定数・述語・ヘルパーを追加する／探す | `docs/development/placement-index.md`（置き場所の一覧） |
-| 実機テスト（`draw/Feedback`・`core/FeedbackSession`・`core/FeedbackScratch`・`parse/Feedback`・`ExtTestMenu`） | `docs/development/live-test/design-rules.md`（設計の決めごと）・一時ファイルの片付けは `scratch-files.md` |
+| 実機テスト（`draw/Feedback`・`core/FeedbackSession`・`core/FeedbackScratch`・`parse/Feedback`） | `docs/development/live-test/design-rules.md`（設計の決めごと）・一時ファイルの片付けは `scratch-files.md` |
 | ローカルの Claude Code から実機確認を回す（MCP の `vw_run_test` / `vw_test_report` / `vw_update` / `vw_restart`） | `docs/development/live-test/local-session-setup.md`（準備）・`running.md`（回し方） |
 | 自動アップデート（`src/Updater*`・`scripts/vw-update.*` / `vw-install.*` / `vw-uninstall.*` / `vw-token.*`） | `docs/development/auto-update/`（`README.md` から） |
 | MCP ブリッジ（`core/Bridge`・`draw/McpBridge`・`ExtMcpPalette`・`scripts/mcp/`・`.mcp.json`） | `docs/development/mcp-bridge.md` |
@@ -101,7 +100,7 @@
    （`scripts/vw-uninstall.*`。フォルダ名が一致し中に殻があるときだけ消す）と、実機テストの
    図面を保存せずに閉じるところ（`draw/Feedback` の `CloseOwnedDocuments`。`CloseDocument` は
    確認なしに変更を捨てるので、閉じる相手は `core/FeedbackSession` の `isOwnedTestDocument`
-   が限定する——記憶に名前で記録され、一時ファイルの置き場の中にある自分の図面だけ。M39）と、
+   が限定する——名前で記録され、一時ファイルの置き場の中にある自分の図面だけ。M39）と、
    実機テストの一時ファイルの片付け（`core/FeedbackScratch` の `removeScratchDir`。PR が
    閉じたブランチか、MCP の占有を解くときに実機テストを終えたブランチ（M42）の、目印のある
    フォルダだけ消す）。どれも回帰テストで押さえてあり、安全弁を緩める方向へ変えない。
@@ -259,12 +258,12 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 
 ### 本番の取り込みコマンドに実機テストを書かない
 
-実機テスト（記憶・図面の用意・報告）を書いてよいのは dev だけの実機テストのコマンド
-（`Extensions/ExtTestMenu` ＋ `draw/Feedback` の `runTestRound`）だけで、`draw/ImportCommand` と
+実機テスト（図面の用意・報告）を書いてよいのは dev だけの MCP の `vw_run_test` が呼ぶ
+`draw/Feedback` の `runTestRound` だけで、`draw/ImportCommand` と
 `Extensions/ExtMenu` には 1 行も書かない。`#ifdef VW_DEV_BUILD` で囲っても制御フローは本番の
 入口に残るので、囲えばよいとも考えない。両者が共有してよいのは**描画するところ**
-（`draw/ImportRun` の `runImportRound`）だけ（M25）。MCP の `vw_run_test` も
-`draw/Feedback` の `runTestRound` を通る。そのほかの決めごとは
+（`draw/ImportRun` の `runImportRound`）だけ（M25）。人が手で確かめるときは本番の
+取り込みを使う（実機テストのメニューは M43 で削除した）。そのほかの決めごとは
 `docs/development/live-test/design-rules.md`（実機テストの設計の決めごと）。
 
 ## C++ コード規約
@@ -415,11 +414,12 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 1 周の流れは **push → `scripts/ci-wait.sh` で dev ビルドを待つ → `vw_update`（殻まで変わった
 ら `vw_restart`）→ `vw_run_test` → 返った報告（`vw_test_report` / `vw_log`）を読む**。
 
-- **1 周目も Claude が始める（M40）。** `vw_run_test` に `ifc`（`tests/fixtures/` の IFC の
-  絶対パス）と `template`（`tests/fixtures/Default.sta` の絶対パス）を渡すと、記憶が無くても
-  尋ねずに 1 周目から走る（設定はテンプレートの図面にあるもので既定を組む）。Vectorworks が
-  起動していなければ MCP サーバが起動してから要求を送る。名指しせず記憶も無ければ走らずにそう返す。
-  人がメニュー「実機テストを実行…」から選ぶ 1 周目も従来どおり使える。
+- **条件は毎周 Claude が渡す（M43）。** `vw_run_test` には毎回 `ifc`（`tests/fixtures/` の
+  IFC の絶対パス）と `template`（`tests/fixtures/Default.sta` の絶対パス）を渡す。プラグインは
+  前の周の条件を覚えていない。設定はテンプレートの図面にあるもので既定を組み、変えたい項目
+  だけ `settings` で渡す（同じ条件で回し続けるなら、同じ `settings` を毎回渡す）。Vectorworks
+  が起動していなければ MCP サーバが起動してから要求を送る。前の周との比較は、前の周の報告を
+  持っているセッションが行う。
 - **`vw_restart` を頼む前に人へ一言断る。** 実機テストの図面は周の終わりに一時ファイルへ
   保存してある（次の周の頭で保存せずに閉じる。M39）ので、ふつうは保存の確認は出ない。人が
   保存していない図面を開いていれば確認が出るので、人の応答が要る（利用者の図面を保存せずに
@@ -427,10 +427,10 @@ VectorWorks ──読み込む──▶ 殻 <name>.vwlibrary / .vlb   … 起動
 - **Vectorworks を使えるのは 1 度に 1 つのセッションだけ（M42）。** 最初の操作で占有を取り、
   他のセッションの操作は断られる（`vw_lock_status` の `wait` で空くのを待てる。相手の周を
   人に確かめずに上書きしない）。**次の実行まで状態を持ち越さないなら `vw_lock_release` で
-  片付けて解放する**（実機テストの図面を閉じ、一時ファイル・記憶・報告を消す）。CI の往復を
+  片付けて解放する**（実機テストの図面を閉じ、一時ファイル・記録・報告を消す）。CI の往復を
   待って続けるなら解放しない（最後の操作から 60 分は占有が続く）。
-- **報告の数字は実機確認の代わりにならない。** 「図面の状態:」の行で図面が取り込み前へ
-  戻っていたかを先に確認し、怪しければ描画結果を見て答えられる形で人に確かめてもらう（読み方は
+- **報告の数字は実機確認の代わりにならない。** 「図面の状態:」と「準備:」の行で図面を
+  テンプレートから用意できていたかを先に確認し、怪しければ描画結果を見て答えられる形で人に確かめてもらう（読み方は
   `docs/development/live-test/reading-reports.md`）。所見は人がチャットへ書く。
 
 ## CI の完了を待つ

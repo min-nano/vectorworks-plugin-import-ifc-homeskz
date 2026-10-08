@@ -2,8 +2,8 @@
 //	core/FeedbackScratch.h
 //
 //	**実機テストの一時ファイルの置き場と、その片付け。** 実機テスト（draw/Feedback）は
-//	図面を別名保存する——1 周目に保存するテンプレート（`template-<n>.sta`）と、各周の
-//	描画結果（`round-<周>-<n>.vwx`）である（M39）。
+//	各周の描画結果（`round-<n>.vwx`）を別名保存する（M39。M42 まではメニューの周が採った
+//	テンプレート `template-<n>.sta` も置いていた）。
 //
 //	【置き場】`<一時ディレクトリ>/homeskz-test/<ブランチ>/`。**ブランチごとに分ける**のは、
 //	片付けの単位が「PR が閉じたブランチ」だから（利用者のご要望。PR が close／merge
@@ -12,13 +12,13 @@
 //	——変換は戻せない（`claude/a` も `claude-a` も同じ名前になりうる）ので、GitHub へ
 //	問い合わせるときは目印の名前を使う。
 //
-//	【いつ消すか】**実機テストの周の頭**（メニューからも MCP の `vw_run_test` からも）。
+//	【いつ消すか】**実機テストの周の頭**（MCP の `vw_run_test`）。
 //	いま動いているビルドのブランチ**以外**のフォルダについて GitHub に PR の状態を尋ね
 //	（同梱スクリプト `vw-update` の `q-pr-state`）、**開いている PR が無く、閉じた PR が
 //	在る**ものだけを消す。問い合わせに失敗した・PR が 1 つも見つからない（＝閉じたとは
 //	言えない）ものは残す。**判断できなければ削除しない。**
 //	もう 1 つは**実機テストを終えるとき**（M42。MCP の占有を解くときの `vw_test_cleanup`）で、
-//	いま動いているビルドのブランチと、記憶が指すファイルを含むフォルダを消す
+//	いま動いているビルドのブランチと、記録が指すファイルを含むフォルダを消す
 //	（sessionScratchDirs）。頼まれたときにしか起きず、安全弁は同じ removeScratchDir を通る。
 //
 //	【消してよいもの】ここは CLAUDE.md「開発の基本方針」8 の 3 か所目の「消すコード」で
@@ -95,7 +95,7 @@ namespace HomeskzIfcImport::core
 	struct ScratchCleanup
 	{
 		std::vector<std::string> removedBranches; // 消したブランチ
-		std::vector<std::string> removedPaths; // 消したフォルダ（記憶のテンプレート・図面の照合用）
+		std::vector<std::string> removedPaths; // 消したフォルダ（保存した図面の記録の照合用）
 		std::vector<std::string> kept; // 閉じていたが消さなかったもの（理由つき）
 	};
 
@@ -103,8 +103,8 @@ namespace HomeskzIfcImport::core
 	ScratchCleanup removeScratchDirs(const std::string& root, const std::vector<ScratchDir>& dirs);
 
 	// **実機テストを終えるときに消すフォルダを選ぶ**（M42）。dirs のうち、目印が branch
-	// （いま動いているビルドのブランチ）と一致するものと、usedPaths（記憶のテンプレート・
-	// 自分の図面）のどれかを中に含むものを、dirs の順のまま返す。どちらも空なら何も選ばない。
+	// （いま動いているビルドのブランチ）と一致するものと、usedPaths（自分で保存した
+	// 図面）のどれかを中に含むものを、dirs の順のまま返す。どちらも空なら何も選ばない。
 	std::vector<ScratchDir> sessionScratchDirs(const std::vector<ScratchDir>& dirs,
 											   const std::string& branch,
 											   const std::vector<std::string>& usedPaths);
@@ -114,7 +114,7 @@ namespace HomeskzIfcImport::core
 										 const std::vector<ScratchDir>& candidates,
 										 const std::map<std::string, PrState>& states);
 
-	// path が dir の中を指しているか（字面で比べる。記憶のテンプレート・図面を消したかの照合用）。
+	// path が dir の中を指しているか（字面で比べる。保存した図面を消したかの照合用）。
 	bool pathIsInside(const std::string& path, const std::string& dir);
 
 	// 報告と診断ログへ出す 1 行（何もしなかったら空）。

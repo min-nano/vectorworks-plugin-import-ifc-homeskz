@@ -24,7 +24,6 @@
 #	define PLUGIN_UPDATE_UNIVERSAL_NAME "CExtMenuCheckUpdate_MinNanoStructureDev"
 #	define PLUGIN_MCP_UNIVERSAL_NAME "CExtMenuMcpBridge_MinNanoStructureDev"
 #	define PLUGIN_MCP_PALETTE_UNIVERSAL_NAME "CExtMcpPalette_MinNanoStructureDev"
-#	define PLUGIN_TEST_UNIVERSAL_NAME "CExtMenuTest_MinNanoStructureDev"
 #else
 // Stable plug-in identity.
 #	define PLUGIN_VWR_ID "min-nano_structure"
@@ -32,7 +31,6 @@
 #	define PLUGIN_UPDATE_UNIVERSAL_NAME "CExtMenuCheckUpdate_MinNanoStructure"
 #	define PLUGIN_MCP_UNIVERSAL_NAME "CExtMenuMcpBridge_MinNanoStructure"
 #	define PLUGIN_MCP_PALETTE_UNIVERSAL_NAME "CExtMcpPalette_MinNanoStructure"
-#	define PLUGIN_TEST_UNIVERSAL_NAME "CExtMenuTest_MinNanoStructure"
 #endif
 
 // **ユニバーサル名（と UUID）はプラグインを改名しても変更しない。** これはコマンドの

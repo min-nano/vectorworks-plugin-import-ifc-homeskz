@@ -197,9 +197,6 @@ namespace HomeskzIfcImport
 		// 返す情報はもう無い（src/draw/ImportCommand.h）。
 		bool runImport(std::string& error);
 
-		// **実機テストを 1 周**（M25。dev だけ。src/draw/Feedback.h の runTestRound）。
-		bool runTest(bool allowDialogs, std::string& error);
-
 		// **MCP ブリッジの受け付けを 1 回**（M30。src/draw/McpBridge.h）。待たずに戻る。
 		// shellReport は殻が済ませた要求の結末（無ければ空。PayloadAbi.h の
 		// VwPayloadMcpServeFn）。out にはパレットに表示する状態の JSON が入る（本体が返した
@@ -221,7 +218,6 @@ namespace HomeskzIfcImport
 		std::string fBranch;
 		PayloadStamp fStamp;
 		VwPayloadRunImportFn fImportFn = nullptr;
-		VwPayloadRunTestFn fTestFn = nullptr;
 		VwPayloadMcpServeFn fMcpServeFn = nullptr;
 		VwPayloadRecalculateFn fRecalcFn = nullptr;
 		VwPayloadShutdownFn fShutdownFn = nullptr;

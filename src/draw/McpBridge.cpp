@@ -413,7 +413,7 @@ namespace HomeskzIfcImport::draw
 			{
 				error = "実機テストの報告がまだありません（" +
 						(path.empty() ? std::string("置き場所が分かりません") : path) +
-						"）。vw_run_test か、メニュー「実機テストを実行…」を実行してください。";
+						"）。vw_run_test を実行してください。";
 				return Json::null();
 			}
 			Json value = Json::object();
@@ -424,22 +424,21 @@ namespace HomeskzIfcImport::draw
 
 		Json RunTestTool(const Json& args, std::string& error)
 		{
-			// **開いている図面は不要**（M39）——続きの周はテンプレートから自分で図面を
-			// 開く。再起動の直後は図面が 1 枚も開いていないのが普通なので、ここで弾かない。
-			// **ダイアログを 1 枚も出さない周**（draw/Feedback.h）。`ifc` を名指しされれば
-			// 尋ねずに 1 周目から始め（M40）、名指しも記憶も無ければ実行せず、その理由を
-			// message に入れて返す。
+			// **開いている図面は不要**（M39）——周はテンプレートから自分で図面を開く。
+			// 再起動の直後は図面が 1 枚も開いていないのが普通なので、ここで弾かない。
+			// **ダイアログを 1 枚も出さない周**（draw/Feedback.h）。条件は毎周渡してもらい
+			// （M43）、使えなければ実行せず、その理由を message に入れて返す。
 			TestRoundRequest request;
 			request.ifcPath = args.at("ifc").asString();
 			request.templatePath = args.at("template").asString();
-			const TestRoundResult round = runTestRound(/*allowDialogs*/ false, request);
+			request.settings = args.at("settings");
+			const TestRoundResult round = runTestRound(request);
 			if (!round.ran)
 			{
 				error = round.message;
 				return Json::null();
 			}
 			Json value = Json::object();
-			value.set("round", Json::integer(round.round));
 			value.set("commit", Json::string(VW_BUILD_VERSION));
 			value.set("message", Json::string(round.message));
 			value.set("report_path", Json::string(round.reportPath));
@@ -533,27 +532,33 @@ namespace HomeskzIfcImport::draw
 			 R"("additionalProperties":false})",
 			 &LogTool, ToolKind::Read, 0},
 			{"vw_test_report",
-			 "直近の実機テストの報告（Markdown。要素の内訳・前の周からの変化・図面の状態・"
-			 "診断ログ）を返す。",
+			 "直近の実機テストの報告（Markdown。要素の内訳・図面の状態・診断ログ）を返す。",
 			 R"({"type":"object","properties":{},"additionalProperties":false})", &TestReportTool,
 			 ToolKind::Read, 0},
 			{"vw_run_test",
 			 "実機テストを 1 周走らせる——前の周の図面を保存せずに閉じ、テンプレートから開いた"
-			 "新しい図面へ前の周と同じ IFC・設定で取り込み、報告を返す。図面は開いていなくて"
-			 "よい。ダイアログは出さない。ifc を渡すと、記憶があっても尋ねずに新しい 1 周目を"
-			 "始める（設定はテンプレートの図面にあるもので既定を組む）。1 周目は template に"
-			 "リポジトリの tests/fixtures/Default.sta の絶対パスも渡す。Vectorworks が起動して"
-			 "いなければ起動してから走らせる。取り込みに 1 分以上かかる。",
+			 "新しい図面へ IFC を取り込み、報告を返す。ifc と template は毎回渡す（前の周の条件は"
+			 "覚えていない）。設定はテンプレートの図面にあるもので既定を組み、settings に書いた"
+			 "項目だけ上書きする。図面は開いていなくてよい。ダイアログは出さない。Vectorworks が"
+			 "起動していなければ起動してから走らせる。取り込みに 1 分以上かかる。",
 			 R"({"type":"object","properties":{)"
-			 R"("ifc":{"type":"string","description":"取り込む IFC の絶対パス（渡すと新しい 1 周目。省略＝前の周と同じ）"},)"
-			 R"("template":{"type":"string","description":"テンプレート（.sta）の絶対パス（省略＝覚えたもの）"}},)"
-			 R"("additionalProperties":false})",
+			 R"("ifc":{"type":"string","description":"取り込む IFC の絶対パス（tests/fixtures/ の IFC）"},)"
+			 R"("template":{"type":"string","description":"テンプレート（.sta）の絶対パス（リポジトリの tests/fixtures/Default.sta）"},)"
+			 R"("settings":{"type":"object","description":"取り込み設定の上書き（省略＝既定のまま）",)"
+			 R"("properties":{)"
+			 R"("symbols":{"type":"object","description":"役割の表示名（アンカーボルト（座金付き）/ アンカーボルト（座金なし）/ 床束 / 火打 / 仕口 / 伏図記号（柱）/ 伏図記号（小屋束）/ 継手）→ シンボル名（そのシンボルで取り込む）・true（既定のシンボルで取り込む）・false か空文字列（取り込まない）","additionalProperties":{"type":["string","boolean"]}},)"
+			 R"("title_block":{"type":"string","description":"図面枠のスタイル名（空＝置かない）"},)"
+			 R"("dimension":{"type":"string","description":"寸法規格の名前（空＝入れない）"},)"
+			 R"("merge_levels":{"type":"array","items":{"type":"string"},"description":"前のレベルと同じ伏図にまとめる高さ（\"<階の番号>:<高さ mm>\"）"},)"
+			 R"("skip_sections":{"type":"array","items":{"type":"string"},"description":"軸組図から除外する通りの図番"},)"
+			 R"("rafter":{"type":"object","properties":{"width":{"type":"number"},"height":{"type":"number"}},"additionalProperties":false,"description":"垂木の断面（mm）"}},)"
+			 R"("additionalProperties":false}},)"
+			 R"("required":["ifc","template"],"additionalProperties":false})",
 			 &RunTestTool, ToolKind::Long, kRunTestTimeoutSeconds},
 			{"vw_test_cleanup",
 			 "実機テストを終える——実機テストが保存した図面を保存せずに閉じ、一時ファイル"
-			 "（テンプレートと各周の図面）・記憶・報告を消す。vw_lock_release が占有を解く"
-			 "ときに自動で呼ぶので、ふつうは直接呼ばない。次の周は ifc と template を渡して"
-			 "1 周目から始める。",
+			 "（各周の図面）・記録・報告を消す。vw_lock_release が占有を解くときに自動で呼ぶ"
+			 "ので、ふつうは直接呼ばない。",
 			 R"({"type":"object","properties":{},"additionalProperties":false})", &EndTestTool,
 			 ToolKind::Long, kEndTestTimeoutSeconds},
 			{"vw_update",

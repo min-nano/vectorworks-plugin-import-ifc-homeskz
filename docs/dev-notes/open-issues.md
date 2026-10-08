@@ -123,8 +123,6 @@
   - `src/Extensions/ExtMenu.cpp` … 「入れられなかった・殻まで変わった、のどちらかで取り込みへ
     進まない」→ 進まないのは入れられなかったときだけ（**実装が正**。`src/UpdaterHost.h` の戻り値）。
   - `src/Extensions/ExtMcpPalette.cpp` … M38 で削除された `ExtFeedbackPalette.cpp` への参照。
-  - `src/Extensions/ExtTestMenu.h` … 「図面の戻し」「取り込み前へ戻してから」→ テンプレートから
-    開いた新しい図面へ描画する（M39）。
   - `src/Extensions/ExtMcpMenu.h` … メニュー名（dev は「MCP ブリッジを表示… (Dev)」）。参照先の
     CLAUDE.md「ビルド・リント・リリース」→「命名」と `docs/development/identifiers.md`。
   - `src/Extensions/ExtShearWall.h` … 「dev ビルド（と HOMESKZ_IFC_TRACE 指定時）は診断ログへ書く」→

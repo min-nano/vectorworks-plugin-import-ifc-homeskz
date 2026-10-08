@@ -333,8 +333,6 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtUpdateMenu.cpp
 		src/Extensions/ExtMcpMenu.h
 		src/Extensions/ExtMcpMenu.cpp
-		src/Extensions/ExtTestMenu.h
-		src/Extensions/ExtTestMenu.cpp
 		src/Extensions/ExtColumnMark.h
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.h
@@ -397,7 +395,6 @@ if(VW_BUILD_PLUGIN)
 		src/Extensions/ExtMenu.cpp
 		src/Extensions/ExtUpdateMenu.cpp
 		src/Extensions/ExtMcpMenu.cpp
-		src/Extensions/ExtTestMenu.cpp
 		src/Extensions/ExtColumnMark.cpp
 		src/Extensions/ExtShearWall.cpp
 		src/Extensions/ExtMcpPalette.cpp

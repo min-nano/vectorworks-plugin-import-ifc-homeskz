@@ -1,17 +1,20 @@
 //
 //	parse/Feedback.h
 //
-//	**実機テストの報告**（docs/DEV-NOTES.md M23 / M38）。開発版ビルドの「実機テストを実行…」
-//	（または MCP の `vw_run_test`）が取り込みを実行した結果を、Claude が読む Markdown へ
+//	**実機テストの報告**（docs/DEV-NOTES.md M23 / M38）。開発版ビルドの MCP の
+//	`vw_run_test` が取り込みを実行した結果を、Claude が読む Markdown へ
 //	組み立てる。報告は手元のファイルに残り、ローカルの Claude Code が MCP の
 //	`vw_test_report` で読む。
 //
 //	【何を載せるか】
 //	  * 結末・所要時間・**要素ごとの内訳**（parse/Summary の elementRows。表は 1 つきり）
-//	  * **前の周からの差分**——読む側が知りたいのは絶対値ではなく「修正の結果どう変化したか」
-//	  * 図面が取り込み前へ戻してあったか（描画結果の破綻を実装のせいにしないための 1 行）
+//	  * 取り込み前から在ったレイヤの枚数（描画結果の破綻を実装のせいにしないための 1 行）
 //	  * 描画側が記録した注意（`DrawCounts::diagnostics`）と記録（`notes`）
 //	  * 診断ログ（上限を超える分は古いほうから削除する）
+//
+//	【前の周と比べない（M43）】報告は 1 周ぶんで完結させる。前の周の報告は、周を起こした
+//	ローカルの Claude Code のセッションが持っているので、比べるのはそちらの仕事である
+//	（M42 までは前の周の内訳と 1 周目のレイヤ構成を記憶して差分を載せていた）。
 //
 //	【所見はここに載らない】**実機を確認した人の所見**は人が Claude とのチャットへ直接書く
 //	（docs/DEV-NOTES.md M23「所見はプラグインの仕事ではなかった」）。
@@ -36,7 +39,6 @@
 
 #include <cstddef>
 #include <string>
-#include <vector>
 
 namespace HomeskzIfcImport::parse
 {
@@ -51,17 +53,6 @@ namespace HomeskzIfcImport::parse
 		std::string startedAt;		  // 壁時計（core::trace::localTimestamp）
 		std::string log;			  // 診断ログ全文（core::trace::text）
 
-		int round = 1;				// 何周目か（1 から）
-		std::string previousCommit; // 前の周のビルド（空なら 1 周目）
-		std::string previousTally;	// 前の周の内訳（formatTally の 1 行表現）
-
-		// **1 周目に採った「取り込み前に在ったレイヤ」の顔ぶれ**（core::FeedbackSession）。
-		// 今回の DrawCounts::existingLayers と照合して、図面が取り込み前へ戻して
-		// あるかを判定する（restoredStateLine）。baselineKnown が false なら基準が無い
-		// （1 周目、または古い版が書いた記憶）ので、判定せずその旨を書く。
-		bool baselineKnown = false;
-		std::vector<std::string> baselineLayers;
-
 		// **取り込みの前に図面へ何をしたか**（draw/Feedback の openRoundDocument が
 		// 返す 1 行。空なら出さない）。診断ログにも同じ行が入るが、**ログは上限で切り詰め
 		// られるので、そこだけを頼りにしない**——図面をどう用意したか（前の周の図面を閉じて
@@ -75,7 +66,7 @@ namespace HomeskzIfcImport::parse
 	};
 
 	// -----------------------------------------------------------------------
-	// **実機テストの周の結末**（M25）。結果ダイアログ（メニューから押した周）と MCP の応答
+	// **実機テストの周の結末**（M25）。MCP の応答
 	// （`vw_run_test`）に、**このコマンド自身の言葉で**短く伝える。
 	//
 	// **取り込みコマンドの完了文言（`formatImportResult` / `formatImportError`）を流用しない。**
@@ -91,27 +82,14 @@ namespace HomeskzIfcImport::parse
 		// 実際には描画先が無かっただけである。**そうなる前に止める。**
 		DocumentFailed,
 		ImportFailed, // 取り込みがエラーで中断した
-		// **記憶が無いのにダイアログを出せない**（MCP の `vw_run_test` で、IFC を名指しせずに
-		// 1 周目を頼まれた）。IFC とテンプレートを名指しして頼み直すか（M40）、人が
-		// メニューから選ぶ。
-		NotRemembered,
-		// **頼まれた中身を使えない**（M40。MCP の `vw_run_test` に渡された IFC や
-		// テンプレートが無い・テンプレートが `.sta` でない）。何も描画していない。
+		// **頼まれた中身を使えない**（M40 / M43。MCP の `vw_run_test` に IFC やテンプレートが
+		// 渡されていない・見つからない・テンプレートが `.sta` でない・settings を読めない）。
+		// 何も描画していない。
 		InvalidRequest,
 	};
 
 	// detail は理由（空でもよい）。返るのは**短い本文**で、内訳と診断ログは報告が持つ。
 	std::string formatTestRoundResult(TestRoundOutcome outcome, const std::string& detail);
-
-	// **内訳の 1 行表現**（`ストーリ:3/3,通り芯:44/44,…`）。命令が 0 の要素は載せない
-	// （無い物の 0 を並べても差分の役に立たない）。次の周まで持ち越して差分を取るための
-	// 形なので、**人向けの整形は一切しない**。
-	std::string formatTally(const std::vector<ElementRow>& rows);
-
-	// 2 つの内訳を照合し、**変わった行だけ**を人が読める形で返す（変化が無ければ空）。
-	// 片方にしか無い要素も「増えた／消えた」として出す——要素が丸ごと出なくなるのは
-	// たいてい退行なので、通知せずに除外すると最悪の変化を見落とす。
-	std::string formatTallyDiff(const std::string& previous, const std::string& current);
 
 	// **長い本文の末尾だけを残す**（診断ログの切り詰め。報告と MCP の `vw_log` が使う）。
 	// maxBytes を超えるときは**古いほう（先頭）を削除し**、「前半 N バイトを省略」の 1 行を
@@ -119,7 +97,7 @@ namespace HomeskzIfcImport::parse
 	// 壊れた UTF-8 になり、JSON の読み手に拒否される（docs/DEV-NOTES.md M25）。
 	std::string keepTail(const std::string& text, std::size_t maxBytes);
 
-	// **実機テストの報告**（Markdown）。先頭の見出しに何周目か・どのビルドかを置く。
+	// **実機テストの報告**（Markdown）。先頭の見出しにどのビルドかを置く。
 	std::string formatTestRoundReport(const FeedbackRound& round, const core::Document& document,
 									  const core::DrawCounts& counts);
 

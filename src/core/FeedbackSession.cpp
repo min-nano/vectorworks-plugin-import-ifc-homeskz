@@ -1,19 +1,19 @@
 //
 //	core/FeedbackSession.cpp
 //
-//	実機フィードバックの記憶の実装（意図は core/FeedbackSession.h 参照）。
+//	実機テストが周をまたいで持ち越すものの実装（意図は core/FeedbackSession.h 参照）。
 //	【SDK 非依存】ここでは VectorWorks SDK を include しない。
 //
 
 #include "core/FeedbackSession.h"
 #include "core/FeedbackScratch.h"
 #include "core/ImportOptions.h"
+#include "core/Json.h"
 #include "core/Trace.h"
 
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
-#include <optional>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -42,24 +42,7 @@ namespace HomeskzIfcImport::core
 			return out.substr(b, e - b + 1);
 		}
 
-		// "1" / "0"。真偽は綴りを揺らさない（読む側の場合分けを増やさないため）。
-		const char* boolText(bool value)
-		{
-			return value ? "1" : "0";
-		}
-
-		// 真とみなす綴り。書くのは常に "1" だが、人が手で直すこともあるので寛容に読む。
-		bool parseBool(const std::string& value, bool fallback)
-		{
-			if (value == "1" || value == "true" || value == "yes" || value == "on")
-				return true;
-			if (value == "0" || value == "false" || value == "no" || value == "off")
-				return false;
-			return fallback;
-		}
-
-		// 10 進の整数（負・桁あふれ・数字以外は fallback）。**例外を投げない**——
-		// 壊れた 1 行で往復が止まるのは割に合わない。
+		// 10 進の整数（負・桁あふれ・数字以外は fallback）。**例外を投げない**。
 		int parseInt(const std::string& value, int fallback)
 		{
 			if (value.empty())
@@ -76,57 +59,201 @@ namespace HomeskzIfcImport::core
 			return result;
 		}
 
-		// 役割 1 つぶんのキー接頭辞（"role.0."）。
-		std::string roleKey(std::size_t index, const char* suffix)
+		// 文字列の配列（配列でない・文字列でない要素があれば false）。
+		bool stringList(const Json& value, std::vector<std::string>& out)
 		{
-			return "role." + std::to_string(index) + "." + suffix;
+			if (!value.isArray())
+				return false;
+			out.clear();
+			for (const Json& item : value.items())
+			{
+				if (item.kind() != Json::Kind::String)
+					return false;
+				out.push_back(item.asString());
+			}
+			return true;
+		}
+
+		// 表示名から役割を引く（無ければ false）。
+		bool roleByLabel(const std::string& label, SymbolRole& out)
+		{
+			for (const SymbolRoleInfo& info : symbolRoles())
+			{
+				if (label == info.label)
+				{
+					out = info.role;
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// 役割の表示名の一覧（理由の文言に添える）。
+		std::string roleLabels()
+		{
+			std::string text;
+			for (const SymbolRoleInfo& info : symbolRoles())
+			{
+				if (!text.empty())
+					text += " / ";
+				text += info.label;
+			}
+			return text;
+		}
+
+		bool applySymbols(const Json& symbols, ImportOptions& options, std::string& error)
+		{
+			if (!symbols.isObject())
+			{
+				error = "settings.symbols はオブジェクトで渡してください";
+				return false;
+			}
+			for (const auto& [label, value] : symbols.members())
+			{
+				SymbolRole role = SymbolRole::AnchorBoltM12;
+				if (!roleByLabel(label, role))
+				{
+					error = "settings.symbols に知らない役割があります（" + label +
+							"。使えるのは " + roleLabels() + "）";
+					return false;
+				}
+				if (value.kind() == Json::Kind::String)
+				{
+					const std::string name = sanitize(value.asString());
+					if (!name.empty())
+						options.setSymbol(role, name);
+					options.setEnabled(role, !name.empty());
+				}
+				else if (value.kind() == Json::Kind::Bool)
+					options.setEnabled(role, value.asBool());
+				else
+				{
+					error = "settings.symbols の値はシンボル名か true / false で渡してください（" +
+							label + "）";
+					return false;
+				}
+			}
+			return true;
+		}
+
+		bool applyMergeLevels(const Json& levels, ImportOptions& options, std::string& error)
+		{
+			std::vector<std::string> keys;
+			if (!stringList(levels, keys))
+			{
+				error = "settings.merge_levels は \"<階の番号>:<高さ mm>\" の配列で渡してください";
+				return false;
+			}
+			options.mergedPlanLevels.clear();
+			for (const std::string& key : keys)
+			{
+				const std::string::size_type colon = key.find(':');
+				const int story =
+					colon == std::string::npos ? -1 : parseInt(sanitize(key.substr(0, colon)), -1);
+				const int height =
+					colon == std::string::npos ? -1 : parseInt(sanitize(key.substr(colon + 1)), -1);
+				if (story < 0 || height < 0)
+				{
+					error = "settings.merge_levels の値を読めません（" + key +
+							"。\"<階の番号>:<高さ mm>\" で渡してください）";
+					return false;
+				}
+				options.setMergeWithPrevious(PlanLevelKey{story, height}, true);
+			}
+			return true;
+		}
+
+		bool applyRafter(const Json& rafter, ImportOptions& options, std::string& error)
+		{
+			if (!rafter.isObject())
+			{
+				error = "settings.rafter は { \"width\": mm, \"height\": mm } で渡してください";
+				return false;
+			}
+			double width = options.rafterWidth;
+			double height = options.rafterHeight;
+			for (const auto& [key, value] : rafter.members())
+			{
+				if ((key != "width" && key != "height") || value.kind() != Json::Kind::Number ||
+					!isValidRafterSize(value.asNumber()))
+				{
+					error = "settings.rafter の値を読めません（" + key +
+							"。width / height を mm の正の数で渡してください）";
+					return false;
+				}
+				if (key == "width")
+					width = value.asNumber();
+				else
+					height = value.asNumber();
+			}
+			options.setRafterSize(width, height);
+			return true;
 		}
 	} // namespace
+
+	bool applyTestSettings(const Json& settings, ImportOptions& options, std::string& error)
+	{
+		if (settings.isNull())
+			return true;
+		if (!settings.isObject())
+		{
+			error = "settings はオブジェクトで渡してください";
+			return false;
+		}
+		for (const auto& [key, value] : settings.members())
+		{
+			bool ok = true;
+			if (key == "symbols")
+				ok = applySymbols(value, options, error);
+			else if (key == "title_block" || key == "dimension")
+			{
+				if (value.kind() != Json::Kind::String)
+				{
+					error = "settings." + key + " は文字列で渡してください（空＝" +
+							(key == "title_block" ? "置かない" : "入れない") + "）";
+					return false;
+				}
+				if (key == "title_block")
+					options.setTitleBlockStyle(sanitize(value.asString()));
+				else
+					options.setDimensionStandard(sanitize(value.asString()));
+			}
+			else if (key == "merge_levels")
+				ok = applyMergeLevels(value, options, error);
+			else if (key == "skip_sections")
+			{
+				std::vector<std::string> numbers;
+				if (!stringList(value, numbers))
+				{
+					error = "settings.skip_sections は図番（文字列）の配列で渡してください";
+					return false;
+				}
+				options.setSkippedSections(numbers);
+			}
+			else if (key == "rafter")
+				ok = applyRafter(value, options, error);
+			else
+			{
+				error = "settings に知らない項目があります（" + key +
+						"。使えるのは symbols / title_block / dimension / merge_levels / "
+						"skip_sections / rafter）";
+				return false;
+			}
+			if (!ok)
+				return false;
+		}
+		return true;
+	}
 
 	std::string formatFeedbackSession(const FeedbackSession& session)
 	{
 		std::ostringstream out;
-		// 先頭に版を置く。**形を変えるときはここを上げ、読む側で分岐する**（いまは 1 だけ）。
-		out << "# HomeskzIfcImport 実機テストの記憶（自動生成。手で消してよい）\n";
-		out << "version=1\n";
-		out << "ifc=" << sanitize(session.ifcPath) << "\n";
-		out << "round=" << session.round << "\n";
-		out << "build=" << sanitize(session.lastCommit) << "\n";
-		out << "tally=" << sanitize(session.lastTally) << "\n";
-		out << "template=" << sanitize(session.templatePath) << "\n";
+		// 先頭に版を置く。**形を変えるときはここを上げ、読む側で分岐する**。
+		out << "# HomeskzIfcImport 実機テストが保存した図面（自動生成。手で消してよい）\n";
+		out << "version=2\n";
 		// 自分で保存した図面（次の周の頭で閉じる相手）。**1 つ 1 行**。
 		for (const std::string& doc : session.ownedDocuments)
 			out << "owned.doc=" << sanitize(doc) << "\n";
-		// 1 周目に採った基準。**レイヤ 1 枚につき 1 行**にしてあるのは、名前へ入れて
-		// よい文字を区切り記号で縛らないため（"," も "\t" もレイヤ名に使える）。
-		out << "baseline=" << boolText(session.baselineRecorded) << "\n";
-		for (const std::string& layer : session.baselineLayers)
-			out << "baseline.layer=" << sanitize(layer) << "\n";
-		// 取り込み設定は役割の表の順に並べる（core/ImportOptions.h の symbolRoles）。
-		for (std::size_t i = 0; i < kSymbolRoleCount; ++i)
-		{
-			const auto role = static_cast<SymbolRole>(i);
-			out << roleKey(i, "symbol") << "=" << sanitize(session.options.symbol(role)) << "\n";
-			out << roleKey(i, "on") << "=" << boolText(session.options.isEnabled(role)) << "\n";
-		}
-		// M28 図面枠のスタイル（空＝置かない）。**役割の表の外にある設定も漏らさず書く**——
-		// 2 周目以降は設定ダイアログを出さずにここから復元するので、書き落とすと 1 周目と
-		// 違う条件（図面枠なし）で警告なしに実行される（PR #133 の round 2 で実際に起きた）。
-		out << "titleblock=" << sanitize(session.options.titleBlockStyle()) << "\n";
-		// M31 寸法規格（空＝入れない）。図面枠と同じ理由で漏らさず書く。
-		out << "dimension=" << sanitize(session.options.dimensionStandard()) << "\n";
-		// 伏図のまとめ方（前のレベルと同じ伏図にまとめる高さ）。図面枠と同じ理由で漏らさず
-		// 書く。**1 つにつき 1 行**で "<階の番号>:<高さ mm>"（core::PlanLevelKey）。
-		for (const PlanLevelKey& key : session.options.mergedPlanLevels)
-			out << "merge.level=" << key.story << ":" << key.height << "\n";
-		// M34 軸組図から除外する通り（図番）。図面枠と同じ理由で漏らさず書く——書き落とすと
-		// 続きの周が除外したはずの通りまで描画する。レイヤと同じく**1 本 1 行**。
-		for (const std::string& number : session.options.skippedSections)
-			out << "section.skip=" << sanitize(number) << "\n";
-		// 垂木の断面（mm）。図面枠と同じ理由で漏らさず書く——書き落とすと続きの周が
-		// 既定の 45×45 で描画する。読み戻せる表記（core::formatRafterSize）で書く。
-		out << "rafter.width=" << formatRafterSize(session.options.rafterWidth) << "\n";
-		out << "rafter.height=" << formatRafterSize(session.options.rafterHeight) << "\n";
 		return out.str();
 	}
 
@@ -148,98 +275,11 @@ namespace HomeskzIfcImport::core
 			const std::string key = sanitize(line.substr(0, eq));
 			const std::string value = sanitize(line.substr(eq + 1));
 
-			// M37 までの記憶にある send / repo / pr / branch / anon / posted / loop は、
-			// 下の「知らない行」として通知せずに読み飛ばす（PR への投稿をやめた。M38）。
-			// M38 までの work（作業ファイル。.vwx）と created.layer / created.sheet
-			// （レイヤ削除の相手）も同じく読み飛ばす——作業ファイルは開くと**その
-			// ファイル自体**が開いてしまい、テンプレートの代わりにならない（M39）。
-			if (key == "ifc")
-				session.ifcPath = value;
-			else if (key == "round")
-				session.round = parseInt(value, session.round);
-			else if (key == "build")
-				session.lastCommit = value;
-			else if (key == "tally")
-				session.lastTally = value;
-			else if (key == "template")
-				session.templatePath = value;
-			else if (key == "owned.doc")
-			{
-				// **重ねて読む**。空の行は閉じる相手にならないので捨てる。
-				if (!value.empty())
-					session.ownedDocuments.push_back(value);
-			}
-			else if (key == "baseline")
-				session.baselineRecorded = parseBool(value, session.baselineRecorded);
-			else if (key == "baseline.layer")
-			{
-				// **重ねて読む**（行の数だけレイヤがある）。空行は基準にならないので捨てる。
-				if (!value.empty())
-					session.baselineLayers.push_back(value);
-			}
-			else if (key == "titleblock")
-			{
-				// 古い記憶（M28 より前）には行が無い——既定の空（置かない）のまま読む。
-				session.options.setTitleBlockStyle(value);
-			}
-			else if (key == "dimension")
-			{
-				// 古い記憶（M31 より前）には行が無い——既定の空（入れない）のまま読む。
-				session.options.setDimensionStandard(value);
-			}
-			else if (key == "rafter.width" || key == "rafter.height")
-			{
-				// 古い記憶には行が無い——既定（45×45）のまま読む。読めない値も既定のまま。
-				const std::optional<double> size = parseRafterSize(value);
-				if (size.has_value())
-				{
-					if (key == "rafter.width")
-						session.options.setRafterSize(*size, session.options.rafterHeight);
-					else
-						session.options.setRafterSize(session.options.rafterWidth, *size);
-				}
-			}
-			else if (key == "merge.level")
-			{
-				// "<階の番号>:<高さ mm>"。読めない行は通知せずに読み飛ばす（古い記憶には行が無く、
-				// まとめない＝既定のまま読む）。GL より下の横架材は無いので、高さも負を
-				// 読まない parseInt で足りる。
-				const std::string::size_type colon = value.find(':');
-				if (colon == std::string::npos)
-					continue;
-				const int story = parseInt(value.substr(0, colon), -1);
-				const int height = parseInt(value.substr(colon + 1), -1);
-				if (story >= 0 && height >= 0)
-					session.options.setMergeWithPrevious(PlanLevelKey{story, height}, true);
-			}
-			else if (key == "section.skip")
-			{
-				// **重ねて読む**（行の数だけ通りがある）。古い記憶（M34 より前）には行が
-				// 無い——既定の空（全部描画する）のまま読む。
-				if (!value.empty())
-				{
-					std::vector<std::string> skipped = session.options.skippedSections;
-					skipped.push_back(value);
-					session.options.setSkippedSections(skipped);
-				}
-			}
-			else if (key.starts_with("role."))
-			{
-				// "role.<n>.symbol" / "role.<n>.on"。表に無い番号は通知せずに読み飛ばす
-				// （役割が増減しても古いファイルを読める）。
-				const std::string::size_type dot = key.find('.', 5);
-				if (dot == std::string::npos)
-					continue;
-				const int index = parseInt(key.substr(5, dot - 5), -1);
-				if (index < 0 || static_cast<std::size_t>(index) >= kSymbolRoleCount)
-					continue;
-				const auto role = static_cast<SymbolRole>(index);
-				const std::string field = key.substr(dot + 1);
-				if (field == "symbol")
-					session.options.setSymbol(role, value);
-				else if (field == "on")
-					session.options.setEnabled(role, parseBool(value, true));
-			}
+			// M42 までの記憶にある条件の行（ifc / round / build / tally / template /
+			// baseline / role.* など）は、知らない行として通知せずに読み飛ばす（M43）。
+			// **重ねて読む**。空の行は閉じる相手にならないので捨てる。
+			if (key == "owned.doc" && !value.empty())
+				session.ownedDocuments.push_back(value);
 		}
 		return session;
 	}
@@ -255,8 +295,8 @@ namespace HomeskzIfcImport::core
 		// 環境変数も GUI アプリの子プロセスに必ず入っている。
 		//
 		// **フォルダ名（HomeskzIfcImport）は識別子なので、プラグインの改名に追随させない。**
-		// 付け替えると、実機テストの記憶（周回数・前の周の内訳・1 周目の選択）が警告なしに
-		// 参照できなくなる。同梱スクリプトが同じフォルダから読むトークンも同じ理由で据え置いて
+		// 付け替えると、実機テストが保存した図面の記録と直近の報告が警告なしに参照できなく
+		// なる。同梱スクリプトが同じフォルダから読むトークンも同じ理由で据え置いて
 		// ある（scripts/vw-token.ps1 の Get-TokenFilePath）。
 		const std::string localAppData = trace::envValue("LOCALAPPDATA");
 		if (!localAppData.empty())
@@ -288,7 +328,7 @@ namespace HomeskzIfcImport::core
 			return false;
 
 		// 置き場所（…/HomeskzIfcImport/）はまだ無いのが普通なので用意する。**例外を
-		// 投げない版を使う**——記憶を残せないだけで取り込み自体は続けられる。
+		// 投げない版を使う**——記録を残せないだけで取り込み自体は続けられる。
 		std::error_code ec;
 		const std::filesystem::path file(path);
 		if (file.has_parent_path())
@@ -322,33 +362,6 @@ namespace HomeskzIfcImport::core
 		return sessionPath.substr(0, slash + 1) + "last-round.md";
 	}
 
-	bool feedbackSessionRemembered(const FeedbackSession& session)
-	{
-		// 1 周は済んでいて（round>0）、その周の IFC が分かっている（ifcPath）——どちらか
-		// 欠けていれば続きの周は組み立てられないので、1 周目として扱う。
-		return session.round > 0 && !session.ifcPath.empty();
-	}
-
-	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session, bool allowDialogs,
-										bool ifcRequested)
-	{
-		if (!allowDialogs && ifcRequested)
-		{
-			// **IFC を名指しされたら、記憶があっても新しい 1 周目**（別の IFC で試し直すのに
-			// 人の手を要らなくする）。描画先はテンプレートからしか作らない（Refuse の doc）。
-			return session.templatePath.empty() ? FeedbackRoundKind::Refuse
-												: FeedbackRoundKind::AutoFirstRound;
-		}
-		if (feedbackSessionRemembered(session))
-		{
-			// **MCP の周はテンプレートが無ければ走らない**（Refuse の doc コメント）。
-			if (!allowDialogs && session.templatePath.empty())
-				return FeedbackRoundKind::Refuse;
-			return FeedbackRoundKind::ContinueRound;
-		}
-		return allowDialogs ? FeedbackRoundKind::FirstRound : FeedbackRoundKind::Refuse;
-	}
-
 	bool isOwnedTestDocument(const FeedbackSession& session, const std::string& openPath,
 							 const std::string& scratchRoot)
 	{
@@ -356,7 +369,7 @@ namespace HomeskzIfcImport::core
 			return false;
 		for (const std::string& owned : session.ownedDocuments)
 		{
-			// **置き場の外を指す記憶は、一致していても対象にしない**（安全弁の 2 つ目）。
+			// **置き場の外を指す記録は、一致していても対象にしない**（安全弁の 2 つ目）。
 			if (!pathIsInside(owned, scratchRoot))
 				continue;
 			if (owned == openPath)

@@ -714,7 +714,7 @@ namespace HomeskzIfcImport::draw
 
 			// 初期値が「置く」の行（図面枠・寸法規格）で、前回の名前が使えないときに選ぶ
 			// 候補。寸法規格は「JIS」を優先する（core::defaultDimensionStandardIndex。
-			// 自動の 1 周目の既定の設定と同じものを選ぶよう、選び方は core に 1 つだけ置く）。
+			// MCP の実機テストの周の既定の設定と同じものを選ぶよう、選び方は core に 1 つだけ置く）。
 			// 図面枠には選ぶ基準が無いので最初。
 			std::size_t DefaultIndex(std::size_t row) const
 			{

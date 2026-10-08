@@ -61,7 +61,7 @@
 | [ローカルセッションでの回し方](development/live-test/running.md) | 1 周の流れ（push → `ci-wait` → `vw_update` → `vw_run_test`） |
 | [報告の読み方（Claude 向け）](development/live-test/reading-reports.md) | 「図面の状態:」から読む・人に頼んでよいこと |
 | [図面の用意（M39）](development/live-test/drawing-preparation.md) | テンプレートから開いた新しい図面へ描く |
-| [覚えているもの（`core/FeedbackSession`）](development/live-test/session-state.md) | 記憶のファイルと置き場所 |
+| [周をまたいで持ち越すもの（`core/FeedbackSession`）](development/live-test/session-state.md) | 自分で保存した図面の記録と置き場所（条件は持ち越さない。M43） |
 | [一時ファイルと片付け（`core/FeedbackScratch`）](development/live-test/scratch-files.md) | ブランチごとの置き場と、削除してよい条件 |
 | [設計の決めごと（実機テストを変えるときに守ること）](development/live-test/design-rules.md) | 入口と分担・尋ねる／伝える・図面を閉じる安全弁 |
 
