@@ -581,9 +581,9 @@ namespace HomeskzIfcImport::draw
 		// 取り込み前から在ったレイヤの名前（登場順に重複なし）。
 		//
 		// **真偽 1 つでは足りない。** 図面のテンプレートに「共通」等が最初から在れば、
-		// 1 周目からこれは空にならない——「戻し忘れ」と「もともと在った」を真偽では
-		// 区別できない（実機の指摘。docs/DEV-NOTES.md M23「基準は 1 周目に採る」）。
-		// 名前で持っておけば、1 周目のレイヤの一覧を基準にして次の周と**照合できる**。
+		// これは空にならない——「戻し忘れ」と「もともと在った」を真偽では区別できない
+		// （実機の指摘。docs/DEV-NOTES.md M23「基準は 1 周目に採る」）。実機テストの報告は
+		// この枚数を出し、周どうしの比較は報告を読む側が行う（M43）。
 		const std::vector<std::string>& existingLayers() const
 		{
 			return fExistingLayers;
@@ -623,8 +623,8 @@ namespace HomeskzIfcImport::draw
 	// 取り込み前から在ったレイヤへ描画したことを記録する（取り消しが部分的になる）。
 	// レイヤを用意するヘルパー（PrepareLayer / ActivateExistingLayer / PrepareSheetLayer）が
 	// 自身で呼ぶので、要素側は意識しなくてよい。
-	// **名前も一緒に渡す**——1 周目のレイヤの一覧を基準に、次の周で図面が戻っているかを
-	// 照合するため（ImportUndoScope::existingLayers）。
+	// **名前も一緒に渡す**——取り込み前から在ったレイヤを名前で数えるため
+	// （ImportUndoScope::existingLayers。同じ名前のレイヤを二重に数えない）。
 	void NoteExistingLayerUsed(MCObjectHandle layer, const std::string& name);
 
 	// **SDK に渡して消費させる下ごしらえのオブジェクト**（PIO のパス・プロファイル等）を

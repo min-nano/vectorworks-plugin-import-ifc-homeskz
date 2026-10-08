@@ -430,9 +430,9 @@ vw_add_test(ParseSummaryTests ParseSummaryTests.cpp CORE FIXTURES)
 # with which symbol) and its defaults. Pure logic, no fixtures.
 vw_add_test(CoreImportOptionsTests CoreImportOptionsTests.cpp CORE)
 
-# The remembered test-round session (src/core/FeedbackSession): what the first,
-# manual run decides and every later round (menu or MCP) reads back. Pure logic +
-# a temp file.
+# What the test round carries over (src/core/FeedbackSession): the record of the
+# drawings it saved itself (the only ones it may close unsaved), and how the MCP
+# `vw_run_test` settings are applied to the import options. Pure logic + a temp file.
 vw_add_test(CoreFeedbackSessionTests CoreFeedbackSessionTests.cpp CORE)
 
 # 実機テストの一時ファイルの置き場と片付け（src/core/FeedbackScratch）: ブランチごとの
@@ -443,9 +443,8 @@ vw_add_test(CoreFeedbackScratchTests CoreFeedbackScratchTests.cpp CORE)
 target_compile_definitions(CoreFeedbackScratchTests
 						   PRIVATE "HOMESKZ_SCRATCH_TEST_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\"")
 
-# The test-round report (src/parse/Feedback): the per-element tally, the diff
-# against the previous round, the drawing-state line and the log trimming that
-# keeps the report on a UTF-8 boundary. Pure string work, no fixtures.
+# The test-round report (src/parse/Feedback): the per-element tally, the
+# drawing-state line and the log trimming that keeps the report on a UTF-8 boundary. Pure string work, no fixtures.
 vw_add_test(ParseFeedbackTests ParseFeedbackTests.cpp CORE)
 
 # The options' path through the parse phase: every module that writes a symbol

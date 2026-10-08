@@ -6,7 +6,8 @@
 //	要素が増えても入口はこの形のまま（各要素の追加は Document と draw 側で行う）。
 //
 //	**ここには往復（実機フィードバック）の分岐が 1 つも無い**——M25 でそれを dev だけの
-//	テストコマンド（draw/Feedback.h の runTestRound）へ分離したため。両者が共有するのは
+//	実機テスト（draw/Feedback.h の runTestRound。M43 から MCP の `vw_run_test` だけが起こす）
+//	へ分離したため。両者が共有するのは
 //	描画結果を作るところ（draw/ImportRun.h）だけである。
 //
 

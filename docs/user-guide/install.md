@@ -138,8 +138,8 @@ powershell -ExecutionPolicy Bypass -File vw-uninstall.ps1 -Name min-nano_structu
    入っています——**IFC (ホームズ君) 取り込み…** と
    **アップデータを確認 (みんなの構造設計支援)** を、好きなメニューへドラッグして
    ください（2 つとも追加しておくと、更新を思い立ったときにすぐ確認できます）。
-   開発版の **MCP ブリッジを表示… (Dev)** と **実機テストを実行… (みんなの構造設計支援Dev)**
-   は開発用なので、使うときだけ追加すれば十分です（[「MCP ブリッジ」](mcp-bridge.md)）。
+   開発版の **MCP ブリッジを表示… (Dev)** は開発用なので、使うときだけ追加すれば
+   十分です（[「MCP ブリッジ」](mcp-bridge.md)）。
 
 ## Windows
 

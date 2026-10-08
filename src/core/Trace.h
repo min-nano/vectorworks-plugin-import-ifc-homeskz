@@ -85,7 +85,7 @@ namespace HomeskzIfcImport::core::trace
 	// 環境変数の値（未設定・空文字は空文字列）。
 	//
 	// 出力先の差し替え（HOMESKZ_IFC_TRACE にパスを入れる）を SDK 側（draw/ImportRun）が
-	// 読むのに使う（実機テストの記憶の置き場所＝core/FeedbackSession も同じ口で読む）。
+	// 読むのに使う（実機テストの記録の置き場所＝core/FeedbackSession も同じ口で読む）。
 	// **ここに置くのは、`std::getenv` の作法をこのファイル 1 つへ
 	// 閉じ込めるため**——MSVC は getenv に C4996（"_dupenv_s を使え"）を出し、無 SDK
 	// ライブラリは /W4 /WX で警告をエラー扱いにしているので、抑止をあちこちに書きたくない。

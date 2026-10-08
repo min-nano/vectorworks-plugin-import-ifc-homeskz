@@ -29,9 +29,9 @@
 | 取り込み設定（役割の表 `core::symbolRoles()`・図面枠のスタイル `core::ImportOptions::titleBlock` → `core::Document::titleBlockStyle`・寸法規格 `core::ImportOptions::dimension` → `core::Document::dimensionStandard`・軸組図から除外する通り `core::ImportOptions::skippedSections` → `parse::dropSkippedSections`・垂木の断面 `core::ImportOptions::rafterWidth` / `rafterHeight`（既定 `core::kDefaultRafterWidth` / `kDefaultRafterHeight`、文字との相互変換 `core::parseRafterSize` / `formatRafterSize`）） | `core/ImportOptions` |
 | 基準からの差の表記（`signedMillimetreText`。符号付き・3 桁ごとのコンマ。伏図レベルの高さとデータタグの高さの注記が共有）・伏図レベルの印（`planLevelTag` / `stripPlanLevelTag` / `planLevelHeightText`。"2-横架材天端(FL-872)" の "(FL-872)" を付ける・除く・高さの表記） | `core/Document.h` |
 | 伏図のまとめ方（`core::PlanLevelKey`・`ImportOptions::mergedPlanLevels`）・設定ダイアログへ運ぶ候補（`core::PlanLevelChoice`） | `core/ImportOptions.h` |
-| まだ決めていない設定の初期値（図面にあるものから組む既定 `core::presetImportOptions`・寸法規格の既定の選び方 `core::defaultDimensionStandardIndex`。設定ダイアログの初期値と実機テストの自動の 1 周目が共有する。M40） | `core/ImportOptions` |
+| まだ決めていない設定の初期値（図面にあるものから組む既定 `core::presetImportOptions`・寸法規格の既定の選び方 `core::defaultDimensionStandardIndex`。設定ダイアログの初期値と MCP の実機テストの周が共有する。M40） | `core/ImportOptions` |
 | 進捗の整形と配分の計算・診断ログのフェーズの行（`beginPhase`） | `core/Progress` |
-| 実機テストの記憶と、どの周になるかの場合分け（`feedbackRoundKind`）・報告の置き場所（`testReportPathFor`）・保存せずに閉じてよい図面か（`isOwnedTestDocument`。閉じる相手を絞る唯一の安全弁） | `core/FeedbackSession` |
+| 実機テストが保存した図面の記録・`vw_run_test` の `settings` の当て方（`applyTestSettings`。M43）・報告の置き場所（`testReportPathFor`）・保存せずに閉じてよい図面か（`isOwnedTestDocument`。閉じる相手を絞る唯一の安全弁） | `core/FeedbackSession` |
 | 実機テストの一時ファイルの置き場（`prepareBranchScratch`）・PR が閉じたブランチの片付け（`removeScratchDir` が唯一の削除口） | `core/FeedbackScratch` |
 | ブランチの PR が開いているか（`vw-update` の `q-pr-state`） | `scripts/vw-update.{sh,ps1}` |
 | MCP ブリッジの受け渡しの作法（要求／応答の形・スプールのファイル名・原子的な書き方・id の綴り検査） | `core/Bridge.h` |
@@ -106,7 +106,7 @@
 | フィクスチャ一覧・近似比較・実 IFC の読み込みと命令セットの組み立てのキャッシュ（`fixture` / `fixtureDocument`）・全フィクスチャ走査（`forEachFixture`） | `tests/Fixtures.h` |
 | 合成 STEP テキストの組み立て（`StepText` と `num` / `ref` / `point3` / `makeStorey` 等） | `tests/StepText.h` |
 | 試験用屋根面と最小 IFC | `tests/RoofSample.h` |
-| 実機テストの 1 周目のテンプレート（MCP の `vw_run_test` の `template` に渡す `.sta`。M40） | `tests/fixtures/Default.sta` |
+| 実機テストのテンプレート（MCP の `vw_run_test` の `template` に毎周渡す `.sta`。M40） | `tests/fixtures/Default.sta` |
 | GitHub のトークン（キーチェーン／DPAPI の保存先・探索順・`gh` の探し場所）。`vw-update` が source する | `scripts/vw-token.{sh,ps1}` |
 | GitHub へのアクセスに失敗したときの理由の文面（HTTP の番号・curl の終了コード・API 制限といつ戻るか） | `vw-update` の `http_reason` / `curl_reason`（Windows は `Get-ApiFailureReason`）。呼び出し側は `api_error` で 1 行に添えるだけ |
 

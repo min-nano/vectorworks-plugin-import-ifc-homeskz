@@ -6,7 +6,7 @@
 //	2 つの入口が並ぶ:
 //
 //	    draw/ImportCommand … 本番。ファイル選択 → 設定 → runImportRound → 結果ダイアログ
-//	    draw/Feedback      … 実機テスト。記憶した条件 → runImportRound → 報告を記録する
+//	    draw/Feedback      … 実機テスト。頼まれた条件 → runImportRound → 報告を記録する
 //
 //	**どちらも同じ runImportRound を通る**ので、テストで実行されるのは本番と同じコードである。
 //	実機テストのことを知っているのは draw/Feedback だけで、本番の経路には実機テストの

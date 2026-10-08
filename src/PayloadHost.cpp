@@ -416,15 +416,13 @@ namespace HomeskzIfcImport
 		auto initFn = reinterpret_cast<VwPayloadInitFn>(fModule.symbol(VW_PAYLOAD_SYM_INIT));
 		auto infoFn = reinterpret_cast<VwPayloadInfoFn>(fModule.symbol(VW_PAYLOAD_SYM_INFO));
 		fImportFn = reinterpret_cast<VwPayloadRunImportFn>(fModule.symbol(VW_PAYLOAD_SYM_IMPORT));
-		fTestFn = reinterpret_cast<VwPayloadRunTestFn>(fModule.symbol(VW_PAYLOAD_SYM_TEST));
 		fMcpServeFn =
 			reinterpret_cast<VwPayloadMcpServeFn>(fModule.symbol(VW_PAYLOAD_SYM_MCP_SERVE));
 		fRecalcFn = reinterpret_cast<VwPayloadRecalculateFn>(fModule.symbol(VW_PAYLOAD_SYM_RECALC));
 		fShutdownFn =
 			reinterpret_cast<VwPayloadShutdownFn>(fModule.symbol(VW_PAYLOAD_SYM_SHUTDOWN));
 		if (abiFn == nullptr || initFn == nullptr || infoFn == nullptr || fImportFn == nullptr ||
-			fTestFn == nullptr || fMcpServeFn == nullptr || fRecalcFn == nullptr ||
-			fShutdownFn == nullptr)
+			fMcpServeFn == nullptr || fRecalcFn == nullptr || fShutdownFn == nullptr)
 		{
 			error = "本体の形が違います（必要な関数が見つかりません）。\n"
 					"殻と本体の版が食い違っている可能性があります。";
@@ -498,23 +496,6 @@ namespace HomeskzIfcImport
 		return true;
 	}
 
-	bool Payload::runTest(bool allowDialogs, std::string& error)
-	{
-		error.clear();
-		if (!fLoaded || fTestFn == nullptr)
-		{
-			error = "本体が読み込まれていません。";
-			return false;
-		}
-		const int status = fTestFn(allowDialogs ? 1 : 0);
-		if (status != kVwPayloadOk)
-		{
-			error = "実機テストを開始できませんでした（コード " + std::to_string(status) + "）。";
-			return false;
-		}
-		return true;
-	}
-
 	bool Payload::mcpServe(const std::string& shellReport, std::string& out, std::string& error)
 	{
 		error.clear();
@@ -562,7 +543,6 @@ namespace HomeskzIfcImport
 			fShutdownFn();
 		fLoaded = false;
 		fImportFn = nullptr;
-		fTestFn = nullptr;
 		fMcpServeFn = nullptr;
 		fRecalcFn = nullptr;
 		fShutdownFn = nullptr;

@@ -10,7 +10,6 @@
 #include "BuildConfig.h"
 #include "Extensions/ExtColumnMark.h"
 #include "Extensions/ExtShearWall.h"
-#include "Extensions/ExtTestMenu.h"
 #include "Extensions/ExtMcpMenu.h"
 #include "Extensions/ExtMcpPalette.h"
 #include "Extensions/ExtMenu.h"
@@ -90,12 +89,6 @@ extern "C" Sint32 GS_EXTERNAL_ENTRY plugin_module_main(Sint32 action, void* modu
 		GROUPID_ExtensionMenu, action, moduleInfo, iid, inOutInterface, cbp, reply);
 
 #ifdef VW_DEV_BUILD
-	// M25 「実機テストを実行」コマンド。**開発版だけ**——実機テスト（記憶した条件で図面を
-	// 戻して取り込み直す）はこのコマンドがすべて担い、本番の取り込みコマンドはそれを知らない
-	// （Extensions/ExtTestMenu.h）。安定版はこのクラスを持つがどこにも登録しない。
-	REGISTER_Extension<HomeskzIfcImport::CExtMenuTest>(GROUPID_ExtensionMenu, action, moduleInfo,
-													   iid, inOutInterface, cbp, reply);
-
 	// 「MCP ブリッジを表示」コマンドと、ブリッジを常駐させるモードレスなパレット（M30）。
 	// **開発版だけ**（M38）——ブリッジはローカルの Claude Code から実機テストを回す開発の道具で、
 	// 取り込み・更新・再起動まで実行できる（Extensions/ExtMcpPalette.h）。安定版はクラスを

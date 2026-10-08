@@ -1,26 +1,27 @@
 //
 //	core/FeedbackSession.h
 //
-//	**実機テストの記憶。** 開発版（dev）ビルドの「実機テストを実行…」が、Claude が直した
-//	次のビルドで**同じ条件で取り込み直す**ために覚えておく値をまとめたもの（docs/DEV-NOTES.md
-//	M23 / M25 / M38）。
+//	**実機テストが周をまたいで持ち越すもの**（docs/DEV-NOTES.md M23 / M25 / M38〜M40）。
+//	持ち越すのは**実機テストが自分で保存した図面のパス**だけで、次の周の頭でそれを閉じる
+//	（draw/Feedback の CloseOwnedDocuments）。
 //
-//	【なぜ覚えるのか】1 周目は人が決める（どの IFC を・どのシンボルで）。2 周目からは
-//	**人の操作を 1 つも挟まずに**同じ条件で走らせたい——Claude が MCP の `vw_run_test` から
-//	起こす周はダイアログを 1 枚も出せないので、1 周目の選択をそのままディスクへ置き、
-//	2 周目以降はここから読む。M37 までは結果を PR へ投稿していたので宛先も覚えていたが、
-//	いまは結果を手元に記録するだけになった（draw/Feedback.h）。
+//	【条件は持ち越さない（M43）】どの IFC を・どのテンプレートから・どの設定で取り込むかは、
+//	**毎周、頼んだ側が渡す**。MCP の `vw_run_test` に Claude が ifc / template /
+//	settings を毎回渡す。M42 までは 1 周目の条件と前の周の内訳・基準の
+//	レイヤをここへ記憶し、2 周目以降を名指し無しで走らせていたが、周を起こすのがローカルの
+//	Claude Code になり、条件も前の周の報告も Claude のセッションが持っているので要らなく
+//	なった（記憶と頼んだ条件が食い違う余地も無くなる）。
 //
-//	【なぜ core/ に置くか】ImportOptions とまったく同じ立ち位置である:
-//	  * 決めるのは描画側（draw/SettingsDialog・draw/Feedback）——IFC のパスは
-//	    ダイアログでしか決まらない。
-//	  * 使うのは解析側と描画側の両方（解析は options を、描画は残り全部を読む）。
-//	SDK も STEP も知らない値なので core/ が置き場所になる（CLAUDE.md「依存の向き」）。
+//	【自分の図面だけは持ち越す】周の終わりに保存した描画結果は、次の周の頭で**保存せずに
+//	閉じる**。その相手を「いま開いている図面のうち、置き場の中にあるもの」で選ぶと、
+//	利用者が置き場から開いた図面まで閉じうる。閉じてよいのは**名指しで記録したもの**に
+//	限る（CLAUDE.md「開発の基本方針」8）。本体は周の間に入れ替わる（`vw_update`）ので、
+//	記録はメモリではなくファイルに置く。
 //
-//	【書式】**key=value を 1 行 1 つ**（更新スクリプトの機械可読出力と同じ流儀）。JSON に
-//	しないのは、読み書きするのがこのファイルと単体テストだけで、値がすべて平たいから——
-//	パーサを持ち込むより、`=` の左右で切るほうが小さく確実に済む。値に改行は入れない
-//	（入っていたら捨てる。パスに改行が含まれることは実際上ない）。
+//	【書式】**key=value を 1 行 1 つ**。JSON にしないのは、読み書きするのがこのファイルと
+//	単体テストだけで、値がすべて平たいから。値に改行は入れない（入っていたら捨てる）。
+//	M42 までの記憶にある条件の行（ifc / round / template / role.* など）は、知らない行として
+//	通知せずに読み飛ばす。
 //
 //	【SDK 非依存】core/ は VectorWorks SDK を include しない。ファイルの読み書きも
 //	標準ライブラリだけで完結するので、無 SDK で単体テストできる（core/Trace と同じ）。
@@ -29,30 +30,16 @@
 #pragma once
 
 #include "core/ImportOptions.h"
+#include "core/Json.h"
 
 #include <string>
 #include <vector>
 
 namespace HomeskzIfcImport::core
 {
-	// 実機テストの記憶。**既定値は「何もしない」**——記憶が無い（＝1 周目の）
-	// ときにそのまま使っても、従来どおりの手動の取り込みになる。
+	// 実機テストが周をまたいで持ち越すもの。既定値は「閉じる相手が無い」。
 	struct FeedbackSession
 	{
-		// **毎周の図面の元になるテンプレート（`.sta`）の絶対パス**（空なら 1 周目と同じく、
-		// いま開いている図面から採る）。
-		//
-		// **これは実機テストの周だけの都合である。** 本番の取り込みは開いている図面へ描画する
-		// のが役割なので、この値を参照するのは draw/Feedback だけ。
-		//
-		// 1 周目に、そのとき開いている図面をこの場所へ**別名保存**し、以後の周は毎回これを
-		// `OpenDocumentPath` で開く。`.sta` を渡すと**そのファイル自体ではなく、中身を
-		// 複製した無題の新規文書**が開く（SDK リファレンス Findings「Documents」）ので、
-		// テンプレートには前の周の描画結果が 1 つも書き戻らず、どの周もまったく同じ初期状態から
-		// 始まる。M38 までの「取り消し」「レイヤ削除」による戻しはやめた（M39。どちらも
-		// 取り込み前から在ったレイヤへ描画した分や取り消しスタックの中身に左右された）。
-		std::string templatePath;
-
 		// **実機テストが自分で保存した図面のパス**（テンプレートと、各周の描画結果）。
 		//
 		// 次の周の頭で、この中で**いま開いているものを保存せずに閉じる**（draw/Feedback の
@@ -60,79 +47,18 @@ namespace HomeskzIfcImport::core
 		// ので、人が手を入れていなければ未保存の変更は無く、Vectorworks を再起動しても
 		// 保存の確認が出ない。**閉じてよいのはここに名指しで在り、かつ一時ファイルの置き場
 		// （core/FeedbackScratch）の中にあるものだけ**——利用者の図面を閉じない安全弁で、
-		// `CloseDocument()` は確認なしに変更を捨てる（同 Findings）ので緩めない。
+		// `CloseDocument()` は確認なしに変更を捨てる（SDK リファレンス Findings「Documents」）
+		// ので緩めない。
 		std::vector<std::string> ownedDocuments;
-
-		// 1 周目に選んだ IFC のパスと取り込み設定。2 周目以降はこれをそのまま使う。
-		std::string ifcPath;
-		ImportOptions options;
-
-		// 済んだ周回数（1 周目が終わると 1 になる）。報告の見出しに出る。
-		int round = 0;
-
-		// 直近の周で動いていたビルドの短縮 sha（報告の「前の周からの変化」の見出しに出す）。
-		std::string lastCommit;
-
-		// **1 周目の「取り込み前に在ったレイヤ」の顔ぶれ**（core::DrawCounts::existingLayers）。
-		// 次の周でこれと照合し、図面が取り込み前へ戻してあるかを確認する——テンプレートに
-		// 「共通」等が最初から在ると真偽 1 つでは「戻し忘れ」と区別できないため、**基準は
-		// 1 周目に採る**（docs/DEV-NOTES.md M23「基準は 1 周目に採る」）。
-		//
-		// baselineRecorded は「採ってあるか」。**空の基準（＝まっさらな図面で始めた 1 周目）と
-		// 古い版が書いた記憶を区別する**ために要る——真偽が無いと、どちらも「空」に見える。
-		bool baselineRecorded = false;
-		std::vector<std::string> baselineLayers;
-
-		// 直近の周の要素内訳（parse::formatTally の 1 行表現）。次の周の報告で
-		// **「前回からどう変わったか」**を出すために持つ——数字の羅列を 2 つ並べて
-		// 読み比べさせるのでは、往復を減らした意味が薄い。
-		std::string lastTally;
 	};
-
-	// -----------------------------------------------------------------------
-	// **実機テストの周がどれになるか**（M25）。`draw/Feedback` の `runTestRound` が最初に
-	// 通す判断で、**SDK も IFC も知らない純粋な場合分け**なのでここに置き、無 SDK でテスト
-	// する（CLAUDE.md「テスト方針」——描画側から切り離せる計算は core/ へ寄せる）。
-	//
-	// **同じビルドでも取り込む**（M38）。M37 までは「同じビルドなら取り込まない」で、往復の
-	// パレットと人の手が同じ周を二重に投稿するのを防いでいた。投稿が無くなり、取り込み直す
-	// かどうかは頼んだ側（人か Claude）が決めるので、その歯止めは要らなくなった。
-	enum class FeedbackRoundKind
-	{
-		// 記憶が無い。IFC・設定を尋ねてから 1 周目を走らせる。
-		FirstRound,
-		// 記憶がある。前の周と同じ条件で続きの周を走らせる（メニューから押したときは、
-		// 同じ条件でよいかを描画側が 1 度だけ尋ねる。draw/Feedback.cpp）。
-		ContinueRound,
-		// **尋ねずに始める 1 周目**（M40）。MCP の `vw_run_test` が IFC を名指しした周で、
-		// 記憶の有無にかかわらず新しい 1 周目として走る。設定は人に尋ねず、テンプレートから
-		// 開いた図面にあるもので既定の設定を組む（draw::presetImportSettings）。テンプレートは
-		// 同じ要求で渡されたもの（リポジトリの tests/fixtures/Default.sta）か、覚えたもの。
-		AutoFirstRound,
-		// ダイアログを出せない場面（MCP の `vw_run_test`）なのに、尋ねないと始められない。
-		// 何もしない（IFC を名指しして頼み直すか、1 周目をメニューから人が実行する）。
-		// **テンプレートが無いときもここ**——人の居ない周に「いま開いている図面」を基準に
-		// 採らせると、前の周の描画結果が載った図面や利用者の図面がそのまま基準になりうる（M39）。
-		Refuse,
-	};
-
-	// allowDialogs はダイアログを出してよいか（メニューから実行したとき true、MCP は false）。
-	// ifcRequested は、頼んだ側が IFC を名指ししたか（MCP の `vw_run_test` の `ifc`。M40）。
-	// 名指しはダイアログを出せない周でだけ意味を持つ——メニューの周は人が選ぶ。
-	FeedbackRoundKind feedbackRoundKind(const FeedbackSession& session, bool allowDialogs,
-										bool ifcRequested = false);
-
-	// 記憶が「続きの周を組み立てられるだけ揃っているか」（1 周は済んでいて、その周の IFC が
-	// 分かっている）。
-	bool feedbackSessionRemembered(const FeedbackSession& session);
 
 	// -----------------------------------------------------------------------
 	// **いま開いている図面 openPath を、実機テストが保存せずに閉じてよいか**（M39 の安全弁）。
 	//
 	// `CloseDocument()` は確認なしに未保存の変更を捨てる（SDK リファレンス Findings
 	// 「Documents」）ので、閉じる相手は次の 2 つを両方満たすものに限る:
-	//   * 記憶（ownedDocuments）に**名指しで在る**——実機テストが自分で保存した図面である。
-	//   * その記憶のパスが**一時ファイルの置き場（scratchRoot）の中**にある——記憶のファイルが
+	//   * 記録（ownedDocuments）に**名指しで在る**——実機テストが自分で保存した図面である。
+	//   * その記録のパスが**一時ファイルの置き場（scratchRoot）の中**にある——記録のファイルが
 	//     壊れていたり手で書き換えられていたりしても、利用者の図面へは届かない。
 	// 同じファイルかどうかは字面だけでなく std::filesystem にも尋ねる（macOS の一時
 	// ディレクトリは /var と /private/var の 2 通りの綴りで返ってくる）。
@@ -140,31 +66,53 @@ namespace HomeskzIfcImport::core
 							 const std::string& scratchRoot);
 
 	// -----------------------------------------------------------------------
-	// 記憶を key=value テキストへ（末尾は改行）。**行の順は固定**——差分を取ったときに
-	// 中身の変化だけが見えるようにするため。
+	// **MCP の `vw_run_test` に渡された settings を取り込み設定へ当てる**（M43）。
+	//
+	// options には先に既定（テンプレートから開いた図面にあるもので組んだもの。
+	// draw::presetImportSettings）を入れておき、settings に書かれた項目だけを上書きする。
+	// 書けるのは設定ダイアログで決められるものすべて:
+	//   symbols       … { "<役割の表示名>": "<シンボル名>" | true | false }
+	//                   （core::symbolRoleLabel。文字列はそのシンボルで取り込む・空文字列と
+	//                   false は取り込まない・true は既定のシンボルのまま取り込む）
+	//   title_block   … 図面枠のスタイル名（空＝置かない）
+	//   dimension     … 寸法規格の名前（空＝入れない）
+	//   merge_levels  … 前のレベルと同じ伏図にまとめる高さ（"<階の番号>:<高さ mm>" の配列。
+	//                   core::PlanLevelKey）
+	//   skip_sections … 軸組図から除外する通りの図番の配列
+	//   rafter        … 垂木の断面 { "width": mm, "height": mm }
+	//
+	// **知らない項目・型の違う値・範囲外の値は通知せずに読み飛ばさず、false と理由を返す**
+	// ——頼んだ条件と違う条件で黙って走った周の報告は、読む側を誤らせる。settings が null
+	// （渡されなかった）なら何もせず true。失敗したとき options は途中まで書き換わっている
+	// ことがあるので、呼び出し側は周を始めずに理由を返す。
+	bool applyTestSettings(const Json& settings, ImportOptions& options, std::string& error);
+
+	// -----------------------------------------------------------------------
+	// 記録を key=value テキストへ（末尾は改行）。
 	std::string formatFeedbackSession(const FeedbackSession& session);
 
-	// key=value テキストから記憶を復元する。**知らない行・壊れた行は通知せずに読み飛ばす**
-	// （古い版が書いたファイルを読めなくして往復を止めない）。値の無い項目は既定のまま。
+	// key=value テキストから記録を復元する。**知らない行・壊れた行は通知せずに読み飛ばす**
+	// （M42 までの記憶にある条件の行もここで落ちる）。
 	FeedbackSession parseFeedbackSession(const std::string& text);
 
-	// 記憶の置き場所。**一時ディレクトリには置かない**（消えると 2 周目が走らない）:
+	// 記録の置き場所。**一時ディレクトリには置かない**（再起動をまたいで閉じる相手を
+	// 失わないため）:
 	//   macOS   … $HOME/Library/Application Support/HomeskzIfcImport/feedback.txt
 	//   Windows … %LOCALAPPDATA%\HomeskzIfcImport\feedback.txt
-	// どちらの環境変数も取れなければ空を返す（呼び出し側は記憶を使わずに 1 周で終わる）。
+	// どちらの環境変数も取れなければ空を返す（呼び出し側は記録を使わない）。
 	// **環境変数 HOMESKZ_IFC_FEEDBACK_STATE が指定されていればそれを優先する**（試験用）。
 	std::string defaultFeedbackSessionPath();
 
-	// 読み書き。読めなければ false（＝記憶が無い＝1 周目）。書けなければ false
-	// （往復は続けられるが 2 周目が走らないので、呼び出し側はログに残す）。
+	// 読み書き。読めなければ false（＝閉じる相手が無い）。書けなければ false
+	// （次の周で前の周の図面を閉じられないだけなので、呼び出し側は結末に添える）。
 	bool readFeedbackSession(const std::string& path, FeedbackSession& out);
 	bool writeFeedbackSession(const std::string& path, const FeedbackSession& session);
 
-	// 記憶を消す（セッションを終了するとき）。無ければ何もしない。
+	// 記録を消す。無ければ何もしない。
 	void clearFeedbackSession(const std::string& path);
 
 	// **直近の実機テストの報告**（Markdown。parse::formatTestRoundReport）の置き場所。
-	// 記憶と同じフォルダの last-round.md（記憶のパスが空なら空）。MCP の `vw_test_report`
+	// 記録と同じフォルダの last-round.md（記録のパスが空なら空）。MCP の `vw_test_report`
 	// がここを読む——本体を入れ替えても読めるよう、メモリではなくファイルに置く。
 	std::string testReportPathFor(const std::string& sessionPath);
 } // namespace HomeskzIfcImport::core
