@@ -28,6 +28,7 @@ namespace HomeskzIfcImport::core::trace
 			// 「なぜ本文を持つか」）。ファイルを開けなかったときでも溜める。
 			std::string text;
 			bool open = false; // ファイルの有無に関わらず「セッションが開いている」か
+			std::size_t session = 0; // open した回数（session() が返す）
 		};
 
 		// 名前空間スコープの変数にすると静的初期化順序に依存するので、関数ローカル
@@ -74,6 +75,7 @@ namespace HomeskzIfcImport::core::trace
 		s.text.clear();
 		s.start = std::chrono::steady_clock::now();
 		s.open = true;
+		++s.session;
 		s.out.open(path, std::ios::out | std::ios::trunc);
 		if (!s.out.is_open())
 			return false; // 書けない場所でも**インポートは続ける**（診断は付随機能）
@@ -112,7 +114,12 @@ namespace HomeskzIfcImport::core::trace
 
 	void log(const std::string& message)
 	{
-		emit("[" + std::to_string(elapsedMs()) + " ms] " + message);
+		// 経過ミリ秒は**右へ寄せて桁を揃える**（6 桁＝15 分弱まで）。揃えないと、本文の
+		// 字下げ（見出しの下の 1 段下げ）が桁の繰り上がりのたびにずれて、階層が読めない。
+		std::string elapsed = std::to_string(elapsedMs());
+		if (elapsed.size() < 6)
+			elapsed.insert(0, 6 - elapsed.size(), ' ');
+		emit("[" + elapsed + " ms] " + message);
 	}
 
 	void note(const std::string& text)
@@ -123,6 +130,11 @@ namespace HomeskzIfcImport::core::trace
 	const std::string& text()
 	{
 		return state().text;
+	}
+
+	std::size_t session()
+	{
+		return state().session;
 	}
 
 	long long elapsedMs()

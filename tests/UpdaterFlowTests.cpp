@@ -888,11 +888,26 @@ TEST(remote_update_installs_the_same_branchs_new_build_silently)
 
 TEST(remote_update_waits_when_nothing_new_matches)
 {
+	// そのブランチのビルドは、いまインストールされているものだけ。
+	FakeHost h;
+	h.qDevOut = "installed=run1234\n"
+				"build\trun1234\tDev: feature/x (run1234)\thttps://ex.com/x.zip\tfeature/x\n"
+				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
+	const RemoteUpdateResult r = RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "");
+	CHECK(r.outcome == RemoteUpdateOutcome::NoNewBuild);
+	CHECK_EQ(h.CountScript("do-install"), 0);
+}
+
+TEST(remote_update_says_the_current_branch_has_no_builds)
+{
+	// いまのブランチの PR が閉じてビルドが消えた。「新しいビルドは無い」とは返さない。
 	FakeHost h;
 	h.qDevOut = "installed=run1234\n"
 				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
 	const RemoteUpdateResult r = RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "");
-	CHECK(r.outcome == RemoteUpdateOutcome::NoNewBuild);
+	CHECK(r.outcome == RemoteUpdateOutcome::NoSuchBranch);
+	CHECK(r.message.find("feature/x") != std::string::npos);
+	CHECK(r.message.find("other") != std::string::npos);
 	CHECK_EQ(h.CountScript("do-install"), 0);
 }
 
@@ -997,16 +1012,23 @@ TEST(remote_update_installs_the_named_branch)
 		CHECK_EQ(args[1], "https://ex.com/y.zip");
 }
 
-TEST(remote_update_says_nothing_new_for_an_unknown_branch)
+TEST(remote_update_rejects_a_branch_without_dev_builds)
 {
+	// **main を名指しした**（開発版は PR のブランチからしかビルドされない）。「新しい
+	// ビルドは無い」と返すと、待てばビルドされるかのように読めてしまう。
 	FakeHost h;
 	h.qDevOut = "installed=run1234\n"
-				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n";
+				"build\taaa1111\tDev: feature/x (aaa1111)\thttps://ex.com/x.zip\tfeature/x\n"
+				"build\taaa0000\tDev: feature/x (aaa0000)\thttps://ex.com/x0.zip\tfeature/x\n"
+				"build\tbbb2222\tDev: other (bbb2222)\thttps://ex.com/y.zip\tother\n";
 	const RemoteUpdateResult r =
-		RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "no-such-branch");
-	CHECK(r.outcome == RemoteUpdateOutcome::NoNewBuild);
-	CHECK_EQ(r.branch, "no-such-branch");
+		RemoteDevUpdateWith(h, "feature/x", "run1234", kRunningShell, "main");
+	CHECK(r.outcome == RemoteUpdateOutcome::NoSuchBranch);
+	CHECK_EQ(r.branch, "main");
+	CHECK(r.message.find("「main」") != std::string::npos);
+	CHECK(r.message.find("feature/x, other") != std::string::npos); // 重複せず、出現順
 	CHECK_EQ(h.CountScript("do-install"), 0);
+	CHECK_EQ(static_cast<std::size_t>(h.informs.size()), static_cast<std::size_t>(0));
 }
 
 // ---------------------------------------------------------------------------

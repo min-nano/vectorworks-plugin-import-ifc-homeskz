@@ -548,6 +548,59 @@ TEST(format_log_result_indents_multi_line_notes)
 	CHECK(text.find("注意:\n  1 行目\n  2 行目\n") != std::string::npos);
 }
 
+TEST(format_log_result_folds_long_records_under_their_heading)
+{
+	// 描画側の記録は 1 件を 1 行に詰めて返す。幅を超える行は「見出し:」の下へ項目を
+	// 1 段下げて並べ、**括弧の中の " / " では分けない**。
+	DrawCounts counts;
+	counts.valid = true;
+	counts.members = 3;
+	counts.columns = 2;
+	counts.notes = "伏図の割り付け（mm）: 用紙 420×297 / 印刷可能 420×297 / 凡例 22 / "
+				   "建物 12610×10790 → 用紙上 252×216 / 縮尺 1/50 / 余白 四辺 0"
+				   "（SDK は値を書いた / シートレイヤ 420×297）。2 文目の補足です。\n"
+				   "短い記録: そのまま";
+
+	std::string const text = formatLogResult(sampleDocument(), counts, 1.0);
+	CHECK(text.find("記録:\n"
+					"  伏図の割り付け（mm）:\n"
+					"    用紙 420×297\n"
+					"    印刷可能 420×297\n"
+					"    凡例 22\n"
+					"    建物 12610×10790 → 用紙上 252×216\n"
+					"    縮尺 1/50\n"
+					"    余白 四辺 0（SDK は値を書いた / シートレイヤ 420×297）。\n"
+					"    2 文目の補足です。\n"
+					"  短い記録: そのまま\n") != std::string::npos);
+}
+
+TEST(format_log_result_splits_long_items_at_commas)
+{
+	// " / " で分けてもなお長い項目（検算のパラメータの羅列）は ", " でも分ける。
+	DrawCounts counts;
+	counts.valid = true;
+	counts.members = 3;
+	counts.columns = 2;
+	std::string params;
+	for (int i = 0; i < 12; ++i)
+		params += (i == 0 ? "" : ", ") + std::string("Param") + std::to_string(i) + "(説明)=100";
+	counts.notes = "柱の実測（取り込み後）: 測れた 2 本 / 1 本目 " + params;
+
+	std::string const text = formatLogResult(sampleDocument(), counts, 1.0);
+	CHECK(text.find("  柱の実測（取り込み後）:\n    測れた 2 本\n    1 本目 Param0(説明)=100\n"
+					"    Param1(説明)=100\n") != std::string::npos);
+	CHECK(text.find("    Param11(説明)=100\n") != std::string::npos);
+}
+
+TEST(fold_record_lines_is_shared_with_the_test_report)
+{
+	// 実機テストの報告（parse/Feedback）も同じ形で見せる。字下げは付けず、空行は除く。
+	const std::string folded = foldRecordLines(
+		"\n短い: そのまま\n\n長い記録: " + std::string(60, 'a') + " / " + std::string(60, 'b'));
+	CHECK_EQ(folded, "短い: そのまま\n長い記録:\n  " + std::string(60, 'a') + "\n  " +
+						 std::string(60, 'b'));
+}
+
 TEST(format_log_result_reports_cancel_and_invalid)
 {
 	DrawCounts cancelled;

@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace HomeskzIfcImport::parse
 {
@@ -303,21 +304,154 @@ namespace HomeskzIfcImport::parse
 
 		// ログの「結果:」に出す短い語。ダイアログの 1 行目と同じ判断から出す。
 
-		// 改行区切りの説明を、ログの箇条書き（2 字下げ）へ組み替える。
-		std::string indentLines(const std::string& text)
+		// 記録を折り返す幅（文字数。全角も半角も 1 字と数える）。ログ欄・エディタで横に
+		// 送らずに読める長さ。
+		constexpr std::size_t kFoldWidth = 100;
+
+		// UTF-8 の文字数（継続バイトを数えない）。
+		std::size_t charCount(const std::string& text)
 		{
-			std::string out;
-			std::istringstream in(text);
-			std::string line;
-			while (std::getline(in, line))
+			std::size_t count = 0;
+			for (const char c : text)
 			{
-				if (line.empty())
+				if ((static_cast<unsigned char>(c) & 0xC0U) != 0x80U)
+					++count;
+			}
+			return count;
+		}
+
+		// 本文を括弧の外の区切りで分ける。区切りは " / " と文の終わりの "。"（"。" は前の
+		// 項目に残す）と、`commas` が true なら ", "。**括弧（（）・()・[]）の中では分けない**
+		// ——「（SDK は値を書いた / シートレイヤ 420×297）」のような補足が 2 行に裂けると、
+		// どちらの行も読めなくなる。
+		std::vector<std::string> splitItems(const std::string& body, bool commas)
+		{
+			static const std::string kOpenFull = "（";
+			static const std::string kCloseFull = "）";
+			std::vector<std::string> items;
+			std::string current;
+			int depth = 0;
+			const auto flush = [&items, &current]()
+			{
+				const std::size_t first = current.find_first_not_of(' ');
+				if (first != std::string::npos)
+					items.push_back(current.substr(first));
+				current.clear();
+			};
+			for (std::size_t i = 0; i < body.size();)
+			{
+				if (body.compare(i, kOpenFull.size(), kOpenFull) == 0 || body[i] == '(' ||
+					body[i] == '[')
+					++depth;
+				else if ((body.compare(i, kCloseFull.size(), kCloseFull) == 0 || body[i] == ')' ||
+						  body[i] == ']') &&
+						 depth > 0)
+					--depth;
+				if (depth == 0)
+				{
+					if (body.compare(i, 3, " / ") == 0)
+					{
+						flush();
+						i += 3;
+						continue;
+					}
+					if (commas && body.compare(i, 2, ", ") == 0)
+					{
+						flush();
+						i += 2;
+						continue;
+					}
+					static const std::string kPeriod = "。";
+					if (body.compare(i, kPeriod.size(), kPeriod) == 0)
+					{
+						current += kPeriod;
+						i += kPeriod.size();
+						flush();
+						continue;
+					}
+				}
+				// UTF-8 の 1 文字ぶんをまとめて送る（先頭バイトから長さが決まる）。
+				const auto lead = static_cast<unsigned char>(body[i]);
+				std::size_t length = 4;
+				if (lead < 0x80U)
+					length = 1;
+				else if (lead < 0xE0U)
+					length = 2;
+				else if (lead < 0xF0U)
+					length = 3;
+				current += body.substr(i, length);
+				i += length;
+			}
+			flush();
+			return items;
+		}
+
+		// **長すぎる 1 行を「見出し:」と 1 段下げた項目へ折る。** 描画側の記録は 1 件を 1 行に
+		// 詰めて返すので、検算の実測のように 2000 字近い行ができ、読みたい値を横に探すことに
+		// なる。区切り（" / "・"。"、それでも長い項目は ", "）で項目に分け、見出し（最初の
+		// ": " まで）の下へ並べる。幅に収まる行・見出しの無い行・分けても 1 項目にしかならない
+		// 行はそのまま返す（無理に折ると、かえって読めなくなる）。
+		std::string foldLine(const std::string& line)
+		{
+			if (charCount(line) <= kFoldWidth)
+				return line;
+			const std::size_t colon = line.find(": ");
+			if (colon == std::string::npos)
+				return line;
+			std::vector<std::string> items;
+			for (const std::string& item : splitItems(line.substr(colon + 2), false))
+			{
+				if (charCount(item) <= kFoldWidth)
+				{
+					items.push_back(item);
 					continue;
-				out += "  " + line + "\n";
+				}
+				for (const std::string& part : splitItems(item, true))
+					items.push_back(part);
+			}
+			if (items.size() < 2)
+				return line;
+			// 字下げ済みの行（記録の中の入れ子）は、その字下げを項目にも引き継ぐ。
+			const std::string indent(line.find_first_not_of(' '), ' ');
+			std::string out = line.substr(0, colon + 1);
+			for (const std::string& item : items)
+			{
+				out += "\n";
+				out += indent;
+				out += "  ";
+				out += item;
 			}
 			return out;
 		}
+
+		// 改行区切りの説明を、ログの箇条書き（2 字下げ）へ組み替える。長すぎる行は
+		// foldRecordLines で見出しと項目に折る（項目はさらに 2 字下げる）。
+		std::string indentLines(const std::string& text)
+		{
+			std::string out;
+			std::istringstream in(foldRecordLines(text));
+			std::string line;
+			while (std::getline(in, line))
+				out += "  " + line + "\n";
+			return out;
+		}
 	} // namespace
+
+	std::string foldRecordLines(const std::string& text)
+	{
+		std::string out;
+		std::istringstream in(text);
+		std::string line;
+		while (std::getline(in, line))
+		{
+			if (line.empty())
+				continue;
+			if (!out.empty())
+				out += "\n";
+			out += foldLine(line);
+		}
+		return out;
+	}
 
 	std::string formatImportResult(const core::Document& document, const core::DrawCounts& counts,
 								   const std::string& fileName)

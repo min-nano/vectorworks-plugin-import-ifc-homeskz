@@ -24,12 +24,18 @@
 //	InversePointTransform でローカルへ変換する（変換しないと PIO を動かした量だけ図形がずれ、
 //	リセットしても同じ相対位置に再描画するので直らない。draw/ColumnMarkPio.cpp で実証済み）。
 //
-//	【診断ログ】リセットのたびに、軸・内法・高さ・記号の離れを診断ログへ 1 行ずつ**自身で**
-//	書く。ログへの書き出し口を入口（draw/ImportRun）へ寄せる規約（CLAUDE.md「重複を作らない
-//	置き場所」）の**唯一の例外**で、PIO のリセットは Vectorworks から直接呼ばれる別の入口だから
+//	【診断ログ】リセットのたびに、壁の原点・内法・記号の離れ・高さ・軸を診断ログへ
+//	**1 行にまとめて自身で**書く（TraceReset）。ログへの書き出し口を入口（draw/ImportRun）へ
+//	寄せる規約（CLAUDE.md「重複を作らない置き場所」）の**唯一の例外**で、PIO のリセットは Vectorworks から直接呼ばれる別の入口だから
 //	である（取り込みの記録へ返す経路が無い）。ログが開いているのは取り込みの最中だけなので、
-//	利用者の編集で実行されるリセットでは何も書かない。1 行ごとにフラッシュされるので、リセットの
-//	途中でクラッシュしたときに、どの壁かが最終行に残る（core/Trace.h）。
+//	利用者の編集で実行されるリセットでは何も書かない。行は作図の前に書いてフラッシュされるので、
+//	作図の途中でクラッシュしたときに、どの壁かが最終行に残る（core/Trace.h）。
+//	**書かないリセットが 2 つある**——パラメータを書く前のリセット（PIO を作った直後に
+//	Vectorworks が実行する。1 枚につき 2 回あり、軸も控えの内法も無いのが正常）と、同じ取り込みの
+//	中で同じ壁が前回と同じ結果になったリセット（伏図を仕上げるときに全枚数がもう 1 度リセット
+//	される）。どちらも書くと 1 枚あたりの行が 4 倍になり、読みたい行を探せなくなる（実測で
+//	ログ 1600 行のうち 1460 行がこの行だった）。その間に異常終了したときは、最終行がフェーズの
+//	見出しになるので、どの段階かまでは分かる。
 //
 //	【実際の見え方はローカルで確認する】記号の大きさ・ハッチングの向き・断面ビューポートで
 //	3D の面がどう表示されるかは CI では検証できない（CLAUDE.md「テスト方針」）。
@@ -58,6 +64,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -444,12 +451,12 @@ namespace HomeskzIfcImport::draw
 						names += ", ";
 					names += pio.GetParamName(i).GetStdString();
 				}
-				core::trace::log("shearwall: PIO のパラメータ " + std::to_string(count) +
+				core::trace::log("  耐力壁: PIO のパラメータ " + std::to_string(count) +
 								 " 個: " + names);
 			}
 			catch (...)
 			{
-				core::trace::log("shearwall: PIO のパラメータ一覧を読めない");
+				core::trace::log("  耐力壁: PIO のパラメータ一覧を読めない");
 			}
 		}
 
@@ -476,7 +483,8 @@ namespace HomeskzIfcImport::draw
 			bool fromColumns = false; // 柱から求められた（false なら控え）
 			double start = 0.0;		  // 内法の始まり（ローカル x）
 			double end = 0.0;		  // 内法の終わり（ローカル x）
-			std::string axis;		  // 軸の取り方（診断ログ用）
+			bool unset = false; // 軸も控えの内法も無い（パラメータを書く前のリセット）
+			std::string axis; // 軸の取り方（診断ログ用）
 			std::string search; // 柱が見つからなかった経過（診断ログ用。見つかれば空）
 		};
 
@@ -503,9 +511,7 @@ namespace HomeskzIfcImport::draw
 				startX = localStart.x;
 				endX = localEnd.x;
 				haveAxis = (endX - startX) >= core::kPointEps;
-				result.axis = "線分 world=[(" + Number(worldStart.x) + ", " + Number(worldStart.y) +
-							  "), (" + Number(worldEnd.x) + ", " + Number(worldEnd.y) +
-							  ")] local x=[" + Number(startX) + ", " + Number(endX) + "]";
+				result.axis = "軸 x=[" + Number(startX) + ", " + Number(endX) + "]";
 			}
 			catch (...)
 			{
@@ -518,11 +524,12 @@ namespace HomeskzIfcImport::draw
 				if (fallbackSpan <= 0.0)
 				{
 					result.axis += "・軸も控えの内法も無い";
+					result.unset = true;
 					return result;
 				}
 				startX = 0.0;
 				endX = fallbackSpan;
-				result.axis += "・軸を控えの内法から組み直す x=[0, " + Number(endX) + "]";
+				result.axis += "→控えの内法から組み直す x=[0, " + Number(endX) + "]";
 			}
 
 			// 軸組内法。**実物の柱から求めるのが原則**で、見つからないときだけ控えを使う。
@@ -553,6 +560,37 @@ namespace HomeskzIfcImport::draw
 				text += "（柱が見つからない: " + span.search + "）";
 			return text;
 		}
+
+		// 壁の原点（ワールド座標）。診断ログの行で**どの壁か**を見分ける（内法や高さは
+		// 同じ寸法の壁で重なるので、それだけでは壁を特定できない）。
+		std::string DescribeOrigin(const VWTransformMatrix& toWorld)
+		{
+			const VWPoint2D origin = toWorld.PointTransform(VWPoint2D(0.0, 0.0));
+			return "(" + Number(origin.x) + ", " + Number(origin.y) + ")";
+		}
+
+		// リセット 1 回の結果を診断ログへ **1 行**書く（ファイル冒頭「診断ログ」）。
+		// 同じ取り込み（core::trace::session）の中で、同じ壁について前回と同じ内容なら書かない。
+		// ログが開いていなければ何もしない。
+		void TraceReset(MCObjectHandle object, const std::string& origin, const std::string& text)
+		{
+			if (!core::trace::isOpen())
+				return;
+			static std::size_t lastSession = 0;
+			static std::map<MCObjectHandle, std::string> last;
+			if (lastSession != core::trace::session())
+			{
+				lastSession = core::trace::session();
+				last.clear();
+			}
+			// 比べるのは**原点を含めた行全体**（壁が動いて原点だけ変わったリセットも書く）。
+			const std::string line = "  耐力壁 " + origin + ": " + text;
+			std::string& previous = last[object];
+			if (previous == line)
+				return;
+			previous = line;
+			core::trace::log(line);
+		}
 	} // namespace
 
 	// -------------------------------------------------------------------
@@ -562,6 +600,8 @@ namespace HomeskzIfcImport::draw
 		if (object == nil)
 			return kObjectEventNoErr;
 
+		// 例外の行にも壁の原点を添えるため、try の外に置く（原点を求める前なら空）。
+		std::string origin;
 		try
 		{
 			const VWParametricObj self(object);
@@ -573,23 +613,25 @@ namespace HomeskzIfcImport::draw
 			self.GetObjectToWorldTransform(toWorld);
 
 			const ClearSpan resolved = ResolveClearSpan(self, toWorld);
-			core::trace::log("  shearwall: " + resolved.axis);
+			origin = DescribeOrigin(toWorld);
 			if (!resolved.ok)
 			{
-				core::trace::log(
-					"  shearwall: 内法が決まらないので描かない" +
-					(resolved.search.empty() ? std::string() : "（" + resolved.search + "）"));
+				// パラメータを書く前のリセットは書かない（ファイル冒頭「診断ログ」）。
+				if (!resolved.unset)
+					TraceReset(object, origin,
+							   "内法が決まらないので描かない" +
+								   (resolved.search.empty() ? std::string()
+															: "（" + resolved.search + "）") +
+								   "・" + resolved.axis);
 				return kObjectEventNoErr;
 			}
 			const double clearStart = resolved.start;
 			const double clearEnd = resolved.end;
-			core::trace::log("  shearwall: 内法 " + DescribeClearSpan(resolved));
 
 			// 記号を壁芯からどれだけ離すか（**図面 mm**）。記号そのものの大きさは
 			// シンボル定義が持つので、ここで扱うのは置き場所だけ。
 			const double markOffset =
 				ParamReal(self, kParamShearMarkOffset, kShearMarkOffsetDefault);
-			core::trace::log("  shearwall: 記号の離れ " + Number(markOffset) + "mm");
 
 			// 軸組内法の高さ。**ここが取得できなくても伏図の記号は描画する**——記号は平面だけで
 			// 決まるので、高さを取得できないことで図面から耐力壁が丸ごと消えるのは避ける
@@ -604,9 +646,16 @@ namespace HomeskzIfcImport::draw
 			const double topEndParam = ParamReal(self, kParamShearTopEnd);
 			const double topAtEnd = topEndParam > bottom ? topEndParam : topAtStart;
 			const bool hasHeight = topAtStart > bottom && topAtEnd > bottom;
-			core::trace::log("  shearwall: 高さ z=[" + Number(bottom) + ", " + Number(topAtStart) +
-							 "→" + Number(topAtEnd) + "]" +
-							 (hasHeight ? "" : " ← 取れないので 3D は描かない"));
+			// **作図の前に書く**（作図の途中で異常終了したときに、どの壁かが最終行に残る）。
+			// 上端は両端が同じなら 1 つだけ出す。
+			const std::string top = topAtEnd == topAtStart
+										? Number(topAtStart)
+										: Number(topAtStart) + "→" + Number(topAtEnd);
+			TraceReset(object, origin,
+					   "内法 " + DescribeClearSpan(resolved) + "・記号の離れ " +
+						   Number(markOffset) + "mm・高さ z=[" + Number(bottom) + ", " + top + "]" +
+						   (hasHeight ? "" : "（取れないので 3D は描かない）") + "・" +
+						   resolved.axis);
 
 			if (draw::PioParamString(self, kParamShearKind) == kShearKindPanel)
 			{
@@ -677,7 +726,7 @@ namespace HomeskzIfcImport::draw
 			// 1 枚の異常で耐力壁全体を停止させない（CLAUDE.md「エラーハンドリング」）。
 			// kObjectEventHadError を返すと VW がオブジェクトをエラー表示にするので、
 			// ここまでに描画できたものを残したまま正常終了として抜ける（柱記号 PIO と同じ）。
-			core::trace::log("  shearwall: 例外（ここまでに描けたものを残して抜ける）");
+			core::trace::log("  耐力壁 " + origin + ": 例外（ここまでに描けたものを残して抜ける）");
 			return kObjectEventNoErr;
 		}
 		return kObjectEventNoErr;
@@ -710,9 +759,9 @@ namespace HomeskzIfcImport::draw
 				text += "（" + resolved.search + "）";
 			const VWPoint2D origin = toWorld.PointTransform(VWPoint2D(0.0, 0.0));
 			const VWPoint2D along = toWorld.PointTransform(VWPoint2D(1.0, 0.0));
-			probe.text = text + "・原点 world=(" + Number(origin.x) + ", " + Number(origin.y) +
-						 ")・向き (" + Number(along.x - origin.x) + ", " +
-						 Number(along.y - origin.y) + ")・" + resolved.axis;
+			probe.text = text + "・原点 world=" + DescribeOrigin(toWorld) + "・向き (" +
+						 Number(along.x - origin.x) + ", " + Number(along.y - origin.y) + ")・" +
+						 resolved.axis;
 		}
 		catch (...)
 		{
