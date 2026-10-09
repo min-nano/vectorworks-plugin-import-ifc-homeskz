@@ -365,7 +365,7 @@ jobs:
         # 付け替えられるため、v1 のままだと中身が知らないうちに変わりうる。更新は
         # Dependabot が # の後ろの版を参照して上げる (他のワークフローが
         # actions/checkout などを固定しているのと同じ作法)。
-        uses: anthropics/claude-code-action@cab360f6565aa35a51d6ce9e43f1f4287c0a32ea # v1
+        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1
         env:
           # 何かの経路で環境に残っていても使われないよう、空で上書きする。
           # 使われると API のクレジットを別枠で消費しかねない。
