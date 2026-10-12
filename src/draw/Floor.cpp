@@ -114,7 +114,7 @@ namespace HomeskzIfcImport::draw
 			if (!AdvanceProgress(progress))
 				break;
 
-			// 配置先レイヤ（"n-FL"）が無い命令はスキップする（規約は ActivateExistingLayer）。
+			// 配置先レイヤ（"n±0-FL"）が無い命令はスキップする（規約は ActivateExistingLayer）。
 			if (ActivateExistingLayer(floor.layer) == nil)
 				continue;
 

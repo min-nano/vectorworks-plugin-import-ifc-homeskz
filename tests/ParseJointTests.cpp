@@ -96,7 +96,7 @@ namespace
 						 double width = 105.0, double depth = 105.0)
 	{
 		ColumnCommand command;
-		command.layer = "1to2-柱";
+		command.layer = "1±0_2±0-柱";
 		command.memberId = "x";
 		command.drawClass = CLASS_KUDABASHIRA;
 		command.structuralUse = "4";
@@ -233,7 +233,7 @@ TEST(joint_non_noboribari_still_layer_restricted)
 	// 通常の横架材は別レイヤの相手を受ける材にしない（従来どおり）。
 	const std::vector<MemberCommand> members = {
 		member("R-母屋", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}),
-		member("R-軒高", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0}),
+		member("R±0-横架材", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0}),
 	};
 	CHECK(!endHasReceiver(1, Vec2{1500.0, 60.0}, geomsOf(members), members, {}));
 }
@@ -262,7 +262,7 @@ TEST(joint_beam_end_on_column_is_received)
 {
 	// 梁: 天端 425・背 180 → Z 範囲 [245, 425]。柱: 下端 −2575・高さ 3000 → [−2575, 425]。
 	const std::vector<MemberCommand> members = {
-		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{1500.0, 0.0})};
+		member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{1500.0, 0.0})};
 	const std::vector<ColumnGeom> columns =
 		columnGeomsOf({column(Vec2{1500.0, 0.0}, -2575.0, 3000.0)});
 	CHECK(endHasReceiver(0, Vec2{1500.0, 0.0}, geomsOf(members), members, columns));
@@ -272,7 +272,7 @@ TEST(joint_beam_end_on_column_face_is_received)
 {
 	// 柱の側面（x = 1500 − 52.5）ちょうどに載る梁端も取り付きとみなす。
 	const std::vector<MemberCommand> members = {
-		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{1447.5, 0.0})};
+		member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{1447.5, 0.0})};
 	const std::vector<ColumnGeom> columns =
 		columnGeomsOf({column(Vec2{1500.0, 0.0}, -2575.0, 3000.0)});
 	CHECK(endHasReceiver(0, Vec2{1447.5, 0.0}, geomsOf(members), members, columns));
@@ -281,7 +281,7 @@ TEST(joint_beam_end_on_column_face_is_received)
 TEST(joint_beam_end_away_from_column_is_not_received)
 {
 	const std::vector<MemberCommand> members = {
-		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{1500.0, 0.0})};
+		member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{1500.0, 0.0})};
 	const std::vector<ColumnGeom> columns =
 		columnGeomsOf({column(Vec2{5000.0, 5000.0}, -2575.0, 3000.0)});
 	CHECK(!endHasReceiver(0, Vec2{1500.0, 0.0}, geomsOf(members), members, columns));
@@ -291,7 +291,7 @@ TEST(joint_column_z_separated_is_not_received)
 {
 	// 柱の上端が梁の Z 範囲より下（梁が柱に乗って面で触れるだけ）は取り付きとみなさない。
 	const std::vector<MemberCommand> members = {
-		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{1500.0, 0.0})};
+		member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{1500.0, 0.0})};
 	const std::vector<ColumnGeom> columns =
 		columnGeomsOf({column(Vec2{1500.0, 0.0}, 425.0, 3000.0)});
 	CHECK(!endHasReceiver(0, Vec2{1500.0, 0.0}, geomsOf(members), members, columns));
@@ -310,7 +310,7 @@ TEST(joint_point_in_column_uses_axis_aligned_rectangle)
 TEST(joint_build_places_joint_at_column_supported_end)
 {
 	// 柱に受けられる梁端に仕口が付く（横架材同士では受け材が無いケース）。
-	const MemberCommand beam = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{1500.0, 0.0});
+	const MemberCommand beam = member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{1500.0, 0.0});
 	const ColumnCommand post = column(Vec2{1500.0, 0.0}, -2575.0, 3000.0);
 
 	// 柱を渡さなければ受ける材が無いので仕口は 0。
@@ -319,7 +319,7 @@ TEST(joint_build_places_joint_at_column_supported_end)
 	const std::vector<SymbolCommand> commands = buildJointCommands({beam}, {post});
 	CHECK_EQ(commands.size(), std::size_t{1});
 	CHECK_EQ(commands.front().symbol, std::string(kSymbolJoint));
-	CHECK_EQ(commands.front().layer, std::string("1-横架材天端"));
+	CHECK_EQ(commands.front().layer, std::string("1±0-横架材"));
 	CHECK(near(commands.front().position.x, 1500.0));
 	CHECK(near(commands.front().position.y, 0.0));
 	// 終端の内側方向は −軸（+X の梁なので 180 度）。
@@ -330,10 +330,10 @@ TEST(joint_build_places_joint_at_column_supported_end)
 
 TEST(joint_degenerate_member_is_skipped)
 {
-	const MemberCommand degenerate = member("1-横架材天端", Vec2{500.0, 500.0}, Vec2{500.0, 500.0});
+	const MemberCommand degenerate = member("1±0-横架材", Vec2{500.0, 500.0}, Vec2{500.0, 500.0});
 	CHECK(!memberGeom(degenerate).valid);
 
-	const MemberCommand other = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0});
+	const MemberCommand other = member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0});
 	const std::vector<MemberCommand> members = {degenerate, other};
 	CHECK(!endHasReceiver(0, Vec2{500.0, 500.0}, geomsOf(members), members, {}));
 	CHECK(buildJointCommands({degenerate, other}).empty());
@@ -344,7 +344,7 @@ TEST(joint_end_has_receiver_rejects_out_of_range_index)
 	// 範囲外のインデックスは受ける材なしとして扱う（呼び出し側は範囲内しか渡さないが、
 	// 範囲外の添字で異常終了しないことを守る）。
 	const std::vector<MemberCommand> members = {
-		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})};
+		member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})};
 	CHECK(!endHasReceiver(5, Vec2{0.0, 0.0}, geomsOf(members), members, {}));
 }
 
@@ -352,13 +352,13 @@ TEST(joint_end_has_receiver_rejects_out_of_range_index)
 
 TEST(joint_t_junction_places_single_joint_at_stem_end)
 {
-	const MemberCommand a = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0});
-	const MemberCommand b = member("1-横架材天端", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0});
+	const MemberCommand a = member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0});
+	const MemberCommand b = member("1±0-横架材", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0});
 
 	const std::vector<SymbolCommand> commands = buildJointCommands({a, b});
 	CHECK_EQ(commands.size(), std::size_t{1});
 	CHECK_EQ(commands.front().symbol, std::string(kSymbolJoint));
-	CHECK_EQ(commands.front().layer, std::string("1-横架材天端"));
+	CHECK_EQ(commands.front().layer, std::string("1±0-横架材"));
 	CHECK(near(commands.front().position.x, 1500.0));
 	CHECK(near(commands.front().position.y, 60.0));
 	// 内側方向（+Y。B の始端から終端へ）＝ 90 度。
@@ -367,15 +367,15 @@ TEST(joint_t_junction_places_single_joint_at_stem_end)
 
 TEST(joint_free_member_has_no_joints)
 {
-	CHECK(buildJointCommands({member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})}).empty());
+	CHECK(buildJointCommands({member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0})}).empty());
 }
 
 TEST(joint_both_ends_received_places_two_joints)
 {
 	// 2 本の桁の間に架かる梁は両端に仕口が付く。
-	const MemberCommand left = member("1-横架材天端", Vec2{0.0, -2000.0}, Vec2{0.0, 2000.0});
-	const MemberCommand right = member("1-横架材天端", Vec2{3000.0, -2000.0}, Vec2{3000.0, 2000.0});
-	const MemberCommand span = member("1-横架材天端", Vec2{60.0, 0.0}, Vec2{2940.0, 0.0});
+	const MemberCommand left = member("1±0-横架材", Vec2{0.0, -2000.0}, Vec2{0.0, 2000.0});
+	const MemberCommand right = member("1±0-横架材", Vec2{3000.0, -2000.0}, Vec2{3000.0, 2000.0});
+	const MemberCommand span = member("1±0-横架材", Vec2{60.0, 0.0}, Vec2{2940.0, 0.0});
 
 	const std::vector<SymbolCommand> commands = buildJointCommands({left, right, span});
 	const auto onSpan =
@@ -414,9 +414,9 @@ TEST(joint_noboribari_end_on_moya_places_joint)
 TEST(joint_result_is_order_independent)
 {
 	// 入力の並びを変えても仕口の集合は同じ（判定がジオメトリだけで決まる）。
-	const MemberCommand a = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0});
-	const MemberCommand b = member("1-横架材天端", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0});
-	const MemberCommand c = member("1-横架材天端", Vec2{5000.0, 5000.0}, Vec2{7000.0, 5000.0});
+	const MemberCommand a = member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0});
+	const MemberCommand b = member("1±0-横架材", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0});
+	const MemberCommand c = member("1±0-横架材", Vec2{5000.0, 5000.0}, Vec2{7000.0, 5000.0});
 
 	CHECK(keysOf(buildJointCommands({a, b, c})) == keysOf(buildJointCommands({c, b, a})));
 }
@@ -427,8 +427,8 @@ TEST(joint_flat_member_keeps_layer_plane_height)
 {
 	// レベルちょうどに載る平らな梁（バウンド offset = 0）は高さ調整をしない＝従来どおり
 	// レイヤ平面に載る。
-	const MemberCommand a = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0});
-	const MemberCommand b = member("1-横架材天端", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0});
+	const MemberCommand a = member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0});
+	const MemberCommand b = member("1±0-横架材", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0});
 
 	const std::vector<SymbolCommand> commands = buildJointCommands({a, b});
 	CHECK_EQ(commands.size(), std::size_t{1});
@@ -438,10 +438,10 @@ TEST(joint_flat_member_keeps_layer_plane_height)
 TEST(joint_height_follows_end_bound_offset)
 {
 	// 段差梁（天端がレベルより 150mm 下）の仕口はレイヤ平面から 150mm 下がる。
-	const MemberCommand girder = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 120.0,
+	const MemberCommand girder = member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 120.0,
 										180.0, 275.0, 275.0, -150.0, -150.0);
-	const MemberCommand beam = member("1-横架材天端", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0},
-									  120.0, 180.0, 275.0, 275.0, -150.0, -150.0);
+	const MemberCommand beam = member("1±0-横架材", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0}, 120.0,
+									  180.0, 275.0, 275.0, -150.0, -150.0);
 
 	const std::vector<SymbolCommand> commands = buildJointCommands({girder, beam});
 	CHECK_EQ(commands.size(), std::size_t{1});
@@ -453,7 +453,7 @@ TEST(joint_sloped_member_uses_the_offset_of_its_own_end)
 	// 登り梁は両端で天端 Z が違う（軒桁 425 ↔ 棟木 6000）。両端に仕口が付くとき、始端の
 	// 仕口は startBound、終端の仕口は endBound の offset を持つ——1 本の梁に一律の高さを
 	// 与えるのではなく、**端部ごとに**梁の天端へ合わせる。
-	MemberCommand eaves = member("R-軒高", Vec2{-2000.0, 0.0}, Vec2{2000.0, 0.0}, 120.0, 180.0,
+	MemberCommand eaves = member("R±0-横架材", Vec2{-2000.0, 0.0}, Vec2{2000.0, 0.0}, 120.0, 180.0,
 								 425.0, 425.0, 0.0, 0.0);
 	MemberCommand munagi = member("R-母屋", Vec2{-2000.0, 3000.0}, Vec2{2000.0, 3000.0}, 120.0,
 								  180.0, 6000.0, 6000.0, 5575.0, 5575.0);
@@ -483,10 +483,10 @@ TEST(joint_height_is_taken_from_the_receiving_member_independent_bound)
 {
 	// 高さは**仕口が載る梁自身**の端部から取る（受ける材の高さではない）。受ける材の
 	// offset を変えても、仕口の高さは変わらない。
-	const MemberCommand girder = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 120.0,
+	const MemberCommand girder = member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{3000.0, 0.0}, 120.0,
 										180.0, 425.0, 425.0, 0.0, 0.0);
-	const MemberCommand beam = member("1-横架材天端", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0},
-									  120.0, 180.0, 425.0, 425.0, 120.0, 120.0);
+	const MemberCommand beam = member("1±0-横架材", Vec2{1500.0, 60.0}, Vec2{1500.0, 2000.0}, 120.0,
+									  180.0, 425.0, 425.0, 120.0, 120.0);
 
 	const std::vector<SymbolCommand> commands = buildJointCommands({girder, beam});
 	CHECK_EQ(commands.size(), std::size_t{1});

@@ -146,7 +146,7 @@ namespace
 							   double width = 105.0, double depth = 105.0)
 	{
 		core::ColumnCommand command;
-		command.layer = "2to2.5-柱";
+		command.layer = "2±0_2+0.5-柱";
 		command.memberId = "col";
 		command.drawClass = HomeskzIfcImport::parse::CLASS_KOYAZUKA;
 		command.structuralUse = "5";

@@ -35,12 +35,17 @@ using HomeskzIfcImport::parse::buildStoryCommands;
 using HomeskzIfcImport::parse::collectStories;
 using HomeskzIfcImport::parse::Entity;
 using HomeskzIfcImport::parse::getLocalPlacementZ;
+using HomeskzIfcImport::parse::layerStoryPrefix;
+using HomeskzIfcImport::parse::levelLabel;
+using HomeskzIfcImport::parse::levelLayerName;
 using HomeskzIfcImport::parse::loadIfcFromText;
 using HomeskzIfcImport::parse::Model;
+using HomeskzIfcImport::parse::parseLevelLabel;
 using HomeskzIfcImport::parse::parseSpanLayer;
 using HomeskzIfcImport::parse::resolveBeamTopOffset;
 using HomeskzIfcImport::parse::spanLayerName;
 using HomeskzIfcImport::parse::StoryInfo;
+using HomeskzIfcImport::parse::stripLevelStep;
 using HomeskzIfcTests::fixture;
 using HomeskzIfcTests::near;
 
@@ -89,10 +94,12 @@ namespace
 
 TEST(beam_group_layer_reads_nokigeta_as_the_beam_layer)
 {
-	// 軒桁の専用レイヤは同じ階の横架材レイヤ（最上階は軒高）と同じ群。それ以外はそのまま。
-	CHECK_EQ(beamGroupLayer("2-軒桁"), std::string("2-横架材天端"));
-	CHECK_EQ(beamGroupLayer("R-軒桁"), std::string("R-軒高"));
-	CHECK_EQ(beamGroupLayer("2-横架材天端"), std::string("2-横架材天端"));
+	// 軒桁の専用レイヤは同じ伏図レベルの横架材レイヤ（最上階も "横架材"）と同じ群。段数は
+	// 残す。それ以外はそのまま。
+	CHECK_EQ(beamGroupLayer("2±0-軒桁"), std::string("2±0-横架材"));
+	CHECK_EQ(beamGroupLayer("2-1-軒桁"), std::string("2-1-横架材"));
+	CHECK_EQ(beamGroupLayer("R±0-軒桁"), std::string("R±0-横架材"));
+	CHECK_EQ(beamGroupLayer("2±0-横架材"), std::string("2±0-横架材"));
 	CHECK_EQ(beamGroupLayer("R-母屋"), std::string("R-母屋"));
 	CHECK_EQ(beamGroupLayer("軒桁"), std::string("軒桁"));
 }
@@ -382,17 +389,17 @@ TEST(build_commands_for_three_stories)
 	CHECK(near(stories[0].elevation, 473.0));
 	CHECK_EQ(stories[0].levels.size(), static_cast<std::size_t>(2));
 	CHECK_EQ(stories[0].levels[0].type, std::string("FL"));
-	CHECK_EQ(stories[0].levels[0].layer, std::string("1-FL"));
+	CHECK_EQ(stories[0].levels[0].layer, std::string("1±0-FL"));
 	CHECK(near(stories[0].levels[0].offset, 0.0));
 	CHECK_EQ(stories[0].levels[1].type, std::string("横架材天端"));
-	CHECK_EQ(stories[0].levels[1].layer, std::string("1-横架材天端"));
+	CHECK_EQ(stories[0].levels[1].layer, std::string("1±0-横架材"));
 	CHECK(near(stories[0].levels[1].offset, -48.0));
 
 	// 2階: 床版 -36 が横架材天端オフセット。
 	CHECK_EQ(stories[1].name, std::string("2階"));
 	CHECK_EQ(stories[1].suffix, std::string("2"));
 	CHECK(near(stories[1].levels[1].offset, -36.0));
-	CHECK_EQ(stories[1].levels[1].layer, std::string("2-横架材天端"));
+	CHECK_EQ(stories[1].levels[1].layer, std::string("2±0-横架材"));
 
 	// 屋根: suffix "R"、軒高(0,R-軒高) のみ。
 	CHECK_EQ(stories[2].name, std::string("屋根"));
@@ -400,7 +407,7 @@ TEST(build_commands_for_three_stories)
 	CHECK(near(stories[2].elevation, 5973.0));
 	CHECK_EQ(stories[2].levels.size(), static_cast<std::size_t>(1));
 	CHECK_EQ(stories[2].levels[0].type, std::string("軒高"));
-	CHECK_EQ(stories[2].levels[0].layer, std::string("R-軒高"));
+	CHECK_EQ(stories[2].levels[0].layer, std::string("R±0-横架材"));
 	CHECK(near(stories[2].levels[0].offset, 0.0));
 }
 
@@ -433,14 +440,14 @@ TEST(desired_layer_order_grid_top_then_stories_top_down)
 {
 	// 1階・2階・屋根の基本命令。希望順は "共通" → 最上階→最下階、床(FL)は背面。
 	std::vector<StoryCommand> stories = {
-		{"1階", "1", 473.0, {{"FL", 0.0, "1-FL"}, {"横架材天端", -48.0, "1-横架材天端"}}},
-		{"2階", "2", 3273.0, {{"FL", 0.0, "2-FL"}, {"横架材天端", -36.0, "2-横架材天端"}}},
-		{"屋根", "R", 5973.0, {{"軒高", 0.0, "R-軒高"}}},
+		{"1階", "1", 473.0, {{"FL", 0.0, "1±0-FL"}, {"横架材天端", -48.0, "1±0-横架材"}}},
+		{"2階", "2", 3273.0, {{"FL", 0.0, "2±0-FL"}, {"横架材天端", -36.0, "2±0-横架材"}}},
+		{"屋根", "R", 5973.0, {{"軒高", 0.0, "R±0-横架材"}}},
 	};
 	std::vector<std::string> const order = desiredStoryLayerOrder(stories);
 
-	const std::vector<std::string> expected = {"共通",		   "R-軒高", "2-横架材天端",
-											   "1-横架材天端", "2-FL",	 "1-FL"};
+	const std::vector<std::string> expected = {"共通",		 "R±0-横架材", "2±0-横架材",
+											   "1±0-横架材", "2±0-FL",	   "1±0-FL"};
 	CHECK_EQ(order.size(), expected.size());
 	if (order.size() == expected.size())
 	{
@@ -458,21 +465,21 @@ TEST(desired_layer_order_brings_shear_wall_layers_to_the_front)
 		{"1階",
 		 "1",
 		 0.0,
-		 {{"FL", 0.0, "1-FL"},
-		  {"耐力壁", -48.0, "1-耐力壁"},
-		  {"横架材天端", -48.0, "1-横架材天端"}}},
+		 {{"FL", 0.0, "1±0-FL"},
+		  {"耐力壁", -48.0, "1±0-耐力壁"},
+		  {"横架材天端", -48.0, "1±0-横架材"}}},
 		{"2階",
 		 "2",
 		 3000.0,
-		 {{"FL", 0.0, "2-FL"},
-		  {"耐力壁", -36.0, "2-耐力壁"},
-		  {"横架材天端", -36.0, "2-横架材天端"}}},
+		 {{"FL", 0.0, "2±0-FL"},
+		  {"耐力壁", -36.0, "2±0-耐力壁"},
+		  {"横架材天端", -36.0, "2±0-横架材"}}},
 	};
-	std::vector<std::string> const order = desiredStoryLayerOrder(stories, {"2-柱伏図記号"});
+	std::vector<std::string> const order = desiredStoryLayerOrder(stories, {"2±0-柱伏図記号"});
 
-	const std::vector<std::string> expected = {"共通",	   "2-柱伏図記号", "2-耐力壁",
-											   "1-耐力壁", "2-横架材天端", "1-横架材天端",
-											   "2-FL",	   "1-FL"};
+	const std::vector<std::string> expected = {"共通",		 "2±0-柱伏図記号", "2±0-耐力壁",
+											   "1±0-耐力壁", "2±0-横架材",	   "1±0-横架材",
+											   "2±0-FL",	 "1±0-FL"};
 	CHECK_EQ(order.size(), expected.size());
 	if (order.size() == expected.size())
 	{
@@ -485,11 +492,11 @@ TEST(desired_layer_order_prepends_top_layers)
 {
 	// topLayers（伏図記号レイヤ等・ストーリ非依存）は "共通" の直下に積む。
 	std::vector<StoryCommand> stories = {
-		{"屋根", "R", 0.0, {{"軒高", 0.0, "R-軒高"}}},
+		{"屋根", "R", 0.0, {{"軒高", 0.0, "R±0-横架材"}}},
 	};
-	std::vector<std::string> const order = desiredStoryLayerOrder(stories, {"2-柱伏図記号"});
+	std::vector<std::string> const order = desiredStoryLayerOrder(stories, {"2±0-柱伏図記号"});
 
-	const std::vector<std::string> expected = {"共通", "2-柱伏図記号", "R-軒高"};
+	const std::vector<std::string> expected = {"共通", "2±0-柱伏図記号", "R±0-横架材"};
 	CHECK_EQ(order.size(), expected.size());
 	if (order.size() == expected.size())
 	{
@@ -524,21 +531,28 @@ TEST(reads_sample_house_fixture)
 		// 屋根版（屋根面）はあるので 垂木・野地板 レベルが軒高の直上に積まれ（M6）、母屋・棟木の
 		// 命令があるので 母屋 レベルがその下（軒高の直上）に積まれる（M7）。このモデルに登り梁は
 		// 無いので 登り梁 レベルは作らない（空レイヤを作らない）。最上段は span 柱レベル
-		// （M8）で、屋根階に立つ主屋根の小屋束が "3to3.5-柱"（屋根面で止まる半整数）に入る。
+		// （M8）で、屋根階に立つ主屋根の小屋束が "R±0_R+0.5-柱"（屋根面で止まる半段上）に入る。
 		// 軒桁は専用の 軒桁 レベルで軒高のすぐ上（母屋伏図に薄く重ねるため）。
-		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"3to3.5-柱", "野地板", "垂木",
+		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"R±0_R+0.5-柱", "野地板", "垂木",
 																  "母屋", "軒桁", "軒高"}));
+		// 横架材のレイヤは最上階も "横架材"（レベル種別は軒高のまま）。
+		CHECK_EQ(roof->levels.back().layer, std::string("R±0-横架材"));
 	}
 
 	// 一般階は FL＋横架材天端の 2 レベル（順序は FL が上）。その上に span 柱レベル（M8）が
-	// (from, to) 昇順で積まれる: 1 階には 2 階で止まる管柱（"1to2-柱"）と、3 階床まで届く
-	// 通し柱（"1to3-柱"）がある。耐力壁（M19）の命令もあるので、横架材天端の直上に
-	// 耐力壁レベルが挟まる。
+	// (from, to) 昇順で積まれる: 1 階には 2 階で止まる管柱（"1±0_2±0-柱"）と、屋根階
+	// （軒高）まで届く通し柱（"1±0_R±0-柱"）がある。耐力壁（M19）の命令もあるので、横架材
+	// 天端の直上に耐力壁レベルが挟まる。
 	const StoryCommand* first = find(stories, "1階");
 	if (first != nullptr)
 	{
-		const std::vector<std::string> base = {"1to2-柱", "1to3-柱", "FL", "耐力壁", "横架材天端"};
+		const std::vector<std::string> base = {"1±0_2±0-柱", "1±0_R±0-柱", "FL", "耐力壁",
+											   "横架材天端"};
 		CHECK(sameVec(levelTypes(*first), base));
+		std::vector<std::string> layers;
+		for (const LevelCommand& level : first->levels)
+			layers.push_back(level.layer);
+		CHECK(sameVec(layers, {"1±0_2±0-柱", "1±0_R±0-柱", "1±0-FL", "1±0-耐力壁", "1±0-横架材"}));
 	}
 }
 
@@ -585,7 +599,7 @@ TEST(moya_level_only_on_stories_with_moya_member)
 	if (withoutMoya.size() == 1)
 	{
 		CHECK(sameVec(levelTypes(withoutMoya[0]), std::vector<std::string>{"軒桁", "軒高"}));
-		CHECK_EQ(withoutMoya[0].levels.front().layer, std::string("R-軒桁"));
+		CHECK_EQ(withoutMoya[0].levels.front().layer, std::string("R±0-軒桁"));
 		CHECK(near(withoutMoya[0].levels.front().offset, 0.0));
 	}
 }
@@ -597,7 +611,7 @@ TEST(moya_level_only_on_stories_with_moya_member)
 TEST(roof_story_gets_fl_level_only_with_floor_slab)
 {
 	// 屋根階に床版（ロフト＝小屋裏収納の床）があれば、軒高の上に FL（軒高 +36mm）を
-	// 追加してレイヤ "R-FL" を作る。床版が無ければ軒高だけ（空の FL レイヤを作らない）。
+	// 追加してレイヤ "R±0-FL" を作る。床版が無ければ軒高だけ（空の FL レイヤを作らない）。
 	const std::string base = "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
 							 "#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
 							 "#3=IFCLOCALPLACEMENT($,#2);\n"
@@ -620,7 +634,7 @@ TEST(roof_story_gets_fl_level_only_with_floor_slab)
 	if (loftRoof != nullptr)
 	{
 		CHECK(sameVec(levelTypes(*loftRoof), std::vector<std::string>{"FL", "軒高"}));
-		CHECK_EQ(loftRoof->levels.front().layer, std::string("R-FL"));
+		CHECK_EQ(loftRoof->levels.front().layer, std::string("R±0-FL"));
 		CHECK(near(loftRoof->levels.front().offset, 36.0));
 	}
 }
@@ -628,7 +642,7 @@ TEST(roof_story_gets_fl_level_only_with_floor_slab)
 TEST(roof_story_gets_fl_level_from_synthesised_loft_floor)
 {
 	// ホームズ君はロフトの床版を出力しないので、屋根階の床梁が囲む領域から床を合成する
-	// （parse/Floor）。その合成床がある屋根にも FL レベル／レイヤ "R-FL" を作る。
+	// （parse/Floor）。その合成床がある屋根にも FL レベル／レイヤ "R±0-FL" を作る。
 	// 床梁は矩形リング 4 本（外周 ±550・部材幅 100・厚み 100 の鉛直押し出し）。
 	std::string text = "#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
 					   "#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
@@ -672,10 +686,11 @@ TEST(roof_story_gets_fl_level_from_synthesised_loft_floor)
 	if (roof != nullptr)
 	{
 		// 床梁は向きの違う 2 組で天端が GL+3050 と GL+3550 に分かれるので、軒高に近い
-		// 3050 が標準・3550 は伏図レベルの軒高（印は軒高からの高さ "軒高+550"。
-		// parse/PlanLevel）になり、軒高の直下へ積む。
-		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"FL", "軒高", "軒高(軒高+550)"}));
-		CHECK_EQ(roof->levels.front().layer, std::string("R-FL"));
+		// 3050 が標準・3550 は 1 段上の伏図レベルの軒高（印は段数 "+1"。parse/PlanLevel）に
+		// なり、軒高の直下へ積む。レイヤは "R+1-横架材"。
+		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"FL", "軒高", "軒高(+1)"}));
+		CHECK_EQ(roof->levels.front().layer, std::string("R±0-FL"));
+		CHECK_EQ(roof->levels.back().layer, std::string("R+1-横架材"));
 	}
 }
 
@@ -770,7 +785,7 @@ TEST(desired_layer_order_sends_roof_sheathing_to_background)
 		return;
 	CHECK_EQ(order.front(), std::string("共通"));
 	// 背面は 野地板 → 床（FL）の順に集まる（最上階→最下階で集めるため R-野地板 が先）。
-	CHECK(order.back() == std::string("1-FL"));
+	CHECK(order.back() == std::string("1±0-FL"));
 	bool sheathingBeforeTaruki = false;
 	for (std::size_t i = 0; i < order.size(); ++i)
 	{
@@ -788,57 +803,122 @@ TEST(desired_layer_order_sends_roof_sheathing_to_background)
 }
 
 // ---------------------------------------------------------------------------
-// span 柱レイヤ名（"{from}to{to}-柱"。組み立てと分解の往復。M8）
+// 伏図レベルの符号とレイヤ名（"2-1_3±0-柱" / "2±0-横架材"。組み立てと分解の往復）
 // ---------------------------------------------------------------------------
 
-TEST(span_layer_name_integer_levels_have_no_decimal)
+TEST(level_label_writes_story_prefix_and_step)
 {
-	CHECK_EQ(spanLayerName(1.0, 2.0), std::string("1to2-柱"));
-	CHECK_EQ(spanLayerName(1.0, 3.0), std::string("1to3-柱"));
+	// 標準は "±0"、下の段は "-1"、上の段は "+1"、段の間は ".5"。最上階の接頭辞は "R"。
+	CHECK_EQ(levelLabel(1, false, 0.0), std::string("2±0"));
+	CHECK_EQ(levelLabel(1, false, -1.0), std::string("2-1"));
+	CHECK_EQ(levelLabel(1, false, 1.0), std::string("2+1"));
+	CHECK_EQ(levelLabel(1, false, 0.5), std::string("2+0.5"));
+	CHECK_EQ(levelLabel(1, false, -1.5), std::string("2-1.5"));
+	CHECK_EQ(levelLabel(2, true, 0.0), std::string("R±0"));
+	CHECK_EQ(levelLabel(11, false, 2.0), std::string("12+2"));
 }
 
-TEST(span_layer_name_half_level_keeps_point_five)
+TEST(parse_level_label_round_trips)
 {
-	CHECK_EQ(spanLayerName(2.0, 2.5), std::string("2to2.5-柱"));
-	CHECK_EQ(spanLayerName(3.0, 3.5), std::string("3to3.5-柱"));
+	std::string prefix;
+	double step = 9.0;
+	CHECK(parseLevelLabel("2±0", prefix, step));
+	CHECK(prefix == "2" && near(step, 0.0));
+	CHECK(parseLevelLabel("2-1", prefix, step));
+	CHECK(prefix == "2" && near(step, -1.0));
+	CHECK(parseLevelLabel("R+0.5", prefix, step));
+	CHECK(prefix == "R" && near(step, 0.5));
+	CHECK(parseLevelLabel("12+2", prefix, step));
+	CHECK(prefix == "12" && near(step, 2.0));
+	// 接頭辞が無い・段数が無い・段数の綴りが違う（"-0" / "+0" は "±0" と書く）。
+	CHECK(!parseLevelLabel("±0", prefix, step));
+	CHECK(!parseLevelLabel("2", prefix, step));
+	CHECK(!parseLevelLabel("2+0", prefix, step));
+	CHECK(!parseLevelLabel("2-0", prefix, step));
+	CHECK(!parseLevelLabel("2+1.25", prefix, step));
+	CHECK(!parseLevelLabel("2+1x", prefix, step));
+	CHECK(!parseLevelLabel("2+", prefix, step));
 }
 
-TEST(parse_span_layer_round_trips_integer_and_half)
+TEST(level_layer_name_uses_beam_suffix_for_beam_levels)
 {
-	double from = 0.0;
-	double to = 0.0;
-	CHECK(parseSpanLayer("1to2-柱", from, to));
-	CHECK(near(from, 1.0) && near(to, 2.0));
-	CHECK(parseSpanLayer("2to2.5-柱", from, to));
-	CHECK(near(from, 2.0) && near(to, 2.5));
+	// 横架材は一般階も最上階も "横架材"（レベル種別は横架材天端／軒高のまま）。
+	CHECK_EQ(levelLayerName(1, false, 0.0, "横架材天端"), std::string("2±0-横架材"));
+	CHECK_EQ(levelLayerName(2, true, 0.0, "軒高"), std::string("R±0-横架材"));
+	CHECK_EQ(levelLayerName(1, false, -1.0, "FL"), std::string("2-1-FL"));
+	CHECK_EQ(levelLayerName(0, false, 0.0, "耐力壁"), std::string("1±0-耐力壁"));
+	// 伏図レベルの印が付いた種別も同じ名前になる。
+	CHECK_EQ(levelLayerName(1, false, -1.0, "横架材天端(-1)"), std::string("2-1-横架材"));
+}
+
+TEST(span_layer_name_joins_labels)
+{
+	CHECK_EQ(spanLayerName("1±0", "2±0", "柱"), std::string("1±0_2±0-柱"));
+	CHECK_EQ(spanLayerName("2-1", "3±0", "柱"), std::string("2-1_3±0-柱"));
+	CHECK_EQ(spanLayerName("2±0", "2+0.5", "登り梁"), std::string("2±0_2+0.5-登り梁"));
+}
+
+TEST(parse_span_layer_round_trips_labels)
+{
+	std::string from;
+	std::string to;
+	CHECK(parseSpanLayer("2-1_3±0-柱", from, to));
+	CHECK(from == "2-1" && to == "3±0");
+	CHECK(parseSpanLayer("2±0_R+0.5-柱", from, to));
+	CHECK(from == "2±0" && to == "R+0.5");
+	CHECK(parseSpanLayer("2±0_2+1-登り梁", "登り梁", from, to));
+	CHECK(from == "2±0" && to == "2+1");
 }
 
 TEST(parse_span_layer_rejects_non_span_layers)
 {
 	// 柱以外のレイヤ・通り芯・横架材は span レイヤでない。
-	double from = 0.0;
-	double to = 0.0;
-	CHECK(!parseSpanLayer("R-軒高", from, to));
+	std::string from;
+	std::string to;
+	CHECK(!parseSpanLayer("R±0-横架材", from, to));
 	CHECK(!parseSpanLayer("共通", from, to));
-	CHECK(!parseSpanLayer("1to2-梁", from, to));
+	CHECK(!parseSpanLayer("1±0_2±0-梁", from, to));
+	// 登り梁の span レイヤは柱の span レイヤでない（接尾辞が違う）。
+	CHECK(!parseSpanLayer("2±0_2+0.5-登り梁", from, to));
 }
 
-TEST(parse_span_layer_rejects_malformed_core)
+TEST(parse_span_layer_rejects_malformed_labels)
 {
-	// "to" が無い／数値でない core は分解できない。
-	double from = 0.0;
-	double to = 0.0;
+	// "_" が無い／符号として読めないものは分解できない。
+	std::string from;
+	std::string to;
 	CHECK(!parseSpanLayer("foo-柱", from, to));
-	CHECK(!parseSpanLayer("atob-柱", from, to));
+	CHECK(!parseSpanLayer("a_b-柱", from, to));
 	CHECK(!parseSpanLayer("-柱", from, to));
-	// 片側が空（"to" が先頭・末尾）。
-	CHECK(!parseSpanLayer("to2-柱", from, to));
-	CHECK(!parseSpanLayer("1to-柱", from, to));
-	// 数値の後ろに余りがある（数値として全部は読めない）。
-	CHECK(!parseSpanLayer("1ato2-柱", from, to));
-	CHECK(!parseSpanLayer("1to2x-柱", from, to));
-	// "to" が 2 つ以上あると (from, to) に分解できない。
-	CHECK(!parseSpanLayer("1to2to3-柱", from, to));
+	// 片側が空。
+	CHECK(!parseSpanLayer("_2±0-柱", from, to));
+	CHECK(!parseSpanLayer("1±0_-柱", from, to));
+	// 段数が無い（旧来の "1" + "to" + "2-柱" の形も読まない）。
+	CHECK(!parseSpanLayer("1_2-柱", from, to));
+	CHECK(!parseSpanLayer(std::string("1") + "to" + "2-柱", from, to));
+	// "_" が 2 つ以上あると (from, to) に分解できない。
+	CHECK(!parseSpanLayer("1±0_2±0_3±0-柱", from, to));
+}
+
+TEST(layer_story_prefix_reads_head_of_layer)
+{
+	CHECK_EQ(layerStoryPrefix("2±0-横架材"), std::string("2"));
+	CHECK_EQ(layerStoryPrefix("2-1_3±0-柱"), std::string("2"));
+	CHECK_EQ(layerStoryPrefix("12-1-FL"), std::string("12"));
+	CHECK_EQ(layerStoryPrefix("R-母屋"), std::string("R"));
+	CHECK(layerStoryPrefix("共通").empty());
+}
+
+TEST(strip_level_step_reads_the_standard_level_layer)
+{
+	CHECK_EQ(stripLevelStep("2-1-横架材"), std::string("2±0-横架材"));
+	CHECK_EQ(stripLevelStep("2+1-FL"), std::string("2±0-FL"));
+	CHECK_EQ(stripLevelStep("2±0-横架材"), std::string("2±0-横架材"));
+	CHECK_EQ(stripLevelStep("R-1-軒桁"), std::string("R±0-軒桁"));
+	// 伏図レベルのレイヤでないものはそのまま。
+	CHECK_EQ(stripLevelStep("2-母屋"), std::string("2-母屋"));
+	CHECK_EQ(stripLevelStep("2-1_3±0-柱"), std::string("2-1_3±0-柱"));
+	CHECK_EQ(stripLevelStep("共通"), std::string("共通"));
 }
 
 // --------------------------------------------------------------------------
@@ -870,9 +950,9 @@ TEST(span_column_levels_are_stacked_on_top)
 	if (stories.size() != 2)
 		return;
 	// 1 階（柱あり）: span レベルが先頭に積まれる。
-	CHECK(
-		sameVec(levelTypes(stories[0]), std::vector<std::string>{"1to1.5-柱", "FL", "横架材天端"}));
-	CHECK_EQ(stories[0].levels.front().layer, std::string("1to1.5-柱"));
+	CHECK(sameVec(levelTypes(stories[0]),
+				  std::vector<std::string>{"1±0_1+0.5-柱", "FL", "横架材天端"}));
+	CHECK_EQ(stories[0].levels.front().layer, std::string("1±0_1+0.5-柱"));
 	// 2 階（最上階・柱なし）: span レベルは作らない。
 	CHECK(sameVec(levelTypes(stories[1]), std::vector<std::string>{"軒高"}));
 }

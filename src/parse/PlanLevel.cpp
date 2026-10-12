@@ -107,14 +107,14 @@ namespace HomeskzIfcImport::parse
 			for (std::size_t k = storyBegin; k < levels.size(); ++k)
 			{
 				levels[k].standard = (k == standard);
+				// 段数は標準からの数（階の中は高さの昇順なので、下が負）。
+				levels[k].step = static_cast<int>(k) - static_cast<int>(standard);
 				// 高さは GL ではなくその階の FL（最上階は軒高）＝ストーリの高さから測る
 				// （ご要望。core::planLevelTag）。
 				levels[k].datum = std::llround(stories[i].elevation);
 				levels[k].top = stories[i].isTop;
-				levels[k].tag = levels[k].standard
-									? std::string()
-									: core::planLevelTag(levels[k].heights.front(), levels[k].datum,
-														 levels[k].top);
+				levels[k].tag =
+					levels[k].standard ? std::string() : core::planLevelTag(levels[k].step);
 			}
 		}
 		return levels;
@@ -203,6 +203,70 @@ namespace HomeskzIfcImport::parse
 		return whole > 0 ? static_cast<std::size_t>(whole - 1) : 0;
 	}
 
+	namespace
+	{
+		// 階 story の標準の伏図レベル（無ければ nullptr）。
+		const PlanLevel* standardLevelOf(const std::vector<PlanLevel>& levels, std::size_t story)
+		{
+			for (const PlanLevel& level : levels)
+			{
+				if (level.story == story && level.standard)
+					return &level;
+			}
+			return nullptr;
+		}
+	} // namespace
+
+	std::string ordinalLabel(const std::vector<PlanLevel>& levels, std::size_t story, double value)
+	{
+		if (const PlanLevel* standard = standardLevelOf(levels, story))
+			return levelLabel(story, standard->top, value - standard->ordinal);
+		// 伏図レベルが無い: 通し番号＝階の番号（storyOfOrdinal の従来の対応と同じ）。
+		return levelLabel(story, false, value - (static_cast<double>(story) + 1.0));
+	}
+
+	std::string spanLevelLabel(const std::vector<PlanLevel>& levels, double value)
+	{
+		return ordinalLabel(levels, storyOfOrdinal(levels, value), value);
+	}
+
+	bool labelOrdinal(const std::vector<PlanLevel>& levels, const std::string& label,
+					  double& outOrdinal)
+	{
+		std::string prefix;
+		double step = 0.0;
+		if (!parseLevelLabel(label, prefix, step))
+			return false;
+		for (const PlanLevel& level : levels)
+		{
+			if (level.standard && storyLayerPrefix(level.story, level.top) == prefix)
+			{
+				outOrdinal = level.ordinal + step;
+				return true;
+			}
+		}
+		// 伏図レベルの無い階: 数字の接頭辞は階の番号（ordinalLabel の逆）。
+		if (prefix.empty() || prefix.front() < '0' || prefix.front() > '9')
+			return false;
+		outOrdinal = std::stod(prefix) + step;
+		return true;
+	}
+
+	bool parseSpanOrdinals(const std::vector<PlanLevel>& levels, const std::string& layer,
+						   const std::string& suffix, double& outFrom, double& outTo)
+	{
+		std::string fromLabel;
+		std::string toLabel;
+		double from = 0.0;
+		double to = 0.0;
+		if (!parseSpanLayer(layer, suffix, fromLabel, toLabel) ||
+			!labelOrdinal(levels, fromLabel, from) || !labelOrdinal(levels, toLabel, to))
+			return false;
+		outFrom = from;
+		outTo = to;
+		return true;
+	}
+
 	std::string planLevelType(const PlanLevel& level, const std::string& levelType)
 	{
 		return levelType + level.tag;
@@ -211,7 +275,7 @@ namespace HomeskzIfcImport::parse
 	std::string planLevelLayer(const PlanLevel& level, const StoryInfo& story,
 							   const std::string& levelType)
 	{
-		return storyLayerName(level.story, story.isTop, planLevelType(level, levelType));
+		return levelLayerName(level.story, story.isTop, level.step, levelType);
 	}
 
 	std::string planLevelBeamLayer(const PlanLevel& level, const StoryInfo& story)
@@ -303,7 +367,7 @@ namespace HomeskzIfcImport::parse
 				const bool beam = member.layer == beamLayer;
 				if (!beam && member.layer != noboribariLayer)
 					continue;
-				// 軒桁は母屋伏図に薄く重ねるため、横架材レイヤから専用の "n-軒桁" へ分ける
+				// 軒桁は母屋伏図に薄く重ねるため、横架材レイヤから専用の "2±0-軒桁" へ分ける
 				// （ご要望。core::kLevelNokigeta）。伏図レベルの分け方は横架材と同じ。
 				const bool eaves = beam && member.drawClass == CLASS_NOKIGETA;
 				// 水平な材は天端、傾いた材は水下（低い側の端）の天端で決める。
@@ -312,7 +376,7 @@ namespace HomeskzIfcImport::parse
 				if (level == nullptr)
 				{
 					if (eaves)
-						member.layer = storyLayerName(i, story.isTop, kLevelNokigeta);
+						member.layer = levelLayerName(i, story.isTop, 0.0, kLevelNokigeta);
 					continue;
 				}
 				if (eaves)
@@ -322,9 +386,11 @@ namespace HomeskzIfcImport::parse
 				else if (double from = 0.0, to = 0.0; noboribariSpan(member, levels, i, from, to))
 				{
 					// 登り梁は柱と同じく、映す伏図レベルの範囲の span レイヤ
-					// （"{from}to{to}-登り梁"）へ。高さ基準もそのレベルへ（高さは登り梁
-					// レベルと同じ。parse/Story）。
-					member.layer = spanLayerName(from, to, kLevelNoboribari);
+					// （"2±0_2+0.5-登り梁"）へ。端の符号は材の階で書く（母屋伏図まで映す
+					// 材の上端は "2+1"＝いちばん上の伏図レベルの 1 段上。次の階の伏図レベルとは
+					// 書かない）。高さ基準もそのレベルへ（高さは登り梁レベルと同じ。parse/Story）。
+					member.layer = spanLayerName(ordinalLabel(levels, i, from),
+												 ordinalLabel(levels, i, to), kLevelNoboribari);
 					member.startBound.level = member.layer;
 					member.endBound.level = member.layer;
 				}

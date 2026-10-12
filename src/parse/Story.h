@@ -24,7 +24,7 @@
 //	  * M6 屋根組 … 屋根版を含む階に 垂木・野地板 レベル（横架材天端／軒高の直上）
 //	  * M7 横架材 … 母屋・登り梁の命令がある階に 母屋・登り梁 レベル（同じく直上。判定は
 //	    parse/Member が組み立てた命令の配置先レイヤ）
-//	  * M8 柱 … 実在する span 柱レイヤ（"{from}to{to}-柱"）ごとのレベル
+//	  * M8 柱 … 実在する span 柱レイヤ（"2-1_3±0-柱"）ごとのレベル
 //	  * M19 耐力壁 … 耐力壁の命令がある階に "耐力壁" レベル
 //	  * 伏図の分け方（parse/PlanLevel）… 軒桁の専用レベル、登り梁の span レベル、標準で
 //	    ない伏図レベル（横架材の高さごとの伏図）の横架材・FL レベル
@@ -44,7 +44,8 @@ namespace HomeskzIfcImport::parse
 	class Context;
 
 	// レベル種別名。CreateLayerLevelType へ登録し GetLayerForStory でレイヤを取り直す鍵で、
-	// デザインレイヤ名の接尾辞（"1-FL" の "FL"）も同じ名前になる。
+	// 伏図レベルで分けないレイヤ（"R-母屋"）は名前の接尾辞もこれ（"母屋"）。伏図レベルで
+	// 分けるレイヤの名前は levelLayerSuffix（横架材天端・軒高は "横架材"）。
 	//
 	// **文字列の定義は core/Document.h（命令セットの語彙）にあり、ここはその再公開**。
 	// 床（parse/Floor）は高さ基準のレベル名としてこれを参照する（かつては Story.cpp と
@@ -56,34 +57,63 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kLevelEaves = core::kLevelEaves;
 	inline constexpr const char* kLevelNokigeta = core::kLevelNokigeta;
 
-	// 柱・小屋束を配置する span（またぐレベル区間）レイヤの接尾辞。レイヤ名は "{from}to{to}-
-	// 柱" で、from は柱が立つ床レベル（1 始まり・GL=0）、to は上端が届く床／屋根面レベル
-	// （parse/Column の resolveColumnToLevel）。伏図が切断レベルで表示レイヤを絞れるようにする
-	// ための分け方。
+	// 横架材のレイヤ名の名前（"2±0-横架材" の "横架材"）。**最上階も同じ名前**にする
+	// （レベル種別は軒高のまま。beamTopLevelType）——柱のレイヤ（"2±0_R±0-柱"）の符号と
+	// 横架材のレイヤの符号を突き合わせて読めるよう、レイヤ名は符号だけでレベルを表す（ご要望）。
+	inline constexpr const char* kBeamLayerSuffix = "横架材";
+
+	// 柱・小屋束を配置する span（またぐレベル区間）レイヤの接尾辞。レイヤ名は
+	// "{from}_{to}-柱"（"2-1_3±0-柱"）で、from は柱が立つ伏図レベルの符号、to は上端が届く
+	// 伏図レベルの符号（屋根面で止まる屋根束は "+0.5" の付く符号。parse/Column）。伏図が
+	// 切断レベルで表示レイヤを絞れるようにするための分け方。
 	inline constexpr const char* kColumnLayerSuffix = "柱";
 
-	// span レベルから柱のデザインレイヤ名 "{from}to{to}-柱" を組み立てる。整数レベルは小数点
-	// なし・半整数は ".5" 付き（"1to2-柱" / "2to2.5-柱"）。**レイヤ名の規約はここが唯一**で、
-	// 柱がレイヤを名乗るときと、ストーリがそのレベル（＝レイヤ）を作るときの両方がこれを通る。
-	std::string spanLayerName(double fromLevel, double toLevel);
+	// 伏図レベルの符号 "{階の接頭辞}{段数}"（"2±0" / "2-1" / "R+0.5"）。接頭辞は
+	// storyLayerPrefix、段数はその階の標準の伏図レベルからの段数（core::planLevelStepText）。
+	// **符号の規約はここが唯一**で、伏図レベルのレイヤ（levelLayerName）・span レイヤ
+	// （spanLayerName）・伏図記号レイヤ（parse/ColumnMark）の頭がどれもこれになる——柱の
+	// レイヤと横架材のレイヤが同じ符号で同じレベルを指す（ご要望）。
+	std::string levelLabel(const std::string& prefix, double step);
+	std::string levelLabel(std::size_t index, bool isTop, double step);
 
-	// 同じ規約で接尾辞だけを替えたもの（登り梁の "{from}to{to}-登り梁"。parse/PlanLevel）。
-	std::string spanLayerName(double fromLevel, double toLevel, const std::string& suffix);
+	// 符号を階の接頭辞と段数へ分解する。text 全体が符号（接頭辞は数字の並びか "R"）なら true。
+	bool parseLevelLabel(const std::string& text, std::string& outPrefix, double& outStep);
 
-	// span レベル 1 つの表記。整数は小数点なし・半整数は".5" 付き（1 → "1"、2.5 → "2.5"）。
-	// **この表記の定義はここが唯一**で、span 柱レイヤ（spanLayerName）と伏図記号レイヤ
-	// （parse/ColumnMark の planMarkLayerName）の両方がこれを通る（別々に書くと
-	// "2.5-柱伏図記号" と "2.5to…-柱" の桁が食い違ったときに、伏図の表示レイヤ探索が黙って失敗す
-	// る形になる）。
-	std::string formatSpanLevel(double value);
+	// 伏図レベルに属するレイヤ名 "{符号}-{名前}"（"2±0-横架材" / "2-1-FL" / "R±0-耐力壁"）。
+	// 名前はレベル種別から levelLayerSuffix で決める。伏図レベルで分けるレイヤ（横架材・
+	// 軒桁・床・耐力壁）は**標準の伏図レベルでも "±0" を付ける**（ご要望）。伏図レベルで
+	// 分けないレイヤ（母屋・垂木・野地板）は従来どおり storyLayerName（"R-母屋"）。
+	std::string levelLayerName(std::size_t index, bool isTop, double step,
+							   const std::string& levelType);
 
-	// "{from}to{to}-柱" レイヤ名を (from, to) へ分解する。span 柱レイヤでなければ
-	// false（接尾辞が違う・"to" が無い・数値でない）。
-	bool parseSpanLayer(const std::string& name, double& outFrom, double& outTo);
+	// レベル種別からレイヤ名の名前を決める（横架材天端・軒高 → "横架材"。それ以外は種別の
+	// まま。伏図レベルの印 "(-1)" は付いていてもいなくてもよい）。
+	std::string levelLayerSuffix(const std::string& levelType);
 
-	// 同じく、接尾辞 suffix の span レイヤ（"{from}to{to}-登り梁" など）を分解する。
-	bool parseSpanLayer(const std::string& name, const std::string& suffix, double& outFrom,
-						double& outTo);
+	// span レイヤ名 "{from}_{to}-{suffix}"（"2-1_3±0-柱" / "2±0_2+0.5-登り梁"）。from / to は
+	// 伏図レベルの符号（levelLabel）。**span レイヤ名の規約はここが唯一**で、柱・登り梁が
+	// レイヤを名乗るときと、ストーリがそのレベル（＝レイヤ）を作るときの両方がこれを通る。
+	std::string spanLayerName(const std::string& fromLabel, const std::string& toLabel,
+							  const std::string& suffix);
+
+	// span レイヤ名を from / to の符号へ分解する。接尾辞 suffix の span レイヤでなければ
+	// false（接尾辞が違う・"_" が 1 つでない・符号として読めない）。符号を通し番号へ引き直す
+	// のは parse/PlanLevel の parseSpanOrdinals（伏図レベルが要る）。
+	bool parseSpanLayer(const std::string& name, const std::string& suffix, std::string& outFrom,
+						std::string& outTo);
+
+	// 柱の span レイヤ（接尾辞 "柱"）を分解する。
+	bool parseSpanLayer(const std::string& name, std::string& outFrom, std::string& outTo);
+
+	// レイヤ名の頭にある階の接頭辞（"2±0-横架材" → "2"、"2-1_3±0-柱" → "2"、"R-母屋" →
+	// "R"）。span レイヤは from の符号の階で、登り梁・柱のレベルもその階に作られる
+	// （parse/Story）。頭が接頭辞でなければ空文字（"共通"）。
+	std::string layerStoryPrefix(const std::string& layer);
+
+	// 伏図レベルのレイヤ（levelLayerName）の段数を "±0" に読み替えた名前（"2-1-横架材" →
+	// "2±0-横架材"）。同じ階の別の伏図レベルの材を同じ群として扱うところ（仕口・継手・寸法・
+	// 柱の上端の判定）がこれで比べる。伏図レベルのレイヤでなければそのまま返す。
+	std::string stripLevelStep(const std::string& layer);
 
 	// IfcProduct（要素）のローカル配置 Z 座標を取り出す。取得できれば outZ に入れて true、
 	// ObjectPlacement が無い／IfcLocalPlacement でない／座標が足りない等で取れなければ false。
@@ -93,21 +123,21 @@ namespace HomeskzIfcImport::parse
 	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ);
 
 	// デザインレイヤ名の接頭辞（＝ CreateStory の接尾辞）を返す。一般階は "{index+1}"、
-	// 最上階は "R"（屋根）。床・部材の配置先レイヤ名（"1-FL" / "R-軒高" …）を組み立てるのに使
-	// う。
+	// 最上階は "R"（屋根）。床・部材の配置先レイヤ名（"1±0-FL" / "R-母屋" …）と伏図レベルの
+	// 符号（levelLabel）を組み立てるのに使う。
 	std::string storyLayerPrefix(std::size_t index, bool isTop);
 
-	// 配置先デザインレイヤ名 "{接頭辞}-{レベル種別}" を組み立てる（"1-FL" / "R-軒高" /
-	// "2-垂木" …）。レイヤ名の規約を 1 か所に固定するためのヘルパーで、ストーリがレベルを
+	// 伏図レベルで分けない配置先デザインレイヤ名 "{接頭辞}-{レベル種別}" を組み立てる
+	// （"R-母屋" / "2-垂木" / "2-登り梁" …。伏図レベルで分けるものは levelLayerName）。レイヤ名の規約を 1 か所に固定するためのヘルパーで、ストーリがレベルを
 	// 作るときと、各要素が配置先を引くときの**両方**がこれを通る（規約が食い違うと要素の
 	// レイヤ探索が黙って失敗し、命令はあるのに 1 つも描画されない形になる）。
 	std::string storyLayerName(std::size_t index, bool isTop, const std::string& levelType);
 
 	// 横架材の取り合い・継手・柱の上端を判定するときの「その階の横架材レイヤ」。軒桁の専用
-	// レイヤ（"n-軒桁" / "n-軒桁(FL-872)"。母屋伏図に薄く重ねるために分けた。
-	// parse/PlanLevel）を同じ伏図レベルの横架材レイヤ（"n-横架材天端" / "R-軒高"。伏図
-	// レベルの印は残す）へ読み替え、それ以外はそのまま返す。**レイヤ一致で相手を絞るところは、
-	// どれもこれを通して比べる**（通さないと軒桁と小屋梁の仕口・継手が黙って消える）。
+	// レイヤ（"2±0-軒桁" / "2-1-軒桁"。母屋伏図に薄く重ねるために分けた。parse/PlanLevel）を
+	// 同じ伏図レベルの横架材レイヤ（"2±0-横架材" / "2-1-横架材"。段数は残す）へ読み替え、
+	// それ以外はそのまま返す。**レイヤ一致で相手を絞るところは、どれもこれを通して比べる**
+	// （通さないと軒桁と小屋梁の仕口・継手が黙って消える）。
 	std::string beamGroupLayer(const std::string& layer);
 
 	// 階（#storeyId）に属する要素の #id を返す。IfcRelContainedInSpatialStructure
@@ -156,11 +186,12 @@ namespace HomeskzIfcImport::parse
 		return story.isTop ? story.elevation : story.elevation + story.beamOffset;
 	}
 
-	// その階の横架材レイヤ名（"1-横架材天端" / "R-軒高"）。beamTopLevelType と
-	// storyLayerName を貫く定型で、横架材・火打の配置先と伏図の表示レイヤがこれを通る。
+	// その階の**標準の伏図レベルの**横架材レイヤ名（"1±0-横架材" / "R±0-横架材"）。横架材・
+	// 火打はまずここへ置き、伏図レベルへ振り分ける（parse/PlanLevel）。同じ階の横架材を
+	// 段数によらず集めるところは、stripLevelStep を通したレイヤ名とこれを比べる。
 	inline std::string beamTopLayerName(std::size_t index, const StoryInfo& story)
 	{
-		return storyLayerName(index, story.isTop, beamTopLevelType(story.isTop));
+		return levelLayerName(index, story.isTop, 0.0, beamTopLevelType(story.isTop));
 	}
 
 	// IFC からストーリ情報を Elevation 昇順で集める。名前が "FL" で終わる IfcBuildingStorey

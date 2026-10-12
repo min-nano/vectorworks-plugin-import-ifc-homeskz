@@ -6,7 +6,7 @@
 //	で単体テスト）。**期待値は手書きで持つ**（他の実装の出力と機械的に突き合わせることはしない）。
 //
 //	検証項目（docs/DEV-NOTES.md M5）: 床版（IfcSlab "床版"）の抽出・FL レイヤ振り分け（最上階の
-//	床はロフト＝小屋裏収納の床として "R-FL" へ・基準面は軒高）・スラブ構成（上から
+//	床はロフト＝小屋裏収納の床として "R±0-FL" へ・基準面は軒高）・スラブ構成（上から
 //	床仕上げ＝FL−横架材天端−24 と 床下地＝24）・クラス・**IFC の床位置を尊重した高さ**
 //	（elevation ＝ 床仕上げ上端 ＝ FL ＋ bound.offset の不変条件、スキップフロアの段差、
 //	横架材天端より上の床）・グリッド中心オフセット済みの外形・決定性。実フィクスチャの
@@ -54,7 +54,7 @@ namespace
 		{
 			if (stories[i].isTop)
 				continue;
-			result[std::to_string(i + 1) + "-FL"] = stories[i].elevation;
+			result[std::to_string(i + 1) + "±0-FL"] = stories[i].elevation;
 		}
 		return result;
 	}
@@ -68,7 +68,7 @@ namespace
 		{
 			if (stories[i].isTop)
 				continue;
-			result[std::to_string(i + 1) + "-FL"] = stories[i].elevation + stories[i].beamOffset;
+			result[std::to_string(i + 1) + "±0-FL"] = stories[i].elevation + stories[i].beamOffset;
 		}
 		return result;
 	}
@@ -82,7 +82,7 @@ namespace
 		return total;
 	}
 
-	// 指定レイヤの命令だけを取り出す。**伏図レベルの印（"2-FL(FL-872)"）は除外して比較する**
+	// 指定レイヤの命令だけを取り出す。**伏図レベルの段数（"2-1-FL"）は ±0 へ読み替えて比較する**
 	// ——横架材の高さごとの伏図のために高さ別のレイヤへ振り分けた床も、その階の FL の床
 	// （parse/PlanLevel）。
 	std::vector<FloorCommand> onLayer(const std::vector<FloorCommand>& floors,
@@ -91,7 +91,7 @@ namespace
 		std::vector<FloorCommand> result;
 		for (const FloorCommand& floor : floors)
 		{
-			if (core::stripPlanLevelTag(floor.layer) == layer)
+			if (parse::stripLevelStep(floor.layer) == layer)
 				result.push_back(floor);
 		}
 		return result;
@@ -145,7 +145,7 @@ TEST(extracts_floor_slab_from_minimal_model)
 	if (floors.empty())
 		return;
 	const FloorCommand& floor = floors.front();
-	CHECK_EQ(floor.layer, std::string("1-FL"));
+	CHECK_EQ(floor.layer, std::string("1±0-FL"));
 	CHECK_EQ(floor.drawClass, std::string(CLASS_FLOOR));
 	// スラブ構成は上から 床仕上げ（FL 0 − 横架材天端 -120 − 床下地 24 = 96）＋ 床下地 24。
 	// IFC の押し出し厚（28）は使わない。
@@ -202,7 +202,7 @@ TEST(returns_empty_without_stories)
 
 TEST(top_story_floor_is_a_loft)
 {
-	// 最上階（屋根）に属する床版はロフト（小屋裏収納）の床として "R-FL" に配置する。
+	// 最上階（屋根）に属する床版はロフト（小屋裏収納）の床として "R±0-FL" に配置する。
 	// 高さ基準は床下地下端（軒高レベル）で、構成は 床仕上げ 12 ＋ 床下地 24（＝軒高+36）。
 	std::string text = minimalFloorText("床版");
 	// 収容先を 1FL(#10) から最上階 2FL(#11) へ差し替える。
@@ -216,7 +216,7 @@ TEST(top_story_floor_is_a_loft)
 	if (floors.empty())
 		return;
 	const FloorCommand& loft = floors.front();
-	CHECK_EQ(loft.layer, std::string("R-FL"));
+	CHECK_EQ(loft.layer, std::string("R±0-FL"));
 	CHECK_EQ(loft.components.size(), static_cast<std::size_t>(2));
 	if (loft.components.size() == 2)
 	{
@@ -260,8 +260,8 @@ TEST(sample1_has_floor_on_each_non_top_fl_layer)
 
 	// 床版は 1FL・2FL に 1 枚ずつ（RFL＝屋根には床板は無い）。
 	CHECK_EQ(floors.size(), static_cast<std::size_t>(2));
-	CHECK_EQ(onLayer(floors, "1-FL").size(), static_cast<std::size_t>(1));
-	CHECK_EQ(onLayer(floors, "2-FL").size(), static_cast<std::size_t>(1));
+	CHECK_EQ(onLayer(floors, "1±0-FL").size(), static_cast<std::size_t>(1));
+	CHECK_EQ(onLayer(floors, "2±0-FL").size(), static_cast<std::size_t>(1));
 }
 
 TEST(sample1_components_and_class_are_fixed)
@@ -341,7 +341,7 @@ TEST(elevation_equals_fl_plus_offset_in_all_fixtures)
 		for (const FloorCommand& floor : buildFloorCommands(model))
 		{
 			CHECK_EQ(floor.bound.level, std::string("FL"));
-			const auto found = fl.find(core::stripPlanLevelTag(floor.layer));
+			const auto found = fl.find(parse::stripLevelStep(floor.layer));
 			CHECK(found != fl.end());
 			if (found == fl.end())
 				continue;
@@ -365,7 +365,7 @@ TEST(floors_only_on_fl_layers)
 		CHECK(ok);
 		const std::map<std::string, double> valid = flByLayer(model);
 		for (const FloorCommand& floor : buildFloorCommands(model))
-			CHECK(valid.find(core::stripPlanLevelTag(floor.layer)) != valid.end());
+			CHECK(valid.find(parse::stripLevelStep(floor.layer)) != valid.end());
 	}
 }
 
@@ -381,7 +381,7 @@ TEST(skip_floor_steps_are_represented)
 	bool ok = false;
 	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
-	const std::vector<FloorCommand> twoFL = onLayer(buildFloorCommands(model), "2-FL");
+	const std::vector<FloorCommand> twoFL = onLayer(buildFloorCommands(model), "2±0-FL");
 	CHECK(!twoFL.empty());
 
 	bool hasZero = false;
@@ -400,14 +400,14 @@ TEST(skip_floor_steps_are_represented)
 	CHECK(hasStep);
 	CHECK(elevations.size() >= 2);
 
-	// 段差のある床は、その高さの横架材（FL-872）の伏図レベルのレイヤへ、標準の床は
-	// "2-FL" のままへ振り分けられる（横架材の高さごとの伏図。parse/PlanLevel）。
+	// 段差のある床は、その高さの横架材（FL-872。標準の 1 段下）の伏図レベルのレイヤへ、
+	// 標準の床は "2±0-FL" のままへ振り分けられる（横架材の高さごとの伏図。parse/PlanLevel）。
 	for (const FloorCommand& floor : twoFL)
 	{
 		if (near(floor.bound.offset, -832.0))
-			CHECK_EQ(floor.layer, std::string("2-FL(FL-872)"));
+			CHECK_EQ(floor.layer, std::string("2-1-FL"));
 		if (near(floor.bound.offset, 0.0))
-			CHECK_EQ(floor.layer, std::string("2-FL"));
+			CHECK_EQ(floor.layer, std::string("2±0-FL"));
 	}
 }
 
@@ -525,7 +525,7 @@ TEST(loft_floor_is_synthesised_from_floor_beams)
 		return;
 
 	const FloorCommand& loft = floors.front();
-	CHECK_EQ(loft.layer, std::string("R-FL"));
+	CHECK_EQ(loft.layer, std::string("R±0-FL"));
 	CHECK_EQ(loft.drawClass, std::string(CLASS_FLOOR));
 	// 構成・基準面・バインド先は床版から作るロフト床と同じ（床仕上げ 12 ＋ 床下地 24）。
 	CHECK(near(totalThickness(loft), 36.0));
@@ -577,7 +577,7 @@ TEST(loft_floor_slab_wins_over_synthesis)
 	CHECK_EQ(floors.size(), static_cast<std::size_t>(1));
 	if (floors.empty())
 		return;
-	CHECK_EQ(floors.front().layer, std::string("R-FL"));
+	CHECK_EQ(floors.front().layer, std::string("R±0-FL"));
 	CHECK(near(floors.front().bound.offset, -120.0));
 }
 
@@ -622,7 +622,7 @@ TEST(loft_floor_is_synthesised_from_a_real_fixture)
 	if (stories.empty())
 		return;
 	CHECK(HomeskzIfcImport::parse::loftFloorRegions(model, stories.back().id).empty());
-	CHECK(onLayer(buildFloorCommands(model), "R-FL").empty());
+	CHECK(onLayer(buildFloorCommands(model), "R±0-FL").empty());
 }
 
 TEST(is_deterministic)

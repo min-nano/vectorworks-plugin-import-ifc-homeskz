@@ -390,7 +390,7 @@ TEST(width_on_top_ignores_non_roof_top_member)
 	spec.end = Vec2{1000.0, 0.0};
 	spec.topZ = 7090.0;
 	spec.memberClass = CLASS_NOKIGETA;
-	spec.layer = "R-軒高";
+	spec.layer = "R±0-横架材";
 	const MemberCommand girder = topMember(spec);
 	CHECK(!memberOnTop(0.0, 0.0, 7000.0, {girder}).has_value());
 }
@@ -601,38 +601,39 @@ TEST(to_level_column_reaching_top_story_at_eaves_stays_integer)
 TEST(collect_spans_distinct_and_sorted)
 {
 	const std::vector<ColumnCommand> columns = {
-		columnOnLayer("2to3-柱"), columnOnLayer("1to2-柱"), columnOnLayer("2to2.5-柱"),
-		columnOnLayer("2to3-柱"), columnOnLayer("3to3.5-柱")};
+		columnOnLayer("2±0_3±0-柱"), columnOnLayer("1±0_2±0-柱"), columnOnLayer("2±0_2+0.5-柱"),
+		columnOnLayer("2±0_3±0-柱"), columnOnLayer("3±0_3+0.5-柱")};
 
-	const std::vector<ColumnSpan> spans = collectColumnSpans(columns);
+	const std::vector<ColumnSpan> spans = collectColumnSpans(columns, {});
 	CHECK_EQ(spans.size(), std::size_t(4));
 	if (spans.size() != 4)
 		return;
 	CHECK(near(spans[0].from, 1.0) && near(spans[0].to, 2.0));
-	CHECK_EQ(spans[0].layer, std::string("1to2-柱"));
+	CHECK_EQ(spans[0].layer, std::string("1±0_2±0-柱"));
+	CHECK_EQ(spans[0].toLabel, std::string("2±0"));
 	CHECK(near(spans[1].from, 2.0) && near(spans[1].to, 2.5));
-	CHECK_EQ(spans[1].layer, std::string("2to2.5-柱"));
+	CHECK_EQ(spans[1].layer, std::string("2±0_2+0.5-柱"));
 	CHECK(near(spans[2].from, 2.0) && near(spans[2].to, 3.0));
-	CHECK_EQ(spans[2].layer, std::string("2to3-柱"));
+	CHECK_EQ(spans[2].layer, std::string("2±0_3±0-柱"));
 	CHECK(near(spans[3].from, 3.0) && near(spans[3].to, 3.5));
-	CHECK_EQ(spans[3].layer, std::string("3to3.5-柱"));
+	CHECK_EQ(spans[3].layer, std::string("3±0_3+0.5-柱"));
 }
 
 TEST(collect_spans_ignores_non_span_layers)
 {
-	CHECK(collectColumnSpans({columnOnLayer("R-軒高")}).empty());
+	CHECK(collectColumnSpans({columnOnLayer("R±0-横架材")}, {}).empty());
 }
 
 TEST(collect_layers_by_story_groups_by_base_index)
 {
 	const std::vector<ColumnCommand> columns = {
-		columnOnLayer("1to2-柱"), columnOnLayer("2to2.5-柱"), columnOnLayer("2to3-柱"),
-		columnOnLayer("3to3.5-柱")};
+		columnOnLayer("1±0_2±0-柱"), columnOnLayer("2±0_2+0.5-柱"), columnOnLayer("2±0_3±0-柱"),
+		columnOnLayer("3±0_3+0.5-柱")};
 	const std::map<int, std::vector<std::string>> byStory = collectColumnLayersByStory(columns, {});
 	CHECK_EQ(byStory.size(), std::size_t(3));
-	CHECK(sameVec(byStory.at(0), {"1to2-柱"}));
-	CHECK(sameVec(byStory.at(1), {"2to2.5-柱", "2to3-柱"}));
-	CHECK(sameVec(byStory.at(2), {"3to3.5-柱"}));
+	CHECK(sameVec(byStory.at(0), {"1±0_2±0-柱"}));
+	CHECK(sameVec(byStory.at(1), {"2±0_2+0.5-柱", "2±0_3±0-柱"}));
+	CHECK(sameVec(byStory.at(2), {"3±0_3+0.5-柱"}));
 }
 
 // --------------------------------------------------------------------------
@@ -663,9 +664,9 @@ TEST(build_command_per_column)
 	CHECK_EQ(commands.size(), std::size_t(2));
 	for (const ColumnCommand& command : commands)
 	{
-		// 柱は span レイヤ "{from}to{to}-柱" に置く。base（1 階＝1 始まりレベル 1）起点
-		// なので from=1。
-		CHECK(command.layer.starts_with("1to"));
+		// 柱は span レイヤ "{from}_{to}-柱" に置く。1 階の標準の天端に立つので from は
+		// "1±0"。
+		CHECK(command.layer.starts_with("1±0_"));
 		CHECK(command.layer.ends_with("-柱"));
 		CHECK_EQ(command.memberId, std::string("105×105 - 管柱"));
 	}
@@ -685,8 +686,8 @@ TEST(build_top_story_column_uses_half_level_span)
 	CHECK_EQ(commands.size(), std::size_t(1));
 	if (commands.empty())
 		return;
-	// 単一ストーリ＝レベル 1（1 始まり）。上に階が無いため屋根束扱いで 1to1.5。
-	CHECK_EQ(commands[0].layer, std::string("1to1.5-柱"));
+	// 単一ストーリ（＝最上階 "R"）。上に階が無いため屋根束扱いで半段上の "R+0.5" まで。
+	CHECK_EQ(commands[0].layer, std::string("R±0_R+0.5-柱"));
 	// 下端高さ ＝ ストーリ高さ + ローカル Z。
 	CHECK(near(commands[0].elevation, 6200.0));
 }
@@ -723,7 +724,7 @@ TEST(build_column_binds_top_to_upper_story_beam_top_even_with_beam_offset)
 	if (commands.size() != 2)
 		return;
 	const ColumnCommand& command = commands[0];
-	CHECK(command.layer.starts_with("1to"));
+	CHECK(command.layer.starts_with("1±0_"));
 	CHECK(near(command.elevation, 600.0));
 	// 上端は**受ける横架材の天端**（上階の横架材天端 3500 − 150 = 3350）に取るので
 	// パス長は 2750。IFC の押し出し Depth 2718 との差 −32 が端部オフセットに入る。
@@ -833,9 +834,9 @@ TEST(build_assigns_span_layer_per_story)
 	const std::vector<ColumnCommand> commands = buildColumnCommands(step.build());
 	CHECK_EQ(commands.size(), std::size_t(2));
 	CHECK(std::ranges::any_of(commands,
-							  [](const ColumnCommand& c) { return c.layer.starts_with("1to"); }));
+							  [](const ColumnCommand& c) { return c.layer.starts_with("1±0_"); }));
 	CHECK(std::ranges::any_of(commands,
-							  [](const ColumnCommand& c) { return c.layer.starts_with("2to"); }));
+							  [](const ColumnCommand& c) { return c.layer.starts_with("2±0_"); }));
 }
 
 TEST(build_elevation_is_story_plus_local_z)
@@ -1221,7 +1222,9 @@ TEST(reads_sample_house_fixture)
 	bool ok = false;
 	const Model& model = fixture("サンプル1 (住木邸新築工事).ifc", ok);
 	CHECK(ok);
-	const std::vector<ColumnCommand> commands = buildColumnCommands(model);
+	HomeskzIfcImport::parse::Context context(model);
+	const std::vector<ColumnCommand>& commands = context.columns();
+	const std::vector<HomeskzIfcImport::parse::PlanLevel>& levels = context.planLevels();
 	CHECK(!commands.empty());
 
 	// 配置先は必ず span 柱レイヤで、from はその柱が立つ階（1 始まり）。
@@ -1229,7 +1232,7 @@ TEST(reads_sample_house_fixture)
 	{
 		double from = 0.0;
 		double to = 0.0;
-		CHECK(HomeskzIfcImport::parse::parseSpanLayer(command.layer, from, to));
+		CHECK(HomeskzIfcImport::parse::parseSpanOrdinals(levels, command.layer, "柱", from, to));
 		CHECK(to > from);
 		CHECK(command.width > 0.0 && command.depth > 0.0 && command.height > 0.0);
 		CHECK(!command.memberId.empty());
@@ -1238,19 +1241,20 @@ TEST(reads_sample_house_fixture)
 		CHECK(!command.topBound.level.empty());
 	}
 
-	// 3 階建て相当（1FL/2FL/RFL）で、1 階には 2 階止まりの管柱と 3 階床まで届く通し柱、
-	// 屋根階には主屋根の小屋束（屋根面で止まる半整数）が立つ。
+	// 3 階建て相当（1FL/2FL/RFL）で、1 階には 2 階止まりの管柱と屋根階（軒高）まで届く
+	// 通し柱、屋根階には主屋根の小屋束（屋根面で止まる "+0.5"）が立つ。符号は横架材の
+	// レイヤと同じ（"R±0" は "R±0-横架材"）。
 	const std::map<int, std::vector<std::string>> byStory =
-		collectColumnLayersByStory(commands, {});
-	CHECK(sameVec(byStory.at(0), {"1to2-柱", "1to3-柱"}));
-	CHECK(sameVec(byStory.at(1), {"2to2.5-柱", "2to3-柱"}));
-	CHECK(sameVec(byStory.at(2), {"3to3.5-柱"}));
+		collectColumnLayersByStory(commands, levels);
+	CHECK(sameVec(byStory.at(0), {"1±0_2±0-柱", "1±0_R±0-柱"}));
+	CHECK(sameVec(byStory.at(1), {"2±0_2+0.5-柱", "2±0_R±0-柱"}));
+	CHECK(sameVec(byStory.at(2), {"R±0_R+0.5-柱"}));
 
-	// 通し柱は 1 階の "1to3-柱" にだけ現れる（クラスも通し柱）。
+	// 通し柱は 1 階の "1±0_R±0-柱" にだけ現れる（クラスも通し柱）。
 	for (const ColumnCommand& command : commands)
 	{
 		if (command.drawClass == CLASS_TOSHIBASHIRA)
-			CHECK_EQ(command.layer, std::string("1to3-柱"));
+			CHECK_EQ(command.layer, std::string("1±0_R±0-柱"));
 	}
 }
 
@@ -1293,7 +1297,8 @@ TEST(all_fixtures_bounds_span_the_column_height)
 			{
 				double from = 0.0;
 				double to = 0.0;
-				CHECK(HomeskzIfcImport::parse::parseSpanLayer(command.layer, from, to));
+				CHECK(HomeskzIfcImport::parse::parseSpanOrdinals(levels, command.layer, "柱", from,
+																 to));
 				const std::size_t base = HomeskzIfcImport::parse::storyOfOrdinal(levels, from);
 				const std::size_t top =
 					base + static_cast<std::size_t>(command.topBound.storyOffset);

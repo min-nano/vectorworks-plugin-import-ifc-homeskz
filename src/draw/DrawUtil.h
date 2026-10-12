@@ -651,7 +651,7 @@ namespace HomeskzIfcImport::draw
 	MCObjectHandle PrepareLayer(const std::string& layerName);
 
 	// 既存の名前付きデザインレイヤをアクティブにする。**存在しなければ何もせず nil**（レイヤ
-	// を作らない）。ストーリ由来のレイヤ（"1-FL" / "n-垂木" / "n-野地板"）は story
+	// を作らない）。ストーリ由来のレイヤ（"1±0-FL" / "n-垂木" / "n-野地板"）は story
 	// 命令が作成するので、無い＝そのストーリの生成がスキップされたということ。要素のために
 	// 独自にレイヤを作成しない。
 	MCObjectHandle ActivateExistingLayer(const std::string& layerName);

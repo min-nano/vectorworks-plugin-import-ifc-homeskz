@@ -181,7 +181,7 @@ TEST(fire_brace_without_storeys_is_empty)
 TEST(fire_brace_fixture_count_and_shape)
 {
 	// 伏図次郎: 28 本（解析を変えたときに件数が動けば気付けるようにするための固定値）。
-	// レイヤは横架材と同じ（一般階＝横架材天端、最上階＝軒高）。
+	// レイヤは横架材と同じ（"2±0-横架材"。最上階も "R±0-横架材"）。
 	bool ok = false;
 	const Model& model = fixture("伏図次郎【2階】.ifc", ok);
 	CHECK(ok);
@@ -193,10 +193,10 @@ TEST(fire_brace_fixture_count_and_shape)
 	for (const SymbolCommand& brace : braces)
 	{
 		CHECK_EQ(brace.symbol, std::string(kSymbolFireBrace));
-		CHECK(endsWith(brace.layer, "横架材天端") || endsWith(brace.layer, "軒高"));
-		sawEaves = sawEaves || endsWith(brace.layer, "軒高");
+		CHECK(endsWith(brace.layer, "-横架材"));
+		sawEaves = sawEaves || brace.layer.starts_with("R");
 	}
-	// 最上階（屋根）の火打は軒高レイヤに載る。
+	// 最上階（屋根）の火打は最上階の横架材レイヤ（軒高）に載る。
 	CHECK(sawEaves);
 }
 
@@ -233,9 +233,8 @@ TEST(fire_brace_all_fixtures_build)
 					   for (const SymbolCommand& brace : braces)
 					   {
 						   CHECK_EQ(brace.symbol, std::string(kSymbolFireBrace));
-						   // 伏図レベルの印（"(FL-872)"）は除外して判定する（parse/PlanLevel）。
-						   const std::string layer = core::stripPlanLevelTag(brace.layer);
-						   CHECK(endsWith(layer, "横架材天端") || endsWith(layer, "軒高"));
+						   // 伏図レベルの段数（"2-1-横架材"）によらず横架材のレイヤ（parse/PlanLevel）。
+						   CHECK(endsWith(brace.layer, "-横架材"));
 					   }
 				   });
 }

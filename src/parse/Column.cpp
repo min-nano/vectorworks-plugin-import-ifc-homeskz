@@ -295,23 +295,27 @@ namespace HomeskzIfcImport::parse
 		return static_cast<double>(level->ordinal);
 	}
 
-	std::vector<ColumnSpan> collectColumnSpans(const std::vector<ColumnCommand>& columns)
+	std::vector<ColumnSpan> collectColumnSpans(const std::vector<ColumnCommand>& columns,
+											   const std::vector<PlanLevel>& levels)
 	{
 		// レイヤ名で重複を除いてから (from, to) 昇順に並べる。map なのでレイヤ名順に
 		// 走査され、命令の並び順に依存しない決定的な結果になる。
-		std::map<std::string, std::pair<double, double>> seen;
+		std::map<std::string, ColumnSpan> seen;
 		for (const ColumnCommand& column : columns)
 		{
-			double from = 0.0;
-			double to = 0.0;
-			if (parseSpanLayer(column.layer, from, to))
-				seen.emplace(column.layer, std::pair<double, double>{from, to});
+			ColumnSpan span;
+			std::string fromLabel;
+			if (!parseSpanOrdinals(levels, column.layer, kColumnLayerSuffix, span.from, span.to) ||
+				!parseSpanLayer(column.layer, fromLabel, span.toLabel))
+				continue;
+			span.layer = column.layer;
+			seen.emplace(column.layer, std::move(span));
 		}
 
 		std::vector<ColumnSpan> spans;
 		spans.reserve(seen.size());
-		for (const auto& [layer, range] : seen)
-			spans.push_back(ColumnSpan{range.first, range.second, layer});
+		for (const auto& entry : seen)
+			spans.push_back(entry.second);
 		std::stable_sort(spans.begin(), spans.end(), [](const ColumnSpan& a, const ColumnSpan& b)
 						 { return a.from != b.from ? a.from < b.from : a.to < b.to; });
 		return spans;
@@ -322,7 +326,7 @@ namespace HomeskzIfcImport::parse
 							   const std::vector<PlanLevel>& levels)
 	{
 		std::map<int, std::vector<std::string>> result;
-		for (const ColumnSpan& span : collectColumnSpans(columns))
+		for (const ColumnSpan& span : collectColumnSpans(columns, levels))
 			result[static_cast<int>(storyOfOrdinal(levels, span.from))].push_back(span.layer);
 		return result;
 	}
@@ -359,10 +363,11 @@ namespace HomeskzIfcImport::parse
 			double lowest = 0.0;
 			for (const MemberCommand& member : members)
 			{
-				// 伏図レベルへ振り分けた横架材（"2-横架材天端(FL-872)"）もその階の床梁
-				// （parse/PlanLevel）。印を除去して階の横架材レイヤと比較する。軒桁の専用レイヤ
-				// （"2-軒桁"）も横架材レイヤへ読み替える（parse/Story の beamGroupLayer）。
-				if (core::stripPlanLevelTag(beamGroupLayer(member.layer)) != beamLayer)
+				// 伏図レベルへ振り分けた横架材（"2-1-横架材"）もその階の床梁
+				// （parse/PlanLevel）。段数を ±0 へ読み替えて階の横架材レイヤと比較する。軒桁の
+				// 専用レイヤ（"2±0-軒桁"）も横架材レイヤへ読み替える（parse/Story の
+				// beamGroupLayer）。
+				if (stripLevelStep(beamGroupLayer(member.layer)) != beamLayer)
 					continue;
 				const double bottom = core::memberBottomZ(member);
 				if (!found || bottom < lowest)
@@ -464,8 +469,11 @@ namespace HomeskzIfcImport::parse
 				const double topEndOffset = topAbs - seatTop;
 
 				ColumnCommand cmd;
-				cmd.layer = spanLayerName(spanFromOrdinal(levels, i, bottomAbs),
-										  spanToOrdinal(levels, toLevel, seatTop));
+				// レイヤ名は立つ／届く伏図レベルの符号（"2-1_3±0-柱"。ヘッダ冒頭）。
+				cmd.layer =
+					spanLayerName(spanLevelLabel(levels, spanFromOrdinal(levels, i, bottomAbs)),
+								  spanLevelLabel(levels, spanToOrdinal(levels, toLevel, seatTop)),
+								  kColumnLayerSuffix);
 				cmd.memberId = makeColumnMemberId(width, depth, resolveColumnType(objectType),
 												  topHardware, bottomHardware);
 				cmd.drawClass = columnClass;

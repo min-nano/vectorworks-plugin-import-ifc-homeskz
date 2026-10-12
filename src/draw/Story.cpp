@@ -23,8 +23,8 @@
 //	VW 2026 では AddStoryLevel + AssociateLayerWithStory ではレイヤ→レベルの紐付けが UI
 //	上「なし」になるため、バインドが保証される CreateStoryLevelTemplate +
 //	AddStoryLevelFromTemplate を使う。テンプレートは CreateStory の suffix を末尾に付けた名前
-//	でレイヤを作る（例 "1-FL-1"）ため、GetLayerForStory で再取得して SetObjectName
-//	で意図した名前（"1-FL"）へ直す。
+//	でレイヤを作る（例 "1±0-FL-1"）ため、GetLayerForStory で再取得して SetObjectName
+//	で意図した名前（"1±0-FL"）へ直す。
 //
 //	レイヤのスタック順の並べ替え（reorderStoryLayers）もここに置く。**ISDK の
 //	InsertObjectAfter / InsertObjectBefore** で図面のオブジェクト列（＝レイヤの並び）を
@@ -75,7 +75,7 @@ namespace HomeskzIfcImport::draw
 				return;
 			if (!gSDK->AddStoryLevelFromTemplate(story, templateIndex))
 				return;
-			// AddStoryLevelFromTemplate はレイヤ名に suffix を付ける（"1-FL-1"）。
+			// AddStoryLevelFromTemplate はレイヤ名に suffix を付ける（"1±0-FL-1"）。
 			// 再取得して名前を直す。
 			MCObjectHandle layer = gSDK->GetLayerForStory(story, levelTypeName);
 			if (layer != nil)

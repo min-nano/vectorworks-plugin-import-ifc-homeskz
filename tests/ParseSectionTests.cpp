@@ -133,8 +133,8 @@ namespace
 		story.name = "1階";
 		story.suffix = "1";
 		story.elevation = 0.0;
-		story.levels = {core::LevelCommand{core::kLevelFL, 0.0, "1-FL"},
-						core::LevelCommand{core::kLevelBeamTop, -48.0, "1-横架材天端"}};
+		story.levels = {core::LevelCommand{core::kLevelFL, 0.0, "1±0-FL"},
+						core::LevelCommand{core::kLevelBeamTop, -48.0, "1±0-横架材"}};
 		return {story};
 	}
 
@@ -337,7 +337,7 @@ TEST(NameCutsHandleMultiByteAndBrokenAxisNames)
 TEST(SectionLayersListsStoryLayersAndGrid)
 {
 	const std::vector<std::string> layers = sectionLayers(sampleStories());
-	CHECK(layers == (std::vector<std::string>{"1-FL", "1-横架材天端", core::kGridLayer}));
+	CHECK(layers == (std::vector<std::string>{"1±0-FL", "1±0-横架材", core::kGridLayer}));
 	// ストーリが無ければ映すものが無い（通り芯だけの図は作らない）。
 	CHECK(sectionLayers({}).empty());
 }
@@ -360,7 +360,7 @@ TEST(BuildSectionCommandsPlacesCutsAndNames)
 	for (const SectionCommand& command : commands)
 	{
 		CHECK(command.viewport.layers ==
-			  (std::vector<std::string>{"1-FL", "1-横架材天端", core::kGridLayer}));
+			  (std::vector<std::string>{"1±0-FL", "1±0-横架材", core::kGridLayer}));
 	}
 }
 

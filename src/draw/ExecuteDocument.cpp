@@ -129,7 +129,7 @@ namespace HomeskzIfcImport::draw
 		if (beginPhase("床を描画しています…", document.floors.size(), core::DrawPhase::Floors))
 			counts.floors = drawFloors(document, progress);
 
-		// M7 横架材を描画する。配置先の "n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁" レイヤは
+		// M7 横架材を描画する。配置先の "n±0-横架材"（最上階も "R±0-横架材"） / "n-母屋" / "n-登り梁" レイヤは
 		// drawStories が作るので、必ずその後に置く（レイヤが無い命令はスキップされる）。
 		// **横架材ハンドルを記録する**——伏図・軸組図の断面寸法データタグがこれを関連付け先
 		// として参照する（立上り → 壁結合と同じ受け渡し方式。draw/ObjectHandles.h）。
@@ -142,7 +142,7 @@ namespace HomeskzIfcImport::draw
 			addDiagnostics(note);
 		}
 
-		// M8 柱を描画する。配置先の span レイヤ（"1to2-柱" 等）も drawStories が作るので、必ず
+		// M8 柱を描画する。配置先の span レイヤ（"1±0_2±0-柱" 等）も drawStories が作るので、必ず
 		// その後に置く（レイヤが無い命令はスキップされる）。横架材の後なのは、柱が横架材と
 		// 同じ構造材ツール／同じスタイル更新の作法を採るため揃えているだけで依存は無い。
 		// **柱ハンドルを記録する**——取り込み後の測り直し（recheckColumns。開発ビルドだけ）が
@@ -204,7 +204,7 @@ namespace HomeskzIfcImport::draw
 		}
 
 		// M19 耐力壁。**柱の後**に置く: PIO はリセット時に対象レイヤの柱を探して軸組内法を
-		// 決めるので、柱が置かれていないと既定の内法で描画されてしまう。配置先の "n-耐力壁"
+		// 決めるので、柱が置かれていないと既定の内法で描画されてしまう。配置先の "n±0-耐力壁"
 		// レイヤは drawStories が作る（レイヤが無い命令はスキップされる）。
 		// 開発ビルドの取り込み後の測り直し（recheckShearWalls）だけが使う表。**本番ビルドでは
 		// 表を作らない**（検算専用の付帯コストを本番へ漏らさない。CLAUDE.md「検算は開発

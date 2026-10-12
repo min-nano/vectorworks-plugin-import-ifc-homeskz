@@ -141,15 +141,15 @@ namespace
 		return {
 			makeStory("F", 0.0, {LevelCommand{core::kLevelGL, 0.0, "F-立上り"}}),
 			makeStory("1", 500.0,
-					  {LevelCommand{core::kLevelFL, 0.0, "1-FL"},
-					   LevelCommand{core::kLevelBeamTop, -36.0, "1-横架材天端"}}),
+					  {LevelCommand{core::kLevelFL, 0.0, "1±0-FL"},
+					   LevelCommand{core::kLevelBeamTop, -36.0, "1±0-横架材"}}),
 			makeStory("2", 3300.0,
-					  {LevelCommand{core::kLevelFL, 0.0, "2-FL"},
-					   LevelCommand{core::kLevelBeamTop, -36.0, "2-横架材天端"},
+					  {LevelCommand{core::kLevelFL, 0.0, "2±0-FL"},
+					   LevelCommand{core::kLevelBeamTop, -36.0, "2±0-横架材"},
 					   LevelCommand{core::kLevelMoya, 200.0, "2-母屋"},
 					   LevelCommand{core::kLevelNoboribari, 200.0, "2-登り梁"},
 					   LevelCommand{core::kLevelTaruki, 200.0, "2-垂木"}}),
-			makeStory("R", 6000.0, {LevelCommand{core::kLevelEaves, 0.0, "R-軒高"}}),
+			makeStory("R", 6000.0, {LevelCommand{core::kLevelEaves, 0.0, "R±0-横架材"}}),
 		};
 	}
 
@@ -507,17 +507,19 @@ TEST(FramingChainsPutOnlyWhatFacesThePerimeterOutside)
 	// 取り合う）と、東西の梁 y=910（西の外周と x=910 に取り合う）。柱は四隅・南の外周の
 	// x=455・内部の梁の上の (455, 910) と (910, 1365)。
 	const std::vector<MemberCommand> members{
-		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 3264.0),
-		makeMember("2-横架材天端", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}, 3264.0),
-		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
-		makeMember("2-横架材天端", Vec2{1820.0, 0.0}, Vec2{1820.0, 1820.0}, 3264.0),
-		makeMember("2-横架材天端", Vec2{910.0, 0.0}, Vec2{910.0, 1820.0}, 3264.0),
-		makeMember("2-横架材天端", Vec2{0.0, 910.0}, Vec2{910.0, 910.0}, 3264.0)};
-	const std::vector<ColumnCommand> columns{
-		makeColumn("1to2-柱", Vec2{0.0, 0.0}),	   makeColumn("1to2-柱", Vec2{1820.0, 0.0}),
-		makeColumn("1to2-柱", Vec2{0.0, 1820.0}),  makeColumn("1to2-柱", Vec2{1820.0, 1820.0}),
-		makeColumn("1to2-柱", Vec2{455.0, 0.0}),   makeColumn("1to2-柱", Vec2{455.0, 910.0}),
-		makeColumn("1to2-柱", Vec2{910.0, 1365.0})};
+		makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 3264.0),
+		makeMember("2±0-横架材", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}, 3264.0),
+		makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
+		makeMember("2±0-横架材", Vec2{1820.0, 0.0}, Vec2{1820.0, 1820.0}, 3264.0),
+		makeMember("2±0-横架材", Vec2{910.0, 0.0}, Vec2{910.0, 1820.0}, 3264.0),
+		makeMember("2±0-横架材", Vec2{0.0, 910.0}, Vec2{910.0, 910.0}, 3264.0)};
+	const std::vector<ColumnCommand> columns{makeColumn("1±0_2±0-柱", Vec2{0.0, 0.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{1820.0, 0.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{0.0, 1820.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{1820.0, 1820.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{455.0, 0.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{455.0, 910.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{910.0, 1365.0})};
 	const std::vector<DimensionChainCommand> chains = parse::framingDimensionChains(
 		members, columns, smallGrid(), Vec2{-60.0, -60.0}, Vec2{1880.0, 1880.0});
 
@@ -549,16 +551,18 @@ TEST(FramingChainsMeasureBeamsApartFromColumnsAndJoinThePerimeterRow)
 	// 大引が東西に渡り、y=910 の短い梁が西の外周に取り合う。西の柱は 0 / 1200 / 1820
 	// （1200 には梁が取り合わない）、東の柱は 0 / 455。
 	const std::vector<MemberCommand> members{
-		makeMember("1-横架材天端", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 464.0),
-		makeMember("1-横架材天端", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}, 464.0),
-		makeMember("1-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 464.0),
-		makeMember("1-横架材天端", Vec2{1820.0, 0.0}, Vec2{1820.0, 910.0}, 464.0),
-		makeMember("1-横架材天端", Vec2{0.0, 650.0}, Vec2{1820.0, 650.0}, 464.0),
-		makeMember("1-横架材天端", Vec2{0.0, 910.0}, Vec2{300.0, 910.0}, 464.0)};
-	const std::vector<ColumnCommand> columns{
-		makeColumn("1to2-柱", Vec2{0.0, 0.0}),	  makeColumn("1to2-柱", Vec2{1820.0, 0.0}),
-		makeColumn("1to2-柱", Vec2{0.0, 1200.0}), makeColumn("1to2-柱", Vec2{1820.0, 455.0}),
-		makeColumn("1to2-柱", Vec2{0.0, 1820.0}), makeColumn("1to2-柱", Vec2{1820.0, 1820.0})};
+		makeMember("1±0-横架材", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 464.0),
+		makeMember("1±0-横架材", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}, 464.0),
+		makeMember("1±0-横架材", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 464.0),
+		makeMember("1±0-横架材", Vec2{1820.0, 0.0}, Vec2{1820.0, 910.0}, 464.0),
+		makeMember("1±0-横架材", Vec2{0.0, 650.0}, Vec2{1820.0, 650.0}, 464.0),
+		makeMember("1±0-横架材", Vec2{0.0, 910.0}, Vec2{300.0, 910.0}, 464.0)};
+	const std::vector<ColumnCommand> columns{makeColumn("1±0_2±0-柱", Vec2{0.0, 0.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{1820.0, 0.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{0.0, 1200.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{1820.0, 455.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{0.0, 1820.0}),
+											 makeColumn("1±0_2±0-柱", Vec2{1820.0, 1820.0})};
 	const std::vector<DimensionChainCommand> chains = parse::framingDimensionChains(
 		members, columns, {}, Vec2{-60.0, -60.0}, Vec2{1880.0, 1880.0});
 
@@ -582,9 +586,9 @@ TEST(FramingChainsKeepTheOverallOnASideWithoutAnExteriorLine)
 	// 上が開いた U 字の架構。東西の梁は下（y=0）だけなので下に面し、上に面する通りは
 	// 無いが、上の全長（0〜1820）は出す。
 	const std::vector<MemberCommand> members{
-		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 3264.0),
-		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
-		makeMember("2-横架材天端", Vec2{1820.0, 0.0}, Vec2{1820.0, 1820.0}, 3264.0)};
+		makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 3264.0),
+		makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
+		makeMember("2±0-横架材", Vec2{1820.0, 0.0}, Vec2{1820.0, 1820.0}, 3264.0)};
 	const std::vector<DimensionChainCommand> chains =
 		parse::framingDimensionChains(members, {}, {}, Vec2{-60.0, -60.0}, Vec2{1880.0, 1880.0});
 
@@ -597,19 +601,19 @@ TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)
 	Document document;
 	document.stories = twoStoreyStories();
 	document.grids = smallGrid();
-	document.columns = {makeColumn("1to2-柱", Vec2{0.0, 0.0}),
-						makeColumn("1to2-柱", Vec2{455.0, 1820.0}),
+	document.columns = {makeColumn("1±0_2±0-柱", Vec2{0.0, 0.0}),
+						makeColumn("1±0_2±0-柱", Vec2{455.0, 1820.0}),
 						// 別の階の柱は映らないので押さえない。
-						makeColumn("2to3-柱", Vec2{1365.0, 1820.0})};
-	document.members = {makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 3264.0),
-						makeMember("2-横架材天端", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}, 3264.0),
-						makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
-						makeMember("2-横架材天端", Vec2{1820.0, 0.0}, Vec2{1820.0, 1820.0}, 3264.0),
+						makeColumn("2±0_3±0-柱", Vec2{1365.0, 1820.0})};
+	document.members = {makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{1820.0, 0.0}, 3264.0),
+						makeMember("2±0-横架材", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}, 3264.0),
+						makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
+						makeMember("2±0-横架材", Vec2{1820.0, 0.0}, Vec2{1820.0, 1820.0}, 3264.0),
 						// 斜めの材は押さえない。
-						makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{910.0, 700.0}, 3264.0),
+						makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{910.0, 700.0}, 3264.0),
 						// 表示レイヤに無い材は押さえない。
-						makeMember("1-横架材天端", Vec2{1500.0, 0.0}, Vec2{1500.0, 1820.0}, 464.0)};
-	const SheetCommand sheet = makeSheet(PlanKind::Framing, {"2-横架材天端", "1to2-柱"});
+						makeMember("1±0-横架材", Vec2{1500.0, 0.0}, Vec2{1500.0, 1820.0}, 464.0)};
+	const SheetCommand sheet = makeSheet(PlanKind::Framing, {"2±0-横架材", "1±0_2±0-柱"});
 
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildPlanDimensionCommands(document, sheet);
@@ -716,14 +720,14 @@ TEST(MoyaChainsFollowMembersAndPressDiagonalCrossings)
 		makeRafterBeam(onDiagonal(base3, top3, 60.0), onDiagonal(base3, top3, 3580.0)),
 		makeRafterBeam(base4, onDiagonal(base4, top4, 3700.0)), northBeam(0.0), northBeam(6825.0)};
 	const std::vector<MemberCommand> eaves{
-		makeEavesGirder("2-横架材天端", Vec2{0.0, 3640.0}, Vec2{7280.0, 3640.0}, 3000.0),
-		makeEavesGirder("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 3640.0}, 3000.0),
-		makeEavesGirder("2-横架材天端", Vec2{7280.0, 0.0}, Vec2{7280.0, 3640.0}, 3000.0)};
+		makeEavesGirder("2±0-横架材", Vec2{0.0, 3640.0}, Vec2{7280.0, 3640.0}, 3000.0),
+		makeEavesGirder("2±0-横架材", Vec2{0.0, 0.0}, Vec2{0.0, 3640.0}, 3000.0),
+		makeEavesGirder("2±0-横架材", Vec2{7280.0, 0.0}, Vec2{7280.0, 3640.0}, 3000.0)};
 	// 受け材を探す先は文書の全横架材。又 7 通りの材は北の登り梁の下端に天端が接する。
 	std::vector<MemberCommand> receivers = members;
 	receivers.insert(receivers.end(), eaves.begin(), eaves.end());
 	receivers.push_back(
-		makeMember("2-横架材天端", Vec2{-300.0, 5915.0}, Vec2{7580.0, 5915.0}, 1483.0));
+		makeMember("2±0-横架材", Vec2{-300.0, 5915.0}, Vec2{7580.0, 5915.0}, 1483.0));
 	std::vector<GridCommand> grids;
 	for (int i = 0; i <= 8; ++i)
 		grids.push_back(
@@ -778,14 +782,14 @@ TEST(MoyaPlanDimensionsMembersOnItsLayersAndTheEavesGirders)
 						makeMember("2-母屋", Vec2{455.0, 0.0}, Vec2{455.0, 1820.0}, 4000.0),
 						makeMember("2-登り梁", Vec2{1365.0, 0.0}, Vec2{1365.0, 1820.0}, 4000.0),
 						// 薄く重ねる同じ階の軒桁（grayedLayers）は押さえる（Y2 通り）。
-						makeEavesGirder("2-軒桁", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}),
+						makeEavesGirder("2±0-軒桁", Vec2{0.0, 1820.0}, Vec2{1820.0, 1820.0}),
 						// 母屋伏図に映らない横架材レイヤの梁は押さえない。
-						makeMember("2-横架材天端", Vec2{910.0, 0.0}, Vec2{910.0, 1820.0}, 3264.0),
+						makeMember("2±0-横架材", Vec2{910.0, 0.0}, Vec2{910.0, 1820.0}, 3264.0),
 						// 別の階の軒桁も押さえない。
-						makeEavesGirder("R-軒桁", Vec2{0.0, 1200.0}, Vec2{1820.0, 1200.0})};
+						makeEavesGirder("R±0-軒桁", Vec2{0.0, 1200.0}, Vec2{1820.0, 1200.0})};
 	// 母屋伏図に映さない同じ階の登り梁（ここでは "2-登り梁"）も寸法には数える。
 	SheetCommand sheet = makeSheet(PlanKind::Moya, {"2-母屋", "2-垂木"});
-	sheet.viewport.grayedLayers = {"2-軒桁"};
+	sheet.viewport.grayedLayers = {"2±0-軒桁"};
 
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildPlanDimensionCommands(document, sheet);
@@ -824,7 +828,7 @@ namespace
 		section.viewPoint = Vec2{-1000.0, 0.0};
 		section.viewport.drawingNumber = "X1";
 		section.viewport.drawingTitle = "X1通り";
-		section.viewport.layers = {"1to2-柱", core::kGridLayer};
+		section.viewport.layers = {"1±0_2±0-柱", core::kGridLayer};
 		return section;
 	}
 
@@ -835,15 +839,15 @@ namespace
 		document.grids = smallGrid();
 		// Y4（y=9000）は図の範囲の外なので寸法に入らない。
 		document.grids.push_back(makeGrid("Y4", Vec2{-1000.0, 9000.0}, Vec2{2820.0, 9000.0}));
-		document.columns = {makeColumn("1to2-柱", Vec2{0.0, 0.0}),
-							makeColumn("1to2-柱", Vec2{0.0, 910.0}),
-							makeColumn("1to2-柱", Vec2{0.0, 1820.0}),
+		document.columns = {makeColumn("1±0_2±0-柱", Vec2{0.0, 0.0}),
+							makeColumn("1±0_2±0-柱", Vec2{0.0, 910.0}),
+							makeColumn("1±0_2±0-柱", Vec2{0.0, 1820.0}),
 							// 切断面の外。
-							makeColumn("1to2-柱", Vec2{1820.0, 455.0})};
+							makeColumn("1±0_2±0-柱", Vec2{1820.0, 455.0})};
 		document.members = {// 標準（2FL−36＝3264）の天端の梁。
-							makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
+							makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3264.0),
 							// 標準より 100 低い梁。
-							makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 910.0}, 3164.0),
+							makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{0.0, 910.0}, 3164.0),
 							// 母屋は高さがもともと材ごとに違うので押さえない。
 							makeMember("2-母屋", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 4500.0)};
 		return document;
@@ -905,10 +909,10 @@ TEST(SectionDimensionsMergeOffStandardBeamsOfTheSameHeight)
 	// まとまる。並びを変えても同じ結果になる。
 	Document document = sectionDocument();
 	document.members.push_back(
-		makeMember("2-横架材天端", Vec2{0.0, 910.0}, Vec2{0.0, 1820.0}, 3164.0));
+		makeMember("2±0-横架材", Vec2{0.0, 910.0}, Vec2{0.0, 1820.0}, 3164.0));
 	// 別の高さ（標準より 200 低い）は別の寸法になる。
 	document.members.push_back(
-		makeMember("2-横架材天端", Vec2{0.0, 910.0}, Vec2{0.0, 1820.0}, 3064.0));
+		makeMember("2±0-横架材", Vec2{0.0, 910.0}, Vec2{0.0, 1820.0}, 3064.0));
 	const SectionCommand section = xSection();
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildSectionDimensionCommands(document, section);
@@ -942,8 +946,7 @@ TEST(SectionDimensionsPlaceMergedBeamHeightOnTheLongestMember)
 {
 	// 同じ高さの材（0〜910 と 0〜1820）のうち、最も長い材の中央に置く。
 	Document document = sectionDocument();
-	document.members.push_back(
-		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3164.0));
+	document.members.push_back(makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{0.0, 1820.0}, 3164.0));
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildSectionDimensionCommands(document, xSection());
 	const DimensionChainCommand* offStandard = findChain(chains, DimensionAxis::Vertical, 1, 0);
@@ -958,10 +961,10 @@ TEST(SectionDimensionsPutUpperColumnsAndKoyazukaAboveTheDrawing)
 	// 1 階の柱 0 / 910 / 1820 に対し、2 階の柱は 0 / 455 / 1820（455 が 1 階と合わない）。
 	// 通し柱（1to3）は 1 階・2 階の両方に数える。小屋束は 2 本（600・1820）。
 	Document document = sectionDocument();
-	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 0.0}));
-	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 455.0}));
-	document.columns.push_back(makeColumn("1to3-柱", Vec2{0.0, 1820.0}));
-	ColumnCommand koyazuka = makeColumn("2to2.5-柱", Vec2{0.0, 600.0});
+	document.columns.push_back(makeColumn("2±0_3±0-柱", Vec2{0.0, 0.0}));
+	document.columns.push_back(makeColumn("2±0_3±0-柱", Vec2{0.0, 455.0}));
+	document.columns.push_back(makeColumn("1±0_3±0-柱", Vec2{0.0, 1820.0}));
+	ColumnCommand koyazuka = makeColumn("2±0_2+0.5-柱", Vec2{0.0, 600.0});
 	koyazuka.structuralUse = core::kStructuralUseKoyazuka;
 	document.columns.push_back(koyazuka);
 	koyazuka.position = Vec2{0.0, 1820.0};
@@ -997,9 +1000,9 @@ TEST(SectionDimensionsSkipUpperColumnsThatMatchTheFloorBelow)
 	// 2 階の柱がすべて 1 階の柱の上にあれば、図の上に 2 階の列は出さない。小屋束は 1 本
 	// でも外壁芯（2 階の柱の両端）から押さえる。
 	Document document = sectionDocument();
-	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 0.0}));
-	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 1820.0}));
-	ColumnCommand koyazuka = makeColumn("2to2.5-柱", Vec2{0.0, 600.0});
+	document.columns.push_back(makeColumn("2±0_3±0-柱", Vec2{0.0, 0.0}));
+	document.columns.push_back(makeColumn("2±0_3±0-柱", Vec2{0.0, 1820.0}));
+	ColumnCommand koyazuka = makeColumn("2±0_2+0.5-柱", Vec2{0.0, 600.0});
 	koyazuka.structuralUse = core::kStructuralUseKoyazuka;
 	document.columns.push_back(koyazuka);
 	const std::vector<DimensionChainCommand> chains =
@@ -1019,16 +1022,15 @@ TEST(SectionDimensionsIncludeWhereAlongBeamsMeetCrossingBeams)
 	// **2 階の**直交材の下を通るだけなので、1600 は数えない（階が違う）。沿う材の端に
 	// 無い切り口（y=700 を横切る 1 階の材）も数えない。
 	Document document = sectionDocument();
+	document.members.push_back(makeMember("1±0-横架材", Vec2{0.0, 0.0}, Vec2{0.0, 1365.0}, 464.0));
 	document.members.push_back(
-		makeMember("1-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1365.0}, 464.0));
+		makeMember("1±0-横架材", Vec2{0.0, 1365.0}, Vec2{0.0, 1600.0}, 464.0));
 	document.members.push_back(
-		makeMember("1-横架材天端", Vec2{0.0, 1365.0}, Vec2{0.0, 1600.0}, 464.0));
+		makeMember("1±0-横架材", Vec2{-910.0, 1365.0}, Vec2{910.0, 1365.0}, 464.0));
 	document.members.push_back(
-		makeMember("1-横架材天端", Vec2{-910.0, 1365.0}, Vec2{910.0, 1365.0}, 464.0));
+		makeMember("2±0-横架材", Vec2{-910.0, 1600.0}, Vec2{910.0, 1600.0}, 3264.0));
 	document.members.push_back(
-		makeMember("2-横架材天端", Vec2{-910.0, 1600.0}, Vec2{910.0, 1600.0}, 3264.0));
-	document.members.push_back(
-		makeMember("1-横架材天端", Vec2{-910.0, 700.0}, Vec2{910.0, 700.0}, 464.0));
+		makeMember("1±0-横架材", Vec2{-910.0, 700.0}, Vec2{910.0, 700.0}, 464.0));
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildSectionDimensionCommands(document, xSection());
 	const DimensionChainCommand* bottom = findChain(chains, DimensionAxis::Horizontal, -1, 0);
@@ -1042,7 +1044,7 @@ TEST(SectionDimensionsMeasureRoofPostsFromTheBuildingPerimeter)
 	// 屋根の階（軒高ストーリ＝3 階）に立つ柱は小屋束と同じ列。建物の外周芯（屋根の階より
 	// 下の柱の両端 0・1820）から押さえる。
 	Document document = sectionDocument();
-	document.columns.push_back(makeColumn("3to3.5-柱", Vec2{0.0, 1000.0}));
+	document.columns.push_back(makeColumn("3±0_3+0.5-柱", Vec2{0.0, 1000.0}));
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildSectionDimensionCommands(document, xSection());
 	const DimensionChainCommand* posts = findChain(chains, DimensionAxis::Horizontal, 1, 0);
@@ -1060,13 +1062,12 @@ TEST(SectionDimensionsStopAtTheOuterWallNotTheNearbyGrid)
 	Document document;
 	document.stories = twoStoreyStories();
 	document.grids = smallGrid();
-	document.columns = {makeColumn("1to2-柱", Vec2{0.0, 0.0}),
-						makeColumn("1to2-柱", Vec2{0.0, 910.0}),
-						makeColumn("1to2-柱", Vec2{0.0, 1775.0})};
-	document.members = {
-		makeMember("1-横架材天端", Vec2{0.0, 0.0}, Vec2{0.0, 1775.0}, 464.0),
-		makeMember("1-横架材天端", Vec2{-910.0, 1775.0}, Vec2{910.0, 1775.0}, 464.0),
-		makeMember("1-横架材天端", Vec2{-910.0, 1820.0}, Vec2{910.0, 1820.0}, 464.0)};
+	document.columns = {makeColumn("1±0_2±0-柱", Vec2{0.0, 0.0}),
+						makeColumn("1±0_2±0-柱", Vec2{0.0, 910.0}),
+						makeColumn("1±0_2±0-柱", Vec2{0.0, 1775.0})};
+	document.members = {makeMember("1±0-横架材", Vec2{0.0, 0.0}, Vec2{0.0, 1775.0}, 464.0),
+						makeMember("1±0-横架材", Vec2{-910.0, 1775.0}, Vec2{910.0, 1775.0}, 464.0),
+						makeMember("1±0-横架材", Vec2{-910.0, 1820.0}, Vec2{910.0, 1820.0}, 464.0)};
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildSectionDimensionCommands(document, xSection());
 	const DimensionChainCommand* bottom = findChain(chains, DimensionAxis::Horizontal, -1, 0);
@@ -1083,12 +1084,12 @@ TEST(SectionTopDimensionsSitOnThisSectionsFrame)
 	Document document = sectionDocument();
 	document.members.erase(document.members.begin() + 2); // 母屋（4500）を削除する
 	MemberCommand rising =
-		makeMember("2-横架材天端", Vec2{-910.0, 900.0}, Vec2{910.0, 900.0}, 4000.0);
+		makeMember("2±0-横架材", Vec2{-910.0, 900.0}, Vec2{910.0, 900.0}, 4000.0);
 	rising.endElevation = 5000.0;
 	document.members.push_back(rising);
 	document.members.push_back(
-		makeMember("2-横架材天端", Vec2{3000.0, 9000.0}, Vec2{4000.0, 9000.0}, 7000.0));
-	document.columns.push_back(makeColumn("2to3-柱", Vec2{0.0, 455.0}));
+		makeMember("2±0-横架材", Vec2{3000.0, 9000.0}, Vec2{4000.0, 9000.0}, 7000.0));
+	document.columns.push_back(makeColumn("2±0_3±0-柱", Vec2{0.0, 455.0}));
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildSectionDimensionCommands(document, xSection());
 	const DimensionChainCommand* upper = findChain(chains, DimensionAxis::Horizontal, 1, 0);
@@ -1131,16 +1132,16 @@ TEST(SectionDimensionsAndLevelMarksReachCrossingMembers)
 	// 半分だけ外）より外から出す。
 	Document document = sectionDocument();
 	document.members.push_back(
-		makeMember("2-横架材天端", Vec2{-910.0, -500.0}, Vec2{910.0, -500.0}, 3264.0));
+		makeMember("2±0-横架材", Vec2{-910.0, -500.0}, Vec2{910.0, -500.0}, 3264.0));
 	// 切断面で止まる材（x=0 で終わる）も切り口を持つ。右端（y=2500 → −2500）を広げる。
 	document.members.push_back(
-		makeMember("2-横架材天端", Vec2{-910.0, 2500.0}, Vec2{0.0, 2500.0}, 3264.0));
+		makeMember("2±0-横架材", Vec2{-910.0, 2500.0}, Vec2{0.0, 2500.0}, 3264.0));
 	// 切断面へ届かない材は数えない。
 	document.members.push_back(
-		makeMember("2-横架材天端", Vec2{500.0, -2000.0}, Vec2{1500.0, -2000.0}, 3264.0));
+		makeMember("2±0-横架材", Vec2{500.0, -2000.0}, Vec2{1500.0, -2000.0}, 3264.0));
 	// 柱の範囲の内側の切り口は、下の列へ加えない（押さえるのは最外周だけ）。
 	document.members.push_back(
-		makeMember("2-横架材天端", Vec2{-910.0, 455.0}, Vec2{910.0, 455.0}, 3264.0));
+		makeMember("2±0-横架材", Vec2{-910.0, 455.0}, Vec2{910.0, 455.0}, 3264.0));
 	// 外側の切り口の近く（20mm）に通り芯がある。下の列は通り芯へ寄せず、切り口の芯のまま。
 	document.grids.push_back(makeGrid("Y0", Vec2{-1000.0, -480.0}, Vec2{2820.0, -480.0}));
 	const SectionCommand section = xSection();
@@ -1172,7 +1173,7 @@ TEST(SectionWithOnlyCrossingMembersHasNoDimensions)
 	// 切り口だけでは記号を置く根拠にしない（柱も沿う材も無い断面は従来どおり空）。
 	Document document;
 	document.stories = twoStoreyStories();
-	document.members = {makeMember("2-横架材天端", Vec2{-910.0, 0.0}, Vec2{910.0, 0.0}, 3264.0)};
+	document.members = {makeMember("2±0-横架材", Vec2{-910.0, 0.0}, Vec2{910.0, 0.0}, 3264.0)};
 	CHECK(parse::buildSectionDimensionCommands(document, xSection()).empty());
 	CHECK(parse::buildSectionLevelMarks(document, xSection()).empty());
 }

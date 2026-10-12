@@ -98,7 +98,7 @@ namespace
 		story.name = "1階";
 		story.suffix = "1";
 		story.elevation = 473.0;
-		story.levels.push_back(core::LevelCommand{"FL", 0.0, "1-FL"});
+		story.levels.push_back(core::LevelCommand{"FL", 0.0, "1±0-FL"});
 		return story;
 	}
 } // namespace
@@ -134,7 +134,7 @@ TEST(validate_rejects_story_level_with_empty_type)
 {
 	core::Document document;
 	core::StoryCommand story = validStory();
-	story.levels.push_back(core::LevelCommand{"", 0.0, "1-横架材天端"});
+	story.levels.push_back(core::LevelCommand{"", 0.0, "1±0-横架材"});
 	document.stories.push_back(story);
 	CHECK(!core::validateDocument(document));
 }
@@ -154,7 +154,7 @@ namespace
 	core::FloorCommand validFloor()
 	{
 		core::FloorCommand floor;
-		floor.layer = "1-FL";
+		floor.layer = "1±0-FL";
 		floor.drawClass = "04構造-02木造-06耐力面材-02床";
 		floor.boundary = {core::Vec2{0.0, 0.0}, core::Vec2{1000.0, 0.0}, core::Vec2{1000.0, 2000.0},
 						  core::Vec2{0.0, 2000.0}};
@@ -288,7 +288,7 @@ namespace
 	core::MemberCommand validMember()
 	{
 		core::MemberCommand member;
-		member.layer = "1-横架材天端";
+		member.layer = "1±0-横架材";
 		member.memberId = "120×180 - 杉";
 		member.drawClass = "04構造-02木造-04梁桁-03床梁";
 		member.start = core::Vec2{0.0, 0.0};
@@ -463,7 +463,7 @@ namespace
 	core::ColumnCommand validColumn()
 	{
 		core::ColumnCommand column;
-		column.layer = "1to2-柱";
+		column.layer = "1±0_2±0-柱";
 		column.memberId = "105×105 - 管柱";
 		column.drawClass = "04構造-02木造-03柱-02管柱";
 		column.structuralUse = "4";
@@ -1251,7 +1251,7 @@ namespace
 	core::SymbolCommand validSymbol()
 	{
 		core::SymbolCommand symbol;
-		symbol.layer = "1-横架材天端";
+		symbol.layer = "1±0-横架材";
 		symbol.symbol = "仕口";
 		symbol.position = core::Vec2{100.0, 200.0};
 		symbol.angle = 90.0;
@@ -1337,7 +1337,7 @@ namespace
 		sheet.title = "1階床伏図";
 		sheet.viewport.drawingNumber = "2";
 		sheet.viewport.drawingTitle = "1階床伏図";
-		sheet.viewport.layers = {"1-横架材天端", "1to2-柱", "1-FL", "共通"};
+		sheet.viewport.layers = {"1±0-横架材", "1±0_2±0-柱", "1±0-FL", "共通"};
 		return sheet;
 	}
 } // namespace
@@ -1403,7 +1403,7 @@ TEST(validate_rejects_sheet_with_empty_grayed_layer_name)
 	// グレーで重ねるレイヤ（母屋伏図の軒桁）も名前が無ければ不正とする。0 枚は妥当。
 	core::Document document;
 	core::SheetCommand sheet = validSheet();
-	sheet.viewport.grayedLayers = {"R-軒桁"};
+	sheet.viewport.grayedLayers = {"R±0-軒桁"};
 	document.sheets.push_back(sheet);
 	CHECK(core::validateDocument(document));
 	document.sheets.front().viewport.grayedLayers.emplace_back();
@@ -1474,7 +1474,7 @@ namespace
 		section.viewPoint = core::Vec2{0.0, 0.0};
 		section.viewport.drawingNumber = "X1";
 		section.viewport.drawingTitle = "X1通り";
-		section.viewport.layers = {"1-横架材天端", "1-FL", "共通"};
+		section.viewport.layers = {"1±0-横架材", "1±0-FL", "共通"};
 		return section;
 	}
 } // namespace
@@ -1545,7 +1545,7 @@ namespace
 	{
 		core::Document document;
 		core::MemberCommand member;
-		member.layer = "1-横架材天端";
+		member.layer = "1±0-横架材";
 		member.memberId = "120×180";
 		member.drawClass = "04構造-02木造-04床組-03床梁";
 		member.start = core::Vec2{0.0, 0.0};
@@ -2002,7 +2002,7 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	};
 
 	core::FloorCommand floor;
-	floor.layer = "1-FL";
+	floor.layer = "1±0-FL";
 	floor.boundary = boundaryAt(1000.0);
 	document.floors.push_back(floor);
 
@@ -2017,7 +2017,7 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	document.roofs.push_back(roof);
 
 	core::MemberCommand member;
-	member.layer = "1-横架材天端";
+	member.layer = "1±0-横架材";
 	member.start = core::Vec2{-1300.0, -1300.0};
 	member.end = core::Vec2{1300.0, 1300.0};
 	document.members.push_back(member);
@@ -2035,17 +2035,17 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	document.rafters.push_back(rafter);
 
 	core::ColumnCommand column;
-	column.layer = "1to2-柱";
+	column.layer = "1±0_2±0-柱";
 	column.position = core::Vec2{1600.0, 0.0};
 	document.columns.push_back(column);
 
 	core::ColumnMarkCommand mark;
-	mark.layer = "2-柱伏図記号";
+	mark.layer = "2±0-柱伏図記号";
 	mark.position = core::Vec2{-1700.0, 0.0};
 	document.columnMarks.push_back(mark);
 
 	core::ShearWallCommand shear;
-	shear.layer = "1-耐力壁";
+	shear.layer = "1±0-耐力壁";
 	shear.start = core::Vec2{-1750.0, 0.0};
 	shear.end = core::Vec2{1750.0, 0.0};
 	document.shearWalls.push_back(shear);
@@ -2060,8 +2060,8 @@ TEST(plan_content_bounds_sees_every_kind_of_command)
 	};
 	document.anchorBolts.push_back(symbolAt("F-アンカーボルト", core::Vec2{0.0, 1800.0}));
 	document.floorPosts.push_back(symbolAt("F-床束", core::Vec2{0.0, -1900.0}));
-	document.fireBraces.push_back(symbolAt("1-横架材天端", core::Vec2{2000.0, 0.0}));
-	document.joints.push_back(symbolAt("1-横架材天端", core::Vec2{-2100.0, 0.0}));
+	document.fireBraces.push_back(symbolAt("1±0-横架材", core::Vec2{2000.0, 0.0}));
+	document.joints.push_back(symbolAt("1±0-横架材", core::Vec2{-2100.0, 0.0}));
 
 	core::GridCommand grid;
 	grid.layer = core::kGridLayer;
@@ -2097,7 +2097,7 @@ TEST(plan_content_bounds_sees_sheet_data_tags)
 	core::Document document;
 
 	core::MemberCommand member;
-	member.layer = "1-横架材天端";
+	member.layer = "1±0-横架材";
 	member.start = core::Vec2{-1000.0, 0.0};
 	member.end = core::Vec2{1000.0, 0.0};
 	document.members.push_back(member);
@@ -2113,7 +2113,7 @@ TEST(plan_content_bounds_sees_sheet_data_tags)
 	sheet.title = "1階床伏図";
 	sheet.viewport.drawingTitle = "1階床伏図";
 	sheet.viewport.drawingNumber = "1";
-	sheet.viewport.layers = {"1-横架材天端"};
+	sheet.viewport.layers = {"1±0-横架材"};
 	sheet.viewport.tags.push_back(tag);
 	document.sheets.push_back(sheet);
 
@@ -2123,15 +2123,15 @@ TEST(plan_content_bounds_sees_sheet_data_tags)
 	CHECK(near(max.y, 3000.0 + core::kPlanContentMargin));
 
 	// 関連付け先の材のレイヤで絞ったときも出る（その材が映る伏図に出るタグなので）。
-	CHECK(core::planContentBounds(document, {"1-横架材天端"}, min, max));
+	CHECK(core::planContentBounds(document, {"1±0-横架材"}, min, max));
 	CHECK(near(max.y, 3000.0 + core::kPlanContentMargin));
 
 	// 別のレイヤで絞れば出ない（その伏図には材もタグも映らない）。
 	core::ColumnCommand column;
-	column.layer = "1to2-柱";
+	column.layer = "1±0_2±0-柱";
 	column.position = core::Vec2{0.0, 0.0};
 	document.columns.push_back(column);
-	CHECK(core::planContentBounds(document, {"1to2-柱"}, min, max));
+	CHECK(core::planContentBounds(document, {"1±0_2±0-柱"}, min, max));
 	CHECK(near(max.y, 0.0 + core::kPlanContentMargin));
 }
 
@@ -2147,7 +2147,7 @@ TEST(plan_content_bounds_takes_unlinked_sheet_tags_into_the_whole_document)
 	core::Document document;
 
 	core::ColumnCommand column;
-	column.layer = "1to2-柱";
+	column.layer = "1±0_2±0-柱";
 	column.position = core::Vec2{0.0, 0.0};
 	document.columns.push_back(column);
 
@@ -2160,7 +2160,7 @@ TEST(plan_content_bounds_takes_unlinked_sheet_tags_into_the_whole_document)
 	sheet.title = "1階床伏図";
 	sheet.viewport.drawingTitle = "1階床伏図";
 	sheet.viewport.drawingNumber = "1";
-	sheet.viewport.layers = {"1to2-柱"};
+	sheet.viewport.layers = {"1±0_2±0-柱"};
 	sheet.viewport.tags.push_back(tag);
 	document.sheets.push_back(sheet);
 
@@ -2170,7 +2170,7 @@ TEST(plan_content_bounds_takes_unlinked_sheet_tags_into_the_whole_document)
 	CHECK(near(max.y, 4000.0 + core::kPlanContentMargin));
 
 	// レイヤで絞れば反映されない（柱だけが残る）。
-	CHECK(core::planContentBounds(document, {"1to2-柱"}, min, max));
+	CHECK(core::planContentBounds(document, {"1±0_2±0-柱"}, min, max));
 	CHECK(near(max.y, 0.0 + core::kPlanContentMargin));
 }
 
@@ -2182,7 +2182,7 @@ TEST(plan_content_bounds_ignores_section_data_tags)
 	core::Document document;
 
 	core::MemberCommand member;
-	member.layer = "1-横架材天端";
+	member.layer = "1±0-横架材";
 	member.start = core::Vec2{-1000.0, 0.0};
 	member.end = core::Vec2{1000.0, 0.0};
 	document.members.push_back(member);
@@ -2215,10 +2215,10 @@ TEST(plan_content_bounds_fails_without_coordinates)
 	// 指定したレイヤに何も載っていないときも同じ（伏図の表示レイヤが 1 つも描画されなかった）。
 	core::Document document;
 	core::ColumnCommand column;
-	column.layer = "1to2-柱";
+	column.layer = "1±0_2±0-柱";
 	column.position = core::Vec2{0.0, 0.0};
 	document.columns.push_back(column);
-	CHECK(!core::planContentBounds(document, {"2to3-柱"}, min, max));
+	CHECK(!core::planContentBounds(document, {"2±0_3±0-柱"}, min, max));
 }
 
 TEST(section_content_size_pairs_plan_width_with_section_height)
@@ -2227,7 +2227,7 @@ TEST(section_content_size_pairs_plan_width_with_section_height)
 	// 平面は 8m（X）× 12m（Y）。幅は**大きい方**＝ Y の広がりを採る（X通りの軸組図が
 	// 映すのは Y 方向の広がりなので、両方向が同じマスに収まるように揃える）。
 	core::MemberCommand member;
-	member.layer = "1-横架材天端";
+	member.layer = "1±0-横架材";
 	member.start = core::Vec2{-4000.0, -6000.0};
 	member.end = core::Vec2{4000.0, 6000.0};
 	member.elevation = 3000.0;
@@ -2279,9 +2279,9 @@ namespace
 	core::ColumnMarkCommand validSectionMark()
 	{
 		core::ColumnMarkCommand mark;
-		mark.layer = "1to2-柱";
+		mark.layer = "1±0_2±0-柱";
 		mark.drawClass = "01作図-01線-02実線-01極細線";
-		mark.targetLayer = "1to2-柱";
+		mark.targetLayer = "1±0_2±0-柱";
 		mark.style = core::ColumnMarkStyle::Section;
 		return mark;
 	}
@@ -2289,9 +2289,9 @@ namespace
 	core::ColumnMarkCommand validPlanMark()
 	{
 		core::ColumnMarkCommand mark;
-		mark.layer = "2-柱伏図記号";
+		mark.layer = "2±0-柱伏図記号";
 		mark.drawClass = "01作図-04記号-04構造-一般";
-		mark.targetLayer = "1to2-柱";
+		mark.targetLayer = "1±0_2±0-柱";
 		mark.style = core::ColumnMarkStyle::Plan;
 		mark.symbol = "柱伏図記号";
 		return mark;
@@ -2371,9 +2371,9 @@ namespace
 	core::ShearWallCommand validShearWall()
 	{
 		core::ShearWallCommand wall;
-		wall.layer = "1-耐力壁";
+		wall.layer = "1±0-耐力壁";
 		wall.drawClass = "04構造-02木造-07筋かい";
-		wall.targetLayers = "1to2-柱";
+		wall.targetLayers = "1±0_2±0-柱";
 		wall.start = core::Vec2{0.0, 0.0};
 		wall.end = core::Vec2{910.0, 0.0};
 		wall.kind = core::ShearWallKind::Brace;

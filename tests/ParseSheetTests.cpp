@@ -77,9 +77,11 @@ namespace
 	// 主屋根の小屋束を並べたもの。
 	std::vector<ColumnSpan> sampleSpans()
 	{
-		return {ColumnSpan{1.0, 2.0, "1to2-柱"}, ColumnSpan{1.0, 3.0, "1to3-柱"},
-				ColumnSpan{2.0, 2.5, "2to2.5-柱"}, ColumnSpan{2.0, 3.0, "2to3-柱"},
-				ColumnSpan{3.0, 3.5, "3to3.5-柱"}};
+		return {ColumnSpan{1.0, 2.0, "1±0_2±0-柱", "2±0"},
+				ColumnSpan{1.0, 3.0, "1±0_3±0-柱", "3±0"},
+				ColumnSpan{2.0, 2.5, "2±0_2+0.5-柱", "2+0.5"},
+				ColumnSpan{2.0, 3.0, "2±0_3±0-柱", "3±0"},
+				ColumnSpan{3.0, 3.5, "3±0_3+0.5-柱", "3+0.5"}};
 	}
 
 	bool contains(const std::vector<std::string>& values, const std::string& value)
@@ -129,16 +131,16 @@ TEST(SpanLayersAtCutIncludesSpansCrossingTheCut)
 
 	// 1 階床伏図（切断 1.25）: 1 階を base とする柱と、そこから上へ貫く通し柱。
 	const std::vector<std::string> first = spanLayersAtCut(spans, 0 + kFloorPlanCutOffset);
-	CHECK(first == (std::vector<std::string>{"1to2-柱", "1to3-柱"}));
+	CHECK(first == (std::vector<std::string>{"1±0_2±0-柱", "1±0_3±0-柱"}));
 
 	// 2 階床伏図（切断 2.25）: 2 階を base とする柱・小屋束に加え、貫いてきた通し柱。
 	const std::vector<std::string> second = spanLayersAtCut(spans, 1 + kFloorPlanCutOffset);
-	CHECK(second == (std::vector<std::string>{"1to3-柱", "2to2.5-柱", "2to3-柱"}));
+	CHECK(second == (std::vector<std::string>{"1±0_3±0-柱", "2±0_2+0.5-柱", "2±0_3±0-柱"}));
 
 	// 3 階小屋伏図（切断 3.25）: **下屋の小屋束（to=2.5）は写り込まない**。3 階床までの
 	// 柱（to=3）も切断より下なので出ず、主屋根の小屋束だけが残る。
 	const std::vector<std::string> top = spanLayersAtCut(spans, 2 + kFloorPlanCutOffset);
-	CHECK(top == (std::vector<std::string>{"3to3.5-柱"}));
+	CHECK(top == (std::vector<std::string>{"3±0_3+0.5-柱"}));
 }
 
 TEST(MoyaCutShowsOnlyColumnsPiercingTheRoof)
@@ -148,7 +150,7 @@ TEST(MoyaCutShowsOnlyColumnsPiercingTheRoof)
 	// 1 階母屋伏図（切断 2.75）: 下屋を貫いて立ち上がる主屋の柱（1to3 / 2to3）だけ。
 	// 母屋を支える下屋の小屋束（2to2.5）は切断より低いので断面としては出ない。
 	const std::vector<std::string> lower = spanLayersAtCut(spans, 1 + kMoyaPlanCutOffset);
-	CHECK(lower == (std::vector<std::string>{"1to3-柱", "2to3-柱"}));
+	CHECK(lower == (std::vector<std::string>{"1±0_3±0-柱", "2±0_3±0-柱"}));
 
 	// 2 階母屋伏図（切断 3.75）: **柱レイヤは 1 つも載らない**。主屋根を貫いて立ち上がる柱は
 	// 無く、主屋根を支える小屋束（3to3.5）も切断より低い（to=3.5 < 3.75）ため断面は出ない
@@ -224,25 +226,23 @@ TEST(FloorFramingSheetPerPlanLevelWithBeamAndGridLayers)
 				CHECK(sheets[k].title == floorPlanTitle(i, isTop, stories.size()) +
 											 planLevelTitleSuffix(levels, level));
 
-				// その伏図レベルの横架材レイヤ（一般階＝横架材天端・最上階＝軒高）と通り芯は
+				// その伏図レベルの横架材レイヤ（"2±0-横架材"。最上階も "横架材"）と通り芯は
 				// 必ず載る。
-				CHECK(contains(
-					sheets[k].viewport.layers,
-					storyLayerName(i, isTop,
-								   std::string(isTop ? "軒高" : "横架材天端") + level.tag)));
+				CHECK(contains(sheets[k].viewport.layers,
+							   parse::levelLayerName(i, isTop, level.step, "横架材天端")));
 				CHECK(contains(sheets[k].viewport.layers, core::kGridLayer));
 
 				// 標準の伏図レベルは、最上階以外なら床（FL）が載る。最下階は基礎があるとき
 				// だけアンカーボルトが載る。
 				if (level.standard)
-					CHECK(contains(sheets[k].viewport.layers, storyLayerName(i, isTop, "FL")) ==
-						  !isTop);
+					CHECK(contains(sheets[k].viewport.layers,
+								   parse::levelLayerName(i, isTop, 0.0, "FL")) == !isTop);
 				const bool expectAnchor = (i == 0) && !isTop && hasFoundation(model);
 				CHECK(contains(sheets[k].viewport.layers, kLayerFoundationAnchor) == expectAnchor);
 				// クラスで隠すのは基礎伏図だけ（柱梁伏図は全クラス表示）。
 				CHECK(sheets[k].viewport.hiddenClasses.empty());
 				// 軒桁は専用レイヤでも柱梁伏図にはふつうに映す（薄くしない）。
-				const std::string eaves = storyLayerName(i, isTop, std::string("軒桁") + level.tag);
+				const std::string eaves = parse::levelLayerName(i, isTop, level.step, "軒桁");
 				CHECK(contains(sheets[k].viewport.layers, eaves) ==
 					  (storyLayerNames(model).count(eaves) == 1));
 				CHECK(sheets[k].viewport.grayedLayers.empty());
@@ -272,17 +272,18 @@ TEST(SkipFloorGetsFramingSheetPerBeamHeight)
 	for (std::size_t k = 0; k < titles.size(); ++k)
 		CHECK_EQ(sheets[k].title, titles[k]);
 
-	// 標準の高さ（2FL の横架材天端 GL+3531・RFL の軒高 GL+6374）は従来のレイヤ名、それ以外は
-	// 高さの印の付いたレイヤ。
-	CHECK(contains(sheets[1].viewport.layers, "2-横架材天端(FL-872)"));
-	CHECK(!contains(sheets[1].viewport.layers, "2-横架材天端"));
-	CHECK(contains(sheets[2].viewport.layers, "2-横架材天端"));
-	CHECK(contains(sheets[5].viewport.layers, "R-軒高"));
-	CHECK(contains(sheets[3].viewport.layers, "R-軒高(軒高-832)"));
+	// 標準の高さ（2FL の横架材天端 GL+3531・RFL の軒高 GL+6374）は "±0"、それ以外は標準
+	// からの段数の符号のレイヤ（ご要望。高さの数値は書かない）。
+	CHECK(contains(sheets[1].viewport.layers, "2-1-横架材"));
+	CHECK(!contains(sheets[1].viewport.layers, "2±0-横架材"));
+	CHECK(contains(sheets[2].viewport.layers, "2±0-横架材"));
+	CHECK(contains(sheets[5].viewport.layers, "R±0-横架材"));
+	CHECK(contains(sheets[3].viewport.layers, "R-2-横架材"));
+	CHECK(contains(sheets[4].viewport.layers, "R-1-横架材"));
 	// 段差の床（GL+2699 の横架材に載る床）は GL+2699 の伏図にだけ出る。
-	CHECK(contains(sheets[1].viewport.layers, "2-FL(FL-872)"));
-	CHECK(!contains(sheets[2].viewport.layers, "2-FL(FL-872)"));
-	CHECK(contains(sheets[2].viewport.layers, "2-FL"));
+	CHECK(contains(sheets[1].viewport.layers, "2-1-FL"));
+	CHECK(!contains(sheets[2].viewport.layers, "2-1-FL"));
+	CHECK(contains(sheets[2].viewport.layers, "2±0-FL"));
 }
 
 TEST(MergedPlanLevelsShareOneFramingSheet)
@@ -306,8 +307,8 @@ TEST(MergedPlanLevelsShareOneFramingSheet)
 	CHECK_EQ(sheets[0].title, std::string("1階床伏図"));
 	CHECK_EQ(sheets[1].title, std::string("2階床伏図"));
 	CHECK_EQ(sheets[2].title, std::string("2階小屋伏図"));
-	CHECK(contains(sheets[1].viewport.layers, "2-横架材天端"));
-	CHECK(contains(sheets[2].viewport.layers, "R-軒高"));
+	CHECK(contains(sheets[1].viewport.layers, "2±0-横架材"));
+	CHECK(contains(sheets[2].viewport.layers, "R±0-横架材"));
 
 	// 一部だけまとめると、まとめた伏図のタイトルに高さを並べる。
 	core::ImportOptions partial;
@@ -318,12 +319,13 @@ TEST(MergedPlanLevelsShareOneFramingSheet)
 	if (partialSheets.size() == 5)
 	{
 		CHECK_EQ(partialSheets[3].title, std::string("2階小屋伏図（軒高-832・軒高-364）"));
-		CHECK(contains(partialSheets[3].viewport.layers, "R-軒高(軒高-832)"));
+		// まとめた単位の段数で呼ぶ（5542 と 6010 で 1 段。標準 6374 の 1 段下）。
+		CHECK(contains(partialSheets[3].viewport.layers, "R-1-横架材"));
 		CHECK_EQ(partialSheets[4].title, std::string("2階小屋伏図（軒高±0）"));
 	}
 	// まとめたので高さ別のレイヤは無く、すべての横架材が標準のレイヤに載る。
 	for (const core::MemberCommand& member : context.members())
-		CHECK(core::stripPlanLevelTag(member.layer) == member.layer);
+		CHECK(parse::stripLevelStep(member.layer) == member.layer);
 }
 
 TEST(MoyaSheetPerStoryWithRoofSlab)
@@ -362,9 +364,10 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 					contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "野地板")));
 				CHECK(contains(sheet.viewport.layers, core::kGridLayer));
 				// 母屋伏図には床（FL）を載せない（梁組と分ける図なので）。
-				CHECK(!contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "FL")));
+				CHECK(!contains(sheet.viewport.layers,
+								parse::levelLayerName(i, stories[i].isTop, 0.0, "FL")));
 				// 同じ階の軒桁は、あればグレーで重ねる（表示レイヤには入れない）。
-				const std::string eaves = storyLayerName(i, stories[i].isTop, "軒桁");
+				const std::string eaves = parse::levelLayerName(i, stories[i].isTop, 0.0, "軒桁");
 				CHECK(!contains(sheet.viewport.layers, eaves));
 				CHECK(contains(sheet.viewport.grayedLayers, eaves) ==
 					  (storyLayerNames(model).count(eaves) == 1));
@@ -377,7 +380,8 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 						continue;
 					double from = 0.0;
 					double to = 0.0;
-					CHECK(parse::parseSpanLayer(layer, "登り梁", from, to));
+					CHECK(
+						parse::parseSpanOrdinals(context.planLevels(), layer, "登り梁", from, to));
 					CHECK(to == std::floor(to) && from < to);
 				}
 				++seq;
@@ -427,8 +431,9 @@ TEST(ViewportLayersExistAmongStoryLayers)
 						   for (const core::LevelCommand& level : foundation.levels)
 							   known.insert(level.layer);
 					   }
-					   for (const PlanMarkLayer& layer :
-							collectPlanMarkLayers(collectColumnSpans(buildColumnCommands(model))))
+					   Context context(model);
+					   for (const PlanMarkLayer& layer : collectPlanMarkLayers(
+								collectColumnSpans(context.columns(), context.planLevels())))
 						   known.insert(layer.layer);
 
 					   for (const SheetCommand& sheet : buildSheetCommands(model))

@@ -256,7 +256,7 @@ namespace HomeskzIfcImport::draw
 			if (!AdvanceProgress(progress))
 				break;
 
-			// 配置先の span レイヤ（"1to2-柱" 等）が無い命令はスキップする
+			// 配置先の span レイヤ（"1±0_2±0-柱" 等）が無い命令はスキップする
 			// （規約は ActivateExistingLayer）。
 			if (ActivateExistingLayer(column.layer) == nil)
 				continue;

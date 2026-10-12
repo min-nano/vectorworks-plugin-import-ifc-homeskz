@@ -28,13 +28,14 @@ namespace HomeskzIfcImport::parse
 		}
 	} // namespace
 
-	std::string planMarkLayerName(double toLevel)
+	std::string planMarkLayerName(const std::string& toLabel)
 	{
-		return formatSpanLevel(toLevel) + "-" + kPlanMarkLayerSuffix;
+		return toLabel + "-" + kPlanMarkLayerSuffix;
 	}
 
 	std::vector<core::ColumnMarkCommand>
 	buildColumnMarkCommands(const std::vector<core::ColumnCommand>& columns,
+							const std::vector<PlanLevel>& levels,
 							const core::ImportOptions& options)
 	{
 		// span レイヤ → そのレイヤの構造用途（単一種別なので最初に見つかった値でよい）。
@@ -42,7 +43,7 @@ namespace HomeskzIfcImport::parse
 		for (const core::ColumnCommand& column : columns)
 			useByLayer.emplace(column.layer, column.structuralUse);
 
-		const std::vector<ColumnSpan> spans = collectColumnSpans(columns);
+		const std::vector<ColumnSpan> spans = collectColumnSpans(columns, levels);
 
 		// 断面記号をすべて先に、続けて伏図記号をすべて。
 		std::vector<core::ColumnMarkCommand> commands;
@@ -72,7 +73,7 @@ namespace HomeskzIfcImport::parse
 				continue;
 
 			core::ColumnMarkCommand mark;
-			mark.layer = planMarkLayerName(span.to); // 配置先＝専用の伏図記号レイヤ
+			mark.layer = planMarkLayerName(span.toLabel); // 配置先＝専用の伏図記号レイヤ
 			mark.drawClass = kPlanMarkClass;
 			mark.targetLayer = span.layer;
 			mark.style = core::ColumnMarkStyle::Plan;
@@ -84,13 +85,14 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<PlanMarkLayer> collectPlanMarkLayers(const std::vector<ColumnSpan>& spans)
 	{
-		// spans は (from, to) 昇順なので to は単調ではない（"1to3" の次に "2to2.5" が来る）。
+		// spans は (from, to) 昇順なので to は単調ではない（"1±0_3±0" の次に "2±0_2+0.5" が
+		// 来る）。
 		// 同じ to をまとめたうえで to 昇順に並べ替える——伏図は「切断の直下で最大の to」を
 		// 選ぶので、昇順に並んでいると走査が単純になる。
 		std::vector<PlanMarkLayer> layers;
 		for (const ColumnSpan& span : spans)
 		{
-			const std::string name = planMarkLayerName(span.to);
+			const std::string name = planMarkLayerName(span.toLabel);
 			bool known = false;
 			for (const PlanMarkLayer& layer : layers)
 				if (layer.layer == name)

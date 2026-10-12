@@ -331,20 +331,14 @@ namespace HomeskzIfcImport::parse
 			const std::string layer = storyLayerName(i, story.isTop, kLevelTaruki);
 			// 支持点が乗る横架材天端の絶対 Z（最上階は軒高＝オフセット 0）。
 			const double beamTopZ = beamTopElevation(story);
-			// 桁幅の参照先は同じ階の横架材だけ（レイヤ接頭辞 "{n}-" で絞る）。登り梁の span
-			// レイヤ（"3to4-登り梁"。parse/PlanLevel）は接頭辞が無いので、from の伏図レベルが
-			// 属する階で判定する。
-			const std::string layerPrefix = storyLayerPrefix(i, story.isTop) + "-";
+			// 桁幅の参照先は同じ階の横架材だけ（レイヤ名の頭の階の接頭辞で絞る。登り梁の
+			// span レイヤ "2±0_2+0.5-登り梁" も from の符号の階。parse/Story の
+			// layerStoryPrefix）。
+			const std::string layerPrefix = storyLayerPrefix(i, story.isTop);
 			std::vector<core::MemberCommand> storyMembers;
 			for (const core::MemberCommand& member : members)
 			{
-				double from = 0.0;
-				double to = 0.0;
-				const bool sameStory =
-					parseSpanLayer(member.layer, core::kLevelNoboribari, from, to)
-						? storyOfOrdinal(context.planLevels(), from) == i
-						: member.layer.starts_with(layerPrefix);
-				if (sameStory)
+				if (layerStoryPrefix(member.layer) == layerPrefix)
 					storyMembers.push_back(member);
 			}
 

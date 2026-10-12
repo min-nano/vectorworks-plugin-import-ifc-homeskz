@@ -143,7 +143,7 @@ namespace HomeskzIfcImport::parse
 		// **通っている**か。耐力壁はその伏図レベルの横架材の天端に立つ。
 		//
 		// ★**base がその階の柱だけでは足りない。** 通し柱は下の階を base とするレイヤ
-		// （"1to3-柱"）に置かれるので、base だけで絞ると 2 階の耐力壁は壁端の通し柱を
+		// （"1±0_3±0-柱"）に置かれるので、base だけで絞ると 2 階の耐力壁は壁端の通し柱を
 		// 見失い、柱芯へ寄らず控えの内法で描画される。その伏図レベルを下端以下に、
 		// 上端をそれより上に持つ span なら、その高さの壁の端に立ちうる。
 		// 管柱 "1to2" は 2 階（伏図レベル 2）を通らない（to == 2 はその床で止まる）。
@@ -161,18 +161,22 @@ namespace HomeskzIfcImport::parse
 									: static_cast<double>(index) + 1.0;
 		}
 
-		// 伏図レベル level を通る span 柱レイヤの柱を集める（spanCoversLevel）。
+		// 伏図レベル level を通る span 柱レイヤの柱を集める（spanCoversLevel）。spans は
+		// columns の span（collectColumnSpans。符号を通し番号へ引き直したもの）。
 		std::vector<const core::ColumnCommand*>
-		columnsAtLevel(const std::vector<core::ColumnCommand>& columns, double level)
+		columnsAtLevel(const std::vector<core::ColumnCommand>& columns,
+					   const std::vector<ColumnSpan>& spans, double level)
 		{
 			std::vector<const core::ColumnCommand*> found;
 			for (const core::ColumnCommand& column : columns)
 			{
-				double from = 0.0;
-				double to = 0.0;
-				if (!parseSpanLayer(column.layer, from, to))
-					continue;
-				if (spanCoversLevel(from, to, level))
+				const bool covers =
+					std::ranges::any_of(spans,
+										[&column, level](const ColumnSpan& span) {
+											return span.layer == column.layer &&
+												   spanCoversLevel(span.from, span.to, level);
+										});
+				if (covers)
 					found.push_back(&column);
 			}
 			return found;
@@ -665,9 +669,9 @@ namespace HomeskzIfcImport::parse
 
 		// 通り芯と同じセンタリングオフセット（通り芯が無ければ (0,0)＝生の IFC 座標）。
 		const Vec2 center = context.gridCenter();
-		const std::vector<ColumnSpan> columnSpans = collectColumnSpans(columns);
 		// 伏図レベル（parse/PlanLevel）。耐力壁は立つ天端の伏図レベルのレイヤへ置く。
 		const std::vector<PlanLevel>& levels = context.planLevels();
+		const std::vector<ColumnSpan> columnSpans = collectColumnSpans(columns, levels);
 
 		std::vector<ShearWallCommand> commands;
 		for (std::size_t i = 0; i < stories.size(); ++i)
@@ -683,19 +687,19 @@ namespace HomeskzIfcImport::parse
 				const ShearWallPiece& first = group.pieces.front();
 
 				// 耐力壁は下の横架材の天端に立つので、下端にいちばん近い伏図レベルの
-				// "n-耐力壁" レイヤへ置く（伏図はその階自身の耐力壁を映す。M19）。柱も
+				// "n±0-耐力壁" レイヤへ置く（伏図はその階自身の耐力壁を映す。M19）。柱も
 				// その伏図レベルを通るものから探す（spanCoversLevel）。
 				const PlanLevel* planLevel =
 					nearestPlanLevel(levels, i, story.elevation + extent.zBottom);
-				const std::string layer = planLevel != nullptr
-											  ? planLevelLayer(*planLevel, story, kLevelShearWall)
-											  : storyLayerName(i, story.isTop, kLevelShearWall);
+				const std::string layer =
+					planLevel != nullptr ? planLevelLayer(*planLevel, story, kLevelShearWall)
+										 : levelLayerName(i, story.isTop, 0.0, kLevelShearWall);
 				const double layerZ =
 					storyLayerZ + (planLevel != nullptr ? planLevelShift(*planLevel, story) : 0.0);
 				const double ordinal = wallLevelOrdinal(planLevel, i);
 				const std::string targets = joinLayers(columnLayersAtLevel(columnSpans, ordinal));
 				const std::vector<const core::ColumnCommand*> storyColumns =
-					columnsAtLevel(columns, ordinal);
+					columnsAtLevel(columns, columnSpans, ordinal);
 
 				// 要素自身の端（センタリング済み）で柱を探す。面材は壁芯から板厚ぶん
 				// 外れているが、探す許容（kShearWallColumnTol）に対しては誤差の範囲。
@@ -795,11 +799,12 @@ namespace HomeskzIfcImport::parse
 								const std::vector<core::MemberCommand>& members,
 								const std::vector<core::ColumnCommand>& columns)
 	{
+		const std::vector<ColumnSpan> spans = collectColumnSpans(columns, levels);
 		// 1 つのレイヤ（＝伏図レベル）ぶんを測り直す。layerZ はそのレイヤ平面の絶対 Z。
 		const auto fitLayer = [&](const std::string& layer, double layerZ, double ordinal)
 		{
 			const std::vector<const core::ColumnCommand*> levelColumns =
-				columnsAtLevel(columns, ordinal);
+				columnsAtLevel(columns, spans, ordinal);
 			for (ShearWallCommand& wall : walls)
 			{
 				if (wall.layer == layer)
@@ -813,8 +818,8 @@ namespace HomeskzIfcImport::parse
 			{
 				const StoryInfo& story = stories[i];
 				// レイヤ平面（絶対 Z）＝その階の横架材天端（最上階は軒高）。
-				fitLayer(storyLayerName(i, story.isTop, kLevelShearWall), beamTopElevation(story),
-						 static_cast<double>(i) + 1.0);
+				fitLayer(levelLayerName(i, story.isTop, 0.0, kLevelShearWall),
+						 beamTopElevation(story), static_cast<double>(i) + 1.0);
 			}
 			return;
 		}
