@@ -322,6 +322,7 @@ namespace HomeskzIfcImport::parse
 			// 小屋梁は出ない（parse/Joint・parse/Splice は横架材レイヤへ置く）。軒桁も伏図
 			// レベルごとのレイヤへ分かれている（parse/PlanLevel）ので、その階の分を全部。
 			std::vector<std::string> eaves;
+			eaves.reserve(storyLevels.size());
 			for (const PlanLevel* level : storyLevels)
 				eaves.push_back(planLevelLayer(*level, stories[i], kLevelNokigeta));
 			for (const std::string& layer : eaves)
