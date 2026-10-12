@@ -964,7 +964,7 @@ TEST(SectionDimensionsPutUpperColumnsAndKoyazukaAboveTheDrawing)
 	document.columns.push_back(makeColumn("2±0_3±0-柱", Vec2{0.0, 0.0}));
 	document.columns.push_back(makeColumn("2±0_3±0-柱", Vec2{0.0, 455.0}));
 	document.columns.push_back(makeColumn("1±0_3±0-柱", Vec2{0.0, 1820.0}));
-	ColumnCommand koyazuka = makeColumn("2±0_2+0.5-柱", Vec2{0.0, 600.0});
+	ColumnCommand koyazuka = makeColumn("2±0_2+1-柱", Vec2{0.0, 600.0});
 	koyazuka.structuralUse = core::kStructuralUseKoyazuka;
 	document.columns.push_back(koyazuka);
 	koyazuka.position = Vec2{0.0, 1820.0};
@@ -1002,7 +1002,7 @@ TEST(SectionDimensionsSkipUpperColumnsThatMatchTheFloorBelow)
 	Document document = sectionDocument();
 	document.columns.push_back(makeColumn("2±0_3±0-柱", Vec2{0.0, 0.0}));
 	document.columns.push_back(makeColumn("2±0_3±0-柱", Vec2{0.0, 1820.0}));
-	ColumnCommand koyazuka = makeColumn("2±0_2+0.5-柱", Vec2{0.0, 600.0});
+	ColumnCommand koyazuka = makeColumn("2±0_2+1-柱", Vec2{0.0, 600.0});
 	koyazuka.structuralUse = core::kStructuralUseKoyazuka;
 	document.columns.push_back(koyazuka);
 	const std::vector<DimensionChainCommand> chains =
@@ -1044,7 +1044,7 @@ TEST(SectionDimensionsMeasureRoofPostsFromTheBuildingPerimeter)
 	// 屋根の階（軒高ストーリ＝3 階）に立つ柱は小屋束と同じ列。建物の外周芯（屋根の階より
 	// 下の柱の両端 0・1820）から押さえる。
 	Document document = sectionDocument();
-	document.columns.push_back(makeColumn("3±0_3+0.5-柱", Vec2{0.0, 1000.0}));
+	document.columns.push_back(makeColumn("3±0_3+1-柱", Vec2{0.0, 1000.0}));
 	const std::vector<DimensionChainCommand> chains =
 		parse::buildSectionDimensionCommands(document, xSection());
 	const DimensionChainCommand* posts = findChain(chains, DimensionAxis::Horizontal, 1, 0);

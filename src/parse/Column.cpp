@@ -274,7 +274,7 @@ namespace HomeskzIfcImport::parse
 		// 伏図レベル。
 		const PlanLevel* level = nearestPlanLevel(levels, baseIndex, bottomAbs);
 		return level != nullptr ? static_cast<double>(level->ordinal)
-								: static_cast<double>(baseIndex + 1);
+								: standardOrdinalWithoutLevels(baseIndex);
 	}
 
 	double spanToOrdinal(const std::vector<PlanLevel>& levels, double storyToLevel, double topAbs)
@@ -282,14 +282,14 @@ namespace HomeskzIfcImport::parse
 		// storyToLevel は階の単位（resolveColumnToLevel。到達階 + 1、屋根束は + 0.5）。
 		const double whole = std::floor(storyToLevel);
 		const auto reached = static_cast<std::size_t>(std::max(whole - 1.0, 0.0));
+		// 屋根束（小屋束・棟束）は到達階の最も高い伏図レベルの上の屋根面で止まる——母屋を
+		// 受けるので、その階の母屋のレベル（moyaOrdinal。符号は "R+1" のような整数。
+		// ご要望）。伏図レベルが無い階も同じ対応（standardOrdinalWithoutLevels）。
+		if (storyToLevel != whole)
+			return moyaOrdinal(levels, reached);
 		const std::vector<const PlanLevel*> reachedLevels = storyPlanLevels(levels, reached);
 		if (reachedLevels.empty())
-			return storyToLevel; // 伏図レベルが無い（階が無い）ときは従来の番号のまま
-		if (storyToLevel != whole)
-		{
-			// 屋根束（小屋束・棟束）は到達階の最も高い伏図レベルの上の屋根面で止まる。
-			return static_cast<double>(reachedLevels.back()->ordinal) + 0.5;
-		}
+			return standardOrdinalWithoutLevels(reached);
 		// 管柱・通し柱は上端（受ける横架材の天端）が届く伏図レベル。
 		const PlanLevel* level = planLevelAbove(levels, reached, topAbs);
 		return static_cast<double>(level->ordinal);

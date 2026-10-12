@@ -74,14 +74,14 @@ using HomeskzIfcTests::forEachFixture;
 namespace
 {
 	// 試験用の span 柱レイヤ。3 階建てで、1 階管柱・1〜2 階通し柱・下屋の小屋束・2 階管柱・
-	// 主屋根の小屋束を並べたもの。
+	// 主屋根の小屋束を並べたもの。通し番号は各階の伏図レベル 1 つ（1 / 3 / 5）と、その
+	// 後ろの母屋のレベル（2 / 4 / 6。parse/PlanLevel）。小屋束の上端は母屋のレベル。
 	std::vector<ColumnSpan> sampleSpans()
 	{
-		return {ColumnSpan{1.0, 2.0, "1±0_2±0-柱", "2±0"},
-				ColumnSpan{1.0, 3.0, "1±0_3±0-柱", "3±0"},
-				ColumnSpan{2.0, 2.5, "2±0_2+0.5-柱", "2+0.5"},
-				ColumnSpan{2.0, 3.0, "2±0_3±0-柱", "3±0"},
-				ColumnSpan{3.0, 3.5, "3±0_3+0.5-柱", "3+0.5"}};
+		return {
+			ColumnSpan{1.0, 3.0, "1±0_2±0-柱", "2±0"}, ColumnSpan{1.0, 5.0, "1±0_3±0-柱", "3±0"},
+			ColumnSpan{3.0, 4.0, "2±0_2+1-柱", "2+1"}, ColumnSpan{3.0, 5.0, "2±0_3±0-柱", "3±0"},
+			ColumnSpan{5.0, 6.0, "3±0_3+1-柱", "3+1"}};
 	}
 
 	bool contains(const std::vector<std::string>& values, const std::string& value)
@@ -133,30 +133,31 @@ TEST(SpanLayersAtCutIncludesSpansCrossingTheCut)
 	const std::vector<std::string> first = spanLayersAtCut(spans, 0 + kFloorPlanCutOffset);
 	CHECK(first == (std::vector<std::string>{"1±0_2±0-柱", "1±0_3±0-柱"}));
 
-	// 2 階床伏図（切断 2.25）: 2 階を base とする柱・小屋束に加え、貫いてきた通し柱。
-	const std::vector<std::string> second = spanLayersAtCut(spans, 1 + kFloorPlanCutOffset);
-	CHECK(second == (std::vector<std::string>{"1±0_3±0-柱", "2±0_2+0.5-柱", "2±0_3±0-柱"}));
+	// 2 階床伏図（切断 3.25）: 2 階を base とする柱・小屋束に加え、貫いてきた通し柱。
+	const std::vector<std::string> second = spanLayersAtCut(spans, 2 + kFloorPlanCutOffset);
+	CHECK(second == (std::vector<std::string>{"1±0_3±0-柱", "2±0_2+1-柱", "2±0_3±0-柱"}));
 
-	// 3 階小屋伏図（切断 3.25）: **下屋の小屋束（to=2.5）は写り込まない**。3 階床までの
-	// 柱（to=3）も切断より下なので出ず、主屋根の小屋束だけが残る。
-	const std::vector<std::string> top = spanLayersAtCut(spans, 2 + kFloorPlanCutOffset);
-	CHECK(top == (std::vector<std::string>{"3±0_3+0.5-柱"}));
+	// 3 階小屋伏図（切断 5.25）: **下屋の小屋束（to=4）は写り込まない**。3 階床までの
+	// 柱（to=5）も切断より下なので出ず、主屋根の小屋束だけが残る。
+	const std::vector<std::string> top = spanLayersAtCut(spans, 4 + kFloorPlanCutOffset);
+	CHECK(top == (std::vector<std::string>{"3±0_3+1-柱"}));
 }
 
 TEST(MoyaCutShowsOnlyColumnsPiercingTheRoof)
 {
 	const std::vector<ColumnSpan> spans = sampleSpans();
 
-	// 1 階母屋伏図（切断 2.75）: 下屋を貫いて立ち上がる主屋の柱（1to3 / 2to3）だけ。
-	// 母屋を支える下屋の小屋束（2to2.5）は切断より低いので断面としては出ない。
-	const std::vector<std::string> lower = spanLayersAtCut(spans, 1 + kMoyaPlanCutOffset);
+	// 1 階母屋伏図（2 階の母屋のレベル 4 + 0.25）: 下屋を貫いて立ち上がる主屋の柱
+	// （"1±0_3±0" / "2±0_3±0"）だけ。母屋を支える下屋の小屋束（"2±0_2+1"。to＝母屋の
+	// レベル 4）は切断より低いので断面としては出ない。
+	const std::vector<std::string> lower = spanLayersAtCut(spans, 4 + kMoyaPlanCutOffset);
 	CHECK(lower == (std::vector<std::string>{"1±0_3±0-柱", "2±0_3±0-柱"}));
 
-	// 2 階母屋伏図（切断 3.75）: **柱レイヤは 1 つも載らない**。主屋根を貫いて立ち上がる柱は
-	// 無く、主屋根を支える小屋束（3to3.5）も切断より低い（to=3.5 < 3.75）ため断面は出ない
-	// ——母屋伏図は母屋の上からの見下げ図なので、これが意図した結果（小屋束の位置は M12 の
-	// 伏図記号で示す）。
-	const std::vector<std::string> upper = spanLayersAtCut(spans, 2 + kMoyaPlanCutOffset);
+	// 2 階母屋伏図（3 階の母屋のレベル 6 + 0.25）: **柱レイヤは 1 つも載らない**。主屋根を
+	// 貫いて立ち上がる柱は無く、主屋根を支える小屋束（"3±0_3+1"。to=6）も切断より低い
+	// ため断面は出ない——母屋伏図は母屋の上からの見下げ図なので、これが意図した結果
+	// （小屋束の位置は M12 の伏図記号で示す）。
+	const std::vector<std::string> upper = spanLayersAtCut(spans, 6 + kMoyaPlanCutOffset);
 	CHECK(upper.empty());
 }
 

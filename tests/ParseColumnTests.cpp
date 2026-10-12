@@ -601,22 +601,34 @@ TEST(to_level_column_reaching_top_story_at_eaves_stays_integer)
 TEST(collect_spans_distinct_and_sorted)
 {
 	const std::vector<ColumnCommand> columns = {
-		columnOnLayer("2±0_3±0-柱"), columnOnLayer("1±0_2±0-柱"), columnOnLayer("2±0_2+0.5-柱"),
-		columnOnLayer("2±0_3±0-柱"), columnOnLayer("3±0_3+0.5-柱")};
+		columnOnLayer("2±0_3±0-柱"), columnOnLayer("1±0_2±0-柱"), columnOnLayer("2±0_2+1-柱"),
+		columnOnLayer("2±0_3±0-柱"), columnOnLayer("3±0_3+1-柱")};
 
+	// 伏図レベルが無いときの通し番号は、階 s の標準が 2s+1・母屋のレベルが 2s+2
+	// （parse/PlanLevel の standardOrdinalWithoutLevels）。
 	const std::vector<ColumnSpan> spans = collectColumnSpans(columns, {});
 	CHECK_EQ(spans.size(), std::size_t(4));
 	if (spans.size() != 4)
 		return;
-	CHECK(near(spans[0].from, 1.0) && near(spans[0].to, 2.0));
+	CHECK(near(spans[0].from, 1.0) && near(spans[0].to, 3.0));
 	CHECK_EQ(spans[0].layer, std::string("1±0_2±0-柱"));
 	CHECK_EQ(spans[0].toLabel, std::string("2±0"));
-	CHECK(near(spans[1].from, 2.0) && near(spans[1].to, 2.5));
-	CHECK_EQ(spans[1].layer, std::string("2±0_2+0.5-柱"));
-	CHECK(near(spans[2].from, 2.0) && near(spans[2].to, 3.0));
+	CHECK(near(spans[1].from, 3.0) && near(spans[1].to, 4.0));
+	CHECK_EQ(spans[1].layer, std::string("2±0_2+1-柱"));
+	CHECK(near(spans[2].from, 3.0) && near(spans[2].to, 5.0));
 	CHECK_EQ(spans[2].layer, std::string("2±0_3±0-柱"));
-	CHECK(near(spans[3].from, 3.0) && near(spans[3].to, 3.5));
-	CHECK_EQ(spans[3].layer, std::string("3±0_3+0.5-柱"));
+	CHECK(near(spans[3].from, 5.0) && near(spans[3].to, 6.0));
+	CHECK_EQ(spans[3].layer, std::string("3±0_3+1-柱"));
+}
+
+TEST(span_ordinals_without_plan_levels)
+{
+	// 伏図レベルが無いときは、階 s の標準を 2s+1・母屋のレベルを 2s+2 とみなす
+	// （parse/PlanLevel の standardOrdinalWithoutLevels）。屋根束（階の単位の to が
+	// 半整数）の上端はその階の母屋のレベル。
+	CHECK(near(HomeskzIfcImport::parse::spanFromOrdinal({}, 1, 3000.0), 3.0));
+	CHECK(near(HomeskzIfcImport::parse::spanToOrdinal({}, 2.0, 3000.0), 3.0));
+	CHECK(near(HomeskzIfcImport::parse::spanToOrdinal({}, 2.5, 3000.0), 4.0));
 }
 
 TEST(collect_spans_ignores_non_span_layers)
@@ -627,13 +639,13 @@ TEST(collect_spans_ignores_non_span_layers)
 TEST(collect_layers_by_story_groups_by_base_index)
 {
 	const std::vector<ColumnCommand> columns = {
-		columnOnLayer("1±0_2±0-柱"), columnOnLayer("2±0_2+0.5-柱"), columnOnLayer("2±0_3±0-柱"),
-		columnOnLayer("3±0_3+0.5-柱")};
+		columnOnLayer("1±0_2±0-柱"), columnOnLayer("2±0_2+1-柱"), columnOnLayer("2±0_3±0-柱"),
+		columnOnLayer("3±0_3+1-柱")};
 	const std::map<int, std::vector<std::string>> byStory = collectColumnLayersByStory(columns, {});
 	CHECK_EQ(byStory.size(), std::size_t(3));
 	CHECK(sameVec(byStory.at(0), {"1±0_2±0-柱"}));
-	CHECK(sameVec(byStory.at(1), {"2±0_2+0.5-柱", "2±0_3±0-柱"}));
-	CHECK(sameVec(byStory.at(2), {"3±0_3+0.5-柱"}));
+	CHECK(sameVec(byStory.at(1), {"2±0_2+1-柱", "2±0_3±0-柱"}));
+	CHECK(sameVec(byStory.at(2), {"3±0_3+1-柱"}));
 }
 
 // --------------------------------------------------------------------------
@@ -686,8 +698,9 @@ TEST(build_top_story_column_uses_half_level_span)
 	CHECK_EQ(commands.size(), std::size_t(1));
 	if (commands.empty())
 		return;
-	// 単一ストーリ（＝最上階 "R"）。上に階が無いため屋根束扱いで半段上の "R+0.5" まで。
-	CHECK_EQ(commands[0].layer, std::string("R±0_R+0.5-柱"));
+	// 単一ストーリ（＝最上階 "R"）。上に階が無いため屋根束扱いで、上端は母屋のレベル
+	// "R+1"（整数の段数に揃える。ご要望）。
+	CHECK_EQ(commands[0].layer, std::string("R±0_R+1-柱"));
 	// 下端高さ ＝ ストーリ高さ + ローカル Z。
 	CHECK(near(commands[0].elevation, 6200.0));
 }
@@ -1242,13 +1255,13 @@ TEST(reads_sample_house_fixture)
 	}
 
 	// 3 階建て相当（1FL/2FL/RFL）で、1 階には 2 階止まりの管柱と屋根階（軒高）まで届く
-	// 通し柱、屋根階には主屋根の小屋束（屋根面で止まる "+0.5"）が立つ。符号は横架材の
+	// 通し柱、屋根階には主屋根の小屋束（屋根面で止まり母屋のレベル "R+1" まで）が立つ。符号は横架材の
 	// レイヤと同じ（"R±0" は "R±0-横架材"）。
 	const std::map<int, std::vector<std::string>> byStory =
 		collectColumnLayersByStory(commands, levels);
 	CHECK(sameVec(byStory.at(0), {"1±0_2±0-柱", "1±0_R±0-柱"}));
-	CHECK(sameVec(byStory.at(1), {"2±0_2+0.5-柱", "2±0_R±0-柱"}));
-	CHECK(sameVec(byStory.at(2), {"R±0_R+0.5-柱"}));
+	CHECK(sameVec(byStory.at(1), {"2±0_2+1-柱", "2±0_R±0-柱"}));
+	CHECK(sameVec(byStory.at(2), {"R±0_R+1-柱"}));
 
 	// 通し柱は 1 階の "1±0_R±0-柱" にだけ現れる（クラスも通し柱）。
 	for (const ColumnCommand& command : commands)

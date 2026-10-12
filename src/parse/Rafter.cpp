@@ -332,7 +332,7 @@ namespace HomeskzIfcImport::parse
 			// 支持点が乗る横架材天端の絶対 Z（最上階は軒高＝オフセット 0）。
 			const double beamTopZ = beamTopElevation(story);
 			// 桁幅の参照先は同じ階の横架材だけ（レイヤ名の頭の階の接頭辞で絞る。登り梁の
-			// span レイヤ "2±0_2+0.5-登り梁" も from の符号の階。parse/Story の
+			// span レイヤ "2-1_2+1-登り梁" も from の符号の階。parse/Story の
 			// layerStoryPrefix）。
 			const std::string layerPrefix = storyLayerPrefix(i, story.isTop);
 			std::vector<core::MemberCommand> storyMembers;

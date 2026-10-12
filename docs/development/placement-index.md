@@ -53,9 +53,9 @@
 | ローカル配置原点の取り出し（`resolveLocalPlacementOrigin`）・屋根面の勾配座標系と退化の閾値・押し出しを鉛直とみなす閾値（`kVerticalExtrudeTol`） | `parse/IfcGeometry` |
 | 共有コンテキスト（下記）・階の屋根面の走査（`storyRoofPlanes`）・取り込み設定の参照（`options()`） | `parse/Context` |
 | 伏図記号レイヤ名（`{to の符号}-柱伏図記号`）と記号の作図クラス（シンボル名は取り込み設定 `core/ImportOptions` が持つ） | `parse/ColumnMark` |
-| 伏図レベル（横架材の高さごとの伏図 1 枚ぶん。高さの集め方・まとめ方・標準の決め方・近い／届く伏図レベルの引き方・伏図レベルのレイヤ名とずらし量・通し番号と符号の行き来（`ordinalLabel` / `spanLevelLabel` / `labelOrdinal` / `parseSpanOrdinals`）・横架材の振り分け・設定ダイアログの候補）。共有は `Context::planLevels()` を通す | `parse/PlanLevel` |
+| 伏図レベル（横架材の高さごとの伏図 1 枚ぶん。高さの集め方・まとめ方・標準の決め方・近い／届く伏図レベルの引き方・伏図レベルのレイヤ名とずらし量・通し番号と符号の行き来（`ordinalLabel` / `spanLevelLabel` / `labelOrdinal` / `parseSpanOrdinals`）・各階の母屋のレベルの通し番号（`moyaOrdinal`。伏図レベルが無いときは `standardOrdinalWithoutLevels`）・横架材の振り分け・設定ダイアログの候補）。共有は `Context::planLevels()` を通す | `parse/PlanLevel` |
 | 柱の span の番号（伏図レベルの通し番号。`spanFromOrdinal` / `spanToOrdinal`） | `parse/Column` |
-| 耐力壁のレイヤレベル名・柱を探す許容 | `parse/ShearWall.h` |
+| 耐力壁のレイヤレベル名・柱を探す許容・伏図レベルに立つ耐力壁の span レイヤの列挙（`shearWallLayersFrom`） | `parse/ShearWall.h` |
 | 切断面に乗る材・横切る材の判定（`memberOnCutPlane` / `columnOnCutPlane` / `memberCrossesCutPlane`。タグと寸法が共有） | `parse/Tag` |
 | データタグに添える横架材の高さの注記（`memberLevelNote` / 連動させる基準名も返す `memberLevelNoteParts`。その階の FL から）・各階の標準の横架材の高さ（`standardBeamHeights`。`parse/PlanLevel`） | `parse/Tag` |
 | 寸法の測点のまとめ方（`mergeStops` / `unionStops`。許容 `kDimensionMergeTol`）・通り芯の位置（`gridStops`）・レベル記号の表示名 | `parse/Dimension` |

@@ -552,7 +552,7 @@ namespace HomeskzIfcImport::parse
 
 		// 柱の span レイヤ（"2-1_3±0-柱"）が立つ階 from と届く階 to（軸組図の柱の列を階ごとに
 		// 分けるため）。階は符号の接頭辞の番号（最上階 "R" は roofFloor）。to は届いた符号の
-		// 階で、その階の標準より上の段（屋根面で止まる屋根束 "+0.5" など）や同じ階の中で
+		// 階で、その階の標準より上の段（屋根面で止まる屋根束の母屋のレベル "R+1" など）や同じ階の中で
 		// 止まる柱は半階ぶん足す——[from, to) の整数がその柱を数える階になる。span レイヤで
 		// なければ false。
 		bool spanFloors(const std::string& layer, int roofFloor, double& outFrom, double& outTo)
@@ -1507,7 +1507,7 @@ namespace HomeskzIfcImport::parse
 	{
 		// 母屋伏図 layers が映す階（その垂木のレイヤを映す階。母屋伏図は必ず垂木を映す。
 		// 下の階の柱の span レイヤも映るので、レイヤを 1 枚でも映す階、では広すぎる）の、
-		// 母屋伏図に映していない登り梁のレイヤ（span レイヤ "2±0_2+0.5-登り梁"。
+		// 母屋伏図に映していない登り梁のレイヤ（span レイヤ "2-1_2+1-登り梁"。
 		// parse/PlanLevel の noboribariSpan。振り分けられずに残った "n-登り梁" も）。
 		std::vector<std::string> noboribariLayersOfSheet(const core::Document& document,
 														 const std::vector<std::string>& layers)

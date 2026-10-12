@@ -354,7 +354,7 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 階の接頭辞が prefix の登り梁の span レイヤ（"2±0_2+0.5-登り梁"。from の符号がその
+		// 階の接頭辞が prefix の登り梁の span レイヤ（"2-1_2+1-登り梁"。from の符号がその
 		// 階のもの）。(from, to) の通し番号の昇順・重複なし。
 		std::vector<std::string>
 		noboribariSpanLayers(const std::vector<core::MemberCommand>& members,
@@ -485,24 +485,27 @@ namespace HomeskzIfcImport::parse
 											upperOffset + planLevelShift(*level, info), layer);
 			}
 
-			// M19 耐力壁: 筋かい・面材の PIO を載せる "n±0-耐力壁" レイヤ。**横架材天端の
-			// すぐ上**（小屋組より下）へ置く。挿入は「後から挿したものが 1 段上」なので、
+			// M19 耐力壁: 筋かい・面材の PIO を載せる span レイヤ（"1±0_2±0-耐力壁"）。
+			// **横架材天端のすぐ上**（小屋組より下）へ置く。挿入は「後から挿したものが 1 段上」なので、
 			// 小屋組（登り梁・母屋・垂木・野地板）より**先に**挿す。
 			//
 			// ［レベルを足す条件］母屋・登り梁と同じく**実際に組み立てた耐力壁命令の配置先
 			// レイヤ**で判定する（命令があるときだけ・命令があれば必ずレイヤができる）。
 			//
-			// 耐力壁は立つ天端の伏図レベルのレイヤへ置かれる（parse/ShearWall）ので、伏図
-			// レベルごとに確かめ、そのレベルの高さのぶんずらす。
+			// 耐力壁は立つ天端の伏図レベルを from とする span レイヤへ置かれる
+			// （parse/ShearWall）ので、伏図レベルごとにその span レイヤのレベルを作り、その
+			// 伏図レベルの高さのぶんずらす（耐力壁の高さはレイヤ平面からの相対。
+			// core::ShearWallCommand）。種別はレイヤ名そのもの（同じ伏図レベルに to の違う
+			// span が並ぶので、種別を一意にするため。柱の span レベルと同じ）。
 			for (const PlanLevel* level : storyLevels)
 			{
-				const std::string layer = planLevelLayer(*level, info, kLevelShearWall);
-				if (anyShearWallOnLayer(context.shearWalls(), layer))
-					insertLevelAboveBeamTop(planLevelType(*level, kLevelShearWall),
-											upperOffset + planLevelShift(*level, info), layer);
+				for (const std::string& layer :
+					 shearWallLayersFrom(context.shearWalls(), planLevelLabel(*level, info)))
+					insertLevelAboveBeamTop(layer, upperOffset + planLevelShift(*level, info),
+											layer);
 			}
 
-			// 登り梁は柱と同じく、映す伏図の範囲の span レイヤ（"2±0_2+0.5-登り梁"）へ
+			// 登り梁は柱と同じく、映す伏図の範囲の span レイヤ（"2-1_2+1-登り梁"）へ
 			// 分かれている（parse/PlanLevel の noboribariSpan）。その階に属する span（from の
 			// 符号の階）ごとにレベルを作る。種別はレイヤ名そのもの（span ごとに一意。
 			// 柱の span レベルと同じ）で、高さは登り梁レベルと同じ。伏図レベルを持たず

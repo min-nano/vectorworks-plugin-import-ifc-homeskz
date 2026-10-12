@@ -25,7 +25,7 @@
 //	  * M7 横架材 … 母屋・登り梁の命令がある階に 母屋・登り梁 レベル（同じく直上。判定は
 //	    parse/Member が組み立てた命令の配置先レイヤ）
 //	  * M8 柱 … 実在する span 柱レイヤ（"2-1_3±0-柱"）ごとのレベル
-//	  * M19 耐力壁 … 耐力壁の命令がある階に "耐力壁" レベル
+//	  * M19 耐力壁 … 実在する耐力壁の span レイヤ（"1±0_2±0-耐力壁"）ごとのレベル
 //	  * 伏図の分け方（parse/PlanLevel）… 軒桁の専用レベル、登り梁の span レベル、標準で
 //	    ない伏図レベル（横架材の高さごとの伏図）の横架材・FL レベル
 //
@@ -64,11 +64,11 @@ namespace HomeskzIfcImport::parse
 
 	// 柱・小屋束を配置する span（またぐレベル区間）レイヤの接尾辞。レイヤ名は
 	// "{from}_{to}-柱"（"2-1_3±0-柱"）で、from は柱が立つ伏図レベルの符号、to は上端が届く
-	// 伏図レベルの符号（屋根面で止まる屋根束は "+0.5" の付く符号。parse/Column）。伏図が
+	// 伏図レベルの符号（屋根面で止まる屋根束は母屋のレベル "R+1"。parse/Column）。伏図が
 	// 切断レベルで表示レイヤを絞れるようにするための分け方。
 	inline constexpr const char* kColumnLayerSuffix = "柱";
 
-	// 伏図レベルの符号 "{階の接頭辞}{段数}"（"2±0" / "2-1" / "R+0.5"）。接頭辞は
+	// 伏図レベルの符号 "{階の接頭辞}{段数}"（"2±0" / "2-1" / "R+1"）。接頭辞は
 	// storyLayerPrefix、段数はその階の標準の伏図レベルからの段数（core::planLevelStepText）。
 	// **符号の規約はここが唯一**で、伏図レベルのレイヤ（levelLayerName）・span レイヤ
 	// （spanLayerName）・伏図記号レイヤ（parse/ColumnMark）の頭がどれもこれになる——柱の
@@ -79,9 +79,10 @@ namespace HomeskzIfcImport::parse
 	// 符号を階の接頭辞と段数へ分解する。text 全体が符号（接頭辞は数字の並びか "R"）なら true。
 	bool parseLevelLabel(const std::string& text, std::string& outPrefix, double& outStep);
 
-	// 伏図レベルに属するレイヤ名 "{符号}-{名前}"（"2±0-横架材" / "2-1-FL" / "R±0-耐力壁"）。
+	// 伏図レベルに属するレイヤ名 "{符号}-{名前}"（"2±0-横架材" / "2-1-FL" / "R±0-軒桁"）。
 	// 名前はレベル種別から levelLayerSuffix で決める。伏図レベルで分けるレイヤ（横架材・
-	// 軒桁・床・耐力壁）は**標準の伏図レベルでも "±0" を付ける**（ご要望）。伏図レベルで
+	// 軒桁・床）は**標準の伏図レベルでも "±0" を付ける**（ご要望）。耐力壁は柱と同じ span
+	// レイヤ（"1±0_2±0-耐力壁"。spanLayerName）。伏図レベルで
 	// 分けないレイヤ（母屋・垂木・野地板）は従来どおり storyLayerName（"R-母屋"）。
 	std::string levelLayerName(std::size_t index, bool isTop, double step,
 							   const std::string& levelType);
@@ -90,7 +91,7 @@ namespace HomeskzIfcImport::parse
 	// まま。伏図レベルの印 "(-1)" は付いていてもいなくてもよい）。
 	std::string levelLayerSuffix(const std::string& levelType);
 
-	// span レイヤ名 "{from}_{to}-{suffix}"（"2-1_3±0-柱" / "2±0_2+0.5-登り梁"）。from / to は
+	// span レイヤ名 "{from}_{to}-{suffix}"（"2-1_3±0-柱" / "2-1_2+1-登り梁"）。from / to は
 	// 伏図レベルの符号（levelLabel）。**span レイヤ名の規約はここが唯一**で、柱・登り梁が
 	// レイヤを名乗るときと、ストーリがそのレベル（＝レイヤ）を作るときの両方がこれを通る。
 	std::string spanLayerName(const std::string& fromLabel, const std::string& toLabel,

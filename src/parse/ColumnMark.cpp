@@ -85,7 +85,7 @@ namespace HomeskzIfcImport::parse
 
 	std::vector<PlanMarkLayer> collectPlanMarkLayers(const std::vector<ColumnSpan>& spans)
 	{
-		// spans は (from, to) 昇順なので to は単調ではない（"1±0_3±0" の次に "2±0_2+0.5" が
+		// spans は (from, to) 昇順なので to は単調ではない（"1±0_3±0" の次に "2±0_2+1" が
 		// 来る）。
 		// 同じ to をまとめたうえで to 昇順に並べ替える——伏図は「切断の直下で最大の to」を
 		// 選ぶので、昇順に並んでいると走査が単純になる。

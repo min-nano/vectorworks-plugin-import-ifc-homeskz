@@ -81,10 +81,10 @@ TEST(EachSpanLayerGetsASectionMarkAndAPlanMark)
 	const std::vector<ColumnCommand> columns{
 		makeColumn(0.0, 0.0, 105.0, 105.0, "1±0_2±0-柱", kStructuralUseColumn),
 		makeColumn(500.0, 0.0, 105.0, 105.0, "1±0_2±0-柱", kStructuralUseColumn), // 同じ span
-		makeColumn(1000.0, 0.0, 90.0, 90.0, "2±0_2+0.5-柱", kStructuralUseKoyazuka)};
+		makeColumn(1000.0, 0.0, 90.0, 90.0, "2±0_2+1-柱", kStructuralUseKoyazuka)};
 
 	const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns, {});
-	// span は 2 つ（"1±0_2±0-柱" / "2±0_2+0.5-柱"）なので記号は 4 つ。**柱の本数には依存しない**
+	// span は 2 つ（"1±0_2±0-柱" / "2±0_2+1-柱"）なので記号は 4 つ。**柱の本数には依存しない**
 	// ——記号は PIO が対象レイヤを検索して描画するので、柱が何本あっても命令は 1 つ。
 	CHECK(marks.size() == 4);
 	CHECK(marks[0].style == ColumnMarkStyle::Section);
@@ -130,29 +130,29 @@ TEST(PlanMarkSymbolFollowsTheSpanStructuralUse)
 	// シンボルはその span レイヤの種別で決まる（柱＝柱伏図記号／小屋束＝束伏図記号）。
 	const std::vector<ColumnCommand> columns{
 		makeColumn(0.0, 0.0, 105.0, 105.0, "1±0_2±0-柱", kStructuralUseColumn),
-		makeColumn(0.0, 0.0, 90.0, 90.0, "2±0_2+0.5-柱", kStructuralUseKoyazuka)};
+		makeColumn(0.0, 0.0, 90.0, 90.0, "2±0_2+1-柱", kStructuralUseKoyazuka)};
 
 	const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns, {});
 	CHECK(marks.size() == 4);
 	CHECK(marks[2].symbol == kPlanMarkSymbolColumn);   // "1±0_2±0-柱" の伏図記号
-	CHECK(marks[3].symbol == kPlanMarkSymbolKoyazuka); // "2±0_2+0.5-柱" の伏図記号
+	CHECK(marks[3].symbol == kPlanMarkSymbolKoyazuka); // "2±0_2+1-柱" の伏図記号
 }
 
 TEST(SameSpanTopSharesOnePlanMarkLayer)
 {
-	// 同じ to の span（"1±0_2+0.5-柱" と "2±0_2+0.5-柱"）は同じ伏図記号レイヤに載る。
+	// 同じ to の span（"1±0_2+1-柱" と "2±0_2+1-柱"）は同じ伏図記号レイヤに載る。
 	// **記号は span ごとに 1 つずつ**なので、命令は 2 つ出て配置先だけが同じになる
 	// （検索対象がそれぞれの span レイヤなので、まとめてしまうと片方が描画されない）。
 	const std::vector<ColumnCommand> columns{
-		makeColumn(0.0, 0.0, 90.0, 90.0, "1±0_2+0.5-柱", kStructuralUseKoyazuka),
-		makeColumn(500.0, 0.0, 90.0, 90.0, "2±0_2+0.5-柱", kStructuralUseKoyazuka)};
+		makeColumn(0.0, 0.0, 90.0, 90.0, "1±0_2+1-柱", kStructuralUseKoyazuka),
+		makeColumn(500.0, 0.0, 90.0, 90.0, "2±0_2+1-柱", kStructuralUseKoyazuka)};
 
 	const std::vector<ColumnMarkCommand> marks = buildColumnMarkCommands(columns, {});
 	CHECK(marks.size() == 4);
-	CHECK(marks[2].layer == "2+0.5-柱伏図記号");
-	CHECK(marks[3].layer == "2+0.5-柱伏図記号");
-	CHECK(marks[2].targetLayer == "1±0_2+0.5-柱");
-	CHECK(marks[3].targetLayer == "2±0_2+0.5-柱");
+	CHECK(marks[2].layer == "2+1-柱伏図記号");
+	CHECK(marks[3].layer == "2+1-柱伏図記号");
+	CHECK(marks[2].targetLayer == "1±0_2+1-柱");
+	CHECK(marks[3].targetLayer == "2±0_2+1-柱");
 }
 
 TEST(NoColumnsMeansNoMarks)
@@ -164,46 +164,46 @@ TEST(PlanMarkLayerNameUsesTheSpanTopLevel)
 {
 	// レイヤ名は span の上側の符号（span 柱レイヤの to と同じ。parse/Story の levelLabel）。
 	CHECK(planMarkLayerName("2±0") == "2±0-柱伏図記号");
-	CHECK(planMarkLayerName("2+0.5") == "2+0.5-柱伏図記号");
+	CHECK(planMarkLayerName("2+1") == "2+1-柱伏図記号");
 	CHECK(planMarkLayerName("R±0") == "R±0-柱伏図記号");
 }
 
 TEST(PlanMarkLayersAreUniqueAndSortedByLevel)
 {
-	// span は (from, to) 昇順で来るが to は単調でない（"1to3" の次に "2to2.5"）。
-	// 列挙は to 昇順・重複なし。
-	const std::vector<ColumnSpan> spans{{1.0, 2.0, "1±0_2±0-柱", "2±0"},
-										{1.0, 3.0, "1±0_3±0-柱", "3±0"},
-										{2.0, 2.5, "2±0_2+0.5-柱", "2+0.5"},
-										{2.0, 3.0, "2±0_3±0-柱", "3±0"},
-										{3.0, 3.5, "3±0_3+0.5-柱", "3+0.5"}};
+	// span は (from, to) 昇順で来るが to は単調でない（"1±0_3±0" の次に "2±0_2+1"）。
+	// 列挙は to 昇順・重複なし。通し番号は階の標準 1 / 3 / 5・母屋のレベル 2 / 4 / 6。
+	const std::vector<ColumnSpan> spans{{1.0, 3.0, "1±0_2±0-柱", "2±0"},
+										{1.0, 5.0, "1±0_3±0-柱", "3±0"},
+										{3.0, 4.0, "2±0_2+1-柱", "2+1"},
+										{3.0, 5.0, "2±0_3±0-柱", "3±0"},
+										{5.0, 6.0, "3±0_3+1-柱", "3+1"}};
 
 	const std::vector<PlanMarkLayer> layers = collectPlanMarkLayers(spans);
 	CHECK(layers.size() == 4);
 	CHECK(layers[0].layer == "2±0-柱伏図記号");
-	CHECK(layers[1].layer == "2+0.5-柱伏図記号");
+	CHECK(layers[1].layer == "2+1-柱伏図記号");
 	CHECK(layers[2].layer == "3±0-柱伏図記号");
-	CHECK(layers[3].layer == "3+0.5-柱伏図記号");
+	CHECK(layers[3].layer == "3+1-柱伏図記号");
 }
 
 TEST(PlanMarkLayerBelowCutPicksTheHighestLevelUnderTheCut)
 {
-	const std::vector<PlanMarkLayer> layers{{2.0, "2±0-柱伏図記号"},
-											{2.5, "2+0.5-柱伏図記号"},
-											{3.0, "3±0-柱伏図記号"},
-											{3.5, "3+0.5-柱伏図記号"}};
+	const std::vector<PlanMarkLayer> layers{{3.0, "2±0-柱伏図記号"},
+											{4.0, "2+1-柱伏図記号"},
+											{5.0, "3±0-柱伏図記号"},
+											{6.0, "3+1-柱伏図記号"}};
 
-	// 2 階床伏図（切断 2.25）は下階＝1 階管柱 "1±0_2±0-柱" の平面記号。
-	CHECK(planMarkLayerBelowCut(layers, 2.25) == "2±0-柱伏図記号");
-	// 1 階母屋伏図（切断 2.75）は下屋小屋束 "2±0_2+0.5-柱" の平面記号。
-	CHECK(planMarkLayerBelowCut(layers, 2.75) == "2+0.5-柱伏図記号");
-	// 2 階小屋伏図（切断 3.25）。
-	CHECK(planMarkLayerBelowCut(layers, 3.25) == "3±0-柱伏図記号");
+	// 2 階床伏図（切断 3.25）は下階＝1 階管柱 "1±0_2±0-柱" の平面記号。
+	CHECK(planMarkLayerBelowCut(layers, 3.25) == "2±0-柱伏図記号");
+	// 1 階母屋伏図（2 階の母屋のレベル 4 + 0.25）は下屋小屋束 "2±0_2+1-柱" の平面記号。
+	CHECK(planMarkLayerBelowCut(layers, 4.25) == "2+1-柱伏図記号");
+	// 2 階小屋伏図（切断 5.25）。
+	CHECK(planMarkLayerBelowCut(layers, 5.25) == "3±0-柱伏図記号");
 	// 1 階床伏図（切断 1.25）より下のレベルは無い＝載せる伏図記号レイヤが無い。
 	CHECK(planMarkLayerBelowCut(layers, 1.25).empty());
 	// **切断ちょうどのレベルは「直下」ではない**（そのレベルの柱は断面記号で出るので、
 	// 伏図記号でも出すと二重になる）。
-	CHECK(planMarkLayerBelowCut(layers, 2.0).empty());
+	CHECK(planMarkLayerBelowCut(layers, 3.0).empty());
 }
 
 TEST(MarksMatchTheSpansOnEveryFixture)

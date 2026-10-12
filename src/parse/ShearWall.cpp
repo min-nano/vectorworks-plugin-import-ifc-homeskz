@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -154,11 +155,47 @@ namespace HomeskzIfcImport::parse
 			return from <= level + core::kPointEps && to > level + core::kPointEps;
 		}
 
-		// 耐力壁が立つ伏図レベルの通し番号。伏図レベルが無ければ階の番号（index + 1）。
+		// 耐力壁が立つ伏図レベルの通し番号。伏図レベルが無ければ standardOrdinalWithoutLevels。
 		double wallLevelOrdinal(const PlanLevel* level, std::size_t index)
 		{
 			return level != nullptr ? static_cast<double>(level->ordinal)
-									: static_cast<double>(index) + 1.0;
+									: standardOrdinalWithoutLevels(index);
+		}
+
+		// 耐力壁の上端が届く伏図レベルの通し番号（span の to）。立つ伏図レベル from より上の
+		// 伏図レベル（階をまたいでよい）のうち、上端 topAbs にいちばん近い天端を含むもの
+		// ——耐力壁の上端は上の横架材の下端（筋かい）か天端付近（面材）にあり、どちらも
+		// その横架材の天端にいちばん近い。上に伏図レベルが無ければ階 story の母屋のレベル
+		// （最上階の耐力壁）。
+		double wallTopOrdinal(const std::vector<PlanLevel>& levels, double from, double topAbs,
+							  std::size_t story)
+		{
+			const PlanLevel* best = nullptr;
+			double bestDistance = 0.0;
+			for (const PlanLevel& level : levels)
+			{
+				if (static_cast<double>(level.ordinal) <= from + kOrdinalTol)
+					continue;
+				double distance = std::numeric_limits<double>::max();
+				for (const long long height : level.heights)
+					distance = std::min(distance, std::abs(static_cast<double>(height) - topAbs));
+				// levels は通し番号の昇順なので、厳密に近いときだけ差し替える＝同じ近さなら低い方。
+				if (best == nullptr || distance < bestDistance)
+				{
+					best = &level;
+					bestDistance = distance;
+				}
+			}
+			return best != nullptr ? static_cast<double>(best->ordinal)
+								   : moyaOrdinal(levels, story);
+		}
+
+		// span レイヤ（"1±0_2±0-耐力壁"）の from の符号。耐力壁の span レイヤでなければ空。
+		std::string wallFromLabel(const std::string& layer)
+		{
+			std::string from;
+			std::string to;
+			return parseSpanLayer(layer, kLevelShearWall, from, to) ? from : std::string();
 		}
 
 		// 伏図レベル level を通る span 柱レイヤの柱を集める（spanCoversLevel）。spans は
@@ -686,17 +723,20 @@ namespace HomeskzIfcImport::parse
 				const GroupExtent extent = groupExtent(group);
 				const ShearWallPiece& first = group.pieces.front();
 
-				// 耐力壁は下の横架材の天端に立つので、下端にいちばん近い伏図レベルの
-				// "n±0-耐力壁" レイヤへ置く（伏図はその階自身の耐力壁を映す。M19）。柱も
-				// その伏図レベルを通るものから探す（spanCoversLevel）。
+				// 耐力壁は下の横架材の天端に立つので、下端にいちばん近い伏図レベルを from、
+				// 上端が届く上の横架材の伏図レベルを to とする span レイヤ（"1±0_2±0-耐力壁"。
+				// 柱と同じ書き方。ご要望）へ置く（伏図は from の伏図レベルの耐力壁を映す。
+				// M19）。柱も from の伏図レベルを通るものから探す（spanCoversLevel）。
 				const PlanLevel* planLevel =
 					nearestPlanLevel(levels, i, story.elevation + extent.zBottom);
-				const std::string layer =
-					planLevel != nullptr ? planLevelLayer(*planLevel, story, kLevelShearWall)
-										 : levelLayerName(i, story.isTop, 0.0, kLevelShearWall);
 				const double layerZ =
 					storyLayerZ + (planLevel != nullptr ? planLevelShift(*planLevel, story) : 0.0);
 				const double ordinal = wallLevelOrdinal(planLevel, i);
+				const std::string layer = spanLayerName(
+					spanLevelLabel(levels, ordinal),
+					spanLevelLabel(
+						levels, wallTopOrdinal(levels, ordinal, story.elevation + extent.zTop, i)),
+					kLevelShearWall);
 				const std::string targets = joinLayers(columnLayersAtLevel(columnSpans, ordinal));
 				const std::vector<const core::ColumnCommand*> storyColumns =
 					columnsAtLevel(columns, columnSpans, ordinal);
@@ -800,14 +840,15 @@ namespace HomeskzIfcImport::parse
 								const std::vector<core::ColumnCommand>& columns)
 	{
 		const std::vector<ColumnSpan> spans = collectColumnSpans(columns, levels);
-		// 1 つのレイヤ（＝伏図レベル）ぶんを測り直す。layerZ はそのレイヤ平面の絶対 Z。
-		const auto fitLayer = [&](const std::string& layer, double layerZ, double ordinal)
+		// 1 つの伏図レベルに立つ耐力壁（span レイヤの from がその符号 fromLabel）を測り直す。
+		// layerZ はそのレイヤ平面の絶対 Z。
+		const auto fitLayer = [&](const std::string& fromLabel, double layerZ, double ordinal)
 		{
 			const std::vector<const core::ColumnCommand*> levelColumns =
 				columnsAtLevel(columns, spans, ordinal);
 			for (ShearWallCommand& wall : walls)
 			{
-				if (wall.layer == layer)
+				if (wallFromLabel(wall.layer) == fromLabel)
 					fitShearWall(wall, layerZ, members, levelColumns);
 			}
 		};
@@ -818,19 +859,20 @@ namespace HomeskzIfcImport::parse
 			{
 				const StoryInfo& story = stories[i];
 				// レイヤ平面（絶対 Z）＝その階の横架材天端（最上階は軒高）。
-				fitLayer(levelLayerName(i, story.isTop, 0.0, kLevelShearWall),
-						 beamTopElevation(story), static_cast<double>(i) + 1.0);
+				fitLayer(levelLabel(i, story.isTop, 0.0), beamTopElevation(story),
+						 standardOrdinalWithoutLevels(i));
 			}
 			return;
 		}
-		// 耐力壁は立つ天端の伏図レベルのレイヤに居る（buildShearWallCommands）。レイヤ平面は
-		// その階の横架材天端を伏図レベルの高さのぶんずらしたもの（parse/PlanLevel）。
+		// 耐力壁は立つ天端の伏図レベルを from とするレイヤに居る（buildShearWallCommands）。
+		// レイヤ平面はその階の横架材天端を伏図レベルの高さのぶんずらしたもの
+		// （parse/PlanLevel）。
 		for (const PlanLevel& level : levels)
 		{
 			if (level.story >= stories.size())
 				continue;
 			const StoryInfo& story = stories[level.story];
-			fitLayer(planLevelLayer(level, story, kLevelShearWall),
+			fitLayer(planLevelLabel(level, story),
 					 beamTopElevation(story) + planLevelShift(level, story),
 					 static_cast<double>(level.ordinal));
 		}
@@ -840,5 +882,17 @@ namespace HomeskzIfcImport::parse
 	{
 		return std::ranges::any_of(walls, [&layer](const ShearWallCommand& wall)
 								   { return wall.layer == layer; });
+	}
+
+	std::vector<std::string> shearWallLayersFrom(const std::vector<ShearWallCommand>& walls,
+												 const std::string& fromLabel)
+	{
+		std::set<std::string> found;
+		for (const ShearWallCommand& wall : walls)
+		{
+			if (wallFromLabel(wall.layer) == fromLabel)
+				found.insert(wall.layer);
+		}
+		return {found.begin(), found.end()};
 	}
 } // namespace HomeskzIfcImport::parse

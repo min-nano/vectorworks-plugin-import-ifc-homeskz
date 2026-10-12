@@ -131,7 +131,7 @@ namespace HomeskzIfcImport::parse
 	//   * 隅木・谷木（垂木に近い材で、高さは要らない。MemberCommand::hipOrValley）
 	//   * 階を特定できない材（レイヤ名が階の規約に合わない）
 	// 階はレイヤ名の頭の階の接頭辞（"2-1-横架材" → "2"。登り梁の span レイヤ
-	// "2±0_2+0.5-登り梁" は from の符号の階。parse/Story の layerStoryPrefix）から引く。
+	// "2-1_2+1-登り梁" は from の符号の階。parse/Story の layerStoryPrefix）から引く。
 	// 高さは mm に丸めて比べる（伏図レベルと同じ。parse/PlanLevel）。
 	std::string memberLevelNote(const core::MemberCommand& member,
 								const std::vector<StoryInfo>& stories,

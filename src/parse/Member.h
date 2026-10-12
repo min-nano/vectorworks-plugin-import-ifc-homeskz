@@ -30,7 +30,7 @@
 //	    （IfcArbitraryClosedProfileDef）で出力される。矩形前提の memberProfileDims では
 //	    取得できず**欠落して全く描画されない**ため、slopedMemberGeometry が平行四辺形の
 //	    4 頂点から中心軸・幅・せい・傾斜を導出する。専用レイヤ "n-登り梁" に置く（M36 から
-//	    parse/PlanLevel の noboribariSpan が span レイヤ "2±0_2+0.5-登り梁" へ移す）。
+//	    parse/PlanLevel の noboribariSpan が span レイヤ "2-1_2+1-登り梁" へ移す）。
 //	    誤取り込み防止に、押し出し軸が鉛直な材（火打）は断面種別より**先に**軸で除外し、
 //	    プロファイルが 4 頂点でない材（筋かい＝6 頂点）は導出が失敗してスキップされる。
 //	  * **登り梁の直切りの幾何**: 端部が鉛直面なので、天端中央線の端点は断面中心軸の

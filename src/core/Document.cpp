@@ -976,7 +976,10 @@ namespace HomeskzIfcImport::core
 		// （desiredStoryLayerOrder の doc コメント）。
 		bool isForegroundLevel(const std::string& type)
 		{
-			return stripPlanLevelTag(type) == kLevelShearWall;
+			// 耐力壁のレベルは span レイヤ（"1±0_2±0-耐力壁"）の名前そのものを種別にする
+			// （parse/Story）ので、接尾辞で見分ける。
+			return stripPlanLevelTag(type) == kLevelShearWall ||
+				   type.ends_with(std::string("-") + kLevelShearWall);
 		}
 	} // namespace
 

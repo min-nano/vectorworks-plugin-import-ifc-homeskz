@@ -28,8 +28,10 @@
 //	    "2±0_…-柱" と、下の階から通っている通し柱の "1±0_3±0-柱" 等）に載るものから、
 //	    軸の両端に最も近い柱を選んで**柱芯**を命令の start / end にする。
 //	    柱が見つからない端は要素自身の端をそのまま使う。
-//	  * 配置先は階ごとの専用レイヤ "n±0-耐力壁"（レイヤ平面＝その階の横架材天端。最上階は軒高。
-//	    横架材の高さごとの伏図では、立つ天端の伏図レベルのレイヤ。parse/PlanLevel）。
+//	  * 配置先は専用レイヤ（レイヤ平面＝立つ天端の伏図レベル。標準なら階の横架材天端、
+//	    最上階は軒高。parse/PlanLevel）。**レイヤは柱と同じく span で分ける**: "{立つ伏図レベル}_{上の横架材の伏図レベル}-耐力壁"
+//	    （"1±0_2±0-耐力壁" / "2-1_R-2-耐力壁"。ご要望）。to は上端にいちばん近い天端の伏図
+//	    レベル（上に無ければその階の母屋のレベル）。
 //	    高さは**レイヤ平面からの相対**で持つ（core::ShearWallCommand「高さの持ち方」）。
 //	  * **高さは上下の横架材に合わせる**（後処理 fitShearWallsToMembers）。IFC の要素自身の
 //	    高さは控えに留め、下端＝下の横架材の天端・上端＝上の横架材の下端を内法の両端で
@@ -191,6 +193,12 @@ namespace HomeskzIfcImport::parse
 								const std::vector<PlanLevel>& levels,
 								const std::vector<core::MemberCommand>& members,
 								const std::vector<core::ColumnCommand>& columns);
+
+	// 伏図レベル（符号 fromLabel。"2-1"）に立つ耐力壁の span レイヤ（"2-1_R-2-耐力壁"）を
+	// 名前順・重複なしで返す。伏図（その伏図レベルの耐力壁を映す。parse/Sheet）と
+	// ストーリ（その伏図レベルのレベルを作る。parse/Story）が使う。
+	std::vector<std::string> shearWallLayersFrom(const std::vector<core::ShearWallCommand>& walls,
+												 const std::string& fromLabel);
 
 	// 耐力壁の命令が layer に 1 枚でもあるか。parse/Story が「その階に耐力壁レベルを作るか」を
 	// 決めるのに使う（母屋・登り梁と同じく、**命令があるときだけ・命令があれば必ず**レイヤが

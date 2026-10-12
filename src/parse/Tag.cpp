@@ -200,7 +200,7 @@ namespace HomeskzIfcImport::parse
 		if (member.hipOrValley)
 			return {};
 		// 階はレイヤ名の頭の階の接頭辞（"2-1-横架材" → "2"）から引く。登り梁の span レイヤ
-		// （"2±0_2+0.5-登り梁"）も from の符号の階で、parse/Story がその階にレベルを作る
+		// （"2-1_2+1-登り梁"）も from の符号の階で、parse/Story がその階にレベルを作る
 		// （描画側のタグの式も「レイヤが属する階」から測る）。
 		const std::string prefix = layerStoryPrefix(member.layer);
 		if (prefix.empty())
