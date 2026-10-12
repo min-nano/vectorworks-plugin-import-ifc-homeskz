@@ -301,6 +301,62 @@ TEST(title_suffix_only_when_a_story_has_several_plans)
 	CHECK_EQ(planLevelTitleSuffix(merged, merged[1]), std::string("（FL-800・FL-700）"));
 }
 
+TEST(ordinal_labels_round_trip_through_the_plan_levels)
+{
+	// 通し番号 ⇔ 符号（"2-1" / "2+0.5" / "R+1"）。段数はその階の標準の通し番号との差。
+	const std::vector<StoryInfo> stories = twoStories();
+	const std::vector<PlanLevel> levels =
+		buildPlanLevels(stories, {{590}, {2700, 3490}, {6300}}, ImportOptions{});
+	CHECK_EQ(parse::ordinalLabel(levels, 1, 2.0), std::string("2-1"));
+	CHECK_EQ(parse::ordinalLabel(levels, 1, 3.5), std::string("2+0.5"));
+	CHECK_EQ(parse::ordinalLabel(levels, 1, 4.0), std::string("2+1")); // 材の階で書く
+	CHECK_EQ(parse::spanLevelLabel(levels, 4.0), std::string("R±0"));  // 番号の階で書く
+	CHECK_EQ(parse::spanLevelLabel(levels, 4.5), std::string("R+0.5"));
+	double ordinal = 0.0;
+	CHECK(parse::labelOrdinal(levels, "2-1", ordinal) && near(ordinal, 2.0));
+	CHECK(parse::labelOrdinal(levels, "2+1", ordinal) && near(ordinal, 4.0));
+	CHECK(parse::labelOrdinal(levels, "R+0.5", ordinal) && near(ordinal, 4.5));
+	// 符号として読めないものは引き直せない。
+	CHECK(!parse::labelOrdinal(levels, "2", ordinal));
+	CHECK(!parse::labelOrdinal(levels, "共通", ordinal));
+}
+
+TEST(ordinal_labels_without_plan_levels_use_the_story_number)
+{
+	// 伏図レベルが無い（単体テストで階だけを扱う）ときは、通し番号＝階の番号とみなす
+	// （storyOfOrdinal の従来の対応と同じ）。最上階 "R" は番号が分からないので引き直せない。
+	CHECK_EQ(parse::ordinalLabel({}, 1, 2.0), std::string("2±0"));
+	CHECK_EQ(parse::ordinalLabel({}, 1, 2.5), std::string("2+0.5"));
+	double ordinal = 0.0;
+	CHECK(parse::labelOrdinal({}, "2+0.5", ordinal) && near(ordinal, 2.5));
+	CHECK(!parse::labelOrdinal({}, "R±0", ordinal));
+	double from = 0.0;
+	double to = 0.0;
+	CHECK(!parse::parseSpanOrdinals({}, "2±0_R±0-柱", "柱", from, to));
+	CHECK(parse::parseSpanOrdinals({}, "1±0_3±0-柱", "柱", from, to));
+	CHECK(near(from, 1.0) && near(to, 3.0));
+}
+
+TEST(span_layers_are_collected_for_any_suffix)
+{
+	// 柱と登り梁で同じ集め方（parse/Column の collectSpanLayers）。span でない名前と
+	// 接尾辞の違う名前は読み飛ばし、重複を除いて (from, to) 昇順。
+	const std::vector<StoryInfo> stories = twoStories();
+	const std::vector<PlanLevel> levels =
+		buildPlanLevels(stories, {{590}, {2700, 3490}, {6300}}, ImportOptions{});
+	const std::vector<parse::ColumnSpan> spans = parse::collectSpanLayers(
+		{"2±0_2+1-登り梁", "2-1_2-0.5-登り梁", "2±0_2+1-登り梁", "2-登り梁", "1±0_2-1-柱"},
+		"登り梁", levels);
+	CHECK_EQ(spans.size(), std::size_t(2));
+	if (spans.size() != 2)
+		return;
+	CHECK_EQ(spans[0].layer, std::string("2-1_2-0.5-登り梁"));
+	CHECK(near(spans[0].from, 2.0) && near(spans[0].to, 2.5));
+	CHECK_EQ(spans[0].toLabel, std::string("2-0.5"));
+	CHECK_EQ(spans[1].layer, std::string("2±0_2+1-登り梁"));
+	CHECK(near(spans[1].from, 3.0) && near(spans[1].to, 4.0));
+}
+
 // ---------------------------------------------------------------------------
 // 横架材の振り分け
 // ---------------------------------------------------------------------------

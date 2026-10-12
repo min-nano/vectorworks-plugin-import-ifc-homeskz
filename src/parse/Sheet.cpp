@@ -29,8 +29,6 @@
 #include "parse/StructuralClass.h"
 
 #include <algorithm>
-#include <set>
-#include <tuple>
 #include <string>
 #include <utility>
 #include <vector>
@@ -111,20 +109,13 @@ namespace HomeskzIfcImport::parse
 		collectNoboribariSpans(const std::vector<core::MemberCommand>& members,
 							   const std::vector<PlanLevel>& levels)
 		{
-			// (from, to, レイヤ名) の昇順・重複なし（入力の並びに依らない）。
-			std::set<std::tuple<double, double, std::string>> found;
+			// (from, to) 昇順・重複なし（入力の並びに依らない）。集め方は柱と同じ
+			// （parse/Column の collectSpanLayers）。
+			std::vector<std::string> layers;
+			layers.reserve(members.size());
 			for (const core::MemberCommand& member : members)
-			{
-				double from = 0.0;
-				double to = 0.0;
-				if (parseSpanOrdinals(levels, member.layer, kLevelNoboribari, from, to))
-					found.emplace(from, to, member.layer);
-			}
-			std::vector<ColumnSpan> spans;
-			spans.reserve(found.size());
-			for (const auto& [from, to, layer] : found)
-				spans.push_back(ColumnSpan{from, to, layer, std::string()});
-			return spans;
+				layers.push_back(member.layer);
+			return collectSpanLayers(layers, kLevelNoboribari, levels);
 		}
 	} // namespace
 
@@ -331,8 +322,6 @@ namespace HomeskzIfcImport::parse
 			// 小屋梁は出ない（parse/Joint・parse/Splice は横架材レイヤへ置く）。軒桁も伏図
 			// レベルごとのレイヤへ分かれている（parse/PlanLevel）ので、その階の分を全部。
 			std::vector<std::string> eaves;
-			if (storyLevels.empty())
-				eaves.push_back(levelLayerName(i, isTop, 0.0, kLevelNokigeta));
 			for (const PlanLevel* level : storyLevels)
 				eaves.push_back(planLevelLayer(*level, stories[i], kLevelNokigeta));
 			for (const std::string& layer : eaves)

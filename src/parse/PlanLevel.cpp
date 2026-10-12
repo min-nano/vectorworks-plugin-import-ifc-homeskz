@@ -372,13 +372,11 @@ namespace HomeskzIfcImport::parse
 				const bool eaves = beam && member.drawClass == CLASS_NOKIGETA;
 				// 水平な材は天端、傾いた材は水下（低い側の端）の天端で決める。
 				const double z = std::min(member.elevation, member.endElevation);
+				// 伏図レベルはどの階にも 1 つ以上ある（collectBeamHeights）。渡されなかった
+				// 階の材は動かさない。
 				const PlanLevel* level = nearestPlanLevel(levels, i, z);
 				if (level == nullptr)
-				{
-					if (eaves)
-						member.layer = levelLayerName(i, story.isTop, 0.0, kLevelNokigeta);
 					continue;
-				}
 				if (eaves)
 					member.layer = planLevelLayer(*level, story, kLevelNokigeta);
 				else if (beam)

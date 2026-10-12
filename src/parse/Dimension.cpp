@@ -559,29 +559,27 @@ namespace HomeskzIfcImport::parse
 		{
 			std::string fromLabel;
 			std::string toLabel;
-			if (!parseSpanLayer(layer, fromLabel, toLabel))
-				return false;
-			const auto floorOf = [roofFloor](const std::string& label, double& floor, double& step)
+			const bool span = parseSpanLayer(layer, fromLabel, toLabel);
+			// 符号の階と段数。parseSpanLayer が符号として読めることを確かめてあるので、ここの
+			// 分解は失敗しない。
+			const auto floorOf = [roofFloor](const std::string& label, double& step)
 			{
 				std::string prefix;
-				if (!parseLevelLabel(label, prefix, step))
-					return false;
-				floor = prefix.front() >= '0' && prefix.front() <= '9'
-							? std::stod(prefix)
-							: static_cast<double>(roofFloor);
-				return true;
+				parseLevelLabel(label, prefix, step);
+				return prefix.front() >= '0' && prefix.front() <= '9'
+						   ? std::stod(prefix)
+						   : static_cast<double>(roofFloor);
 			};
-			double from = 0.0;
-			double to = 0.0;
-			double fromStep = 0.0;
-			double toStep = 0.0;
-			if (!floorOf(fromLabel, from, fromStep) || !floorOf(toLabel, to, toStep))
-				return false;
-			if (toStep > 0.0 || to <= from)
-				to = std::max(to, from) + 0.5;
-			outFrom = from;
-			outTo = to;
-			return true;
+			if (span)
+			{
+				double fromStep = 0.0;
+				double toStep = 0.0;
+				outFrom = floorOf(fromLabel, fromStep);
+				outTo = floorOf(toLabel, toStep);
+				if (toStep > 0.0 || outTo <= outFrom)
+					outTo = std::max(outTo, outFrom) + 0.5;
+			}
+			return span;
 		}
 
 		// 軸組図の高さの基準（GL・各階の FL・軒高）と、各階の FL から標準の横架材天端まで

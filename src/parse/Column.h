@@ -228,6 +228,13 @@ namespace HomeskzIfcImport::parse
 	std::vector<ColumnSpan> collectColumnSpans(const std::vector<core::ColumnCommand>& columns,
 											   const std::vector<PlanLevel>& levels);
 
+	// 同じく、接尾辞 suffix の span レイヤ（柱 "2-1_3±0-柱"・登り梁 "2±0_2+0.5-登り梁"）を
+	// レイヤ名の並びから (from, to) 昇順・重複なしで列挙する（柱と登り梁で同じ集め方を
+	// 共有する。parse/Sheet）。span レイヤでない名前は読み飛ばす。
+	std::vector<ColumnSpan> collectSpanLayers(const std::vector<std::string>& layers,
+											  const std::string& suffix,
+											  const std::vector<PlanLevel>& levels);
+
 	// span の from（柱が立つ伏図レベルの通し番号）。baseIndex の階の伏図レベルのうち、柱の
 	// 下端 bottomAbs にいちばん近い天端を含むもの。伏図レベルが無ければ階の番号
 	// （baseIndex + 1）。

@@ -475,13 +475,8 @@ namespace HomeskzIfcImport::parse
 			// 軒桁: 母屋伏図に軒桁だけを薄く重ねるため、横架材天端（最上階は軒高）から分けた
 			// "n±0-軒桁" レイヤ（parse/PlanLevel）。高さは横架材天端と同じなので、そのすぐ上へ
 			// **最初に**挿す（耐力壁・小屋組より下）。条件は母屋・登り梁と同じく命令の配置先で、
-			// 登り梁と同じく伏図レベルごとに確かめる（その高さのぶんずらす）。
-			if (storyLevels.empty())
-			{
-				if (anyMemberOnLayer(members, standardLayerFor(kLevelNokigeta)))
-					insertLevelAboveBeamTop(kLevelNokigeta, upperOffset,
-											standardLayerFor(kLevelNokigeta));
-			}
+			// 登り梁と同じく伏図レベルごとに確かめる（その高さのぶんずらす）。伏図レベルは
+			// どの階にも 1 つ以上ある（parse/PlanLevel の collectBeamHeights）。
 			for (const PlanLevel* level : storyLevels)
 			{
 				const std::string layer = planLevelLayer(*level, info, kLevelNokigeta);
@@ -498,14 +493,7 @@ namespace HomeskzIfcImport::parse
 			// レイヤ**で判定する（命令があるときだけ・命令があれば必ずレイヤができる）。
 			//
 			// 耐力壁は立つ天端の伏図レベルのレイヤへ置かれる（parse/ShearWall）ので、伏図
-			// レベルごとに確かめ、そのレベルの高さのぶんずらす（伏図レベルが無い階は従来の
-			// 1 つだけ）。
-			if (storyLevels.empty())
-			{
-				if (anyShearWallOnLayer(context.shearWalls(), standardLayerFor(kLevelShearWall)))
-					insertLevelAboveBeamTop(kLevelShearWall, upperOffset,
-											standardLayerFor(kLevelShearWall));
-			}
+			// レベルごとに確かめ、そのレベルの高さのぶんずらす。
 			for (const PlanLevel* level : storyLevels)
 			{
 				const std::string layer = planLevelLayer(*level, info, kLevelShearWall);

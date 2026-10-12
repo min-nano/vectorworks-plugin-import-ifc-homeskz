@@ -295,21 +295,25 @@ namespace HomeskzIfcImport::parse
 		return static_cast<double>(level->ordinal);
 	}
 
-	std::vector<ColumnSpan> collectColumnSpans(const std::vector<ColumnCommand>& columns,
-											   const std::vector<PlanLevel>& levels)
+	std::vector<ColumnSpan> collectSpanLayers(const std::vector<std::string>& layers,
+											  const std::string& suffix,
+											  const std::vector<PlanLevel>& levels)
 	{
 		// レイヤ名で重複を除いてから (from, to) 昇順に並べる。map なのでレイヤ名順に
-		// 走査され、命令の並び順に依存しない決定的な結果になる。
+		// 走査され、入力の並び順に依存しない決定的な結果になる（(from, to) が同じなら
+		// レイヤ名順）。
 		std::map<std::string, ColumnSpan> seen;
-		for (const ColumnCommand& column : columns)
+		for (const std::string& layer : layers)
 		{
 			ColumnSpan span;
 			std::string fromLabel;
-			if (!parseSpanOrdinals(levels, column.layer, kColumnLayerSuffix, span.from, span.to) ||
-				!parseSpanLayer(column.layer, fromLabel, span.toLabel))
-				continue;
-			span.layer = column.layer;
-			seen.emplace(column.layer, std::move(span));
+			// 通し番号へ引き直せた名前は符号として読めるので、2 つ目の分解は失敗しない。
+			if (parseSpanOrdinals(levels, layer, suffix, span.from, span.to) &&
+				parseSpanLayer(layer, suffix, fromLabel, span.toLabel))
+			{
+				span.layer = layer;
+				seen.emplace(layer, std::move(span));
+			}
 		}
 
 		std::vector<ColumnSpan> spans;
@@ -319,6 +323,16 @@ namespace HomeskzIfcImport::parse
 		std::stable_sort(spans.begin(), spans.end(), [](const ColumnSpan& a, const ColumnSpan& b)
 						 { return a.from != b.from ? a.from < b.from : a.to < b.to; });
 		return spans;
+	}
+
+	std::vector<ColumnSpan> collectColumnSpans(const std::vector<ColumnCommand>& columns,
+											   const std::vector<PlanLevel>& levels)
+	{
+		std::vector<std::string> layers;
+		layers.reserve(columns.size());
+		for (const ColumnCommand& column : columns)
+			layers.push_back(column.layer);
+		return collectSpanLayers(layers, kColumnLayerSuffix, levels);
 	}
 
 	std::map<int, std::vector<std::string>>
