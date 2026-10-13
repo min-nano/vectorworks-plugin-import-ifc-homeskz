@@ -121,7 +121,7 @@ namespace HomeskzIfcImport::draw
 		// その階に属していれば true（取り込み前から在ったレイヤとして記録する）。
 		bool CreateStoryOnlyLayer(MCObjectHandle story, const std::string& layerName)
 		{
-			TXString name(layerName.c_str());
+			const TXString name(layerName.c_str());
 			if (const MCObjectHandle existing = gSDK->GetNamedLayer(name); existing != nil)
 			{
 				NoteExistingLayerUsed(existing, layerName);
