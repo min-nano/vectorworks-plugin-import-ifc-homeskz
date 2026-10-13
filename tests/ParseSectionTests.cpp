@@ -560,6 +560,7 @@ TEST(FixtureSectionsCutRealGridLinesAndShowExistingLayers)
 	{
 		for (const core::LevelCommand& level : story.levels)
 			storyLayers.insert(level.layer);
+		storyLayers.insert(story.storyLayers.begin(), story.storyLayers.end());
 	}
 
 	std::set<std::string> numbers;

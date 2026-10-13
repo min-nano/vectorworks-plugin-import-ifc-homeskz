@@ -98,7 +98,11 @@ namespace HomeskzIfcImport::draw
 		// 置されるため、通り芯や他要素より前に用意する。
 		if (beginPhase("ストーリとレイヤを作成しています…", document.stories.size(),
 					   core::DrawPhase::Stories))
-			counts.stories = drawStories(document, progress);
+		{
+			std::string note;
+			counts.stories = drawStories(document, progress, &note);
+			addDiagnostics(note);
+		}
 
 		// M1 通り芯を描画する。
 		if (beginPhase("通り芯を描画しています…", document.grids.size(), core::DrawPhase::Grids))

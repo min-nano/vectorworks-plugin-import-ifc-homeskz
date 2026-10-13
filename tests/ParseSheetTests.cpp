@@ -99,6 +99,8 @@ namespace
 		{
 			for (const core::LevelCommand& level : story.levels)
 				names.insert(level.layer);
+			// レベルを持たずに階だけに結ぶレイヤ（柱の span レイヤ）。
+			names.insert(story.storyLayers.begin(), story.storyLayers.end());
 		}
 		return names;
 	}

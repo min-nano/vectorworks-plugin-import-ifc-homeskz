@@ -434,6 +434,12 @@ namespace HomeskzIfcImport::parse
 		std::vector<std::string> layers;
 		for (const core::StoryCommand& story : stories)
 		{
+			// レベルを持たずに階だけに結んだレイヤ（柱の span レイヤ）も映す。
+			for (const std::string& layer : story.storyLayers)
+			{
+				if (!layer.empty())
+					layers.push_back(layer);
+			}
 			for (const core::LevelCommand& level : story.levels)
 			{
 				if (!level.layer.empty())

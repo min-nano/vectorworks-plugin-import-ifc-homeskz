@@ -181,12 +181,18 @@ namespace HomeskzIfcImport::core
 	//   levels                  … 生成するストーリレベルの列。並び順は**希望する
 	//                             デザインレイヤのスタック順（上→下）**を表し、draw/Story が
 	//                             その順にレイヤを並べ替える（レベルの高さには依存しない）。
+	//   storyLayers             … **レベルを持たずに階だけに結ぶ**デザインレイヤ名の列（柱の
+	//                             span レイヤ "1±0_2±0-柱"）。柱は端部を上下の横架材天端の
+	//                             レベルへバインドするので、レイヤに専用のレベルは要らない
+	//                             （ご要望。docs/DEV-NOTES.md M44）。レイヤの高さは階の高さ。
+	//                             スタック順は levels より上段（前面）で、並びはこの列の順。
 	struct StoryCommand
 	{
 		std::string name;
 		std::string suffix;
 		double elevation = 0.0;
 		std::vector<LevelCommand> levels;
+		std::vector<std::string> storyLayers;
 	};
 
 	// 高さ基準（ストーリレベルへのバインド）1 端分。床・構造材・柱・壁・スラブが共通で使う。

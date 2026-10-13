@@ -13,7 +13,7 @@
 3. （続けて）**耐力壁も柱と同じく `下端レベル_上端レベル` で表す。**
 4. （続けて）**小屋束の上端の `R+0.5` を整数に揃える。**
 
-**2〜4 は実装した。1 は SDK の調査待ち**（下記）。
+**1〜4 とも実装した**（1 は SDK リファレンスの調査 #221 を待ってから。下記）。
 
 ## 符号（`parse/Story` の `levelLabel`）
 
@@ -97,24 +97,40 @@ M36 までは屋根束（小屋束・棟束）の上端を「届いた階のい�
   引ける（M36 では span レイヤだけ接頭辞が無く、データタグの注記と垂木が伏図レベルを介して
   階を引いていた）。
 
-## 柱のレイヤをストーリだけに結ぶ（未実装・SDK の調査待ち）
+## 柱のレイヤをストーリだけに結ぶ（レベルを持たない）
 
-今も柱のレイヤは専用のストーリレベル（レベル種別＝レイヤ名。`1±0_2±0-柱`）を持つ。
-**ストーリにだけ結び、レベル「なし」にするには SDK の口が要る**:
+柱の span レイヤ（`1±0_2±0-柱`）は**ストーリにだけ結び、ストーリレベルを持たせない**
+（オーガナイザで「ストーリ＝その階・ストーリレベル＝なし」）。M43 までは span ごとに
+レベル種別＝レイヤ名の専用レベルを作っていたので、レベル種別の一覧が柱の span の数だけ
+増えていた。
 
-- レイヤを作る手段として確かめてあるのは `CreateStoryLevelTemplate` ＋
-  `AddStoryLevelFromTemplate`（＝レベルとレイヤを同時に生やす）だけ。
-- `AssociateLayerWithStory(layer, story)` は【ヘッダ根拠】で、`AddStoryLevel` と組み合わせた
-  ときに「レイヤ→レベルの紐付けが UI 上なし」になったという記録があるだけ
-  （[Findings「Layers and Stories」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layers%20and%20Stories.md)）。
-- 柱の上端は `storyOffset = 1`（上の階）で横架材天端へバインドしているので、**レイヤが
-  ストーリに属していることは必須**（素のデザインレイヤでは上の階を指せない）。
+**作り方は SDK リファレンスの
+[issue #221](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/221)
+の実測どおり**（[Findings「Layers and Stories」](https://github.com/min-nano/vectorworks-developer-sdk-reference/blob/main/Findings/Layers%20and%20Stories.md)
+の「レベルを持たないレイヤを階に結ぶ」。`draw/Story` の `CreateStoryOnlyLayer`）:
 
-SDK リファレンスの
-[issue #221](https://github.com/min-nano/vectorworks-developer-sdk-reference/issues/221) で、
-レベル無しで階に結べるか・その上のバウンドが解決されるか・レイヤの高さと重ね順を調べて
-もらっている。`Findings/` に反映されたら `draw/Story` で柱の span レイヤだけをレベル無しで
-作る（`LevelCommand` に「レベルを作らない」ことを表す形が要る）。
+1. `CreateLayer` で素のデザインレイヤを作る。
+2. その階で未使用の**仮のレベル種別**（`柱`。1 つを使い回せる）を `SetLayerLevelType` で与える
+   ——素のレイヤ（種別 `''`）は `AssociateLayerWithStory` に弾かれる。
+3. `AssociateLayerWithStory` で階に結び、**`GetStoryOfLayer` の読み戻しで確かめる**。
+4. `SetLayerLevelType(layer, "")` で種別を外す（階は残る）。
+
+- **柱の高さは変わらない。** バウンドの宛先はバウンドに書いた種別（横架材天端）で決まり、
+  入れ物のレイヤから要るのは**階だけ**（上の階を `storyOffset = 1` で数える）。レベル付きの
+  レイヤと同じ値に解決され、階を動かせば追随する（Findings）。
+- **結べなかったら作ったレイヤを消し、従来のレベル付きのレイヤで作り直す**（診断に枚数を
+  残す）。階に属さないレイヤの上ではバウンドが同じ高さへ潰れ、長さ 0 の柱になるため
+  （Findings「階に属さないレイヤの上では `eStoryObjectBound_Story` が…」）。
+- レイヤの高さは**階の高さ**（FL。従来は横架材天端）。柱は高さをバウンドで決めるので
+  効かない。
+- レベルを持たないレイヤは VW の高さ順の自動整列に乗らないが、並びは
+  `reorderStoryLayers`（`InsertObjectAfter`）が決めるので変わらない。スタック順は従来どおり
+  その階のレベルより上段（`core::desiredStoryLayerOrder` が `StoryCommand::storyLayers` を
+  levels の前に積む）。
+- 命令セットでは `StoryCommand::storyLayers`（レベルを持たずに階だけに結ぶレイヤ名の列）で
+  表す。軸組図の表示レイヤ（`parse/Section` の `sectionLayers`）もここから引く。
+- 仮の種別 `柱` は図面のレベル種別の一覧に 1 つ残る（消す口は確かめていない）。柱の span の
+  数だけ種別が増えていた M43 までより少ない。
 
 ## 図面への影響
 

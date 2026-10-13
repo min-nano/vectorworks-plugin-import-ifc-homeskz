@@ -19,12 +19,24 @@
 //	  * gSDK->AddStoryLevelFromTemplate(story, idx)       … テンプレートからレベル＋レイヤ生成
 //	  * gSDK->GetLayerForStory(story, type)               … 生成レイヤのハンドル取得
 //	  * gSDK->SetObjectName(layer, name)                  … レイヤ名を意図した名前へリネーム
+//	  * gSDK->CreateLayer / SetLayerLevelType / AssociateLayerWithStory / GetStoryOfLayer
+//	                                                       … レベルを持たないレイヤを階に結ぶ
+//	                                                         （柱の span レイヤ。下記）
 //
 //	VW 2026 では AddStoryLevel + AssociateLayerWithStory ではレイヤ→レベルの紐付けが UI
 //	上「なし」になるため、バインドが保証される CreateStoryLevelTemplate +
 //	AddStoryLevelFromTemplate を使う。テンプレートは CreateStory の suffix を末尾に付けた名前
 //	でレイヤを作る（例 "1±0-FL-1"）ため、GetLayerForStory で再取得して SetObjectName
 //	で意図した名前（"1±0-FL"）へ直す。
+//
+//	**柱の span レイヤ（StoryCommand::storyLayers）はレベルを持たせず、階にだけ結ぶ**（ご要望。
+//	M44）。素のレイヤ（種別 ''）は AssociateLayerWithStory に弾かれるので、その階で未使用の
+//	仮の種別を与えて結び、結んだあとで種別を外す（SDK リファレンス issue #221・Findings
+//	「Layers and Stories」の「レベルを持たないレイヤを階に結ぶ」。実機確認済み）。柱の
+//	上下端のバウンドはバウンドに書いた種別（横架材天端）で解決され、入れ物から要るのは
+//	階だけなので、レベル付きのレイヤのときと同じ高さになる。レイヤの高さは階の高さ。
+//	レベルの無いレイヤは高さ順に自動整列されないが、並びは reorderStoryLayers が
+//	InsertObjectAfter で決めるので変わらない。
 //
 //	レイヤのスタック順の並べ替え（reorderStoryLayers）もここに置く。**ISDK の
 //	InsertObjectAfter / InsertObjectBefore** で図面のオブジェクト列（＝レイヤの並び）を
@@ -43,6 +55,7 @@
 #include "core/Document.h"
 #include "core/Progress.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <ranges>
 #include <string>
@@ -87,6 +100,52 @@ namespace HomeskzIfcImport::draw
 				RecordCreatedLayer(layer);
 			}
 		}
+
+		// レベルを持たないレイヤを階に結ぶときに、結ぶ間だけ与える仮のレベル種別
+		// （SDK リファレンス Findings「Layers and Stories」の「レベルを持たないレイヤを階に
+		// 結ぶ」）。**その階で未使用の種別**なら 1 つを何枚にも使い回せる（外すとまた空く）。
+		// 名前は結ぶレイヤ（柱の span レイヤ "1±0_2±0-柱"）の中身に合わせる——種別の一覧に
+		// 1 つ残るので、図面を開いた人が読んで意味の分かる名前にしておく。
+		constexpr const char* kStoryOnlyLayerType = "柱";
+
+		// レベルを持たないデザインレイヤ layerName を作り、階 story にだけ結ぶ
+		// （OIP / オーガナイザで「ストーリ＝その階・ストーリレベル＝なし」）。結べたら true。
+		//
+		// 手順は Findings のとおり、この順番に意味がある: CreateLayer → 仮の種別を与える →
+		// AssociateLayerWithStory（素のレイヤ＝種別 '' は弾かれる）→ 種別を外す（階は残る）。
+		// 結べたかは戻り値ではなく GetStoryOfLayer の読み戻しで確かめる。
+		//
+		// **結べなければ作ったレイヤを消して false を返す**——階に属さないレイヤの上では
+		// 柱の上下端のバウンドが同じ高さへ潰れ、長さ 0 の柱になる（Findings）。消しておけば
+		// 呼び出し側が従来のレベル付きのレイヤで作り直せる。同名のレイヤが既に在れば作らず、
+		// その階に属していれば true（取り込み前から在ったレイヤとして記録する）。
+		bool CreateStoryOnlyLayer(MCObjectHandle story, const std::string& layerName)
+		{
+			TXString name(layerName.c_str());
+			if (const MCObjectHandle existing = gSDK->GetNamedLayer(name); existing != nil)
+			{
+				NoteExistingLayerUsed(existing, layerName);
+				return gSDK->GetStoryOfLayer(existing) == story;
+			}
+			MCObjectHandle layer = gSDK->CreateLayer(name, static_cast<short>(LayerKind::Design));
+			if (layer == nil)
+				return false;
+			TXString tempType(kStoryOnlyLayerType); // SetLayerLevelType は非 const TXString&
+			gSDK->SetLayerLevelType(layer, tempType);
+			const bool bound = gSDK->AssociateLayerWithStory(layer, story) &&
+							   gSDK->GetStoryOfLayer(layer) == story;
+			TXString noType;
+			gSDK->SetLayerLevelType(layer, noType);
+			if (!bound)
+			{
+				gSDK->DeleteObject(layer);
+				return false;
+			}
+			// このインポートが作ったレイヤとして undo イベントへ登録する
+			// （CreateStoryLevelViaTemplate と同じ）。
+			RecordCreatedLayer(layer);
+			return true;
+		}
 	} // namespace
 
 	std::size_t reorderStoryLayers(const core::Document& document)
@@ -119,7 +178,8 @@ namespace HomeskzIfcImport::draw
 		return moved;
 	}
 
-	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress)
+	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress,
+							std::string* outNote)
 	{
 		const std::vector<core::StoryCommand>& commands = document.stories;
 		if (commands.empty())
@@ -138,6 +198,15 @@ namespace HomeskzIfcImport::draw
 			TXString levelTypeName(levelType.c_str()); // CreateLayerLevelType は非 const TXString&
 			gSDK->CreateLayerLevelType(levelTypeName);
 		}
+		// レベルを持たないレイヤを結ぶための仮の種別（CreateStoryOnlyLayer）。そういう
+		// レイヤがあるときだけ登録する（種別の一覧に要らないものを足さない）。
+		if (std::ranges::any_of(commands, [](const core::StoryCommand& command)
+								{ return !command.storyLayers.empty(); }))
+		{
+			TXString tempType(kStoryOnlyLayerType);
+			gSDK->CreateLayerLevelType(tempType);
+		}
+		std::size_t fallbackLayers = 0;
 
 		std::size_t count = 0;
 		for (const core::StoryCommand& command : commands)
@@ -165,7 +234,29 @@ namespace HomeskzIfcImport::draw
 			for (const core::LevelCommand& level : command.levels)
 				CreateStoryLevelViaTemplate(story, level.type, level.offset, level.layer);
 
+			// レベルを持たずに階だけに結ぶレイヤ（柱の span レイヤ。M44）。結べなかった
+			// ときは従来のレベル付きのレイヤ（種別＝レイヤ名）で作り直す——柱が描画できる
+			// ことを優先し、診断に残す。
+			for (const std::string& layer : command.storyLayers)
+			{
+				if (CreateStoryOnlyLayer(story, layer))
+					continue;
+				TXString levelTypeName(layer.c_str());
+				gSDK->CreateLayerLevelType(levelTypeName);
+				CreateStoryLevelViaTemplate(story, layer, 0.0, layer);
+				++fallbackLayers;
+			}
+
 			++count;
+		}
+
+		if (outNote != nullptr)
+		{
+			std::string text;
+			AppendCount(text,
+						"ストーリの診断: レベルを持たずに階へ結べず、レベル付きで作ったレイヤ",
+						fallbackLayers, "枚");
+			*outNote = std::move(text);
 		}
 		return count;
 	}

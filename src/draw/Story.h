@@ -24,6 +24,7 @@
 #include "core/Progress.h"
 
 #include <cstddef>
+#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -35,7 +36,13 @@ namespace HomeskzIfcImport::draw
 	// progress には 1 件描画するごとに 1 ステップ報告し、**ループの先頭で中止要求を確認して
 	// 抜ける**（進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
 	// 決める）。描画済みの分は図面に残る。
-	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress);
+	//
+	// レベルを持たずに階だけに結ぶレイヤ（StoryCommand::storyLayers。柱の span レイヤ）は、
+	// 仮のレベル種別を与えて AssociateLayerWithStory で結び、種別を外して作る（SDK
+	// リファレンス Findings「Layers and Stories」）。結べなかったレイヤは従来のレベル付きの
+	// レイヤで作り直し、その枚数を outNote へ書く（無ければ空）。
+	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress,
+							std::string* outNote = nullptr);
 
 	// デザインレイヤのスタック順を希望順（core::desiredStoryLayerOrder）へ並べ替える。
 	// 移動できたレイヤ数を返す。

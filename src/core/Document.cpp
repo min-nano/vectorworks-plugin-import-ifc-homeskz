@@ -48,7 +48,9 @@ namespace HomeskzIfcImport::core
 		bool isValidStory(const StoryCommand& story)
 		{
 			return !story.name.empty() && !story.suffix.empty() &&
-				   std::ranges::all_of(story.levels, isValidLevel);
+				   std::ranges::all_of(story.levels, isValidLevel) &&
+				   std::ranges::none_of(story.storyLayers,
+										[](const std::string& layer) { return layer.empty(); });
 		}
 
 		// 構成層（スラブ・壁）1 枚が妥当か。名前とクラス名が非空で、層厚が 0 以上
@@ -1173,6 +1175,8 @@ namespace HomeskzIfcImport::core
 		std::vector<std::string> background;
 		for (const StoryCommand& command : std::views::reverse(stories))
 		{
+			// レベルを持たないレイヤ（柱の span レイヤ）はその階のレベルより上段。
+			order.insert(order.end(), command.storyLayers.begin(), command.storyLayers.end());
 			for (const LevelCommand& level : command.levels)
 			{
 				if (isForegroundLevel(level.type))

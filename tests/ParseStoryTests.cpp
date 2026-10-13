@@ -438,16 +438,21 @@ TEST(build_commands_empty_returns_empty)
 
 TEST(desired_layer_order_grid_top_then_stories_top_down)
 {
-	// 1階・2階・屋根の基本命令。希望順は "共通" → 最上階→最下階、床(FL)は背面。
+	// 1階・2階・屋根の基本命令。希望順は "共通" → 最上階→最下階、床(FL)は背面。レベルを
+	// 持たずに階だけに結ぶレイヤ（柱の span レイヤ。storyLayers）はその階のレベルより上段。
 	std::vector<StoryCommand> stories = {
-		{"1階", "1", 473.0, {{"FL", 0.0, "1±0-FL"}, {"横架材天端", -48.0, "1±0-横架材"}}},
-		{"2階", "2", 3273.0, {{"FL", 0.0, "2±0-FL"}, {"横架材天端", -36.0, "2±0-横架材"}}},
-		{"屋根", "R", 5973.0, {{"軒高", 0.0, "R±0-横架材"}}},
+		{"1階",
+		 "1",
+		 473.0,
+		 {{"FL", 0.0, "1±0-FL"}, {"横架材天端", -48.0, "1±0-横架材"}},
+		 {"1±0_2±0-柱"}},
+		{"2階", "2", 3273.0, {{"FL", 0.0, "2±0-FL"}, {"横架材天端", -36.0, "2±0-横架材"}}, {}},
+		{"屋根", "R", 5973.0, {{"軒高", 0.0, "R±0-横架材"}}, {}},
 	};
 	std::vector<std::string> const order = desiredStoryLayerOrder(stories);
 
-	const std::vector<std::string> expected = {"共通",		 "R±0-横架材", "2±0-横架材",
-											   "1±0-横架材", "2±0-FL",	   "1±0-FL"};
+	const std::vector<std::string> expected = {
+		"共通", "R±0-横架材", "2±0-横架材", "1±0_2±0-柱", "1±0-横架材", "2±0-FL", "1±0-FL"};
 	CHECK_EQ(order.size(), expected.size());
 	if (order.size() == expected.size())
 	{
@@ -461,25 +466,29 @@ TEST(desired_layer_order_brings_shear_wall_layers_to_the_front)
 	// 耐力壁レイヤは階をまたいで集めて "共通"／topLayers の直後（最前面群）へ回す。
 	// 伏図へ出るのは注記（筋かいの三角・面材の丸）なので、横架材や柱の図形に隠されると
 	// 読めない（core::desiredStoryLayerOrder）。階の並び（最上階→最下階）は崩さない。
+	// 耐力壁のレベルの種別は span レイヤ名そのもの（"1±0_2±0-耐力壁"）でも、種別
+	// "耐力壁" でも前面へ回る。
 	std::vector<StoryCommand> stories = {
 		{"1階",
 		 "1",
 		 0.0,
 		 {{"FL", 0.0, "1±0-FL"},
-		  {"耐力壁", -48.0, "1±0-耐力壁"},
-		  {"横架材天端", -48.0, "1±0-横架材"}}},
+		  {"1±0_2±0-耐力壁", -48.0, "1±0_2±0-耐力壁"},
+		  {"横架材天端", -48.0, "1±0-横架材"}},
+		 {}},
 		{"2階",
 		 "2",
 		 3000.0,
 		 {{"FL", 0.0, "2±0-FL"},
 		  {"耐力壁", -36.0, "2±0-耐力壁"},
-		  {"横架材天端", -36.0, "2±0-横架材"}}},
+		  {"横架材天端", -36.0, "2±0-横架材"}},
+		 {}},
 	};
 	std::vector<std::string> const order = desiredStoryLayerOrder(stories, {"2±0-柱伏図記号"});
 
-	const std::vector<std::string> expected = {"共通",		 "2±0-柱伏図記号", "2±0-耐力壁",
-											   "1±0-耐力壁", "2±0-横架材",	   "1±0-横架材",
-											   "2±0-FL",	 "1±0-FL"};
+	const std::vector<std::string> expected = {"共通",			 "2±0-柱伏図記号", "2±0-耐力壁",
+											   "1±0_2±0-耐力壁", "2±0-横架材",	   "1±0-横架材",
+											   "2±0-FL",		 "1±0-FL"};
 	CHECK_EQ(order.size(), expected.size());
 	if (order.size() == expected.size())
 	{
@@ -492,7 +501,7 @@ TEST(desired_layer_order_prepends_top_layers)
 {
 	// topLayers（伏図記号レイヤ等・ストーリ非依存）は "共通" の直下に積む。
 	std::vector<StoryCommand> stories = {
-		{"屋根", "R", 0.0, {{"軒高", 0.0, "R±0-横架材"}}},
+		{"屋根", "R", 0.0, {{"軒高", 0.0, "R±0-横架材"}}, {}},
 	};
 	std::vector<std::string> const order = desiredStoryLayerOrder(stories, {"2±0-柱伏図記号"});
 
@@ -530,31 +539,32 @@ TEST(reads_sample_house_fixture)
 		// 床版の無い屋根に FL は付かない（ロフトの床がある屋根には FL が加わる。下のテスト）。
 		// 屋根版（屋根面）はあるので 垂木・野地板 レベルが軒高の直上に積まれ（M6）、母屋・棟木の
 		// 命令があるので 母屋 レベルがその下（軒高の直上）に積まれる（M7）。このモデルに登り梁は
-		// 無いので 登り梁 レベルは作らない（空レイヤを作らない）。最上段は span 柱レベル
-		// （M8）で、屋根階に立つ主屋根の小屋束が "R±0_R+1-柱"（屋根面で止まり母屋のレベルまで）に入る。
-		// 軒桁は専用の 軒桁 レベルで軒高のすぐ上（母屋伏図に薄く重ねるため）。
-		CHECK(sameVec(levelTypes(*roof), std::vector<std::string>{"R±0_R+1-柱", "野地板", "垂木",
-																  "母屋", "軒桁", "軒高"}));
+		// 無いので 登り梁 レベルは作らない（空レイヤを作らない）。軒桁は専用の 軒桁 レベルで
+		// 軒高のすぐ上（母屋伏図に薄く重ねるため）。屋根階に立つ主屋根の小屋束の span レイヤ
+		// "R±0_R+1-柱"（屋根面で止まり母屋のレベルまで）はレベルを持たずに階だけに結ぶ（M44）。
+		CHECK(sameVec(levelTypes(*roof),
+					  std::vector<std::string>{"野地板", "垂木", "母屋", "軒桁", "軒高"}));
+		CHECK(sameVec(roof->storyLayers, std::vector<std::string>{"R±0_R+1-柱"}));
 		// 横架材のレイヤは最上階も "横架材"（レベル種別は軒高のまま）。
 		CHECK_EQ(roof->levels.back().layer, std::string("R±0-横架材"));
 	}
 
-	// 一般階は FL＋横架材天端の 2 レベル（順序は FL が上）。その上に span 柱レベル（M8）が
-	// (from, to) 昇順で積まれる: 1 階には 2 階で止まる管柱（"1±0_2±0-柱"）と、屋根階
-	// （軒高）まで届く通し柱（"1±0_R±0-柱"）がある。耐力壁（M19）の命令もあるので、横架材
+	// 一般階は FL＋横架材天端の 2 レベル（順序は FL が上）。柱の span レイヤ（M8）は
+	// レベルを持たずに階だけに結ぶ（storyLayers。(from, to) 昇順。M44）: 1 階には 2 階で
+	// 止まる管柱（"1±0_2±0-柱"）と、屋根階（軒高）まで届く通し柱（"1±0_R±0-柱"）がある。
+	// 耐力壁（M19）の命令もあるので、横架材
 	// 天端の直上に耐力壁の span レベル（1 階の標準に立ち 2 階の横架材まで "1±0_2±0-耐力壁"。
 	// 種別はレイヤ名そのもの）が挟まる。
 	const StoryCommand* first = find(stories, "1階");
 	if (first != nullptr)
 	{
-		const std::vector<std::string> base = {"1±0_2±0-柱", "1±0_R±0-柱", "FL", "1±0_2±0-耐力壁",
-											   "横架材天端"};
+		const std::vector<std::string> base = {"FL", "1±0_2±0-耐力壁", "横架材天端"};
 		CHECK(sameVec(levelTypes(*first), base));
 		std::vector<std::string> layers;
 		for (const LevelCommand& level : first->levels)
 			layers.push_back(level.layer);
-		CHECK(sameVec(layers,
-					  {"1±0_2±0-柱", "1±0_R±0-柱", "1±0-FL", "1±0_2±0-耐力壁", "1±0-横架材"}));
+		CHECK(sameVec(layers, {"1±0-FL", "1±0_2±0-耐力壁", "1±0-横架材"}));
+		CHECK(sameVec(first->storyLayers, {"1±0_2±0-柱", "1±0_R±0-柱"}));
 	}
 }
 
@@ -924,15 +934,15 @@ TEST(strip_level_step_reads_the_standard_level_layer)
 }
 
 // --------------------------------------------------------------------------
-// - span 柱レベル（柱の命令がある階にだけ追加する。M8）
+// - span 柱レイヤ（柱の命令がある階にだけ、レベルを持たずに階へ結ぶ。M8・M44）
 // ---------------------------------------------------------------------------
 
 TEST(span_column_levels_are_stacked_on_top)
 {
 	// 1FL に柱（高さ 2844 → 上端 3444。2FL の梁が無いので梁下端は天端＝2FL 高さで代用され、
 	// 3444 < 3500 なので直上階へ届かず屋根束扱いの 1to1.5）と、RFL に小屋束を置く。
-	// span レベルは levels の**先頭**（FL／軒高の直上＝スタック最上段）に積まれ、レベル種別は
-	// レイヤ名そのもの。柱の無い階には span レベルを作らない（空レイヤを作らない）。
+	// span レイヤは**レベルを持たずに階だけに結ぶ**レイヤ（storyLayers。M44）で、レベルは
+	// 作らない。柱の無い階には span レイヤを作らない（空レイヤを作らない）。
 	Model const model =
 		loadIfcFromText("#1=IFCCARTESIANPOINT((0.,0.,0.));\n"
 						"#2=IFCAXIS2PLACEMENT3D(#1,$,$);\n"
@@ -951,12 +961,12 @@ TEST(span_column_levels_are_stacked_on_top)
 	CHECK_EQ(stories.size(), static_cast<std::size_t>(2));
 	if (stories.size() != 2)
 		return;
-	// 1 階（柱あり）: span レベルが先頭に積まれる。
-	CHECK(sameVec(levelTypes(stories[0]),
-				  std::vector<std::string>{"1±0_1+1-柱", "FL", "横架材天端"}));
-	CHECK_EQ(stories[0].levels.front().layer, std::string("1±0_1+1-柱"));
-	// 2 階（最上階・柱なし）: span レベルは作らない。
+	// 1 階（柱あり）: span レイヤは階だけに結ぶ（レベルは FL・横架材天端のまま）。
+	CHECK(sameVec(levelTypes(stories[0]), std::vector<std::string>{"FL", "横架材天端"}));
+	CHECK(sameVec(stories[0].storyLayers, std::vector<std::string>{"1±0_1+1-柱"}));
+	// 2 階（最上階・柱なし）: span レイヤは作らない。
 	CHECK(sameVec(levelTypes(stories[1]), std::vector<std::string>{"軒高"}));
+	CHECK(stories[1].storyLayers.empty());
 }
 
 TEST_MAIN()

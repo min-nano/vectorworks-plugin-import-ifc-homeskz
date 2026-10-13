@@ -570,23 +570,19 @@ namespace HomeskzIfcImport::parse
 								floorLayer);
 			}
 
-			// M8 柱: この階を base（from の符号がこの階）とする span レイヤ（"2-1_3±0-柱"）
-			// のレベルを、levels の**先頭＝スタック最上段**（FL／軒高レイヤの直上）へ (from,
-			// to)昇順で積む。レベル種別はレイヤ名そのもの（span ごとに一意な文字列が要るため）。
-			// 高さは横架材天端（最上階は軒高）に揃えるが、柱の上下端は bottomBound /
-			// topBound が指すレベルで決まるのでこのオフセットには依存しない。
+			// M8 柱: この階を base（from の符号がこの階）とする span レイヤ（"2-1_3±0-柱"）を、
+			// **レベルを持たずに階だけに結ぶ**レイヤ（storyLayers）として (from, to) 昇順で
+			// 並べる（ご要望。M44）。柱の上下端は bottomBound / topBound が指す横架材天端の
+			// レベルで決まり、入れ物のレイヤから要るのは階だけ（上階を storyOffset で数える
+			// ため）なので、レイヤに専用のレベルは要らない（SDK リファレンス Findings
+			// 「Layers and Stories」の「レベルを持たないレイヤを階に結ぶ」）。スタック順は
+			// その階のレベルより上段（FL／軒高レイヤの直上。core::desiredStoryLayerOrder）。
 			//
 			// レイヤは**実在する柱から決まる**ので、母屋・登り梁と同じく「命令があるときだけ
 			// ・命令があれば必ず」できる（空レイヤを作らない）。
-			const auto spanLayers = columnLayers.find(static_cast<int>(i));
-			if (spanLayers != columnLayers.end())
-			{
-				std::vector<LevelCommand> spanLevels;
-				spanLevels.reserve(spanLayers->second.size());
-				for (const std::string& layer : spanLayers->second)
-					spanLevels.push_back(LevelCommand{layer, upperOffset, layer});
-				cmd.levels.insert(cmd.levels.begin(), spanLevels.begin(), spanLevels.end());
-			}
+			if (const auto spanLayers = columnLayers.find(static_cast<int>(i));
+				spanLayers != columnLayers.end())
+				cmd.storyLayers = spanLayers->second;
 			commands.push_back(std::move(cmd));
 		}
 		return commands;

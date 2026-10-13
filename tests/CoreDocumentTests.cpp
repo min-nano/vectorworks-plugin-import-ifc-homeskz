@@ -148,6 +148,18 @@ TEST(validate_rejects_story_level_with_empty_layer)
 	CHECK(!core::validateDocument(document));
 }
 
+TEST(validate_checks_story_only_layer_names)
+{
+	// レベルを持たずに階だけに結ぶレイヤ（柱の span レイヤ）は名前が要る。
+	core::Document document;
+	core::StoryCommand story = validStory();
+	story.storyLayers = {"1±0_2±0-柱"};
+	document.stories.push_back(story);
+	CHECK(core::validateDocument(document));
+	document.stories.front().storyLayers.emplace_back();
+	CHECK(!core::validateDocument(document));
+}
+
 namespace
 {
 	// 検証を通る最小の床命令（レイヤ・クラス・3 点以上の外形・構成層・高さ基準）。
