@@ -550,6 +550,38 @@ namespace HomeskzIfcImport::parse
 									   { return level.type == type; });
 		}
 
+		// 柱の span レイヤ（"2-1_3±0-柱"）が立つ階 from と届く階 to（軸組図の柱の列を階ごとに
+		// 分けるため）。階は符号の接頭辞の番号（最上階 "R" は roofFloor）。to は届いた符号の
+		// 階で、その階の標準より上の段（屋根面で止まる屋根束の母屋のレベル "R+1" など）や同じ階の中で
+		// 止まる柱は半階ぶん足す——[from, to) の整数がその柱を数える階になる。span レイヤで
+		// なければ false。
+		bool spanFloors(const std::string& layer, int roofFloor, double& outFrom, double& outTo)
+		{
+			std::string fromLabel;
+			std::string toLabel;
+			const bool span = parseSpanLayer(layer, fromLabel, toLabel);
+			// 符号の階と段数。parseSpanLayer が符号として読めることを確かめてあるので、ここの
+			// 分解は失敗しない。
+			const auto floorOf = [roofFloor](const std::string& label, double& step)
+			{
+				std::string prefix;
+				parseLevelLabel(label, prefix, step);
+				return prefix.front() >= '0' && prefix.front() <= '9'
+						   ? std::stod(prefix)
+						   : static_cast<double>(roofFloor);
+			};
+			if (span)
+			{
+				double fromStep = 0.0;
+				double toStep = 0.0;
+				outFrom = floorOf(fromLabel, fromStep);
+				outTo = floorOf(toLabel, toStep);
+				if (toStep > 0.0 || outTo <= outFrom)
+					outTo = std::max(outTo, outFrom) + 0.5;
+			}
+			return span;
+		}
+
 		// 軸組図の高さの基準（GL・各階の FL・軒高）と、各階の FL から標準の横架材天端まで
 		// （{FL, 横架材天端}。FL と同じ高さのもの＝軒高は持たない）。
 		struct SectionHeights
@@ -560,7 +592,7 @@ namespace HomeskzIfcImport::parse
 
 		// レベルに紐づくレイヤ → 何階か（1 始まり。柱の span レイヤの from と同じ数え方）。
 		// 基礎ストーリのレイヤは 0 階、軒高ストーリは最上階の 1 つ上。軸組図で、横架材を
-		// その上に立つ柱と同じ階として扱う（"2-横架材天端" の梁は 2 階の柱の足元）。
+		// その上に立つ柱と同じ階として扱う（"2±0-横架材" の梁は 2 階の柱の足元）。
 		std::map<std::string, int> layerFloors(const std::vector<core::StoryCommand>& stories)
 		{
 			std::map<std::string, int> floors;
@@ -1475,7 +1507,7 @@ namespace HomeskzIfcImport::parse
 	{
 		// 母屋伏図 layers が映す階（その垂木のレイヤを映す階。母屋伏図は必ず垂木を映す。
 		// 下の階の柱の span レイヤも映るので、レイヤを 1 枚でも映す階、では広すぎる）の、
-		// 母屋伏図に映していない登り梁のレイヤ（span レイヤ "{from}to{to}-登り梁"。
+		// 母屋伏図に映していない登り梁のレイヤ（span レイヤ "2-1_2+1-登り梁"。
 		// parse/PlanLevel の noboribariSpan。振り分けられずに残った "n-登り梁" も）。
 		std::vector<std::string> noboribariLayersOfSheet(const core::Document& document,
 														 const std::vector<std::string>& layers)
@@ -1490,8 +1522,8 @@ namespace HomeskzIfcImport::parse
 					continue;
 				for (const core::LevelCommand& level : story.levels)
 				{
-					double from = 0.0;
-					double to = 0.0;
+					std::string from;
+					std::string to;
 					const bool noboribari =
 						core::stripPlanLevelTag(level.type) == core::kLevelNoboribari ||
 						parseSpanLayer(level.layer, core::kLevelNoboribari, from, to);
@@ -1607,8 +1639,8 @@ namespace HomeskzIfcImport::parse
 
 		// 横: 柱・束の位置。**1 階の柱は図の下**、**1 階と合わない上階の柱と小屋束は図の上**に
 		// 出す（利用者の指定）。
-		//   * 柱は立つ階ごとに分ける（span レイヤ "{from}to{to}-柱" の from〜to がまたぐ階。
-		//     通し柱はまたぐ階のすべてに数える）。span レイヤでない柱は 1 階とみなす。
+		//   * 柱は立つ階ごとに分ける（span レイヤ "2-1_3±0-柱" の from〜to の符号の階がまたぐ
+		//     階。通し柱はまたぐ階のすべてに数える）。span レイヤでない柱は 1 階とみなす。
 		//   * **紙面と平行な横架材が直交する横架材にぶつかる位置**も、その横架材の階の列の
 		//     測点にする（は通りの 5通り。利用者の指定）。沿う材の端（端点は接合点。M20）に、
 		//     同じ階の切り口があるところ。
@@ -1640,7 +1672,7 @@ namespace HomeskzIfcImport::parse
 			const double a = along(column.position);
 			double from = 0.0;
 			double to = 0.0;
-			const bool span = parseSpanLayer(column.layer, from, to) && to > from;
+			const bool span = spanFloors(column.layer, roofFloor, from, to);
 			if (column.structuralUse == core::kStructuralUseKoyazuka ||
 				(span && std::lround(from) >= roofFloor))
 			{
@@ -1652,7 +1684,8 @@ namespace HomeskzIfcImport::parse
 				floorColumns[1].push_back(a);
 				continue;
 			}
-			// from は整数（柱が立つ床）。半整数の to（屋根面で止まる）はその階までに数える。
+			// from は整数（柱が立つ階）。to は届く階（半端は屋根面や上の段で止まる柱で、
+			// その階までに数える。spanFloors）。
 			for (int floor = static_cast<int>(std::lround(from)); floor < to; ++floor)
 				floorColumns[floor].push_back(a);
 		}
@@ -1783,11 +1816,11 @@ namespace HomeskzIfcImport::parse
 		{
 			if (!memberOnCutPlane(member, section))
 				continue;
-			// 伏図レベルのレイヤ（"2-横架材天端(FL-872)"）の材も、その階の標準の天端
-			// からの差を押さえる（印を除いた元のレイヤのレベル。parse/PlanLevel）。軒桁の
-			// 専用レイヤの材は同じ階の横架材レイヤのレベルで判定する（parse/Story の
-			// beamGroupLayer）。
-			const auto level = levels.find(core::stripPlanLevelTag(beamGroupLayer(member.layer)));
+			// 伏図レベルのレイヤ（"2-1-横架材"）の材も、その階の標準の天端からの差を
+			// 押さえる（段数を ±0 へ読み替えた標準のレイヤのレベル。parse/Story の
+			// stripLevelStep）。軒桁の専用レイヤの材は同じ階の横架材レイヤのレベルで判定する
+			// （parse/Story の beamGroupLayer）。
+			const auto level = levels.find(stripLevelStep(beamGroupLayer(member.layer)));
 			if (level == levels.end() || (level->second.type != core::kLevelBeamTop &&
 										  level->second.type != core::kLevelEaves))
 				continue;

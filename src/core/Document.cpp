@@ -48,7 +48,9 @@ namespace HomeskzIfcImport::core
 		bool isValidStory(const StoryCommand& story)
 		{
 			return !story.name.empty() && !story.suffix.empty() &&
-				   std::ranges::all_of(story.levels, isValidLevel);
+				   std::ranges::all_of(story.levels, isValidLevel) &&
+				   std::ranges::none_of(story.storyLayers,
+										[](const std::string& layer) { return layer.empty(); });
 		}
 
 		// 構成層（スラブ・壁）1 枚が妥当か。名前とクラス名が非空で、層厚が 0 以上
@@ -965,7 +967,7 @@ namespace HomeskzIfcImport::core
 		// desiredStoryLayerOrder の doc コメント参照）。
 		bool isBackgroundLevel(const std::string& rawType)
 		{
-			// 伏図レベルの印（"FL(FL-872)"）は取り除いて元の種別で判定する（planLevelTag）。
+			// 伏図レベルの印（"FL(-1)"）は取り除いて元の種別で判定する（planLevelTag）。
 			const std::string type = stripPlanLevelTag(rawType);
 			return type == kLevelFL || type == kLevelNojiita;
 		}
@@ -976,7 +978,10 @@ namespace HomeskzIfcImport::core
 		// （desiredStoryLayerOrder の doc コメント）。
 		bool isForegroundLevel(const std::string& type)
 		{
-			return stripPlanLevelTag(type) == kLevelShearWall;
+			// 耐力壁のレベルは span レイヤ（"1±0_2±0-耐力壁"）の名前そのものを種別にする
+			// （parse/Story）ので、接尾辞で見分ける。
+			return stripPlanLevelTag(type) == kLevelShearWall ||
+				   type.ends_with(std::string("-") + kLevelShearWall);
 		}
 	} // namespace
 
@@ -1088,9 +1093,55 @@ namespace HomeskzIfcImport::core
 		return std::string(planLevelDatumName(top)) + signedMillimetreText(heightMm - datumMm);
 	}
 
-	std::string planLevelTag(long long heightMm, long long datumMm, bool top)
+	std::string planLevelStepText(double step)
 	{
-		return "(" + planLevelHeightText(heightMm, datumMm, top) + ")";
+		// 段数は 0.5 刻み（伏図レベルの通し番号の差）。整数は小数点なし・半端は ".5"。
+		const double magnitude = std::abs(step);
+		const auto whole = static_cast<long long>(std::floor(magnitude + 0.25));
+		const bool half = magnitude - static_cast<double>(whole) > 0.25;
+		if (whole == 0 && !half)
+			return kPlanLevelZero + std::string("0");
+		const std::string number = std::to_string(whole) + (half ? ".5" : "");
+		return (step > 0.0 ? kPlanLevelPlus : kPlanLevelMinus) + number;
+	}
+
+	bool parsePlanLevelStepText(const std::string& text, double& outStep)
+	{
+		if (text == kPlanLevelZero + std::string("0"))
+		{
+			outStep = 0.0;
+			return true;
+		}
+		double sign = 0.0;
+		std::string rest;
+		if (text.starts_with(kPlanLevelPlus))
+			sign = 1.0;
+		else if (text.starts_with(kPlanLevelMinus))
+			sign = -1.0;
+		else
+			return false;
+		rest = text.substr(1);
+		// 数字の並び（＋任意の ".5"）だけを受け付ける（"+1e3" や "+ 1" を段数と読まない）。
+		bool half = false;
+		if (rest.ends_with(".5"))
+		{
+			half = true;
+			rest.resize(rest.size() - 2);
+		}
+		if (rest.empty() || rest.size() > 6 ||
+			!std::ranges::all_of(rest, [](char c) { return c >= '0' && c <= '9'; }))
+			return false;
+		const double magnitude = static_cast<double>(std::stoll(rest)) + (half ? 0.5 : 0.0);
+		// "-0" / "+0" は "±0" と書く（同じ段に 2 つの綴りを作らない）。
+		if (magnitude == 0.0)
+			return false;
+		outStep = sign * magnitude;
+		return true;
+	}
+
+	std::string planLevelTag(int step)
+	{
+		return "(" + planLevelStepText(step) + ")";
 	}
 
 	std::string stripPlanLevelTag(const std::string& name)
@@ -1100,22 +1151,12 @@ namespace HomeskzIfcImport::core
 		const std::size_t open = name.rfind('(');
 		if (open == std::string::npos)
 			return name;
-		// 中身が「FL か軒高＋符号」で始まるものだけを印とみなす（"柱(通し)" のような
-		// 利用者の括弧を剥がさない）。
-		const std::string inner = name.substr(open + 1);
-		for (const bool top : {false, true})
-		{
-			const std::string datum = planLevelDatumName(top);
-			if (!inner.starts_with(datum))
-				continue;
-			const std::string rest = inner.substr(datum.size());
-			for (const char* sign : {kPlanLevelPlus, kPlanLevelMinus, kPlanLevelZero})
-			{
-				if (rest.starts_with(sign))
-					return name.substr(0, open);
-			}
-		}
-		return name;
+		// 中身が段数の表記のものだけを印とみなす（"柱(通し)" のような利用者の括弧を
+		// 剥がさない）。
+		double step = 0.0;
+		if (!parsePlanLevelStepText(name.substr(open + 1, name.size() - open - 2), step))
+			return name;
+		return name.substr(0, open);
 	}
 
 	std::vector<std::string> desiredStoryLayerOrder(const std::vector<StoryCommand>& stories,
@@ -1134,6 +1175,8 @@ namespace HomeskzIfcImport::core
 		std::vector<std::string> background;
 		for (const StoryCommand& command : std::views::reverse(stories))
 		{
+			// レベルを持たないレイヤ（柱の span レイヤ）はその階のレベルより上段。
+			order.insert(order.end(), command.storyLayers.begin(), command.storyLayers.end());
 			for (const LevelCommand& level : command.levels)
 			{
 				if (isForegroundLevel(level.type))

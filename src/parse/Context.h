@@ -150,7 +150,7 @@ namespace HomeskzIfcImport::parse
 		const std::vector<core::SymbolCommand>& anchorBolts();
 
 		// 耐力壁の命令（parse/ShearWall の buildShearWallCommands）。2 者がこの 1 回の解析
-		// 結果を共有する: Document の shearWalls と、ストーリ（その階に "n-耐力壁" レベルを
+		// 結果を共有する: Document の shearWalls と、ストーリ（その階に "1±0_2±0-耐力壁" レベルを
 		// 作るか）。全 IfcMember / IfcWall の押し出しソリッドを解決する重い解析なので、
 		// 要素ごとに再構築すると同じ走査が 2 回走る。柱芯へ端を寄せるので columns（上記）
 		// を入力に取る。

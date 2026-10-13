@@ -90,7 +90,7 @@ namespace
 			direction == SectionDirection::X ? Vec2{cut, 10000.0} : Vec2{10000.0, cut};
 		section.viewport.drawingNumber = "X1";
 		section.viewport.drawingTitle = "X1通り";
-		section.viewport.layers = {"1-横架材天端"};
+		section.viewport.layers = {"1±0-横架材"};
 		return section;
 	}
 } // namespace
@@ -131,15 +131,15 @@ TEST(PlanTagsSitOnTheMemberEdge)
 {
 	const std::vector<MemberCommand> members = {
 		// 表示レイヤに乗る東西材（上辺の中央にタグ）。
-		makeMember("1-横架材天端", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}, 120.0, 3000.0, 3000.0),
+		makeMember("1±0-横架材", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}, 120.0, 3000.0, 3000.0),
 		// 表示レイヤに乗る南北材（左辺の中央にタグ）。
-		makeMember("1-横架材天端", Vec2{500.0, 0.0}, Vec2{500.0, 1820.0}, 105.0, 3000.0, 3000.0),
+		makeMember("1±0-横架材", Vec2{500.0, 0.0}, Vec2{500.0, 1820.0}, 105.0, 3000.0, 3000.0),
 		// 別レイヤ（この伏図には映らない）。
-		makeMember("2-横架材天端", Vec2{0.0, 0.0}, Vec2{910.0, 0.0}, 120.0, 6000.0, 6000.0),
+		makeMember("2±0-横架材", Vec2{0.0, 0.0}, Vec2{910.0, 0.0}, 120.0, 6000.0, 6000.0),
 	};
 
 	const std::vector<TagCommand> tags =
-		buildPlanTagCommands(members, makeViewport({"1-横架材天端", "共通"}));
+		buildPlanTagCommands(members, makeViewport({"1±0-横架材", "共通"}));
 	CHECK(tags.size() == 2);
 	if (tags.size() < 2)
 		return;
@@ -165,11 +165,11 @@ TEST(SectionTagsOnlyCoverMembersOnTheCutPlane)
 {
 	const std::vector<MemberCommand> members = {
 		// 切断面（X = 1000）に乗る南北材。断面には立面として写る。
-		makeMember("1-横架材天端", Vec2{1000.0, 0.0}, Vec2{1000.0, 3640.0}, 120.0, 3000.0, 3000.0),
+		makeMember("1±0-横架材", Vec2{1000.0, 0.0}, Vec2{1000.0, 3640.0}, 120.0, 3000.0, 3000.0),
 		// 同じ通りだが東西に走る材（切断面に直交して交わるだけ）。
-		makeMember("1-横架材天端", Vec2{0.0, 910.0}, Vec2{2000.0, 910.0}, 120.0, 3000.0, 3000.0),
+		makeMember("1±0-横架材", Vec2{0.0, 910.0}, Vec2{2000.0, 910.0}, 120.0, 3000.0, 3000.0),
 		// 別の通り（X = 2000）の南北材。
-		makeMember("1-横架材天端", Vec2{2000.0, 0.0}, Vec2{2000.0, 3640.0}, 120.0, 3000.0, 3000.0),
+		makeMember("1±0-横架材", Vec2{2000.0, 0.0}, Vec2{2000.0, 3640.0}, 120.0, 3000.0, 3000.0),
 		// 切断面に乗る傾斜材（登り梁）。角度が天端線の勾配になる。
 		makeMember("2-登り梁", Vec2{1000.0, 0.0}, Vec2{1000.0, 1000.0}, 120.0, 6000.0, 7000.0),
 	};
@@ -221,8 +221,8 @@ TEST(SectionTagsFollowTheViewDirection)
 	// Y通り（定 Y）は東西に走る材が切断面に乗る。注釈座標の x は材の X −横原点
 	// （この試験用の断面は終点が X=10000）。
 	const std::vector<MemberCommand> members = {
-		makeMember("1-横架材天端", Vec2{0.0, 500.0}, Vec2{3640.0, 500.0}, 120.0, 3000.0, 3000.0),
-		makeMember("1-横架材天端", Vec2{910.0, 0.0}, Vec2{910.0, 2000.0}, 120.0, 3000.0, 3000.0),
+		makeMember("1±0-横架材", Vec2{0.0, 500.0}, Vec2{3640.0, 500.0}, 120.0, 3000.0, 3000.0),
+		makeMember("1±0-横架材", Vec2{910.0, 0.0}, Vec2{910.0, 2000.0}, 120.0, 3000.0, 3000.0),
 	};
 
 	const std::vector<TagCommand> tags =
@@ -362,39 +362,39 @@ TEST(LevelNoteMeasuresFromTheStoreyFl)
 	// 標準の横架材の高さ（2FL−40）と違う水平な材だけ、階名付きで FL から。
 	CHECK_EQ(memberLevelNote(noteMember("2-横架材天端(FL-872)", 2699.0, 2699.0), stories, standard),
 			 std::string("(2FL -872)"));
-	CHECK(memberLevelNote(noteMember("2-横架材天端", 3531.0, 3531.0), stories, standard).empty());
-	CHECK_EQ(memberLevelNote(noteMember("2-横架材天端", 3571.0, 3571.0), stories, standard),
+	CHECK(memberLevelNote(noteMember("2±0-横架材", 3531.0, 3531.0), stories, standard).empty());
+	CHECK_EQ(memberLevelNote(noteMember("2±0-横架材", 3571.0, 3571.0), stories, standard),
 			 std::string("(2FL ±0)"));
-	CHECK_EQ(memberLevelNote(noteMember("1-横架材天端", 1612.4, 1612.4), stories, standard),
+	CHECK_EQ(memberLevelNote(noteMember("1±0-横架材", 1612.4, 1612.4), stories, standard),
 			 std::string("(1FL +1,000)"));
 	// 標準は推定した値（横架材天端）ではなく実在する高さ。推定した値ちょうどの材でも、標準の
 	// 高さと違えば添える。
-	CHECK_EQ(memberLevelNote(noteMember("1-横架材天端", 572.0, 572.0), stories, {612, 3531, 6374}),
+	CHECK_EQ(memberLevelNote(noteMember("1±0-横架材", 572.0, 572.0), stories, {612, 3531, 6374}),
 			 std::string("(1FL -40)"));
 	// 標準を渡さない階は推定した値で比べる。
-	CHECK(memberLevelNote(noteMember("2-横架材天端", 3531.0, 3531.0), stories, {}).empty());
+	CHECK(memberLevelNote(noteMember("2±0-横架材", 3531.0, 3531.0), stories, {}).empty());
 	// 最上階の標準は軒高（RFL そのもの）。母屋は軒高より上なので必ず添える。最上階は
 	// "RFL" ではなく "軒高" と書く（RFL は図面で使わない）。
-	CHECK(memberLevelNote(noteMember("R-軒高", 6374.0, 6374.0), stories, standard).empty());
+	CHECK(memberLevelNote(noteMember("R±0-横架材", 6374.0, 6374.0), stories, standard).empty());
 	CHECK_EQ(memberLevelNote(noteMember("R-母屋", 6738.0, 6738.0), stories, standard),
 			 std::string("(軒高 +364)"));
 	// 傾斜材は低い端〜高い端（向きに依らない）。
 	CHECK_EQ(memberLevelNote(noteMember("2-登り梁", 3531.0, 2699.0), stories, standard),
 			 std::string("(2FL -872~-40)"));
 	// 隅木・谷木は添えない。階を特定できない材も添えない。
-	MemberCommand hip = noteMember("2-横架材天端", 3283.0, 4524.0);
+	MemberCommand hip = noteMember("2±0-横架材", 3283.0, 4524.0);
 	hip.hipOrValley = true;
 	CHECK(memberLevelNote(hip, stories, standard).empty());
 	CHECK(memberLevelNote(noteMember("共通", 0.0, 0.0), stories, standard).empty());
-	CHECK(memberLevelNote(noteMember("3-横架材天端", 100.0, 100.0), stories, standard).empty());
+	CHECK(memberLevelNote(noteMember("3±0-横架材", 100.0, 100.0), stories, standard).empty());
 	// 二重引用符を含む階名は番号で呼ぶ（注記はタグの式に "…" で囲んで埋め込むので、
 	// 引用符が混ざると式全体が評価されなくなる）。名前が無い階も番号で呼ぶ。
 	std::vector<StoryInfo> quoted = stories;
 	quoted[1].name = "2\"FL";
-	CHECK_EQ(memberLevelNote(noteMember("2-横架材天端", 2699.0, 2699.0), quoted, standard),
+	CHECK_EQ(memberLevelNote(noteMember("2±0-横架材", 2699.0, 2699.0), quoted, standard),
 			 std::string("(2FL -872)"));
 	quoted[1].name.clear();
-	CHECK_EQ(memberLevelNote(noteMember("2-横架材天端", 2699.0, 2699.0), quoted, standard),
+	CHECK_EQ(memberLevelNote(noteMember("2±0-横架材", 2699.0, 2699.0), quoted, standard),
 			 std::string("(2FL -872)"));
 }
 
@@ -416,26 +416,19 @@ TEST(LevelNoteCarriesTheLinkedDatum)
 	CHECK_EQ(sloped.datum, std::string("2FL"));
 	// 注記を添えない材は基準も持たない。
 	const auto none =
-		memberLevelNoteParts(noteMember("2-横架材天端", 3531.0, 3531.0), stories, standard);
+		memberLevelNoteParts(noteMember("2±0-横架材", 3531.0, 3531.0), stories, standard);
 	CHECK(none.text.empty());
 	CHECK(none.datum.empty());
-	// 登り梁の span レイヤ（"{from}to{to}-登り梁"）は接頭辞で階を特定できないので、from の伏図
-	// レベルが属する階から求める（伏図レベル: 1 階 1・2 階 2〜3・屋根 4）。伏図レベルを渡さ
-	// なければ階を特定できず添えない。
-	const std::vector<parse::PlanLevel> levels = parse::buildPlanLevels(
-		stories, {{572}, {2699, 3531}, {6374}}, HomeskzIfcImport::core::ImportOptions{});
-	const auto spanned = memberLevelNoteParts(noteMember("2to3.5-登り梁", 3531.0, 2699.0), stories,
-											  standard, levels);
+	// 登り梁の span レイヤ（"2-1_2+0.5-登り梁"）は from の符号の階（頭の接頭辞）から求める。
+	const auto spanned =
+		memberLevelNoteParts(noteMember("2-1_2+0.5-登り梁", 3531.0, 2699.0), stories, standard);
 	CHECK_EQ(spanned.text, std::string("(2FL -872~-40)"));
 	CHECK_EQ(spanned.datum, std::string("2FL"));
-	CHECK(memberLevelNoteParts(noteMember("2to3.5-登り梁", 3531.0, 2699.0), stories, standard)
-			  .text.empty());
 	// 引用符を含む階名は番号で呼ぶ（基準名も同じ）。
 	std::vector<StoryInfo> quoted = stories;
 	quoted[1].name = "2\"FL";
-	CHECK_EQ(
-		memberLevelNoteParts(noteMember("2-横架材天端", 2699.0, 2699.0), quoted, standard).datum,
-		std::string("2FL"));
+	CHECK_EQ(memberLevelNoteParts(noteMember("2±0-横架材", 2699.0, 2699.0), quoted, standard).datum,
+			 std::string("2FL"));
 }
 
 TEST(FixtureTagsCarryLevelNotes)
@@ -453,13 +446,13 @@ TEST(FixtureTagsCarryLevelNotes)
 				const MemberCommand& member = document.members[tag.memberIndex];
 				if (member.hipOrValley)
 					CHECK(tag.note.empty());
-				if (member.layer == "2-横架材天端(FL-872)")
+				if (member.layer == "2-1-横架材")
 				{
 					CHECK_EQ(tag.note, std::string("(2FL -872)"));
 					CHECK_EQ(tag.noteDatum, std::string("2FL"));
 					skipNote = true;
 				}
-				if (member.layer == "2-横架材天端" && member.elevation == member.endElevation &&
+				if (member.layer == "2±0-横架材" && member.elevation == member.endElevation &&
 					std::llround(member.elevation) == 3531)
 					CHECK(tag.note.empty());
 			}

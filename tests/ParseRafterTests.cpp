@@ -68,7 +68,7 @@ namespace
 	MemberCommand girderMember(const Vec2& start, const Vec2& end, double width)
 	{
 		MemberCommand member;
-		member.layer = "R-軒高";
+		member.layer = "R±0-横架材";
 		member.memberId = "girder";
 		member.drawClass = CLASS_TARUKI; // 桁幅の判定はクラスを参照しない
 		member.start = start;

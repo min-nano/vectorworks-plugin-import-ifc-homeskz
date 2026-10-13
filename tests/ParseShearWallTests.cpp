@@ -110,7 +110,7 @@ namespace
 							 "#30=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#29),#1);\n";
 
 	// 合わせ込みの試験用の 1 階（Elevation 600・横架材天端 −174 ＝レイヤ平面 426）と
-	// 最上階。1 階の耐力壁レイヤは "1-耐力壁"。
+	// 最上階。1 階の耐力壁レイヤは 1 階の標準に立ち最上階へ届く "1±0_R±0-耐力壁"。
 	std::vector<StoryInfo> fitStories()
 	{
 		return {StoryInfo{1, 600.0, -174.0, false, "1FL"}, StoryInfo{2, 3500.0, 0.0, true, "RFL"}};
@@ -120,7 +120,7 @@ namespace
 	ShearWallCommand fitWall()
 	{
 		ShearWallCommand wall;
-		wall.layer = "1-耐力壁";
+		wall.layer = "1±0_R±0-耐力壁";
 		wall.drawClass = "筋かい";
 		wall.start = core::Vec2{0.0, 0.0};
 		wall.end = core::Vec2{1820.0, 0.0};
@@ -138,10 +138,10 @@ namespace
 	std::vector<core::ColumnCommand> fitColumns()
 	{
 		std::vector<core::ColumnCommand> columns(2);
-		columns[0].layer = "1to2-柱";
+		columns[0].layer = "1±0_2±0-柱";
 		columns[0].position = core::Vec2{0.0, 0.0};
 		columns[0].width = 105.0;
-		columns[1].layer = "1to2-柱";
+		columns[1].layer = "1±0_2±0-柱";
 		columns[1].position = core::Vec2{1820.0, 0.0};
 		columns[1].width = 105.0;
 		return columns;
@@ -279,8 +279,9 @@ TEST(shear_wall_brace_command_from_synthetic_model)
 	CHECK(wall.kind == ShearWallKind::Brace);
 	CHECK(wall.braceStyle == ShearWallBraceStyle::Single);
 	CHECK(wall.braceRisesToEnd);
-	// ストーリが 1 つだけなら最上階＝屋根なので "R-耐力壁"。
-	CHECK_EQ(wall.layer, std::string("R-耐力壁"));
+	// ストーリが 1 つだけなら最上階＝屋根で、上に伏図レベルが無いので上端は母屋の
+	// レベル（"R+1"）。
+	CHECK_EQ(wall.layer, std::string("R±0_R+1-耐力壁"));
 	// 柱が 1 本も無いモデルなので、端は要素自身の広がり・探索先レイヤは空。
 	CHECK(wall.targetLayers.empty());
 	CHECK(near(wall.start.x, -36.0, 1e-6) && near(wall.start.y, 0.0, 1e-6));
@@ -308,14 +309,14 @@ TEST(shear_wall_ignores_columns_outside_span_layers)
 	columns[0].layer = "柱"; // span でない（始端から 64mm）
 	columns[0].position = core::Vec2{-100.0, 0.0};
 	columns[0].width = 105.0;
-	columns[1].layer = "1to2-柱"; // 1 階を通る（終端から 64mm）
+	columns[1].layer = "1±0_2±0-柱"; // 1 階を通る（終端から 64mm）
 	columns[1].position = core::Vec2{1900.0, 0.0};
 	columns[1].width = 105.0;
 
 	const std::vector<ShearWallCommand> walls = buildShearWallCommands(context, columns);
 	CHECK_EQ(walls.size(), std::size_t{1});
 	const ShearWallCommand& wall = walls.front();
-	CHECK_EQ(wall.targetLayers, std::string("1to2-柱"));
+	CHECK_EQ(wall.targetLayers, std::string("1±0_2±0-柱"));
 	CHECK(near(wall.start.x, -36.0, 1e-6)); // 要素自身の端のまま
 	CHECK(near(wall.end.x, 1900.0, 1e-6));	// span の柱の芯へ寄る
 }
@@ -409,10 +410,10 @@ TEST(shear_wall_without_solid_is_skipped)
 TEST(shear_wall_layer_predicate)
 {
 	std::vector<ShearWallCommand> walls(1);
-	walls.front().layer = "1-耐力壁";
-	CHECK(anyShearWallOnLayer(walls, "1-耐力壁"));
-	CHECK(!anyShearWallOnLayer(walls, "2-耐力壁"));
-	CHECK(!anyShearWallOnLayer({}, "1-耐力壁"));
+	walls.front().layer = "1±0-耐力壁";
+	CHECK(anyShearWallOnLayer(walls, "1±0-耐力壁"));
+	CHECK(!anyShearWallOnLayer(walls, "2±0-耐力壁"));
+	CHECK(!anyShearWallOnLayer({}, "1±0-耐力壁"));
 }
 
 // --- 実フィクスチャ ---------------------------------------------------------
@@ -433,11 +434,15 @@ TEST(shear_wall_fixture_count_and_layers)
 	for (const ShearWallCommand& wall : walls)
 	{
 		CHECK(endsWith(wall.layer, "耐力壁"));
+		// 柱と同じく立つレベルと上の横架材のレベルの span レイヤ（ご要望）。
+		std::string from;
+		std::string to;
+		CHECK(parse::parseSpanLayer(wall.layer, "耐力壁", from, to));
 		CHECK(!wall.drawClass.empty());
 		CHECK(wall.thickness > 0.0);
 		CHECK(wall.clearSpan > 0.0);
 		CHECK(wall.topHeight > wall.bottomHeight);
-		if (wall.layer == "1-耐力壁")
+		if (from == "1±0")
 			++first;
 		if (wall.kind == ShearWallKind::Brace)
 		{
@@ -530,12 +535,12 @@ TEST(shear_wall_fixture_target_layers_name_real_span_layers)
 TEST(shear_wall_fixture_target_layers_include_through_columns)
 {
 	// 柱を探すレイヤは**その階を通る** span 柱レイヤすべて。2 階の壁端の通し柱は 1 階を
-	// base とするレイヤ（"1to3-柱"）に載るので、base だけで絞ると検出できない（実機で
+	// base とするレイヤ（"1±0_3±0-柱"）に載るので、base だけで絞ると検出できない（実機で
 	// 耐力壁 PIO が壁端の通し柱を認識しなかった不具合）。逆に 2 階の床で止まる管柱
-	// （"1to2-柱"）は 2 階の壁の端には立たないので挙げない。
+	// （"1±0_2±0-柱"）は 2 階の壁の端には立たないので挙げない。
 	//
 	// 「その階」は耐力壁が立つ**伏図レベル**（parse/PlanLevel）。span の番号も伏図レベルの
-	// 通し番号なので、壁のレイヤ（"2-耐力壁" / "2-耐力壁(FL-872)"）からその通し番号を引く
+	// 通し番号なので、壁のレイヤ（"2±0-耐力壁" / "2-1-耐力壁"）からその通し番号を引く
 	// （どの階も高さが 1 つなら階の番号と同じ）。
 	std::size_t throughEnds = 0;
 	for (const auto& name : allFixtures())
@@ -544,18 +549,22 @@ TEST(shear_wall_fixture_target_layers_include_through_columns)
 		bool ok = false;
 		parse::Context context(fixture(name, ok));
 		CHECK(ok);
-		std::map<std::string, double> ordinalOfLayer;
+		// 伏図レベルの符号（"2-1"）→ 通し番号。壁のレイヤの from の符号から引く。
+		std::map<std::string, double> ordinalOfLabel;
 		for (const parse::PlanLevel& planLevel : context.planLevels())
-			ordinalOfLayer[parse::planLevelLayer(planLevel, context.stories()[planLevel.story],
-												 parse::kLevelShearWall)] = planLevel.ordinal;
+			ordinalOfLabel[parse::planLevelLabel(planLevel, context.stories()[planLevel.story])] =
+				planLevel.ordinal;
 		for (const ShearWallCommand& wall : document.shearWalls)
 		{
-			// 最上階（"R-…"）には床の上に立つ柱が無いので確認しない。
-			if (wall.layer.starts_with("R-"))
+			// 最上階（"R…"）には床の上に立つ柱が無いので確認しない。
+			if (parse::layerStoryPrefix(wall.layer) == "R")
 				continue;
-			const auto found = ordinalOfLayer.find(wall.layer);
-			CHECK(found != ordinalOfLayer.end());
-			if (found == ordinalOfLayer.end())
+			std::string fromLabel;
+			std::string toLabel;
+			CHECK(parse::parseSpanLayer(wall.layer, "耐力壁", fromLabel, toLabel));
+			const auto found = ordinalOfLabel.find(fromLabel);
+			CHECK(found != ordinalOfLabel.end());
+			if (found == ordinalOfLabel.end())
 				continue;
 			const double level = found->second;
 			const std::string targets = ";" + wall.targetLayers + ";";
@@ -563,7 +572,7 @@ TEST(shear_wall_fixture_target_layers_include_through_columns)
 			{
 				double from = 0.0;
 				double to = 0.0;
-				if (!parse::parseSpanLayer(column.layer, from, to))
+				if (!parse::parseSpanOrdinals(context.planLevels(), column.layer, "柱", from, to))
 					continue;
 				const bool covers = from <= level && to > level;
 				const bool listed = targets.find(";" + column.layer + ";") != std::string::npos;
@@ -614,44 +623,50 @@ TEST(shear_wall_all_fixtures_produce_valid_commands)
 
 TEST(shear_wall_stories_carry_the_shear_wall_level)
 {
-	// 耐力壁の命令がある階にだけ "n-耐力壁" レベルができる（空レイヤを作らない）。
+	// 耐力壁の命令がある階にだけ耐力壁の span レイヤ（"1±0_2±0-耐力壁"）のレベルができる
+	// （空レイヤを作らない）。種別はレイヤ名そのもの。
 	const Document& document = fixtureDocument("サンプル1 (住木邸新築工事).ifc");
 	for (const core::StoryCommand& story : document.stories)
 	{
-		const bool hasLevel =
-			std::ranges::any_of(story.levels, [](const core::LevelCommand& level)
-								{ return level.type == std::string(core::kLevelShearWall); });
-		const bool hasCommand = std::ranges::any_of(
-			document.shearWalls,
-			[&story](const ShearWallCommand& wall) {
-				return endsWith(wall.layer, "耐力壁") && wall.layer.starts_with(story.suffix + "-");
-			});
+		const bool hasLevel = std::ranges::any_of(
+			story.levels, [](const core::LevelCommand& level)
+			{ return endsWith(level.type, "-耐力壁") && level.type == level.layer; });
+		const bool hasCommand =
+			std::ranges::any_of(document.shearWalls,
+								[&story](const ShearWallCommand& wall) {
+									return endsWith(wall.layer, "耐力壁") &&
+										   parse::layerStoryPrefix(wall.layer) == story.suffix;
+								});
 		CHECK_EQ(hasLevel, hasCommand);
 	}
 }
 
 TEST(shear_wall_floor_plan_shows_its_own_storey)
 {
-	// 伏図には**その階自身**の耐力壁が載る（1 階床＝土台伏図 → "1-耐力壁"、
-	// 2 階床伏図 → "2-耐力壁"）。「n 階の耐力壁」は n 階の伏図で読む、という図面の
+	// 伏図には**その階自身**の耐力壁が載る（1 階床＝土台伏図 → "1±0_…-耐力壁"、
+	// 2 階床伏図 → "2±0_…-耐力壁"）。「n 階の耐力壁」は n 階の伏図で読む、という図面の
 	// 呼び方に合わせた規約（parse/Sheet の M19 のコメント）。
 	const Document& document = fixtureDocument("サンプル1 (住木邸新築工事).ifc");
 	std::size_t checked = 0;
+	const auto hasWallFrom = [](const std::vector<std::string>& layers, const std::string& from)
+	{
+		return std::ranges::any_of(
+			layers, [&from](const std::string& layer)
+			{ return layer.starts_with(from + "_") && endsWith(layer, "-耐力壁"); });
+	};
 	for (const core::SheetCommand& sheet : document.sheets)
 	{
-		const auto* const expected = sheet.title == "1階床伏図"	  ? "1-耐力壁"
-									 : sheet.title == "2階床伏図" ? "2-耐力壁"
+		const auto* const expected = sheet.title == "1階床伏図"	  ? "1±0"
+									 : sheet.title == "2階床伏図" ? "2±0"
 																  : nullptr;
 		if (expected == nullptr)
 			continue;
 		++checked;
-		CHECK(std::ranges::find(sheet.viewport.layers, std::string(expected)) !=
-			  sheet.viewport.layers.end());
+		CHECK(hasWallFrom(sheet.viewport.layers, expected));
 		// 他の階の耐力壁は載せない（下の階のものを載せていたときは、上の階の横架材に
 		// 必ず隠れていた）。
-		const auto* const other = sheet.title == "1階床伏図" ? "2-耐力壁" : "1-耐力壁";
-		CHECK(std::ranges::find(sheet.viewport.layers, std::string(other)) ==
-			  sheet.viewport.layers.end());
+		const auto* const other = sheet.title == "1階床伏図" ? "2±0" : "1±0";
+		CHECK(!hasWallFrom(sheet.viewport.layers, other));
 	}
 	CHECK_EQ(checked, static_cast<std::size_t>(2));
 }
@@ -790,7 +805,7 @@ TEST(shear_wall_fit_leaves_other_layers_alone)
 {
 	// 配置先レイヤがどの階の耐力壁レイヤでもない命令は変更しない。
 	ShearWallCommand wall = fitWall();
-	wall.layer = "9-耐力壁";
+	wall.layer = "9±0_10±0-耐力壁";
 	std::vector<ShearWallCommand> walls{wall};
 	const std::vector<core::MemberCommand> members{
 		fitBeam({-500.0, 0.0}, {2500.0, 0.0}, 3420.0, 3420.0, 240.0)};
@@ -834,7 +849,8 @@ TEST(shear_wall_fit_sample1_heights)
 	std::size_t found = 0;
 	for (const ShearWallCommand& wall : document.shearWalls)
 	{
-		if (wall.layer != "1-耐力壁" || !core::samePoint(wall.start, core::Vec2{2275.0, 5460.0}) ||
+		if (!wall.layer.starts_with("1±0_") ||
+			!core::samePoint(wall.start, core::Vec2{2275.0, 5460.0}) ||
 			!core::samePoint(wall.end, core::Vec2{3640.0, 5460.0}))
 			continue;
 		++found;

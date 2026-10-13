@@ -24,6 +24,7 @@
 #include "core/Progress.h"
 
 #include <cstddef>
+#include <string>
 
 namespace HomeskzIfcImport::draw
 {
@@ -35,13 +36,19 @@ namespace HomeskzIfcImport::draw
 	// progress には 1 件描画するごとに 1 ステップ報告し、**ループの先頭で中止要求を確認して
 	// 抜ける**（進捗ダイアログの「キャンセル」。フェーズの見出しと配分は draw/ExecuteDocument が
 	// 決める）。描画済みの分は図面に残る。
-	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress);
+	//
+	// レベルを持たずに階だけに結ぶレイヤ（StoryCommand::storyLayers。柱の span レイヤ）は、
+	// 仮のレベル種別を与えて AssociateLayerWithStory で結び、種別を外して作る（SDK
+	// リファレンス Findings「Layers and Stories」）。結べなかったレイヤは従来のレベル付きの
+	// レイヤで作り直し、その枚数を outNote へ書く（無ければ空）。
+	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress,
+							std::string* outNote = nullptr);
 
 	// デザインレイヤのスタック順を希望順（core::desiredStoryLayerOrder）へ並べ替える。
 	// 移動できたレイヤ数を返す。
 	//
 	// 【なぜ要るか】伏図ビューポートは**ドキュメントのレイヤ重ね順で描画される**ので、
-	// 床（"n-FL"）・野地板が柱・梁より前面にあると覆い隠してしまう。希望順は
+	// 床（"n±0-FL"）・野地板が柱・梁より前面にあると覆い隠してしまう。希望順は
 	// 「共通（通り芯）を最前面 → 伏図記号・耐力壁 → 最上階→最下階 → 床・野地板は最背面」
 	// で、計算そのものは SDK 非依存の core::desiredStoryLayerOrder が持つ（無 SDK テスト済み）。
 	//

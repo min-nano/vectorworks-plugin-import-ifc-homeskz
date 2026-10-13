@@ -207,7 +207,7 @@ namespace HomeskzIfcImport::draw
 			if (!AdvanceProgress(progress))
 				break;
 
-			// 配置先レイヤ（"n-横架材天端" / "R-軒高" / "n-母屋" / "n-登り梁"）が無い命令は
+			// 配置先レイヤ（"n±0-横架材"（最上階も "R±0-横架材"） / "n-母屋" / "n-登り梁"）が無い命令は
 			// スキップする（規約は ActivateExistingLayer）。
 			if (ActivateExistingLayer(member.layer) == nil)
 				continue;

@@ -105,7 +105,7 @@ namespace HomeskzIfcImport::parse
 
 		// M19 耐力壁: 筋かい（IfcMember "筋かい…"）・面材（IfcWall "面材…"）を線分 PIO の命令へ
 		// 変換する（parse/ShearWall）。両端を柱芯へ寄せるので columns の後に置く。**ストーリ
-		// より前**なのは、ストーリが「その階に耐力壁レベル（"n-耐力壁" レイヤ）を作るか」を
+		// より前**なのは、ストーリが「その階に耐力壁レベル（"1±0_2±0-耐力壁" レイヤ）を作るか」を
 		// この命令の配置先レイヤで決めるため（母屋・登り梁と同じ判定）。コンテキストが 1 回
 		// だけ解析して両者へ配る（parse/Context.h の shearWalls）。
 		//
@@ -197,7 +197,8 @@ namespace HomeskzIfcImport::parse
 		// M12 断面記号・伏図記号。柱の命令だけから決まる（IFC は参照しない）ので columns の
 		// 後ならどこでもよいが、**伏図より前**に置く必要がある——伏図は伏図記号レイヤを
 		// 表示レイヤに載せるため、そのレイヤ名を決める側が先に確定していないといけない。
-		document.columnMarks = buildColumnMarkCommands(document.columns, options);
+		document.columnMarks =
+			buildColumnMarkCommands(document.columns, context.planLevels(), options);
 		progress.step();
 
 		// M13 シート（伏図）: 基礎伏図・各階の柱梁伏図・母屋伏図。**どの伏図に何を映すかは
@@ -223,8 +224,7 @@ namespace HomeskzIfcImport::parse
 		// sections が確定した後**でなければ置き場所が決まらない——したがって軸組図の後に置く
 		// （parse/Tag）。
 		attachTagCommands(document, context.stories(),
-						  standardBeamHeights(context.stories(), context.planLevels()),
-						  context.planLevels());
+						  standardBeamHeights(context.stories(), context.planLevels()));
 		progress.step();
 
 		// M28 図面枠（タイトルブロック）: 設定で選ばれたスタイル名をそのまま命令セットへ

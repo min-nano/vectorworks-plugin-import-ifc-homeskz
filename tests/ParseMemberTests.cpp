@@ -246,7 +246,7 @@ namespace
 		double height = 180.0;
 		double elevation = 473.0;
 		double endElevation = 473.0;
-		std::string layer = "1-横架材天端";
+		std::string layer = "1±0-横架材";
 		std::string memberId = "m";
 	};
 
@@ -266,7 +266,7 @@ namespace
 	core::ColumnCommand column(const ColumnSpec& spec)
 	{
 		core::ColumnCommand command;
-		command.layer = "1to2-柱";
+		command.layer = "1±0_2±0-柱";
 		command.memberId = "105×105 - 管柱";
 		command.drawClass = "04構造-02木造-03柱-02管柱";
 		command.structuralUse = core::kStructuralUseColumn;
@@ -760,7 +760,7 @@ TEST(build_member_commands_one_per_beam)
 	const std::vector<MemberCommand> members = buildMemberCommands(step.build());
 	CHECK_EQ(members.size(), std::size_t(2));
 	for (const MemberCommand& m : members)
-		CHECK_EQ(m.layer, "1-横架材天端");
+		CHECK_EQ(m.layer, "1±0-横架材");
 }
 
 TEST(top_story_member_uses_eaves_layer_and_top_centre_elevation)
@@ -775,7 +775,7 @@ TEST(top_story_member_uses_eaves_layer_and_top_centre_elevation)
 	CHECK_EQ(members.size(), std::size_t(1));
 	if (members.size() == 1)
 	{
-		CHECK_EQ(members[0].layer, "R-軒高");
+		CHECK_EQ(members[0].layer, "R±0-横架材");
 		// 天端 = ストーリ高さ + ローカル Z(0) + 背/2（断面中心 → 天端補正）
 		CHECK(near(members[0].elevation, 5973.0 + 90.0));
 		CHECK(near(members[0].endElevation, 5973.0 + 90.0));
@@ -849,9 +849,9 @@ TEST(assigns_layer_per_story)
 	const std::vector<MemberCommand> members = buildMemberCommands(step.build());
 	CHECK_EQ(members.size(), std::size_t(2));
 	const bool hasFirst = std::ranges::any_of(members, [](const MemberCommand& m)
-											  { return m.layer == "1-横架材天端"; });
+											  { return m.layer == "1±0-横架材"; });
 	const bool hasSecond = std::ranges::any_of(members, [](const MemberCommand& m)
-											   { return m.layer == "2-横架材天端"; });
+											   { return m.layer == "2±0-横架材"; });
 	CHECK(hasFirst);
 	CHECK(hasSecond);
 }
@@ -1227,12 +1227,10 @@ TEST(build_trims_interfering_beam_end)
 
 TEST(t_joint_end_snaps_to_winner_centreline)
 {
-	const MemberCommand primary =
-		member(MemberSpec{Vec2{0.0, -1000.0}, Vec2{0.0, 1000.0}, 120.0, 180.0, 473.0, 473.0,
-						  "1-横架材天端", "primary"});
-	const MemberCommand butting =
-		member(MemberSpec{Vec2{600.0, 500.0}, Vec2{0.0, 500.0}, 105.0, 180.0, 473.0, 473.0,
-						  "1-横架材天端", "butting"});
+	const MemberCommand primary = member(MemberSpec{Vec2{0.0, -1000.0}, Vec2{0.0, 1000.0}, 120.0,
+													180.0, 473.0, 473.0, "1±0-横架材", "primary"});
+	const MemberCommand butting = member(MemberSpec{Vec2{600.0, 500.0}, Vec2{0.0, 500.0}, 105.0,
+													180.0, 473.0, 473.0, "1±0-横架材", "butting"});
 
 	const std::vector<MemberCommand> result = resolveMemberInterferences({primary, butting});
 	CHECK_EQ(result.size(), std::size_t(2));
@@ -1267,11 +1265,11 @@ TEST(interference_result_is_order_independent)
 TEST(trims_both_ends_between_two_primaries)
 {
 	const MemberCommand left = member(MemberSpec{Vec2{-300.0, -1000.0}, Vec2{-300.0, 1000.0}, 120.0,
-												 180.0, 473.0, 473.0, "1-横架材天端", "L"});
+												 180.0, 473.0, 473.0, "1±0-横架材", "L"});
 	const MemberCommand right = member(MemberSpec{Vec2{300.0, -1000.0}, Vec2{300.0, 1000.0}, 120.0,
-												  180.0, 473.0, 473.0, "1-横架材天端", "R"});
+												  180.0, 473.0, 473.0, "1±0-横架材", "R"});
 	const MemberCommand mid = member(MemberSpec{Vec2{-300.0, 0.0}, Vec2{300.0, 0.0}, 105.0, 180.0,
-												473.0, 473.0, "1-横架材天端", "mid"});
+												473.0, 473.0, "1±0-横架材", "mid"});
 
 	const std::vector<MemberCommand> result = resolveMemberInterferences({left, right, mid});
 	const MemberCommand* found = findById(result, "mid");
@@ -1581,7 +1579,7 @@ TEST(different_layers_not_trimmed)
 {
 	MemberSpec primarySpec{Vec2{0.0, -1000.0}, Vec2{0.0, 1000.0}};
 	MemberSpec buttingSpec{Vec2{600.0, 500.0}, Vec2{0.0, 500.0}};
-	buttingSpec.layer = "2-横架材天端";
+	buttingSpec.layer = "2±0-横架材";
 	const std::vector<MemberCommand> result =
 		resolveMemberInterferences({member(primarySpec), member(buttingSpec)});
 	CHECK(near(result[1].end.x, 0.0));
@@ -1805,8 +1803,8 @@ TEST(noboribari_level_added_to_its_story)
 		{
 			CHECK_EQ(types[0], "FL");
 			CHECK_EQ(types[2], "横架材天端");
-			double from = 0.0;
-			double to = 0.0;
+			std::string from;
+			std::string to;
 			CHECK(parse::parseSpanLayer(types[1], "登り梁", from, to));
 			CHECK_EQ(stories[0].levels[1].layer, types[1]);
 		}

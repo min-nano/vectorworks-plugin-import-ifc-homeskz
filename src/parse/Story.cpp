@@ -78,81 +78,125 @@ namespace HomeskzIfcImport::parse
 			return std::ranges::any_of(members, [&layer](const core::MemberCommand& member)
 									   { return member.layer == layer; });
 		}
+	} // namespace
 
-		// 文字列全体が実数として読めれば outValue に入れて true（"1" / "2.5"）。末尾に
-		// 余りがある・空文字・数値でないなら false（parseSpanLayer の関門）。
-		bool parseNumber(const std::string& text, double& outValue)
+	namespace
+	{
+		// 伏図レベルのレイヤ名（"2-1-横架材"）を符号の接頭辞・段数の表記・名前へ分ける。
+		// 段数の表記のすぐ後ろが "-" で、その後ろに名前が続くものだけを受け付ける（span
+		// レイヤ "2-1_3±0-柱" や伏図レベルで分けないレイヤ "2-母屋" は false）。
+		bool splitLevelLayer(const std::string& layer, std::string& outPrefix, std::string& outStep,
+							 std::string& outName)
 		{
-			if (text.empty())
+			const std::string prefix = layerStoryPrefix(layer);
+			if (prefix.empty())
 				return false;
-			try
-			{
-				std::size_t consumed = 0;
-				const double value = std::stod(text, &consumed);
-				if (consumed != text.size())
-					return false;
-				outValue = value;
-				return true;
-			}
-			catch (...)
-			{
-				// std::stod は数値でない／範囲外で例外を投げる。span レイヤでないだけなので
-				// 呼び出し側へは false で返す（例外はここに閉じ込める。CLAUDE.md「例外は
-				// parse 内部の局所処理に留める」）。
+			// 段数の表記は名前との区切りの "-" の手前まで。表記自身が "-" で始まりうるので、
+			// 2 文字目以降から区切りを探す。
+			const std::size_t stepBegin = prefix.size();
+			const std::size_t separator = layer.find('-', stepBegin + 1);
+			if (separator == std::string::npos || separator + 1 >= layer.size())
 				return false;
-			}
+			const std::string step = layer.substr(stepBegin, separator - stepBegin);
+			double value = 0.0;
+			if (!core::parsePlanLevelStepText(step, value))
+				return false;
+			outPrefix = prefix;
+			outStep = step;
+			outName = layer.substr(separator + 1);
+			return true;
 		}
 	} // namespace
 
-	// span レベルは resolveColumnToLevel が返す整数／半整数だけなので、一般の実数書式
-	// （std::to_string の 6 桁固定小数）は使わない。
-	std::string formatSpanLevel(double value)
+	std::string levelLabel(const std::string& prefix, double step)
 	{
-		const double rounded = std::floor(value);
-		const auto whole = static_cast<long long>(rounded);
-		if (value == rounded)
-			return std::to_string(whole);
-		return std::to_string(whole) + ".5";
+		return prefix + core::planLevelStepText(step);
 	}
 
-	std::string spanLayerName(double fromLevel, double toLevel)
+	std::string levelLabel(std::size_t index, bool isTop, double step)
 	{
-		return spanLayerName(fromLevel, toLevel, kColumnLayerSuffix);
+		return levelLabel(storyLayerPrefix(index, isTop), step);
 	}
 
-	std::string spanLayerName(double fromLevel, double toLevel, const std::string& suffix)
+	bool parseLevelLabel(const std::string& text, std::string& outPrefix, double& outStep)
 	{
-		return formatSpanLevel(fromLevel) + "to" + formatSpanLevel(toLevel) + "-" + suffix;
+		const std::string prefix = layerStoryPrefix(text);
+		if (prefix.empty())
+			return false;
+		double step = 0.0;
+		if (!core::parsePlanLevelStepText(text.substr(prefix.size()), step))
+			return false;
+		outPrefix = prefix;
+		outStep = step;
+		return true;
 	}
 
-	bool parseSpanLayer(const std::string& name, double& outFrom, double& outTo)
+	std::string levelLayerSuffix(const std::string& levelType)
+	{
+		std::string type = core::stripPlanLevelTag(levelType);
+		if (type == kLevelBeamTop || type == kLevelEaves)
+			return kBeamLayerSuffix;
+		return type;
+	}
+
+	std::string levelLayerName(std::size_t index, bool isTop, double step,
+							   const std::string& levelType)
+	{
+		return levelLabel(index, isTop, step) + "-" + levelLayerSuffix(levelType);
+	}
+
+	std::string spanLayerName(const std::string& fromLabel, const std::string& toLabel,
+							  const std::string& suffix)
+	{
+		return fromLabel + "_" + toLabel + "-" + suffix;
+	}
+
+	bool parseSpanLayer(const std::string& name, std::string& outFrom, std::string& outTo)
 	{
 		return parseSpanLayer(name, kColumnLayerSuffix, outFrom, outTo);
 	}
 
-	bool parseSpanLayer(const std::string& name, const std::string& layerSuffix, double& outFrom,
-						double& outTo)
+	bool parseSpanLayer(const std::string& name, const std::string& layerSuffix,
+						std::string& outFrom, std::string& outTo)
 	{
 		const std::string suffix = "-" + layerSuffix;
-		if (name.size() <= suffix.size() ||
-			name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+		if (name.size() <= suffix.size() || !name.ends_with(suffix))
 			return false;
-		const std::string core = name.substr(0, name.size() - suffix.size());
-		const std::size_t separator = core.find("to");
-		if (separator == std::string::npos)
+		const std::string body = name.substr(0, name.size() - suffix.size());
+		const std::size_t separator = body.find('_');
+		// "_" が 2 つ以上あるレイヤ名（"1±0_2±0_3±0-柱"）は分解できないので span でないとする。
+		if (separator == std::string::npos || body.find('_', separator + 1) != std::string::npos)
 			return false;
-		// "to" が 2 つ以上あるレイヤ名（"1to2to3-柱"）は分解できないので span でないとする。
-		if (core.find("to", separator + 2) != std::string::npos)
-			return false;
-
-		double from = 0.0;
-		double to = 0.0;
-		if (!parseNumber(core.substr(0, separator), from) ||
-			!parseNumber(core.substr(separator + 2), to))
+		const std::string from = body.substr(0, separator);
+		const std::string to = body.substr(separator + 1);
+		std::string prefix;
+		double step = 0.0;
+		if (!parseLevelLabel(from, prefix, step) || !parseLevelLabel(to, prefix, step))
 			return false;
 		outFrom = from;
 		outTo = to;
 		return true;
+	}
+
+	std::string layerStoryPrefix(const std::string& layer)
+	{
+		// 最上階は "R"（storyLayerPrefix）。それ以外は数字の並び。
+		if (layer.starts_with(kRoofSuffix))
+			return kRoofSuffix;
+		std::size_t digits = 0;
+		while (digits < layer.size() && layer[digits] >= '0' && layer[digits] <= '9')
+			++digits;
+		return layer.substr(0, digits);
+	}
+
+	std::string stripLevelStep(const std::string& layer)
+	{
+		std::string prefix;
+		std::string step;
+		std::string name;
+		if (!splitLevelLayer(layer, prefix, step, name))
+			return layer;
+		return levelLabel(prefix, 0.0) + "-" + name;
 	}
 
 	std::string storyLayerPrefix(std::size_t index, bool isTop)
@@ -171,14 +215,13 @@ namespace HomeskzIfcImport::parse
 
 	std::string beamGroupLayer(const std::string& layer)
 	{
-		// 伏図レベルの印（"(FL-872)"）は残す（同じ伏図レベルの横架材レイヤへ読み替える）。
-		const std::string base = core::stripPlanLevelTag(layer);
-		const std::string suffix = std::string("-") + kLevelNokigeta;
-		if (!base.ends_with(suffix))
+		// 段数（"-1"）は残す（同じ伏図レベルの横架材レイヤへ読み替える）。
+		std::string prefix;
+		std::string step;
+		std::string name;
+		if (!splitLevelLayer(layer, prefix, step, name) || name != kLevelNokigeta)
 			return layer;
-		const std::string prefix = base.substr(0, base.size() - suffix.size());
-		return prefix + "-" + (prefix == kRoofSuffix ? kLevelEaves : kLevelBeamTop) +
-			   layer.substr(base.size());
+		return prefix + step + "-" + kBeamLayerSuffix;
 	}
 
 	bool getLocalPlacementZ(const Model& model, const Entity& element, double& outZ)
@@ -311,19 +354,19 @@ namespace HomeskzIfcImport::parse
 
 	namespace
 	{
-		// 階 story に属する登り梁の span レイヤ（"{from}to{to}-登り梁"。from の伏図レベルが
-		// その階のもの）。(from, to) 昇順・重複なし。
+		// 階の接頭辞が prefix の登り梁の span レイヤ（"2-1_2+1-登り梁"。from の符号がその
+		// 階のもの）。(from, to) の通し番号の昇順・重複なし。
 		std::vector<std::string>
 		noboribariSpanLayers(const std::vector<core::MemberCommand>& members,
-							 const std::vector<PlanLevel>& levels, std::size_t story)
+							 const std::vector<PlanLevel>& levels, const std::string& prefix)
 		{
 			std::vector<std::pair<std::pair<double, double>, std::string>> spans;
 			for (const core::MemberCommand& member : members)
 			{
 				double from = 0.0;
 				double to = 0.0;
-				if (!parseSpanLayer(member.layer, kLevelNoboribari, from, to) ||
-					storyOfOrdinal(levels, from) != story)
+				if (layerStoryPrefix(member.layer) != prefix ||
+					!parseSpanOrdinals(levels, member.layer, kLevelNoboribari, from, to))
 					continue;
 				spans.push_back({{from, to}, member.layer});
 			}
@@ -345,7 +388,7 @@ namespace HomeskzIfcImport::parse
 		// 記「レベルを足す条件」）。コンテキストが 1 度だけ解析するので、垂木・登り梁の補正と
 		// 同じ結果を共有する。
 		const std::vector<core::MemberCommand>& members = context.members();
-		// span 柱レイヤ（"{from}to{to}-柱"）は実在する柱から決まる。コンテキストが柱命令を
+		// span 柱レイヤ（"2-1_3±0-柱"）は実在する柱から決まる。コンテキストが柱命令を
 		// 1 度だけ組み立てるので、ここと Document の columns は同じ結果を共有する
 		// （parse/Context.h の columns）。
 		const std::map<int, std::vector<std::string>> columnLayers =
@@ -367,8 +410,12 @@ namespace HomeskzIfcImport::parse
 			cmd.elevation = info.elevation;
 
 			// レイヤ名は要素側の配置先探索と同じ規約で組み立てる（parse/Story storyLayerName）。
+			// 伏図レベルで分けるレイヤ（横架材・軒桁・床・耐力壁）は標準の伏図レベルの符号
+			// "±0" を付ける（levelLayerName。"2±0-横架材"）。
 			const auto layerFor = [i, &info](const char* levelType)
 			{ return storyLayerName(i, info.isTop, levelType); };
+			const auto standardLayerFor = [i, &info](const char* levelType)
+			{ return levelLayerName(i, info.isTop, 0.0, levelType); };
 
 			// 基本レベル（M3）。要素ごとのレベルはこの後で追加する（ヘッダ冒頭「作るレベル」）。
 			// levels の並び順は希望するデザインレイヤのスタック順（上→下）。
@@ -376,22 +423,22 @@ namespace HomeskzIfcImport::parse
 			{
 				// 最上階（屋根）は軒高（オフセット 0）。ロフト（小屋裏収納）の床があるときだ
 				// け、その標準床レベル FL（軒高 + kLoftFloorLevelOffset）を追加する（床の無い屋根
-				// に空の FL レイヤを作らない）。この FL がロフト床の配置先レイヤ "R-FL"
+				// に空の FL レイヤを作らない）。この FL がロフト床の配置先レイヤ "R±0-FL"
 				// になる。ロフトの床は床版（IfcSlab）でも床梁から合成した領域でもよい
 				// （parse/Floor の storyHasLoftFloor）。
 				if (storyHasLoftFloor(context, info.id))
 				{
 					cmd.levels.push_back(
-						LevelCommand{kLevelFL, kLoftFloorLevelOffset, layerFor(kLevelFL)});
+						LevelCommand{kLevelFL, kLoftFloorLevelOffset, standardLayerFor(kLevelFL)});
 				}
-				cmd.levels.push_back(LevelCommand{kLevelEaves, 0.0, layerFor(kLevelEaves)});
+				cmd.levels.push_back(LevelCommand{kLevelEaves, 0.0, standardLayerFor(kLevelEaves)});
 			}
 			else
 			{
 				// 一般階は FL（0）＋横架材天端（負オフセット）。FL を上段に積む。
-				cmd.levels.push_back(LevelCommand{kLevelFL, 0.0, layerFor(kLevelFL)});
+				cmd.levels.push_back(LevelCommand{kLevelFL, 0.0, standardLayerFor(kLevelFL)});
 				cmd.levels.push_back(
-					LevelCommand{kLevelBeamTop, info.beamOffset, layerFor(kLevelBeamTop)});
+					LevelCommand{kLevelBeamTop, info.beamOffset, standardLayerFor(kLevelBeamTop)});
 			}
 
 			// 小屋組のレベル（登り梁・母屋・垂木・野地板）は、横架材天端（最上階は軒高）
@@ -402,13 +449,15 @@ namespace HomeskzIfcImport::parse
 			// 絶対値を要素自身が持つため、このオフセットには依存しない）。
 			const double upperOffset = info.isTop ? 0.0 : info.beamOffset;
 			const auto beamTopIndex = static_cast<std::ptrdiff_t>(cmd.levels.size()) - 1;
-			const auto insertAboveBeamTop =
-				[&cmd, &i, &info, beamTopIndex](const std::string& levelType, double offset)
-			{
-				cmd.levels.insert(
-					cmd.levels.begin() + beamTopIndex,
-					LevelCommand{levelType, offset, storyLayerName(i, info.isTop, levelType)});
+			const auto insertLevelAboveBeamTop = [&cmd, beamTopIndex](const std::string& levelType,
+																	  double offset,
+																	  const std::string& layer) {
+				cmd.levels.insert(cmd.levels.begin() + beamTopIndex,
+								  LevelCommand{levelType, offset, layer});
 			};
+			const auto insertAboveBeamTop =
+				[&insertLevelAboveBeamTop, &layerFor](const char* levelType, double offset)
+			{ insertLevelAboveBeamTop(levelType, offset, layerFor(levelType)); };
 			const std::vector<const PlanLevel*> storyLevels = storyPlanLevels(planLevels, i);
 
 			// M7 横架材: 母屋・棟木（"n-母屋"）と登り梁（"n-登り梁"）は、梁（小屋梁・軒桁）と
@@ -424,54 +473,48 @@ namespace HomeskzIfcImport::parse
 			// 命令の配置先で判定すれば、**レイヤは命令があるときだけ・命令があれば必ず**でき、
 			// 両方の齟齬が構造的に起きない。
 			// 軒桁: 母屋伏図に軒桁だけを薄く重ねるため、横架材天端（最上階は軒高）から分けた
-			// "n-軒桁" レイヤ（parse/PlanLevel）。高さは横架材天端と同じなので、そのすぐ上へ
+			// "n±0-軒桁" レイヤ（parse/PlanLevel）。高さは横架材天端と同じなので、そのすぐ上へ
 			// **最初に**挿す（耐力壁・小屋組より下）。条件は母屋・登り梁と同じく命令の配置先で、
-			// 登り梁と同じく伏図レベルごとに確かめる（その高さのぶんずらす）。
-			if (storyLevels.empty())
-			{
-				if (anyMemberOnLayer(members, layerFor(kLevelNokigeta)))
-					insertAboveBeamTop(kLevelNokigeta, upperOffset);
-			}
+			// 登り梁と同じく伏図レベルごとに確かめる（その高さのぶんずらす）。伏図レベルは
+			// どの階にも 1 つ以上ある（parse/PlanLevel の collectBeamHeights）。
 			for (const PlanLevel* level : storyLevels)
 			{
-				if (anyMemberOnLayer(members, planLevelLayer(*level, info, kLevelNokigeta)))
-					insertAboveBeamTop(planLevelType(*level, kLevelNokigeta),
-									   upperOffset + planLevelShift(*level, info));
+				const std::string layer = planLevelLayer(*level, info, kLevelNokigeta);
+				if (anyMemberOnLayer(members, layer))
+					insertLevelAboveBeamTop(planLevelType(*level, kLevelNokigeta),
+											upperOffset + planLevelShift(*level, info), layer);
 			}
 
-			// M19 耐力壁: 筋かい・面材の PIO を載せる "n-耐力壁" レイヤ。**横架材天端の
-			// すぐ上**（小屋組より下）へ置く。挿入は「後から挿したものが 1 段上」なので、
+			// M19 耐力壁: 筋かい・面材の PIO を載せる span レイヤ（"1±0_2±0-耐力壁"）。
+			// **横架材天端のすぐ上**（小屋組より下）へ置く。挿入は「後から挿したものが 1 段上」なので、
 			// 小屋組（登り梁・母屋・垂木・野地板）より**先に**挿す。
 			//
 			// ［レベルを足す条件］母屋・登り梁と同じく**実際に組み立てた耐力壁命令の配置先
 			// レイヤ**で判定する（命令があるときだけ・命令があれば必ずレイヤができる）。
 			//
-			// 耐力壁は立つ天端の伏図レベルのレイヤへ置かれる（parse/ShearWall）ので、伏図
-			// レベルごとに確かめ、そのレベルの高さのぶんずらす（伏図レベルが無い階は従来の
-			// 1 つだけ）。
-			if (storyLevels.empty())
-			{
-				if (anyShearWallOnLayer(context.shearWalls(), layerFor(kLevelShearWall)))
-					insertAboveBeamTop(kLevelShearWall, upperOffset);
-			}
+			// 耐力壁は立つ天端の伏図レベルを from とする span レイヤへ置かれる
+			// （parse/ShearWall）ので、伏図レベルごとにその span レイヤのレベルを作り、その
+			// 伏図レベルの高さのぶんずらす（耐力壁の高さはレイヤ平面からの相対。
+			// core::ShearWallCommand）。種別はレイヤ名そのもの（同じ伏図レベルに to の違う
+			// span が並ぶので、種別を一意にするため。柱の span レベルと同じ）。
 			for (const PlanLevel* level : storyLevels)
 			{
-				if (anyShearWallOnLayer(context.shearWalls(),
-										planLevelLayer(*level, info, kLevelShearWall)))
-					insertAboveBeamTop(planLevelType(*level, kLevelShearWall),
-									   upperOffset + planLevelShift(*level, info));
+				for (const std::string& layer :
+					 shearWallLayersFrom(context.shearWalls(), planLevelLabel(*level, info)))
+					insertLevelAboveBeamTop(layer, upperOffset + planLevelShift(*level, info),
+											layer);
 			}
 
-			// 登り梁は柱と同じく、映す伏図の範囲の span レイヤ（"{from}to{to}-登り梁"）へ
+			// 登り梁は柱と同じく、映す伏図の範囲の span レイヤ（"2-1_2+1-登り梁"）へ
 			// 分かれている（parse/PlanLevel の noboribariSpan）。その階に属する span（from の
-			// 伏図レベルの階）ごとにレベルを作る。種別はレイヤ名そのもの（span ごとに一意。
+			// 符号の階）ごとにレベルを作る。種別はレイヤ名そのもの（span ごとに一意。
 			// 柱の span レベルと同じ）で、高さは登り梁レベルと同じ。伏図レベルを持たず
 			// 振り分けられなかった材は従来の "n-登り梁" に残る。母屋は分けない。
 			if (anyMemberOnLayer(members, layerFor(kLevelNoboribari)))
 				insertAboveBeamTop(kLevelNoboribari, upperOffset);
-			for (const std::string& layer : noboribariSpanLayers(members, planLevels, i))
-				cmd.levels.insert(cmd.levels.begin() + beamTopIndex,
-								  LevelCommand{layer, upperOffset, layer});
+			for (const std::string& layer :
+				 noboribariSpanLayers(members, planLevels, storyLayerPrefix(i, info.isTop)))
+				insertLevelAboveBeamTop(layer, upperOffset, layer);
 			if (anyMemberOnLayer(members, layerFor(kLevelMoya)))
 				insertAboveBeamTop(kLevelMoya, upperOffset);
 
@@ -492,18 +535,19 @@ namespace HomeskzIfcImport::parse
 
 			// 伏図レベルのレベル（横架材の高さごとの伏図。parse/PlanLevel）: 標準でない伏図
 			// レベルの横架材・床は、元のレベル（横架材天端／軒高・FL）をその高さのぶんずらした
-			// 別のレベルのレイヤ（"2-横架材天端(FL-872)" / "2-FL(FL-872)"）へ置かれる。
+			// 別のレベル（"横架材天端(-1)" / "FL(-1)"）のレイヤ（"2-1-横架材" / "2-1-FL"）へ
+			// 置かれる。
 			// **元のレベルの直下**へ積む（同じ種類のレイヤが並ぶので、重ね順の決まり
 			// ——床は背面へ・耐力壁は前面へ——は印を除いた種別で適用される。core の
 			// desiredStoryLayerOrder）。命令があるときだけ作る（空のレイヤを作らない）。
-			const auto insertBelow = [&cmd, &i, &info](const std::string& baseType,
-													   const std::string& levelType, double offset)
+			const auto insertBelow = [&cmd](const std::string& baseType,
+											const std::string& levelType, double offset,
+											const std::string& layer)
 			{
 				auto at = std::ranges::find(cmd.levels, baseType, &LevelCommand::type);
 				// 元のレベルが無い（屋根階にロフト床が無い）ときは先頭（＝最上段）へ。
 				at = at == cmd.levels.end() ? cmd.levels.begin() : at + 1;
-				cmd.levels.insert(
-					at, LevelCommand{levelType, offset, storyLayerName(i, info.isTop, levelType)});
+				cmd.levels.insert(at, LevelCommand{levelType, offset, layer});
 			};
 			const char* const beamType = beamTopLevelType(info.isTop);
 			const double floorOffset = info.isTop ? kLoftFloorLevelOffset : 0.0;
@@ -515,31 +559,30 @@ namespace HomeskzIfcImport::parse
 				if (level->standard)
 					continue;
 				const double shift = planLevelShift(*level, info);
-				if (anyMemberOnLayer(members, planLevelBeamLayer(*level, info)))
-					insertBelow(beamType, planLevelType(*level, beamType), upperOffset + shift);
+				if (const std::string beamLayer = planLevelBeamLayer(*level, info);
+					anyMemberOnLayer(members, beamLayer))
+					insertBelow(beamType, planLevelType(*level, beamType), upperOffset + shift,
+								beamLayer);
 				const std::string floorLayer = planLevelLayer(*level, info, kLevelFL);
 				if (std::ranges::any_of(floors, [&floorLayer](const core::FloorCommand& floor)
 										{ return floor.layer == floorLayer; }))
-					insertBelow(kLevelFL, planLevelType(*level, kLevelFL), floorOffset + shift);
+					insertBelow(kLevelFL, planLevelType(*level, kLevelFL), floorOffset + shift,
+								floorLayer);
 			}
 
-			// M8 柱: この階を base（from = i+1）とする span レイヤ（"{from}to{to}-柱"）
-			// のレベルを、levels の**先頭＝スタック最上段**（FL／軒高レイヤの直上）へ (from,
-			// to)昇順で積む。レベル種別はレイヤ名そのもの（span ごとに一意な文字列が要るため）。
-			// 高さは横架材天端（最上階は軒高）に揃えるが、柱の上下端は bottomBound /
-			// topBound が指すレベルで決まるのでこのオフセットには依存しない。
+			// M8 柱: この階を base（from の符号がこの階）とする span レイヤ（"2-1_3±0-柱"）を、
+			// **レベルを持たずに階だけに結ぶ**レイヤ（storyLayers）として (from, to) 昇順で
+			// 並べる（ご要望。M44）。柱の上下端は bottomBound / topBound が指す横架材天端の
+			// レベルで決まり、入れ物のレイヤから要るのは階だけ（上階を storyOffset で数える
+			// ため）なので、レイヤに専用のレベルは要らない（SDK リファレンス Findings
+			// 「Layers and Stories」の「レベルを持たないレイヤを階に結ぶ」）。スタック順は
+			// その階のレベルより上段（FL／軒高レイヤの直上。core::desiredStoryLayerOrder）。
 			//
 			// レイヤは**実在する柱から決まる**ので、母屋・登り梁と同じく「命令があるときだけ
 			// ・命令があれば必ず」できる（空レイヤを作らない）。
-			const auto spanLayers = columnLayers.find(static_cast<int>(i));
-			if (spanLayers != columnLayers.end())
-			{
-				std::vector<LevelCommand> spanLevels;
-				spanLevels.reserve(spanLayers->second.size());
-				for (const std::string& layer : spanLayers->second)
-					spanLevels.push_back(LevelCommand{layer, upperOffset, layer});
-				cmd.levels.insert(cmd.levels.begin(), spanLevels.begin(), spanLevels.end());
-			}
+			if (const auto spanLayers = columnLayers.find(static_cast<int>(i));
+				spanLayers != columnLayers.end())
+				cmd.storyLayers = spanLayers->second;
 			commands.push_back(std::move(cmd));
 		}
 		return commands;

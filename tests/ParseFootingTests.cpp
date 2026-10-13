@@ -150,7 +150,7 @@ namespace
 	core::ColumnCommand column(double x, double y)
 	{
 		core::ColumnCommand cmd;
-		cmd.layer = "1to2-柱";
+		cmd.layer = "1±0_2±0-柱";
 		cmd.memberId = "105×105 - 管柱";
 		cmd.drawClass = HomeskzIfcImport::parse::CLASS_KUDABASHIRA;
 		cmd.structuralUse = "4";

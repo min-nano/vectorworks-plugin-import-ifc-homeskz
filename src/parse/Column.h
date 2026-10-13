@@ -14,16 +14,18 @@
 //	    種別の違いは**構造用途**（structuralUse）で表し、管柱・通し柱＝柱（"4"）、
 //	    小屋束＝小屋束（"5"）。小屋束を柱用途で描画すると VW が柱の高さモデルを適用して上端高さが
 //	    崩れる。
-//	  * **span（またぐレベル区間）レイヤ**: 柱は階のレイヤではなく "{from}to{to}-柱" へ置く
-//	    （parse/Story の spanLayerName）。from は柱が立つ床レベル（1 始まり・GL=0）、to は
-//	    上端が届く床／屋根面レベル（resolveColumnToLevel）。管柱は次階の整数、屋根束
-//	    （小屋束・棟束）は屋根面で止まるので +0.5 の半整数、通し柱は複数階ぶん上。伏図が
-//	    切断レベルで表示レイヤを絞れるようにするための分け方で、下屋の小屋束（"2to2.5-柱"）が
-//	    上階の小屋伏図に表示されない。
-//	    **番号は伏図レベルの通し番号**（parse/PlanLevel）——伏図をまとめる単位で柱の
-//	    レイヤも区切る（ご要望）。from は柱が立つ天端の伏図レベル（spanFromOrdinal）、to は
-//	    上端が届く伏図レベル（spanToOrdinal。屋根束は到達階の最も高い伏図レベル +0.5）。
-//	    どの階も横架材の高さが 1 つなら通し番号＝階の番号なので、上の説明どおりになる。
+//	  * **span（またぐレベル区間）レイヤ**: 柱は階のレイヤではなく "{from}_{to}-柱" へ置く
+//	    （parse/Story の spanLayerName）。from は柱が立つ天端の伏図レベル（spanFromOrdinal）、
+//	    to は上端が届く伏図レベル（spanToOrdinal）で、どちらも**伏図レベルの符号**（階の
+//	    接頭辞＋その階の標準からの段数。parse/PlanLevel）で書く——"2-1_3±0-柱" は「2 階の
+//	    標準より 1 段下の天端に立ち、3 階の標準の天端まで届く柱」で、横架材のレイヤ
+//	    "2-1-横架材" / "3±0-横架材" と同じ符号になる（ご要望）。屋根束（小屋束・棟束）は
+//	    屋根面で止まって母屋を受けるので、届いた階の**母屋のレベル**（いちばん上の伏図
+//	    レベルの 1 段上 "R+1"。整数に揃える。ご要望。parse/PlanLevel の moyaOrdinal）。伏図が
+//	    切断レベルで表示レイヤを絞れるようにするための分け方で、下屋の小屋束
+//	    （"2±0_2+1-柱"）が上階の小屋伏図に表示されない。伏図をまとめる単位で柱の
+//	    レイヤも区切る（ご要望）。切断との比較は通し番号で行う（parse/PlanLevel の
+//	    parseSpanOrdinals）。
 //	  * **to レベルの境界は上階横架材の「下端」**（天端ではない）。通常の管柱は梁を下から
 //	    受ける高さ＝横架材の下端までしか来ないため、天端を境界にするとホームズ君のモデルで
 //	    天端付近まで伸びた管柱を通し柱と誤判定する。ただし**到達階の横架材天端（最上階は
@@ -210,27 +212,39 @@ namespace HomeskzIfcImport::parse
 								const std::vector<double>& beamBottoms,
 								const std::vector<double>& beamTops);
 
-	// column 命令から実在する span 柱レイヤを列挙した 1 件。
+	// column 命令から実在する span 柱レイヤを列挙した 1 件。from / to は通し番号
+	// （parse/PlanLevel の parseSpanOrdinals で符号から引き直したもの）、toLabel は to の符号
+	// （伏図記号レイヤの名前に使う。parse/ColumnMark）。
 	struct ColumnSpan
 	{
 		double from = 0.0;
 		double to = 0.0;
 		std::string layer;
+		std::string toLabel;
 	};
 
 	// column 命令から実在する span 柱レイヤを (from, to) 昇順で列挙する。重複は除外する。
-	// 伏図（M13）が切断レベルで表示レイヤを絞るのに使う。
-	std::vector<ColumnSpan> collectColumnSpans(const std::vector<core::ColumnCommand>& columns);
+	// 伏図（M13）が切断レベルで表示レイヤを絞るのに使う。levels はレイヤ名の符号を通し番号へ
+	// 引き直すのに使う。
+	std::vector<ColumnSpan> collectColumnSpans(const std::vector<core::ColumnCommand>& columns,
+											   const std::vector<PlanLevel>& levels);
+
+	// 同じく、接尾辞 suffix の span レイヤ（柱 "2-1_3±0-柱"・登り梁 "2-1_2+1-登り梁"）を
+	// レイヤ名の並びから (from, to) 昇順・重複なしで列挙する（柱と登り梁で同じ集め方を
+	// 共有する。parse/Sheet）。span レイヤでない名前は読み飛ばす。
+	std::vector<ColumnSpan> collectSpanLayers(const std::vector<std::string>& layers,
+											  const std::string& suffix,
+											  const std::vector<PlanLevel>& levels);
 
 	// span の from（柱が立つ伏図レベルの通し番号）。baseIndex の階の伏図レベルのうち、柱の
-	// 下端 bottomAbs にいちばん近い天端を含むもの。伏図レベルが無ければ階の番号
-	// （baseIndex + 1）。
+	// 下端 bottomAbs にいちばん近い天端を含むもの。伏図レベルが無ければ
+	// standardOrdinalWithoutLevels。
 	double spanFromOrdinal(const std::vector<PlanLevel>& levels, std::size_t baseIndex,
 						   double bottomAbs);
 
 	// span の to（上端が届く伏図レベルの通し番号）。storyToLevel は階の単位の to
 	// （resolveColumnToLevel）で、整数なら到達階の伏図レベルのうち上端 topAbs が届くもの
-	// （planLevelAbove）、半整数（屋根束）なら到達階の最も高い伏図レベル + 0.5。
+	// （planLevelAbove）、半整数（屋根束）なら到達階の母屋のレベル（moyaOrdinal）。
 	double spanToOrdinal(const std::vector<PlanLevel>& levels, double storyToLevel, double topAbs);
 
 	// span 柱レイヤを base ストーリ（from の伏図レベルが属する階。0 起点）ごとにまとめる。
@@ -243,7 +257,7 @@ namespace HomeskzIfcImport::parse
 	// STEP Model から柱の描画命令を組み立てる。
 	//
 	// FL ストーリ（parse/Story の collectStories）を Elevation 昇順に走査し、各階に含まれる
-	// IfcColumn を解析する。配置先は span レイヤ（"{from}to{to}-柱"）で、座標は通り芯と同じ
+	// IfcColumn を解析する。配置先は span レイヤ（"2-1_3±0-柱"）で、座標は通り芯と同じ
 	// グリッド中心オフセットで補正する。配置・断面を解決できない柱はスキップする（1 本の
 	// 欠損で全体を止めない。CLAUDE.md「エラーハンドリング」）。
 	//

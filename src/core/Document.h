@@ -36,7 +36,8 @@ namespace HomeskzIfcImport::core
 
 	// ストーリレベルの種別名。**命令セットの語彙なのでここが唯一の定義**で、
 	// LevelCommand::type / StoryBoundCommand::level に入る値と、デザインレイヤ名の接尾辞
-	// （"1-FL" の "FL"）がこれになる。parse/ 側（parse/Story.h・parse/Rafter.h・parse/Roof.h）は
+	// （"1±0-FL" の "FL"。横架材天端・軒高のレイヤだけは "横架材"。parse/Story の
+	// levelLayerSuffix）がこれになる。parse/ 側（parse/Story.h・parse/Rafter.h・parse/Roof.h）は
 	// 要素ごとの読みやすい名前でこれを再公開するだけで、文字列を自前で持たない。
 	//
 	// core が持つ理由: desiredStoryLayerOrder は「床（FL）・野地板のレイヤを背面へ回す」
@@ -52,7 +53,7 @@ namespace HomeskzIfcImport::core
 	// 専用レベル。母屋・棟木は "母屋"、登り梁は "登り梁"（parse/Member.h 参照）。
 	inline constexpr const char* kLevelMoya = "母屋";
 	inline constexpr const char* kLevelNoboribari = "登り梁";
-	// 軒桁の専用レベル（"n-軒桁"）。母屋伏図に軒桁だけを薄く重ねるために、横架材天端（最上階
+	// 軒桁の専用レベル（"n±0-軒桁"）。母屋伏図に軒桁だけを薄く重ねるために、横架材天端（最上階
 	// は軒高）のレイヤから分ける（ご要望。parse/PlanLevel の assignMemberPlanLevels）。高さは
 	// 横架材天端（軒高）と同じで、材の高さ基準は横架材天端（軒高）のまま。取り合い・継手などを
 	// 判定するときは、同じ階の横架材レイヤと同じ群として扱う（parse/Story の beamGroupLayer）。
@@ -68,31 +69,43 @@ namespace HomeskzIfcImport::core
 	inline constexpr const char* kLevelFoundationTop = "基礎天端";
 	inline constexpr const char* kLevelFloorPost = "床束";
 
-	// M19 耐力壁のレベル。筋かい・面材の PIO を載せる "n-耐力壁" レイヤの種別名で、レイヤ平面は
+	// M19 耐力壁のレベル。筋かい・面材の PIO を載せる "1±0_2±0-耐力壁"（立つレベル_上の横架材のレベル）レイヤの種別名で、レイヤ平面は
 	// **その階の横架材天端**（最上階は軒高）に合わせる（parse/Story）。耐力壁は土台天端から
 	// 梁下端までの内法に収まるので、この平面を基準にすれば命令が持つ高さ（bottomHeight /
 	// topHeight）がそのまま内法になる（ShearWallCommand 参照）。
 	inline constexpr const char* kLevelShearWall = "耐力壁";
 
-	// 伏図レベルの印（横架材の高さごとの伏図。docs/DEV-NOTES.md「横架材の高さごとに伏図を
-	// 作る」）。1 つの階に横架材の天端が複数あると（スキップフロア）、標準の天端（その階の
-	// 横架材天端・最上階は軒高）以外の高さの横架材・床・耐力壁は**別のレイヤ**へ置き、
-	// 伏図はレイヤでそれを切り分ける（ビューポートが映すものを絞れるのはレイヤとクラス
-	// だけ）。そのレイヤのレベル種別とレイヤ名には、元の種別の後ろにこの印を付ける
-	// （"横架材天端(FL-872)" / "2-横架材天端(FL-872)" / "R-軒高(軒高-832)"）。
+	// 伏図レベルの段数の表記（横架材の高さごとの伏図。docs/DEV-NOTES.md「横架材の高さごとに
+	// 伏図を作る」）。1 つの階に横架材の天端が複数あると（スキップフロア）、高さごとに伏図
+	// レベルを立てる。各伏図レベルは**その階の標準の伏図レベルから何段上か下か**で呼ぶ
+	// （標準 "±0"・1 段下 "-1"・1 段上 "+1"）。その階のいちばん上の伏図レベルの 1 段上は
+	// その階の母屋のレベル（屋根束の上端・母屋伏図。parse/PlanLevel の moyaOrdinal）。
+	// 表記は 0.5 刻みまで読み書きできる（"+0.5"）が、取り込みが作る符号は整数だけ
+	// （ご要望）。
 	//
-	// **高さは GL ではなくその階の FL（最上階は軒高）から測る**（ご要望。GL 基準では
-	// 図面の読み方と合わず分かりにくい）。FL も軒高もストーリの高さ（Elevation）その
-	// ものなので、基準は階の Elevation で、名前だけが一般階と最上階で違う。
+	// **高さの数値ではなく段数で呼ぶ**（ご要望）——レイヤ名やレベル種別に高さを書くと、
+	// 利用者がレベルの高さを変えたときに名前が食い違う。段数なら高さを変えても順序は
+	// 変わらないので名前が正しいまま残る。
 	//
-	// **印の書式はここが唯一**——付けるのは parse/PlanLevel、取り除いて元の種別へ戻すのは
-	// 重ね順（desiredStoryLayerOrder）・仕口（parse/Joint）・継手（parse/Splice）・寸法
-	// （parse/Dimension）で、core/ は parse/ を include できないのでここに置く（kLevelFL を
-	// core が持つのと同じ理由）。heightMm / datumMm は GL からの高さ（mm）、top は最上階か。
-	std::string planLevelTag(long long heightMm, long long datumMm, bool top);
+	// 階の接頭辞と組み合わせた符号（"2±0" / "2-1"）がレイヤ名の頭になり（parse/Story の
+	// levelLabel）、柱のレイヤ（"2-1_3±0-柱"）と横架材のレイヤ（"3±0-横架材"）が同じ
+	// 符号で同じレベルを指す。**表記の定義はここが唯一**——付けるのは parse/、レベル種別から
+	// 取り除いて元の種別へ戻すのは重ね順（desiredStoryLayerOrder）・寸法（parse/Dimension）で、
+	// core/ は parse/ を include できないのでここに置く（kLevelFL を core が持つのと同じ理由）。
+	std::string planLevelStepText(double step);
 
-	// 高さの表記（"FL-872" / "FL±0" / "軒高-832"）。印（planLevelTag）の中身で、伏図の
-	// タイトルと設定ダイアログの行もこれで高さを書く。
+	// 段数の表記（planLevelStepText）を読む。text 全体が表記どおり（"±0" / "+1" / "-0.5"。
+	// 整数か .5）なら outStep に入れて true。
+	bool parsePlanLevelStepText(const std::string& text, double& outStep);
+
+	// 標準でない伏図レベルのレベル種別に付ける印（"横架材天端(-1)" の "(-1)"）。中身は段数の
+	// 表記（planLevelStepText）。レベル種別は階ごとに 1 つずつなので、階の接頭辞は要らない。
+	std::string planLevelTag(int step);
+
+	// 高さの表記（"FL-872" / "FL±0" / "軒高-832"。高さは GL ではなくその階の FL（最上階は
+	// 軒高）から測る。ご要望）。伏図のタイトルと設定ダイアログの行がこれで高さを書く。
+	// heightMm / datumMm は GL からの高さ（mm）、top は最上階か。レイヤ名・レベル種別には
+	// 使わない（段数で呼ぶ。planLevelStepText）。
 	std::string planLevelHeightText(long long heightMm, long long datumMm, bool top);
 
 	// 基準からの差（mm）の表記。符号を必ず付け（0 は "±0"）、1,000 以上は 3 桁ごとに
@@ -100,8 +113,8 @@ namespace HomeskzIfcImport::core
 	// 横架材のデータタグに添える高さ（parse/Tag の memberLevelNote）が同じ書き方をする。
 	std::string signedMillimetreText(long long deltaMm);
 
-	// 末尾の伏図レベルの印を取り除いた名前（レベル種別・レイヤ名のどちらにも使える）。印が
-	// 無ければそのまま返す。
+	// 末尾の伏図レベルの印（planLevelTag）を取り除いたレベル種別。印が無ければそのまま返す。
+	// レイヤ名には使わない（レイヤ名の段数は頭の符号にある。parse/Story の stripLevelStep）。
 	std::string stripPlanLevelTag(const std::string& name);
 
 	// 構造用途（構造材ツールのポップアップのキー）。**命令セットの語彙なのでここが唯一の
@@ -149,7 +162,7 @@ namespace HomeskzIfcImport::core
 	//   type              … レベル種別（"FL" / "横架材天端" / "軒高"。CreateLayerLevelType
 	//                        へ登録し、GetLayerForStory でレイヤを取り直す鍵になる）
 	//   offset            … ストーリ原点（FL／軒高）からの相対高さ（mm。負値=下）
-	//   layer             … このレベルに紐づくデザインレイヤの意図した名前（"1-FL" 等）
+	//   layer             … このレベルに紐づくデザインレイヤの意図した名前（"1±0-FL" 等）
 	struct LevelCommand
 	{
 		std::string type;
@@ -168,12 +181,18 @@ namespace HomeskzIfcImport::core
 	//   levels                  … 生成するストーリレベルの列。並び順は**希望する
 	//                             デザインレイヤのスタック順（上→下）**を表し、draw/Story が
 	//                             その順にレイヤを並べ替える（レベルの高さには依存しない）。
+	//   storyLayers             … **レベルを持たずに階だけに結ぶ**デザインレイヤ名の列（柱の
+	//                             span レイヤ "1±0_2±0-柱"）。柱は端部を上下の横架材天端の
+	//                             レベルへバインドするので、レイヤに専用のレベルは要らない
+	//                             （ご要望。docs/DEV-NOTES.md M44）。レイヤの高さは階の高さ。
+	//                             スタック順は levels より上段（前面）で、並びはこの列の順。
 	struct StoryCommand
 	{
 		std::string name;
 		std::string suffix;
 		double elevation = 0.0;
 		std::vector<LevelCommand> levels;
+		std::vector<std::string> storyLayers;
 	};
 
 	// 高さ基準（ストーリレベルへのバインド）1 端分。床・構造材・柱・壁・スラブが共通で使う。
@@ -255,7 +274,7 @@ namespace HomeskzIfcImport::core
 	// 命令が持つ層がそのまま床の構成になる。
 	//
 	// フィールド:
-	//   layer                    … 配置先デザインレイヤ名（"1-FL" 等。既存のみ・無ければスキップ）
+	//   layer                    … 配置先デザインレイヤ名（"1±0-FL" 等。既存のみ・無ければスキップ）
 	//   drawClass                … クラス名（床板。予約語 class を機械置換）
 	//   boundary                 … 床の平面外形（mm・グリッド中心オフセット済み。閉じた
 	//                              ポリゴンの頂点列で、末尾に始点を重複させない）
@@ -440,8 +459,8 @@ namespace HomeskzIfcImport::core
 	// 傾斜を持たせると二重に適用される（draw/Member.cpp 冒頭）。
 	//
 	// フィールド:
-	//   layer                           … 配置先デザインレイヤ名（"1-横架材天端" / "R-軒高" /
-	//                                     "n-母屋" / "n-登り梁"）
+	//   layer                           … 配置先デザインレイヤ名（"1±0-横架材" / "2-1-横架材" /
+	//                                     "R±0-横架材" / "n-母屋" / "2-1_2+1-登り梁"）
 	//   memberId                        … 構造材 ID（"120×180 - 杉…"。材種が無ければ "120×180"）
 	//   drawClass                       … クラス名（土台／床梁／軒桁／母屋…。予約語 class を機械置換）
 	//   start                           … 天端中央線の始端（センタリング済みの平面座標）
@@ -508,11 +527,13 @@ namespace HomeskzIfcImport::core
 	// オブジェクトへ変換する（docs/DEV-NOTES.md M8）。管柱・通し柱・小屋束をこの命令で表し、
 	// 種別の違いは drawClass と structuralUse（構造用途）に出る。
 	//
-	// 【配置先レイヤは span（またぐレベル区間）】柱は階のレイヤではなく "{from}to{to}-柱"
-	// という**span 専用レイヤ**に置く（"1to2-柱" / "2to2.5-柱"）。from は柱が立つ床レベル
-	// （1 始まり）、to は上端が届く床／屋根面レベル（管柱＝次階の整数・屋根束＝屋根面で
-	// 止まる半整数・通し柱＝複数階ぶん上）。伏図が切断レベルで表示レイヤを絞れるようにする
-	// ための分け方で、下屋の小屋束が上階の小屋伏図に表示されない（parse/Column.h 参照）。
+	// 【配置先レイヤは span（またぐレベル区間）】柱は階のレイヤではなく "{from}_{to}-柱"
+	// という**span 専用レイヤ**に置く（"1±0_2±0-柱" / "2-1_R±0-柱" / "2±0_2+1-柱"）。
+	// from は柱が立つ伏図レベル、to は上端が届く伏図レベルの符号（階の接頭辞＋その階の
+	// 標準からの段数。管柱＝上の階・屋根束＝屋根面で止まって母屋のレベル "R+1"・通し柱＝複数階ぶん上）で、
+	// 横架材のレイヤ（"2-1-横架材"）と同じ符号になる。伏図が切断レベルで表示レイヤを絞れる
+	// ようにするための分け方で、下屋の小屋束が上階の小屋伏図に表示されない（parse/Column.h・
+	// parse/PlanLevel.h 参照）。
 	//
 	// 【高さの持ち方】elevation は**柱下端**の絶対 Z、height は**パス長**（下端 → 上端）で、
 	// 上端は elevation + height。上端は受ける横架材の天端に取るので（下記）、実際に描画される
@@ -527,7 +548,7 @@ namespace HomeskzIfcImport::core
 	// 入れる（＝**バウンドの差は常に柱高さ**になる）。
 	//
 	// フィールド:
-	//   layer                              … 配置先デザインレイヤ名（"1to2-柱" 等）
+	//   layer                              … 配置先デザインレイヤ名（"1±0_2±0-柱" 等）
 	//   memberId                           … 構造材 ID（"105×105 - 管柱 / 柱頭金物:(ろ)"）
 	//   drawClass                          … クラス名（通し柱／管柱／小屋束。予約語 class を機械置換）
 	//   structuralUse                      … 構造用途（柱="4" / 小屋束="5"）
@@ -977,12 +998,12 @@ namespace HomeskzIfcImport::core
 	// でも描画結果が消えないよう、解析時に IFC から測った内法（clearSpan）を予備として持たせる。
 	//
 	// フィールド:
-	//   layer                  … PIO を置くデザインレイヤ名（"1-耐力壁"。parse/ShearWall）
+	//   layer                  … PIO を置くデザインレイヤ名（"1±0_2±0-耐力壁"。parse/ShearWall）
 	//   drawClass              … PIO 本体の作図クラス（予約語 class を機械置換）
 	//   targetLayers           … 柱を探すデザインレイヤ名を ";" で連ねたもの
-	//                            （"1to2-柱;1to3-柱"）。**その階（伏図レベル）を通る span
+	//                            （"1±0_2±0-柱;1±0_3±0-柱"）。**その階（伏図レベル）を通る span
 	//                            柱レイヤすべて**を渡す——管柱と通し柱が別レイヤに分かれ、
-	//                            2 階の壁端の通し柱は 1 階を base とするレイヤ（"1to3-柱"）
+	//                            2 階の壁端の通し柱は 1 階を base とするレイヤ（"1±0_3±0-柱"）
 	//                            に載るため、base だけでは端の柱を取り逃がす
 	//                            （parse/ShearWall の spanCoversLevel）
 	//   start                  … 軸の始点＝柱芯（センタリング済みの平面座標）
@@ -1010,7 +1031,7 @@ namespace HomeskzIfcImport::core
 	// 1 本の直線で上辺を表せないときは、高い方（梁下端の高い側）で水平にそろえる（梁下に隙間を
 	// 空けない）。下端は 1 つなので、下の梁が段差なら天端の低い方（同じく隙間を空けない）。
 	//
-	// 【高さは「レイヤ平面からの差」で持つ】配置先の "n-耐力壁" レイヤは**その階の横架材天端**
+	// 【高さは「レイヤ平面からの差」で持つ】配置先の "1±0_2±0-耐力壁" レイヤは**その階の横架材天端**
 	// に載る（parse/Story）ので、土台天端から梁下端までの内法はそのままこの 2 つで表せる。
 	// シンボル置換系（SymbolCommand::zOffset）と同じ考え方で、描画側が絶対 Z を引き直す
 	// 必要がない形にしてある。
@@ -1191,7 +1212,7 @@ namespace HomeskzIfcImport::core
 	//   hiddenClasses                    … 非表示にするクラス名（**それ以外は表示**）。
 	//                                      図面に無いクラス名は描画側が読み飛ばす（作らない）
 	//   grayedLayers                     … グレー（薄く）で重ねるデザインレイヤ名。layers と
-	//                                      重ねない。母屋伏図に同じ階の軒桁（"n-軒桁"）を薄く
+	//                                      重ねない。母屋伏図に同じ階の軒桁（"n±0-軒桁"）を薄く
 	//                                      表示するのに使う（ご要望。parse/Sheet）。図の外形・
 	//                                      データタグ・寸法の対象には数えない（layers だけを
 	//                                      参照する）
@@ -1399,7 +1420,7 @@ namespace HomeskzIfcImport::core
 
 		// M7 横架材。IfcBeam / IfcMember を解析して得た MemberCommand の列（階＝Elevation
 		// 昇順・階内は要素の出現順で決定的。parse/Member が組み立て、登り梁は parse/Noboribari が
-		// 屋根面へスナップ補正した後の値）。配置先レイヤ（"n-横架材天端" / "R-軒高" /
+		// 屋根面へスナップ補正した後の値）。配置先レイヤ（"n±0-横架材"（最上階も "R±0-横架材"） /
 		// "n-母屋" / "n-登り梁"）は stories が作るので、描画は stories の後に処理する。
 		std::vector<MemberCommand> members;
 
@@ -1414,7 +1435,7 @@ namespace HomeskzIfcImport::core
 
 		// M8 柱。IfcColumn を解析して得た ColumnCommand の列（階＝Elevation 昇順・階内は
 		// 要素の出現順で決定的。parse/Column が組み立てる）。配置先の span レイヤ
-		// （"1to2-柱" 等）は stories が作るので、描画は stories の後に処理する。
+		// （"1±0_2±0-柱" 等）は stories が作るので、描画は stories の後に処理する。
 		std::vector<ColumnCommand> columns;
 
 		// M9 基礎の立上り。IfcFooting "基礎梁…" を解析して得た WallCommand の列
@@ -1447,7 +1468,7 @@ namespace HomeskzIfcImport::core
 		std::vector<SymbolCommand> floorPosts;
 
 		// M11 火打。Name が "火打…" の IfcBeam / IfcMember を "鋼製火打" へ置換する
-		// （parse/FireBrace）。配置先は横架材と同じレイヤ（"n-横架材天端" / "R-軒高"）。
+		// （parse/FireBrace）。配置先は横架材と同じレイヤ（"n±0-横架材"（最上階も "R±0-横架材"））。
 		std::vector<SymbolCommand> fireBraces;
 
 		// M11 仕口。受ける材（別の横架材・柱）のある横架材端部へ "仕口" を置く
@@ -1466,7 +1487,7 @@ namespace HomeskzIfcImport::core
 		std::vector<ColumnMarkCommand> columnMarks;
 
 		// M19 耐力壁。筋かい（IfcMember "筋かい…"）と面材（IfcWall "面材…"）を、両端を柱に
-		// 紐付けた線分 PIO 1 つずつで表す（parse/ShearWall）。配置先の "n-耐力壁" レイヤは
+		// 紐付けた線分 PIO 1 つずつで表す（parse/ShearWall）。配置先の "1±0_2±0-耐力壁" レイヤは
 		// stories が作り、柱を探す span 柱レイヤ（targetLayers）は columns から決まるので、
 		// その 2 つより後に組み立てる。
 		std::vector<ShearWallCommand> shearWalls;

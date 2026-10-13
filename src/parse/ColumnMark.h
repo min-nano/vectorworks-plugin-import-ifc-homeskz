@@ -49,16 +49,16 @@
 namespace HomeskzIfcImport::parse
 {
 	// 伏図記号を置く専用デザインレイヤの接尾辞。レイヤ名は "{to}-柱伏図記号" で、to は span
-	// の上側の数値。**同じ to の span（"1to2.5-柱" と "2to2.5-柱"）は同じレイヤに載る**——伏図
-	// は「切断位置の直下のレベル」を 1 枚だけ映すので、レベルでまとめておくとその
-	// 1 枚で足りる。
+	// の上側の符号（"3±0-柱伏図記号"）。**同じ to の span（"1±0_2+1-柱" と
+	// "2±0_2+1-柱"）は同じレイヤに載る**——伏図は「切断位置の直下のレベル」を 1 枚だけ
+	// 映すので、レベルでまとめておくとその 1 枚で足りる。
 	inline constexpr const char* kPlanMarkLayerSuffix = "柱伏図記号";
 
-	// span の to レベルから伏図記号レイヤ名 "{to}-柱伏図記号" を組み立てる。**レイヤ名の規約
-	// はここが唯一**で、記号がレイヤを名乗るとき（buildColumnPlanMarkCommands）と、
-	// 伏図がそのレイヤを映すとき（parse/Sheet）の両方がこれを通る。レベルの表記は span
-	// 柱レイヤと同じ formatSpanLevel（parse/Story）。
-	std::string planMarkLayerName(double toLevel);
+	// span の to の符号から伏図記号レイヤ名 "{to}-柱伏図記号" を組み立てる。**レイヤ名の規約
+	// はここが唯一**で、記号がレイヤを名乗るとき（buildColumnMarkCommands）と、
+	// 伏図がそのレイヤを映すとき（parse/Sheet）の両方がこれを通る。符号は span 柱レイヤと
+	// 同じ（parse/Story の levelLabel）。
+	std::string planMarkLayerName(const std::string& toLabel);
 
 	// 断面記号の作図クラス。実断面の対角線を極細の実線で引く。存在しないクラスは VW
 	// が自動生成する。
@@ -84,15 +84,18 @@ namespace HomeskzIfcImport::parse
 	// 柱のみ、または小屋束のみ。parse/Column.h）。
 	//
 	// 伏図記号のシンボル名は取り込み設定が持つ。options を省いた呼び出しは既定の設定＝
-	// 従来と同じ名前になる（単体テスト用）。
+	// 従来と同じ名前になる（単体テスト用）。levels は span の並び（通し番号の昇順）を決める
+	// のに使う（collectColumnSpans）。
 	std::vector<core::ColumnMarkCommand>
 	buildColumnMarkCommands(const std::vector<core::ColumnCommand>& columns,
+							const std::vector<PlanLevel>& levels,
 							const core::ImportOptions& options = core::ImportOptions{});
 
 	// 実在する伏図記号レイヤを **to の昇順**で（重複を除いて）列挙する。伏図が「切断位置の
 	// 直下のレイヤ」を 1 枚選ぶのに使う（parse/Sheet）。
 	//
-	// **同じ to の span はまとめて 1 枚になる**（"1to2.5-柱" と "2to2.5-柱" → "2.5-柱伏図記号"）。
+	// **同じ to の span はまとめて 1 枚になる**（"1±0_2+1-柱" と "2±0_2+1-柱" →
+	// "2+1-柱伏図記号"）。
 	// 入力の spans は collectColumnSpans（parse/Column）が (from, to) 昇順で返すものなので、
 	// 結果も入力順に依存しない決定的な並びになる（CLAUDE.md「決定性を守る」）。
 	struct PlanMarkLayer

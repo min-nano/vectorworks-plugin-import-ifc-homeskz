@@ -27,7 +27,7 @@
 | 長さ・文字の単位の換算（インチ → mm `kMillimetersPerInch`・1 インチの pt 数 `kPointsPerInch`・紙の pt → mm `pointsToMillimeters`） | `core/Layout` |
 | 回転して置いた注釈の自身の高さを外接矩形から求める（`rotatedRectHeight`。45 度近くで解けない境 `kRotatedRectMinConditioning`。傾斜材のデータタグの逃がし量＝`draw/Tag`） | `core/Layout` |
 | 取り込み設定（役割の表 `core::symbolRoles()`・図面枠のスタイル `core::ImportOptions::titleBlock` → `core::Document::titleBlockStyle`・寸法規格 `core::ImportOptions::dimension` → `core::Document::dimensionStandard`・軸組図から除外する通り `core::ImportOptions::skippedSections` → `parse::dropSkippedSections`・垂木の断面 `core::ImportOptions::rafterWidth` / `rafterHeight`（既定 `core::kDefaultRafterWidth` / `kDefaultRafterHeight`、文字との相互変換 `core::parseRafterSize` / `formatRafterSize`）） | `core/ImportOptions` |
-| 基準からの差の表記（`signedMillimetreText`。符号付き・3 桁ごとのコンマ。伏図レベルの高さとデータタグの高さの注記が共有）・伏図レベルの印（`planLevelTag` / `stripPlanLevelTag` / `planLevelHeightText`。"2-横架材天端(FL-872)" の "(FL-872)" を付ける・除く・高さの表記） | `core/Document.h` |
+| 基準からの差の表記（`signedMillimetreText`。符号付き・3 桁ごとのコンマ。伏図レベルの高さとデータタグの高さの注記が共有）・伏図レベルの段数の表記（`planLevelStepText` / `parsePlanLevelStepText`。"±0" / "-1" / "+0.5"）・標準でない伏図レベルのレベル種別の印（`planLevelTag` / `stripPlanLevelTag`。"横架材天端(-1)" の "(-1)" を付ける・除く）・伏図のタイトルの高さの表記（`planLevelHeightText`） | `core/Document.h` |
 | 伏図のまとめ方（`core::PlanLevelKey`・`ImportOptions::mergedPlanLevels`）・設定ダイアログへ運ぶ候補（`core::PlanLevelChoice`） | `core/ImportOptions.h` |
 | まだ決めていない設定の初期値（図面にあるものから組む既定 `core::presetImportOptions`・寸法規格の既定の選び方 `core::defaultDimensionStandardIndex`。設定ダイアログの初期値と MCP の実機テストの周が共有する。M40） | `core/ImportOptions` |
 | 進捗の整形と配分の計算・診断ログのフェーズの行（`beginPhase`） | `core/Progress` |
@@ -43,7 +43,7 @@
 | --- | --- |
 | IFC の属性インデックス | `parse/IfcAttr.h` |
 | 構造クラス名（`04構造-…` の階層の葉クラス・構成要素の素材クラス）と部材種別からのクラス判定 | `parse/StructuralClass.h` |
-| レベル種別名（定義は `core/Document.h`。ここは再公開）・`storyLayerName`・横架材レベルの定型（`beamTopLevelType` / `beamTopElevation` / `beamTopLayerName`）・横架材の取り合いを判定するときのレイヤの読み替え（`beamGroupLayer`。軒桁の専用レイヤ→横架材レイヤ）・階の要素の有無（`storyHasElement`）・span レベルの表記（`formatSpanLevel`）・span レイヤ名の組み立てと分解（`spanLayerName` / `parseSpanLayer`。柱・登り梁で接尾辞だけ違う） | `parse/Story.h` |
+| レベル種別名（定義は `core/Document.h`。ここは再公開）・`storyLayerName`・横架材レベルの定型（`beamTopLevelType` / `beamTopElevation` / `beamTopLayerName`）・横架材の取り合いを判定するときのレイヤの読み替え（`beamGroupLayer`。軒桁の専用レイヤ→横架材レイヤ）・階の要素の有無（`storyHasElement`）・伏図レベルの符号（`levelLabel` / `parseLevelLabel`。"2-1"）・伏図レベルのレイヤ名（`levelLayerName` / `levelLayerSuffix`。"2-1-横架材"）と段数の読み替え（`stripLevelStep`）・レイヤ名の頭の階の接頭辞（`layerStoryPrefix`）・span レイヤ名の組み立てと分解（`spanLayerName` / `parseSpanLayer`。"2-1_3±0-柱"。柱・登り梁で接尾辞だけ違う） | `parse/Story.h` |
 | 屋根組の名前 | `parse/Rafter.h` / `parse/Roof.h` |
 | 基礎ストーリの名前・接尾辞・レベル・レイヤ名、基礎の許容値（統合・自由端・人通口・壁結合・地中梁・床付け） | `parse/Footing.h` |
 | 要素の判別述語（`isFloorSlab` / `isRoofSlab` / `isFireBrace` / `isBaseSlab` / `isShearBrace` / `isShearPanel` 等） | その要素のヘッダ |
@@ -52,10 +52,10 @@
 | 横架材の端部と相手の取り合いの幾何（`memberEndJoint`）・柱に取り付く端を柱芯へ送る関門（`resolveMemberColumnJoints`。`parse/BuildDocument` が一度だけ通す） | `parse/Member` |
 | ローカル配置原点の取り出し（`resolveLocalPlacementOrigin`）・屋根面の勾配座標系と退化の閾値・押し出しを鉛直とみなす閾値（`kVerticalExtrudeTol`） | `parse/IfcGeometry` |
 | 共有コンテキスト（下記）・階の屋根面の走査（`storyRoofPlanes`）・取り込み設定の参照（`options()`） | `parse/Context` |
-| 伏図記号レイヤ名（`{to}-柱伏図記号`）と記号の作図クラス（シンボル名は取り込み設定 `core/ImportOptions` が持つ） | `parse/ColumnMark` |
-| 伏図レベル（横架材の高さごとの伏図 1 枚ぶん。高さの集め方・まとめ方・標準の決め方・近い／届く伏図レベルの引き方・伏図レベルのレイヤ名とずらし量・横架材の振り分け・設定ダイアログの候補）。共有は `Context::planLevels()` を通す | `parse/PlanLevel` |
+| 伏図記号レイヤ名（`{to の符号}-柱伏図記号`）と記号の作図クラス（シンボル名は取り込み設定 `core/ImportOptions` が持つ） | `parse/ColumnMark` |
+| 伏図レベル（横架材の高さごとの伏図 1 枚ぶん。高さの集め方・まとめ方・標準の決め方・近い／届く伏図レベルの引き方・伏図レベルのレイヤ名とずらし量・通し番号と符号の行き来（`ordinalLabel` / `spanLevelLabel` / `labelOrdinal` / `parseSpanOrdinals`）・各階の母屋のレベルの通し番号（`moyaOrdinal`。伏図レベルが無いときは `standardOrdinalWithoutLevels`）・横架材の振り分け・設定ダイアログの候補）。共有は `Context::planLevels()` を通す | `parse/PlanLevel` |
 | 柱の span の番号（伏図レベルの通し番号。`spanFromOrdinal` / `spanToOrdinal`） | `parse/Column` |
-| 耐力壁のレイヤレベル名・柱を探す許容 | `parse/ShearWall.h` |
+| 耐力壁のレイヤレベル名・柱を探す許容・伏図レベルに立つ耐力壁の span レイヤの列挙（`shearWallLayersFrom`） | `parse/ShearWall.h` |
 | 切断面に乗る材・横切る材の判定（`memberOnCutPlane` / `columnOnCutPlane` / `memberCrossesCutPlane`。タグと寸法が共有） | `parse/Tag` |
 | データタグに添える横架材の高さの注記（`memberLevelNote` / 連動させる基準名も返す `memberLevelNoteParts`。その階の FL から）・各階の標準の横架材の高さ（`standardBeamHeights`。`parse/PlanLevel`） | `parse/Tag` |
 | 寸法の測点のまとめ方（`mergeStops` / `unionStops`。許容 `kDimensionMergeTol`）・通り芯の位置（`gridStops`）・レベル記号の表示名 | `parse/Dimension` |

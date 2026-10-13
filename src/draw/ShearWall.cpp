@@ -370,7 +370,7 @@ namespace HomeskzIfcImport::draw
 			if (!AdvanceProgress(progress))
 				break;
 
-			// "n-耐力壁" はストーリが作るレイヤ。無い＝その階の生成がスキップされたと
+			// "1±0_2±0-耐力壁" はストーリが作るレイヤ。無い＝その階の生成がスキップされたと
 			// いうことなので、耐力壁も置かない（要素のために独自にレイヤを作らない）。
 			if (ActivateExistingLayer(wall.layer) == nil)
 			{

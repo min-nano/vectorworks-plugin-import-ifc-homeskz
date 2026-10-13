@@ -124,10 +124,10 @@ namespace HomeskzIfcImport::parse
 		{
 			const StoryInfo& story = stories[i];
 
-			// 配置先レイヤは parse/Story のレイヤ名規約と同じ "{接頭辞}-FL"（一般階は
-			// "1-FL"…、屋根階は "R-FL"）。屋根階の FL レベルは床があるときだけ
+			// 配置先レイヤは parse/Story のレイヤ名規約と同じ "{符号}-FL"（一般階は
+			// "1±0-FL"…、屋根階は "R±0-FL"）。屋根階の FL レベルは床があるときだけ
 			// parse/Story が作る（ロフト＝小屋裏収納の床）。
-			const std::string layer = storyLayerName(i, story.isTop, kLevelFL);
+			const std::string layer = levelLayerName(i, story.isTop, 0.0, kLevelFL);
 
 			// 床を受ける基準高さ（横架材天端＝床下地の下端）の絶対 Z。段差床はここからの
 			// 高低差でずれる。屋根階は軒高（ストーリ原点）がその高さにあたる。
@@ -155,7 +155,7 @@ namespace HomeskzIfcImport::parse
 			// 床 1 枚の命令を組み立てる。boundary は IFC の生座標（ここで通り芯センタリング
 			// を掛ける）、levelDelta は基準レベル（一般階＝FL／屋根階＝軒高）からの高低差。
 			//
-			// 配置先は床の下端（＝受ける横架材の天端）にいちばん近い伏図レベルの "n-FL"
+			// 配置先は床の下端（＝受ける横架材の天端）にいちばん近い伏図レベルの "n±0-FL"
 			// レイヤ（parse/PlanLevel。横架材の高さごとの伏図がその高さの床だけを映すため）。
 			const auto makeCommand = [&](std::vector<Vec2> boundary, double levelDelta)
 			{

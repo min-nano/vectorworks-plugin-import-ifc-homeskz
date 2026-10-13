@@ -30,7 +30,7 @@
 //	    （IfcArbitraryClosedProfileDef）で出力される。矩形前提の memberProfileDims では
 //	    取得できず**欠落して全く描画されない**ため、slopedMemberGeometry が平行四辺形の
 //	    4 頂点から中心軸・幅・せい・傾斜を導出する。専用レイヤ "n-登り梁" に置く（M36 から
-//	    parse/PlanLevel の noboribariSpan が span レイヤ "{from}to{to}-登り梁" へ移す）。
+//	    parse/PlanLevel の noboribariSpan が span レイヤ "2-1_2+1-登り梁" へ移す）。
 //	    誤取り込み防止に、押し出し軸が鉛直な材（火打）は断面種別より**先に**軸で除外し、
 //	    プロファイルが 4 頂点でない材（筋かい＝6 頂点）は導出が失敗してスキップされる。
 //	  * **登り梁の直切りの幾何**: 端部が鉛直面なので、天端中央線の端点は断面中心軸の
@@ -235,8 +235,9 @@ namespace HomeskzIfcImport::parse
 	// STEP Model から横架材の描画命令を組み立てる。
 	//
 	// FL ストーリ（parse/Story の collectStories）を Elevation 昇順に走査し、各階に含まれる
-	// IfcBeam / IfcMember を解析する。配置先レイヤは一般階が "n-横架材天端"、最上階が
-	// "R-軒高"、母屋・棟木は "n-母屋"、登り梁は "n-登り梁"。座標は通り芯と同じグリッド中心
+	// IfcBeam / IfcMember を解析する。配置先レイヤは横架材が "n±0-横架材"（最上階も同じ
+	// 名前）、母屋・棟木は "n-母屋"、登り梁は "n-登り梁"（伏図レベルへの振り分けは
+	// parse/PlanLevel）。座標は通り芯と同じグリッド中心
 	// オフセットで補正する。配置・断面を解決できない材はスキップする（1 本の欠損で全体を
 	// 止めない。CLAUDE.md「エラーハンドリング」）。最後に食い込み調整を掛ける。
 	//

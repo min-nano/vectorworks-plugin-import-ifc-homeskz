@@ -76,7 +76,7 @@ namespace
 	constexpr double kBeamBottom = 2820.0;
 	MemberCommand beam(Vec2 start, Vec2 end, const char* drawClass = "04構造-02木造-04梁桁-03床梁")
 	{
-		MemberCommand command = member("2-横架材天端", start, end, kBeamTop);
+		MemberCommand command = member("2±0-横架材", start, end, kBeamTop);
 		command.drawClass = drawClass;
 		return command;
 	}
@@ -85,7 +85,7 @@ namespace
 	ColumnCommand column(Vec2 position, double bottom, double top)
 	{
 		ColumnCommand command;
-		command.layer = "1to2-柱";
+		command.layer = "1±0_2±0-柱";
 		command.memberId = "x";
 		command.position = position;
 		command.width = 105.0;
@@ -106,15 +106,15 @@ namespace
 TEST(splice_collinear_butt_joint_places_one_symbol)
 {
 	const std::vector<MemberCommand> members = {
-		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
-		member("1-横架材天端", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}),
+		member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
+		member("1±0-横架材", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}),
 	};
 	const std::vector<SymbolCommand> splices = buildSpliceCommands(members);
 	CHECK_EQ(splices.size(), std::size_t{1});
 	if (splices.size() != 1)
 		return;
 	CHECK_EQ(splices[0].symbol, kSymbolSplice);
-	CHECK_EQ(splices[0].layer, std::string("1-横架材天端"));
+	CHECK_EQ(splices[0].layer, std::string("1±0-横架材"));
 	CHECK(near(splices[0].position.x, 2000.0));
 	CHECK(near(splices[0].position.y, 0.0));
 	CHECK(near(splices[0].angle, 0.0));
@@ -125,8 +125,8 @@ TEST(splice_angle_is_normalized_regardless_of_member_direction)
 {
 	// Y 方向の材を −Y 向きに描いても、向きは +Y（90 度）にそろう。
 	const std::vector<MemberCommand> members = {
-		member("2-横架材天端", Vec2{500.0, 3000.0}, Vec2{500.0, 1000.0}),
-		member("2-横架材天端", Vec2{500.0, 1000.0}, Vec2{500.0, -1000.0}),
+		member("2±0-横架材", Vec2{500.0, 3000.0}, Vec2{500.0, 1000.0}),
+		member("2±0-横架材", Vec2{500.0, 1000.0}, Vec2{500.0, -1000.0}),
 	};
 	const std::vector<SymbolCommand> splices = buildSpliceCommands(members);
 	CHECK_EQ(splices.size(), std::size_t{1});
@@ -138,8 +138,8 @@ TEST(splice_angle_is_normalized_regardless_of_member_direction)
 
 	// X 方向の材を −X 向きに描いても 0 度（180 度にはならない）。
 	const std::vector<MemberCommand> reversed = {
-		member("2-横架材天端", Vec2{4000.0, 0.0}, Vec2{2000.0, 0.0}),
-		member("2-横架材天端", Vec2{2000.0, 0.0}, Vec2{0.0, 0.0}),
+		member("2±0-横架材", Vec2{4000.0, 0.0}, Vec2{2000.0, 0.0}),
+		member("2±0-横架材", Vec2{2000.0, 0.0}, Vec2{0.0, 0.0}),
 	};
 	const std::vector<SymbolCommand> xs = buildSpliceCommands(reversed);
 	CHECK_EQ(xs.size(), std::size_t{1});
@@ -151,12 +151,12 @@ TEST(splice_ends_separated_by_a_through_member_are_not_spliced)
 {
 	// 直交材が間を通り抜ける箇所: 命令の端点は相手の芯線（x=2000）で一致するが、材の端は
 	// 端部オフセット（−52.5）でその材の面まで戻っているので 105mm 離れる → 継手ではない。
-	MemberCommand left = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0});
+	MemberCommand left = member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0});
 	left.endOffset = -52.5;
-	MemberCommand right = member("1-横架材天端", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0});
+	MemberCommand right = member("1±0-横架材", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0});
 	right.startOffset = -52.5;
 	const std::vector<MemberCommand> members = {
-		left, right, member("1-横架材天端", Vec2{2000.0, -1000.0}, Vec2{2000.0, 1000.0})};
+		left, right, member("1±0-横架材", Vec2{2000.0, -1000.0}, Vec2{2000.0, 1000.0})};
 	CHECK(buildSpliceCommands(members).empty());
 }
 
@@ -164,9 +164,9 @@ TEST(splice_uses_the_drawn_end_not_the_command_end)
 {
 	// 命令の端点が柱芯へ送られていても（端部オフセットで材の端を戻している）、材の端どうしが
 	// 一致すれば継手。置く位置も材の端。
-	MemberCommand left = member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{2100.0, 0.0});
+	MemberCommand left = member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{2100.0, 0.0});
 	left.endOffset = -100.0; // 材の端は x=2000
-	MemberCommand right = member("1-横架材天端", Vec2{2100.0, 0.0}, Vec2{4000.0, 0.0});
+	MemberCommand right = member("1±0-横架材", Vec2{2100.0, 0.0}, Vec2{4000.0, 0.0});
 	right.startOffset = 100.0; // 材の端は x=2000
 	const std::vector<SymbolCommand> splices = buildSpliceCommands({left, right});
 	CHECK_EQ(splices.size(), std::size_t{1});
@@ -176,7 +176,7 @@ TEST(splice_uses_the_drawn_end_not_the_command_end)
 
 TEST(splice_excludes_overlap_corner_layer_and_z)
 {
-	const std::string layer = "1-横架材天端";
+	const std::string layer = "1±0-横架材";
 	// 同じ側へ伸びる（重なる）材。
 	CHECK(buildSpliceCommands({member(layer, Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
 							   member(layer, Vec2{0.0, 0.0}, Vec2{1000.0, 0.0})})
@@ -187,7 +187,7 @@ TEST(splice_excludes_overlap_corner_layer_and_z)
 			  .empty());
 	// レイヤ違い。
 	CHECK(buildSpliceCommands({member(layer, Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
-							   member("2-横架材天端", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0})})
+							   member("2±0-横架材", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0})})
 			  .empty());
 	// Z が離れている（天端 425 せい 180 と 天端 1500）。
 	CHECK(buildSpliceCommands({member(layer, Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
@@ -214,8 +214,8 @@ TEST(splice_height_takes_the_higher_end_offset)
 TEST(splice_follows_import_options)
 {
 	const std::vector<MemberCommand> members = {
-		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
-		member("1-横架材天端", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}),
+		member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
+		member("1±0-横架材", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}),
 	};
 	ImportOptions options;
 	options.setSymbol(SymbolRole::Splice, "継手_腰掛け鎌");
@@ -231,10 +231,10 @@ TEST(splice_follows_import_options)
 TEST(splice_result_does_not_depend_on_member_order)
 {
 	std::vector<MemberCommand> members = {
-		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
-		member("1-横架材天端", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}),
-		member("1-横架材天端", Vec2{0.0, 1000.0}, Vec2{0.0, 3000.0}),
-		member("1-横架材天端", Vec2{0.0, 3000.0}, Vec2{0.0, 5000.0}),
+		member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
+		member("1±0-横架材", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}),
+		member("1±0-横架材", Vec2{0.0, 1000.0}, Vec2{0.0, 3000.0}),
+		member("1±0-横架材", Vec2{0.0, 3000.0}, Vec2{0.0, 5000.0}),
 	};
 	const auto key = [](const std::vector<SymbolCommand>& splices)
 	{
@@ -281,8 +281,8 @@ TEST(splice_dodai_female_is_opposite_the_m12_anchor)
 {
 	// 土台: M12 アンカーボルトが付く側が男木。女木はその反対で、シンボルの +X が女木を向く。
 	const std::vector<MemberCommand> members = {
-		member("1-横架材天端", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
-		member("1-横架材天端", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}),
+		member("1±0-横架材", Vec2{0.0, 0.0}, Vec2{2000.0, 0.0}),
+		member("1±0-横架材", Vec2{2000.0, 0.0}, Vec2{4000.0, 0.0}),
 	};
 	SpliceCues left;
 	left.anchorsM12 = {Vec2{1850.0, 0.0}, Vec2{3000.0, 0.0}}; // 左の 150mm が近い → 左が男木
@@ -397,13 +397,13 @@ TEST(splice_short_span_uses_the_support_distance_seen_elsewhere)
 
 	// 代表値は**レイヤごと**。別レイヤの継手の距離は、そのレイヤに代表値があれば使わない。
 	std::vector<MemberCommand> otherLayer = members;
-	otherLayer[2].layer = "3-横架材天端";
-	otherLayer[3].layer = "3-横架材天端";
+	otherLayer[2].layer = "3±0-横架材";
+	otherLayer[3].layer = "3±0-横架材";
 	// 3 階にも長いスパンの継手（距離 120 の支点）を追加する → 3 階の代表値は 120 → 左が女木。
 	MemberCommand longLeft = beam(Vec2{20000.0, 0.0}, Vec2{22000.0, 0.0});
 	MemberCommand longRight = beam(Vec2{22000.0, 0.0}, Vec2{24000.0, 0.0});
-	longLeft.layer = "3-横架材天端";
-	longRight.layer = "3-横架材天端";
+	longLeft.layer = "3±0-横架材";
+	longRight.layer = "3±0-横架材";
 	otherLayer.push_back(longLeft);
 	otherLayer.push_back(longRight);
 	SpliceCues layered = cues;
