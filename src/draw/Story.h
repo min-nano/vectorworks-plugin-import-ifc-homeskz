@@ -38,9 +38,11 @@ namespace HomeskzIfcImport::draw
 	// 決める）。描画済みの分は図面に残る。
 	//
 	// レベルを持たずに階だけに結ぶレイヤ（StoryCommand::storyLayers。柱の span レイヤ）は、
-	// 仮のレベル種別を与えて AssociateLayerWithStory で結び、種別を外して作る（SDK
-	// リファレンス Findings「Layers and Stories」）。結べなかったレイヤは従来のレベル付きの
-	// レイヤで作り直し、その枚数を outNote へ書く（無ければ空）。
+	// レベル付きのレイヤより先に、その階の levels のレベル種別を仮に与えて
+	// AssociateLayerWithStory で結び、種別を外して作る（SDK リファレンス Findings
+	// 「Layers and Stories」）。結んだときに階に残るレベルは、その種別のレイヤに再利用する
+	// （専用の種別を使うと、どのレイヤも使わないレベルが各階に残る）。結べなかったレイヤは
+	// 従来のレベル付きのレイヤで作り直し、その枚数を outNote へ書く（無ければ空）。
 	std::size_t drawStories(const core::Document& document, core::ProgressReporter& progress,
 							std::string* outNote = nullptr);
 
