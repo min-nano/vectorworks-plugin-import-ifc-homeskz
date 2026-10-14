@@ -191,7 +191,7 @@ namespace HomeskzIfcImport::draw
 		{
 			for (const core::LevelCommand& level : levels)
 			{
-				TXString levelTypeName(level.type.c_str());
+				const TXString levelTypeName(level.type.c_str());
 				if (gSDK->GetLayerForStory(story, levelTypeName) == nil)
 					return level.type;
 			}
@@ -320,8 +320,7 @@ namespace HomeskzIfcImport::draw
 			AppendCount(text,
 						"ストーリの診断: レベルを持たずに階へ結べず、レベル付きで作ったレイヤ",
 						fallbackLayers, "枚");
-			AppendCount(text,
-						"ストーリの診断: 柱のレイヤを結ぶために借りたレベルへ結べず、別に作ったレイヤ",
+			AppendCount(text, "ストーリの診断: 柱のレイヤに貸したレベルへ結べず、別に作ったレイヤ",
 						unattachedLeftovers, "枚");
 			*outNote = std::move(text);
 		}
