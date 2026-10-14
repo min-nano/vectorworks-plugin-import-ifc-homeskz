@@ -21,7 +21,10 @@
 //	  * gSDK->SetObjectName(layer, name)                  … レイヤ名を意図した名前へリネーム
 //	  * gSDK->CreateLayer / SetLayerLevelType / AssociateLayerWithStory / GetStoryOfLayer
 //	                                                       … レベルを持たないレイヤを階に結ぶ
-//	                                                         （柱の span レイヤ。下記）
+//	                                                         （柱の span レイヤ。下記）と、
+//	                                                         そのとき借りたレベルへレイヤを結ぶ
+//	  * gSDK->SetStoryLevelElevation(story, type, elev)   … 借りたレベルの階内の相対Z を設定
+//	  * gSDK->SetLayerScaleN(layer, scale)                … 借りたレベルに結んだレイヤの縮尺
 //
 //	VW 2026 では AddStoryLevel + AssociateLayerWithStory ではレイヤ→レベルの紐付けが UI
 //	上「なし」になるため、バインドが保証される CreateStoryLevelTemplate +
@@ -113,7 +116,8 @@ namespace HomeskzIfcImport::draw
 		//
 		// tempType は**その階でまだレイヤが使っていない種別**でなければならない（使用中の種別は
 		// 弾かれる。Findings）。結ぶと階にその種別のレベルが残るので、呼び出し側はこのあと
-		// その階で使うレベル種別を渡し、残ったレベルを再利用する（drawStories）。
+		// その階で使うレベル種別を渡し、残ったレベルを再利用する（drawStories）。借りられる
+		// 種別が無ければ空を渡す——同名のレイヤの確かめだけを行い、無ければ false を返す。
 		//
 		// **結べなければ作ったレイヤを消して false を返す**——階に属さないレイヤの上では
 		// 柱の上下端のバウンドが同じ高さへ潰れ、長さ 0 の柱になる（Findings）。消しておけば
@@ -128,6 +132,8 @@ namespace HomeskzIfcImport::draw
 				NoteExistingLayerUsed(existing, layerName);
 				return gSDK->GetStoryOfLayer(existing) == story;
 			}
+			if (tempType.empty())
+				return false;
 			MCObjectHandle layer = gSDK->CreateLayer(name, static_cast<short>(LayerKind::Design));
 			if (layer == nil)
 				return false;
@@ -286,9 +292,9 @@ namespace HomeskzIfcImport::draw
 			bool leftoverLevel = false;
 			for (const std::string& layer : command.storyLayers)
 			{
-				if (!borrowedType.empty() && CreateStoryOnlyLayer(story, layer, borrowedType))
+				if (CreateStoryOnlyLayer(story, layer, borrowedType))
 				{
-					leftoverLevel = true;
+					leftoverLevel = leftoverLevel || !borrowedType.empty();
 					continue;
 				}
 				TXString levelTypeName(layer.c_str());
