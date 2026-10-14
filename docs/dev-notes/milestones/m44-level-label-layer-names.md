@@ -110,8 +110,9 @@ M36 までは屋根束（小屋束・棟束）の上端を「届いた階のい�
 の「レベルを持たないレイヤを階に結ぶ」。`draw/Story` の `CreateStoryOnlyLayer`）:
 
 1. `CreateLayer` で素のデザインレイヤを作る。
-2. その階で未使用の**仮のレベル種別**（`柱`。1 つを使い回せる）を `SetLayerLevelType` で与える
-   ——素のレイヤ（種別 `''`）は `AssociateLayerWithStory` に弾かれる。
+2. その階で未使用の**仮のレベル種別**を `SetLayerLevelType` で与える（1 つを使い回せる）
+   ——素のレイヤ（種別 `''`）は `AssociateLayerWithStory` に弾かれる。仮の種別には
+   **その階でこのあと横架材などのレイヤが使うレベル種別を借りる**（下記）。
 3. `AssociateLayerWithStory` で階に結び、**`GetStoryOfLayer` の読み戻しで確かめる**。
 4. `SetLayerLevelType(layer, "")` で種別を外す（階は残る）。
 
@@ -129,8 +130,14 @@ M36 までは屋根束（小屋束・棟束）の上端を「届いた階のい�
   levels の前に積む）。
 - 命令セットでは `StoryCommand::storyLayers`（レベルを持たずに階だけに結ぶレイヤ名の列）で
   表す。軸組図の表示レイヤ（`parse/Section` の `sectionLayers`）もここから引く。
-- 仮の種別 `柱` は図面のレベル種別の一覧に 1 つ残る（消す口は確かめていない）。柱の span の
-  数だけ種別が増えていた M43 までより少ない。
+- **結ぶとその階に仮の種別のレベルができ、種別を外してもレベルは残る。** 当初は専用の種別
+  `柱` を使っていたので、どのレイヤにも使われないストーリレベル `柱` が各階に残った。
+  そこで**柱のレイヤをレベル付きのレイヤより先に作り**、仮の種別にはその階の levels の
+  うちまだレイヤの無い最初の種別（横架材など）を借りる。残ったレベルには、あとでその種別の
+  レイヤを `SetLayerLevelType` ＋ `AssociateLayerWithStory` で結び（テンプレート経由で作ると
+  同じ種別のレベルがもう 1 つできる）、`SetStoryLevelElevation` で階内の相対Z を与える
+  （`draw/Story` の `AttachLayerToLeftoverLevel`）。結べなければテンプレート経由で作り、
+  診断に枚数を残す。
 
 ## 図面への影響
 
