@@ -89,6 +89,11 @@ namespace HomeskzIfcImport::parse
 		return std::to_string(index) + "階" + kMoyaPlanLabel + "伏図";
 	}
 
+	std::string columnWallPlanTitle(std::size_t index)
+	{
+		return std::to_string(index + 1) + "階" + kColumnWallPlanLabel + "伏図";
+	}
+
 	std::vector<std::string> spanLayersAtCut(const std::vector<ColumnSpan>& spans, double cut)
 	{
 		std::vector<std::string> layers;
@@ -158,9 +163,6 @@ namespace HomeskzIfcImport::parse
 		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns(), planLevels);
 		const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
 		const bool foundation = hasFoundation(context.model());
-		// 耐力壁レイヤは**命令があるときだけ**作られるので、載せる前に有無を確かめる
-		// （空のレイヤ名をビューポートへ渡さない）。
-		const std::vector<core::ShearWallCommand>& shearWalls = context.shearWalls();
 		const std::vector<core::FloorCommand>& floors = context.floors();
 		const std::vector<core::MemberCommand>& members = context.members();
 		const std::vector<ColumnSpan> noboribariSpans = collectNoboribariSpans(members, planLevels);
@@ -200,21 +202,8 @@ namespace HomeskzIfcImport::parse
 				!markLayer.empty())
 				layers.push_back(markLayer);
 
-			// M19 耐力壁: **その階自身**の耐力壁——この伏図レベルに立つ耐力壁の span レイヤ
-			// （"1±0_2±0-耐力壁"。from がこの伏図レベル）を重ねる（1 階床＝土台伏図 →
-			// "1±0_…-耐力壁"、2 階床伏図 → "2±0_…-耐力壁"）。伏図記号（"{to}-柱伏図記号"）が
-			// 切断の**直下**を映すのとは規約が違う——耐力壁は「どの階の壁か」で呼ばれる
-			// ものなので、1 階の耐力壁は 1 階の伏図（土台伏図）に、2 階の耐力壁は 2 階床
-			// 伏図に出るのが図面としての読み方に合う（実機確認で決めた。M19）。耐力壁は
-			// 立つ天端の伏図レベルを from とする span レイヤへ置かれている（parse/ShearWall）。
-			//
-			// **重ね順もこの規約に乗っている**: 同じ階のレイヤどうしなら 耐力壁レベルは
-			// 横架材天端の 1 段上（前面）に積まれるので、記号が横架材の後ろへ回らない
-			// （下の階のレイヤを載せていたときは、上の階の横架材に必ず隠れていた）。
-			// 加えて core::desiredStoryLayerOrder が耐力壁レイヤを最前面群へ回す。
-			const std::vector<std::string> shearLayers =
-				shearWallLayersFrom(shearWalls, planLevelLabel(level, story));
-			layers.insert(layers.end(), shearLayers.begin(), shearLayers.end());
+			// 耐力壁は映さない（M45。ご要望）。耐力壁は階ごとの柱壁伏図
+			// （buildColumnWallSheetCommands）にだけ映す。
 
 			// 登り梁はこの伏図レベルの高さを跨ぐものを映す（ご要望。parse/PlanLevel の
 			// noboribariSpan が span レイヤへ分けてある。この伏図レベルを範囲に含むもの）。
@@ -338,12 +327,72 @@ namespace HomeskzIfcImport::parse
 		return commands;
 	}
 
+	std::vector<core::SheetCommand> buildColumnWallSheetCommands(Context& context, int startNumber)
+	{
+		const std::vector<StoryInfo>& stories = context.stories();
+		const std::vector<PlanLevel>& planLevels = context.planLevels();
+		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns(), planLevels);
+		const std::vector<core::ShearWallCommand>& shearWalls = context.shearWalls();
+
+		std::vector<core::SheetCommand> commands;
+		int number = startNumber;
+		for (std::size_t i = 0; i < stories.size(); ++i)
+		{
+			// 最上階（小屋組の階）は柱壁伏図を作らない。そこに立つのは小屋束で、母屋伏図が
+			// 伏図記号で示す（buildMoyaSheetCommands）。
+			if (stories[i].isTop)
+				continue;
+
+			// その階の伏図レベルすべてについて、床伏図と同じ切断（通し番号 + 0.25）を span が
+			// 含む柱レイヤと、そこに立つ耐力壁の span レイヤを集める。スキップフロアで階に
+			// 伏図レベルが 2 つ以上あっても柱壁伏図は階に 1 枚なので、どの高さに立つ柱・
+			// 耐力壁も載せる。通し柱は切断ごとに同じレイヤが返るので重複を除く。
+			std::vector<std::string> columnLayers;
+			std::vector<std::string> wallLayers;
+			for (const PlanLevel* level : storyPlanLevels(planLevels, i))
+			{
+				const double cut = static_cast<double>(level->ordinal) + kFloorPlanCutOffset - 1.0;
+				for (std::string& layer : spanLayersAtCut(spans, cut))
+				{
+					if (std::ranges::find(columnLayers, layer) == columnLayers.end())
+						columnLayers.push_back(std::move(layer));
+				}
+				for (std::string& layer :
+					 shearWallLayersFrom(shearWalls, planLevelLabel(*level, stories[i])))
+				{
+					if (std::ranges::find(wallLayers, layer) == wallLayers.end())
+						wallLayers.push_back(std::move(layer));
+				}
+			}
+			// 柱も耐力壁も無い階には作らない（空のビューポートを残さない。CLAUDE.md 開発の
+			// 基本方針 5）。
+			if (columnLayers.empty() && wallLayers.empty())
+				continue;
+
+			std::vector<std::string> layers = std::move(columnLayers);
+			layers.insert(layers.end(), wallLayers.begin(), wallLayers.end());
+			layers.emplace_back(core::kGridLayer);
+
+			// 凡例は床伏図と同じく常に載せる（中身は凡例オブジェクトのソース定義が決める）。
+			commands.push_back(makeSheet(core::PlanKind::ColumnWall, std::to_string(number++),
+										 columnWallPlanTitle(i), std::move(layers), true));
+		}
+		return commands;
+	}
+
 	std::vector<core::SheetCommand> buildSheetCommands(Context& context)
 	{
 		std::vector<core::SheetCommand> commands = buildFoundationSheetCommands(context);
 		for (core::SheetCommand& sheet : buildFloorFramingSheetCommands(context))
 			commands.push_back(std::move(sheet));
-		for (core::SheetCommand& sheet : buildMoyaSheetCommands(context))
+		std::vector<core::SheetCommand> moya = buildMoyaSheetCommands(context);
+		// 柱壁伏図は母屋伏図の続きの番号（基礎の有無に依らない番号の振り方は母屋伏図と同じ）。
+		const int columnWallStart = kFloorPlanStartNumber +
+									static_cast<int>(context.planLevels().size()) +
+									static_cast<int>(moya.size());
+		for (core::SheetCommand& sheet : moya)
+			commands.push_back(std::move(sheet));
+		for (core::SheetCommand& sheet : buildColumnWallSheetCommands(context, columnWallStart))
 			commands.push_back(std::move(sheet));
 		return commands;
 	}
@@ -366,6 +415,13 @@ namespace HomeskzIfcImport::parse
 	{
 		Context context(model);
 		return buildMoyaSheetCommands(context);
+	}
+
+	std::vector<core::SheetCommand> buildColumnWallSheetCommands(const Model& model,
+																 int startNumber)
+	{
+		Context context(model);
+		return buildColumnWallSheetCommands(context, startNumber);
 	}
 
 	std::vector<core::SheetCommand> buildSheetCommands(const Model& model)

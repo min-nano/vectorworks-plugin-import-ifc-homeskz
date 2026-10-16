@@ -1581,6 +1581,22 @@ namespace HomeskzIfcImport::parse
 			// 外周の横架材に乗る柱と、外周の横架材に取り合う直交する梁だけを出し、それ以外は
 			// 内部の横架材に沿う列が押さえる。
 			return framingDimensionChains(members, columns, document.grids, min, max);
+		case core::PlanKind::ColumnWall:
+		{
+			// 柱壁伏図（M45）は横架材を映さないので、映っている耐力壁の芯（柱芯どうし）を
+			// 通りの線として、柱をその上と外周で押さえる（床伏図の横架材の代わり）。
+			std::vector<LineSegment> segments;
+			for (const core::ShearWallCommand& wall : document.shearWalls)
+			{
+				if (onLayers(layers, wall.layer))
+					segments.push_back(LineSegment{wall.start, wall.end, wall.thickness});
+			}
+			std::vector<core::Vec2> points;
+			points.reserve(columns.size());
+			for (const core::ColumnCommand& column : columns)
+				points.push_back(column.position);
+			return framingLineChains(segments, points, {}, document.grids, min, max, false);
+		}
 		case core::PlanKind::Moya:
 		{
 			// 母屋・登り梁を床伏図・小屋伏図と同じく通りに沿って押さえ、斜めの登り梁は交点を

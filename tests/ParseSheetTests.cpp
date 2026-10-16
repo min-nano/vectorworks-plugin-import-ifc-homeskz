@@ -41,6 +41,7 @@ using namespace HomeskzIfcImport;
 using HomeskzIfcImport::core::SheetCommand;
 using HomeskzIfcImport::parse::buildAnchorBoltCommands;
 using HomeskzIfcImport::parse::buildColumnCommands;
+using HomeskzIfcImport::parse::buildColumnWallSheetCommands;
 using HomeskzIfcImport::parse::buildFloorFramingSheetCommands;
 using HomeskzIfcImport::parse::buildFoundationSheetCommands;
 using HomeskzIfcImport::parse::buildFoundationStoryCommand;
@@ -51,6 +52,7 @@ using HomeskzIfcImport::parse::collectColumnSpans;
 using HomeskzIfcImport::parse::collectPlanMarkLayers;
 using HomeskzIfcImport::parse::collectStories;
 using HomeskzIfcImport::parse::ColumnSpan;
+using HomeskzIfcImport::parse::columnWallPlanTitle;
 using HomeskzIfcImport::parse::Context;
 using HomeskzIfcImport::parse::floorPlanTitle;
 using HomeskzIfcImport::parse::hasFoundation;
@@ -116,6 +118,13 @@ TEST(FloorPlanTitleNamesFloorsAndRoof)
 	CHECK(floorPlanTitle(2, true, 3) == "2階小屋伏図");
 	// 2 階建て（ストーリ 2 つ）なら 1 階床伏図 + 1 階小屋伏図。
 	CHECK(floorPlanTitle(1, true, 2) == "1階小屋伏図");
+}
+
+TEST(ColumnWallPlanTitleUsesFloorNumber)
+{
+	// 柱壁伏図は床伏図と同じ階番号（0 起点の index + 1）。
+	CHECK_EQ(columnWallPlanTitle(0), std::string("1階柱壁伏図"));
+	CHECK_EQ(columnWallPlanTitle(1), std::string("2階柱壁伏図"));
 }
 
 TEST(MoyaPlanTitleUsesStoryIndex)
@@ -392,6 +401,108 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 		});
 }
 
+TEST(ColumnWallSheetPerStoryWithColumnsAndShearWalls)
+{
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   Context context(model);
+					   const auto stories = collectStories(context);
+					   const std::vector<SheetCommand> all = buildSheetCommands(context);
+					   std::vector<const SheetCommand*> sheets;
+					   for (const SheetCommand& sheet : all)
+					   {
+						   if (sheet.kind == core::PlanKind::ColumnWall)
+							   sheets.push_back(&sheet);
+					   }
+					   // 柱壁伏図は伏図の最後に並ぶ（番号は母屋伏図の続き）。
+					   CHECK(!sheets.empty());
+					   if (sheets.empty())
+						   return;
+					   CHECK(sheets.front() == &all[all.size() - sheets.size()]);
+
+					   std::set<std::string> titles;
+					   for (const SheetCommand* sheet : sheets)
+					   {
+						   titles.insert(sheet->title);
+						   // 通り芯と凡例は必ず載り、横架材・床・伏図記号は載らない（柱と耐力壁の図）。
+						   CHECK(contains(sheet->viewport.layers, core::kGridLayer));
+						   CHECK(sheet->legend.has_value());
+						   CHECK(sheet->viewport.grayedLayers.empty());
+						   for (const std::string& layer : sheet->viewport.layers)
+						   {
+							   CHECK(layer.find("横架材") == std::string::npos);
+							   CHECK(layer.find("FL") == std::string::npos);
+							   CHECK(layer.find("伏図記号") == std::string::npos);
+						   }
+					   }
+					   // 階ごとに 1 枚（同じタイトルが 2 枚無い）で、最上階（小屋組の階）には作らない。
+					   CHECK(titles.size() == sheets.size());
+					   CHECK(sheets.size() < stories.size());
+				   });
+}
+
+TEST(ShearWallsAppearOnlyOnColumnWallSheets)
+{
+	// 耐力壁は柱壁伏図にだけ映す（ご要望。M45）。耐力壁の命令が載るレイヤは、どれかの
+	// 柱壁伏図にちょうど 1 度だけ映り、ほかの種類の伏図には映らない。
+	forEachFixture(failures,
+				   [&](const std::string&, const Model& model)
+				   {
+					   Context context(model);
+					   const std::vector<SheetCommand> sheets = buildSheetCommands(context);
+					   std::set<std::string> wallLayers;
+					   for (const core::ShearWallCommand& wall : context.shearWalls())
+						   wallLayers.insert(wall.layer);
+					   for (const std::string& layer : wallLayers)
+					   {
+						   std::size_t shown = 0;
+						   for (const SheetCommand& sheet : sheets)
+						   {
+							   if (!contains(sheet.viewport.layers, layer))
+								   continue;
+							   CHECK(sheet.kind == core::PlanKind::ColumnWall);
+							   ++shown;
+						   }
+						   CHECK_EQ(shown, std::size_t(1));
+					   }
+					   for (const SheetCommand& sheet : sheets)
+					   {
+						   if (sheet.kind == core::PlanKind::ColumnWall)
+							   continue;
+						   for (const std::string& layer : sheet.viewport.layers)
+							   CHECK(layer.find("耐力壁") == std::string::npos);
+					   }
+				   });
+}
+
+TEST(SkipFloorColumnWallSheetCoversEveryBeamHeight)
+{
+	// スキップフロア_サンプルの 2 階は横架材の高さが 2 つ（2-1 / 2±0）あるが、柱壁伏図は
+	// 階に 1 枚で、どちらの高さに立つ柱も載せる（柱梁伏図の 2 枚に映る柱の和）。
+	bool ok = false;
+	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
+	CHECK(ok);
+	Context context(model);
+	const std::vector<SheetCommand> framing = buildFloorFramingSheetCommands(context);
+	const std::vector<SheetCommand> sheets = buildColumnWallSheetCommands(context, 100);
+	CHECK_EQ(sheets.size(), std::size_t(2));
+	if (sheets.size() != 2 || framing.size() < 3)
+		return;
+	CHECK_EQ(sheets[0].title, std::string("1階柱壁伏図"));
+	CHECK_EQ(sheets[0].number, std::string("100"));
+	CHECK_EQ(sheets[1].title, std::string("2階柱壁伏図"));
+	CHECK_EQ(sheets[1].number, std::string("101"));
+	for (const std::size_t k : {std::size_t(1), std::size_t(2)})
+	{
+		for (const std::string& layer : framing[k].viewport.layers)
+		{
+			if (layer.size() > 4 && layer.ends_with("-柱"))
+				CHECK(contains(sheets[1].viewport.layers, layer));
+		}
+	}
+}
+
 TEST(SheetNumbersAreUniqueAndConsecutive)
 {
 	forEachFixture(failures,
@@ -467,17 +578,18 @@ TEST(FoundationSheetLegendFollowsAnchorBolts)
 				   });
 }
 
-TEST(FloorAndMoyaSheetsAlwaysCarryFloorLegend)
+TEST(FloorMoyaAndColumnWallSheetsAlwaysCarryLegend)
 {
 	forEachFixture(
 		failures,
 		[&](const std::string&, const Model& model)
 		{
-			// 柱梁伏図・母屋伏図は**必ず**凡例を載せる（何が並ぶかは凡例オブジェクト自身の
+			// 柱梁伏図・母屋伏図・柱壁伏図は**必ず**凡例を載せる（何が並ぶかは凡例オブジェクト自身の
 			// ソース定義が決めるので、解析側では中身の有無を判断できない）。命令が持つのは
 			// 「凡例が有る」ことだけで、基礎伏図の凡例との違いも「どの伏図に載るか」しかない。
 			for (const std::vector<SheetCommand>& sheets :
-				 {buildFloorFramingSheetCommands(model), buildMoyaSheetCommands(model)})
+				 {buildFloorFramingSheetCommands(model), buildMoyaSheetCommands(model),
+				  buildColumnWallSheetCommands(model, 1)})
 			{
 				for (const SheetCommand& sheet : sheets)
 				{

@@ -7,14 +7,18 @@
 //
 //	【SDK 非依存】parse/ は VectorWorks SDK を一切 include しない（CLAUDE.md「Phase 1」）。
 //
-//	作る伏図は 3 種（番号もこの順に "1" から振る）:
+//	作る伏図は 4 種（番号は 基礎伏図 → 柱梁伏図 → 母屋伏図 → 柱壁伏図 の順に "1" から振る）:
 //	  * **基礎伏図**（buildFoundationSheetCommands）… 基礎要素があるときだけ 1 枚。
 //	    表示レイヤは 底盤・立上り・床束・アンカーボルト・通り芯。
 //	  * **柱梁伏図**（buildFloorFramingSheetCommands）… **横架材の高さ（伏図レベル）1 つに
 //	    つき 1 枚**（parse/PlanLevel。どの階も高さが 1 つなら FL ストーリ 1 つにつき 1 枚）。
 //	    表示レイヤは その伏図レベルの横架材（"2±0-横架材" / "2-1-横架材" / "R±0-横架材"。
-//	    符号は parse/PlanLevel）・軒桁・登り梁（その高さを跨ぐもの）・耐力壁＋切断レベルを
+//	    符号は parse/PlanLevel）・軒桁・登り梁（その高さを跨ぐもの）＋切断レベルを
 //	    span が含む柱レイヤ＋（最上階以外は）床＋（最下階かつ基礎ありなら）アンカーボルト＋通り芯。
+//	  * **柱壁伏図**（buildColumnWallSheetCommands。M45）… 最上階を除く階ごとに 1 枚（柱も
+//	    耐力壁も無い階には作らない）。表示レイヤは その階の伏図レベルの切断を span が含む
+//	    柱レイヤ＋その階の伏図レベルに立つ耐力壁＋通り芯。**耐力壁はここにだけ映し、柱梁伏図
+//	    には映さない**（ご要望）。番号は母屋伏図の続き。
 //	  * **母屋伏図**（buildMoyaSheetCommands）… 屋根版を持つ階ごとに 1 枚。表示レイヤは
 //	    その階の小屋組（母屋・垂木・野地板）＋切断レベルを span が含む柱・登り梁レイヤ＋
 //	    通り芯（同じ階の軒桁は薄く重ねる）。**登り梁は上端がその階のいちばん上の伏図レベルに
@@ -97,6 +101,7 @@ namespace HomeskzIfcImport::parse
 	inline constexpr const char* kFloorPlanFloorLabel = "床";
 	inline constexpr const char* kFloorPlanRoofLabel = "小屋";
 	inline constexpr const char* kMoyaPlanLabel = "母屋";
+	inline constexpr const char* kColumnWallPlanLabel = "柱壁";
 
 	// 柱梁伏図のタイトル。最上階は主屋根が架かる階番号を付けた "{count-1}階小屋伏図"、
 	// それ以外は "{index+1}階床伏図"。小屋組（母屋・垂木・野地板）は専用の母屋伏図へ分けるの
@@ -107,6 +112,9 @@ namespace HomeskzIfcImport::parse
 	// を付けた "{index}階母屋伏図"。2 階建てなら主屋根（index=2）＝"2階母屋伏図"、
 	// 中間階の下屋根（index=1）＝"1階母屋伏図"。
 	std::string moyaPlanTitle(std::size_t index);
+
+	// 柱壁伏図のタイトル。床伏図と同じ階番号を付けた "{index+1}階柱壁伏図"。
+	std::string columnWallPlanTitle(std::size_t index);
 
 	// span 柱レイヤのうち切断レベル cut を含む（from ≤ cut ≤ to）ものを (from, to) 昇順で返す。
 	// spans は parse/Column の collectColumnSpans。
@@ -137,8 +145,20 @@ namespace HomeskzIfcImport::parse
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(const Model& model);
 
-	// 上の 3 種を 基礎伏図 → 柱梁伏図 → 母屋伏図 の順に連ねた sheet 命令。シートレイヤ番号も
-	// この並びと一致する。
+	// 階ごとの柱壁伏図の sheet 命令（M45。無ければ空）。最上階を除く階ごとに 1 枚で、柱も
+	// 耐力壁も無い階には作らない。番号は startNumber から Elevation 昇順に振る（母屋伏図の
+	// 続き。buildSheetCommands が渡す）。グラフィック凡例を 1 つ載せる。
+	//
+	// 柱は**その階の伏図レベルすべて**の切断（柱梁伏図と同じ。通し番号 + 0.25）を span が
+	// 含むものを載せる——スキップフロアで階に伏図レベルが 2 つ以上あっても、柱壁伏図は階に
+	// 1 枚なので、どの高さに立つ柱も載せる。耐力壁も同じく、その階の伏図レベルに立つもの。
+	// 横架材は載せない（柱と耐力壁の配置を読む図なので）。
+	std::vector<core::SheetCommand> buildColumnWallSheetCommands(Context& context, int startNumber);
+	std::vector<core::SheetCommand> buildColumnWallSheetCommands(const Model& model,
+																 int startNumber);
+
+	// 上の 4 種を 基礎伏図 → 柱梁伏図 → 母屋伏図 → 柱壁伏図 の順に連ねた sheet 命令。
+	// シートレイヤ番号もこの並びと一致する。
 	std::vector<core::SheetCommand> buildSheetCommands(Context& context);
 	std::vector<core::SheetCommand> buildSheetCommands(const Model& model);
 } // namespace HomeskzIfcImport::parse
