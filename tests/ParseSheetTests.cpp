@@ -398,7 +398,7 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 		});
 }
 
-TEST(ColumnWallSheetPerStoryWithColumnsAndShearWalls)
+TEST(ColumnWallSheetsCarryOnlyColumnsWallsAndGrid)
 {
 	forEachFixture(failures,
 				   [&](const std::string&, const Model& model)
@@ -429,9 +429,16 @@ TEST(ColumnWallSheetPerStoryWithColumnsAndShearWalls)
 							   CHECK(layer.find("伏図記号") == std::string::npos);
 						   }
 					   }
-					   // 階ごとに 1 枚（同じタイトルが 2 枚無い）で、最上階（小屋組の階）には作らない。
+					   // 伏図レベルごとに 1 枚（同じタイトルが 2 枚無い）で、最上階（小屋組の階）の
+					   // 伏図レベルには作らない。
 					   CHECK(titles.size() == sheets.size());
-					   CHECK(sheets.size() < stories.size());
+					   std::size_t floorLevels = 0;
+					   for (const PlanLevel& level : context.planLevels())
+					   {
+						   if (!stories[level.story].isTop)
+							   ++floorLevels;
+					   }
+					   CHECK(sheets.size() <= floorLevels);
 				   });
 }
 
@@ -469,36 +476,59 @@ TEST(ShearWallsAppearOnlyOnColumnWallSheets)
 				   });
 }
 
-TEST(SkipFloorColumnWallSheetCoversEveryBeamHeight)
+TEST(ColumnWallSheetPerPlanLevelLikeFloorFraming)
 {
-	// スキップフロア_サンプルの 2 階は横架材の高さが 2 つ（2-1 / 2±0）あるが、柱壁伏図は
-	// 階に 1 枚で、どちらの高さに立つ柱も載せる（柱梁伏図の 2 枚に映る柱の和）。
+	// 柱壁伏図は柱梁伏図と同じ規則で伏図レベルごとに 1 枚（ご要望。M45）。スキップ
+	// フロア_サンプルの 2 階は横架材の高さが 2 つ（2-1 / 2±0）あるので柱壁伏図も 2 枚で、
+	// それぞれ同じ伏図レベルの柱梁伏図と同じ柱レイヤを映し、その伏図レベルに立つ耐力壁だけを
+	// 映す。
 	bool ok = false;
 	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
 	Context context(model);
 	const std::vector<SheetCommand> framing = buildFloorFramingSheetCommands(context);
 	const std::vector<SheetCommand> sheets = buildColumnWallSheetCommands(context);
-	CHECK_EQ(sheets.size(), std::size_t(2));
-	if (sheets.size() != 2 || framing.size() < 3)
+	const std::vector<std::string> titles = {"1階柱壁伏図", "2階柱壁伏図（FL-872）",
+											 "2階柱壁伏図（FL-40）"};
+	CHECK_EQ(sheets.size(), titles.size());
+	if (sheets.size() != titles.size() || framing.size() < 3)
 		return;
-	CHECK_EQ(sheets[0].title, std::string("1階柱壁伏図"));
-	CHECK_EQ(sheets[1].title, std::string("2階柱壁伏図"));
-	for (const std::size_t k : {std::size_t(1), std::size_t(2)})
+	for (std::size_t k = 0; k < titles.size(); ++k)
 	{
+		CHECK_EQ(sheets[k].title, titles[k]);
+		// 柱は同じ伏図レベルの柱梁伏図と同じ span レイヤ。
+		std::vector<std::string> framingColumns;
 		for (const std::string& layer : framing[k].viewport.layers)
 		{
-			if (layer.size() > 4 && layer.ends_with("-柱"))
-				CHECK(contains(sheets[1].viewport.layers, layer));
+			if (layer.ends_with("-柱"))
+				framingColumns.push_back(layer);
 		}
+		std::vector<std::string> columns;
+		for (const std::string& layer : sheets[k].viewport.layers)
+		{
+			if (layer.ends_with("-柱"))
+				columns.push_back(layer);
+		}
+		CHECK(columns == framingColumns);
+	}
+	// 耐力壁はその伏図レベルに立つものだけ（2-1 の柱壁伏図に 2±0 の耐力壁を混ぜない）。
+	for (const std::string& layer : sheets[1].viewport.layers)
+	{
+		if (layer.ends_with("-耐力壁"))
+			CHECK(layer.starts_with("2-1_"));
+	}
+	for (const std::string& layer : sheets[2].viewport.layers)
+	{
+		if (layer.ends_with("-耐力壁"))
+			CHECK(layer.starts_with("2±0_"));
 	}
 }
 
 TEST(SheetsStackFromTheBottomStory)
 {
-	// 伏図は下の階から積み上げる（ご要望。M45）: 基礎伏図 →（階ごとに）その階の柱梁伏図
-	// （伏図レベルの順）→ その階の柱壁伏図 → … → 母屋伏図。スキップフロアの 2 階は
-	// 床伏図が 2 枚あり、柱壁伏図はその 2 枚の後ろに 1 枚。
+	// 伏図は下から積み上げる（ご要望。M45）: 基礎伏図 →（伏図レベルの順に）柱梁伏図 →
+	// 同じ伏図レベルの柱壁伏図 → … → 母屋伏図。スキップフロアの 2 階は段ごとに
+	// 床伏図・柱壁伏図が対で並ぶ。
 	bool ok = false;
 	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
 	CHECK(ok);
@@ -512,8 +542,9 @@ TEST(SheetsStackFromTheBottomStory)
 	std::vector<std::string> expected = {"1階床伏図",
 										 "1階柱壁伏図",
 										 "2階床伏図（FL-872）",
+										 "2階柱壁伏図（FL-872）",
 										 "2階床伏図（FL-40）",
-										 "2階柱壁伏図",
+										 "2階柱壁伏図（FL-40）",
 										 "2階小屋伏図（軒高-832）",
 										 "2階小屋伏図（軒高-364）",
 										 "2階小屋伏図（軒高±0）"};
