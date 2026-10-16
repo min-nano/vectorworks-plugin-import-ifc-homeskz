@@ -1286,6 +1286,35 @@ namespace HomeskzIfcImport::parse
 	} // namespace
 
 	std::vector<core::DimensionChainCommand>
+	columnDimensionChains(const std::vector<core::ColumnCommand>& columns, const core::Vec2& max)
+	{
+		std::vector<double> xs;
+		std::vector<double> ys;
+		xs.reserve(columns.size());
+		ys.reserve(columns.size());
+		for (const core::ColumnCommand& column : columns)
+		{
+			xs.push_back(column.position.x);
+			ys.push_back(column.position.y);
+		}
+		std::vector<DimensionChainCommand> out;
+		const auto emit = [&out](DimensionAxis axis, std::vector<double> stops, double base)
+		{
+			if (stops.size() < 2)
+				return;
+			std::vector<double> overall{stops.front(), stops.back()};
+			const bool withOverall = !sameStops(overall, stops);
+			out.push_back(makeChain(axis, std::move(stops), base, 1, 0));
+			if (withOverall)
+				out.push_back(makeChain(axis, std::move(overall), base, 1, 1));
+		};
+		// 上（X）→ 右（Y）の順。全長は床伏図と同じく上と右に出す。
+		emit(DimensionAxis::Horizontal, mergeStops(std::move(xs)), max.y);
+		emit(DimensionAxis::Vertical, mergeStops(std::move(ys)), max.x);
+		return out;
+	}
+
+	std::vector<core::DimensionChainCommand>
 	foundationDimensionChains(const std::vector<core::WallCommand>& walls,
 							  const std::vector<core::SymbolCommand>& anchorBolts,
 							  const std::vector<core::GridCommand>& grids, const core::Vec2& min,
@@ -1581,6 +1610,9 @@ namespace HomeskzIfcImport::parse
 			// 外周の横架材に乗る柱と、外周の横架材に取り合う直交する梁だけを出し、それ以外は
 			// 内部の横架材に沿う列が押さえる。
 			return framingDimensionChains(members, columns, document.grids, min, max);
+		case core::PlanKind::ColumnWall:
+			// 柱壁伏図（M45）は柱の位置だけを押さえる（耐力壁の有無に依らない。ご要望）。
+			return columnDimensionChains(columns, max);
 		case core::PlanKind::Moya:
 		{
 			// 母屋・登り梁を床伏図・小屋伏図と同じく通りに沿って押さえ、斜めの登り梁は交点を

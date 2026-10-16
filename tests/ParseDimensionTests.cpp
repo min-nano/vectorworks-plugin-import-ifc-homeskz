@@ -596,6 +596,47 @@ TEST(FramingChainsKeepTheOverallOnASideWithoutAnExteriorLine)
 	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 1820.0}, 1880.0, 1, 0));
 }
 
+TEST(ColumnChainsPressEveryColumnWithoutWalls)
+{
+	// 柱壁伏図は耐力壁の有無に依らず柱の位置を押さえる（ご要望。M45）: 上に全柱の X、
+	// 右に全柱の Y、その外に全長。どの通りにも乗らない柱（1365, 455）も押さえる。
+	const std::vector<ColumnCommand> columns{
+		makeColumn("1±0_2±0-柱", Vec2{0.0, 0.0}), makeColumn("1±0_2±0-柱", Vec2{1820.0, 0.0}),
+		makeColumn("1±0_2±0-柱", Vec2{0.0, 1820.0}), makeColumn("1±0_2±0-柱", Vec2{1820.0, 1820.0}),
+		makeColumn("1±0_2±0-柱", Vec2{1365.0, 455.0})};
+	const std::vector<DimensionChainCommand> chains =
+		parse::columnDimensionChains(columns, Vec2{1880.0, 1880.0});
+	CHECK_EQ(chains.size(), std::size_t(4));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 1365.0, 1820.0}, 1880.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Horizontal, {0.0, 1820.0}, 1880.0, 1, 1));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 455.0, 1820.0}, 1880.0, 1, 0));
+	CHECK(hasChain(chains, DimensionAxis::Vertical, {0.0, 1820.0}, 1880.0, 1, 1));
+
+	// 列が全長そのもの（柱が 2 本の向き）なら全長を重ねず、1 本しかない向きは出さない。
+	const std::vector<DimensionChainCommand> pair = parse::columnDimensionChains(
+		{makeColumn("1±0_2±0-柱", Vec2{0.0, 0.0}), makeColumn("1±0_2±0-柱", Vec2{910.0, 0.0})},
+		Vec2{970.0, 60.0});
+	CHECK_EQ(pair.size(), std::size_t(1));
+	CHECK(hasChain(pair, DimensionAxis::Horizontal, {0.0, 910.0}, 60.0, 1, 0));
+	CHECK(parse::columnDimensionChains({}, Vec2{0.0, 0.0}).empty());
+}
+
+TEST(ColumnWallPlanDimensionsOnlyItsColumns)
+{
+	// 柱壁伏図の寸法は表示レイヤの柱だけで決まる（耐力壁・ほかのレイヤの柱は数えない）。
+	Document document;
+	document.columns = {makeColumn("1±0_2±0-柱", Vec2{0.0, 0.0}),
+						makeColumn("1±0_2±0-柱", Vec2{910.0, 0.0}),
+						makeColumn("2±0_R±0-柱", Vec2{455.0, 0.0})};
+	const std::vector<DimensionChainCommand> chains = parse::buildPlanDimensionCommands(
+		document, makeSheet(PlanKind::ColumnWall, {"1±0_2±0-柱"}));
+	CHECK_EQ(chains.size(), std::size_t(1));
+	const DimensionChainCommand* top = findChain(chains, DimensionAxis::Horizontal, 1, 0);
+	CHECK(top != nullptr);
+	if (top != nullptr)
+		CHECK(top->stops == std::vector<double>({0.0, 910.0}));
+}
+
 TEST(FramingPlanDimensionsColumnsAndBeamsOnItsLayers)
 {
 	Document document;

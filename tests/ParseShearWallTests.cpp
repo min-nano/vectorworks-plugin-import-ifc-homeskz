@@ -641,11 +641,12 @@ TEST(shear_wall_stories_carry_the_shear_wall_level)
 	}
 }
 
-TEST(shear_wall_floor_plan_shows_its_own_storey)
+TEST(shear_wall_column_wall_plan_shows_its_own_storey)
 {
-	// 伏図には**その階自身**の耐力壁が載る（1 階床＝土台伏図 → "1±0_…-耐力壁"、
-	// 2 階床伏図 → "2±0_…-耐力壁"）。「n 階の耐力壁」は n 階の伏図で読む、という図面の
-	// 呼び方に合わせた規約（parse/Sheet の M19 のコメント）。
+	// 耐力壁は**柱壁伏図にだけ**載り、床伏図には載らない（M45。ご要望）。柱壁伏図には
+	// **その階自身**の耐力壁が載る（1 階柱壁伏図 → "1±0_…-耐力壁"、2 階柱壁伏図 →
+	// "2±0_…-耐力壁"）。「n 階の耐力壁」は n 階の図で読む、という図面の呼び方に合わせた
+	// 規約（M19 から引き継ぐ）。
 	const Document& document = fixtureDocument("サンプル1 (住木邸新築工事).ifc");
 	std::size_t checked = 0;
 	const auto hasWallFrom = [](const std::vector<std::string>& layers, const std::string& from)
@@ -656,16 +657,21 @@ TEST(shear_wall_floor_plan_shows_its_own_storey)
 	};
 	for (const core::SheetCommand& sheet : document.sheets)
 	{
-		const auto* const expected = sheet.title == "1階床伏図"	  ? "1±0"
-									 : sheet.title == "2階床伏図" ? "2±0"
-																  : nullptr;
+		if (sheet.title == "1階床伏図" || sheet.title == "2階床伏図")
+		{
+			CHECK(!hasWallFrom(sheet.viewport.layers, "1±0"));
+			CHECK(!hasWallFrom(sheet.viewport.layers, "2±0"));
+			continue;
+		}
+		const auto* const expected = sheet.title == "1階柱壁伏図"	? "1±0"
+									 : sheet.title == "2階柱壁伏図" ? "2±0"
+																	: nullptr;
 		if (expected == nullptr)
 			continue;
 		++checked;
 		CHECK(hasWallFrom(sheet.viewport.layers, expected));
-		// 他の階の耐力壁は載せない（下の階のものを載せていたときは、上の階の横架材に
-		// 必ず隠れていた）。
-		const auto* const other = sheet.title == "1階床伏図" ? "2±0" : "1±0";
+		// 他の階の耐力壁は載せない。
+		const auto* const other = sheet.title == "1階柱壁伏図" ? "2±0" : "1±0";
 		CHECK(!hasWallFrom(sheet.viewport.layers, other));
 	}
 	CHECK_EQ(checked, static_cast<std::size_t>(2));
