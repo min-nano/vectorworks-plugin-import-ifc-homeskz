@@ -37,18 +37,24 @@ namespace HomeskzIfcImport::parse
 {
 	namespace
 	{
-		// 伏図 1 枚の sheet 命令を組み立てる。番号・タイトルは図面タイトル／図番と同じ値を使
-		// う。withLegend なら、グラフィック凡例をシートレイヤに載せる（空の凡例を作らないため
+		// 伏図 1 枚の番号を決める。番号は図番と同じ値を使う。
+		void numberSheet(core::SheetCommand& sheet, std::string number)
+		{
+			sheet.number = std::move(number);
+			sheet.viewport.drawingNumber = sheet.number;
+		}
+
+		// 伏図 1 枚の sheet 命令を組み立てる。タイトルは図面タイトルと同じ値を使う。番号は
+		// 並びが決まってから振る（numberSheet。基礎伏図のほかは buildSheetCommands）。
+		// withLegend なら、グラフィック凡例をシートレイヤに載せる（空の凡例を作らないため
 		// の出し分けは呼び出し側が持つ。ヘッダ冒頭）。
-		core::SheetCommand makeSheet(core::PlanKind kind, std::string number, std::string title,
+		core::SheetCommand makeSheet(core::PlanKind kind, std::string title,
 									 std::vector<std::string> layers, bool withLegend = false)
 		{
 			core::SheetCommand sheet;
-			sheet.number = std::move(number);
 			sheet.title = std::move(title);
 			// 伏図の種類（M31）。寸法で何を押さえるかは種類で決まる（parse/Dimension）。
 			sheet.kind = kind;
-			sheet.viewport.drawingNumber = sheet.number;
 			sheet.viewport.drawingTitle = sheet.title;
 			sheet.viewport.layers = std::move(layers);
 			if (withLegend)
@@ -141,8 +147,10 @@ namespace HomeskzIfcImport::parse
 		// に残るだけになる（あちらは「載せるシンボルが 1 つも無ければ空リスト」と書いていた）。
 		const bool withLegend = !context.anchorBolts().empty();
 
-		core::SheetCommand sheet = makeSheet(core::PlanKind::Foundation, kFoundationSheetNumber,
-											 kFoundationSheetTitle, std::move(layers), withLegend);
+		core::SheetCommand sheet = makeSheet(core::PlanKind::Foundation, kFoundationSheetTitle,
+											 std::move(layers), withLegend);
+		// 基礎伏図の番号は 1 で一定（ほかの伏図の並びに依らない）。
+		numberSheet(sheet, kFoundationSheetNumber);
 		// 床付け（捨てコンクリート・砕石）は**クラスで隠す**（ご要望）。伏図は基礎の形を
 		// 読む図で、床付けは要らない。レイヤでは切り分けられない（底盤の構成層・地中梁の
 		// 下の床付けソリッドは底盤と同じレイヤに載る）ので、素材クラス（parse/StructuralClass）
@@ -154,89 +162,113 @@ namespace HomeskzIfcImport::parse
 		return commands;
 	}
 
+	namespace
+	{
+		// 階に属する伏図 1 枚。柱梁伏図・柱壁伏図を階ごとに並べ替えるために、どの階の図かを
+		// 添えて返す（buildSheetCommands）。
+		struct StorySheet
+		{
+			std::size_t story = 0;
+			core::SheetCommand sheet;
+		};
+
+		std::vector<core::SheetCommand> sheetsOf(std::vector<StorySheet> sheets)
+		{
+			std::vector<core::SheetCommand> out;
+			out.reserve(sheets.size());
+			for (StorySheet& entry : sheets)
+				out.push_back(std::move(entry.sheet));
+			return out;
+		}
+
+		std::vector<StorySheet> framingSheets(Context& context)
+		{
+			const std::vector<StoryInfo>& stories = context.stories();
+			// 伏図は**横架材の高さ（伏図レベル）ごとに 1 枚**（parse/PlanLevel）。どの階も高さが
+			// 1 つなら階ごとに 1 枚＝従来と同じ。
+			const std::vector<PlanLevel>& planLevels = context.planLevels();
+			const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns(), planLevels);
+			const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
+			const bool foundation = hasFoundation(context.model());
+			const std::vector<core::FloorCommand>& floors = context.floors();
+			const std::vector<core::MemberCommand>& members = context.members();
+			const std::vector<ColumnSpan> noboribariSpans =
+				collectNoboribariSpans(members, planLevels);
+
+			std::vector<StorySheet> commands;
+			commands.reserve(planLevels.size());
+			for (const PlanLevel& level : planLevels)
+			{
+				const std::size_t i = level.story;
+				if (i >= stories.size())
+					continue;
+				const StoryInfo& story = stories[i];
+				const bool isTop = story.isTop;
+				// その伏図レベルの横架材レイヤ（"2±0-横架材" / "2-1-横架材"）。
+				std::vector<std::string> layers{planLevelBeamLayer(level, story)};
+				// 軒桁は専用レイヤに分けてある（母屋伏図に薄く重ねるため。parse/PlanLevel）ので、
+				// 横架材レイヤと一緒に映す。
+				if (const std::string eaves = planLevelLayer(level, story, kLevelNokigeta);
+					anyMemberOnLayer(members, eaves))
+					layers.push_back(eaves);
+
+				// 切断レベル（その伏図レベルの通し番号 + 0.25）を span が含む柱レイヤ。span の
+				// 番号も伏図レベルの通し番号なので（parse/Column）、この伏図の横架材の上に立つ柱
+				// と、下から貫いてこの高さを通り過ぎる柱の断面が出る。
+				const double cut = static_cast<double>(level.ordinal) + kFloorPlanCutOffset - 1.0;
+				const std::vector<std::string> spanLayers = spanLayersAtCut(spans, cut);
+				layers.insert(layers.end(), spanLayers.begin(), spanLayers.end());
+
+				// 切断位置の**直下**の伏図記号レイヤ（M12）。その伏図が対象とする横架材の下に
+				// ある柱・小屋束を平面記号で示す（例 2 階床伏図＝切断 2.25 → "2±0-柱伏図記号"＝
+				// 1 階管柱 "1±0_2±0-柱" の平面記号）。断面記号（span レイヤ）とは排他になる。
+				// 伏図レベルごとの伏図では、この高さの横架材を受ける柱だけが出る（上端が届く
+				// 伏図レベルで to を決めているため。parse/Column の spanToOrdinal）。
+				if (const std::string markLayer = planMarkLayerBelowCut(markLayers, cut);
+					!markLayer.empty())
+					layers.push_back(markLayer);
+
+				// 耐力壁は映さない（M45。ご要望）。耐力壁は階ごとの柱壁伏図
+				// （buildColumnWallSheetCommands）にだけ映す。
+
+				// 登り梁はこの伏図レベルの高さを跨ぐものを映す（ご要望。parse/PlanLevel の
+				// noboribariSpan が span レイヤへ分けてある。この伏図レベルを範囲に含むもの）。
+				const std::vector<std::string> noboribariLayers =
+					spanLayersAtCut(noboribariSpans, static_cast<double>(level.ordinal));
+				layers.insert(layers.end(), noboribariLayers.begin(), noboribariLayers.end());
+
+				if (!isTop)
+				{
+					// 最下階は基礎があるときだけアンカーボルトを重ねる（土台と一緒に見たい）。
+					if (i == 0 && foundation)
+						layers.emplace_back(kLayerFoundationAnchor);
+					// 床はその伏図レベルの "n±0-FL"。標準のレイヤは床が無くてもストーリが作るので
+					// 従来どおり常に載せ、標準でない高さのレイヤは床があるときだけ（parse/Story）。
+					const std::string floorLayer = planLevelLayer(level, story, kLevelFL);
+					if (level.standard ||
+						std::ranges::any_of(floors, [&floorLayer](const core::FloorCommand& floor)
+											{ return floor.layer == floorLayer; }))
+						layers.push_back(floorLayer);
+				}
+				layers.emplace_back(core::kGridLayer);
+
+				// 階に伏図レベルが 2 つ以上あれば、タイトルに高さを添えて見分ける
+				// （"2階床伏図（FL-872）"）。
+				std::string title = floorPlanTitle(i, isTop, stories.size()) +
+									planLevelTitleSuffix(planLevels, level);
+				// グラフィック凡例は常に載せる（何が並ぶかは凡例オブジェクトのソース定義が決める
+				// ので、ここでは中身の有無を判断できない）。
+				commands.push_back(
+					StorySheet{i, makeSheet(core::PlanKind::Framing, std::move(title),
+											std::move(layers), true)});
+			}
+			return commands;
+		}
+	} // namespace
+
 	std::vector<core::SheetCommand> buildFloorFramingSheetCommands(Context& context)
 	{
-		const std::vector<StoryInfo>& stories = context.stories();
-		// 伏図は**横架材の高さ（伏図レベル）ごとに 1 枚**（parse/PlanLevel）。どの階も高さが
-		// 1 つなら階ごとに 1 枚＝従来と同じ。
-		const std::vector<PlanLevel>& planLevels = context.planLevels();
-		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns(), planLevels);
-		const std::vector<PlanMarkLayer> markLayers = collectPlanMarkLayers(spans);
-		const bool foundation = hasFoundation(context.model());
-		const std::vector<core::FloorCommand>& floors = context.floors();
-		const std::vector<core::MemberCommand>& members = context.members();
-		const std::vector<ColumnSpan> noboribariSpans = collectNoboribariSpans(members, planLevels);
-
-		std::vector<core::SheetCommand> commands;
-		commands.reserve(planLevels.size());
-		// 図番は伏図レベルの並び順（通し番号は母屋のレベルの分だけ飛ぶので使わない）。
-		int number = kFloorPlanStartNumber;
-		for (const PlanLevel& level : planLevels)
-		{
-			const std::size_t i = level.story;
-			if (i >= stories.size())
-				continue;
-			const StoryInfo& story = stories[i];
-			const bool isTop = story.isTop;
-			// その伏図レベルの横架材レイヤ（"2±0-横架材" / "2-1-横架材"）。
-			std::vector<std::string> layers{planLevelBeamLayer(level, story)};
-			// 軒桁は専用レイヤに分けてある（母屋伏図に薄く重ねるため。parse/PlanLevel）ので、
-			// 横架材レイヤと一緒に映す。
-			if (const std::string eaves = planLevelLayer(level, story, kLevelNokigeta);
-				anyMemberOnLayer(members, eaves))
-				layers.push_back(eaves);
-
-			// 切断レベル（その伏図レベルの通し番号 + 0.25）を span が含む柱レイヤ。span の
-			// 番号も伏図レベルの通し番号なので（parse/Column）、この伏図の横架材の上に立つ柱
-			// と、下から貫いてこの高さを通り過ぎる柱の断面が出る。
-			const double cut = static_cast<double>(level.ordinal) + kFloorPlanCutOffset - 1.0;
-			const std::vector<std::string> spanLayers = spanLayersAtCut(spans, cut);
-			layers.insert(layers.end(), spanLayers.begin(), spanLayers.end());
-
-			// 切断位置の**直下**の伏図記号レイヤ（M12）。その伏図が対象とする横架材の下に
-			// ある柱・小屋束を平面記号で示す（例 2 階床伏図＝切断 2.25 → "2±0-柱伏図記号"＝
-			// 1 階管柱 "1±0_2±0-柱" の平面記号）。断面記号（span レイヤ）とは排他になる。
-			// 伏図レベルごとの伏図では、この高さの横架材を受ける柱だけが出る（上端が届く
-			// 伏図レベルで to を決めているため。parse/Column の spanToOrdinal）。
-			if (const std::string markLayer = planMarkLayerBelowCut(markLayers, cut);
-				!markLayer.empty())
-				layers.push_back(markLayer);
-
-			// 耐力壁は映さない（M45。ご要望）。耐力壁は階ごとの柱壁伏図
-			// （buildColumnWallSheetCommands）にだけ映す。
-
-			// 登り梁はこの伏図レベルの高さを跨ぐものを映す（ご要望。parse/PlanLevel の
-			// noboribariSpan が span レイヤへ分けてある。この伏図レベルを範囲に含むもの）。
-			const std::vector<std::string> noboribariLayers =
-				spanLayersAtCut(noboribariSpans, static_cast<double>(level.ordinal));
-			layers.insert(layers.end(), noboribariLayers.begin(), noboribariLayers.end());
-
-			if (!isTop)
-			{
-				// 最下階は基礎があるときだけアンカーボルトを重ねる（土台と一緒に見たい）。
-				if (i == 0 && foundation)
-					layers.emplace_back(kLayerFoundationAnchor);
-				// 床はその伏図レベルの "n±0-FL"。標準のレイヤは床が無くてもストーリが作るので
-				// 従来どおり常に載せ、標準でない高さのレイヤは床があるときだけ（parse/Story）。
-				const std::string floorLayer = planLevelLayer(level, story, kLevelFL);
-				if (level.standard ||
-					std::ranges::any_of(floors, [&floorLayer](const core::FloorCommand& floor)
-										{ return floor.layer == floorLayer; }))
-					layers.push_back(floorLayer);
-			}
-			layers.emplace_back(core::kGridLayer);
-
-			// 階に伏図レベルが 2 つ以上あれば、タイトルに高さを添えて見分ける
-			// （"2階床伏図（FL-872）"）。
-			std::string title =
-				floorPlanTitle(i, isTop, stories.size()) + planLevelTitleSuffix(planLevels, level);
-			std::string sheetNumber = std::to_string(number++);
-			// グラフィック凡例は常に載せる（何が並ぶかは凡例オブジェクトのソース定義が決める
-			// ので、ここでは中身の有無を判断できない）。
-			commands.push_back(makeSheet(core::PlanKind::Framing, std::move(sheetNumber),
-										 std::move(title), std::move(layers), true));
-		}
-		return commands;
+		return sheetsOf(framingSheets(context));
 	}
 
 	std::vector<core::SheetCommand> buildMoyaSheetCommands(Context& context)
@@ -251,12 +283,7 @@ namespace HomeskzIfcImport::parse
 		const std::vector<core::MemberCommand>& members = context.members();
 		const std::vector<ColumnSpan> noboribariSpans = collectNoboribariSpans(members, planLevels);
 
-		// 番号は 基礎伏図（1）＋柱梁伏図（伏図レベルの数）の次から。**柱梁伏図は基礎の
-		// 有無に関わらず 2 から振る**ので、ここも基礎の有無に依存しない。
-		const int baseNumber = kFloorPlanStartNumber + static_cast<int>(planLevels.size());
-
 		std::vector<core::SheetCommand> commands;
-		int seq = 0;
 		for (std::size_t i = 0; i < stories.size(); ++i)
 		{
 			// 屋根版を持つ階（最上階の主屋根・中間階の下屋根）だけに母屋伏図を作る。
@@ -303,12 +330,9 @@ namespace HomeskzIfcImport::parse
 
 			layers.emplace_back(core::kGridLayer);
 
-			std::string title = moyaPlanTitle(i);
-			std::string number = std::to_string(baseNumber + seq);
-			++seq;
 			// 柱梁伏図と同じく凡例を載せる（母屋伏図に映るシンボルも同じ形で集まる）。
-			core::SheetCommand sheet = makeSheet(core::PlanKind::Moya, std::move(number),
-												 std::move(title), std::move(layers), true);
+			core::SheetCommand sheet =
+				makeSheet(core::PlanKind::Moya, moyaPlanTitle(i), std::move(layers), true);
 			// 同じ階の軒桁を薄く重ねる（ご要望: 登り梁が取り付く相手を見せる。寸法は
 			// parse/Dimension がその交点を押さえる）。軒桁だけのレイヤなので、仕口・継手・
 			// 小屋梁は出ない（parse/Joint・parse/Splice は横架材レイヤへ置く）。軒桁も伏図
@@ -327,73 +351,98 @@ namespace HomeskzIfcImport::parse
 		return commands;
 	}
 
-	std::vector<core::SheetCommand> buildColumnWallSheetCommands(Context& context, int startNumber)
+	namespace
 	{
-		const std::vector<StoryInfo>& stories = context.stories();
-		const std::vector<PlanLevel>& planLevels = context.planLevels();
-		const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns(), planLevels);
-		const std::vector<core::ShearWallCommand>& shearWalls = context.shearWalls();
-
-		std::vector<core::SheetCommand> commands;
-		int number = startNumber;
-		for (std::size_t i = 0; i < stories.size(); ++i)
+		std::vector<StorySheet> columnWallSheets(Context& context)
 		{
-			// 最上階（小屋組の階）は柱壁伏図を作らない。そこに立つのは小屋束で、母屋伏図が
-			// 伏図記号で示す（buildMoyaSheetCommands）。
-			if (stories[i].isTop)
-				continue;
+			const std::vector<StoryInfo>& stories = context.stories();
+			const std::vector<PlanLevel>& planLevels = context.planLevels();
+			const std::vector<ColumnSpan> spans = collectColumnSpans(context.columns(), planLevels);
+			const std::vector<core::ShearWallCommand>& shearWalls = context.shearWalls();
 
-			// その階の伏図レベルすべてについて、床伏図と同じ切断（通し番号 + 0.25）を span が
-			// 含む柱レイヤと、そこに立つ耐力壁の span レイヤを集める。スキップフロアで階に
-			// 伏図レベルが 2 つ以上あっても柱壁伏図は階に 1 枚なので、どの高さに立つ柱・
-			// 耐力壁も載せる。通し柱は切断ごとに同じレイヤが返るので重複を除く。
-			std::vector<std::string> columnLayers;
-			std::vector<std::string> wallLayers;
-			for (const PlanLevel* level : storyPlanLevels(planLevels, i))
+			std::vector<StorySheet> commands;
+			for (std::size_t i = 0; i < stories.size(); ++i)
 			{
-				const double cut = static_cast<double>(level->ordinal) + kFloorPlanCutOffset - 1.0;
-				for (std::string& layer : spanLayersAtCut(spans, cut))
+				// 最上階（小屋組の階）は柱壁伏図を作らない。そこに立つのは小屋束で、母屋伏図が
+				// 伏図記号で示す（buildMoyaSheetCommands）。
+				if (stories[i].isTop)
+					continue;
+
+				// その階の伏図レベルすべてについて、床伏図と同じ切断（通し番号 + 0.25）を span が
+				// 含む柱レイヤと、そこに立つ耐力壁の span レイヤを集める。スキップフロアで階に
+				// 伏図レベルが 2 つ以上あっても柱壁伏図は階に 1 枚なので、どの高さに立つ柱・
+				// 耐力壁も載せる。通し柱は切断ごとに同じレイヤが返るので重複を除く。
+				std::vector<std::string> columnLayers;
+				std::vector<std::string> wallLayers;
+				for (const PlanLevel* level : storyPlanLevels(planLevels, i))
 				{
-					if (std::ranges::find(columnLayers, layer) == columnLayers.end())
-						columnLayers.push_back(std::move(layer));
+					const double cut =
+						static_cast<double>(level->ordinal) + kFloorPlanCutOffset - 1.0;
+					for (std::string& layer : spanLayersAtCut(spans, cut))
+					{
+						if (std::ranges::find(columnLayers, layer) == columnLayers.end())
+							columnLayers.push_back(std::move(layer));
+					}
+					for (std::string& layer :
+						 shearWallLayersFrom(shearWalls, planLevelLabel(*level, stories[i])))
+					{
+						if (std::ranges::find(wallLayers, layer) == wallLayers.end())
+							wallLayers.push_back(std::move(layer));
+					}
 				}
-				for (std::string& layer :
-					 shearWallLayersFrom(shearWalls, planLevelLabel(*level, stories[i])))
-				{
-					if (std::ranges::find(wallLayers, layer) == wallLayers.end())
-						wallLayers.push_back(std::move(layer));
-				}
+				// 柱も耐力壁も無い階には作らない（空のビューポートを残さない。CLAUDE.md 開発の
+				// 基本方針 5）。
+				if (columnLayers.empty() && wallLayers.empty())
+					continue;
+
+				std::vector<std::string> layers = std::move(columnLayers);
+				layers.insert(layers.end(), wallLayers.begin(), wallLayers.end());
+				layers.emplace_back(core::kGridLayer);
+
+				// 凡例は床伏図と同じく常に載せる（中身は凡例オブジェクトのソース定義が決める）。
+				commands.push_back(
+					StorySheet{i, makeSheet(core::PlanKind::ColumnWall, columnWallPlanTitle(i),
+											std::move(layers), true)});
 			}
-			// 柱も耐力壁も無い階には作らない（空のビューポートを残さない。CLAUDE.md 開発の
-			// 基本方針 5）。
-			if (columnLayers.empty() && wallLayers.empty())
-				continue;
-
-			std::vector<std::string> layers = std::move(columnLayers);
-			layers.insert(layers.end(), wallLayers.begin(), wallLayers.end());
-			layers.emplace_back(core::kGridLayer);
-
-			// 凡例は床伏図と同じく常に載せる（中身は凡例オブジェクトのソース定義が決める）。
-			commands.push_back(makeSheet(core::PlanKind::ColumnWall, std::to_string(number++),
-										 columnWallPlanTitle(i), std::move(layers), true));
+			return commands;
 		}
-		return commands;
+	} // namespace
+
+	std::vector<core::SheetCommand> buildColumnWallSheetCommands(Context& context)
+	{
+		return sheetsOf(columnWallSheets(context));
 	}
 
 	std::vector<core::SheetCommand> buildSheetCommands(Context& context)
 	{
 		std::vector<core::SheetCommand> commands = buildFoundationSheetCommands(context);
-		for (core::SheetCommand& sheet : buildFloorFramingSheetCommands(context))
+		const std::size_t numbered = commands.size();
+
+		// 柱梁伏図と柱壁伏図は**下の階から積み上げる**（ご要望。M45）: 階ごとに、その階の
+		// 柱梁伏図（伏図レベルの順）→ その階の柱壁伏図。どちらも階の昇順に並んでいるので、
+		// 2 つの列を階で突き合わせて併合する。
+		const std::vector<StorySheet> framing = framingSheets(context);
+		const std::vector<StorySheet> columnWalls = columnWallSheets(context);
+		std::size_t wall = 0;
+		for (const StorySheet& entry : framing)
+		{
+			// この柱梁伏図より下の階の柱壁伏図を先に出す（床伏図の無い階の柱壁伏図も
+			// 階の順を保つ）。
+			while (wall < columnWalls.size() && columnWalls[wall].story < entry.story)
+				commands.push_back(columnWalls[wall++].sheet);
+			commands.push_back(entry.sheet);
+		}
+		while (wall < columnWalls.size())
+			commands.push_back(columnWalls[wall++].sheet);
+
+		for (core::SheetCommand& sheet : buildMoyaSheetCommands(context))
 			commands.push_back(std::move(sheet));
-		std::vector<core::SheetCommand> moya = buildMoyaSheetCommands(context);
-		// 柱壁伏図は母屋伏図の続きの番号（基礎の有無に依らない番号の振り方は母屋伏図と同じ）。
-		const int columnWallStart = kFloorPlanStartNumber +
-									static_cast<int>(context.planLevels().size()) +
-									static_cast<int>(moya.size());
-		for (core::SheetCommand& sheet : moya)
-			commands.push_back(std::move(sheet));
-		for (core::SheetCommand& sheet : buildColumnWallSheetCommands(context, columnWallStart))
-			commands.push_back(std::move(sheet));
+
+		// 番号は基礎伏図（1）の後ろを 2 から並び順に振る。**基礎が無い文書でも 2 から**
+		// （kFloorPlanStartNumber。番号が基礎の有無で動かない）。
+		int number = kFloorPlanStartNumber;
+		for (std::size_t k = numbered; k < commands.size(); ++k)
+			numberSheet(commands[k], std::to_string(number++));
 		return commands;
 	}
 
@@ -417,11 +466,10 @@ namespace HomeskzIfcImport::parse
 		return buildMoyaSheetCommands(context);
 	}
 
-	std::vector<core::SheetCommand> buildColumnWallSheetCommands(const Model& model,
-																 int startNumber)
+	std::vector<core::SheetCommand> buildColumnWallSheetCommands(const Model& model)
 	{
 		Context context(model);
-		return buildColumnWallSheetCommands(context, startNumber);
+		return buildColumnWallSheetCommands(context);
 	}
 
 	std::vector<core::SheetCommand> buildSheetCommands(const Model& model)

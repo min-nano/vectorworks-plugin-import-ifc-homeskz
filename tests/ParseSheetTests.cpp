@@ -233,8 +233,8 @@ TEST(FloorFramingSheetPerPlanLevelWithBeamAndGridLayers)
 				const PlanLevel& level = levels[k];
 				const std::size_t i = level.story;
 				const bool isTop = stories[i].isTop;
-				CHECK(sheets[k].number ==
-					  std::to_string(kFloorPlanStartNumber + static_cast<int>(k)));
+				// 番号は並べる buildSheetCommands が振る（ここでは空）。
+				CHECK(sheets[k].number.empty());
 				CHECK(sheets[k].title == floorPlanTitle(i, isTop, stories.size()) +
 											 planLevelTitleSuffix(levels, level));
 
@@ -350,7 +350,7 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 			const auto stories = collectStories(context);
 			const std::vector<SheetCommand> sheets = buildMoyaSheetCommands(model);
 
-			// 屋根版を持つ階の数だけ作られ、番号は柱梁伏図の後に続く。
+			// 屋根版を持つ階の数だけ作られる。
 			std::size_t expected = 0;
 			for (const auto& info : stories)
 			{
@@ -365,10 +365,7 @@ TEST(MoyaSheetPerStoryWithRoofSlab)
 				if (!storyHasRoofSlab(context, stories[i].id))
 					continue;
 				const SheetCommand& sheet = sheets[seq];
-				// 柱梁伏図は伏図レベル（横架材の高さ）ごとに 1 枚。
-				const int base =
-					kFloorPlanStartNumber + static_cast<int>(context.planLevels().size());
-				CHECK(sheet.number == std::to_string(base + static_cast<int>(seq)));
+				CHECK(sheet.number.empty());
 				CHECK(sheet.title == moyaPlanTitle(i));
 				// 屋根版のある階には必ず垂木・野地板レイヤが作られる（parse/Story）。
 				CHECK(contains(sheet.viewport.layers, storyLayerName(i, stories[i].isTop, "垂木")));
@@ -415,11 +412,7 @@ TEST(ColumnWallSheetPerStoryWithColumnsAndShearWalls)
 						   if (sheet.kind == core::PlanKind::ColumnWall)
 							   sheets.push_back(&sheet);
 					   }
-					   // 柱壁伏図は伏図の最後に並ぶ（番号は母屋伏図の続き）。
 					   CHECK(!sheets.empty());
-					   if (sheets.empty())
-						   return;
-					   CHECK(sheets.front() == &all[all.size() - sheets.size()]);
 
 					   std::set<std::string> titles;
 					   for (const SheetCommand* sheet : sheets)
@@ -485,14 +478,12 @@ TEST(SkipFloorColumnWallSheetCoversEveryBeamHeight)
 	CHECK(ok);
 	Context context(model);
 	const std::vector<SheetCommand> framing = buildFloorFramingSheetCommands(context);
-	const std::vector<SheetCommand> sheets = buildColumnWallSheetCommands(context, 100);
+	const std::vector<SheetCommand> sheets = buildColumnWallSheetCommands(context);
 	CHECK_EQ(sheets.size(), std::size_t(2));
 	if (sheets.size() != 2 || framing.size() < 3)
 		return;
 	CHECK_EQ(sheets[0].title, std::string("1階柱壁伏図"));
-	CHECK_EQ(sheets[0].number, std::string("100"));
 	CHECK_EQ(sheets[1].title, std::string("2階柱壁伏図"));
-	CHECK_EQ(sheets[1].number, std::string("101"));
 	for (const std::size_t k : {std::size_t(1), std::size_t(2)})
 	{
 		for (const std::string& layer : framing[k].viewport.layers)
@@ -501,6 +492,44 @@ TEST(SkipFloorColumnWallSheetCoversEveryBeamHeight)
 				CHECK(contains(sheets[1].viewport.layers, layer));
 		}
 	}
+}
+
+TEST(SheetsStackFromTheBottomStory)
+{
+	// 伏図は下の階から積み上げる（ご要望。M45）: 基礎伏図 →（階ごとに）その階の柱梁伏図
+	// （伏図レベルの順）→ その階の柱壁伏図 → … → 母屋伏図。スキップフロアの 2 階は
+	// 床伏図が 2 枚あり、柱壁伏図はその 2 枚の後ろに 1 枚。
+	bool ok = false;
+	const Model& model = fixture("スキップフロア_サンプル.ifc", ok);
+	CHECK(ok);
+	const std::vector<SheetCommand> sheets = buildSheetCommands(model);
+	std::vector<std::string> titles;
+	for (const SheetCommand& sheet : sheets)
+	{
+		if (sheet.kind != core::PlanKind::Moya)
+			titles.push_back(sheet.title);
+	}
+	std::vector<std::string> expected = {"1階床伏図",
+										 "1階柱壁伏図",
+										 "2階床伏図（FL-872）",
+										 "2階床伏図（FL-40）",
+										 "2階柱壁伏図",
+										 "2階小屋伏図（軒高-832）",
+										 "2階小屋伏図（軒高-364）",
+										 "2階小屋伏図（軒高±0）"};
+	if (hasFoundation(model))
+		expected.insert(expected.begin(), kFoundationSheetTitle);
+	CHECK(titles == expected);
+	// 母屋伏図は最後にまとめて並ぶ。
+	bool moya = false;
+	for (const SheetCommand& sheet : sheets)
+	{
+		if (sheet.kind == core::PlanKind::Moya)
+			moya = true;
+		else
+			CHECK(!moya);
+	}
+	CHECK(moya);
 }
 
 TEST(SheetNumbersAreUniqueAndConsecutive)
@@ -589,7 +618,7 @@ TEST(FloorMoyaAndColumnWallSheetsAlwaysCarryLegend)
 			// 「凡例が有る」ことだけで、基礎伏図の凡例との違いも「どの伏図に載るか」しかない。
 			for (const std::vector<SheetCommand>& sheets :
 				 {buildFloorFramingSheetCommands(model), buildMoyaSheetCommands(model),
-				  buildColumnWallSheetCommands(model, 1)})
+				  buildColumnWallSheetCommands(model)})
 			{
 				for (const SheetCommand& sheet : sheets)
 				{

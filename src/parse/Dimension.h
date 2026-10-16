@@ -164,6 +164,17 @@ namespace HomeskzIfcImport::parse
 						   const std::vector<core::GridCommand>& grids, const core::Vec2& min,
 						   const core::Vec2& max);
 
+	// 柱壁伏図 1 枚ぶんの寸法の列（M45）。**耐力壁の有無に依らず柱の位置を押さえる**
+	// （ご要望）: 上に全柱の X、右に全柱の Y の列（1 段目）を並べ、その外に全長（2 段目。
+	// 列が全長そのものなら重ねない）。columns はその伏図に映る柱、max は図の外形の右上
+	// （上と右の列の補助線の根元）。
+	// 柱の位置の列が 2 点に満たない向きは出さない。
+	//
+	// 床伏図のように材の通りに沿って押さえないのは、柱壁伏図が横架材を映さず、耐力壁は
+	// すべての柱を通らないため（耐力壁に沿わせると、耐力壁の無い通りの柱が押さえられない）。
+	std::vector<core::DimensionChainCommand>
+	columnDimensionChains(const std::vector<core::ColumnCommand>& columns, const core::Vec2& max);
+
 	// 母屋伏図 1 枚ぶんの寸法の列（ヘッダ冒頭「母屋伏図も材の通りに沿って押さえる」）。
 	// members はその伏図に映る母屋・登り梁、eavesGirders は同じ階の軒桁、receivers は
 	// 母屋・登り梁を受ける材を探す先（文書の全横架材）、columns は柱。min / max・列の並びは
