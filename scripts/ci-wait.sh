@@ -216,7 +216,7 @@ GRACE_BASE=0
 # 締切・生存出力・API 連続失敗の打ち切りは poll_until が持つので、ここは状態を
 # 調べるだけでよい。
 #
-# shellcheck disable=SC2317 # poll_until から名前で間接的に呼ばれる。
+# shellcheck disable=SC2317,SC2329 # poll_until から名前で間接的に呼ばれる。
 probe_checks() {
 	local code total completed pending head
 
