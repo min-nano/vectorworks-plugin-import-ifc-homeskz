@@ -1,0 +1,4 @@
+# Claude Code が新しい worktree を作るときに写す、コミットしないファイル（.gitignore の書式）。
+# 手元のビルドの設定（SDK の場所など。各自の Mac に固有）。リポジトリの中の SDK は写らないので、
+# その中の VW_SDK_DIR はリポジトリの外の絶対パスで書く。
+CMakeUserPresets.json
