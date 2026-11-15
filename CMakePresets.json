@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "vw2026-base",
+      "hidden": true,
+      "description": "Vectorworks 2026 の手元のビルド（macOS）の共通設定。各自の vw2026 プリセットが継ぐ",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-vw2026",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "vw2026-base",
+      "hidden": true,
+      "configurePreset": "vw2026-base"
+    }
+  ]
+}

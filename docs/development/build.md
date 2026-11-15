@@ -29,28 +29,34 @@ Xcode（Vectorworks 2026 は公式に **Xcode 16.2** を対象）と **mac SDK**
    `build/min-nano_structure.vwpayload`（本体）です。殻は本体を隣から読むので、
    2 つを揃えて置きます。
 
-### 手元の設定をプリセットに置く（`CMakeUserPresets.json`）
+既定では Apple Silicon（`arm64`）向けにビルドします。ユニバーサルバイナリにするには:
 
-SDK の場所は各自の Mac に固有なので、**コミットしない** `CMakeUserPresets.json`
-（リポジトリ直下。`.gitignore` 済み）に書いておくと、`-DVW_SDK_DIR` を毎回渡さずに
-済みます。Claude のシェルでも、人のターミナルや IDE でも同じ設定になります。
-プリセット名は Vectorworks の版（`vw2026`）にします。SDK を同じ場所に置けば、他の
-プラグインのリポジトリとも 1 つの SDK を共有できます。
+```sh
+cmake -S . -B build -DVW_SDK_DIR=/path/to/sdk \
+  -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+```
+
+### 手元のビルド（プリセット `vw2026`）
+
+macOS の手元では、プリセット `vw2026`（Vectorworks の版）でビルドできます。共通の設定は、
+コミットしてある `CMakePresets.json` の隠しプリセット `vw2026-base` にあります（ビルド先
+`build-vw2026/`・`RelWithDebInfo`・生成器 `Unix Makefiles`）。各自の Mac に固有のもの——SDK の
+場所と並列数——だけを、コミットしない `CMakeUserPresets.json`（リポジトリ直下。`.gitignore`
+済み）に書いて継ぎます。Claude のシェルでも、人のターミナルや IDE でも同じ設定になります。
 
 ```json
 {
-  "version": 3,
+  "version": 2,
   "configurePresets": [
     {
       "name": "vw2026",
-      "binaryDir": "${sourceDir}/build-vw2026",
-      "cacheVariables": {
-        "VW_SDK_DIR": "$env{HOME}/vw-sdk/2026-NNA-eng-mac-SDK",
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
-      }
+      "inherits": "vw2026-base",
+      "cacheVariables": { "VW_SDK_DIR": "/Users/<you>/vw-sdk/2026-NNA-eng-mac-SDK" }
     }
   ],
-  "buildPresets": [{ "name": "vw2026", "configurePreset": "vw2026", "jobs": 4 }]
+  "buildPresets": [
+    { "name": "vw2026", "inherits": "vw2026-base", "configurePreset": "vw2026", "jobs": 4 }
+  ]
 }
 ```
 
@@ -58,18 +64,22 @@ SDK の場所は各自の Mac に固有なので、**コミットしない** `CM
 cmake --preset vw2026 && cmake --build --preset vw2026
 ```
 
-ビルドタイプは `RelWithDebInfo` にします（最適化しつつデバッグ情報を付けるので、
-Vectorworks が落ちたとき lldb で場所を追えます）。CI の `Release` とは最適化の段
-（`-O2` / `-O3`）とデバッグ情報だけが違い、`NDEBUG` はどちらでも定義されます。
-CMake 3.21 以上が要ります（プリセットの `version: 3`）。`.worktreeinclude` に載せて
-あるので、Claude Code が作る worktree にもこのファイルが写されます。
+成果物は `build-vw2026/` の下に、上の `build/` と同じ形で出ます（既定の `VW_BUILD_CHANNEL=both`
+なので、安定版と開発版の両方）。
 
-既定では Apple Silicon（`arm64`）向けにビルドします。ユニバーサルバイナリにするには:
-
-```sh
-cmake -S . -B build -DVW_SDK_DIR=/path/to/sdk \
-  -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-```
+- **macOS 用の例です。** Windows は Visual Studio の生成器を使い、`HOME` も無いので、
+  このプリセットは使いません（下の Windows の手順のとおり）。
+- **`VW_SDK_DIR` は各自の環境に書き換え、リポジトリの外の絶対パスにします**（`$env{HOME}/...`
+  でもよい）。`.worktreeinclude` で Claude Code の worktree へ写るのはこのファイルだけで、
+  リポジトリの中の SDK は写らないためです。環境変数 `VW_SDK_DIR` を使っているなら、
+  `cacheVariables` ごと省けばそちらが使われます（書くと環境変数より優先されます）。
+  SDK を同じ場所に置けば、他のプラグインのリポジトリとも 1 つの SDK を共有できます。
+- **`jobs` はマシンに合わせます**（目安はコア数）。
+- **`RelWithDebInfo`** は、Vectorworks が落ちたとき lldb で場所を追えるようにデバッグ情報を
+  付けたものです。CI の `Release` とは最適化の段（`-O2` / `-O3`）とデバッグ情報が違います
+  （`NDEBUG` はどちらでも定義されます）。最適化の違いで出方の変わる不具合は再現しないことが
+  あるので、そのときは `-DCMAKE_BUILD_TYPE=Release` で作り直します。
+- プリセットはスキーマの `version: 2` なので、CMake 3.20 で足ります。
 
 ## Windows
 
