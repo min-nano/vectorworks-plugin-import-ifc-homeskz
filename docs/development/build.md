@@ -46,7 +46,7 @@ SDK の場所は各自の Mac に固有なので、**コミットしない** `CM
       "binaryDir": "${sourceDir}/build-vw2026",
       "cacheVariables": {
         "VW_SDK_DIR": "$env{HOME}/vw-sdk/2026-NNA-eng-mac-SDK",
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
       }
     }
   ],
@@ -58,6 +58,9 @@ SDK の場所は各自の Mac に固有なので、**コミットしない** `CM
 cmake --preset vw2026 && cmake --build --preset vw2026
 ```
 
+ビルドタイプは `RelWithDebInfo` にします（最適化しつつデバッグ情報を付けるので、
+Vectorworks が落ちたとき lldb で場所を追えます）。CI の `Release` とは最適化の段
+（`-O2` / `-O3`）とデバッグ情報だけが違い、`NDEBUG` はどちらでも定義されます。
 CMake 3.21 以上が要ります（プリセットの `version: 3`）。`.worktreeinclude` に載せて
 あるので、Claude Code が作る worktree にもこのファイルが写されます。
 
