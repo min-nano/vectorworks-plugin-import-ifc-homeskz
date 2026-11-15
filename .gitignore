@@ -36,3 +36,7 @@ xcuserdata/
 
 # Python のバイトコードキャッシュ（scripts/*.py を実行・コンパイルすると生まれる）
 __pycache__/
+
+# ローカルビルド（各自の CMakeUserPresets.json。プリセット vw2026 のビルド先は build-vw2026/）
+/CMakeUserPresets.json
+/.claude/settings.local.json

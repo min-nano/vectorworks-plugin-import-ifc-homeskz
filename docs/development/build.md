@@ -29,6 +29,38 @@ Xcode（Vectorworks 2026 は公式に **Xcode 16.2** を対象）と **mac SDK**
    `build/min-nano_structure.vwpayload`（本体）です。殻は本体を隣から読むので、
    2 つを揃えて置きます。
 
+### 手元の設定をプリセットに置く（`CMakeUserPresets.json`）
+
+SDK の場所は各自の Mac に固有なので、**コミットしない** `CMakeUserPresets.json`
+（リポジトリ直下。`.gitignore` 済み）に書いておくと、`-DVW_SDK_DIR` を毎回渡さずに
+済みます。Claude のシェルでも、人のターミナルや IDE でも同じ設定になります。
+プリセット名は Vectorworks の版（`vw2026`）にします。SDK を同じ場所に置けば、他の
+プラグインのリポジトリとも 1 つの SDK を共有できます。
+
+```json
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "vw2026",
+      "binaryDir": "${sourceDir}/build-vw2026",
+      "cacheVariables": {
+        "VW_SDK_DIR": "$env{HOME}/vw-sdk/2026-NNA-eng-mac-SDK",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [{ "name": "vw2026", "configurePreset": "vw2026", "jobs": 4 }]
+}
+```
+
+```sh
+cmake --preset vw2026 && cmake --build --preset vw2026
+```
+
+CMake 3.21 以上が要ります（プリセットの `version: 3`）。`.worktreeinclude` に載せて
+あるので、Claude Code が作る worktree にもこのファイルが写されます。
+
 既定では Apple Silicon（`arm64`）向けにビルドします。ユニバーサルバイナリにするには:
 
 ```sh

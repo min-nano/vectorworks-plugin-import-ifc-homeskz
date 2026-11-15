@@ -1,0 +1,3 @@
+# Claude Code が新しい worktree を作るときに写す、コミットしないファイル（.gitignore の書式）。
+# ローカルビルドの設定（SDK の場所など。各自の Mac に固有）。
+CMakeUserPresets.json
